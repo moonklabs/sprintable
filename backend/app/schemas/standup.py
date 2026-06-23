@@ -48,8 +48,20 @@ class StandupEntryResponse(BaseModel):
     plan: str | None = None
     blockers: str | None = None
     plan_story_ids: list[uuid.UUID]
+    # a9e67531: plan_story_ids 의 org-scope resolve 요약(id+title+status). FE 가 active-sprint stories 배열에
+    # 의존하지 않고 cross-board plan story 도 렌더(미노출 버그 근본 fix). plan_story_ids 는 하위호환 유지.
+    plan_stories: list["PlanStorySummary"] = []
     created_at: datetime
     updated_at: datetime
+
+
+class PlanStorySummary(BaseModel):
+    id: uuid.UUID
+    title: str
+    status: str
+    priority: str | None = None
+    project_id: uuid.UUID | None = None
+    sprint_id: uuid.UUID | None = None
 
 
 class FeedbackCreate(BaseModel):

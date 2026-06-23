@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle } from 'lucide-react';
+import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target, Clock, Users, Calendar } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -167,9 +167,9 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
               />
             </div>
           </div>
-          {/* ⎈ 실행 계획 */}
+          {/* 실행 계획(calm 라벨·Target lucide·장식 글리프 제거) */}
           <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">⎈ {t('planSection')}</p>
+            <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><Target className="size-3.5" />{t('planSection')}</p>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('goalLabel')}</label>
               <input
@@ -183,7 +183,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-                  <span>⏲</span>{t('capacityLabel')}
+                  <Clock className="size-3.5" />{t('capacityLabel')}
                 </label>
                 <div className="relative">
                   <input
@@ -199,7 +199,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
               </div>
               <div className="space-y-1">
                 <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-                  <span>👤</span>{t('teamSizeLabel')}
+                  <Users className="size-3.5" />{t('teamSizeLabel')}
                 </label>
                 <div className="relative">
                   <input
@@ -216,9 +216,9 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
             </div>
           </div>
 
-          {/* ◎ 효과 가설 */}
+          {/* 효과 가설(calm 라벨·Target lucide·장식 글리프 제거) */}
           <div className="space-y-1.5">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">◎ {t('hypothesisSection')}</p>
+            <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><Target className="size-3.5" />{t('hypothesisSection')}</p>
             <OutcomeIntentFields value={intent} onChange={setIntent} />
           </div>
 
@@ -579,7 +579,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       {/* Goal */}
       {selected.goal ? (
         <p className="mb-3 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-foreground">
-          <span className="mr-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">⎈ 목표</span>
+          <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-xs font-medium text-muted-foreground"><Target className="size-3 shrink-0" />목표</span>
           {selected.goal}
         </p>
       ) : null}
@@ -589,18 +589,18 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         <div className="mb-4 flex flex-wrap gap-2">
           {selected.capacity != null ? (
             <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
-              <span className="text-muted-foreground">⏲</span>
+              <Clock className="size-3.5 text-muted-foreground" />
               {selected.capacity}<span className="ml-0.5 text-muted-foreground">SP</span>
             </span>
           ) : null}
           {selected.team_size != null ? (
             <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
-              <span className="text-muted-foreground">👤</span>
+              <Users className="size-3.5 text-muted-foreground" />
               {selected.team_size}<span className="ml-0.5 text-muted-foreground">명</span>
             </span>
           ) : null}
           <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
-            <span className="text-muted-foreground">📅</span>
+            <Calendar className="size-3.5 text-muted-foreground" />
             {sprintDurationDays(selected.start_date, selected.end_date)}{t('days')}
           </span>
         </div>
@@ -638,7 +638,11 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         <p className="text-sm text-muted-foreground">{t('loading')}</p>
       ) : burndown ? (
         <div className="mb-6 space-y-3">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('burndown')}</p>
+          <p className="text-xs font-medium text-muted-foreground">{t('burndown')}</p>
+          {/* 진행 바 — 기존 completion_pct 시각화(새 데이터 0·번다운 주인공) */}
+          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-success transition-all" style={{ width: `${burndown.completion_pct}%` }} />
+          </div>
           <div className="grid grid-cols-3 gap-2">
             <div className="rounded-md border border-border bg-muted/30 p-2 text-center">
               <p className="text-xl font-bold text-foreground">{burndown.completion_pct}%</p>
@@ -655,10 +659,10 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           </div>
           {burndown.ideal_line.length > 0 ? (
             <div className="rounded-md border border-border p-3">
-              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('burndown')}</p>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">{t('burndown')}</p>
               <div className="flex gap-4 text-xs text-muted-foreground">
-                <span>📉 {t('idealLine')}: {burndown.ideal_line[0]?.points ?? 0} → 0</span>
-                <span>📊 {t('actualLine')}: {burndown.actual_line[0]?.points ?? 0} → {burndown.actual_line[burndown.actual_line.length - 1]?.points ?? 0}</span>
+                <span>{t('idealLine')}: {burndown.ideal_line[0]?.points ?? 0} → 0</span>
+                <span>{t('actualLine')}: {burndown.actual_line[0]?.points ?? 0} → {burndown.actual_line[burndown.actual_line.length - 1]?.points ?? 0}</span>
               </div>
             </div>
           ) : null}
@@ -675,7 +679,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
 
       {/* Sprint stories */}
       <div className="mb-4 space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('sprintStories')}</p>
+        <p className="text-xs font-medium text-muted-foreground">{t('sprintStories')}</p>
         {loadingStories ? (
           <p className="text-xs text-muted-foreground">{t('loading')}</p>
         ) : sprintStories.length === 0 ? (
@@ -720,7 +724,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       {/* Backlog assignment */}
       {selected.status !== 'closed' && backlogStories.length > 0 ? (
         <div className="space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('backlog')}</p>
+          <p className="text-xs font-medium text-muted-foreground">{t('backlog')}</p>
           <ul className="space-y-1.5">
             {backlogStories.map((story) => (
               <li key={story.id} className="flex items-center justify-between rounded-lg border border-dashed border-border px-3 py-2 hover:border-primary/40 hover:bg-primary/5 transition-colors">

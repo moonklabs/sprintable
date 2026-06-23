@@ -6,7 +6,7 @@ import { CheckCircle, XCircle, Ban, MoreHorizontal, AlertTriangle, Pause, PlayCi
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { GateEvidence, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
+import { GateEvidence, gateNeedsAction, gateDecision, gateHasEvidence } from '@/components/cage/gate-evidence';
 import { GateLineContext } from '@/components/cage/gate-line-context';
 import { GateReassignModal } from '@/components/cage/gate-reassign-modal';
 import { GateOverrideModal } from '@/components/cage/gate-override-modal';
@@ -221,12 +221,15 @@ export function GateInbox({ memberId }: GateInboxProps) {
                     resolveName={(id) => memberNames[id] ?? id.slice(0, 6)}
                     className="mt-1"
                   />
-                  <div className="flex items-center gap-2 pt-1.5">
-                    <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70">
-                      {t('lineEvidenceDivider')}
-                    </span>
-                    <span className="h-px flex-1 bg-border" />
-                  </div>
+                  {/* S3: 증거 없는 카드(State A)는 구분선도 숨김 — 빈 블록 위 헤더 방지(omit) */}
+                  {gateHasEvidence(gate) ? (
+                    <div className="flex items-center gap-2 pt-1.5">
+                      <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                        {t('lineEvidenceDivider')}
+                      </span>
+                      <span className="h-px flex-1 bg-border" />
+                    </div>
+                  ) : null}
                 </>
               ) : null}
               {/* H1-S8: decision 배지 + CI/신뢰도 facts + 사유(read-only evidence) */}

@@ -812,8 +812,8 @@ export default function SettingsPage() {
   return (
     <>
       <Tabs value={activeTab} onValueChange={handleTabChange} orientation="vertical" className="flex-1 min-h-0 gap-0">
-        {/* Left nav: desktop=always visible, mobile=toggle via lnbOpen */}
-        <div className={`shrink-0 border-r overflow-y-auto p-4 flex-col w-52 ${lnbOpen ? 'flex' : 'hidden'} lg:flex`}>
+        {/* Left nav: desktop/tablet(≥md)=always visible, mobile(<md)=toggle via lnbOpen */}
+        <div className={`shrink-0 border-r overflow-y-auto p-4 flex-col w-52 ${lnbOpen ? 'flex' : 'hidden'} md:flex`}>
           <h1 className="mb-4 px-2 text-sm font-semibold">{t('title')}</h1>
           <TabsList variant="line" className="w-full flex-col items-stretch">
             <span className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('myAccount')}</span>
@@ -897,6 +897,16 @@ export default function SettingsPage() {
               </>
             ) : null}
 
+            {/* E-GHAPP: 연동 — 자체 섹션(결제와 분리·향후 slack/jira 등 통합 표준 위치)·서브라우트 `/settings/integrations`(install-callback 타깃·탭 아닌 발견성 진입점) */}
+            <span className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('tabIntegrations')}</span>
+            <Link
+              href="/settings/integrations"
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground transition hover:text-foreground"
+            >
+              <Webhook className="h-4 w-4" />
+              {t('tabIntegrations')}
+            </Link>
+
             <span className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('dangerZone')}</span>
             <TabsTrigger
               value="danger"
@@ -916,7 +926,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => setLnbOpen((v) => !v)}
-              className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="md:hidden rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
               aria-label="Toggle navigation"
             >
               {lnbOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}

@@ -18,6 +18,7 @@ import type {
   StandupMemberSummary,
   StandupReviewType,
   StandupStorySummary,
+  LinkedStoryView,
 } from './standup-review-card';
 
 interface StandupFeedbackDialogProps {
@@ -93,12 +94,20 @@ export function StandupFeedbackDialog({
     }
   }, [editingFeedbackId, feedback]);
 
-  const linkedStories = useMemo(() => {
+  const linkedStories = useMemo<LinkedStoryView[]>(() => {
+    // a9e67531: plan_stories(org-scope·cross-board 포함) 우선·scoped stories에 있으면 enrich·없으면 요약(미노출 fix).
+    const summaries = entry?.plan_stories ?? [];
+    if (summaries.length > 0) {
+      return summaries.map((s) => {
+        const rich = stories.find((story) => story.id === s.id);
+        return rich ?? { id: s.id, title: s.title, status: s.status };
+      });
+    }
     const planStoryIds = entry?.plan_story_ids ?? [];
     return planStoryIds
       .map((storyId) => stories.find((story) => story.id === storyId))
       .filter((story): story is StandupStorySummary => Boolean(story));
-  }, [entry?.plan_story_ids, stories]);
+  }, [entry?.plan_stories, entry?.plan_story_ids, stories]);
 
   const canAddFeedback = Boolean(entry) && currentMemberId !== member.id;
 
@@ -220,16 +229,21 @@ export function StandupFeedbackDialog({
                       <p className="text-sm font-medium text-foreground">{story.title}</p>
                       <Badge variant="outline">{story.status}</Badge>
                     </div>
-                    <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                      <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
-                      <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
-                    </div>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-primary"
-                        style={{ width: `${story.task_count > 0 ? Math.round((story.done_task_count / story.task_count) * 100) : 0}%` }}
-                      />
-                    </div>
+                    {/* a9e67531: rich(scoped)만 assignee/task 진척·cross-board 요약은 title/status만 */}
+                    {story.task_count != null ? (
+                      <>
+                        <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                          <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
+                          <span>{t('taskProgress', { done: story.done_task_count ?? 0, total: story.task_count })}</span>
+                        </div>
+                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary"
+                            style={{ width: `${story.task_count > 0 ? Math.round(((story.done_task_count ?? 0) / story.task_count) * 100) : 0}%` }}
+                          />
+                        </div>
+                      </>
+                    ) : null}
                   </div>
                 ))}
               </div>

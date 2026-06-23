@@ -9,19 +9,31 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.dependencies.database import get_db
+from app.models.github_installation import GithubInstallation, GithubWebhookDelivery
 from app.models.pm import Story
 from app.routers.cron import CRON_SECRET, _err, _ok, verify_cron
-from app.services.verdict_capture import capture_pr_ci_verdict, capture_review_verdict, parse_story_id
+from app.services.github_app import get_installation_token
+from app.services.pr_story_link import resolve_story_for_pr
+from app.services.story_status_events import advance_story_to_done
+from app.services.verdict_capture import (
+    capture_pr_ci_verdict,
+    capture_review_verdict,
+    fetch_status_check_rollup,
+    parse_story_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -146,13 +158,56 @@ _CI_FAILURE = frozenset({"failure", "timed_out", "action_required", "stale", "st
 _CI_CANCELLED = frozenset({"cancelled", "canceled", "skipped", "neutral"})
 
 
-def _verify_github_signature(raw_body: bytes, signature_header: str | None) -> bool:
-    """X-Hub-Signature-256 HMAC-SHA256 검증. 시크릿 미설정/서명 불일치면 False."""
-    secret = settings.github_webhook_secret
-    if not secret or not signature_header:
+_SIG_RE = re.compile(r"^sha256=[0-9a-f]{64}$")  # X-Hub-Signature-256 = 'sha256=<hex64>' 형식만 허용.
+_app_inert_warned = False  # equal-secret misconfig warning 1회만(로그 스팸 방지).
+
+
+def _hmac_match(raw_body: bytes, signature_header: str | None, secret: str) -> bool:
+    """X-Hub-Signature-256 HMAC-SHA256 full-string constant-time 비교. secret 빈값/header 없음/형식
+    오류(bare hex·wrong prefix)면 False. ⚠️secret/signature 원문은 로그에 남기지 않는다."""
+    if not secret or not signature_header or not _SIG_RE.match(signature_header):
         return False
-    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature_header.removeprefix("sha256="))
+    expected = "sha256=" + hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature_header)
+
+
+def _resolve_webhook_source(raw_body: bytes, signature_header: str | None) -> str | None:
+    """source 를 **검증된 secret match 로만** 결정(untrusted payload 금지). 'app'|'legacy'|None.
+
+    - app secret(`github_app_webhook_secret`) 미설정 → app inert(app 검증 skip)·legacy 만.
+    - app secret == legacy secret(둘 다 non-empty·misconfig) → **app inert + startup warning**(legacy
+      무회귀 보존·silent app-우선 금지).
+    - 그 외 → app 먼저 검증(match=app)·아니면 legacy(match=legacy)·둘 다 실패=None.
+    """
+    global _app_inert_warned
+    legacy_secret = settings.github_webhook_secret
+    app_secret = settings.github_app_webhook_secret
+    equal_misconfig = bool(app_secret) and bool(legacy_secret) and app_secret == legacy_secret
+    if equal_misconfig and not _app_inert_warned:
+        logger.warning(
+            "github_app_webhook_secret 가 github_webhook_secret 와 동일(misconfig) → app webhook inert; "
+            "legacy 경로만 동작. 별도 App webhook secret 설정 필요."  # ⚠️secret 값/길이/해시 미노출.
+        )
+        _app_inert_warned = True
+    app_inert = (not app_secret) or equal_misconfig
+    if not app_inert and _hmac_match(raw_body, signature_header, app_secret):
+        return "app"
+    if _hmac_match(raw_body, signature_header, legacy_secret):
+        return "legacy"
+    return None
+
+
+def warn_if_webhook_secret_misconfigured() -> None:
+    """Startup config 검증(P3): app webhook secret 이 legacy 와 동일(misconfig)이면 **트래픽 前** 경고.
+    app inert 로 동작해 보안 위험은 없으나 운영자가 secret 을 분리하도록 알린다. ⚠️secret 정보 미노출.
+    """
+    legacy = settings.github_webhook_secret
+    app_s = settings.github_app_webhook_secret
+    if app_s and legacy and app_s == legacy:
+        logger.warning(
+            "[startup] github_app_webhook_secret 가 github_webhook_secret 와 동일(misconfig) → "
+            "App webhook inert(legacy 만 동작). 별도 App webhook secret 설정 필요."
+        )
 
 
 def _normalize_ci(conclusion: str | None) -> str | None:
@@ -186,23 +241,137 @@ def _candidate_texts(payload: dict) -> list[str]:
     return [t for t in texts if t]
 
 
-def _extract_pr_ci(event: str, payload: dict) -> tuple[int, bool, str | None]:
-    """이벤트 형태에서 (pr_number, merged, ci_conclusion) 추출."""
+def _extract_pr_ci(event: str, payload: dict) -> tuple[int, bool, str | None, str | None]:
+    """이벤트 형태에서 (pr_number, merged, ci_conclusion, head_sha) 추출.
+
+    head_sha = native CI(statusCheckRollup) 조회용 PR head commit. 이벤트별 위치가 달라 함께 뽑는다.
+    """
     pr_number = 0
     merged = False
     ci_conclusion: str | None = None
+    head_sha: str | None = None
     if event == "pull_request":
         pr = payload.get("pull_request") or {}
         pr_number = int(pr.get("number") or 0)
         merged = bool(pr.get("merged")) and payload.get("action") == "closed"
+        head_sha = (pr.get("head") or {}).get("sha") or None
     elif event in ("workflow_run", "check_suite", "check_run"):
         node = payload.get("workflow_run") or payload.get("check_suite") or payload.get("check_run") or {}
         ci_conclusion = _normalize_ci(node.get("conclusion"))
         prs = node.get("pull_requests") or []
         pr_number = int((prs[0].get("number") if prs else 0) or 0)
+        head_sha = node.get("head_sha") or None
     elif event == "status":
         ci_conclusion = _normalize_ci(payload.get("state"))
-    return pr_number, merged, ci_conclusion
+        head_sha = payload.get("sha") or None
+    return pr_number, merged, ci_conclusion, head_sha
+
+
+async def _process_webhook_event(
+    session: AsyncSession, source: str, event: str, payload: dict, installation_id: int | None,
+    delivery: GithubWebhookDelivery,
+) -> tuple[dict, str]:
+    """검증·dedup 통과한 이벤트 처리(legacy/app 라우팅·Bot-L.1 resolver 체인). (result, status) 반환.
+
+    org resolve: **app**=installation.id→github_installation(suspended 제외)→그 org_id만(anti-IDOR·payload
+    추론 금지·resolve 先). **legacy**=resolver 가 SID 전역→story.org_id(무회귀). story 해소=resolver 체인
+    (explicit>auto high>SID>text). **close-on-merge**=should_auto_close(confident)+merge → advance_story_to_done
+    (단일 idempotent 헬퍼). native CI(Bot-M.1)=installation 토큰. caller 가 동일 트랜잭션으로 commit/rollback.
+    """
+    texts = _candidate_texts(payload)
+    repo = (payload.get("repository") or {}).get("full_name") or ""
+    pr_number, merged, ci_conclusion, head_sha = _extract_pr_ci(event, payload)
+
+    installation: GithubInstallation | None = None
+    org_id: uuid.UUID | None = None
+    if source == "app":
+        # ⭐app: installation→org resolve 先(미등록 installation 으로 story 존재 oracle 차단·payload 추론 금지).
+        if installation_id is None:
+            return {"skipped_reason": "no_installation_id", "recorded": []}, "ignored"
+        installation = (
+            await session.execute(
+                select(GithubInstallation).where(
+                    GithubInstallation.installation_id == installation_id,
+                    GithubInstallation.suspended_at.is_(None),  # suspended → side-effect 금지.
+                )
+            )
+        ).scalar_one_or_none()
+        if installation is None:
+            return {"skipped_reason": "installation_not_registered_or_suspended", "recorded": []}, "ignored"
+        org_id = installation.org_id
+        delivery.org_id = org_id
+
+    # 행동 가능한 신호(머지 또는 CI 완료)가 없으면 skip(in_progress 등) — resolve/side-effect 前.
+    if not merged and ci_conclusion is None:
+        return {"skipped_reason": "no_actionable_signal", "recorded": []}, "ignored"
+
+    # Bot-L.1 resolver 체인: explicit>auto high>SID>text. app=org-scoped(org 알려짐)·legacy=SID 전역→story.org_id.
+    rl = await resolve_story_for_pr(session, org_id, repo, pr_number, texts)
+    if rl.story_id is None:
+        return {"skipped_reason": rl.reason, "recorded": []}, "ignored"  # no_match/auto suggestion 등.
+    story_id = rl.story_id
+    org_id = rl.org_id  # app=입력 org·legacy=story.org_id(resolver 검증). 단일 진실원.
+    delivery.org_id = org_id
+
+    # Bot-M.1: native CI 채움 — **installation 토큰**(org-scope)으로 statusCheckRollup pull(⚠️PAT fallback 없음).
+    # app source 는 위서 resolve된 installation(suspended 제외) 직접 사용·legacy 는 org→installation resolve.
+    # 토큰 없음/미설치/실패/미완료 → ci unknown 유지(graceful·success 승격 금지). unknown(reason) 계약.
+    native_ci_state: str | None = None
+    native_ci_reason: str | None = None
+    if ci_conclusion is None and head_sha and repo:
+        inst_for_ci = installation
+        if inst_for_ci is None:  # legacy: org→installation resolve(suspended 제외).
+            inst_for_ci = (
+                await session.execute(
+                    select(GithubInstallation).where(
+                        GithubInstallation.org_id == org_id,
+                        GithubInstallation.suspended_at.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+        if inst_for_ci is None:
+            native_ci_state, native_ci_reason = "unknown", "no_installation"
+        else:
+            inst_token = await get_installation_token(inst_for_ci.installation_id)
+            if not inst_token:
+                native_ci_state, native_ci_reason = "unknown", "no_installation_token"
+            else:
+                ci, reason = await fetch_status_check_rollup(repo, head_sha, inst_token)
+                if ci is not None:
+                    ci_conclusion = ci
+                    native_ci_state, native_ci_reason = ci, None
+                else:
+                    native_ci_state, native_ci_reason = "unknown", reason
+        logger.info(
+            "native CI story=%s source=%s state=%s reason=%s",
+            story_id, source, native_ci_state, native_ci_reason,
+        )
+
+    result = await capture_pr_ci_verdict(
+        session=session,
+        org_id=org_id,
+        story_id=story_id,
+        pr_number=pr_number,
+        repo=repo,
+        merged=merged,
+        ci_result=ci_conclusion,  # AC④: failure→capture가 fail로 채점.
+    )
+    if native_ci_state is not None:
+        result = {**result, "native_ci": {"state": native_ci_state, "reason": native_ci_reason}}
+
+    # Bot-L.1 close-on-merge: **confident link**(explicit·auto high·sid)+merge → story done(idempotent).
+    # med/low/text suggestion 은 should_auto_close=False → close 안 함(오매치 done 방지). gate-approve 와
+    # 동일 advance_story_to_done 헬퍼(단일 정책·중복 advance 0). actor=system(자동). already-done=no-op.
+    if merged and rl.should_auto_close:
+        story_obj = await session.get(Story, story_id)
+        closed = False
+        if story_obj is not None and story_obj.org_id == org_id:  # org-scope 재확인(anti-IDOR).
+            closed = await advance_story_to_done(session, org_id, story_obj, actor_type="system")
+        result = {
+            **result,
+            "auto_close": {"closed": closed, "source": rl.source, "confidence": rl.confidence},
+        }
+    return result, "processed"
 
 
 @router.post("/github-webhook")
@@ -211,54 +380,59 @@ async def github_webhook(
     session: AsyncSession = Depends(get_db),
     x_github_event: str | None = Header(default=None),
     x_hub_signature_256: str | None = Header(default=None),
+    x_github_delivery: str | None = Header(default=None),
 ) -> JSONResponse:
-    """GitHub PR/CI webhook → [SID:uuid] 파싱 → capture_pr_ci_verdict (H1-S6 실 runtime 경로).
+    """GitHub 웹훅 통합 ingress(Bot-M.2) → [SID:uuid]/installation 라우팅 → capture_pr_ci_verdict.
 
-    HMAC 검증 후 PR merge(=pr verdict)·CI 완료(=ci verdict)를 기록한다. SID 없거나(AC②) story
-    없으면(AC③) skip. duplicate webhook은 uq(participation,source) upsert로 멱등(AC⑤).
+    보안(산티아고 lock): ⭐**HMAC-before-parse**(검증 前 parse/DB/dedup/capture 0)·source 는 **검증된
+    secret 으로만**(payload 금지)·dedup `(source, delivery_id)` insert+side-effect+status **동일 트랜잭션**
+    (실패=rollback→GitHub retry 보존·중복=2xx no-op)·app=installation resolve 後 org-scope(anti-IDOR).
     """
     raw = await request.body()
-    if not _verify_github_signature(raw, x_hub_signature_256):
+
+    # 1) source 결정 = 검증된 secret(app/legacy). 실패면 401 — parse/DB/dedup 전부 0.
+    source = _resolve_webhook_source(raw, x_hub_signature_256)
+    if source is None:
         return _err("INVALID_SIGNATURE", "GitHub webhook 서명 검증 실패", 401)
 
+    # 2) no-delivery-id → reject(sig 검증 後·DB insert 前). 멱등 불가하므로 감사가능하게 거부.
+    if not x_github_delivery:
+        return _err("MISSING_DELIVERY_ID", "X-GitHub-Delivery 헤더 없음", 400)
+
+    # 3) parse(검증 後에만).
     try:
         payload = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         return _err("INVALID_PAYLOAD", "JSON 파싱 실패", 400)
+    if not isinstance(payload, dict):
+        return _err("INVALID_PAYLOAD", "JSON object 아님", 400)
 
-    # AC②: [SID:] 태그 없으면 skip(거짓기록 금지).
-    story_id = next((sid for t in _candidate_texts(payload) if (sid := parse_story_id(t))), None)
-    if story_id is None:
-        return _ok({"skipped_reason": "no_sid_tag", "recorded": []})
+    event = x_github_event or ""
+    inst_raw = (payload.get("installation") or {}).get("id")
+    installation_id = inst_raw if isinstance(inst_raw, int) else None
 
-    # AC③: story 없으면 skip.
-    story = (
-        await session.execute(
-            select(Story).where(Story.id == story_id, Story.deleted_at.is_(None))
-        )
-    ).scalar_one_or_none()
-    if story is None:
-        return _ok({"skipped_reason": "story_not_found", "recorded": []})
-
-    repo = (payload.get("repository") or {}).get("full_name") or ""
-    pr_number, merged, ci_conclusion = _extract_pr_ci(x_github_event or "", payload)
-
-    # 행동 가능한 신호(머지 또는 CI 완료)가 없으면 skip(in_progress 등).
-    if not merged and ci_conclusion is None:
-        return _ok({"skipped_reason": "no_actionable_signal", "recorded": []})
-
+    # 4) dedup insert — uq(source, delivery_id) 중복이면 2xx no-op(side-effect 0·세션 clean).
+    delivery = GithubWebhookDelivery(
+        source=source, delivery_id=x_github_delivery, event=event,
+        installation_id=installation_id, status="received",
+    )
+    session.add(delivery)
     try:
-        result = await capture_pr_ci_verdict(
-            session=session,
-            org_id=story.org_id,
-            story_id=story_id,
-            pr_number=pr_number,
-            repo=repo,
-            merged=merged,
-            ci_result=ci_conclusion,  # AC④: failure→capture가 fail로 채점.
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()  # 중복 → 세션 clean + no-op(capture 0).
+        return _ok({"skipped_reason": "duplicate_delivery", "recorded": []})
+
+    # 5) 처리 + status 갱신 + commit 을 **동일 트랜잭션**으로. 실패=rollback(delivery row 도 함께 → retry 보존).
+    try:
+        result, status_label = await _process_webhook_event(
+            session, source, event, payload, installation_id, delivery
         )
+        delivery.status = status_label
+        delivery.processed_at = datetime.now(timezone.utc)
         await session.commit()
         return _ok(result)
     except Exception as exc:
-        logger.exception("github webhook verdict capture failed: %s", exc)
-        return _err("INTERNAL_ERROR", "verdict capture failed", 500)
+        await session.rollback()  # delivery insert 포함 전부 rollback → GitHub retry 가 재처리(영구 no-op 금지).
+        logger.exception("github webhook 처리 실패 delivery=%s event=%s: %s", x_github_delivery, event, exc)
+        return _err("WEBHOOK_PROCESSING_FAILED", "처리 중 오류(재시도 가능)", 500)

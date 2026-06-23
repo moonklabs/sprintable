@@ -22,7 +22,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useDocsLayout } from '../docs-context';
-import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
+import { DocAssigneeControl } from '@/components/docs/doc-assignee-control';
 import { DocBreadcrumb } from '@/components/docs/doc-breadcrumb';
 
 interface DocDetail {
@@ -122,7 +122,7 @@ export default function DocSlugPage() {
   const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
   const isNew = isNewRef.current;
 
-  const { projectId, tree, setTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder } = useDocsLayout();
+  const { projectId, tree, setTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer } = useDocsLayout();
 
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
   const [docLoading, setDocLoading] = useState(true);
@@ -134,6 +134,23 @@ export default function DocSlugPage() {
   const [slugLocked, setSlugLocked] = useState(false);
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  // §3-2 슬림 헤더 메타: 수정 이력 N(작성자는 created_by/memberMap 부재로 드롭·PO 보수안). DocGateSection도
+  // revision을 fetch하나 헤더 메타용으로 경량 count만 별도 조회(공유 리프트는 S28 refactor라 follow-up).
+  const [revisionCount, setRevisionCount] = useState<number | null>(null);
+  const docId = selectedDoc?.id ?? null;
+  useEffect(() => {
+    if (!docId) { setRevisionCount(null); return; }
+    let alive = true;
+    void fetch(`/api/docs/${docId}/revisions`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)
+      .then((json) => {
+        if (!alive) return;
+        const rows = (json?.data ?? json) as unknown[];
+        setRevisionCount(Array.isArray(rows) ? rows.length : null);
+      });
+    return () => { alive = false; };
+  }, [docId]);
 
   const handleDocSaved = useCallback((doc: DocDetail) => {
     setSelectedDoc(doc);
@@ -370,29 +387,17 @@ export default function DocSlugPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Dispatch */}
-      {projectId && (
-        <div className="flex-shrink-0 border-b border-border px-4 py-2 lg:px-6">
-          <EntityDispatchPanel
-            entityType="doc"
-            entityId={selectedDoc.id}
-            projectId={projectId}
-            currentAssigneeId={selectedDoc.assignee_id}
-            onAssigneePatched={(aid) => setSelectedDoc((prev) => prev ? { ...prev, assignee_id: aid } : prev)}
-            mobileMode="assignee-only"
-          />
-        </div>
-      )}
+      {/* 박스1: Dispatch(담당자) 밴드 제거 → 슬림 헤더 담당자 아바타+popover로 이동(content-dominant·기능 보존). */}
 
       {/* S28: doc decision gate(검토 상태·반려 사유·재상신 CTA·revision 이력). 비-gated/이력없음은 self-hide. */}
       {selectedDoc.doc_type !== 'sprint_report' ? (
-        <div className="flex-shrink-0 px-4 pt-3 lg:px-6">
+        <div className="flex-shrink-0 px-4 pt-2 lg:px-6">
           <DocGateSection docId={selectedDoc.id} status={selectedDoc.status} onTransitioned={fetchDoc} />
         </div>
       ) : null}
 
       {/* Editor */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 lg:px-6 lg:py-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pt-2 pb-4 lg:px-6 lg:pt-3 lg:pb-6">
         <DocEditor
           value={content}
           contentFormat={contentFormat}
@@ -409,6 +414,28 @@ export default function DocSlugPage() {
           onTitleChange={handleTitleChange}
           titlePlaceholder={t('titlePlaceholder')}
           titleAutoFocus={isNew || !title}
+          onOpenTree={openTreeDrawer}
+          dispatchSlot={projectId ? (
+            <DocAssigneeControl
+              docId={selectedDoc.id}
+              projectId={projectId}
+              currentAssigneeId={selectedDoc.assignee_id ?? null}
+              onAssigneePatched={(aid) => setSelectedDoc((prev) => prev ? { ...prev, assignee_id: aid } : prev)}
+            />
+          ) : undefined}
+          metaSlot={
+            <>
+              {revisionCount != null ? (
+                <>
+                  <span className="tabular-nums">{t('docMetaRevisions', { count: revisionCount })}</span>
+                  {selectedDoc.updated_at ? <span aria-hidden> · </span> : null}
+                </>
+              ) : null}
+              {selectedDoc.updated_at ? (
+                <span className="tabular-nums">{new Date(selectedDoc.updated_at).toLocaleString()}</span>
+              ) : null}
+            </>
+          }
           urlSlot={
             <DocUrlChip
               slug={selectedDoc.slug}

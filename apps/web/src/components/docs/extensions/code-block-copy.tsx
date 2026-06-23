@@ -46,16 +46,16 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
 
   return (
     <NodeViewWrapper className="my-4 not-prose" data-mermaid-id={id}>
-      <div className="rounded-2xl border border-slate-700 bg-[#0b1120]">
+      <div className="rounded-xl border border-border bg-muted">
         <div className="flex items-center justify-between px-3 py-2" contentEditable={false}>
-          <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">mermaid</span>
+          <span className="text-[11px] font-medium text-muted-foreground">mermaid</span>
           {isEditable && (
-            <span className="text-[11px] text-slate-600">{showCode ? '코드 편집 중' : '클릭하여 편집'}</span>
+            <span className="text-[11px] text-muted-foreground">{showCode ? '코드 편집 중' : '클릭하여 편집'}</span>
           )}
         </div>
 
         {/* Code editor — visible when selected */}
-        <pre className={`border-t border-slate-700/50 p-4 text-[13px] leading-6 text-slate-200 ${showCode ? '' : 'hidden'}`}>
+        <pre className={`border-t border-border p-4 text-xs leading-6 text-foreground ${showCode ? '' : 'hidden'}`}>
           <NodeViewContent />
         </pre>
 
@@ -77,7 +77,7 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
                 className="flex justify-center [&_svg]:max-w-full [&_svg]:h-auto"
               />
             ) : (
-              <p className="text-xs text-slate-600">다이어그램을 입력하세요</p>
+              <p className="text-xs text-muted-foreground">다이어그램을 입력하세요</p>
             )}
           </div>
         )}
@@ -146,7 +146,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
 
   return (
     <NodeViewWrapper className="my-4 not-prose">
-      <div className="rounded-2xl border border-slate-700 bg-[#0b1120]">
+      <div className="rounded-xl border border-border bg-muted">
         {/* Header: language selector + copy button */}
         <div className="flex items-center justify-between px-3 pt-2 pb-1">
           {/* Language dropdown */}
@@ -154,24 +154,24 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
             <button
               type="button"
               onClick={() => isEditable && setShowLangMenu((v) => !v)}
-              className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.12em] transition ${
+              className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium transition ${
                 isEditable
-                  ? 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200 cursor-pointer'
-                  : 'text-slate-500 cursor-default'
+                  ? 'text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer'
+                  : 'text-muted-foreground cursor-default'
               }`}
             >
               {langLabel}
               {isEditable && <ChevronDown className="size-3" />}
             </button>
             {showLangMenu && (
-              <div className="absolute left-0 top-full z-50 mt-1 max-h-52 w-36 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 py-1 shadow-xl">
+              <div className="absolute left-0 top-full z-50 mt-1 max-h-52 w-36 overflow-y-auto rounded-xl border border-border bg-popover py-1">
                 {SUPPORTED_LANGUAGES.map((lang) => (
                   <button
                     key={lang}
                     type="button"
                     onClick={() => handleLangSelect(lang)}
-                    className={`flex w-full items-center px-3 py-1.5 text-left text-xs transition hover:bg-slate-700/60 ${
-                      lang === language ? 'text-blue-400' : 'text-slate-300'
+                    className={`flex w-full items-center px-3 py-1.5 text-left text-xs transition hover:bg-accent ${
+                      lang === language ? 'text-primary' : 'text-foreground'
                     }`}
                   >
                     {LANGUAGE_LABELS[lang] ?? lang}
@@ -186,7 +186,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
             type="button"
             contentEditable={false}
             onClick={handleCopy}
-            className="rounded-full border border-slate-600 bg-slate-700/50 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-300 transition hover:border-slate-400 hover:text-slate-100"
+            className="rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
           >
             {copied ? '복사됨' : '복사'}
           </button>
@@ -196,7 +196,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
         <div className="overflow-x-auto px-4 pb-4">
           {/* Editing mode: show plain NodeViewContent */}
           <pre
-            className={`text-[13px] leading-6 text-slate-200 ${isEditing || !highlightedHtml ? '' : 'hidden'}`}
+            className={`text-xs leading-6 text-foreground ${isEditing || !highlightedHtml ? '' : 'hidden'}`}
           >
             <NodeViewContent />
           </pre>
@@ -205,7 +205,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
           {!isEditing && highlightedHtml && (
             <div
               dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-              className="shiki-block [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:text-[13px] [&_pre]:leading-6 [&_pre]:!p-0 [&_code]:!bg-transparent"
+              className="shiki-block [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:text-xs [&_pre]:leading-6 [&_pre]:!p-0 [&_code]:!bg-transparent"
               onClick={() => isEditable && editor?.commands.focus()}
               style={{ cursor: isEditable ? 'text' : 'default' }}
             />

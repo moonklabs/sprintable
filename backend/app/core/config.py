@@ -113,6 +113,19 @@ class Settings(BaseSettings):
     # E-H1-S6: GitHub webhook(PR/CI verdict 캡처) HMAC 검증 시크릿. 미설정이면 webhook 거부(inert).
     github_webhook_secret: str = ""
 
+    # E-GHAPP Bot-S: GitHub App(봇) — per-org 설치/링킹. user-login OAuth(github_client_id/secret)와
+    # 별개 credential. private key 는 Secret Manager only(env 는 dev/local fallback·로그 노출 0).
+    github_app_id: str = ""                  # GitHub App numeric id (installation 토큰 API 경로용)
+    github_app_client_id: str = ""           # App client ID — JWT `iss`(현 권장)
+    github_app_client_secret: str = ""        # App OAuth client secret — install callback user-token 교환(소속 검증)
+    github_app_slug: str = ""                # 설치 URL: github.com/apps/<slug>/installations/new
+    github_app_private_key: str = ""         # PEM. dev/local fallback only — prod 는 Secret Manager
+    github_app_private_key_secret: str = ""  # Secret Manager resource name (prod 우선 소스)
+    github_app_state_secret: str = ""        # 설치 callback state(CSRF+org+nonce+TTL) 서명 키
+    # Bot-M.2: App 웹훅 HMAC 시크릿(legacy github_webhook_secret 과 분리). 미설정=app-source inert.
+    # github_webhook_secret 과 동일값(misconfig)이면 app inert + startup warning(legacy 무회귀 보존).
+    github_app_webhook_secret: str = ""
+
     # S-COMM-07: 에이전트 inbox webhook HMAC 검증 시크릿
     agent_inbox_webhook_secret: str = ""
 

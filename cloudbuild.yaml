@@ -102,6 +102,10 @@ steps:
       - --region=${_AR_REGION}
       - --min-instances=${_BACKEND_MIN_INSTANCES}
       - --max-instances=${_BACKEND_MAX_INSTANCES}
+      # ⭐frontend 가 NEXT_PUBLIC_FASTAPI_URL 로 backend 를 직접 호출(public 필수). 플래그 없으면
+      # gcloud run deploy 가 기존 IAM 을 preserve(non-deterministic) → 신규/리셋 시 allUsers invoker
+      # 유실로 403(2026-06-21 prod promotion 사건). 명시적·멱등 설정으로 매 배포 public 보장(dev/prod 공통).
+      - --allow-unauthenticated
       - --quiet
     waitFor: [push-backend]
 

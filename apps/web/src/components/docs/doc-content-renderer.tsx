@@ -80,7 +80,7 @@ export function DocContentRenderer({
           });
           const wrapper = document.createElement('div');
           wrapper.innerHTML = highlighted;
-          wrapper.className = '[&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:p-4 [&_pre]:text-[13px] [&_pre]:leading-6 [&_code]:!bg-transparent overflow-x-auto';
+          wrapper.className = '[&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6 [&_code]:!bg-transparent overflow-x-auto';
           if (pre.parentElement) pre.replaceWith(wrapper);
         }).catch(() => { /* fallback: keep original pre */ });
       });
@@ -121,11 +121,11 @@ export function DocContentRenderer({
       // Public share viewer: internal doc links are inert plain text — no navigation,
       // no cross-doc traversal (meta-leak guard).
       if (publicMode) {
-        span.className = 'text-[0.9em] text-muted-foreground';
+        span.className = 'text-sm text-muted-foreground';
         span.removeAttribute('data-slug');
         return () => { /* no handler attached */ };
       }
-      span.className = 'inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[0.9em] bg-brand/10 text-[color:var(--brand-soft)] hover:bg-brand/20 transition-colors';
+      span.className = 'inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-sm text-foreground underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:decoration-foreground';
       span.title = title;
       const handleClick = () => { if (slug) window.location.href = `/docs/${slug}`; };
       span.addEventListener('click', handleClick);
@@ -292,19 +292,19 @@ export function DocContentRenderer({
     '[&_h3]:scroll-mt-24 [&_h3]:mt-8 [&_h3]:text-xl [&_h3]:font-semibold',
     '[&_p]:leading-7 [&_p]:text-foreground/92',
     '[&_a]:text-[color:var(--brand-soft)] [&_a]:underline [&_a]:underline-offset-4',
-    '[&_blockquote]:rounded-2xl [&_blockquote]:border-l-4 [&_blockquote]:border-brand/45 [&_blockquote]:bg-brand/8 [&_blockquote]:px-4 [&_blockquote]:py-3 [&_blockquote]:text-foreground/88',
-    '[&_img]:max-h-[32rem] [&_img]:w-full [&_img]:rounded-2xl [&_img]:border [&_img]:border-border [&_img]:object-contain',
-    '[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-2xl [&_table]:border [&_table]:border-border [&_table]:bg-muted/20',
+    '[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:bg-muted/30 [&_blockquote]:px-4 [&_blockquote]:py-3 [&_blockquote]:text-muted-foreground',
+    '[&_img]:max-h-[32rem] [&_img]:w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_img]:object-contain',
+    '[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border [&_table]:bg-muted/20',
     '[&_thead]:bg-muted/50 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold',
     '[&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2',
     '[&_hr]:my-8 [&_hr]:border-border',
     '[&_ul]:space-y-2 [&_ol]:space-y-2',
-    '[&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:border [&_pre]:border-border [&_pre]:bg-[#0b1120] [&_pre]:text-gray-100 [&_pre]:p-4 [&_pre]:text-[13px] [&_pre]:leading-6',
-    '[&_code]:rounded-md [&_code]:bg-slate-800 [&_code]:text-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-[0.95em]',
+    '[&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:border [&_pre]:border-border [&_pre]:bg-muted [&_pre]:text-foreground [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6',
+    '[&_code]:rounded-md [&_code]:bg-muted [&_code]:text-foreground [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-sm',
     '[&_pre_code]:bg-transparent [&_pre_code]:p-0',
     '[&_[data-doc-code-shell="true"]]:not-prose [&_[data-doc-code-shell="true"]]:my-6',
     '[&_[data-doc-code-actions="true"]]:mb-2 [&_[data-doc-code-actions="true"]]:flex [&_[data-doc-code-actions="true"]]:justify-end',
-    '[&_[data-doc-copy-button="true"]]:rounded-full [&_[data-doc-copy-button="true"]]:border [&_[data-doc-copy-button="true"]]:border-border [&_[data-doc-copy-button="true"]]:bg-muted/50 [&_[data-doc-copy-button="true"]]:px-3 [&_[data-doc-copy-button="true"]]:py-1.5 [&_[data-doc-copy-button="true"]]:text-[11px] [&_[data-doc-copy-button="true"]]:font-medium [&_[data-doc-copy-button="true"]]:uppercase [&_[data-doc-copy-button="true"]]:tracking-[0.18em] [&_[data-doc-copy-button="true"]]:text-muted-foreground',
+    '[&_[data-doc-copy-button="true"]]:rounded-md [&_[data-doc-copy-button="true"]]:border [&_[data-doc-copy-button="true"]]:border-border [&_[data-doc-copy-button="true"]]:bg-card [&_[data-doc-copy-button="true"]]:px-3 [&_[data-doc-copy-button="true"]]:py-1.5 [&_[data-doc-copy-button="true"]]:text-[11px] [&_[data-doc-copy-button="true"]]:font-medium [&_[data-doc-copy-button="true"]]:text-muted-foreground',
     className,
   );
 
@@ -341,7 +341,7 @@ export function DocContentRenderer({
           blockquote: ({ children }) => <blockquote>{children}</blockquote>,
           img: ({ src, alt }) => <NextImage src={typeof src === 'string' ? src : ''} alt={alt ?? ''} width={800} height={600} style={{ maxWidth: '100%', height: 'auto' }} unoptimized />,
           table: ({ children }) => (
-            <div className="not-prose overflow-x-auto rounded-2xl border border-border">
+            <div className="not-prose overflow-x-auto rounded-xl border border-border">
               <table>{children}</table>
             </div>
           ),
@@ -393,11 +393,11 @@ function MermaidReadonlyBlock({ code }: { code: string }) {
     return <div className="not-prose my-4 rounded-xl border border-destructive-border bg-destructive-tint p-3 text-xs text-destructive">{error}</div>;
   }
   if (!svg) {
-    return <div className="not-prose my-4 rounded-xl border border-slate-700 bg-[#0b1120] p-4 text-xs text-slate-500">렌더링 중...</div>;
+    return <div className="not-prose my-4 rounded-xl border border-border bg-muted p-4 text-xs text-muted-foreground">렌더링 중...</div>;
   }
   return (
     <div
-      className="not-prose my-4 flex justify-center rounded-xl border border-slate-700 bg-[#0b1120] p-4 [&_svg]:h-auto [&_svg]:max-w-full"
+      className="not-prose my-4 flex justify-center rounded-xl border border-border bg-muted p-4 [&_svg]:h-auto [&_svg]:max-w-full"
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );
@@ -439,12 +439,12 @@ function ShikiCodeBlock({
   }, [code]);
 
   return (
-    <div data-doc-code-shell="true" className="not-prose my-6 overflow-hidden rounded-2xl border border-slate-700 bg-[#0b1120]">
+    <div data-doc-code-shell="true" className="not-prose my-6 overflow-hidden rounded-xl border border-border bg-muted">
       <div data-doc-code-actions="true" className="flex justify-end px-3 pt-2">
         <button
           type="button"
           onClick={handleCopy}
-          className="rounded-full border border-slate-600 bg-slate-700/50 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-300 transition hover:border-slate-400 hover:text-slate-100"
+          className="rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
         >
           {copied ? copiedLabel : copyLabel}
         </button>
@@ -452,10 +452,10 @@ function ShikiCodeBlock({
       {html ? (
         <div
           dangerouslySetInnerHTML={{ __html: html }}
-          className="overflow-x-auto [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:p-4 [&_pre]:text-[13px] [&_pre]:leading-6 [&_code]:!bg-transparent"
+          className="overflow-x-auto [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6 [&_code]:!bg-transparent"
         />
       ) : (
-        <pre className="overflow-x-auto p-4 text-[13px] leading-6 text-slate-200">
+        <pre className="overflow-x-auto p-4 text-xs leading-6 text-foreground">
           <code>{code}</code>
         </pre>
       )}
@@ -484,7 +484,7 @@ function decorateHtmlContent(content: string, headings: ReturnType<typeof extrac
   });
 
   const withTableShells = withHeadingIds.replace(/<table\b[\s\S]*?<\/table>/gi, (tableMarkup) => {
-    return `<div class="not-prose overflow-x-auto rounded-2xl border border-border">${tableMarkup}</div>`;
+    return `<div class="not-prose overflow-x-auto rounded-xl border border-border">${tableMarkup}</div>`;
   });
 
   return withTableShells.replace(/<pre>([\s\S]*?)<\/pre>/gi, (_match, inner) => {

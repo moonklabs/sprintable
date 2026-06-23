@@ -33,7 +33,7 @@ function DocPreviewCard({ title, snippet, x, y }: { title: string; snippet: stri
   return createPortal(
     <div
       style={{ position: 'fixed', left, top, width: CARD_WIDTH, zIndex: 9999, pointerEvents: 'none' }}
-      className="rounded-xl border border-border bg-background p-3 shadow-lg"
+      className="rounded-xl border border-border bg-background p-3"
     >
       <p className="mb-1 text-xs font-semibold text-foreground truncate">{title}</p>
       {snippet ? (
@@ -254,7 +254,7 @@ function TreeNode({
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
           className={cn(
-            'flex w-full items-center gap-2 rounded-2xl pl-3 pr-7 py-2 text-left text-[13px] transition-all',
+            'flex w-full items-center gap-2 rounded-lg pl-3 pr-7 py-2 text-left text-xs transition-all',
             isSelected
               ? 'bg-primary/10 text-primary'
               : 'text-foreground/88 hover:bg-muted hover:text-foreground',
@@ -292,7 +292,7 @@ function TreeNode({
         <div
           ref={menuRef}
           className={cn(
-            'absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-border bg-popover p-1 shadow-md',
+            'absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-border bg-popover p-1',
             contextMenuOpen ? 'block' : 'hidden',
           )}
         >

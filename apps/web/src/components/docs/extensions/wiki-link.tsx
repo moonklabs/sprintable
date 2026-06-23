@@ -53,10 +53,10 @@ function WikiLinkView({ node, editor }: ReactNodeViewProps) {
       <span
         onClick={handleClick}
         title={isNotFound ? '문서를 찾을 수 없습니다' : title}
-        className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 text-[0.9em] transition-colors ${
+        className={`inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-sm transition-colors ${
           isNotFound
             ? 'bg-destructive-tint text-destructive hover:bg-destructive/20'
-            : 'bg-brand/10 text-[color:var(--brand-soft)] hover:bg-brand/20'
+            : 'text-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:decoration-foreground'
         }`}
       >
         {isNotFound
@@ -168,8 +168,8 @@ function WikiLinkMenu({
           onClick={() => command(item)}
           className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
             i === selectedIndex
-              ? 'bg-brand/14 text-[color:var(--brand-soft)]'
-              : 'text-foreground hover:bg-white/6'
+              ? 'bg-primary/10 text-primary'
+              : 'text-foreground hover:bg-muted'
           }`}
         >
           <FileText className="size-3.5 flex-shrink-0 text-muted-foreground" />

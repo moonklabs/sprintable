@@ -137,3 +137,31 @@ async def emit_story_status_changed(
             await db.flush()
         except Exception:
             pass
+
+
+async def advance_story_to_done(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    story,
+    *,
+    actor_id: uuid.UUID | None = None,
+    actor_type: str | None = None,
+    actor_name: str | None = None,
+) -> bool:
+    """story 를 done 으로 전이하는 **단일 idempotent 헬퍼**(E-GHAPP Bot-L.1).
+
+    gate-approve(`_advance_story_on_merge_approve`)와 PR-merge close-on-merge 가 **공유**한다 — 상태전이
+    정책을 한 곳에 둬 중복 advance/drift 를 막는다. story None/이미 done 이면 **no-op(False)**. 전이 시
+    emit_story_status_changed 로 status_changed side-effects(events·webhook·L2·notification·activity)를
+    동일하게 발화(board 경로와 parity). 호출자는 org-scope 로 story 를 조회해 넘긴다(anti-IDOR).
+    """
+    if story is None or story.status == "done":
+        return False  # 멱등: 이미 done/부재 → no-op.
+    old_status = story.status
+    story.status = "done"
+    await db.flush()
+    await emit_story_status_changed(
+        db, org_id, story, old_status,
+        actor_id=actor_id, actor_type=actor_type, actor_name=actor_name,
+    )
+    return True
