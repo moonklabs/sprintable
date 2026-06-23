@@ -20,7 +20,6 @@ import {
   type StandupMemberSummary,
   type StandupReviewType,
   type StandupStorySummary,
-  type LinkedStoryView,
 } from '@/components/standup/standup-review-card';
 
 interface StandupSprintSummary {
@@ -149,21 +148,14 @@ export default function StandupPage() {
   const totalTasks = useMemo(() => stories.reduce((sum, story) => sum + story.task_count, 0), [stories]);
   const doneTasks = useMemo(() => stories.reduce((sum, story) => sum + story.done_task_count, 0), [stories]);
   const currentEntry = currentTeamMemberId ? entryByAuthorId[currentTeamMemberId] : undefined;
-  const storyPickerStories = useMemo<LinkedStoryView[]>(() => {
-    // a9e67531: scoped(active-sprint) stories + 현 엔트리의 cross-board plan story(scoped 밖·plan_stories)
-    // merge → 백로그 등 active-sprint 밖 계획 항목도 picker에 체크 상태로 노출/해제 가능(미노출 버그 fix).
-    const base: LinkedStoryView[] = stories.slice();
-    const scopedIds = new Set(stories.map((s) => s.id));
-    for (const ps of currentEntry?.plan_stories ?? []) {
-      if (!scopedIds.has(ps.id)) base.push({ id: ps.id, title: ps.title, status: ps.status });
-    }
-    return base.sort((left, right) => {
-      const leftPriority = left.assignee_id != null && left.assignee_id === currentTeamMemberId ? 0 : 1;
-      const rightPriority = right.assignee_id != null && right.assignee_id === currentTeamMemberId ? 0 : 1;
-      if (leftPriority !== rightPriority) return leftPriority - rightPriority;
-      return left.title.localeCompare(right.title);
-    });
-  }, [stories, currentTeamMemberId, currentEntry?.plan_stories]);
+  // a9e67531(PO 트림): picker 후보는 scoped stories만 — cross-board plan story를 picker 후보로 늘리는 것은
+  // selection(write) 측이라 Track E v3 브릿지 모달 영역(PO AC 後 별건). #1689는 순수 read/render fix로 한정.
+  const storyPickerStories = useMemo(() => stories.slice().sort((left, right) => {
+    const leftPriority = left.assignee_id === currentTeamMemberId ? 0 : 1;
+    const rightPriority = right.assignee_id === currentTeamMemberId ? 0 : 1;
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+    return left.title.localeCompare(right.title);
+  }), [stories, currentTeamMemberId]);
 
   const feedbackDialogMember = useMemo(
     () => members.find((m) => m.id === feedbackDialogMemberId) ?? null,
@@ -645,13 +637,10 @@ export default function StandupPage() {
                                             <p className="text-sm font-medium text-foreground">{story.title}</p>
                                             <Badge variant="outline">{story.status}</Badge>
                                           </div>
-                                          {/* a9e67531: rich(scoped)만 assignee/task·cross-board plan story 요약은 title/status만 */}
-                                          {story.task_count != null ? (
-                                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                              <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
-                                              <span>{t('taskProgress', { done: story.done_task_count ?? 0, total: story.task_count })}</span>
-                                            </div>
-                                          ) : null}
+                                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                            <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
+                                            <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
+                                          </div>
                                         </div>
                                       </label>
                                     );
