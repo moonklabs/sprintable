@@ -1366,6 +1366,8 @@
     "collapseHistory": "Collapse history",
     "justNow": "Just now",
     "minutesAgo": "m ago",
+    "dateToday": "Today",
+    "dateYesterday": "Yesterday",
     "hoursAgo": "h ago",
     "selectToView": "Select a notification to view details",
     "detailEmptyTitle": "No notification selected",

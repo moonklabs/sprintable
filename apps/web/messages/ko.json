@@ -1366,6 +1366,8 @@
     "collapseHistory": "이력 접기",
     "justNow": "방금",
     "minutesAgo": "분 전",
+    "dateToday": "오늘",
+    "dateYesterday": "어제",
     "hoursAgo": "시간 전",
     "selectToView": "알림을 선택하면 상세 내용을 볼 수 있습니다",
     "detailEmptyTitle": "선택된 알림이 없습니다",
