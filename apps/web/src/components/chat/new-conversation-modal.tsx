@@ -103,7 +103,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
                     </div>
                     <span className="flex-1 truncate">{m.name}</span>
                     {m.type === 'agent' && (
-                      <span className="rounded-sm bg-violet-100 px-1 py-0.5 text-[9px] font-semibold uppercase text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">AI</span>
+                      <span className="rounded-sm bg-accent-claim/15 px-1 py-0.5 text-[9px] font-medium text-accent-claim">Bot</span>
                     )}
                     {selected.includes(m.id) && <Check className="h-3.5 w-3.5 flex-shrink-0 text-primary" />}
                   </button>

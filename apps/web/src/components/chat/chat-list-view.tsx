@@ -154,7 +154,7 @@ function ConversationRow({
           ? 'bg-warning-tint text-warning'
           : conv.type === 'dm'
             ? 'bg-primary/15 text-primary'
-            : 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300'
+            : 'bg-info/15 text-info'
       }`}>
         {isAgentConv
           ? <Bot className="h-4 w-4" />
@@ -329,7 +329,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     <div className="space-y-4">
       {dmConvs.length > 0 && (
         <div>
-          <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="mb-1 px-3 text-[11px] font-medium text-muted-foreground">
             {t('dmSection')}
           </p>
           {dmConvs.map((conv) => (
@@ -339,7 +339,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       )}
       {groupConvs.length > 0 && (
         <div>
-          <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="mb-1 px-3 text-[11px] font-medium text-muted-foreground">
             {t('groupSection')}
           </p>
           {groupConvs.map((conv) => (
@@ -366,7 +366,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     </div>
   ) : (
     <div>
-      <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <p className="mb-1 px-3 text-[11px] font-medium text-muted-foreground">
         {t('agentSection')}
       </p>
       {agentOnlyConvs.map((conv) => (

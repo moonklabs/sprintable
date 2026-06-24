@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, Loader2, Paperclip, Send, Terminal, Type, X } from 'lucide-react';
+import { AlertTriangle, Loader2, Paperclip, Send, Terminal, Type, X, Hash } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { getFileIcon } from '@/lib/file-icon';
@@ -10,6 +10,7 @@ import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier
 import { resolveRuntimeStatus, runtimeLabel } from '@/lib/runtime-capabilities';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 import { imageFilesFromClipboard } from '@/lib/clipboard-image';
+import { ENTITY_ICONS } from './embed-card';
 
 /** S8 #2: pre-send capability 경고 대상 — 대화의 에이전트 participant(본인 제외) runtime. */
 export interface CommandTarget {
@@ -56,12 +57,6 @@ function applyEntity(
   return { text: value.slice(0, start) + replacement + value.slice(cursorPos), caretPos: start + replacement.length };
 }
 
-const ENTITY_ICONS: Record<string, string> = {
-  story: '📋',
-  doc: '📄',
-  epic: '🎯',
-  task: '✅',
-};
 
 interface MentionMember {
   id: string;
@@ -241,13 +236,15 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     if (entityResults.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setEntityIndex((i) => (i + 1) % entityResults.length); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setEntityIndex((i) => (i - 1 + entityResults.length) % entityResults.length); return; }
-      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); selectEntity(entityResults[entityIndex]!); return; }
+      // §5.2 select 가드: async 윈도우서 index가 범위 밖이면 undefined select 방지(클램프+존재 체크).
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); const ent = entityResults[entityIndex] ?? entityResults[0]; if (ent) selectEntity(ent); return; }
       if (e.key === 'Escape') { setEntityQuery(null); setEntityResults([]); return; }
     }
     if (mentionMembers.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex((i) => (i + 1) % mentionMembers.length); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIndex((i) => (i - 1 + mentionMembers.length) % mentionMembers.length); return; }
-      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); selectMention(mentionMembers[mentionIndex]!); return; }
+      // §5.2 select 가드: index 범위 밖 undefined select 방지(클램프+존재 체크).
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); const m = mentionMembers[mentionIndex] ?? mentionMembers[0]; if (m) selectMention(m); return; }
       if (e.key === 'Escape') { setMentionQuery(null); setMentionMembers([]); return; }
     }
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -374,7 +371,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         }
         const chip = cmd ? `/${commandName(text)}` : (dequoteLiteral(text).trimStart().split(/\s+/)[0] ?? '');
         return (
-          <div className={`mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${cmd ? 'border-brand/30 bg-brand/10 text-brand' : 'border-border bg-muted/50 text-muted-foreground'}`}>
+          <div className={`mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${cmd ? 'border-info/30 bg-info/8 text-info' : 'border-border bg-muted/50 text-muted-foreground'}`}>
             {cmd ? <Terminal className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <Type className="h-3.5 w-3.5 shrink-0" aria-hidden />}
             <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono text-foreground">{chip}</code>
             <span>{cmd ? t('commandPreviewSendAsCommand') : t('commandPreviewSendAsLiteral')}</span>
@@ -385,13 +382,16 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       <div className="relative flex items-end gap-2">
         {/* Mention dropdown */}
         {mentionMembers.length > 0 && (
-          <ul className="absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+          <ul role="listbox" aria-label="멘션 후보" className="absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
             {mentionMembers.map((member, idx) => (
               <li key={member.id}>
                 <button
                   type="button"
+                  id={`mention-opt-${idx}`}
+                  role="option"
+                  aria-selected={idx === mentionIndex}
                   onMouseDown={(e) => { e.preventDefault(); selectMention(member); }}
-                  className={`w-full px-3 py-2 text-left text-sm transition ${idx === mentionIndex ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+                  className={`w-full px-3 py-2 text-left text-sm transition ${idx === mentionIndex ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
                 >
                   <span className="font-medium text-primary">@</span>{member.name}
                   {member.role ? <span className="ml-2 text-xs opacity-60">{member.role}</span> : null}
@@ -403,22 +403,28 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
         {/* Entity dropdown */}
         {entityResults.length > 0 && (
-          <ul className="absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
-            {entityResults.map((entity, idx) => (
+          <ul role="listbox" aria-label="엔티티 후보" className="absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+            {entityResults.map((entity, idx) => {
+              const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
+              return (
               <li key={`${entity.entity_type}:${entity.entity_id}`}>
                 <button
                   type="button"
+                  id={`entity-opt-${idx}`}
+                  role="option"
+                  aria-selected={idx === entityIndex}
                   onMouseDown={(e) => { e.preventDefault(); selectEntity(entity); }}
-                  className={`w-full px-3 py-2 text-left text-sm transition ${idx === entityIndex ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+                  className={`flex w-full items-center px-3 py-2 text-left text-sm transition ${idx === entityIndex ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
                 >
-                  <span className="mr-1.5">{ENTITY_ICONS[entity.entity_type] ?? '#'}</span>
+                  <EntityIcon className="mr-1.5 size-3.5 shrink-0" />
                   <span className="font-medium">{entity.title}</span>
                   {entity.status ? (
                     <span className="ml-2 rounded px-1.5 py-0.5 text-xs bg-muted text-muted-foreground">{entity.status}</span>
                   ) : null}
                 </button>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
 
@@ -446,6 +452,12 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           ref={textareaRef}
           rows={1}
           value={text}
+          aria-controls={mentionMembers.length > 0 ? 'mention-opt-0' : entityResults.length > 0 ? 'entity-opt-0' : undefined}
+          aria-activedescendant={
+            mentionMembers.length > 0 ? `mention-opt-${mentionIndex}`
+              : entityResults.length > 0 ? `entity-opt-${entityIndex}`
+              : undefined
+          }
           onChange={(e) => handleTextChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
