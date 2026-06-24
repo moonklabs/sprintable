@@ -57,6 +57,10 @@ class DocSummaryResponse(BaseModel):
     tags: list[str]
     updated_at: datetime
     snippet: str | None = None
+    # doc-payload enrich(slug-query 단건 경로): FE 상세 fetchDoc 이 GET /api/docs?slug= 를 쓰므로 이 응답에도
+    # 담당자/수정이력 요약 동봉(이중 fetch 제거). additive·nullable(다건 list/tree/search 엔 None). forward-ref.
+    assignee: "DocMemberSummary | None" = None
+    revisions: "DocRevisionsSummary | None" = None
 
 
 class DocMemberSummary(BaseModel):
@@ -116,3 +120,7 @@ class PublicDocResponse(BaseModel):
     title: str
     content: str
     content_format: str
+
+
+# DocSummaryResponse 는 뒤에 정의된 DocMemberSummary/DocRevisionsSummary 를 forward-ref 하므로 명시 rebuild.
+DocSummaryResponse.model_rebuild()
