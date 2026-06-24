@@ -224,7 +224,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
                   {/* S3: 증거 없는 카드(State A)는 구분선도 숨김 — 빈 블록 위 헤더 방지(omit) */}
                   {gateHasEvidence(gate) ? (
                     <div className="flex items-center gap-2 pt-1.5">
-                      <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                      <span className="shrink-0 text-[9px] font-medium text-muted-foreground/70">
                         {t('lineEvidenceDivider')}
                       </span>
                       <span className="h-px flex-1 bg-border" />
@@ -411,7 +411,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
             onClick={() => setRejectModal(null)}
             aria-label={t('cancel')}
           />
-          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background p-5 shadow-xl">
+          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background p-5 shadow-xl">
             <h3 className="mb-3 text-sm font-semibold">{t('gateRejectTitle')}</h3>
             <textarea
               rows={3}
@@ -445,7 +445,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
             onClick={() => setVoidModal(null)}
             aria-label={t('cancel')}
           />
-          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background p-5 shadow-xl">
+          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background p-5 shadow-xl">
             <div className="mb-2 flex items-center gap-2">
               <AlertTriangle className="size-4 shrink-0 text-warning" />
               <h3 className="text-sm font-semibold">{t('voidConfirmTitle')}</h3>
@@ -484,7 +484,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
             onClick={() => setHoldModal(null)}
             aria-label={t('cancel')}
           />
-          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background p-5 shadow-xl">
+          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background p-5 shadow-xl">
             <div className="mb-2 flex items-center gap-2">
               <Pause className="size-4 shrink-0 text-muted-foreground" />
               <h3 className="text-sm font-semibold">{t('holdConfirmTitle')}</h3>
