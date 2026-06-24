@@ -10,6 +10,7 @@ from app.schemas.story import _validate_metric_definition
 SPRINT_STATUSES = ("planning", "active", "review", "closed", "archived")
 _SPRINT_VALID_TRANSITIONS: set[tuple[str, str]] = {
     ("planning", "active"),     # 시작(activate·1-active 제약·overlay-gated)
+    ("planning", "closed"),     # 시작 전 폐기(cancel/discard·한번도 안 뛴 스프린트·velocity 0·non-gated)
     ("active", "review"),        # review 단계(선택)
     ("active", "closed"),        # 마감 직행(review 생략·overlay-gated). close-state=closed(de-facto·decision① B)
     ("review", "closed"),        # 마감(review 경유·overlay-gated)
