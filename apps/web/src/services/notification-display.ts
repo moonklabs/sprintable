@@ -1,13 +1,13 @@
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 import {
-  Bookmark, ClipboardList, Trophy, Info, AlertTriangle, Wrench,
+  FileText, ClipboardList, Trophy, Info, AlertTriangle, Wrench,
   CheckCircle2, Flag, User, Mail, Bot, type LucideIcon,
 } from 'lucide-react';
 
 // 알림 type 아이콘 — 장식 emoji(📌📋🏆ℹ️…)를 lucide로 충실 변환(글리프 0·다크 안전).
-// ⚠️ 아이콘 선택은 emoji 의미 1:1 매핑(가디언 픽셀서 정합 확認).
+// story=FileText: 채팅 ENTITY_ICONS와 cross-surface 부품 언어 일관(같은 story=같은 아이콘·유나 픽셀 콜).
 export const NOTIFICATION_TYPE_ICONS: Record<string, LucideIcon> = {
-  story: Bookmark,
+  story: FileText,
   task: ClipboardList,
   reward: Trophy,
   info: Info,
@@ -17,7 +17,7 @@ export const NOTIFICATION_TYPE_ICONS: Record<string, LucideIcon> = {
   task_completed: CheckCircle2,
   sprint_closed: Flag,
   standup_reminder: User,
-  story_assigned: Bookmark,
+  story_assigned: FileText,
   invitation: Mail,
   agent_joined: Bot,
 };
