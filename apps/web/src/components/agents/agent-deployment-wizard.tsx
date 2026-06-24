@@ -455,7 +455,7 @@ export function AgentDeploymentWizard({
     if (!agent) {
       return (
         <div className="rounded-md border border-dashed border-border bg-muted/30 p-6 text-center">
-          <AlertTriangle className="mx-auto size-9 text-amber-300" />
+          <AlertTriangle className="mx-auto size-9 text-warning" />
           <h3 className="mt-4 text-lg font-semibold text-foreground">{t('noAgentTitle')}</h3>
           <p className="mt-2 text-sm text-muted-foreground">{t('noAgentBody')}</p>
         </div>
@@ -487,7 +487,7 @@ export function AgentDeploymentWizard({
           </div>
           {[{ label: t('builtInPersonas'), personas: builtinPersonas }, { label: t('customPersonas'), personas: customPersonas }].map((group) => (
             <div key={group.label} className="space-y-3">
-              <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{group.label}</div>
+              <div className="text-xs text-muted-foreground">{group.label}</div>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {group.personas.length === 0 ? (
                   <div className="rounded-md border border-dashed border-border bg-muted/30 px-4 py-5 text-sm text-muted-foreground">
@@ -563,7 +563,7 @@ export function AgentDeploymentWizard({
 
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="space-y-2 lg:col-span-1">
-              <label className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('providerLabel')}</label>
+              <label className="text-xs text-muted-foreground">{t('providerLabel')}</label>
               <OperatorSelect value={deploymentProvider} onChange={(event) => setProvider(event.target.value as LLMProvider)} disabled={Boolean(lockedByomProvider)}>
                 {(['openai', 'anthropic', 'google', 'groq', 'openai-compatible'] as LLMProvider[]).map((option) => (
                   <option key={option} value={option}>{PROVIDER_LABELS[option]}</option>
@@ -574,7 +574,7 @@ export function AgentDeploymentWizard({
               ) : null}
             </div>
             <div className="space-y-2 lg:col-span-1">
-              <label className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('modelLabel')}</label>
+              <label className="text-xs text-muted-foreground">{t('modelLabel')}</label>
               {modelOptions.length > 0 ? (
                 <OperatorSelect value={model} onChange={(event) => setModel(event.target.value)}>
                   {modelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -584,7 +584,7 @@ export function AgentDeploymentWizard({
               )}
             </div>
             <div className="space-y-2 lg:col-span-1">
-              <label className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('deploymentNameLabel')}</label>
+              <label className="text-xs text-muted-foreground">{t('deploymentNameLabel')}</label>
               <OperatorInput value={deploymentName} onChange={(event) => setDeploymentName(event.target.value)} placeholder={t('deploymentNamePlaceholder')} />
             </div>
           </div>
@@ -679,7 +679,7 @@ export function AgentDeploymentWizard({
           <div className="grid gap-3 md:grid-cols-2">
             {summaryItems.map((item) => (
               <div key={item.label} className="rounded-md border border-border bg-muted/30 p-4">
-                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{item.label}</div>
+                <div className="text-xs text-muted-foreground">{item.label}</div>
                 <div className="mt-2 text-sm font-medium text-foreground">{item.value}</div>
               </div>
             ))}
@@ -745,15 +745,15 @@ export function AgentDeploymentWizard({
 
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               <div className="rounded-md border border-border bg-muted/30 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('deployPreflightScopeLabel')}</div>
+                <div className="text-xs text-muted-foreground">{t('deployPreflightScopeLabel')}</div>
                 <div className="mt-2 text-sm font-medium text-foreground">{verificationScopeSummary}</div>
               </div>
               <div className="rounded-md border border-border bg-muted/30 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('deployPreflightRoutingLabel')}</div>
+                <div className="text-xs text-muted-foreground">{t('deployPreflightRoutingLabel')}</div>
                 <div className="mt-2 text-sm font-medium text-foreground">{t('deployPreflightRoutingValue', { template: autoRoutingPreviewLabel, count: autoRoutingPreview.rules.length })}</div>
               </div>
               <div className="rounded-md border border-border bg-muted/30 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('deployPreflightCheckedAtLabel')}</div>
+                <div className="text-xs text-muted-foreground">{t('deployPreflightCheckedAtLabel')}</div>
                 <div className="mt-2 text-sm font-medium text-foreground">{preflight ? new Date(preflight.checked_at).toLocaleString() : t('deployPreflightNotRun')}</div>
               </div>
             </div>
@@ -859,7 +859,7 @@ export function AgentDeploymentWizard({
                         {complete ? <CheckCircle2 className="size-4" /> : <Icon className="size-4" />}
                       </div>
                       <div>
-                        <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t(`steps.${key}.eyebrow`)}</div>
+                        <div className="text-xs text-muted-foreground">{t(`steps.${key}.eyebrow`)}</div>
                         <div className="text-sm font-semibold text-foreground">{t(`steps.${key}.title`)}</div>
                       </div>
                     </div>

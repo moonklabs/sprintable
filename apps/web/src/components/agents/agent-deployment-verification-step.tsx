@@ -58,12 +58,12 @@ export function AgentDeploymentVerificationStep({
 
       <div className="grid gap-3 md:grid-cols-4">
         <GlassPanel className="border-white/8 bg-muted/35 p-4">
-          <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('verificationStatusLabel')}</div>
+          <div className="text-xs text-muted-foreground">{t('verificationStatusLabel')}</div>
           <div className="mt-2 text-sm font-medium text-foreground">{deploymentStatus}</div>
           <div className="mt-2 text-xs text-muted-foreground">{lastDeployedAt ? new Date(lastDeployedAt).toLocaleString() : t('verificationStatusPending')}</div>
         </GlassPanel>
         <GlassPanel className="border-white/8 bg-muted/35 p-4">
-          <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('verificationResultLabel')}</div>
+          <div className="text-xs text-muted-foreground">{t('verificationResultLabel')}</div>
           <div className="mt-2 flex items-center gap-2">
             <div className="text-sm font-medium text-foreground">{verificationCompleted ? t('verificationStatusValueCompleted') : t('verificationStatusValuePending')}</div>
             <Badge variant={verificationCompleted ? 'success' : 'outline'}>
@@ -73,12 +73,12 @@ export function AgentDeploymentVerificationStep({
           <div className="mt-2 text-xs text-muted-foreground">{verificationCompletedAt ? t('verificationCompletedAtValue', { date: new Date(verificationCompletedAt).toLocaleString() }) : t('verificationPendingHint')}</div>
         </GlassPanel>
         <GlassPanel className="border-white/8 bg-muted/35 p-4">
-          <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('verificationScopeLabel')}</div>
+          <div className="text-xs text-muted-foreground">{t('verificationScopeLabel')}</div>
           <div className="mt-2 text-sm font-medium text-foreground">{verificationScopeSummary}</div>
           <div className="mt-2 text-xs text-muted-foreground">{t('verificationModelValue', { provider: deploymentProviderLabel, model })}</div>
         </GlassPanel>
         <GlassPanel className="border-white/8 bg-muted/35 p-4">
-          <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('verificationRoutingLabel')}</div>
+          <div className="text-xs text-muted-foreground">{t('verificationRoutingLabel')}</div>
           <div className="mt-2 text-sm font-medium text-foreground">{autoRoutingPreviewLabel}</div>
           <div className="mt-2 text-xs text-muted-foreground">{t('deployPreflightRoutingValue', { template: autoRoutingPreviewLabel, count: autoRoutingRuleCount })}</div>
         </GlassPanel>

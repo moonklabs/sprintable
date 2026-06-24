@@ -113,7 +113,7 @@ export function AgentHitlPolicyEditor() {
         <SectionCardBody>
           <div className="space-y-3">
             {[1, 2, 3].map((item) => (
-              <div key={item} className="h-28 animate-pulse rounded-3xl bg-muted" />
+              <div key={item} className="h-28 animate-pulse rounded-xl bg-muted" />
             ))}
           </div>
         </SectionCardBody>
@@ -128,7 +128,7 @@ export function AgentHitlPolicyEditor() {
           <h2 className="text-base font-semibold text-foreground">{t('policyTitle')}</h2>
         </SectionCardHeader>
         <SectionCardBody className="space-y-3">
-          <p className="text-sm text-amber-100">{error ?? t('policyLoadFailed')}</p>
+          <p className="text-sm text-warning">{error ?? t('policyLoadFailed')}</p>
           <Button variant="glass" size="sm" onClick={() => void fetchPolicy()}>{t('refreshPolicy')}</Button>
         </SectionCardBody>
       </SectionCard>
@@ -137,9 +137,9 @@ export function AgentHitlPolicyEditor() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/8 bg-white/4 px-4 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/4 px-4 py-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">{t('policyEyebrow')}</p>
+          <p className="text-xs font-semibold text-muted-foreground">{t('policyEyebrow')}</p>
           <h2 className="mt-1 text-lg font-semibold text-foreground">{t('policyTitle')}</h2>
           <p className="mt-1 text-sm text-muted-foreground">{t('policyBody')}</p>
         </div>
@@ -169,7 +169,7 @@ export function AgentHitlPolicyEditor() {
           </SectionCardHeader>
           <SectionCardBody className="space-y-3">
             {policy.high_risk_actions.map((item) => (
-              <div key={item.key} className="rounded-3xl border border-white/10 bg-white/4 px-4 py-4">
+              <div key={item.key} className="rounded-xl border border-white/10 bg-white/4 px-4 py-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={item.severity === 'critical' ? 'destructive' : 'info'}>{t(`catalogSeverity_${item.severity}`)}</Badge>
                   <Badge variant="outline">{t(`requestType_${item.default_request_type}`)}</Badge>
@@ -194,7 +194,7 @@ export function AgentHitlPolicyEditor() {
           </SectionCardHeader>
           <SectionCardBody className="space-y-3">
             {policy.approval_rules.map((rule) => (
-              <div key={rule.key} className="rounded-3xl border border-white/10 bg-white/4 px-4 py-4 space-y-3">
+              <div key={rule.key} className="rounded-xl border border-white/10 bg-white/4 px-4 py-4 space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="info">{t('approvalRequired')}</Badge>
                   <Badge variant="outline">{t(`timeoutClass_${rule.timeout_class}`)}</Badge>
@@ -204,13 +204,13 @@ export function AgentHitlPolicyEditor() {
                   <p className="mt-1 text-sm text-muted-foreground">{t(`approval_${rule.key}_body`)}</p>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                  <label className="space-y-2 text-xs font-semibold text-muted-foreground">
                     <span>{t('approvalRequestTypeLabel')}</span>
-                    <div className="flex h-10 items-center rounded-2xl border border-white/10 bg-muted px-3 text-sm font-medium normal-case tracking-normal text-foreground">
+                    <div className="flex h-10 items-center rounded-xl border border-white/10 bg-muted px-3 text-sm font-medium normal-case tracking-normal text-foreground">
                       {t('requestType_approval')}
                     </div>
                   </label>
-                  <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                  <label className="space-y-2 text-xs font-semibold text-muted-foreground">
                     <span>{t('approvalTimeoutClassLabel')}</span>
                     <OperatorSelect value={rule.timeout_class} onChange={(event) => updateApprovalRule(rule.key, event.target.value)}>
                       {policy.timeout_classes.map((timeoutClass) => (
@@ -238,7 +238,7 @@ export function AgentHitlPolicyEditor() {
             {policy.timeout_classes.map((timeoutClass) => {
               const linkedRules = policy.approval_rules.filter((rule) => rule.timeout_class === timeoutClass.key);
               return (
-                <div key={timeoutClass.key} className="rounded-3xl border border-white/10 bg-white/4 px-4 py-4 space-y-3">
+                <div key={timeoutClass.key} className="rounded-xl border border-white/10 bg-white/4 px-4 py-4 space-y-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="chip">{t(`timeoutClass_${timeoutClass.key}`)}</Badge>
                     {linkedRules.map((rule) => (
@@ -250,7 +250,7 @@ export function AgentHitlPolicyEditor() {
                     <p className="mt-1 text-sm text-muted-foreground">{t(`timeout_${timeoutClass.key}_body`)}</p>
                   </div>
                   <div className="grid gap-3">
-                    <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    <label className="space-y-2 text-xs font-semibold text-muted-foreground">
                       <span>{t('timeoutDurationLabel')}</span>
                       <OperatorInput
                         type="number"
@@ -260,7 +260,7 @@ export function AgentHitlPolicyEditor() {
                         onChange={(event) => updateTimeoutClass(timeoutClass.key, 'duration_minutes', event.target.value)}
                       />
                     </label>
-                    <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    <label className="space-y-2 text-xs font-semibold text-muted-foreground">
                       <span>{t('timeoutReminderLabel')}</span>
                       <OperatorInput
                         type="number"
@@ -270,7 +270,7 @@ export function AgentHitlPolicyEditor() {
                         onChange={(event) => updateTimeoutClass(timeoutClass.key, 'reminder_minutes_before', event.target.value)}
                       />
                     </label>
-                    <label className="space-y-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    <label className="space-y-2 text-xs font-semibold text-muted-foreground">
                       <span>{t('timeoutEscalationLabel')}</span>
                       <OperatorSelect value={timeoutClass.escalation_mode} onChange={(event) => updateTimeoutClass(timeoutClass.key, 'escalation_mode', event.target.value)}>
                         {ESCALATION_MODE_OPTIONS.map((mode) => (
@@ -297,7 +297,7 @@ export function AgentHitlPolicyEditor() {
           </div>
         </SectionCardHeader>
         <SectionCardBody>
-          <pre className="whitespace-pre-wrap rounded-3xl border border-white/10 bg-slate-950/40 px-4 py-4 text-sm text-muted-foreground">{policy.prompt_summary}</pre>
+          <pre className="whitespace-pre-wrap rounded-xl border border-white/10 bg-muted/40 px-4 py-4 text-sm text-muted-foreground">{policy.prompt_summary}</pre>
         </SectionCardBody>
       </SectionCard>
     </div>
