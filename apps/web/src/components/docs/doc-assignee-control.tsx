@@ -14,34 +14,21 @@ export function DocAssigneeControl({
   docId,
   projectId,
   currentAssigneeId,
+  assigneeName,
   onAssigneePatched,
 }: {
   docId: string;
   projectId: string;
   currentAssigneeId: string | null;
+  // #1691: doc payload(assignee.name) 직접 소비 — 이니셜용 별도 /api/members fetch 제거.
+  // payload 미동봉(legacy/미enrich)인데 assignee_id만 있으면 null → id-only(User 아이콘) fallback.
+  assigneeName: string | null;
   onAssigneePatched: (assigneeId: string) => void;
 }) {
   const t = useTranslations('docs');
   const [open, setOpen] = useState(false);
-  const [memberName, setMemberName] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-
-  // 현 담당자 이름 resolve(아바타 이니셜용). EntityDispatchPanel도 멤버를 fetch하나 트리거 라벨용 경량 조회.
-  // null 케이스는 동기 setState 대신 render서 파생(currentAssigneeId 가드)해 set-state-in-effect 회피.
-  useEffect(() => {
-    if (!currentAssigneeId) return;
-    let alive = true;
-    void fetch(`/api/members?project_id=${projectId}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null)
-      .then((json) => {
-        if (!alive) return;
-        const rows = ((json?.data ?? json) as { id: string; name: string }[] | null) ?? [];
-        const m = Array.isArray(rows) ? rows.find((x) => x.id === currentAssigneeId) : null;
-        setMemberName(m?.name ?? null);
-      });
-    return () => { alive = false; };
-  }, [currentAssigneeId, projectId]);
+  const memberName = assigneeName;
 
   // click-outside 닫기
   useEffect(() => {

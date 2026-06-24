@@ -43,6 +43,9 @@ interface DocDetail {
   // E-DG S22/S28: doc decision lifecycle status(draft|pending|confirmed|denied·기본 draft) + cross-doc 대체 포인터(S28·additive).
   status?: string;
   superseded_by?: string | null;
+  // #1691 payload enrich(이중 fetch 제거·additive·nullable): 담당자 요약 + 수정이력 요약 동봉.
+  assignee?: { id: string; name: string; avatar_url?: string | null } | null;
+  revisions?: { count: number; latest_at?: string | null } | null;
 }
 
 function InlineSaveIndicator({
@@ -134,23 +137,10 @@ export default function DocSlugPage() {
   const [slugLocked, setSlugLocked] = useState(false);
   const [urlDialogOpen, setUrlDialogOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
-  // §3-2 슬림 헤더 메타: 수정 이력 N(작성자는 created_by/memberMap 부재로 드롭·PO 보수안). DocGateSection도
-  // revision을 fetch하나 헤더 메타용으로 경량 count만 별도 조회(공유 리프트는 S28 refactor라 follow-up).
-  const [revisionCount, setRevisionCount] = useState<number | null>(null);
-  const docId = selectedDoc?.id ?? null;
-  useEffect(() => {
-    if (!docId) { setRevisionCount(null); return; }
-    let alive = true;
-    void fetch(`/api/docs/${docId}/revisions`)
-      .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null)
-      .then((json) => {
-        if (!alive) return;
-        const rows = (json?.data ?? json) as unknown[];
-        setRevisionCount(Array.isArray(rows) ? rows.length : null);
-      });
-    return () => { alive = false; };
-  }, [docId]);
+  // §3-2 슬림 헤더 메타: 수정 이력 N. #1691 payload enrich로 별도 /revisions fetch 제거 — doc payload의
+  // revisions.count 직접 소비(미enrich/legacy 응답엔 null → 메타 서브라인 숨김·기존 동작 동일).
+  // (DocGateSection의 revision 타임라인 fetch는 full history용이라 별개·유지.)
+  const revisionCount = selectedDoc?.revisions?.count ?? null;
 
   const handleDocSaved = useCallback((doc: DocDetail) => {
     setSelectedDoc(doc);
@@ -420,6 +410,7 @@ export default function DocSlugPage() {
               docId={selectedDoc.id}
               projectId={projectId}
               currentAssigneeId={selectedDoc.assignee_id ?? null}
+              assigneeName={selectedDoc.assignee?.name ?? null}
               onAssigneePatched={(aid) => setSelectedDoc((prev) => prev ? { ...prev, assignee_id: aid } : prev)}
             />
           ) : undefined}
