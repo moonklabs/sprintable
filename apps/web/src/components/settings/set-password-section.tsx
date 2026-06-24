@@ -110,9 +110,9 @@ export function SetPasswordSection() {
           />
 
           {showRules && (
-            <ul className="space-y-1 text-xs">
+            <ul className="divide-y divide-border text-xs">
               <PasswordRuleItem met={rules.length} label="At least 8 characters" />
-              <li className={`flex items-center gap-1.5 ${categoriesMet >= 3 ? 'text-success' : 'text-muted-foreground'}`}>
+              <li className={`flex items-center gap-1.5 py-1.5 ${categoriesMet >= 3 ? 'text-success' : 'text-muted-foreground'}`}>
                 {categoriesMet >= 3 ? <Check className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />}
                 <span>At least 3 of: uppercase, lowercase, digit, special character ({categoriesMet}/3)</span>
               </li>
@@ -138,7 +138,7 @@ export function SetPasswordSection() {
 
 function PasswordRuleItem({ met, label }: { met: boolean; label: string }) {
   return (
-    <li className={`flex items-center gap-1.5 ${met ? 'text-success' : 'text-muted-foreground'}`}>
+    <li className={`flex items-center gap-1.5 py-1.5 ${met ? 'text-success' : 'text-muted-foreground'}`}>
       {met ? <Check className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />}
       <span>{label}</span>
     </li>
