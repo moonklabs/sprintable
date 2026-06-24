@@ -49,7 +49,7 @@ export function GateOverrideModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button type="button" className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} aria-label={t('cancel')} />
-      <div className="relative z-10 w-full max-w-sm rounded-xl border border-destructive/40 bg-background p-5 shadow-xl">
+      <div className="relative z-10 w-full max-w-sm rounded-2xl border border-destructive/40 bg-background p-5 shadow-xl">
         <div className="mb-2 flex items-center gap-2">
           <Gavel className="size-4 shrink-0 text-destructive" />
           <h3 className="text-sm font-semibold text-foreground">{t('overrideTitle')}</h3>

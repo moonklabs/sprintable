@@ -71,7 +71,7 @@ export function GateReassignModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button type="button" className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} aria-label={t('cancel')} />
-      <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background p-5 shadow-xl">
+      <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background p-5 shadow-xl">
         <div className="mb-3 flex items-center gap-2">
           <UserCog className="size-4 shrink-0 text-muted-foreground" />
           <h3 className="text-sm font-semibold">{t('reassignTitle')}</h3>

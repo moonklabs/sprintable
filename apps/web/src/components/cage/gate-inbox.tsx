@@ -411,7 +411,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
             onClick={() => setRejectModal(null)}
             aria-label={t('cancel')}
           />
-          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background p-5 shadow-xl">
+          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background p-5 shadow-xl">
             <h3 className="mb-3 text-sm font-semibold">{t('gateRejectTitle')}</h3>
             <textarea
               rows={3}
@@ -445,7 +445,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
             onClick={() => setVoidModal(null)}
             aria-label={t('cancel')}
           />
-          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background p-5 shadow-xl">
+          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background p-5 shadow-xl">
             <div className="mb-2 flex items-center gap-2">
               <AlertTriangle className="size-4 shrink-0 text-warning" />
               <h3 className="text-sm font-semibold">{t('voidConfirmTitle')}</h3>
@@ -484,7 +484,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
             onClick={() => setHoldModal(null)}
             aria-label={t('cancel')}
           />
-          <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-background p-5 shadow-xl">
+          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background p-5 shadow-xl">
             <div className="mb-2 flex items-center gap-2">
               <Pause className="size-4 shrink-0 text-muted-foreground" />
               <h3 className="text-sm font-semibold">{t('holdConfirmTitle')}</h3>
