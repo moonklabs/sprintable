@@ -167,15 +167,16 @@ export function AgentPerformancePanel() {
             {agents.length === 0 ? (
               <p className="py-6 text-center text-sm text-muted-foreground">{t('noAgents')}</p>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              // 목업 ① de-boxy dense grid: per-card 테두리 제거·gap-px divider·중첩 메트릭 박스→flex 행(아이콘이 타입)
+              <div className="grid grid-cols-1 gap-px overflow-hidden rounded-xl bg-border sm:grid-cols-2 lg:grid-cols-3">
                 {agents.map((agent) => (
-                  <div key={agent.id} className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                  <div key={agent.id} className="space-y-2 bg-background p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-semibold text-foreground">{agent.name}</div>
                         {agent.rank != null && (
-                          <div className="flex items-center gap-1 mt-0.5">
-                            <Trophy className="size-3 text-amber-400" />
+                          <div className="mt-0.5 flex items-center gap-1">
+                            <Trophy className="size-3 text-warning" />
                             <span className="text-xs text-muted-foreground">#{agent.rank}</span>
                           </div>
                         )}
@@ -184,28 +185,19 @@ export function AgentPerformancePanel() {
                         {agent.balance} TJSB
                       </Badge>
                     </div>
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div className="rounded-md bg-muted/50 px-2 py-2">
-                        <div className="flex items-center justify-center gap-1 text-emerald-500">
-                          <CheckCircle className="size-3" />
-                          <span className="text-base font-bold">{agent.stats?.completed ?? 0}</span>
-                        </div>
-                        <div className="mt-0.5 text-[10px] text-muted-foreground">{t('doneStories')}</div>
-                      </div>
-                      <div className="rounded-md bg-muted/50 px-2 py-2">
-                        <div className="flex items-center justify-center gap-1 text-primary">
-                          <Zap className="size-3" />
-                          <span className="text-base font-bold">{agent.stats?.total_stories ?? 0}</span>
-                        </div>
-                        <div className="mt-0.5 text-[10px] text-muted-foreground">{t('assignedStories')}</div>
-                      </div>
-                      <div className="rounded-md bg-muted/50 px-2 py-2">
-                        <div className="flex items-center justify-center gap-1 text-muted-foreground">
-                          <Clock className="size-3" />
-                          <span className="text-base font-bold">{formatDuration(agent.stats?.avg_lead_time_ms ?? 0)}</span>
-                        </div>
-                        <div className="mt-0.5 text-[10px] text-muted-foreground">{t('avgLeadTime')}</div>
-                      </div>
+                    <div className="flex flex-wrap items-center gap-4 text-xs">
+                      <span className="inline-flex items-center gap-1 text-success" title={t('doneStories')}>
+                        <CheckCircle className="size-3.5" />
+                        <span className="font-semibold tabular-nums">{agent.stats?.completed ?? 0}</span>
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-primary" title={t('assignedStories')}>
+                        <Zap className="size-3.5" />
+                        <span className="font-semibold tabular-nums">{agent.stats?.total_stories ?? 0}</span>
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-muted-foreground" title={t('avgLeadTime')}>
+                        <Clock className="size-3.5" />
+                        <span className="font-semibold tabular-nums">{formatDuration(agent.stats?.avg_lead_time_ms ?? 0)}</span>
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -233,12 +225,12 @@ export function AgentPerformancePanel() {
           <SectionCard>
             <SectionCardHeader>
               <div className="flex items-center gap-2">
-                <Trophy className="size-4 text-amber-400" />
+                <Trophy className="size-4 text-warning" />
                 <span className="text-sm font-semibold text-foreground">{t('leaderboardTitle')}</span>
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">{t('leaderboardDescription')}</p>
             </SectionCardHeader>
-            <SectionCardBody className="space-y-2">
+            <SectionCardBody className="divide-y divide-border/60">
               {agents.length === 0 ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">{t('noAgents')}</p>
               ) : (
@@ -247,9 +239,9 @@ export function AgentPerformancePanel() {
                   .map((agent, idx) => (
                     <div
                       key={agent.id}
-                      className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2.5"
+                      className="flex items-center gap-3 px-3 py-2.5"
                     >
-                      <span className={`w-6 shrink-0 text-center text-sm font-bold ${idx === 0 ? 'text-amber-400' : idx === 1 ? 'text-slate-400' : idx === 2 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                      <span className={`w-6 shrink-0 text-center text-sm font-bold ${idx === 0 ? 'text-warning' : idx === 1 ? 'text-muted-foreground' : idx === 2 ? 'text-warning/70' : 'text-muted-foreground'}`}>
                         {idx + 1}
                       </span>
                       <span className="flex-1 truncate text-sm font-medium text-foreground">{agent.name}</span>

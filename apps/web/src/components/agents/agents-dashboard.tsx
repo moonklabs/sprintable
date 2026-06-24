@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { Bot, Clock3, History, Pause, Play, RefreshCw, Rocket, TriangleAlert, User, Zap } from 'lucide-react';
+import { Bot, Clock3, History, Pause, Play, RefreshCw, Rocket, TriangleAlert, User, Zap, ClipboardList, RotateCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -78,10 +78,10 @@ function statusBadgeVariant(status: string) {
 
 function statusDotClass(status: string): string {
   switch (status) {
-    case 'ACTIVE': return 'bg-emerald-500';
+    case 'ACTIVE': return 'bg-success';
     case 'DEPLOY_FAILED': return 'bg-destructive';
     case 'SUSPENDED': return 'bg-muted-foreground/60';
-    case 'DEPLOYING': return 'bg-amber-500 animate-pulse';
+    case 'DEPLOYING': return 'bg-warning animate-pulse';
     default: return 'bg-muted-foreground/40';
   }
 }
@@ -364,12 +364,12 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                 </div>
                 <div className="grid gap-3 md:grid-cols-3">
                   {([
-                    { icon: '📋', titleKey: 'featureTaskTitle', bodyKey: 'featureTaskBody' },
-                    { icon: '⚡', titleKey: 'featureAutoTitle', bodyKey: 'featureAutoBody' },
-                    { icon: '🔁', titleKey: 'featureSkillTitle', bodyKey: 'featureSkillBody' },
-                  ] as const).map(({ icon, titleKey, bodyKey }) => (
+                    { Icon: ClipboardList, titleKey: 'featureTaskTitle', bodyKey: 'featureTaskBody' },
+                    { Icon: Zap, titleKey: 'featureAutoTitle', bodyKey: 'featureAutoBody' },
+                    { Icon: RotateCw, titleKey: 'featureSkillTitle', bodyKey: 'featureSkillBody' },
+                  ] as const).map(({ Icon, titleKey, bodyKey }) => (
                     <div key={titleKey} className="rounded-lg border border-border/60 bg-muted/20 p-4">
-                      <div className="text-2xl">{icon}</div>
+                      <Icon className="size-6 text-muted-foreground" />
                       <p className="mt-2 text-sm font-semibold text-foreground">{t(titleKey)}</p>
                       <p className="mt-1 text-xs text-muted-foreground">{t(bodyKey)}</p>
                     </div>
@@ -521,7 +521,7 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
 
                       {latestFailure ? (
                         <div className="mt-3 rounded-md border border-border bg-muted/30 px-3 py-3">
-                          <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">{t('recentFailureTitle')}</p>
+                          <p className="text-[11px] font-medium text-muted-foreground">{t('recentFailureTitle')}</p>
                           <p className="mt-1 text-sm font-medium text-foreground">
                             {getFailureHeadline(latestFailure) ?? t('recentFailureFallback')}
                           </p>

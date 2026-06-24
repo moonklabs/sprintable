@@ -225,8 +225,8 @@ export function AgentRunDetail({
   if (loading) {
     return (
       <div className="space-y-4">
-        <div className="h-24 animate-pulse rounded-2xl bg-muted" />
-        <div className="h-64 animate-pulse rounded-2xl bg-muted" />
+        <div className="h-24 animate-pulse rounded-xl bg-muted" />
+        <div className="h-64 animate-pulse rounded-xl bg-muted" />
       </div>
     );
   }
@@ -317,7 +317,7 @@ export function AgentRunDetail({
             </div>
 
             {Array.isArray(run.billing_notes) && run.billing_notes.length > 0 && (
-              <div className="mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+              <div className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
                 <p className="text-sm font-medium text-foreground">{t('billingNotesLabel')}</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {run.billing_notes.map((note) => (
@@ -346,14 +346,14 @@ export function AgentRunDetail({
 
             {/* Result summary */}
             {run.result_summary && (
-              <div className="mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+              <div className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
                 <p className="text-sm font-medium text-foreground">{t('resultSummary')}</p>
                 <p className="mt-1 text-sm text-muted-foreground">{run.result_summary}</p>
               </div>
             )}
 
             {retrievalDiagnostics && (
-              <div className="mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+              <div className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
                 <p className="text-sm font-medium text-foreground">{t('memoryRetrievalTitle')}</p>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <MemoryBucketCard
@@ -381,7 +381,7 @@ export function AgentRunDetail({
             )}
 
             {compactionPolicy && (
-              <div className="mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+              <div className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
                 <p className="text-sm font-medium text-foreground">{t('memoryCompactionTitle')}</p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {t('memoryCompactionThresholds', {
@@ -403,7 +403,7 @@ export function AgentRunDetail({
             )}
 
             {run.continuity_debug && (
-              <div className="mb-4 rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+              <div className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
                 <p className="text-sm font-medium text-foreground">{t('continuityDebugTitle')}</p>
                 <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <MetaCard label={t('sessionId')} value={run.continuity_debug.sessionId ?? '-'} />
@@ -464,7 +464,7 @@ export function AgentRunDetail({
                             {hasError ? (
                               <AlertTriangle className="size-3.5 text-destructive" />
                             ) : (
-                              <CheckCircle2 className="size-3.5 text-emerald-400/60" />
+                              <CheckCircle2 className="size-3.5 text-success/60" />
                             )}
                           </div>
                           {hasError && (
@@ -505,7 +505,7 @@ export function AgentRunDetail({
                     const durationMs = payload && typeof payload.duration_ms === 'number' ? payload.duration_ms : null;
 
                     return (
-                      <div key={entry.id} className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+                      <div key={entry.id} className="rounded-xl border border-white/8 bg-white/4 px-4 py-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant={outcome === 'denied' ? 'destructive' : outcome === 'failed' ? 'secondary' : 'success'}>
                             {outcome === 'denied' ? t('toolAuditOutcomeDenied') : outcome === 'failed' ? t('toolAuditOutcomeFailed') : t('toolAuditOutcomeAllowed')}
@@ -516,47 +516,47 @@ export function AgentRunDetail({
                         </div>
                         <div className="mt-2 grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
                           <div>
-                            <span className="text-xs uppercase tracking-[0.16em]">{t('toolAuditActorLabel')}</span>
+                            <span className="text-xs">{t('toolAuditActorLabel')}</span>
                             <p className="mt-1 text-foreground">{entry.actor_name ?? run.agent_name ?? t('unknownAgent')}</p>
                           </div>
                           <div>
-                            <span className="text-xs uppercase tracking-[0.16em]">{t('toolAuditEventLabel')}</span>
+                            <span className="text-xs">{t('toolAuditEventLabel')}</span>
                             <p className="mt-1 break-all text-foreground">{entry.event_type}</p>
                           </div>
                           {reasonCode ? (
                             <div>
-                              <span className="text-xs uppercase tracking-[0.16em]">{t('toolAuditReasonCodeLabel')}</span>
+                              <span className="text-xs">{t('toolAuditReasonCodeLabel')}</span>
                               <p className="mt-1 break-all text-foreground">{reasonCode}</p>
                             </div>
                           ) : null}
                           {durationMs != null ? (
                             <div>
-                              <span className="text-xs uppercase tracking-[0.16em]">{t('duration')}</span>
+                              <span className="text-xs">{t('duration')}</span>
                               <p className="mt-1 text-foreground">{formatDuration(durationMs)}</p>
                             </div>
                           ) : null}
                           {serverName ? (
                             <div>
-                              <span className="text-xs uppercase tracking-[0.16em]">{t('toolAuditServerLabel')}</span>
+                              <span className="text-xs">{t('toolAuditServerLabel')}</span>
                               <p className="mt-1 text-foreground">{serverName}</p>
                             </div>
                           ) : null}
                         </div>
                         {operatorReason ? (
-                          <div className="mt-3 rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{t('toolAuditOperatorReasonLabel')}</p>
+                          <div className="mt-3 rounded-xl border border-white/8 bg-white/3 px-3 py-3">
+                            <p className="text-xs font-semibold text-muted-foreground">{t('toolAuditOperatorReasonLabel')}</p>
                             <p className="mt-1 text-sm text-foreground">{operatorReason}</p>
                           </div>
                         ) : null}
                         {userReason ? (
-                          <div className="mt-3 rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{t('toolAuditUserReasonLabel')}</p>
+                          <div className="mt-3 rounded-xl border border-white/8 bg-white/3 px-3 py-3">
+                            <p className="text-xs font-semibold text-muted-foreground">{t('toolAuditUserReasonLabel')}</p>
                             <p className="mt-1 text-sm text-foreground">{userReason}</p>
                           </div>
                         ) : null}
                         {nextAction ? (
-                          <div className="mt-3 rounded-2xl border border-white/8 bg-white/3 px-3 py-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{t('toolAuditNextActionLabel')}</p>
+                          <div className="mt-3 rounded-xl border border-white/8 bg-white/3 px-3 py-3">
+                            <p className="text-xs font-semibold text-muted-foreground">{t('toolAuditNextActionLabel')}</p>
                             <p className="mt-1 text-sm text-foreground">{nextAction}</p>
                           </div>
                         ) : null}
@@ -582,7 +582,7 @@ export function AgentRunDetail({
 
 function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+    <div className="rounded-xl border border-white/8 bg-white/4 px-4 py-3">
       <div className="flex items-center gap-2 text-muted-foreground">
         {icon}
         <span className="text-xs">{label}</span>
@@ -594,7 +594,7 @@ function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string
 
 function MetaCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-white/8 bg-white/3 px-4 py-3">
+    <div className="rounded-xl border border-white/8 bg-white/3 px-4 py-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 break-all text-sm font-medium text-foreground">{value}</p>
     </div>
@@ -617,7 +617,7 @@ function MemoryBucketCard({
   injectedIdsLabel: string;
 }) {
   return (
-    <div className="rounded-2xl border border-white/8 bg-white/3 px-4 py-3 text-sm text-muted-foreground">
+    <div className="rounded-xl border border-white/8 bg-white/3 px-4 py-3 text-sm text-muted-foreground">
       <p className="font-medium text-foreground">{label}</p>
       <div className="mt-2 space-y-1">
         <p>{queriedLabel}: {bucket.queriedCount}</p>
@@ -631,7 +631,7 @@ function MemoryBucketCard({
 
 function CriteriaList({ title, items }: { title: string; items: string[] }) {
   return (
-    <div className="rounded-2xl border border-white/8 bg-white/3 px-4 py-3">
+    <div className="rounded-xl border border-white/8 bg-white/3 px-4 py-3">
       <p className="text-sm font-medium text-foreground">{title}</p>
       <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
         {items.map((item) => <li key={item}>{item}</li>)}
