@@ -17,51 +17,17 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { isInjectableEventType } from './inject-allowlist'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-
-/**
- * 04791bd9 AC1: 워커가 터미널 수동 런치라 process.env(SPRINTABLE_API_KEY/AGENT_API_KEY)가
- * 비어 SSE가 disabled→전군 dormant되던 결함의 robust fix. env가 비면 워크스페이스
- * `.mcp.json`(CLAUDE_PROJECT_DIR 또는 worker cwd)서 sprintable 서버 env 직독으로 fallback.
- * 수동 셸 export 없이 키가 잡혀 SSE가 열린다. 키는 로깅하지 않는다(노출 0).
- */
-function readMcpJsonEnv(): { apiKey?: string; apiUrl?: string; hasWebhook?: boolean } {
-  const candidates = [
-    process.env.CLAUDE_PROJECT_DIR ? join(process.env.CLAUDE_PROJECT_DIR, '.mcp.json') : null,
-    join(process.cwd(), '.mcp.json'),
-  ].filter((p): p is string => !!p)
-  for (const path of candidates) {
-    try {
-      const json = JSON.parse(readFileSync(path, 'utf8')) as {
-        mcpServers?: Record<string, { env?: Record<string, string> }>
-      }
-      const servers = json?.mcpServers ?? {}
-      const sprintable = servers.sprintable?.env ?? {}
-      const apiKey = sprintable.SPRINTABLE_API_KEY ?? sprintable.AGENT_API_KEY
-      const apiUrl = sprintable.SPRINTABLE_API_URL
-      // HAS_WEBHOOK: 어느 서버 env든 "true"면 webhook 구성됨(우리 군단 fakechat/sprintable entry).
-      const hasWebhook = Object.values(servers).some(
-        (s) => String((s?.env ?? {}).HAS_WEBHOOK ?? '').toLowerCase() === 'true',
-      )
-      if (apiKey || apiUrl || hasWebhook) return { apiKey, apiUrl, hasWebhook }
-    } catch {
-      // 후보 경로 부재/파싱 실패 → 다음 후보(graceful)
-    }
-  }
-  return {}
-}
-
-const mcpFallback = readMcpJsonEnv()
 
 const API_URL = (
-  process.env.SPRINTABLE_API_URL ?? mcpFallback.apiUrl ?? 'https://sprintable-backend-dev-57iommnikq-du.a.run.app'
+  process.env.SPRINTABLE_API_URL ?? 'https://sprintable-backend-dev-57iommnikq-du.a.run.app'
 ).replace(/\/$/, '')
-// env 우선 → .mcp.json fallback(워커 수동 런치 호환) → 빈 값(SSE disabled).
-const API_KEY = (process.env.SPRINTABLE_API_KEY ?? process.env.AGENT_API_KEY ?? mcpFallback.apiKey ?? '').trim()
+// AGENT_API_KEY fallback for compatibility with existing .mcp.json configs.
+// 04791bd9: 키 주입은 launch env(config/launch)가 담당 — plugin 프로세스↔workspace .mcp.json
+// path 링크 부재로 코드 path-fallback(#1708 readMcpJsonEnv)은 futile이라 revert(process.env-only).
+const API_KEY = (process.env.SPRINTABLE_API_KEY ?? process.env.AGENT_API_KEY ?? '').trim()
 // 선생님 설계: webhook 구성된 에이전트는 fakechat SSE off(이중 주입 방지·discord가 처리).
-// HAS_WEBHOOK="true"(env 또는 .mcp.json) → SSE 안 엶. webhook 없으면(오스카 등) on.
-const HAS_WEBHOOK = (process.env.HAS_WEBHOOK ?? '').toLowerCase() === 'true' || mcpFallback.hasWebhook === true
+// HAS_WEBHOOK="true"(launch env) → SSE 안 엶. webhook 없으면(오스카 등) on. harmless safety.
+const HAS_WEBHOOK = (process.env.HAS_WEBHOOK ?? '').toLowerCase() === 'true'
 
 type InboundMeta = {
   threadId: string
