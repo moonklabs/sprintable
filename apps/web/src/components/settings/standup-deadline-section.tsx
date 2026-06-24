@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
@@ -50,7 +51,7 @@ export function StandupDeadlineSection({ projectId }: Props) {
         <SectionCardBody>
           <div className="flex items-center gap-4">
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{t('standupDeadline')}</label>
+              <label className="text-xs font-medium text-muted-foreground">{t('standupDeadline')}</label>
               <input
                 type="time"
                 value={deadline}
@@ -59,7 +60,7 @@ export function StandupDeadlineSection({ projectId }: Props) {
               />
             </div>
             <Button size="sm" className="mt-4" onClick={handleSave} disabled={saving || !projectId}>
-              {saved ? '✓ 저장됨' : saving ? '저장 중...' : t('save')}
+              {saved ? <><Check className="size-4" />저장됨</> : saving ? '저장 중...' : t('save')}
             </Button>
           </div>
         </SectionCardBody>

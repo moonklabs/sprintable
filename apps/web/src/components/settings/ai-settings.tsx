@@ -203,7 +203,7 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
             className="w-full rounded border px-3 py-2 text-sm"
           />
           {requiresNewApiKey && (
-            <p className="mt-1 text-xs text-amber-600">{t('aiApiKeyProviderChangeRequired')}</p>
+            <p className="mt-1 text-xs text-warning">{t('aiApiKeyProviderChangeRequired')}</p>
           )}
         </div>
 
@@ -244,7 +244,7 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
         </div>
 
         {error && <p className="text-xs text-destructive">{error}</p>}
-        {saved && <p className="text-xs text-green-500">{t('aiSettingsSaved')}</p>}
+        {saved && <p className="text-xs text-success">{t('aiSettingsSaved')}</p>}
 
         <button
           onClick={handleSave}

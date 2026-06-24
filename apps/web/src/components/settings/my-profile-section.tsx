@@ -67,8 +67,8 @@ export function MyProfileSection() {
         </div>
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
-        <div className="grid gap-3 text-sm">
-          <div className="flex items-center gap-4">
+        <div className="divide-y divide-border text-sm">
+          <div className="flex items-center gap-4 py-2.5">
             <span className="w-20 shrink-0 text-muted-foreground">{t('profileName')}</span>
             {editing ? (
               <div className="flex items-center gap-2">
@@ -95,11 +95,11 @@ export function MyProfileSection() {
             )}
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 py-2.5">
             <span className="w-20 shrink-0 text-muted-foreground">{t('profileEmail')}</span>
             <span className="text-muted-foreground">{profile.email ?? '—'}</span>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 py-2.5">
             <span className="w-20 shrink-0 text-muted-foreground">{t('profileRole')}</span>
             <span>{profile.role}</span>
           </div>

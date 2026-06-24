@@ -47,7 +47,7 @@ export function WorkflowActiveLineView({ projectId }: { projectId?: string | nul
     <div className="space-y-3 rounded-xl border border-border bg-muted/10 p-3">
       <div className="flex items-center gap-2">
         <GitBranch className="size-4 shrink-0 text-muted-foreground" />
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('simActiveLine')}</p>
+        <p className="text-[11px] font-medium text-muted-foreground">{t('simActiveLine')}</p>
         <select
           value={entityType}
           onChange={(e) => setEntityType(e.target.value)}

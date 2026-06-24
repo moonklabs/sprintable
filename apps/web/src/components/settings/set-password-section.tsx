@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Check, Circle } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
 function checkPasswordRules(pw: string) {
@@ -90,7 +91,7 @@ export function SetPasswordSection() {
             placeholder="New password"
             autoComplete="new-password"
             className={`w-full rounded-lg border px-4 py-2 text-sm text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-primary ${
-              showRules && !isPasswordValid ? 'border-rose-400' : 'border-border'
+              showRules && !isPasswordValid ? 'border-destructive' : 'border-border'
             }`}
             value={password}
             onChange={(e) => { setPassword(e.target.value); setTouched(true); }}
@@ -101,7 +102,7 @@ export function SetPasswordSection() {
             placeholder="Confirm new password"
             autoComplete="new-password"
             className={`w-full rounded-lg border px-4 py-2 text-sm text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-primary ${
-              touched && confirm && !isConfirmValid ? 'border-rose-400' : 'border-border'
+              touched && confirm && !isConfirmValid ? 'border-destructive' : 'border-border'
             }`}
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
@@ -112,7 +113,7 @@ export function SetPasswordSection() {
             <ul className="space-y-1 text-xs">
               <PasswordRuleItem met={rules.length} label="At least 8 characters" />
               <li className={`flex items-center gap-1.5 ${categoriesMet >= 3 ? 'text-success' : 'text-muted-foreground'}`}>
-                <span>{categoriesMet >= 3 ? '✓' : '○'}</span>
+                {categoriesMet >= 3 ? <Check className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />}
                 <span>At least 3 of: uppercase, lowercase, digit, special character ({categoriesMet}/3)</span>
               </li>
             </ul>
@@ -138,7 +139,7 @@ export function SetPasswordSection() {
 function PasswordRuleItem({ met, label }: { met: boolean; label: string }) {
   return (
     <li className={`flex items-center gap-1.5 ${met ? 'text-success' : 'text-muted-foreground'}`}>
-      <span>{met ? '✓' : '○'}</span>
+      {met ? <Check className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />}
       <span>{label}</span>
     </li>
   );
