@@ -21,6 +21,8 @@ def _mock_doc() -> MagicMock:
     d.assignee_id = None
     d.status = "draft"  # E-DG S22: 신규 status 필드(MagicMock→DocResponse 검증 실패 방지)
     d.superseded_by = None  # E-DG S28: 신규 superseded_by(동일 패턴·MagicMock None 명시)
+    d.assignee = None  # doc-payload enrich: 신규 응답필드(MagicMock→DocResponse 검증 실패 방지·동일 패턴)
+    d.revisions = None  # doc-payload enrich: 신규 응답필드(동일 패턴)
     d.title = "Getting Started"
     d.slug = "getting-started"
     d.canonical_slug = "getting-started"  # 4dd399c6: property on real Doc; mock 명시 필수
@@ -123,6 +125,7 @@ async def test_get_doc_200():
     try:
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = _mock_doc()
+        mock_result.one.return_value = (0, None)  # doc-payload enrich: revisions count/latest agg.
         session.execute = AsyncMock(return_value=mock_result)
 
         async with client as c:
