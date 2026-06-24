@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target, Clock, Users, Calendar } from 'lucide-react';
+import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target, Clock, Users, Calendar, Ban } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -423,7 +423,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
 
   const handleClose = async () => {
     if (!selected) return;
-    if (!confirm(t('closeConfirm'))) return;
+    // 6580c655: planning(미시작) 종료=취소/discard 의미라 confirm 카피 분기. 엔드포인트는 동일
+    // POST /close(디디 BE #1698이 planning→closed=velocity 0 취소로 처리).
+    if (!confirm(selected.status === 'planning' ? t('cancelConfirm') : t('closeConfirm'))) return;
     setClosing(true);
     setActionError(null);
     try {
@@ -608,10 +610,18 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
 
       {/* Action buttons */}
       {selected.status === 'planning' ? (
-        <Button size="sm" className="mb-4 w-full" onClick={() => void handleActivate()} disabled={activating}>
-          <Play className="size-4" />
-          {activating ? '...' : t('activate')}
-        </Button>
+        // 6580c655: planning=활성화 + 취소(discard). 이전엔 활성화만이라 미시작 스프린트를 web서
+        // 종료 못 함(선생님 제보 Sprint 13 overdue) — BE #1698 planning→closed 경로에 취소 버튼 노출.
+        <div className="mb-4 flex flex-col gap-2">
+          <Button size="sm" className="w-full" onClick={() => void handleActivate()} disabled={activating}>
+            <Play className="size-4" />
+            {activating ? '...' : t('activate')}
+          </Button>
+          <Button size="sm" variant="outline" className="w-full" onClick={() => void handleClose()} disabled={closing}>
+            <Ban className="size-4" />
+            {closing ? '...' : t('cancelSprint')}
+          </Button>
+        </div>
       ) : null}
       {selected.status === 'active' ? (
         <Button size="sm" variant="outline" className="mb-4 w-full" onClick={() => void handleClose()} disabled={closing}>

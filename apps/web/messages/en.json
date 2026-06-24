@@ -2423,6 +2423,8 @@
     "activateError": "Failed to start sprint.",
     "closeError": "Failed to close sprint.",
     "closeConfirm": "Close this sprint? Incomplete stories will move to backlog.",
+    "cancelSprint": "Cancel Sprint",
+    "cancelConfirm": "Cancel this sprint that hasn't started? Stories return to the backlog.",
     "sprintStories": "Sprint Stories",
     "noSprintStories": "No stories assigned to this sprint.",
     "backlog": "Backlog",
