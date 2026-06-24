@@ -62,6 +62,23 @@ async def _resolve_org_project_ids(
     return project_ids
 
 
+def _build_mcp_config(effective_port: int, api_key_plaintext: str | None) -> dict:
+    """온보딩 응답의 mcp_config. E-MCP-HTTP prod 승격: env MCP_PUBLIC_URL(prod 게이트웨이 /mcp) 설정 시
+    streamable-http(type:"http"·per-request Bearer)·미설정(dev/로컬)이면 기존 localhost SSE(무회귀).
+    http 모드 실인증=per-request bearer(=발급 api_key)라 키 있을 때만 Authorization 헤더 포함."""
+    mcp_public_url = os.environ.get("MCP_PUBLIC_URL", "").strip()
+    if mcp_public_url:
+        server: dict = {"type": "http", "url": mcp_public_url}
+        if api_key_plaintext:
+            server["headers"] = {"Authorization": f"Bearer {api_key_plaintext}"}
+        return {"mcpServers": {"sprintable": server}}
+    return {
+        "mcpServers": {
+            "sprintable": {"type": "sse", "url": f"http://localhost:{effective_port}/sse"}
+        }
+    }
+
+
 @router.post("", status_code=201)
 async def create_org_agent(
     body: OrgAgentCreate,
@@ -107,14 +124,7 @@ async def create_org_agent(
     effective_port = member.fakechat_port or int(os.environ.get("FAKECHAT_PORT", _FAKECHAT_BASE_PORT))
     response["fakechat_port"] = effective_port
     response["api_key_created"] = bool(api_key_plaintext)
-    response["mcp_config"] = {
-        "mcpServers": {
-            "sprintable": {
-                "type": "sse",
-                "url": f"http://localhost:{effective_port}/sse",
-            }
-        }
-    }
+    response["mcp_config"] = _build_mcp_config(effective_port, api_key_plaintext)
     if api_key_plaintext:
         response["api_key"] = api_key_plaintext
     return response
