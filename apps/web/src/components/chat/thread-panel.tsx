@@ -114,7 +114,7 @@ export function ThreadPanel({
 
       {/* AC9: 원본 메시지 */}
       <div className="flex-shrink-0 border-b border-border/60 bg-muted/30 px-4 py-3">
-        <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">원본 메시지</p>
+        <p className="mb-1 text-[10px] font-medium text-muted-foreground">원본 메시지</p>
         <ChatBubble
           message={parentMessage}
           isMine={parentMessage.created_by === currentTeamMemberId}

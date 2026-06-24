@@ -503,9 +503,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           {typingAgents.length > 0 && (
             <div className="flex flex-shrink-0 items-center gap-2 px-4 py-1.5 text-xs text-muted-foreground" aria-live="polite">
               <span className="flex items-center gap-0.5" aria-hidden>
-                <span className="size-1.5 rounded-full bg-brand motion-safe:animate-bounce" />
-                <span className="size-1.5 rounded-full bg-brand motion-safe:animate-bounce [animation-delay:150ms]" />
-                <span className="size-1.5 rounded-full bg-brand motion-safe:animate-bounce [animation-delay:300ms]" />
+                <span className="size-1.5 rounded-full bg-muted-foreground motion-safe:animate-bounce" />
+                <span className="size-1.5 rounded-full bg-muted-foreground motion-safe:animate-bounce [animation-delay:150ms]" />
+                <span className="size-1.5 rounded-full bg-muted-foreground motion-safe:animate-bounce [animation-delay:300ms]" />
               </span>
               <span>
                 {typingAgents.length === 1

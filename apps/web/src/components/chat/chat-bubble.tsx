@@ -177,7 +177,7 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
           <div className="relative h-7 w-7 flex-shrink-0">
             <div className={`flex h-full w-full items-center justify-center rounded-full text-xs font-medium ${
               isAgent
-                ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300'
+                ? 'bg-accent-claim/15 text-accent-claim'
                 : isMine
                   ? 'bg-primary/20 text-primary'
                   : 'bg-muted text-muted-foreground'
@@ -200,8 +200,8 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] font-medium text-muted-foreground">{displayName}</span>
               {isAgent && (
-                <span className="rounded-sm bg-violet-100 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
-                  AI
+                <span className="rounded-sm bg-accent-claim/15 px-1 py-0.5 text-[9px] font-medium text-accent-claim">
+                  Bot
                 </span>
               )}
             </div>
@@ -209,18 +209,18 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
 
           {/* Content — S8: command 전용 버블(brand·mono·⌘ 태그) vs 일반(리터럴은 dequote 표시) */}
           {isCmd ? (
-            <div className={`rounded-2xl border border-brand/30 bg-brand/10 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
-              <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-brand">
+            <div className={`rounded-xl border border-info/30 bg-info/8 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
+              <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-info">
                 <Terminal className="h-3 w-3" aria-hidden />
                 {t('commandTag')}
               </div>
               <code className="block whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm">
-                <span className="text-brand">/{cmdName}</span>
+                <span className="text-info">/{cmdName}</span>
                 <span className="text-muted-foreground">{message.content.slice(1 + (cmdName?.length ?? 0))}</span>
               </code>
             </div>
           ) : (
-            <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${
+            <div className={`rounded-xl px-3.5 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${
               isMine
                 ? 'rounded-tr-sm bg-primary text-primary-foreground'
                 : 'rounded-tl-sm bg-muted text-foreground'
