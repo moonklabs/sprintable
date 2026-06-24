@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { ShieldCheck } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
@@ -96,7 +97,7 @@ export function TwoFactorSection() {
     <SectionCard>
       <SectionCardHeader>
         <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">🔐 {t('twoFactorTitle')}</h2>
+          <h2 className="flex items-center gap-1.5 text-base font-semibold text-foreground"><ShieldCheck className="size-4" />{t('twoFactorTitle')}</h2>
           <p className="text-sm text-muted-foreground">
             {state === 'enabled' ? t('twoFactorActive') : t('twoFactorDescription')}
           </p>
@@ -104,7 +105,7 @@ export function TwoFactorSection() {
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
         {message && (
-          <p className={`text-sm ${message.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>{message.text}</p>
+          <p className={`text-sm ${message.type === 'success' ? 'text-success' : 'text-destructive'}`}>{message.text}</p>
         )}
 
         {state === 'disabled' && (
@@ -157,14 +158,14 @@ export function TwoFactorSection() {
               inputMode="numeric"
               maxLength={6}
               placeholder="000000"
-              className="w-full rounded-lg border border-border bg-background px-4 py-2 text-center font-mono tracking-widest text-foreground focus:outline-none focus:ring-2 focus:ring-rose-500"
+              className="w-full rounded-lg border border-border bg-background px-4 py-2 text-center font-mono tracking-widest text-foreground focus:outline-none focus:ring-2 focus:ring-destructive"
               value={otpCode}
               onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
             />
             <button
               onClick={handleDisable}
               disabled={busy || otpCode.length !== 6}
-              className="rounded-lg border border-rose-500/40 px-4 py-2 text-sm font-medium text-rose-400 hover:border-rose-400 hover:text-rose-300 disabled:opacity-50"
+              className="rounded-lg border border-destructive px-4 py-2 text-sm font-medium text-destructive hover:border-destructive hover:text-destructive disabled:opacity-50"
             >
               {busy ? '...' : t('twoFactorDisable')}
             </button>

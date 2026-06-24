@@ -234,7 +234,7 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
           {/* Key input form */}
           <div className="space-y-3">
             <div>
-              <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
                 {t('providerLabel')}
               </label>
               <OperatorDropdownSelect
@@ -250,7 +250,7 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
             </div>
 
             <div>
-              <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
                 {t('apiKeyLabel')}
               </label>
               <div className="flex gap-2">
@@ -280,7 +280,7 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
 
             {requiresBaseUrl ? (
               <div>
-                <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
                   {t('baseUrlLabel')}
                 </label>
                 <OperatorInput
@@ -343,8 +343,8 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
       {/* Delete confirmation dialog */}
       {showDeleteConfirm ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-muted p-6 shadow-xl backdrop-blur-xl">
-            <h3 className="text-lg font-semibold text-rose-100">{t('deleteConfirmTitle')}</h3>
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-muted p-6 shadow-xl backdrop-blur-xl">
+            <h3 className="text-lg font-semibold text-destructive">{t('deleteConfirmTitle')}</h3>
             <p className="mt-2 text-sm text-muted-foreground">{t('deleteConfirmDesc')}</p>
             <div className="mt-6 flex gap-3">
               <Button variant="glass" className="flex-1" onClick={() => setShowDeleteConfirm(false)}>
