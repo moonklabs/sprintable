@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Lock, RotateCcw } from 'lucide-react';
+import { Lock, RotateCcw, Check, Pause, Ban, type LucideIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -34,12 +34,18 @@ const WORK_TYPES: WorkType[] = ['done', 'merge'];
 const ACTOR_TYPES: ActorType[] = ['agent', 'human'];
 const LEVELS: Level[] = ['auto', 'ask', 'block'];
 
-// GateEvidence DECISION_META 미러: auto→success ✓ / ask→warning ⏸ / block→destructive ⛔.
-const LEVEL_META: Record<Level, { selected: string; badge: 'success' | 'warning' | 'destructive'; mark: string; labelKey: string }> = {
-  auto: { selected: 'border-success-border bg-success-tint text-success', badge: 'success', mark: '✓', labelKey: 'levelAuto' },
-  ask: { selected: 'border-warning-border bg-warning-tint text-warning', badge: 'warning', mark: '⏸', labelKey: 'levelAsk' },
-  block: { selected: 'border-destructive-border bg-destructive-tint text-destructive', badge: 'destructive', mark: '⛔', labelKey: 'levelBlock' },
+// GateEvidence DECISION_META 미러: auto→success Check / ask→warning Pause / block→destructive Ban (글리프→lucide).
+const LEVEL_META: Record<Level, { selected: string; badge: 'success' | 'warning' | 'destructive'; mark: LucideIcon; labelKey: string }> = {
+  auto: { selected: 'border-success-border bg-success-tint text-success', badge: 'success', mark: Check, labelKey: 'levelAuto' },
+  ask: { selected: 'border-warning-border bg-warning-tint text-warning', badge: 'warning', mark: Pause, labelKey: 'levelAsk' },
+  block: { selected: 'border-destructive-border bg-destructive-tint text-destructive', badge: 'destructive', mark: Ban, labelKey: 'levelBlock' },
 };
+
+// LEVEL_META.mark(lucide) 렌더 — 글리프 span 대체.
+function LevelMark({ level, className }: { level: Level; className?: string }) {
+  const M = LEVEL_META[level].mark;
+  return <M aria-hidden className={className} />;
+}
 
 // 안전 하한(S-GATE-3 BE 강제): merge 는 최소 'ask' — 'auto' 비활성(UI 표현만, BE 가 우회 차단).
 const isLevelDisabled = (workType: WorkType, level: Level): boolean => workType === 'merge' && level === 'auto';
@@ -177,7 +183,7 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           {LEVELS.map((lv) => (
             <span key={lv} className="inline-flex items-center gap-1">
-              <span aria-hidden>{LEVEL_META[lv].mark}</span>{t(LEVEL_META[lv].labelKey)}
+              <LevelMark level={lv} className="mr-0.5 inline size-3" />{t(LEVEL_META[lv].labelKey)}
             </span>
           ))}
         </div>
@@ -255,14 +261,14 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
                                     floorDisabled && 'opacity-40',
                                   )}
                                 >
-                                  <span aria-hidden>{LEVEL_META[lv].mark}</span>{t(LEVEL_META[lv].labelKey)}
+                                  <LevelMark level={lv} className="mr-0.5 inline size-3" />{t(LEVEL_META[lv].labelKey)}
                                 </Button>
                               );
                             })}
                           </div>
                         ) : cell ? (
                           <Badge variant={LEVEL_META[cell.level].badge} className="shrink-0">
-                            <span aria-hidden className="mr-0.5">{LEVEL_META[cell.level].mark}</span>
+                            <LevelMark level={cell.level} className="mr-0.5 inline size-3" />
                             {t(LEVEL_META[cell.level].labelKey)}
                           </Badge>
                         ) : (

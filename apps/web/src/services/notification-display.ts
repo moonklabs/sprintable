@@ -1,19 +1,25 @@
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
+import {
+  FileText, ClipboardList, Trophy, Info, AlertTriangle, Wrench,
+  CheckCircle2, Flag, User, Mail, Bot, type LucideIcon,
+} from 'lucide-react';
 
-export const NOTIFICATION_TYPE_ICONS: Record<string, string> = {
-  story: '📌',
-  task: '📋',
-  reward: '🏆',
-  info: 'ℹ️',
-  warning: '⚠️',
-  system: '🔧',
-  task_assigned: '📋',
-  task_completed: '✅',
-  sprint_closed: '🏁',
-  standup_reminder: '🧍',
-  story_assigned: '📌',
-  invitation: '✉️',
-  agent_joined: '🤖',
+// 알림 type 아이콘 — 장식 emoji(📌📋🏆ℹ️…)를 lucide로 충실 변환(글리프 0·다크 안전).
+// story=FileText: 채팅 ENTITY_ICONS와 cross-surface 부품 언어 일관(같은 story=같은 아이콘·유나 픽셀 콜).
+export const NOTIFICATION_TYPE_ICONS: Record<string, LucideIcon> = {
+  story: FileText,
+  task: ClipboardList,
+  reward: Trophy,
+  info: Info,
+  warning: AlertTriangle,
+  system: Wrench,
+  task_assigned: ClipboardList,
+  task_completed: CheckCircle2,
+  sprint_closed: Flag,
+  standup_reminder: User,
+  story_assigned: FileText,
+  invitation: Mail,
+  agent_joined: Bot,
 };
 
 export const INBOX_FILTER_TYPES = ['', ...NOTIFICATION_TYPES] as const;

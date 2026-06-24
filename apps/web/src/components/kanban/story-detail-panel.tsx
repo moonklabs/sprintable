@@ -801,7 +801,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   entityType="story"
                   entityId={story.id}
                   projectId={projectId}
-                  currentAssigneeId={localAssigneeIds.length > 1 ? undefined : story.assignee_id}
+                  currentAssigneeId={localAssigneeIds.length > 1 ? undefined : (localAssigneeIds[0] ?? story.assignee_id)}
                   onAssigneePatched={(aid) => onStoryUpdate?.({ ...story, assignee_id: aid })}
                 />
               </div>

@@ -5,20 +5,22 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ExternalLink, X } from 'lucide-react';
+import { ExternalLink, X, FileText, File, Layers, CheckSquare, Hash, type LucideIcon } from 'lucide-react';
 
-export const ENTITY_ICONS: Record<string, string> = {
-  story: '📋',
-  doc: '📄',
-  epic: '🎯',
-  task: '✅',
+// 글리프(📋📄🎯✅) → lucide. 타입 식별=아이콘·색은 신호 토큰만(다크 무파손).
+export const ENTITY_ICONS: Record<string, LucideIcon> = {
+  story: FileText,
+  doc: File,
+  epic: Layers,
+  task: CheckSquare,
 };
 
+// 엔티티 신호 토큰(하드코딩 blue/purple/emerald/slate 제거·다크 자동 정합). 타입별 절제 틴트.
 const ENTITY_COLORS: Record<string, string> = {
-  story: 'border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100',
-  doc: 'border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100',
-  epic: 'border-purple-200 bg-purple-50 text-purple-900 dark:border-purple-800 dark:bg-purple-950 dark:text-purple-100',
-  task: 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100',
+  story: 'border-info/30 bg-info/8 text-foreground',
+  doc: 'border-border bg-muted/40 text-foreground',
+  epic: 'border-secondary bg-secondary/40 text-foreground',
+  task: 'border-success/30 bg-success/8 text-foreground',
 };
 
 export function getEntityHref(entityType: string, entityId: string): string | null {
@@ -157,7 +159,7 @@ function EntityPreviewModal({
     if (e.target === overlayRef.current) onClose();
   }, [onClose]);
 
-  const icon = ENTITY_ICONS[entityType] ?? '#';
+  const Icon = ENTITY_ICONS[entityType] ?? Hash;
   const colorClass = ENTITY_COLORS[entityType] ?? 'border-border bg-muted text-foreground';
   const label = title ?? entityId;
 
@@ -171,7 +173,7 @@ function EntityPreviewModal({
         {/* Header */}
         <div className="flex-shrink-0 flex items-start gap-3 px-6 pt-5 pb-3 border-b border-border">
           <div className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm ${colorClass} flex-1 min-w-0`}>
-            <span>{icon}</span>
+            <Icon className="size-4 shrink-0" />
             <span className="font-semibold truncate">{label}</span>
             {status ? (
               <span className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{status}</span>
@@ -221,7 +223,7 @@ export function EmbedCard({ entity_type, entity_id, title, status }: EmbedCardDa
   const [showModal, setShowModal] = useState(false);
   const [navigating, setNavigating] = useState(false);
   const router = useRouter();
-  const icon = ENTITY_ICONS[entity_type] ?? '#';
+  const Icon = ENTITY_ICONS[entity_type] ?? Hash;
   const colorClass = ENTITY_COLORS[entity_type] ?? 'border-border bg-muted text-foreground';
   const href = getEntityHref(entity_type, entity_id);
   const label = title ?? entity_id;
@@ -240,7 +242,7 @@ export function EmbedCard({ entity_type, entity_id, title, status }: EmbedCardDa
 
   const inner = (
     <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${colorClass}`}>
-      <span>{icon}</span>
+      <Icon className="size-4 shrink-0" />
       <span className="font-medium">{label}</span>
       {status ? (
         <span className="ml-auto rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{status}</span>
@@ -297,12 +299,12 @@ export function EntityChip({
   href: string | null;
 }) {
   const [showModal, setShowModal] = useState(false);
-  const icon = ENTITY_ICONS[entityType] ?? '#';
+  const Icon = ENTITY_ICONS[entityType] ?? Hash;
   const colorClass = ENTITY_COLORS[entityType] ?? 'border-border bg-muted text-foreground';
 
   const inner = (
     <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs font-medium ${colorClass}`}>
-      <span>{icon}</span>
+      <Icon className="size-3 shrink-0" />
       <span>{label}</span>
     </span>
   );

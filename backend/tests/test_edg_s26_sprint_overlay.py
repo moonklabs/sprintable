@@ -28,7 +28,7 @@ def test_sprint_fsm_valid_transitions():
     assert is_valid_sprint_transition("active", "review")
     assert is_valid_sprint_transition("review", "closed")
     assert is_valid_sprint_transition("closed", "archived")  # native
-    assert not is_valid_sprint_transition("planning", "closed")  # 직행 금지
+    assert is_valid_sprint_transition("planning", "closed")  # 시작 전 폐기(cancel/discard·velocity 0·non-gated)
     assert not is_valid_sprint_transition("closed", "active")    # 역전이 금지
 
 
@@ -143,4 +143,33 @@ async def test_default_off_activate_any_caller():
         agent = ResolvedMember(id=uuid.uuid4(), user_id=None, name="a", type="agent", role="member", org_id=org)
         result = await transition_sprint(s, org, agent, sprint.id, "active")  # agent·default-off→활성
         assert result.status == "active"  # human-only inline 없음(enforcing gate가 담당)
+    await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_planning_close_discard_velocity_zero():
+    """prod fix: planning→closed = cancel/discard. repo.close(active|review 전용·velocity 집계) 우회 →
+    discard 경로로 status=closed·velocity 0(한번도 안 뛴 스프린트 outcome 채점 skip). non-gated."""
+    from app.services.sprint import transition_sprint
+    from app.services.member_resolver import ResolvedMember
+    from app.models.pm import Sprint
+    from app.models.project import Project
+    from sqlalchemy import select
+    engine, Session = await _session()
+    async with Session() as s:
+        org, proj = uuid.uuid4(), uuid.uuid4()
+        s.add(Project(id=proj, org_id=org, name="p"))
+        await s.flush()
+        sprint = Sprint(org_id=org, project_id=proj, title="sp", status="planning")
+        s.add(sprint)
+        await s.commit()
+        caller = ResolvedMember(id=uuid.uuid4(), user_id=None, name="h", type="human", role="member", org_id=org)
+        result = await transition_sprint(s, org, caller, sprint.id, "closed")  # planning→closed discard
+        await s.commit()
+        st, vel = (await s.execute(
+            select(Sprint.status, Sprint.velocity).where(Sprint.id == sprint.id)
+        )).one()
+        assert result.status == "closed" and st == "closed"
+        assert vel == 0  # 안 뛴 스프린트 → velocity 0(채점 skip)
     await engine.dispose()

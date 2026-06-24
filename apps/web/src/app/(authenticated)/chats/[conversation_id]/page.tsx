@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Bell, BellOff, ChevronLeft, UserPlus } from 'lucide-react';
+import { Bell, BellOff, ChevronLeft, UserPlus, Pencil } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChatView } from '@/components/chat/chat-view';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
@@ -182,7 +182,7 @@ export default function ConversationPage() {
                 aria-label="방 이름 편집"
               >
                 <span className="min-w-0 truncate text-sm font-medium text-foreground">{headerTitle}</span>
-                <span className="flex-shrink-0 text-xs text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100">✎</span>
+                <Pencil className="size-3 flex-shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100" aria-hidden />
               </button>
             ) : (
               <span className="min-w-0 truncate text-sm font-medium text-foreground">{headerTitle}</span>

@@ -4,16 +4,72 @@ from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import DocComment, DocRevision
+from app.models.member import Member
 from app.models.team import TeamMember
 from app.repositories.doc import DocRepository
 from app.services.member_resolver import canonicalize_member_id
-from app.schemas.doc import DocCreate, DocResponse, DocSummaryResponse, DocUpdate, ShareStatusResponse
+from app.schemas.doc import (
+    DocCreate,
+    DocMemberSummary,
+    DocResponse,
+    DocRevisionsSummary,
+    DocSummaryResponse,
+    DocUpdate,
+    ShareStatusResponse,
+)
+
+
+async def _resolve_doc_extras(
+    doc, session: AsyncSession
+) -> tuple[DocMemberSummary | None, DocRevisionsSummary]:
+    """단건 doc 의 담당자 member 요약 + 수정이력 요약 해소(FE 이중 fetch 제거 공용 코어).
+
+    doc.org_id 스코프(anti-IDOR·caller 는 이미 doc 접근 검증)·N+1 0(member 1쿼리 + revisions agg 1쿼리)·
+    assignee 없으면 member 쿼리 skip·member 미발견(타org/삭제/미존재)은 None(노출 0). detail(GET /{id})과
+    slug-query 단건 경로 양쪽에서 동일 코어 사용 — FE 실 소비 경로(slug-query)도 enrich되도록."""
+    assignee: DocMemberSummary | None = None
+    if doc.assignee_id is not None:
+        m = (
+            await session.execute(
+                select(Member.id, Member.name, Member.avatar_url).where(
+                    Member.id == doc.assignee_id,
+                    Member.org_id == doc.org_id,        # org-scope(anti-IDOR).
+                    Member.deleted_at.is_(None),
+                )
+            )
+        ).first()
+        if m is not None:
+            assignee = DocMemberSummary(id=m[0], name=m[1], avatar_url=m[2])
+    cnt, latest = (
+        await session.execute(
+            select(func.count(DocRevision.id), func.max(DocRevision.created_at)).where(
+                DocRevision.doc_id == doc.id,
+                DocRevision.org_id == doc.org_id,        # org-scope.
+            )
+        )
+    ).one()
+    return assignee, DocRevisionsSummary(count=cnt or 0, latest_at=latest)
+
+
+async def _enrich_doc_response(doc, session: AsyncSession) -> DocResponse:
+    """detail(GET /{id}) 응답에 담당자/수정이력 요약 동봉. additive·기존 필드 불변."""
+    resp = DocResponse.model_validate(doc)
+    resp.assignee, resp.revisions = await _resolve_doc_extras(doc, session)
+    return resp
+
+
+async def _enrich_doc_summary(doc, session: AsyncSession) -> DocSummaryResponse:
+    """slug-query 단건 경로 응답(DocSummaryResponse)에 담당자/수정이력 요약 동봉. FE 상세 fetchDoc 이
+    GET /api/docs?slug= 를 쓰므로 이 경로도 enrich 해야 #1693 payload 소비가 실제로 흐른다. additive."""
+    resp = DocSummaryResponse.model_validate(doc)
+    resp.assignee, resp.revisions = await _resolve_doc_extras(doc, session)
+    return resp
 
 router = APIRouter(prefix="/api/v2/docs", tags=["docs"])
 
@@ -49,7 +105,9 @@ async def list_docs(
         if doc is None:
             # 4dd399c6 AC3: live 미스 → alias fallback. 응답 canonical_slug≠요청 slug면 FE가 router.replace.
             doc = await repo.get_by_alias(project_id, slug)
-        return [DocSummaryResponse.model_validate(doc)] if doc else []
+        # slug 단건 경로 = FE 문서 상세 fetchDoc 의 실 경로 → detail 과 동일하게 enrich(담당자/수정이력).
+        # 일반 list/tree/search 분기는 enrich 안 함(다건 N+1 회피·페이로드 과확장 금지).
+        return [await _enrich_doc_summary(doc, repo.session)] if doc else []
 
     if tags and project_id:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
@@ -227,7 +285,9 @@ async def get_doc(
         )
         if member.scalar_one_or_none() is None:
             raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
-    return DocResponse.model_validate(doc)
+    # doc 상세(detail view)만 enrich: 담당자 member 요약 + 수정이력 요약 동봉(FE 이중 fetch 제거).
+    # create/update/transition 은 write-path 라 plain(추가 쿼리 0·기존 테스트 broad-mock 무파손).
+    return await _enrich_doc_response(doc, session)
 
 
 @router.patch("/{id}", response_model=DocResponse)

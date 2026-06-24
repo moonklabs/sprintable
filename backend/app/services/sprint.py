@@ -74,6 +74,11 @@ async def transition_sprint(
     if to_status == "active":
         return await repo.activate(sprint_id)   # planning→active·1-active 제약
     if to_status == "closed":
+        # planning→closed = cancel/discard(한번도 안 뛴 스프린트). repo.close 는 active|review 만 수용하고
+        # velocity 집계 + outcome 채점(E-OUTCOME-LOOP)을 하는데, 실행 안 된 스프린트를 가설 채점하면
+        # 오측정 → discard 경로로 velocity 0 만 세팅(채점 skip). active|review 는 기존 repo.close 보존.
+        if sprint.status == "planning":
+            return await repo.update(sprint_id, status="closed", velocity=0)
         return await repo.close(sprint_id)      # active|review→closed·velocity 집계(repo.close=closed set)
     # review·archived: 특수 로직 없음 → inline.
     updated = await repo.update(sprint_id, status=to_status)
