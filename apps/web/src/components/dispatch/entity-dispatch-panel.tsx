@@ -40,6 +40,12 @@ export function EntityDispatchPanel({
   // f5ae74e4: Dispatch(이벤트 전달)를 Kickoff(킥오프·워크플로우 규칙)와 라벨·툴팁으로 명확히 구분.
   const dispatchTitle = !assigneeId ? t('dispatchNeedsAssignee') : t('dispatchTooltip');
 
+  // 84f57f97 fix①: currentAssigneeId prop 변경(낙관 배정·재fetch) 시 local assigneeId 동기화.
+  // 미동기화 시 stale 상태로 dispatch→BE가 직전 배정 못 봐 core flow 막힘(prod 버그 근본 1).
+  useEffect(() => {
+    setAssigneeId(currentAssigneeId ?? '');
+  }, [currentAssigneeId]);
+
   useEffect(() => {
     if (!moreOpen) return;
     const handler = (e: MouseEvent | TouchEvent) => {
@@ -69,16 +75,21 @@ export function EntityDispatchPanel({
     if (!assigneeId || dispatching) return;
     setDispatching(true);
     try {
-      const patchPath = entityType === 'doc' ? `/api/docs/${entityId}` : `/api/epics/${entityId}`;
-      if (entityType !== 'story') {
-        const patchRes = await fetch(patchPath, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assignee_id: assigneeId }),
-        });
-        if (!patchRes.ok) throw new Error('assignee patch failed');
-        onAssigneePatched?.(assigneeId);
-      }
+      // 84f57f97 fix②: dispatch 前 assignee를 전 entity type 영속화(이전엔 story만 스킵→미영속→
+      // BE dispatch가 담당자 못 봐 core flow 막힘). story=assignee_ids 배열·doc/epic=assignee_id.
+      const patchPath = entityType === 'doc' ? `/api/docs/${entityId}`
+        : entityType === 'epic' ? `/api/epics/${entityId}`
+        : `/api/stories/${entityId}`;
+      const patchBody = entityType === 'story'
+        ? { assignee_ids: [assigneeId] }
+        : { assignee_id: assigneeId };
+      const patchRes = await fetch(patchPath, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patchBody),
+      });
+      if (!patchRes.ok) throw new Error('assignee patch failed');
+      onAssigneePatched?.(assigneeId);
 
       const dispatchRes = await fetch('/api/dispatch', {
         method: 'POST',
