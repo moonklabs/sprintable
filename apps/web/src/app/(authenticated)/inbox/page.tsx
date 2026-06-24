@@ -322,6 +322,26 @@ export default function InboxPage() {
     return items.sort((a, b) => b.sortTime - a.sortTime);
   }, [notifications]);
 
+  // 목업 ③: inboxItems를 날짜 버킷(오늘/어제/날짜)으로 묶어 section 라벨 삽입(dense list 가독).
+  const inboxSections = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfYesterday = startOfToday - 86400000;
+    const labelFor = (time: number) => {
+      if (time >= startOfToday) return t('dateToday');
+      if (time >= startOfYesterday) return t('dateYesterday');
+      return new Date(time).toLocaleDateString();
+    };
+    const sections: { label: string; items: InboxItem[] }[] = [];
+    for (const item of inboxItems) {
+      const label = labelFor(item.sortTime);
+      const last = sections[sections.length - 1];
+      if (last && last.label === label) last.items.push(item);
+      else sections.push({ label, items: [item] });
+    }
+    return sections;
+  }, [inboxItems, t]);
+
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const toggleGroup = (key: string) => setExpandedGroups((prev) => {
     const next = new Set(prev);
@@ -415,11 +435,11 @@ export default function InboxPage() {
         {/* Left: notification list. max-md master-detail (efcb3840 ⓑ): full-width list,
             hidden once a detail is open so the detail can take the screen (md+ unchanged). */}
         <div className={`flex w-full min-w-[320px] flex-col border-r border-border/80 md:max-w-[420px] max-md:min-w-0 ${selectedId ? 'max-md:hidden' : ''}`}>
-          <div className="flex-1 overflow-y-auto px-3 py-3">
+          <div className="flex-1 overflow-y-auto py-2">
             {loading ? (
-              <div className="space-y-2">
+              <div className="space-y-2 px-3 pt-2">
                 {[1, 2, 3, 4, 5].map((i) => (
-                  <div key={i} className="h-16 animate-pulse rounded-xl bg-muted" />
+                  <div key={i} className="h-14 animate-pulse rounded-lg bg-muted" />
                 ))}
               </div>
             ) : notifications.length === 0 ? (
@@ -427,111 +447,112 @@ export default function InboxPage() {
                 <p className="text-sm text-muted-foreground">{t('noNotifications')}</p>
               </div>
             ) : (
-              <div className="space-y-1.5">
-                {inboxItems.map((item) => {
-                  // f2ec5395: status_changed 그룹 엔트리(접힘 default·chevron 토글·헤더클릭=내비+일괄읽음).
-                  if (item.kind === 'group') {
-                    const expanded = expandedGroups.has(item.key);
-                    return (
-                      <div
-                        key={`group-${item.key}`}
-                        className={`rounded-xl border ${item.hasUnread ? 'border-brand/18 bg-brand/8' : 'border-white/8 bg-muted/55'}`}
-                      >
-                        <div className="flex items-stretch">
-                          <button
-                            type="button"
-                            onClick={() => toggleGroup(item.key)}
-                            aria-expanded={expanded}
-                            aria-label={expanded ? t('collapseHistory') : t('expandHistory')}
-                            className="flex shrink-0 items-center px-2 text-muted-foreground transition hover:text-foreground"
-                          >
-                            {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void openGroup(item)}
-                            className="flex min-w-0 flex-1 items-start gap-3 py-3 pr-3 text-left"
-                          >
-                            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/6 text-muted-foreground">
-                              <NotifIcon type={item.latest.type} fallback={Bell} className="size-4" />
-                            </div>
-                            <div className="min-w-0 flex-1 space-y-1">
-                              <div className="flex items-start justify-between gap-2">
-                                {/* f2ec5395 fix: 카운트 칩을 truncate <p> 밖 shrink-0 형제로 — 긴 title 잘려도 칩 항상 표시(AC1 핵심) */}
-                                <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                                  <p className={`min-w-0 truncate text-sm ${item.hasUnread ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
-                                    {item.latest.title}
-                                  </p>
-                                  <span className="shrink-0 rounded-full border border-brand/30 bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
-                                    {t('statusChangeCount', { count: item.count })}
-                                  </span>
+              inboxSections.map((section) => (
+                <div key={section.label}>
+                  {/* 목업 ③: 날짜 section 라벨(calm·NOT uppercase) */}
+                  <p className="px-3 pt-3 pb-1 text-[11.5px] font-medium text-muted-foreground">{section.label}</p>
+                  {/* 목업 ④: dense rows — per-item 카드 테두리 제거·divide-y로 구분·content-dominant */}
+                  <div className="divide-y divide-border/60">
+                    {section.items.map((item) => {
+                      // f2ec5395: status_changed 그룹 엔트리(접힘 default·chevron 토글·헤더클릭=내비+일괄읽음).
+                      if (item.kind === 'group') {
+                        const expanded = expandedGroups.has(item.key);
+                        return (
+                          <div key={`group-${item.key}`}>
+                            <div className="relative flex items-stretch transition hover:bg-muted/40">
+                              {item.hasUnread ? <span className="absolute left-0 top-0 h-full w-0.5 bg-brand" aria-hidden /> : null}
+                              <button
+                                type="button"
+                                onClick={() => toggleGroup(item.key)}
+                                aria-expanded={expanded}
+                                aria-label={expanded ? t('collapseHistory') : t('expandHistory')}
+                                className="flex shrink-0 items-center px-2 text-muted-foreground transition hover:text-foreground"
+                              >
+                                {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void openGroup(item)}
+                                className="flex min-w-0 flex-1 items-start gap-3 py-2.5 pr-3 text-left"
+                              >
+                                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/6 text-muted-foreground">
+                                  <NotifIcon type={item.latest.type} fallback={Bell} className="size-4" />
                                 </div>
-                                <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(item.latest.created_at)}</span>
-                              </div>
-                              {item.hasUnread ? (
-                                <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand" />
-                              ) : null}
+                                <div className="min-w-0 flex-1 space-y-0.5">
+                                  <div className="flex items-start justify-between gap-2">
+                                    {/* f2ec5395 fix: 카운트 칩을 truncate <p> 밖 shrink-0 형제로 — 긴 title 잘려도 칩 항상 표시 */}
+                                    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                                      <p className={`min-w-0 truncate text-sm ${item.hasUnread ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
+                                        {item.latest.title}
+                                      </p>
+                                      <span className="shrink-0 rounded-full border border-brand/30 bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
+                                        {t('statusChangeCount', { count: item.count })}
+                                      </span>
+                                    </div>
+                                    <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(item.latest.created_at)}</span>
+                                  </div>
+                                </div>
+                              </button>
                             </div>
-                          </button>
-                        </div>
-                        {expanded ? (
-                          <div className="space-y-1.5 border-t border-white/8 py-2 pl-9 pr-3">
-                            {item.notifications.map((n, idx) => (
-                              <div key={n.id} className="flex items-center gap-2 text-xs">
-                                <span className={`size-1.5 shrink-0 rounded-full ${idx === 0 ? 'bg-success' : 'bg-muted-foreground/40'}`} />
-                                <span className="min-w-0 flex-1 truncate text-foreground">{n.title}</span>
-                                <span className="shrink-0 text-[10px] text-muted-foreground">{formatTime(n.created_at)}</span>
+                            {expanded ? (
+                              <div className="space-y-1.5 py-2 pl-9 pr-3">
+                                {item.notifications.map((n, idx) => (
+                                  <div key={n.id} className="flex items-center gap-2 text-xs">
+                                    <span className={`size-1.5 shrink-0 rounded-full ${idx === 0 ? 'bg-success' : 'bg-muted-foreground/40'}`} />
+                                    <span className="min-w-0 flex-1 truncate text-foreground">{n.title}</span>
+                                    <span className="shrink-0 text-[10px] text-muted-foreground">{formatTime(n.created_at)}</span>
+                                  </div>
+                                ))}
                               </div>
-                            ))}
+                            ) : null}
                           </div>
-                        ) : null}
-                      </div>
-                    );
-                  }
+                        );
+                      }
 
-                  const notification = item.notification;
-                  const isSelected = notification.id === selectedId;
-                  // ⓐ 도달 사유 칩(왜 내게) — 추론 가능할 때만, 없으면 생략(graceful degrade).
-                  const reasonKey = getNotificationReasonKey(notification.type);
-                  return (
-                    <button
-                      key={notification.id}
-                      type="button"
-                      onClick={() => void selectNotification(notification)}
-                      className={`w-full rounded-xl border p-3 text-left transition ${
-                        isSelected
-                          ? 'border-brand/35 bg-brand/15'
-                          : notification.is_read
-                            ? 'border-white/8 bg-muted/55 hover:border-brand/20 hover:bg-white/5'
-                            : 'border-brand/18 bg-brand/8 hover:bg-brand/12'
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/6 text-muted-foreground">
-                          <NotifIcon type={notification.type} fallback={Info} className="size-4" />
-                        </div>
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className={`truncate text-sm ${notification.is_read ? 'text-muted-foreground' : 'font-semibold text-foreground'}`}>
-                              {notification.title}
-                            </p>
-                            <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(notification.created_at)}</span>
+                      const notification = item.notification;
+                      const isSelected = notification.id === selectedId;
+                      // ⓐ 도달 사유 칩(왜 내게) — 추론 가능할 때만, 없으면 생략(graceful degrade).
+                      const reasonKey = getNotificationReasonKey(notification.type);
+                      return (
+                        <button
+                          key={notification.id}
+                          type="button"
+                          onClick={() => void selectNotification(notification)}
+                          className={`relative flex w-full items-start gap-3 px-3 py-2.5 text-left transition ${isSelected ? 'bg-accent' : 'hover:bg-muted/40'}`}
+                        >
+                          {/* 목업 ④: unread=좌측 accent strip(박시 카드 bg 대체) */}
+                          {!notification.is_read ? <span className="absolute left-0 top-0 h-full w-0.5 bg-brand" aria-hidden /> : null}
+                          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/6 text-muted-foreground">
+                            <NotifIcon type={notification.type} fallback={Info} className="size-4" />
                           </div>
-                          {notification.body ? (
-                            <p className="line-clamp-1 text-xs text-muted-foreground">{notification.body}</p>
-                          ) : null}
-                          {reasonKey ? (
-                            <Badge variant="info" className="text-[10px]">{t(reasonKey)}</Badge>
-                          ) : null}
-                          {!notification.is_read ? (
-                            <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand" />
-                          ) : null}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className={`truncate text-sm ${notification.is_read ? 'text-muted-foreground' : 'font-semibold text-foreground'}`}>
+                                {notification.title}
+                              </p>
+                              <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(notification.created_at)}</span>
+                            </div>
+                            {notification.body ? (
+                              <p className="line-clamp-1 text-xs text-muted-foreground">{notification.body}</p>
+                            ) : null}
+                            {/* 목업 ⑤: 타입 1급 — agent_joined=Bot 칩(accent-claim)·도달사유 칩 */}
+                            {(notification.type === 'agent_joined' || reasonKey) ? (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {notification.type === 'agent_joined' ? (
+                                  <Badge className="gap-0.5 bg-accent-claim/15 text-accent-claim text-[10px]">
+                                    <Bot className="size-2.5" />Bot
+                                  </Badge>
+                                ) : null}
+                                {reasonKey ? <Badge variant="info" className="text-[10px]">{t(reasonKey)}</Badge> : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </div>

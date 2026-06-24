@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { CheckCircle2, X, Sparkles } from 'lucide-react';
+import { CheckCircle2, X, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
@@ -136,10 +136,10 @@ export function DecisionsWaiting({ onChange }: DecisionsWaitingProps = {}) {
   return (
     <section
       data-testid="decisions-waiting"
-      className="border-b border-white/8 bg-muted/40 px-4 py-3"
+      className="mx-3 mt-3 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2"
     >
       <header className="mb-2 flex items-center gap-2">
-        <Sparkles className="size-4 text-brand" />
+        <AlertTriangle className="size-4 text-warning" />
         <h2 className="text-sm font-semibold text-foreground">
           {t('decisionsWaiting')}
         </h2>
