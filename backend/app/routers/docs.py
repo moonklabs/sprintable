@@ -4,16 +4,53 @@ from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import DocComment, DocRevision
+from app.models.member import Member
 from app.models.team import TeamMember
 from app.repositories.doc import DocRepository
 from app.services.member_resolver import canonicalize_member_id
-from app.schemas.doc import DocCreate, DocResponse, DocSummaryResponse, DocUpdate, ShareStatusResponse
+from app.schemas.doc import (
+    DocCreate,
+    DocMemberSummary,
+    DocResponse,
+    DocRevisionsSummary,
+    DocSummaryResponse,
+    DocUpdate,
+    ShareStatusResponse,
+)
+
+
+async def _enrich_doc_response(doc, session: AsyncSession) -> DocResponse:
+    """doc 상세 응답에 담당자 member 요약 + 수정이력 요약 동봉(FE 이중 fetch 제거). doc.org_id 스코프(caller
+    가 이미 doc 접근 검증)·N+1 0(member 1쿼리 + revisions agg 1쿼리·단건 doc). additive·기존 필드 불변."""
+    resp = DocResponse.model_validate(doc)
+    if doc.assignee_id is not None:
+        m = (
+            await session.execute(
+                select(Member.id, Member.name, Member.avatar_url).where(
+                    Member.id == doc.assignee_id,
+                    Member.org_id == doc.org_id,        # org-scope(anti-IDOR).
+                    Member.deleted_at.is_(None),
+                )
+            )
+        ).first()
+        if m is not None:
+            resp.assignee = DocMemberSummary(id=m[0], name=m[1], avatar_url=m[2])
+    cnt, latest = (
+        await session.execute(
+            select(func.count(DocRevision.id), func.max(DocRevision.created_at)).where(
+                DocRevision.doc_id == doc.id,
+                DocRevision.org_id == doc.org_id,        # org-scope.
+            )
+        )
+    ).one()
+    resp.revisions = DocRevisionsSummary(count=cnt or 0, latest_at=latest)
+    return resp
 
 router = APIRouter(prefix="/api/v2/docs", tags=["docs"])
 
@@ -227,7 +264,9 @@ async def get_doc(
         )
         if member.scalar_one_or_none() is None:
             raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
-    return DocResponse.model_validate(doc)
+    # doc 상세(detail view)만 enrich: 담당자 member 요약 + 수정이력 요약 동봉(FE 이중 fetch 제거).
+    # create/update/transition 은 write-path 라 plain(추가 쿼리 0·기존 테스트 broad-mock 무파손).
+    return await _enrich_doc_response(doc, session)
 
 
 @router.patch("/{id}", response_model=DocResponse)

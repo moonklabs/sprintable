@@ -59,6 +59,19 @@ class DocSummaryResponse(BaseModel):
     snippet: str | None = None
 
 
+class DocMemberSummary(BaseModel):
+    """담당자 member 최소 요약(아바타 렌더용·FE 별도 fetch 제거). org-scope resolve."""
+    id: uuid.UUID
+    name: str
+    avatar_url: str | None = None
+
+
+class DocRevisionsSummary(BaseModel):
+    """수정이력 요약(count/latest·FE 별도 fetch 제거). full history 는 /{id}/revisions 그대로 사용."""
+    count: int = 0
+    latest_at: datetime | None = None
+
+
 class DocResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -85,6 +98,10 @@ class DocResponse(BaseModel):
     tags: list[str]
     created_at: datetime
     updated_at: datetime
+    # doc-payload enrich(이중 fetch 제거): 담당자 member 요약 + 수정이력 요약을 doc 상세에 동봉.
+    # additive·nullable(하위호환·미enrich 응답/list 엔 None). FE 는 별도 member/revisions fetch 제거.
+    assignee: DocMemberSummary | None = None
+    revisions: DocRevisionsSummary | None = None
 
 
 class ShareStatusResponse(BaseModel):
