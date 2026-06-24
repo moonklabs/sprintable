@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment } from 'react';
-import { CheckCircle, XCircle, GitPullRequest } from 'lucide-react';
+import { CheckCircle, XCircle, GitPullRequest, Check, Pause, Ban, type LucideIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import type { GateItem } from '@/components/kanban/types';
@@ -34,10 +34,10 @@ interface PrLinkFact {
   link_source?: string; // 'explicit' | 'auto' | 'sid'
 }
 
-const DECISION_META: Record<Decision, { variant: 'success' | 'warning' | 'destructive'; mark: string; labelKey: string }> = {
-  auto_merge: { variant: 'success', mark: '✓', labelKey: 'decisionAutoMerge' },
-  ask_human: { variant: 'warning', mark: '⏸', labelKey: 'decisionAskHuman' },
-  block: { variant: 'destructive', mark: '⛔', labelKey: 'decisionBlock' },
+const DECISION_META: Record<Decision, { variant: 'success' | 'warning' | 'destructive'; mark: LucideIcon; labelKey: string }> = {
+  auto_merge: { variant: 'success', mark: Check, labelKey: 'decisionAutoMerge' },
+  ask_human: { variant: 'warning', mark: Pause, labelKey: 'decisionAskHuman' },
+  block: { variant: 'destructive', mark: Ban, labelKey: 'decisionBlock' },
 };
 
 const DECISIONS = new Set(['auto_merge', 'ask_human', 'block']);
@@ -141,9 +141,10 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
     ? (gate.neutral_facts!['pr_links'] as PrLinkFact[]).filter((p) => p?.repo_full_name && typeof p?.pr_number === 'number')
     : [];
 
+  const DecisionMark = decision ? DECISION_META[decision].mark : null;
   const decisionBadge = decision ? (
-    <Badge variant={DECISION_META[decision].variant} className="shrink-0">
-      <span aria-hidden className="mr-0.5">{DECISION_META[decision].mark}</span>
+    <Badge variant={DECISION_META[decision].variant} className="shrink-0 gap-0.5">
+      {DecisionMark ? <DecisionMark aria-hidden className="size-3" /> : null}
       {t(DECISION_META[decision].labelKey)}
     </Badge>
   ) : null;
@@ -168,7 +169,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
         <div className="mt-1.5 grid grid-cols-1 gap-2 text-[11.5px] sm:grid-cols-2 sm:gap-3">
           {/* 좌: 납품(delivery 신호 — 기계 검증). S5(GitHub앱) PR·AC·위험 슬롯 자리. */}
           <div className="space-y-0.5">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">{t('deliveryColLabel')}</p>
+            <p className="text-[10px] font-medium text-muted-foreground/70">{t('deliveryColLabel')}</p>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
               {ci !== null ? <CiSignal ci={ci} /> : null}
               {trust !== null ? <TrustValue trust={trust} selfReportOnly={selfReportOnly} /> : null}
@@ -178,7 +179,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
           </div>
           {/* 우: 판단("옳았다 판정"). gate엔 정밀 hit_rate 없음 → 임시 예측만(억지 % X). */}
           <div className="space-y-0.5">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">{t('outcomeColLabel')}</p>
+            <p className="text-[10px] font-medium text-muted-foreground/70">{t('outcomeColLabel')}</p>
             <div className="text-muted-foreground">
               {seedKey ? (
                 <Badge variant="chip" className="shrink-0">{t(seedKey)}</Badge>

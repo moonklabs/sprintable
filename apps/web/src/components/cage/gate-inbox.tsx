@@ -224,7 +224,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
                   {/* S3: 증거 없는 카드(State A)는 구분선도 숨김 — 빈 블록 위 헤더 방지(omit) */}
                   {gateHasEvidence(gate) ? (
                     <div className="flex items-center gap-2 pt-1.5">
-                      <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                      <span className="shrink-0 text-[9px] font-medium text-muted-foreground/70">
                         {t('lineEvidenceDivider')}
                       </span>
                       <span className="h-px flex-1 bg-border" />

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, ChevronDown, ChevronRight, Inbox as InboxIcon, Zap, ZapOff } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, Inbox as InboxIcon, Zap, ZapOff, Bot, Bell, Info, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +16,12 @@ import {
   getNotificationReasonKey,
   NOTIFICATION_TYPE_ICONS,
 } from '@/services/notification-display';
+
+// 알림 type 아이콘 렌더 — NOTIFICATION_TYPE_ICONS(lucide)서 lookup·미상 type은 fallback 아이콘.
+function NotifIcon({ type, fallback: Fallback, className }: { type: string; fallback: LucideIcon; className?: string }) {
+  const Icon = NOTIFICATION_TYPE_ICONS[type] ?? Fallback;
+  return <Icon className={className} />;
+}
 
 interface WorkflowExecItem {
   id: string;
@@ -92,8 +98,8 @@ function AgentJoinedDetailPanel({
   return (
     <div className="flex flex-1 flex-col gap-4 px-6 py-6">
       <div className="flex items-start gap-3">
-        <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white/6 text-xl">
-          🤖
+        <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-white/6 text-muted-foreground">
+          <Bot className="size-6" />
         </div>
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -384,12 +390,12 @@ export default function InboxPage() {
 
         {workflowExecs.length > 0 && (
           <div className="shrink-0 border-b border-border/80 px-4 py-3">
-            <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">워크플로우 실행</p>
+            <p className="mb-2 text-[11px] font-medium text-muted-foreground">워크플로우 실행</p>
             <div className="flex flex-col gap-1.5">
               {workflowExecs.slice(0, 5).map((exec) => (
                 <div key={exec.id} className="flex items-center gap-2 rounded-lg bg-muted/55 px-3 py-2 text-xs">
                   {exec.status === 'matched' ? (
-                    <Zap className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                    <Zap className="h-3.5 w-3.5 shrink-0 text-warning" />
                   ) : (
                     <ZapOff className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   )}
@@ -446,8 +452,8 @@ export default function InboxPage() {
                             onClick={() => void openGroup(item)}
                             className="flex min-w-0 flex-1 items-start gap-3 py-3 pr-3 text-left"
                           >
-                            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/6 text-base">
-                              {NOTIFICATION_TYPE_ICONS[item.latest.type] ?? '📌'}
+                            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/6 text-muted-foreground">
+                              <NotifIcon type={item.latest.type} fallback={Bell} className="size-4" />
                             </div>
                             <div className="min-w-0 flex-1 space-y-1">
                               <div className="flex items-start justify-between gap-2">
@@ -501,8 +507,8 @@ export default function InboxPage() {
                       }`}
                     >
                       <div className="flex items-start gap-3">
-                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/6 text-base">
-                          {NOTIFICATION_TYPE_ICONS[notification.type] ?? 'ℹ️'}
+                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/6 text-muted-foreground">
+                          <NotifIcon type={notification.type} fallback={Info} className="size-4" />
                         </div>
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex items-start justify-between gap-2">
@@ -515,7 +521,7 @@ export default function InboxPage() {
                             <p className="line-clamp-1 text-xs text-muted-foreground">{notification.body}</p>
                           ) : null}
                           {reasonKey ? (
-                            <Badge variant="info" className="text-[10px]">🔑 {t(reasonKey)}</Badge>
+                            <Badge variant="info" className="text-[10px]">{t(reasonKey)}</Badge>
                           ) : null}
                           {!notification.is_read ? (
                             <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand" />
@@ -554,14 +560,14 @@ export default function InboxPage() {
             ) : (
             <div className="flex flex-1 flex-col gap-4 px-6 py-6">
               <div className="flex items-start gap-3">
-                <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white/6 text-xl">
-                  {NOTIFICATION_TYPE_ICONS[selectedNotification.type] ?? 'ℹ️'}
+                <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-white/6 text-muted-foreground">
+                  <NotifIcon type={selectedNotification.type} fallback={Info} className="size-5" />
                 </div>
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline">{getInboxNotificationLabel(t, selectedNotification.type)}</Badge>
                     {getNotificationReasonKey(selectedNotification.type) ? (
-                      <Badge variant="info">🔑 {t(getNotificationReasonKey(selectedNotification.type) as string)}</Badge>
+                      <Badge variant="info">{t(getNotificationReasonKey(selectedNotification.type) as string)}</Badge>
                     ) : null}
                     <span className="text-xs text-muted-foreground">
                       {t('receivedAt')} · {new Date(selectedNotification.created_at).toLocaleString()}
@@ -599,7 +605,7 @@ export default function InboxPage() {
             )
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
-              <div className="flex size-14 items-center justify-center rounded-2xl bg-muted/55">
+              <div className="flex size-14 items-center justify-center rounded-xl bg-muted/55">
                 <InboxIcon className="size-6 text-muted-foreground" />
               </div>
               <p className="text-sm font-medium text-muted-foreground">{t('selectToView')}</p>

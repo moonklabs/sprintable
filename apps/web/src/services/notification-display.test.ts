@@ -31,15 +31,16 @@ describe('notification-display', () => {
   it('keeps info and warning filter types available for the inbox surface', () => {
     expect(INBOX_FILTER_TYPES).toContain('info');
     expect(INBOX_FILTER_TYPES).toContain('warning');
-    expect(NOTIFICATION_TYPE_ICONS.info).toBe('ℹ️');
-    expect(NOTIFICATION_TYPE_ICONS.warning).toBe('⚠️');
+    // 글리프→lucide 변환(컴포넌트 맵): 키별 아이콘 컴포넌트 존재 확認(emoji 문자열 단언 폐기).
+    expect(NOTIFICATION_TYPE_ICONS.info).toBeTruthy();
+    expect(NOTIFICATION_TYPE_ICONS.warning).toBeTruthy();
   });
 
   it('includes task type in filter list and icons', () => {
     const t = (key: string) => translations[key] ?? key;
 
     expect(INBOX_FILTER_TYPES).toContain('task');
-    expect(NOTIFICATION_TYPE_ICONS.task).toBe('📋');
+    expect(NOTIFICATION_TYPE_ICONS.task).toBeTruthy();
     expect(getInboxNotificationLabel(t, 'task')).toBe('태스크');
   });
 });

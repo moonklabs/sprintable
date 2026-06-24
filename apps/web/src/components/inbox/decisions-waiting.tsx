@@ -166,7 +166,7 @@ export function DecisionsWaiting({ onChange }: DecisionsWaitingProps = {}) {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+                    <Badge variant="outline" className="text-[10px]">
                       {item.kind}
                     </Badge>
                     {item.priority === 'high' ? (
