@@ -26,7 +26,7 @@ import { join } from 'node:path'
  * `.mcp.json`(CLAUDE_PROJECT_DIR 또는 worker cwd)서 sprintable 서버 env 직독으로 fallback.
  * 수동 셸 export 없이 키가 잡혀 SSE가 열린다. 키는 로깅하지 않는다(노출 0).
  */
-function readMcpJsonEnv(): { apiKey?: string; apiUrl?: string } {
+function readMcpJsonEnv(): { apiKey?: string; apiUrl?: string; hasWebhook?: boolean } {
   const candidates = [
     process.env.CLAUDE_PROJECT_DIR ? join(process.env.CLAUDE_PROJECT_DIR, '.mcp.json') : null,
     join(process.cwd(), '.mcp.json'),
@@ -36,10 +36,15 @@ function readMcpJsonEnv(): { apiKey?: string; apiUrl?: string } {
       const json = JSON.parse(readFileSync(path, 'utf8')) as {
         mcpServers?: Record<string, { env?: Record<string, string> }>
       }
-      const env = json?.mcpServers?.sprintable?.env ?? {}
-      const apiKey = env.SPRINTABLE_API_KEY ?? env.AGENT_API_KEY
-      const apiUrl = env.SPRINTABLE_API_URL
-      if (apiKey || apiUrl) return { apiKey, apiUrl }
+      const servers = json?.mcpServers ?? {}
+      const sprintable = servers.sprintable?.env ?? {}
+      const apiKey = sprintable.SPRINTABLE_API_KEY ?? sprintable.AGENT_API_KEY
+      const apiUrl = sprintable.SPRINTABLE_API_URL
+      // HAS_WEBHOOK: 어느 서버 env든 "true"면 webhook 구성됨(우리 군단 fakechat/sprintable entry).
+      const hasWebhook = Object.values(servers).some(
+        (s) => String((s?.env ?? {}).HAS_WEBHOOK ?? '').toLowerCase() === 'true',
+      )
+      if (apiKey || apiUrl || hasWebhook) return { apiKey, apiUrl, hasWebhook }
     } catch {
       // 후보 경로 부재/파싱 실패 → 다음 후보(graceful)
     }
@@ -54,6 +59,9 @@ const API_URL = (
 ).replace(/\/$/, '')
 // env 우선 → .mcp.json fallback(워커 수동 런치 호환) → 빈 값(SSE disabled).
 const API_KEY = (process.env.SPRINTABLE_API_KEY ?? process.env.AGENT_API_KEY ?? mcpFallback.apiKey ?? '').trim()
+// 선생님 설계: webhook 구성된 에이전트는 fakechat SSE off(이중 주입 방지·discord가 처리).
+// HAS_WEBHOOK="true"(env 또는 .mcp.json) → SSE 안 엶. webhook 없으면(오스카 등) on.
+const HAS_WEBHOOK = (process.env.HAS_WEBHOOK ?? '').toLowerCase() === 'true' || mcpFallback.hasWebhook === true
 
 type InboundMeta = {
   threadId: string
@@ -346,6 +354,10 @@ async function _consumeStream(): Promise<void> {
 }
 
 async function _runStream(): Promise<void> {
+  if (HAS_WEBHOOK) {
+    process.stderr.write('[fakechat] webhook configured — SSE off\n')
+    return
+  }
   if (!API_KEY) {
     process.stderr.write('[fakechat] SPRINTABLE_API_KEY / AGENT_API_KEY not set — SSE disabled\n')
     return
