@@ -370,6 +370,15 @@ async def agent_stream(
                 await sync_agent_profile_presence(
                     _pdb, agent_id, last_seen_at=datetime.now(timezone.utc), agent_status="online"
                 )
+                # OB-4b seam(stream_connected): V2 /agent/stream 연결 establish 1회(presence online과 동일
+                # tx). begin_nested 격리·non-blocking·fail-silent — savepoint라 emit 실패가 presence/세션
+                # write를 poison 안 함(단일경로·presence 무회귀). funnel mcp_reachable 직전 reachability.
+                from app.services.onboarding_funnel import emit_onboarding_event
+                await emit_onboarding_event(
+                    _pdb, "stream_connected", agent_id=agent_id,
+                    org_id=uuid.UUID(org_id_str), session_id=session_id,
+                    runtime="claude-code", transport="stdio",
+                )
                 await _pdb.commit()
             _presence_wired = True
             # R2(da9d1781): 연결 online 진입 → presence SSE 발행(FE 3s 폴링 대체·best-effort).

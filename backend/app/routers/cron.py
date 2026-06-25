@@ -150,6 +150,26 @@ async def expire_stale_events_cron(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── POST /api/v2/internal/cron/onboarding-abandoned-sweep ────────────────────
+# OB-4b: funnel abandoned 파생(BE SoT). config_generated 후 30분 미verified·미abandoned →
+# abandoned 1건(furthest 단계로 failure_reason). FE abandoned_explicit 과 이중계상 금지(terminal dedup).
+
+@router.post("/onboarding-abandoned-sweep")
+async def onboarding_abandoned_sweep(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.onboarding_funnel import sweep_abandoned_onboarding
+
+        emitted = await sweep_abandoned_onboarding(session)
+        return _ok({"abandoned_emitted": emitted})
+    except Exception as exc:
+        logger.exception("cron error (onboarding-abandoned-sweep): %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/workflow-handoff-watchdog ──────────────────────
 # E-DG S8: handoff watchdog + ACK reconciliation(P0-3). silent handoff stall 을 observable
 # incident 로 전환 — ACK 대사 → acked / 10분 미ACK → timed_out(board badge) + fallback notification.

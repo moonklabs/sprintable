@@ -9,8 +9,9 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.onboarding_event import OnboardingEvent
@@ -133,3 +134,66 @@ async def emit_onboarding_event(
             )
     except Exception:
         logger.warning("onboarding emit failed event=%s agent=%s", event, agent_id, exc_info=True)
+
+
+# ─── abandoned 파생(BE SoT·cron) ──────────────────────────────────────────────
+
+ABANDON_THRESHOLD_MINUTES = 30
+
+
+def _derive_abandon_reason(events: set[str]) -> str:
+    """furthest 도달 단계로 실패사유 도출(§4 taxonomy). 단계가 멀수록 후반 사유."""
+    if "event_sent" in events or "ack_received" in events:
+        return "no_ack"             # verify 디스패치됐으나 ack 미도달
+    if "stream_connected" in events:
+        return "verify_timeout"     # 연결됐으나 verify 미시작/미완
+    if "first_auth_seen" in events:
+        return "stream_unreachable"  # 인증했으나 stream 미연결
+    if "config_copied" in events:
+        return "no_auth"            # 복사했으나 인증 안 함
+    return "no_copy"                # config 생성됐으나 복사 안 함
+
+
+async def sweep_abandoned_onboarding(
+    db: AsyncSession, *, older_than_minutes: int = ABANDON_THRESHOLD_MINUTES
+) -> int:
+    """BE-SoT ``abandoned`` 파생: ``config_generated`` 후 ``older_than`` 경과·미``verified``·미``abandoned``
+    인 에이전트마다 ``abandoned`` 1건 emit(furthest 단계로 failure_reason). cron 호출.
+
+    **AC3 이중계상 금지**: terminal(``verified``/``abandoned``·FE ``abandoned_explicit`` 포함)이 이미
+    있으면 skip — FE explicit/기존 cron-emit 과 중복 카운트하지 않는다. 호출자(cron)가 commit 됨.
+    """
+    # RC-2(산티아고 concurrency): 동시 cron 2개가 같은 stalled 에이전트에 중복 abandoned 를 insert 하지
+    # 않게 sweep 을 직렬화 — sweep-scoped advisory xact lock. 2번째 cron 은 1번째 commit 까지 대기 후
+    # terminal dedup 으로 skip(후보→terminal→insert 분리 구간의 race 차단).
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext("onboarding_abandoned_sweep"))))
+
+    threshold = datetime.now(timezone.utc) - timedelta(minutes=older_than_minutes)
+    candidates = (await db.execute(
+        select(OnboardingEvent.agent_id).where(
+            OnboardingEvent.event == "config_generated",
+            OnboardingEvent.agent_id.isnot(None),
+            OnboardingEvent.server_ts < threshold,
+        ).distinct()
+    )).scalars().all()
+
+    emitted = 0
+    for agent_id in candidates:
+        terminal = (await db.execute(
+            select(OnboardingEvent.id).where(
+                OnboardingEvent.agent_id == agent_id,
+                OnboardingEvent.event.in_(("verified", "abandoned")),
+            ).limit(1)
+        )).first()
+        if terminal:
+            continue  # 이미 verified or abandoned → 이중계상 금지
+        events = set((await db.execute(
+            select(OnboardingEvent.event).where(OnboardingEvent.agent_id == agent_id)
+        )).scalars().all())
+        await record_onboarding_event(
+            db, event="abandoned", agent_id=agent_id,
+            failure_reason=_derive_abandon_reason(events),
+        )
+        emitted += 1
+    await db.commit()
+    return emitted
