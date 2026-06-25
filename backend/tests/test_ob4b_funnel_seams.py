@@ -92,9 +92,13 @@ def test_first_auth_seen_wired_with_dedup_and_isolation():
     from app.dependencies import auth
     src = inspect.getsource(auth)
     assert "_first_auth_seen = api_key.last_used_at is None" in src  # 첫인증 dedup 캡처
-    # 까심 RC-1: streaming auth(commit 없음) 미persist 차단 — 전용 committed 세션 + atomic dedup.
+    # 까심 RC-1: streaming auth(commit 없음) 미persist 차단 — 전용 committed 세션.
     assert "_persist_first_auth_seen" in src and '"first_auth_seen"' in src
-    assert "ApiKey.last_used_at.is_(None)" in src  # race-safe atomic dedup(조건 UPDATE)
+    # 산티아고 RC-1(deadlock): api_key row 무접촉(caller dirty와 cross-conn 데드락 회피) +
+    # onboarding_events 존재 dedup + advisory lock 직렬화(TOCTOU).
+    assert "update(ApiKey)" not in src               # api_key row UPDATE 금지(데드락 회피)
+    assert "pg_advisory_xact_lock" in src            # 동시 첫인증 직렬화
+    assert "OnboardingEvent" in src                  # 이벤트 존재 dedup
 
 
 def test_stream_connected_wired_one_time_isolated():
@@ -105,16 +109,17 @@ def test_stream_connected_wired_one_time_isolated():
     assert "emit_onboarding_event(" in src
 
 
-# ─── RC-1: 전용 committed 세션 + atomic dedup(까심) ───────────────────────────
+# ─── RC-1(산티아고): 전용 세션·api_key 무접촉·event 존재 dedup·advisory lock ──────
 
-def _sess_cm(rowcount):
+def _sess_cm(exists_row):
+    """[advisory_lock execute, exists SELECT] 2회 execute 모킹. exists_row=None→첫인증, 값→이미 존재."""
     s = AsyncMock()
     s.add = MagicMock()
     s.flush = AsyncMock()
     s.commit = AsyncMock()
-    res = MagicMock()
-    res.rowcount = rowcount
-    s.execute = AsyncMock(return_value=res)
+    exists_res = MagicMock()
+    exists_res.first.return_value = exists_row
+    s.execute = AsyncMock(side_effect=[MagicMock(), exists_res])  # advisory lock, then exists 조회
     cm = AsyncMock()
     cm.__aenter__ = AsyncMock(return_value=s)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -122,21 +127,21 @@ def _sess_cm(rowcount):
 
 
 @pytest.mark.anyio
-async def test_persist_first_auth_emits_on_first(monkeypatch):
-    """last_used_at IS NULL UPDATE 가 1행 → 첫 인증 → emit + commit(전용 committed 세션)."""
+async def test_persist_first_auth_emits_when_no_prior_event(monkeypatch):
+    """advisory lock 후 onboarding_events 에 first_auth_seen 없으면 → emit + commit(api_key 무접촉)."""
     from app.dependencies import auth
-    cm, s = _sess_cm(1)
+    cm, s = _sess_cm(None)
     monkeypatch.setattr("app.core.database.async_session_factory", lambda: cm)
-    await auth._persist_first_auth_seen(uuid.uuid4(), uuid.uuid4(), str(uuid.uuid4()), None)
-    s.add.assert_called_once()  # first_auth_seen 저장(commit 보장→경로 무관 persist)
+    await auth._persist_first_auth_seen(uuid.uuid4(), str(uuid.uuid4()), None)
+    s.add.assert_called_once()  # first_auth_seen 저장(전용 commit→경로 무관 persist)
     s.commit.assert_awaited_once()
 
 
 @pytest.mark.anyio
-async def test_persist_first_auth_skips_when_already_seen(monkeypatch):
-    """조건 UPDATE 0행(이미 인증) → atomic dedup → 이중 emit 0(재인증/동시 안전)."""
+async def test_persist_first_auth_skips_when_event_exists(monkeypatch):
+    """이미 first_auth_seen 이벤트 있으면 skip(idempotent dedup·이중 emit 0)."""
     from app.dependencies import auth
-    cm, s = _sess_cm(0)
+    cm, s = _sess_cm((uuid.uuid4(),))
     monkeypatch.setattr("app.core.database.async_session_factory", lambda: cm)
-    await auth._persist_first_auth_seen(uuid.uuid4(), uuid.uuid4(), None, None)
+    await auth._persist_first_auth_seen(uuid.uuid4(), None, None)
     s.add.assert_not_called()

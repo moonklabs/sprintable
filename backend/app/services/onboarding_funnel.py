@@ -11,7 +11,7 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.onboarding_event import OnboardingEvent
@@ -163,6 +163,11 @@ async def sweep_abandoned_onboarding(
     **AC3 이중계상 금지**: terminal(``verified``/``abandoned``·FE ``abandoned_explicit`` 포함)이 이미
     있으면 skip — FE explicit/기존 cron-emit 과 중복 카운트하지 않는다. 호출자(cron)가 commit 됨.
     """
+    # RC-2(산티아고 concurrency): 동시 cron 2개가 같은 stalled 에이전트에 중복 abandoned 를 insert 하지
+    # 않게 sweep 을 직렬화 — sweep-scoped advisory xact lock. 2번째 cron 은 1번째 commit 까지 대기 후
+    # terminal dedup 으로 skip(후보→terminal→insert 분리 구간의 race 차단).
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext("onboarding_abandoned_sweep"))))
+
     threshold = datetime.now(timezone.utc) - timedelta(minutes=older_than_minutes)
     candidates = (await db.execute(
         select(OnboardingEvent.agent_id).where(
