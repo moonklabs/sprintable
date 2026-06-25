@@ -10,9 +10,6 @@ import { cn } from '@/lib/utils';
 import { VerifyRail, RAIL_ORDER, type DisplayStep, type RailState, type RailStatus } from './verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemetry';
 
-// backend-direct URL (agent가 로컬에서 직접 호출) — CF 경유 금지(blueprint §2). NEXT_PUBLIC이라 클라 인라인.
-const BACKEND_URL = process.env.NEXT_PUBLIC_FASTAPI_URL ?? 'http://localhost:8000';
-
 const RAIL_LABEL_KEY: Record<RailState, string> = {
   config_copied: 'railConfigCopied',
   waiting: 'railWaiting',
@@ -34,24 +31,6 @@ interface ConnectStepProps {
   onFinish: () => void;
 }
 
-/** stdio working config. AGENT_API_KEY 값만 마스킹 가능(나머지 JSON은 평문 가독). */
-function buildConfig(apiKey: string): string {
-  return JSON.stringify(
-    {
-      mcpServers: {
-        sprintable: {
-          type: 'stdio',
-          command: 'uvx',
-          args: ['sprintable-mcp'],
-          env: { SPRINTABLE_API_URL: BACKEND_URL, AGENT_API_KEY: apiKey },
-        },
-      },
-    },
-    null,
-    2,
-  );
-}
-
 /** `sk_live_••••<last4>` — prefix + 마지막 4자만 노출. */
 function maskApiKey(key: string): string {
   if (!key) return '';
@@ -62,27 +41,27 @@ function maskApiKey(key: string): string {
 }
 
 /**
- * 아티팩트 렌더 — URL 소스 우선순위: OB-1 connection-artifact content(backend-direct URL 권위).
- * OB-1 미머지/404 시 FE-built fallback(provisional·env URL). 키는 first-run newApiKey 주입(display=마스킹).
- * ⚠️ 실 working URL은 OB-1(SPRINTABLE_API_URL=backend-direct·CF 금지)이 소유 — env fallback은 임시.
+ * 아티팩트 렌더 — **서버 SSOT**(AC3): 구조+backend-direct URL은 OB-1 connection-artifact content 그대로.
+ * 클라는 config를 재조립하지 않는다(buildConfig 제거). 키 placeholder(`<YOUR_AGENT_API_KEY>`)만
+ * first-run 실 키로 치환(display=마스킹·copy=실키). OB-1 content 부재 시 null → 카드는 pending.
  */
-function renderArtifact(baseContent: string | null, apiKey: string, mask: boolean): string {
+function renderArtifact(baseContent: string | null, apiKey: string, mask: boolean): string | null {
+  if (!baseContent) return null;
   const key = mask ? maskApiKey(apiKey) : apiKey;
-  if (baseContent) {
-    try {
-      const parsed = JSON.parse(baseContent) as {
-        mcpServers?: { sprintable?: { env?: Record<string, string> } };
-      };
-      const env = parsed?.mcpServers?.sprintable?.env;
-      if (env) {
-        env.AGENT_API_KEY = key;
-        return JSON.stringify(parsed, null, 2);
-      }
-    } catch {
-      // OB-1 content 파싱 실패 → fallback
+  try {
+    const parsed = JSON.parse(baseContent) as {
+      mcpServers?: { sprintable?: { env?: Record<string, string> } };
+    };
+    const env = parsed?.mcpServers?.sprintable?.env;
+    if (env && 'AGENT_API_KEY' in env) {
+      env.AGENT_API_KEY = key;
+      return JSON.stringify(parsed, null, 2);
     }
+    // 구조가 예상과 달라도 클라 재조립 금지 — placeholder 치환으로 SSOT 보존
+    return baseContent.replace('<YOUR_AGENT_API_KEY>', key);
+  } catch {
+    return baseContent.replace('<YOUR_AGENT_API_KEY>', key);
   }
-  return buildConfig(key);
 }
 
 function HighlightedJson({ text }: { text: string }) {
@@ -109,7 +88,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   const t = useTranslations('onboarding');
 
   const [artifactBase, setArtifactBase] = useState<string | null>(null);
-  const [artifactResolved, setArtifactResolved] = useState(false);
+  const [artifactError, setArtifactError] = useState(false);
   const [beSteps, setBeSteps] = useState<RawStep[] | null>(null);
   const [hasCopied, setHasCopied] = useState(false);
   const [justCopied, setJustCopied] = useState(false);
@@ -139,25 +118,27 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
     return () => clearInterval(iv);
   }, [agentId, apiKey, pollStatus]);
 
-  // OB-1 connection-artifact = URL 소스(backend-direct 권위). 404/미머지 시 FE-built fallback.
+  // OB-1 connection-artifact = 아티팩트 SSOT(구조+backend-direct URL). OB-1 라이브라 정상응답 디폴트.
+  // 실패 시 클라빌드로 메우지 않고(§2 CF env 노출 금지·AC3) pending+재시도 유지.
+  const fetchArtifact = useCallback(async () => {
+    if (!agentId) return;
+    setArtifactError(false);
+    try {
+      const res = await fetch(`/api/agents/${agentId}/connection-artifact`);
+      if (!res.ok) { setArtifactError(true); return; }
+      const json = (await res.json()) as { data?: { content?: string }; content?: string };
+      const content = json?.data?.content ?? json?.content;
+      if (typeof content === 'string') setArtifactBase(content);
+      else setArtifactError(true);
+    } catch {
+      setArtifactError(true);
+    }
+  }, [agentId]);
+
   useEffect(() => {
     if (!agentId || !apiKey) return;
-    let active = true;
-    void (async () => {
-      try {
-        const res = await fetch(`/api/agents/${agentId}/connection-artifact`);
-        if (!res.ok) return; // 미머지/404 → fallback(provisional)
-        const json = (await res.json()) as { data?: { content?: string }; content?: string };
-        const content = json?.data?.content ?? json?.content;
-        if (active && typeof content === 'string') setArtifactBase(content);
-      } catch {
-        // swallow — graceful
-      } finally {
-        if (active) setArtifactResolved(true);
-      }
-    })();
-    return () => { active = false; };
-  }, [agentId, apiKey]);
+    void fetchArtifact();
+  }, [agentId, apiKey, fetchArtifact]);
 
   const displaySteps: DisplayStep[] = RAIL_ORDER.map((state) => {
     const be = beSteps?.find((s) => s.state === state);
@@ -182,8 +163,10 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
 
   const handleCopy = async () => {
     if (!apiKey) return;
+    const cfg = renderArtifact(artifactBase, apiKey, false);
+    if (!cfg) return; // 아티팩트 미준비(pending) — copy 불가
     try {
-      await navigator.clipboard.writeText(renderArtifact(artifactBase, apiKey, false));
+      await navigator.clipboard.writeText(cfg);
     } catch {
       // ignore clipboard failure
     }
@@ -254,6 +237,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
               variant="outline"
               size="sm"
               onClick={() => void handleCopy()}
+              disabled={!displayConfig}
               aria-label={t('copyConfig')}
               className="shrink-0 whitespace-nowrap"
             >
@@ -264,18 +248,36 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
               )}
             </Button>
           </div>
-          <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">
-            <code className="font-mono"><HighlightedJson text={displayConfig} /></code>
-          </pre>
+          {displayConfig ? (
+            <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">
+              <code className="font-mono"><HighlightedJson text={displayConfig} /></code>
+            </pre>
+          ) : (
+            <div className="space-y-2 bg-muted/40 p-3" aria-busy={!artifactError}>
+              <div className={cn('h-3 w-3/4 rounded bg-muted', !artifactError && 'animate-pulse')} />
+              <div className={cn('h-3 w-1/2 rounded bg-muted', !artifactError && 'animate-pulse')} />
+              <div className={cn('h-3 w-2/3 rounded bg-muted', !artifactError && 'animate-pulse')} />
+              <div className="flex items-center gap-2 pt-1">
+                <p className="text-xs text-muted-foreground">{t('artifactPending')}</p>
+                {artifactError && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void fetchArtifact()}
+                    className="h-auto px-2 py-0.5 text-xs"
+                  >
+                    {t('artifactRetry')}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
         <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
           {t('artifactGuide')}
         </p>
         <p className="text-xs text-muted-foreground">{t('keyOneTimeNote')}</p>
-        {artifactResolved && !artifactBase && (
-          <p className="text-xs text-muted-foreground/70">{t('artifactUrlPending')}</p>
-        )}
       </section>
 
       {/* [2] verify 상태레일 */}
