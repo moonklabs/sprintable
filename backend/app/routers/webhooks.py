@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
 from app.repositories.webhook_config import WebhookConfigRepository
@@ -34,12 +34,24 @@ def _get_repo(
     return WebhookConfigRepository(session, org_id)
 
 
+async def _get_caller_member_id(
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> uuid.UUID:
+    """caller 의 canonical member_id — webhook-config 는 멤버 소유 리소스라 소유 스코프 강제(IDOR 차단).
+    레거시 휴먼 tm.id→members.id 정규화(저장된 member_id 와 동형 매칭)."""
+    from app.services.member_resolver import canonicalize_member_id
+    return await canonicalize_member_id(uuid.UUID(auth.user_id), session)
+
+
 @router.get("/config", response_model=list[WebhookConfigResponse])
 async def list_webhook_configs(
     project_id: uuid.UUID | None = Query(default=None),
     repo: WebhookConfigRepository = Depends(_get_repo),
+    caller_member_id: uuid.UUID = Depends(_get_caller_member_id),
 ) -> list[WebhookConfigResponse]:
-    items = await repo.list(project_id=project_id)
+    # IDOR(산티아고): caller member-scope — org_id 만이면 same-org 타 멤버 config(URL) 가 leak.
+    items = await repo.list(member_id=caller_member_id, project_id=project_id)
     return [WebhookConfigResponse.model_validate(i) for i in items]
 
 
@@ -47,12 +59,12 @@ async def list_webhook_configs(
 async def upsert_webhook_config(
     body: UpsertWebhookConfig,
     repo: WebhookConfigRepository = Depends(_get_repo),
+    caller_member_id: uuid.UUID = Depends(_get_caller_member_id),
 ) -> WebhookConfigResponse:
-    # AC3-2d(2): member_id canonical 정규화(레거시 휴먼 tm.id→members.id). (A) write. agent id는 no-op.
-    from app.services.member_resolver import canonicalize_member_id
-    member_id = await canonicalize_member_id(body.member_id, repo.session)
+    # IDOR(산티아고): member_id 는 **auth context 서 산출**(body.member_id 불신·무시) — caller 는 자기
+    # 소유 config 만 생성/수정한다. body 에 타 멤버 id 를 넣어도 caller 로 강제되어 무해(타 멤버 설정 불가).
     config = await repo.upsert(
-        member_id=member_id,
+        member_id=caller_member_id,
         url=body.url,
         project_id=body.project_id,
         events=body.events,
@@ -66,11 +78,42 @@ async def upsert_webhook_config(
 async def delete_webhook_config(
     id: uuid.UUID = Query(...),
     repo: WebhookConfigRepository = Depends(_get_repo),
+    caller_member_id: uuid.UUID = Depends(_get_caller_member_id),
 ) -> dict:
-    ok = await repo.delete(id)
+    # IDOR: 소유 검증 삭제 — 타 멤버 config_id 면 0행 → 404(타 org/타 멤버 동형).
+    ok = await repo.delete(id, caller_member_id)
     if not ok:
         raise HTTPException(status_code=404, detail="WebhookConfig not found")
     return {"ok": True}
+
+
+@router.post("/config/{config_id}/test-send", status_code=200)
+async def test_send_webhook_config(
+    config_id: uuid.UUID,
+    repo: WebhookConfigRepository = Depends(_get_repo),
+    caller_member_id: uuid.UUID = Depends(_get_caller_member_id),
+) -> dict:
+    """0a6487c6-BE AC2/3: 알림 목적지 자가진단 — 합성 'TEST' 알림 1발 후 도달 결과 반환.
+
+    **소유 검증 조회(get_owned·id+org+member·IDOR)**: 타 멤버 config_id 로 그 webhook 에 test-send
+    불가(404). SSRF 재검증은 deliver_test_webhook 책임.
+    **계약 lock(FE 1:1 소비)**: ``{ok, reached, reason?, ts}`` — ok=요청 처리됨, reached=목적지 2xx,
+    reason=미도달 사유(도달 시 생략), ts=발사 시각.
+    """
+    from datetime import datetime, timezone
+
+    from app.services.webhook_dispatch import deliver_test_webhook
+
+    config = await repo.get_owned(config_id, caller_member_id)
+    if config is None:
+        raise HTTPException(status_code=404, detail="WebhookConfig not found")
+
+    ts = datetime.now(timezone.utc).isoformat()
+    reached, reason = await deliver_test_webhook(config.url, config.secret)
+    result: dict = {"ok": True, "reached": reached, "ts": ts}
+    if reason:
+        result["reason"] = reason
+    return result
 
 
 @router.get("/deliveries", response_model=list[DeliveryStatusResponse])

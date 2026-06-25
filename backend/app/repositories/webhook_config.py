@@ -14,8 +14,15 @@ class WebhookConfigRepository:
         self.session = session
         self.org_id = org_id
 
-    async def list(self, project_id: uuid.UUID | None = None) -> list[WebhookConfig]:
-        q = select(WebhookConfig).where(WebhookConfig.org_id == self.org_id)
+    async def list(
+        self, member_id: uuid.UUID, project_id: uuid.UUID | None = None
+    ) -> list[WebhookConfig]:
+        # IDOR(산티아고): webhook-config 는 **멤버 소유** 리소스 — org_id 만으론 same-org 타 멤버 config
+        # (URL 포함)가 응답에 실린다(5c1258e2 토대 갭). caller member-scope 강제. admin 전체조회는 별도.
+        q = select(WebhookConfig).where(
+            WebhookConfig.org_id == self.org_id,
+            WebhookConfig.member_id == member_id,
+        )
         if project_id is not None:
             q = q.where(WebhookConfig.project_id == project_id)
         q = q.order_by(WebhookConfig.created_at.desc())
@@ -23,8 +30,21 @@ class WebhookConfigRepository:
         return list(result.scalars().all())
 
     async def get(self, id: uuid.UUID) -> WebhookConfig | None:
+        """org-scope 조회 — **내부용**(upsert 직후 자기 행 재조회). 외부 노출 경로는 get_owned 사용."""
         result = await self.session.execute(
             select(WebhookConfig).where(WebhookConfig.id == id, WebhookConfig.org_id == self.org_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_owned(self, id: uuid.UUID, member_id: uuid.UUID) -> WebhookConfig | None:
+        """소유 검증 조회 — id + org + **member**. same-org 타 멤버 config_id 를 알아도 None(IDOR 차단).
+        get/delete/test-send 등 외부 노출 경로의 표준 조회."""
+        result = await self.session.execute(
+            select(WebhookConfig).where(
+                WebhookConfig.id == id,
+                WebhookConfig.org_id == self.org_id,
+                WebhookConfig.member_id == member_id,
+            )
         )
         return result.scalar_one_or_none()
 
@@ -105,8 +125,9 @@ class WebhookConfigRepository:
         await self.session.refresh(config)
         return config
 
-    async def delete(self, id: uuid.UUID) -> bool:
-        config = await self.get(id)
+    async def delete(self, id: uuid.UUID, member_id: uuid.UUID) -> bool:
+        # IDOR: 소유 검증(get_owned) — 타 멤버 config_id 로 삭제 차단.
+        config = await self.get_owned(id, member_id)
         if config is None:
             return False
         await self.session.delete(config)

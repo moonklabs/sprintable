@@ -192,7 +192,9 @@ async def test_get_by_project_200():
 
         assert resp.status_code == 200
         assert len(resp.json()) == 1
-        mock_list.assert_called_once_with(project_id=PROJECT_ID)
+        # IDOR: list 는 이제 caller member-scope(member_id 추가) — project_id 전달은 유지.
+        mock_list.assert_called_once()
+        assert mock_list.call_args.kwargs["project_id"] == PROJECT_ID
     finally:
         app.dependency_overrides.clear()
 
