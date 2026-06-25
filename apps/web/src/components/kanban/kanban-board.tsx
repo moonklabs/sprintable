@@ -35,8 +35,9 @@ class MousePointerSensor extends PointerSensor {
   static activators = [
     {
       eventName: 'onPointerDown' as const,
+      // 좌클릭만 드래그(button===0) — 우/휠/보조 클릭은 dnd 게이트(산티아고 QA RC·dnd-kit 기본 PointerSensor 동등).
       handler: ({ nativeEvent }: { nativeEvent: PointerEvent }) =>
-        nativeEvent.isPrimary && nativeEvent.pointerType !== 'touch',
+        nativeEvent.isPrimary && nativeEvent.button === 0 && nativeEvent.pointerType !== 'touch',
     },
   ];
 }
