@@ -49,9 +49,12 @@ async def _client():
 
     from app.dependencies.auth import get_current_user
     from app.dependencies.database import get_db
+    from app.routers.webhooks import _get_caller_member_id
 
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_current_user] = override_auth
+    # caller member 해소(resolve_member)는 인프라 — 단위테스트는 직접 오버라이드(멤버 소유 스코프=MEMBER_ID).
+    app.dependency_overrides[_get_caller_member_id] = lambda: MEMBER_ID
 
     from httpx import ASGITransport, AsyncClient
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), mock_session, app
@@ -192,7 +195,9 @@ async def test_get_by_project_200():
 
         assert resp.status_code == 200
         assert len(resp.json()) == 1
-        mock_list.assert_called_once_with(project_id=PROJECT_ID)
+        # IDOR: list 는 이제 caller member-scope(member_id 추가) — project_id 전달은 유지.
+        mock_list.assert_called_once()
+        assert mock_list.call_args.kwargs["project_id"] == PROJECT_ID
     finally:
         app.dependency_overrides.clear()
 

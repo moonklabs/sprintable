@@ -106,6 +106,10 @@ steps:
       # gcloud run deploy 가 기존 IAM 을 preserve(non-deterministic) → 신규/리셋 시 allUsers invoker
       # 유실로 403(2026-06-21 prod promotion 사건). 명시적·멱등 설정으로 매 배포 public 보장(dev/prod 공통).
       - --allow-unauthenticated
+      # OB-1: 에이전트 onboarding generator 가 읽는 backend-direct URL 을 런타임 env 로 주입.
+      # ⚠️ 반드시 --update-env-vars(additive·기존 backend env[DATABASE_URL 등] 보존). --set-env-vars 금지
+      # (전체 wipe). _FASTAPI_URL 은 dev/prod 각 backend-direct run.app(프론트 NEXT_PUBLIC_FASTAPI_URL 과 동일 값).
+      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL}
       - --quiet
     waitFor: [push-backend]
 

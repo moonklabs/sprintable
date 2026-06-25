@@ -20,40 +20,15 @@ import httpx
 
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
 from app.models.webhook_config import WebhookConfig
+# c60dd33c: Discord payload 변환은 공용 헬퍼(discord_webhook)로 단일화 — fire_webhooks 와 공유.
+from app.services.discord_webhook import is_discord_url as _is_discord_url
+from app.services.discord_webhook import to_discord_message_payload as _to_discord_payload
 
 logger = logging.getLogger(__name__)
 
 _EVENT_TYPE = "conversation.message_created"
 _MAX_RETRIES = 3
 _BACKOFF_BASE = 1.0  # seconds
-
-
-_DISCORD_URL_PATTERNS = ("discord.com/api/webhooks", "discordapp.com/api/webhooks")
-
-
-def _is_discord_url(url: str) -> bool:
-    return any(pat in url for pat in _DISCORD_URL_PATTERNS)
-
-
-def _to_discord_payload(payload: dict) -> dict:
-    """Sprintable webhook payload → Discord content 포맷 변환 (_fire_webhook 스타일)."""
-    content_text = (payload.get("content") or "")[:500]
-    conversation_id = payload.get("conversation_id", "")
-    thread_id = payload.get("thread_id") or ""
-
-    discord_content = f"📩 **새 메시지**"
-    if content_text:
-        discord_content += f"\n{content_text}"
-    if conversation_id:
-        discord_content += f"\n\nconversation_id: {conversation_id}"
-    if thread_id:
-        discord_content += f"\nmessage_id: {thread_id}"
-
-    result: dict = {"content": discord_content}
-    app_url = __import__("os").environ.get("NEXT_PUBLIC_APP_URL", "")
-    if app_url and conversation_id:
-        result["embeds"] = [{"title": "대화 보기", "url": f"{app_url}/conversations/{conversation_id}"}]
-    return result
 
 
 def _sign_payload(secret: str, body: bytes) -> str:

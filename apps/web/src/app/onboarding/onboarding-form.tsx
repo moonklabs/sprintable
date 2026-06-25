@@ -1,37 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
+import { ConnectStep } from './connect-step';
+import { emitOnboardingEvent } from './onboarding-telemetry';
 
-function getAppOrigin() {
-  if (typeof window !== 'undefined') return window.location.origin;
-  return process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai';
-}
-const MCP_SERVER_URL = () => `${getAppOrigin()}/api/v2/mcp`;
-// f44e2644: 온보딩 문서는 랜딩 canonical(sprintable.ai/llms.txt) 직지정. app.sprintable.ai/llms.txt는
-// host-스코프 CF 301이 prod에서 미발동(앱 자체 사본 서빙·onboarding-guide 링크 깨짐)이라 직지정이 안전.
-const LLMS_PROMPT = () => `Read this document and complete onboarding: https://sprintable.ai/llms.txt`;
 const AGENT_ROLES = ['developer', 'designer', 'pm', 'qa', 'devops'];
-
-function buildMcpConfig(apiKey: string) {
-  return JSON.stringify(
-    {
-      mcpServers: {
-        sprintable: {
-          type: 'streamable-http',
-          url: MCP_SERVER_URL(),
-          headers: { Authorization: `Bearer ${apiKey}` },
-        },
-      },
-    },
-    null,
-    2,
-  );
-}
 
 type Step = 'org' | 'project' | 'agent' | 'connect';
 const STEPS: Step[] = ['org', 'project', 'agent', 'connect'];
@@ -53,14 +30,19 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   const [projectId, setProjectId] = useState<string | null>(null);
   const [agentName, setAgentName] = useState('My Agent');
   const [agentRole, setAgentRole] = useState('developer');
+  const [agentId, setAgentId] = useState<string | null>(null);
   const [newApiKey, setNewApiKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeReason, setUpgradeReason] = useState('');
-  const [copied, setCopied] = useState<string | null>(null);
 
   const stepIndex = STEPS.indexOf(step);
+
+  // OB-4: wizard 진입 1회 emit. session_id는 telemetry가 sessionStorage로 1회차당 고정.
+  useEffect(() => {
+    emitOnboardingEvent('onboarding_started');
+  }, []);
 
   const handleOrgNameChange = (name: string) => {
     setOrgName(name);
@@ -79,16 +61,6 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   };
 
   const slugValid = /^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$|^[a-z0-9]$/.test(orgSlug);
-
-  const handleCopy = async (text: string, key: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(key);
-      setTimeout(() => setCopied(null), 2000);
-    } catch {
-      // ignore
-    }
-  };
 
   const handleCreateOrg = async () => {
     if (!orgName.trim() || !orgSlug.trim()) return;
@@ -199,12 +171,13 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
       return;
     }
 
-    const agentId = memberJson.data?.id;
-    if (!agentId) {
+    const newAgentId = memberJson.data?.id;
+    if (!newAgentId) {
       setError('Failed to create agent');
       setLoading(false);
       return;
     }
+    setAgentId(newAgentId);
 
     // 에이전트 생성 응답에 이미 plaintext api_key가 포함됨(BE team_members.py: type=agent 생성 시 항상 발급).
     // 별도 발급 호출(POST /api/agents/{id}/api-key)은 BE가 body 필수라 빈 본문 시 422 → 응답 키를 그대로 사용.
@@ -222,7 +195,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-md space-y-6 rounded-2xl border border-border bg-card p-6 shadow-lg sm:p-8">
+      <div className={`w-full ${step === 'connect' ? 'max-w-lg' : 'max-w-md'} space-y-6 rounded-2xl border border-border bg-card p-6 shadow-lg sm:p-8`}>
         {/* 진행 표시줄 */}
         <div className="space-y-1.5">
           <div className="flex justify-between text-xs text-muted-foreground">
@@ -369,67 +342,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
         )}
 
         {step === 'connect' && (
-          <div className="space-y-4">
-            {newApiKey ? (
-              <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold text-foreground">{t('mcpConfigTitle')}</p>
-                  <button
-                    type="button"
-                    onClick={() => void handleCopy(buildMcpConfig(newApiKey), 'mcp')}
-                    className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors"
-                  >
-                    {copied === 'mcp' ? '✓ Copied' : 'Copy'}
-                  </button>
-                </div>
-                <pre className="overflow-x-auto rounded-md border border-border bg-background p-2 text-xs text-foreground">
-                  {buildMcpConfig(newApiKey)}
-                </pre>
-              </div>
-            ) : (
-              <div className="rounded-md border border-amber-500/20 bg-amber-500/10 p-3 space-y-2">
-                <p className="text-sm text-amber-600 dark:text-amber-400">{t('apiKeyFailedMembers')}</p>
-                <Link
-                  href="/settings?tab=members"
-                  className="inline-block rounded border border-amber-500/30 bg-background px-3 py-1 text-xs font-medium text-amber-600 hover:bg-amber-500/10 transition-colors dark:text-amber-400"
-                >
-                  {t('goToMembersAgents')} →
-                </Link>
-              </div>
-            )}
-
-            <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-foreground">{t('promptTitle')}</p>
-                <button
-                  type="button"
-                  onClick={() => void handleCopy(LLMS_PROMPT(), 'prompt')}
-                  className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors"
-                >
-                  {copied === 'prompt' ? '✓ Copied' : 'Copy'}
-                </button>
-              </div>
-              <p className="break-all rounded-md border border-border bg-background p-2 text-xs text-foreground">
-                {LLMS_PROMPT()}
-              </p>
-            </div>
-
-            <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              에이전트 추가 및 API Key 관리:{' '}
-              <Link href="/settings?tab=members" className="font-medium text-primary hover:underline">
-                Settings → Members → Agents
-              </Link>
-            </div>
-
-            <Button
-              variant="hero"
-              size="lg"
-              className="w-full"
-              onClick={handleFinish}
-            >
-              {t('finish')}
-            </Button>
-          </div>
+          <ConnectStep agentId={agentId} apiKey={newApiKey} onFinish={handleFinish} />
         )}
       </div>
       {showUpgrade && <UpgradeModal message={upgradeReason} onClose={() => setShowUpgrade(false)} />}

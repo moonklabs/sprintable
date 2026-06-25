@@ -511,9 +511,18 @@ async def update_story(
             "assignees": [str(story.assignee_id)] if story.assignee_id else [],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        # AC1(c60dd33c 미러): assignee_changed webhook은 관련자만 — 담당자(신/구)+행위자. member-bound
+        # webhook이 무관 에이전트에 fan-out되던 갭 차단. member_id=null 브로드캐스트는 보존(preserve_broadcast).
+        _assignee_notify_ids = {
+            m for m in (story.assignee_id, old_assignee_id, actor_id) if m is not None
+        }
+        # publish_event는 org-level 브라우저 UI 활동피드(_subscribers·per-agent 미전파)라 org-wide 의도 유지(AC2).
         publish_event(str(org_id), "story.assignee_changed", event_data)
         try:
-            await fire_webhooks(db, org_id, "story.assignee_changed", event_data)
+            await fire_webhooks(
+                db, org_id, "story.assignee_changed", event_data,
+                recipient_member_ids=_assignee_notify_ids,
+            )
         except Exception:
             pass
         try:
@@ -804,12 +813,20 @@ async def update_story_status(
                 reason=_violation.reason or "워크플로우 위반 감지",
                 severity="warn",
             )
+            # AC4(동일 패턴): workflow_violation webhook도 관련자(행위자+담당자)만 — 동일 org-wide fan-out
+            # 박멸. publish_event(UI 활동피드)는 org-wide 유지.
+            _violation_notify_ids = {
+                m for m in (actor_id, story.assignee_id) if m is not None
+            }
             try:
                 publish_event(str(org_id), "workflow_violation", _v_event)
             except Exception:
                 pass
             try:
-                await fire_webhooks(db, org_id, "workflow_violation", _v_event)
+                await fire_webhooks(
+                    db, org_id, "workflow_violation", _v_event,
+                    recipient_member_ids=_violation_notify_ids,
+                )
             except Exception:
                 pass
         # 41a6e294: status_changed side-effects(events→L1·webhook·L2·notif·activity)는 공유 helper로

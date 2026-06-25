@@ -8,7 +8,7 @@ from typing import Literal
 
 from fastapi import Depends, Header, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory
@@ -26,6 +26,50 @@ class AuthContext:
     email: str | None
     claims: dict
     org_id: str | None = field(default=None)
+
+
+async def _persist_first_auth_seen(
+    member_id: uuid.UUID, org_id: str | None, project_id: str | None
+) -> None:
+    """OB-4b: 첫 인증 1회 ``first_auth_seen`` — caller 세션 commit 여부와 **무관하게** persist.
+
+    ⚠️ streaming auth(``get_current_user_streaming``)는 세션을 commit 없이 close 하므로 caller-session
+    emit 은 rollback 으로 미persist(V2 통일로 에이전트 첫 인증이 ``/agent/stream`` 인 게 가장 흔함) →
+    **전용 committed 세션**에서 persist.
+
+    ⚠️ RC-1(산티아고 concurrency): caller ``_resolve_api_key`` 는 ``api_key.last_used_at = now`` 로
+    api_key row 를 dirty 로 들고 있고(autoflush 가 다음 조회 시 그 row lock 획득), 이 _persist 가 같은
+    api_key row 를 건드리면 **cross-connection 데드락**(전용 세션이 caller lock 대기 ↔ caller 는 이
+    await 끝나야 close). → **api_key row 를 일절 건드리지 않는다.** dedup 은 ``onboarding_events`` 존재로
+    판정하고, 동시 첫 인증은 agent-scoped advisory xact lock 으로 직렬화(TOCTOU 중복 emit 방지).
+    인증 무중단(fail-silent).
+    """
+    from app.core.database import async_session_factory
+    from app.models.onboarding_event import OnboardingEvent
+    from app.services.onboarding_funnel import record_onboarding_event
+    try:
+        async with async_session_factory() as s:
+            # 동시 첫인증 직렬화(check-then-insert TOCTOU) — agent-scoped advisory xact lock(api_key 무접촉).
+            await s.execute(
+                select(func.pg_advisory_xact_lock(func.hashtext(f"onboarding_first_auth:{member_id}")))
+            )
+            exists = (await s.execute(
+                select(OnboardingEvent.id).where(
+                    OnboardingEvent.agent_id == member_id,
+                    OnboardingEvent.event == "first_auth_seen",
+                ).limit(1)
+            )).first()
+            if exists is not None:
+                return  # 이미 첫 인증 기록(경로 무관·idempotent dedup)
+            await record_onboarding_event(
+                s, event="first_auth_seen", agent_id=member_id,
+                org_id=(uuid.UUID(org_id) if org_id else None),
+                project_id=(uuid.UUID(project_id) if project_id else None),
+                runtime="claude-code", transport="stdio",
+            )
+            await s.commit()
+    except Exception:
+        logger.warning("first_auth_seen persist failed agent=%s", member_id, exc_info=True)
 
 
 async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
@@ -46,6 +90,9 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
     if not api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
+    # OB-4b seam(first_auth_seen): 이 키의 최초 인증(last_used_at None)을 갱신 전 캡처 — 1회 dedup.
+    # api_key 경로 = 에이전트 인증(휴먼은 JWT). 실제 emit 은 member_id/org_id 해소 후(return 직전).
+    _first_auth_seen = api_key.last_used_at is None
     # fire-and-forget last_used_at 업데이트
     api_key.last_used_at = now
     scope: list[str] = api_key.scope or ["read", "write"]
@@ -117,6 +164,11 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
     # project_ids=[] 인데 project_id 가 set 인 모순(require_project_access 자기차단)을 차단.
     if project_id and project_id not in project_ids:
         project_ids.append(project_id)
+
+    # OB-4b seam(first_auth_seen): 최초 인증 1회. caller 세션(특히 streaming auth=commit 없음)에 의존하면
+    # 미persist + dedup 깨짐(까심 RC-1) → 전용 committed 세션에서 atomic 처리(경로 무관·race-safe·무중단).
+    if _first_auth_seen:
+        await _persist_first_auth_seen(member_id, org_id, project_id)
 
     return AuthContext(
         user_id=str(member_id),
