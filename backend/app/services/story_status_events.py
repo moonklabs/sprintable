@@ -77,9 +77,22 @@ async def emit_story_status_changed(
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
+    # c60dd33c: webhook 게이팅 기준 = 알림 대상(assignee/actor)과 동일 notify_ids. dispatch_notification
+    # 과 공유하므로 fire_webhooks 호출 전에 먼저 산출한다.
+    notify_ids: set[uuid.UUID] = set()
+    if story.assignee_id:
+        notify_ids.add(story.assignee_id)
+    if actor_id and actor_id != story.assignee_id:
+        notify_ids.add(actor_id)
+
     publish_event(str(org_id), "story.status_changed", event_data)
     try:
-        await fire_webhooks(db, org_id, "story.status_changed", event_data)
+        # AC2: story.status_changed 의 member-bound webhook 은 관련자(notify_ids)만 수신 → org-wide
+        # 과다 fan-out 차단. member_id=null 진짜 activity-feed 브로드캐스트는 보존(preserve_broadcast).
+        await fire_webhooks(
+            db, org_id, "story.status_changed", event_data,
+            recipient_member_ids=notify_ids,
+        )
     except Exception:
         pass
     try:
@@ -97,11 +110,6 @@ async def emit_story_status_changed(
     except Exception:
         pass
 
-    notify_ids: set[uuid.UUID] = set()
-    if story.assignee_id:
-        notify_ids.add(story.assignee_id)
-    if actor_id and actor_id != story.assignee_id:
-        notify_ids.add(actor_id)
     if notify_ids:
         # notif도 best-effort 격리 — gate 경로는 flush後 commit前 emit이라 notif 실패가 story done을
         # 롤백할 수 있다. 나머지 4 side-effect와 동일하게 isolation.
