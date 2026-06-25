@@ -109,6 +109,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   const t = useTranslations('onboarding');
 
   const [artifactBase, setArtifactBase] = useState<string | null>(null);
+  const [artifactResolved, setArtifactResolved] = useState(false);
   const [beSteps, setBeSteps] = useState<RawStep[] | null>(null);
   const [hasCopied, setHasCopied] = useState(false);
   const [justCopied, setJustCopied] = useState(false);
@@ -151,6 +152,8 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
         if (active && typeof content === 'string') setArtifactBase(content);
       } catch {
         // swallow — graceful
+      } finally {
+        if (active) setArtifactResolved(true);
       }
     })();
     return () => { active = false; };
@@ -270,6 +273,9 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
           {t('artifactGuide')}
         </p>
         <p className="text-xs text-muted-foreground">{t('keyOneTimeNote')}</p>
+        {artifactResolved && !artifactBase && (
+          <p className="text-xs text-muted-foreground/70">{t('artifactUrlPending')}</p>
+        )}
       </section>
 
       {/* [2] verify 상태레일 */}

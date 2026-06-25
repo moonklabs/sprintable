@@ -334,6 +334,7 @@
     "copied": "복사됨",
     "artifactGuide": "프로젝트 루트에 저장한 뒤 에이전트를 재시작하세요.",
     "keyOneTimeNote": "API 키는 지금 한 번만 표시됩니다 — 지금 복사해두세요.",
+    "artifactUrlPending": "연결 URL을 확정하는 중입니다 (미리보기).",
     "verifyTitle": "연결 확인",
     "verifyRetry": "다시 테스트",
     "railConfigCopied": "설정 복사됨",

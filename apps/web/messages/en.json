@@ -334,6 +334,7 @@
     "copied": "Copied",
     "artifactGuide": "Save it to your project root, then restart the agent.",
     "keyOneTimeNote": "The API key is shown only once — copy it now.",
+    "artifactUrlPending": "Connection URL is being finalized (preview).",
     "verifyTitle": "Verify connection",
     "verifyRetry": "Run test",
     "railConfigCopied": "Config copied",
