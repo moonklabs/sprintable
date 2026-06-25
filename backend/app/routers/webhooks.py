@@ -73,6 +73,33 @@ async def delete_webhook_config(
     return {"ok": True}
 
 
+@router.post("/config/{config_id}/test-send", status_code=200)
+async def test_send_webhook_config(
+    config_id: uuid.UUID,
+    repo: WebhookConfigRepository = Depends(_get_repo),
+) -> dict:
+    """0a6487c6-BE AC2/3: 알림 목적지 자가진단 — 합성 'TEST' 알림 1발 후 도달 결과 반환.
+
+    org-scope 조회(anti-IDOR·repo.get 이 org_id 강제)·SSRF 재검증은 deliver_test_webhook 책임.
+    **계약 lock(FE 1:1 소비)**: ``{ok, reached, reason?, ts}`` — ok=요청 처리됨, reached=목적지 2xx,
+    reason=미도달 사유(도달 시 생략), ts=발사 시각.
+    """
+    from datetime import datetime, timezone
+
+    from app.services.webhook_dispatch import deliver_test_webhook
+
+    config = await repo.get(config_id)
+    if config is None:
+        raise HTTPException(status_code=404, detail="WebhookConfig not found")
+
+    ts = datetime.now(timezone.utc).isoformat()
+    reached, reason = await deliver_test_webhook(config.url, config.secret)
+    result: dict = {"ok": True, "reached": reached, "ts": ts}
+    if reason:
+        result["reason"] = reason
+    return result
+
+
 @router.get("/deliveries", response_model=list[DeliveryStatusResponse])
 async def list_webhook_deliveries(
     message_id: uuid.UUID | None = Query(default=None),

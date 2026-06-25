@@ -92,3 +92,37 @@ async def fire_webhooks(
                 await client.post(url, content=body, headers=headers)
             except Exception:
                 pass
+
+
+async def deliver_test_webhook(url: str, secret: str | None) -> tuple[bool, str | None]:
+    """0a6487c6-BE: 단일 합성 'TEST' webhook 1발 → ``(reached, reason)``.
+
+    사용자 제공 URL 이라 **SSRF 재검증 필수**(DNS rebinding). 실 알림 오인 방지 — event=``webhook.test``·
+    ``label='TEST'`` 명시. Discord URL 은 ``{content|embeds}`` 로 정규화(c60dd33c·아니면 Discord 400).
+    ``reached`` = 목적지 2xx 응답. fire_webhooks 의 서명/검증 경로와 동형(거동 불변).
+    """
+    from datetime import datetime, timezone
+    data = {
+        "label": "TEST",
+        "message": "Sprintable 알림 목적지 연결 테스트 — 이 메시지가 보이면 정상 연결입니다.",
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await validate_webhook_url_async(url)
+    except ValueError:
+        return False, "unsafe or invalid url"
+    if is_discord_url(url):
+        # 범용 포매터는 event 명만 싣어(label 누락) TEST 임을 못 알림 — 자가진단용은 명시 TEST 문구.
+        body = json.dumps({"content": f"🔔 **[TEST]** {data['message']}"})
+        headers = {"Content-Type": "application/json"}
+    else:
+        body = json.dumps({"event": "webhook.test", "data": data})
+        headers = {"Content-Type": "application/json", **_build_signature_headers(secret, body)}
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+            resp = await client.post(url, content=body, headers=headers)
+    except Exception as exc:
+        return False, f"delivery error: {type(exc).__name__}"
+    if 200 <= resp.status_code < 300:
+        return True, None
+    return False, f"HTTP {resp.status_code}"
