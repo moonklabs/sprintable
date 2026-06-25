@@ -46,6 +46,9 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
     if not api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
+    # OB-4b seam(first_auth_seen): 이 키의 최초 인증(last_used_at None)을 갱신 전 캡처 — 1회 dedup.
+    # api_key 경로 = 에이전트 인증(휴먼은 JWT). 실제 emit 은 member_id/org_id 해소 후(return 직전).
+    _first_auth_seen = api_key.last_used_at is None
     # fire-and-forget last_used_at 업데이트
     api_key.last_used_at = now
     scope: list[str] = api_key.scope or ["read", "write"]
@@ -117,6 +120,17 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
     # project_ids=[] 인데 project_id 가 set 인 모순(require_project_access 자기차단)을 차단.
     if project_id and project_id not in project_ids:
         project_ids.append(project_id)
+
+    # OB-4b seam(first_auth_seen): 최초 인증 1회·non-blocking·fail-silent(begin_nested 격리). 측정이
+    # 인증 경로를 절대 안 막음(생명선 보호와 동형). funnel mcp_reachable 직전 단계.
+    if _first_auth_seen:
+        from app.services.onboarding_funnel import emit_onboarding_event
+        await emit_onboarding_event(
+            db, "first_auth_seen", agent_id=member_id,
+            org_id=(uuid.UUID(org_id) if org_id else None),
+            project_id=(uuid.UUID(project_id) if project_id else None),
+            runtime="claude-code", transport="stdio",
+        )
 
     return AuthContext(
         user_id=str(member_id),
