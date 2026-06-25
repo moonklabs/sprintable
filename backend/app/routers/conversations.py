@@ -26,6 +26,7 @@ from app.services import chat_presence
 from app.services.agent_runtime import supports_deterministic_command
 from app.services.command_classifier import classify_command
 from app.services.event_seq import assign_recipient_seq
+from app.services.webhook_targeting import active_webhook_member_ids
 from app.services.member_resolver import (
     ResolvedMember,
     filter_org_member_ids,
@@ -292,10 +293,38 @@ async def _dispatch_conversation_event(
     )).all()
     member_type_map = {r[0]: r[1] for r in member_rows}
 
+    # E-EVENT-1CONFIG(이중수신 박멸): 활성 member-bound webhook 보유 agent recipient는 SSE
+    # enqueue 스킵 — webhook 경로(deliver_conversation_message_webhook)가 동일 메시지를 전달하므로
+    # (dispatch_notification 과 대칭). 판정 스코프는 그 전달 predicate 와 정확히 동일:
+    #   authorized = mentioned 우선·없으면 participants(sender 제외) / member-bound / **project 독립**.
+    # member_id=null 브로드캐스트는 멤버 세션 채널이 아니라 공유 엔드포인트 → skip 근거 제외
+    # (active_webhook_member_ids 가 member_id IS NOT NULL 만 본다). 비-mentioned participant 는
+    # webhook 미커버 → SSE 유지(silent loss 0).
+    mentioned_authorized = {m for m in (msg.mentioned_ids or []) if m is not None}
+    webhook_authorized = (
+        (mentioned_authorized & participant_ids) if mentioned_authorized else participant_ids
+    )
+    agent_webhook_candidates = {
+        pid for pid in participant_ids
+        if member_type_map.get(pid) == "agent" and pid in webhook_authorized
+    }
+    webhook_covered = await active_webhook_member_ids(db, org_id, agent_webhook_candidates)
+
     events_to_push: list[tuple[str, Event]] = []
     _set_working_any = False
     for pid in sorted(participant_ids):  # deadlock 방지: 일관 락 순서
         m_type = member_type_map.get(pid, "human")
+        is_agent = m_type == "agent"
+        # 1aeecdde P2: agent recipient 에게 메시지가 dispatch = 답장 생성 시작 → working emit.
+        # 그 agent 가 reply 를 보내면 send_message 에서 clear, 안 보내면 TTL 자동 소멸(ephemeral).
+        # webhook-covered agent 도 webhook 으로 받아 답장하므로 working 표시는 유지한다.
+        if is_agent:
+            chat_presence.set_working(str(conversation.id), str(pid))
+            _set_working_any = True
+        # webhook-covered agent → SSE Event/seq/push 스킵(이중수신 박멸). human Event 는 무변경
+        # (웹 UI SSE = events.py status 별경로·FORK2).
+        if is_agent and pid in webhook_covered:
+            continue
         event = Event(
             project_id=conversation.project_id,
             org_id=org_id,
@@ -310,11 +339,6 @@ async def _dispatch_conversation_event(
         )
         db.add(event)
         events_to_push.append((str(pid), event))
-        # 1aeecdde P2: agent recipient 에게 메시지가 dispatch = 답장 생성 시작 → working emit.
-        # 그 agent 가 reply 를 보내면 send_message 에서 clear, 안 보내면 TTL 자동 소멸(ephemeral).
-        if m_type == "agent":
-            chat_presence.set_working(str(conversation.id), str(pid))
-            _set_working_any = True
 
     # flush로 event.id 확보
     await db.flush()
@@ -356,9 +380,20 @@ async def _dispatch_mention_events(
     )).all()
     member_type_map = {r[0]: r[1] for r in member_rows}
 
+    # E-EVENT-1CONFIG(이중수신 박멸): 멘션 대상 = webhook authorized set 그 자체(mentioned 우선
+    # 규칙의 mentioned 측). 활성 member-bound webhook 보유 agent 는 SSE(conversation:mention)
+    # 스킵 — webhook 이 동일 메시지를 전달. member_id=null 브로드캐스트는 제외(SSOT 동일).
+    agent_webhook_candidates = {
+        pid for pid in mention_targets if member_type_map.get(pid) == "agent"
+    }
+    webhook_covered = await active_webhook_member_ids(db, org_id, agent_webhook_candidates)
+
     events_to_push: list[tuple[str, Event]] = []
     for pid in sorted(mention_targets):  # deadlock 방지: 일관 락 순서
         m_type = member_type_map.get(pid, "human")
+        # webhook-covered agent → SSE 스킵. human 은 무변경(FORK2).
+        if m_type == "agent" and pid in webhook_covered:
+            continue
         event = Event(
             project_id=conversation.project_id,
             org_id=org_id,

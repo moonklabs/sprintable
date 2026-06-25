@@ -486,5 +486,22 @@ async def ack_event(
         existing.acked_seq = body.seq
         existing.updated_at = datetime.now(timezone.utc)
 
+    # E-EVENT-1CONFIG(backfill landmine 박멸): ACK 가 acked_seq 만 전진시키고 Event.status 를
+    # 안 건드리면 agent SSE 이벤트가 status='pending' 으로 영구 잔존한다 — cleanup(events.py
+    # expire-stale)은 status='delivered' 만 삭제하므로 영영 회수 불가 + 미-ack 누적. ACK 한
+    # 이벤트(recipient_seq <= seq)를 같은 트랜잭션서 delivered 마킹해 cleanup 회수 대상이 되게
+    # 한다. recipient_seq IS NOT NULL = agent SSE 이벤트만(human 이벤트는 seq 없음). status=
+    # 'pending' 만 전이 → 이미 delivered/expired 는 무변경(idempotent·재-ack no-op).
+    await db.execute(
+        update(Event)
+        .where(
+            Event.recipient_id == agent_id,
+            Event.recipient_seq.isnot(None),
+            Event.recipient_seq <= body.seq,
+            Event.status == "pending",
+        )
+        .values(status="delivered", delivered_at=datetime.now(timezone.utc))
+    )
+
     await db.commit()
     return {"acked_seq": body.seq}
