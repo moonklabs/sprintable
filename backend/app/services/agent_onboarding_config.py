@@ -16,22 +16,21 @@ DEFAULT_RUNTIME = "claude-code"
 SUPPORTED_RUNTIMES = frozenset({"claude-code"})
 
 _LOCAL_FALLBACK_URL = "http://localhost:8000"
-# generator 가 backend-direct URL 을 읽는 런타임 env 후보(우선순위). 배포가 주입.
+# generator 가 backend-direct URL 을 읽는 런타임 env. 배포(deploy_backend.sh)가 주입한다.
 # `_FASTAPI_URL`(cloudbuild)·`NEXT_PUBLIC_FASTAPI_URL`(FE)·`fastapi_url`(gh action) 컨벤션과 일치.
-_BACKEND_URL_ENV_KEYS = ("FASTAPI_URL", "SPRINTABLE_API_URL")
+# ⚠️ `SPRINTABLE_API_URL`(=에이전트/MCP 측 env 이름)을 backend fallback 으로 읽지 않는다 — backend
+# 런타임엔 미설정이고, 혹 CF 도메인으로 새어 들어오면 잘못 집을 footgun(PO QA). 단일 canonical 키.
+_BACKEND_URL_ENV_KEY = "FASTAPI_URL"
 
 
 def resolve_backend_direct_url() -> str:
     """에이전트가 호출할 backend-direct Cloud Run URL.
 
-    배포가 주입한 env(``FASTAPI_URL`` 우선) → 미설정(로컬)이면 localhost fallback. trailing slash 제거.
+    배포가 주입한 env(``FASTAPI_URL``) → 미설정(로컬)이면 localhost fallback. trailing slash 제거.
     **CF-fronted 깔끔 도메인 금지** — /agent/stream SSE 도달이 필수라 직통 run.app 이어야 한다.
     """
-    for key in _BACKEND_URL_ENV_KEYS:
-        val = os.environ.get(key, "").strip()
-        if val:
-            return val.rstrip("/")
-    return _LOCAL_FALLBACK_URL
+    val = os.environ.get(_BACKEND_URL_ENV_KEY, "").strip()
+    return val.rstrip("/") if val else _LOCAL_FALLBACK_URL
 
 
 def build_agent_mcp_config(

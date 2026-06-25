@@ -51,15 +51,14 @@ def test_url_from_fastapi_url_env(monkeypatch):
 def test_url_local_fallback(monkeypatch):
     """env 미설정 → localhost fallback(로컬 dev)."""
     monkeypatch.delenv("FASTAPI_URL", raising=False)
-    monkeypatch.delenv("SPRINTABLE_API_URL", raising=False)
     assert gen.resolve_backend_direct_url() == "http://localhost:8000"
 
 
-def test_url_sprintable_api_url_fallback(monkeypatch):
-    """FASTAPI_URL 없고 SPRINTABLE_API_URL 있으면 그걸 사용(2순위)."""
+def test_sprintable_api_url_not_used_as_fallback(monkeypatch):
+    """footgun 가드: backend env의 SPRINTABLE_API_URL(CF 도메인일 수 있음)을 절대 안 집는다(PO QA)."""
     monkeypatch.delenv("FASTAPI_URL", raising=False)
-    monkeypatch.setenv("SPRINTABLE_API_URL", "https://backend-direct.run.app")
-    assert gen.resolve_backend_direct_url() == "https://backend-direct.run.app"
+    monkeypatch.setenv("SPRINTABLE_API_URL", "https://api.sprintable.ai")  # CF 도메인 가정
+    assert gen.resolve_backend_direct_url() == "http://localhost:8000"  # FASTAPI_URL만·localhost로
 
 
 # ─── AC3: GET /agents/{id}/connection-artifact 엔드포인트 ──────────────────────
