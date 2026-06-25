@@ -57,6 +57,61 @@ describe('StandupService.save', () => {
   });
 });
 
+describe('StandupService.getEntries plan_stories enrich (b47f9b05)', () => {
+  it('resolves plan_story_ids to plan_stories org-scoped, incl. cross-board backlog (no sprint/status filter)', async () => {
+    const storiesFilters: string[] = [];
+    const db = {
+      from(table: string) {
+        if (table === 'standup_entries') {
+          return {
+            select() { return this; },
+            eq() { return this; },
+            order: async () => ({
+              data: [{
+                id: 'e1', org_id: 'org-1', project_id: 'p1', author_id: 'm1', date: '2026-04-10',
+                plan_story_ids: ['s-sprint', 's-backlog'],
+              }],
+              error: null,
+            }),
+          };
+        }
+        if (table === 'stories') {
+          return {
+            select() { return this; },
+            in() { return this; },
+            is(col: string) { storiesFilters.push(`is:${col}`); return this; },
+            eq(col: string) { storiesFilters.push(`eq:${col}`); return this; },
+            then: (resolve: (v: { data: unknown; error: null }) => void) => Promise.resolve({
+              data: [
+                { id: 's-sprint', title: 'In sprint', status: 'in-progress', priority: 'high', project_id: 'p1', sprint_id: 'sp1' },
+                { id: 's-backlog', title: 'Backlog other board', status: 'backlog', priority: 'low', project_id: 'p2', sprint_id: null },
+              ],
+              error: null,
+            }).then(resolve),
+          };
+        }
+        return { select() { return this; }, eq() { return this; }, single: async () => ({ data: null, error: null }) };
+      },
+    } as any;
+
+    const service = new StandupService(db);
+    const entries = await service.getEntries('p1', '2026-04-10');
+
+    expect(entries).toHaveLength(1);
+    // cross-board 백로그(sprint_id null·타 project)도 탈락 없이 포함
+    expect(entries[0].plan_stories).toEqual([
+      { id: 's-sprint', title: 'In sprint', status: 'in-progress', priority: 'high', project_id: 'p1', sprint_id: 'sp1' },
+      { id: 's-backlog', title: 'Backlog other board', status: 'backlog', priority: 'low', project_id: 'p2', sprint_id: null },
+    ]);
+    // 불변식: org_id + deleted_at만, sprint/project/status 필터 없음
+    expect(storiesFilters).toContain('is:deleted_at');
+    expect(storiesFilters).toContain('eq:org_id');
+    expect(storiesFilters).not.toContain('eq:sprint_id');
+    expect(storiesFilters).not.toContain('eq:status');
+    expect(storiesFilters).not.toContain('eq:project_id');
+  });
+});
+
 describe('StandupFeedbackService', () => {
   it('loads feedback by standup date', async () => {
     const db = {
