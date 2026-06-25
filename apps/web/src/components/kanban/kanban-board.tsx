@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Check, ChevronDown, LayoutGrid, LayoutList, Search } from 'lucide-react';
-import { DndContext, DragEndEvent, PointerSensor, TouchSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -25,6 +25,22 @@ import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
 import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
+
+/**
+ * 터치는 드래그를 절대 시작하지 않게 — pointerType !== 'touch'만 드래그 활성(0d142311 prod 재발 근본 fix).
+ * 마우스/펜 = 8px 드래그 유지 / 터치 = 센서 무시 → 네이티브 스크롤(touch-action pan-x pan-y 보장).
+ * 타이밍 disambiguation(TouchSensor delay/tolerance) 포기·deterministic. 하이브리드(터치 노트북)도 마우스 드래그 유지.
+ */
+class MousePointerSensor extends PointerSensor {
+  static activators = [
+    {
+      eventName: 'onPointerDown' as const,
+      // 좌클릭만 드래그(button===0) — 우/휠/보조 클릭은 dnd 게이트(산티아고 QA RC·dnd-kit 기본 PointerSensor 동등).
+      handler: ({ nativeEvent }: { nativeEvent: PointerEvent }) =>
+        nativeEvent.isPrimary && nativeEvent.button === 0 && nativeEvent.pointerType !== 'touch',
+    },
+  ];
+}
 
 type DragOverlayCompatProps = {
   children?: React.ReactNode;
@@ -180,12 +196,11 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
   const [storyTasks, setStoryTasks] = useState<Task[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  // Desktop: mouse drag begins after an 8px move. Touch: a 250ms press-and-hold is
-  // required before a drag starts, so vertical scrolling on mobile web isn't hijacked
-  // by the drag sensor — the root cause of "보드 dnd 안 됨" on touch (S6 AC1).
+  // 드래그는 non-touch pointer(마우스/펜)만 8px 이동으로 시작. 터치는 센서가 잡지 않아
+  // 네이티브 스크롤만 동작(0d142311: PointerSensor가 터치도 잡던 + TouchSensor 타이밍 fragile 근본 제거).
+  // 모바일 status 변경은 long-press 메뉴/드롭다운 경로 — touch-drag-reorder 상실은 product intent.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+    useSensor(MousePointerSensor, { activationConstraint: { distance: 8 } }),
   );
 
   const epicMap: Record<string, string> = {};
