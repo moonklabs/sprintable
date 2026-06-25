@@ -480,6 +480,8 @@ async def ack_event(
         select(AgentEventCursor).where(AgentEventCursor.agent_id == agent_id)
     )).scalar_one_or_none()
 
+    prior_acked = existing.acked_seq if existing else 0  # OB-4: verify 완료 감지 기준선
+
     if existing is None:
         db.add(AgentEventCursor(agent_id=agent_id, acked_seq=body.seq))
     elif body.seq > existing.acked_seq:
@@ -502,6 +504,24 @@ async def ack_event(
         )
         .values(status="delivered", delivered_at=datetime.now(timezone.utc))
     )
+
+    # OB-4 seam: 새로 ack된 범위(prior_acked < seq <= body.seq)에 verify connection_test 가 있으면
+    # ack_received + verified 발화(verify 라운드트립 완료·funnel·non-blocking·verify-ack에만 한정).
+    if body.seq > prior_acked:
+        from app.services.agent_verify import VERIFY_EVENT_TYPE
+        from app.services.onboarding_funnel import emit_onboarding_event
+        _verify_done = (await db.execute(
+            select(Event.id).where(
+                Event.recipient_id == agent_id,
+                Event.event_type == VERIFY_EVENT_TYPE,
+                Event.recipient_seq.isnot(None),
+                Event.recipient_seq > prior_acked,
+                Event.recipient_seq <= body.seq,
+            ).limit(1)
+        )).first()
+        if _verify_done:
+            await emit_onboarding_event(db, "ack_received", agent_id=agent_id)
+            await emit_onboarding_event(db, "verified", agent_id=agent_id)
 
     await db.commit()
     return {"acked_seq": body.seq}
