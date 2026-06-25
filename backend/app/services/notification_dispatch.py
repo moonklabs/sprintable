@@ -17,6 +17,7 @@ from app.models.event import Event
 from app.models.notification import Notification, NotificationSetting
 from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
+from app.services.webhook_targeting import active_webhook_member_ids
 
 logger = logging.getLogger(__name__)
 
@@ -142,19 +143,12 @@ async def dispatch_notification(
         if not enabled_member_ids:
             return
 
-        # 활성 webhook_configs가 있는 멤버 집합 — 웹훅 채널로 전달되므로 내장 알림 스킵
-        webhook_member_ids: set[uuid.UUID] = set()
-        try:
-            wh_rows = await db.execute(
-                select(WebhookConfig.member_id).where(
-                    WebhookConfig.member_id.in_(enabled_member_ids),
-                    WebhookConfig.is_active.is_(True),
-                    WebhookConfig.member_id.isnot(None),
-                )
-            )
-            webhook_member_ids = {row for row in wh_rows.scalars().all()}
-        except Exception:
-            logger.warning("dispatch_notification: webhook_configs lookup failed — no skip applied")
+        # 활성 webhook_configs가 있는 멤버 집합 — 웹훅 채널로 전달되므로 내장 알림 스킵.
+        # E-EVENT-1CONFIG: 메시지 경로 SSE-skip과 공용 SSOT(active_webhook_member_ids) —
+        # member-bound(project-독립) 활성 webhook 보유 멤버. fail-open(조회 실패=빈 집합).
+        webhook_member_ids = await active_webhook_member_ids(
+            db, org_id, enabled_member_ids
+        )
 
         # BUG-2 수정: user_id.isnot(None) 필터 제거 — agent는 user_id=NULL이므로 제외됐던 문제
         # type 및 project_id도 함께 조회

@@ -130,6 +130,26 @@ async def hitl_timeouts(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── GET /api/v2/internal/cron/expire-stale-events ────────────────────────────
+# E-EVENT-1CONFIG: backfill landmine 박멸의 cleanup 짝. ACK retire 가 agent SSE 이벤트를
+# delivered 로 마킹해도, 이 cron 이 호출돼야 실제로 회수(삭제)된다. 기존 /events/expire-stale 은
+# org-scoped(헤더 의존)·호출자 0 이었다 → 전 org 일괄 cleanup 으로 cron 연결.
+@router.get("/expire-stale-events")
+async def expire_stale_events_cron(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.routers.events import expire_stale_events_core
+
+        result = await expire_stale_events_core(session, org_id=None)  # 전 org
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("cron error (expire-stale-events): %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/workflow-handoff-watchdog ──────────────────────
 # E-DG S8: handoff watchdog + ACK reconciliation(P0-3). silent handoff stall 을 observable
 # incident 로 전환 — ACK 대사 → acked / 10분 미ACK → timed_out(board badge) + fallback notification.

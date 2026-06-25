@@ -537,12 +537,15 @@ async def test_send_message_filters_cross_org_mentions_group():
         session.refresh.side_effect = _refresh
 
         mention_calls = {}
-        async def _capture_mention(db, conversation, msg, org_id, sender, mention_targets):
+        async def _capture_mention(db, conversation, msg, org_id, sender, mention_targets,
+                                   webhook_covered_ids=None):
             mention_calls["targets"] = set(mention_targets)
             return []
 
         with patch("app.routers.conversations.filter_org_member_ids",
                    new=AsyncMock(return_value={valid_id})), \
+             patch("app.services.conversation_webhook.resolve_conversation_webhook_targets",
+                   new=AsyncMock(return_value=[])), \
              patch("app.routers.conversations._dispatch_conversation_event",
                    new=AsyncMock(return_value=[])), \
              patch("app.routers.conversations._dispatch_mention_events",
