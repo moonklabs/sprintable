@@ -58,6 +58,7 @@ async def test_sweep_emits_abandoned_for_stalled_agent():
     db.flush = AsyncMock()
     db.commit = AsyncMock()
     db.execute = AsyncMock(side_effect=[
+        MagicMock(),                                        # RC-2: sweep advisory xact lock
         _scalars([agent]),                                  # candidates
         _first(None),                                       # terminal? 아니오
         _scalars(["config_generated", "first_auth_seen"]),  # 도달 이벤트
@@ -78,6 +79,7 @@ async def test_sweep_skips_terminal_no_double_count():
     db.add = MagicMock()
     db.commit = AsyncMock()
     db.execute = AsyncMock(side_effect=[
+        MagicMock(),                # RC-2: sweep advisory xact lock
         _scalars([agent]),          # candidates
         _first((uuid.uuid4(),)),    # terminal 존재 → skip
     ])
