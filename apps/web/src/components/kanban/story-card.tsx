@@ -129,13 +129,14 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-    // Touch dnd: pan-x pan-y lets a quick swipe scroll natively in BOTH axes (aborting the
-    // TouchSensor's 250ms delay) while a press-and-hold still starts a drag (dnd-kit
-    // preventDefaults once active). `none` would kill scroll-on-card.
+    // Touch dnd: pan-x pan-y lets a swipe scroll natively in BOTH axes. 0d142311: the drag
+    // sensor (MousePointerSensor) now ignores pointerType==='touch' entirely, so touch never
+    // starts a drag — pan-x pan-y just guarantees native scroll; press-and-hold drives the
+    // context menu, not a drag. `none` would kill scroll-on-card.
     // 0a36762d: pan-y alone (S6) preserved vertical column scroll but BLOCKED horizontal board
     // scroll — columns sit in an `overflow-x-auto` row (scrollW>clientW), so a horizontal swipe
-    // starting on a card had no native scroll and got captured. pan-x pan-y restores horizontal
-    // board scroll (superset of pan-y → no regression to vertical scroll or desktop drag).
+    // starting on a card had no native scroll. pan-x pan-y restores horizontal board scroll
+    // (superset of pan-y → no regression to vertical scroll or desktop drag).
     touchAction: 'pan-x pan-y' as const,
   };
 
