@@ -178,3 +178,20 @@ async def test_upsert_uses_caller_member_ignoring_body():
     await upsert_webhook_config(body, repo=repo, caller_member_id=caller)
     # body.member_id(other) 가 아니라 caller 로 upsert — 타 멤버 설정 불가
     assert repo.upsert.await_args.kwargs["member_id"] == caller
+
+
+# ─── 멤버 축 정합: _get_caller_member_id = resolve_member().id (산티아고/PO hotfix) ──
+
+@pytest.mark.anyio
+async def test_caller_member_id_uses_resolve_member_not_user_id():
+    """_get_caller_member_id 는 resolve_member().id(휴먼=org_member.id·에이전트=team_member.id)를 쓴다.
+    canonicalize(auth.user_id) 금지 — 휴먼은 auth.user_id=users.id라 디스패치(org_member.id)와 불일치."""
+    from app.routers.webhooks import _get_caller_member_id
+    org_member_id = uuid.uuid4()
+    users_id = uuid.uuid4()
+    auth = SimpleNamespace(user_id=str(users_id))  # 휴먼 JWT sub = users.id
+    with patch("app.services.member_resolver.resolve_member",
+               new=AsyncMock(return_value=SimpleNamespace(id=org_member_id))):
+        out = await _get_caller_member_id(auth=auth, org_id=uuid.uuid4(), session=AsyncMock())
+    assert out == org_member_id        # canonical 축(디스패치 정합)
+    assert out != users_id             # users.id 축 아님(축 버그 회귀 차단)
