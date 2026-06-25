@@ -155,6 +155,30 @@ async def deliver_injected_event_webhook(
                     )
 
 
+def _select_project_scope_targets(
+    project_scope_rows: list,
+    authorized_member_ids: set[uuid.UUID],
+) -> list:
+    """프로젝트-스코프 활성 webhook 중 conversation.message_created 전달 대상 선별.
+
+    BUG c2dfb823: 첫 프로젝트-스코프 쿼리가 참가자 게이팅 없이 member-bound webhook까지
+    전부 끌어와, 대화 참가자가 아닌 멤버(디디 cee1b445·도선윤 66de982b 등)의 webhook이
+    프로젝트 내 모든 대화를 수신하던 누설을 차단한다.
+
+    - events 미구독(_EVENT_TYPE 부재) → 제외
+    - member_id is None  → 진짜 프로젝트-브로드캐스트 → 무조건 포함(AC2)
+    - member_id != None  → 그 멤버가 인가 수신자(참가자/mentioned)일 때만 포함(AC1)
+    """
+    targets = []
+    for wh in project_scope_rows:
+        if wh.events and _EVENT_TYPE not in wh.events:
+            continue
+        if wh.member_id is not None and wh.member_id not in authorized_member_ids:
+            continue
+        targets.append(wh)
+    return targets
+
+
 async def deliver_conversation_message_webhook(
     message_id: uuid.UUID,
     conversation_id: uuid.UUID,
@@ -176,21 +200,8 @@ async def deliver_conversation_message_webhook(
 
     async with async_session_factory() as db:
         try:
-            wh_rows = (await db.execute(
-                select(WebhookConfig).where(
-                    WebhookConfig.org_id == org_id,
-                    WebhookConfig.project_id == project_id,
-                    WebhookConfig.is_active.is_(True),
-                )
-            )).scalars().all()
-
-            # events가 NULL/빈 배열이면 전체 이벤트 구독으로 간주 (backwards compatible)
-            target_webhooks = [
-                wh for wh in wh_rows
-                if not wh.events or _EVENT_TYPE in wh.events
-            ]
-
-            # AC2: member webhook 조회 — mentioned_ids 없으면 대화 참여자 전원(sender 제외) 대상
+            # AC1/AC4: 인가 수신자 멤버 집합 먼저 도출 — mentioned_ids 우선,
+            # 없으면 대화 참가자 전원(sender 제외). 프로젝트-스코프 게이팅의 기준이 된다.
             member_ids_for_webhook: list[uuid.UUID] = list(mentioned_ids) if mentioned_ids else []
             if not member_ids_for_webhook:
                 from app.models.conversation import ConversationParticipant
@@ -205,6 +216,24 @@ async def deliver_conversation_message_webhook(
                 )).scalars().all()
                 member_ids_for_webhook = list(participant_member_ids)
 
+            authorized_member_ids: set[uuid.UUID] = {
+                mid for mid in member_ids_for_webhook if mid is not None
+            }
+
+            # 프로젝트-스코프 활성 webhook 조회 후 참가자 게이팅(BUG c2dfb823):
+            # member-bound webhook은 그 멤버가 인가 수신자일 때만, member_id=null
+            # 진짜 브로드캐스트만 무조건 포함. events 미구독은 제외(backwards compatible).
+            wh_rows = (await db.execute(
+                select(WebhookConfig).where(
+                    WebhookConfig.org_id == org_id,
+                    WebhookConfig.project_id == project_id,
+                    WebhookConfig.is_active.is_(True),
+                )
+            )).scalars().all()
+            target_webhooks = _select_project_scope_targets(wh_rows, authorized_member_ids)
+
+            # 참가자/mentioned 멤버에 묶인 webhook은 프로젝트 스코프 밖(글로벌·타 프로젝트)에도
+            # 존재할 수 있어 member_id로 한 번 더 union(중복은 id/url 로 차단).
             if member_ids_for_webhook:
                 extra_wh_rows = (await db.execute(
                     select(WebhookConfig).where(
