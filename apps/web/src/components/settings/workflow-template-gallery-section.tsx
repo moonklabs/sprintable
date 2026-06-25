@@ -254,7 +254,7 @@ export function WorkflowTemplateGallerySection({
             })}
 
             {applyResult && (
-              <p className={`text-xs ${applyResult.ok ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
+              <p className={`text-xs ${applyResult.ok ? 'text-success' : 'text-destructive'}`}>
                 {applyResult.message}
               </p>
             )}

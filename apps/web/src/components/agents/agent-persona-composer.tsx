@@ -361,15 +361,15 @@ export function AgentPersonaComposer({
             {basePersona ? (
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-md border border-border bg-muted/30 p-4">
-                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('personaComposerVersionLabel')}</p>
+                  <p className="text-xs text-muted-foreground">{t('personaComposerVersionLabel')}</p>
                   <p className="mt-2 text-2xl font-semibold text-foreground">v{basePersona.version_metadata.version_number}</p>
                 </div>
                 <div className="rounded-md border border-border bg-muted/30 p-4">
-                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('personaComposerPublishedAtLabel')}</p>
+                  <p className="text-xs text-muted-foreground">{t('personaComposerPublishedAtLabel')}</p>
                   <p className="mt-2 text-sm font-medium text-foreground">{formatPersonaTimestamp(basePersona.version_metadata.published_at)}</p>
                 </div>
                 <div className="rounded-md border border-border bg-muted/30 p-4">
-                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('personaComposerRollbackLabel')}</p>
+                  <p className="text-xs text-muted-foreground">{t('personaComposerRollbackLabel')}</p>
                   <p className="mt-2 text-sm font-medium text-foreground">{basePersona.version_metadata.rollback_target_version_number != null ? `v${basePersona.version_metadata.rollback_target_version_number}` : t('personaComposerRollbackEmpty')}</p>
                 </div>
               </div>
@@ -382,7 +382,7 @@ export function AgentPersonaComposer({
                   <p className="text-sm text-muted-foreground">{t('personaComposerBoundaryBody')}</p>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('personaComposerBoundaryToolsLabel')}</p>
+                  <p className="text-xs text-muted-foreground">{t('personaComposerBoundaryToolsLabel')}</p>
                   <div className="flex flex-wrap gap-2">
                     {basePersona.permission_boundary.allowed_tool_names.length > 0 ? basePersona.permission_boundary.allowed_tool_names.map((toolName) => (
                       <Badge key={toolName} variant="chip">{toolName}</Badge>
@@ -390,7 +390,7 @@ export function AgentPersonaComposer({
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('personaComposerBoundaryServersLabel')}</p>
+                  <p className="text-xs text-muted-foreground">{t('personaComposerBoundaryServersLabel')}</p>
                   <div className="flex flex-wrap gap-2">
                     {basePersona.permission_boundary.mcp_server_names.length > 0 ? basePersona.permission_boundary.mcp_server_names.map((serverName) => (
                       <Badge key={serverName} variant="outline">{serverName}</Badge>
@@ -398,7 +398,7 @@ export function AgentPersonaComposer({
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('personaComposerBoundaryLayersLabel')}</p>
+                  <p className="text-xs text-muted-foreground">{t('personaComposerBoundaryLayersLabel')}</p>
                   <div className="flex flex-wrap gap-2">
                     {basePersona.permission_boundary.enforcement_layers.map((layer) => (
                       <Badge key={layer} variant="info">{layer}</Badge>
@@ -411,7 +411,7 @@ export function AgentPersonaComposer({
             <div className="grid gap-3 sm:grid-cols-2">
               {tokenStats.map((stat) => (
                 <div key={stat.label} className="rounded-md border border-border bg-muted/30 p-4">
-                  <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{stat.label}</p>
+                  <p className="text-xs text-muted-foreground">{stat.label}</p>
                   <p className="mt-2 text-2xl font-semibold text-foreground">{stat.value}</p>
                 </div>
               ))}

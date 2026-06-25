@@ -403,7 +403,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           {/* Messages */}
           <div
             ref={scrollRef}
-            className="relative flex-1 overflow-y-auto px-4 py-3"
+            className="relative min-h-0 flex-1 overflow-y-auto px-4 py-3"
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={() => void handleTouchEnd()}

@@ -14,6 +14,8 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+from typing import NamedTuple
+
 import httpx
 
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
@@ -155,6 +157,117 @@ async def deliver_injected_event_webhook(
                     )
 
 
+def _select_project_scope_targets(
+    project_scope_rows: list,
+    authorized_member_ids: set[uuid.UUID],
+) -> list:
+    """프로젝트-스코프 활성 webhook 중 conversation.message_created 전달 대상 선별.
+
+    BUG c2dfb823: 첫 프로젝트-스코프 쿼리가 참가자 게이팅 없이 member-bound webhook까지
+    전부 끌어와, 대화 참가자가 아닌 멤버(디디 cee1b445·도선윤 66de982b 등)의 webhook이
+    프로젝트 내 모든 대화를 수신하던 누설을 차단한다.
+
+    - events 미구독(_EVENT_TYPE 부재) → 제외
+    - member_id is None  → 진짜 프로젝트-브로드캐스트 → 무조건 포함(AC2)
+    - member_id != None  → 그 멤버가 인가 수신자(참가자/mentioned)일 때만 포함(AC1)
+    """
+    targets = []
+    for wh in project_scope_rows:
+        if wh.events and _EVENT_TYPE not in wh.events:
+            continue
+        if wh.member_id is not None and wh.member_id not in authorized_member_ids:
+            continue
+        targets.append(wh)
+    return targets
+
+
+class _WebhookTarget(NamedTuple):
+    """conversation.message_created 전달 대상 webhook의 직렬화 가능한 스냅샷.
+
+    E-EVENT-1CONFIG: 요청 트랜잭션서 산출해 (a) SSE-skip covered set 도출과 (b) post-commit
+    delivery 양쪽에 같은 결정을 흘려보내기 위해 ORM 대신 평면 값으로 고정(세션 분리/commit 경계
+    안전·BackgroundTask 전달 가능).
+    """
+    id: uuid.UUID
+    url: str
+    secret: str | None
+    member_id: uuid.UUID | None
+
+
+async def resolve_conversation_webhook_targets(
+    db,
+    *,
+    conversation_id: uuid.UUID,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    sender_id: uuid.UUID | None,
+    mentioned_ids: list[uuid.UUID] | None,
+) -> list[_WebhookTarget]:
+    """conversation.message_created 의 실 전달 대상 webhook 을 결정하는 SSOT.
+
+    이 결과가 ① 메시지 경로 SSE-skip 의 covered member 집합과 ② 실제 webhook 전달 대상 둘 다의
+    **단일 출처**다. send_message 요청 트랜잭션에서 1회 호출해 skip 결정과 delivery 가 같은
+    snapshot/결정을 쓰게 함으로써 TOCTOU(skip 됐는데 post-commit requery 시 target 0 →
+    silent loss)를 차단한다(산티아고 Finding 1).
+
+    authorized = mentioned 우선(**sender 제외**)·없으면 참가자 전원(sender 제외). member-bound
+    webhook 은 그 멤버가 authorized 일 때만, member_id=null 브로드캐스트는 무조건 포함(참가자
+    게이팅 c2dfb823). sender 제외로 자기 self-mention webhook 비대칭도 제거(Finding 2).
+    """
+    from sqlalchemy import select
+
+    from app.models.conversation import ConversationParticipant
+
+    if mentioned_ids:
+        # 멘션 있으면 멘션 대상만 — sender 제외(자기 메시지를 자기 webhook 으로 되받지 않도록·
+        # SSE mention 경로[conversations.py]와 authorized set 통일). 멘션이 sender 뿐이면 전달 0.
+        member_ids_for_webhook: list[uuid.UUID] = [m for m in mentioned_ids if m != sender_id]
+    else:
+        participant_member_ids = (await db.execute(
+            select(ConversationParticipant.member_id).where(
+                ConversationParticipant.conversation_id == conversation_id,
+                *([ConversationParticipant.member_id != sender_id] if sender_id else []),
+            )
+        )).scalars().all()
+        member_ids_for_webhook = list(participant_member_ids)
+
+    authorized_member_ids: set[uuid.UUID] = {
+        mid for mid in member_ids_for_webhook if mid is not None
+    }
+
+    # 프로젝트-스코프 활성 webhook + 참가자 게이팅(c2dfb823).
+    wh_rows = (await db.execute(
+        select(WebhookConfig).where(
+            WebhookConfig.org_id == org_id,
+            WebhookConfig.project_id == project_id,
+            WebhookConfig.is_active.is_(True),
+        )
+    )).scalars().all()
+    target_configs = _select_project_scope_targets(wh_rows, authorized_member_ids)
+
+    # member-bound webhook 은 글로벌·타 프로젝트에도 존재 가능 → member_id union(중복 id/url 차단).
+    if member_ids_for_webhook:
+        extra_wh_rows = (await db.execute(
+            select(WebhookConfig).where(
+                WebhookConfig.org_id == org_id,
+                WebhookConfig.member_id.in_(member_ids_for_webhook),
+                WebhookConfig.is_active.is_(True),
+            )
+        )).scalars().all()
+        existing_ids = {wh.id for wh in target_configs}
+        existing_urls = {wh.url for wh in target_configs}
+        for wh in extra_wh_rows:
+            if wh.id not in existing_ids and wh.url not in existing_urls:
+                target_configs.append(wh)
+                existing_ids.add(wh.id)
+                existing_urls.add(wh.url)
+
+    return [
+        _WebhookTarget(id=wh.id, url=wh.url, secret=wh.secret, member_id=wh.member_id)
+        for wh in target_configs
+    ]
+
+
 async def deliver_conversation_message_webhook(
     message_id: uuid.UUID,
     conversation_id: uuid.UUID,
@@ -165,75 +278,30 @@ async def deliver_conversation_message_webhook(
     created_at: datetime,
     mentioned_ids: list[uuid.UUID] | None = None,
     content: str | None = None,
+    targets: list[_WebhookTarget] | None = None,
 ) -> None:
     """BackgroundTask 진입점.
 
-    webhook_configs에서 conversation.message_created 이벤트 구독 중인
-    활성 webhook을 조회하고 delivery attempt 기록 후 발송.
+    전달 대상은 ``targets`` 로 받는다(send_message 요청 트랜잭션서 산출). 이는 SSE-skip 결정과
+    **같은 snapshot** 이라 TOCTOU silent loss 를 차단한다(산티아고 Finding 1). targets 미전달 시
+    (구 호출자/방어) 이 함수가 직접 resolve — 단 그 경로는 skip 과 다른 snapshot 일 수 있다.
     """
     from app.core.database import async_session_factory
     from sqlalchemy import select
 
     async with async_session_factory() as db:
         try:
-            wh_rows = (await db.execute(
-                select(WebhookConfig).where(
-                    WebhookConfig.org_id == org_id,
-                    WebhookConfig.project_id == project_id,
-                    WebhookConfig.is_active.is_(True),
-                )
-            )).scalars().all()
-
-            # events가 NULL/빈 배열이면 전체 이벤트 구독으로 간주 (backwards compatible)
-            target_webhooks = [
-                wh for wh in wh_rows
-                if not wh.events or _EVENT_TYPE in wh.events
-            ]
-
-            # AC2: member webhook 조회 — mentioned_ids 없으면 대화 참여자 전원(sender 제외) 대상
-            member_ids_for_webhook: list[uuid.UUID] = list(mentioned_ids) if mentioned_ids else []
-            if not member_ids_for_webhook:
-                from app.models.conversation import ConversationParticipant
-                participant_member_ids = (await db.execute(
-                    select(ConversationParticipant.member_id).where(
-                        ConversationParticipant.conversation_id == conversation_id,
-                        *(
-                            [ConversationParticipant.member_id != sender_id]
-                            if sender_id else []
-                        ),
-                    )
-                )).scalars().all()
-                member_ids_for_webhook = list(participant_member_ids)
-
-            if member_ids_for_webhook:
-                extra_wh_rows = (await db.execute(
-                    select(WebhookConfig).where(
-                        WebhookConfig.org_id == org_id,
-                        WebhookConfig.member_id.in_(member_ids_for_webhook),
-                        WebhookConfig.is_active.is_(True),
-                    )
-                )).scalars().all()
-                existing_ids = {wh.id for wh in target_webhooks}
-                existing_urls = {wh.url for wh in target_webhooks}
-                for wh in extra_wh_rows:
-                    if wh.id not in existing_ids and wh.url not in existing_urls:
-                        target_webhooks.append(wh)
-                        existing_ids.add(wh.id)
-                        existing_urls.add(wh.url)
-
-            # 웹훅 없는 멤버 → 내장 /chats 경로로 fallback (conversations router에서 처리)
-            webhook_covered_ids: set[uuid.UUID] = {
-                wh.member_id for wh in target_webhooks if wh.member_id is not None
-            }
-            fallback_ids = [mid for mid in member_ids_for_webhook if mid not in webhook_covered_ids]
-            if fallback_ids:
-                logger.debug(
-                    "conversation webhook: %d member(s) without webhook — in-app fallback applies message_id=%s",
-                    len(fallback_ids),
-                    message_id,
+            if targets is None:
+                targets = await resolve_conversation_webhook_targets(
+                    db,
+                    conversation_id=conversation_id,
+                    org_id=org_id,
+                    project_id=project_id,
+                    sender_id=sender_id,
+                    mentioned_ids=mentioned_ids,
                 )
 
-            if not target_webhooks:
+            if not targets:
                 return
 
             mentioned_id_strs = [str(m) for m in (mentioned_ids or [])]
@@ -301,7 +369,7 @@ async def deliver_conversation_message_webhook(
                 "images": attachment_images,
             }
 
-            for wh in target_webhooks:
+            for wh in targets:
                 delivery = ConversationWebhookDelivery(
                     id=uuid.uuid4(),
                     message_id=message_id,

@@ -524,36 +524,36 @@ assert _EXPIRE_DAYS * 24 >= _EVENT_RETENTION_MIN_HOURS, "Event retention must be
 assert _CLEANUP_DAYS * 24 >= _EVENT_RETENTION_MIN_HOURS, "Event cleanup must be >= 24h"
 
 
+async def expire_stale_events_core(
+    db: AsyncSession, org_id: uuid.UUID | None
+) -> dict:
+    """30일 초과 pending → expired, 7일 초과 delivered 삭제.
+
+    ``org_id`` 가 주어지면 그 org 로 스코프(엔드포인트 경로), ``None`` 이면 전 org 일괄
+    회수(cron 경로). E-EVENT-1CONFIG: ACK retire 가 delivered 로 마킹한 agent SSE 이벤트를
+    이 cleanup 이 회수한다 — 둘이 짝이라 cron 미연결 시 retire 해도 영영 안 지워진다.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff_expire = now - timedelta(days=_EXPIRE_DAYS)
+    cutoff_cleanup = now - timedelta(days=_CLEANUP_DAYS)
+
+    expire_where = [Event.status == "pending", Event.created_at < cutoff_expire]
+    cleanup_where = [Event.status == "delivered", Event.delivered_at < cutoff_cleanup]
+    if org_id is not None:
+        expire_where.append(Event.org_id == org_id)
+        cleanup_where.append(Event.org_id == org_id)
+
+    expired = await db.execute(update(Event).where(*expire_where).values(status="expired"))
+    cleaned = await db.execute(delete(Event).where(*cleanup_where))
+
+    await db.commit()
+    return {"expired": expired.rowcount, "cleaned": cleaned.rowcount}
+
+
 @router.post("/expire-stale", status_code=200)
 async def expire_stale_events(
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
     """POST /api/v2/events/expire-stale — 30일 초과 pending → expired, 7일 초과 delivered 삭제."""
-    now = datetime.now(timezone.utc)
-    cutoff_expire = now - timedelta(days=_EXPIRE_DAYS)
-    cutoff_cleanup = now - timedelta(days=_CLEANUP_DAYS)
-
-    expired = await db.execute(
-        update(Event)
-        .where(
-            Event.org_id == org_id,
-            Event.status == "pending",
-            Event.created_at < cutoff_expire,
-        )
-        .values(status="expired")
-    )
-
-    cleaned = await db.execute(
-        delete(Event).where(
-            Event.org_id == org_id,
-            Event.status == "delivered",
-            Event.delivered_at < cutoff_cleanup,
-        )
-    )
-
-    await db.commit()
-    return {
-        "expired": expired.rowcount,
-        "cleaned": cleaned.rowcount,
-    }
+    return await expire_stale_events_core(db, org_id)

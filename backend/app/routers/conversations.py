@@ -266,10 +266,14 @@ async def _dispatch_conversation_event(
     org_id: uuid.UUID,
     sender: "ResolvedMember | TeamMember",
     exclude_ids: set[uuid.UUID] | None = None,
+    webhook_covered_ids: set[uuid.UUID] | None = None,
 ) -> list[tuple[str, dict]]:
     """conversation:message → Event INSERT + flush. push 페이로드 반환 (commit 후 호출).
 
     exclude_ids: SSE 발송에서 제외할 member_id 집합 (Discord 수신자 등).
+    webhook_covered_ids: E-EVENT-1CONFIG — webhook 으로 전달되는(=SSE enqueue 스킵할) agent
+        member 집합. send_message 요청 트랜잭션서 webhook 전달 대상과 **같은 snapshot** 으로
+        산출돼 넘어온다(resolve_conversation_webhook_targets) → skip↔deliver 동일 결정·TOCTOU 차단.
     반환값: [(pid_str, payload)] — db.commit() 완료 후 _push_to_agent() 호출용.
     """
     if not conversation.project_id:
@@ -292,10 +296,28 @@ async def _dispatch_conversation_event(
     )).all()
     member_type_map = {r[0]: r[1] for r in member_rows}
 
+    # E-EVENT-1CONFIG(이중수신 박멸): webhook-covered agent recipient 는 SSE enqueue 스킵 —
+    # webhook 경로(deliver_conversation_message_webhook)가 동일 메시지를 전달하므로(대칭). covered
+    # 집합은 webhook 실 전달 대상과 같은 snapshot 으로 산출돼(authorized=mentioned 우선·sender 제외 /
+    # member-bound / project 독립 / member_id=null 브로드캐스트 제외) 넘어온다 → 비-mentioned
+    # participant·human·broadcast 는 covered 밖 → SSE 유지(silent loss 0). human Event 는 무변경(FORK2).
+    webhook_covered = webhook_covered_ids or set()
+
     events_to_push: list[tuple[str, Event]] = []
     _set_working_any = False
     for pid in sorted(participant_ids):  # deadlock 방지: 일관 락 순서
         m_type = member_type_map.get(pid, "human")
+        is_agent = m_type == "agent"
+        # 1aeecdde P2: agent recipient 에게 메시지가 dispatch = 답장 생성 시작 → working emit.
+        # 그 agent 가 reply 를 보내면 send_message 에서 clear, 안 보내면 TTL 자동 소멸(ephemeral).
+        # webhook-covered agent 도 webhook 으로 받아 답장하므로 working 표시는 유지한다.
+        if is_agent:
+            chat_presence.set_working(str(conversation.id), str(pid))
+            _set_working_any = True
+        # webhook-covered agent → SSE Event/seq/push 스킵(이중수신 박멸). human Event 는 무변경
+        # (웹 UI SSE = events.py status 별경로·FORK2).
+        if is_agent and pid in webhook_covered:
+            continue
         event = Event(
             project_id=conversation.project_id,
             org_id=org_id,
@@ -310,11 +332,6 @@ async def _dispatch_conversation_event(
         )
         db.add(event)
         events_to_push.append((str(pid), event))
-        # 1aeecdde P2: agent recipient 에게 메시지가 dispatch = 답장 생성 시작 → working emit.
-        # 그 agent 가 reply 를 보내면 send_message 에서 clear, 안 보내면 TTL 자동 소멸(ephemeral).
-        if m_type == "agent":
-            chat_presence.set_working(str(conversation.id), str(pid))
-            _set_working_any = True
 
     # flush로 event.id 확보
     await db.flush()
@@ -342,9 +359,13 @@ async def _dispatch_mention_events(
     org_id: uuid.UUID,
     sender: TeamMember,
     mention_targets: set[uuid.UUID],
+    webhook_covered_ids: set[uuid.UUID] | None = None,
 ) -> list[tuple[str, dict]]:
     """AC1: 멘션 대상에게 conversation:mention Event INSERT + flush. push 페이로드 반환 (commit 후 호출).
 
+    webhook_covered_ids: E-EVENT-1CONFIG — webhook 전달 대상과 같은 snapshot 으로 산출된
+        SSE-skip agent 집합(_dispatch_conversation_event 와 공유). 멘션 대상 ⊆ authorized 라
+        그대로 적용 가능.
     반환값: [(pid_str, payload)] — db.commit() 완료 후 _push_to_agent() 호출용.
     """
     if not conversation.project_id or not mention_targets:
@@ -356,9 +377,16 @@ async def _dispatch_mention_events(
     )).all()
     member_type_map = {r[0]: r[1] for r in member_rows}
 
+    # E-EVENT-1CONFIG(이중수신 박멸): webhook-covered agent 는 SSE(conversation:mention) 스킵 —
+    # webhook 이 동일 메시지를 전달. covered 집합은 webhook 실 전달과 같은 snapshot(TOCTOU 차단).
+    webhook_covered = webhook_covered_ids or set()
+
     events_to_push: list[tuple[str, Event]] = []
     for pid in sorted(mention_targets):  # deadlock 방지: 일관 락 순서
         m_type = member_type_map.get(pid, "human")
+        # webhook-covered agent → SSE 스킵. human 은 무변경(FORK2).
+        if m_type == "agent" and pid in webhook_covered:
+            continue
         event = Event(
             project_id=conversation.project_id,
             org_id=org_id,
@@ -1210,10 +1238,37 @@ async def send_message(
     # 비-command 면 빈 결과 → 무영향. 차단 대상은 dispatch exclude 로 합쳐 주입 0.
     blocked_agent_ids, command_hints = await _command_capability_gate(db, conv, msg, sender, org_id)
 
+    # E-EVENT-1CONFIG: webhook 전달 대상을 요청 트랜잭션서 1회 산출(SSOT) — SSE-skip 결정과 실제
+    # webhook delivery 가 **같은 snapshot/결정**을 쓰게 해 TOCTOU silent loss 를 차단한다(산티아고
+    # Finding 1). 산출된 target 을 그대로 delivery task 로 넘기고(post-commit requery 0), 그로부터
+    # 도출한 covered member 집합을 SSE-skip 에 쓴다.
+    from app.services.conversation_webhook import resolve_conversation_webhook_targets
+    webhook_targets: list = []
+    if conv.project_id:
+        try:
+            webhook_targets = await resolve_conversation_webhook_targets(
+                db,
+                conversation_id=conversation_id,
+                org_id=org_id,
+                project_id=conv.project_id,
+                sender_id=sender.id,
+                mentioned_ids=list(msg.mentioned_ids) if msg.mentioned_ids else None,
+            )
+        except Exception:
+            logger.warning(
+                "webhook target resolve failed conversation_id=%s — SSE 유지(skip 0·fail-open)",
+                conversation_id, exc_info=True,
+            )
+    webhook_covered_ids = {t.member_id for t in webhook_targets if t.member_id is not None}
+
     pending_sse_pushes: list[tuple[str, dict]] = []
     try:
         async with db.begin_nested():
-            pending_sse_pushes += await _dispatch_conversation_event(db, conv, msg, org_id, sender, exclude_ids=discord_exclude_ids | blocked_agent_ids)
+            pending_sse_pushes += await _dispatch_conversation_event(
+                db, conv, msg, org_id, sender,
+                exclude_ids=discord_exclude_ids | blocked_agent_ids,
+                webhook_covered_ids=webhook_covered_ids,
+            )
     except Exception as _dispatch_err:
         # dispatch 실패를 삼키지 않고 surface — 게이트웨이 이벤트 미생성 무음 방지
         logger.error("conversation event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
@@ -1225,7 +1280,10 @@ async def send_message(
         if mention_targets:
             try:
                 async with db.begin_nested():
-                    pending_sse_pushes += await _dispatch_mention_events(db, conv, msg, org_id, sender, mention_targets)
+                    pending_sse_pushes += await _dispatch_mention_events(
+                        db, conv, msg, org_id, sender, mention_targets,
+                        webhook_covered_ids=webhook_covered_ids,
+                    )
             except Exception:
                 logger.warning("mention event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
 
@@ -1298,7 +1356,8 @@ async def send_message(
     except Exception:
         logger.warning("ws_chat broadcast failed message_id=%s", msg.id, exc_info=True)
 
-    # webhook delivery BackgroundTask (AC1~8)
+    # webhook delivery BackgroundTask (AC1~8) — E-EVENT-1CONFIG: targets 를 요청 트랜잭션서 산출한
+    # webhook_targets 로 고정 전달(post-commit requery 0·SSE-skip 과 동일 snapshot·TOCTOU 차단).
     from app.services.conversation_webhook import deliver_conversation_message_webhook
     background_tasks.add_task(
         deliver_conversation_message_webhook,
@@ -1311,6 +1370,7 @@ async def send_message(
         created_at=msg.created_at,
         mentioned_ids=list(msg.mentioned_ids) if msg.mentioned_ids else None,
         content=msg.content,
+        targets=webhook_targets,
     )
 
     # Discord 아웃바운드 (AC9~11)

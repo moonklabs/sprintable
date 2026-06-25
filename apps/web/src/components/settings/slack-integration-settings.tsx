@@ -250,7 +250,7 @@ export function SlackIntegrationSettingsSection() {
               <div className="border-b border-white/8 px-5 py-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
-                    <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">{t('workspaceLabel')}</p>
+                    <p className="text-xs text-muted-foreground">{t('workspaceLabel')}</p>
                     <h3 className="text-lg font-semibold text-foreground">
                       {data.workspace?.team_name ?? t('workspaceDisconnected')}
                     </h3>
@@ -273,15 +273,15 @@ export function SlackIntegrationSettingsSection() {
               </div>
               <div className="grid gap-3 px-5 py-4 sm:grid-cols-3">
                 <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{t('metricChannels')}</p>
+                  <p className="text-xs text-muted-foreground">{t('metricChannels')}</p>
                   <p className="mt-2 text-2xl font-semibold text-foreground">{data.channels.length}</p>
                 </div>
                 <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{t('metricMapped')}</p>
+                  <p className="text-xs text-muted-foreground">{t('metricMapped')}</p>
                   <p className="mt-2 text-2xl font-semibold text-foreground">{data.mappings.length}</p>
                 </div>
                 <div className="rounded-2xl border border-white/8 bg-black/10 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{t('metricDirty')}</p>
+                  <p className="text-xs text-muted-foreground">{t('metricDirty')}</p>
                   <p className="mt-2 text-2xl font-semibold text-foreground">{allDirtyChannels.length}</p>
                 </div>
               </div>
@@ -290,7 +290,7 @@ export function SlackIntegrationSettingsSection() {
             <GlassPanel className="border-white/8 bg-muted/40 p-5">
               <div className="space-y-3">
                 <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <CheckCircle2 className="size-4 text-emerald-300" />
+                  <CheckCircle2 className="size-4 text-success" />
                   {t('actionPanelTitle')}
                 </div>
                 <p className="text-sm text-muted-foreground">{t('actionPanelDescription')}</p>
@@ -328,7 +328,7 @@ export function SlackIntegrationSettingsSection() {
           {loading ? (
             <div className="grid gap-3">
               {[1, 2, 3].map((item) => (
-                <div key={item} className="h-28 animate-pulse rounded-3xl border border-white/8 bg-muted/45" />
+                <div key={item} className="h-28 animate-pulse rounded-xl border border-white/8 bg-muted/45" />
               ))}
             </div>
           ) : data.status === 'disconnected' ? (
@@ -384,7 +384,7 @@ export function SlackIntegrationSettingsSection() {
 
                       <div className="grid flex-1 gap-3 xl:max-w-xl xl:grid-cols-[minmax(0,1fr)_auto]">
                         <div className="space-y-2">
-                          <label className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{t('selectProjectLabel')}</label>
+                          <label className="text-xs text-muted-foreground">{t('selectProjectLabel')}</label>
                           <OperatorDropdownSelect
                             value={selectedProjectId}
                             onValueChange={(v) => setSelectedProjects((prev) => ({ ...prev, [channel.id]: v }))}
@@ -461,7 +461,7 @@ export function SlackIntegrationSettingsSection() {
       ) : null}
 
       <Dialog open={Boolean(remapConflict)} onOpenChange={(open) => { if (!open) setRemapConflict(null); }}>
-        <DialogContent className="max-w-lg rounded-3xl border border-white/10 bg-muted text-foreground shadow-[0_30px_80px_rgba(0,0,0,0.42)]">
+        <DialogContent className="max-w-lg rounded-xl border border-white/10 bg-muted text-foreground shadow-[0_30px_80px_rgba(0,0,0,0.42)]">
           <DialogHeader>
             <DialogTitle>{t('remapDialogTitle')}</DialogTitle>
             <DialogDescription className="text-muted-foreground">

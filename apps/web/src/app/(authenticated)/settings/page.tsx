@@ -816,7 +816,7 @@ export default function SettingsPage() {
         <div className={`shrink-0 border-r overflow-y-auto p-4 flex-col w-52 ${lnbOpen ? 'flex' : 'hidden'} md:flex`}>
           <h1 className="mb-4 px-2 text-sm font-semibold">{t('title')}</h1>
           <TabsList variant="line" className="w-full flex-col items-stretch">
-            <span className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('myAccount')}</span>
+            <span className="px-2 pb-1 pt-1 text-[10px] font-medium text-muted-foreground/70">{t('myAccount')}</span>
             <TabsTrigger value="profile">
               <User className="h-4 w-4" />
               {t('tabProfile')}
@@ -830,7 +830,7 @@ export default function SettingsPage() {
               {t('tabNotifications')}
             </TabsTrigger>
 
-            <span className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('projectSettings')}</span>
+            <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground/70">{t('projectSettings')}</span>
             {currentProjectId && !HIDDEN_SETTINGS_TABS.has('ai') ? (
               <TabsTrigger value="ai">
                 <Bot className="h-4 w-4" />
@@ -858,7 +858,7 @@ export default function SettingsPage() {
 
             {adminChecked ? (
               <>
-                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('organizationSettings')}</span>
+                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground/70">{t('organizationSettings')}</span>
                 <TabsTrigger value="organization">
                   <FolderKanban className="h-4 w-4" />
                   {t('tabOrganization')}
@@ -877,7 +877,7 @@ export default function SettingsPage() {
 
             {adminChecked && isAdmin ? (
               <>
-                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('billing')}</span>
+                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground/70">{t('billing')}</span>
                 {isEEEnabled() && (
                   <TabsTrigger value="subscription">
                     <CreditCard className="h-4 w-4" />
@@ -898,7 +898,7 @@ export default function SettingsPage() {
             ) : null}
 
             {/* E-GHAPP: 연동 — 자체 섹션(결제와 분리·향후 slack/jira 등 통합 표준 위치)·서브라우트 `/settings/integrations`(install-callback 타깃·탭 아닌 발견성 진입점) */}
-            <span className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('tabIntegrations')}</span>
+            <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground/70">{t('tabIntegrations')}</span>
             <Link
               href="/settings/integrations"
               className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground transition hover:text-foreground"
@@ -907,7 +907,7 @@ export default function SettingsPage() {
               {t('tabIntegrations')}
             </Link>
 
-            <span className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{t('dangerZone')}</span>
+            <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground/70">{t('dangerZone')}</span>
             <TabsTrigger
               value="danger"
               className="text-destructive hover:text-destructive data-active:text-destructive data-active:bg-destructive/10"
@@ -1005,7 +1005,7 @@ export default function SettingsPage() {
                             <div key={category.key}>
                               {/* 카테고리 헤더 */}
                               <div className="mb-1 flex items-center justify-between">
-                                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                <span className="text-xs font-semibold text-muted-foreground">
                                   {t(`notification_category_${category.key}`)}
                                 </span>
                                 <button

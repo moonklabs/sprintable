@@ -162,7 +162,7 @@ export function AgentHitlRequestsList() {
                           <User className="size-3.5" />
                           {t('assigneeLine', { assignee: request.requested_for_name ?? t('unknownAssignee') })}
                         </span>
-                        <span className="inline-flex items-center gap-1 text-amber-200">
+                        <span className="inline-flex items-center gap-1 text-warning">
                           <TriangleAlert className="size-3.5" />
                           {t('deadlineLine', { countdown: getCountdownLabel(request.expires_at, t) })}
                         </span>

@@ -200,7 +200,7 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
               const isOAuth = connection.authStrategy === 'oauth';
               const canSave = !isOAuth && Boolean(secretDrafts[connection.serverKey]?.trim());
               return (
-                <div key={connection.serverKey} className="rounded-3xl border border-white/10 bg-muted/45 p-4">
+                <div key={connection.serverKey} className="rounded-xl border border-white/10 bg-muted/45 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
@@ -274,7 +274,7 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
           </div>
         )}
 
-        <div className="rounded-3xl border border-dashed border-white/10 p-4">
+        <div className="rounded-xl border border-dashed border-white/10 p-4">
           <div className="space-y-1">
             <h3 className="text-sm font-semibold text-foreground">{t('customRequestTitle')}</h3>
             <p className="text-sm text-muted-foreground">{t('customRequestDescription')}</p>

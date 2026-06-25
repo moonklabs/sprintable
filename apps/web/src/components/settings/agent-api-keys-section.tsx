@@ -254,11 +254,11 @@ export function AgentApiKeysSection({ projectId }: { projectId: string }) {
                 </div>
 
                 {freshKey ? (
-                  <div className="mb-3 rounded-md border border-yellow-300 bg-yellow-50 p-3 dark:border-yellow-700 dark:bg-yellow-950">
-                    <p className="mb-1 text-xs font-semibold text-yellow-800 dark:text-yellow-200">
+                  <div className="mb-3 rounded-md border border-warning/30 bg-warning/8 p-3">
+                    <p className="mb-1 text-xs font-semibold text-warning">
                       새 API Key — 지금만 표시됩니다. 복사해 두세요.
                     </p>
-                    <code className="block break-all text-xs text-yellow-900 dark:text-yellow-100">
+                    <code className="block break-all text-xs text-warning">
                       {freshKey.api_key}
                     </code>
                   </div>

@@ -2,6 +2,7 @@
 
 import { useTheme } from 'next-themes';
 import { useEffect, useState, startTransition } from 'react';
+import { Palette } from 'lucide-react';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
@@ -24,7 +25,7 @@ export function ThemeSettings() {
     <SectionCard>
       <SectionCardHeader>
         <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">🎨 테마 설정</h2>
+          <h2 className="flex items-center gap-1.5 text-base font-semibold text-foreground"><Palette className="size-4" />테마 설정</h2>
           <p className="text-sm text-muted-foreground">라이트 모드, 다크 모드 또는 시스템 설정을 따를 수 있습니다.</p>
         </div>
       </SectionCardHeader>

@@ -284,7 +284,10 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         <SectionCardHeader>
           <h2 className="text-base font-semibold text-foreground">멤버 ({members.length})</h2>
         </SectionCardHeader>
-        <SectionCardBody className="space-y-2">
+        <SectionCardBody>
+          {/* HARD 픽셀 딴판 fix: 박시 per-member 카드 → project-access와 동일 de-boxy divide-y(공유 MemberRow flat·양 surface 정합) */}
+          {members.length > 0 ? (
+          <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
           {members.map((member) => {
             const isThisOwner = member.role === 'owner';
             const canEdit = isOwner && !isThisOwner;
@@ -293,6 +296,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 key={member.id}
                 name={member.name}
                 email={member.email}
+                className="border-0 rounded-none bg-transparent"
                 meta={member.joined_at ? `${new Date(member.joined_at).toLocaleDateString('ko-KR')} 가입` : undefined}
                 actions={
                   <>
@@ -319,7 +323,8 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
               />
             );
           })}
-          {members.length === 0 && (
+          </div>
+          ) : (
             <p className="text-sm text-muted-foreground">멤버가 없습니다.</p>
           )}
         </SectionCardBody>
@@ -347,11 +352,13 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
           <SectionCardHeader>
             <h2 className="text-base font-semibold text-foreground">초대 대기 ({invites.length})</h2>
           </SectionCardHeader>
-          <SectionCardBody className="space-y-2">
+          <SectionCardBody>
+            <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
             {invites.map((invite) => (
               <MemberRow
                 key={invite.id}
                 name={invite.email}
+                className="border-0 rounded-none bg-transparent"
                 meta={`${invite.role} · 만료: ${new Date(invite.expires_at).toLocaleDateString('ko-KR')}`}
                 emphasis="subtle"
                 actions={
@@ -383,6 +390,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 }
               />
             ))}
+            </div>
           </SectionCardBody>
         </SectionCard>
       )}

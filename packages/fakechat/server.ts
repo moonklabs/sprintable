@@ -21,8 +21,13 @@ import { isInjectableEventType } from './inject-allowlist'
 const API_URL = (
   process.env.SPRINTABLE_API_URL ?? 'https://sprintable-backend-dev-57iommnikq-du.a.run.app'
 ).replace(/\/$/, '')
-// AGENT_API_KEY fallback for compatibility with existing .mcp.json configs
+// AGENT_API_KEY fallback for compatibility with existing .mcp.json configs.
+// 04791bd9: 키 주입은 launch env(config/launch)가 담당 — plugin 프로세스↔workspace .mcp.json
+// path 링크 부재로 코드 path-fallback(#1708 readMcpJsonEnv)은 futile이라 revert(process.env-only).
 const API_KEY = (process.env.SPRINTABLE_API_KEY ?? process.env.AGENT_API_KEY ?? '').trim()
+// 선생님 설계: webhook 구성된 에이전트는 fakechat SSE off(이중 주입 방지·discord가 처리).
+// HAS_WEBHOOK="true"(launch env) → SSE 안 엶. webhook 없으면(오스카 등) on. harmless safety.
+const HAS_WEBHOOK = (process.env.HAS_WEBHOOK ?? '').toLowerCase() === 'true'
 
 type InboundMeta = {
   threadId: string
@@ -315,6 +320,10 @@ async function _consumeStream(): Promise<void> {
 }
 
 async function _runStream(): Promise<void> {
+  if (HAS_WEBHOOK) {
+    process.stderr.write('[fakechat] webhook configured — SSE off\n')
+    return
+  }
   if (!API_KEY) {
     process.stderr.write('[fakechat] SPRINTABLE_API_KEY / AGENT_API_KEY not set — SSE disabled\n')
     return

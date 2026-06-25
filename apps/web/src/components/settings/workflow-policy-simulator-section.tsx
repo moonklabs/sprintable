@@ -127,7 +127,7 @@ export function WorkflowPolicySimulatorSection() {
           </div>
 
           <div className="space-y-1">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('simAxisRouting')}</p>
+            <p className="text-[11px] font-medium text-muted-foreground">{t('simAxisRouting')}</p>
             {result.routing_path.length ? (
               <ul className="space-y-0.5">
                 {result.routing_path.map((s, i) => (
@@ -143,7 +143,7 @@ export function WorkflowPolicySimulatorSection() {
           </div>
 
           <div className="space-y-1">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('simAxisGates')}</p>
+            <p className="text-[11px] font-medium text-muted-foreground">{t('simAxisGates')}</p>
             {result.gates.length ? (
               <div className="flex flex-wrap gap-1.5">
                 {result.gates.map((g, i) => {
@@ -161,7 +161,7 @@ export function WorkflowPolicySimulatorSection() {
           </div>
 
           <div className="space-y-1">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('simAxisTrust')}</p>
+            <p className="text-[11px] font-medium text-muted-foreground">{t('simAxisTrust')}</p>
             <div className="flex flex-wrap items-center gap-2">
               {decisionMeta ? <Badge variant={decisionMeta.variant}>{t(decisionMeta.labelKey)}</Badge> : null}
               <span className="text-xs text-muted-foreground">
