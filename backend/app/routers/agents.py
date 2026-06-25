@@ -25,6 +25,7 @@ from app.services.agent_onboarding_config import (
     build_agent_mcp_config,
 )
 from app.services.agent_verify import get_verification_state, start_verification
+from app.services.onboarding_funnel import emit_onboarding_event, safe_key_prefix
 from app.services.org_agent import create_org_level_agent
 
 router = APIRouter(prefix="/api/v2/agents", tags=["agents"])
@@ -121,6 +122,14 @@ async def create_org_agent(
     response["mcp_config"] = build_agent_mcp_config(api_key_plaintext=api_key_plaintext)
     if api_key_plaintext:
         response["api_key"] = api_key_plaintext
+
+    # OB-4 seam: agent_created (funnel·non-blocking·fail-silent). key_prefix=prefix-only(평문키 금지).
+    await emit_onboarding_event(
+        session, "agent_created", agent_id=member.id, org_id=org_id,
+        project_id=(project_ids[0] if project_ids else None),
+        runtime="claude-code", transport="stdio", key_prefix=safe_key_prefix(api_key_plaintext),
+    )
+    await session.commit()
     return response
 
 
@@ -153,6 +162,14 @@ async def get_agent_connection_artifact(
         raise HTTPException(status_code=404, detail="Agent not found")
 
     artifact = build_agent_mcp_config(api_key_plaintext=_API_KEY_PLACEHOLDER, runtime=runtime)
+
+    # OB-4 seam: config_generated (generator 아티팩트 반환·funnel·non-blocking).
+    await emit_onboarding_event(
+        session, "config_generated", agent_id=member.id, org_id=org_id,
+        runtime=runtime, transport="stdio",
+    )
+    await session.commit()
+
     # BE↔FE 계약 락(OB-3 wizard 1:1 렌더): content = paste-ready .mcp.json **문자열**(dict 아님).
     return {
         "filename": ".mcp.json",
@@ -194,6 +211,11 @@ async def verify_agent_connection(
 
     seq = await start_verification(
         session, agent_id=agent_id, org_id=org_id, project_id=member.project_id
+    )
+    # OB-4 seam: event_sent (합성 verify 이벤트 디스패치·funnel·non-blocking·verify tx 동승).
+    await emit_onboarding_event(
+        session, "event_sent", agent_id=agent_id, org_id=org_id,
+        project_id=member.project_id, runtime="claude-code", transport="stdio",
     )
     await session.commit()
 
