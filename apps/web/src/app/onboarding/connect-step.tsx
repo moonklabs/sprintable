@@ -61,6 +61,30 @@ function maskApiKey(key: string): string {
   return `${prefix}••••${last4}`;
 }
 
+/**
+ * 아티팩트 렌더 — URL 소스 우선순위: OB-1 connection-artifact content(backend-direct URL 권위).
+ * OB-1 미머지/404 시 FE-built fallback(provisional·env URL). 키는 first-run newApiKey 주입(display=마스킹).
+ * ⚠️ 실 working URL은 OB-1(SPRINTABLE_API_URL=backend-direct·CF 금지)이 소유 — env fallback은 임시.
+ */
+function renderArtifact(baseContent: string | null, apiKey: string, mask: boolean): string {
+  const key = mask ? maskApiKey(apiKey) : apiKey;
+  if (baseContent) {
+    try {
+      const parsed = JSON.parse(baseContent) as {
+        mcpServers?: { sprintable?: { env?: Record<string, string> } };
+      };
+      const env = parsed?.mcpServers?.sprintable?.env;
+      if (env) {
+        env.AGENT_API_KEY = key;
+        return JSON.stringify(parsed, null, 2);
+      }
+    } catch {
+      // OB-1 content 파싱 실패 → fallback
+    }
+  }
+  return buildConfig(key);
+}
+
 function HighlightedJson({ text }: { text: string }) {
   const segments: { t: string; c?: string }[] = [];
   const regex = /("(?:\\.|[^"\\])*"\s*:)|("(?:\\.|[^"\\])*")|([{}[\],])/g;
@@ -84,6 +108,7 @@ function HighlightedJson({ text }: { text: string }) {
 export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   const t = useTranslations('onboarding');
 
+  const [artifactBase, setArtifactBase] = useState<string | null>(null);
   const [beSteps, setBeSteps] = useState<RawStep[] | null>(null);
   const [hasCopied, setHasCopied] = useState(false);
   const [justCopied, setJustCopied] = useState(false);
@@ -113,6 +138,24 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
     return () => clearInterval(iv);
   }, [agentId, apiKey, pollStatus]);
 
+  // OB-1 connection-artifact = URL 소스(backend-direct 권위). 404/미머지 시 FE-built fallback.
+  useEffect(() => {
+    if (!agentId || !apiKey) return;
+    let active = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/agents/${agentId}/connection-artifact`);
+        if (!res.ok) return; // 미머지/404 → fallback(provisional)
+        const json = (await res.json()) as { data?: { content?: string }; content?: string };
+        const content = json?.data?.content ?? json?.content;
+        if (active && typeof content === 'string') setArtifactBase(content);
+      } catch {
+        // swallow — graceful
+      }
+    })();
+    return () => { active = false; };
+  }, [agentId, apiKey]);
+
   const displaySteps: DisplayStep[] = RAIL_ORDER.map((state) => {
     const be = beSteps?.find((s) => s.state === state);
     let status: RailStatus = be?.status ?? 'pending';
@@ -137,7 +180,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   const handleCopy = async () => {
     if (!apiKey) return;
     try {
-      await navigator.clipboard.writeText(buildConfig(apiKey));
+      await navigator.clipboard.writeText(renderArtifact(artifactBase, apiKey, false));
     } catch {
       // ignore clipboard failure
     }
@@ -191,7 +234,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
     );
   }
 
-  const displayConfig = buildConfig(maskApiKey(apiKey));
+  const displayConfig = renderArtifact(artifactBase, apiKey, true);
 
   return (
     <div className="space-y-4">
