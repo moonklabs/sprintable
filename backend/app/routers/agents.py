@@ -24,6 +24,7 @@ from app.services.agent_onboarding_config import (
     SUPPORTED_RUNTIMES,
     build_agent_mcp_config,
 )
+from app.services.agent_verify import get_verification_state, start_verification
 from app.services.org_agent import create_org_level_agent
 
 router = APIRouter(prefix="/api/v2/agents", tags=["agents"])
@@ -158,4 +159,76 @@ async def get_agent_connection_artifact(
         "content": json.dumps(artifact, indent=2, ensure_ascii=False),
         "agent_id": str(member.id),
         "runtime": runtime,
+    }
+
+
+async def _fetch_org_agent(session: AsyncSession, agent_id: uuid.UUID, org_id: uuid.UUID):
+    """org-scope agent 조회(anti-IDOR). team_members projection VIEW 멀티행 → .limit(1)."""
+    return (await session.execute(
+        select(TeamMember).where(
+            TeamMember.id == agent_id,
+            TeamMember.org_id == org_id,
+            TeamMember.type == "agent",
+        ).limit(1)
+    )).scalar_one_or_none()
+
+
+@router.post("/{agent_id}/verify-connection")
+async def verify_agent_connection(
+    agent_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """OB-2 AC1: 합성 connection_test Event 를 **실 SSE 경로**로 발사 → 라운드트립 verify 시작.
+
+    single-target(AC3): 해당 agent 1명에게만 — fire_webhooks/org 브로드캐스트 미사용. 이벤트는
+    실 /agent/stream 경로(우회 X)로 가고, 에이전트가 ack 하면(acked_seq>=seq) verified 가 된다.
+    응답은 verification-status 와 동일한 6단계 레일(초기 상태)을 같이 실어 FE 가 즉시 렌더하게 한다.
+    """
+    member = await _fetch_org_agent(session, agent_id, org_id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not member.project_id:
+        raise HTTPException(status_code=400, detail="agent has no project scope to verify")
+
+    seq = await start_verification(
+        session, agent_id=agent_id, org_id=org_id, project_id=member.project_id
+    )
+    await session.commit()
+
+    # commit 후 SSE 스트림 nudge(단일 타겟). payload 미포함 — 스트림이 seq>acked_seq 재조회로 가져간다.
+    from app.routers.agent_gateway import wake_agent
+    wake_agent(str(agent_id), seq)
+
+    state = await get_verification_state(session, agent_id)
+    return {
+        "agent_id": str(agent_id),
+        "verification_seq": seq,
+        "verified": state["verified"],
+        "rail": state["rail"],
+    }
+
+
+@router.get("/{agent_id}/verification-status")
+async def agent_verification_status(
+    agent_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """OB-2 AC2: 6단계 레일 폴링/조회(BE↔FE 계약 락). SSE 우선·이 poll 은 fallback.
+
+    각 단계 ``{state, status: pending|active|done}``. ack/verified 는 acked_seq>=seq 권위 신호만.
+    """
+    member = await _fetch_org_agent(session, agent_id, org_id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    state = await get_verification_state(session, agent_id)
+    return {
+        "agent_id": str(agent_id),
+        "verification_seq": state["verify_seq"],
+        "verified": state["verified"],
+        "rail": state["rail"],
     }
