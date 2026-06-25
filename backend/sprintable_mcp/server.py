@@ -5,11 +5,7 @@ import asyncio
 import inspect
 import json
 import logging
-import time
-from collections import OrderedDict
 from typing import get_type_hints
-
-from mcp.server.transport_security import TransportSecuritySettings
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +14,7 @@ from mcp.types import TextContent
 from pydantic import BaseModel
 from pydantic.fields import PydanticUndefined
 
-from .api_client import _api_key_override, client, reset_project_override, set_project_override
+from .api_client import client, reset_project_override, set_project_override
 from .config import settings
 from .response import ok
 from .schemas import SprintableInput
@@ -124,57 +120,24 @@ async def _heartbeat_fire_forget() -> None:
 
 
 # ── E-MCP S2: call-time toolset enforcement ──────────────────────────────────
-# 키의 허용 toolset(scope)을 /api/v2/mcp/manifest에서 로드(per-key 캐시) 후, 매 도구 호출 시
+# 키의 허용 toolset(scope)을 /api/v2/mcp/manifest에서 1회 로드(캐시) 후, 매 도구 호출 시
 # is_tool_allowed로 차단(403-shape). 백엔드 ApiKey.scope가 진짜 SSOT, 여기선 defense-in-depth.
-# E-MCP-HTTP S1: env 단일키 글로벌 캐시 → **per-key bounded 캐시**(http 멀티테넌트·多키 무한증식 방지·
-# LRU+TTL·SeenIdsCache 패턴). 미해소(manifest 실패) sentinel=_SCOPE_FAILOPEN(None=전체 허용 fail-open).
-_SCOPE_MISS = object()
-_SCOPE_FAILOPEN: object = None  # None = legacy 전체 허용(백엔드 최종 SSOT)
+_key_scope: list[str] | None = None
+_scope_loaded: bool = False
 
 
-class _ScopeCache:
-    """per-key scope LRU+TTL 캐시(bound)·SeenIdsCache 패턴. value=list[str]|None(fail-open)."""
-
-    def __init__(self, max_size: int, ttl_seconds: float) -> None:
-        self._max = max_size
-        self._ttl = ttl_seconds
-        self._store: "OrderedDict[str, tuple[float, list[str] | None]]" = OrderedDict()
-
-    def get(self, key: str):
-        item = self._store.get(key)
-        if item is None:
-            return _SCOPE_MISS
-        added_at, scope = item
-        if (time.monotonic() - added_at) > self._ttl:
-            del self._store[key]
-            return _SCOPE_MISS
-        self._store.move_to_end(key)  # LRU touch
-        return scope
-
-    def put(self, key: str, scope: list[str] | None) -> None:
-        self._store[key] = (time.monotonic(), scope)
-        self._store.move_to_end(key)
-        while len(self._store) > self._max:
-            self._store.popitem(last=False)  # LRU evict
-
-
-_scope_cache = _ScopeCache(settings.mcp_scope_cache_max_size, settings.mcp_scope_cache_ttl_seconds)
-
-
-async def _load_scope_for(key: str) -> list[str] | None:
-    """effective 키의 scope 해소(per-key 캐시). manifest 는 api_client 가 per-request 키(contextvar)로
-    호출하므로 그 키의 scope 가 온다. 실패 시 fail-open(None·백엔드 최종 SSOT)."""
-    cached = _scope_cache.get(key)
-    if cached is not _SCOPE_MISS:
-        return cached  # type: ignore[return-value]
+async def _load_scope() -> None:
+    global _key_scope, _scope_loaded
+    if _scope_loaded:
+        return
+    _scope_loaded = True
     try:
         manifest = await client.get("/api/v2/mcp/manifest")
-        scope: list[str] | None = manifest.get("scope") or []
+        _key_scope = manifest.get("scope") or []
     except Exception:
-        scope = _SCOPE_FAILOPEN  # 매니페스트 미가용 → fail-open(백엔드가 최종 SSOT)
+        # 매니페스트 미가용 시 레거시 기본(비파괴 전체)로 fail-open — 백엔드가 최종 SSOT.
+        _key_scope = None
         logger.warning("MCP toolset manifest load failed — falling back to legacy scope")
-    _scope_cache.put(key, scope)
-    return scope
 
 
 def _denied(name: str) -> list[TextContent]:
@@ -216,11 +179,8 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
 
     async def wrapper(**kwargs):
         # E-MCP S2: call-time enforcement — 키 허용 밖 도구는 호출 차단(403-shape).
-        # E-MCP-HTTP S1: effective 키(http=per-request bearer override·stdio=env 단일키)별 scope 로드
-        # (per-key bounded 캐시). 멀티테넌트서 키마다 다른 scope 정확 적용.
-        _eff_key = _api_key_override.get() or settings.agent_api_key
-        _scope = await _load_scope_for(_eff_key)
-        if not is_tool_allowed(name, _scope):
+        await _load_scope()
+        if not is_tool_allowed(name, _key_scope):
             return _denied(name)
         # 85429ee0: per-call project_id override → contextvar(tool 호출 스코프). client.project_id +
         # X-Project-Id 헤더에 반영(org-agent 멀티프로젝트 grant). 미지정이면 키 default(무회귀).
@@ -241,31 +201,12 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     return wrapper
 
 
-# E-MCP-HTTP S2: DNS-rebinding 보호 설정. FastMCP 는 명시 transport_security 없으면 host 기반 자동
-# 보호(localhost allowed_hosts)를 켜 Cloud Run host(*.run.app)를 421 거부한다. MCP_ALLOWED_HOSTS 지정 시
-# 그 호스트만 화이트리스트(보호 ON)·비우면 보호 OFF(공개 bearer-gated 호스팅·Cloud Run TLS+bearer 가 실보안).
-_allowed_hosts = [h.strip() for h in (settings.mcp_allowed_hosts or "").split(",") if h.strip()]
-# ⭐codex RC: allowed_hosts 는 Host 헤더(bare host) exact-match 이지만 allowed_origins 는 Origin 헤더
-# (브라우저=scheme 포함·`https://host`) exact-match 다(SDK _validate_origin). bare host 를 origins 에
-# 넣으면 브라우저 Origin 요청이 403(prod·whitelist 시). → origins 는 `https://{host}` 로 파생(Cloud Run/
-# 커스텀도메인 TLS=https). Poke 등 server-to-server 는 Origin 부재라 항상 통과(SDK: origin 없으면 True).
-_allowed_origins = [f"https://{h}" for h in _allowed_hosts]
-_transport_security = TransportSecuritySettings(
-    enable_dns_rebinding_protection=bool(_allowed_hosts),
-    allowed_hosts=_allowed_hosts,
-    allowed_origins=_allowed_origins,
-)
-
 mcp = FastMCP(
     name="sprintable-mcp-python",
     instructions=(
         "Sprintable Python MCP server. "
         f"Backend: {settings.sprintable_api_url}"
     ),
-    # E-MCP-HTTP S1: stateless HTTP(요청간 세션 미보존)=무상태 툴서버(서버리스/멀티인스턴스 안전·Cloud
-    # Run S2). stdio 모드는 이 설정 무시(영향 0).
-    stateless_http=True,
-    transport_security=_transport_security,
 )
 
 

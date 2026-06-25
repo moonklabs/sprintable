@@ -28,14 +28,6 @@ def main() -> None:
     if not settings.sprintable_api_url:
         print("Error: SPRINTABLE_API_URL environment variable required", file=sys.stderr)
         sys.exit(1)
-
-    # E-MCP-HTTP S1: transport 분기. http=외부/Poke(per-request bearer·startup env-key auth/filter 없음·
-    # SSE bridge 미구동=내부 이벤트 분리). stdio=내부 에이전트(현행·env 단일키·툴+이벤트). 기본 stdio(무회귀).
-    transport = (settings.mcp_transport or "stdio").strip().lower()
-    if transport == "http":
-        _run_http()
-        return
-
     if not settings.agent_api_key:
         print("Error: AGENT_API_KEY environment variable required", file=sys.stderr)
         sys.exit(1)
@@ -76,34 +68,6 @@ async def _run() -> None:
         sse_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await sse_task
-
-
-def _run_http() -> None:
-    """E-MCP-HTTP S1: Streamable HTTP(외부/Poke) — 툴 전용. per-request bearer auth(http_auth ASGI
-    미들웨어가 요청별 키 contextvar set)·startup env-key auth/filter 없음(scope 는 per-key·call-time).
-    ⭐SSE bridge 미구동 = 내부 에이전트 실시간 이벤트는 stdio 경로 분리 유지(§7·격하 0)."""
-    import uvicorn
-
-    from .http_auth import bearer_auth_asgi
-
-    # env fallback 키. ⭐http 모드 실제 인증은 per-request bearer override(미들웨어)라 이 fallback 은
-    # never-hit(미들웨어가 bearer 없으면 401). agent_api_key 미설정 시 placeholder(configure 계약 유지·
-    # 백엔드는 override 키로 호출되며 placeholder 가 새면 401 로 거름·fail-safe). stateless_http=True 는 mcp 구성.
-    client.configure(
-        settings.sprintable_api_url,
-        settings.agent_api_key or "_http_per_request_bearer_only_",
-    )
-    # E-MCP-HTTP S2: Cloud Run 은 $PORT 를 주입(8080 우연일치 의존 X) → PORT 우선·없으면 config default.
-    import os
-
-    port = int(os.environ.get("PORT") or settings.mcp_http_port)
-    app = bearer_auth_asgi(mcp.streamable_http_app())
-    print(
-        f"Sprintable MCP — Streamable HTTP on {settings.mcp_http_host}:{port}/mcp "
-        "(per-request bearer auth·tools-only)",
-        file=sys.stderr,
-    )
-    uvicorn.run(app, host=settings.mcp_http_host, port=port, log_level="info")
 
 
 if __name__ == "__main__":

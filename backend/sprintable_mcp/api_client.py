@@ -24,29 +24,6 @@ def set_project_override(project_id: str | None):
 def reset_project_override(token) -> None:
     _project_override.reset(token)
 
-
-# E-MCP-HTTP S1: per-request API 키 override(http 모드 멀티테넌트). http 미들웨어가 요청경계서
-# Authorization: Bearer <key> 를 set → request() 가 그 키로 백엔드 호출. 미설정(stdio)이면 env
-# 단일키(self._api_key) 사용(무회귀). contextvar 라 async 동시요청별 격리.
-_api_key_override: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "mcp_api_key_override", default=None
-)
-
-
-def set_api_key_override(api_key: str | None):
-    """per-request API 키 override 설정 — 반환 token 으로 reset(http 미들웨어가 요청 스코프로 사용)."""
-    return _api_key_override.set(api_key or None)
-
-
-def reset_api_key_override(token) -> None:
-    _api_key_override.reset(token)
-
-
-# E-MCP-HTTP ee2f4e58: per-key 해소 컨텍스트 캐시(http 멀티테넌트). 키 → {member_id,org_id,project_id}.
-# http 미들웨어가 요청경계서 ensure_auth_context(key) 로 1회 해소·캐시 → 명시 project_id 없는 툴도 그 키의
-# default 로 해소(stdio startup resolve_auth_context 와 parity). 싱글톤 self._* 에 쓰지 않아 테넌트 격리(무블리드).
-_auth_ctx_cache: dict[str, dict[str, str]] = {}
-
 # 백엔드 에러 본문을 MCP 에러 문자열에 노출할 때, 비정상적으로 큰 body가
 # 에이전트 컨텍스트를 잠식하지 않도록 자르는 상한.
 _ERROR_BODY_MAX = 1500
@@ -169,7 +146,7 @@ class SprintableClient:
         self._api_key = api_key
 
     async def resolve_auth_context(self) -> dict[str, str]:
-        """GET /api/v2/auth/me → org_id/project_id/member_id 캐시(stdio 부팅 시 1회)."""
+        """GET /api/v2/auth/me → org_id/project_id/member_id 캐시."""
         data = await self.get("/api/v2/auth/me")
         self._member_id = data.get("member_id") or ""
         self._org_id = data.get("org_id") or ""
@@ -184,58 +161,18 @@ class SprintableClient:
             "project_id": self._project_id,
         }
 
-    async def ensure_auth_context(self, api_key: str) -> dict[str, str]:
-        """E-MCP-HTTP ee2f4e58: per-request bearer 키의 default 컨텍스트(member/org/project)를 키별
-        1회 해소·캐시. http 미들웨어가 요청경계서 호출 → 명시 project_id 없는 툴 호출도 그 키의 default 로
-        해소(stdio resolve_auth_context 와 parity·422 제거). 싱글톤 self._* 는 건드리지 않아 테넌트 격리.
-
-        멀티프로젝트 키: /api/v2/auth/me 가 주는 server-canonical default project_id 를 그대로 사용
-        (클라 임의선택 0). default 가 비면 빈 채로 둬 호출자가 project_id 를 명시하게 한다(추측 금지).
-
-        캐시 수명 = 프로세스. 키의 default project 가 런타임 중 바뀌면 stale 할 수 있으나(재기동 시 해소),
-        parity 가 목표라 TTL 은 의도적으로 두지 않는다(over-engineer 회피).
-        """
-        if not api_key:
-            return {}
-        cached = _auth_ctx_cache.get(api_key)
-        if cached is not None:
-            return cached
-        data = await self.get("/api/v2/auth/me")
-        ctx = {
-            "member_id": data.get("member_id") or "",
-            "org_id": data.get("org_id") or "",
-            "project_id": data.get("project_id") or "",
-        }
-        _auth_ctx_cache[api_key] = ctx
-        return ctx
-
-    def _effective_ctx(self) -> dict[str, str]:
-        """현 요청의 effective 키(per-request override ∨ env 단일키)에 해소된 컨텍스트.
-
-        stdio: override 미설정이라 env 키 기준이고 캐시는 비어 있어 {} → 프로퍼티는 self._* 로 폴백(무회귀).
-        http: 미들웨어가 그 요청 키로 ensure_auth_context 해둬 default 컨텍스트를 돌려준다.
-        """
-        key = _api_key_override.get() or self._api_key
-        return _auth_ctx_cache.get(key, {})
-
     @property
     def member_id(self) -> str:
-        # stdio env-key 해소값 우선 → 없으면(http) per-key 해소 캐시.
-        return self._member_id or self._effective_ctx().get("member_id", "")
+        return self._member_id
 
     @property
     def org_id(self) -> str:
-        return self._org_id or self._effective_ctx().get("org_id", "")
+        return self._org_id
 
     @property
     def project_id(self) -> str:
-        # per-call override(85429ee0) 우선. override=None(=미설정·arg 부재)은 falsy 라 skip →
-        # stdio env-key default → http per-key 해소 default(ee2f4e58). 이 fall-through 가 422 제거 핵심.
-        return (
-            _project_override.get()
-            or self._project_id
-            or self._effective_ctx().get("project_id", "")
-        )
+        # per-call override(85429ee0) 우선 — 없으면 키 default(무회귀).
+        return _project_override.get() or self._project_id
 
     async def request(
         self,
@@ -246,11 +183,9 @@ class SprintableClient:
         params: dict | None = None,
     ) -> Any:
         url = f"{self._base_url}{path}"
-        # E-MCP-HTTP S1: effective 키 = per-request override(http 멀티테넌트) ∨ env 단일키(stdio·무회귀).
-        _key = _api_key_override.get() or self._api_key
         headers = {
-            "Authorization": f"Bearer {_key}",
-            "x-agent-api-key": _key,
+            "Authorization": f"Bearer {self._api_key}",
+            "x-agent-api-key": self._api_key,
             "Content-Type": "application/json",
         }
         # 85429ee0: per-call override 시 X-Project-Id 헤더 전송 — 백엔드 get_verified_org_id 가
@@ -260,15 +195,14 @@ class SprintableClient:
         if _override:
             headers["X-Project-Id"] = _override
 
-        # POST/PUT/PATCH body에 context 필드 자동 주입. ee2f4e58: 프로퍼티 경유로 읽어 http per-key
-        # 해소 default 까지 반영(stdio 는 self._* 우선이라 무회귀).
+        # POST/PUT/PATCH body에 context 필드 자동 주입(project_id 는 override 반영된 effective).
         if method.upper() in ("POST", "PUT", "PATCH") and json is not None:
             if not json.get("project_id") and self.project_id:
                 json = {**json, "project_id": self.project_id}
-            if not json.get("org_id") and self.org_id:
-                json = {**json, "org_id": self.org_id}
-            if not json.get("created_by") and self.member_id:
-                json = {**json, "created_by": self.member_id}
+            if not json.get("org_id") and self._org_id:
+                json = {**json, "org_id": self._org_id}
+            if not json.get("created_by") and self._member_id:
+                json = {**json, "created_by": self._member_id}
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.request(method, url, json=json, params=params, headers=headers)
