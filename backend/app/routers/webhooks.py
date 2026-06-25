@@ -36,12 +36,22 @@ def _get_repo(
 
 async def _get_caller_member_id(
     auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
     session: AsyncSession = Depends(get_db),
 ) -> uuid.UUID:
-    """caller 의 canonical member_id — webhook-config 는 멤버 소유 리소스라 소유 스코프 강제(IDOR 차단).
-    레거시 휴먼 tm.id→members.id 정규화(저장된 member_id 와 동형 매칭)."""
-    from app.services.member_resolver import canonicalize_member_id
-    return await canonicalize_member_id(uuid.UUID(auth.user_id), session)
+    """caller 의 **canonical member_id**(멤버-ssot SSOT `resolve_member`) — webhook-config 소유 스코프.
+
+    휴먼 = org_member.id · 에이전트 = team_member.id. 이게 디스패치(conversation_participants.member_id,
+    0092 이후 동일 canonical 축)와 정합하는 축이다.
+
+    ⚠️ `canonicalize_member_id(auth.user_id)` 금지(축 버그): 휴먼은 `auth.user_id = users.id`(JWT sub,
+    OrgMember.user_id로 매칭)이고 alias 는 team_member.id→org_member.id 전용이라 users.id 는 no-op →
+    **users.id 축**으로 저장/스코프됨. 디스패치는 org_member.id 로 조회 → 0행 → webhook silent 미배달.
+    에이전트는 `auth.user_id = team_member.id` 라 두 방식 동일(무회귀). resolve_member 가 양쪽 정합 보장.
+    """
+    from app.services.member_resolver import resolve_member
+    resolved = await resolve_member(auth, org_id, session)
+    return resolved.id
 
 
 @router.get("/config", response_model=list[WebhookConfigResponse])
