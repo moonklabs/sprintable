@@ -76,3 +76,40 @@ async def test_org_scope_in_query():
     await _entries_with_plan_stories([entry], session, ORG)
     stmt = str(session.execute.await_args.args[0])
     assert "org_id" in stmt and "deleted_at" in stmt  # org-scope + soft-delete 필터.
+
+
+# ─── b47f9b05: history + get_standup enrich 갭 회귀(원 시나리오) ──────────────
+
+def _repo(*, list_ret=None, get_ret=None, session=None):
+    return SimpleNamespace(
+        list=AsyncMock(return_value=list_ret),
+        get=AsyncMock(return_value=get_ret),
+        session=session, org_id=ORG,
+    )
+
+
+@pytest.mark.anyio
+async def test_history_endpoint_enriches_backlog_plan_story():
+    """history 가 백로그(cross-board) plan_story 를 enrich — 미적용 시 plan_stories 빈 채 미노출 회귀."""
+    from app.routers.standups import list_standup_history
+    backlog = uuid.uuid4()
+    session = AsyncMock()
+    result = MagicMock(); result.all.return_value = [_row(backlog, "Backlog", "backlog")]
+    session.execute = AsyncMock(return_value=result)
+    repo = _repo(list_ret=[_entry([backlog])], session=session)
+    out = await list_standup_history(project_id=uuid.uuid4(), limit=30, repo=repo)
+    assert [ps.id for ps in out[0].plan_stories] == [backlog]  # 백로그 노출(enrich)
+
+
+@pytest.mark.anyio
+async def test_get_standup_endpoint_enriches_backlog_plan_story():
+    """단건 조회도 백로그 plan_story enrich(list/upsert/update 와 일관)."""
+    from app.routers.standups import get_standup
+    backlog = uuid.uuid4()
+    entry = _entry([backlog])
+    session = AsyncMock()
+    result = MagicMock(); result.all.return_value = [_row(backlog, "Backlog", "backlog")]
+    session.execute = AsyncMock(return_value=result)
+    repo = _repo(get_ret=entry, session=session)
+    out = await get_standup(id=entry.id, repo=repo)
+    assert [ps.id for ps in out.plan_stories] == [backlog]
