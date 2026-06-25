@@ -15,6 +15,20 @@ export interface SaveStandupInput {
   plan_story_ids?: string[];
 }
 
+/**
+ * b47f9b05: ee standup GET이 Supabase-direct라 raw plan_story_ids만 내려 FE가 active-sprint scoped
+ * stories fallback→백로그(sprint 밖) 탈락. plan_story_ids를 stories org-scope 조회로 resolve해
+ * plan_stories(BE #1731 enrich 동형)로 채워 내린다. cross-board(타 프로젝트 백로그) 노출 보장.
+ */
+export interface PlanStorySummary {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  project_id: string;
+  sprint_id: string | null;
+}
+
 export interface CreateStandupFeedbackInput {
   project_id: string;
   org_id: string;
@@ -53,7 +67,9 @@ export class StandupService {
       .eq('date', date)
       .order('created_at');
     if (error) throw error;
-    return data;
+    const entries = (data ?? []) as Array<Record<string, unknown>>;
+    const map = await this.resolvePlanStories(entries);
+    return entries.map((e) => this.attachPlanStories(e, map));
   }
 
   async getEntryForUser(projectId: string, authorId: string, date: string) {
@@ -65,7 +81,53 @@ export class StandupService {
       .eq('date', date)
       .single();
     if (error && error.code !== 'PGRST116') throw error;
-    return data;
+    if (!data) return data;
+    const map = await this.resolvePlanStories([data]);
+    return this.attachPlanStories(data, map);
+  }
+
+  /** plan_story_ids → stories org-scope 조회(cross-board)로 PlanStorySummary 맵. admin client에도 org_id 가드. */
+  private async resolvePlanStories(
+    entries: Array<Record<string, unknown>>,
+  ): Promise<Map<string, PlanStorySummary>> {
+    const map = new Map<string, PlanStorySummary>();
+    const ids = [...new Set(entries.flatMap((e) => (e.plan_story_ids as string[] | null) ?? []))];
+    if (ids.length === 0) return map;
+    const orgId = (entries.find((e) => e.org_id)?.org_id as string | undefined) ?? null;
+    // ⭐ 불변식(디디): org_id 스코프 ONLY + deleted_at is null. sprint/project/board/status 필터 금지
+    // — 좁히면 백로그(sprint 밖·타 보드) 다시 탈락(BE _entries_with_plan_stories 동형).
+    let query = this.db
+      .from('stories')
+      .select('id, title, status, priority, project_id, sprint_id')
+      .in('id', ids)
+      .is('deleted_at', null);
+    if (orgId) query = query.eq('org_id', orgId);
+    const { data, error } = await query;
+    if (error) throw error;
+    for (const s of (data ?? []) as Array<Record<string, unknown>>) {
+      map.set(s.id as string, {
+        id: s.id as string,
+        title: s.title as string,
+        status: s.status as string,
+        priority: s.priority as string,
+        project_id: s.project_id as string,
+        sprint_id: (s.sprint_id as string | null) ?? null,
+      });
+    }
+    return map;
+  }
+
+  private attachPlanStories<T extends Record<string, unknown>>(
+    entry: T,
+    map: Map<string, PlanStorySummary>,
+  ): T & { plan_stories: PlanStorySummary[] } {
+    const ids = (entry.plan_story_ids as string[] | null) ?? [];
+    return {
+      ...entry,
+      plan_stories: ids
+        .map((id) => map.get(id))
+        .filter((s): s is PlanStorySummary => Boolean(s)),
+    };
   }
 
   async save(input: SaveStandupInput) {
@@ -125,12 +187,14 @@ export class StandupService {
   async getHistory(projectId: string, limit = 50) {
     const { data, error } = await this.db
       .from('standup_entries')
-      .select('author_id, date, done, plan, blockers')
+      .select('author_id, date, done, plan, blockers, plan_story_ids, org_id')
       .eq('project_id', projectId)
       .order('date', { ascending: false })
       .limit(limit);
     if (error) throw error;
-    return data;
+    const entries = (data ?? []) as Array<Record<string, unknown>>;
+    const map = await this.resolvePlanStories(entries);
+    return entries.map((e) => this.attachPlanStories(e, map));
   }
 }
 
