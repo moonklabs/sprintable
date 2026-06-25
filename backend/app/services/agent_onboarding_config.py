@@ -47,8 +47,21 @@ def build_agent_mcp_config(
 
     runtime 은 현재 ``claude-code`` 단일(향후 cursor 등 분기 여지). 미지원 값은 호출부(엔드포인트)가
     400 으로 거른다 — generator 는 항상 canonical stdio 아티팩트를 만든다.
+
+    **OB-2-align — 두 SSE 시스템 통일(AC④)**: sse_bridge 는 ``AGENT_GATEWAY_V2`` env 로 수신 경로를
+    가른다(sse_bridge.py). 두 경로 공존:
+      - V2 ``/api/v2/agent/stream`` — ``AgentGatewaySession`` 생성·recipient_seq/acked_seq 커서.
+        verify(OB-2)·단일경로 fix(5a99842b/c60dd33c)·presence 가 모두 이 경로를 가정. **canonical.**
+      - 구 ``/api/v2/events/stream`` — in-memory ``_agent_connections``·세션/presence 미생성(legacy).
+    flag 미설정이면 sse_bridge 가 **구 경로 default** → 신규 에이전트가 ``AgentGatewaySession`` 을
+    안 만들어 verify ``mcp_reachable`` 가 false-negative(통합 dogfood 적출). 따라서 아티팩트에
+    ``AGENT_GATEWAY_V2="1"`` 을 박아 신규 에이전트를 **V2 로 통일** — mcp_reachable+acked_seq 정렬로
+    verified-green 이 성립한다(서버 무변경·기존 에이전트 무영향).
     """
-    env: dict[str, str] = {"SPRINTABLE_API_URL": resolve_backend_direct_url()}
+    env: dict[str, str] = {
+        "SPRINTABLE_API_URL": resolve_backend_direct_url(),
+        "AGENT_GATEWAY_V2": "1",  # OB-2-align: 신규 에이전트를 V2 게이트웨이(/agent/stream)로 통일.
+    }
     if api_key_plaintext:
         env["AGENT_API_KEY"] = api_key_plaintext
     return {
