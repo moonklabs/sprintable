@@ -8,7 +8,7 @@ from typing import Literal
 
 from fastapi import Depends, Header, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory
@@ -26,6 +26,40 @@ class AuthContext:
     email: str | None
     claims: dict
     org_id: str | None = field(default=None)
+
+
+async def _persist_first_auth_seen(
+    api_key_id: uuid.UUID, member_id: uuid.UUID, org_id: str | None, project_id: str | None
+) -> None:
+    """OB-4b: 첫 인증 1회 ``first_auth_seen`` — caller 세션의 commit 여부와 **무관하게** persist.
+
+    ⚠️ streaming auth(``get_current_user_streaming``)는 세션을 commit 없이 close 하므로, caller-session
+    emit 은 rollback 으로 미persist + ``last_used_at`` dedup 도 깨진다(V2 통일로 에이전트 첫 인증이
+    ``/agent/stream`` 인 게 가장 흔하므로 그 케이스가 핵심). → **전용 단기 committed 세션**에서
+    ``last_used_at IS NULL`` 조건 UPDATE 로 **atomic dedup**(동시/재인증은 0행 → skip, 이중 emit 방지)
+    한 뒤 emit. 인증 무중단(fail-silent).
+    """
+    from app.core.database import async_session_factory
+    from app.models.api_key import ApiKey
+    from app.services.onboarding_funnel import record_onboarding_event
+    try:
+        async with async_session_factory() as s:
+            res = await s.execute(
+                update(ApiKey)
+                .where(ApiKey.id == api_key_id, ApiKey.last_used_at.is_(None))
+                .values(last_used_at=datetime.now(timezone.utc))
+            )
+            if res.rowcount == 0:
+                return  # 이미 첫 인증 처리됨(다른 경로/동시) — atomic dedup
+            await record_onboarding_event(
+                s, event="first_auth_seen", agent_id=member_id,
+                org_id=(uuid.UUID(org_id) if org_id else None),
+                project_id=(uuid.UUID(project_id) if project_id else None),
+                runtime="claude-code", transport="stdio",
+            )
+            await s.commit()
+    except Exception:
+        logger.warning("first_auth_seen persist failed agent=%s", member_id, exc_info=True)
 
 
 async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
@@ -121,16 +155,10 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
     if project_id and project_id not in project_ids:
         project_ids.append(project_id)
 
-    # OB-4b seam(first_auth_seen): 최초 인증 1회·non-blocking·fail-silent(begin_nested 격리). 측정이
-    # 인증 경로를 절대 안 막음(생명선 보호와 동형). funnel mcp_reachable 직전 단계.
+    # OB-4b seam(first_auth_seen): 최초 인증 1회. caller 세션(특히 streaming auth=commit 없음)에 의존하면
+    # 미persist + dedup 깨짐(까심 RC-1) → 전용 committed 세션에서 atomic 처리(경로 무관·race-safe·무중단).
     if _first_auth_seen:
-        from app.services.onboarding_funnel import emit_onboarding_event
-        await emit_onboarding_event(
-            db, "first_auth_seen", agent_id=member_id,
-            org_id=(uuid.UUID(org_id) if org_id else None),
-            project_id=(uuid.UUID(project_id) if project_id else None),
-            runtime="claude-code", transport="stdio",
-        )
+        await _persist_first_auth_seen(api_key.id, member_id, org_id, project_id)
 
     return AuthContext(
         user_id=str(member_id),

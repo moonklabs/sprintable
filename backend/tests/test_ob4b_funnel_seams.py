@@ -91,8 +91,10 @@ async def test_sweep_skips_terminal_no_double_count():
 def test_first_auth_seen_wired_with_dedup_and_isolation():
     from app.dependencies import auth
     src = inspect.getsource(auth)
-    assert "_first_auth_seen = api_key.last_used_at is None" in src  # 첫인증 dedup
-    assert 'emit_onboarding_event(' in src and '"first_auth_seen"' in src
+    assert "_first_auth_seen = api_key.last_used_at is None" in src  # 첫인증 dedup 캡처
+    # 까심 RC-1: streaming auth(commit 없음) 미persist 차단 — 전용 committed 세션 + atomic dedup.
+    assert "_persist_first_auth_seen" in src and '"first_auth_seen"' in src
+    assert "ApiKey.last_used_at.is_(None)" in src  # race-safe atomic dedup(조건 UPDATE)
 
 
 def test_stream_connected_wired_one_time_isolated():
@@ -101,3 +103,40 @@ def test_stream_connected_wired_one_time_isolated():
     assert '"stream_connected"' in src
     # 연결 establish(_pdb·presence) 블록 안에서 emit — 루프(_mark_agent_online)와 분리(1회)
     assert "emit_onboarding_event(" in src
+
+
+# ─── RC-1: 전용 committed 세션 + atomic dedup(까심) ───────────────────────────
+
+def _sess_cm(rowcount):
+    s = AsyncMock()
+    s.add = MagicMock()
+    s.flush = AsyncMock()
+    s.commit = AsyncMock()
+    res = MagicMock()
+    res.rowcount = rowcount
+    s.execute = AsyncMock(return_value=res)
+    cm = AsyncMock()
+    cm.__aenter__ = AsyncMock(return_value=s)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    return cm, s
+
+
+@pytest.mark.anyio
+async def test_persist_first_auth_emits_on_first(monkeypatch):
+    """last_used_at IS NULL UPDATE 가 1행 → 첫 인증 → emit + commit(전용 committed 세션)."""
+    from app.dependencies import auth
+    cm, s = _sess_cm(1)
+    monkeypatch.setattr("app.core.database.async_session_factory", lambda: cm)
+    await auth._persist_first_auth_seen(uuid.uuid4(), uuid.uuid4(), str(uuid.uuid4()), None)
+    s.add.assert_called_once()  # first_auth_seen 저장(commit 보장→경로 무관 persist)
+    s.commit.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_persist_first_auth_skips_when_already_seen(monkeypatch):
+    """조건 UPDATE 0행(이미 인증) → atomic dedup → 이중 emit 0(재인증/동시 안전)."""
+    from app.dependencies import auth
+    cm, s = _sess_cm(0)
+    monkeypatch.setattr("app.core.database.async_session_factory", lambda: cm)
+    await auth._persist_first_auth_seen(uuid.uuid4(), uuid.uuid4(), None, None)
+    s.add.assert_not_called()
