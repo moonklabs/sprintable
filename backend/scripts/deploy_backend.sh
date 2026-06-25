@@ -52,6 +52,9 @@ case "${ENV}" in
         FRONTEND_URL="${FRONTEND_ORIGIN:-https://sprintable-frontend-dev-placeholder.run.app}"
         RUNTIME_SA="cloudrun-runtime-dev@${GCP_PROJECT}.iam.gserviceaccount.com"
         APP_URL="${APP_URL:-https://dev-app.sprintable.ai}"  # OAuth redirect/이메일 링크용 프론트 URL
+        # OB-1: 에이전트 onboarding config 의 backend-direct Cloud Run URL(에이전트 SSE 직통).
+        # CF-fronted 깔끔 도메인 금지(/agent/stream 버퍼·봇차단). cloudbuild _FASTAPI_URL 과 동일 값.
+        FASTAPI_URL="${FASTAPI_URL:-https://sprintable-backend-dev-787818285179.asia-northeast3.run.app}"
         ;;
     prod)
         SERVICE_NAME="sprintable-backend-prod"
@@ -63,6 +66,8 @@ case "${ENV}" in
         FRONTEND_URL="${FRONTEND_ORIGIN:-https://app.sprintable.ai}"
         RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
         APP_URL="${APP_URL:-https://app.sprintable.ai}"
+        # OB-1: prod backend-direct Cloud Run URL(에이전트 SSE 직통·CF 금지).
+        FASTAPI_URL="${FASTAPI_URL:-https://sprintable-backend-prod-787818285179.asia-northeast3.run.app}"
         ;;
     *)
         echo "Usage: $0 [dev|prod]" >&2; exit 1 ;;
@@ -103,6 +108,8 @@ ENV_VARS_SPEC="^@^APP_ENV=${ENV}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@CORS_ORIGINS=${CORS_ORIGINS}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@APP_URL=${APP_URL}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@NEXT_PUBLIC_APP_URL=${APP_URL}"
+# OB-1: agent_onboarding_config generator 가 읽는 backend-direct URL(에이전트 .mcp.json SPRINTABLE_API_URL).
+ENV_VARS_SPEC="${ENV_VARS_SPEC}@FASTAPI_URL=${FASTAPI_URL}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@EVENTBUS_ENABLED=${EVENTBUS_ENABLED}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@MEMBER_SSOT_RESOLVER_SHADOW=${MEMBER_SSOT_RESOLVER_SHADOW}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@MEMBER_SSOT_APIKEY_CUT=${MEMBER_SSOT_APIKEY_CUT}"
