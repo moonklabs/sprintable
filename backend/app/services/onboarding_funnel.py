@@ -74,10 +74,17 @@ async def record_onboarding_event(
     client_ts: datetime | None = None,
     meta: dict | None = None,
 ) -> OnboardingEvent:
-    """단일 onboarding_event INSERT(저장 SSOT). 검증/PII 가드는 호출부 책임. 호출자가 commit.
+    """단일 onboarding_event INSERT(저장 SSOT). 호출자가 commit.
 
-    key_prefix 는 ≤12 절삭(평문키 방어 2중화).
+    **RC-1 choke-point PII 방어(산티아고)**: 어느 호출자(endpoint·BE emit·future caller)든 이 단일
+    저장 경로를 타므로, 여기서 secret-형태(전체키)를 한 번 더 막는다 — meta 등에 평문키가 섞이면
+    ValueError raise(endpoint=422로 전환·emit=fail-silent로 미저장). key_prefix 는 ≤12 절삭(2중화).
     """
+    if contains_secret({
+        "key_prefix": key_prefix, "failure_reason": failure_reason,
+        "runtime": runtime, "env": env, "transport": transport, "meta": meta,
+    }):
+        raise ValueError("onboarding event contains a secret-shaped value — refused")
     row = OnboardingEvent(
         event=event,
         session_id=session_id,

@@ -114,6 +114,46 @@ async def test_post_anonymous_pre_auth_stores():
     db.commit.assert_awaited_once()
 
 
+# ─── RC-1: choke-point PII 방어(record 전 경로) ───────────────────────────────
+
+@pytest.mark.anyio
+async def test_record_rejects_secret_in_meta_choke_point():
+    """record_onboarding_event(전 경로 초크포인트)가 meta 속 전체키를 막는다(endpoint 우회 차단)."""
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    with pytest.raises(ValueError):
+        await f.record_onboarding_event(
+            db, event="config_copied", meta={"api_key": "sk_" + "live_" + "z" * 30}
+        )
+    db.add.assert_not_called()  # secret이면 저장 0
+
+
+@pytest.mark.anyio
+async def test_emit_swallows_secret_meta_not_stored():
+    """BE emit이 secret meta 받아도 record raise→fail-silent로 미저장(예외 전파 0)."""
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.begin_nested = MagicMock(return_value=_nested_cm())
+    await f.emit_onboarding_event(db, "config_generated", meta={"leak": "sk_" + "live_" + "z" * 30})
+    db.add.assert_not_called()
+
+
+# ─── RC-2: pre-auth client agent_id 스푸핑 차단 ───────────────────────────────
+
+@pytest.mark.anyio
+async def test_post_pre_auth_ignores_client_agent_id():
+    """무인증이면 client-supplied agent_id 무시(None)·session_id만 신뢰(스푸핑 차단)."""
+    db = _db()
+    spoofed = uuid.uuid4()
+    sess = uuid.uuid4()
+    body = OnboardingEventBody(event="config_copied", session_id=sess, agent_id=spoofed)
+    await post_onboarding_event(body, db=db, credentials=None, x_agent_api_key=None)
+    row = db.add.call_args[0][0]
+    assert row.agent_id is None and row.key_prefix is None  # 클라 불신
+    assert row.session_id == sess  # session_id만 신뢰
+
+
 @pytest.mark.anyio
 async def test_post_authed_derives_server_truth():
     """키 있으면 agent_id/org_id/key_prefix를 서버가 도출(클라 agent_id 무시)."""

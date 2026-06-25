@@ -61,11 +61,12 @@ async def post_onboarding_event(
     if body.key_prefix and len(body.key_prefix) > KEY_PREFIX_MAX:
         raise HTTPException(status_code=422, detail="key_prefix must be prefix-only (≤12)")
 
-    # optional auth: 키 있으면 서버-truth 우선(클라 agent_id/key_prefix 신뢰 금지·§5).
-    agent_id = body.agent_id
+    # RC-2(산티아고): client-supplied agent_id/org_id/project_id/key_prefix **전부 불신** — valid 키서만
+    # 서버가 도출(스푸핑 차단). 무효/무인증이면 None 유지(pre-auth=session_id만 신뢰). body.agent_id 무시.
+    agent_id: uuid.UUID | None = None
     org_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
-    key_prefix = body.key_prefix
+    key_prefix: str | None = None
     raw_key = (
         x_agent_api_key
         if (x_agent_api_key and x_agent_api_key.startswith("sk_"))
