@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -42,6 +42,12 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
   const [busyId, setBusyId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  // inline confirm 진입 시 안전 기본값(취소)으로 포커스 이동 — 파괴적 액션 a11y (AC③)
+  useEffect(() => {
+    if (deleteConfirmId) cancelRef.current?.focus();
+  }, [deleteConfirmId]);
 
   // [A] 리스트 = 글로벌(null) + 현재 프로젝트 config 만 노출 (스코프 결정: 다른 프로젝트는 해당 탭에서 관리)
   const fetchWebhookConfigs = useCallback(async (mid: string) => {
@@ -186,6 +192,9 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
                   return (
                     <div
                       key={c.id}
+                      role="group"
+                      aria-live="assertive"
+                      aria-label={`${t('webhookDeleteConfirm')} (${label})`}
                       className="flex items-center justify-between gap-3 bg-destructive/5 px-3 py-2.5"
                     >
                       <span className="min-w-0 truncate text-sm text-destructive" title={c.url}>
@@ -193,6 +202,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
                       </span>
                       <div className="flex shrink-0 items-center gap-2">
                         <Button
+                          ref={cancelRef}
                           variant="ghost"
                           size="sm"
                           onClick={() => setDeleteConfirmId(null)}
