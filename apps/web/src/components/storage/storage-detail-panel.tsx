@@ -62,7 +62,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
           </button>
         ) : null}
         <div
-          className="grid size-[96px] w-[128px] place-items-center rounded-[0.5rem] text-info shadow-[0_6px_22px_oklch(0.2_0.05_258_/_0.14)]"
+          className="grid size-[96px] w-[128px] place-items-center rounded-[0.5rem] text-info shadow-lg"
           style={{
             backgroundImage:
               'repeating-linear-gradient(45deg, var(--info-tint), var(--info-tint) 9px, transparent 9px, transparent 18px)',
