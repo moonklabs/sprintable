@@ -68,15 +68,26 @@ async def resolve_accounts(
         except ValueError:
             continue
 
-        user = (await session.execute(select(User).where(User.id == uid))).scalar_one_or_none()
-        if user is None:
+        # active = (DB 저장된 토큰: hash+user_id 일치·non-revoked·non-expired) AND JWT 미만료.
+        # ⚠️ 까심: 미저장 signed RT 가 active 표시되면 안 됨(hash+uid row 요구)·만료/취소 RT 는
+        # PII 미반환(stale RT 만으로 name/email/org/avatar 노출 차단). 비활성=최소 {account_id,status}.
+        jwt_expired = int(claims.get("exp", 0)) < int(now.timestamp())
+        active_row = (await session.execute(
+            select(RefreshToken.id).where(
+                RefreshToken.token_hash == hash_token(rt),
+                RefreshToken.user_id == uid,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > now,
+            )
+        )).scalar_one_or_none()
+        if jwt_expired or active_row is None:
+            out.append(AccountMeta(account_id=str(sub), status="expired"))  # PII 없음
             continue
 
-        expired = int(claims.get("exp", 0)) < int(now.timestamp())
-        row = (await session.execute(
-            select(RefreshToken).where(RefreshToken.token_hash == hash_token(rt))
-        )).scalar_one_or_none()
-        revoked = row is not None and row.revoked_at is not None
+        user = (await session.execute(select(User).where(User.id == uid))).scalar_one_or_none()
+        if user is None:
+            out.append(AccountMeta(account_id=str(sub), status="expired"))
+            continue
 
         org_name = None
         if user.last_org_id is not None:
@@ -93,7 +104,7 @@ async def resolve_accounts(
             email=user.email,
             org_name=org_name,
             avatar_url=avatar_url,
-            status="expired" if (expired or revoked) else "active",
+            status="active",
         ))
     return AccountResolveResponse(accounts=out)
 

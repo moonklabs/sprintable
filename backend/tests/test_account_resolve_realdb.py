@@ -5,8 +5,10 @@ switch rotation 왕복을 real-DB 로 실증. DB env 없으면 skip(CI alembic-f
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
+from datetime import timedelta
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -166,6 +168,80 @@ async def test_switch_account_rotates_and_returns_project():
         # revoked RT 재switch → 401
         r2 = await client.post("/api/v2/auth/switch-account", json={"refresh_token": rt})
         assert r2.status_code == 401
+    finally:
+        app.dependency_overrides.clear()
+        await client.aclose()
+        await engine.dispose()
+        _cleanup_sync()
+
+
+@pytest.mark.anyio
+async def test_resolve_expired_and_unstored_rt_no_pii():
+    """만료 RT·미저장(유효서명·DB無) RT → status=expired·PII 0(까심: stale RT 만으로 PII 노출 차단)."""
+    from app.core.security import create_refresh_token, hash_token
+
+    _seed_sync()
+    expired_rt, exp = create_refresh_token(str(USER), expires_delta=timedelta(seconds=-10))
+    eng = create_engine(_SYNC)
+    try:
+        with eng.begin() as conn:
+            conn.execute(
+                text("INSERT INTO refresh_tokens (id,user_id,token_hash,expires_at) "
+                     "VALUES (gen_random_uuid(), :u, :h, :e)"),
+                {"u": str(USER), "h": hash_token(expired_rt), "e": exp},
+            )
+    finally:
+        eng.dispose()
+    unstored_rt, _ = create_refresh_token(str(USER))  # 저장 안 함
+
+    client, engine, app = await _client()
+    try:
+        for tok in (expired_rt, unstored_rt):
+            r = await client.post("/api/v2/accounts/resolve", json={"refresh_tokens": [tok]},
+                                  headers={"Authorization": "Bearer x"})
+            assert r.status_code == 200, r.text
+            a = r.json()["accounts"][0]
+            assert a["account_id"] == str(USER) and a["status"] == "expired"
+            assert a["name"] is None and a["email"] is None
+            assert a["org_name"] is None and a["avatar_url"] is None
+    finally:
+        app.dependency_overrides.clear()
+        await client.aclose()
+        await engine.dispose()
+        _cleanup_sync()
+
+
+@pytest.mark.anyio
+async def test_forged_token_skipped_and_switch_401():
+    """위조(서명 불일치) 토큰: resolve skip(0건)·switch 401(우리 서명만 통과)."""
+    _seed_sync()
+    forged = "forged.invalid.token"
+    client, engine, app = await _client()
+    try:
+        r = await client.post("/api/v2/accounts/resolve", json={"refresh_tokens": [forged]},
+                              headers={"Authorization": "Bearer x"})
+        assert r.status_code == 200 and r.json()["accounts"] == []
+        r2 = await client.post("/api/v2/auth/switch-account", json={"refresh_token": forged})
+        assert r2.status_code == 401
+    finally:
+        app.dependency_overrides.clear()
+        await client.aclose()
+        await engine.dispose()
+        _cleanup_sync()
+
+
+@pytest.mark.anyio
+async def test_switch_concurrent_double_spend_single_success():
+    """동시 2요청 동일 RT → 원자 rotation 으로 정확히 1건 성공·1건 401(까심 TOCTOU double-spend)."""
+    rt = _seed_sync()
+    client, engine, app = await _client()
+    try:
+        results = await asyncio.gather(
+            client.post("/api/v2/auth/switch-account", json={"refresh_token": rt}),
+            client.post("/api/v2/auth/switch-account", json={"refresh_token": rt}),
+        )
+        codes = sorted(r.status_code for r in results)
+        assert codes == [200, 401], [r.status_code for r in results]
     finally:
         app.dependency_overrides.clear()
         await client.aclose()

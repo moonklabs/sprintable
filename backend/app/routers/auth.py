@@ -808,26 +808,25 @@ async def switch_account(
         return _err("INVALID_TOKEN", "Not a refresh token", 401)
 
     token_hash = hash_token(body.refresh_token)
-    stored = (await session.execute(
-        select(RefreshToken).where(
+    # ⚠️ 원자 single-use rotation(까심 TOCTOU): SELECT-then-UPDATE 비원자면 동시 2요청이 둘 다
+    # 통과해 double-spend. 검증+revoke 를 단일 UPDATE...WHERE revoked_at IS NULL...RETURNING 으로
+    # 원자화 — 동시 요청 중 정확히 1건만 row 매치(나머지 0행→401).
+    revoked_user_id = (await session.execute(
+        update(RefreshToken)
+        .where(
             RefreshToken.token_hash == token_hash,
             RefreshToken.revoked_at.is_(None),
             RefreshToken.expires_at > datetime.now(timezone.utc),
         )
+        .values(revoked_at=datetime.now(timezone.utc))
+        .returning(RefreshToken.user_id)
     )).scalar_one_or_none()
-    if not stored:
+    if revoked_user_id is None:
         return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
 
-    user = await _get_user_by_id(session, uuid.UUID(payload["sub"]))
+    user = await _get_user_by_id(session, revoked_user_id)
     if not user:
         return _err("USER_NOT_FOUND", "User not found", 401)
-
-    # target RT 무효화(rotation·single-use 이중소비 방지)
-    await session.execute(
-        update(RefreshToken)
-        .where(RefreshToken.token_hash == token_hash)
-        .values(revoked_at=datetime.now(timezone.utc))
-    )
 
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:
