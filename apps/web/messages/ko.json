@@ -106,7 +106,7 @@
     "delete": "삭제",
     "cancel": "취소",
     "deleteTitle": "자산을 삭제할까요?",
-    "deleteBody": "{name}을(를) 삭제하면 되돌릴 수 없습니다.",
+    "deleteBody": "<b>{name}</b>을(를) 삭제하면 되돌릴 수 없습니다.",
     "deleteImpact": "이 자산은 현재 {count}곳에서 사용 중입니다 — 삭제하면 아래 항목의 링크가 끊어집니다.",
     "selectPrompt": "자산을 선택하면 상세 정보가 표시됩니다.",
     "emptyTitle": "아직 자산이 없습니다",
