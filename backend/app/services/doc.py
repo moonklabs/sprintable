@@ -68,6 +68,18 @@ async def transition_doc(
         # Gate inbox 미노출+결재 불능. 재상신=새 결재 사이클이므로 terminal gate 를 pending 으로 **re-open**
         # (직접 reset — FSM 전이 아님·해소 메타 clear). pending/held(admin hold)면 그대로 둔다.
         if gate.status in ("approved", "rejected", "auto_passed", "voided"):
+            # 감사추적 보존(산티아고 audit): clear 전에 이전 결재(누가/언제/왜)를 neutral_facts.
+            # decision_history 에 append(append-only·재상신 사이클별 1건) → 반려 이력 손실 0. 그 후 current
+            # 해소필드 clear(새 결재 사이클). JSONB 는 in-place mutation 미감지라 새 dict 재할당.
+            _prior = {
+                "status": gate.status,
+                "resolver_id": str(gate.resolver_id) if gate.resolver_id else None,
+                "resolved_at": gate.resolved_at.isoformat() if gate.resolved_at else None,
+                "resolution_note": gate.resolution_note,
+            }
+            _facts = dict(gate.neutral_facts or {})
+            _facts["decision_history"] = [*_facts.get("decision_history", []), _prior]
+            gate.neutral_facts = _facts
             gate.status = "pending"
             gate.resolver_id = None
             gate.resolved_at = None

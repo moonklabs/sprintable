@@ -6,6 +6,7 @@ confirmed/reject→denied(AC2)·pending status 추가로 422 해소(AC3)·human-
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -118,8 +119,10 @@ async def test_resubmit_reopens_terminal_gate():
     org = uuid.uuid4()
     doc = MagicMock(status="draft", id=uuid.uuid4(), title="t", project_id=uuid.uuid4())
     session = _doc_session(doc)
-    rejected = MagicMock(status="rejected", resolver_id=uuid.uuid4(),
-                         resolved_at=object(), resolution_note="반려사유")
+    prior_resolver = uuid.uuid4()
+    rejected = MagicMock(status="rejected", resolver_id=prior_resolver,
+                         resolved_at=datetime(2026, 6, 26, tzinfo=timezone.utc),
+                         resolution_note="반려사유", neutral_facts=None)
     with patch("app.services.gate_service.create_gate", new=AsyncMock(return_value=rejected)), \
          patch("app.services.workflow_line_config._default_role_id",
                new=AsyncMock(return_value=uuid.uuid4())):
@@ -128,6 +131,10 @@ async def test_resubmit_reopens_terminal_gate():
     assert rejected.resolver_id is None and rejected.resolved_at is None
     assert rejected.resolution_note is None
     assert doc.status == "pending"
+    # 감사추적 보존(산티아고): 이전 반려(누가/왜)가 decision_history 에 append.
+    hist = rejected.neutral_facts["decision_history"]
+    assert hist[-1]["status"] == "rejected" and hist[-1]["resolution_note"] == "반려사유"
+    assert hist[-1]["resolver_id"] == str(prior_resolver)
 
 
 # ─── AC3: pending 직접 self-confirm 차단(gate 해소로만) ───────────────────────
