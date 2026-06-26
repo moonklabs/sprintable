@@ -12,11 +12,12 @@ python-docx 의존 설치(pyproject). GCS fetch 실패/미지원은 best-effort(
 """
 from __future__ import annotations
 
-import asyncio
 import io
 import logging
 import os
 from datetime import timedelta
+
+from app.services.storage import get_storage_provider
 
 logger = logging.getLogger(__name__)
 
@@ -74,46 +75,21 @@ def _is_scoped_to_conversation(object_path: str, project_id, conversation_id) ->
 
 
 async def _download_object(object_path: str) -> bytes:
-    """GCS 객체 bytes 다운로드 — 서비스계정(ADC) 직접 read. blocking client 는 thread 로 격리."""
+    """객체 bytes 다운로드 — provider 추상 경유(E-STORAGE-SSOT S1·AC3). _BUCKET=컨테이너.
 
-    def _blocking() -> bytes:
-        from google.cloud import storage  # 지연 import(의존 없을 때 모듈 로드 무영향)
-
-        client = storage.Client()
-        return client.bucket(_BUCKET).blob(object_path).download_as_bytes()
-
-    return await asyncio.to_thread(_blocking)
+    호출 전 _is_scoped_to_conversation 으로 IDOR 게이트를 통과한 path 만 받는다(스코프 로직은 본 모듈 유지).
+    """
+    return await get_storage_provider().download_object(_BUCKET, object_path)
 
 
 async def _signed_read_url(object_path: str) -> str | None:
-    """scoped GCS 객체에 대한 단기 V4 read 서명 URL. 실패 시 None(best-effort).
+    """scoped 객체에 대한 단기 read 서명 URL — provider 추상 경유(GCS V4 / S3 presigned / local HMAC).
 
-    Cloud Run ADC(키파일 없음)에서는 runtime SA 가 자신에 대해 signBlob(roles/iam.serviceAccountTokenCreator)
-    권한을 가지면 IAM SignBlob 으로 V4 서명이 가능하다(creds.refresh→service_account_email+access_token 전달).
-    blocking 호출은 thread 로 격리. 호출 전 _is_scoped_to_conversation 으로 IDOR 게이트를 통과한 path 만 받는다.
+    실패 시 None(best-effort). 호출 전 _is_scoped_to_conversation 으로 IDOR 게이트를 통과한 path 만 받는다.
     """
-
-    def _blocking() -> str:
-        import google.auth
-        from google.auth.transport.requests import Request as _AuthRequest
-        from google.cloud import storage
-
-        creds, _ = google.auth.default()
-        creds.refresh(_AuthRequest())  # access_token 확보(IAM SignBlob 용)
-        blob = storage.Client().bucket(_BUCKET).blob(object_path)
-        return blob.generate_signed_url(
-            version="v4",
-            expiration=_SIGNED_URL_TTL,
-            method="GET",
-            service_account_email=getattr(creds, "service_account_email", None),
-            access_token=creds.token,
-        )
-
-    try:
-        return await asyncio.to_thread(_blocking)
-    except Exception:
-        logger.warning("attachment_context: signed url 생성 실패 path=%s", object_path, exc_info=True)
-        return None
+    return await get_storage_provider().signed_read_url(
+        _BUCKET, object_path, ttl=_SIGNED_URL_TTL
+    )
 
 
 def _extract_text(ext: str, data: bytes) -> str:

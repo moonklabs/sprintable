@@ -13,7 +13,9 @@ import type {
   IAgentApiKeyRepository,
   IInboxItemRepository,
   IHypothesisRepository,
+  IStorageService,
 } from '@sprintable/core-storage';
+import { STORAGE_PROVIDER } from './config';
 
 async function getSpAt(): Promise<string> {
   try {
@@ -117,6 +119,49 @@ export async function createSubscriptionRepository(db?: unknown): Promise<ISubsc
 
 export async function createAgentRunBillingRepository(db?: unknown): Promise<IAgentRunBillingRepository> {
   return _agentRunBillingFactory(db);
+}
+
+// ============================================================================
+// Blob Storage Service (E-STORAGE-SSOT S1)
+// ----------------------------------------------------------------------------
+// 셀렉션은 `STORAGE_PROVIDER` env 주도(OSS 기본 local). provider SDK 는 dynamic import 로
+// 분리 → 선택된 provider 만 번들/로드(local/GCS 유저는 @aws-sdk 비용 0).
+//
+// ⚠️ 기존 GCS 배포(dev/prod)는 ee unbuilt OSS 이미지로 단독 구동 → `registerStorageService()`
+// 가 불리지 않으므로 **반드시 `STORAGE_PROVIDER=gcs` env 명시**(미설정 default local → 첨부
+// ephemeral 디스크 적재·GCS 무회귀 위반). register seam 은 미래 ee 용으로만 유지(단독 셀렉터 금지).
+// ============================================================================
+
+type StorageServiceFactory = () => Promise<IStorageService>;
+let _storageServiceFactory: StorageServiceFactory | null = null;
+
+export function registerStorageService(factory: StorageServiceFactory): void {
+  _storageServiceFactory = factory;
+}
+
+export async function createStorageService(): Promise<IStorageService> {
+  if (_storageServiceFactory) return _storageServiceFactory();
+  switch (STORAGE_PROVIDER) {
+    case 'gcs': {
+      const { GcsStorageService } = await import('./providers/gcs');
+      return new GcsStorageService();
+    }
+    case 's3':
+    case 'minio': {
+      const { S3StorageService } = await import('./providers/s3');
+      return new S3StorageService();
+    }
+    case 'local': {
+      const { LocalDiskStorageService } = await import('./providers/local');
+      return new LocalDiskStorageService();
+    }
+    default:
+      // fail-closed: 인식 못 하는 값(오타 `gcx` 등)은 silent local 추락 금지(첨부 ephemeral 적재
+      // data-loss 방지). 미설정/공백은 config 에서 이미 'local' 로 정규화됨(unset≠unknown).
+      throw new Error(
+        `unknown STORAGE_PROVIDER: "${STORAGE_PROVIDER}". valid values: local | gcs | s3 | minio`,
+      );
+  }
 }
 
 export async function createAgentRunRepository(): Promise<IAgentRunRepository> {

@@ -1,5 +1,6 @@
 import { getServerSession } from '@/lib/db/server';
-import { getSignedReadUrl, GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/gcs';
+import { GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/storage/config';
+import { createStorageService } from '@/lib/storage/factory';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 
@@ -54,8 +55,9 @@ export async function GET(request: Request) {
     if (authRes.status === 403) return ApiErrors.forbidden('첨부 접근 권한이 없습니다');
     if (!authRes.ok) return ApiErrors.badRequest('attachment authorization failed');
 
-    // authorize 통과 — 단기 만료 서명 URL 발급.
-    const url = await getSignedReadUrl(GCS_MEMO_ATTACHMENTS_BUCKET, objectPath);
+    // authorize 통과 — 단기 만료 서명 URL 발급(provider 추상 경유).
+    const storage = await createStorageService();
+    const url = await storage.signRead(GCS_MEMO_ATTACHMENTS_BUCKET, objectPath);
     return apiSuccess({ url });
   } catch (err: unknown) {
     return handleApiError(err);
