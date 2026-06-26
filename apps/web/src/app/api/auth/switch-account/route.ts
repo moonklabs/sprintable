@@ -100,8 +100,13 @@ export async function POST(request: Request) {
       return bad;
     }
 
+    // RC2: 떠난 계정 supersede 마킹을 외부 await(rotate) **前**으로 — switch 의도 확정 직후.
+    // rotate 네트워크 윈도우 동안 도착하는 떠난-계정 late refresh 도 결정적으로 억제. 실패 시 rollback.
+    if (prevActiveId && prevActiveId !== targetId) markSuperseded(prevActiveId);
+
     const result = await singleFlightRotate(targetId, targetRt);
     if (!result) {
+      if (prevActiveId && prevActiveId !== targetId) clearSuperseded(prevActiveId); // rollback(RC3/back-compat 보존)
       // BE 미머지/회전 실패/동시 충돌 → 409 graceful(유나 UX switch-error 분기).
       return NextResponse.json({ error: { code: 'SWITCH_UNAVAILABLE', message: 'switch failed or in progress' } }, { status: 409 });
     }
@@ -111,9 +116,8 @@ export async function POST(request: Request) {
     if (prevActiveId && rt && prevActiveId !== targetId) setVaultEntry(res.cookies, prevActiveId, rt);
     setActiveAccount(res.cookies, targetId, result.access_token, result.refresh_token, result.project_id);
     removeVaultEntry(res.cookies, targetId);
-    // RC2 epoch: target 재활성=마킹 해제(switch-back 보존·RC3) / 떠난 계정=마킹(stale refresh 억제).
+    // RC2 epoch: target 재활성=마킹 해제(switch-back 보존·RC3). 떠난 계정 마킹은 위(rotate 前)서 완료.
     clearSuperseded(targetId);
-    if (prevActiveId && prevActiveId !== targetId) markSuperseded(prevActiveId);
     // RC1 enforcement: 잔여 stale vault 쿠키(suffix/type 위반) 폐기.
     const { staleNames } = await auditVault();
     discardCookies(res.cookies, staleNames.filter((n) => n !== `${VAULT_PREFIX}${targetId}`));

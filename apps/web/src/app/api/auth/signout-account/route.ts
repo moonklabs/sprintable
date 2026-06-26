@@ -63,9 +63,10 @@ export async function POST(request: Request) {
     }
 
     // scope === 'this' — 현 계정만 revoke, 다음 vault 계정 승격.
-    if (activeRt) await beRevoke(activeRt);
+    // RC2: 떠난 계정 supersede 마킹을 외부 await(revoke) **前**으로 — late refresh 결정적 억제.
     const signedOutId = await getVerifiedActiveAccountId();
-    if (signedOutId) markSuperseded(signedOutId); // RC2: 떠난 계정 stale refresh 억제
+    if (signedOutId) markSuperseded(signedOutId);
+    if (activeRt) await beRevoke(activeRt);
     const { valid: vault, staleNames } = await auditVault();
     const next = vault[0];
     const base = cookieBase();
