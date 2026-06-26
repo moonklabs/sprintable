@@ -21,8 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.asset import Asset
-from app.models.conversation import ConversationParticipant
+from app.models.conversation import Conversation, ConversationParticipant
 from app.models.pm import Story
+from app.services.asset_registry import path_in_source_scope
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import has_project_access
 
@@ -94,16 +95,20 @@ async def authorize_attachment(
     if not path or "://" in path:
         raise HTTPException(status_code=400, detail="path must be a bare object path")
 
-    segments = path.split("/")
-    legacy_url = _PUBLIC_PREFIX + path  # legacy stored 형태
+    legacy_url = _PUBLIC_PREFIX + path  # legacy stored 형태(belongs 정확매치용)
 
     if conversation_id is not None:
-        # ① 구조적 스코프: conv id 가 path segment + 우리 namespace(legacy `chat/...` OR S7
-        #    `org/<org>/project/.../chat/...`). 정확 belongs 검사(②)가 실 게이트·이건 defense-in-depth.
-        ns_ok = path.startswith("chat/") or (
-            path.startswith(f"org/{org_id}/project/") and "/chat/" in path
-        )
-        if not (ns_ok and str(conversation_id) in segments):
+        # ① 구조적 스코프 — 등록(sync)과 **동일 함수** path_in_source_scope 로 통일(까심 IDOR).
+        #    conv 의 실 project_id 를 DB 조회해 `chat/{proj}/{conv}/`(legacy) 또는
+        #    `org/{org}/project/{proj}/chat/{conv}/`(S7) **exact prefix**만 허용(중간 `/chat/` 우회 차단).
+        conv_proj = (await db.execute(
+            select(Conversation.project_id).where(
+                Conversation.id == conversation_id, Conversation.org_id == org_id
+            )
+        )).scalar_one_or_none()
+        if conv_proj is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        if not path_in_source_scope(path, "conversation_message", conv_proj, conversation_id, org_id):
             raise HTTPException(status_code=403, detail="Attachment path not scoped to this conversation")
         # 권한: conversation 참가자(canonical member). team_member 봐주기 없음.
         member = await resolve_member(auth, org_id, db, project_id=None)
@@ -128,12 +133,8 @@ async def authorize_attachment(
         if not belongs:
             raise HTTPException(status_code=403, detail="Attachment does not belong to this conversation")
     else:
-        # ① 구조적 스코프: story id segment + 우리 namespace(legacy `story/...` OR S7 `org/.../story/...`).
-        ns_ok = path.startswith("story/") or (
-            path.startswith(f"org/{org_id}/project/") and "/story/" in path
-        )
-        if not (ns_ok and str(story_id) in segments):
-            raise HTTPException(status_code=403, detail="Attachment path not scoped to this story")
+        # story 의 실 project_id 를 먼저 조회 — 구조 스코프를 등록과 동일 함수로 통일(까심 IDOR·project
+        # segment 도 story.project_id 와 정확 매치). `story/{proj}/{story}/` + `org/{org}/project/{proj}/story/{story}/`.
         row = (await db.execute(
             select(Story.project_id, Story.attachments).where(
                 Story.id == story_id,
@@ -144,6 +145,8 @@ async def authorize_attachment(
         if row is None:
             raise HTTPException(status_code=404, detail="Story not found")
         project_id, attachments = row
+        if not path_in_source_scope(path, "story", project_id, story_id, org_id):
+            raise HTTPException(status_code=403, detail="Attachment path not scoped to this story")
         if not await has_project_access(db, uuid.UUID(auth.user_id), project_id, org_id):
             raise HTTPException(status_code=403, detail="No access to this project")
         # ② 정확 매치: canonical object path == 요청 path

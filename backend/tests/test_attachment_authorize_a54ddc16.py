@@ -94,7 +94,8 @@ async def test_authorize_400_path_with_scheme():
 @pytest.mark.anyio
 async def test_authorize_conversation_participant_and_belongs_200():
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_scalar(uuid.uuid4()), _scalar(True)])  # participant, belongs
+    # S7: conv project_id 조회(스코프 통일) → participant → belongs
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(uuid.uuid4()), _scalar(True)])
     client, app = await _client(session)
     try:
         with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
@@ -106,16 +107,15 @@ async def test_authorize_conversation_participant_and_belongs_200():
 
 @pytest.mark.anyio
 async def test_authorize_conversation_path_not_scoped_403():
-    """구조적 스코프 위반(다른 conv id 의 path)은 권한쿼리 전에 403 — cross-resource 차단."""
+    """구조적 스코프 위반(다른 conv id 의 path)은 conv project 조회 직후 스코프 게이트서 403."""
     session = AsyncMock()
-    session.execute = AsyncMock()  # 호출되면 안 됨
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID)])  # conv project 조회만(스코프서 차단)
     other_conv = uuid.uuid4()
     client, app = await _client(session)
     try:
         with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
             r = await _get(client, f"path=chat/{PROJECT_ID}/{other_conv}/u-victim.png&conversation_id={CONV_ID}")
-        assert r.status_code == 403
-        session.execute.assert_not_awaited()  # 스코프 게이트서 차단
+        assert r.status_code == 403  # participant/belongs 쿼리 전 스코프 차단
     finally:
         app.dependency_overrides.clear()
 
@@ -123,7 +123,7 @@ async def test_authorize_conversation_path_not_scoped_403():
 @pytest.mark.anyio
 async def test_authorize_conversation_not_participant_403():
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_scalar(None)])  # 비참가
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(None)])  # conv project, 비참가
     client, app = await _client(session)
     try:
         with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
@@ -137,7 +137,7 @@ async def test_authorize_conversation_not_participant_403():
 async def test_authorize_conversation_belong_exact_miss_403():
     """구조 스코프 통과·참가자지만 stored 와 정확 일치 안 하면 403(substring 아님)."""
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_scalar(uuid.uuid4()), _scalar(False)])
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(uuid.uuid4()), _scalar(False)])
     client, app = await _client(session)
     try:
         with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
@@ -211,7 +211,8 @@ STORY_PATH_S7 = f"org/{ORG_ID}/project/{PROJECT_ID}/story/{STORY_ID}/u1-abc.png"
 @pytest.mark.anyio
 async def test_authorize_conversation_s7_namespace_200():
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_scalar(uuid.uuid4()), _scalar(True)])
+    # conv project=PROJECT_ID → path_in_source_scope 통과(신 namespace) → participant → belongs
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(uuid.uuid4()), _scalar(True)])
     client, app = await _client(session)
     try:
         with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
@@ -236,15 +237,34 @@ async def test_authorize_story_s7_namespace_200():
 
 @pytest.mark.anyio
 async def test_authorize_conversation_s7_wrong_org_403():
-    """신 namespace인데 org 불일치(타 org path) → 구조 스코프 거부(403)."""
+    """신 namespace 우회 시도(타 org/타 project/중간 /chat/) → exact-prefix 스코프 거부(403·까심 IDOR)."""
     import uuid as _u
-    bad = f"org/{_u.uuid4()}/project/{PROJECT_ID}/chat/{CONV_ID}/u.png"
+    # 타 org + 중간 /chat/ 삽입(`org/<타org>/project/<proj>/evil/chat/<conv>/`)
+    bad = f"org/{_u.uuid4()}/project/{PROJECT_ID}/evil/chat/{CONV_ID}/u.png"
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_scalar(uuid.uuid4()), _scalar(True)])
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID)])  # conv project 조회 후 스코프서 차단
     client, app = await _client(session)
     try:
         with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
             r = await _get(client, f"path={bad}&conversation_id={CONV_ID}")
         assert r.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_authorize_conversation_s7_same_org_cross_project_idor_403():
+    """까심 IDOR: 같은 org·타 project namespace + 중간 /chat/ 삽입 → exact-prefix 스코프 거부(403).
+    conv 실 project=PROJECT_ID 인데 path 는 타 project → path_in_source_scope 불일치."""
+    import uuid as _u
+    victim_proj = _u.uuid4()
+    bad = f"org/{ORG_ID}/project/{victim_proj}/evil/chat/{CONV_ID}/secret.png"
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID)])  # conv project=PROJECT_ID
+    client, app = await _client(session)
+    try:
+        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
+            r = await _get(client, f"path={bad}&conversation_id={CONV_ID}")
+        assert r.status_code == 403  # 타 project 경로 서명 차단(IDOR)
     finally:
         app.dependency_overrides.clear()

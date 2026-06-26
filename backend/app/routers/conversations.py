@@ -1210,8 +1210,9 @@ async def send_message(
         content=body.content,
         mentioned_ids=valid_mentioned_ids,
         thread_id=body.thread_id,
-        # E-FILE S1: 첨부 메타(URL+name+content_type+size)를 0093 attachments JSONB에 저장
-        attachments=[a.model_dump() for a in body.attachments],
+        # E-FILE S1: 첨부 메타(URL+name+content_type+size)를 0093 attachments JSONB에 저장.
+        # S7: client 제공 asset_id 는 strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
+        attachments=[{**a.model_dump(), "asset_id": None} for a in body.attachments],
     )
     db.add(msg)
 
