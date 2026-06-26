@@ -64,13 +64,6 @@ class GateTransitionRequest(BaseModel):
         return v
 
 
-class WorkItemSummary(BaseModel):
-    """doc-side 결재 UX(24f5ae18): 인박스 gate 가 work_item 을 렌더/링크하도록 title/slug 동봉.
-    현재 doc gate 에 채움(향후 타 work_item_type 확장 여지)."""
-    title: str
-    slug: str | None = None
-
-
 class GateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -78,9 +71,6 @@ class GateResponse(BaseModel):
     org_id: uuid.UUID
     work_item_id: uuid.UUID
     work_item_type: str
-    # doc-side 결재 UX(24f5ae18): gate row 는 work_item_id 만이라 인박스가 doc 를 못 그림 → enrich.
-    # additive·nullable(비-doc/미존재 시 None·하위호환). FE 는 별도 doc fetch 제거.
-    work_item_summary: "WorkItemSummary | None" = None
     gate_type: str
     status: str
     resolver_id: uuid.UUID | None = None
@@ -135,25 +125,7 @@ async def list_gates(
     if status:
         q = q.where(Gate.status == status)
     result = await session.execute(q)
-    gates = list(result.scalars().all())
-    responses = [GateResponse.model_validate(g) for g in gates]
-
-    # doc-side 결재 UX(24f5ae18): doc gate 는 work_item_id(doc id)만이라 인박스가 doc 를 못 그림 →
-    # doc title/slug batch enrich(org-scope·soft-delete 가드·N+1 0). FE 가 "결재: <title>" 렌더 + /docs/<slug>
-    # 링크. 비-doc/삭제 doc 은 None(하위호환).
-    doc_ids = {g.work_item_id for g in gates if g.work_item_type == "doc"}
-    if doc_ids:
-        from app.models.doc import Doc
-        rows = (await session.execute(
-            select(Doc.id, Doc.title, Doc.slug).where(
-                Doc.id.in_(doc_ids), Doc.org_id == org_id, Doc.deleted_at.is_(None),
-            )
-        )).all()
-        summaries = {did: WorkItemSummary(title=title, slug=slug) for did, title, slug in rows}
-        for resp in responses:
-            if resp.work_item_type == "doc":
-                resp.work_item_summary = summaries.get(resp.work_item_id)
-    return responses
+    return [GateResponse.model_validate(g) for g in result.scalars().all()]
 
 
 @router.post("/{id}/transition", response_model=GateResponse)
