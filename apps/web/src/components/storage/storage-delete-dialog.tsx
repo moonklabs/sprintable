@@ -62,7 +62,8 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
               {/* Body */}
               <div className="px-[18px] pb-[14px] pt-[4px] text-[13px] leading-[1.55] text-muted-foreground">
                 {t.rich('deleteBody', {
-                  name: () => <b className="font-semibold text-foreground">{asset.name}</b>,
+                  name: asset.name,
+                  b: (chunks) => <b className="font-semibold text-foreground">{chunks}</b>,
                 })}
 
                 {usageCount > 0 ? (

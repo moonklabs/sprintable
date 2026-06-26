@@ -106,7 +106,7 @@
     "delete": "Delete",
     "cancel": "Cancel",
     "deleteTitle": "Delete this asset?",
-    "deleteBody": "Deleting {name} can't be undone.",
+    "deleteBody": "Deleting <b>{name}</b> can't be undone.",
     "deleteImpact": "This asset is currently used in {count} place(s) — deleting it will break the links below.",
     "selectPrompt": "Select an asset to see its details.",
     "emptyTitle": "No assets yet",
