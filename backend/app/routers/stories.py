@@ -247,7 +247,7 @@ async def create_story(
             _cb = await _resolve_team_member_id(auth, org_id, session)
         except Exception:
             _cb = None
-        await sync_attachment_assets(
+        url_map = await sync_attachment_assets(
             session,
             org_id=org_id,
             project_id=story.project_id,
@@ -256,6 +256,12 @@ async def create_story(
             attachments=[a.model_dump() for a in body.attachments],
             created_by=_cb,
         )
+        if url_map:  # S7: JSONB asset_id 역기입(denorm·catch#4)
+            story.attachments = [
+                {**a, "asset_id": str(url_map[a["url"]])} if a.get("url") in url_map else a
+                for a in (story.attachments or [])
+            ]
+            await session.flush()
     # E-BOARD S5: 복수 assignee join 기록 (단일 assignee_id와 공존)
     saved_ids = await StoryAssigneeRepository(session, org_id).set_for_story(story.id, effective_ids)
     # E-CAGE-REFEREE: assignee 설정 시 implementation 역할 participation 자동 생성
@@ -485,7 +491,7 @@ async def update_story(
             _cb = await _resolve_team_member_id(auth, repo.org_id, db)
         except Exception:
             _cb = None
-        await sync_attachment_assets(
+        url_map = await sync_attachment_assets(
             db,
             org_id=repo.org_id,
             project_id=story.project_id,
@@ -494,6 +500,12 @@ async def update_story(
             attachments=data.get("attachments") or [],
             created_by=_cb,
         )
+        if url_map:  # S7: JSONB asset_id 역기입(denorm·catch#4·attachments 교체 반영)
+            story.attachments = [
+                {**a, "asset_id": str(url_map[a["url"]])} if a.get("url") in url_map else a
+                for a in (story.attachments or [])
+            ]
+            await db.flush()
 
     # E-BOARD S5: 복수 assignee join 동기화 (단일 assignee_id와 정합 유지)
     if assignee_ids_in is not None:

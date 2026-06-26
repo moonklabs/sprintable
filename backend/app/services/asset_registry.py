@@ -39,18 +39,28 @@ def path_in_source_scope(
     source_type: str,
     project_id: uuid.UUID | None,
     source_id: uuid.UUID,
+    org_id: uuid.UUID | None = None,
 ) -> bool:
     """object_path 가 이 source(=메시지/스토리)에 귀속된 경로인지 검증(IDOR·registry 오염 차단).
 
-    S1 `_is_scoped_to_conversation` 와 동형: 업로드 경로가 resource 에 스코프되므로
-    (`chat/<project>/<conversation>/...`·`story/<project>/<story>/...`) path 가 정확히 이 source 를
-    가리킬 때만 등록한다. 유저가 자기 메시지에 타 project/conv 객체 경로를 심어 registry 를
-    오염시키는 것 방지(까심 적출). manual/doc 은 경로 제약 없음(신뢰 등록·doc=S4).
+    S1 `_is_scoped_to_conversation` 와 동형: 업로드 경로가 resource 에 스코프돼야 등록(유저가 타
+    project/conv 경로 심어 오염 차단·까심). 두 namespace 인식(S7·AC3 무회귀):
+    - legacy: `chat/<project>/<conversation>/...` · `story/<project>/<story>/...`
+    - S7 신: `org/<org>/project/<project>/chat/<conversation>/...` · `.../story/<story>/...`
+    manual/doc 은 경로 제약 없음(신뢰 등록·doc=S4).
     """
     if source_type == "conversation_message":
-        return object_path.startswith(f"chat/{project_id}/{source_id}/")
+        if object_path.startswith(f"chat/{project_id}/{source_id}/"):
+            return True
+        return org_id is not None and object_path.startswith(
+            f"org/{org_id}/project/{project_id}/chat/{source_id}/"
+        )
     if source_type == "story":
-        return object_path.startswith(f"story/{project_id}/{source_id}/")
+        if object_path.startswith(f"story/{project_id}/{source_id}/"):
+            return True
+        return org_id is not None and object_path.startswith(
+            f"org/{org_id}/project/{project_id}/story/{source_id}/"
+        )
     return True
 
 
@@ -64,25 +74,27 @@ async def sync_attachment_assets(
     attachments: list[dict] | None,
     created_by: uuid.UUID | None = None,
     container: str = DEFAULT_CONTAINER,
-) -> list[uuid.UUID]:
+) -> dict[str, uuid.UUID]:
     """첨부 목록을 asset registry 로 동기화(upsert) + asset_link 재조정(reconcile).
 
     - 각 첨부 → asset upsert(멱등 키 container/object_path) → asset_link upsert.
     - source 의 현재 첨부 집합에 없는 기존 link 는 삭제(update 의 attachments 교체 의미 반영·SSOT 정확).
     - 외부 URL/타 버킷 첨부는 우리 객체가 아니므로 스킵.
-    반환: 현재 첨부에 대응하는 asset_id 목록.
+    반환: {원본 첨부 url → asset_id} (S7: 호출부가 JSONB 에 asset_id 역기입·denorm·catch#4).
     """
     if source_type not in ASSET_LINK_SOURCE_TYPES:
         raise ValueError(f"invalid asset link source_type: {source_type}")
 
     asset_ids: list[uuid.UUID] = []
+    url_map: dict[str, uuid.UUID] = {}
     for att in attachments or []:
         if not isinstance(att, dict):
             continue
-        obj = canonical_object_path(att.get("url") or "", container)
+        raw_url = att.get("url") or ""
+        obj = canonical_object_path(raw_url, container)
         if obj is None:
             continue  # 외부/비정상 — 우리 객체 아님
-        if not path_in_source_scope(obj, source_type, project_id, source_id):
+        if not path_in_source_scope(obj, source_type, project_id, source_id, org_id):
             continue  # 이 source 귀속 경로 아님 — registry 오염/IDOR 차단(까심)
         name = (att.get("name") or "").strip() or obj.rsplit("/", 1)[-1] or "file"
         content_type = (att.get("content_type") or "").strip() or None
@@ -122,6 +134,7 @@ async def sync_attachment_assets(
                 else sel.where(Asset.project_id.is_(None))
             asset_id = (await session.execute(sel)).scalar_one()
         asset_ids.append(asset_id)
+        url_map[raw_url] = asset_id  # JSONB asset_id 역기입용(denorm)
 
         await session.execute(
             pg_insert(AssetLink)
@@ -144,4 +157,4 @@ async def sync_attachment_assets(
         stale = stale.where(AssetLink.asset_id.not_in(asset_ids))
     await session.execute(stale)
 
-    return asset_ids
+    return url_map

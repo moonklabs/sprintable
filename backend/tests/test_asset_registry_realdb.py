@@ -553,3 +553,42 @@ async def test_enrich_negative_doc_message_member_s3_fold():
             await s.commit()
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_s7_new_namespace_sync_and_asset_id_map():
+    """S7: 신 org/project namespace 업로드가 registry 등록·url→asset_id 맵 반환(JSONB denorm용)·
+    legacy 무회귀·타 org namespace 스코프 거부."""
+    from app.services.asset_registry import sync_attachment_assets
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            src = uuid.uuid4()
+            new_path = f"org/{ORG}/project/{PROJ_A}/story/{src}/u-a.png"
+            legacy_path = f"story/{PROJ_A}/{src}/u-b.png"
+            url_map = await sync_attachment_assets(
+                s, org_id=ORG, project_id=PROJ_A, source_type="story", source_id=src,
+                attachments=[_att(new_path), _att(legacy_path)],
+            )
+            await s.commit()
+            # 신 namespace + legacy 둘 다 등록(AC1/AC3)·url→asset_id 맵 반환(AC2 denorm)
+            assert new_path in url_map and legacy_path in url_map
+            n = (await s.execute(text(
+                f"SELECT count(*) FROM assets WHERE org_id='{ORG}' AND project_id='{PROJ_A}' "
+                f"AND object_path IN ('{new_path}','{legacy_path}')"
+            ))).scalar_one()
+            assert n == 2
+
+            # 타 org namespace(org 불일치)는 스코프 거부→미등록(IDOR)
+            bad = f"org/{uuid.uuid4()}/project/{PROJ_A}/story/{src}/x.png"
+            url_map2 = await sync_attachment_assets(
+                s, org_id=ORG, project_id=PROJ_A, source_type="story", source_id=src,
+                attachments=[_att(new_path), _att(bad)],
+            )
+            await s.commit()
+            assert new_path in url_map2 and bad not in url_map2
+    finally:
+        await engine.dispose()
