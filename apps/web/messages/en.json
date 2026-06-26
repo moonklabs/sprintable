@@ -2728,6 +2728,7 @@
     "fallbackNotifyError": "Failed to notify",
     "gateApprove": "Approve",
     "gateReject": "Reject",
+    "docGateTitlePrefix": "Approval: ",
     "gateRejectTitle": "Reject gate",
     "gateRejectNotePlaceholder": "Reason (optional)",
     "gateRejectConfirm": "Confirm reject",
