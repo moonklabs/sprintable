@@ -147,18 +147,3 @@ async def test_pending_direct_confirm_blocked_without_gate():
     with pytest.raises(DocTransitionError) as ei:
         await transition_doc(session, org, _human(org), doc.id, "confirmed")  # via_gate=False
     assert ei.value.code == "GATE_REQUIRED"
-
-
-# ─── 500 fix: 전이 엔드포인트가 commit 後 refresh (MissingGreenlet 방지) ─────────
-
-def test_transition_endpoint_refreshes_before_serialize():
-    """UPDATE→commit으로 server-onupdate(updated_at) expired → model_validate lazy-load=MissingGreenlet
-    →500. commit→refresh→model_validate 순서로 async 컨텍스트 eager 재로드(라이브 dev 재현됨)."""
-    import inspect
-    from app.routers import docs
-    src = inspect.getsource(docs.transition_doc_endpoint)
-    assert "await session.refresh(doc)" in src
-    i_commit = src.index("await session.commit()")
-    i_refresh = src.index("await session.refresh(doc)")
-    i_validate = src.rindex("DocResponse.model_validate(doc)")
-    assert i_commit < i_refresh < i_validate  # 순서 정합

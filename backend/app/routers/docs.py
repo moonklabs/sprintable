@@ -619,10 +619,6 @@ async def transition_doc_endpoint(
     try:
         doc = await transition_doc(session, org_id, caller, id, body.status)
         await session.commit()
-        # 48f064e5 fix: UPDATE 후 commit 으로 server-onupdate 컬럼(updated_at)이 expired → model_validate
-        # 의 동기 컨텍스트서 lazy-load 시 MissingGreenlet(async IO) → 500. refresh 로 async 컨텍스트서
-        # eager 재로드(create_doc=INSERT라 무영향이었음). [[base_repository_refresh]] 패턴.
-        await session.refresh(doc)
         return DocResponse.model_validate(doc)
     except DocTransitionError as e:
         _codes = {
