@@ -136,13 +136,29 @@ export function StorageView() {
 
   const handleLoadMore = useCallback(() => {
     if (!nextCursor || loadingMore) return;
+    // 현 세대(필터/정렬/검색) 캡처 — 필터 변경·retry 시 reqIdRef 가 증가하므로 늦게 온 구 cursor 응답을 폐기.
+    const reqId = reqIdRef.current;
+    const cursor = nextCursor;
     setLoadingMore(true);
     void (async () => {
       try {
-        const res = await fetch(buildAssetsUrl(nextCursor));
+        const res = await fetch(buildAssetsUrl(cursor));
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as { data?: AssetListResponse };
-        setItems((prev) => [...prev, ...(json.data?.items ?? [])]);
+        // 세대 검증: in-flight 중 필터/정렬/검색이 바뀌었으면 구 자산 append 금지(타폴더 혼입·중복·누락 방지).
+        if (reqIdRef.current !== reqId) return;
+        const incoming = json.data?.items ?? [];
+        setItems((prev) => {
+          const seen = new Set(prev.map((a) => a.id));
+          const merged = prev.slice();
+          for (const a of incoming) {
+            if (!seen.has(a.id)) {
+              seen.add(a.id);
+              merged.push(a);
+            }
+          }
+          return merged;
+        });
         setNextCursor(json.data?.next_cursor ?? null);
       } catch {
         // load-more 실패 — 조용히 무시(기존 목록 유지)
