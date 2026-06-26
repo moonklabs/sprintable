@@ -48,7 +48,8 @@ async def test_submit_creates_doc_gate_and_pending_status():
     doc = MagicMock(status="draft", id=uuid.uuid4(), title="설계 문서", project_id=uuid.uuid4())
     session = _doc_session(doc)
     role_id = uuid.uuid4()
-    with patch("app.services.gate_service.create_gate", new=AsyncMock()) as mock_cg, \
+    with patch("app.services.gate_service.create_gate",
+               new=AsyncMock(return_value=MagicMock(status="pending"))) as mock_cg, \
          patch("app.services.workflow_line_config._default_role_id",
                new=AsyncMock(return_value=role_id)):
         caller = _human(org)
@@ -64,22 +65,30 @@ async def test_submit_creates_doc_gate_and_pending_status():
 
 def _doc_gate(work_item_id):
     return MagicMock(work_item_type=DOC_GATE_WORK_ITEM_TYPE, gate_type=DOC_GATE_TYPE,
-                     work_item_id=work_item_id)
+                     work_item_id=work_item_id, org_id=uuid.uuid4())
+
+
+def _gate_session(doc):
+    """_resolve_doc_gate 는 select(Doc)(org_id+deleted_at 가드)로 조회 — execute 모킹."""
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = doc
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=result)
+    session.flush = AsyncMock()
+    return session
 
 
 @pytest.mark.anyio
 async def test_gate_approve_confirms_doc():
     doc = MagicMock(status="pending")
-    session = AsyncMock(); session.get = AsyncMock(return_value=doc); session.flush = AsyncMock()
-    await _resolve_doc_gate(session, _doc_gate(uuid.uuid4()), "approved")
+    await _resolve_doc_gate(_gate_session(doc), _doc_gate(uuid.uuid4()), "approved")
     assert doc.status == "confirmed"
 
 
 @pytest.mark.anyio
 async def test_gate_reject_denies_doc():
     doc = MagicMock(status="pending")
-    session = AsyncMock(); session.get = AsyncMock(return_value=doc); session.flush = AsyncMock()
-    await _resolve_doc_gate(session, _doc_gate(uuid.uuid4()), "rejected")
+    await _resolve_doc_gate(_gate_session(doc), _doc_gate(uuid.uuid4()), "rejected")
     assert doc.status == "denied"
 
 
@@ -87,18 +96,38 @@ async def test_gate_reject_denies_doc():
 async def test_gate_resolve_noop_when_not_pending():
     """이미 결정/취소(non-pending) doc → no-op(멱등·double-resolve 방어)."""
     doc = MagicMock(status="confirmed")
-    session = AsyncMock(); session.get = AsyncMock(return_value=doc); session.flush = AsyncMock()
-    await _resolve_doc_gate(session, _doc_gate(uuid.uuid4()), "approved")
+    await _resolve_doc_gate(_gate_session(doc), _doc_gate(uuid.uuid4()), "approved")
     assert doc.status == "confirmed"  # 불변
 
 
 @pytest.mark.anyio
 async def test_gate_resolve_ignores_non_doc_gate():
-    """story/merge 게이트엔 무영향(work_item_type/gate_type 가드)."""
-    session = AsyncMock(); session.get = AsyncMock()
+    """story/merge 게이트엔 무영향(work_item_type/gate_type 가드·doc 조회 0)."""
+    session = AsyncMock(); session.execute = AsyncMock()
     gate = MagicMock(work_item_type="story", gate_type="merge", work_item_id=uuid.uuid4())
     await _resolve_doc_gate(session, gate, "approved")
-    session.get.assert_not_called()
+    session.execute.assert_not_called()
+
+
+# ─── RC(산티아고): 재상신 시 terminal gate re-open(결재 재가능) ──────────────
+
+@pytest.mark.anyio
+async def test_resubmit_reopens_terminal_gate():
+    """draft→pending→reject→denied→draft→재상신: create_gate 멱등이 기존 rejected gate 반환 →
+    pending 으로 re-open(resolver/해소메타 clear) → 결재 재가능(Gate inbox 재노출)."""
+    org = uuid.uuid4()
+    doc = MagicMock(status="draft", id=uuid.uuid4(), title="t", project_id=uuid.uuid4())
+    session = _doc_session(doc)
+    rejected = MagicMock(status="rejected", resolver_id=uuid.uuid4(),
+                         resolved_at=object(), resolution_note="반려사유")
+    with patch("app.services.gate_service.create_gate", new=AsyncMock(return_value=rejected)), \
+         patch("app.services.workflow_line_config._default_role_id",
+               new=AsyncMock(return_value=uuid.uuid4())):
+        await transition_doc(session, org, _human(org), doc.id, "pending")
+    assert rejected.status == "pending"          # re-open
+    assert rejected.resolver_id is None and rejected.resolved_at is None
+    assert rejected.resolution_note is None
+    assert doc.status == "pending"
 
 
 # ─── AC3: pending 직접 self-confirm 차단(gate 해소로만) ───────────────────────

@@ -309,7 +309,14 @@ async def _resolve_doc_gate(session: AsyncSession, gate: Gate, new_status: str) 
         return
     from app.models.doc import Doc
 
-    doc = await session.get(Doc, gate.work_item_id)
+    # 방어심층(산티아고): PK get 대신 org_id + soft-delete 가드(타org/삭제 doc 무영향).
+    doc = (await session.execute(
+        select(Doc).where(
+            Doc.id == gate.work_item_id,
+            Doc.org_id == gate.org_id,
+            Doc.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
     if doc is None or doc.status != "pending":
         return  # 멱등·pending 아니면 no-op(double-resolve/취소 방어).
     doc.status = "confirmed" if new_status == "approved" else "denied"

@@ -58,11 +58,20 @@ async def transition_doc(
         from app.services.gate_service import create_gate
         from app.services.workflow_line_config import _default_role_id
         role_id = await _default_role_id(session, org_id) or doc.id  # 기본 결재 role(부재 시 placeholder)
-        await create_gate(
+        gate = await create_gate(
             session, org_id, doc.id, DOC_GATE_WORK_ITEM_TYPE, DOC_GATE_TYPE,
             caller.id, role_id,
             neutral_facts={"requested_by_member_id": str(caller.id), "doc_title": doc.title},
         )
+        # ⚠️재상신 RC(산티아고): uq(work_item_id,gate_type)=1 gate·terminal(approved/rejected)=immutable →
+        # create_gate 멱등이 기존 **terminal gate 를 반환**해(상태필터 없음) 재상신 시 새 pending gate 0 →
+        # Gate inbox 미노출+결재 불능. 재상신=새 결재 사이클이므로 terminal gate 를 pending 으로 **re-open**
+        # (직접 reset — FSM 전이 아님·해소 메타 clear). pending/held(admin hold)면 그대로 둔다.
+        if gate.status in ("approved", "rejected", "auto_passed", "voided"):
+            gate.status = "pending"
+            gate.resolver_id = None
+            gate.resolved_at = None
+            gate.resolution_note = None
         doc.status = "pending"
         await session.flush()
         return doc
