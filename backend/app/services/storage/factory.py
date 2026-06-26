@@ -12,7 +12,13 @@ from .base import StorageProvider
 
 
 def get_storage_provider() -> StorageProvider:
-    provider = os.environ.get("STORAGE_PROVIDER", "local").lower()
+    # 미설정/공백 → local(zero-config 보존·unset≠unknown). 인식 못 하는 값(오타 `gcx` 등)은
+    # fail-closed(raise) — silent local 추락→첨부 ephemeral 적재 data-loss 방지.
+    provider = os.environ.get("STORAGE_PROVIDER", "").strip().lower() or "local"
+    if provider == "local":
+        from .local import LocalStorageProvider
+
+        return LocalStorageProvider()
     if provider == "gcs":
         from .gcs import GcsStorageProvider
 
@@ -21,6 +27,6 @@ def get_storage_provider() -> StorageProvider:
         from .s3 import S3StorageProvider
 
         return S3StorageProvider()
-    from .local import LocalStorageProvider
-
-    return LocalStorageProvider()
+    raise ValueError(
+        f'unknown STORAGE_PROVIDER: "{provider}". valid values: local | gcs | s3 | minio'
+    )

@@ -30,6 +30,37 @@ def test_factory_selects_s3(monkeypatch, value):
     assert isinstance(get_storage_provider(), S3StorageProvider)
 
 
+def test_factory_blank_is_local_not_unknown(monkeypatch):
+    # unset≠unknown: 공백/미설정은 local(zero-config 보존).
+    monkeypatch.setenv("STORAGE_PROVIDER", "   ")
+    assert isinstance(get_storage_provider(), LocalStorageProvider)
+
+
+def test_factory_unknown_provider_fail_closed(monkeypatch):
+    # 오타 등 미인식 값은 silent local 추락 금지 → raise.
+    monkeypatch.setenv("STORAGE_PROVIDER", "gcx")
+    with pytest.raises(ValueError, match="unknown STORAGE_PROVIDER"):
+        get_storage_provider()
+
+
+async def test_local_secret_fail_closed_in_production(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("STORAGE_LOCAL_SIGNING_SECRET", raising=False)
+    with pytest.raises(RuntimeError, match="STORAGE_LOCAL_SIGNING_SECRET"):
+        await LocalStorageProvider().signed_read_url(
+            "c", "chat/p/c/x.png", ttl=timedelta(minutes=5)
+        )
+
+
+async def test_local_secret_dev_default_zero_config(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.delenv("STORAGE_LOCAL_SIGNING_SECRET", raising=False)
+    url = await LocalStorageProvider().signed_read_url(
+        "c", "chat/p/c/x.png", ttl=timedelta(minutes=5)
+    )
+    assert url is not None and "sig=" in url
+
+
 async def test_local_download_roundtrip(monkeypatch, tmp_path):
     monkeypatch.setenv("STORAGE_LOCAL_ROOT", str(tmp_path))
     container = "sprintable-memo-attachments"

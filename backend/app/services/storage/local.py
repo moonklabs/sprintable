@@ -20,13 +20,29 @@ from .base import StorageProvider
 
 logger = logging.getLogger(__name__)
 
-# FE `config.ts` 의 dev 기본과 동일(공유 secret 미설정 시 서명 불일치 방지). prod self-host override 권장.
+# FE `config.ts` 의 dev 기본과 동일(공유 secret 미설정 시 서명 불일치 방지). prod 에서는 사용 안 함(fail-closed).
 _DEFAULT_SECRET = "sprintable-local-dev-unsafe"
 _DEFAULT_SERVE_BASE = "http://localhost:3000"
 
 
 def _root() -> Path:
     return Path(os.environ.get("STORAGE_LOCAL_ROOT", ".storage"))
+
+
+def _signing_secret() -> str:
+    """local HMAC 서명 비밀 resolve — fail-closed.
+
+    미설정 + production(APP_ENV) 이면 raise(공개 소스 기본값으로 HMAC 위조→authorize 우회 차단).
+    dev/test 에서는 미설정 시 dev 기본값으로 zero-config 유지. FE `resolveLocalSigningSecret()` 와 동형.
+    """
+    secret = (os.environ.get("STORAGE_LOCAL_SIGNING_SECRET") or "").strip()
+    if secret:
+        return secret
+    if os.environ.get("APP_ENV", "development").strip().lower() == "production":
+        raise RuntimeError(
+            "STORAGE_LOCAL_SIGNING_SECRET is required when STORAGE_PROVIDER=local in production"
+        )
+    return _DEFAULT_SECRET
 
 
 def _resolve_safe(container: str, object_path: str) -> Path:
@@ -48,8 +64,9 @@ class LocalStorageProvider(StorageProvider):
     async def signed_read_url(
         self, container: str, object_path: str, *, ttl: timedelta
     ) -> str | None:
+        # fail-closed: prod 에서 secret 미설정이면 raise(swallow 금지·보안). try 밖에서 resolve.
+        secret = _signing_secret()
         try:
-            secret = os.environ.get("STORAGE_LOCAL_SIGNING_SECRET") or _DEFAULT_SECRET
             base = os.environ.get("STORAGE_LOCAL_SERVE_BASE_URL", _DEFAULT_SERVE_BASE).rstrip("/")
             exp = int((time.time() + ttl.total_seconds()) * 1000)  # ms(FE Date.now() 정합)
             payload = f"{container}/{object_path}:{exp}".encode()

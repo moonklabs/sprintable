@@ -22,6 +22,7 @@ from app.models.team import AgentMessageAllowlist, TeamMember
 from app.models.agent_deployment import AgentAuditLog
 from app.models.webhook_config import WebhookConfig
 from app.routers.events import _push_to_agent, publish_event
+from app.schemas.attachment import validate_attachment_url
 from app.services import chat_presence
 from app.services.agent_runtime import supports_deterministic_command
 from app.services.command_classifier import classify_command
@@ -581,7 +582,7 @@ _MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB (메타 sanity 상한)
 
 
 class MessageAttachment(BaseModel):
-    url: str           # FE-proxy가 GCS에 업로드한 객체 URL (https)
+    url: str           # FE-proxy 업로드 객체 url(https GCS 또는 canonical bare path·provider 추상)
     name: str          # 원본 파일명
     content_type: str  # MIME
     size: int          # 바이트
@@ -589,10 +590,8 @@ class MessageAttachment(BaseModel):
     @field_validator("url")
     @classmethod
     def _validate_url(cls, v: str) -> str:
-        v = v.strip()
-        if not v.startswith("https://"):
-            raise ValueError("attachment url must be an https:// URL")
-        return v
+        # https URL(legacy/GCS) 또는 canonical bare object path(local/s3) 허용·외부 스킴 거부.
+        return validate_attachment_url(v)
 
     @field_validator("name", "content_type")
     @classmethod

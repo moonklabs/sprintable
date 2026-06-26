@@ -123,4 +123,42 @@ describe('createStorageService 셀렉션', () => {
     const { S3StorageService } = await import('./providers/s3');
     expect(await createStorageService()).toBeInstanceOf(S3StorageService);
   });
+
+  it('미인식 STORAGE_PROVIDER → fail-closed throw (silent local 추락 금지)', async () => {
+    vi.resetModules();
+    vi.stubEnv('STORAGE_PROVIDER', 'gcx');
+    const { createStorageService } = await import('./factory');
+    await expect(createStorageService()).rejects.toThrow(/unknown STORAGE_PROVIDER/);
+  });
+});
+
+describe('resolveLocalSigningSecret fail-closed', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('secret 설정 시 그 값 반환', async () => {
+    vi.resetModules();
+    vi.stubEnv('STORAGE_LOCAL_SIGNING_SECRET', 'prod-secret');
+    vi.stubEnv('NODE_ENV', 'production');
+    const { resolveLocalSigningSecret } = await import('./config');
+    expect(resolveLocalSigningSecret()).toBe('prod-secret');
+  });
+
+  it('production + 미설정 → throw', async () => {
+    vi.resetModules();
+    vi.stubEnv('STORAGE_LOCAL_SIGNING_SECRET', '');
+    vi.stubEnv('NODE_ENV', 'production');
+    const { resolveLocalSigningSecret } = await import('./config');
+    expect(() => resolveLocalSigningSecret()).toThrow(/required.*production/);
+  });
+
+  it('dev + 미설정 → dev 기본(zero-config)', async () => {
+    vi.resetModules();
+    vi.stubEnv('STORAGE_LOCAL_SIGNING_SECRET', '');
+    vi.stubEnv('NODE_ENV', 'development');
+    const { resolveLocalSigningSecret } = await import('./config');
+    expect(resolveLocalSigningSecret()).toBe('sprintable-local-dev-unsafe');
+  });
 });

@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import { STORAGE_PROVIDER, localStorageConfig } from '@/lib/storage/config';
+import { STORAGE_PROVIDER, resolveLocalSigningSecret } from '@/lib/storage/config';
 import { verifyLocalObject } from '@/lib/storage/local-sign';
 import { LocalDiskStorageService } from '@/lib/storage/providers/local';
 
@@ -27,7 +27,18 @@ export async function GET(
   const exp = Number(searchParams.get('exp'));
   const sig = searchParams.get('sig') ?? '';
 
-  if (!verifyLocalObject(localStorageConfig.signingSecret, container, objectPath, exp, sig)) {
+  // fail-closed: prod 에서 secret 미설정이면 resolveLocalSigningSecret() 가 throw → 503(서명 검증 불가).
+  let secret: string;
+  try {
+    secret = resolveLocalSigningSecret();
+  } catch {
+    return NextResponse.json(
+      { error: { message: 'local storage signing not configured' } },
+      { status: 503 },
+    );
+  }
+
+  if (!verifyLocalObject(secret, container, objectPath, exp, sig)) {
     return NextResponse.json({ error: { message: 'invalid or expired signature' } }, { status: 403 });
   }
 

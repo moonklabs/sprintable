@@ -6,8 +6,11 @@
 // 디스크에 쓰여 GCS 무회귀 위반·인스턴스 리사이클 시 유실). prod/dev env provisioning 은
 // S1 머지/승격과 원자적으로 처리(PO).
 
-/** 선택된 storage provider. OSS 기본 = local(zero-config). GCS 배포는 'gcs' 명시 필수. */
-export const STORAGE_PROVIDER = (process.env['STORAGE_PROVIDER'] ?? 'local').toLowerCase();
+/** 선택된 storage provider. OSS 기본 = local(zero-config). GCS 배포는 'gcs' 명시 필수.
+ *  미설정/공백 → local(zero-config 보존). 인식 못 하는 값은 팩토리가 fail-closed(throw)한다
+ *  (오타 `gcx` 등이 silent local 추락→첨부 ephemeral 적재 data-loss로 가는 것 방지). */
+export const STORAGE_PROVIDER =
+  (process.env['STORAGE_PROVIDER'] ?? '').trim().toLowerCase() || 'local';
 
 /** chat/story 첨부 컨테이너(GCS=버킷·s3=버킷·local=루트 하위 서브디렉터리). */
 export const GCS_MEMO_ATTACHMENTS_BUCKET =
@@ -17,13 +20,30 @@ export const GCS_MEMO_ATTACHMENTS_BUCKET =
 export const GCS_RECORDINGS_BUCKET =
   process.env['GCS_RECORDINGS_BUCKET'] ?? 'sprintable-recordings';
 
-/** local disk provider 설정. zero-config OSS 기본값 — prod self-host 는 signing secret 권장. */
+/** local disk provider 설정. zero-config OSS 기본값. */
 export const localStorageConfig = {
   /** 객체 루트. 컨테이너별 서브디렉터리가 그 아래에 생긴다. */
   root: process.env['STORAGE_LOCAL_ROOT'] ?? '.storage',
-  /** HMAC 서명 비밀. 미설정 시 dev 기본(프로덕션 self-host 는 반드시 override 권장). */
-  signingSecret: process.env['STORAGE_LOCAL_SIGNING_SECRET'] || 'sprintable-local-dev-unsafe',
 };
+
+// dev-only 편의 기본(zero-config). prod 에서는 절대 사용하지 않는다(아래 fail-closed).
+const _LOCAL_DEV_SECRET = 'sprintable-local-dev-unsafe';
+
+/**
+ * local provider HMAC 서명 비밀 resolve — **fail-closed**.
+ * 미설정 + production(NODE_ENV) 이면 throw(공개 소스 기본값으로 HMAC 위조→authorize 우회 차단).
+ * dev/test 에서는 미설정 시 dev 기본값으로 zero-config 유지. provider=local 경로에서만 호출된다.
+ */
+export function resolveLocalSigningSecret(): string {
+  const s = (process.env['STORAGE_LOCAL_SIGNING_SECRET'] ?? '').trim();
+  if (s) return s;
+  if ((process.env['NODE_ENV'] ?? '').toLowerCase() === 'production') {
+    throw new Error(
+      'STORAGE_LOCAL_SIGNING_SECRET is required when STORAGE_PROVIDER=local in production',
+    );
+  }
+  return _LOCAL_DEV_SECRET;
+}
 
 /** s3/minio provider 설정. provider=s3 일 때만 사용(SDK 는 dynamic import 로 분리). */
 export const s3StorageConfig = {

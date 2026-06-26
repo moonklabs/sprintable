@@ -151,11 +151,16 @@ export async function createStorageService(): Promise<IStorageService> {
       const { S3StorageService } = await import('./providers/s3');
       return new S3StorageService();
     }
-    case 'local':
-    default: {
+    case 'local': {
       const { LocalDiskStorageService } = await import('./providers/local');
       return new LocalDiskStorageService();
     }
+    default:
+      // fail-closed: 인식 못 하는 값(오타 `gcx` 등)은 silent local 추락 금지(첨부 ephemeral 적재
+      // data-loss 방지). 미설정/공백은 config 에서 이미 'local' 로 정규화됨(unset≠unknown).
+      throw new Error(
+        `unknown STORAGE_PROVIDER: "${STORAGE_PROVIDER}". valid values: local | gcs | s3 | minio`,
+      );
   }
 }
 

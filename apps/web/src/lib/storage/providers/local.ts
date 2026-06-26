@@ -1,7 +1,7 @@
 import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
 import type { IStorageService, StorageObjectHead } from '@sprintable/core-storage';
-import { localStorageConfig } from '../config';
+import { localStorageConfig, resolveLocalSigningSecret } from '../config';
 import { signLocalObject } from '../local-sign';
 
 // E-STORAGE-SSOT S1 (D2): local disk provider. OSS zero-config 기본.
@@ -11,7 +11,8 @@ import { signLocalObject } from '../local-sign';
 export class LocalDiskStorageService implements IStorageService {
   constructor(
     private readonly root: string = localStorageConfig.root,
-    private readonly signingSecret: string = localStorageConfig.signingSecret,
+    // fail-closed: prod 에서 STORAGE_LOCAL_SIGNING_SECRET 미설정이면 생성 시점에 throw.
+    private readonly signingSecret: string = resolveLocalSigningSecret(),
   ) {}
 
   // path traversal 차단: container/objectPath 를 root 아래로 정규화하고 이탈하면 거부.

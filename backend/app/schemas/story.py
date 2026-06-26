@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from app.schemas.attachment import validate_attachment_url
+
 _METRIC_SOURCES = frozenset({"internal_ops", "ga4", "manual"})
 _METRIC_DIRECTIONS = frozenset({"up", "down"})
 # GA4 지원 지표명 (모르는 지표 → pending 가드)
@@ -53,7 +55,7 @@ _MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB
 
 
 class StoryAttachment(BaseModel):
-    url: str           # FE-proxy가 GCS에 업로드한 객체 URL (https)
+    url: str           # FE-proxy 업로드 객체 url(https GCS 또는 canonical bare path·provider 추상)
     name: str          # 원본 파일명
     content_type: str  # MIME
     size: int          # 바이트
@@ -61,10 +63,8 @@ class StoryAttachment(BaseModel):
     @field_validator("url")
     @classmethod
     def _validate_url(cls, v: str) -> str:
-        v = v.strip()
-        if not v.startswith("https://"):
-            raise ValueError("attachment url must be an https:// URL")
-        return v
+        # https URL(legacy/GCS) 또는 canonical bare object path(local/s3) 허용·외부 스킴 거부.
+        return validate_attachment_url(v)
 
     @field_validator("name", "content_type")
     @classmethod
