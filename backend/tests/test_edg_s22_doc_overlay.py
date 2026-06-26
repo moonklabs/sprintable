@@ -21,18 +21,12 @@ def anyio_backend():
 # ── doc FSM(unit·DB 없이) ─────────────────────────────────────────────────────
 def test_doc_fsm_valid_transitions():
     from app.models.doc import DOC_STATUSES, is_valid_doc_transition
-    # 48f064e5: pending(결재 대기·인앱 Gate) 추가.
-    assert DOC_STATUSES == {"draft", "pending", "confirmed", "denied", "superseded", "deprecated"}
+    assert DOC_STATUSES == {"draft", "confirmed", "denied", "superseded", "deprecated"}
     assert is_valid_doc_transition("draft", "confirmed")
-    assert is_valid_doc_transition("draft", "pending")          # 상신(doc-gate)
-    assert is_valid_doc_transition("pending", "confirmed")      # 승인(gate)
-    assert is_valid_doc_transition("pending", "denied")         # 반려(gate)
-    assert is_valid_doc_transition("pending", "draft")          # 상신 취소
     assert is_valid_doc_transition("denied", "draft")          # revise
     assert is_valid_doc_transition("confirmed", "superseded")
     assert not is_valid_doc_transition("confirmed", "draft")   # 역전이 금지
     assert not is_valid_doc_transition("draft", "deprecated")  # 비합법
-    assert not is_valid_doc_transition("pending", "superseded")  # 비합법
 
 
 def test_matrix_doc_eligible_draft_to_confirmed_only():

@@ -142,8 +142,6 @@ async def transition_gate(
     else:
         # H1-FIX-2: merge 게이트 approve → work item 스토리를 done으로 진행(_preflight 재평가 우회).
         await _advance_story_on_merge_approve(session, gate, new_status)
-        # E-DG doc-gate(48f064e5): doc 결재 게이트 approve→confirmed·reject→denied.
-        await _resolve_doc_gate(session, gate, new_status)
 
     await session.flush()
     await session.refresh(gate)
@@ -294,33 +292,6 @@ async def unhold_gate(
     await session.flush()
     await session.refresh(gate)
     return gate
-
-
-async def _resolve_doc_gate(session: AsyncSession, gate: Gate, new_status: str) -> None:
-    """E-DG doc-gate(48f064e5): doc 결재 게이트 해소 → doc status 전이(merge-approve 의 doc 아날로그).
-
-    approve→confirmed · reject→denied. **pending doc 만**(멱등·非pending no-op·이미 결정/취소면 무시).
-    human-only 결재(AC4)는 게이트 전이 엔드포인트 authz 에서 강제 — 여기는 status 반영만.
-    """
-    from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
-    if gate.work_item_type != DOC_GATE_WORK_ITEM_TYPE or gate.gate_type != DOC_GATE_TYPE:
-        return
-    if new_status not in ("approved", "rejected"):
-        return
-    from app.models.doc import Doc
-
-    # 방어심층(산티아고): PK get 대신 org_id + soft-delete 가드(타org/삭제 doc 무영향).
-    doc = (await session.execute(
-        select(Doc).where(
-            Doc.id == gate.work_item_id,
-            Doc.org_id == gate.org_id,
-            Doc.deleted_at.is_(None),
-        )
-    )).scalar_one_or_none()
-    if doc is None or doc.status != "pending":
-        return  # 멱등·pending 아니면 no-op(double-resolve/취소 방어).
-    doc.status = "confirmed" if new_status == "approved" else "denied"
-    await session.flush()
 
 
 async def _advance_story_on_merge_approve(session: AsyncSession, gate: Gate, new_status: str) -> None:
