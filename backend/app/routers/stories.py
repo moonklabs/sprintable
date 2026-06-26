@@ -16,6 +16,7 @@ from app.repositories.story_assignee import StoryAssigneeRepository
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import publish_event
 from app.services.event_seq import assign_recipient_seq
+from app.services.asset_registry import sync_attachment_assets
 from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
 from app.services.member_resolver import canonicalize_member_id
 from app.services.merge_verdict_gate import (
@@ -239,6 +240,16 @@ async def create_story(
         # E-FILE S4: 보드 스토리 첨부 (FE-proxy URL+메타) 저장
         attachments=[a.model_dump() for a in body.attachments],
     )
+    # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
+    if body.attachments:
+        await sync_attachment_assets(
+            session,
+            org_id=org_id,
+            project_id=story.project_id,
+            source_type="story",
+            source_id=story.id,
+            attachments=[a.model_dump() for a in body.attachments],
+        )
     # E-BOARD S5: 복수 assignee join 기록 (단일 assignee_id와 공존)
     saved_ids = await StoryAssigneeRepository(session, org_id).set_for_story(story.id, effective_ids)
     # E-CAGE-REFEREE: assignee 설정 시 implementation 역할 participation 자동 생성
@@ -460,6 +471,17 @@ async def update_story(
     story = await repo.update(id, **data)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+
+    # E-STORAGE-SSOT S2: 첨부 교체(attachments 제공) 시 asset registry 재동기화(reconcile·SSOT 정확).
+    if "attachments" in data:
+        await sync_attachment_assets(
+            db,
+            org_id=repo.org_id,
+            project_id=story.project_id,
+            source_type="story",
+            source_id=story.id,
+            attachments=data.get("attachments") or [],
+        )
 
     # E-BOARD S5: 복수 assignee join 동기화 (단일 assignee_id와 정합 유지)
     if assignee_ids_in is not None:

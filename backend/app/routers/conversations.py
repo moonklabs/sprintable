@@ -25,6 +25,7 @@ from app.routers.events import _push_to_agent, publish_event
 from app.schemas.attachment import validate_attachment_url
 from app.services import chat_presence
 from app.services.agent_runtime import supports_deterministic_command
+from app.services.asset_registry import sync_attachment_assets
 from app.services.command_classifier import classify_command
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import (
@@ -1223,6 +1224,18 @@ async def send_message(
         )
 
     await db.flush()
+
+    # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
+    if body.attachments:
+        await sync_attachment_assets(
+            db,
+            org_id=org_id,
+            project_id=conv.project_id,
+            source_type="conversation_message",
+            source_id=msg.id,
+            attachments=[a.model_dump() for a in body.attachments],
+            created_by=sender.id,
+        )
 
     # AC10: Discord 수신자 파악 → SSE dispatch에서 제외 (동일 db 세션, flush 완료 상태)
     discord_exclude_ids: set[uuid.UUID] = set()

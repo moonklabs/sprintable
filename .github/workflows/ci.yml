@@ -72,7 +72,10 @@ jobs:
           # baseline REVISION invariant — the snapshot was captured at 0096; changing this without
           # regenerating baseline/schema.sql would mis-stamp fresh DBs. Lock it.
           test "$(cat backend/alembic/baseline/REVISION)" = "0096"
-          echo "baseline parity OK: team_members=VIEW, org_member_id nullable, seed present, 0097 applied, REVISION=0096"
+          # E-STORAGE-SSOT S2 (0139): asset registry 3 테이블 + asset_links source_type CHECK 적용 확인.
+          test "$(P "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('assets','asset_folders','asset_links')")" = "3"
+          test "$(P "SELECT count(*) FROM pg_constraint WHERE conname='ck_asset_links_source_type'")" = "1"
+          echo "baseline parity OK: team_members=VIEW, org_member_id nullable, seed present, 0097 applied, asset registry present, REVISION=0096"
 
       - name: Verify fresh DB reached head (baseline + incremental)
         working-directory: backend

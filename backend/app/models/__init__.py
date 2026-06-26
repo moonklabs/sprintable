@@ -36,9 +36,13 @@ from app.models.org_invite import OrgInvite
 from app.models.project_access import ProjectAccess
 from app.models.member import AgentProjectProfile, Member, MemberIdentityAlias
 from app.models.activity_event import ActivityEvent
+from app.models.asset import Asset, AssetFolder, AssetLink
 
 __all__ = [
     "ActivityEvent",
+    "Asset",
+    "AssetFolder",
+    "AssetLink",
     "AgentProjectProfile",
     "Member",
     "MemberIdentityAlias",
