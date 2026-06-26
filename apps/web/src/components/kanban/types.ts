@@ -40,10 +40,6 @@ export interface GateItem {
   overridden_at?: string | null;
   bypassed_sod?: boolean | null;
   neutral_facts: Record<string, unknown> | null;
-  // doc-side 결재(24f5ea18): doc gate(work_item_type='doc' / gate_type='doc_approval')일 때 BE가
-  // 대상 문서 요약을 동봉(디디 BE PR #1742·additive). non-doc/삭제된 문서 gate는 null → `?.` 가드 폴백.
-  // slug는 향후 deep-link 후속용(MVP 미사용).
-  work_item_summary?: { title: string; slug: string } | null;
   // H1-S3 머지 verdict 게이트 evidence(GateResponse·additive·하위호환 default). null≠0(AC③).
   requires_human?: boolean;
   evidence_status?: string | null; // sufficient | blocked | insufficient
