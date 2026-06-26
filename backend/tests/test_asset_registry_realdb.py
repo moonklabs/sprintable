@@ -476,3 +476,80 @@ def test_backfill_legacy_attachments_idempotent():
         assert assets2 == 1 and links2 == 1
     finally:
         engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_enrich_negative_doc_message_member_s3_fold():
+    """AC6(S2 fold·S3): Doc/Message enrich + created_by(member) 도 cross-org 오염 시 미누출.
+
+    오염 asset_link(doc/conversation_message·타 org source)는 link 미생성·타 org created_by 는 null.
+    """
+    from app.dependencies.auth import AuthContext
+    from app.routers.assets import list_assets
+    from app.services.asset_registry import sync_attachment_assets
+
+    other_doc = uuid.uuid4()
+    other_conv = uuid.uuid4()
+    other_msg = uuid.uuid4()
+    foreign_member = uuid.uuid4()  # ORG 멤버 아님 → created_by enrich 시 null
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            for sql in [
+                # 잔여(이전 run) 정리는 project 스코프로(고정 slug 충돌 방지·id-only 정리 불충분).
+                f"DELETE FROM conversation_messages WHERE conversation_id IN "
+                f"(SELECT id FROM conversations WHERE project_id='{PROJ_OTHER}')",
+                f"DELETE FROM conversations WHERE project_id='{PROJ_OTHER}'",
+                f"DELETE FROM docs WHERE project_id='{PROJ_OTHER}'",
+                f"DELETE FROM projects WHERE id='{PROJ_OTHER}'",
+                f"DELETE FROM organizations WHERE id='{ORG2}'",
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG2}','A2b','a2borg','free')",
+                f"INSERT INTO projects (id,org_id,name) VALUES ('{PROJ_OTHER}','{ORG2}','OtherP')",
+                f"INSERT INTO docs (id,org_id,project_id,title,slug) "
+                f"VALUES ('{other_doc}','{ORG2}','{PROJ_OTHER}','SECRET DOC','secret-doc')",
+                f"INSERT INTO conversations (id,org_id,project_id,type,status) "
+                f"VALUES ('{other_conv}','{ORG2}','{PROJ_OTHER}','group','open')",
+                "INSERT INTO conversation_messages (id,conversation_id,content,mentioned_ids,reply_count) "
+                f"VALUES ('{other_msg}','{other_conv}','SECRET MSG','{{}}',0)",
+            ]:
+                await s.execute(text(sql))
+            # ORG/PROJ_A manual asset.
+            await sync_attachment_assets(s, org_id=ORG, project_id=PROJ_A, source_type="manual",
+                                         source_id=uuid.uuid4(), attachments=[_att("manual/a/x.png")])
+            await s.commit()
+            asset_id = (await s.execute(text(
+                f"SELECT id FROM assets WHERE org_id='{ORG}' AND object_path='manual/a/x.png'"
+            ))).scalar_one()
+            # 타 org doc/message link 주입 + 타 org created_by 설정(오염).
+            for stype, sid in (("doc", other_doc), ("conversation_message", other_msg)):
+                await s.execute(text(
+                    "INSERT INTO asset_links (org_id, asset_id, source_type, source_id) "
+                    f"VALUES ('{ORG}','{asset_id}','{stype}','{sid}') ON CONFLICT DO NOTHING"
+                ))
+            await s.execute(text(f"UPDATE assets SET created_by='{foreign_member}' WHERE id='{asset_id}'"))
+            await s.commit()
+
+            auth = AuthContext(user_id=str(USER), email=None, claims={}, org_id=str(ORG))
+            page = await list_assets(project_id=PROJ_A, folder_id=None, mime=None, q=None,
+                                     sort="date", order="desc", cursor=None, limit=50,
+                                     db=s, auth=auth, org_id=ORG)
+            item = next(it for it in page.items if str(it.id) == str(asset_id))
+            ids = {str(sl.id) for sl in item.source_links}
+            titles = {sl.title for sl in item.source_links}
+            assert str(other_doc) not in ids and str(other_msg) not in ids  # 오염 link 미생성
+            assert "SECRET DOC" not in titles and "SECRET MSG" not in titles  # 타 org 내용 미누출
+            assert item.created_by is None  # 타 org member created_by 미해소(누수 0)
+
+            for sql in [
+                f"DELETE FROM conversation_messages WHERE id='{other_msg}'",
+                f"DELETE FROM conversations WHERE id='{other_conv}'",
+                f"DELETE FROM docs WHERE id='{other_doc}'",
+                f"DELETE FROM projects WHERE id='{PROJ_OTHER}'",
+                f"DELETE FROM organizations WHERE id='{ORG2}'",
+            ]:
+                await s.execute(text(sql))
+            await s.commit()
+    finally:
+        await engine.dispose()

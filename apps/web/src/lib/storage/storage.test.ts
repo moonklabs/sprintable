@@ -64,7 +64,7 @@ describe('LocalDiskStorageService roundtrip', () => {
     const read = await svc.readObject(container, objectPath);
     expect(read?.toString('utf8')).toBe('hello storage');
 
-    const signed = await svc.signRead(container, objectPath, 60_000);
+    const signed = await svc.signRead(container, objectPath, { expiresInMs: 60_000 });
     expect(signed).toContain(`/api/storage/local/${container}/${objectPath}`);
     const u = new URL(signed, 'http://localhost');
     const exp = Number(u.searchParams.get('exp'));

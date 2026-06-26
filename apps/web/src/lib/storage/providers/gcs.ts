@@ -1,5 +1,5 @@
 import { Storage } from '@google-cloud/storage';
-import type { IStorageService, StorageObjectHead } from '@sprintable/core-storage';
+import type { IStorageService, SignReadOptions, StorageObjectHead } from '@sprintable/core-storage';
 
 // E-STORAGE-SSOT S1: GCS provider. `@google-cloud/storage` 직 import 는 이 파일에만 격리된다
 // (AC1: call-site 직 import 0). 로직은 기존 `lib/gcs.ts`(uploadToGcs/getSignedReadUrl)에서 이관.
@@ -42,8 +42,9 @@ export class GcsStorageService implements IStorageService {
   async signRead(
     container: string,
     objectPath: string,
-    expiresInMs = 5 * 60 * 1000,
+    opts?: SignReadOptions,
   ): Promise<string> {
+    const expiresInMs = opts?.expiresInMs ?? 5 * 60 * 1000;
     const [url] = await this.storage
       .bucket(container)
       .file(objectPath)
@@ -51,6 +52,7 @@ export class GcsStorageService implements IStorageService {
         version: 'v4',
         action: 'read',
         expires: Date.now() + expiresInMs,
+        ...(opts?.disposition ? { responseDisposition: opts.disposition } : {}),
       });
     return url;
   }

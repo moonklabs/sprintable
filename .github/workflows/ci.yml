@@ -90,14 +90,14 @@ jobs:
 
       # E-STORAGE-SSOT: asset registry IDOR/정합 게이트는 real-DB 가 필수(backend-test 잡엔 PG 없음).
       # 이 PG 백드 잡에서 실행해 S2~S8 IDOR/멀티테넌시 회귀를 CI 가 잡도록 박는다(까심#4).
-      - name: asset registry real-DB tests (IDOR / sync / backfill)
+      - name: asset registry real-DB tests (IDOR / sync / backfill / authorize)
         working-directory: backend
         env:
           ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
           DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
           JWT_SECRET: ci-test-secret-at-least-32-chars-long
           SECRET_KEY: ci-test-secret-at-least-32-chars-long
-        run: uv run pytest tests/test_asset_registry_realdb.py tests/test_asset_canonical.py -q
+        run: uv run pytest tests/test_asset_registry_realdb.py tests/test_asset_canonical.py tests/test_attachment_authorize_asset_s3.py -q
 
       - name: Verify fresh DB reached head (baseline + incremental)
         working-directory: backend

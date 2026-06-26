@@ -197,7 +197,17 @@ async def _enrich(
     (타 org·접근불가 project 의 title/content/slug 누수 차단·까심 R2/R3). 스코프 lookup 서 못 찾은
     source 는 **SourceLink 자체 미생성**(title=None 노출 말고 제거). member 는 org 레벨(project 무관).
     """
-    base = {a.id: AssetResponse.model_validate(a, from_attributes=True) for a in assets}
+    # ⚠️ created_by(ORM=UUID)를 model_validate 가 CreatedBy 로 coerce 시도→ValidationError(S2 잠복 버그·
+    # created_by 세팅된 실 asset 에서 list 500). created_by/source_links 는 ORM 매핑 제외하고 아래서 enrich.
+    base = {
+        a.id: AssetResponse(
+            id=a.id, org_id=a.org_id, project_id=a.project_id, folder_id=a.folder_id,
+            container=a.container, object_path=a.object_path, name=a.name,
+            content_type=a.content_type, size_bytes=a.size_bytes,
+            created_at=a.created_at, updated_at=a.updated_at,
+        )
+        for a in assets
+    }
     if not assets:
         return base
 
