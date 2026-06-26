@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { ACCOUNT_CAP } from '@/lib/auth/account-limits';
 
 interface Account {
   account_id: string;
@@ -31,9 +32,6 @@ interface ProfileMenuProps {
   email?: string | null;
   avatarUrl?: string | null;
 }
-
-// tier 한도(Free 2 / Paid 5·PO 검토 中) — 한도 도달 시 계정 추가 비활성. 기본 5.
-const ACCOUNT_CAP = 5;
 
 function initialOf(label: string | null | undefined): string {
   const s = (label ?? '').trim();
@@ -124,8 +122,18 @@ export function ProfileMenu({ name, avatarUrl }: ProfileMenuProps) {
   const handleAdd = async () => {
     if (atCap || busy) return;
     setBusy('add');
+    setError(null);
     try {
       const r = await fetch('/api/auth/add-account', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      if (!r.ok) {
+        if (r.status === 401) {
+          window.location.assign('/login'); // corrupt active → 폐기됨·로그인 재진입
+          return;
+        }
+        setError(t('capReached')); // 409 cap(서버 guard·UI 우회 방어) 등
+        setBusy(null);
+        return;
+      }
       const j = (await r.json().catch(() => null)) as { data?: { redirect?: string } } | null;
       window.location.assign(j?.data?.redirect ?? '/login');
     } catch {
