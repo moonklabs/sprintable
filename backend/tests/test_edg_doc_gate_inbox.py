@@ -214,6 +214,8 @@ async def test_submit_notifies_org_approvers():
     assert kw["target_member_ids"] == owners
     assert kw["event_type"] == "doc_approval_requested"
     assert kw["reference_type"] == "gate" and kw["reference_id"] == gate_id
+    # 산티아고 RC: approver 쿼리에 deleted_at 필터(삭제 owner/admin 제외).
+    assert "deleted_at" in str(session.execute.await_args.args[0])
 
 
 @pytest.mark.anyio

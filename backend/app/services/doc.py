@@ -34,6 +34,7 @@ async def _notify_doc_approval_requested(
             select(OrgMember.id).where(
                 OrgMember.org_id == org_id,
                 OrgMember.role.in_(("owner", "admin")),
+                OrgMember.deleted_at.is_(None),  # 산티아고 RC: 삭제/탈퇴 owner/admin 제외(정보노출·실결재권자만)
                 OrgMember.id != requester_id,
             )
         )).scalars().all()
