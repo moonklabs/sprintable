@@ -202,8 +202,9 @@ async def test_resolve_expired_and_unstored_rt_no_pii():
             assert r.status_code == 200, r.text
             a = r.json()["accounts"][0]
             assert a["account_id"] == str(USER) and a["status"] == "expired"
-            assert a["name"] is None and a["email"] is None
-            assert a["org_name"] is None and a["avatar_url"] is None
+            # exclude_none(minor#1): 비활성은 PII 키 자체가 응답에 없음(null 키 잔존 X)
+            assert "name" not in a and "email" not in a
+            assert "org_name" not in a and "avatar_url" not in a
     finally:
         app.dependency_overrides.clear()
         await client.aclose()
@@ -242,6 +243,44 @@ async def test_switch_concurrent_double_spend_single_success():
         )
         codes = sorted(r.status_code for r in results)
         assert codes == [200, 401], [r.status_code for r in results]
+    finally:
+        app.dependency_overrides.clear()
+        await client.aclose()
+        await engine.dispose()
+        _cleanup_sync()
+
+
+@pytest.mark.anyio
+async def test_resolve_same_sub_active_priority():
+    """동일 sub 의 만료 토큰이 먼저 와도 active 계정은 active 로 병합(까심 minor#2·switcher 회귀 차단)."""
+    from app.core.security import create_refresh_token, hash_token
+
+    active_rt = _seed_sync()  # USER 의 유효 저장 토큰
+    expired_rt, exp = create_refresh_token(str(USER), expires_delta=timedelta(seconds=-10))
+    eng = create_engine(_SYNC)
+    try:
+        with eng.begin() as conn:
+            conn.execute(
+                text("INSERT INTO refresh_tokens (id,user_id,token_hash,expires_at) "
+                     "VALUES (gen_random_uuid(), :u, :h, :e)"),
+                {"u": str(USER), "h": hash_token(expired_rt), "e": exp},
+            )
+    finally:
+        eng.dispose()
+
+    client, engine, app = await _client()
+    try:
+        # 만료 토큰을 **먼저** 둔다 — 순서 의존 dedupe면 expired 로 잘못 표시될 케이스.
+        r = await client.post("/api/v2/accounts/resolve",
+                              json={"refresh_tokens": [expired_rt, active_rt]},
+                              headers={"Authorization": "Bearer x"})
+        assert r.status_code == 200, r.text
+        accounts = r.json()["accounts"]
+        assert len(accounts) == 1  # 동일 sub → 1 계정
+        a = accounts[0]
+        assert a["account_id"] == str(USER)
+        assert a["status"] == "active"  # 만료가 먼저여도 active 우선
+        assert a["name"] == "Alice"     # active 라 PII 정상
     finally:
         app.dependency_overrides.clear()
         await client.aclose()

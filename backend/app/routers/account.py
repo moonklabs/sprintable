@@ -38,7 +38,9 @@ class AccountResolveResponse(BaseModel):
     accounts: list[AccountMeta]
 
 
-@accounts_router.post("/resolve", response_model=AccountResolveResponse)
+@accounts_router.post(
+    "/resolve", response_model=AccountResolveResponse, response_model_exclude_none=True
+)
 async def resolve_accounts(
     body: AccountResolveRequest,
     session: AsyncSession = Depends(get_db),
@@ -50,8 +52,9 @@ async def resolve_accounts(
     로 표시(재로그인 유도). 호출자 인증(Bearer) 필요.
     """
     now = datetime.now(timezone.utc)
-    out: list[AccountMeta] = []
-    seen: set[str] = set()
+    # 계정(sub)별 **active 우선 병합**(까심 minor#2): 동일 sub 토큰이 여럿이면 토큰 순서와 무관하게
+    # active 가 expired 를 이긴다(만료 토큰이 먼저 와도 active 계정이 expired 로 표시되지 않게).
+    by_sub: dict[str, AccountMeta] = {}
     for rt in body.refresh_tokens:
         try:
             claims = decode_jwt_ignore_exp(rt)
@@ -60,9 +63,11 @@ async def resolve_accounts(
         if claims.get("type") != "refresh":
             continue
         sub = claims.get("sub")
-        if not sub or sub in seen:
+        if not sub:
             continue
-        seen.add(sub)
+        existing = by_sub.get(str(sub))
+        if existing is not None and existing.status == "active":
+            continue  # 이미 active 확정 — 추가 토큰 무시(중복 쿼리 회피)
         try:
             uid = uuid.UUID(str(sub))
         except ValueError:
@@ -80,33 +85,35 @@ async def resolve_accounts(
                 RefreshToken.expires_at > now,
             )
         )).scalar_one_or_none()
+
         if jwt_expired or active_row is None:
-            out.append(AccountMeta(account_id=str(sub), status="expired"))  # PII 없음
-            continue
+            meta = AccountMeta(account_id=str(sub), status="expired")  # PII 없음
+        else:
+            user = (await session.execute(select(User).where(User.id == uid))).scalar_one_or_none()
+            if user is None:
+                meta = AccountMeta(account_id=str(sub), status="expired")
+            else:
+                org_name = None
+                if user.last_org_id is not None:
+                    org_name = (await session.execute(
+                        select(Organization.name).where(Organization.id == user.last_org_id)
+                    )).scalar_one_or_none()
+                avatar_url = (await session.execute(
+                    select(TeamMember.avatar_url).where(TeamMember.user_id == uid).limit(1)
+                )).scalar_one_or_none()
+                meta = AccountMeta(
+                    account_id=str(sub),
+                    name=user.display_name,
+                    email=user.email,
+                    org_name=org_name,
+                    avatar_url=avatar_url,
+                    status="active",
+                )
 
-        user = (await session.execute(select(User).where(User.id == uid))).scalar_one_or_none()
-        if user is None:
-            out.append(AccountMeta(account_id=str(sub), status="expired"))
-            continue
-
-        org_name = None
-        if user.last_org_id is not None:
-            org_name = (await session.execute(
-                select(Organization.name).where(Organization.id == user.last_org_id)
-            )).scalar_one_or_none()
-        avatar_url = (await session.execute(
-            select(TeamMember.avatar_url).where(TeamMember.user_id == uid).limit(1)
-        )).scalar_one_or_none()
-
-        out.append(AccountMeta(
-            account_id=str(sub),
-            name=user.display_name,
-            email=user.email,
-            org_name=org_name,
-            avatar_url=avatar_url,
-            status="active",
-        ))
-    return AccountResolveResponse(accounts=out)
+        # active 우선 병합: active 면 무조건 덮고, 아니면 빈 자리에만 채운다.
+        if existing is None or meta.status == "active":
+            by_sub[str(sub)] = meta
+    return AccountResolveResponse(accounts=list(by_sub.values()))
 
 
 @router.post("/delete", response_model=AccountDeleteResponse)
