@@ -14,6 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.doc import Doc, DOC_STATUSES, DocRevision, is_valid_doc_transition
 from app.services.member_resolver import ResolvedMember
 
+# E-DG doc-gate(48f064e5): doc 결재 인앱 게이트. work_item_type='doc'·gate_type='doc_approval'.
+DOC_GATE_WORK_ITEM_TYPE = "doc"
+DOC_GATE_TYPE = "doc_approval"
+
 
 class DocTransitionError(Exception):
     """도메인 오류 — 라우터가 code/message 를 HTTPException 으로 매핑."""
@@ -46,6 +50,26 @@ async def transition_doc(
         raise DocTransitionError(
             "INVALID_DOC_TRANSITION", f"불법 전이: {doc.status} → {to_status}"
         )
+
+    # E-DG doc-gate(48f064e5): 상신 draft→pending → 인앱 doc-gate 생성(work_item_type='doc'·pending)
+    # → Gate inbox(/api/gates?status=pending) 노출. doc.status='pending'(결재 대기). create_gate 멱등
+    # (재상신=기존 gate 반환·중복 0). 결재(승인/반려)는 gate 해소가 _resolve_doc_gate 로 수행.
+    if to_status == "pending" and doc.status == "draft":
+        from app.services.gate_service import create_gate
+        from app.services.workflow_line_config import _default_role_id
+        role_id = await _default_role_id(session, org_id) or doc.id  # 기본 결재 role(부재 시 placeholder)
+        await create_gate(
+            session, org_id, doc.id, DOC_GATE_WORK_ITEM_TYPE, DOC_GATE_TYPE,
+            caller.id, role_id,
+            neutral_facts={"requested_by_member_id": str(caller.id), "doc_title": doc.title},
+        )
+        doc.status = "pending"
+        await session.flush()
+        return doc
+
+    # 결재 대기(pending) 문서의 승인/반려는 **gate 해소(via_gate)로만** — 직접 API self-confirm 차단.
+    if doc.status == "pending" and to_status in ("confirmed", "denied") and not via_gate:
+        raise DocTransitionError("GATE_REQUIRED", "결재 대기 문서는 Gate 승인/반려로만 전이됩니다.")
 
     # ⭐E-DG S22: draft→confirmed line overlay. enforcing 라인이면 human-gate 생성·draft 유지(가시
     # confirm 대기). default-off/plain/엔진실패 → 아래 inline human-only 폴백(byte-동일·agent 차단 유지·
