@@ -91,35 +91,36 @@ async def sync_attachment_assets(
         except (TypeError, ValueError):
             size_bytes = 0
 
-        # asset upsert — 멱등(container/object_path). 충돌 시 RETURNING 없음 → 후속 SELECT.
-        ins = (
-            pg_insert(Asset)
-            .values(
-                org_id=org_id,
-                project_id=project_id,
-                container=container,
-                object_path=obj,
-                name=name,
-                content_type=content_type,
-                size_bytes=size_bytes,
-                created_by=created_by,
-            )
-            .on_conflict_do_nothing(constraint="uq_assets_org_project_container_object_path")
-            .returning(Asset.id)
+        # asset upsert — 멱등. project_id null/non-null 별 partial unique 로 ON CONFLICT 분기(까심 R3).
+        base_ins = pg_insert(Asset).values(
+            org_id=org_id,
+            project_id=project_id,
+            container=container,
+            object_path=obj,
+            name=name,
+            content_type=content_type,
+            size_bytes=size_bytes,
+            created_by=created_by,
         )
+        if project_id is not None:
+            ins = base_ins.on_conflict_do_nothing(
+                index_elements=[Asset.org_id, Asset.project_id, Asset.container, Asset.object_path],
+                index_where=Asset.project_id.isnot(None),
+            ).returning(Asset.id)
+        else:
+            ins = base_ins.on_conflict_do_nothing(
+                index_elements=[Asset.org_id, Asset.container, Asset.object_path],
+                index_where=Asset.project_id.is_(None),
+            ).returning(Asset.id)
         asset_id = (await session.execute(ins)).scalar_one_or_none()
         if asset_id is None:
-            # conflict(이미 존재) → **org+project-scoped** 재조회(타 org/project row 매핑 금지·누수 차단).
-            asset_id = (
-                await session.execute(
-                    select(Asset.id).where(
-                        Asset.org_id == org_id,
-                        Asset.project_id == project_id,
-                        Asset.container == container,
-                        Asset.object_path == obj,
-                    )
-                )
-            ).scalar_one()
+            # conflict(이미 존재) → org+project-scoped 재조회(타 org/project row 매핑 금지·누수 차단).
+            sel = select(Asset.id).where(
+                Asset.org_id == org_id, Asset.container == container, Asset.object_path == obj
+            )
+            sel = sel.where(Asset.project_id == project_id) if project_id is not None \
+                else sel.where(Asset.project_id.is_(None))
+            asset_id = (await session.execute(sel)).scalar_one()
         asset_ids.append(asset_id)
 
         await session.execute(

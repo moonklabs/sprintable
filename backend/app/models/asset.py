@@ -57,14 +57,18 @@ class Asset(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
 
     __tablename__ = "assets"
     __table_args__ = (
-        # 멱등 upsert 키 — (org_id, project_id) 포함 필수(멀티테넌시·까심 R2/R3).
-        # org_id: cross-org dangling link 차단. project_id: same-org 두 project 가 같은 object_path
-        # (manual/doc 등 path 가 project 미내포 시) 쓸 때 cross-project 누수 차단. chat/story 는
-        # path 가 project 내포라 안전했으나 manual/doc 대비 키에 명시. project_id NULL(org-level)은
-        # NULL-distinct(dedup 안 됨)이나 S2 에 org-level writer 없음·cross-project 누수는 없음(허용).
-        UniqueConstraint(
-            "org_id", "project_id", "container", "object_path",
-            name="uq_assets_org_project_container_object_path",
+        # 멱등 upsert 키(멀티테넌시·까심 R1~R3). org_id+project_id 둘 다 포함 — cross-org·same-org
+        # cross-project 누수 차단. project_id NULL(org-level capability·nullable=org레벨 허용)은
+        # PG UNIQUE 가 NULL-distinct라 별도 partial unique 로 멱등 보장(2-index 정공):
+        #   - non-null: (org_id, project_id, container, object_path) WHERE project_id IS NOT NULL
+        #   - null:     (org_id, container, object_path)            WHERE project_id IS NULL
+        Index(
+            "uq_assets_proj_nonnull", "org_id", "project_id", "container", "object_path",
+            unique=True, postgresql_where=text("project_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_assets_proj_null", "org_id", "container", "object_path",
+            unique=True, postgresql_where=text("project_id IS NULL"),
         ),
         Index(
             "ix_assets_org_project_ctype_created",

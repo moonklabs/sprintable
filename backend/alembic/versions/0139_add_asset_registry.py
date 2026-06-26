@@ -81,11 +81,16 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
             sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
             sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
-            # (org_id, project_id) 포함 필수(멀티테넌시·까심): cross-org + same-org cross-project 누수 차단.
-            sa.UniqueConstraint(
-                "org_id", "project_id", "container", "object_path",
-                name="uq_assets_org_project_container_object_path",
-            ),
+        )
+        # 멀티테넌시 멱등 키(까심 R1~R3): org_id+project_id 포함. project_id NULL(org-level)은
+        # NULL-distinct라 별도 partial unique 로 멱등 보장(2-index 정공).
+        op.create_index(
+            "uq_assets_proj_nonnull", "assets", ["org_id", "project_id", "container", "object_path"],
+            unique=True, postgresql_where=sa.text("project_id IS NOT NULL"),
+        )
+        op.create_index(
+            "uq_assets_proj_null", "assets", ["org_id", "container", "object_path"],
+            unique=True, postgresql_where=sa.text("project_id IS NULL"),
         )
         op.create_index("ix_assets_org_id", "assets", ["org_id"])
         op.create_index("ix_assets_project_id", "assets", ["project_id"])
@@ -163,7 +168,8 @@ def _backfill_source(conn, *, table, join, org_expr, project_expr, scope_like, s
         FROM {table} m {join}
         CROSS JOIN LATERAL jsonb_array_elements(m.attachments) AS att
         WHERE {where}
-        ON CONFLICT (org_id, project_id, container, object_path) DO NOTHING
+        ON CONFLICT (org_id, project_id, container, object_path)
+            WHERE project_id IS NOT NULL DO NOTHING
         """
     ).bindparams(bindparam("ids", expanding=True))
     insert_links = text(

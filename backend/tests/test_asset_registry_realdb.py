@@ -323,29 +323,36 @@ async def test_same_org_cross_project_no_collision():
 
 
 @pytest.mark.anyio
-async def test_enrich_no_cross_org_leak():
-    """오염 asset_link(타 org source id)가 있어도 enrich 가 타 org title/content/name 미누출(까심 R2#7)."""
+async def test_enrich_no_cross_org_or_cross_project_leak():
+    """오염 asset_link(타 org OR same-org 접근불가 project source)는 enrich 에서 **link 자체 미생성**
+    (title/content/slug/deeplink/id 응답 0·까심 R3). 정상 source(접근 project)는 정상 enrich."""
     from app.dependencies.auth import AuthContext
     from app.routers.assets import list_assets
     from app.services.asset_registry import sync_attachment_assets
 
+    cross_org_story = uuid.uuid4()    # ORG2(타 org)
+    cross_proj_story = uuid.uuid4()   # ORG/PROJ_B(same org·USER 접근불가)
+    src = uuid.uuid4()                # 정상 story(ORG/PROJ_A·USER 접근가능)
     engine = create_async_engine(_ASYNC)
     Session = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with Session() as s:
             await _reset_and_seed(s)
-            other_story = uuid.uuid4()
             for sql in [
-                f"DELETE FROM stories WHERE id='{other_story}'",
                 f"DELETE FROM projects WHERE id='{PROJ_OTHER}'",
                 f"DELETE FROM organizations WHERE id='{ORG2}'",
                 f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG2}','A2b','a2borg','free')",
                 f"INSERT INTO projects (id,org_id,name) VALUES ('{PROJ_OTHER}','{ORG2}','OtherP')",
+                # 정상 story(접근 가능 PROJ_A) — enrich 정상 노출돼야.
                 f"INSERT INTO stories (id,org_id,project_id,title,status,priority) "
-                f"VALUES ('{other_story}','{ORG2}','{PROJ_OTHER}','SECRET TITLE','backlog','medium')",
+                f"VALUES ('{src}','{ORG}','{PROJ_A}','OK STORY','backlog','medium')",
+                f"INSERT INTO stories (id,org_id,project_id,title,status,priority) "
+                f"VALUES ('{cross_org_story}','{ORG2}','{PROJ_OTHER}','SECRET ORG','backlog','medium')",
+                # same-org·접근불가 project(PROJ_B) story — USER 는 PROJ_A 만 grant.
+                f"INSERT INTO stories (id,org_id,project_id,title,status,priority) "
+                f"VALUES ('{cross_proj_story}','{ORG}','{PROJ_B}','SECRET PROJ','backlog','medium')",
             ]:
                 await s.execute(text(sql))
-            src = uuid.uuid4()
             base = f"story/{PROJ_A}/{src}"
             await sync_attachment_assets(s, org_id=ORG, project_id=PROJ_A, source_type="story",
                                          source_id=src, attachments=[_att(f"{base}/u-a.png")])
@@ -353,28 +360,57 @@ async def test_enrich_no_cross_org_leak():
             asset_id = (await s.execute(text(
                 f"SELECT id FROM assets WHERE org_id='{ORG}' AND object_path='{base}/u-a.png'"
             ))).scalar_one()
-            # pollute: ORG asset_link → ORG2 story id(다형 link·FK 없음)
-            await s.execute(text(
-                "INSERT INTO asset_links (org_id, asset_id, source_type, source_id) "
-                f"VALUES ('{ORG}','{asset_id}','story','{other_story}') ON CONFLICT DO NOTHING"
-            ))
+            # pollute: ORG asset_link → 타 org story + same-org 접근불가 project story(다형·FK 없음)
+            for poll in (cross_org_story, cross_proj_story):
+                await s.execute(text(
+                    "INSERT INTO asset_links (org_id, asset_id, source_type, source_id) "
+                    f"VALUES ('{ORG}','{asset_id}','story','{poll}') ON CONFLICT DO NOTHING"
+                ))
             await s.commit()
 
             auth = AuthContext(user_id=str(USER), email=None, claims={}, org_id=str(ORG))
             page = await list_assets(project_id=PROJ_A, folder_id=None, mime=None, q=None,
                                      sort="date", order="desc", cursor=None, limit=50,
                                      db=s, auth=auth, org_id=ORG)
-            leaked = [sl.title for it in page.items for sl in it.source_links
-                      if str(sl.id) == str(other_story)]
-            assert leaked and all(t is None for t in leaked)  # 타 org story title 미누출
+            all_links = [sl for it in page.items for sl in it.source_links]
+            # 정상 link(이 story·PROJ_A) 1건만·오염 2건은 미생성(id/title/deeplink 0 노출)
+            ids = {str(sl.id) for sl in all_links}
+            assert str(src) in ids
+            assert str(cross_org_story) not in ids
+            assert str(cross_proj_story) not in ids
+            titles = {sl.title for sl in all_links}
+            assert "SECRET ORG" not in titles and "SECRET PROJ" not in titles
 
             for sql in [
-                f"DELETE FROM stories WHERE id='{other_story}'",
+                f"DELETE FROM stories WHERE id IN ('{cross_org_story}','{cross_proj_story}')",
                 f"DELETE FROM projects WHERE id='{PROJ_OTHER}'",
                 f"DELETE FROM organizations WHERE id='{ORG2}'",
             ]:
                 await s.execute(text(sql))
             await s.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_org_level_null_project_idempotent():
+    """org-level(project NULL) manual asset 재동기화 멱등 — partial-null unique 로 단일 row(까심 R3#2)."""
+    from app.services.asset_registry import sync_attachment_assets
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            path = "manual/orglevel/x.png"
+            for _ in range(3):
+                await sync_attachment_assets(s, org_id=ORG, project_id=None, source_type="manual",
+                                             source_id=uuid.uuid4(), attachments=[_att(path)])
+                await s.commit()
+            n = (await s.execute(text(
+                f"SELECT count(*) FROM assets WHERE org_id='{ORG}' AND project_id IS NULL AND object_path='{path}'"
+            ))).scalar_one()
+            assert n == 1  # 재동기화에도 단일 row(NULL-distinct 회귀 봉합)
     finally:
         await engine.dispose()
 

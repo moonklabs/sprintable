@@ -100,17 +100,21 @@ def _decode_cursor(cursor: str, sort: str) -> tuple[Any, uuid.UUID]:
 
 
 async def _scope_filter(db, auth, org_id, project_id):
-    """org + project 접근권으로 쿼리 스코프(IDOR 차단). 반환=WHERE clause 리스트."""
+    """org + project 접근권으로 쿼리 스코프(IDOR 차단). 반환=(WHERE clauses, accessible project set).
+
+    accessible set 은 enrich source 스코프(타 project source 누수 차단·까심 R3)에도 재사용한다.
+    """
     user_id = uuid.UUID(auth.user_id)
     clauses = [Asset.org_id == org_id, Asset.deleted_at.is_(None)]
     if project_id is not None:
         if not await has_project_access(db, user_id, project_id, org_id):
             raise HTTPException(status_code=403, detail="No access to this project")
         clauses.append(Asset.project_id == project_id)
+        accessible = {project_id}
     else:
-        accessible = await accessible_project_ids_in_org(db, user_id, org_id)
+        accessible = set(await accessible_project_ids_in_org(db, user_id, org_id))
         clauses.append(or_(Asset.project_id.is_(None), Asset.project_id.in_(accessible)))
-    return clauses
+    return clauses, accessible
 
 
 @router.get("/assets", response_model=AssetPage)
@@ -127,7 +131,7 @@ async def list_assets(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> AssetPage:
-    clauses = await _scope_filter(db, auth, org_id, project_id)
+    clauses, accessible = await _scope_filter(db, auth, org_id, project_id)
     if folder_id is not None:
         clauses.append(Asset.folder_id == folder_id)
     if mime:
@@ -152,7 +156,7 @@ async def list_assets(
     )
     assets = list((await db.execute(stmt)).scalars().all())
 
-    enriched = await _enrich(db, org_id, assets)
+    enriched = await _enrich(db, org_id, accessible, assets)
     items = [enriched[a.id] for a in assets]
     next_cursor = None
     if len(assets) == limit:
@@ -181,8 +185,18 @@ async def list_folders(
     return [FolderResponse.model_validate(r) for r in rows]
 
 
-async def _enrich(db: AsyncSession, org_id: uuid.UUID, assets: list[Asset]) -> dict[uuid.UUID, AssetResponse]:
-    """페이지 단위 batch enrich(N+1 회피): created_by(name/avatar) + source_links(title/deeplink)."""
+async def _enrich(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    accessible: set[uuid.UUID],
+    assets: list[Asset],
+) -> dict[uuid.UUID, AssetResponse]:
+    """페이지 단위 batch enrich(N+1 회피): created_by(name/avatar) + source_links(title/deeplink).
+
+    ⚠️ 다형 link 는 FK 없어 오염 row 가능 → enrich 조회를 **org + accessible-project scoped**
+    (타 org·접근불가 project 의 title/content/slug 누수 차단·까심 R2/R3). 스코프 lookup 서 못 찾은
+    source 는 **SourceLink 자체 미생성**(title=None 노출 말고 제거). member 는 org 레벨(project 무관).
+    """
     base = {a.id: AssetResponse.model_validate(a, from_attributes=True) for a in assets}
     if not assets:
         return base
@@ -198,29 +212,32 @@ async def _enrich(db: AsyncSession, org_id: uuid.UUID, assets: list[Asset]) -> d
         if sid is not None:
             by_type.setdefault(stype, set()).add(sid)
 
-    # type별 title/deeplink 소스 batch fetch.
-    # ⚠️ 다형 link 는 FK 없어 오염 row 가능 → 모든 enrich 조회를 **org-scoped**(타 org title/content/
-    # name 누수 차단·까심#7). ConversationMessage 는 자체 org_id 없어 conversations JOIN 으로 스코프.
+    # org + accessible-project 스코프 batch fetch. accessible 빈 set이면 in_([]) → 0건(누수 0).
     story_t = dict((await db.execute(
         select(Story.id, Story.title).where(
-            Story.id.in_(by_type["story"]), Story.org_id == org_id, Story.deleted_at.is_(None)
+            Story.id.in_(by_type["story"]), Story.org_id == org_id,
+            Story.project_id.in_(accessible), Story.deleted_at.is_(None),
         )
-    )).all()) if by_type.get("story") else {}
+    )).all()) if by_type.get("story") and accessible else {}
     doc_rows = (await db.execute(
         select(Doc.id, Doc.title, Doc.slug).where(
-            Doc.id.in_(by_type["doc"]), Doc.org_id == org_id, Doc.deleted_at.is_(None)
+            Doc.id.in_(by_type["doc"]), Doc.org_id == org_id,
+            Doc.project_id.in_(accessible), Doc.deleted_at.is_(None),
         )
-    )).all() if by_type.get("doc") else []
+    )).all() if by_type.get("doc") and accessible else []
     doc_t = {r[0]: (r[1], r[2]) for r in doc_rows}
     msg_rows = (await db.execute(
         select(ConversationMessage.id, ConversationMessage.conversation_id, ConversationMessage.content)
         .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
-        .where(ConversationMessage.id.in_(by_type["conversation_message"]), Conversation.org_id == org_id)
-    )).all() if by_type.get("conversation_message") else []
+        .where(
+            ConversationMessage.id.in_(by_type["conversation_message"]),
+            Conversation.org_id == org_id, Conversation.project_id.in_(accessible),
+        )
+    )).all() if by_type.get("conversation_message") and accessible else []
     msg_t = {r[0]: (r[1], r[2]) for r in msg_rows}
 
-    # created_by enrich — team_members 뷰(name NOT NULL·avatar nullable). org-scoped(타 org member 누수
-    # 차단·까심#7). 멀티프로젝트 agent=뷰 N행 → id로 dedup.
+    # created_by enrich — team_members 뷰(name NOT NULL·avatar nullable)·org-scoped(member=org 레벨).
+    # 멀티프로젝트 agent=뷰 N행 → id로 dedup.
     cb_ids = {a.created_by for a in assets if a.created_by is not None}
     cb_map: dict[uuid.UUID, CreatedBy] = {}
     if cb_ids:
@@ -234,7 +251,8 @@ async def _enrich(db: AsyncSession, org_id: uuid.UUID, assets: list[Asset]) -> d
     links_by_asset: dict[uuid.UUID, list[SourceLink]] = {}
     for aid, stype, sid in links:
         sl = _build_source_link(stype, sid, base[aid].name, story_t, doc_t, msg_t)
-        links_by_asset.setdefault(aid, []).append(sl)
+        if sl is not None:  # 스코프 밖 source → link 미생성(누수 0)
+            links_by_asset.setdefault(aid, []).append(sl)
 
     for a in assets:
         resp = base[a.id]
@@ -243,18 +261,24 @@ async def _enrich(db: AsyncSession, org_id: uuid.UUID, assets: list[Asset]) -> d
     return base
 
 
-def _build_source_link(stype, sid, asset_name, story_t, doc_t, msg_t) -> SourceLink:
+def _build_source_link(stype, sid, asset_name, story_t, doc_t, msg_t) -> SourceLink | None:
+    """스코프된 source 맵에 없으면 None(link 미생성). manual 은 source 없이 파일명으로 항상 생성."""
     if stype == "story":
-        return SourceLink(type=stype, id=sid, title=story_t.get(sid),
-                          deeplink={"story_id": str(sid)} if sid else None)
+        if sid not in story_t:
+            return None
+        return SourceLink(type=stype, id=sid, title=story_t[sid], deeplink={"story_id": str(sid)})
     if stype == "doc":
-        title, slug = doc_t.get(sid, (None, None))
+        if sid not in doc_t:
+            return None
+        title, slug = doc_t[sid]
         return SourceLink(type=stype, id=sid, title=title,
                           deeplink={"doc_slug": slug} if slug else None)
     if stype == "conversation_message":
-        conv_id, content = msg_t.get(sid, (None, None))
+        if sid not in msg_t:
+            return None
+        conv_id, content = msg_t[sid]
         title = (content or "").strip()[:_SNIPPET] or "메시지"
-        deeplink = {"conversation_id": str(conv_id), "message_id": str(sid)} if conv_id and sid else None
+        deeplink = {"conversation_id": str(conv_id), "message_id": str(sid)} if conv_id else None
         return SourceLink(type=stype, id=sid, title=title, deeplink=deeplink)
-    # manual: 파일명 title·deeplink 없음
+    # manual: 파일명 title·deeplink 없음(source 조회 불요·항상 생성)
     return SourceLink(type=stype, id=sid, title=asset_name, deeplink=None)
