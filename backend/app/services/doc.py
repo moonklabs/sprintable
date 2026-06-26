@@ -14,6 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.doc import Doc, DOC_STATUSES, DocRevision, is_valid_doc_transition
 from app.services.member_resolver import ResolvedMember
 
+# E-DG doc-gate(48f064e5): doc 결재 인앱 게이트. work_item_type='doc'·gate_type='doc_approval'.
+DOC_GATE_WORK_ITEM_TYPE = "doc"
+DOC_GATE_TYPE = "doc_approval"
+
 
 class DocTransitionError(Exception):
     """도메인 오류 — 라우터가 code/message 를 HTTPException 으로 매핑."""
@@ -46,6 +50,47 @@ async def transition_doc(
         raise DocTransitionError(
             "INVALID_DOC_TRANSITION", f"불법 전이: {doc.status} → {to_status}"
         )
+
+    # E-DG doc-gate(48f064e5): 상신 draft→pending → 인앱 doc-gate 생성(work_item_type='doc'·pending)
+    # → Gate inbox(/api/gates?status=pending) 노출. doc.status='pending'(결재 대기). create_gate 멱등
+    # (재상신=기존 gate 반환·중복 0). 결재(승인/반려)는 gate 해소가 _resolve_doc_gate 로 수행.
+    if to_status == "pending" and doc.status == "draft":
+        from app.services.gate_service import create_gate
+        from app.services.workflow_line_config import _default_role_id
+        role_id = await _default_role_id(session, org_id) or doc.id  # 기본 결재 role(부재 시 placeholder)
+        gate = await create_gate(
+            session, org_id, doc.id, DOC_GATE_WORK_ITEM_TYPE, DOC_GATE_TYPE,
+            caller.id, role_id,
+            neutral_facts={"requested_by_member_id": str(caller.id), "doc_title": doc.title},
+        )
+        # ⚠️재상신 RC(산티아고): uq(work_item_id,gate_type)=1 gate·terminal(approved/rejected)=immutable →
+        # create_gate 멱등이 기존 **terminal gate 를 반환**해(상태필터 없음) 재상신 시 새 pending gate 0 →
+        # Gate inbox 미노출+결재 불능. 재상신=새 결재 사이클이므로 terminal gate 를 pending 으로 **re-open**
+        # (직접 reset — FSM 전이 아님·해소 메타 clear). pending/held(admin hold)면 그대로 둔다.
+        if gate.status in ("approved", "rejected", "auto_passed", "voided"):
+            # 감사추적 보존(산티아고 audit): clear 전에 이전 결재(누가/언제/왜)를 neutral_facts.
+            # decision_history 에 append(append-only·재상신 사이클별 1건) → 반려 이력 손실 0. 그 후 current
+            # 해소필드 clear(새 결재 사이클). JSONB 는 in-place mutation 미감지라 새 dict 재할당.
+            _prior = {
+                "status": gate.status,
+                "resolver_id": str(gate.resolver_id) if gate.resolver_id else None,
+                "resolved_at": gate.resolved_at.isoformat() if gate.resolved_at else None,
+                "resolution_note": gate.resolution_note,
+            }
+            _facts = dict(gate.neutral_facts or {})
+            _facts["decision_history"] = [*_facts.get("decision_history", []), _prior]
+            gate.neutral_facts = _facts
+            gate.status = "pending"
+            gate.resolver_id = None
+            gate.resolved_at = None
+            gate.resolution_note = None
+        doc.status = "pending"
+        await session.flush()
+        return doc
+
+    # 결재 대기(pending) 문서의 승인/반려는 **gate 해소(via_gate)로만** — 직접 API self-confirm 차단.
+    if doc.status == "pending" and to_status in ("confirmed", "denied") and not via_gate:
+        raise DocTransitionError("GATE_REQUIRED", "결재 대기 문서는 Gate 승인/반려로만 전이됩니다.")
 
     # ⭐E-DG S22: draft→confirmed line overlay. enforcing 라인이면 human-gate 생성·draft 유지(가시
     # confirm 대기). default-off/plain/엔진실패 → 아래 inline human-only 폴백(byte-동일·agent 차단 유지·
