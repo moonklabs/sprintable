@@ -72,7 +72,21 @@ jobs:
           # baseline REVISION invariant — the snapshot was captured at 0096; changing this without
           # regenerating baseline/schema.sql would mis-stamp fresh DBs. Lock it.
           test "$(cat backend/alembic/baseline/REVISION)" = "0096"
-          echo "baseline parity OK: team_members=VIEW, org_member_id nullable, seed present, 0097 applied, REVISION=0096"
+          # E-STORAGE-SSOT S2 (0139): asset registry 3 테이블 + asset_links source_type CHECK 적용 확인.
+          test "$(P "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('assets','asset_folders','asset_links')")" = "3"
+          test "$(P "SELECT count(*) FROM pg_constraint WHERE conname='ck_asset_links_source_type'")" = "1"
+          echo "baseline parity OK: team_members=VIEW, org_member_id nullable, seed present, 0097 applied, asset registry present, REVISION=0096"
+
+      # E-STORAGE-SSOT: asset registry IDOR/정합 게이트는 real-DB 가 필수(backend-test 잡엔 PG 없음).
+      # 이 PG 백드 잡에서 실행해 S2~S8 IDOR/멀티테넌시 회귀를 CI 가 잡도록 박는다(까심#4).
+      - name: asset registry real-DB tests (IDOR / sync / backfill)
+        working-directory: backend
+        env:
+          ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+          DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
+          JWT_SECRET: ci-test-secret-at-least-32-chars-long
+          SECRET_KEY: ci-test-secret-at-least-32-chars-long
+        run: uv run pytest tests/test_asset_registry_realdb.py tests/test_asset_canonical.py -q
 
       - name: Verify fresh DB reached head (baseline + incremental)
         working-directory: backend
