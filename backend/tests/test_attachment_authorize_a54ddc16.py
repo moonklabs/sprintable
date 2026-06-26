@@ -201,3 +201,50 @@ async def test_authorize_story_no_access_403():
         assert r.status_code == 403
     finally:
         app.dependency_overrides.clear()
+
+
+# E-STORAGE-SSOT S7 — authorize 가 신 org/project namespace 도 인식(legacy 무회귀·신 upload 렌더).
+CONV_PATH_S7 = f"org/{ORG_ID}/project/{PROJECT_ID}/chat/{CONV_ID}/u1-abc.png"
+STORY_PATH_S7 = f"org/{ORG_ID}/project/{PROJECT_ID}/story/{STORY_ID}/u1-abc.png"
+
+
+@pytest.mark.anyio
+async def test_authorize_conversation_s7_namespace_200():
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_scalar(uuid.uuid4()), _scalar(True)])
+    client, app = await _client(session)
+    try:
+        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
+            r = await _get(client, f"path={CONV_PATH_S7}&conversation_id={CONV_ID}")
+        assert r.status_code == 200 and r.json()["authorized"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_authorize_story_s7_namespace_200():
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=_story_row([{"url": STORY_PATH_S7}]))
+    client, app = await _client(session)
+    try:
+        with patch("app.routers.attachments.has_project_access", new_callable=AsyncMock, return_value=True):
+            r = await _get(client, f"path={STORY_PATH_S7}&story_id={STORY_ID}")
+        assert r.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_authorize_conversation_s7_wrong_org_403():
+    """신 namespace인데 org 불일치(타 org path) → 구조 스코프 거부(403)."""
+    import uuid as _u
+    bad = f"org/{_u.uuid4()}/project/{PROJECT_ID}/chat/{CONV_ID}/u.png"
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_scalar(uuid.uuid4()), _scalar(True)])
+    client, app = await _client(session)
+    try:
+        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
+            r = await _get(client, f"path={bad}&conversation_id={CONV_ID}")
+        assert r.status_code == 403
+    finally:
+        app.dependency_overrides.clear()

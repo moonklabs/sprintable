@@ -98,8 +98,12 @@ async def authorize_attachment(
     legacy_url = _PUBLIC_PREFIX + path  # legacy stored 형태
 
     if conversation_id is not None:
-        # ① 구조적 스코프: chat/<proj>/<conv_id>/<file> — conv id 가 path segment 여야
-        if not (path.startswith("chat/") and str(conversation_id) in segments):
+        # ① 구조적 스코프: conv id 가 path segment + 우리 namespace(legacy `chat/...` OR S7
+        #    `org/<org>/project/.../chat/...`). 정확 belongs 검사(②)가 실 게이트·이건 defense-in-depth.
+        ns_ok = path.startswith("chat/") or (
+            path.startswith(f"org/{org_id}/project/") and "/chat/" in path
+        )
+        if not (ns_ok and str(conversation_id) in segments):
             raise HTTPException(status_code=403, detail="Attachment path not scoped to this conversation")
         # 권한: conversation 참가자(canonical member). team_member 봐주기 없음.
         member = await resolve_member(auth, org_id, db, project_id=None)
@@ -124,8 +128,11 @@ async def authorize_attachment(
         if not belongs:
             raise HTTPException(status_code=403, detail="Attachment does not belong to this conversation")
     else:
-        # ① 구조적 스코프: story/<proj>/<story_id>/<file>
-        if not (path.startswith("story/") and str(story_id) in segments):
+        # ① 구조적 스코프: story id segment + 우리 namespace(legacy `story/...` OR S7 `org/.../story/...`).
+        ns_ok = path.startswith("story/") or (
+            path.startswith(f"org/{org_id}/project/") and "/story/" in path
+        )
+        if not (ns_ok and str(story_id) in segments):
             raise HTTPException(status_code=403, detail="Attachment path not scoped to this story")
         row = (await db.execute(
             select(Story.project_id, Story.attachments).where(
