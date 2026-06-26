@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { Button } from '@/components/ui/button';
+import { AddAgentForm } from './add-agent-form';
 import { cn } from '@/lib/utils';
 
 type MemberType = 'human' | 'agent';
@@ -34,14 +35,12 @@ export function AddMemberModal({ open, onClose, orgId, projects, defaultType = '
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'admin' | 'member'>('member');
   const [projectIds, setProjectIds] = useState<string[]>([]);
-  // 에이전트(team-members)
-  const [agentName, setAgentName] = useState('');
-  const [agentProjectId, setAgentProjectId] = useState('');
+  // 에이전트(v2)는 <AddAgentForm>가 자체 state/submit/결과 phase 호스팅 — 모달은 human invite만 다룬다.
 
   const reset = () => {
     setType(defaultType);
     setEmail(''); setRole('member'); setProjectIds([]);
-    setAgentName(''); setAgentProjectId(''); setError(null);
+    setError(null);
   };
   const close = () => { reset(); onClose(); };
 
@@ -51,41 +50,30 @@ export function AddMemberModal({ open, onClose, orgId, projects, defaultType = '
     if (!open) return;
     setType(defaultType);
     setEmail(''); setRole('member'); setProjectIds([]);
-    setAgentName(''); setAgentProjectId(''); setError(null);
+    setError(null);
   }, [open, defaultType]);
   const toggleProject = (id: string) =>
     setProjectIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  const submit = async () => {
+  // human invite 전용(agent는 AddAgentForm가 처리). orgId null 가드 — /organizations/null/invites 차단.
+  const submitHuman = async () => {
     if (submitting) return;
+    if (!orgId) { setError(t('addMemberInviteError')); return; }
+    if (!email.trim()) { setError(t('inviteEmailRequired')); return; }
     setSubmitting(true);
     setError(null);
     try {
-      if (type === 'human') {
-        if (!email.trim()) { setError(t('inviteEmailRequired')); return; }
-        const res = await fetch(`/api/organizations/${orgId}/invites`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: email.trim(), role, project_ids: projectIds }),
-        });
-        const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-        if (!res.ok) { setError(json.error?.message ?? t('addMemberInviteError')); return; }
-        onAdded('human', t('addMemberInviteSuccess'));
-        close();
-      } else {
-        if (!agentName.trim() || !agentProjectId) { setError(t('addMemberAgentRequired')); return; }
-        const res = await fetch('/api/team-members', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ org_id: orgId, project_id: agentProjectId, name: agentName.trim(), type: 'agent', role: 'member' }),
-        });
-        const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-        if (!res.ok) { setError(json.error?.message ?? t('addMemberAgentError')); return; }
-        onAdded('agent', t('addMemberAgentSuccess'));
-        close();
-      }
+      const res = await fetch(`/api/organizations/${orgId}/invites`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), role, project_ids: projectIds }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+      if (!res.ok) { setError(json.error?.message ?? t('addMemberInviteError')); return; }
+      onAdded('human', t('addMemberInviteSuccess'));
+      close();
     } catch {
-      setError(t(type === 'human' ? 'addMemberInviteError' : 'addMemberAgentError'));
+      setError(t('addMemberInviteError'));
     } finally {
       setSubmitting(false);
     }
@@ -172,31 +160,23 @@ export function AddMemberModal({ open, onClose, orgId, projects, defaultType = '
             </div>
           </div>
         ) : (
-          <div className="space-y-3">
-            <OperatorInput
-              value={agentName}
-              onChange={(e) => setAgentName(e.target.value)}
-              placeholder={t('agentNamePlaceholder')}
-            />
-            <OperatorDropdownSelect
-              value={agentProjectId}
-              onValueChange={(v) => setAgentProjectId(v)}
-              options={[
-                { value: '', label: t('selectProject') },
-                ...projects.map((p) => ({ value: p.id, label: p.name })),
-              ]}
-            />
-          </div>
+          <AddAgentForm
+            projects={projects}
+            onCreated={() => onAdded('agent', t('addMemberAgentSuccess'))}
+            onDone={close}
+          />
         )}
 
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        {type === 'human' && error ? <p className="text-xs text-destructive">{error}</p> : null}
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={close} disabled={submitting}>{tc('cancel')}</Button>
-          <Button variant="hero" onClick={() => void submit()} disabled={submitting}>
-            {submitting ? '...' : t('addMember')}
-          </Button>
-        </DialogFooter>
+        {type === 'human' ? (
+          <DialogFooter>
+            <Button variant="ghost" onClick={close} disabled={submitting}>{tc('cancel')}</Button>
+            <Button variant="hero" onClick={() => void submitHuman()} disabled={submitting || !orgId}>
+              {submitting ? '...' : t('addMember')}
+            </Button>
+          </DialogFooter>
+        ) : null}
       </DialogContent>
     </Dialog>
   );
