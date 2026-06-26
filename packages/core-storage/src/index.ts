@@ -131,6 +131,7 @@ export type {
 export type {
   IStorageService,
   StorageObjectHead,
+  SignReadOptions,
 } from './interfaces/IStorageService';
 
 export { NullSubscriptionRepository } from './null/NullSubscriptionRepository';

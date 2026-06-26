@@ -47,11 +47,12 @@ export async function GET(
     return NextResponse.json({ error: { message: 'not found' } }, { status: 404 });
   }
 
-  return new NextResponse(new Uint8Array(body), {
-    status: 200,
-    headers: {
-      'content-type': 'application/octet-stream',
-      'cache-control': 'private, no-store',
-    },
-  });
+  // S3: disposition(inline|attachment) — GCS responseDisposition / S3 ResponseContentDisposition 와 동치.
+  const disposition = searchParams.get('disposition') === 'attachment' ? 'attachment' : 'inline';
+  const headers: Record<string, string> = {
+    'content-type': 'application/octet-stream',
+    'cache-control': 'private, no-store',
+    'content-disposition': disposition,
+  };
+  return new NextResponse(new Uint8Array(body), { status: 200, headers });
 }

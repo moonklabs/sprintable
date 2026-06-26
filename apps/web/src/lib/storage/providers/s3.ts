@@ -6,7 +6,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import type { IStorageService, StorageObjectHead } from '@sprintable/core-storage';
+import type { IStorageService, SignReadOptions, StorageObjectHead } from '@sprintable/core-storage';
 import { s3StorageConfig } from '../config';
 
 // E-STORAGE-SSOT S1: S3(및 minio 호환) provider. @aws-sdk 는 팩토리에서 provider=s3 일 때만
@@ -57,11 +57,16 @@ export class S3StorageService implements IStorageService {
   async signRead(
     container: string,
     objectPath: string,
-    expiresInMs = 5 * 60 * 1000,
+    opts?: SignReadOptions,
   ): Promise<string> {
+    const expiresInMs = opts?.expiresInMs ?? 5 * 60 * 1000;
     return getSignedUrl(
       this.client,
-      new GetObjectCommand({ Bucket: container, Key: objectPath }),
+      new GetObjectCommand({
+        Bucket: container,
+        Key: objectPath,
+        ...(opts?.disposition ? { ResponseContentDisposition: opts.disposition } : {}),
+      }),
       { expiresIn: Math.ceil(expiresInMs / 1000) },
     );
   }

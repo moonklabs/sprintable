@@ -15,6 +15,12 @@ export interface StorageObjectHead {
   contentType: string | null;
 }
 
+/** signRead 옵션 — 만료·content-disposition(S3·S5 계약: preview=inline / download=attachment). */
+export interface SignReadOptions {
+  expiresInMs?: number;
+  disposition?: 'inline' | 'attachment';
+}
+
 export interface IStorageService {
   /**
    * 객체 업로드. 반환 `url` 은 첨부 메타에 저장되는 canonical 값으로, sign/authorize 경로의
@@ -29,8 +35,8 @@ export interface IStorageService {
     contentType?: string,
   ): Promise<{ url: string }>;
 
-  /** authorize 통과 후 호출되는 단기 만료 read 서명 URL. */
-  signRead(container: string, objectPath: string, expiresInMs?: number): Promise<string>;
+  /** authorize 통과 후 호출되는 단기 만료 read 서명 URL. opts.disposition 으로 inline/attachment 제어. */
+  signRead(container: string, objectPath: string, opts?: SignReadOptions): Promise<string>;
 
   /** 객체 삭제. 객체가 없으면 no-op. */
   deleteObject(container: string, objectPath: string): Promise<void>;

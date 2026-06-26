@@ -30,19 +30,39 @@ export async function GET(request: Request) {
     const rawPath = searchParams.get('path');
     const conversationId = searchParams.get('conversation_id');
     const storyId = searchParams.get('story_id');
+    const assetId = searchParams.get('asset_id');
+    // S5 계약: preview=inline / download=attachment.
+    const disposition = searchParams.get('disposition') === 'attachment' ? 'attachment' : 'inline';
 
-    if (!rawPath) return ApiErrors.badRequest('path is required');
-    // BE 계약: 정확히 하나의 리소스(conversation_id XOR story_id).
-    if ((conversationId === null) === (storyId === null)) {
-      return ApiErrors.badRequest('exactly one of conversation_id or story_id is required');
+    // BE 계약: 정확히 하나의 리소스(conversation_id | story_id | asset_id).
+    if ([conversationId, storyId, assetId].filter((x) => x !== null).length !== 1) {
+      return ApiErrors.badRequest('exactly one of conversation_id, story_id, asset_id is required');
     }
 
+    const storage = await createStorageService();
+
+    // S3: asset_id 경로 — BE 가 registry(SSOT)에서 {container, object_path} 권위 derive(FE 제공값 trust X).
+    if (assetId) {
+      const authUrl = new URL('/api/v2/attachments/authorize', FASTAPI_URL());
+      authUrl.searchParams.set('asset_id', assetId);
+      const authRes = await fetch(authUrl.toString(), {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: 'no-store',
+      });
+      if (authRes.status === 403) return ApiErrors.forbidden('첨부 접근 권한이 없습니다');
+      if (authRes.status === 404) return ApiErrors.badRequest('asset not found');
+      if (!authRes.ok) return ApiErrors.badRequest('attachment authorization failed');
+      const a = (await authRes.json()) as { container?: string; object_path?: string };
+      if (!a.container || !a.object_path) return ApiErrors.badRequest('asset authorization incomplete');
+      const url = await storage.signRead(a.container, a.object_path, { disposition });
+      return apiSuccess({ url });
+    }
+
+    // conv/story 경로 — 기존 path 기반(구조 스코프 + canonical 정확 매치) 2겹 방어 무변경.
+    if (!rawPath) return ApiErrors.badRequest('path is required');
     const objectPath = canonicalObjectPath(rawPath);
-    // bare object path(스킴 없음)만 허용 — injection 차단(BE와 동일 가드).
     if (!objectPath || objectPath.includes('://')) return ApiErrors.badRequest('invalid attachment path');
 
-    // BE authorize — 요청자 접근권 + path 소속(구조 스코프 + canonical 정확 매치) 2겹 방어.
-    // 세션 access_token(sp_at)을 Bearer로 전달. org는 BE가 토큰서 도출.
     const authUrl = new URL('/api/v2/attachments/authorize', FASTAPI_URL());
     authUrl.searchParams.set('path', objectPath);
     if (conversationId) authUrl.searchParams.set('conversation_id', conversationId);
@@ -55,9 +75,7 @@ export async function GET(request: Request) {
     if (authRes.status === 403) return ApiErrors.forbidden('첨부 접근 권한이 없습니다');
     if (!authRes.ok) return ApiErrors.badRequest('attachment authorization failed');
 
-    // authorize 통과 — 단기 만료 서명 URL 발급(provider 추상 경유).
-    const storage = await createStorageService();
-    const url = await storage.signRead(GCS_MEMO_ATTACHMENTS_BUCKET, objectPath);
+    const url = await storage.signRead(GCS_MEMO_ATTACHMENTS_BUCKET, objectPath, { disposition });
     return apiSuccess({ url });
   } catch (err: unknown) {
     return handleApiError(err);

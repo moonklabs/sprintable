@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.asset import Asset
 from app.models.conversation import ConversationParticipant
 from app.models.pm import Story
 from app.services.member_resolver import resolve_member
@@ -48,19 +49,48 @@ def _canonical_object_path(stored_url: str) -> str | None:
 
 @router.get("/authorize")
 async def authorize_attachment(
-    path: str = Query(..., description="GCS object path (bare·스킴 없음)"),
+    path: str | None = Query(default=None, description="GCS object path (bare·스킴 없음·conv/story 전용)"),
     conversation_id: uuid.UUID | None = Query(default=None),
     story_id: uuid.UUID | None = Query(default=None),
+    asset_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
     """GET /api/v2/attachments/authorize — 첨부 접근 인가(200) / 거부(403).
 
-    정확히 하나의 리소스(conversation_id XOR story_id)·요청자 접근권·path 소속(구조+정확매치).
+    정확히 하나의 리소스(conversation_id | story_id | asset_id)·요청자 접근권.
+    S3: asset_id 분기(S2 registry·D1: BE가 registry에서 {container,object_path} 권위 derive·FE 제공값
+    trust X). conversation/story 엄격검사(path 구조+정확매치)는 무변경(IDOR 유지).
     """
-    if (conversation_id is None) == (story_id is None):
-        raise HTTPException(status_code=400, detail="exactly one of conversation_id or story_id required")
+    if sum(x is not None for x in (conversation_id, story_id, asset_id)) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="exactly one of conversation_id, story_id, asset_id required",
+        )
+
+    if asset_id is not None:
+        # S3·D1: asset_id 가 truth. registry(org-scoped)에서 좌표 derive→authz→{container,object_path}
+        # 반환(FE 제공 path/container 안 받음·attack surface↓). cross-org=org 필터 0행→404(AC4).
+        asset = (await db.execute(
+            select(Asset).where(
+                Asset.id == asset_id,
+                Asset.org_id == org_id,
+                Asset.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+        if asset is None:
+            raise HTTPException(status_code=404, detail="Asset not found")
+        # 인가(AC1·AC4): project asset=has_project_access·org-level(project_id NULL)=verified-org 멤버.
+        # org_id 는 get_verified_org_id 로 검증됨(asset.org_id==org_id 매치)→ org-level 통과.
+        if asset.project_id is not None and not await has_project_access(
+            db, uuid.UUID(auth.user_id), asset.project_id, org_id
+        ):
+            raise HTTPException(status_code=403, detail="No access to this project")
+        # BE 권위 좌표 반환 — FE 는 이걸로 signRead(외부URL/wrong-bucket 불가·AC3).
+        return {"authorized": True, "container": asset.container, "object_path": asset.object_path}
+
+    # conv/story 분기는 path(bare object) 필수.
     if not path or "://" in path:
         raise HTTPException(status_code=400, detail="path must be a bare object path")
 

@@ -1,6 +1,6 @@
 import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
-import type { IStorageService, StorageObjectHead } from '@sprintable/core-storage';
+import type { IStorageService, SignReadOptions, StorageObjectHead } from '@sprintable/core-storage';
 import { localStorageConfig, resolveLocalSigningSecret } from '../config';
 import { signLocalObject } from '../local-sign';
 
@@ -41,12 +41,14 @@ export class LocalDiskStorageService implements IStorageService {
   async signRead(
     container: string,
     objectPath: string,
-    expiresInMs = 5 * 60 * 1000,
+    opts?: SignReadOptions,
   ): Promise<string> {
-    const exp = Date.now() + expiresInMs;
+    const exp = Date.now() + (opts?.expiresInMs ?? 5 * 60 * 1000);
     const sig = signLocalObject(this.signingSecret, container, objectPath, exp);
     // same-origin 상대 URL — 브라우저가 직접 fetch. serve 라우트가 HMAC 검증.
+    // disposition 은 HMAC 비포함(inline↔attachment 변조는 cosmetic·무해)·serve 가 헤더로 반영.
     const qs = new URLSearchParams({ exp: String(exp), sig });
+    if (opts?.disposition) qs.set('disposition', opts.disposition);
     return `/api/storage/local/${container}/${objectPath}?${qs.toString()}`;
   }
 
