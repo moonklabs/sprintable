@@ -117,6 +117,19 @@ def decode_jwt(token: str) -> dict:
     )
 
 
+def decode_jwt_ignore_exp(token: str) -> dict:
+    """서명 검증·exp 무시 decode — 만료 토큰서도 sub/claims 추출(계정 메타 resolve 전용).
+
+    우리 서명(JWT_SECRET)만 통과하므로 임의 토큰 정보 leak 0. 부작용 없음(read-only).
+    """
+    return jwt.decode(
+        token,
+        _get_secret(),
+        algorithms=["HS256"],
+        options={"verify_aud": False, "verify_exp": False},
+    )
+
+
 def hash_token(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
