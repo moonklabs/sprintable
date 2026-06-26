@@ -31,6 +31,8 @@ USER = uuid.UUID("a2000000-0000-0000-0000-0000000000a1")
 OM = uuid.UUID("a2000000-0000-0000-0000-0000000000b1")
 PROJ_A = uuid.UUID("a2000000-0000-0000-0000-0000000000c1")
 PROJ_B = uuid.UUID("a2000000-0000-0000-0000-0000000000c2")
+ORG2 = uuid.UUID("a2000000-0000-0000-0000-000000000002")
+PROJ_OTHER = uuid.UUID("a2000000-0000-0000-0000-0000000000d1")  # ORG2 소속
 BUCKET = "sprintable-memo-attachments"
 
 
@@ -284,6 +286,94 @@ async def test_cross_org_same_path_isolated_no_dangling_link():
             await s.execute(text(f"DELETE FROM asset_links WHERE org_id='{ORG2}'"))
             await s.execute(text(f"DELETE FROM assets WHERE org_id='{ORG2}'"))
             await s.execute(text(f"DELETE FROM organizations WHERE id='{ORG2}'"))
+            await s.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_same_org_cross_project_no_collision():
+    """같은 org 두 project 가 동일 object_path(project 미내포) 등록 → project별 별도 asset·
+    cross-project link 누수 0(까심 R2#1·4-col unique 키)."""
+    from app.services.asset_registry import sync_attachment_assets
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            src_a, src_b = uuid.uuid4(), uuid.uuid4()
+            shared = "manual/shared/x.png"  # project 미내포 경로
+            await sync_attachment_assets(s, org_id=ORG, project_id=PROJ_A, source_type="manual",
+                                         source_id=src_a, attachments=[_att(shared)])
+            await sync_attachment_assets(s, org_id=ORG, project_id=PROJ_B, source_type="manual",
+                                         source_id=src_b, attachments=[_att(shared)])
+            await s.commit()
+            n = (await s.execute(text(
+                f"SELECT count(*) FROM assets WHERE org_id='{ORG}' AND object_path='{shared}'"
+            ))).scalar_one()
+            assert n == 2  # project별 별도 row(충돌 없음)
+            leak = (await s.execute(text(
+                f"SELECT count(*) FROM asset_links al JOIN assets a ON a.id=al.asset_id "
+                f"WHERE al.source_id='{src_b}' AND a.project_id <> '{PROJ_B}'"
+            ))).scalar_one()
+            assert leak == 0  # B link 가 타 project asset 에 안 붙음
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_enrich_no_cross_org_leak():
+    """오염 asset_link(타 org source id)가 있어도 enrich 가 타 org title/content/name 미누출(까심 R2#7)."""
+    from app.dependencies.auth import AuthContext
+    from app.routers.assets import list_assets
+    from app.services.asset_registry import sync_attachment_assets
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            other_story = uuid.uuid4()
+            for sql in [
+                f"DELETE FROM stories WHERE id='{other_story}'",
+                f"DELETE FROM projects WHERE id='{PROJ_OTHER}'",
+                f"DELETE FROM organizations WHERE id='{ORG2}'",
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG2}','A2b','a2borg','free')",
+                f"INSERT INTO projects (id,org_id,name) VALUES ('{PROJ_OTHER}','{ORG2}','OtherP')",
+                f"INSERT INTO stories (id,org_id,project_id,title,status,priority) "
+                f"VALUES ('{other_story}','{ORG2}','{PROJ_OTHER}','SECRET TITLE','backlog','medium')",
+            ]:
+                await s.execute(text(sql))
+            src = uuid.uuid4()
+            base = f"story/{PROJ_A}/{src}"
+            await sync_attachment_assets(s, org_id=ORG, project_id=PROJ_A, source_type="story",
+                                         source_id=src, attachments=[_att(f"{base}/u-a.png")])
+            await s.commit()
+            asset_id = (await s.execute(text(
+                f"SELECT id FROM assets WHERE org_id='{ORG}' AND object_path='{base}/u-a.png'"
+            ))).scalar_one()
+            # pollute: ORG asset_link → ORG2 story id(다형 link·FK 없음)
+            await s.execute(text(
+                "INSERT INTO asset_links (org_id, asset_id, source_type, source_id) "
+                f"VALUES ('{ORG}','{asset_id}','story','{other_story}') ON CONFLICT DO NOTHING"
+            ))
+            await s.commit()
+
+            auth = AuthContext(user_id=str(USER), email=None, claims={}, org_id=str(ORG))
+            page = await list_assets(project_id=PROJ_A, folder_id=None, mime=None, q=None,
+                                     sort="date", order="desc", cursor=None, limit=50,
+                                     db=s, auth=auth, org_id=ORG)
+            leaked = [sl.title for it in page.items for sl in it.source_links
+                      if str(sl.id) == str(other_story)]
+            assert leaked and all(t is None for t in leaked)  # 타 org story title 미누출
+
+            for sql in [
+                f"DELETE FROM stories WHERE id='{other_story}'",
+                f"DELETE FROM projects WHERE id='{PROJ_OTHER}'",
+                f"DELETE FROM organizations WHERE id='{ORG2}'",
+            ]:
+                await s.execute(text(sql))
             await s.commit()
     finally:
         await engine.dispose()

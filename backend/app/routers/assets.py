@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.asset import Asset, AssetFolder, AssetLink
-from app.models.conversation import ConversationMessage
+from app.models.conversation import Conversation, ConversationMessage
 from app.models.doc import Doc
 from app.models.pm import Story
 from app.models.team import TeamMember
@@ -198,26 +198,35 @@ async def _enrich(db: AsyncSession, org_id: uuid.UUID, assets: list[Asset]) -> d
         if sid is not None:
             by_type.setdefault(stype, set()).add(sid)
 
-    # type별 title/deeplink 소스 batch fetch
+    # type별 title/deeplink 소스 batch fetch.
+    # ⚠️ 다형 link 는 FK 없어 오염 row 가능 → 모든 enrich 조회를 **org-scoped**(타 org title/content/
+    # name 누수 차단·까심#7). ConversationMessage 는 자체 org_id 없어 conversations JOIN 으로 스코프.
     story_t = dict((await db.execute(
-        select(Story.id, Story.title).where(Story.id.in_(by_type["story"]))
+        select(Story.id, Story.title).where(
+            Story.id.in_(by_type["story"]), Story.org_id == org_id, Story.deleted_at.is_(None)
+        )
     )).all()) if by_type.get("story") else {}
     doc_rows = (await db.execute(
-        select(Doc.id, Doc.title, Doc.slug).where(Doc.id.in_(by_type["doc"]))
+        select(Doc.id, Doc.title, Doc.slug).where(
+            Doc.id.in_(by_type["doc"]), Doc.org_id == org_id, Doc.deleted_at.is_(None)
+        )
     )).all() if by_type.get("doc") else []
     doc_t = {r[0]: (r[1], r[2]) for r in doc_rows}
     msg_rows = (await db.execute(
         select(ConversationMessage.id, ConversationMessage.conversation_id, ConversationMessage.content)
-        .where(ConversationMessage.id.in_(by_type["conversation_message"]))
+        .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+        .where(ConversationMessage.id.in_(by_type["conversation_message"]), Conversation.org_id == org_id)
     )).all() if by_type.get("conversation_message") else []
     msg_t = {r[0]: (r[1], r[2]) for r in msg_rows}
 
-    # created_by enrich — team_members 뷰(name NOT NULL·avatar nullable). 멀티프로젝트 agent=뷰 N행 → id로 dedup.
+    # created_by enrich — team_members 뷰(name NOT NULL·avatar nullable). org-scoped(타 org member 누수
+    # 차단·까심#7). 멀티프로젝트 agent=뷰 N행 → id로 dedup.
     cb_ids = {a.created_by for a in assets if a.created_by is not None}
     cb_map: dict[uuid.UUID, CreatedBy] = {}
     if cb_ids:
         for tid, name, avatar in (await db.execute(
-            select(TeamMember.id, TeamMember.name, TeamMember.avatar_url).where(TeamMember.id.in_(cb_ids))
+            select(TeamMember.id, TeamMember.name, TeamMember.avatar_url)
+            .where(TeamMember.id.in_(cb_ids), TeamMember.org_id == org_id)
         )).all():
             if tid not in cb_map:
                 cb_map[tid] = CreatedBy(id=tid, name=name, avatar_url=avatar)

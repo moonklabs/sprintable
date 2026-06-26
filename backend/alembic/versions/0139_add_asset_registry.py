@@ -81,8 +81,11 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
             sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
             sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
-            # org_id 포함 필수(멀티테넌시·cross-org dangling link 차단·까심). project_id 는 object_path 가 내포.
-            sa.UniqueConstraint("org_id", "container", "object_path", name="uq_assets_org_container_object_path"),
+            # (org_id, project_id) 포함 필수(멀티테넌시·까심): cross-org + same-org cross-project 누수 차단.
+            sa.UniqueConstraint(
+                "org_id", "project_id", "container", "object_path",
+                name="uq_assets_org_project_container_object_path",
+            ),
         )
         op.create_index("ix_assets_org_id", "assets", ["org_id"])
         op.create_index("ix_assets_project_id", "assets", ["project_id"])
@@ -160,7 +163,7 @@ def _backfill_source(conn, *, table, join, org_expr, project_expr, scope_like, s
         FROM {table} m {join}
         CROSS JOIN LATERAL jsonb_array_elements(m.attachments) AS att
         WHERE {where}
-        ON CONFLICT (org_id, container, object_path) DO NOTHING
+        ON CONFLICT (org_id, project_id, container, object_path) DO NOTHING
         """
     ).bindparams(bindparam("ids", expanding=True))
     insert_links = text(
@@ -169,7 +172,8 @@ def _backfill_source(conn, *, table, join, org_expr, project_expr, scope_like, s
         SELECT {org_expr}, a.id, :source_type, m.id
         FROM {table} m {join}
         CROSS JOIN LATERAL jsonb_array_elements(m.attachments) AS att
-        JOIN assets a ON a.org_id = {org_expr} AND a.container = :bucket AND a.object_path = {_CANON}
+        JOIN assets a ON a.org_id = {org_expr} AND a.project_id = {project_expr}
+                     AND a.container = :bucket AND a.object_path = {_CANON}
         WHERE {where}
         ON CONFLICT (asset_id, source_type, source_id) DO NOTHING
         """

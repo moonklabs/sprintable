@@ -104,16 +104,17 @@ async def sync_attachment_assets(
                 size_bytes=size_bytes,
                 created_by=created_by,
             )
-            .on_conflict_do_nothing(constraint="uq_assets_org_container_object_path")
+            .on_conflict_do_nothing(constraint="uq_assets_org_project_container_object_path")
             .returning(Asset.id)
         )
         asset_id = (await session.execute(ins)).scalar_one_or_none()
         if asset_id is None:
-            # conflict(이미 존재) → **org-scoped** 재조회(타 org row 매핑 금지·cross-org link 차단).
+            # conflict(이미 존재) → **org+project-scoped** 재조회(타 org/project row 매핑 금지·누수 차단).
             asset_id = (
                 await session.execute(
                     select(Asset.id).where(
                         Asset.org_id == org_id,
+                        Asset.project_id == project_id,
                         Asset.container == container,
                         Asset.object_path == obj,
                     )
