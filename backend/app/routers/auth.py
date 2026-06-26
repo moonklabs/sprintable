@@ -785,6 +785,63 @@ async def refresh_token(
     return _ok(tokens)
 
 
+# ─── POST /api/v2/auth/switch-account ─────────────────────────────────────────
+
+@router.post("/switch-account")
+@limiter.limit("20/minute")
+async def switch_account(
+    request: Request,
+    body: RefreshRequest,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """멀티계정 switcher — vault 의 target refresh token 으로 active 세션 전환(rotation).
+
+    refresh 와 동형(타겟 RT 검증→rotate→신규 tokens)이되, FE 가 활성화할 project_id 를 동봉한다
+    (라이브 회귀: BE 미구현 404 → switch 무동작). single-use RT rotation 으로 이중소비 방지.
+    """
+    try:
+        payload = decode_jwt(body.refresh_token)
+    except JWTError:
+        return _err("INVALID_TOKEN", "Invalid refresh token", 401)
+
+    if payload.get("type") != "refresh":
+        return _err("INVALID_TOKEN", "Not a refresh token", 401)
+
+    token_hash = hash_token(body.refresh_token)
+    stored = (await session.execute(
+        select(RefreshToken).where(
+            RefreshToken.token_hash == token_hash,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > datetime.now(timezone.utc),
+        )
+    )).scalar_one_or_none()
+    if not stored:
+        return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
+
+    user = await _get_user_by_id(session, uuid.UUID(payload["sub"]))
+    if not user:
+        return _err("USER_NOT_FOUND", "User not found", 401)
+
+    # target RT 무효화(rotation·single-use 이중소비 방지)
+    await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.token_hash == token_hash)
+        .values(revoked_at=datetime.now(timezone.utc))
+    )
+
+    _md = await _build_app_metadata(user, session)
+    if settings.build_app_metadata_defallback:
+        _persist_resolved_context(user, _md)  # last_project_id/last_org_id 영속
+    tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
+    _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+
+    return _ok({
+        **tokens,
+        "project_id": str(user.last_project_id) if user.last_project_id else None,
+    })
+
+
 # ─── POST /api/v2/auth/logout ────────────────────────────────────────────────
 
 @router.post("/logout")
