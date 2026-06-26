@@ -5,7 +5,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, Bot, Check, CheckCircle2, CreditCard, FolderKanban, GitBranch, Menu, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { BarChart2, Bell, Bot, CreditCard, FolderKanban, GitBranch, Menu, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 import { AddMemberModal } from '@/components/settings/add-member-modal';
@@ -30,7 +30,6 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
-import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { MemberRow } from '@/components/ui/member-row';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -90,13 +89,6 @@ interface ProjectMember {
   webhook_url?: string | null;
   created_by?: string | null;
   fakechat_port?: number | null;
-}
-
-interface NewAgentResult {
-  name: string;
-  fakechat_port: number | null;
-  mcp_config: Record<string, unknown> | null;
-  api_key: string | null;
 }
 
 const NOTIFICATION_CATEGORIES = [
@@ -200,16 +192,9 @@ export default function SettingsPage() {
   const [membersSubTab, setMembersSubTab] = useState<'people' | 'agents'>('people');
   const [addMemberOpen, setAddMemberOpen] = useState(false); // 7363ec8a: 통합 "+멤버 추가" 모달
   const [orgAgents, setOrgAgents] = useState<ProjectMember[]>([]);
-  const [newAgentName, setNewAgentName] = useState('');
-  // org-agent S5: 단일 project_id → scope 인지(전체/특정) 멀티프로젝트 생성으로 업그레이드.
-  const [newAgentRole, setNewAgentRole] = useState<'member' | 'admin'>('member');
-  const [newAgentScopeMode, setNewAgentScopeMode] = useState<'org' | 'projects'>('projects');
-  const [newAgentProjectIds, setNewAgentProjectIds] = useState<string[]>([]);
-  const [addingAgent, setAddingAgent] = useState(false);
+  // 에이전트 추가 v2(name·role·scope·결과)는 AddMemberModal 임베드 <AddAgentForm>가 호스팅(0c1a81b6 경로 통일).
   const [deactivatingAgentId, setDeactivatingAgentId] = useState<string | null>(null);
   const [agentActionMessage, setAgentActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [newAgentResult, setNewAgentResult] = useState<NewAgentResult | null>(null);
-  const [newAgentMcpCopied, setNewAgentMcpCopied] = useState(false);
   const [webhookEditing, setWebhookEditing] = useState<Record<string, string>>({});
   const [webhookSaving, setWebhookSaving] = useState<string | null>(null);
   const [webhookErrors, setWebhookErrors] = useState<Record<string, string>>({});
@@ -337,57 +322,6 @@ export default function SettingsPage() {
     if (!res.ok) return;
     const json = await res.json();
     setOrgAgents((json.data ?? []) as ProjectMember[]);
-  };
-
-  const toggleNewAgentProject = (id: string) => {
-    setNewAgentProjectIds((prev) => prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]);
-  };
-
-  const handleAddAgent = async () => {
-    if (!newAgentName.trim()) return;
-    if (newAgentScopeMode === 'projects' && newAgentProjectIds.length === 0) return;
-    setAddingAgent(true);
-    setAgentActionMessage(null);
-    setNewAgentResult(null);
-    // org-agent S5: v1 단일프로젝트(/api/team-members) → v2 org-level scope(/api/agents).
-    // org_id·인가는 BE 가 verified context 로 해소 → body 미포함. scope_mode='org'면 project_ids 무시.
-    const res = await fetch('/api/agents', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: newAgentName.trim(),
-        role: newAgentRole,
-        scope_mode: newAgentScopeMode,
-        project_ids: newAgentScopeMode === 'projects' ? newAgentProjectIds : [],
-      }),
-    });
-    if (res.ok) {
-      const json = await res.json() as { data?: { fakechat_port?: number | null; mcp_config?: Record<string, unknown> | null; api_key?: string | null } };
-      setNewAgentResult({
-        name: newAgentName.trim(),
-        fakechat_port: json.data?.fakechat_port ?? null,
-        mcp_config: json.data?.mcp_config ?? null,
-        api_key: json.data?.api_key ?? null,
-      });
-      setNewAgentName('');
-      setNewAgentRole('member');
-      setNewAgentScopeMode('projects');
-      setNewAgentProjectIds([]);
-      await refreshOrgAgents();
-    } else {
-      const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-      setAgentActionMessage({ type: 'error', text: json?.error?.message ?? t('agentActionFailed') });
-    }
-    setAddingAgent(false);
-  };
-
-  const handleCopyNewAgentMcp = async () => {
-    if (!newAgentResult?.mcp_config) return;
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(newAgentResult.mcp_config, null, 2));
-      setNewAgentMcpCopied(true);
-      setTimeout(() => setNewAgentMcpCopied(false), 2000);
-    } catch { /* noop */ }
   };
 
   const handleToggleAgentActive = async (agent: ProjectMember) => {
@@ -1371,47 +1305,6 @@ export default function SettingsPage() {
                         </Alert>
                       ) : null}
 
-                      {newAgentResult ? (
-                        <div className="rounded-md border border-success-border bg-success-tint p-4 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold text-success">
-                              {newAgentResult.name} 생성 완료
-                            </p>
-                            <button type="button" onClick={() => setNewAgentResult(null)} className="text-muted-foreground hover:text-foreground">
-                              <X className="size-3.5" />
-                            </button>
-                          </div>
-                          {newAgentResult.fakechat_port ? (
-                            <div className="flex items-center gap-2 text-xs">
-                              <Badge variant="info">SSE</Badge>
-                              <span className="font-mono text-foreground">Port: {newAgentResult.fakechat_port}</span>
-                              <span className="text-muted-foreground">— fakechat http://localhost:{newAgentResult.fakechat_port}/sse</span>
-                            </div>
-                          ) : null}
-                          {newAgentResult.api_key ? (
-                            <div className="space-y-1">
-                              <p className="text-xs font-medium text-foreground">API Key — 지금만 표시됩니다.</p>
-                              <code className="block break-all rounded bg-background border border-border p-2 text-xs font-mono text-foreground/80">
-                                {newAgentResult.api_key}
-                              </code>
-                            </div>
-                          ) : null}
-                          {newAgentResult.mcp_config ? (
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between">
-                                <p className="text-xs font-medium text-foreground">MCP Config (SSE)</p>
-                                <Button variant="glass" size="sm" onClick={() => void handleCopyNewAgentMcp()}>
-                                  {newAgentMcpCopied ? <Check className="size-3" /> : 'Copy'}
-                                </Button>
-                              </div>
-                              <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
-                                {JSON.stringify(newAgentResult.mcp_config, null, 2)}
-                              </pre>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-
                       {orgAgents.length > 0 ? (
                         <div className="space-y-2">
                           {orgAgents.map((agent) => {
@@ -1460,92 +1353,6 @@ export default function SettingsPage() {
                         </div>
                       )}
 
-                      {/* org-agent S5: scope 인지 생성 폼 — agent-deployment-wizard scope 패턴 미러(신규 토큰 0). */}
-                      <div className="space-y-4">
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-muted-foreground">{t('agentNameLabel')}</label>
-                          <OperatorInput
-                            value={newAgentName}
-                            onChange={(e) => setNewAgentName(e.target.value)}
-                            placeholder={t('agentNamePlaceholder')}
-                          />
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-muted-foreground">{t('agentRoleLabel')}</label>
-                          <OperatorDropdownSelect
-                            value={newAgentRole}
-                            onValueChange={(v) => setNewAgentRole(v as 'member' | 'admin')}
-                            options={[
-                              { value: 'member', label: t('agentRoleMember') },
-                              { value: 'admin', label: t('agentRoleAdmin') },
-                            ]}
-                          />
-                        </div>
-
-                        <div className="space-y-2">
-                          <label className="text-xs font-medium text-muted-foreground">{t('agentScopeLabel')}</label>
-                          <div className="grid gap-3 md:grid-cols-2">
-                            {(['org', 'projects'] as const).map((mode) => {
-                              const selected = newAgentScopeMode === mode;
-                              return (
-                                <button
-                                  key={mode}
-                                  type="button"
-                                  onClick={() => setNewAgentScopeMode(mode)}
-                                  className={`rounded-md border px-4 py-4 text-left transition ${selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted'}`}
-                                >
-                                  <div className="flex items-center justify-between gap-3">
-                                    <div>
-                                      <p className="text-sm font-semibold text-foreground">{mode === 'org' ? t('agentScopeAllProjects') : t('agentScopeSpecificProjects')}</p>
-                                      <p className="mt-1 text-sm text-muted-foreground">{mode === 'org' ? t('agentScopeAllProjectsBody') : t('agentScopeSpecificProjectsBody')}</p>
-                                    </div>
-                                    {selected ? <CheckCircle2 className="size-5 shrink-0 text-primary" /> : null}
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
-
-                          {newAgentScopeMode === 'projects' ? (
-                            <div className="grid max-h-72 gap-3 overflow-y-auto md:grid-cols-2 xl:grid-cols-3">
-                              {projects.map((project) => {
-                                const selected = newAgentProjectIds.includes(project.id);
-                                return (
-                                  <button
-                                    key={project.id}
-                                    type="button"
-                                    onClick={() => toggleNewAgentProject(project.id)}
-                                    className={`rounded-md border px-4 py-4 text-left transition ${selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted'}`}
-                                  >
-                                    <div className="flex items-center justify-between gap-3">
-                                      <p className="truncate text-sm font-semibold text-foreground">{project.name}</p>
-                                      {selected ? <CheckCircle2 className="size-5 shrink-0 text-primary" /> : null}
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-                              {t('agentScopeAllProjectsHint', { count: projects.length })}
-                            </div>
-                          )}
-                        </div>
-
-                        <p className="text-xs text-muted-foreground">{t('agentSeatCaption')}</p>
-
-                        <div className="flex justify-end">
-                          <Button
-                            variant="hero"
-                            size="lg"
-                            onClick={() => void handleAddAgent()}
-                            disabled={!newAgentName.trim() || (newAgentScopeMode === 'projects' && newAgentProjectIds.length === 0) || addingAgent}
-                          >
-                            {addingAgent ? '...' : t('addAgent')}
-                          </Button>
-                        </div>
-                      </div>
                     </SectionCardBody>
                   </SectionCard>
                 </div>

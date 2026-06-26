@@ -34,6 +34,16 @@
     "add": "Add",
     "confirm": "Confirm"
   },
+  "accountSwitcher": {
+    "title": "Accounts",
+    "addAccount": "Add account",
+    "signOutThis": "Sign out this account",
+    "signOutAll": "Sign out all accounts",
+    "switching": "Switching…",
+    "switchFailed": "Failed to switch account. Please try again.",
+    "reloginRequired": "Re-login required",
+    "capReached": "Account limit reached"
+  },
   "nav": {
     "dashboard": "Dashboard",
     "sprintManagement": "Sprint Management",

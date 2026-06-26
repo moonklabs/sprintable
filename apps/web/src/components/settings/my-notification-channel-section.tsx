@@ -69,12 +69,14 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
     if (deleteConfirmId) cancelRef.current?.focus();
   }, [deleteConfirmId]);
 
-  // AC2 집계 — 그 멤버의 글로벌(null)+전 프로젝트 config 전부(5c1258e2서 좁힌 필터 제거).
-  const fetchWebhookConfigs = useCallback(async (mid: string) => {
+  // AC2 집계 — BE GET이 이미 caller user-scope(IDOR fix #1726=내 것만 반환). 클라 member_id 필터는
+  // 중복+유해(BE가 member_id를 user_id로 저장/반환하는데 /api/me.id는 org-member-id라 0 매치→전 config 숨김 회귀).
+  // → 필터 제거하고 BE 스코프 그대로 신뢰. (member_id 시맨틱은 디디 BE #1726 확인 항목)
+  const fetchWebhookConfigs = useCallback(async () => {
     const res = await fetch('/api/webhooks/config');
     if (!res.ok) return;
     const json = await res.json() as { data: WebhookConfig[] };
-    setWebhookConfigs((json.data ?? []).filter((c) => c.member_id === mid));
+    setWebhookConfigs(json.data ?? []);
   }, []);
 
   useEffect(() => {
@@ -95,7 +97,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
         const mid = json.data?.id ?? null;
         if (!mid) return;
         setMemberId(mid);
-        await fetchWebhookConfigs(mid);
+        await fetchWebhookConfigs();
       } finally {
         setLoading(false);
       }
@@ -132,7 +134,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
         const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
         addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
       }
-      await fetchWebhookConfigs(memberId);
+      await fetchWebhookConfigs();
     } finally {
       setBusyId(null);
     }
@@ -150,7 +152,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
         return;
       }
       setDeleteConfirmId(null);
-      await fetchWebhookConfigs(memberId);
+      await fetchWebhookConfigs();
     } finally {
       setBusyId(null);
     }
@@ -208,7 +210,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
         return;
       }
       addToast({ type: 'success', title: 'Webhook URL saved' });
-      await fetchWebhookConfigs(memberId);
+      await fetchWebhookConfigs();
     } finally {
       setSavingNew(false);
     }

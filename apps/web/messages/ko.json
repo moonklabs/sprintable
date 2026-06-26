@@ -34,6 +34,16 @@
     "add": "추가",
     "confirm": "확인"
   },
+  "accountSwitcher": {
+    "title": "계정",
+    "addAccount": "계정 추가",
+    "signOutThis": "이 계정 로그아웃",
+    "signOutAll": "모든 계정 로그아웃",
+    "switching": "전환 중…",
+    "switchFailed": "계정 전환에 실패했습니다. 다시 시도해 주세요.",
+    "reloginRequired": "재로그인 필요",
+    "capReached": "계정 한도에 도달했습니다"
+  },
   "nav": {
     "dashboard": "대시보드",
     "sprintManagement": "스프린트 관리",

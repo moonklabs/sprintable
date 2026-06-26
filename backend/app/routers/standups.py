@@ -177,9 +177,13 @@ async def list_standup_history(
     limit: int = Query(default=30, ge=1, le=200),
     repo: StandupEntryRepository = Depends(_get_repo),
 ) -> list[StandupEntryResponse]:
-    """GET /api/v2/standups/history — 최근 N개 스탠드업 히스토리 조회 (AC2 S-STANDUP-FIX)."""
+    """GET /api/v2/standups/history — 최근 N개 스탠드업 히스토리 조회 (AC2 S-STANDUP-FIX).
+
+    b47f9b05: list/upsert/update 와 동일하게 plan_stories org-scope enrich(a9e67531) 적용 — 미적용 시
+    백로그→데일리 할일(plan_story_ids)이 plan_stories 빈 채 내려가 cross-board 미노출(SaaS FE 프록시 포함).
+    """
     entries = await repo.list(project_id=project_id, limit=limit)
-    return [StandupEntryResponse.model_validate(e) for e in entries]
+    return await _entries_with_plan_stories(entries, repo.session, repo.org_id)
 
 
 @router.get("/missing", response_model=list[uuid.UUID])
@@ -224,7 +228,8 @@ async def get_standup(
     entry = await repo.get(id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Standup entry not found")
-    return StandupEntryResponse.model_validate(entry)
+    # b47f9b05: 단건 조회도 plan_stories enrich(list/upsert/update 와 일관·cross-board 백로그 노출).
+    return (await _entries_with_plan_stories([entry], repo.session, repo.org_id))[0]
 
 
 @router.post("/{id}/feedback", response_model=FeedbackResponse, status_code=201)

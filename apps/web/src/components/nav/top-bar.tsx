@@ -3,6 +3,7 @@
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { cn } from '@/lib/utils';
 import { NotificationBell } from './notification-bell';
+import { WhatsNewButton } from '@/components/release-notes/whats-new-button';
 import { PresenceToggleButton } from '@/components/presence/team-presence-toggle';
 import { useTopBar } from './top-bar-context';
 
@@ -31,6 +32,7 @@ export function TopBar({ className }: TopBarProps) {
         {actions}
         {/* 2505d27d: presence 패널 토글(선생님 결정·FAB 대체) — Bell 옆·working-count 배지 */}
         <PresenceToggleButton />
+        <WhatsNewButton />
         <NotificationBell />
       </div>
     </div>

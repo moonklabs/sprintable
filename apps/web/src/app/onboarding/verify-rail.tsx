@@ -40,8 +40,9 @@ function StepIcon({ status }: { status: RailStatus }) {
     );
   }
   if (status === 'active') {
+    // active = status 토큰 `info`(진행중)로 spectrum 완성: muted(대기)→info(진행중)→success(완료)/destructive(실패).
     return (
-      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full border-2 border-primary text-primary">
+      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full border-2 border-info text-info">
         <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
       </span>
     );

@@ -2,6 +2,7 @@ import { jwtVerify } from 'jose';
 import { NextResponse, type NextRequest } from 'next/server';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
+import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
 
 const PUBLIC_EXACT = [
   '/',
@@ -50,6 +51,32 @@ async function verifyAccessToken(token: string): Promise<{ exp?: number } | null
   } catch {
     return null;
   }
+}
+
+// bf305fa0 멀티계정 — active 포인터(switch가 set). 없으면 단일계정(back-compat).
+const ACTIVE_ACCOUNT_COOKIE = 'sp_active_account';
+
+/**
+ * RC2(stale Set-Cookie suppression): refresh 결과를 sp_at/sp_rt 에 적용해도 되는지 판정.
+ *  1) server-authoritative epoch — refreshed sub 가 최근 switch 로 superseded 된 계정이면 억제(결정적·
+ *     request cookie snapshot 무관). switch 後 도착한 떠난-계정 late refresh 를 확실히 차단.
+ *     switch-back(다시 active) 시엔 switch route 가 clearSuperseded 하므로 정상 refresh 는 통과(RC3 보존).
+ *  2) active 포인터 일치(보조) — 포인터 있으면 sub == 포인터.
+ * 포인터 없고 superseded 도 아니면 단일계정 back-compat 으로 허용.
+ */
+async function refreshMatchesActive(request: NextRequest, accessToken: string): Promise<boolean> {
+  let sub: string | undefined;
+  try {
+    const { payload } = await jwtVerify(accessToken, getJwtSecretBytes());
+    sub = typeof payload.sub === 'string' ? payload.sub : undefined;
+  } catch {
+    return false;
+  }
+  if (!sub) return false;
+  if (isRecentlySuperseded(sub)) return false; // RC2: switch 가 supersede 한 계정의 stale refresh 억제
+  const pointer = request.cookies.get(ACTIVE_ACCOUNT_COOKIE)?.value;
+  if (pointer && sub !== pointer) return false;
+  return true;
 }
 
 async function tryRefreshViaFastapi(request: NextRequest): Promise<{ accessToken: string; refreshToken: string } | null> {
@@ -167,7 +194,8 @@ export async function proxy(request: NextRequest) {
 
   if (!accessToken) {
     const tokens = await singleFlightRefresh(request);
-    if (!tokens) {
+    // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지.
+    if (!tokens || !(await refreshMatchesActive(request, tokens.accessToken))) {
       if (isApiPath) return NextResponse.next({ request }); // let handler return 401
       return loginRedirect(request);
     }
@@ -182,7 +210,8 @@ export async function proxy(request: NextRequest) {
   if (!claims) {
     // access token invalid/expired — try refresh
     const tokens = await singleFlightRefresh(request);
-    if (!tokens) {
+    // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지.
+    if (!tokens || !(await refreshMatchesActive(request, tokens.accessToken))) {
       if (isApiPath) return NextResponse.next({ request }); // let handler return 401
       return loginRedirect(request);
     }
@@ -201,7 +230,8 @@ export async function proxy(request: NextRequest) {
   const response = NextResponse.next({ request: { headers: fwdHeaders } });
   if (claims.exp !== undefined && claims.exp - now < 300) {
     const tokens = await singleFlightRefresh(request);
-    if (tokens) {
+    // RC2: stale refresh(다른 계정)면 적용 안 함 — 현 active 세션 유지.
+    if (tokens && (await refreshMatchesActive(request, tokens.accessToken))) {
       applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
     }
   }
