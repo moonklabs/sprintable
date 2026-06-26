@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from '@/lib/db/server';
 import { ApiErrors } from '@/lib/api-response';
-import { GCS_MEMO_ATTACHMENTS_BUCKET, uploadToGcs } from '@/lib/gcs';
+import { GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/storage/config';
+import { createStorageService } from '@/lib/storage/factory';
 
 // BE _MAX_ATTACHMENT_SIZE 정합 (conversations.py)
 const MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100MB
@@ -46,7 +47,14 @@ export async function POST(
   const objectPath = `chat/${projectId}/${conversation_id}/${randomUUID()}-${safeName}`;
 
   try {
-    const url = await uploadToGcs(GCS_MEMO_ATTACHMENTS_BUCKET, objectPath, file);
+    const storage = await createStorageService();
+    const body = Buffer.from(await file.arrayBuffer());
+    const { url } = await storage.putObject(
+      GCS_MEMO_ATTACHMENTS_BUCKET,
+      objectPath,
+      body,
+      file.type || undefined,
+    );
     return NextResponse.json({
       url,
       name: file.name || safeName,
