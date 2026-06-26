@@ -47,10 +47,6 @@ _DISPOSITION_TO_STATUS: dict[str, str] = {
     "deny": "rejected",
 }
 
-# doc-gate v2 갭1: deliberate 인간 결재 gate — org allow_auto/deny posture 무관하게 항상 manual(pending).
-# disposition auto-pass/auto-deny 제외(인간 deliberation 이 정책 자동결정보다 우선).
-_ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset({"doc_approval"})
-
 
 async def create_gate(
     session: AsyncSession,
@@ -78,10 +74,6 @@ async def create_gate(
 
     disposition = await resolve_disposition(session, org_id, member_id, role_id, gate_type)
     status = _DISPOSITION_TO_STATUS.get(disposition, "pending")
-    # doc-gate v2 갭1(선생님 실 Web): doc_approval 류 deliberate gate 는 disposition auto-pass 무관하게
-    # 항상 pending. auto_passed 면 수동 결재가 Gate inbox 에 안 떠 결재 불능(인간 결재 의도 우선).
-    if gate_type in _ALWAYS_MANUAL_GATE_TYPES:
-        status = "pending"
 
     gate = Gate(
         id=uuid.uuid4(),
