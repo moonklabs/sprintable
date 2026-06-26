@@ -36,3 +36,42 @@ def test_external_or_other_bucket_is_none(external):
 def test_empty_is_none():
     assert canonical_object_path("", _BUCKET) is None
     assert canonical_object_path(_PREFIX, _BUCKET) is None  # prefix-only → 빈 path
+
+
+# E-STORAGE-SSOT S7 — path_in_source_scope: legacy + 신 org/project namespace 인식(DB 무관).
+import uuid as _uuid  # noqa: E402
+from app.services.asset_registry import path_in_source_scope  # noqa: E402
+
+_ORG = _uuid.UUID("11111111-1111-1111-1111-111111111111")
+_PROJ = _uuid.UUID("22222222-2222-2222-2222-222222222222")
+_CONV = _uuid.UUID("33333333-3333-3333-3333-333333333333")
+_STORY = _uuid.UUID("44444444-4444-4444-4444-444444444444")
+
+
+def test_scope_legacy_namespace():
+    assert path_in_source_scope(f"chat/{_PROJ}/{_CONV}/u.png", "conversation_message", _PROJ, _CONV, _ORG)
+    assert path_in_source_scope(f"story/{_PROJ}/{_STORY}/u.png", "story", _PROJ, _STORY, _ORG)
+
+
+def test_scope_s7_org_namespace():
+    assert path_in_source_scope(
+        f"org/{_ORG}/project/{_PROJ}/chat/{_CONV}/u.png", "conversation_message", _PROJ, _CONV, _ORG)
+    assert path_in_source_scope(
+        f"org/{_ORG}/project/{_PROJ}/story/{_STORY}/u.png", "story", _PROJ, _STORY, _ORG)
+
+
+def test_scope_rejects_wrong_source_or_org():
+    other = _uuid.uuid4()
+    # 타 conv
+    assert not path_in_source_scope(
+        f"org/{_ORG}/project/{_PROJ}/chat/{other}/u.png", "conversation_message", _PROJ, _CONV, _ORG)
+    # 타 org(신 namespace인데 org 불일치)
+    assert not path_in_source_scope(
+        f"org/{other}/project/{_PROJ}/chat/{_CONV}/u.png", "conversation_message", _PROJ, _CONV, _ORG)
+    # org_id 없이 신 namespace → 거부(legacy만 허용)
+    assert not path_in_source_scope(
+        f"org/{_ORG}/project/{_PROJ}/chat/{_CONV}/u.png", "conversation_message", _PROJ, _CONV, None)
+
+
+def test_scope_manual_unconstrained():
+    assert path_in_source_scope("anything/x.png", "manual", _PROJ, _uuid.uuid4(), _ORG)

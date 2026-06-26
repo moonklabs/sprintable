@@ -38,13 +38,15 @@ export async function POST(
   if (!convRes.ok) {
     return NextResponse.json({ error: { message: 'conversation not found or no access' } }, { status: convRes.status === 403 ? 403 : 404 });
   }
-  const conv = (await convRes.json().catch(() => null)) as { project_id?: string | null } | null;
+  const conv = (await convRes.json().catch(() => null)) as { project_id?: string | null; org_id?: string | null } | null;
   const projectId = conv?.project_id;
-  if (!projectId) {
-    return NextResponse.json({ error: { message: 'conversation project could not be resolved' } }, { status: 422 });
+  const orgId = conv?.org_id;
+  if (!projectId || !orgId) {
+    return NextResponse.json({ error: { message: 'conversation org/project could not be resolved' } }, { status: 422 });
   }
   const safeName = (file.name || 'file').replace(/[^\w.\-]+/g, '_').slice(-128) || 'file';
-  const objectPath = `chat/${projectId}/${conversation_id}/${randomUUID()}-${safeName}`;
+  // E-STORAGE-SSOT S7: org/project namespace(Storage UI 노출)·source segment(conv) 유지(IDOR scope).
+  const objectPath = `org/${orgId}/project/${projectId}/chat/${conversation_id}/${randomUUID()}-${safeName}`;
 
   try {
     const storage = await createStorageService();

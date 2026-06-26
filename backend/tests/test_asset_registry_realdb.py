@@ -553,3 +553,80 @@ async def test_enrich_negative_doc_message_member_s3_fold():
             await s.commit()
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_s7_new_namespace_sync_and_asset_id_map():
+    """S7: 신 org/project namespace 업로드가 registry 등록·url→asset_id 맵 반환(JSONB denorm용)·
+    legacy 무회귀·타 org namespace 스코프 거부."""
+    from app.services.asset_registry import sync_attachment_assets
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            src = uuid.uuid4()
+            new_path = f"org/{ORG}/project/{PROJ_A}/story/{src}/u-a.png"
+            legacy_path = f"story/{PROJ_A}/{src}/u-b.png"
+            url_map = await sync_attachment_assets(
+                s, org_id=ORG, project_id=PROJ_A, source_type="story", source_id=src,
+                attachments=[_att(new_path), _att(legacy_path)],
+            )
+            await s.commit()
+            # 신 namespace + legacy 둘 다 등록(AC1/AC3)·url→asset_id 맵 반환(AC2 denorm)
+            assert new_path in url_map and legacy_path in url_map
+            n = (await s.execute(text(
+                f"SELECT count(*) FROM assets WHERE org_id='{ORG}' AND project_id='{PROJ_A}' "
+                f"AND object_path IN ('{new_path}','{legacy_path}')"
+            ))).scalar_one()
+            assert n == 2
+
+            # 타 org namespace(org 불일치)는 스코프 거부→미등록(IDOR)
+            bad = f"org/{uuid.uuid4()}/project/{PROJ_A}/story/{src}/x.png"
+            url_map2 = await sync_attachment_assets(
+                s, org_id=ORG, project_id=PROJ_A, source_type="story", source_id=src,
+                attachments=[_att(new_path), _att(bad)],
+            )
+            await s.commit()
+            assert new_path in url_map2 and bad not in url_map2
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_jsonb_asset_id_no_drift_with_strip():
+    """까심 drift: client 제공 asset_id 를 strip + 서버 url_map 만 역기입 → skip된 첨부에 asset_id 미잔존·
+    asset_links(SSOT)와 정합(handler 로직 동형: strip→sync→writeback)."""
+    from app.services.asset_registry import sync_attachment_assets
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            src = uuid.uuid4()
+            scoped = f"story/{PROJ_A}/{src}/u-a.png"
+            external = "https://evil.example/x.png"  # 우리 객체 아님 → sync skip
+            client_atts = [
+                {**_att(scoped), "asset_id": str(uuid.uuid4())},    # bogus client asset_id
+                {**_att(external), "asset_id": str(uuid.uuid4())},  # bogus + skip 대상
+            ]
+            stripped = [{**a, "asset_id": None} for a in client_atts]  # handler strip
+            url_map = await sync_attachment_assets(
+                s, org_id=ORG, project_id=PROJ_A, source_type="story", source_id=src, attachments=stripped,
+            )
+            await s.commit()
+            final = [
+                {**a, "asset_id": str(url_map[a["url"]])} if a["url"] in url_map else a
+                for a in stripped
+            ]
+            by_url = {a["url"]: a["asset_id"] for a in final}
+            assert by_url[scoped] == str(url_map[scoped])  # 서버 asset_id
+            assert by_url[external] is None  # skip된 첨부=asset_id None(client bogus 미잔존·drift 0)
+            n = (await s.execute(text(
+                f"SELECT count(*) FROM asset_links WHERE source_id='{src}' AND source_type='story'"
+            ))).scalar_one()
+            assert n == 1  # asset_links SSOT=등록된 1건만
+    finally:
+        await engine.dispose()

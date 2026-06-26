@@ -38,13 +38,15 @@ export async function POST(
   if (!storyRes.ok) {
     return NextResponse.json({ error: { message: 'story not found or no access' } }, { status: storyRes.status === 403 ? 403 : 404 });
   }
-  const story = (await storyRes.json().catch(() => null)) as { project_id?: string | null } | null;
+  const story = (await storyRes.json().catch(() => null)) as { project_id?: string | null; org_id?: string | null } | null;
   const projectId = story?.project_id;
-  if (!projectId) {
-    return NextResponse.json({ error: { message: 'story project could not be resolved' } }, { status: 422 });
+  const orgId = story?.org_id;
+  if (!projectId || !orgId) {
+    return NextResponse.json({ error: { message: 'story org/project could not be resolved' } }, { status: 422 });
   }
   const safeName = (file.name || 'file').replace(/[^\w.\-]+/g, '_').slice(-128) || 'file';
-  const objectPath = `story/${projectId}/${id}/${randomUUID()}-${safeName}`;
+  // E-STORAGE-SSOT S7: org/project namespace(Storage UI 노출)·source segment(story) 유지(IDOR scope).
+  const objectPath = `org/${orgId}/project/${projectId}/story/${id}/${randomUUID()}-${safeName}`;
 
   try {
     const storage = await createStorageService();

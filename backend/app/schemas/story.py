@@ -59,6 +59,8 @@ class StoryAttachment(BaseModel):
     name: str          # 원본 파일명
     content_type: str  # MIME
     size: int          # 바이트
+    # E-STORAGE-SSOT S7: asset registry row id(denorm·catch#4). asset_links=SSOT·이 필드=denorm.
+    asset_id: uuid.UUID | None = None
 
     @field_validator("url")
     @classmethod

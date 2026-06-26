@@ -237,8 +237,8 @@ async def create_story(
         success_hypothesis=body.success_hypothesis,
         metric_definition=body.metric_definition,
         measure_after=body.measure_after,
-        # E-FILE S4: 보드 스토리 첨부 (FE-proxy URL+메타) 저장
-        attachments=[a.model_dump() for a in body.attachments],
+        # E-FILE S4: 보드 스토리 첨부 (FE-proxy URL+메타) 저장. S7: client asset_id strip(서버 권위·drift 방지).
+        attachments=[{**a.model_dump(), "asset_id": None} for a in body.attachments],
     )
     # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
     if body.attachments:
@@ -247,7 +247,7 @@ async def create_story(
             _cb = await _resolve_team_member_id(auth, org_id, session)
         except Exception:
             _cb = None
-        await sync_attachment_assets(
+        url_map = await sync_attachment_assets(
             session,
             org_id=org_id,
             project_id=story.project_id,
@@ -256,6 +256,12 @@ async def create_story(
             attachments=[a.model_dump() for a in body.attachments],
             created_by=_cb,
         )
+        if url_map:  # S7: JSONB asset_id 역기입(denorm·catch#4)
+            story.attachments = [
+                {**a, "asset_id": str(url_map[a["url"]])} if a.get("url") in url_map else a
+                for a in (story.attachments or [])
+            ]
+            await session.flush()
     # E-BOARD S5: 복수 assignee join 기록 (단일 assignee_id와 공존)
     saved_ids = await StoryAssigneeRepository(session, org_id).set_for_story(story.id, effective_ids)
     # E-CAGE-REFEREE: assignee 설정 시 implementation 역할 participation 자동 생성
@@ -441,6 +447,9 @@ async def update_story(
     auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
     data = body.model_dump(exclude_unset=True)
+    # S7: client 제공 asset_id strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
+    if data.get("attachments"):
+        data["attachments"] = [{**a, "asset_id": None} for a in data["attachments"]]
     # E-BOARD S5: assignee_ids는 stories 컬럼이 아니므로 repo.update 전에 분리.
     assignee_ids_in = data.pop("assignee_ids", None)
     # assignee_ids만 제공되면 단일 assignee_id(주담당)를 첫 요소로 동기화 → 기존 event/notify 로직 재사용.
@@ -485,7 +494,7 @@ async def update_story(
             _cb = await _resolve_team_member_id(auth, repo.org_id, db)
         except Exception:
             _cb = None
-        await sync_attachment_assets(
+        url_map = await sync_attachment_assets(
             db,
             org_id=repo.org_id,
             project_id=story.project_id,
@@ -494,6 +503,12 @@ async def update_story(
             attachments=data.get("attachments") or [],
             created_by=_cb,
         )
+        if url_map:  # S7: JSONB asset_id 역기입(denorm·catch#4·attachments 교체 반영)
+            story.attachments = [
+                {**a, "asset_id": str(url_map[a["url"]])} if a.get("url") in url_map else a
+                for a in (story.attachments or [])
+            ]
+            await db.flush()
 
     # E-BOARD S5: 복수 assignee join 동기화 (단일 assignee_id와 정합 유지)
     if assignee_ids_in is not None:

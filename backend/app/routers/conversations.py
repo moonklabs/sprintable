@@ -587,6 +587,9 @@ class MessageAttachment(BaseModel):
     name: str          # 원본 파일명
     content_type: str  # MIME
     size: int          # 바이트
+    # E-STORAGE-SSOT S7: asset registry row id(denorm·catch#4). asset_links=SSOT·이 필드=denorm.
+    # optional(legacy 첨부·미등록 호환). save 시 이 값으로 asset_link 파생(drift 0).
+    asset_id: uuid.UUID | None = None
 
     @field_validator("url")
     @classmethod
@@ -1207,8 +1210,9 @@ async def send_message(
         content=body.content,
         mentioned_ids=valid_mentioned_ids,
         thread_id=body.thread_id,
-        # E-FILE S1: 첨부 메타(URL+name+content_type+size)를 0093 attachments JSONB에 저장
-        attachments=[a.model_dump() for a in body.attachments],
+        # E-FILE S1: 첨부 메타(URL+name+content_type+size)를 0093 attachments JSONB에 저장.
+        # S7: client 제공 asset_id 는 strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
+        attachments=[{**a.model_dump(), "asset_id": None} for a in body.attachments],
     )
     db.add(msg)
 
@@ -1226,8 +1230,9 @@ async def send_message(
     await db.flush()
 
     # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
+    # S7: 반환 url→asset_id 로 JSONB asset_id 역기입(denorm·catch#4: asset_links=SSOT·JSONB=denorm).
     if body.attachments:
-        await sync_attachment_assets(
+        url_map = await sync_attachment_assets(
             db,
             org_id=org_id,
             project_id=conv.project_id,
@@ -1236,6 +1241,12 @@ async def send_message(
             attachments=[a.model_dump() for a in body.attachments],
             created_by=sender.id,
         )
+        if url_map:
+            msg.attachments = [
+                {**a, "asset_id": str(url_map[a["url"]])} if a.get("url") in url_map else a
+                for a in (msg.attachments or [])
+            ]
+            await db.flush()
 
     # AC10: Discord 수신자 파악 → SSE dispatch에서 제외 (동일 db 세션, flush 완료 상태)
     discord_exclude_ids: set[uuid.UUID] = set()
