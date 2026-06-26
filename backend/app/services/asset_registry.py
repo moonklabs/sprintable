@@ -34,6 +34,26 @@ def canonical_object_path(stored_url: str, container: str = DEFAULT_CONTAINER) -
     return stored_url
 
 
+def path_in_source_scope(
+    object_path: str,
+    source_type: str,
+    project_id: uuid.UUID | None,
+    source_id: uuid.UUID,
+) -> bool:
+    """object_path 가 이 source(=메시지/스토리)에 귀속된 경로인지 검증(IDOR·registry 오염 차단).
+
+    S1 `_is_scoped_to_conversation` 와 동형: 업로드 경로가 resource 에 스코프되므로
+    (`chat/<project>/<conversation>/...`·`story/<project>/<story>/...`) path 가 정확히 이 source 를
+    가리킬 때만 등록한다. 유저가 자기 메시지에 타 project/conv 객체 경로를 심어 registry 를
+    오염시키는 것 방지(까심 적출). manual/doc 은 경로 제약 없음(신뢰 등록·doc=S4).
+    """
+    if source_type == "conversation_message":
+        return object_path.startswith(f"chat/{project_id}/{source_id}/")
+    if source_type == "story":
+        return object_path.startswith(f"story/{project_id}/{source_id}/")
+    return True
+
+
 async def sync_attachment_assets(
     session: AsyncSession,
     *,
@@ -62,6 +82,8 @@ async def sync_attachment_assets(
         obj = canonical_object_path(att.get("url") or "", container)
         if obj is None:
             continue  # 외부/비정상 — 우리 객체 아님
+        if not path_in_source_scope(obj, source_type, project_id, source_id):
+            continue  # 이 source 귀속 경로 아님 — registry 오염/IDOR 차단(까심)
         name = (att.get("name") or "").strip() or obj.rsplit("/", 1)[-1] or "file"
         content_type = (att.get("content_type") or "").strip() or None
         try:
@@ -82,15 +104,18 @@ async def sync_attachment_assets(
                 size_bytes=size_bytes,
                 created_by=created_by,
             )
-            .on_conflict_do_nothing(constraint="uq_assets_container_object_path")
+            .on_conflict_do_nothing(constraint="uq_assets_org_container_object_path")
             .returning(Asset.id)
         )
         asset_id = (await session.execute(ins)).scalar_one_or_none()
         if asset_id is None:
+            # conflict(이미 존재) → **org-scoped** 재조회(타 org row 매핑 금지·cross-org link 차단).
             asset_id = (
                 await session.execute(
                     select(Asset.id).where(
-                        Asset.container == container, Asset.object_path == obj
+                        Asset.org_id == org_id,
+                        Asset.container == container,
+                        Asset.object_path == obj,
                     )
                 )
             ).scalar_one()

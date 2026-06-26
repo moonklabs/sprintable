@@ -37,6 +37,8 @@ _CANON = (
 )
 # 우리 객체만(GCS prefix 또는 bare). 외부 https/gs/file 등은 제외.
 _OURS = "(att->>'url' LIKE :prefix || '%' OR position('://' in att->>'url') = 0)"
+# size 안전 캐스팅(까심#3): 비숫자(`""`·`"12 bytes"`) 오염에도 마이그 실패 금지.
+_SIZE = "CASE WHEN att->>'size' ~ '^[0-9]+$' THEN (att->>'size')::bigint ELSE 0 END"
 
 
 def upgrade() -> None:
@@ -79,7 +81,8 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
             sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
             sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
-            sa.UniqueConstraint("container", "object_path", name="uq_assets_container_object_path"),
+            # org_id 포함 필수(멀티테넌시·cross-org dangling link 차단·까심). project_id 는 object_path 가 내포.
+            sa.UniqueConstraint("org_id", "container", "object_path", name="uq_assets_org_container_object_path"),
         )
         op.create_index("ix_assets_org_id", "assets", ["org_id"])
         op.create_index("ix_assets_project_id", "assets", ["project_id"])
@@ -122,6 +125,8 @@ def _backfill(conn) -> None:
         join="JOIN conversations c ON c.id = m.conversation_id",
         org_expr="c.org_id",
         project_expr="c.project_id",
+        # 경로가 이 메시지에 귀속됐는지(IDOR·오염 차단·까심#2): chat/<project>/<conversation>/...
+        scope_like="'chat/' || c.project_id || '/' || m.conversation_id || '/%'",
         source_type="conversation_message",
     )
     _backfill_source(
@@ -130,16 +135,19 @@ def _backfill(conn) -> None:
         join="",
         org_expr="m.org_id",
         project_expr="m.project_id",
+        scope_like="'story/' || m.project_id || '/' || m.id || '/%'",
         source_type="story",
     )
 
 
-def _backfill_source(conn, *, table, join, org_expr, project_expr, source_type) -> None:
+def _backfill_source(conn, *, table, join, org_expr, project_expr, scope_like, source_type) -> None:
     params = {"prefix": _PREFIX, "bucket": _BUCKET}
+    # 우리 객체 + 이 source 귀속 경로만(까심#2). jsonb_typeof 가드(까심#3)는 ids_sql 에서 선행.
+    where = f"m.id IN :ids AND att->>'url' IS NOT NULL AND {_OURS} AND ({_CANON}) LIKE {scope_like}"
 
     ids_sql = text(
         f"SELECT m.id FROM {table} m "
-        f"WHERE m.id > :last AND m.attachments IS NOT NULL "
+        f"WHERE m.id > :last AND jsonb_typeof(m.attachments) = 'array' "
         f"AND jsonb_array_length(m.attachments) > 0 ORDER BY m.id LIMIT :lim"
     )
     insert_assets = text(
@@ -148,11 +156,11 @@ def _backfill_source(conn, *, table, join, org_expr, project_expr, source_type) 
         SELECT {org_expr}, {project_expr}, :bucket, {_CANON},
                COALESCE(NULLIF(att->>'name', ''), 'file'),
                NULLIF(att->>'content_type', ''),
-               COALESCE((att->>'size')::bigint, 0)
+               {_SIZE}
         FROM {table} m {join}
         CROSS JOIN LATERAL jsonb_array_elements(m.attachments) AS att
-        WHERE m.id IN :ids AND att->>'url' IS NOT NULL AND {_OURS}
-        ON CONFLICT (container, object_path) DO NOTHING
+        WHERE {where}
+        ON CONFLICT (org_id, container, object_path) DO NOTHING
         """
     ).bindparams(bindparam("ids", expanding=True))
     insert_links = text(
@@ -161,8 +169,8 @@ def _backfill_source(conn, *, table, join, org_expr, project_expr, source_type) 
         SELECT {org_expr}, a.id, :source_type, m.id
         FROM {table} m {join}
         CROSS JOIN LATERAL jsonb_array_elements(m.attachments) AS att
-        JOIN assets a ON a.container = :bucket AND a.object_path = {_CANON}
-        WHERE m.id IN :ids AND att->>'url' IS NOT NULL AND {_OURS}
+        JOIN assets a ON a.org_id = {org_expr} AND a.container = :bucket AND a.object_path = {_CANON}
+        WHERE {where}
         ON CONFLICT (asset_id, source_type, source_id) DO NOTHING
         """
     ).bindparams(bindparam("ids", expanding=True))

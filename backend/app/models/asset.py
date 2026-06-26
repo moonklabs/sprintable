@@ -57,8 +57,11 @@ class Asset(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
 
     __tablename__ = "assets"
     __table_args__ = (
-        # 멱등 upsert 키 — 같은 blob(=경로)은 단일 row(backfill/재업로드 중복 방지).
-        UniqueConstraint("container", "object_path", name="uq_assets_container_object_path"),
+        # 멱등 upsert 키 — 같은 blob(=경로)은 org 내 단일 row(backfill/재업로드 중복 방지).
+        # ⚠️ org_id 포함 필수(멀티테넌시): 전역 키면 타 org가 같은 object_path 재사용 시 conflict가
+        # 타 org asset_id로 매핑돼 cross-org dangling link/IDOR 발생(까심 적출). project_id 는
+        # object_path 가 이미 내포하므로 키 제외(nullable NULL-distinct로 org-level 멱등 깨짐 회피).
+        UniqueConstraint("org_id", "container", "object_path", name="uq_assets_org_container_object_path"),
         Index(
             "ix_assets_org_project_ctype_created",
             "org_id",

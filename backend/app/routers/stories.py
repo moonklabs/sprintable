@@ -242,6 +242,11 @@ async def create_story(
     )
     # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
     if body.attachments:
+        _cb: uuid.UUID | None = None
+        try:  # created_by enrich용 업로더 member id(비보안·best-effort).
+            _cb = await _resolve_team_member_id(auth, org_id, session)
+        except Exception:
+            _cb = None
         await sync_attachment_assets(
             session,
             org_id=org_id,
@@ -249,6 +254,7 @@ async def create_story(
             source_type="story",
             source_id=story.id,
             attachments=[a.model_dump() for a in body.attachments],
+            created_by=_cb,
         )
     # E-BOARD S5: 복수 assignee join 기록 (단일 assignee_id와 공존)
     saved_ids = await StoryAssigneeRepository(session, org_id).set_for_story(story.id, effective_ids)
@@ -474,6 +480,11 @@ async def update_story(
 
     # E-STORAGE-SSOT S2: 첨부 교체(attachments 제공) 시 asset registry 재동기화(reconcile·SSOT 정확).
     if "attachments" in data:
+        _cb: uuid.UUID | None = None
+        try:
+            _cb = await _resolve_team_member_id(auth, repo.org_id, db)
+        except Exception:
+            _cb = None
         await sync_attachment_assets(
             db,
             org_id=repo.org_id,
@@ -481,6 +492,7 @@ async def update_story(
             source_type="story",
             source_id=story.id,
             attachments=data.get("attachments") or [],
+            created_by=_cb,
         )
 
     # E-BOARD S5: 복수 assignee join 동기화 (단일 assignee_id와 정합 유지)
