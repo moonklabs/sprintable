@@ -6,6 +6,7 @@ doc 의 native status(0128·doc-specific 값)를 hypothesis 와 동형 패턴으
 """
 from __future__ import annotations
 
+import logging
 import uuid
 
 from sqlalchemy import select
@@ -14,9 +15,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.doc import Doc, DOC_STATUSES, DocRevision, is_valid_doc_transition
 from app.services.member_resolver import ResolvedMember
 
+logger = logging.getLogger(__name__)
+
 # E-DG doc-gate(48f064e5): doc 결재 인앱 게이트. work_item_type='doc'·gate_type='doc_approval'.
 DOC_GATE_WORK_ITEM_TYPE = "doc"
 DOC_GATE_TYPE = "doc_approval"
+
+
+async def _notify_doc_approval_requested(
+    session: AsyncSession, org_id: uuid.UUID, doc: Doc, gate_id: uuid.UUID, *, requester_id: uuid.UUID
+) -> None:
+    """doc-gate v2 갭2: doc 상신 → org owner/admin 휴먼 결재자에게 in-app 알림(상신자 본인 제외).
+    best-effort·비중단(알림 실패가 상신을 막지 않음). transition_gate 해소 알림과 대칭."""
+    try:
+        from app.models.project import OrgMember
+        from app.services.notification_dispatch import dispatch_notification
+        approver_ids = (await session.execute(
+            select(OrgMember.id).where(
+                OrgMember.org_id == org_id,
+                OrgMember.role.in_(("owner", "admin")),
+                OrgMember.deleted_at.is_(None),  # 산티아고 RC: 삭제/탈퇴 owner/admin 제외(정보노출·실결재권자만)
+                OrgMember.id != requester_id,
+            )
+        )).scalars().all()
+        if approver_ids:
+            await dispatch_notification(
+                session, org_id=org_id, event_type="doc_approval_requested",
+                target_member_ids=list(approver_ids),
+                title="문서 결재 요청",
+                body=f"'{doc.title}' 문서가 결재 대기 중입니다.",
+                reference_type="gate", reference_id=gate_id,
+                source_project_id=doc.project_id,
+            )
+    except Exception:  # noqa: BLE001 — 알림 실패는 상신 비중단.
+        logger.warning("doc 상신 결재자 알림 실패 doc=%s", doc.id, exc_info=True)
 
 
 class DocTransitionError(Exception):
@@ -86,6 +118,11 @@ async def transition_doc(
             gate.resolution_note = None
         doc.status = "pending"
         await session.flush()
+        # doc-gate v2 갭2(선생님 실 Web): 상신 시 **결재자(org owner/admin 휴먼)에게 알림** — create_gate/
+        # doc transition 은 event/notification 0이라 상신해도 결재자가 모름(transition_gate 해소엔
+        # dispatch_notification 있는데 상신엔 없던 비대칭). best-effort(알림 실패는 상신 비중단·SoD상
+        # 상신자 본인 제외).
+        await _notify_doc_approval_requested(session, org_id, doc, gate.id, requester_id=caller.id)
         return doc
 
     # 결재 대기(pending) 문서의 승인/반려는 **gate 해소(via_gate)로만** — 직접 API self-confirm 차단.

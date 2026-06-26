@@ -162,3 +162,66 @@ def test_transition_endpoint_refreshes_before_serialize():
     i_refresh = src.index("await session.refresh(doc)")
     i_validate = src.rindex("DocResponse.model_validate(doc)")
     assert i_commit < i_refresh < i_validate  # 순서 정합
+
+
+# ─── doc-gate v2: 갭1 항상 manual(auto_pass 제외) + 갭2 상신 알림 ──────────────
+
+@pytest.mark.anyio
+async def test_doc_approval_always_pending_despite_allow_auto():
+    """갭1: org posture→allow_auto 여도 doc_approval 은 항상 pending(deliberate 인간 결재)."""
+    from app.services.gate_service import create_gate
+    captured = {}
+    session = AsyncMock()
+    session.add = MagicMock(side_effect=lambda g: captured.__setitem__("gate", g))
+    session.flush = AsyncMock(); session.refresh = AsyncMock()
+    no_existing = MagicMock(); no_existing.scalar_one_or_none.return_value = None
+    session.execute = AsyncMock(return_value=no_existing)
+    with patch("app.services.gate_service.resolve_disposition", new=AsyncMock(return_value="allow_auto")):
+        await create_gate(session, uuid.uuid4(), uuid.uuid4(), "doc", "doc_approval",
+                          uuid.uuid4(), uuid.uuid4())
+    assert captured["gate"].status == "pending"  # allow_auto → 그래도 pending(force)
+
+
+@pytest.mark.anyio
+async def test_non_doc_gate_still_auto_passes():
+    """비-doc 게이트(merge 등)는 기존대로 allow_auto→auto_passed(force 미적용·무회귀)."""
+    from app.services.gate_service import create_gate
+    captured = {}
+    session = AsyncMock()
+    session.add = MagicMock(side_effect=lambda g: captured.__setitem__("gate", g))
+    session.flush = AsyncMock(); session.refresh = AsyncMock()
+    no_existing = MagicMock(); no_existing.scalar_one_or_none.return_value = None
+    session.execute = AsyncMock(return_value=no_existing)
+    with patch("app.services.gate_service.resolve_disposition", new=AsyncMock(return_value="allow_auto")):
+        await create_gate(session, uuid.uuid4(), uuid.uuid4(), "story", "merge",
+                          uuid.uuid4(), uuid.uuid4())
+    assert captured["gate"].status == "auto_passed"
+
+
+@pytest.mark.anyio
+async def test_submit_notifies_org_approvers():
+    """갭2: 상신 → org owner/admin 휴먼 결재자에게 dispatch_notification(상신자 제외·gate 참조)."""
+    from app.services.doc import _notify_doc_approval_requested
+    org, requester, gate_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    doc = MagicMock(id=uuid.uuid4(), title="설계 문서", project_id=uuid.uuid4())
+    owners = [uuid.uuid4(), uuid.uuid4()]
+    res = MagicMock(); res.scalars.return_value.all.return_value = owners
+    session = AsyncMock(); session.execute = AsyncMock(return_value=res)
+    with patch("app.services.notification_dispatch.dispatch_notification", new=AsyncMock()) as dn:
+        await _notify_doc_approval_requested(session, org, doc, gate_id, requester_id=requester)
+    dn.assert_awaited_once()
+    kw = dn.await_args.kwargs
+    assert kw["target_member_ids"] == owners
+    assert kw["event_type"] == "doc_approval_requested"
+    assert kw["reference_type"] == "gate" and kw["reference_id"] == gate_id
+    # 산티아고 RC: approver 쿼리에 deleted_at 필터(삭제 owner/admin 제외).
+    assert "deleted_at" in str(session.execute.await_args.args[0])
+
+
+@pytest.mark.anyio
+async def test_submit_notify_fail_silent():
+    """알림 실패는 상신 비중단(예외 전파 0)."""
+    from app.services.doc import _notify_doc_approval_requested
+    session = AsyncMock(); session.execute = AsyncMock(side_effect=RuntimeError("boom"))
+    await _notify_doc_approval_requested(session, uuid.uuid4(), MagicMock(id=uuid.uuid4()),
+                                         uuid.uuid4(), requester_id=uuid.uuid4())
