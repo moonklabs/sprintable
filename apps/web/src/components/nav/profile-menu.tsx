@@ -165,8 +165,9 @@ export function ProfileMenu({ name, avatarUrl }: ProfileMenuProps) {
         <ChevronsUpDown className="size-3.5 shrink-0 text-sidebar-foreground/60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-64">
-        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">{t('title')}</DropdownMenuLabel>
         <DropdownMenuGroup>
+          {/* GroupLabel(base-ui)은 반드시 Group 내부 — Popup 직속이면 error #31 크래시. */}
+          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">{t('title')}</DropdownMenuLabel>
           {ordered.map((acc) => {
             const isActive = acc.status === 'active';
             const isExpired = acc.status === 'expired';
