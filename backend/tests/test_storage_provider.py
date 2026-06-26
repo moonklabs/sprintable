@@ -43,8 +43,12 @@ def test_factory_unknown_provider_fail_closed(monkeypatch):
         get_storage_provider()
 
 
-async def test_local_secret_fail_closed_in_production(monkeypatch):
-    monkeypatch.setenv("APP_ENV", "production")
+@pytest.mark.parametrize("prod_var", ["APP_ENV", "NODE_ENV"])
+async def test_local_secret_fail_closed_in_production(monkeypatch, prod_var):
+    # APP_ENV 또는 NODE_ENV 중 하나라도 production 이면 fail-closed(운영 BE NODE_ENV-only 우회 차단).
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("NODE_ENV", raising=False)
+    monkeypatch.setenv(prod_var, "production")
     monkeypatch.delenv("STORAGE_LOCAL_SIGNING_SECRET", raising=False)
     with pytest.raises(RuntimeError, match="STORAGE_LOCAL_SIGNING_SECRET"):
         await LocalStorageProvider().signed_read_url(
@@ -54,6 +58,7 @@ async def test_local_secret_fail_closed_in_production(monkeypatch):
 
 async def test_local_secret_dev_default_zero_config(monkeypatch):
     monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.delenv("NODE_ENV", raising=False)
     monkeypatch.delenv("STORAGE_LOCAL_SIGNING_SECRET", raising=False)
     url = await LocalStorageProvider().signed_read_url(
         "c", "chat/p/c/x.png", ttl=timedelta(minutes=5)

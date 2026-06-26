@@ -38,7 +38,13 @@ def _signing_secret() -> str:
     secret = (os.environ.get("STORAGE_LOCAL_SIGNING_SECRET") or "").strip()
     if secret:
         return secret
-    if os.environ.get("APP_ENV", "development").strip().lower() == "production":
+    # APP_ENV 또는 NODE_ENV 중 하나라도 production 이면 fail-closed(운영 BE 가 NODE_ENV 만 세팅하는
+    # 경우 우회 방지 — 까심 적출). FE `resolveLocalSigningSecret()` 와 동형.
+    is_prod = (
+        os.environ.get("APP_ENV", "development").strip().lower() == "production"
+        or os.environ.get("NODE_ENV", "").strip().lower() == "production"
+    )
+    if is_prod:
         raise RuntimeError(
             "STORAGE_LOCAL_SIGNING_SECRET is required when STORAGE_PROVIDER=local in production"
         )
