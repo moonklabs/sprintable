@@ -10,8 +10,10 @@ import {
   auditVault,
   clearAllAccounts,
   discardCookies,
+  getVerifiedActiveAccountId,
   removeVaultEntry,
 } from '@/lib/auth/account-vault';
+import { clearSuperseded, markSuperseded } from '@/lib/auth/switch-epoch';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 const RT_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
@@ -47,6 +49,10 @@ export async function POST(request: Request) {
     if (scope === 'all') {
       // bulk revoke(RC3: sign-out 전체에서만) — active + vault 전건 best-effort.
       const { valid: vault } = await auditVault();
+      const activeId = await getVerifiedActiveAccountId();
+      // RC2 epoch: 전 계정 supersede — in-flight refresh 가 Set-Cookie 로 되살리지 못하게.
+      if (activeId) markSuperseded(activeId);
+      for (const v of vault) markSuperseded(v.accountId);
       await Promise.all([
         ...(activeRt ? [beRevoke(activeRt)] : []),
         ...vault.map((v) => beRevoke(v.refreshToken)),
@@ -58,6 +64,8 @@ export async function POST(request: Request) {
 
     // scope === 'this' — 현 계정만 revoke, 다음 vault 계정 승격.
     if (activeRt) await beRevoke(activeRt);
+    const signedOutId = await getVerifiedActiveAccountId();
+    if (signedOutId) markSuperseded(signedOutId); // RC2: 떠난 계정 stale refresh 억제
     const { valid: vault, staleNames } = await auditVault();
     const next = vault[0];
     const base = cookieBase();
@@ -77,6 +85,7 @@ export async function POST(request: Request) {
     res.cookies.set(ACTIVE_ACCOUNT_COOKIE, next.accountId, { ...base, maxAge: RT_MAX_AGE_SECONDS });
     res.cookies.set(CURRENT_PROJECT_COOKIE, '', { path: '/', sameSite: 'lax', maxAge: 0 });
     removeVaultEntry(res.cookies, next.accountId);
+    clearSuperseded(next.accountId); // 승격된 next 는 active — epoch 마킹 해제(정상 refresh 허용)
     discardCookies(res.cookies, staleNames); // RC1: stale vault 폐기
     return res;
   } catch (err: unknown) {

@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
-import { SP_RT_COOKIE } from '@/lib/db/server';
+import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { handleApiError } from '@/lib/api-error';
 import { ApiErrors } from '@/lib/api-response';
 import {
   VAULT_PREFIX,
   auditVault,
   decodeAccountId,
+  discardActiveSession,
   discardCookies,
   getVerifiedActiveAccountId,
   rtHash,
@@ -15,6 +16,7 @@ import {
   setVaultEntry,
   removeVaultEntry,
 } from '@/lib/auth/account-vault';
+import { clearSuperseded, markSuperseded } from '@/lib/auth/switch-epoch';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -72,6 +74,22 @@ export async function POST(request: Request) {
     if (!targetId) return ApiErrors.badRequest('account_id required');
 
     const store = await cookies();
+
+    // RC1: 현 active 세션이 corrupt(sp_at.sub != sp_rt.sub / 포인터 mismatch)면 폐기 + 거부.
+    const at = store.get(SP_AT_COOKIE)?.value;
+    const rt = store.get(SP_RT_COOKIE)?.value;
+    const prevActiveId = await getVerifiedActiveAccountId();
+    if (at && rt && !prevActiveId) {
+      const corrupt = NextResponse.json(
+        { error: { code: 'ACTIVE_SESSION_CORRUPT', message: 'active session integrity check failed' } },
+        { status: 401 },
+      );
+      discardActiveSession(corrupt.cookies);
+      const audit = await auditVault();
+      discardCookies(corrupt.cookies, audit.staleNames);
+      return corrupt;
+    }
+
     // RC1: vault 쿠키 존재 + suffix == decoded RT sub 검증(아니면 폐기·거부).
     const targetRt = store.get(`${VAULT_PREFIX}${targetId}`)?.value;
     if (!targetRt) return ApiErrors.badRequest('account not in vault');
@@ -90,11 +108,12 @@ export async function POST(request: Request) {
 
     // 원자적 swap(한 Set-Cookie 응답·switch-org 선례): 현 active RT → vault 보존, target → active, target vault 제거.
     const res = NextResponse.json({ data: { ok: true, account_id: targetId, project_id: result.project_id } });
-    const prevActiveId = await getVerifiedActiveAccountId();
-    const prevRt = store.get(SP_RT_COOKIE)?.value;
-    if (prevActiveId && prevRt && prevActiveId !== targetId) setVaultEntry(res.cookies, prevActiveId, prevRt);
+    if (prevActiveId && rt && prevActiveId !== targetId) setVaultEntry(res.cookies, prevActiveId, rt);
     setActiveAccount(res.cookies, targetId, result.access_token, result.refresh_token, result.project_id);
     removeVaultEntry(res.cookies, targetId);
+    // RC2 epoch: target 재활성=마킹 해제(switch-back 보존·RC3) / 떠난 계정=마킹(stale refresh 억제).
+    clearSuperseded(targetId);
+    if (prevActiveId && prevActiveId !== targetId) markSuperseded(prevActiveId);
     // RC1 enforcement: 잔여 stale vault 쿠키(suffix/type 위반) 폐기.
     const { staleNames } = await auditVault();
     discardCookies(res.cookies, staleNames.filter((n) => n !== `${VAULT_PREFIX}${targetId}`));
