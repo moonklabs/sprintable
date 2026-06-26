@@ -52,6 +52,25 @@ async function verifyAccessToken(token: string): Promise<{ exp?: number } | null
   }
 }
 
+// bf305fa0 멀티계정 — active 포인터(switch가 set). 없으면 단일계정(back-compat).
+const ACTIVE_ACCOUNT_COOKIE = 'sp_active_account';
+
+/**
+ * RC2(stale Set-Cookie suppression): refresh 결과를 sp_at/sp_rt 에 적용하기 전, refreshed access token 의
+ * sub 가 현 active 포인터와 일치하는지 확인. switch 後 in-flight refresh(다른 계정 RT)가 active 를
+ * 되돌리는 것을 차단. 포인터 없으면(단일계정) 항상 허용.
+ */
+async function refreshMatchesActive(request: NextRequest, accessToken: string): Promise<boolean> {
+  const pointer = request.cookies.get(ACTIVE_ACCOUNT_COOKIE)?.value;
+  if (!pointer) return true;
+  try {
+    const { payload } = await jwtVerify(accessToken, getJwtSecretBytes());
+    return payload.sub === pointer;
+  } catch {
+    return false;
+  }
+}
+
 async function tryRefreshViaFastapi(request: NextRequest): Promise<{ accessToken: string; refreshToken: string } | null> {
   const rt = request.cookies.get(SP_RT_COOKIE)?.value;
   if (!rt) return null;
@@ -167,7 +186,8 @@ export async function proxy(request: NextRequest) {
 
   if (!accessToken) {
     const tokens = await singleFlightRefresh(request);
-    if (!tokens) {
+    // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지.
+    if (!tokens || !(await refreshMatchesActive(request, tokens.accessToken))) {
       if (isApiPath) return NextResponse.next({ request }); // let handler return 401
       return loginRedirect(request);
     }
@@ -182,7 +202,8 @@ export async function proxy(request: NextRequest) {
   if (!claims) {
     // access token invalid/expired — try refresh
     const tokens = await singleFlightRefresh(request);
-    if (!tokens) {
+    // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지.
+    if (!tokens || !(await refreshMatchesActive(request, tokens.accessToken))) {
       if (isApiPath) return NextResponse.next({ request }); // let handler return 401
       return loginRedirect(request);
     }
@@ -201,7 +222,8 @@ export async function proxy(request: NextRequest) {
   const response = NextResponse.next({ request: { headers: fwdHeaders } });
   if (claims.exp !== undefined && claims.exp - now < 300) {
     const tokens = await singleFlightRefresh(request);
-    if (tokens) {
+    // RC2: stale refresh(다른 계정)면 적용 안 함 — 현 active 세션 유지.
+    if (tokens && (await refreshMatchesActive(request, tokens.accessToken))) {
       applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
     }
   }

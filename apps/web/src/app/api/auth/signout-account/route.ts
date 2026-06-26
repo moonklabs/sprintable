@@ -7,8 +7,9 @@ import { handleApiError } from '@/lib/api-error';
 import {
   ACTIVE_ACCOUNT_COOKIE,
   CURRENT_PROJECT_COOKIE,
-  getValidVaultEntries,
+  auditVault,
   clearAllAccounts,
+  discardCookies,
   removeVaultEntry,
 } from '@/lib/auth/account-vault';
 
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
 
     if (scope === 'all') {
       // bulk revoke(RC3: sign-out 전체에서만) — active + vault 전건 best-effort.
-      const vault = await getValidVaultEntries();
+      const { valid: vault } = await auditVault();
       await Promise.all([
         ...(activeRt ? [beRevoke(activeRt)] : []),
         ...vault.map((v) => beRevoke(v.refreshToken)),
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
 
     // scope === 'this' — 현 계정만 revoke, 다음 vault 계정 승격.
     if (activeRt) await beRevoke(activeRt);
-    const vault = await getValidVaultEntries();
+    const { valid: vault, staleNames } = await auditVault();
     const next = vault[0];
     const base = cookieBase();
 
@@ -76,6 +77,7 @@ export async function POST(request: Request) {
     res.cookies.set(ACTIVE_ACCOUNT_COOKIE, next.accountId, { ...base, maxAge: RT_MAX_AGE_SECONDS });
     res.cookies.set(CURRENT_PROJECT_COOKIE, '', { path: '/', sameSite: 'lax', maxAge: 0 });
     removeVaultEntry(res.cookies, next.accountId);
+    discardCookies(res.cookies, staleNames); // RC1: stale vault 폐기
     return res;
   } catch (err: unknown) {
     return handleApiError(err);

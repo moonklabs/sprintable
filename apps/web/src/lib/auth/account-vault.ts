@@ -32,14 +32,25 @@ export function rtHash(token: string): string {
   return createHash('sha256').update(token).digest('hex').slice(0, 12);
 }
 
-/** JWT 서명 검증 + sub 추출. accountId SSOT 진입점(account_id claim 추가 시 여기만 교체). 실패=null. */
-export async function decodeAccountId(token: string): Promise<string | null> {
+/**
+ * JWT 서명 검증 + (RC1 MED) type claim 검증 + sub 추출. accountId SSOT 진입점.
+ * expectedType: vault/sp_rt='refresh', sp_at='access' — access 토큰을 vault에 끼우는 혼용 차단.
+ * 실패(서명/type/sub)=null.
+ */
+export async function decodeAccountId(token: string, expectedType?: 'access' | 'refresh'): Promise<string | null> {
   try {
     const { payload } = await jwtVerify(token, jwtSecretBytes());
+    if (expectedType && payload['type'] !== expectedType) return null;
     return typeof payload.sub === 'string' ? payload.sub : null;
   } catch {
     return null;
   }
+}
+
+/** 쿠키 전건 maxAge:0 폐기(RC1 enforcement·stale vault cleanup). */
+export function discardCookies(res: CookieSetter, names: string[]): void {
+  const base = cookieBase();
+  for (const name of names) res.set(name, '', { ...base, maxAge: 0 });
 }
 
 export interface VaultEntry {
@@ -47,36 +58,53 @@ export interface VaultEntry {
   refreshToken: string;
 }
 
+export interface VaultAudit {
+  valid: VaultEntry[];
+  /** RC1 위반(suffix != decoded sub·type != refresh·서명불일치) vault 쿠키 이름 — 호출측이 maxAge:0 폐기. */
+  staleNames: string[];
+}
+
 /**
- * vault 쿠키 전건 읽어 RC1 검증(suffix == decoded RT sub)된 엔트리만 반환.
- * suffix 스푸핑/만료/서명불일치 쿠키는 제외(폐기는 호출측이 응답에 maxAge:0).
+ * vault 쿠키 전건 audit — RC1(suffix == decoded RT sub) + RC1 MED(type=='refresh') 통과만 valid,
+ * 위반은 staleNames(폐기 대상). 호출측이 discardCookies(res.cookies, staleNames)로 enforcement.
  */
-export async function getValidVaultEntries(): Promise<VaultEntry[]> {
+export async function auditVault(): Promise<VaultAudit> {
   const store = await cookies();
-  const out: VaultEntry[] = [];
+  const valid: VaultEntry[] = [];
+  const staleNames: string[] = [];
   for (const c of store.getAll()) {
     if (!c.name.startsWith(VAULT_PREFIX)) continue;
     const suffix = c.name.slice(VAULT_PREFIX.length);
-    const sub = await decodeAccountId(c.value);
-    if (sub && sub === suffix) out.push({ accountId: sub, refreshToken: c.value });
-    // mismatch/무효 = 무시(RC1) — 호출측 cleanup에서 maxAge:0
+    const sub = await decodeAccountId(c.value, 'refresh');
+    if (sub && sub === suffix) valid.push({ accountId: sub, refreshToken: c.value });
+    else staleNames.push(c.name); // RC1 위반 → 폐기
   }
-  return out;
+  return { valid, staleNames };
 }
 
-/** RC1: active 무결성 — sp_at.sub == sp_rt.sub == sp_active_account. 일치 시 accountId, 아니면 null. */
+/**
+ * RC1: active 무결성 — sp_at(type=access).sub == sp_rt(type=refresh).sub == sp_active_account.
+ * 일치 시 accountId, 아니면 null(호출측은 corrupt active 폐기+거부).
+ */
 export async function getVerifiedActiveAccountId(): Promise<string | null> {
   const store = await cookies();
   const at = store.get(SP_AT_COOKIE)?.value;
   const rt = store.get(SP_RT_COOKIE)?.value;
   if (!at || !rt) return null;
-  const atSub = await decodeAccountId(at);
-  const rtSub = await decodeAccountId(rt);
+  const atSub = await decodeAccountId(at, 'access');
+  const rtSub = await decodeAccountId(rt, 'refresh');
   if (!atSub || atSub !== rtSub) return null;
   const pointer = store.get(ACTIVE_ACCOUNT_COOKIE)?.value;
-  // 포인터는 보조 — sp_at/sp_rt sub 일치가 SSOT. 포인터 있으면 추가 검증.
-  if (pointer && pointer !== atSub) return null;
+  if (pointer && pointer !== atSub) return null; // 포인터 mismatch = corrupt
   return atSub;
+}
+
+/** active 세션(sp_at/sp_rt/포인터) 폐기 — corrupt active mismatch enforcement(RC1 HIGH). */
+export function discardActiveSession(res: CookieSetter): void {
+  const base = cookieBase();
+  res.set(SP_AT_COOKIE, '', { ...base, maxAge: 0 });
+  res.set(SP_RT_COOKIE, '', { ...base, maxAge: 0 });
+  res.set(ACTIVE_ACCOUNT_COOKIE, '', { ...base, maxAge: 0 });
 }
 
 /** active 세션 + 포인터 set(+ project-context 리셋). switch-org 선례 동형. */

@@ -1,8 +1,14 @@
+import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { handleApiError } from '@/lib/api-error';
-import { apiSuccess } from '@/lib/api-response';
-import { getServerSession, SP_RT_COOKIE } from '@/lib/db/server';
-import { decodeAccountId, getValidVaultEntries, getVerifiedActiveAccountId } from '@/lib/auth/account-vault';
+import { getServerSession, SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
+import {
+  auditVault,
+  decodeAccountId,
+  discardActiveSession,
+  discardCookies,
+  getVerifiedActiveAccountId,
+} from '@/lib/auth/account-vault';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -16,20 +22,33 @@ interface AccountMeta {
 }
 
 /**
- * GET /api/accounts — switcher 계정 리스트(ⓐ). vault RT + active RT는 서버 경계 안에서만 BE resolve.
- * RC3: resolve는 metadata만(rotate/revoke 부작용 0). BE 미머지/404 시 RT decode로 최소 리스트(graceful).
+ * GET /api/accounts — switcher 계정 리스트(ⓐ). vault+active RT는 서버 경계 안에서만 BE resolve.
+ * RC1 enforcement: corrupt active(sp_at.sub != sp_rt.sub) = 폐기+401 거부 / stale vault = 폐기.
+ * RC3: resolve는 metadata만(rotate/revoke 부작용 0). BE 404 = RT decode 최소 리스트(graceful).
  */
 export async function GET(_request: Request) {
   try {
     const store = await cookies();
-    const activeId = await getVerifiedActiveAccountId();
+    const at = store.get(SP_AT_COOKIE)?.value ?? null;
     const activeRt = store.get(SP_RT_COOKIE)?.value ?? null;
-    const vault = await getValidVaultEntries();
+    const activeId = await getVerifiedActiveAccountId();
+    const { valid: vault, staleNames } = await auditVault();
+
+    // RC1 HIGH: active 세션이 있는데 무결성 깨짐 = corrupt → 폐기 + 거부.
+    if (at && activeRt && !activeId) {
+      const corrupt = NextResponse.json(
+        { error: { code: 'ACTIVE_SESSION_CORRUPT', message: 'active session integrity check failed' } },
+        { status: 401 },
+      );
+      discardActiveSession(corrupt.cookies);
+      discardCookies(corrupt.cookies, staleNames);
+      return corrupt;
+    }
 
     const tokens = [...(activeRt ? [activeRt] : []), ...vault.map((v) => v.refreshToken)];
-    if (tokens.length === 0) return apiSuccess({ accounts: [] });
+    if (tokens.length === 0) return NextResponse.json({ data: { accounts: [] } });
 
-    // BE 메타 resolve (서버 only·토큰 경계 밖 X). 404/실패 = graceful.
+    // BE 메타 resolve(서버 only·토큰 경계 밖 X). 404/실패 = graceful.
     const metaById = new Map<string, Partial<AccountMeta>>();
     try {
       const session = await getServerSession();
@@ -52,7 +71,7 @@ export async function GET(_request: Request) {
     const seen = new Set<string>();
     const accounts: AccountMeta[] = [];
     const push = async (rt: string, isActive: boolean) => {
-      const id = await decodeAccountId(rt);
+      const id = await decodeAccountId(rt, 'refresh');
       if (!id || seen.has(id)) return;
       seen.add(id);
       const m = metaById.get(id);
@@ -68,7 +87,9 @@ export async function GET(_request: Request) {
     if (activeRt) await push(activeRt, activeId != null);
     for (const v of vault) await push(v.refreshToken, false);
 
-    return apiSuccess({ accounts });
+    const res = NextResponse.json({ data: { accounts } });
+    discardCookies(res.cookies, staleNames); // RC1: stale vault 폐기
+    return res;
   } catch (err: unknown) {
     return handleApiError(err);
   }

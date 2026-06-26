@@ -6,7 +6,9 @@ import { handleApiError } from '@/lib/api-error';
 import { ApiErrors } from '@/lib/api-response';
 import {
   VAULT_PREFIX,
+  auditVault,
   decodeAccountId,
+  discardCookies,
   getVerifiedActiveAccountId,
   rtHash,
   setActiveAccount,
@@ -73,7 +75,7 @@ export async function POST(request: Request) {
     // RC1: vault 쿠키 존재 + suffix == decoded RT sub 검증(아니면 폐기·거부).
     const targetRt = store.get(`${VAULT_PREFIX}${targetId}`)?.value;
     if (!targetRt) return ApiErrors.badRequest('account not in vault');
-    const decoded = await decodeAccountId(targetRt);
+    const decoded = await decodeAccountId(targetRt, 'refresh'); // RC1 MED: type=refresh
     if (decoded !== targetId) {
       const bad = NextResponse.json({ error: { code: 'ACCOUNT_BINDING_MISMATCH', message: 'vault binding invalid' } }, { status: 400 });
       removeVaultEntry(bad.cookies, targetId); // RC1 폐기
@@ -93,6 +95,9 @@ export async function POST(request: Request) {
     if (prevActiveId && prevRt && prevActiveId !== targetId) setVaultEntry(res.cookies, prevActiveId, prevRt);
     setActiveAccount(res.cookies, targetId, result.access_token, result.refresh_token, result.project_id);
     removeVaultEntry(res.cookies, targetId);
+    // RC1 enforcement: 잔여 stale vault 쿠키(suffix/type 위반) 폐기.
+    const { staleNames } = await auditVault();
+    discardCookies(res.cookies, staleNames.filter((n) => n !== `${VAULT_PREFIX}${targetId}`));
     return res;
   } catch (err: unknown) {
     return handleApiError(err);
