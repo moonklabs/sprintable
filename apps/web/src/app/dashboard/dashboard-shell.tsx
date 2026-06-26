@@ -18,6 +18,7 @@ import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { TeamPresencePanel } from '@/components/presence/team-presence-panel';
 import { useTeamPresence } from '@/components/presence/use-team-presence';
+import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-gate';
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
 import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
@@ -62,6 +63,7 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
   const workingCount = items.filter((i) => i.working).length;
 
   return (
+    <ReleaseNotesProvider userId={currentTeamMemberId}>
     <TeamPresenceToggleProvider value={{ toggle: panel.togglePanel, workingCount, open: panel.inlinePanelOpen || panel.drawerOpen }}>
     <SidebarInset className="relative flex flex-col overflow-hidden">
       <div ref={setRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto">
@@ -91,6 +93,7 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
       </div>
     </SidebarInset>
     </TeamPresenceToggleProvider>
+    </ReleaseNotesProvider>
   );
 }
 
