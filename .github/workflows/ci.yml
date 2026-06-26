@@ -53,6 +53,17 @@ jobs:
           SECRET_KEY: ci-test-secret-at-least-32-chars-long
         run: uv run alembic upgrade head
 
+      # 멀티계정 auth 보안 테스트는 real-DB 필수(backend-test 잡엔 PG 없음). 이 회귀(끝단 검증 부족)
+      # 재발 방지 위해 PG 백드 잡에서 실행 — auth resolve/switch IDOR/replay 회귀를 CI 가 가드.
+      - name: account resolve/switch real-DB tests
+        working-directory: backend
+        env:
+          ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+          DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
+          JWT_SECRET: ci-test-secret-at-least-32-chars-long
+          SECRET_KEY: ci-test-secret-at-least-32-chars-long
+        run: uv run pytest tests/test_account_resolve_realdb.py -q
+
       - name: Verify tables created
         run: |
           PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test -c \
