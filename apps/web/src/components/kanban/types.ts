@@ -177,10 +177,10 @@ export interface KanbanMember {
 
 import { VALID_STORY_TRANSITIONS } from '@sprintable/shared';
 
-// done→in-review는 admin만 허용 (백엔드 검증) — 프론트엔드에서는 done 드래그 허용 안 함
+// 정공법 A(c1cd484b): done 포함 전 전이 허용 — shared SSOT 그대로 사용.
+// 비정상 점프는 FE 하드블록 아닌 BE 위반(warn) 기록·표시로 처리(애자일 가치 보존·done reopen 허용).
 export const VALID_TRANSITIONS: Record<string, string[]> = {
   ...VALID_STORY_TRANSITIONS,
-  done: [],
 };
 
 export const COLUMNS = [

@@ -207,6 +207,7 @@
     "tasks": "Tasks",
     "invalidTransition": "Invalid status transition",
     "transitionDenied": "This transition requires admin permission",
+    "transitionViolation": "Skipped a workflow step — recorded as a violation",
     "loading": "Loading...",
     "loadMore": "Load more",
     "editStory": "Edit Story",
