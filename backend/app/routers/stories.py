@@ -37,7 +37,11 @@ from app.services.workflow_line_status import (
 )
 from app.services.workflow_pipeline import process_event
 from app.services.rule_evaluator import EventContext
-from app.services.workflow_violation import build_violation_event, check_transition
+from app.services.workflow_violation import (
+    build_violation_event,
+    build_violation_flag,
+    check_transition,
+)
 
 router = APIRouter(prefix="/api/v2/stories", tags=["stories"])
 
@@ -409,14 +413,28 @@ async def bulk_update_stories(
     payload: BulkUpdateRequest,
     db: AsyncSession = Depends(get_db),
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[StoryResponse]:
+    # 정공법 A(c1cd484b): /bulk 도 /status 와 동일 — status 변경을 항상 allow 하되 비순차 전진 점프는
+    # violation flag(응답)+workflow_violation 이벤트로 가시화(차단 X). dnd 양경로(드래그·메뉴) 공통 SSOT.
+    # violation 웹훅 수신자 필터용 actor 1회 해소(org-wide fan-out 박멸·/status 와 동형).
+    actor_id: uuid.UUID | None = None
+    try:
+        actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
+    except Exception:  # noqa: BLE001 — actor 해소 실패도 bulk 비차단.
+        actor_id = None
+
     updated: list[Story] = []
+    old_status_by_id: dict[uuid.UUID, str] = {}
     for item in payload.items:
         q = await db.execute(select(Story).where(Story.id == item.id))
         story = q.scalar_one_or_none()
         if not story:
             continue
         update_data = item.model_dump(exclude={"id"}, exclude_none=True)
+        # status 변경이면 전이 前 old_status 포착(violation 판정용·setattr 前).
+        if "status" in update_data and update_data["status"] != story.status:
+            old_status_by_id[story.id] = story.status
         for k, v in update_data.items():
             setattr(story, k, v)
         # E-BOARD S5: 단일 assignee_id 변경 시 join 미러(단일↔복수 공존 정합)
@@ -432,8 +450,40 @@ async def bulk_update_stories(
         await db.refresh(s)
     # refresh 後 transient assignee_ids 세팅(refresh 는 매핑 컬럼만 reload·transient 보존).
     await _attach_assignee_ids(db, repo.org_id, updated)
-    results = [StoryResponse.model_validate(s) for s in updated]
+
+    # 응답(violation flag 포함) + violation 이벤트 페이로드를 commit 前에 빌드(commit 시 attr expire→
+    # MissingGreenlet 방지·기존 results 빌드와 동일 시점). 이벤트 발화는 commit 後(/status 와 동일 순서).
+    results: list[StoryResponse] = []
+    violation_dispatch: list[tuple[dict, set[uuid.UUID]]] = []
+    for s in updated:
+        r = StoryResponse.model_validate(s)
+        old = old_status_by_id.get(s.id)
+        flag = build_violation_flag(old, s.status) if old is not None else None
+        r.violation = flag
+        results.append(r)
+        if flag is not None:
+            _ev = build_violation_event(
+                story_id=str(s.id), story_title=s.title, project_id=str(s.project_id),
+                org_id=str(repo.org_id), old_status=old, new_status=s.status,
+                reason=f"'{old}' → '{s.status}' 전이: {flag['skipped']}단계 건너뜀", severity="warn",
+            )
+            _notify = {m for m in (actor_id, s.assignee_id) if m is not None}
+            violation_dispatch.append((_ev, _notify))
+
     await db.commit()
+
+    # workflow_violation 발화(commit 後·기존 이벤트 타입이라 additive·기존 컨슈머 무영향). 실패는 비차단.
+    for _ev, _notify in violation_dispatch:
+        try:
+            publish_event(str(repo.org_id), "workflow_violation", _ev)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await fire_webhooks(
+                db, repo.org_id, "workflow_violation", _ev, recipient_member_ids=_notify,
+            )
+        except Exception:  # noqa: BLE001
+            pass
     return results
 
 
@@ -711,17 +761,11 @@ async def update_story_status(
     story_before = await repo.get(id)
     old_status = story_before.status if story_before else None
 
-    # AC1/AC5/AC7: violation 체크 — block 모드면 전이 거부
-    from app.models.project import Project as ProjectModel
-    _proj_result = await db.execute(
-        select(ProjectModel).where(ProjectModel.id == story_before.project_id)
-    ) if story_before else None
-    _proj = _proj_result.scalar_one_or_none() if _proj_result else None
-    _violation_level = getattr(_proj, "violation_level", "warn") if _proj else "warn"
-
-    _violation = check_transition(old_status, body.status, _violation_level)
-    if _violation.violated and _violation_level == "block":
-        raise HTTPException(status_code=400, detail=_violation.reason or "워크플로우 위반으로 상태 전이가 거부되었습니다.")
+    # 정공법 A(c1cd484b·선생님 지시): 전이 순서 **하드블록 폐지** — 비순차 점프도 항상 allow,
+    # violation 은 warn 기록(이벤트)+응답 flag 로만 가시화. projects.violation_level=="block" 잔존이
+    # `/status`=block vs `/bulk`=pass SSOT 역설("정신병" 일부 경로 생존)을 만들던 걸 제거(까심 ②).
+    # → 전이-순서는 항상 warn. E-DG merge-gate/워크플로우 라인 엔진(아래)은 직교라 그대로 유지.
+    _violation = check_transition(old_status, body.status, "warn")
 
     # E-DG S5(P0-2): enforcing 라인의 merge-gate step이 이 전이를 거버닝하면, 아래 라인 엔진이
     # evaluate_merge_gate를 단일 평가한다 → 여기 _preflight_merge_gate/enforce_gate(done)는 skip해
@@ -799,7 +843,7 @@ async def update_story_status(
 
     try:
         # AC2: violation_level 전달 → warn 모드이면 set_status hard block 우회
-        story = await repo.set_status(id, body.status, violation_level=_violation_level)
+        story = await repo.set_status(id, body.status, violation_level="warn")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -850,8 +894,8 @@ async def update_story_status(
 
     if old_status != story.status:
         org_id = repo.org_id
-        # AC2/3/4/6: warn 모드 위반 — 전이는 정상 진행, 이벤트+웹훅만 발행
-        if _violation.violated and _violation_level == "warn":
+        # AC2/3/4/6: 위반 — 전이는 항상 정상 진행(하드블록 폐지), 이벤트+웹훅만 발행(가시화).
+        if _violation.violated:
             _v_event = build_violation_event(
                 story_id=str(id),
                 story_title=story.title,
@@ -900,7 +944,10 @@ async def update_story_status(
         )
 
     await _attach_assignee_ids(db, repo.org_id, [story])
-    return StoryResponse.model_validate(story)
+    resp = StoryResponse.model_validate(story)
+    # 정공법 A: 비순차 점프면 응답에 violation flag(차단 없이 가시화·/bulk 와 동일 SSOT).
+    resp.violation = build_violation_flag(old_status, story.status)
+    return resp
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────
