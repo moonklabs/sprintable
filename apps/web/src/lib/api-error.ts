@@ -1,5 +1,4 @@
 import { NotFoundError, ForbiddenError } from '@/services/sprint';
-import { InvalidTransitionError } from '@/services/story';
 import { RevokedApiKeyError } from './auth-api-key';
 import { apiError } from './api-response';
 
@@ -12,9 +11,6 @@ export function handleApiError(err: unknown) {
   }
   if (err instanceof ForbiddenError) {
     return apiError('FORBIDDEN', err.message, 403);
-  }
-  if (err instanceof InvalidTransitionError) {
-    return apiError('INVALID_TRANSITION', err.message, 400);
   }
 
   // DB/Postgrest 에러 코드 직접 매핑
