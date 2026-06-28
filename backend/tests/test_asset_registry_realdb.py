@@ -685,3 +685,124 @@ async def test_conversation_message_path_scope_id_vs_link_source_s7_ac1():
             assert url_map_idor == {}
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_storage_usage_sums_committed_excludes_softdeleted():
+    """S8: GET storage-usage = org committed asset bytes SUM. soft-deleted(deleted_at) 제외(용량 즉시 회수)."""
+    from unittest.mock import MagicMock
+
+    from app.routers.assets import storage_usage
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            ins = (
+                "INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes,deleted_at)"
+                " VALUES (gen_random_uuid(),:org,:proj,:c,:p,:n,:sz,:del)"
+            )
+            await s.execute(text(ins), {"org": ORG, "proj": PROJ_A, "c": BUCKET, "p": "su/a", "n": "a", "sz": 100, "del": None})
+            await s.execute(text(ins), {"org": ORG, "proj": PROJ_A, "c": BUCKET, "p": "su/b", "n": "b", "sz": 250, "del": None})
+            # soft-deleted → 합산 제외
+            await s.execute(text(
+                "INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes,deleted_at)"
+                " VALUES (gen_random_uuid(),:org,:proj,:c,:p,:n,:sz,now())"
+            ), {"org": ORG, "proj": PROJ_A, "c": BUCKET, "p": "su/c", "n": "c", "sz": 999})
+            await s.commit()
+
+            auth = MagicMock(); auth.user_id = str(USER)
+            resp = await storage_usage(db=s, auth=auth, org_id=ORG)
+            assert resp.org_id == ORG
+            assert resp.used_bytes == 350  # 100+250 (soft-deleted 999 제외)
+
+            # empty org(다른 org_id)면 0 — org-scope WHERE 검증(IDOR 라인은 list 테스트서 별도 커버)
+            empty = await storage_usage(db=s, auth=auth, org_id=ORG2)
+            assert empty.used_bytes == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_check_storage_capacity_enforce():
+    """S8 enforce: per-file + 총량 캡 초과 → 402. 미만/외부URL/빈 → 통과. (free tier=5GB/100MB·org_sub 없으면 free)."""
+    from ee.plan_limits import check_storage_capacity
+    from fastapi import HTTPException
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    GB = 1024 * 1024 * 1024
+    MB = 1024 * 1024
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            # plan_tier_limits seed(마이그)·org_subscription 없음→free. 기존 used 거의 5GB-100 으로 채움.
+            await s.execute(text(
+                "INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes,deleted_at)"
+                " VALUES (gen_random_uuid(),:o,:p,:c,'cap/big','big',:sz,NULL)"
+            ), {"o": ORG, "p": PROJ_A, "c": BUCKET, "sz": 5 * GB - 100})
+            await s.commit()
+
+            def _att_sized(sz, path="cap/new.png"):
+                return {"url": f"org/{ORG}/project/{PROJ_A}/chat/{uuid.uuid4()}/{path}", "name": "n", "content_type": "image/png", "size": sz}
+
+            # 총량 초과: used(5GB-100)+200 > 5GB → 402
+            try:
+                await check_storage_capacity(s, ORG, [_att_sized(200)])
+                assert False, "expected 402"
+            except HTTPException as e:
+                assert e.status_code == 402 and e.detail["code"] == "PLAN_LIMIT_EXCEEDED" and e.detail["resource"] == "storage"
+
+            # 미만: +50 < 100 여유 → 통과
+            await check_storage_capacity(s, ORG, [_att_sized(50)])
+
+            # per-file 초과: 200MB > free 100MB → 402(file_size)
+            try:
+                await check_storage_capacity(s, ORG, [_att_sized(200 * MB)])
+                assert False, "expected 402 per-file"
+            except HTTPException as e:
+                assert e.status_code == 402 and e.detail["resource"] == "file_size"
+
+            # 외부 URL(우리 객체 아님)=미카운트 → 통과
+            await check_storage_capacity(s, ORG, [{"url": "https://evil.example/x.png", "name": "x", "content_type": "image/png", "size": 999 * GB}])
+            # 빈 → no-op
+            await check_storage_capacity(s, ORG, [])
+            await check_storage_capacity(s, ORG, None)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_storage_usage_limit_ee_gated(monkeypatch):
+    """S8: storage-usage limit/percentage 는 ee-gated. SaaS=plan_tier_limits 캡, OSS=null."""
+    from unittest.mock import MagicMock
+
+    from app.core.config import settings
+    from app.routers.assets import storage_usage
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    MB = 1024 * 1024
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            await s.execute(text(
+                "INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes,deleted_at)"
+                " VALUES (gen_random_uuid(),:o,:p,:c,'u/a','a',:sz,NULL)"
+            ), {"o": ORG, "p": PROJ_A, "c": BUCKET, "sz": 512 * MB})
+            await s.commit()
+            auth = MagicMock(); auth.user_id = str(USER)
+
+            # OSS(is_ee_enabled False) → limit null·percentage 0
+            monkeypatch.setattr(settings, "license_consent", "")
+            oss = await storage_usage(db=s, auth=auth, org_id=ORG)
+            assert oss.used_bytes == 512 * MB and oss.limit_bytes is None and oss.percentage == 0.0
+
+            # SaaS(ee) → free 캡 5120MB·percentage 계산
+            monkeypatch.setattr(settings, "license_consent", "agreed")
+            ee = await storage_usage(db=s, auth=auth, org_id=ORG)
+            assert ee.limit_bytes == 5120 * MB
+            assert ee.percentage == round(512 / 5120 * 100, 1)  # =10.0
+    finally:
+        await engine.dispose()
