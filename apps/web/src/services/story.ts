@@ -6,13 +6,8 @@ import { requireOrgAdmin } from '@/lib/admin-check';
 
 export type { CreateStoryInput, UpdateStoryInput, BulkUpdateItem };
 
-// InvalidTransitionError 클래스는 보존(epic 전용 전이 변환 등 공유 컨슈머용). 단 story 전이에선 더는 throw 안 함.
-export class InvalidTransitionError extends Error {
-  constructor(from: string, to: string) {
-    super(`Cannot move from ${from} to ${to}`);
-    this.name = 'InvalidTransitionError';
-  }
-}
+// 정공법 A(c1cd484b): story 전이 하드블록 폐지 → InvalidTransitionError(전이-순서 차단) 제거.
+// 비정상 점프는 BE SSOT가 violation(warn)으로 기록·표시한다(FE throw 없음).
 
 export class StoryService {
   private readonly repo: IStoryRepository;
