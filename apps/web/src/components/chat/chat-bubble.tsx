@@ -9,6 +9,7 @@ import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { AssetEmbedCard } from '@/components/chat/asset-embed-card';
 import { getFileIcon } from '@/lib/file-icon';
 import { AttachmentImage } from './attachment-image';
 import { AttachmentFile } from './attachment-file';
@@ -82,6 +83,10 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
           }
           const m = href?.match(/^entity:(\w+):([0-9a-f-]+)$/i);
           if (m) {
+            // S6: 자산 토큰은 컴팩트 칩 대신 리치 임베드 카드(썸네일+메타+화살표).
+            if (m[1]!.toLowerCase() === 'asset') {
+              return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} />;
+            }
             return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
           }
           return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
