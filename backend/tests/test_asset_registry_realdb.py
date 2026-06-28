@@ -685,3 +685,40 @@ async def test_conversation_message_path_scope_id_vs_link_source_s7_ac1():
             assert url_map_idor == {}
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_storage_usage_sums_committed_excludes_softdeleted():
+    """S8: GET storage-usage = org committed asset bytes SUM. soft-deleted(deleted_at) 제외(용량 즉시 회수)."""
+    from unittest.mock import MagicMock
+
+    from app.routers.assets import storage_usage
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            ins = (
+                "INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes,deleted_at)"
+                " VALUES (gen_random_uuid(),:org,:proj,:c,:p,:n,:sz,:del)"
+            )
+            await s.execute(text(ins), {"org": ORG, "proj": PROJ_A, "c": BUCKET, "p": "su/a", "n": "a", "sz": 100, "del": None})
+            await s.execute(text(ins), {"org": ORG, "proj": PROJ_A, "c": BUCKET, "p": "su/b", "n": "b", "sz": 250, "del": None})
+            # soft-deleted → 합산 제외
+            await s.execute(text(
+                "INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes,deleted_at)"
+                " VALUES (gen_random_uuid(),:org,:proj,:c,:p,:n,:sz,now())"
+            ), {"org": ORG, "proj": PROJ_A, "c": BUCKET, "p": "su/c", "n": "c", "sz": 999})
+            await s.commit()
+
+            auth = MagicMock(); auth.user_id = str(USER)
+            resp = await storage_usage(db=s, auth=auth, org_id=ORG)
+            assert resp.org_id == ORG
+            assert resp.used_bytes == 350  # 100+250 (soft-deleted 999 제외)
+
+            # empty org(다른 org_id)면 0 — org-scope WHERE 검증(IDOR 라인은 list 테스트서 별도 커버)
+            empty = await storage_usage(db=s, auth=auth, org_id=ORG2)
+            assert empty.used_bytes == 0
+    finally:
+        await engine.dispose()

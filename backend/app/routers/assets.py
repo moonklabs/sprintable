@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -163,6 +163,32 @@ async def list_assets(
         last = assets[-1]
         next_cursor = _encode_cursor(getattr(last, {"date": "updated_at", "name": "name", "size": "size_bytes"}[sort]), last.id)
     return AssetPage(items=items, next_cursor=next_cursor)
+
+
+class StorageUsageResponse(BaseModel):
+    org_id: uuid.UUID
+    used_bytes: int
+
+
+@router.get("/assets/storage-usage", response_model=StorageUsageResponse)
+async def storage_usage(
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> StorageUsageResponse:
+    """GET /api/v2/assets/storage-usage — org 의 committed(미삭제) asset bytes 합(S8 capacity usage).
+
+    usage SSOT = asset registry **live SUM**(결재: committed asset bytes·org scope·drift 0). soft-delete
+    (deleted_at IS NOT NULL)는 합산서 제외 = 즉시 용량 회수(복구는 7일 grace·별도). 캡/enforce 는 별도
+    (enforce 위치 crux A/B)·이 엔드포인트는 usage 만 권위 제공(A/B 공통 필요). org-wide(프로젝트 무관).
+    """
+    used = (await db.execute(
+        select(func.coalesce(func.sum(Asset.size_bytes), 0)).where(
+            Asset.org_id == org_id,
+            Asset.deleted_at.is_(None),
+        )
+    )).scalar_one()
+    return StorageUsageResponse(org_id=org_id, used_bytes=int(used))
 
 
 @router.get("/folders", response_model=list[FolderResponse])
