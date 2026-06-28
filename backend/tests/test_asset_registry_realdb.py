@@ -630,3 +630,58 @@ async def test_jsonb_asset_id_no_drift_with_strip():
             assert n == 1  # asset_links SSOT=등록된 1건만
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_conversation_message_path_scope_id_vs_link_source_s7_ac1():
+    """S7 AC1 회귀: conversation_message 는 업로드 path 가 conv_id 스코프인데 asset_link.source_id=msg.id.
+    path_scope_id 없으면(source_id=msg.id 로 path 검증) chat/{msg.id}/ 기대 vs chat/{conv}/ → mismatch →
+    등록 0(버그). path_scope_id=conv 면 등록 성공·link.source_id=msg.id(deeplink 의미 유지)."""
+    from app.services.asset_registry import sync_attachment_assets
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            conv = uuid.uuid4()
+            msg = uuid.uuid4()
+            path = f"org/{ORG}/project/{PROJ_A}/chat/{conv}/u-a.png"
+
+            # ① 버그 재현: path_scope_id 없이 → source_id(msg.id)로 path 검증 → mismatch → 등록 0.
+            url_map_bug = await sync_attachment_assets(
+                s, org_id=ORG, project_id=PROJ_A, source_type="conversation_message",
+                source_id=msg, attachments=[_att(path)],
+            )
+            assert url_map_bug == {}
+            n_bug = (await s.execute(text(
+                f"SELECT count(*) FROM asset_links WHERE source_id='{msg}'"
+            ))).scalar_one()
+            assert n_bug == 0
+
+            # ② fix: path_scope_id=conv → 등록 성공. asset_link.source_id=msg.id 유지(축 분리).
+            url_map = await sync_attachment_assets(
+                s, org_id=ORG, project_id=PROJ_A, source_type="conversation_message",
+                source_id=msg, attachments=[_att(path)], path_scope_id=conv,
+            )
+            await s.commit()
+            assert path in url_map
+            link_n = (await s.execute(text(
+                "SELECT count(*) FROM asset_links "
+                f"WHERE source_type='conversation_message' AND source_id='{msg}'"
+            ))).scalar_one()
+            assert link_n == 1
+            asset_n = (await s.execute(text(
+                f"SELECT count(*) FROM assets WHERE org_id='{ORG}' "
+                f"AND project_id='{PROJ_A}' AND object_path='{path}'"
+            ))).scalar_one()
+            assert asset_n == 1
+
+            # ③ IDOR 유지: 타 conv 를 path_scope_id 로 줘도 path(conv) 와 불일치 → 거부(등록 0 증가).
+            url_map_idor = await sync_attachment_assets(
+                s, org_id=ORG, project_id=PROJ_A, source_type="conversation_message",
+                source_id=uuid.uuid4(), attachments=[_att(path)], path_scope_id=uuid.uuid4(),
+            )
+            assert url_map_idor == {}
+    finally:
+        await engine.dispose()

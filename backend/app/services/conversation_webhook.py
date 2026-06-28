@@ -311,7 +311,8 @@ async def deliver_conversation_message_webhook(
                 if _atts:
                     from app.services.attachment_context import build_attachment_context
                     _ctx, attachment_images = await build_attachment_context(
-                        _atts, project_id=project_id, conversation_id=conversation_id
+                        _atts, project_id=project_id, conversation_id=conversation_id,
+                        org_id=org_id,
                     )
                     if _ctx:
                         _base = content or ""

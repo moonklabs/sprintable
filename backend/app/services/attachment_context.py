@@ -17,6 +17,7 @@ import logging
 import os
 from datetime import timedelta
 
+from app.services.asset_registry import path_in_source_scope
 from app.services.storage import get_storage_provider
 
 logger = logging.getLogger(__name__)
@@ -55,22 +56,17 @@ def _ext(name: str) -> str:
     return name.rsplit(".", 1)[-1].lower() if "." in name else ""
 
 
-def _is_scoped_to_conversation(object_path: str, project_id, conversation_id) -> bool:
-    """canonical object path 가 **이 대화**에 스코프됐는지(`chat/<project_id>/<conversation_id>/<file>`).
+def _is_scoped_to_conversation(object_path: str, project_id, conversation_id, org_id) -> bool:
+    """canonical object path 가 **이 대화**에 스코프됐는지 — 등록(asset_registry)·authorize 와 **동일**
+    `path_in_source_scope` SSOT 로 판정(까심 재QA: 규칙 단일화).
 
-    ⚠️ 보안(QA RC HIGH·object-scope IDOR): 저장 URL 을 그대로 믿고 fetch 하면, 참가자가 *타 대화*
-    객체 URL 을 첨부에 심어 백엔드 SA(objectAdmin) 권한으로 임의 객체를 읽어 그 내용을 에이전트
-    컨텍스트로 누출시킬 수 있다(attachments.py 스코프 게이트 우회). 업로드 경로가 resource 에
-    스코프되므로(`chat/<proj>/<conv>/<file>`), path segment 가 정확히 이 conversation 을 가리킬
-    때만 fetch 한다(substring 금지·정확 segment 매치). 다른 conversation/story/외부 = 거부.
+    legacy `chat/<proj>/<conv>/` + S7 `org/<org>/project/<proj>/chat/<conv>/` 인식하되 **org/project/conv
+    전 tenancy segment 를 exact 바인딩**. ⚠️ CRITICAL(까심): 신 namespace 의 org segment(parts[1])를
+    검증 안 하면 project_id+conv_id 만 맞춘 **cross-org path 가 통과**(SA objectAdmin 으로 타 org 객체
+    fetch→에이전트 컨텍스트 누출). path_in_source_scope 는 `org/{org_id}/...` exact-prefix 로 org 까지 바인딩.
     """
-    parts = object_path.split("/")
-    return (
-        len(parts) >= 4
-        and parts[0] == "chat"
-        and parts[1] == str(project_id)
-        and parts[2] == str(conversation_id)
-        and parts[3] != ""
+    return path_in_source_scope(
+        object_path, "conversation_message", project_id, conversation_id, org_id
     )
 
 
@@ -125,6 +121,7 @@ async def build_attachment_context(
     *,
     project_id,
     conversation_id,
+    org_id,
 ) -> tuple[str, list[dict]]:
     """메시지 attachments(list of {url,name,content_type,size}) → (에이전트 주입용 텍스트 블록, 이미지 목록).
 
@@ -171,7 +168,7 @@ async def build_attachment_context(
         # content 엔 `![name](url)` 마크다운(멀티모달 에이전트 fetch+view) + images 목록(구조화 계약).
         if ctype.startswith("image/") or ext in _IMAGE_EXTS:
             obj = _canonical_object_path(a.get("url") or "")
-            if obj is None or not _is_scoped_to_conversation(obj, project_id, conversation_id):
+            if obj is None or not _is_scoped_to_conversation(obj, project_id, conversation_id, org_id):
                 if not _append(f"[이미지 첨부(접근 범위 밖): {name}]"):
                     break
                 continue
@@ -193,7 +190,7 @@ async def build_attachment_context(
 
         obj = _canonical_object_path(a.get("url") or "")
         # ⚠️ 보안: 우리 버킷 객체 + 이 대화에 스코프된 path 만 fetch(타 대화/story/외부 거부)
-        if obj is None or not _is_scoped_to_conversation(obj, project_id, conversation_id):
+        if obj is None or not _is_scoped_to_conversation(obj, project_id, conversation_id, org_id):
             if not _append(f"[첨부(접근 범위 밖): {name}]"):
                 break
             continue
