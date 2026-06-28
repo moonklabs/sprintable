@@ -64,13 +64,72 @@ async def test_bulk_handler_refreshes_and_serializes(monkeypatch):
     repo.org_id = uuid.uuid4()
 
     monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+    monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
     # ⚠️ model_validate 는 모킹하지 않는다 — 실 직렬화를 태워야 P0 3차류를 잡는다.
 
     payload = BulkUpdateRequest(items=[{"id": str(story.id), "status": "done"}])
-    result = await bulk_update_stories(payload, db, repo)
+    result = await bulk_update_stories(payload, db, repo, auth=MagicMock())
 
     assert story.status == "done"  # setattr 적용
     db.refresh.assert_awaited_once_with(story)  # MissingGreenlet fix 가드(refresh 누락 시 실패)
     assert len(result) == 1 and result[0].status == "done"  # 실 StoryResponse 직렬화 통과
     assert result[0].id == story.id
     db.commit.assert_awaited_once()
+    # status="todo"(미지 rank)→done = 위반 판정 불가 → violation None(allow·무플래그).
+    assert result[0].violation is None
+
+
+@pytest.mark.anyio
+async def test_bulk_nonsequential_jump_flags_violation_but_allows(monkeypatch):
+    """정공법 A: /bulk 2단계+ 전진 점프 → 차단 없이 violation flag 반환 + 이벤트 발행(가시화)."""
+    story = _full_story()
+    story.status = "backlog"  # backlog → in-progress = ready-for-dev 1단계 건너뜀
+    exec_result = MagicMock()
+    exec_result.scalar_one_or_none = MagicMock(return_value=story)
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=exec_result)
+    db.flush = AsyncMock(); db.refresh = AsyncMock(); db.commit = AsyncMock()
+    repo = MagicMock(); repo.org_id = uuid.uuid4()
+
+    monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+    monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
+    _pub = MagicMock(); _fire = AsyncMock()
+    monkeypatch.setattr(stories_mod, "publish_event", _pub)
+    monkeypatch.setattr(stories_mod, "fire_webhooks", _fire)
+
+    payload = BulkUpdateRequest(items=[{"id": str(story.id), "status": "in-progress"}])
+    result = await bulk_update_stories(payload, db, repo, auth=MagicMock())
+
+    assert story.status == "in-progress"  # allow(차단 X)
+    assert result[0].violation == {
+        "level": "warn", "from": "backlog", "to": "in-progress", "skipped": 1,
+    }
+    db.commit.assert_awaited_once()
+    # workflow_violation 가시화 — 기존 이벤트 타입(additive)·commit 後 발화.
+    _pub.assert_called_once()
+    assert _pub.call_args[0][1] == "workflow_violation"
+    _fire.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_bulk_adjacent_and_reopen_no_violation(monkeypatch):
+    """정공법 A: 인접 전진·역방향 reopen 은 정상 → violation None·이벤트 미발행."""
+    for old, new in [("ready-for-dev", "in-progress"), ("done", "in-progress")]:
+        story = _full_story(); story.status = old
+        exec_result = MagicMock()
+        exec_result.scalar_one_or_none = MagicMock(return_value=story)
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=exec_result)
+        db.flush = AsyncMock(); db.refresh = AsyncMock(); db.commit = AsyncMock()
+        repo = MagicMock(); repo.org_id = uuid.uuid4()
+        monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
+        monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
+        _fire = AsyncMock(); monkeypatch.setattr(stories_mod, "fire_webhooks", _fire)
+        monkeypatch.setattr(stories_mod, "publish_event", MagicMock())
+
+        payload = BulkUpdateRequest(items=[{"id": str(story.id), "status": new}])
+        result = await bulk_update_stories(payload, db, repo, auth=MagicMock())
+
+        assert story.status == new  # allow
+        assert result[0].violation is None, f"{old}->{new} should be no-violation"
+        _fire.assert_not_awaited()  # 정상 전이=이벤트 미발행

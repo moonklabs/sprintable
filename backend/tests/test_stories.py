@@ -219,22 +219,30 @@ async def test_status_transition_200():
 
 
 @pytest.mark.anyio
-async def test_status_transition_invalid_400():
-    """backlog → done 비순차 전이 → 400."""
+async def test_status_nonsequential_jump_allowed_with_violation():
+    """정공법 A(c1cd484b): 비순차 전진 점프(backlog→in-review)는 하드블록 폐지 → 200(allow) + violation flag.
+    (이전엔 400 차단 — '정신병' 근원. /bulk 와 SSOT 동형.)"""
     client, session, app = await _client()
     try:
-        backlog_story = _mock_story("backlog")
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = backlog_story
-        session.execute = AsyncMock(return_value=mock_result)
+        story = _mock_story("backlog")
+
+        async def mock_execute(stmt, *args, **kwargs):
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = story
+            return result
+        session.execute = mock_execute
 
         async with client as c:
             resp = await c.patch(
                 f"/api/v2/stories/{STORY_ID}/status",
-                json={"status": "done"},
+                json={"status": "in-review"},
             )
 
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        v = resp.json()["violation"]
+        assert v is not None
+        assert v["level"] == "warn" and v["from"] == "backlog" and v["to"] == "in-review"
+        assert v["skipped"] == 2  # ready-for-dev, in-progress 건너뜀
     finally:
         app.dependency_overrides.clear()
 
@@ -326,14 +334,17 @@ async def test_status_same_status_idempotent_200(status: str):
     ("in-review", "in-progress"),
     ("ready-for-dev", "backlog"),
 ])
-async def test_status_backward_transition_400(from_status: str, to_status: str):
-    """역방향 전이 거부 → 400."""
+async def test_status_backward_transition_allowed(from_status: str, to_status: str):
+    """정공법 A: 역방향 전이(reopen)는 정당한 rework → 200(allow)·violation 없음(null). (이전엔 400.)"""
     client, session, app = await _client()
     try:
         story = _mock_story(from_status)
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = story
-        session.execute = AsyncMock(return_value=mock_result)
+
+        async def mock_execute(stmt, *args, **kwargs):
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = story
+            return result
+        session.execute = mock_execute
 
         async with client as c:
             resp = await c.patch(
@@ -341,7 +352,8 @@ async def test_status_backward_transition_400(from_status: str, to_status: str):
                 json={"status": to_status},
             )
 
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        assert resp.json()["violation"] is None
     finally:
         app.dependency_overrides.clear()
 
