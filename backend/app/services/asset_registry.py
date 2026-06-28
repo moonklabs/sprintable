@@ -34,6 +34,17 @@ def canonical_object_path(stored_url: str, container: str = DEFAULT_CONTAINER) -
     return stored_url
 
 
+def _prefix_segments_match(object_path: str, segments: list[str]) -> bool:
+    """object_path 의 앞 segment 들이 `segments` 와 **정확히 일치** + 그 뒤에 비어있지 않은 file segment.
+
+    까심 LOW(robustness): `startswith(문자열)` 대신 segment 단위 정확 비교 — 빈 trailing(`.../chat/<conv>/`
+    파일 없음)·prefix 혼동·UUID 형식 변형을 견고하게 거부한다. 모든 비교값은 str(UUID) canonical 형식.
+    """
+    parts = object_path.split("/")
+    n = len(segments)
+    return len(parts) > n and parts[:n] == segments and parts[n] != ""
+
+
 def path_in_source_scope(
     object_path: str,
     source_type: str,
@@ -43,25 +54,25 @@ def path_in_source_scope(
 ) -> bool:
     """object_path 가 이 source(=메시지/스토리)에 귀속된 경로인지 검증(IDOR·registry 오염 차단).
 
-    S1 `_is_scoped_to_conversation` 와 동형: 업로드 경로가 resource 에 스코프돼야 등록(유저가 타
-    project/conv 경로 심어 오염 차단·까심). 두 namespace 인식(S7·AC3 무회귀):
-    - legacy: `chat/<project>/<conversation>/...` · `story/<project>/<story>/...`
-    - S7 신: `org/<org>/project/<project>/chat/<conversation>/...` · `.../story/<story>/...`
-    manual/doc 은 경로 제약 없음(신뢰 등록·doc=S4).
+    registry(sync)·agent-context(attachment_context)·authorize 가 **공유하는 단일 SSOT**(까심: 규칙
+    단일화). 업로드 경로가 resource 에 스코프돼야 통과(유저가 타 org/project/conv 경로 심어 오염/IDOR
+    차단). 두 namespace 인식(S7·AC3 무회귀)·**org/project/source 전 tenancy segment exact 바인딩**:
+    - legacy: `chat/<project>/<conversation>/<file>` · `story/<project>/<story>/<file>`
+    - S7 신: `org/<org>/project/<project>/chat/<conversation>/<file>` · `.../story/<story>/<file>`
+    신 namespace 의 org segment 도 반드시 일치(미검증 시 cross-org IDOR·CRITICAL). manual/doc 은 경로
+    제약 없음(신뢰 등록·doc=S4). segment 단위 정확 비교(_prefix_segments_match)로 변형/우회 견고.
     """
-    if source_type == "conversation_message":
-        if object_path.startswith(f"chat/{project_id}/{source_id}/"):
-            return True
-        return org_id is not None and object_path.startswith(
-            f"org/{org_id}/project/{project_id}/chat/{source_id}/"
-        )
-    if source_type == "story":
-        if object_path.startswith(f"story/{project_id}/{source_id}/"):
-            return True
-        return org_id is not None and object_path.startswith(
-            f"org/{org_id}/project/{project_id}/story/{source_id}/"
-        )
-    return True
+    pid, sid = str(project_id), str(source_id)
+    kind = {"conversation_message": "chat", "story": "story"}.get(source_type)
+    if kind is None:
+        return True  # manual/doc 등 경로 제약 없는 source
+    # legacy: <kind>/<project>/<source>/<file>
+    if _prefix_segments_match(object_path, [kind, pid, sid]):
+        return True
+    # S7 신: org/<org>/project/<project>/<kind>/<source>/<file> — org 까지 exact 바인딩.
+    return org_id is not None and _prefix_segments_match(
+        object_path, ["org", str(org_id), "project", pid, kind, sid]
+    )
 
 
 async def sync_attachment_assets(
