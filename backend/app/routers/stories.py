@@ -761,17 +761,11 @@ async def update_story_status(
     story_before = await repo.get(id)
     old_status = story_before.status if story_before else None
 
-    # AC1/AC5/AC7: violation 체크 — block 모드면 전이 거부
-    from app.models.project import Project as ProjectModel
-    _proj_result = await db.execute(
-        select(ProjectModel).where(ProjectModel.id == story_before.project_id)
-    ) if story_before else None
-    _proj = _proj_result.scalar_one_or_none() if _proj_result else None
-    _violation_level = getattr(_proj, "violation_level", "warn") if _proj else "warn"
-
-    _violation = check_transition(old_status, body.status, _violation_level)
-    if _violation.violated and _violation_level == "block":
-        raise HTTPException(status_code=400, detail=_violation.reason or "워크플로우 위반으로 상태 전이가 거부되었습니다.")
+    # 정공법 A(c1cd484b·선생님 지시): 전이 순서 **하드블록 폐지** — 비순차 점프도 항상 allow,
+    # violation 은 warn 기록(이벤트)+응답 flag 로만 가시화. projects.violation_level=="block" 잔존이
+    # `/status`=block vs `/bulk`=pass SSOT 역설("정신병" 일부 경로 생존)을 만들던 걸 제거(까심 ②).
+    # → 전이-순서는 항상 warn. E-DG merge-gate/워크플로우 라인 엔진(아래)은 직교라 그대로 유지.
+    _violation = check_transition(old_status, body.status, "warn")
 
     # E-DG S5(P0-2): enforcing 라인의 merge-gate step이 이 전이를 거버닝하면, 아래 라인 엔진이
     # evaluate_merge_gate를 단일 평가한다 → 여기 _preflight_merge_gate/enforce_gate(done)는 skip해
@@ -849,7 +843,7 @@ async def update_story_status(
 
     try:
         # AC2: violation_level 전달 → warn 모드이면 set_status hard block 우회
-        story = await repo.set_status(id, body.status, violation_level=_violation_level)
+        story = await repo.set_status(id, body.status, violation_level="warn")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -900,8 +894,8 @@ async def update_story_status(
 
     if old_status != story.status:
         org_id = repo.org_id
-        # AC2/3/4/6: warn 모드 위반 — 전이는 정상 진행, 이벤트+웹훅만 발행
-        if _violation.violated and _violation_level == "warn":
+        # AC2/3/4/6: 위반 — 전이는 항상 정상 진행(하드블록 폐지), 이벤트+웹훅만 발행(가시화).
+        if _violation.violated:
             _v_event = build_violation_event(
                 story_id=str(id),
                 story_title=story.title,
