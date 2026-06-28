@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.event import Event
@@ -221,6 +222,10 @@ async def create_story(
         body.assignee_id if body.assignee_id is not None
         else (effective_ids[0] if effective_ids else None)
     )
+    # S8: 서버사이드 capacity 게이트(ee seam·SaaS only·OSS no-op) — asset commit 前 per-file+총량 enforce.
+    if settings.is_ee_enabled and body.attachments:
+        from ee.plan_limits import check_storage_capacity  # type: ignore[import]
+        await check_storage_capacity(session, org_id, [a.model_dump() for a in body.attachments])
     story = await repo.create(
         project_id=body.project_id,
         title=body.title,
@@ -450,6 +455,10 @@ async def update_story(
     # S7: client 제공 asset_id strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
     if data.get("attachments"):
         data["attachments"] = [{**a, "asset_id": None} for a in data["attachments"]]
+        # S8: 서버사이드 capacity 게이트(ee seam·SaaS only·OSS no-op) — 첨부 교체 commit 前 enforce.
+        if settings.is_ee_enabled:
+            from ee.plan_limits import check_storage_capacity  # type: ignore[import]
+            await check_storage_capacity(db, repo.org_id, data["attachments"])
     # E-BOARD S5: assignee_ids는 stories 컬럼이 아니므로 repo.update 전에 분리.
     assignee_ids_in = data.pop("assignee_ids", None)
     # assignee_ids만 제공되면 단일 assignee_id(주담당)를 첫 요소로 동기화 → 기존 event/notify 로직 재사용.

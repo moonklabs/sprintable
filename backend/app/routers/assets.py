@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.asset import Asset, AssetFolder, AssetLink
@@ -168,6 +169,8 @@ async def list_assets(
 class StorageUsageResponse(BaseModel):
     org_id: uuid.UUID
     used_bytes: int
+    limit_bytes: int | None = None
+    percentage: float = 0.0
 
 
 @router.get("/assets/storage-usage", response_model=StorageUsageResponse)
@@ -176,19 +179,29 @@ async def storage_usage(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> StorageUsageResponse:
-    """GET /api/v2/assets/storage-usage — org 의 committed(미삭제) asset bytes 합(S8 capacity usage).
+    """GET /api/v2/assets/storage-usage — org 의 committed(미삭제) asset bytes 합 + tier 캡 + percentage(S8).
 
     usage SSOT = asset registry **live SUM**(결재: committed asset bytes·org scope·drift 0). soft-delete
-    (deleted_at IS NOT NULL)는 합산서 제외 = 즉시 용량 회수(복구는 7일 grace·별도). 캡/enforce 는 별도
-    (enforce 위치 crux A/B)·이 엔드포인트는 usage 만 권위 제공(A/B 공통 필요). org-wide(프로젝트 무관).
+    (deleted_at IS NOT NULL)는 합산서 제외 = 즉시 용량 회수(복구는 7일 grace·별도). cap = **단일 BE SSOT**
+    (plan_tier_limits·server 권위·FE 가 이 응답으로 캡 read → Supabase 이원화 0). limit/percentage 는
+    **ee-gated**(is_ee_enabled): SaaS = org tier→plan_tier_limits 캡, OSS = null(무제한). org-wide.
     """
-    used = (await db.execute(
+    used = int((await db.execute(
         select(func.coalesce(func.sum(Asset.size_bytes), 0)).where(
             Asset.org_id == org_id,
             Asset.deleted_at.is_(None),
         )
-    )).scalar_one()
-    return StorageUsageResponse(org_id=org_id, used_bytes=int(used))
+    )).scalar_one())
+
+    limit_bytes: int | None = None
+    if settings.is_ee_enabled:
+        from ee.plan_limits import get_org_storage_limit_bytes  # type: ignore[import]
+        limit_bytes = await get_org_storage_limit_bytes(db, org_id)
+
+    pct = round(used / limit_bytes * 100, 1) if limit_bytes else 0.0
+    return StorageUsageResponse(
+        org_id=org_id, used_bytes=used, limit_bytes=limit_bytes, percentage=pct
+    )
 
 
 @router.get("/folders", response_model=list[FolderResponse])
