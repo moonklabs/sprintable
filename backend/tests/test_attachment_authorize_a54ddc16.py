@@ -268,3 +268,20 @@ async def test_authorize_conversation_s7_same_org_cross_project_idor_403():
         assert r.status_code == 403  # 타 project 경로 서명 차단(IDOR)
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_authorize_conversation_s7_clean_wrong_org_403():
+    """까심 LOW: 구조는 정상(타 segment 삽입 없음)·org segment만 틀린 신 namespace → 403.
+    org 검증을 단독 격리(`org/<타org>/project/<proj>/chat/<conv>/file`·proj+conv 정확)."""
+    import uuid as _u
+    bad = f"org/{_u.uuid4()}/project/{PROJECT_ID}/chat/{CONV_ID}/u1-abc.png"  # 깔끔한 구조·org만 틀림
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID)])  # conv project=PROJECT_ID 조회
+    client, app = await _client(session)
+    try:
+        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
+            r = await _get(client, f"path={bad}&conversation_id={CONV_ID}")
+        assert r.status_code == 403  # org segment 불일치 → cross-org 서명 차단
+    finally:
+        app.dependency_overrides.clear()

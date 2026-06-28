@@ -75,3 +75,29 @@ def test_scope_rejects_wrong_source_or_org():
 
 def test_scope_manual_unconstrained():
     assert path_in_source_scope("anything/x.png", "manual", _PROJ, _uuid.uuid4(), _ORG)
+
+
+def test_scope_segment_robustness():
+    """까심 LOW: segment 단위 정확 비교 견고성 — 빈 trailing·prefix 혼동 거부·subdir 허용."""
+    # 빈 trailing(파일 segment 없음) → 거부
+    assert not path_in_source_scope(f"chat/{_PROJ}/{_CONV}/", "conversation_message", _PROJ, _CONV, _ORG)
+    assert not path_in_source_scope(
+        f"org/{_ORG}/project/{_PROJ}/chat/{_CONV}/", "conversation_message", _PROJ, _CONV, _ORG)
+    # conv segment prefix 혼동(예: <conv>extra) → 정확 segment 불일치로 거부
+    assert not path_in_source_scope(
+        f"chat/{_PROJ}/{_CONV}extra/u.png", "conversation_message", _PROJ, _CONV, _ORG)
+    # 중간 삽입(parts[4]!='chat') → 거부
+    assert not path_in_source_scope(
+        f"org/{_ORG}/project/{_PROJ}/evil/chat/{_CONV}/u.png", "conversation_message", _PROJ, _CONV, _ORG)
+    # 정당한 subdir 깊은 경로는 허용(file segment 비어있지 않음)
+    assert path_in_source_scope(
+        f"chat/{_PROJ}/{_CONV}/sub/u.png", "conversation_message", _PROJ, _CONV, _ORG)
+
+
+def test_scope_cross_org_with_correct_proj_conv_rejected():
+    """까심 CRITICAL 고정: org segment만 틀려도(proj+conv 정확) 거부 — cross-org IDOR 차단."""
+    other_org = _uuid.uuid4()
+    assert not path_in_source_scope(
+        f"org/{other_org}/project/{_PROJ}/chat/{_CONV}/u.png", "conversation_message", _PROJ, _CONV, _ORG)
+    assert not path_in_source_scope(
+        f"org/{other_org}/project/{_PROJ}/story/{_STORY}/u.png", "story", _PROJ, _STORY, _ORG)
