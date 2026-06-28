@@ -74,6 +74,7 @@ async def sync_attachment_assets(
     attachments: list[dict] | None,
     created_by: uuid.UUID | None = None,
     container: str = DEFAULT_CONTAINER,
+    path_scope_id: uuid.UUID | None = None,
 ) -> dict[str, uuid.UUID]:
     """첨부 목록을 asset registry 로 동기화(upsert) + asset_link 재조정(reconcile).
 
@@ -81,10 +82,17 @@ async def sync_attachment_assets(
     - source 의 현재 첨부 집합에 없는 기존 link 는 삭제(update 의 attachments 교체 의미 반영·SSOT 정확).
     - 외부 URL/타 버킷 첨부는 우리 객체가 아니므로 스킵.
     반환: {원본 첨부 url → asset_id} (S7: 호출부가 JSONB 에 asset_id 역기입·denorm·catch#4).
+
+    ⚠️ path_scope_id (S7 AC1 핫픽스): path 스코프 검증용 id — **asset_link.source_id 와 분리**된다.
+    conversation_message 는 업로드 path 가 conversation_id 로 스코프되는데(업로드가 메시지 생성 前이라
+    conv 단위일 수밖에) asset_link.source_id 는 message_id(S5 메시지 deeplink·링크 의미)라 축이 다르다.
+    둘을 같은 값으로 쓰면 `chat/{msg.id}/` 기대 vs `chat/{conv_id}/` 실제 → 영구 mismatch → 등록 0(AC1
+    fail). None 이면 source_id 폴백(story 는 source_id=story_id 가 path 와 일치하므로 무변경).
     """
     if source_type not in ASSET_LINK_SOURCE_TYPES:
         raise ValueError(f"invalid asset link source_type: {source_type}")
 
+    scope_id = path_scope_id if path_scope_id is not None else source_id
     asset_ids: list[uuid.UUID] = []
     url_map: dict[str, uuid.UUID] = {}
     for att in attachments or []:
@@ -94,7 +102,7 @@ async def sync_attachment_assets(
         obj = canonical_object_path(raw_url, container)
         if obj is None:
             continue  # 외부/비정상 — 우리 객체 아님
-        if not path_in_source_scope(obj, source_type, project_id, source_id, org_id):
+        if not path_in_source_scope(obj, source_type, project_id, scope_id, org_id):
             continue  # 이 source 귀속 경로 아님 — registry 오염/IDOR 차단(까심)
         name = (att.get("name") or "").strip() or obj.rsplit("/", 1)[-1] or "file"
         content_type = (att.get("content_type") or "").strip() or None

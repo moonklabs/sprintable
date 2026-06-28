@@ -216,3 +216,48 @@ async def test_empty_text_guidance(monkeypatch):
     monkeypatch.setattr(ac, "_extract_text", MagicMock(return_value="   "))
     out = await _text(ac, [_att("empty.txt", "text/plain")])
     assert "추출 텍스트 없음" in out
+
+
+# ── S7 신 namespace(org/<org>/project/<proj>/chat/<conv>/...) 인식 + IDOR 유지 ──
+
+
+@pytest.mark.anyio
+async def test_s7_namespace_doc_extraction_injected(monkeypatch):
+    """S7 AC1/AC3 회귀: 신 namespace chat 첨부도 스코프 통과 → fetch+추출 주입(probe '접근 범위 밖' 근원 해소)."""
+    from app.services import attachment_context as ac
+
+    monkeypatch.setattr(ac, "_download_object", AsyncMock(return_value=b"x"))
+    monkeypatch.setattr(ac, "_extract_text", MagicMock(return_value="hello s7"))
+    url = f"org/orgX/project/{PROJ}/chat/{CONV}/report.pdf"
+    out = await _text(ac, [_att("report.pdf", "application/pdf", url=url)])
+    assert "[첨부: report.pdf]" in out and "hello s7" in out
+    assert "접근 범위 밖" not in out
+
+
+@pytest.mark.anyio
+async def test_s7_namespace_cross_conv_rejected(monkeypatch):
+    """신 namespace라도 타 conv segment → 스코프 밖 거부(IDOR·exact segment)."""
+    from app.services import attachment_context as ac
+
+    fetch = AsyncMock(return_value=b"secret")
+    monkeypatch.setattr(ac, "_download_object", fetch)
+    url = f"org/orgX/project/{PROJ}/chat/OTHERCONV/leak.pdf"
+    out = await _text(ac, [_att("leak.pdf", "application/pdf", url=url)])
+    assert "접근 범위 밖): leak.pdf" in out and "secret" not in out
+    fetch.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_s7_namespace_cross_project_and_middle_inject_rejected(monkeypatch):
+    """타 project segment·중간 /chat/ 삽입 → 거부(까심 IDOR·정확 segment 바인딩)."""
+    from app.services import attachment_context as ac
+
+    fetch = AsyncMock(return_value=b"secret")
+    monkeypatch.setattr(ac, "_download_object", fetch)
+    for url in (
+        f"org/orgX/project/OTHERPROJ/chat/{CONV}/leak.pdf",          # 타 project
+        f"org/orgX/project/{PROJ}/evil/chat/{CONV}/leak.pdf",        # 중간 삽입(parts[4]!='chat')
+    ):
+        out = await _text(ac, [_att("leak.pdf", "application/pdf", url=url)])
+        assert "접근 범위 밖): leak.pdf" in out, url
+    fetch.assert_not_awaited()

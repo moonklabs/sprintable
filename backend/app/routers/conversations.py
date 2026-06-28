@@ -1240,6 +1240,10 @@ async def send_message(
             source_id=msg.id,
             attachments=[a.model_dump() for a in body.attachments],
             created_by=sender.id,
+            # S7 AC1: 업로드 path 는 conversation_id 로 스코프(`.../chat/{conv_id}/`)·asset_link.source_id 는
+            # msg.id 유지. path 검증만 conv_id 로(축 분리·영구 mismatch 해소). IDOR: conv 의 project/org 는
+            # 이 핸들러가 이미 검증(conv.project_id·get_verified_org_id) + exact-prefix 그대로.
+            path_scope_id=conversation_id,
         )
         if url_map:
             msg.attachments = [

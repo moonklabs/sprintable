@@ -56,21 +56,33 @@ def _ext(name: str) -> str:
 
 
 def _is_scoped_to_conversation(object_path: str, project_id, conversation_id) -> bool:
-    """canonical object path 가 **이 대화**에 스코프됐는지(`chat/<project_id>/<conversation_id>/<file>`).
+    """canonical object path 가 **이 대화**에 스코프됐는지.
+
+    두 namespace 인식(S7 AC1 핫픽스·AC3 무회귀):
+    - legacy: `chat/<project_id>/<conversation_id>/<file>`
+    - S7 신:  `org/<org>/project/<project_id>/chat/<conversation_id>/<file>`
 
     ⚠️ 보안(QA RC HIGH·object-scope IDOR): 저장 URL 을 그대로 믿고 fetch 하면, 참가자가 *타 대화*
     객체 URL 을 첨부에 심어 백엔드 SA(objectAdmin) 권한으로 임의 객체를 읽어 그 내용을 에이전트
-    컨텍스트로 누출시킬 수 있다(attachments.py 스코프 게이트 우회). 업로드 경로가 resource 에
-    스코프되므로(`chat/<proj>/<conv>/<file>`), path segment 가 정확히 이 conversation 을 가리킬
-    때만 fetch 한다(substring 금지·정확 segment 매치). 다른 conversation/story/외부 = 거부.
+    컨텍스트로 누출시킬 수 있다(attachments.py 스코프 게이트 우회). path segment 가 정확히 이
+    (project, conversation) 을 가리킬 때만 fetch(substring 금지·정확 segment 매치). 신 namespace 도
+    project_id+conversation_id 를 **정확 segment** 로 바인딩(legacy 와 동일 보안 자세·중간 삽입 우회 차단).
+    다른 conversation/project/story/외부 = 거부.
     """
     parts = object_path.split("/")
+    pid, cid = str(project_id), str(conversation_id)
+    # legacy: chat/<proj>/<conv>/<file>
+    if len(parts) >= 4 and parts[0] == "chat" and parts[1] == pid and parts[2] == cid and parts[3] != "":
+        return True
+    # S7 신: org/<org>/project/<proj>/chat/<conv>/<file> — 정확 segment(org 값은 conv+proj 바인딩에 종속).
     return (
-        len(parts) >= 4
-        and parts[0] == "chat"
-        and parts[1] == str(project_id)
-        and parts[2] == str(conversation_id)
-        and parts[3] != ""
+        len(parts) >= 7
+        and parts[0] == "org"
+        and parts[2] == "project"
+        and parts[3] == pid
+        and parts[4] == "chat"
+        and parts[5] == cid
+        and parts[6] != ""
     )
 
 
