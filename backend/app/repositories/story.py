@@ -88,7 +88,7 @@ class StoryRepository(BaseRepository[Story]):
         return updated
 
     async def set_status(
-        self, id: uuid.UUID, new_status: str, violation_level: str = "block"
+        self, id: uuid.UUID, new_status: str, violation_level: str = "warn"
     ) -> Story:
         story = await self.get(id)
         if story is None:

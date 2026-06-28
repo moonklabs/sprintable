@@ -60,6 +60,26 @@ def check_transition(
     return ViolationResult(violated=False)
 
 
+def build_violation_flag(old_status: str | None, new_status: str) -> dict | None:
+    """정공법 A(c1cd484b): 비순차 전진 점프를 응답용 violation flag 로 변환(차단 X·FE 가시화).
+
+    `/status`·`/bulk` **공통 SSOT** — 두 경로가 동일 판정·동일 shape 를 쓰도록 단일 함수로 둔다.
+    정상 인접 전이·역방향 reopen(정당한 rework) → None. 2단계+ 전진 점프 → flag.
+    shape: {level, from, to, skipped}. skipped = 건너뛴 중간 단계 수(new_rank-old_rank-1).
+    """
+    res = check_transition(old_status, new_status, "warn")
+    if not res.violated:
+        return None
+    old_rank = _STATUS_RANK.get(old_status or "", 0)
+    new_rank = _STATUS_RANK.get(new_status, 0)
+    return {
+        "level": "warn",
+        "from": old_status,
+        "to": new_status,
+        "skipped": max(1, new_rank - old_rank - 1),
+    }
+
+
 def build_violation_event(
     story_id: str,
     story_title: str,
