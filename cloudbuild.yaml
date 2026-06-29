@@ -11,13 +11,14 @@ substitutions:
   _DEPLOY_ENV: dev
   _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
   _BACKEND_MIN_INSTANCES: '1'
-  # ⚠️ 이 값은 **GHA cloud-build.yml 이 per-env override**(prod=5·dev=1) — 이 default 는 수동 빌드 fallback.
+  # ⚠️ default '1'(아래) = _DEPLOY_ENV:dev default 와 정합한 **dev-safe fallback**(수동 `gcloud builds submit`
+  #    override 없을 때 maxScale 10 trap=2×10×5+5=105>25 재현 차단). GHA cloud-build.yml 이 per-env override(prod=5·dev=1).
   #    rollout-safe 산식(ee7794eb·dev TooManyConnections 인시던트): **2 × maxScale × (pool+overflow + raw) +
   #    headroom ≤ max_conn**. per-instance = pool(3/1=4) + pg_pubsub raw(1) = 5.
   #    prod(g1-small 100): maxScale **5** → 2×5×5+20=70 ≤ 100 ✓(선생님 right-size·여유 30). 10 은 120>100 폐기.
   #    dev(f1-micro 25): maxScale 1 → 2×1×5+5=15 ≤ 25 ✓. (PgBouncer 풀러: Cloud Run raw TCP 미지원으로 중앙
   #    불가·관리형 풀링 Enterprise Plus 전용 → 채택 안 함. 트래픽↑ 時 tier업 동반해야 maxScale 상향.)
-  _BACKEND_MAX_INSTANCES: '10'
+  _BACKEND_MAX_INSTANCES: '1'
   _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
 
 steps:
