@@ -86,11 +86,23 @@ async function uploadAndRegister(docId: string, file: File): Promise<AssetRef> {
     }),
   });
   if (!reg.ok) throw new Error('register failed');
+  // BE register 응답은 snake_case(`data.asset_id`) — camelCase/평면 폴백도 같이 수용(계약 견고화).
   const json = (await reg.json().catch(() => null)) as
-    | { data?: { assetId?: string; id?: string } | null; assetId?: string; id?: string }
+    | {
+        data?: { asset_id?: string; assetId?: string; id?: string } | null;
+        asset_id?: string;
+        assetId?: string;
+        id?: string;
+      }
     | null;
   const assetId =
-    json?.data?.assetId ?? json?.data?.id ?? json?.assetId ?? json?.id ?? null;
+    json?.data?.asset_id ??
+    json?.data?.assetId ??
+    json?.data?.id ??
+    json?.asset_id ??
+    json?.assetId ??
+    json?.id ??
+    null;
   if (!assetId) throw new Error('no assetId in register response');
   return { assetId, filename: meta.name, size: meta.size, mime: meta.content_type };
 }
