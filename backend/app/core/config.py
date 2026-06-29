@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     #    미점유). (l2_worker 는 engine.connect→pool 내·추가 0.) → **per_instance = (pool+overflow) + RAW(1) = 5.**
     #    rollout-aware 산식: **2 × maxScale × ((pool+overflow) + RAW) + admin/migration headroom ≤ max_connections.**
     #   ① 앱 최소요구(실측): pool+overflow ≥ 4 (total 3 이면 send_message pool_timeout). ∴ pool 3/1=4 고정(밑으로 불가).
-    #   ② dev(f1-micro ~25·maxScale 실측 10→PO 2 적용 rev 01240-hkc): 2×2×5+5 = 25 = 25/25 (한계·headroom 0).
-    #      (maxScale 10 이면 2×10×5+5=105≫25. pool 4 단독 불가 → maxScale↓ 필수. 더 여유엔 maxScale 1=15/25.)
+    #   ② dev(f1-micro ~25·maxScale 실측 10→PO **1** 적용 rev 01240-hkc): 2×1×5+5 = 15 ≤ 25 (여유 10).
+    #      (maxScale 2 면 25/25 한계·1 로 여유 확보. 10 이면 2×10×5+5=105≫25 → pool 4 단독 불가·maxScale↓ 필수.)
     #   ③ prod(g1-small 100·maxScale **실측 필수**): 2×10×5+20=120 > 100(가정 10이면 초과). 안전 상한 maxScale≤8
     #      (2×8×5+20=100·여유 0). **prod 승격 前 PgBouncer(durable·연결 decouple) 또는 tier↑ 필수**(maxScale 캡만으론 0 headroom).
     # ⚠️ 향후 always-on LISTEN/raw 연결 추가 시 RAW 카운트 ++ 동반(산식 누락 = 이번 false-PASS 재발).

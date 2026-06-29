@@ -9,7 +9,7 @@ from app.core.config import settings
 # ⚠️ 인스턴스당 실 커넥션 = (pool_size+max_overflow) + **pool 밖 raw 연결**(pg_pubsub.listen_loop 상시 1·
 #   l2_worker 는 pool 내). rollout(old+new 2×) 반영: 2×maxScale×((pool+overflow)+RAW)+headroom ≤ max_connections.
 #   per_instance = 4(pool 3/1) + RAW 1 = **5**. (pool 4 는 앱최소·밑으로 불가.)
-#   dev(~25·maxScale 10→PO 2): 2×2×5+5=25 = 25/25(한계). prod(100·maxScale 실측필수): 2×10×5+20=120>100 →
+#   dev(~25·maxScale 10→PO 1): 2×1×5+5=15 ≤ 25(여유 10). prod(100·maxScale 실측필수): 2×10×5+20=120>100 →
 #   maxScale≤8(2×8×5+20=100·여유0) + ③ 승격 前 PgBouncer/tier↑ 필수. 향후 raw 추가 시 RAW++ (config.py 산식).
 # env DB_POOL_SIZE / DB_MAX_OVERFLOW로 조정하되 상향은 rollout 여유(tier↑/maxScale↓/PgBouncer) 동반.
 def _build_engine_kwargs() -> dict:
