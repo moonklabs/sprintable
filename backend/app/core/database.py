@@ -5,12 +5,13 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
-# S20/E-INFRA S2: DB 풀 right-size — SSE는 대기 구간에서 커넥션 미점유(개별 세션 패턴).
-# 인스턴스당 최대 커넥션 = pool_size + max_overflow. 클러스터 총합 = maxScale × (pool_size+overflow).
-# ⚠️ 산식: (maxScale × (pool_size+max_overflow)) + admin/migration headroom ≤ Cloud SQL max_connections.
-#   prod(db-g1-small max_connections=100, maxScale=10): 10×(5+3)=80 + ~20 headroom = 100 ✓
-#   (이전 10/20=30/instance × 10 = 300 > 100 → 고갈 위험이라 right-size)
-# env DB_POOL_SIZE / DB_MAX_OVERFLOW로 환경별 독립 조정(config.py 산식 주석 참조).
+# S20/E-INFRA S2 + ee7794eb: DB 풀 **rollout-safe** right-size — SSE는 대기 구간 커넥션 미점유(개별 세션).
+# ⚠️ 인스턴스당 실 커넥션 = (pool_size+max_overflow) + **pool 밖 raw 연결**(pg_pubsub.listen_loop 상시 1·
+#   l2_worker 는 pool 내). rollout(old+new 2×) 반영: 2×maxScale×((pool+overflow)+RAW)+headroom ≤ max_connections.
+#   per_instance = 4(pool 3/1) + RAW 1 = **5**. (pool 4 는 앱최소·밑으로 불가.)
+#   dev(~25·maxScale 10→PO 1): 2×1×5+5=15 ≤ 25(여유 10). prod(100·maxScale 실측필수): 2×10×5+20=120>100 →
+#   maxScale≤8(2×8×5+20=100·여유0) + ③ 승격 前 PgBouncer/tier↑ 필수. 향후 raw 추가 시 RAW++ (config.py 산식).
+# env DB_POOL_SIZE / DB_MAX_OVERFLOW로 조정하되 상향은 rollout 여유(tier↑/maxScale↓/PgBouncer) 동반.
 def _build_engine_kwargs() -> dict:
     """create_async_engine 인자를 DB_PGBOUNCER flag로 분기.
 
