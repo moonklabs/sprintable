@@ -101,17 +101,36 @@ async def _dispatch_received(payload_str: str) -> None:
         logger.warning("pg_listen dispatch failed target=%s: %s", target, exc)
 
 
+def _resolve_listen_url(s=None) -> str:
+    """LISTEN raw 연결 URL — ee7794eb ③: DB_PGBOUNCER on 時 transaction-mode PgBouncer 는 LISTEN/NOTIFY
+    미지원이라 **direct Cloud SQL**(database_url_direct)로 우회. 미설정 폴백=database_url(non-PgBouncer)."""
+    if s is None:
+        from app.core.config import settings as s
+    return (s.database_url_direct or s.database_url).replace("postgresql+asyncpg://", "postgresql://", 1)
+
+
+def check_listen_config(s=None) -> None:
+    """fail-closed: DB_PGBOUNCER on 인데 direct URL 없으면 raise — LISTEN 이 PgBouncer 경유로 깨지는
+    misconfig 를 startup서 차단(silent 이벤트 유실 방지). main lifespan 이 create_task 前 호출."""
+    if s is None:
+        from app.core.config import settings as s
+    if s.db_pgbouncer and not s.database_url_direct:
+        raise RuntimeError(
+            "DB_PGBOUNCER=on requires DATABASE_URL_DIRECT — pg_pubsub LISTEN 은 transaction-mode "
+            "PgBouncer 비호환이라 direct Cloud SQL URL 필수 (fail-closed·ee7794eb ③)."
+        )
+
+
 async def listen_loop() -> None:
     """PG LISTEN 수신 루프. lifespan startup에서 background task로 실행.
 
-    - raw asyncpg 전용 커넥션 1개 (SQLAlchemy pool 미점유)
+    - raw asyncpg 전용 커넥션 1개 (SQLAlchemy pool 미점유·DB_PGBOUNCER 시 direct Cloud SQL 우회)
     - 연결 실패 시 exponential backoff 1s→2s→4s→max 30s
     - CancelledError 수신 시 커넥션 정리 후 종료
     """
     import asyncpg
-    from app.core.config import settings
 
-    raw_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    raw_url = _resolve_listen_url()
     delay = 1.0
 
     logger.info("pg_listen starting on channel=%s instance=%s", _CHANNEL, INSTANCE_ID)
