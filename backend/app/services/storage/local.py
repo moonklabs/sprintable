@@ -82,3 +82,14 @@ class LocalStorageProvider(StorageProvider):
         except Exception:
             logger.warning("local storage: signed url 생성 실패 path=%s", object_path, exc_info=True)
             return None
+
+    async def delete_object(self, container: str, object_path: str) -> bool:
+        def _blocking() -> bool:
+            _resolve_safe(container, object_path).unlink(missing_ok=True)  # 없어도 OK = 멱등
+            return True
+
+        try:
+            return await asyncio.to_thread(_blocking)
+        except Exception:
+            logger.warning("local storage: delete 실패 path=%s", object_path, exc_info=True)
+            return False

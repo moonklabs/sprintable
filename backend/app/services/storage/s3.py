@@ -55,3 +55,14 @@ class S3StorageProvider(StorageProvider):
         except Exception:
             logger.warning("s3 storage: signed url 생성 실패 path=%s", object_path, exc_info=True)
             return None
+
+    async def delete_object(self, container: str, object_path: str) -> bool:
+        def _blocking() -> bool:
+            _client().delete_object(Bucket=container, Key=object_path)  # S3 delete=멱등(없어도 성공)
+            return True
+
+        try:
+            return await asyncio.to_thread(_blocking)
+        except Exception:
+            logger.warning("s3 storage: delete 실패 path=%s", object_path, exc_info=True)
+            return False

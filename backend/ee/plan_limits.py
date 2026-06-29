@@ -131,7 +131,7 @@ async def check_storage_capacity(session: AsyncSession, org_id, attachments: lis
         if not isinstance(att, dict) or canonical_object_path(att.get("url") or "") is None:
             continue  # 우리 객체 아님(외부/타버킷) → 우리 storage 미카운트
         try:
-            size = int(att.get("size") or 0)
+            size = max(0, int(att.get("size") or 0))  # 음수 clamp(까심 ②·함수단독 raw 호출 방어·총량 우회 차단)
         except (TypeError, ValueError):
             size = 0
         if size > max_file_bytes:

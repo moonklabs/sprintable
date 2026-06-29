@@ -101,3 +101,23 @@ def test_scope_cross_org_with_correct_proj_conv_rejected():
         f"org/{other_org}/project/{_PROJ}/chat/{_CONV}/u.png", "conversation_message", _PROJ, _CONV, _ORG)
     assert not path_in_source_scope(
         f"org/{other_org}/project/{_PROJ}/story/{_STORY}/u.png", "story", _PROJ, _STORY, _ORG)
+@pytest.mark.anyio
+async def test_local_provider_delete_object(tmp_path, monkeypatch):
+    """S8 Phase 2: local provider delete_object — 파일 삭제 + 이미 없으면 멱등(True)."""
+    monkeypatch.setenv("STORAGE_LOCAL_ROOT", str(tmp_path))
+    from app.services.storage.local import LocalStorageProvider
+
+    p = LocalStorageProvider()
+    target = tmp_path / "bucket" / "a" / "f.png"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"x")
+    assert target.exists()
+    assert await p.delete_object("bucket", "a/f.png") is True
+    assert not target.exists()
+    # 이미 없음 → 멱등 True
+    assert await p.delete_object("bucket", "a/f.png") is True
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"

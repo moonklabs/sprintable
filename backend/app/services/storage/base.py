@@ -21,3 +21,7 @@ class StorageProvider(abc.ABC):
         self, container: str, object_path: str, *, ttl: timedelta
     ) -> str | None:
         """단기 만료 read 서명 URL. 실패 시 None(best-effort)."""
+
+    @abc.abstractmethod
+    async def delete_object(self, container: str, object_path: str) -> bool:
+        """객체 hard-delete(S8 grace cron). 이미 없으면 True(멱등)·실패 시 False(best-effort·호출부 계속)."""
