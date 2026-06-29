@@ -34,6 +34,20 @@ import {
   Columns2,
 } from 'lucide-react';
 
+import { startAttachmentUpload } from './image-upload';
+
+/** 파일 피커 → Storage 업로드 플로우(gutter +·slash·DnD·paste 공용 진입). */
+export function pickAndUpload(editor: Editor, accept?: string): void {
+  const input = document.createElement('input');
+  input.type = 'file';
+  if (accept) input.accept = accept;
+  input.onchange = () => {
+    const file = input.files?.[0];
+    if (file) void startAttachmentUpload(editor, file);
+  };
+  input.click();
+}
+
 export interface SlashMenuItem {
   title: string;
   description: string;
@@ -149,36 +163,20 @@ export const slashMenuCategories: SlashMenuCategory[] = [
         title: 'Image',
         description: '이미지 삽입',
         icon: ImageIcon,
+        // S4: URL prompt → 파일 피커 + Storage 업로드(asset ref). 다른 진입(gutter +·DnD·paste)과 동일 플로우.
         command: (editor, range) => {
-          const url = window.prompt('Image URL:');
-          if (url) editor.chain().focus().deleteRange(range).setImage({ src: url }).run();
+          editor.chain().focus().deleteRange(range).run();
+          pickAndUpload(editor, 'image/*');
         },
       },
       {
         title: 'File',
         description: '파일 첨부',
         icon: Paperclip,
+        // S4: base64 인라인 → Storage 업로드(asset ref).
         command: (editor, range) => {
           editor.chain().focus().deleteRange(range).run();
-          const input = document.createElement('input');
-          input.type = 'file';
-          input.onchange = async () => {
-            const file = input.files?.[0];
-            if (!file) return;
-            const { MAX_FILE_BYTES: maxBytes, fileToDataUrl: toDataUrl, formatFileSize: fmtSize } = await import('./file-node');
-            if (file.size > maxBytes) {
-              window.dispatchEvent(new CustomEvent('docs:file-size-error', {
-                detail: { message: `파일 크기가 5MB를 초과합니다. (${fmtSize(file.size)})` },
-              }));
-              return;
-            }
-            const dataUrl = await toDataUrl(file);
-            editor.commands.insertContent({
-              type: 'fileAttachment',
-              attrs: { filename: file.name, size: file.size, mimeType: file.type, data: dataUrl },
-            });
-          };
-          input.click();
+          pickAndUpload(editor);
         },
       },
       {
