@@ -35,12 +35,15 @@ def test_image_node_byte_exact_minimal():
 
 
 def test_image_node_byte_exact_with_width_alt():
+    # FE content-converter imageWithAsset 와 byte-exact: alt-before-width·width=style·quote-only escape.
     assert to_asset_ref_image_node(ID, "img.png", 999, "image/png", width=320, alt="cat") == (
         '<img data-asset-id="11111111-2222-3333-4444-555555555555" data-filename="img.png" '
-        'data-size="999" data-mime-type="image/png" width="320" alt="cat">'
+        'data-size="999" data-mime-type="image/png" alt="cat" '
+        'style="width:320px;max-width:100%;height:auto">'
     )
-    # src 절대 미포함(ephemeral signed URL persist 금지).
-    assert "src=" not in to_asset_ref_image_node(ID, "i.png", 1, "image/png", width=10)
+    # src 절대 미포함(ephemeral signed URL persist 금지)·width 는 style(attr 아님).
+    out = to_asset_ref_image_node(ID, "i.png", 1, "image/png", width=10)
+    assert "src=" not in out and 'width="10"' not in out and "style=\"width:10px" in out
 
 
 def test_scan_finds_all_three_forms():

@@ -99,20 +99,24 @@ def to_asset_ref_image_node(
     asset_id: uuid.UUID, filename: str, size: int, mime: str, *, width: int | None = None,
     alt: str | None = None,
 ) -> str:
-    """이미지 노드 asset-ref 직렬화(미르코 §1 LOCK byte-exact·CustomImageNode).
-
-    `<img data-asset-id data-filename data-size data-mime-type [width] [alt]>` — **src attr 없음**
-    (PO 크럭스 option ②: signed URL ephemeral·persist 금지·렌더 시 data-asset-id→sign?asset_id 해소).
-    width/alt 는 legacy 에 있을 때만(회귀0·resize/대체텍스트 보존).
+    """이미지 노드 asset-ref 직렬화 — **FE content-converter `imageWithAsset` 룰(실 round-trip 코드)
+    byte-exact**. ⚠️ §1.1 doc(`width="{px}"`·width-before-alt)은 부정확 — 실 코드는:
+    - escape = **quote-only**(`"`→&quot;·`&`/`<`/`>` 미escape·FE `a()` 동형).
+    - order = data-asset-id, data-filename, data-size, data-mime-type, **alt, then width**.
+    - width = **`style="width:{px}px;max-width:100%;height:auto"`** (width attr 아님).
+    - src 미출력(option ②·signed URL ephemeral·렌더 시 data-asset-id→sign?asset_id 해소).
     """
+    def _q(s: str) -> str:  # FE image a(): 따옴표만 escape(파일 노드 safeAttr 와 다름)
+        return s.replace('"', "&quot;")
+
     s = (
-        f'<img data-asset-id="{asset_id}" data-filename="{_esc(filename)}" '
-        f'data-size="{size}" data-mime-type="{_esc(mime)}"'
+        f'<img data-asset-id="{asset_id}" data-filename="{_q(filename)}" '
+        f'data-size="{size}" data-mime-type="{_q(mime)}"'
     )
-    if width:
-        s += f' width="{width}"'
     if alt:
-        s += f' alt="{_esc(alt)}"'
+        s += f' alt="{_q(alt)}"'
+    if width:
+        s += f' style="width:{width}px;max-width:100%;height:auto"'
     return s + ">"
 
 
