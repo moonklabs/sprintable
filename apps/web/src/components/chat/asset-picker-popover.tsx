@@ -122,10 +122,11 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
     }
   };
 
+  // scope 정직화(까심 재QA): BE 교차-프로젝트 검색 미지원이라 '전체'는 '이 프로젝트'와 동일 결과 → 오인 방지 위해 제거.
+  // '폴더'는 currentFolderId 전달 시에만(현 chat 진입은 project-scoped). 교차-스코프는 BE 지원 後 fast-follow.
   const scopes: { id: Scope; label: string }[] = [
     { id: 'project', label: t('assetScopeProject') },
     ...(currentFolderId ? [{ id: 'folder' as Scope, label: t('assetScopeFolder') }] : []),
-    { id: 'all', label: t('assetScopeAll') },
   ];
 
   return (

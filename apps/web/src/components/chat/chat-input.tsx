@@ -75,7 +75,9 @@ function applyAsset(
   name: string,
   assetId: string,
 ): { text: string; caretPos: number } {
-  const replacement = `[${name}](entity:asset:${assetId}) `;
+  // 파일명 escape — `[ ] ( ) \` 와 개행이 markdown-link 토큰 구조를 변조(예 `x](https://phish)[y` → 외부 phishing 링크 렌더)하는 걸 차단.
+  const safeName = name.replace(/[\\[\]()]/g, '\\$&').replace(/[\r\n]+/g, ' ');
+  const replacement = `[${safeName}](entity:asset:${assetId}) `;
   return { text: value.slice(0, cursorPos) + replacement + value.slice(cursorPos), caretPos: cursorPos + replacement.length };
 }
 

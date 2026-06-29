@@ -81,7 +81,8 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
               </span>
             );
           }
-          const m = href?.match(/^entity:(\w+):([0-9a-f-]+)$/i);
+          // id 는 UUID 만 허용 — `dead`·`----` 등 비-UUID는 매칭 실패→평문 링크로 폴백(엔티티 칩/카드 미렌더).
+          const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
           if (m) {
             // S6: 자산 토큰은 컴팩트 칩 대신 리치 임베드 카드(썸네일+메타+화살표).
             if (m[1]!.toLowerCase() === 'asset') {
