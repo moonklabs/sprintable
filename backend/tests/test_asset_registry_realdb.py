@@ -712,7 +712,8 @@ async def test_storage_usage_sums_committed_excludes_softdeleted():
             ), {"org": ORG, "proj": PROJ_A, "c": BUCKET, "p": "su/c", "n": "c", "sz": 999})
             await s.commit()
 
-            auth = MagicMock(); auth.user_id = str(USER)
+            auth = MagicMock()
+            auth.user_id = str(USER)
             resp = await storage_usage(db=s, auth=auth, org_id=ORG)
             assert resp.org_id == ORG
             assert resp.used_bytes == 350  # 100+250 (soft-deleted 999 제외)
@@ -792,7 +793,8 @@ async def test_storage_usage_limit_ee_gated(monkeypatch):
                 " VALUES (gen_random_uuid(),:o,:p,:c,'u/a','a',:sz,NULL)"
             ), {"o": ORG, "p": PROJ_A, "c": BUCKET, "sz": 512 * MB})
             await s.commit()
-            auth = MagicMock(); auth.user_id = str(USER)
+            auth = MagicMock()
+            auth.user_id = str(USER)
 
             # OSS(is_ee_enabled False) → limit null·percentage 0
             monkeypatch.setattr(settings, "license_consent", "")
@@ -804,5 +806,49 @@ async def test_storage_usage_limit_ee_gated(monkeypatch):
             ee = await storage_usage(db=s, auth=auth, org_id=ORG)
             assert ee.limit_bytes == 5120 * MB
             assert ee.percentage == round(512 / 5120 * 100, 1)  # =10.0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_single_asset_scoped():
+    """S6 BE: GET /assets/{id} — accessible project asset 반환·cross-project/malformed/없음/삭제=404(graceful)."""
+    from unittest.mock import MagicMock
+
+    from fastapi import HTTPException
+
+    from app.routers.assets import get_asset
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            ins = ("INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes)"
+                   " VALUES (:id,:o,:p,:c,:path,:n,10)")
+            aid_a = uuid.uuid4()  # PROJ_A: USER granted
+            await s.execute(text(ins), {"id": aid_a, "o": ORG, "p": PROJ_A, "c": BUCKET, "path": "ga/a", "n": "a.png"})
+            aid_b = uuid.uuid4()  # PROJ_B: USER 미접근
+            await s.execute(text(ins), {"id": aid_b, "o": ORG, "p": PROJ_B, "c": BUCKET, "path": "ga/b", "n": "b.png"})
+            aid_del = uuid.uuid4()  # soft-deleted
+            await s.execute(text(
+                "INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes,deleted_at)"
+                " VALUES (:id,:o,:p,:c,'ga/d','d.png',10, now())"
+            ), {"id": aid_del, "o": ORG, "p": PROJ_A, "c": BUCKET})
+            await s.commit()
+
+            auth = MagicMock()
+            auth.user_id = str(USER)
+
+            r = await get_asset(str(aid_a), db=s, auth=auth, org_id=ORG)
+            assert r.id == aid_a and r.name == "a.png"
+
+            for bad, why in [(str(aid_b), "cross-project"), (str(aid_del), "soft-deleted"),
+                             (str(uuid.uuid4()), "nonexistent"), ("not-a-uuid", "malformed")]:
+                try:
+                    await get_asset(bad, db=s, auth=auth, org_id=ORG)
+                    assert False, f"expected 404 for {why}"
+                except HTTPException as e:
+                    assert e.status_code == 404, why
     finally:
         await engine.dispose()
