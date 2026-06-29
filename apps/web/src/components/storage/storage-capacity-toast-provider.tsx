@@ -40,7 +40,8 @@ export function StorageCapacityToastProvider({ children }: { children: React.Rea
         if (!res.ok) return;
         const json = (await res.json()) as { data?: { percentage?: number } };
         const pct = json.data?.percentage;
-        if (cancelled || typeof pct !== 'number' || pct < 80) return;
+        // 유한수 가드 — limit_bytes 0/null(무제한) → NaN/Infinity 가능(div0 방어). NaN<80=false 회피.
+        if (cancelled || !Number.isFinite(pct) || (pct as number) < 80) return;
         const roundedPct = Math.round(pct);
         const isBlock = pct >= 100;
         addToast({
