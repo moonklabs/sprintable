@@ -207,6 +207,7 @@
     "tasks": "태스크",
     "invalidTransition": "유효하지 않은 상태 전이입니다",
     "transitionDenied": "해당 전이는 관리자 권한이 필요합니다",
+    "transitionViolation": "단계를 건너뛴 전이입니다 — 위반으로 기록됐습니다",
     "loading": "불러오는 중...",
     "loadMore": "더 보기",
     "editStory": "스토리 수정",

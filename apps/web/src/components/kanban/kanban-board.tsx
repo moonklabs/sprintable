@@ -23,7 +23,7 @@ import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
-import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
+import { COLUMNS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
 
 /**
@@ -585,15 +585,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
 
     const isSameColumn = story.status === newStatus;
 
-    // 다른 컬럼으로 이동 시 유효성 검사
-    if (!isSameColumn) {
-      const validNext = VALID_TRANSITIONS[story.status] ?? [];
-      if (!validNext.includes(newStatus)) {
-        setTransitionError(t('invalidTransition'));
-        setTimeout(() => setTransitionError(null), 4000);
-        return;
-      }
-    }
+    // 정공법 A(c1cd484b): 어느 칸→어느 칸 자유 이동. FE 하드reject 제거 — 비정상 점프는
+    // BE가 위반(warn)으로 기록하고 차단하지 않는다(메뉴 경로와 거동 일관). done reopen 허용.
 
     // AC4: 새 position 계산
     const targetColumnStories = stories.filter((s) => s.status === newStatus);
@@ -627,23 +620,23 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         body: JSON.stringify({ items: [{ id: storyId, status: newStatus }] }),
       });
       if (!res.ok) {
-        // 롤백 (카운트도 원복)
+        // 정공법 A: 전이 자체는 차단 안 됨 — 권한(FORBIDDEN) 등 실 실패만 롤백.
         setStories((prev) =>
           prev.map((s) => (s.id === storyId ? { ...s, status: story.status, position: story.position } : s)),
         );
         adjustColumnTotal(newStatus, -1);
         adjustColumnTotal(story.status, +1);
         const errJson = await res.json().catch(() => null);
-        const code = errJson?.error?.code;
-        if (code === 'INVALID_TRANSITION') {
-          setTransitionError(t('invalidTransition'));
-          setTimeout(() => setTransitionError(null), 4000);
-        } else if (code === 'FORBIDDEN') {
+        if (errJson?.error?.code === 'FORBIDDEN') {
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
         }
         return;
       }
+      // 정공법 A: 비순차 점프는 BE가 violation(warn)으로 기록·차단X → 비차단 인디케이터 표시.
+      const okItems = await res.json().then((j) => j?.data ?? j).catch(() => null);
+      const violation = Array.isArray(okItems) ? okItems.find((x) => x?.id === storyId)?.violation : null;
+      if (violation) addToast({ type: 'warning', title: t('transitionViolation') });
       // status 성공 후 position fire-and-forget
       void fetch(`/api/stories/${storyId}`, {
         method: 'PATCH',
@@ -686,22 +679,23 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         body: JSON.stringify({ items: [{ id: storyId, status: newStatus }] }),
       });
       if (!res.ok) {
-        // Rollback (카운트도 원복)
+        // 정공법 A: 전이 자체는 차단 안 됨 — 권한(FORBIDDEN) 등 실 실패만 롤백.
         setStories((prev) =>
           prev.map((s) => (s.id === storyId ? { ...s, status: story.status } : s)),
         );
         adjustColumnTotal(newStatus, -1);
         adjustColumnTotal(story.status, +1);
         const errJson = await res.json().catch(() => null);
-        const code = errJson?.error?.code;
-        if (code === 'INVALID_TRANSITION') {
-          setTransitionError(t('invalidTransition'));
-          setTimeout(() => setTransitionError(null), 4000);
-        } else if (code === 'FORBIDDEN') {
+        if (errJson?.error?.code === 'FORBIDDEN') {
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
         }
+        return;
       }
+      // 정공법 A: 비순차 점프 violation(warn) 비차단 표시(메뉴 경로도 드래그와 동일 거동).
+      const okItems = await res.json().then((j) => j?.data ?? j).catch(() => null);
+      const violation = Array.isArray(okItems) ? okItems.find((x) => x?.id === storyId)?.violation : null;
+      if (violation) addToast({ type: 'warning', title: t('transitionViolation') });
     } catch {
       // Rollback (카운트도 원복)
       setStories((prev) =>
@@ -710,7 +704,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       adjustColumnTotal(newStatus, -1);
       adjustColumnTotal(story.status, +1);
     }
-  }, [stories, t, adjustColumnTotal]);
+  }, [stories, t, adjustColumnTotal, addToast]);
 
   const handleAssignStory = useCallback(async (storyId: string) => {
     // TODO: Implement proper member selection UI

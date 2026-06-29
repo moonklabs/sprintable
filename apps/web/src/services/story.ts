@@ -2,19 +2,12 @@
 import type { IStoryRepository, CreateStoryInput, UpdateStoryInput, BulkUpdateItem, StoryListFilters } from '@sprintable/core-storage';
 import { ApiStoryRepository } from '@sprintable/storage-api';
 import { NotFoundError, ForbiddenError } from './sprint';
-import { requireOrgAdmin, isOrgAdmin } from '@/lib/admin-check';
-import { VALID_STORY_TRANSITIONS } from '@sprintable/shared';
+import { requireOrgAdmin } from '@/lib/admin-check';
 
 export type { CreateStoryInput, UpdateStoryInput, BulkUpdateItem };
 
-const VALID_TRANSITIONS = VALID_STORY_TRANSITIONS;
-
-export class InvalidTransitionError extends Error {
-  constructor(from: string, to: string) {
-    super(`Cannot move from ${from} to ${to}`);
-    this.name = 'InvalidTransitionError';
-  }
-}
+// 정공법 A(c1cd484b): story 전이 하드블록 폐지 → InvalidTransitionError(전이-순서 차단) 제거.
+// 비정상 점프는 BE SSOT가 violation(warn)으로 기록·표시한다(FE throw 없음).
 
 export class StoryService {
   private readonly repo: IStoryRepository;
@@ -99,40 +92,11 @@ export class StoryService {
     }
     if (Object.keys(sanitized).length === 0) throw new Error('No valid fields to update');
 
-    const existing = await this.getById(id);
+    // 존재 검증(없으면 NotFoundError).
+    await this.getById(id);
 
-    // 상태 전이 검증 (SID:357)
-    if (input.status && input.status !== existing.status) {
-      const currentStatus = existing.status as string;
-      const targetStatus = input.status;
-
-      // admin/owner 또는 agent context는 어떤 상태에서든 backlog로 역전이 허용 (AC1)
-      // isAdminContext: agent API key 경유 시 service_role client는 auth.getUser()가 null이므로 플래그로 우회
-      const adminReverseToBacklog =
-        targetStatus === 'backlog' &&
-        (this.isAdminContext || (!!this.db && await isOrgAdmin(this.db, existing.org_id as string)));
-
-      if (!adminReverseToBacklog) {
-        const validNext = VALID_TRANSITIONS[currentStatus];
-        if (!validNext || !validNext.includes(targetStatus)) {
-          // 비관리자의 역방향 전이 시도 (AC2)
-          if (targetStatus === 'backlog') {
-            throw new ForbiddenError('Admin permission required to move story back to backlog');
-          }
-          throw new InvalidTransitionError(currentStatus, targetStatus);
-        }
-      }
-
-      // done → in-review는 admin만 (OSS: single user = always admin)
-      if (currentStatus === 'done' && targetStatus !== 'backlog' && this.db) {
-        try {
-          await requireOrgAdmin(this.db, existing.org_id as string);
-        } catch {
-          throw new ForbiddenError('Admin permission required to reopen done stories');
-        }
-      }
-    }
-
+    // 정공법 A(c1cd484b): 상태 전이 하드블록 폐지 — 드로어 단건수정도 보드(/bulk)처럼 자유 이동.
+    // 비정상 점프/ done reopen 모두 차단하지 않는다(선생님 지시). 위반 기록/가시화는 BE SSOT 책임.
     return this.repo.update(id, sanitized as UpdateStoryInput);
   }
 
@@ -148,41 +112,8 @@ export class StoryService {
   }
 
   async bulkUpdate(items: BulkUpdateItem[]) {
-    // status 변경 item에 대해 전이 검증 (bulk 경로 우회 방지)
-    const statusItems = items.filter((item) => item.status !== undefined);
-    if (statusItems.length > 0) {
-      await Promise.all(
-        statusItems.map(async (item) => {
-          const existing = await this.getById(item.id);
-          const currentStatus = existing.status as string;
-          const targetStatus = item.status as string;
-          if (targetStatus === currentStatus) return;
-
-          const adminReverseToBacklog =
-            targetStatus === 'backlog' &&
-            (this.isAdminContext || (!!this.db && await isOrgAdmin(this.db, existing.org_id as string)));
-
-          if (!adminReverseToBacklog) {
-            const validNext = VALID_TRANSITIONS[currentStatus];
-            if (!validNext || !validNext.includes(targetStatus)) {
-              if (targetStatus === 'backlog') {
-                throw new ForbiddenError('Admin permission required to move story back to backlog');
-              }
-              throw new InvalidTransitionError(currentStatus, targetStatus);
-            }
-          }
-
-          // done → in-review는 admin만 (단건 update()와 동일)
-          if (currentStatus === 'done' && targetStatus !== 'backlog' && this.db) {
-            try {
-              await requireOrgAdmin(this.db, existing.org_id as string);
-            } catch {
-              throw new ForbiddenError('Admin permission required to reopen done stories');
-            }
-          }
-        }),
-      );
-    }
+    // 정공법 A(c1cd484b): 상태 전이 하드블록 폐지 — 보드 /bulk(FastAPI)와 동일 거동(자유 이동).
+    // 비정상 점프/done reopen 차단 안 함. 위반 기록/가시화는 BE SSOT 책임.
     return this.repo.bulkUpdate(items);
   }
 

@@ -199,3 +199,13 @@ class StoryResponse(BaseModel):
     is_excluded: bool = False
     created_at: datetime
     updated_at: datetime
+    # 칸반 정공법(c1cd484b): 비순차 전진 점프 시 응답에 위반 flag(차단 X·FE 가시화). 정상/역방향=None.
+    # shape: {level:"warn", from, to, skipped}. /status·/bulk 동일. 라우터가 model_validate 後 직접 세팅.
+    violation: dict[str, Any] | None = None
+
+    @field_validator("violation", mode="before")
+    @classmethod
+    def _coerce_violation(cls, v):
+        # violation 은 ORM 컬럼이 아님 — from_attributes 시 비-dict(MagicMock auto-attr 등)는 None 처리
+        # (_coerce_attachments 와 동형). 실제 flag 는 라우터가 model_validate 後 dict 로 할당한다.
+        return v if isinstance(v, dict) else None

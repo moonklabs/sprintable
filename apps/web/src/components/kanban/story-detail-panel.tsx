@@ -23,7 +23,7 @@ import { PrLinkSection } from '@/components/integrations/pr-link-section';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { VALID_TRANSITIONS, COLUMNS } from './types';
+import { COLUMNS } from './types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog, DialogContent, DialogDescription,
@@ -360,6 +360,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     // /stories/{id} PATCH (patchStory) intentionally omits `status`, so it would 200 without
     // persisting — the root of the badge reverting after a "successful" change.
     let ok = false;
+    let violation: unknown = null;
     try {
       const res = await fetch(`/api/stories/${story.id}/status`, {
         method: 'PATCH',
@@ -367,12 +368,18 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         body: JSON.stringify({ status: newStatus }),
       });
       ok = res.ok;
+      if (ok) {
+        const json = await res.json().catch(() => null) as { data?: { violation?: unknown } } | null;
+        violation = json?.data?.violation ?? null;
+      }
     } catch { /* network error — treat as failure, roll back below */ }
     setSavingStatus(false);
     if (ok) {
       onStoryUpdate?.({ ...story, status: newStatus }); // persisted → sync the board
+      // 정공법 A(c1cd484b): 비순차 점프는 BE가 violation(warn)으로 기록·차단X → 비차단 인디케이터(보드와 일관).
+      if (violation) addToast({ type: 'warning', title: t('transitionViolation') });
     } else {
-      setLocalStatus(prev); // BE rejected (e.g. invalid transition) — roll back
+      setLocalStatus(prev); // BE rejected (권한 등) — roll back
     }
   };
 
@@ -708,11 +715,12 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <DropdownMenuContent align="start">
                 {COLUMNS.map((col) => {
                   const isCurrent = col.id === localStatus;
-                  const allowed = isCurrent || (VALID_TRANSITIONS[localStatus] ?? []).includes(col.id);
+                  // 정공법 A(c1cd484b): 전이-순서 disable 제거 — 어느 상태로든 선택 가능(하드블록 X).
+                  // 비정상 점프는 /status 응답 violation → 비차단 토스트로 가시화.
                   return (
                     <DropdownMenuItem
                       key={col.id}
-                      disabled={!allowed}
+                      disabled={savingStatus || isCurrent}
                       onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
                     >
                       <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
