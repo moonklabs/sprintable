@@ -201,11 +201,13 @@ export const FileAttachmentNode = Node.create({
         parseHTML: (el) => (el as HTMLElement).getAttribute('data-file-data') ?? '',
       },
       // ref(assetId) — data-asset-id 라운드트립.
+      // ⚠️ attr-level renderHTML 두지 않는다: 노드 renderHTML 이 HTMLAttributes.assetId 를 읽어
+      // data-asset-id ↔ data-file-data 상호배타로 직렬화하기 때문. attr renderHTML 을 두면 assetId 가
+      // HTMLAttributes 에서 data-asset-id 로 미리 매핑돼 노드 renderHTML 의 assetId 가 undefined →
+      // 항상 data-file-data 로 직렬화되는 버그(파일 asset-ref 유실·dev 끝단 적출).
       assetId: {
         default: null,
         parseHTML: (el) => (el as HTMLElement).getAttribute('data-asset-id'),
-        renderHTML: (attributes: Record<string, unknown>) =>
-          attributes['assetId'] ? { 'data-asset-id': String(attributes['assetId']) } : {},
       },
       // transient(직렬화 X).
       uploadId: { default: null, rendered: false },
