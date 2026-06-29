@@ -12,20 +12,21 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { RELEASE_NOTES, type ReleaseNote } from '@/lib/release-notes';
+import { type ReleaseNote } from '@/lib/release-notes';
 
 interface ReleaseNotesDialogProps {
   open: boolean;
   onClose: () => void;
+  notes: ReleaseNote[];
 }
 
-export function ReleaseNotesDialog({ open, onClose }: ReleaseNotesDialogProps) {
+export function ReleaseNotesDialog({ open, onClose, notes }: ReleaseNotesDialogProps) {
   const [view, setView] = useState<'latest' | 'list'>('latest');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const note: ReleaseNote | undefined = selectedId
-    ? RELEASE_NOTES.find((n) => n.id === selectedId)
-    : RELEASE_NOTES[0];
+    ? notes.find((n) => n.id === selectedId)
+    : notes[0];
 
   const reset = () => {
     setView('latest');
@@ -42,7 +43,25 @@ export function ReleaseNotesDialog({ open, onClose }: ReleaseNotesDialogProps) {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md rounded-xl">
-        {view === 'latest' && note ? (
+        {notes.length === 0 ? (
+          <>
+            <DialogHeader className="space-y-2">
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-info">
+                <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                What&apos;s new
+              </span>
+              <DialogTitle className="text-base">릴리즈 노트</DialogTitle>
+              <DialogDescription className="text-sm text-muted-foreground">
+                아직 새로운 소식이 없어요. 업데이트가 준비되면 여기에서 알려드릴게요.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="hero" size="sm" onClick={() => handleOpenChange(false)}>
+                확인
+              </Button>
+            </DialogFooter>
+          </>
+        ) : view === 'latest' && note ? (
           <>
             <DialogHeader className="space-y-2">
               <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-info">
@@ -101,7 +120,7 @@ export function ReleaseNotesDialog({ open, onClose }: ReleaseNotesDialogProps) {
               <DialogDescription className="sr-only">이전 릴리즈 노트 목록</DialogDescription>
             </DialogHeader>
             <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
-              {RELEASE_NOTES.map((n) => (
+              {notes.map((n) => (
                 <li key={n.id}>
                   <button
                     type="button"
