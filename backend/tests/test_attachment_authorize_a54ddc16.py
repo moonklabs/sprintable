@@ -122,11 +122,45 @@ async def test_authorize_conversation_path_not_scoped_403():
 
 @pytest.mark.anyio
 async def test_authorize_conversation_not_participant_403():
+    """비참가 + 非owner/admin(member) → 403(우회 없음)."""
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(None)])  # conv project, 비참가
     client, app = await _client(session)
     try:
-        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()):
+        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()), \
+             patch("app.routers.conversations._effective_org_role", new_callable=AsyncMock, return_value="member"):
+            r = await _get(client, f"path={CONV_PATH}&conversation_id={CONV_ID}")
+        assert r.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_authorize_conversation_owner_agentonly_bypass_200():
+    """e6f25e53: 비참가 owner/admin + agent-only 대화 → 우회 허용(메시지 LIST 와 일관·선생님 제보)."""
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(None), _scalar(True)])  # conv proj·비참가·belongs
+    client, app = await _client(session)
+    try:
+        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()), \
+             patch("app.routers.conversations._effective_org_role", new_callable=AsyncMock, return_value="owner"), \
+             patch("app.routers.conversations._conversation_has_human_participant", new_callable=AsyncMock, return_value=False):
+            r = await _get(client, f"path={CONV_PATH}&conversation_id={CONV_ID}")
+        assert r.status_code == 200 and r.json()["authorized"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_authorize_conversation_owner_humandm_403():
+    """비참가 owner/admin 라도 휴먼 참가 대화(사적 DM)면 → 403(프라이버시·우회 금지)."""
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_scalar(PROJECT_ID), _scalar(None)])  # conv proj·비참가(belongs 도달 전 403)
+    client, app = await _client(session)
+    try:
+        with patch("app.routers.attachments.resolve_member", new_callable=AsyncMock, return_value=_member()), \
+             patch("app.routers.conversations._effective_org_role", new_callable=AsyncMock, return_value="owner"), \
+             patch("app.routers.conversations._conversation_has_human_participant", new_callable=AsyncMock, return_value=True):
             r = await _get(client, f"path={CONV_PATH}&conversation_id={CONV_ID}")
         assert r.status_code == 403
     finally:
