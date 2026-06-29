@@ -9,6 +9,7 @@ import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { AssetEmbedCard } from '@/components/chat/asset-embed-card';
 import { getFileIcon } from '@/lib/file-icon';
 import { AttachmentImage } from './attachment-image';
 import { AttachmentFile } from './attachment-file';
@@ -80,8 +81,13 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
               </span>
             );
           }
-          const m = href?.match(/^entity:(\w+):([0-9a-f-]+)$/i);
+          // id 는 UUID 만 허용 — `dead`·`----` 등 비-UUID는 매칭 실패→평문 링크로 폴백(엔티티 칩/카드 미렌더).
+          const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
           if (m) {
+            // S6: 자산 토큰은 컴팩트 칩 대신 리치 임베드 카드(썸네일+메타+화살표).
+            if (m[1]!.toLowerCase() === 'asset') {
+              return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} />;
+            }
             return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
           }
           return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
