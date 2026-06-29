@@ -119,7 +119,20 @@ async def authorize_attachment(
             )
         )).scalar_one_or_none()
         if is_participant is None:
-            raise HTTPException(status_code=403, detail="Not a participant of this conversation")
+            # owner/admin 우회 — conversations.py get_conversation/list 와 **동일 SSOT**(e6f25e53·선생님 제보):
+            # agent-only 대화는 org owner/admin 열람 허용(메시지 LIST/get_conversation 은 보이는데 첨부 sign 만
+            # 403 이던 불일치 해소). 휴먼 참가 대화(사적 DM)는 참가자-only 유지(프라이버시). belongs(②)는
+            # 그대로 — 우회는 참가자 요건만 면제·임의 path 허용 아님. story 브랜치(has_project_access)는 무변경.
+            from app.routers.conversations import (
+                _conversation_has_human_participant,
+                _effective_org_role,
+            )
+            role = await _effective_org_role(auth, org_id, db, member)
+            if not (
+                role in ("owner", "admin")
+                and not await _conversation_has_human_participant(conversation_id, db)
+            ):
+                raise HTTPException(status_code=403, detail="Not a participant of this conversation")
         # ② 정확 매치: stored url == bare path(신규) OR == legacy 전체 URL. substring 금지.
         belongs = (await db.execute(
             text(
