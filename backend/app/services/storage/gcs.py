@@ -81,3 +81,19 @@ class GcsStorageProvider(StorageProvider):
         except Exception:
             logger.warning("gcs storage: head 실패 path=%s", object_path, exc_info=True)
             return None
+
+    async def put_object(
+        self, container: str, object_path: str, data: bytes, *, content_type: str | None = None
+    ) -> bool:
+        def _blocking() -> bool:
+            from google.cloud import storage
+
+            blob = storage.Client().bucket(container).blob(object_path)
+            blob.upload_from_string(data, content_type=content_type or "application/octet-stream")
+            return True
+
+        try:
+            return await asyncio.to_thread(_blocking)
+        except Exception:
+            logger.warning("gcs storage: put 실패 path=%s", object_path, exc_info=True)
+            return False

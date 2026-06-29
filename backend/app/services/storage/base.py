@@ -30,3 +30,10 @@ class StorageProvider(abc.ABC):
     async def head_object(self, container: str, object_path: str) -> int | None:
         """객체 실 크기(bytes) — 부재/실패 시 None. capacity/size_bytes **authoritative source**(까심 ①:
         client-제공 size 신뢰 금지·size:0 quota 우회+음수 size_bytes 오염 차단). None=객체 미존재=미등록."""
+
+    @abc.abstractmethod
+    async def put_object(
+        self, container: str, object_path: str, data: bytes, *, content_type: str | None = None
+    ) -> bool:
+        """객체 업로드(S4 Phase2 backfill: doc 본문 base64→GCS 이관). 성공 True·실패 False(best-effort·
+        호출부가 실패 노드 base64 유지). D3(put=FE)의 후속 확장 — BE backfill 만 사용(런타임 업로드는 FE)."""

@@ -87,6 +87,7 @@ async def sync_attachment_assets(
     created_by: uuid.UUID | None = None,
     container: str = DEFAULT_CONTAINER,
     path_scope_id: uuid.UUID | None = None,
+    reconcile: bool = True,
 ) -> dict[str, uuid.UUID]:
     """첨부 목록을 asset registry 로 동기화(upsert) + asset_link 재조정(reconcile).
 
@@ -173,12 +174,15 @@ async def sync_attachment_assets(
         )
 
     # reconcile: 이 source 의 현재 집합에 없는 link 제거(update 의 attachments 교체 의미).
-    stale = delete(AssetLink).where(
-        AssetLink.source_type == source_type,
-        AssetLink.source_id == source_id,
-    )
-    if asset_ids:
-        stale = stale.where(AssetLink.asset_id.not_in(asset_ids))
-    await session.execute(stale)
+    # ⚠️ S4 backfill 은 reconcile=False(additive) — base64-derived 만 넘기는데 reconcile 하면 같은 doc 의
+    # 기존 FE-업로드 asset_link 까지 삭제(clobber)된다. backfill 은 추가만·삭제 금지.
+    if reconcile:
+        stale = delete(AssetLink).where(
+            AssetLink.source_type == source_type,
+            AssetLink.source_id == source_id,
+        )
+        if asset_ids:
+            stale = stale.where(AssetLink.asset_id.not_in(asset_ids))
+        await session.execute(stale)
 
     return url_map
