@@ -10,8 +10,9 @@ import ReactMarkdown from 'react-markdown';
 import DOMPurify from 'dompurify';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import rehypeSanitize from 'rehype-sanitize';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import NextImage from 'next/image';
+import { ImageOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { extractDocHeadings, slugifyHeading } from './doc-heading-utils';
 
@@ -28,6 +29,119 @@ interface DocContentRendererProps {
   publicAttachmentLabel?: string;
   /** publicMode placeholder text for auth-gated images that can't render publicly. */
   publicImageLabel?: string;
+  /** authed-mode label shown when an asset-ref image fails to resolve via the signed route. */
+  assetImageErrorLabel?: string;
+}
+
+// 마크다운 경로 sanitize 스키마 — rehype-sanitize 기본 스키마는 img/div 의 data-* 를 제거하므로
+// asset-ref(data-asset-id) + 파일첨부(data-type)가 리졸버까지 도달하지 못한다.
+// img(asset-ref 이미지) + div(fileAttachment·data-type/asset-ref/legacy data-file-data) 양쪽 허용 추가.
+const docMarkdownSanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    img: [
+      ...(defaultSchema.attributes?.['img'] ?? []),
+      'alt',
+      'width',
+      'dataAssetId',
+      'dataFilename',
+      'dataSize',
+      'dataMimeType',
+    ],
+    div: [
+      ...(defaultSchema.attributes?.['div'] ?? []),
+      'dataType',
+      'dataAssetId',
+      'dataFilename',
+      'dataSize',
+      'dataMimeType',
+      'dataFileData',
+    ],
+  },
+};
+
+// asset-ref 식별 — react-markdown 은 hast node(properties.dataAssetId) + data-* prop 양쪽을 줄 수 있어
+// 둘 다 확인한다(스키마 통과분만 도달).
+function extractAssetId(props: unknown): string | null {
+  const p = props as {
+    node?: { properties?: Record<string, unknown> };
+    'data-asset-id'?: unknown;
+  };
+  const fromNode = p.node?.properties?.['dataAssetId'];
+  const fromProp = p['data-asset-id'];
+  const raw = typeof fromNode === 'string' ? fromNode : typeof fromProp === 'string' ? fromProp : '';
+  return raw || null;
+}
+
+/**
+ * 읽기 전용 뷰어용 asset-ref 이미지(마크다운 경로) — 서명 라우트(`/api/attachments/sign`)로
+ * 단기 서명 URL을 받아 표시한다(chat AttachmentImage 미러). public 모드에서는 절대 마운트하지
+ * 않는다(서명 fetch 401-leak 경계). 상태: loading(skeleton) → ok(img) → error(placeholder).
+ */
+function DocAssetImage({ assetId, alt, errorLabel }: { assetId: string; alt: string; errorLabel: string }) {
+  const [state, setState] = useState<'loading' | 'ok' | 'error'>('loading');
+  const [url, setUrl] = useState<string | null>(null);
+  const retriedRef = useRef(false);
+
+  const fetchSigned = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/attachments/sign?asset_id=${encodeURIComponent(assetId)}`);
+      if (!res.ok) { setState('error'); return; }
+      const json = (await res.json().catch(() => null)) as { data?: { url?: string } } | null;
+      const signed = json?.data?.url;
+      if (!signed) { setState('error'); return; }
+      setUrl(signed);
+      setState('ok');
+    } catch {
+      setState('error');
+    }
+  }, [assetId]);
+
+  useEffect(() => {
+    retriedRef.current = false;
+    // 외부 시스템(서명 라우트) 비동기 fetch — setState 는 모두 await 이후라 동기 cascade 아님.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchSigned();
+  }, [fetchSigned]);
+
+  // 만료된 서명 URL 로드 실패 → 1회 투명 재fetch, 재실패면 error.
+  const handleImgError = useCallback(() => {
+    if (!retriedRef.current) {
+      retriedRef.current = true;
+      void fetchSigned();
+    } else {
+      setState('error');
+    }
+  }, [fetchSigned]);
+
+  if (state === 'error') {
+    return (
+      <span className="not-prose my-2 flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+        <ImageOff className="size-3.5 flex-shrink-0" aria-hidden />
+        <span className="truncate">{errorLabel}</span>
+      </span>
+    );
+  }
+  if (state === 'loading' || !url) {
+    return (
+      <span
+        className="my-2 block aspect-[4/3] w-full max-w-sm animate-pulse rounded-xl border border-border bg-muted"
+        aria-busy="true"
+        aria-label={alt}
+        data-doc-asset-loading="true"
+      />
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt={alt}
+      onError={handleImgError}
+      className="my-2 max-h-[32rem] w-full rounded-xl border border-border object-contain"
+    />
+  );
 }
 
 export function DocContentRenderer({
@@ -40,6 +154,7 @@ export function DocContentRenderer({
   publicMode = false,
   publicAttachmentLabel = 'Attachment unavailable in public view',
   publicImageLabel = 'Image unavailable in public view',
+  assetImageErrorLabel = 'This image could not be loaded',
 }: DocContentRendererProps) {
   const internalRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractDocHeadings(content, contentFormat), [content, contentFormat]);
@@ -204,6 +319,7 @@ export function DocContentRenderer({
     const fileCleanup = fileBlocks.map((block) => {
       const filename = block.getAttribute('data-filename') ?? 'file';
       const data = block.getAttribute('data-file-data') ?? '';
+      const refAssetId = block.getAttribute('data-asset-id') ?? '';
       const size = Number(block.getAttribute('data-size') ?? 0);
       const sizeLabel = size < 1024 * 1024
         ? `${(size / 1024).toFixed(1)} KB`
@@ -234,13 +350,27 @@ export function DocContentRenderer({
         </div>`;
 
       const handleClick = () => {
-        if (!data) return;
-        const a = document.createElement('a');
-        a.href = data;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        // legacy(base64 data-url) — blob href 직접 다운로드(현 동작 유지).
+        if (data) {
+          const a = document.createElement('a');
+          a.href = data;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          return;
+        }
+        // ref(assetId) — 서명 라우트 경유 새 탭(chat AttachmentFile 미러).
+        if (!refAssetId) return;
+        void (async () => {
+          try {
+            const res = await fetch(`/api/attachments/sign?asset_id=${encodeURIComponent(refAssetId)}&disposition=attachment`);
+            if (!res.ok) return;
+            const json = (await res.json().catch(() => null)) as { data?: { url?: string } } | null;
+            const url = json?.data?.url;
+            if (url) window.open(url, '_blank', 'noopener,noreferrer');
+          } catch { /* 서명 실패 — 무시(no leak). */ }
+        })();
       };
       block.addEventListener('click', handleClick);
       return () => block.removeEventListener('click', handleClick);
@@ -255,6 +385,54 @@ export function DocContentRenderer({
         placeholder.className = 'flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground';
         placeholder.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0"><path d="m2 2 20 20"/><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"/><line x1="13.5" y1="13.5" x2="6" y2="21"/><line x1="18" y1="12" x2="21" y2="15"/><path d="M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.05-.22 1.41-.59"/><path d="M21 15V5a2 2 0 0 0-2-2H9"/></svg><span class="truncate">${escapeHtmlText(alt || publicImageLabel)}</span>`;
         img.replaceWith(placeholder);
+      });
+    }
+
+    // Authed viewer: resolve asset-ref images (img[data-asset-id], no src) via the signed
+    // route. NEVER runs in public mode (the publicMode branch above already replaced every
+    // <img> with an inert placeholder — 401-leak boundary).
+    const assetImgCleanup: Array<() => void> = [];
+    if (!publicMode) {
+      Array.from(root.querySelectorAll<HTMLImageElement>('img[data-asset-id]')).forEach((img) => {
+        const assetId = img.getAttribute('data-asset-id');
+        // legacy/이미 해석된 이미지(src 보유)는 건너뜀(regression 0).
+        if (!assetId || (img.getAttribute('src') ?? '').length > 0) return;
+
+        let cancelled = false;
+        const altText = img.getAttribute('alt')?.trim() ?? '';
+        img.style.opacity = '0.4';
+        img.setAttribute('aria-busy', 'true');
+
+        const showError = () => {
+          const placeholder = document.createElement('div');
+          placeholder.className = 'flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground';
+          placeholder.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0"><path d="m2 2 20 20"/><path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"/><line x1="13.5" y1="13.5" x2="6" y2="21"/><line x1="18" y1="12" x2="21" y2="15"/><path d="M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.05-.22 1.41-.59"/><path d="M21 15V5a2 2 0 0 0-2-2H9"/></svg><span class="truncate">${escapeHtmlText(altText || assetImageErrorLabel)}</span>`;
+          img.replaceWith(placeholder);
+        };
+        const onImgError = () => { if (!cancelled) showError(); };
+
+        void (async () => {
+          try {
+            const res = await fetch(`/api/attachments/sign?asset_id=${encodeURIComponent(assetId)}`);
+            if (cancelled) return;
+            if (!res.ok) { showError(); return; }
+            const json = (await res.json().catch(() => null)) as { data?: { url?: string } } | null;
+            const url = json?.data?.url;
+            if (cancelled) return;
+            if (!url) { showError(); return; }
+            img.addEventListener('error', onImgError);
+            img.src = url;
+            img.style.opacity = '';
+            img.removeAttribute('aria-busy');
+          } catch {
+            if (!cancelled) showError();
+          }
+        })();
+
+        assetImgCleanup.push(() => {
+          cancelled = true;
+          img.removeEventListener('error', onImgError);
+        });
       });
     }
 
@@ -275,9 +453,10 @@ export function DocContentRenderer({
       cleanup.forEach((dispose) => dispose());
       wikiCleanup.forEach((dispose) => dispose());
       fileCleanup.forEach((dispose) => dispose());
+      assetImgCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
     };
-  }, [codeCopiedLabel, codeCopyLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel]);
+  }, [codeCopiedLabel, codeCopyLabel, content, contentFormat, publicMode, publicAttachmentLabel, publicImageLabel, assetImageErrorLabel]);
 
   const decoratedHtml = useMemo(() => {
     const sanitized = sanitizeDocHtml(content);
@@ -324,7 +503,7 @@ export function DocContentRenderer({
     <div ref={setContentRef} className={rootClassName}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeRaw, rehypeSanitize]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, docMarkdownSanitizeSchema]]}
         components={{
           h1: ({ children }) => {
             const heading = headings[headingIndex++];
@@ -339,7 +518,18 @@ export function DocContentRenderer({
             return <h3 id={heading?.id}>{children}</h3>;
           },
           blockquote: ({ children }) => <blockquote>{children}</blockquote>,
-          img: ({ src, alt }) => <NextImage src={typeof src === 'string' ? src : ''} alt={alt ?? ''} width={800} height={600} style={{ maxWidth: '100%', height: 'auto' }} unoptimized />,
+          img: (props) => {
+            const { src, alt } = props as { src?: unknown; alt?: string };
+            const hasSrc = typeof src === 'string' && src.length > 0;
+            // asset-ref(data-asset-id·src 없음) — authed 에서만 서명 해석. public 모드는 절대
+            // fetch 하지 않고(401-leak 경계) NextImage(src="")로 두어 위 DOM effect 의 inert
+            // placeholder 치환에 맡긴다.
+            const assetId = !publicMode ? extractAssetId(props) : null;
+            if (assetId && !hasSrc) {
+              return <DocAssetImage assetId={assetId} alt={alt ?? ''} errorLabel={assetImageErrorLabel} />;
+            }
+            return <NextImage src={hasSrc ? (src as string) : ''} alt={alt ?? ''} width={800} height={600} style={{ maxWidth: '100%', height: 'auto' }} unoptimized />;
+          },
           table: ({ children }) => (
             <div className="not-prose overflow-x-auto rounded-xl border border-border">
               <table>{children}</table>

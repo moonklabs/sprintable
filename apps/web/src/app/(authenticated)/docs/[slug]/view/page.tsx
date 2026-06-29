@@ -88,6 +88,7 @@ export default function DocViewPage() {
             contentRef={contentRef}
             codeCopyLabel={t('codeCopy')}
             codeCopiedLabel={t('codeCopied')}
+            assetImageErrorLabel={t('attachImageUnavailable')}
           />
         </div>
       </div>

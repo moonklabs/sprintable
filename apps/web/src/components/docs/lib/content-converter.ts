@@ -1,9 +1,33 @@
 import TurndownService from 'turndown';
 
+// fileAttachment 노드는 내용 없는 <div>(non-void) → turndown 의 blank 처리에 의해 drop 된다
+// (이미지는 <img> 가 void 라 살아남음). blankReplacement 에서 fileAttachment 만 특별 처리해 보존.
+function serializeFileAttachment(el: HTMLElement): string {
+  const safeAttr = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const filename = safeAttr(el.getAttribute('data-filename') ?? '');
+  const size = safeAttr(el.getAttribute('data-size') ?? '0');
+  const mimeType = safeAttr(el.getAttribute('data-mime-type') ?? '');
+  const assetId = el.getAttribute('data-asset-id');
+  // S4: ref(assetId) → data-asset-id(data-file-data 부재) · legacy → data-file-data. 상호배타(renderHTML 정합).
+  const tail = assetId
+    ? ` data-asset-id="${safeAttr(assetId)}"`
+    : ` data-file-data="${el.getAttribute('data-file-data') ?? ''}"`;
+  return `\n<div data-type="fileAttachment" data-filename="${filename}" data-size="${size}" data-mime-type="${mimeType}"${tail}></div>\n`;
+}
+
 const turndown = new TurndownService({
   headingStyle: 'atx',
   codeBlockStyle: 'fenced',
   bulletListMarker: '-',
+  // 내용-없는 fileAttachment <div> 가 blank 로 drop 되지 않도록 raw HTML 로 보존(legacy·ref 공통).
+  blankReplacement: (_content: string, node: unknown) => {
+    const el = node as HTMLElement & { isBlock?: boolean };
+    if (el && typeof el.getAttribute === 'function' && el.getAttribute('data-type') === 'fileAttachment') {
+      return serializeFileAttachment(el);
+    }
+    return el?.isBlock ? '\n\n' : '';
+  },
 });
 
 // Disable Turndown's built-in text escape function.
@@ -143,15 +167,21 @@ turndown.addRule('fileAttachment', {
   filter: (node) =>
     node.nodeName === 'DIV' &&
     (node as HTMLElement).getAttribute('data-type') === 'fileAttachment',
+  replacement: (_content, node) => serializeFileAttachment(node as HTMLElement),
+});
+
+// S4: asset-ref 이미지(src 없음·data-asset-id) → raw HTML 직렬화(마크다운 ![](.) 로는 ref/메타 손실).
+// imageWithWidth 보다 뒤에 등록 → data-asset-id 가진 img 에 우선(turndown 7: 최신 규칙 우선).
+turndown.addRule('imageWithAsset', {
+  filter: (node) => node.nodeName === 'IMG' && !!(node as HTMLElement).getAttribute('data-asset-id'),
   replacement: (_content, node) => {
     const el = node as HTMLElement;
-    const safeAttr = (s: string) =>
-      s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const filename = safeAttr(el.getAttribute('data-filename') ?? '');
-    const size = safeAttr(el.getAttribute('data-size') ?? '0');
-    const mimeType = safeAttr(el.getAttribute('data-mime-type') ?? '');
-    const data = el.getAttribute('data-file-data') ?? '';
-    return `\n<div data-type="fileAttachment" data-filename="${filename}" data-size="${size}" data-mime-type="${mimeType}" data-file-data="${data}"></div>\n`;
+    const a = (name: string) => {
+      const v = el.getAttribute(name);
+      return v == null ? '' : ` ${name}="${v.replace(/"/g, '&quot;')}"`;
+    };
+    const width = el.style.width ? ` style="width:${el.style.width};max-width:100%;height:auto"` : '';
+    return `\n<img${a('data-asset-id')}${a('data-filename')}${a('data-size')}${a('data-mime-type')}${a('alt')}${width}>\n`;
   },
 });
 
@@ -375,6 +405,12 @@ export function markdownToHtml(rawMd: string): string {
   });
   // Images with width style — serialized as raw HTML by imageWithWidth Turndown rule
   html = html.replace(/^<img\s[^>]*style="width:[^"]*"[^>]*>$/gm, (m) => {
+    const idx = atomPlaceholders.length;
+    atomPlaceholders.push(m);
+    return `\x00ATOM${idx}\x00`;
+  });
+  // S4: asset-ref images (no src, data-asset-id) — serialized as raw HTML by imageWithAsset rule
+  html = html.replace(/^<img\s[^>]*data-asset-id="[^"]*"[^>]*>$/gm, (m) => {
     const idx = atomPlaceholders.length;
     atomPlaceholders.push(m);
     return `\x00ATOM${idx}\x00`;
