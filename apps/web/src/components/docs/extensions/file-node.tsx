@@ -181,11 +181,25 @@ export const FileAttachmentNode = Node.create({
 
   addAttributes() {
     return {
-      filename: { default: '' },
-      size: { default: 0 },
-      mimeType: { default: '' },
+      // 직접 HTML 파싱(save→load 라운드트립) 대칭 — parseHTML 부재 시 renderHTML 의
+      // data-* 가 기본값으로 리셋되어 메타/legacy base64 가 유실된다.
+      filename: {
+        default: '',
+        parseHTML: (el) => (el as HTMLElement).getAttribute('data-filename') ?? '',
+      },
+      size: {
+        default: 0,
+        parseHTML: (el) => Number((el as HTMLElement).getAttribute('data-size') ?? 0) || 0,
+      },
+      mimeType: {
+        default: '',
+        parseHTML: (el) => (el as HTMLElement).getAttribute('data-mime-type') ?? '',
+      },
       // legacy: base64 data-url 보관 / ref: 빈 문자열.
-      data: { default: '' },
+      data: {
+        default: '',
+        parseHTML: (el) => (el as HTMLElement).getAttribute('data-file-data') ?? '',
+      },
       // ref(assetId) — data-asset-id 라운드트립.
       assetId: {
         default: null,
