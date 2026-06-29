@@ -3,7 +3,7 @@
 engine은 import-time 단일 생성이라 flag별 재생성이 어렵다 → 분기 로직을
 database._build_engine_kwargs()로 추출해 settings 토글 → 인자 검증으로 커버한다.
 
-- off(기본): pool_size=5/overflow=3 + connect_args 비움(statement_cache_size 없음)
+- off(기본): pool_size=3/overflow=1(rollout-safe·앱최소 4·ee7794eb) + connect_args 비움(statement_cache_size 없음)
 - on:        pool_size=2/overflow=1 + connect_args={"statement_cache_size": 0}
 """
 from __future__ import annotations
@@ -18,8 +18,8 @@ def test_settings_defaults_flag_off():
     assert s.db_pgbouncer is False
     assert s.db_pgbouncer_pool_size == 2
     assert s.db_pgbouncer_max_overflow == 1
-    assert s.db_pool_size == 5
-    assert s.db_max_overflow == 3
+    assert s.db_pool_size == 3  # ee7794eb: rollout-safe·앱최소(≥4=3+1) default
+    assert s.db_max_overflow == 1
 
 
 def test_settings_flag_on_via_env(monkeypatch):

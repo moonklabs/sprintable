@@ -20,9 +20,10 @@ _logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     from app.core.database import engine
     from app.routers.verdict_capture import warn_if_webhook_secret_misconfigured
-    from app.services.pg_pubsub import listen_loop
+    from app.services.pg_pubsub import check_listen_config, listen_loop
 
     warn_if_webhook_secret_misconfigured()  # Bot-M.2 P3: 웹훅 secret misconfig 를 트래픽 前 경고.
+    check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
     task = asyncio.create_task(listen_loop())
     # E-L2 S5: 휴리스틱 트리거 워커는 default-off — 명시 활성화 시에만 task 생성(AC①).
     l2_task = None
@@ -56,7 +57,7 @@ async def lifespan(app: FastAPI):
             await engine.dispose()
 
 
-from app.routers import account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, gate_config, gate_metrics, attachments, audit_logs, auth, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, exclusion, file_locks, gates, github_integration, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, mcp, me, meetings, members, merge_gate, mockups, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, webhooks, workflow_executions, workflow_line_config, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, gate_config, gate_metrics, attachments, audit_logs, auth, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, exclusion, file_locks, gates, github_integration, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, mcp, me, meetings, members, merge_gate, mockups, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, release_notes, retros, rewards, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, webhooks, workflow_executions, workflow_line_config, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -147,6 +148,7 @@ app.include_router(events.router)
 app.include_router(agent_gateway.router)
 app.include_router(dispatch.router)
 app.include_router(assets.router)
+app.include_router(release_notes.router)
 app.include_router(conversations.router)
 app.include_router(presence.router)
 app.include_router(sprints.router)

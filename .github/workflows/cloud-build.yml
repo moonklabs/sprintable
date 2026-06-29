@@ -46,16 +46,20 @@ jobs:
             echo "target=prod" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
             echo "backend_min_instances=1" >> "$GITHUB_OUTPUT"
-            # maxScale 10: 429 포화(2026-06-09)·6은 sat 유발. #1330 가속→연결 회전→10×8=80<DB 100 viable. PgBouncer 後 30+.
-            echo "backend_max_instances=10" >> "$GITHUB_OUTPUT"
+            # ⚠️ maxScale 5 (ee7794eb ③·선생님 right-size): prod g1-small max_conn 100. per-instance 5(pool
+            # 3/1=4 + pg_pubsub raw 1). rollout(old+new 2×): 2×5×5+20(admin)=70 ≤ 100 ✓ (여유 30).
+            # (PgBouncer 풀러 불필요 — Cloud Run raw TCP 미지원으로 중앙 PgBouncer 불가·관리형 풀링은 Enterprise Plus
+            # 전용. maxScale 10 은 2×10×5+20=120>100 이라 폐기. 향후 트래픽↑ 시 tier업 동반해야 maxScale 상향.)
+            echo "backend_max_instances=5" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=G-RYHFE7XM3X" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
             echo "backend_min_instances=1" >> "$GITHUB_OUTPUT"
-            # maxScale 10: 429 포화(2026-06-09)·6은 sat 유발. #1330 statement_cache 가속→연결 회전→
-            # 10×8=80<DB 100 viable. prod(L49)·cloudbuild.yaml default와 합치. PgBouncer 랜딩 後 30+.
-            echo "backend_max_instances=10" >> "$GITHUB_OUTPUT"
+            # ⚠️ maxScale 1 (ee7794eb·durable): dev Cloud SQL f1-micro max_conn~25. rollout(old+new 2×)·
+            # per-instance = pool(3/1=4·#1773) + pg_pubsub raw 1 = 5. 2×1×5+5(admin)=15 ≤ 25 ✓.
+            # (이전 10 = rollout 2×10×5+5=105≫25 → 매 배포 TooManyConnections. steady 80<100 주석은 rollout 누락이었음.)
+            echo "backend_max_instances=1" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=" >> "$GITHUB_OUTPUT"
           fi
 
