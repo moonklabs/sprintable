@@ -632,3 +632,80 @@ async def transition_doc_endpoint(
         raise HTTPException(
             status_code=_codes.get(e.code, 400), detail={"code": e.code, "message": e.message}
         )
+
+
+class DocAssetRegisterRequest(BaseModel):
+    url: str           # FE putObject 반환(GCS url 또는 canonical bare path)
+    filename: str
+    size: int
+    mime: str | None = None
+
+
+class DocAssetRegisterResponse(BaseModel):
+    asset_id: uuid.UUID
+    filename: str
+    size: int
+    mime: str | None = None
+
+
+@router.post("/{doc_id}/assets", response_model=DocAssetRegisterResponse, status_code=201)
+async def register_doc_asset(
+    doc_id: uuid.UUID,
+    body: DocAssetRegisterRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> DocAssetRegisterResponse:
+    """POST /api/v2/docs/{doc_id}/assets — S4: FE-putObject 後 doc asset register(optimistic).
+
+    FE 가 압축→putObject(`org/{org}/project/{proj}/doc/{doc_id}/...`) 後 이 endpoint 로 register.
+    ⚠️ object_path 를 path_in_source_scope(doc 분기)로 검증 = **IDOR 핵심**(FE 가 임의/타org/타doc path
+    register 못 함). capacity 게이트①(ee seam·OSS no-op·doc 우회 구멍 차단)·asset + asset_link
+    (source_type=doc·source_id=doc_id) 생성. signed read 는 S3 authorize asset_id 분기 재사용(신규 0).
+    """
+    from app.core.config import settings
+    from app.models.doc import Doc
+    from app.services.asset_registry import sync_attachment_assets
+    from app.services.member_resolver import resolve_member
+    from app.services.project_auth import has_project_access
+
+    doc = (await session.execute(
+        select(Doc).where(Doc.id == doc_id, Doc.org_id == org_id, Doc.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    if not await has_project_access(session, uuid.UUID(auth.user_id), doc.project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
+    att = {"url": body.url, "name": body.filename, "content_type": body.mime, "size": body.size}
+    # capacity 게이트①(서버사이드·ee seam·OSS no-op) — doc 업로드도 commit 前 enforce(우회 구멍 차단·까심①).
+    if settings.is_ee_enabled:
+        from ee.plan_limits import check_storage_capacity  # type: ignore[import]
+        await check_storage_capacity(session, org_id, [att])
+
+    created_by: uuid.UUID | None = None
+    try:
+        created_by = (await resolve_member(auth, org_id, session)).id
+    except Exception:  # noqa: BLE001 — created_by 는 비필수(asset.created_by nullable).
+        created_by = None
+
+    url_map = await sync_attachment_assets(
+        session, org_id=org_id, project_id=doc.project_id, source_type="doc",
+        source_id=doc_id, attachments=[att], created_by=created_by,
+    )
+    asset_id = url_map.get(body.url)
+    if asset_id is None:
+        # 미등록 사유: ① path_in_source_scope(doc) 거부=이 doc namespace 밖 path(IDOR)/외부URL,
+        # ② head_object None=GCS에 객체 부재(FE putObject 미완·optimistic FE는 error state 처리).
+        raise HTTPException(
+            status_code=400, detail="object not registered: out-of-scope path or not uploaded"
+        )
+    # size 는 authoritative(sync 가 head_object 로 저장한 실값·client size 무시·까심①).
+    from app.models.asset import Asset
+    real_size = int((await session.execute(
+        select(Asset.size_bytes).where(Asset.id == asset_id)
+    )).scalar_one())
+    await session.commit()
+    return DocAssetRegisterResponse(
+        asset_id=asset_id, filename=body.filename, size=real_size, mime=body.mime
+    )

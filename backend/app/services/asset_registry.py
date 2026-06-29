@@ -59,13 +59,14 @@ def path_in_source_scope(
     차단). 두 namespace 인식(S7·AC3 무회귀)·**org/project/source 전 tenancy segment exact 바인딩**:
     - legacy: `chat/<project>/<conversation>/<file>` · `story/<project>/<story>/<file>`
     - S7 신: `org/<org>/project/<project>/chat/<conversation>/<file>` · `.../story/<story>/<file>`
-    신 namespace 의 org segment 도 반드시 일치(미검증 시 cross-org IDOR·CRITICAL). manual/doc 은 경로
-    제약 없음(신뢰 등록·doc=S4). segment 단위 정확 비교(_prefix_segments_match)로 변형/우회 견고.
+    신 namespace 의 org segment 도 반드시 일치(미검증 시 cross-org IDOR·CRITICAL). **doc(S4)**도 동일
+    스코프 강제(`org/<org>/project/<project>/doc/<doc_id>/`·register endpoint IDOR 핵심·FE 임의/타org path
+    register 차단). manual 만 경로 제약 없음(신뢰 등록). segment 단위 정확 비교(_prefix_segments_match)로 견고.
     """
     pid, sid = str(project_id), str(source_id)
-    kind = {"conversation_message": "chat", "story": "story"}.get(source_type)
+    kind = {"conversation_message": "chat", "story": "story", "doc": "doc"}.get(source_type)
     if kind is None:
-        return True  # manual/doc 등 경로 제약 없는 source
+        return True  # manual 등 경로 제약 없는 source(신뢰 등록)
     # legacy: <kind>/<project>/<source>/<file>
     if _prefix_segments_match(object_path, [kind, pid, sid]):
         return True
@@ -117,10 +118,14 @@ async def sync_attachment_assets(
             continue  # 이 source 귀속 경로 아님 — registry 오염/IDOR 차단(까심)
         name = (att.get("name") or "").strip() or obj.rsplit("/", 1)[-1] or "file"
         content_type = (att.get("content_type") or "").strip() or None
-        try:
-            size_bytes = int(att.get("size") or 0)
-        except (TypeError, ValueError):
-            size_bytes = 0
+        # 까심 ①: size 는 client-trust 금지 — 실 object size(head_object) **authoritative**(size:0 quota
+        # 우회·음수 size_bytes 오염 차단). 객체 부재(head None)=FE putObject 안 함/오염 → 등록 안 함(skip·
+        # phantom asset 0). 전 경로(doc register·chat send_message·story) 동시 적용=client-trust 완전 제거.
+        from app.services.storage import get_storage_provider
+
+        size_bytes = await get_storage_provider().head_object(container, obj)
+        if size_bytes is None:
+            continue
 
         # asset upsert — 멱등. project_id null/non-null 별 partial unique 로 ON CONFLICT 분기(까심 R3).
         base_ins = pg_insert(Asset).values(

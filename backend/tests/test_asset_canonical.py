@@ -121,3 +121,17 @@ async def test_local_provider_delete_object(tmp_path, monkeypatch):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+def test_scope_doc_namespace_s4():
+    """S4: doc 분기 — org/project/doc exact-prefix 강제(이전 unconstrained). cross-org/project/doc 거부·manual 무제약."""
+    doc = _uuid.uuid4()
+    assert path_in_source_scope(f"org/{_ORG}/project/{_PROJ}/doc/{doc}/u.png", "doc", _PROJ, doc, _ORG)
+    # cross-org / cross-doc / cross-project → 거부
+    assert not path_in_source_scope(f"org/{_uuid.uuid4()}/project/{_PROJ}/doc/{doc}/u.png", "doc", _PROJ, doc, _ORG)
+    assert not path_in_source_scope(f"org/{_ORG}/project/{_PROJ}/doc/{_uuid.uuid4()}/u.png", "doc", _PROJ, doc, _ORG)
+    assert not path_in_source_scope(f"org/{_ORG}/project/{_uuid.uuid4()}/doc/{doc}/u.png", "doc", _PROJ, doc, _ORG)
+    # 빈 trailing / 중간삽입 거부
+    assert not path_in_source_scope(f"org/{_ORG}/project/{_PROJ}/doc/{doc}/", "doc", _PROJ, doc, _ORG)
+    # manual 은 여전히 무제약(신뢰 등록)
+    assert path_in_source_scope("anything/x.png", "manual", _PROJ, _uuid.uuid4(), _ORG)

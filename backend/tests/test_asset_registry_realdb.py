@@ -41,6 +41,32 @@ def anyio_backend():
     return "asyncio"
 
 
+# 까심①: sync/capacity 가 size 를 head_object(실 object size)로 가져온다(client-trust 제거). realdb 테스트는
+# 실 GCS 객체가 없으므로(합성 path) provider.head_object 를 mock — 기본 size + per-path override(_HEAD_SIZES).
+_HEAD_SIZE_DEFAULT = 10
+_HEAD_SIZES: dict[str, int] = {}
+
+
+@pytest.fixture(autouse=True)
+def _mock_storage_head(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    import app.services.storage as _storage_mod
+
+    _HEAD_SIZES.clear()
+
+    async def _head(container, object_path):
+        return _HEAD_SIZES.get(object_path, _HEAD_SIZE_DEFAULT)
+
+    prov = MagicMock()
+    prov.head_object = AsyncMock(side_effect=_head)
+    # sync_attachment_assets·check_storage_capacity 는 call-time `from app.services.storage import
+    # get_storage_provider` → source 패치로 둘 다 mock 픽업. (cron grace 테스트는 cron.get_storage_provider
+    # 자체 패치라 독립.)
+    monkeypatch.setattr(_storage_mod, "get_storage_provider", lambda: prov)
+    yield
+
+
 async def _reset_and_seed(session):
     # 멱등 클린업 후 org/projects/user/grant 시드. assets/asset_links 는 본 org 범위만 정리.
     for sql in [
@@ -746,7 +772,9 @@ async def test_check_storage_capacity_enforce():
             await s.commit()
 
             def _att_sized(sz, path="cap/new.png"):
-                return {"url": f"org/{ORG}/project/{PROJ_A}/chat/{uuid.uuid4()}/{path}", "name": "n", "content_type": "image/png", "size": sz}
+                url = f"org/{ORG}/project/{PROJ_A}/chat/{uuid.uuid4()}/{path}"
+                _HEAD_SIZES[url] = sz  # head_object authoritative(까심①)·client size 무시 증명용 att size=0
+                return {"url": url, "name": "n", "content_type": "image/png", "size": 0}
 
             # 총량 초과: used(5GB-100)+200 > 5GB → 402
             try:
@@ -945,5 +973,75 @@ async def test_storage_warn_cron_email_dedup_rearm(monkeypatch):
             await cron.storage_usage_warn(MagicMock(), session=s)
             m2 = (await s.execute(text(f"SELECT storage_warn_notified_at FROM org_subscriptions WHERE org_id='{ORG}'"))).scalar_one()
             assert m2 is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_register_doc_asset_s4():
+    """S4: doc asset register endpoint — valid=asset+asset_link(doc) 생성·out-of-scope path=400(IDOR)·
+    no project access=403·doc 없음=404."""
+    from unittest.mock import MagicMock
+
+    from fastapi import HTTPException
+
+    from app.models.doc import Doc
+    from app.routers.docs import DocAssetRegisterRequest, register_doc_asset
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            doc = Doc(org_id=ORG, project_id=PROJ_A, title="t", slug=f"s4-{uuid.uuid4()}")
+            s.add(doc)
+            doc_b = Doc(org_id=ORG, project_id=PROJ_B, title="tb", slug=f"s4b-{uuid.uuid4()}")  # USER 미접근
+            s.add(doc_b)
+            await s.flush()
+            doc_id, doc_b_id = doc.id, doc_b.id
+            await s.commit()
+
+            auth = MagicMock()
+            auth.user_id = str(USER)
+
+            # ① valid register → asset + asset_link(source_type=doc). size=head_object authoritative(까심①):
+            #    client size=999999(거짓)여도 무시되고 head 실값(777) 저장/반환.
+            good = f"org/{ORG}/project/{PROJ_A}/doc/{doc_id}/u-a.png"
+            _HEAD_SIZES[good] = 777
+            resp = await register_doc_asset(
+                doc_id, DocAssetRegisterRequest(url=good, filename="a.png", size=999999, mime="image/png"),
+                session=s, auth=auth, org_id=ORG,
+            )
+            assert resp.filename == "a.png" and resp.size == 777  # client 999999 무시·head 777
+            link_n = (await s.execute(text(
+                f"SELECT count(*) FROM asset_links WHERE source_type='doc' AND source_id='{doc_id}'"
+            ))).scalar_one()
+            size_row = (await s.execute(text(f"SELECT size_bytes FROM assets WHERE id='{resp.asset_id}'"))).scalar_one()
+            assert link_n == 1 and int(size_row) == 777  # DB 도 authoritative
+
+            # ② out-of-scope path(타 doc namespace) → 400 IDOR
+            bad = f"org/{ORG}/project/{PROJ_A}/doc/{uuid.uuid4()}/evil.png"
+            try:
+                await register_doc_asset(doc_id, DocAssetRegisterRequest(url=bad, filename="e", size=1), session=s, auth=auth, org_id=ORG)
+                assert False, "expected 400"
+            except HTTPException as e:
+                assert e.status_code == 400
+
+            # ③ no project access(PROJ_B doc) → 403
+            try:
+                await register_doc_asset(
+                    doc_b_id, DocAssetRegisterRequest(url=f"org/{ORG}/project/{PROJ_B}/doc/{doc_b_id}/x.png", filename="x", size=1),
+                    session=s, auth=auth, org_id=ORG,
+                )
+                assert False, "expected 403"
+            except HTTPException as e:
+                assert e.status_code == 403
+
+            # ④ doc 없음 → 404
+            try:
+                await register_doc_asset(uuid.uuid4(), DocAssetRegisterRequest(url="org/x/y/doc/z/f.png", filename="x", size=1), session=s, auth=auth, org_id=ORG)
+                assert False, "expected 404"
+            except HTTPException as e:
+                assert e.status_code == 404
     finally:
         await engine.dispose()

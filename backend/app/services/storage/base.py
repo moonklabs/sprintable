@@ -25,3 +25,8 @@ class StorageProvider(abc.ABC):
     @abc.abstractmethod
     async def delete_object(self, container: str, object_path: str) -> bool:
         """객체 hard-delete(S8 grace cron). 이미 없으면 True(멱등)·실패 시 False(best-effort·호출부 계속)."""
+
+    @abc.abstractmethod
+    async def head_object(self, container: str, object_path: str) -> int | None:
+        """객체 실 크기(bytes) — 부재/실패 시 None. capacity/size_bytes **authoritative source**(까심 ①:
+        client-제공 size 신뢰 금지·size:0 quota 우회+음수 size_bytes 오염 차단). None=객체 미존재=미등록."""
