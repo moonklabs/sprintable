@@ -49,6 +49,8 @@ async def test_list_returns_seeded_newest_first():
             v15 = next(r for r in out if r.id == "2026-06-v1-5")
             assert v15.version == "v1.5" and v15.publishedAt == "2026년 6월"  # display_period→publishedAt
             assert v15.items and v15.items[0].text  # JSONB items 매핑
+            # 0143(③ B): v1.5 에 스토리지 용량경고 항목 append(idempotent).
+            assert any("저장공간" in i.text for i in v15.items), "v1.5 용량경고 항목 누락(0143)"
     finally:
         await engine.dispose()
 

@@ -51,6 +51,11 @@ jobs:
             # (PgBouncer 가 Cloud SQL 연결 decouple → app pool×instance 무관). ③ 前 prod 승격 금지(승격 rollout 자체가 초과).
             echo "backend_max_instances=10" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=G-RYHFE7XM3X" >> "$GITHUB_OUTPUT"
+            # ③ 중앙 PgBouncer(ee7794eb): prod on. DATABASE_URL→PgBouncer 서비스·DATABASE_URL_DIRECT→Cloud SQL
+            # 시크릿 주입(값은 PO·이름만 참조). 이게 켜져야 maxScale 10 이 rollout-safe(연결 decouple).
+            echo "db_pgbouncer=true" >> "$GITHUB_OUTPUT"
+            echo "database_url_secret=DATABASE_URL_PROD_PGB" >> "$GITHUB_OUTPUT"
+            echo "database_url_direct_secret=DATABASE_URL_DIRECT_PROD" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
@@ -60,6 +65,10 @@ jobs:
             # (이전 10 = rollout 2×10×5+5=105≫25 → 매 배포 TooManyConnections. steady 80<100 주석은 rollout 누락이었음.)
             echo "backend_max_instances=1" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=" >> "$GITHUB_OUTPUT"
+            # dev: PgBouncer off(maxScale 1+pool 4 이미 안전·prod-only ③). DATABASE_URL out-of-band 유지.
+            echo "db_pgbouncer=false" >> "$GITHUB_OUTPUT"
+            echo "database_url_secret=" >> "$GITHUB_OUTPUT"
+            echo "database_url_direct_secret=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Submit Cloud Build
@@ -67,6 +76,6 @@ jobs:
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_DB_PGBOUNCER="${{ steps.env.outputs.db_pgbouncer }}",_DATABASE_URL_SECRET="${{ steps.env.outputs.database_url_secret }}",_DATABASE_URL_DIRECT_SECRET="${{ steps.env.outputs.database_url_direct_secret }}" \
             --suppress-logs \
             .

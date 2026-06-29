@@ -18,6 +18,11 @@ substitutions:
   #    decouple) 또는 tier↑ 전제**. dev(f1-micro 25)는 maxScale 1(2×1×5+5=15≤25)로 cloud-build.yml 에서 강제.
   _BACKEND_MAX_INSTANCES: '10'
   _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
+  # ③ 중앙 PgBouncer(ee7794eb): prod 만 on. cloud-build.yml(GHA)이 per-env override(prod=true+시크릿名·dev=false).
+  # on 時 deploy 가 DATABASE_URL→PgBouncer 서비스·DATABASE_URL_DIRECT→Cloud SQL 시크릿 주입(시크릿 값은 PO·이름만 참조).
+  _DB_PGBOUNCER: 'false'
+  _DATABASE_URL_SECRET: ''          # prod: DATABASE_URL_PROD_PGB (→PgBouncer:6432)
+  _DATABASE_URL_DIRECT_SECRET: ''   # prod: DATABASE_URL_DIRECT_PROD (→Cloud SQL 직결·pg_pubsub LISTEN)
 
 steps:
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
@@ -93,24 +98,32 @@ steps:
 
   - id: deploy-backend
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
+    # ③ PgBouncer: prod 만 DATABASE_URL→PgBouncer·DATABASE_URL_DIRECT→Cloud SQL 시크릿을 조건부 주입해야 해
+    # bash 분기로 전환(dev 는 base·DATABASE_URL out-of-band 보존). 기존 플래그/주의는 그대로 유지.
+    entrypoint: bash
     args:
-      - run
-      - deploy
-      - sprintable-backend-${_DEPLOY_ENV}
-      - --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA}
-      - --region=${_AR_REGION}
-      - --min-instances=${_BACKEND_MIN_INSTANCES}
-      - --max-instances=${_BACKEND_MAX_INSTANCES}
-      # ⭐frontend 가 NEXT_PUBLIC_FASTAPI_URL 로 backend 를 직접 호출(public 필수). 플래그 없으면
-      # gcloud run deploy 가 기존 IAM 을 preserve(non-deterministic) → 신규/리셋 시 allUsers invoker
-      # 유실로 403(2026-06-21 prod promotion 사건). 명시적·멱등 설정으로 매 배포 public 보장(dev/prod 공통).
-      - --allow-unauthenticated
-      # OB-1: 에이전트 onboarding generator 가 읽는 backend-direct URL 을 런타임 env 로 주입.
-      # ⚠️ 반드시 --update-env-vars(additive·기존 backend env[DATABASE_URL 등] 보존). --set-env-vars 금지
-      # (전체 wipe). _FASTAPI_URL 은 dev/prod 각 backend-direct run.app(프론트 NEXT_PUBLIC_FASTAPI_URL 과 동일 값).
-      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL}
-      - --quiet
+      - -c
+      - |
+        set -euo pipefail
+        DEPLOY_ARGS=(
+          run deploy "sprintable-backend-${_DEPLOY_ENV}"
+          "--image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA}"
+          "--region=${_AR_REGION}"
+          "--min-instances=${_BACKEND_MIN_INSTANCES}"
+          "--max-instances=${_BACKEND_MAX_INSTANCES}"
+          # ⭐public 필수(2026-06-21 prod 403 사건)·멱등 보장(dev/prod 공통).
+          --allow-unauthenticated
+          # ⚠️ --update-env-vars(additive·기존 DATABASE_URL 등 보존). --set-env-vars 금지(전체 wipe).
+          # FASTAPI_URL=backend-direct run.app · DB_PGBOUNCER=prod만 true(③·cloud-build.yml per-env).
+          "--update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_PGBOUNCER=${_DB_PGBOUNCER}"
+          --quiet
+        )
+        # ③ prod-only: DATABASE_URL→PgBouncer 시크릿·DATABASE_URL_DIRECT→Cloud SQL 시크릿 주입(값은 PO·이름 참조).
+        # dev(_DB_PGBOUNCER=false)는 미주입 → DATABASE_URL out-of-band 보존(현 동작 무변경).
+        if [ "${_DB_PGBOUNCER}" = "true" ]; then
+          DEPLOY_ARGS+=( "--update-secrets=DATABASE_URL=${_DATABASE_URL_SECRET}:latest,DATABASE_URL_DIRECT=${_DATABASE_URL_DIRECT_SECRET}:latest" )
+        fi
+        gcloud "${DEPLOY_ARGS[@]}"
     waitFor: [push-backend]
 
 options:
