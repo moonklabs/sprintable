@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     # Cloud SQL Unix socket 연결 예시 (Cloud Run 등):
     #   postgresql+asyncpg://sprintable:PASSWORD@/sprintable?host=/cloudsql/sprintable:asia-northeast3:sprintable-dev
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:54322/postgres"
+    # ee7794eb ③: DB_PGBOUNCER on 時 DATABASE_URL 은 PgBouncer(transaction-mode) 를 가리키는데, pg_pubsub
+    # raw LISTEN/NOTIFY 는 transaction-mode 비호환(연결이 statement 마다 반납돼 LISTEN 상태 소실) → **direct
+    # Cloud SQL URL 별도**로 우회. 미설정 시 database_url 폴백(non-PgBouncer 환경). on+미설정 = startup
+    # fail-closed(pg_pubsub.check_listen_config·main lifespan).
+    database_url_direct: str = ""
 
     # Cloud SQL (D-S1: Phase D GCP 인프라)
     cloud_sql_instance_dev: str = "sprintable-494803:asia-northeast3:sprintable-dev"
