@@ -9,8 +9,8 @@ from app.core.config import settings
 # 인스턴스당 최대 커넥션 = pool_size + max_overflow. 클러스터 총합 = maxScale × (pool_size+overflow).
 # ⚠️ 배포 rollout 時 old+new 리비전 풀 **동시 점유(2×)** 반영 필수(2026-06-29 dev TooManyConnections):
 #   **2 × maxScale × (pool_size+max_overflow) + admin/migration headroom ≤ Cloud SQL max_connections.**
-#   per-instance=4(3+1): 앱 최소요구(≥4·send_message 다중세션) ∩ prod rollout(2×10×4+20=100≤100). total 5면 prod 120>100.
-#   ⚠️ dev(f1-micro ~25, maxScale 3): 2×3×4+5=29 > 25 — pool 축소만으론 worst-case 미해결·maxScale 3→2(PO) 또는 tier↑ 동반.
+#   per-instance=4(3+1): 앱 최소요구(≥4·send_message 다중세션) ∩ prod rollout(2×10×4+20=100·maxScale 10 가정·③前 실측).
+#   ⚠️ dev maxScale 실측=10(주석의 3은 stale): pool 4 단독도 2×10×4+5=85>25 → maxScale 10→2 동반 필수(PO rev 01240-hkc): 21≤25 ✓.
 # env DB_POOL_SIZE / DB_MAX_OVERFLOW로 환경별 조정하되 상향은 rollout 여유(tier↑/maxScale↓/PgBouncer) 동반.
 def _build_engine_kwargs() -> dict:
     """create_async_engine 인자를 DB_PGBOUNCER flag로 분기.

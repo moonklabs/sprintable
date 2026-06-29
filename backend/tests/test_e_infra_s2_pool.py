@@ -7,18 +7,19 @@
 per-instance 는 두 제약 교집합으로 **정확히 4**(3+1):
   ① 앱 최소요구(실측): pool+overflow ≥ 4 (send_message 요청당 다중세션·total 3 이면 pool_timeout).
   ② prod rollout: 2×10×4+20=100 ≤ 100 (total 5 면 120 > 100). → total ≤ 4.
-dev(maxScale 3·~25)는 2×3×4+5=29 > 25 라 pool 축소만으론 worst-case 미해결 → maxScale 3→2(PO infra) 동반.
+⚠️ dev maxScale 실측=10(코드주석의 3은 stale): pool 4 단독도 2×10×4+5=85>25 → maxScale 10→2(PO rev
+01240-hkc) 동반 필수. pool 축소만으론 worst-case 미해결이라는 결론을 락.
 """
 from app.core.config import Settings
 
 ROLLOUT = 2  # 배포 중 old+new 리비전 동시 점유
 
 PROD_MAX_CONNECTIONS = 100
-PROD_MAX_SCALE = 10
+PROD_MAX_SCALE = 10  # ⚠️ 가정 — ③ prod 승격 前 gcloud 실측 필수(dev 가 주석 3↔실측 10 괴리였음)
 PROD_HEADROOM = 20
 
 DEV_MAX_CONNECTIONS = 25  # sprintable-dev db-f1-micro
-DEV_MAX_SCALE_SAFE = 2  # ⚠️ 현 dev maxScale=3 은 rollout 초과 → PO가 2로 축소 동반 필요
+DEV_MAX_SCALE_SAFE = 2  # PO 적용(rev 01240-hkc): dev maxScale 10→2. pool 4 + maxScale 2 = rollout-safe
 DEV_HEADROOM = 5
 
 APP_MIN_PER_INSTANCE = 4  # 실측: send_message 등이 요청당 ≥4 커넥션(total 3 이면 pool_timeout)
@@ -52,7 +53,7 @@ def test_default_pool_rollout_safe_prod(monkeypatch):
 def test_default_pool_dev_safe_with_reduced_maxscale(monkeypatch):
     """dev 는 maxScale 2(축소·PO infra) 동반 時 rollout-safe — 이번 인시던트 직접 회귀 게이트.
 
-    (현 maxScale 3 은 2×3×4+5=29>25 라 pool 단독 불가 — config 주석의 maxScale↓ 동반 요구를 락.)
+    (실측 maxScale 10 은 2×10×4+5=85>25 라 pool 단독 불가 — config 주석의 maxScale↓ 동반 요구를 락.)
     """
     _clear_pool_env(monkeypatch)
     s = Settings()

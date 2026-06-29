@@ -21,10 +21,11 @@ class Settings(BaseSettings):
     #    **2 × maxScale × (pool_size + max_overflow) + admin/migration headroom ≤ max_connections.**
     # 두 제약의 교집합으로 per-instance 가 **정확히 4**(3+1)로 고정:
     #   ① 앱 최소요구(실측): pool+overflow ≥ 4 — send_message 등이 요청당 다중 세션 점유, total 3 이면 pool_timeout.
-    #   ② prod rollout: 2×10×4+20 = 100 ≤ 100 ✓ (total 5 면 2×10×5+20=120 > 100 → 초과). → total ≤ 4.
-    #   ∴ total == 4. (이전 5/3=8 은 rollout 時 prod 2×10×8=160≫100·dev 2×3×8=48≫25 양쪽 위험)
-    # ⚠️ dev(f1-micro ~25, maxScale 3): 2×3×4+5 = 29 > 25 — **pool 축소만으론 worst-case 미해결**.
-    #    dev 는 maxScale 3→2 동반 필요(2×2×4+5=21 ≤ 25 ✓·PO infra) 또는 tier↑. 단독 env 상향 금지.
+    #   ② prod rollout(maxScale 10 가정·③ 승격 前 gcloud 실측 필수): 2×10×4+20=100 ≤ 100 (total 5 면 120>100). → total ≤ 4.
+    #   ∴ total == 4. (이전 5/3=8 은 rollout 時 prod 2×10×8=160≫100 위험)
+    # ⚠️ dev: maxScale 가 **실측 10**이었음(코드주석의 3 은 stale·gcloud 확인). 인시던트=2×10×8=160≫25.
+    #    pool 4 단독도 2×10×4+5=85 > 25 → **maxScale 10→2 동반 필수**(PO 적용 rev 01240-hkc): 2×2×4+5=21 ≤ 25 ✓.
+    #    즉 pool 축소(4)만으론 부족·maxScale↓(또는 tier↑)가 짝. 단독 env 상향 금지.
     # ⚠️ --concurrency=80(인스턴스당 동시 HTTP 요청)과 별개: 풀은 **DB op 점유 구간만** 커넥션을 잡고
     #    즉시 반납하므로 80 동시요청 ≠ 80 커넥션. pool+overflow 초과분은 pool_timeout 대기(실패 아님).
     db_pool_size: int = 3
