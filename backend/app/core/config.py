@@ -15,15 +15,20 @@ class Settings(BaseSettings):
     cloud_sql_instance_dev: str = "sprintable-494803:asia-northeast3:sprintable-dev"
     cloud_sql_instance_prod: str = "sprintable-494803:asia-northeast3:sprintable-prod"
 
-    # E-INFRA S2: DB 커넥션 풀 right-size (env DB_POOL_SIZE / DB_MAX_OVERFLOW로 override).
-    # 산식: (maxScale × (pool_size + max_overflow)) + admin/migration headroom ≤ max_connections.
-    #   prod(sprintable-prod db-g1-small, max_connections=100, maxScale=10):
-    #     10 × (5 + 3) = 80  + ~20 headroom(superuser_reserved 3 + migrate-prod 잡 + 수동 admin) = 100 ✓
-    #   dev(maxScale=3): 3 × (5+3)=24 로 여유 큼 — 필요 시 env로 상향(예 10/20) 독립 right-size.
+    # E-INFRA S2 + ee7794eb: DB 커넥션 풀 **rollout-safe** right-size (env DB_POOL_SIZE/DB_MAX_OVERFLOW override).
+    # ⚠️ 배포 rollout 時 old+new 리비전 풀이 **동시 점유(2×)** — steady 산식만 쓰면 배포 중 max_connections
+    #    초과(2026-06-29 dev TooManyConnections 인시던트·#1766 rollout서 전요청 500). rollout 2× 포함 산식:
+    #    **2 × maxScale × (pool_size + max_overflow) + admin/migration headroom ≤ max_connections.**
+    # 두 제약의 교집합으로 per-instance 가 **정확히 4**(3+1)로 고정:
+    #   ① 앱 최소요구(실측): pool+overflow ≥ 4 — send_message 등이 요청당 다중 세션 점유, total 3 이면 pool_timeout.
+    #   ② prod rollout: 2×10×4+20 = 100 ≤ 100 ✓ (total 5 면 2×10×5+20=120 > 100 → 초과). → total ≤ 4.
+    #   ∴ total == 4. (이전 5/3=8 은 rollout 時 prod 2×10×8=160≫100·dev 2×3×8=48≫25 양쪽 위험)
+    # ⚠️ dev(f1-micro ~25, maxScale 3): 2×3×4+5 = 29 > 25 — **pool 축소만으론 worst-case 미해결**.
+    #    dev 는 maxScale 3→2 동반 필요(2×2×4+5=21 ≤ 25 ✓·PO infra) 또는 tier↑. 단독 env 상향 금지.
     # ⚠️ --concurrency=80(인스턴스당 동시 HTTP 요청)과 별개: 풀은 **DB op 점유 구간만** 커넥션을 잡고
     #    즉시 반납하므로 80 동시요청 ≠ 80 커넥션. pool+overflow 초과분은 pool_timeout 대기(실패 아님).
-    db_pool_size: int = 5
-    db_max_overflow: int = 3
+    db_pool_size: int = 3
+    db_max_overflow: int = 1
 
     # PgBouncer ④: 사이드카(localhost:6432·pool_mode=transaction) 경유 여부(env DB_PGBOUNCER).
     # off(기본): 직접 Cloud SQL — 현 동작 100% 유지(사이드카 없어도 다운 X).
