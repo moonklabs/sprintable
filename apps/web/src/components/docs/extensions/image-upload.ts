@@ -67,6 +67,33 @@ export interface AssetRef {
  *     (2) register → { data: { assetId } } (또는 {id}). assetId(ref) 반환.
  * register 엔드포인트는 design-first(디디) — 미존재 시 non-2xx 로 throw 되어 호출부가 error 상태 처리.
  */
+/**
+ * register(`POST /api/docs/{id}/assets`) 응답에서 asset id 추출.
+ * BE 실응답은 snake_case `data.asset_id`(apiSuccess `{data}` envelope) — camelCase/평면 폴백도 수용(계약 견고화).
+ * dev 끝단 적출(#1768): HTTP 200인데 키 형상(snake↔camel) 불일치로 sign 미호출·이미지 미렌더로
+ * 조용히 degrade했던 클래스. 이 추출이 그 계약을 잠근다(테스트로 영구 고정).
+ */
+export function pickRegisteredAssetId(json: unknown): string | null {
+  const j = json as
+    | {
+        data?: { asset_id?: string; assetId?: string; id?: string } | null;
+        asset_id?: string;
+        assetId?: string;
+        id?: string;
+      }
+    | null
+    | undefined;
+  return (
+    j?.data?.asset_id ??
+    j?.data?.assetId ??
+    j?.data?.id ??
+    j?.asset_id ??
+    j?.assetId ??
+    j?.id ??
+    null
+  );
+}
+
 async function uploadAndRegister(docId: string, file: File): Promise<AssetRef> {
   const fd = new FormData();
   fd.append('file', file);
@@ -86,11 +113,8 @@ async function uploadAndRegister(docId: string, file: File): Promise<AssetRef> {
     }),
   });
   if (!reg.ok) throw new Error('register failed');
-  const json = (await reg.json().catch(() => null)) as
-    | { data?: { assetId?: string; id?: string } | null; assetId?: string; id?: string }
-    | null;
-  const assetId =
-    json?.data?.assetId ?? json?.data?.id ?? json?.assetId ?? json?.id ?? null;
+  const json = await reg.json().catch(() => null);
+  const assetId = pickRegisteredAssetId(json);
   if (!assetId) throw new Error('no assetId in register response');
   return { assetId, filename: meta.name, size: meta.size, mime: meta.content_type };
 }
