@@ -108,8 +108,9 @@ async def check_storage_capacity(session: AsyncSession, org_id, attachments: lis
     """S8: org storage 캡 enforce(서버 게이트·all tiers). per-file + 총량(committed+신규).
 
     tier(org_subscriptions)→plan_tier_limits[tier]→캡. 캡 미정의 tier=무제한(no-op). **우리 버킷 객체만**
-    카운트(canonical_object_path not None·외부 URL 제외). 보수적: 재전송 중복은 over-count(안전측·캡 초과
-    절대 불허). OSS 는 호출 안 됨(is_ee_enabled 게이트·라우터). 초과 시 402 PLAN_LIMIT_EXCEEDED.
+    카운트(canonical_object_path not None·외부 URL 제외). **size 는 head_object authoritative**(까심 ①:
+    client-size:0 quota 우회·음수 size 오염 차단·sync 와 동일 source). 객체 부재(head None)=미카운트(미등록될
+    것). OSS 는 호출 안 됨(is_ee_enabled 게이트·라우터). 초과 시 402 PLAN_LIMIT_EXCEEDED.
     """
     if not attachments:
         return
@@ -124,16 +125,20 @@ async def check_storage_capacity(session: AsyncSession, org_id, attachments: lis
     max_file_bytes = max_file_mb * 1024 * 1024
     max_storage_bytes = max_storage_mb * 1024 * 1024
 
-    from app.services.asset_registry import canonical_object_path
+    from app.services.asset_registry import DEFAULT_CONTAINER, canonical_object_path
+    from app.services.storage import get_storage_provider
 
+    provider = get_storage_provider()
     new_bytes = 0
     for att in attachments:
-        if not isinstance(att, dict) or canonical_object_path(att.get("url") or "") is None:
-            continue  # 우리 객체 아님(외부/타버킷) → 우리 storage 미카운트
-        try:
-            size = max(0, int(att.get("size") or 0))  # 음수 clamp(까심 ②·함수단독 raw 호출 방어·총량 우회 차단)
-        except (TypeError, ValueError):
-            size = 0
+        if not isinstance(att, dict):
+            continue
+        obj = canonical_object_path(att.get("url") or "", DEFAULT_CONTAINER)
+        if obj is None:
+            continue  # 우리 객체 아님(외부/타버킷) → 미카운트
+        size = await provider.head_object(DEFAULT_CONTAINER, obj)  # authoritative(client size 무시·까심①)
+        if size is None:
+            continue  # 객체 부재 = 미카운트(미등록될 것)
         if size > max_file_bytes:
             raise _storage_limit_error("file_size", max_file_mb, tier)
         new_bytes += size

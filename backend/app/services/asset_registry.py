@@ -118,10 +118,14 @@ async def sync_attachment_assets(
             continue  # 이 source 귀속 경로 아님 — registry 오염/IDOR 차단(까심)
         name = (att.get("name") or "").strip() or obj.rsplit("/", 1)[-1] or "file"
         content_type = (att.get("content_type") or "").strip() or None
-        try:
-            size_bytes = int(att.get("size") or 0)
-        except (TypeError, ValueError):
-            size_bytes = 0
+        # 까심 ①: size 는 client-trust 금지 — 실 object size(head_object) **authoritative**(size:0 quota
+        # 우회·음수 size_bytes 오염 차단). 객체 부재(head None)=FE putObject 안 함/오염 → 등록 안 함(skip·
+        # phantom asset 0). 전 경로(doc register·chat send_message·story) 동시 적용=client-trust 완전 제거.
+        from app.services.storage import get_storage_provider
+
+        size_bytes = await get_storage_provider().head_object(container, obj)
+        if size_bytes is None:
+            continue
 
         # asset upsert — 멱등. project_id null/non-null 별 partial unique 로 ON CONFLICT 분기(까심 R3).
         base_ins = pg_insert(Asset).values(

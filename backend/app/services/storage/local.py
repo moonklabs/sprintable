@@ -93,3 +93,14 @@ class LocalStorageProvider(StorageProvider):
         except Exception:
             logger.warning("local storage: delete 실패 path=%s", object_path, exc_info=True)
             return False
+
+    async def head_object(self, container: str, object_path: str) -> int | None:
+        def _blocking() -> int | None:
+            p = _resolve_safe(container, object_path)
+            return p.stat().st_size if p.exists() else None
+
+        try:
+            return await asyncio.to_thread(_blocking)
+        except Exception:
+            logger.warning("local storage: head 실패 path=%s", object_path, exc_info=True)
+            return None

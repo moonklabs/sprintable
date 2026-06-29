@@ -695,9 +695,17 @@ async def register_doc_asset(
     )
     asset_id = url_map.get(body.url)
     if asset_id is None:
-        # path_in_source_scope(doc) 거부 = 이 doc namespace 밖 path(IDOR) 또는 외부/타버킷 URL.
-        raise HTTPException(status_code=400, detail="object_path not scoped to this document")
+        # 미등록 사유: ① path_in_source_scope(doc) 거부=이 doc namespace 밖 path(IDOR)/외부URL,
+        # ② head_object None=GCS에 객체 부재(FE putObject 미완·optimistic FE는 error state 처리).
+        raise HTTPException(
+            status_code=400, detail="object not registered: out-of-scope path or not uploaded"
+        )
+    # size 는 authoritative(sync 가 head_object 로 저장한 실값·client size 무시·까심①).
+    from app.models.asset import Asset
+    real_size = int((await session.execute(
+        select(Asset.size_bytes).where(Asset.id == asset_id)
+    )).scalar_one())
     await session.commit()
     return DocAssetRegisterResponse(
-        asset_id=asset_id, filename=body.filename, size=body.size, mime=body.mime
+        asset_id=asset_id, filename=body.filename, size=real_size, mime=body.mime
     )

@@ -68,3 +68,16 @@ class GcsStorageProvider(StorageProvider):
         except Exception:
             logger.warning("gcs storage: delete 실패 path=%s", object_path, exc_info=True)
             return False
+
+    async def head_object(self, container: str, object_path: str) -> int | None:
+        def _blocking() -> int | None:
+            from google.cloud import storage
+
+            blob = storage.Client().bucket(container).get_blob(object_path)  # get_blob=None if absent
+            return int(blob.size) if blob is not None and blob.size is not None else None
+
+        try:
+            return await asyncio.to_thread(_blocking)
+        except Exception:
+            logger.warning("gcs storage: head 실패 path=%s", object_path, exc_info=True)
+            return None

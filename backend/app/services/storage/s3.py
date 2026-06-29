@@ -66,3 +66,17 @@ class S3StorageProvider(StorageProvider):
         except Exception:
             logger.warning("s3 storage: delete 실패 path=%s", object_path, exc_info=True)
             return False
+
+    async def head_object(self, container: str, object_path: str) -> int | None:
+        def _blocking() -> int | None:
+            try:
+                resp = _client().head_object(Bucket=container, Key=object_path)
+                return int(resp["ContentLength"])
+            except Exception:
+                return None  # 404/absent
+
+        try:
+            return await asyncio.to_thread(_blocking)
+        except Exception:
+            logger.warning("s3 storage: head 실패 path=%s", object_path, exc_info=True)
+            return None
