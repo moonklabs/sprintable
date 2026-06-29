@@ -116,7 +116,12 @@
     "errorTitle": "Couldn't load assets",
     "errorDesc": "Something went wrong. Try again.",
     "retry": "Retry",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "previewLoading": "Loading preview",
+    "previewNoAccessTitle": "Preview not available",
+    "previewNoAccessDesc": "This conversation attachment is only visible to participants.",
+    "previewPhantomTitle": "No preview",
+    "previewPhantomDesc": "This asset has no stored original."
   },
   "commandPalette": {
     "title": "Command palette",

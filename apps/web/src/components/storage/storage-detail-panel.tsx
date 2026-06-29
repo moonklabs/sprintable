@@ -12,6 +12,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { StorageUploaderAvatar } from './storage-uploader-avatar';
 import { StorageSourceUsageList } from './storage-source-usage-list';
 import { StorageFileGlyph } from './storage-file-glyph';
+import { StorageThumbnail } from './storage-thumbnail';
 import type { Asset } from '@/lib/storage/types';
 
 interface StorageDetailPanelProps {
@@ -46,30 +47,35 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
 
   const ext = fileExtLabel(asset.content_type, asset.name);
   const usageCount = asset.source_links.length;
+  const isImage = asset.content_type.startsWith('image/');
 
   return (
     <section className="flex h-full min-h-0 flex-col border-l border-border bg-card">
       {/* preview */}
-      <div className="relative grid h-[168px] shrink-0 place-items-center border-b border-border bg-gradient-to-br from-info/10 to-brand/[0.06]">
+      <div className="relative grid h-[168px] shrink-0 place-items-center overflow-hidden border-b border-border bg-gradient-to-br from-info/10 to-brand/[0.06]">
+        {isImage ? (
+          <StorageThumbnail key={asset.id} asset={asset} />
+        ) : (
+          <div
+            className="grid size-[96px] w-[128px] place-items-center rounded-[0.5rem] text-info shadow-lg"
+            style={{
+              backgroundImage:
+                'repeating-linear-gradient(45deg, var(--info-tint), var(--info-tint) 9px, transparent 9px, transparent 18px)',
+            }}
+          >
+            <StorageFileGlyph icon={getFileIcon(asset.content_type)} className="size-[30px]" />
+          </div>
+        )}
         {onClose ? (
           <button
             type="button"
             onClick={onClose}
             aria-label={t('cancel')}
-            className="absolute right-2 top-2 grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted"
+            className="absolute right-2 top-2 z-10 grid size-7 place-items-center rounded-md bg-card/70 text-muted-foreground backdrop-blur-sm hover:bg-muted"
           >
             <X className="size-4" />
           </button>
         ) : null}
-        <div
-          className="grid size-[96px] w-[128px] place-items-center rounded-[0.5rem] text-info shadow-lg"
-          style={{
-            backgroundImage:
-              'repeating-linear-gradient(45deg, var(--info-tint), var(--info-tint) 9px, transparent 9px, transparent 18px)',
-          }}
-        >
-          <StorageFileGlyph icon={getFileIcon(asset.content_type)} className="size-[30px]" />
-        </div>
       </div>
 
       {/* dhead */}
