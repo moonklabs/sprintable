@@ -104,3 +104,18 @@ class LocalStorageProvider(StorageProvider):
         except Exception:
             logger.warning("local storage: head 실패 path=%s", object_path, exc_info=True)
             return None
+
+    async def put_object(
+        self, container: str, object_path: str, data: bytes, *, content_type: str | None = None
+    ) -> bool:
+        def _blocking() -> bool:
+            p = _resolve_safe(container, object_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(data)
+            return True
+
+        try:
+            return await asyncio.to_thread(_blocking)
+        except Exception:
+            logger.warning("local storage: put 실패 path=%s", object_path, exc_info=True)
+            return False

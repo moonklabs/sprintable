@@ -80,3 +80,19 @@ class S3StorageProvider(StorageProvider):
         except Exception:
             logger.warning("s3 storage: head 실패 path=%s", object_path, exc_info=True)
             return None
+
+    async def put_object(
+        self, container: str, object_path: str, data: bytes, *, content_type: str | None = None
+    ) -> bool:
+        def _blocking() -> bool:
+            kwargs: dict = {"Bucket": container, "Key": object_path, "Body": data}
+            if content_type:
+                kwargs["ContentType"] = content_type
+            _client().put_object(**kwargs)
+            return True
+
+        try:
+            return await asyncio.to_thread(_blocking)
+        except Exception:
+            logger.warning("s3 storage: put 실패 path=%s", object_path, exc_info=True)
+            return False
