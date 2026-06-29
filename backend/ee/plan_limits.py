@@ -76,6 +76,82 @@ async def check_project_create_limit(session: AsyncSession, org_id) -> None:
         raise _plan_limit_error("project", FREE_LIMITS["max_projects"])
 
 
+def _storage_limit_error(resource: str, limit_mb: int, tier: str) -> HTTPException:
+    upgrade = tier != "pro"
+    msg = (
+        f"{tier} plan {resource} limit ({limit_mb}MB) reached. Upgrade for more capacity."
+        if upgrade else f"{resource} limit ({limit_mb}MB) reached."
+    )
+    return HTTPException(
+        status_code=402,
+        detail={
+            "code": "PLAN_LIMIT_EXCEEDED",
+            "resource": resource,
+            "limit_mb": limit_mb,
+            "tier": tier,
+            "upgrade_required": upgrade,
+            "message": msg,
+        },
+    )
+
+
+async def get_org_storage_limit_bytes(session: AsyncSession, org_id) -> int | None:
+    """org tier 의 storage 캡(bytes). 캡 미정의 tier=None(무제한). storage-usage 표시 공용(server 권위 SSOT)."""
+    tier = await _get_org_tier(session, org_id)
+    row = (await session.execute(
+        text("SELECT max_storage_mb FROM plan_tier_limits WHERE tier = :t"), {"t": tier},
+    )).first()
+    return int(row[0]) * 1024 * 1024 if row else None
+
+
+async def check_storage_capacity(session: AsyncSession, org_id, attachments: list[dict] | None) -> None:
+    """S8: org storage 캡 enforce(서버 게이트·all tiers). per-file + 총량(committed+신규).
+
+    tier(org_subscriptions)→plan_tier_limits[tier]→캡. 캡 미정의 tier=무제한(no-op). **우리 버킷 객체만**
+    카운트(canonical_object_path not None·외부 URL 제외). **size 는 head_object authoritative**(까심 ①:
+    client-size:0 quota 우회·음수 size 오염 차단·sync 와 동일 source). 객체 부재(head None)=미카운트(미등록될
+    것). OSS 는 호출 안 됨(is_ee_enabled 게이트·라우터). 초과 시 402 PLAN_LIMIT_EXCEEDED.
+    """
+    if not attachments:
+        return
+    tier = await _get_org_tier(session, org_id)
+    row = (await session.execute(
+        text("SELECT max_storage_mb, max_file_mb FROM plan_tier_limits WHERE tier = :t"),
+        {"t": tier},
+    )).first()
+    if row is None:
+        return  # 캡 미정의 tier → 무제한
+    max_storage_mb, max_file_mb = int(row[0]), int(row[1])
+    max_file_bytes = max_file_mb * 1024 * 1024
+    max_storage_bytes = max_storage_mb * 1024 * 1024
+
+    from app.services.asset_registry import DEFAULT_CONTAINER, canonical_object_path
+    from app.services.storage import get_storage_provider
+
+    provider = get_storage_provider()
+    new_bytes = 0
+    for att in attachments:
+        if not isinstance(att, dict):
+            continue
+        obj = canonical_object_path(att.get("url") or "", DEFAULT_CONTAINER)
+        if obj is None:
+            continue  # 우리 객체 아님(외부/타버킷) → 미카운트
+        size = await provider.head_object(DEFAULT_CONTAINER, obj)  # authoritative(client size 무시·까심①)
+        if size is None:
+            continue  # 객체 부재 = 미카운트(미등록될 것)
+        if size > max_file_bytes:
+            raise _storage_limit_error("file_size", max_file_mb, tier)
+        new_bytes += size
+    if new_bytes == 0:
+        return
+    used = (await session.execute(
+        text("SELECT COALESCE(SUM(size_bytes),0) FROM assets WHERE org_id = :oid AND deleted_at IS NULL"),
+        {"oid": str(org_id)},
+    )).scalar() or 0
+    if int(used) + new_bytes > max_storage_bytes:
+        raise _storage_limit_error("storage", max_storage_mb, tier)
+
+
 async def check_member_invite_limit(session: AsyncSession, org_id) -> None:
     """Free: org당 member 5명 제한 (human + agent). Team/Pro는 스킵."""
     tier = await _get_org_tier(session, org_id)

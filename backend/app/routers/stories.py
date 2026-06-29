@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.event import Event
@@ -16,6 +17,7 @@ from app.repositories.story_assignee import StoryAssigneeRepository
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import publish_event
 from app.services.event_seq import assign_recipient_seq
+from app.services.asset_registry import sync_attachment_assets
 from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
 from app.services.member_resolver import canonicalize_member_id
 from app.services.merge_verdict_gate import (
@@ -224,6 +226,10 @@ async def create_story(
         body.assignee_id if body.assignee_id is not None
         else (effective_ids[0] if effective_ids else None)
     )
+    # S8: 서버사이드 capacity 게이트(ee seam·SaaS only·OSS no-op) — asset commit 前 per-file+총량 enforce.
+    if settings.is_ee_enabled and body.attachments:
+        from ee.plan_limits import check_storage_capacity  # type: ignore[import]
+        await check_storage_capacity(session, org_id, [a.model_dump() for a in body.attachments])
     story = await repo.create(
         project_id=body.project_id,
         title=body.title,
@@ -240,9 +246,31 @@ async def create_story(
         success_hypothesis=body.success_hypothesis,
         metric_definition=body.metric_definition,
         measure_after=body.measure_after,
-        # E-FILE S4: 보드 스토리 첨부 (FE-proxy URL+메타) 저장
-        attachments=[a.model_dump() for a in body.attachments],
+        # E-FILE S4: 보드 스토리 첨부 (FE-proxy URL+메타) 저장. S7: client asset_id strip(서버 권위·drift 방지).
+        attachments=[{**a.model_dump(), "asset_id": None} for a in body.attachments],
     )
+    # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
+    if body.attachments:
+        _cb: uuid.UUID | None = None
+        try:  # created_by enrich용 업로더 member id(비보안·best-effort).
+            _cb = await _resolve_team_member_id(auth, org_id, session)
+        except Exception:
+            _cb = None
+        url_map = await sync_attachment_assets(
+            session,
+            org_id=org_id,
+            project_id=story.project_id,
+            source_type="story",
+            source_id=story.id,
+            attachments=[a.model_dump() for a in body.attachments],
+            created_by=_cb,
+        )
+        if url_map:  # S7: JSONB asset_id 역기입(denorm·catch#4)
+            story.attachments = [
+                {**a, "asset_id": str(url_map[a["url"]])} if a.get("url") in url_map else a
+                for a in (story.attachments or [])
+            ]
+            await session.flush()
     # E-BOARD S5: 복수 assignee join 기록 (단일 assignee_id와 공존)
     saved_ids = await StoryAssigneeRepository(session, org_id).set_for_story(story.id, effective_ids)
     # E-CAGE-REFEREE: assignee 설정 시 implementation 역할 participation 자동 생성
@@ -474,6 +502,13 @@ async def update_story(
     auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
     data = body.model_dump(exclude_unset=True)
+    # S7: client 제공 asset_id strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
+    if data.get("attachments"):
+        data["attachments"] = [{**a, "asset_id": None} for a in data["attachments"]]
+        # S8: 서버사이드 capacity 게이트(ee seam·SaaS only·OSS no-op) — 첨부 교체 commit 前 enforce.
+        if settings.is_ee_enabled:
+            from ee.plan_limits import check_storage_capacity  # type: ignore[import]
+            await check_storage_capacity(db, repo.org_id, data["attachments"])
     # E-BOARD S5: assignee_ids는 stories 컬럼이 아니므로 repo.update 전에 분리.
     assignee_ids_in = data.pop("assignee_ids", None)
     # assignee_ids만 제공되면 단일 assignee_id(주담당)를 첫 요소로 동기화 → 기존 event/notify 로직 재사용.
@@ -510,6 +545,29 @@ async def update_story(
     story = await repo.update(id, **data)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+
+    # E-STORAGE-SSOT S2: 첨부 교체(attachments 제공) 시 asset registry 재동기화(reconcile·SSOT 정확).
+    if "attachments" in data:
+        _cb: uuid.UUID | None = None
+        try:
+            _cb = await _resolve_team_member_id(auth, repo.org_id, db)
+        except Exception:
+            _cb = None
+        url_map = await sync_attachment_assets(
+            db,
+            org_id=repo.org_id,
+            project_id=story.project_id,
+            source_type="story",
+            source_id=story.id,
+            attachments=data.get("attachments") or [],
+            created_by=_cb,
+        )
+        if url_map:  # S7: JSONB asset_id 역기입(denorm·catch#4·attachments 교체 반영)
+            story.attachments = [
+                {**a, "asset_id": str(url_map[a["url"]])} if a.get("url") in url_map else a
+                for a in (story.attachments or [])
+            ]
+            await db.flush()
 
     # E-BOARD S5: 복수 assignee join 동기화 (단일 assignee_id와 정합 유지)
     if assignee_ids_in is not None:

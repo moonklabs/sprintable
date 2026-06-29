@@ -9,9 +9,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +17,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.database import get_db
 from app.models.agent_run import AgentRun
 from app.models.agent_session import AgentSession
+from app.models.asset import Asset
 from app.models.hitl import HitlRequest
+from app.models.org_subscription import OrgSubscription
+from app.models.plan_tier_limit import PlanTierLimit
+from app.models.project import OrgMember
+from app.models.user import User
+from app.services.email import send_email
+from app.services.storage import get_storage_provider
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v2/internal/cron", tags=["cron"])
 
@@ -457,4 +464,126 @@ async def score_hypotheses_cron(
         return _ok(summary)
     except Exception as exc:
         logger.exception("score-hypotheses cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── S8: storage capacity lifecycle crons ─────────────────────────────────────
+
+_ASSET_GRACE_DAYS = 7
+_STORAGE_WARN_THRESHOLD = 0.8
+_STORAGE_WARN_COOLDOWN = timedelta(days=7)
+
+
+@router.get("/assets-grace-hard-delete")
+async def assets_grace_hard_delete(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """S8: soft-delete(deleted_at) 7일 경과 asset hard-delete — blob(provider)+row(asset_links FK CASCADE).
+
+    best-effort: blob delete 성공(또는 이미 없음=멱등) 시에만 row 삭제. blob delete 실패 시 row 보존
+    →다음 tick 재시도(orphan 0). tick당 최대 500건(폭주 방지).
+    """
+    verify_cron(request)
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=_ASSET_GRACE_DAYS)
+        rows = list((await session.execute(
+            select(Asset)
+            .where(Asset.deleted_at.is_not(None), Asset.deleted_at < cutoff)
+            .limit(500)
+        )).scalars().all())
+        provider = get_storage_provider()
+        deleted = 0
+        failed = 0
+        for a in rows:
+            if await provider.delete_object(a.container, a.object_path):
+                await session.delete(a)  # asset_links 는 FK ondelete=CASCADE 로 자동 삭제
+                deleted += 1
+            else:
+                failed += 1  # blob delete 실패 → row 보존(다음 tick 재시도)
+        await session.commit()
+        return _ok({"hard_deleted": deleted, "blob_delete_failed": failed})
+    except Exception as exc:
+        logger.exception("assets-grace-hard-delete cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+@router.get("/storage-usage-warn")
+async def storage_usage_warn(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """S8: SaaS org storage 사용량이 캡의 80%+ 면 owner/admin 경고 메일(dedup·cooldown 7일).
+
+    org_subscription(active) 대상. 캡 미정의 tier=무제한(skip). 80% 미만 복귀 시 마커 re-arm(재크로싱 시
+    즉시 재경고). 메일 실패는 best-effort(개별 흡수). cooldown 내 재발송 금지(storage_warn_notified_at).
+    """
+    verify_cron(request)
+    try:
+        now = datetime.now(timezone.utc)
+        subs = list((await session.execute(
+            select(OrgSubscription).where(OrgSubscription.status == "active")
+        )).scalars().all())
+        caps = {
+            t: mb for t, mb in (await session.execute(
+                select(PlanTierLimit.tier, PlanTierLimit.max_storage_mb)
+            )).all()
+        }
+        notified = 0
+        for sub in subs:
+            cap_mb = caps.get(sub.tier)
+            if not cap_mb:
+                continue  # 캡 미정의 tier = 무제한
+            cap_bytes = int(cap_mb) * 1024 * 1024
+            used = int((await session.execute(
+                select(func.coalesce(func.sum(Asset.size_bytes), 0)).where(
+                    Asset.org_id == sub.org_id, Asset.deleted_at.is_(None)
+                )
+            )).scalar_one())
+            if used < cap_bytes * _STORAGE_WARN_THRESHOLD:
+                if sub.storage_warn_notified_at is not None:  # 80% 미만 복귀 → re-arm
+                    await session.execute(
+                        update(OrgSubscription)
+                        .where(OrgSubscription.id == sub.id)
+                        .values(storage_warn_notified_at=None)
+                    )
+                continue
+            if (
+                sub.storage_warn_notified_at is not None
+                and (now - sub.storage_warn_notified_at) < _STORAGE_WARN_COOLDOWN
+            ):
+                continue  # cooldown 내 — 재발송 금지(dedup)
+            emails = [
+                r[0] for r in (await session.execute(
+                    select(User.email)
+                    .join(OrgMember, User.id == OrgMember.user_id)
+                    .where(
+                        OrgMember.org_id == sub.org_id,
+                        OrgMember.role.in_(["owner", "admin"]),
+                        OrgMember.deleted_at.is_(None),
+                    )
+                )).all()
+            ]
+            pct = round(used / cap_bytes * 100, 1)
+            subject = f"[Sprintable] Storage usage at {pct}%"
+            html = (
+                f"<p>Your organization's storage usage has reached <b>{pct}%</b> "
+                f"({used // (1024 * 1024)}MB / {cap_mb}MB).</p>"
+                f"<p>Free up space (delete unused files) or upgrade your plan to avoid upload limits.</p>"
+            )
+            for em in emails:
+                try:
+                    send_email(em, subject, html)
+                except Exception:
+                    logger.warning("storage-usage-warn email 실패 org=%s", sub.org_id, exc_info=True)
+            await session.execute(
+                update(OrgSubscription)
+                .where(OrgSubscription.id == sub.id)
+                .values(storage_warn_notified_at=now)
+            )
+            notified += 1
+        await session.commit()
+        return _ok({"notified_orgs": notified})
+    except Exception as exc:
+        logger.exception("storage-usage-warn cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

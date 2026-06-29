@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from '@/lib/db/server';
 import { ApiErrors } from '@/lib/api-response';
-import { GCS_MEMO_ATTACHMENTS_BUCKET, uploadToGcs } from '@/lib/gcs';
+import { GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/storage/config';
+import { createStorageService } from '@/lib/storage/factory';
 
 // BE _MAX_ATTACHMENT_SIZE 정합 (schemas/story.py)
 const MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100MB
@@ -37,16 +38,25 @@ export async function POST(
   if (!storyRes.ok) {
     return NextResponse.json({ error: { message: 'story not found or no access' } }, { status: storyRes.status === 403 ? 403 : 404 });
   }
-  const story = (await storyRes.json().catch(() => null)) as { project_id?: string | null } | null;
+  const story = (await storyRes.json().catch(() => null)) as { project_id?: string | null; org_id?: string | null } | null;
   const projectId = story?.project_id;
-  if (!projectId) {
-    return NextResponse.json({ error: { message: 'story project could not be resolved' } }, { status: 422 });
+  const orgId = story?.org_id;
+  if (!projectId || !orgId) {
+    return NextResponse.json({ error: { message: 'story org/project could not be resolved' } }, { status: 422 });
   }
   const safeName = (file.name || 'file').replace(/[^\w.\-]+/g, '_').slice(-128) || 'file';
-  const objectPath = `story/${projectId}/${id}/${randomUUID()}-${safeName}`;
+  // E-STORAGE-SSOT S7: org/project namespace(Storage UI 노출)·source segment(story) 유지(IDOR scope).
+  const objectPath = `org/${orgId}/project/${projectId}/story/${id}/${randomUUID()}-${safeName}`;
 
   try {
-    const url = await uploadToGcs(GCS_MEMO_ATTACHMENTS_BUCKET, objectPath, file);
+    const storage = await createStorageService();
+    const body = Buffer.from(await file.arrayBuffer());
+    const { url } = await storage.putObject(
+      GCS_MEMO_ATTACHMENTS_BUCKET,
+      objectPath,
+      body,
+      file.type || undefined,
+    );
     return NextResponse.json({
       url,
       name: file.name || safeName,

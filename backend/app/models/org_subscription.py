@@ -22,6 +22,8 @@ class OrgSubscription(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
     current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # S8 Phase 2: 80% storage 경고 메일 dedup 마커(마지막 발송 시각·NULL=미발송).
+    storage_warn_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -11,6 +11,7 @@ from app.models.user import RefreshToken, User
 from app.models.workflow_version import WorkflowVersion
 from app.models.api_key import ApiKey
 from app.models.org_subscription import OrgSubscription
+from app.models.plan_tier_limit import PlanTierLimit
 from app.models.policy_document import PolicyDocument
 from app.models.audit import AuditLog
 from app.models.webhook_config import WebhookConfig
@@ -36,9 +37,13 @@ from app.models.org_invite import OrgInvite
 from app.models.project_access import ProjectAccess
 from app.models.member import AgentProjectProfile, Member, MemberIdentityAlias
 from app.models.activity_event import ActivityEvent
+from app.models.asset import Asset, AssetFolder, AssetLink
 
 __all__ = [
     "ActivityEvent",
+    "Asset",
+    "AssetFolder",
+    "AssetLink",
     "AgentProjectProfile",
     "Member",
     "MemberIdentityAlias",
@@ -59,6 +64,7 @@ __all__ = [
     "UsageMeter",
     "ApiKey",
     "OrgSubscription",
+    "PlanTierLimit",
     "PolicyDocument",
     "AuditLog",
     "WebhookConfig",

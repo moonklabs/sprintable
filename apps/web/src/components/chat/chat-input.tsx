@@ -2,15 +2,24 @@
 
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, Loader2, Paperclip, Send, Terminal, Type, X, Hash } from 'lucide-react';
+import { AlertTriangle, FolderOpen, Loader2, Paperclip, Send, Terminal, Type, Upload, X, Hash } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { getFileIcon } from '@/lib/file-icon';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { resolveRuntimeStatus, runtimeLabel } from '@/lib/runtime-capabilities';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
+import type { Asset } from '@/lib/storage/types';
 import { imageFilesFromClipboard } from '@/lib/clipboard-image';
 import { ENTITY_ICONS } from './embed-card';
+import { AssetPickerPopover } from './asset-picker-popover';
 
 /** S8 #2: pre-send capability 경고 대상 — 대화의 에이전트 participant(본인 제외) runtime. */
 export interface CommandTarget {
@@ -57,6 +66,20 @@ function applyEntity(
   return { text: value.slice(0, start) + replacement + value.slice(cursorPos), caretPos: start + replacement.length };
 }
 
+
+// S6: 스토리지 자산 선택 → 토큰 삽입. applyEntity 미러(트리거 문자 없이 caret 위치에 삽입).
+// 토큰 형식 정확히 `[${name}](entity:asset:${id}) ` (chat-bubble 의 entity:asset 렌더 경로와 정합).
+function applyAsset(
+  value: string,
+  cursorPos: number,
+  name: string,
+  assetId: string,
+): { text: string; caretPos: number } {
+  // 파일명 escape — `[ ] ( ) \` 와 개행이 markdown-link 토큰 구조를 변조(예 `x](https://phish)[y` → 외부 phishing 링크 렌더)하는 걸 차단.
+  const safeName = name.replace(/[\\[\]()]/g, '\\$&').replace(/[\r\n]+/g, ' ');
+  const replacement = `[${safeName}](entity:asset:${assetId}) `;
+  return { text: value.slice(0, cursorPos) + replacement + value.slice(cursorPos), caretPos: cursorPos + replacement.length };
+}
 
 // command(/) 후보 레지스트리 — command-classifier는 free-form(`^/[a-zA-Z]`·BE 카탈로그/엔드포인트 0·
 // commandTargets=에이전트라 command 목록 아님). 큐레이션된 suggestion 목록 신설(선생님 B 결정·mockup #3).
@@ -128,6 +151,10 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   const [commandQuery, setCommandQuery] = useState<string | null>(null);
   const [commandIndex, setCommandIndex] = useState(0);
+
+  // S6: 첨부 메뉴(파일 업로드/스토리지에서 선택) + 자산 피커.
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   // command 후보 = 레지스트리에서 prefix 필터(로컬·fetch 0). query '' → 전체.
   const commandCandidates = commandQuery === null
     ? []
@@ -232,6 +259,20 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     setText(nextText);
     setEntityQuery(null);
     setEntityResults([]);
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(caretPos, caretPos);
+    });
+  };
+
+  // S6: 자산 선택 → caret 위치에 토큰 삽입 + 피커 닫고 textarea 리포커스(selectEntity 미러).
+  const selectAsset = (asset: Asset) => {
+    const textarea = textareaRef.current;
+    const cursorPos = textarea?.selectionStart ?? text.length;
+    const { text: nextText, caretPos } = applyAsset(text, cursorPos, asset.name, asset.id);
+    setText(nextText);
+    adjustHeight();
+    setPickerOpen(false);
     requestAnimationFrame(() => {
       textarea?.focus();
       textarea?.setSelectionRange(caretPos, caretPos);
@@ -353,10 +394,18 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   return (
     <div
-      className="flex-shrink-0 border-t border-border/80 bg-background px-3 py-2"
+      className="relative flex-shrink-0 border-t border-border/80 bg-background px-3 py-2"
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >
+      {/* S6: 스토리지 자산 피커 — 첨부 메뉴 '스토리지에서 선택' 진입(목업 ①). */}
+      {pickerOpen && projectId && (
+        <AssetPickerPopover
+          projectId={projectId}
+          onSelect={selectAsset}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
       {/* Pending file chips (전송 전) */}
       {pendingFiles.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
@@ -514,16 +563,44 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           </ul>
         )}
 
-        {/* Attach */}
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled || atMaxAttachments}
-          className="flex-shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-muted/60 hover:text-foreground disabled:opacity-40"
-          aria-label="파일 첨부"
-        >
-          <Paperclip className="h-4 w-4" />
-        </button>
+        {/* Attach — S6: 메뉴(파일 업로드 / 스토리지에서 선택). 피커 열림 시 info 틴트(목업 .iconbtn.on). */}
+        <DropdownMenu open={attachMenuOpen} onOpenChange={setAttachMenuOpen}>
+          <DropdownMenuTrigger
+            type="button"
+            disabled={disabled}
+            aria-label={t('attachMenuLabel')}
+            className={`flex-shrink-0 rounded-md p-1.5 transition-colors disabled:opacity-40 ${
+              attachMenuOpen || pickerOpen
+                ? 'bg-info/10 text-info'
+                : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+            }`}
+          >
+            <Paperclip className="h-4 w-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-52">
+            <DropdownMenuItem
+              disabled={atMaxAttachments}
+              onClick={() => {
+                setAttachMenuOpen(false);
+                fileInputRef.current?.click();
+              }}
+            >
+              <Upload className="size-4 text-muted-foreground" aria-hidden />
+              {t('attachMenuUpload')}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={!projectId}
+              onClick={() => {
+                setAttachMenuOpen(false);
+                setPickerOpen(true);
+              }}
+            >
+              <FolderOpen className="size-4 text-info" aria-hidden />
+              {t('attachMenuStorage')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <input
           ref={fileInputRef}
           type="file"

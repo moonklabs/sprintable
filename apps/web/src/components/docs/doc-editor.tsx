@@ -7,7 +7,7 @@ import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import { CustomImageNode } from './extensions/image-node';
-import { ImageUploadExtension } from './extensions/image-upload';
+import { ImageUploadExtension, registerDocIdProvider } from './extensions/image-upload';
 import Highlight from '@tiptap/extension-highlight';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
@@ -16,7 +16,8 @@ import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import Placeholder from '@tiptap/extension-placeholder';
-import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2, PanelLeft } from 'lucide-react';
+import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2, PanelLeft, Plus, ImageIcon, Paperclip } from 'lucide-react';
+import { pickAndUpload } from './extensions/slash-command';
 import { CalloutNode } from './extensions/callout-node';
 import { SlashCommandExtension } from './extensions/slash-command';
 import { PageEmbedExtension } from './extensions/page-embed-node';
@@ -31,6 +32,7 @@ import { DocToc } from './doc-toc';
 import { type DocHeading, slugifyHeading } from './doc-heading-utils';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
 import { MobileSelectionMenu, isMobileDevice } from './mobile-selection-menu';
+import { useTranslations } from 'next-intl';
 
 type ContentFormat = 'markdown' | 'html';
 type ViewMode = 'preview' | 'markdown';
@@ -110,11 +112,18 @@ export function DocEditor({
     redo: string;
   };
 }) {
+  const tEditor = useTranslations('docs');
   const suppressUpdateRef = useRef(false);
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
   const [tocHeadings, setTocHeadings] = useState<DocHeading[]>([]);
   const [isFocused, setIsFocused] = useState(false);
   const editorContentRef = useRef<HTMLDivElement>(null);
+  // S4 첨부 진입: gutter "+" 위치 / 빈 문서 힌트 / DnD active-zone.
+  const [gutterTop, setGutterTop] = useState<number | null>(null);
+  const [insertMenuOpen, setInsertMenuOpen] = useState(false);
+  const [isEmpty, setIsEmpty] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragDepthRef = useRef(0);
 
   useEffect(() => {
     if (!onFileError) return;
@@ -183,6 +192,71 @@ export function DocEditor({
     if (!editor) return;
     editor.setEditable(editable);
   }, [editor, editable]);
+
+  // 업로드 확장이 라이브로 읽는 docId 등록(doc 전환 대응·storage mutate / ref 전달 회피).
+  useEffect(() => {
+    if (!editor) return;
+    return registerDocIdProvider(editor, () => currentDocId);
+  }, [editor, currentDocId]);
+
+  // gutter "+" 위치(현재 캐럿 줄) + 빈 문서 여부 추적.
+  useEffect(() => {
+    if (!editor) return;
+    const sync = () => {
+      setIsEmpty(editor.isEmpty);
+      const wrap = editorContentRef.current;
+      if (!wrap) return;
+      try {
+        const { from } = editor.state.selection;
+        const coords = editor.view.coordsAtPos(from);
+        const rect = wrap.getBoundingClientRect();
+        setGutterTop(coords.top - rect.top + wrap.scrollTop);
+      } catch {
+        setGutterTop(null);
+      }
+    };
+    sync();
+    editor.on('selectionUpdate', sync);
+    editor.on('update', sync);
+    editor.on('focus', sync);
+    return () => {
+      editor.off('selectionUpdate', sync);
+      editor.off('update', sync);
+      editor.off('focus', sync);
+    };
+  }, [editor]);
+
+  // 메뉴 바깥 클릭 시 닫기.
+  useEffect(() => {
+    if (!insertMenuOpen) return;
+    const close = () => setInsertMenuOpen(false);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [insertMenuOpen]);
+
+  const openImagePicker = useCallback(() => {
+    if (editor) pickAndUpload(editor, 'image/*');
+    setInsertMenuOpen(false);
+  }, [editor]);
+  const openFilePicker = useCallback(() => {
+    if (editor) pickAndUpload(editor);
+    setInsertMenuOpen(false);
+  }, [editor]);
+
+  // DnD active-zone — 파일 드래그 동안 점선 오버레이(실 drop 은 ProseMirror handleDrop 처리).
+  const onDragEnter = useCallback((e: React.DragEvent) => {
+    if (!Array.from(e.dataTransfer?.types ?? []).includes('Files')) return;
+    dragDepthRef.current += 1;
+    setIsDragging(true);
+  }, []);
+  const onDragLeave = useCallback(() => {
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDragging(false);
+  }, []);
+  const onDrop = useCallback(() => {
+    dragDepthRef.current = 0;
+    setIsDragging(false);
+  }, []);
 
   // Extract TOC headings from editor + assign IDs to heading DOM elements
   useEffect(() => {
@@ -453,8 +527,80 @@ export function DocEditor({
           placeholder={labels.placeholder}
         />
       ) : (
-        <div ref={editorContentRef as RefObject<HTMLDivElement>} className="tiptap-editor-wrapper flex-1 overflow-y-auto p-3 max-md:pb-20 max-md:min-h-[50vh]">
+        <div
+          ref={editorContentRef as RefObject<HTMLDivElement>}
+          onDragEnter={onDragEnter}
+          onDragOver={(e) => { if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) e.preventDefault(); }}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
+          className="tiptap-editor-wrapper relative flex-1 overflow-y-auto p-3 pl-9 max-md:pb-20 max-md:min-h-[50vh]"
+        >
           <EditorContent editor={editor} className="tiptap-content h-full outline-none" />
+
+          {/* 빈 문서 힌트 — 첨부 진입 discoverability(+ · / · DnD). */}
+          {editable && isEmpty ? (
+            <p className="pointer-events-none absolute left-9 top-3 select-none text-sm text-muted-foreground/50">
+              {tEditor('attachEmptyHint')}
+            </p>
+          ) : null}
+
+          {/* gutter "+" — 현재 줄 좌측 거터·항상 표시·클릭 시 이미지/파일 삽입 메뉴 */}
+          {editable && gutterTop !== null ? (
+            <div
+              contentEditable={false}
+              className="absolute left-1.5 z-20"
+              style={{ top: gutterTop }}
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              <button
+                type="button"
+                aria-label={tEditor('attachInsertMenu')}
+                aria-haspopup="menu"
+                aria-expanded={insertMenuOpen}
+                onClick={(e) => { e.stopPropagation(); setInsertMenuOpen((v) => !v); }}
+                className="flex size-6 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Plus className="size-3.5" />
+              </button>
+              {insertMenuOpen ? (
+                <div
+                  role="menu"
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute left-7 top-0 w-36 overflow-hidden rounded-lg border border-border bg-card p-1 shadow-lg"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={openImagePicker}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
+                  >
+                    <ImageIcon className="size-4 text-muted-foreground" />
+                    {tEditor('attachImage')}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={openFilePicker}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
+                  >
+                    <Paperclip className="size-4 text-muted-foreground" />
+                    {tEditor('attachFile')}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* DnD active-zone 오버레이 — 파일 드래그 중(목업 .dnd.active). pointer-events-none 로 실 drop 통과. */}
+          {editable && isDragging ? (
+            <div className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-dashed border-info bg-info/10 text-center">
+              <span className="flex size-9 items-center justify-center rounded-full bg-info/10 text-info">
+                <Plus className="size-4" />
+              </span>
+              <span className="text-sm font-semibold text-foreground">{tEditor('attachDropTitle')}</span>
+              <span className="text-xs text-muted-foreground">{tEditor('attachDropHint')}</span>
+            </div>
+          ) : null}
         </div>
       )}
 

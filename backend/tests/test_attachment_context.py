@@ -10,6 +10,7 @@ import pytest
 
 PROJ = "proj1"
 CONV = "conv1"
+ORG = "org1"
 
 
 @pytest.fixture
@@ -29,7 +30,7 @@ def _att(name, content_type="", url=None):
 async def _build(ac, attachments):
     """(text, images) 튜플 반환."""
     return await ac.build_attachment_context(
-        attachments, project_id=PROJ, conversation_id=CONV
+        attachments, project_id=PROJ, conversation_id=CONV, org_id=ORG
     )
 
 
@@ -216,3 +217,62 @@ async def test_empty_text_guidance(monkeypatch):
     monkeypatch.setattr(ac, "_extract_text", MagicMock(return_value="   "))
     out = await _text(ac, [_att("empty.txt", "text/plain")])
     assert "추출 텍스트 없음" in out
+
+
+# ── S7 신 namespace(org/<org>/project/<proj>/chat/<conv>/...) 인식 + IDOR 유지 ──
+
+
+@pytest.mark.anyio
+async def test_s7_namespace_doc_extraction_injected(monkeypatch):
+    """S7 AC1/AC3 회귀: 신 namespace(실 org) chat 첨부 스코프 통과 → fetch+추출 주입(probe 근원 해소)."""
+    from app.services import attachment_context as ac
+
+    monkeypatch.setattr(ac, "_download_object", AsyncMock(return_value=b"x"))
+    monkeypatch.setattr(ac, "_extract_text", MagicMock(return_value="hello s7"))
+    url = f"org/{ORG}/project/{PROJ}/chat/{CONV}/report.pdf"
+    out = await _text(ac, [_att("report.pdf", "application/pdf", url=url)])
+    assert "[첨부: report.pdf]" in out and "hello s7" in out
+    assert "접근 범위 밖" not in out
+
+
+@pytest.mark.anyio
+async def test_s7_namespace_cross_org_rejected(monkeypatch):
+    """🔴CRITICAL(까심): project_id+conv_id 가 맞아도 **org segment 가 다르면 거부**(cross-org IDOR 차단).
+    이전 hand-rolled 검사는 parts[1](org) 무검증이라 통과했던 구멍 — 이 테스트가 그걸 고정한다."""
+    from app.services import attachment_context as ac
+
+    fetch = AsyncMock(return_value=b"secret")
+    monkeypatch.setattr(ac, "_download_object", fetch)
+    url = f"org/OTHERORG/project/{PROJ}/chat/{CONV}/leak.pdf"  # 정확한 proj+conv, 틀린 org
+    out = await _text(ac, [_att("leak.pdf", "application/pdf", url=url)])
+    assert "접근 범위 밖): leak.pdf" in out and "secret" not in out
+    fetch.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_s7_namespace_cross_conv_rejected(monkeypatch):
+    """실 org 라도 타 conv segment → 스코프 밖 거부(IDOR·exact segment)."""
+    from app.services import attachment_context as ac
+
+    fetch = AsyncMock(return_value=b"secret")
+    monkeypatch.setattr(ac, "_download_object", fetch)
+    url = f"org/{ORG}/project/{PROJ}/chat/OTHERCONV/leak.pdf"
+    out = await _text(ac, [_att("leak.pdf", "application/pdf", url=url)])
+    assert "접근 범위 밖): leak.pdf" in out and "secret" not in out
+    fetch.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_s7_namespace_cross_project_and_middle_inject_rejected(monkeypatch):
+    """타 project segment·중간 /chat/ 삽입 → 거부(까심 IDOR·정확 segment 바인딩)."""
+    from app.services import attachment_context as ac
+
+    fetch = AsyncMock(return_value=b"secret")
+    monkeypatch.setattr(ac, "_download_object", fetch)
+    for url in (
+        f"org/{ORG}/project/OTHERPROJ/chat/{CONV}/leak.pdf",          # 타 project
+        f"org/{ORG}/project/{PROJ}/evil/chat/{CONV}/leak.pdf",        # 중간 삽입(parts[4]!='chat')
+    ):
+        out = await _text(ac, [_att("leak.pdf", "application/pdf", url=url)])
+        assert "접근 범위 밖): leak.pdf" in out, url
+    fetch.assert_not_awaited()

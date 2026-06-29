@@ -12,6 +12,7 @@ import {
   ClipboardList,
   FolderKanban,
   Gauge,
+  HardDrive,
   Inbox,
   Layers,
   LayoutDashboard,
@@ -278,6 +279,16 @@ export function AppSidebar({
                 >
                   <Bot />
                   <span>{t('agents')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/storage" />}
+                  isActive={isActive('/storage')}
+                  tooltip={t('storage')}
+                >
+                  <HardDrive />
+                  <span>{t('storage')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>

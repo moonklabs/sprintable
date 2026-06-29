@@ -21,6 +21,8 @@ const ENTITY_COLORS: Record<string, string> = {
   doc: 'border-border bg-muted/40 text-foreground',
   epic: 'border-secondary bg-secondary/40 text-foreground',
   task: 'border-success/30 bg-success/8 text-foreground',
+  // S6: 스토리지 자산 토큰 — info 틴트(파일 아이콘은 content-type 의존이라 AssetEmbedCard 에서 getFileIcon 처리).
+  asset: 'border-info/30 bg-info/8 text-foreground',
 };
 
 export function getEntityHref(entityType: string, entityId: string): string | null {
@@ -28,6 +30,7 @@ export function getEntityHref(entityType: string, entityId: string): string | nu
     case 'story': return `/board?story=${entityId}`;
     case 'doc': return `/docs?id=${entityId}`;
     case 'epic': return `/epics/${entityId}`;
+    case 'asset': return `/storage?asset=${entityId}`;
     case 'task': return null;
     default: return null;
   }
@@ -45,6 +48,7 @@ const ENTITY_API: Record<string, (id: string) => string> = {
   story: (id) => `/api/stories/${id}`,
   epic: (id) => `/api/epics/${id}`,
   doc: (id) => `/api/docs/${id}`,
+  asset: (id) => `/api/assets/${id}`,
 };
 
 const MdBadge = ({ label }: { label: string }) => (

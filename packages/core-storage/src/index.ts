@@ -128,5 +128,11 @@ export type {
   InboxOption,
 } from './interfaces/IInboxItemRepository';
 
+export type {
+  IStorageService,
+  StorageObjectHead,
+  SignReadOptions,
+} from './interfaces/IStorageService';
+
 export { NullSubscriptionRepository } from './null/NullSubscriptionRepository';
 export { NullAgentRunBillingRepository } from './null/NullAgentRunBillingRepository';

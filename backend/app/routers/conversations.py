@@ -13,6 +13,7 @@ from sqlalchemy import and_, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
@@ -22,8 +23,10 @@ from app.models.team import AgentMessageAllowlist, TeamMember
 from app.models.agent_deployment import AgentAuditLog
 from app.models.webhook_config import WebhookConfig
 from app.routers.events import _push_to_agent, publish_event
+from app.schemas.attachment import validate_attachment_url
 from app.services import chat_presence
 from app.services.agent_runtime import supports_deterministic_command
+from app.services.asset_registry import sync_attachment_assets
 from app.services.command_classifier import classify_command
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import (
@@ -581,18 +584,19 @@ _MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB (메타 sanity 상한)
 
 
 class MessageAttachment(BaseModel):
-    url: str           # FE-proxy가 GCS에 업로드한 객체 URL (https)
+    url: str           # FE-proxy 업로드 객체 url(https GCS 또는 canonical bare path·provider 추상)
     name: str          # 원본 파일명
     content_type: str  # MIME
     size: int          # 바이트
+    # E-STORAGE-SSOT S7: asset registry row id(denorm·catch#4). asset_links=SSOT·이 필드=denorm.
+    # optional(legacy 첨부·미등록 호환). save 시 이 값으로 asset_link 파생(drift 0).
+    asset_id: uuid.UUID | None = None
 
     @field_validator("url")
     @classmethod
     def _validate_url(cls, v: str) -> str:
-        v = v.strip()
-        if not v.startswith("https://"):
-            raise ValueError("attachment url must be an https:// URL")
-        return v
+        # https URL(legacy/GCS) 또는 canonical bare object path(local/s3) 허용·외부 스킴 거부.
+        return validate_attachment_url(v)
 
     @field_validator("name", "content_type")
     @classmethod
@@ -1201,14 +1205,21 @@ async def send_message(
         if root_msg.thread_id is not None:
             raise HTTPException(status_code=400, detail="Cannot reply to a reply (single-level thread only)")
 
+    # S8: 서버사이드 capacity 게이트(ee seam·SaaS only·OSS no-op) — asset commit 前 per-file+총량 enforce.
+    # 직접 API 우회 불가(commit-time gate). 초과 시 402 PLAN_LIMIT_EXCEEDED.
+    if settings.is_ee_enabled and body.attachments:
+        from ee.plan_limits import check_storage_capacity  # type: ignore[import]
+        await check_storage_capacity(db, org_id, [a.model_dump() for a in body.attachments])
+
     msg = ConversationMessage(
         conversation_id=conversation_id,
         sender_id=sender.id,
         content=body.content,
         mentioned_ids=valid_mentioned_ids,
         thread_id=body.thread_id,
-        # E-FILE S1: 첨부 메타(URL+name+content_type+size)를 0093 attachments JSONB에 저장
-        attachments=[a.model_dump() for a in body.attachments],
+        # E-FILE S1: 첨부 메타(URL+name+content_type+size)를 0093 attachments JSONB에 저장.
+        # S7: client 제공 asset_id 는 strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
+        attachments=[{**a.model_dump(), "asset_id": None} for a in body.attachments],
     )
     db.add(msg)
 
@@ -1224,6 +1235,29 @@ async def send_message(
         )
 
     await db.flush()
+
+    # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
+    # S7: 반환 url→asset_id 로 JSONB asset_id 역기입(denorm·catch#4: asset_links=SSOT·JSONB=denorm).
+    if body.attachments:
+        url_map = await sync_attachment_assets(
+            db,
+            org_id=org_id,
+            project_id=conv.project_id,
+            source_type="conversation_message",
+            source_id=msg.id,
+            attachments=[a.model_dump() for a in body.attachments],
+            created_by=sender.id,
+            # S7 AC1: 업로드 path 는 conversation_id 로 스코프(`.../chat/{conv_id}/`)·asset_link.source_id 는
+            # msg.id 유지. path 검증만 conv_id 로(축 분리·영구 mismatch 해소). IDOR: conv 의 project/org 는
+            # 이 핸들러가 이미 검증(conv.project_id·get_verified_org_id) + exact-prefix 그대로.
+            path_scope_id=conversation_id,
+        )
+        if url_map:
+            msg.attachments = [
+                {**a, "asset_id": str(url_map[a["url"]])} if a.get("url") in url_map else a
+                for a in (msg.attachments or [])
+            ]
+            await db.flush()
 
     # AC10: Discord 수신자 파악 → SSE dispatch에서 제외 (동일 db 세션, flush 완료 상태)
     discord_exclude_ids: set[uuid.UUID] = set()
