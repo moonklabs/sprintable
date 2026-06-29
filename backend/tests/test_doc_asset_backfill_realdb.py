@@ -109,6 +109,29 @@ async def test_apply_converts_registers_rewrites_idempotent():
 
 
 @pytest.mark.anyio
+async def test_lost_update_race_no_clobber():
+    """PO codex: 스캔↔write 사이 doc 편집(stale 스냅샷) → CAS miss → 유저 편집 clobber 0(skip)."""
+    from app.services.doc_asset_backfill import backfill_doc
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            edited = "USER EDITED — 보존돼야 함"
+            did = await _seed(s, edited)  # DB 현재 content = 유저 편집본
+            stale = f"![old](data:image/png;base64,{B64})"  # backfill 이 든 stale 스냅샷(편집 前)
+            r = await backfill_doc(s, doc_id=did, org_id=ORG, project_id=PROJ, content=stale, apply=True)
+            await s.commit()
+            assert r["converted"] == 0 and r["skipped_modified"] == 1  # CAS miss → skip
+            now = (await s.execute(text(f"SELECT content FROM docs WHERE id='{did}'"))).scalar_one()
+            assert now == edited  # 유저 편집 무손실
+            # savepoint rollback → orphan asset/link 0.
+            n_assets = (await s.execute(text(f"SELECT count(*) FROM assets WHERE org_id='{ORG}'"))).scalar_one()
+            assert n_assets == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_partial_failure_keeps_base64(_mock_storage):
     from app.services.doc_asset_backfill import backfill_doc
     _mock_storage.put_object = AsyncMock(side_effect=[True, False])  # 2번째 노드 put 실패

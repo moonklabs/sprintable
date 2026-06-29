@@ -51,7 +51,8 @@ async def main() -> int:
 
     print(
         f"[{mode}] 완료 — docs_scanned={totals['docs_scanned']} docs_converted={totals['docs_converted']} "
-        f"nodes_found={totals['found']} converted={totals['converted']} failed={totals['failed']}"
+        f"nodes_found={totals['found']} converted={totals['converted']} failed={totals['failed']} "
+        f"skipped_modified={totals['skipped_modified']}"
     )
     if not args.apply:
         print("(dry-run — 쓰기 없음. --apply 로 실제 이관)", file=sys.stderr)

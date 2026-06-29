@@ -172,7 +172,7 @@ async def backfill_doc(
 ) -> dict:
     """단일 doc backfill. dry-run(apply=False)=count만. 반환 counts + (apply 시) 새 content."""
     nodes = _scan_nodes(content)
-    result = {"found": len(nodes), "converted": 0, "failed": 0}
+    result = {"found": len(nodes), "converted": 0, "failed": 0, "skipped_modified": 0}
     if not nodes or not apply:
         return result
 
@@ -199,37 +199,55 @@ async def backfill_doc(
     if not attachments:
         return result
 
-    # additive register(reconcile=False·같은 doc 기존 link clobber 금지). head_object authoritative size.
-    url_map = await sync_attachment_assets(
-        session, org_id=org_id, project_id=project_id, source_type="doc",
-        source_id=doc_id, attachments=[{"url": a["url"], "name": a["name"],
-                                        "content_type": a["content_type"]} for a in attachments],
-        reconcile=False,
-    )
-    for a in attachments:
-        asset_id = url_map.get(a["url"])
-        n = a["_node"]
-        if asset_id is None:
-            result["failed"] += 1
-            continue  # register 미성공(scope 거부 등) → base64 유지
-        if n.kind == "file":
-            n.asset_ref = to_asset_ref_file_node(asset_id, n.filename, a["_size"], a["_mime"])
-        else:
-            n.asset_ref = to_asset_ref_image_node(
-                asset_id, n.filename, a["_size"], a["_mime"], width=n.width, alt=n.alt
-            )
-
-    # 성공 노드만 역순 치환(position 보존). 실패 노드는 base64 그대로.
-    new_content = content
-    for n in sorted([x for x in nodes if x.asset_ref], key=lambda x: x.start, reverse=True):
-        new_content = new_content[:n.start] + n.asset_ref + new_content[n.end:]
-        result["converted"] += 1
-
-    if result["converted"] and new_content != content:
-        await session.execute(
-            update(Doc).where(Doc.id == doc_id).values(content=new_content)
+    # 낙관적 동시성(PO codex: lost-update race) — 스캔 스냅샷(content)↔content write 사이 유저가 그 doc 을
+    # 편집하면 무조건 덮어쓰기가 유저 편집을 clobber(데이터유실). register(asset/link insert) + content CAS
+    # (`WHERE content == 스냅샷`)를 savepoint 로 묶어, CAS miss(doc 변경됨)면 통째 rollback → asset/link
+    # orphan 0(GCS blob 만 미참조로 잔류=무해)·base64 유지·다음 run 재변환. 정상은 savepoint→chunk commit persist.
+    sp = await session.begin_nested()
+    try:
+        url_map = await sync_attachment_assets(
+            session, org_id=org_id, project_id=project_id, source_type="doc",
+            source_id=doc_id, attachments=[{"url": a["url"], "name": a["name"],
+                                            "content_type": a["content_type"]} for a in attachments],
+            reconcile=False,
         )
-        result["content"] = new_content
+        for a in attachments:
+            asset_id = url_map.get(a["url"])
+            n = a["_node"]
+            if asset_id is None:
+                result["failed"] += 1
+                continue  # register 미성공(scope 거부 등) → base64 유지
+            if n.kind == "file":
+                n.asset_ref = to_asset_ref_file_node(asset_id, n.filename, a["_size"], a["_mime"])
+            else:
+                n.asset_ref = to_asset_ref_image_node(
+                    asset_id, n.filename, a["_size"], a["_mime"], width=n.width, alt=n.alt
+                )
+
+        # 성공 노드만 역순 치환(position 보존). 실패 노드는 base64 그대로.
+        new_content = content
+        applied = 0
+        for n in sorted([x for x in nodes if x.asset_ref], key=lambda x: x.start, reverse=True):
+            new_content = new_content[:n.start] + n.asset_ref + new_content[n.end:]
+            applied += 1
+
+        if applied and new_content != content:
+            res = await session.execute(
+                update(Doc)
+                .where(Doc.id == doc_id, Doc.content == content)  # CAS — 스냅샷과 동일할 때만
+                .values(content=new_content)
+            )
+            if not res.rowcount:
+                await sp.rollback()  # doc 변경됨 — clobber 방지·asset/link insert 통째 취소
+                result["skipped_modified"] = applied
+                logger.warning("backfill: doc %s 스캔 후 변경됨 — lost-update 방지 skip", doc_id)
+                return result
+            result["content"] = new_content
+        await sp.commit()
+        result["converted"] = applied
+    except Exception:
+        await sp.rollback()
+        raise
     return result
 
 
@@ -241,7 +259,8 @@ async def backfill_docs(
     chunk: int = 100,
 ) -> dict:
     """전 doc(또는 org 한정) keyset chunk 순회 backfill. 반환 집계 counts."""
-    totals = {"docs_scanned": 0, "docs_converted": 0, "found": 0, "converted": 0, "failed": 0}
+    totals = {"docs_scanned": 0, "docs_converted": 0, "found": 0, "converted": 0,
+              "failed": 0, "skipped_modified": 0}
     last_id: uuid.UUID | None = None
     while True:
         q = select(Doc.id, Doc.org_id, Doc.project_id, Doc.content).order_by(Doc.id).limit(chunk)
@@ -264,6 +283,7 @@ async def backfill_docs(
             totals["found"] += r["found"]
             totals["converted"] += r["converted"]
             totals["failed"] += r["failed"]
+            totals["skipped_modified"] += r["skipped_modified"]
             if r["converted"]:
                 totals["docs_converted"] += 1
         if apply:
