@@ -11,11 +11,11 @@ substitutions:
   _DEPLOY_ENV: dev
   _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
   _BACKEND_MIN_INSTANCES: '1'
-  # ⚠️ maxScale 10 = 429 포화 인시던트(2026-06-09) 後. 6(#1325)은 부하에 인스턴스 포화→429 유발.
-  #    #1330 statement_cache revert로 쿼리 가속→연결 빠른 회전→10×8=80 < DB 100 viable(peak 여유).
-  #    수렴 history: 3(#1319前·sat)→10(#1319·churn)→6(#1325·429 sat)→10(#1330 가속·viable).
-  #    durable fix는 2c4dcae7 PgBouncer(연결 decouple·maxScale 30+)·랜딩 後 상향. 그 前까지 10.
-  #    (GHA develop→dev·main→prod 자동배포가 이 default 주입 → 6이면 머지마다 429 재발 latent → 10.)
+  # ⚠️ 이 값은 **GHA cloud-build.yml 이 per-env override**(dev=1·prod=10) — 이 default 는 수동 빌드 fallback.
+  #    maxScale 10 history: 429 포화(2026-06-09)→#1330 가속→steady 10×8=80<100 "viable" 판단이었으나
+  #    **rollout(old+new 2×) 누락**이었음(ee7794eb·dev TooManyConnections). rollout per-instance = pool(4)
+  #    + pg_pubsub raw(1) = 5 → 2×10×5+20=120 > 100. 즉 maxScale 10 은 **PgBouncer(DB_PGBOUNCER·연결
+  #    decouple) 또는 tier↑ 전제**. dev(f1-micro 25)는 maxScale 1(2×1×5+5=15≤25)로 cloud-build.yml 에서 강제.
   _BACKEND_MAX_INSTANCES: '10'
   _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
 
