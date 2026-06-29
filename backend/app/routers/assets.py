@@ -331,3 +331,30 @@ def _build_source_link(stype, sid, asset_name, story_t, doc_t, msg_t) -> SourceL
         return SourceLink(type=stype, id=sid, title=title, deeplink=deeplink)
     # manual: 파일명 title·deeplink 없음(source 조회 불요·항상 생성)
     return SourceLink(type=stype, id=sid, title=asset_name, deeplink=None)
+
+
+@router.get("/assets/{asset_id}", response_model=AssetResponse)
+async def get_asset(
+    asset_id: str,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> AssetResponse:
+    """GET /api/v2/assets/{id} — 단건 asset(enriched·S6 embed-card 리치카드 소스).
+
+    _scope_filter 와 동일 org/project 접근권(IDOR·S3 authorize 일관). malformed UUID / 스코프 밖 /
+    삭제됨 = **graceful 404**(존재여부 비노출). 라우트는 /assets/storage-usage·/folders 後 선언이라
+    리터럴 경로 미shadow(파라미터 라우트 최후).
+    """
+    try:
+        aid = uuid.UUID(asset_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Asset not found") from None
+    clauses, accessible = await _scope_filter(db, auth, org_id, None)
+    asset = (await db.execute(
+        select(Asset).where(Asset.id == aid, and_(*clauses))
+    )).scalar_one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    enriched = await _enrich(db, org_id, accessible, [asset])
+    return enriched[asset.id]
