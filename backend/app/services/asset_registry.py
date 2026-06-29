@@ -59,13 +59,14 @@ def path_in_source_scope(
     차단). 두 namespace 인식(S7·AC3 무회귀)·**org/project/source 전 tenancy segment exact 바인딩**:
     - legacy: `chat/<project>/<conversation>/<file>` · `story/<project>/<story>/<file>`
     - S7 신: `org/<org>/project/<project>/chat/<conversation>/<file>` · `.../story/<story>/<file>`
-    신 namespace 의 org segment 도 반드시 일치(미검증 시 cross-org IDOR·CRITICAL). manual/doc 은 경로
-    제약 없음(신뢰 등록·doc=S4). segment 단위 정확 비교(_prefix_segments_match)로 변형/우회 견고.
+    신 namespace 의 org segment 도 반드시 일치(미검증 시 cross-org IDOR·CRITICAL). **doc(S4)**도 동일
+    스코프 강제(`org/<org>/project/<project>/doc/<doc_id>/`·register endpoint IDOR 핵심·FE 임의/타org path
+    register 차단). manual 만 경로 제약 없음(신뢰 등록). segment 단위 정확 비교(_prefix_segments_match)로 견고.
     """
     pid, sid = str(project_id), str(source_id)
-    kind = {"conversation_message": "chat", "story": "story"}.get(source_type)
+    kind = {"conversation_message": "chat", "story": "story", "doc": "doc"}.get(source_type)
     if kind is None:
-        return True  # manual/doc 등 경로 제약 없는 source
+        return True  # manual 등 경로 제약 없는 source(신뢰 등록)
     # legacy: <kind>/<project>/<source>/<file>
     if _prefix_segments_match(object_path, [kind, pid, sid]):
         return True

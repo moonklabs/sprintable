@@ -947,3 +947,71 @@ async def test_storage_warn_cron_email_dedup_rearm(monkeypatch):
             assert m2 is None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_register_doc_asset_s4():
+    """S4: doc asset register endpoint — valid=asset+asset_link(doc) 생성·out-of-scope path=400(IDOR)·
+    no project access=403·doc 없음=404."""
+    from unittest.mock import MagicMock
+
+    from fastapi import HTTPException
+
+    from app.models.doc import Doc
+    from app.routers.docs import DocAssetRegisterRequest, register_doc_asset
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            doc = Doc(org_id=ORG, project_id=PROJ_A, title="t", slug=f"s4-{uuid.uuid4()}")
+            s.add(doc)
+            doc_b = Doc(org_id=ORG, project_id=PROJ_B, title="tb", slug=f"s4b-{uuid.uuid4()}")  # USER 미접근
+            s.add(doc_b)
+            await s.flush()
+            doc_id, doc_b_id = doc.id, doc_b.id
+            await s.commit()
+
+            auth = MagicMock()
+            auth.user_id = str(USER)
+
+            # ① valid register → asset + asset_link(source_type=doc)
+            good = f"org/{ORG}/project/{PROJ_A}/doc/{doc_id}/u-a.png"
+            resp = await register_doc_asset(
+                doc_id, DocAssetRegisterRequest(url=good, filename="a.png", size=123, mime="image/png"),
+                session=s, auth=auth, org_id=ORG,
+            )
+            assert resp.filename == "a.png" and resp.size == 123
+            link_n = (await s.execute(text(
+                f"SELECT count(*) FROM asset_links WHERE source_type='doc' AND source_id='{doc_id}'"
+            ))).scalar_one()
+            asset_n = (await s.execute(text(f"SELECT count(*) FROM assets WHERE id='{resp.asset_id}'"))).scalar_one()
+            assert link_n == 1 and asset_n == 1
+
+            # ② out-of-scope path(타 doc namespace) → 400 IDOR
+            bad = f"org/{ORG}/project/{PROJ_A}/doc/{uuid.uuid4()}/evil.png"
+            try:
+                await register_doc_asset(doc_id, DocAssetRegisterRequest(url=bad, filename="e", size=1), session=s, auth=auth, org_id=ORG)
+                assert False, "expected 400"
+            except HTTPException as e:
+                assert e.status_code == 400
+
+            # ③ no project access(PROJ_B doc) → 403
+            try:
+                await register_doc_asset(
+                    doc_b_id, DocAssetRegisterRequest(url=f"org/{ORG}/project/{PROJ_B}/doc/{doc_b_id}/x.png", filename="x", size=1),
+                    session=s, auth=auth, org_id=ORG,
+                )
+                assert False, "expected 403"
+            except HTTPException as e:
+                assert e.status_code == 403
+
+            # ④ doc 없음 → 404
+            try:
+                await register_doc_asset(uuid.uuid4(), DocAssetRegisterRequest(url="org/x/y/doc/z/f.png", filename="x", size=1), session=s, auth=auth, org_id=ORG)
+                assert False, "expected 404"
+            except HTTPException as e:
+                assert e.status_code == 404
+    finally:
+        await engine.dispose()
