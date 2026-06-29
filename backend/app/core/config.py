@@ -10,20 +10,31 @@ class Settings(BaseSettings):
     # Cloud SQL Unix socket 연결 예시 (Cloud Run 등):
     #   postgresql+asyncpg://sprintable:PASSWORD@/sprintable?host=/cloudsql/sprintable:asia-northeast3:sprintable-dev
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:54322/postgres"
+    # ee7794eb ③: DB_PGBOUNCER on 時 DATABASE_URL 은 PgBouncer(transaction-mode) 를 가리키는데, pg_pubsub
+    # raw LISTEN/NOTIFY 는 transaction-mode 비호환(연결이 statement 마다 반납돼 LISTEN 상태 소실) → **direct
+    # Cloud SQL URL 별도**로 우회. 미설정 시 database_url 폴백(non-PgBouncer 환경). on+미설정 = startup
+    # fail-closed(pg_pubsub.check_listen_config·main lifespan).
+    database_url_direct: str = ""
 
     # Cloud SQL (D-S1: Phase D GCP 인프라)
     cloud_sql_instance_dev: str = "sprintable-494803:asia-northeast3:sprintable-dev"
     cloud_sql_instance_prod: str = "sprintable-494803:asia-northeast3:sprintable-prod"
 
-    # E-INFRA S2: DB 커넥션 풀 right-size (env DB_POOL_SIZE / DB_MAX_OVERFLOW로 override).
-    # 산식: (maxScale × (pool_size + max_overflow)) + admin/migration headroom ≤ max_connections.
-    #   prod(sprintable-prod db-g1-small, max_connections=100, maxScale=10):
-    #     10 × (5 + 3) = 80  + ~20 headroom(superuser_reserved 3 + migrate-prod 잡 + 수동 admin) = 100 ✓
-    #   dev(maxScale=3): 3 × (5+3)=24 로 여유 큼 — 필요 시 env로 상향(예 10/20) 독립 right-size.
-    # ⚠️ --concurrency=80(인스턴스당 동시 HTTP 요청)과 별개: 풀은 **DB op 점유 구간만** 커넥션을 잡고
-    #    즉시 반납하므로 80 동시요청 ≠ 80 커넥션. pool+overflow 초과분은 pool_timeout 대기(실패 아님).
-    db_pool_size: int = 5
-    db_max_overflow: int = 3
+    # E-INFRA S2 + ee7794eb: DB 커넥션 풀 **rollout-safe** right-size (env DB_POOL_SIZE/DB_MAX_OVERFLOW override).
+    # ⚠️ 배포 rollout 時 old+new 리비전이 **동시 점유(2×)** — steady 산식만 쓰면 배포 중 max_connections
+    #    초과(2026-06-29 dev TooManyConnections·#1766 rollout 전요청 500). **인스턴스당 실 커넥션은 pool
+    #    밖의 raw 연결까지** 포함해야 한다(까심 적출): pg_pubsub.listen_loop = raw asyncpg **상시 1개**(pool
+    #    미점유). (l2_worker 는 engine.connect→pool 내·추가 0.) → **per_instance = (pool+overflow) + RAW(1) = 5.**
+    #    rollout-aware 산식: **2 × maxScale × ((pool+overflow) + RAW) + admin/migration headroom ≤ max_connections.**
+    #   ① 앱 최소요구(실측): pool+overflow ≥ 4 (total 3 이면 send_message pool_timeout). ∴ pool 3/1=4 고정(밑으로 불가).
+    #   ② dev(f1-micro ~25·maxScale 실측 10→PO **1** 적용 rev 01240-hkc): 2×1×5+5 = 15 ≤ 25 (여유 10).
+    #      (maxScale 2 면 25/25 한계·1 로 여유 확보. 10 이면 2×10×5+5=105≫25 → pool 4 단독 불가·maxScale↓ 필수.)
+    #   ③ prod(g1-small 100·maxScale **실측 필수**): 2×10×5+20=120 > 100(가정 10이면 초과). 안전 상한 maxScale≤8
+    #      (2×8×5+20=100·여유 0). **prod 승격 前 PgBouncer(durable·연결 decouple) 또는 tier↑ 필수**(maxScale 캡만으론 0 headroom).
+    # ⚠️ 향후 always-on LISTEN/raw 연결 추가 시 RAW 카운트 ++ 동반(산식 누락 = 이번 false-PASS 재발).
+    # ⚠️ --concurrency=80 과 별개: 풀은 DB op 점유 구간만 잡고 즉시 반납·초과분 pool_timeout 대기(실패 아님).
+    db_pool_size: int = 3
+    db_max_overflow: int = 1
 
     # PgBouncer ④: 사이드카(localhost:6432·pool_mode=transaction) 경유 여부(env DB_PGBOUNCER).
     # off(기본): 직접 Cloud SQL — 현 동작 100% 유지(사이드카 없어도 다운 X).
