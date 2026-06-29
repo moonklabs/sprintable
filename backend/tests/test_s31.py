@@ -333,8 +333,9 @@ async def test_get_project_settings_200():
         mock_result.scalar_one_or_none.return_value = _mock_setting()
         session.execute = AsyncMock(return_value=mock_result)
 
-        async with client as c:
-            resp = await c.get(f"/api/v2/project-settings?project_id={PROJECT_ID}")
+        with patch("app.routers.project_settings.has_project_access", new_callable=AsyncMock, return_value=True):
+            async with client as c:
+                resp = await c.get(f"/api/v2/project-settings?project_id={PROJECT_ID}")
 
         assert resp.status_code == 200
         assert resp.json()["standup_deadline"] == "09:00:00"
@@ -350,8 +351,9 @@ async def test_get_project_settings_default_200():
         mock_result.scalar_one_or_none.return_value = None
         session.execute = AsyncMock(return_value=mock_result)
 
-        async with client as c:
-            resp = await c.get(f"/api/v2/project-settings?project_id={PROJECT_ID}")
+        with patch("app.routers.project_settings.has_project_access", new_callable=AsyncMock, return_value=True):
+            async with client as c:
+                resp = await c.get(f"/api/v2/project-settings?project_id={PROJECT_ID}")
 
         assert resp.status_code == 200
         assert resp.json()["standup_deadline"] == "09:00:00"

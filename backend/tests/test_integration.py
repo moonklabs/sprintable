@@ -1,6 +1,5 @@
 """S18+S25+S32: conftest fixture 기반 통합 테스트 — Sprint 3+4+5 도메인 헬스 체크."""
 import uuid
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -238,7 +237,9 @@ async def test_project_settings_get_via_conftest(test_client, mock_session, proj
     mock_result.scalar_one_or_none.return_value = None
     mock_session.execute = AsyncMock(return_value=mock_result)
 
-    resp = await test_client.get(f"/api/v2/project-settings?project_id={project_id}")
+    from unittest.mock import patch as _patch
+    with _patch("app.routers.project_settings.has_project_access", new_callable=AsyncMock, return_value=True):
+        resp = await test_client.get(f"/api/v2/project-settings?project_id={project_id}")
     assert resp.status_code == 200
     assert resp.json()["standup_deadline"] == "09:00:00"
 

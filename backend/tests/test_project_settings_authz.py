@@ -45,4 +45,12 @@ async def test_patch_settings_checks_admin_min_role():
     assert mock_hpr.await_args.kwargs.get("min_role") == "admin"
 
 
-# GET(읽기·standup_deadline)은 저민감이라 authed user 면 허용(기존 동작 유지)·write(PATCH)만 게이트.
+@pytest.mark.anyio
+async def test_get_settings_requires_project_access():
+    # GET = project member(has_project_access·테넌시) — cross-tenant read(타 org settings 노출) 차단.
+    with patch.object(ps, "has_project_access", new_callable=AsyncMock, return_value=False):
+        with pytest.raises(HTTPException) as e:
+            await ps.get_project_settings(
+                project_id=uuid.uuid4(), session=AsyncMock(), auth=_auth(), org_id=uuid.uuid4()
+            )
+        assert e.value.status_code == 403
