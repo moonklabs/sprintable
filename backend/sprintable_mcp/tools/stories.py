@@ -79,8 +79,13 @@ async def list_stories(args: ListStoriesInput) -> list[TextContent]:
 
 async def list_backlog(args: SprintableInput) -> list[TextContent]:
     """백로그 스토리 목록 (스프린트 미배정)."""
+    # b5870c4c: 전용 `/stories/backlog` 라우트 부재 → `/{id}` 로 shadow 돼 422(id="backlog" 非-UUID).
+    # 기존 list 엔드포인트 + `no_sprint` 필터(server-side repo.list_backlog·sprint 미배정·docstring 정합) 재사용.
+    # ⚠️ no_sprint 는 project_id 와 함께여야 backlog 분기 동작(stories.py list_stories).
     try:
-        return ok(await client.get("/api/v2/stories/backlog", params={"project_id": client.project_id}))
+        return ok(await client.get(
+            "/api/v2/stories", params={"project_id": client.project_id, "no_sprint": "true"}
+        ))
     except Exception as exc:
         return err(str(exc))
 
