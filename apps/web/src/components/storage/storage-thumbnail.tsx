@@ -47,32 +47,24 @@ function deeplinkValue(deeplink: AssetDeeplink, key: string): string | null {
 }
 
 /**
- * source 선택 — "accessible 우선 + privacy-safe" 우선순위(정확히 하나):
- *   1. story  → path + story_id        (project authorize)
- *   2. doc    → asset_id               (project-scoped; doc 는 참여자 모델 없음)
- *   3. conversation_message → path + conversation_id (참여자 authorize) ← manual BEFORE
+ * source 선택 — privacy-invariant 우선 우선순위(정확히 하나):
+ *   1. conversation_message → path + conversation_id (참여자 authorize) · 못 만들면 phantom ← 최우선
+ *   2. story  → path + story_id        (project authorize)
+ *   3. doc    → asset_id               (project-scoped)
  *   4. manual → asset_id               (project-scoped)
  *   5. 없음   → null (phantom)
  *
- * conv 가 manual(asset_id) 보다 먼저 검사된다 → conv-sourced 자산은 절대 project-scoped
- * asset_id 로 서명되지 않는다(DM 누출 차단). conv source 인데 path 인자를 못 만들면 manual 로
- * 내려가지 않고 phantom 반환(asset_id fallback 금지).
+ * 🔒 INVARIANT: conv-sourced 자산은 절대 project-scoped asset_id 로 서명되지 않는다(DM 누출 차단).
+ * conv 를 **최우선** 검사 — doc/story/manual 이 함께 있어도 conv 가 있으면 conv sign(참여자 authorize).
+ * doc asset_id 는 path 체크가 없어(project-scoped) doc+conv mixed 자산이 doc 먼저 매칭되면 우회됨
+ * → conv 를 step1 로 둬 차단(#1769 codex crux). conv 인데 path 인자를 못 만들면 phantom 반환
+ * (asset_id fallback 절대 금지).
  */
-function selectSignPlan(asset: Asset): SignPlan {
+export function selectSignPlan(asset: Asset): SignPlan {
   const links = asset.source_links;
   const hasPath = typeof asset.object_path === 'string' && asset.object_path.length > 0;
 
-  // 1. story (path-based)
-  const story = links.find((l) => l.type === 'story');
-  if (story) {
-    const storyId = deeplinkValue(story.deeplink, 'story_id');
-    if (hasPath && storyId) return { kind: 'path', param: 'story_id', id: storyId };
-  }
-
-  // 2. doc (project-scoped asset_id)
-  if (links.some((l) => l.type === 'doc')) return { kind: 'asset' };
-
-  // 3. conversation_message (path-based) — manual 보다 먼저
+  // 1. conversation_message (path-based) — 최우선. conv 있으면 무조건 conv sign 또는 phantom.
   const conv = links.find((l) => l.type === 'conversation_message');
   if (conv) {
     const conversationId = deeplinkValue(conv.deeplink, 'conversation_id');
@@ -80,6 +72,16 @@ function selectSignPlan(asset: Asset): SignPlan {
     // conv source 지만 path 인자 못 만듦 → asset_id 로 절대 내려가지 않는다(누출 차단). phantom.
     return null;
   }
+
+  // 2. story (path-based)
+  const story = links.find((l) => l.type === 'story');
+  if (story) {
+    const storyId = deeplinkValue(story.deeplink, 'story_id');
+    if (hasPath && storyId) return { kind: 'path', param: 'story_id', id: storyId };
+  }
+
+  // 3. doc (project-scoped asset_id)
+  if (links.some((l) => l.type === 'doc')) return { kind: 'asset' };
 
   // 4. manual (project-scoped asset_id)
   if (links.some((l) => l.type === 'manual')) return { kind: 'asset' };
