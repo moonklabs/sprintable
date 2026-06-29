@@ -148,6 +148,24 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     expect(img?.getAttribute('data-next-image')).toBeNull();
   });
 
+  it('authed (markdown): asset-ref file div survives sanitize + becomes clickable (guards the div data-* schema)', async () => {
+    // raw asset-ref fileAttachment <div> in a markdown doc — the default rehype-sanitize schema
+    // strips div data-type/data-asset-id, so the resolver (querySelectorAll[data-type]) would miss
+    // it → inert. The docMarkdownSanitizeSchema div extension keeps it resolvable.
+    const md = 'Intro\n\n<div data-type="fileAttachment" data-filename="r.pdf" data-size="9" data-mime-type="application/pdf" data-asset-id="mdfile-1"></div>\n\nOutro';
+    await mount(<DocContentRenderer content={md} contentFormat="markdown" />);
+
+    const fileBlock = container.querySelector<HTMLElement>('[data-type="fileAttachment"]');
+    expect(fileBlock).not.toBeNull();
+    expect(fileBlock?.innerHTML).toContain('cursor-pointer');
+    await act(async () => {
+      fileBlock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=mdfile-1&disposition=attachment'));
+    expect(openMock).toHaveBeenCalledWith(SIGNED_URL, '_blank', 'noopener,noreferrer');
+  });
+
   it('public (markdown): asset-ref image never triggers the signed route', async () => {
     const md = 'Intro\n\n<img data-asset-id="md-2" data-filename="m.png" data-size="5" data-mime-type="image/png" alt="md shot">';
     await mount(

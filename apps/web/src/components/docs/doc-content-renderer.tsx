@@ -33,8 +33,9 @@ interface DocContentRendererProps {
   assetImageErrorLabel?: string;
 }
 
-// 마크다운 경로 sanitize 스키마 — rehype-sanitize 기본 스키마는 img 의 data-* 를 제거하므로
-// asset-ref(data-asset-id)가 컴포넌트로 전달되지 않는다. img 에 한해 asset-ref 속성만 허용 추가.
+// 마크다운 경로 sanitize 스키마 — rehype-sanitize 기본 스키마는 img/div 의 data-* 를 제거하므로
+// asset-ref(data-asset-id) + 파일첨부(data-type)가 리졸버까지 도달하지 못한다.
+// img(asset-ref 이미지) + div(fileAttachment·data-type/asset-ref/legacy data-file-data) 양쪽 허용 추가.
 const docMarkdownSanitizeSchema = {
   ...defaultSchema,
   attributes: {
@@ -47,6 +48,15 @@ const docMarkdownSanitizeSchema = {
       'dataFilename',
       'dataSize',
       'dataMimeType',
+    ],
+    div: [
+      ...(defaultSchema.attributes?.['div'] ?? []),
+      'dataType',
+      'dataAssetId',
+      'dataFilename',
+      'dataSize',
+      'dataMimeType',
+      'dataFileData',
     ],
   },
 };
