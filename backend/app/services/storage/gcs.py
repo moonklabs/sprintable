@@ -51,3 +51,20 @@ class GcsStorageProvider(StorageProvider):
         except Exception:
             logger.warning("gcs storage: signed url 생성 실패 path=%s", object_path, exc_info=True)
             return None
+
+    async def delete_object(self, container: str, object_path: str) -> bool:
+        def _blocking() -> bool:
+            from google.cloud import storage
+            from google.cloud.exceptions import NotFound
+
+            try:
+                storage.Client().bucket(container).blob(object_path).delete()
+            except NotFound:
+                return True  # 이미 없음 = 멱등
+            return True
+
+        try:
+            return await asyncio.to_thread(_blocking)
+        except Exception:
+            logger.warning("gcs storage: delete 실패 path=%s", object_path, exc_info=True)
+            return False

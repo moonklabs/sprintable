@@ -852,3 +852,98 @@ async def test_get_single_asset_scoped():
                     assert e.status_code == 404, why
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_grace_cron_hard_deletes_expired_softdeleted(monkeypatch):
+    """S8 Phase 2: grace cron — soft-delete 7일 경과만 hard-delete(row+link CASCADE). 최근/live 보존.
+    blob delete 성공 시에만 row 삭제(mock provider)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.routers import cron
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            aid = uuid.uuid4()
+            await s.execute(text(
+                "INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes,deleted_at)"
+                " VALUES (:id,:o,:p,:c,'grace/a','a',10, now() - interval '8 days')"
+            ), {"id": aid, "o": ORG, "p": PROJ_A, "c": BUCKET})
+            await s.execute(text(
+                "INSERT INTO asset_links (id,org_id,asset_id,source_type,source_id)"
+                " VALUES (gen_random_uuid(),:o,:aid,'manual',gen_random_uuid())"
+            ), {"o": ORG, "aid": aid})
+            await s.execute(text(
+                "INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes,deleted_at)"
+                " VALUES (gen_random_uuid(),:o,:p,:c,'grace/b','b',10, now() - interval '1 day')"
+            ), {"o": ORG, "p": PROJ_A, "c": BUCKET})
+            await s.execute(text(
+                "INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes,deleted_at)"
+                " VALUES (gen_random_uuid(),:o,:p,:c,'grace/c','c',10, NULL)"
+            ), {"o": ORG, "p": PROJ_A, "c": BUCKET})
+            await s.commit()
+
+            prov = MagicMock()
+            prov.delete_object = AsyncMock(return_value=True)
+            monkeypatch.setattr(cron, "get_storage_provider", lambda: prov)
+
+            await cron.assets_grace_hard_delete(MagicMock(), session=s)
+
+            gone = (await s.execute(text(f"SELECT count(*) FROM assets WHERE id='{aid}'"))).scalar_one()
+            link_gone = (await s.execute(text(f"SELECT count(*) FROM asset_links WHERE asset_id='{aid}'"))).scalar_one()
+            kept = (await s.execute(text(
+                f"SELECT count(*) FROM assets WHERE org_id='{ORG}' AND object_path IN ('grace/b','grace/c')"
+            ))).scalar_one()
+            assert gone == 0 and link_gone == 0 and kept == 2
+            prov.delete_object.assert_awaited()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_storage_warn_cron_email_dedup_rearm(monkeypatch):
+    """S8 Phase 2: 80% 경고 cron — over-80%→owner 메일+마커, cooldown→재발송 X, under-80%→마커 re-arm."""
+    from unittest.mock import MagicMock
+
+    from app.routers import cron
+
+    GB = 1024 ** 3
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _reset_and_seed(s)
+            await s.execute(text(f"UPDATE org_members SET role='owner' WHERE org_id='{ORG}'"))
+            await s.execute(text(f"DELETE FROM org_subscriptions WHERE org_id='{ORG}'"))
+            await s.execute(text(
+                "INSERT INTO org_subscriptions (id,org_id,polar_customer_id,tier,status)"
+                " VALUES (gen_random_uuid(),:o,'cust_test','free','active')"
+            ), {"o": ORG})
+            await s.execute(text(
+                "INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes,deleted_at)"
+                " VALUES (gen_random_uuid(),:o,:p,:c,'warn/big','big',:sz,NULL)"
+            ), {"o": ORG, "p": PROJ_A, "c": BUCKET, "sz": int(4.5 * GB)})
+            await s.commit()
+
+            sent: list = []
+            monkeypatch.setattr(cron, "send_email", lambda to, subject, html: sent.append(to) or True)
+
+            await cron.storage_usage_warn(MagicMock(), session=s)
+            assert "u@a2.test" in sent
+            m1 = (await s.execute(text(f"SELECT storage_warn_notified_at FROM org_subscriptions WHERE org_id='{ORG}'"))).scalar_one()
+            assert m1 is not None
+
+            sent.clear()
+            await cron.storage_usage_warn(MagicMock(), session=s)
+            assert sent == []
+
+            await s.execute(text(f"UPDATE assets SET deleted_at=now() WHERE org_id='{ORG}' AND object_path='warn/big'"))
+            await s.commit()
+            await cron.storage_usage_warn(MagicMock(), session=s)
+            m2 = (await s.execute(text(f"SELECT storage_warn_notified_at FROM org_subscriptions WHERE org_id='{ORG}'"))).scalar_one()
+            assert m2 is None
+    finally:
+        await engine.dispose()
