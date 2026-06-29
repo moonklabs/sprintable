@@ -57,14 +57,17 @@ export function StorageCapacityBanner() {
           data?: { used_bytes?: number; limit_bytes?: number; percentage?: number };
         };
         const d = json.data;
+        if (!d) return;
         // percentage 가 유한수일 때만 채택 — limit_bytes 0/null(무제한·OSS) → BE 가 NaN/Infinity/null
         // 줄 수 있고, NaN < 80 은 false 라 가드 없으면 깨진(NaN%) 배너가 렌더된다(div0 방어).
-        if (!d || !Number.isFinite(d.percentage)) return;
+        // (typeof 로 number 내로잉 + isFinite 로 NaN/Infinity 배제.)
+        const pct = d.percentage;
+        if (typeof pct !== 'number' || !Number.isFinite(pct)) return;
         if (cancelled) return;
         setUsage({
           used: d.used_bytes ?? 0,
           limit: d.limit_bytes ?? 0,
-          pct: d.percentage,
+          pct,
         });
       } catch {
         // 조회 실패는 치명적이지 않음 — 배너 미노출(에러 표면 없음)
