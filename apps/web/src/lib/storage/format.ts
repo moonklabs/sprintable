@@ -102,6 +102,23 @@ export function formatTotalSize(bytes: number): string {
   return `${(mb / 1024).toFixed(1)} GB`;
 }
 
+/**
+ * 스토리지 용량 포맷(S8 용량 경고 배너) — formatTotalSize 는 GB 상한이라 TB 한도(엔터프라이즈
+ * 플랜)에서 "5120.0 GB" 같이 깨진다. B/KB/MB/GB/TB 까지 커버하는 용량 전용 포맷터.
+ * 예: 5368709120 → "5.0 GB", 0 → "0 B".
+ */
+export function formatStorageSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  const gb = mb / 1024;
+  if (gb < 1024) return `${gb.toFixed(1)} GB`;
+  return `${(gb / 1024).toFixed(1)} TB`;
+}
+
 /** ISO → YYYY-MM-DD (상세 메타 '생성' 행). */
 export function formatDate(iso: string): string {
   const t = new Date(iso).getTime();

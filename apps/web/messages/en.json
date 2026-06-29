@@ -121,7 +121,19 @@
     "previewNoAccessTitle": "Preview not available",
     "previewNoAccessDesc": "This conversation attachment is only visible to participants.",
     "previewPhantomTitle": "No preview",
-    "previewPhantomDesc": "This asset has no stored original."
+    "previewPhantomDesc": "This asset has no stored original.",
+    "capacityWarnTitle": "Storage is almost full",
+    "capacityWarnDesc": "You've used {pct}% of your storage limit. Free up space or upgrade your plan.",
+    "capacityWarnDescNoManage": "You've used {pct}% of your storage limit. Please free up some space.",
+    "capacityBlockTitle": "Storage is full · uploads are paused",
+    "capacityBlockDesc": "To upload new files, free up space by removing existing files or upgrade your plan.",
+    "capacityUsage": "<b>{used}</b> / {limit} used · {pct}%",
+    "capacityManageFiles": "Manage files",
+    "capacityUpgrade": "Upgrade",
+    "capacityToastTitle": "Storage {pct}% full",
+    "capacityToastDesc": "Uploads may be restricted soon.",
+    "capacityToastDescBlock": "Uploads are paused. Please free up space.",
+    "capacityDismiss": "Hide for this session"
   },
   "commandPalette": {
     "title": "Command palette",

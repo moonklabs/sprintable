@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { formatTotalSize } from '@/lib/storage/format';
+import { StorageCapacityBanner } from './storage-capacity-banner';
 import { StorageFolderTree } from './storage-folder-tree';
 import { StorageAssetList } from './storage-asset-list';
 import { StorageDetailPanel } from './storage-detail-panel';
@@ -244,6 +245,10 @@ export function StorageView() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <TopBarSlot title={topBarTitle} />
+
+      <div className="px-4 pt-3 empty:hidden">
+        <StorageCapacityBanner />
+      </div>
 
       <div
         className={cn(
