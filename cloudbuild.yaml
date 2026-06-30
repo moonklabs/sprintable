@@ -111,7 +111,11 @@ steps:
       # OB-1: 에이전트 onboarding generator 가 읽는 backend-direct URL 을 런타임 env 로 주입.
       # ⚠️ 반드시 --update-env-vars(additive·기존 backend env[DATABASE_URL 등] 보존). --set-env-vars 금지
       # (전체 wipe). _FASTAPI_URL 은 dev/prod 각 backend-direct run.app(프론트 NEXT_PUBLIC_FASTAPI_URL 과 동일 값).
-      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL}
+      # DB_POOL_SIZE=3/DB_MAX_OVERFLOW=1: config.py 기본과 동일하나 **명시 주입으로 durable**(과거 수동 설정·
+      # lingering env 가 config 기본을 덮는 것 방지). rollout 산식: 2×maxScale×(pool+overflow+pg_pubsub raw 1)
+      # ≤ DB max_conn (dev maxScale 8: 2×8×5=80 · prod maxScale 5: 2×5×5=50+admin). 변경 시 cloud-build.yml
+      # maxScale 와 짝으로 검토. (PO rev 01256 dev 429 right-size durable 화.)
+      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1
       - --quiet
     waitFor: [push-backend]
 
