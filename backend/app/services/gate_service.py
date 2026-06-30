@@ -211,6 +211,42 @@ async def void_gate(
     return gate
 
 
+async def void_pending_doc_gate(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    voider_id: uuid.UUID,
+) -> bool:
+    """b13352c2: doc 삭제 cascade — 그 doc 의 pending doc_approval 게이트를 system void(orphan Gate inbox
+    항목 방지). 삭제 권한자가 트리거하는 **system cascade**라 human-gate authz(can_approve·human-only) 우회
+    정당(별도 결재 아님·actor=삭제자·자기승인 아님·산티아고 검토). 스코핑=`doc_approval` 만(타 gate_type 무접촉)·
+    멱등(pending 아니면 no-op)·begin_nested 격리 best-effort(void 실패가 doc 삭제 비중단). 반환=void 수행 여부."""
+    from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
+    gate = (await session.execute(
+        select(Gate).where(
+            Gate.org_id == org_id,
+            Gate.work_item_id == doc_id,
+            Gate.work_item_type == DOC_GATE_WORK_ITEM_TYPE,
+            Gate.gate_type == DOC_GATE_TYPE,
+            Gate.status == "pending",
+        )
+    )).scalar_one_or_none()
+    if gate is None:
+        return False  # pending doc-gate 없음(terminal/held/부재) → no-op(멱등).
+    try:
+        async with session.begin_nested():
+            await void_gate(
+                session, org_id, gate.id, voider_id,
+                "doc 삭제 cascade — pending 결재 게이트 자동 무효화",
+            )
+        return True
+    except Exception:
+        logger.warning(
+            "doc 삭제 cascade void 실패(비중단) doc=%s gate=%s", doc_id, gate.id, exc_info=True
+        )
+        return False
+
+
 async def _set_linked_step_run(session, org_id, gate_id, *, status, held_until, reason):
     """gate 에 묶인 미해소 step_run 의 status/held_until 갱신(없으면 no-op·legacy/비-라인 gate)."""
     from app.services.workflow_line_resolution import find_active_step_run_for_gate

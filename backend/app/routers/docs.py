@@ -419,10 +419,18 @@ async def update_doc(
 async def delete_doc(
     id: uuid.UUID,
     repo: DocRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Doc not found")
+    # b13352c2: doc 삭제 시 그 doc 의 pending doc_approval 게이트를 cascade void(orphan Gate inbox 항목 방지).
+    # 삭제 권한자(인증 caller) 트리거 system cascade — human-gate authz 우회 정당(별도 결재 아님). void 는
+    # begin_nested 격리 best-effort라 삭제 비중단. pending 아니면 no-op(멱등)·doc_approval 만 스코핑.
+    from app.services.gate_service import void_pending_doc_gate
+    from app.services.member_resolver import resolve_member
+    deleter = await resolve_member(auth, repo.org_id, repo.session)
+    await void_pending_doc_gate(repo.session, repo.org_id, id, deleter.id)
     return {"ok": True}
 
 
