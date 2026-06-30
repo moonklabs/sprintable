@@ -34,12 +34,13 @@ def _agent(mid: uuid.UUID) -> ResolvedMember:
     )
 
 
-def _gate(requester_id, *, work_item_id=None):
+def _gate(requester_id, *, work_item_id=None, status="pending"):
     return SimpleNamespace(
         gate_type="doc_approval",
         neutral_facts={"requested_by_member_id": str(requester_id)} if requester_id else {},
         work_item_id=work_item_id or uuid.uuid4(),
         work_item_type="doc",
+        status=status,
     )
 
 
@@ -199,7 +200,8 @@ async def test_list_gates_can_approve_false_for_agent():
 @pytest.mark.anyio
 async def test_list_gates_non_doc_gate_untouched():
     merge = SimpleNamespace(
-        gate_type="merge", work_item_type="story", work_item_id=uuid.uuid4(), neutral_facts={}
+        gate_type="merge", work_item_type="story", work_item_id=uuid.uuid4(),
+        neutral_facts={}, status="pending",
     )
     org = uuid.uuid4()
     gates_result = MagicMock()
@@ -234,7 +236,7 @@ async def test_list_gates_can_approve_uses_doc_approval_predicate_not_work_item_
     org, doc_id, pid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     g = SimpleNamespace(  # 이상: gate_type=doc_approval 이나 work_item_type≠doc
         gate_type="doc_approval", work_item_type="story", work_item_id=doc_id,
-        neutral_facts={"requested_by_member_id": str(uuid.uuid4())},
+        neutral_facts={"requested_by_member_id": str(uuid.uuid4())}, status="pending",
     )
     gates_result = MagicMock()
     gates_result.scalars.return_value.all.return_value = [g]
@@ -251,3 +253,17 @@ async def test_list_gates_can_approve_uses_doc_approval_predicate_not_work_item_
             session=session, org_id=org, auth=auth,
         )
     assert out[0].can_approve is True  # project_id 가 doc_approval predicate 로 조회됨(work_item_type 무관)
+
+
+@pytest.mark.anyio
+async def test_list_gates_can_approve_false_for_terminal_status():
+    """status-DRY(codex): authz 통과해도 terminal(approved/rejected) gate 는 can_approve False — transition
+    FSM(is_valid_transition·pending 외 거부)과 동일. can_approve='지금 승인 가능'(authz + pending) 의미 정합."""
+    out = await _list_gates(_gate(uuid.uuid4(), status="approved"), has_access=True)
+    assert out[0].can_approve is False  # 자격 OK 지만 pending 아님 → FSM 으로 차단
+
+
+@pytest.mark.anyio
+async def test_list_gates_can_approve_false_for_held_status():
+    out = await _list_gates(_gate(uuid.uuid4(), status="held"), has_access=True)
+    assert out[0].can_approve is False  # held 도 pending→approved FSM 아님

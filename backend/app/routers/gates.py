@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import Doc
-from app.models.gate import Gate
+from app.models.gate import Gate, is_valid_transition
 from app.services.gate_service import (
     create_gate,
     hold_gate,
@@ -231,7 +231,11 @@ async def list_gates(
                     session, g, resolved, _uid, org_id,
                     doc_project_id=doc_proj.get(g.work_item_id),
                 )
-                resp.can_approve = _reason is None
+                # 완전 DRY(codex): "지금 승인 가능" = authz(rule A·helper) **AND** FSM 으로 resolvable
+                # (pending). transition 도 authz(helper) + transition_gate FSM(is_valid_transition) 이중이므로
+                # enrich 도 동일 is_valid_transition 으로 FSM 반영 — terminal/held gate 는 can_approve=False(승인/
+                # 반려 둘 다 pending 전제라 "approved" 한 방향 검사로 충분). authz-only 의미 갈림 제거.
+                resp.can_approve = _reason is None and is_valid_transition(g.status, "approved")
         except Exception:  # noqa: BLE001 — can_approve 가시성 enrich 실패는 목록 비중단(fail-closed=False 유지).
             logger.warning("list_gates can_approve enrich 실패(비중단) org=%s", org_id, exc_info=True)
     return responses
