@@ -105,6 +105,15 @@ async def create_gate_endpoint(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     _auth=Depends(get_current_user),
 ) -> GateResponse:
+    # ⚠️BLOCKER(codex gpt-5.5): doc_approval 게이트는 **doc 상신 경로(doc.py transition)로만** 생성.
+    # 일반 엔드포인트는 client 가 work_item_id=<자기 doc>+forged neutral_facts.requested_by_member_id 로
+    # pre-create 가능 → create_gate 멱등 재사용으로 transition self-approval 가드 우회. 직접 생성 거부
+    # (방어심층·doc.py 가 caller 로 server-stamp 하는 것과 짝). 비-doc 게이트는 기존대로.
+    if body.gate_type == "doc_approval":
+        raise HTTPException(
+            status_code=403,
+            detail="doc 결재 게이트는 doc 상신 경로로만 생성됩니다 (직접 생성 불가).",
+        )
     gate = await create_gate(
         session=session,
         org_id=org_id,
