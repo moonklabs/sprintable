@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { CheckCircle, XCircle, Ban, MoreHorizontal, AlertTriangle, Pause, PlayCircle, UserCog, ArrowRightLeft, Gavel, Crown } from 'lucide-react';
+import { CheckCircle, XCircle, Ban, MoreHorizontal, AlertTriangle, Pause, PlayCircle, UserCog, ArrowRightLeft, Gavel, Crown, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -292,6 +293,20 @@ export function GateInbox({ memberId }: GateInboxProps) {
                 </>
               ) : gateNeedsAction(gate) || isDocGate(gate) ? (
                 <>
+                  {/* doc gate: "문서에서 검토" 딥링크 primary(in-context 결재·rubber-stamp 방지). slug null이면 omit. */}
+                  {isDocGate(gate) && gate.work_item_summary?.slug ? (
+                    <Button
+                      asChild
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 gap-1 text-info hover:bg-info-tint hover:text-info"
+                    >
+                      <Link href={`/docs/${gate.work_item_summary.slug}`}>
+                        {t('gateOpenInDoc')}
+                        <ExternalLink className="size-3.5" />
+                      </Link>
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="ghost"
