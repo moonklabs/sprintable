@@ -56,10 +56,13 @@ jobs:
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
             echo "backend_min_instances=1" >> "$GITHUB_OUTPUT"
-            # ⚠️ maxScale 1 (ee7794eb·durable): dev Cloud SQL f1-micro max_conn~25. rollout(old+new 2×)·
-            # per-instance = pool(3/1=4·#1773) + pg_pubsub raw 1 = 5. 2×1×5+5(admin)=15 ≤ 25 ✓.
-            # (이전 10 = rollout 2×10×5+5=105≫25 → 매 배포 TooManyConnections. steady 80<100 주석은 rollout 누락이었음.)
-            echo "backend_max_instances=1" >> "$GITHUB_OUTPUT"
+            # ⚠️ maxScale 8 (PO rev 01256-w9r right-size·durable): dev 429 근본 = Cloud Run "no available
+            # instance"(maxScale 1 이 fleet 폴링 압도·3h 1345건). per-instance = pool(3/1=4·#1773) +
+            # pg_pubsub raw 1 = 5. rollout(old+new 2×): 2×8×5=80 ≤ 100(PO 실측 dev DB max_conn). 이전
+            # maxScale 1 은 conn-safe였으나 인스턴스 기아로 429 → load+conn 양립값. DB_POOL_SIZE=3/
+            # DB_MAX_OVERFLOW=1 은 cloudbuild.yaml --update-env-vars 로 durable(lingering env 덮어씀).
+            # (⚠️ dev/prod 공유 DB라면 prod(2×5×5+admin)와 합산 점검 필요 — PO 토폴로지 확認.)
+            echo "backend_max_instances=8" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=" >> "$GITHUB_OUTPUT"
           fi
 
