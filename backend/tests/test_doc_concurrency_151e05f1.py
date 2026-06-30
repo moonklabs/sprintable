@@ -8,10 +8,12 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.dependencies.auth import AuthContext
+from app.routers import docs as docs_mod
 from app.routers.docs import update_doc
 from app.schemas.doc import DocUpdate
 
@@ -42,7 +44,11 @@ async def _call(body_kwargs, doc_updated_at=T1):
     session.execute = AsyncMock()
     session.flush = AsyncMock()
     session.refresh = AsyncMock()
-    resp = await update_doc(d.id, DocUpdate(**body_kwargs), repo, session)
+    auth = AuthContext(user_id=str(uuid.uuid4()), email=None, claims={}, org_id=str(repo.org_id))
+    # f69fcd91: update_doc 가 project authz(_require_doc_project_access) 선행 — 이 테스트는 409 동시성
+    # 로직 검증이라 authz 게이트는 통과(doc 반환)로 패치.
+    with patch.object(docs_mod, "_require_doc_project_access", AsyncMock(return_value=d)):
+        resp = await update_doc(d.id, DocUpdate(**body_kwargs), repo, session, auth=auth)
     return resp, d
 
 
