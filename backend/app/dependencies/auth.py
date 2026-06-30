@@ -116,7 +116,11 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
         proj = (await db.execute(
             select(AgentProjectProfile.project_id)
             .where(AgentProjectProfile.member_id == m.id)
-            .order_by(AgentProjectProfile.created_at.asc())
+            # behavior-preserving: legacy(team_members ORDER BY project_id)와 동일 정렬 → 멀티프로젝트
+            # 에이전트 기본 프로젝트가 cut 전후 동일(드리프트 0). created_at 정렬은 silent 기본프로젝트
+            # 변경 = 컷오버 무중단 원칙 위반(prod 산티아고 c7a8dd0e 케이스). team_members 뷰가
+            # agent_project_profiles 서 파생되므로 project_id ASC 로 두 경로 default 동치.
+            .order_by(AgentProjectProfile.project_id.asc())
             .limit(1)
         )).scalar_one_or_none()
         member_id = m.id

@@ -9,8 +9,9 @@ dual-write 했고 0075는 type='agent' team_member만 members에 넣었으므로
 - **(a) cut regression** — legacy 는 200(active team_members 존재)인데 anchor 는 401(members(agent,active)
   부재) = flip 으로 실제 깨지는 working 키. legacy 도 이미 401 인 dead 키(inactive tm)는 flip 무관이므로
   regression 에서 제외하고 INFO(revoke 후보)로만 집계 — '깨지는 키'와 '이미 죽은 키'를 분리.
-- **(b) 해소 드리프트** — 유효 앵커가 있어도 anchor 해소(members.id + agent_project_profiles ORDER BY created_at)
+- **(b) 해소 드리프트** — 유효 앵커가 있어도 anchor 해소(members.id + agent_project_profiles ORDER BY project_id)
   가 legacy(team_members.id + ORDER BY project_id)와 다른 신원/프로젝트/org 면 cut 후 권한 드리프트.
+  (anchor 정렬을 legacy 와 동일 project_id ASC 로 정합한 後 — 정상이면 proj 축 0, 깨지면 정렬회귀/0075 파손 감지.)
 - 0건(a∩b∩FK) → flag-on 안전(dead 키 INFO 는 비차단). 1건+ → 처리(regression: 0075 정합/members 보정 · 드리프트: 정렬 정합).
 
 env: DATABASE_URL (백엔드 동일, cloud-sql-proxy/in-VPC 경유). 읽기 전용(조회만).
@@ -64,9 +65,10 @@ WHERE ak.member_id IS NOT NULL
 """
 
 # (b) anchor==legacy 해소 일치(H2 두 번째 축): **유효 앵커가 있어도** cut-on 이 legacy 와 다른 신원/
-# 프로젝트로 해소되면 cut 후 권한 드리프트. legacy(auth.py:136)=team_members ORDER BY project_id LIMIT 1,
-# anchor(auth.py:119)=agent_project_profiles ORDER BY created_at LIMIT 1 → 멀티프로젝트 agent 는 기본
-# 프로젝트가 갈릴 수 있다. member_id≠team_member_id=0075 invariant 파손. org 불일치도 점검.
+# 프로젝트로 해소되면 cut 후 권한 드리프트. legacy=team_members ORDER BY project_id LIMIT 1, anchor=
+# agent_project_profiles ORDER BY **project_id** LIMIT 1(auth.py 가 behavior-preserving 정렬 정합 후).
+# 두 경로가 project_id ASC 동일 정렬이라 정상 데이터면 proj_mismatch 0(정합 깨지면=정렬 회귀/0075 파손
+# 감지). member_id≠team_member_id=0075 invariant 파손. org 불일치도 점검.
 PARITY_SQL = """
 SELECT ak.id AS api_key_id, ak.team_member_id, ak.member_id,
        leg.project_id AS legacy_proj, anc.project_id AS anchor_proj,
@@ -85,7 +87,7 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
     SELECT app.project_id FROM agent_project_profiles app
     WHERE app.member_id = ak.member_id
-    ORDER BY app.created_at ASC LIMIT 1
+    ORDER BY app.project_id ASC LIMIT 1
 ) anc ON TRUE
 WHERE ak.revoked_at IS NULL AND (ak.expires_at IS NULL OR ak.expires_at > now())
   -- legacy 가 실제 해소되는 키만(dead 키의 legacy NULL 을 anchor 와 비교해 가짜 드리프트로 잡지 않도록).
