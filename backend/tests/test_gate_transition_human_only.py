@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -34,6 +34,10 @@ async def _call(status: str, member_type: str):
     org_id = uuid.uuid4()
     body = GateTransitionRequest(status=status, resolver_id=uuid.uuid4())
     session = AsyncMock()
+    # 48f064e5: 엔드포인트가 doc-gate authz용 게이트 로드 → 비-doc 게이트 반환(merge 등)으로 그 분기 skip.
+    _gr = MagicMock()
+    _gr.scalar_one_or_none.return_value = SimpleNamespace(gate_type="merge_approval")
+    session.execute = AsyncMock(return_value=_gr)
     transition = AsyncMock(return_value=SimpleNamespace())
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved(member_type))), \
          patch.object(gates_mod, "transition_gate", transition), \

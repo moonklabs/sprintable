@@ -182,8 +182,13 @@ async def test_delete_doc_200():
         session.delete = AsyncMock()
         session.flush = AsyncMock()
 
-        async with client as c:
-            resp = await c.delete(f"/api/v2/docs/{DOC_ID}")
+        # b13352c2: delete_doc 가 cascade(resolve_member + void_pending_doc_gate) 호출 → 패치(이 테스트는 삭제만 검증·cascade는 별도).
+        from unittest.mock import patch as _patch
+        with _patch("app.services.member_resolver.resolve_member",
+                    new=AsyncMock(return_value=MagicMock(id=uuid.uuid4()))), \
+             _patch("app.services.gate_service.void_pending_doc_gate", new=AsyncMock(return_value=False)):
+            async with client as c:
+                resp = await c.delete(f"/api/v2/docs/{DOC_ID}")
 
         assert resp.status_code == 200
         assert resp.json()["ok"] is True

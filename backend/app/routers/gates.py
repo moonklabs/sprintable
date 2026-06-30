@@ -1,4 +1,5 @@
 """E-CAGE-REFEREE P3: HITL Gate CRUD + 전이 엔드포인트."""
+import logging
 import uuid
 from datetime import datetime
 from typing import Any
@@ -10,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.gate import Gate
+from app.models.doc import Doc
+from app.models.gate import Gate, is_valid_transition
 from app.services.gate_service import (
     create_gate,
     hold_gate,
@@ -19,7 +21,9 @@ from app.services.gate_service import (
     void_gate,
 )
 from app.services.member_resolver import resolve_member
-from app.services.project_auth import is_org_owner, is_org_owner_or_admin
+from app.services.project_auth import has_project_access, is_org_owner, is_org_owner_or_admin
+
+logger = logging.getLogger(__name__)
 
 # 사람 검증 행위(approve/reject) — "human-validated" 웨지 integrity상 휴먼 member만 허용.
 _HUMAN_REVIEW_STATUSES = frozenset({"approved", "rejected"})
@@ -64,6 +68,13 @@ class GateTransitionRequest(BaseModel):
         return v
 
 
+class WorkItemSummary(BaseModel):
+    """doc-side 결재 UX(24f5ae18): 인박스 gate 가 work_item 을 렌더/링크하도록 title/slug 동봉.
+    현재 doc gate 에 채움(향후 타 work_item_type 확장 여지)."""
+    title: str
+    slug: str | None = None
+
+
 class GateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -71,6 +82,13 @@ class GateResponse(BaseModel):
     org_id: uuid.UUID
     work_item_id: uuid.UUID
     work_item_type: str
+    # doc-side 결재 UX(24f5ae18): gate row 는 work_item_id 만이라 인박스가 doc 를 못 그림 → enrich.
+    # additive·nullable(비-doc/미존재 시 None·하위호환). FE 는 별도 doc fetch 제거.
+    work_item_summary: "WorkItemSummary | None" = None
+    # decider 가시성(89484c8c): doc_approval 게이트에 **per-caller** can_approve(rule A) — FE in-doc
+    # decider 버튼 게이팅 소스(parallel-approver 목록 아님). 비-doc/무자격/비-휴먼은 False(fail-closed·
+    # additive 하위호환). ⚠️실 authz 는 BE transition 강제(이 필드는 가시성뿐). [[can_approve_doc_gate_reason]]
+    can_approve: bool = False
     gate_type: str
     status: str
     resolver_id: uuid.UUID | None = None
@@ -87,6 +105,45 @@ class GateResponse(BaseModel):
     updated_at: datetime
 
 
+# rule-A can_approve 단일 규칙(48f064e5 transition 인라인 → 89484c8c 추출·DRY). transition 강제(403
+# 분기)와 list_gates decider 가시성(can_approve bool) 이 공용 — 거동 분기 0.
+_DOC_UNSET: Any = object()
+
+
+async def can_approve_doc_gate_reason(
+    session: AsyncSession,
+    gate: Gate,
+    resolved: Any,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+    *,
+    doc_project_id: Any = _DOC_UNSET,
+) -> str | None:
+    """doc_approval 게이트 rule A(PO) 판정. None=승인 가능·else 거부사유 코드("not_human"/"self_or_unverified"/
+    "no_project_access"). rule A = human + 대상 doc project has_project_access + not-author(resolver≠
+    requester·미기록=fail-closed). ⚠️single source: transition self-approval/can_approve 강제와 list_gates
+    per-caller can_approve enrich 가 공용(분기 일치 보장). ``doc_project_id`` 미지정 시 대상 doc 직접 조회
+    (transition 단건)·list_gates 는 배치 조회한 project_id 주입(N+1 0)·None 주입=삭제/미존재 doc."""
+    if resolved.type != "human":
+        return "not_human"
+    requester = (gate.neutral_facts or {}).get("requested_by_member_id")
+    # SoD: 상신자 본인 금지 + 미기록(forged/이상 게이트)=fail-closed.
+    if requester is None or str(resolved.id) == str(requester):
+        return "self_or_unverified"
+    if doc_project_id is _DOC_UNSET:
+        _doc = (await session.execute(
+            select(Doc).where(
+                Doc.id == gate.work_item_id, Doc.org_id == org_id, Doc.deleted_at.is_(None)
+            )
+        )).scalar_one_or_none()
+        doc_project_id = _doc.project_id if _doc is not None else None
+    if doc_project_id is None or not await has_project_access(
+        session, user_id, doc_project_id, org_id
+    ):
+        return "no_project_access"
+    return None
+
+
 @router.post("", response_model=GateResponse, status_code=201)
 async def create_gate_endpoint(
     body: GateCreateRequest,
@@ -94,6 +151,15 @@ async def create_gate_endpoint(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     _auth=Depends(get_current_user),
 ) -> GateResponse:
+    # ⚠️BLOCKER(codex gpt-5.5): doc_approval 게이트는 **doc 상신 경로(doc.py transition)로만** 생성.
+    # 일반 엔드포인트는 client 가 work_item_id=<자기 doc>+forged neutral_facts.requested_by_member_id 로
+    # pre-create 가능 → create_gate 멱등 재사용으로 transition self-approval 가드 우회. 직접 생성 거부
+    # (방어심층·doc.py 가 caller 로 server-stamp 하는 것과 짝). 비-doc 게이트는 기존대로.
+    if body.gate_type == "doc_approval":
+        raise HTTPException(
+            status_code=403,
+            detail="doc 결재 게이트는 doc 상신 경로로만 생성됩니다 (직접 생성 불가).",
+        )
     gate = await create_gate(
         session=session,
         org_id=org_id,
@@ -115,7 +181,7 @@ async def list_gates(
     status: str | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth=Depends(get_current_user),
 ) -> list[GateResponse]:
     q = select(Gate).where(Gate.org_id == org_id)
     if work_item_id:
@@ -125,7 +191,54 @@ async def list_gates(
     if status:
         q = q.where(Gate.status == status)
     result = await session.execute(q)
-    return [GateResponse.model_validate(g) for g in result.scalars().all()]
+    gates = list(result.scalars().all())
+    responses = [GateResponse.model_validate(g) for g in gates]
+
+    # doc-side enrich 2종 Doc 조회를 **한 배치**로(org-scope·soft-delete 가드·N+1 0):
+    #  ⓐ work_item_summary(24f5ae18): work_item_type=='doc' gate → title/slug.
+    #  ⓑ can_approve(89484c8c): gate_type=='doc_approval' gate → project_id.
+    # ⚠️project_id 소스 predicate 는 transition(gate_type=='doc_approval'·work_item_id→Doc)와 **동일**해야
+    # DRY 정합 — work_item_type 으로 키잉하면 doc_approval 인데 work_item_type≠doc 인 이상 게이트에서 enrich
+    # (can_approve)와 transition 강제가 갈림. 두 predicate 의 work_item_id 합집합으로 조회.
+    summary_doc_ids = {g.work_item_id for g in gates if g.work_item_type == "doc"}
+    approval_doc_ids = {g.work_item_id for g in gates if g.gate_type == "doc_approval"}
+    doc_proj: dict[uuid.UUID, uuid.UUID] = {}
+    fetch_ids = summary_doc_ids | approval_doc_ids
+    if fetch_ids:
+        from app.models.doc import Doc
+        rows = (await session.execute(
+            select(Doc.id, Doc.title, Doc.slug, Doc.project_id).where(
+                Doc.id.in_(fetch_ids), Doc.org_id == org_id, Doc.deleted_at.is_(None),
+            )
+        )).all()
+        summaries = {did: WorkItemSummary(title=title, slug=slug) for did, title, slug, _ in rows}
+        doc_proj = {did: pid for did, _, _, pid in rows}
+        for resp in responses:
+            if resp.work_item_type == "doc":
+                resp.work_item_summary = summaries.get(resp.work_item_id)
+
+    # decider 가시성(89484c8c): doc_approval 게이트에 **per-caller** can_approve(rule A) enrich — FE in-doc
+    # decider 버튼 게이팅 소스(parallel /approvers 아님·그건 admin-only·plain doc-gate 빈목록=dead-path).
+    # transition 강제와 can_approve_doc_gate_reason 단일 규칙 공용(DRY). 배치 project_id 주입(N+1 0)·비-휴먼/
+    # 무자격/삭제 doc = False(default·fail-closed). additive — 실 authz 는 transition BE 가 강제(이 필드=가시성뿐).
+    doc_gates = [(resp, g) for resp, g in zip(responses, gates) if g.gate_type == "doc_approval"]
+    if doc_gates:
+        try:
+            resolved = await resolve_member(auth, org_id, session)
+            _uid = uuid.UUID(auth.user_id)
+            for resp, g in doc_gates:
+                _reason = await can_approve_doc_gate_reason(
+                    session, g, resolved, _uid, org_id,
+                    doc_project_id=doc_proj.get(g.work_item_id),
+                )
+                # 완전 DRY(codex): "지금 승인 가능" = authz(rule A·helper) **AND** FSM 으로 resolvable
+                # (pending). transition 도 authz(helper) + transition_gate FSM(is_valid_transition) 이중이므로
+                # enrich 도 동일 is_valid_transition 으로 FSM 반영 — terminal/held gate 는 can_approve=False(승인/
+                # 반려 둘 다 pending 전제라 "approved" 한 방향 검사로 충분). authz-only 의미 갈림 제거.
+                resp.can_approve = _reason is None and is_valid_transition(g.status, "approved")
+        except Exception:  # noqa: BLE001 — can_approve 가시성 enrich 실패는 목록 비중단(fail-closed=False 유지).
+            logger.warning("list_gates can_approve enrich 실패(비중단) org=%s", org_id, exc_info=True)
+    return responses
 
 
 @router.post("/{id}/transition", response_model=GateResponse)
@@ -146,6 +259,30 @@ async def transition_gate_endpoint(
             status_code=403,
             detail="게이트 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 승인 불가).",
         )
+    # E-DG 48f064e5: doc 결재 게이트 BE-level can_approve 강제(FE 게이팅은 가시성뿐·실 authz는 BE).
+    # 룰(A·PO 결정): human(위) + 대상 doc project has_project_access + not-author(resolver≠requester).
+    # 89484c8c: rule 을 can_approve_doc_gate_reason 단일 규칙으로 추출 — list_gates per-caller can_approve
+    # 가시성과 **공용**(거동 분기 0·DRY). 거부사유별 403 메시지는 여기서 보존(self vs 권한). 휴먼 체크는
+    # 위에서 선행되므로 여기 not_human 미도달(방어적으로 권한 403 매핑). 비-doc 게이트는 기존 경로 무변경.
+    _gate = (await session.execute(
+        select(Gate).where(Gate.id == id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if _gate is not None and _gate.gate_type == "doc_approval":  # doc.py DOC_GATE_TYPE
+        _reason = await can_approve_doc_gate_reason(
+            session, _gate, resolved, uuid.UUID(auth.user_id), org_id
+        )
+        # ① self-approval(SoD)·상신자 미기록(forged/이상 게이트) fail-closed.
+        if _reason == "self_or_unverified":
+            raise HTTPException(
+                status_code=403,
+                detail="본인이 상신한 doc 결재는 본인이 승인/거부할 수 없습니다 (self-approval 금지·상신자 미검증 차단).",
+            )
+        # ② can_approve 자격(no_project_access·삭제 doc·방어적 not_human): project-scope·random org-member 차단.
+        if _reason is not None:
+            raise HTTPException(
+                status_code=403,
+                detail="doc 결재 권한이 없습니다 (대상 프로젝트 접근 필요).",
+            )
     # ⭐S23 RC① + RC#1(방어심층): resolver_id 를 **전 status 무조건 인증 caller 로 강제**(body 무시).
     # body 조작(타인 UUID)으로 SoD(approver≠owner) 우회·confirmed_by_member_id 위조 차단.
     _resolver_id = resolved.id

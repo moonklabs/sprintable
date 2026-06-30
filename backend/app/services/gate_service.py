@@ -47,6 +47,10 @@ _DISPOSITION_TO_STATUS: dict[str, str] = {
     "deny": "rejected",
 }
 
+# doc-gate v2 갭1: deliberate 인간 결재 gate — org allow_auto/deny posture 무관하게 항상 manual(pending).
+# disposition auto-pass/auto-deny 제외(인간 deliberation 이 정책 자동결정보다 우선).
+_ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset({"doc_approval"})
+
 
 async def create_gate(
     session: AsyncSession,
@@ -74,6 +78,10 @@ async def create_gate(
 
     disposition = await resolve_disposition(session, org_id, member_id, role_id, gate_type)
     status = _DISPOSITION_TO_STATUS.get(disposition, "pending")
+    # doc-gate v2 갭1(선생님 실 Web): doc_approval 류 deliberate gate 는 disposition auto-pass 무관하게
+    # 항상 pending. auto_passed 면 수동 결재가 Gate inbox 에 안 떠 결재 불능(인간 결재 의도 우선).
+    if gate_type in _ALWAYS_MANUAL_GATE_TYPES:
+        status = "pending"
 
     gate = Gate(
         id=uuid.uuid4(),
@@ -142,6 +150,8 @@ async def transition_gate(
     else:
         # H1-FIX-2: merge 게이트 approve → work item 스토리를 done으로 진행(_preflight 재평가 우회).
         await _advance_story_on_merge_approve(session, gate, new_status)
+        # E-DG doc-gate(48f064e5): doc 결재 게이트 approve→confirmed·reject→denied.
+        await _resolve_doc_gate(session, gate, new_status)
 
     await session.flush()
     await session.refresh(gate)
@@ -199,6 +209,42 @@ async def void_gate(
     await session.flush()
     await session.refresh(gate)
     return gate
+
+
+async def void_pending_doc_gate(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    voider_id: uuid.UUID,
+) -> bool:
+    """b13352c2: doc 삭제 cascade — 그 doc 의 pending doc_approval 게이트를 system void(orphan Gate inbox
+    항목 방지). 삭제 권한자가 트리거하는 **system cascade**라 human-gate authz(can_approve·human-only) 우회
+    정당(별도 결재 아님·actor=삭제자·자기승인 아님·산티아고 검토). 스코핑=`doc_approval` 만(타 gate_type 무접촉)·
+    멱등(pending 아니면 no-op)·begin_nested 격리 best-effort(void 실패가 doc 삭제 비중단). 반환=void 수행 여부."""
+    from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
+    gate = (await session.execute(
+        select(Gate).where(
+            Gate.org_id == org_id,
+            Gate.work_item_id == doc_id,
+            Gate.work_item_type == DOC_GATE_WORK_ITEM_TYPE,
+            Gate.gate_type == DOC_GATE_TYPE,
+            Gate.status == "pending",
+        )
+    )).scalar_one_or_none()
+    if gate is None:
+        return False  # pending doc-gate 없음(terminal/held/부재) → no-op(멱등).
+    try:
+        async with session.begin_nested():
+            await void_gate(
+                session, org_id, gate.id, voider_id,
+                "doc 삭제 cascade — pending 결재 게이트 자동 무효화",
+            )
+        return True
+    except Exception:
+        logger.warning(
+            "doc 삭제 cascade void 실패(비중단) doc=%s gate=%s", doc_id, gate.id, exc_info=True
+        )
+        return False
 
 
 async def _set_linked_step_run(session, org_id, gate_id, *, status, held_until, reason):
@@ -292,6 +338,33 @@ async def unhold_gate(
     await session.flush()
     await session.refresh(gate)
     return gate
+
+
+async def _resolve_doc_gate(session: AsyncSession, gate: Gate, new_status: str) -> None:
+    """E-DG doc-gate(48f064e5): doc 결재 게이트 해소 → doc status 전이(merge-approve 의 doc 아날로그).
+
+    approve→confirmed · reject→denied. **pending doc 만**(멱등·非pending no-op·이미 결정/취소면 무시).
+    human-only 결재(AC4)는 게이트 전이 엔드포인트 authz 에서 강제 — 여기는 status 반영만.
+    """
+    from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
+    if gate.work_item_type != DOC_GATE_WORK_ITEM_TYPE or gate.gate_type != DOC_GATE_TYPE:
+        return
+    if new_status not in ("approved", "rejected"):
+        return
+    from app.models.doc import Doc
+
+    # 방어심층(산티아고): PK get 대신 org_id + soft-delete 가드(타org/삭제 doc 무영향).
+    doc = (await session.execute(
+        select(Doc).where(
+            Doc.id == gate.work_item_id,
+            Doc.org_id == gate.org_id,
+            Doc.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if doc is None or doc.status != "pending":
+        return  # 멱등·pending 아니면 no-op(double-resolve/취소 방어).
+    doc.status = "confirmed" if new_status == "approved" else "denied"
+    await session.flush()
 
 
 async def _advance_story_on_merge_approve(session: AsyncSession, gate: Gate, new_status: str) -> None:

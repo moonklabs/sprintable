@@ -25,6 +25,8 @@ interface ChatBubbleProps {
   // 1aeecdde P2: 2축 presence — 연결(dot) + 활동(working ring). 에이전트 sender만 적용.
   presenceStatus?: PresenceStatus | null;
   isWorking?: boolean;
+  // Deeplink (ade2d6d5): 딥링크 진입 시 일시 하이라이트(ring). 토큰 기반·테마 인지.
+  highlight?: boolean;
 }
 
 interface ContextMenuState {
@@ -101,7 +103,7 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
 
 const LONG_PRESS_MS = 500;
 
-export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, onDelete, presenceStatus, isWorking = false }: ChatBubbleProps) {
+export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, onDelete, presenceStatus, isWorking = false, highlight = false }: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
@@ -170,7 +172,8 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
   return (
     <>
       <div
-        className={`flex gap-2 ${isMine ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'}`}
+        id={`msg-${message.id}`}
+        className={`flex scroll-mt-4 gap-2 transition-shadow ${isMine ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''}`}
         onContextMenu={handleContextMenu}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}

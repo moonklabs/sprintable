@@ -39,8 +39,15 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     monkeypatch.setattr(gm, "transition_gate", _fake_transition)
     monkeypatch.setattr(gm.GateResponse, "model_validate", staticmethod(lambda g: g))
     body = gm.GateTransitionRequest(status="approved", resolver_id=spoofed)
+    # 48f064e5: 엔드포인트가 doc-gate authz용 게이트 로드 → 비-doc 게이트 반환으로 그 분기 skip.
+    _sess = AsyncMock()
+    _gr = MagicMock()
+    _g = MagicMock()
+    _g.gate_type = "merge"
+    _gr.scalar_one_or_none.return_value = _g
+    _sess.execute = AsyncMock(return_value=_gr)
     await gm.transition_gate_endpoint(
-        uuid.uuid4(), body, session=AsyncMock(), org_id=uuid.uuid4(), auth=MagicMock())
+        uuid.uuid4(), body, session=_sess, org_id=uuid.uuid4(), auth=MagicMock())
     assert captured["resolver_id"] == caller_id  # ⭐조작된 spoofed 가 아니라 인증 caller
     assert captured["resolver_id"] != spoofed
 

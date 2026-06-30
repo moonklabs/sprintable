@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Bell, BellOff, ChevronLeft, UserPlus, Pencil } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChatView } from '@/components/chat/chat-view';
@@ -40,6 +40,10 @@ function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string): str
 export default function ConversationPage() {
   const { conversation_id } = useParams<{ conversation_id: string }>();
   const router = useRouter();
+  // Deeplink (ade2d6d5): /chats/{id}?messageId={uuid} → ChatView scrolls to + highlights it.
+  // ChatView has key={conversation_id} so this is read fresh per conversation.
+  const searchParams = useSearchParams();
+  const scrollToMessageId = searchParams.get('messageId') ?? undefined;
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const [meta, setMeta] = useState<ConversationMeta | null>(null);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
@@ -226,6 +230,7 @@ export default function ConversationPage() {
           apiPrefix="/api/conversations"
           commandTargets={commandTargets}
           presenceById={presenceById}
+          scrollToMessageId={scrollToMessageId}
         />
       </div>
 
