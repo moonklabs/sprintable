@@ -127,9 +127,14 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
         proj = (await db.execute(
             select(_proj_union.c.project_id).order_by(_proj_union.c.project_id.asc()).limit(1)
         )).scalar_one_or_none()
+        # legacy 는 team_members 행이 없으면(=접근 프로젝트 0) 401(아래 else 분기). cut-on 도 동치로 401 —
+        # union 이 비면(profile·grant 모두 없음) 인증 거부(무프로젝트 키를 project_id=None 으로 통과시키면
+        # legacy 대비 인증 widening). 까심 finding①.
+        if proj is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
         member_id = m.id
         org_id = str(m.org_id)
-        project_id = str(proj) if proj else None
+        project_id = str(proj)
     else:
         # 레거시: team_members 경로.
         # team_members 는 0088 이후 projection VIEW라 멀티프로젝트 에이전트(org-level grant)는
