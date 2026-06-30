@@ -138,3 +138,37 @@ async def test_audit_regression_gate_and_aligned_parity():
             assert parity[K_IDD]["proj_mismatch"] is False  # 둘 다 P1 → proj 는 정합
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_resolver_cut_on_no_project_raises_401():
+    """auth.py finding①(까심 v3): cut-on flag-on 에서 member valid·접근 프로젝트 0(M_NOPROJ: profile·grant
+    둘 다 없음 → union 빈)인 agent 키는 `_resolve_api_key` 가 **401** — legacy(team_members 0행=401)와 동치.
+    audit (c) widening 게이트의 **resolver 측 짝**: `if proj is None: raise 401` 코드 경로 직접 락(제거 시 fail)."""
+    from fastapi import HTTPException
+
+    from app.core import config as _cfg
+    from app.core.security import hash_token
+    from app.dependencies.auth import _resolve_api_key
+
+    raw = "sk_live_noproj" + "9" * 50
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    prev = _cfg.settings.member_ssot_apikey_cut
+    try:
+        async with Session() as s:
+            await _seed(s)
+            # K_NOPROJ(member=M_NOPROJ·profile·grant 0)의 key_hash 를 실 해시로 → _resolve_api_key 가 조회 가능.
+            await s.execute(
+                text("UPDATE agent_api_keys SET key_hash = :h WHERE id = :k"),
+                {"h": hash_token(raw), "k": str(K_NOPROJ)},
+            )
+            await s.commit()
+        _cfg.settings.member_ssot_apikey_cut = True
+        async with Session() as s:
+            with pytest.raises(HTTPException) as e:
+                await _resolve_api_key(raw, s)
+            assert e.value.status_code == 401, f"무프로젝트 cut-on 이 401 아님(widening): {e.value.status_code}"
+    finally:
+        _cfg.settings.member_ssot_apikey_cut = prev
+        await engine.dispose()
