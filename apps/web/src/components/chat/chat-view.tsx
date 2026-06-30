@@ -93,6 +93,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const lastScrolledIdRef = useRef<string | null>(null);
   const scrollTargetRef = useRef<string | undefined>(undefined);
   const scrollLoadAttemptsRef = useRef(0);
+  // scroll race fix: rAF(post-paint 측정)·settle 디바운스(prepend/이미지로드로 target 밀림 재보정)·done(유저 스크롤 존중).
+  const scrollRafRef = useRef<number | null>(null);
+  const scrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollDoneRef = useRef(false);
   // CB-S8: render 후 스크롤 트리거용 ref (setTimeout 패턴 대체)
   const shouldScrollToBottomRef = useRef(false);
   // CB-S8: pull-to-refresh 터치 추적
@@ -149,9 +153,11 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     }
   }, [loading, scrollToBottom, scrollToMessageId]);
 
-  // Deeplink (ade2d6d5): 언마운트 시 하이라이트 타이머 정리(메모리·setState-after-unmount 방지).
+  // Deeplink (ade2d6d5): 언마운트 시 타이머/rAF 정리(메모리·setState-after-unmount 방지).
   useEffect(() => () => {
     if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    if (scrollSettleTimerRef.current) clearTimeout(scrollSettleTimerRef.current);
+    if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current);
   }, []);
 
   // 1aeecdde P2: 에이전트 typing 즉시 해제(답장 메시지 도착 시·다음 폴링 전 갭 제거).
@@ -370,24 +376,36 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 로드 후 다시 탐색한다. 대상 미발견·페이지 소진 시 no-op(graceful).
   useEffect(() => {
     if (!scrollToMessageId || loading) return;
-    // 대상이 바뀌면 시도 카운터 리셋(이전 대상의 잔여 시도 영향 제거).
+    // 대상이 바뀌면 시도/상태 리셋.
     if (scrollTargetRef.current !== scrollToMessageId) {
       scrollTargetRef.current = scrollToMessageId;
       scrollLoadAttemptsRef.current = 0;
+      scrollDoneRef.current = false;
     }
-    // 같은 대상으로 이미 스크롤했다면 재스크롤 금지.
-    if (lastScrolledIdRef.current === scrollToMessageId) return;
+    // settle 완료(추가 레이아웃 변화 없음) → 재보정 중단(유저 스크롤 존중).
+    if (scrollDoneRef.current) return;
 
     const container = scrollRef.current;
     if (!container) return;
     const el = container.querySelector<HTMLElement>(`#msg-${CSS.escape(scrollToMessageId)}`);
     if (el) {
-      lastScrolledIdRef.current = scrollToMessageId;
       scrollLoadAttemptsRef.current = 0;
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
-      setHighlightId(scrollToMessageId);
-      highlightTimerRef.current = setTimeout(() => setHighlightId(null), 2200);
+      // race fix: 동기 scrollIntoView 는 prepend 페이지 paint/이미지로드 前 측정→target 이 이후
+      // 성장으로 밀려 off-screen(top≈15022). rAF 로 paint 後 측정 + messages 변경마다(prepend·이미지) center 재보정.
+      if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = requestAnimationFrame(() => {
+        container.querySelector<HTMLElement>(`#msg-${CSS.escape(scrollToMessageId)}`)?.scrollIntoView({ block: 'center' });
+      });
+      // 첫 발견 시에만 하이라이트(2.2s).
+      if (lastScrolledIdRef.current !== scrollToMessageId) {
+        lastScrolledIdRef.current = scrollToMessageId;
+        if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+        setHighlightId(scrollToMessageId);
+        highlightTimerRef.current = setTimeout(() => setHighlightId(null), 2200);
+      }
+      // settle 디바운스: 추가 messages 변경 없이 안정되면 done(재보정 정지).
+      if (scrollSettleTimerRef.current) clearTimeout(scrollSettleTimerRef.current);
+      scrollSettleTimerRef.current = setTimeout(() => { scrollDoneRef.current = true; }, 600);
       return;
     }
     // 미발견 + 이전 페이지 존재 → 바운드 내에서 이전 페이지 로드 후 재시도(messages 변경→effect 재실행).
