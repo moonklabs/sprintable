@@ -10,9 +10,18 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+def _non_doc_gate_session():
+    """48f064e5: 엔드포인트가 doc-gate authz용 게이트 로드 → 비-doc 게이트 반환으로 그 분기 skip."""
+    s = AsyncMock()
+    gr = MagicMock()
+    gr.scalar_one_or_none.return_value = SimpleNamespace(gate_type="merge")
+    s.execute = AsyncMock(return_value=gr)
+    return s
 
 
 @pytest.fixture
@@ -61,7 +70,7 @@ async def test_transition_forces_resolver_ignoring_body():
          patch.object(mod, "transition_gate", _fake_transition):
         await transition_gate_endpoint(
             id=uuid.uuid4(), body=GateTransitionRequest(status="approved", resolver_id=forged),
-            session=AsyncMock(), org_id=uuid.uuid4(),
+            session=_non_doc_gate_session(), org_id=uuid.uuid4(),
             auth=SimpleNamespace(user_id=str(uuid.uuid4())))
     assert captured["resolver_id"] == caller.id     # caller 강제
     assert captured["resolver_id"] != forged          # body 무시

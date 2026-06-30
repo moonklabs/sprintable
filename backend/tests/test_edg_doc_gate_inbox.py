@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -60,6 +61,30 @@ async def test_submit_creates_doc_gate_and_pending_status():
     args = mock_cg.await_args.args
     assert args[2] == doc.id and args[3] == DOC_GATE_WORK_ITEM_TYPE and args[4] == DOC_GATE_TYPE
     assert args[5] == caller.id  # 상신자 = member_id
+
+
+# ─── BLOCKER fix: 상신서 requested_by_member_id 항상 caller.id server-stamp(forged 덮어쓰기) ───
+
+@pytest.mark.anyio
+async def test_submit_server_stamps_requester_over_forged_pending_gate():
+    """일반 gate 엔드포인트로 forged requested_by_member_id 의 pending doc_approval gate 가 pre-create 돼도,
+    상신(transition_doc)이 create_gate 멱등 재사용 gate 의 requested_by_member_id 를 **caller.id 로 덮어씀**
+    (client-forged 불신·self-approval 가드가 신뢰하는 requester 가 위조 불가)."""
+    org = uuid.uuid4()
+    doc = MagicMock(status="draft", id=uuid.uuid4(), title="설계", project_id=uuid.uuid4())
+    session = _doc_session(doc)
+    forged = uuid.uuid4()
+    # create_gate 멱등이 반환하는 **기존 forged pending gate**(requester=타인).
+    gate = SimpleNamespace(id=uuid.uuid4(), status="pending",
+                           neutral_facts={"requested_by_member_id": str(forged)})
+    with patch("app.services.gate_service.create_gate", new=AsyncMock(return_value=gate)), \
+         patch("app.services.workflow_line_config._default_role_id",
+               new=AsyncMock(return_value=uuid.uuid4())):
+        caller = _human(org)
+        await transition_doc(session, org, caller, doc.id, "pending")
+    # forged 가 caller.id 로 server-stamp 됨(우회 봉).
+    assert gate.neutral_facts["requested_by_member_id"] == str(caller.id)
+    assert gate.neutral_facts["requested_by_member_id"] != str(forged)
 
 
 # ─── AC2: gate 해소 → doc status ─────────────────────────────────────────────

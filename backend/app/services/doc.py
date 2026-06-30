@@ -99,23 +99,29 @@ async def transition_doc(
         # create_gate 멱등이 기존 **terminal gate 를 반환**해(상태필터 없음) 재상신 시 새 pending gate 0 →
         # Gate inbox 미노출+결재 불능. 재상신=새 결재 사이클이므로 terminal gate 를 pending 으로 **re-open**
         # (직접 reset — FSM 전이 아님·해소 메타 clear). pending/held(admin hold)면 그대로 둔다.
+        # ⚠️BLOCKER(codex gpt-5.5 cross-model): 일반 gate 엔드포인트(POST /gates)로 누구나 forged
+        # requested_by_member_id 로 doc_approval gate pre-create 가능 → create_gate 멱등이 그 forged
+        # gate(pending 포함)를 unchanged 반환 → transition self-approval 가드가 **위조 requester** 를
+        # 신뢰해 author 자기승인 우회. → 상신서 requested_by_member_id 를 **항상 caller.id 로 server-stamp**
+        # (신규·기존 pending·terminal 모두·forged 덮어쓰기·client neutral_facts 절대 불신·[[feedback_sod_resolver_id_server_forced]]).
+        _facts = dict(gate.neutral_facts or {})
+        _facts["requested_by_member_id"] = str(caller.id)
+        _facts.setdefault("doc_title", doc.title)
+        # 재상신(terminal gate) re-open: 이전 결재 이력 append + 해소필드 clear(새 사이클·산티아고 audit).
+        # pending/held(admin hold)면 status 유지·requester 만 재stamp(위 forged 덮어쓰기 포함).
         if gate.status in ("approved", "rejected", "auto_passed", "voided"):
-            # 감사추적 보존(산티아고 audit): clear 전에 이전 결재(누가/언제/왜)를 neutral_facts.
-            # decision_history 에 append(append-only·재상신 사이클별 1건) → 반려 이력 손실 0. 그 후 current
-            # 해소필드 clear(새 결재 사이클). JSONB 는 in-place mutation 미감지라 새 dict 재할당.
             _prior = {
                 "status": gate.status,
                 "resolver_id": str(gate.resolver_id) if gate.resolver_id else None,
                 "resolved_at": gate.resolved_at.isoformat() if gate.resolved_at else None,
                 "resolution_note": gate.resolution_note,
             }
-            _facts = dict(gate.neutral_facts or {})
             _facts["decision_history"] = [*_facts.get("decision_history", []), _prior]
-            gate.neutral_facts = _facts
             gate.status = "pending"
             gate.resolver_id = None
             gate.resolved_at = None
             gate.resolution_note = None
+        gate.neutral_facts = _facts  # 항상 재할당(JSONB in-place 미감지) — server-stamp + (재오픈 시) 이력.
         doc.status = "pending"
         await session.flush()
         # doc-gate v2 갭2(선생님 실 Web): 상신 시 **결재자(org owner/admin 휴먼)에게 알림** — create_gate/
