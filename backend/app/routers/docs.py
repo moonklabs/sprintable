@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.doc import DocComment, DocRevision
+from app.models.doc import Doc, DocComment, DocRevision
 from app.models.member import Member
 from app.models.team import TeamMember
 from app.repositories.doc import DocRepository
@@ -296,7 +296,10 @@ async def update_doc(
     body: DocUpdate,
     repo: DocRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
 ) -> DocResponse:
+    # f69fcd91: 대상 doc 의 project 접근 강제(cross-project IDOR — patch 도 id+org 로만 잡아 mutate 하던 갭).
+    await _require_doc_project_access(session, id, uuid.UUID(auth.user_id), repo.org_id)
     data = body.model_dump(exclude_unset=True)
     # 4dd399c6: slug/slug_locked 는 유일성·alias 처리가 필요해 일반 필드와 분리.
     slug_in = data.pop("slug", None)
@@ -421,6 +424,9 @@ async def delete_doc(
     repo: DocRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    # f69fcd91: 대상 doc 의 project 접근 강제(cross-project IDOR 차단·get_project_scoped_org_id 의 org-only
+    # fallback 으로 同org 비-project caller 가 타 project doc 삭제 가능하던 갭). 없으면 404·무권한 403.
+    await _require_doc_project_access(repo.session, id, uuid.UUID(auth.user_id), repo.org_id)
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Doc not found")
@@ -454,6 +460,25 @@ async def _resolve_doc_member_id(auth: AuthContext, org_id: uuid.UUID, db: Async
     # member id(org_member.id)로 폴백. 비-멤버는 resolve_member가 400.
     from app.services.member_resolver import resolve_member
     return (await resolve_member(auth, org_id, db)).id
+
+
+async def _require_doc_project_access(
+    session: AsyncSession, doc_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID
+) -> Doc:
+    """f69fcd91: doc mutation 의 canonical project-scope authz. 대상 doc 을 org-scope 로 로드하고 caller 의
+    그 doc project 접근(has_project_access SSOT=team_member∪grant∪owner/admin)을 강제 — doc 없으면 404·
+    무권한 403. delete/cancel/update 가 **id+org 로만** doc 잡아 mutate 하던 cross-project IDOR(同org
+    비-project caller 가 타 project doc 삭제/취소/수정) 차단. register_doc_asset 의 project 가드와 동일 SSOT.
+    반환=로드된 doc(caller 재사용 가능)."""
+    from app.services.project_auth import has_project_access
+    doc = (await session.execute(
+        select(Doc).where(Doc.id == doc_id, Doc.org_id == org_id, Doc.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    if not await has_project_access(session, user_id, doc.project_id, org_id):
+        raise HTTPException(status_code=403, detail="해당 문서의 프로젝트 접근 권한이 없습니다")
+    return doc
 
 
 # ─── Share (Part B b1574f5a) ──────────────────────────────────────────────────
@@ -624,6 +649,9 @@ async def transition_doc_endpoint(
     from app.services.member_resolver import resolve_member
 
     caller = await resolve_member(auth, org_id, session)
+    # f69fcd91: 대상 doc 의 project 접근 강제(cross-project IDOR — cancel/transition 도 id+org 로만 doc
+    # 잡던 갭). via_gate 시스템 경로(gate 해소)는 transition_doc 직호출이라 무영향(이 엔드포인트만 user authz).
+    await _require_doc_project_access(session, id, uuid.UUID(auth.user_id), org_id)
     try:
         doc = await transition_doc(session, org_id, caller, id, body.status)
         await session.commit()
