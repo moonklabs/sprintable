@@ -32,11 +32,13 @@ M_INACTIVE = uuid.UUID("a5000000-0000-0000-0000-0000000000c2")  # inactive ancho
 M_DEAD = uuid.UUID("a5000000-0000-0000-0000-0000000000f1")      # inactive(legacy·anchor 둘 다 401)
 M_TMSIDE = uuid.UUID("a5000000-0000-0000-0000-0000000000aa")    # K_IDD legacy 측(active)
 M_ANCHORSIDE = uuid.UUID("a5000000-0000-0000-0000-0000000000bb")  # K_IDD anchor 측(active·다른 id)
+M_GRANT = uuid.UUID("a5000000-0000-0000-0000-0000000000cc")     # grant-only(profile P2 + grant P1)
 K_OK = uuid.UUID("a5000000-0000-0000-0000-00000000ba01")
 K_DIV = uuid.UUID("a5000000-0000-0000-0000-00000000ba02")
 K_REG = uuid.UUID("a5000000-0000-0000-0000-00000000ba03")
 K_DEAD = uuid.UUID("a5000000-0000-0000-0000-00000000ba04")
 K_IDD = uuid.UUID("a5000000-0000-0000-0000-00000000ba05")       # member_id≠team_member_id(id_mismatch)
+K_GRANT = uuid.UUID("a5000000-0000-0000-0000-00000000ba06")     # grant-only 최소 project_id(까심 BLOCKER 케이스)
 
 
 @pytest.fixture
@@ -45,11 +47,14 @@ def anyio_backend():
 
 
 async def _seed(s):
-    keys = f"'{K_OK}','{K_DIV}','{K_REG}','{K_DEAD}','{K_IDD}'"
+    keys = f"'{K_OK}','{K_DIV}','{K_REG}','{K_DEAD}','{K_IDD}','{K_GRANT}'"
+    members = (
+        f"'{M_OK}','{M_DIVERGE}','{M_REG}','{M_DEAD}','{M_TMSIDE}','{M_ANCHORSIDE}','{M_GRANT}'"
+    )
     for sql in [
         f"DELETE FROM agent_api_keys WHERE id IN ({keys})",
-        f"DELETE FROM agent_project_profiles WHERE member_id IN "
-        f"('{M_OK}','{M_DIVERGE}','{M_REG}','{M_DEAD}','{M_TMSIDE}','{M_ANCHORSIDE}')",
+        f"DELETE FROM project_access WHERE member_id IN ({members})",
+        f"DELETE FROM agent_project_profiles WHERE member_id IN ({members})",
         f"DELETE FROM members WHERE org_id='{ORG}'",
         f"DELETE FROM projects WHERE org_id='{ORG}'",
         f"DELETE FROM organizations WHERE id='{ORG}'",
@@ -59,7 +64,7 @@ async def _seed(s):
         f"('{M_OK}','{ORG}','agent','Ok',true),('{M_DIVERGE}','{ORG}','agent','Div',true),"
         f"('{M_REG}','{ORG}','agent','Reg',true),('{M_INACTIVE}','{ORG}','agent','Inact',false),"
         f"('{M_DEAD}','{ORG}','agent','Dead',false),('{M_TMSIDE}','{ORG}','agent','TmSide',true),"
-        f"('{M_ANCHORSIDE}','{ORG}','agent','AnchorSide',true)",
+        f"('{M_ANCHORSIDE}','{ORG}','agent','AnchorSide',true),('{M_GRANT}','{ORG}','agent','Grant',true)",
         # M_DIVERGE: P2 프로파일이 더 일찍 생성 — created_at 정렬이면 P2(legacy P1과 드리프트)였으나,
         # project_id 정렬 정합 後엔 anchor 도 P1(최소 project_id) → 드리프트 0.
         "INSERT INTO agent_project_profiles (id,member_id,project_id,agent_role,fakechat_port,created_at) VALUES "
@@ -69,14 +74,21 @@ async def _seed(s):
         f"(gen_random_uuid(),'{M_REG}','{P1}','dev',9804,'2026-01-01T00:00:00+00'),"
         f"(gen_random_uuid(),'{M_DEAD}','{P1}','dev',9805,'2026-01-01T00:00:00+00'),"
         f"(gen_random_uuid(),'{M_TMSIDE}','{P1}','dev',9806,'2026-01-01T00:00:00+00'),"
-        f"(gen_random_uuid(),'{M_ANCHORSIDE}','{P1}','dev',9807,'2026-01-01T00:00:00+00')",
-        # K_REG=regression(legacy 200·anchor 401) · K_DEAD=dead(INFO) · K_IDD=id_mismatch(member≠tm).
+        f"(gen_random_uuid(),'{M_ANCHORSIDE}','{P1}','dev',9807,'2026-01-01T00:00:00+00'),"
+        # M_GRANT: profile 은 P2(높은 project_id)에만·P1 은 grant-only(profile 無·project_access granted).
+        f"(gen_random_uuid(),'{M_GRANT}','{P2}','dev',9808,'2026-01-01T00:00:00+00')",
+        # M_GRANT grant-only: P1(최소 project_id) 에 profile 없이 granted → team_members 뷰 branch3.
+        # 까심 BLOCKER: profile-only resolver 면 P2(드리프트), union resolver 면 P1(=legacy·무드리프트).
+        f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES "
+        f"(gen_random_uuid(),'{P1}','{M_GRANT}','granted')",
+        # K_REG=regression · K_DEAD=dead(INFO) · K_IDD=id_mismatch · K_GRANT=grant-only-lowest.
         "INSERT INTO agent_api_keys (id,team_member_id,member_id,key_prefix,key_hash,created_at) VALUES "
         f"('{K_OK}','{M_OK}','{M_OK}','sk_o','h_o',now()),"
         f"('{K_DIV}','{M_DIVERGE}','{M_DIVERGE}','sk_d','h_d',now()),"
         f"('{K_REG}','{M_REG}','{M_INACTIVE}','sk_r','h_r',now()),"
         f"('{K_DEAD}','{M_DEAD}','{M_DEAD}','sk_x','h_x',now()),"
-        f"('{K_IDD}','{M_TMSIDE}','{M_ANCHORSIDE}','sk_i','h_i',now())",
+        f"('{K_IDD}','{M_TMSIDE}','{M_ANCHORSIDE}','sk_i','h_i',now()),"
+        f"('{K_GRANT}','{M_GRANT}','{M_GRANT}','sk_g','h_g',now())",
     ]:
         await s.execute(text(sql))
     await s.commit()
@@ -99,9 +111,12 @@ async def test_audit_regression_gate_and_aligned_parity():
             assert K_OK not in reg and K_DIV not in reg, "정상 키 false-positive"
             assert dead >= 1, f"dead 키 INFO 미집계: {dead}"
 
-            # (b) 정렬 정합 後: 멀티프로젝트 M_DIVERGE 는 anchor 도 project_id ASC → P1 = legacy → 무드리프트.
+            # (b) union 해소 後: 멀티프로젝트 M_DIVERGE 는 anchor 도 project_id ASC → P1 = legacy → 무드리프트.
             assert K_DIV not in parity, "정렬 정합 後에도 멀티프로젝트 드리프트(정합 미적용?)"
             assert K_OK not in parity, "단일프로젝트 false-positive"
+            # 까심 BLOCKER: grant-only 최소 project_id(P1)도 union(agent_project_profiles ∪ project_access granted)
+            # 에 포함 → anchor MIN=P1=legacy team_members(branch3) → 무드리프트. profile-only resolver 면 P2 드리프트.
+            assert K_GRANT not in parity, "grant-only 최소 project 미union(profile-only resolver 잔여 드리프트)"
             # parity 는 여전히 id_mismatch(0075 파손) 를 잡는다 — K_IDD(member≠tm).
             assert K_IDD in parity and parity[K_IDD]["id_mismatch"] is True
             assert parity[K_IDD]["proj_mismatch"] is False  # 둘 다 P1 → proj 는 정합
