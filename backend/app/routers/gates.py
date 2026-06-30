@@ -194,16 +194,21 @@ async def list_gates(
     gates = list(result.scalars().all())
     responses = [GateResponse.model_validate(g) for g in gates]
 
-    # doc-side 결재 UX(24f5ae18): doc gate 는 work_item_id(doc id)만이라 인박스가 doc 를 못 그림 →
-    # doc title/slug batch enrich(org-scope·soft-delete 가드·N+1 0). FE 가 "결재: <title>" 렌더 + /docs/<slug>
-    # 링크. 비-doc/삭제 doc 은 None(하위호환). project_id 도 같이 조회해 can_approve enrich 에 재사용.
-    doc_ids = {g.work_item_id for g in gates if g.work_item_type == "doc"}
+    # doc-side enrich 2종 Doc 조회를 **한 배치**로(org-scope·soft-delete 가드·N+1 0):
+    #  ⓐ work_item_summary(24f5ae18): work_item_type=='doc' gate → title/slug.
+    #  ⓑ can_approve(89484c8c): gate_type=='doc_approval' gate → project_id.
+    # ⚠️project_id 소스 predicate 는 transition(gate_type=='doc_approval'·work_item_id→Doc)와 **동일**해야
+    # DRY 정합 — work_item_type 으로 키잉하면 doc_approval 인데 work_item_type≠doc 인 이상 게이트에서 enrich
+    # (can_approve)와 transition 강제가 갈림. 두 predicate 의 work_item_id 합집합으로 조회.
+    summary_doc_ids = {g.work_item_id for g in gates if g.work_item_type == "doc"}
+    approval_doc_ids = {g.work_item_id for g in gates if g.gate_type == "doc_approval"}
     doc_proj: dict[uuid.UUID, uuid.UUID] = {}
-    if doc_ids:
+    fetch_ids = summary_doc_ids | approval_doc_ids
+    if fetch_ids:
         from app.models.doc import Doc
         rows = (await session.execute(
             select(Doc.id, Doc.title, Doc.slug, Doc.project_id).where(
-                Doc.id.in_(doc_ids), Doc.org_id == org_id, Doc.deleted_at.is_(None),
+                Doc.id.in_(fetch_ids), Doc.org_id == org_id, Doc.deleted_at.is_(None),
             )
         )).all()
         summaries = {did: WorkItemSummary(title=title, slug=slug) for did, title, slug, _ in rows}

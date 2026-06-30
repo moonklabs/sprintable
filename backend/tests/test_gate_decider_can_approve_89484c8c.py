@@ -224,3 +224,30 @@ async def test_list_gates_can_approve_enrich_nonfatal():
     """resolve_member 실패해도 목록은 반환(can_approve=False fail-closed·비중단)."""
     out = await _list_gates(_gate(uuid.uuid4()), has_access=True, resolve_raises=True)
     assert out[0].can_approve is False
+
+
+@pytest.mark.anyio
+async def test_list_gates_can_approve_uses_doc_approval_predicate_not_work_item_type():
+    """② DRY: doc_approval 인데 work_item_type≠doc 인 이상 게이트도 project_id 를 doc_approval predicate
+    (work_item_id→Doc·transition 과 동일)로 조회 → can_approve 가 transition 강제와 정합. work_item_type 으로
+    키잉하면 project_id=None→can_approve False 로 갈림(이 테스트가 그 회귀를 잠금)."""
+    org, doc_id, pid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    g = SimpleNamespace(  # 이상: gate_type=doc_approval 이나 work_item_type≠doc
+        gate_type="doc_approval", work_item_type="story", work_item_id=doc_id,
+        neutral_facts={"requested_by_member_id": str(uuid.uuid4())},
+    )
+    gates_result = MagicMock()
+    gates_result.scalars.return_value.all.return_value = [g]
+    doc_batch = MagicMock()
+    doc_batch.all.return_value = [(doc_id, "T", "slug", pid)]  # approval predicate 로 조회돼야 채워짐
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[gates_result, doc_batch])
+    auth = SimpleNamespace(user_id=str(uuid.uuid4()))
+    with patch.object(gates_mod.GateResponse, "model_validate", _resp), \
+         patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_human(uuid.uuid4()))), \
+         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)):
+        out = await list_gates(
+            work_item_id=None, work_item_type=None, status=None,
+            session=session, org_id=org, auth=auth,
+        )
+    assert out[0].can_approve is True  # project_id 가 doc_approval predicate 로 조회됨(work_item_type 무관)
