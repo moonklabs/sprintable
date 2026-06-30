@@ -1,4 +1,5 @@
 """E-CAGE-REFEREE P3: HITL Gate CRUD + 전이 엔드포인트."""
+import logging
 import uuid
 from datetime import datetime
 from typing import Any
@@ -21,6 +22,8 @@ from app.services.gate_service import (
 )
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import has_project_access, is_org_owner, is_org_owner_or_admin
+
+logger = logging.getLogger(__name__)
 
 # 사람 검증 행위(approve/reject) — "human-validated" 웨지 integrity상 휴먼 member만 허용.
 _HUMAN_REVIEW_STATUSES = frozenset({"approved", "rejected"})
@@ -82,6 +85,10 @@ class GateResponse(BaseModel):
     # doc-side 결재 UX(24f5ae18): gate row 는 work_item_id 만이라 인박스가 doc 를 못 그림 → enrich.
     # additive·nullable(비-doc/미존재 시 None·하위호환). FE 는 별도 doc fetch 제거.
     work_item_summary: "WorkItemSummary | None" = None
+    # decider 가시성(89484c8c): doc_approval 게이트에 **per-caller** can_approve(rule A) — FE in-doc
+    # decider 버튼 게이팅 소스(parallel-approver 목록 아님). 비-doc/무자격/비-휴먼은 False(fail-closed·
+    # additive 하위호환). ⚠️실 authz 는 BE transition 강제(이 필드는 가시성뿐). [[can_approve_doc_gate_reason]]
+    can_approve: bool = False
     gate_type: str
     status: str
     resolver_id: uuid.UUID | None = None
@@ -96,6 +103,45 @@ class GateResponse(BaseModel):
     auto_decision_reason: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+# rule-A can_approve 단일 규칙(48f064e5 transition 인라인 → 89484c8c 추출·DRY). transition 강제(403
+# 분기)와 list_gates decider 가시성(can_approve bool) 이 공용 — 거동 분기 0.
+_DOC_UNSET: Any = object()
+
+
+async def can_approve_doc_gate_reason(
+    session: AsyncSession,
+    gate: Gate,
+    resolved: Any,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+    *,
+    doc_project_id: Any = _DOC_UNSET,
+) -> str | None:
+    """doc_approval 게이트 rule A(PO) 판정. None=승인 가능·else 거부사유 코드("not_human"/"self_or_unverified"/
+    "no_project_access"). rule A = human + 대상 doc project has_project_access + not-author(resolver≠
+    requester·미기록=fail-closed). ⚠️single source: transition self-approval/can_approve 강제와 list_gates
+    per-caller can_approve enrich 가 공용(분기 일치 보장). ``doc_project_id`` 미지정 시 대상 doc 직접 조회
+    (transition 단건)·list_gates 는 배치 조회한 project_id 주입(N+1 0)·None 주입=삭제/미존재 doc."""
+    if resolved.type != "human":
+        return "not_human"
+    requester = (gate.neutral_facts or {}).get("requested_by_member_id")
+    # SoD: 상신자 본인 금지 + 미기록(forged/이상 게이트)=fail-closed.
+    if requester is None or str(resolved.id) == str(requester):
+        return "self_or_unverified"
+    if doc_project_id is _DOC_UNSET:
+        _doc = (await session.execute(
+            select(Doc).where(
+                Doc.id == gate.work_item_id, Doc.org_id == org_id, Doc.deleted_at.is_(None)
+            )
+        )).scalar_one_or_none()
+        doc_project_id = _doc.project_id if _doc is not None else None
+    if doc_project_id is None or not await has_project_access(
+        session, user_id, doc_project_id, org_id
+    ):
+        return "no_project_access"
+    return None
 
 
 @router.post("", response_model=GateResponse, status_code=201)
@@ -135,7 +181,7 @@ async def list_gates(
     status: str | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth=Depends(get_current_user),
 ) -> list[GateResponse]:
     q = select(Gate).where(Gate.org_id == org_id)
     if work_item_id:
@@ -150,19 +196,39 @@ async def list_gates(
 
     # doc-side 결재 UX(24f5ae18): doc gate 는 work_item_id(doc id)만이라 인박스가 doc 를 못 그림 →
     # doc title/slug batch enrich(org-scope·soft-delete 가드·N+1 0). FE 가 "결재: <title>" 렌더 + /docs/<slug>
-    # 링크. 비-doc/삭제 doc 은 None(하위호환).
+    # 링크. 비-doc/삭제 doc 은 None(하위호환). project_id 도 같이 조회해 can_approve enrich 에 재사용.
     doc_ids = {g.work_item_id for g in gates if g.work_item_type == "doc"}
+    doc_proj: dict[uuid.UUID, uuid.UUID] = {}
     if doc_ids:
         from app.models.doc import Doc
         rows = (await session.execute(
-            select(Doc.id, Doc.title, Doc.slug).where(
+            select(Doc.id, Doc.title, Doc.slug, Doc.project_id).where(
                 Doc.id.in_(doc_ids), Doc.org_id == org_id, Doc.deleted_at.is_(None),
             )
         )).all()
-        summaries = {did: WorkItemSummary(title=title, slug=slug) for did, title, slug in rows}
+        summaries = {did: WorkItemSummary(title=title, slug=slug) for did, title, slug, _ in rows}
+        doc_proj = {did: pid for did, _, _, pid in rows}
         for resp in responses:
             if resp.work_item_type == "doc":
                 resp.work_item_summary = summaries.get(resp.work_item_id)
+
+    # decider 가시성(89484c8c): doc_approval 게이트에 **per-caller** can_approve(rule A) enrich — FE in-doc
+    # decider 버튼 게이팅 소스(parallel /approvers 아님·그건 admin-only·plain doc-gate 빈목록=dead-path).
+    # transition 강제와 can_approve_doc_gate_reason 단일 규칙 공용(DRY). 배치 project_id 주입(N+1 0)·비-휴먼/
+    # 무자격/삭제 doc = False(default·fail-closed). additive — 실 authz 는 transition BE 가 강제(이 필드=가시성뿐).
+    doc_gates = [(resp, g) for resp, g in zip(responses, gates) if g.gate_type == "doc_approval"]
+    if doc_gates:
+        try:
+            resolved = await resolve_member(auth, org_id, session)
+            _uid = uuid.UUID(auth.user_id)
+            for resp, g in doc_gates:
+                _reason = await can_approve_doc_gate_reason(
+                    session, g, resolved, _uid, org_id,
+                    doc_project_id=doc_proj.get(g.work_item_id),
+                )
+                resp.can_approve = _reason is None
+        except Exception:  # noqa: BLE001 — can_approve 가시성 enrich 실패는 목록 비중단(fail-closed=False 유지).
+            logger.warning("list_gates can_approve enrich 실패(비중단) org=%s", org_id, exc_info=True)
     return responses
 
 
@@ -186,31 +252,24 @@ async def transition_gate_endpoint(
         )
     # E-DG 48f064e5: doc 결재 게이트 BE-level can_approve 강제(FE 게이팅은 가시성뿐·실 authz는 BE).
     # 룰(A·PO 결정): human(위) + 대상 doc project has_project_access + not-author(resolver≠requester).
-    # 비-human/no-project-access/self → 403 fail-closed. 비-doc 게이트(merge 등)는 기존 경로 무변경.
+    # 89484c8c: rule 을 can_approve_doc_gate_reason 단일 규칙으로 추출 — list_gates per-caller can_approve
+    # 가시성과 **공용**(거동 분기 0·DRY). 거부사유별 403 메시지는 여기서 보존(self vs 권한). 휴먼 체크는
+    # 위에서 선행되므로 여기 not_human 미도달(방어적으로 권한 403 매핑). 비-doc 게이트는 기존 경로 무변경.
     _gate = (await session.execute(
         select(Gate).where(Gate.id == id, Gate.org_id == org_id)
     )).scalar_one_or_none()
     if _gate is not None and _gate.gate_type == "doc_approval":  # doc.py DOC_GATE_TYPE
-        _facts = _gate.neutral_facts or {}
-        _requester = _facts.get("requested_by_member_id")
-        # ① self-approval(SoD): 상신자 본인 승인/거부 금지. SoD 가드가 parallel 경로에만 있어 plain
-        # doc-gate 는 미적용이던 갭 — 여기서 닫음. requester=현 사이클 상신자(재오픈 시 갱신).
-        # ⚠️fail-closed(산티아고/PO 플래그): 상신자 미기록(None)이면 SoD 검증 불가 → 거부(silent self-approval
-        # 우회 방지). 정상 doc-gate 는 doc.py 생성·재상신서 항상 persist — None=이상 게이트.
-        if _requester is None or str(resolved.id) == str(_requester):
+        _reason = await can_approve_doc_gate_reason(
+            session, _gate, resolved, uuid.UUID(auth.user_id), org_id
+        )
+        # ① self-approval(SoD)·상신자 미기록(forged/이상 게이트) fail-closed.
+        if _reason == "self_or_unverified":
             raise HTTPException(
                 status_code=403,
                 detail="본인이 상신한 doc 결재는 본인이 승인/거부할 수 없습니다 (self-approval 금지·상신자 미검증 차단).",
             )
-        # ② can_approve 자격: 대상 doc 의 project 접근 보유 human 만(project-scope·random org-member 차단).
-        _doc = (await session.execute(
-            select(Doc).where(
-                Doc.id == _gate.work_item_id, Doc.org_id == org_id, Doc.deleted_at.is_(None)
-            )
-        )).scalar_one_or_none()
-        if _doc is None or not await has_project_access(
-            session, uuid.UUID(auth.user_id), _doc.project_id, org_id
-        ):
+        # ② can_approve 자격(no_project_access·삭제 doc·방어적 not_human): project-scope·random org-member 차단.
+        if _reason is not None:
             raise HTTPException(
                 status_code=403,
                 detail="doc 결재 권한이 없습니다 (대상 프로젝트 접근 필요).",
