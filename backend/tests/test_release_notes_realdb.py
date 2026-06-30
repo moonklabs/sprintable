@@ -1,16 +1,18 @@
-"""E-POLISH 53bc0945: release_notes API + 시드 realdb. DB env 없으면 skip(CI alembic-fresh).
+"""E-POLISH 53bc0945 + 3f1f2408: release_notes **GET** API realdb. DB env 없으면 skip(CI alembic-fresh).
 
-마이그 0142 가 테이블+시드(v1.2~v1.5) 생성 → list 가 4개 published newest-first·shape(id=note_key·
-publishedAt=display_period) 반환. CRUD 는 owner/admin(is_org_owner_or_admin) 게이트.
+마이그 0142 가 테이블+시드(v1.2~v1.5) → list 가 published newest-first·shape(id=note_key·
+publishedAt=display_period) 반환. write route 는 3f1f2408 에서 공개 API 제거(멀티테넌시 침해 봉인) — write
+테스트는 부재 가드(test_release_notes_no_write_routes.py·no-DB)로 이전. 여기선 GET 거동만.
 """
 from __future__ import annotations
 
 import os
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 import pytest
-from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 _RAW = os.environ.get("ALEMBIC_DATABASE_URL") or os.environ.get("PARITY_TEST_DATABASE_URL") or ""
@@ -18,8 +20,6 @@ _ASYNC = _RAW.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace
     "postgresql://", "postgresql+asyncpg://"
 )
 pytestmark = pytest.mark.skipif(not _RAW, reason="real-DB URL 미설정 — skip")
-
-ORG = uuid.uuid4()
 
 
 @pytest.fixture
@@ -56,62 +56,29 @@ async def test_list_returns_seeded_newest_first():
 
 
 @pytest.mark.anyio
-async def test_create_requires_owner_admin():
-    from app.routers.release_notes import ReleaseNoteCreate, create_release_note
-    engine = create_async_engine(_ASYNC)
-    Session = async_sessionmaker(engine, expire_on_commit=False)
-    key = f"test-{uuid.uuid4()}"
-    body = ReleaseNoteCreate(
-        note_key=key, version="vT", published_at="2026-07-01T00:00:00+00:00",
-        display_period="2026년 7월", title="T", summary="s", items=[{"text": "x"}],
-    )
-    try:
-        async with Session() as s:
-            # 비-admin → 403
-            with patch("app.routers.release_notes.is_org_owner_or_admin",
-                       new_callable=AsyncMock, return_value=False):
-                with pytest.raises(HTTPException) as e:
-                    await create_release_note(body=body, session=s, org_id=ORG, auth=_auth())
-                assert e.value.status_code == 403
-            # admin → 201 생성
-            with patch("app.routers.release_notes.is_org_owner_or_admin",
-                       new_callable=AsyncMock, return_value=True):
-                created = await create_release_note(body=body, session=s, org_id=ORG, auth=_auth())
-                assert created.id == key and created.version == "vT"
-    finally:
-        await engine.dispose()
-
-
-@pytest.mark.anyio
-async def test_unpublished_excluded_and_patch_delete():
-    from app.routers.release_notes import (
-        ReleaseNoteCreate,
-        ReleaseNoteUpdate,
-        create_release_note,
-        delete_release_note,
-        list_release_notes,
-        update_release_note,
-    )
+async def test_unpublished_excluded_from_list():
+    """is_published=False 노트는 GET 제외·True 면 포함(published 필터 검증). write 엔드포인트 없이 ORM 직시드."""
+    from app.models.release_note import ReleaseNote
+    from app.routers.release_notes import list_release_notes
     engine = create_async_engine(_ASYNC)
     Session = async_sessionmaker(engine, expire_on_commit=False)
     key = f"unpub-{uuid.uuid4()}"
     try:
-        with patch("app.routers.release_notes.is_org_owner_or_admin",
-                   new_callable=AsyncMock, return_value=True):
-            async with Session() as s:
-                # 미발행 생성 → list 제외.
-                await create_release_note(
-                    body=ReleaseNoteCreate(
-                        note_key=key, version="vU", published_at="2026-08-01T00:00:00+00:00",
-                        display_period="2026년 8월", title="U", summary="", items=[], is_published=False),
-                    session=s, org_id=ORG, auth=_auth())
-                assert key not in [r.id for r in await list_release_notes(session=s, _auth=_auth())]
-                # patch 발행 → list 포함.
-                await update_release_note(note_key=key, body=ReleaseNoteUpdate(is_published=True),
-                                          session=s, org_id=ORG, auth=_auth())
-                assert key in [r.id for r in await list_release_notes(session=s, _auth=_auth())]
-                # delete.
-                await delete_release_note(note_key=key, session=s, org_id=ORG, auth=_auth())
-                assert key not in [r.id for r in await list_release_notes(session=s, _auth=_auth())]
+        async with Session() as s:
+            s.add(ReleaseNote(
+                note_key=key, version="vU",
+                published_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+                display_period="2026년 8월", title="U", summary="", items=[], is_published=False,
+            ))
+            await s.commit()
+            assert key not in [r.id for r in await list_release_notes(session=s, _auth=_auth())]
+            row = (await s.execute(
+                select(ReleaseNote).where(ReleaseNote.note_key == key)
+            )).scalar_one()
+            row.is_published = True
+            await s.commit()
+            assert key in [r.id for r in await list_release_notes(session=s, _auth=_auth())]
+            await s.delete(row)
+            await s.commit()
     finally:
         await engine.dispose()
