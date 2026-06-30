@@ -1,8 +1,9 @@
-"""f5ee8387 H2 audit 정밀화 검증 — cut REGRESSION 게이트가 '깨지는 키'만 잡고 'dead 키'는 INFO 로 분리,
-(b) parity 가 project-default 드리프트를 잡는지 락. DB env 없으면 skip(CI alembic-fresh).
+"""f5ee8387 H2 audit 검증 — cut REGRESSION 게이트('깨지는 키'만·dead 는 INFO) + parity(정렬 정합 後
+멀티프로젝트 무드리프트 + id_mismatch 적출). DB env 없으면 skip(CI alembic-fresh).
 
-PO dev audit 적발: 기존 (a)가 legacy 도 이미 401 인 dead 키(inactive tm)까지 위반으로 inflation(team_members
-projection VIEW dup 포함). 정밀화 = (a) regression(legacy 200·anchor 401)만 게이트·dead 는 count(DISTINCT) INFO.
+prod audit가 (b)서 산티아고 멀티프로젝트 agent 기본프로젝트 드리프트(legacy project_id ASC vs anchor
+created_at ASC) 적발 → anchor 정렬을 legacy 와 동일 project_id ASC 로 정합(auth.py + PARITY_SQL).
+정합 後엔 정상 데이터면 proj 드리프트 0(M_DIVERGE 미적출)·id_mismatch 만 parity 가 잡는다.
 """
 from __future__ import annotations
 
@@ -13,7 +14,12 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from scripts.jobs.audit_apikey_member_anchor import AUDIT_SQL, DEAD_KEYS_SQL, PARITY_SQL
+from scripts.jobs.audit_apikey_member_anchor import (
+    AUDIT_SQL,
+    DEAD_KEYS_SQL,
+    PARITY_SQL,
+    WIDENING_SQL,
+)
 
 _RAW = os.environ.get("ALEMBIC_DATABASE_URL") or os.environ.get("PARITY_TEST_DATABASE_URL") or ""
 _ASYNC = _RAW.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace(
@@ -22,17 +28,24 @@ _ASYNC = _RAW.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace
 pytestmark = pytest.mark.skipif(not _RAW, reason="real-DB URL 미설정 — skip")
 
 ORG = uuid.UUID("a5000000-0000-0000-0000-000000000001")
-P1 = uuid.UUID("a5000000-0000-0000-0000-0000000000a1")  # P1 < P2 (legacy ORDER BY project_id → P1)
+P1 = uuid.UUID("a5000000-0000-0000-0000-0000000000a1")  # P1 < P2 (project_id ASC → P1)
 P2 = uuid.UUID("a5000000-0000-0000-0000-0000000000b2")
-M_OK = uuid.UUID("a5000000-0000-0000-0000-0000000000e1")        # 단일프로젝트·일치
-M_DIVERGE = uuid.UUID("a5000000-0000-0000-0000-0000000000d1")   # 멀티프로젝트·드리프트
+M_OK = uuid.UUID("a5000000-0000-0000-0000-0000000000e1")        # 단일프로젝트
+M_DIVERGE = uuid.UUID("a5000000-0000-0000-0000-0000000000d1")   # 멀티프로젝트(정렬 정합 後 무드리프트)
 M_REG = uuid.UUID("a5000000-0000-0000-0000-0000000000c1")       # active(legacy 200)
 M_INACTIVE = uuid.UUID("a5000000-0000-0000-0000-0000000000c2")  # inactive anchor(K_REG 가 가리킴 → anchor 401)
 M_DEAD = uuid.UUID("a5000000-0000-0000-0000-0000000000f1")      # inactive(legacy·anchor 둘 다 401)
+M_TMSIDE = uuid.UUID("a5000000-0000-0000-0000-0000000000aa")    # K_IDD legacy 측(active)
+M_ANCHORSIDE = uuid.UUID("a5000000-0000-0000-0000-0000000000bb")  # K_IDD anchor 측(active·다른 id)
+M_GRANT = uuid.UUID("a5000000-0000-0000-0000-0000000000cc")     # grant-only(profile P2 + grant P1)
+M_NOPROJ = uuid.UUID("a5000000-0000-0000-0000-0000000000dd")    # member valid·무프로젝트(widening 케이스)
 K_OK = uuid.UUID("a5000000-0000-0000-0000-00000000ba01")
 K_DIV = uuid.UUID("a5000000-0000-0000-0000-00000000ba02")
 K_REG = uuid.UUID("a5000000-0000-0000-0000-00000000ba03")
 K_DEAD = uuid.UUID("a5000000-0000-0000-0000-00000000ba04")
+K_IDD = uuid.UUID("a5000000-0000-0000-0000-00000000ba05")       # member_id≠team_member_id(id_mismatch)
+K_GRANT = uuid.UUID("a5000000-0000-0000-0000-00000000ba06")     # grant-only 최소 project_id(까심 BLOCKER 케이스)
+K_NOPROJ = uuid.UUID("a5000000-0000-0000-0000-00000000ba07")    # 무프로젝트 member-valid(widening·까심 finding②)
 
 
 @pytest.fixture
@@ -41,10 +54,14 @@ def anyio_backend():
 
 
 async def _seed(s):
+    keys = f"'{K_OK}','{K_DIV}','{K_REG}','{K_DEAD}','{K_IDD}','{K_GRANT}','{K_NOPROJ}'"
+    members = (
+        f"'{M_OK}','{M_DIVERGE}','{M_REG}','{M_DEAD}','{M_TMSIDE}','{M_ANCHORSIDE}','{M_GRANT}','{M_NOPROJ}'"
+    )
     for sql in [
-        f"DELETE FROM agent_api_keys WHERE id IN ('{K_OK}','{K_DIV}','{K_REG}','{K_DEAD}')",
-        f"DELETE FROM agent_project_profiles WHERE member_id IN "
-        f"('{M_OK}','{M_DIVERGE}','{M_REG}','{M_DEAD}')",
+        f"DELETE FROM agent_api_keys WHERE id IN ({keys})",
+        f"DELETE FROM project_access WHERE member_id IN ({members})",
+        f"DELETE FROM agent_project_profiles WHERE member_id IN ({members})",
         f"DELETE FROM members WHERE org_id='{ORG}'",
         f"DELETE FROM projects WHERE org_id='{ORG}'",
         f"DELETE FROM organizations WHERE id='{ORG}'",
@@ -53,28 +70,42 @@ async def _seed(s):
         "INSERT INTO members (id,org_id,type,name,is_active) VALUES "
         f"('{M_OK}','{ORG}','agent','Ok',true),('{M_DIVERGE}','{ORG}','agent','Div',true),"
         f"('{M_REG}','{ORG}','agent','Reg',true),('{M_INACTIVE}','{ORG}','agent','Inact',false),"
-        f"('{M_DEAD}','{ORG}','agent','Dead',false)",
-        # agent_project_profiles → team_members(view) 행. M_DIVERGE: P2 가 더 일찍 생성(anchor=created_at→P2)·legacy=P1.
+        f"('{M_DEAD}','{ORG}','agent','Dead',false),('{M_TMSIDE}','{ORG}','agent','TmSide',true),"
+        f"('{M_ANCHORSIDE}','{ORG}','agent','AnchorSide',true),('{M_GRANT}','{ORG}','agent','Grant',true),"
+        f"('{M_NOPROJ}','{ORG}','agent','NoProj',true)",
+        # M_DIVERGE: P2 프로파일이 더 일찍 생성 — created_at 정렬이면 P2(legacy P1과 드리프트)였으나,
+        # project_id 정렬 정합 後엔 anchor 도 P1(최소 project_id) → 드리프트 0.
         "INSERT INTO agent_project_profiles (id,member_id,project_id,agent_role,fakechat_port,created_at) VALUES "
         f"(gen_random_uuid(),'{M_OK}','{P1}','dev',9803,'2026-01-01T00:00:00+00'),"
         f"(gen_random_uuid(),'{M_DIVERGE}','{P2}','dev',9801,'2026-01-01T00:00:00+00'),"
         f"(gen_random_uuid(),'{M_DIVERGE}','{P1}','dev',9802,'2026-02-01T00:00:00+00'),"
         f"(gen_random_uuid(),'{M_REG}','{P1}','dev',9804,'2026-01-01T00:00:00+00'),"
-        f"(gen_random_uuid(),'{M_DEAD}','{P1}','dev',9805,'2026-01-01T00:00:00+00')",
-        # 키: K_REG = legacy(M_REG active) 200 · anchor(M_INACTIVE) 401 → regression.
-        #     K_DEAD = legacy(M_DEAD inactive)·anchor 둘 다 401 → dead(INFO).
+        f"(gen_random_uuid(),'{M_DEAD}','{P1}','dev',9805,'2026-01-01T00:00:00+00'),"
+        f"(gen_random_uuid(),'{M_TMSIDE}','{P1}','dev',9806,'2026-01-01T00:00:00+00'),"
+        f"(gen_random_uuid(),'{M_ANCHORSIDE}','{P1}','dev',9807,'2026-01-01T00:00:00+00'),"
+        # M_GRANT: profile 은 P2(높은 project_id)에만·P1 은 grant-only(profile 無·project_access granted).
+        f"(gen_random_uuid(),'{M_GRANT}','{P2}','dev',9808,'2026-01-01T00:00:00+00')",
+        # M_GRANT grant-only: P1(최소 project_id) 에 profile 없이 granted → team_members 뷰 branch3.
+        # 까심 BLOCKER: profile-only resolver 면 P2(드리프트), union resolver 면 P1(=legacy·무드리프트).
+        f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES "
+        f"(gen_random_uuid(),'{P1}','{M_GRANT}','granted')",
+        # K_REG=regression · K_DEAD=dead(INFO) · K_IDD=id_mismatch · K_GRANT=grant-only-lowest.
         "INSERT INTO agent_api_keys (id,team_member_id,member_id,key_prefix,key_hash,created_at) VALUES "
         f"('{K_OK}','{M_OK}','{M_OK}','sk_o','h_o',now()),"
         f"('{K_DIV}','{M_DIVERGE}','{M_DIVERGE}','sk_d','h_d',now()),"
         f"('{K_REG}','{M_REG}','{M_INACTIVE}','sk_r','h_r',now()),"
-        f"('{K_DEAD}','{M_DEAD}','{M_DEAD}','sk_x','h_x',now())",
+        f"('{K_DEAD}','{M_DEAD}','{M_DEAD}','sk_x','h_x',now()),"
+        f"('{K_IDD}','{M_TMSIDE}','{M_ANCHORSIDE}','sk_i','h_i',now()),"
+        f"('{K_GRANT}','{M_GRANT}','{M_GRANT}','sk_g','h_g',now()),"
+        # K_NOPROJ: member valid 인데 profile·grant 0 → active team_members 0 → legacy 401·widening 케이스.
+        f"('{K_NOPROJ}','{M_NOPROJ}','{M_NOPROJ}','sk_n','h_n',now())",
     ]:
         await s.execute(text(sql))
     await s.commit()
 
 
 @pytest.mark.anyio
-async def test_audit_regression_gate_and_parity():
+async def test_audit_regression_gate_and_aligned_parity():
     engine = create_async_engine(_ASYNC)
     Session = async_sessionmaker(engine, expire_on_commit=False)
     try:
@@ -82,16 +113,62 @@ async def test_audit_regression_gate_and_parity():
             await _seed(s)
             reg = {r["api_key_id"] for r in (await s.execute(text(AUDIT_SQL))).mappings().all()}
             dead = (await s.execute(text(DEAD_KEYS_SQL))).scalar_one()
-            parity = {r["member_id"]: r for r in (await s.execute(text(PARITY_SQL))).mappings().all()}
+            parity = {r["api_key_id"]: r for r in (await s.execute(text(PARITY_SQL))).mappings().all()}
+            widen = {r["api_key_id"] for r in (await s.execute(text(WIDENING_SQL))).mappings().all()}
 
             # (a) regression: legacy 200·anchor 401 인 K_REG 만. dead/ok/valid 는 제외.
             assert K_REG in reg, f"regression 미적출: {reg}"
-            assert K_DEAD not in reg, "dead 키가 regression 으로 오분류(flip 무관인데)"
+            assert K_DEAD not in reg, "dead 키가 regression 으로 오분류"
             assert K_OK not in reg and K_DIV not in reg, "정상 키 false-positive"
-            # dead 키(K_DEAD)는 INFO count 로만(≥1·DISTINCT 라 dup inflation 없음).
             assert dead >= 1, f"dead 키 INFO 미집계: {dead}"
-            # (b) parity: 멀티프로젝트 드리프트 M_DIVERGE 만(proj_mismatch).
-            assert M_DIVERGE in parity and parity[M_DIVERGE]["proj_mismatch"] is True
-            assert M_OK not in parity, "단일프로젝트 일치 agent false-positive"
+
+            # (b) union 해소 後: 멀티프로젝트 M_DIVERGE 는 anchor 도 project_id ASC → P1 = legacy → 무드리프트.
+            assert K_DIV not in parity, "정렬 정합 後에도 멀티프로젝트 드리프트(정합 미적용?)"
+            assert K_OK not in parity, "단일프로젝트 false-positive"
+            # 까심 BLOCKER: grant-only 최소 project_id(P1)도 union(agent_project_profiles ∪ project_access granted)
+            # 에 포함 → anchor MIN=P1=legacy team_members(branch3) → 무드리프트. profile-only resolver 면 P2 드리프트.
+            assert K_GRANT not in parity, "grant-only 최소 project 미union(profile-only resolver 잔여 드리프트)"
+
+            # (c) widening(까심 finding②): 무프로젝트 member-valid(K_NOPROJ)는 legacy 401인데 cut-on 통과 위험
+            # → audit 가 게이트로 적출. 프로젝트 있는 키(OK/DIV/GRANT)는 active tm 존재라 미적출.
+            assert K_NOPROJ in widen, f"무프로젝트 widening 미적출: {widen}"
+            assert K_OK not in widen and K_DIV not in widen and K_GRANT not in widen, "프로젝트 보유 키 widening false-positive"
+            # parity 는 여전히 id_mismatch(0075 파손) 를 잡는다 — K_IDD(member≠tm).
+            assert K_IDD in parity and parity[K_IDD]["id_mismatch"] is True
+            assert parity[K_IDD]["proj_mismatch"] is False  # 둘 다 P1 → proj 는 정합
     finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_resolver_cut_on_no_project_raises_401():
+    """auth.py finding①(까심 v3): cut-on flag-on 에서 member valid·접근 프로젝트 0(M_NOPROJ: profile·grant
+    둘 다 없음 → union 빈)인 agent 키는 `_resolve_api_key` 가 **401** — legacy(team_members 0행=401)와 동치.
+    audit (c) widening 게이트의 **resolver 측 짝**: `if proj is None: raise 401` 코드 경로 직접 락(제거 시 fail)."""
+    from fastapi import HTTPException
+
+    from app.core import config as _cfg
+    from app.core.security import hash_token
+    from app.dependencies.auth import _resolve_api_key
+
+    raw = "sk_live_noproj" + "9" * 50
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    prev = _cfg.settings.member_ssot_apikey_cut
+    try:
+        async with Session() as s:
+            await _seed(s)
+            # K_NOPROJ(member=M_NOPROJ·profile·grant 0)의 key_hash 를 실 해시로 → _resolve_api_key 가 조회 가능.
+            await s.execute(
+                text("UPDATE agent_api_keys SET key_hash = :h WHERE id = :k"),
+                {"h": hash_token(raw), "k": str(K_NOPROJ)},
+            )
+            await s.commit()
+        _cfg.settings.member_ssot_apikey_cut = True
+        async with Session() as s:
+            with pytest.raises(HTTPException) as e:
+                await _resolve_api_key(raw, s)
+            assert e.value.status_code == 401, f"무프로젝트 cut-on 이 401 아님(widening): {e.value.status_code}"
+    finally:
+        _cfg.settings.member_ssot_apikey_cut = prev
         await engine.dispose()
