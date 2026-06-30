@@ -26,6 +26,7 @@ def _mock_story_obj(assignee_id=None):
     s.sprint_id = None
     s.assignee_id = assignee_id
     s.assignee_ids = [assignee_id] if assignee_id else []  # E-BOARD S5
+    s.reporter_id = None  # 9f25e74a: created_by(alias) 검증 위해 명시
     s.meeting_id = None
     s.title = "Story 1"
     s.status = "backlog"

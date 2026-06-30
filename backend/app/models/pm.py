@@ -94,6 +94,9 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    # 9f25e74a: reporter(=creator·canonical member). create 경로가 채우고, historical 은 0128 백필
+    # (story_created activity 실값·no-guess). 보드 '내가 등록한' 필터·응답 created_by 키로 노출.
+    reporter_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     meeting_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="SET NULL"), nullable=True
     )

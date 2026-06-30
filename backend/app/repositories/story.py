@@ -31,6 +31,7 @@ class StoryRepository(BaseRepository[Story]):
         cursor: datetime | None = None,
         sprint_id: uuid.UUID | None = None,
         assignee_id: uuid.UUID | None = None,
+        reporter_id: uuid.UUID | None = None,
     ) -> tuple[list[Story], int]:
         """CB-S4: 보드 상태별 쿼리 — created_at DESC + priority 보조 정렬 + cursor 페이징.
 
@@ -46,6 +47,8 @@ class StoryRepository(BaseRepository[Story]):
             q = q.where(Story.sprint_id == sprint_id)
         if assignee_id:
             q = q.where(Story.assignee_id == assignee_id)
+        if reporter_id:  # 9f25e74a: '내가 등록한'(reporter) 서버필터 — 보드 done cursor 집합 기준.
+            q = q.where(Story.reporter_id == reporter_id)
 
         # done: 최근 7일 제한
         if status == "done":

@@ -95,6 +95,7 @@ async def test_patch_story_is_excluded_true():
     marked_story.sprint_id = None
     marked_story.assignee_id = None
     marked_story.assignee_ids = []
+    marked_story.reporter_id = None  # 9f25e74a: created_by(alias) 검증 위해 명시
     marked_story.meeting_id = None
     # E-BOARD S5: update_story가 _attach_assignee_ids로 story_assignees 조회 → 빈 결과 모킹
     _empty = MagicMock()
