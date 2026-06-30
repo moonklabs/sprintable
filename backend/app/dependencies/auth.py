@@ -8,7 +8,7 @@ from typing import Literal
 
 from fastapi import Depends, Header, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import func, select
+from sqlalchemy import func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory
@@ -101,8 +101,9 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
     # user_id 동일 = 무중단. 기본 off(레거시), 실 에이전트 무중단 실증 후 단계 on.
     from app.core.config import settings as _settings
     if _settings.member_ssot_apikey_cut:
-        # anchor cut: members.id 기반. project_id는 agent_project_profiles 경유(ORDER BY 결정성).
+        # anchor cut: members.id 기반.
         from app.models.member import AgentProjectProfile, Member
+        from app.models.project_access import ProjectAccess
         m = (await db.execute(
             select(Member).where(
                 Member.id == api_key.member_id,
@@ -113,15 +114,27 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
         )).scalar_one_or_none()
         if not m:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
+        # 기본 project = legacy(team_members ORDER BY project_id LIMIT 1)와 동치 해소. team_members 뷰(0110)의
+        # 에이전트 set = agent_project_profiles(profile) ∪ project_access(permission='granted', grant-only).
+        # profile 만 보면 grant-only 최소 project_id 누락 → cut 후 기본프로젝트 드리프트(까심 BLOCKER). 두 anchor
+        # 소스 UNION 후 project_id ASC 로 legacy 와 동일 set·정렬 → 전 agent 드리프트 0(behavior-preserving).
+        _proj_union = union(
+            select(AgentProjectProfile.project_id).where(AgentProjectProfile.member_id == m.id),
+            select(ProjectAccess.project_id).where(
+                ProjectAccess.member_id == m.id, ProjectAccess.permission == "granted"
+            ),
+        ).subquery()
         proj = (await db.execute(
-            select(AgentProjectProfile.project_id)
-            .where(AgentProjectProfile.member_id == m.id)
-            .order_by(AgentProjectProfile.created_at.asc())
-            .limit(1)
+            select(_proj_union.c.project_id).order_by(_proj_union.c.project_id.asc()).limit(1)
         )).scalar_one_or_none()
+        # legacy 는 team_members 행이 없으면(=접근 프로젝트 0) 401(아래 else 분기). cut-on 도 동치로 401 —
+        # union 이 비면(profile·grant 모두 없음) 인증 거부(무프로젝트 키를 project_id=None 으로 통과시키면
+        # legacy 대비 인증 widening). 까심 finding①.
+        if proj is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
         member_id = m.id
         org_id = str(m.org_id)
-        project_id = str(proj) if proj else None
+        project_id = str(proj)
     else:
         # 레거시: team_members 경로.
         # team_members 는 0088 이후 projection VIEW라 멀티프로젝트 에이전트(org-level grant)는
