@@ -10,10 +10,16 @@ from app.core.database import Base
 from app.models.base import OrgScopedMixin, SoftDeleteMixin, TimestampMixin
 
 # E-DG S22: doc decision lifecycle(doc-specific·work status 아님). hypothesis _VALID_TRANSITIONS 패턴 미러.
-DOC_STATUSES = frozenset({"draft", "confirmed", "denied", "superseded", "deprecated"})
-# 합법 (from, to) 전이. confirmed/denied→draft 외 역전이 금지. ⭐draft→confirmed 만 line overlay-gated.
+# E-DG doc-gate(48f064e5): draft→pending(상신·Gate inbox 노출)→confirmed/denied(gate 해소). pending=
+# 결재 대기(인앱 Gate). FE 계약(doc decision lifecycle: draft|pending|confirmed|denied)과 정합.
+DOC_STATUSES = frozenset({"draft", "pending", "confirmed", "denied", "superseded", "deprecated"})
+# 합법 (from, to) 전이. confirmed/denied→draft 외 역전이 금지.
 _DOC_VALID_TRANSITIONS: set[tuple[str, str]] = {
-    ("draft", "confirmed"),       # 승인(human-gate overlay 대상)
+    ("draft", "pending"),         # 상신(결재 요청·doc-gate 생성·Gate inbox 노출)
+    ("pending", "confirmed"),     # 승인(gate approve·human·via_gate)
+    ("pending", "denied"),        # 반려(gate reject·via_gate)
+    ("pending", "draft"),         # 상신 취소(작성자 회수)
+    ("draft", "confirmed"),       # 레거시 직접 승인(non-gated·line overlay 대상)
     ("draft", "denied"),          # 반려
     ("denied", "draft"),          # 재작성(revise·S28 토대)
     ("confirmed", "superseded"),  # 신버전 대체

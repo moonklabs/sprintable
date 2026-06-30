@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.doc import DocComment, DocRevision
+from app.models.doc import Doc, DocComment, DocRevision
 from app.models.member import Member
 from app.models.team import TeamMember
 from app.repositories.doc import DocRepository
@@ -296,7 +296,10 @@ async def update_doc(
     body: DocUpdate,
     repo: DocRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
 ) -> DocResponse:
+    # f69fcd91: 대상 doc 의 project 접근 강제(cross-project IDOR — patch 도 id+org 로만 잡아 mutate 하던 갭).
+    await _require_doc_project_access(session, id, uuid.UUID(auth.user_id), repo.org_id)
     data = body.model_dump(exclude_unset=True)
     # 4dd399c6: slug/slug_locked 는 유일성·alias 처리가 필요해 일반 필드와 분리.
     slug_in = data.pop("slug", None)
@@ -419,10 +422,21 @@ async def update_doc(
 async def delete_doc(
     id: uuid.UUID,
     repo: DocRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    # f69fcd91: 대상 doc 의 project 접근 강제(cross-project IDOR 차단·get_project_scoped_org_id 의 org-only
+    # fallback 으로 同org 비-project caller 가 타 project doc 삭제 가능하던 갭). 없으면 404·무권한 403.
+    await _require_doc_project_access(repo.session, id, uuid.UUID(auth.user_id), repo.org_id)
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Doc not found")
+    # b13352c2: doc 삭제 시 그 doc 의 pending doc_approval 게이트를 cascade void(orphan Gate inbox 항목 방지).
+    # 삭제 권한자(인증 caller) 트리거 system cascade — human-gate authz 우회 정당(별도 결재 아님). void 는
+    # begin_nested 격리 best-effort라 삭제 비중단. pending 아니면 no-op(멱등)·doc_approval 만 스코핑.
+    from app.services.gate_service import void_pending_doc_gate
+    from app.services.member_resolver import resolve_member
+    deleter = await resolve_member(auth, repo.org_id, repo.session)
+    await void_pending_doc_gate(repo.session, repo.org_id, id, deleter.id)
     return {"ok": True}
 
 
@@ -446,6 +460,25 @@ async def _resolve_doc_member_id(auth: AuthContext, org_id: uuid.UUID, db: Async
     # member id(org_member.id)로 폴백. 비-멤버는 resolve_member가 400.
     from app.services.member_resolver import resolve_member
     return (await resolve_member(auth, org_id, db)).id
+
+
+async def _require_doc_project_access(
+    session: AsyncSession, doc_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID
+) -> Doc:
+    """f69fcd91: doc mutation 의 canonical project-scope authz. 대상 doc 을 org-scope 로 로드하고 caller 의
+    그 doc project 접근(has_project_access SSOT=team_member∪grant∪owner/admin)을 강제 — doc 없으면 404·
+    무권한 403. delete/cancel/update 가 **id+org 로만** doc 잡아 mutate 하던 cross-project IDOR(同org
+    비-project caller 가 타 project doc 삭제/취소/수정) 차단. register_doc_asset 의 project 가드와 동일 SSOT.
+    반환=로드된 doc(caller 재사용 가능)."""
+    from app.services.project_auth import has_project_access
+    doc = (await session.execute(
+        select(Doc).where(Doc.id == doc_id, Doc.org_id == org_id, Doc.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    if not await has_project_access(session, user_id, doc.project_id, org_id):
+        raise HTTPException(status_code=403, detail="해당 문서의 프로젝트 접근 권한이 없습니다")
+    return doc
 
 
 # ─── Share (Part B b1574f5a) ──────────────────────────────────────────────────
@@ -481,9 +514,9 @@ async def enable_doc_share(
     auth: AuthContext = Depends(get_current_user),
 ) -> ShareStatusResponse:
     """opt-in 공개 활성 — active 토큰 발급(멱등)."""
-    doc = await repo.get(id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Doc not found")
+    # f69fcd91: 대상 doc project access 강제(cross-project IDOR — share enable/rotate/revoke 도 id+org
+    # 로만 doc 잡던 갭). 없으면 404·무권한 403. agent 도 has_project_access agent 분기로 차단.
+    doc = await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     actor_id = await _resolve_doc_member_id(auth, repo.org_id, db)
     from app.services import doc_share
     tok = await doc_share.enable(db, repo.org_id, doc.project_id, id, actor_id)
@@ -498,9 +531,9 @@ async def regenerate_doc_share(
     auth: AuthContext = Depends(get_current_user),
 ) -> ShareStatusResponse:
     """구 토큰 즉시 폐기 + 신규 발급(유출 방어)."""
-    doc = await repo.get(id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Doc not found")
+    # f69fcd91: 대상 doc project access 강제(cross-project IDOR — share enable/rotate/revoke 도 id+org
+    # 로만 doc 잡던 갭). 없으면 404·무권한 403. agent 도 has_project_access agent 분기로 차단.
+    doc = await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     actor_id = await _resolve_doc_member_id(auth, repo.org_id, db)
     from app.services import doc_share
     tok = await doc_share.regenerate(db, repo.org_id, doc.project_id, id, actor_id)
@@ -515,9 +548,9 @@ async def disable_doc_share(
     auth: AuthContext = Depends(get_current_user),
 ) -> ShareStatusResponse:
     """공개 중단 — active 토큰 revoke(이후 공개 read 410)."""
-    doc = await repo.get(id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Doc not found")
+    # f69fcd91: 대상 doc project access 강제(cross-project IDOR — share enable/rotate/revoke 도 id+org
+    # 로만 doc 잡던 갭). 없으면 404·무권한 403. agent 도 has_project_access agent 분기로 차단.
+    await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     actor_id = await _resolve_doc_member_id(auth, repo.org_id, db)
     from app.services import doc_share
     await doc_share.revoke(db, repo.org_id, id, actor_id)
@@ -555,11 +588,8 @@ async def add_doc_comment(
     repo: DocRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> DocCommentResponse:
-    from app.models.doc import Doc
-    doc_result = await db.execute(select(Doc).where(Doc.id == id, Doc.org_id == repo.org_id))
-    doc = doc_result.scalar_one_or_none()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Doc not found")
+    # f69fcd91: 대상 doc project access 강제(cross-project IDOR — 코멘트 주입도 id+org 로만 잡던 갭).
+    doc = await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     created_by = await _resolve_doc_member_id(auth, repo.org_id, db)
     created_by = await canonicalize_member_id(created_by, db)  # AC3-2d(2): canonical 정규화
     comment = DocComment(
@@ -616,9 +646,16 @@ async def transition_doc_endpoint(
     from app.services.member_resolver import resolve_member
 
     caller = await resolve_member(auth, org_id, session)
+    # f69fcd91: 대상 doc 의 project 접근 강제(cross-project IDOR — cancel/transition 도 id+org 로만 doc
+    # 잡던 갭). via_gate 시스템 경로(gate 해소)는 transition_doc 직호출이라 무영향(이 엔드포인트만 user authz).
+    await _require_doc_project_access(session, id, uuid.UUID(auth.user_id), org_id)
     try:
         doc = await transition_doc(session, org_id, caller, id, body.status)
         await session.commit()
+        # 48f064e5 fix: UPDATE 후 commit 으로 server-onupdate 컬럼(updated_at)이 expired → model_validate
+        # 의 동기 컨텍스트서 lazy-load 시 MissingGreenlet(async IO) → 500. refresh 로 async 컨텍스트서
+        # eager 재로드(create_doc=INSERT라 무영향이었음). [[base_repository_refresh]] 패턴.
+        await session.refresh(doc)
         return DocResponse.model_validate(doc)
     except DocTransitionError as e:
         _codes = {

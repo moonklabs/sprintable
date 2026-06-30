@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { CheckCircle, XCircle, Ban, MoreHorizontal, AlertTriangle, Pause, PlayCircle, UserCog, ArrowRightLeft, Gavel, Crown } from 'lucide-react';
+import { CheckCircle, XCircle, Ban, MoreHorizontal, AlertTriangle, Pause, PlayCircle, UserCog, ArrowRightLeft, Gavel, Crown, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -41,6 +42,10 @@ export function GateInbox({ memberId }: GateInboxProps) {
   // held 판정은 status==='held' OR held_until(디디 BE 표현 미확정·둘 다 커버·머지 후 정합).
   const [holdModal, setHoldModal] = useState<{ gateId: string; reason: string; indefinite: boolean; heldUntil: string } | null>(null);
   const isHeld = (g: GateItem) => g.status === 'held' || !!g.held_until;
+  // doc-side 결재(24f5ea18): doc 결재 gate 판정. work_item_type='doc' 또는 gate_type='doc_approval'(디디 BE PR #1742).
+  // doc gate는 머지 verdict의 requires_human/auto_decision 메타가 없어 gateNeedsAction이 false → 사람 결재 액션이
+  // 떠야 하므로 별도 분기로 승인/반려를 surface한다(human-only authz는 BE 강제).
+  const isDocGate = (g: GateItem) => g.work_item_type === 'doc' || g.gate_type === 'doc_approval';
   const resolveName = (id: string) => memberNames[id] ?? id.slice(0, 6);
   // S11 ②: 라인 컨텍스트(active step_run by story_id) + approver 이름맵.
   const [lineMap, setLineMap] = useState<Record<string, WorkflowLineStepRun>>({});
@@ -210,7 +215,14 @@ export function GateInbox({ memberId }: GateInboxProps) {
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex items-center gap-2">
                 <span className="shrink-0 text-xs font-medium text-foreground">{gate.gate_type}</span>
-                <span className="truncate text-xs text-muted-foreground">#{gate.work_item_id.slice(0, 6)}</span>
+                {/* doc gate: 원문서 제목 노출(work_item_summary·디디 BE PR #1742). 없으면(null/non-doc) 기존 raw id 폴백. */}
+                {gate.work_item_summary?.title ? (
+                  <span className="truncate text-xs text-muted-foreground" title={gate.work_item_summary.title}>
+                    {t('docGateTitlePrefix')}{gate.work_item_summary.title}
+                  </span>
+                ) : (
+                  <span className="truncate text-xs text-muted-foreground">#{gate.work_item_id.slice(0, 6)}</span>
+                )}
                 <span className="shrink-0 text-[10px] text-muted-foreground/70">{new Date(gate.created_at).toLocaleDateString()}</span>
               </div>
               {/* S11 ②: 라인 컨텍스트("어디·누가·언제") + ④ 구분선 → H1 GateEvidence("왜")와 분리 */}
@@ -279,8 +291,22 @@ export function GateInbox({ memberId }: GateInboxProps) {
                     {t('resumeAction')}
                   </Button>
                 </>
-              ) : gateNeedsAction(gate) ? (
+              ) : gateNeedsAction(gate) || isDocGate(gate) ? (
                 <>
+                  {/* doc gate: "문서에서 검토" 딥링크 primary(in-context 결재·rubber-stamp 방지). slug null이면 omit. */}
+                  {isDocGate(gate) && gate.work_item_summary?.slug ? (
+                    <Button
+                      asChild
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 gap-1 text-info hover:bg-info-tint hover:text-info"
+                    >
+                      <Link href={`/docs/${gate.work_item_summary.slug}`}>
+                        {t('gateOpenInDoc')}
+                        <ExternalLink className="size-3.5" />
+                      </Link>
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="ghost"
