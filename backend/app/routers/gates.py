@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.doc import Doc
 from app.models.gate import Gate
 from app.services.gate_service import (
     create_gate,
@@ -19,7 +20,7 @@ from app.services.gate_service import (
     void_gate,
 )
 from app.services.member_resolver import resolve_member
-from app.services.project_auth import is_org_owner, is_org_owner_or_admin
+from app.services.project_auth import has_project_access, is_org_owner, is_org_owner_or_admin
 
 # 사람 검증 행위(approve/reject) — "human-validated" 웨지 integrity상 휴먼 member만 허용.
 _HUMAN_REVIEW_STATUSES = frozenset({"approved", "rejected"})
@@ -174,6 +175,35 @@ async def transition_gate_endpoint(
             status_code=403,
             detail="게이트 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 승인 불가).",
         )
+    # E-DG 48f064e5: doc 결재 게이트 BE-level can_approve 강제(FE 게이팅은 가시성뿐·실 authz는 BE).
+    # 룰(A·PO 결정): human(위) + 대상 doc project has_project_access + not-author(resolver≠requester).
+    # 비-human/no-project-access/self → 403 fail-closed. 비-doc 게이트(merge 등)는 기존 경로 무변경.
+    _gate = (await session.execute(
+        select(Gate).where(Gate.id == id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if _gate is not None and _gate.gate_type == "doc_approval":  # doc.py DOC_GATE_TYPE
+        _facts = _gate.neutral_facts or {}
+        _requester = _facts.get("requested_by_member_id")
+        # ① self-approval(SoD): 상신자 본인 승인/거부 금지. SoD 가드가 parallel 경로에만 있어 plain
+        # doc-gate 는 미적용이던 갭 — 여기서 닫음. requester=현 사이클 상신자(재오픈 시 갱신).
+        if _requester is not None and str(resolved.id) == str(_requester):
+            raise HTTPException(
+                status_code=403,
+                detail="본인이 상신한 doc 결재는 본인이 승인/거부할 수 없습니다 (self-approval 금지).",
+            )
+        # ② can_approve 자격: 대상 doc 의 project 접근 보유 human 만(project-scope·random org-member 차단).
+        _doc = (await session.execute(
+            select(Doc).where(
+                Doc.id == _gate.work_item_id, Doc.org_id == org_id, Doc.deleted_at.is_(None)
+            )
+        )).scalar_one_or_none()
+        if _doc is None or not await has_project_access(
+            session, uuid.UUID(auth.user_id), _doc.project_id, org_id
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="doc 결재 권한이 없습니다 (대상 프로젝트 접근 필요).",
+            )
     # ⭐S23 RC① + RC#1(방어심층): resolver_id 를 **전 status 무조건 인증 caller 로 강제**(body 무시).
     # body 조작(타인 UUID)으로 SoD(approver≠owner) 우회·confirmed_by_member_id 위조 차단.
     _resolver_id = resolved.id

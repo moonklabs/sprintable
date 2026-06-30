@@ -111,6 +111,9 @@ async def transition_doc(
             }
             _facts = dict(gate.neutral_facts or {})
             _facts["decision_history"] = [*_facts.get("decision_history", []), _prior]
+            # 48f064e5 SoD: 재상신 = 새 결재 사이클 → 상신자를 현 caller 로 갱신(self-approval 체크가
+            # 현 사이클 상신자 기준이 되도록). 미갱신 시 다른 사람이 재상신해도 원 author 만 차단되는 누수.
+            _facts["requested_by_member_id"] = str(caller.id)
             gate.neutral_facts = _facts
             gate.status = "pending"
             gate.resolver_id = None
