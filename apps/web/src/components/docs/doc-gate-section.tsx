@@ -17,7 +17,8 @@ import type { GateItem } from '@/components/kanban/types';
  *   - doc.status = draft/pending/confirmed/denied → 배지(META map).
  *   - gate-row status = approved/rejected → decider 결재 transition body. 승인→BE가 doc→confirmed, 반려→doc→denied.
  * (34360c54) draft = "검토 요청" CTA 상시 노출(가시성 fix·draft→pending). (24f5ae18) pending+자격자 = in-doc 승인/반려.
- *   자격 = GET /api/gates/{id}/approvers 에 currentTeamMemberId 포함(저자 자기승인 금지·BE can_approve 강제·fail-closed).
+ *   자격 = gate.can_approve(BE per-caller·rule A: human+has_project_access+not-author·89484c8c). FE=가시성·실 authz=BE 403.
+ *   (구버전 /api/gates/{id}/approvers 는 S32 quorum/parallel 전용·plain doc-gate=빈목록이라 dead였음 → can_approve 로 교체.)
  * audit 타임라인 = revisions(요청/재요청) + 현재 gate resolution(승인/반려+사유) display 병합.
  *   ⚠️ 사이클별 풍부한 per-transition 이벤트 로그는 BE event-log 의존(디디 scope-TBD). v1 = 보유 데이터 병합.
  * 반려 사유 = doc gate(work_item_type='doc')의 resolution_note. revision = GET /docs/{id}/revisions(org-scoped IDOR fix).
@@ -59,26 +60,6 @@ function toState(status: string | undefined): DocGateState | null {
   return null; // draft 등은 배지 미표시
 }
 
-// approvers 응답 형상 방어 파싱: 배열 | {data:[]} | {approvers:[]}, 각 항목서 member id 추출. any 금지(strict).
-function extractApproverIds(raw: unknown): string[] {
-  const obj = raw as { data?: unknown; approvers?: unknown } | null;
-  const arr: unknown[] = Array.isArray(raw)
-    ? raw
-    : Array.isArray(obj?.data)
-      ? (obj!.data as unknown[])
-      : Array.isArray(obj?.approvers)
-        ? (obj!.approvers as unknown[])
-        : [];
-  const ids: string[] = [];
-  for (const item of arr) {
-    if (typeof item === 'string') { ids.push(item); continue; }
-    const r = item as Record<string, unknown>;
-    const id = r?.approver_member_id ?? r?.member_id ?? r?.team_member_id ?? r?.id;
-    if (typeof id === 'string') ids.push(id);
-  }
-  return ids;
-}
-
 export function DocGateSection({
   docId,
   status,
@@ -93,7 +74,6 @@ export function DocGateSection({
   const [gate, setGate] = useState<GateItem | null>(null);
   const [revisions, setRevisions] = useState<DocRevision[]>([]);
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
-  const [approverIds, setApproverIds] = useState<string[] | null>(null); // null = 미로드/실패 → fail-closed(버튼 숨김)
   const [busy, setBusy] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false); // 기본 접힘(본문 우선·이력 secondary)
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -115,17 +95,9 @@ export function DocGateSection({
     const names: Record<string, string> = {};
     for (const m of ((membersJson?.data ?? []) as { id: string; name: string }[])) names[m.id] = m.name;
     setMemberNames(names);
-    // (24f5ae18) decider 게이팅: pending + gate 있을 때만 자격자 목록 조회. 실패=null(fail-closed).
-    if (status === 'pending' && picked) {
-      const approversRaw = await fetch(`/api/gates/${picked.id}/approvers`)
-        .then((r) => (r.ok ? r.json() : null))
-        .catch(() => null);
-      if (signal?.aborted) return;
-      setApproverIds(approversRaw == null ? null : extractApproverIds(approversRaw));
-    } else {
-      setApproverIds(null);
-    }
-  }, [docId, status]);
+    // (89484c8c) decider 자격 = gate.can_approve(BE per-caller·rule A). 별도 approvers 조회 없음
+    // — /api/gates/{id}/approvers 는 S32 quorum/parallel 전용(plain doc-gate=빈목록)이라 dead였음.
+  }, [docId]);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -137,10 +109,10 @@ export function DocGateSection({
   const meta = state ? META[state] : null;
   const MetaIcon = meta?.Icon;
   const isDraft = status === 'draft';
-  const isApprover = status === 'pending' && !!currentTeamMemberId && (approverIds?.includes(currentTeamMemberId) ?? false);
+  // 자격 = gate.can_approve(BE per-caller·rule A: human+has_project_access+not-author). FE=가시성·실 authz=BE 403.
+  const isApprover = status === 'pending' && gate?.can_approve === true;
   const resolveName = (id: string | null | undefined) => (id ? (memberNames[id] ?? id.slice(0, 6)) : '—');
   const fmtDate = (s: string | undefined) => (s ? new Date(s).toLocaleString() : '');
-  const reviewerName = approverIds && approverIds.length > 0 ? resolveName(approverIds[0]) : null;
 
   // doc.status transition(draft↔pending↔denied). gate-row transition과 별개.
   const docTransition = async (next: string) => {
@@ -263,7 +235,7 @@ export function DocGateSection({
           ) : state === 'pending' ? (
             /* ② pending + author/비자격자 = 검토자 응답 대기(액션 없음·self-approval 금지). */
             <span className="text-xs text-muted-foreground">
-              {reviewerName ? t('docGateAwaitingReviewer', { name: reviewerName }) : t('docGateAwaitingGeneric')}
+              {t('docGateAwaitingGeneric')}
             </span>
           ) : state === 'confirmed' && gate ? (
             /* ④ confirmed = 결재자 + 시각. */
