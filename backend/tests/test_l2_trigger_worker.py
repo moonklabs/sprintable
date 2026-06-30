@@ -199,6 +199,33 @@ async def test_collect_epic_deadlines_dispatchable_anchor():
     assert pair_org == org and d.anchor_type in ("epic", "story", "doc")  # dispatchable.
 
 
+@pytest.mark.anyio
+async def test_collect_sprint_deadlines_dispatchable_anchor():
+    """ed904b9d AC③: sprint deadline → wake. sprint 은 assignee 컬럼 없음 → _fetch_entity 가 relay-owner 로
+    target 해소(S27). dispatchable anchor 라 L2 firing 이 wake skip 안 됨."""
+    w = L2TriggerWorker(use_advisory_lock=False)
+    owner, org, sprint_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    rows = [{
+        "id": sprint_id, "org_id": org,
+        # sprint 윈도우=deadline_sprint_end_h(24h). collect 가 end_date를 당일 23:59:59 로 combine 하므로
+        # 오늘 날짜면 remaining ≤ 24h → 임박 발사(어느 시각이든 안정·non-flaky).
+        "end_date": now.date(),
+        "status": "active",
+    }]
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_rows_result(rows))
+    with patch(
+        "app.services.agent_dispatch._fetch_entity", new_callable=AsyncMock,
+        return_value=(owner, "Sprint", "status=active", uuid.uuid4()),
+    ):
+        pairs = await w._collect_sprint_deadlines(db, now)
+    assert len(pairs) == 1
+    d, pair_org = pairs[0]
+    assert d.anchor_type == "sprint" and d.anchor_id == sprint_id and d.target_agent_id == owner
+    assert pair_org == org
+
+
 # ── S6: dedup 발사 ─────────────────────────────────────────────────────────────
 
 def _decision(anchor_type="epic", seq=None):
