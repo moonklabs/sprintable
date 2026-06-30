@@ -23,12 +23,18 @@ interface ChatViewProps {
   commandTargets?: CommandTarget[];
   // 1aeecdde P2: 에이전트 member_id → presence_status(연결축 dot). 없으면 dot 미표시(graceful).
   presenceById?: Record<string, PresenceStatus>;
+  // Deeplink (ade2d6d5): 진입 시 스크롤+하이라이트할 메시지 id(?messageId=). 없으면 일반 동작(하단 스크롤).
+  scrollToMessageId?: string;
 }
 
 interface MessageGroup {
   date: string;
   messages: ChatMessage[];
 }
+
+// Deeplink (ade2d6d5): scroll-to-message가 대상 탐색을 위해 이전 페이지를 로드하는 최대 횟수(런어웨이 방지).
+// 50/page × 10 = ~500개. 그 안에 없으면 no-op(graceful).
+const MAX_SCROLL_LOAD_ATTEMPTS = 10;
 
 function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   const groups: Record<string, ChatMessage[]> = {};
@@ -41,7 +47,7 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
-export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', commandTargets, presenceById }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', commandTargets, presenceById, scrollToMessageId }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
@@ -57,6 +63,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const [commandHints, setCommandHints] = useState<Record<string, BlockedHint[]>>({});
   // 1aeecdde P2: 답장 생성 중 에이전트 typing — #1353 GET /working 폴링(BE 45s TTL) 결과.
   const [typingAgents, setTypingAgents] = useState<{ id: string; name: string }[]>([]);
+  // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
   // CB-S9: 스레드 패널 상태
   const [activeThread, setActiveThread] = useState<ChatMessage | null>(null);
   const [threadIncoming, setThreadIncoming] = useState<ChatMessage | null>(null);
@@ -80,6 +88,11 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const scrollRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const isFirstLoad = useRef(true);
+  // Deeplink (ade2d6d5): 하이라이트 클리어 타이머·중복 스크롤 가드·페이지 로드 시도 카운터(런어웨이 방지).
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastScrolledIdRef = useRef<string | null>(null);
+  const scrollTargetRef = useRef<string | undefined>(undefined);
+  const scrollLoadAttemptsRef = useRef(0);
   // CB-S8: render 후 스크롤 트리거용 ref (setTimeout 패턴 대체)
   const shouldScrollToBottomRef = useRef(false);
   // CB-S8: pull-to-refresh 터치 추적
@@ -129,10 +142,17 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   useEffect(() => {
     if (!loading && isFirstLoad.current) {
-      scrollToBottom();
+      // Deeplink (ade2d6d5): scrollToMessageId가 있으면 하단 자동스크롤을 건너뛴다
+      // (scroll-to-message와 충돌 방지). 일반 진입(messageId 부재)은 기존대로 하단 스크롤.
+      if (!scrollToMessageId) scrollToBottom();
       isFirstLoad.current = false;
     }
-  }, [loading, scrollToBottom]);
+  }, [loading, scrollToBottom, scrollToMessageId]);
+
+  // Deeplink (ade2d6d5): 언마운트 시 하이라이트 타이머 정리(메모리·setState-after-unmount 방지).
+  useEffect(() => () => {
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+  }, []);
 
   // 1aeecdde P2: 에이전트 typing 즉시 해제(답장 메시지 도착 시·다음 폴링 전 갭 제거).
   const clearTyping = useCallback((agentId: string) => {
@@ -344,6 +364,39 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     }
   });
 
+  // Deeplink (ade2d6d5): scrollToMessageId로 진입 시 해당 메시지로 스크롤 + 하이라이트.
+  // 메시지는 cursor 페이지네이션(50/page, 비-가상화)이라 대상이 아직 로드 안 된 이전 페이지에
+  // 있으면 이전 페이지를 (바운드 내에서) 로드하며 재시도. messages 변경마다 effect가 재실행되어
+  // 로드 후 다시 탐색한다. 대상 미발견·페이지 소진 시 no-op(graceful).
+  useEffect(() => {
+    if (!scrollToMessageId || loading) return;
+    // 대상이 바뀌면 시도 카운터 리셋(이전 대상의 잔여 시도 영향 제거).
+    if (scrollTargetRef.current !== scrollToMessageId) {
+      scrollTargetRef.current = scrollToMessageId;
+      scrollLoadAttemptsRef.current = 0;
+    }
+    // 같은 대상으로 이미 스크롤했다면 재스크롤 금지.
+    if (lastScrolledIdRef.current === scrollToMessageId) return;
+
+    const container = scrollRef.current;
+    if (!container) return;
+    const el = container.querySelector<HTMLElement>(`#msg-${CSS.escape(scrollToMessageId)}`);
+    if (el) {
+      lastScrolledIdRef.current = scrollToMessageId;
+      scrollLoadAttemptsRef.current = 0;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      setHighlightId(scrollToMessageId);
+      highlightTimerRef.current = setTimeout(() => setHighlightId(null), 2200);
+      return;
+    }
+    // 미발견 + 이전 페이지 존재 → 바운드 내에서 이전 페이지 로드 후 재시도(messages 변경→effect 재실행).
+    if (hasMore && !loadingMore && scrollLoadAttemptsRef.current < MAX_SCROLL_LOAD_ATTEMPTS) {
+      scrollLoadAttemptsRef.current += 1;
+      void handleLoadMore();
+    }
+  }, [scrollToMessageId, loading, messages, hasMore, loadingMore, handleLoadMore]);
+
   // 스크롤을 직접 내리면 인디케이터 자동 해제
   useEffect(() => {
     const el = scrollRef.current;
@@ -470,6 +523,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             onDelete={handleDeleteMessage}
                             presenceStatus={presenceById?.[msg.created_by]}
                             isWorking={typingAgents.some((a) => a.id === msg.created_by)}
+                            highlight={msg.id === highlightId}
                           />
                           {/* S5: 트리거 메시지 직후 차단 hint notice(차단 에이전트별 1건) */}
                           {commandHints[msg.id]?.map((h) => (
