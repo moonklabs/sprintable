@@ -186,10 +186,12 @@ async def transition_gate_endpoint(
         _requester = _facts.get("requested_by_member_id")
         # ① self-approval(SoD): 상신자 본인 승인/거부 금지. SoD 가드가 parallel 경로에만 있어 plain
         # doc-gate 는 미적용이던 갭 — 여기서 닫음. requester=현 사이클 상신자(재오픈 시 갱신).
-        if _requester is not None and str(resolved.id) == str(_requester):
+        # ⚠️fail-closed(산티아고/PO 플래그): 상신자 미기록(None)이면 SoD 검증 불가 → 거부(silent self-approval
+        # 우회 방지). 정상 doc-gate 는 doc.py 생성·재상신서 항상 persist — None=이상 게이트.
+        if _requester is None or str(resolved.id) == str(_requester):
             raise HTTPException(
                 status_code=403,
-                detail="본인이 상신한 doc 결재는 본인이 승인/거부할 수 없습니다 (self-approval 금지).",
+                detail="본인이 상신한 doc 결재는 본인이 승인/거부할 수 없습니다 (self-approval 금지·상신자 미검증 차단).",
             )
         # ② can_approve 자격: 대상 doc 의 project 접근 보유 human 만(project-scope·random org-member 차단).
         _doc = (await session.execute(

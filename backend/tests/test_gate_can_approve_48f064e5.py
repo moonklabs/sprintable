@@ -86,6 +86,25 @@ async def test_doc_gate_self_approval_forbidden():
     transition.assert_not_awaited()
 
 
+# ── ①' fail-closed: 상신자 미기록(None) → 403 (silent self-approval 우회 방지·산티아고/PO 플래그) ──
+@pytest.mark.anyio
+async def test_doc_gate_missing_requester_fail_closed():
+    gate = SimpleNamespace(gate_type="doc_approval", neutral_facts={}, work_item_id=uuid.uuid4())
+    transition = AsyncMock()
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_result(gate)])
+    auth = SimpleNamespace(user_id=str(uuid.uuid4()))
+    with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_human(uuid.uuid4()))), \
+         patch.object(gates_mod, "transition_gate", transition):
+        with pytest.raises(HTTPException) as ei:
+            await transition_gate_endpoint(
+                id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                session=session, org_id=uuid.uuid4(), auth=auth,
+            )
+    assert ei.value.status_code == 403
+    transition.assert_not_awaited()
+
+
 # ── ② no-project-access human → 403 ──
 @pytest.mark.anyio
 async def test_doc_gate_no_project_access_forbidden():
