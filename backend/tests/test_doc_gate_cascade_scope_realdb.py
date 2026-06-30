@@ -53,17 +53,18 @@ async def test_void_pending_doc_gate_scoping_locked():
     from app.services.gate_service import void_pending_doc_gate
 
     orgA, orgB = uuid.uuid4(), uuid.uuid4()
-    d1, d2, d3 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    d1, d2 = uuid.uuid4(), uuid.uuid4()
     engine, Session = await _session()
     try:
         async with Session() as s:
+            # 각 negative 는 match 와 **정확히 1 차원만** 다르게(변수 분리) → 스코핑 차원별 독립 잠금.
             cases = {
                 "match": _gate(orgA, d1, wit="doc", gt="doc_approval", status="pending"),     # → VOID
-                "merge": _gate(orgA, d1, wit="doc", gt="merge", status="pending"),            # gate_type≠
-                "wrongtype": _gate(orgA, d1, wit="story", gt="doc_approval", status="pending"),  # work_item_type≠
-                "terminal": _gate(orgA, d2, wit="doc", gt="doc_approval", status="approved"),  # status≠pending
-                "otherdoc": _gate(orgA, d3, wit="doc", gt="doc_approval", status="pending"),   # work_item_id≠
-                "crossorg": _gate(orgB, d1, wit="doc", gt="doc_approval", status="pending"),   # org≠
+                "merge": _gate(orgA, d1, wit="doc", gt="merge", status="pending"),            # gate_type만 다름
+                "wrongtype": _gate(orgA, d1, wit="story", gt="doc_approval", status="pending"),  # work_item_type만
+                "terminal": _gate(orgA, d1, wit="doc", gt="doc_approval", status="approved"),  # status만(같은 d1!)
+                "otherdoc": _gate(orgA, d2, wit="doc", gt="doc_approval", status="pending"),   # work_item_id만
+                "crossorg": _gate(orgB, d1, wit="doc", gt="doc_approval", status="pending"),   # org만
             }
             for g in cases.values():
                 s.add(g)
