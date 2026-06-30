@@ -71,3 +71,27 @@ async def test_best_effort_swallows_void_failure():
                new=AsyncMock(side_effect=ValueError("boom"))):
         r = await void_pending_doc_gate(s, uuid.uuid4(), uuid.uuid4(), uuid.uuid4())
     assert r is False
+
+
+# ── 상신취소(pending→draft)도 gate void(cancel-orphan 방지·PO 실측 ⓑ 케이스) ──
+@pytest.mark.anyio
+async def test_cancel_pending_to_draft_voids_gate():
+    from app.services.doc import transition_doc
+    from app.services.member_resolver import ResolvedMember
+    org = uuid.uuid4()
+    doc = MagicMock(status="pending", id=uuid.uuid4(), title="t", project_id=uuid.uuid4(), content="c")
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = doc
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=result)
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+    caller = ResolvedMember(id=uuid.uuid4(), user_id=uuid.uuid4(), name="u", type="human",
+                            role="member", org_id=org)
+    with patch("app.services.gate_service.void_pending_doc_gate",
+               new=AsyncMock(return_value=True)) as vpg:
+        await transition_doc(session, org, caller, doc.id, "draft")
+    vpg.assert_awaited_once()
+    assert vpg.await_args.args[2] == doc.id          # 그 doc 의 게이트
+    assert vpg.await_args.args[3] == caller.id        # voider=취소자
+    assert doc.status == "draft"

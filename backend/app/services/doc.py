@@ -168,6 +168,14 @@ async def transition_doc(
             content=doc.content, created_by=caller.id,
         ))
 
+    # b13352c2: 상신취소(pending→draft) 시 연결 pending doc_approval 게이트 cascade void(orphan Gate inbox
+    # 방지·PO 실측 cancel-orphan). doc 가 pending 을 떠나면 그 결재 사이클 종료 → gate void. 재상신(draft→pending)
+    # 시 create_gate 멱등이 voided(=terminal) 게이트를 re-open(L102)하므로 멱등 reuse 의도와 충돌 0. 삭제
+    # cascade(docs.py delete_doc)와 동일 void_pending_doc_gate·system cascade(취소자 트리거·human-gate authz 우회 정당).
+    if doc.status == "pending" and to_status == "draft":
+        from app.services.gate_service import void_pending_doc_gate
+        await void_pending_doc_gate(session, org_id, doc.id, caller.id)
+
     doc.status = to_status
     await session.flush()
     return doc
