@@ -514,9 +514,9 @@ async def enable_doc_share(
     auth: AuthContext = Depends(get_current_user),
 ) -> ShareStatusResponse:
     """opt-in 공개 활성 — active 토큰 발급(멱등)."""
-    doc = await repo.get(id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Doc not found")
+    # f69fcd91: 대상 doc project access 강제(cross-project IDOR — share enable/rotate/revoke 도 id+org
+    # 로만 doc 잡던 갭). 없으면 404·무권한 403. agent 도 has_project_access agent 분기로 차단.
+    doc = await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     actor_id = await _resolve_doc_member_id(auth, repo.org_id, db)
     from app.services import doc_share
     tok = await doc_share.enable(db, repo.org_id, doc.project_id, id, actor_id)
@@ -531,9 +531,9 @@ async def regenerate_doc_share(
     auth: AuthContext = Depends(get_current_user),
 ) -> ShareStatusResponse:
     """구 토큰 즉시 폐기 + 신규 발급(유출 방어)."""
-    doc = await repo.get(id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Doc not found")
+    # f69fcd91: 대상 doc project access 강제(cross-project IDOR — share enable/rotate/revoke 도 id+org
+    # 로만 doc 잡던 갭). 없으면 404·무권한 403. agent 도 has_project_access agent 분기로 차단.
+    doc = await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     actor_id = await _resolve_doc_member_id(auth, repo.org_id, db)
     from app.services import doc_share
     tok = await doc_share.regenerate(db, repo.org_id, doc.project_id, id, actor_id)
@@ -548,9 +548,9 @@ async def disable_doc_share(
     auth: AuthContext = Depends(get_current_user),
 ) -> ShareStatusResponse:
     """공개 중단 — active 토큰 revoke(이후 공개 read 410)."""
-    doc = await repo.get(id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Doc not found")
+    # f69fcd91: 대상 doc project access 강제(cross-project IDOR — share enable/rotate/revoke 도 id+org
+    # 로만 doc 잡던 갭). 없으면 404·무권한 403. agent 도 has_project_access agent 분기로 차단.
+    await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     actor_id = await _resolve_doc_member_id(auth, repo.org_id, db)
     from app.services import doc_share
     await doc_share.revoke(db, repo.org_id, id, actor_id)
@@ -588,11 +588,8 @@ async def add_doc_comment(
     repo: DocRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> DocCommentResponse:
-    from app.models.doc import Doc
-    doc_result = await db.execute(select(Doc).where(Doc.id == id, Doc.org_id == repo.org_id))
-    doc = doc_result.scalar_one_or_none()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Doc not found")
+    # f69fcd91: 대상 doc project access 강제(cross-project IDOR — 코멘트 주입도 id+org 로만 잡던 갭).
+    doc = await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     created_by = await _resolve_doc_member_id(auth, repo.org_id, db)
     created_by = await canonicalize_member_id(created_by, db)  # AC3-2d(2): canonical 정규화
     comment = DocComment(
