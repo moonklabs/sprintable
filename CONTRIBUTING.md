@@ -33,6 +33,18 @@ pnpm build         # Production build
    - Screenshots for UI changes
 4. **Review**: At least one approval required before merge
 
+## Linking PRs to Stories
+
+Sprintable's approval gates can auto-link a PR to its story so a gate reflects the real
+CI/merge outcome. Contributors in this repository may opt to tag a PR by including a
+`sid-<story-uuid>` segment in the branch name (or `[SID:<story-uuid>]` in the PR body) —
+this is **optional**, and untagged PRs are handled gracefully. The detailed tagging
+conventions used by this repo's own agents live in [`AGENTS.md`](AGENTS.md).
+
+Convention-free linking for product use (in-app, no branch/PR naming rules) is planned
+and provided separately — the tagging above is an internal convenience, not a
+requirement for using Sprintable.
+
 ## Code Style
 
 - **TypeScript strict mode** — no `any` unless absolutely necessary
