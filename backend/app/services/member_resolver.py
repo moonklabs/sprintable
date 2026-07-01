@@ -69,6 +69,13 @@ async def _resolve_member_legacy(
         )).scalars().first()
         if tm is None:
             raise HTTPException(status_code=400, detail="Team member not found")
+        # 까심 QA CRITICAL(#1814 S3 QA): 휴먼 분기만 project_id를 has_project_access로 검증했고
+        # agent(API키) 분기는 검증 없이 조기 return — agent가 접근권한 없는 project_id를 넘기면
+        # 그 project에 리소스가 생성됐다(cross-project IDOR). resolve_member(project_id=)를 쓰는
+        # 모든 라우터(loops/hypotheses/retros/standups/conversations 등)가 동일하게 뚫려 있었다.
+        if project_id is not None:
+            if not await has_project_access(session, tm.id, project_id, org_id):
+                raise HTTPException(status_code=403, detail="No access to this project")
         return ResolvedMember(
             id=tm.id,
             user_id=None,
@@ -144,6 +151,11 @@ async def _resolve_member_anchor(
             select(AgentProjectProfile.project_id).where(AgentProjectProfile.member_id == m.id)
             .order_by(AgentProjectProfile.created_at.asc()).limit(1)
         )).scalar_one_or_none()
+        # 까심 QA CRITICAL(#1814 S3 QA) — legacy 분기와 동일 갭(agent가 project_id 검증 없이 통과).
+        # anchor 경로도 동일하게 봉인(shadow 플래그로 어느 쪽이 active여도 안전).
+        if project_id is not None:
+            if not await has_project_access(session, m.id, project_id, org_id):
+                raise HTTPException(status_code=403, detail="No access to this project")
         return ResolvedMember(
             id=m.id,
             user_id=None,
