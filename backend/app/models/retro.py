@@ -45,12 +45,24 @@ class RetroItem(Base):
     category: Mapped[str] = mapped_column(Text, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     vote_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # B2(9f27af8f): 'group' phase 병합 — child가 가리키는 값. parent는 반드시 top-level
+    # (parent_item_id IS NULL)이어야 함(체인/사이클 방지, app-level 검증 — 같은 테이블 참조라
+    # CHECK 제약으로 표현 불가). child는 vote 불가·투표는 parent로 이관.
+    parent_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("retro_items.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
     session: Mapped[RetroSession] = relationship("RetroSession", back_populates="items")
     votes: Mapped[list["RetroVote"]] = relationship("RetroVote", back_populates="item", lazy="select")
+    parent: Mapped["RetroItem | None"] = relationship(
+        "RetroItem", remote_side=[id], back_populates="children"
+    )
+    children: Mapped[list["RetroItem"]] = relationship(
+        "RetroItem", back_populates="parent", lazy="select"
+    )
 
 
 class RetroVote(Base):

@@ -47,6 +47,10 @@ def _mock_item() -> MagicMock:
     # RetroItem 실 모델엔 없는 계산 필드 — MagicMock은 미설정 속성도 truthy를 자동생성하므로
     # (실 ORM 객체라면 getattr 이 없어 pydantic 기본값 False로 떨어짐) 명시적으로 맞춰준다.
     i.voted_by_me = False
+    # B2: 실 컬럼(parent_item_id)이지만 미설정 시 MagicMock이 truthy 자동생성 → 잘못
+    # "그룹핑됨"으로 오판(vote_item의 `is not None` 체크·get_session의 visible_items 필터
+    # 둘 다 영향). 기본은 top-level(None).
+    i.parent_item_id = None
     return i
 
 
@@ -80,7 +84,7 @@ def _deny_project_access():
 
 
 def _mock_resolve_member(member_id: uuid.UUID | None = None):
-    """B4: get_session이 호출하는 resolve_member SSOT를 patch — DB member 해소 우회."""
+    """B4/P0: 라우터가 호출하는 resolve_member SSOT를 patch — DB member 해소 우회."""
     resolved = MagicMock()
     resolved.id = member_id or uuid.uuid4()
     return patch("app.routers.retros.resolve_member", new=AsyncMock(return_value=resolved))
@@ -178,8 +182,10 @@ async def test_list_retro_sessions_cross_project_403():
 async def test_create_retro_session_201():
     client, session, app = await _client()
     try:
+        resolved_id = uuid.uuid4()
         with (
             _allow_project_access(),
+            _mock_resolve_member(resolved_id),
             patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create,
         ):
             mock_create.return_value = _mock_session()
@@ -189,10 +195,15 @@ async def test_create_retro_session_201():
                     "project_id": str(PROJECT_ID),
                     "org_id": str(ORG_ID),
                     "title": "Sprint 3 Retro",
+                    "created_by": str(uuid.uuid4()),  # P0: client 지정값은 무시돼야 함
                 })
 
         assert resp.status_code == 201
         assert resp.json()["title"] == "Sprint 3 Retro"
+        # 핵심: created_by는 client body가 아니라 resolve_member 해소값으로 create 호출됨.
+        mock_create.assert_awaited_once_with(
+            project_id=PROJECT_ID, title="Sprint 3 Retro", sprint_id=None, created_by=resolved_id
+        )
     finally:
         app.dependency_overrides.clear()
 
@@ -338,6 +349,7 @@ async def test_add_item_default_not_voted():
 
         with (
             _allow_project_access(),
+            _mock_resolve_member(),
             patch("app.repositories.retro.RetroItemRepository.create", new_callable=AsyncMock) as mock_create,
         ):
             mock_create.return_value = _mock_item()
@@ -440,8 +452,10 @@ async def test_add_item_201():
         session.refresh = AsyncMock()
         session.add = MagicMock()
 
+        resolved_id = uuid.uuid4()
         with (
             _allow_project_access(),
+            _mock_resolve_member(resolved_id),
             patch("app.repositories.retro.RetroItemRepository.create", new_callable=AsyncMock) as mock_create,
         ):
             mock_create.return_value = _mock_item()
@@ -450,10 +464,15 @@ async def test_add_item_201():
                 resp = await c.post(f"/api/v2/retros/{SESSION_ID}/items", json={
                     "category": "good",
                     "text": "팀워크 좋았는",
+                    "author_id": str(uuid.uuid4()),  # P0: client 지정값은 무시돼야 함
                 })
 
         assert resp.status_code == 201
         assert resp.json()["category"] == "good"
+        # 핵심: author_id는 client body가 아니라 resolve_member 해소값으로 create 호출됨.
+        mock_create.assert_awaited_once_with(
+            session_id=SESSION_ID, category="good", text="팀워크 좋았는", author_id=resolved_id
+        )
     finally:
         app.dependency_overrides.clear()
 
@@ -532,11 +551,9 @@ async def test_vote_duplicate_409():
 
         session.execute = mock_execute
 
-        with _allow_project_access():
+        with _allow_project_access(), _mock_resolve_member(VOTER_ID):
             async with client as c:
-                resp = await c.post(
-                    f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/vote?voter_id={VOTER_ID}"
-                )
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/vote")
 
         assert resp.status_code == 409
     finally:
@@ -564,11 +581,231 @@ async def test_vote_item_wrong_session_404():
 
         with _allow_project_access():
             async with client as c:
-                resp = await c.post(
-                    f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/vote?voter_id={VOTER_ID}"
-                )
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/vote")
 
         assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_vote_grouped_child_forbidden_400():
+    """B2 — parent_item_id가 있는(그룹핑된) child는 직접 투표 불가."""
+    client, session, app = await _client()
+    try:
+        grouped_item = _mock_item()
+        grouped_item.parent_item_id = uuid.uuid4()
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = _mock_session() if call_count == 1 else grouped_item
+            return result
+
+        session.execute = mock_execute
+
+        with _allow_project_access():
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/vote")
+
+        assert resp.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_vote_item_uses_resolved_caller_not_client_input():
+    """P0(9f27af8f) — voter_id는 client 입력에서 완전히 배제, resolve_member 해소값만 사용
+    (vote-spoofing 봉쇄). RetroVoteRepository.vote 가 resolve_member 해소값으로 호출되는지
+    직접 검증(호출 인자 assert — DB 생성 필드 mocking 없이 라우팅 로직만 격리)."""
+    client, session, app = await _client()
+    try:
+        resolved_id = uuid.uuid4()
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            # call1 = _require_retro_project_access, call2 = _require_item_in_session
+            result.scalar_one_or_none.return_value = _mock_session() if call_count == 1 else _mock_item()
+            return result
+
+        session.execute = mock_execute
+
+        with (
+            _allow_project_access(),
+            _mock_resolve_member(resolved_id),
+            patch("app.repositories.retro.RetroVoteRepository.vote", new_callable=AsyncMock) as mock_vote,
+        ):
+            v = _mock_vote()
+            v.voter_id = resolved_id
+            mock_vote.return_value = v
+
+            # POST body/query 어디에도 voter_id를 전혀 안 보냄 — 파라미터 자체가 없다.
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/vote")
+
+        assert resp.status_code == 201
+        assert resp.json()["voter_id"] == str(resolved_id)
+        # 핵심: vote()가 resolve_member 해소값으로만 호출됐는지(client 입력 경로 자체가 없음).
+        mock_vote.assert_awaited_once_with(ITEM_ID, resolved_id)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_group_item_200():
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        parent_id = uuid.uuid4()
+        grouped = _mock_item()
+        grouped.parent_item_id = parent_id
+
+        with (
+            _allow_project_access(),
+            patch(
+                "app.repositories.retro.RetroItemRepository.group_under_parent",
+                new_callable=AsyncMock,
+            ) as mock_group,
+        ):
+            mock_group.return_value = grouped
+
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/group",
+                    json={"parent_item_id": str(parent_id)},
+                )
+
+        assert resp.status_code == 200
+        assert resp.json()["parent_item_id"] == str(parent_id)
+        mock_group.assert_awaited_once_with(SESSION_ID, ITEM_ID, parent_id)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_group_item_invalid_400():
+    """category 불일치·이미 그룹핑됨·parent가 top-level 아님 등 — ValueError를 400으로 매핑."""
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with (
+            _allow_project_access(),
+            patch(
+                "app.repositories.retro.RetroItemRepository.group_under_parent",
+                new_callable=AsyncMock,
+            ) as mock_group,
+        ):
+            mock_group.side_effect = ValueError("CATEGORY_MISMATCH")
+
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/group",
+                    json={"parent_item_id": str(uuid.uuid4())},
+                )
+
+        assert resp.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_ungroup_item_200():
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        ungrouped = _mock_item()
+        ungrouped.parent_item_id = None
+
+        with (
+            _allow_project_access(),
+            patch("app.repositories.retro.RetroItemRepository.ungroup", new_callable=AsyncMock) as mock_ungroup,
+        ):
+            mock_ungroup.return_value = ungrouped
+
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/ungroup")
+
+        assert resp.status_code == 200
+        assert resp.json()["parent_item_id"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_ungroup_item_not_found_404():
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with (
+            _allow_project_access(),
+            patch("app.repositories.retro.RetroItemRepository.ungroup", new_callable=AsyncMock) as mock_ungroup,
+        ):
+            mock_ungroup.return_value = None
+
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/ungroup")
+
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_session_hides_grouped_children():
+    """B2 — get_session은 top-level item만 노출·parent에 grouped_item_ids 반영."""
+    client, session, app = await _client()
+    try:
+        parent = _mock_item()
+        parent.id = uuid.uuid4()
+        parent.parent_item_id = None
+        child = _mock_item()
+        child.id = uuid.uuid4()
+        child.parent_item_id = parent.id
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalar_one_or_none.return_value = _mock_session()
+            elif call_count == 2:
+                result.scalars.return_value.all.return_value = [parent, child]
+            elif call_count == 3:
+                result.scalars.return_value.all.return_value = []  # actions
+            else:
+                result.scalars.return_value.all.return_value = []  # votes
+            return result
+
+        session.execute = mock_execute
+
+        with _allow_project_access(), _mock_resolve_member():
+            async with client as c:
+                resp = await c.get(f"/api/v2/retros/{SESSION_ID}")
+
+        items = resp.json()["items"]
+        assert len(items) == 1
+        assert items[0]["id"] == str(parent.id)
+        assert items[0]["grouped_item_ids"] == [str(child.id)]
     finally:
         app.dependency_overrides.clear()
 
