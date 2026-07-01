@@ -281,6 +281,20 @@ async def transition_hypothesis(
         updates["archived_at"] = datetime.now(timezone.utc)
 
     updated = await repo.update(hypothesis_id, **updates)
+
+    if target in ("verified", "falsified"):
+        # E-LOOP-LEDGER S19: hypothesis_scorer.score_hypotheses(cron·GA4/internal_ops 전용)가
+        # 해소 직후 부르는 것과 동일한 다운스트림을 이 경로(수동 transition·source 무관)에도
+        # 배선한다 — 이 호출이 없으면 cron이 자동채점 안 하는 source(manual 등)로 해소된 가설이나
+        # 사람이 직접 transition으로 해소한 가설은 trust verdict(HO-S4)도 loop 귀속(S7)도 조용히
+        # 스킵됐다(진짜 갭). source-agnostic: GA4/internal_ops/manual 어느 경로든 verified/falsified
+        # 도달 시 항상 같은 다운스트림이 돈다("통합 0개여도 loop 완결" 실증).
+        from app.services.hypothesis_outcome_verdict import record_outcome_verdicts
+        from app.services.loop_outcome_attribution import attribute_loop_outcome
+
+        await record_outcome_verdicts(session, updated)
+        await attribute_loop_outcome(session, updated)
+
     return await _to_response(repo, updated)
 
 
