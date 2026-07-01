@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { StandupEntrySummary, StandupFeedbackSummary, StandupMemberSummary } from './standup-review-card';
+import type { StandupEntrySummary, StandupFeedbackSummary, StandupMemberSummary } from './standup-types';
 
 interface StandupBoardCardProps {
   member: StandupMemberSummary;

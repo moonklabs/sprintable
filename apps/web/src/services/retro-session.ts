@@ -22,6 +22,9 @@ export interface RetroItemRecord {
   vote_count: number;
   author_id: string;
   created_at: string;
+  // B4(9f27af8f): BE가 세션 조회 응답에 요청자 투표 여부를 포함하면 새로고침 후에도 투표 상태 복원.
+  // 필드 미도입 상태에서는 undefined → 기존 세션-로컬 votedItemIds 동작과 100% 동일(회귀 0).
+  voted_by_me?: boolean;
 }
 
 export interface RetroActionRecord {

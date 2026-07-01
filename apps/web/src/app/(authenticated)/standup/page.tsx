@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { Bot, Users } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +12,7 @@ import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-contro
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { formatSeoulDate } from '@/lib/date';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
+import { BoardBridgeModal, type BoardBridgeStory } from '@/components/standup/board-bridge-modal';
 import { StandupBoardCard } from '@/components/standup/standup-board-card';
 import { StandupFeedbackDialog } from '@/components/standup/standup-feedback-dialog';
 import { StandupHistorySection } from '@/components/standup/standup-history-section';
@@ -20,7 +22,14 @@ import {
   type StandupMemberSummary,
   type StandupReviewType,
   type StandupStorySummary,
-} from '@/components/standup/standup-review-card';
+} from '@/components/standup/standup-types';
+
+interface BridgedStory {
+  id: string;
+  title: string;
+  status: string;
+  projectName: string;
+}
 
 interface StandupSprintSummary {
   id: string;
@@ -97,7 +106,7 @@ function shiftDate(dateStr: string, days: number): string {
 
 export default function StandupPage() {
   const t = useTranslations('standup');
-  const { currentTeamMemberId, projectId } = useDashboardContext();
+  const { currentTeamMemberId, projectId, projectMemberships } = useDashboardContext();
 
   const [date, setDate] = useState(() => formatSeoulDate());
   const [entries, setEntries] = useState<StandupEntryRow[]>([]);
@@ -121,6 +130,9 @@ export default function StandupPage() {
   const [sprintExpanded, setSprintExpanded] = useState(false);
   const [editingSelf, setEditingSelf] = useState(false);
   const [feedbackDialogMemberId, setFeedbackDialogMemberId] = useState<string | null>(null);
+  // A1(9f27af8f): 보드 브릿지 — 현재 프로젝트 스코프 밖 스토리를 plan_story_ids에 연결.
+  const [bridgeModalOpen, setBridgeModalOpen] = useState(false);
+  const [bridgedStories, setBridgedStories] = useState<BridgedStory[]>([]);
 
   const memberNameById = useMemo(() => {
     const map: Record<string, string> = {};
@@ -142,6 +154,17 @@ export default function StandupPage() {
     }
     return map;
   }, [feedback]);
+
+  // A2(9f27af8f): 블로커 롤업 — 기존 entries에서 파생, 신규 fetch 0.
+  const blockerEntries = useMemo(() => (
+    entries
+      .filter((entry) => Boolean(entry.blockers?.trim()))
+      .map((entry) => ({
+        authorId: entry.author_id,
+        name: memberNameById[entry.author_id] ?? t('unknown'),
+        blockers: entry.blockers as string,
+      }))
+  ), [entries, memberNameById, t]);
 
   const humanMembers = useMemo(() => members.filter((member) => member.type === 'human'), [members]);
   const agentMembers = useMemo(() => members.filter((member) => member.type === 'agent'), [members]);
@@ -169,7 +192,16 @@ export default function StandupPage() {
     setPlan(currentEntry?.plan ?? '');
     setBlockers(currentEntry?.blockers ?? '');
     setPlanStoryIds(currentEntry?.plan_story_ids ?? []);
-  }, [currentEntry?.id, currentEntry?.updated_at, currentEntry?.done, currentEntry?.plan, currentEntry?.blockers, currentEntry?.plan_story_ids]);
+    // A1(9f27af8f): 이전에 연결된 타 보드 스토리(scoped stories에 없는 plan_stories)를 브릿지 칩으로 복원.
+    const scopedIds = new Set(stories.map((story) => story.id));
+    const bridged = (currentEntry?.plan_stories ?? []).filter((story) => !scopedIds.has(story.id));
+    setBridgedStories(bridged.map((story) => ({
+      id: story.id,
+      title: story.title,
+      status: story.status,
+      projectName: projectMemberships.find((m) => m.projectId === story.project_id)?.projectName ?? t('unknown'),
+    })));
+  }, [currentEntry?.id, currentEntry?.updated_at, currentEntry?.done, currentEntry?.plan, currentEntry?.blockers, currentEntry?.plan_story_ids, currentEntry?.plan_stories, stories, projectMemberships, t]);
 
   useEffect(() => {
     setEditingSelf(false);
@@ -301,6 +333,20 @@ export default function StandupPage() {
     : loading
       ? [{ label: t('loading'), variant: 'outline' as const }]
       : summaryBadges;
+
+  function addBridgedStory(story: BoardBridgeStory, board: { projectId: string; projectName: string }) {
+    setPlanStoryIds((current) => (current.includes(story.id) ? current : [...current, story.id]));
+    setBridgedStories((current) => (
+      current.some((item) => item.id === story.id)
+        ? current
+        : [...current, { id: story.id, title: story.title, status: story.status, projectName: board.projectName }]
+    ));
+  }
+
+  function removeBridgedStory(storyId: string) {
+    setPlanStoryIds((current) => current.filter((id) => id !== storyId));
+    setBridgedStories((current) => current.filter((item) => item.id !== storyId));
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -449,7 +495,7 @@ export default function StandupPage() {
                     {loading ? (
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                         {[1, 2, 3].map((item) => (
-                          <div key={item} className="h-28 animate-pulse rounded-2xl bg-muted" />
+                          <div key={item} className="h-28 animate-pulse rounded-xl bg-muted" />
                         ))}
                       </div>
                     ) : activeSprint ? (
@@ -457,7 +503,7 @@ export default function StandupPage() {
                         <div className="space-y-3">
                           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                             {stories.map((story) => (
-                              <div key={story.id} className="rounded-2xl border border-border/70 bg-background p-4 shadow-sm">
+                              <div key={story.id} className="rounded-xl border border-border/70 bg-background p-4 shadow-sm">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <p className="text-sm font-medium text-foreground">{story.title}</p>
                                   <Badge variant="outline">{story.status}</Badge>
@@ -535,11 +581,31 @@ export default function StandupPage() {
                 </Alert>
               ) : null}
 
+              {/* A2(9f27af8f): 블로커 롤업 — 0건이면 접힘(미렌더) */}
+              {!loading && blockerEntries.length > 0 ? (
+                <div className="rounded-xl border border-destructive-border bg-destructive-bg p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-sm font-semibold text-destructive">{t('blockersRollupTitle', { count: blockerEntries.length })}</h2>
+                  </div>
+                  <div className="mt-2 space-y-1.5">
+                    {blockerEntries.map((entry) => (
+                      <p key={entry.authorId} className="text-xs text-foreground/90">
+                        <span className="font-medium text-destructive">{entry.name}</span>
+                        <span className="text-muted-foreground"> · {entry.blockers}</span>
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               {/* 사람 섹션 */}
               {loading ? (
                 <section className="space-y-3">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-semibold text-foreground">👤 {t('people')}</h2>
+                    <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                      <Users className="h-4 w-4" aria-hidden />
+                      {t('people')}
+                    </h2>
                   </div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                     {[1, 2, 3].map((item) => (
@@ -550,7 +616,10 @@ export default function StandupPage() {
               ) : humanMembers.length > 0 ? (
                 <section className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold text-foreground">👤 {t('people')}</h2>
+                    <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                      <Users className="h-4 w-4" aria-hidden />
+                      {t('people')}
+                    </h2>
                     <Badge variant="chip">{t('memberCount', { count: humanMembers.length })}</Badge>
                   </div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -561,7 +630,7 @@ export default function StandupPage() {
 
                       if (isCurrentUser && editingSelf) {
                         return (
-                          <div key={member.id} className="col-span-full rounded-xl border border-brand/40 bg-card p-4 shadow-sm space-y-4">
+                          <div key={member.id} className="rounded-xl border border-brand/40 bg-card p-4 shadow-sm space-y-4">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="space-y-0.5">
                                 <h3 className="text-sm font-semibold text-foreground">{t('orgLevelTitle')}</h3>
@@ -577,31 +646,32 @@ export default function StandupPage() {
                               <AlertDescription className="text-xs">{t('orgWriteBanner')}</AlertDescription>
                             </Alert>
 
-                            <div className="grid gap-4 md:grid-cols-3">
+                            {/* A3(9f27af8f): 카드 내부 확장 — col-span-full 전면폼 제거, 세로 스택 */}
+                            <div className="space-y-3">
                               <div>
-                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-emerald-400">{t('done')}</label>
+                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-success">{t('done')}</label>
                                 <OperatorTextarea
                                   value={done}
                                   onChange={(event) => setDone(event.target.value)}
-                                  rows={4}
+                                  rows={3}
                                   placeholder={t('donePlaceholder')}
                                 />
                               </div>
                               <div>
-                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[color:var(--brand-soft)]">{t('plan')}</label>
+                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-info">{t('plan')}</label>
                                 <OperatorTextarea
                                   value={plan}
                                   onChange={(event) => setPlan(event.target.value)}
-                                  rows={4}
+                                  rows={3}
                                   placeholder={t('planPlaceholder')}
                                 />
                               </div>
                               <div>
-                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-rose-300">{t('blockers')}</label>
+                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-destructive">{t('blockers')}</label>
                                 <OperatorTextarea
                                   value={blockers}
                                   onChange={(event) => setBlockers(event.target.value)}
-                                  rows={4}
+                                  rows={3}
                                   placeholder={t('blockersPlaceholder')}
                                 />
                               </div>
@@ -610,10 +680,31 @@ export default function StandupPage() {
                             <div className="space-y-3 rounded-xl border border-border/70 bg-muted/10 p-3">
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('planStoriesOptional')}</p>
-                                <Badge variant="outline">{t('linkedStoryCount', { count: planStoryIds.length })}</Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline">{t('linkedStoryCount', { count: planStoryIds.length })}</Badge>
+                                  {projectMemberships.length > 0 ? (
+                                    <Button variant="glass" size="sm" className="h-6 px-2 text-xs" onClick={() => setBridgeModalOpen(true)}>
+                                      {t('bridgeAddButton')}
+                                    </Button>
+                                  ) : null}
+                                </div>
                               </div>
                               {/* projection은 접근권 기준 자동 — plan_story_ids와 무관(디커플 명시) */}
                               <p className="text-xs text-muted-foreground">{t('planStoriesProjectionHint')}</p>
+                              {/* A1(9f27af8f): 브릿지로 연결한 타 보드 스토리 — 현재 프로젝트 picker와 별도 표시 */}
+                              {bridgedStories.length > 0 ? (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {bridgedStories.map((story) => (
+                                    <Badge key={story.id} variant="chip" className="gap-1.5">
+                                      <span className="max-w-[10rem] truncate">{story.title}</span>
+                                      <span className="text-muted-foreground">· {story.projectName}</span>
+                                      <button type="button" onClick={() => removeBridgedStory(story.id)} className="ml-1 text-muted-foreground hover:text-foreground" aria-label={t('bridgeRemove')}>
+                                        ✕
+                                      </button>
+                                    </Badge>
+                                  ))}
+                                </div>
+                              ) : null}
                               {storyPickerStories.length > 0 ? (
                                 <div className="max-h-40 space-y-1.5 overflow-y-auto">
                                   {storyPickerStories.map((story) => {
@@ -665,7 +756,7 @@ export default function StandupPage() {
                                 {saving ? t('saving') : t('save')}
                               </Button>
                               <Button variant="outline" onClick={() => setEditingSelf(false)}>{t('cancel')}</Button>
-                              {saveError ? <p className="text-sm text-rose-300">{saveError}</p> : null}
+                              {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}
                             </div>
                           </div>
                         );
@@ -692,7 +783,10 @@ export default function StandupPage() {
               {!loading && agentMembers.length > 0 ? (
                 <section className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold text-foreground">🤖 {t('agents')}</h2>
+                    <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                      <Bot className="h-4 w-4" aria-hidden />
+                      {t('agents')}
+                    </h2>
                     <Badge variant="chip">{t('memberCount', { count: agentMembers.length })}</Badge>
                   </div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -759,6 +853,15 @@ export default function StandupPage() {
           onDeleteFeedback={deleteFeedback}
         />
       ) : null}
+
+      {/* A1(9f27af8f): 보드 브릿지 모달 */}
+      <BoardBridgeModal
+        open={bridgeModalOpen}
+        onOpenChange={setBridgeModalOpen}
+        boards={projectMemberships}
+        alreadySelectedIds={planStoryIds}
+        onSelectStory={addBridgedStory}
+      />
     </>
   );
 }
