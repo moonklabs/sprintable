@@ -19,18 +19,23 @@ from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.org_subscription import OrgSubscription
+from app.models.pricing_version import PricingVersion
 from app.models.project import OrgMember
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["billing-ee"])
 
+# 표시가(USD 월간) — E-ADMIN B1(story 553fc58d)로 $49/$149 정정(구 $29/$79는 live Polar
+# 상품과 불일치했던 값). 실 청구는 pricing_versions(DB, doc e-admin-b1-polar-live-price-ids
+# SSOT)가 SSOT — 여기 숫자는 표시용 상수로 유지(B1 범위=grandfather 배선, catalog 전체
+# DB화는 별도 후속).
 _PLAN_CATALOG = [
     {"id": "free", "name": "Free", "price": 0, "billing_cycle": None,
      "features": ["1 project", "5 members", "Basic AI features"]},
-    {"id": "team", "name": "Team", "price": 29, "billing_cycle": "monthly",
+    {"id": "team", "name": "Team", "price": 49, "billing_cycle": "monthly",
      "features": ["Unlimited projects", "25 members", "Full AI features", "Priority support"]},
-    {"id": "pro", "name": "Pro", "price": 79, "billing_cycle": "monthly",
+    {"id": "pro", "name": "Pro", "price": 149, "billing_cycle": "monthly",
      "features": ["Unlimited projects", "Unlimited members", "Advanced AI", "Custom integrations", "SLA"]},
 ]
 
@@ -99,18 +104,15 @@ def _polar_api_url() -> str:
     return "https://sandbox.api.polar.sh" if settings.polar_sandbox else "https://api.polar.sh"
 
 
-# 플랜별 Polar product_price_id 매핑 (sandbox IDs — prod 배포 시 환경변수로 교체)
-_POLAR_PRICE_IDS: dict[str, str] = {
-    "team_monthly": "price_team_monthly_sandbox",
-    "team_yearly": "price_team_yearly_sandbox",
-    "pro_monthly": "price_pro_monthly_sandbox",
-    "pro_yearly": "price_pro_yearly_sandbox",
-}
-
-# 연간 플랜 가격 (월 환산)
-_PLAN_PRICES = {
-    "team": {"monthly": 29, "yearly": 23},
-    "pro": {"monthly": 79, "yearly": 63},
+# 플랜별 Polar product_price_id 매핑 — Moonklabs live org(선생님 GO, doc
+# e-admin-b1-polar-live-price-ids SSOT). 체크아웃은 여전히 USD만 사용(currency 선택 API
+# 미구현, 이번 스코프 아님) — krw는 pricing_versions DB에 이미 있고 여기 미리 반영해둔다
+# (통화 선택 API 나오면 바로 사용 가능, 지금은 checkout이 "usd"만 읽음).
+_POLAR_PRICE_IDS: dict[str, dict[str, str]] = {
+    "team_monthly": {"usd": "7d501b9f-f8b0-45ac-9b3f-817a3370ce9f", "krw": "3d1bae90-be94-496b-832e-f4178c658eea"},
+    "team_yearly": {"usd": "9a251b0e-e16c-45a6-a977-3351bada5b9e", "krw": "684deacc-7c31-4fe7-96ae-5c7408feded8"},
+    "pro_monthly": {"usd": "deefdbe9-ed44-4f60-a485-201215234e0b", "krw": "a48fca24-3374-4a78-b1dc-1168457acec4"},
+    "pro_yearly": {"usd": "415b0b77-f6d3-4cbb-9fe8-250f3281378f", "krw": "1fc9d6fa-b1bd-492b-b081-ecfe78775d12"},
 }
 
 
@@ -148,7 +150,7 @@ async def create_checkout_session(
         raise HTTPException(status_code=400, detail="Invalid billing_cycle. Use 'monthly' or 'yearly'")
 
     price_key = f"{body.plan_id}_{body.billing_cycle}"
-    price_id = _POLAR_PRICE_IDS.get(price_key)
+    price_id = (_POLAR_PRICE_IDS.get(price_key) or {}).get("usd")
     if not price_id:
         raise HTTPException(status_code=400, detail=f"No price configured for {price_key}")
 
@@ -300,6 +302,25 @@ async def polar_webhook(
     return {"ok": True}
 
 
+async def _current_pricing_version_id(
+    session: AsyncSession, tier: str, billing_cycle: str, currency: str = "usd"
+) -> uuid.UUID | None:
+    """grandfather 배선(E-ADMIN B1) — 가입/플랜변경 시점의 현재 유효 pricing_version을
+    조회(effective_from <= now 중 최신 1건). checkout이 USD만 다뤄 currency 기본값 usd."""
+    row = await session.execute(
+        select(PricingVersion.id)
+        .where(
+            PricingVersion.tier == tier,
+            PricingVersion.billing_cycle == billing_cycle,
+            PricingVersion.currency == currency,
+            PricingVersion.effective_from <= datetime.now(timezone.utc),
+        )
+        .order_by(PricingVersion.effective_from.desc())
+        .limit(1)
+    )
+    return row.scalar_one_or_none()
+
+
 async def _update_subscription(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -309,9 +330,12 @@ async def _update_subscription(
     polar_subscription_id: str | None,
     status: str = "active",
 ) -> None:
-    """Subscription 레코드 upsert."""
+    """Subscription 레코드 upsert. pricing_version_id는 매번(신규 가입뿐 아니라 플랜변경
+    시에도) 현재 유효 버전으로 갱신 — 플랜변경은 새 플랜의 현재가를 grandfather 기준점으로
+    삼는 게 맞다(기존 플랜의 옛 버전을 유지할 이유가 없음)."""
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     now = datetime.now(timezone.utc)
+    pricing_version_id = await _current_pricing_version_id(session, tier, billing_cycle)
     await session.execute(
         pg_insert(OrgSubscription)
         .values(
@@ -321,12 +345,14 @@ async def _update_subscription(
             tier=tier,
             billing_cycle=billing_cycle,
             status="active",
+            pricing_version_id=pricing_version_id,
             updated_at=now,
         )
         .on_conflict_do_update(
             index_elements=["org_id"],
             set_={"tier": tier, "billing_cycle": billing_cycle, "status": status,
-                  "polar_customer_id": polar_customer_id or "", "updated_at": now},
+                  "polar_customer_id": polar_customer_id or "", "pricing_version_id": pricing_version_id,
+                  "updated_at": now},
         )
     )
     await session.commit()
