@@ -332,28 +332,41 @@ async def _update_subscription(
 ) -> None:
     """Subscription 레코드 upsert. pricing_version_id는 매번(신규 가입뿐 아니라 플랜변경
     시에도) 현재 유효 버전으로 갱신 — 플랜변경은 새 플랜의 현재가를 grandfather 기준점으로
-    삼는 게 맞다(기존 플랜의 옛 버전을 유지할 이유가 없음)."""
+    삼는 게 맞다(기존 플랜의 옛 버전을 유지할 이유가 없음).
+
+    이 함수는 webhook 핸들러가 `background_tasks.add_task`로 fire-and-forget 호출한다 —
+    Polar엔 이미 {ok:true} ACK가 나간 뒤라 여기서 실패해도 호출자에게 전파할 방법이 없고
+    Polar 재시도도 없다(까심 QA 발견: 0148 버그가 이 경로 때문에 아무도 몰랐음). 그래서
+    반드시 여기서 직접 로그를 남긴다 — 조용한 실패 봉쇄가 핵심(풀 재시도 시스템은 후속)."""
     from sqlalchemy.dialects.postgresql import insert as pg_insert
-    now = datetime.now(timezone.utc)
-    pricing_version_id = await _current_pricing_version_id(session, tier, billing_cycle)
-    await session.execute(
-        pg_insert(OrgSubscription)
-        .values(
-            org_id=org_id,
-            polar_customer_id=polar_customer_id or "",
-            polar_subscription_id=polar_subscription_id,
-            tier=tier,
-            billing_cycle=billing_cycle,
-            status="active",
-            pricing_version_id=pricing_version_id,
-            updated_at=now,
+    try:
+        now = datetime.now(timezone.utc)
+        pricing_version_id = await _current_pricing_version_id(session, tier, billing_cycle)
+        await session.execute(
+            pg_insert(OrgSubscription)
+            .values(
+                org_id=org_id,
+                polar_customer_id=polar_customer_id or "",
+                polar_subscription_id=polar_subscription_id,
+                tier=tier,
+                billing_cycle=billing_cycle,
+                status="active",
+                pricing_version_id=pricing_version_id,
+                updated_at=now,
+            )
+            .on_conflict_do_update(
+                index_elements=["org_id"],
+                set_={"tier": tier, "billing_cycle": billing_cycle, "status": status,
+                      "polar_customer_id": polar_customer_id or "", "pricing_version_id": pricing_version_id,
+                      "updated_at": now},
+            )
         )
-        .on_conflict_do_update(
-            index_elements=["org_id"],
-            set_={"tier": tier, "billing_cycle": billing_cycle, "status": status,
-                  "polar_customer_id": polar_customer_id or "", "pricing_version_id": pricing_version_id,
-                  "updated_at": now},
+        await session.commit()
+        logger.info("Subscription updated for org %s → %s/%s", org_id, tier, billing_cycle)
+    except Exception:
+        logger.error(
+            "Subscription upsert FAILED for org %s (tier=%s, billing_cycle=%s, "
+            "polar_subscription_id=%s) — background task, Polar already ACKed, no retry",
+            org_id, tier, billing_cycle, polar_subscription_id, exc_info=True,
         )
-    )
-    await session.commit()
-    logger.info("Subscription updated for org %s → %s/%s", org_id, tier, billing_cycle)
+        raise
