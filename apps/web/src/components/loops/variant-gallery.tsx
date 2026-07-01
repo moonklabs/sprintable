@@ -7,7 +7,13 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { OperatorTextarea } from '@/components/ui/operator-control';
 import { ArtifactPreview } from '@/components/loops/artifact-preview';
+import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { Layers } from 'lucide-react';
+
+/** loop_outcome_attribution.py 산출 shape — closed loop에만 존재. */
+export interface OutcomeInfo {
+  hypothesis_status: 'verified' | 'falsified';
+}
 
 export interface LoopArtifact {
   id: string;
@@ -36,11 +42,13 @@ function VariantSlot({
   group,
   canDecide,
   onDecided,
+  outcome,
 }: {
   loopId: string;
   group: VariantGroup;
   canDecide: boolean;
   onDecided: () => void;
+  outcome: OutcomeInfo | null;
 }) {
   const t = useTranslations('loops');
   const sorted = [...group.artifacts].sort((a, b) => a.sort_order - b.sort_order);
@@ -135,7 +143,12 @@ function VariantSlot({
               <div className="space-y-1.5 p-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-xs font-medium text-foreground">{artifact.variant_label}</span>
-                  {isChosen ? <Badge variant="success" className="text-[9px]">{t('chosenBadge')}</Badge> : null}
+                  <div className="flex shrink-0 items-center gap-1">
+                    {isChosen ? <Badge variant="success" className="text-[9px]">{t('chosenBadge')}</Badge> : null}
+                    {isChosen && outcome ? (
+                      <OutcomeBadge hypothesisStatus={outcome.hypothesis_status} className="text-[9px]" />
+                    ) : null}
+                  </div>
                 </div>
 
                 {isChosen && artifact.choose_reason ? (
@@ -197,11 +210,13 @@ export function VariantGallery({
   groups,
   canDecide,
   onDecided,
+  outcome = null,
 }: {
   loopId: string;
   groups: VariantGroup[];
   canDecide: boolean;
   onDecided: () => void;
+  outcome?: OutcomeInfo | null;
 }) {
   const t = useTranslations('loops');
 
@@ -218,6 +233,7 @@ export function VariantGallery({
           group={group}
           canDecide={canDecide}
           onDecided={onDecided}
+          outcome={outcome}
         />
       ))}
     </div>

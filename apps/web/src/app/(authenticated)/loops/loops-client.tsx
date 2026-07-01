@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { LoopStatusBadge, type LoopStatus } from '@/components/loops/loop-status-badge';
+import { OutcomeBadge } from '@/components/loops/outcome-badge';
 
 interface Loop {
   id: string;
@@ -19,6 +20,7 @@ interface Loop {
   title: string;
   goal_tags: string[];
   status: LoopStatus;
+  outcome_snapshot: { hypothesis_status: 'verified' | 'falsified' } | null;
   created_at: string;
   updated_at: string;
 }
@@ -40,7 +42,12 @@ function LoopRow({ loop, onClick }: { loop: Loop; onClick: () => void }) {
       <div className="space-y-2">
         <div className="flex items-start justify-between gap-2">
           <p className="text-sm font-semibold leading-snug text-foreground">{loop.title}</p>
-          <LoopStatusBadge status={loop.status} />
+          <div className="flex shrink-0 items-center gap-1">
+            <LoopStatusBadge status={loop.status} />
+            {loop.status === 'closed' && loop.outcome_snapshot ? (
+              <OutcomeBadge hypothesisStatus={loop.outcome_snapshot.hypothesis_status} />
+            ) : null}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {loop.parent_loop_id ? (
