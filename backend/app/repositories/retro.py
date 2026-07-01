@@ -5,7 +5,14 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.retro import PHASE_TRANSITIONS, RetroAction, RetroItem, RetroSession, RetroVote
+from app.models.retro import (
+    ALLOWED_PHASE_TRANSITIONS,
+    RETRO_PHASES,
+    RetroAction,
+    RetroItem,
+    RetroSession,
+    RetroVote,
+)
 from app.repositories.base import BaseRepository
 
 
@@ -13,28 +20,20 @@ class RetroSessionRepository(BaseRepository[RetroSession]):
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         super().__init__(RetroSession, session, org_id)
 
-    async def advance_phase(self, id: uuid.UUID) -> RetroSession:
-        retro = await self.get(id)
-        if retro is None:
-            raise ValueError(f"RetroSession {id} not found")
-        next_phase = PHASE_TRANSITIONS.get(retro.phase)
-        if next_phase is None:
-            raise ValueError(f"Session is already in final phase: {retro.phase}")
-        updated = await self.update(id, phase=next_phase)
-        assert updated is not None
-        return updated
-
     async def set_phase(self, id: uuid.UUID, new_phase: str) -> RetroSession:
-        from app.models.retro import RETRO_PHASES
+        """B1: 인접 양방향(collect↔vote↔action) + action→closed 편도만 허용. closed는
+        terminal(전이 0건). 같은 phase 재지정은 no-op(멱등 — FE advance 확인 다이얼로그가
+        중복 클릭해도 안전)."""
         retro = await self.get(id)
         if retro is None:
             raise ValueError(f"RetroSession {id} not found")
-        current_idx = list(RETRO_PHASES).index(retro.phase)
-        new_idx = list(RETRO_PHASES).index(new_phase) if new_phase in RETRO_PHASES else -1
-        if new_idx < 0:
+        if new_phase not in RETRO_PHASES:
             raise ValueError(f"Invalid phase: {new_phase}")
-        if new_idx != current_idx + 1:
-            raise ValueError(f"Non-sequential transition: {retro.phase} → {new_phase}")
+        if new_phase == retro.phase:
+            return retro
+        allowed = ALLOWED_PHASE_TRANSITIONS.get(retro.phase, frozenset())
+        if new_phase not in allowed:
+            raise ValueError(f"Invalid phase transition: {retro.phase} → {new_phase}")
         updated = await self.update(id, phase=new_phase)
         assert updated is not None
         return updated

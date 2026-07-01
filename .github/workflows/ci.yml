@@ -97,7 +97,7 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
           JWT_SECRET: ci-test-secret-at-least-32-chars-long
           SECRET_KEY: ci-test-secret-at-least-32-chars-long
-        run: uv run pytest tests/test_asset_registry_realdb.py tests/test_asset_canonical.py tests/test_attachment_authorize_asset_s3.py tests/test_conv_human_participant_realdb.py tests/test_doc_asset_backfill_realdb.py tests/test_release_notes_realdb.py tests/test_audit_apikey_parity_realdb.py tests/test_doc_gate_cascade_scope_realdb.py tests/test_doc_mutation_project_scope_idor_realdb.py tests/test_retro_mutation_project_scope_idor_realdb.py tests/test_retro_voted_by_me_realdb.py tests/test_retro_grouping_vote_count_realdb.py -q
+        run: uv run pytest tests/test_asset_registry_realdb.py tests/test_asset_canonical.py tests/test_attachment_authorize_asset_s3.py tests/test_conv_human_participant_realdb.py tests/test_doc_asset_backfill_realdb.py tests/test_release_notes_realdb.py tests/test_audit_apikey_parity_realdb.py tests/test_doc_gate_cascade_scope_realdb.py tests/test_doc_mutation_project_scope_idor_realdb.py tests/test_retro_mutation_project_scope_idor_realdb.py tests/test_retro_voted_by_me_realdb.py tests/test_retro_grouping_vote_count_realdb.py tests/test_retro_phase_transitions_realdb.py -q
 
       - name: Verify fresh DB reached head (baseline + incremental)
         working-directory: backend
