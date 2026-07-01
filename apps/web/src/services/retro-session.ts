@@ -3,6 +3,28 @@
 export type RetroSessionPhase = 'collect' | 'group' | 'vote' | 'discuss' | 'action' | 'closed';
 export type RetroItemCategory = 'good' | 'bad' | 'improve';
 
+// B1(9f27af8f): 유나 phase-options-mockup B열 — 사용자 시야엔 3단계(+closed)만 노출.
+// group/discuss는 독립 단계가 아니라 우선순위/액션 단계 내 비차단 도구로 흡수(레거시 세션 호환 매핑).
+export type RetroVisibleStage = 'collect' | 'priority' | 'action' | 'closed';
+
+export const RETRO_STAGE_ORDER: RetroVisibleStage[] = ['collect', 'priority', 'action', 'closed'];
+
+export const RETRO_PHASE_TO_STAGE: Record<RetroSessionPhase, RetroVisibleStage> = {
+  collect: 'collect',
+  group: 'priority',
+  vote: 'priority',
+  discuss: 'action',
+  action: 'action',
+  closed: 'closed',
+};
+
+export const RETRO_STAGE_VARIANTS: Record<RetroVisibleStage, 'success' | 'info' | 'outline' | 'secondary'> = {
+  collect: 'info',
+  priority: 'secondary',
+  action: 'success',
+  closed: 'outline',
+};
+
 export interface RetroSessionRecord {
   id: string;
   org_id: string;
@@ -22,6 +44,12 @@ export interface RetroItemRecord {
   vote_count: number;
   author_id: string;
   created_at: string;
+  // B4(9f27af8f, #1803 머지): 요청자 투표 여부 — 새로고침 후에도 투표 상태 복원.
+  voted_by_me?: boolean;
+  // B2(9f27af8f, #1804 머지): 'group' 도구 병합. child일 때만 non-null, top-level만 렌더 대상.
+  parent_item_id?: string | null;
+  // parent일 때 그 아래 병합된 child item id 목록(vote_count에 이미 합산 반영됨).
+  grouped_item_ids?: string[];
 }
 
 export interface RetroActionRecord {

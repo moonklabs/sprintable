@@ -38,9 +38,6 @@ export async function POST(request: Request, { params }: RouteParams) {
     const projectId = searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
 
-    const body = await request.json() as { title?: string; assignee_id?: string | null };
-    if (!body.title) return ApiErrors.badRequest('title required');
-
     const _r = await proxyToFastapiWithParams(request, '/api/v2/retros/[id]/actions', { id });
     if (!_r.ok) return _r;
     if (_r.status === 204) return apiSuccess({ ok: true });

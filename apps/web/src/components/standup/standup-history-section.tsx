@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, startTransition } from 'react';
+import { ClipboardList } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 
@@ -47,8 +48,9 @@ export function StandupHistorySection({ projectId, memberNameById = {} }: Props)
   return (
     <section className="mt-8 space-y-3">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold text-foreground">
-          {t('history', { defaultValue: '📋 작성 이력' })}
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+          <ClipboardList className="h-4 w-4" aria-hidden />
+          {t('history')}
         </h2>
         <Badge variant="chip">{entries.length}</Badge>
       </div>
