@@ -5,6 +5,7 @@ from app.models.agent_routing_rule import AgentRoutingRule
 from app.models.agent_run import AgentRun
 from app.models.agent_session import AgentSession
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
+from app.models.gate import Gate
 from app.models.hitl import HitlPolicy, HitlRequest
 from app.models.mockup import MockupComponent, MockupPage, MockupScenario, MockupVersion, UsageMeter
 from app.models.user import RefreshToken, User
@@ -25,6 +26,7 @@ from app.models.notification_preference import NotificationPreference
 from app.models.organization import Organization
 from app.models.pm import Epic, Sprint, Story, Task
 from app.models.hypothesis import Hypothesis, HypothesisEpicLink, HypothesisStoryLink
+from app.models.loop import LoopRun
 from app.models.story_assignee import StoryAssignee
 from app.models.project import OrgMember, Project
 from app.models.project_setting import ProjectSetting
@@ -58,6 +60,7 @@ __all__ = [
     "AgentSession",
     "BridgeChannelMapping",
     "BridgeUserMapping",
+    "Gate",
     "HitlPolicy",
     "HitlRequest",
     "MockupComponent",
@@ -78,6 +81,7 @@ __all__ = [
     "HypothesisEpicLink",
     "HypothesisStoryLink",
     "InboxItem",
+    "LoopRun",
     "Meeting",
     "Notification",
     "Conversation",
