@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { OperatorSelect } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 
@@ -16,6 +17,12 @@ interface RetroSession {
   title: string;
   phase: string;
   created_at: string;
+}
+
+interface RetroSprintOption {
+  id: string;
+  title: string;
+  status: 'planning' | 'active' | 'closed';
 }
 
 const PHASE_VARIANTS: Record<string, 'success' | 'info' | 'outline' | 'secondary'> = {
@@ -39,6 +46,22 @@ export default function RetroPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // B5(9f27af8f): 생성 시 스프린트 연결(옵셔널)
+  const [sprints, setSprints] = useState<RetroSprintOption[]>([]);
+  const [selectedSprintId, setSelectedSprintId] = useState('');
+
+  useEffect(() => {
+    if (!projectId) { setSprints([]); return; }
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/sprints?project_id=${projectId}&status=active`);
+      if (!res.ok || cancelled) return;
+      const json = await res.json().catch(() => null) as { data?: RetroSprintOption[] } | null;
+      if (json?.data && !cancelled) setSprints(json.data);
+    })();
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,12 +98,18 @@ export default function RetroPage() {
       const res = await fetch('/api/retro-sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim(), project_id: projectId, org_id: orgId }),
+        body: JSON.stringify({
+          title: title.trim(),
+          project_id: projectId,
+          org_id: orgId,
+          sprint_id: selectedSprintId || null,
+        }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setSessions((prev) => [json.data, ...prev]);
       setTitle('');
+      setSelectedSprintId('');
       setShowCreateForm(false);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Failed to create session');
@@ -128,7 +157,7 @@ export default function RetroPage() {
         {/* Create new session — toggle via TopBar button */}
         {showCreateForm && (
           <div className="flex-shrink-0 border-b border-border/80 px-6 py-4">
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Input
                 id="retro-title-input"
                 value={title}
@@ -138,6 +167,14 @@ export default function RetroPage() {
                 className="flex-1"
                 autoFocus
               />
+              {sprints.length > 0 ? (
+                <OperatorSelect value={selectedSprintId} onChange={(e) => setSelectedSprintId(e.target.value)} className="w-auto">
+                  <option value="">{t('noSprintLink')}</option>
+                  {sprints.map((sprint) => (
+                    <option key={sprint.id} value={sprint.id}>{sprint.title}</option>
+                  ))}
+                </OperatorSelect>
+              ) : null}
               <Button variant="default" onClick={handleCreate} disabled={!title.trim() || !orgId || creating}>
                 {creating ? t('creating') : t('create')}
               </Button>

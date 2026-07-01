@@ -1238,7 +1238,10 @@
     "expandSprintStories": "Show sprint stories",
     "collapseSprintStories": "Collapse",
     "feedbackDialogTitle": "Feedback on {name}",
-    "history": "📋 Standup History"
+    "history": "Standup History",
+    "blockersRollupTitle": "Today's blockers · {count}",
+    "markAsReview": "Mark as review",
+    "backToQuickComment": "Back to quick comment"
   },
   "retro": {
     "title": "Sprint Retro",
@@ -1288,7 +1291,10 @@
     "addItemFailed": "Failed to add item.",
     "voteFailed": "Failed to vote.",
     "addActionFailed": "Failed to add action.",
-    "linkedSprintOutcome": "Linked sprint outcome"
+    "linkedSprintOutcome": "Linked sprint outcome",
+    "actionProgress": "{done}/{total} done",
+    "actionUnassigned": "Unassigned",
+    "noSprintLink": "No sprint link"
   },
   "share": {
     "share": "Share",

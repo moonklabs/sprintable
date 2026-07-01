@@ -1238,7 +1238,10 @@
     "expandSprintStories": "스프린트 스토리 보기",
     "collapseSprintStories": "접기",
     "feedbackDialogTitle": "{name} 피드백",
-    "history": "📋 작성 이력"
+    "history": "작성 이력",
+    "blockersRollupTitle": "오늘의 블로커 · {count}",
+    "markAsReview": "리뷰로 표시",
+    "backToQuickComment": "간단 코멘트로"
   },
   "retro": {
     "title": "스프린트 회고",
@@ -1288,7 +1291,10 @@
     "addItemFailed": "항목 추가에 실패했습니다.",
     "voteFailed": "투표에 실패했습니다.",
     "addActionFailed": "액션 추가에 실패했습니다.",
-    "linkedSprintOutcome": "연결된 스프린트 성과"
+    "linkedSprintOutcome": "연결된 스프린트 성과",
+    "actionProgress": "{done}/{total} 완료",
+    "actionUnassigned": "담당자 없음",
+    "noSprintLink": "스프린트 연결 안 함"
   },
   "share": {
     "share": "공유",

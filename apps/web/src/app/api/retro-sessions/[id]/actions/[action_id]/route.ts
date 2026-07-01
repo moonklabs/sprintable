@@ -1,0 +1,27 @@
+import { handleApiError } from '@/lib/api-error';
+import { apiSuccess, ApiErrors } from '@/lib/api-response';
+import { getAuthContext } from '@/lib/auth-helpers';
+import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
+
+type RouteParams = { params: Promise<{ id: string; action_id: string }> };
+
+// PATCH /api/retro-sessions/:id/actions/:action_id
+export async function PATCH(request: Request, { params }: RouteParams) {
+  try {
+    const { id, action_id } = await params;
+    const me = await getAuthContext(request);
+    if (!me) return ApiErrors.unauthorized();
+    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get('project_id');
+    if (!projectId) return ApiErrors.badRequest('project_id required');
+
+    const _r = await proxyToFastapiWithParams(request, '/api/v2/retros/[id]/actions/[action_id]', { id, action_id });
+    if (!_r.ok) return _r;
+    if (_r.status === 204) return apiSuccess({ ok: true });
+    return apiSuccess(await _r.json())
+  } catch (err: unknown) {
+    return handleApiError(err);
+  }
+}
