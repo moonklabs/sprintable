@@ -1241,7 +1241,16 @@
     "history": "작성 이력",
     "blockersRollupTitle": "오늘의 블로커 · {count}",
     "markAsReview": "리뷰로 표시",
-    "backToQuickComment": "간단 코멘트로"
+    "backToQuickComment": "간단 코멘트로",
+    "bridgeAddButton": "보드에서 추가",
+    "bridgeModalTitle": "다른 보드에서 스토리 연결",
+    "bridgeStepBoard": "보드 선택",
+    "bridgeBoardPlaceholder": "보드를 선택하세요",
+    "bridgeStepStory": "스토리 선택",
+    "bridgeLoadFailed": "스토리를 불러오지 못했습니다.",
+    "bridgeNoStories": "이 보드에는 스토리가 없습니다.",
+    "bridgeAlreadyAdded": "추가됨",
+    "bridgeRemove": "제거"
   },
   "retro": {
     "title": "스프린트 회고",
@@ -1294,7 +1303,8 @@
     "linkedSprintOutcome": "연결된 스프린트 성과",
     "actionProgress": "{done}/{total} 완료",
     "actionUnassigned": "담당자 없음",
-    "noSprintLink": "스프린트 연결 안 함"
+    "noSprintLink": "스프린트 연결 안 함",
+    "advanceConfirm": "'{next}' 단계로 진행할지? 이전 단계로 되돌릴 수 없습니다."
   },
   "share": {
     "share": "공유",

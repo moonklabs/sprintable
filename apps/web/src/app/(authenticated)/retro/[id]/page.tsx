@@ -115,9 +115,15 @@ export default function RetroSessionPage() {
       const res = await fetch(`/api/retro-sessions/${sessionId}?project_id=${projectId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json() as { data: RetroSessionRecord & { items?: RetroItemRecord[]; actions?: RetroActionRecord[] } };
+      const loadedItems = json.data.items ?? [];
       setSession(json.data);
-      setItems(json.data.items ?? []);
+      setItems(loadedItems);
       setActions(json.data.actions ?? []);
+      // B4(9f27af8f): voted_by_me가 응답에 실리면 새로고침 후에도 투표 상태 복원(필드 부재 시 기존 동작 그대로).
+      const hydratedVotes = loadedItems.filter((item) => item.voted_by_me).map((item) => item.id);
+      if (hydratedVotes.length > 0) {
+        setVotedItemIds((prev) => new Set([...prev, ...hydratedVotes]));
+      }
     } catch {
       setLoadError(t('loadFailed'));
     } finally {
@@ -131,6 +137,9 @@ export default function RetroSessionPage() {
     if (!session || !projectId) return;
     const nextPhase = PHASE_NEXT[session.phase as RetroSessionPhase];
     if (!nextPhase) return;
+    // B1(9f27af8f): 현재 VALID_TRANSITIONS는 전진 전용(역방향 불가) — 실수 advance 방지 확인.
+    // phase-B(3단계+비차단 그룹/토론+양방향)는 BE VALID_TRANSITIONS 확정 후 별건 통합.
+    if (!window.confirm(t('advanceConfirm', { next: t(PHASE_KEYS[nextPhase] as 'phaseCollect') }))) return;
     setAdvancing(true);
     setAdvanceError(null);
     try {

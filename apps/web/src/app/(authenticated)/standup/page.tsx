@@ -12,6 +12,7 @@ import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-contro
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { formatSeoulDate } from '@/lib/date';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
+import { BoardBridgeModal, type BoardBridgeStory } from '@/components/standup/board-bridge-modal';
 import { StandupBoardCard } from '@/components/standup/standup-board-card';
 import { StandupFeedbackDialog } from '@/components/standup/standup-feedback-dialog';
 import { StandupHistorySection } from '@/components/standup/standup-history-section';
@@ -22,6 +23,13 @@ import {
   type StandupReviewType,
   type StandupStorySummary,
 } from '@/components/standup/standup-types';
+
+interface BridgedStory {
+  id: string;
+  title: string;
+  status: string;
+  projectName: string;
+}
 
 interface StandupSprintSummary {
   id: string;
@@ -98,7 +106,7 @@ function shiftDate(dateStr: string, days: number): string {
 
 export default function StandupPage() {
   const t = useTranslations('standup');
-  const { currentTeamMemberId, projectId } = useDashboardContext();
+  const { currentTeamMemberId, projectId, projectMemberships } = useDashboardContext();
 
   const [date, setDate] = useState(() => formatSeoulDate());
   const [entries, setEntries] = useState<StandupEntryRow[]>([]);
@@ -122,6 +130,9 @@ export default function StandupPage() {
   const [sprintExpanded, setSprintExpanded] = useState(false);
   const [editingSelf, setEditingSelf] = useState(false);
   const [feedbackDialogMemberId, setFeedbackDialogMemberId] = useState<string | null>(null);
+  // A1(9f27af8f): 보드 브릿지 — 현재 프로젝트 스코프 밖 스토리를 plan_story_ids에 연결.
+  const [bridgeModalOpen, setBridgeModalOpen] = useState(false);
+  const [bridgedStories, setBridgedStories] = useState<BridgedStory[]>([]);
 
   const memberNameById = useMemo(() => {
     const map: Record<string, string> = {};
@@ -181,7 +192,16 @@ export default function StandupPage() {
     setPlan(currentEntry?.plan ?? '');
     setBlockers(currentEntry?.blockers ?? '');
     setPlanStoryIds(currentEntry?.plan_story_ids ?? []);
-  }, [currentEntry?.id, currentEntry?.updated_at, currentEntry?.done, currentEntry?.plan, currentEntry?.blockers, currentEntry?.plan_story_ids]);
+    // A1(9f27af8f): 이전에 연결된 타 보드 스토리(scoped stories에 없는 plan_stories)를 브릿지 칩으로 복원.
+    const scopedIds = new Set(stories.map((story) => story.id));
+    const bridged = (currentEntry?.plan_stories ?? []).filter((story) => !scopedIds.has(story.id));
+    setBridgedStories(bridged.map((story) => ({
+      id: story.id,
+      title: story.title,
+      status: story.status,
+      projectName: projectMemberships.find((m) => m.projectId === story.project_id)?.projectName ?? t('unknown'),
+    })));
+  }, [currentEntry?.id, currentEntry?.updated_at, currentEntry?.done, currentEntry?.plan, currentEntry?.blockers, currentEntry?.plan_story_ids, currentEntry?.plan_stories, stories, projectMemberships, t]);
 
   useEffect(() => {
     setEditingSelf(false);
@@ -313,6 +333,20 @@ export default function StandupPage() {
     : loading
       ? [{ label: t('loading'), variant: 'outline' as const }]
       : summaryBadges;
+
+  function addBridgedStory(story: BoardBridgeStory, board: { projectId: string; projectName: string }) {
+    setPlanStoryIds((current) => (current.includes(story.id) ? current : [...current, story.id]));
+    setBridgedStories((current) => (
+      current.some((item) => item.id === story.id)
+        ? current
+        : [...current, { id: story.id, title: story.title, status: story.status, projectName: board.projectName }]
+    ));
+  }
+
+  function removeBridgedStory(storyId: string) {
+    setPlanStoryIds((current) => current.filter((id) => id !== storyId));
+    setBridgedStories((current) => current.filter((item) => item.id !== storyId));
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -646,10 +680,31 @@ export default function StandupPage() {
                             <div className="space-y-3 rounded-xl border border-border/70 bg-muted/10 p-3">
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('planStoriesOptional')}</p>
-                                <Badge variant="outline">{t('linkedStoryCount', { count: planStoryIds.length })}</Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline">{t('linkedStoryCount', { count: planStoryIds.length })}</Badge>
+                                  {projectMemberships.length > 0 ? (
+                                    <Button variant="glass" size="sm" className="h-6 px-2 text-xs" onClick={() => setBridgeModalOpen(true)}>
+                                      {t('bridgeAddButton')}
+                                    </Button>
+                                  ) : null}
+                                </div>
                               </div>
                               {/* projection은 접근권 기준 자동 — plan_story_ids와 무관(디커플 명시) */}
                               <p className="text-xs text-muted-foreground">{t('planStoriesProjectionHint')}</p>
+                              {/* A1(9f27af8f): 브릿지로 연결한 타 보드 스토리 — 현재 프로젝트 picker와 별도 표시 */}
+                              {bridgedStories.length > 0 ? (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {bridgedStories.map((story) => (
+                                    <Badge key={story.id} variant="chip" className="gap-1.5">
+                                      <span className="max-w-[10rem] truncate">{story.title}</span>
+                                      <span className="text-muted-foreground">· {story.projectName}</span>
+                                      <button type="button" onClick={() => removeBridgedStory(story.id)} className="ml-1 text-muted-foreground hover:text-foreground" aria-label={t('bridgeRemove')}>
+                                        ✕
+                                      </button>
+                                    </Badge>
+                                  ))}
+                                </div>
+                              ) : null}
                               {storyPickerStories.length > 0 ? (
                                 <div className="max-h-40 space-y-1.5 overflow-y-auto">
                                   {storyPickerStories.map((story) => {
@@ -798,6 +853,15 @@ export default function StandupPage() {
           onDeleteFeedback={deleteFeedback}
         />
       ) : null}
+
+      {/* A1(9f27af8f): 보드 브릿지 모달 */}
+      <BoardBridgeModal
+        open={bridgeModalOpen}
+        onOpenChange={setBridgeModalOpen}
+        boards={projectMemberships}
+        alreadySelectedIds={planStoryIds}
+        onSelectStory={addBridgedStory}
+      />
     </>
   );
 }

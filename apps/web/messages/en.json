@@ -1241,7 +1241,16 @@
     "history": "Standup History",
     "blockersRollupTitle": "Today's blockers · {count}",
     "markAsReview": "Mark as review",
-    "backToQuickComment": "Back to quick comment"
+    "backToQuickComment": "Back to quick comment",
+    "bridgeAddButton": "Add from board",
+    "bridgeModalTitle": "Link a story from another board",
+    "bridgeStepBoard": "Select board",
+    "bridgeBoardPlaceholder": "Choose a board",
+    "bridgeStepStory": "Select story",
+    "bridgeLoadFailed": "Failed to load stories.",
+    "bridgeNoStories": "This board has no stories.",
+    "bridgeAlreadyAdded": "Added",
+    "bridgeRemove": "Remove"
   },
   "retro": {
     "title": "Sprint Retro",
@@ -1294,7 +1303,8 @@
     "linkedSprintOutcome": "Linked sprint outcome",
     "actionProgress": "{done}/{total} done",
     "actionUnassigned": "Unassigned",
-    "noSprintLink": "No sprint link"
+    "noSprintLink": "No sprint link",
+    "advanceConfirm": "Move to '{next}'? This cannot be undone."
   },
   "share": {
     "share": "Share",
