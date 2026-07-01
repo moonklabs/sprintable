@@ -85,8 +85,18 @@ class LoopRun(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     decision_gate_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("gate.id", ondelete="SET NULL"), nullable=True
     )
+    # name+use_alter=True 필수 — loop_artifacts.loop_id→loop_runs.id 와 함께 진짜 2-테이블
+    # FK 순환을 이룬다(parent_loop_id self-FK와 다른 클래스). 무명이면 SQLAlchemy
+    # Base.metadata.drop_all()이 DROP 순서를 못 풀어 CircularDependencyError(까심 QA 발견,
+    # fresh-schema 라운드트립 쓰는 테스트 다수가 회귀). 마이그 0150의
+    # op.create_foreign_key("fk_loop_runs_chosen_artifact_id", ...)와 이름 일치 필수.
     chosen_artifact_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("loop_artifacts.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey(
+            "loop_artifacts.id", ondelete="SET NULL",
+            name="fk_loop_runs_chosen_artifact_id", use_alter=True,
+        ),
+        nullable=True
     )
     recipe_slug: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str] = mapped_column(Text, nullable=False)
