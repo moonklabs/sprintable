@@ -279,7 +279,9 @@ async def test_group_rejects_chain_and_self_and_category_mismatch():
 
 
 @pytest.mark.anyio
-async def test_get_session_hides_grouped_children_and_blocks_child_vote():
+async def test_get_session_includes_grouped_children_and_blocks_child_vote():
+    """P1(9f27af8f, 유나 real-payload 재현) — get_session은 grouped child도 items에 flat 포함
+    (FE가 top-level/child를 자체 필터링해 클러스터를 그리므로 child 객체 자체가 필요)."""
     from app.repositories.retro import RetroItemRepository, RetroSessionRepository
     from app.routers.retros import get_session, vote_item
 
@@ -298,8 +300,11 @@ async def test_get_session_hides_grouped_children_and_blocks_child_vote():
             out = await get_session(
                 id=session_id, db=s, auth=_auth(), repo=RetroSessionRepository(s, ORG)
             )
-            assert [i.id for i in out.items] == [parent_id]
-            assert out.items[0].grouped_item_ids == [child_id]
+            by_id = {i.id: i for i in out.items}
+            assert set(by_id.keys()) == {parent_id, child_id}
+            assert by_id[parent_id].parent_item_id is None
+            assert by_id[parent_id].grouped_item_ids == [child_id]
+            assert by_id[child_id].parent_item_id == parent_id
 
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
@@ -308,5 +313,33 @@ async def test_get_session_hides_grouped_children_and_blocks_child_vote():
                     db=s, auth=_auth(), repo=RetroSessionRepository(s, ORG),
                 )
             assert ei.value.status_code == 400
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_export_excludes_grouped_children():
+    """export는 P1 fix와 무관하게 top-level-only 유지(parent에 집계된 vote_count로만 노출)."""
+    from app.repositories.retro import RetroItemRepository, RetroSessionRepository
+    from app.routers.retros import export_session
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed_org_project(s)
+            session_id, item_ids = await _seed_session_with_items(s, n_items=2)
+        parent_id, child_id = item_ids
+
+        async with Session() as s:
+            await RetroItemRepository(s).group_under_parent(session_id, child_id, parent_id)
+            await s.commit()
+
+        async with Session() as s:
+            resp = await export_session(
+                id=session_id, db=s, auth=_auth(), repo=RetroSessionRepository(s, ORG)
+            )
+            body = resp.body.decode()
+            # child(session_with_items가 만든 'i1'/'i0' 텍스트)는 그룹핑된 쪽만 제외돼야.
+            assert body.count(" votes)") == 1  # parent 1건만(child 텍스트 라인 없음)
     finally:
         await eng.dispose()
