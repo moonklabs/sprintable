@@ -399,12 +399,14 @@ export default function RetroSessionPage() {
     }
   }
 
-  type StageTranslationKey = 'phaseCollect' | 'stagePriority' | 'phaseAction' | 'phaseClosed';
+  // 유나 가디언 should-fix: phaseCollect/Action/Closed는 이모지 프리픽스 재사용이라 stagePriority(무이모지)와
+  // 한 스테퍼 안에서 불일치 — 스테퍼 전용 de-emoji 라벨로 분리(phaseX 키는 다른 소비부 없어 그대로 둠).
+  type StageTranslationKey = 'stageCollect' | 'stagePriority' | 'stageAction' | 'stageClosed';
   const STAGE_KEYS: Record<VisibleStage, StageTranslationKey> = {
-    collect: 'phaseCollect',
+    collect: 'stageCollect',
     priority: 'stagePriority',
-    action: 'phaseAction',
-    closed: 'phaseClosed',
+    action: 'stageAction',
+    closed: 'stageClosed',
   };
 
   const currentPhase = session?.phase as RetroSessionPhase | undefined;

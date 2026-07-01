@@ -111,11 +111,12 @@ export default function RetroPage() {
   };
 
   // B1(9f27af8f): 리스트 배지도 상세 페이지와 동일한 3단계(+closed) 표시로 통일.
-  const STAGE_KEYS: Record<string, 'phaseCollect' | 'stagePriority' | 'phaseAction' | 'phaseClosed'> = {
-    collect: 'phaseCollect',
+  // 유나 가디언 should-fix: 스테퍼/배지 전용 de-emoji 라벨(phaseCollect/Action/Closed는 다른 소비부 없어 그대로 둠).
+  const STAGE_KEYS: Record<string, 'stageCollect' | 'stagePriority' | 'stageAction' | 'stageClosed'> = {
+    collect: 'stageCollect',
     priority: 'stagePriority',
-    action: 'phaseAction',
-    closed: 'phaseClosed',
+    action: 'stageAction',
+    closed: 'stageClosed',
   };
 
   if (!projectId) {
