@@ -275,3 +275,35 @@ async def decide_loop_artifacts(
         gate_status=gate.status,
         all_groups_decided=all_groups_decided,
     )
+
+
+# S22: 제네릭 전이가 허용하는 target status 화이트리스트. executing/closed는 의도적으로 제외 —
+# deciding→executing은 S5(decide_loop_artifacts)의 "전 슬롯 결정됨" 전제를, measuring→closed는
+# S7(attribute_loop_outcome)의 "hypothesis 해소됨" 전제를 각각 지켜야 하는 전이라, 이 제네릭
+# 엔드포인트로 맨몸 status flip을 허용하면 그 전제를 완전히 우회한다(gates.py의
+# _HUMAN_REVIEW_STATUSES 화이트리스트 큐레이션과 동일 안전장치).
+LOOP_TRANSITION_ALLOWED_TARGETS: frozenset[str] = frozenset(
+    {"briefing", "generating", "deciding", "measuring", "abandoned"}
+)
+
+
+async def transition_loop(
+    session: AsyncSession, org_id: uuid.UUID, loop: LoopRun, target_status: str
+) -> LoopResponse:
+    """S22: loop 자체 FSM 전이(draft→...→deciding·executing→measuring·*→abandoned).
+
+    loop project 접근은 호출부(라우터)의 resolve_member(project_id=loop.project_id)가 선행
+    검증(root-fix #1815로 agent 분기도 보호) — human/agent 둘 다 허용(HITL 판단점 아닌 순수
+    워크플로 진행 마커. 실제 결정은 S5 human-only 게이트만 통과 가능·이 엔드포인트로 우회 불가)."""
+    if target_status not in LOOP_TRANSITION_ALLOWED_TARGETS:
+        raise LoopServiceError(
+            "TRANSITION_NOT_ALLOWED",
+            f"'{target_status}'는 이 엔드포인트로 전이할 수 없습니다(전용 엔드포인트 사용).",
+        )
+    if not is_valid_transition(loop.status, target_status):
+        raise LoopServiceError(
+            "INVALID_LOOP_TRANSITION", f"불법 전이: {loop.status} → {target_status}"
+        )
+    repo = LoopRunRepository(session, org_id)
+    updated = await repo.update(loop.id, status=target_status)
+    return LoopResponse.model_validate(updated)
