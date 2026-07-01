@@ -47,6 +47,10 @@ def _mock_item() -> MagicMock:
     # RetroItem 실 모델엔 없는 계산 필드 — MagicMock은 미설정 속성도 truthy를 자동생성하므로
     # (실 ORM 객체라면 getattr 이 없어 pydantic 기본값 False로 떨어짐) 명시적으로 맞춰준다.
     i.voted_by_me = False
+    # B2: 실 컬럼(parent_item_id)이지만 미설정 시 MagicMock이 truthy 자동생성 → 잘못
+    # "그룹핑됨"으로 오판(vote_item의 `is not None` 체크·get_session의 visible_items 필터
+    # 둘 다 영향). 기본은 top-level(None).
+    i.parent_item_id = None
     return i
 
 
@@ -569,6 +573,189 @@ async def test_vote_item_wrong_session_404():
                 )
 
         assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_vote_grouped_child_forbidden_400():
+    """B2 — parent_item_id가 있는(그룹핑된) child는 직접 투표 불가."""
+    client, session, app = await _client()
+    try:
+        grouped_item = _mock_item()
+        grouped_item.parent_item_id = uuid.uuid4()
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = _mock_session() if call_count == 1 else grouped_item
+            return result
+
+        session.execute = mock_execute
+
+        with _allow_project_access():
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/vote?voter_id={VOTER_ID}"
+                )
+
+        assert resp.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_group_item_200():
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        parent_id = uuid.uuid4()
+        grouped = _mock_item()
+        grouped.parent_item_id = parent_id
+
+        with (
+            _allow_project_access(),
+            patch(
+                "app.repositories.retro.RetroItemRepository.group_under_parent",
+                new_callable=AsyncMock,
+            ) as mock_group,
+        ):
+            mock_group.return_value = grouped
+
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/group",
+                    json={"parent_item_id": str(parent_id)},
+                )
+
+        assert resp.status_code == 200
+        assert resp.json()["parent_item_id"] == str(parent_id)
+        mock_group.assert_awaited_once_with(SESSION_ID, ITEM_ID, parent_id)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_group_item_invalid_400():
+    """category 불일치·이미 그룹핑됨·parent가 top-level 아님 등 — ValueError를 400으로 매핑."""
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with (
+            _allow_project_access(),
+            patch(
+                "app.repositories.retro.RetroItemRepository.group_under_parent",
+                new_callable=AsyncMock,
+            ) as mock_group,
+        ):
+            mock_group.side_effect = ValueError("CATEGORY_MISMATCH")
+
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/group",
+                    json={"parent_item_id": str(uuid.uuid4())},
+                )
+
+        assert resp.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_ungroup_item_200():
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        ungrouped = _mock_item()
+        ungrouped.parent_item_id = None
+
+        with (
+            _allow_project_access(),
+            patch("app.repositories.retro.RetroItemRepository.ungroup", new_callable=AsyncMock) as mock_ungroup,
+        ):
+            mock_ungroup.return_value = ungrouped
+
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/ungroup")
+
+        assert resp.status_code == 200
+        assert resp.json()["parent_item_id"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_ungroup_item_not_found_404():
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with (
+            _allow_project_access(),
+            patch("app.repositories.retro.RetroItemRepository.ungroup", new_callable=AsyncMock) as mock_ungroup,
+        ):
+            mock_ungroup.return_value = None
+
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/items/{ITEM_ID}/ungroup")
+
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_session_hides_grouped_children():
+    """B2 — get_session은 top-level item만 노출·parent에 grouped_item_ids 반영."""
+    client, session, app = await _client()
+    try:
+        parent = _mock_item()
+        parent.id = uuid.uuid4()
+        parent.parent_item_id = None
+        child = _mock_item()
+        child.id = uuid.uuid4()
+        child.parent_item_id = parent.id
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalar_one_or_none.return_value = _mock_session()
+            elif call_count == 2:
+                result.scalars.return_value.all.return_value = [parent, child]
+            elif call_count == 3:
+                result.scalars.return_value.all.return_value = []  # actions
+            else:
+                result.scalars.return_value.all.return_value = []  # votes
+            return result
+
+        session.execute = mock_execute
+
+        with _allow_project_access(), _mock_resolve_member():
+            async with client as c:
+                resp = await c.get(f"/api/v2/retros/{SESSION_ID}")
+
+        items = resp.json()["items"]
+        assert len(items) == 1
+        assert items[0]["id"] == str(parent.id)
+        assert items[0]["grouped_item_ids"] == [str(child.id)]
     finally:
         app.dependency_overrides.clear()
 

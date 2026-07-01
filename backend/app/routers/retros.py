@@ -20,6 +20,7 @@ from app.schemas.retro import (
     CreateAction,
     CreateItem,
     CreateSession,
+    GroupItem,
     ItemResponse,
     PhaseTransition,
     SessionListResponse,
@@ -135,17 +136,26 @@ async def get_session(
     items = await item_repo.list_by_session(id)
     actions = await action_repo.list_by_session(id)
 
+    # B2: 그룹핑된 child는 응답에서 숨김(부모만 top-level로 노출) — parent id → child id 목록.
+    grouped_by_parent: dict[uuid.UUID, list[uuid.UUID]] = {}
+    visible_items = []
+    for i in items:
+        if i.parent_item_id is None:
+            visible_items.append(i)
+        else:
+            grouped_by_parent.setdefault(i.parent_item_id, []).append(i.id)
+
     # B4: voted_by_me — client 지정 voter_id 무신뢰. auth 로 canonical requester id 를 직접 해소
     # (RetroVote.voter_id 는 vote 시 canonicalize_member_id 를 거친 members.id 공간이고, 휴먼은
     # members.id=org_members.id 로 ID-preserving 백필돼 resolve_member(레거시 경로).id 와 동일
     # 공간 — 별도 매핑 불요).
     resolved = await resolve_member(auth, session.org_id, db, project_id=session.project_id)
     voted_item_ids: set[uuid.UUID] = set()
-    if items:
+    if visible_items:
         voted_rows = await db.execute(
             select(RetroVote.item_id).where(
                 RetroVote.voter_id == resolved.id,
-                RetroVote.item_id.in_([i.id for i in items]),
+                RetroVote.item_id.in_([i.id for i in visible_items]),
             )
         )
         voted_item_ids = set(voted_rows.scalars().all())
@@ -170,8 +180,10 @@ async def get_session(
                 vote_count=i.vote_count,
                 created_at=i.created_at,
                 voted_by_me=i.id in voted_item_ids,
+                parent_item_id=i.parent_item_id,
+                grouped_item_ids=grouped_by_parent.get(i.id, []),
             )
-            for i in items
+            for i in visible_items
         ],
         actions=[ActionResponse.model_validate(a) for a in actions],
     )
@@ -210,6 +222,43 @@ async def add_item(
     return ItemResponse.model_validate(item)
 
 
+@router.post("/{id}/items/{item_id}/group", response_model=ItemResponse)
+async def group_item(
+    id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: GroupItem,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> ItemResponse:
+    """B2: item_id를 body.parent_item_id 아래 병합('group' phase 중복 정리)."""
+    await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    item_repo = RetroItemRepository(db)
+    try:
+        item = await item_repo.group_under_parent(id, item_id, body.parent_item_id)
+    except ValueError as exc:
+        if "ITEM_NOT_FOUND" in str(exc):
+            raise HTTPException(status_code=404, detail="Item not found") from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ItemResponse.model_validate(item)
+
+
+@router.post("/{id}/items/{item_id}/ungroup", response_model=ItemResponse)
+async def ungroup_item(
+    id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> ItemResponse:
+    await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    item_repo = RetroItemRepository(db)
+    item = await item_repo.ungroup(id, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return ItemResponse.model_validate(item)
+
+
 @router.delete("/{id}/items/{item_id}", status_code=200)
 async def delete_item(
     id: uuid.UUID,
@@ -236,7 +285,10 @@ async def vote_item(
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> VoteResponse:
     await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
-    await _require_item_in_session(db, id, item_id)
+    item = await _require_item_in_session(db, id, item_id)
+    if item.parent_item_id is not None:
+        # B2: 그룹핑된 child는 투표 불가 — 투표는 parent로 이관/집계.
+        raise HTTPException(status_code=400, detail="Grouped child items cannot be voted directly")
     voter_id = await canonicalize_member_id(voter_id, db)  # AC3-2d(1b): canonical 정규화
     vote_repo = RetroVoteRepository(db)
     try:
@@ -308,7 +360,8 @@ async def export_session(
 
     item_repo = RetroItemRepository(db)
     action_repo = RetroActionRepository(db)
-    items = await item_repo.list_by_session(id)
+    # B2: 그룹핑된 child는 export에서도 제외(parent에 집계된 vote_count로만 노출).
+    items = [i for i in await item_repo.list_by_session(id) if i.parent_item_id is None]
     actions = await action_repo.list_by_session(id)
 
     lines = [
