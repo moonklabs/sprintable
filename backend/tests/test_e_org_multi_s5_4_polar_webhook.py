@@ -131,6 +131,32 @@ def test_update_subscription_accepts_status():
     assert "status" in source
 
 
+# ─── 까심 QA: fire-and-forget 백그라운드 태스크 조용한 실패 봉쇄 ──────────────
+# (0148 org_subscriptions.org_id UNIQUE 부재 버그가 이 경로 때문에 아무도 못 잡았음 —
+# webhook이 background_tasks.add_task로 fire-and-forget 호출해 Polar엔 이미 {ok:true}
+# ACK가 나간 뒤라 실패해도 전파할 곳이 없었다. 여기서는 최소한 로그로는 남아야 한다.)
+
+@pytest.mark.anyio
+async def test_update_subscription_logs_error_and_reraises_on_db_failure(caplog):
+    import logging
+    from unittest.mock import AsyncMock
+
+    from ee.routers import billing
+
+    org_id = uuid.uuid4()
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=RuntimeError("boom"))
+
+    with caplog.at_level(logging.ERROR, logger="ee.routers.billing"):
+        with pytest.raises(RuntimeError, match="boom"):
+            await billing._update_subscription(
+                session, org_id, "team", "monthly", "cus_x", "sub_x", "active"
+            )
+
+    assert any(str(org_id) in record.message for record in caplog.records)
+    assert any(record.levelno == logging.ERROR for record in caplog.records)
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
