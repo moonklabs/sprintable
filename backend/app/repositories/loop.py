@@ -1,4 +1,4 @@
-"""E-LOOP-LEDGER S3: LoopRun repository — CRUD(BaseRepository) + 필터드 list."""
+"""E-LOOP-LEDGER S3/S4: LoopRun + LoopArtifact repository — CRUD(BaseRepository) + 필터드 list."""
 from __future__ import annotations
 
 import uuid
@@ -6,7 +6,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.loop import LoopRun
+from app.models.loop import LoopArtifact, LoopRun
 from app.repositories.base import BaseRepository
 
 
@@ -35,4 +35,19 @@ class LoopRunRepository(BaseRepository[LoopRun]):
         if goal_tag is not None:
             q = q.where(LoopRun.goal_tags.any(goal_tag))
         q = q.order_by(LoopRun.created_at.desc(), LoopRun.id.desc()).limit(limit)
+        return list((await self.session.execute(q)).scalars().all())
+
+
+class LoopArtifactRepository(BaseRepository[LoopArtifact]):
+    def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
+        super().__init__(LoopArtifact, session, org_id)
+
+    async def list_by_loop(self, loop_id: uuid.UUID) -> list[LoopArtifact]:
+        # ix_loop_artifacts_loop_variant_group과 동일 순서(variant_group, sort_order) — GET
+        # 응답의 variant_group 그룹핑이 이미 정렬된 스캔 순서를 그대로 소비하도록.
+        q = (
+            select(LoopArtifact)
+            .where(LoopArtifact.org_id == self.org_id, LoopArtifact.loop_id == loop_id)
+            .order_by(LoopArtifact.variant_group.asc(), LoopArtifact.sort_order.asc())
+        )
         return list((await self.session.execute(q)).scalars().all())

@@ -41,3 +41,37 @@ class LoopResponse(BaseModel):
     created_by_member_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+
+
+class LoopArtifactCreate(BaseModel):
+    """S4: variant 후보 등록. decision 필드는 의도적으로 없다 — 서버가 'pending' 고정
+    (chosen/rejected는 S5 게이트 전용 엔드포인트, client가 직접 전이 불가)."""
+
+    variant_group: str
+    variant_label: str
+    asset_id: uuid.UUID
+    generation_metadata: dict[str, Any] = {}
+
+
+class LoopArtifactResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    org_id: uuid.UUID
+    loop_id: uuid.UUID
+    asset_id: uuid.UUID
+    variant_group: str
+    variant_label: str
+    decision: str
+    choose_reason: str | None = None
+    rejection_reason: str | None = None
+    generation_metadata: dict[str, Any]
+    sort_order: int
+    created_by_member_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class LoopArtifactVariantGroup(BaseModel):
+    variant_group: str
+    artifacts: list[LoopArtifactResponse]
