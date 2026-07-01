@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.retro import RetroItem, RetroSession
-from app.services.member_resolver import canonicalize_member_id
+from app.models.retro import RetroItem, RetroSession, RetroVote
+from app.services.member_resolver import canonicalize_member_id, resolve_member
 from app.services.project_auth import has_project_access
 from app.repositories.retro import (
     RetroActionRepository,
@@ -135,6 +135,21 @@ async def get_session(
     items = await item_repo.list_by_session(id)
     actions = await action_repo.list_by_session(id)
 
+    # B4: voted_by_me — client 지정 voter_id 무신뢰. auth 로 canonical requester id 를 직접 해소
+    # (RetroVote.voter_id 는 vote 시 canonicalize_member_id 를 거친 members.id 공간이고, 휴먼은
+    # members.id=org_members.id 로 ID-preserving 백필돼 resolve_member(레거시 경로).id 와 동일
+    # 공간 — 별도 매핑 불요).
+    resolved = await resolve_member(auth, session.org_id, db, project_id=session.project_id)
+    voted_item_ids: set[uuid.UUID] = set()
+    if items:
+        voted_rows = await db.execute(
+            select(RetroVote.item_id).where(
+                RetroVote.voter_id == resolved.id,
+                RetroVote.item_id.in_([i.id for i in items]),
+            )
+        )
+        voted_item_ids = set(voted_rows.scalars().all())
+
     return SessionResponse(
         id=session.id,
         project_id=session.project_id,
@@ -145,7 +160,19 @@ async def get_session(
         phase=session.phase,
         created_at=session.created_at,
         updated_at=session.updated_at,
-        items=[ItemResponse.model_validate(i) for i in items],
+        items=[
+            ItemResponse(
+                id=i.id,
+                session_id=i.session_id,
+                author_id=i.author_id,
+                category=i.category,
+                text=i.text,
+                vote_count=i.vote_count,
+                created_at=i.created_at,
+                voted_by_me=i.id in voted_item_ids,
+            )
+            for i in items
+        ],
         actions=[ActionResponse.model_validate(a) for a in actions],
     )
 

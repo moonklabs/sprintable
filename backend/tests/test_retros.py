@@ -44,6 +44,9 @@ def _mock_item() -> MagicMock:
     i.text = "팀워크 좋았는"
     i.vote_count = 2
     i.created_at = datetime(2026, 4, 29, tzinfo=timezone.utc)
+    # RetroItem 실 모델엔 없는 계산 필드 — MagicMock은 미설정 속성도 truthy를 자동생성하므로
+    # (실 ORM 객체라면 getattr 이 없어 pydantic 기본값 False로 떨어짐) 명시적으로 맞춰준다.
+    i.voted_by_me = False
     return i
 
 
@@ -74,6 +77,13 @@ def _allow_project_access():
 
 def _deny_project_access():
     return patch("app.routers.retros.has_project_access", new=AsyncMock(return_value=False))
+
+
+def _mock_resolve_member(member_id: uuid.UUID | None = None):
+    """B4: get_session이 호출하는 resolve_member SSOT를 patch — DB member 해소 우회."""
+    resolved = MagicMock()
+    resolved.id = member_id or uuid.uuid4()
+    return patch("app.routers.retros.resolve_member", new=AsyncMock(return_value=resolved))
 
 
 @pytest.fixture
@@ -215,7 +225,7 @@ async def test_get_retro_session_with_items_200():
         mock_result.scalars.return_value.all.return_value = []
         session.execute = AsyncMock(return_value=mock_result)
 
-        with _allow_project_access():
+        with _allow_project_access(), _mock_resolve_member():
             async with client as c:
                 resp = await c.get(f"/api/v2/retros/{SESSION_ID}")
 
@@ -224,6 +234,122 @@ async def test_get_retro_session_with_items_200():
         assert body["id"] == str(SESSION_ID)
         assert "items" in body
         assert "actions" in body
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_retro_session_voted_by_me_reflects_only_requester():
+    """B4 — voted_by_me는 요청자 본인 투표만 반영(타인 투표는 노출 안 함)."""
+    client, session, app = await _client()
+    try:
+        my_id = uuid.uuid4()
+        other_id = uuid.uuid4()
+        item_i_voted = _mock_item()
+        item_i_voted.id = uuid.uuid4()
+        item_other_voted = _mock_item()
+        item_other_voted.id = uuid.uuid4()
+        item_nobody_voted = _mock_item()
+        item_nobody_voted.id = uuid.uuid4()
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalar_one_or_none.return_value = _mock_session()
+            elif call_count == 2:
+                result.scalars.return_value.all.return_value = [
+                    item_i_voted, item_other_voted, item_nobody_voted,
+                ]
+            elif call_count == 3:
+                result.scalars.return_value.all.return_value = []  # actions
+            else:
+                # votes query — voter_id=my_id 로 필터되므로 my_id가 실제 투표한 item만 반환
+                result.scalars.return_value.all.return_value = [item_i_voted.id]
+            return result
+
+        session.execute = mock_execute
+
+        with _allow_project_access(), _mock_resolve_member(my_id):
+            async with client as c:
+                resp = await c.get(f"/api/v2/retros/{SESSION_ID}")
+
+        assert resp.status_code == 200
+        items_by_id = {i["id"]: i for i in resp.json()["items"]}
+        assert items_by_id[str(item_i_voted.id)]["voted_by_me"] is True
+        assert items_by_id[str(item_other_voted.id)]["voted_by_me"] is False
+        assert items_by_id[str(item_nobody_voted.id)]["voted_by_me"] is False
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_retro_session_no_items_skips_votes_query():
+    """items가 비어있으면 votes 쿼리 자체를 스킵(불필요 왕복 0)."""
+    client, session, app = await _client()
+    try:
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalar_one_or_none.return_value = _mock_session()
+            else:
+                result.scalars.return_value.all.return_value = []
+            return result
+
+        session.execute = mock_execute
+
+        with _allow_project_access(), _mock_resolve_member():
+            async with client as c:
+                resp = await c.get(f"/api/v2/retros/{SESSION_ID}")
+
+        assert resp.status_code == 200
+        assert resp.json()["items"] == []
+        # call1=session, call2=items(빈), call3=actions(빈) — votes 쿼리(4번째) 없음.
+        assert call_count == 3
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_add_item_default_not_voted():
+    """add_item(신규 생성)은 voted_by_me 계산 없이 기본 False."""
+    client, session, app = await _client()
+    try:
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = _mock_session() if call_count == 1 else _mock_item()
+            return result
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.refresh = AsyncMock()
+        session.add = MagicMock()
+
+        with (
+            _allow_project_access(),
+            patch("app.repositories.retro.RetroItemRepository.create", new_callable=AsyncMock) as mock_create,
+        ):
+            mock_create.return_value = _mock_item()
+
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/items", json={
+                    "category": "good",
+                    "text": "새 아이템",
+                })
+
+        assert resp.status_code == 201
+        assert resp.json()["voted_by_me"] is False
     finally:
         app.dependency_overrides.clear()
 

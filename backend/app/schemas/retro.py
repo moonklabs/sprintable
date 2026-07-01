@@ -22,6 +22,9 @@ class ItemResponse(BaseModel):
     text: str
     vote_count: int
     created_at: datetime
+    # B4: 요청자(canonical member id)가 이 item에 투표했는지 — get_session에서만 명시 계산
+    # (계산 필드라 ORM에서 자동 채워지지 않음). 다른 생성/응답 경로는 default False.
+    voted_by_me: bool = False
 
 
 class ActionResponse(BaseModel):
