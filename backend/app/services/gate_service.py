@@ -49,7 +49,9 @@ _DISPOSITION_TO_STATUS: dict[str, str] = {
 
 # doc-gate v2 갭1: deliberate 인간 결재 gate — org allow_auto/deny posture 무관하게 항상 manual(pending).
 # disposition auto-pass/auto-deny 제외(인간 deliberation 이 정책 자동결정보다 우선).
-_ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset({"doc_approval"})
+# 'loop_decision'(E-LOOP-LEDGER S5): variant 선택도 동일 이유로 항상 human pending — GATE_TYPES에도
+# 미등록(doc_approval과 동일 선례. org gate override 설정 대상에서 제외=애초에 자동화 불가 명시).
+_ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset({"doc_approval", "loop_decision"})
 
 
 async def create_gate(

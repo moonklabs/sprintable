@@ -1,4 +1,5 @@
-"""E-LOOP-LEDGER S3/S4: /api/v2/loops 라우터 (POST/GET/LIST loops + POST/GET artifacts, 블루프린트 §3/§4).
+"""E-LOOP-LEDGER S3/S4/S5: /api/v2/loops 라우터 (POST/GET/LIST loops + POST/GET artifacts + POST decision,
+블루프린트 §3/§4/§5).
 
 계약: 성공은 raw model/list 반환, 오류는 HTTPException(dict detail {code,message}) —
 main.py 핸들러가 {data:null,error:{code,message,...},meta:null}로 감싼다(hypotheses.py 동형).
@@ -16,7 +17,13 @@ authz(artifacts, S4) — 2단계:
 ② asset_id가 그 loop과 같은 project 소유인지(서비스 레벨 ASSET_PROJECT_MISMATCH) — 신규
    크로스-리소스 IDOR 축(타 project asset을 이 loop에 link 못 하게).
 
-status FSM 전이는 이 스토리의 스코프 밖(S5 게이트/후속) — 생성 시 status='draft' 고정.
+authz(decision, S5) — loop project 접근(위와 동일) + **human-only 명시 체크**(gates.py
+transition_gate_endpoint와 동형: caller.type != 'human' → 403 — 결정 게이트는 순수 HITL,
+에이전트 API키는 자동 승인 불가). gate_type='loop_decision'은 gate_service._ALWAYS_MANUAL_GATE_TYPES에
+있어 org disposition posture와 무관하게 항상 human-pending.
+
+status FSM 전이(deciding→executing)는 loop의 전 variant_group이 결판났을 때만 발생(S5 §5).
+생성 시 status='draft' 고정 — draft→...→deciding 전이 자체는 이 스토리의 스코프 밖(추후 확장).
 """
 import uuid
 
@@ -31,6 +38,8 @@ from app.schemas.loop import (
     LoopArtifactResponse,
     LoopArtifactVariantGroup,
     LoopCreate,
+    LoopDecisionRequest,
+    LoopDecisionResponse,
     LoopResponse,
 )
 from app.services import loop as svc
@@ -44,6 +53,11 @@ _ERROR_STATUS: dict[str, int] = {
     "LOOP_PROJECT_ACCESS_DENIED": 403,
     "ASSET_NOT_FOUND": 404,
     "ASSET_PROJECT_MISMATCH": 403,
+    "LOOP_NOT_IN_DECIDING_STATE": 409,
+    "GATE_ALREADY_RESOLVED": 409,
+    "NO_PENDING_ARTIFACTS_IN_GROUP": 422,
+    "ARTIFACT_SET_MISMATCH": 422,
+    "INVALID_LOOP_TRANSITION": 409,
 }
 
 
@@ -134,3 +148,30 @@ async def list_loop_artifacts(
     except svc.LoopServiceError as err:
         _raise(err)
     return await svc.list_loop_artifacts(session, org_id, loop_id)
+
+
+@router.post("/{loop_id}/decision", response_model=LoopDecisionResponse)
+async def decide_loop(
+    loop_id: uuid.UUID,
+    body: LoopDecisionRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> LoopDecisionResponse:
+    loop = await LoopRunRepository(session, org_id).get(loop_id)
+    if loop is None:
+        raise HTTPException(
+            status_code=404, detail={"code": "LOOP_NOT_FOUND", "message": "루프를 찾을 수 없습니다."}
+        )
+    # ①loop project 접근 — resolve_member(project_id)가 검증(root-fix #1815로 agent도 보호).
+    caller = await resolve_member(auth, org_id, session, project_id=loop.project_id)
+    # ⭐human-only(gates.py transition_gate_endpoint와 동형) — 결정 게이트는 순수 HITL, agent 승인 불가.
+    if caller.type != "human":
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "DECISION_HUMAN_ONLY", "message": "루프 결정은 휴먼 멤버만 가능합니다 (에이전트 불가)."},
+        )
+    try:
+        return await svc.decide_loop_artifacts(session, org_id, caller, loop, body)
+    except svc.LoopServiceError as err:
+        _raise(err)

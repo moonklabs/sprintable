@@ -15,13 +15,15 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset, AssetLink
-from app.models.loop import LoopArtifact, LoopRun
+from app.models.loop import LoopArtifact, LoopRun, is_valid_transition
 from app.repositories.loop import LoopArtifactRepository, LoopRunRepository
 from app.schemas.loop import (
     LoopArtifactCreate,
     LoopArtifactResponse,
     LoopArtifactVariantGroup,
     LoopCreate,
+    LoopDecisionRequest,
+    LoopDecisionResponse,
     LoopResponse,
 )
 from app.services.member_resolver import ResolvedMember
@@ -164,3 +166,94 @@ async def list_loop_artifacts(
             artifacts=[LoopArtifactResponse.model_validate(a) for a in items],
         ))
     return groups
+
+
+async def decide_loop_artifacts(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    caller: ResolvedMember,
+    loop: LoopRun,
+    payload: LoopDecisionRequest,
+) -> LoopDecisionResponse:
+    """S5: variant 슬롯(variant_group)별 결정 — 1콜에 다중 그룹 동시 결정 허용. human-only는 호출부
+    (라우터)가 gates.py 동형 패턴(caller.type!='human'→403)으로 선행 검증한다.
+
+    chosen SSOT는 loop_artifacts.decision(그룹별) — loop_runs.chosen_artifact_id는 loop 전체가
+    단일 variant_group일 때만 편의상 stamp(다중슬롯이면 NULL 유지, 승자는 GET .../artifacts로).
+    status 전이(deciding→executing)는 loop의 **전 슬롯이 결판났을 때만**(pending 아티팩트 0)."""
+    if loop.status != "deciding":
+        raise LoopServiceError("LOOP_NOT_IN_DECIDING_STATE", "루프가 deciding 상태가 아닙니다.")
+
+    from app.services.gate_service import create_gate, transition_gate
+    from app.services.workflow_line_config import _default_role_id
+
+    role_id = await _default_role_id(session, org_id) or uuid.uuid4()
+    gate = await create_gate(
+        session, org_id, loop.id, "loop", "loop_decision",
+        caller.id, role_id,
+        neutral_facts={"requested_by_member_id": str(caller.id), "loop_title": loop.title},
+    )
+    # 재-결정 방지: 이 loop의 결정 프로세스가 이미 종결(approved/rejected)됐으면 side-effect 전 조기 차단.
+    if gate.status != "pending":
+        raise LoopServiceError("GATE_ALREADY_RESOLVED", "이 루프의 결정은 이미 종결되었습니다.")
+
+    artifact_repo = LoopArtifactRepository(session, org_id)
+    loop_repo = LoopRunRepository(session, org_id)
+
+    for group_decision in payload.decisions:
+        pending = await artifact_repo.list_pending_by_group(loop.id, group_decision.variant_group)
+        if not pending:
+            raise LoopServiceError(
+                "NO_PENDING_ARTIFACTS_IN_GROUP",
+                f"variant_group '{group_decision.variant_group}'에 결정할 pending 아티팩트가 없습니다.",
+            )
+        pending_ids = {a.id for a in pending}
+        rejection_ids = {r.artifact_id for r in group_decision.rejections}
+        expected = {group_decision.chosen_artifact_id} | rejection_ids
+        if expected != pending_ids or group_decision.chosen_artifact_id in rejection_ids:
+            raise LoopServiceError(
+                "ARTIFACT_SET_MISMATCH",
+                f"variant_group '{group_decision.variant_group}'의 chosen+rejections가 "
+                "pending 아티팩트 집합과 정확히 일치해야 합니다.",
+            )
+        await artifact_repo.update(
+            group_decision.chosen_artifact_id,
+            decision="chosen", choose_reason=group_decision.choose_reason,
+        )
+        for rejection in group_decision.rejections:
+            await artifact_repo.update(
+                rejection.artifact_id,
+                decision="rejected", rejection_reason=rejection.rejection_reason,
+            )
+
+    # decision_gate_id는 매 콜(gate 생성 시점부터) stamp — FE가 진행중 게이트를 참조할 수 있게.
+    if loop.decision_gate_id != gate.id:
+        loop = await loop_repo.update(loop.id, decision_gate_id=gate.id)
+
+    all_groups_decided = await artifact_repo.count_pending(loop.id) == 0
+    if all_groups_decided:
+        if not is_valid_transition(loop.status, "executing"):
+            raise LoopServiceError(
+                "INVALID_LOOP_TRANSITION", f"불법 전이: {loop.status} → executing"
+            )
+        gate = await transition_gate(session, org_id, gate.id, "approved", resolver_id=caller.id)
+        update_fields: dict = {"status": "executing", "decision_gate_id": gate.id}
+        groups = await artifact_repo.distinct_variant_groups(loop.id)
+        # 단일슬롯 편의 stamp — 다중슬롯이면 chosen_artifact_id는 NULL 유지(승자는 그룹별 GET로).
+        if len(groups) == 1:
+            chosen_id = (await session.execute(
+                select(LoopArtifact.id).where(
+                    LoopArtifact.org_id == org_id, LoopArtifact.loop_id == loop.id,
+                    LoopArtifact.decision == "chosen",
+                )
+            )).scalar_one_or_none()
+            if chosen_id is not None:
+                update_fields["chosen_artifact_id"] = chosen_id
+        loop = await loop_repo.update(loop.id, **update_fields)
+
+    return LoopDecisionResponse(
+        loop=LoopResponse.model_validate(loop),
+        gate_id=gate.id,
+        gate_status=gate.status,
+        all_groups_decided=all_groups_decided,
+    )
