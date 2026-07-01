@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { OperatorSelect, OperatorTextarea } from '@/components/ui/operator-control';
+import { OperatorInput, OperatorSelect, OperatorTextarea } from '@/components/ui/operator-control';
 import { cn } from '@/lib/utils';
 import type {
   StandupEntrySummary,
@@ -19,7 +19,7 @@ import type {
   StandupReviewType,
   StandupStorySummary,
   LinkedStoryView,
-} from './standup-review-card';
+} from './standup-types';
 
 interface StandupFeedbackDialogProps {
   open: boolean;
@@ -67,6 +67,8 @@ export function StandupFeedbackDialog({
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [reviewType, setReviewType] = useState<StandupReviewType>('comment');
+  // A4(9f27af8f): 기본 제스처=한 줄 코멘트. reviewMode=true일 때만 approve/request_changes 노출(리뷰로 표시).
+  const [reviewMode, setReviewMode] = useState(false);
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [editingFeedbackId, setEditingFeedbackId] = useState<string | null>(null);
   const [editingReviewType, setEditingReviewType] = useState<StandupReviewType>('comment');
@@ -79,6 +81,7 @@ export function StandupFeedbackDialog({
       setShowFeedbackForm(false);
       setFeedbackText('');
       setReviewType('comment');
+      setReviewMode(false);
       setEditingFeedbackId(null);
       setEditingReviewType('comment');
       setEditingFeedbackText('');
@@ -193,19 +196,19 @@ export function StandupFeedbackDialog({
           {entry ? (
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-md border border-border bg-muted/30 p-3">
-                <div className="text-xs font-semibold uppercase tracking-wider text-emerald-400">{t('doneLabel')}</div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-success">{t('doneLabel')}</div>
                 <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground/90', !entry.done && 'text-muted-foreground')}>
                   {entry.done || t('emptySection')}
                 </p>
               </div>
               <div className="rounded-md border border-border bg-muted/30 p-3">
-                <div className="text-xs font-semibold uppercase tracking-wider text-[color:var(--brand-soft)]">{t('planLabel')}</div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-info">{t('planLabel')}</div>
                 <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground/90', !entry.plan && 'text-muted-foreground')}>
                   {entry.plan || t('emptySection')}
                 </p>
               </div>
               <div className="rounded-md border border-border bg-muted/30 p-3">
-                <div className="text-xs font-semibold uppercase tracking-wider text-rose-300">{t('blockersLabel')}</div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-destructive">{t('blockersLabel')}</div>
                 <p className={cn('mt-2 whitespace-pre-wrap text-sm text-foreground/90', !entry.blockers && 'text-muted-foreground')}>
                   {entry.blockers || t('emptySection')}
                 </p>
@@ -261,7 +264,7 @@ export function StandupFeedbackDialog({
               ) : null}
             </div>
 
-            {actionError ? <p className="text-sm text-rose-300">{actionError}</p> : null}
+            {actionError ? <p className="text-sm text-destructive">{actionError}</p> : null}
 
             {feedback.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t('noFeedback')}</p>
@@ -321,22 +324,50 @@ export function StandupFeedbackDialog({
 
             {showFeedbackForm ? (
               <div className="space-y-3 rounded-md border border-dashed border-border p-3">
-                <OperatorSelect value={reviewType} onChange={(e) => setReviewType(e.target.value as StandupReviewType)}>
-                  {REVIEW_TYPE_OPTIONS.map((option) => (
-                    <option key={option} value={option}>{t(`reviewType_${option}`)}</option>
-                  ))}
-                </OperatorSelect>
-                <OperatorTextarea
-                  value={feedbackText}
-                  onChange={(e) => setFeedbackText(e.target.value)}
-                  rows={3}
-                  placeholder={t('feedbackPlaceholder')}
-                />
+                {/* A4(9f27af8f): 기본=한 줄 코멘트. approve/request_changes는 "리뷰로 표시" 뒤로. 3종 보존. */}
+                {reviewMode ? (
+                  <>
+                    <OperatorSelect value={reviewType} onChange={(e) => setReviewType(e.target.value as StandupReviewType)}>
+                      {REVIEW_TYPE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>{t(`reviewType_${option}`)}</option>
+                      ))}
+                    </OperatorSelect>
+                    <OperatorTextarea
+                      value={feedbackText}
+                      onChange={(e) => setFeedbackText(e.target.value)}
+                      rows={3}
+                      placeholder={t('feedbackPlaceholder')}
+                    />
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+                      onClick={() => { setReviewMode(false); setReviewType('comment'); }}
+                    >
+                      {t('backToQuickComment')}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <OperatorInput
+                      value={feedbackText}
+                      onChange={(e) => setFeedbackText(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submitFeedback(); } }}
+                      placeholder={t('feedbackPlaceholder')}
+                    />
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+                      onClick={() => setReviewMode(true)}
+                    >
+                      {t('markAsReview')}
+                    </button>
+                  </>
+                )}
                 <div className="flex flex-wrap gap-2">
                   <Button variant="hero" size="sm" onClick={() => void submitFeedback()} disabled={submittingFeedback || !feedbackText.trim()}>
                     {submittingFeedback ? t('saving') : t('submitFeedback')}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => setShowFeedbackForm(false)}>
+                  <Button variant="outline" size="sm" onClick={() => { setShowFeedbackForm(false); setReviewMode(false); setReviewType('comment'); }}>
                     {t('cancel')}
                   </Button>
                 </div>
