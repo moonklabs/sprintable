@@ -7,6 +7,23 @@ import { getAuthContext } from '@/lib/auth-helpers';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
+// GET — single hypothesis by id (E-LOOP-LEDGER S6: loop 상세 goal statement 표시용 —
+// LoopResponse엔 hypothesis_id만 있어 FE가 별도 조회, handoff §4-1 갭 해소).
+export async function GET(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+    const me = await getAuthContext(request);
+    if (!me) return ApiErrors.unauthorized();
+    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
+
+    const service = new HypothesisService(await createHypothesisRepository());
+    const hypothesis = await service.getById(id);
+    return apiSuccess(hypothesis);
+  } catch (err: unknown) {
+    return handleApiError(err);
+  }
+}
+
 // PATCH — general update + the "confirm draft" path (draft_metadata.confirmed=true).
 // Confirm draft is intentionally NOT a status transition (PO §12.2): it's a lightweight
 // PATCH that records the user's edits + confirmed flag, removing the "draft" pin.
