@@ -1304,7 +1304,20 @@
     "actionProgress": "{done}/{total} done",
     "actionUnassigned": "Unassigned",
     "noSprintLink": "No sprint link",
-    "advanceConfirm": "Move to '{next}'? This cannot be undone."
+    "stagePriority": "Priority",
+    "stageCollect": "Collect",
+    "stageAction": "Action",
+    "stageClosed": "Closed",
+    "previousPhase": "Previous stage",
+    "stageForwardConfirm": "Move to '{stage}'?",
+    "stageBackConfirm": "Go back to '{stage}'? Your data is preserved.",
+    "mergeHint": "Drag an item onto another to merge duplicates.",
+    "mergedCount": "{count} merged",
+    "ungroup": "Split off",
+    "groupFailed": "Failed to merge items.",
+    "discussNotesLabel": "Discussion notes (optional)",
+    "discussNotesHint": "These notes aren't saved — for reference during the meeting only.",
+    "discussNotesPlaceholder": "Notes while discussing..."
   },
   "share": {
     "share": "Share",

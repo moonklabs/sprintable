@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { OperatorSelect } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
+import { RETRO_PHASE_TO_STAGE, RETRO_STAGE_VARIANTS, type RetroSessionPhase } from '@/services/retro-session';
 
 interface RetroSession {
   id: string;
@@ -24,15 +25,6 @@ interface RetroSprintOption {
   title: string;
   status: 'planning' | 'active' | 'closed';
 }
-
-const PHASE_VARIANTS: Record<string, 'success' | 'info' | 'outline' | 'secondary'> = {
-  collect: 'info',
-  group: 'secondary',
-  vote: 'outline',
-  discuss: 'secondary',
-  action: 'success',
-  closed: 'outline',
-};
 
 export default function RetroPage() {
   const t = useTranslations('retro');
@@ -118,13 +110,13 @@ export default function RetroPage() {
     }
   };
 
-  const PHASE_KEYS: Record<string, string> = {
-    collect: 'phaseCollect',
-    group: 'phaseGroup',
-    vote: 'phaseVote',
-    discuss: 'phaseDiscuss',
-    action: 'phaseAction',
-    closed: 'phaseClosed',
+  // B1(9f27af8f): 리스트 배지도 상세 페이지와 동일한 3단계(+closed) 표시로 통일.
+  // 유나 가디언 should-fix: 스테퍼/배지 전용 de-emoji 라벨(phaseCollect/Action/Closed는 다른 소비부 없어 그대로 둠).
+  const STAGE_KEYS: Record<string, 'stageCollect' | 'stagePriority' | 'stageAction' | 'stageClosed'> = {
+    collect: 'stageCollect',
+    priority: 'stagePriority',
+    action: 'stageAction',
+    closed: 'stageClosed',
   };
 
   if (!projectId) {
@@ -215,9 +207,14 @@ export default function RetroPage() {
                       {new Date(session.created_at).toLocaleDateString()}
                     </p>
                   </div>
-                  <Badge variant={PHASE_VARIANTS[session.phase] ?? 'outline'}>
-                    {PHASE_KEYS[session.phase] ? t(PHASE_KEYS[session.phase] as 'phaseCollect') : session.phase}
-                  </Badge>
+                  {(() => {
+                    const stage = RETRO_PHASE_TO_STAGE[session.phase as RetroSessionPhase];
+                    return (
+                      <Badge variant={stage ? RETRO_STAGE_VARIANTS[stage] : 'outline'}>
+                        {stage ? t(STAGE_KEYS[stage]) : session.phase}
+                      </Badge>
+                    );
+                  })()}
                 </Link>
               ))}
             </div>
