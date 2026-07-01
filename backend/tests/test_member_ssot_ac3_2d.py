@@ -52,9 +52,13 @@ def test_batch1b_write_routers_canonicalize():
     for mod, name in [(retros, "retros"), (meetings, "meetings"), (stories, "stories")]:
         src = inspect.getsource(mod)
         assert "canonicalize_member_id" in src, f"{name} write canonicalize 누락"
-    # retro 4 식별 컬럼 전부 canonicalize(created_by/author_id/voter_id/assignee_id)
+    # P0(9f27af8f, vote-spoofing 봉쇄): created_by/author_id/voter_id는 "누가 행위하는가"
+    # attribution이라 client 입력을 신뢰하면 타인 명의 spoofing 벡터 — resolve_member(auth
+    # 기반 서버사이드 해소)로 전환. assignee_id만 "누구에게 할당하는가"(target-reference)라
+    # client가 타인을 정당하게 지정할 수 있어 canonicalize_member_id 유지.
     rsrc = inspect.getsource(retros)
-    assert rsrc.count("canonicalize_member_id(") >= 4, "retro 4컬럼 canonicalize 미흡"
+    assert rsrc.count("resolve_member(") >= 3, "retro 행위자(actor) 3필드(created_by/author_id/voter_id) resolve_member 미흡"
+    assert "canonicalize_member_id(" in rsrc, "retro assignee_id canonicalize 누락"
 
 
 def test_batch1b_activity_log_uses_lookup_members():

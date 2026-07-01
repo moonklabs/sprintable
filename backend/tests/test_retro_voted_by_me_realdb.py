@@ -117,3 +117,37 @@ async def test_voted_by_me_id_space_matches_real_resolve_member():
             assert by_id[ids["item2_id"]].voted_by_me is False
     finally:
         await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_vote_item_uses_resolved_caller_member_realdb():
+    """P0(9f27af8f) — vote_item에 client-supplied voter_id 파라미터 자체가 없다(함수 시그니처에
+    없음 — 스푸핑 벡터 원천 제거). 실 PG에서 caller(USER_A/USER_B)마다 정확히 자기 자신의
+    canonical member id로만 투표가 기록되는지(타인 명의 투표 불가) 실증."""
+    from app.repositories.retro import RetroSessionRepository
+    from app.routers.retros import vote_item
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            ids = await _seed(s)
+
+        async with Session() as s:
+            out = await vote_item(
+                id=ids["session_id"], item_id=ids["item2_id"],
+                db=s, auth=_auth(USER_A), repo=RetroSessionRepository(s, ORG),
+            )
+            await s.commit()
+            assert out.voter_id == OM_A
+            assert out.voter_id != OM_B
+
+        async with Session() as s:
+            out = await vote_item(
+                id=ids["session_id"], item_id=ids["item1_id"],
+                db=s, auth=_auth(USER_B), repo=RetroSessionRepository(s, ORG),
+            )
+            await s.commit()
+            assert out.voter_id == OM_B
+            assert out.voter_id != OM_A
+    finally:
+        await eng.dispose()

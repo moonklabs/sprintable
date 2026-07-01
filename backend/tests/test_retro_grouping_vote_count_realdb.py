@@ -304,7 +304,7 @@ async def test_get_session_hides_grouped_children_and_blocks_child_vote():
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
                 await vote_item(
-                    id=session_id, item_id=child_id, voter_id=uuid.uuid4(),
+                    id=session_id, item_id=child_id,
                     db=s, auth=_auth(), repo=RetroSessionRepository(s, ORG),
                 )
             assert ei.value.status_code == 400

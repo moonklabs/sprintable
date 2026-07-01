@@ -111,13 +111,16 @@ async def create_session(
     # body.project_id 를 검증 없이 신뢰하면 무권한 project 에 session 을 심는 mutation IDOR.
     if not await has_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id):
         raise HTTPException(status_code=403, detail="해당 프로젝트 접근 권한이 없습니다")
+    # P0(9f27af8f): created_by는 "누가 이 session을 만들었나"라는 행위자(actor) attribution —
+    # body.created_by(client 지정)를 신뢰하면 타인 명의 spoofing 벡터. auth로 canonical
+    # requester id를 직접 해소(B4/vote_item과 동일 SSOT 패턴), body.created_by는 무시.
+    creator = await resolve_member(auth, org_id, db, project_id=body.project_id)
     repo = RetroSessionRepository(db, org_id)
     session = await repo.create(
         project_id=body.project_id,
         title=body.title,
         sprint_id=body.sprint_id,
-        # AC3-2d(1b): 작성자 식별자 canonical 정규화(레거시 휴먼 tm.id→members.id). (A) write.
-        created_by=(await canonicalize_member_id(body.created_by, db)) if body.created_by else None,
+        created_by=creator.id,
     )
     return SessionListResponse.model_validate(session)
 
@@ -146,9 +149,9 @@ async def get_session(
             grouped_by_parent.setdefault(i.parent_item_id, []).append(i.id)
 
     # B4: voted_by_me — client 지정 voter_id 무신뢰. auth 로 canonical requester id 를 직접 해소
-    # (RetroVote.voter_id 는 vote 시 canonicalize_member_id 를 거친 members.id 공간이고, 휴먼은
-    # members.id=org_members.id 로 ID-preserving 백필돼 resolve_member(레거시 경로).id 와 동일
-    # 공간 — 별도 매핑 불요).
+    # (P0(9f27af8f) 이후 RetroVote.voter_id 는 vote_item 이 resolve_member 로 직접 써넣은
+    # members.id 공간이고, 휴먼은 members.id=org_members.id 로 ID-preserving 백필돼 여기
+    # resolve_member(레거시 경로).id 와 동일 공간 — 별도 매핑 불요).
     resolved = await resolve_member(auth, session.org_id, db, project_id=session.project_id)
     voted_item_ids: set[uuid.UUID] = set()
     if visible_items:
@@ -213,9 +216,11 @@ async def add_item(
     auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> ItemResponse:
-    await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     item_repo = RetroItemRepository(db)
-    author_id = (await canonicalize_member_id(body.author_id, db)) if body.author_id else None
+    # P0(9f27af8f): author_id도 행위자(actor) attribution — body.author_id(client 지정) 무시,
+    # auth로 canonical requester id를 직접 해소(vote_item/create_session과 동일 SSOT 패턴).
+    author_id = (await resolve_member(auth, session.org_id, db, project_id=session.project_id)).id
     item = await item_repo.create(
         session_id=id, category=body.category, text=body.text, author_id=author_id
     )
@@ -279,17 +284,20 @@ async def delete_item(
 async def vote_item(
     id: uuid.UUID,
     item_id: uuid.UUID,
-    voter_id: uuid.UUID = Query(...),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> VoteResponse:
-    await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    # P0(9f27af8f): 원래 client-supplied `voter_id: Query(...)` — 타인 대신 투표하는
+    # spoofing 벡터였고, FE(#1801 리라이트)는 애초에 이 파라미터를 보내지 않아 전 투표가
+    # 422로 깨져 있었다(유나 라이브 E2E 적출). 근본수정: voter는 auth에서 canonical
+    # requester id로 서버사이드 해소(client 입력 전혀 신뢰하지 않음).
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     item = await _require_item_in_session(db, id, item_id)
     if item.parent_item_id is not None:
         # B2: 그룹핑된 child는 투표 불가 — 투표는 parent로 이관/집계.
         raise HTTPException(status_code=400, detail="Grouped child items cannot be voted directly")
-    voter_id = await canonicalize_member_id(voter_id, db)  # AC3-2d(1b): canonical 정규화
+    voter_id = (await resolve_member(auth, session.org_id, db, project_id=session.project_id)).id
     vote_repo = RetroVoteRepository(db)
     try:
         vote = await vote_repo.vote(item_id, voter_id)
