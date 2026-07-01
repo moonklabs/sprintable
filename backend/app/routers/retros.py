@@ -139,13 +139,13 @@ async def get_session(
     items = await item_repo.list_by_session(id)
     actions = await action_repo.list_by_session(id)
 
-    # B2: 그룹핑된 child는 응답에서 숨김(부모만 top-level로 노출) — parent id → child id 목록.
+    # P1(9f27af8f, 유나 real-payload 재현): grouped child를 items에서 제외하면 FE가 클러스터를
+    # 그릴 데이터 자체가 없어짐(FE는 items를 top-level/child로 필터링해 렌더 — child 객체가
+    # 있어야 함). session GET은 **flat 배열로 전부 노출**(parent_item_id로 FE가 필터), export만
+    # top-level-only 유지(별도 필터, 아래). grouped_item_ids는 parent 조회 편의상 유지.
     grouped_by_parent: dict[uuid.UUID, list[uuid.UUID]] = {}
-    visible_items = []
     for i in items:
-        if i.parent_item_id is None:
-            visible_items.append(i)
-        else:
+        if i.parent_item_id is not None:
             grouped_by_parent.setdefault(i.parent_item_id, []).append(i.id)
 
     # B4: voted_by_me — client 지정 voter_id 무신뢰. auth 로 canonical requester id 를 직접 해소
@@ -154,11 +154,11 @@ async def get_session(
     # resolve_member(레거시 경로).id 와 동일 공간 — 별도 매핑 불요).
     resolved = await resolve_member(auth, session.org_id, db, project_id=session.project_id)
     voted_item_ids: set[uuid.UUID] = set()
-    if visible_items:
+    if items:
         voted_rows = await db.execute(
             select(RetroVote.item_id).where(
                 RetroVote.voter_id == resolved.id,
-                RetroVote.item_id.in_([i.id for i in visible_items]),
+                RetroVote.item_id.in_([i.id for i in items]),
             )
         )
         voted_item_ids = set(voted_rows.scalars().all())
@@ -186,7 +186,7 @@ async def get_session(
                 parent_item_id=i.parent_item_id,
                 grouped_item_ids=grouped_by_parent.get(i.id, []),
             )
-            for i in visible_items
+            for i in items
         ],
         actions=[ActionResponse.model_validate(a) for a in actions],
     )

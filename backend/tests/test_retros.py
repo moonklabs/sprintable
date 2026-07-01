@@ -848,8 +848,10 @@ async def test_ungroup_item_not_found_404():
 
 
 @pytest.mark.anyio
-async def test_get_session_hides_grouped_children():
-    """B2 — get_session은 top-level item만 노출·parent에 grouped_item_ids 반영."""
+async def test_get_session_includes_grouped_children_flat():
+    """P1(9f27af8f, 유나 real-payload 재현) — get_session은 grouped child도 items에 그대로
+    포함(flat 배열, parent_item_id 세팅) — FE가 top-level/child를 자체 필터링해 클러스터를
+    그리므로 child 객체 자체가 응답에 있어야 함(id만으론 렌더 불가). export만 top-level-only 유지."""
     client, session, app = await _client()
     try:
         parent = _mock_item()
@@ -882,9 +884,11 @@ async def test_get_session_hides_grouped_children():
                 resp = await c.get(f"/api/v2/retros/{SESSION_ID}")
 
         items = resp.json()["items"]
-        assert len(items) == 1
-        assert items[0]["id"] == str(parent.id)
-        assert items[0]["grouped_item_ids"] == [str(child.id)]
+        by_id = {i["id"]: i for i in items}
+        assert len(items) == 2
+        assert by_id[str(parent.id)]["parent_item_id"] is None
+        assert by_id[str(parent.id)]["grouped_item_ids"] == [str(child.id)]
+        assert by_id[str(child.id)]["parent_item_id"] == str(parent.id)
     finally:
         app.dependency_overrides.clear()
 
