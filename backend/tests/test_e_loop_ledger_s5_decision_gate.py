@@ -8,6 +8,9 @@ S5 고유 가치(비-tautological):
 ⓓ 부분 결정: 일부 그룹만 결정 시 loop 'deciding' 유지(전 슬롯 결판나야 executing 전이).
 ⓔ 재-결정 방지(GATE_ALREADY_RESOLVED) + LOOP_NOT_IN_DECIDING_STATE.
 ⓕ 단일슬롯 chosen_artifact_id stamp vs 다중슬롯 NULL 유지.
+ⓖ 1콜 내 다중 그룹 중 하나가 실패하면(같은 트랜잭션) 앞서 처리된 그룹도 rollback 시 원복
+   (BaseRepository/create_gate/transition_gate 전부 flush만·commit 안 함을 실 DB로 실증 —
+   get_db 의존성의 except:rollback 패턴이 실제로 지킬 무결성 조건).
 
 DB env(ALEMBIC_DATABASE_URL) 없으면 realdb 파트 skip.
 """
@@ -212,6 +215,62 @@ async def test_decide_loop_not_deciding_state_409():
                 )
             assert ei.value.status_code == 409
             assert ei.value.detail["code"] == "LOOP_NOT_IN_DECIDING_STATE"
+    finally:
+        await eng.dispose()
+
+
+# ── ⓖ 1콜 내 부분실패 원자성(까심 QA 지적 지점) ──────────────────────────────
+
+@pytestmark_db
+@pytest.mark.anyio
+async def test_decide_partial_failure_within_one_call_rolls_back_earlier_group():
+    """decisions=[headline(유효), cta(mismatch)] 한 콜 — cta에서 실패하면 headline도
+    session.rollback() 후 pending으로 원복돼야 한다(BaseRepository/create_gate/transition_gate가
+    flush만 하고 commit하지 않는다는 설계를 실제 DB round-trip으로 실증 — get_db 의존성의
+    except:rollback 패턴이 프로덕션에서 지킬 원자성을 여기서는 명시적으로 재현·검증한다)."""
+    from app.repositories.loop import LoopRunRepository
+    from app.services.loop import LoopServiceError, decide_loop_artifacts
+    from app.services.member_resolver import resolve_member
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+            loop_id = await _seed_loop(s)
+            h1 = await _seed_artifact(s, loop_id, "headline", "A")
+            h2 = await _seed_artifact(s, loop_id, "headline", "B")
+            c1 = await _seed_artifact(s, loop_id, "cta", "A")
+            await _seed_artifact(s, loop_id, "cta", "B")
+
+        async with Session() as s:
+            loop = await LoopRunRepository(s, ORG).get(loop_id)
+            caller = await resolve_member(_auth(), ORG, s, project_id=loop.project_id)
+            with pytest.raises(LoopServiceError) as ei:
+                await decide_loop_artifacts(
+                    s, ORG, caller, loop,
+                    LoopDecisionRequest(decisions=[
+                        VariantGroupDecision(
+                            variant_group="headline", chosen_artifact_id=h1, choose_reason="best",
+                            rejections=[LoopArtifactRejection(artifact_id=h2, rejection_reason="worse")],
+                        ),
+                        VariantGroupDecision(
+                            # cta: rejections 누락 — mismatch로 실패 유도(headline은 이미 flush됨).
+                            variant_group="cta", chosen_artifact_id=c1, choose_reason="best cta",
+                            rejections=[],
+                        ),
+                    ]),
+                )
+            assert ei.value.code == "ARTIFACT_SET_MISMATCH"
+            # get_db 의존성이 실제로 하는 것과 동일: 예외 시 rollback.
+            await s.rollback()
+
+        # 완전히 새 세션/커넥션으로 재조회 — 커밋되지 않았다면 headline도 여전히 pending.
+        async with Session() as s:
+            from app.models.loop import LoopArtifact
+            fetched_h1 = (await s.execute(select(LoopArtifact).where(LoopArtifact.id == h1))).scalar_one()
+            fetched_h2 = (await s.execute(select(LoopArtifact).where(LoopArtifact.id == h2))).scalar_one()
+            assert fetched_h1.decision == "pending", "headline chosen이 rollback 후에도 남아있으면 원자성 위반"
+            assert fetched_h2.decision == "pending", "headline rejected이 rollback 후에도 남아있으면 원자성 위반"
     finally:
         await eng.dispose()
 
