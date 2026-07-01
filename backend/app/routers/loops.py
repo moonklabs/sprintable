@@ -53,6 +53,8 @@ _ERROR_STATUS: dict[str, int] = {
     "LOOP_PROJECT_ACCESS_DENIED": 403,
     "ASSET_NOT_FOUND": 404,
     "ASSET_PROJECT_MISMATCH": 403,
+    "HYPOTHESIS_NOT_FOUND": 404,
+    "HYPOTHESIS_PROJECT_MISMATCH": 403,
     "LOOP_NOT_IN_DECIDING_STATE": 409,
     "GATE_ALREADY_RESOLVED": 409,
     "NO_PENDING_ARTIFACTS_IN_GROUP": 422,
@@ -96,7 +98,10 @@ async def create_loop(
 ) -> LoopResponse:
     # resolve_member(project_id)가 프로젝트 접근을 검증한다(hypotheses.create_hypothesis와 동형).
     caller = await resolve_member(auth, org_id, session, project_id=body.project_id)
-    return await svc.create_loop(session, org_id, caller, body)
+    try:
+        return await svc.create_loop(session, org_id, caller, body)
+    except svc.LoopServiceError as err:
+        _raise(err)
 
 
 @router.get("/{loop_id}", response_model=LoopResponse)

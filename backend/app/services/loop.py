@@ -15,6 +15,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset, AssetLink
+from app.models.hypothesis import Hypothesis
 from app.models.loop import LoopArtifact, LoopRun, is_valid_transition
 from app.repositories.loop import LoopArtifactRepository, LoopRunRepository
 from app.schemas.loop import (
@@ -62,6 +63,23 @@ async def create_loop(
 ) -> LoopResponse:
     # resolve_member(project_id=...)가 이미 호출부(라우터)에서 caller의 project 접근을
     # 검증했으므로 여기서는 재검증하지 않는다(hypotheses.create_hypothesis와 동형).
+    #
+    # 까심 QA CRITICAL(#1818 S7 QA) — hypothesis_id는 FK만 있고 소유검증이 없었다(S4의
+    # ASSET_PROJECT_MISMATCH와 같은 크로스-리소스 IDOR 축이 빠짐). 타 org의 hypothesis_id를
+    # loop에 연결하면 그 hypothesis가 나중에 resolved될 때 attribute_loop_outcome이 그
+    # hypothesis의 기밀 outcome_result를 이 org의 loop에 stamp — cross-org 데이터 유출(까심
+    # 실재현). 여기서 원천 차단(S4 asset 패턴 그대로 미러).
+    if payload.hypothesis_id is not None:
+        hyp = (await session.execute(
+            select(Hypothesis).where(Hypothesis.id == payload.hypothesis_id, Hypothesis.org_id == org_id)
+        )).scalar_one_or_none()
+        if hyp is None:
+            raise LoopServiceError("HYPOTHESIS_NOT_FOUND", "가설을 찾을 수 없습니다.")
+        if hyp.project_id != payload.project_id:
+            raise LoopServiceError(
+                "HYPOTHESIS_PROJECT_MISMATCH", "가설이 이 루프와 같은 프로젝트에 속하지 않습니다."
+            )
+
     repo = LoopRunRepository(session, org_id)
     loop = await repo.create(
         project_id=payload.project_id,

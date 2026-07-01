@@ -29,6 +29,17 @@ def _mock_outcome_verdicts():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _mock_loop_attribution():
+    """E-LOOP-LEDGER S7: scorer가 해소 직후 attribute_loop_outcome도 호출하므로(추가 session.execute
+    1회), _mock_outcome_verdicts와 동일 이유로 전이 로직만 검증하는 기존 테스트에서 격리한다."""
+    with patch(
+        "app.services.loop_outcome_attribution.attribute_loop_outcome",
+        new=AsyncMock(return_value={"skipped_reason": "no_measuring_loop", "attributed": []}),
+    ):
+        yield
+
+
 def _hyp(status="active", source="ga4", **ov):
     md = {"metric": "signups", "source": source, "target": 100, "direction": "up"}
     base = dict(

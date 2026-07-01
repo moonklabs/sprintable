@@ -67,7 +67,10 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
     # HO-S4: 해소(verified/falsified) 직후 outcome verdict 배선 결과(가설 적중 이력→trust).
     verdicts_recorded: list[dict] = []
     verdicts_skipped: list[dict] = []
+    # E-LOOP-LEDGER S7: 해소 직후 loop outcome 귀속 배선 결과(복리 되먹임 고리).
+    loops_attributed: list[dict] = []
     from app.services.hypothesis_outcome_verdict import record_outcome_verdicts
+    from app.services.loop_outcome_attribution import attribute_loop_outcome
 
     hyps = (await session.execute(
         select(Hypothesis).where(
@@ -115,6 +118,11 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
                     "bet": vres.get("bet", []),
                     "execution": vres.get("execution", []),
                 })
+            # E-LOOP-LEDGER S7: 이 가설에 연결된 measuring 상태 loop 귀속(있으면). loop이 아직
+            # measuring에 도달하지 못했으면(전이 배선 갭·별도 스토리) no_measuring_loop로 skip.
+            lres = await attribute_loop_outcome(session, hyp)
+            if lres.get("attributed"):
+                loops_attributed.append({"hypothesis_id": str(hyp.id), "loop_ids": lres["attributed"]})
         else:
             pending.append(str(hyp.id))  # measuring 유지
 
@@ -127,5 +135,7 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
         "total": len(hyps),
         # HO-S4(AC②): outcome verdict 배선 결과를 cron response에 노출.
         "verdicts_recorded": verdicts_recorded,
+        # S7: loop outcome 귀속 결과를 cron response에 노출(관측 정직성).
+        "loops_attributed": loops_attributed,
         "verdicts_skipped": verdicts_skipped,
     }

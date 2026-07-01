@@ -44,7 +44,11 @@ async def test_resolved_calls_wiring_manual_does_not():
 
     spy = AsyncMock(return_value={"skipped_reason": None, "bet": ["b1"], "execution": ["e1"]})
     with patch.object(sc, "score_ga4_outcome", return_value={"outcome_status": "hit", "outcome_result": {"x": 1}}), \
-         patch("app.services.hypothesis_outcome_verdict.record_outcome_verdicts", new=spy):
+         patch("app.services.hypothesis_outcome_verdict.record_outcome_verdicts", new=spy), \
+         patch(
+             "app.services.loop_outcome_attribution.attribute_loop_outcome",
+             new=AsyncMock(return_value={"skipped_reason": "no_measuring_loop", "attributed": []}),
+         ):
         summary = await sc.score_hypotheses(session)
 
     # AC①: verified 가설에만 배선 호출(manual 미호출·AC④).
@@ -65,7 +69,11 @@ async def test_skipped_wiring_goes_to_verdicts_skipped():
     session.execute = AsyncMock(return_value=res)
     spy = AsyncMock(return_value={"skipped_reason": "no_linked_story", "bet": [], "execution": []})
     with patch.object(sc, "score_ga4_outcome", return_value={"outcome_status": "miss", "outcome_result": {}}), \
-         patch("app.services.hypothesis_outcome_verdict.record_outcome_verdicts", new=spy):
+         patch("app.services.hypothesis_outcome_verdict.record_outcome_verdicts", new=spy), \
+         patch(
+             "app.services.loop_outcome_attribution.attribute_loop_outcome",
+             new=AsyncMock(return_value={"skipped_reason": "no_measuring_loop", "attributed": []}),
+         ):
         summary = await sc.score_hypotheses(session)
     assert str(h.id) in summary["falsified"]
     assert summary["verdicts_skipped"] == [{"hypothesis_id": str(h.id), "reason": "no_linked_story"}]
