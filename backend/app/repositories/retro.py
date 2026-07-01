@@ -65,6 +65,19 @@ class RetroItemRepository:
         await self.session.flush()
         return True
 
+    async def delete_from_session(self, session_id: uuid.UUID, item_id: uuid.UUID) -> bool:
+        """item_id가 session_id 소속인지 원자적으로 확인 후 삭제(session IDOR 2차 방어 — item_id를
+        타 session 것으로 조작해 부모 session project-access 체크만 우회하는 것 차단)."""
+        result = await self.session.execute(
+            select(RetroItem).where(RetroItem.id == item_id, RetroItem.session_id == session_id)
+        )
+        item = result.scalar_one_or_none()
+        if item is None:
+            return False
+        await self.session.delete(item)
+        await self.session.flush()
+        return True
+
 
 class RetroVoteRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -110,3 +123,23 @@ class RetroActionRepository:
             update(RetroAction).where(RetroAction.id == action_id).values(**data)
         )
         return await self.get(action_id)
+
+    async def update_in_session(
+        self, session_id: uuid.UUID, action_id: uuid.UUID, **data: Any
+    ) -> RetroAction | None:
+        """action_id가 session_id 소속인지 원자적으로 확인 후 갱신(session IDOR 2차 방어 —
+        action_id를 타 session 것으로 조작해 부모 session project-access 체크만 우회하는 것 차단)."""
+        action = (
+            await self.session.execute(
+                select(RetroAction).where(
+                    RetroAction.id == action_id, RetroAction.session_id == session_id
+                )
+            )
+        ).scalar_one_or_none()
+        if action is None:
+            return None
+        for key, value in data.items():
+            setattr(action, key, value)
+        await self.session.flush()
+        await self.session.refresh(action)
+        return action
