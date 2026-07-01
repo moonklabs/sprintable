@@ -8,7 +8,16 @@ import { ArrowLeft, FileText, GitBranch, ShieldAlert } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { LoopStatusBadge, type LoopStatus } from '@/components/loops/loop-status-badge';
+import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { VariantGallery, type VariantGroup } from '@/components/loops/variant-gallery';
+
+/** E-LOOP-LEDGER S7 loop_outcome_attribution.py::attribute_loop_outcome 산출 shape 그대로. */
+interface OutcomeSnapshot {
+  hypothesis_id: string;
+  hypothesis_status: 'verified' | 'falsified';
+  outcome_result: { metric: string; target: number; actual: number; direction: 'up' | 'down'; scored_at: string } | null;
+  attributed_at: string;
+}
 
 interface Loop {
   id: string;
@@ -20,6 +29,7 @@ interface Loop {
   title: string;
   goal_tags: string[];
   status: LoopStatus;
+  outcome_snapshot: OutcomeSnapshot | null;
 }
 
 interface Hypothesis {
@@ -41,6 +51,7 @@ interface DocSummary {
  */
 export function LoopDetailClient({ loopId }: { loopId: string }) {
   const t = useTranslations('loops');
+  const th = useTranslations('hypotheses');
   const router = useRouter();
 
   const [loop, setLoop] = useState<Loop | null>(null);
@@ -169,6 +180,26 @@ export function LoopDetailClient({ loopId }: { loopId: string }) {
             </div>
           ) : null}
 
+          {/* Outcome — E-LOOP-LEDGER S9: closed loop 성과(S7 outcome_snapshot 소비) */}
+          {loop.status === 'closed' && loop.outcome_snapshot ? (
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 p-3">
+              <span className="text-xs font-medium text-muted-foreground">{t('outcomeSectionLabel')}</span>
+              <OutcomeBadge hypothesisStatus={loop.outcome_snapshot.hypothesis_status} />
+              {loop.outcome_snapshot.outcome_result ? (
+                <span className="text-sm text-foreground">
+                  {t('outcomeMetricLine', {
+                    metric: loop.outcome_snapshot.outcome_result.metric,
+                    actual: loop.outcome_snapshot.outcome_result.actual,
+                    dir: loop.outcome_snapshot.outcome_result.direction === 'up' ? th('dirUp') : th('dirDown'),
+                    target: loop.outcome_snapshot.outcome_result.target,
+                  })}
+                </span>
+              ) : (
+                <span className="text-sm italic text-muted-foreground">{t('outcomeNoResult')}</span>
+              )}
+            </div>
+          ) : null}
+
           {/* Goal / hypothesis */}
           <div className="rounded-lg border border-border bg-muted/40 p-3">
             <p className="mb-1 text-xs font-medium text-muted-foreground">{t('goalLabel')}</p>
@@ -206,7 +237,13 @@ export function LoopDetailClient({ loopId }: { loopId: string }) {
         </div>
 
         {/* Variant gallery */}
-        <VariantGallery loopId={loop.id} groups={groups} canDecide={canDecide} onDecided={() => void fetchAll()} />
+        <VariantGallery
+          loopId={loop.id}
+          groups={groups}
+          canDecide={canDecide}
+          onDecided={() => void fetchAll()}
+          outcome={loop.status === 'closed' ? loop.outcome_snapshot : null}
+        />
       </div>
     </>
   );

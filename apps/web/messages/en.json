@@ -2621,7 +2621,12 @@
     "decisionError": "Failed to confirm the slot.",
     "noArtifacts": "This loop has no candidate artifacts yet.",
     "viewDetail": "View detail",
-    "notFound": "Loop not found."
+    "notFound": "Loop not found.",
+    "outcomeSectionLabel": "Outcome",
+    "outcomeHit": "Hit",
+    "outcomeMiss": "Miss",
+    "outcomeNoResult": "No measurement result.",
+    "outcomeMetricLine": "{metric}: actual {actual} {dir} target {target}"
   },
   "sprints": {
     "title": "Sprints",

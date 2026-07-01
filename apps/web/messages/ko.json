@@ -2621,7 +2621,12 @@
     "decisionError": "슬롯 확정에 실패했습니다.",
     "noArtifacts": "이 loop에는 아직 후보 아티팩트가 없습니다.",
     "viewDetail": "상세 보기",
-    "notFound": "loop을 찾을 수 없습니다."
+    "notFound": "loop을 찾을 수 없습니다.",
+    "outcomeSectionLabel": "성과",
+    "outcomeHit": "Hit",
+    "outcomeMiss": "Miss",
+    "outcomeNoResult": "측정 결과가 없습니다.",
+    "outcomeMetricLine": "{metric}: 실제 {actual} {dir} 목표 {target}"
   },
   "sprints": {
     "title": "스프린트",
