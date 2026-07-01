@@ -1,11 +1,14 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.retro import RetroItem, RetroSession
 from app.services.member_resolver import canonicalize_member_id
+from app.services.project_auth import has_project_access
 from app.repositories.retro import (
     RetroActionRepository,
     RetroItemRepository,
@@ -35,18 +38,65 @@ def _get_session_repo(
     return RetroSessionRepository(db, org_id)
 
 
+async def _require_retro_project_access(
+    session: AsyncSession, session_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID
+) -> RetroSession:
+    """대상 retro session의 canonical project-scope authz(doc-gate #1796 `_require_doc_project_access`
+    와 동일 패턴). session을 org-scope로 로드하고 caller의 그 session project 접근(has_project_access
+    SSOT=team_member∪grant∪owner/admin)을 강제 — 없으면 404·무권한 403. 기존 `_get_session_repo`가
+    org-level만 검증해 same-org cross-project IDOR가 있었음(#1801 까심 QA HIGH). 반환=로드된
+    session(caller 재사용 가능)."""
+    retro = (
+        await session.execute(
+            select(RetroSession).where(RetroSession.id == session_id, RetroSession.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if retro is None:
+        raise HTTPException(status_code=404, detail="Retro session not found")
+    if not await has_project_access(session, user_id, retro.project_id, org_id):
+        raise HTTPException(status_code=403, detail="해당 회고의 프로젝트 접근 권한이 없습니다")
+    return retro
+
+
+async def _require_item_in_session(
+    session: AsyncSession, session_id: uuid.UUID, item_id: uuid.UUID
+) -> RetroItem:
+    """item_id가 session_id 소속인지 확인(2차 IDOR 방어 — item_id를 타 session 것으로 조작해
+    부모 session project-access 체크만 우회하는 것 차단)."""
+    item = (
+        await session.execute(
+            select(RetroItem).where(RetroItem.id == item_id, RetroItem.session_id == session_id)
+        )
+    ).scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item
+
+
 @router.get("", response_model=list[SessionListResponse])
 async def list_sessions(
     project_id: uuid.UUID | None = Query(default=None),
     sprint_id: uuid.UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> list[SessionListResponse]:
+    user_id = uuid.UUID(auth.user_id)
+    if project_id is not None:
+        # 명시 필터 시 그 프로젝트 접근권 선검증(무권한 project_id로 org 존재 여부 탐색 차단).
+        if not await has_project_access(db, user_id, project_id, repo.org_id):
+            raise HTTPException(status_code=403, detail="해당 프로젝트 접근 권한이 없습니다")
     filters: dict = {}
     if project_id:
         filters["project_id"] = project_id
     if sprint_id:
         filters["sprint_id"] = sprint_id
     sessions = await repo.list(**filters)
+    if project_id is None:
+        # project_id 생략 시 org 전체 세션이 나오던 갭 — 각 세션의 실제 project 접근권으로 필터.
+        sessions = [
+            s for s in sessions if await has_project_access(db, user_id, s.project_id, repo.org_id)
+        ]
     return [SessionListResponse.model_validate(s) for s in sessions]
 
 
@@ -54,9 +104,12 @@ async def list_sessions(
 async def create_session(
     body: CreateSession,
     db: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> SessionListResponse:
+    # body.project_id 를 검증 없이 신뢰하면 무권한 project 에 session 을 심는 mutation IDOR.
+    if not await has_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id):
+        raise HTTPException(status_code=403, detail="해당 프로젝트 접근 권한이 없습니다")
     repo = RetroSessionRepository(db, org_id)
     session = await repo.create(
         project_id=body.project_id,
@@ -72,11 +125,10 @@ async def create_session(
 async def get_session(
     id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> SessionResponse:
-    session = await repo.get(id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Retro session not found")
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
 
     item_repo = RetroItemRepository(db)
     action_repo = RetroActionRepository(db)
@@ -102,8 +154,11 @@ async def get_session(
 async def advance_phase(
     id: uuid.UUID,
     body: PhaseTransition,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> SessionListResponse:
+    await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     try:
         session = await repo.set_phase(id, body.phase)
     except (ValueError, Exception) as exc:
@@ -116,11 +171,10 @@ async def add_item(
     id: uuid.UUID,
     body: CreateItem,
     db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> ItemResponse:
-    session = await repo.get(id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Retro session not found")
+    await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     item_repo = RetroItemRepository(db)
     author_id = (await canonicalize_member_id(body.author_id, db)) if body.author_id else None
     item = await item_repo.create(
@@ -134,13 +188,12 @@ async def delete_item(
     id: uuid.UUID,
     item_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> dict:
-    session = await repo.get(id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Retro session not found")
+    await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     item_repo = RetroItemRepository(db)
-    ok = await item_repo.delete(item_id)
+    ok = await item_repo.delete_from_session(id, item_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Item not found")
     return {"ok": True}
@@ -152,11 +205,11 @@ async def vote_item(
     item_id: uuid.UUID,
     voter_id: uuid.UUID = Query(...),
     db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> VoteResponse:
-    session = await repo.get(id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Retro session not found")
+    await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    await _require_item_in_session(db, id, item_id)
     voter_id = await canonicalize_member_id(voter_id, db)  # AC3-2d(1b): canonical 정규화
     vote_repo = RetroVoteRepository(db)
     try:
@@ -172,11 +225,10 @@ async def vote_item(
 async def list_actions(
     id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> list[ActionResponse]:
-    session = await repo.get(id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Retro session not found")
+    await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     action_repo = RetroActionRepository(db)
     actions = await action_repo.list_by_session(id)
     return [ActionResponse.model_validate(a) for a in actions]
@@ -187,11 +239,10 @@ async def create_action(
     id: uuid.UUID,
     body: CreateAction,
     db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> ActionResponse:
-    session = await repo.get(id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Retro session not found")
+    await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     action_repo = RetroActionRepository(db)
     assignee_id = (await canonicalize_member_id(body.assignee_id, db)) if body.assignee_id else None
     action = await action_repo.create(
@@ -206,14 +257,14 @@ async def update_action(
     action_id: uuid.UUID,
     body: UpdateAction,
     db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> ActionResponse:
-    session = await repo.get(id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Retro session not found")
+    # #1801 까심 QA HIGH — 이 라우트가 org-only 게이트였던 원 적출 지점.
+    await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     action_repo = RetroActionRepository(db)
     data = body.model_dump(exclude_unset=True)
-    action = await action_repo.update(action_id, **data)
+    action = await action_repo.update_in_session(id, action_id, **data)
     if action is None:
         raise HTTPException(status_code=404, detail="Action not found")
     return ActionResponse.model_validate(action)
@@ -223,11 +274,10 @@ async def update_action(
 async def export_session(
     id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> Response:
-    session = await repo.get(id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Retro session not found")
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
 
     item_repo = RetroItemRepository(db)
     action_repo = RetroActionRepository(db)
