@@ -101,3 +101,10 @@ class LoopDecisionResponse(BaseModel):
     gate_id: uuid.UUID
     gate_status: str
     all_groups_decided: bool
+
+
+class LoopTransitionRequest(BaseModel):
+    """S22: 명시 FSM 전이. status는 라우터의 화이트리스트({briefing,generating,deciding,
+    measuring,abandoned})로 executing/closed(S5/S7 전용 전이)를 원천 배제한다."""
+
+    status: str
