@@ -402,11 +402,11 @@ async def test_get_retro_session_cross_project_403():
 
 @pytest.mark.anyio
 async def test_advance_phase_200():
-    """collect → group 순차 전이."""
+    """B1 — collect → vote 인접 전이."""
     client, session, app = await _client()
     try:
         collect_session = _mock_session("collect")
-        group_session = _mock_session("group")
+        vote_session = _mock_session("vote")
 
         call_count = 0
 
@@ -415,21 +415,100 @@ async def test_advance_phase_200():
             call_count += 1
             result = MagicMock()
             # call 1 = _require_retro_project_access pre-check, call 2 = set_phase() 내부 get()
-            # (둘 다 현재 phase="collect" 세션이어야 current_idx 계산이 맞음) — call 3+ = update() 내부 get().
+            # (둘 다 현재 phase="collect" 세션이어야 전이 허용판정이 맞음) — call 3+ = update() 내부 get().
             if call_count <= 2:
                 result.scalar_one_or_none.return_value = collect_session
             else:
-                result.scalar_one_or_none.return_value = group_session
+                result.scalar_one_or_none.return_value = vote_session
             return result
 
         session.execute = mock_execute
 
         with _allow_project_access():
             async with client as c:
-                resp = await c.patch(f"/api/v2/retros/{SESSION_ID}/phase", json={"phase": "group"})
+                resp = await c.patch(f"/api/v2/retros/{SESSION_ID}/phase", json={"phase": "vote"})
 
         assert resp.status_code == 200
-        assert resp.json()["phase"] == "group"
+        assert resp.json()["phase"] == "vote"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_advance_phase_backward_vote_to_collect_200():
+    """B1 — 양방향: vote → collect 뒤로가기 허용(데이터는 손대지 않음, phase만 변경)."""
+    client, session, app = await _client()
+    try:
+        vote_session = _mock_session("vote")
+        collect_session = _mock_session("collect")
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = vote_session if call_count <= 2 else collect_session
+            return result
+
+        session.execute = mock_execute
+
+        with _allow_project_access():
+            async with client as c:
+                resp = await c.patch(f"/api/v2/retros/{SESSION_ID}/phase", json={"phase": "collect"})
+
+        assert resp.status_code == 200
+        assert resp.json()["phase"] == "collect"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize(
+    "current_phase,target_phase",
+    [
+        ("collect", "action"),  # 비인접 점프
+        ("collect", "closed"),  # 비인접 점프
+        ("vote", "closed"),  # 비인접 점프
+        ("closed", "action"),  # terminal에서 전이 시도
+        ("closed", "vote"),  # terminal에서 전이 시도
+        ("closed", "collect"),  # terminal에서 전이 시도
+    ],
+)
+@pytest.mark.anyio
+async def test_advance_phase_non_adjacent_rejected_400(current_phase, target_phase):
+    """B1 — 비인접 전이는 여전히 거부(closed는 terminal이라 전이 0건)."""
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session(current_phase)
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with _allow_project_access():
+            async with client as c:
+                resp = await c.patch(
+                    f"/api/v2/retros/{SESSION_ID}/phase", json={"phase": target_phase}
+                )
+
+        assert resp.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_advance_phase_same_phase_noop_200():
+    """B1 — 같은 phase 재지정은 no-op(멱등 — FE 중복클릭 방어)."""
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session("vote")
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with _allow_project_access():
+            async with client as c:
+                resp = await c.patch(f"/api/v2/retros/{SESSION_ID}/phase", json={"phase": "vote"})
+
+        assert resp.status_code == 200
+        assert resp.json()["phase"] == "vote"
     finally:
         app.dependency_overrides.clear()
 
