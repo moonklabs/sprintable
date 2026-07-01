@@ -73,8 +73,9 @@ pytestmark_db = pytest.mark.skipif(not _RAW, reason="real-DB URL 미설정 — s
 ORG = uuid.UUID("1c000000-0000-0000-0000-000000000001")
 USER = uuid.UUID("1c000000-0000-0000-0000-0000000000a1")
 OM = uuid.UUID("1c000000-0000-0000-0000-0000000000b1")
-PROJ_A = uuid.UUID("1c000000-0000-0000-0000-0000000000c1")  # USER grant(접근 O)
-PROJ_B = uuid.UUID("1c000000-0000-0000-0000-0000000000c2")  # USER 접근 X(IDOR 축)
+AGENT = uuid.UUID("1c000000-0000-0000-0000-0000000000d1")  # PROJ_A 스코프 agent(까심 재현 시나리오)
+PROJ_A = uuid.UUID("1c000000-0000-0000-0000-0000000000c1")  # USER/AGENT grant(접근 O)
+PROJ_B = uuid.UUID("1c000000-0000-0000-0000-0000000000c2")  # USER/AGENT 접근 X(IDOR 축)
 
 
 def _auth():
@@ -82,12 +83,27 @@ def _auth():
     return AuthContext(user_id=str(USER), email=None, claims={}, org_id=str(ORG))
 
 
+def _agent_auth():
+    """까심 QA CRITICAL(#1815) 재현 시나리오용 — API키 agent 호출자.
+
+    eb1eb21b(resolve_member root-fix)가 develop에 머지된 뒤 이 브랜치가 rebase되며 딸려온
+    보호(_resolve_member_legacy/_resolve_member_anchor 두 분기 모두 has_project_access 검증)를
+    loops 표면에서도 직접 실증한다 — S3 자체 코드 변경은 없음(루트 fix가 이미 막음)."""
+    from app.dependencies.auth import AuthContext
+    return AuthContext(
+        user_id=str(AGENT), email=None,
+        claims={"app_metadata": {"api_key_id": "ak_test", "org_id": str(ORG)}},
+        org_id=str(ORG),
+    )
+
+
 async def _seed(s):
-    """ORG·USER(member·非owner/admin)·PROJ_A(grant)·PROJ_B(no grant) 시드."""
+    """ORG·USER(member·非owner/admin)·AGENT(PROJ_A만 grant)·PROJ_A(grant)·PROJ_B(no grant) 시드."""
     for sql in [
         f"DELETE FROM loop_runs WHERE org_id='{ORG}'",
         f"DELETE FROM project_access WHERE project_id IN ('{PROJ_A}','{PROJ_B}')",
         f"DELETE FROM org_members WHERE org_id='{ORG}'",
+        f"DELETE FROM members WHERE org_id='{ORG}'",
         f"DELETE FROM projects WHERE org_id='{ORG}'",
         f"DELETE FROM users WHERE id='{USER}'",
         f"DELETE FROM organizations WHERE id='{ORG}'",
@@ -95,11 +111,14 @@ async def _seed(s):
         "INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,"
         f"login_fail_count,totp_enabled,totp_fail_count) VALUES ('{USER}','u@c1c.test','x','U',true,true,0,false,0)",
         f"INSERT INTO org_members (id,org_id,user_id,role) VALUES ('{OM}','{ORG}','{USER}','member')",
+        f"INSERT INTO members (id,org_id,type,name,is_active) VALUES ('{AGENT}','{ORG}','agent','Ag',true)",
         f"INSERT INTO projects (id,org_id,name) VALUES ('{PROJ_A}','{ORG}','A')",
         f"INSERT INTO projects (id,org_id,name) VALUES ('{PROJ_B}','{ORG}','B')",
-        # USER는 PROJ_A에만 grant(PROJ_B 접근 없음 — IDOR 테스트축).
+        # USER/AGENT는 PROJ_A에만 grant(PROJ_B 접근 없음 — IDOR 테스트축).
         f"INSERT INTO project_access (id,project_id,org_member_id,permission) "
         f"VALUES (gen_random_uuid(),'{PROJ_A}','{OM}','granted')",
+        f"INSERT INTO project_access (id,project_id,org_member_id,member_id,permission) "
+        f"VALUES (gen_random_uuid(),'{PROJ_A}',NULL,'{AGENT}','granted')",
     ]:
         await s.execute(text(sql))
     await s.commit()
@@ -183,6 +202,38 @@ async def test_create_loop_cross_project_forbidden_via_resolve_member():
                     session=s, auth=_auth(), org_id=ORG,
                 )
             assert ei.value.status_code in (400, 403)
+    finally:
+        await eng.dispose()
+
+
+@pytestmark_db
+@pytest.mark.anyio
+async def test_create_loop_agent_cross_project_forbidden_403():
+    """까심 QA CRITICAL(#1814 S3 QA, root-fix #1815) 재현 시나리오 — agent가 PROJ_A에만 grant된
+    상태에서 body.project_id=PROJ_B로 POST하면 403이어야 한다. 이 방어는 eb1eb21b(develop 머지된
+    resolve_member root-fix)가 이미 제공 — loops.py 자체엔 변경 불요. same-project(PROJ_A) 성공까지
+    양방향 실증해 fix가 정당한 요청을 막지 않음도 확인."""
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+        # cross-project(PROJ_B·agent grant 없음) → 403(취약점 있었다면 여기서 통과했을 것).
+        async with Session() as s:
+            with pytest.raises(HTTPException) as ei:
+                await r.create_loop(
+                    body=LoopCreate(project_id=PROJ_B, title="agent-idor-attempt"),
+                    session=s, auth=_agent_auth(), org_id=ORG,
+                )
+            assert ei.value.status_code == 403
+        # same-project(PROJ_A·agent grant 있음) → 통과 + created_by_member_id=agent id.
+        async with Session() as s:
+            out = await r.create_loop(
+                body=LoopCreate(project_id=PROJ_A, title="agent-legit"),
+                session=s, auth=_agent_auth(), org_id=ORG,
+            )
+            await s.commit()
+            assert out.project_id == PROJ_A
+            assert out.created_by_member_id == AGENT
     finally:
         await eng.dispose()
 
