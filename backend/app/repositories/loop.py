@@ -51,3 +51,28 @@ class LoopArtifactRepository(BaseRepository[LoopArtifact]):
             .order_by(LoopArtifact.variant_group.asc(), LoopArtifact.sort_order.asc())
         )
         return list((await self.session.execute(q)).scalars().all())
+
+    async def list_pending_by_group(self, loop_id: uuid.UUID, variant_group: str) -> list[LoopArtifact]:
+        q = select(LoopArtifact).where(
+            LoopArtifact.org_id == self.org_id,
+            LoopArtifact.loop_id == loop_id,
+            LoopArtifact.variant_group == variant_group,
+            LoopArtifact.decision == "pending",
+        )
+        return list((await self.session.execute(q)).scalars().all())
+
+    async def count_pending(self, loop_id: uuid.UUID) -> int:
+        q = select(LoopArtifact.id).where(
+            LoopArtifact.org_id == self.org_id,
+            LoopArtifact.loop_id == loop_id,
+            LoopArtifact.decision == "pending",
+        )
+        return len((await self.session.execute(q)).scalars().all())
+
+    async def distinct_variant_groups(self, loop_id: uuid.UUID) -> list[str]:
+        q = (
+            select(LoopArtifact.variant_group)
+            .where(LoopArtifact.org_id == self.org_id, LoopArtifact.loop_id == loop_id)
+            .distinct()
+        )
+        return list((await self.session.execute(q)).scalars().all())

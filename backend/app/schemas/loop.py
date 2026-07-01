@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LoopCreate(BaseModel):
@@ -75,3 +75,29 @@ class LoopArtifactResponse(BaseModel):
 class LoopArtifactVariantGroup(BaseModel):
     variant_group: str
     artifacts: list[LoopArtifactResponse]
+
+
+class LoopArtifactRejection(BaseModel):
+    artifact_id: uuid.UUID
+    rejection_reason: str = Field(min_length=1)
+
+
+class VariantGroupDecision(BaseModel):
+    """S5: 슬롯(variant_group) 1개에 대한 결정 — 그 그룹 pending 집합과 chosen+rejections가
+    정확히 일치해야 한다(초과/누락 모두 거부, 서비스 레벨에서 검증)."""
+
+    variant_group: str
+    chosen_artifact_id: uuid.UUID
+    choose_reason: str = Field(min_length=1)
+    rejections: list[LoopArtifactRejection]
+
+
+class LoopDecisionRequest(BaseModel):
+    decisions: list[VariantGroupDecision] = Field(min_length=1)
+
+
+class LoopDecisionResponse(BaseModel):
+    loop: LoopResponse
+    gate_id: uuid.UUID
+    gate_status: str
+    all_groups_decided: bool
