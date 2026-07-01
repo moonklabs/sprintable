@@ -32,9 +32,14 @@ async def attribute_loop_outcome(session: AsyncSession, hypothesis) -> dict[str,
     if hypothesis.status not in _RESOLVED:
         return {"skipped_reason": "not_resolved", "attributed": []}
 
+    # 까심 QA CRITICAL(#1818 S7 QA) — org_id 스코프 없으면 cross-org 데이터 유출: 근본 fix는
+    # create_loop(app/services/loop.py)가 이제 hypothesis_id의 org/project 소속을 생성 시점에
+    # 검증하지만, 여기도 defense-in-depth로 org_id를 명시 필터한다(다른 loop 쿼리들과 일관 —
+    # 미래에 create_loop 가드가 우회/누락되는 경로가 생겨도 이 쿼리 자체가 타org 유출을 차단).
     loops = (await session.execute(
         select(LoopRun).where(
             LoopRun.hypothesis_id == hypothesis.id,
+            LoopRun.org_id == hypothesis.org_id,
             LoopRun.status == "measuring",
         )
     )).scalars().all()

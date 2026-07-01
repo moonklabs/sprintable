@@ -303,3 +303,96 @@ async def test_list_loops_filters_by_status_and_project():
             assert items[0].title == "draft-loop"
     finally:
         await eng.dispose()
+
+
+# ── 까심 QA CRITICAL(#1818 S7 QA) — hypothesis_id 소유검증(cross-org 데이터 유출 근본 차단) ──
+
+async def _seed_hypothesis(s, *, org_id, project_id) -> uuid.UUID:
+    from datetime import datetime, timezone
+    from app.models.hypothesis import Hypothesis
+    hyp = Hypothesis(
+        id=uuid.uuid4(), org_id=org_id, project_id=project_id, owner_member_id=uuid.uuid4(),
+        statement="s", metric_definition={"metric": "m", "source": "manual", "target": 1, "direction": "up"},
+        measure_after=datetime(2026, 1, 1, tzinfo=timezone.utc), status="active",
+    )
+    s.add(hyp)
+    await s.commit()
+    return hyp.id
+
+
+@pytestmark_db
+@pytest.mark.anyio
+async def test_create_loop_cross_org_hypothesis_forbidden_404():
+    """까심 재현 시나리오 — 타 org의 hypothesis_id로 loop 생성 시도. FK만으론 존재 검증뿐이라
+    통과했을 것(fix 前) — org 스코프 조회로 404(같은 org 안에서 못 찾음, 존재 여부 오라클 최소화)."""
+    other_org = uuid.UUID("1c000000-0000-0000-0000-0000000000ee")
+    other_project = uuid.UUID("1c000000-0000-0000-0000-0000000000ef")
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+            for sql in [
+                f"DELETE FROM projects WHERE org_id='{other_org}'",
+                f"DELETE FROM organizations WHERE id='{other_org}'",
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{other_org}','OTH','othorg-1c','free')",
+                f"INSERT INTO projects (id,org_id,name) VALUES ('{other_project}','{other_org}','OTH-P')",
+            ]:
+                await s.execute(text(sql))
+            await s.commit()
+            other_org_hyp_id = await _seed_hypothesis(s, org_id=other_org, project_id=other_project)
+
+        async with Session() as s:
+            with pytest.raises(HTTPException) as ei:
+                await r.create_loop(
+                    body=LoopCreate(
+                        project_id=PROJ_A, title="leak-attempt", hypothesis_id=other_org_hyp_id,
+                    ),
+                    session=s, auth=_auth(), org_id=ORG,
+                )
+            assert ei.value.status_code == 404
+            assert ei.value.detail["code"] == "HYPOTHESIS_NOT_FOUND"
+    finally:
+        await eng.dispose()
+
+
+@pytestmark_db
+@pytest.mark.anyio
+async def test_create_loop_cross_project_same_org_hypothesis_forbidden_403():
+    """같은 org 내에서도 hypothesis가 loop과 다른 project 소속이면 403(S4 asset 패턴과 동일 축)."""
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+            hyp_in_proj_b = await _seed_hypothesis(s, org_id=ORG, project_id=PROJ_B)
+
+        async with Session() as s:
+            with pytest.raises(HTTPException) as ei:
+                await r.create_loop(
+                    body=LoopCreate(
+                        project_id=PROJ_A, title="mismatch-attempt", hypothesis_id=hyp_in_proj_b,
+                    ),
+                    session=s, auth=_auth(), org_id=ORG,
+                )
+            assert ei.value.status_code == 403
+            assert ei.value.detail["code"] == "HYPOTHESIS_PROJECT_MISMATCH"
+    finally:
+        await eng.dispose()
+
+
+@pytestmark_db
+@pytest.mark.anyio
+async def test_create_loop_same_project_hypothesis_succeeds():
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+            hyp_id = await _seed_hypothesis(s, org_id=ORG, project_id=PROJ_A)
+
+        async with Session() as s:
+            out = await r.create_loop(
+                body=LoopCreate(project_id=PROJ_A, title="ok", hypothesis_id=hyp_id),
+                session=s, auth=_auth(), org_id=ORG,
+            )
+            assert out.hypothesis_id == hyp_id
+    finally:
+        await eng.dispose()

@@ -320,6 +320,52 @@ async def test_multiple_measuring_loops_linked_to_same_hypothesis_all_attributed
         await eng.dispose()
 
 
+# ── 까심 QA CRITICAL(#1818) — org_id defense-in-depth(cross-org 유출 근본 2차 방어) ──
+
+OTHER_ORG = uuid.UUID("20000000-0000-0000-0000-0000000000ee")
+OTHER_PROJ = uuid.UUID("20000000-0000-0000-0000-0000000000ef")
+
+
+@pytestmark_db
+@pytest.mark.anyio
+async def test_cross_org_loop_not_attributed_org_scope_defense():
+    """근본 fix는 create_loop(S3)의 hypothesis 소유검증이지만, 여기서는 그 가드를 우회해
+    (레거시 데이터/미래 버그 가정) 타 org의 loop이 이 hypothesis_id를 참조하는 상황을 직접
+    구성해 attribute_loop_outcome 쿼리의 org_id 필터가 독립적으로 유출을 막는지 실증한다."""
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed_org_project(s)
+            await _cleanup(s)
+            for sql in [
+                f"DELETE FROM loop_runs WHERE org_id='{OTHER_ORG}'",
+                f"DELETE FROM projects WHERE org_id='{OTHER_ORG}'",
+                f"DELETE FROM organizations WHERE id='{OTHER_ORG}'",
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{OTHER_ORG}','C2X','c2xorg','free')",
+                f"INSERT INTO projects (id,org_id,name) VALUES ('{OTHER_PROJ}','{OTHER_ORG}','OP')",
+            ]:
+                await s.execute(text(sql))
+            await s.commit()
+
+            hyp = await _seed_hypothesis(s, "verified", outcome_result={"secret": "org-A-revenue"})
+            from app.repositories.loop import LoopRunRepository
+            other_loop = await LoopRunRepository(s, OTHER_ORG).create(
+                project_id=OTHER_PROJ, title="leak-target", goal_tags=[], status="measuring",
+                hypothesis_id=hyp.id, created_by_member_id=uuid.uuid4(),
+            )
+            await s.commit()
+
+            result = await attribute_loop_outcome(s, hyp)
+            await s.commit()
+            assert result == {"skipped_reason": "no_measuring_loop", "attributed": []}
+
+            fetched = await _fetch_loop(s, other_loop.id)
+            assert fetched.status == "measuring"
+            assert fetched.outcome_snapshot is None
+    finally:
+        await eng.dispose()
+
+
 # ── 통합: score_hypotheses 배선 경유 ──────────────────────────────────────────
 
 @pytestmark_db
