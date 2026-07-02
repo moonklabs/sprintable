@@ -9,6 +9,17 @@ stamp한다(블루프린트 "복리 조직기억"의 실제 소비 지점, PO cr
 만들고 결과 id를 반환한다(브리핑 전이마다 brief_doc_id가 결정론적으로 채워짐). Doc 생성 자체가
 실패하는 진짜 이상 상황만 예외로 전파해 호출자(transition_loop)의 최종 try/except가 방어한다.
 
+🔴까심 QA CRITICAL fix(2026-07-02): Python try/except만으론 불충분하다 — search_similar_embeddings
+등이 실 Postgres 에러(UndefinedTable/타임아웃 등)로 실패하면 트랜잭션이 **server-level aborted**
+상태가 되고, Python 예외 자체는 잡히더라도 같은 세션의 후속 쿼리(resolve_unique_slug 등)가
+InFailedSqlTransactionError로 연쇄 실패하며, 결국 호출자의 session.commit()이 예외 없이 조용히
+ROLLBACK되어 **이미 flush된 status='briefing' 전이까지 통째로 유실**된다(in-memory 객체만
+briefing으로 보이는 거짓 성공 — DB엔 draft 그대로). embed/검색 구간을 session.begin_nested()
+(SAVEPOINT)로 격리해, 그 안에서 실 DB 에러가 나도 SAVEPOINT만 롤백되고 바깥 트랜잭션(이미
+flush된 status 전이)은 오염되지 않게 한다. except는 SAVEPOINT 밖에서 잡아 이 시점엔 외부
+트랜잭션이 이미 정상 상태 — Doc 생성(fallback 포함)은 항상 SAVEPOINT 밖(복구된 트랜잭션)에서
+수행한다.
+
 쿼리 벡터는 loop 자신의 title+goal_tags를 embed_client로 동기 임베드(S6와 동형 — briefing 전이는
 infrequent해 latency/비용 허용). 결과에서 자기 자신(entity_type='loop'·entity_id=이 loop)은
 제외(자기유사 100% 노이즈). embedding_text는 title+goal_tags(loop)/statement(hypothesis)만
@@ -37,20 +48,23 @@ async def assemble_context_pack_briefing(
     results = []
     embed_unavailable = False
     try:
-        from app.services.embedding_client import embed_text
-        from app.services.embedding_enqueue import build_loop_embedding_text
+        async with session.begin_nested():  # SAVEPOINT — 실 DB 에러가 나도 외부 트랜잭션(이미 flush된
+            # status 전이)을 오염시키지 않는다. except는 이 async with 밖에서 잡아, 그 시점엔 SAVEPOINT
+            # 롤백이 이미 끝나 외부 트랜잭션이 정상 상태로 복구돼 있다.
+            from app.services.embedding_client import embed_text
+            from app.services.embedding_enqueue import build_loop_embedding_text
 
-        query_text = build_loop_embedding_text(loop.title, loop.goal_tags)
-        vector = embed_text(query_text)
-        if vector is None:
-            embed_unavailable = True
-        else:
-            from app.services.context_pack_search import search_similar_embeddings
+            query_text = build_loop_embedding_text(loop.title, loop.goal_tags)
+            vector = embed_text(query_text)
+            if vector is None:
+                embed_unavailable = True
+            else:
+                from app.services.context_pack_search import search_similar_embeddings
 
-            raw = await search_similar_embeddings(session, org_id, loop.project_id, vector, limit=_SEARCH_LIMIT)
-            results = [r for r in raw if not (r.entity_type == "loop" and r.entity_id == loop.id)]
+                raw = await search_similar_embeddings(session, org_id, loop.project_id, vector, limit=_SEARCH_LIMIT)
+                results = [r for r in raw if not (r.entity_type == "loop" and r.entity_id == loop.id)]
     except Exception as exc:  # embed/검색 실패는 Doc 콘텐츠로 흡수(전이 차단 절대 금지).
-        logger.warning("context-pack 조립: embed/검색 실패(생략 처리): %s", exc)
+        logger.warning("context-pack 조립: embed/검색 실패(SAVEPOINT 롤백, 생략 처리): %s", exc)
         embed_unavailable = True
         results = []
 

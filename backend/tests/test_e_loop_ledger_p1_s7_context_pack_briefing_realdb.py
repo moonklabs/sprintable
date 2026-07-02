@@ -130,11 +130,22 @@ async def test_briefing_transition_assembles_doc_with_similar_history_and_exclud
         await eng.dispose()
 
 
+async def _real_db_error_search(session, org_id, project_id, vector, limit=5):
+    """실 Postgres 레벨 에러 재현(UndefinedTable) — 존재하지 않는 테이블 쿼리로 트랜잭션을
+    server-level aborted 상태로 만든다. 순수 Python 예외(mock RuntimeError)와 달리 이 에러는
+    같은 세션의 후속 쿼리까지 InFailedSqlTransactionError로 연쇄시킨다(까심 QA CRITICAL 재현
+    시나리오와 동일 — SAVEPOINT 부재 시 session.commit()이 조용히 전체 롤백되는 근본 원인)."""
+    await session.execute(text("SELECT * FROM this_table_definitely_does_not_exist_xyz"))
+    return []  # 위에서 반드시 예외 — 도달 안 함.
+
+
 @pytestmark_db
 @pytest.mark.anyio
-async def test_context_pack_failure_never_blocks_status_transition():
-    """⭐crux 핵심 불변식: assemble_context_pack_briefing이 예외를 던져도 이미 적용된 status
-    전이는 롤백되지 않고 살아남는다(brief_doc_id만 미설정으로 남음)."""
+async def test_real_db_error_inside_savepoint_never_blocks_status_transition():
+    """🔴까심 QA CRITICAL 회귀 — 비-tautological: 실 Postgres 에러(UndefinedTable)를 SAVEPOINT
+    안에서 발생시켜, 이미 flush된 status='briefing' 전이가 DB에 실제로 persist되는지(draft로
+    silent rollback 안 되는지) 직접 검증한다. mock RuntimeError는 이 시나리오를 재현 못 한다
+    (Postgres 트랜잭션 상태에 영향이 없어 masking test — QA 지적 그대로 여기 회귀로 고정)."""
     from app.repositories.loop import LoopRunRepository
     from app.services.loop import transition_loop
 
@@ -144,7 +155,7 @@ async def test_context_pack_failure_never_blocks_status_transition():
             await _seed_org_project(s)
             repo = LoopRunRepository(s, ORG)
             loop = await repo.create(
-                project_id=PROJECT, title="장애 시나리오 loop", goal_tags=[],
+                project_id=PROJECT, title="실DB 장애 시나리오 loop", goal_tags=[],
                 status="draft", created_by_member_id=uuid.uuid4(),
             )
             loop_id = loop.id
@@ -152,19 +163,27 @@ async def test_context_pack_failure_never_blocks_status_transition():
 
         async with Session() as s:
             loop_obj = await LoopRunRepository(s, ORG).get(loop_id)
-            with patch(
-                "app.services.loop_briefing.assemble_context_pack_briefing",
-                side_effect=RuntimeError("예기치 못한 조립 실패"),
-            ):
-                out = await transition_loop(s, ORG, loop_obj, "briefing")
-            await s.commit()
+            with patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
+                with patch(
+                    "app.services.context_pack_search.search_similar_embeddings",
+                    new=_real_db_error_search,
+                ):
+                    out = await transition_loop(s, ORG, loop_obj, "briefing")
+            await s.commit()  # ⭐SAVEPOINT 없었다면 이 commit이 조용히 ROLLBACK됐을 지점.
 
-        assert out.status == "briefing"  # 전이는 살아남음.
-        assert out.brief_doc_id is None  # Context Pack만 미조립.
+        assert out.status == "briefing"  # in-memory 응답도 briefing.
+        assert out.brief_doc_id is not None  # fallback Doc(embed_unavailable 취급)이 생성됨.
 
         async with Session() as s:
             from app.models.loop import LoopRun
             persisted = (await s.execute(select(LoopRun).where(LoopRun.id == loop_id))).scalar_one()
-            assert persisted.status == "briefing"  # DB에도 실제로 반영됨(롤백 안 됨).
+            # ⭐핵심 단정: 새 세션으로 재조회해도 실제 DB에 'briefing'이 persist돼 있어야 한다
+            # (SAVEPOINT 부재 버그였다면 여기서 'draft'가 나와 거짓 성공을 잡아낸다).
+            assert persisted.status == "briefing"
+            assert persisted.brief_doc_id == out.brief_doc_id
+
+            from app.models.doc import Doc
+            doc = (await s.execute(select(Doc).where(Doc.id == out.brief_doc_id))).scalar_one()
+            assert "일시 불가" in doc.content  # 검색 실패 → fallback 콘텐츠.
     finally:
         await eng.dispose()
