@@ -51,7 +51,12 @@ class ContextPackResponse(BaseModel):
     """P1-S12: 최상위 응답 — items(similarity-desc)+embed_available(임베딩 불가 상태 구분).
 
     S26: synthesis(L2 학습 종합, str|None) 추가 — items 회수 근거로만 gen-LLM(S25)이 증류.
-    items 0건이거나 gen-LLM 미가용이면 null(퇴화 없음 — items(L1)는 그대로 표시)."""
+    items 0건이거나 gen-LLM 미가용이면 null(퇴화 없음 — items(L1)는 그대로 표시).
+
+    S27: recommendation(L3 능동 추천, str|None) 추가 — synthesis(L2)+새 loop의 goal/hypothesis를
+    gen-LLM으로 처방. synthesis가 null이면(근거 자체가 없음) recommendation도 항상 null(L1/L2
+    무손상 — 과잉 처방 금지)."""
     items: list[ContextPackItem]
     embed_available: bool
     synthesis: str | None = None
+    recommendation: str | None = None
