@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { GitBranch } from 'lucide-react';
+import { GitBranch, Plus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { LoopStatusBadge, type LoopStatus } from '@/components/loops/loop-status-badge';
 import { OutcomeBadge } from '@/components/loops/outcome-badge';
+import { LoopCreateDialog } from '@/components/loops/loop-create-dialog';
 
 interface Loop {
   id: string;
@@ -76,6 +78,7 @@ export function LoopsClient({ projectId }: { projectId: string }) {
   const [loops, setLoops] = useState<Loop[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<LoopStatus | 'all'>('all');
+  const [createOpen, setCreateOpen] = useState(false);
 
   const fetchLoops = useCallback(async () => {
     try {
@@ -107,7 +110,21 @@ export function LoopsClient({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+      <TopBarSlot
+        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        actions={
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="size-3.5" />
+            {t('createLoopCta')}
+          </Button>
+        }
+      />
+      <LoopCreateDialog
+        projectId={projectId}
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={(loop) => router.push(`/loops/${loop.id}`)}
+      />
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div className="flex shrink-0 flex-wrap gap-1 px-4 pt-3 pb-1">
           {STATUS_FILTERS.map((s) => (
