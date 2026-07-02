@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.models.hypothesis import Hypothesis
 from app.services import agent_dispatch as svc
 from app.services import hypothesis as hyp_svc
 
@@ -65,8 +66,12 @@ async def test_story_with_no_primary_hypothesis_returns_none():
 
 
 async def test_story_resolves_via_primary_hypothesis_anchor_then_loop_and_doc():
-    """S11b: story→primary hypothesis anchor→그 hypothesis의 loop→brief doc 경로가 전부 합류."""
-    anchor_hyp = SimpleNamespace(id=uuid.uuid4())
+    """S11b: story→primary hypothesis anchor→그 hypothesis의 loop→brief doc 경로가 전부 합류.
+
+    anchor_hyp은 실제 Hypothesis 인스턴스여야 한다 — 까심 QA RC(2026-07-02) 이후
+    resolve_dispatch_context_pack이 isinstance(anchor_hyp, Hypothesis) 방어를 갖췄으므로,
+    SimpleNamespace를 쓰면 그 방어에 걸려 masking(잘못된 이유로 테스트가 통과/실패)된다."""
+    anchor_hyp = Hypothesis(id=uuid.uuid4())
     doc_id = uuid.uuid4()
     loop = _loop(brief_doc_id=doc_id)
     doc = SimpleNamespace(content="## Context Pack\n\nstory 간접 해소 브리핑.")
@@ -86,7 +91,9 @@ async def test_story_resolves_via_primary_hypothesis_anchor_then_loop_and_doc():
 
 
 async def test_epic_resolves_via_primary_hypothesis_anchor():
-    anchor_hyp = SimpleNamespace(id=uuid.uuid4())
+    """anchor_hyp은 실제 Hypothesis 인스턴스여야 isinstance 방어를 통과해 loop 쿼리까지
+    genuinely 도달한다(SimpleNamespace면 방어에서 조기 반환돼 masking)."""
+    anchor_hyp = Hypothesis(id=uuid.uuid4())
     session = _scalar_one_or_none_session(None)  # anchor는 있지만 연결 loop이 없음.
     with patch.object(
         hyp_svc.HypothesisRepository, "resolve_primary_anchor", AsyncMock(return_value=anchor_hyp),

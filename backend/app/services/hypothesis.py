@@ -574,9 +574,25 @@ async def resolve_dispatch_context_pack(
     if entity_type == "hypothesis":
         hypothesis_id = entity_id
     elif entity_type in ("story", "epic"):
-        repo = HypothesisRepository(session, org_id)
-        anchor_hyp = await repo.resolve_primary_anchor(entity_type, entity_id)
-        if anchor_hyp is None:
+        # 까심 QA RC(2026-07-02): Context Pack은 dispatch(critical path)의 optional 보강이라
+        # 이 해소가 실패/예상외 타입을 내도 dispatch 자체를 절대 깨면 안 된다(resolve_dispatch_anchor
+        # 의 isinstance 방어와 동일 원칙 + 쿼리 자체의 예외까지 try/except로 추가 방어 — anchor
+        # 쪽은 쿼리 예외 방어가 없어 이번에 같은 취약점이 있었음이 드러남).
+        try:
+            repo = HypothesisRepository(session, org_id)
+            anchor_hyp = await repo.resolve_primary_anchor(entity_type, entity_id)
+        except Exception as exc:
+            logger.warning(
+                "resolve_dispatch_context_pack: anchor 해소 실패(생략 처리) %s %s: %s",
+                entity_type, entity_id, exc,
+            )
+            return None
+        if not isinstance(anchor_hyp, Hypothesis):
+            if anchor_hyp is not None:
+                logger.warning(
+                    "resolve_dispatch_context_pack: non-Hypothesis anchor %r for %s %s — 생략",
+                    type(anchor_hyp).__name__, entity_type, entity_id,
+                )
             return None
         hypothesis_id = anchor_hyp.id
     else:
