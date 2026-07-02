@@ -30,6 +30,17 @@ def _hyp(status="active", source="ga4"):
     )
 
 
+def _mock_session():
+    """P1-S3g: session.begin_nested()가 진짜 async context manager처럼 동작해야(SAVEPOINT 구조
+    재현) — plain AsyncMock()은 __aenter__/__aexit__을 자동 지원하지 않는다."""
+    session = AsyncMock()
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=None)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    session.begin_nested = MagicMock(return_value=cm)
+    return session
+
+
 # ── AC①②④: 해소 시 배선 호출·response 노출·manual 미호출 ─────────────────────
 
 @pytest.mark.anyio
@@ -37,7 +48,7 @@ async def test_resolved_calls_wiring_manual_does_not():
     verified_hyp = _hyp("active", "ga4")     # ga4 hit → verified → 배선 호출.
     manual_hyp = _hyp("measuring", "manual")  # manual → pending → 배선 미호출(AC④).
 
-    session = AsyncMock()
+    session = _mock_session()
     res = MagicMock()
     res.scalars.return_value.all.return_value = [verified_hyp, manual_hyp]
     session.execute = AsyncMock(return_value=res)
@@ -63,7 +74,7 @@ async def test_resolved_calls_wiring_manual_does_not():
 @pytest.mark.anyio
 async def test_skipped_wiring_goes_to_verdicts_skipped():
     h = _hyp("active", "ga4")
-    session = AsyncMock()
+    session = _mock_session()
     res = MagicMock()
     res.scalars.return_value.all.return_value = [h]
     session.execute = AsyncMock(return_value=res)

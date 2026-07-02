@@ -60,6 +60,12 @@ def _session(execute_results):
     s = AsyncMock()
     s.execute = AsyncMock(side_effect=execute_results)
     s.commit = AsyncMock()
+    # P1-S3g: session.begin_nested()가 진짜 async context manager처럼 동작해야(SAVEPOINT 구조
+    # 재현) — plain AsyncMock()은 __aenter__/__aexit__을 자동 지원하지 않는다.
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=None)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    s.begin_nested = MagicMock(return_value=cm)
     return s
 
 
