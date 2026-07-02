@@ -11,6 +11,10 @@ model_version/dimension 컬럼을 별도로 둬서 향후 모델 업그레이드
 status 라이프사이클: pending(생성 직후, embedding NULL) → processing(cron이 집음) →
 ready(embedding 채워짐) 또는 failed(error_message 채움, 재시도는 cron이 pending으로 되돌림 —
 P1-S3 스코프). 이 스토리(S1)는 순수 스키마만 — client/cron 없음.
+
+P1-S3f: retry_count가 N(5)에 도달하면 status='failed'인 채로 cron 배치에서 영구 제외되어
+사실상 terminal이 된다(poison-pill row가 정상 row 슬롯을 starvation시키는 것을 방지 —
+app/services/embedding_backlog.py 참고).
 """
 from __future__ import annotations
 
@@ -70,6 +74,10 @@ class Embedding(Base, OrgScopedMixin, TimestampMixin):
 
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # P1-S3f: embed_text() 연속 실패 횟수(cron이 증가) — N회(5) 도달 시 status='failed'가 배치
+    # 재선정에서 영구 제외되는 terminal 신호로 쓰인다(신규 status 값 도입 없이 기존 'failed'
+    # 재활용, PO AC 지시 — additive 컬럼만). 성공 시 0으로 리셋.
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
     created_by_member_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 

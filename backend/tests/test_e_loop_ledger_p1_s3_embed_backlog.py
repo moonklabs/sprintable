@@ -18,10 +18,11 @@ def anyio_backend():
     return "asyncio"
 
 
-def _row(status="pending", embedding_text="loop: 신규 온보딩 개선"):
+def _row(status="pending", embedding_text="loop: 신규 온보딩 개선", retry_count=0):
     return SimpleNamespace(
         id=uuid.uuid4(), status=status, embedding_text=embedding_text,
         embedding=None, model_version=None, dimension=None, error_message=None,
+        retry_count=retry_count,
     )
 
 
@@ -104,7 +105,9 @@ async def test_one_row_exception_does_not_block_batch():
 async def test_empty_backlog_returns_zero_counts():
     session = _session([])
     summary = await backlog.process_embedding_backlog(session)
-    assert summary == {"scanned": 0, "embedded": [], "pending_retry": [], "failed": []}
+    assert summary == {
+        "scanned": 0, "embedded": [], "pending_retry": [], "failed": [], "terminal": [],
+    }
 
 
 async def test_batch_limit_passed_through_to_query():
