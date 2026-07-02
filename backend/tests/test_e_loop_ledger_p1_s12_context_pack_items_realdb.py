@@ -165,3 +165,82 @@ async def test_embed_unavailable_real_db():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
+async def test_pre_decision_loop_excluded_from_results_real_db():
+    """🔴PO 결(2026-07-02, S13 QA→유나 근본설계) 회귀 — chosen 아티팩트 없는 in-flight loop이
+    실 pgvector 검색 결과에서 실제로 빠지는지(decision.chosen=null 노출이 아니라 항목 자체 제외)
+    비-tautological로 검증. 대조군(chosen 있는 loop)은 정상 포함됨을 같은 배치에서 확인."""
+    from sqlalchemy import text as _text
+    from app.core.database import Base
+    from app.models.embedding import Embedding
+    from app.models.loop import LoopArtifact, LoopRun
+    from app.repositories.loop import LoopRunRepository
+    from app.services.context_pack_items import build_loop_context_pack
+
+    engine, Session = await _session()
+    query_vec = _unit(0)
+
+    in_flight_loop_id, decided_loop_id, bare_loop_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    asset_id = uuid.uuid4()
+
+    try:
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            repo = LoopRunRepository(s, ORG)
+            target_loop = await repo.create(
+                project_id=PROJECT, title="타깃 loop", goal_tags=[],
+                status="draft", created_by_member_id=uuid.uuid4(),
+            )
+            s.add_all([
+                LoopRun(id=in_flight_loop_id, org_id=ORG, project_id=PROJECT, title="in-flight loop",
+                        created_by_member_id=uuid.uuid4(), status="deciding"),
+                LoopRun(id=decided_loop_id, org_id=ORG, project_id=PROJECT, title="decided loop",
+                        created_by_member_id=uuid.uuid4(), status="closed"),
+                LoopRun(id=bare_loop_id, org_id=ORG, project_id=PROJECT, title="artifact 없는 loop",
+                        created_by_member_id=uuid.uuid4(), status="deciding"),
+            ])
+            await s.flush()
+            s.add_all([
+                # in_flight_loop: rejected만 있고 chosen 없음 — 제외돼야.
+                LoopArtifact(id=uuid.uuid4(), org_id=ORG, loop_id=in_flight_loop_id, asset_id=asset_id,
+                             variant_group="g1", variant_label="후보1", decision="rejected",
+                             created_by_member_id=uuid.uuid4()),
+                # decided_loop: chosen 있음 — 포함돼야(대조군).
+                LoopArtifact(id=uuid.uuid4(), org_id=ORG, loop_id=decided_loop_id, asset_id=asset_id,
+                             variant_group="g1", variant_label="채택안", decision="chosen",
+                             choose_reason="가설정렬", created_by_member_id=uuid.uuid4()),
+                # bare_loop: artifact 자체가 없음 — 제외돼야.
+                Embedding(id=uuid.uuid4(), org_id=ORG, project_id=PROJECT,
+                          entity_type="loop", entity_id=in_flight_loop_id,
+                          embedding_text="in-flight loop", content_hash="h1",
+                          embedding=_near(0), model_version="m", dimension=768, status="ready"),
+                Embedding(id=uuid.uuid4(), org_id=ORG, project_id=PROJECT,
+                          entity_type="loop", entity_id=decided_loop_id,
+                          embedding_text="decided loop", content_hash="h2",
+                          embedding=_near(1), model_version="m", dimension=768, status="ready"),
+                Embedding(id=uuid.uuid4(), org_id=ORG, project_id=PROJECT,
+                          entity_type="loop", entity_id=bare_loop_id,
+                          embedding_text="bare loop", content_hash="h3",
+                          embedding=_near(2), model_version="m", dimension=768, status="ready"),
+            ])
+            await s.commit()
+
+        async with Session() as s:
+            loop_obj = await LoopRunRepository(s, ORG).get(target_loop.id)
+            with patch("app.services.embedding_client.embed_text", return_value=query_vec):
+                out = await build_loop_context_pack(s, ORG, loop_obj)
+
+        result_ids = {i.entity_id for i in out.items}
+        assert in_flight_loop_id not in result_ids  # rejected만 → 제외.
+        assert bare_loop_id not in result_ids        # artifact 없음 → 제외.
+        assert decided_loop_id in result_ids          # chosen 있음 → 포함.
+        decided_item = next(i for i in out.items if i.entity_id == decided_loop_id)
+        assert decided_item.decision.chosen is not None
+        assert decided_item.decision.chosen.label == "채택안"
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()

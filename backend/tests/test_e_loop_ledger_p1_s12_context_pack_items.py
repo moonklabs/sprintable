@@ -98,7 +98,9 @@ async def test_hypothesis_item_maps_goal_and_outcome_no_decision():
     assert item.href is None
 
 
-async def test_hypothesis_not_resolved_status_has_null_outcome():
+async def test_unresolved_hypothesis_excluded_entirely_no_learnable_signal():
+    """PO 결(2026-07-02): 미해소 hypothesis는 배울 신호가 없어 항목 자체가 제외된다(null-outcome
+    으로 남는 게 아니라 items에서 통째로 드롭)."""
     loop = _loop_obj()
     hyp = _hyp(status="measuring")
     result = _search_result("hypothesis", hyp.id)
@@ -113,7 +115,7 @@ async def test_hypothesis_not_resolved_status_has_null_outcome():
             new=AsyncMock(return_value=[result]),
         ):
             out = await svc.build_loop_context_pack(session, loop.org_id, loop)
-    assert out.items[0].outcome is None
+    assert out.items == []
 
 
 async def test_loop_item_gets_decision_and_indirect_outcome():
@@ -194,3 +196,87 @@ async def test_input_order_from_search_preserved_similarity_desc():
             out = await svc.build_loop_context_pack(session, loop.org_id, loop)
 
     assert [i.similarity for i in out.items] == [0.95, 0.42]
+
+
+async def test_pre_decision_loop_excluded_no_chosen_artifact():
+    """PO 결(2026-07-02, S13 QA→유나 근본설계): chosen 아티팩트가 없는 in-flight loop은 배울 신호가
+    없어 결과에서 통째로 제외된다(decision.chosen=null인 채로 노출되지 않음 — S13 크래시 근본 차단)."""
+    loop = _loop_obj()
+    in_flight_loop = _looprun(title="아직 결정 안 된 loop")
+    result = _search_result("loop", in_flight_loop.id)
+    only_rejected = _artifact(in_flight_loop.id, decision="rejected", variant_label="후보1")
+
+    session = AsyncMock()
+    loop_res = MagicMock(); loop_res.scalars.return_value.all.return_value = [in_flight_loop]
+    artifact_res = MagicMock(); artifact_res.scalars.return_value.all.return_value = [only_rejected]
+    session.execute = AsyncMock(side_effect=[loop_res, artifact_res])
+
+    with patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
+        with patch(
+            "app.services.context_pack_search.search_similar_embeddings",
+            new=AsyncMock(return_value=[result]),
+        ):
+            out = await svc.build_loop_context_pack(session, loop.org_id, loop)
+    assert out.items == []
+
+
+async def test_loop_with_no_artifacts_at_all_excluded():
+    """artifact가 하나도 없는(결정 자체가 아직 없는) loop도 동일하게 제외."""
+    loop = _loop_obj()
+    bare_loop = _looprun(title="아티팩트 없는 loop")
+    result = _search_result("loop", bare_loop.id)
+
+    session = AsyncMock()
+    loop_res = MagicMock(); loop_res.scalars.return_value.all.return_value = [bare_loop]
+    artifact_res = MagicMock(); artifact_res.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(side_effect=[loop_res, artifact_res])
+
+    with patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
+        with patch(
+            "app.services.context_pack_search.search_similar_embeddings",
+            new=AsyncMock(return_value=[result]),
+        ):
+            out = await svc.build_loop_context_pack(session, loop.org_id, loop)
+    assert out.items == []
+
+
+async def test_pending_decision_artifact_excluded():
+    """PO 결: decision='pending'인 loop_artifact도 배울 신호 없음 — 동일 원칙으로 제외."""
+    loop = _loop_obj()
+    pending_artifact = _artifact(uuid.uuid4(), decision="pending", variant_label="미결정")
+    result = _search_result("loop_artifact", pending_artifact.id)
+
+    session = AsyncMock()
+    artifact_res = MagicMock(); artifact_res.scalars.return_value.all.return_value = [pending_artifact]
+    session.execute = AsyncMock(return_value=artifact_res)
+
+    with patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
+        with patch(
+            "app.services.context_pack_search.search_similar_embeddings",
+            new=AsyncMock(return_value=[result]),
+        ):
+            out = await svc.build_loop_context_pack(session, loop.org_id, loop)
+    assert out.items == []
+
+
+async def test_decided_loop_included_with_non_null_chosen():
+    """대조군: chosen 아티팩트가 있는 loop은 정상 포함되고 decision.chosen이 실제로 non-null."""
+    loop = _loop_obj()
+    decided_loop = _looprun(title="결정된 loop")
+    result = _search_result("loop", decided_loop.id)
+    chosen = _artifact(decided_loop.id, decision="chosen", variant_label="채택안", choose_reason="가설정렬")
+
+    session = AsyncMock()
+    loop_res = MagicMock(); loop_res.scalars.return_value.all.return_value = [decided_loop]
+    artifact_res = MagicMock(); artifact_res.scalars.return_value.all.return_value = [chosen]
+    session.execute = AsyncMock(side_effect=[loop_res, artifact_res])
+
+    with patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
+        with patch(
+            "app.services.context_pack_search.search_similar_embeddings",
+            new=AsyncMock(return_value=[result]),
+        ):
+            out = await svc.build_loop_context_pack(session, loop.org_id, loop)
+    assert len(out.items) == 1
+    assert out.items[0].decision.chosen is not None
+    assert out.items[0].decision.chosen.label == "채택안"
