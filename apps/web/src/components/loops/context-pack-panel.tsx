@@ -194,7 +194,7 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
                       <p className="font-semibold">{t('contextPackSynthesisTitle')}</p>
                       <AiAttributionRow confidence={data.synthesis_confidence} evidenceCount={data.evidence_count} />
                     </div>
-                    <p className="text-info/90">{data.synthesis}</p>
+                    <p className="whitespace-pre-line text-info/90">{data.synthesis}</p>
                   </div>
                 </div>
                 <AiTransparencyLine className="border-info-border/60" />
@@ -209,7 +209,7 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
                       <p className="font-medium text-foreground/80">{t('contextPackRecommendationTitle')}</p>
                       <AiAttributionRow confidence={data.recommendation_confidence} evidenceCount={data.evidence_count} />
                     </div>
-                    <p>{data.recommendation}</p>
+                    <p className="whitespace-pre-line">{data.recommendation}</p>
                   </div>
                 </div>
                 <AiTransparencyLine />
