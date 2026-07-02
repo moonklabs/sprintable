@@ -57,6 +57,45 @@ _BUILTIN_RECIPES: list[dict[str, Any]] = [
         ],
         "builtin": True,
     },
+    # E-LOOP-LEDGER S17(블루프린트 §5): 복리 조직기억 loop — 목표·가설부터 실행·성과 학습까지
+    # 폐루프. 비개발 조직의 반복 실험(카피 테스트·캠페인 variant 등)에 적합. 6단계는 블루프린트
+    # §5가 명시한 DAG 그대로(Goal&Hypothesis→Brief→Generate Variants→Human Pick→Execute→
+    # Track&Learn) — loop_runs/loop_artifacts/gate(loop_decision) 실제 엔티티·게이트명과 정합.
+    {
+        "id": "loop-agency",
+        "slug": "loop-agency",
+        "name": "루프 에이전시",
+        "description": "목표·가설 설정 → 브리프 → 실행안 생성 → 인간 선택 → 실행 → 성과 학습까지 이어지는 "
+                        "복리 조직기억 워크플로우. 반복되는 실험(카피·캠페인 variant 등)에 적합.",
+        "steps": [
+            {
+                "role": "Human", "label": "목표·가설 정의", "pattern": "goal_hypothesis",
+                "action": "loop의 목표(goal)와 성과 가설(hypothesis)·측정 지표(metric)를 정의",
+            },
+            {
+                "role": "PO", "label": "브리프 작성", "pattern": "brief_doc_approval",
+                "action": "실행 계획을 브리프 문서로 작성하고 doc_approval 게이트를 통과",
+            },
+            {
+                "role": "Agent", "label": "실행안 생성", "pattern": "generate_variants",
+                "action": "brief를 바탕으로 복수의 실행안(variant)을 생성해 loop_artifacts로 등록",
+            },
+            {
+                "role": "Human", "label": "인간 선택", "pattern": "loop_decision",
+                "action": "실행안 중 하나를 선택(choose)하고 이유를 기록·나머지는 반려(reject) 이유를 기록",
+            },
+            {
+                "role": "Any", "label": "실행", "pattern": "execute",
+                "action": "선택된 실행안을 외부(캠페인 발행·배포 등)에서 실행",
+            },
+            {
+                "role": "Any", "label": "추적 및 학습", "pattern": "track_and_learn",
+                "action": "성과(GA4 등)를 측정해 outcome_snapshot으로 귀속하고, 다음 loop의 Context "
+                          "Pack에 이 loop의 선택·이유·성과가 학습 근거로 반영되게 한다",
+            },
+        ],
+        "builtin": True,
+    },
 ]
 
 _BUILTIN_BY_ID = {r["id"]: r for r in _BUILTIN_RECIPES}
