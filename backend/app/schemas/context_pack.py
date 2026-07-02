@@ -41,7 +41,10 @@ class ContextPackItem(BaseModel):
     goal: str
     decision: ContextPackDecision | None = None
     outcome: ContextPackOutcome | None = None
-    href: str
+    # hypothesis는 nullable — 미르코 FE 라우트 실측(2026-07-02): apps/web에 독립 hypothesis 상세
+    # 페이지 없음(HypothesesSection은 /epics/[id] 임베드뿐 + epic_ids 다대다라 /epics 치환도 모호).
+    # broken link 주느니 null(FE가 링크 생략 처리) — 진짜 딥링크는 별도 follow-up.
+    href: str | None
 
 
 class ContextPackResponse(BaseModel):

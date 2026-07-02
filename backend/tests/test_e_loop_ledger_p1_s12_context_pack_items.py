@@ -94,7 +94,8 @@ async def test_hypothesis_item_maps_goal_and_outcome_no_decision():
     assert item.outcome is not None
     assert item.outcome.hypothesis_status == "verified"
     assert item.outcome.actual == 18.4
-    assert item.href == f"/hypotheses/{hyp.id}"
+    # 미르코 FE 라우트 실측: 독립 hypothesis 상세 페이지 없음 → href는 null(broken link 방지).
+    assert item.href is None
 
 
 async def test_hypothesis_not_resolved_status_has_null_outcome():

@@ -12,6 +12,10 @@ hypothesis_status 기반(loop은 자신의 hypothesis_id를 통해 간접 해소
 
 entity_type 매핑: 내부 embeddings.entity_type의 'loop_artifact'는 응답에서 'decision'으로
 노출(S13 UI가 붙이는 명명 — "타입칩(loop/hypothesis/decision)").
+
+href(미르코 FE 라우트 실측 반영, 2026-07-02): loop→/loops/{id}·decision→부모 loop(독립 상세
+페이지 없음)·hypothesis→null(apps/web에 독립 hypothesis 상세 페이지가 없어 broken link를
+주느니 정직하게 null로 반환 — FE가 링크 생략 처리, 진짜 딥링크는 별도 follow-up 스토리).
 """
 from __future__ import annotations
 
@@ -119,7 +123,9 @@ async def _build_items(session: AsyncSession, org_id: uuid.UUID, results: list) 
             if hyp is None:
                 continue  # orphan(이미 search_similar_embeddings가 걸러야 정상이나 방어적 스킵).
             goal = hyp.statement
-            href = f"/hypotheses/{r.entity_id}"
+            # 미르코 FE 라우트 실측(2026-07-02): apps/web에 독립 hypothesis 상세 페이지 없음
+            # (/epics/[id] 임베드뿐+epic_ids 다대다라 치환도 모호) — null(FE가 링크 생략 처리).
+            href = None
             decision = None
             outcome = _build_outcome(hyp)
         elif r.entity_type == "loop":

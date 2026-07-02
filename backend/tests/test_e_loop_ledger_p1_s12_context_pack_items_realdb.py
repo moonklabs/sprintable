@@ -120,7 +120,8 @@ async def test_full_round_trip_maps_hypothesis_and_loop_with_decision_real_db():
         assert out.items[0].outcome.hypothesis_status == "verified"
         assert out.items[0].outcome.actual == 18.4
         assert out.items[0].decision is None
-        assert out.items[0].href == f"/hypotheses/{past_hyp_id}"
+        # 미르코 FE 라우트 실측: 독립 hypothesis 상세 페이지 없음 → href는 null(broken link 방지).
+        assert out.items[0].href is None
 
         loop_item = out.items[1]
         assert loop_item.entity_type == "loop"
