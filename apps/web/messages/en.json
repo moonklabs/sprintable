@@ -134,7 +134,10 @@
     "capacityToastTitle": "Storage {pct}% full",
     "capacityToastDesc": "Uploads may be restricted soon.",
     "capacityToastDescBlock": "Uploads are paused. Please free up space.",
-    "capacityDismiss": "Hide for this session"
+    "capacityDismiss": "Hide for this session",
+    "previewExpand": "Show more",
+    "previewCollapse": "Show less",
+    "previewTruncatedNote": "Content truncated"
   },
   "commandPalette": {
     "title": "Command palette",

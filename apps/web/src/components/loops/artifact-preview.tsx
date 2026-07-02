@@ -4,41 +4,27 @@ import { useEffect, useState } from 'react';
 import { ImageOff, Loader2, Lock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
-type State = 'loading' | 'ok' | 'no-access' | 'phantom';
+type ImageState = 'loading' | 'ok' | 'no-access' | 'phantom';
 
-interface AssetMeta {
-  id: string;
-  name: string;
-  content_type: string;
-}
+/** 짧은 copy(CTA/헤드라인)는 전문, 이보다 길면 line-clamp+더보기(handoff §2). */
+const SHORT_COPY_THRESHOLD = 60;
 
 /**
- * Loop variant 후보 asset 프리뷰. StorageThumbnail(components/storage)과 달리 source_links 기반
- * sign-plan을 거치지 않는다 — 방금 생성된 loop artifact asset은 story/doc/conversation/manual
- * 어디에도 안 걸려있는 게 정상이라(handoff §4-2 갭) selectSignPlan이 항상 phantom을 반환한다.
- * 대신 asset_id 직접 sign을 시도한다 — BE attachments/authorize가 project-scope로 권위 판정하고
- * source_links는 표시용 메타일 뿐 sign 게이트가 아니기 때문에 안전하다.
- * 이미지 아닌 content_type(텍스트 카피 등)은 이름 라벨 폴백 — 본문 텍스트 프리뷰는 §4-2 미확정.
+ * image/* 프리뷰 — StorageThumbnail(components/storage)과 달리 source_links 기반 sign-plan을
+ * 거치지 않는다(방금 생성된 loop artifact asset은 source_links가 비어있는 게 정상, S6 §4-2).
+ * asset_id 직접 sign — BE attachments/authorize가 project-scope로 권위 판정하므로 안전.
  */
-export function ArtifactPreview({ assetId, fallbackLabel }: { assetId: string; fallbackLabel: string }) {
+function ImagePreview({ assetId, fallbackLabel }: { assetId: string; fallbackLabel: string }) {
   const t = useTranslations('storage');
-  const [state, setState] = useState<State>('loading');
+  const [state, setState] = useState<ImageState>('loading');
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
-  const [meta, setMeta] = useState<AssetMeta | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const assetRes = await fetch(`/api/assets/${assetId}`);
-        if (cancelled) return;
-        if (!assetRes.ok) { setState('no-access'); return; }
-        const { data } = (await assetRes.json()) as { data: AssetMeta };
-        if (cancelled) return;
-        setMeta(data);
-        if (!data.content_type.startsWith('image/')) { setState('phantom'); return; }
-
         const signRes = await fetch(`/api/attachments/sign?asset_id=${assetId}`);
         if (cancelled) return;
         if (signRes.status === 403) { setState('no-access'); return; }
@@ -78,7 +64,7 @@ export function ArtifactPreview({ assetId, fallbackLabel }: { assetId: string; f
       // eslint-disable-next-line @next/next/no-img-element
       <img
         src={signedUrl}
-        alt={meta?.name ?? fallbackLabel}
+        alt={fallbackLabel}
         onError={() => setState('phantom')}
         className="absolute inset-0 h-full w-full object-cover"
       />
@@ -87,7 +73,133 @@ export function ArtifactPreview({ assetId, fallbackLabel }: { assetId: string; f
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-muted px-3 text-center text-muted-foreground">
       <ImageOff className="size-5" aria-hidden />
-      <span className="line-clamp-2 text-[10px] font-medium">{meta?.name ?? fallbackLabel}</span>
+      <span className="line-clamp-2 text-[10px] font-medium">{fallbackLabel}</span>
     </div>
   );
+}
+
+/** text/* 프리뷰 — text_content가 LoopArtifactResponse에 이미 실려오므로 fetch 없이 동기 렌더. */
+function TextPreview({ textContent, textTruncated }: { textContent: string; textTruncated: boolean }) {
+  const t = useTranslations('storage');
+  const [expanded, setExpanded] = useState(false);
+  const isLong = textContent.length > SHORT_COPY_THRESHOLD;
+
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 overflow-y-auto bg-muted/30 px-3 py-2 text-center">
+      <p
+        className={cn(
+          'text-[13px] font-semibold leading-snug text-foreground',
+          isLong && !expanded && 'line-clamp-3 text-[11.5px] font-normal',
+        )}
+      >
+        {textContent}
+      </p>
+      {isLong ? (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
+          className="text-[10px] font-semibold text-primary hover:underline"
+        >
+          {expanded ? t('previewCollapse') : t('previewExpand')}
+        </button>
+      ) : null}
+      {textTruncated ? <span className="text-[9px] text-muted-foreground">{t('previewTruncatedNote')}</span> : null}
+    </div>
+  );
+}
+
+function TypeChipFallback({ contentType, fallbackLabel }: { contentType: string; fallbackLabel: string }) {
+  const subtype = contentType.split('/')[1] ?? contentType;
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-muted px-3 text-center text-muted-foreground">
+      <span className="line-clamp-2 text-[10px] font-medium">{fallbackLabel}</span>
+      <span className="rounded-full border border-border bg-background px-1.5 py-0.5 text-[9px] font-semibold uppercase text-muted-foreground">
+        {subtype}
+      </span>
+    </div>
+  );
+}
+
+function renderByContentType(
+  contentType: string,
+  assetId: string,
+  fallbackLabel: string,
+  textContent: string | null,
+  textTruncated: boolean,
+) {
+  if (contentType.startsWith('image/')) {
+    return <ImagePreview assetId={assetId} fallbackLabel={fallbackLabel} />;
+  }
+  if (contentType.startsWith('text/') && textContent) {
+    return <TextPreview textContent={textContent} textTruncated={textTruncated} />;
+  }
+  // 기타 type(video 등) 또는 text/*인데 text_content 없음(null-safe 폴백) — label+chip.
+  return <TypeChipFallback contentType={contentType} fallbackLabel={fallbackLabel} />;
+}
+
+/**
+ * BE가 아직 content_type을 LoopArtifactResponse에 안 실어주는 과도기(S24 병행 배포 중) 대응 —
+ * S6 시절처럼 /api/assets/{id}를 별도로 조회해 content_type만 얻는다(text_content는 이 경로로
+ * 안 옴 — old asset 응답엔 없음 — 그래서 text/*로 판정돼도 TypeChipFallback으로 떨어져 S24
+ * 이전과 동일한 라벨-only 동작을 유지한다. image/*만 실 프리뷰, 나머지는 무조건 안전).
+ */
+function LegacyContentTypeFallback({ assetId, fallbackLabel }: { assetId: string; fallbackLabel: string }) {
+  const [resolvedType, setResolvedType] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/assets/${assetId}`);
+        if (cancelled) return;
+        if (!res.ok) { setFailed(true); return; }
+        const { data } = (await res.json()) as { data?: { content_type?: string } };
+        if (cancelled) return;
+        if (!data?.content_type) { setFailed(true); return; }
+        setResolvedType(data.content_type);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [assetId]);
+
+  if (failed) return <TypeChipFallback contentType="application/octet-stream" fallbackLabel={fallbackLabel} />;
+  if (!resolvedType) {
+    return (
+      <div className="absolute inset-0">
+        <Skeleton className="absolute inset-0 rounded-none" />
+      </div>
+    );
+  }
+  return <>{renderByContentType(resolvedType, assetId, fallbackLabel, null, false)}</>;
+}
+
+/**
+ * E-LOOP-LEDGER S24 — variant 카드 미리보기, content_type 분기(handoff §2/render doc).
+ * image/* → 기존 서명URL sign+fetch 경로(회귀0). text/* → text_content 인라인(엑박 근절,
+ * S6 §4-2 갭 해소) — LoopArtifactResponse에 이미 실려오므로 별도 fetch 없음(N+1 개선 부수효과).
+ * 기타 → label+content_type chip 폴백(video 등, graceful, 엑박 근절).
+ *
+ * ⚠️ contentType이 빈 값(디디 BE가 S24 필드를 아직 안 실어주는 과도기)이면 LegacyContentTypeFallback
+ * 으로 떨어져 S24 이전과 동일하게 동작한다 — 크로스-PR 배포 순서 무관 회귀0(까심 재현 대비).
+ */
+export function ArtifactPreview({
+  assetId,
+  fallbackLabel,
+  contentType,
+  textContent,
+  textTruncated,
+}: {
+  assetId: string;
+  fallbackLabel: string;
+  contentType: string | null | undefined;
+  textContent: string | null;
+  textTruncated: boolean;
+}) {
+  if (!contentType) {
+    return <LegacyContentTypeFallback assetId={assetId} fallbackLabel={fallbackLabel} />;
+  }
+  return <>{renderByContentType(contentType, assetId, fallbackLabel, textContent, textTruncated)}</>;
 }
