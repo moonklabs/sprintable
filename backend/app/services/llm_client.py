@@ -61,14 +61,25 @@ def generate_text(prompt: str, *, max_output_tokens: int = DEFAULT_MAX_OUTPUT_TO
         response = client.models.generate_content(
             model=MODEL_VERSION,
             contents=prompt,
-            config=types.GenerateContentConfig(max_output_tokens=max_output_tokens),
+            config=types.GenerateContentConfig(
+                max_output_tokens=max_output_tokens,
+                # PO 실측(dev 로그, 2026-07-02): gemini-2.5-flash는 thinking 모델이라
+                # thinking_config 미지정 시 AUTOMATIC thinking budget이 max_output_tokens를
+                # 통째로 잠식해 200 OK+빈 text(finish_reason=MAX_TOKENS)로 끝나는 사례 실측.
+                # 이 용도(1~3문장 요약/처방)엔 deep reasoning 불요 — thinking_budget=0으로
+                # 명시 disable(SDK 문서: "0 is DISABLED"). 모델이 0을 거부하면(일부 모델은
+                # 완전 disable 불가) 아래 except가 흡수해 기존 graceful None으로 동일 안전.
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
         )
         latency_ms = round((time.monotonic() - start) * 1000, 2)
         _log_generation_instrumentation(latency_ms, response)
 
         text = response.text
         if not text or not text.strip():
-            logger.warning("llm_client: 빈 응답 → None 처리")
+            logger.warning(
+                "llm_client: 빈 응답 → None 처리 (finish_reason=%s)", _finish_reason(response)
+            )
             return None
         return text
     except Exception as exc:  # errors.ClientError(4xx: auth/quota/403)·ServerError(5xx)·기타 SDK 오류 포괄
@@ -76,8 +87,25 @@ def generate_text(prompt: str, *, max_output_tokens: int = DEFAULT_MAX_OUTPUT_TO
         return None
 
 
+def _finish_reason(response) -> str | None:
+    """candidates[0].finish_reason — MAX_TOKENS(thinking 잠식 등)/SAFETY/RECITATION 등 빈
+    응답의 근본 원인 진단용(PO 실측 요청, 2026-07-02). 실패해도 None(진단 보조일 뿐)."""
+    try:
+        candidates = getattr(response, "candidates", None)
+        if not candidates:
+            return None
+        reason = getattr(candidates[0], "finish_reason", None)
+        return reason.value if reason is not None and hasattr(reason, "value") else (
+            str(reason) if reason is not None else None
+        )
+    except Exception:
+        return None
+
+
 def _log_generation_instrumentation(latency_ms: float, response) -> None:
     """S25 AC③ 토큰 cap+구조화 로깅 — 크레딧 내 비용 추적(P1-S8 A2 계측 관용구 재사용).
+    2026-07-02 PO 실측 후 finish_reason/thoughts_token_count 추가(빈 응답 근본원인 진단 —
+    MAX_TOKENS면 thinking 잠식, SAFETY면 콘텐츠 차단 구분).
 
     non-fatal: 계측 실패가 이미 확보된 생성 응답을 막으면 안 된다(응답엔 무영향)."""
     try:
@@ -89,7 +117,9 @@ def _log_generation_instrumentation(latency_ms: float, response) -> None:
                 "latency_ms": latency_ms,
                 "prompt_token_count": getattr(usage, "prompt_token_count", None) if usage else None,
                 "candidates_token_count": getattr(usage, "candidates_token_count", None) if usage else None,
+                "thoughts_token_count": getattr(usage, "thoughts_token_count", None) if usage else None,
                 "total_token_count": getattr(usage, "total_token_count", None) if usage else None,
+                "finish_reason": _finish_reason(response),
             }},
         )
     except Exception as exc:
