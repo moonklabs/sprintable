@@ -48,14 +48,15 @@ interface ContextPackResponse {
    */
   recommendation?: string | null;
   /**
-   * E-LOOP-LEDGER S28 — voice/attribution 계약(#1854, 핸드오프 §5). synthesis/recommendation은
-   * 별도 gen-LLM 호출이라 confidence/evidence_count도 각각 독립(오르테가 확인, 2026-07-02) — 공유
-   * 단일 필드 아님. optional·null-safe: BE 미착지/신호 부족 시 attribution 칩만 뜨고 배지는 생략.
+   * E-LOOP-LEDGER S28 — voice/attribution 계약(실 BE #1854, `schemas/context_pack.py` 확인).
+   * *_confidence(LLM 산출·gen-LLM 호출별 독립)는 synthesis/recommendation 각각 분리 필드가 맞지만,
+   * evidence_count는 LLM 산출물이 아니라 **items 수로 결정론적 산출되는 단일 공유 필드**(까심 RC —
+   * FE가 초기에 synthesis_evidence_count/recommendation_evidence_count로 분리 가정했던 것을 실 BE
+   * shape로 수정, 크로스모델 계약 불일치 교정). optional·null-safe: BE 미착지 시 칩만 뜨고 배지 생략.
    */
   synthesis_confidence?: AiConfidence | null;
-  synthesis_evidence_count?: number | null;
   recommendation_confidence?: AiConfidence | null;
-  recommendation_evidence_count?: number | null;
+  evidence_count?: number | null;
 }
 
 function ContextPackCard({ item }: { item: ContextPackItem }) {
@@ -191,7 +192,7 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex flex-wrap items-center justify-between gap-1.5">
                       <p className="font-semibold">{t('contextPackSynthesisTitle')}</p>
-                      <AiAttributionRow confidence={data.synthesis_confidence} evidenceCount={data.synthesis_evidence_count} />
+                      <AiAttributionRow confidence={data.synthesis_confidence} evidenceCount={data.evidence_count} />
                     </div>
                     <p className="text-info/90">{data.synthesis}</p>
                   </div>
@@ -206,7 +207,7 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex flex-wrap items-center justify-between gap-1.5">
                       <p className="font-medium text-foreground/80">{t('contextPackRecommendationTitle')}</p>
-                      <AiAttributionRow confidence={data.recommendation_confidence} evidenceCount={data.recommendation_evidence_count} />
+                      <AiAttributionRow confidence={data.recommendation_confidence} evidenceCount={data.evidence_count} />
                     </div>
                     <p>{data.recommendation}</p>
                   </div>
