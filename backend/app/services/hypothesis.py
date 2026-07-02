@@ -420,9 +420,12 @@ def _draft_statement(context: dict | None) -> tuple[str, bool]:
     prompt = _build_draft_prompt(context)
     if prompt is not None:
         try:
-            from app.services.llm_client import generate_text
+            # S28: Gemini(generate_text)→Claude(generate_text_claude, reasoning="disabled")로
+            # 전환(synthesis/recommendation과 동일 모델 배선). 단문 statement 생성이라 순환성
+            # 문제 자체가 없어 프롬프트 재설계는 대상 밖(PO 확인, 2026-07-02).
+            from app.services.llm_client import generate_text_claude
 
-            generated = generate_text(prompt)
+            generated = generate_text_claude(prompt, reasoning="disabled")
             if generated and generated.strip():
                 return generated.strip(), True
         except Exception as exc:
