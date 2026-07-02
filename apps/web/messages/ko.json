@@ -2641,7 +2641,8 @@
     "contextPackViewHypothesis": "이 가설 보기",
     "entityTypeLoop": "loop",
     "entityTypeHypothesis": "hypothesis",
-    "entityTypeDecision": "decision"
+    "entityTypeDecision": "decision",
+    "contextPackDecisionPending": "아직 결정 전입니다"
   },
   "sprints": {
     "title": "스프린트",

@@ -2641,7 +2641,8 @@
     "contextPackViewHypothesis": "View this hypothesis",
     "entityTypeLoop": "loop",
     "entityTypeHypothesis": "hypothesis",
-    "entityTypeDecision": "decision"
+    "entityTypeDecision": "decision",
+    "contextPackDecisionPending": "Not yet decided"
   },
   "sprints": {
     "title": "Sprints",

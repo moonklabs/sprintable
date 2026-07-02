@@ -10,7 +10,9 @@ import { OutcomeBadge } from '@/components/loops/outcome-badge';
 
 /** E-LOOP-LEDGER S13 — GET /loops/{id}/context-pack 응답 shape(handoff §3, PO-locked). */
 interface ContextPackDecision {
-  chosen: { label: string; reason: string };
+  /** S12 Pydantic 실스키마 확인(까심 QA): loop에 chosen 아티팩트가 아직 없으면(결정 진행 중)
+   * decision 객체는 non-null이지만 chosen만 null일 수 있다 — rejected만 있거나 둘 다 빈 경우도 유효. */
+  chosen: { label: string; reason: string } | null;
   rejected: { label: string; reason: string }[];
 }
 interface ContextPackOutcome {
@@ -62,11 +64,15 @@ function ContextPackCard({ item }: { item: ContextPackItem }) {
 
       {item.decision ? (
         <div className="space-y-1 rounded-lg border border-border bg-muted/30 p-2.5 text-[11.5px]">
-          <div>
-            <Badge variant="success" className="mr-1.5 text-[9px]">{t('contextPackChosenLabel')}</Badge>
-            <span className="font-medium text-foreground">{item.decision.chosen.label}</span>
-            <span className="text-muted-foreground"> — {item.decision.chosen.reason}</span>
-          </div>
+          {item.decision.chosen ? (
+            <div>
+              <Badge variant="success" className="mr-1.5 text-[9px]">{t('contextPackChosenLabel')}</Badge>
+              <span className="font-medium text-foreground">{item.decision.chosen.label}</span>
+              <span className="text-muted-foreground"> — {item.decision.chosen.reason}</span>
+            </div>
+          ) : (
+            <p className="italic text-muted-foreground">{t('contextPackDecisionPending')}</p>
+          )}
           {item.decision.rejected.map((r, i) => (
             <div key={i}>
               <Badge variant="chip" className="mr-1.5 text-[9px]">{t('contextPackRejectedLabel')}</Badge>
