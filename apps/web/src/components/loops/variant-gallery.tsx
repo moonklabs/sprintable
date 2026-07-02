@@ -25,6 +25,15 @@ export interface LoopArtifact {
   choose_reason: string | null;
   rejection_reason: string | null;
   sort_order: number;
+  /**
+   * E-LOOP-LEDGER S24 — 카드 렌더 분기 키(image/* vs text/* vs 기타). optional인 이유: 디디 BE가
+   * 이 필드를 아직 안 실어주는 크로스-PR 과도기가 있을 수 있음(ArtifactPreview가 null-safe 폴백).
+   */
+  content_type?: string;
+  /** text/*일 때만·capped(~4KB). image/*는 null(기존 sign 경로 그대로). */
+  text_content?: string | null;
+  /** true면 원본이 4KB cap을 초과 — text_content는 발췌. */
+  text_truncated?: boolean;
 }
 
 export interface VariantGroup {
@@ -138,7 +147,13 @@ function VariantSlot({
               }`}
             >
               <div className="relative h-28 bg-muted">
-                <ArtifactPreview assetId={artifact.asset_id} fallbackLabel={artifact.variant_label} />
+                <ArtifactPreview
+                  assetId={artifact.asset_id}
+                  fallbackLabel={artifact.variant_label}
+                  contentType={artifact.content_type}
+                  textContent={artifact.text_content ?? null}
+                  textTruncated={artifact.text_truncated ?? false}
+                />
               </div>
               <div className="space-y-1.5 p-2.5">
                 <div className="flex items-center justify-between gap-2">

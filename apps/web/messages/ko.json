@@ -134,7 +134,10 @@
     "capacityToastTitle": "스토리지 {pct}% 사용 중",
     "capacityToastDesc": "곧 업로드가 제한될 수 있습니다.",
     "capacityToastDescBlock": "업로드가 중단되었습니다. 공간을 확보해 주세요.",
-    "capacityDismiss": "이번 세션 동안 숨기기"
+    "capacityDismiss": "이번 세션 동안 숨기기",
+    "previewExpand": "더보기",
+    "previewCollapse": "접기",
+    "previewTruncatedNote": "내용이 잘렸습니다"
   },
   "commandPalette": {
     "title": "커맨드 팔레트",
