@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Any, Literal
@@ -28,6 +29,8 @@ from app.models.doc import Doc
 from app.models.pm import Story
 from app.models.team import TeamMember
 from app.services.project_auth import accessible_project_ids_in_org, has_project_access
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v2", tags=["assets"])
 
@@ -394,7 +397,14 @@ async def get_asset_text(
 
     from app.services.storage import get_storage_provider
 
-    data = await get_storage_provider().download_object(asset.container, asset.object_path)
+    # 까심 RC: blob 부재/삭제/일시장애가 여기서 그대로 터지면 FastAPI 500(graceful 위반) —
+    # _resolve_artifact_text(inline 경로)와 동일 정책으로 503+명확 메시지(context_pack.py의
+    # EMBED_UNAVAILABLE 503 관용구와 동형 — storage도 외부 의존성 장애는 503).
+    try:
+        data = await get_storage_provider().download_object(asset.container, asset.object_path)
+    except Exception:
+        logger.warning("asset text 조회 실패 asset=%s", asset.id, exc_info=True)
+        raise HTTPException(status_code=503, detail="자산 내용을 불러올 수 없습니다. 잠시 후 다시 시도하세요.") from None
     return AssetTextResponse(
         asset_id=asset.id, content_type=asset.content_type, text_content=data.decode("utf-8", errors="ignore")
     )

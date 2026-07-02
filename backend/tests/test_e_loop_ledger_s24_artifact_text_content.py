@@ -62,9 +62,16 @@ async def test_resolve_artifact_text_none_asset():
 
 @pytest.mark.anyio
 async def test_resolve_artifact_text_image_content_type_skips_storage_read():
-    # content_type=image/* → storage read 자체를 안 함(container/object_path가 가짜라도 에러 안 남).
-    asset = _FakeAsset(uuid.uuid4(), "image/png", "nope", "nope/nope.png")
-    text_content, truncated = await _resolve_artifact_text(asset)
+    """까심 RC(선택·권장) — fake path가 "가드 없어도 우연히 같은 결과"일 수 있어 tautological
+    위험([[feedback_test_isolate_bug_variable]]). spy로 download_object 호출 0회를 직접 assert해
+    가드가 실제로 storage read 자체를 막는지(에러를 삼킨 게 아니라) 비-tautological하게 증명."""
+    from unittest.mock import AsyncMock, patch
+
+    asset = _FakeAsset(uuid.uuid4(), "image/png", "uploads", "some/real/path.png")
+    with patch("app.services.storage.get_storage_provider") as mock_provider:
+        mock_provider.return_value.download_object = AsyncMock(side_effect=AssertionError("should not be called"))
+        text_content, truncated = await _resolve_artifact_text(asset)
+    mock_provider.return_value.download_object.assert_not_called()
     assert text_content is None and truncated is False
 
 
@@ -290,6 +297,30 @@ async def test_get_asset_text_endpoint_success():
             out = await get_asset_text(asset_id=str(asset_id), db=s, auth=_auth(), org_id=ORG)
             assert out.text_content == full
             assert out.content_type == "text/plain"
+    finally:
+        await eng.dispose()
+
+
+@pytestmark_db
+@pytest.mark.anyio
+async def test_get_asset_text_endpoint_missing_blob_graceful_503_not_500():
+    """까심 RC(필수) — DB row는 존재하지만 GCS blob이 없음(head_object 등록 후 blob 삭제/일시장애
+    시나리오). fix 前엔 download_object의 FileNotFoundError가 그대로 터져 FastAPI 500 — fix 後엔
+    503+명확 메시지(크래시 아님). object_path를 write 없이 등록해 실제 부재를 재현(mock 아님)."""
+    from app.routers.assets import get_asset_text
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+            asset_id = await _seed_asset(
+                s, PROJ_A, "text/plain", object_path=f"org/{ORG}/never-uploaded-{uuid.uuid4().hex[:8]}.txt"
+            )
+
+        async with Session() as s:
+            with pytest.raises(HTTPException) as ei:
+                await get_asset_text(asset_id=str(asset_id), db=s, auth=_auth(), org_id=ORG)
+            assert ei.value.status_code == 503
     finally:
         await eng.dispose()
 
