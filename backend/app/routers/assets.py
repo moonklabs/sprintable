@@ -358,3 +358,43 @@ async def get_asset(
         raise HTTPException(status_code=404, detail="Asset not found")
     enriched = await _enrich(db, org_id, accessible, [asset])
     return enriched[asset.id]
+
+
+class AssetTextResponse(BaseModel):
+    asset_id: uuid.UUID
+    content_type: str
+    text_content: str
+
+
+@router.get("/assets/{asset_id}/text", response_model=AssetTextResponse)
+async def get_asset_text(
+    asset_id: str,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> AssetTextResponse:
+    """GET /api/v2/assets/{id}/text — S24(doc 8e8725da §3④) 전문 on-demand refetch.
+
+    결정 UX 카드는 LoopArtifactResponse.text_content(4KB cap)만 inline 받는다(N+1 최소화).
+    4KB 초과(text_truncated=true)일 때 "더보기" 클릭 시에만 이 endpoint로 전문을 lazy fetch —
+    list 응답은 가볍게 유지. authz/404 규칙은 get_asset과 동일(_scope_filter 재사용).
+    """
+    try:
+        aid = uuid.UUID(asset_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Asset not found") from None
+    clauses, _accessible = await _scope_filter(db, auth, org_id, None)
+    asset = (await db.execute(
+        select(Asset).where(Asset.id == aid, and_(*clauses))
+    )).scalar_one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if not asset.content_type or not asset.content_type.startswith("text/"):
+        raise HTTPException(status_code=400, detail="Not a text asset")
+
+    from app.services.storage import get_storage_provider
+
+    data = await get_storage_provider().download_object(asset.container, asset.object_path)
+    return AssetTextResponse(
+        asset_id=asset.id, content_type=asset.content_type, text_content=data.decode("utf-8", errors="ignore")
+    )

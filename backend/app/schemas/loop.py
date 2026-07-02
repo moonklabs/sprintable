@@ -71,6 +71,13 @@ class LoopArtifactResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # S24: 결정 UX copy 변형 표시(doc 8e8725da §3). asset 파생값 — LoopArtifact ORM에는 없는
+    # 필드라 model_validate(artifact) 後 서비스가 채운다(asset_id로 join). content_type=카드 렌더
+    # 분기 키(image/* 는 기존 경로 불변·text_content=null). text_content 는 text/* 에만 4KB cap.
+    content_type: str | None = None
+    text_content: str | None = None
+    text_truncated: bool = False
+
 
 class LoopArtifactVariantGroup(BaseModel):
     variant_group: str
