@@ -379,11 +379,55 @@ def _build_source_snapshot(context: dict | None) -> dict:
 
 
 def _template_statement(context: dict | None) -> str:
-    """deterministic 템플릿 초안(§3.9.5). LLM draft service는 미확인이라 후속 story로 미룬다."""
+    """deterministic 템플릿 초안(§3.9.5) — gen-LLM(S25) 미가용/실패 시 fallback."""
     title = (context or {}).get("title")
     if isinstance(title, str) and title.strip():
         return f"{title.strip()[:120]} — 이 실행 묶음이 목표 지표를 개선한다"
     return "이 실행 묶음이 목표 지표를 개선한다"
+
+
+_DRAFT_INSTRUCTION = (
+    "다음은 새 가설(hypothesis)의 소재가 될 작업 맥락이다. 이 맥락에 명시된 내용만 근거로, "
+    '"실행하면 목표 지표가 개선될 것이다" 형태의 검증 가능한 가설 문장을 한국어 1문장으로 '
+    "작성하라. 맥락에 없는 지표/숫자/사실을 추정하거나 새로 만들어내지 마라. 사람이 검토·수정할 "
+    "초안이니 간결하고 구체적으로 작성하라."
+)
+
+
+def _build_draft_prompt(context: dict | None) -> str | None:
+    """S15: 맥락(title/description/summary) 전무면 None — 근거 없이 LLM에 지어내라고
+    시키지 않는다(S26/S27과 동형 원칙: 없는 사실을 만들 근거 자체를 안 준다)."""
+    if not context:
+        return None
+    title, description, summary = context.get("title"), context.get("description"), context.get("summary")
+    if not any(isinstance(v, str) and v.strip() for v in (title, description, summary)):
+        return None
+    lines = [_DRAFT_INSTRUCTION, ""]
+    if title:
+        lines.append(f"제목: {title}")
+    if description:
+        lines.append(f"설명: {description}")
+    if summary:
+        lines.append(f"요약: {summary}")
+    lines.extend(["", "가설 문장(1문장):"])
+    return "\n".join(lines)
+
+
+def _draft_statement(context: dict | None) -> tuple[str, bool]:
+    """S15 근본 구현: gen-LLM(S25)으로 맥락 기반 초안 시도 → 맥락 부족/LLM 미가용/실패 시
+    기존 deterministic 템플릿으로 graceful fallback(무손상, S25/S26/S27과 동일 격리 철학).
+    반환 = (statement, llm_generated 여부 — draft_metadata에 기록해 추후 추적 가능)."""
+    prompt = _build_draft_prompt(context)
+    if prompt is not None:
+        try:
+            from app.services.llm_client import generate_text
+
+            generated = generate_text(prompt)
+            if generated and generated.strip():
+                return generated.strip(), True
+        except Exception as exc:
+            logger.warning("hypothesis draft: LLM 초안 실패(템플릿 fallback): %s", exc)
+    return _template_statement(context), False
 
 
 async def draft_hypothesis(
@@ -392,12 +436,16 @@ async def draft_hypothesis(
     caller: ResolvedMember,
     payload: HypothesisDraftRequest,
 ) -> HypothesisDraftResponse:
-    """§3.9 — 흐름 부산물에서 AI 초안 생성. DB에 active를 만들지 않는다.
+    """§3.9 — 흐름 부산물에서 AI 초안 생성. DB에 active를 만들지 않는다(호출부는 항상
+    create_hypothesis를 통해서만 persist하고, status='proposed' 강제는 그 함수의 기존 정책
+    그대로 — agent caller는 절대 active를 만들 수 없다. "돕되 대체 안 함": 자동초안은 제안일
+    뿐, 인간이 검토·수정·confirm(별도 human-only transition)해야 active가 된다).
 
     persist=true이면 status='proposed' row만 생성(create 경로 재사용 — owner/agent 규칙 동일).
-    초기에는 deterministic 템플릿(LLM 미연결). 사람이 statement/metric을 다듬고 확정한다.
+    S15: gen-LLM(S25)으로 statement 초안 시도 → 미가용/실패 시 기존 deterministic 템플릿으로
+    graceful fallback. metric_definition/measure_after는 여전히 고정값(사람이 다듬는 전제).
     """
-    statement = _template_statement(payload.context)
+    statement, llm_generated = _draft_statement(payload.context)
     metric_definition = {"metric": "outcome", "source": "manual", "target": 1, "direction": "up"}
     measure_after = datetime.now(timezone.utc) + timedelta(days=_DEFAULT_MEASURE_DAYS)
     snapshot = _build_source_snapshot(payload.context)
@@ -421,7 +469,10 @@ async def draft_hypothesis(
                 story_ids=story_ids,
                 source_type=payload.source_type,
                 source_id=payload.source_id,
-                draft_metadata={"template": True, "source_snapshot": snapshot},
+                draft_metadata={
+                    "generation_method": "llm" if llm_generated else "template",
+                    "source_snapshot": snapshot,
+                },
             ),
         )
     return HypothesisDraftResponse(
