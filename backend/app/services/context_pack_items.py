@@ -78,7 +78,10 @@ async def build_loop_context_pack(
     # search_similar_embeddings는 cosine 거리 ASC(=similarity DESC)로 이미 정렬 — crux ①과 정합.
     items = await _build_items(session, org_id, results)
     synthesis = _synthesize_learnings(items)
-    return ContextPackResponse(items=items, embed_available=True, synthesis=synthesis)
+    recommendation = await _recommend_next_step(session, org_id, loop, synthesis, len(items))
+    return ContextPackResponse(
+        items=items, embed_available=True, synthesis=synthesis, recommendation=recommendation,
+    )
 
 
 async def _build_items(session: AsyncSession, org_id: uuid.UUID, results: list) -> list[ContextPackItem]:
@@ -242,4 +245,57 @@ def _synthesize_learnings(items: list[ContextPackItem]) -> str | None:
         return generate_text(_build_synthesis_prompt(items))
     except Exception as exc:
         logger.warning("context-pack synthesis 실패(생략 처리): %s", exc)
+        return None
+
+
+# ── S27: L3 능동 추천(synthesis+새 loop goal/hypothesis→처방) ────────────────────
+
+_RECOMMENDATION_INSTRUCTION = (
+    "다음은 새로 시작하는 loop의 목표와, 과거 유사 실행들에서 이미 종합된 학습 요약이다. 이 "
+    "학습 요약이 새 loop에 실질적으로 도움이 되는 구체적 제안을 한국어 1~2문장으로 하라. 요약 "
+    "밖의 사실을 추정하거나 새로 만들어내지 마라. 근거(과거 사례 수)가 적거나 애매하면 "
+    "단정적으로 처방하지 말고 '과거 N건 기준' 같은 정직한 hedge를 반드시 포함해 신중하게 "
+    "제안하라."
+)
+
+
+def _build_recommendation_prompt(
+    new_goal: str, new_hypothesis: str | None, synthesis: str, item_count: int,
+) -> str:
+    """⭐과신 방지(S27 AC②): 근거는 synthesis(이미 items 근거로만 만들어진 종합)뿐 — 새 loop의
+    goal/hypothesis는 처방 "대상"을 명시할 뿐 학습 근거로 주입되지 않는다(items 밖 사실 0)."""
+    lines = [_RECOMMENDATION_INSTRUCTION, "", f"[새 loop] 목표: {new_goal}"]
+    if new_hypothesis:
+        lines.append(f"           가설: {new_hypothesis}")
+    lines.extend([
+        "",
+        f"[과거 학습 종합 — 근거 {item_count}건]",
+        synthesis,
+        "",
+        "제안(1~2문장, hedge 포함):",
+    ])
+    return "\n".join(lines)
+
+
+async def _recommend_next_step(
+    session: AsyncSession, org_id: uuid.UUID, loop: LoopRun, synthesis: str | None, item_count: int,
+) -> str | None:
+    """S27 AC①③: synthesis가 없으면(L2 자체가 근거 부족으로 실패/생략) 추천을 아예 시도하지
+    않는다 — 종합도 없이 처방하는 것은 과잉(과신) 처방이라 원천 차단."""
+    if synthesis is None:
+        return None
+    hyp_statement: str | None = None
+    if loop.hypothesis_id is not None:
+        hyp_statement = (await session.execute(
+            select(Hypothesis.statement).where(
+                Hypothesis.id == loop.hypothesis_id, Hypothesis.org_id == org_id
+            )
+        )).scalar_one_or_none()
+    try:
+        from app.services.llm_client import generate_text
+
+        prompt = _build_recommendation_prompt(loop.title, hyp_statement, synthesis, item_count)
+        return generate_text(prompt)
+    except Exception as exc:
+        logger.warning("context-pack recommendation 실패(생략 처리): %s", exc)
         return None
