@@ -110,15 +110,29 @@ async def _seed(s):
     await s.commit()
 
 
-async def _seed_loop(s, status, project_id=PROJ_A) -> uuid.UUID:
+async def _seed_loop(s, status, project_id=PROJ_A, hypothesis_id=None) -> uuid.UUID:
     from app.repositories.loop import LoopRunRepository
     repo = LoopRunRepository(s, ORG)
     loop = await repo.create(
         project_id=project_id, title="L", goal_tags=[], status=status,
-        created_by_member_id=uuid.uuid4(),
+        hypothesis_id=hypothesis_id, created_by_member_id=uuid.uuid4(),
     )
     await s.commit()
     return loop.id
+
+
+async def _seed_hypothesis(s, *, project_id=PROJ_A, status="active") -> uuid.UUID:
+    """S14: generating 전이엔 active hypothesis가 있어야 하므로(_seed_loop만으론 불충분해짐)."""
+    from datetime import datetime, timezone
+    from app.models.hypothesis import Hypothesis
+    hyp = Hypothesis(
+        id=uuid.uuid4(), org_id=ORG, project_id=project_id, owner_member_id=uuid.uuid4(),
+        statement="s", metric_definition={"metric": "m", "source": "manual", "target": 1, "direction": "up"},
+        measure_after=datetime(2026, 1, 1, tzinfo=timezone.utc), status=status,
+    )
+    s.add(hyp)
+    await s.commit()
+    return hyp.id
 
 
 async def _engine():
@@ -142,7 +156,9 @@ async def test_legal_transitions_succeed(from_status, target):
     try:
         async with Session() as s:
             await _seed(s)
-            loop_id = await _seed_loop(s, from_status)
+            # S14: briefing→generating은 active hypothesis 전제(그 외 대상 케이스는 무관·None 유지).
+            hyp_id = await _seed_hypothesis(s) if target == "generating" else None
+            loop_id = await _seed_loop(s, from_status, hypothesis_id=hyp_id)
         async with Session() as s:
             out = await r.transition_loop(
                 loop_id=loop_id, body=LoopTransitionRequest(status=target),

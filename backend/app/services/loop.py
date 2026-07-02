@@ -103,27 +103,55 @@ async def create_loop(
     # resolve_member(project_id=...)가 이미 호출부(라우터)에서 caller의 project 접근을
     # 검증했으므로 여기서는 재검증하지 않는다(hypotheses.create_hypothesis와 동형).
     #
+    # S14(P2): hypothesis_id 없으면 goal+metric_definition+measure_after 셋 다 있어야
+    # 그 자리에서 proposed hypothesis를 만들어 링크한다. 셋 다 없으면 거부(loop 경계에서만
+    # hypothesis 필수화 — 블루프린트 §4).
+    hypothesis_id = payload.hypothesis_id
+    if hypothesis_id is None:
+        if not (payload.goal and payload.metric_definition and payload.measure_after):
+            raise LoopServiceError(
+                "LOOP_HYPOTHESIS_REQUIRED",
+                "hypothesis_id 또는 goal+metric_definition+measure_after가 필요합니다.",
+            )
+        from app.schemas.hypothesis import HypothesisCreate
+        from app.services.hypothesis import HypothesisServiceError, create_hypothesis
+
+        try:
+            hyp_resp = await create_hypothesis(
+                session, org_id, caller,
+                HypothesisCreate(
+                    project_id=payload.project_id,
+                    statement=payload.goal,
+                    metric_definition=payload.metric_definition,
+                    measure_after=payload.measure_after,
+                    owner_member_id=payload.owner_member_id,
+                ),
+            )
+        except HypothesisServiceError as exc:
+            raise LoopServiceError(exc.code, exc.message) from exc
+        hypothesis_id = hyp_resp.id
+
     # 까심 QA CRITICAL(#1818 S7 QA) — hypothesis_id는 FK만 있고 소유검증이 없었다(S4의
     # ASSET_PROJECT_MISMATCH와 같은 크로스-리소스 IDOR 축이 빠짐). 타 org의 hypothesis_id를
     # loop에 연결하면 그 hypothesis가 나중에 resolved될 때 attribute_loop_outcome이 그
     # hypothesis의 기밀 outcome_result를 이 org의 loop에 stamp — cross-org 데이터 유출(까심
-    # 실재현). 여기서 원천 차단(S4 asset 패턴 그대로 미러).
-    if payload.hypothesis_id is not None:
-        hyp = (await session.execute(
-            select(Hypothesis).where(Hypothesis.id == payload.hypothesis_id, Hypothesis.org_id == org_id)
-        )).scalar_one_or_none()
-        if hyp is None:
-            raise LoopServiceError("HYPOTHESIS_NOT_FOUND", "가설을 찾을 수 없습니다.")
-        if hyp.project_id != payload.project_id:
-            raise LoopServiceError(
-                "HYPOTHESIS_PROJECT_MISMATCH", "가설이 이 루프와 같은 프로젝트에 속하지 않습니다."
-            )
+    # 실재현). 여기서 원천 차단(S4 asset 패턴 그대로 미러). 방금 생성한 hypothesis_id도 같은
+    # 경로로 재검증(동일 project_id로 만들었으니 통과 — 코드 경로 단일화).
+    hyp = (await session.execute(
+        select(Hypothesis).where(Hypothesis.id == hypothesis_id, Hypothesis.org_id == org_id)
+    )).scalar_one_or_none()
+    if hyp is None:
+        raise LoopServiceError("HYPOTHESIS_NOT_FOUND", "가설을 찾을 수 없습니다.")
+    if hyp.project_id != payload.project_id:
+        raise LoopServiceError(
+            "HYPOTHESIS_PROJECT_MISMATCH", "가설이 이 루프와 같은 프로젝트에 속하지 않습니다."
+        )
 
     repo = LoopRunRepository(session, org_id)
     loop = await repo.create(
         project_id=payload.project_id,
         title=payload.title,
-        hypothesis_id=payload.hypothesis_id,
+        hypothesis_id=hypothesis_id,
         parent_loop_id=payload.parent_loop_id,
         recipe_slug=payload.recipe_slug,
         goal_tags=payload.goal_tags,
@@ -388,6 +416,23 @@ async def transition_loop(
         raise LoopServiceError(
             "INVALID_LOOP_TRANSITION", f"불법 전이: {loop.status} → {target_status}"
         )
+    # S14(P2): hypothesis가 human-confirm된(active) 뒤에만 briefing→generating 진행 허용
+    # (블루프린트 §4 — loop 경계에서만 강제, board 전역 hypothesis 필수화 아님).
+    if target_status == "generating":
+        hyp_status = (
+            (await session.execute(
+                select(Hypothesis.status).where(
+                    Hypothesis.id == loop.hypothesis_id, Hypothesis.org_id == org_id
+                )
+            )).scalar_one_or_none()
+            if loop.hypothesis_id is not None
+            else None
+        )
+        if hyp_status != "active":
+            raise LoopServiceError(
+                "HYPOTHESIS_NOT_ACTIVE",
+                "가설이 아직 active 상태(휴먼 확인)가 아니라 generating으로 전이할 수 없습니다.",
+            )
     repo = LoopRunRepository(session, org_id)
     updated = await repo.update(loop.id, status=target_status)
 
