@@ -41,6 +41,15 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _mock_embedding_enqueue():
+    """E-LOOP-LEDGER P1-S4: create/update_hypothesis가 해소 직후 enqueue_embedding을 호출
+    하므로(추가 session.execute+flush), 전이 로직만 검증하는 기존 mock-session 테스트에서는
+    배선 호출을 격리한다(_mock_outcome_verdicts/_mock_loop_attribution과 동일 이유)."""
+    with patch("app.services.embedding_enqueue.enqueue_embedding", new=AsyncMock(return_value=None)):
+        yield
+
+
 def _caller(member_type: str) -> ResolvedMember:
     cid = CALLER_HUMAN_ID if member_type == "human" else CALLER_AGENT_ID
     return ResolvedMember(

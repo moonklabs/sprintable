@@ -91,6 +91,14 @@ async def create_loop(
         status="draft",
         created_by_member_id=caller.id,
     )
+
+    # P1-S4: title+goal_tags를 embeddings 큐에 pending으로 등록(네트워크 I/O 0).
+    from app.services.embedding_enqueue import build_loop_embedding_text, enqueue_embedding
+    await enqueue_embedding(
+        session, org_id, loop.project_id, "loop", loop.id,
+        build_loop_embedding_text(loop.title, loop.goal_tags), created_by_member_id=caller.id,
+    )
+
     return LoopResponse.model_validate(loop)
 
 
@@ -169,6 +177,16 @@ async def create_loop_artifact(
         )
         .on_conflict_do_nothing(constraint="uq_asset_links_asset_source")
     )
+
+    # P1-S4: variant_label만으로 우선 큐잉(choose/rejection_reason은 S5 decide 시점에
+    # 재큐잉 — "moat" 텍스트[왜 골랐나/반려했나]가 실제로 완성되는 순간이 그때이기 때문).
+    from app.services.embedding_enqueue import build_loop_artifact_embedding_text, enqueue_embedding
+    await enqueue_embedding(
+        session, org_id, loop.project_id, "loop_artifact", artifact.id,
+        build_loop_artifact_embedding_text(artifact.variant_label, None, None),
+        created_by_member_id=caller.id,
+    )
+
     return LoopArtifactResponse.model_validate(artifact)
 
 
@@ -234,14 +252,33 @@ async def decide_loop_artifacts(
                 f"variant_group '{group_decision.variant_group}'의 chosen+rejections가 "
                 "pending 아티팩트 집합과 정확히 일치해야 합니다.",
             )
-        await artifact_repo.update(
+        # P1-S4: chosen/rejected 아티팩트를 여기서 재큐잉한다 — choose_reason/rejection_reason
+        # ("moat" 신호)이 실제로 채워지는 순간이 바로 지금이라, create 시점(variant_label만)의
+        # 얇은 임베딩을 이유까지 포함한 온전한 텍스트로 갱신(content_hash가 달라 재큐잉됨).
+        from app.services.embedding_enqueue import build_loop_artifact_embedding_text, enqueue_embedding
+
+        chosen_artifact = await artifact_repo.update(
             group_decision.chosen_artifact_id,
             decision="chosen", choose_reason=group_decision.choose_reason,
         )
+        await enqueue_embedding(
+            session, org_id, loop.project_id, "loop_artifact", chosen_artifact.id,
+            build_loop_artifact_embedding_text(
+                chosen_artifact.variant_label, chosen_artifact.choose_reason, None
+            ),
+            created_by_member_id=caller.id,
+        )
         for rejection in group_decision.rejections:
-            await artifact_repo.update(
+            rejected_artifact = await artifact_repo.update(
                 rejection.artifact_id,
                 decision="rejected", rejection_reason=rejection.rejection_reason,
+            )
+            await enqueue_embedding(
+                session, org_id, loop.project_id, "loop_artifact", rejected_artifact.id,
+                build_loop_artifact_embedding_text(
+                    rejected_artifact.variant_label, None, rejected_artifact.rejection_reason
+                ),
+                created_by_member_id=caller.id,
             )
 
     # decision_gate_id는 매 콜(gate 생성 시점부터) stamp — FE가 진행중 게이트를 참조할 수 있게.
