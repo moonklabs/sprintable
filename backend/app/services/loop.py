@@ -33,6 +33,39 @@ from app.services.project_auth import has_project_access
 
 logger = logging.getLogger(__name__)
 
+# S24: 결정 UX copy 변형 inline 계약(doc 8e8725da §3 crux) — 4KB cap. asset은 DB에 text를
+# 들고 있지 않음(GCS blob만·app/models/asset.py에 content 컬럼 없음) → N+1 판단: 결정 UX는
+# variant 수가 작아(few·context-pack ~5) inline GCS read N회가 허용 범위(crux 확정, 큰 N이면
+# GET /assets/{id}/text 같은 lazy 경로로 전환).
+_TEXT_CONTENT_CAP_BYTES = 4096
+
+
+async def _resolve_artifact_text(asset: Asset | None) -> tuple[str | None, bool]:
+    """asset이 text/* 면 (capped 내용, truncated 여부) — 아니면/실패하면 (None, False).
+
+    best-effort: storage 장애가 카드 렌더 전체를 죽이면 안 된다(image 경로와 동일한 관용).
+    utf-8 문자 경계에서 안 잘릴 수 있어 errors='ignore'로 trailing 불완전 바이트만 버림(프리뷰용
+    발췌라 완전성보다 안정성 우선 — 전문은 S24 §3④ on-demand refetch로 별도 확보)."""
+    if asset is None or not asset.content_type or not asset.content_type.startswith("text/"):
+        return None, False
+    try:
+        from app.services.storage import get_storage_provider
+
+        data = await get_storage_provider().download_object(asset.container, asset.object_path)
+    except Exception:
+        logger.warning("artifact text 조회 실패 asset=%s", asset.id, exc_info=True)
+        return None, False
+    truncated = len(data) > _TEXT_CONTENT_CAP_BYTES
+    text = data[:_TEXT_CONTENT_CAP_BYTES].decode("utf-8", errors="ignore")
+    return text, truncated
+
+
+async def _to_artifact_response(artifact: LoopArtifact, asset: Asset | None) -> LoopArtifactResponse:
+    resp = LoopArtifactResponse.model_validate(artifact)
+    resp.content_type = asset.content_type if asset is not None else None
+    resp.text_content, resp.text_truncated = await _resolve_artifact_text(asset)
+    return resp
+
 
 class LoopServiceError(Exception):
     """도메인 오류 — 라우터가 code/message를 HTTPException dict-detail로 매핑한다."""
@@ -193,7 +226,7 @@ async def create_loop_artifact(
         created_by_member_id=caller.id,
     )
 
-    return LoopArtifactResponse.model_validate(artifact)
+    return await _to_artifact_response(artifact, asset)
 
 
 async def list_loop_artifacts(
@@ -201,12 +234,20 @@ async def list_loop_artifacts(
 ) -> list[LoopArtifactVariantGroup]:
     repo = LoopArtifactRepository(session, org_id)
     rows = await repo.list_by_loop(loop_id)
+    asset_ids = {a.asset_id for a in rows}
+    assets_by_id: dict[uuid.UUID, Asset] = {}
+    if asset_ids:
+        assets = (await session.execute(
+            select(Asset).where(Asset.id.in_(asset_ids), Asset.org_id == org_id)
+        )).scalars().all()
+        assets_by_id = {a.id: a for a in assets}
+
     groups: list[LoopArtifactVariantGroup] = []
     for variant_group, items in itertools.groupby(rows, key=lambda a: a.variant_group):
-        groups.append(LoopArtifactVariantGroup(
-            variant_group=variant_group,
-            artifacts=[LoopArtifactResponse.model_validate(a) for a in items],
-        ))
+        artifacts = [
+            await _to_artifact_response(a, assets_by_id.get(a.asset_id)) for a in items
+        ]
+        groups.append(LoopArtifactVariantGroup(variant_group=variant_group, artifacts=artifacts))
     return groups
 
 

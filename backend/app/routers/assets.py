@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Any, Literal
@@ -28,6 +29,8 @@ from app.models.doc import Doc
 from app.models.pm import Story
 from app.models.team import TeamMember
 from app.services.project_auth import accessible_project_ids_in_org, has_project_access
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v2", tags=["assets"])
 
@@ -358,3 +361,50 @@ async def get_asset(
         raise HTTPException(status_code=404, detail="Asset not found")
     enriched = await _enrich(db, org_id, accessible, [asset])
     return enriched[asset.id]
+
+
+class AssetTextResponse(BaseModel):
+    asset_id: uuid.UUID
+    content_type: str
+    text_content: str
+
+
+@router.get("/assets/{asset_id}/text", response_model=AssetTextResponse)
+async def get_asset_text(
+    asset_id: str,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> AssetTextResponse:
+    """GET /api/v2/assets/{id}/text — S24(doc 8e8725da §3④) 전문 on-demand refetch.
+
+    결정 UX 카드는 LoopArtifactResponse.text_content(4KB cap)만 inline 받는다(N+1 최소화).
+    4KB 초과(text_truncated=true)일 때 "더보기" 클릭 시에만 이 endpoint로 전문을 lazy fetch —
+    list 응답은 가볍게 유지. authz/404 규칙은 get_asset과 동일(_scope_filter 재사용).
+    """
+    try:
+        aid = uuid.UUID(asset_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Asset not found") from None
+    clauses, _accessible = await _scope_filter(db, auth, org_id, None)
+    asset = (await db.execute(
+        select(Asset).where(Asset.id == aid, and_(*clauses))
+    )).scalar_one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if not asset.content_type or not asset.content_type.startswith("text/"):
+        raise HTTPException(status_code=400, detail="Not a text asset")
+
+    from app.services.storage import get_storage_provider
+
+    # 까심 RC: blob 부재/삭제/일시장애가 여기서 그대로 터지면 FastAPI 500(graceful 위반) —
+    # _resolve_artifact_text(inline 경로)와 동일 정책으로 503+명확 메시지(context_pack.py의
+    # EMBED_UNAVAILABLE 503 관용구와 동형 — storage도 외부 의존성 장애는 503).
+    try:
+        data = await get_storage_provider().download_object(asset.container, asset.object_path)
+    except Exception:
+        logger.warning("asset text 조회 실패 asset=%s", asset.id, exc_info=True)
+        raise HTTPException(status_code=503, detail="자산 내용을 불러올 수 없습니다. 잠시 후 다시 시도하세요.") from None
+    return AssetTextResponse(
+        asset_id=asset.id, content_type=asset.content_type, text_content=data.decode("utf-8", errors="ignore")
+    )
