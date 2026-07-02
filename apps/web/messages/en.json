@@ -2676,7 +2676,14 @@
     "createLoopDrafting": "Drafting...",
     "createLoopDraftNoteTitle": "This is an AI draft — review and edit before confirming.",
     "createLoopDraftNoteBody": "It won't be submitted as-is; you need to confirm it.",
-    "createLoopDraftRetry": "Suggest again"
+    "createLoopDraftRetry": "Suggest again",
+    "aiAttributionLabel": "Sprintable AI",
+    "aiConfidenceLabel": "{count} refs · {level}",
+    "aiConfidenceLowLabel": "Limited evidence · draft quality",
+    "aiConfidenceLevel_high": "High",
+    "aiConfidenceLevel_medium": "Medium",
+    "aiConfidenceLevel_low": "Low",
+    "aiTransparencyLine": "AI-assisted reference — the judgment is yours."
   },
   "sprints": {
     "title": "Sprints",
