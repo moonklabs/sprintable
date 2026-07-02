@@ -2676,7 +2676,14 @@
     "createLoopDrafting": "제안 중...",
     "createLoopDraftNoteTitle": "AI 초안입니다 — 검토·수정 후 확정하세요.",
     "createLoopDraftNoteBody": "이 문구는 그대로 제출되지 않으며, 당신이 확인해야 반영됩니다.",
-    "createLoopDraftRetry": "다시 제안"
+    "createLoopDraftRetry": "다시 제안",
+    "aiAttributionLabel": "Sprintable AI",
+    "aiConfidenceLabel": "근거 {count}건 · {level}",
+    "aiConfidenceLowLabel": "근거 부족 · 초안 수준",
+    "aiConfidenceLevel_high": "높음",
+    "aiConfidenceLevel_medium": "보통",
+    "aiConfidenceLevel_low": "낮음",
+    "aiTransparencyLine": "AI가 도운 참고 자료입니다 · 판단은 당신이 합니다."
   },
   "sprints": {
     "title": "스프린트",

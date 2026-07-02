@@ -7,6 +7,7 @@ import { Brain, Lightbulb, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { OutcomeBadge } from '@/components/loops/outcome-badge';
+import { AiAttributionRow, AiTransparencyLine, type AiConfidence } from '@/components/loops/ai-attribution';
 
 /** E-LOOP-LEDGER S13 — GET /loops/{id}/context-pack 응답 shape(handoff §3, PO-locked). */
 interface ContextPackDecision {
@@ -46,6 +47,16 @@ interface ContextPackResponse {
    * ⭐유나 LOCK: 제안형 톤(복리 엔진은 결정을 돕지 대체 안 함)·시각 위계는 결정 UI보다 항상 낮게(subtle).
    */
   recommendation?: string | null;
+  /**
+   * E-LOOP-LEDGER S28 — voice/attribution 계약(실 BE #1854, `schemas/context_pack.py` 확인).
+   * *_confidence(LLM 산출·gen-LLM 호출별 독립)는 synthesis/recommendation 각각 분리 필드가 맞지만,
+   * evidence_count는 LLM 산출물이 아니라 **items 수로 결정론적 산출되는 단일 공유 필드**(까심 RC —
+   * FE가 초기에 synthesis_evidence_count/recommendation_evidence_count로 분리 가정했던 것을 실 BE
+   * shape로 수정, 크로스모델 계약 불일치 교정). optional·null-safe: BE 미착지 시 칩만 뜨고 배지 생략.
+   */
+  synthesis_confidence?: AiConfidence | null;
+  recommendation_confidence?: AiConfidence | null;
+  evidence_count?: number | null;
 }
 
 function ContextPackCard({ item }: { item: ContextPackItem }) {
@@ -175,21 +186,33 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
           <>
             {/* L2 요약(위) → L3 제안(중간) → L1 근거 items(아래) — 유나 LOCK: 위계는 항상 결정 UI보다 낮게. */}
             {data.synthesis ? (
-              <div className="flex items-start gap-2 rounded-lg border border-info-border bg-info-tint p-2.5 text-xs text-info">
-                <Sparkles className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                <div className="space-y-0.5">
-                  <p className="font-semibold">{t('contextPackSynthesisTitle')}</p>
-                  <p className="text-info/90">{data.synthesis}</p>
+              <div className="rounded-lg border border-info-border bg-info-tint p-2.5 text-xs text-info">
+                <div className="flex items-start gap-2">
+                  <Sparkles className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5">
+                      <p className="font-semibold">{t('contextPackSynthesisTitle')}</p>
+                      <AiAttributionRow confidence={data.synthesis_confidence} evidenceCount={data.evidence_count} />
+                    </div>
+                    <p className="text-info/90">{data.synthesis}</p>
+                  </div>
                 </div>
+                <AiTransparencyLine className="border-info-border/60" />
               </div>
             ) : null}
             {data.recommendation ? (
-              <div className="flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/20 p-2.5 text-xs text-muted-foreground">
-                <Lightbulb className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                <div className="space-y-0.5">
-                  <p className="font-medium text-foreground/80">{t('contextPackRecommendationTitle')}</p>
-                  <p>{data.recommendation}</p>
+              <div className="rounded-lg border border-dashed border-border bg-muted/20 p-2.5 text-xs text-muted-foreground">
+                <div className="flex items-start gap-2">
+                  <Lightbulb className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5">
+                      <p className="font-medium text-foreground/80">{t('contextPackRecommendationTitle')}</p>
+                      <AiAttributionRow confidence={data.recommendation_confidence} evidenceCount={data.evidence_count} />
+                    </div>
+                    <p>{data.recommendation}</p>
+                  </div>
                 </div>
+                <AiTransparencyLine />
               </div>
             ) : null}
             {data.items.map((item) => <ContextPackCard key={`${item.entity_type}-${item.entity_id}`} item={item} />)}
