@@ -2645,7 +2645,8 @@
     "entityTypeLoop": "loop",
     "entityTypeHypothesis": "hypothesis",
     "entityTypeDecision": "decision",
-    "contextPackDecisionPending": "아직 결정 전입니다"
+    "contextPackDecisionPending": "아직 결정 전입니다",
+    "contextPackSynthesisTitle": "학습 요약"
   },
   "sprints": {
     "title": "스프린트",
