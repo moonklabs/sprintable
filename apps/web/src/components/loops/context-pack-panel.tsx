@@ -27,7 +27,8 @@ interface ContextPackItem {
   goal: string;
   decision: ContextPackDecision | null;
   outcome: ContextPackOutcome | null;
-  href: string;
+  /** hypothesis entity는 FE에 독립 라우트가 없어 BE가 null 반환(방어) — 링크 생략, broken 링크 대신 정직 null. */
+  href: string | null;
 }
 interface ContextPackResponse {
   items: ContextPackItem[];
@@ -49,9 +50,14 @@ function ContextPackCard({ item }: { item: ContextPackItem }) {
           </div>
           <p className="text-sm font-semibold text-foreground">{item.goal}</p>
         </div>
-        <span className="shrink-0 whitespace-nowrap text-[11px] font-medium text-muted-foreground">
-          {t('contextPackSimilarity', { value: item.similarity.toFixed(2) })}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span className="whitespace-nowrap text-[11px] font-medium text-muted-foreground">
+            {t('contextPackSimilarity', { value: item.similarity.toFixed(2) })}
+          </span>
+          <div className="h-1 w-16 overflow-hidden rounded-full bg-info-tint" aria-hidden>
+            <div className="h-full rounded-full bg-info" style={{ width: `${Math.round(item.similarity * 100)}%` }} />
+          </div>
+        </div>
       </div>
 
       {item.decision ? (
@@ -82,9 +88,11 @@ function ContextPackCard({ item }: { item: ContextPackItem }) {
             })}
           </span>
         ) : <span />}
-        <Link href={item.href} className="shrink-0 font-semibold text-primary hover:underline">
-          {viewLabel} →
-        </Link>
+        {item.href ? (
+          <Link href={item.href} className="shrink-0 font-semibold text-primary hover:underline">
+            {viewLabel} →
+          </Link>
+        ) : null}
       </div>
     </div>
   );
