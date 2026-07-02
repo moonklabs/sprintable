@@ -44,6 +44,8 @@ _CORE = "core"  # ping/notifications-check 등 기본 — 항상 허용
 _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     "ping", "sprintable_ping", "sprintable_my_dashboard", "sprintable_check_notifications",
     "sprintable_get_workflow_guide", "sprintable_list_team_members", "sprintable_poll_events",
+    # P1-S12: get_workflow_guide 동형(read-only·에이전트 on-demand pull) — 항상 허용.
+    "sprintable_get_loop_context",
 })
 
 # scope 토큰: 그룹명 외에 read/write(레거시·전체 비파괴 의미), admin/destructive(파괴적 허용)
@@ -250,6 +252,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     # hypotheses (E1-S5)
     "sprintable_list_hypotheses", "sprintable_get_hypothesis", "sprintable_create_hypothesis",
     "sprintable_update_hypothesis", "sprintable_link_hypothesis", "sprintable_confirm_hypothesis",
+    # loops (E-LOOP-LEDGER P1-S12)
+    "sprintable_get_loop_context",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.
