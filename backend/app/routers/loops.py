@@ -8,7 +8,7 @@ authz(loops):
 - POST: resolve_member(auth, org_id, session, project_id=body.project_id)가 project 접근을
   검증(무권한이면 400/403) + caller를 created_by_member_id로 서버 해소.
 - LIST: get_project_scoped_org_id 의존성(project_id 쿼리파람 기반, has_project_access SSOT).
-- GET(단건): _require_loop_project_access(service)가 org-scope 로드 후 has_project_access로
+- GET(단건)/context-pack: require_loop_project_access(service)가 org-scope 로드 후 has_project_access로
   cross-project IDOR 차단(docs.py의 _require_doc_project_access와 동형).
 
 authz(artifacts, S4) — 2단계:
@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
 from app.repositories.loop import LoopRunRepository
+from app.schemas.context_pack import ContextPackResponse
 from app.schemas.loop import (
     LoopArtifactCreate,
     LoopArtifactResponse,
@@ -125,6 +126,25 @@ async def get_loop(
         _raise(err)
 
 
+@router.get("/{loop_id}/context-pack", response_model=ContextPackResponse)
+async def get_loop_context_pack(
+    loop_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> ContextPackResponse:
+    """P1-S12: structured Context Pack(S13 UI 패널 데이터 소스, doc fbe5923e §3).
+
+    authz는 get_loop과 동일 — require_loop_project_access(org-scope 로드+has_project_access,
+    cross-project IDOR 차단)."""
+    try:
+        loop = await svc.require_loop_project_access(session, loop_id, uuid.UUID(str(auth.user_id)), org_id)
+    except svc.LoopServiceError as err:
+        _raise(err)
+    from app.services.context_pack_items import build_loop_context_pack
+    return await build_loop_context_pack(session, org_id, loop)
+
+
 @router.post("/{loop_id}/artifacts", response_model=LoopArtifactResponse, status_code=201)
 async def create_loop_artifact(
     loop_id: uuid.UUID,
@@ -155,7 +175,7 @@ async def list_loop_artifacts(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> list[LoopArtifactVariantGroup]:
     try:
-        # get_loop이 _require_loop_project_access(GET 단건과 동일 IDOR 방어)를 내부에서 수행 —
+        # get_loop이 require_loop_project_access(GET 단건과 동일 IDOR 방어)를 내부에서 수행 —
         # 결과(LoopResponse)는 authz 게이트 통과 증거로만 쓰고 버린다.
         await svc.get_loop(session, org_id, uuid.UUID(str(auth.user_id)), loop_id)
     except svc.LoopServiceError as err:
