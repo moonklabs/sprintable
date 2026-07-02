@@ -10,6 +10,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { LoopStatusBadge, type LoopStatus } from '@/components/loops/loop-status-badge';
 import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { VariantGallery, type VariantGroup } from '@/components/loops/variant-gallery';
+import { ContextPackPanel } from '@/components/loops/context-pack-panel';
 
 /** E-LOOP-LEDGER S7 loop_outcome_attribution.py::attribute_loop_outcome 산출 shape 그대로. */
 interface OutcomeSnapshot {
@@ -244,6 +245,9 @@ export function LoopDetailClient({ loopId }: { loopId: string }) {
           onDecided={() => void fetchAll()}
           outcome={loop.status === 'closed' ? loop.outcome_snapshot : null}
         />
+
+        {/* Context pack — E-LOOP-LEDGER S13: "과거 loop에서 학습" (S12 계약, 브리핑 맥락 부속 섹션) */}
+        <ContextPackPanel loopId={loop.id} />
       </div>
     </>
   );
