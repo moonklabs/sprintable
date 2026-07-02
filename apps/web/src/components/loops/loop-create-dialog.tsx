@@ -23,6 +23,16 @@ const EMPTY_METRIC: MetricDefinition = { metric: '', source: 'internal_ops', tar
 
 type Mode = 'new' | 'link';
 
+/** E-LOOP-LEDGER S18 — GET /api/workflow-recipes 응답 shape(블루프린트 §5, backend/app/routers/workflow_recipes.py 실측). */
+interface WorkflowRecipe {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  steps: { role: string; label: string; pattern: string; action: string }[];
+  builtin: boolean;
+}
+
 /**
  * E-LOOP-LEDGER S16 — net-new loop 생성 모달(핸드오프 §1/§2, render doc ec26cd28).
  * Goal(hypothesis) 필수 강제: trio(statement+metric_definition+measure_after) 또는
@@ -59,6 +69,9 @@ export function LoopCreateDialog({
   const [hypothesisSearch, setHypothesisSearch] = useState('');
   const [linkedId, setLinkedId] = useState<string | null>(null);
 
+  const [recipes, setRecipes] = useState<WorkflowRecipe[] | null>(null);
+  const [recipeSlug, setRecipeSlug] = useState('');
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,6 +89,7 @@ export function LoopCreateDialog({
     setHypothesisSearch('');
     setError(null);
     setDrafted(false);
+    setRecipeSlug('');
   }, []);
 
   const handleDraft = useCallback(async () => {
@@ -120,6 +134,21 @@ export function LoopCreateDialog({
     })();
   }, [open, mode, hypotheses, projectId]);
 
+  // E-LOOP-LEDGER S18 — recipe 목록은 선택 기능이라 fetch 실패해도 select 옵션만 없어질 뿐
+  // (null-safe, "직접 진행" 기본값으로 폼은 정상 동작).
+  useEffect(() => {
+    if (!open || recipes !== null) return;
+    void (async () => {
+      try {
+        const res = await fetch('/api/workflow-recipes');
+        if (!res.ok) { setRecipes([]); return; }
+        setRecipes((await res.json()) as WorkflowRecipe[]);
+      } catch {
+        setRecipes([]);
+      }
+    })();
+  }, [open, recipes]);
+
   const setMetricPatch = (patch: Partial<MetricDefinition>) => setMetric((m) => ({ ...m, ...patch }));
 
   const isGa4 = metric.source === 'ga4';
@@ -143,6 +172,7 @@ export function LoopCreateDialog({
         title: title.trim(),
         goal_tags: tags.split(',').map((s) => s.trim()).filter(Boolean),
       };
+      if (recipeSlug) body['recipe_slug'] = recipeSlug;
       if (mode === 'link') {
         body['hypothesis_id'] = linkedId;
       } else {
@@ -175,12 +205,13 @@ export function LoopCreateDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, projectId, title, tags, mode, linkedId, statement, isGa4, metric, measureAfter, reset, onOpenChange, onCreated, t]);
+  }, [canSubmit, projectId, title, tags, mode, linkedId, statement, isGa4, metric, measureAfter, recipeSlug, reset, onOpenChange, onCreated, t]);
 
   const filteredHypotheses = (hypotheses ?? []).filter((h) =>
     h.statement.toLowerCase().includes(hypothesisSearch.trim().toLowerCase()),
   );
   const linkedHypothesis = hypotheses?.find((h) => h.id === linkedId) ?? null;
+  const selectedRecipe = recipes?.find((r) => r.slug === recipeSlug) ?? null;
 
   return (
     <Dialog
@@ -207,6 +238,32 @@ export function LoopCreateDialog({
               className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
             />
           </div>
+
+          {recipes && recipes.length > 0 ? (
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('createLoopRecipeLabel')}</label>
+              <select
+                value={recipeSlug}
+                onChange={(e) => setRecipeSlug(e.target.value)}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              >
+                <option value="">{t('createLoopRecipeNone')}</option>
+                {recipes.map((r) => (
+                  <option key={r.slug} value={r.slug}>{r.name}</option>
+                ))}
+              </select>
+              {selectedRecipe ? (
+                <div className="space-y-1 rounded-lg border border-dashed border-border bg-muted/30 p-2 text-[10.5px] text-muted-foreground">
+                  <p>{selectedRecipe.description}</p>
+                  <ol className="list-decimal space-y-0.5 pl-4">
+                    {selectedRecipe.steps.map((s, i) => (
+                      <li key={i}><span className="font-medium text-foreground">{s.label}</span> ({s.role})</li>
+                    ))}
+                  </ol>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="space-y-2.5 rounded-xl border border-border bg-muted/20 p-3">
             <div className="flex items-center justify-between">

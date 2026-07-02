@@ -2683,7 +2683,9 @@
     "aiConfidenceLevel_high": "High",
     "aiConfidenceLevel_medium": "Medium",
     "aiConfidenceLevel_low": "Low",
-    "aiTransparencyLine": "AI-assisted reference — the judgment is yours."
+    "aiTransparencyLine": "AI-assisted reference — the judgment is yours.",
+    "createLoopRecipeLabel": "Workflow recipe (optional)",
+    "createLoopRecipeNone": "Go it alone"
   },
   "sprints": {
     "title": "Sprints",
