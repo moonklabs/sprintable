@@ -77,7 +77,8 @@ async def build_loop_context_pack(
 
     # search_similar_embeddings는 cosine 거리 ASC(=similarity DESC)로 이미 정렬 — crux ①과 정합.
     items = await _build_items(session, org_id, results)
-    return ContextPackResponse(items=items, embed_available=True)
+    synthesis = _synthesize_learnings(items)
+    return ContextPackResponse(items=items, embed_available=True, synthesis=synthesis)
 
 
 async def _build_items(session: AsyncSession, org_id: uuid.UUID, results: list) -> list[ContextPackItem]:
@@ -194,3 +195,51 @@ def _build_outcome(hyp: Hypothesis | None) -> ContextPackOutcome | None:
         target=result.get("target"),
         direction=result.get("direction"),
     )
+
+
+# ── S26: L2 학습 종합(회수 items→증류) ────────────────────────────────────────
+
+_SYNTHESIS_INSTRUCTION = (
+    "다음은 유사한 과거 실행(loop/가설)들의 실제 기록이다. 아래 데이터에 명시된 사실만 근거로 "
+    "공통 패턴이나 성공/실패 요인을 한국어 2~3문장으로 요약하라. 데이터에 없는 내용은 절대 "
+    "추정하거나 새로 만들어내지 마라 — 각 항목의 목표/채택·기각 이유/성과만 사용한다."
+)
+
+
+def _build_synthesis_prompt(items: list[ContextPackItem]) -> str:
+    """⭐환각 방지(S26 AC②): 회수된 items 필드를 그대로 나열 — 프롬프트에 없는 사실은
+    모델이 만들어낼 근거 자체가 없다(items 밖 지식 주입 0)."""
+    lines = [_SYNTHESIS_INSTRUCTION, ""]
+    for i, item in enumerate(items, start=1):
+        lines.append(f"[{i}] 목표: {item.goal}")
+        if item.decision is not None:
+            if item.decision.chosen is not None:
+                reason = item.decision.chosen.reason or "(이유 미기록)"
+                lines.append(f"    채택: {item.decision.chosen.label} — 이유: {reason}")
+            for rej in item.decision.rejected:
+                reason = rej.reason or "(이유 미기록)"
+                lines.append(f"    기각: {rej.label} — 이유: {reason}")
+        if item.outcome is not None:
+            lines.append(
+                f"    성과: {item.outcome.hypothesis_status}"
+                f"(metric={item.outcome.metric} target={item.outcome.target} "
+                f"actual={item.outcome.actual} direction={item.outcome.direction})"
+            )
+        lines.append("")
+    lines.append("요약(2~3문장, 위 데이터에 명시된 사실만 근거로):")
+    return "\n".join(lines)
+
+
+def _synthesize_learnings(items: list[ContextPackItem]) -> str | None:
+    """S26 AC②③: items 0건이면 종합할 근거가 없으므로 즉시 None(LLM 호출 자체를 안 함).
+    gen-LLM(S25) 미가용/실패 시에도 None — build_loop_context_pack이 이미 조립한 items(L1)는
+    이 함수와 무관하게 그대로 반환되므로 패널은 퇴화 없이 raw 목록만 보여준다."""
+    if not items:
+        return None
+    try:
+        from app.services.llm_client import generate_text
+
+        return generate_text(_build_synthesis_prompt(items))
+    except Exception as exc:
+        logger.warning("context-pack synthesis 실패(생략 처리): %s", exc)
+        return None
