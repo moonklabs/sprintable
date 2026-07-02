@@ -160,6 +160,15 @@ async def create_hypothesis(
     )
     await repo.add_epic_links(hyp.id, payload.epic_ids, "primary")
     await repo.add_story_links(hyp.id, payload.story_ids, "supports")
+
+    # E-LOOP-LEDGER P1-S4: statement를 embeddings 큐에 pending으로 등록(네트워크 I/O 0 —
+    # 실제 임베딩은 P1-S3 cron이 처리). score_hypotheses/attribute_loop_outcome과 동형 배선.
+    from app.services.embedding_enqueue import build_hypothesis_embedding_text, enqueue_embedding
+    await enqueue_embedding(
+        session, org_id, hyp.project_id, "hypothesis", hyp.id,
+        build_hypothesis_embedding_text(hyp.statement), created_by_member_id=caller.id,
+    )
+
     return await _to_response(repo, hyp)
 
 
@@ -219,6 +228,15 @@ async def update_hypothesis(
         await _verify_human_owner(session, new_owner)
 
     updated = await repo.update(hypothesis_id, **fields)
+
+    # P1-S4: statement가 바뀌면 재임베딩 큐잉(content_hash가 변경 없는 재저장은 no-op으로 걸러줌).
+    if "statement" in fields:
+        from app.services.embedding_enqueue import build_hypothesis_embedding_text, enqueue_embedding
+        await enqueue_embedding(
+            session, org_id, updated.project_id, "hypothesis", updated.id,
+            build_hypothesis_embedding_text(updated.statement), created_by_member_id=caller.id,
+        )
+
     return await _to_response(repo, updated)
 
 
