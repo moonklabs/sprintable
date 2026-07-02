@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     cloud_sql_instance_dev: str = "sprintable-494803:asia-northeast3:sprintable-dev"
     cloud_sql_instance_prod: str = "sprintable-494803:asia-northeast3:sprintable-prod"
 
+    # E-LOOP-LEDGER P1-S2: Vertex AI 임베딩(gemini-embedding-001) — cloud_sql_instance_*와 동일
+    # GCP project/region(sprintable-494803·asia-northeast3) 기본값. ADC로 인증(신규 크리덴셜 관리 0,
+    # ga4_client.py/gcs.py와 동일 패턴).
+    gcp_project_id: str = "sprintable-494803"
+    vertex_ai_location: str = "asia-northeast3"
+
     # E-INFRA S2 + ee7794eb: DB 커넥션 풀 **rollout-safe** right-size (env DB_POOL_SIZE/DB_MAX_OVERFLOW override).
     # ⚠️ 배포 rollout 時 old+new 리비전이 **동시 점유(2×)** — steady 산식만 쓰면 배포 중 max_connections
     #    초과(2026-06-29 dev TooManyConnections·#1766 rollout 전요청 500). **인스턴스당 실 커넥션은 pool
