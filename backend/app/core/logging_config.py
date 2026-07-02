@@ -27,6 +27,11 @@ class JsonFormatter(logging.Formatter):
             payload["exception"] = self.formatException(record.exc_info)
         if hasattr(record, "request_id"):
             payload["httpRequest"] = {"requestId": record.request_id}
+        # E-LOOP-LEDGER P1-S8: 임의 구조화 필드 pass-through(logger.info(..., extra={"structured": {...}}))
+        # — Cloud Logging jsonPayload에서 필드별 필터/집계 가능(메시지 문자열 파싱보다 A2 임계치
+        # 실측에 유리). 화이트리스트 없이 그대로 병합 — 호출부가 키 이름 충돌만 스스로 피하면 됨.
+        if hasattr(record, "structured"):
+            payload.update(record.structured)
         return json.dumps(payload, ensure_ascii=False)
 
 
