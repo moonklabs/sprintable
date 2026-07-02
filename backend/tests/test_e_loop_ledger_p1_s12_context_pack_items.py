@@ -22,6 +22,9 @@ def _loop_obj(loop_id=None, title="타깃 loop", goal_tags=None):
     return SimpleNamespace(
         id=loop_id or uuid.uuid4(), title=title, goal_tags=goal_tags or [],
         project_id=uuid.uuid4(), org_id=uuid.uuid4(),
+        # S28: hypothesis_id(캐시키/추천 컨텍스트)+context_pack_cache_key(캐시 히트 판정)를
+        # build_loop_context_pack이 무조건 읽는다 — None이면 캐시-미스 경로(정상)로 흐른다.
+        hypothesis_id=None, context_pack_cache_key=None,
     )
 
 
@@ -79,7 +82,8 @@ async def test_hypothesis_item_maps_goal_and_outcome_no_decision():
     hyp_result.scalars.return_value.all.return_value = [hyp]
     session.execute = AsyncMock(return_value=hyp_result)
 
-    with patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
+    with patch("app.services.llm_client.generate_text_claude", return_value=None), \
+         patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
         with patch(
             "app.services.context_pack_search.search_similar_embeddings",
             new=AsyncMock(return_value=[result]),
@@ -134,7 +138,8 @@ async def test_loop_item_gets_decision_and_indirect_outcome():
     artifact_res = MagicMock(); artifact_res.scalars.return_value.all.return_value = [chosen, rejected]
     session.execute = AsyncMock(side_effect=[loop_res, hyp_res, artifact_res])
 
-    with patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
+    with patch("app.services.llm_client.generate_text_claude", return_value=None), \
+         patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
         with patch(
             "app.services.context_pack_search.search_similar_embeddings",
             new=AsyncMock(return_value=[result]),
@@ -161,7 +166,8 @@ async def test_loop_artifact_item_maps_to_decision_entity_type_no_decision_block
     artifact_res = MagicMock(); artifact_res.scalars.return_value.all.return_value = [artifact]
     session.execute = AsyncMock(return_value=artifact_res)
 
-    with patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
+    with patch("app.services.llm_client.generate_text_claude", return_value=None), \
+         patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
         with patch(
             "app.services.context_pack_search.search_similar_embeddings",
             new=AsyncMock(return_value=[result]),
@@ -188,7 +194,8 @@ async def test_input_order_from_search_preserved_similarity_desc():
     artifact_res = MagicMock(); artifact_res.scalars.return_value.all.return_value = [a1, a2]
     session.execute = AsyncMock(return_value=artifact_res)
 
-    with patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
+    with patch("app.services.llm_client.generate_text_claude", return_value=None), \
+         patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
         with patch(
             "app.services.context_pack_search.search_similar_embeddings",
             new=AsyncMock(return_value=[r1, r2]),  # 이미 desc 정렬된 입력.
@@ -271,7 +278,8 @@ async def test_decided_loop_included_with_non_null_chosen():
     artifact_res = MagicMock(); artifact_res.scalars.return_value.all.return_value = [chosen]
     session.execute = AsyncMock(side_effect=[loop_res, artifact_res])
 
-    with patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
+    with patch("app.services.llm_client.generate_text_claude", return_value=None), \
+         patch("app.services.embedding_client.embed_text", return_value=[0.1] * 768):
         with patch(
             "app.services.context_pack_search.search_similar_embeddings",
             new=AsyncMock(return_value=[result]),

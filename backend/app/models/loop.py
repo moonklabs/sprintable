@@ -109,6 +109,16 @@ class LoopRun(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     # FK 비강제(hypotheses.owner_member_id/assignee_id 동형 컨벤션) — resolve_member 서비스 해소.
     created_by_member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
+    # S28(story 116e6fe8) AC④: Context Pack synthesis/recommendation content-hash 캐시(gen-LLM
+    # 재호출 방지 — "같은 입력=1회만"). cache_key가 최신 회수 items+loop 맥락+모델/프롬프트
+    # 버전 해시와 일치할 때만 재사용(app/services/context_pack_items.py::_compute_cache_key).
+    context_pack_cache_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    context_pack_synthesis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_pack_synthesis_confidence: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    context_pack_recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_pack_recommendation_confidence: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    context_pack_cached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     __table_args__ = (
         CheckConstraint(
             "status IN ('draft','briefing','generating','deciding','executing',"

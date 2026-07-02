@@ -55,8 +55,15 @@ class ContextPackResponse(BaseModel):
 
     S27: recommendation(L3 능동 추천, str|None) 추가 — synthesis(L2)+새 loop의 goal/hypothesis를
     gen-LLM으로 처방. synthesis가 null이면(근거 자체가 없음) recommendation도 항상 null(L1/L2
-    무손상 — 과잉 처방 금지)."""
+    무손상 — 과잉 처방 금지).
+
+    S28(유나 BE↔FE 계약, 2026-07-02): *_confidence("high"|"medium"|"low"|None)는 LLM이 산출한
+    확신도를 구조화 필드로 노출(텍스트 hedge와 별개 — FE 배지 렌더용). evidence_count는
+    items 수로 결정론적 산출(LLM 산출물 아님) — "과거 N건 기준" FE 표시 소스."""
     items: list[ContextPackItem]
     embed_available: bool
     synthesis: str | None = None
+    synthesis_confidence: str | None = None
     recommendation: str | None = None
+    recommendation_confidence: str | None = None
+    evidence_count: int = 0

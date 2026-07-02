@@ -74,7 +74,7 @@ def test_build_draft_prompt_instructs_no_fabrication_and_single_sentence():
 # ── ⓐⓒ _draft_statement — LLM 시도/graceful fallback ───────────────────────────
 
 def test_no_context_falls_back_to_template_without_calling_llm():
-    with patch("app.services.llm_client.generate_text") as mock_gen:
+    with patch("app.services.llm_client.generate_text_claude") as mock_gen:
         statement, llm_generated = _draft_statement(None)
     mock_gen.assert_not_called()
     assert llm_generated is False
@@ -82,7 +82,7 @@ def test_no_context_falls_back_to_template_without_calling_llm():
 
 
 def test_llm_success_returns_generated_statement():
-    with patch("app.services.llm_client.generate_text", return_value="실행하면 활성화율이 오를 것이다.") as mock_gen:
+    with patch("app.services.llm_client.generate_text_claude", return_value="실행하면 활성화율이 오를 것이다.") as mock_gen:
         statement, llm_generated = _draft_statement({"title": "온보딩 개선"})
     mock_gen.assert_called_once()
     assert statement == "실행하면 활성화율이 오를 것이다."
@@ -92,14 +92,14 @@ def test_llm_success_returns_generated_statement():
 
 
 def test_llm_unavailable_falls_back_to_template():
-    with patch("app.services.llm_client.generate_text", return_value=None):
+    with patch("app.services.llm_client.generate_text_claude", return_value=None):
         statement, llm_generated = _draft_statement({"title": "온보딩 개선"})
     assert llm_generated is False
     assert statement == _template_statement({"title": "온보딩 개선"})
 
 
 def test_llm_exception_falls_back_to_template_not_raised():
-    with patch("app.services.llm_client.generate_text", side_effect=RuntimeError("boom")):
+    with patch("app.services.llm_client.generate_text_claude", side_effect=RuntimeError("boom")):
         statement, llm_generated = _draft_statement({"title": "온보딩 개선"})
     assert llm_generated is False
     assert statement == _template_statement({"title": "온보딩 개선"})
@@ -107,7 +107,7 @@ def test_llm_exception_falls_back_to_template_not_raised():
 
 def test_llm_blank_response_falls_back_to_template():
     """빈/공백 응답을 그대로 statement로 쓰지 않고 템플릿으로 대체(안전 필터 차단 등 대비)."""
-    with patch("app.services.llm_client.generate_text", return_value="   "):
+    with patch("app.services.llm_client.generate_text_claude", return_value="   "):
         statement, llm_generated = _draft_statement({"title": "온보딩 개선"})
     assert llm_generated is False
     assert statement == _template_statement({"title": "온보딩 개선"})
@@ -168,7 +168,7 @@ async def test_draft_persist_llm_success_records_llm_generation_method():
     )
     with patch.object(svc, "HypothesisRepository", return_value=repo), \
          patch.object(svc, "lookup_members_by_ids", AsyncMock(return_value=_members_lookup())), \
-         patch("app.services.llm_client.generate_text", return_value="실행하면 활성화율이 오를 것이다."):
+         patch("app.services.llm_client.generate_text_claude", return_value="실행하면 활성화율이 오를 것이다."):
         out = await svc.draft_hypothesis(_empty_session(), ORG_ID, _caller(), payload)
 
     assert out.statement == "실행하면 활성화율이 오를 것이다."
@@ -186,7 +186,7 @@ async def test_draft_persist_llm_unavailable_records_template_generation_method(
     )
     with patch.object(svc, "HypothesisRepository", return_value=repo), \
          patch.object(svc, "lookup_members_by_ids", AsyncMock(return_value=_members_lookup())), \
-         patch("app.services.llm_client.generate_text", return_value=None):
+         patch("app.services.llm_client.generate_text_claude", return_value=None):
         out = await svc.draft_hypothesis(_empty_session(), ORG_ID, _caller(), payload)
 
     assert out.statement == _template_statement({"title": "온보딩 개선"})
@@ -201,7 +201,7 @@ async def test_draft_no_persist_still_drafts_statement_without_creating_row():
         project_id=PROJECT_ID, source_type="epic", source_id=uuid.uuid4(),
         persist=False, context={"title": "온보딩 개선"},
     )
-    with patch("app.services.llm_client.generate_text", return_value="실행하면 활성화율이 오를 것이다.") as mock_gen:
+    with patch("app.services.llm_client.generate_text_claude", return_value="실행하면 활성화율이 오를 것이다.") as mock_gen:
         out = await svc.draft_hypothesis(_empty_session(), ORG_ID, _caller(), payload)
     mock_gen.assert_called_once()
     assert out.statement == "실행하면 활성화율이 오를 것이다."
