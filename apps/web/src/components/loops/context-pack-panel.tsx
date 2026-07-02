@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { Brain } from 'lucide-react';
+import { Brain, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { OutcomeBadge } from '@/components/loops/outcome-badge';
@@ -35,6 +35,11 @@ interface ContextPackItem {
 interface ContextPackResponse {
   items: ContextPackItem[];
   embed_available: boolean;
+  /**
+   * E-LOOP-LEDGER S26 — gen-LLM이 회수 precedents를 증류한 학습 요약(#1843, PO-locked 계약).
+   * optional: 디디 BE 미착지 과도기·gen-LLM 미가용·items 0건 등은 null — 섹션 자체를 렌더 생략(null-safe).
+   */
+  synthesis?: string | null;
 }
 
 function ContextPackCard({ item }: { item: ContextPackItem }) {
@@ -161,7 +166,18 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
         ) : !data || data.items.length === 0 ? (
           <p className="py-4 text-center text-sm text-muted-foreground">{t('contextPackEmpty')}</p>
         ) : (
-          data.items.map((item) => <ContextPackCard key={`${item.entity_type}-${item.entity_id}`} item={item} />)
+          <>
+            {data.synthesis ? (
+              <div className="flex items-start gap-2 rounded-lg border border-info-border bg-info-tint p-2.5 text-xs text-info">
+                <Sparkles className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                <div className="space-y-0.5">
+                  <p className="font-semibold">{t('contextPackSynthesisTitle')}</p>
+                  <p className="text-info/90">{data.synthesis}</p>
+                </div>
+              </div>
+            ) : null}
+            {data.items.map((item) => <ContextPackCard key={`${item.entity_type}-${item.entity_id}`} item={item} />)}
+          </>
         )}
       </div>
     </div>
