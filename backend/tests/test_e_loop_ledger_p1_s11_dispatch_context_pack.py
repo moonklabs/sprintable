@@ -92,7 +92,12 @@ async def test_story_resolves_via_primary_hypothesis_anchor_then_loop_and_doc():
 
 async def test_epic_resolves_via_primary_hypothesis_anchor():
     """anchor_hyp은 실제 Hypothesis 인스턴스여야 isinstance 방어를 통과해 loop 쿼리까지
-    genuinely 도달한다(SimpleNamespace면 방어에서 조기 반환돼 masking)."""
+    genuinely 도달한다(SimpleNamespace면 방어에서 조기 반환돼 masking).
+
+    까심/codex QA RC(2026-07-02): out is None 단독으로는 "가드가 조기 거부"와 "가드 통과 후
+    loop 쿼리 결과가 없어 None"을 구분 못 한다(둘 다 out is None) — isinstance 가드를 통째로
+    제거해도 이 테스트는 통과해 회귀탐지력이 0이었다. session.execute(loop 쿼리) 실제 호출
+    여부를 직접 검증해 "가드를 genuinely 통과했다"는 것을 관찰 가능하게 만든다."""
     anchor_hyp = Hypothesis(id=uuid.uuid4())
     session = _scalar_one_or_none_session(None)  # anchor는 있지만 연결 loop이 없음.
     with patch.object(
@@ -102,6 +107,9 @@ async def test_epic_resolves_via_primary_hypothesis_anchor():
     assert out is None
     mock_resolve.assert_called_once()
     assert mock_resolve.call_args.args[0] == "epic"
+    # 가드 통과 증명 — 가드가 anchor_hyp을 거부했다면 loop 쿼리(session.execute)는 호출되지
+    # 않았을 것이다. 이 assertion이 있어야 isinstance 가드 제거 시 이 테스트가 genuinely 실패한다.
+    session.execute.assert_called_once()
 
 
 async def test_no_linked_loop_returns_none():
