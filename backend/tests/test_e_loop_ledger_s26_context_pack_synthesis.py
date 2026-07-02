@@ -424,6 +424,80 @@ async def test_build_loop_context_pack_cache_hit_skips_llm_call_real_db():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
 @pytest.mark.anyio
+async def test_build_loop_context_pack_recommendation_transient_failure_not_permanently_cached_real_db():
+    """⭐까심 QA RC(2026-07-02): synthesis는 성공·recommendation만 일시장애(quota/timeout)로
+    실패(None)해도 캐시에 기록되면 안 된다 — 기록되면 다음 요청이 캐시히트로 LLM을 다시
+    안 불러 recommendation=None이 영구 고착된다. 캐시 미기록 → 다음 GET이 둘 다 재시도해야."""
+    from sqlalchemy import text as _text
+    from app.core.database import Base
+    from app.models.embedding import Embedding
+    from app.models.hypothesis import Hypothesis
+    from app.repositories.loop import LoopRunRepository
+    from app.services.context_pack_items import build_loop_context_pack
+
+    engine, Session = await _session()
+    query_vec = _unit(0)
+    past_hyp_id = uuid.uuid4()
+
+    try:
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            repo = LoopRunRepository(s, ORG)
+            target_loop = await repo.create(
+                project_id=PROJECT, title="타깃 loop", goal_tags=[],
+                status="draft", created_by_member_id=uuid.uuid4(),
+            )
+            s.add(Hypothesis(
+                id=past_hyp_id, org_id=ORG, project_id=PROJECT, owner_member_id=uuid.uuid4(),
+                statement="과거 실험", metric_definition={"metric": "x", "source": "manual", "target": 1, "direction": "up"},
+                measure_after=datetime.now(timezone.utc), status="verified",
+                outcome_result={"metric": "cvr", "actual": 18.4, "target": 18, "direction": "up"},
+            ))
+            await s.flush()
+            s.add(Embedding(
+                id=uuid.uuid4(), org_id=ORG, project_id=PROJECT,
+                entity_type="hypothesis", entity_id=past_hyp_id,
+                embedding_text="과거 실험", content_hash="h1",
+                embedding=query_vec, model_version="m", dimension=768, status="ready",
+            ))
+            await s.commit()
+
+        # 1차 GET — synthesis 성공 + recommendation 일시장애(None). 호출 순서: synthesis→recommendation.
+        async with Session() as s:
+            loop_obj = await LoopRunRepository(s, ORG).get(target_loop.id)
+            with patch("app.services.embedding_client.embed_text", return_value=query_vec), \
+                 patch(
+                     "app.services.llm_client.generate_text_claude",
+                     side_effect=["synthesis 1.\nconfidence: high", None],
+                 ) as mock_gen_1:
+                out1 = await build_loop_context_pack(s, ORG, loop_obj)
+            await s.commit()
+        assert out1.synthesis == "synthesis 1."
+        assert out1.recommendation is None
+        assert mock_gen_1.call_count == 2
+
+        # 2차 GET(동일 items/loop) — 캐시가 기록되지 않았어야 하므로 synthesis+recommendation
+        # 둘 다 재시도(캐시히트였다면 mock_gen_2가 전혀 호출 안 됐을 것).
+        async with Session() as s:
+            loop_obj2 = await LoopRunRepository(s, ORG).get(target_loop.id)
+            with patch("app.services.embedding_client.embed_text", return_value=query_vec), \
+                 patch(
+                     "app.services.llm_client.generate_text_claude",
+                     side_effect=["synthesis 2.\nconfidence: high", "recommendation 2.\nconfidence: medium"],
+                 ) as mock_gen_2:
+                out2 = await build_loop_context_pack(s, ORG, loop_obj2)
+
+        assert mock_gen_2.call_count == 2  # 캐시 미기록 → 둘 다 재호출(복구 확인).
+        assert out2.synthesis == "synthesis 2."
+        assert out2.recommendation == "recommendation 2."
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
 async def test_build_loop_context_pack_cache_invalidates_when_decision_changes_real_db():
     """⭐캐시 무효화 — 선례 decision이 바뀌면(예: 새 chosen 확정) content-hash가 달라져 캐시가
     자동 무효화되고 LLM이 다시 호출된다(stale 캐시 방지)."""

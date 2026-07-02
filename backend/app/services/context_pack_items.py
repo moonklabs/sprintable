@@ -102,9 +102,12 @@ async def build_loop_context_pack(
         recommendation, recommendation_confidence = _recommend_next_step(
             loop.title, hyp_statement, synthesis, evidence_count,
         )
-        if synthesis is not None:
-            # gen-LLM 미가용/실패(synthesis=None)면 캐시에 기록하지 않는다 — 일시적 장애를
-            # 영구 캐시된 "결과 없음"으로 굳히면 안 됨(다음 요청이 다시 시도하게 둔다).
+        if synthesis is not None and recommendation is not None:
+            # 까심 QA RC(2026-07-02): synthesis만 검사하면 recommendation의 일시적 장애(quota/
+            # timeout)가 recommendation=None으로 영구 캐시된다 — 입력이 안 바뀌는 한 gen-LLM이
+            # 복구돼도 캐시히트로 재시도 자체가 막힌다. 둘 다 성공했을 때만 캐시(둘 중 하나라도
+            # 실패하면 매 요청 재시도 — "일시적 장애를 영구 결과없음으로 굳히지 않는다" 원칙을
+            # synthesis/recommendation 양쪽에 동일 적용).
             from app.repositories.loop import LoopRunRepository
 
             await LoopRunRepository(session, org_id).update(
