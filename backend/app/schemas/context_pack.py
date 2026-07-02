@@ -10,3 +10,44 @@ class ContextPackSearchResult(BaseModel):
     entity_id: uuid.UUID
     embedding_text: str
     similarity: float
+
+
+class ContextPackDecisionSide(BaseModel):
+    """P1-S12: decision.chosen/rejected[] 항목 1건(doc fbe5923e §3)."""
+    label: str
+    reason: str | None = None
+
+
+class ContextPackDecision(BaseModel):
+    """P1-S12: entity_type=='loop'일 때만 populate — chosen 1건+top rejected(대표 1건)."""
+    chosen: ContextPackDecisionSide | None = None
+    rejected: list[ContextPackDecisionSide] = []
+
+
+class ContextPackOutcome(BaseModel):
+    """P1-S12: hypothesis가 verified/falsified로 해소됐을 때만 populate(S9 OutcomeBadge 매핑)."""
+    hypothesis_status: str
+    metric: str | None = None
+    actual: float | None = None
+    target: float | None = None
+    direction: str | None = None
+
+
+class ContextPackItem(BaseModel):
+    """P1-S12: GET /loops/{id}/context-pack 응답 1건(doc fbe5923e §3, 유나 S13 목업 확정 계약)."""
+    entity_type: str  # "loop" | "hypothesis" | "decision"(내부 loop_artifact를 FE 명명으로 매핑)
+    entity_id: uuid.UUID
+    similarity: float
+    goal: str
+    decision: ContextPackDecision | None = None
+    outcome: ContextPackOutcome | None = None
+    # hypothesis는 nullable — 미르코 FE 라우트 실측(2026-07-02): apps/web에 독립 hypothesis 상세
+    # 페이지 없음(HypothesesSection은 /epics/[id] 임베드뿐 + epic_ids 다대다라 /epics 치환도 모호).
+    # broken link 주느니 null(FE가 링크 생략 처리) — 진짜 딥링크는 별도 follow-up.
+    href: str | None
+
+
+class ContextPackResponse(BaseModel):
+    """P1-S12: 최상위 응답 — items(similarity-desc)+embed_available(임베딩 불가 상태 구분)."""
+    items: list[ContextPackItem]
+    embed_available: bool

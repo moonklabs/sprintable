@@ -43,12 +43,15 @@ class LoopServiceError(Exception):
         self.message = message
 
 
-async def _require_loop_project_access(
+async def require_loop_project_access(
     session: AsyncSession, loop_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID
 ) -> LoopRun:
     """GET-by-id의 canonical project-scope authz. docs._require_doc_project_access와 동형:
     org-scope로 대상을 로드(없으면 404) → has_project_access로 그 loop의 project 접근을
-    검증(무권한이면 403). id+org만으로 잡는 cross-project IDOR을 차단한다."""
+    검증(무권한이면 403). id+org만으로 잡는 cross-project IDOR을 차단한다.
+
+    P1-S12: 라우터(context-pack 엔드포인트)가 raw ORM LoopRun이 필요해 public으로 승격
+    (get_loop처럼 LoopResponse로 직렬화하지 않는 호출부가 생김)."""
     repo = LoopRunRepository(session, org_id)
     loop = await repo.get(loop_id)
     if loop is None:
@@ -108,7 +111,7 @@ async def create_loop(
 async def get_loop(
     session: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, loop_id: uuid.UUID
 ) -> LoopResponse:
-    loop = await _require_loop_project_access(session, loop_id, user_id, org_id)
+    loop = await require_loop_project_access(session, loop_id, user_id, org_id)
     return LoopResponse.model_validate(loop)
 
 
