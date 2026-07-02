@@ -50,10 +50,22 @@ def test_recommendation_prompt_instructs_hedge_and_no_fabrication():
     assert "hedge" in prompt
 
 
+def test_recommendation_prompt_synthesis_none_is_safe_not_a_crash():
+    """까심 RC — synthesis=None으로 프롬프트 조립 자체가 크래시하지 않아야 한다. 이래야
+    _recommend_next_step의 `if synthesis is None: return None` 가드가 과잉처방을 막는
+    "유일한" 게이트가 되고(우연한 TypeError 흡수로 masking되지 않고), 가드를 실수로
+    지우면 generate_text가 실제로 불려 테스트가 정직하게 실패한다(아래 spy 테스트 참고)."""
+    prompt = _build_recommendation_prompt("g", None, None, 0)
+    assert "(종합 없음)" in prompt
+
+
 # ── ⓐ synthesis=None → 추천 자제(generate_text 미호출, spy) ────────────────────
 
 @pytest.mark.anyio
 async def test_synthesis_none_skips_recommendation_without_calling_llm():
+    """⭐까심 RC 검증됨(비-tautological): 프롬프트 빌더가 None-safe이므로(위 테스트) 이
+    assert_not_called()는 가드가 실제로 작동해야만 통과한다 — 가드를 지워보면 generate_text가
+    호출돼 이 테스트가 정확히 그 지점서 실패함을 로컬 검증(fix 임시 제거→재현→복원)."""
     from app.models.loop import LoopRun
 
     loop = LoopRun(id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), title="L", status="briefing")

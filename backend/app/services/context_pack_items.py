@@ -260,17 +260,23 @@ _RECOMMENDATION_INSTRUCTION = (
 
 
 def _build_recommendation_prompt(
-    new_goal: str, new_hypothesis: str | None, synthesis: str, item_count: int,
+    new_goal: str, new_hypothesis: str | None, synthesis: str | None, item_count: int,
 ) -> str:
     """⭐과신 방지(S27 AC②): 근거는 synthesis(이미 items 근거로만 만들어진 종합)뿐 — 새 loop의
-    goal/hypothesis는 처방 "대상"을 명시할 뿐 학습 근거로 주입되지 않는다(items 밖 사실 0)."""
+    goal/hypothesis는 처방 "대상"을 명시할 뿐 학습 근거로 주입되지 않는다(items 밖 사실 0).
+
+    까심 RC: synthesis=None을 None-safe로 처리(TypeError로 크래시하지 않음) — 이래야
+    _recommend_next_step의 `if synthesis is None: return None` 가드가 "유일한" 과잉처방
+    방지 게이트가 된다(가드 없이 이 함수만으로는 크래시가 우연히 generate_text 미호출을
+    만드는 masking을 방지 — 실제 프롬프트 조립이 어떤 입력에도 안전해야 가드의 존재 여부가
+    테스트에서 정직하게 드러난다)."""
     lines = [_RECOMMENDATION_INSTRUCTION, "", f"[새 loop] 목표: {new_goal}"]
     if new_hypothesis:
         lines.append(f"           가설: {new_hypothesis}")
     lines.extend([
         "",
         f"[과거 학습 종합 — 근거 {item_count}건]",
-        synthesis,
+        synthesis if synthesis else "(종합 없음)",
         "",
         "제안(1~2문장, hedge 포함):",
     ])
