@@ -59,6 +59,7 @@ from .tools.hypotheses import (
     confirm_hypothesis, create_hypothesis, get_hypothesis,
     link_hypothesis, list_hypotheses, update_hypothesis,
 )
+from .tools.loops import GetLoopContextInput, get_loop_context
 from .tools.meetings import (
     CreateMeetingInput, ListMeetingsInput, MeetingIdInput, UpdateMeetingInput,
     create_meeting, delete_meeting, get_meeting, list_meetings,
@@ -458,6 +459,9 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_get_workflow_guide",
      "현재 프로젝트 워크플로우 가이드 텍스트 반환 — 에이전트 system prompt 주입용.",
      SprintableInput, get_workflow_guide),
+    ("sprintable_get_loop_context",
+     "loop의 Context Pack(의미 유사한 과거 loop/결정/성과) 조회 — 에이전트 on-demand pull, read-only.",
+     GetLoopContextInput, get_loop_context),
     ("sprintable_lock_files",
      "파일 작업 시작 선언 — 동시 수정 충돌 경고 반환. 작업 완료 후 반드시 unlock_files 호출.",
      LockFilesInput, lock_files),

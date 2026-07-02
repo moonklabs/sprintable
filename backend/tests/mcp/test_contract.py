@@ -1,4 +1,4 @@
-"""S3-6: 시스템 콜 계약 검증 — 95개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
+"""S3-6: 시스템 콜 계약 검증 — 96개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
 from __future__ import annotations
 
 import os
@@ -73,6 +73,8 @@ EXPECTED_TOOLS = {
     "sprintable_list_webhook_configs", "sprintable_upsert_webhook_config", "sprintable_delete_webhook_config",
     # workflow (1)
     "sprintable_get_workflow_guide",
+    # loops (1) — E-LOOP-LEDGER P1-S12
+    "sprintable_get_loop_context",
     # file locks (2)
     "sprintable_lock_files", "sprintable_unlock_files",
     # smoke
@@ -81,7 +83,7 @@ EXPECTED_TOOLS = {
 
 
 def test_total_tool_count():
-    assert len(_TOOLS) == 95
+    assert len(_TOOLS) == 96
 
 
 def test_all_expected_tools_registered():
