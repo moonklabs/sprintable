@@ -13,6 +13,18 @@ measure_after가 도래한 가설을 채점한다. legacy outcome_scorer(sprint/
     source='ga4'          → score_ga4_outcome (GA4 Data API)
     source='internal_ops' (metric=completion_pct) → 링크된 스토리 완료율 → score_epic_outcome
     그 외(manual 등)       → 자동 채점 안 함(§10.4), measuring 유지.
+
+🔴P1-S3g fix(2026-07-02, story 7ca1c953): internal_ops 브랜치의 _linked_story_completion_pct가
+실 DB 쿼리(Story JOIN)를 한다 — 이 쿼리가 실 Postgres 에러(UndefinedTable/타임아웃 등)로
+트랜잭션을 server-level aborted 시키면, 종전엔 except가 Python 예외만 잡고 같은 세션으로
+루프를 continue해 이후 batch의 모든 쿼리(다른 hypothesis의 record_outcome_verdicts/
+attribute_loop_outcome 포함)가 연쇄 실패하고 cron route의 session.commit()이 조용히
+ROLLBACK되어 이미 처리된 다른 hypothesis들의 진행(active→measuring 등)까지 통째 유실될 수
+있었다(P1-S7 까심 QA CRITICAL에서 발견된 것과 동일 클래스 — [[feedback_savepoint_failopen_
+session_poison]] 참고). score_ga4_outcome/score_epic_outcome(+_linked_story_completion_pct)를
+session.begin_nested()(SAVEPOINT)로 격리해, 한 hypothesis의 DB abort가 그 SAVEPOINT만
+롤백시키고 batch 내 다른 hypothesis 진행과 outer commit은 오염시키지 않게 한다. GA4 브랜치는
+순수 HTTP(fetch_ga4_metric)라 애초에 이 위험이 없음(무관).
 """
 from __future__ import annotations
 
@@ -88,15 +100,18 @@ async def score_hypotheses(session: AsyncSession) -> dict[str, Any]:
         md = hyp.metric_definition or {}
         source = md.get("source")
         try:
-            if source == "ga4":
-                scoring = score_ga4_outcome(md)
-            elif source == "internal_ops":
-                pct = await _linked_story_completion_pct(session, hyp.id)
-                result = score_epic_outcome(md, pct)
-                scoring = result if result is not None else {"outcome_status": "pending", "outcome_result": None}
-            else:
-                # manual·미지원 source → 자동 채점 금지(거짓 신호 차단). measuring 유지.
-                scoring = {"outcome_status": "pending", "outcome_result": None}
+            async with session.begin_nested():  # SAVEPOINT — internal_ops의 실 DB 쿼리가 실
+                # Postgres 에러를 내도 이 hypothesis 처리만 롤백되고 batch 나머지(이미 flush된
+                # active→measuring 등)는 오염되지 않는다. except는 이 async with 밖에서 잡는다.
+                if source == "ga4":
+                    scoring = score_ga4_outcome(md)
+                elif source == "internal_ops":
+                    pct = await _linked_story_completion_pct(session, hyp.id)
+                    result = score_epic_outcome(md, pct)
+                    scoring = result if result is not None else {"outcome_status": "pending", "outcome_result": None}
+                else:
+                    # manual·미지원 source → 자동 채점 금지(거짓 신호 차단). measuring 유지.
+                    scoring = {"outcome_status": "pending", "outcome_result": None}
         except Exception as exc:  # GA4 회수 등 실패 → measuring 유지(위장 금지)
             logger.warning("hypothesis scoring failed id=%s: %s", hyp.id, exc)
             failed.append({"id": str(hyp.id), "error": str(exc)})
