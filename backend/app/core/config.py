@@ -1,5 +1,11 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# E-LOOP-LEDGER P1: gemini-embedding-001 @ output_dimensionality=768(파운데이션 crux 확정,
+# 2026-07-01) — app.models.embedding.Embedding.embedding(vector 컬럼)과 embedding_client.py
+# 양쪽이 이 단일 상수를 참조한다(중복 선언 제거, PO 지시 2026-07-02). 배포별로 달라질 값이
+# 아니라(모델 자체를 바꾸는 결정) env-overridable Settings 필드가 아닌 plain 상수로 둔다.
+EMBEDDING_DIMENSION = 768
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=(".env", ".env.local"), env_file_encoding="utf-8", extra="ignore")
@@ -19,6 +25,12 @@ class Settings(BaseSettings):
     # Cloud SQL (D-S1: Phase D GCP 인프라)
     cloud_sql_instance_dev: str = "sprintable-494803:asia-northeast3:sprintable-dev"
     cloud_sql_instance_prod: str = "sprintable-494803:asia-northeast3:sprintable-prod"
+
+    # E-LOOP-LEDGER P1-S2: Vertex AI 임베딩(gemini-embedding-001) — cloud_sql_instance_*와 동일
+    # GCP project/region(sprintable-494803·asia-northeast3) 기본값. ADC로 인증(신규 크리덴셜 관리 0,
+    # ga4_client.py/gcs.py와 동일 패턴).
+    gcp_project_id: str = "sprintable-494803"
+    vertex_ai_location: str = "asia-northeast3"
 
     # E-INFRA S2 + ee7794eb: DB 커넥션 풀 **rollout-safe** right-size (env DB_POOL_SIZE/DB_MAX_OVERFLOW override).
     # ⚠️ 배포 rollout 時 old+new 리비전이 **동시 점유(2×)** — steady 산식만 쓰면 배포 중 max_connections

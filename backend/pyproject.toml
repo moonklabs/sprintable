@@ -30,6 +30,8 @@ dependencies = [
     "python-docx>=1.1.0",
     # E-LOOP-LEDGER P1-S1: pgvector SQLAlchemy Vector 타입(embeddings 테이블). extension은 baseline에 이미 활성화됨.
     "pgvector>=0.3.0",
+    # E-LOOP-LEDGER P1-S2: Vertex AI(gemini-embedding-001) 임베딩 클라이언트. ADC 인증(신규 크리덴셜 0).
+    "google-genai>=1.0.0",
 ]
 
 [dependency-groups]

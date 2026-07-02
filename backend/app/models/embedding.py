@@ -32,6 +32,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.config import EMBEDDING_DIMENSION
 from app.models.base import Base, OrgScopedMixin, TimestampMixin
 
 # fresh-runnable(Base.metadata.create_all) 경로는 baseline.sql을 안 거치므로 pgvector
@@ -45,7 +46,6 @@ def _ensure_vector_extension(target, connection, **kw):
 
 EMBEDDING_ENTITY_TYPES = frozenset({"hypothesis", "loop", "loop_artifact"})
 EMBEDDING_STATUSES = frozenset({"pending", "processing", "ready", "failed"})
-EMBEDDING_DIMENSION = 768
 
 
 class Embedding(Base, OrgScopedMixin, TimestampMixin):
