@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ImageOff, Loader2, Lock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -78,11 +78,51 @@ function ImagePreview({ assetId, fallbackLabel }: { assetId: string; fallbackLab
   );
 }
 
-/** text/* 프리뷰 — text_content가 LoopArtifactResponse에 이미 실려오므로 fetch 없이 동기 렌더. */
-function TextPreview({ textContent, textTruncated }: { textContent: string; textTruncated: boolean }) {
+/**
+ * text/* 프리뷰 — text_content(≤4KB)가 LoopArtifactResponse에 이미 실려오므로 fetch 없이
+ * 동기 렌더이 기본. textTruncated(원본 >4KB)일 때만 "더보기"가 GET /api/assets/{id}/text로
+ * 전문을 lazy refetch(S24b fast-follow, 디디 endpoint) — <4KB(대다수)는 순수 클라이언트
+ * line-clamp 토글 그대로(회귀0). 실패(503 등)는 캡된 textContent를 유지한 채 재시도 affordance.
+ */
+function TextPreview({
+  assetId,
+  textContent,
+  textTruncated,
+}: {
+  assetId: string;
+  textContent: string;
+  textTruncated: boolean;
+}) {
   const t = useTranslations('storage');
   const [expanded, setExpanded] = useState(false);
+  const [fullText, setFullText] = useState<string | null>(null);
+  const [loadingFull, setLoadingFull] = useState(false);
+  const [fullTextError, setFullTextError] = useState(false);
   const isLong = textContent.length > SHORT_COPY_THRESHOLD;
+  const displayText = fullText ?? textContent;
+
+  const fetchFullText = useCallback(async () => {
+    setLoadingFull(true);
+    setFullTextError(false);
+    try {
+      const res = await fetch(`/api/assets/${assetId}/text`);
+      if (!res.ok) { setFullTextError(true); return; }
+      const { data } = (await res.json()) as { data?: { text_content?: string } };
+      if (!data?.text_content) { setFullTextError(true); return; }
+      setFullText(data.text_content);
+      setExpanded(true);
+    } catch {
+      setFullTextError(true);
+    } finally {
+      setLoadingFull(false);
+    }
+  }, [assetId]);
+
+  const handleToggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (textTruncated && fullText === null) { void fetchFullText(); return; }
+    setExpanded((v) => !v);
+  };
 
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 overflow-y-auto bg-muted/30 px-3 py-2 text-center">
@@ -92,18 +132,25 @@ function TextPreview({ textContent, textTruncated }: { textContent: string; text
           isLong && !expanded && 'line-clamp-3 text-[11.5px] font-normal',
         )}
       >
-        {textContent}
+        {displayText}
       </p>
       {isLong ? (
         <button
           type="button"
-          onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
-          className="text-[10px] font-semibold text-primary hover:underline"
+          onClick={handleToggle}
+          disabled={loadingFull}
+          className="text-[10px] font-semibold text-primary hover:underline disabled:opacity-50"
         >
-          {expanded ? t('previewCollapse') : t('previewExpand')}
+          {loadingFull ? t('previewLoading') : expanded ? t('previewCollapse') : t('previewExpand')}
         </button>
       ) : null}
-      {textTruncated ? <span className="text-[9px] text-muted-foreground">{t('previewTruncatedNote')}</span> : null}
+      {fullTextError ? (
+        <button type="button" onClick={handleToggle} className="text-[9px] font-medium text-destructive hover:underline">
+          {t('errorDesc')} · {t('retry')}
+        </button>
+      ) : textTruncated && fullText === null ? (
+        <span className="text-[9px] text-muted-foreground">{t('previewTruncatedNote')}</span>
+      ) : null}
     </div>
   );
 }
@@ -131,7 +178,7 @@ function renderByContentType(
     return <ImagePreview assetId={assetId} fallbackLabel={fallbackLabel} />;
   }
   if (contentType.startsWith('text/') && textContent) {
-    return <TextPreview textContent={textContent} textTruncated={textTruncated} />;
+    return <TextPreview assetId={assetId} textContent={textContent} textTruncated={textTruncated} />;
   }
   // 기타 type(video 등) 또는 text/*인데 text_content 없음(null-safe 폴백) — label+chip.
   return <TypeChipFallback contentType={contentType} fallbackLabel={fallbackLabel} />;
