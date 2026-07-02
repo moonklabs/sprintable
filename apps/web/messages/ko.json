@@ -2646,7 +2646,8 @@
     "entityTypeHypothesis": "hypothesis",
     "entityTypeDecision": "decision",
     "contextPackDecisionPending": "아직 결정 전입니다",
-    "contextPackSynthesisTitle": "학습 요약"
+    "contextPackSynthesisTitle": "학습 요약",
+    "contextPackRecommendationTitle": "참고 제안"
   },
   "sprints": {
     "title": "스프린트",

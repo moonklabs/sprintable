@@ -2646,7 +2646,8 @@
     "entityTypeHypothesis": "hypothesis",
     "entityTypeDecision": "decision",
     "contextPackDecisionPending": "Not yet decided",
-    "contextPackSynthesisTitle": "Learning summary"
+    "contextPackSynthesisTitle": "Learning summary",
+    "contextPackRecommendationTitle": "For consideration"
   },
   "sprints": {
     "title": "Sprints",
