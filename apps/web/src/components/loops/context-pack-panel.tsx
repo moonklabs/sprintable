@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { Brain, Sparkles } from 'lucide-react';
+import { Brain, Lightbulb, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { OutcomeBadge } from '@/components/loops/outcome-badge';
@@ -40,6 +40,12 @@ interface ContextPackResponse {
    * optional: 디디 BE 미착지 과도기·gen-LLM 미가용·items 0건 등은 null — 섹션 자체를 렌더 생략(null-safe).
    */
   synthesis?: string | null;
+  /**
+   * E-LOOP-LEDGER S27 — gen-LLM 능동 추천(L3, #1845, PO-locked 계약). optional·null-safe: BE 미착지/
+   * gen-LLM 미가용/근거 부족 등은 null — 섹션 생략(퇴화 없음, S26과 동일 원칙).
+   * ⭐유나 LOCK: 제안형 톤(복리 엔진은 결정을 돕지 대체 안 함)·시각 위계는 결정 UI보다 항상 낮게(subtle).
+   */
+  recommendation?: string | null;
 }
 
 function ContextPackCard({ item }: { item: ContextPackItem }) {
@@ -167,12 +173,22 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
           <p className="py-4 text-center text-sm text-muted-foreground">{t('contextPackEmpty')}</p>
         ) : (
           <>
+            {/* L2 요약(위) → L3 제안(중간) → L1 근거 items(아래) — 유나 LOCK: 위계는 항상 결정 UI보다 낮게. */}
             {data.synthesis ? (
               <div className="flex items-start gap-2 rounded-lg border border-info-border bg-info-tint p-2.5 text-xs text-info">
                 <Sparkles className="mt-0.5 size-3.5 shrink-0" aria-hidden />
                 <div className="space-y-0.5">
                   <p className="font-semibold">{t('contextPackSynthesisTitle')}</p>
                   <p className="text-info/90">{data.synthesis}</p>
+                </div>
+              </div>
+            ) : null}
+            {data.recommendation ? (
+              <div className="flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/20 p-2.5 text-xs text-muted-foreground">
+                <Lightbulb className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                <div className="space-y-0.5">
+                  <p className="font-medium text-foreground/80">{t('contextPackRecommendationTitle')}</p>
+                  <p>{data.recommendation}</p>
                 </div>
               </div>
             ) : null}
