@@ -14,11 +14,19 @@ from pydantic import BaseModel, ConfigDict, Field
 class LoopCreate(BaseModel):
     project_id: uuid.UUID
     title: str
-    # S1 스키마는 nullable — API 레벨 필수화는 S14(P2) 스코프.
+    # S1 스키마는 nullable — S14(P2): hypothesis_id 없으면 goal+metric_definition+measure_after
+    # 셋 다 있어야 한다(서비스가 그 자리에서 proposed hypothesis를 만들어 링크). 셋 다 없고
+    # hypothesis_id도 없으면 LOOP_HYPOTHESIS_REQUIRED(400).
     hypothesis_id: uuid.UUID | None = None
     parent_loop_id: uuid.UUID | None = None
     recipe_slug: str | None = None
     goal_tags: list[str] = []
+    goal: str | None = None
+    metric_definition: dict[str, Any] | None = None
+    measure_after: datetime | None = None
+    # agent caller가 goal 경로를 탈 때만 필요(HypothesisCreate.owner_member_id와 동일 정책 —
+    # hypothesis.create_hypothesis의 기존 HUMAN_OWNER_REQUIRED 검증을 그대로 통과시킨다).
+    owner_member_id: uuid.UUID | None = None
 
 
 class LoopResponse(BaseModel):

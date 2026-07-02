@@ -155,9 +155,19 @@ async def test_create_loop_enqueues_title_and_goal_tags():
     try:
         async with Session() as s:
             await _seed(s)
+            # S14: hypothesis_id 필수화됐으므로(이 테스트의 관심사는 embedding enqueue) 시드해서 우회.
+            from app.models.hypothesis import Hypothesis
+            hyp = Hypothesis(
+                id=uuid.uuid4(), org_id=ORG, project_id=PROJ, owner_member_id=uuid.uuid4(),
+                statement="s", metric_definition={"metric": "m", "source": "manual", "target": 1, "direction": "up"},
+                measure_after=datetime(2026, 1, 1, tzinfo=timezone.utc), status="proposed",
+            )
+            s.add(hyp)
+            await s.commit()
             caller = await resolve_member(_auth(), ORG, s, project_id=PROJ)
             out = await create_loop(s, ORG, caller, LoopCreate(
                 project_id=PROJ, title="Improve onboarding", goal_tags=["retention", "activation"],
+                hypothesis_id=hyp.id,
             ))
             await s.commit()
 

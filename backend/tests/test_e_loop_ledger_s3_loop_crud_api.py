@@ -226,9 +226,12 @@ async def test_create_loop_agent_cross_project_forbidden_403():
                 )
             assert ei.value.status_code == 403
         # same-project(PROJ_A·agent grant 있음) → 통과 + created_by_member_id=agent id.
+        # S14: hypothesis_id 필수화됐으므로(이 테스트의 관심사는 IDOR 아님) 시드해서 우회.
+        async with Session() as s:
+            hyp_id = await _seed_hypothesis(s, org_id=ORG, project_id=PROJ_A)
         async with Session() as s:
             out = await r.create_loop(
-                body=LoopCreate(project_id=PROJ_A, title="agent-legit"),
+                body=LoopCreate(project_id=PROJ_A, title="agent-legit", hypothesis_id=hyp_id),
                 session=s, auth=_agent_auth(), org_id=ORG,
             )
             await s.commit()
@@ -248,9 +251,12 @@ async def test_create_loop_persists_server_resolved_actor_not_arbitrary_value():
     try:
         async with Session() as s:
             await _seed(s)
+            hyp_id = await _seed_hypothesis(s, org_id=ORG, project_id=PROJ_A)  # S14: hypothesis 필수
         async with Session() as s:
             out = await r.create_loop(
-                body=LoopCreate(project_id=PROJ_A, title="A loop", goal_tags=["retention"]),
+                body=LoopCreate(
+                    project_id=PROJ_A, title="A loop", goal_tags=["retention"], hypothesis_id=hyp_id,
+                ),
                 session=s, auth=_auth(), org_id=ORG,
             )
             await s.commit()
