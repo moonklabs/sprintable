@@ -102,6 +102,45 @@ def test_empty_response_text_returns_none():
     assert result is None
 
 
+def test_thinking_disabled_to_prevent_budget_exhausting_output():
+    """⭐PO 실측(dev 로그, 2026-07-02) — gemini-2.5-flash가 thinking_config 미지정 시
+    AUTOMATIC thinking budget이 max_output_tokens를 통째로 잠식해 200 OK+빈 text(사실상
+    기능 0)를 냄. thinking_budget=0(명시 disable)이 실제로 SDK config에 실려나가는지 실증."""
+    fake_response = MagicMock()
+    fake_response.text = "ok"
+    fake_response.usage_metadata = None
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client_cls.return_value.models.generate_content.return_value = fake_response
+            generate_text("x")
+    call_kwargs = mock_client_cls.return_value.models.generate_content.call_args.kwargs
+    assert call_kwargs["config"].thinking_config.thinking_budget == 0
+
+
+def test_empty_response_with_max_tokens_finish_reason_logged_for_diagnosis(caplog):
+    """⭐빈 응답의 근본 원인(MAX_TOKENS=thinking 잠식 vs SAFETY=차단 등)을 로그로 즉시 구분
+    가능해야 한다 — PO가 "finish_reason 추가해 원인 확정" 요청한 그 진단 능력을 직접 검증."""
+    from google.genai import types as genai_types
+
+    fake_candidate = MagicMock()
+    fake_candidate.finish_reason = genai_types.FinishReason.MAX_TOKENS
+    fake_response = MagicMock()
+    fake_response.text = ""
+    fake_response.usage_metadata = None
+    fake_response.candidates = [fake_candidate]
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False), \
+         caplog.at_level(logging.WARNING, logger="app.services.llm_client"):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client_cls.return_value.models.generate_content.return_value = fake_response
+            result = generate_text("x")
+    assert result is None
+    assert any("MAX_TOKENS" in r.message for r in caplog.records)
+
+
 # ── ⭐AC⑤ 실패 재현(비-tautological) ────────────────────────────────────────
 
 def test_sdk_exception_returns_none_not_raised():
