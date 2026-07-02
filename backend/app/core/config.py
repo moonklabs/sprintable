@@ -1,5 +1,11 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# E-LOOP-LEDGER P1: gemini-embedding-001 @ output_dimensionality=768(파운데이션 crux 확정,
+# 2026-07-01) — app.models.embedding.Embedding.embedding(vector 컬럼)과 embedding_client.py
+# 양쪽이 이 단일 상수를 참조한다(중복 선언 제거, PO 지시 2026-07-02). 배포별로 달라질 값이
+# 아니라(모델 자체를 바꾸는 결정) env-overridable Settings 필드가 아닌 plain 상수로 둔다.
+EMBEDDING_DIMENSION = 768
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=(".env", ".env.local"), env_file_encoding="utf-8", extra="ignore")

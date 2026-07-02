@@ -6,20 +6,18 @@ GOOGLE_APPLICATION_CREDENTIALS 환경변수 또는 ADC(gcloud auth application-d
 S8의 "false-hit 0" 설계를 그대로 계승: 임베딩 실패가 잘못된 검색 결과를 만들지 않는다).
 
 모델/차원: gemini-embedding-001 @ output_dimensionality=768(파운데이션 crux 확정,
-2026-07-01). ⚠️P1-S1(embeddings 테이블·병렬 개발)의 EMBEDDING_DIMENSION과 값이 반드시
-일치해야 한다 — 의도적으로 import 의존을 안 걸었다(S2가 S1 머지 여부와 무관하게 독립
-개발/머지되도록. app.models.embedding이 아직 develop에 없을 수 있음).
+2026-07-01) — app.core.config.EMBEDDING_DIMENSION 단일소스(app.models.embedding.Embedding.
+embedding 컬럼과 정합, PO 지시로 2026-07-02 중복 상수 정리). config.py는 pydantic Settings
+객체 없이도 import 가능해 S1 머지 여부와 무관하게 이 스토리가 독립 개발/머지된다.
 """
 from __future__ import annotations
 
 import logging
 import os
 
-from app.core.config import settings
+from app.core.config import EMBEDDING_DIMENSION, settings
 
 logger = logging.getLogger(__name__)
-
-EMBEDDING_DIMENSION = 768
 
 MODEL_VERSION = "gemini-embedding-001"
 
