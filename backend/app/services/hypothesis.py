@@ -554,20 +554,32 @@ async def resolve_dispatch_context_pack(
     entity_type: str,
     entity_id: uuid.UUID,
 ) -> str | None:
-    """E-LOOP-LEDGER P1-S11: dispatch 대상의 Context Pack(S7이 조립한 markdown brief) — 복리
-    조직기억이 에이전트에게 실제로 전달되는 지점(crux GO 2026-07-02).
+    """E-LOOP-LEDGER P1-S11(+S11b): dispatch 대상의 Context Pack(S7이 조립한 markdown brief) —
+    복리 조직기억이 에이전트에게 실제로 전달되는 지점(crux GO 2026-07-02).
 
-    entity_type=='hypothesis'만 스코프(hypothesis→loop만 결정론적 직접 경로 — loop은 dispatch
-    entity가 아니고, story/epic은 간접 해소가 필요해 후속 스토리로 분리). 그 hypothesis에 연결된
-    loop 중 최신(created_at desc)·abandoned 제외 1개를 선택 — 여러 loop이 있을 수 있어(1:0..N)
-    결정론적 단일 선택이 필요하다.
+    entity_type=='hypothesis'는 직접 경로. story/epic은 resolve_primary_anchor(hypothesis_anchor
+    와 동일 SSOT — story link primary 우선→없으면 story의 epic primary로 fallback·epic은 epic
+    link primary)로 대표 hypothesis 1건을 먼저 해소한 뒤 동일 loop 조회로 합류한다(S11b, 간접
+    entity 커버리지). sprint/doc 등 그 외는 anchor 메커니즘 자체가 커버하지 않는 범위라 동형으로
+    스코프 밖(None, 쿼리 0).
+
+    해소된 hypothesis에 연결된 loop 중 최신(created_at desc)·abandoned 제외 1개를 선택 — 여러
+    loop이 있을 수 있어(1:0..N) 결정론적 단일 선택이 필요하다.
 
     데이터 소스는 선택된 loop의 brief_doc_id(S7이 draft→briefing 전이 시 조립한 Doc)를 그대로
     재사용한다 — 재검색(embed_client 호출) 안 함. dispatch는 사용자가 응답을 기다리는 요청이
     아니라(S6 검색과 대비) latency/비용을 새로 들일 이유가 없다. brief_doc_id가 없으면(loop이
     아직 briefing 전이 전) None(hypothesis_anchor의 null-fallback과 동형 — 재검색으로 억지로
     채우지 않는다)."""
-    if entity_type != "hypothesis":
+    if entity_type == "hypothesis":
+        hypothesis_id = entity_id
+    elif entity_type in ("story", "epic"):
+        repo = HypothesisRepository(session, org_id)
+        anchor_hyp = await repo.resolve_primary_anchor(entity_type, entity_id)
+        if anchor_hyp is None:
+            return None
+        hypothesis_id = anchor_hyp.id
+    else:
         return None
 
     from app.models.doc import Doc
@@ -577,7 +589,7 @@ async def resolve_dispatch_context_pack(
         select(LoopRun)
         .where(
             LoopRun.org_id == org_id,
-            LoopRun.hypothesis_id == entity_id,
+            LoopRun.hypothesis_id == hypothesis_id,
             LoopRun.status != "abandoned",
             LoopRun.deleted_at.is_(None),
         )

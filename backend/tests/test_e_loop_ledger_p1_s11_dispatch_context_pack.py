@@ -1,9 +1,11 @@
-"""E-LOOP-LEDGER P1-S11: Context Pack agent dispatch 주입 단위 테스트(mock, 블루프린트 §2).
+"""E-LOOP-LEDGER P1-S11(+S11b): Context Pack agent dispatch 주입 단위 테스트(mock, 블루프린트 §2).
 
 3개 델리버리 경로(BYO=event.payload passthrough·CC payload dict·CC delivery dict+
 deliver_injected_event_webhook)가 전부 context_pack을 실제로 받는지, brief 없으면 null로
 graceful하게 생략되는지, 기존 dispatch(trigger_metadata 등) 무회귀를 검증한다.
-hypothesis-only 스코프(story/epic/sprint/doc은 즉시 None, DB 쿼리 0)도 확인.
+S11b(2026-07-02): story/epic도 resolve_primary_anchor로 간접 해소(hypothesis_anchor와 동일
+SSOT)·sprint/doc은 그 anchor 메커니즘 자체가 커버 안 하는 범위라 동형으로 스코프 밖(즉시
+None, DB 쿼리 0).
 """
 from __future__ import annotations
 
@@ -41,12 +43,58 @@ def _scalar_one_or_none_session(value):
     return s
 
 
-async def test_non_hypothesis_entity_returns_none_without_query():
+async def test_out_of_scope_entity_returns_none_without_query():
+    """sprint/doc은 hypothesis_anchor 메커니즘 자체가 커버 안 하는 범위 — 동형으로 스코프 밖."""
     session = AsyncMock()
     session.execute = AsyncMock()
-    out = await hyp_svc.resolve_dispatch_context_pack(session, uuid.uuid4(), "story", uuid.uuid4())
+    out = await hyp_svc.resolve_dispatch_context_pack(session, uuid.uuid4(), "sprint", uuid.uuid4())
     assert out is None
     session.execute.assert_not_called()
+
+
+async def test_story_with_no_primary_hypothesis_returns_none():
+    """S11b: story/epic 모두 primary anchor가 없으면(hypothesis_story_links 미해소) None."""
+    with patch.object(
+        hyp_svc.HypothesisRepository, "resolve_primary_anchor", AsyncMock(return_value=None),
+    ):
+        session = AsyncMock()
+        session.execute = AsyncMock()
+        out = await hyp_svc.resolve_dispatch_context_pack(session, uuid.uuid4(), "story", uuid.uuid4())
+    assert out is None
+    session.execute.assert_not_called()  # anchor 자체가 없으면 loop/doc 쿼리 자체를 안 함.
+
+
+async def test_story_resolves_via_primary_hypothesis_anchor_then_loop_and_doc():
+    """S11b: story→primary hypothesis anchor→그 hypothesis의 loop→brief doc 경로가 전부 합류."""
+    anchor_hyp = SimpleNamespace(id=uuid.uuid4())
+    doc_id = uuid.uuid4()
+    loop = _loop(brief_doc_id=doc_id)
+    doc = SimpleNamespace(content="## Context Pack\n\nstory 간접 해소 브리핑.")
+
+    session = AsyncMock()
+    loop_result = MagicMock()
+    loop_result.scalar_one_or_none.return_value = loop
+    doc_result = MagicMock()
+    doc_result.scalar_one_or_none.return_value = doc
+    session.execute = AsyncMock(side_effect=[loop_result, doc_result])
+
+    with patch.object(
+        hyp_svc.HypothesisRepository, "resolve_primary_anchor", AsyncMock(return_value=anchor_hyp),
+    ):
+        out = await hyp_svc.resolve_dispatch_context_pack(session, uuid.uuid4(), "story", uuid.uuid4())
+    assert out == doc.content
+
+
+async def test_epic_resolves_via_primary_hypothesis_anchor():
+    anchor_hyp = SimpleNamespace(id=uuid.uuid4())
+    session = _scalar_one_or_none_session(None)  # anchor는 있지만 연결 loop이 없음.
+    with patch.object(
+        hyp_svc.HypothesisRepository, "resolve_primary_anchor", AsyncMock(return_value=anchor_hyp),
+    ) as mock_resolve:
+        out = await hyp_svc.resolve_dispatch_context_pack(session, uuid.uuid4(), "epic", uuid.uuid4())
+    assert out is None
+    mock_resolve.assert_called_once()
+    assert mock_resolve.call_args.args[0] == "epic"
 
 
 async def test_no_linked_loop_returns_none():

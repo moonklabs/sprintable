@@ -1,10 +1,13 @@
-"""E-LOOP-LEDGER P1-S11: resolve_dispatch_context_pack 실 Postgres 검증(블루프린트 §2).
+"""E-LOOP-LEDGER P1-S11(+S11b): resolve_dispatch_context_pack 실 Postgres 검증(블루프린트 §2).
 
 핵심: hypothesis→loop 1:0..N 관계에서 최신(created_at desc)·non-abandoned 1개만 선택되는지·
 brief_doc_id 없는 loop은 None인지를 실 DB round-trip으로 직접 검증. 순수 wiring(payload/delivery
 dict 조립)은 mock 테스트(test_e_loop_ledger_p1_s11_dispatch_context_pack.py)가 이미 커버 —
 여기선 신규 SQL 쿼리 로직(정렬·필터)만 실 DB로 검증한다(resolve_dispatch_anchor의 실DB 검증이
 별도 스모크로 분리된 것과 동형 관례).
+
+S11b: story dispatch가 hypothesis_story_links(link_type='primary')를 거쳐 그 hypothesis의
+loop→brief doc까지 실 DB round-trip으로 합류하는지도 검증.
 """
 from __future__ import annotations
 
@@ -127,6 +130,107 @@ async def test_loop_without_brief_doc_id_returns_none_real_db():
         async with Session() as s:
             out = await resolve_dispatch_context_pack(s, org, "hypothesis", hyp_id)
         assert out is None
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
+async def test_story_dispatch_resolves_via_primary_hypothesis_link_to_loop_brief_real_db():
+    """S11b: story dispatch → hypothesis_story_links(primary) → 그 hypothesis의 최신 non-abandoned
+    loop → brief doc까지 실 DB round-trip 전부 합류."""
+    from sqlalchemy import text as _text
+    from app.core.database import Base
+    from app.models.doc import Doc
+    from app.models.hypothesis import Hypothesis, HypothesisStoryLink
+    from app.models.loop import LoopRun
+    from app.models.pm import Story
+    from app.services.hypothesis import resolve_dispatch_context_pack
+
+    engine, Session = await _session()
+    org, project = uuid.uuid4(), uuid.uuid4()
+    hyp_id, story_id, loop_id, doc_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    now = datetime.now(timezone.utc)
+
+    try:
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            s.add_all([
+                Story(id=story_id, org_id=org, project_id=project, title="story"),
+                Hypothesis(
+                    id=hyp_id, org_id=org, project_id=project, owner_member_id=uuid.uuid4(),
+                    statement="가설", metric_definition={"metric": "x", "source": "manual", "target": 1, "direction": "up"},
+                    measure_after=now, status="active",
+                ),
+                Doc(id=doc_id, org_id=org, project_id=project, title="brief", slug="brief",
+                    content="## Context Pack\n\nstory 간접 해소 브리핑."),
+            ])
+            await s.flush()
+            s.add_all([
+                HypothesisStoryLink(id=uuid.uuid4(), hypothesis_id=hyp_id, story_id=story_id, link_type="primary"),
+                LoopRun(id=loop_id, org_id=org, project_id=project, hypothesis_id=hyp_id,
+                        title="loop", created_by_member_id=uuid.uuid4(),
+                        status="briefing", brief_doc_id=doc_id),
+            ])
+            await s.commit()
+
+        async with Session() as s:
+            out = await resolve_dispatch_context_pack(s, org, "story", story_id)
+        assert out == "## Context Pack\n\nstory 간접 해소 브리핑."
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
+async def test_story_without_primary_link_falls_back_to_epic_primary_real_db():
+    """S11b AC①: story에 primary link가 없으면 그 story의 epic의 primary hypothesis로 fallback
+    (resolve_primary_anchor의 기존 story→epic fallback을 그대로 재사용함을 실 DB로 확인)."""
+    from sqlalchemy import text as _text
+    from app.core.database import Base
+    from app.models.doc import Doc
+    from app.models.hypothesis import Hypothesis, HypothesisEpicLink
+    from app.models.loop import LoopRun
+    from app.models.pm import Epic, Story
+    from app.services.hypothesis import resolve_dispatch_context_pack
+
+    engine, Session = await _session()
+    org, project = uuid.uuid4(), uuid.uuid4()
+    epic_id, hyp_id, story_id, loop_id, doc_id = (
+        uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4(),
+    )
+    now = datetime.now(timezone.utc)
+
+    try:
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            s.add_all([
+                Epic(id=epic_id, org_id=org, project_id=project, title="epic"),
+                Hypothesis(
+                    id=hyp_id, org_id=org, project_id=project, owner_member_id=uuid.uuid4(),
+                    statement="가설", metric_definition={"metric": "x", "source": "manual", "target": 1, "direction": "up"},
+                    measure_after=now, status="active",
+                ),
+                Doc(id=doc_id, org_id=org, project_id=project, title="brief", slug="brief",
+                    content="## Context Pack\n\nepic fallback 브리핑."),
+            ])
+            await s.flush()
+            s.add_all([
+                Story(id=story_id, org_id=org, project_id=project, epic_id=epic_id, title="story"),
+                HypothesisEpicLink(id=uuid.uuid4(), hypothesis_id=hyp_id, epic_id=epic_id, link_type="primary"),
+                LoopRun(id=loop_id, org_id=org, project_id=project, hypothesis_id=hyp_id,
+                        title="loop", created_by_member_id=uuid.uuid4(),
+                        status="briefing", brief_doc_id=doc_id),
+            ])
+            await s.commit()
+
+        async with Session() as s:
+            out = await resolve_dispatch_context_pack(s, org, "story", story_id)
+        assert out == "## Context Pack\n\nepic fallback 브리핑."
     finally:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
