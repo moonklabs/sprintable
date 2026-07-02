@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from app.schemas.story import _validate_metric_definition
 
@@ -117,12 +117,22 @@ class HypothesisResponse(BaseModel):
 
 
 class HypothesisDraftRequest(BaseModel):
-    """§3.9 — 흐름 부산물에서 AI 초안 생성. persist=true이면 status='proposed' row만 생성."""
+    """§3.9 — 흐름 부산물에서 AI 초안 생성. persist=true이면 status='proposed' row만 생성.
+
+    S16 BE 갭(유나 적출, 2026-07-02): "loop_goal"은 유저가 loop-create 폼에 방금 타이핑한
+    goal 텍스트에서 초안 — 백킹 엔티티가 없어 source_id가 없다(context dict만으로 draft).
+    기존 4종(epic/story/conversation/dispatch)은 source_id 필수 그대로(회귀 방지)."""
     project_id: uuid.UUID
-    source_type: str  # "epic" | "story" | "conversation" | "dispatch"
-    source_id: uuid.UUID
+    source_type: str  # "epic" | "story" | "conversation" | "dispatch" | "loop_goal"
+    source_id: uuid.UUID | None = None
     context: dict[str, Any] | None = None
     persist: bool = False
+
+    @model_validator(mode="after")
+    def _source_id_required_unless_loop_goal(self) -> "HypothesisDraftRequest":
+        if self.source_type != "loop_goal" and self.source_id is None:
+            raise ValueError("source_id는 loop_goal 외 source_type에서 필수입니다.")
+        return self
 
 
 class HypothesisDraftResponse(BaseModel):
