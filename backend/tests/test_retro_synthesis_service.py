@@ -275,22 +275,62 @@ async def test_recommend_next_out_of_range_confidence_is_clamped_not_dropped():
 
 
 async def test_recommend_next_missing_confidence_or_rationale_drops_item():
-    """까심 codex RC②(2026-07-03) — confidence가 missing/비숫자거나 rationale이 blank면
-    statement가 있어도 item 드롭(text/source와 대칭 검증, #1863 원칙). 캡(_MAX_NEXT_
-    HYPOTHESES=3)이 슬라이스 후 필터라 3개 이내로 구성(4번째는 아예 안 보임 — 별도
-    캡 테스트에서 이미 검증)."""
+    """까심 codex RC②(round1, 2026-07-03) — confidence가 missing/비숫자거나 rationale이
+    blank면 statement가 있어도 item 드롭(text/source와 대칭 검증, #1863 원칙). filter-then-
+    cap(round2 fix) 덕에 앞쪽 malformed 3개를 지나 4번째 valid item("d")까지 정상 도달함을
+    함께 실증 — round1 당시엔 슬라이스-후-필터 버그로 이 케이스가 아예 안 보였다."""
     synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
     raw = (
         '{"items": ['
         '{"statement": "a", "rationale": "r", "confidence": "not-a-number"}, '
         '{"statement": "b", "confidence": 0.5}, '
-        '{"statement": "c", "rationale": "r", "confidence": 0.7}'
+        '{"statement": "c", "rationale": "   ", "confidence": 0.5}, '
+        '{"statement": "d", "rationale": "r", "confidence": 0.7}'
         ']}'
     )
     with patch("app.services.llm_client.generate_text_claude", return_value=raw):
         result = await svc.recommend_next(synthesis)
     assert len(result) == 1
-    assert result[0]["statement"] == "c"
+    assert result[0]["statement"] == "d"
+
+
+async def test_recommend_next_non_finite_confidence_drops_item():
+    """까심 codex RC round2(2026-07-03) — `json.loads`는 표준 확장으로 NaN/Infinity/
+    -Infinity를 파싱한다(Python json 모듈 특성). `isinstance(x,(int,float))` 가드는
+    NaN도 통과시켜 `max(0.0,min(1.0,nan))`이 1.0(최대 확신도)으로 둔갑 — #1863 fail-closed
+    위반이었다. math.isfinite로 NaN/Infinity/-Infinity 전부 드롭."""
+    synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
+    raw = (
+        '{"items": ['
+        '{"statement": "nan-item", "rationale": "r", "confidence": NaN}, '
+        '{"statement": "inf-item", "rationale": "r", "confidence": Infinity}, '
+        '{"statement": "neginf-item", "rationale": "r", "confidence": -Infinity}, '
+        '{"statement": "valid-item", "rationale": "r", "confidence": 0.5}'
+        ']}'
+    )
+    with patch("app.services.llm_client.generate_text_claude", return_value=raw):
+        result = await svc.recommend_next(synthesis)
+    assert len(result) == 1
+    assert result[0]["statement"] == "valid-item"
+    assert result[0]["confidence"] == 0.5
+
+
+async def test_recommend_next_filter_then_cap_not_slice_then_filter():
+    """까심 codex RC round2(2026-07-03) — 앞쪽 3개가 전부 malformed고 4~6번째가 valid면,
+    슬라이스-후-필터(구 버그)는 items[:3]만 보고 전부 드롭→None(유효 후보 유실 = over-drop).
+    filter-then-cap은 전체를 순회해 valid 3개(캡)를 정확히 찾아낸다."""
+    synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
+    raw = (
+        '{"items": ['
+        '{"statement": "bad1"}, {"statement": "bad2"}, {"statement": "bad3"}, '
+        '{"statement": "good1", "rationale": "r", "confidence": 0.1}, '
+        '{"statement": "good2", "rationale": "r", "confidence": 0.2}, '
+        '{"statement": "good3", "rationale": "r", "confidence": 0.3}'
+        ']}'
+    )
+    with patch("app.services.llm_client.generate_text_claude", return_value=raw):
+        result = await svc.recommend_next(synthesis)
+    assert [c["statement"] for c in result] == ["good1", "good2", "good3"]
 
 
 async def test_recommend_next_invalid_json_returns_none():

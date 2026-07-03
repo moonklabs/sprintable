@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -276,18 +277,28 @@ async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]] | No
 
     measure_after = datetime.now(timezone.utc) + timedelta(days=_DEFAULT_MEASURE_DAYS)
     candidates: list[dict[str, Any]] = []
-    for x in items[:_MAX_NEXT_HYPOTHESES]:
+    # 까심 codex RC round2(2026-07-03) — 전체 items를 순회하며 "유효한" 후보 수가
+    # _MAX_NEXT_HYPOTHESES에 도달하면 멈춘다(raw 순서로 슬라이스 후 필터하면 앞쪽 malformed
+    # item이 뒤쪽 valid item을 밀어내는 over-drop이 났다 — filter-then-cap이 정답).
+    for x in items:
+        if len(candidates) >= _MAX_NEXT_HYPOTHESES:
+            break
         if not isinstance(x, dict) or not isinstance(x.get("statement"), str) or not x["statement"].strip():
             continue
-        # 까심 codex RC(2026-07-03) — response_schema가 rationale/confidence를 required로
-        # 강제하지만 JSON Schema "number"는 범위(min/max)를 강제 못 한다(PO 실측: Vertex
-        # structured output 제약). statement처럼 rationale도 non-blank 필수·confidence는
-        # [0.0,1.0] clamp(범위 밖/비숫자는 스키마 위반과 동급 → item 드롭, #1863 원칙).
+        # response_schema가 rationale/confidence를 required로 강제하지만 JSON Schema
+        # "number"는 범위(min/max)도, NaN/Infinity 배제도 못 한다(PO 실측: Vertex
+        # structured output 제약 — json.loads는 표준 확장으로 NaN/Infinity를 파싱한다).
+        # statement처럼 rationale은 non-blank 필수·confidence는 유한수만 [0.0,1.0] clamp
+        # (범위 밖/비숫자/비유한은 스키마 위반과 동급 → item 드롭, #1863 원칙).
         rationale = x.get("rationale")
         if not isinstance(rationale, str) or not rationale.strip():
             continue
         confidence_raw = x.get("confidence")
-        if not isinstance(confidence_raw, (int, float)) or isinstance(confidence_raw, bool):
+        if (
+            not isinstance(confidence_raw, (int, float))
+            or isinstance(confidence_raw, bool)
+            or not math.isfinite(confidence_raw)
+        ):
             continue
         confidence = max(0.0, min(1.0, float(confidence_raw)))
         candidates.append({
