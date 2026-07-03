@@ -90,6 +90,80 @@ def test_invalid_reasoning_value_falls_back_to_disabled():
     assert call_kwargs["thinking"] == {"type": "disabled"}
 
 
+# ── ⭐response_schema — structured output(2026-07-03, 선생님/PO 지적: 근본 해법) ──
+
+def test_response_schema_sends_output_config_format_json_schema():
+    """실측(SDK 0.115.1 messages.create) — output_config.format={"type":"json_schema",
+    "schema":...}가 정확한 전송 형태. reasoning=disabled(effort 없음)에서도 format만으로
+    output_config가 실려야 한다(이전엔 disabled면 output_config 자체를 안 보냈음)."""
+    schema = {"type": "object", "properties": {"items": {"type": "array"}}, "required": ["items"]}
+    fake = _fake_response(text='{"items": []}')
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("anthropic.AnthropicVertex") as mock_client_cls:
+            mock_client_cls.return_value.messages.create.return_value = fake
+            generate_text_claude("x", reasoning="disabled", response_schema=schema)
+    call_kwargs = mock_client_cls.return_value.messages.create.call_args.kwargs
+    assert call_kwargs["output_config"] == {"format": {"type": "json_schema", "schema": schema}}
+    assert call_kwargs["thinking"] == {"type": "disabled"}
+
+
+def test_response_schema_merges_with_effort():
+    """reasoning != disabled + response_schema 동시 지정 시 effort와 format이 같은
+    output_config dict 안에서 병합돼야 함(SDK .stream() 병합 패턴과 동일 원칙)."""
+    schema = {"type": "object", "properties": {"items": {"type": "array"}}, "required": ["items"]}
+    fake = _fake_response(text='{"items": []}')
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("anthropic.AnthropicVertex") as mock_client_cls:
+            mock_client_cls.return_value.messages.create.return_value = fake
+            generate_text_claude("x", reasoning="low", response_schema=schema)
+    call_kwargs = mock_client_cls.return_value.messages.create.call_args.kwargs
+    assert call_kwargs["output_config"] == {
+        "effort": "low", "format": {"type": "json_schema", "schema": schema},
+    }
+
+
+# ── ⭐stop_reason 명시 방어(max_tokens/refusal) ─────────────────────────────────
+
+def test_stop_reason_max_tokens_returns_none_even_with_partial_text():
+    """텍스트가 비어있지 않아도(truncated JSON일 수 있음) stop_reason=max_tokens면 명시
+    실패(None) — 부분 JSON을 성공으로 오인하지 않기 위함."""
+    fake = _fake_response(text='{"items": [{"text": "부분', stop_reason="max_tokens")
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("anthropic.AnthropicVertex") as mock_client_cls:
+            mock_client_cls.return_value.messages.create.return_value = fake
+            result = generate_text_claude("x")
+    assert result is None
+
+
+def test_stop_reason_refusal_returns_none():
+    fake = _fake_response(text="I cannot help with that.", stop_reason="refusal")
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("anthropic.AnthropicVertex") as mock_client_cls:
+            mock_client_cls.return_value.messages.create.return_value = fake
+            result = generate_text_claude("x")
+    assert result is None
+
+
+def test_stop_reason_end_turn_still_succeeds():
+    """회귀 방지 — 정상 종료(end_turn)는 여전히 텍스트를 반환해야 함."""
+    fake = _fake_response(text='{"items": []}', stop_reason="end_turn")
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("anthropic.AnthropicVertex") as mock_client_cls:
+            mock_client_cls.return_value.messages.create.return_value = fake
+            result = generate_text_claude("x")
+    assert result == '{"items": []}'
+
+
 # ── 성공 경로 ────────────────────────────────────────────────────────────────
 
 def test_successful_generation_returns_text_and_uses_global_region():

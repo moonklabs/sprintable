@@ -141,6 +141,7 @@ _CLAUDE_REASONING_LEVELS = frozenset({"disabled", "low", "medium", "high", "xhig
 
 def generate_text_claude(
     prompt: str, *, max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS, reasoning: str = "disabled",
+    response_schema: dict | None = None,
 ) -> str | None:
     """Claude(claude-sonnet-5) 생성 — S28 모델/reasoning 레벨 실험용 별도 경로.
 
@@ -149,9 +150,22 @@ def generate_text_claude(
     thinking.type="enabled"+budget_tokens를 지원 안 함(invalid_request_error 확인) —
     thinking.type="adaptive"+output_config.effort로만 강도 제어 가능.
 
-    graceful 계약은 generate_text()와 동일: 인증 불가/빈 입력/API 오류/빈 응답 시 None(예외
-    전파 없음 — 호출부는 이를 "아직 못 만듦"으로 처리하고 graceful degrade해야 한다).
-    """
+    response_schema(E-SPRINT-LOOP dc861e44 2026-07-03, 선생님/PO 지적): JSON Schema를 주면
+    `output_config.format`으로 structured output을 강제한다(AnthropicVertex·claude-sonnet-5·
+    rawPredict가 GA로 지원 — 모델 교체 불요, 실측 SDK 0.115.1
+    `messages.create(output_config=...)` 확인). 프리앰블/트레일링 프로즈 문제(retro
+    synthesize 502 dev repro)의 근본 해법 — 프롬프트로 "JSON만 내라" 애원하는 밴드에이드
+    대신 스키마로 유효 JSON을 구조적으로 보장한다. top-level은 object 권장(배열 직접
+    top-level은 지양 — 호출부가 스키마의 wrapping key로 꺼낸다). effort(reasoning)와
+    format은 `output_config` 안에서 병합(SDK `.stream()` 구현의 병합 패턴과 동일 원칙).
+
+    stop_reason 명시 체크(max_tokens/refusal) — 스키마가 유효성을 보장해도 truncate/거부는
+    막지 못하므로, 텍스트가 비어있지 않아도 이 두 stop_reason이면 즉시 실패(None) 처리한다
+    (부분 JSON을 "성공"으로 오인하지 않기 위함).
+
+    graceful 계약은 generate_text()와 동일: 인증 불가/빈 입력/API 오류/빈 응답/truncate/거부
+    시 None(예외 전파 없음 — 호출부는 이를 "아직 못 만듦"으로 처리하고 graceful degrade해야
+    한다)."""
     if not prompt or not prompt.strip():
         return None
     if reasoning not in _CLAUDE_REASONING_LEVELS:
@@ -176,19 +190,32 @@ def generate_text_claude(
             kwargs["thinking"] = {"type": "disabled"}
         else:
             kwargs["thinking"] = {"type": "adaptive"}
-            kwargs["output_config"] = {"effort": reasoning}
+
+        output_config: dict = {}
+        if reasoning != "disabled":
+            output_config["effort"] = reasoning
+        if response_schema is not None:
+            output_config["format"] = {"type": "json_schema", "schema": response_schema}
+        if output_config:
+            kwargs["output_config"] = output_config
 
         response = client.messages.create(**kwargs)
         latency_ms = round((time.monotonic() - start) * 1000, 2)
         _log_claude_generation_instrumentation(latency_ms, response, reasoning)
+
+        stop_reason = getattr(response, "stop_reason", None)
+        if stop_reason in ("max_tokens", "refusal"):
+            logger.warning(
+                "llm_client(claude): stop_reason=%s(truncate/거부) → None 처리", stop_reason
+            )
+            return None
 
         text = "".join(
             block.text for block in response.content if getattr(block, "type", None) == "text"
         ).strip()
         if not text:
             logger.warning(
-                "llm_client(claude): 빈 응답 → None 처리 (stop_reason=%s)",
-                getattr(response, "stop_reason", None),
+                "llm_client(claude): 빈 응답 → None 처리 (stop_reason=%s)", stop_reason
             )
             return None
         return text

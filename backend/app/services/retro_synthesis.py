@@ -2,14 +2,19 @@
 
 design-first crux 반영(2026-07-03): synthesis/next_hypotheses는 on-demand·overwrite
 저장(retro_sessions nullable JSONB — repository.update()가 그대로 처리, 이 모듈은
-호출부가 저장할 dict/list를 만들어주기만 한다). LLM은 `llm_client.generate_text_claude`
-(graceful: 인증불가/오류 시 None) + JSON 출력 지시 + 파싱 실패 시 graceful fallback —
-S15(`hypothesis._draft_statement`)의 "LLM 실패해도 완전 실패 없음" 철학을 미러한다.
-"""
+호출부가 저장할 dict/list를 만들어주기만 한다).
+
+structured output(2026-07-03, 선생님/PO 지적·dev repro `84d63d5c` 실측): LLM 출력 형식은
+프롬프트로 "JSON만 내라" 애원하는 밴드에이드가 아니라 `generate_text_claude`의
+`response_schema`(Anthropic Vertex structured output GA)로 구조적으로 강제한다 —
+Sonnet5가 프리앰블/트레일링 프로즈를 붙이는 문제 자체가 스키마 레벨에서 소멸한다.
+graceful 계약(data-loss 방지, #1863 RC)은 불변: 스키마가 유효 JSON을 보장해도
+refusal/max_tokens/SDK 오류는 여전히 None(호출부 미저장·502)."""
 from __future__ import annotations
 
 import json
 import logging
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -30,12 +35,13 @@ _SOUL_LOCK_INSTRUCTION = (
     '"실패했다"·"안 됐다" 같은 표현은 금지한다.'
 )
 
+# 출력 형식 지시("JSON만 내라")는 response_schema가 구조적으로 강제하므로 프롬프트에서
+# 제거 — 프롬프트는 콘텐츠 규칙만 담당(관심사 분리, 밴드에이드 잔재 제거).
 _SYNTHESIS_INSTRUCTION = (
     "다음은 한 스프린트의 가설 검증 결과와 팀 회고 상위 의견이다. 이 정보만 근거로 "
-    '"이번 스프린트에서 배운 것"을 2~4개의 불릿으로 한국어로 종합하라. 각 불릿은 반드시 '
+    '"이번 스프린트에서 배운 것"을 2~4개 항목으로 한국어로 종합하라. 각 항목은 반드시 '
     "근거(가설 statement 또는 회고 아이템 내용)를 함께 명시하라. " + _SOUL_LOCK_INSTRUCTION +
-    " 맥락에 없는 사실/숫자를 지어내지 마라. 출력은 반드시 아래 JSON 배열 형식만 — "
-    '다른 텍스트 절대 추가하지 마라:\n[{"text": "...", "source": "..."}]'
+    " 맥락에 없는 사실/숫자를 지어내지 마라."
 )
 
 _NEXT_HYPOTHESES_INSTRUCTION = (
@@ -43,24 +49,58 @@ _NEXT_HYPOTHESES_INSTRUCTION = (
     f"검증할 만한 가설 후보를 최대 {_MAX_NEXT_HYPOTHESES}개, 각각 " '"~할 것이다" 형태의 '
     "제안형 한국어 문장으로 작성하라. 각 후보에는 반드시 근거(종합의 어느 부분에서 나왔는지)를 "
     "rationale로 함께 제시하고, confidence(0.0~1.0, 확신도를 정직하게)를 매겨라. " +
-    _SOUL_LOCK_INSTRUCTION + " 맥락에 없는 사실을 지어내지 마라. 출력은 반드시 아래 JSON "
-    '배열 형식만 — 다른 텍스트 절대 추가하지 마라:\n'
-    '[{"statement": "...", "rationale": "...", "confidence": 0.0}]'
+    _SOUL_LOCK_INSTRUCTION + " 맥락에 없는 사실을 지어내지 마라."
 )
 
+# top-level은 object 권장(배열 직접 top-level 지양, PO 지시) — items 키로 배열을 감싼다.
+_SYNTHESIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}, "source": {"type": "string"}},
+                "required": ["text", "source"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["items"],
+    "additionalProperties": False,
+}
 
-def _extract_json(raw: str) -> Any | None:
-    """LLM 출력이 ```json 코드펜스로 감싸져 오는 경우가 흔해 벗겨내고 파싱 시도."""
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text[:4].lower() == "json":
-            text = text[4:]
-        text = text.strip()
+_NEXT_HYPOTHESES_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "statement": {"type": "string"},
+                    "rationale": {"type": "string"},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["statement", "rationale", "confidence"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["items"],
+    "additionalProperties": False,
+}
+
+
+def _parse_json_object(raw: str) -> dict[str, Any] | None:
+    """response_schema가 유효 JSON object를 구조적으로 보장하므로 코드펜스 벗기기·bracket
+    매칭 같은 방어적 파싱은 더 이상 불요(2026-07-03 PO 지시 — 밴드에이드 제거). 그래도
+    SDK/스키마 컴파일 엣지케이스에 대비해 json.loads 실패는 흡수(None, 호출부가 실패 처리)."""
     try:
-        return json.loads(text)
+        parsed = json.loads(raw.strip())
     except (json.JSONDecodeError, ValueError):
         return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 async def build_hypotheses_items(
@@ -148,25 +188,36 @@ async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, An
 
     raw = None
     try:
-        raw = generate_text_claude(prompt, reasoning="disabled")
+        raw = generate_text_claude(prompt, reasoning="disabled", response_schema=_SYNTHESIS_SCHEMA)
     except Exception as exc:  # noqa: BLE001 — 예외도 "실패"로 수렴(None), 여기서 삼키지 않음.
         logger.warning("retro synthesize: LLM 호출 실패: %s", exc)
 
     if not raw:
-        return None  # 근거는 있었는데 LLM이 실패 — 기존 캐시 보존(호출부 502·미저장).
+        return None  # 근거는 있었는데 LLM이 실패(또는 stop_reason=max_tokens/refusal —
+        # generate_text_claude가 이미 걸러 None으로 수렴) — 기존 캐시 보존(호출부 502·미저장).
 
-    parsed = _extract_json(raw)
+    parsed = _parse_json_object(raw)
+    items = parsed.get("items") if parsed is not None else None
     learned: list[dict[str, str]] = []
-    if isinstance(parsed, list):
+    if isinstance(items, list):
+        # 까심 codex RC(2026-07-03) — text는 걸렀는데 source(근거)는 안 걸러 근거 없는
+        # 학습이 새어들 수 있었다. response_schema가 source를 required로 강제하니 빠진
+        # 응답 = 스키마 위반 → #1863 원칙대로 그 item을 드롭(text와 대칭 검증).
         learned = [
-            {"text": str(x["text"]), "source": str(x.get("source", ""))}
-            for x in parsed
-            if isinstance(x, dict) and isinstance(x.get("text"), str) and x["text"].strip()
+            {"text": x["text"].strip(), "source": x["source"].strip()}
+            for x in items
+            if isinstance(x, dict)
+            and isinstance(x.get("text"), str) and x["text"].strip()
+            and isinstance(x.get("source"), str) and x["source"].strip()
         ]
     if not learned:
-        # JSON 파싱 실패/스키마 불일치/전부 malformed — raw-wrap 구제 없이 명시 실패(None).
-        # raw는 실 LLM 응답이었지만, 형식을 안 지킨 응답을 캐시에 넣는 것 자체가 이전 good
-        # synthesis를 저품질 1-bullet로 강등시키는 data-loss(까심 codex RC②).
+        # response_schema가 유효 object를 보장해도(2026-07-03 구조화 전환) items가 빈
+        # 배열이거나 항목이 스키마 위반이면(방어적 케이스) 여전히 명시 실패(None) — raw-wrap
+        # 구제 없이(까심 codex RC②) 기존 good synthesis를 저품질로 덮어쓰지 않는다. raw 원문을
+        # 로그에 남겨(2026-07-03 dev repro 교훈) 다음 반례를 재현 없이 바로 확인 가능하게 한다.
+        logger.warning(
+            "retro synthesize: 유효 items 없음(raw 원문 앞 500자) — %s", raw.strip()[:500]
+        )
         return None
 
     return {"learned": learned, "generated_at": now.isoformat(), "source": "ai_draft"}
@@ -205,30 +256,58 @@ async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]] | No
 
     raw = None
     try:
-        raw = generate_text_claude(prompt, reasoning="disabled")
+        raw = generate_text_claude(
+            prompt, reasoning="disabled", response_schema=_NEXT_HYPOTHESES_SCHEMA
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("retro recommend_next: LLM 호출 실패: %s", exc)
     if not raw:
-        return None  # LLM 실패 — 기존 캐시 보존.
+        return None  # LLM 실패(또는 max_tokens/refusal) — 기존 캐시 보존.
 
-    parsed = _extract_json(raw)
-    if not isinstance(parsed, list):
-        return None  # 파싱 자체가 완전 실패(리스트가 아님) — synthesis처럼 원문 래핑 구제가
-        # 불가(스키마상 statement 필수 필드라 텍스트 1줄로 대체 불가) → 명시 실패로 처리.
+    parsed = _parse_json_object(raw)
+    items = parsed.get("items") if parsed is not None else None
+    if not isinstance(items, list):
+        # response_schema가 유효 object를 보장해도(2026-07-03 구조화 전환) items 키 자체가
+        # 방어적 케이스로 리스트가 아닐 수 있음 — synthesize처럼 원문 래핑 구제가 불가(스키마상
+        # statement 필수 필드라 텍스트 1줄로 대체 불가) → 명시 실패. raw 원문을 로그에 남김.
+        logger.warning(
+            "retro recommend_next: 유효 items 없음(raw 원문 앞 500자) — %s", raw.strip()[:500]
+        )
+        return None
 
     measure_after = datetime.now(timezone.utc) + timedelta(days=_DEFAULT_MEASURE_DAYS)
     candidates: list[dict[str, Any]] = []
-    for x in parsed[:_MAX_NEXT_HYPOTHESES]:
+    # 까심 codex RC round2(2026-07-03) — 전체 items를 순회하며 "유효한" 후보 수가
+    # _MAX_NEXT_HYPOTHESES에 도달하면 멈춘다(raw 순서로 슬라이스 후 필터하면 앞쪽 malformed
+    # item이 뒤쪽 valid item을 밀어내는 over-drop이 났다 — filter-then-cap이 정답).
+    for x in items:
+        if len(candidates) >= _MAX_NEXT_HYPOTHESES:
+            break
         if not isinstance(x, dict) or not isinstance(x.get("statement"), str) or not x["statement"].strip():
             continue
-        confidence = x.get("confidence")
+        # response_schema가 rationale/confidence를 required로 강제하지만 JSON Schema
+        # "number"는 범위(min/max)도, NaN/Infinity 배제도 못 한다(PO 실측: Vertex
+        # structured output 제약 — json.loads는 표준 확장으로 NaN/Infinity를 파싱한다).
+        # statement처럼 rationale은 non-blank 필수·confidence는 유한수만 [0.0,1.0] clamp
+        # (범위 밖/비숫자/비유한은 스키마 위반과 동급 → item 드롭, #1863 원칙).
+        rationale = x.get("rationale")
+        if not isinstance(rationale, str) or not rationale.strip():
+            continue
+        confidence_raw = x.get("confidence")
+        if (
+            not isinstance(confidence_raw, (int, float))
+            or isinstance(confidence_raw, bool)
+            or not math.isfinite(confidence_raw)
+        ):
+            continue
+        confidence = max(0.0, min(1.0, float(confidence_raw)))
         candidates.append({
             "id": str(uuid.uuid4()),
             "statement": x["statement"].strip(),
             "metric_definition": {"metric": "outcome", "source": "manual", "target": 1, "direction": "up"},
             "measure_after": measure_after.isoformat(),
-            "confidence": float(confidence) if isinstance(confidence, (int, float)) else None,
-            "rationale": str(x.get("rationale", "")),
+            "confidence": confidence,
+            "rationale": rationale.strip(),
             "requires_confirmation": True,
         })
     if not candidates:
