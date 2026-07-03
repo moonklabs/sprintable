@@ -88,10 +88,13 @@ async def _scan_events(conn, recipient_id: uuid.UUID, after_seq: int) -> list[in
 # 도입 커밋 ca8bd581(#1138)이 그 race 시나리오(같은 recipient의 낮은 seq가 늦게 커밋)를 구조
 # 자체(agent_event_seqs 카운터 row-lock 직렬화)로 불가능하게 만들어 그 테스트는 실행만 하면
 # 진짜 race가 아니라 진짜 교착(deadlock, 30초 타임아웃까지 블록 후 커넥션 오염)이 됐다 —
-# story 18eefc31 에서 skip 처리. 검증하려던 의도(ack-ordering 무결성)는 폐기된 게 아니라
-# 메커니즘만(rescan→직렬화) 바뀐 것이고, 그 새 메커니즘은 바로 아래
-# `test_per_recipient_dense_seq_prevents_ack_ordering_gap`(같은 #1138 커밋)이 이미 대체
-# 검증하며 현재도 green — 신규 재설계 없이 화석 테스트만 제거.
+# story 18eefc31 에서 skip 처리. rescan 이 지키려던 gap-free 의도는 폐기된 게 아니라
+# dense-seq per-recipient counter 의 구조적 불변식(#1138)으로 대체됐다 — 그 불변식은 바로
+# 아래 `test_per_recipient_dense_seq_prevents_ack_ordering_gap`이 검증한다(단, 이 테스트는
+# conn1 COMMIT 완료 後 conn2 를 순차 실행해 **순차 seq 단조성**만 검증한다 — "T1 미커밋 중
+# T2 가 실제 블록되는" row-lock 경합 동시성 자체는 `test_unsorted_counter_acquires_cause_
+# deadlock`/`test_sorted_counter_acquires_no_deadlock`이 실 asyncio 동시성으로 별도 커버).
+# 신규 재설계 없이 화석 테스트만 제거.
 
 @pytest.mark.anyio
 async def test_rescan_from_acked_seq_not_max_sent():
@@ -151,10 +154,13 @@ async def test_per_recipient_dense_seq_prevents_ack_ordering_gap():
     → 낮은 seq가 늦게 커밋되는 상황이 구조적으로 불가능.
     → T1이 seq=100을 발급받으면 T1 커밋 완료 전에 seq=101은 발급 안 됨.
 
-    story 18eefc31(gateway-3rd) 저우선 후속: 이 테스트가 `test_acked_seq_rescan_catches_
-    low_seq_late_commit`(구 rescan-방어 시절 race 회귀 가드, 이 파일에서 제거됨)의 검증
-    의도를 대체한다 — 그 테스트가 지키려던 "ack-ordering 무결성"은 폐기된 게 아니라 방어
-    메커니즘만(rescan → 이 dense-seq 직렬화) 바뀐 것.
+    story 18eefc31(gateway-3rd) 저우선 후속: `test_acked_seq_rescan_catches_low_seq_late_
+    commit`(구 rescan-방어 시절 race 회귀 가드, 이 파일에서 제거됨)이 지키려던 gap-free
+    의도는 폐기된 게 아니라 dense-seq per-recipient counter 의 구조적 불변식(#1138)으로
+    대체됐다. 단, 이 테스트는 conn1 COMMIT 완료 後 conn2 를 순차 실행해 **순차 seq
+    단조성**만 검증한다 — "T1 미커밋 중 T2 가 실제 블록되는" row-lock 경합 동시성 자체는
+    `test_unsorted_counter_acquires_cause_deadlock`/`test_sorted_counter_acquires_no_
+    deadlock`이 실 asyncio 동시성으로 별도 커버한다.
     """
     import asyncpg
 
