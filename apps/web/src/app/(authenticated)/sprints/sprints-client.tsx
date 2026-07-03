@@ -7,9 +7,18 @@ import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target,
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { OutcomeIntentFields, type OutcomeIntentValue, type MetricDefinition } from '@/components/outcome/outcome-intent-fields';
+import type { MetricDefinition } from '@/components/outcome/outcome-intent-fields';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import type { OutcomeStatus } from '@/components/outcome/outcome-status-badge';
+import {
+  EMPTY_DECLARATION,
+  isDeclarationComplete,
+  toDeclarationPayload,
+  type HypothesisDeclarationValue,
+} from '@/services/hypothesis-declaration';
+import { HypothesisDeclarationSection } from '@/components/sprints/hypothesis-declaration-section';
+import { OpenLoopCockpit } from '@/components/sprints/open-loop-cockpit';
+import type { RetroHypothesisResult } from '@/services/retro-session';
 
 // 8a2bbda2: 기간 표시는 start_date~end_date(진실)에서 계산한다. BE `duration` 필드(예 14)가
 // 날짜 범위와 불일치하는 케이스가 있어 신뢰하지 않고, inclusive 일수(end−start+1)를 직접 산출한다.
@@ -89,13 +98,17 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
   const [goal, setGoal] = useState('');
   const [capacity, setCapacity] = useState('');
   const [teamSize, setTeamSize] = useState('');
-  const [intent, setIntent] = useState<OutcomeIntentValue>({ success_hypothesis: '', metric_definition: null, measure_after: '' });
+  // E-SPRINT-LOOP FE(278314e9) — sprint-open 定: 단일 optional success_hypothesis는 N-선언으로
+  // 흡수(핸드오프 §7 KEEP). 임시저장(planning)은 0개도 허용, 활성화(定)만 ≥1(완결된) 선언 요구.
+  const [declarations, setDeclarations] = useState<HypothesisDeclarationValue[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const declaredCount = declarations.filter(isDeclarationComplete).length;
+
+  const handleSubmit = async (activateAfterCreate: boolean) => {
     if (!title.trim() || !startDate || !endDate) return;
+    if (activateAfterCreate && declaredCount === 0) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -104,9 +117,6 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
         // 미입력 시 null 대신 필드 omit — BFF createSprintSchema가 number().optional()이라 null은 거부하고 undefined(omit)는 통과한다.
         ...(capacity ? { capacity: Number(capacity) } : {}),
         ...(teamSize ? { team_size: Number(teamSize) } : {}),
-        success_hypothesis: intent.success_hypothesis.trim() || null,
-        metric_definition: intent.metric_definition,
-        measure_after: intent.measure_after ? `${intent.measure_after}T00:00:00Z` : null,
       };
       const res = await fetch('/api/sprints', {
         method: 'POST',
@@ -115,6 +125,26 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
       });
       if (!res.ok) throw new Error(await res.text());
       const { data } = await res.json() as { data: Sprint };
+
+      // 선언된 가설을 sprint에 배선 — 신규/링크 페이로드가 완결된 것만(불완전한 카드는 스킵,
+      // 임시저장 자유 원칙과 정합). 개별 실패는 무시하고 계속(부분 성공이 크래시보다 낫다).
+      for (const d of declarations) {
+        const body = toDeclarationPayload(d);
+        if (!body) continue;
+        try {
+          await fetch(`/api/sprints/${data.id}/hypotheses`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+        } catch {
+          // 개별 가설 배선 실패는 무시 — 스프린트 생성 자체는 성공시킨다.
+        }
+      }
+
+      if (activateAfterCreate) {
+        await fetch(`/api/sprints/${data.id}/activate`, { method: 'POST' }).catch(() => {});
+      }
       onCreated(data);
     } catch {
       setError(t('createError'));
@@ -126,14 +156,14 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button type="button" className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} aria-label={t('cancel')} />
-      <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background p-6 shadow-xl">
+      <div className="relative z-10 max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-background p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-bold text-foreground">{t('newSprint')}</h2>
           <button type="button" onClick={onClose} className="rounded-xl p-1.5 text-muted-foreground hover:bg-muted">
             <X className="size-4" />
           </button>
         </div>
-        <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-3">
+        <div className="space-y-3">
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">{t('sprintTitle')}</label>
             <input
@@ -216,20 +246,36 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
             </div>
           </div>
 
-          {/* 효과 가설(calm 라벨·Target lucide·장식 글리프 제거) */}
-          <div className="space-y-1.5">
-            <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><Target className="size-3.5" />{t('hypothesisSection')}</p>
-            <OutcomeIntentFields value={intent} onChange={setIntent} />
-          </div>
+          {/* E-SPRINT-LOOP FE(278314e9) — sprint-open 定: N-가설 선언(≥1 필수 — 단, 이 시점엔
+              임시저장 자유·활성화 시에만 강제). 기존 단일 OutcomeIntentFields 대체(흡수, §7 KEEP). */}
+          {projectId ? (
+            <HypothesisDeclarationSection
+              projectId={projectId}
+              contextTitle={title}
+              contextGoal={goal}
+              declarations={declarations}
+              onChange={setDeclarations}
+            />
+          ) : null}
 
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('cancel')}</Button>
-            <Button type="submit" size="sm" disabled={submitting || !title.trim() || !startDate || !endDate}>
-              {submitting ? '...' : t('create')}
-            </Button>
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <span className="text-[11px] text-muted-foreground">
+              {declaredCount > 0 ? (
+                <span className="flex items-center gap-1"><Badge variant="success" className="text-[9px]">{t('declareCount', { count: declaredCount })}</Badge></span>
+              ) : t('activateBlocked')}
+            </span>
+            <div className="flex gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('cancel')}</Button>
+              <Button type="button" variant="outline" size="sm" disabled={submitting || !title.trim() || !startDate || !endDate} onClick={() => void handleSubmit(false)}>
+                {t('saveDraft')}
+              </Button>
+              <Button type="button" size="sm" disabled={submitting || !title.trim() || !startDate || !endDate || declaredCount === 0} onClick={() => void handleSubmit(true)}>
+                {submitting ? '...' : t('activate')}
+              </Button>
+            </div>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );
@@ -302,6 +348,24 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // E-SPRINT-LOOP FE(278314e9) — sprint-open 定: 선택된 sprint의 N-가설(§10 P0 cockpit 소스 +
+  // ≥1 활성화 게이트 판정). BE 미착지/404는 빈 배열로 흡수(nullable graceful, 크래시 0).
+  const [hypotheses, setHypotheses] = useState<RetroHypothesisResult[]>([]);
+  const [activateGateBlocked, setActivateGateBlocked] = useState(false);
+  const [addingHypothesis, setAddingHypothesis] = useState(false);
+  const [quickDeclarations, setQuickDeclarations] = useState<HypothesisDeclarationValue[]>([EMPTY_DECLARATION]);
+
+  const loadHypotheses = useCallback(async (sprintId: string) => {
+    try {
+      const res = await fetch(`/api/sprints/${sprintId}/hypotheses`);
+      if (!res.ok) { setHypotheses([]); return; }
+      const json = await res.json() as { data?: RetroHypothesisResult[] };
+      setHypotheses(json.data ?? []);
+    } catch {
+      setHypotheses([]);
+    }
+  }, []);
 
   const loadSprints = useCallback(async () => {
     setLoading(true);
@@ -392,8 +456,11 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
 
   const handleSelect = useCallback(async (sprint: Sprint) => {
     setSelected(sprint);
-    await loadSprintDetail(sprint);
-  }, [loadSprintDetail]);
+    setActivateGateBlocked(false);
+    setAddingHypothesis(false);
+    setQuickDeclarations([EMPTY_DECLARATION]);
+    await Promise.all([loadSprintDetail(sprint), loadHypotheses(sprint.id)]);
+  }, [loadSprintDetail, loadHypotheses]);
 
   // ?id= 파라미터로 sprint 자동 선택 (알림 딥링크 지원)
   useEffect(() => {
@@ -407,15 +474,49 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     if (!selected) return;
     setActivating(true);
     setActionError(null);
+    setActivateGateBlocked(false);
     try {
       const res = await fetch(`/api/sprints/${selected.id}/activate`, { method: 'POST' });
       if (!res.ok) {
-        const json = await res.json().catch(() => ({})) as { error?: { message?: string } };
-        setActionError(json.error?.message ?? t('activateError'));
+        const json = await res.json().catch(() => ({})) as { error?: { code?: string; message?: string } };
+        // E-SPRINT-LOOP FE(278314e9) §5 — 422 HYPOTHESIS_REQUIRED_FOR_ACTIVATION은 마찰(에러 토스트)이
+        // 아니라 "검증할 가설 최소 1개" 안내로 graceful 처리(gate 배너 노출, 3경로 즉시 제공).
+        if (json.error?.code === 'HYPOTHESIS_REQUIRED_FOR_ACTIVATION') {
+          setActivateGateBlocked(true);
+          setAddingHypothesis(true);
+        } else {
+          setActionError(json.error?.message ?? t('activateError'));
+        }
         return;
       }
       await loadSprints();
       setSelected((prev) => prev ? { ...prev, status: 'active' } : prev);
+    } finally {
+      setActivating(false);
+    }
+  };
+
+  // E-SPRINT-LOOP FE(278314e9) §4④ — 활성화 게이트(0개)에서 즉시 제공하는 3경로(정의/링크/AI초안)
+  // 중 하나로 채운 선언을 sprint에 배선. 완료 후 hypotheses를 재조회해 gate를 자연 해제.
+  const handleQuickAddHypotheses = async () => {
+    if (!selected) return;
+    const completed = quickDeclarations.filter(isDeclarationComplete);
+    if (completed.length === 0) return;
+    setActivating(true);
+    try {
+      for (const d of completed) {
+        const body = toDeclarationPayload(d);
+        if (!body) continue;
+        await fetch(`/api/sprints/${selected.id}/hypotheses`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }).catch(() => {});
+      }
+      await loadHypotheses(selected.id);
+      setActivateGateBlocked(false);
+      setAddingHypothesis(false);
+      setQuickDeclarations([EMPTY_DECLARATION]);
     } finally {
       setActivating(false);
     }
@@ -631,8 +732,38 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       ) : null}
       {actionError ? <p className="mb-3 text-xs text-destructive">{actionError}</p> : null}
 
-      {/* Outcome result card */}
-      {selected.outcome_status && selected.outcome_status !== 'n_a' ? (
+      {/* E-SPRINT-LOOP FE(278314e9) §4④ — 활성화 게이트: planning + 생존 가설 0이면 질문 안내(마찰
+          아님). 422 HYPOTHESIS_REQUIRED_FOR_ACTIVATION을 맞은 뒤에도 동일 배너로 graceful 흡수. */}
+      {selected.status === 'planning' && (hypotheses.length === 0 || activateGateBlocked) ? (
+        <div className="mb-4 space-y-2 rounded-xl border border-dashed border-info-border bg-info-tint/20 p-3">
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+            ✦ {t('declareGateQuestion')}
+          </p>
+          <p className="text-[11px] leading-snug text-muted-foreground">{t('declareGateHint')}</p>
+          {!addingHypothesis ? (
+            <Button size="sm" variant="outline" onClick={() => setAddingHypothesis(true)}>{t('declareAddCta')}</Button>
+          ) : (
+            <div className="space-y-2">
+              <HypothesisDeclarationSection
+                projectId={projectId}
+                contextTitle={selected.title}
+                contextGoal={selected.goal ?? undefined}
+                declarations={quickDeclarations}
+                onChange={setQuickDeclarations}
+              />
+              <Button size="sm" className="w-full" onClick={() => void handleQuickAddHypotheses()} disabled={activating || quickDeclarations.filter(isDeclarationComplete).length === 0}>
+                {activating ? '...' : t('declareSectionTitle')}
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {/* sprint 상세 loop cockpit 최소(§10 P0) — hypotheses 있으면 신규 cockpit이 레거시 단일
+          OutcomeResultCard를 대체(migration-boundary, [[project-1b9f4ecb]] 패턴과 동형·회귀0). */}
+      {hypotheses.length > 0 ? (
+        <OpenLoopCockpit hypotheses={hypotheses} storyTitles={sprintStories.map((s) => s.title)} />
+      ) : selected.outcome_status && selected.outcome_status !== 'n_a' ? (
         <div className="mb-4">
           <OutcomeResultCard
             status={selected.outcome_status}
