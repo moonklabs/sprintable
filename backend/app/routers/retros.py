@@ -21,6 +21,7 @@ from app.repositories.retro import (
 from app.schemas.hypothesis import HypothesisCreate, HypothesisLinkRequest
 from app.schemas.retro import (
     ActionResponse,
+    AdoptNextHypothesis,
     CreateAction,
     CreateItem,
     CreateSession,
@@ -279,10 +280,48 @@ async def recommend_next_session(
     return await _build_session_response(db, updated, auth)
 
 
-@router.post("/{id}/next-hypotheses/{candidate_id}/adopt", response_model=SessionResponse)
+# story 4b87d3a6: FE `retro/[id]/page.tsx`+BFF는 `POST /{id}/synthesis`(명사) 1콜로
+# {synthesis, next_hypotheses}를 한번에 기대하는데(retro-sessions/[id]/synthesis/route.ts),
+# 이 라우터엔 `/synthesize`+`/recommend-next` 2분리 동사 엔드포인트만 있어 `/synthesis` 자체가
+# dev 라이브 404였다. L2(synthesize)+L3(recommend_next)를 순차 오케스트레이션 — 새 로직 0줄,
+# 기존 두 서비스 함수 재사용.
+@router.post("/{id}/synthesis", response_model=SessionResponse)
+async def synthesize_and_recommend(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> SessionResponse:
+    """dc861e44 §3 L2+L3 combined(FE 계약 정합, story 4b87d3a6). L2 실패 → 502(`/synthesize`와
+    동일 코드). L2 성공+L3 실패는 **combined 호출 자체를 실패시키지 않는다**(PO crux
+    2026-07-04 ①): synthesis는 이미 확정 저장됐고, next_hypotheses는 기존 캐시를 그대로
+    유지(#1863 data-loss 방지 원칙 연장 — 방금 실패한 L3로 예전 good 캐시를 지우지 않음).
+    FE도 원래 next_hypotheses를 optional로 취급(`?? []`)이라 L3만 실패해도 L2 성과가
+    죽지 않는다."""
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    sresult = await synth_svc.synthesize(db, session)
+    if sresult is None:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "SYNTHESIS_GENERATION_FAILED", "message": "AI 종합 생성에 실패했습니다. 잠시 후 다시 시도해주세요."},
+        )
+    updated = await repo.update(id, synthesis=sresult)
+    assert updated is not None
+
+    nresult = await synth_svc.recommend_next(updated.synthesis)
+    if nresult is not None:
+        updated = await repo.update(id, next_hypotheses=nresult)
+        assert updated is not None
+    # nresult is None → 조용히 스킵(위 docstring 참고) — updated.next_hypotheses는 DB의
+    # 기존(가능하면 예전) 값 그대로.
+
+    return await _build_session_response(db, updated, auth)
+
+
+@router.post("/{id}/next-hypotheses/adopt", response_model=SessionResponse)
 async def adopt_next_hypothesis(
     id: uuid.UUID,
-    candidate_id: uuid.UUID,
+    body: AdoptNextHypothesis,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
@@ -291,6 +330,16 @@ async def adopt_next_hypothesis(
     link_type="seeded"로 링크(없으면 backlog proposed). 신규 hypothesis 서비스 로직 0줄 —
     기존 create_hypothesis + link_hypothesis 조합. sprint_id는 서버가 조회(§2 PO 결)해서
     클라이언트가 넘기지 않으므로 그 축의 IDOR가 설계상 없다.
+
+    story 4b87d3a6: candidate_id는 path가 아니라 body의 `id`(FE `{...rec, statement}`
+    spread가 실어보내는 필드 — FE 코드 변경 0). 누락/malformed면 Pydantic이 자동 422
+    (PO crux 2026-07-04: 암묵계약 drift 대비 graceful 422 확인 완료).
+
+    ⭐HITL statement 편집 반영(story 4b87d3a6, PO crux "§3.7.1 확정은 당신이" 위반 지적) —
+    body.statement가 있으면(사람이 sprint-close-cockpit의 OperatorTextarea로 편집한 값)
+    그걸 쓰고, 없으면 서버 저장 candidate의 statement 그대로. metric_definition/
+    measure_after는 여전히 서버 값만 신뢰(클라 위조 방지 — AI 산출 수치는 편집 대상 아님,
+    문구만 사람이 다듬는 게 UX 의도).
 
     SOUL-LOCK(유나 §6) "채택=인간 게이트" — agent caller는 403.
 
@@ -309,7 +358,7 @@ async def adopt_next_hypothesis(
     if locked is None:
         raise HTTPException(status_code=404, detail="Retro session not found")
 
-    candidate = seed_svc.find_candidate(locked.next_hypotheses, candidate_id)
+    candidate = seed_svc.find_candidate(locked.next_hypotheses, body.id)
     if candidate is None:
         raise HTTPException(
             status_code=404,
@@ -321,11 +370,13 @@ async def adopt_next_hypothesis(
             detail={"code": "ALREADY_ADOPTED", "message": "이미 채택된 추천입니다."},
         )
 
+    statement = body.statement.strip() if body.statement and body.statement.strip() else candidate["statement"]
+
     hyp = await hyp_svc.create_hypothesis(
         db, session.org_id, caller,
         HypothesisCreate(
             project_id=session.project_id,
-            statement=candidate["statement"],
+            statement=statement,
             metric_definition=candidate["metric_definition"],
             measure_after=candidate["measure_after"],
             status="proposed",
@@ -342,7 +393,7 @@ async def adopt_next_hypothesis(
         )
 
     updated_candidates = [
-        {**c, "adopted_hypothesis_id": str(hyp.id)} if str(c.get("id")) == str(candidate_id) else c
+        {**c, "adopted_hypothesis_id": str(hyp.id)} if str(c.get("id")) == str(body.id) else c
         for c in locked.next_hypotheses
     ]
     updated = await repo.update(id, next_hypotheses=updated_candidates)

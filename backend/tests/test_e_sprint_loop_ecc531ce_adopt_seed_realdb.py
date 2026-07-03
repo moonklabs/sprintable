@@ -156,6 +156,7 @@ async def test_resolve_next_sprint_full_tie_breaks_deterministically_by_id():
 async def test_adopt_creates_proposed_hypothesis_seeds_earliest_planning_sprint():
     """§2 PO 결 — planning 중 가장 이른 start_date(0801)가 선택돼야 함(0901 아님)."""
     from app.routers.retros import adopt_next_hypothesis
+    from app.schemas.retro import AdoptNextHypothesis
 
     eng, Session = await _engine()
     try:
@@ -165,7 +166,7 @@ async def test_adopt_creates_proposed_hypothesis_seeds_earliest_planning_sprint(
         async with Session() as s:
             with _no_embed():
                 resp = await adopt_next_hypothesis(
-                    SESSION_A, CANDIDATE_ID, db=s, auth=_auth(), repo=_repo(s),
+                    SESSION_A, AdoptNextHypothesis(id=CANDIDATE_ID), db=s, auth=_auth(), repo=_repo(s),
                 )
             await s.commit()
 
@@ -190,6 +191,7 @@ async def test_adopt_creates_proposed_hypothesis_seeds_earliest_planning_sprint(
 async def test_adopt_no_planning_sprint_creates_backlog_proposed_no_link():
     """AC #2 — 다음 sprint 없으면 backlog proposed(링크 없음). PROJ_B는 seed에서 sprint 0개."""
     from app.routers.retros import adopt_next_hypothesis
+    from app.schemas.retro import AdoptNextHypothesis
 
     eng, Session = await _engine()
     try:
@@ -203,7 +205,7 @@ async def test_adopt_no_planning_sprint_creates_backlog_proposed_no_link():
         async with Session() as s:
             with _no_embed():
                 resp = await adopt_next_hypothesis(
-                    SESSION_A, CANDIDATE_ID, db=s, auth=_auth(), repo=_repo(s),
+                    SESSION_A, AdoptNextHypothesis(id=CANDIDATE_ID), db=s, auth=_auth(), repo=_repo(s),
                 )
             await s.commit()
 
@@ -225,6 +227,7 @@ async def test_adopt_no_planning_sprint_creates_backlog_proposed_no_link():
 @pytest.mark.anyio
 async def test_adopt_already_adopted_409():
     from app.routers.retros import adopt_next_hypothesis
+    from app.schemas.retro import AdoptNextHypothesis
 
     eng, Session = await _engine()
     try:
@@ -233,12 +236,12 @@ async def test_adopt_already_adopted_409():
 
         async with Session() as s:
             with _no_embed():
-                await adopt_next_hypothesis(SESSION_A, CANDIDATE_ID, db=s, auth=_auth(), repo=_repo(s))
+                await adopt_next_hypothesis(SESSION_A, AdoptNextHypothesis(id=CANDIDATE_ID), db=s, auth=_auth(), repo=_repo(s))
             await s.commit()
 
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
-                await adopt_next_hypothesis(SESSION_A, CANDIDATE_ID, db=s, auth=_auth(), repo=_repo(s))
+                await adopt_next_hypothesis(SESSION_A, AdoptNextHypothesis(id=CANDIDATE_ID), db=s, auth=_auth(), repo=_repo(s))
             assert ei.value.status_code == 409
             assert ei.value.detail["code"] == "ALREADY_ADOPTED"
     finally:
@@ -248,6 +251,7 @@ async def test_adopt_already_adopted_409():
 @pytest.mark.anyio
 async def test_adopt_cross_project_403():
     from app.routers.retros import adopt_next_hypothesis
+    from app.schemas.retro import AdoptNextHypothesis
 
     eng, Session = await _engine()
     try:
@@ -255,7 +259,7 @@ async def test_adopt_cross_project_403():
             await _seed(s)
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
-                await adopt_next_hypothesis(SESSION_B, CANDIDATE_ID, db=s, auth=_auth(), repo=_repo(s))
+                await adopt_next_hypothesis(SESSION_B, AdoptNextHypothesis(id=CANDIDATE_ID), db=s, auth=_auth(), repo=_repo(s))
             assert ei.value.status_code == 403
     finally:
         await eng.dispose()
@@ -268,6 +272,7 @@ async def test_concurrent_double_click_creates_exactly_one_hypothesis():
     여야 하고, hypotheses 테이블에는 정확히 1행만 생겨야 한다."""
     from app.models.retro import RetroSession
     from app.routers.retros import adopt_next_hypothesis
+    from app.schemas.retro import AdoptNextHypothesis
 
     eng, Session = await _engine()
     try:
@@ -282,7 +287,7 @@ async def test_concurrent_double_click_creates_exactly_one_hypothesis():
             async with Session() as s:
                 try:
                     resp = await adopt_next_hypothesis(
-                        SESSION_A_NOSPRINT, seeded_candidate_id,
+                        SESSION_A_NOSPRINT, AdoptNextHypothesis(id=seeded_candidate_id),
                         db=s, auth=_auth(), repo=_repo(s),
                     )
                     await s.commit()
