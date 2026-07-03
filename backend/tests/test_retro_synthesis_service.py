@@ -129,7 +129,10 @@ async def test_synthesize_malformed_json_falls_back_to_raw_wrap():
     assert result["learned"][0]["source"] == "generated"
 
 
-async def test_synthesize_llm_none_falls_back_to_empty_learned():
+async def test_synthesize_llm_none_returns_none_not_empty_success():
+    """data-loss 방지(오르테가 지적 2026-07-03) — LLM이 근거는 받고도 실패하면 '정당한 빈
+    결과'가 아니라 명시 실패(None)여야 한다. 호출부가 이 None을 기존 캐시 덮어쓰기 신호로
+    오인하면 안 되므로 dict가 아니라 None을 반환한다."""
     session = _empty_execute_session()
     retro = _retro(sprint_id=SPRINT_ID)
     hyp = SimpleNamespace(
@@ -139,10 +142,10 @@ async def test_synthesize_llm_none_falls_back_to_empty_learned():
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
          patch("app.services.llm_client.generate_text_claude", return_value=None):
         result = await svc.synthesize(session, retro)
-    assert result["learned"] == []
+    assert result is None
 
 
-async def test_synthesize_llm_exception_graceful():
+async def test_synthesize_llm_exception_returns_none():
     session = _empty_execute_session()
     retro = _retro(sprint_id=SPRINT_ID)
     hyp = SimpleNamespace(
@@ -151,8 +154,8 @@ async def test_synthesize_llm_exception_graceful():
     )
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
          patch("app.services.llm_client.generate_text_claude", side_effect=RuntimeError("boom")):
-        result = await svc.synthesize(session, retro)  # 예외 전파 없이 graceful
-    assert result["learned"] == []
+        result = await svc.synthesize(session, retro)  # 예외 전파는 없음(None으로 수렴)
+    assert result is None
 
 
 # ── recommend_next ────────────────────────────────────────────────────────────
@@ -191,8 +194,26 @@ async def test_recommend_next_caps_at_max_and_drops_malformed():
     assert len(result) == 3  # _MAX_NEXT_HYPOTHESES=3 캡
 
 
-async def test_recommend_next_invalid_json_returns_empty():
+async def test_recommend_next_invalid_json_returns_none():
+    """data-loss 방지 — 파싱 완전 실패는 빈 배열(성공으로 오인 가능)이 아니라 None(실패)."""
     synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
     with patch("app.services.llm_client.generate_text_claude", return_value="not json"):
         result = await svc.recommend_next(synthesis)
-    assert result == []
+    assert result is None
+
+
+async def test_recommend_next_llm_none_returns_none():
+    synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
+    with patch("app.services.llm_client.generate_text_claude", return_value=None):
+        result = await svc.recommend_next(synthesis)
+    assert result is None
+
+
+async def test_recommend_next_all_items_malformed_returns_none():
+    """JSON 배열 형식은 맞지만 항목 전부 스키마 불일치(statement 부재) — 빈 배열을 '정답'으로
+    저장하면 안 되므로 None(실패)."""
+    synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
+    raw = '[{"no_statement": true}, {"also_wrong": 1}]'
+    with patch("app.services.llm_client.generate_text_claude", return_value=raw):
+        result = await svc.recommend_next(synthesis)
+    assert result is None

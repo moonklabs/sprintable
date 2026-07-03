@@ -206,6 +206,66 @@ async def test_synthesize_cross_project_403():
         await eng.dispose()
 
 
+@pytest.mark.anyio
+async def test_llm_failure_does_not_destroy_existing_good_synthesis():
+    """까심 RC①(2026-07-03) — good synthesis가 이미 저장된 상태에서 [다시 생성]이 LLM 장애로
+    실패하면 502를 반환하고 **DB의 기존 값은 그대로**여야 한다(재조회로 실증 — 세션 로컬 파이썬
+    객체 비교가 아니라 진짜 커밋된 DB 상태 확인)."""
+    from app.routers.retros import get_session, synthesize_session
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+
+        good_raw = '[{"text": "가설이 반증됐다 — 학습 데이터", "source": "가설 1"}]'
+        async with Session() as s:
+            with patch("app.services.llm_client.generate_text_claude", return_value=good_raw):
+                await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+            await s.commit()
+
+        # [다시 생성] 중 LLM 장애(Anthropic outage 재현) — 예외로 실패.
+        async with Session() as s:
+            with patch("app.services.llm_client.generate_text_claude", side_effect=RuntimeError("outage")):
+                with pytest.raises(HTTPException) as ei:
+                    await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+                assert ei.value.status_code == 502
+                assert ei.value.detail["code"] == "SYNTHESIS_GENERATION_FAILED"
+            await s.rollback()  # 실패 응답이면 어차피 아무것도 flush 안 됨 — 명시적으로 확인
+
+        # 재조회 — DB에 남은 값은 여전히 "good"(빈 배열/garbage로 덮이지 않음).
+        async with Session() as s:
+            resp = await get_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+        assert resp.synthesis is not None
+        assert resp.synthesis.learned[0].text == "가설이 반증됐다 — 학습 데이터"
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_recommend_next_malformed_synthesis_in_db_returns_409_not_500():
+    """까심 RC②(2026-07-03) — DB에 malformed synthesis(list)가 들어있어도 크래시 없이 409."""
+    from app.routers.retros import recommend_next_session
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+        async with Session() as s:
+            await s.execute(
+                text("UPDATE retro_sessions SET synthesis = '[]'::jsonb WHERE id = :id"),
+                {"id": SESSION_A},
+            )
+            await s.commit()
+        async with Session() as s:
+            with pytest.raises(HTTPException) as ei:
+                await recommend_next_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+            assert ei.value.status_code == 409
+            assert ei.value.detail["code"] == "SYNTHESIS_REQUIRED"
+    finally:
+        await eng.dispose()
+
+
 def _repo(session):
     from app.repositories.retro import RetroSessionRepository
     return RetroSessionRepository(session, ORG)

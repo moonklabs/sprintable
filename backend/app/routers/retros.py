@@ -40,6 +40,18 @@ def _get_session_repo(
     return RetroSessionRepository(db, org_id)
 
 
+def _has_valid_synthesis(synthesis: object) -> bool:
+    """recommend-next 게이팅(까심 RC②, 2026-07-03) — `synthesis is None`만 보면 `{}`·`[]`·
+    `{"learned": []}` 같은 malformed/empty 값이 게이트를 통과한다. `synthesis=[]`는
+    `_build_next_hypotheses_prompt`의 `.get("learned")` 호출에서 AttributeError(500)까지
+    난다. dict이고 `learned`이 비어있지 않은 리스트일 때만 "종합이 실제로 존재"로 인정."""
+    return (
+        isinstance(synthesis, dict)
+        and isinstance(synthesis.get("learned"), list)
+        and len(synthesis["learned"]) > 0
+    )
+
+
 async def _require_retro_project_access(
     session: AsyncSession, session_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID
 ) -> RetroSession:
@@ -213,9 +225,18 @@ async def synthesize_session(
     auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> SessionResponse:
-    """dc861e44 §3 — L2 종합(on-demand·버튼 트리거). overwrite 저장(PO 결)."""
+    """dc861e44 §3 — L2 종합(on-demand·버튼 트리거). overwrite 저장(PO 결).
+
+    ⚠️ result가 None(LLM 생성 실패)이면 **저장하지 않는다** — 기존 good synthesis 캐시를
+    빈 결과로 덮어써 잃는 data-loss(오르테가 지적 2026-07-03·S28 캐시게이트 버그와 동형)를
+    막는다. 502로 실패를 명시하고 재시도를 유도(자동 backfill 없음)."""
     session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     result = await synth_svc.synthesize(db, session)
+    if result is None:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "SYNTHESIS_GENERATION_FAILED", "message": "AI 종합 생성에 실패했습니다. 잠시 후 다시 시도해주세요."},
+        )
     updated = await repo.update(id, synthesis=result)
     assert updated is not None
     return await _build_session_response(db, updated, auth)
@@ -231,12 +252,19 @@ async def recommend_next_session(
     """dc861e44 §3 — L3 다음가설 추천(on-demand). synthesis 선행 필수 — PO 결(2026-07-03):
     fail-closed(409), 자동 선행 생성 안 함(HITL 순서 — 팀이 종합을 보고/편집한 뒤 추천)."""
     session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
-    if session.synthesis is None:
+    if not _has_valid_synthesis(session.synthesis):
         raise HTTPException(
             status_code=409,
             detail={"code": "SYNTHESIS_REQUIRED", "message": "종합을 먼저 생성해야 합니다."},
         )
     result = await synth_svc.recommend_next(session.synthesis)
+    if result is None:
+        # synthesize_session과 동일 원칙 — 실패를 빈 배열로 조용히 저장해 기존 good
+        # next_hypotheses 캐시를 지우지 않는다(오르테가 지적 2026-07-03).
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "RECOMMENDATION_GENERATION_FAILED", "message": "다음가설 추천 생성에 실패했습니다. 잠시 후 다시 시도해주세요."},
+        )
     updated = await repo.update(id, next_hypotheses=result)
     assert updated is not None
     return await _build_session_response(db, updated, auth)

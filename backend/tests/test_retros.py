@@ -1073,6 +1073,56 @@ async def test_synthesize_session_200_persists_via_repo_update():
 
 
 @pytest.mark.anyio
+async def test_synthesize_llm_failure_does_not_overwrite_existing_cache():
+    """data-loss 방지(오르테가 지적 2026-07-03) — LLM 생성 실패(svc가 None 반환) 시 502를
+    반환하고 repo.update()를 절대 호출하지 않는다(기존 good synthesis 캐시 보존)."""
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with (
+            _allow_project_access(),
+            patch("app.routers.retros.synth_svc.synthesize", new=AsyncMock(return_value=None)),
+            patch("app.repositories.base.BaseRepository.update", new=AsyncMock()) as mock_update,
+        ):
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/synthesize")
+
+        assert resp.status_code == 502
+        assert resp.json()["error"]["code"] == "SYNTHESIS_GENERATION_FAILED"
+        mock_update.assert_not_awaited()  # 핵심 — 실패 시 캐시 절대 건드리지 않음
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_recommend_next_llm_failure_does_not_overwrite_existing_cache():
+    client, session, app = await _client()
+    try:
+        s = _mock_session()
+        s.synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "t", "source": "ai_draft"}
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = s
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with (
+            _allow_project_access(),
+            patch("app.routers.retros.synth_svc.recommend_next", new=AsyncMock(return_value=None)),
+            patch("app.repositories.base.BaseRepository.update", new=AsyncMock()) as mock_update,
+        ):
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/recommend-next")
+
+        assert resp.status_code == 502
+        assert resp.json()["error"]["code"] == "RECOMMENDATION_GENERATION_FAILED"
+        mock_update.assert_not_awaited()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_recommend_next_without_synthesis_409():
     """PO 결(2026-07-03) — synthesis 미생성 시 fail-closed 409(자동 선행 생성 안 함)."""
     client, session, app = await _client()
@@ -1089,6 +1139,40 @@ async def test_recommend_next_without_synthesis_409():
 
         assert resp.status_code == 409
         assert resp.json()["error"]["code"] == "SYNTHESIS_REQUIRED"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("malformed_synthesis", [
+    {},                    # dict이지만 learned 키 부재
+    [],                    # dict조차 아님 — .get() 호출 시 AttributeError 크래시 지점
+    {"learned": []},       # 형태는 맞지만 실제론 빈 종합(근거 없음으로 생성된 케이스)
+    {"learned": "x"},      # learned가 list가 아님
+    "not a dict",          # 완전 이형
+])
+@pytest.mark.anyio
+async def test_recommend_next_malformed_synthesis_409_not_crash(malformed_synthesis):
+    """까심 RC②(2026-07-03) — `is None`만 보던 구 게이트는 `[]`를 통과시켜
+    `_build_next_hypotheses_prompt`의 `.get()` 호출에서 500 크래시가 났다. `_has_valid_synthesis`
+    는 이 전부를 409로 fail-closed(크래시 없음·LLM 호출 없음·persist 없음)."""
+    client, session, app = await _client()
+    try:
+        s = _mock_session()
+        s.synthesis = malformed_synthesis
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = s
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with (
+            _allow_project_access(),
+            patch("app.routers.retros.synth_svc.recommend_next") as mock_recommend,
+        ):
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/recommend-next")
+
+        assert resp.status_code == 409
+        assert resp.json()["error"]["code"] == "SYNTHESIS_REQUIRED"
+        mock_recommend.assert_not_called()  # 게이트에서 막혀 LLM 경로 진입 자체를 안 함
     finally:
         app.dependency_overrides.clear()
 

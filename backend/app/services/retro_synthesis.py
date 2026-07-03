@@ -121,8 +121,14 @@ def _build_synthesis_prompt(
     return "\n".join(lines)
 
 
-async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, Any]:
-    """L2 종합 생성 — 저장은 호출부(router)가 repo.update()로 overwrite."""
+async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, Any] | None:
+    """L2 종합 생성 — 저장은 호출부(router)가 repo.update()로 overwrite.
+
+    반환 None = **생성 실패**(호출부는 절대 저장하면 안 됨 — 기존 good 캐시가 있다면 그대로
+    보존해야 함, PO 지적 2026-07-02 S28 캐시게이트 버그와 동형: "일시장애≠영구 no-result").
+    구분: 근거(가설·투표 아이템) 전무는 **정당한 빈 결과**(learned=[])이지 실패가 아니다 —
+    LLM을 아예 호출 안 하고 그대로 반환. 반면 호출까지 갔는데 응답이 없으면(None/빈 문자열/
+    예외) 진짜 실패로 취급해 None 반환 — 조용히 learned=[]를 반환해 기존 캐시를 지우지 않는다."""
     from app.services.llm_client import generate_text_claude
 
     hypotheses_items = await build_hypotheses_items(
@@ -138,21 +144,24 @@ async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, An
     raw = None
     try:
         raw = generate_text_claude(prompt, reasoning="disabled")
-    except Exception as exc:  # noqa: BLE001 — LLM 실패는 graceful fallback, dispatch 안 깨짐.
-        logger.warning("retro synthesize: LLM 호출 실패(fallback): %s", exc)
+    except Exception as exc:  # noqa: BLE001 — 예외도 "실패"로 수렴(None), 여기서 삼키지 않음.
+        logger.warning("retro synthesize: LLM 호출 실패: %s", exc)
+
+    if not raw:
+        return None  # 근거는 있었는데 LLM이 실패 — 기존 캐시 보존(호출부 502·미저장).
 
     learned: list[dict[str, str]] = []
-    if raw:
-        parsed = _extract_json(raw)
-        if isinstance(parsed, list):
-            learned = [
-                {"text": str(x["text"]), "source": str(x.get("source", ""))}
-                for x in parsed
-                if isinstance(x, dict) and isinstance(x.get("text"), str) and x["text"].strip()
-            ]
-        if not learned:
-            # 파싱 실패/빈 배열 — 원문을 단일 bullet로 래핑(완전 실패 없음, S15 fallback 철학).
-            learned = [{"text": raw.strip()[:500], "source": "generated"}]
+    parsed = _extract_json(raw)
+    if isinstance(parsed, list):
+        learned = [
+            {"text": str(x["text"]), "source": str(x.get("source", ""))}
+            for x in parsed
+            if isinstance(x, dict) and isinstance(x.get("text"), str) and x["text"].strip()
+        ]
+    if not learned:
+        # JSON 파싱 실패/스키마 불일치 — raw 자체는 실 LLM 응답(완전 실패 아님)이라 원문을
+        # 단일 bullet로 래핑해 구제(S15 fallback 철학). "raw가 아예 없음"과는 다른 케이스.
+        learned = [{"text": raw.strip()[:500], "source": "generated"}]
 
     return {"learned": learned, "generated_at": now.isoformat(), "source": "ai_draft"}
 
@@ -166,10 +175,14 @@ def _build_next_hypotheses_prompt(synthesis: dict[str, Any]) -> str | None:
     return "\n".join(lines)
 
 
-async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]]:
+async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]] | None:
     """L3 다음가설 추천 — synthesis(§5 계약 dict, 이미 non-null임을 라우터가 보장) 기반.
     metric_definition/measure_after는 S15 draft_hypothesis와 동형으로 고정 템플릿(LLM이
-    구조화 수치를 지어내지 않게) — statement/rationale/confidence만 LLM 생성."""
+    구조화 수치를 지어내지 않게) — statement/rationale/confidence만 LLM 생성.
+
+    반환 None = **생성 실패**(호출부 미저장 — synthesize와 동일 원칙, 기존 good
+    next_hypotheses 캐시를 빈 배열/garbage로 덮어쓰지 않는다). synthesis.learned가 애초에
+    비어 있어 프롬프트 자체를 안 만든 경우만 정당한 빈 배열(LLM 미호출)."""
     from app.services.llm_client import generate_text_claude
 
     prompt = _build_next_hypotheses_prompt(synthesis)
@@ -180,13 +193,14 @@ async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]]:
     try:
         raw = generate_text_claude(prompt, reasoning="disabled")
     except Exception as exc:  # noqa: BLE001
-        logger.warning("retro recommend_next: LLM 호출 실패(fallback): %s", exc)
+        logger.warning("retro recommend_next: LLM 호출 실패: %s", exc)
     if not raw:
-        return []
+        return None  # LLM 실패 — 기존 캐시 보존.
 
     parsed = _extract_json(raw)
     if not isinstance(parsed, list):
-        return []
+        return None  # 파싱 자체가 완전 실패(리스트가 아님) — synthesis처럼 원문 래핑 구제가
+        # 불가(스키마상 statement 필수 필드라 텍스트 1줄로 대체 불가) → 명시 실패로 처리.
 
     measure_after = datetime.now(timezone.utc) + timedelta(days=_DEFAULT_MEASURE_DAYS)
     candidates: list[dict[str, Any]] = []
@@ -203,4 +217,8 @@ async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]]:
             "rationale": str(x.get("rationale", "")),
             "requires_confirmation": True,
         })
+    if not candidates:
+        # 응답은 JSON 배열이었지만 항목이 전부 스키마 불일치 — 사실상 생성 실패와 동급이라
+        # 빈 배열을 "정답"으로 저장하지 않는다(기존 캐시 보존).
+        return None
     return candidates
