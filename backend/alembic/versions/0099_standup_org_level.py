@@ -128,13 +128,29 @@ def upgrade() -> None:
 
     # 2d. text MERGE (winner 값 + 상이한 비-winner non-empty 값 provenance append) + plan_story_ids union
     #     CP4: project name NULL/soft-deleted → project:<id> 폴백 (LEFT JOIN 으로 행 자체는 확보).
+    #
+    #     story 4f88f7b7 (2026-07-03) — in-place hotfix, 선례 284c2611(0080)와 동일 관례:
+    #     아래 `cnt` 계산이 원래 `count(*) OVER w` 였다. `w`는 ORDER BY 가 있는 named window라
+    #     명시 frame 이 없으면 PG 기본 frame(RANGE UNBOUNDED PRECEDING AND CURRENT ROW)이 적용돼
+    #     partition 전체 크기가 아니라 累積(cumulative) count 를 반환했다 — rn=1(파티션 첫 행)일
+    #     때 cnt 는 항상 1이라 바로 아래 `keepers` CTE(`rn=1 AND cnt>1`)가 그룹 크기와 무관하게
+    #     영원히 0행이었다. 즉 이 UPDATE(done/plan/blockers MERGE)는 이 마이그가 실제 실행된
+    #     이래 항상 no-op 이었고, 2e DELETE 가 non-keeper 값을 그대로 버려 이 파일 docstring이
+    #     명시 거부한 winner-only lossy merge 가 실제로 일어났다(story 18eefc31 에서 발견,
+    #     4f88f7b7 에서 근본수정).
+    #     ⚠️ 이 수정은 이미 이 migration 을 실행한 환경(예: dev/prod)엔 아무 효과가 없다 —
+    #     Alembic 은 이미 적용된 revision 을 재실행하지 않고, 그 시점에 삭제된 non-keeper 값은
+    #     복구 불가(비가역, 위 downgrade 주석과 동일 정책). 이 수정은 앞으로 이 migration을
+    #     처음부터 재구동하는 환경(신규 dev clone·재난복구 rebuild·CI fresh-DB alembic chain)이
+    #     올바른 content-preserving 동작을 얻도록 하는 forward-correctness 전용이다. 실 데이터
+    #     손실 정량화(포렌식)는 이 story 스코프 밖 — 별도 트랙.
     op.execute(
         """
         WITH ranked AS (
             SELECT id, org_id, author_id, date,
                    row_number() OVER w AS rn,
                    first_value(id) OVER w AS keeper,
-                   count(*) OVER w AS cnt
+                   count(*) OVER (PARTITION BY org_id, author_id, date) AS cnt
             FROM standup_entries
             WINDOW w AS (PARTITION BY org_id, author_id, date ORDER BY updated_at DESC, id DESC)
         ),
