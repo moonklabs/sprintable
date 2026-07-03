@@ -173,11 +173,19 @@ async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, An
 
 
 def _build_next_hypotheses_prompt(synthesis: dict[str, Any]) -> str | None:
+    """까심 QA MINOR(2026-07-03) — `_has_valid_synthesis`는 "≥1개 유효 아이템"만 요구하므로
+    혼합 learned(예: [{"text":"진짜 내용"}, {"foo":"bar"}])가 게이트를 통과할 수 있다. 이전엔
+    dict이기만 하면 `item.get('text','')`로 빈 문자열 bullet("- ")까지 프롬프트에 흘려보냈다
+    — 게이트와 동일한 shape 검증(non-blank text)으로 garbage 아이템을 여기서도 드롭."""
     learned = synthesis.get("learned") or []
-    if not learned:
+    valid_texts = [
+        item["text"] for item in learned
+        if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip()
+    ]
+    if not valid_texts:
         return None
     lines = [_NEXT_HYPOTHESES_INSTRUCTION, "", "종합:"]
-    lines.extend(f"- {item.get('text', '')}" for item in learned if isinstance(item, dict))
+    lines.extend(f"- {t}" for t in valid_texts)
     return "\n".join(lines)
 
 

@@ -117,6 +117,42 @@ def _no_embed():
 
 
 @pytest.mark.anyio
+async def test_resolve_next_sprint_full_tie_breaks_deterministically_by_id():
+    """까심 QA MINOR(2026-07-03) — start_date·created_at까지 완전히 동일한 planning sprint가
+    여럿이면 `Sprint.id.asc()` tie-break 없이는 비결정적이었다. 두 sprint를 같은 start_date·
+    같은 explicit created_at으로 심고, 매번 같은(더 작은 id) sprint가 선택되는지 확인."""
+    from app.services.retro_hypothesis_seed import resolve_next_sprint
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+            await s.execute(text(f"DELETE FROM sprints WHERE project_id='{PROJ_A}'"))
+            same_ts = datetime(2026, 8, 15, tzinfo=timezone.utc)
+            tie_a = uuid.UUID("dc000000-0000-0000-0000-0000000000aa")
+            tie_b = uuid.UUID("dc000000-0000-0000-0000-0000000000bb")
+            for sid in (tie_b, tie_a):  # 삽입 순서를 id 순서와 반대로 — 삽입순 우연 일치 배제
+                await s.execute(
+                    text(
+                        "INSERT INTO sprints (id,org_id,project_id,title,status,duration,"
+                        "start_date,created_at) VALUES "
+                        "(:id,:org,:proj,'tie','planning',14,'2026-08-15',:ts)"
+                    ),
+                    {"id": sid, "org": ORG, "proj": PROJ_A, "ts": same_ts},
+                )
+            await s.commit()
+
+        picks = set()
+        for _ in range(3):
+            async with Session() as s:
+                sprint = await resolve_next_sprint(s, ORG, PROJ_A)
+                picks.add(sprint.id)
+        assert picks == {tie_a}  # 항상 더 작은 id(tie_a < tie_b)만 선택 — 결정적
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
 async def test_adopt_creates_proposed_hypothesis_seeds_earliest_planning_sprint():
     """§2 PO 결 — planning 중 가장 이른 start_date(0801)가 선택돼야 함(0901 아님)."""
     from app.routers.retros import adopt_next_hypothesis
