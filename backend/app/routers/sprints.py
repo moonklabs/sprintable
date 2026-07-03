@@ -105,10 +105,18 @@ async def update_sprint(
             caller = await resolve_member(auth, org_id, session)
             try:
                 await transition_sprint(session, org_id, caller, id, _status_change)
-            except (SprintTransitionError, ValueError) as exc:
-                raise HTTPException(
-                    status_code=400, detail=getattr(exc, "message", str(exc))
-                ) from exc
+            except SprintTransitionError as exc:
+                # 까심 codex QA(2026-07-03, #1867): a353e88d 게이트가 구조화 code로
+                # raise하는데 이 경로가 400+string으로만 매핑해 FE graceful-404 계약
+                # (§5 handoff)이 깨졌다. 신규 code만 422+구조화 detail로 노출 — 기존
+                # 코드(INVALID_STATUS 등)는 status/shape 그대로(회귀 0, PO 결).
+                if exc.code == "HYPOTHESIS_REQUIRED_FOR_ACTIVATION":
+                    raise HTTPException(
+                        status_code=422, detail={"code": exc.code, "message": exc.message}
+                    ) from exc
+                raise HTTPException(status_code=400, detail=exc.message) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
     # 8a2bbda2: 날짜가 갱신되면 duration 을 (병합된) 날짜에서 재산출 저장(dates 단일진실).
     if "start_date" in data or "end_date" in data:
         existing = await repo.get(id)
@@ -157,8 +165,16 @@ async def activate_sprint(
     try:
         sprint = await transition_sprint(session, org_id, caller, id, "active")
         await session.commit()
-    except (SprintTransitionError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=getattr(exc, "message", str(exc))) from exc
+    except SprintTransitionError as exc:
+        # 까심 codex QA(2026-07-03, #1867): 위 update_sprint와 동일 갭 — 신규 code만
+        # 422+구조화 detail(FE §5 graceful 계약), 기존 코드는 backward-compat 유지.
+        if exc.code == "HYPOTHESIS_REQUIRED_FOR_ACTIVATION":
+            raise HTTPException(
+                status_code=422, detail={"code": exc.code, "message": exc.message}
+            ) from exc
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return SprintResponse.model_validate(sprint)
 
 

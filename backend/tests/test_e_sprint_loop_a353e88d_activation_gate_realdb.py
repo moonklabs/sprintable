@@ -193,3 +193,88 @@ async def test_canonical_transition_router_surfaces_422():
             assert ei.value.detail["code"] == "HYPOTHESIS_REQUIRED_FOR_ACTIVATION"
     finally:
         await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_activate_endpoint_surfaces_422_with_structured_code():
+    """까심 codex QA(2026-07-03, #1867 BLOCKER①) — `POST /{id}/activate`도 게이트를 태우는
+    3경로 중 하나(SSOT `transition_sprint` 경유)인데, 서비스 raise만 테스트하면 이 경로의
+    에러 매핑 자체가 400+string으로 퇴화해도 안 잡힌다(cross-layer contract 갭). 실 엔드포인트를
+    때려 HTTP 422 + code가 그대로 노출되는지 실증(FE §5 handoff graceful 계약 전제)."""
+    from app.routers.sprints import activate_sprint
+    from app.dependencies.auth import AuthContext
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed_org_project(s)
+            sprint = await _make_sprint(s)
+            await s.commit()
+
+        async with Session() as s:
+            auth = AuthContext(user_id=str(USER), email=None, claims={}, org_id=str(ORG))
+            with pytest.raises(HTTPException) as ei:
+                await activate_sprint(sprint.id, session=s, org_id=ORG, auth=auth)
+            assert ei.value.status_code == 422
+            assert ei.value.detail["code"] == "HYPOTHESIS_REQUIRED_FOR_ACTIVATION"
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_patch_status_endpoint_surfaces_422_with_structured_code():
+    """까심 codex QA(2026-07-03, #1867 BLOCKER①) — `PATCH /{id}`(status 변경)도 동일 SSOT
+    경유 3경로 중 하나. 이 엔드포인트 역시 422 + 구조화 code로 노출돼야 FE가 다른 두 경로와
+    동일하게 graceful degrade 가능(3경로 중 하나만 계약이 다르면 FE가 경로별 분기해야 하는
+    회귀)."""
+    from app.routers.sprints import update_sprint
+    from app.schemas.sprint import SprintUpdate
+    from app.repositories.sprint import SprintRepository
+    from app.dependencies.auth import AuthContext
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed_org_project(s)
+            sprint = await _make_sprint(s)
+            await s.commit()
+
+        async with Session() as s:
+            auth = AuthContext(user_id=str(USER), email=None, claims={}, org_id=str(ORG))
+            repo = SprintRepository(s, ORG)
+            with pytest.raises(HTTPException) as ei:
+                await update_sprint(
+                    sprint.id, SprintUpdate(status="active"),
+                    repo=repo, session=s, org_id=ORG, auth=auth,
+                )
+            assert ei.value.status_code == 422
+            assert ei.value.detail["code"] == "HYPOTHESIS_REQUIRED_FOR_ACTIVATION"
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_activate_endpoint_preserves_400_shape_for_preexisting_codes():
+    """backward-compat 회귀 방지(PO 결, 2026-07-03) — 신규 code(HYPOTHESIS_REQUIRED_FOR_ACTIVATION)만
+    422+구조화로 승격됐고, 기존 코드(예: 이미 active인 스프린트 재활성화 시도 =
+    INVALID_SPRINT_TRANSITION류)는 이 엔드포인트에서 여전히 400+string shape 그대로임을
+    실증 — 기존 FE 소비자(400 문자열 파싱)를 깨지 않는다."""
+    from app.routers.sprints import activate_sprint
+    from app.dependencies.auth import AuthContext
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed_org_project(s)
+            sprint = await _make_sprint(s, status="active")  # 이미 active — planning→active 전이 아님
+            await _link_hypothesis(s, sprint.id, "proposed")  # 게이트는 통과, 전이 자체가 무효
+            await s.commit()
+
+        async with Session() as s:
+            auth = AuthContext(user_id=str(USER), email=None, claims={}, org_id=str(ORG))
+            with pytest.raises(HTTPException) as ei:
+                await activate_sprint(sprint.id, session=s, org_id=ORG, auth=auth)
+            assert ei.value.status_code == 400
+            assert isinstance(ei.value.detail, str)
+    finally:
+        await eng.dispose()
