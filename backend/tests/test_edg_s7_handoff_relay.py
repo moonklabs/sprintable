@@ -170,8 +170,10 @@ async def test_relay_db_poison_isolated_by_savepoint():
 # ── 엔진 relay 플래그 (enforcing agent-handoff만) ────────────────────────────
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-@pytest.mark.xfail(strict=False, reason="settings.decision_gate_line_enabled monkeypatch 누락(형제 s18/s19/s29 패턴 미적용) — default-off라 plain_transition로 퇴화. story 8236bbc3 e2e서 신규 노출(파일 자체가 CI 최초 실행). story 18eefc31 트래킹.")
-async def test_engine_sets_relay_only_for_enforcing_agent_handoff():
+async def test_engine_sets_relay_only_for_enforcing_agent_handoff(monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "decision_gate_line_enabled", True)
+    monkeypatch.setattr(settings, "decision_gate_line_mode", "enforcing")
     from app.services.workflow_line_engine import evaluate_line_for_transition
     from app.models.workflow_line import WorkflowLineDefinition, WorkflowLineDefinitionVersion
 

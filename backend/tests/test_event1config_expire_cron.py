@@ -71,51 +71,60 @@ _requires_db = pytest.mark.skipif(
 
 
 @_requires_db
-@pytest.mark.xfail(strict=False, reason="asyncpg 'attached to a different loop' RuntimeError — story 8236bbc3 e2e 시뮬레이션서 신규 노출(격리 재현 확인). story 18eefc31 트래킹.")
 @pytest.mark.anyio
 async def test_global_cleanup_recovers_delivered_across_orgs_realdb():
-    """전 org cleanup: 7일 초과 delivered 삭제(ACK retire 회수)·org 무관."""
-    from app.core.database import async_session_factory
+    """전 org cleanup: 7일 초과 delivered 삭제(ACK retire 회수)·org 무관.
+
+    story 18eefc31: `app.core.database.async_session_factory`(프로덕션 전역 엔진) 대신
+    테스트 전용 엔진 사용 — 다른 모든 realdb 테스트와 동일 관례(test_event1config_
+    webhook_targets.py::test_resolve_predicate_realdb와 동일 근본원인/수정, 함수-스코프
+    이벤트루프 간 커넥션풀 공유가 "attached to a different loop"를 유발)."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     org_a, org_b = uuid.uuid4(), uuid.uuid4()
     proj_a, proj_b = uuid.uuid4(), uuid.uuid4()
     agent = uuid.uuid4()
     old = datetime.now(timezone.utc) - timedelta(days=10)
 
-    async with async_session_factory() as db:
-        for org, proj in ((org_a, proj_a), (org_b, proj_b)):
-            await db.execute(
-                text("INSERT INTO organizations (id, name, slug) VALUES (:i, :n, :s)"),
-                {"i": org, "n": f"exp-org-{org}", "s": f"exp-{org}"},
-            )
-            await db.execute(
-                text("INSERT INTO projects (id, org_id, name) VALUES (:i, :o, :n)"),
-                {"i": proj, "o": org, "n": f"exp-proj-{proj}"},
-            )
-            # 오래된 delivered(ACK retire 산출물) — cleanup 대상
-            await db.execute(
-                text(
-                    "INSERT INTO events (id, org_id, project_id, event_type, recipient_id, "
-                    " recipient_type, payload, status, recipient_seq, delivered_at) VALUES "
-                    "(gen_random_uuid(), :o, :p, 'conversation.message_created', :r, 'agent', "
-                    " '{}', 'delivered', 1, :d)"
-                ),
-                {"o": org, "p": proj, "r": agent, "d": old},
-            )
-        await db.commit()
-        try:
-            out = await expire_stale_events_core(db, org_id=None)
-            assert out["cleaned"] >= 2, "양 org 의 오래된 delivered 모두 회수"
-
-            remaining = (await db.execute(
-                text("SELECT count(*) FROM events WHERE recipient_id = :r AND status = 'delivered'"),
-                {"r": agent},
-            )).scalar()
-            assert remaining == 0
-        finally:
-            await db.execute(text("DELETE FROM events WHERE recipient_id = :r"), {"r": agent})
-            for proj in (proj_a, proj_b):
-                await db.execute(text("DELETE FROM projects WHERE id = :i"), {"i": proj})
-            for org in (org_a, org_b):
-                await db.execute(text("DELETE FROM organizations WHERE id = :i"), {"i": org})
+    engine = create_async_engine(_ASYNCPG_URL.replace("postgresql://", "postgresql+asyncpg://"))
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as db:
+            for org, proj in ((org_a, proj_a), (org_b, proj_b)):
+                await db.execute(
+                    text("INSERT INTO organizations (id, name, slug) VALUES (:i, :n, :s)"),
+                    {"i": org, "n": f"exp-org-{org}", "s": f"exp-{org}"},
+                )
+                await db.execute(
+                    text("INSERT INTO projects (id, org_id, name) VALUES (:i, :o, :n)"),
+                    {"i": proj, "o": org, "n": f"exp-proj-{proj}"},
+                )
+                # 오래된 delivered(ACK retire 산출물) — cleanup 대상
+                await db.execute(
+                    text(
+                        "INSERT INTO events (id, org_id, project_id, event_type, recipient_id, "
+                        " recipient_type, payload, status, recipient_seq, delivered_at) VALUES "
+                        "(gen_random_uuid(), :o, :p, 'conversation.message_created', :r, 'agent', "
+                        " '{}', 'delivered', 1, :d)"
+                    ),
+                    {"o": org, "p": proj, "r": agent, "d": old},
+                )
             await db.commit()
+            try:
+                out = await expire_stale_events_core(db, org_id=None)
+                assert out["cleaned"] >= 2, "양 org 의 오래된 delivered 모두 회수"
+
+                remaining = (await db.execute(
+                    text("SELECT count(*) FROM events WHERE recipient_id = :r AND status = 'delivered'"),
+                    {"r": agent},
+                )).scalar()
+                assert remaining == 0
+            finally:
+                await db.execute(text("DELETE FROM events WHERE recipient_id = :r"), {"r": agent})
+                for proj in (proj_a, proj_b):
+                    await db.execute(text("DELETE FROM projects WHERE id = :i"), {"i": proj})
+                for org in (org_a, org_b):
+                    await db.execute(text("DELETE FROM organizations WHERE id = :i"), {"i": org})
+                await db.commit()
+    finally:
+        await engine.dispose()

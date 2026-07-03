@@ -138,8 +138,29 @@ _DEDUPE_SQL = [
 
 @pytest.mark.anyio
 @pytest.mark.skipif(not _ASYNC, reason="real-DB URL 미설정 — skip")
-@pytest.mark.xfail(strict=False, reason="asyncpg TypeError: expected datetime.date/datetime, got str — story 8236bbc3 e2e 시뮬레이션서 신규 노출(asyncpg 엄격 datetime 타이핑 패턴). story 18eefc31 트래킹.")
+@pytest.mark.xfail(
+    strict=False,
+    reason="story 18eefc31 — asyncpg datetime 타이핑(원 xfail 사유)은 실 datetime 객체 바인딩으로 "
+    "해결했으나(다른 realdb 테스트와 동일 관례), 그 뒤 별개의 진짜 product 버그가 드러났다: "
+    "2d text-MERGE 의 `count(*) OVER w`(ORDER BY 있는 named window, 명시 frame 없음)는 PG 기본"
+    "frame(RANGE UNBOUNDED PRECEDING AND CURRENT ROW)이 적용돼 partition 전체 크기가 아니라 "
+    "累積(cumulative) count 를 반환한다 — rn=1(파티션 첫 행)일 때 cnt 는 항상 1이라 "
+    "`WHERE r.rn=1 AND r.cnt>1`(keepers CTE)가 그룹 크기와 무관하게 영원히 0행이다. 즉 "
+    "done/plan/blockers MERGE(UPDATE)가 **항상 no-op**이고, 뒤이은 2e DELETE 는 keeper 이외 값을 "
+    "그대로 버린다 — winner-only lossy merge. 이 SQL은 alembic/versions/0099_standup_org_level.py "
+    "2d 와 완전 동형(migration 원문 그대로 복제)이며, 그 마이그의 docstring 은 명문으로 "
+    "'PO ①·dev lossy_rows=1 실적출 → winner-only 폐기'(즉 PO가 winner-only 를 명시 거부하고 "
+    "content-preserving MERGE 를 확정)라고 밝힌다 — 실제로는 그 반대(PO가 거부한 winner-only)가 "
+    "일어난다. 로컬 psql 로 최소 재현: 2-row 그룹에서 `count(*) OVER w`=[1,2], "
+    "`count(*) OVER (PARTITION BY org_id,author_id,date)`(명시 frame 없는 별도 window)=[2,2] — "
+    "cnt 컬럼 자체가 버그. 마이그는 이미 실행됐고(dev 최신 head 포함) 데이터 손실이 이미 "
+    "발생했을 가능성(당시 dedupe 대상 그룹이 실제 있었는지는 별도 포렌식 필요, prod 접근 없음 "
+    "— 에스컬 사유) — 이 story(test-infra 하드닝) 스코프 밖이라 테스트를 완화해 통과시키지 않고 "
+    "xfail+PO 에스컬 — SQL 프레임 근본수정은 follow-up story 4f88f7b7(E-STANDUP)로 분리, 그 "
+    "story 구현·머지 完了 後 이 xfail 해소. story 18eefc31 트래킹.",
+)
 async def test_dedupe_merge_lossless_and_idempotent_realdb():
+    from datetime import datetime, timezone
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -150,83 +171,97 @@ async def test_dedupe_merge_lossless_and_idempotent_realdb():
     eng = create_async_engine(_ASYNC)
     sm = async_sessionmaker(eng, expire_on_commit=False)
     try:
-        async with sm() as s:
-            # 격리: unique index 잠시 제거(테스트 dup 시드 허용)
-            await s.execute(text("DROP INDEX IF EXISTS uq_standup_org_author_date"))
-            for pid, nm in ((p1, "Alpha"), (p2, "Beta"), (p3, "Gamma")):
-                await s.execute(text("INSERT INTO projects (id,org_id,name,created_at) VALUES (:i,:o,:n,now())"),
-                                {"i": pid, "o": org, "n": nm})
-            rows = [
-                (e1, p1, "PLAN-ALPHA", "2026-06-05 10:00+00"),
-                (e2, p2, "PLAN-BETA", "2026-06-05 11:00+00"),
-                (e3, p3, "PLAN-GAMMA", "2026-06-05 12:00+00"),  # keeper(latest)
-            ]
-            for eid, pid, plan, ts in rows:
+        try:
+            async with sm() as s:
+                # 격리: unique index 잠시 제거(테스트 dup 시드 허용)
+                await s.execute(text("DROP INDEX IF EXISTS uq_standup_org_author_date"))
+                # story 18eefc31: organizations 행 없이 projects.org_id를 채우던 이전 버전은
+                # 실 FK(projects_org_id_fkey)가 있는 migrated DB에서 깨진다 — 명시 시드.
+                await s.execute(
+                    text("INSERT INTO organizations (id,name,slug) VALUES (:i,:n,:sl)"),
+                    {"i": org, "n": f"standup-org-{org}", "sl": f"standup-{org}"},
+                )
+                for pid, nm in ((p1, "Alpha"), (p2, "Beta"), (p3, "Gamma")):
+                    await s.execute(text("INSERT INTO projects (id,org_id,name,created_at) VALUES (:i,:o,:n,now())"),
+                                    {"i": pid, "o": org, "n": nm})
+                # story 18eefc31: asyncpg는 timestamptz 컬럼에 ISO 문자열을 직접 바인딩하면
+                # TypeError(expected datetime.date/datetime, got str)로 거부한다 — 실 datetime
+                # 객체로 바인딩(asyncpg 엄격 타이핑, 이 세션에서 반복 확인된 패턴).
+                rows = [
+                    (e1, p1, "PLAN-ALPHA", datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc)),
+                    (e2, p2, "PLAN-BETA", datetime(2026, 6, 5, 11, 0, tzinfo=timezone.utc)),
+                    (e3, p3, "PLAN-GAMMA", datetime(2026, 6, 5, 12, 0, tzinfo=timezone.utc)),  # keeper(latest)
+                ]
+                for eid, pid, plan, ts in rows:
+                    await s.execute(text(
+                        "INSERT INTO standup_entries (id,org_id,project_id,author_id,date,plan,plan_story_ids,created_at,updated_at)"
+                        " VALUES (:i,:o,:p,:a,:d,:pl,ARRAY[]::uuid[],:t,:t)"),
+                        {"i": eid, "o": org, "p": pid, "a": author, "d": d, "pl": plan, "t": ts})
+                    await s.execute(text(
+                        "INSERT INTO standup_entry_projects (id,entry_id,project_id,org_id) VALUES (gen_random_uuid(),:e,:p,:o)"),
+                        {"e": eid, "p": pid, "o": org})
+                # feedback on 비-keeper(e1)
                 await s.execute(text(
-                    "INSERT INTO standup_entries (id,org_id,project_id,author_id,date,plan,plan_story_ids,created_at,updated_at)"
-                    " VALUES (:i,:o,:p,:a,:d,:pl,ARRAY[]::uuid[],:t,:t)"),
-                    {"i": eid, "o": org, "p": pid, "a": author, "d": d, "pl": plan, "t": ts})
-                await s.execute(text(
-                    "INSERT INTO standup_entry_projects (id,entry_id,project_id,org_id) VALUES (gen_random_uuid(),:e,:p,:o)"),
-                    {"e": eid, "p": pid, "o": org})
-            # feedback on 비-keeper(e1)
-            await s.execute(text(
-                "INSERT INTO standup_feedback (id,org_id,project_id,standup_entry_id,feedback_by_id,review_type,feedback_text,created_at,updated_at)"
-                " VALUES (:i,:o,:p,:se,:fb,'comment','good',now(),now())"),
-                {"i": fb, "o": org, "p": p1, "se": e1, "fb": uuid.uuid4()})
-            await s.commit()
-
-            async def run_dedupe():
-                for sql in _DEDUPE_SQL:
-                    await s.execute(text(sql))
+                    "INSERT INTO standup_feedback (id,org_id,project_id,standup_entry_id,feedback_by_id,review_type,feedback_text,created_at,updated_at)"
+                    " VALUES (:i,:o,:p,:se,:fb,'comment','good',now(),now())"),
+                    {"i": fb, "o": org, "p": p1, "se": e1, "fb": uuid.uuid4()})
                 await s.commit()
 
-            await run_dedupe()
+                async def run_dedupe():
+                    for sql in _DEDUPE_SQL:
+                        await s.execute(text(sql))
+                    await s.commit()
 
-            # 1엔트리만 남음 = keeper(e3)
-            cnt = (await s.execute(text(
-                "SELECT count(*) FROM standup_entries WHERE org_id=:o AND author_id=:a AND date=:d"),
-                {"o": org, "a": author, "d": d})).scalar_one()
-            assert cnt == 1
-            keeper_plan = (await s.execute(text(
-                "SELECT plan FROM standup_entries WHERE org_id=:o AND author_id=:a AND date=:d"),
-                {"o": org, "a": author, "d": d})).scalar_one()
-            # 내용 0 소실 — 세 plan 전부 보존
-            assert "PLAN-GAMMA" in keeper_plan
-            assert "PLAN-ALPHA" in keeper_plan and "Alpha" in keeper_plan  # provenance
-            assert "PLAN-BETA" in keeper_plan and "Beta" in keeper_plan
-            # 링크 union = {p1,p2,p3} 가 keeper 에
-            links = set((await s.execute(text(
-                "SELECT project_id FROM standup_entry_projects WHERE entry_id IN "
-                "(SELECT id FROM standup_entries WHERE org_id=:o AND author_id=:a AND date=:d)"),
-                {"o": org, "a": author, "d": d})).scalars().all())
-            assert links == {p1, p2, p3}
-            # feedback reattach → keeper(e3)
-            fb_entry = (await s.execute(text("SELECT standup_entry_id FROM standup_feedback WHERE id=:i"),
-                                        {"i": fb})).scalar_one()
-            assert fb_entry == e3
-            # lossy_rows = 0 재프로브(그룹 단일행 → dup 0)
-            lossy = (await s.execute(text("""
-                WITH ranked AS (SELECT id, row_number() OVER (PARTITION BY org_id,author_id,date) rn
-                                FROM standup_entries WHERE org_id=:o AND author_id=:a AND date=:d)
-                SELECT count(*) FROM ranked WHERE rn>1"""), {"o": org, "a": author, "d": d})).scalar_one()
-            assert lossy == 0
+                await run_dedupe()
 
-            # 멱등: 재실행 무변화
-            await run_dedupe()
-            cnt2 = (await s.execute(text(
-                "SELECT count(*) FROM standup_entries WHERE org_id=:o AND author_id=:a AND date=:d"),
-                {"o": org, "a": author, "d": d})).scalar_one()
-            assert cnt2 == 1
-        # cleanup + unique index 복원
-        async with sm() as s:
-            await s.execute(text("DELETE FROM standup_feedback WHERE org_id=:o"), {"o": org})
-            await s.execute(text("DELETE FROM standup_entry_projects WHERE org_id=:o"), {"o": org})
-            await s.execute(text("DELETE FROM standup_entries WHERE org_id=:o"), {"o": org})
-            await s.execute(text("DELETE FROM projects WHERE org_id=:o"), {"o": org})
-            await s.execute(text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_standup_org_author_date "
-                "ON standup_entries (org_id, author_id, date)"))
-            await s.commit()
+                # 1엔트리만 남음 = keeper(e3)
+                cnt = (await s.execute(text(
+                    "SELECT count(*) FROM standup_entries WHERE org_id=:o AND author_id=:a AND date=:d"),
+                    {"o": org, "a": author, "d": d})).scalar_one()
+                assert cnt == 1
+                keeper_plan = (await s.execute(text(
+                    "SELECT plan FROM standup_entries WHERE org_id=:o AND author_id=:a AND date=:d"),
+                    {"o": org, "a": author, "d": d})).scalar_one()
+                # 내용 0 소실 — 세 plan 전부 보존
+                assert "PLAN-GAMMA" in keeper_plan
+                assert "PLAN-ALPHA" in keeper_plan and "Alpha" in keeper_plan  # provenance
+                assert "PLAN-BETA" in keeper_plan and "Beta" in keeper_plan
+                # 링크 union = {p1,p2,p3} 가 keeper 에
+                links = set((await s.execute(text(
+                    "SELECT project_id FROM standup_entry_projects WHERE entry_id IN "
+                    "(SELECT id FROM standup_entries WHERE org_id=:o AND author_id=:a AND date=:d)"),
+                    {"o": org, "a": author, "d": d})).scalars().all())
+                assert links == {p1, p2, p3}
+                # feedback reattach → keeper(e3)
+                fb_entry = (await s.execute(text("SELECT standup_entry_id FROM standup_feedback WHERE id=:i"),
+                                            {"i": fb})).scalar_one()
+                assert fb_entry == e3
+                # lossy_rows = 0 재프로브(그룹 단일행 → dup 0)
+                lossy = (await s.execute(text("""
+                    WITH ranked AS (SELECT id, row_number() OVER (PARTITION BY org_id,author_id,date) rn
+                                    FROM standup_entries WHERE org_id=:o AND author_id=:a AND date=:d)
+                    SELECT count(*) FROM ranked WHERE rn>1"""), {"o": org, "a": author, "d": d})).scalar_one()
+                assert lossy == 0
+
+                # 멱등: 재실행 무변화
+                await run_dedupe()
+                cnt2 = (await s.execute(text(
+                    "SELECT count(*) FROM standup_entries WHERE org_id=:o AND author_id=:a AND date=:d"),
+                    {"o": org, "a": author, "d": d})).scalar_one()
+                assert cnt2 == 1
+        finally:
+            # cleanup + unique index 복원 — story 18eefc31: assertion 실패(xfail) 시에도
+            # 항상 실행돼야 시드 데이터가 공유 job DB에 누적되지 않는다(다른 realdb 테스트와
+            # 동일 finally-cleanup 관례). 이전 버전은 이 블록이 try 밖에 있어 실패 시 스킵됐다.
+            async with sm() as s:
+                await s.execute(text("DELETE FROM standup_feedback WHERE org_id=:o"), {"o": org})
+                await s.execute(text("DELETE FROM standup_entry_projects WHERE org_id=:o"), {"o": org})
+                await s.execute(text("DELETE FROM standup_entries WHERE org_id=:o"), {"o": org})
+                await s.execute(text("DELETE FROM projects WHERE org_id=:o"), {"o": org})
+                await s.execute(text("DELETE FROM organizations WHERE id=:o"), {"o": org})
+                await s.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_standup_org_author_date "
+                    "ON standup_entries (org_id, author_id, date)"))
+                await s.commit()
     finally:
         await eng.dispose()

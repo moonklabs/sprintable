@@ -27,7 +27,6 @@ def anyio_backend():
 
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
-@pytest.mark.xfail(strict=False, reason="clean_pass_rate가 None(기대 non-None) — trust 계산 seed/calibration 갭 의심. story 8236bbc3 e2e서 신규 노출(파일 자체가 CI 최초 실행). story 18eefc31 트래킹.")
 @pytest.mark.anyio
 async def test_h1_end_to_end_ready_to_done():
     from sqlalchemy import text as _text
@@ -106,7 +105,13 @@ async def test_h1_end_to_end_ready_to_done():
             )).scalar()
             assert vcount >= 2, f"verdict(pr/ci/merge) 증가해야, got {vcount}"
 
-            trust = await compute_member_trust_scores(s, org, member, role_key="implementation")
+            # story 18eefc31: HO-S5(#1497, 이 E2E 원작 PR #1487 以後 병합)가 기본 trust
+            # source를 hypothesis_outcome_* 로 제한해 이 체인이 캡처하는 CI/pr/merge verdict는
+            # 기본 집계에서 제외된다 — include_legacy=True 로 legacy source 합산 명시(product
+            # 버그 아닌 API 변경에 뒤처진 테스트 staleness).
+            trust = await compute_member_trust_scores(
+                s, org, member, role_key="implementation", include_legacy=True
+            )
             assert trust["scores"], "trust scores가 비지 않아야(verdict 누적)"
             assert trust["scores"][0]["clean_pass_rate"] is not None, "trust null 아니어야"
 

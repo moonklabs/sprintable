@@ -64,8 +64,10 @@ def _decision(decision, gate_id):
 # ── line_merge_gate_active (라우터 skip 판정) ─────────────────────────────────
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-@pytest.mark.xfail(strict=False, reason="settings.decision_gate_line_enabled monkeypatch 누락(형제 s18/s19/s29 패턴 미적용) — default-off라 plain_transition로 퇴화. story 8236bbc3 e2e서 신규 노출(파일 자체가 CI 최초 실행). story 18eefc31 트래킹.")
-async def test_line_merge_gate_active_only_for_enforcing_merge_gate():
+async def test_line_merge_gate_active_only_for_enforcing_merge_gate(monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "decision_gate_line_enabled", True)
+    monkeypatch.setattr(settings, "decision_gate_line_mode", "enforcing")
     from app.services.workflow_line_engine import line_merge_gate_active
     engine, Session = await _session()
     kw = dict(entity_type="story", from_status="in-review", to_status="done")
@@ -90,8 +92,10 @@ async def test_line_merge_gate_active_only_for_enforcing_merge_gate():
 # ── wrapper decision 매핑 (evaluate_merge_gate patch로 결정 격리) ─────────────
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-@pytest.mark.xfail(strict=False, reason="settings.decision_gate_line_enabled monkeypatch 누락(형제 s18/s19/s29 패턴 미적용) — default-off라 plain_transition로 퇴화. story 8236bbc3 e2e서 신규 노출(파일 자체가 CI 최초 실행). story 18eefc31 트래킹.")
-async def test_merge_gate_wrapper_ask_human_uses_h1_gate_no_double():
+async def test_merge_gate_wrapper_ask_human_uses_h1_gate_no_double(monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "decision_gate_line_enabled", True)
+    monkeypatch.setattr(settings, "decision_gate_line_mode", "enforcing")
     from sqlalchemy import func, select
     from app.services import workflow_line_engine as eng
     from app.services.merge_verdict_gate import ASK_HUMAN
@@ -121,8 +125,10 @@ async def test_merge_gate_wrapper_ask_human_uses_h1_gate_no_double():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-@pytest.mark.xfail(strict=False, reason="settings.decision_gate_line_enabled monkeypatch 누락(형제 s18/s19/s29 패턴 미적용) — default-off라 plain_transition로 퇴화. story 8236bbc3 e2e서 신규 노출(파일 자체가 CI 최초 실행). story 18eefc31 트래킹.")
-async def test_merge_gate_wrapper_auto_merge_and_block():
+async def test_merge_gate_wrapper_auto_merge_and_block(monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "decision_gate_line_enabled", True)
+    monkeypatch.setattr(settings, "decision_gate_line_mode", "enforcing")
     from app.services import workflow_line_engine as eng
     from app.services.merge_verdict_gate import AUTO_MERGE, BLOCK
     engine, Session = await _session()
@@ -145,8 +151,10 @@ async def test_merge_gate_wrapper_auto_merge_and_block():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-@pytest.mark.xfail(strict=False, reason="settings.decision_gate_line_enabled monkeypatch 누락(형제 s18/s19/s29 패턴 미적용) — default-off라 plain_transition로 퇴화. story 8236bbc3 e2e서 신규 노출(파일 자체가 CI 최초 실행). story 18eefc31 트래킹.")
-async def test_merge_gate_wrapper_failopen():
+async def test_merge_gate_wrapper_failopen(monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "decision_gate_line_enabled", True)
+    monkeypatch.setattr(settings, "decision_gate_line_mode", "enforcing")
     """⭐S3 fail-open 보존: merge-gate 평가(evaluate_merge_gate) 예외도 engine_failed→plain(전이 진행)."""
     from app.services import workflow_line_engine as eng
     engine, Session = await _session()
@@ -163,8 +171,10 @@ async def test_merge_gate_wrapper_failopen():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-@pytest.mark.xfail(strict=False, reason="settings.decision_gate_line_enabled monkeypatch 누락(형제 s18/s19/s29 패턴 미적용) — default-off라 plain_transition로 퇴화. story 8236bbc3 e2e서 신규 노출(파일 자체가 CI 최초 실행). story 18eefc31 트래킹.")
-async def test_merge_gate_audit_persists_after_raise_commit():
+async def test_merge_gate_audit_persists_after_raise_commit(monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "decision_gate_line_enabled", True)
+    monkeypatch.setattr(settings, "decision_gate_line_mode", "enforcing")
     """⭐SME blocking 회귀: gate_pending(라우터가 raise 前 db.commit) 후 engine 이 만든 step_run audit
     이 살아남아야 한다. commit 없이 raise 하면 get_db rollback 으로 사라지던 갭."""
     from sqlalchemy import select

@@ -85,51 +85,59 @@ _requires_db = pytest.mark.skipif(
 
 
 @_requires_db
-@pytest.mark.xfail(strict=False, reason="story 8236bbc3 e2e 시뮬레이션서 order-dependent 플레이키 확인(84파일 풀런서만 간헐 실패 — 공유DB 상태 의존 의심). story 18eefc31 트래킹.")
 @pytest.mark.anyio
 async def test_ack_retire_semantics_realdb():
     """<=seq pending → delivered, >seq 유지, 재-ack idempotent."""
-    from app.core.database import async_session_factory
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     org, proj, agent = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-    async with async_session_factory() as db:
-        await db.execute(
-            text("INSERT INTO organizations (id, name, slug) VALUES (:i, :n, :s)"),
-            {"i": org, "n": f"ack-org-{org}", "s": f"ack-{org}"},
-        )
-        await db.execute(
-            text("INSERT INTO projects (id, org_id, name) VALUES (:i, :o, :n)"),
-            {"i": proj, "o": org, "n": f"ack-proj-{proj}"},
-        )
-        for seq in (1, 2, 3):
+    # story 18eefc31: 테스트 전용 엔진(+dispose) — 프로덕션 전역 싱글턴
+    # `app.core.database.async_session_factory` 는 pytest-asyncio 함수-스코프 이벤트루프와
+    # 부딪혀 "attached to a different loop"(84파일 풀런서만 노출) — 다른 realdb 테스트와
+    # 동일 관례로 전환.
+    engine = create_async_engine(_ASYNCPG_URL.replace("postgresql://", "postgresql+asyncpg://"))
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as db:
             await db.execute(
-                text(
-                    "INSERT INTO events "
-                    "(id, org_id, project_id, event_type, recipient_id, recipient_type, "
-                    " payload, status, recipient_seq) VALUES "
-                    "(gen_random_uuid(), :o, :p, 'conversation.message_created', :r, 'agent', "
-                    " '{}', 'pending', :seq)"
-                ),
-                {"o": org, "p": proj, "r": agent, "seq": seq},
+                text("INSERT INTO organizations (id, name, slug) VALUES (:i, :n, :s)"),
+                {"i": org, "n": f"ack-org-{org}", "s": f"ack-{org}"},
             )
-        await db.commit()
-        try:
-            await ack_event(AckRequest(seq=2), db=db, auth=_api_key_auth(agent))
-
-            rows = (await db.execute(
-                text("SELECT recipient_seq, status FROM events WHERE recipient_id = :r"),
-                {"r": agent},
-            )).all()
-            by_seq = {r[0]: r[1] for r in rows}
-            assert by_seq[1] == "delivered"
-            assert by_seq[2] == "delivered"
-            assert by_seq[3] == "pending", ">seq 이벤트는 유지(미-ack)"
-
-            # 재-ack: 동일 seq → no-op(idempotent), 에러 없음
-            await ack_event(AckRequest(seq=2), db=db, auth=_api_key_auth(agent))
-        finally:
-            await db.execute(text("DELETE FROM events WHERE recipient_id = :r"), {"r": agent})
-            await db.execute(text("DELETE FROM agent_event_cursors WHERE agent_id = :a"), {"a": agent})
-            await db.execute(text("DELETE FROM projects WHERE id = :i"), {"i": proj})
-            await db.execute(text("DELETE FROM organizations WHERE id = :i"), {"i": org})
+            await db.execute(
+                text("INSERT INTO projects (id, org_id, name) VALUES (:i, :o, :n)"),
+                {"i": proj, "o": org, "n": f"ack-proj-{proj}"},
+            )
+            for seq in (1, 2, 3):
+                await db.execute(
+                    text(
+                        "INSERT INTO events "
+                        "(id, org_id, project_id, event_type, recipient_id, recipient_type, "
+                        " payload, status, recipient_seq) VALUES "
+                        "(gen_random_uuid(), :o, :p, 'conversation.message_created', :r, 'agent', "
+                        " '{}', 'pending', :seq)"
+                    ),
+                    {"o": org, "p": proj, "r": agent, "seq": seq},
+                )
             await db.commit()
+            try:
+                await ack_event(AckRequest(seq=2), db=db, auth=_api_key_auth(agent))
+
+                rows = (await db.execute(
+                    text("SELECT recipient_seq, status FROM events WHERE recipient_id = :r"),
+                    {"r": agent},
+                )).all()
+                by_seq = {r[0]: r[1] for r in rows}
+                assert by_seq[1] == "delivered"
+                assert by_seq[2] == "delivered"
+                assert by_seq[3] == "pending", ">seq 이벤트는 유지(미-ack)"
+
+                # 재-ack: 동일 seq → no-op(idempotent), 에러 없음
+                await ack_event(AckRequest(seq=2), db=db, auth=_api_key_auth(agent))
+            finally:
+                await db.execute(text("DELETE FROM events WHERE recipient_id = :r"), {"r": agent})
+                await db.execute(text("DELETE FROM agent_event_cursors WHERE agent_id = :a"), {"a": agent})
+                await db.execute(text("DELETE FROM projects WHERE id = :i"), {"i": proj})
+                await db.execute(text("DELETE FROM organizations WHERE id = :i"), {"i": org})
+                await db.commit()
+    finally:
+        await engine.dispose()
