@@ -82,127 +82,19 @@ async def _scan_events(conn, recipient_id: uuid.UUID, after_seq: int) -> list[in
 
 
 # ─── 핵심 race 테스트 ─────────────────────────────────────────────────────────
-
-@pytest.mark.skip(
-    reason="story 18eefc31 심층 재진단(원래 사유였던 FK violation은 org/project autocommit "
-    "순서 fix로 해결됨 — 별개). 남은 문제는 이 테스트의 race 시나리오 자체가 현재 "
-    "per-recipient dense-seq 설계(agent_event_seqs 카운터 row-lock 직렬화, event_seq.py 참고) "
-    "하에서는 구성 불가능하다는 것 — T2가 T1(같은 recipient_id, 미커밋)과 같은 카운터 row를 "
-    "잡으려 하면 T1 커밋까지 그냥 블록된다(race 아님, 진짜 교착). xfail(실행은 됨)로는 "
-    "30초 타임아웃까지 블록 후 DB 커넥션을 오염 상태로 남겨 후속 테스트/cleanup까지 연쇄로 "
-    "막는다(실측: pg_stat_activity에 idle-in-transaction+lock-wait 잔존 확인) — 그래서 "
-    "xfail이 아니라 skip(미실행). codex 교차검증도 동일 결론(\"현재 구현 하 재구성 불가, "
-    "재설계 필요\"). 이 테스트가 검증하려던 위협 모델이 이후 아키텍처 변경(dense-seq)으로 "
-    "폐기됐는지, 다른 방식(예: 별도 recipient)으로 재구성해야 하는지는 product 판단 필요. "
-    "story 18eefc31 트래킹.",
-)
-@pytest.mark.anyio
-async def test_acked_seq_rescan_catches_low_seq_late_commit():
-    """실 DB race: T1(낮은 seq, 늦게 커밋) → acked_seq 재스캔에서 반드시 잡힘.
-
-    시나리오:
-    1) T1 BEGIN → events INSERT (seq_t1 발급, 낮음)
-    2) T2 BEGIN → events INSERT (seq_t2=seq_t1+1) → COMMIT
-    3) 스캔(after_seq = seq_t1 - 1): T2만 보임 (T1 미커밋)
-    4) acked_seq = seq_t1 - 1 (클라이언트 아직 ACK 안 함 → 재스캔 기준점 유지)
-    5) T1 COMMIT
-    6) 재스캔(after_seq = acked_seq = seq_t1 - 1): T1, T2 모두 잡힘 ← 핵심 검증
-
-    pre-fix(max-advance): 3)에서 T2를 보고 start_seq = seq_t2로 전진.
-                          6) 재스캔이 after_seq=seq_t2부터라 T1 누락.
-    fix(acked_seq 재스캔): acked_seq = seq_t1-1 유지 → 6)에서 T1 반드시 잡힘.
-    """
-    import asyncpg
-
-    conn_setup = await asyncpg.connect(_ASYNCPG_URL)
-    conn1 = await asyncpg.connect(_ASYNCPG_URL)  # T1 (늦게 커밋)
-    conn2 = await asyncpg.connect(_ASYNCPG_URL)  # T2 (먼저 커밋)
-    scan_conn = await asyncpg.connect(_ASYNCPG_URL)  # 조회용
-
-    org_id = None
-    project_id = None
-    recipient_id = uuid.uuid4()
-
-    try:
-        # story 18eefc31: org/project INSERT를 conn_setup의 명시 트랜잭션(BEGIN)에 넣고
-        # COMMIT을 함수 끝까지 미루면, 아래 conn1(별개 커넥션)의 events INSERT가 그 미커밋
-        # project_id를 FK로 참조 → ForeignKeyViolationError(Postgres MVCC — 다른 커넥션엔
-        # 미커밋 row가 안 보임). 이 테스트가 검증하려는 진짜 race와 무관한 fixture 순서 버그였다
-        # (codex 교차검증 완료 — 결정적 100% 재현, 실 prod 동시성 이슈 아님). autocommit(암묵
-        # BEGIN/COMMIT 없이)으로 즉시 커밋해 conn1이 참조하기 전에 반드시 보이게 한다.
-        org_id, project_id = await _make_test_org_and_project(conn_setup)
-
-        # ── T1 시작: events INSERT (seq 발급, 미커밋) ──────────────────────
-        await conn1.execute("BEGIN")
-        seq_t1 = await _insert_event_with_seq(conn1, org_id, project_id, recipient_id)
-
-        # ── T2: events INSERT + COMMIT (seq_t1 + 1) ───────────────────────
-        await conn2.execute("BEGIN")
-        seq_t2 = await _insert_event_with_seq(conn2, org_id, project_id, recipient_id)
-        await conn2.execute("COMMIT")
-
-        # T1이 T2보다 낮은 seq를 가진다는 게 보장되어야 함
-        assert seq_t1 < seq_t2, f"seq ordering violated: t1={seq_t1}, t2={seq_t2}"
-
-        # ── acked_seq 기준점 ───────────────────────────────────────────────
-        acked_seq = seq_t1 - 1  # 클라이언트가 아직 ACK 안 한 상태
-
-        # ── 스캔 1: T1 미커밋 상태 ────────────────────────────────────────
-        visible_1 = await _scan_events(scan_conn, recipient_id, acked_seq)
-        # T1(seq_t1)이 미커밋이므로 보이지 않아야 함
-        assert seq_t1 not in visible_1, "T1 should not be visible before commit"
-        assert seq_t2 in visible_1, "T2 should be visible"
-
-        # ── T1 COMMIT ─────────────────────────────────────────────────────
-        await conn1.execute("COMMIT")
-
-        # ── 재스캔: acked_seq 기준 (fix 검증) ─────────────────────────────
-        visible_2 = await _scan_events(scan_conn, recipient_id, acked_seq)
-        assert seq_t1 in visible_2, (
-            f"BUG: T1(seq={seq_t1}) was permanently lost! "
-            f"visible_2={visible_2}, acked_seq={acked_seq}"
-        )
-        assert seq_t2 in visible_2, "T2 should still be visible"
-
-        # pre-fix 시뮬: max-advance라면 after_seq=seq_t2로 전진했을 것 → T1 누락
-        visible_maxadvance = await _scan_events(scan_conn, recipient_id, seq_t2)
-        assert seq_t1 not in visible_maxadvance, (
-            "This confirms pre-fix would miss T1: "
-            f"after_seq={seq_t2} skips seq_t1={seq_t1}"
-        )
-
-    except Exception:
-        # 롤백 후 정리
-        try:
-            await conn1.execute("ROLLBACK")
-        except Exception:
-            pass
-        try:
-            await conn2.execute("ROLLBACK")
-        except Exception:
-            pass
-        try:
-            await conn_setup.execute("ROLLBACK")
-        except Exception:
-            pass
-        raise
-    finally:
-        # 테스트 데이터 정리
-        if project_id:
-            cleanup = await asyncpg.connect(_ASYNCPG_URL)
-            try:
-                await cleanup.execute("DELETE FROM events WHERE recipient_id = $1", recipient_id)
-                await cleanup.execute("DELETE FROM projects WHERE id = $1", project_id)
-                await cleanup.execute("DELETE FROM organizations WHERE id = $1", org_id)
-            except Exception:
-                pass
-            finally:
-                await cleanup.close()
-        await conn_setup.close()
-        await conn1.close()
-        await conn2.close()
-        await scan_conn.close()
-
+#
+# story 18eefc31(gateway-3rd) → 저우선 후속: 이 자리엔 원래 `acked_seq 재스캔` 방어 시절의
+# race 회귀 테스트(`test_acked_seq_rescan_catches_low_seq_late_commit`)가 있었다. dense-seq
+# 도입 커밋 ca8bd581(#1138)이 그 race 시나리오(같은 recipient의 낮은 seq가 늦게 커밋)를 구조
+# 자체(agent_event_seqs 카운터 row-lock 직렬화)로 불가능하게 만들어 그 테스트는 실행만 하면
+# 진짜 race가 아니라 진짜 교착(deadlock, 30초 타임아웃까지 블록 후 커넥션 오염)이 됐다 —
+# story 18eefc31 에서 skip 처리. rescan 이 지키려던 gap-free 의도는 폐기된 게 아니라
+# dense-seq per-recipient counter 의 구조적 불변식(#1138)으로 대체됐다 — 그 불변식은 바로
+# 아래 `test_per_recipient_dense_seq_prevents_ack_ordering_gap`이 검증한다(단, 이 테스트는
+# conn1 COMMIT 완료 後 conn2 를 순차 실행해 **순차 seq 단조성**만 검증한다 — "T1 미커밋 중
+# T2 가 실제 블록되는" row-lock 경합 동시성 자체는 `test_unsorted_counter_acquires_cause_
+# deadlock`/`test_sorted_counter_acquires_no_deadlock`이 실 asyncio 동시성으로 별도 커버).
+# 신규 재설계 없이 화석 테스트만 제거.
 
 @pytest.mark.anyio
 async def test_rescan_from_acked_seq_not_max_sent():
@@ -219,7 +111,7 @@ async def test_rescan_from_acked_seq_not_max_sent():
 
     try:
         # story 18eefc31: autocommit(암묵 BEGIN/COMMIT 없이) — conn(별개 커넥션)이 뒤이어
-        # 참조하기 전에 org/project가 즉시 보여야 한다(위 test_acked_seq_rescan_...와 동일
+        # 참조하기 전에 org/project가 즉시 보여야 한다(다른 gateway race 테스트와 동일
         # fixture 순서 버그, 동일 수정).
         org_id, project_id = await _make_test_org_and_project(setup_conn)
 
@@ -261,6 +153,14 @@ async def test_per_recipient_dense_seq_prevents_ack_ordering_gap():
     카운터 row-lock 직렬화 → seq N+1은 N 커밋 전 발급 자체 불가.
     → 낮은 seq가 늦게 커밋되는 상황이 구조적으로 불가능.
     → T1이 seq=100을 발급받으면 T1 커밋 완료 전에 seq=101은 발급 안 됨.
+
+    story 18eefc31(gateway-3rd) 저우선 후속: `test_acked_seq_rescan_catches_low_seq_late_
+    commit`(구 rescan-방어 시절 race 회귀 가드, 이 파일에서 제거됨)이 지키려던 gap-free
+    의도는 폐기된 게 아니라 dense-seq per-recipient counter 의 구조적 불변식(#1138)으로
+    대체됐다. 단, 이 테스트는 conn1 COMMIT 완료 後 conn2 를 순차 실행해 **순차 seq
+    단조성**만 검증한다 — "T1 미커밋 중 T2 가 실제 블록되는" row-lock 경합 동시성 자체는
+    `test_unsorted_counter_acquires_cause_deadlock`/`test_sorted_counter_acquires_no_
+    deadlock`이 실 asyncio 동시성으로 별도 커버한다.
     """
     import asyncpg
 
@@ -273,7 +173,7 @@ async def test_per_recipient_dense_seq_prevents_ack_ordering_gap():
     project_id = None
 
     try:
-        # story 18eefc31: autocommit — 위 두 테스트와 동일 fixture 순서 버그·동일 수정.
+        # story 18eefc31: autocommit — 다른 gateway race 테스트와 동일 fixture 순서 버그·동일 수정.
         org_id, project_id = await _make_test_org_and_project(conn_setup)
 
         # T1: seq 발급 (카운터 row-lock 획득, 낮은 seq)
