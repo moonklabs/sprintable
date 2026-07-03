@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.sprint import SprintRepository
@@ -17,6 +18,12 @@ from app.services.member_resolver import ResolvedMember
 
 # overlay-gated 전이(나머지 archive 는 native). matrix valid_transitions 와 일치.
 _OVERLAY_TRANSITIONS = frozenset({("planning", "active"), ("active", "closed"), ("review", "closed")})
+
+# a353e88d PO 결(2026-07-03) — sprint-open 게이트가 인정하는 "선언"은 생존 가설만.
+# killed/archived만 링크된 채로 게이트를 통과하면 "검증 대상 0"인데 활성화가 되는
+# semantic 구멍(사고강제 무력화)이라 제외. verified/falsified는 재검증/재링크 가능성이
+# 있어 포함(HYPOTHESIS_STATUSES - 이 집합 = 인정 대상).
+_DEAD_HYPOTHESIS_STATUSES = frozenset({"killed", "archived"})
 
 
 class SprintTransitionError(Exception):
@@ -46,6 +53,27 @@ async def transition_sprint(
         raise SprintTransitionError(
             "INVALID_SPRINT_TRANSITION", f"불법 전이: {sprint.status} → {to_status}"
         )
+
+    # a353e88d — sprint-open 定: planning→active 게이트 = 생존 가설(HypothesisSprintLink)
+    # ≥1 필수. transition_sprint가 PATCH/activate/transition 3개 라우터 호출부의 단일
+    # SSOT라 여기 한 곳에 걸면 우회 축이 없다(S26 "PATCH 옆문 봉인"과 동일 전략).
+    if sprint.status == "planning" and to_status == "active":
+        from app.models.hypothesis import Hypothesis, HypothesisSprintLink
+
+        has_alive_hypothesis = await session.scalar(
+            select(HypothesisSprintLink.id)
+            .join(Hypothesis, Hypothesis.id == HypothesisSprintLink.hypothesis_id)
+            .where(
+                HypothesisSprintLink.sprint_id == sprint_id,
+                Hypothesis.status.notin_(_DEAD_HYPOTHESIS_STATUSES),
+            )
+            .limit(1)
+        )
+        if has_alive_hypothesis is None:
+            raise SprintTransitionError(
+                "HYPOTHESIS_REQUIRED_FOR_ACTIVATION",
+                "이 스프린트로 검증할 가설을 최소 1개 선언하세요.",
+            )
 
     gated = (sprint.status, to_status) in _OVERLAY_TRANSITIONS
     # ⭐S26: 시작/마감 line overlay(advisory). enforcing 라인이면 gate 생성·status 유지. default-off/
