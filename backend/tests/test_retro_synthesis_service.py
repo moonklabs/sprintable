@@ -113,6 +113,52 @@ async def test_synthesize_strips_markdown_fence():
     assert result["learned"] == [{"text": "배운 것", "source": "s"}]
 
 
+async def test_synthesize_strips_preamble_prose_before_json_array():
+    """dev repro 실측(2026-07-03, retro 84d63d5c) — Sonnet5가 "다른 텍스트 절대 추가하지
+    마라" 지시에도 프리앰블 프로즈를 배열 앞에 붙이는 사례를 실 Cloud Run 로그로 확인(httpx
+    200 OK 후 파싱 거부→502). 순수 JSON만 받던 구 파서가 이 흔한 케이스를 놓쳤다."""
+    session = _empty_execute_session()
+    retro = _retro(sprint_id=SPRINT_ID)
+    hyp = SimpleNamespace(
+        id=uuid.uuid4(), statement="stmt", status="verified",
+        metric_definition={}, outcome_result=None,
+    )
+    raw = '다음은 요청하신 종합입니다:\n\n[{"text": "배운 것", "source": "s"}]'
+    with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
+         patch("app.services.llm_client.generate_text_claude", return_value=raw):
+        result = await svc.synthesize(session, retro)
+    assert result["learned"] == [{"text": "배운 것", "source": "s"}]
+
+
+async def test_synthesize_strips_trailing_prose_after_json_array():
+    session = _empty_execute_session()
+    retro = _retro(sprint_id=SPRINT_ID)
+    hyp = SimpleNamespace(
+        id=uuid.uuid4(), statement="stmt", status="verified",
+        metric_definition={}, outcome_result=None,
+    )
+    raw = '[{"text": "배운 것", "source": "s"}]\n\n도움이 되셨길 바랍니다.'
+    with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
+         patch("app.services.llm_client.generate_text_claude", return_value=raw):
+        result = await svc.synthesize(session, retro)
+    assert result["learned"] == [{"text": "배운 것", "source": "s"}]
+
+
+async def test_synthesize_no_brackets_at_all_returns_none():
+    """대괄호 자체가 없으면(순수 프로즈 응답) 부분추출도 불가 — 여전히 명시 실패(None)."""
+    session = _empty_execute_session()
+    retro = _retro(sprint_id=SPRINT_ID)
+    hyp = SimpleNamespace(
+        id=uuid.uuid4(), statement="stmt", status="verified",
+        metric_definition={}, outcome_result=None,
+    )
+    raw = "죄송하지만 데이터가 부족해 종합을 생성할 수 없습니다."
+    with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
+         patch("app.services.llm_client.generate_text_claude", return_value=raw):
+        result = await svc.synthesize(session, retro)
+    assert result is None
+
+
 async def test_synthesize_malformed_json_returns_none_no_raw_wrap():
     """까심 codex RC①(2026-07-03) — 파싱 실패한 raw를 단일 bullet로 "구제"하던 이전 fallback은
     캐시-overwrite 맥락에서 garbage-persist였다(S15 템플릿-fallback 철학이 여기선 오적용).

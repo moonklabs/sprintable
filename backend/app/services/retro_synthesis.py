@@ -50,7 +50,15 @@ _NEXT_HYPOTHESES_INSTRUCTION = (
 
 
 def _extract_json(raw: str) -> Any | None:
-    """LLM 출력이 ```json 코드펜스로 감싸져 오는 경우가 흔해 벗겨내고 파싱 시도."""
+    """LLM 출력 파싱 — 실측(2026-07-03, dev repro `84d63d5c`): "다른 텍스트 절대 추가하지
+    마라" 지시에도 Sonnet5(reasoning=disabled)가 프리앰블/트레일링 텍스트를 배열 앞뒤에
+    붙이는 사례를 실 Cloud Run 로그(httpx 200 OK 확인 후 파싱 단계 거부)로 확인 — 순수
+    JSON만 받아들이던 구 구현(1차 strip만)이 이 흔한 케이스를 못 잡았다.
+
+    3단계로 견고화: ① 마크다운 코드펜스 벗기기(기존) ② 그대로 파싱 시도 ③ 실패하면 첫
+    '['~마지막 ']' 구간만 잘라 재시도(프리앰블/트레일링 프로즈 무시). ①②만으로 안 될 때만
+    ③을 타므로 엄격한 파싱이 여전히 우선이고, 정말 JSON 배열이 아예 없으면(대괄호 자체가
+    없거나 부분추출도 파싱 실패) 여전히 None(명시 실패 — data-loss 방지 원칙 불변)."""
     text = raw.strip()
     if text.startswith("```"):
         text = text.strip("`")
@@ -59,6 +67,15 @@ def _extract_json(raw: str) -> Any | None:
         text = text.strip()
     try:
         return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        return json.loads(text[start:end + 1])
     except (json.JSONDecodeError, ValueError):
         return None
 
@@ -166,7 +183,12 @@ async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, An
     if not learned:
         # JSON 파싱 실패/스키마 불일치/전부 malformed — raw-wrap 구제 없이 명시 실패(None).
         # raw는 실 LLM 응답이었지만, 형식을 안 지킨 응답을 캐시에 넣는 것 자체가 이전 good
-        # synthesis를 저품질 1-bullet로 강등시키는 data-loss(까심 codex RC②).
+        # synthesis를 저품질 1-bullet로 강등시키는 data-loss(까심 codex RC②). raw 원문을
+        # 로그에 남겨(dev repro 2026-07-03 교훈 — 실패 원인을 추측 아닌 실측으로 파악하려면
+        # 최소한 흔적이 있어야 한다) 다음 파서 반례를 재현 없이 바로 확인할 수 있게 한다.
+        logger.warning(
+            "retro synthesize: JSON 파싱 실패(raw 원문 앞 500자) — %s", raw.strip()[:500]
+        )
         return None
 
     return {"learned": learned, "generated_at": now.isoformat(), "source": "ai_draft"}
@@ -213,8 +235,13 @@ async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]] | No
 
     parsed = _extract_json(raw)
     if not isinstance(parsed, list):
-        return None  # 파싱 자체가 완전 실패(리스트가 아님) — synthesis처럼 원문 래핑 구제가
-        # 불가(스키마상 statement 필수 필드라 텍스트 1줄로 대체 불가) → 명시 실패로 처리.
+        # 파싱 자체가 완전 실패(리스트가 아님) — synthesis처럼 원문 래핑 구제가 불가(스키마상
+        # statement 필수 필드라 텍스트 1줄로 대체 불가) → 명시 실패로 처리. raw 원문을 로그에
+        # 남김(2026-07-03 dev repro 교훈 — synthesize와 동형).
+        logger.warning(
+            "retro recommend_next: JSON 파싱 실패(raw 원문 앞 500자) — %s", raw.strip()[:500]
+        )
+        return None
 
     measure_after = datetime.now(timezone.utc) + timedelta(days=_DEFAULT_MEASURE_DAYS)
     candidates: list[dict[str, Any]] = []
