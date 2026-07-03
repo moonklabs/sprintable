@@ -68,8 +68,10 @@ function useHeuristicStepIndex(generating: boolean, stepCount: number): number {
  */
 
 // story fbf1c14b: RetroHypothesisResult.status가 backend HYPOTHESIS_STATUSES 전체를 정직하게
-// 반영하도록 넓어져(proposed/active/archived 포함) verdict 4종만으로는 t(undefined) 크래시
-// 위험 — sprint-close 시점에도 늦게 declare돼 아직 measuring 전인 가설이 섞일 수 있다.
+// 반영하도록 넓어져(proposed/active/archived 포함) verdict 4종만으로는 VERDICT_KEY[status]가
+// undefined였다 — sprint-close 시점에도 늦게 declare돼 아직 measuring 전인 가설이 섞일 수
+// 있다. 까심 QA 정정(2026-07-03): t(undefined)는 크래시가 아니라 next-intl graceful
+// fallback으로 잘못된 텍스트를 냈던 것.
 const VERDICT_KEY = {
   verified: 'hVerdictVerified',
   falsified: 'hVerdictFalsified',

@@ -7,8 +7,10 @@ import type { RetroHypothesisResult as SprintHypothesisResult } from '@/services
 
 // story fbf1c14b: GET /{id}/hypotheses는 이 status 전체(HYPOTHESIS_STATUSES, backend
 // app/models/hypothesis.py)를 정직하게 그대로 반환한다 — sprint-open 직후 선언된 가설은
-// proposed/active가 정상 케이스라 verdict 4종만으로는 tr(undefined) 크래시(PO crux 확인·
-// SOUL 정직 원칙: BE가 measuring으로 강제 coercion하는 대안은 기각).
+// proposed/active가 정상 케이스라 verdict 4종만으로는 VERDICT_KEY[status]가 undefined였다.
+// 까심 QA 정정(2026-07-03): tr(undefined)는 크래시가 아니라 next-intl이 graceful하게
+// 흡수해 잘못된 폴백 텍스트를 냈던 것(SOUL 정직 원칙: BE가 measuring으로 강제 coercion하는
+// 대안은 기각 — PO crux 확인).
 const VERDICT_KEY = {
   verified: 'hVerdictVerified',
   falsified: 'hVerdictFalsified',

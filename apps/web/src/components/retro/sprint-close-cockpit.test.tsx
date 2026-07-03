@@ -62,20 +62,25 @@ describe('SprintCloseCockpit (E-SPRINT-LOOP 1b9f4ecb)', () => {
   });
 
   // story fbf1c14b: 늦게 declare된 가설이 sprint-close 시점에도 아직 measuring 전(proposed/
-  // active)일 수 있다 — verdict 4종만 처리하던 VERDICT_KEY가 크래시했다(PO crux 확정).
-  it.each(['proposed', 'active', 'archived'] as const)(
-    'renders a %s hypothesis without crashing, honest label, no destructive color',
-    (status) => {
-      const h: RetroHypothesisResult = { id: `h-${status}`, statement: `${status} 가설`, status };
-      const markup = renderToStaticMarkup(wrap(
-        <SprintCloseCockpit hypotheses={[h]} synthesis={null} nextHypotheses={[]} onGenerateSynthesis={noop} onAdoptRecommendation={noop} />,
-      ));
-      expect(markup).toContain(`${status} 가설`);
-      expect(markup).not.toContain('text-destructive');
-      expect(markup).not.toContain('bg-destructive');
-      expect(markup).not.toMatch(/\btext-red-\d/);
-    },
-  );
+  // active)일 수 있다 — verdict 4종만 처리하던 VERDICT_KEY가 tr(undefined)를 냈다(PO crux
+  // 확정). 까심 QA 정정(2026-07-03): next-intl이 이걸 크래시 아닌 graceful fallback으로
+  // 흡수해 "폴백 텍스트" 버그였던 것 — 첫 구현의 "크래시 없음"만 보는 assertion은
+  // VERDICT_KEY서 키를 빼도 통과하는 tautological 테스트였다. 실 라벨을 직접 assert.
+  it.each([
+    ['proposed', '제안됨'],
+    ['active', '진행 중'],
+    ['archived', '보관됨'],
+  ] as const)('renders a %s hypothesis with the honest "%s" label (not a fallback), no destructive color', (status, label) => {
+    const h: RetroHypothesisResult = { id: `h-${status}`, statement: `${status} 가설`, status };
+    const markup = renderToStaticMarkup(wrap(
+      <SprintCloseCockpit hypotheses={[h]} synthesis={null} nextHypotheses={[]} onGenerateSynthesis={noop} onAdoptRecommendation={noop} />,
+    ));
+    expect(markup).toContain(`${status} 가설`);
+    expect(markup).toContain(label);
+    expect(markup).not.toContain('text-destructive');
+    expect(markup).not.toContain('bg-destructive');
+    expect(markup).not.toMatch(/\btext-red-\d/);
+  });
 
   it('tallies verified/falsified/measuring counts correctly', () => {
     const markup = renderToStaticMarkup(wrap(
