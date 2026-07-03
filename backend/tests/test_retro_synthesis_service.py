@@ -199,6 +199,26 @@ async def test_recommend_next_parses_candidates():
     datetime.fromisoformat(c["measure_after"])  # ISO datetime
 
 
+async def test_recommend_next_mixed_learned_drops_garbage_items_from_prompt():
+    """까심 QA MINOR(2026-07-03) — `_has_valid_synthesis`는 "≥1개 유효 아이템"만 요구해
+    혼합 learned가 게이트를 통과할 수 있다. garbage 아이템(text 없음)이 프롬프트에 빈
+    bullet("- ")로 새면 안 됨 — LLM 호출 프롬프트에 실제로 뭐가 전달됐는지 직접 검증."""
+    synthesis = {
+        "learned": [
+            {"text": "진짜 배운 것", "source": "s"},
+            {"foo": "bar"},  # text 키 자체가 없음
+            {"text": "   "},  # text가 공백뿐
+        ],
+        "generated_at": "x", "source": "ai_draft",
+    }
+    raw = '[{"statement": "다음 검증", "rationale": "r", "confidence": 0.5}]'
+    with patch("app.services.llm_client.generate_text_claude", return_value=raw) as mock_gen:
+        await svc.recommend_next(synthesis)
+    prompt_sent = mock_gen.call_args.args[0]
+    assert "진짜 배운 것" in prompt_sent
+    assert "- \n" not in prompt_sent and not prompt_sent.rstrip().endswith("- ")
+
+
 async def test_recommend_next_caps_at_max_and_drops_malformed():
     synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
     raw = (

@@ -22,11 +22,16 @@ async def resolve_next_sprint(
     """§2 PO 결(2026-07-03) — planning 상태 sprint 중 가장 이른 start_date(없으면
     created_at)를 "다음 sprint"로 본다. `SprintRepository.activate()`의 1-active 제약과
     달리 planning은 다건 공존 가능해 deterministic 선택 규칙이 필요했다. 없으면 None
-    (호출부는 backlog proposed로 그대로 둔다 — sprint 링크 생략)."""
+    (호출부는 backlog proposed로 그대로 둔다 — sprint 링크 생략).
+
+    까심 QA MINOR(2026-07-03) — start_date와 created_at까지 완전히 동일한 sprint가
+    여럿이면(같은 배치로 생성된 케이스) 여전히 비결정적이었다. `Sprint.id.asc()`를 최종
+    tie-break로 추가 — id는 uuid4라 값 자체엔 의미 없지만, 같은 세션 안에서 매번 같은
+    행을 고른다는 순수 결정성만 보장하면 된다(어느 것이 뽑히든 product 의미는 동일)."""
     return (await session.execute(
         select(Sprint)
         .where(Sprint.org_id == org_id, Sprint.project_id == project_id, Sprint.status == "planning")
-        .order_by(Sprint.start_date.asc().nulls_last(), Sprint.created_at.asc())
+        .order_by(Sprint.start_date.asc().nulls_last(), Sprint.created_at.asc(), Sprint.id.asc())
         .limit(1)
     )).scalar_one_or_none()
 
