@@ -147,8 +147,10 @@ async def test_routing_context_non_story_unsupported():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-@pytest.mark.xfail(strict=False, reason="settings.decision_gate_line_enabled monkeypatch 누락(형제 s18/s19/s29 패턴 미적용) — default-off라 plain_transition로 퇴화. story 8236bbc3 e2e서 신규 노출(파일 자체가 CI 최초 실행). story 18eefc31 트래킹.")
-async def test_engine_shadow_records_routing_context_and_trust():
+async def test_engine_shadow_records_routing_context_and_trust(monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "decision_gate_line_enabled", True)
+    monkeypatch.setattr(settings, "decision_gate_line_mode", "enforcing")
     """S3 엔진 shadow 경로가 S4 resolver 산출(routing_context+trust_snapshot)을 step_run 에 기록."""
     from sqlalchemy import select
     from app.services.workflow_line_engine import evaluate_line_for_transition
@@ -188,8 +190,10 @@ async def test_engine_shadow_records_routing_context_and_trust():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-@pytest.mark.xfail(strict=False, reason="settings.decision_gate_line_enabled monkeypatch 누락(형제 s18/s19/s29 패턴 미적용) — default-off라 plain_transition로 퇴화. story 8236bbc3 e2e서 신규 노출(파일 자체가 CI 최초 실행). story 18eefc31 트래킹.")
-async def test_actor_propagates_to_step_run_snapshot():
+async def test_actor_propagates_to_step_run_snapshot(monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "decision_gate_line_enabled", True)
+    monkeypatch.setattr(settings, "decision_gate_line_mode", "enforcing")
     """⭐SME blocking 회귀: 엔진에 actor_id/actor_type 을 넘기면 resolver→step_run.routing_context.actor
     까지 전파돼야 한다(라우터가 actor 미전달 시 항상 no_member 로 고정되던 통합 갭). actor.member_id 가
     실제 actor 로 채워져야 trust 가 그 actor 이력 기반(non-cold-start 가능)이 된다."""

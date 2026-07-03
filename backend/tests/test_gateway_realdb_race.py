@@ -83,7 +83,19 @@ async def _scan_events(conn, recipient_id: uuid.UUID, after_seq: int) -> list[in
 
 # ─── 핵심 race 테스트 ─────────────────────────────────────────────────────────
 
-@pytest.mark.xfail(strict=False, reason="ForeignKeyViolationError(events.project_id) — story 8236bbc3 e2e 시뮬레이션서 신규 노출, 실 동시성 버그 의심(PO: prod 우려·최우선 조사 대상). story 18eefc31 트래킹.")
+@pytest.mark.skip(
+    reason="story 18eefc31 심층 재진단(원래 사유였던 FK violation은 org/project autocommit "
+    "순서 fix로 해결됨 — 별개). 남은 문제는 이 테스트의 race 시나리오 자체가 현재 "
+    "per-recipient dense-seq 설계(agent_event_seqs 카운터 row-lock 직렬화, event_seq.py 참고) "
+    "하에서는 구성 불가능하다는 것 — T2가 T1(같은 recipient_id, 미커밋)과 같은 카운터 row를 "
+    "잡으려 하면 T1 커밋까지 그냥 블록된다(race 아님, 진짜 교착). xfail(실행은 됨)로는 "
+    "30초 타임아웃까지 블록 후 DB 커넥션을 오염 상태로 남겨 후속 테스트/cleanup까지 연쇄로 "
+    "막는다(실측: pg_stat_activity에 idle-in-transaction+lock-wait 잔존 확인) — 그래서 "
+    "xfail이 아니라 skip(미실행). codex 교차검증도 동일 결론(\"현재 구현 하 재구성 불가, "
+    "재설계 필요\"). 이 테스트가 검증하려던 위협 모델이 이후 아키텍처 변경(dense-seq)으로 "
+    "폐기됐는지, 다른 방식(예: 별도 recipient)으로 재구성해야 하는지는 product 판단 필요. "
+    "story 18eefc31 트래킹.",
+)
 @pytest.mark.anyio
 async def test_acked_seq_rescan_catches_low_seq_late_commit():
     """실 DB race: T1(낮은 seq, 늦게 커밋) → acked_seq 재스캔에서 반드시 잡힘.
@@ -112,7 +124,12 @@ async def test_acked_seq_rescan_catches_low_seq_late_commit():
     recipient_id = uuid.uuid4()
 
     try:
-        await conn_setup.execute("BEGIN")
+        # story 18eefc31: org/project INSERT를 conn_setup의 명시 트랜잭션(BEGIN)에 넣고
+        # COMMIT을 함수 끝까지 미루면, 아래 conn1(별개 커넥션)의 events INSERT가 그 미커밋
+        # project_id를 FK로 참조 → ForeignKeyViolationError(Postgres MVCC — 다른 커넥션엔
+        # 미커밋 row가 안 보임). 이 테스트가 검증하려는 진짜 race와 무관한 fixture 순서 버그였다
+        # (codex 교차검증 완료 — 결정적 100% 재현, 실 prod 동시성 이슈 아님). autocommit(암묵
+        # BEGIN/COMMIT 없이)으로 즉시 커밋해 conn1이 참조하기 전에 반드시 보이게 한다.
         org_id, project_id = await _make_test_org_and_project(conn_setup)
 
         # ── T1 시작: events INSERT (seq 발급, 미커밋) ──────────────────────
@@ -154,8 +171,6 @@ async def test_acked_seq_rescan_catches_low_seq_late_commit():
             f"after_seq={seq_t2} skips seq_t1={seq_t1}"
         )
 
-        await conn_setup.execute("COMMIT")
-
     except Exception:
         # 롤백 후 정리
         try:
@@ -189,7 +204,6 @@ async def test_acked_seq_rescan_catches_low_seq_late_commit():
         await scan_conn.close()
 
 
-@pytest.mark.xfail(strict=False, reason="ForeignKeyViolationError(events.project_id) — story 8236bbc3 e2e 시뮬레이션서 신규 노출, 실 동시성 버그 의심(PO: prod 우려·최우선 조사 대상). story 18eefc31 트래킹.")
 @pytest.mark.anyio
 async def test_rescan_from_acked_seq_not_max_sent():
     """max-advance vs acked_seq 재스캔 동작 대비 명시 검증.
@@ -204,7 +218,9 @@ async def test_rescan_from_acked_seq_not_max_sent():
     recipient_id = uuid.uuid4()
 
     try:
-        await setup_conn.execute("BEGIN")
+        # story 18eefc31: autocommit(암묵 BEGIN/COMMIT 없이) — conn(별개 커넥션)이 뒤이어
+        # 참조하기 전에 org/project가 즉시 보여야 한다(위 test_acked_seq_rescan_...와 동일
+        # fixture 순서 버그, 동일 수정).
         org_id, project_id = await _make_test_org_and_project(setup_conn)
 
         # seq 3개 INSERT (모두 커밋)
@@ -222,8 +238,6 @@ async def test_rescan_from_acked_seq_not_max_sent():
         assert seqs[2] in visible
         assert seqs[0] not in visible  # acked는 제외
 
-        await setup_conn.execute("COMMIT")
-
     finally:
         cleanup = await asyncpg.connect(_ASYNCPG_URL)
         try:
@@ -236,7 +250,6 @@ async def test_rescan_from_acked_seq_not_max_sent():
         await conn.close()
         await setup_conn.close()
 
-@pytest.mark.xfail(strict=False, reason="ForeignKeyViolationError(events.project_id) — story 8236bbc3 e2e 시뮬레이션서 신규 노출, 실 동시성 버그 의심(PO: prod 우려·최우선 조사 대상). story 18eefc31 트래킹.")
 @pytest.mark.anyio
 async def test_per_recipient_dense_seq_prevents_ack_ordering_gap():
     """AC3: per-recipient dense seq → ack-후-늦커밋 gap 구조적 불가.
@@ -260,7 +273,7 @@ async def test_per_recipient_dense_seq_prevents_ack_ordering_gap():
     project_id = None
 
     try:
-        await conn_setup.execute("BEGIN")
+        # story 18eefc31: autocommit — 위 두 테스트와 동일 fixture 순서 버그·동일 수정.
         org_id, project_id = await _make_test_org_and_project(conn_setup)
 
         # T1: seq 발급 (카운터 row-lock 획득, 낮은 seq)
@@ -297,8 +310,6 @@ async def test_per_recipient_dense_seq_prevents_ack_ordering_gap():
         assert seq_t1 not in higher_ack_visible  # 이미 acked
         assert seq_t2 not in higher_ack_visible  # 이미 acked
         # 새 이벤트가 없으므로 빈 배열 = 누락 없음
-
-        await conn_setup.execute("COMMIT")
 
     except Exception:
         try: await conn1.execute("ROLLBACK")
