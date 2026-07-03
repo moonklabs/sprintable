@@ -38,6 +38,29 @@ class RetroSessionRepository(BaseRepository[RetroSession]):
         assert updated is not None
         return updated
 
+    async def get_for_update(self, id: uuid.UUID) -> RetroSession | None:
+        """ecc531ce(까심 crux 2026-07-03) — 동시 [채택] 더블클릭 시 둘 다 next_hypotheses의
+        "미채택" 상태를 읽고 각자 create_hypothesis를 호출하면 중복 proposed 가설이 생긴다
+        (#1862 set_sprint_link TOCTOU와 같은 클래스). `FOR UPDATE`로 이 세션 row를 잠가
+        두 번째 요청이 첫 번째 커밋 후에야 읽도록 직렬화 — check-then-insert가 아니라
+        "이미 존재하는 row의 필드"를 다루는 경우라 SELECT FOR UPDATE가 유효하다
+        (check_then_insert_toctou 메모의 "row 0 시점 무력" 케이스와 다름 — 여기 row는 항상 존재).
+
+        `execution_options(populate_existing=True)` 필수 — 이 세션이 `_require_retro_project_
+        access`에서 이미 같은 id로 언락 SELECT를 한 번 했다면 identity map에 그 객체가 캐싱돼
+        있어, FOR UPDATE가 DB 레벨 락은 정확히 걸어도(실측 확인) SQLAlchemy가 Python 객체
+        속성을 새로 fetch한 row로 갱신 안 하면 잠금 대기 후에도 여전히 "잠금 전" 값(stale
+        next_hypotheses)을 반환하는 조용한 버그가 난다 — 락은 걸렸는데 읽은 값은 옛날 것이라
+        원자성이 실효 없어지는 것. 원 구현(populate_existing 누락)에서 실 동시성 테스트로
+        재현·적발."""
+        result = await self.session.execute(
+            select(RetroSession)
+            .where(RetroSession.id == id, RetroSession.org_id == self.org_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
 
 class RetroItemRepository:
     def __init__(self, session: AsyncSession) -> None:

@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.retro import RetroItem, RetroSession, RetroVote
+from app.services import hypothesis as hyp_svc
+from app.services import retro_hypothesis_seed as seed_svc
 from app.services import retro_synthesis as synth_svc
 from app.services.member_resolver import canonicalize_member_id, resolve_member
 from app.services.project_auth import has_project_access
@@ -16,6 +18,7 @@ from app.repositories.retro import (
     RetroSessionRepository,
     RetroVoteRepository,
 )
+from app.schemas.hypothesis import HypothesisCreate, HypothesisLinkRequest
 from app.schemas.retro import (
     ActionResponse,
     CreateAction,
@@ -272,6 +275,77 @@ async def recommend_next_session(
             detail={"code": "RECOMMENDATION_GENERATION_FAILED", "message": "다음가설 추천 생성에 실패했습니다. 잠시 후 다시 시도해주세요."},
         )
     updated = await repo.update(id, next_hypotheses=result)
+    assert updated is not None
+    return await _build_session_response(db, updated, auth)
+
+
+@router.post("/{id}/next-hypotheses/{candidate_id}/adopt", response_model=SessionResponse)
+async def adopt_next_hypothesis(
+    id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> SessionResponse:
+    """ecc531ce §3 — L3 추천 채택 → proposed 가설 persist + 다음 sprint 있으면
+    link_type="seeded"로 링크(없으면 backlog proposed). 신규 hypothesis 서비스 로직 0줄 —
+    기존 create_hypothesis + link_hypothesis 조합. sprint_id는 서버가 조회(§2 PO 결)해서
+    클라이언트가 넘기지 않으므로 그 축의 IDOR가 설계상 없다.
+
+    SOUL-LOCK(유나 §6) "채택=인간 게이트" — agent caller는 403.
+
+    원자성(까심 crux 2026-07-03): `repo.get_for_update`로 이 session row를 잠가 동시
+    더블클릭이 직렬화되게 한다 — 안 그러면 둘 다 "미채택"을 읽고 각자 create_hypothesis를
+    호출해 중복 proposed 가설이 생긴다(#1862 set_sprint_link TOCTOU와 같은 클래스)."""
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    caller = await resolve_member(auth, session.org_id, db, project_id=session.project_id)
+    if caller.type != "human":
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "ADOPTION_REQUIRES_HUMAN", "message": "다음가설 채택은 사람만 할 수 있습니다."},
+        )
+
+    locked = await repo.get_for_update(id)
+    if locked is None:
+        raise HTTPException(status_code=404, detail="Retro session not found")
+
+    candidate = seed_svc.find_candidate(locked.next_hypotheses, candidate_id)
+    if candidate is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "CANDIDATE_NOT_FOUND", "message": "추천 가설을 찾을 수 없습니다."},
+        )
+    if candidate.get("adopted_hypothesis_id"):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ALREADY_ADOPTED", "message": "이미 채택된 추천입니다."},
+        )
+
+    hyp = await hyp_svc.create_hypothesis(
+        db, session.org_id, caller,
+        HypothesisCreate(
+            project_id=session.project_id,
+            statement=candidate["statement"],
+            metric_definition=candidate["metric_definition"],
+            measure_after=candidate["measure_after"],
+            status="proposed",
+            source_type="retro_synthesis",
+            source_id=session.id,
+        ),
+    )
+
+    next_sprint = await seed_svc.resolve_next_sprint(db, session.org_id, session.project_id)
+    if next_sprint is not None:
+        await hyp_svc.link_hypothesis(
+            db, session.org_id, hyp.id,
+            HypothesisLinkRequest(sprint_id=next_sprint.id, link_type="seeded"),
+        )
+
+    updated_candidates = [
+        {**c, "adopted_hypothesis_id": str(hyp.id)} if str(c.get("id")) == str(candidate_id) else c
+        for c in locked.next_hypotheses
+    ]
+    updated = await repo.update(id, next_hypotheses=updated_candidates)
     assert updated is not None
     return await _build_session_response(db, updated, auth)
 
