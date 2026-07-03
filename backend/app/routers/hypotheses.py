@@ -95,6 +95,7 @@ async def list_hypotheses(
     project_id: uuid.UUID = Query(...),
     epic_id: uuid.UUID | None = Query(default=None),
     story_id: uuid.UUID | None = Query(default=None),
+    sprint_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     owner_member_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=2000),
@@ -104,7 +105,7 @@ async def list_hypotheses(
     items = await svc.list_hypotheses(
         session, org_id, project_id,
         status=status_filter, owner_member_id=owner_member_id,
-        epic_id=epic_id, story_id=story_id, limit=limit,
+        epic_id=epic_id, story_id=story_id, sprint_id=sprint_id, limit=limit,
     )
     response.headers["X-Total-Count"] = str(len(items))
     return items

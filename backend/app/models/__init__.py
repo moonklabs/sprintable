@@ -26,7 +26,12 @@ from app.models.notification import InboxItem, Notification, NotificationSetting
 from app.models.notification_preference import NotificationPreference
 from app.models.organization import Organization
 from app.models.pm import Epic, Sprint, Story, Task
-from app.models.hypothesis import Hypothesis, HypothesisEpicLink, HypothesisStoryLink
+from app.models.hypothesis import (
+    Hypothesis,
+    HypothesisEpicLink,
+    HypothesisSprintLink,
+    HypothesisStoryLink,
+)
 from app.models.loop import LoopRun
 from app.models.story_assignee import StoryAssignee
 from app.models.project import OrgMember, Project
@@ -81,6 +86,7 @@ __all__ = [
     "Epic",
     "Hypothesis",
     "HypothesisEpicLink",
+    "HypothesisSprintLink",
     "HypothesisStoryLink",
     "InboxItem",
     "LoopRun",
