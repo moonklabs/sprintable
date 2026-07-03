@@ -335,7 +335,9 @@ async def transition_sprint_endpoint(
         return SprintResponse.model_validate(sprint)
     except SprintTransitionError as e:
         _codes = {"SPRINT_NOT_FOUND": 404, "HUMAN_CONFIRM_REQUIRED": 403,
-                  "INVALID_STATUS": 422, "INVALID_SPRINT_TRANSITION": 422}
+                  "INVALID_STATUS": 422, "INVALID_SPRINT_TRANSITION": 422,
+                  # a353e88d — precondition-validation(형제 코드와 동급), PO 결 422.
+                  "HYPOTHESIS_REQUIRED_FOR_ACTIVATION": 422}
         raise HTTPException(status_code=_codes.get(e.code, 400), detail={"code": e.code, "message": e.message})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

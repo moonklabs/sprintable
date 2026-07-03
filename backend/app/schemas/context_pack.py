@@ -3,13 +3,31 @@ import uuid
 from pydantic import BaseModel
 
 
+class ContextPackOutcome(BaseModel):
+    """P1-S12: hypothesis가 verified/falsified로 해소됐을 때만 populate(S9 OutcomeBadge 매핑)."""
+    hypothesis_status: str
+    metric: str | None = None
+    actual: float | None = None
+    target: float | None = None
+    direction: str | None = None
+
+
 class ContextPackSearchResult(BaseModel):
     """P1-S6: 유사도 검색 결과 1건. entity_type/entity_id는 embeddings의 폴리모픽 참조를 그대로 노출
-    (호출자가 S7 Context Pack 조립 시 해당 엔티티를 직접 로드)."""
+    (호출자가 S7 Context Pack 조립 시 해당 엔티티를 직접 로드).
+
+    a353e88d(PO 결 2026-07-03) — sprint-open L1 선례 UI가 "결과"까지 한 응답으로 보여주도록
+    additive+nullable 확장(서버 배치 enrich, N+1 금지 — §6 절대: 회수 스코프[WHERE 절] 무변경,
+    결과 shape에 필드만 얹음). entity_type=="hypothesis"일 때만 populate; loop 등 다른 엔티티는
+    항상 None. hypothesis_status는 outcome 유무와 무관하게 항상 노출(measuring/proposed 등
+    outcome 없는 상태도 표시), outcome은 실제 verified/falsified로 채점된 경우만(ContextPackOutcome
+    재사용 — P1-S12와 동일 형상)."""
     entity_type: str
     entity_id: uuid.UUID
     embedding_text: str
     similarity: float
+    hypothesis_status: str | None = None
+    outcome: ContextPackOutcome | None = None
 
 
 class ContextPackDecisionSide(BaseModel):
@@ -22,15 +40,6 @@ class ContextPackDecision(BaseModel):
     """P1-S12: entity_type=='loop'일 때만 populate — chosen 1건+top rejected(대표 1건)."""
     chosen: ContextPackDecisionSide | None = None
     rejected: list[ContextPackDecisionSide] = []
-
-
-class ContextPackOutcome(BaseModel):
-    """P1-S12: hypothesis가 verified/falsified로 해소됐을 때만 populate(S9 OutcomeBadge 매핑)."""
-    hypothesis_status: str
-    metric: str | None = None
-    actual: float | None = None
-    target: float | None = None
-    direction: str | None = None
 
 
 class ContextPackItem(BaseModel):
