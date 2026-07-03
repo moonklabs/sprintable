@@ -35,10 +35,10 @@ export function AiGenerationLoading({
   transline: string;
 }) {
   return (
-    <div className="flex flex-col gap-3.5 rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
+    <div className="flex flex-col gap-3.5 rounded-xl border border-border bg-info-tint/10 p-4">
       <div className="flex items-center gap-2">
         <span className="flex items-center gap-1.5 text-sm font-bold text-foreground">
-          <Sparkles className="size-3.5 text-primary" aria-hidden />
+          <Sparkles className="size-3.5 text-info" aria-hidden />
           Sprintable AI
         </span>
         <span className="text-[10.5px] font-medium text-muted-foreground">{headline}</span>
@@ -55,7 +55,7 @@ export function AiGenerationLoading({
                 <span
                   className={cn(
                     'absolute left-[9px] top-[26px] bottom-[-6px] w-px',
-                    isDone ? 'bg-primary/40' : 'bg-border',
+                    isDone ? 'bg-info-border' : 'bg-border',
                   )}
                   aria-hidden
                 />
@@ -63,14 +63,14 @@ export function AiGenerationLoading({
               <span
                 className={cn(
                   'relative z-[1] mt-0.5 flex size-[18px] shrink-0 items-center justify-center rounded-full text-[10px]',
-                  isDone && 'border border-primary/40 bg-primary/15 text-primary',
-                  isActive && 'bg-primary text-primary-foreground',
+                  isDone && 'border border-info-border bg-info-tint text-info',
+                  isActive && 'bg-info text-background',
                   isPending && 'border border-border bg-muted text-muted-foreground',
                 )}
               >
                 {isDone ? '✓' : isActive ? <span className="animate-pulse">✦</span> : i + 1}
                 {isActive ? (
-                  <span className="absolute -inset-1 rounded-full border border-primary/40 animate-pulse" aria-hidden />
+                  <span className="absolute -inset-1 rounded-full border border-info-border animate-pulse" aria-hidden />
                 ) : null}
               </span>
               <div className="min-w-0 flex-1 space-y-1">
@@ -80,7 +80,7 @@ export function AiGenerationLoading({
                 {step.desc ? <p className="text-[10px] leading-snug text-muted-foreground">{step.desc}</p> : null}
                 {isActive ? (
                   <div className="relative h-[3px] w-full max-w-[220px] overflow-hidden rounded-full bg-muted">
-                    <span className="absolute inset-y-0 left-0 w-[36%] animate-ai-loading-indeterminate rounded-full bg-gradient-to-r from-transparent via-primary to-transparent" aria-hidden />
+                    <span className="absolute inset-y-0 left-0 w-[36%] animate-ai-loading-indeterminate rounded-full bg-gradient-to-r from-transparent via-info to-transparent" aria-hidden />
                   </div>
                 ) : null}
               </div>
@@ -92,7 +92,7 @@ export function AiGenerationLoading({
       <GenerationSkeleton variant={skeleton} />
 
       <p className="flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1.5 text-[10px] leading-snug text-muted-foreground">
-        <Sparkles className="size-3 shrink-0 text-primary" aria-hidden />
+        <Sparkles className="size-3 shrink-0 text-info" aria-hidden />
         {transline}
       </p>
     </div>
@@ -122,7 +122,7 @@ function GenerationSkeleton({ variant }: { variant: 'synthesis' | 'draft' }) {
       <div className="space-y-2.5 rounded-lg border border-border bg-card p-2.5">
         {[0, 1].map((i) => (
           <div key={i} className="flex items-start gap-2">
-            <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary/40" aria-hidden />
+            <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-info-border" aria-hidden />
             <div className="flex-1 space-y-1.5">
               <Skeleton variant="text" className="w-[90%]" />
               <Skeleton variant="text" className="w-[60%]" />
