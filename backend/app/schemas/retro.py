@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -43,6 +44,46 @@ class ActionResponse(BaseModel):
     created_at: datetime
 
 
+class RetroHypothesisItem(BaseModel):
+    """dc861e44 §5 — sprint 링크 가설(story 1 `hypothesis_sprint_links.sprint_id`) 평탄화.
+    N>=0 동일 렌더 — 0개/측정중만이어도 graceful(FE "아직 측정 중")."""
+
+    id: uuid.UUID
+    statement: str
+    status: str  # verified|falsified|measuring|killed|... (색/라벨은 FE·SOUL-LOCK)
+    metric: str | None = None
+    target: float | None = None
+    direction: str | None = None
+    actual: float | None = None  # outcome_result.actual, 미확정이면 None(측정중)
+    href: str
+
+
+class SynthesisLearnedItem(BaseModel):
+    text: str
+    source: str
+
+
+class Synthesis(BaseModel):
+    """L2 종합 — on-demand·overwrite 저장(PO 결). null이면 미생성(FE CTA)."""
+
+    learned: list[SynthesisLearnedItem]
+    generated_at: datetime
+    source: str = "ai_draft"
+
+
+class NextHypothesisCandidate(BaseModel):
+    """L3 다음가설 추천 — `HypothesisDraftResponse` 형 재사용(§5 계약). id는 story 3
+    "채택" 액션이 참조할 안정 키(이 story 스코프에선 순수 데이터 형상만)."""
+
+    id: uuid.UUID
+    statement: str
+    metric_definition: dict[str, Any]
+    measure_after: datetime
+    confidence: float | None = None
+    rationale: str
+    requires_confirmation: bool = True
+
+
 class SessionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -57,6 +98,10 @@ class SessionResponse(BaseModel):
     updated_at: datetime
     items: list[ItemResponse] = []
     actions: list[ActionResponse] = []
+    # dc861e44 §5 — additive+nullable. hypotheses는 sprint_id 없으면 항상 []·회귀 0.
+    hypotheses: list[RetroHypothesisItem] = []
+    synthesis: Synthesis | None = None
+    next_hypotheses: list[NextHypothesisCandidate] | None = None
 
 
 class SessionListResponse(BaseModel):

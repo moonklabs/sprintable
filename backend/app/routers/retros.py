@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.retro import RetroItem, RetroSession, RetroVote
+from app.services import retro_synthesis as synth_svc
 from app.services.member_resolver import canonicalize_member_id, resolve_member
 from app.services.project_auth import has_project_access
 from app.repositories.retro import (
@@ -37,6 +38,24 @@ def _get_session_repo(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> RetroSessionRepository:
     return RetroSessionRepository(db, org_id)
+
+
+def _has_valid_synthesis(synthesis: object) -> bool:
+    """recommend-next 게이팅(까심 codex RC①·②, 2026-07-03) — `synthesis is None`만 보면
+    `{}`·`[]`·`{"learned": []}` 같은 malformed/empty 값이 게이트를 통과한다. `synthesis=[]`는
+    `_build_next_hypotheses_prompt`의 `.get("learned")` 호출에서 AttributeError(500)까지
+    난다. **1차 라운드에서 "learned가 비어있지 않은 list"까지만 봤는데 codex가 아이템 shape
+    미검증을 다시 잡음**(`{"learned":[123]}`·`{"learned":[{}]}` 통과해 recommend-next가 사실상
+    빈 종합으로 LLM 호출/persist) — ≥1개 dict 아이템이 non-blank `text`를 가져야 유효."""
+    if not isinstance(synthesis, dict):
+        return False
+    learned = synthesis.get("learned")
+    if not isinstance(learned, list) or not learned:
+        return False
+    return any(
+        isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip()
+        for item in learned
+    )
 
 
 async def _require_retro_project_access(
@@ -125,19 +144,13 @@ async def create_session(
     return SessionListResponse.model_validate(session)
 
 
-@router.get("/{id}", response_model=SessionResponse)
-async def get_session(
-    id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    auth: AuthContext = Depends(get_current_user),
-    repo: RetroSessionRepository = Depends(_get_session_repo),
+async def _build_session_response(
+    db: AsyncSession, session: RetroSession, auth: AuthContext
 ) -> SessionResponse:
-    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
-
     item_repo = RetroItemRepository(db)
     action_repo = RetroActionRepository(db)
-    items = await item_repo.list_by_session(id)
-    actions = await action_repo.list_by_session(id)
+    items = await item_repo.list_by_session(session.id)
+    actions = await action_repo.list_by_session(session.id)
 
     # P1(9f27af8f, 유나 real-payload 재현): grouped child를 items에서 제외하면 FE가 클러스터를
     # 그릴 데이터 자체가 없어짐(FE는 items를 top-level/child로 필터링해 렌더 — child 객체가
@@ -162,6 +175,11 @@ async def get_session(
             )
         )
         voted_item_ids = set(voted_rows.scalars().all())
+
+    # dc861e44 §5 — sprint 링크 가설(story 1 sprint_id 필터 재사용). sprint 미연결 회고는 [].
+    hypotheses = await synth_svc.build_hypotheses_items(
+        db, session.org_id, session.project_id, session.sprint_id
+    )
 
     return SessionResponse(
         id=session.id,
@@ -189,7 +207,73 @@ async def get_session(
             for i in items
         ],
         actions=[ActionResponse.model_validate(a) for a in actions],
+        hypotheses=hypotheses,
+        synthesis=session.synthesis,
+        next_hypotheses=session.next_hypotheses,
     )
+
+
+@router.get("/{id}", response_model=SessionResponse)
+async def get_session(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> SessionResponse:
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    return await _build_session_response(db, session, auth)
+
+
+@router.post("/{id}/synthesize", response_model=SessionResponse)
+async def synthesize_session(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> SessionResponse:
+    """dc861e44 §3 — L2 종합(on-demand·버튼 트리거). overwrite 저장(PO 결).
+
+    ⚠️ result가 None(LLM 생성 실패)이면 **저장하지 않는다** — 기존 good synthesis 캐시를
+    빈 결과로 덮어써 잃는 data-loss(오르테가 지적 2026-07-03·S28 캐시게이트 버그와 동형)를
+    막는다. 502로 실패를 명시하고 재시도를 유도(자동 backfill 없음)."""
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    result = await synth_svc.synthesize(db, session)
+    if result is None:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "SYNTHESIS_GENERATION_FAILED", "message": "AI 종합 생성에 실패했습니다. 잠시 후 다시 시도해주세요."},
+        )
+    updated = await repo.update(id, synthesis=result)
+    assert updated is not None
+    return await _build_session_response(db, updated, auth)
+
+
+@router.post("/{id}/recommend-next", response_model=SessionResponse)
+async def recommend_next_session(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> SessionResponse:
+    """dc861e44 §3 — L3 다음가설 추천(on-demand). synthesis 선행 필수 — PO 결(2026-07-03):
+    fail-closed(409), 자동 선행 생성 안 함(HITL 순서 — 팀이 종합을 보고/편집한 뒤 추천)."""
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    if not _has_valid_synthesis(session.synthesis):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SYNTHESIS_REQUIRED", "message": "종합을 먼저 생성해야 합니다."},
+        )
+    result = await synth_svc.recommend_next(session.synthesis)
+    if result is None:
+        # synthesize_session과 동일 원칙 — 실패를 빈 배열로 조용히 저장해 기존 good
+        # next_hypotheses 캐시를 지우지 않는다(오르테가 지적 2026-07-03).
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "RECOMMENDATION_GENERATION_FAILED", "message": "다음가설 추천 생성에 실패했습니다. 잠시 후 다시 시도해주세요."},
+        )
+    updated = await repo.update(id, next_hypotheses=result)
+    assert updated is not None
+    return await _build_session_response(db, updated, auth)
 
 
 @router.patch("/{id}/phase", response_model=SessionListResponse)
