@@ -144,7 +144,7 @@ async def test_synthesize_then_recommend_next_full_flow():
 
         # get_db 의존성은 요청 끝에서 커밋한다(프로덕션 경로) — 라우터 함수를 직접 호출하는
         # 이 테스트는 그 래핑을 우회하므로 명시 commit 필요(repo.update()는 flush만 함).
-        synth_raw = '[{"text": "가설이 반증됐다(온보딩 42% vs 목표 50%) — 학습 데이터", "source": "가설 1"}]'
+        synth_raw = '{"items": [{"text": "가설이 반증됐다(온보딩 42% vs 목표 50%) — 학습 데이터", "source": "가설 1"}]}'
         async with Session() as s:
             with patch("app.services.llm_client.generate_text_claude", return_value=synth_raw):
                 resp = await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
@@ -153,7 +153,7 @@ async def test_synthesize_then_recommend_next_full_flow():
         assert len(resp.synthesis.learned) == 1
         assert "학습" in resp.synthesis.learned[0].text or resp.synthesis.learned[0].text
 
-        next_raw = '[{"statement": "온보딩 UX를 단순화하면 이탈이 줄 것이다.", "rationale": "가설 1 반증", "confidence": 0.55}]'
+        next_raw = '{"items": [{"statement": "온보딩 UX를 단순화하면 이탈이 줄 것이다.", "rationale": "가설 1 반증", "confidence": 0.55}]}'
         async with Session() as s:
             with patch("app.services.llm_client.generate_text_claude", return_value=next_raw):
                 resp2 = await recommend_next_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
@@ -218,7 +218,7 @@ async def test_llm_failure_does_not_destroy_existing_good_synthesis():
         async with Session() as s:
             await _seed(s)
 
-        good_raw = '[{"text": "가설이 반증됐다 — 학습 데이터", "source": "가설 1"}]'
+        good_raw = '{"items": [{"text": "가설이 반증됐다 — 학습 데이터", "source": "가설 1"}]}'
         async with Session() as s:
             with patch("app.services.llm_client.generate_text_claude", return_value=good_raw):
                 await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
@@ -255,7 +255,7 @@ async def test_malformed_llm_response_does_not_destroy_existing_good_synthesis()
         async with Session() as s:
             await _seed(s)
 
-        good_raw = '[{"text": "가설이 반증됐다 — 학습 데이터", "source": "가설 1"}]'
+        good_raw = '{"items": [{"text": "가설이 반증됐다 — 학습 데이터", "source": "가설 1"}]}'
         async with Session() as s:
             with patch("app.services.llm_client.generate_text_claude", return_value=good_raw):
                 await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
