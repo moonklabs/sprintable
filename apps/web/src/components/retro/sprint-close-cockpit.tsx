@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -8,11 +8,45 @@ import { Button } from '@/components/ui/button';
 import { OperatorTextarea } from '@/components/ui/operator-control';
 import { cn } from '@/lib/utils';
 import { DeltaTrack, fmt } from '@/components/outcome/outcome-result-card';
+import { AiGenerationLoading, type AiGenerationLoadingStep } from '@/components/ai/ai-generation-loading';
 import type {
   RetroHypothesisResult,
   RetroNextHypothesis,
   RetroSynthesis,
 } from '@/services/retro-session';
+
+/**
+ * E-SPRINT-LOOP(81b0d17e) §7 — 스텝 수 = 실 백엔드 phase 수(가짜 phase 발명 금지). retro
+ * synthesize()는 context 수집 + 2 순차 gemini 콜(L2 종합·L3 추천) = 3 스텝. 순서=파이프라인
+ * 순서와 동일(진실). 타이밍은 FE heuristic — 마지막 스텝은 응답 전까지 절대 안 넘어간다.
+ */
+function useSynthesisLoadingSteps(t: ReturnType<typeof useTranslations>): AiGenerationLoadingStep[] {
+  return [
+    { label: t('loadingStep1Label'), desc: t('loadingStep1Desc') },
+    { label: t('loadingStep2Label'), desc: t('loadingStep2Desc') },
+    { label: t('loadingStep3Label'), desc: t('loadingStep3Desc') },
+  ];
+}
+
+/** heuristic advance — 실측 근거 없는 판단값(핸드오프 관찰 ~9초 기준 비례 배분), 라이브 픽셀 시 조정 가능. */
+function useHeuristicStepIndex(generating: boolean, stepCount: number): number {
+  const [index, setIndex] = useState(0);
+  // generating 전환 시 리셋 — render-phase adjustment(SynthesisBlock의 syncedFor와 동일 패턴),
+  // effect body에서 곧바로 setState하지 않도록(react-hooks/set-state-in-effect).
+  const [syncedFor, setSyncedFor] = useState(generating);
+  if (syncedFor !== generating) {
+    setSyncedFor(generating);
+    if (!generating) setIndex(0);
+  }
+  useEffect(() => {
+    if (!generating) return;
+    const timers = stepCount > 1
+      ? [setTimeout(() => setIndex(1), 1200), setTimeout(() => setIndex(stepCount - 1), 6000)]
+      : [];
+    return () => timers.forEach(clearTimeout);
+  }, [generating, stepCount]);
+  return index;
+}
 
 /**
  * E-SPRINT-LOOP FE(1b9f4ecb) — 회고 `closed` 단계 = sprint-close 종합 cockpit.
@@ -132,11 +166,9 @@ function HypothesisCard({ hypothesis }: { hypothesis: RetroHypothesisResult }) {
 
 function SynthesisBlock({
   synthesis,
-  generating,
   onRegenerate,
 }: {
   synthesis: RetroSynthesis;
-  generating: boolean;
   onRegenerate: () => void;
 }) {
   const t = useTranslations('retro');
@@ -185,8 +217,8 @@ function SynthesisBlock({
         <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setEditing((v) => !v)}>
           {editing ? t('synthesisEditDone') : t('synthesisEdit')}
         </Button>
-        <Button variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={onRegenerate} disabled={generating}>
-          {generating ? t('synthesisRegenerating') : t('synthesisRegenerate')}
+        <Button variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={onRegenerate}>
+          {t('synthesisRegenerate')}
         </Button>
       </div>
     </div>
@@ -301,6 +333,8 @@ export function SprintCloseCockpit({
   const [ignoredIndexes, setIgnoredIndexes] = useState<Set<number>>(new Set());
   const [adoptingIndex, setAdoptingIndex] = useState<number | null>(null);
   const [adoptError, setAdoptError] = useState<number | null>(null);
+  const loadingSteps = useSynthesisLoadingSteps(t);
+  const activeStepIndex = useHeuristicStepIndex(generating, loadingSteps.length);
 
   const measuringOnly = hypotheses.length > 0 && hypotheses.every((h) => h.status === 'measuring');
 
@@ -344,20 +378,28 @@ export function SprintCloseCockpit({
         )}
       </div>
 
-      {synthesis ? (
-        <SynthesisBlock synthesis={synthesis} generating={generating} onRegenerate={() => void handleGenerate()} />
+      {generating ? (
+        <AiGenerationLoading
+          headline={t('loadingHeadlineSynthesis')}
+          steps={loadingSteps}
+          activeIndex={activeStepIndex}
+          skeleton="synthesis"
+          transline={t('loadingTranslineSynthesis')}
+        />
+      ) : synthesis ? (
+        <SynthesisBlock synthesis={synthesis} onRegenerate={() => void handleGenerate()} />
       ) : (
         <div className="flex flex-col items-center gap-2.5 rounded-xl border border-dashed border-border bg-muted/20 p-5 text-center">
           <Sparkles className="size-4 text-info" aria-hidden />
           <p className="text-xs text-muted-foreground">{t('synthesisGenerateHint')}</p>
           {generateError ? <p className="text-xs text-destructive">{t('synthesisGenerateFailed')}</p> : null}
-          <Button variant="outline" size="sm" onClick={() => void handleGenerate()} disabled={generating}>
-            {generating ? t('synthesisGenerating') : t('synthesisGenerateCta')}
+          <Button variant="outline" size="sm" onClick={() => void handleGenerate()}>
+            {t('synthesisGenerateCta')}
           </Button>
         </div>
       )}
 
-      {synthesis && nextHypotheses.length > 0 ? (
+      {!generating && synthesis && nextHypotheses.length > 0 ? (
         <div className="space-y-2.5">
           <div className="flex items-center gap-2">
             <Sparkles className="size-3.5 text-info" aria-hidden />

@@ -1372,7 +1372,15 @@
     "hitlBanner": "This is only a recommendation. Adopting seeds a draft (proposed) hypothesis for the next sprint — activating, editing, or discarding it is the team's call.",
     "evidenceStripLabel": "Hypothesis status",
     "evidenceStripEmpty": "No hypotheses linked",
-    "evidenceStripMore": "See details at close →"
+    "evidenceStripMore": "See details at close →",
+    "loadingHeadlineSynthesis": "is scanning this sprint…",
+    "loadingStep1Label": "Recalling similar precedents from past loops",
+    "loadingStep1Desc": "Searching org memory for similar hypotheses, decisions, and outcomes",
+    "loadingStep2Label": "Synthesizing this sprint's results",
+    "loadingStep2Desc": "Drawing lessons from hypothesis verdicts and top retro signals",
+    "loadingStep3Label": "Deriving the next hypothesis to test",
+    "loadingStep3Desc": "Suggesting a direction worth testing next sprint",
+    "loadingTranslineSynthesis": "Sprintable AI is preparing reference material. The judgment call is yours."
   },
   "share": {
     "share": "Share",
@@ -2807,7 +2815,11 @@
     "cockpitHypothesesTitle": "{count} hypotheses in progress",
     "cockpitMeasureCountdown": "Measuring in D-{days}",
     "cockpitMeasureOverdue": "Measuring soon — auto-scored after close",
-    "cockpitExperimentsLabel": "Experiments"
+    "cockpitExperimentsLabel": "Experiments",
+    "loadingHeadlineDraft": "is drafting a hypothesis…",
+    "loadingStepDraftLabel": "Drafting a hypothesis",
+    "loadingStepDraftDesc": "Proposing a statement, metric, and measurement date from the goal context",
+    "loadingTranslineDraft": "This is an AI draft. Review and edit it — you confirm it."
   },
   "presence": {
     "panelTitle": "Team presence",

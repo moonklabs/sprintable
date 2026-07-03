@@ -43,6 +43,16 @@
   100% { background-position:  200% 0; }
 }
 
+/* E-SPRINT-LOOP 81b0d17e: AiGenerationLoading 인디터미닛 바 — 가짜 진행 %가 아닌 슬라이딩
+   하이라이트(honest indeterminate, handoff §4③). */
+@keyframes ai-loading-indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(360%); }
+}
+.animate-ai-loading-indeterminate {
+  animation: ai-loading-indeterminate 1.5s ease-in-out infinite;
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);

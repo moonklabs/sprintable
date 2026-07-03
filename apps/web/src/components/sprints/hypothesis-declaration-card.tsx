@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { Hypothesis, HypothesisDraft, MetricDefinition } from '@sprintable/core-storage';
 import type { ContextPackSearchResult, HypothesisDeclarationValue } from '@/services/hypothesis-declaration';
+import { AiGenerationLoading } from '@/components/ai/ai-generation-loading';
 
 const GA4_METRICS = ['activeUsers', 'newUsers', 'sessions', 'conversions', 'eventCount', 'screenPageViews'] as const;
 const SOURCES: MetricDefinition['source'][] = ['internal_ops', 'ga4', 'manual'];
@@ -122,7 +123,15 @@ export function HypothesisDeclarationCard({
         ) : null}
       </div>
 
-      {value.mode === 'new' ? (
+      {value.mode === 'new' && drafting ? (
+        <AiGenerationLoading
+          headline={t('loadingHeadlineDraft')}
+          steps={[{ label: t('loadingStepDraftLabel'), desc: t('loadingStepDraftDesc') }]}
+          activeIndex={0}
+          skeleton="draft"
+          transline={t('loadingTranslineDraft')}
+        />
+      ) : value.mode === 'new' ? (
         <>
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-medium text-muted-foreground">{t('declareStatementLabel')}</span>
@@ -133,7 +142,7 @@ export function HypothesisDeclarationCard({
               className="inline-flex items-center gap-1 rounded-lg border border-dashed border-border px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-50"
             >
               <Sparkles className="size-3" />
-              {drafting ? t('declareDrafting') : t('declareDraftCta')}
+              {t('declareDraftCta')}
             </button>
           </div>
           <textarea
