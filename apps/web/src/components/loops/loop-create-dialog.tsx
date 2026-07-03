@@ -24,13 +24,41 @@ const EMPTY_METRIC: MetricDefinition = { metric: '', source: 'internal_ops', tar
 type Mode = 'new' | 'link';
 
 /** E-LOOP-LEDGER S18 — GET /api/workflow-recipes 응답 shape(블루프린트 §5, backend/app/routers/workflow_recipes.py 실측). */
-interface WorkflowRecipe {
+export interface WorkflowRecipe {
   id: string;
   slug: string;
   name: string;
   description: string;
   steps: { role: string; label: string; pattern: string; action: string }[];
   builtin: boolean;
+}
+
+/** localizeRecipe가 실제로 쓰는 next-intl translator 표면만 뽑은 최소 구조 타입 —
+ * next-intl `Translator<Messages, Namespace>`의 깊은 제네릭에 결합하지 않아 테스트에서
+ * `createTranslator()`로 만든 translator도 그대로 넘길 수 있다. */
+type RecipeTranslator = {
+  (key: string): string;
+  has(key: string): boolean;
+};
+
+/**
+ * E-LOOP-LEDGER S18-fu — builtin 레시피는 BE `_BUILTIN_RECIPES`(Python 리터럴, 정적 콘텐츠)라
+ * `workflowRecipes` 메시지 네임스페이스로 FE-only 매핑한다(BE locale 필드 불요). `t.has()`로
+ * 키 존재를 직접 SSOT 삼아 커스텀(DB WorkflowTemplate) 레시피·미등록 slug는 자동으로 BE 원문
+ * fallback(별도 builtin-slug 화이트리스트 불필요, 크래시 0).
+ */
+export function localizeRecipe(recipe: WorkflowRecipe, tr: RecipeTranslator): WorkflowRecipe {
+  const nameKey = `${recipe.slug}.name`;
+  const descriptionKey = `${recipe.slug}.description`;
+  return {
+    ...recipe,
+    name: tr.has(nameKey) ? tr(nameKey) : recipe.name,
+    description: tr.has(descriptionKey) ? tr(descriptionKey) : recipe.description,
+    steps: recipe.steps.map((step) => {
+      const labelKey = `${recipe.slug}.steps.${step.pattern}.label`;
+      return tr.has(labelKey) ? { ...step, label: tr(labelKey) } : step;
+    }),
+  };
 }
 
 /**
@@ -57,6 +85,7 @@ export function LoopCreateDialog({
 }) {
   const t = useTranslations('loops');
   const th = useTranslations('hypotheses');
+  const tr = useTranslations('workflowRecipes');
 
   const [title, setTitle] = useState('');
   const [mode, setMode] = useState<Mode>('new');
@@ -214,7 +243,8 @@ export function LoopCreateDialog({
     h.statement.toLowerCase().includes(hypothesisSearch.trim().toLowerCase()),
   );
   const linkedHypothesis = hypotheses?.find((h) => h.id === linkedId) ?? null;
-  const selectedRecipe = recipes?.find((r) => r.slug === recipeSlug) ?? null;
+  const localizedRecipes = recipes?.map((r) => localizeRecipe(r, tr)) ?? null;
+  const selectedRecipe = localizedRecipes?.find((r) => r.slug === recipeSlug) ?? null;
 
   return (
     <Dialog
@@ -242,7 +272,7 @@ export function LoopCreateDialog({
             />
           </div>
 
-          {recipes && recipes.length > 0 ? (
+          {localizedRecipes && localizedRecipes.length > 0 ? (
             <div className="space-y-1">
               <label htmlFor="loop-create-recipe" className="text-xs font-medium text-muted-foreground">{t('createLoopRecipeLabel')}</label>
               <select
@@ -252,7 +282,7 @@ export function LoopCreateDialog({
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
               >
                 <option value="">{t('createLoopRecipeNone')}</option>
-                {recipes.map((r) => (
+                {localizedRecipes.map((r) => (
                   <option key={r.slug} value={r.slug}>{r.name}</option>
                 ))}
               </select>
