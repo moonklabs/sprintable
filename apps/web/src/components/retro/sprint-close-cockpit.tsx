@@ -244,11 +244,13 @@ function RecommendationCard({
         <p className="text-sm font-medium leading-snug text-foreground">{statement}</p>
       )}
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Badge variant="chip" className="text-[10px]">
-          {t('recMetricChip', { metric: rec.metric_definition.metric, dir: rec.metric_definition.direction === 'down' ? th('dirDown') : th('dirUp'), target: fmt(rec.metric_definition.target) })}
-        </Badge>
-      </div>
+      {rec.metric_definition ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant="chip" className="text-[10px]">
+            {t('recMetricChip', { metric: rec.metric_definition.metric, dir: rec.metric_definition.direction === 'down' ? th('dirDown') : th('dirUp'), target: fmt(rec.metric_definition.target) })}
+          </Badge>
+        </div>
+      ) : null}
 
       {rec.rationale ? (
         <p className="flex items-start gap-1.5 text-[10.5px] leading-snug text-muted-foreground">

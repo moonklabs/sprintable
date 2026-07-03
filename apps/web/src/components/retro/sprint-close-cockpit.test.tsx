@@ -45,15 +45,20 @@ describe('SprintCloseCockpit (E-SPRINT-LOOP 1b9f4ecb)', () => {
     expect(markup).toContain('아직 측정 중입니다');
   });
 
-  it('SOUL-LOCK: falsified renders neutral (info), never destructive/red', () => {
+  it('SOUL-LOCK: falsified renders neutral (info), never destructive/red in any form', () => {
     const markup = renderToStaticMarkup(wrap(
       <SprintCloseCockpit hypotheses={[VERIFIED, FALSIFIED]} synthesis={null} nextHypotheses={[]} onGenerateSynthesis={noop} onAdoptRecommendation={noop} />,
     ));
     expect(markup).toContain('반증됨');
     expect(markup).toContain('학습');
-    // the falsified verdict badge/note must never carry a destructive/red treatment
+    // 까심 codex QA — destructive 외 다른 경로(raw red-* 유틸, border-red-*, inline color)로
+    // red-leak이 새는지까지 넓게 가드(회귀 시 이 assertion이 먼저 깨진다).
     expect(markup).not.toContain('text-destructive');
     expect(markup).not.toContain('bg-destructive');
+    expect(markup).not.toMatch(/\btext-red-\d/);
+    expect(markup).not.toMatch(/\bbg-red-\d/);
+    expect(markup).not.toMatch(/\bborder-red-\d/);
+    expect(markup).not.toMatch(/color:\s*#?(red|f00)/i);
   });
 
   it('tallies verified/falsified/measuring counts correctly', () => {
@@ -106,6 +111,24 @@ describe('SprintCloseCockpit (E-SPRINT-LOOP 1b9f4ecb)', () => {
     expect(markup).toContain('채택');
     expect(markup).toContain('추천일 뿐이다');
     expect(markup).toContain('중'); // 0.55 → mid bucket
+  });
+
+  it('does not crash when a recommendation is missing metric_definition (까심 QA 적출 회귀 가드)', () => {
+    const synthesis: RetroSynthesis = { learned: [{ text: '학습' }], generated_at: '2026-07-02T00:00:00Z', source: 'ai_draft' };
+    const recWithoutMetric: RetroNextHypothesis = {
+      statement: '체크아웃 흐름을 모바일에도 적용하면 완료율이 오를 것이다',
+      metric_definition: null,
+      requires_confirmation: true,
+    };
+    expect(() => renderToStaticMarkup(wrap(
+      <SprintCloseCockpit hypotheses={[VERIFIED]} synthesis={synthesis} nextHypotheses={[recWithoutMetric]} onGenerateSynthesis={noop} onAdoptRecommendation={noop} />,
+    ))).not.toThrow();
+  });
+
+  it('does not crash on the closed stage when hypotheses/synthesis/next_hypotheses are all empty (nullable graceful floor)', () => {
+    expect(() => renderToStaticMarkup(wrap(
+      <SprintCloseCockpit hypotheses={[]} synthesis={null} nextHypotheses={[]} onGenerateSynthesis={noop} onAdoptRecommendation={noop} />,
+    ))).not.toThrow();
   });
 });
 

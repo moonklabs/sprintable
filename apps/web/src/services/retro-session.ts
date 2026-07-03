@@ -93,8 +93,10 @@ export interface RetroSynthesis {
 
 export interface RetroNextHypothesis {
   statement: string;
-  metric_definition: { metric: string; target: number; direction: 'up' | 'down' };
-  measure_after: string;
+  // BE 계약 추정(§5 HypothesisDraftResponse 형) — 실제 페이로드에서 누락/null 가능성 있어
+  // optional로 방어(까심 QA 적출: 무가드 deref 크래시 재발 방지).
+  metric_definition?: { metric: string; target: number; direction: 'up' | 'down' } | null;
+  measure_after?: string | null;
   confidence?: number | null;
   rationale?: string | null;
   requires_confirmation: true;

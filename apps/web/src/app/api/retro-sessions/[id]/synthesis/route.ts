@@ -10,5 +10,7 @@ export async function POST(request: Request, { params }: RouteParams) {
   const { id } = await params;
   const _r = await proxyToFastapi(request, `/api/v2/retros/${id}/synthesis`);
   if (!_r.ok) return _r;
+  // 까심 QA 적출: 204(빈 바디)에 .json()을 그대로 호출하면 파싱 크래시 — 선처리 필요.
+  if (_r.status === 204) return apiSuccess({ ok: true });
   return apiSuccess(await _r.json());
 }
