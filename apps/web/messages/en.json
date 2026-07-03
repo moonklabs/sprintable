@@ -3069,5 +3069,46 @@
     "seedKill": "Kill",
     "outcomeAccumulating": "Awaiting verdict data",
     "evidenceNonePrompt": "No evidence yet — review by content"
+  },
+  "workflowRecipes": {
+    "scrum-3step": {
+      "name": "3-Step Scrum",
+      "description": "Plan → Build → QA three-stage workflow. Fits small to mid-size sprints.",
+      "steps": {
+        "kickoff": { "label": "Define requirements" },
+        "implementation": { "label": "Build" },
+        "qa_review": { "label": "Verify" }
+      }
+    },
+    "kanban-simple": {
+      "name": "Simple Kanban",
+      "description": "To Do → In Progress → Done flow. Fits continuous delivery environments.",
+      "steps": {
+        "task_created": { "label": "Pick up task" },
+        "in_progress": { "label": "In progress" },
+        "done_check": { "label": "Confirm done" }
+      }
+    },
+    "solo": {
+      "name": "Solo Agent",
+      "description": "A single agent handles every stage. Fits simple automated tasks.",
+      "steps": {
+        "received": { "label": "Receive & analyze" },
+        "execute": { "label": "Execute" },
+        "report": { "label": "Report" }
+      }
+    },
+    "loop-agency": {
+      "name": "Loop Agency",
+      "description": "Compounding org-memory workflow — goal & hypothesis → brief → generate variants → human pick → execute → learn from outcomes. Fits recurring experiments (copy tests, campaign variants, etc.).",
+      "steps": {
+        "goal_hypothesis": { "label": "Define goal & hypothesis" },
+        "brief_doc_approval": { "label": "Write brief" },
+        "generate_variants": { "label": "Generate variants" },
+        "loop_decision": { "label": "Human decision" },
+        "execute": { "label": "Execute" },
+        "track_and_learn": { "label": "Track & learn" }
+      }
+    }
   }
 }

@@ -3069,5 +3069,46 @@
     "seedKill": "중단 예측",
     "outcomeAccumulating": "판정 데이터 누적 중",
     "evidenceNonePrompt": "근거 데이터 없음 — 내용으로 직접 판단"
+  },
+  "workflowRecipes": {
+    "scrum-3step": {
+      "name": "3단계 스크럼",
+      "description": "기획 → 개발 → QA 3단계 워크플로우. 소규모~중규모 스프린트에 적합.",
+      "steps": {
+        "kickoff": { "label": "요구사항 정의" },
+        "implementation": { "label": "구현" },
+        "qa_review": { "label": "검증" }
+      }
+    },
+    "kanban-simple": {
+      "name": "칸반 심플",
+      "description": "할 일 → 진행 중 → 완료 단순 흐름. 지속적 딜리버리 환경에 적합.",
+      "steps": {
+        "task_created": { "label": "작업 접수" },
+        "in_progress": { "label": "진행" },
+        "done_check": { "label": "완료 확인" }
+      }
+    },
+    "solo": {
+      "name": "솔로 에이전트",
+      "description": "단일 에이전트가 전 단계를 처리. 간단한 자동화 태스크에 적합.",
+      "steps": {
+        "received": { "label": "수신 및 분석" },
+        "execute": { "label": "실행" },
+        "report": { "label": "보고" }
+      }
+    },
+    "loop-agency": {
+      "name": "루프 에이전시",
+      "description": "목표·가설 설정 → 브리프 → 실행안 생성 → 인간 선택 → 실행 → 성과 학습까지 이어지는 복리 조직기억 워크플로우. 반복되는 실험(카피·캠페인 variant 등)에 적합.",
+      "steps": {
+        "goal_hypothesis": { "label": "목표·가설 정의" },
+        "brief_doc_approval": { "label": "브리프 작성" },
+        "generate_variants": { "label": "실행안 생성" },
+        "loop_decision": { "label": "인간 선택" },
+        "execute": { "label": "실행" },
+        "track_and_learn": { "label": "추적 및 학습" }
+      }
+    }
   }
 }
