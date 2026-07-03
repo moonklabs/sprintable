@@ -5,11 +5,16 @@ design-first crux 반영(2026-07-03): synthesis/next_hypotheses는 on-demand·ov
 호출부가 저장할 dict/list를 만들어주기만 한다).
 
 structured output(2026-07-03, 선생님/PO 지적·dev repro `84d63d5c` 실측): LLM 출력 형식은
-프롬프트로 "JSON만 내라" 애원하는 밴드에이드가 아니라 `generate_text_claude`의
-`response_schema`(Anthropic Vertex structured output GA)로 구조적으로 강제한다 —
-Sonnet5가 프리앰블/트레일링 프로즈를 붙이는 문제 자체가 스키마 레벨에서 소멸한다.
+프롬프트로 "JSON만 내라" 애원하는 밴드에이드가 아니라 `response_schema`로 구조적으로
+강제한다 — 프리앰블/트레일링 프로즈를 붙이는 문제 자체가 스키마 레벨에서 소멸한다.
 graceful 계약(data-loss 방지, #1863 RC)은 불변: 스키마가 유효 JSON을 보장해도
-refusal/max_tokens/SDK 오류는 여전히 None(호출부 미저장·502)."""
+refusal/max_tokens/SDK 오류는 여전히 None(호출부 미저장·502).
+
+Gemini 피벗(2026-07-03, 선생님/PO 지시): moonklabs org GCP credit이 Vertex Claude를
+포함하지 않아 `generate_text_claude`(claude-sonnet-5)를 은퇴하고 `generate_text`
+(Gemini, `response_json_schema`로 동일한 structured output 보장)로 전송 레이어만
+교체 — 이 파일의 스키마(items-wrapping)·파싱·필터·#1863 원칙은 model-agnostic이라
+전부 무변경(llm_client.py 참고)."""
 from __future__ import annotations
 
 import json
@@ -174,7 +179,7 @@ async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, An
     fallback 결과를 그 자리서 즉시 응답할 뿐 아무것도 지우지 않지만, 여기서는 라우터가
     non-None 반환값을 곧장 `repo.update()`로 **기존 good synthesis 위에 덮어쓴다** — 같은
     "완전 실패 없음" 철학이 정반대 결과(데이터 보존 vs 파괴)를 낳는 컨텍스트라 미러가 틀렸다."""
-    from app.services.llm_client import generate_text_claude
+    from app.services.llm_client import generate_text
 
     hypotheses_items = await build_hypotheses_items(
         session, retro.org_id, retro.project_id, retro.sprint_id
@@ -188,13 +193,13 @@ async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, An
 
     raw = None
     try:
-        raw = generate_text_claude(prompt, reasoning="disabled", response_schema=_SYNTHESIS_SCHEMA)
+        raw = generate_text(prompt, response_schema=_SYNTHESIS_SCHEMA)
     except Exception as exc:  # noqa: BLE001 — 예외도 "실패"로 수렴(None), 여기서 삼키지 않음.
         logger.warning("retro synthesize: LLM 호출 실패: %s", exc)
 
     if not raw:
-        return None  # 근거는 있었는데 LLM이 실패(또는 stop_reason=max_tokens/refusal —
-        # generate_text_claude가 이미 걸러 None으로 수렴) — 기존 캐시 보존(호출부 502·미저장).
+        return None  # 근거는 있었는데 LLM이 실패(또는 finish_reason!=STOP —
+        # generate_text가 이미 걸러 None으로 수렴) — 기존 캐시 보존(호출부 502·미저장).
 
     parsed = _parse_json_object(raw)
     items = parsed.get("items") if parsed is not None else None
@@ -248,7 +253,7 @@ async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]] | No
     반환 None = **생성 실패**(호출부 미저장 — synthesize와 동일 원칙, 기존 good
     next_hypotheses 캐시를 빈 배열/garbage로 덮어쓰지 않는다). synthesis.learned가 애초에
     비어 있어 프롬프트 자체를 안 만든 경우만 정당한 빈 배열(LLM 미호출)."""
-    from app.services.llm_client import generate_text_claude
+    from app.services.llm_client import generate_text
 
     prompt = _build_next_hypotheses_prompt(synthesis)
     if prompt is None:
@@ -256,9 +261,7 @@ async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]] | No
 
     raw = None
     try:
-        raw = generate_text_claude(
-            prompt, reasoning="disabled", response_schema=_NEXT_HYPOTHESES_SCHEMA
-        )
+        raw = generate_text(prompt, response_schema=_NEXT_HYPOTHESES_SCHEMA)
     except Exception as exc:  # noqa: BLE001
         logger.warning("retro recommend_next: LLM 호출 실패: %s", exc)
     if not raw:

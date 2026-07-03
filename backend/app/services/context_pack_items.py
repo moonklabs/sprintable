@@ -144,7 +144,7 @@ def _compute_cache_key(items: list[ContextPackItem], loop: LoopRun, hyp_statemen
     """S28 AC④ — 회수 items(결정/성과)+새 loop 맥락+모델/프롬프트 버전이 전부 같을 때만 캐시
     hit. 선례 결정/성과가 바뀌거나(예: pending→chosen, 새 outcome 확정) 모델/프롬프트를
     바꾸면 입력 해시가 달라져 자동 무효화된다(별도 invalidation 로직 불요)."""
-    from app.services.llm_client import CLAUDE_MODEL_VERSION
+    from app.services.llm_client import MODEL_VERSION
 
     payload = {
         "items": [
@@ -157,7 +157,7 @@ def _compute_cache_key(items: list[ContextPackItem], loop: LoopRun, hyp_statemen
         ],
         "loop_title": loop.title,
         "hypothesis_statement": hyp_statement,
-        "model": CLAUDE_MODEL_VERSION,
+        "model": MODEL_VERSION,
         "synthesis_prompt_version": _SYNTHESIS_PROMPT_VERSION,
         "recommendation_prompt_version": _RECOMMENDATION_PROMPT_VERSION,
     }
@@ -364,17 +364,16 @@ def _synthesize_learnings(items: list[ContextPackItem]) -> tuple[str | None, str
     함). gen-LLM 미가용/실패 시에도 (None, None) — build_loop_context_pack이 이미 조립한
     items(L1)는 이 함수와 무관하게 그대로 반환되므로 패널은 퇴화 없이 raw 목록만 보여준다.
 
-    S28: Gemini(generate_text)→Claude(generate_text_claude, reasoning="disabled")로 전환.
-    실측(2026-07-02): 이 프롬프트 규모(item 수 적음)엔 disabled와 low(adaptive) 레이턴시/
-    thinking_tokens 차이가 사실상 0이라 비용 낮은 disabled 채택(선생님 결).
+    Gemini 피벗(2026-07-03): moonklabs org GCP credit 미포함으로 Claude 경로
+    (generate_text_claude) 은퇴 → generate_text(Gemini)로 복귀.
 
     반환 = (synthesis 본문, confidence). confidence 마커 파싱 실패해도 본문은 항상 보존."""
     if not items:
         return None, None
     try:
-        from app.services.llm_client import generate_text_claude
+        from app.services.llm_client import generate_text
 
-        raw = generate_text_claude(_build_synthesis_prompt(items), reasoning="disabled")
+        raw = generate_text(_build_synthesis_prompt(items))
         if raw is None:
             return None, None
         return _extract_confidence(raw)
@@ -439,15 +438,16 @@ def _recommend_next_step(
     않는다 — 종합도 없이 처방하는 것은 과잉(과신) 처방이라 원천 차단.
 
     S28: hyp_statement를 build_loop_context_pack이 미리 로드해 넘겨주므로 session/org_id/
-    loop 의존 없는 순수 함수로 단순화(중복 조회 제거) + Claude(disabled) 전환 + confidence
-    파싱. 반환 = (recommendation 본문, confidence)."""
+    loop 의존 없는 순수 함수로 단순화(중복 조회 제거) + confidence 파싱. Gemini 피벗
+    (2026-07-03): Claude 경로 은퇴 → generate_text(Gemini)로 복귀. 반환 = (recommendation
+    본문, confidence)."""
     if synthesis is None:
         return None, None
     try:
-        from app.services.llm_client import generate_text_claude
+        from app.services.llm_client import generate_text
 
         prompt = _build_recommendation_prompt(new_goal, new_hypothesis, synthesis, item_count)
-        raw = generate_text_claude(prompt, reasoning="disabled")
+        raw = generate_text(prompt)
         if raw is None:
             return None, None
         return _extract_confidence(raw)

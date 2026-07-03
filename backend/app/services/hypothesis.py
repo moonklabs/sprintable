@@ -464,12 +464,12 @@ def _draft_statement(context: dict | None) -> tuple[str, bool]:
     prompt = _build_draft_prompt(context)
     if prompt is not None:
         try:
-            # S28: Gemini(generate_text)→Claude(generate_text_claude, reasoning="disabled")로
-            # 전환(synthesis/recommendation과 동일 모델 배선). 단문 statement 생성이라 순환성
-            # 문제 자체가 없어 프롬프트 재설계는 대상 밖(PO 확인, 2026-07-02).
-            from app.services.llm_client import generate_text_claude
+            # Gemini 피벗(2026-07-03): moonklabs org GCP credit 미포함으로 Claude 경로
+            # (generate_text_claude) 은퇴 → generate_text(Gemini)로 복귀(synthesis/
+            # recommendation과 동일 모델 배선).
+            from app.services.llm_client import generate_text
 
-            generated = generate_text_claude(prompt, reasoning="disabled")
+            generated = generate_text(prompt)
             if generated and generated.strip():
                 return generated.strip(), True
         except Exception as exc:

@@ -106,7 +106,7 @@ async def test_draft_persist_loop_goal_creates_row_with_null_source_id_and_empty
     )
     with patch.object(svc, "HypothesisRepository", return_value=repo), \
          patch.object(svc, "lookup_members_by_ids", AsyncMock(return_value={CALLER_ID: _caller()})), \
-         patch("app.services.llm_client.generate_text_claude", return_value="가입 전환율을 개선하는 실험."):
+         patch("app.services.llm_client.generate_text", return_value="가입 전환율을 개선하는 실험."):
         out = await svc.draft_hypothesis(None, ORG_ID, _caller(), payload)
 
     assert out.statement == "가입 전환율을 개선하는 실험."
