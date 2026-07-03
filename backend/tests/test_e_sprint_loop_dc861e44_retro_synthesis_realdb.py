@@ -173,6 +173,79 @@ async def test_synthesize_then_recommend_next_full_flow():
 
 
 @pytest.mark.anyio
+async def test_synthesis_combined_endpoint_persists_both_in_one_call():
+    """story 4b87d3a6 — FE가 실제로 부르는 combined POST /{id}/synthesis 1콜로 L2+L3 둘 다
+    persist되고, 그 결과가 이후 GET에도 그대로 남아있는지(라우터 표면 실증 — 서비스 유닛
+    mock으론 못 잡는 엔드포인트 부재 클래스, 8236bbc3/18eefc31과 동형)."""
+    from app.routers.retros import synthesize_and_recommend
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+
+        synth_raw = '{"items": [{"text": "가설이 반증됐다(온보딩 42% vs 목표 50%) — 학습 데이터", "source": "가설 1"}]}'
+        next_raw = '{"items": [{"statement": "온보딩 UX를 단순화하면 이탈이 줄 것이다.", "rationale": "가설 1 반증", "confidence": 0.55}]}'
+        async with Session() as s:
+            with patch("app.services.llm_client.generate_text", side_effect=[synth_raw, next_raw]):
+                resp = await synthesize_and_recommend(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+            await s.commit()
+
+        assert resp.synthesis is not None
+        assert len(resp.synthesis.learned) == 1
+        assert resp.next_hypotheses is not None
+        assert len(resp.next_hypotheses) == 1
+        assert resp.next_hypotheses[0].statement == "온보딩 UX를 단순화하면 이탈이 줄 것이다."
+
+        from app.routers.retros import get_session
+        async with Session() as s:
+            resp2 = await get_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+        assert resp2.synthesis is not None
+        assert resp2.next_hypotheses is not None
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_synthesis_combined_l3_failure_preserves_stale_next_hypotheses_not_502():
+    """PO crux(2026-07-04 ①) — 기존 good next_hypotheses가 있는 상태에서 재종합 시 L3만
+    실패하면(빈/malformed LLM 응답) combined 호출은 502가 아니라 200이고, 새 synthesis는
+    갱신되지만 next_hypotheses는 예전 캐시가 그대로 응답에 남는다(overwrite 안 됨)."""
+    from app.routers.retros import synthesize_and_recommend, synthesize_session, recommend_next_session
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+
+        # 1) 먼저 정상 synthesize+recommend로 good 캐시를 만들어둔다.
+        synth_raw_1 = '{"items": [{"text": "1차 학습", "source": "가설 1"}]}'
+        async with Session() as s:
+            with patch("app.services.llm_client.generate_text", return_value=synth_raw_1):
+                await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+            await s.commit()
+        next_raw_1 = '{"items": [{"statement": "예전 추천(보존돼야 함)", "rationale": "r", "confidence": 0.5}]}'
+        async with Session() as s:
+            with patch("app.services.llm_client.generate_text", return_value=next_raw_1):
+                await recommend_next_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+            await s.commit()
+
+        # 2) combined 재호출 — L2는 성공(새 synthesis), L3는 malformed(파싱 실패=None)로 재현.
+        synth_raw_2 = '{"items": [{"text": "2차 새 학습", "source": "가설 1"}]}'
+        async with Session() as s:
+            with patch("app.services.llm_client.generate_text", side_effect=[synth_raw_2, "이건 JSON이 아님"]):
+                resp = await synthesize_and_recommend(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+            await s.commit()
+
+        assert resp.synthesis is not None
+        assert resp.synthesis.learned[0].text == "2차 새 학습"
+        assert resp.next_hypotheses is not None
+        assert resp.next_hypotheses[0].statement == "예전 추천(보존돼야 함)"  # L3 실패로 미갱신
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
 async def test_recommend_next_without_synthesis_409():
     from app.routers.retros import recommend_next_session
 

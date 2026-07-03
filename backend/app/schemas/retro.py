@@ -86,6 +86,20 @@ class NextHypothesisCandidate(BaseModel):
     adopted_hypothesis_id: uuid.UUID | None = None
 
 
+class AdoptNextHypothesis(BaseModel):
+    """story 4b87d3a6 — FE `handleAdoptRecommendation`가 `{...rec, statement}`(rec=
+    NextHypothesisCandidate 런타임 객체 — TS 타입엔 `id`가 없지만 실제 응답엔 있어 spread로
+    실려온다)를 body로 보낸다. candidate_id를 path가 아니라 이 body의 `id`로 받는다(FE
+    무변경). `statement`는 사람이 편집했을 수 있는 override — 없으면 서버 저장 candidate의
+    statement를 그대로 쓴다(§3.7.1 HITL: "확정은 당신이" — 편집을 무시하면 사람의 편집이
+    조용히 버려지는 위반이라 이 필드를 실반영해야 한다)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: uuid.UUID
+    statement: str | None = None
+
+
 class SessionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
