@@ -145,6 +145,22 @@ async def test_synthesize_valid_object_wrong_item_shape_returns_none():
     assert result is None
 
 
+async def test_synthesize_missing_source_drops_item():
+    """까심 codex RC③(2026-07-03) — text는 걸렀는데 source(근거)는 안 걸러 근거 없는 학습이
+    새어들 수 있었다. text/source 대칭 검증 — source 없는 항목은 드롭, 전부 드롭이면 None."""
+    session = _empty_execute_session()
+    retro = _retro(sprint_id=SPRINT_ID)
+    hyp = SimpleNamespace(
+        id=uuid.uuid4(), statement="stmt", status="verified",
+        metric_definition={}, outcome_result=None,
+    )
+    raw = '{"items": [{"text": "근거 없는 배운 것"}, {"text": "진짜", "source": "가설 1"}]}'
+    with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
+         patch("app.services.llm_client.generate_text_claude", return_value=raw):
+        result = await svc.synthesize(session, retro)
+    assert result["learned"] == [{"text": "진짜", "source": "가설 1"}]
+
+
 async def test_synthesize_llm_none_returns_none_not_empty_success():
     """data-loss 방지(오르테가 지적 2026-07-03) — LLM이 근거는 받고도 실패하면 '정당한 빈
     결과'가 아니라 명시 실패(None)여야 한다. 호출부가 이 None을 기존 캐시 덮어쓰기 신호로
@@ -221,14 +237,60 @@ async def test_recommend_next_mixed_learned_drops_garbage_items_from_prompt():
 
 
 async def test_recommend_next_caps_at_max_and_drops_malformed():
+    """까심 codex RC(2026-07-03): statement-only 항목은 rationale/confidence 미검증 시절엔
+    "성공"으로 통과해 버그가 살아있어도 그린이던 tautological 테스트였다 — 이제 rationale/
+    confidence까지 채운 valid 4개 + no_statement 1개(드롭)로 캡·드롭을 함께 비-tautology
+    실증한다."""
     synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
     raw = (
-        '{"items": [{"statement": "a"}, {"statement": "b"}, {"statement": "c"}, '
-        '{"statement": "d"}, {"no_statement": true}]}'
+        '{"items": ['
+        '{"statement": "a", "rationale": "r-a", "confidence": 0.5}, '
+        '{"statement": "b", "rationale": "r-b", "confidence": 0.5}, '
+        '{"statement": "c", "rationale": "r-c", "confidence": 0.5}, '
+        '{"statement": "d", "rationale": "r-d", "confidence": 0.5}, '
+        '{"no_statement": true}'
+        ']}'
     )
     with patch("app.services.llm_client.generate_text_claude", return_value=raw):
         result = await svc.recommend_next(synthesis)
-    assert len(result) == 3  # _MAX_NEXT_HYPOTHESES=3 캡
+    assert len(result) == 3  # _MAX_NEXT_HYPOTHESES=3 캡(전체 4개 유효 중 슬라이스)
+
+
+async def test_recommend_next_out_of_range_confidence_is_clamped_not_dropped():
+    """까심 codex RC①(2026-07-03) — JSON Schema "number"는 범위(min/max) 강제 불가(PO 실측:
+    Vertex structured output 제약). 9.0/-1.0처럼 범위 밖 숫자는 드롭이 아니라 [0.0,1.0]로
+    clamp(값 자체는 신뢰하되 안전 범위로 보정 — missing/비숫자와는 다른 처리)."""
+    synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
+    raw = (
+        '{"items": ['
+        '{"statement": "a", "rationale": "r", "confidence": 9.0}, '
+        '{"statement": "b", "rationale": "r", "confidence": -1.0}'
+        ']}'
+    )
+    with patch("app.services.llm_client.generate_text_claude", return_value=raw):
+        result = await svc.recommend_next(synthesis)
+    assert len(result) == 2
+    assert result[0]["confidence"] == 1.0
+    assert result[1]["confidence"] == 0.0
+
+
+async def test_recommend_next_missing_confidence_or_rationale_drops_item():
+    """까심 codex RC②(2026-07-03) — confidence가 missing/비숫자거나 rationale이 blank면
+    statement가 있어도 item 드롭(text/source와 대칭 검증, #1863 원칙). 캡(_MAX_NEXT_
+    HYPOTHESES=3)이 슬라이스 후 필터라 3개 이내로 구성(4번째는 아예 안 보임 — 별도
+    캡 테스트에서 이미 검증)."""
+    synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
+    raw = (
+        '{"items": ['
+        '{"statement": "a", "rationale": "r", "confidence": "not-a-number"}, '
+        '{"statement": "b", "confidence": 0.5}, '
+        '{"statement": "c", "rationale": "r", "confidence": 0.7}'
+        ']}'
+    )
+    with patch("app.services.llm_client.generate_text_claude", return_value=raw):
+        result = await svc.recommend_next(synthesis)
+    assert len(result) == 1
+    assert result[0]["statement"] == "c"
 
 
 async def test_recommend_next_invalid_json_returns_none():

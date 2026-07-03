@@ -199,10 +199,15 @@ async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, An
     items = parsed.get("items") if parsed is not None else None
     learned: list[dict[str, str]] = []
     if isinstance(items, list):
+        # 까심 codex RC(2026-07-03) — text는 걸렀는데 source(근거)는 안 걸러 근거 없는
+        # 학습이 새어들 수 있었다. response_schema가 source를 required로 강제하니 빠진
+        # 응답 = 스키마 위반 → #1863 원칙대로 그 item을 드롭(text와 대칭 검증).
         learned = [
-            {"text": str(x["text"]), "source": str(x.get("source", ""))}
+            {"text": x["text"].strip(), "source": x["source"].strip()}
             for x in items
-            if isinstance(x, dict) and isinstance(x.get("text"), str) and x["text"].strip()
+            if isinstance(x, dict)
+            and isinstance(x.get("text"), str) and x["text"].strip()
+            and isinstance(x.get("source"), str) and x["source"].strip()
         ]
     if not learned:
         # response_schema가 유효 object를 보장해도(2026-07-03 구조화 전환) items가 빈
@@ -274,14 +279,24 @@ async def recommend_next(synthesis: dict[str, Any]) -> list[dict[str, Any]] | No
     for x in items[:_MAX_NEXT_HYPOTHESES]:
         if not isinstance(x, dict) or not isinstance(x.get("statement"), str) or not x["statement"].strip():
             continue
-        confidence = x.get("confidence")
+        # 까심 codex RC(2026-07-03) — response_schema가 rationale/confidence를 required로
+        # 강제하지만 JSON Schema "number"는 범위(min/max)를 강제 못 한다(PO 실측: Vertex
+        # structured output 제약). statement처럼 rationale도 non-blank 필수·confidence는
+        # [0.0,1.0] clamp(범위 밖/비숫자는 스키마 위반과 동급 → item 드롭, #1863 원칙).
+        rationale = x.get("rationale")
+        if not isinstance(rationale, str) or not rationale.strip():
+            continue
+        confidence_raw = x.get("confidence")
+        if not isinstance(confidence_raw, (int, float)) or isinstance(confidence_raw, bool):
+            continue
+        confidence = max(0.0, min(1.0, float(confidence_raw)))
         candidates.append({
             "id": str(uuid.uuid4()),
             "statement": x["statement"].strip(),
             "metric_definition": {"metric": "outcome", "source": "manual", "target": 1, "direction": "up"},
             "measure_after": measure_after.isoformat(),
-            "confidence": float(confidence) if isinstance(confidence, (int, float)) else None,
-            "rationale": str(x.get("rationale", "")),
+            "confidence": confidence,
+            "rationale": rationale.strip(),
             "requires_confirmation": True,
         })
     if not candidates:
