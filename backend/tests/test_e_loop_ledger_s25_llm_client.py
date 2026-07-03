@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 
 from app.services.llm_client import (
     DEFAULT_MAX_OUTPUT_TOKENS,
+    MODEL_LOCATION,
     MODEL_VERSION,
     generate_text,
 )
@@ -42,6 +43,7 @@ def test_credentials_file_env_set_skips_adc_check():
     fake_response = MagicMock()
     fake_response.text = "distilled synthesis text"
     fake_response.usage_metadata = None
+    fake_response.candidates = []
     with patch.dict(os.environ, {"GOOGLE_APPLICATION_CREDENTIALS": "/fake/path.json"}), \
          patch("app.services.llm_client._has_adc") as mock_adc:
         with patch("google.genai.Client") as mock_client_cls:
@@ -57,6 +59,7 @@ def test_successful_generation_returns_text_and_uses_expected_model():
     fake_response = MagicMock()
     fake_response.text = "과거 CTA 실험 5건 — 저부담 문구가 우세."
     fake_response.usage_metadata = None
+    fake_response.candidates = []
     with patch("app.services.llm_client._has_adc", return_value=True), \
          patch.dict(os.environ, {}, clear=False):
         os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
@@ -201,6 +204,7 @@ def test_instrumentation_failure_does_not_block_successful_response():
     fake_response = MagicMock()
     fake_response.text = "synthesis despite instrumentation failure"
     fake_response.usage_metadata = _BoomUsage()
+    fake_response.candidates = []
     with patch("app.services.llm_client._has_adc", return_value=True), \
          patch.dict(os.environ, {}, clear=False):
         os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
@@ -208,6 +212,156 @@ def test_instrumentation_failure_does_not_block_successful_response():
             mock_client_cls.return_value.models.generate_content.return_value = fake_response
             result = generate_text("x")
     assert result == "synthesis despite instrumentation failure"
+
+
+# ── Gemini 피벗(2026-07-03): response_schema structured output + finish_reason 방어 ──
+# #1866(Claude structured output)의 근본을 그대로 이관 — response_json_schema가 기존
+# 스키마 dict(items-wrapping)를 그대로 받아들이고, finish_reason!=STOP 방어는 Claude
+# stop_reason(max_tokens/refusal) 방어와 동형 원칙(구 test_e_loop_ledger_s28_llm_client_claude.py
+# 은퇴에 따라 이 파일로 이관).
+
+def test_response_schema_sets_json_mime_and_response_json_schema():
+    schema = {"type": "object", "properties": {"items": {"type": "array"}}, "required": ["items"]}
+    fake_response = MagicMock()
+    fake_response.text = '{"items": []}'
+    fake_response.usage_metadata = None
+    fake_response.candidates = []
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client_cls.return_value.models.generate_content.return_value = fake_response
+            result = generate_text("x", response_schema=schema)
+    assert result == '{"items": []}'
+    call_kwargs = mock_client_cls.return_value.models.generate_content.call_args.kwargs
+    config = call_kwargs["config"]
+    assert config.response_mime_type == "application/json"
+    assert config.response_json_schema == schema
+
+
+def test_no_response_schema_omits_json_mime():
+    """response_schema 미지정 시(기존 순수 텍스트 호출) response_mime_type을 강제하지 않음
+    — 5개 non-schema 호출부(hypothesis draft·context_pack synthesis/recommendation) 회귀 방지."""
+    fake_response = MagicMock()
+    fake_response.text = "ok"
+    fake_response.usage_metadata = None
+    fake_response.candidates = []
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client_cls.return_value.models.generate_content.return_value = fake_response
+            generate_text("x")
+    call_kwargs = mock_client_cls.return_value.models.generate_content.call_args.kwargs
+    assert call_kwargs["config"].response_mime_type is None
+
+
+def test_finish_reason_max_tokens_returns_none_even_with_nonempty_text():
+    """⭐텍스트가 비어있지 않아도(truncated JSON일 수 있음) finish_reason=MAX_TOKENS면 명시
+    실패(None) — 부분 출력을 성공으로 오인하지 않음(Claude stop_reason=max_tokens 방어와 동형,
+    이관 전 old code는 finish_reason을 아예 체크하지 않아 이 케이스를 성공으로 오판했었다)."""
+    from google.genai import types as genai_types
+
+    fake_candidate = MagicMock()
+    fake_candidate.finish_reason = genai_types.FinishReason.MAX_TOKENS
+    fake_response = MagicMock()
+    fake_response.text = '{"items": [{"text": "부분'
+    fake_response.usage_metadata = None
+    fake_response.candidates = [fake_candidate]
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client_cls.return_value.models.generate_content.return_value = fake_response
+            result = generate_text("x")
+    assert result is None
+
+
+def test_finish_reason_stop_with_text_succeeds():
+    """회귀 방지 — 정상 종료(STOP)는 텍스트가 있으면 여전히 반환해야 함."""
+    from google.genai import types as genai_types
+
+    fake_candidate = MagicMock()
+    fake_candidate.finish_reason = genai_types.FinishReason.STOP
+    fake_response = MagicMock()
+    fake_response.text = '{"items": []}'
+    fake_response.usage_metadata = None
+    fake_response.candidates = [fake_candidate]
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client_cls.return_value.models.generate_content.return_value = fake_response
+            result = generate_text("x")
+    assert result == '{"items": []}'
+
+
+def test_finish_reason_none_with_text_still_succeeds():
+    """candidates가 비어있어 finish_reason을 못 구해도(None) 텍스트 유무로만 판정하던 기존
+    계약 유지 — 진단 실패가 정상 응답을 실패로 오판하지 않음."""
+    fake_response = MagicMock()
+    fake_response.text = "ok"
+    fake_response.usage_metadata = None
+    fake_response.candidates = []
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client_cls.return_value.models.generate_content.return_value = fake_response
+            result = generate_text("x")
+    assert result == "ok"
+
+
+# ── Gemini 피벗: model=/location= 오버라이드(모델 A/B 비교용) ─────────────────────
+
+def test_model_param_overrides_module_default():
+    fake_response = MagicMock()
+    fake_response.text = "ok"
+    fake_response.usage_metadata = None
+    fake_response.candidates = []
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client_cls.return_value.models.generate_content.return_value = fake_response
+            generate_text("x", model="gemini-3.1-pro-preview")
+    call_kwargs = mock_client_cls.return_value.models.generate_content.call_args.kwargs
+    assert call_kwargs["model"] == "gemini-3.1-pro-preview"
+
+
+def test_location_param_overrides_module_default():
+    """⭐PO 실측(2026-07-03): gemini-3.x는 location="global" 필수(asia-northeast3/
+    us-central1은 404) — 모델별 location 오버라이드가 실제로 Client(location=...)에
+    실려나가는지 실증."""
+    fake_response = MagicMock()
+    fake_response.text = "ok"
+    fake_response.usage_metadata = None
+    fake_response.candidates = []
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client_cls.return_value.models.generate_content.return_value = fake_response
+            generate_text("x", location="global")
+    init_kwargs = mock_client_cls.call_args.kwargs
+    assert init_kwargs["location"] == "global"
+
+
+def test_default_location_is_module_default_unchanged():
+    """location= 미지정 시 기존 MODEL_LOCATION(settings.vertex_ai_location 기반) 그대로 —
+    2.5-flash/embedding 경로 회귀 0."""
+    fake_response = MagicMock()
+    fake_response.text = "ok"
+    fake_response.usage_metadata = None
+    fake_response.candidates = []
+    with patch("app.services.llm_client._has_adc", return_value=True), \
+         patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client_cls.return_value.models.generate_content.return_value = fake_response
+            generate_text("x")
+    init_kwargs = mock_client_cls.call_args.kwargs
+    assert init_kwargs["location"] == MODEL_LOCATION
 
 
 # ── AC④ 임베딩 경로 회귀0 — 별도 파일/클라이언트 인스턴스임을 구조적으로 증명 ──────

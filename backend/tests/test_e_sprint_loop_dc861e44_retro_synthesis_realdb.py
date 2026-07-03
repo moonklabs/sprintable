@@ -146,7 +146,7 @@ async def test_synthesize_then_recommend_next_full_flow():
         # 이 테스트는 그 래핑을 우회하므로 명시 commit 필요(repo.update()는 flush만 함).
         synth_raw = '{"items": [{"text": "가설이 반증됐다(온보딩 42% vs 목표 50%) — 학습 데이터", "source": "가설 1"}]}'
         async with Session() as s:
-            with patch("app.services.llm_client.generate_text_claude", return_value=synth_raw):
+            with patch("app.services.llm_client.generate_text", return_value=synth_raw):
                 resp = await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
             await s.commit()
         assert resp.synthesis is not None
@@ -155,7 +155,7 @@ async def test_synthesize_then_recommend_next_full_flow():
 
         next_raw = '{"items": [{"statement": "온보딩 UX를 단순화하면 이탈이 줄 것이다.", "rationale": "가설 1 반증", "confidence": 0.55}]}'
         async with Session() as s:
-            with patch("app.services.llm_client.generate_text_claude", return_value=next_raw):
+            with patch("app.services.llm_client.generate_text", return_value=next_raw):
                 resp2 = await recommend_next_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
             await s.commit()
         assert resp2.next_hypotheses is not None
@@ -220,13 +220,13 @@ async def test_llm_failure_does_not_destroy_existing_good_synthesis():
 
         good_raw = '{"items": [{"text": "가설이 반증됐다 — 학습 데이터", "source": "가설 1"}]}'
         async with Session() as s:
-            with patch("app.services.llm_client.generate_text_claude", return_value=good_raw):
+            with patch("app.services.llm_client.generate_text", return_value=good_raw):
                 await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
             await s.commit()
 
         # [다시 생성] 중 LLM 장애(Anthropic outage 재현) — 예외로 실패.
         async with Session() as s:
-            with patch("app.services.llm_client.generate_text_claude", side_effect=RuntimeError("outage")):
+            with patch("app.services.llm_client.generate_text", side_effect=RuntimeError("outage")):
                 with pytest.raises(HTTPException) as ei:
                     await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
                 assert ei.value.status_code == 502
@@ -257,13 +257,13 @@ async def test_malformed_llm_response_does_not_destroy_existing_good_synthesis()
 
         good_raw = '{"items": [{"text": "가설이 반증됐다 — 학습 데이터", "source": "가설 1"}]}'
         async with Session() as s:
-            with patch("app.services.llm_client.generate_text_claude", return_value=good_raw):
+            with patch("app.services.llm_client.generate_text", return_value=good_raw):
                 await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
             await s.commit()
 
         # [다시 생성] — LLM이 응답은 하지만 JSON 형식을 안 지킴(raw-wrap 구제 제거 검증).
         async with Session() as s:
-            with patch("app.services.llm_client.generate_text_claude", return_value="이건 JSON이 아님"):
+            with patch("app.services.llm_client.generate_text", return_value="이건 JSON이 아님"):
                 with pytest.raises(HTTPException) as ei:
                     await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
                 assert ei.value.status_code == 502

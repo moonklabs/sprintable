@@ -82,7 +82,7 @@ async def test_synthesize_no_context_skips_llm_call():
     """가설도 투표 아이템도 0건 — LLM 호출 자체를 안 함(S15 동형: 지어낼 근거가 없으면 안 시킴)."""
     session = _empty_execute_session()
     retro = _retro(sprint_id=None)
-    with patch("app.services.llm_client.generate_text_claude") as mock_gen:
+    with patch("app.services.llm_client.generate_text") as mock_gen:
         result = await svc.synthesize(session, retro)
     mock_gen.assert_not_called()
     assert result["learned"] == []
@@ -99,13 +99,13 @@ async def test_synthesize_parses_valid_json():
     )
     raw = '{"items": [{"text": "가설이 검증됐다", "source": "가설 1"}]}'
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
-         patch("app.services.llm_client.generate_text_claude", return_value=raw):
+         patch("app.services.llm_client.generate_text", return_value=raw):
         result = await svc.synthesize(session, retro)
     assert result["learned"] == [{"text": "가설이 검증됐다", "source": "가설 1"}]
     # response_schema가 실려 나갔는지도 확인 — 구조화 강제가 실제로 걸리는지.
     call_kwargs = None
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
-         patch("app.services.llm_client.generate_text_claude", return_value=raw) as mock_gen:
+         patch("app.services.llm_client.generate_text", return_value=raw) as mock_gen:
         await svc.synthesize(session, retro)
         call_kwargs = mock_gen.call_args.kwargs
     assert call_kwargs["response_schema"] == svc._SYNTHESIS_SCHEMA
@@ -122,7 +122,7 @@ async def test_synthesize_prose_only_response_returns_none():
     )
     raw = "죄송하지만 데이터가 부족해 종합을 생성할 수 없습니다."
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
-         patch("app.services.llm_client.generate_text_claude", return_value=raw):
+         patch("app.services.llm_client.generate_text", return_value=raw):
         result = await svc.synthesize(session, retro)
     assert result is None
 
@@ -140,7 +140,7 @@ async def test_synthesize_valid_object_wrong_item_shape_returns_none():
     )
     raw = '{"items": [{"no_text": 1}, {"text": "   "}]}'
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
-         patch("app.services.llm_client.generate_text_claude", return_value=raw):
+         patch("app.services.llm_client.generate_text", return_value=raw):
         result = await svc.synthesize(session, retro)
     assert result is None
 
@@ -156,7 +156,7 @@ async def test_synthesize_missing_source_drops_item():
     )
     raw = '{"items": [{"text": "근거 없는 배운 것"}, {"text": "진짜", "source": "가설 1"}]}'
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
-         patch("app.services.llm_client.generate_text_claude", return_value=raw):
+         patch("app.services.llm_client.generate_text", return_value=raw):
         result = await svc.synthesize(session, retro)
     assert result["learned"] == [{"text": "진짜", "source": "가설 1"}]
 
@@ -172,7 +172,7 @@ async def test_synthesize_llm_none_returns_none_not_empty_success():
         metric_definition={}, outcome_result=None,
     )
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
-         patch("app.services.llm_client.generate_text_claude", return_value=None):
+         patch("app.services.llm_client.generate_text", return_value=None):
         result = await svc.synthesize(session, retro)
     assert result is None
 
@@ -185,7 +185,7 @@ async def test_synthesize_llm_exception_returns_none():
         metric_definition={}, outcome_result=None,
     )
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
-         patch("app.services.llm_client.generate_text_claude", side_effect=RuntimeError("boom")):
+         patch("app.services.llm_client.generate_text", side_effect=RuntimeError("boom")):
         result = await svc.synthesize(session, retro)  # 예외 전파는 없음(None으로 수렴)
     assert result is None
 
@@ -193,7 +193,7 @@ async def test_synthesize_llm_exception_returns_none():
 # ── recommend_next ────────────────────────────────────────────────────────────
 
 async def test_recommend_next_empty_synthesis_skips_llm():
-    with patch("app.services.llm_client.generate_text_claude") as mock_gen:
+    with patch("app.services.llm_client.generate_text") as mock_gen:
         result = await svc.recommend_next({"learned": [], "generated_at": "x", "source": "ai_draft"})
     mock_gen.assert_not_called()
     assert result == []
@@ -202,7 +202,7 @@ async def test_recommend_next_empty_synthesis_skips_llm():
 async def test_recommend_next_parses_candidates():
     synthesis = {"learned": [{"text": "배운 것", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
     raw = '{"items": [{"statement": "다음엔 온보딩을 개선하면 이탈이 줄 것이다.", "rationale": "가설 2 반증에서", "confidence": 0.6}]}'
-    with patch("app.services.llm_client.generate_text_claude", return_value=raw) as mock_gen:
+    with patch("app.services.llm_client.generate_text", return_value=raw) as mock_gen:
         result = await svc.recommend_next(synthesis)
     assert len(result) == 1
     c = result[0]
@@ -229,7 +229,7 @@ async def test_recommend_next_mixed_learned_drops_garbage_items_from_prompt():
         "generated_at": "x", "source": "ai_draft",
     }
     raw = '{"items": [{"statement": "다음 검증", "rationale": "r", "confidence": 0.5}]}'
-    with patch("app.services.llm_client.generate_text_claude", return_value=raw) as mock_gen:
+    with patch("app.services.llm_client.generate_text", return_value=raw) as mock_gen:
         await svc.recommend_next(synthesis)
     prompt_sent = mock_gen.call_args.args[0]
     assert "진짜 배운 것" in prompt_sent
@@ -251,7 +251,7 @@ async def test_recommend_next_caps_at_max_and_drops_malformed():
         '{"no_statement": true}'
         ']}'
     )
-    with patch("app.services.llm_client.generate_text_claude", return_value=raw):
+    with patch("app.services.llm_client.generate_text", return_value=raw):
         result = await svc.recommend_next(synthesis)
     assert len(result) == 3  # _MAX_NEXT_HYPOTHESES=3 캡(전체 4개 유효 중 슬라이스)
 
@@ -267,7 +267,7 @@ async def test_recommend_next_out_of_range_confidence_is_clamped_not_dropped():
         '{"statement": "b", "rationale": "r", "confidence": -1.0}'
         ']}'
     )
-    with patch("app.services.llm_client.generate_text_claude", return_value=raw):
+    with patch("app.services.llm_client.generate_text", return_value=raw):
         result = await svc.recommend_next(synthesis)
     assert len(result) == 2
     assert result[0]["confidence"] == 1.0
@@ -288,7 +288,7 @@ async def test_recommend_next_missing_confidence_or_rationale_drops_item():
         '{"statement": "d", "rationale": "r", "confidence": 0.7}'
         ']}'
     )
-    with patch("app.services.llm_client.generate_text_claude", return_value=raw):
+    with patch("app.services.llm_client.generate_text", return_value=raw):
         result = await svc.recommend_next(synthesis)
     assert len(result) == 1
     assert result[0]["statement"] == "d"
@@ -308,7 +308,7 @@ async def test_recommend_next_non_finite_confidence_drops_item():
         '{"statement": "valid-item", "rationale": "r", "confidence": 0.5}'
         ']}'
     )
-    with patch("app.services.llm_client.generate_text_claude", return_value=raw):
+    with patch("app.services.llm_client.generate_text", return_value=raw):
         result = await svc.recommend_next(synthesis)
     assert len(result) == 1
     assert result[0]["statement"] == "valid-item"
@@ -328,7 +328,7 @@ async def test_recommend_next_filter_then_cap_not_slice_then_filter():
         '{"statement": "good3", "rationale": "r", "confidence": 0.3}'
         ']}'
     )
-    with patch("app.services.llm_client.generate_text_claude", return_value=raw):
+    with patch("app.services.llm_client.generate_text", return_value=raw):
         result = await svc.recommend_next(synthesis)
     assert [c["statement"] for c in result] == ["good1", "good2", "good3"]
 
@@ -336,14 +336,14 @@ async def test_recommend_next_filter_then_cap_not_slice_then_filter():
 async def test_recommend_next_invalid_json_returns_none():
     """data-loss 방지 — 파싱 완전 실패는 빈 배열(성공으로 오인 가능)이 아니라 None(실패)."""
     synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
-    with patch("app.services.llm_client.generate_text_claude", return_value="not json"):
+    with patch("app.services.llm_client.generate_text", return_value="not json"):
         result = await svc.recommend_next(synthesis)
     assert result is None
 
 
 async def test_recommend_next_llm_none_returns_none():
     synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
-    with patch("app.services.llm_client.generate_text_claude", return_value=None):
+    with patch("app.services.llm_client.generate_text", return_value=None):
         result = await svc.recommend_next(synthesis)
     assert result is None
 
@@ -353,6 +353,6 @@ async def test_recommend_next_all_items_malformed_returns_none():
     저장하면 안 되므로 None(실패)."""
     synthesis = {"learned": [{"text": "x", "source": "s"}], "generated_at": "x", "source": "ai_draft"}
     raw = '{"items": [{"no_statement": true}, {"also_wrong": 1}]}'
-    with patch("app.services.llm_client.generate_text_claude", return_value=raw):
+    with patch("app.services.llm_client.generate_text", return_value=raw):
         result = await svc.recommend_next(synthesis)
     assert result is None
