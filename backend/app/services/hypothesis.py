@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hypothesis import HYPOTHESIS_STATUSES, Hypothesis, is_valid_transition
-from app.models.pm import Epic, Story
+from app.models.pm import Epic, Sprint, Story
 
 logger = logging.getLogger(__name__)
 from app.repositories.hypothesis import HypothesisRepository
@@ -79,7 +79,8 @@ async def _to_response(
 ) -> HypothesisResponse:
     epic_ids = await repo.get_epic_ids(hyp.id)
     story_ids = await repo.get_story_ids(hyp.id)
-    return HypothesisResponse.from_model(hyp, epic_ids, story_ids)
+    sprint_id = await repo.get_sprint_id(hyp.id)
+    return HypothesisResponse.from_model(hyp, epic_ids, story_ids, sprint_id)
 
 
 async def _assert_targets_same_project(
@@ -87,12 +88,15 @@ async def _assert_targets_same_project(
     project_id: uuid.UUID,
     epic_ids: list[uuid.UUID],
     story_ids: list[uuid.UUID],
+    sprint_id: uuid.UUID | None = None,
 ) -> None:
-    """§3.7.2 — 링크 대상 epic/story가 hypothesis와 다른 project면 거부.
+    """§3.7.2 — 링크 대상 epic/story/sprint가 hypothesis와 다른 project면 거부.
 
     create/draft/link 공통 service 가드. 이전엔 라우터(link 라우트)에만 있어 create·draft
     경로의 add_epic_links/add_story_links가 same-org cross-project blind INSERT로 우회됐다.
-    존재하지 않는 대상도 same-project 검증 불가라 거부한다(rowcount 대조).
+    존재하지 않는 대상도 same-project 검증 불가라 거부한다(rowcount 대조). sprint_id는
+    a4acc4d0(N:1)이 동일 원칙으로 확장 — org 스코프도 여기서 겸함(project는 org 1:1이라
+    다른 org의 sprint_id를 넣어도 project_id 불일치로 걸림, anti-IDOR).
     """
     if epic_ids:
         rows = (await session.execute(
@@ -109,6 +113,14 @@ async def _assert_targets_same_project(
         if len(rows) != len(set(story_ids)) or any(pid != project_id for _id, pid in rows):
             raise HypothesisServiceError(
                 "CROSS_PROJECT_LINK_FORBIDDEN", "다른 프로젝트의 스토리에는 연결할 수 없습니다."
+            )
+    if sprint_id is not None:
+        sprint_project_id = await session.scalar(
+            select(Sprint.project_id).where(Sprint.id == sprint_id)
+        )
+        if sprint_project_id != project_id:
+            raise HypothesisServiceError(
+                "CROSS_PROJECT_LINK_FORBIDDEN", "다른 프로젝트의 스프린트에는 연결할 수 없습니다."
             )
 
 
@@ -191,6 +203,7 @@ async def list_hypotheses(
     owner_member_id: uuid.UUID | None = None,
     epic_id: uuid.UUID | None = None,
     story_id: uuid.UUID | None = None,
+    sprint_id: uuid.UUID | None = None,
     limit: int = 100,
 ) -> list[HypothesisResponse]:
     repo = HypothesisRepository(session, org_id)
@@ -200,12 +213,14 @@ async def list_hypotheses(
         owner_member_id=owner_member_id,
         epic_id=epic_id,
         story_id=story_id,
+        sprint_id=sprint_id,
         limit=limit,
     )
     ids = [r.id for r in rows]
     emap = await repo.get_epic_ids_map(ids)
     smap = await repo.get_story_ids_map(ids)
-    return [HypothesisResponse.from_model(r, emap[r.id], smap[r.id]) for r in rows]
+    spmap = await repo.get_sprint_ids_map(ids)
+    return [HypothesisResponse.from_model(r, emap[r.id], smap[r.id], spmap[r.id]) for r in rows]
 
 
 async def update_hypothesis(
@@ -326,10 +341,14 @@ async def link_hypothesis(
     hyp = await repo.get(hypothesis_id)
     if hyp is None:
         raise HypothesisServiceError("HYPOTHESIS_NOT_FOUND", "가설을 찾을 수 없습니다.")
-    # cross-project epic/story 링크 차단(§3.7.2) — service 공통 가드(라우터 위임 제거).
-    await _assert_targets_same_project(session, hyp.project_id, payload.epic_ids, payload.story_ids)
+    # cross-project epic/story/sprint 링크 차단(§3.7.2·a4acc4d0) — service 공통 가드(라우터 위임 제거).
+    await _assert_targets_same_project(
+        session, hyp.project_id, payload.epic_ids, payload.story_ids, payload.sprint_id
+    )
     await repo.add_epic_links(hypothesis_id, payload.epic_ids, payload.link_type or "primary")
     await repo.add_story_links(hypothesis_id, payload.story_ids, payload.link_type or "supports")
+    if payload.sprint_id is not None:
+        await repo.set_sprint_link(hypothesis_id, payload.sprint_id, payload.link_type or "declared")
     return await _to_response(repo, hyp)
 
 
@@ -345,6 +364,8 @@ async def unlink_hypothesis(
         raise HypothesisServiceError("HYPOTHESIS_NOT_FOUND", "가설을 찾을 수 없습니다.")
     await repo.remove_epic_links(hypothesis_id, payload.epic_ids)
     await repo.remove_story_links(hypothesis_id, payload.story_ids)
+    if payload.unlink_sprint:
+        await repo.remove_sprint_link(hypothesis_id)
     return await _to_response(repo, hyp)
 
 

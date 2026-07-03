@@ -87,6 +87,7 @@ def _repo_mock(hyp: SimpleNamespace) -> AsyncMock:
     repo.create = AsyncMock(return_value=hyp)
     repo.get_epic_ids = AsyncMock(return_value=[])
     repo.get_story_ids = AsyncMock(return_value=[])
+    repo.get_sprint_id = AsyncMock(return_value=None)
     repo.add_epic_links = AsyncMock()
     repo.add_story_links = AsyncMock()
     return repo

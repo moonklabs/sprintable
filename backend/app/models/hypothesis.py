@@ -189,3 +189,38 @@ class HypothesisStoryLink(Base):
         UniqueConstraint("hypothesis_id", "story_id", name="uq_hypothesis_story_links"),
         Index("ix_hypothesis_story_links_story", "story_id"),
     )
+
+
+class HypothesisSprintLink(Base):
+    """E-SPRINT-LOOP a4acc4d0: 가설↔스프린트 연결. epic/story 링크와 달리 **N:1**(PO 결·
+    2026-07-03) — sprint는 시간상자, 가설은 그 안의 실험이라 한 가설은 정확히 1개 sprint에
+    속한다(epic/story의 N:M 지지 관계와 의미론이 다름). cross-sprint 복리는 링크가 아니라
+    회수(context_pack_search·project 전역)로 성립하므로 멀티링크 불필요 — §6 비협상은
+    context_pack_search.py에 sprint_id 필터를 추가하지 않는 것으로 준수(이 테이블 신설과
+    무관하게 그 파일은 org_id+project_id 스코프 그대로).
+
+    link_type: 'declared'(sprint 열기 시 직접 선언, 기본) | 'seeded'(이전 sprint의 L3
+    다음가설 추천을 채택해 생긴 링크 — story 3). seed된 가설의 home도 여전히 1개(seed
+    대상 sprint) — 측정이 걸쳐도 선언 sprint에 잔류(§ PO 결).
+    """
+
+    __tablename__ = "hypothesis_sprint_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    hypothesis_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("hypotheses.id", ondelete="CASCADE"), nullable=False
+    )
+    sprint_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sprints.id", ondelete="CASCADE"), nullable=False
+    )
+    link_type: Mapped[str] = mapped_column(String(24), nullable=False, server_default="declared")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        # N:1 강제(PO 결) — epic/story의 (hypothesis_id, target_id) 쌍 unique와 달리
+        # hypothesis_id 단독 unique. 재배정은 서비스가 upsert(기존 링크 delete→insert)로 처리.
+        UniqueConstraint("hypothesis_id", name="uq_hypothesis_sprint_links_hypothesis"),
+        Index("ix_hypothesis_sprint_links_sprint", "sprint_id"),
+    )

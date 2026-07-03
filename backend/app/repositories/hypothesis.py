@@ -11,7 +11,12 @@ import uuid
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.hypothesis import Hypothesis, HypothesisEpicLink, HypothesisStoryLink
+from app.models.hypothesis import (
+    Hypothesis,
+    HypothesisEpicLink,
+    HypothesisSprintLink,
+    HypothesisStoryLink,
+)
 from app.models.pm import Story
 from app.repositories.base import BaseRepository
 
@@ -28,6 +33,7 @@ class HypothesisRepository(BaseRepository[Hypothesis]):
         owner_member_id: uuid.UUID | None = None,
         epic_id: uuid.UUID | None = None,
         story_id: uuid.UUID | None = None,
+        sprint_id: uuid.UUID | None = None,
         limit: int = 100,
     ) -> list[Hypothesis]:
         q = select(Hypothesis).where(
@@ -51,6 +57,14 @@ class HypothesisRepository(BaseRepository[Hypothesis]):
                 Hypothesis.id.in_(
                     select(HypothesisStoryLink.hypothesis_id).where(
                         HypothesisStoryLink.story_id == story_id
+                    )
+                )
+            )
+        if sprint_id is not None:
+            q = q.where(
+                Hypothesis.id.in_(
+                    select(HypothesisSprintLink.hypothesis_id).where(
+                        HypothesisSprintLink.sprint_id == sprint_id
                     )
                 )
             )
@@ -102,6 +116,29 @@ class HypothesisRepository(BaseRepository[Hypothesis]):
         )).all()
         for hid, sid in rows:
             result[hid].append(sid)
+        return result
+
+    async def get_sprint_id(self, hypothesis_id: uuid.UUID) -> uuid.UUID | None:
+        """N:1 — 가설당 sprint 링크는 최대 1개(uq_hypothesis_sprint_links_hypothesis)."""
+        return await self.session.scalar(
+            select(HypothesisSprintLink.sprint_id).where(
+                HypothesisSprintLink.hypothesis_id == hypothesis_id
+            )
+        )
+
+    async def get_sprint_ids_map(
+        self, hypothesis_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, uuid.UUID | None]:
+        result: dict[uuid.UUID, uuid.UUID | None] = {hid: None for hid in hypothesis_ids}
+        if not hypothesis_ids:
+            return result
+        rows = (await self.session.execute(
+            select(HypothesisSprintLink.hypothesis_id, HypothesisSprintLink.sprint_id).where(
+                HypothesisSprintLink.hypothesis_id.in_(hypothesis_ids)
+            )
+        )).all()
+        for hid, sid in rows:
+            result[hid] = sid
         return result
 
     # ── 링크 추가/제거 (멱등: 기존 (hypothesis, target) 쌍은 건너뜀) ──────────────
@@ -162,6 +199,39 @@ class HypothesisRepository(BaseRepository[Hypothesis]):
         for link in links:
             await self.session.delete(link)
         await self.session.flush()
+
+    async def set_sprint_link(
+        self, hypothesis_id: uuid.UUID, sprint_id: uuid.UUID, link_type: str = "declared"
+    ) -> None:
+        """N:1 upsert — 같은 sprint면 no-op, 다른 sprint면 기존 링크 delete 후 재생성
+        (uq_hypothesis_sprint_links_hypothesis 단독 unique라 pair-idempotent add로는 불가:
+        재배정은 명시적 교체여야 함)."""
+        existing = (await self.session.execute(
+            select(HypothesisSprintLink).where(
+                HypothesisSprintLink.hypothesis_id == hypothesis_id
+            )
+        )).scalar_one_or_none()
+        if existing is not None:
+            if existing.sprint_id == sprint_id:
+                return
+            await self.session.delete(existing)
+            await self.session.flush()
+        self.session.add(
+            HypothesisSprintLink(
+                hypothesis_id=hypothesis_id, sprint_id=sprint_id, link_type=link_type
+            )
+        )
+        await self.session.flush()
+
+    async def remove_sprint_link(self, hypothesis_id: uuid.UUID) -> None:
+        existing = (await self.session.execute(
+            select(HypothesisSprintLink).where(
+                HypothesisSprintLink.hypothesis_id == hypothesis_id
+            )
+        )).scalar_one_or_none()
+        if existing is not None:
+            await self.session.delete(existing)
+            await self.session.flush()
 
     # ── dispatch anchor 해소 (S6 §5.2) ──────────────────────────────────────────
     async def _primary_via_epic(self, epic_id: uuid.UUID) -> Hypothesis | None:
