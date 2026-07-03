@@ -127,8 +127,13 @@ async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, An
     반환 None = **생성 실패**(호출부는 절대 저장하면 안 됨 — 기존 good 캐시가 있다면 그대로
     보존해야 함, PO 지적 2026-07-02 S28 캐시게이트 버그와 동형: "일시장애≠영구 no-result").
     구분: 근거(가설·투표 아이템) 전무는 **정당한 빈 결과**(learned=[])이지 실패가 아니다 —
-    LLM을 아예 호출 안 하고 그대로 반환. 반면 호출까지 갔는데 응답이 없으면(None/빈 문자열/
-    예외) 진짜 실패로 취급해 None 반환 — 조용히 learned=[]를 반환해 기존 캐시를 지우지 않는다."""
+    LLM을 아예 호출 안 하고 그대로 반환. 반면 호출까지 갔는데 응답이 없거나(None/빈 문자열/
+    예외) **JSON 파싱 실패/스키마 불일치**면 진짜 실패로 수렴(None) — 까심 codex RC(2026-07-03):
+    raw 텍스트를 단일 bullet로 "구제"하던 이전 fallback(S15 draft_hypothesis의 템플릿-fallback
+    철학을 그대로 미러한 것)이 실은 **캐시-overwrite 맥락에서 garbage-persist**였다. S15는
+    fallback 결과를 그 자리서 즉시 응답할 뿐 아무것도 지우지 않지만, 여기서는 라우터가
+    non-None 반환값을 곧장 `repo.update()`로 **기존 good synthesis 위에 덮어쓴다** — 같은
+    "완전 실패 없음" 철학이 정반대 결과(데이터 보존 vs 파괴)를 낳는 컨텍스트라 미러가 틀렸다."""
     from app.services.llm_client import generate_text_claude
 
     hypotheses_items = await build_hypotheses_items(
@@ -150,8 +155,8 @@ async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, An
     if not raw:
         return None  # 근거는 있었는데 LLM이 실패 — 기존 캐시 보존(호출부 502·미저장).
 
-    learned: list[dict[str, str]] = []
     parsed = _extract_json(raw)
+    learned: list[dict[str, str]] = []
     if isinstance(parsed, list):
         learned = [
             {"text": str(x["text"]), "source": str(x.get("source", ""))}
@@ -159,9 +164,10 @@ async def synthesize(session: AsyncSession, retro: RetroSession) -> dict[str, An
             if isinstance(x, dict) and isinstance(x.get("text"), str) and x["text"].strip()
         ]
     if not learned:
-        # JSON 파싱 실패/스키마 불일치 — raw 자체는 실 LLM 응답(완전 실패 아님)이라 원문을
-        # 단일 bullet로 래핑해 구제(S15 fallback 철학). "raw가 아예 없음"과는 다른 케이스.
-        learned = [{"text": raw.strip()[:500], "source": "generated"}]
+        # JSON 파싱 실패/스키마 불일치/전부 malformed — raw-wrap 구제 없이 명시 실패(None).
+        # raw는 실 LLM 응답이었지만, 형식을 안 지킨 응답을 캐시에 넣는 것 자체가 이전 good
+        # synthesis를 저품질 1-bullet로 강등시키는 data-loss(까심 codex RC②).
+        return None
 
     return {"learned": learned, "generated_at": now.isoformat(), "source": "ai_draft"}
 

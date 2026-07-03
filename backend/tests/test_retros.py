@@ -1144,11 +1144,14 @@ async def test_recommend_next_without_synthesis_409():
 
 
 @pytest.mark.parametrize("malformed_synthesis", [
-    {},                    # dict이지만 learned 키 부재
-    [],                    # dict조차 아님 — .get() 호출 시 AttributeError 크래시 지점
-    {"learned": []},       # 형태는 맞지만 실제론 빈 종합(근거 없음으로 생성된 케이스)
-    {"learned": "x"},      # learned가 list가 아님
-    "not a dict",          # 완전 이형
+    {},                          # dict이지만 learned 키 부재
+    [],                          # dict조차 아님 — .get() 호출 시 AttributeError 크래시 지점
+    {"learned": []},             # 형태는 맞지만 실제론 빈 종합(근거 없음으로 생성된 케이스)
+    {"learned": "x"},            # learned가 list가 아님
+    "not a dict",                # 완전 이형
+    {"learned": [123]},          # 까심 codex RC②: 아이템이 dict가 아님(shape 미검증 시 통과)
+    {"learned": [{}]},           # 아이템이 dict지만 text 키 부재
+    {"learned": [{"text": "  "}]},  # text가 공백뿐
 ])
 @pytest.mark.anyio
 async def test_recommend_next_malformed_synthesis_409_not_crash(malformed_synthesis):

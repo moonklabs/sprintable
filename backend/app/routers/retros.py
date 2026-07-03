@@ -41,14 +41,20 @@ def _get_session_repo(
 
 
 def _has_valid_synthesis(synthesis: object) -> bool:
-    """recommend-next 게이팅(까심 RC②, 2026-07-03) — `synthesis is None`만 보면 `{}`·`[]`·
-    `{"learned": []}` 같은 malformed/empty 값이 게이트를 통과한다. `synthesis=[]`는
+    """recommend-next 게이팅(까심 codex RC①·②, 2026-07-03) — `synthesis is None`만 보면
+    `{}`·`[]`·`{"learned": []}` 같은 malformed/empty 값이 게이트를 통과한다. `synthesis=[]`는
     `_build_next_hypotheses_prompt`의 `.get("learned")` 호출에서 AttributeError(500)까지
-    난다. dict이고 `learned`이 비어있지 않은 리스트일 때만 "종합이 실제로 존재"로 인정."""
-    return (
-        isinstance(synthesis, dict)
-        and isinstance(synthesis.get("learned"), list)
-        and len(synthesis["learned"]) > 0
+    난다. **1차 라운드에서 "learned가 비어있지 않은 list"까지만 봤는데 codex가 아이템 shape
+    미검증을 다시 잡음**(`{"learned":[123]}`·`{"learned":[{}]}` 통과해 recommend-next가 사실상
+    빈 종합으로 LLM 호출/persist) — ≥1개 dict 아이템이 non-blank `text`를 가져야 유효."""
+    if not isinstance(synthesis, dict):
+        return False
+    learned = synthesis.get("learned")
+    if not isinstance(learned, list) or not learned:
+        return False
+    return any(
+        isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip()
+        for item in learned
     )
 
 

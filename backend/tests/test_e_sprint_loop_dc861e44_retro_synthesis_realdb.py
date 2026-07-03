@@ -243,6 +243,41 @@ async def test_llm_failure_does_not_destroy_existing_good_synthesis():
 
 
 @pytest.mark.anyio
+async def test_malformed_llm_response_does_not_destroy_existing_good_synthesis():
+    """까심 codex RC①(2026-07-03) — [다시 생성]에서 LLM이 예외/None이 아니라 **JSON 형식을
+    안 지킨 텍스트**를 반환해도(raw는 존재) 기존 good synthesis가 살아남아야 한다. 1차 fix는
+    raw가 None/예외인 경우만 잡았고, "raw는 있지만 malformed"는 여전히 1-bullet로 래핑해
+    캐시를 덮어썼다(codex가 잡은 잔여 구멍) — 이제 이 경로도 502·캐시 보존."""
+    from app.routers.retros import get_session, synthesize_session
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+
+        good_raw = '[{"text": "가설이 반증됐다 — 학습 데이터", "source": "가설 1"}]'
+        async with Session() as s:
+            with patch("app.services.llm_client.generate_text_claude", return_value=good_raw):
+                await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+            await s.commit()
+
+        # [다시 생성] — LLM이 응답은 하지만 JSON 형식을 안 지킴(raw-wrap 구제 제거 검증).
+        async with Session() as s:
+            with patch("app.services.llm_client.generate_text_claude", return_value="이건 JSON이 아님"):
+                with pytest.raises(HTTPException) as ei:
+                    await synthesize_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+                assert ei.value.status_code == 502
+            await s.rollback()
+
+        async with Session() as s:
+            resp = await get_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+        assert resp.synthesis is not None
+        assert resp.synthesis.learned[0].text == "가설이 반증됐다 — 학습 데이터"
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
 async def test_recommend_next_malformed_synthesis_in_db_returns_409_not_500():
     """까심 RC②(2026-07-03) — DB에 malformed synthesis(list)가 들어있어도 크래시 없이 409."""
     from app.routers.retros import recommend_next_session
@@ -255,6 +290,31 @@ async def test_recommend_next_malformed_synthesis_in_db_returns_409_not_500():
             await s.execute(
                 text("UPDATE retro_sessions SET synthesis = '[]'::jsonb WHERE id = :id"),
                 {"id": SESSION_A},
+            )
+            await s.commit()
+        async with Session() as s:
+            with pytest.raises(HTTPException) as ei:
+                await recommend_next_session(SESSION_A, db=s, auth=_auth(), repo=_repo(s))
+            assert ei.value.status_code == 409
+            assert ei.value.detail["code"] == "SYNTHESIS_REQUIRED"
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_recommend_next_item_shape_malformed_synthesis_in_db_returns_409():
+    """까심 codex RC②(2026-07-03) — learned는 비어있지 않은 list지만 아이템이 스키마 불일치
+    (text 부재)면 여전히 409여야 한다(item-shape 미검증 시 통과하던 구멍)."""
+    from app.routers.retros import recommend_next_session
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+        async with Session() as s:
+            await s.execute(
+                text("UPDATE retro_sessions SET synthesis = :syn WHERE id = :id"),
+                {"syn": '{"learned": [{}], "generated_at": "t", "source": "ai_draft"}', "id": SESSION_A},
             )
             await s.commit()
         async with Session() as s:

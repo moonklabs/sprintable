@@ -113,7 +113,10 @@ async def test_synthesize_strips_markdown_fence():
     assert result["learned"] == [{"text": "배운 것", "source": "s"}]
 
 
-async def test_synthesize_malformed_json_falls_back_to_raw_wrap():
+async def test_synthesize_malformed_json_returns_none_no_raw_wrap():
+    """까심 codex RC①(2026-07-03) — 파싱 실패한 raw를 단일 bullet로 "구제"하던 이전 fallback은
+    캐시-overwrite 맥락에서 garbage-persist였다(S15 템플릿-fallback 철학이 여기선 오적용).
+    이제 malformed/wrong-shape는 명시 실패(None) — 호출부가 기존 캐시를 지키게 한다."""
     session = _empty_execute_session()
     retro = _retro(sprint_id=SPRINT_ID)
     hyp = SimpleNamespace(
@@ -124,9 +127,22 @@ async def test_synthesize_malformed_json_falls_back_to_raw_wrap():
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
          patch("app.services.llm_client.generate_text_claude", return_value=raw):
         result = await svc.synthesize(session, retro)
-    assert len(result["learned"]) == 1
-    assert result["learned"][0]["text"] == raw
-    assert result["learned"][0]["source"] == "generated"
+    assert result is None
+
+
+async def test_synthesize_valid_json_wrong_item_shape_returns_none():
+    """JSON 배열이지만 항목이 스키마 불일치(text 부재/blank) — 전부 None(실패)."""
+    session = _empty_execute_session()
+    retro = _retro(sprint_id=SPRINT_ID)
+    hyp = SimpleNamespace(
+        id=uuid.uuid4(), statement="stmt", status="verified",
+        metric_definition={}, outcome_result=None,
+    )
+    raw = '[{"no_text": 1}, {"text": "   "}]'
+    with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
+         patch("app.services.llm_client.generate_text_claude", return_value=raw):
+        result = await svc.synthesize(session, retro)
+    assert result is None
 
 
 async def test_synthesize_llm_none_returns_none_not_empty_success():
