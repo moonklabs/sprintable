@@ -38,4 +38,20 @@ describe('OpenLoopCockpit (E-SPRINT-LOOP sprint-open 278314e9, §10 P0)', () => 
     expect(markup).not.toContain('bg-destructive');
     expect(markup).not.toMatch(/\btext-red-\d/);
   });
+
+  // story fbf1c14b: GET /{id}/hypotheses가 BE HYPOTHESIS_STATUSES 전체를 정직하게 반환 —
+  // sprint-open 직후 선언된 가설은 proposed/active가 정상 케이스라 verdict 4종만으로는
+  // 크래시했다(PO crux — VERDICT_KEY 확장 확정). 이 3개 status에서 렌더 크래시 없이 라벨이
+  // 나오는지 + SOUL-LOCK 중립(빨강 0)을 실증.
+  it.each(['proposed', 'active', 'archived'] as const)(
+    'renders a %s hypothesis with its honest status label, no crash, no destructive color',
+    (status) => {
+      const h: RetroHypothesisResult = { id: `h-${status}`, statement: `${status} 가설`, status };
+      const markup = renderToStaticMarkup(wrap(<OpenLoopCockpit hypotheses={[h]} storyTitles={[]} />));
+      expect(markup).toContain(`${status} 가설`);
+      expect(markup).not.toContain('text-destructive');
+      expect(markup).not.toContain('bg-destructive');
+      expect(markup).not.toMatch(/\btext-red-\d/);
+    },
+  );
 });

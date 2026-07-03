@@ -5,11 +5,18 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { RetroHypothesisResult as SprintHypothesisResult } from '@/services/retro-session';
 
+// story fbf1c14b: GET /{id}/hypotheses는 이 status 전체(HYPOTHESIS_STATUSES, backend
+// app/models/hypothesis.py)를 정직하게 그대로 반환한다 — sprint-open 직후 선언된 가설은
+// proposed/active가 정상 케이스라 verdict 4종만으로는 tr(undefined) 크래시(PO crux 확인·
+// SOUL 정직 원칙: BE가 measuring으로 강제 coercion하는 대안은 기각).
 const VERDICT_KEY = {
   verified: 'hVerdictVerified',
   falsified: 'hVerdictFalsified',
   measuring: 'hVerdictMeasuring',
   killed: 'hVerdictKilled',
+  proposed: 'hVerdictProposed',
+  active: 'hVerdictActive',
+  archived: 'hVerdictArchived',
 } as const;
 
 function daysUntil(dateIso: string): number | null {

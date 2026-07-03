@@ -61,6 +61,22 @@ describe('SprintCloseCockpit (E-SPRINT-LOOP 1b9f4ecb)', () => {
     expect(markup).not.toMatch(/color:\s*#?(red|f00)/i);
   });
 
+  // story fbf1c14b: 늦게 declare된 가설이 sprint-close 시점에도 아직 measuring 전(proposed/
+  // active)일 수 있다 — verdict 4종만 처리하던 VERDICT_KEY가 크래시했다(PO crux 확정).
+  it.each(['proposed', 'active', 'archived'] as const)(
+    'renders a %s hypothesis without crashing, honest label, no destructive color',
+    (status) => {
+      const h: RetroHypothesisResult = { id: `h-${status}`, statement: `${status} 가설`, status };
+      const markup = renderToStaticMarkup(wrap(
+        <SprintCloseCockpit hypotheses={[h]} synthesis={null} nextHypotheses={[]} onGenerateSynthesis={noop} onAdoptRecommendation={noop} />,
+      ));
+      expect(markup).toContain(`${status} 가설`);
+      expect(markup).not.toContain('text-destructive');
+      expect(markup).not.toContain('bg-destructive');
+      expect(markup).not.toMatch(/\btext-red-\d/);
+    },
+  );
+
   it('tallies verified/falsified/measuring counts correctly', () => {
     const markup = renderToStaticMarkup(wrap(
       <SprintCloseCockpit hypotheses={[VERIFIED, FALSIFIED, MEASURING]} synthesis={null} nextHypotheses={[]} onGenerateSynthesis={noop} onAdoptRecommendation={noop} />,

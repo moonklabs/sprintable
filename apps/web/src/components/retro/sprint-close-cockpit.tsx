@@ -67,11 +67,17 @@ function useHeuristicStepIndex(generating: boolean, stepCount: number): number {
  * AI 종합·추천 = 제안형·시각무게 < 인간 결정 액션·[채택]=인간 게이트.
  */
 
+// story fbf1c14b: RetroHypothesisResult.status가 backend HYPOTHESIS_STATUSES 전체를 정직하게
+// 반영하도록 넓어져(proposed/active/archived 포함) verdict 4종만으로는 t(undefined) 크래시
+// 위험 — sprint-close 시점에도 늦게 declare돼 아직 measuring 전인 가설이 섞일 수 있다.
 const VERDICT_KEY = {
   verified: 'hVerdictVerified',
   falsified: 'hVerdictFalsified',
   measuring: 'hVerdictMeasuring',
   killed: 'hVerdictKilled',
+  proposed: 'hVerdictProposed',
+  active: 'hVerdictActive',
+  archived: 'hVerdictArchived',
 } as const;
 
 function TallyHeader({ hypotheses }: { hypotheses: RetroHypothesisResult[] }) {

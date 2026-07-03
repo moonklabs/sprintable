@@ -68,10 +68,16 @@ export interface RetroActionRecord {
  */
 export type RetroHypothesisVerdict = 'verified' | 'falsified' | 'measuring' | 'killed';
 
+// story fbf1c14b: GET /api/v2/sprints/:id/hypotheses는 backend HYPOTHESIS_STATUSES 전체를
+// 정직하게 반환한다(proposed/active는 sprint-open 직후 정상 케이스) — verdict 4종만 담던
+// 이 유니온을 좁게 유지하면 h.status의 실제 값과 타입이 어긋난다(PO crux: BE가 진실을
+// 숨기지 않기로 확정했으니 FE 타입도 그 진실을 반영해야 함).
+export type RetroHypothesisStatus = RetroHypothesisVerdict | 'proposed' | 'active' | 'archived';
+
 export interface RetroHypothesisResult {
   id: string;
   statement: string;
-  status: RetroHypothesisVerdict;
+  status: RetroHypothesisStatus;
   metric?: string | null;
   target?: number | null;
   direction?: 'up' | 'down' | null;
