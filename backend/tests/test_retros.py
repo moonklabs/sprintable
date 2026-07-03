@@ -6,6 +6,7 @@ patch해야 한다(패치 안 하면 진짜 session.execute가 한 번 더 끼�
 순번이 밀림 — 광역 mock 공유 함정. [[feedback_shared_flow_query_breaks_broad_mock]])."""
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,6 +33,11 @@ def _mock_session(phase: str = "collect", project_id: uuid.UUID = PROJECT_ID) ->
     s.actions = []
     s.created_at = datetime(2026, 4, 29, tzinfo=timezone.utc)
     s.updated_at = datetime(2026, 4, 29, tzinfo=timezone.utc)
+    # dc861e44: MagicMock은 미설정 속성을 truthy 자동생성하므로(parent_item_id와 동일 함정)
+    # 명시 None — 실 ORM 컬럼 기본값(미생성)과 정합, SessionResponse(synthesis: Synthesis|None)
+    # Pydantic 검증 통과에 필수.
+    s.synthesis = None
+    s.next_hypotheses = None
     return s
 
 
@@ -1002,5 +1008,196 @@ async def test_export_markdown_200():
         assert resp.status_code == 200
         assert "Sprint 3 Retro" in resp.text
         assert "# " in resp.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ── dc861e44: synthesize / recommend-next ────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_synthesize_session_cross_project_403():
+    """IDOR 가드 상속(#1801) — synthesize도 _require_retro_project_access를 탐."""
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session(project_id=OTHER_PROJECT_ID)
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with _deny_project_access():
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/synthesize")
+
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_synthesize_session_200_persists_via_repo_update():
+    client, session, app = await _client()
+    try:
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalar_one_or_none.return_value = _mock_session()
+            else:
+                result.scalars.return_value.all.return_value = []  # items/actions 빈 리스트
+            return result
+
+        session.execute = mock_execute
+
+        synthesis_result = {
+            "learned": [{"text": "배운 것", "source": "s"}],
+            "generated_at": "2026-07-03T00:00:00+00:00", "source": "ai_draft",
+        }
+        updated = _mock_session()
+        updated.synthesis = synthesis_result
+
+        with (
+            _allow_project_access(), _mock_resolve_member(),
+            patch("app.routers.retros.synth_svc.synthesize", new=AsyncMock(return_value=synthesis_result)),
+            patch("app.repositories.base.BaseRepository.update", new=AsyncMock(return_value=updated)) as mock_update,
+        ):
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/synthesize")
+
+        assert resp.status_code == 200
+        assert resp.json()["synthesis"]["learned"][0]["text"] == "배운 것"
+        mock_update.assert_awaited_once_with(SESSION_ID, synthesis=synthesis_result)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_recommend_next_without_synthesis_409():
+    """PO 결(2026-07-03) — synthesis 미생성 시 fail-closed 409(자동 선행 생성 안 함)."""
+    client, session, app = await _client()
+    try:
+        s = _mock_session()
+        s.synthesis = None
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = s
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with _allow_project_access():
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/recommend-next")
+
+        assert resp.status_code == 409
+        assert resp.json()["error"]["code"] == "SYNTHESIS_REQUIRED"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_recommend_next_cross_project_403():
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session(project_id=OTHER_PROJECT_ID)
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with _deny_project_access():
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/recommend-next")
+
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_recommend_next_200_when_synthesis_present():
+    client, session, app = await _client()
+    try:
+        s = _mock_session()
+        s.synthesis = {
+            "learned": [{"text": "x", "source": "s"}],
+            "generated_at": "2026-07-03T00:00:00+00:00", "source": "ai_draft",
+        }
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalar_one_or_none.return_value = s
+            else:
+                result.scalars.return_value.all.return_value = []
+            return result
+
+        session.execute = mock_execute
+
+        candidates = [{
+            "id": str(uuid.uuid4()), "statement": "다음엔 X를 검증할 것이다.",
+            "metric_definition": {"metric": "outcome", "source": "manual", "target": 1, "direction": "up"},
+            "measure_after": "2026-08-01T00:00:00+00:00", "confidence": 0.5,
+            "rationale": "r", "requires_confirmation": True,
+        }]
+        updated = _mock_session()
+        updated.synthesis = s.synthesis
+        updated.next_hypotheses = candidates
+
+        with (
+            _allow_project_access(), _mock_resolve_member(),
+            patch("app.routers.retros.synth_svc.recommend_next", new=AsyncMock(return_value=candidates)),
+            patch("app.repositories.base.BaseRepository.update", new=AsyncMock(return_value=updated)) as mock_update,
+        ):
+            async with client as c:
+                resp = await c.post(f"/api/v2/retros/{SESSION_ID}/recommend-next")
+
+        assert resp.status_code == 200
+        assert resp.json()["next_hypotheses"][0]["statement"] == "다음엔 X를 검증할 것이다."
+        mock_update.assert_awaited_once_with(SESSION_ID, next_hypotheses=candidates)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_session_embeds_hypotheses_when_sprint_linked():
+    """§5 hypotheses[] — sprint_id 있으면 story 1 필터 재사용해 채움."""
+    client, session, app = await _client()
+    try:
+        s = _mock_session()
+        s.sprint_id = uuid.uuid4()
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalar_one_or_none.return_value = s
+            else:
+                result.scalars.return_value.all.return_value = []
+            return result
+
+        session.execute = mock_execute
+
+        hyp = SimpleNamespace(
+            id=uuid.uuid4(), statement="stmt", status="verified",
+            metric_definition={"metric": "x", "target": 1, "direction": "up"},
+            outcome_result={"actual": 2},
+        )
+
+        with (
+            _allow_project_access(), _mock_resolve_member(),
+            patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])),
+        ):
+            async with client as c:
+                resp = await c.get(f"/api/v2/retros/{SESSION_ID}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["hypotheses"]) == 1
+        assert body["hypotheses"][0]["statement"] == "stmt"
+        assert body["hypotheses"][0]["actual"] == 2
+        assert body["synthesis"] is None
+        assert body["next_hypotheses"] is None
     finally:
         app.dependency_overrides.clear()

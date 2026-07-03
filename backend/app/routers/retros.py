@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.retro import RetroItem, RetroSession, RetroVote
+from app.services import retro_synthesis as synth_svc
 from app.services.member_resolver import canonicalize_member_id, resolve_member
 from app.services.project_auth import has_project_access
 from app.repositories.retro import (
@@ -125,19 +126,13 @@ async def create_session(
     return SessionListResponse.model_validate(session)
 
 
-@router.get("/{id}", response_model=SessionResponse)
-async def get_session(
-    id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    auth: AuthContext = Depends(get_current_user),
-    repo: RetroSessionRepository = Depends(_get_session_repo),
+async def _build_session_response(
+    db: AsyncSession, session: RetroSession, auth: AuthContext
 ) -> SessionResponse:
-    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
-
     item_repo = RetroItemRepository(db)
     action_repo = RetroActionRepository(db)
-    items = await item_repo.list_by_session(id)
-    actions = await action_repo.list_by_session(id)
+    items = await item_repo.list_by_session(session.id)
+    actions = await action_repo.list_by_session(session.id)
 
     # P1(9f27af8f, 유나 real-payload 재현): grouped child를 items에서 제외하면 FE가 클러스터를
     # 그릴 데이터 자체가 없어짐(FE는 items를 top-level/child로 필터링해 렌더 — child 객체가
@@ -162,6 +157,11 @@ async def get_session(
             )
         )
         voted_item_ids = set(voted_rows.scalars().all())
+
+    # dc861e44 §5 — sprint 링크 가설(story 1 sprint_id 필터 재사용). sprint 미연결 회고는 [].
+    hypotheses = await synth_svc.build_hypotheses_items(
+        db, session.org_id, session.project_id, session.sprint_id
+    )
 
     return SessionResponse(
         id=session.id,
@@ -189,7 +189,57 @@ async def get_session(
             for i in items
         ],
         actions=[ActionResponse.model_validate(a) for a in actions],
+        hypotheses=hypotheses,
+        synthesis=session.synthesis,
+        next_hypotheses=session.next_hypotheses,
     )
+
+
+@router.get("/{id}", response_model=SessionResponse)
+async def get_session(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> SessionResponse:
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    return await _build_session_response(db, session, auth)
+
+
+@router.post("/{id}/synthesize", response_model=SessionResponse)
+async def synthesize_session(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> SessionResponse:
+    """dc861e44 §3 — L2 종합(on-demand·버튼 트리거). overwrite 저장(PO 결)."""
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    result = await synth_svc.synthesize(db, session)
+    updated = await repo.update(id, synthesis=result)
+    assert updated is not None
+    return await _build_session_response(db, updated, auth)
+
+
+@router.post("/{id}/recommend-next", response_model=SessionResponse)
+async def recommend_next_session(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> SessionResponse:
+    """dc861e44 §3 — L3 다음가설 추천(on-demand). synthesis 선행 필수 — PO 결(2026-07-03):
+    fail-closed(409), 자동 선행 생성 안 함(HITL 순서 — 팀이 종합을 보고/편집한 뒤 추천)."""
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    if session.synthesis is None:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SYNTHESIS_REQUIRED", "message": "종합을 먼저 생성해야 합니다."},
+        )
+    result = await synth_svc.recommend_next(session.synthesis)
+    updated = await repo.update(id, next_hypotheses=result)
+    assert updated is not None
+    return await _build_session_response(db, updated, auth)
 
 
 @router.patch("/{id}/phase", response_model=SessionListResponse)
