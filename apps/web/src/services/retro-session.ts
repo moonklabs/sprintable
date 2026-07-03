@@ -61,6 +61,47 @@ export interface RetroActionRecord {
   created_at: string;
 }
 
+/**
+ * E-SPRINT-LOOP FE(1b9f4ecb) — 회고 = sprint-close 종합 cockpit(핸드오프 `retro-sprint-close-synthesis-handoff`
+ * §5). additive+nullable graceful 계약 — 소스=HypothesisSprintLink(BE story a4acc4d0, 디디 병행).
+ * BE 미착지 구간엔 필드 부재/404를 빈배열·null로 흡수해 렌더(크래시 0, 별도 BE 대기 불요).
+ */
+export type RetroHypothesisVerdict = 'verified' | 'falsified' | 'measuring' | 'killed';
+
+export interface RetroHypothesisResult {
+  id: string;
+  statement: string;
+  status: RetroHypothesisVerdict;
+  metric?: string | null;
+  target?: number | null;
+  direction?: 'up' | 'down' | null;
+  actual?: number | null;
+  measure_after?: string | null;
+  href?: string | null;
+}
+
+export interface RetroSynthesisLearned {
+  text: string;
+  source?: string | null;
+}
+
+export interface RetroSynthesis {
+  learned: RetroSynthesisLearned[];
+  generated_at: string;
+  source: 'ai_draft';
+}
+
+export interface RetroNextHypothesis {
+  statement: string;
+  // BE 계약 추정(§5 HypothesisDraftResponse 형) — 실제 페이로드에서 누락/null 가능성 있어
+  // optional로 방어(까심 QA 적출: 무가드 deref 크래시 재발 방지).
+  metric_definition?: { metric: string; target: number; direction: 'up' | 'down' } | null;
+  measure_after?: string | null;
+  confidence?: number | null;
+  rationale?: string | null;
+  requires_confirmation: true;
+}
+
 const VALID_TRANSITIONS: Record<string, string[]> = {
   collect: ['group'],
   group: ['vote'],

@@ -19,13 +19,18 @@ import {
   RETRO_STAGE_ORDER,
   RETRO_STAGE_VARIANTS,
   type RetroActionRecord,
+  type RetroHypothesisResult,
   type RetroItemRecord,
+  type RetroNextHypothesis,
   type RetroSessionPhase,
   type RetroSessionRecord,
+  type RetroSynthesis,
   type RetroVisibleStage,
 } from '@/services/retro-session';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import type { OutcomeStatus } from '@/components/outcome/outcome-status-badge';
+import { SprintCloseCockpit } from '@/components/retro/sprint-close-cockpit';
+import { EvidenceStrip } from '@/components/retro/evidence-strip';
 
 type RetroItemCategory = 'good' | 'bad' | 'improve';
 type VisibleStage = RetroVisibleStage;
@@ -173,6 +178,61 @@ export default function RetroSessionPage() {
     return () => { cancelled = true; };
   }, [session?.sprint_id]);
 
+  // E-SPRINT-LOOP FE(1b9f4ecb) — 회고 = sprint-close 종합 cockpit(핸드오프 §5, additive+nullable
+  // graceful). 소스=HypothesisSprintLink(BE story a4acc4d0, 디디 병행) — 미착지 구간엔 404를
+  // 빈 배열로 흡수(선택 기능, 크래시 0). session.sprint_id 없거나 fetch 실패해도 폼은 정상 동작.
+  const [hypotheses, setHypotheses] = useState<RetroHypothesisResult[]>([]);
+
+  useEffect(() => {
+    if (!session?.sprint_id) { setHypotheses([]); return; }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/sprints/${session.sprint_id}/hypotheses`);
+        if (!res.ok || cancelled) { if (!cancelled) setHypotheses([]); return; }
+        const json = await res.json() as { data?: RetroHypothesisResult[] };
+        if (!cancelled) setHypotheses(json.data ?? []);
+      } catch {
+        if (!cancelled) setHypotheses([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [session?.sprint_id]);
+
+  // synthesis/next_hypotheses는 SessionResponse에 additive로 얹힐 예정(§5) — BE 미착지 구간엔
+  // 필드 자체가 없어 undefined로 넘어오므로 null/빈배열로 기본값 처리(load()에서 함께 세팅).
+  const [synthesis, setSynthesis] = useState<RetroSynthesis | null>(null);
+  const [nextHypotheses, setNextHypotheses] = useState<RetroNextHypothesis[]>([]);
+
+  const handleGenerateSynthesis = useCallback(async (): Promise<boolean> => {
+    if (!projectId) return false;
+    try {
+      const res = await fetch(`/api/retro-sessions/${sessionId}/synthesis?project_id=${projectId}`, { method: 'POST' });
+      if (!res.ok) return false;
+      const json = await res.json() as { data?: { synthesis?: RetroSynthesis; next_hypotheses?: RetroNextHypothesis[] } };
+      if (!json.data?.synthesis) return false;
+      setSynthesis(json.data.synthesis);
+      setNextHypotheses(json.data.next_hypotheses ?? []);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [projectId, sessionId]);
+
+  const handleAdoptRecommendation = useCallback(async (rec: RetroNextHypothesis, statement: string): Promise<boolean> => {
+    if (!projectId) return false;
+    try {
+      const res = await fetch(`/api/retro-sessions/${sessionId}/next-hypotheses/adopt?project_id=${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...rec, statement }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }, [projectId, sessionId]);
+
   const [newItemText, setNewItemText] = useState<Record<RetroItemCategory, string>>({ good: '', bad: '', improve: '' });
   const [addingItem, setAddingItem] = useState<RetroItemCategory | null>(null);
   const [addItemError, setAddItemError] = useState<string | null>(null);
@@ -211,11 +271,22 @@ export default function RetroSessionPage() {
     try {
       const res = await fetch(`/api/retro-sessions/${sessionId}?project_id=${projectId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json() as { data: RetroSessionRecord & { items?: RetroItemRecord[]; actions?: RetroActionRecord[] } };
+      const json = await res.json() as {
+        data: RetroSessionRecord & {
+          items?: RetroItemRecord[];
+          actions?: RetroActionRecord[];
+          synthesis?: RetroSynthesis | null;
+          next_hypotheses?: RetroNextHypothesis[];
+        };
+      };
       const loadedItems = json.data.items ?? [];
       setSession(json.data);
       setItems(loadedItems);
       setActions(json.data.actions ?? []);
+      // E-SPRINT-LOOP FE(1b9f4ecb) — additive 필드(§5). BE 미착지 구간엔 undefined로 넘어와
+      // null/빈배열 기본값(nullable graceful, "종합 생성" CTA로 이어짐).
+      setSynthesis(json.data.synthesis ?? null);
+      setNextHypotheses(json.data.next_hypotheses ?? []);
       // B4(9f27af8f): voted_by_me가 응답에 실리면 새로고침 후에도 투표 상태 복원(필드 부재 시 기존 동작 그대로).
       const hydratedVotes = loadedItems.filter((item) => item.voted_by_me).map((item) => item.id);
       if (hydratedVotes.length > 0) {
@@ -516,8 +587,19 @@ export default function RetroSessionPage() {
             />
           ) : (
             <>
-              {/* Linked sprint outcome card */}
-              {sprintOutcome ? (
+              {/* E-SPRINT-LOOP FE(1b9f4ecb) — 종료 단계 = sprint-close 종합 cockpit(핸드오프 §4 A안).
+                  hypotheses[]가 있으면(HypothesisSprintLink 배선 후) N-가설 cockpit이 레거시
+                  단일 sprintOutcome 카드를 대체 — 없으면(BE 미착지·현재 상태) 레거시 카드 그대로
+                  fallback해 회귀 0을 보장한다. */}
+              {currentStage === 'closed' && hypotheses.length > 0 ? (
+                <SprintCloseCockpit
+                  hypotheses={hypotheses}
+                  synthesis={synthesis}
+                  nextHypotheses={nextHypotheses}
+                  onGenerateSynthesis={handleGenerateSynthesis}
+                  onAdoptRecommendation={handleAdoptRecommendation}
+                />
+              ) : sprintOutcome ? (
                 <div className="space-y-2">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('linkedSprintOutcome')}</p>
                   <OutcomeResultCard
@@ -528,6 +610,10 @@ export default function RetroSessionPage() {
                   />
                 </div>
               ) : null}
+
+              {/* 진행 단계(수집/우선순위/액션) 얇은 evidence 스트립(핸드오프 §4·목업 PART 5) —
+                  종료 cockpit의 무거운 결과 프레임이 sentiment 수집을 압도하지 않도록 분리. */}
+              {currentStage !== 'closed' ? <EvidenceStrip hypotheses={hypotheses} /> : null}
 
               {/* Items grid */}
               {showItems ? (
