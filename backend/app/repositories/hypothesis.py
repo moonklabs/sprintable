@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import desc, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hypothesis import (
@@ -203,24 +204,18 @@ class HypothesisRepository(BaseRepository[Hypothesis]):
     async def set_sprint_link(
         self, hypothesis_id: uuid.UUID, sprint_id: uuid.UUID, link_type: str = "declared"
     ) -> None:
-        """N:1 upsert — 같은 sprint면 no-op, 다른 sprint면 기존 링크 delete 후 재생성
-        (uq_hypothesis_sprint_links_hypothesis 단독 unique라 pair-idempotent add로는 불가:
-        재배정은 명시적 교체여야 함)."""
-        existing = (await self.session.execute(
-            select(HypothesisSprintLink).where(
-                HypothesisSprintLink.hypothesis_id == hypothesis_id
-            )
-        )).scalar_one_or_none()
-        if existing is not None:
-            if existing.sprint_id == sprint_id:
-                return
-            await self.session.delete(existing)
-            await self.session.flush()
-        self.session.add(
-            HypothesisSprintLink(
-                hypothesis_id=hypothesis_id, sprint_id=sprint_id, link_type=link_type
-            )
+        """N:1 원자적 upsert(a4acc4d0 까심 RC②) — `INSERT ... ON CONFLICT (hypothesis_id)
+        DO UPDATE`로 재배정(교체)한다. 이전의 select→delete→insert 3단계는 동시 재링크 시
+        둘 다 no-row를 관측한 뒤 각자 insert해 uq_hypothesis_sprint_links_hypothesis
+        위반(500)이 날 수 있는 레이스였다 — ON CONFLICT는 DB 레벨 원자성이라 그 창이 없다."""
+        stmt = pg_insert(HypothesisSprintLink).values(
+            id=uuid.uuid4(), hypothesis_id=hypothesis_id, sprint_id=sprint_id, link_type=link_type,
         )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["hypothesis_id"],
+            set_={"sprint_id": stmt.excluded.sprint_id, "link_type": stmt.excluded.link_type},
+        )
+        await self.session.execute(stmt)
         await self.session.flush()
 
     async def remove_sprint_link(self, hypothesis_id: uuid.UUID) -> None:

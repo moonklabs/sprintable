@@ -30,6 +30,9 @@ class HypothesisCreate(BaseModel):
     status: str = "proposed"
     epic_ids: list[uuid.UUID] = []
     story_ids: list[uuid.UUID] = []
+    # N:1(PO 결) — epic_ids/story_ids와 대칭으로 create-time 링크(a4acc4d0 까심 RC① fix:
+    # 이전엔 /links 전용이라 create 시 sprint_id를 줘도 silent drop됐다).
+    sprint_id: uuid.UUID | None = None
     source_type: str | None = None
     source_id: uuid.UUID | None = None
     draft_metadata: dict[str, Any] | None = None
@@ -50,6 +53,9 @@ class HypothesisUpdate(BaseModel):
     confidence: float | None = None
     draft_metadata: dict[str, Any] | None = None
     human_accounting: dict[str, Any] | None = None
+    # N:1(PO 결) — hypotheses 컬럼이 아니라 링크 테이블 행이라 서비스가 별도 경로로 처리
+    # (repo.update()에 그대로 넘기면 존재하지 않는 컬럼이라 silent no-op). None = 링크 해제.
+    sprint_id: uuid.UUID | None = None
 
     @field_validator("metric_definition")
     @classmethod

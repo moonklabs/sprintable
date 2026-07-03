@@ -445,6 +445,93 @@ def test_response_exposes_sprint_id():
     assert resp2.sprint_id == sprint_id
 
 
+# ── a4acc4d0 까심 RC①: create/update sprint_id 대칭(epic_ids/story_ids와 동형) ──────
+
+async def test_create_sets_sprint():
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    sprint_id = uuid.uuid4()
+    session = _session_scalar(PROJECT_ID)
+    payload = HypothesisCreate(
+        project_id=PROJECT_ID, statement="s", metric_definition=VALID_METRIC,
+        measure_after=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        owner_member_id=OWNER_ID, sprint_id=sprint_id,
+    )
+    with p_repo, p_lookup:
+        await svc.create_hypothesis(session, ORG_ID, _caller("human"), payload)
+    repo.set_sprint_link.assert_awaited_once_with(HYP_ID, sprint_id, "declared")
+
+
+async def test_create_sprint_cross_project_forbidden():
+    """create 경로도 cross-project sprint 링크 거부 — repo.create 전 차단(orphan 0)."""
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    session = _session_scalar(uuid.uuid4())  # 다른 project sprint
+    payload = HypothesisCreate(
+        project_id=PROJECT_ID, statement="s", metric_definition=VALID_METRIC,
+        measure_after=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        owner_member_id=OWNER_ID, sprint_id=uuid.uuid4(),
+    )
+    with p_repo, p_lookup, pytest.raises(svc.HypothesisServiceError) as ei:
+        await svc.create_hypothesis(session, ORG_ID, _caller("human"), payload)
+    assert ei.value.code == "CROSS_PROJECT_LINK_FORBIDDEN"
+    repo.create.assert_not_awaited()
+
+
+async def test_update_sprint_id_only_does_not_raise_no_valid_fields():
+    """patch body가 sprint_id 단독이어도 NO_VALID_FIELDS에 걸리지 않는다(fix 전 회귀 재현 대상)."""
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    sprint_id = uuid.uuid4()
+    session = _session_scalar(PROJECT_ID)
+    with p_repo, p_lookup:
+        await svc.update_hypothesis(
+            session, ORG_ID, _caller("human"), HYP_ID,
+            HypothesisUpdate(sprint_id=sprint_id),
+        )
+    repo.set_sprint_link.assert_awaited_once_with(HYP_ID, sprint_id, "declared")
+    repo.update.assert_not_awaited()  # sprint_id만 있으면 컬럼 update 호출 자체가 없어야 함
+
+
+async def test_update_sprint_id_null_unlinks():
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    with p_repo, p_lookup:
+        await svc.update_hypothesis(
+            MagicMock(), ORG_ID, _caller("human"), HYP_ID,
+            HypothesisUpdate(sprint_id=None),
+        )
+    repo.remove_sprint_link.assert_awaited_once_with(HYP_ID)
+
+
+async def test_update_sprint_cross_project_forbidden():
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    session = _session_scalar(uuid.uuid4())  # 다른 project sprint
+    with p_repo, p_lookup, pytest.raises(svc.HypothesisServiceError) as ei:
+        await svc.update_hypothesis(
+            session, ORG_ID, _caller("human"), HYP_ID,
+            HypothesisUpdate(sprint_id=uuid.uuid4()),
+        )
+    assert ei.value.code == "CROSS_PROJECT_LINK_FORBIDDEN"
+    repo.set_sprint_link.assert_not_awaited()
+
+
+async def test_update_statement_and_sprint_together():
+    """컬럼 필드 + sprint_id 동시 patch — 둘 다 적용(repo.update는 sprint_id 없이 호출)."""
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    sprint_id = uuid.uuid4()
+    session = _session_scalar(PROJECT_ID)
+    with p_repo, p_lookup:
+        await svc.update_hypothesis(
+            session, ORG_ID, _caller("human"), HYP_ID,
+            HypothesisUpdate(statement="new", sprint_id=sprint_id),
+        )
+    repo.update.assert_awaited_once_with(HYP_ID, statement="new")
+    repo.set_sprint_link.assert_awaited_once_with(HYP_ID, sprint_id, "declared")
+
+
 # ── 54a8bd8a: cross-project 가드 service 레벨 — create/draft 경로 패리티 ─────────
 
 def _session_one_result(rows):

@@ -220,7 +220,8 @@ class HypothesisSprintLink(Base):
 
     __table_args__ = (
         # N:1 강제(PO 결) — epic/story의 (hypothesis_id, target_id) 쌍 unique와 달리
-        # hypothesis_id 단독 unique. 재배정은 서비스가 upsert(기존 링크 delete→insert)로 처리.
+        # hypothesis_id 단독 unique. 재배정은 repo.set_sprint_link의 원자적 ON CONFLICT
+        # upsert로 처리(select→delete→insert 레이스 제거, a4acc4d0 까심 RC②).
         UniqueConstraint("hypothesis_id", name="uq_hypothesis_sprint_links_hypothesis"),
         Index("ix_hypothesis_sprint_links_sprint", "sprint_id"),
     )

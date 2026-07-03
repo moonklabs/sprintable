@@ -149,8 +149,13 @@ async def create_hypothesis(
             "INVALID_CREATE_STATUS", "생성 시 status는 proposed|active만 허용됩니다."
         )
 
-    # cross-project epic/story 링크 차단(§3.7.2) — repo.create 전이라 거부 시 orphan 가설 0.
-    await _assert_targets_same_project(session, payload.project_id, payload.epic_ids, payload.story_ids)
+    # cross-project epic/story/sprint 링크 차단(§3.7.2·a4acc4d0 까심 RC①) — repo.create 전이라
+    # 거부 시 orphan 가설 0. sprint_id도 epic_ids/story_ids와 대칭으로 create-time 링크 지원
+    # (sprint-open 선언 흐름 + story 3 seed가 create-time 링크를 요구 — 이전엔 /links 전용이라
+    # create 시 sprint_id를 줘도 silent drop됐다).
+    await _assert_targets_same_project(
+        session, payload.project_id, payload.epic_ids, payload.story_ids, payload.sprint_id
+    )
 
     repo = HypothesisRepository(session, org_id)
     hyp = await repo.create(
@@ -172,6 +177,8 @@ async def create_hypothesis(
     )
     await repo.add_epic_links(hyp.id, payload.epic_ids, "primary")
     await repo.add_story_links(hyp.id, payload.story_ids, "supports")
+    if payload.sprint_id is not None:
+        await repo.set_sprint_link(hyp.id, payload.sprint_id, "declared")
 
     # E-LOOP-LEDGER P1-S4: statement를 embeddings 큐에 pending으로 등록(네트워크 I/O 0 —
     # 실제 임베딩은 P1-S3 cron이 처리). score_hypotheses/attribute_loop_outcome과 동형 배선.
@@ -238,11 +245,27 @@ async def update_hypothesis(
     fields = payload.model_dump(exclude_unset=True)
     if not fields:
         raise HypothesisServiceError("NO_VALID_FIELDS", "수정할 필드가 없습니다.")
+    # sprint_id는 hypotheses 컬럼이 아니라 링크 테이블 행(a4acc4d0 까심 RC①) — repo.update()에
+    # 그대로 넘기면 존재하지 않는 컬럼이라 silent no-op이 된다. 별도 경로(set/remove_sprint_link)로
+    # 분리하고, sprint_id만 patch돼도(exclude_unset 시맨틱) NO_VALID_FIELDS에 걸리지 않게
+    # 위 dict 생성 이후에 pop한다.
+    sprint_id_provided = "sprint_id" in fields
+    sprint_id = fields.pop("sprint_id", None)
     new_owner = fields.get("owner_member_id")
     if new_owner is not None:
         await _verify_human_owner(session, new_owner)
+    # cross-project 가드는 어떤 컬럼 mutation보다 먼저 — 거부 시 부분 update 0(create 경로와 동형).
+    if sprint_id_provided and sprint_id is not None:
+        await _assert_targets_same_project(session, hyp.project_id, [], [], sprint_id)
 
-    updated = await repo.update(hypothesis_id, **fields)
+    updated = hyp
+    if fields:
+        updated = await repo.update(hypothesis_id, **fields)
+    if sprint_id_provided:
+        if sprint_id is not None:
+            await repo.set_sprint_link(hypothesis_id, sprint_id, "declared")
+        else:
+            await repo.remove_sprint_link(hypothesis_id)
 
     # P1-S4: statement가 바뀌면 재임베딩 큐잉(content_hash가 변경 없는 재저장은 no-op으로 걸러줌).
     if "statement" in fields:
