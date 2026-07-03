@@ -70,6 +70,7 @@ export function LoopCreateDialog({
   const [linkedId, setLinkedId] = useState<string | null>(null);
 
   const [recipes, setRecipes] = useState<WorkflowRecipe[] | null>(null);
+  const [recipesFailed, setRecipesFailed] = useState(false);
   const [recipeSlug, setRecipeSlug] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
@@ -90,6 +91,7 @@ export function LoopCreateDialog({
     setError(null);
     setDrafted(false);
     setRecipeSlug('');
+    setRecipesFailed(false);
   }, []);
 
   const handleDraft = useCallback(async () => {
@@ -135,19 +137,20 @@ export function LoopCreateDialog({
   }, [open, mode, hypotheses, projectId]);
 
   // E-LOOP-LEDGER S18 — recipe 목록은 선택 기능이라 fetch 실패해도 select 옵션만 없어질 뿐
-  // (null-safe, "직접 진행" 기본값으로 폼은 정상 동작).
+  // (null-safe, "직접 진행" 기본값으로 폼은 정상 동작). 실패는 recipesFailed로만 표시하고
+  // recipes는 null로 유지 — 닫힘/재오픈(reset)마다 recipesFailed가 풀려 재시도된다(영구 실종 방지).
   useEffect(() => {
-    if (!open || recipes !== null) return;
+    if (!open || recipes !== null || recipesFailed) return;
     void (async () => {
       try {
         const res = await fetch('/api/workflow-recipes');
-        if (!res.ok) { setRecipes([]); return; }
+        if (!res.ok) { setRecipesFailed(true); return; }
         setRecipes((await res.json()) as WorkflowRecipe[]);
       } catch {
-        setRecipes([]);
+        setRecipesFailed(true);
       }
     })();
-  }, [open, recipes]);
+  }, [open, recipes, recipesFailed]);
 
   const setMetricPatch = (patch: Partial<MetricDefinition>) => setMetric((m) => ({ ...m, ...patch }));
 
@@ -241,8 +244,9 @@ export function LoopCreateDialog({
 
           {recipes && recipes.length > 0 ? (
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('createLoopRecipeLabel')}</label>
+              <label htmlFor="loop-create-recipe" className="text-xs font-medium text-muted-foreground">{t('createLoopRecipeLabel')}</label>
               <select
+                id="loop-create-recipe"
                 value={recipeSlug}
                 onChange={(e) => setRecipeSlug(e.target.value)}
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
