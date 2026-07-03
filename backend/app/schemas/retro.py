@@ -73,7 +73,7 @@ class Synthesis(BaseModel):
 
 class NextHypothesisCandidate(BaseModel):
     """L3 다음가설 추천 — `HypothesisDraftResponse` 형 재사용(§5 계약). id는 story 3
-    "채택" 액션이 참조할 안정 키(이 story 스코프에선 순수 데이터 형상만)."""
+    "채택" 액션이 참조할 안정 키."""
 
     id: uuid.UUID
     statement: str
@@ -82,6 +82,8 @@ class NextHypothesisCandidate(BaseModel):
     confidence: float | None = None
     rationale: str
     requires_confirmation: bool = True
+    # ecc531ce — 채택되면 생성된 hypothesis id(idempotency 겸용 마커). None=미채택.
+    adopted_hypothesis_id: uuid.UUID | None = None
 
 
 class SessionResponse(BaseModel):
