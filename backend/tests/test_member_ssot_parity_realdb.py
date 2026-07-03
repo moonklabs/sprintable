@@ -3,8 +3,16 @@
 legacy(org_members/team_members) vs anchor(members/aliases) resolver를 **동일 실 데이터**로
 대조해 0-diff 입증. mocked로는 못 잡는 실데이터 정합(orphan·멀티프로젝트·휴먼 name)을 검증.
 
-DB env(ALEMBIC_DATABASE_URL 또는 PARITY_TEST_DATABASE_URL) 없으면 skip — CI alembic-fresh-db
-잡(postgres + alembic upgrade head)에서 실행되며, 로컬은 throwaway PG로 실행.
+story 8236bbc3(2026-07-03, PO crux 확인): 이 파일은 CI에서 **의도적으로 제외**한다(silent
+아님 — design-ci-realdb-gap-8236bbc3 §1 참고). legacy(org_members/team_members 직접 write)
+↔ anchor(members/aliases) dual-write **전환 기간**을 검증하던 parity 테스트인데, 그 전환은
+이미 완료됐다 — baseline은 `team_members`를 앵커 테이블(members+project_access+
+agent_project_profiles) 위의 **읽기전용 VIEW**로 제공하고(INSTEAD OF 트리거 없음), 이
+파일의 픽스처(`INSERT INTO team_members` 등)는 VIEW에 직접 쓰기 시도라 구조적으로
+불가능하다. 즉 "cutover 완료로 obsolete"이지 "진짜 사각"이 아니다 — 이 파일이 원래
+검증하던 정합 불변식은 이제 VIEW 정의 자체가 구조적으로 보장한다(런타임 재검증 불요).
+스토리 8236bbc3 스코프 밖 — 포스트-컷오버 스키마로 재작성하거나 폐기하는 follow-up으로
+추적(기존 파일 유지, 무조건 skip으로 명시).
 """
 from __future__ import annotations
 
@@ -21,7 +29,11 @@ _ASYNC_URL = _RAW_URL.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
     "postgresql://", "postgresql+asyncpg://"
 )
 
-pytestmark = pytest.mark.skipif(not _ASYNC_URL, reason="parity real-DB URL 미설정 — skip")
+pytestmark = pytest.mark.skip(
+    reason="post-cutover baseline과 구조적 불일치(team_members=읽기전용 VIEW, dual-write "
+    "픽스처 무효) — story 8236bbc3 스코프 밖, 재작성/폐기 follow-up 추적. design-ci-realdb-"
+    "gap-8236bbc3 §1 참고."
+)
 
 
 @pytest.fixture

@@ -50,3 +50,6 @@ dev = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 timeout = 30
+markers = [
+    "destructive_schema: module calls Base.metadata.create_all()/drop_all() directly to build/tear down its own schema — must run against an isolated throwaway DB, never the shared alembic-migrated baseline DB (drop_all issues DROP TABLE against objects that are VIEWs in baseline, e.g. team_members, and corrupts the DB for every later test in the same session). See story 8236bbc3 / docs/design-ci-realdb-gap-8236bbc3.",
+]
