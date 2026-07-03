@@ -14,7 +14,9 @@ jobs:
   alembic-fresh-db:
     name: Alembic upgrade head (fresh DB)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # story 8236bbc3(2026-07-03): 217초 실측(전체 스위트 3391개 대다수, 비파괴 real-DB 84개
+    # 파일 포함) + 파괴적 54개 파일 격리 순회 오버헤드 버퍼. 규모상 샤딩 불요(설계 §1-D).
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -33,6 +35,15 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+    # story 8236bbc3: job 레벨로 승격(기존 스텝마다 중복 선언되던 5개 env var 통합) — 이 job의
+    # 모든 pytest 호출(비파괴/파괴 공통)이 동일 자격증명을 쓴다.
+    env:
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      PARITY_TEST_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
+      JWT_SECRET: ci-test-secret-at-least-32-chars-long
+      SECRET_KEY: ci-test-secret-at-least-32-chars-long
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,23 +57,7 @@ jobs:
       # and stamps revision 0096. This is the exact path a freshly-wiped prod takes.
       - name: alembic upgrade head (fresh DB → baseline)
         working-directory: backend
-        env:
-          ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
-          DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
-          JWT_SECRET: ci-test-secret-at-least-32-chars-long
-          SECRET_KEY: ci-test-secret-at-least-32-chars-long
         run: uv run alembic upgrade head
-
-      # 멀티계정 auth 보안 테스트는 real-DB 필수(backend-test 잡엔 PG 없음). 이 회귀(끝단 검증 부족)
-      # 재발 방지 위해 PG 백드 잡에서 실행 — auth resolve/switch IDOR/replay 회귀를 CI 가 가드.
-      - name: account resolve/switch real-DB tests
-        working-directory: backend
-        env:
-          ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
-          DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
-          JWT_SECRET: ci-test-secret-at-least-32-chars-long
-          SECRET_KEY: ci-test-secret-at-least-32-chars-long
-        run: uv run pytest tests/test_account_resolve_realdb.py -q
 
       - name: Verify tables created
         run: |
@@ -88,21 +83,18 @@ jobs:
           test "$(P "SELECT count(*) FROM pg_constraint WHERE conname='ck_asset_links_source_type'")" = "1"
           echo "baseline parity OK: team_members=VIEW, org_member_id nullable, seed present, 0097 applied, asset registry present, REVISION=0096"
 
-      # E-STORAGE-SSOT: asset registry IDOR/정합 게이트는 real-DB 가 필수(backend-test 잡엔 PG 없음).
-      # 이 PG 백드 잡에서 실행해 S2~S8 IDOR/멀티테넌시 회귀를 CI 가 잡도록 박는다(까심#4).
-      - name: asset registry real-DB tests (IDOR / sync / backfill / authorize)
+      # story 8236bbc3: 기존 "account resolve/switch"(1개 파일)·"asset registry"(13개 파일)
+      # 하드코딩 리스트 2스텝을 흡수 — real-DB 게이팅(ALEMBIC_DATABASE_URL/PARITY_TEST_DATABASE_URL)
+      # 전체(파일명 무관, destructive_schema 마커 제외 84개 파일)가 자기 skipif로 자동 활성화된다.
+      # 신규 real-DB 테스트 파일은 이 스텝에 아무것도 안 해도 자동 편입(누락 원천차단).
+      # test_member_ssot_parity_realdb.py는 파일 자체 무조건 skip(post-cutover 불일치 — 파일
+      # 상단 주석·design-ci-realdb-gap-8236bbc3 §1 참고).
+      - name: Real-DB tests (non-destructive, auto-discovered via marker)
         working-directory: backend
-        env:
-          ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
-          DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
-          JWT_SECRET: ci-test-secret-at-least-32-chars-long
-          SECRET_KEY: ci-test-secret-at-least-32-chars-long
-        run: uv run pytest tests/test_asset_registry_realdb.py tests/test_asset_canonical.py tests/test_attachment_authorize_asset_s3.py tests/test_conv_human_participant_realdb.py tests/test_doc_asset_backfill_realdb.py tests/test_release_notes_realdb.py tests/test_audit_apikey_parity_realdb.py tests/test_doc_gate_cascade_scope_realdb.py tests/test_doc_mutation_project_scope_idor_realdb.py tests/test_retro_mutation_project_scope_idor_realdb.py tests/test_retro_voted_by_me_realdb.py tests/test_retro_grouping_vote_count_realdb.py tests/test_retro_phase_transitions_realdb.py -q
+        run: uv run pytest -q -m "not destructive_schema"
 
       - name: Verify fresh DB reached head (baseline + incremental)
         working-directory: backend
-        env:
-          ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
         run: |
           set -e
           cur=$(uv run alembic current 2>/dev/null | grep -oE '^[0-9a-z_]+' | head -1)
@@ -114,11 +106,6 @@ jobs:
       # (The fresh-DB run above already advanced this DB to head via baseline + incremental.)
       - name: Existing-DB no-op (re-run upgrade head)
         working-directory: backend
-        env:
-          ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
-          DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
-          JWT_SECRET: ci-test-secret-at-least-32-chars-long
-          SECRET_KEY: ci-test-secret-at-least-32-chars-long
         run: |
           set -e
           out=$(uv run alembic upgrade head 2>&1); echo "$out"
@@ -127,14 +114,43 @@ jobs:
           fi
           echo "OK: existing-DB upgrade head is a no-op"
 
-      # NOTE: the member-ssot real-DB parity test (tests/test_member_ssot_parity_realdb.py) was
-      # removed from this gate. It validated the legacy→anchor *dual-write transition* and only
-      # ever ran against the create_all schema (team_members as a writable table). The baseline
-      # captures the COMPLETED cutover, where team_members is a read-only VIEW projecting the
-      # anchor tables (members + project_access + agent_project_profiles) with no INSTEAD OF
-      # triggers — so its fixtures (INSERT INTO team_members, agents without agent_config) are
-      # structurally incompatible. The view definition now guarantees the parity invariant by
-      # construction. Rewriting this test for the post-cutover schema is tracked as follow-up.
+      # story 8236bbc3: destructive_schema 마커 파일(Base.metadata.create_all/drop_all로 자체
+      # 스키마 직접 관리)은 위 alembic-migrated 공유 DB(sprintable_test)에서 절대 실행하지
+      # 않는다 — 실측(design doc §1-C): 단 1개 파일의 drop_all()이 DROP TABLE
+      # agent_project_profiles→ForeignKeyViolationError로 DB를 오염시키고 같은 세션 후속
+      # 테스트 전부가 연쇄 실패(116건). 파일마다 독립 throwaway DB(sprintable_test_iso)로
+      # 완전 격리 — sprintable_test는 절대 건드리지 않는다.
+      - name: Real-DB tests (destructive schema — isolated fresh DB per file)
+        working-directory: backend
+        run: |
+          set -uo pipefail
+          # ⭐set -e를 여기선 안 쓴다(로컬 e2e 시뮬레이션 실측 교훈, 2026-07-03) — 파일별
+          # 루프에서 첫 실패 파일이 스크립트를 즉시 죽이면 나머지 파일은 전혀 실행되지 않고
+          # 조용히 스킵된 것과 동일한 결과가 된다(이 스토리가 막으려는 바로 그 실패 유형).
+          # 전체 파일을 끝까지 돌리고 실패를 누적, 마지막에 하나라도 있으면 exit 1.
+          mapfile -t files < <(
+            uv run pytest -q -m destructive_schema --collect-only \
+              | grep -oE '^tests/[a-zA-Z0-9_]+\.py' | sort -u
+          )
+          echo "destructive files: ${#files[@]}"
+          failed_files=()
+          for f in "${files[@]}"; do
+            echo "::group::isolated $f"
+            PGPASSWORD=sprintable dropdb -h localhost -U sprintable --if-exists sprintable_test_iso
+            PGPASSWORD=sprintable createdb -h localhost -U sprintable sprintable_test_iso
+            PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test_iso \
+              -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+            ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+            PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+            DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+            uv run pytest -q "$f" || failed_files+=("$f")
+            echo "::endgroup::"
+          done
+          if [ "${#failed_files[@]}" -gt 0 ]; then
+            echo "FAILED files: ${failed_files[*]}"
+            exit 1
+          fi
+          echo "OK: all ${#files[@]} isolated destructive-schema files passed"
 
   backend-test:
     name: Backend pytest

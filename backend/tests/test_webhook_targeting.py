@@ -91,6 +91,7 @@ _requires_db = pytest.mark.skipif(
 
 
 @_requires_db
+@pytest.mark.xfail(strict=False, reason="story 8236bbc3 e2e 시뮬레이션서 order-dependent 플레이키 확인(배치별로 다른 에러 — asyncio loop RuntimeError 또는 webhook_configs.member_id NotNullViolation). story 18eefc31 트래킹.")
 @pytest.mark.anyio
 async def test_predicate_semantics_realdb():
     """실DB: member-bound는 project 독립으로 covered, broadcast(null)은 제외, 타 org 격리."""
