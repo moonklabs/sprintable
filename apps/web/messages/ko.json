@@ -1372,7 +1372,15 @@
     "hitlBanner": "추천일 뿐이다. 채택하면 다음 스프린트 가설 초안(proposed)으로 시드되고, 활성화·수정·폐기는 팀이 결정한다.",
     "evidenceStripLabel": "가설 현황",
     "evidenceStripEmpty": "연결된 가설이 없습니다",
-    "evidenceStripMore": "종료 단계에서 자세히 →"
+    "evidenceStripMore": "종료 단계에서 자세히 →",
+    "loadingHeadlineSynthesis": "가 이번 스프린트를 훑는 중…",
+    "loadingStep1Label": "과거 루프에서 유사 선례 회수",
+    "loadingStep1Desc": "비슷한 가설·결정·성과를 조직 기억에서 찾음",
+    "loadingStep2Label": "이번 스프린트 결과 종합",
+    "loadingStep2Desc": "가설별 검증/반증 + 상위 회고 신호에서 배운 것 도출",
+    "loadingStep3Label": "다음 검증 가설 도출",
+    "loadingStep3Desc": "다음 스프린트에서 검증해볼 만한 방향 제안",
+    "loadingTranslineSynthesis": "Sprintable AI가 참고 자료를 만드는 중입니다 · 판단은 당신이 합니다."
   },
   "share": {
     "share": "공유",
@@ -2807,7 +2815,11 @@
     "cockpitHypothesesTitle": "검증 중인 가설 {count}",
     "cockpitMeasureCountdown": "측정 예정 D-{days}",
     "cockpitMeasureOverdue": "측정 예정 — 종료 후 자동 채점",
-    "cockpitExperimentsLabel": "실험"
+    "cockpitExperimentsLabel": "실험",
+    "loadingHeadlineDraft": "가 초안을 짓는 중…",
+    "loadingStepDraftLabel": "가설 초안 짓는 중",
+    "loadingStepDraftDesc": "목표 맥락에서 statement·지표·측정 시점을 한 번에 제안",
+    "loadingTranslineDraft": "AI 초안입니다 · 검토·수정 후 확정은 당신이 합니다."
   },
   "presence": {
     "panelTitle": "팀 presence",
