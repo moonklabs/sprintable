@@ -60,7 +60,11 @@ describe('AiGenerationLoading (E-SPRINT-LOOP 81b0d17e — honest indeterminate)'
     );
     for (const markup of [synth, draft]) {
       expect(markup).not.toContain('data-variant="destructive"');
-      expect(markup).not.toMatch(/\btext-red-\d|\bbg-red-\d/);
+      // 까심 QA 적출(2026-07-03): 시맨틱 destructive 토큰(text-destructive/bg-destructive)은
+      // 별도 assert 필요 — red-* 유틸/data-variant 체크가 이 시맨틱 클래스명을 못 잡는다.
+      expect(markup).not.toMatch(/\btext-destructive\b/);
+      expect(markup).not.toMatch(/\bbg-destructive\b/);
+      expect(markup).not.toMatch(/\btext-red-\d|\bbg-red-\d|\bborder-red-\d/);
     }
   });
 

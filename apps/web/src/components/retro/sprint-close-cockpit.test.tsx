@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
-import { SprintCloseCockpit } from './sprint-close-cockpit';
+import { createHeuristicStepSchedule, SprintCloseCockpit } from './sprint-close-cockpit';
 import { EvidenceStrip } from './evidence-strip';
 import type { RetroHypothesisResult, RetroNextHypothesis, RetroSynthesis } from '@/services/retro-session';
 
@@ -141,5 +141,60 @@ describe('EvidenceStrip (thin in-progress-stage strip)', () => {
   it('renders dot counts once hypotheses are linked', () => {
     const markup = renderToStaticMarkup(wrap(<EvidenceStrip hypotheses={[VERIFIED, FALSIFIED, MEASURING]} />));
     expect(markup).toContain('가설 현황');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createHeuristicStepSchedule — 까심 QA 적출 test-gap fold(2026-07-03). honest
+// indeterminate 계약의 핵심 회귀막: 6초를 넘겨도 마지막 스텝(stepCount-1)에서 캡되고,
+// 그 이상은 절대 진행하지 않는다(거짓 완료 방지). createAutosaveScheduler(use-doc-sync.ts)와
+// 동형의 순수 스케줄 팩토리 패턴 — React 렌더 없이 fake timer로 직접 검증.
+// ---------------------------------------------------------------------------
+describe('createHeuristicStepSchedule (honest indeterminate 타이머 캡)', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('advances to index 1 at 1.2s, then to the last index at 6s (3-step retro synthesis)', () => {
+    const onAdvance = vi.fn();
+    createHeuristicStepSchedule(3, onAdvance);
+
+    vi.advanceTimersByTime(1199);
+    expect(onAdvance).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+    expect(onAdvance).toHaveBeenCalledWith(1);
+
+    vi.advanceTimersByTime(6000 - 1200 - 1);
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(1);
+    expect(onAdvance).toHaveBeenNthCalledWith(2, 2); // stepCount-1 = 2
+  });
+
+  it('never advances past the last index — no third call even far beyond 6s (거짓 완료 방지, honest 계약 핵심)', () => {
+    const onAdvance = vi.fn();
+    createHeuristicStepSchedule(3, onAdvance);
+
+    vi.advanceTimersByTime(60_000);
+    expect(onAdvance).toHaveBeenCalledTimes(2);
+    expect(onAdvance).toHaveBeenLastCalledWith(2);
+  });
+
+  it('schedules no timers at all for a 1-step surface (sprint-open draft) — stays active immediately, no fake "done" step', () => {
+    const onAdvance = vi.fn();
+    createHeuristicStepSchedule(1, onAdvance);
+
+    vi.advanceTimersByTime(60_000);
+    expect(onAdvance).not.toHaveBeenCalled();
+  });
+
+  it('cancel() stops any pending advance', () => {
+    const onAdvance = vi.fn();
+    const schedule = createHeuristicStepSchedule(3, onAdvance);
+    schedule.cancel();
+
+    vi.advanceTimersByTime(60_000);
+    expect(onAdvance).not.toHaveBeenCalled();
   });
 });

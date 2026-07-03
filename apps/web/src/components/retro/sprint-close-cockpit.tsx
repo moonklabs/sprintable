@@ -28,7 +28,21 @@ function useSynthesisLoadingSteps(t: ReturnType<typeof useTranslations>): AiGene
   ];
 }
 
-/** heuristic advance — 실측 근거 없는 판단값(핸드오프 관찰 ~9초 기준 비례 배분), 라이브 픽셀 시 조정 가능. */
+/**
+ * 순수 타이머 스케줄 팩토리(React 비의존 — `use-doc-sync.ts`의 `createAutosaveScheduler`와 동형
+ * 패턴, fake-timer 유닛테스트 용이). 실측 근거 없는 heuristic 판단값(핸드오프 관찰 ~9초 기준
+ * 비례 배분, 라이브 픽셀 시 조정 가능) — 단, **캡(stepCount-1)은 honest 계약의 핵심**: 6초
+ * 이후로는 절대 더 진행하지 않아 응답 도착 전까지 마지막 스텝이 계속 shimmer한다(거짓 완료 방지).
+ */
+export function createHeuristicStepSchedule(stepCount: number, onAdvance: (index: number) => void): { cancel: () => void } {
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  if (stepCount > 1) {
+    timers.push(setTimeout(() => onAdvance(1), 1200));
+    timers.push(setTimeout(() => onAdvance(stepCount - 1), 6000));
+  }
+  return { cancel: () => timers.forEach(clearTimeout) };
+}
+
 function useHeuristicStepIndex(generating: boolean, stepCount: number): number {
   const [index, setIndex] = useState(0);
   // generating 전환 시 리셋 — render-phase adjustment(SynthesisBlock의 syncedFor와 동일 패턴),
@@ -40,10 +54,8 @@ function useHeuristicStepIndex(generating: boolean, stepCount: number): number {
   }
   useEffect(() => {
     if (!generating) return;
-    const timers = stepCount > 1
-      ? [setTimeout(() => setIndex(1), 1200), setTimeout(() => setIndex(stepCount - 1), 6000)]
-      : [];
-    return () => timers.forEach(clearTimeout);
+    const schedule = createHeuristicStepSchedule(stepCount, setIndex);
+    return () => schedule.cancel();
   }, [generating, stepCount]);
   return index;
 }
