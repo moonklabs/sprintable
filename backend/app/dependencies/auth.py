@@ -29,9 +29,16 @@ class AuthContext:
 
 
 async def _persist_first_auth_seen(
-    member_id: uuid.UUID, org_id: str | None, project_id: str | None
+    member_id: uuid.UUID, org_id: str | None, project_id: str | None,
+    transport: str | None = None,
 ) -> None:
     """OB-4b: 첫 인증 1회 ``first_auth_seen`` — caller 세션 commit 여부와 **무관하게** persist.
+
+    E-MCP-OPT S5(#5): 이 인증 경로(API키)는 REST 전반의 공용 진입점이라 ``transport``(stdio/http)를
+    자체적으론 전혀 알 수 없다 — MCP 클라이언트(``sprintable_mcp``)가 자기 신고하는
+    ``X-MCP-Transport`` 헤더(``get_current_user``가 읽어 여기로 전달)만이 유일한 신호. 헤더 미전송
+    (구버전 클라이언트·MCP 아닌 직접 API 호출)이면 기존 하드코딩과 동일하게 ``"stdio"`` 로 폴백
+    (레거시 무회귀 — 관측용 필드일 뿐 인가에 쓰이지 않음).
 
     ⚠️ streaming auth(``get_current_user_streaming``)는 세션을 commit 없이 close 하므로 caller-session
     emit 은 rollback 으로 미persist(V2 통일로 에이전트 첫 인증이 ``/agent/stream`` 인 게 가장 흔함) →
@@ -65,14 +72,16 @@ async def _persist_first_auth_seen(
                 s, event="first_auth_seen", agent_id=member_id,
                 org_id=(uuid.UUID(org_id) if org_id else None),
                 project_id=(uuid.UUID(project_id) if project_id else None),
-                runtime="claude-code", transport="stdio",
+                runtime="claude-code", transport=(transport or "stdio"),
             )
             await s.commit()
     except Exception:
         logger.warning("first_auth_seen persist failed agent=%s", member_id, exc_info=True)
 
 
-async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
+async def _resolve_api_key(
+    raw_key: str, db: AsyncSession, transport: str | None = None,
+) -> AuthContext:
     """sk_live_* API key를 DB에서 조회하여 AuthContext 반환."""
     from app.models.api_key import ApiKey
     from app.models.team import TeamMember
@@ -181,7 +190,7 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
     # OB-4b seam(first_auth_seen): 최초 인증 1회. caller 세션(특히 streaming auth=commit 없음)에 의존하면
     # 미persist + dedup 깨짐(까심 RC-1) → 전용 committed 세션에서 atomic 처리(경로 무관·race-safe·무중단).
     if _first_auth_seen:
-        await _persist_first_auth_seen(member_id, org_id, project_id)
+        await _persist_first_auth_seen(member_id, org_id, project_id, transport=transport)
 
     return AuthContext(
         user_id=str(member_id),
@@ -203,11 +212,12 @@ async def _resolve_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     x_agent_api_key: str | None = Header(default=None, alias="x-agent-api-key"),
+    x_mcp_transport: str | None = Header(default=None, alias="X-MCP-Transport"),
     db: AsyncSession = Depends(get_db),
 ) -> AuthContext:
     # x-agent-api-key 헤더 우선 처리 (SSE 브릿지 직접 연결용)
     if x_agent_api_key and x_agent_api_key.startswith("sk_live_"):
-        return await _resolve_api_key(x_agent_api_key, db)
+        return await _resolve_api_key(x_agent_api_key, db, transport=x_mcp_transport)
 
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
@@ -216,7 +226,7 @@ async def get_current_user(
 
     # sk_live_* prefix → API key 경로 (DB 조회)
     if token.startswith("sk_live_"):
-        return await _resolve_api_key(token, db)
+        return await _resolve_api_key(token, db, transport=x_mcp_transport)
 
     # JWT 경로 (기존)
     try:
