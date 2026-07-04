@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -741,4 +741,133 @@ async def register_doc_asset(
     await session.commit()
     return DocAssetRegisterResponse(
         asset_id=asset_id, filename=body.filename, size=real_size, mime=body.mime
+    )
+
+
+class UploadDocAttachmentRequest(BaseModel):
+    """E-MCP-OPT S6: MCP(비-브라우저)용 JSON/base64 첨부 업로드 요청(chat/story와 동형)."""
+
+    content_base64: str
+    name: str
+    content_type: str
+
+    @field_validator("content_base64", "name", "content_type")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
+
+    @field_validator("content_type")
+    @classmethod
+    def _content_type_sane(cls, v: str) -> str:
+        from app.services import mcp_attachment_upload
+        if len(v) > mcp_attachment_upload.MAX_ATTACHMENT_NAME_LEN or any(ord(ch) < 32 for ch in v):
+            raise ValueError("invalid content_type")
+        return v
+
+
+class UploadDocAttachmentResponse(BaseModel):
+    asset_id: uuid.UUID
+    filename: str
+    size: int
+    mime: str | None = None
+    # E-MCP-OPT S6: 에이전트가 doc 임베드 마크업(TipTap file-node/image-node 계약)을 몰라도 되게
+    # MCP 패키지가 그대로 content 에 붙일 수 있는 완성 HTML 스니펫. doc-content-renderer.tsx/
+    # file-node.tsx/image-node.tsx 의 실 렌더 계약과 정확히 일치(uploader 무관 렌더 — FE 변경 0).
+    embed_snippet: str
+
+
+def _build_doc_attachment_embed_snippet(
+    *, asset_id: uuid.UUID, name: str, content_type: str, size: int,
+) -> str:
+    """FE `file-node.tsx`/`image-node.tsx` renderHTML 계약과 정확히 일치하는 마크업 조립.
+
+    이미지(mime image/*) → `<img data-asset-id data-filename data-size data-mime-type alt>`.
+    그 외 → `<div data-type="fileAttachment" data-filename data-size data-mime-type data-asset-id>`.
+    파일명은 doc content(HTML)에 그대로 꽂히므로 attribute-context escape 필수(주입 방지).
+    """
+    import html as _html
+
+    safe_name = _html.escape(name, quote=True)
+    safe_mime = _html.escape(content_type or "application/octet-stream", quote=True)
+    if (content_type or "").lower().startswith("image/"):
+        return (
+            f'<img data-asset-id="{asset_id}" data-filename="{safe_name}" '
+            f'data-size="{size}" data-mime-type="{safe_mime}" alt="{safe_name}">'
+        )
+    return (
+        f'<div data-type="fileAttachment" data-filename="{safe_name}" data-size="{size}" '
+        f'data-mime-type="{safe_mime}" data-asset-id="{asset_id}"></div>'
+    )
+
+
+@router.post(
+    "/{doc_id}/attachments", response_model=UploadDocAttachmentResponse, status_code=201,
+)
+async def upload_doc_attachment(
+    doc_id: uuid.UUID,
+    body: UploadDocAttachmentRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> UploadDocAttachmentResponse:
+    """E-MCP-OPT S6: 비-브라우저 클라이언트(MCP)용 JSON/base64 doc 첨부 업로드 + 즉시 등록.
+
+    `register_doc_asset`(FE 2단계: FE putObject → 이 register)와 달리 MCP 는 base64 업로드+등록을
+    한 호출로 합친다(FE 세션 없이 base64 만으로 완결). 인가/등록 로직은 `register_doc_asset`과 동일
+    (has_project_access·sync_attachment_assets) — doc 은 업로드=등록이 곧 종결 액션이라(story/chat과
+    달리 별도 "메시지 생성" 시점이 없음) S5식 집계 재검증이 불필요하다(이 한 호출 자체가 그 지점).
+    """
+    from app.models.doc import Doc
+    from app.services import mcp_attachment_upload
+    from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
+    from app.services.member_resolver import resolve_member
+    from app.services.project_auth import has_project_access
+    from app.services.storage import get_storage_provider
+
+    doc = (await session.execute(
+        select(Doc).where(Doc.id == doc_id, Doc.org_id == org_id, Doc.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    if not await has_project_access(session, uuid.UUID(auth.user_id), doc.project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
+    data = mcp_attachment_upload.decode_json_attachment(body.content_base64)
+    safe_name = mcp_attachment_upload.safe_attachment_filename(body.name)
+    object_path = mcp_attachment_upload.build_mcp_object_path(
+        org_id=org_id, project_id=doc.project_id, kind="doc", resource_id=doc_id, safe_name=safe_name,
+    )
+
+    uploaded = await get_storage_provider().put_object(
+        DEFAULT_CONTAINER, object_path, data, content_type=body.content_type,
+    )
+    if not uploaded:
+        raise HTTPException(status_code=502, detail="upload failed")
+
+    created_by: uuid.UUID | None = None
+    try:
+        created_by = (await resolve_member(auth, org_id, session)).id
+    except Exception:  # noqa: BLE001 — created_by 는 비필수(asset.created_by nullable).
+        created_by = None
+
+    att = {"url": object_path, "name": body.name, "content_type": body.content_type, "size": len(data)}
+    url_map = await sync_attachment_assets(
+        session, org_id=org_id, project_id=doc.project_id, source_type="doc",
+        source_id=doc_id, attachments=[att], created_by=created_by,
+    )
+    asset_id = url_map.get(object_path)
+    if asset_id is None:
+        # 우리가 방금 쓴 path 가 우리가 만든 접두를 못 지나면 path_in_source_scope 버그(방어적 500) —
+        # register_doc_asset 의 400(client 경로 스푸핑)과 원인이 다르므로 구분한다.
+        raise HTTPException(status_code=500, detail="asset registration failed for uploaded object")
+    await session.commit()
+
+    return UploadDocAttachmentResponse(
+        asset_id=asset_id, filename=body.name, size=len(data), mime=body.content_type,
+        embed_snippet=_build_doc_attachment_embed_snippet(
+            asset_id=asset_id, name=body.name, content_type=body.content_type, size=len(data),
+        ),
     )

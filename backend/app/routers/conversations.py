@@ -1,11 +1,8 @@
 """E-EVENTBUS P7-A S37: conversations 테이블 + Chat API."""
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 import logging
-import re
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -29,7 +26,8 @@ from app.routers.events import _push_to_agent, publish_event
 from app.schemas.attachment import validate_attachment_url
 from app.services import chat_presence
 from app.services.agent_runtime import supports_deterministic_command
-from app.services.asset_registry import DEFAULT_CONTAINER, canonical_object_path, sync_attachment_assets
+from app.services import mcp_attachment_upload
+from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.services.command_classifier import classify_command
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import (
@@ -586,40 +584,16 @@ class ConversationResponse(BaseModel):
 _MAX_ATTACHMENTS = 10
 _MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB (메타 sanity 상한)
 
-# E-MCP-OPT S2(bbfd24ba): MCP(비-브라우저) 클라이언트용 JSON/base64 업로드 — 스샷/작은 문서가
-# 실사용(대용량 아님). FE-proxy 100MB 캡과 별개로 더 작게(Cloud Run HTTP/1 32MiB 요청 캡 대비
-# 여유 마진). sprintable_mcp 의 동일 상수(tools/chat.py `_MCP_MAX_ATTACHMENT_BYTES`)와 정합.
-_MAX_JSON_ATTACHMENT_UPLOAD_SIZE = 2 * 1024 * 1024  # 2MiB decoded
-_MAX_ATTACHMENT_NAME_LEN = 255
-_SAFE_ATTACHMENT_NAME_RE = re.compile(r"[^\w.\-]+")
-# E-MCP-OPT S5(#2, 까심 QA): 위 per-file 2MiB 캡은 걸지만 "선언 한도"(5개/6MiB 합계 — sprintable_mcp
-# `tools/chat.py` 의 client-side 가드와 동일 값)는 이 엔드포인트가 서버서 강제하지 않았다 —
-# participant 가 여러 번 개별 호출로(각 ≤2MiB) 메시지당 최대 10개(기존 `_MAX_ATTACHMENTS`)×2MiB≈
-# 20MiB 를 모아 SSOT 정책을 우회할 수 있었다(보안 취약점 아님·기존 message-level 캡으로 bounded — SSOT
-# 원칙 위반). object_path 에 `mcp/` 세그먼트를 심어 이 엔드포인트로 실제 업로드된 첨부만 식별하고,
-# `send_message` 가 그 부분집합에 한해 선언 한도를 재검증한다(새 테이블/시간창 추적 0 — 메시지 생성
-# 시점 1회 재검증으로 충분·메시지 없이 업로드만 반복하는 건 orphan blob 만 남길 뿐 이 한도와 무관).
-_MCP_MAX_ATTACHMENTS = 5
-_MCP_MAX_TOTAL_ATTACHMENT_BYTES = 6 * 1024 * 1024  # 6MiB decoded
+# E-MCP-OPT S2(bbfd24ba)/S6: MCP(비-브라우저) 클라이언트용 JSON/base64 업로드 공용 프리미티브
+# (S6 부터 story/doc 도 공유 — `app/services/mcp_attachment_upload.py` 참조).
+_MAX_JSON_ATTACHMENT_UPLOAD_SIZE = mcp_attachment_upload.MAX_JSON_ATTACHMENT_UPLOAD_SIZE
+_MAX_ATTACHMENT_NAME_LEN = mcp_attachment_upload.MAX_ATTACHMENT_NAME_LEN
+_MCP_MAX_ATTACHMENTS = mcp_attachment_upload.MCP_MAX_ATTACHMENTS
+_MCP_MAX_TOTAL_ATTACHMENT_BYTES = mcp_attachment_upload.MCP_MAX_TOTAL_ATTACHMENT_BYTES
 
 
 def _is_mcp_upload_object_path(url: str) -> bool:
-    """이 url 이 `upload_conversation_attachment`(MCP JSON 업로드)로 실제 생성된 객체 경로인지.
-
-    그 엔드포인트만 `org/<org>/project/<project>/chat/<conversation>/mcp/<file>` 형태(6번째
-    segment=``mcp``)로 서버가 직접 object_path 를 구성한다 — client 는 ``name``(파일명 suffix)
-    외에는 경로에 관여할 수 없어 이 segment 를 조작해 자신에게 더 엄격한 검사를 켜는 것 외엔
-    스푸핑 이득이 없다(false-positive 는 harmless·false-negative 는 발생하지 않음 — 이 엔드포인트가
-    쓰는 유일한 shape).
-    """
-    canon = canonical_object_path(url, DEFAULT_CONTAINER)
-    if not canon:
-        return False
-    parts = canon.split("/")
-    return (
-        len(parts) >= 7
-        and parts[0] == "org" and parts[2] == "project" and parts[4] == "chat" and parts[6] == "mcp"
-    )
+    return mcp_attachment_upload.is_mcp_upload_object_path(url, kind="chat")
 
 
 class MessageAttachment(BaseModel):
@@ -1526,11 +1500,6 @@ async def send_message(
     return response
 
 
-def _safe_attachment_filename(name: str) -> str:
-    safe = _SAFE_ATTACHMENT_NAME_RE.sub("_", name.strip())[-128:]
-    return safe or "file"
-
-
 @router.post(
     "/{conversation_id}/attachments",
     status_code=201,
@@ -1569,26 +1538,17 @@ async def upload_conversation_attachment(
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
 
-    try:
-        data = base64.b64decode(body.content_base64, validate=True)
-    except (binascii.Error, ValueError):
-        raise HTTPException(status_code=400, detail="content_base64 must be valid base64")
-    if not data:
-        raise HTTPException(status_code=400, detail="attachment must not be empty")
-    if len(data) > _MAX_JSON_ATTACHMENT_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail=f"attachment too large (max {_MAX_JSON_ATTACHMENT_UPLOAD_SIZE} bytes)",
-        )
+    data = mcp_attachment_upload.decode_json_attachment(body.content_base64)
 
-    safe_name = _safe_attachment_filename(body.name)
+    safe_name = mcp_attachment_upload.safe_attachment_filename(body.name)
     # S7 namespace — FE 업로드 라우트(apps/web .../conversations/[id]/attachments/route.ts)와 동일
     # 접두(org/<org>/project/<project>/chat/<conv>/...). path_in_source_scope 는 이 접두까지만
     # segment-match 하므로(그 뒤 세그먼트 수는 안 봄) 추가된 `mcp/` 세그먼트는 IDOR 가드/read-authorize
     # 통과에 영향 없다 — E-MCP-OPT S5(#2): 이 엔드포인트로 실제 생성된 객체만 식별하는 마커
     # (`_is_mcp_upload_object_path`)로 send_message 의 선언 한도 재검증이 소비한다.
-    object_path = (
-        f"org/{org_id}/project/{conv.project_id}/chat/{conversation_id}/mcp/{uuid.uuid4()}-{safe_name}"
+    object_path = mcp_attachment_upload.build_mcp_object_path(
+        org_id=org_id, project_id=conv.project_id, kind="chat", resource_id=conversation_id,
+        safe_name=safe_name,
     )
 
     uploaded = await get_storage_provider().put_object(
