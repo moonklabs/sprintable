@@ -17,8 +17,17 @@ from __future__ import annotations
 from alembic import op
 
 revision = "0148"
-down_revision = "0147"
-branch_labels = None
+# story bda4beac: 원래 down_revision="0147"(pricing 시드) — 0148은 pricing과 무관한
+# core 버그 fix(org_subscriptions는 baseline 테이블·같은 model unique=True 선언이 main에도
+# 있음)인데 0146/0147(진짜 ee 전용) 사이에 순차 배치된 탓에 main promotion 시 함께
+# 누락(#bda4beac 발견 — main엔 0146/0147 파일 자체가 없어 down_revision="0147" 참조가
+# KeyError로 그래프 구성 자체를 실패시켜 prod 승격이 막혔다). 0145(공통 core 조상) 직계로
+# 재부모해 main 단독으로도 승격 가능하게 근본수정 — main 체인은 이제 0145→0148→0149→...
+# 로 pricing 파일 존재 여부와 완전 무관해진다. develop/ee 환경은 이 재부모로 dual-head가
+# 된다(core head 0155+ · ee_pricing head 0147) — `alembic upgrade heads`(복수형)로 전환
+# 필요, 콜사이트는 ci.yml/migrate.sh/test_migrate_env.py 등에서 함께 갱신.
+down_revision = "0145"
+branch_labels = ("core",)
 depends_on = None
 
 

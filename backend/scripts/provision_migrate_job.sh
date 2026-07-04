@@ -5,7 +5,8 @@
 # 이 스크립트는 dev/prod 양쪽 마이그 잡을 동일 패턴으로 재현 가능하게 생성/갱신한다.
 #
 # 잡 구성 (라이브 sprintable-migrate-dev 미러):
-#   - command         : /app/scripts/migrate.sh  (alembic upgrade head)
+#   - command         : /app/scripts/migrate.sh  (alembic upgrade heads — story bda4beac,
+#                        ee_pricing 별도 head 분기 후 복수형으로 전환)
 #   - ALEMBIC_DATABASE_URL : 시크릿 ALEMBIC_DATABASE_URL_<ENV> (Private-IP psycopg2)
 #   - cloudsql-instances   : env별 인스턴스 (prod→sprintable-prod, dev→sprintable-dev)
 #   - network/vpc-egress   : default / private-ranges-only

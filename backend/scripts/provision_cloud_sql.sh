@@ -143,8 +143,8 @@ print_proxy_instructions() {
 3. FastAPI .env 설정:
    DATABASE_URL=postgresql+asyncpg://sprintable:PASSWORD@127.0.0.1:5433/sprintable
 
-4. Alembic 마이그레이션 적용:
-   alembic upgrade head
+4. Alembic 마이그레이션 적용(story bda4beac 이후 복수형 — ee_pricing 별도 head 분기):
+   alembic upgrade heads
 
 5. 연결 검증:
    curl http://localhost:8000/api/v2/health

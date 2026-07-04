@@ -88,7 +88,7 @@ Workflow templates let contributors add new multi-step automation patterns witho
 3. Use `step_1`, `step_2`, ... as `role_ref` placeholders — they are resolved at apply time.
 4. Set `is_system: false` for community templates (users can delete them).
 5. Write a pytest test in `backend/tests/test_e2e_workflow_template.py` asserting the correct rule count after `apply_template`.
-6. Run `alembic upgrade head` locally and verify `GET /api/v2/workflow-templates` returns your new template.
+6. Run `alembic upgrade heads` locally and verify `GET /api/v2/workflow-templates` returns your new template.
 
 ### Template schema quick reference
 
