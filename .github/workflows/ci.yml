@@ -55,9 +55,11 @@ jobs:
 
       # Empty DB → alembic/env.py provisions from the baseline snapshot (schema + global seed)
       # and stamps revision 0096. This is the exact path a freshly-wiped prod takes.
-      - name: alembic upgrade head (fresh DB → baseline)
+      # story bda4beac: 0148(core) 재부모 후 이 checkout(develop, ee_pricing 포함)은 dual-head
+      # (core 0155+ · ee_pricing 0147) — `head`(단수)는 이제 모호해 `heads`(복수)로 전환.
+      - name: alembic upgrade heads (fresh DB → baseline)
         working-directory: backend
-        run: uv run alembic upgrade head
+        run: uv run alembic upgrade heads
 
       - name: Verify tables created
         run: |
@@ -93,26 +95,32 @@ jobs:
         working-directory: backend
         run: uv run pytest -q -m "not destructive_schema"
 
-      - name: Verify fresh DB reached head (baseline + incremental)
+      # story bda4beac: dual-head(core+ee_pricing) checkout에서 "current == 단일 head" 비교는
+      # 항상 실패한다(current가 2행이라 head=1건과 부분일치 안 됨) — 두 head 집합이 정확히
+      # 일치하는지(comm -3, 차집합 0행) 비교로 교체. 단일-head 컨텍스트(main)에서도 그대로
+      # 성립(양쪽 다 1행이면 차집합도 0행).
+      - name: Verify fresh DB reached heads (baseline + incremental)
         working-directory: backend
         run: |
           set -e
-          cur=$(uv run alembic current 2>/dev/null | grep -oE '^[0-9a-z_]+' | head -1)
-          head=$(uv run alembic heads 2>/dev/null | grep -oE '^[0-9a-z_]+' | head -1)
-          echo "current=$cur head=$head"
-          test -n "$cur" && test "$cur" = "$head"  # fresh DB is AT head, not stuck at baseline
+          cur=$(uv run alembic current 2>/dev/null | grep -oE '^[0-9a-z_]+' | sort)
+          heads=$(uv run alembic heads 2>/dev/null | grep -oE '^[0-9a-z_]+' | sort)
+          echo "current=$cur"
+          echo "heads=$heads"
+          test -n "$cur"  # fresh DB is not stuck at baseline(0096) — reached at least one head
+          diff <(echo "$cur") <(echo "$heads")  # current head set == full head set(전 head 도달)
 
-      # existing-DB path: a DB already at head must be a pure no-op — no migration re-runs.
-      # (The fresh-DB run above already advanced this DB to head via baseline + incremental.)
-      - name: Existing-DB no-op (re-run upgrade head)
+      # existing-DB path: a DB already at heads must be a pure no-op — no migration re-runs.
+      # (The fresh-DB run above already advanced this DB to heads via baseline + incremental.)
+      - name: Existing-DB no-op (re-run upgrade heads)
         working-directory: backend
         run: |
           set -e
-          out=$(uv run alembic upgrade head 2>&1); echo "$out"
+          out=$(uv run alembic upgrade heads 2>&1); echo "$out"
           if echo "$out" | grep -q "Running upgrade"; then
-            echo "FAIL: migrations re-ran on a DB already at head (existing-DB path not a no-op)"; exit 1
+            echo "FAIL: migrations re-ran on a DB already at heads (existing-DB path not a no-op)"; exit 1
           fi
-          echo "OK: existing-DB upgrade head is a no-op"
+          echo "OK: existing-DB upgrade heads is a no-op"
 
       # story 8236bbc3: destructive_schema 마커 파일(Base.metadata.create_all/drop_all로 자체
       # 스키마 직접 관리)은 위 alembic-migrated 공유 DB(sprintable_test)에서 절대 실행하지
@@ -151,6 +159,70 @@ jobs:
             exit 1
           fi
           echo "OK: all ${#files[@]} isolated destructive-schema files passed"
+
+  # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
+  # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
+  # 못 잡는다(실제로 못 잡아서 prod 승격이 롤백된 그 사고). PR base가 main일 때만 도는 이
+  # 프리플라이트가 "이 PR이 머지되면 main이 실제로 갖게 될 파일셋"으로 fresh-DB upgrade heads
+  # 를 실증한다 — develop→main 승격 PR은 그 시점에 이미 main-후보 파일셋으로 체크아웃되므로
+  # (선별 제외가 그 PR 자체의 diff), PR HEAD 그대로 체크아웃하면 된다.
+  main-alembic-preflight:
+    name: Main Alembic preflight (fresh DB, main file set)
+    if: github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_main_preflight
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_main_preflight
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+
+      # ee_pricing(0146/0147)이 main 승격分에 섞여 들어왔다면 여기서 즉시 실패 — main은
+      # 항상 단일 core head(0148 직계)여야 한다.
+      - name: Assert main migration file set (no ee_pricing, core 0148 present)
+        working-directory: backend
+        run: |
+          set -e
+          test -f alembic/versions/0148_org_subscriptions_org_id_unique.py
+          if [ -f alembic/versions/0146_pricing_versions.py ] || [ -f alembic/versions/0147_pricing_versions_live_seed.py ]; then
+            echo "FAIL: ee_pricing migration(s) present in a main-bound file set"; exit 1
+          fi
+          echo "OK: main file set has 0148(core), no ee_pricing"
+
+      - name: Build revision graph (single head expected)
+        working-directory: backend
+        run: |
+          set -e
+          heads=$(uv run alembic heads 2>/dev/null | grep -oE '^[0-9a-z_]+')
+          n=$(echo "$heads" | grep -c .)
+          echo "heads=$heads (count=$n)"
+          test "$n" = "1"  # main never carries the ee_pricing branch — exactly one head
+
+      - name: Fresh-DB upgrade heads (main file set)
+        working-directory: backend
+        run: uv run alembic upgrade heads
 
   backend-test:
     name: Backend pytest
