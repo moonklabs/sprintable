@@ -130,7 +130,12 @@ async def build_hypotheses_items(
             "target": md.get("target"),
             "direction": md.get("direction"),
             "actual": actual,
-            "href": f"/hypotheses/{h.id}",
+            "measure_after": h.measure_after,
+            # story 5feac498: sprints.py `_flat_hypothesis`(story fbf1c14b)와 shape 정합 — FE에
+            # hypothesis 상세 페이지 라우트가 없어(API 프록시만 존재) 이 추측 URL은 죽은 링크였다
+            # (그 story의 PO crux로 href=None 확정). FE가 이 embed 필드를 소비하려면(별도
+            # /sprints/{id}/hypotheses 재조회 제거) 두 경로가 동일 shape이어야 한다.
+            "href": None,
         })
     return items
 

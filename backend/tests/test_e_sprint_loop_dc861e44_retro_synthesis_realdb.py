@@ -126,7 +126,9 @@ async def test_hypotheses_embed_flattens_sprint_linked_hypothesis():
         assert h.target == 50
         assert h.direction == "up"
         assert h.actual == 42
-        assert h.href == f"/hypotheses/{HYP}"
+        # story 5feac498: sprints.py shape 정합 — href는 FE 상세페이지 부재로 fbf1c14b PO
+        # crux가 None 확정한 것과 동일하게 정정(retro-session embed를 FE가 재조회 없이 소비).
+        assert h.href is None
         assert resp.synthesis is None
         assert resp.next_hypotheses is None
     finally:
