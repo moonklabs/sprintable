@@ -11,8 +11,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from sprintable_mcp.tools import attachments as attachments_mod
 from sprintable_mcp.tools import chat as chat_mod
-from sprintable_mcp.tools.chat import SendChatInput, _upload_attachments, _validate_attachment, send_chat_message
+from sprintable_mcp.tools.attachments import upload_attachments as _upload_attachments
+from sprintable_mcp.tools.attachments import validate_attachment as _validate_attachment
+from sprintable_mcp.tools.chat import SendChatInput, send_chat_message
 
 
 @pytest.fixture
@@ -53,7 +56,7 @@ def test_validate_attachment_empty_content_base64_raises():
 
 
 def test_validate_attachment_oversized_rejected_before_full_decode():
-    too_big = _b64(chat_mod._MAX_ATTACHMENT_BYTES + 1)
+    too_big = _b64(attachments_mod.MAX_ATTACHMENT_BYTES + 1)
     with pytest.raises(ValueError, match="too large"):
         _validate_attachment({"content_base64": too_big, "name": "a", "content_type": "t"}, 0)
 
@@ -61,28 +64,28 @@ def test_validate_attachment_oversized_rejected_before_full_decode():
 # ── _upload_attachments ───────────────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_upload_attachments_empty_returns_empty():
-    assert await _upload_attachments("conv-1", None) == []
-    assert await _upload_attachments("conv-1", []) == []
+    assert await _upload_attachments("/api/v2/conversations/conv-1/attachments", None) == []
+    assert await _upload_attachments("/api/v2/conversations/conv-1/attachments", []) == []
 
 
 @pytest.mark.anyio
 async def test_upload_attachments_too_many_rejected():
-    atts = [{"content_base64": _b64(1), "name": f"{i}", "content_type": "t"} for i in range(chat_mod._MAX_ATTACHMENTS + 1)]
+    atts = [{"content_base64": _b64(1), "name": f"{i}", "content_type": "t"} for i in range(attachments_mod.MAX_ATTACHMENTS + 1)]
     with pytest.raises(ValueError, match="too many attachments"):
-        await _upload_attachments("conv-1", atts)
+        await _upload_attachments("/api/v2/conversations/conv-1/attachments", atts)
 
 
 @pytest.mark.anyio
 async def test_upload_attachments_total_size_exceeded_rejected_before_any_network_call():
     """총량 초과는 업로드 시작 前 전부 검증되어 걸러진다 — client.post 가 단 한 번도 안 불림
     (마지막 파일에서만 드러나는 초과였다면 앞선 파일들이 실제 업로드→orphan 되는 낭비 없음)."""
-    per_file = chat_mod._MAX_ATTACHMENT_BYTES
+    per_file = attachments_mod.MAX_ATTACHMENT_BYTES
     atts = [{"content_base64": _b64(per_file), "name": f"{i}", "content_type": "t"} for i in range(4)]
-    assert len(atts) <= chat_mod._MAX_ATTACHMENTS
-    assert per_file * 4 > chat_mod._MAX_TOTAL_ATTACHMENT_BYTES
+    assert len(atts) <= attachments_mod.MAX_ATTACHMENTS
+    assert per_file * 4 > attachments_mod.MAX_TOTAL_ATTACHMENT_BYTES
     with patch.object(chat_mod.client, "post", new=AsyncMock()) as m:
         with pytest.raises(ValueError, match="total too large"):
-            await _upload_attachments("conv-1", atts)
+            await _upload_attachments("/api/v2/conversations/conv-1/attachments", atts)
         m.assert_not_awaited()
 
 
@@ -91,7 +94,7 @@ async def test_upload_attachments_calls_endpoint_per_file():
     atts = [{"content_base64": _b64(5), "name": "a.png", "content_type": "image/png"}]
     fake_result = {"url": "org/o/project/p/chat/c/x-a.png", "name": "a.png", "content_type": "image/png", "size": 5}
     with patch.object(chat_mod.client, "post", new=AsyncMock(return_value=fake_result)) as m:
-        result = await _upload_attachments("conv-1", atts)
+        result = await _upload_attachments("/api/v2/conversations/conv-1/attachments", atts)
         assert result == [fake_result]
         m.assert_awaited_once_with(
             "/api/v2/conversations/conv-1/attachments",

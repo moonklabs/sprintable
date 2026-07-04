@@ -6,6 +6,7 @@ from mcp.types import CallToolResult, TextContent
 from ..api_client import client
 from ..response import err, ok
 from ..schemas import SprintableInput, StoryPoints, StoryPriority, StoryStatus
+from .attachments import upload_attachments
 
 
 class ListStoriesInput(SprintableInput):
@@ -36,6 +37,10 @@ class UpdateStoryInput(SprintableInput):
     acceptance_criteria: str | None = None
     assignee_id: str | None = None
     epic_id: str | None = None
+    # [{content_base64, name, content_type}, ...] — 스샷/작은 문서(최대 5개·파일당 2MiB·총 6MiB).
+    # 기존 첨부에 **추가**된다(PATCH attachments 는 서버측 full-replace 라 update_story 가 먼저 기존
+    # 첨부를 읽어 병합 — 새 첨부가 기존 걸 지우지 않는다).
+    attachments: list[dict] | None = None
 
 
 class DeleteStoryInput(SprintableInput):
@@ -131,6 +136,16 @@ async def update_story(args: UpdateStoryInput) -> list[TextContent]:
     if args.epic_id is not None:
         updates["epic_id"] = args.epic_id
     try:
+        if args.attachments:
+            uploaded = await upload_attachments(
+                f"/api/v2/stories/{args.story_id}/attachments", args.attachments,
+            )
+            if uploaded:
+                # PATCH attachments 는 서버측 full-replace(교체 SSOT 재동기화) — 기존 첨부를 먼저
+                # 읽어 병합해야 새 첨부가 기존 걸 지우지 않는다.
+                current = await client.get(f"/api/v2/stories/{args.story_id}")
+                existing = current.get("attachments") or [] if isinstance(current, dict) else []
+                updates["attachments"] = existing + uploaded
         return ok(await client.patch(f"/api/v2/stories/{args.story_id}", json=updates))
     except Exception as exc:
         return err(str(exc))
