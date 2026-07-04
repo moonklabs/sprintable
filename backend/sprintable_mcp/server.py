@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent
+from mcp.types import Tool as MCPTool
 from pydantic import BaseModel
 from pydantic.fields import PydanticUndefined
 
@@ -257,7 +258,29 @@ _transport_security = TransportSecuritySettings(
     allowed_origins=_allowed_origins,
 )
 
-mcp = FastMCP(
+# E-MCP-OPT S1: hosted(http) tools/list 요청별 scope 필터. FastMCP.__init__ → _setup_handlers()가
+# `self._mcp_server.list_tools()(self.list_tools)`로 **구성 시점 bound method**를 저수준 핸들러에
+# 등록한다 — 구성 後 인스턴스 몽키패치(mcp.list_tools = fn)는 이미 캡처된 참조에 안 먹는다(실측 확인:
+# 코덱스 + 별도 독립 재현 스크립트 둘 다). 서브클래스 오버라이드는 __init__ 이전에 존재해 self.list_tools
+# 속성조회(MRO)가 오버라이드로 해소되므로 저수준 핸들러가 정확히 이걸 호출한다 — 유일하게 먹는 방식.
+#
+# stdio는 부팅 시 filter_tools_by_scope(레지스트리 destructive mutation)로 이미 걸러진 목록만 남아
+# 있어 이 필터가 다시 돌아도 무해한 no-op(전 도구 이미 허용된 것들)이지만, mcp_transport 가드로 아예
+# 스킵해 시맨틱을 명확히 하고 매 stdio list_tools 호출마다 불필요한 manifest 캐시 조회도 피한다.
+# fail-open(scope=None → 비파괴셋)은 call-time(_flat wrapper)과 동일 철학 — 백엔드가 최종 SSOT라 list는
+# degrade(더 보여줌)해도 call은 여전히 403 차단.
+class SprintableFastMCP(FastMCP):
+    async def list_tools(self) -> list[MCPTool]:
+        tools = await super().list_tools()
+        if (settings.mcp_transport or "stdio").strip().lower() != "http":
+            return tools
+
+        _eff_key = _api_key_override.get() or settings.agent_api_key
+        _scope = await _load_scope_for(_eff_key)
+        return [tool for tool in tools if is_tool_allowed(tool.name, _scope)]
+
+
+mcp = SprintableFastMCP(
     name="sprintable-mcp-python",
     instructions=(
         "Sprintable Python MCP server. "
