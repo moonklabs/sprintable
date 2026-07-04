@@ -140,7 +140,7 @@ Set `is_system = false` so users can delete it.
 Add a new entry to `SEED_TEMPLATES` in `backend/alembic/versions/0016_add_workflow_templates.py` and run:
 
 ```bash
-cd backend && alembic upgrade head
+cd backend && alembic upgrade heads
 ```
 
 ### Template Schema Reference

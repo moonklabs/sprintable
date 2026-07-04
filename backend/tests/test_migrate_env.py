@@ -88,4 +88,6 @@ def test_migrate_sh_exists_and_has_alembic_check():
     assert "ALEMBIC_DATABASE_URL" in content
     assert "exit 1" in content
     assert "cd /app" in content
-    assert "alembic upgrade head" in content
+    # story bda4beac: ee_pricing(0146/0147)이 core 체인과 분기된 별도 head라 `heads`(복수)로
+    # 전환 — dual-head(develop/ee)·single-head(main) 양쪽에서 안전.
+    assert "alembic upgrade heads" in content
