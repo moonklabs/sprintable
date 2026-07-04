@@ -133,11 +133,18 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
 
   useEffect(() => {
     if (!agentId || !apiKey || !transport) return;
-    setBeSteps(null); // transport 전환 시 이전 transport의 레일 상태가 새 레일에 새는 것 방지
     void pollStatus(transport);
     const iv = setInterval(() => void pollStatus(transport), 2500);
     return () => clearInterval(iv);
   }, [agentId, apiKey, transport, pollStatus]);
+
+  // 까심 QA S5#3: setBeSteps(null)을 effect(커밋 後 실행)에 두면 탭 클릭 직후 한 프레임
+  // 구 transport의 rail이 새 railOrder로 잘못 그려지는 깜빡임이 생김 — 클릭 핸들러에서
+  // setTransport와 같은 배치로 동기 호출해 그 프레임 자체를 없앤다.
+  const selectTransport = (next: Transport) => {
+    setBeSteps(null);
+    setTransport(next);
+  };
 
   // OB-1 connection-artifact = 아티팩트 SSOT(구조+backend-direct URL). OB-1 라이브라 정상응답 디폴트.
   // 실패 시 클라빌드로 메우지 않고(§2 CF env 노출 금지·AC3) pending+재시도 유지.
@@ -290,7 +297,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
       <div className="flex gap-0 rounded-md border border-border bg-muted p-[3px]">
         <button
           type="button"
-          onClick={() => setTransport('http')}
+          onClick={() => selectTransport('http')}
           disabled={!transport}
           className={cn(
             'flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors',
@@ -303,7 +310,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
         </button>
         <button
           type="button"
-          onClick={() => setTransport('stdio')}
+          onClick={() => selectTransport('stdio')}
           disabled={!transport}
           className={cn(
             'flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors',
