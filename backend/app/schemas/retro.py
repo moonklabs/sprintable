@@ -55,7 +55,12 @@ class RetroHypothesisItem(BaseModel):
     target: float | None = None
     direction: str | None = None
     actual: float | None = None  # outcome_result.actual, 미확정이면 None(측정중)
-    href: str
+    measure_after: datetime | None = None
+    # story 5feac498: sprints.py `SprintHypothesisItem`(story fbf1c14b)과 동일 shape — FE에
+    # hypothesis 상세 페이지가 없어(API 프록시만 존재) href 추측은 죽은 링크였다(그 story의
+    # PO crux로 None 확정). 두 embed 경로가 동일 shape이어야 FE가 이걸 소비하고 별도
+    # /sprints/{id}/hypotheses 재조회를 없앨 수 있다.
+    href: str | None = None
 
 
 class SynthesisLearnedItem(BaseModel):

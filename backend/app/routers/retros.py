@@ -169,7 +169,11 @@ async def _build_session_response(
     # (P0(9f27af8f) 이후 RetroVote.voter_id 는 vote_item 이 resolve_member 로 직접 써넣은
     # members.id 공간이고, 휴먼은 members.id=org_members.id 로 ID-preserving 백필돼 여기
     # resolve_member(레거시 경로).id 와 동일 공간 — 별도 매핑 불요).
-    resolved = await resolve_member(auth, session.org_id, db, project_id=session.project_id)
+    # story 5feac498: project_id 생략 — `_build_session_response`의 모든 호출부가 이미
+    # `_require_retro_project_access`로 이 session의 project 접근을 검증한 後에만 호출된다.
+    # project_id를 넘기면 resolve_member의 JWT 분기가 has_project_access(동일 4-EXISTS 쿼리)를
+    # 요청당 또 한 번(총 2회) 실행하는 순수 중복 — id 해소만 필요하므로 재검증 스킵.
+    resolved = await resolve_member(auth, session.org_id, db)
     voted_item_ids: set[uuid.UUID] = set()
     if items:
         voted_rows = await db.execute(

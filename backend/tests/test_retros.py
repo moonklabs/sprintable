@@ -1416,7 +1416,7 @@ async def test_get_session_embeds_hypotheses_when_sprint_linked():
         hyp = SimpleNamespace(
             id=uuid.uuid4(), statement="stmt", status="verified",
             metric_definition={"metric": "x", "target": 1, "direction": "up"},
-            outcome_result={"actual": 2},
+            outcome_result={"actual": 2}, measure_after=None,
         )
 
         with (
@@ -1431,6 +1431,8 @@ async def test_get_session_embeds_hypotheses_when_sprint_linked():
         assert len(body["hypotheses"]) == 1
         assert body["hypotheses"][0]["statement"] == "stmt"
         assert body["hypotheses"][0]["actual"] == 2
+        # story 5feac498: sprints.py shape 정합 — href는 FE 상세페이지 부재로 None 확정(fbf1c14b).
+        assert body["hypotheses"][0]["href"] is None
         assert body["synthesis"] is None
         assert body["next_hypotheses"] is None
     finally:

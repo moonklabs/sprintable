@@ -51,17 +51,22 @@ async def test_build_hypotheses_items_no_sprint_returns_empty():
 
 
 async def test_build_hypotheses_items_flattens_metric_and_actual():
+    measure_after = datetime(2026, 7, 10, tzinfo=timezone.utc)
     hyp = SimpleNamespace(
         id=uuid.uuid4(), statement="stmt", status="falsified",
         metric_definition={"metric": "signup_rate", "target": 10, "direction": "up"},
-        outcome_result={"actual": 7.5},
+        outcome_result={"actual": 7.5}, measure_after=measure_after,
     )
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])):
         result = await svc.build_hypotheses_items(MagicMock(), ORG_ID, PROJECT_ID, SPRINT_ID)
+    # story 5feac498: sprints.py `_flat_hypothesis`(story fbf1c14b)와 shape 정합 —
+    # measure_after 추가·href는 FE에 상세 페이지가 없어 죽은 링크였던 추측을 None으로 정정
+    # (retro-session embed를 FE가 별도 재조회 없이 소비하려면 두 경로가 동일 shape이어야 함).
     assert result == [{
         "id": hyp.id, "statement": "stmt", "status": "falsified",
         "metric": "signup_rate", "target": 10, "direction": "up", "actual": 7.5,
-        "href": f"/hypotheses/{hyp.id}",
+        "measure_after": measure_after,
+        "href": None,
     }]
 
 
@@ -69,7 +74,7 @@ async def test_build_hypotheses_items_measuring_actual_none():
     hyp = SimpleNamespace(
         id=uuid.uuid4(), statement="stmt", status="measuring",
         metric_definition={"metric": "x", "target": 1, "direction": "up"},
-        outcome_result=None,
+        outcome_result=None, measure_after=None,
     )
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])):
         result = await svc.build_hypotheses_items(MagicMock(), ORG_ID, PROJECT_ID, SPRINT_ID)
@@ -95,7 +100,7 @@ async def test_synthesize_parses_valid_json():
     hyp = SimpleNamespace(
         id=uuid.uuid4(), statement="stmt", status="verified",
         metric_definition={"metric": "x", "target": 1, "direction": "up"},
-        outcome_result={"actual": 2},
+        outcome_result={"actual": 2}, measure_after=None,
     )
     raw = '{"items": [{"text": "가설이 검증됐다", "source": "가설 1"}]}'
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
@@ -118,7 +123,7 @@ async def test_synthesize_prose_only_response_returns_none():
     retro = _retro(sprint_id=SPRINT_ID)
     hyp = SimpleNamespace(
         id=uuid.uuid4(), statement="stmt", status="verified",
-        metric_definition={}, outcome_result=None,
+        metric_definition={}, outcome_result=None, measure_after=None,
     )
     raw = "죄송하지만 데이터가 부족해 종합을 생성할 수 없습니다."
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
@@ -136,7 +141,7 @@ async def test_synthesize_valid_object_wrong_item_shape_returns_none():
     retro = _retro(sprint_id=SPRINT_ID)
     hyp = SimpleNamespace(
         id=uuid.uuid4(), statement="stmt", status="verified",
-        metric_definition={}, outcome_result=None,
+        metric_definition={}, outcome_result=None, measure_after=None,
     )
     raw = '{"items": [{"no_text": 1}, {"text": "   "}]}'
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
@@ -152,7 +157,7 @@ async def test_synthesize_missing_source_drops_item():
     retro = _retro(sprint_id=SPRINT_ID)
     hyp = SimpleNamespace(
         id=uuid.uuid4(), statement="stmt", status="verified",
-        metric_definition={}, outcome_result=None,
+        metric_definition={}, outcome_result=None, measure_after=None,
     )
     raw = '{"items": [{"text": "근거 없는 배운 것"}, {"text": "진짜", "source": "가설 1"}]}'
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
@@ -169,7 +174,7 @@ async def test_synthesize_llm_none_returns_none_not_empty_success():
     retro = _retro(sprint_id=SPRINT_ID)
     hyp = SimpleNamespace(
         id=uuid.uuid4(), statement="stmt", status="verified",
-        metric_definition={}, outcome_result=None,
+        metric_definition={}, outcome_result=None, measure_after=None,
     )
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
          patch("app.services.llm_client.generate_text", return_value=None):
@@ -182,7 +187,7 @@ async def test_synthesize_llm_exception_returns_none():
     retro = _retro(sprint_id=SPRINT_ID)
     hyp = SimpleNamespace(
         id=uuid.uuid4(), statement="stmt", status="verified",
-        metric_definition={}, outcome_result=None,
+        metric_definition={}, outcome_result=None, measure_after=None,
     )
     with patch("app.services.hypothesis.list_hypotheses", new=AsyncMock(return_value=[hyp])), \
          patch("app.services.llm_client.generate_text", side_effect=RuntimeError("boom")):
