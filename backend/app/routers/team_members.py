@@ -16,7 +16,7 @@ from app.repositories.team_member import TeamMemberRepository
 from app.schemas.team_member import (
     ActiveStorySummary, TeamMemberCreate, TeamMemberResponse, TeamMemberUpdate,
 )
-from app.services.agent_onboarding_config import build_agent_mcp_config
+from app.services.agent_onboarding_config import build_agent_mcp_config_bundle
 
 
 class ClaimBody(BaseModel):
@@ -314,8 +314,11 @@ async def create_team_member(
         effective_port = fakechat_port or int(os.environ.get("FAKECHAT_PORT", _FAKECHAT_BASE_PORT))
         response["fakechat_port"] = effective_port
         response["api_key_created"] = bool(api_key_plaintext)
-        # OB-1 AC2: 단일 SSOT generator 소비(stdio 아티팩트). 인라인 sse config 제거.
-        response["mcp_config"] = build_agent_mcp_config(api_key_plaintext=api_key_plaintext)
+        # E-MCP-OPT S3: 단일 SSOT generator 소비 — edition 기본 + 두 transport 변형 동봉(FE round-trip 0).
+        config_bundle = build_agent_mcp_config_bundle(api_key_plaintext=api_key_plaintext)
+        response["mcp_config"] = config_bundle["mcp_config"]
+        response["default_transport"] = config_bundle["default_transport"]
+        response["mcp_config_alternatives"] = config_bundle["mcp_config_alternatives"]
         if api_key_plaintext:
             response["api_key"] = api_key_plaintext
 
