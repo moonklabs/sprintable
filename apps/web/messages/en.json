@@ -432,7 +432,16 @@
     "advancedSubtitle": "Webhook notifications · alternate transports (HTTP, fakechat)",
     "advancedNote": "Configure webhook notifications and alternate connection methods later.",
     "dashboardCta": "Go to dashboard",
-    "connectFooterHint": "Once verified you're ready — you can skip for now."
+    "connectFooterHint": "Once verified you're ready — you can skip for now.",
+    "transportHosted": "Hosted",
+    "transportLocal": "Local (uvx)",
+    "transportRecommended": "Recommended",
+    "hostedBenefit": "No reinstall when features change — the server always serves the latest version.",
+    "hostedVerifyNote": "Hosted verifies via tool-call heartbeat — a different path than local SSE, but verification completes just the same.",
+    "localGuideNote": "Runs locally — for self-hosted/offline use. uvx re-fetches the latest version when tools change.",
+    "railStageHosted": "Hosted · 4 steps",
+    "railStageLocal": "Local · 6 steps",
+    "artifactUnavailable": "No hosted deployment in this environment."
   },
   "settings": {
     "title": "Settings",
