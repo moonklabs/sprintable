@@ -17,6 +17,10 @@ from app.services import gate_service as gs
 from app.services.gate_service import _record_gate_review_verdict
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+
+# story 8236bbc3: create_all/drop_all로 자체 스키마 직접 관리 — 공유 alembic-migrated DB
+# 오염 방지 위해 격리 DB 전용(conftest.py 가드가 마커 누락을 자동 검출).
+pytestmark = pytest.mark.destructive_schema
 ORG = uuid.uuid4()
 
 
@@ -178,7 +182,14 @@ async def test_human_review_verdict_reflected_in_trust_real_db():
             await s.commit()
 
         async with Session() as s:
-            trust = await compute_member_trust_scores(s, org, member, role_key="implementation")
+            # story 18eefc31: HO-S5(#1497, 이 테스트 원작 PR #1489 以後 병합)가 기본 trust
+            # source를 hypothesis_outcome_* 로 제한해 CI/pr/merge verdict는 기본 집계에서
+            # 제외한다 — 이 테스트가 검증하려는 "사람 review(merge) verdict → trust 반영"은
+            # legacy source 이므로 include_legacy=True 로 명시(product 버그 아닌 API 변경에
+            # 뒤처진 테스트 staleness).
+            trust = await compute_member_trust_scores(
+                s, org, member, role_key="implementation", include_legacy=True
+            )
             scores = trust["scores"]
             # AC④: 사람 review verdict가 trust 집계에 반영(clean pass 1).
             assert scores and scores[0]["clean_pass_rate"] == 1.0

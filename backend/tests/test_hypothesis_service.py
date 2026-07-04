@@ -21,6 +21,7 @@ from app.schemas.hypothesis import (
     HypothesisLinkRequest,
     HypothesisResponse,
     HypothesisTransition,
+    HypothesisUnlinkRequest,
     HypothesisUpdate,
 )
 from app.services import hypothesis as svc
@@ -39,6 +40,15 @@ VALID_METRIC = {"metric": "signups", "source": "manual", "target": 100, "directi
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def _mock_embedding_enqueue():
+    """E-LOOP-LEDGER P1-S4: create/update_hypothesis가 해소 직후 enqueue_embedding을 호출
+    하므로(추가 session.execute+flush), 전이 로직만 검증하는 기존 mock-session 테스트에서는
+    배선 호출을 격리한다(_mock_outcome_verdicts/_mock_loop_attribution과 동일 이유)."""
+    with patch("app.services.embedding_enqueue.enqueue_embedding", new=AsyncMock(return_value=None)):
+        yield
 
 
 def _caller(member_type: str) -> ResolvedMember:
@@ -72,10 +82,13 @@ def _repo_mock(hyp: SimpleNamespace | None) -> AsyncMock:
     repo.update = AsyncMock(side_effect=lambda _id, **f: _hyp_stub(**f) if hyp is None else _hyp_stub(**{**hyp.__dict__, **f}))
     repo.get_epic_ids = AsyncMock(return_value=[])
     repo.get_story_ids = AsyncMock(return_value=[])
+    repo.get_sprint_id = AsyncMock(return_value=None)
     repo.add_epic_links = AsyncMock()
     repo.add_story_links = AsyncMock()
     repo.remove_epic_links = AsyncMock()
     repo.remove_story_links = AsyncMock()
+    repo.set_sprint_link = AsyncMock()
+    repo.remove_sprint_link = AsyncMock()
     return repo
 
 
@@ -355,6 +368,168 @@ async def test_link_adds_epic_and_story():
         )
     repo.add_epic_links.assert_awaited_once_with(HYP_ID, [eid], "primary")
     repo.add_story_links.assert_awaited_once_with(HYP_ID, [sid], "supports")
+
+
+# ── a4acc4d0: HypothesisSprintLink (N:1) ────────────────────────────────────────
+
+def _session_scalar(value):
+    """sprint 가드(`session.scalar`)용 mock 세션 — epic/story 가드(`session.execute().all()`)와
+    호출 형태가 다르다(Sprint.project_id는 단일 스칼라 조회)."""
+    session = MagicMock()
+    session.scalar = AsyncMock(return_value=value)
+    return session
+
+
+async def test_link_sets_sprint():
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    sprint_id = uuid.uuid4()
+    session = _session_scalar(PROJECT_ID)  # 동일 project sprint
+    with p_repo, p_lookup:
+        await svc.link_hypothesis(
+            session, ORG_ID, HYP_ID,
+            HypothesisLinkRequest(sprint_id=sprint_id),
+        )
+    repo.set_sprint_link.assert_awaited_once_with(HYP_ID, sprint_id, "declared")
+
+
+async def test_link_sprint_cross_project_forbidden():
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    sprint_id = uuid.uuid4()
+    session = _session_scalar(uuid.uuid4())  # 다른 project sprint
+    with p_repo, p_lookup, pytest.raises(svc.HypothesisServiceError) as ei:
+        await svc.link_hypothesis(
+            session, ORG_ID, HYP_ID,
+            HypothesisLinkRequest(sprint_id=sprint_id),
+        )
+    assert ei.value.code == "CROSS_PROJECT_LINK_FORBIDDEN"
+    repo.set_sprint_link.assert_not_awaited()
+
+
+async def test_link_sprint_nonexistent_forbidden():
+    """존재하지 않는 sprint_id — Sprint.project_id 조회가 None(스칼라 no-row)이라
+    project_id와 불일치로 동일하게 거부된다(epic/story의 rowcount 대조와 동형 원칙)."""
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    session = _session_scalar(None)
+    with p_repo, p_lookup, pytest.raises(svc.HypothesisServiceError) as ei:
+        await svc.link_hypothesis(
+            session, ORG_ID, HYP_ID,
+            HypothesisLinkRequest(sprint_id=uuid.uuid4()),
+        )
+    assert ei.value.code == "CROSS_PROJECT_LINK_FORBIDDEN"
+
+
+async def test_unlink_sprint_only_when_flagged():
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    with p_repo, p_lookup:
+        await svc.unlink_hypothesis(
+            MagicMock(), ORG_ID, HYP_ID, HypothesisUnlinkRequest(),
+        )
+    repo.remove_sprint_link.assert_not_awaited()
+
+    with p_repo, p_lookup:
+        await svc.unlink_hypothesis(
+            MagicMock(), ORG_ID, HYP_ID, HypothesisUnlinkRequest(unlink_sprint=True),
+        )
+    repo.remove_sprint_link.assert_awaited_once_with(HYP_ID)
+
+
+def test_response_exposes_sprint_id():
+    resp = HypothesisResponse.from_model(_hyp_stub(), [], [], None)
+    assert resp.sprint_id is None
+    sprint_id = uuid.uuid4()
+    resp2 = HypothesisResponse.from_model(_hyp_stub(), [], [], sprint_id)
+    assert resp2.sprint_id == sprint_id
+
+
+# ── a4acc4d0 까심 RC①: create/update sprint_id 대칭(epic_ids/story_ids와 동형) ──────
+
+async def test_create_sets_sprint():
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    sprint_id = uuid.uuid4()
+    session = _session_scalar(PROJECT_ID)
+    payload = HypothesisCreate(
+        project_id=PROJECT_ID, statement="s", metric_definition=VALID_METRIC,
+        measure_after=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        owner_member_id=OWNER_ID, sprint_id=sprint_id,
+    )
+    with p_repo, p_lookup:
+        await svc.create_hypothesis(session, ORG_ID, _caller("human"), payload)
+    repo.set_sprint_link.assert_awaited_once_with(HYP_ID, sprint_id, "declared")
+
+
+async def test_create_sprint_cross_project_forbidden():
+    """create 경로도 cross-project sprint 링크 거부 — repo.create 전 차단(orphan 0)."""
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    session = _session_scalar(uuid.uuid4())  # 다른 project sprint
+    payload = HypothesisCreate(
+        project_id=PROJECT_ID, statement="s", metric_definition=VALID_METRIC,
+        measure_after=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        owner_member_id=OWNER_ID, sprint_id=uuid.uuid4(),
+    )
+    with p_repo, p_lookup, pytest.raises(svc.HypothesisServiceError) as ei:
+        await svc.create_hypothesis(session, ORG_ID, _caller("human"), payload)
+    assert ei.value.code == "CROSS_PROJECT_LINK_FORBIDDEN"
+    repo.create.assert_not_awaited()
+
+
+async def test_update_sprint_id_only_does_not_raise_no_valid_fields():
+    """patch body가 sprint_id 단독이어도 NO_VALID_FIELDS에 걸리지 않는다(fix 전 회귀 재현 대상)."""
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    sprint_id = uuid.uuid4()
+    session = _session_scalar(PROJECT_ID)
+    with p_repo, p_lookup:
+        await svc.update_hypothesis(
+            session, ORG_ID, _caller("human"), HYP_ID,
+            HypothesisUpdate(sprint_id=sprint_id),
+        )
+    repo.set_sprint_link.assert_awaited_once_with(HYP_ID, sprint_id, "declared")
+    repo.update.assert_not_awaited()  # sprint_id만 있으면 컬럼 update 호출 자체가 없어야 함
+
+
+async def test_update_sprint_id_null_unlinks():
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    with p_repo, p_lookup:
+        await svc.update_hypothesis(
+            MagicMock(), ORG_ID, _caller("human"), HYP_ID,
+            HypothesisUpdate(sprint_id=None),
+        )
+    repo.remove_sprint_link.assert_awaited_once_with(HYP_ID)
+
+
+async def test_update_sprint_cross_project_forbidden():
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    session = _session_scalar(uuid.uuid4())  # 다른 project sprint
+    with p_repo, p_lookup, pytest.raises(svc.HypothesisServiceError) as ei:
+        await svc.update_hypothesis(
+            session, ORG_ID, _caller("human"), HYP_ID,
+            HypothesisUpdate(sprint_id=uuid.uuid4()),
+        )
+    assert ei.value.code == "CROSS_PROJECT_LINK_FORBIDDEN"
+    repo.set_sprint_link.assert_not_awaited()
+
+
+async def test_update_statement_and_sprint_together():
+    """컬럼 필드 + sprint_id 동시 patch — 둘 다 적용(repo.update는 sprint_id 없이 호출)."""
+    repo = _repo_mock(_hyp_stub())
+    p_repo, p_lookup = _patch(repo, "human")
+    sprint_id = uuid.uuid4()
+    session = _session_scalar(PROJECT_ID)
+    with p_repo, p_lookup:
+        await svc.update_hypothesis(
+            session, ORG_ID, _caller("human"), HYP_ID,
+            HypothesisUpdate(statement="new", sprint_id=sprint_id),
+        )
+    repo.update.assert_awaited_once_with(HYP_ID, statement="new")
+    repo.set_sprint_link.assert_awaited_once_with(HYP_ID, sprint_id, "declared")
 
 
 # ── 54a8bd8a: cross-project 가드 service 레벨 — create/draft 경로 패리티 ─────────

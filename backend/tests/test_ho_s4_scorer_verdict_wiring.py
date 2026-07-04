@@ -17,6 +17,10 @@ from app.services import hypothesis_scorer as sc
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
+# story 8236bbc3: create_all/drop_all로 자체 스키마 직접 관리 — 공유 alembic-migrated DB
+# 오염 방지 위해 격리 DB 전용(conftest.py 가드가 마커 누락을 자동 검출).
+pytestmark = pytest.mark.destructive_schema
+
 
 @pytest.fixture
 def anyio_backend():
@@ -30,6 +34,17 @@ def _hyp(status="active", source="ga4"):
     )
 
 
+def _mock_session():
+    """P1-S3g: session.begin_nested()가 진짜 async context manager처럼 동작해야(SAVEPOINT 구조
+    재현) — plain AsyncMock()은 __aenter__/__aexit__을 자동 지원하지 않는다."""
+    session = AsyncMock()
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=None)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    session.begin_nested = MagicMock(return_value=cm)
+    return session
+
+
 # ── AC①②④: 해소 시 배선 호출·response 노출·manual 미호출 ─────────────────────
 
 @pytest.mark.anyio
@@ -37,14 +52,18 @@ async def test_resolved_calls_wiring_manual_does_not():
     verified_hyp = _hyp("active", "ga4")     # ga4 hit → verified → 배선 호출.
     manual_hyp = _hyp("measuring", "manual")  # manual → pending → 배선 미호출(AC④).
 
-    session = AsyncMock()
+    session = _mock_session()
     res = MagicMock()
     res.scalars.return_value.all.return_value = [verified_hyp, manual_hyp]
     session.execute = AsyncMock(return_value=res)
 
     spy = AsyncMock(return_value={"skipped_reason": None, "bet": ["b1"], "execution": ["e1"]})
     with patch.object(sc, "score_ga4_outcome", return_value={"outcome_status": "hit", "outcome_result": {"x": 1}}), \
-         patch("app.services.hypothesis_outcome_verdict.record_outcome_verdicts", new=spy):
+         patch("app.services.hypothesis_outcome_verdict.record_outcome_verdicts", new=spy), \
+         patch(
+             "app.services.loop_outcome_attribution.attribute_loop_outcome",
+             new=AsyncMock(return_value={"skipped_reason": "no_measuring_loop", "attributed": []}),
+         ):
         summary = await sc.score_hypotheses(session)
 
     # AC①: verified 가설에만 배선 호출(manual 미호출·AC④).
@@ -59,13 +78,17 @@ async def test_resolved_calls_wiring_manual_does_not():
 @pytest.mark.anyio
 async def test_skipped_wiring_goes_to_verdicts_skipped():
     h = _hyp("active", "ga4")
-    session = AsyncMock()
+    session = _mock_session()
     res = MagicMock()
     res.scalars.return_value.all.return_value = [h]
     session.execute = AsyncMock(return_value=res)
     spy = AsyncMock(return_value={"skipped_reason": "no_linked_story", "bet": [], "execution": []})
     with patch.object(sc, "score_ga4_outcome", return_value={"outcome_status": "miss", "outcome_result": {}}), \
-         patch("app.services.hypothesis_outcome_verdict.record_outcome_verdicts", new=spy):
+         patch("app.services.hypothesis_outcome_verdict.record_outcome_verdicts", new=spy), \
+         patch(
+             "app.services.loop_outcome_attribution.attribute_loop_outcome",
+             new=AsyncMock(return_value={"skipped_reason": "no_measuring_loop", "attributed": []}),
+         ):
         summary = await sc.score_hypotheses(session)
     assert str(h.id) in summary["falsified"]
     assert summary["verdicts_skipped"] == [{"hypothesis_id": str(h.id), "reason": "no_linked_story"}]

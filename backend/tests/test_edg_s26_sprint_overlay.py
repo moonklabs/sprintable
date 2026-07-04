@@ -13,6 +13,10 @@ import pytest
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
+# story 8236bbc3: create_all(+drop_all)로 자체 스키마를 직접 다룸 — 공유 alembic-migrated
+# DB 오염 방지 위해 격리 DB 전용(conftest.py 가드가 마커 누락을 자동 검출).
+pytestmark = pytest.mark.destructive_schema
+
 
 @pytest.fixture
 def anyio_backend():
@@ -67,6 +71,26 @@ def _sr(to_status, from_status="planning"):
 
 
 # ── _apply_sprint_transition (real-PG·③SoD 없음·repo 위임) ────────────────────
+async def _seed_alive_hypothesis_link(s, org, proj, sprint_id):
+    """a353e88d — planning→active 게이트(≥1 생존 가설 링크)를 통과시키는 공용 시드 헬퍼.
+    이 파일의 activate 경로 테스트는 게이트 의도(1-active 제약 등)와 무관한 관심사라
+    항상 통과하도록 최소 fixture만 심는다(게이트 자체의 회귀/차단 테스트는
+    test_e_sprint_loop_a353e88d_*.py 별도)."""
+    import uuid as _uuid
+    from datetime import datetime, timedelta, timezone
+    from app.models.hypothesis import Hypothesis, HypothesisSprintLink
+    hyp = Hypothesis(
+        id=_uuid.uuid4(), org_id=org, project_id=proj, owner_member_id=_uuid.uuid4(),
+        statement="s", metric_definition={"metric": "x", "source": "manual", "target": 1, "direction": "up"},
+        measure_after=datetime.now(timezone.utc) + timedelta(days=14), status="proposed",
+        human_accounting={}, gate_contract={},
+    )
+    s.add(hyp)
+    await s.flush()
+    s.add(HypothesisSprintLink(id=_uuid.uuid4(), hypothesis_id=hyp.id, sprint_id=sprint_id, link_type="declared"))
+    await s.flush()
+
+
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_apply_activates_no_sod():
@@ -84,6 +108,7 @@ async def test_apply_activates_no_sod():
         sprint = Sprint(org_id=org, project_id=proj, title="sp", status="planning")
         s.add(sprint)
         await s.flush()
+        await _seed_alive_hypothesis_link(s, org, proj, sprint.id)  # a353e88d 게이트 통과
         sr = WorkflowLineStepRun(
             org_id=org, project_id=proj, entity_type="sprint", entity_id=sprint.id,
             from_status="planning", to_status="active", status="gate_pending", mode="enforcing",
@@ -139,6 +164,8 @@ async def test_default_off_activate_any_caller():
         await s.flush()
         sprint = Sprint(org_id=org, project_id=proj, title="sp", status="planning")
         s.add(sprint)
+        await s.flush()
+        await _seed_alive_hypothesis_link(s, org, proj, sprint.id)  # a353e88d 게이트 통과
         await s.commit()
         agent = ResolvedMember(id=uuid.uuid4(), user_id=None, name="a", type="agent", role="member", org_id=org)
         result = await transition_sprint(s, org, agent, sprint.id, "active")  # agent·default-off→활성

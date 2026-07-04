@@ -19,8 +19,6 @@ ORG_ID = uuid.uuid4()
 PROJECT_ID = uuid.uuid4()
 MEMBER_ID = uuid.uuid4()
 
-NOW = datetime.now(timezone.utc)
-
 
 def _mock_member(type_: str = "agent", last_seen_at=None):
     m = MagicMock()
@@ -69,7 +67,8 @@ def test_presence_status_online():
 def test_presence_status_idle():
     """AC3: last_seen_at 15분 전 → idle."""
     from app.schemas.team_member import TeamMemberResponse
-    m = _mock_member(last_seen_at=NOW - timedelta(minutes=15))
+    now = datetime.now(timezone.utc)
+    m = _mock_member(last_seen_at=now - timedelta(minutes=15))
     resp = TeamMemberResponse.model_validate(m)
     assert resp.presence_status == "idle"
 
@@ -77,7 +76,8 @@ def test_presence_status_idle():
 def test_presence_status_offline_over_30():
     """AC4: last_seen_at 31분 전 → offline."""
     from app.schemas.team_member import TeamMemberResponse
-    m = _mock_member(last_seen_at=NOW - timedelta(minutes=31))
+    now = datetime.now(timezone.utc)
+    m = _mock_member(last_seen_at=now - timedelta(minutes=31))
     resp = TeamMemberResponse.model_validate(m)
     assert resp.presence_status == "offline"
 
@@ -93,7 +93,8 @@ def test_presence_status_offline_null_agent():
 def test_presence_status_null_for_human():
     """AC5: type=human → presence_status=null."""
     from app.schemas.team_member import TeamMemberResponse
-    m = _mock_member(type_="human", last_seen_at=NOW - timedelta(minutes=1))
+    now = datetime.now(timezone.utc)
+    m = _mock_member(type_="human", last_seen_at=now - timedelta(minutes=1))
     resp = TeamMemberResponse.model_validate(m)
     assert resp.presence_status is None
 
@@ -154,9 +155,10 @@ async def test_list_team_members_includes_presence_status():
     """AC1: GET /api/v2/team-members 응답에 presence_status 필드 포함."""
     client, session, app = await _client()
     try:
+        now = datetime.now(timezone.utc)
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [
-            _mock_member(type_="agent", last_seen_at=NOW - timedelta(minutes=2))
+            _mock_member(type_="agent", last_seen_at=now - timedelta(minutes=2))
         ]
         session.execute = AsyncMock(return_value=mock_result)
 
@@ -177,12 +179,13 @@ async def test_list_members_mixed_presence():
     """AC1/2/3/4/5: 다양한 멤버 타입 + last_seen_at 혼합."""
     client, session, app = await _client()
     try:
+        now = datetime.now(timezone.utc)
         members = [
-            _mock_member(type_="agent", last_seen_at=NOW - timedelta(minutes=2)),   # online
-            _mock_member(type_="agent", last_seen_at=NOW - timedelta(minutes=15)),  # idle
-            _mock_member(type_="agent", last_seen_at=NOW - timedelta(minutes=60)),  # offline
+            _mock_member(type_="agent", last_seen_at=now - timedelta(minutes=2)),   # online
+            _mock_member(type_="agent", last_seen_at=now - timedelta(minutes=15)),  # idle
+            _mock_member(type_="agent", last_seen_at=now - timedelta(minutes=60)),  # offline
             _mock_member(type_="agent", last_seen_at=None),                         # offline
-            _mock_member(type_="human", last_seen_at=NOW - timedelta(minutes=1)),   # null
+            _mock_member(type_="human", last_seen_at=now - timedelta(minutes=1)),   # null
         ]
         # 고유 ID 부여
         for i, m in enumerate(members):

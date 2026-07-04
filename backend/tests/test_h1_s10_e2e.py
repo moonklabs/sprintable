@@ -16,6 +16,10 @@ import pytest
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
+# story 8236bbc3: create_all/drop_all로 자체 스키마 직접 관리 — 공유 alembic-migrated DB
+# 오염 방지 위해 격리 DB 전용(conftest.py 가드가 마커 누락을 자동 검출).
+pytestmark = pytest.mark.destructive_schema
+
 
 @pytest.fixture
 def anyio_backend():
@@ -101,7 +105,13 @@ async def test_h1_end_to_end_ready_to_done():
             )).scalar()
             assert vcount >= 2, f"verdict(pr/ci/merge) 증가해야, got {vcount}"
 
-            trust = await compute_member_trust_scores(s, org, member, role_key="implementation")
+            # story 18eefc31: HO-S5(#1497, 이 E2E 원작 PR #1487 以後 병합)가 기본 trust
+            # source를 hypothesis_outcome_* 로 제한해 이 체인이 캡처하는 CI/pr/merge verdict는
+            # 기본 집계에서 제외된다 — include_legacy=True 로 legacy source 합산 명시(product
+            # 버그 아닌 API 변경에 뒤처진 테스트 staleness).
+            trust = await compute_member_trust_scores(
+                s, org, member, role_key="implementation", include_legacy=True
+            )
             assert trust["scores"], "trust scores가 비지 않아야(verdict 누적)"
             assert trust["scores"][0]["clean_pass_rate"] is not None, "trust null 아니어야"
 

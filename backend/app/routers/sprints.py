@@ -1,8 +1,9 @@
 import uuid
-from datetime import date as date_type
+from datetime import date as date_type, datetime
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,10 +12,76 @@ from app.dependencies.database import get_db
 from app.models.pm import Story
 from app.models.team import TeamMember
 from app.repositories.sprint import SprintRepository
+from app.schemas.hypothesis import HypothesisCreate, HypothesisLinkRequest, HypothesisResponse
 from app.schemas.sprint import KickoffBody, SprintCreate, SprintResponse, SprintUpdate, compute_sprint_duration
+from app.services import hypothesis as hypothesis_svc
+from app.services.member_resolver import resolve_member
 from app.services.notification_dispatch import dispatch_notification
 
 router = APIRouter(prefix="/api/v2/sprints", tags=["sprints"])
+
+# story fbf1c14b: hypotheses.py 라우터의 HypothesisServiceError→HTTP 매핑과 정합(중복
+# 정의 — private 모듈 심볼 import 대신 여기서도 로컬 유지, hypotheses.py와 값 동일 확인됨).
+_HYPOTHESIS_ERROR_STATUS: dict[str, int] = {
+    "HUMAN_OWNER_REQUIRED": 400,
+    "HUMAN_CONFIRM_REQUIRED": 403,
+    "INVALID_CREATE_STATUS": 422,
+    "INVALID_STATUS": 422,
+    "INVALID_HYPOTHESIS_TRANSITION": 409,
+    "NO_VALID_FIELDS": 400,
+    "HYPOTHESIS_NOT_FOUND": 404,
+    "CROSS_PROJECT_LINK_FORBIDDEN": 403,
+}
+
+
+class SprintHypothesisItem(BaseModel):
+    id: uuid.UUID
+    statement: str
+    status: str
+    metric: str | None = None
+    target: float | int | None = None
+    direction: str | None = None
+    actual: float | int | None = None
+    measure_after: datetime | None = None
+    href: str | None = None
+
+
+class SprintHypothesisDeclareRequest(BaseModel):
+    """POST /{id}/hypotheses body — 정확히 하나의 shape만 허용(FE hypothesis-declaration.ts
+    toDeclarationPayload()와 1:1). hypothesis_id=기존 링크, 나머지 3개 전부=신규 생성+링크."""
+    hypothesis_id: uuid.UUID | None = None
+    statement: str | None = None
+    metric_definition: dict[str, Any] | None = None
+    measure_after: datetime | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_shape(self) -> "SprintHypothesisDeclareRequest":
+        has_link = self.hypothesis_id is not None
+        create_fields = (self.statement, self.metric_definition, self.measure_after)
+        has_any_create = any(v is not None for v in create_fields)
+        has_all_create = all(v is not None for v in create_fields)
+        if has_link and has_any_create:
+            raise ValueError("hypothesis_id와 신규 가설 필드를 동시에 줄 수 없습니다.")
+        if not has_link and not has_all_create:
+            raise ValueError(
+                "hypothesis_id 또는 statement/metric_definition/measure_after 전부가 필요합니다."
+            )
+        if self.statement is not None and not self.statement.strip():
+            raise ValueError("statement가 비어 있을 수 없습니다.")
+        return self
+
+
+def _flat_hypothesis(h: HypothesisResponse) -> SprintHypothesisItem:
+    md = h.metric_definition or {}
+    outcome = h.outcome_result or {}
+    return SprintHypothesisItem(
+        id=h.id, statement=h.statement, status=h.status,
+        metric=md.get("metric"), target=md.get("target"), direction=md.get("direction"),
+        actual=outcome.get("actual"), measure_after=h.measure_after,
+        # PO crux 2026-07-03: FE에 hypothesis 상세 페이지 라우트 자체가 없어(API 프록시만
+        # 존재) 추측 URL은 죽은 링크가 된다 — null 확정, 상세 페이지 생기면 그때 채운다.
+        href=None,
+    )
 
 
 def _get_repo(
@@ -84,6 +151,73 @@ async def get_sprint(
     return SprintResponse.model_validate(sprint)
 
 
+# story fbf1c14b: FE #1869 선언 폼 + retro sprint-close cockpit이 호출하는 REST가 아예
+# 없어(dev 라이브 404) 가설 선언 자체가 미persist·cockpit 미렌더였던 dead-path. 모델/repo/
+# service(HypothesisSprintLink·set_sprint_link·list_hypotheses sprint_id 필터·a353e88d
+# 활성화 게이트)는 전부 기존재 — 순수 REST 배선(재구현 0). 게이트와 커플링 0(POST가 링크만
+# 만들면 transition_sprint의 독립 쿼리가 자동으로 봄).
+@router.get("/{id}/hypotheses", response_model=list[SprintHypothesisItem])
+async def list_sprint_hypotheses(
+    id: uuid.UUID,
+    repo: SprintRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> list[SprintHypothesisItem]:
+    sprint = await repo.get(id)
+    if sprint is None:
+        raise HTTPException(
+            status_code=404, detail={"code": "SPRINT_NOT_FOUND", "message": "스프린트를 찾을 수 없습니다."}
+        )
+    items = await hypothesis_svc.list_hypotheses(
+        session, org_id, sprint.project_id, sprint_id=id, limit=200
+    )
+    return [_flat_hypothesis(h) for h in items]
+
+
+@router.post("/{id}/hypotheses", response_model=SprintHypothesisItem, status_code=201)
+async def declare_sprint_hypothesis(
+    id: uuid.UUID,
+    body: SprintHypothesisDeclareRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> SprintHypothesisItem:
+    repo = SprintRepository(session, org_id)
+    sprint = await repo.get(id)
+    if sprint is None:
+        raise HTTPException(
+            status_code=404, detail={"code": "SPRINT_NOT_FOUND", "message": "스프린트를 찾을 수 없습니다."}
+        )
+    # project-scoped 인가(hypotheses.py::create_hypothesis 라우터와 동일 패턴) — 다른
+    # project의 caller가 이 sprint의 project에 접근 권한 없으면 여기서 거부(IDOR).
+    caller = await resolve_member(auth, org_id, session, project_id=sprint.project_id)
+    # commit/rollback = get_db 의존성이 요청 성공/예외에 따라 자동 처리(hypotheses.py 라우터와
+    # 동일 관례 — 여기서 수동 호출 안 함).
+    try:
+        if body.hypothesis_id is not None:
+            h = await hypothesis_svc.link_hypothesis(
+                session, org_id, body.hypothesis_id,
+                HypothesisLinkRequest(sprint_id=id, link_type="declared"),
+            )
+        else:
+            h = await hypothesis_svc.create_hypothesis(
+                session, org_id, caller,
+                HypothesisCreate(
+                    project_id=sprint.project_id,
+                    statement=body.statement,
+                    metric_definition=body.metric_definition,
+                    measure_after=body.measure_after,
+                    sprint_id=id,
+                ),
+            )
+        return _flat_hypothesis(h)
+    except hypothesis_svc.HypothesisServiceError as err:
+        raise HTTPException(
+            status_code=_HYPOTHESIS_ERROR_STATUS.get(err.code, 400),
+            detail={"code": err.code, "message": err.message},
+        ) from err
+
+
 @router.patch("/{id}", response_model=SprintResponse)
 async def update_sprint(
     id: uuid.UUID,
@@ -105,10 +239,18 @@ async def update_sprint(
             caller = await resolve_member(auth, org_id, session)
             try:
                 await transition_sprint(session, org_id, caller, id, _status_change)
-            except (SprintTransitionError, ValueError) as exc:
-                raise HTTPException(
-                    status_code=400, detail=getattr(exc, "message", str(exc))
-                ) from exc
+            except SprintTransitionError as exc:
+                # 까심 codex QA(2026-07-03, #1867): a353e88d 게이트가 구조화 code로
+                # raise하는데 이 경로가 400+string으로만 매핑해 FE graceful-404 계약
+                # (§5 handoff)이 깨졌다. 신규 code만 422+구조화 detail로 노출 — 기존
+                # 코드(INVALID_STATUS 등)는 status/shape 그대로(회귀 0, PO 결).
+                if exc.code == "HYPOTHESIS_REQUIRED_FOR_ACTIVATION":
+                    raise HTTPException(
+                        status_code=422, detail={"code": exc.code, "message": exc.message}
+                    ) from exc
+                raise HTTPException(status_code=400, detail=exc.message) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
     # 8a2bbda2: 날짜가 갱신되면 duration 을 (병합된) 날짜에서 재산출 저장(dates 단일진실).
     if "start_date" in data or "end_date" in data:
         existing = await repo.get(id)
@@ -157,8 +299,16 @@ async def activate_sprint(
     try:
         sprint = await transition_sprint(session, org_id, caller, id, "active")
         await session.commit()
-    except (SprintTransitionError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=getattr(exc, "message", str(exc))) from exc
+    except SprintTransitionError as exc:
+        # 까심 codex QA(2026-07-03, #1867): 위 update_sprint와 동일 갭 — 신규 code만
+        # 422+구조화 detail(FE §5 graceful 계약), 기존 코드는 backward-compat 유지.
+        if exc.code == "HYPOTHESIS_REQUIRED_FOR_ACTIVATION":
+            raise HTTPException(
+                status_code=422, detail={"code": exc.code, "message": exc.message}
+            ) from exc
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return SprintResponse.model_validate(sprint)
 
 
@@ -335,7 +485,9 @@ async def transition_sprint_endpoint(
         return SprintResponse.model_validate(sprint)
     except SprintTransitionError as e:
         _codes = {"SPRINT_NOT_FOUND": 404, "HUMAN_CONFIRM_REQUIRED": 403,
-                  "INVALID_STATUS": 422, "INVALID_SPRINT_TRANSITION": 422}
+                  "INVALID_STATUS": 422, "INVALID_SPRINT_TRANSITION": 422,
+                  # a353e88d — precondition-validation(형제 코드와 동급), PO 결 422.
+                  "HYPOTHESIS_REQUIRED_FOR_ACTIVATION": 422}
         raise HTTPException(status_code=_codes.get(e.code, 400), detail={"code": e.code, "message": e.message})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

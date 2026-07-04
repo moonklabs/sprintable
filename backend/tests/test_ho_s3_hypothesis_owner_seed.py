@@ -45,7 +45,13 @@ def test_seed_hypothesis_owner_per_org_idempotent():
     try:
         with eng.begin() as c:
             # 마이그가 의존하는 테이블이 없으면 만든다(fresh DB 격리 — CI는 마이그 체인으로 존재).
-            c.execute(sa.text("CREATE TABLE IF NOT EXISTS organizations (id uuid PRIMARY KEY)"))
+            # story 18eefc31: name/slug는 실 baseline(organizations NOT NULL, 기본값 없음)과
+            # 정합해야 alembic-migrated DB(참 스키마)에서도 INSERT가 성립한다 — id만 있는
+            # 이전 버전은 fresh-DB 경로만 우연히 통과하고 migrated-DB 경로에서 항상 깨졌다.
+            c.execute(sa.text(
+                "CREATE TABLE IF NOT EXISTS organizations "
+                "(id uuid PRIMARY KEY, name text NOT NULL, slug text NOT NULL)"
+            ))
             c.execute(sa.text(
                 "CREATE TABLE IF NOT EXISTS participation_role (id uuid PRIMARY KEY, org_id uuid NOT NULL, "
                 "key varchar(50) NOT NULL, label text NOT NULL, is_default boolean NOT NULL DEFAULT false, "
@@ -55,7 +61,13 @@ def test_seed_hypothesis_owner_per_org_idempotent():
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_participation_role_org_key "
                 "ON participation_role (org_id, key)"
             ))
-            c.execute(sa.text("INSERT INTO organizations(id) VALUES (:a),(:b)"), {"a": org_a, "b": org_b})
+            c.execute(
+                sa.text("INSERT INTO organizations(id,name,slug) VALUES (:a,:na,:sa),(:b,:nb,:sb)"),
+                {
+                    "a": org_a, "na": f"ho-s3-org-{org_a}", "sa": f"ho-s3-{org_a}",
+                    "b": org_b, "nb": f"ho-s3-org-{org_b}", "sb": f"ho-s3-{org_b}",
+                },
+            )
             # org_a는 이미 hypothesis_owner 보유(중복 방지 검증).
             c.execute(sa.text(
                 "INSERT INTO participation_role(id,org_id,key,label) VALUES (:i,:o,'hypothesis_owner','기존')"

@@ -62,7 +62,10 @@ export const unlinkHypothesisSchema = z.object({
 export const draftHypothesisSchema = z.object({
   project_id: z.string().min(1),
   source_type: z.string().min(1),
-  source_id: z.string().min(1),
+  // S16 BE 갭(#1850): "loop_goal"은 백킹 엔티티가 없어 source_id 없이 context dict만으로
+  // draft — BE model_validator가 "loop_goal 외 source_type은 source_id 필수"를 권위 검증하므로
+  // FE는 shape만 optional로 두고 실제 강제는 BE에 위임(기존 4종 회귀 없음, 여전히 값 보내면 통과).
+  source_id: z.string().min(1).optional(),
   context: z.record(z.string(), z.unknown()).optional().nullable(),
   // persist=true이면 status='proposed' row 생성(drafted_by_member_id 기록·E1-S10 AC④).
   // 기본 false=미리보기. BE HypothesisDraftRequest.persist와 동기.

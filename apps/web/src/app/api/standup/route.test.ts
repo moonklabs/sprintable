@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 837a36c4(Group B b2): proxy 위임 리팩토링 후 stale 테스트 재작성 — auth → proxyToFastapi → 래핑.
-const { getAuthContext, proxyToFastapi } = vi.hoisted(() => ({
-  getAuthContext: vi.fn(),
+const { getOrgProjectAuthContext, proxyToFastapi } = vi.hoisted(() => ({
+  getOrgProjectAuthContext: vi.fn(),
   proxyToFastapi: vi.fn(),
 }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET, POST, PUT } from './route';
@@ -18,14 +18,14 @@ const req = (method = 'GET') => new Request('http://localhost/api/standup?projec
 
 describe('/api/standup (proxy 위임)', () => {
   beforeEach(() => {
-    getAuthContext.mockReset();
+    getOrgProjectAuthContext.mockReset();
     proxyToFastapi.mockReset();
-    getAuthContext.mockResolvedValue(agent());
+    getOrgProjectAuthContext.mockResolvedValue(agent());
   });
 
   for (const [name, fn] of [['GET', GET], ['POST', POST], ['PUT', PUT]] as const) {
     it(`${name}: 401 when unauthenticated`, async () => {
-      getAuthContext.mockResolvedValue(null);
+      getOrgProjectAuthContext.mockResolvedValue(null);
       expect((await fn(req(name))).status).toBe(401);
       expect(proxyToFastapi).not.toHaveBeenCalled();
     });

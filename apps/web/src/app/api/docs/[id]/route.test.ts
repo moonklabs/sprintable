@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 837a36c4(Group B b10): 혼합 핸들러 — PATCH=proxyToFastapi(verbatim) / GET·DELETE=DocsService 직접.
 const h = vi.hoisted(() => ({
-  getAuthContext: vi.fn(), createDocRepository: vi.fn(), proxyToFastapi: vi.fn(),
+  getOrgProjectAuthContext: vi.fn(), createDocRepository: vi.fn(), proxyToFastapi: vi.fn(),
   getDocTimestamp: vi.fn(), deleteDoc: vi.fn(),
 }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext: h.getOrgProjectAuthContext }));
 vi.mock('@/lib/storage/factory', () => ({ createDocRepository: h.createDocRepository }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi: h.proxyToFastapi }));
 vi.mock('@/services/docs', async (importActual) => ({
@@ -25,12 +25,12 @@ const req = (m = 'GET') => new Request(`http://localhost/x/${ID}`, { method: m }
 describe('/api/docs/[id] (혼합: proxy + DocsService)', () => {
   beforeEach(() => {
     Object.values(h).forEach((m) => m.mockReset());
-    h.getAuthContext.mockResolvedValue(agent());
+    h.getOrgProjectAuthContext.mockResolvedValue(agent());
     h.createDocRepository.mockResolvedValue({});
   });
 
   it('PATCH: 401 when unauthenticated', async () => {
-    h.getAuthContext.mockResolvedValue(null);
+    h.getOrgProjectAuthContext.mockResolvedValue(null);
     expect((await PATCH(req('PATCH'), ctx())).status).toBe(401);
   });
   it('PATCH: proxies to /api/v2/docs/{id} verbatim (200)', async () => {
@@ -45,7 +45,7 @@ describe('/api/docs/[id] (혼합: proxy + DocsService)', () => {
   });
 
   it('GET: 401 when unauthenticated', async () => {
-    h.getAuthContext.mockResolvedValue(null);
+    h.getOrgProjectAuthContext.mockResolvedValue(null);
     expect((await GET(req(), ctx())).status).toBe(401);
   });
   it('GET: returns timestamp via DocsService.getDocTimestamp(id)', async () => {

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -40,6 +40,15 @@ class RetroSession(Base, OrgScopedMixin, TimestampMixin):
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     phase: Mapped[str] = mapped_column(Text, nullable=False, default="collect")
+    # dc861e44 §5 — L2 종합(on-demand). null=미생성→FE "종합 생성" CTA. overwrite 저장
+    # (PO 결 2026-07-03: 1세션=1 최신·이력 보존 YAGNI — 진짜 결정은 story 3서 proposed
+    # 가설로 별도 영속). shape: {learned:[{text,source}], generated_at, source:'ai_draft'}.
+    synthesis: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # dc861e44 §5 — L3 다음가설 추천(on-demand). synthesis 선행 필수(recommend-next가
+    # 409 SYNTHESIS_REQUIRED로 fail-closed 가드). overwrite 저장(synthesis와 동일 정책).
+    # shape: [{id,statement,metric_definition,measure_after,confidence,rationale,
+    #          requires_confirmation:true}]
+    next_hypotheses: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     items: Mapped[list["RetroItem"]] = relationship("RetroItem", back_populates="session", lazy="select")
     actions: Mapped[list["RetroAction"]] = relationship("RetroAction", back_populates="session", lazy="select")

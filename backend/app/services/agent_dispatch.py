@@ -155,14 +155,22 @@ async def dispatch_entity_to_assignee(
     member_type = assignee_member.type
 
     # E1-S6 L4: 대표 가설 anchor 주입 (epic/story) — additive.
-    from app.services.hypothesis import format_anchor_line, resolve_dispatch_anchor
+    from app.services.hypothesis import (
+        format_anchor_line,
+        resolve_dispatch_anchor,
+        resolve_dispatch_context_pack,
+    )
     hypothesis_anchor = await resolve_dispatch_anchor(db, org_id, entity_type, entity_id)
+    # E-LOOP-LEDGER P1-S11: Context Pack(S7 markdown brief) 주입 — additive, hypothesis-only 스코프.
+    context_pack = await resolve_dispatch_context_pack(db, org_id, entity_type, entity_id)
 
     # E-EVENT-INJECT S1: connector가 content 없는 이벤트를 드롭하므로 top-level content 부여.
     _detail = (message or description or "").strip()
     content = f"[{entity_type}] {title}" + (f" — {_detail}" if _detail else "")
     if hypothesis_anchor is not None:
         content += "\n" + format_anchor_line(hypothesis_anchor)
+    if context_pack is not None:
+        content += "\n\n" + context_pack
     payload: dict[str, Any] = {
         "entity_type": entity_type,
         "entity_id": str(entity_id),
@@ -171,6 +179,7 @@ async def dispatch_entity_to_assignee(
         "message": message,
         "content": content,
         "hypothesis_anchor": hypothesis_anchor,
+        "context_pack": context_pack,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     if trigger_metadata is not None:
@@ -238,6 +247,7 @@ async def dispatch_entity_to_assignee(
         "source_entity_type": entity_type,
         "source_entity_id": entity_id,
         "hypothesis_anchor": hypothesis_anchor,
+        "context_pack": context_pack,
     }
     return response, delivery
 

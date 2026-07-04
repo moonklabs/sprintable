@@ -14,6 +14,10 @@ from app.services.workflow_line_resolver import _risk_flags, _story_predicate
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
+# story 8236bbc3: create_all(+drop_all)로 자체 스키마를 직접 다룸 — 공유 alembic-migrated
+# DB 오염 방지 위해 격리 DB 전용(conftest.py 가드가 마커 누락을 자동 검출).
+pytestmark = pytest.mark.destructive_schema
+
 
 @pytest.fixture
 def anyio_backend():
@@ -143,7 +147,10 @@ async def test_routing_context_non_story_unsupported():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-async def test_engine_shadow_records_routing_context_and_trust():
+async def test_engine_shadow_records_routing_context_and_trust(monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "decision_gate_line_enabled", True)
+    monkeypatch.setattr(settings, "decision_gate_line_mode", "enforcing")
     """S3 엔진 shadow 경로가 S4 resolver 산출(routing_context+trust_snapshot)을 step_run 에 기록."""
     from sqlalchemy import select
     from app.services.workflow_line_engine import evaluate_line_for_transition
@@ -183,7 +190,10 @@ async def test_engine_shadow_records_routing_context_and_trust():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-async def test_actor_propagates_to_step_run_snapshot():
+async def test_actor_propagates_to_step_run_snapshot(monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "decision_gate_line_enabled", True)
+    monkeypatch.setattr(settings, "decision_gate_line_mode", "enforcing")
     """⭐SME blocking 회귀: 엔진에 actor_id/actor_type 을 넘기면 resolver→step_run.routing_context.actor
     까지 전파돼야 한다(라우터가 actor 미전달 시 항상 no_member 로 고정되던 통합 갭). actor.member_id 가
     실제 actor 로 채워져야 trust 가 그 actor 이력 기반(non-cold-start 가능)이 된다."""

@@ -54,7 +54,7 @@ async def _session():
 
 
 async def test_poll_activities_after_seq_cursor_and_org_scope():
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 
     from app.models.activity_event import ActivityEvent
     from app.services.activity_stream import poll_activities_after_seq
@@ -63,25 +63,34 @@ async def test_poll_activities_after_seq_cursor_and_org_scope():
     org_a, org_b = uuid.uuid4(), uuid.uuid4()
     try:
         async with Session() as s:
+            # story 18eefc31: activity_events 는 이 파일 전체·84파일 풀런에서 공유되는 테이블이라
+            # (cleanup 없음) 이전 테스트/파일이 심은 잔여행이 누적된다. 원래 base 계산(전체 테이블
+            # MIN(activity_seq))은 그 잔여행까지 잡아 poll_after(base-1)가 이 테스트의 4행보다
+            # 훨씬 많이 반환 — 소배치서는 우연히 통과(잔여 없음)·84파일 풀런서만 실패했다.
+            # 삽입 直前 워터마크(MAX, 순차실행이라 동시쓰기 없음 — 안전)를 cursor 기준으로 삼아
+            # "이 테스트가 심은 행만" 포착하도록 근본수정.
+            pre = (await s.execute(select(func.max(ActivityEvent.activity_seq)))).scalar() or 0
             s.add_all([_act(org_a), _act(org_a), _act(org_b), _act(org_a)])
             await s.commit()
-            base = (await s.execute(select(ActivityEvent.activity_seq).order_by(ActivityEvent.activity_seq.asc()))).scalars().first()
 
-            # org 생략 = 전 org poll. after_seq=base-1로 전체 4행.
-            allrows, _ = await poll_activities_after_seq(s, base - 1, limit=100)
+            # org 생략 = 전 org poll. after_seq=pre(삽입 直前 워터마크)로 이 테스트의 4행만.
+            allrows, _ = await poll_activities_after_seq(s, pre, limit=100)
             assert len(allrows) == 4
             assert [r.activity_seq for r in allrows] == sorted(r.activity_seq for r in allrows)  # ASC
 
             # org_a 스코프 = 3행(org_b 제외).
-            a_rows, _ = await poll_activities_after_seq(s, base - 1, limit=100, org_id=org_a)
+            a_rows, _ = await poll_activities_after_seq(s, pre, limit=100, org_id=org_a)
             assert len(a_rows) == 3 and all(r.org_id == org_a for r in a_rows)
 
             # cursor: limit=2 → next_after_seq, 이어 읽기 strict(중복 0).
-            p1, nxt1 = await poll_activities_after_seq(s, base - 1, limit=2, org_id=org_a)
+            p1, nxt1 = await poll_activities_after_seq(s, pre, limit=2, org_id=org_a)
             assert len(p1) == 2 and nxt1 == p1[-1].activity_seq
             p2, nxt2 = await poll_activities_after_seq(s, nxt1, limit=2, org_id=org_a)
             assert len(p2) == 1 and nxt2 is None
             assert p2[0].activity_seq > nxt1
+
+            await s.execute(ActivityEvent.__table__.delete().where(ActivityEvent.org_id.in_([org_a, org_b])))
+            await s.commit()
     finally:
         await engine.dispose()
 

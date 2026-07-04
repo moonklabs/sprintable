@@ -6,7 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.pm import Sprint
 from app.models.retro import RetroItem, RetroSession, RetroVote
+from app.services import hypothesis as hyp_svc
+from app.services import retro_hypothesis_seed as seed_svc
+from app.services import retro_synthesis as synth_svc
 from app.services.member_resolver import canonicalize_member_id, resolve_member
 from app.services.project_auth import has_project_access
 from app.repositories.retro import (
@@ -15,8 +19,10 @@ from app.repositories.retro import (
     RetroSessionRepository,
     RetroVoteRepository,
 )
+from app.schemas.hypothesis import HypothesisCreate, HypothesisLinkRequest
 from app.schemas.retro import (
     ActionResponse,
+    AdoptNextHypothesis,
     CreateAction,
     CreateItem,
     CreateSession,
@@ -37,6 +43,24 @@ def _get_session_repo(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> RetroSessionRepository:
     return RetroSessionRepository(db, org_id)
+
+
+def _has_valid_synthesis(synthesis: object) -> bool:
+    """recommend-next 게이팅(까심 codex RC①·②, 2026-07-03) — `synthesis is None`만 보면
+    `{}`·`[]`·`{"learned": []}` 같은 malformed/empty 값이 게이트를 통과한다. `synthesis=[]`는
+    `_build_next_hypotheses_prompt`의 `.get("learned")` 호출에서 AttributeError(500)까지
+    난다. **1차 라운드에서 "learned가 비어있지 않은 list"까지만 봤는데 codex가 아이템 shape
+    미검증을 다시 잡음**(`{"learned":[123]}`·`{"learned":[{}]}` 통과해 recommend-next가 사실상
+    빈 종합으로 LLM 호출/persist) — ≥1개 dict 아이템이 non-blank `text`를 가져야 유효."""
+    if not isinstance(synthesis, dict):
+        return False
+    learned = synthesis.get("learned")
+    if not isinstance(learned, list) or not learned:
+        return False
+    return any(
+        isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip()
+        for item in learned
+    )
 
 
 async def _require_retro_project_access(
@@ -111,6 +135,23 @@ async def create_session(
     # body.project_id 를 검증 없이 신뢰하면 무권한 project 에 session 을 심는 mutation IDOR.
     if not await has_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id):
         raise HTTPException(status_code=403, detail="해당 프로젝트 접근 권한이 없습니다")
+    # 까심 QA(#1880 embed-switch 中 실 Postgres 재현) — body.sprint_id가 실제 body.project_id
+    # 소속인지 검증하는 FK/CHECK가 없어 project A 세션에 project B sprint를 링크 가능했다.
+    # embed(session.project_id로 스코프)와 별도 /sprints/{id}/hypotheses(sprint의 실제
+    # project_id로 스코프) 응답이 갈라져 FE엔 "가설이 사라진" 것처럼 보였다(데이터 유실 아님,
+    # 애초 정합 안 된 링크). `_require_item_in_session`(아래, item_id가 부모 session 소속 아니면
+    # 404)과 동일 컨벤션 — 존재하나 이 스코프엔 없는 리소스는 404. org_id는 위 has_project_access
+    # 컨텍스트와 동일한 caller의 검증된 org(get_verified_org_id) — 테넌트 스코프 유지. 이 조회
+    # 1발이 "존재하지 않는 sprint_id"(오늘은 FK violation 500)까지 자연스럽게 404로 흡수한다.
+    # has_project_access 검증 後·이 체크를 두는 순서 — 무권한 caller에게 sprint 존재 유출 방지.
+    if body.sprint_id is not None:
+        sprint = (
+            await db.execute(
+                select(Sprint).where(Sprint.id == body.sprint_id, Sprint.org_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if sprint is None or sprint.project_id != body.project_id:
+            raise HTTPException(status_code=404, detail="Sprint not found")
     # P0(9f27af8f): created_by는 "누가 이 session을 만들었나"라는 행위자(actor) attribution —
     # body.created_by(client 지정)를 신뢰하면 타인 명의 spoofing 벡터. auth로 canonical
     # requester id를 직접 해소(B4/vote_item과 동일 SSOT 패턴), body.created_by는 무시.
@@ -125,19 +166,13 @@ async def create_session(
     return SessionListResponse.model_validate(session)
 
 
-@router.get("/{id}", response_model=SessionResponse)
-async def get_session(
-    id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    auth: AuthContext = Depends(get_current_user),
-    repo: RetroSessionRepository = Depends(_get_session_repo),
+async def _build_session_response(
+    db: AsyncSession, session: RetroSession, auth: AuthContext
 ) -> SessionResponse:
-    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
-
     item_repo = RetroItemRepository(db)
     action_repo = RetroActionRepository(db)
-    items = await item_repo.list_by_session(id)
-    actions = await action_repo.list_by_session(id)
+    items = await item_repo.list_by_session(session.id)
+    actions = await action_repo.list_by_session(session.id)
 
     # P1(9f27af8f, 유나 real-payload 재현): grouped child를 items에서 제외하면 FE가 클러스터를
     # 그릴 데이터 자체가 없어짐(FE는 items를 top-level/child로 필터링해 렌더 — child 객체가
@@ -152,7 +187,11 @@ async def get_session(
     # (P0(9f27af8f) 이후 RetroVote.voter_id 는 vote_item 이 resolve_member 로 직접 써넣은
     # members.id 공간이고, 휴먼은 members.id=org_members.id 로 ID-preserving 백필돼 여기
     # resolve_member(레거시 경로).id 와 동일 공간 — 별도 매핑 불요).
-    resolved = await resolve_member(auth, session.org_id, db, project_id=session.project_id)
+    # story 5feac498: project_id 생략 — `_build_session_response`의 모든 호출부가 이미
+    # `_require_retro_project_access`로 이 session의 project 접근을 검증한 後에만 호출된다.
+    # project_id를 넘기면 resolve_member의 JWT 분기가 has_project_access(동일 4-EXISTS 쿼리)를
+    # 요청당 또 한 번(총 2회) 실행하는 순수 중복 — id 해소만 필요하므로 재검증 스킵.
+    resolved = await resolve_member(auth, session.org_id, db)
     voted_item_ids: set[uuid.UUID] = set()
     if items:
         voted_rows = await db.execute(
@@ -162,6 +201,11 @@ async def get_session(
             )
         )
         voted_item_ids = set(voted_rows.scalars().all())
+
+    # dc861e44 §5 — sprint 링크 가설(story 1 sprint_id 필터 재사용). sprint 미연결 회고는 [].
+    hypotheses = await synth_svc.build_hypotheses_items(
+        db, session.org_id, session.project_id, session.sprint_id
+    )
 
     return SessionResponse(
         id=session.id,
@@ -189,7 +233,194 @@ async def get_session(
             for i in items
         ],
         actions=[ActionResponse.model_validate(a) for a in actions],
+        hypotheses=hypotheses,
+        synthesis=session.synthesis,
+        next_hypotheses=session.next_hypotheses,
     )
+
+
+@router.get("/{id}", response_model=SessionResponse)
+async def get_session(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> SessionResponse:
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    return await _build_session_response(db, session, auth)
+
+
+@router.post("/{id}/synthesize", response_model=SessionResponse)
+async def synthesize_session(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> SessionResponse:
+    """dc861e44 §3 — L2 종합(on-demand·버튼 트리거). overwrite 저장(PO 결).
+
+    ⚠️ result가 None(LLM 생성 실패)이면 **저장하지 않는다** — 기존 good synthesis 캐시를
+    빈 결과로 덮어써 잃는 data-loss(오르테가 지적 2026-07-03·S28 캐시게이트 버그와 동형)를
+    막는다. 502로 실패를 명시하고 재시도를 유도(자동 backfill 없음)."""
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    result = await synth_svc.synthesize(db, session)
+    if result is None:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "SYNTHESIS_GENERATION_FAILED", "message": "AI 종합 생성에 실패했습니다. 잠시 후 다시 시도해주세요."},
+        )
+    updated = await repo.update(id, synthesis=result)
+    assert updated is not None
+    return await _build_session_response(db, updated, auth)
+
+
+@router.post("/{id}/recommend-next", response_model=SessionResponse)
+async def recommend_next_session(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> SessionResponse:
+    """dc861e44 §3 — L3 다음가설 추천(on-demand). synthesis 선행 필수 — PO 결(2026-07-03):
+    fail-closed(409), 자동 선행 생성 안 함(HITL 순서 — 팀이 종합을 보고/편집한 뒤 추천)."""
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    if not _has_valid_synthesis(session.synthesis):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SYNTHESIS_REQUIRED", "message": "종합을 먼저 생성해야 합니다."},
+        )
+    result = await synth_svc.recommend_next(session.synthesis)
+    if result is None:
+        # synthesize_session과 동일 원칙 — 실패를 빈 배열로 조용히 저장해 기존 good
+        # next_hypotheses 캐시를 지우지 않는다(오르테가 지적 2026-07-03).
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "RECOMMENDATION_GENERATION_FAILED", "message": "다음가설 추천 생성에 실패했습니다. 잠시 후 다시 시도해주세요."},
+        )
+    updated = await repo.update(id, next_hypotheses=result)
+    assert updated is not None
+    return await _build_session_response(db, updated, auth)
+
+
+# story 4b87d3a6: FE `retro/[id]/page.tsx`+BFF는 `POST /{id}/synthesis`(명사) 1콜로
+# {synthesis, next_hypotheses}를 한번에 기대하는데(retro-sessions/[id]/synthesis/route.ts),
+# 이 라우터엔 `/synthesize`+`/recommend-next` 2분리 동사 엔드포인트만 있어 `/synthesis` 자체가
+# dev 라이브 404였다. L2(synthesize)+L3(recommend_next)를 순차 오케스트레이션 — 새 로직 0줄,
+# 기존 두 서비스 함수 재사용.
+@router.post("/{id}/synthesis", response_model=SessionResponse)
+async def synthesize_and_recommend(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> SessionResponse:
+    """dc861e44 §3 L2+L3 combined(FE 계약 정합, story 4b87d3a6). L2 실패 → 502(`/synthesize`와
+    동일 코드). L2 성공+L3 실패는 **combined 호출 자체를 실패시키지 않는다**(PO crux
+    2026-07-04 ①): synthesis는 이미 확정 저장됐고, next_hypotheses는 기존 캐시를 그대로
+    유지(#1863 data-loss 방지 원칙 연장 — 방금 실패한 L3로 예전 good 캐시를 지우지 않음).
+    FE도 원래 next_hypotheses를 optional로 취급(`?? []`)이라 L3만 실패해도 L2 성과가
+    죽지 않는다."""
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    sresult = await synth_svc.synthesize(db, session)
+    if sresult is None:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "SYNTHESIS_GENERATION_FAILED", "message": "AI 종합 생성에 실패했습니다. 잠시 후 다시 시도해주세요."},
+        )
+    updated = await repo.update(id, synthesis=sresult)
+    assert updated is not None
+
+    nresult = await synth_svc.recommend_next(updated.synthesis)
+    if nresult is not None:
+        updated = await repo.update(id, next_hypotheses=nresult)
+        assert updated is not None
+    # nresult is None → 조용히 스킵(위 docstring 참고) — updated.next_hypotheses는 DB의
+    # 기존(가능하면 예전) 값 그대로.
+
+    return await _build_session_response(db, updated, auth)
+
+
+@router.post("/{id}/next-hypotheses/adopt", response_model=SessionResponse)
+async def adopt_next_hypothesis(
+    id: uuid.UUID,
+    body: AdoptNextHypothesis,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: RetroSessionRepository = Depends(_get_session_repo),
+) -> SessionResponse:
+    """ecc531ce §3 — L3 추천 채택 → proposed 가설 persist + 다음 sprint 있으면
+    link_type="seeded"로 링크(없으면 backlog proposed). 신규 hypothesis 서비스 로직 0줄 —
+    기존 create_hypothesis + link_hypothesis 조합. sprint_id는 서버가 조회(§2 PO 결)해서
+    클라이언트가 넘기지 않으므로 그 축의 IDOR가 설계상 없다.
+
+    story 4b87d3a6: candidate_id는 path가 아니라 body의 `id`(FE `{...rec, statement}`
+    spread가 실어보내는 필드 — FE 코드 변경 0). 누락/malformed면 Pydantic이 자동 422
+    (PO crux 2026-07-04: 암묵계약 drift 대비 graceful 422 확인 완료).
+
+    ⭐HITL statement 편집 반영(story 4b87d3a6, PO crux "§3.7.1 확정은 당신이" 위반 지적) —
+    body.statement가 있으면(사람이 sprint-close-cockpit의 OperatorTextarea로 편집한 값)
+    그걸 쓰고, 없으면 서버 저장 candidate의 statement 그대로. metric_definition/
+    measure_after는 여전히 서버 값만 신뢰(클라 위조 방지 — AI 산출 수치는 편집 대상 아님,
+    문구만 사람이 다듬는 게 UX 의도).
+
+    SOUL-LOCK(유나 §6) "채택=인간 게이트" — agent caller는 403.
+
+    원자성(까심 crux 2026-07-03): `repo.get_for_update`로 이 session row를 잠가 동시
+    더블클릭이 직렬화되게 한다 — 안 그러면 둘 다 "미채택"을 읽고 각자 create_hypothesis를
+    호출해 중복 proposed 가설이 생긴다(#1862 set_sprint_link TOCTOU와 같은 클래스)."""
+    session = await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
+    caller = await resolve_member(auth, session.org_id, db, project_id=session.project_id)
+    if caller.type != "human":
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "ADOPTION_REQUIRES_HUMAN", "message": "다음가설 채택은 사람만 할 수 있습니다."},
+        )
+
+    locked = await repo.get_for_update(id)
+    if locked is None:
+        raise HTTPException(status_code=404, detail="Retro session not found")
+
+    candidate = seed_svc.find_candidate(locked.next_hypotheses, body.id)
+    if candidate is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "CANDIDATE_NOT_FOUND", "message": "추천 가설을 찾을 수 없습니다."},
+        )
+    if candidate.get("adopted_hypothesis_id"):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ALREADY_ADOPTED", "message": "이미 채택된 추천입니다."},
+        )
+
+    statement = body.statement.strip() if body.statement and body.statement.strip() else candidate["statement"]
+
+    hyp = await hyp_svc.create_hypothesis(
+        db, session.org_id, caller,
+        HypothesisCreate(
+            project_id=session.project_id,
+            statement=statement,
+            metric_definition=candidate["metric_definition"],
+            measure_after=candidate["measure_after"],
+            status="proposed",
+            source_type="retro_synthesis",
+            source_id=session.id,
+        ),
+    )
+
+    next_sprint = await seed_svc.resolve_next_sprint(db, session.org_id, session.project_id)
+    if next_sprint is not None:
+        await hyp_svc.link_hypothesis(
+            db, session.org_id, hyp.id,
+            HypothesisLinkRequest(sprint_id=next_sprint.id, link_type="seeded"),
+        )
+
+    updated_candidates = [
+        {**c, "adopted_hypothesis_id": str(hyp.id)} if str(c.get("id")) == str(body.id) else c
+        for c in locked.next_hypotheses
+    ]
+    updated = await repo.update(id, next_hypotheses=updated_candidates)
+    assert updated is not None
+    return await _build_session_response(db, updated, auth)
 
 
 @router.patch("/{id}/phase", response_model=SessionListResponse)

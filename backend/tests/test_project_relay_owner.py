@@ -16,7 +16,12 @@ from app.services.project_auth import resolve_project_relay_owner
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
-pytestmark = pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(raw SQL UNION/COALESCE)")
+# story 8236bbc3: create_all(+drop_all)로 자체 스키마를 직접 다룸 — 공유 alembic-migrated
+# DB 오염 방지 위해 격리 DB 전용(conftest.py 가드가 마커 누락을 자동 검출).
+pytestmark = [
+    pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(raw SQL UNION/COALESCE)"),
+    pytest.mark.destructive_schema,
+]
 
 
 @pytest.fixture

@@ -17,6 +17,7 @@ import {
   Layers,
   LayoutDashboard,
   MessageSquare,
+  Repeat,
   Search,
   Settings,
   Users,
@@ -228,6 +229,16 @@ export function AppSidebar({
                 >
                   <Layers />
                   <span>{t('epics')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/loops" />}
+                  isActive={isActive('/loops')}
+                  tooltip={t('loops')}
+                >
+                  <Repeat />
+                  <span>{t('loops')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>

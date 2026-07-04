@@ -29,6 +29,17 @@ def _mock_outcome_verdicts():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _mock_loop_attribution():
+    """E-LOOP-LEDGER S7: scorer가 해소 직후 attribute_loop_outcome도 호출하므로(추가 session.execute
+    1회), _mock_outcome_verdicts와 동일 이유로 전이 로직만 검증하는 기존 테스트에서 격리한다."""
+    with patch(
+        "app.services.loop_outcome_attribution.attribute_loop_outcome",
+        new=AsyncMock(return_value={"skipped_reason": "no_measuring_loop", "attributed": []}),
+    ):
+        yield
+
+
 def _hyp(status="active", source="ga4", **ov):
     md = {"metric": "signups", "source": source, "target": 100, "direction": "up"}
     base = dict(
@@ -49,6 +60,12 @@ def _session(execute_results):
     s = AsyncMock()
     s.execute = AsyncMock(side_effect=execute_results)
     s.commit = AsyncMock()
+    # P1-S3g: session.begin_nested()가 진짜 async context manager처럼 동작해야(SAVEPOINT 구조
+    # 재현) — plain AsyncMock()은 __aenter__/__aexit__을 자동 지원하지 않는다.
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=None)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    s.begin_nested = MagicMock(return_value=cm)
     return s
 
 

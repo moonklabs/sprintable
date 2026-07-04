@@ -61,6 +61,53 @@ export interface RetroActionRecord {
   created_at: string;
 }
 
+/**
+ * E-SPRINT-LOOP FE(1b9f4ecb) — 회고 = sprint-close 종합 cockpit(핸드오프 `retro-sprint-close-synthesis-handoff`
+ * §5). additive+nullable graceful 계약 — 소스=HypothesisSprintLink(BE story a4acc4d0, 디디 병행).
+ * BE 미착지 구간엔 필드 부재/404를 빈배열·null로 흡수해 렌더(크래시 0, 별도 BE 대기 불요).
+ */
+export type RetroHypothesisVerdict = 'verified' | 'falsified' | 'measuring' | 'killed';
+
+// story fbf1c14b: GET /api/v2/sprints/:id/hypotheses는 backend HYPOTHESIS_STATUSES 전체를
+// 정직하게 반환한다(proposed/active는 sprint-open 직후 정상 케이스) — verdict 4종만 담던
+// 이 유니온을 좁게 유지하면 h.status의 실제 값과 타입이 어긋난다(PO crux: BE가 진실을
+// 숨기지 않기로 확정했으니 FE 타입도 그 진실을 반영해야 함).
+export type RetroHypothesisStatus = RetroHypothesisVerdict | 'proposed' | 'active' | 'archived';
+
+export interface RetroHypothesisResult {
+  id: string;
+  statement: string;
+  status: RetroHypothesisStatus;
+  metric?: string | null;
+  target?: number | null;
+  direction?: 'up' | 'down' | null;
+  actual?: number | null;
+  measure_after?: string | null;
+  href?: string | null;
+}
+
+export interface RetroSynthesisLearned {
+  text: string;
+  source?: string | null;
+}
+
+export interface RetroSynthesis {
+  learned: RetroSynthesisLearned[];
+  generated_at: string;
+  source: 'ai_draft';
+}
+
+export interface RetroNextHypothesis {
+  statement: string;
+  // BE 계약 추정(§5 HypothesisDraftResponse 형) — 실제 페이로드에서 누락/null 가능성 있어
+  // optional로 방어(까심 QA 적출: 무가드 deref 크래시 재발 방지).
+  metric_definition?: { metric: string; target: number; direction: 'up' | 'down' } | null;
+  measure_after?: string | null;
+  confidence?: number | null;
+  rationale?: string | null;
+  requires_confirmation: true;
+}
+
 const VALID_TRANSITIONS: Record<string, string[]> = {
   collect: ['group'],
   group: ['vote'],

@@ -467,6 +467,58 @@ async def score_hypotheses_cron(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── POST /api/v2/internal/cron/embed-backlog ──────────────────────────────────
+
+@router.post("/embed-backlog")
+async def embed_backlog_cron(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """E-LOOP-LEDGER P1-S3: embeddings 백로그(status pending/failed) 배치 임베딩(블루프린트 §P1).
+
+    embed_client(P1-S2, gemini-embedding-001@768) 호출 — 성공 시 ready(벡터 저장), 실패(인증불가/
+    API오류/응답이상)는 원인 구분 불가라 pending 유지(false-hit 0 설계 계승, 다음 tick 재시도).
+    FOR UPDATE SKIP LOCKED로 중첩 invocation 간 disjoint 배치 보장(workflow_handoff_watchdog 동형).
+    tick당 상한 있음(폭주 방지). 신규 write-path(P1-S4)가 쌓은 pending row를 이 cron이 drain.
+    """
+    verify_cron(request)
+
+    from app.services.embedding_backlog import process_embedding_backlog
+
+    try:
+        summary = await process_embedding_backlog(session)
+        await session.commit()
+        return _ok(summary)
+    except Exception as exc:
+        logger.exception("embed-backlog cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── POST /api/v2/internal/cron/embed-backfill ─────────────────────────────────
+
+@router.post("/embed-backfill")
+async def embed_backfill_cron(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """E-LOOP-LEDGER P1-S5: 기존 hypothesis/loop/loop_artifact 전체를 embeddings status='pending'으로
+    1회 backfill(블루프린트 §P1). 네트워크 I/O 0(enqueue_embedding=INSERT/UPSERT만) — 실제 임베딩은
+    P1-S3(embed-backlog) cron이 후속 처리. content_hash 멱등이라 재실행해도 안전(순수 1회성 아님,
+    안전하게 재트리거 가능). 신규 마이그 0 — 순수 스크립트로 gcloud/migrate 잡과 무관.
+    """
+    verify_cron(request)
+
+    from app.services.embedding_backfill import backfill_embeddings
+
+    try:
+        counts = await backfill_embeddings(session)
+        await session.commit()
+        return _ok(counts)
+    except Exception as exc:
+        logger.exception("embed-backfill cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── S8: storage capacity lifecycle crons ─────────────────────────────────────
 
 _ASSET_GRACE_DAYS = 7

@@ -36,6 +36,12 @@ _CORE = "core"
 
 _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     "ping", "sprintable_ping", "sprintable_my_dashboard", "sprintable_check_notifications",
+    # P1-S12: 백엔드 SSOT(app/services/mcp_toolset.py)와 대조해 기존 드리프트 발견 후 동기화
+    # (get_workflow_guide/list_team_members/poll_events가 vendored 사본에 빠져있었음 — 발견 즉시
+    # 수정, 모두 비파괴 read라 always-allow 안전). sprintable_get_loop_context(P1-S12, 이 스토리
+    # 신규)도 read-only·get_workflow_guide 동형으로 여기 추가.
+    "sprintable_get_workflow_guide", "sprintable_list_team_members", "sprintable_poll_events",
+    "sprintable_get_loop_context",
 })
 
 _LEGACY_SCOPES: frozenset[str] = frozenset({"read", "write"})

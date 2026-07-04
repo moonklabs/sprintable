@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 837a36c4(Group B b6): proxy 위임 리팩토링 후 stale 재작성 — proxyToFastapiWithParams·auth 게이트. POST는 201.
-const { getAuthContext, proxyToFastapiWithParams } = vi.hoisted(() => ({
-  getAuthContext: vi.fn(), proxyToFastapiWithParams: vi.fn(),
+const { getOrgProjectAuthContext, proxyToFastapiWithParams } = vi.hoisted(() => ({
+  getOrgProjectAuthContext: vi.fn(), proxyToFastapiWithParams: vi.fn(),
 }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapiWithParams }));
 
 import { GET, POST } from './route';
@@ -18,10 +18,10 @@ const okRes = (b: unknown = { ok: 1 }) =>
 const req = (m = 'GET') => new Request(`http://localhost/x/${ID}/comments`, { method: m });
 
 describe('/api/docs/[id]/comments (proxyWithParams 위임)', () => {
-  beforeEach(() => { getAuthContext.mockReset(); proxyToFastapiWithParams.mockReset(); getAuthContext.mockResolvedValue(agent()); });
+  beforeEach(() => { getOrgProjectAuthContext.mockReset(); proxyToFastapiWithParams.mockReset(); getOrgProjectAuthContext.mockResolvedValue(agent()); });
   for (const [name, fn] of [['GET', GET], ['POST', POST]] as const) {
     it(`${name}: 401 when unauthenticated`, async () => {
-      getAuthContext.mockResolvedValue(null);
+      getOrgProjectAuthContext.mockResolvedValue(null);
       expect((await fn(req(name), ctx())).status).toBe(401);
       expect(proxyToFastapiWithParams).not.toHaveBeenCalled();
     });

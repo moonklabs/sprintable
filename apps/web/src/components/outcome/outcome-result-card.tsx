@@ -6,7 +6,7 @@ import { OutcomeStatusBadge, type OutcomeStatus } from './outcome-status-badge';
 
 export type { OutcomeResult };
 interface Props { status: OutcomeStatus; hypothesis?: string | null; result?: OutcomeResult | null; pendingMetricLabel?: string; }
-const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+export const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 
 export function OutcomeResultCard({ status, hypothesis, result, pendingMetricLabel }: Props) {
   const t = useTranslations('outcomeLoop');
@@ -47,7 +47,7 @@ export function OutcomeResultCard({ status, hypothesis, result, pendingMetricLab
   );
 }
 
-function DeltaTrack({ target, actual, isHit, targetLabel }: { target: number; actual: number; isHit: boolean; targetLabel: string }) {
+export function DeltaTrack({ target, actual, isHit, targetLabel }: { target: number; actual: number; isHit: boolean; targetLabel: string }) {
   const scale = Math.max(Math.abs(target), Math.abs(actual), 1);
   const offset = Math.max(-42, Math.min(42, ((actual - target) / scale) * 42));
   return (

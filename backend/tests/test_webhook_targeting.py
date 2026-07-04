@@ -91,10 +91,22 @@ _requires_db = pytest.mark.skipif(
 
 
 @_requires_db
+@pytest.mark.xfail(
+    strict=False,
+    reason="story 18eefc31 — 원 xfail 사유(order-dependent, 배치별 asyncio loop RuntimeError)는 "
+    "test_event1config_webhook_targets.py::test_resolve_predicate_realdb 와 동일 근본원인(공유 "
+    "singleton `app.core.database.async_session_factory` 를 pytest-asyncio 함수-스코프 루프에서 "
+    "사용)이라 동일 수정(테스트 전용 엔진+dispose)으로 해결했으나, 그 뒤에 남는 두 번째 에러 "
+    "(webhook_configs.member_id NotNullViolation, broadcast 행 member_id=None 시드)는 별개의 "
+    "이미-에스컬된 product 버그다 — §AC2 project-wide broadcast webhook 은 member_id NOT NULL "
+    "제약 때문에 100% 도달 불가 dead code(follow-up story 34b3a8fb 에서 폐기 vs 복구 결정 대기). "
+    "그 story 의 결정·구현 완료 後 이 xfail 도 함께 해소. story 18eefc31 트래킹.",
+)
 @pytest.mark.anyio
 async def test_predicate_semantics_realdb():
     """실DB: member-bound는 project 독립으로 covered, broadcast(null)은 제외, 타 org 격리."""
-    from app.core.database import async_session_factory
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
     from app.models.webhook_config import WebhookConfig
 
     org_a, org_b = uuid.uuid4(), uuid.uuid4()
@@ -104,37 +116,44 @@ async def test_predicate_semantics_realdb():
     agent_cross_org = uuid.uuid4()     # 타 org webhook
     agent_inactive = uuid.uuid4()      # is_active=False
 
-    async with async_session_factory() as db:
-        db.add_all([
-            WebhookConfig(id=uuid.uuid4(), org_id=org_a, project_id=proj_x,
-                          member_id=agent_member_proj, url="https://h/1", is_active=True),
-            WebhookConfig(id=uuid.uuid4(), org_id=org_a, project_id=proj_x,
-                          member_id=None, url="https://h/bcast", is_active=True),
-            WebhookConfig(id=uuid.uuid4(), org_id=org_b, project_id=proj_y,
-                          member_id=agent_cross_org, url="https://h/2", is_active=True),
-            WebhookConfig(id=uuid.uuid4(), org_id=org_a, project_id=proj_x,
-                          member_id=agent_inactive, url="https://h/3", is_active=False),
-        ])
-        await db.commit()
-        try:
-            # org_a 기준 조회: proj_y 대화여도 member-bound는 project 독립으로 covered.
-            out = await active_webhook_member_ids(
-                db, org_a,
-                [agent_member_proj, agent_broadcast_only, agent_cross_org, agent_inactive],
-            )
-            assert agent_member_proj in out, "member-bound는 project 독립으로 covered"
-            assert agent_broadcast_only not in out, "broadcast(null)은 멤버 커버 아님 — 제외"
-            assert agent_cross_org not in out, "타 org webhook 격리"
-            assert agent_inactive not in out, "비활성 webhook 제외"
-        finally:
-            for mid in (agent_member_proj, agent_cross_org, agent_inactive):
-                await db.execute(
-                    WebhookConfig.__table__.delete().where(WebhookConfig.member_id == mid)
-                )
-            await db.execute(
-                WebhookConfig.__table__.delete().where(
-                    WebhookConfig.org_id.in_([org_a, org_b]),
-                    WebhookConfig.member_id.is_(None),
-                )
-            )
+    # story 18eefc31: 테스트 전용 엔진(+dispose) — 프로덕션 전역 싱글턴 대신
+    # (다른 realdb 테스트와 동일 관례, "attached to a different loop" 방지).
+    engine = create_async_engine(_ASYNCPG_URL.replace("postgresql://", "postgresql+asyncpg://"))
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as db:
+            db.add_all([
+                WebhookConfig(id=uuid.uuid4(), org_id=org_a, project_id=proj_x,
+                              member_id=agent_member_proj, url="https://h/1", is_active=True),
+                WebhookConfig(id=uuid.uuid4(), org_id=org_a, project_id=proj_x,
+                              member_id=None, url="https://h/bcast", is_active=True),
+                WebhookConfig(id=uuid.uuid4(), org_id=org_b, project_id=proj_y,
+                              member_id=agent_cross_org, url="https://h/2", is_active=True),
+                WebhookConfig(id=uuid.uuid4(), org_id=org_a, project_id=proj_x,
+                              member_id=agent_inactive, url="https://h/3", is_active=False),
+            ])
             await db.commit()
+            try:
+                # org_a 기준 조회: proj_y 대화여도 member-bound는 project 독립으로 covered.
+                out = await active_webhook_member_ids(
+                    db, org_a,
+                    [agent_member_proj, agent_broadcast_only, agent_cross_org, agent_inactive],
+                )
+                assert agent_member_proj in out, "member-bound는 project 독립으로 covered"
+                assert agent_broadcast_only not in out, "broadcast(null)은 멤버 커버 아님 — 제외"
+                assert agent_cross_org not in out, "타 org webhook 격리"
+                assert agent_inactive not in out, "비활성 webhook 제외"
+            finally:
+                for mid in (agent_member_proj, agent_cross_org, agent_inactive):
+                    await db.execute(
+                        WebhookConfig.__table__.delete().where(WebhookConfig.member_id == mid)
+                    )
+                await db.execute(
+                    WebhookConfig.__table__.delete().where(
+                        WebhookConfig.org_id.in_([org_a, org_b]),
+                        WebhookConfig.member_id.is_(None),
+                    )
+                )
+                await db.commit()
+    finally:
+        await engine.dispose()

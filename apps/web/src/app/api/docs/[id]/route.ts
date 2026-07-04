@@ -1,6 +1,6 @@
 import { DocsService } from '@/services/docs';
 import { handleApiError } from '@/lib/api-error';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { createDocRepository } from '@/lib/storage/factory';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
@@ -9,7 +9,7 @@ type RouteParams = { params: Promise<{ id: string }> };
 
 export async function PATCH(request: Request, { params }: RouteParams) {
   const { id } = await params;
-  const me = await getAuthContext(request);
+  const me = await getOrgProjectAuthContext(request);
   if (!me) return ApiErrors.unauthorized();
   if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
   // Thin proxy to the FastAPI BE, which owns the authoritative slug logic
@@ -27,7 +27,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 export async function GET(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
@@ -40,7 +40,7 @@ export async function GET(request: Request, { params }: RouteParams) {
 export async function DELETE(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;

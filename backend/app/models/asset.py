@@ -24,7 +24,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, OrgScopedMixin, SoftDeleteMixin, TimestampMixin
 
 # asset_links.source_type 허용값(catch: AC6 다형). CHECK + 서비스 가드 양쪽에서 강제.
-ASSET_LINK_SOURCE_TYPES = ("conversation_message", "story", "doc", "manual")
+# 'loop_artifact': E-LOOP-LEDGER S2(0150) — CHECK 제약도 그 마이그에서 동일하게 확장됨.
+ASSET_LINK_SOURCE_TYPES = ("conversation_message", "story", "doc", "manual", "loop_artifact")
 
 
 class AssetFolder(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
@@ -111,7 +112,7 @@ class AssetLink(Base, OrgScopedMixin, TimestampMixin):
             "asset_id", "source_type", "source_id", name="uq_asset_links_asset_source"
         ),
         CheckConstraint(
-            "source_type IN ('conversation_message','story','doc','manual')",
+            "source_type IN ('conversation_message','story','doc','manual','loop_artifact')",
             name="ck_asset_links_source_type",
         ),
         Index("ix_asset_links_source", "source_type", "source_id"),

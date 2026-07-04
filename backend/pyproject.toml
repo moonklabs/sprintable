@@ -28,6 +28,12 @@ dependencies = [
     "boto3>=1.34.0",
     "pypdf>=5.0.0",
     "python-docx>=1.1.0",
+    # E-LOOP-LEDGER P1-S1: pgvector SQLAlchemy Vector 타입(embeddings 테이블). extension은 baseline에 이미 활성화됨.
+    "pgvector>=0.3.0",
+    # E-LOOP-LEDGER P1-S2/S25: Vertex AI(gemini-embedding-001 임베딩 + generate_text 생성형) 클라이언트.
+    # ADC 인증(신규 크리덴셜 0). Gemini 피벗(2026-07-03)으로 anthropic[vertex](claude-sonnet-5
+    # 생성형 경로)는 완전 은퇴 — moonklabs org GCP credit이 Vertex Claude 미포함.
+    "google-genai>=1.0.0",
 ]
 
 [dependency-groups]
@@ -44,3 +50,6 @@ dev = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 timeout = 30
+markers = [
+    "destructive_schema: module calls Base.metadata.create_all()/drop_all() directly to build/tear down its own schema — must run against an isolated throwaway DB, never the shared alembic-migrated baseline DB (drop_all issues DROP TABLE against objects that are VIEWs in baseline, e.g. team_members, and corrupts the DB for every later test in the same session). See story 8236bbc3 / docs/design-ci-realdb-gap-8236bbc3.",
+]

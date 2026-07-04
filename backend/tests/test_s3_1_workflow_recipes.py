@@ -52,7 +52,7 @@ async def _client():
 
 @pytest.mark.anyio
 async def test_list_recipes_includes_builtins():
-    """AC1/6: GET /workflow-recipes — builtin 3종 포함."""
+    """AC1/6: GET /workflow-recipes — builtin 4종 포함(S17: loop-agency 추가)."""
     client, session, app = await _client()
     try:
         # DB에 템플릿 없는 경우
@@ -69,7 +69,8 @@ async def test_list_recipes_includes_builtins():
         assert "scrum-3step" in slugs
         assert "kanban-simple" in slugs
         assert "solo" in slugs
-        assert len(body) >= 3
+        assert "loop-agency" in slugs
+        assert len(body) >= 4
     finally:
         app.dependency_overrides.clear()
 
@@ -225,10 +226,10 @@ async def test_workflow_templates_endpoint_still_works():
 # ─── AC6: 3종 프리셋 단위 확인 ───────────────────────────────────────────────
 
 def test_builtin_recipes_slugs():
-    """AC6: 코드 내 3종 프리셋 slug 확인."""
+    """AC6(+S17): 코드 내 4종 프리셋 slug 확인(scrum-3step·kanban-simple·solo·loop-agency)."""
     from app.routers.workflow_recipes import _BUILTIN_RECIPES
     slugs = {r["slug"] for r in _BUILTIN_RECIPES}
-    assert slugs == {"scrum-3step", "kanban-simple", "solo"}
+    assert slugs == {"scrum-3step", "kanban-simple", "solo", "loop-agency"}
 
 
 def test_generate_guide_markdown_format():
@@ -240,3 +241,42 @@ def test_generate_guide_markdown_format():
     assert "###" in guide
     assert "**담당 역할**" in guide
     assert "**기대 행동**" in guide
+
+
+# ─── S17(블루프린트 §5): loop-agency 레시피 ─────────────────────────────────
+
+def test_loop_agency_recipe_has_blueprint_6_step_dag():
+    """블루프린트 §5 DAG 그대로: Goal&Hypothesis→Brief→Generate Variants→Human Pick→
+    Execute→Track&Learn — 6단계·pattern이 실제 엔티티/게이트명과 정합(S18이 이 pattern에
+    의존할 수 있게)."""
+    from app.routers.workflow_recipes import _BUILTIN_BY_ID
+    recipe = _BUILTIN_BY_ID["loop-agency"]
+    assert recipe["name"]
+    assert recipe["builtin"] is True
+    patterns = [s["pattern"] for s in recipe["steps"]]
+    assert patterns == [
+        "goal_hypothesis", "brief_doc_approval", "generate_variants",
+        "loop_decision", "execute", "track_and_learn",
+    ]
+
+
+@pytest.mark.anyio
+async def test_get_guide_builtin_loop_agency():
+    """AC2/3(S17): GET /workflow-recipes/loop-agency/guide — 마크다운+6단계 전부 서술."""
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        session.execute = AsyncMock(return_value=mock_result)
+
+        async with client as c:
+            resp = await c.get("/api/v2/workflow-recipes/loop-agency/guide")
+
+        assert resp.status_code == 200
+        guide = resp.json()["guide"]
+        for i in range(1, 7):
+            assert f"{i}단계" in guide
+        assert "가설" in guide
+        assert "loop_artifacts" in guide or "실행안" in guide
+    finally:
+        app.dependency_overrides.clear()

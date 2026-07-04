@@ -3,11 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // 837a36c4(Group B): 라우트가 FastAPI proxy 위임으로 리팩토링됨 — 테스트를 현 계약
 // (auth → proxyToFastapi → apiSuccess 래핑)에 맞춰 재작성. 구 createDbServerClient 직쿼리
 // mock은 폐기(라우트가 더는 DB를 직접 안 쓰며, 비즈니스 로직은 FastAPI backend pytest가 검증).
-const { getAuthContext, proxyToFastapi } = vi.hoisted(() => ({
-  getAuthContext: vi.fn(),
+const { getOrgProjectAuthContext, proxyToFastapi } = vi.hoisted(() => ({
+  getOrgProjectAuthContext: vi.fn(),
   proxyToFastapi: vi.fn(),
 }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET } from './route';
@@ -18,19 +18,19 @@ const agent = () => ({ id: 'a', type: 'agent', rateLimitExceeded: false, rateLim
 
 describe('GET /api/analytics/velocity-history', () => {
   beforeEach(() => {
-    getAuthContext.mockReset();
+    getOrgProjectAuthContext.mockReset();
     proxyToFastapi.mockReset();
-    getAuthContext.mockResolvedValue(agent());
+    getOrgProjectAuthContext.mockResolvedValue(agent());
   });
 
   it('returns 401 when unauthenticated', async () => {
-    getAuthContext.mockResolvedValue(null);
+    getOrgProjectAuthContext.mockResolvedValue(null);
     expect((await GET(new Request(URL))).status).toBe(401);
     expect(proxyToFastapi).not.toHaveBeenCalled();
   });
 
   it('returns 429 when rate limited', async () => {
-    getAuthContext.mockResolvedValue({ ...agent(), rateLimitExceeded: true });
+    getOrgProjectAuthContext.mockResolvedValue({ ...agent(), rateLimitExceeded: true });
     expect((await GET(new Request(URL))).status).toBe(429);
   });
 
