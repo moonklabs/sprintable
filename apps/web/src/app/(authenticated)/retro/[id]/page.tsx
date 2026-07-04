@@ -31,6 +31,7 @@ import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outc
 import type { OutcomeStatus } from '@/components/outcome/outcome-status-badge';
 import { SprintCloseCockpit } from '@/components/retro/sprint-close-cockpit';
 import { EvidenceStrip } from '@/components/retro/evidence-strip';
+import { Skeleton } from '@/components/ui/skeleton';
 
 type RetroItemCategory = 'good' | 'bad' | 'improve';
 type VisibleStage = RetroVisibleStage;
@@ -143,6 +144,37 @@ function MergeableItemCard({
   );
 }
 
+/**
+ * E-SPRINT-LOOP FE(5feac498) — T=0(session 도착 전) 셸 skeleton. 아직 어느 단계인지 몰라
+ * 특정 stage UI를 흉내내지 않고, 종합 헤더+가설 카드+3열 아이템 그리드의 일반 형태만 예고한다
+ * (핸드오프 §4 목업 T=0 형태 근사). DS-S11 Skeleton 재사용(신규토큰 0).
+ */
+function RetroEntrySkeleton() {
+  return (
+    <>
+      <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+        <Skeleton variant="text" className="h-4 w-32" />
+        <div className="flex gap-3">
+          <Skeleton variant="text" className="h-3 w-20" />
+          <Skeleton variant="text" className="h-3 w-20" />
+        </div>
+      </div>
+      <div className="rounded-xl border border-border bg-card p-4 space-y-2">
+        <Skeleton variant="text" className="h-3.5 w-2/3" />
+        <Skeleton variant="text" className="h-3 w-2/5" />
+      </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="space-y-3 rounded-xl border border-border bg-card p-4">
+            <Skeleton variant="text" className="h-3.5 w-16" />
+            <Skeleton variant="text" className="h-3 w-4/5" />
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export default function RetroSessionPage() {
   const t = useTranslations('retro');
   const { projectId, currentTeamMemberId } = useDashboardContext();
@@ -152,7 +184,10 @@ export default function RetroSessionPage() {
   const [session, setSession] = useState<RetroSessionRecord | null>(null);
   const [items, setItems] = useState<RetroItemRecord[]>([]);
   const [actions, setActions] = useState<RetroActionRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  // E-SPRINT-LOOP FE(5feac498) — progressive render: 셸(topbar·stepper)은 항상 렌더하고 섹션별로
+  // skeleton→hydrate(핸드오프 §4). 전체화면 블로킹 `loading` 게이트를 없애 `!session`(아직 한 번도
+  // 못 불러옴)으로 T=0 skeleton을, `session` 존재로 실 콘텐츠를 가른다 — 그룹핑/언그룹 등으로
+  // load()가 재호출돼도 session은 null로 되돌아가지 않아 재로드 시 skeleton이 다시 뜨지 않는다.
   const [loadError, setLoadError] = useState<string | null>(null);
   const [advancing, setAdvancing] = useState(false);
   const [advanceError, setAdvanceError] = useState<string | null>(null);
@@ -162,42 +197,64 @@ export default function RetroSessionPage() {
   const [sprintOutcome, setSprintOutcome] = useState<{
     status: OutcomeStatus; hypothesis: string | null; result: OutcomeResult | null; metric?: string;
   } | null>(null);
+  // E-SPRINT-LOOP FE(5feac498) §4 — 섹션별 로딩 플래그. session이 아직 안 왔으면(sprint_id 자체를
+  // 모름) "로딩 중"·session 도착 후 sprint_id 없으면 즉시 "완료"(해당 없음)·있으면 fetch 완료까지.
+  const [outcomeLoading, setOutcomeLoading] = useState(true);
+  // hasSession=session!=null. 최초 1회만 false→true 전이(load() 재호출로 세션이 다시 null이 되는
+  // 일은 없음) — 아래 두 effect가 group/ungroup의 load() 재호출마다 불필요 재fetch되지 않게 한다.
+  const hasSession = session != null;
 
   useEffect(() => {
-    if (!session?.sprint_id) { setSprintOutcome(null); return; }
+    if (!hasSession) return; // round-1 아직 — sprint_id를 모른다, outcomeLoading=true 유지.
+    const sprintId = session?.sprint_id;
+    if (!sprintId) { setSprintOutcome(null); setOutcomeLoading(false); return; }
     let cancelled = false;
+    setOutcomeLoading(true);
     void (async () => {
-      const res = await fetch(`/api/sprints/${session.sprint_id}`);
-      if (!res.ok || cancelled) return;
-      const { data } = await res.json() as { data?: { outcome_status?: string; success_hypothesis?: string | null; outcome_result?: OutcomeResult | null; metric_definition?: { metric?: string } | null } };
-      if (data?.outcome_status && data.outcome_status !== 'n_a') {
-        setSprintOutcome({ status: data.outcome_status as OutcomeStatus, hypothesis: data.success_hypothesis ?? null,
-          result: data.outcome_result ?? null, metric: data.metric_definition?.metric });
-      } else setSprintOutcome(null);
+      try {
+        const res = await fetch(`/api/sprints/${sprintId}`);
+        if (!res.ok || cancelled) return;
+        const { data } = await res.json() as { data?: { outcome_status?: string; success_hypothesis?: string | null; outcome_result?: OutcomeResult | null; metric_definition?: { metric?: string } | null } };
+        if (data?.outcome_status && data.outcome_status !== 'n_a') {
+          setSprintOutcome({ status: data.outcome_status as OutcomeStatus, hypothesis: data.success_hypothesis ?? null,
+            result: data.outcome_result ?? null, metric: data.metric_definition?.metric });
+        } else setSprintOutcome(null);
+      } finally {
+        if (!cancelled) setOutcomeLoading(false);
+      }
     })();
     return () => { cancelled = true; };
-  }, [session?.sprint_id]);
+    // hasSession(1회만 false→true 전이) + sprint_id 값만 트리거 — session 객체 참조 자체는 phase
+    // 전이·group/ungroup의 load() 재호출마다 바뀌므로 의도적으로 제외(불필요 재fetch 방지).
+  }, [hasSession, session?.sprint_id]);
 
   // E-SPRINT-LOOP FE(1b9f4ecb) — 회고 = sprint-close 종합 cockpit(핸드오프 §5, additive+nullable
   // graceful). 소스=HypothesisSprintLink(BE story a4acc4d0, 디디 병행) — 미착지 구간엔 404를
   // 빈 배열로 흡수(선택 기능, 크래시 0). session.sprint_id 없거나 fetch 실패해도 폼은 정상 동작.
   const [hypotheses, setHypotheses] = useState<RetroHypothesisResult[]>([]);
+  const [hypothesesLoading, setHypothesesLoading] = useState(true);
 
   useEffect(() => {
-    if (!session?.sprint_id) { setHypotheses([]); return; }
+    if (!hasSession) return;
+    const sprintId = session?.sprint_id;
+    if (!sprintId) { setHypotheses([]); setHypothesesLoading(false); return; }
     let cancelled = false;
+    setHypothesesLoading(true);
     void (async () => {
       try {
-        const res = await fetch(`/api/sprints/${session.sprint_id}/hypotheses`);
+        const res = await fetch(`/api/sprints/${sprintId}/hypotheses`);
         if (!res.ok || cancelled) { if (!cancelled) setHypotheses([]); return; }
         const json = await res.json() as { data?: RetroHypothesisResult[] };
         if (!cancelled) setHypotheses(json.data ?? []);
       } catch {
         if (!cancelled) setHypotheses([]);
+      } finally {
+        if (!cancelled) setHypothesesLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [session?.sprint_id]);
+    // 위 outcome effect와 동일 근거(hasSession 최초 전이 + sprint_id 값만 트리거).
+  }, [hasSession, session?.sprint_id]);
 
   // synthesis/next_hypotheses는 SessionResponse에 additive로 얹힐 예정(§5) — BE 미착지 구간엔
   // 필드 자체가 없어 undefined로 넘어오므로 null/빈배열로 기본값 처리(load()에서 함께 세팅).
@@ -266,7 +323,6 @@ export default function RetroSessionPage() {
 
   const load = useCallback(async () => {
     if (!projectId || !sessionId) return;
-    setLoading(true);
     setLoadError(null);
     try {
       const res = await fetch(`/api/retro-sessions/${sessionId}?project_id=${projectId}`);
@@ -294,8 +350,6 @@ export default function RetroSessionPage() {
       }
     } catch {
       setLoadError(t('loadFailed'));
-    } finally {
-      setLoading(false);
     }
   }, [projectId, sessionId, t]);
 
@@ -517,7 +571,11 @@ export default function RetroSessionPage() {
               {t('backToList')}
             </Link>
             <span className="text-muted-foreground">/</span>
-            <h1 className="text-sm font-medium">{session?.title ?? '...'}</h1>
+            {session ? (
+              <h1 className="text-sm font-medium">{session.title}</h1>
+            ) : (
+              <Skeleton variant="text" className="h-4 w-32" />
+            )}
             {session && currentStage ? (
               <Badge variant={STAGE_VARIANTS[currentStage]}>
                 {t(STAGE_KEYS[currentStage])}
@@ -550,7 +608,8 @@ export default function RetroSessionPage() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        {/* B1(9f27af8f): 3단계(+closed) 스테퍼 */}
+        {/* E-SPRINT-LOOP FE(5feac498) — 셸(stepper 프레임)은 항상 렌더(핸드오프 §4①). session
+            도착 전엔 중립 skeleton 칩(어느 단계인지 아직 모름)·도착 후 실제 상태로 hydrate. */}
         {session && currentStage ? (
           <div className="flex flex-wrap items-center gap-1.5 border-b border-border/80 px-6 py-3">
             {STAGE_ORDER.map((stage, index) => {
@@ -570,27 +629,31 @@ export default function RetroSessionPage() {
               );
             })}
           </div>
-        ) : null}
+        ) : (
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border/80 px-6 py-3">
+            {STAGE_ORDER.map((stage) => <Skeleton key={stage} className="h-5 w-14 rounded-md" />)}
+          </div>
+        )}
 
         <div className="space-y-6 p-6">
-          {loading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="h-32 animate-pulse rounded-xl bg-muted/50" />
-              ))}
-            </div>
-          ) : loadError ? (
+          {loadError ? (
             <EmptyState
               title={loadError}
               description={t('loadFailedDescription')}
               action={<Button variant="hero" onClick={() => void load()}>{t('retry')}</Button>}
             />
+          ) : !session ? (
+            // E-SPRINT-LOOP FE(5feac498) — 전체화면 blocking 게이트 제거(핸드오프 §4①): T=0에
+            // 셸(위 topbar/stepper)은 이미 렌더됐고, 본문은 이 skeleton으로 즉시 구조를 예고한다.
+            <RetroEntrySkeleton />
           ) : (
             <>
               {/* E-SPRINT-LOOP FE(1b9f4ecb) — 종료 단계 = sprint-close 종합 cockpit(핸드오프 §4 A안).
                   hypotheses[]가 있으면(HypothesisSprintLink 배선 후) N-가설 cockpit이 레거시
                   단일 sprintOutcome 카드를 대체 — 없으면(BE 미착지·현재 상태) 레거시 카드 그대로
-                  fallback해 회귀 0을 보장한다. */}
+                  fallback해 회귀 0을 보장한다.
+                  E-SPRINT-LOOP FE(5feac498) — T=session(round-1) hydrate 후에도 sprint 의존
+                  데이터(round-2: hypotheses/outcome)가 아직이면 섹션 skeleton(§4 T=sprint 표기). */}
               {currentStage === 'closed' && hypotheses.length > 0 ? (
                 <SprintCloseCockpit
                   hypotheses={hypotheses}
@@ -599,6 +662,18 @@ export default function RetroSessionPage() {
                   onGenerateSynthesis={handleGenerateSynthesis}
                   onAdoptRecommendation={handleAdoptRecommendation}
                 />
+              ) : currentStage === 'closed' && (hypothesesLoading || outcomeLoading) ? (
+                <div className="space-y-2.5">
+                  <Skeleton variant="text" className="h-3.5 w-40" />
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {[0, 1].map((i) => (
+                      <div key={i} className="space-y-2 rounded-xl border border-border bg-card p-3.5">
+                        <Skeleton variant="text" className="h-3.5 w-4/5" />
+                        <Skeleton variant="text" className="h-3 w-2/5" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
               ) : sprintOutcome ? (
                 <div className="space-y-2">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('linkedSprintOutcome')}</p>
