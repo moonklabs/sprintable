@@ -229,10 +229,17 @@ async def verify_agent_connection(
     에이전트 push 경로 자체가 없어(streamable, client-initiated) 보낼 곳이 없다. heartbeat 기반
     4단계 레일을 즉시 조회해 반환(사실상 GET verification-status 와 동형 — "확인" 버튼 클릭이 곧
     현재 heartbeat freshness 재조회를 뜻한다).
+
+    E-MCP-OPT S5(#4): project 미배정 에이전트는 **transport 무관 동일하게 400** — http 조기 return이
+    이 가드보다 먼저면 미배정 에이전트가 stdio=400/http=200으로 갈렸다(까심 QA). project 스코프가
+    없는 에이전트는애초에 "연결 검증"이 의미가 없으므로(heartbeat 조차 project 컨텍스트 하 tool
+    호출을 전제) 두 transport 모두 이 가드를 먼저 통과해야 한다.
     """
     member = await _fetch_org_agent(session, agent_id, org_id)
     if member is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    if not member.project_id:
+        raise HTTPException(status_code=400, detail="agent has no project scope to verify")
 
     if transport == "http":
         state = await get_verification_state(session, agent_id, transport="http")
@@ -242,9 +249,6 @@ async def verify_agent_connection(
             "verified": state["verified"],
             "rail": state["rail"],
         }
-
-    if not member.project_id:
-        raise HTTPException(status_code=400, detail="agent has no project scope to verify")
 
     seq = await start_verification(
         session, agent_id=agent_id, org_id=org_id, project_id=member.project_id

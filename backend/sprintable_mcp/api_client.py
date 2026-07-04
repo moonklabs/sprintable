@@ -248,10 +248,16 @@ class SprintableClient:
         url = f"{self._base_url}{path}"
         # E-MCP-HTTP S1: effective 키 = per-request override(http 멀티테넌트) ∨ env 단일키(stdio·무회귀).
         _key = _api_key_override.get() or self._api_key
+        from .config import settings as _mcp_settings
+
         headers = {
             "Authorization": f"Bearer {_key}",
             "x-agent-api-key": _key,
             "Content-Type": "application/json",
+            # E-MCP-OPT S5(#5): BE 가 첫인증 등 텔레메트리에서 실 transport 를 알 수 있도록 자기신고
+            # (BE 는 이 값을 신뢰만 하고 인가에 쓰지 않음 — 순수 관측용, per-request bearer/scope 가 실
+            # SSOT). 미설정 시 BE 는 fallback "stdio"(레거시 무회귀).
+            "X-MCP-Transport": (_mcp_settings.mcp_transport or "stdio").strip().lower(),
         }
         # 85429ee0: per-call override 시 X-Project-Id 헤더 전송 — 백엔드 get_verified_org_id 가
         # has_project_access 로 멤버십 검증 후 그 프로젝트로 컨텍스트 전환(mutation 라우트). 미설정 시
