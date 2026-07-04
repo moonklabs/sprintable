@@ -1,8 +1,11 @@
 """E-EVENTBUS P7-A S37: conversations 테이블 + Chat API."""
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
+import re
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -26,7 +29,7 @@ from app.routers.events import _push_to_agent, publish_event
 from app.schemas.attachment import validate_attachment_url
 from app.services import chat_presence
 from app.services.agent_runtime import supports_deterministic_command
-from app.services.asset_registry import sync_attachment_assets
+from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.services.command_classifier import classify_command
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import (
@@ -36,6 +39,7 @@ from app.services.member_resolver import (
     resolve_member,
     resolve_member_identity,
 )
+from app.services.storage import get_storage_provider
 
 logger = logging.getLogger(__name__)
 
@@ -582,6 +586,13 @@ class ConversationResponse(BaseModel):
 _MAX_ATTACHMENTS = 10
 _MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB (메타 sanity 상한)
 
+# E-MCP-OPT S2(bbfd24ba): MCP(비-브라우저) 클라이언트용 JSON/base64 업로드 — 스샷/작은 문서가
+# 실사용(대용량 아님). FE-proxy 100MB 캡과 별개로 더 작게(Cloud Run HTTP/1 32MiB 요청 캡 대비
+# 여유 마진). sprintable_mcp 의 동일 상수(tools/chat.py `_MCP_MAX_ATTACHMENT_BYTES`)와 정합.
+_MAX_JSON_ATTACHMENT_UPLOAD_SIZE = 2 * 1024 * 1024  # 2MiB decoded
+_MAX_ATTACHMENT_NAME_LEN = 255
+_SAFE_ATTACHMENT_NAME_RE = re.compile(r"[^\w.\-]+")
+
 
 class MessageAttachment(BaseModel):
     url: str           # FE-proxy 업로드 객체 url(https GCS 또는 canonical bare path·provider 추상)
@@ -627,6 +638,29 @@ class SendMessageRequest(BaseModel):
     def _limit_attachments(cls, v: list[MessageAttachment]) -> list[MessageAttachment]:
         if len(v) > _MAX_ATTACHMENTS:
             raise ValueError(f"too many attachments (max {_MAX_ATTACHMENTS})")
+        return v
+
+
+class UploadConversationAttachmentRequest(BaseModel):
+    """E-MCP-OPT S2: MCP(비-브라우저)용 JSON/base64 첨부 업로드 요청."""
+
+    content_base64: str
+    name: str
+    content_type: str
+
+    @field_validator("content_base64", "name", "content_type")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
+
+    @field_validator("content_type")
+    @classmethod
+    def _content_type_sane(cls, v: str) -> str:
+        if len(v) > _MAX_ATTACHMENT_NAME_LEN or any(ord(ch) < 32 for ch in v):
+            raise ValueError("invalid content_type")
         return v
 
 
@@ -1445,6 +1479,83 @@ async def send_message(
     if command_hints:
         response["command_gate"] = {"blocked": command_hints}
     return response
+
+
+def _safe_attachment_filename(name: str) -> str:
+    safe = _SAFE_ATTACHMENT_NAME_RE.sub("_", name.strip())[-128:]
+    return safe or "file"
+
+
+@router.post(
+    "/{conversation_id}/attachments",
+    status_code=201,
+    response_model=MessageAttachment,
+    response_model_exclude_none=True,
+)
+async def upload_conversation_attachment(
+    conversation_id: uuid.UUID,
+    body: UploadConversationAttachmentRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> MessageAttachment:
+    """E-MCP-OPT S2(bbfd24ba): 비-브라우저 클라이언트(MCP)용 JSON/base64 첨부 업로드.
+
+    인가는 `send_message`의 실제 발신 요건과 **동일**(참가자 필수) — 읽기 전용 엔드포인트의
+    admin-agent-only-conversation 우회는 여기 적용하지 않는다: 그 우회는 GET(list/get_conversation)
+    전용이고, 업로드는 결국 이 conversation 에 메시지를 보내는 것과 같은 쓰기 동작이라
+    `send_message`(에이전트 sender 는 참가자 아니면 무조건 403·우회/auto-join 없음)와 정합해야
+    한다 — 그렇지 않으면 비참가자 admin 에이전트가 업로드는 성공하고 뒤이은 send_chat_message 는
+    403 나는 모순이 생긴다.
+    """
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    participant = (await db.execute(
+        select(ConversationParticipant.id).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.member_id == sender.id,
+        )
+    )).scalar_one_or_none()
+    if participant is None:
+        raise HTTPException(status_code=403, detail="Not a participant")
+
+    try:
+        data = base64.b64decode(body.content_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="content_base64 must be valid base64")
+    if not data:
+        raise HTTPException(status_code=400, detail="attachment must not be empty")
+    if len(data) > _MAX_JSON_ATTACHMENT_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"attachment too large (max {_MAX_JSON_ATTACHMENT_UPLOAD_SIZE} bytes)",
+        )
+
+    safe_name = _safe_attachment_filename(body.name)
+    # S7 namespace — FE 업로드 라우트(apps/web .../conversations/[id]/attachments/route.ts)와
+    # 정확히 동일한 shape(org/<org>/project/<project>/chat/<conv>/<file>). path_in_source_scope/
+    # sync_attachment_assets 가 기대하는 스코프와 일치해야 IDOR 가드·read-authorize 가 통과한다.
+    object_path = (
+        f"org/{org_id}/project/{conv.project_id}/chat/{conversation_id}/{uuid.uuid4()}-{safe_name}"
+    )
+
+    uploaded = await get_storage_provider().put_object(
+        DEFAULT_CONTAINER, object_path, data, content_type=body.content_type,
+    )
+    if not uploaded:
+        raise HTTPException(status_code=502, detail="upload failed")
+
+    return MessageAttachment(
+        url=object_path,
+        name=body.name,
+        content_type=body.content_type,
+        size=len(data),
+    )
 
 
 @router.patch("/{conversation_id}/status", status_code=200)
