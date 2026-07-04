@@ -1,4 +1,4 @@
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
@@ -8,7 +8,7 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
  */
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded)
       return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);

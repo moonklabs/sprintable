@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getAuthContext } = vi.hoisted(() => ({
-  getAuthContext: vi.fn(),
+const { getOrgProjectAuthContext } = vi.hoisted(() => ({
+  getOrgProjectAuthContext: vi.fn(),
 }));
 
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext }));
 
 import { POST } from './route';
 
@@ -14,8 +14,8 @@ function makeAgent() {
 
 describe('POST /api/retro-sessions/[id]/actions', () => {
   beforeEach(() => {
-    getAuthContext.mockReset();
-    getAuthContext.mockResolvedValue(makeAgent());
+    getOrgProjectAuthContext.mockReset();
+    getOrgProjectAuthContext.mockResolvedValue(makeAgent());
     vi.restoreAllMocks();
   });
 

@@ -1,6 +1,6 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 // GET /api/activity-stream?project_id=X&actor_id=&verb=&object_type=&object_id=&since=&until=&after_seq=&limit=
@@ -9,7 +9,7 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
 // 명단 미노출)·delivery status 미포함은 BE에서 강제 — FE는 표시만(개수=recipient_ids.length).
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const res = await proxyToFastapi(request, '/api/v2/activity-stream');

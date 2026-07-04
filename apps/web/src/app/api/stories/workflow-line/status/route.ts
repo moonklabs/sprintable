@@ -1,6 +1,6 @@
 import { handleApiError } from '@/lib/api-error';
 import { ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 // E-DG S11 ①: workflow-line 상태 배치 read 프록시(보드 카드 badge용).
@@ -10,7 +10,7 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
 // query(?ids=)는 proxyToFastapi 가 url.search 로 자동 forward(중복 append 금지).
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 

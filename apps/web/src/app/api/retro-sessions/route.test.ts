@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 837a36c4(Group B b5): proxy 위임 리팩토링 후 stale 재작성 — auth 게이트 → proxyToFastapi → 래핑.
-const { getAuthContext, proxyToFastapi } = vi.hoisted(() => ({ getAuthContext: vi.fn(), proxyToFastapi: vi.fn() }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+const { getOrgProjectAuthContext, proxyToFastapi } = vi.hoisted(() => ({ getOrgProjectAuthContext: vi.fn(), proxyToFastapi: vi.fn() }));
+vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET, POST } from './route';
@@ -14,10 +14,10 @@ const okRes = (b: unknown = { ok: 1 }) =>
 const req = (m = 'GET') => new Request('http://localhost/api/retro-sessions?project_id=p', { method: m });
 
 describe('/api/retro-sessions (proxy 위임)', () => {
-  beforeEach(() => { getAuthContext.mockReset(); proxyToFastapi.mockReset(); getAuthContext.mockResolvedValue(agent()); });
+  beforeEach(() => { getOrgProjectAuthContext.mockReset(); proxyToFastapi.mockReset(); getOrgProjectAuthContext.mockResolvedValue(agent()); });
   for (const [name, fn] of [['GET', GET], ['POST', POST]] as const) {
     it(`${name}: 401 when unauthenticated`, async () => {
-      getAuthContext.mockResolvedValue(null);
+      getOrgProjectAuthContext.mockResolvedValue(null);
       expect((await fn(req(name))).status).toBe(401);
     });
     it(`${name}: delegates to ${PATH} and wraps`, async () => {

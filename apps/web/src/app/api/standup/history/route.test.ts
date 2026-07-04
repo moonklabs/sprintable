@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getAuthContext, proxyToFastapi } = vi.hoisted(() => ({
-  getAuthContext: vi.fn(),
+const { getOrgProjectAuthContext, proxyToFastapi } = vi.hoisted(() => ({
+  getOrgProjectAuthContext: vi.fn(),
   proxyToFastapi: vi.fn(),
 }));
 
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET } from './route';
@@ -16,13 +16,13 @@ function makeAgent() {
 
 describe('GET /api/standup/history', () => {
   beforeEach(() => {
-    getAuthContext.mockReset();
+    getOrgProjectAuthContext.mockReset();
     proxyToFastapi.mockReset();
-    getAuthContext.mockResolvedValue(makeAgent());
+    getOrgProjectAuthContext.mockResolvedValue(makeAgent());
   });
 
   it('returns 401 when not authenticated', async () => {
-    getAuthContext.mockResolvedValue(null);
+    getOrgProjectAuthContext.mockResolvedValue(null);
 
     const response = await GET(
       new Request('http://localhost/api/standup/history?project_id=project-1'),

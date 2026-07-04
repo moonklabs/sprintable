@@ -1,6 +1,6 @@
 import { handleApiError } from '@/lib/api-error';
 import { ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ id: string }> };
@@ -8,7 +8,7 @@ type RouteParams = { params: Promise<{ id: string }> };
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
