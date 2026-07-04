@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.pm import Sprint
 from app.models.retro import RetroItem, RetroSession, RetroVote
 from app.services import hypothesis as hyp_svc
 from app.services import retro_hypothesis_seed as seed_svc
@@ -134,6 +135,23 @@ async def create_session(
     # body.project_id 를 검증 없이 신뢰하면 무권한 project 에 session 을 심는 mutation IDOR.
     if not await has_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id):
         raise HTTPException(status_code=403, detail="해당 프로젝트 접근 권한이 없습니다")
+    # 까심 QA(#1880 embed-switch 中 실 Postgres 재현) — body.sprint_id가 실제 body.project_id
+    # 소속인지 검증하는 FK/CHECK가 없어 project A 세션에 project B sprint를 링크 가능했다.
+    # embed(session.project_id로 스코프)와 별도 /sprints/{id}/hypotheses(sprint의 실제
+    # project_id로 스코프) 응답이 갈라져 FE엔 "가설이 사라진" 것처럼 보였다(데이터 유실 아님,
+    # 애초 정합 안 된 링크). `_require_item_in_session`(아래, item_id가 부모 session 소속 아니면
+    # 404)과 동일 컨벤션 — 존재하나 이 스코프엔 없는 리소스는 404. org_id는 위 has_project_access
+    # 컨텍스트와 동일한 caller의 검증된 org(get_verified_org_id) — 테넌트 스코프 유지. 이 조회
+    # 1발이 "존재하지 않는 sprint_id"(오늘은 FK violation 500)까지 자연스럽게 404로 흡수한다.
+    # has_project_access 검증 後·이 체크를 두는 순서 — 무권한 caller에게 sprint 존재 유출 방지.
+    if body.sprint_id is not None:
+        sprint = (
+            await db.execute(
+                select(Sprint).where(Sprint.id == body.sprint_id, Sprint.org_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if sprint is None or sprint.project_id != body.project_id:
+            raise HTTPException(status_code=404, detail="Sprint not found")
     # P0(9f27af8f): created_by는 "누가 이 session을 만들었나"라는 행위자(actor) attribution —
     # body.created_by(client 지정)를 신뢰하면 타인 명의 spoofing 벡터. auth로 canonical
     # requester id를 직접 해소(B4/vote_item과 동일 SSOT 패턴), body.created_by는 무시.
