@@ -170,6 +170,77 @@ async function resolveTeamMemberFromMemberships(
   };
 }
 
+export interface AuthContext {
+  id: string;
+  org_id: string;
+  project_id: string;
+  project_name: string;
+  type?: 'human' | 'agent';
+  scope?: string[];
+  rateLimitExceeded?: boolean;
+  rateLimitRemaining?: number;
+  rateLimitResetAt?: number;
+}
+
+// story 7d6b770b: authz-only(org/project 스코프만 필요) 라우트가 소비하는 축소 shape.
+// id/project_name/type/scope는 light path(JWT claim)에선 안 채워지므로 optional로 남긴다 —
+// 이 필드들이 실제로 필요한 라우트는 애초에 getOrgProjectAuthContext를 쓰면 안 된다(9건
+// "needs_full_identity" 버킷은 getAuthContext 유지).
+export type OrgProjectAuthContext = Pick<AuthContext, 'org_id' | 'project_id' | 'type'>
+  & Partial<Pick<AuthContext, 'id' | 'project_name' | 'scope' | 'rateLimitExceeded' | 'rateLimitRemaining' | 'rateLimitResetAt'>>;
+
+function getRawApiKey(request: Request): string | null {
+  // x-api-key 헤더는 Authorization 헤더가 CDN에서 strip될 때를 위한 fallback
+  const authHeader = request.headers.get('Authorization');
+  const xApiKey = request.headers.get('x-api-key');
+  return authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : (xApiKey ?? null);
+}
+
+async function resolveApiKeyAuthContext(rawApiKey: string): Promise<AuthContext | null> {
+  try {
+    const { fastapiCall } = await import('@sprintable/storage-api');
+    const apiKeyMember = await fastapiCall<{
+      id: string; org_id: string; project_id: string; project_name: string;
+      type: 'human' | 'agent'; scope?: string[];
+    }>('GET', '/api/v2/me', rawApiKey);
+
+    if (!apiKeyMember) return null;
+
+    const { checkRateLimit } = await import('./rate-limiter');
+    const { allowed, remaining, resetAt } = checkRateLimit(apiKeyMember.id);
+    return {
+      id: apiKeyMember.id,
+      org_id: apiKeyMember.org_id,
+      project_id: apiKeyMember.project_id,
+      project_name: apiKeyMember.project_name ?? '',
+      type: apiKeyMember.type,
+      scope: apiKeyMember.scope,
+      rateLimitExceeded: !allowed,
+      rateLimitRemaining: remaining,
+      rateLimitResetAt: resetAt,
+    };
+  } catch {
+    // API key 인증 실패 — OAuth 경로로 계속(호출부가 판단)
+    return null;
+  }
+}
+
+async function resolveHumanAuthContextFromMe(accessToken: string): Promise<AuthContext | null> {
+  const { fastapiCall } = await import('@sprintable/storage-api');
+  const meData = await fastapiCall<{ id: string; org_id: string; project_id: string; project_name: string } | null>(
+    'GET', '/api/v2/me', accessToken
+  ).catch(() => null);
+  if (!meData) return null;
+
+  return {
+    id: meData.id,
+    org_id: meData.org_id,
+    project_id: meData.project_id,
+    project_name: meData.project_name,
+    type: 'human' as const,
+  };
+}
+
 /**
  * Dual auth: OAuth 또는 API Key로 인증
  *
@@ -183,50 +254,13 @@ async function resolveTeamMemberFromMemberships(
  *
  * @returns team_member context { id, org_id, project_id, project_name, type?, rateLimitExceeded? }
  */
-export const getAuthContext = cache(async (
-  request: Request
-): Promise<{
-  id: string;
-  org_id: string;
-  project_id: string;
-  project_name: string;
-  type?: 'human' | 'agent';
-  scope?: string[];
-  rateLimitExceeded?: boolean;
-  rateLimitRemaining?: number;
-  rateLimitResetAt?: number;
-} | null> => {
+export const getAuthContext = cache(async (request: Request): Promise<AuthContext | null> => {
   // 1. API Key 인증 — FastAPI /api/v2/me에 rawApiKey를 Bearer 토큰으로 전달
-  // x-api-key 헤더는 Authorization 헤더가 CDN에서 strip될 때를 위한 fallback
-  const authHeader = request.headers.get('Authorization');
-  const xApiKey = request.headers.get('x-api-key');
-  const rawApiKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : (xApiKey ?? null);
+  const rawApiKey = getRawApiKey(request);
   if (rawApiKey) {
-    try {
-      const { fastapiCall } = await import('@sprintable/storage-api');
-      const apiKeyMember = await fastapiCall<{
-        id: string; org_id: string; project_id: string; project_name: string;
-        type: 'human' | 'agent'; scope?: string[];
-      }>('GET', '/api/v2/me', rawApiKey);
-
-      if (apiKeyMember) {
-        const { checkRateLimit } = await import('./rate-limiter');
-        const { allowed, remaining, resetAt } = checkRateLimit(apiKeyMember.id);
-        return {
-          id: apiKeyMember.id,
-          org_id: apiKeyMember.org_id,
-          project_id: apiKeyMember.project_id,
-          project_name: apiKeyMember.project_name ?? '',
-          type: apiKeyMember.type,
-          scope: apiKeyMember.scope,
-          rateLimitExceeded: !allowed,
-          rateLimitRemaining: remaining,
-          rateLimitResetAt: resetAt,
-        };
-      }
-    } catch {
-      // API key 인증 실패 — OAuth 경로로 계속
-    }
+    const apiKeyContext = await resolveApiKeyAuthContext(rawApiKey);
+    if (apiKeyContext) return apiKeyContext;
+    // API key 인증 실패 — OAuth 경로로 계속
   }
 
   // 2. OAuth 세션 — JWT 쿠키 파싱
@@ -235,17 +269,45 @@ export const getAuthContext = cache(async (
   if (!session) return null;
 
   // FastAPI로 team member 조회
-  const { fastapiCall } = await import('@sprintable/storage-api');
-  const meData = await fastapiCall<{ id: string; org_id: string; project_id: string; project_name: string } | null>(
-    'GET', '/api/v2/me', session.access_token
-  ).catch(() => null);
-  if (!meData) return null;
+  return resolveHumanAuthContextFromMe(session.access_token);
+});
 
-  return {
-    id: meData.id,
-    org_id: meData.org_id,
-    project_id: meData.project_id,
-    project_name: meData.project_name,
-    type: 'human' as const,
-  };
+/**
+ * story 7d6b770b: getAuthContext의 경량 변형 — org/project 스코프 authz만 필요하고
+ * member_id(id)/project_name/type/scope는 안 쓰는 BFF 라우트 전용("pure proxy gate"
+ * 버킷, 63건 — FastAPI가 같은 토큰으로 재검증하므로 이 값들이 FE측 authz 결정에 쓰이지
+ * 않는 라우트). JWT app_metadata에 org_id·project_id가 **둘 다** 있으면 GET /api/v2/me
+ * 재호출 없이 그 claim을 쓴다(신규 네트워크 호출 0) — 없거나 malformed면 fail-closed로
+ * 기존 /me 경로로 fallback(기능 무손, 절대 fail-open 아님).
+ *
+ * ⚠️기존 getAuthContext()의 계약/동작은 이 함수 도입으로 전혀 바뀌지 않는다(94개 기존
+ * 호출부 무변경) — 이 함수를 명시적으로 opt-in한 라우트만 영향받는다.
+ *
+ * API 키(에이전트) 경로는 이 light path를 타지 않고 항상 기존 /me 경로를 그대로 쓴다 —
+ * API 키는 이 JWT claim shape이 아니고, rate-limit 키잉(checkRateLimit)에 apiKeyMember.id가
+ * 필요해 애초에 /me 응답이 필요하다.
+ */
+export const getOrgProjectAuthContext = cache(async (request: Request): Promise<OrgProjectAuthContext | null> => {
+  const rawApiKey = getRawApiKey(request);
+  if (rawApiKey) {
+    const apiKeyContext = await resolveApiKeyAuthContext(rawApiKey);
+    if (apiKeyContext) return apiKeyContext;
+    // API key 인증 실패 — OAuth 경로로 계속
+  }
+
+  const { getServerSession } = await import('./db/server');
+  const session = await getServerSession();
+  if (!session) return null;
+
+  if (session.org_id && session.project_id) {
+    return {
+      org_id: session.org_id,
+      project_id: session.project_id,
+      type: 'human' as const,
+    };
+  }
+
+  // fail-closed: claim 없거나 malformed면 기존 /me 왕복으로 fallback(스킵 최적화 포기,
+  // 기능은 항상 보존).
+  return resolveHumanAuthContextFromMe(session.access_token);
 });

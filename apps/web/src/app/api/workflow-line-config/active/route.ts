@@ -1,6 +1,6 @@
 import { ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 // E-DG S29 follow-up: 좌-pane 데이터소스 — 현 active published 라인 config(steps/gates) 조회 프록시(admin·#1637).
@@ -8,7 +8,7 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
 // proxyToFastapi가 url.search(entity_type/project_id) 자동 전달. raw passthrough(workflow-line 도메인 일관).
 export async function GET(request: Request) {
   try {
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 

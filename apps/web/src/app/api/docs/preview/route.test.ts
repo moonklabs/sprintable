@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 837a36c4(Group B b6): proxy 위임 리팩토링 후 stale 재작성 — proxyToFastapi·auth 게이트·q 필수·embed_chain→embedChain 매핑.
-const { getAuthContext, proxyToFastapi } = vi.hoisted(() => ({ getAuthContext: vi.fn(), proxyToFastapi: vi.fn() }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+const { getOrgProjectAuthContext, proxyToFastapi } = vi.hoisted(() => ({ getOrgProjectAuthContext: vi.fn(), proxyToFastapi: vi.fn() }));
+vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET } from './route';
@@ -15,9 +15,9 @@ const previewRes = () => new Response(
 const req = (q = 'slug-x') => new Request(`http://localhost/api/docs/preview?q=${q}`);
 
 describe('GET /api/docs/preview (proxy 위임)', () => {
-  beforeEach(() => { getAuthContext.mockReset(); proxyToFastapi.mockReset(); getAuthContext.mockResolvedValue(agent()); });
+  beforeEach(() => { getOrgProjectAuthContext.mockReset(); proxyToFastapi.mockReset(); getOrgProjectAuthContext.mockResolvedValue(agent()); });
   it('401 when unauthenticated', async () => {
-    getAuthContext.mockResolvedValue(null);
+    getOrgProjectAuthContext.mockResolvedValue(null);
     expect((await GET(req())).status).toBe(401);
   });
   it('400 when q missing', async () => {

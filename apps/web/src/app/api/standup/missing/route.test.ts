@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 837a36c4(Group B b2): proxy 위임 리팩토링 후 stale 테스트 재작성.
-const { getAuthContext, proxyToFastapi } = vi.hoisted(() => ({
-  getAuthContext: vi.fn(),
+const { getOrgProjectAuthContext, proxyToFastapi } = vi.hoisted(() => ({
+  getOrgProjectAuthContext: vi.fn(),
   proxyToFastapi: vi.fn(),
 }));
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi }));
 
 import { GET } from './route';
@@ -16,13 +16,13 @@ const req = () => new Request('http://localhost/api/standup/missing?project_id=p
 
 describe('GET /api/standup/missing (proxy 위임)', () => {
   beforeEach(() => {
-    getAuthContext.mockReset();
+    getOrgProjectAuthContext.mockReset();
     proxyToFastapi.mockReset();
-    getAuthContext.mockResolvedValue(agent());
+    getOrgProjectAuthContext.mockResolvedValue(agent());
   });
 
   it('401 when unauthenticated', async () => {
-    getAuthContext.mockResolvedValue(null);
+    getOrgProjectAuthContext.mockResolvedValue(null);
     expect((await GET(req())).status).toBe(401);
     expect(proxyToFastapi).not.toHaveBeenCalled();
   });

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getAuthContext, proxyToFastapiWithParams } = vi.hoisted(() => ({
-  getAuthContext: vi.fn(),
+const { getOrgProjectAuthContext, proxyToFastapiWithParams } = vi.hoisted(() => ({
+  getOrgProjectAuthContext: vi.fn(),
   proxyToFastapiWithParams: vi.fn(),
 }));
 
-vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
+vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapiWithParams }));
 
 import { PATCH } from './route';
@@ -16,13 +16,13 @@ function makeAgent() {
 
 describe('PATCH /api/retro-sessions/[id]', () => {
   beforeEach(() => {
-    getAuthContext.mockReset();
+    getOrgProjectAuthContext.mockReset();
     proxyToFastapiWithParams.mockReset();
-    getAuthContext.mockResolvedValue(makeAgent());
+    getOrgProjectAuthContext.mockResolvedValue(makeAgent());
   });
 
   it('returns 401 when not authenticated', async () => {
-    getAuthContext.mockResolvedValue(null);
+    getOrgProjectAuthContext.mockResolvedValue(null);
 
     const response = await PATCH(
       new Request('http://localhost/api/retro-sessions/session-1?project_id=project-1', {

@@ -1,6 +1,6 @@
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
-import { getAuthContext } from '@/lib/auth-helpers';
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ id: string }> };
@@ -9,7 +9,7 @@ type RouteParams = { params: Promise<{ id: string }> };
 export async function GET(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     const _r = await proxyToFastapi(request, `/api/v2/agents/${id}/api-keys`);
     if (!_r.ok) return _r;
@@ -21,7 +21,7 @@ export async function GET(request: Request, { params }: RouteParams) {
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     const _r = await proxyToFastapi(request, `/api/v2/agents/${id}/api-keys`);
     if (!_r.ok) return _r;
@@ -36,7 +36,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     const { searchParams } = new URL(request.url);
     const keyId = searchParams.get('key_id');
     if (!keyId) return ApiErrors.badRequest('key_id required');
-    const me = await getAuthContext(request);
+    const me = await getOrgProjectAuthContext(request);
     if (!me) return ApiErrors.unauthorized();
     const _r = await proxyToFastapi(request, `/api/v2/agents/${id}/api-keys/${keyId}`);
     if (!_r.ok) return _r;
