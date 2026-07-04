@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,8 +17,9 @@ from app.repositories.story_assignee import StoryAssigneeRepository
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import publish_event
 from app.services.event_seq import assign_recipient_seq
-from app.services.asset_registry import sync_attachment_assets
-from app.schemas.story import StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
+from app.services import mcp_attachment_upload
+from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
+from app.schemas.story import StoryAttachment, StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
 from app.services.member_resolver import canonicalize_member_id
 from app.services.merge_verdict_gate import (
     AUTO_MERGE,
@@ -200,6 +201,23 @@ async def _preflight_merge_gate(
         )
 
 
+def _enforce_mcp_attachment_declared_limit(attachments: list[dict]) -> None:
+    """E-MCP-OPT S6: chat(S5 #2)과 동일 갭을 story 에서 처음부터 막는다 — mcp-태그 첨부(dict shape:
+    url/size 키) 부분집합만 선언한도(5개/6MiB) 재검증. FE 업로드 첨부(마커 없음)는 무관."""
+    mcp_origin = [a for a in attachments if mcp_attachment_upload.is_mcp_upload_object_path(a["url"], kind="story")]
+    if len(mcp_origin) > mcp_attachment_upload.MCP_MAX_ATTACHMENTS or (
+        sum(a["size"] for a in mcp_origin) > mcp_attachment_upload.MCP_MAX_TOTAL_ATTACHMENT_BYTES
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"mcp attachments exceed declared limit "
+                f"(max {mcp_attachment_upload.MCP_MAX_ATTACHMENTS} files / "
+                f"{mcp_attachment_upload.MCP_MAX_TOTAL_ATTACHMENT_BYTES} bytes total)"
+            ),
+        )
+
+
 @router.post("", response_model=StoryResponse, status_code=201)
 async def create_story(
     body: StoryCreate,
@@ -226,6 +244,8 @@ async def create_story(
         body.assignee_id if body.assignee_id is not None
         else (effective_ids[0] if effective_ids else None)
     )
+    if body.attachments:
+        _enforce_mcp_attachment_declared_limit([a.model_dump() for a in body.attachments])
     # S8: 서버사이드 capacity 게이트(ee seam·SaaS only·OSS no-op) — asset commit 前 per-file+총량 enforce.
     if settings.is_ee_enabled and body.attachments:
         from ee.plan_limits import check_storage_capacity  # type: ignore[import]
@@ -326,6 +346,72 @@ async def get_story(
         raise HTTPException(status_code=404, detail="Story not found")
     await _attach_assignee_ids(repo.session, repo.org_id, [story])
     return StoryResponse.model_validate(story)
+
+
+class UploadStoryAttachmentRequest(BaseModel):
+    """E-MCP-OPT S6: MCP(비-브라우저)용 JSON/base64 첨부 업로드 요청(chat과 동형)."""
+
+    content_base64: str
+    name: str
+    content_type: str
+
+    @field_validator("content_base64", "name", "content_type")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
+
+    @field_validator("content_type")
+    @classmethod
+    def _content_type_sane(cls, v: str) -> str:
+        if len(v) > mcp_attachment_upload.MAX_ATTACHMENT_NAME_LEN or any(ord(ch) < 32 for ch in v):
+            raise ValueError("invalid content_type")
+        return v
+
+
+@router.post(
+    "/{id}/attachments", status_code=201, response_model=StoryAttachment, response_model_exclude_none=True,
+)
+async def upload_story_attachment(
+    id: uuid.UUID,
+    body: UploadStoryAttachmentRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> StoryAttachment:
+    """E-MCP-OPT S6: 비-브라우저 클라이언트(MCP)용 JSON/base64 스토리 첨부 업로드(chat과 동형).
+
+    인가 = `has_project_access`(story.project_id) — `register_doc_asset`/`enforce_body_context`(story
+    create)와 동일 SSOT. object_path 는 FE 업로드 라우트(`apps/web/.../stories/[id]/attachments/
+    route.ts`)와 동일 접두(org/<org>/project/<project>/story/<id>/...)+`mcp/` 마커(S5 패턴 재사용) —
+    create/update_story 가 그 부분집합만 선언한도(5개/6MiB)를 재검증한다.
+    """
+    story = (await session.execute(
+        select(Story).where(Story.id == id, Story.org_id == org_id)
+    )).scalar_one_or_none()
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(session, uuid.UUID(auth.user_id), story.project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
+    data = mcp_attachment_upload.decode_json_attachment(body.content_base64)
+    safe_name = mcp_attachment_upload.safe_attachment_filename(body.name)
+    object_path = mcp_attachment_upload.build_mcp_object_path(
+        org_id=org_id, project_id=story.project_id, kind="story", resource_id=id, safe_name=safe_name,
+    )
+
+    from app.services.storage import get_storage_provider
+    uploaded = await get_storage_provider().put_object(
+        DEFAULT_CONTAINER, object_path, data, content_type=body.content_type,
+    )
+    if not uploaded:
+        raise HTTPException(status_code=502, detail="upload failed")
+
+    return StoryAttachment(url=object_path, name=body.name, content_type=body.content_type, size=len(data))
 
 
 # E-DG S10(P1-4 observability): workflow-line 상태 read API — "왜 막혔나·어디로 relay 됐나"를
@@ -505,6 +591,7 @@ async def update_story(
     # S7: client 제공 asset_id strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
     if data.get("attachments"):
         data["attachments"] = [{**a, "asset_id": None} for a in data["attachments"]]
+        _enforce_mcp_attachment_declared_limit(data["attachments"])
         # S8: 서버사이드 capacity 게이트(ee seam·SaaS only·OSS no-op) — 첨부 교체 commit 前 enforce.
         if settings.is_ee_enabled:
             from ee.plan_limits import check_storage_capacity  # type: ignore[import]

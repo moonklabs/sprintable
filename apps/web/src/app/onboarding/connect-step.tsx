@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { FileText, Copy, Check, RefreshCw, ChevronRight, Info } from 'lucide-react';
+import { FileText, Copy, Check, RefreshCw, ChevronRight, Info, Cloud, Terminal, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
-import { VerifyRail, RAIL_ORDER, type DisplayStep, type RailState, type RailStatus } from './verify-rail';
+import { VerifyRail, RAIL_ORDER, HTTP_RAIL_ORDER, type DisplayStep, type RailState, type RailStatus } from './verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemetry';
 
 const RAIL_LABEL_KEY: Record<RailState, string> = {
@@ -19,10 +19,24 @@ const RAIL_LABEL_KEY: Record<RailState, string> = {
   verified: 'railVerified',
 };
 
+/** E-MCP-OPT S3: SaaS 기본=호스팅(http)·OSS 기본=로컬(stdio) — BE `default_transport_for_edition()` 따름. */
+export type Transport = 'http' | 'stdio';
+
 interface RawStep {
   state: RailState;
   status: RailStatus;
   reason?: string;
+}
+
+/** connection-artifact content(JSON)의 `mcpServers.sprintable.type` 필드만 읽는다(재조립 아님) —
+ * transport 미지정 최초 요청은 BE edition 기본을 반환하므로, 어느 탭을 pre-select할지 이걸로 판별. */
+export function inferTransport(content: string): Transport {
+  try {
+    const parsed = JSON.parse(content) as { mcpServers?: { sprintable?: { type?: string } } };
+    return parsed?.mcpServers?.sprintable?.type === 'http' ? 'http' : 'stdio';
+  } catch {
+    return 'stdio';
+  }
 }
 
 interface ConnectStepProps {
@@ -87,20 +101,26 @@ function HighlightedJson({ text }: { text: string }) {
 export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   const t = useTranslations('onboarding');
 
-  const [artifactBase, setArtifactBase] = useState<string | null>(null);
-  const [artifactError, setArtifactError] = useState(false);
+  // transport=null: 최초 default-resolve 응답 대기 中(BE edition 기본 판별 前).
+  const [transport, setTransport] = useState<Transport | null>(null);
+  const [artifacts, setArtifacts] = useState<Partial<Record<Transport, string>>>({});
+  const [artifactErrors, setArtifactErrors] = useState<Partial<Record<Transport, boolean>>>({});
+  // transport 미판별 상태(최초 default-resolve 요청)에서의 실패 — 이후엔 위 per-transport 에러로 대체.
+  const [initialError, setInitialError] = useState(false);
+  const [hostedUnavailable, setHostedUnavailable] = useState(false);
   const [beSteps, setBeSteps] = useState<RawStep[] | null>(null);
-  const [hasCopied, setHasCopied] = useState(false);
+  const [hasCopiedMap, setHasCopiedMap] = useState<Partial<Record<Transport, boolean>>>({});
   const [justCopied, setJustCopied] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const leftRef = useRef(false);
 
   // OB-2 verification-status poll (SSE-우선은 OB-2 SSE 포맷 확정 후 follow-up·현재 poll). 404 graceful.
-  const pollStatus = useCallback(async () => {
+  // E-MCP-OPT S3: transport별 레일 shape 다름(호스팅=4단계, event/ack 없음) — 쿼리로 분기.
+  const pollStatus = useCallback(async (forTransport: Transport) => {
     if (!agentId) return;
     try {
-      const res = await fetch(`/api/agents/${agentId}/verification-status`);
+      const res = await fetch(`/api/agents/${agentId}/verification-status?transport=${forTransport}`);
       if (!res.ok) return; // 미머지/404 → pending 유지(가짜 에러 안 띄움)
       const json = (await res.json()) as { data?: { steps?: RawStep[] } | RawStep[]; steps?: RawStep[] };
       const d = json?.data;
@@ -112,35 +132,74 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   }, [agentId]);
 
   useEffect(() => {
-    if (!agentId || !apiKey) return;
-    void pollStatus();
-    const iv = setInterval(() => void pollStatus(), 2500);
+    if (!agentId || !apiKey || !transport) return;
+    setBeSteps(null); // transport 전환 시 이전 transport의 레일 상태가 새 레일에 새는 것 방지
+    void pollStatus(transport);
+    const iv = setInterval(() => void pollStatus(transport), 2500);
     return () => clearInterval(iv);
-  }, [agentId, apiKey, pollStatus]);
+  }, [agentId, apiKey, transport, pollStatus]);
 
   // OB-1 connection-artifact = 아티팩트 SSOT(구조+backend-direct URL). OB-1 라이브라 정상응답 디폴트.
   // 실패 시 클라빌드로 메우지 않고(§2 CF env 노출 금지·AC3) pending+재시도 유지.
-  const fetchArtifact = useCallback(async () => {
+  // E-MCP-OPT S3: reqTransport 생략 시 BE가 edition 기본을 판별해 반환 — 최초 1회만 이렇게 호출해
+  // 어느 탭을 pre-select할지 응답 content의 `type` 필드로 역산한다(§5, FE round-trip 없이 SSOT 보존).
+  const fetchArtifact = useCallback(async (reqTransport?: Transport) => {
     if (!agentId) return;
-    setArtifactError(false);
+    if (!reqTransport) setInitialError(false);
     try {
-      const res = await fetch(`/api/agents/${agentId}/connection-artifact`);
-      if (!res.ok) { setArtifactError(true); return; }
+      const qs = reqTransport ? `?transport=${reqTransport}` : '';
+      const res = await fetch(`/api/agents/${agentId}/connection-artifact${qs}`);
+      if (!res.ok) {
+        if (reqTransport === 'http' && res.status === 400) {
+          // MCP_PUBLIC_URL 미설정 환경(OSS/로컬) — "탭 자체가 없음"(BE 계약), 에러 아님.
+          setHostedUnavailable(true);
+          return;
+        }
+        if (!reqTransport && res.status === 400) {
+          // edition 기본이 http로 잡혔는데 이 환경엔 배포가 없는 misconfig — stdio는 항상 가능하다는
+          // BE invariant를 믿고 명시 폴백(무한 pending 방치 금지).
+          setHostedUnavailable(true);
+          void fetchArtifact('stdio');
+          return;
+        }
+        if (reqTransport) setArtifactErrors((p) => ({ ...p, [reqTransport]: true }));
+        else setInitialError(true);
+        return;
+      }
       const json = (await res.json()) as { data?: { content?: string }; content?: string };
       const content = json?.data?.content ?? json?.content;
-      if (typeof content === 'string') setArtifactBase(content);
-      else setArtifactError(true);
+      if (typeof content !== 'string') {
+        if (reqTransport) setArtifactErrors((p) => ({ ...p, [reqTransport]: true }));
+        else setInitialError(true);
+        return;
+      }
+      const resolved = reqTransport ?? inferTransport(content);
+      setArtifacts((p) => ({ ...p, [resolved]: content }));
+      setArtifactErrors((p) => ({ ...p, [resolved]: false }));
+      setTransport((cur) => cur ?? resolved);
     } catch {
-      setArtifactError(true);
+      if (reqTransport) setArtifactErrors((p) => ({ ...p, [reqTransport]: true }));
+      else setInitialError(true);
     }
   }, [agentId]);
 
+  // 최초 마운트 — transport 미지정 요청으로 BE edition 기본 판별.
   useEffect(() => {
     if (!agentId || !apiKey) return;
     void fetchArtifact();
   }, [agentId, apiKey, fetchArtifact]);
 
-  const displaySteps: DisplayStep[] = RAIL_ORDER.map((state) => {
+  // 탭 전환 — 아직 fetch 안 한 transport 만 재요청(§5 "탭 전환마다 재요청"·이미 캐시된 건 재요청 생략).
+  useEffect(() => {
+    if (!agentId || !apiKey || !transport) return;
+    if (artifacts[transport]) return;
+    if (transport === 'http' && hostedUnavailable) return;
+    void fetchArtifact(transport);
+  }, [agentId, apiKey, transport, artifacts, hostedUnavailable, fetchArtifact]);
+
+  const railOrder = transport === 'http' ? HTTP_RAIL_ORDER : RAIL_ORDER;
+  const hasCopied = transport ? Boolean(hasCopiedMap[transport]) : false;
+  const displaySteps: DisplayStep[] = railOrder.map((state) => {
     const be = beSteps?.find((s) => s.state === state);
     let status: RailStatus = be?.status ?? 'pending';
     // whichever-first: Copy 클릭 OR 첫 OB-2 신호 — config_copied done
@@ -162,31 +221,31 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   }, [agentId, verified]);
 
   const handleCopy = async () => {
-    if (!apiKey) return;
-    const cfg = renderArtifact(artifactBase, apiKey, false);
+    if (!apiKey || !transport) return;
+    const cfg = renderArtifact(artifacts[transport] ?? null, apiKey, false);
     if (!cfg) return; // 아티팩트 미준비(pending) — copy 불가
     try {
       await navigator.clipboard.writeText(cfg);
     } catch {
       // ignore clipboard failure
     }
-    setHasCopied(true);
+    setHasCopiedMap((p) => ({ ...p, [transport]: true }));
     setJustCopied(true);
     setTimeout(() => setJustCopied(false), 2000);
     emitOnboardingEvent('config_copied', { agent_id: agentId });
   };
 
   const handleVerify = async () => {
-    if (!agentId) return;
+    if (!agentId || !transport) return;
     setVerifying(true);
     emitOnboardingEvent('verify_started', { agent_id: agentId });
     try {
-      await fetch(`/api/agents/${agentId}/verify-connection`, {
+      await fetch(`/api/agents/${agentId}/verify-connection?transport=${transport}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
       }).catch(() => {});
-      await pollStatus();
+      await pollStatus(transport);
     } finally {
       setVerifying(false);
     }
@@ -220,10 +279,42 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
     );
   }
 
+  const artifactBase = transport ? (artifacts[transport] ?? null) : null;
+  const artifactError = transport ? Boolean(artifactErrors[transport]) : initialError;
+  const isHostedUnavailable = transport === 'http' && hostedUnavailable;
   const displayConfig = renderArtifact(artifactBase, apiKey, true);
 
   return (
     <div className="space-y-4">
+      {/* [0] transport 세그먼트 토글 */}
+      <div className="flex gap-0 rounded-md border border-border bg-muted p-[3px]">
+        <button
+          type="button"
+          onClick={() => setTransport('http')}
+          disabled={!transport}
+          className={cn(
+            'flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors',
+            transport === 'http' && 'bg-background text-foreground shadow-sm',
+          )}
+        >
+          <Cloud className="h-3.5 w-3.5" aria-hidden />
+          {t('transportHosted')}
+          <Badge variant="info" className="px-1.5 py-0 text-[9px]">{t('transportRecommended')}</Badge>
+        </button>
+        <button
+          type="button"
+          onClick={() => setTransport('stdio')}
+          disabled={!transport}
+          className={cn(
+            'flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors',
+            transport === 'stdio' && 'bg-background text-foreground shadow-sm',
+          )}
+        >
+          <Terminal className="h-3.5 w-3.5" aria-hidden />
+          {t('transportLocal')}
+        </button>
+      </div>
+
       {/* [1] 아티팩트 카드 */}
       <section className="space-y-2">
         <div className="overflow-hidden rounded-md border border-border">
@@ -253,17 +344,19 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
               <code className="font-mono"><HighlightedJson text={displayConfig} /></code>
             </pre>
           ) : (
-            <div className="space-y-2 bg-muted/40 p-3" aria-busy={!artifactError}>
-              <div className={cn('h-3 w-3/4 rounded bg-muted', !artifactError && 'animate-pulse')} />
-              <div className={cn('h-3 w-1/2 rounded bg-muted', !artifactError && 'animate-pulse')} />
-              <div className={cn('h-3 w-2/3 rounded bg-muted', !artifactError && 'animate-pulse')} />
+            <div className="space-y-2 bg-muted/40 p-3" aria-busy={!artifactError && !isHostedUnavailable}>
+              <div className={cn('h-3 w-3/4 rounded bg-muted', !artifactError && !isHostedUnavailable && 'animate-pulse')} />
+              <div className={cn('h-3 w-1/2 rounded bg-muted', !artifactError && !isHostedUnavailable && 'animate-pulse')} />
+              <div className={cn('h-3 w-2/3 rounded bg-muted', !artifactError && !isHostedUnavailable && 'animate-pulse')} />
               <div className="flex items-center gap-2 pt-1">
-                <p className="text-xs text-muted-foreground">{t('artifactPending')}</p>
-                {artifactError && (
+                <p className="text-xs text-muted-foreground">
+                  {isHostedUnavailable ? t('artifactUnavailable') : t('artifactPending')}
+                </p>
+                {artifactError && !isHostedUnavailable && (
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => void fetchArtifact()}
+                    onClick={() => void fetchArtifact(transport ?? undefined)}
                     className="h-auto px-2 py-0.5 text-xs"
                   >
                     {t('artifactRetry')}
@@ -273,6 +366,18 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
             </div>
           )}
         </div>
+        {transport === 'http' && !isHostedUnavailable && (
+          <div className="flex items-start gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-info">
+            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>{t('hostedBenefit')}</span>
+          </div>
+        )}
+        {transport === 'stdio' && (
+          <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            {t('localGuideNote')}
+          </p>
+        )}
         <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
           {t('artifactGuide')}
@@ -283,12 +388,17 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
       {/* [2] verify 상태레일 */}
       <section className="space-y-3 border-t border-border pt-4">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-sm font-medium">{t('verifyTitle')}</p>
+          <p className="text-sm font-medium">
+            {t('verifyTitle')}{' '}
+            <span className={cn('text-xs font-normal', transport === 'http' ? 'text-info' : 'text-muted-foreground')}>
+              {transport === 'http' ? t('railStageHosted') : t('railStageLocal')}
+            </span>
+          </p>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => void handleVerify()}
-            disabled={verifying}
+            disabled={verifying || !transport}
             aria-label={t('verifyRetry')}
             className="shrink-0 whitespace-nowrap"
           >
@@ -297,6 +407,12 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
           </Button>
         </div>
         <VerifyRail steps={displaySteps} />
+        {transport === 'http' && (
+          <p className="flex items-start gap-1.5 text-xs text-info">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            {t('hostedVerifyNote')}
+          </p>
+        )}
         {verified && (
           <div className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-success">
             {t('verifiedBanner')}

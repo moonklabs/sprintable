@@ -906,11 +906,14 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
       </div>
 
       {/* Mobile layout */}
-      <div className="flex flex-1 flex-col overflow-hidden lg:hidden">
+      {/* min-h-0 필수 — 없으면 flex item 기본 min-height:auto가 content 높이만큼 커져
+          이 wrapper의 overflow-hidden이 하단 콘텐츠를 스크롤 불가하게 clip한다(desktop
+          분기 L893의 min-h-0와 동형·모바일 스크롤 불가 재현+근본 확인 후 정정). */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:hidden">
         {mobileView === 'list' ? (
-          <div className="flex-1">{listPanel}</div>
+          <div className="min-h-0 flex-1">{listPanel}</div>
         ) : (
-          <div className="flex-1">
+          <div className="min-h-0 flex-1">
             {selectedEpic ? (
               <EpicDetailPanel
                 epic={selectedEpic}

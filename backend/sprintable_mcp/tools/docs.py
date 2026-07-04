@@ -8,6 +8,7 @@ from mcp.types import TextContent
 from ..api_client import client
 from ..response import err, ok
 from ..schemas import SprintableInput
+from .attachments import upload_attachments
 
 
 class ListDocsInput(SprintableInput):
@@ -44,6 +45,11 @@ class UpdateDocInput(SprintableInput):
     parent_id: str | None = None
     expected_updated_at: str | None = None
     force_overwrite: bool | None = None
+    # [{content_base64, name, content_type}, ...] — 스샷/작은 문서(최대 5개·파일당 2MiB·총 6MiB).
+    # 업로드 後 완성된 embed HTML(TipTap file-node/image-node 계약과 정확히 일치 — 에이전트가 마크업을
+    # 몰라도 됨)을 content 끝에 append. 이 호출에 content 를 안 실었으면 현재 저장된 content 를 먼저
+    # 읽어 그 뒤에 append(기존 본문을 지우지 않음).
+    attachments: list[dict] | None = None
 
 
 class DeleteDocInput(SprintableInput):
@@ -123,6 +129,17 @@ async def update_doc(args: UpdateDocInput) -> list[TextContent]:
     if args.force_overwrite is not None:
         updates["force_overwrite"] = args.force_overwrite
     try:
+        if args.attachments:
+            uploaded = await upload_attachments(
+                f"/api/v2/docs/{args.doc_id}/attachments", args.attachments,
+            )
+            if uploaded:
+                base_content = updates.get("content")
+                if base_content is None:
+                    current = await client.get(f"/api/v2/docs/{args.doc_id}")
+                    base_content = (current.get("content") or "") if isinstance(current, dict) else ""
+                snippets = "".join(a["embed_snippet"] for a in uploaded if isinstance(a, dict) and a.get("embed_snippet"))
+                updates["content"] = f"{base_content}\n{snippets}" if base_content else snippets
         return ok(await client.patch(f"/api/v2/docs/{args.doc_id}", json=updates))
     except Exception as exc:
         return err(str(exc))

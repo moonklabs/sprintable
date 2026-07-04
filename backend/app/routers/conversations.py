@@ -26,7 +26,8 @@ from app.routers.events import _push_to_agent, publish_event
 from app.schemas.attachment import validate_attachment_url
 from app.services import chat_presence
 from app.services.agent_runtime import supports_deterministic_command
-from app.services.asset_registry import sync_attachment_assets
+from app.services import mcp_attachment_upload
+from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.services.command_classifier import classify_command
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import (
@@ -36,6 +37,7 @@ from app.services.member_resolver import (
     resolve_member,
     resolve_member_identity,
 )
+from app.services.storage import get_storage_provider
 
 logger = logging.getLogger(__name__)
 
@@ -582,6 +584,17 @@ class ConversationResponse(BaseModel):
 _MAX_ATTACHMENTS = 10
 _MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB (메타 sanity 상한)
 
+# E-MCP-OPT S2(bbfd24ba)/S6: MCP(비-브라우저) 클라이언트용 JSON/base64 업로드 공용 프리미티브
+# (S6 부터 story/doc 도 공유 — `app/services/mcp_attachment_upload.py` 참조).
+_MAX_JSON_ATTACHMENT_UPLOAD_SIZE = mcp_attachment_upload.MAX_JSON_ATTACHMENT_UPLOAD_SIZE
+_MAX_ATTACHMENT_NAME_LEN = mcp_attachment_upload.MAX_ATTACHMENT_NAME_LEN
+_MCP_MAX_ATTACHMENTS = mcp_attachment_upload.MCP_MAX_ATTACHMENTS
+_MCP_MAX_TOTAL_ATTACHMENT_BYTES = mcp_attachment_upload.MCP_MAX_TOTAL_ATTACHMENT_BYTES
+
+
+def _is_mcp_upload_object_path(url: str) -> bool:
+    return mcp_attachment_upload.is_mcp_upload_object_path(url, kind="chat")
+
 
 class MessageAttachment(BaseModel):
     url: str           # FE-proxy 업로드 객체 url(https GCS 또는 canonical bare path·provider 추상)
@@ -627,6 +640,29 @@ class SendMessageRequest(BaseModel):
     def _limit_attachments(cls, v: list[MessageAttachment]) -> list[MessageAttachment]:
         if len(v) > _MAX_ATTACHMENTS:
             raise ValueError(f"too many attachments (max {_MAX_ATTACHMENTS})")
+        return v
+
+
+class UploadConversationAttachmentRequest(BaseModel):
+    """E-MCP-OPT S2: MCP(비-브라우저)용 JSON/base64 첨부 업로드 요청."""
+
+    content_base64: str
+    name: str
+    content_type: str
+
+    @field_validator("content_base64", "name", "content_type")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be empty")
+        return v
+
+    @field_validator("content_type")
+    @classmethod
+    def _content_type_sane(cls, v: str) -> str:
+        if len(v) > _MAX_ATTACHMENT_NAME_LEN or any(ord(ch) < 32 for ch in v):
+            raise ValueError("invalid content_type")
         return v
 
 
@@ -1211,6 +1247,23 @@ async def send_message(
         from ee.plan_limits import check_storage_capacity  # type: ignore[import]
         await check_storage_capacity(db, org_id, [a.model_dump() for a in body.attachments])
 
+    # E-MCP-OPT S5(#2): MCP JSON 업로드 엔드포인트가 개별 업로드마다 파일당 2MiB만 검사하고
+    # 선언 한도(5개/6MiB 합계)를 강제 안 해 다회 호출로 우회 가능했다 — 이 메시지가 실제로
+    # 참조하는 mcp-origin 첨부 부분집합에 한해 여기서 재검증(전체 attachments 가 아님 — FE 업로드
+    # 첨부는 기존 100MB/10개 한도만 적용받는다·회귀0).
+    if body.attachments:
+        mcp_origin = [a for a in body.attachments if _is_mcp_upload_object_path(a.url)]
+        if len(mcp_origin) > _MCP_MAX_ATTACHMENTS or (
+            sum(a.size for a in mcp_origin) > _MCP_MAX_TOTAL_ATTACHMENT_BYTES
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"mcp attachments exceed declared limit "
+                    f"(max {_MCP_MAX_ATTACHMENTS} files / {_MCP_MAX_TOTAL_ATTACHMENT_BYTES} bytes total)"
+                ),
+            )
+
     msg = ConversationMessage(
         conversation_id=conversation_id,
         sender_id=sender.id,
@@ -1445,6 +1498,71 @@ async def send_message(
     if command_hints:
         response["command_gate"] = {"blocked": command_hints}
     return response
+
+
+@router.post(
+    "/{conversation_id}/attachments",
+    status_code=201,
+    response_model=MessageAttachment,
+    response_model_exclude_none=True,
+)
+async def upload_conversation_attachment(
+    conversation_id: uuid.UUID,
+    body: UploadConversationAttachmentRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> MessageAttachment:
+    """E-MCP-OPT S2(bbfd24ba): 비-브라우저 클라이언트(MCP)용 JSON/base64 첨부 업로드.
+
+    인가는 `send_message`의 실제 발신 요건과 **동일**(참가자 필수) — 읽기 전용 엔드포인트의
+    admin-agent-only-conversation 우회는 여기 적용하지 않는다: 그 우회는 GET(list/get_conversation)
+    전용이고, 업로드는 결국 이 conversation 에 메시지를 보내는 것과 같은 쓰기 동작이라
+    `send_message`(에이전트 sender 는 참가자 아니면 무조건 403·우회/auto-join 없음)와 정합해야
+    한다 — 그렇지 않으면 비참가자 admin 에이전트가 업로드는 성공하고 뒤이은 send_chat_message 는
+    403 나는 모순이 생긴다.
+    """
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    participant = (await db.execute(
+        select(ConversationParticipant.id).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.member_id == sender.id,
+        )
+    )).scalar_one_or_none()
+    if participant is None:
+        raise HTTPException(status_code=403, detail="Not a participant")
+
+    data = mcp_attachment_upload.decode_json_attachment(body.content_base64)
+
+    safe_name = mcp_attachment_upload.safe_attachment_filename(body.name)
+    # S7 namespace — FE 업로드 라우트(apps/web .../conversations/[id]/attachments/route.ts)와 동일
+    # 접두(org/<org>/project/<project>/chat/<conv>/...). path_in_source_scope 는 이 접두까지만
+    # segment-match 하므로(그 뒤 세그먼트 수는 안 봄) 추가된 `mcp/` 세그먼트는 IDOR 가드/read-authorize
+    # 통과에 영향 없다 — E-MCP-OPT S5(#2): 이 엔드포인트로 실제 생성된 객체만 식별하는 마커
+    # (`_is_mcp_upload_object_path`)로 send_message 의 선언 한도 재검증이 소비한다.
+    object_path = mcp_attachment_upload.build_mcp_object_path(
+        org_id=org_id, project_id=conv.project_id, kind="chat", resource_id=conversation_id,
+        safe_name=safe_name,
+    )
+
+    uploaded = await get_storage_provider().put_object(
+        DEFAULT_CONTAINER, object_path, data, content_type=body.content_type,
+    )
+    if not uploaded:
+        raise HTTPException(status_code=502, detail="upload failed")
+
+    return MessageAttachment(
+        url=object_path,
+        name=body.name,
+        content_type=body.content_type,
+        size=len(data),
+    )
 
 
 @router.patch("/{conversation_id}/status", status_code=200)
