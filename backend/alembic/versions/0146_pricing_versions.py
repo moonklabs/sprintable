@@ -33,8 +33,17 @@ from sqlalchemy.dialects import postgresql
 
 revision = "0146"
 down_revision = "0145"
-branch_labels = None
-depends_on = None
+# story bda4beac: 0146/0147(pricing_versions 신설+시드)은 ee 전용 — main엔 이 두 파일
+# 자체가 없다(develop만 존재). 원래 0146→0147→0148→0149 리니어 체인이었으나 0148
+# (org_subscriptions.org_id UNIQUE 제약, core 버그 fix)이 사고로 146/147과 함께 순차적
+# 위치 때문에 main promotion에서 같이 빠졌었다(#bda4beac 발견 — 0148은 baseline core
+# 테이블 대상이라 pricing과 무관, main도 동일 model unique=True 선언 보유 확인).
+# 근본수정: 0148을 core 체인(0145 직계)으로 독립시키고, ee_pricing은 별도 head로 분리
+# (develop/ee 환경은 상시 dual-head — core head(0155+) + ee_pricing head(0147)).
+# depends_on="0148": 이 마이그도 org_subscriptions를 건드리므로(pricing_version_id 컬럼
+# 추가) core의 UNIQUE 제약 fix가 먼저 적용된 뒤 실행되도록 순서만 명시(브랜치 병합 아님).
+branch_labels = ("ee_pricing",)
+depends_on = "0148"
 
 
 def upgrade() -> None:

@@ -43,7 +43,7 @@ diff <(gcloud secrets versions access latest --secret=DATABASE_URL_DEV) \
 bash backend/scripts/provision_migrate_job.sh prod
 gcloud run jobs execute sprintable-migrate-prod --region=asia-northeast3 --project=sprintable-494803 --wait
 ```
-> `migrate.sh` 는 `alembic upgrade head` 만 실행 — seed 없음.
+> `migrate.sh` 는 `alembic upgrade heads`(story bda4beac 이후 복수형) 만 실행 — seed 없음.
 > 선생님 fresh-signup이 org를 새로 생성하므로 seed 데이터 불필요.
 
 ### 5. prod 백엔드 배포 (디디, GO 후)

@@ -10,6 +10,9 @@ if [ -z "${ALEMBIC_DATABASE_URL:-}" ]; then
   exit 1
 fi
 
+# story bda4beac: pricing(ee) 마이그(0146/0147)가 core 체인(0145→0148→0149+)과 분기된
+# 별도 head라 이미지에 그 파일이 없는 환경(main/prod)에선 head가 1개, 있는 환경(develop/ee
+# 빌드)에선 2개다 — `heads`(복수)는 두 경우 모두 안전(단일-head 환경에서도 그대로 동작).
 cd /app
-echo "Running: alembic upgrade head"
-exec alembic upgrade head
+echo "Running: alembic upgrade heads"
+exec alembic upgrade heads
