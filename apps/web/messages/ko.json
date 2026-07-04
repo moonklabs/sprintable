@@ -432,7 +432,16 @@
     "advancedSubtitle": "Webhook 알림 · 대체 연결 방식 (HTTP, fakechat)",
     "advancedNote": "Webhook 알림과 대체 연결 방식은 나중에 설정할 수 있습니다.",
     "dashboardCta": "대시보드로",
-    "connectFooterHint": "확인되면 준비 완료 — 지금 건너뛰어도 됩니다."
+    "connectFooterHint": "확인되면 준비 완료 — 지금 건너뛰어도 됩니다.",
+    "transportHosted": "호스팅",
+    "transportLocal": "로컬 (uvx)",
+    "transportRecommended": "권장",
+    "hostedBenefit": "기능이 바뀌어도 재설치가 없습니다. 서버가 자동으로 최신 상태를 서빙합니다.",
+    "hostedVerifyNote": "호스팅은 tool 호출 신호(heartbeat)로 연결을 확인합니다 — 로컬 SSE 방식과 다른 경로일 뿐, 검증은 동일하게 완료됩니다.",
+    "localGuideNote": "로컬 실행 — 셀프호스트/오프라인용. 툴 변경 시 uvx가 최신 버전을 재fetch합니다.",
+    "railStageHosted": "호스팅 · 4단계",
+    "railStageLocal": "로컬 · 6단계",
+    "artifactUnavailable": "이 환경에는 호스팅 배포가 없습니다."
   },
   "settings": {
     "title": "설정",

@@ -17,6 +17,9 @@ export const RAIL_ORDER = [
 
 export type RailState = (typeof RAIL_ORDER)[number];
 
+/** E-MCP-OPT S3: 호스팅(http) transport 축소 레일 — event_delivered/ack 없음(구조적으로 불가·BE agent_verify.py). */
+export const HTTP_RAIL_ORDER = ['config_copied', 'waiting', 'mcp_reachable', 'verified'] as const;
+
 export interface DisplayStep {
   state: RailState;
   status: RailStatus;

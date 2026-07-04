@@ -22,7 +22,10 @@ from app.schemas.team_member import OrgAgentCreate, TeamMemberResponse
 from app.services.agent_onboarding_config import (
     DEFAULT_RUNTIME,
     SUPPORTED_RUNTIMES,
+    SUPPORTED_TRANSPORTS,
     build_agent_mcp_config,
+    build_agent_mcp_config_bundle,
+    default_transport_for_edition,
 )
 from app.services.agent_verify import get_verification_state, start_verification
 from app.services.onboarding_funnel import emit_onboarding_event, safe_key_prefix
@@ -118,8 +121,11 @@ async def create_org_agent(
     effective_port = member.fakechat_port or int(os.environ.get("FAKECHAT_PORT", _FAKECHAT_BASE_PORT))
     response["fakechat_port"] = effective_port
     response["api_key_created"] = bool(api_key_plaintext)
-    # OB-1 AC2: 단일 SSOT generator 소비(stdio 아티팩트). 로컬 _build_mcp_config 제거.
-    response["mcp_config"] = build_agent_mcp_config(api_key_plaintext=api_key_plaintext)
+    # E-MCP-OPT S3: 단일 SSOT generator 소비 — edition 기본 + 두 transport 변형 동봉(FE round-trip 0).
+    config_bundle = build_agent_mcp_config_bundle(api_key_plaintext=api_key_plaintext)
+    response["mcp_config"] = config_bundle["mcp_config"]
+    response["default_transport"] = config_bundle["default_transport"]
+    response["mcp_config_alternatives"] = config_bundle["mcp_config_alternatives"]
     if api_key_plaintext:
         response["api_key"] = api_key_plaintext
 
@@ -127,7 +133,8 @@ async def create_org_agent(
     await emit_onboarding_event(
         session, "agent_created", agent_id=member.id, org_id=org_id,
         project_id=(project_ids[0] if project_ids else None),
-        runtime="claude-code", transport="stdio", key_prefix=safe_key_prefix(api_key_plaintext),
+        runtime="claude-code", transport=config_bundle["default_transport"],
+        key_prefix=safe_key_prefix(api_key_plaintext),
     )
     await session.commit()
     return response
@@ -137,6 +144,7 @@ async def create_org_agent(
 async def get_agent_connection_artifact(
     agent_id: uuid.UUID,
     runtime: str = DEFAULT_RUNTIME,
+    transport: str | None = None,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -147,9 +155,17 @@ async def get_agent_connection_artifact(
     사용자가 자기 키를 붙여 완성한다. wizard(OB-3)가 이 아티팩트를 렌더+copy+verify 한다.
     org-scope 로 조회(anti-IDOR). team_members 는 projection VIEW 라 멀티프로젝트 agent 가 N행이므로
     ``.limit(1)`` 로 MultipleResultsFound 차단(identity 조회·행 동형).
+
+    E-MCP-OPT S3: ``transport`` 쿼리(``stdio``|``http``) — connect-step 토글이 다른 탭 선택 시 이
+    파라미터로 재요청(§5, FE round-trip 방식 선택). 미지정 시 edition 기본(SaaS=http·OSS=stdio).
+    이 엔드포인트의 기존 "content=paste-ready 문자열" 계약은 그대로 — 요청된 단일 변형만 반환한다
+    (두 변형 동봉은 생성 시점 bundle 엔드포인트가 담당).
     """
     if runtime not in SUPPORTED_RUNTIMES:
         raise HTTPException(status_code=400, detail=f"unsupported runtime: {runtime}")
+    resolved_transport = transport or default_transport_for_edition()
+    if resolved_transport not in SUPPORTED_TRANSPORTS:
+        raise HTTPException(status_code=400, detail=f"unsupported transport: {transport}")
 
     member = (await session.execute(
         select(TeamMember).where(
@@ -161,12 +177,17 @@ async def get_agent_connection_artifact(
     if member is None:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    artifact = build_agent_mcp_config(api_key_plaintext=_API_KEY_PLACEHOLDER, runtime=runtime)
+    artifact = build_agent_mcp_config(
+        api_key_plaintext=_API_KEY_PLACEHOLDER, runtime=runtime, transport=resolved_transport,
+    )
+    if artifact is None:
+        # http 요청됐으나 이 환경엔 호스팅 배포가 없음(MCP_PUBLIC_URL 미설정) — 명시 요청이라 400.
+        raise HTTPException(status_code=400, detail=f"transport '{resolved_transport}' unavailable in this environment")
 
     # OB-4 seam: config_generated (generator 아티팩트 반환·funnel·non-blocking).
     await emit_onboarding_event(
         session, "config_generated", agent_id=member.id, org_id=org_id,
-        runtime=runtime, transport="stdio",
+        runtime=runtime, transport=resolved_transport,
     )
     await session.commit()
 
@@ -193,6 +214,7 @@ async def _fetch_org_agent(session: AsyncSession, agent_id: uuid.UUID, org_id: u
 @router.post("/{agent_id}/verify-connection")
 async def verify_agent_connection(
     agent_id: uuid.UUID,
+    transport: str | None = None,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -202,12 +224,31 @@ async def verify_agent_connection(
     single-target(AC3): 해당 agent 1명에게만 — fire_webhooks/org 브로드캐스트 미사용. 이벤트는
     실 /agent/stream 경로(우회 X)로 가고, 에이전트가 ack 하면(acked_seq>=seq) verified 가 된다.
     응답은 verification-status 와 동일한 6단계 레일(초기 상태)을 같이 실어 FE 가 즉시 렌더하게 한다.
+
+    E-MCP-OPT S3: ``transport="http"`` 는 **합성 이벤트/SSE nudge 전부 스킵**한다 — http 는 서버→
+    에이전트 push 경로 자체가 없어(streamable, client-initiated) 보낼 곳이 없다. heartbeat 기반
+    4단계 레일을 즉시 조회해 반환(사실상 GET verification-status 와 동형 — "확인" 버튼 클릭이 곧
+    현재 heartbeat freshness 재조회를 뜻한다).
+
+    E-MCP-OPT S5(#4): project 미배정 에이전트는 **transport 무관 동일하게 400** — http 조기 return이
+    이 가드보다 먼저면 미배정 에이전트가 stdio=400/http=200으로 갈렸다(까심 QA). project 스코프가
+    없는 에이전트는애초에 "연결 검증"이 의미가 없으므로(heartbeat 조차 project 컨텍스트 하 tool
+    호출을 전제) 두 transport 모두 이 가드를 먼저 통과해야 한다.
     """
     member = await _fetch_org_agent(session, agent_id, org_id)
     if member is None:
         raise HTTPException(status_code=404, detail="Agent not found")
     if not member.project_id:
         raise HTTPException(status_code=400, detail="agent has no project scope to verify")
+
+    if transport == "http":
+        state = await get_verification_state(session, agent_id, transport="http")
+        return {
+            "agent_id": str(agent_id),
+            "verification_seq": None,
+            "verified": state["verified"],
+            "rail": state["rail"],
+        }
 
     seq = await start_verification(
         session, agent_id=agent_id, org_id=org_id, project_id=member.project_id
@@ -235,19 +276,22 @@ async def verify_agent_connection(
 @router.get("/{agent_id}/verification-status")
 async def agent_verification_status(
     agent_id: uuid.UUID,
+    transport: str = "stdio",
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
-    """OB-2 AC2: 6단계 레일 폴링/조회(BE↔FE 계약 락). SSE 우선·이 poll 은 fallback.
+    """OB-2 AC2: 레일 폴링/조회(BE↔FE 계약 락). SSE 우선·이 poll 은 fallback.
 
-    각 단계 ``{state, status: pending|active|done}``. ack/verified 는 acked_seq>=seq 권위 신호만.
+    각 단계 ``{state, status: pending|active|done}``. ack/verified 는 acked_seq>=seq 권위 신호만
+    (stdio) 또는 heartbeat freshness(http, E-MCP-OPT S3 — 4단계 축소 레일).
+    ``transport`` 쿼리 — connect-step 이 보고 있는 탭과 정합(기본 stdio·회귀0).
     """
     member = await _fetch_org_agent(session, agent_id, org_id)
     if member is None:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    state = await get_verification_state(session, agent_id)
+    state = await get_verification_state(session, agent_id, transport=transport)
     return {
         "agent_id": str(agent_id),
         "verification_seq": state["verify_seq"],
