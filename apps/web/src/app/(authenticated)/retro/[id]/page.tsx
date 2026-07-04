@@ -233,8 +233,14 @@ export default function RetroSessionPage() {
   // 빈 배열로 흡수(선택 기능, 크래시 0). session.sprint_id 없거나 fetch 실패해도 폼은 정상 동작.
   const [hypotheses, setHypotheses] = useState<RetroHypothesisResult[]>([]);
   const [hypothesesLoading, setHypothesesLoading] = useState(true);
+  // E-SPRINT-LOOP FE(5feac498 후속) — BE #1878(dev live 확인됨, RetroHypothesisItem.measure_after/
+  // href 정합)로 retro-session 응답이 이제 hypotheses[]를 embed한다. embed가 있으면(하위 useEffect
+  // round-2를 건너뛰고) 이 값을 그대로 쓴다 — 없으면(구버전 BE 하위호환) 기존 별도 fetch로 graceful
+  // fallback. `undefined`(필드 자체 부재=구버전) vs `[]`(신버전·값 없음)를 구분해야 한다.
+  const [hypothesesEmbedded, setHypothesesEmbedded] = useState(false);
 
   useEffect(() => {
+    if (hypothesesEmbedded) return; // embed로 이미 채워짐 — round-2 fetch 불필요.
     if (!hasSession) return;
     const sprintId = session?.sprint_id;
     if (!sprintId) { setHypotheses([]); setHypothesesLoading(false); return; }
@@ -253,8 +259,8 @@ export default function RetroSessionPage() {
       }
     })();
     return () => { cancelled = true; };
-    // 위 outcome effect와 동일 근거(hasSession 최초 전이 + sprint_id 값만 트리거).
-  }, [hasSession, session?.sprint_id]);
+    // 위 outcome effect와 동일 근거(hasSession 최초 전이 + sprint_id 값만 트리거) + embed 플래그.
+  }, [hypothesesEmbedded, hasSession, session?.sprint_id]);
 
   // synthesis/next_hypotheses는 SessionResponse에 additive로 얹힐 예정(§5) — BE 미착지 구간엔
   // 필드 자체가 없어 undefined로 넘어오므로 null/빈배열로 기본값 처리(load()에서 함께 세팅).
@@ -333,6 +339,7 @@ export default function RetroSessionPage() {
           actions?: RetroActionRecord[];
           synthesis?: RetroSynthesis | null;
           next_hypotheses?: RetroNextHypothesis[];
+          hypotheses?: RetroHypothesisResult[];
         };
       };
       const loadedItems = json.data.items ?? [];
@@ -343,6 +350,13 @@ export default function RetroSessionPage() {
       // null/빈배열 기본값(nullable graceful, "종합 생성" CTA로 이어짐).
       setSynthesis(json.data.synthesis ?? null);
       setNextHypotheses(json.data.next_hypotheses ?? []);
+      // E-SPRINT-LOOP FE(5feac498 후속) — BE #1878 embed 소비. `undefined`(필드 자체 부재=구버전
+      // BE)와 `[]`(신버전·값 없음)를 구분해야 하위 round-2 fetch를 잘못 스킵하지 않는다.
+      if (json.data.hypotheses !== undefined) {
+        setHypotheses(json.data.hypotheses);
+        setHypothesesLoading(false);
+        setHypothesesEmbedded(true);
+      }
       // B4(9f27af8f): voted_by_me가 응답에 실리면 새로고침 후에도 투표 상태 복원(필드 부재 시 기존 동작 그대로).
       const hydratedVotes = loadedItems.filter((item) => item.voted_by_me).map((item) => item.id);
       if (hydratedVotes.length > 0) {
