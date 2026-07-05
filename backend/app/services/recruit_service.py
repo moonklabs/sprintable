@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.role_template import RoleTemplate
@@ -75,7 +75,18 @@ async def recruit_agent(
     QA MINOR 하드닝(S2에서 명시 유보된 부분의 소비 지점): ``validate_tool_groups``를 어떤 write
     (persona/key)도 하기 전에 먼저 호출 — role_template.default_tool_groups 가 오염돼 있으면
     ``resolve_policy``의 미인식-그룹 fail-open(전체 비파괴 허용)으로 새는 걸 fail-closed 로 막는다.
+
+    까심 QA HIGH(S3 RC): ``get_recruited()`` 조회→create 사이 + 키 rotate 의 old조회→revoke→insert
+    사이에 락이 없으면 동일 agent 에 대한 동시 recruit 2콜이 persona 2행 + active 키 2개(scope
+    서로 다름)를 만들어 G2/G3 단일소스 전제가 깨진다(codex 실재현). SELECT FOR UPDATE 는 아직
+    존재하지 않는 행은 못 잠그므로(check-then-insert TOCTOU — 기존 [[feedback_check_then_insert_toctou]]
+    교훈과 동형) agent-scoped `pg_advisory_xact_lock` 으로 이 함수 본문 전체(조회→분기→write)를
+    직렬화한다 — 트랜잭션 종료 시 자동 해제, 기존 `onboarding_first_auth:{member_id}` 관례와 동일 패턴.
     """
+    await session.execute(
+        select(func.pg_advisory_xact_lock(func.hashtext(f"recruit_agent:{agent_member.id}")))
+    )
+
     tool_allowlist = list(role_template.default_tool_groups)
     validate_tool_groups(tool_allowlist)  # fail-closed — ValueError 전파, 호출부가 400 매핑
 
@@ -95,6 +106,9 @@ async def recruit_agent(
             tool_allowlist=tool_allowlist,
             role_template_id=role_template.id,
             is_default=True,
+            # QA MEDIUM(persona description stale): 새 role의 description이 None이어도 이전
+            # role의 값이 잔존하면 안 됨 — 이 필드만 None도 명시 반영으로 승격.
+            force_none_fields={"description"},
         )
     else:
         persona = await persona_repo.create(
