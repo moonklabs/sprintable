@@ -387,6 +387,44 @@ async def _lookup_members_by_ids_anchor(
     return result
 
 
+async def is_caller_member(
+    member_id: uuid.UUID, auth: AuthContext, session: AsyncSession, org_id: uuid.UUID,
+) -> bool:
+    """S19(발견·회귀수정): caller가 team_members뷰 id 공간의 ``member_id`` 본인인지 axis-safe하게
+    확인한다.
+
+    ``resolve_member(auth,...).id != member_id`` 직접비교는 API키 에이전트(auth.user_id가 이미
+    team_member.id)엔 맞지만, JWT 휴먼은 ``resolve_member``가 ``OrgMember.id``(별개 테이블 PK)를
+    반환해 이 path의 ``member_id``(=members anchor/team_members뷰 id)와 축이 달라 **본인이 본인
+    claim/heartbeat/lock을 호출해도 403**나는 회귀를 냈다(까심의 "human 회귀 없음" 판정은 검증
+    시드가 같은 id를 재사용한 거짓양성 — 실 서로 다른 id로 재현하면 드러남).
+
+    axis-safe 비교: agent(API키)는 ``auth.user_id`` 자체가 이미 team_member.id이므로 직접비교.
+    human(JWT)은 ``auth.user_id``=users.id이므로, member_id가 가리키는 team_members뷰 행의
+    ``user_id`` 컬럼(동일 users.id 공간)과 비교한다 — org_member/members 어느 쪽도 개입하지 않음.
+    """
+    caller_id = uuid.UUID(auth.user_id)
+    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    if is_api_key:
+        return member_id == caller_id
+    result = await session.execute(
+        select(TeamMember.user_id).where(
+            TeamMember.id == member_id, TeamMember.org_id == org_id,
+        ).limit(1)
+    )
+    row = result.first()
+    return row is not None and row[0] == caller_id
+
+
+async def assert_caller_is_member(
+    member_id: uuid.UUID, auth: AuthContext, session: AsyncSession, org_id: uuid.UUID,
+    detail: str = "Cannot act as another member",
+) -> None:
+    """``is_caller_member`` 결과가 False면 403. self-scope 게이트의 표준 형태."""
+    if not await is_caller_member(member_id, auth, session, org_id):
+        raise HTTPException(status_code=403, detail=detail)
+
+
 async def resolve_auth_member(
     auth: AuthContext,
     org_id: uuid.UUID,

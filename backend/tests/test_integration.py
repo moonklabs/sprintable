@@ -1,6 +1,6 @@
 """S18+S25+S32: conftest fixture 기반 통합 테스트 — Sprint 3+4+5 도메인 헬스 체크."""
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -334,7 +334,8 @@ async def test_notification_settings_get_via_conftest_s6(test_client, mock_sessi
     mock_result.scalars.return_value.all.return_value = []
     mock_session.execute = AsyncMock(return_value=mock_result)
 
-    resp = await test_client.get(f"/api/v2/notification-settings?member_id={member_id}")
+    with patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=True):
+        resp = await test_client.get(f"/api/v2/notification-settings?member_id={member_id}")
     assert resp.status_code == 200
     assert resp.json() == []
 

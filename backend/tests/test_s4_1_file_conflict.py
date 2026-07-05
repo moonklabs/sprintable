@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 ORG_ID = uuid.uuid4()
 PROJECT_ID = uuid.uuid4()
@@ -169,8 +170,8 @@ async def test_file_lock_no_conflict_200():
         session.flush = AsyncMock()
         session.add = MagicMock()
 
-        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved(MEMBER_ID)):
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/file-lock",
@@ -195,8 +196,8 @@ async def test_file_lock_403_when_caller_is_different_member():
         result.scalars.return_value.first.return_value = member
         session.execute = AsyncMock(return_value=result)
 
-        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved(OTHER_MEMBER_ID)):
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   side_effect=HTTPException(status_code=403, detail="Cannot act as another member")):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/file-lock",
@@ -258,8 +259,8 @@ async def test_file_lock_with_conflict_warning():
 
         with patch("app.routers.file_locks.publish_event"), \
              patch("app.routers.file_locks.fire_webhooks", new_callable=AsyncMock), \
-             patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved(MEMBER_ID)):
+             patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/file-lock",
@@ -296,8 +297,8 @@ async def test_file_unlock_200():
         session.execute = mock_execute
         session.flush = AsyncMock()
 
-        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved(MEMBER_ID)):
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/file-unlock",
@@ -337,8 +338,8 @@ async def test_file_unlock_update_where_scoped_to_member_project():
         session.execute = mock_execute
         session.flush = AsyncMock()
 
-        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved(MEMBER_ID)):
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/file-unlock",
@@ -366,8 +367,8 @@ async def test_file_unlock_403_when_caller_is_different_member():
         result.scalars.return_value.first.return_value = member
         session.execute = AsyncMock(return_value=result)
 
-        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved(OTHER_MEMBER_ID)):
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   side_effect=HTTPException(status_code=403, detail="Cannot act as another member")):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/file-unlock",
@@ -519,8 +520,8 @@ async def test_file_lock_uses_project_hint_to_scope_member_query():
         session.flush = AsyncMock()
         session.add = MagicMock()
 
-        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved(MEMBER_ID)), \
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None), \
              patch("app.routers.file_locks._caller_project_hint", return_value=hint_project) as hint_mock:
             async with client as c:
                 resp = await c.post(
@@ -565,8 +566,8 @@ async def test_stale_project_hint_falls_back_instead_of_404():
         session.flush = AsyncMock()
         session.add = MagicMock()
 
-        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved(MEMBER_ID)), \
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None), \
              patch("app.routers.file_locks._caller_project_hint", return_value=stale_hint):
             async with client as c:
                 resp = await c.post(

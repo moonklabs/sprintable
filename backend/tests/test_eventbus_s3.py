@@ -299,7 +299,10 @@ def test_stream_batch_delivers_over_100_events(mock_session, org_id):
 
 @pytest.mark.anyio
 async def test_expire_stale_events(client, mock_session):
-    """POST /api/v2/events/expire-stale — expired + cleaned rowcount 반환."""
+    """POST /api/v2/events/expire-stale — expired + cleaned rowcount 반환.
+
+    S19(SHOULD): org-admin 전용 게이트 추가 — org-admin caller로 mock.
+    """
     expired_result = MagicMock()
     expired_result.rowcount = 5
     cleaned_result = MagicMock()
@@ -307,12 +310,21 @@ async def test_expire_stale_events(client, mock_session):
 
     mock_session.execute.side_effect = [expired_result, cleaned_result]
 
-    resp = await client.post("/api/v2/events/expire-stale")
+    with patch("app.routers.events._is_org_admin", new_callable=AsyncMock, return_value=True):
+        resp = await client.post("/api/v2/events/expire-stale")
     assert resp.status_code == 200
     data = resp.json()
     assert data["expired"] == 5
     assert data["cleaned"] == 3
     mock_session.commit.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_expire_stale_403_when_not_org_admin(client, mock_session):
+    """S19(SHOULD MUST급): per-resource IDOR이 아니라 privilege 게이트 부재 — org-admin 아니면 403."""
+    with patch("app.routers.events._is_org_admin", new_callable=AsyncMock, return_value=False):
+        resp = await client.post("/api/v2/events/expire-stale")
+    assert resp.status_code == 403
 
 
 @pytest.mark.anyio
@@ -324,7 +336,8 @@ async def test_expire_stale_uses_correct_cutoffs(client, mock_session):
     cleaned_result.rowcount = 0
     mock_session.execute.side_effect = [expired_result, cleaned_result]
 
-    resp = await client.post("/api/v2/events/expire-stale")
+    with patch("app.routers.events._is_org_admin", new_callable=AsyncMock, return_value=True):
+        resp = await client.post("/api/v2/events/expire-stale")
     assert resp.status_code == 200
     # execute 2번 호출 (update expired + delete cleaned)
     assert mock_session.execute.call_count == 2
