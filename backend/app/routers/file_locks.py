@@ -86,7 +86,10 @@ async def _fetch_scoped_member(
     404로 끝내지 말고 힌트 없이 결정적 폴백(ORDER BY project_id, 기존 MED 픽스와 동일 패턴)으로
     재조회한다. X-Project-Id 헤더 미전송 + JWT project가 stale인 정상 caller의 false-404 회귀 방지.
     """
-    base_query = select(TeamMember).where(TeamMember.id == member_id, TeamMember.org_id == org_id)
+    # S17 RC④(산티아고 최종): 체크리스트 "id+org+active" 명문화 — is_active 필터 추가.
+    base_query = select(TeamMember).where(
+        TeamMember.id == member_id, TeamMember.org_id == org_id, TeamMember.is_active.is_(True),
+    )
 
     project_hint = _caller_project_hint(auth)
     if project_hint is not None:
@@ -240,6 +243,11 @@ async def unlock_files(
     S17(산티아고 SME MUST①): 이전엔 path member_id만 신뢰해 org 필터·소유 확인 없이 UPDATE —
     임의 member 명의 lock을 아무나 해제 가능한 구조였다. member 존재+org 확인 후 caller
     self-scope(자기 자신만) 검증 + UPDATE WHERE에 org_id 필터 추가.
+
+    S17 RC④(산티아고 최종 MUST): UPDATE WHERE에 project_id 필터도 없었다 — 같은 member가 org 내
+    여러 project에 동일 file_path를 lock 중이면, 한 project 컨텍스트에서의 unlock이 **다른
+    project의 lock까지** 함께 release해 advisory-lock의 project 단위 무결성이 깨졌다(권한상승은
+    아니고 데이터 무결성 문제). member.project_id(_fetch_scoped_member가 결정한 그 project)로 좁힌다.
     """
     member = await _fetch_scoped_member(session, member_id, org_id, auth)
     if member is None:
@@ -254,6 +262,7 @@ async def unlock_files(
         update(FileLock)
         .where(
             FileLock.org_id == org_id,
+            FileLock.project_id == member.project_id,
             FileLock.member_id == member_id,
             FileLock.file_path.in_(body.file_paths),
             FileLock.released_at.is_(None),

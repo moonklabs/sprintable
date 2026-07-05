@@ -311,6 +311,48 @@ async def test_file_unlock_200():
 
 
 @pytest.mark.anyio
+async def test_file_unlock_update_where_scoped_to_member_project():
+    """S17 RC④(산티아고 최종 MUST): unlock UPDATE WHERE에 project_id 필터가 실제로 걸리는지 —
+    누락 시 같은 member가 org 내 여러 project에 같은 file_path 락을 갖고 있으면 한 project
+    컨텍스트의 unlock이 다른 project의 lock까지 release해 advisory-lock의 project 경계가 깨진다.
+    (프로젝트 격리의 실제 왕복 검증은 real-Postgres 스크립트로 별도 수행 — 여기선 컴파일된 WHERE에
+    project_id 조건이 존재하는지만 확인.)
+    """
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        captured_stmts = []
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            captured_stmts.append(stmt)
+            result = MagicMock()
+            if call_count == 1:
+                result.scalars.return_value.first.return_value = member
+            return result
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+
+        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
+                   return_value=_resolved(MEMBER_ID)):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-unlock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
+
+        assert resp.status_code == 200
+        update_stmt = captured_stmts[1]  # 2nd captured call = the UPDATE
+        assert "project_id" in str(update_stmt)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_file_unlock_403_when_caller_is_different_member():
     """S17(산티아고 SME MUST①): self-scope — 타 member 명의 lock을 임의로 해제하지 못하게.
 
