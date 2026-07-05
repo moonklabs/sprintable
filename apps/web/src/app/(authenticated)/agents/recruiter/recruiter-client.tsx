@@ -1,0 +1,629 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useTranslations } from 'next-intl';
+import {
+  Check, Copy, Download, RefreshCw, ChevronLeft, Info, Sparkles,
+  Palette, Cog, Search, ClipboardList, Briefcase, IdCard,
+} from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { cn } from '@/lib/utils';
+import {
+  VerifyRail, RAIL_ORDER, HTTP_RAIL_ORDER, type DisplayStep, type RailState, type RailStatus,
+} from '@/app/onboarding/verify-rail';
+import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle } from '@/services/recruit';
+import { RUNTIME_VALUES, RUNTIME_SUPPORTED, RUNTIME_GUIDE_FILENAME } from '@/services/recruit';
+
+// ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
+
+type Step = 1 | 2 | 3 | 4;
+
+const CATEGORY_ICON: Record<string, typeof Palette> = {
+  frontend: Palette,
+  backend: Cog,
+  qa: Search,
+  pm: ClipboardList,
+};
+
+const RAIL_LABEL_KEY: Record<RailState, string> = {
+  config_copied: 'railConfigCopied',
+  waiting: 'railWaiting',
+  mcp_reachable: 'railMcpReachable',
+  event_delivered: 'railEventDelivered',
+  ack: 'railAck',
+  verified: 'railVerified',
+};
+
+/**
+ * rotate 후 실 key 를 mcp_config 에 치환 — 재조립 아닌 필드 치환(connect-step renderArtifact 원칙 동형).
+ * 까심 QA RC HIGH①+②: transport별 키 위치가 다르다 — http는 `headers.Authorization`(Bearer 접두),
+ * stdio는 `env.AGENT_API_KEY`(접두 없음). 하나만 처리하면 다른 transport에서 화면 키가 조용히
+ * stale(회전된 옛 키 그대로 노출)해진다 — 둘 다 처리하고, 어느 쪽도 못 찾으면 null(호출부가 에러로 취급).
+ */
+export function spliceApiKey(bundle: McpConfigBundle, newKey: string): McpConfigBundle | null {
+  const server = bundle.mcpServers.sprintable;
+  if (server.headers && 'Authorization' in server.headers) {
+    return {
+      mcpServers: {
+        sprintable: { ...server, headers: { ...server.headers, Authorization: `Bearer ${newKey}` } },
+      },
+    };
+  }
+  if (server.env && 'AGENT_API_KEY' in server.env) {
+    return {
+      mcpServers: {
+        sprintable: { ...server, env: { ...server.env, AGENT_API_KEY: newKey } },
+      },
+    };
+  }
+  return null;
+}
+
+function downloadTextFile(filename: string, content: string) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+interface RawStep {
+  state: RailState;
+  status: RailStatus;
+  reason?: string;
+}
+
+// ─── 재사용 하위 컴포넌트 ────────────────────────────────────────────────────
+
+function StepperHeader({ step }: { step: Step }) {
+  const t = useTranslations('recruiter');
+  const stages: { n: Step; label: string }[] = [
+    { n: 1, label: t('stepRole') },
+    { n: 2, label: t('stepRuntime') },
+    { n: 3, label: t('stepBundle') },
+    { n: 4, label: t('stepVerify') },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-1 pb-3">
+      {stages.map((s, i) => (
+        <div key={s.n} className="flex items-center gap-1.5">
+          <span
+            className={cn(
+              'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold',
+              s.n === step && 'border-transparent bg-foreground text-background',
+              s.n < step && 'border-success/40 text-success',
+              s.n > step && 'border-border text-muted-foreground',
+            )}
+          >
+            {s.n < step ? <Check className="h-3 w-3" aria-hidden /> : s.n}
+            {s.label}
+          </span>
+          {i < stages.length - 1 && <span className="text-muted-foreground">›</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CopyDownloadButtons({
+  content, filename, copied, onCopied,
+}: { content: string; filename: string; copied: boolean; onCopied: () => void }) {
+  const t = useTranslations('recruiter');
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      onCopied();
+    } catch {
+      // ignore clipboard failure
+    }
+  };
+  return (
+    <div className="flex shrink-0 items-center gap-1.5">
+      <Button variant="outline" size="sm" onClick={() => void handleCopy()}>
+        {copied ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => downloadTextFile(filename, content)}>
+        <Download className="h-3.5 w-3.5" />{t('download')}
+      </Button>
+    </div>
+  );
+}
+
+// ─── 메인 컴포넌트 ───────────────────────────────────────────────────────────
+
+export function RecruiterClient({ projectId }: { projectId: string; orgId?: string }) {
+  const t = useTranslations('recruiter');
+  const tAgents = useTranslations('agents');
+  const [step, setStep] = useState<Step>(1);
+
+  // STEP 1 — role catalog
+  const [roleTemplates, setRoleTemplates] = useState<RoleTemplateSummary[] | null>(null);
+  const [roleError, setRoleError] = useState(false);
+  const [selectedRoleSlug, setSelectedRoleSlug] = useState<string | null>(null);
+
+  const fetchRoleTemplates = useCallback(async () => {
+    setRoleError(false);
+    try {
+      const res = await fetch('/api/role-templates');
+      if (!res.ok) { setRoleError(true); return; }
+      const json = (await res.json()) as { data?: RoleTemplateSummary[] };
+      setRoleTemplates(json.data ?? []);
+    } catch {
+      setRoleError(true);
+    }
+  }, []);
+
+  useEffect(() => { void fetchRoleTemplates(); }, [fetchRoleTemplates]);
+
+  const selectedRole = roleTemplates?.find((r) => r.slug === selectedRoleSlug) ?? null;
+
+  // STEP 2 — runtime + agent(G1)
+  const [runtime, setRuntime] = useState<string>('claude-code');
+  const [agentMode, setAgentMode] = useState<'new' | 'existing'>('new');
+  const [newAgentName, setNewAgentName] = useState('');
+  const autoFilledNameRef = useRef('');
+  const [existingAgents, setExistingAgents] = useState<{ id: string; name: string }[] | null>(null);
+  const [selectedExistingAgentId, setSelectedExistingAgentId] = useState('');
+  const [recruiting, setRecruiting] = useState(false);
+  const [recruitError, setRecruitError] = useState<string | null>(null);
+  const [activeAgentName, setActiveAgentName] = useState('');
+
+  useEffect(() => {
+    if (existingAgents !== null) return;
+    void (async () => {
+      try {
+        // 까심 QA RC HIGH③: project_id 없이 부르면 org 전체(타 프로젝트 포함) 에이전트가 새 — 이 채용
+        // 흐름은 현재 프로젝트 스코프라 새로 만들기(scope_mode=projects)와 동일하게 project_id 로 스코프.
+        const res = await fetch(`/api/team-members?project_id=${projectId}&type=agent`);
+        if (!res.ok) return;
+        const json = (await res.json()) as { data?: Array<{ id: string; name: string; type: string }> };
+        setExistingAgents((json.data ?? []).filter((m) => m.type === 'agent').map((m) => ({ id: m.id, name: m.name })));
+      } catch {
+        setExistingAgents([]);
+      }
+    })();
+  }, [existingAgents, projectId]);
+
+  // STEP 3 — bundle result
+  const [recruitResult, setRecruitResult] = useState<RecruitResponse | null>(null);
+  const [copiedGuide, setCopiedGuide] = useState(false);
+  const [copiedMcp, setCopiedMcp] = useState(false);
+  const [showRotateConfirm, setShowRotateConfirm] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const [rotateError, setRotateError] = useState<string | null>(null);
+
+  const guideFilename = RUNTIME_GUIDE_FILENAME[runtime] ?? 'CLAUDE.md';
+
+  const handleRecruit = async () => {
+    if (!selectedRoleSlug) return;
+    setRecruiting(true);
+    setRecruitError(null);
+    try {
+      let agentId: string;
+      let agentName: string;
+      if (agentMode === 'new') {
+        const name = newAgentName.trim();
+        if (!name) { setRecruitError(t('agentNameRequired')); setRecruiting(false); return; }
+        const createRes = await fetch('/api/agents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, scope_mode: 'projects', project_ids: [projectId] }),
+        });
+        const createJson = (await createRes.json().catch(() => null)) as { data?: { id: string } } | null;
+        if (!createRes.ok || !createJson?.data?.id) throw new Error(t('recruitFailed'));
+        agentId = createJson.data.id;
+        agentName = name;
+      } else {
+        if (!selectedExistingAgentId) { setRecruitError(t('agentSelectRequired')); setRecruiting(false); return; }
+        agentId = selectedExistingAgentId;
+        agentName = existingAgents?.find((a) => a.id === agentId)?.name ?? '';
+      }
+
+      const recruitRes = await fetch(`/api/agents/${agentId}/recruit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role_template_slug: selectedRoleSlug, runtime }),
+      });
+      const recruitJson = (await recruitRes.json().catch(() => null)) as { data?: RecruitResponse } | null;
+      if (!recruitRes.ok || !recruitJson?.data) throw new Error(t('recruitFailed'));
+
+      setRecruitResult(recruitJson.data);
+      setActiveAgentName(agentName);
+      setCopiedGuide(false);
+      setCopiedMcp(false);
+      setStep(3);
+    } catch (err) {
+      setRecruitError(err instanceof Error ? err.message : t('recruitFailed'));
+    } finally {
+      setRecruiting(false);
+    }
+  };
+
+  const handleRotateConfirmed = async () => {
+    if (!recruitResult) return;
+    setRotating(true);
+    setRotateError(null);
+    try {
+      const listRes = await fetch(`/api/agents/${recruitResult.agent_id}/api-keys`);
+      const listJson = (await listRes.json().catch(() => null)) as { data?: Array<{ id: string; revoked_at: string | null }> } | null;
+      const active = listJson?.data?.find((k) => !k.revoked_at);
+      if (!listRes.ok || !active) throw new Error(t('rotateFailed'));
+
+      const rotateRes = await fetch('/api/api-keys/rotate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key_id: active.id }),
+      });
+      const rotateJson = (await rotateRes.json().catch(() => null)) as { data?: { api_key?: string } } | null;
+      const newKey = rotateJson?.data?.api_key;
+      if (!rotateRes.ok || !newKey) throw new Error(t('rotateFailed'));
+
+      // 까심 QA RC HIGH①: 두 transport 키 위치 다 처리 실패 시(null) 조용히 stale 화면을 두지 말고 에러로.
+      const splicedConfig = spliceApiKey(recruitResult.mcp_config, newKey);
+      if (!splicedConfig) throw new Error(t('rotateFailed'));
+
+      setRecruitResult({ ...recruitResult, api_key: newKey, mcp_config: splicedConfig });
+      setCopiedMcp(false);
+      setShowRotateConfirm(false);
+    } catch (err) {
+      setRotateError(err instanceof Error ? err.message : t('rotateFailed'));
+    } finally {
+      setRotating(false);
+    }
+  };
+
+  // STEP 4 — verify rail (connect-step 재사용 패턴)
+  const [beSteps, setBeSteps] = useState<RawStep[] | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const railOrder = recruitResult?.default_transport === 'http' ? HTTP_RAIL_ORDER : RAIL_ORDER;
+
+  const pollStatus = useCallback(async () => {
+    if (!recruitResult) return;
+    try {
+      const res = await fetch(`/api/agents/${recruitResult.agent_id}/verification-status?transport=${recruitResult.default_transport}`);
+      if (!res.ok) return;
+      const json = (await res.json()) as { data?: { steps?: RawStep[] } | RawStep[]; steps?: RawStep[] };
+      const d = json?.data;
+      const raw = (Array.isArray(d) ? d : d?.steps) ?? json?.steps;
+      if (Array.isArray(raw)) setBeSteps(raw);
+    } catch {
+      // swallow — graceful degradation
+    }
+  }, [recruitResult]);
+
+  useEffect(() => {
+    if (step !== 4 || !recruitResult) return;
+    void pollStatus();
+    const iv = setInterval(() => void pollStatus(), 2500);
+    return () => clearInterval(iv);
+  }, [step, recruitResult, pollStatus]);
+
+  const displaySteps: DisplayStep[] = railOrder.map((state) => {
+    const be = beSteps?.find((s) => s.state === state);
+    let status: RailStatus = be?.status ?? 'pending';
+    if (state === 'config_copied' && status === 'pending') status = 'done'; // 번들 다운로드=STEP3 완주로 이미 완료
+    // 유나 가디언 polish#2: onboarding 공용 라벨("설정 복사됨")은 채용 맥락과 안 맞아 이 상태만 로컬 오버라이드.
+    const label = state === 'config_copied' ? t('railBundleDownloaded') : tAgents(RAIL_LABEL_KEY[state]);
+    return { state, status, label, reason: be?.reason };
+  });
+  const verified = displaySteps.find((s) => s.state === 'verified')?.status === 'done';
+
+  const handleVerify = async () => {
+    if (!recruitResult) return;
+    setVerifying(true);
+    try {
+      await fetch(`/api/agents/${recruitResult.agent_id}/verify-connection?transport=${recruitResult.default_transport}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      }).catch(() => {});
+      await pollStatus();
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const mcpConfigText = useMemo(
+    () => (recruitResult ? JSON.stringify(recruitResult.mcp_config, null, 2) : ''),
+    [recruitResult],
+  );
+
+  return (
+    <div className="mx-auto flex max-w-2xl flex-1 flex-col gap-4 p-4">
+      <TopBarSlot title={<h1 className="flex items-center gap-2 text-sm font-medium"><IdCard className="h-4 w-4" aria-hidden />{t('title')}</h1>} />
+
+      <SectionCard>
+        <SectionCardHeader>
+          <StepperHeader step={step} />
+        </SectionCardHeader>
+        <SectionCardBody className="space-y-4">
+
+          {/* ── STEP 1 : 직무 선택 ── */}
+          {step === 1 && (
+            <div className="space-y-4">
+              <p className="text-sm font-semibold text-foreground">{t('roleQuestion')}</p>
+              {roleError ? (
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-destructive">{t('roleLoadError')}</p>
+                  <Button variant="ghost" size="sm" onClick={() => void fetchRoleTemplates()}>{t('retry')}</Button>
+                </div>
+              ) : !roleTemplates ? (
+                <p className="text-sm text-muted-foreground">{t('roleLoading')}</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {roleTemplates.map((role) => {
+                    const Icon = CATEGORY_ICON[role.category] ?? Briefcase;
+                    const sel = role.slug === selectedRoleSlug;
+                    return (
+                      <button
+                        key={role.id}
+                        type="button"
+                        onClick={() => setSelectedRoleSlug(role.slug)}
+                        className={cn(
+                          'relative flex flex-col gap-2 rounded-xl border p-3 text-left transition-colors',
+                          sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
+                        )}
+                      >
+                        {sel && <Check className="absolute right-2.5 top-2.5 h-4 w-4 text-primary" aria-hidden />}
+                        <span className="flex items-center gap-2 text-sm font-bold text-foreground">
+                          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                          {role.name}
+                        </span>
+                        {role.description && <span className="text-xs leading-relaxed text-muted-foreground">{role.description}</span>}
+                        <span className="flex flex-wrap gap-1 pt-0.5">
+                          {role.default_tool_groups.map((g) => (
+                            <span key={g} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                              {tAgents.has(`toolPermissions.groups.${g}`) ? tAgents(`toolPermissions.groups.${g}`) : g}
+                            </span>
+                          ))}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                {t('roleGuide')}
+              </p>
+              <div className="flex justify-end pt-2">
+                <Button
+                  variant="hero"
+                  disabled={!selectedRoleSlug}
+                  onClick={() => {
+                    // PO crux① "가볍고 빠르게" — 직무 고르면 에이전트 이름 자동 채움(스마트 기본값).
+                    // 유저가 이미 직접 수정했으면(자동채움 값과 다르면) 덮어쓰지 않는다.
+                    if (selectedRole && (newAgentName === '' || newAgentName === autoFilledNameRef.current)) {
+                      const auto = t('agentNameAutoFill', { role: selectedRole.name });
+                      autoFilledNameRef.current = auto;
+                      setNewAgentName(auto);
+                    }
+                    setStep(2);
+                  }}
+                >
+                  {t('next')}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* ── STEP 2 : 실행환경 + 에이전트(G1) ── */}
+          {step === 2 && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-foreground">{t('runtimeQuestion')}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {RUNTIME_VALUES.map((rv) => {
+                    const supported = RUNTIME_SUPPORTED.includes(rv);
+                    const label = rv === 'connector' ? t('runtimeConnector') : rv === 'claude-code' ? 'Claude Code' : rv === 'codex' ? 'Codex' : rv === 'gemini' ? 'Gemini' : 'Cursor';
+                    return (
+                      <button
+                        key={rv}
+                        type="button"
+                        disabled={!supported}
+                        onClick={() => supported && setRuntime(rv)}
+                        className={cn(
+                          'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
+                          runtime === rv ? 'border-primary/60 bg-primary/10 text-foreground' : 'border-border text-muted-foreground',
+                          !supported && 'cursor-not-allowed opacity-50',
+                        )}
+                      >
+                        {label}{!supported && ` · ${t('comingSoon')}`}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  {t('runtimeGuide')}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-foreground">{t('agentQuestion')}</p>
+                <div className="space-y-2.5 rounded-xl border border-info-border bg-info-tint/40 p-3">
+                  <div className="flex w-fit rounded-lg border border-border bg-muted p-[3px]">
+                    <button
+                      type="button"
+                      onClick={() => setAgentMode('new')}
+                      className={cn('rounded px-2.5 py-1 text-xs font-semibold', agentMode === 'new' && 'bg-background text-foreground shadow-sm', agentMode !== 'new' && 'text-muted-foreground')}
+                    >
+                      {t('agentModeNew')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAgentMode('existing')}
+                      className={cn('rounded px-2.5 py-1 text-xs font-semibold', agentMode === 'existing' && 'bg-background text-foreground shadow-sm', agentMode !== 'existing' && 'text-muted-foreground')}
+                    >
+                      {t('agentModeExisting')}
+                    </button>
+                  </div>
+                  {agentMode === 'new' ? (
+                    <input
+                      type="text"
+                      value={newAgentName}
+                      onChange={(e) => setNewAgentName(e.target.value)}
+                      placeholder={t('agentNamePlaceholder')}
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    />
+                  ) : (
+                    <select
+                      value={selectedExistingAgentId}
+                      onChange={(e) => setSelectedExistingAgentId(e.target.value)}
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    >
+                      <option value="">{t('agentSelectPlaceholder')}</option>
+                      {(existingAgents ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  )}
+                  <p className="flex items-start gap-1.5 text-xs text-info">
+                    <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                    {t('agentInlineNote')}
+                  </p>
+                </div>
+              </div>
+
+              {recruitError && <p className="text-sm text-destructive">{recruitError}</p>}
+
+              <div className="flex justify-between gap-2 pt-2">
+                <Button variant="ghost" onClick={() => setStep(1)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
+                <Button variant="hero" disabled={recruiting} onClick={() => void handleRecruit()}>
+                  {recruiting ? t('recruiting') : t('recruitCta')}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* ── STEP 3 : 번들 프리뷰(파일 3종) ── */}
+          {step === 3 && recruitResult && selectedRole && (
+            <div className="space-y-4">
+              <Alert variant="warning">
+                <AlertDescription className="flex items-start gap-2">
+                  <span aria-hidden>🔑</span>
+                  <span><b>{t('keyOnceTitle')}</b> {t('keyOnceBody')}</span>
+                </AlertDescription>
+              </Alert>
+
+              <div className="overflow-hidden rounded-md border border-border">
+                <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
+                  <span className="font-mono text-xs text-foreground">📄 {guideFilename} <span className="text-muted-foreground">{t('guideFileNote')}</span></span>
+                  <CopyDownloadButtons content={recruitResult.system_prompt} filename={guideFilename} copied={copiedGuide} onCopied={() => setCopiedGuide(true)} />
+                </div>
+                <pre className="max-h-64 overflow-auto bg-muted/40 p-3 text-xs leading-relaxed whitespace-pre-wrap">{recruitResult.system_prompt}</pre>
+              </div>
+
+              <div className="overflow-hidden rounded-md border border-border">
+                <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
+                  <span className="font-mono text-xs text-foreground">📄 .mcp.json <span className="text-muted-foreground">{t('mcpFileNote')}</span></span>
+                  <CopyDownloadButtons content={mcpConfigText} filename=".mcp.json" copied={copiedMcp} onCopied={() => setCopiedMcp(true)} />
+                </div>
+                <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">{mcpConfigText}</pre>
+              </div>
+
+              <div className="space-y-2 rounded-md border border-border p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">🔑 {t('scopeTitle')}</span>
+                  <Button variant="ghost" size="sm" onClick={() => setShowRotateConfirm(true)}>
+                    <RefreshCw className="h-3.5 w-3.5" />{t('rotate')}
+                  </Button>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <Badge variant="success">{t('scopeCore')}</Badge>
+                  {recruitResult.tool_allowlist.map((g) => (
+                    <span key={g} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                      {tAgents.has(`toolPermissions.groups.${g}`) ? tAgents(`toolPermissions.groups.${g}`) : g}
+                    </span>
+                  ))}
+                  <span className="text-muted-foreground">{t('scopeCoreNote')}</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <Badge variant="destructive">{t('scopeBlocked')}</Badge>
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground line-through opacity-60">admin</span>
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground line-through opacity-60">destructive</span>
+                  <span className="text-destructive">{t('scopeBlockedNote')}</span>
+                </div>
+
+                {showRotateConfirm && (
+                  <div className="space-y-2 rounded-md border border-warning-border bg-warning-tint p-3">
+                    <p className="text-xs font-semibold text-foreground">{t('rotateConfirmTitle')}</p>
+                    <p className="text-xs leading-relaxed text-muted-foreground"><b className="text-foreground">{t('rotateConfirmBold')}</b> {t('rotateConfirmBody')}</p>
+                    {rotateError && <p className="text-xs text-destructive">{rotateError}</p>}
+                    <div className="flex justify-end gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => setShowRotateConfirm(false)} disabled={rotating}>{t('cancel')}</Button>
+                      <Button size="sm" className="bg-warning text-foreground hover:bg-warning/90" disabled={rotating} onClick={() => void handleRotateConfirmed()}>
+                        {rotating ? t('rotating') : t('rotateConfirmCta')}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                {t('runtimeFilenameNote')}
+              </p>
+
+              <div className="flex justify-end pt-2">
+                <Button variant="hero" onClick={() => setStep(4)}>{t('next')}</Button>
+              </div>
+            </div>
+          )}
+
+          {/* ── STEP 4 : 검증 + 배치(G5) ── */}
+          {step === 4 && recruitResult && (
+            <div className="space-y-4">
+              <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                {t('verifyGuide')}
+              </p>
+
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">
+                  {t('verifyTitle')}{' '}
+                  <span className={cn('text-xs font-normal', recruitResult.default_transport === 'http' ? 'text-info' : 'text-muted-foreground')}>
+                    {recruitResult.default_transport === 'http' ? tAgents('railStageHosted') : ''}
+                  </span>
+                </p>
+                <Button variant="ghost" size="sm" onClick={() => void handleVerify()} disabled={verifying}>
+                  <RefreshCw className={cn('h-3.5 w-3.5', verifying && 'animate-spin')} />{t('verifyRetry')}
+                </Button>
+              </div>
+              <VerifyRail steps={displaySteps} />
+
+              <div className="flex items-center gap-3 rounded-md border border-success/20 bg-success/10 p-3">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
+                  {activeAgentName.slice(0, 1) || '🪪'}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-center gap-1.5 text-sm font-bold text-foreground">
+                    {activeAgentName || t('deployedAgentFallback')}
+                    <Badge variant="success">{t('deployedMember')}</Badge>
+                  </p>
+                  <p className="text-xs text-muted-foreground">{selectedRole?.name} · {t('deployedNote')}</p>
+                </div>
+                <Link href="/board" className="shrink-0 text-xs font-semibold text-primary hover:underline">{t('viewInBoard')} →</Link>
+              </div>
+
+              <p className="flex items-start gap-1.5 text-xs text-info">
+                <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                {t('executionBoundaryNote')}
+              </p>
+
+              <div className="flex justify-between gap-2 pt-2">
+                <Button variant="ghost" onClick={() => setStep(3)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
+                <Link href="/dashboard"><Button variant={verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
+              </div>
+            </div>
+          )}
+        </SectionCardBody>
+      </SectionCard>
+    </div>
+  );
+}
