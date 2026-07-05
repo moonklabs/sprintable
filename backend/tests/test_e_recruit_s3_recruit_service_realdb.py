@@ -385,3 +385,92 @@ async def test_partial_recruit_config_touch_does_not_leak_stale_key_but_preserve
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
+async def test_recruit_vs_standalone_rotate_cross_endpoint_race_no_crash():
+    """까심 재QA 잔여1건(크로스엔드포인트 레이스): advisory lock이 recruit_agent() 본문에만 걸려
+    있으면 standalone POST /api-keys/rotate 가 같은 키를 동시 rotate할 때 락 없이 끼어들어 recruit
+    측 CAS 를 이기고, recruit 의 ``assert result is not None``이 터져 정상 요청이 500 크래시했다
+    (데이터 자체는 안전 — 패배 트랜잭션 전체 롤백). ``acquire_agent_mutation_lock``을 양쪽이 공유
+    하면 크래시 없이 안전하게 직렬화되는지 실증."""
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+    from sqlalchemy import text as _text
+    from app.core.database import Base
+    from app.models.api_key import ApiKey
+    from app.models.role_template import RoleTemplate
+    from app.models.team import TeamMember
+    from app.repositories.api_key import ApiKeyRepository
+    from app.routers.api_keys import rotate_api_key
+    from app.schemas.api_key import RotateApiKeyRequest
+    from app.services.recruit_service import recruit_agent
+
+    engine, Session = await _session()
+
+    async def _do_recruit(agent_id, org_id, role_template_id):
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            agent_ref = (await s.execute(
+                select(TeamMember).where(TeamMember.id == agent_id)
+            )).scalar_one()
+            rt_ref = (await s.execute(
+                select(RoleTemplate).where(RoleTemplate.id == role_template_id)
+            )).scalar_one()
+            try:
+                result = await recruit_agent(
+                    s, agent_member=agent_ref, org_id=org_id, role_template=rt_ref,
+                    runtime="claude-code", actor_id=uuid.uuid4(),
+                )
+                await s.commit()
+                return result
+            except Exception as exc:
+                await s.rollback()
+                return exc
+
+    async def _do_standalone_rotate(active_key_id):
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            repo = ApiKeyRepository(s)
+            try:
+                result = await rotate_api_key(
+                    RotateApiKeyRequest(api_key_id=active_key_id),
+                    _auth=SimpleNamespace(user_id=str(uuid.uuid4())),
+                    repo=repo, session=s,
+                )
+                await s.commit()
+                return result
+            except Exception as exc:
+                await s.rollback()
+                return exc
+
+    try:
+        async with Session() as s:
+            agent, backend_rt, _qa_rt, _bogus_rt, org_id = await _seed_agent_and_role_templates(s)
+            agent_id = agent.id
+            keys = (await s.execute(
+                select(ApiKey).where(ApiKey.team_member_id == agent_id)
+            )).scalars().all()
+            active_key_id = next(k.id for k in keys if k.revoked_at is None)
+
+        results = await asyncio.gather(
+            _do_recruit(agent_id, org_id, backend_rt.id),
+            _do_standalone_rotate(active_key_id),
+        )
+        # 핵심 단정: 어느 쪽도 AssertionError(500 매핑 전 단계)로 안 죽어야 함 — 패자는 CAS 손실을
+        # 정상적인 404(이미 회전된 키)로 받거나, 락 직렬화 후 자기 차례에 정상 완주해야 한다.
+        for r in results:
+            assert not isinstance(r, AssertionError), f"crashed with AssertionError: {r!r}"
+
+        async with Session() as s:
+            keys = (await s.execute(
+                select(ApiKey).where(ApiKey.team_member_id == agent_id)
+            )).scalars().all()
+            active = [k for k in keys if k.revoked_at is None]
+            assert len(active) == 1  # 데이터 정합성도 그대로 유지
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()

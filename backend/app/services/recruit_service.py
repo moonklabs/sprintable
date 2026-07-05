@@ -44,6 +44,17 @@ async def resolve_recipe_by_slug(session: AsyncSession, slug: str | None) -> dic
     return _template_to_recipe(template) if template else None
 
 
+async def acquire_agent_mutation_lock(session: AsyncSession, agent_id: uuid.UUID) -> None:
+    """까심 QA 재QA 잔여1건(S3, 크로스엔드포인트 레이스): ``recruit_agent()``와 standalone
+    ``POST /api-keys/rotate``(``api_keys.py``)가 같은 키를 동시 rotate하면, advisory lock이
+    recruit 본문에만 걸려 있어 standalone 쪽이 락 없이 끼어들어 CAS 를 이겼다. 두 진입점이 반드시
+    **같은 네임스페이스 문자열**로 이 함수를 호출해야 서로 직렬화된다(데이터는 그때도 안전했지만
+    —패배 트랜잭션 롤백— 정상 요청이 500 으로 크래시하는 게 문제였음). PO 선호안(a): 양쪽 다 감싼다."""
+    await session.execute(
+        select(func.pg_advisory_xact_lock(func.hashtext(f"recruit_agent:{agent_id}")))
+    )
+
+
 async def _rotate_or_create_key(
     session: AsyncSession, *, agent_id: uuid.UUID, scope: list[str]
 ) -> tuple[Any, str]:
@@ -83,9 +94,7 @@ async def recruit_agent(
     교훈과 동형) agent-scoped `pg_advisory_xact_lock` 으로 이 함수 본문 전체(조회→분기→write)를
     직렬화한다 — 트랜잭션 종료 시 자동 해제, 기존 `onboarding_first_auth:{member_id}` 관례와 동일 패턴.
     """
-    await session.execute(
-        select(func.pg_advisory_xact_lock(func.hashtext(f"recruit_agent:{agent_member.id}")))
-    )
+    await acquire_agent_mutation_lock(session, agent_member.id)
 
     tool_allowlist = list(role_template.default_tool_groups)
     validate_tool_groups(tool_allowlist)  # fail-closed — ValueError 전파, 호출부가 400 매핑
