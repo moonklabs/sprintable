@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.dependencies.ownership import assert_agent_owner
+from app.dependencies.ownership import _is_org_admin, assert_agent_owner
 from app.models.pm import Story
 from app.models.team import TeamMember
 from app.repositories.team_member import TeamMemberRepository
@@ -337,6 +337,25 @@ async def get_team_member(
     return TeamMemberResponse.model_validate(member)
 
 
+async def _assert_can_manage_human(
+    member: TeamMember, session: AsyncSession, org_id: uuid.UUID, auth: AuthContext,
+) -> None:
+    """S19(#2/#3 MUST): human 대상 mutation(update/deactivate)이 caller-ownership 확인 없이
+    통과되던 갭 — self(본인) 또는 org-admin만 허용한다.
+
+    ``auth.user_id``는 JWT 휴먼이면 users.id(=TeamMember.user_id와 직접 비교 가능), API키
+    에이전트면 그 에이전트 자신의 team_member.id다 — 후자는 어떤 human의 user_id/org_members
+    행과도 절대 일치하지 않으므로 별도 is_api_key 분기 없이 이 비교만으로 "에이전트가 human을
+    관리할 수 없다"는 의도된 거부까지 자연히 성립한다.
+    """
+    caller_id = uuid.UUID(auth.user_id)
+    if member.user_id == caller_id:
+        return
+    if await _is_org_admin(session, org_id, caller_id):
+        return
+    raise HTTPException(status_code=403, detail="Not authorized to manage this member")
+
+
 @router.patch("/{id}", response_model=TeamMemberResponse)
 async def update_team_member(
     id: uuid.UUID,
@@ -345,12 +364,16 @@ async def update_team_member(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> TeamMemberResponse:
+    """S19(#2 MUST): human 경로에 caller-ownership 확인이 아예 없어 org 내 임의 멤버가 타 human의
+    role/color/name 등을 수정할 수 있었다. self-or-org-admin 게이트 추가."""
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
     if member.type == "agent":
         await assert_agent_owner(id, session, org_id, uuid.UUID(auth.user_id))
+    else:
+        await _assert_can_manage_human(member, session, org_id, auth)
     data = body.model_dump(exclude_unset=True)
     # AC3-4 2-2: team_members 뷰 — 필드를 앵커 테이블로 라우팅(anchor-only). expire 후 뷰 재조회로 갱신값 반영.
     await repo.apply_anchor_update(member, data)
@@ -364,12 +387,23 @@ async def heartbeat(
     id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    """AC1/2: last_seen_at = NOW(), agent_status = online 갱신."""
+    """AC1/2: last_seen_at = NOW(), agent_status = online 갱신.
+
+    S19(#1 MUST): auth 파라미터 자체가 없어 caller 확인이 전혀 없었다 — 누구나 임의 member의
+    presence(last_seen_at/agent_status)를 스푸핑할 수 있었다. claim/unclaim과 동일한
+    resolve_member 기반 self-scope로 닫는다(대리 heartbeat 흐름 없음).
+    """
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
+
+    caller = await resolve_member(auth, org_id, session, project_id=member.project_id)
+    if caller.id != id:
+        raise HTTPException(status_code=403, detail="Cannot heartbeat as another member")
+
     now = datetime.now(timezone.utc)
     # AC3-4 2-2: team_members 뷰 — presence는 agent_project_profiles가 유일 소스(anchor-only).
     from app.services.agent_anchor_sync import sync_agent_profile_presence
@@ -458,12 +492,16 @@ async def deactivate_team_member(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
+    """S19(#3 MUST): human 경로에 caller-ownership 확인이 없어 org 내 임의 멤버가 타 human을
+    deactivate할 수 있었다. self-or-org-admin 게이트 추가(update_team_member와 동일 패턴)."""
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
     if member.type == "agent":
         await assert_agent_owner(id, session, org_id, uuid.UUID(auth.user_id))
+    else:
+        await _assert_can_manage_human(member, session, org_id, auth)
     ok = await repo.deactivate(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Team member not found")

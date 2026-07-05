@@ -24,18 +24,38 @@ def _auth_ctx():
 
 @pytest.mark.anyio
 async def test_recruit_404_when_agent_not_found():
+    """S19(#8): 이제 agent 존재+ownership 확인이 assert_agent_owner 단일 호출로 합쳐졌다."""
     from fastapi import HTTPException
     from app.routers.agents import recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
-    with patch("app.routers.agents._fetch_org_agent", AsyncMock(return_value=None)):
+    with patch("app.routers.agents.assert_agent_owner",
+               AsyncMock(side_effect=HTTPException(status_code=404, detail="Agent not found"))):
         with pytest.raises(HTTPException) as ei:
             await recruit_agent_endpoint(
                 uuid.uuid4(), RecruitRequest(role_template_slug="backend"),
                 session=session, auth=_auth_ctx(), org_id=uuid.uuid4(),
             )
     assert ei.value.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_recruit_403_when_caller_not_owner_or_admin():
+    """S19(#8 MUST): agent의 생성자도 org-admin도 아닌 caller는 재채용 불가."""
+    from fastapi import HTTPException
+    from app.routers.agents import recruit_agent_endpoint
+    from app.schemas.recruit import RecruitRequest
+
+    session = MagicMock()
+    with patch("app.routers.agents.assert_agent_owner",
+               AsyncMock(side_effect=HTTPException(status_code=403, detail="Not the owner of this agent"))):
+        with pytest.raises(HTTPException) as ei:
+            await recruit_agent_endpoint(
+                uuid.uuid4(), RecruitRequest(role_template_slug="backend"),
+                session=session, auth=_auth_ctx(), org_id=uuid.uuid4(),
+            )
+    assert ei.value.status_code == 403
 
 
 @pytest.mark.anyio
@@ -46,7 +66,7 @@ async def test_recruit_400_on_unsupported_runtime():
 
     session = MagicMock()
     member = SimpleNamespace(id=uuid.uuid4(), project_id=uuid.uuid4())
-    with patch("app.routers.agents._fetch_org_agent", AsyncMock(return_value=member)):
+    with patch("app.routers.agents.assert_agent_owner", AsyncMock(return_value=member)):
         with pytest.raises(HTTPException) as ei:
             await recruit_agent_endpoint(
                 uuid.uuid4(), RecruitRequest(role_template_slug="backend", runtime="bogus-runtime"),
@@ -63,7 +83,7 @@ async def test_recruit_404_when_role_template_not_found():
 
     session = MagicMock()
     member = SimpleNamespace(id=uuid.uuid4(), project_id=uuid.uuid4())
-    with patch("app.routers.agents._fetch_org_agent", AsyncMock(return_value=member)), \
+    with patch("app.routers.agents.assert_agent_owner", AsyncMock(return_value=member)), \
          patch("app.routers.agents.get_published_role_template", AsyncMock(return_value=None)):
         with pytest.raises(HTTPException) as ei:
             await recruit_agent_endpoint(
@@ -84,7 +104,7 @@ async def test_recruit_400_when_recruit_agent_raises_value_error():
     session.commit = AsyncMock()
     member = SimpleNamespace(id=uuid.uuid4(), project_id=uuid.uuid4())
     role_template = SimpleNamespace(slug="bogus", default_tool_groups=["not-real"])
-    with patch("app.routers.agents._fetch_org_agent", AsyncMock(return_value=member)), \
+    with patch("app.routers.agents.assert_agent_owner", AsyncMock(return_value=member)), \
          patch("app.routers.agents.get_published_role_template", AsyncMock(return_value=role_template)), \
          patch("app.routers.agents.recruit_agent", AsyncMock(side_effect=ValueError("unknown group"))):
         with pytest.raises(HTTPException) as ei:
@@ -117,7 +137,7 @@ async def test_recruit_success_response_shape():
         "mcp_config_alternatives": {},
     }
 
-    with patch("app.routers.agents._fetch_org_agent", AsyncMock(return_value=member)), \
+    with patch("app.routers.agents.assert_agent_owner", AsyncMock(return_value=member)), \
          patch("app.routers.agents.get_published_role_template", AsyncMock(return_value=role_template)), \
          patch("app.routers.agents.recruit_agent", AsyncMock(return_value=recruit_result)), \
          patch("app.routers.agents.build_agent_mcp_config_bundle", MagicMock(return_value=bundle)), \

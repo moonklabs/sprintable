@@ -176,6 +176,7 @@ async def test_get_team_member_404():
 
 @pytest.mark.anyio
 async def test_update_team_member_200():
+    """S19(#2): human 경로가 self-or-org-admin 게이트를 통과해야 진행 — org-admin caller로 mock."""
     client, session, app = await _client()
     try:
         updated = _mock_member()
@@ -186,8 +187,9 @@ async def test_update_team_member_200():
         session.execute = AsyncMock(return_value=mock_result)
         session.expire = MagicMock()  # sync 메서드(AsyncMock 코루틴 경고 회피)
 
-        async with client as c:
-            resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}", json={"color": "#ff0000"})
+        with patch("app.routers.team_members._is_org_admin", AsyncMock(return_value=True)):
+            async with client as c:
+                resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}", json={"color": "#ff0000"})
 
         assert resp.status_code == 200
     finally:
@@ -195,8 +197,27 @@ async def test_update_team_member_200():
 
 
 @pytest.mark.anyio
+async def test_update_team_member_403_when_not_self_or_admin():
+    """S19(#2 MUST): human 대상이 본인도 org-admin도 아닌 caller가 수정 시 403."""
+    client, session, app = await _client()
+    try:
+        target = _mock_member()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.first.return_value = target
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.routers.team_members._is_org_admin", AsyncMock(return_value=False)):
+            async with client as c:
+                resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}", json={"color": "#ff0000"})
+
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_deactivate_team_member_200():
-    """DELETE → soft deactivate (is_active=False)."""
+    """DELETE → soft deactivate (is_active=False). S19(#3): org-admin caller로 mock."""
     client, session, app = await _client()
     try:
         active_member = _mock_member(is_active=True)
@@ -217,13 +238,33 @@ async def test_deactivate_team_member_200():
 
         session.execute = mock_execute
 
-        async with client as c:
-            resp = await c.delete(f"/api/v2/team-members/{MEMBER_ID}")
+        with patch("app.routers.team_members._is_org_admin", AsyncMock(return_value=True)):
+            async with client as c:
+                resp = await c.delete(f"/api/v2/team-members/{MEMBER_ID}")
 
         assert resp.status_code == 200
         body = resp.json()
         assert body["ok"] is True
         assert body["deactivated"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_deactivate_team_member_403_when_not_self_or_admin():
+    """S19(#3 MUST): human 대상이 본인도 org-admin도 아닌 caller가 deactivate 시 403."""
+    client, session, app = await _client()
+    try:
+        active_member = _mock_member(is_active=True)
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.first.return_value = active_member
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.routers.team_members._is_org_admin", AsyncMock(return_value=False)):
+            async with client as c:
+                resp = await c.delete(f"/api/v2/team-members/{MEMBER_ID}")
+
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
