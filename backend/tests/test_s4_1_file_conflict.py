@@ -136,6 +136,16 @@ def _mock_member():
     return m
 
 
+def _resolved(member_id: uuid.UUID):
+    """S17: resolve_member() 반환 mock — self-scope 검증 대상 caller 신원."""
+    from app.services.member_resolver import ResolvedMember
+
+    return ResolvedMember(
+        id=member_id, user_id=None, name="TestAgent", type="agent",
+        role="member", org_id=ORG_ID, project_id=PROJECT_ID,
+    )
+
+
 @pytest.mark.anyio
 async def test_file_lock_no_conflict_200():
     """AC1: 충돌 없을 때 200 + warning=null."""
@@ -150,7 +160,7 @@ async def test_file_lock_no_conflict_200():
             call_count += 1
             result = MagicMock()
             if call_count == 1:
-                result.scalar_one_or_none.return_value = member  # get member
+                result.scalars.return_value.first.return_value = member  # get member
             else:
                 result.scalars.return_value.all.return_value = []  # no conflicts
             return result
@@ -159,16 +169,61 @@ async def test_file_lock_no_conflict_200():
         session.flush = AsyncMock()
         session.add = MagicMock()
 
+        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
+                   return_value=_resolved(MEMBER_ID)):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-lock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["locked"] is True
+        assert body["warning"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_file_lock_403_when_caller_is_different_member():
+    """S17(산티아고 SME MUST②): self-scope — 자기 자신이 아닌 member 명의로 lock 시도 시 403."""
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = member
+        session.execute = AsyncMock(return_value=result)
+
+        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
+                   return_value=_resolved(OTHER_MEMBER_ID)):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-lock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
+
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_file_lock_404_when_member_not_in_caller_org():
+    """S17(산티아고 SME MUST②): member 조회가 org_id로 스코프됨 — 타 org member_id는 404."""
+    client, session, app = await _client()
+    try:
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = None  # org 필터로 미발견
+        session.execute = AsyncMock(return_value=result)
+
         async with client as c:
             resp = await c.post(
                 f"/api/v2/team-members/{MEMBER_ID}/file-lock",
                 json={"file_paths": ["src/foo.py"]},
             )
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["locked"] is True
-        assert body["warning"] is None
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 
@@ -192,7 +247,7 @@ async def test_file_lock_with_conflict_warning():
             call_count += 1
             result = MagicMock()
             if call_count == 1:
-                result.scalar_one_or_none.return_value = member
+                result.scalars.return_value.first.return_value = member
             else:
                 result.scalars.return_value.all.return_value = [conflict_lock]
             return result
@@ -202,7 +257,9 @@ async def test_file_lock_with_conflict_warning():
         session.add = MagicMock()
 
         with patch("app.routers.file_locks.publish_event"), \
-             patch("app.routers.file_locks.fire_webhooks", new_callable=AsyncMock):
+             patch("app.routers.file_locks.fire_webhooks", new_callable=AsyncMock), \
+             patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
+                   return_value=_resolved(MEMBER_ID)):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/file-lock",
@@ -221,12 +278,73 @@ async def test_file_lock_with_conflict_warning():
 
 @pytest.mark.anyio
 async def test_file_unlock_200():
-    """AC2: file-unlock → 200."""
+    """AC2: file-unlock → 200 (S17: 이제 member 존재/org+self-scope 확인 후 UPDATE)."""
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        session.execute = AsyncMock(return_value=mock_result)
+        member = _mock_member()
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalars.return_value.first.return_value = member  # get member
+            return result
+
+        session.execute = mock_execute
         session.flush = AsyncMock()
+
+        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
+                   return_value=_resolved(MEMBER_ID)):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-unlock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
+
+        assert resp.status_code == 200
+        assert resp.json()["unlocked"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_file_unlock_403_when_caller_is_different_member():
+    """S17(산티아고 SME MUST①): self-scope — 타 member 명의 lock을 임의로 해제하지 못하게.
+
+    이전엔 이 엔드포인트가 member 조회/소유 확인 전혀 없이 path member_id 만 믿고 UPDATE했다
+    (org 필터도 없어 임의 member 락을 아무나 해제 가능한 구조 — 산티아고 SME MUST①의 핵심 갭).
+    """
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = member
+        session.execute = AsyncMock(return_value=result)
+
+        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
+                   return_value=_resolved(OTHER_MEMBER_ID)):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-unlock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
+
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_file_unlock_404_when_member_not_in_caller_org():
+    """S17(산티아고 SME MUST①): member 조회가 org_id로 스코프됨 — 타 org member_id는 404."""
+    client, session, app = await _client()
+    try:
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = None
+        session.execute = AsyncMock(return_value=result)
 
         async with client as c:
             resp = await c.post(
@@ -234,8 +352,45 @@ async def test_file_unlock_200():
                 json={"file_paths": ["src/foo.py"]},
             )
 
-        assert resp.status_code == 200
-        assert resp.json()["unlocked"] is True
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ─── S17 SHOULD: file_paths 상한·path 정규화 ─────────────────────────────────
+
+def test_normalize_path_strips_dot_slash_and_dedupes_slashes():
+    from app.routers.file_locks import _normalize_path
+
+    assert _normalize_path("./src/foo.py") == "src/foo.py"
+    assert _normalize_path("src//foo.py") == "src/foo.py"
+    assert _normalize_path("././src/foo.py") == "src/foo.py"
+    assert _normalize_path("src/foo.py") == "src/foo.py"
+
+
+def test_file_lock_body_normalizes_paths_and_caps_count():
+    from app.routers.file_locks import FileLockBody, _MAX_FILE_PATHS_PER_REQUEST
+
+    body = FileLockBody(file_paths=["./src/foo.py", "src//bar.py"])
+    assert body.file_paths == ["src/foo.py", "src/bar.py"]
+
+    with pytest.raises(ValueError, match="exceeds max"):
+        FileLockBody(file_paths=["f.py"] * (_MAX_FILE_PATHS_PER_REQUEST + 1))
+
+
+@pytest.mark.anyio
+async def test_file_lock_rejects_over_max_paths_422():
+    client, session, app = await _client()
+    try:
+        from app.routers.file_locks import _MAX_FILE_PATHS_PER_REQUEST
+
+        async with client as c:
+            resp = await c.post(
+                f"/api/v2/team-members/{MEMBER_ID}/file-lock",
+                json={"file_paths": [f"f{i}.py" for i in range(_MAX_FILE_PATHS_PER_REQUEST + 1)]},
+            )
+
+        assert resp.status_code == 422
     finally:
         app.dependency_overrides.clear()
 
