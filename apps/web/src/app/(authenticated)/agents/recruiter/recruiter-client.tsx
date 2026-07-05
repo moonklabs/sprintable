@@ -39,15 +39,29 @@ const RAIL_LABEL_KEY: Record<RailState, string> = {
   verified: 'railVerified',
 };
 
-/** rotate 후 실 key 를 mcp_config 에 치환 — 재조립 아닌 필드 치환(connect-step renderArtifact 원칙 동형). */
-function spliceApiKey(bundle: McpConfigBundle, newKey: string): McpConfigBundle {
-  const headers = bundle.mcpServers.sprintable.headers;
-  if (!headers) return bundle;
-  return {
-    mcpServers: {
-      sprintable: { ...bundle.mcpServers.sprintable, headers: { ...headers, Authorization: `Bearer ${newKey}` } },
-    },
-  };
+/**
+ * rotate 후 실 key 를 mcp_config 에 치환 — 재조립 아닌 필드 치환(connect-step renderArtifact 원칙 동형).
+ * 까심 QA RC HIGH①+②: transport별 키 위치가 다르다 — http는 `headers.Authorization`(Bearer 접두),
+ * stdio는 `env.AGENT_API_KEY`(접두 없음). 하나만 처리하면 다른 transport에서 화면 키가 조용히
+ * stale(회전된 옛 키 그대로 노출)해진다 — 둘 다 처리하고, 어느 쪽도 못 찾으면 null(호출부가 에러로 취급).
+ */
+export function spliceApiKey(bundle: McpConfigBundle, newKey: string): McpConfigBundle | null {
+  const server = bundle.mcpServers.sprintable;
+  if (server.headers && 'Authorization' in server.headers) {
+    return {
+      mcpServers: {
+        sprintable: { ...server, headers: { ...server.headers, Authorization: `Bearer ${newKey}` } },
+      },
+    };
+  }
+  if (server.env && 'AGENT_API_KEY' in server.env) {
+    return {
+      mcpServers: {
+        sprintable: { ...server, env: { ...server.env, AGENT_API_KEY: newKey } },
+      },
+    };
+  }
+  return null;
 }
 
 function downloadTextFile(filename: string, content: string) {
@@ -165,7 +179,9 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
     if (existingAgents !== null) return;
     void (async () => {
       try {
-        const res = await fetch('/api/team-members');
+        // 까심 QA RC HIGH③: project_id 없이 부르면 org 전체(타 프로젝트 포함) 에이전트가 새 — 이 채용
+        // 흐름은 현재 프로젝트 스코프라 새로 만들기(scope_mode=projects)와 동일하게 project_id 로 스코프.
+        const res = await fetch(`/api/team-members?project_id=${projectId}&type=agent`);
         if (!res.ok) return;
         const json = (await res.json()) as { data?: Array<{ id: string; name: string; type: string }> };
         setExistingAgents((json.data ?? []).filter((m) => m.type === 'agent').map((m) => ({ id: m.id, name: m.name })));
@@ -173,7 +189,7 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
         setExistingAgents([]);
       }
     })();
-  }, [existingAgents]);
+  }, [existingAgents, projectId]);
 
   // STEP 3 — bundle result
   const [recruitResult, setRecruitResult] = useState<RecruitResponse | null>(null);
@@ -249,7 +265,11 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
       const newKey = rotateJson?.data?.api_key;
       if (!rotateRes.ok || !newKey) throw new Error(t('rotateFailed'));
 
-      setRecruitResult((prev) => (prev ? { ...prev, api_key: newKey, mcp_config: spliceApiKey(prev.mcp_config, newKey) } : prev));
+      // 까심 QA RC HIGH①: 두 transport 키 위치 다 처리 실패 시(null) 조용히 stale 화면을 두지 말고 에러로.
+      const splicedConfig = spliceApiKey(recruitResult.mcp_config, newKey);
+      if (!splicedConfig) throw new Error(t('rotateFailed'));
+
+      setRecruitResult({ ...recruitResult, api_key: newKey, mcp_config: splicedConfig });
       setCopiedMcp(false);
       setShowRotateConfirm(false);
     } catch (err) {
