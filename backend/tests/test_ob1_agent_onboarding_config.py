@@ -115,7 +115,8 @@ async def test_connection_artifact_with_persona_emits_instruction_file():
     from app.routers.agents import get_agent_connection_artifact
 
     agent_id = uuid.uuid4()
-    persona = SimpleNamespace(resolved_system_prompt="당신은 백엔드 엔지니어입니다.")
+    # 까심 QA RC(S5): is_default=True 명시 — list()의 정렬 순서([0])만으론 default 보장 안 됨.
+    persona = SimpleNamespace(resolved_system_prompt="당신은 백엔드 엔지니어입니다.", is_default=True)
     db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
 
     with patch(
@@ -130,6 +131,28 @@ async def test_connection_artifact_with_persona_emits_instruction_file():
     assert filenames == {"CLAUDE.md", ".mcp.json"}
     instruction_file = next(f for f in out["files"] if f["filename"] == "CLAUDE.md")
     assert instruction_file["content"] == "당신은 백엔드 엔지니어입니다."
+
+
+@pytest.mark.anyio
+async def test_connection_artifact_non_default_persona_omits_instruction_file():
+    """까심 QA RC(S5): personas[0]가 is_default=False면(list() 정렬만으론 default 안 보장) 지침
+    파일을 emit하면 안 됨 — 안전 fallback으로 생략(.mcp.json만)."""
+    from unittest.mock import patch
+    from app.routers.agents import get_agent_connection_artifact
+
+    agent_id = uuid.uuid4()
+    persona = SimpleNamespace(resolved_system_prompt="이건 authoritative 아님.", is_default=False)
+    db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
+
+    with patch(
+        "app.routers.agents.AgentPersonaRepository.list",
+        new_callable=AsyncMock, return_value=[persona],
+    ):
+        out = await get_agent_connection_artifact(
+            agent_id, runtime="claude-code", session=db, auth=MagicMock(), org_id=uuid.uuid4()
+        )
+    assert len(out["files"]) == 1
+    assert out["files"][0]["filename"] == ".mcp.json"
 
 
 @pytest.mark.anyio

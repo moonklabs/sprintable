@@ -189,10 +189,19 @@ async def get_agent_connection_artifact(
         raise HTTPException(status_code=404, detail="Agent not found")
 
     # G4: persona가 있으면(is_default) 자율 운영 지침을 파일로 emit — recruit 전용 아닌 공용 레이어.
+    # 까심 QA RC(S5): list()는 `ORDER BY is_default DESC, created_at ASC` 정렬만 하지 실제
+    # is_default 여부를 보장 안 함 — is_default=True 행이 하나도 없으면(POST /agent-personas가
+    # is_default 생략 시 non-default 생성 가능·"정확히 1개 default" 불변식 없음) 가장 오래된
+    # persona가 [0]에 와서 임의 system_prompt가 authoritative처럼 emit된다(G4 목적과 정반대).
+    # is_default를 명시 확인 — 참인 행이 없으면 지침 파일 생략(안전 fallback, "미채용"과 동형).
     files: list[dict] = []
     personas = await AgentPersonaRepository(session).list(org_id, member.project_id, agent_id)
     default_persona = personas[0] if personas else None
-    if default_persona is not None and default_persona.resolved_system_prompt:
+    if (
+        default_persona is not None
+        and default_persona.is_default
+        and default_persona.resolved_system_prompt
+    ):
         files.append({
             "filename": resolve_instruction_filename(runtime),
             "content": default_persona.resolved_system_prompt,

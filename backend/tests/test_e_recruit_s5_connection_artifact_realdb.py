@@ -165,3 +165,55 @@ async def test_connection_artifact_connector_runtime_real_db():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
+async def test_connection_artifact_no_default_persona_omits_instruction_file():
+    """까심 QA RC(S5): persona가 존재해도 전부 ``is_default=False``면(POST /agent-personas가
+    is_default 생략 시 non-default 생성 가능 — "정확히 1개 default" 불변식 없음) list()의
+    ``ORDER BY is_default DESC, created_at ASC`` 정렬 때문에 가장 오래된 non-default persona가
+    [0]에 온다. 그 persona의 system_prompt를 authoritative처럼 emit하면 안 됨 — 지침 파일 생략
+    (안전 fallback, .mcp.json만)이 맞다."""
+    from unittest.mock import MagicMock
+    from sqlalchemy import text as _text
+    from app.core.database import Base
+    from app.models.team import TeamMember
+    from app.models.agent_deployment import AgentPersona
+    from app.routers.agents import get_agent_connection_artifact
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            org_id, project_id = uuid.uuid4(), uuid.uuid4()
+            await s.execute(_text("SET session_replication_role = replica"))
+            agent = TeamMember(
+                id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent",
+                name="Test Agent", role="member",
+            )
+            s.add(agent)
+            await s.flush()
+            # 의도적으로 is_default=False인 persona만 존재(예: is_default 생략된 수기 생성).
+            persona = AgentPersona(
+                org_id=org_id, project_id=project_id, agent_id=agent.id,
+                name="Draft Persona", slug="draft",
+                system_prompt="이건 authoritative 지침이 아니어야 함.",
+                is_builtin=False, is_default=False,
+            )
+            s.add(persona)
+            await s.flush()
+            await s.commit()
+
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            out = await get_agent_connection_artifact(
+                agent.id, runtime="claude-code", session=s,
+                auth=MagicMock(), org_id=org_id,
+            )
+
+        assert len(out["files"]) == 1  # 지침 파일 생략 — .mcp.json만
+        assert out["files"][0]["filename"] == ".mcp.json"
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
