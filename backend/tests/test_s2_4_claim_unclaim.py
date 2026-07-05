@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 ORG_ID = uuid.uuid4()
 PROJECT_ID = uuid.uuid4()
@@ -128,8 +129,8 @@ async def test_claim_story_200():
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
 
-        with patch("app.routers.team_members.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved(MEMBER_ID)):
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/claim",
@@ -158,8 +159,8 @@ async def test_claim_story_403_when_caller_is_different_member():
         result.scalar_one_or_none.return_value = member
         session.execute = AsyncMock(return_value=result)
 
-        with patch("app.routers.team_members.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved(uuid.uuid4())):
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   side_effect=HTTPException(status_code=403, detail="Cannot act as another member")):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/claim",
@@ -194,8 +195,8 @@ async def test_unclaim_story_200():
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
 
-        with patch("app.routers.team_members.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved(MEMBER_ID)):
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
             async with client as c:
                 resp = await c.post(f"/api/v2/team-members/{MEMBER_ID}/unclaim")
 
@@ -218,8 +219,8 @@ async def test_unclaim_story_403_when_caller_is_different_member():
         result.scalar_one_or_none.return_value = member
         session.execute = AsyncMock(return_value=result)
 
-        with patch("app.routers.team_members.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved(uuid.uuid4())):
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   side_effect=HTTPException(status_code=403, detail="Cannot act as another member")):
             async with client as c:
                 resp = await c.post(f"/api/v2/team-members/{MEMBER_ID}/unclaim")
 
@@ -251,8 +252,8 @@ async def test_claim_story_400_if_story_not_in_project():
 
         session.execute = mock_execute
 
-        with patch("app.routers.team_members.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved(MEMBER_ID)):
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/claim",

@@ -77,16 +77,6 @@ def anyio_backend():
     return "asyncio"
 
 
-def _resolved_self(member_id: uuid.UUID):
-    """S19(#1): resolve_member() 반환 mock — heartbeat self-scope 검증 대상 caller 신원."""
-    from app.services.member_resolver import ResolvedMember
-
-    return ResolvedMember(
-        id=member_id, user_id=None, name="TestAgent", type="agent",
-        role="member", org_id=ORG_ID, project_id=uuid.uuid4(),
-    )
-
-
 @pytest.mark.anyio
 async def test_heartbeat_endpoint_200():
     """AC1: PATCH /api/v2/team-members/{id}/heartbeat → 200 (S19: self-scope 통과 시)."""
@@ -114,8 +104,8 @@ async def test_heartbeat_endpoint_200():
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
 
-        with patch("app.routers.team_members.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved_self(MEMBER_ID)):
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
             async with client as c:
                 resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}/heartbeat")
 
@@ -128,6 +118,8 @@ async def test_heartbeat_endpoint_200():
 async def test_heartbeat_403_when_caller_is_different_member():
     """S19(#1 MUST): auth 파라미터가 아예 없어 caller 확인이 전혀 없었다 — 타 member 명의로
     heartbeat(presence 스푸핑) 시도 시 403."""
+    from fastapi import HTTPException
+
     client, session, app = await _heartbeat_client()
     try:
         member = _mock_member_for_heartbeat()
@@ -135,9 +127,8 @@ async def test_heartbeat_403_when_caller_is_different_member():
         mock_get_result.scalars.return_value.first.return_value = member
         session.execute = AsyncMock(return_value=mock_get_result)
 
-        other_member_id = uuid.uuid4()
-        with patch("app.routers.team_members.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved_self(other_member_id)):
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   side_effect=HTTPException(status_code=403, detail="Cannot heartbeat as another member")):
             async with client as c:
                 resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}/heartbeat")
 
@@ -170,8 +161,8 @@ async def test_heartbeat_response_shape():
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
 
-        with patch("app.routers.team_members.resolve_member", new_callable=AsyncMock,
-                   return_value=_resolved_self(MEMBER_ID)):
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
             async with client as c:
                 resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}/heartbeat")
 

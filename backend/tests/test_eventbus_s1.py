@@ -3,12 +3,23 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from app.models.event import Event
+
+
+def _resolved(member_id: uuid.UUID):
+    """S19(events sender_id 검증): resolve_member() 반환 mock — caller가 sender_id 본인임을 가장."""
+    from app.services.member_resolver import ResolvedMember
+
+    return ResolvedMember(
+        id=member_id, user_id=member_id, name="TestSender", type="human",
+        role="member", org_id=uuid.uuid4(), project_id=None,
+    )
 
 
 @pytest.fixture
@@ -91,7 +102,8 @@ async def client(mock_session, auth_ctx, org_id):
 @pytest.mark.anyio
 async def test_create_event_stores_in_db(client, mock_session):
     recipient_id = uuid.uuid4()
-    event = _make_event(recipient_id=recipient_id, recipient_type="agent")
+    sender_id = uuid.uuid4()
+    event = _make_event(recipient_id=recipient_id, recipient_type="agent", sender_id=sender_id)
 
     # team_members.type 조회 결과 mock
     member_result = MagicMock()
@@ -114,18 +126,55 @@ async def test_create_event_stores_in_db(client, mock_session):
         "event_type": "memo_created",
         "source_entity_type": "memo",
         "source_entity_id": str(uuid.uuid4()),
-        "sender_id": str(uuid.uuid4()),
+        "sender_id": str(sender_id),
         "recipient_id": str(recipient_id),
         "recipient_type": "agent",
         "payload": {"title": "킥오프"},
     }
-    resp = await client.post("/api/v2/events", json=payload)
+    with patch("app.routers.events.assert_caller_is_member", new_callable=AsyncMock,
+               return_value=None):
+        resp = await client.post("/api/v2/events", json=payload)
     assert resp.status_code == 201
     data = resp.json()
     assert data["status"] == "pending"
     assert data["event_type"] == "memo_created"
     mock_session.add.assert_called_once()
     mock_session.commit.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_create_event_403_when_sender_id_does_not_match_caller():
+    """S19(SHOULD): sender_id가 caller 본인과 다르면 403(임퍼스네이션 차단)."""
+    from app.dependencies.auth import get_current_user, get_verified_org_id
+    from app.dependencies.database import get_db
+    from app.main import app
+
+    session = AsyncMock()
+    ctx = MagicMock()
+    ctx.user_id = str(uuid.uuid4())
+    ctx.claims = {"app_metadata": {}}
+
+    async def _db():
+        yield session
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = lambda: ctx
+    app.dependency_overrides[get_verified_org_id] = lambda: uuid.uuid4()
+    try:
+        payload = {
+            "project_id": str(uuid.uuid4()),
+            "event_type": "memo_created",
+            "sender_id": str(uuid.uuid4()),  # resolve_member가 반환하는 caller와 다른 임의 sender
+            "recipient_id": str(uuid.uuid4()),
+            "recipient_type": "agent",
+        }
+        with patch("app.routers.events.assert_caller_is_member", new_callable=AsyncMock,
+                   side_effect=HTTPException(status_code=403, detail="sender_id must match the caller's own identity")):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.post("/api/v2/events", json=payload)
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
@@ -171,6 +220,7 @@ async def test_get_pending_events_returns_list(client, mock_session):
 
 @pytest.mark.anyio
 async def test_mark_delivered_sets_status_and_timestamp(client, mock_session):
+    """S19(#7): caller가 event의 recipient 본인이어야 delivered로 마킹 가능."""
     event = _make_event(status="pending")
 
     async def _refresh(obj):
@@ -182,12 +232,30 @@ async def test_mark_delivered_sets_status_and_timestamp(client, mock_session):
     scalar_mock.scalar_one_or_none.return_value = event
     mock_session.execute.return_value = scalar_mock
 
-    resp = await client.patch(f"/api/v2/events/{event.id}/delivered")
+    with patch("app.routers.events.assert_caller_is_member", new_callable=AsyncMock,
+               return_value=None):
+        resp = await client.patch(f"/api/v2/events/{event.id}/delivered")
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "delivered"
     assert data["delivered_at"] is not None
     mock_session.commit.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_mark_delivered_403_when_caller_is_not_recipient(client, mock_session):
+    """S19(#7 MUST): recipient 확인 없이 org-scope만 있어 누구나 타 member 이벤트를 delivered로
+    마킹할 수 있었다(알림 은폐 가능) — caller==recipient 강제."""
+    event = _make_event(status="pending")
+
+    scalar_mock = MagicMock()
+    scalar_mock.scalar_one_or_none.return_value = event
+    mock_session.execute.return_value = scalar_mock
+
+    with patch("app.routers.events.assert_caller_is_member", new_callable=AsyncMock,
+               side_effect=HTTPException(status_code=403, detail="Not the recipient of this event")):
+        resp = await client.patch(f"/api/v2/events/{event.id}/delivered")
+    assert resp.status_code == 403
 
 
 @pytest.mark.anyio

@@ -16,7 +16,7 @@ from app.dependencies.database import get_db
 from app.models.file_lock import FileLock
 from app.models.team import TeamMember
 from app.routers.events import publish_event
-from app.services.member_resolver import resolve_member
+from app.services.member_resolver import assert_caller_is_member
 from app.services.webhook_dispatch import fire_webhooks
 
 router = APIRouter(tags=["file-locks"])
@@ -185,8 +185,13 @@ async def lock_files(
     """AC1/3: 파일 lock 등록 + 충돌 시 warning 반환.
 
     S17(산티아고 SME MUST②): member 조회에 org_id 필터 추가(타 org member_id로 org_id/project_id
-    불일치 row 생성 방지) + caller self-scope 확인(자기 자신 명의로만 lock 가능 — canonical
-    resolve_member 축 사용, TeamMember.id 문자열 비교로 우회하지 않게 [[member_bound_resource_resolve_member_axis]]).
+    불일치 row 생성 방지) + caller self-scope 확인(자기 자신 명의로만 lock 가능).
+
+    S19(발견·회귀수정): self-scope는 axis-safe해야 한다 — resolve_member()/.id 직접비교는
+    휴먼 JWT caller에게 org_member.id(별개 테이블 PK)를 반환하는데, 이 path의 member_id는
+    team_members뷰 id(members anchor)라 축이 달라 휴먼 본인이 자기 파일을 lock해도 항상
+    403났다(agent API키 caller만 실증했던 맹점 — auth.user_id가 이미 team_members.id라 안
+    드러남). assert_caller_is_member(agent=id 직접비교·human=user_id 비교)로 교체.
 
     S17 RC②(까심 델타 MED): member 조회에 project_id 힌트 없이 .limit(1)만 쓰면 멀티프로젝트
     휴먼이 엉뚱한 project row로 스코프돼 실제 충돌(타 프로젝트 락)을 놓칠 수 있었다 — caller의
@@ -197,9 +202,7 @@ async def lock_files(
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
 
-    caller = await resolve_member(auth, org_id, session, project_id=member.project_id)
-    if caller.id != member_id:
-        raise HTTPException(status_code=403, detail="Cannot lock files as another member")
+    await assert_caller_is_member(member_id, auth, session, org_id, detail="Cannot lock files as another member")
 
     # AC3: 충돌 체크
     conflicts = await _find_conflicts(session, org_id, member.project_id, member_id, body.file_paths)
@@ -248,14 +251,15 @@ async def unlock_files(
     여러 project에 동일 file_path를 lock 중이면, 한 project 컨텍스트에서의 unlock이 **다른
     project의 lock까지** 함께 release해 advisory-lock의 project 단위 무결성이 깨졌다(권한상승은
     아니고 데이터 무결성 문제). member.project_id(_fetch_scoped_member가 결정한 그 project)로 좁힌다.
+
+    S19(발견·회귀수정): self-scope를 axis-safe한 assert_caller_is_member로 교체(lock_files와
+    동일 사유 — resolve_member()/.id 직접비교는 휴먼 JWT caller의 axis가 어긋나 본인도 403남).
     """
     member = await _fetch_scoped_member(session, member_id, org_id, auth)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
 
-    caller = await resolve_member(auth, org_id, session, project_id=member.project_id)
-    if caller.id != member_id:
-        raise HTTPException(status_code=403, detail="Cannot unlock files as another member")
+    await assert_caller_is_member(member_id, auth, session, org_id, detail="Cannot unlock files as another member")
 
     now = datetime.now(timezone.utc)
     await session.execute(

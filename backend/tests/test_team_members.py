@@ -216,6 +216,84 @@ async def test_update_team_member_403_when_not_self_or_admin():
 
 
 @pytest.mark.anyio
+async def test_update_team_member_self_can_edit_profile_fields():
+    """산티아고 Phase A SME (c): self가 프로필 필드(color 등)만 건드리면 org-admin 없이도 통과."""
+    from app.main import app
+    from app.dependencies.auth import get_current_user
+    from app.dependencies.database import get_db
+
+    self_user_id = uuid.uuid4()
+    updated = _mock_member()
+    updated.user_id = self_user_id
+    updated.color = "#ff0000"
+
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.first.return_value = updated
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.expire = MagicMock()
+
+    ctx = MagicMock()
+    ctx.user_id = str(self_user_id)
+    ctx.claims = {"app_metadata": {"org_id": str(ORG_ID)}}
+
+    async def override_db():
+        yield mock_session
+
+    async def override_auth():
+        return ctx
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_auth
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}", json={"color": "#ff0000"})
+        assert resp.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_team_member_self_403_when_escalating_role():
+    """산티아고 Phase A SME (c) MUST: self가 자기 role/can_manage_members/is_active/agent_config를
+    스스로 바꾸는 건 권한상승이라 org-admin 없이는 403 — 이전엔 self 경로가 전 필드를 허용했다."""
+    from app.main import app
+    from app.dependencies.auth import get_current_user
+    from app.dependencies.database import get_db
+
+    self_user_id = uuid.uuid4()
+    target = _mock_member()
+    target.user_id = self_user_id
+
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.first.return_value = target
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    ctx = MagicMock()
+    ctx.user_id = str(self_user_id)
+    ctx.claims = {"app_metadata": {"org_id": str(ORG_ID)}}
+
+    async def override_db():
+        yield mock_session
+
+    async def override_auth():
+        return ctx
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_auth
+    try:
+        with patch("app.routers.team_members._is_org_admin", AsyncMock(return_value=False)):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.patch(
+                    f"/api/v2/team-members/{MEMBER_ID}", json={"role": "admin"},
+                )
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_deactivate_team_member_200():
     """DELETE → soft deactivate (is_active=False). S19(#3): org-admin caller로 mock."""
     client, session, app = await _client()

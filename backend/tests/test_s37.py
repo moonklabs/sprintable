@@ -181,7 +181,9 @@ async def test_put_notification_setting_200():
         with patch(
             "app.repositories.notification.NotificationSettingRepository.upsert",
             new_callable=AsyncMock
-        ) as mock_upsert:
+        ) as mock_upsert, patch(
+            "app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=True,
+        ):
             mock_upsert.return_value = setting_mock
 
             async with client as c:

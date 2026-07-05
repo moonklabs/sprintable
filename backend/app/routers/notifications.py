@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.dependencies.ownership import _is_org_admin
 from app.models.team import TeamMember
 from app.repositories.notification import InboxRepository, NotificationRepository, NotificationSettingRepository
 from app.schemas.notification import (
@@ -15,8 +16,26 @@ from app.schemas.notification import (
     ResolveInboxItem,
     UpsertNotificationSetting,
 )
+from app.services.member_resolver import assert_caller_is_member, is_caller_member
 
 router = APIRouter(prefix="/api/v2", tags=["notifications"])
+
+
+async def _assert_self_or_org_admin(
+    member_id: uuid.UUID, auth: AuthContext, session: AsyncSession, org_id: uuid.UUID,
+) -> None:
+    """S19(#4-#6 MUST): notifications/inbox 리소스가 caller-ownership 확인 없이 임의 member_id를
+    받아들이던 갭 — self(axis-safe) 또는 org-admin만 허용한다.
+
+    S19(발견·회귀수정): resolve_member()/.id 직접비교(및 그 대체였던 resolve_auth_member 단독
+    사용)는 휴먼 JWT caller에서 축이 어긋날 수 있다 — is_caller_member(agent=id 직접비교·
+    human=team_members뷰의 user_id 컬럼과 비교)로 axis-safe하게 판정한다.
+    """
+    if await is_caller_member(member_id, auth, session, org_id):
+        return
+    if await _is_org_admin(session, org_id, uuid.UUID(auth.user_id)):
+        return
+    raise HTTPException(status_code=403, detail="Not authorized for this member")
 
 
 async def _resolve_notification_user_id(auth: AuthContext, db: AsyncSession) -> uuid.UUID:
@@ -133,7 +152,11 @@ async def upsert_notification_setting(
     body: UpsertNotificationSetting = ...,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> NotificationSettingResponse:
+    """S19(#4 MUST): member_id 쿼리파람에 caller-ownership 확인이 없어 누구나 타 member의 알림
+    설정을 덮어쓸 수 있었다. self-or-org-admin 게이트 추가."""
+    await _assert_self_or_org_admin(member_id, auth, session, org_id)
     repo = NotificationSettingRepository(session)
     setting = await repo.upsert(
         org_id=org_id,
@@ -168,25 +191,54 @@ async def list_incoming(
 async def resolve_inbox_item(
     id: uuid.UUID,
     body: ResolveInboxItem,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
     repo: InboxRepository = Depends(_inbox_repo),
 ) -> InboxItemResponse:
-    item = await repo.resolve(
+    """S19(#5 MUST): auth 파라미터 자체가 없어 caller가 이 inbox item의 assignee인지 확인이
+    전혀 없었다 — 누구나 타 member의 inbox item을 resolve할 수 있었고, `resolved_by` 바디값을
+    임의로 스푸핑할 수도 있었다. assignee==caller 강제(axis-safe) + resolved_by는 확인된
+    assignee_member_id에서 서버-파생(바디값 무시 — identity는 서버가 결정, 클라이언트가
+    주장하는 게 아니다). assert_caller_is_member 통과 = caller.id == assignee_member_id가
+    이미 확정이므로 별도 caller 재조회 없이 그 값을 그대로 쓴다."""
+    item = await repo.get(id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="InboxItem not found")
+
+    await assert_caller_is_member(
+        item.assignee_member_id, auth, session, org_id, detail="Not the assignee of this inbox item",
+    )
+
+    resolved = await repo.resolve(
         id=id,
-        resolved_by=body.resolved_by,
+        resolved_by=item.assignee_member_id,
         resolved_option_id=body.resolved_option_id,
         resolved_note=body.resolved_note,
     )
-    if item is None:
+    if resolved is None:
         raise HTTPException(status_code=404, detail="InboxItem not found")
-    return InboxItemResponse.model_validate(item)
+    return InboxItemResponse.model_validate(resolved)
 
 
 @router.post("/inbox/{id}/dismiss", response_model=InboxItemResponse)
 async def dismiss_inbox_item(
     id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
     repo: InboxRepository = Depends(_inbox_repo),
 ) -> InboxItemResponse:
-    item = await repo.dismiss(id=id)
+    """S19(#6 MUST): resolve와 동일 갭 — assignee==caller 강제(axis-safe)."""
+    item = await repo.get(id)
     if item is None:
         raise HTTPException(status_code=404, detail="InboxItem not found")
-    return InboxItemResponse.model_validate(item)
+
+    await assert_caller_is_member(
+        item.assignee_member_id, auth, session, org_id, detail="Not the assignee of this inbox item",
+    )
+
+    dismissed = await repo.dismiss(id=id)
+    if dismissed is None:
+        raise HTTPException(status_code=404, detail="InboxItem not found")
+    return InboxItemResponse.model_validate(dismissed)
