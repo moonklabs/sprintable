@@ -73,6 +73,24 @@ def test_role_behaviors_reference_verified_tool_names_only():
         assert not unknown, f"{slug} role_behaviors invents non-existent tool names: {unknown}"
 
 
+def test_release_manager_tools_list_does_not_instruct_close_sprint():
+    """까심 QA RC(S14, 0157 200번줄): release-manager가 자기 "자주 쓰는 도구" 목록(role별 커스텀
+    tools 문자열)에 sprintable_close_sprint(is_destructive=True)를 넣었는데,
+    default_tool_groups(sprints 그룹만·destructive 별도 grant 없음)로는 is_tool_allowed=False라
+    자기 자신에게 permission-denied 날 호출을 지시하는 반쪽 role이었다.
+
+    ⚠️ scope: 이 테스트는 QA가 명시 지적한 "role별 커스텀 tools 목록" 케이스만 잠근다. 공유
+    `_behaviors()` 템플릿 고정 step3(lock_files/unlock_files, admin 그룹·destructive)는 모든
+    17개 role(+이미 머지된 S1 기존 4직무)에 동형으로 존재하는 별개 사안 — PO 스코프 확認
+    후 별도 처리(sweep 결과 보고함)."""
+    from app.services.mcp_toolset import is_tool_allowed
+
+    mod = _load_migration()
+    behaviors = mod._ROLE_BEHAVIORS["release-manager"]
+    assert "sprintable_close_sprint" not in behaviors
+    assert not is_tool_allowed("sprintable_close_sprint", ["stories", "tasks", "sprints", "chat", "docs"])
+
+
 def test_all_18_roles_compose_without_error_and_validate_against_default_tool_groups():
     """견고 기준(S2 교차검증): 각 role의 compose_prompt가 크래시 없이 완주하고, 치트시트가
     실 default_tool_groups 로부터만 파생되는지(환각 0·G3 단일소스)."""

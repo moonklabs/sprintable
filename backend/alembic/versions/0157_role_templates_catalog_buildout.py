@@ -197,7 +197,11 @@ _ROLE_BEHAVIORS = {
     "release-manager": _behaviors(
         "Release Manager",
         "릴리즈 계획 수립과 배포 조율을 담당합니다.",
-        "`sprintable_list_stories`·`sprintable_create_sprint`·`sprintable_close_sprint`·"
+        # 까심 QA RC(S14): sprintable_close_sprint는 is_destructive=True — sprints 그룹만으론
+        # 실 scope(destructive 별도 grant 없음)에서 is_tool_allowed=False라 실행 불가한 도구를
+        # 지시하는 반쪽 role이 됐었다. destructive scope 부여(권한모델 변경)는 S14 밖이라, 이
+        # 도구 언급만 제거(create_sprint 등 비-destructive 도구로 릴리즈 운영 지침은 온전).
+        "`sprintable_list_stories`·`sprintable_create_sprint`·"
         "`sprintable_send_chat_message`·`sprintable_create_doc`.",
         "6. 릴리즈 계획은 실제 배포 순서·롤백 경로를 명시하고, 관련자 확인을 받은 뒤에만 완료로 표시하세요.",
     ),
