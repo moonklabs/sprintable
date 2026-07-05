@@ -124,7 +124,12 @@ async def test_rotate_key_201():
         new_plaintext = _PREFIX_MARKER + "n" * 64
 
         with patch("app.services.agent_message_policy.ensure_creator_allowlisted", new_callable=AsyncMock), \
+             patch("app.repositories.api_key.ApiKeyRepository.get", new_callable=AsyncMock) as mock_get, \
+             patch("app.services.recruit_service.acquire_agent_mutation_lock", new_callable=AsyncMock), \
              patch("app.repositories.api_key.ApiKeyRepository.rotate", new_callable=AsyncMock) as mock_rotate:
+            # E-RECRUIT S3 QA 재QA 잔여1건 fix: rotate_api_key가 이제 rotate() 전에 get()으로
+            # 대상 키의 team_member_id를 확인해 크로스엔드포인트 advisory lock을 건다.
+            mock_get.return_value = _mock_key()
             mock_rotate.return_value = (new_key, new_plaintext)
 
             async with client as c:
@@ -139,10 +144,30 @@ async def test_rotate_key_201():
 
 @pytest.mark.anyio
 async def test_rotate_key_404():
+    """존재하는 키(get 성공)인데 rotate가 None(CAS 손실/레이스 패배)인 케이스 — 404 매핑."""
     client, session, app = await _client()
     try:
-        with patch("app.repositories.api_key.ApiKeyRepository.rotate", new_callable=AsyncMock) as mock_rotate:
+        with patch("app.repositories.api_key.ApiKeyRepository.get", new_callable=AsyncMock) as mock_get, \
+             patch("app.services.recruit_service.acquire_agent_mutation_lock", new_callable=AsyncMock), \
+             patch("app.repositories.api_key.ApiKeyRepository.rotate", new_callable=AsyncMock) as mock_rotate:
+            mock_get.return_value = _mock_key()
             mock_rotate.return_value = None
+
+            async with client as c:
+                resp = await c.post("/api/v2/api-keys/rotate", json={"api_key_id": str(uuid.uuid4())})
+
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_rotate_key_404_when_key_missing():
+    """E-RECRUIT S3 QA 재QA 잔여1건 fix: get()이 애초에 키를 못 찾으면 rotate/lock 호출 전에 404."""
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.api_key.ApiKeyRepository.get", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = None
 
             async with client as c:
                 resp = await c.post("/api/v2/api-keys/rotate", json={"api_key_id": str(uuid.uuid4())})

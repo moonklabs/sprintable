@@ -18,6 +18,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.project import Project
 from app.models.team import TeamMember
+from app.schemas.recruit import RecruitRequest
 from app.schemas.team_member import OrgAgentCreate, TeamMemberResponse
 from app.services.agent_onboarding_config import (
     DEFAULT_RUNTIME,
@@ -30,6 +31,7 @@ from app.services.agent_onboarding_config import (
 from app.services.agent_verify import get_verification_state, start_verification
 from app.services.onboarding_funnel import emit_onboarding_event, safe_key_prefix
 from app.services.org_agent import create_org_level_agent
+from app.services.recruit_service import get_published_role_template, recruit_agent
 
 router = APIRouter(prefix="/api/v2/agents", tags=["agents"])
 
@@ -209,6 +211,69 @@ async def _fetch_org_agent(session: AsyncSession, agent_id: uuid.UUID, org_id: u
             TeamMember.type == "agent",
         ).limit(1)
     )).scalar_one_or_none()
+
+
+@router.post("/{agent_id}/recruit", status_code=201)
+async def recruit_agent_endpoint(
+    agent_id: uuid.UUID,
+    body: RecruitRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """E-RECRUIT S3(story ff2996d0): role_template + runtime → 자율 운영 지침 합성(S2) + persona
+    upsert(G7) + role-derived scope 로 키 회전(G2/G3) + 활성화 번들(``.mcp.json`` + 실 key 1회) 반환.
+
+    G1: 에이전트가 없으면 FE가 먼저 기존 ``POST /agents``를 재사용해 만든다 — 이 엔드포인트는
+    ``agent_id``가 이미 존재함을 전제(별도 인라인 분기 없음, 경로 divergence 방지).
+    """
+    member = await _fetch_org_agent(session, agent_id, org_id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    if body.runtime not in SUPPORTED_RUNTIMES:
+        raise HTTPException(status_code=400, detail=f"unsupported runtime: {body.runtime}")
+
+    role_template = await get_published_role_template(session, body.role_template_slug)
+    if role_template is None:
+        raise HTTPException(status_code=404, detail="role_template not found")
+
+    try:
+        result = await recruit_agent(
+            session,
+            agent_member=member,
+            org_id=org_id,
+            role_template=role_template,
+            runtime=body.runtime,
+            actor_id=uuid.UUID(auth.user_id),
+        )
+    except ValueError as exc:
+        # validate_tool_groups fail-closed(QA MINOR 하드닝) — 오염된 role_template 데이터 400.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    persona = result["persona"]
+    api_key_plaintext = result["api_key_plaintext"]
+    bundle = build_agent_mcp_config_bundle(api_key_plaintext=api_key_plaintext, runtime=body.runtime)
+
+    # OB-4 seam: config_generated(recruit 도 번들 생성 지점 — connection-artifact 와 동일 이벤트 재사용).
+    await emit_onboarding_event(
+        session, "config_generated", agent_id=member.id, org_id=org_id,
+        project_id=member.project_id, runtime=body.runtime,
+        transport=bundle["default_transport"], key_prefix=safe_key_prefix(api_key_plaintext),
+    )
+    await session.commit()
+
+    return {
+        "agent_id": str(member.id),
+        "persona_id": str(persona.id),
+        "role_template_slug": role_template.slug,
+        "system_prompt": persona.system_prompt,
+        "tool_allowlist": result["tool_allowlist"],
+        "api_key": api_key_plaintext,
+        "default_transport": bundle["default_transport"],
+        "mcp_config": bundle["mcp_config"],
+        "mcp_config_alternatives": bundle["mcp_config_alternatives"],
+    }
 
 
 @router.post("/{agent_id}/verify-connection")

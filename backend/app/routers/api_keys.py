@@ -13,6 +13,7 @@ from app.schemas.api_key import (
     CreateApiKeyRequest,
     RotateApiKeyRequest,
 )
+from app.services.recruit_service import acquire_agent_mutation_lock
 
 router = APIRouter(prefix="/api/v2", tags=["api-keys"])
 
@@ -28,6 +29,12 @@ async def rotate_api_key(
     repo: ApiKeyRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
 ) -> ApiKeyCreatedResponse:
+    existing = await repo.get(body.api_key_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+    # E-RECRUIT S3 QA 재QA 잔여1건(크로스엔드포인트 레이스): recruit_agent()와 같은 agent-scoped
+    # lock을 여기도 걸어 동시 rotate가 CAS 손실→AssertionError→500으로 새는 걸 막는다(PO 선호안 a).
+    await acquire_agent_mutation_lock(session, existing.team_member_id)
     result = await repo.rotate(body.api_key_id)
     if result is None:
         raise HTTPException(status_code=404, detail="API key not found")
