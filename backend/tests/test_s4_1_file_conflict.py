@@ -495,6 +495,78 @@ async def test_file_lock_uses_project_hint_to_scope_member_query():
 
 
 @pytest.mark.anyio
+async def test_stale_project_hint_falls_back_instead_of_404():
+    """S17 RC③(까심+codex 델타 RC — false-404 회귀): project_hint가 stale/미스매치(0행)여도
+    hint 없는 결정적 폴백(ORDER BY project_id)으로 재조회해 정상 caller를 404시키지 않는다.
+    hint는 검증되지 않은 best-effort 최적화일 뿐 authz가 아니다(org_id+self-scope가 실제 게이트).
+    """
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        stale_hint = uuid.uuid4()  # caller가 접근 못 하는(혹은 소멸된) project
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalars.return_value.first.return_value = None  # hinted query: 0행
+            elif call_count == 2:
+                result.scalars.return_value.first.return_value = member  # fallback query: 발견
+            else:
+                result.scalars.return_value.all.return_value = []  # conflict-check
+            return result
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.add = MagicMock()
+
+        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
+                   return_value=_resolved(MEMBER_ID)), \
+             patch("app.routers.file_locks._caller_project_hint", return_value=stale_hint):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-lock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
+
+        assert resp.status_code == 200
+        assert call_count == 3  # hinted(miss) + fallback(hit) + conflict-check
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_fetch_scoped_member_falls_back_directly():
+    """_fetch_scoped_member 단위 검증: 힌트 쿼리 0행 → 힌트 없는 폴백 쿼리로 재시도."""
+    from app.routers.file_locks import _fetch_scoped_member
+    from app.dependencies.auth import AuthContext
+
+    member = _mock_member()
+    stale_hint = uuid.uuid4()
+    auth = AuthContext(user_id=str(MEMBER_ID), email=None,
+                        claims={"app_metadata": {"project_id": str(stale_hint)}})
+
+    session = AsyncMock()
+    call_count = 0
+
+    async def mock_execute(stmt, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = None if call_count == 1 else member
+        return result
+
+    session.execute = mock_execute
+
+    out = await _fetch_scoped_member(session, MEMBER_ID, ORG_ID, auth)
+    assert out is member
+    assert call_count == 2
+
+
+@pytest.mark.anyio
 async def test_list_file_locks_200():
     """AC6: GET /api/v2/file-locks → 목록 반환."""
     client, session, app = await _client()

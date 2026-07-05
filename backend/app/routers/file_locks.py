@@ -78,6 +78,29 @@ def _caller_project_hint(auth: AuthContext) -> uuid.UUID | None:
         return None
 
 
+async def _fetch_scoped_member(
+    session: AsyncSession, member_id: uuid.UUID, org_id: uuid.UUID, auth: AuthContext,
+) -> TeamMember | None:
+    """S17 RC③(까심+codex 델타 RC): _caller_project_hint는 **검증되지 않은 best-effort 최적화**일
+    뿐 authz가 아니다(org_id 필터 + 이후 self-scope가 실제 게이트) — hint가 stale/미스매치라 0행이면
+    404로 끝내지 말고 힌트 없이 결정적 폴백(ORDER BY project_id, 기존 MED 픽스와 동일 패턴)으로
+    재조회한다. X-Project-Id 헤더 미전송 + JWT project가 stale인 정상 caller의 false-404 회귀 방지.
+    """
+    base_query = select(TeamMember).where(TeamMember.id == member_id, TeamMember.org_id == org_id)
+
+    project_hint = _caller_project_hint(auth)
+    if project_hint is not None:
+        hinted_result = await session.execute(
+            base_query.where(TeamMember.project_id == project_hint).limit(1)
+        )
+        hinted_member = hinted_result.scalars().first()
+        if hinted_member is not None:
+            return hinted_member
+
+    fallback_result = await session.execute(base_query.order_by(TeamMember.project_id).limit(1))
+    return fallback_result.scalars().first()
+
+
 class ConflictInfo(BaseModel):
     file_path: str
     locked_by_member_id: str
@@ -167,12 +190,7 @@ async def lock_files(
     active/X-Project-Id 컨텍스트(_caller_project_hint)가 있으면 그 project로 결정적으로 좁힌다.
     """
     # AC3-5②: team_members가 뷰(0088) — multi-row 안전(휴먼 multi-project).
-    project_hint = _caller_project_hint(auth)
-    member_query = select(TeamMember).where(TeamMember.id == member_id, TeamMember.org_id == org_id)
-    if project_hint is not None:
-        member_query = member_query.where(TeamMember.project_id == project_hint)
-    member_result = await session.execute(member_query.order_by(TeamMember.project_id).limit(1))
-    member = member_result.scalars().first()
+    member = await _fetch_scoped_member(session, member_id, org_id, auth)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
 
@@ -223,12 +241,7 @@ async def unlock_files(
     임의 member 명의 lock을 아무나 해제 가능한 구조였다. member 존재+org 확인 후 caller
     self-scope(자기 자신만) 검증 + UPDATE WHERE에 org_id 필터 추가.
     """
-    project_hint = _caller_project_hint(auth)
-    member_query = select(TeamMember).where(TeamMember.id == member_id, TeamMember.org_id == org_id)
-    if project_hint is not None:
-        member_query = member_query.where(TeamMember.project_id == project_hint)
-    member_result = await session.execute(member_query.order_by(TeamMember.project_id).limit(1))
-    member = member_result.scalars().first()
+    member = await _fetch_scoped_member(session, member_id, org_id, auth)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
 
