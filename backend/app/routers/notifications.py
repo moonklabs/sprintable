@@ -139,8 +139,12 @@ async def mark_read(
 async def get_notification_settings(
     member_id: uuid.UUID = Query(...),
     session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[NotificationSettingResponse]:
+    """까심 델타 재QA HIGH(S19): write(PUT)만 닫히고 이 GET은 무가드로 남아 타 member 알림설정을
+    누구나 조회할 수 있었다(정보노출). PUT과 동일한 self-or-org-admin 게이트 적용."""
+    await _assert_self_or_org_admin(member_id, auth, session, org_id)
     repo = NotificationSettingRepository(session)
     settings = await repo.get_by_member(member_id=member_id)
     return [NotificationSettingResponse.model_validate(s) for s in settings]
@@ -172,8 +176,14 @@ async def upsert_notification_setting(
 async def list_inbox(
     assignee_member_id: uuid.UUID = Query(...),
     state: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
     repo: InboxRepository = Depends(_inbox_repo),
 ) -> list[InboxItemResponse]:
+    """까심 델타 재QA HIGH(S19): 무가드로 남아 타 member의 inbox를 누구나 조회할 수 있었다
+    (정보노출). resolve/dismiss와 동일한 self-or-org-admin 게이트 적용."""
+    await _assert_self_or_org_admin(assignee_member_id, auth, session, org_id)
     items = await repo.list(assignee_member_id=assignee_member_id, state=state)
     return [InboxItemResponse.model_validate(i) for i in items]
 
@@ -181,8 +191,13 @@ async def list_inbox(
 @router.get("/inbox/incoming", response_model=list[InboxItemResponse])
 async def list_incoming(
     assignee_member_id: uuid.UUID = Query(...),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
     repo: InboxRepository = Depends(_inbox_repo),
 ) -> list[InboxItemResponse]:
+    """까심 델타 재QA HIGH(S19): list_inbox와 동일 갭 — self-or-org-admin 게이트 적용."""
+    await _assert_self_or_org_admin(assignee_member_id, auth, session, org_id)
     items = await repo.list_incoming(assignee_member_id=assignee_member_id)
     return [InboxItemResponse.model_validate(i) for i in items]
 

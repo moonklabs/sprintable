@@ -154,7 +154,9 @@ async def test_get_notification_settings_200():
         with patch(
             "app.repositories.notification.NotificationSettingRepository.get_by_member",
             new_callable=AsyncMock
-        ) as mock_get:
+        ) as mock_get, patch(
+            "app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=True,
+        ):
             mock_get.return_value = []
 
             async with client as c:

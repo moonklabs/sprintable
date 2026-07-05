@@ -210,9 +210,11 @@ async def test_mark_read_single_404_when_not_owned():
 
 @pytest.mark.anyio
 async def test_get_notification_settings_200():
+    """까심 델타 재QA HIGH(S19): 이 GET이 무가드로 남아있었다 — self 통과 시 정상 동작 확인."""
     client, session, app = await _client()
     try:
-        with patch("app.repositories.notification.NotificationSettingRepository.get_by_member", new_callable=AsyncMock) as mock_get:
+        with patch("app.repositories.notification.NotificationSettingRepository.get_by_member", new_callable=AsyncMock) as mock_get, \
+             patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=True):
             mock_get.return_value = [_mock_setting()]
 
             async with client as c:
@@ -221,6 +223,20 @@ async def test_get_notification_settings_200():
         assert resp.status_code == 200
         assert len(resp.json()) == 1
         assert resp.json()[0]["event_type"] == "story_assigned"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_notification_settings_403_when_not_self_or_admin():
+    """까심 델타 재QA HIGH(S19 MUST): 타 member의 알림설정 열람(정보노출) 차단."""
+    client, session, app = await _client()
+    try:
+        with patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=False), \
+             patch("app.routers.notifications._is_org_admin", new_callable=AsyncMock, return_value=False):
+            async with client as c:
+                resp = await c.get(f"/api/v2/notification-settings?member_id={MEMBER_ID}")
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
@@ -265,9 +281,11 @@ async def test_upsert_notification_setting_403_when_not_self_or_admin():
 
 @pytest.mark.anyio
 async def test_list_inbox_200():
+    """까심 델타 재QA HIGH(S19): 무가드였던 GET — self 통과 시 정상 동작."""
     client, session, app = await _client()
     try:
-        with patch("app.repositories.notification.InboxRepository.list", new_callable=AsyncMock) as mock_list:
+        with patch("app.repositories.notification.InboxRepository.list", new_callable=AsyncMock) as mock_list, \
+             patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=True):
             mock_list.return_value = [_mock_inbox()]
 
             async with client as c:
@@ -281,10 +299,26 @@ async def test_list_inbox_200():
 
 
 @pytest.mark.anyio
-async def test_list_incoming_200():
+async def test_list_inbox_403_when_not_self_or_admin():
+    """까심 델타 재QA HIGH(S19 MUST): 타 member의 inbox 열람(정보노출) 차단."""
     client, session, app = await _client()
     try:
-        with patch("app.repositories.notification.InboxRepository.list_incoming", new_callable=AsyncMock) as mock_list:
+        with patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=False), \
+             patch("app.routers.notifications._is_org_admin", new_callable=AsyncMock, return_value=False):
+            async with client as c:
+                resp = await c.get(f"/api/v2/inbox?assignee_member_id={MEMBER_ID}")
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_incoming_200():
+    """까심 델타 재QA HIGH(S19): 무가드였던 GET — self 통과 시 정상 동작."""
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.notification.InboxRepository.list_incoming", new_callable=AsyncMock) as mock_list, \
+             patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=True):
             mock_list.return_value = [_mock_inbox()]
 
             async with client as c:
@@ -292,6 +326,20 @@ async def test_list_incoming_200():
 
         assert resp.status_code == 200
         assert resp.json()[0]["kind"] == "approval"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_incoming_403_when_not_self_or_admin():
+    """까심 델타 재QA HIGH(S19 MUST): list_inbox와 동일 갭 — 정보노출 차단."""
+    client, session, app = await _client()
+    try:
+        with patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=False), \
+             patch("app.routers.notifications._is_org_admin", new_callable=AsyncMock, return_value=False):
+            async with client as c:
+                resp = await c.get(f"/api/v2/inbox/incoming?assignee_member_id={MEMBER_ID}")
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
