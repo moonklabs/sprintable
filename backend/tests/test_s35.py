@@ -124,6 +124,7 @@ async def test_rotate_key_201():
         new_plaintext = _PREFIX_MARKER + "n" * 64
 
         with patch("app.services.agent_message_policy.ensure_creator_allowlisted", new_callable=AsyncMock), \
+             patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock), \
              patch("app.repositories.api_key.ApiKeyRepository.get", new_callable=AsyncMock) as mock_get, \
              patch("app.services.recruit_service.acquire_agent_mutation_lock", new_callable=AsyncMock), \
              patch("app.repositories.api_key.ApiKeyRepository.rotate", new_callable=AsyncMock) as mock_rotate:
@@ -147,7 +148,8 @@ async def test_rotate_key_404():
     """존재하는 키(get 성공)인데 rotate가 None(CAS 손실/레이스 패배)인 케이스 — 404 매핑."""
     client, session, app = await _client()
     try:
-        with patch("app.repositories.api_key.ApiKeyRepository.get", new_callable=AsyncMock) as mock_get, \
+        with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock), \
+             patch("app.repositories.api_key.ApiKeyRepository.get", new_callable=AsyncMock) as mock_get, \
              patch("app.services.recruit_service.acquire_agent_mutation_lock", new_callable=AsyncMock), \
              patch("app.repositories.api_key.ApiKeyRepository.rotate", new_callable=AsyncMock) as mock_rotate:
             mock_get.return_value = _mock_key()
@@ -163,7 +165,8 @@ async def test_rotate_key_404():
 
 @pytest.mark.anyio
 async def test_rotate_key_404_when_key_missing():
-    """E-RECRUIT S3 QA 재QA 잔여1건 fix: get()이 애초에 키를 못 찾으면 rotate/lock 호출 전에 404."""
+    """E-RECRUIT S3 QA 재QA 잔여1건 fix: get()이 애초에 키를 못 찾으면 ownership/rotate/lock
+    호출 전에 404."""
     client, session, app = await _client()
     try:
         with patch("app.repositories.api_key.ApiKeyRepository.get", new_callable=AsyncMock) as mock_get:
@@ -173,6 +176,31 @@ async def test_rotate_key_404_when_key_missing():
                 resp = await c.post("/api/v2/api-keys/rotate", json={"api_key_id": str(uuid.uuid4())})
 
         assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_rotate_key_rejects_cross_org_key_403_or_404():
+    """story 561fd294(CRITICAL 보안): 대상 키가 가리키는 agent가 호출자의 org 소속이 아니면
+    (assert_agent_owner가 org_id 불일치로 agent 조회 실패→404, 또는 소유자 아니면 403) rotate가
+    실행되면 안 된다 — 크로스-org IDOR 회귀 가드. assert_agent_owner를 mock하지 않고 그 자체가
+    HTTPException을 던지는지로 가드 실효성을 검증(단순 존재 확인이 아니라 실제 예외 발생 확인)."""
+    from fastapi import HTTPException
+
+    client, session, app = await _client()
+    try:
+        with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock) as mock_owner, \
+             patch("app.repositories.api_key.ApiKeyRepository.get", new_callable=AsyncMock) as mock_get, \
+             patch("app.repositories.api_key.ApiKeyRepository.rotate", new_callable=AsyncMock) as mock_rotate:
+            mock_get.return_value = _mock_key()  # 다른 org 소속 agent의 키(team_member_id=AGENT_ID)
+            mock_owner.side_effect = HTTPException(status_code=403, detail="Not the owner of this agent")
+
+            async with client as c:
+                resp = await c.post("/api/v2/api-keys/rotate", json={"api_key_id": str(KEY_ID)})
+
+        assert resp.status_code == 403
+        mock_rotate.assert_not_awaited()  # ownership 실패 시 rotate()가 아예 호출되면 안 됨
     finally:
         app.dependency_overrides.clear()
 
