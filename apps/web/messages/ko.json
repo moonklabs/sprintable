@@ -3221,6 +3221,7 @@
     "stepRuntime": "실행환경",
     "stepBundle": "번들",
     "stepVerify": "검증",
+    "railBundleDownloaded": "번들 다운로드",
     "roleQuestion": "어떤 직무로 채용하나요?",
     "roleLoading": "직무 카탈로그를 불러오는 중…",
     "roleLoadError": "직무 카탈로그를 불러오지 못했습니다.",

@@ -289,7 +289,9 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
     const be = beSteps?.find((s) => s.state === state);
     let status: RailStatus = be?.status ?? 'pending';
     if (state === 'config_copied' && status === 'pending') status = 'done'; // 번들 다운로드=STEP3 완주로 이미 완료
-    return { state, status, label: tAgents(RAIL_LABEL_KEY[state]), reason: be?.reason };
+    // 유나 가디언 polish#2: onboarding 공용 라벨("설정 복사됨")은 채용 맥락과 안 맞아 이 상태만 로컬 오버라이드.
+    const label = state === 'config_copied' ? t('railBundleDownloaded') : tAgents(RAIL_LABEL_KEY[state]);
+    return { state, status, label, reason: be?.reason };
   });
   const verified = displaySteps.find((s) => s.state === 'verified')?.status === 'done';
 
@@ -524,6 +526,7 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
                   <Badge variant="destructive">{t('scopeBlocked')}</Badge>
                   <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground line-through opacity-60">admin</span>
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground line-through opacity-60">destructive</span>
                   <span className="text-destructive">{t('scopeBlockedNote')}</span>
                 </div>
 

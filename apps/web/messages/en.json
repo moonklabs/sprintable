@@ -3221,6 +3221,7 @@
     "stepRuntime": "Runtime",
     "stepBundle": "Bundle",
     "stepVerify": "Verify",
+    "railBundleDownloaded": "Bundle downloaded",
     "roleQuestion": "Which role are you hiring for?",
     "roleLoading": "Loading role catalog…",
     "roleLoadError": "Couldn't load the role catalog.",
