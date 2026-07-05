@@ -200,6 +200,7 @@ async def test_create_event_recipient_not_found_returns_404(client, mock_session
 
 @pytest.mark.anyio
 async def test_get_pending_events_returns_list(client, mock_session):
+    """산티아고 SME 최종 MUST(S19): recipient==caller 통과 시 정상 동작."""
     recipient_id = uuid.uuid4()
     events = [_make_event(recipient_id=recipient_id, status="pending") for _ in range(3)]
 
@@ -209,11 +210,26 @@ async def test_get_pending_events_returns_list(client, mock_session):
     result_mock.scalars.return_value = scalars_mock
     mock_session.execute.return_value = result_mock
 
-    resp = await client.get(f"/api/v2/events/pending?recipient_id={recipient_id}")
+    with patch("app.routers.events.assert_caller_is_member", new_callable=AsyncMock,
+               return_value=None):
+        resp = await client.get(f"/api/v2/events/pending?recipient_id={recipient_id}")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 3
     assert all(e["status"] == "pending" for e in data)
+
+
+@pytest.mark.anyio
+async def test_get_pending_events_403_when_caller_is_not_recipient(client, mock_session):
+    """산티아고 SME 최종 MUST(S19): recipient_id 쿼리로 타 member 이벤트(payload/sender/source)를
+    auth·recipient 검증 없이 읽을 수 있었다 — mark_delivered(write)는 이미 닫혔는데 같은
+    recipient 축의 이 read fallback이 열려있었다."""
+    recipient_id = uuid.uuid4()
+
+    with patch("app.routers.events.assert_caller_is_member", new_callable=AsyncMock,
+               side_effect=HTTPException(status_code=403, detail="Cannot read another member's events")):
+        resp = await client.get(f"/api/v2/events/pending?recipient_id={recipient_id}")
+    assert resp.status_code == 403
 
 
 # ─── AC4: PATCH /api/v2/events/{id}/delivered ─────────────────────────────────
@@ -330,7 +346,9 @@ async def test_get_pending_filters_by_org(client, mock_session, org_id):
     result_mock.scalars.return_value = scalars_mock
     mock_session.execute.return_value = result_mock
 
-    resp = await client.get(f"/api/v2/events/pending?recipient_id={recipient_id}")
+    with patch("app.routers.events.assert_caller_is_member", new_callable=AsyncMock,
+               return_value=None):
+        resp = await client.get(f"/api/v2/events/pending?recipient_id={recipient_id}")
     assert resp.status_code == 200
     # execute 호출 시 org_id 필터가 쿼리에 포함됐는지 — 실제 SQL은 mock이므로 호출 여부로 확인
     mock_session.execute.assert_called_once()

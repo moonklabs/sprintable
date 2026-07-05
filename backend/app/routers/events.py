@@ -483,12 +483,21 @@ async def get_pending_events(
     include_recent_delivered_minutes: int = Query(default=30, le=120),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[EventResponse]:
     """GET /api/v2/events/pending — 수신자별 pending + 최근 N분 delivered 이벤트 목록.
 
     include_recent_delivered_minutes: SSE로 delivered 마킹된 이벤트도 최근 N분 이내라면 반환.
     → SSE 전달과 poll_events 폴링 간 충돌(갭 2) 해소.
+
+    산티아고 SME 최종 MUST(S19): recipient_id 쿼리로 타 member 이벤트(payload/sender/source)를
+    auth·recipient 검증 없이 읽을 수 있었다 — mark_delivered(write)는 recipient==caller로
+    닫혔는데 같은 recipient 축의 이 read fallback이 열려있었다. 동일 패턴(순수 self, admin
+    대리열람 흐름 없음)으로 닫는다.
     """
+    await assert_caller_is_member(
+        recipient_id, auth, db, org_id, detail="Cannot read another member's events",
+    )
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=include_recent_delivered_minutes)
     status_filter = or_(
         Event.status == "pending",
