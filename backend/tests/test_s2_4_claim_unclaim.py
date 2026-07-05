@@ -58,6 +58,16 @@ def _mock_story(id=None, title="Test Story", status="in-progress"):
     return s
 
 
+def _resolved(member_id: uuid.UUID):
+    """S17 RC②: resolve_member() 반환 mock — claim/unclaim self-scope 검증 대상 caller 신원."""
+    from app.services.member_resolver import ResolvedMember
+
+    return ResolvedMember(
+        id=member_id, user_id=None, name="TestAgent", type="agent",
+        role="member", org_id=ORG_ID, project_id=PROJECT_ID,
+    )
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
@@ -118,16 +128,45 @@ async def test_claim_story_200():
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
 
-        async with client as c:
-            resp = await c.post(
-                f"/api/v2/team-members/{MEMBER_ID}/claim",
-                json={"story_id": str(STORY_ID)},
-            )
+        with patch("app.routers.team_members.resolve_member", new_callable=AsyncMock,
+                   return_value=_resolved(MEMBER_ID)):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/claim",
+                    json={"story_id": str(STORY_ID)},
+                )
 
         assert resp.status_code == 200
         body = resp.json()
         assert body["claimed"] is True
         assert body["story_id"] == str(STORY_ID)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_claim_story_403_when_caller_is_different_member():
+    """S17 RC②(까심 델타 HIGH): self-scope — 타 member 명의로 claim 시도 시 403.
+
+    이전엔 claim_story가 auth 파라미터 자체를 받지 않아 caller 확인이 전혀 없었다 — Bob이
+    Alice member_id로 claim해 active_story/participation을 오염시킬 수 있는 구조였다.
+    """
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = member
+        session.execute = AsyncMock(return_value=result)
+
+        with patch("app.routers.team_members.resolve_member", new_callable=AsyncMock,
+                   return_value=_resolved(uuid.uuid4())):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/claim",
+                    json={"story_id": str(STORY_ID)},
+                )
+
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
@@ -155,11 +194,36 @@ async def test_unclaim_story_200():
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
 
-        async with client as c:
-            resp = await c.post(f"/api/v2/team-members/{MEMBER_ID}/unclaim")
+        with patch("app.routers.team_members.resolve_member", new_callable=AsyncMock,
+                   return_value=_resolved(MEMBER_ID)):
+            async with client as c:
+                resp = await c.post(f"/api/v2/team-members/{MEMBER_ID}/unclaim")
 
         assert resp.status_code == 200
         assert resp.json()["unclaimed"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_unclaim_story_403_when_caller_is_different_member():
+    """S17 RC②(까심 델타 HIGH — 파일락 경계의 마지막 구멍): self-scope — 타 member 명의로
+    unclaim 시도 시 403. 이전엔 auth 파라미터 자체가 없어 Bob이 Alice 명의로 unclaim 호출 시
+    release_all_file_locks(session, id)가 Alice의 모든 file lock을 해제할 수 있었다.
+    """
+    client, session, app = await _client()
+    try:
+        member = _mock_member(active_story_id=STORY_ID)
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = member
+        session.execute = AsyncMock(return_value=result)
+
+        with patch("app.routers.team_members.resolve_member", new_callable=AsyncMock,
+                   return_value=_resolved(uuid.uuid4())):
+            async with client as c:
+                resp = await c.post(f"/api/v2/team-members/{MEMBER_ID}/unclaim")
+
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
@@ -187,11 +251,13 @@ async def test_claim_story_400_if_story_not_in_project():
 
         session.execute = mock_execute
 
-        async with client as c:
-            resp = await c.post(
-                f"/api/v2/team-members/{MEMBER_ID}/claim",
-                json={"story_id": str(uuid.uuid4())},
-            )
+        with patch("app.routers.team_members.resolve_member", new_callable=AsyncMock,
+                   return_value=_resolved(MEMBER_ID)):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/claim",
+                    json={"story_id": str(uuid.uuid4())},
+                )
 
         assert resp.status_code == 400
     finally:

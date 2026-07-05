@@ -17,6 +17,7 @@ from app.schemas.team_member import (
     ActiveStorySummary, TeamMemberCreate, TeamMemberResponse, TeamMemberUpdate,
 )
 from app.services.agent_onboarding_config import build_agent_mcp_config_bundle
+from app.services.member_resolver import resolve_member
 
 
 class ClaimBody(BaseModel):
@@ -382,12 +383,23 @@ async def claim_story(
     body: ClaimBody,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    """AC1/3: active_story_id 갱신 + story 존재 검증."""
+    """AC1/3: active_story_id 갱신 + story 존재 검증.
+
+    S17(까심 델타 RC HIGH — file_locks.py와 같은 취약 클래스): auth 파라미터가 아예 없어
+    caller가 이 member 본인인지 확인 0이었다 — 다른 멤버 명의로 claim(active_story/participation
+    오염) 가능했음. resolve_member() 기반 self-scope 확인 추가(관리자 대리 claim 흐름 없음 확인 후
+    순수 self-scope로 닫음).
+    """
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
+
+    caller = await resolve_member(auth, org_id, session, project_id=member.project_id)
+    if caller.id != id:
+        raise HTTPException(status_code=403, detail="Cannot claim as another member")
 
     # AC3: story가 해당 project에 존재하는지 검증
     story_result = await session.execute(
@@ -413,12 +425,23 @@ async def unclaim_story(
     id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    """AC2: active_story_id = NULL. AC7: file lock 자동 해제."""
+    """AC2: active_story_id = NULL. AC7: file lock 자동 해제.
+
+    S17(까심 델타 RC HIGH — 파일락 경계의 마지막 구멍): auth 파라미터가 아예 없어 caller가
+    본인인지 확인 0 — Bob이 Alice 명의로 unclaim 호출 시 release_all_file_locks(session, id)가
+    org 필터도 없이 Alice의 모든 file lock을 해제할 수 있었다. claim과 동일 self-scope 패턴 적용.
+    """
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
+
+    caller = await resolve_member(auth, org_id, session, project_id=member.project_id)
+    if caller.id != id:
+        raise HTTPException(status_code=403, detail="Cannot unclaim as another member")
+
     # AC3-4 2-2: anchor-only — agent_project_profiles가 presence 유일 소스.
     from app.services.agent_anchor_sync import sync_agent_profile_presence
     await sync_agent_profile_presence(session, id, active_story_id=None)

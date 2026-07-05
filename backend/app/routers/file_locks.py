@@ -30,7 +30,20 @@ def _normalize_path(p: str) -> str:
     n = re.sub(r"/+", "/", p.strip())
     while n.startswith("./"):
         n = n[2:]
+    if n in (".", "/"):
+        n = ""
     return n
+
+
+def _validate_paths(v: list[str]) -> list[str]:
+    if len(v) > _MAX_FILE_PATHS_PER_REQUEST:
+        raise ValueError(f"file_paths exceeds max of {_MAX_FILE_PATHS_PER_REQUEST}")
+    normalized = [_normalize_path(p) for p in v]
+    # S17 LOW(까심 델타 RC): 정규화 후 빈 문자열(""·"."·".//")로 축약되는 path 거부 — 조율키로
+    # 무의미할 뿐더러 조용히 accept되면 충돌감지가 엉뚱한 "빈 경로"끼리 매칭될 수 있다.
+    if any(not n for n in normalized):
+        raise ValueError("file_paths contains an empty path after normalization")
+    return normalized
 
 
 class FileLockBody(BaseModel):
@@ -40,9 +53,7 @@ class FileLockBody(BaseModel):
     @field_validator("file_paths")
     @classmethod
     def _validate_and_normalize(cls, v: list[str]) -> list[str]:
-        if len(v) > _MAX_FILE_PATHS_PER_REQUEST:
-            raise ValueError(f"file_paths exceeds max of {_MAX_FILE_PATHS_PER_REQUEST}")
-        return [_normalize_path(p) for p in v]
+        return _validate_paths(v)
 
 
 class FileUnlockBody(BaseModel):
@@ -51,9 +62,20 @@ class FileUnlockBody(BaseModel):
     @field_validator("file_paths")
     @classmethod
     def _validate_and_normalize(cls, v: list[str]) -> list[str]:
-        if len(v) > _MAX_FILE_PATHS_PER_REQUEST:
-            raise ValueError(f"file_paths exceeds max of {_MAX_FILE_PATHS_PER_REQUEST}")
-        return [_normalize_path(p) for p in v]
+        return _validate_paths(v)
+
+
+def _caller_project_hint(auth: AuthContext) -> uuid.UUID | None:
+    """S17 MED(까심 델타 RC): caller의 active/X-Project-Id 컨텍스트 — 멀티프로젝트 휴먼의 member
+    조회를 특정 project로 결정적으로 좁힌다(get_verified_org_id가 X-Project-Id 헤더 수신 시
+    app_metadata.project_id를 갱신 — 미수신 시 JWT/API키 발급 당시 project 폴백)."""
+    raw = auth.claims.get("app_metadata", {}).get("project_id")
+    if not raw:
+        return None
+    try:
+        return uuid.UUID(str(raw))
+    except (ValueError, TypeError):
+        return None
 
 
 class ConflictInfo(BaseModel):
@@ -139,11 +161,17 @@ async def lock_files(
     S17(산티아고 SME MUST②): member 조회에 org_id 필터 추가(타 org member_id로 org_id/project_id
     불일치 row 생성 방지) + caller self-scope 확인(자기 자신 명의로만 lock 가능 — canonical
     resolve_member 축 사용, TeamMember.id 문자열 비교로 우회하지 않게 [[member_bound_resource_resolve_member_axis]]).
+
+    S17 RC②(까심 델타 MED): member 조회에 project_id 힌트 없이 .limit(1)만 쓰면 멀티프로젝트
+    휴먼이 엉뚱한 project row로 스코프돼 실제 충돌(타 프로젝트 락)을 놓칠 수 있었다 — caller의
+    active/X-Project-Id 컨텍스트(_caller_project_hint)가 있으면 그 project로 결정적으로 좁힌다.
     """
-    # AC3-5②: team_members가 뷰(0088) — multi-row 안전(휴먼 multi-project) .limit(1).first().
-    member_result = await session.execute(
-        select(TeamMember).where(TeamMember.id == member_id, TeamMember.org_id == org_id).limit(1)
-    )
+    # AC3-5②: team_members가 뷰(0088) — multi-row 안전(휴먼 multi-project).
+    project_hint = _caller_project_hint(auth)
+    member_query = select(TeamMember).where(TeamMember.id == member_id, TeamMember.org_id == org_id)
+    if project_hint is not None:
+        member_query = member_query.where(TeamMember.project_id == project_hint)
+    member_result = await session.execute(member_query.order_by(TeamMember.project_id).limit(1))
     member = member_result.scalars().first()
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
@@ -195,9 +223,11 @@ async def unlock_files(
     임의 member 명의 lock을 아무나 해제 가능한 구조였다. member 존재+org 확인 후 caller
     self-scope(자기 자신만) 검증 + UPDATE WHERE에 org_id 필터 추가.
     """
-    member_result = await session.execute(
-        select(TeamMember).where(TeamMember.id == member_id, TeamMember.org_id == org_id).limit(1)
-    )
+    project_hint = _caller_project_hint(auth)
+    member_query = select(TeamMember).where(TeamMember.id == member_id, TeamMember.org_id == org_id)
+    if project_hint is not None:
+        member_query = member_query.where(TeamMember.project_id == project_hint)
+    member_result = await session.execute(member_query.order_by(TeamMember.project_id).limit(1))
     member = member_result.scalars().first()
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")

@@ -395,6 +395,105 @@ async def test_file_lock_rejects_over_max_paths_422():
         app.dependency_overrides.clear()
 
 
+# ─── S17 RC②(까심 델타): 빈 path 거부 + project 힌트 결정성 ────────────────────
+
+@pytest.mark.parametrize("raw", ["", ".", "./", ".//", "  ", "././"])
+def test_normalize_reduces_to_empty_is_rejected(raw):
+    from app.routers.file_locks import _validate_paths
+
+    with pytest.raises(ValueError, match="empty path"):
+        _validate_paths([raw])
+
+
+def test_file_lock_body_rejects_empty_after_normalization():
+    from app.routers.file_locks import FileLockBody
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        FileLockBody(file_paths=["./"])
+
+
+@pytest.mark.anyio
+async def test_file_lock_rejects_path_that_normalizes_to_empty_422():
+    client, session, app = await _client()
+    try:
+        async with client as c:
+            resp = await c.post(
+                f"/api/v2/team-members/{MEMBER_ID}/file-lock",
+                json={"file_paths": ["src/foo.py", "././"]},
+            )
+        assert resp.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_caller_project_hint_reads_app_metadata_project_id():
+    from app.dependencies.auth import AuthContext
+    from app.routers.file_locks import _caller_project_hint
+
+    pid = uuid.uuid4()
+    auth = AuthContext(user_id=str(uuid.uuid4()), email=None,
+                        claims={"app_metadata": {"project_id": str(pid)}})
+    assert _caller_project_hint(auth) == pid
+
+
+def test_caller_project_hint_none_when_absent_or_invalid():
+    from app.dependencies.auth import AuthContext
+    from app.routers.file_locks import _caller_project_hint
+
+    assert _caller_project_hint(
+        AuthContext(user_id=str(uuid.uuid4()), email=None, claims={"app_metadata": {}})
+    ) is None
+    assert _caller_project_hint(
+        AuthContext(user_id=str(uuid.uuid4()), email=None,
+                    claims={"app_metadata": {"project_id": "not-a-uuid"}})
+    ) is None
+
+
+@pytest.mark.anyio
+async def test_file_lock_uses_project_hint_to_scope_member_query():
+    """S17 RC②(까심 델타 MED): X-Project-Id/active project 컨텍스트가 있으면 member 조회가
+    그 project로 결정적으로 좁혀지는지 — 쿼리에 project_id 필터가 실제로 걸렸는지 stmt 검사."""
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        hint_project = member.project_id
+        captured_stmts = []
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            captured_stmts.append(stmt)
+            result = MagicMock()
+            if call_count == 1:
+                result.scalars.return_value.first.return_value = member
+            else:
+                result.scalars.return_value.all.return_value = []
+            return result
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.add = MagicMock()
+
+        with patch("app.routers.file_locks.resolve_member", new_callable=AsyncMock,
+                   return_value=_resolved(MEMBER_ID)), \
+             patch("app.routers.file_locks._caller_project_hint", return_value=hint_project) as hint_mock:
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-lock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
+
+        assert resp.status_code == 200
+        hint_mock.assert_called_once()
+        # member-fetch stmt (first captured) must reference project_id in its WHERE (compiled contains column name)
+        assert "project_id" in str(captured_stmts[0])
+    finally:
+        app.dependency_overrides.clear()
+
+
 @pytest.mark.anyio
 async def test_list_file_locks_200():
     """AC6: GET /api/v2/file-locks → 목록 반환."""
