@@ -174,14 +174,16 @@ async def test_connection_artifact_transport_http_returns_http_content(monkeypat
     monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
     agent_id = uuid.uuid4()
     res = MagicMock()
-    res.scalar_one_or_none.return_value = SimpleNamespace(id=agent_id)
+    res.scalar_one_or_none.return_value = SimpleNamespace(id=agent_id, project_id=uuid.uuid4())
     db = AsyncMock()
     db.execute = AsyncMock(return_value=res)
-    out = await get_agent_connection_artifact(
-        agent_id, runtime="claude-code", transport="http",
-        session=db, auth=MagicMock(), org_id=uuid.uuid4(),
-    )
-    parsed = json.loads(out["content"])
+    with patch("app.routers.agents.AgentPersonaRepository.list", new_callable=AsyncMock, return_value=[]):
+        out = await get_agent_connection_artifact(
+            agent_id, runtime="claude-code", transport="http",
+            session=db, auth=MagicMock(), org_id=uuid.uuid4(),
+        )
+    mcp_file = next(f for f in out["files"] if f["filename"] == ".mcp.json")
+    parsed = json.loads(mcp_file["content"])
     assert parsed["mcpServers"]["sprintable"]["type"] == "http"
 
 
@@ -195,14 +197,15 @@ async def test_connection_artifact_transport_http_unavailable_400(monkeypatch):
     monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
     agent_id = uuid.uuid4()
     res = MagicMock()
-    res.scalar_one_or_none.return_value = SimpleNamespace(id=agent_id)
+    res.scalar_one_or_none.return_value = SimpleNamespace(id=agent_id, project_id=uuid.uuid4())
     db = AsyncMock()
     db.execute = AsyncMock(return_value=res)
-    with pytest.raises(HTTPException) as ei:
-        await get_agent_connection_artifact(
-            agent_id, runtime="claude-code", transport="http",
-            session=db, auth=MagicMock(), org_id=uuid.uuid4(),
-        )
+    with patch("app.routers.agents.AgentPersonaRepository.list", new_callable=AsyncMock, return_value=[]):
+        with pytest.raises(HTTPException) as ei:
+            await get_agent_connection_artifact(
+                agent_id, runtime="claude-code", transport="http",
+                session=db, auth=MagicMock(), org_id=uuid.uuid4(),
+            )
     assert ei.value.status_code == 400
 
 
@@ -211,10 +214,16 @@ async def test_connection_artifact_unsupported_transport_400():
     from fastapi import HTTPException
 
     from app.routers.agents import get_agent_connection_artifact
-    with pytest.raises(HTTPException) as ei:
+    agent_id = uuid.uuid4()
+    res = MagicMock()
+    res.scalar_one_or_none.return_value = SimpleNamespace(id=agent_id, project_id=uuid.uuid4())
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=res)
+    with patch("app.routers.agents.AgentPersonaRepository.list", new_callable=AsyncMock, return_value=[]), \
+         pytest.raises(HTTPException) as ei:
         await get_agent_connection_artifact(
-            uuid.uuid4(), runtime="claude-code", transport="carrier-pigeon",
-            session=AsyncMock(), auth=MagicMock(), org_id=uuid.uuid4(),
+            agent_id, runtime="claude-code", transport="carrier-pigeon",
+            session=db, auth=MagicMock(), org_id=uuid.uuid4(),
         )
     assert ei.value.status_code == 400
 

@@ -18,15 +18,19 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.project import Project
 from app.models.team import TeamMember
+from app.repositories.agent_persona import AgentPersonaRepository
 from app.schemas.recruit import RecruitRequest
 from app.schemas.team_member import OrgAgentCreate, TeamMemberResponse
 from app.services.agent_onboarding_config import (
+    CONNECTOR_RUNTIME,
     DEFAULT_RUNTIME,
     SUPPORTED_RUNTIMES,
     SUPPORTED_TRANSPORTS,
     build_agent_mcp_config,
     build_agent_mcp_config_bundle,
+    build_connector_guidance,
     default_transport_for_edition,
+    resolve_instruction_filename,
 )
 from app.services.agent_verify import get_verification_state, start_verification
 from app.services.onboarding_funnel import emit_onboarding_event, safe_key_prefix
@@ -151,7 +155,7 @@ async def get_agent_connection_artifact(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
-    """OB-1 AC3: 에이전트 connection 아티팩트(.mcp.json) — 同 SSOT generator 소비.
+    """OB-1 AC3 + E-RECRUIT S5(story 4fca5a3e): 에이전트 activation 번들 — 同 SSOT generator 소비.
 
     기존 에이전트는 평문 키가 없으므로(생성 시 1회 노출) ``AGENT_API_KEY`` 는 placeholder 로 채운다 —
     사용자가 자기 키를 붙여 완성한다. wizard(OB-3)가 이 아티팩트를 렌더+copy+verify 한다.
@@ -160,14 +164,19 @@ async def get_agent_connection_artifact(
 
     E-MCP-OPT S3: ``transport`` 쿼리(``stdio``|``http``) — connect-step 토글이 다른 탭 선택 시 이
     파라미터로 재요청(§5, FE round-trip 방식 선택). 미지정 시 edition 기본(SaaS=http·OSS=stdio).
-    이 엔드포인트의 기존 "content=paste-ready 문자열" 계약은 그대로 — 요청된 단일 변형만 반환한다
-    (두 변형 동봉은 생성 시점 bundle 엔드포인트가 담당).
+
+    E-RECRUIT S5 G4(블루프린트 핵심 발견 — ``agent_personas.system_prompt``가 저장은 되나 어떤
+    런타임에도 전달 안 됨): 이 **공용** 레이어에 fix를 둬서 recruit(S3) 전용이 아니라 **일반
+    생성 에이전트도** persona 가 있으면(is_default) 그 자율 운영 지침을 파일로 받는다. persona
+    가 없으면(미채용) 지침 파일 없이 mcp_config 만(이전 동작과 동일 — 회귀 없음).
+
+    ⚠️ BREAKING(dev-only, 착수 전 미르코군 조율): 응답 shape 을 기존 ``{filename, content}``
+    단일 파일에서 ``{files[], mcp_config, api_key}``(``api_key`` 는 GET 이라 placeholder 뿐)로
+    교체 — S4 채용관 번들 프리뷰(파일 3종)와 recruit(S3) 응답 shape 에 맞춘다(G2: 재방문 시
+    placeholder만·실키는 recruit 시점 1회).
     """
     if runtime not in SUPPORTED_RUNTIMES:
         raise HTTPException(status_code=400, detail=f"unsupported runtime: {runtime}")
-    resolved_transport = transport or default_transport_for_edition()
-    if resolved_transport not in SUPPORTED_TRANSPORTS:
-        raise HTTPException(status_code=400, detail=f"unsupported transport: {transport}")
 
     member = (await session.execute(
         select(TeamMember).where(
@@ -179,12 +188,45 @@ async def get_agent_connection_artifact(
     if member is None:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    artifact = build_agent_mcp_config(
-        api_key_plaintext=_API_KEY_PLACEHOLDER, runtime=runtime, transport=resolved_transport,
-    )
-    if artifact is None:
-        # http 요청됐으나 이 환경엔 호스팅 배포가 없음(MCP_PUBLIC_URL 미설정) — 명시 요청이라 400.
-        raise HTTPException(status_code=400, detail=f"transport '{resolved_transport}' unavailable in this environment")
+    # G4: persona가 있으면(is_default) 자율 운영 지침을 파일로 emit — recruit 전용 아닌 공용 레이어.
+    # 까심 QA RC(S5): list()는 `ORDER BY is_default DESC, created_at ASC` 정렬만 하지 실제
+    # is_default 여부를 보장 안 함 — is_default=True 행이 하나도 없으면(POST /agent-personas가
+    # is_default 생략 시 non-default 생성 가능·"정확히 1개 default" 불변식 없음) 가장 오래된
+    # persona가 [0]에 와서 임의 system_prompt가 authoritative처럼 emit된다(G4 목적과 정반대).
+    # is_default를 명시 확인 — 참인 행이 없으면 지침 파일 생략(안전 fallback, "미채용"과 동형).
+    files: list[dict] = []
+    personas = await AgentPersonaRepository(session).list(org_id, member.project_id, agent_id)
+    default_persona = personas[0] if personas else None
+    if (
+        default_persona is not None
+        and default_persona.is_default
+        and default_persona.resolved_system_prompt
+    ):
+        files.append({
+            "filename": resolve_instruction_filename(runtime),
+            "content": default_persona.resolved_system_prompt,
+        })
+
+    if runtime == CONNECTOR_RUNTIME:
+        # Q2(PO 확정): connector = 포인터/안내만 — SSE dial-out은 `.mcp.json`과 별개 프로토콜이라
+        # transport 파라미터 자체가 의미 없음(무시).
+        resolved_transport = None
+        mcp_config: dict | None = None
+        files.append({"filename": "CONNECTOR_SETUP.md", "content": build_connector_guidance(runtime)})
+    else:
+        resolved_transport = transport or default_transport_for_edition()
+        if resolved_transport not in SUPPORTED_TRANSPORTS:
+            raise HTTPException(status_code=400, detail=f"unsupported transport: {transport}")
+        mcp_config = build_agent_mcp_config(
+            api_key_plaintext=_API_KEY_PLACEHOLDER, runtime=runtime, transport=resolved_transport,
+        )
+        if mcp_config is None:
+            # http 요청됐으나 이 환경엔 호스팅 배포가 없음(MCP_PUBLIC_URL 미설정) — 명시 요청이라 400.
+            raise HTTPException(status_code=400, detail=f"transport '{resolved_transport}' unavailable in this environment")
+        files.append({
+            "filename": ".mcp.json",
+            "content": json.dumps(mcp_config, indent=2, ensure_ascii=False),
+        })
 
     # OB-4 seam: config_generated (generator 아티팩트 반환·funnel·non-blocking).
     await emit_onboarding_event(
@@ -193,12 +235,13 @@ async def get_agent_connection_artifact(
     )
     await session.commit()
 
-    # BE↔FE 계약 락(OB-3 wizard 1:1 렌더): content = paste-ready .mcp.json **문자열**(dict 아님).
     return {
-        "filename": ".mcp.json",
-        "content": json.dumps(artifact, indent=2, ensure_ascii=False),
         "agent_id": str(member.id),
         "runtime": runtime,
+        "files": files,
+        "mcp_config": mcp_config,
+        # G2: GET 재방문 — full key 재발급 불가(생성/recruit 시점 1회만 노출). placeholder 로 표시.
+        "api_key": None,
     }
 
 

@@ -69,8 +69,12 @@ from unittest.mock import AsyncMock, MagicMock  # noqa: E402
 
 
 def _db_returning(member):
+    """member 조회 mock + AgentPersonaRepository.list()가 쓰는 .scalars().all() 도 빈 리스트로
+    안전하게 반환(E-RECRUIT S5: connection-artifact가 이제 persona 조회도 하므로 — 이 헬퍼를 쓰는
+    기존 테스트들은 "persona 없음"(회귀 없는 기존 동작) 경로를 검증)."""
     res = MagicMock()
     res.scalar_one_or_none.return_value = member
+    res.scalars.return_value.all.return_value = []
     db = AsyncMock()
     db.execute = AsyncMock(return_value=res)
     return db
@@ -81,29 +85,102 @@ async def test_connection_artifact_returns_stdio_with_placeholder():
     from app.routers.agents import get_agent_connection_artifact
 
     agent_id = uuid.uuid4()
-    db = _db_returning(SimpleNamespace(id=agent_id))
+    db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
     out = await get_agent_connection_artifact(
         agent_id, runtime="claude-code", session=db, auth=MagicMock(), org_id=uuid.uuid4()
     )
-    # BE↔FE 계약 락: {filename, content(=문자열), agent_id, runtime}
-    assert out["filename"] == ".mcp.json"
+    # E-RECRUIT S5 BE↔FE 계약(story 4fca5a3e): {files[], mcp_config, api_key, agent_id, runtime}
     assert out["agent_id"] == str(agent_id)
     assert out["runtime"] == "claude-code"
-    assert isinstance(out["content"], str), "content 는 paste-ready json 문자열이어야(dict 아님)"
-    parsed = json.loads(out["content"])
+    assert out["api_key"] is None  # G2: GET 재방문은 placeholder만(실키 재노출 불가)
+    assert len(out["files"]) == 1  # persona 없음(mock) → .mcp.json 만(회귀 없음)
+    mcp_file = out["files"][0]
+    assert mcp_file["filename"] == ".mcp.json"
+    assert isinstance(mcp_file["content"], str), "content 는 paste-ready json 문자열이어야(dict 아님)"
+    parsed = json.loads(mcp_file["content"])
     server = parsed["mcpServers"]["sprintable"]
     assert server["type"] == "stdio"
     assert server["env"]["AGENT_API_KEY"] == "<YOUR_AGENT_API_KEY>"  # placeholder
+    assert out["mcp_config"] == parsed
+
+
+@pytest.mark.anyio
+async def test_connection_artifact_with_persona_emits_instruction_file():
+    """G4: persona(is_default)가 있으면 자율 운영 지침이 런타임별 파일명으로 files[]에 포함.
+
+    ``AgentPersonaRepository.list()`` 내부(_decorate → _get_base/_is_in_use)는 실 DB 조회를
+    거치므로, 이 라우터-계층 테스트는 그 메서드 자체를 patch(반환값만 확인)한다 — 실 DB 조회
+    시맨틱은 별도 realdb 테스트가 검증."""
+    from unittest.mock import patch
+    from app.routers.agents import get_agent_connection_artifact
+
+    agent_id = uuid.uuid4()
+    # 까심 QA RC(S5): is_default=True 명시 — list()의 정렬 순서([0])만으론 default 보장 안 됨.
+    persona = SimpleNamespace(resolved_system_prompt="당신은 백엔드 엔지니어입니다.", is_default=True)
+    db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
+
+    with patch(
+        "app.routers.agents.AgentPersonaRepository.list",
+        new_callable=AsyncMock, return_value=[persona],
+    ):
+        out = await get_agent_connection_artifact(
+            agent_id, runtime="claude-code", session=db, auth=MagicMock(), org_id=uuid.uuid4()
+        )
+    assert len(out["files"]) == 2
+    filenames = {f["filename"] for f in out["files"]}
+    assert filenames == {"CLAUDE.md", ".mcp.json"}
+    instruction_file = next(f for f in out["files"] if f["filename"] == "CLAUDE.md")
+    assert instruction_file["content"] == "당신은 백엔드 엔지니어입니다."
+
+
+@pytest.mark.anyio
+async def test_connection_artifact_non_default_persona_omits_instruction_file():
+    """까심 QA RC(S5): personas[0]가 is_default=False면(list() 정렬만으론 default 안 보장) 지침
+    파일을 emit하면 안 됨 — 안전 fallback으로 생략(.mcp.json만)."""
+    from unittest.mock import patch
+    from app.routers.agents import get_agent_connection_artifact
+
+    agent_id = uuid.uuid4()
+    persona = SimpleNamespace(resolved_system_prompt="이건 authoritative 아님.", is_default=False)
+    db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
+
+    with patch(
+        "app.routers.agents.AgentPersonaRepository.list",
+        new_callable=AsyncMock, return_value=[persona],
+    ):
+        out = await get_agent_connection_artifact(
+            agent_id, runtime="claude-code", session=db, auth=MagicMock(), org_id=uuid.uuid4()
+        )
+    assert len(out["files"]) == 1
+    assert out["files"][0]["filename"] == ".mcp.json"
+
+
+@pytest.mark.anyio
+async def test_connection_artifact_connector_runtime_returns_pointer_only():
+    """Q2(PO 확정): connector 런타임은 `.mcp.json` 없이 포인터/안내 파일만."""
+    from app.routers.agents import get_agent_connection_artifact
+
+    agent_id = uuid.uuid4()
+    db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
+    out = await get_agent_connection_artifact(
+        agent_id, runtime="connector", session=db, auth=MagicMock(), org_id=uuid.uuid4()
+    )
+    assert out["mcp_config"] is None
+    assert len(out["files"]) == 1
+    assert out["files"][0]["filename"] == "CONNECTOR_SETUP.md"
+    assert "connectors/" in out["files"][0]["content"]
 
 
 @pytest.mark.anyio
 async def test_connection_artifact_unsupported_runtime_400():
+    """Q1(PO 확정): S5 SUPPORTED_RUNTIMES는 S4 픽커 5종(claude-code/codex/gemini/cursor/connector)
+    으로 좁혔다 — RuntimeType 의 다른 9종 중 미채택 값(예: hermes)은 여전히 400."""
     from fastapi import HTTPException
 
     from app.routers.agents import get_agent_connection_artifact
     with pytest.raises(HTTPException) as ei:
         await get_agent_connection_artifact(
-            uuid.uuid4(), runtime="cursor", session=AsyncMock(), auth=MagicMock(), org_id=uuid.uuid4()
+            uuid.uuid4(), runtime="hermes", session=AsyncMock(), auth=MagicMock(), org_id=uuid.uuid4()
         )
     assert ei.value.status_code == 400
 
