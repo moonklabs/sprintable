@@ -135,6 +135,24 @@ class AgentPersonaRepository:
             return None
         return await self._decorate(persona)
 
+    async def get_recruited(
+        self, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID
+    ) -> AgentPersona | None:
+        """E-RECRUIT S3(story ff2996d0) G7: 이 에이전트를 위해 recruit이 이미 만든 persona(있으면
+        정확히 1개 — ``config.role_template_id`` 로 표식) 조회. 재채용/역할변경은 이 행을 upsert
+        한다(수기 생성 persona 와 별개 — 그건 role_template_id 마커가 없다). raw ORM 행 반환(호출부가
+        직접 갱신하거나 rotate 대상 판별에 쓴다 — decorate 불필요한 내부 오케스트레이션용)."""
+        r = await self.session.execute(
+            select(AgentPersona).where(
+                AgentPersona.org_id == org_id,
+                AgentPersona.project_id == project_id,
+                AgentPersona.agent_id == agent_id,
+                AgentPersona.deleted_at.is_(None),
+                AgentPersona.config["role_template_id"].isnot(None),
+            )
+        )
+        return r.scalars().first()
+
     async def create(
         self,
         org_id: uuid.UUID,
@@ -150,6 +168,7 @@ class AgentPersonaRepository:
         base_persona_id: uuid.UUID | None = None,
         tool_allowlist: list[str] | None = None,
         is_default: bool = False,
+        role_template_id: uuid.UUID | None = None,
     ) -> PersonaSummaryResponse:
         if is_default:
             await self._clear_default(org_id, project_id, agent_id)
@@ -159,6 +178,10 @@ class AgentPersonaRepository:
             config["base_persona_id"] = str(base_persona_id)
         if tool_allowlist is not None:
             config["tool_allowlist"] = tool_allowlist
+        # E-RECRUIT S3(story ff2996d0): recruit이 생성한 persona 표식 — 재채용/역할변경 upsert(G7)
+        # 대상 판별에 쓰인다(get_recruited).
+        if role_template_id:
+            config["role_template_id"] = str(role_template_id)
 
         persona = AgentPersona(
             org_id=org_id,
@@ -210,6 +233,9 @@ class AgentPersonaRepository:
             tl = fields.pop("tool_allowlist")
             if tl is not None:
                 config["tool_allowlist"] = tl
+        if "role_template_id" in fields:
+            rtid = fields.pop("role_template_id")
+            config["role_template_id"] = str(rtid) if rtid else None
 
         if fields.get("is_default"):
             await self._clear_default(org_id, project_id, persona.agent_id, exclude_id=persona_id)

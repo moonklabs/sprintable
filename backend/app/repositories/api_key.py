@@ -68,14 +68,19 @@ class ApiKeyRepository:
         await self.session.refresh(key)
         return key
 
-    async def rotate(self, api_key_id: uuid.UUID) -> tuple[ApiKey, str] | None:
+    async def rotate(
+        self, api_key_id: uuid.UUID, scope: list[str] | None = None
+    ) -> tuple[ApiKey, str] | None:
+        """이전 키 revoke + 신규 발급. ``scope`` 미지정 시 이전 scope 그대로 승계(기존 동작 보존) —
+        E-RECRUIT S3(story ff2996d0)가 역할변경 시 scope 를 새 role_template 파생값으로 교체하려고
+        명시 override 를 추가했다(sentinel: None=승계 vs []=빈 scope 의도적 지정 구분)."""
         old = await self.get(api_key_id)
         if old is None:
             return None
         old.revoked_at = datetime.now(timezone.utc)
         new_key, plaintext = await self.create(
             team_member_id=old.team_member_id,
-            scope=old.scope,
+            scope=scope if scope is not None else old.scope,
             expires_at=None,
         )
         return new_key, plaintext
