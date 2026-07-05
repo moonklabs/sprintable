@@ -28,7 +28,7 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("epics", ("epic",)),
     ("tasks", ("task",)),
     ("stories", ("story", "stories", "backlog", "claim", "checkin")),
-    ("admin", ("lock", "unlock", "give_reward", "emit_event", "trigger_ai", "activate_sprint",
+    ("admin", ("give_reward", "emit_event", "trigger_ai", "activate_sprint",
                "close_sprint", "delete_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
 ]
 
@@ -38,10 +38,13 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     "ping", "sprintable_ping", "sprintable_my_dashboard", "sprintable_check_notifications",
     # P1-S12: 백엔드 SSOT(app/services/mcp_toolset.py)와 대조해 기존 드리프트 발견 후 동기화
     # (get_workflow_guide/list_team_members/poll_events가 vendored 사본에 빠져있었음 — 발견 즉시
-    # 수정, 모두 비파괴 read라 always-allow 안전). sprintable_get_loop_context(P1-S12, 이 스토리
+    # 수정, read 유틸은 비파괴라 always-allow 안전). sprintable_get_loop_context(P1-S12, 이 스토리
     # 신규)도 read-only·get_workflow_guide 동형으로 여기 추가.
     "sprintable_get_workflow_guide", "sprintable_list_team_members", "sprintable_poll_events",
     "sprintable_get_loop_context",
+    # S17: lock/unlock — 백엔드 SSOT와 동일 사유(org/project-scoped advisory 조율 도구, 파괴 아님)
+    # 로 core 취급. 드리프트 금지 원칙에 따라 백엔드와 동기화(app/services/mcp_toolset.py 참고).
+    "sprintable_lock_files", "sprintable_unlock_files",
 })
 
 _LEGACY_SCOPES: frozenset[str] = frozenset({"read", "write"})
@@ -62,12 +65,11 @@ def tool_group(tool_name: str) -> str:
 
 
 def is_destructive(tool_name: str) -> bool:
+    """S17: lock_files/unlock_files 제외 — 백엔드 SSOT와 동기화(app/services/mcp_toolset.py)."""
     n = tool_name.lower()
     return (
         "delete" in n
         or "give_reward" in n
-        or n.endswith("lock_files")
-        or "unlock" in n
         or "_delete_" in n
         or n.startswith("sprintable_delete")
         or "close_sprint" in n
