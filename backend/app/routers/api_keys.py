@@ -24,10 +24,21 @@ def _get_repo(session: AsyncSession = Depends(get_db)) -> ApiKeyRepository:
 @router.post("/api-keys/rotate", response_model=ApiKeyCreatedResponse, status_code=201)
 async def rotate_api_key(
     body: RotateApiKeyRequest,
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
     repo: ApiKeyRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
 ) -> ApiKeyCreatedResponse:
+    """story 561fd294(CRITICAL 보안 핫픽스): cross-org IDOR fix — 자매 3엔드포인트(list/create/
+    revoke)와 달리 이 엔드포인트만 org_id dependency 자체가 없어 rotate 대상 조회가 org 무관
+    글로벌 lookup이었다 — 인증만 되면 타 org api_key_id로 그 키를 회전시켜 새 평문 시크릿을
+    탈취할 수 있었다(크로스-테넌트, prod 실존 확認·까심 실 exploit 재현). 자매 엔드포인트와
+    동일하게 ``assert_agent_owner``로 대상 키가 가리키는 agent가 호출자의 org 소속(+생성자 or
+    org admin/owner)인지 검증 — rotate 전에 반드시 통과해야 한다."""
+    existing = await repo.get(body.api_key_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+    await assert_agent_owner(existing.team_member_id, session, org_id, uuid.UUID(auth.user_id))
     result = await repo.rotate(body.api_key_id)
     if result is None:
         raise HTTPException(status_code=404, detail="API key not found")
