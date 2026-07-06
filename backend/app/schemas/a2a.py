@@ -10,7 +10,12 @@ E-A2A-PROTO(2026-07-06, PO 크럭스 P0): v1.0.1 태그(gh api, main과 byte-ide
 발견한 누락 필드 추가 — `AgentCapabilities.extensions`(AgentExtension 목록, uri/description/
 required/params)·`Message.extensions`/`reference_task_ids`·`Part.raw`(base64 bytes)/`metadata`·
 `Artifact.metadata`/`extensions`. 전부 옵셔널/기본 빈값이라 회귀 없음 — `AgentCapabilities.
-extensions`는 향후 E-A2A-EXT(Sprintable 차별화를 A2A extension으로 정의) 축의 진입점."""
+extensions`는 향후 E-A2A-EXT(Sprintable 차별화를 A2A extension으로 정의) 축의 진입점.
+
+E-A2A-EXTERNAL(축4, 2026-07-06, 문서 `e-a2a-external-interop-crux`): `AgentCard.security_schemes`
+/`security_requirements` 추가 — 실제 `/rpc` 인증 요건(Bearer sk_live_ API key/JWT)을 스펙
+표준(§4.4)으로 정직 광고. `HTTPAuthSecurityScheme`만 구현(스펙 5종 중 우리가 실제 쓰는 하나만,
+OAuth2/mTLS 등은 미사용이라 미구현 — 과설계 회피)."""
 from __future__ import annotations
 
 import uuid
@@ -58,6 +63,32 @@ class AgentSkill(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class HTTPAuthSecurityScheme(BaseModel):
+    """스펙 §4.4 SecurityScheme의 5종(APIKey/HTTPAuth/OAuth2/OpenIdConnect/mTLS) 중 우리가
+    실제 쓰는 HTTPAuth(Bearer)만 구현 — 나머지는 미사용이라 모델링 생략(과설계 회피)."""
+    description: str | None = None
+    scheme: str
+    bearer_format: str | None = Field(default=None, alias="bearerFormat")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SecurityScheme(BaseModel):
+    http_auth_security_scheme: HTTPAuthSecurityScheme | None = Field(
+        default=None, alias="httpAuthSecurityScheme"
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SecurityRequirement(BaseModel):
+    """스펙 §4.4: scheme명 → 필요 scope 목록. 우리는 OAuth2 scope 개념이 없어 빈 리스트로
+    "이 scheme이 필요하다"만 표현(Bearer 토큰 자체가 요건, scope 세분화 없음)."""
+    schemes: dict[str, list[str]] = Field(default_factory=dict)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class AgentCard(BaseModel):
     name: str
     description: str
@@ -67,6 +98,12 @@ class AgentCard(BaseModel):
     default_input_modes: list[str] = Field(alias="defaultInputModes")
     default_output_modes: list[str] = Field(alias="defaultOutputModes")
     skills: list[AgentSkill]
+    security_schemes: dict[str, SecurityScheme] = Field(
+        default_factory=dict, alias="securitySchemes"
+    )
+    security_requirements: list[SecurityRequirement] = Field(
+        default_factory=list, alias="securityRequirements"
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
