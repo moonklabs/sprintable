@@ -80,6 +80,39 @@ steps:
       - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend
     waitFor: [build-backend]
 
+  # ─── Migrate DB (story dbda0baf, E-RECRUIT S13) ────────────────────────────
+  # 근본원인(2026-07-05 dev 인시던트): migrate 잡이 파이프라인과 완전히 분리돼 있어 ⓐ
+  # provision_migrate_job.sh 를 COMMIT_SHA 없이 수동 실행하면 마지막 `latest-${ENV}` 태그에
+  # 조용히 고정되고(mutable·드리프트) ⓑ 잡 자체가 인라인 `head`(단수)로 수동 override 돼
+  # migrate.sh(정본 `heads` 복수)를 안 타는 상태였다. 매 배포마다 잡을 SHA-pinned 이미지 +
+  # canonical command(`/app/scripts/migrate.sh`)로 강제 재배포해 드리프트가 다시 쌓일 수 없게 한다.
+  - id: update-migrate-job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        GCP_PROJECT="${PROJECT_ID}" GCP_REGION="${_AR_REGION}" AR_REPO="${_AR_REPO}" COMMIT_SHA="${COMMIT_SHA}" \
+          bash backend/scripts/provision_migrate_job.sh ${_DEPLOY_ENV}
+    waitFor: [push-backend]
+
+  # `gcloud run jobs execute --wait`는 잡 실패 시 비-0 exit → 이 스텝이 실패 → Cloud Build가
+  # 빌드 전체를 실패 처리하고 뒤따르는 deploy-backend(waitFor 의존)는 아예 실행되지 않는다
+  # (migrate 실패 시 배포 자동 abort — "잡 성공≠앱DB 배포" 상태가 재발할 수 없음). 실패는
+  # Cloud Build 로그 + GHA 워크플로우 실패(빨간 X·커밋 상태)로 가시화된다.
+  - id: run-migrate-job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - execute
+      - sprintable-migrate-${_DEPLOY_ENV}
+      - --region=${_AR_REGION}
+      - --wait
+    waitFor: [update-migrate-job]
+
   # ─── Deploy to Cloud Run ───────────────────────────────────────────────────
   - id: deploy-frontend
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
@@ -117,7 +150,9 @@ steps:
       # maxScale 와 짝으로 검토. (PO rev 01256 dev 429 right-size durable 화.)
       - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1
       - --quiet
-    waitFor: [push-backend]
+    # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
+    # 스키마를 상대로 뜨는 걸 막는다(migrate 실패 시 이 스텝 자체가 안 돎).
+    waitFor: [run-migrate-job]
 
 options:
   machineType: E2_HIGHCPU_8
