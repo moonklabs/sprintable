@@ -12,20 +12,28 @@ spec shape는 `a2aproject/A2A`(GitHub, main) `specification/a2a.proto` + `docs/s
 실측 기준(PascalCase 메소드명·camelCase 필드·`TASK_STATE_`/`ROLE_` enum) — story AC의
 `message/send`/`tasks/get` 표기(구초안)가 아니다. PO 크럭스로 확認됨.
 
-**S2(story 1485217f) — CC 어댑터**: 기존 fakechat 하향 경로 실측 결과(문서
-`e-a2a-poc-s2-design-crux`), "fakechat"의 실체는 `conversation_webhook.py:deliver_conversation_message_webhook`
-가 그 멤버의 **member-bound WebhookConfig(Discord webhook)**로 메시지를 POST하는 것뿐이었다.
-S2는 echo 대신 이 실 전달 경로를 재사용한다: SendMessage가 task-태깅 Conversation(=`context_id`)
-+ root ConversationMessage를 만들어 그 경로로 전달(`TASK_STATE_WORKING`) → CC가 그 메시지의
-thread(reply)로 답신 → GetTask가 그 thread를 폴링해 첫 답신을 발견하면 `TASK_STATE_COMPLETED`
-+ artifact로 승격(PO 크럭스 채택안, Q1+Q2 결합).
+**S2(story 1485217f) — CC 어댑터**: 재실측 결과(문서 `e-a2a-poc-s2-design-crux`, PO+선생님
+정정 2026-07-06) fakechat의 실체는 Discord webhook이 **아니라** 내장 WS 채팅 허브
+(`ws_chat.py`의 `WS /ws/chat/{agent_id}` room + `channel.py:channel_deliver`가 그 room으로
+`_broadcast`)다. 플랫폼은 멤버의 **member-bound `WebhookConfig` 유무로 택일**한다(有→Discord
+webhook/`conversation_webhook.py`, 無→fakechat WS). S2는 이 기존 라우팅을 그대로 재사용해
+**두 경로를 A2A 어댑터 뒤로 캡슐화**한다: SendMessage가 task-태깅 Conversation(=`context_id`)
++ root ConversationMessage를 만들고, WebhookConfig 유무에 따라 Discord webhook 또는 fakechat
+WS `_broadcast`로 전달(`TASK_STATE_WORKING`) → CC가 그 메시지의 thread(reply)로 답신 →
+GetTask가 그 thread를 폴링해 첫 답신을 발견하면 `TASK_STATE_COMPLETED` + artifact로 승격
+(PO 크럭스 채택안, Q1+Q2 결합 — 두 전달 경로 공통).
 
-⚠️ **알려진 한계(PO 크럭스 finding)**: 완료 신호는 CC가 "task thread에 답신"하는 관례에
+⚠️ **알려진 한계(PO 크럭스 finding)**: (1) 완료 신호는 CC가 "task thread에 답신"하는 관례에
 의존한다 — model-mediated 에이전트는 직접 완료 훅이 없어 A2A 표준이 기대하는 명시적 완료
-신호를 얻을 근본 방법이 없다(이 세션의 substrate로는). Phase 3 이후 재검토 대상.
+신호를 얻을 근본 방법이 없다. (2) fakechat WS 경로는 Discord webhook과 신뢰성이 다르다 —
+`_broadcast`는 그 순간 연결된 소켓에만 push하고 재시도/영속 큐가 없어(Discord webhook의
+`ConversationWebhookDelivery` retry+상태추적과 다름) CC가 그 순간 미접속이면 실시간 유실된다
+(단 `ConversationMessage` 자체는 DB에 영속). A2A는 인터페이스를 캡슐화하나 하위 채널의
+신뢰성 차이까지 없애진 못한다 — Phase 3 이후 재검토 대상.
 """
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -39,6 +47,7 @@ from app.models.agent_deployment import AgentPersona
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
+from app.routers.ws_chat import _broadcast
 from app.schemas.a2a import (
     AgentCapabilities,
     AgentCard,
@@ -191,30 +200,17 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
     member_project_id = member.project_id
     member_name = member.name
 
+    # S2(정정 2026-07-06): 플랫폼 기존 라우팅(webhook_targeting.py:active_webhook_member_ids)과
+    # 동형으로 택일 — member-bound WebhookConfig 有→Discord webhook, 無→fakechat WS(_broadcast).
+    # `_get_agent_member`가 이미 type="agent"+is_active를 강제해 여기 도달하는 멤버는 항상 둘 중
+    # 하나로 도달 가능하므로 REJECTED 분기는 없다(도달불가 케이스가 실제로 없음).
     webhook = (await session.execute(
         select(WebhookConfig).where(
             WebhookConfig.member_id == member_id, WebhookConfig.is_active.is_(True)
         )
     )).scalar_one_or_none()
 
-    if webhook is None:
-        # A2A 표준 상태 — agent가 이 task를 처리할 수단(주입 경로)이 없어 즉시 거부.
-        task_id = uuid.uuid4()
-        session.add(A2ATask(
-            id=task_id,
-            context_id=uuid.uuid4(),
-            member_id=member_id,
-            state="TASK_STATE_REJECTED",
-            history=[incoming.model_dump(by_alias=True, mode="json")],
-            artifacts=[],
-        ))
-        await session.flush()
-        await session.commit()
-        task = (await session.execute(select(A2ATask).where(A2ATask.id == task_id))).scalar_one()
-        return _task_to_dict(task)
-
-    # S2: task-태깅 Conversation(=A2A context_id) — CC 어댑터가 실 webhook 경로로 주입한다
-    # (echo 대신 `deliver_conversation_message_webhook` 재사용 — fakechat 실체와 동일 경로).
+    # S2: task-태깅 Conversation(=A2A context_id) — CC 어댑터가 이 두 경로 중 하나로 실 주입한다.
     conv_id = uuid.uuid4()
     root_message_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
@@ -240,18 +236,31 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
     await session.flush()
     await session.commit()
 
-    await deliver_conversation_message_webhook(
-        message_id=root_message_id,
-        conversation_id=conv_id,
-        org_id=member_org_id,
-        project_id=member_project_id,
-        sender_id=None,
-        thread_id=None,
-        created_at=now,
-        mentioned_ids=None,
-        content=text,
-        targets=None,
-    )
+    if webhook is not None:
+        await deliver_conversation_message_webhook(
+            message_id=root_message_id,
+            conversation_id=conv_id,
+            org_id=member_org_id,
+            project_id=member_project_id,
+            sender_id=None,
+            thread_id=None,
+            created_at=now,
+            mentioned_ids=None,
+            content=text,
+            targets=None,
+        )
+    else:
+        # fakechat WS 경로 — channel.py:_persist_and_broadcast와 동일 payload shape,
+        # 다만 A2A엔 실 caller member가 없어 sender_id=None(시스템 발신, 기존 패턴).
+        payload = json.dumps({
+            "id": str(root_message_id),
+            "conversation_id": str(conv_id),
+            "sender_id": None,
+            "sender_name": "A2A",
+            "content": text,
+            "ts": now.isoformat(),
+        })
+        await _broadcast(str(member_id), payload)
 
     task_id = uuid.uuid4()
     session.add(A2ATask(
