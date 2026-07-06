@@ -13,7 +13,7 @@ MEMBER_ID = uuid.uuid4()
 def _mock_member(agent_role: str | None = "qa") -> MagicMock:
     m = MagicMock()
     m.id = MEMBER_ID
-    m.name = "Kkasim"
+    m.name = "Qasim"
     m.type = "agent"
     m.is_active = True
     m.agent_role = agent_role
@@ -139,7 +139,7 @@ async def test_agent_card_200_reflects_role_template_skills():
 
         assert resp.status_code == 200
         card = resp.json()
-        assert card["name"] == "Kkasim"
+        assert card["name"] == "Qasim"
         assert card["skills"][0]["tags"] == ["stories", "tasks", "chat"]
         assert card["skills"][0]["id"] == "qa"
         assert card["supportedInterfaces"][0]["protocolBinding"] == "JSONRPC"
@@ -209,7 +209,7 @@ async def test_list_agent_cards_filters_by_skill_zero_hardcoding():
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return _list_result([_mock_agent(qa_id, "Kkasim"), _mock_agent(backend_id, "Didi", "backend")])
+                return _list_result([_mock_agent(qa_id, "Qasim"), _mock_agent(backend_id, "Didi", "backend")])
             if call_count == 2:
                 return _result(qa_persona)
             return _result(None)  # backend agent has no matching persona in this fixture
@@ -221,7 +221,7 @@ async def test_list_agent_cards_filters_by_skill_zero_hardcoding():
 
         assert resp.status_code == 200
         cards = resp.json()
-        assert [c["name"] for c in cards] == ["Kkasim"]
+        assert [c["name"] for c in cards] == ["Qasim"]
         assert cards[0]["supportedInterfaces"][0]["tenant"] == str(qa_id)
     finally:
         app.dependency_overrides.clear()
