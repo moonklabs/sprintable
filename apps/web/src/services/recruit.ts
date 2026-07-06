@@ -66,7 +66,10 @@ export interface RuntimeCapabilityItem {
   slug: string;
   display_name: string;
   supported: boolean;
-  tier?: string;
+  /** supported=true 내부 구분(유나 핸드오프 §3-1) — "full"=완전지원(무배지)·"experimental"=
+   * config emit되나 프롬프트 shaping(S7) 前 부분지원(subtle info 배지). supported=false면 무관. */
+  tier?: 'full' | 'experimental';
+  /** 내부용 — 유저에게 노출 안 함(과기술 방지, 핸드오프 §3-1). */
   transport: 'stdio' | 'http' | 'connector';
   guide_filename: string;
   icon?: string;

@@ -5,12 +5,13 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import {
   Check, Copy, Download, RefreshCw, ChevronLeft, Info, Sparkles,
-  Palette, Cog, Search, ClipboardList, Briefcase, IdCard,
+  Palette, Cog, Search, ClipboardList, Briefcase, IdCard, Plug,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { cn } from '@/lib/utils';
 import {
@@ -192,22 +193,31 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
   // STEP 2 — runtime + agent(G1)
   const [runtime, setRuntime] = useState<string>('claude-code');
   // E-RECRUIT S6: BE `GET /api/v2/runtime-capabilities`(agent_runtime.py 레지스트리 노출) 동적 소비.
-  // 엔드포인트가 아직 배포 전(디디 미착지)이면 404/네트워크실패 → S4 당시 폴백(Claude Code만 활성)으로
-  // graceful degrade — 엔드포인트가 뜨는 순간 재배포 없이 자동으로 동적 목록으로 전환된다.
+  // 404(엔드포인트 아직 미배포·디디 미착지)는 "에러"가 아니라 "기능 아직 없음" — 조용히 S4 당시
+  // 폴백(Claude Code만 활성)으로 graceful degrade하고 에러 배너를 띄우지 않는다(과장된 고장 인상 방지).
+  // 그 외 실패(500·네트워크 예외 — 엔드포인트가 실제로 배포된 후에나 발생 가능)는 핸드오프 §3-4의
+  // 명시적 에러 UI(재시도+최소 claude-code 폴백 안내)로 — "정직"하게 안 됨을 알린다.
   const [runtimeCapabilities, setRuntimeCapabilities] = useState<RuntimeCapabilityItem[] | null>(null);
+  const [runtimeCapabilitiesError, setRuntimeCapabilitiesError] = useState(false);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch('/api/runtime-capabilities');
-        if (!res.ok) { setRuntimeCapabilities(RUNTIME_CAPABILITIES_FALLBACK); return; }
-        const json = (await res.json()) as { data?: RuntimeCapabilityItem[] };
-        setRuntimeCapabilities(json.data?.length ? json.data : RUNTIME_CAPABILITIES_FALLBACK);
-      } catch {
+  const fetchRuntimeCapabilities = useCallback(async () => {
+    setRuntimeCapabilitiesError(false);
+    try {
+      const res = await fetch('/api/runtime-capabilities');
+      if (!res.ok) {
         setRuntimeCapabilities(RUNTIME_CAPABILITIES_FALLBACK);
+        if (res.status !== 404) setRuntimeCapabilitiesError(true);
+        return;
       }
-    })();
+      const json = (await res.json()) as { data?: RuntimeCapabilityItem[] };
+      setRuntimeCapabilities(json.data?.length ? json.data : RUNTIME_CAPABILITIES_FALLBACK);
+    } catch {
+      setRuntimeCapabilities(RUNTIME_CAPABILITIES_FALLBACK);
+      setRuntimeCapabilitiesError(true);
+    }
   }, []);
+
+  useEffect(() => { void fetchRuntimeCapabilities(); }, [fetchRuntimeCapabilities]);
 
   const { supported: supportedRuntimes, comingSoon: comingSoonRuntimes } = useMemo(
     () => splitRuntimeCapabilities(runtimeCapabilities ?? []),
@@ -476,37 +486,73 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-foreground">{t('runtimeQuestion')}</p>
                 {!runtimeCapabilities ? (
-                  <p className="text-sm text-muted-foreground">{t('runtimeLoading')}</p>
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[0, 1, 2].map((i) => <Skeleton key={i} className="h-14 rounded-xl" />)}
+                    </div>
+                  </div>
+                ) : runtimeCapabilitiesError ? (
+                  <div className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
+                    <p className="text-sm font-medium text-foreground">{t('runtimeLoadError')}</p>
+                    <p className="text-xs text-muted-foreground">{t('runtimeLoadErrorNote')}</p>
+                    <Button variant="ghost" size="sm" onClick={() => void fetchRuntimeCapabilities()}>{t('retry')}</Button>
+                  </div>
                 ) : (
                   <>
-                    <div className="flex flex-wrap gap-1.5">
-                      {supportedRuntimes.map((rc) => (
-                        <button
-                          key={rc.slug}
-                          type="button"
-                          onClick={() => setRuntime(rc.slug)}
-                          className={cn(
-                            'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
-                            runtime === rc.slug ? 'border-primary/60 bg-primary/10 text-foreground' : 'border-border text-muted-foreground',
-                          )}
-                        >
-                          {rc.display_name}
-                        </button>
-                      ))}
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {supportedRuntimes.map((rc) => {
+                          const sel = runtime === rc.slug;
+                          return (
+                            <button
+                              key={rc.slug}
+                              type="button"
+                              onClick={() => setRuntime(rc.slug)}
+                              className={cn(
+                                'relative flex flex-col items-start gap-1 rounded-xl border p-2.5 text-left transition-colors',
+                                sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
+                              )}
+                            >
+                              {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
+                              <span className={cn(
+                                'flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground',
+                                sel && 'bg-primary/15 text-primary',
+                              )}>
+                                {rc.icon ?? rc.display_name.charAt(0).toUpperCase()}
+                              </span>
+                              <span className="text-xs font-bold text-foreground">{rc.display_name}</span>
+                              {rc.tier === 'experimental' && <Badge variant="info" className="text-[9px]">{t('runtimeExperimental')}</Badge>}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                    {/* 지원 예정(레지스트리 supported=false) + 커넥터(레지스트리 밖 transport
-                        카테고리, 오르테가 확정 — RuntimeType enum 아님·FE 전용 catch-all) */}
+                    {/* 지원 예정(레지스트리 supported=false) — dimmed·disabled */}
                     <div className="space-y-1">
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeComingSoonLabel')}</p>
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="grid grid-cols-3 gap-2">
                         {comingSoonRuntimes.map((rc) => (
-                          <button key={rc.slug} type="button" disabled className="cursor-not-allowed rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground opacity-50">
-                            {rc.display_name} · {t('comingSoon')}
+                          <button key={rc.slug} type="button" disabled className="flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-muted/40 p-2.5 text-left opacity-55">
+                            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
+                              {rc.icon ?? rc.display_name.charAt(0).toUpperCase()}
+                            </span>
+                            <span className="text-xs font-bold text-foreground">{rc.display_name}</span>
+                            <Badge variant="chip" className="text-[9px]">{t('runtimeComingSoonBadge')}</Badge>
                           </button>
                         ))}
-                        <button type="button" disabled className="cursor-not-allowed rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground opacity-50">
-                          {t('runtimeConnector')} · {t('comingSoon')}
-                        </button>
+                      </div>
+                    </div>
+                    {/* 커넥터(레지스트리 밖 transport 카테고리, 오르테가 확정 — RuntimeType enum 아님·
+                        네이티브 미목록 런타임용 FE 전용 catch-all) */}
+                    <div className="flex items-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 p-2.5">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border bg-card text-xs">
+                        <Plug className="h-3.5 w-3.5" aria-hidden />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-foreground">{t('runtimeConnector')}</p>
+                        <p className="text-[10px] text-muted-foreground">{t('runtimeConnectorNote')}</p>
                       </div>
                     </div>
                   </>
