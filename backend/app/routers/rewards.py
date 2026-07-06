@@ -1,11 +1,13 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin
+from app.models.project import Project
 from app.repositories.reward import RewardRepository
 from app.schemas.reward import BalanceResponse, GrantReward, LeaderboardEntry, RewardLedgerResponse
 from app.services.member_resolver import is_caller_member, resolve_member
@@ -96,9 +98,17 @@ async def get_leaderboard(
     period: str = Query(default="all"),
     limit: int = Query(default=50, ge=1, le=100),
     cursor: str | None = Query(default=None),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
     repo: RewardRepository = Depends(_get_repo),
 ) -> list[LeaderboardEntry]:
+    """산티아고 SME fast-follow(S20 전수봉인): project_id가 caller org 소속인지 검증 없어
+    타 org의 리더보드(재무/성과 aggregate)가 project_id만 알면 노출됐다 — 이제 명시 403."""
     if period not in ("daily", "weekly", "monthly", "all"):
         raise HTTPException(status_code=400, detail="period must be one of: daily, weekly, monthly, all")
+    proj_check = await repo.session.execute(
+        select(Project.id).where(Project.id == project_id, Project.org_id == org_id)
+    )
+    if proj_check.scalar_one_or_none() is None:
+        raise HTTPException(status_code=403, detail="project not accessible")
     items = await repo.leaderboard(project_id=project_id, period=period, limit=limit, cursor=cursor)
     return [LeaderboardEntry.model_validate(i) for i in items]
