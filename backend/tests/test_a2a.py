@@ -728,3 +728,70 @@ async def test_get_task_transitions_to_failed_on_timeout():
         assert "timed out" in body["result"]["status"]["message"]["parts"][0]["text"]
     finally:
         app.dependency_overrides.clear()
+
+
+# ── E-A2A-PROTO P0(2026-07-06): 스펙 정합 필드 회귀 lock ──────────────────────
+
+
+def test_agent_capabilities_has_extensions_field_defaults_empty():
+    from app.schemas.a2a import AgentCapabilities
+
+    caps = AgentCapabilities(streaming=False, push_notifications=False, extended_agent_card=False)
+    assert caps.extensions == []
+    dumped = caps.model_dump(by_alias=True, mode="json")
+    assert dumped["extensions"] == []
+    assert dumped["pushNotifications"] is False
+    assert dumped["extendedAgentCard"] is False
+
+
+def test_agent_extension_roundtrip_camelcase():
+    from app.schemas.a2a import AgentExtension
+
+    ext = AgentExtension(uri="https://example.com/ext/v1", description="test ext", required=True, params={"k": "v"})
+    dumped = ext.model_dump(by_alias=True, mode="json")
+    assert dumped == {"uri": "https://example.com/ext/v1", "description": "test ext", "required": True, "params": {"k": "v"}}
+
+
+def test_message_has_extensions_and_reference_task_ids_fields():
+    from app.schemas.a2a import Message, Part
+
+    msg = Message(
+        message_id="m1", role="ROLE_USER", parts=[Part(text="hi")],
+        extensions=["https://example.com/ext/v1"], reference_task_ids=["t1", "t2"],
+    )
+    dumped = msg.model_dump(by_alias=True, mode="json")
+    assert dumped["extensions"] == ["https://example.com/ext/v1"]
+    assert dumped["referenceTaskIds"] == ["t1", "t2"]
+    # 기본값(누락 시) — 회귀 없이 빈 리스트
+    msg2 = Message(message_id="m2", role="ROLE_USER", parts=[Part(text="hi")])
+    assert msg2.extensions == []
+    assert msg2.reference_task_ids == []
+
+
+def test_part_has_raw_and_metadata_fields():
+    from app.schemas.a2a import Part
+
+    part = Part(raw="base64data==", metadata={"k": "v"})
+    dumped = part.model_dump(by_alias=True, mode="json")
+    assert dumped["raw"] == "base64data=="
+    assert dumped["metadata"] == {"k": "v"}
+    # text 전용 Part는 raw/metadata가 None이어도 무방(oneof 성격)
+    text_part = Part(text="hi")
+    assert text_part.raw is None
+    assert text_part.metadata is None
+
+
+def test_artifact_has_metadata_and_extensions_fields():
+    from app.schemas.a2a import Artifact, Part
+
+    artifact = Artifact(
+        artifact_id="a1", parts=[Part(text="result")],
+        metadata={"k": "v"}, extensions=["https://example.com/ext/v1"],
+    )
+    dumped = artifact.model_dump(by_alias=True, mode="json")
+    assert dumped["metadata"] == {"k": "v"}
+    assert dumped["extensions"] == ["https://example.com/ext/v1"]
+    # 기본값 회귀 없음
+    artifact2 = Artifact(artifact_id="a2", parts=[Part(text="result")])
+    assert artifact2.metadata is None
+    assert artifact2.extensions == []

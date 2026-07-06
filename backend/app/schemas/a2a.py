@@ -4,7 +4,13 @@
 **현재 spec의 PascalCase JSON-RPC 메소드명**(`SendMessage`/`GetTask`) + camelCase 필드 +
 `TASK_STATE_`/`ROLE_` 접두 enum을 기준으로 구현한다. PoC는 필수 필드 + AgentInterface만
 채우고, provider/securitySchemes/signatures 등 선택 필드는 생략(Phase 3, 인증/signed Card
-붙을 때 추가)."""
+붙을 때 추가).
+
+E-A2A-PROTO(2026-07-06, PO 크럭스 P0): v1.0.1 태그(gh api, main과 byte-identical) 재실측으로
+발견한 누락 필드 추가 — `AgentCapabilities.extensions`(AgentExtension 목록, uri/description/
+required/params)·`Message.extensions`/`reference_task_ids`·`Part.raw`(base64 bytes)/`metadata`·
+`Artifact.metadata`/`extensions`. 전부 옵셔널/기본 빈값이라 회귀 없음 — `AgentCapabilities.
+extensions`는 향후 E-A2A-EXT(Sprintable 차별화를 A2A extension으로 정의) 축의 진입점."""
 from __future__ import annotations
 
 import uuid
@@ -24,9 +30,19 @@ class AgentInterface(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class AgentExtension(BaseModel):
+    uri: str
+    description: str | None = None
+    required: bool = False
+    params: dict | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class AgentCapabilities(BaseModel):
     streaming: bool = False
     push_notifications: bool = Field(default=False, alias="pushNotifications")
+    extensions: list[AgentExtension] = Field(default_factory=list)
     extended_agent_card: bool = Field(default=False, alias="extendedAgentCard")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -60,8 +76,10 @@ class AgentCard(BaseModel):
 
 class Part(BaseModel):
     text: str | None = None
+    raw: str | None = None
     url: str | None = None
     data: Any | None = None
+    metadata: dict | None = None
     filename: str | None = None
     media_type: str | None = Field(default=None, alias="mediaType")
 
@@ -75,6 +93,8 @@ class Message(BaseModel):
     role: Literal["ROLE_USER", "ROLE_AGENT", "ROLE_UNSPECIFIED"]
     parts: list[Part]
     metadata: dict | None = None
+    extensions: list[str] = Field(default_factory=list)
+    reference_task_ids: list[str] = Field(default_factory=list, alias="referenceTaskIds")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -105,6 +125,8 @@ class Artifact(BaseModel):
     name: str | None = None
     description: str | None = None
     parts: list[Part]
+    metadata: dict | None = None
+    extensions: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(populate_by_name=True)
 
