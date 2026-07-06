@@ -1,7 +1,7 @@
 """S33 AC: Dashboard + Current Project + Members 라우터 (7건 이상)."""
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -114,11 +114,29 @@ async def test_current_project_get_200():
 
         session.execute = mock_execute
 
-        async with client as c:
-            resp = await c.get(f"/api/v2/current-project?member_id={MEMBER_ID}")
+        with patch("app.routers.current_project.assert_caller_is_member", new_callable=AsyncMock, return_value=None):
+            async with client as c:
+                resp = await c.get(f"/api/v2/current-project?member_id={MEMBER_ID}")
 
         assert resp.status_code == 200
         assert resp.json()["project_id"] == str(PROJECT_ID)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_current_project_get_403_when_not_self():
+    """S20(authz-coverage 스캐너 발견): member_id가 caller 본인 아니면 403(membership-existence
+    오라클 차단 — S19 Phase C서 no-op 판단했다가 스캐너가 재발견)."""
+    from fastapi import HTTPException
+
+    client, session, app = await _client()
+    try:
+        with patch("app.routers.current_project.assert_caller_is_member", new_callable=AsyncMock,
+                   side_effect=HTTPException(status_code=403, detail="Cannot act as another member")):
+            async with client as c:
+                resp = await c.get(f"/api/v2/current-project?member_id={MEMBER_ID}")
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
@@ -141,14 +159,34 @@ async def test_current_project_post_200():
 
         session.execute = mock_execute
 
-        async with client as c:
-            resp = await c.post(
-                f"/api/v2/current-project?member_id={MEMBER_ID}",
-                json={"project_id": str(PROJECT_ID)},
-            )
+        with patch("app.routers.current_project.assert_caller_is_member", new_callable=AsyncMock, return_value=None):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/current-project?member_id={MEMBER_ID}",
+                    json={"project_id": str(PROJECT_ID)},
+                )
 
         assert resp.status_code == 200
         assert resp.json()["project_id"] == str(PROJECT_ID)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_current_project_post_403_when_not_self():
+    """S20: POST도 GET과 동일 갭 — self-scope 강제."""
+    from fastapi import HTTPException
+
+    client, session, app = await _client()
+    try:
+        with patch("app.routers.current_project.assert_caller_is_member", new_callable=AsyncMock,
+                   side_effect=HTTPException(status_code=403, detail="Cannot act as another member")):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/current-project?member_id={MEMBER_ID}",
+                    json={"project_id": str(PROJECT_ID)},
+                )
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
