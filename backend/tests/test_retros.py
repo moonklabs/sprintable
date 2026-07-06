@@ -936,6 +936,116 @@ async def test_update_action_200():
 
 
 @pytest.mark.anyio
+async def test_create_action_with_assignee_in_org_200():
+    """prod 핫픽스(S20 전수스캔 MUST): assignee_id가 caller org 소속이면 정상 동작."""
+    from app.services.member_resolver import ResolvedMember
+
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        assignee_id = uuid.uuid4()
+        created = _mock_action()
+        created.assignee_id = assignee_id
+        resolved = ResolvedMember(
+            id=assignee_id, user_id=uuid.uuid4(), name="a", type="human",
+            role="member", org_id=ORG_ID,
+        )
+
+        with (
+            _allow_project_access(),
+            patch("app.routers.retros.canonicalize_member_id", new_callable=AsyncMock, return_value=assignee_id),
+            patch("app.routers.retros.lookup_members_by_ids", new_callable=AsyncMock, return_value={assignee_id: resolved}),
+            patch("app.repositories.retro.RetroActionRepository.create", new_callable=AsyncMock) as mock_create,
+        ):
+            mock_create.return_value = created
+
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/retros/{SESSION_ID}/actions",
+                    json={"title": "follow up", "assignee_id": str(assignee_id)},
+                )
+
+        assert resp.status_code == 201
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_create_action_with_cross_org_assignee_400():
+    """prod 핫픽스(S20 전수스캔 MUST): assignee_id가 caller org 소속이 아니면 400(오귀속 차단)."""
+    from app.services.member_resolver import ResolvedMember
+
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        assignee_id = uuid.uuid4()
+        resolved = ResolvedMember(
+            id=assignee_id, user_id=uuid.uuid4(), name="a", type="human",
+            role="member", org_id=uuid.uuid4(),  # ORG_ID와 다름
+        )
+
+        with (
+            _allow_project_access(),
+            patch("app.routers.retros.canonicalize_member_id", new_callable=AsyncMock, return_value=assignee_id),
+            patch("app.routers.retros.lookup_members_by_ids", new_callable=AsyncMock, return_value={assignee_id: resolved}),
+            patch("app.repositories.retro.RetroActionRepository.create", new_callable=AsyncMock) as mock_create,
+        ):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/retros/{SESSION_ID}/actions",
+                    json={"title": "follow up", "assignee_id": str(assignee_id)},
+                )
+
+        assert resp.status_code == 400
+        mock_create.assert_not_awaited()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_action_cross_org_assignee_400():
+    """prod 핫픽스(S20 전수스캔 MUST): update_action도 동일 갭 — cross-org assignee 재배정 차단."""
+    from app.services.member_resolver import ResolvedMember
+
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = _mock_session()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        assignee_id = uuid.uuid4()
+        resolved = ResolvedMember(
+            id=assignee_id, user_id=uuid.uuid4(), name="a", type="human",
+            role="member", org_id=uuid.uuid4(),  # ORG_ID와 다름
+        )
+
+        with (
+            _allow_project_access(),
+            patch("app.routers.retros.lookup_members_by_ids", new_callable=AsyncMock, return_value={assignee_id: resolved}),
+            patch(
+                "app.repositories.retro.RetroActionRepository.update_in_session",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
+            async with client as c:
+                resp = await c.patch(
+                    f"/api/v2/retros/{SESSION_ID}/actions/{uuid.uuid4()}",
+                    json={"assignee_id": str(assignee_id)},
+                )
+
+        assert resp.status_code == 400
+        mock_update.assert_not_awaited()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_update_action_cross_project_403():
     """#1801 원 적출 지점 — parent session이 caller 무권한 project 소속이면 403."""
     client, session, app = await _client()

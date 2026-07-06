@@ -98,6 +98,24 @@ async def test_list_agent_runs_empty_200():
 
 
 @pytest.mark.anyio
+async def test_list_agent_runs_404_when_project_not_in_caller_org():
+    """prod 핫픽스(S20 전수스캔): project_id가 caller org 소속 아니면 404(cross-org 차단)."""
+    client, session, app = await _client()
+    try:
+        no_proj = MagicMock()
+        no_proj.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=no_proj)
+        with patch("app.repositories.agent_run.AgentRunRepository.list", new_callable=AsyncMock) as mock_list:
+            async with client as c:
+                resp = await c.get(f"/api/v2/agent-runs?project_id={PROJECT_ID}")
+
+        assert resp.status_code == 404
+        mock_list.assert_not_awaited()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_list_agent_runs_missing_project_id_422():
     client, session, app = await _client()
     try:
@@ -161,7 +179,8 @@ async def test_update_agent_run_completed_200():
         completed.input_tokens = 1500
         completed.output_tokens = 300
 
-        with patch("app.repositories.agent_run.AgentRunRepository.update", new_callable=AsyncMock) as mock_update:
+        with patch("app.repositories.agent_run.AgentRunRepository.get", new_callable=AsyncMock, return_value=completed), \
+             patch("app.repositories.agent_run.AgentRunRepository.update", new_callable=AsyncMock) as mock_update:
             mock_update.return_value = completed
 
             async with client as c:
@@ -185,7 +204,8 @@ async def test_update_agent_run_failed_200():
         failed = _mock_run("failed")
         failed.last_error_code = "timeout"
 
-        with patch("app.repositories.agent_run.AgentRunRepository.update", new_callable=AsyncMock) as mock_update:
+        with patch("app.repositories.agent_run.AgentRunRepository.get", new_callable=AsyncMock, return_value=failed), \
+             patch("app.repositories.agent_run.AgentRunRepository.update", new_callable=AsyncMock) as mock_update:
             mock_update.return_value = failed
 
             async with client as c:
@@ -204,12 +224,32 @@ async def test_update_agent_run_failed_200():
 async def test_update_agent_run_404():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.agent_run.AgentRunRepository.update", new_callable=AsyncMock) as mock_update:
+        with patch("app.repositories.agent_run.AgentRunRepository.get", new_callable=AsyncMock, return_value=None), \
+             patch("app.repositories.agent_run.AgentRunRepository.update", new_callable=AsyncMock) as mock_update:
             mock_update.return_value = None
 
             async with client as c:
                 resp = await c.patch(f"/api/v2/agent-runs/{uuid.uuid4()}", json={"status": "completed"})
 
         assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_agent_run_404_cross_org():
+    """prod 핫픽스(S20 전수스캔): 다른 org의 run id를 patch 시도해도 404(cross-org 차단)."""
+    client, session, app = await _client()
+    try:
+        other_org_run = _mock_run("completed")
+        other_org_run.org_id = uuid.uuid4()  # caller org(ORG_ID)와 다름
+
+        with patch("app.repositories.agent_run.AgentRunRepository.get", new_callable=AsyncMock, return_value=other_org_run), \
+             patch("app.repositories.agent_run.AgentRunRepository.update", new_callable=AsyncMock) as mock_update:
+            async with client as c:
+                resp = await c.patch(f"/api/v2/agent-runs/{RUN_ID}", json={"status": "completed"})
+
+        assert resp.status_code == 404
+        mock_update.assert_not_awaited()
     finally:
         app.dependency_overrides.clear()

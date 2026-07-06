@@ -1,7 +1,7 @@
 """E-CAGE-REFEREE P2: 신뢰 점수 집계 엔진 테스트."""
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -312,13 +312,50 @@ async def test_get_trust_scores_endpoint_200():
     app.dependency_overrides[get_current_user] = override_auth
 
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            resp = await c.get(f"/api/v2/trust-scores?member_id={MEMBER_ID}")
+        with patch("app.routers.trust_scores.is_caller_member", new_callable=AsyncMock, return_value=True):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.get(f"/api/v2/trust-scores?member_id={MEMBER_ID}")
         assert resp.status_code == 200
         body = resp.json()
         assert body["member_id"] == str(MEMBER_ID)
         assert body["scores"] == []
         assert "window_days" in body
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_trust_scores_403_when_not_self_or_admin():
+    """S20 전수스캔 finding #11: member_id가 caller 본인도 org-admin도 아니면 403
+    (이전엔 org_id만 검증되고 member_id ownership 확인이 아예 없어 임의 member의
+    신뢰점수를 열람할 수 있었다)."""
+    from app.main import app
+    from app.dependencies.auth import get_current_user
+    from app.dependencies.database import get_db
+    from httpx import ASGITransport, AsyncClient
+
+    ctx = MagicMock()
+    ctx.user_id = str(uuid.uuid4())
+    ctx.email = "test@example.com"
+    ctx.claims = {"app_metadata": {"org_id": str(ORG_ID)}}
+
+    mock_session = AsyncMock()
+
+    async def override_db():
+        yield mock_session
+
+    async def override_auth():
+        return ctx
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_auth
+
+    try:
+        with patch("app.routers.trust_scores.is_caller_member", new_callable=AsyncMock, return_value=False), \
+             patch("app.routers.trust_scores._is_org_admin", new_callable=AsyncMock, return_value=False):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.get(f"/api/v2/trust-scores?member_id={MEMBER_ID}")
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
