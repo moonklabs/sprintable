@@ -11,13 +11,14 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { cn } from '@/lib/utils';
 import {
   VerifyRail, RAIL_ORDER, HTTP_RAIL_ORDER, type DisplayStep, type RailState, type RailStatus,
 } from '@/app/onboarding/verify-rail';
-import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle } from '@/services/recruit';
-import { RUNTIME_VALUES, RUNTIME_SUPPORTED, RUNTIME_GUIDE_FILENAME } from '@/services/recruit';
+import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
+import { RUNTIME_GUIDE_FILENAME_FALLBACK, RUNTIME_CAPABILITIES_FALLBACK } from '@/services/recruit';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -62,6 +63,31 @@ export function spliceApiKey(bundle: McpConfigBundle, newKey: string): McpConfig
     };
   }
   return null;
+}
+
+/**
+ * E-RECRUIT S6 — `runtime-capabilities` 응답을 STEP2 두 섹션(지원됨/곧지원)으로 분리.
+ * 순서는 응답 순서 그대로 보존(BE가 이미 카탈로그 표시 순서로 정렬해 반환한다고 가정 — 재정렬 안 함).
+ */
+export function splitRuntimeCapabilities(
+  items: RuntimeCapabilityItem[],
+): { supported: RuntimeCapabilityItem[]; comingSoon: RuntimeCapabilityItem[] } {
+  return {
+    supported: items.filter((r) => r.supported),
+    comingSoon: items.filter((r) => !r.supported),
+  };
+}
+
+/**
+ * 현재 선택된 runtime이 로드된 지원목록에 없으면(예: 기본값 'claude-code'가 이 환경서 미지원)
+ * 첫 지원 런타임으로 보정 — recruit() 400 방지. 지원목록이 비어있으면 현재값 그대로 유지(호출부가
+ * "지원 런타임 0개" 상태를 별도로 처리해야 하는 엣지케이스 — 현재는 로딩 실패 폴백이 항상 최소 1개
+ * 지원 항목을 포함하므로 실무에선 발생 안 함).
+ */
+export function pickDefaultRuntime(supported: RuntimeCapabilityItem[], current: string): string {
+  if (supported.length === 0) return current;
+  if (supported.some((r) => r.slug === current)) return current;
+  return supported[0].slug;
 }
 
 function downloadTextFile(filename: string, content: string) {
@@ -166,6 +192,45 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
 
   // STEP 2 — runtime + agent(G1)
   const [runtime, setRuntime] = useState<string>('claude-code');
+  // E-RECRUIT S6: BE `GET /api/v2/runtime-capabilities`(agent_runtime.py 레지스트리 노출) 동적 소비.
+  // 404(엔드포인트 아직 미배포·디디 미착지)는 "에러"가 아니라 "기능 아직 없음" — 조용히 S4 당시
+  // 폴백(Claude Code만 활성)으로 graceful degrade하고 에러 배너를 띄우지 않는다(과장된 고장 인상 방지).
+  // 그 외 실패(500·네트워크 예외 — 엔드포인트가 실제로 배포된 후에나 발생 가능)는 핸드오프 §3-4의
+  // 명시적 에러 UI(재시도+최소 claude-code 폴백 안내)로 — "정직"하게 안 됨을 알린다.
+  const [runtimeCapabilities, setRuntimeCapabilities] = useState<RuntimeCapabilityItem[] | null>(null);
+  const [runtimeCapabilitiesError, setRuntimeCapabilitiesError] = useState(false);
+
+  const fetchRuntimeCapabilities = useCallback(async () => {
+    setRuntimeCapabilitiesError(false);
+    try {
+      const res = await fetch('/api/runtime-capabilities');
+      if (!res.ok) {
+        setRuntimeCapabilities(RUNTIME_CAPABILITIES_FALLBACK);
+        if (res.status !== 404) setRuntimeCapabilitiesError(true);
+        return;
+      }
+      const json = (await res.json()) as { data?: RuntimeCapabilityItem[] };
+      setRuntimeCapabilities(json.data?.length ? json.data : RUNTIME_CAPABILITIES_FALLBACK);
+    } catch {
+      setRuntimeCapabilities(RUNTIME_CAPABILITIES_FALLBACK);
+      setRuntimeCapabilitiesError(true);
+    }
+  }, []);
+
+  useEffect(() => { void fetchRuntimeCapabilities(); }, [fetchRuntimeCapabilities]);
+
+  const { supported: supportedRuntimes, comingSoon: comingSoonRuntimes } = useMemo(
+    () => splitRuntimeCapabilities(runtimeCapabilities ?? []),
+    [runtimeCapabilities],
+  );
+
+  // 로드된 목록에 현재 선택값이 없으면(예: 기본값 'claude-code'가 이 org enviro서 미지원) 첫 지원
+  // 런타임으로 보정 — recruit() 400 방지.
+  useEffect(() => {
+    const next = pickDefaultRuntime(supportedRuntimes, runtime);
+    if (next !== runtime) setRuntime(next);
+  }, [supportedRuntimes, runtime]);
+
   const [agentMode, setAgentMode] = useState<'new' | 'existing'>('new');
   const [newAgentName, setNewAgentName] = useState('');
   const autoFilledNameRef = useRef('');
@@ -199,7 +264,10 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
   const [rotating, setRotating] = useState(false);
   const [rotateError, setRotateError] = useState<string | null>(null);
 
-  const guideFilename = RUNTIME_GUIDE_FILENAME[runtime] ?? 'CLAUDE.md';
+  // 실측(BE PR #1911): 일반 런타임 지침 파일명은 `prompt_file`(`guide_filename`은 connector 전용
+  // "CONNECTOR_SETUP.md") — 당초 안내와 필드명이 달라 실 스키마로 정정.
+  const guideFilename = runtimeCapabilities?.find((r) => r.slug === runtime)?.prompt_file
+    ?? RUNTIME_GUIDE_FILENAME_FALLBACK[runtime] ?? 'CLAUDE.md';
 
   const handleRecruit = async () => {
     if (!selectedRoleSlug) return;
@@ -419,27 +487,67 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
             <div className="space-y-4">
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-foreground">{t('runtimeQuestion')}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {RUNTIME_VALUES.map((rv) => {
-                    const supported = RUNTIME_SUPPORTED.includes(rv);
-                    const label = rv === 'connector' ? t('runtimeConnector') : rv === 'claude-code' ? 'Claude Code' : rv === 'codex' ? 'Codex' : rv === 'gemini' ? 'Gemini' : 'Cursor';
-                    return (
-                      <button
-                        key={rv}
-                        type="button"
-                        disabled={!supported}
-                        onClick={() => supported && setRuntime(rv)}
-                        className={cn(
-                          'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
-                          runtime === rv ? 'border-primary/60 bg-primary/10 text-foreground' : 'border-border text-muted-foreground',
-                          !supported && 'cursor-not-allowed opacity-50',
-                        )}
-                      >
-                        {label}{!supported && ` · ${t('comingSoon')}`}
-                      </button>
-                    );
-                  })}
-                </div>
+                {!runtimeCapabilities ? (
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[0, 1, 2].map((i) => <Skeleton key={i} className="h-14 rounded-xl" />)}
+                    </div>
+                  </div>
+                ) : runtimeCapabilitiesError ? (
+                  <div className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
+                    <p className="text-sm font-medium text-foreground">{t('runtimeLoadError')}</p>
+                    <p className="text-xs text-muted-foreground">{t('runtimeLoadErrorNote')}</p>
+                    <Button variant="ghost" size="sm" onClick={() => void fetchRuntimeCapabilities()}>{t('retry')}</Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {supportedRuntimes.map((rc) => {
+                          const sel = runtime === rc.slug;
+                          return (
+                            <button
+                              key={rc.slug}
+                              type="button"
+                              onClick={() => setRuntime(rc.slug)}
+                              className={cn(
+                                'relative flex flex-col items-start gap-1 rounded-xl border p-2.5 text-left transition-colors',
+                                sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
+                              )}
+                            >
+                              {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
+                              <span className={cn(
+                                'flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground',
+                                sel && 'bg-primary/15 text-primary',
+                              )}>
+                                {rc.icon ?? rc.display_name.charAt(0).toUpperCase()}
+                              </span>
+                              <span className="text-xs font-bold text-foreground">{rc.display_name}</span>
+                              {rc.tier === 'experimental' && <Badge variant="info" className="text-[9px]">{t('runtimeExperimental')}</Badge>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {/* 지원 예정(레지스트리 supported=false) — dimmed·disabled */}
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeComingSoonLabel')}</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {comingSoonRuntimes.map((rc) => (
+                          <button key={rc.slug} type="button" disabled className="flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-muted/40 p-2.5 text-left opacity-55">
+                            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
+                              {rc.icon ?? rc.display_name.charAt(0).toUpperCase()}
+                            </span>
+                            <span className="text-xs font-bold text-foreground">{rc.display_name}</span>
+                            <Badge variant="chip" className="text-[9px]">{t('runtimeComingSoonBadge')}</Badge>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
                 <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                   <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                   {t('runtimeGuide')}

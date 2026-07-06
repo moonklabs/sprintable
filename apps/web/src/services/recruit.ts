@@ -45,20 +45,48 @@ export interface RecruitResponse {
   mcp_config_alternatives: Partial<Record<Transport, McpConfigBundle>>;
 }
 
-/** 런타임별 지침 파일명(P0=Claude Code 기준·핸드오프 §STEP3). */
-export const RUNTIME_GUIDE_FILENAME: Record<string, string> = {
+/** 런타임별 지침 파일명(P0=Claude Code 기준·핸드오프 §STEP3) — BE `runtime-capabilities`가 아직
+ * 배포 전(디디 미착지)이거나 응답에 `prompt_file`이 없을 때만 쓰는 폴백. */
+export const RUNTIME_GUIDE_FILENAME_FALLBACK: Record<string, string> = {
   'claude-code': 'CLAUDE.md',
   codex: 'AGENTS.md',
   gemini: 'GEMINI.md',
   cursor: 'CLAUDE.md',
-  connector: 'CLAUDE.md',
 };
 
-/** 런타임 값(순서=UI 노출 순서). 브랜드명은 컴포넌트에서 직접 리터럴(비번역 고유명사),
- * "커넥터"만 i18n 리소스에서 라벨 조회. */
-export const RUNTIME_VALUES = ['claude-code', 'codex', 'gemini', 'cursor', 'connector'] as const;
+/**
+ * E-RECRUIT S6 — `GET /api/v2/runtime-capabilities` 응답 항목. **실측 계약**(BE PR #1911,
+ * `backend/app/routers/runtime_capabilities.py::RuntimeCapability` 그대로 미러 — 2026-07-06
+ * 착지 후 실 스키마로 정정. 착수 시점에 전달받은 요약과 실제 필드명·nullability·`connector` 취급이
+ * 달라 PR diff를 직접 읽고 맞췄다):
+ * - **`connector`도 레지스트리의 정식 slug**(10개 중 하나, `supported=true, tier="experimental"`) —
+ *   FE 전용 catch-all 카드가 아니라 다른 experimental 런타임과 동일하게 지원 섹션에 데이터 기반으로
+ *   렌더된다(당초 안내와 달랐던 부분).
+ * - `guide_filename`은 connector 전용("CONNECTOR_SETUP.md")이고 **일반 런타임의 지침 파일명은
+ *   `prompt_file`**(claude-code="CLAUDE.md", 나머지는 S7 shaping 전 generic fallback).
+ * - `transport`(단수)는 edition 기본 transport(nullable) — E-MCP-OPT S3의 `default_transport`와
+ *   같은 개념. `mcp_transport`(복수, 배열)가 그 런타임이 실제 지원하는 transport 집합.
+ */
+export interface RuntimeCapabilityItem {
+  slug: string;
+  display_name: string;
+  supported: boolean;
+  /** supported=false면 항상 null. "full"=확정 지침파일 매핑 있음(claude-code만)·"experimental"=
+   * config emit은 되나 S7 프롬프트 shaping 前 generic fallback(codex/gemini/cursor/connector). */
+  tier: 'full' | 'experimental' | null;
+  transport: string | null;
+  mcp_transport: string[];
+  prompt_file: string | null;
+  guide_filename: string | null;
+  supports_event_push: boolean;
+  icon: string | null;
+}
 
-/** BE `SUPPORTED_RUNTIMES`(agent_onboarding_config.py) 실측 — 현재 P0=Claude Code 단일 지원.
- * 나머지 4종은 E-RECRUIT S5(런타임별 config emit 확장, ready-for-dev·미착지)가 실제 지원을 追加할
- * 때까지 UI엔 노출하되 선택 비활성(곧 지원) — recruit() 400을 유저에게 안 겪게 함. */
-export const RUNTIME_SUPPORTED: readonly string[] = ['claude-code'];
+/** BE `runtime-capabilities` 미배포(디디 S6 미착지) 동안의 폴백 — S4 당시 하드코딩과 동일한
+ * "Claude Code만 활성" 동작을 그대로 보존해 회귀 0(엔드포인트 배포되면 자동으로 동적 전환). */
+export const RUNTIME_CAPABILITIES_FALLBACK: RuntimeCapabilityItem[] = [
+  { slug: 'claude-code', display_name: 'Claude Code', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['stdio'], prompt_file: 'CLAUDE.md', guide_filename: null, supports_event_push: true, icon: null },
+  { slug: 'codex', display_name: 'Codex', supported: false, tier: null, transport: null, mcp_transport: [], prompt_file: null, guide_filename: null, supports_event_push: false, icon: null },
+  { slug: 'gemini', display_name: 'Gemini', supported: false, tier: null, transport: null, mcp_transport: [], prompt_file: null, guide_filename: null, supports_event_push: false, icon: null },
+  { slug: 'cursor', display_name: 'Cursor', supported: false, tier: null, transport: null, mcp_transport: [], prompt_file: null, guide_filename: null, supports_event_push: false, icon: null },
+];
