@@ -287,6 +287,59 @@ async def test_next_assignee_mapping():
 
 
 @pytest.mark.anyio
+async def test_story_cross_org_404():
+    """S20 전수스캔 finding #12: story_id가 caller org 소속 아니면 404
+    (이전엔 org_id 검증 자체가 없어 임의 org의 story를 조회/전이시킬 수 있었다)."""
+    client, session, app = await _client()
+    try:
+        not_found = MagicMock()
+        not_found.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=not_found)
+
+        async with client as c:
+            resp = await c.post("/api/v2/workflow/report-done", json={
+                "story_id": str(STORY_ID),
+                "stage": "kickoff",
+                "agent_id": str(AGENT_ID),
+            })
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_agent_id_cross_org_400():
+    """S20 전수스캔 finding #12(sibling): agent_id가 caller org 소속 member 아니면 400
+    (이전엔 검증 없이 gate/line 평가의 actor로 그대로 스푸핑 가능했다)."""
+    client, session, app = await _client()
+    try:
+        story = _mock_story(status="ready-for-dev")
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalar_one_or_none.return_value = story
+            else:
+                result.scalar_one_or_none.return_value = None
+            return result
+
+        session.execute = mock_execute
+
+        async with client as c:
+            resp = await c.post("/api/v2/workflow/report-done", json={
+                "story_id": str(STORY_ID),
+                "stage": "kickoff",
+                "agent_id": str(uuid.uuid4()),
+            })
+        assert resp.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_pipeline_sequence():
     """kickoff→dev→review→qa→merge→done 순서가 올바르다."""
     from app.routers.workflow_report import _TRANSITIONS
