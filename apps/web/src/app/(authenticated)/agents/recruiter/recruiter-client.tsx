@@ -64,6 +64,31 @@ export function spliceApiKey(bundle: McpConfigBundle, newKey: string): McpConfig
   return null;
 }
 
+/**
+ * E-RECRUIT S6 — `runtime-capabilities` 응답을 STEP2 두 섹션(지원됨/곧지원)으로 분리.
+ * 순서는 응답 순서 그대로 보존(BE가 이미 카탈로그 표시 순서로 정렬해 반환한다고 가정 — 재정렬 안 함).
+ */
+export function splitRuntimeCapabilities(
+  items: RuntimeCapabilityItem[],
+): { supported: RuntimeCapabilityItem[]; comingSoon: RuntimeCapabilityItem[] } {
+  return {
+    supported: items.filter((r) => r.supported),
+    comingSoon: items.filter((r) => !r.supported),
+  };
+}
+
+/**
+ * 현재 선택된 runtime이 로드된 지원목록에 없으면(예: 기본값 'claude-code'가 이 환경서 미지원)
+ * 첫 지원 런타임으로 보정 — recruit() 400 방지. 지원목록이 비어있으면 현재값 그대로 유지(호출부가
+ * "지원 런타임 0개" 상태를 별도로 처리해야 하는 엣지케이스 — 현재는 로딩 실패 폴백이 항상 최소 1개
+ * 지원 항목을 포함하므로 실무에선 발생 안 함).
+ */
+export function pickDefaultRuntime(supported: RuntimeCapabilityItem[], current: string): string {
+  if (supported.length === 0) return current;
+  if (supported.some((r) => r.slug === current)) return current;
+  return supported[0].slug;
+}
+
 function downloadTextFile(filename: string, content: string) {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -184,14 +209,16 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
     })();
   }, []);
 
-  const supportedRuntimes = useMemo(() => runtimeCapabilities?.filter((r) => r.supported) ?? [], [runtimeCapabilities]);
-  const comingSoonRuntimes = useMemo(() => runtimeCapabilities?.filter((r) => !r.supported) ?? [], [runtimeCapabilities]);
+  const { supported: supportedRuntimes, comingSoon: comingSoonRuntimes } = useMemo(
+    () => splitRuntimeCapabilities(runtimeCapabilities ?? []),
+    [runtimeCapabilities],
+  );
 
   // 로드된 목록에 현재 선택값이 없으면(예: 기본값 'claude-code'가 이 org enviro서 미지원) 첫 지원
   // 런타임으로 보정 — recruit() 400 방지.
   useEffect(() => {
-    if (supportedRuntimes.length === 0) return;
-    if (!supportedRuntimes.some((r) => r.slug === runtime)) setRuntime(supportedRuntimes[0].slug);
+    const next = pickDefaultRuntime(supportedRuntimes, runtime);
+    if (next !== runtime) setRuntime(next);
   }, [supportedRuntimes, runtime]);
 
   const [agentMode, setAgentMode] = useState<'new' | 'existing'>('new');
