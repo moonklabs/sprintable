@@ -3232,6 +3232,8 @@
     "runtimeQuestion": "어디서 이 에이전트를 실행하나요?",
     "runtimeGuide": "런타임에 맞춰 지침 파일명(CLAUDE.md/AGENTS.md/GEMINI.md)과 연결 배선이 자동으로 조정됩니다.",
     "runtimeConnector": "커넥터",
+    "runtimeLoading": "지원 런타임을 불러오는 중…",
+    "runtimeComingSoonLabel": "곧 지원 예정",
     "comingSoon": "곧 지원",
     "agentQuestion": "어느 에이전트로 채용하나요?",
     "agentNameAutoFill": "{role} 채용 1호",

@@ -3232,6 +3232,8 @@
     "runtimeQuestion": "Where will this agent run?",
     "runtimeGuide": "The guide filename (CLAUDE.md/AGENTS.md/GEMINI.md) and connection wiring adjust automatically to match the runtime.",
     "runtimeConnector": "Connector",
+    "runtimeLoading": "Loading supported runtimes…",
+    "runtimeComingSoonLabel": "Coming soon",
     "comingSoon": "coming soon",
     "agentQuestion": "Which agent are you hiring into?",
     "agentNameAutoFill": "{role} Hire #1",

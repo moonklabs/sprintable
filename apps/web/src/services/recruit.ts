@@ -45,20 +45,38 @@ export interface RecruitResponse {
   mcp_config_alternatives: Partial<Record<Transport, McpConfigBundle>>;
 }
 
-/** 런타임별 지침 파일명(P0=Claude Code 기준·핸드오프 §STEP3). */
-export const RUNTIME_GUIDE_FILENAME: Record<string, string> = {
+/** 런타임별 지침 파일명(P0=Claude Code 기준·핸드오프 §STEP3). E-RECRUIT S6가 이 값을
+ * `RuntimeCapabilityItem.guide_filename`(BE `runtime-capabilities` 응답)으로 동적 대체할 때까지의
+ * 폴백(BE 미배포·엔드포인트 404 시에만 사용). */
+export const RUNTIME_GUIDE_FILENAME_FALLBACK: Record<string, string> = {
   'claude-code': 'CLAUDE.md',
   codex: 'AGENTS.md',
   gemini: 'GEMINI.md',
   cursor: 'CLAUDE.md',
-  connector: 'CLAUDE.md',
 };
 
-/** 런타임 값(순서=UI 노출 순서). 브랜드명은 컴포넌트에서 직접 리터럴(비번역 고유명사),
- * "커넥터"만 i18n 리소스에서 라벨 조회. */
-export const RUNTIME_VALUES = ['claude-code', 'codex', 'gemini', 'cursor', 'connector'] as const;
+/**
+ * E-RECRUIT S6 — `GET /api/v2/runtime-capabilities` 응답 항목(오르테가 확정 계약, 2026-07-06).
+ * BE `agent_runtime.py::RuntimeCapability`(9종 `RuntimeType` 레지스트리) 확장분을 노출 —
+ * `transport`/`guide_filename`이 AC의 `mcp_transport`/`prompt_file`에 대응.
+ * `connector`(네이티브 미목록 런타임용 transport 카테고리)는 이 레지스트리에 없음 — RuntimeType
+ * enum 자체가 아니라 FE 전용 catch-all 카드로 별도 취급(오르테가 확정).
+ */
+export interface RuntimeCapabilityItem {
+  slug: string;
+  display_name: string;
+  supported: boolean;
+  tier?: string;
+  transport: 'stdio' | 'http' | 'connector';
+  guide_filename: string;
+  icon?: string;
+}
 
-/** BE `SUPPORTED_RUNTIMES`(agent_onboarding_config.py) 실측 — 현재 P0=Claude Code 단일 지원.
- * 나머지 4종은 E-RECRUIT S5(런타임별 config emit 확장, ready-for-dev·미착지)가 실제 지원을 追加할
- * 때까지 UI엔 노출하되 선택 비활성(곧 지원) — recruit() 400을 유저에게 안 겪게 함. */
-export const RUNTIME_SUPPORTED: readonly string[] = ['claude-code'];
+/** BE `runtime-capabilities` 미배포(디디 S6 미착지) 동안의 폴백 — S4 당시 하드코딩과 동일한
+ * "Claude Code만 활성" 동작을 그대로 보존해 회귀 0(엔드포인트 배포되면 자동으로 동적 전환). */
+export const RUNTIME_CAPABILITIES_FALLBACK: RuntimeCapabilityItem[] = [
+  { slug: 'claude-code', display_name: 'Claude Code', supported: true, transport: 'stdio', guide_filename: 'CLAUDE.md' },
+  { slug: 'codex', display_name: 'Codex', supported: false, transport: 'stdio', guide_filename: 'AGENTS.md' },
+  { slug: 'gemini', display_name: 'Gemini', supported: false, transport: 'stdio', guide_filename: 'GEMINI.md' },
+  { slug: 'cursor', display_name: 'Cursor', supported: false, transport: 'stdio', guide_filename: 'CLAUDE.md' },
+];

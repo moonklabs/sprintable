@@ -16,8 +16,8 @@ import { cn } from '@/lib/utils';
 import {
   VerifyRail, RAIL_ORDER, HTTP_RAIL_ORDER, type DisplayStep, type RailState, type RailStatus,
 } from '@/app/onboarding/verify-rail';
-import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle } from '@/services/recruit';
-import { RUNTIME_VALUES, RUNTIME_SUPPORTED, RUNTIME_GUIDE_FILENAME } from '@/services/recruit';
+import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
+import { RUNTIME_GUIDE_FILENAME_FALLBACK, RUNTIME_CAPABILITIES_FALLBACK } from '@/services/recruit';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -166,6 +166,34 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
 
   // STEP 2 — runtime + agent(G1)
   const [runtime, setRuntime] = useState<string>('claude-code');
+  // E-RECRUIT S6: BE `GET /api/v2/runtime-capabilities`(agent_runtime.py 레지스트리 노출) 동적 소비.
+  // 엔드포인트가 아직 배포 전(디디 미착지)이면 404/네트워크실패 → S4 당시 폴백(Claude Code만 활성)으로
+  // graceful degrade — 엔드포인트가 뜨는 순간 재배포 없이 자동으로 동적 목록으로 전환된다.
+  const [runtimeCapabilities, setRuntimeCapabilities] = useState<RuntimeCapabilityItem[] | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/runtime-capabilities');
+        if (!res.ok) { setRuntimeCapabilities(RUNTIME_CAPABILITIES_FALLBACK); return; }
+        const json = (await res.json()) as { data?: RuntimeCapabilityItem[] };
+        setRuntimeCapabilities(json.data?.length ? json.data : RUNTIME_CAPABILITIES_FALLBACK);
+      } catch {
+        setRuntimeCapabilities(RUNTIME_CAPABILITIES_FALLBACK);
+      }
+    })();
+  }, []);
+
+  const supportedRuntimes = useMemo(() => runtimeCapabilities?.filter((r) => r.supported) ?? [], [runtimeCapabilities]);
+  const comingSoonRuntimes = useMemo(() => runtimeCapabilities?.filter((r) => !r.supported) ?? [], [runtimeCapabilities]);
+
+  // 로드된 목록에 현재 선택값이 없으면(예: 기본값 'claude-code'가 이 org enviro서 미지원) 첫 지원
+  // 런타임으로 보정 — recruit() 400 방지.
+  useEffect(() => {
+    if (supportedRuntimes.length === 0) return;
+    if (!supportedRuntimes.some((r) => r.slug === runtime)) setRuntime(supportedRuntimes[0].slug);
+  }, [supportedRuntimes, runtime]);
+
   const [agentMode, setAgentMode] = useState<'new' | 'existing'>('new');
   const [newAgentName, setNewAgentName] = useState('');
   const autoFilledNameRef = useRef('');
@@ -199,7 +227,8 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
   const [rotating, setRotating] = useState(false);
   const [rotateError, setRotateError] = useState<string | null>(null);
 
-  const guideFilename = RUNTIME_GUIDE_FILENAME[runtime] ?? 'CLAUDE.md';
+  const guideFilename = runtimeCapabilities?.find((r) => r.slug === runtime)?.guide_filename
+    ?? RUNTIME_GUIDE_FILENAME_FALLBACK[runtime] ?? 'CLAUDE.md';
 
   const handleRecruit = async () => {
     if (!selectedRoleSlug) return;
@@ -419,27 +448,42 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
             <div className="space-y-4">
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-foreground">{t('runtimeQuestion')}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {RUNTIME_VALUES.map((rv) => {
-                    const supported = RUNTIME_SUPPORTED.includes(rv);
-                    const label = rv === 'connector' ? t('runtimeConnector') : rv === 'claude-code' ? 'Claude Code' : rv === 'codex' ? 'Codex' : rv === 'gemini' ? 'Gemini' : 'Cursor';
-                    return (
-                      <button
-                        key={rv}
-                        type="button"
-                        disabled={!supported}
-                        onClick={() => supported && setRuntime(rv)}
-                        className={cn(
-                          'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
-                          runtime === rv ? 'border-primary/60 bg-primary/10 text-foreground' : 'border-border text-muted-foreground',
-                          !supported && 'cursor-not-allowed opacity-50',
-                        )}
-                      >
-                        {label}{!supported && ` · ${t('comingSoon')}`}
-                      </button>
-                    );
-                  })}
-                </div>
+                {!runtimeCapabilities ? (
+                  <p className="text-sm text-muted-foreground">{t('runtimeLoading')}</p>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-1.5">
+                      {supportedRuntimes.map((rc) => (
+                        <button
+                          key={rc.slug}
+                          type="button"
+                          onClick={() => setRuntime(rc.slug)}
+                          className={cn(
+                            'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
+                            runtime === rc.slug ? 'border-primary/60 bg-primary/10 text-foreground' : 'border-border text-muted-foreground',
+                          )}
+                        >
+                          {rc.display_name}
+                        </button>
+                      ))}
+                    </div>
+                    {/* 지원 예정(레지스트리 supported=false) + 커넥터(레지스트리 밖 transport
+                        카테고리, 오르테가 확정 — RuntimeType enum 아님·FE 전용 catch-all) */}
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeComingSoonLabel')}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {comingSoonRuntimes.map((rc) => (
+                          <button key={rc.slug} type="button" disabled className="cursor-not-allowed rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground opacity-50">
+                            {rc.display_name} · {t('comingSoon')}
+                          </button>
+                        ))}
+                        <button type="button" disabled className="cursor-not-allowed rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground opacity-50">
+                          {t('runtimeConnector')} · {t('comingSoon')}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
                 <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                   <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                   {t('runtimeGuide')}
