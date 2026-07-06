@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -30,7 +30,6 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
-import { MemberRow } from '@/components/ui/member-row';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { SidebarTrigger } from '@/components/ui/sidebar';
@@ -65,16 +64,6 @@ interface ProjectOption {
   id: string;
   name: string;
   description?: string | null;
-}
-
-interface InvitationItem {
-  id: string;
-  email: string;
-  status: 'pending' | 'accepted' | 'revoked';
-  accepted_at: string | null;
-  expires_at: string;
-  project_id: string | null;
-  projects: { id: string; name: string } | null;
 }
 
 interface ProjectMember {
@@ -165,19 +154,8 @@ export default function SettingsPage() {
   const [editProjectName, setEditProjectName] = useState('');
   const [editProjectDescription, setEditProjectDescription] = useState('');
   const [savingProject, setSavingProject] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member');
-  const [inviting, setInviting] = useState(false);
-  const [inviteResult, setInviteResult] = useState<string | null>(null);
-  const [invitations, setInvitations] = useState<InvitationItem[]>([]);
-  const [inviteProjectId, setInviteProjectId] = useState('');
   const [memberProjectId, setMemberProjectId] = useState('');
   const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
-  const [orgMembers, setOrgMembers] = useState<ProjectMember[]>([]);
-  const [selectedOrgMemberUserId, setSelectedOrgMemberUserId] = useState('');
-  const [memberActionMessage, setMemberActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [addingMember, setAddingMember] = useState(false);
-  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminChecked, setAdminChecked] = useState(false);
   const [currentProjectRole, setCurrentProjectRole] = useState<string>('member'); // S-GATE-4: 현재 프로젝트 effective role
@@ -185,9 +163,6 @@ export default function SettingsPage() {
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
 
-  const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
-  const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
-  const [resendResult, setResendResult] = useState<{ id: string; url: string } | null>(null);
   const [graceUntil, setGraceUntil] = useState<string | null>(null);
   const [membersSubTab, setMembersSubTab] = useState<'people' | 'agents'>('people');
   const [addMemberOpen, setAddMemberOpen] = useState(false); // 7363ec8a: 통합 "+멤버 추가" 모달
@@ -276,44 +251,17 @@ export default function SettingsPage() {
     setMemberProjectId((current) => current || currentProjectId || nextProjects[0]?.id || '');
   };
 
+  // d3619e80: org_invites canonical(레거시 /api/invitations 폐기) — 초대 목록 UI는 폐기됐지만
+  // 이 엔드포인트 성공 시에만 구독 grace-period 배너를 갱신하는 기존 게이팅은 그대로 보존.
   const refreshInvitations = async () => {
-    if (!orgId) return; // d3619e80: org_invites canonical(레거시 /api/invitations 폐기).
+    if (!orgId) return;
     const res = await fetch(`/api/organizations/${orgId}/invites`);
     if (res.ok) {
-      const json = await res.json();
-      setInvitations(json.data ?? []);
       const statusRes = await fetch('/api/subscription/status');
       if (statusRes.ok) {
         const statusJson = await statusRes.json() as { data?: { grace_until?: string | null } };
         setGraceUntil(statusJson.data?.grace_until ?? null);
       }
-    }
-  };
-
-  const handleRevokeInvite = async (inviteId: string) => {
-    if (!orgId) return;
-    setRevokingInviteId(inviteId);
-    try {
-      const res = await fetch(`/api/organizations/${orgId}/invites/${inviteId}`, { method: 'DELETE' });
-      if (res.ok) await refreshInvitations();
-    } finally {
-      setRevokingInviteId(null);
-    }
-  };
-
-  const handleResendInvite = async (inviteId: string) => {
-    if (!orgId) return;
-    setResendingInviteId(inviteId);
-    setResendResult(null);
-    try {
-      const res = await fetch(`/api/organizations/${orgId}/invites/${inviteId}/resend`, { method: 'POST' });
-      if (res.ok) {
-        const json = await res.json();
-        setResendResult({ id: inviteId, url: json.data?.invite_url ?? '' });
-        await refreshInvitations();
-      }
-    } finally {
-      setResendingInviteId(null);
     }
   };
 
@@ -345,30 +293,11 @@ export default function SettingsPage() {
   const refreshMemberData = async (projectId: string) => {
     if (!projectId) return;
 
-    const [projectMemberRes, orgMemberRes] = await Promise.all([
-      fetch(`/api/team-members?project_id=${projectId}`),
-      fetch('/api/org-members'),
-    ]);
+    const projectMemberRes = await fetch(`/api/team-members?project_id=${projectId}`);
 
     if (projectMemberRes.ok) {
       const json = await projectMemberRes.json();
       setProjectMembers((json.data ?? []) as ProjectMember[]);
-    }
-
-    if (orgMemberRes.ok) {
-      const json = await orgMemberRes.json();
-      type OrgMemberRow = { id: string; user_id: string; role: string; email?: string; deleted_at?: string | null };
-      const mapped: ProjectMember[] = (json.data ?? []).map((row: OrgMemberRow) => ({
-        id: row.id,
-        name: row.email ?? row.user_id,
-        email: row.email,
-        type: 'human' as const,
-        role: row.role,
-        user_id: row.user_id,
-        project_id: projectId,
-        is_active: !row.deleted_at,
-      }));
-      setOrgMembers(mapped);
     }
   };
 
@@ -462,7 +391,6 @@ export default function SettingsPage() {
 
   useEffect(() => {
     void refreshOrgAgents().catch((err) => { console.error('조직 에이전트 로드 실패', err); });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // api-keys 탭 접근 시 Members > Agents로 자동 전환 (레거시 리다이렉트)
@@ -536,22 +464,6 @@ export default function SettingsPage() {
     return category.types.every((type) => getEnabled(type));
   };
 
-  const assignableMembers = useMemo(() => {
-    const assignedUserIds = new Set(
-      projectMembers
-        .filter((member) => member.type === 'human' && member.user_id)
-        .map((member) => member.user_id as string),
-    );
-
-    const deduped = new Map<string, ProjectMember>();
-    for (const member of orgMembers) {
-      if (member.type !== 'human' || !member.user_id || assignedUserIds.has(member.user_id)) continue;
-      if (!deduped.has(member.user_id)) deduped.set(member.user_id, member);
-    }
-
-    return Array.from(deduped.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [orgMembers, projectMembers]);
-
   const handleUpdateProject = async () => {
     if (!editingProjectId || !editProjectName.trim()) return;
     setSavingProject(true);
@@ -616,7 +528,6 @@ export default function SettingsPage() {
       const next = prev.some((item) => item.id === project.id) ? prev : [...prev, project];
       return next.slice().sort((a, b) => a.name.localeCompare(b.name));
     });
-    setInviteProjectId(project.id);
     setMemberProjectId(project.id);
     setNewProjectName('');
     setNewProjectDescription('');
@@ -625,38 +536,6 @@ export default function SettingsPage() {
     await refreshProjects().catch((err) => { console.error('프로젝트 생성 후 목록 갱신 실패', err); });
     router.refresh();
     setCreatingProject(false);
-  };
-
-  const handleAddProjectMember = async () => {
-    if (!memberProjectId || !selectedOrgMemberUserId) return;
-    const member = assignableMembers.find((item) => item.user_id === selectedOrgMemberUserId);
-    if (!member) return;
-
-    setAddingMember(true);
-    setMemberActionMessage(null);
-
-    const res = await fetch('/api/team-members', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        project_id: memberProjectId,
-        user_id: selectedOrgMemberUserId,
-        type: 'human',
-        name: member.name,
-        role: member.role ?? 'member',
-      }),
-    });
-
-    if (res.ok) {
-      await refreshMemberData(memberProjectId);
-      setSelectedOrgMemberUserId('');
-      setMemberActionMessage({ type: 'success', text: t('memberAdded') });
-    } else {
-      const json = await res.json().catch(() => null);
-      setMemberActionMessage({ type: 'error', text: json?.error?.message ?? t('memberActionFailed') });
-    }
-
-    setAddingMember(false);
   };
 
   const handleDeleteProject = async (projectId: string) => {
@@ -717,26 +596,6 @@ export default function SettingsPage() {
     } finally {
       setWebhookSaving(null);
     }
-  };
-
-  const handleRemoveProjectMember = async (memberId: string) => {
-    setRemovingMemberId(memberId);
-    setMemberActionMessage(null);
-
-    const res = await fetch(`/api/team-members/${memberId}`, { method: 'DELETE' });
-    if (res.ok) {
-      await refreshMemberData(memberProjectId);
-      setMemberActionMessage({ type: 'success', text: t('memberRemoved') });
-    } else {
-      const json = await res.json().catch(() => null);
-      const errorCode = json?.error?.code;
-      setMemberActionMessage({
-        type: 'error',
-        text: errorCode === 'LAST_PROJECT_MEMBERSHIP' ? t('lastProjectMembership') : json?.error?.message ?? t('memberActionFailed'),
-      });
-    }
-
-    setRemovingMemberId(null);
   };
 
   // suppress unused variable warning — createdProjectMembership used in future flows
