@@ -167,6 +167,10 @@ function CopyDownloadButtons({
 export function RecruiterClient({ projectId }: { projectId: string; orgId?: string }) {
   const t = useTranslations('recruiter');
   const tAgents = useTranslations('agents');
+  // 오르테가 라이브 스모크 적출(2026-07-06): railXxx/railStageHosted 키는 connect-step이 원래
+  // 정의한 'onboarding' 네임스페이스에 있는데 STEP4가 이걸 'agents'(tAgents)로 조회해 전부
+  // MISSING_MESSAGE였음 — S4 merge(#1900) 때부터의 잠재 버그. 발견 즉시 여기서 수정.
+  const tOnboarding = useTranslations('onboarding');
   const [step, setStep] = useState<Step>(1);
 
   // STEP 1 — role catalog
@@ -378,7 +382,7 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
     let status: RailStatus = be?.status ?? 'pending';
     if (state === 'config_copied' && status === 'pending') status = 'done'; // 번들 다운로드=STEP3 완주로 이미 완료
     // 유나 가디언 polish#2: onboarding 공용 라벨("설정 복사됨")은 채용 맥락과 안 맞아 이 상태만 로컬 오버라이드.
-    const label = state === 'config_copied' ? t('railBundleDownloaded') : tAgents(RAIL_LABEL_KEY[state]);
+    const label = state === 'config_copied' ? t('railBundleDownloaded') : tOnboarding(RAIL_LABEL_KEY[state]);
     return { state, status, label, reason: be?.reason };
   });
   const verified = displaySteps.find((s) => s.state === 'verified')?.status === 'done';
@@ -696,7 +700,7 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
                 <p className="text-sm font-medium">
                   {t('verifyTitle')}{' '}
                   <span className={cn('text-xs font-normal', recruitResult.default_transport === 'http' ? 'text-info' : 'text-muted-foreground')}>
-                    {recruitResult.default_transport === 'http' ? tAgents('railStageHosted') : ''}
+                    {recruitResult.default_transport === 'http' ? tOnboarding('railStageHosted') : ''}
                   </span>
                 </p>
                 <Button variant="ghost" size="sm" onClick={() => void handleVerify()} disabled={verifying}>
