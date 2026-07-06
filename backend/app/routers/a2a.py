@@ -56,9 +56,9 @@ from app.models.agent_deployment import AgentPersona
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
 from app.models.team import TeamMember
-from app.models.webhook_config import WebhookConfig
 from app.repositories.team_member import TeamMemberRepository
 from app.routers.ws_chat import _broadcast, _rooms
+from app.services.webhook_targeting import active_webhook_member_ids
 from app.schemas.a2a import (
     AgentCapabilities,
     AgentCard,
@@ -270,19 +270,16 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
     member_project_id = member.project_id
     member_name = member.name
 
-    # S2(정정 2026-07-06): 플랫폼 기존 라우팅(webhook_targeting.py:active_webhook_member_ids)과
-    # 동형으로 택일 — member-bound WebhookConfig 有→Discord webhook, 無→fakechat WS(_broadcast).
-    # `_get_agent_member`가 이미 type="agent"+is_active를 강제해 여기 도달하는 멤버는 항상 둘 중
-    # 하나로 도달 가능하므로 REJECTED 분기는 없다(도달불가 케이스가 실제로 없음).
-    # 라이브 E2E(까심발견 아닌 오르테가군 직접 스모크)MUST: member-global+project별로 활성
-    # WebhookConfig가 여러 개일 수 있어(예: 디디 본인) — 여긴 "존재 여부"만 필요하므로
-    # scalar_one_or_none()(MultipleResultsFound 500) 대신 first() 사용. 실 전달은 다중 타깃
-    # resolve를 이미 하는 deliver_conversation_message_webhook에 위임(아래, 변경 없음).
-    has_webhook = (await session.execute(
-        select(WebhookConfig.id).where(
-            WebhookConfig.member_id == member_id, WebhookConfig.is_active.is_(True)
-        ).limit(1)
-    )).first() is not None
+    # S2(정정 2026-07-06)+P1-S3 §10(SSOT 교체): 플랫폼 기존 라우팅과 동형으로 택일 —
+    # member-bound WebhookConfig 有→Discord webhook, 無→fakechat WS(_broadcast). "존재 여부"
+    # 판정은 이제 인라인 쿼리가 아니라 플랫폼 SSOT(webhook_targeting.active_webhook_member_ids —
+    # notification_dispatch/conversations.py가 이미 공유하는 그 함수)를 그대로 호출한다 — 병렬
+    # 구현 박멸(멤버 다중 WebhookConfig 케이스도 이 함수가 이미 처리: member_id.in_() + 존재만
+    # 보므로 MultipleResultsFound 위험이 애초에 없다). `_get_agent_member`가 이미 type="agent"+
+    # is_active를 강제해 여기 도달하는 멤버는 항상 둘 중 하나로 도달 가능하므로 REJECTED 분기는
+    # 없다. 실 전달은 다중 타깃 resolve를 이미 하는 deliver_conversation_message_webhook에 위임
+    # (아래, 변경 없음).
+    has_webhook = member_id in await active_webhook_member_ids(session, member_org_id, [member_id])
 
     # S2: task-태깅 Conversation(=A2A context_id) — CC 어댑터가 이 두 경로 중 하나로 실 주입한다.
     conv_id = uuid.uuid4()
