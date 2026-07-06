@@ -12,7 +12,11 @@ on:
 
 concurrency:
   group: cloud-build-${{ github.ref }}
-  cancel-in-progress: true
+  # 근본원인(2026-07-06, story 6ac3e62f): true였을 때 GHA 워크플로우 실행만 취소되고 이미
+  # 원격 GCP에 제출된 Cloud Build는 계속 진행돼, 연속 push 시 먼저 취소된 실행의 원격 빌드가
+  # 나중 커밋의 배포를 늦게 덮어써 리비전 역전이 발생했다(GCP 이력상 동시빌드 실재 확認,
+  # 07:21↔07:23 겹침). false로 직렬 큐잉해 커밋 순서=배포 순서를 보장한다.
+  cancel-in-progress: false
 
 permissions:
   contents: read
