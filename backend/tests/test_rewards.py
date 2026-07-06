@@ -94,9 +94,11 @@ async def test_list_rewards_with_member_filter_200():
 
 @pytest.mark.anyio
 async def test_get_balance_200():
+    """prod 핫픽스(S20 MUST): self-or-org-admin 통과 시(caller 본인) 정상 동작."""
     client, session, app = await _client()
     try:
-        with patch("app.repositories.reward.RewardRepository.get_balance", new_callable=AsyncMock) as mock_bal:
+        with patch("app.repositories.reward.RewardRepository.get_balance", new_callable=AsyncMock) as mock_bal, \
+             patch("app.routers.rewards.is_caller_member", new_callable=AsyncMock, return_value=True):
             mock_bal.return_value = 150.0
 
             async with client as c:
@@ -109,12 +111,55 @@ async def test_get_balance_200():
 
 
 @pytest.mark.anyio
-async def test_grant_reward_201():
+async def test_get_balance_403_when_not_self_or_admin():
+    """prod 핫픽스(S20 MUST): 타 멤버 잔액 열람 차단(재무정보 노출)."""
     client, session, app = await _client()
     try:
-        with patch("app.repositories.reward.RewardRepository.grant", new_callable=AsyncMock) as mock_grant:
+        with patch("app.routers.rewards.is_caller_member", new_callable=AsyncMock, return_value=False), \
+             patch("app.routers.rewards._is_org_admin", new_callable=AsyncMock, return_value=False):
+            async with client as c:
+                resp = await c.get(f"/api/v2/rewards/balance?project_id={PROJECT_ID}&member_id={MEMBER_ID}")
+
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_grant_reward_201():
+    """prod 핫픽스(S20 MUST, 최우선): org-admin 통과 시 정상 동작·granted_by는 caller에서 서버파생."""
+    client, session, app = await _client()
+    try:
+        resolved = MagicMock()
+        resolved.id = GRANTER_ID
+        with patch("app.repositories.reward.RewardRepository.grant", new_callable=AsyncMock) as mock_grant, \
+             patch("app.routers.rewards._is_org_admin", new_callable=AsyncMock, return_value=True), \
+             patch("app.routers.rewards.resolve_member", new_callable=AsyncMock, return_value=resolved), \
+             patch("app.services.member_resolver.canonicalize_member_id", new_callable=AsyncMock, side_effect=lambda mid, _s: mid):
             mock_grant.return_value = _mock_entry(25.0)
 
+            async with client as c:
+                resp = await c.post("/api/v2/rewards", json={
+                    "project_id": str(PROJECT_ID),
+                    "member_id": str(MEMBER_ID),
+                    "amount": 25.0,
+                    "reason": "스프린트 완료",
+                    "granted_by": str(uuid.uuid4()),  # S20: 바디값 무시(caller에서 서버-파생)
+                })
+
+        assert resp.status_code == 201
+        assert resp.json()["currency"] == "TJSB"
+        assert mock_grant.await_args.kwargs["granted_by"] == GRANTER_ID
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_grant_reward_403_when_not_org_admin():
+    """prod 핫픽스(S20 MUST): org-admin 아니면 임의 리워드 발행 차단."""
+    client, session, app = await _client()
+    try:
+        with patch("app.routers.rewards._is_org_admin", new_callable=AsyncMock, return_value=False):
             async with client as c:
                 resp = await c.post("/api/v2/rewards", json={
                     "project_id": str(PROJECT_ID),
@@ -124,8 +169,7 @@ async def test_grant_reward_201():
                     "granted_by": str(GRANTER_ID),
                 })
 
-        assert resp.status_code == 201
-        assert resp.json()["currency"] == "TJSB"
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
@@ -134,7 +178,12 @@ async def test_grant_reward_201():
 async def test_grant_reward_404_member_not_in_project():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.reward.RewardRepository.grant", new_callable=AsyncMock) as mock_grant:
+        resolved = MagicMock()
+        resolved.id = GRANTER_ID
+        with patch("app.repositories.reward.RewardRepository.grant", new_callable=AsyncMock) as mock_grant, \
+             patch("app.routers.rewards._is_org_admin", new_callable=AsyncMock, return_value=True), \
+             patch("app.routers.rewards.resolve_member", new_callable=AsyncMock, return_value=resolved), \
+             patch("app.services.member_resolver.canonicalize_member_id", new_callable=AsyncMock, side_effect=lambda mid, _s: mid):
             mock_grant.return_value = None
 
             async with client as c:

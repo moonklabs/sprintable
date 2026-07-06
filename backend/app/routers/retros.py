@@ -11,7 +11,7 @@ from app.models.retro import RetroItem, RetroSession, RetroVote
 from app.services import hypothesis as hyp_svc
 from app.services import retro_hypothesis_seed as seed_svc
 from app.services import retro_synthesis as synth_svc
-from app.services.member_resolver import canonicalize_member_id, resolve_member
+from app.services.member_resolver import canonicalize_member_id, lookup_members_by_ids, resolve_member
 from app.services.project_auth import has_project_access
 from app.repositories.retro import (
     RetroActionRepository,
@@ -552,6 +552,16 @@ async def list_actions(
     return [ActionResponse.model_validate(a) for a in actions]
 
 
+async def _verify_assignee_in_org(db: AsyncSession, org_id: uuid.UUID, assignee_id: uuid.UUID) -> None:
+    """prod 핫픽스(S20 전수스캔 MUST, hypothesis._verify_human_owner와 동일 클래스): assignee_id가
+    caller org 소속인지 검증 없이(canonicalize_member_id는 alias 정규화일 뿐 org 검증이 아님)
+    임의 org의 멤버를 action 담당자로 지정할 수 있었다(오귀속/신원 스푸핑)."""
+    members = await lookup_members_by_ids({assignee_id}, db)
+    rm = members.get(assignee_id)
+    if rm is None or rm.org_id != org_id:
+        raise HTTPException(status_code=400, detail="assignee_id must be a member of this organization")
+
+
 @router.post("/{id}/actions", response_model=ActionResponse, status_code=201)
 async def create_action(
     id: uuid.UUID,
@@ -563,6 +573,8 @@ async def create_action(
     await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     action_repo = RetroActionRepository(db)
     assignee_id = (await canonicalize_member_id(body.assignee_id, db)) if body.assignee_id else None
+    if assignee_id is not None:
+        await _verify_assignee_in_org(db, repo.org_id, assignee_id)
     action = await action_repo.create(
         session_id=id, title=body.title, assignee_id=assignee_id
     )
@@ -582,6 +594,8 @@ async def update_action(
     await _require_retro_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     action_repo = RetroActionRepository(db)
     data = body.model_dump(exclude_unset=True)
+    if data.get("assignee_id") is not None:
+        await _verify_assignee_in_org(db, repo.org_id, data["assignee_id"])
     action = await action_repo.update_in_session(id, action_id, **data)
     if action is None:
         raise HTTPException(status_code=404, detail="Action not found")

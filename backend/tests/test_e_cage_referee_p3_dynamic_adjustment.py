@@ -223,18 +223,54 @@ async def test_apply_endpoint_member_override():
     app.dependency_overrides[get_current_user] = override_auth
 
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            resp = await c.post("/api/v2/gate-config/recommendations/apply", json={
-                "member_id": str(MEMBER_ID),
-                "gate_type": "pr_review",
-                "disposition": "allow_auto",
-                "apply_as": "member",
-            })
+        with patch("app.routers.hitl_config._is_org_admin", new_callable=AsyncMock, return_value=True):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.post("/api/v2/gate-config/recommendations/apply", json={
+                    "member_id": str(MEMBER_ID),
+                    "gate_type": "pr_review",
+                    "disposition": "allow_auto",
+                    "apply_as": "member",
+                })
         assert resp.status_code == 200
         body = resp.json()
         assert body["applied"] is True
         assert body["disposition"] == "allow_auto"
         mock_session.add.assert_called_once()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_apply_endpoint_403_when_not_org_admin():
+    """prod 핫픽스(S20 전수스캔 HIGH): org-admin 아니면 gate override 적용 차단."""
+    from app.main import app
+    from app.dependencies.auth import get_current_user
+    from app.dependencies.database import get_db
+    from httpx import ASGITransport, AsyncClient
+
+    ctx = MagicMock()
+    ctx.user_id = str(uuid.uuid4())
+    ctx.claims = {"app_metadata": {"org_id": str(ORG_ID)}}
+
+    async def override_db():
+        yield AsyncMock()
+
+    async def override_auth():
+        return ctx
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_auth
+
+    try:
+        with patch("app.routers.hitl_config._is_org_admin", new_callable=AsyncMock, return_value=False):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.post("/api/v2/gate-config/recommendations/apply", json={
+                    "member_id": str(MEMBER_ID),
+                    "gate_type": "pr_review",
+                    "disposition": "allow_auto",
+                    "apply_as": "member",
+                })
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
