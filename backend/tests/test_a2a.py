@@ -13,7 +13,7 @@ MEMBER_ID = uuid.uuid4()
 def _mock_member(agent_role: str | None = "qa") -> MagicMock:
     m = MagicMock()
     m.id = MEMBER_ID
-    m.name = "Kkasim"
+    m.name = "Qasim"
     m.type = "agent"
     m.is_active = True
     m.agent_role = agent_role
@@ -60,6 +60,49 @@ def _result(value):
     return r
 
 
+def _list_result(items):
+    r = MagicMock()
+    r.scalars.return_value.all.return_value = items
+    return r
+
+
+def _mock_agent(member_id, name, agent_role="qa"):
+    m = MagicMock()
+    m.id = member_id
+    m.name = name
+    m.type = "agent"
+    m.is_active = True
+    m.agent_role = agent_role
+    return m
+
+
+async def _authed_client(org_id: uuid.UUID):
+    from app.main import app
+    from app.dependencies.auth import get_current_user, get_verified_org_id
+
+    mock_session = AsyncMock()
+
+    async def override_db():
+        yield mock_session
+
+    from app.dependencies.database import get_db
+
+    async def override_auth():
+        ctx = MagicMock()
+        ctx.user_id = str(uuid.uuid4())
+        ctx.claims = {"app_metadata": {"org_id": str(org_id)}}
+        return ctx
+
+    async def override_org():
+        return org_id
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_auth
+    app.dependency_overrides[get_verified_org_id] = override_org
+
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), mock_session, app
+
+
 def _multi_row_result():
     """라이브 E2E MUST(2026-07-06): 활성 WebhookConfig가 여러 개인 멤버 — .scalar_one_or_none()/
     .scalar_one()을 호출하면 MultipleResultsFound가 나야 정상(회귀 감지용), .first()만 안전."""
@@ -96,7 +139,7 @@ async def test_agent_card_200_reflects_role_template_skills():
 
         assert resp.status_code == 200
         card = resp.json()
-        assert card["name"] == "Kkasim"
+        assert card["name"] == "Qasim"
         assert card["skills"][0]["tags"] == ["stories", "tasks", "chat"]
         assert card["skills"][0]["id"] == "qa"
         assert card["supportedInterfaces"][0]["protocolBinding"] == "JSONRPC"
@@ -143,6 +186,89 @@ async def test_agent_card_404_unknown_member():
             resp = await c.get(f"/api/v2/a2a/members/{uuid.uuid4()}/agent-card.json")
 
         assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ── S3: 발견 — GET /members (authed, skill 필터) ──────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_list_agent_cards_filters_by_skill_zero_hardcoding():
+    """S3(story 5578a8e2): skill 쿼리 하나로 role-id 매칭 에이전트만 발견 — member_id 하드코딩 없음."""
+    org_id = uuid.uuid4()
+    qa_id, backend_id = uuid.uuid4(), uuid.uuid4()
+    client, session, app = await _authed_client(org_id)
+    try:
+        qa_persona = _mock_persona()
+        qa_persona.agent_id = qa_id
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _list_result([_mock_agent(qa_id, "Qasim"), _mock_agent(backend_id, "Didi", "backend")])
+            if call_count == 2:
+                return _result(qa_persona)
+            return _result(None)  # backend agent has no matching persona in this fixture
+
+        session.execute = mock_execute
+
+        async with client as c:
+            resp = await c.get("/api/v2/a2a/members", params={"skill": "qa"})
+
+        assert resp.status_code == 200
+        cards = resp.json()
+        assert [c["name"] for c in cards] == ["Qasim"]
+        assert cards[0]["supportedInterfaces"][0]["tenant"] == str(qa_id)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_agent_cards_no_filter_returns_all_org_agents():
+    org_id = uuid.uuid4()
+    a_id, b_id = uuid.uuid4(), uuid.uuid4()
+    client, session, app = await _authed_client(org_id)
+    try:
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _list_result([_mock_agent(a_id, "A"), _mock_agent(b_id, "B")])
+            return _result(None)
+
+        session.execute = mock_execute
+
+        async with client as c:
+            resp = await c.get("/api/v2/a2a/members")
+
+        assert resp.status_code == 200
+        assert {c["name"] for c in resp.json()} == {"A", "B"}
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_agent_cards_requires_auth():
+    """S3: 개별 member_id 엔드포인트(S1/S2)와 달리 로스터 열거는 인증 필수(PO 판정)."""
+    from app.main import app
+    from app.dependencies.database import get_db
+
+    mock_session = AsyncMock()
+
+    async def override_db():
+        yield mock_session
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/v2/a2a/members")
+        assert resp.status_code in (401, 403)
     finally:
         app.dependency_overrides.clear()
 

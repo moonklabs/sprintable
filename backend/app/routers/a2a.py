@@ -30,6 +30,13 @@ GetTask가 그 thread를 폴링해 첫 답신을 발견하면 `TASK_STATE_COMPLE
 `ConversationWebhookDelivery` retry+상태추적과 다름) CC가 그 순간 미접속이면 실시간 유실된다
 (단 `ConversationMessage` 자체는 DB에 영속). A2A는 인터페이스를 캡슐화하나 하위 채널의
 신뢰성 차이까지 없애진 못한다 — Phase 3 이후 재검토 대상.
+
+**S3(story 5578a8e2) — 발견→위임**: `GET /api/v2/a2a/members`(신규, 문서
+`e-a2a-poc-s3-design-crux`)가 org 내 활성 agent 전원의 Agent Card를 반환 + `?skill=` 필터.
+⚠️ **S1/S2의 개별 member_id 엔드포인트와 달리 이건 org 전체 로스터 열거라 인증 필수**
+(PO 판정 — 오늘 S20 IDOR 스윕과 동형 노출 클래스, `get_verified_org_id`+`get_current_user`로
+기존 `list_team_members`와 동일하게 authed). 발견된 member_id로 기존 S2 `SendMessage`/`GetTask`
+경로를 그대로 재사용(신규 위임 코드 없음).
 """
 from __future__ import annotations
 
@@ -37,16 +44,18 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.a2a_task import A2ATask
 from app.models.agent_deployment import AgentPersona
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
+from app.repositories.team_member import TeamMemberRepository
 from app.routers.ws_chat import _broadcast
 from app.schemas.a2a import (
     AgentCapabilities,
@@ -150,6 +159,41 @@ async def _build_agent_card(session: AsyncSession, member: TeamMember, base_url:
         default_output_modes=["text/plain"],
         skills=skills,
     )
+
+
+def _skill_matches(card: AgentCard, query: str) -> bool:
+    q = query.lower()
+    for skill in card.skills:
+        if q == skill.id.lower():
+            return True
+        if any(q in tag.lower() for tag in skill.tags):
+            return True
+        if q in skill.name.lower() or q in skill.description.lower():
+            return True
+    return False
+
+
+@router.get("/members", response_model=list[AgentCard])
+async def list_agent_cards(
+    request: Request,
+    skill: str | None = Query(default=None),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> list[AgentCard]:
+    """S3(story 5578a8e2) — 발견: caller org 내 활성 agent 전원의 Agent Card 열거 + `?skill=`
+    필터(id/tags/name/description OR 매칭, 대소문자 무시). 개별 member_id 엔드포인트와 달리
+    org 전체 로스터 열거라 인증 필수(PO 판정, 오늘 S20 IDOR 스윕과 동형 노출 클래스)."""
+    repo = TeamMemberRepository(session, org_id)
+    agents = await repo.list(type="agent", is_active=True)
+
+    base_url = str(request.base_url).rstrip("/")
+    cards = [await _build_agent_card(session, agent, base_url) for agent in agents]
+
+    if skill:
+        cards = [c for c in cards if _skill_matches(c, skill)]
+
+    return cards
 
 
 @router.get("/members/{member_id}/agent-card.json")
