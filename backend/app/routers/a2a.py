@@ -204,11 +204,15 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
     # 동형으로 택일 — member-bound WebhookConfig 有→Discord webhook, 無→fakechat WS(_broadcast).
     # `_get_agent_member`가 이미 type="agent"+is_active를 강제해 여기 도달하는 멤버는 항상 둘 중
     # 하나로 도달 가능하므로 REJECTED 분기는 없다(도달불가 케이스가 실제로 없음).
-    webhook = (await session.execute(
-        select(WebhookConfig).where(
+    # 라이브 E2E(까심발견 아닌 오르테가군 직접 스모크)MUST: member-global+project별로 활성
+    # WebhookConfig가 여러 개일 수 있어(예: 디디 본인) — 여긴 "존재 여부"만 필요하므로
+    # scalar_one_or_none()(MultipleResultsFound 500) 대신 first() 사용. 실 전달은 다중 타깃
+    # resolve를 이미 하는 deliver_conversation_message_webhook에 위임(아래, 변경 없음).
+    has_webhook = (await session.execute(
+        select(WebhookConfig.id).where(
             WebhookConfig.member_id == member_id, WebhookConfig.is_active.is_(True)
-        )
-    )).scalar_one_or_none()
+        ).limit(1)
+    )).first() is not None
 
     # S2: task-태깅 Conversation(=A2A context_id) — CC 어댑터가 이 두 경로 중 하나로 실 주입한다.
     conv_id = uuid.uuid4()
@@ -236,7 +240,7 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
     await session.flush()
     await session.commit()
 
-    if webhook is not None:
+    if has_webhook:
         await deliver_conversation_message_webhook(
             message_id=root_message_id,
             conversation_id=conv_id,
