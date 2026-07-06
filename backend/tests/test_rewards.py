@@ -247,3 +247,21 @@ async def test_leaderboard_invalid_period_400():
         assert resp.status_code == 400
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_leaderboard_403_when_project_not_in_caller_org():
+    """산티아고 SME fast-follow(S20 전수봉인): project_id가 caller org 소속 아니면 403
+    (이전엔 project 소속 검증 자체가 없어 project_id만 알면 타 org 리더보드가 노출됐다)."""
+    client, session, app = await _client()
+    try:
+        not_found = MagicMock()
+        not_found.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=not_found)
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/rewards/leaderboard?project_id={PROJECT_ID}&period=all")
+
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
