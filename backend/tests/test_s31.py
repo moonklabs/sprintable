@@ -278,6 +278,23 @@ async def test_get_me_200():
 
 
 @pytest.mark.anyio
+async def test_get_me_404_when_member_id_is_not_self():
+    """S20(authz-coverage 스캐너 발견): member_id가 caller 본인이 아니면 조회 실패(404) —
+    이전엔 member_id를 그대로 신뢰해 임의 member의 email 등 PII를 노출했다(update_me엔 있는
+    self-check가 get_me엔 없었다). 본인이 아니면 where_clause가 0행 → repo가 None 반환."""
+    client, session, app = await _client()
+    try:
+        session.execute = AsyncMock(return_value=_mock_result(None))
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/me?member_id={uuid.uuid4()}")
+
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_get_me_via_api_key_200():
     """API key 인증: auth.user_id = TeamMember.id → id 분기로 조회."""
     client, session, app = await _client_api_key()
