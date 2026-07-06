@@ -3231,8 +3231,6 @@
     "back": "이전",
     "runtimeQuestion": "어디서 이 에이전트를 실행하나요?",
     "runtimeGuide": "런타임에 맞춰 지침 파일명(CLAUDE.md/AGENTS.md/GEMINI.md)과 연결 배선이 자동으로 조정됩니다.",
-    "runtimeConnector": "커넥터",
-    "runtimeConnectorNote": "목록에 없는 런타임 — 범용 연결 설정으로 직접 붙입니다.",
     "runtimeSupportedLabel": "지원",
     "runtimeComingSoonLabel": "준비 중",
     "runtimeExperimental": "실험적",

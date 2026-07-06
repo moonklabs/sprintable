@@ -3231,8 +3231,6 @@
     "back": "Back",
     "runtimeQuestion": "Where will this agent run?",
     "runtimeGuide": "The guide filename (CLAUDE.md/AGENTS.md/GEMINI.md) and connection wiring adjust automatically to match the runtime.",
-    "runtimeConnector": "Connector",
-    "runtimeConnectorNote": "Not in the list — connect directly via a generic connection setup.",
     "runtimeSupportedLabel": "Supported",
     "runtimeComingSoonLabel": "Coming soon",
     "runtimeExperimental": "Experimental",

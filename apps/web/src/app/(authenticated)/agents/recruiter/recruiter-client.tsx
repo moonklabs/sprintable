@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import {
   Check, Copy, Download, RefreshCw, ChevronLeft, Info, Sparkles,
-  Palette, Cog, Search, ClipboardList, Briefcase, IdCard, Plug,
+  Palette, Cog, Search, ClipboardList, Briefcase, IdCard,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -264,7 +264,9 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
   const [rotating, setRotating] = useState(false);
   const [rotateError, setRotateError] = useState<string | null>(null);
 
-  const guideFilename = runtimeCapabilities?.find((r) => r.slug === runtime)?.guide_filename
+  // 실측(BE PR #1911): 일반 런타임 지침 파일명은 `prompt_file`(`guide_filename`은 connector 전용
+  // "CONNECTOR_SETUP.md") — 당초 안내와 필드명이 달라 실 스키마로 정정.
+  const guideFilename = runtimeCapabilities?.find((r) => r.slug === runtime)?.prompt_file
     ?? RUNTIME_GUIDE_FILENAME_FALLBACK[runtime] ?? 'CLAUDE.md';
 
   const handleRecruit = async () => {
@@ -542,17 +544,6 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
                             <Badge variant="chip" className="text-[9px]">{t('runtimeComingSoonBadge')}</Badge>
                           </button>
                         ))}
-                      </div>
-                    </div>
-                    {/* 커넥터(레지스트리 밖 transport 카테고리, 오르테가 확정 — RuntimeType enum 아님·
-                        네이티브 미목록 런타임용 FE 전용 catch-all) */}
-                    <div className="flex items-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 p-2.5">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border bg-card text-xs">
-                        <Plug className="h-3.5 w-3.5" aria-hidden />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-bold text-foreground">{t('runtimeConnector')}</p>
-                        <p className="text-[10px] text-muted-foreground">{t('runtimeConnectorNote')}</p>
                       </div>
                     </div>
                   </>
