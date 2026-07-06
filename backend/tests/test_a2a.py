@@ -382,9 +382,10 @@ async def test_send_message_working_when_member_has_multiple_active_webhooks():
 
 
 @pytest.mark.anyio
-async def test_send_message_working_via_fakechat_ws_when_no_webhook():
-    """S2 정정(2026-07-06): webhook 없는 멤버는 REJECTED가 아니라 fakechat WS(_broadcast)로
-    전달 시도 후 WORKING — 플랫폼 기존 라우팅(webhook_targeting.py)과 동형 택일."""
+async def test_send_message_working_via_sse_pipeline_when_no_webhook():
+    """헤드라인 fix(2026-07-06, 문서 a2a-headline-sse-reroute-crux): webhook 없는 멤버는
+    REJECTED가 아니라 Event/agent_gateway SSE 파이프라인(Event 생성→assign_recipient_seq→
+    wake_agent)으로 전달 시도 후 WORKING — 죽은 ws_chat._broadcast 아님."""
     client, session, app = await _authed_client(uuid.uuid4())
     try:
         member = _mock_member()
@@ -406,12 +407,13 @@ async def test_send_message_working_via_fakechat_ws_when_no_webhook():
         session.commit = AsyncMock()
 
         with patch("app.routers.a2a.deliver_conversation_message_webhook", new_callable=AsyncMock) as mock_deliver, \
-             patch("app.routers.a2a._broadcast", new_callable=AsyncMock) as mock_broadcast:
+             patch("app.routers.a2a.assign_recipient_seq", new_callable=AsyncMock, return_value=7) as mock_assign_seq, \
+             patch("app.routers.a2a.wake_agent") as mock_wake_agent:
             async with client as c:
                 resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=_SEND_REQ)
             mock_deliver.assert_not_called()
-            mock_broadcast.assert_called_once()
-            assert mock_broadcast.call_args[0][0] == str(MEMBER_ID)
+            mock_assign_seq.assert_called_once()
+            mock_wake_agent.assert_called_once_with(str(MEMBER_ID), 7)
 
         assert resp.status_code == 200
         body = resp.json()
