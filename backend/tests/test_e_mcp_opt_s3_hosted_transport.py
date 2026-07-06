@@ -226,12 +226,13 @@ async def test_verify_connection_http_skips_synthetic_event_and_wake(monkeypatch
     db = AsyncMock()
     db.execute = AsyncMock(return_value=_scalar(member))
     rail = [{"state": s, "status": "done"} for s in HTTP_RAIL_STATES]
-    with patch.object(ag, "start_verification", new=AsyncMock()) as start, \
+    with patch.object(ag, "assert_agent_owner", new=AsyncMock(return_value=member)), \
+         patch.object(ag, "start_verification", new=AsyncMock()) as start, \
          patch.object(ag, "get_verification_state",
                       new=AsyncMock(return_value={"verified": True, "rail": rail, "verify_seq": None})), \
          patch("app.routers.agent_gateway.wake_agent", new=MagicMock()) as wake:
         out = await ag.verify_agent_connection(
-            member.id, transport="http", session=db, auth=MagicMock(), org_id=uuid.uuid4(),
+            member.id, transport="http", session=db, auth=MagicMock(user_id=str(uuid.uuid4())), org_id=uuid.uuid4(),
         )
     assert out["verified"] is True and out["rail"] == rail
     start.assert_not_awaited()

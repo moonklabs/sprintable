@@ -80,6 +80,9 @@ class RewardRepository:
     ) -> list[dict]:
         limit = min(limit, 100)
 
+        # S20 전수스캔(산티아고 SME fast-follow): reward_balances 뷰는 org_id 컬럼이 없어(member_id,
+        # project_id, balance만) SQL 레벨 org_id 필터가 불가 — project_id가 caller org 소속인지는
+        # 라우터(get_leaderboard)에서 사전 검증한다(project_id는 org 1:1이라 그걸로 충분).
         if period == "all":
             q = (
                 "SELECT member_id, balance FROM reward_balances"
@@ -95,10 +98,12 @@ class RewardRepository:
 
         period_seconds = {"daily": 86400, "weekly": 7 * 86400, "monthly": 30 * 86400}
         seconds = period_seconds.get(period, 86400)
-        params2: dict = {"pid": str(project_id), "seconds": seconds, "lim": limit}
+        # S20 전수스캔(산티아고 SME fast-follow): reward_ledger는 org_id 보유 — list()/get_balance()와
+        # 동형으로 org_id 필터 추가(project_id만으론 타 org 리더보드 노출 가능했다).
+        params2: dict = {"pid": str(project_id), "org_id": str(self.org_id), "seconds": seconds, "lim": limit}
         q2 = (
             "SELECT member_id, CAST(SUM(amount) AS float) AS balance FROM reward_ledger"
-            " WHERE project_id = :pid"
+            " WHERE project_id = :pid AND org_id = :org_id"
             " AND created_at >= NOW() - (:seconds || ' seconds')::interval"
             " GROUP BY member_id ORDER BY balance DESC LIMIT :lim"
         )

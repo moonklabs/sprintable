@@ -159,16 +159,43 @@ async def test_file_lock_no_conflict_200():
         session.flush = AsyncMock()
         session.add = MagicMock()
 
-        async with client as c:
-            resp = await c.post(
-                f"/api/v2/team-members/{MEMBER_ID}/file-lock",
-                json={"file_paths": ["src/foo.py"]},
-            )
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock, return_value=None):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-lock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
 
         assert resp.status_code == 200
         body = resp.json()
         assert body["locked"] is True
         assert body["warning"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_file_lock_403_when_caller_is_not_member():
+    """prod 핫픽스(까심 재QA CRITICAL): Bob이 Alice member_id로 file-lock 시도 시 403
+    (이전엔 _auth가 선언만 되고 미사용이라 caller-ownership 확인이 전혀 없었다)."""
+    from fastapi import HTTPException
+
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = member
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   side_effect=HTTPException(status_code=403, detail="Cannot lock files as another member")):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-lock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
+
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
@@ -202,7 +229,8 @@ async def test_file_lock_with_conflict_warning():
         session.add = MagicMock()
 
         with patch("app.routers.file_locks.publish_event"), \
-             patch("app.routers.file_locks.fire_webhooks", new_callable=AsyncMock):
+             patch("app.routers.file_locks.fire_webhooks", new_callable=AsyncMock), \
+             patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock, return_value=None):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/file-lock",
@@ -228,14 +256,38 @@ async def test_file_unlock_200():
         session.execute = AsyncMock(return_value=mock_result)
         session.flush = AsyncMock()
 
-        async with client as c:
-            resp = await c.post(
-                f"/api/v2/team-members/{MEMBER_ID}/file-unlock",
-                json={"file_paths": ["src/foo.py"]},
-            )
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock, return_value=None):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-unlock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
 
         assert resp.status_code == 200
         assert resp.json()["unlocked"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_file_unlock_403_when_caller_is_not_member():
+    """prod 핫픽스(까심 재QA CRITICAL): lock과 동일 갭 — Bob이 Alice 명의로 unlock 시도 시 403."""
+    from fastapi import HTTPException
+
+    client, session, app = await _client()
+    try:
+        mock_result = MagicMock()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   side_effect=HTTPException(status_code=403, detail="Cannot unlock files as another member")):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-unlock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
+
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 

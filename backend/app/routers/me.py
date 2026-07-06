@@ -27,7 +27,13 @@ async def get_me(
     is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
 
     if member_id:
-        where_clause = TeamMember.id == member_id
+        # S20(authz-coverage 스캐너 발견 — update_me엔 있는 self-check가 이 GET엔 없었다):
+        # 명시 member_id가 caller 본인일 때만 매칭 — 아니면 임의 member의 email 등 PII를
+        # 그대로 반환하던 갭(MeResponse.email 노출).
+        if is_api_key:
+            where_clause = (TeamMember.id == member_id) & (TeamMember.id == uid)
+        else:
+            where_clause = (TeamMember.id == member_id) & (TeamMember.user_id == uid)
     elif is_api_key:
         # API key 인증: auth.user_id = TeamMember.id
         where_clause = TeamMember.id == uid

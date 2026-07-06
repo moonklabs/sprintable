@@ -10,11 +10,12 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.file_lock import FileLock
 from app.models.team import TeamMember
 from app.routers.events import publish_event
+from app.services.member_resolver import assert_caller_is_member
 from app.services.webhook_dispatch import fire_webhooks
 
 router = APIRouter(tags=["file-locks"])
@@ -99,16 +100,24 @@ async def lock_files(
     body: FileLockBody,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    """AC1/3: 파일 lock 등록 + 충돌 시 warning 반환."""
-    # AC3-5 ②: team_members가 뷰(0088) — multi-row 안전(휴먼 multi-project) .limit(1).first().
+    """AC1/3: 파일 lock 등록 + 충돌 시 warning 반환.
+
+    prod 핫픽스(까심 재QA CRITICAL): ``_auth``가 선언만 되고 미사용 — caller-ownership 확인이
+    전혀 없었고, member 조회도 org_id 필터가 없어 타 org의 member_id를 targeting할 수 있었다.
+    self-scope(assert_caller_is_member) + org_id 필터 추가(core IDOR 가드만 — S17의
+    reclassify/cap/project-determinism 확장은 dev 기능이라 제외).
+    """
+    # org_id 필터: 타 org의 member_id를 targeting하는 cross-org IDOR 방지.
     member_result = await session.execute(
-        select(TeamMember).where(TeamMember.id == member_id).limit(1)
+        select(TeamMember).where(TeamMember.id == member_id, TeamMember.org_id == org_id).limit(1)
     )
     member = member_result.scalars().first()
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
+
+    await assert_caller_is_member(member_id, auth, session, org_id, detail="Cannot lock files as another member")
 
     # AC3: 충돌 체크
     conflicts = await _find_conflicts(session, member.project_id, member_id, body.file_paths)
@@ -145,13 +154,19 @@ async def unlock_files(
     body: FileUnlockBody,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    """AC2: 파일 lock 해제."""
+    """AC2: 파일 lock 해제.
+
+    prod 핫픽스(까심 재QA CRITICAL): lock_files와 동일 갭 — self-scope + org_id 필터 추가.
+    """
+    await assert_caller_is_member(member_id, auth, session, org_id, detail="Cannot unlock files as another member")
+
     now = datetime.now(timezone.utc)
     await session.execute(
         update(FileLock)
         .where(
+            FileLock.org_id == org_id,
             FileLock.member_id == member_id,
             FileLock.file_path.in_(body.file_paths),
             FileLock.released_at.is_(None),

@@ -34,10 +34,11 @@ async def test_verify_connection_unassigned_agent_400_via_stdio():
     db = AsyncMock()
     db.execute = AsyncMock(return_value=_scalar(member))
     from fastapi import HTTPException
-    with pytest.raises(HTTPException) as ei:
-        await ag.verify_agent_connection(
-            member.id, transport=None, session=db, auth=MagicMock(), org_id=uuid.uuid4(),
-        )
+    with patch.object(ag, "assert_agent_owner", new=AsyncMock(return_value=member)):
+        with pytest.raises(HTTPException) as ei:
+            await ag.verify_agent_connection(
+                member.id, transport=None, session=db, auth=MagicMock(user_id=str(uuid.uuid4())), org_id=uuid.uuid4(),
+            )
     assert ei.value.status_code == 400
 
 
@@ -48,10 +49,11 @@ async def test_verify_connection_unassigned_agent_400_via_http_too():
     db = AsyncMock()
     db.execute = AsyncMock(return_value=_scalar(member))
     from fastapi import HTTPException
-    with pytest.raises(HTTPException) as ei:
-        await ag.verify_agent_connection(
-            member.id, transport="http", session=db, auth=MagicMock(), org_id=uuid.uuid4(),
-        )
+    with patch.object(ag, "assert_agent_owner", new=AsyncMock(return_value=member)):
+        with pytest.raises(HTTPException) as ei:
+            await ag.verify_agent_connection(
+                member.id, transport="http", session=db, auth=MagicMock(user_id=str(uuid.uuid4())), org_id=uuid.uuid4(),
+            )
     assert ei.value.status_code == 400
 
 
@@ -61,13 +63,14 @@ async def test_verify_connection_assigned_agent_http_still_skips_sse(monkeypatch
     member = SimpleNamespace(id=uuid.uuid4(), project_id=uuid.uuid4())
     db = AsyncMock()
     db.execute = AsyncMock(return_value=_scalar(member))
-    with patch.object(ag, "start_verification", new=AsyncMock()) as start, \
+    with patch.object(ag, "assert_agent_owner", new=AsyncMock(return_value=member)), \
+         patch.object(ag, "start_verification", new=AsyncMock()) as start, \
          patch.object(ag, "get_verification_state", new=AsyncMock(
              return_value={"verified": True, "rail": [], "verify_seq": None},
          )), \
          patch("app.routers.agent_gateway.wake_agent", new=MagicMock()) as wake:
         out = await ag.verify_agent_connection(
-            member.id, transport="http", session=db, auth=MagicMock(), org_id=uuid.uuid4(),
+            member.id, transport="http", session=db, auth=MagicMock(user_id=str(uuid.uuid4())), org_id=uuid.uuid4(),
         )
     assert out["verified"] is True
     start.assert_not_awaited()

@@ -339,6 +339,9 @@ class AnalyticsRepository:
     ) -> list[dict]:
         limit = min(limit, 100)
 
+        # S20 전수스캔(산티아고 SME fast-follow, sibling — reward.py:leaderboard와 동형):
+        # reward_balances 뷰는 org_id 컬럼이 없어 SQL 필터 불가·caller가 project_id를 caller
+        # org 소속인지 사전 검증해야 한다(현재 미라우팅 dead code지만 향후 재배선 landmine 방지).
         if period == "all":
             q = "SELECT member_id, balance FROM reward_balances WHERE project_id = :pid ORDER BY balance DESC"
             params: dict = {"pid": str(project_id), "lim": limit}
@@ -351,10 +354,11 @@ class AnalyticsRepository:
 
         period_ms = {"daily": 86400, "weekly": 7 * 86400, "monthly": 30 * 86400}
         seconds = period_ms.get(period, 86400)
-        params2: dict = {"pid": str(project_id), "seconds": seconds}
+        params2: dict = {"pid": str(project_id), "org_id": str(self.org_id), "seconds": seconds}
         q2 = (
             "SELECT member_id, SUM(amount) AS balance FROM reward_ledger"
-            " WHERE project_id = :pid AND created_at >= NOW() - (:seconds || ' seconds')::interval"
+            " WHERE project_id = :pid AND org_id = :org_id"
+            " AND created_at >= NOW() - (:seconds || ' seconds')::interval"
             " GROUP BY member_id ORDER BY balance DESC LIMIT :lim"
         )
         params2["lim"] = limit

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.dependencies.ownership import assert_agent_owner
 from app.models.project import Project
 from app.models.team import TeamMember
 from app.schemas.team_member import OrgAgentCreate, TeamMemberResponse
@@ -234,10 +235,11 @@ async def verify_agent_connection(
     이 가드보다 먼저면 미배정 에이전트가 stdio=400/http=200으로 갈렸다(까심 QA). project 스코프가
     없는 에이전트는애초에 "연결 검증"이 의미가 없으므로(heartbeat 조차 project 컨텍스트 하 tool
     호출을 전제) 두 transport 모두 이 가드를 먼저 통과해야 한다.
+
+    S19(#9 MUST, prod 핫픽스): org-scope 조회(`_fetch_org_agent`)만으로는 org 내 임의 멤버가
+    남의 agent 연결검증을 트리거할 수 있었다. `assert_agent_owner`(생성자 또는 org-admin)로 닫는다.
     """
-    member = await _fetch_org_agent(session, agent_id, org_id)
-    if member is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    member = await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
     if not member.project_id:
         raise HTTPException(status_code=400, detail="agent has no project scope to verify")
 

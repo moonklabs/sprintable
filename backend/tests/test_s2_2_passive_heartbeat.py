@@ -79,14 +79,14 @@ def anyio_backend():
 
 @pytest.mark.anyio
 async def test_heartbeat_endpoint_200():
-    """AC1: PATCH /api/v2/team-members/{id}/heartbeat → 200."""
+    """AC1: PATCH /api/v2/team-members/{id}/heartbeat → 200 (S19: self-scope 통과 시)."""
     client, session, app = await _heartbeat_client()
     try:
         member = _mock_member_for_heartbeat()
         updated = _mock_member_for_heartbeat()
 
         mock_get_result = MagicMock()
-        mock_get_result.scalar_one_or_none.return_value = member
+        mock_get_result.scalars.return_value.first.return_value = member
 
         mock_update_result = MagicMock()
         mock_update_result.scalar_one_or_none.return_value = updated
@@ -104,10 +104,35 @@ async def test_heartbeat_endpoint_200():
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
 
-        async with client as c:
-            resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}/heartbeat")
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
+            async with client as c:
+                resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}/heartbeat")
 
         assert resp.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_heartbeat_403_when_caller_is_different_member():
+    """S19(#1 MUST): auth 파라미터가 아예 없어 caller 확인이 전혀 없었다 — 타 member 명의로
+    heartbeat(presence 스푸핑) 시도 시 403."""
+    from fastapi import HTTPException
+
+    client, session, app = await _heartbeat_client()
+    try:
+        member = _mock_member_for_heartbeat()
+        mock_get_result = MagicMock()
+        mock_get_result.scalars.return_value.first.return_value = member
+        session.execute = AsyncMock(return_value=mock_get_result)
+
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   side_effect=HTTPException(status_code=403, detail="Cannot heartbeat as another member")):
+            async with client as c:
+                resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}/heartbeat")
+
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
@@ -126,15 +151,20 @@ async def test_heartbeat_response_shape():
             nonlocal call_count
             call_count += 1
             result = MagicMock()
-            result.scalar_one_or_none.return_value = member if call_count == 1 else updated
+            if call_count == 1:
+                result.scalars.return_value.first.return_value = member
+            else:
+                result.scalar_one_or_none.return_value = updated
             return result
 
         session.execute = mock_execute
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
 
-        async with client as c:
-            resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}/heartbeat")
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
+            async with client as c:
+                resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}/heartbeat")
 
         body = resp.json()
         assert body["ok"] is True

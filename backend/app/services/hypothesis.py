@@ -65,12 +65,16 @@ def map_legacy_outcome_status(outcome_status: str | None) -> str | None:
     return _LEGACY_OUTCOME_TO_STATUS.get(outcome_status)
 
 
-async def _verify_human_owner(session: AsyncSession, owner_id: uuid.UUID) -> None:
+async def _verify_human_owner(session: AsyncSession, org_id: uuid.UUID, owner_id: uuid.UUID) -> None:
+    """prod 핫픽스(S20 전수스캔 MUST): 이전엔 org_id 검증이 없어(``lookup_members_by_ids``가
+    org 필터 없이 순수 id로만 조회) caller가 임의 org의 human을 owner_member_id로 지정할 수
+    있었다(cross-org 오귀속 — 데이터 유출은 아니나 신원 스푸핑). 조회된 멤버가 caller의 org
+    소속인지 검증한다."""
     members = await lookup_members_by_ids({owner_id}, session)
     rm = members.get(owner_id)
-    if rm is None or rm.type != "human":
+    if rm is None or rm.type != "human" or rm.org_id != org_id:
         raise HypothesisServiceError(
-            "HUMAN_OWNER_REQUIRED", "owner_member_id는 type='human' 멤버여야 합니다."
+            "HUMAN_OWNER_REQUIRED", "owner_member_id는 caller와 동일 org의 type='human' 멤버여야 합니다."
         )
 
 
@@ -138,7 +142,7 @@ async def create_hypothesis(
                 "HUMAN_OWNER_REQUIRED", "agent caller는 휴먼 owner_member_id를 명시해야 합니다."
             )
         owner_id = caller.id
-    await _verify_human_owner(session, owner_id)
+    await _verify_human_owner(session, org_id, owner_id)
 
     # 상태 — agent/API key는 proposed로 강제(에러 아님). 생성 허용 상태는 proposed|active.
     status = payload.status or "proposed"
@@ -253,7 +257,7 @@ async def update_hypothesis(
     sprint_id = fields.pop("sprint_id", None)
     new_owner = fields.get("owner_member_id")
     if new_owner is not None:
-        await _verify_human_owner(session, new_owner)
+        await _verify_human_owner(session, org_id, new_owner)
     # cross-project 가드는 어떤 컬럼 mutation보다 먼저 — 거부 시 부분 update 0(create 경로와 동형).
     if sprint_id_provided and sprint_id is not None:
         await _assert_targets_same_project(session, hyp.project_id, [], [], sprint_id)

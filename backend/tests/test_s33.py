@@ -94,6 +94,24 @@ async def test_dashboard_empty_result_200():
         app.dependency_overrides.clear()
 
 
+@pytest.mark.anyio
+async def test_dashboard_404_when_member_not_in_caller_org():
+    """prod 핫픽스(S20 MUST): member_id가 caller org 소속 아니면 404(cross-org 데이터 누출 차단)
+    — project_id를 명시해도 member org 검증은 항상 수행된다."""
+    client, session, app = await _client()
+    try:
+        not_found = MagicMock()
+        not_found.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=not_found)
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/dashboard?member_id={MEMBER_ID}&project_id={PROJECT_ID}")
+
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
 # ── Current Project ──────────────────────────────────────────────────────────
 
 @pytest.mark.anyio

@@ -328,6 +328,24 @@ async def test_update_owner_agent_raises():
     assert ei.value.code == "HUMAN_OWNER_REQUIRED"
 
 
+async def test_update_owner_cross_org_raises():
+    """prod 핫픽스(S20 전수스캔 MUST): owner_member_id가 caller org와 다른 org의 human이면
+    거부(오귀속/cross-org 스푸핑 차단) — type='human'만으로는 부족, org 일치도 필요."""
+    repo = _repo_mock(_hyp_stub())
+    other_org_member = ResolvedMember(
+        id=OWNER_ID, user_id=uuid.uuid4(), name="o", type="human",
+        role="member", org_id=uuid.uuid4(),  # ORG_ID와 다름
+    )
+    p_repo = patch.object(svc, "HypothesisRepository", return_value=repo)
+    p_lookup = patch.object(svc, "lookup_members_by_ids", AsyncMock(return_value={OWNER_ID: other_org_member}))
+    with p_repo, p_lookup, pytest.raises(svc.HypothesisServiceError) as ei:
+        await svc.update_hypothesis(
+            MagicMock(), ORG_ID, _caller("human"), HYP_ID,
+            HypothesisUpdate(owner_member_id=OWNER_ID),
+        )
+    assert ei.value.code == "HUMAN_OWNER_REQUIRED"
+
+
 async def test_update_statement_ok():
     repo = _repo_mock(_hyp_stub())
     p_repo, p_lookup = _patch(repo, "human")

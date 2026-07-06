@@ -9,10 +9,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.gate import Gate
 from app.models.pm import Story
+from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.services.merge_verdict_gate import (
     AUTO_MERGE,
@@ -129,6 +130,7 @@ async def report_done(
     background_tasks: BackgroundTasks,
     response: Response,
     session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> ReportDoneResponse:
     if body.stage not in _VALID_STAGES:
@@ -137,11 +139,24 @@ async def report_done(
             detail=f"Invalid stage '{body.stage}'. Valid: {list(_VALID_STAGES)}",
         )
 
-    # 스토리 조회
-    result = await session.execute(select(Story).where(Story.id == body.story_id))
+    # S20 전수스캔 finding #12: org_id 검증이 전혀 없어 임의 org의 caller가 다른 org 소유
+    # story를 조회/전이(cross-org story-pipeline 조작)할 수 있었다 — 이제 caller org로 필터.
+    result = await session.execute(
+        select(Story).where(Story.id == body.story_id, Story.org_id == org_id)
+    )
     story = result.scalar_one_or_none()
     if story is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Story not found")
+
+    # S20 finding #12(sibling): body.agent_id도 검증 없이 gate/line 평가의 actor로 그대로
+    # 쓰였다 — 임의 agent_id로 actor 스푸핑 가능했던 갭. caller org 소속 member인지 확인.
+    agent_check = await session.execute(
+        select(TeamMember.id).where(
+            TeamMember.id == body.agent_id, TeamMember.org_id == org_id,
+        ).limit(1)
+    )
+    if agent_check.scalar_one_or_none() is None:
+        raise HTTPException(status_code=400, detail="agent_id not found in this organization")
 
     transition = _TRANSITIONS[body.stage]
     next_stage: str = transition["next_stage"]
