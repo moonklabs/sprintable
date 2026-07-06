@@ -1,12 +1,13 @@
-"""E-A2A-POC S1+S2(story 480e81fb·1485217f): 최소 A2A 서버 — Agent Card + JSON-RPC
-(SendMessage/GetTask) + CC 어댑터(fakechat 대체).
+"""E-A2A-POC S1+S2+S3 / E-A2A-P1 S1+S2: A2A 서버 — Agent Card + JSON-RPC
+(SendMessage/GetTask) + CC 어댑터(fakechat 대체) + 발견 + 프로덕션 하드닝.
 
-PoC 스코프(선생님 지시 + PO 크럭스 2026-07-06): 인증·멀티tenant·signed Card·push 웹훅 생략
-(Phase 3). member_id로만 스코프(org_id 검증 없음) — `public_docs.py` 선례처럼 비인증 라우트.
+PoC 스코프였던 부분(2026-07-06): signed Card·멀티tenant는 여전히 Phase 3 대상. Card fetch
+(`GET .../agent-card.json`)는 P1-S1 판단대로 unauth 유지(`public_docs.py` 선례 — 실 A2A
+컨벤션상 개별 Card는 의도적 공개, opaque member_id당 name+skills뿐이라 PII 아님).
 
-⚠️ Phase 3 리스크 노트(PO 크럭스): `/rpc`의 `SendMessage`는 실제 task를 생성/트리거하는
-action-triggering 엔드포인트다 — PoC는 내부 2에이전트 contained 시나리오라 비인증이 허용되지만
-외부 interop 단계에서는 인증이 반드시 필요하다.
+⚠️ **`/rpc`는 P1-S2(story 7b93eb10)로 authed+org-scoped 승격됨**(PO 크럭스) — action-triggering
+엔드포인트라 caller org 소속 agent에게만 위임 가능(`_get_agent_member`에 org_id 검증 추가,
+cross-org IDOR 봉인·오늘 S20 스윕과 동형 클래스였음).
 
 spec shape는 `a2aproject/A2A`(GitHub, main) `specification/a2a.proto` + `docs/specification.md`
 실측 기준(PascalCase 메소드명·camelCase 필드·`TASK_STATE_`/`ROLE_` enum) — story AC의
@@ -42,7 +43,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
@@ -53,10 +54,11 @@ from app.dependencies.database import get_db
 from app.models.a2a_task import A2ATask
 from app.models.agent_deployment import AgentPersona
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
 from app.models.team import TeamMember
 from app.models.webhook_config import WebhookConfig
 from app.repositories.team_member import TeamMemberRepository
-from app.routers.ws_chat import _broadcast
+from app.routers.ws_chat import _broadcast, _rooms
 from app.schemas.a2a import (
     AgentCapabilities,
     AgentCard,
@@ -88,6 +90,14 @@ _TERMINAL_STATES = {
     "TASK_STATE_REJECTED",
 }
 
+# P1-S2(story 7b93eb10, PO 크럭스 승인): model-mediated 완료신호 부재의 백스톱 — CC가 이 시간
+# 안에 task-thread 답신을 안 하면 GetTask가 폴링 시점에 TASK_STATE_FAILED로 전이한다(영구
+# WORKING 정체 방지). ⚠️ tradeoff(정직히 문서화, PO 지시): CC가 30분 넘게 조용히 오래 작업하는
+# 정상 케이스도 false-FAIL될 수 있다(interim ack 없는 model-mediated 구조의 근본 제약) — 실사용
+# 데이터가 쌓이면 이 값을 튜닝한다. PoC→P1 단계에선 설정가능화(요청별 override) 대신 고정 상수로
+# 시작(실사용 데이터 없이 설정 노출은 과설계).
+A2A_TASK_TIMEOUT_MINUTES = 30
+
 
 class _JsonRpcException(Exception):
     def __init__(self, code: int, message: str) -> None:
@@ -95,12 +105,19 @@ class _JsonRpcException(Exception):
         self.message = message
 
 
-async def _get_agent_member(session: AsyncSession, member_id: uuid.UUID) -> TeamMember:
-    result = await session.execute(
-        select(TeamMember).where(
-            TeamMember.id == member_id, TeamMember.type == "agent", TeamMember.is_active.is_(True)
-        )
-    )
+async def _get_agent_member(
+    session: AsyncSession, member_id: uuid.UUID, org_id: uuid.UUID | None = None
+) -> TeamMember:
+    """P1-S2(story 7b93eb10, PO 크럭스 승인): `org_id`가 주어지면 caller org로 스코프한다 —
+    `/rpc`는 이제 authed+org-scoped 호출이라 이 검증이 필수(이전엔 org_id 비교가 없어 caller
+    org와 무관하게 아무 agent에게나 SendMessage 가능한 cross-org IDOR였다, S20과 동형).
+    Card fetch(`get_agent_card`)는 P1-S1 판단대로 org_id 없이(unauth) 그대로 호출한다."""
+    conditions = [
+        TeamMember.id == member_id, TeamMember.type == "agent", TeamMember.is_active.is_(True)
+    ]
+    if org_id is not None:
+        conditions.append(TeamMember.org_id == org_id)
+    result = await session.execute(select(TeamMember).where(*conditions))
     member = result.scalar_one_or_none()
     if member is None:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -208,15 +225,24 @@ async def get_agent_card(
 
 
 def _task_to_dict(task: A2ATask) -> dict:
+    status_message = None
+    failure_reason = (task.task_metadata or {}).get("failure_reason") if task.state == "TASK_STATE_FAILED" else None
+    if failure_reason:
+        status_message = Message(
+            message_id=str(uuid.uuid4()), context_id=str(task.context_id),
+            role="ROLE_AGENT", parts=[Part(text=failure_reason)],
+        )
     return Task(
         id=str(task.id),
         context_id=str(task.context_id),
         status=TaskStatus(
             state=task.state,
+            message=status_message,
             timestamp=task.updated_at.isoformat() if task.updated_at else None,
         ),
         artifacts=[Artifact.model_validate(a) for a in task.artifacts],
         history=[Message.model_validate(m) for m in task.history],
+        metadata=task.task_metadata,
     ).model_dump(by_alias=True, mode="json")
 
 
@@ -284,6 +310,8 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
     await session.flush()
     await session.commit()
 
+    task_metadata: dict = {"delivery_channel": "webhook" if has_webhook else "fakechat_ws"}
+
     if has_webhook:
         await deliver_conversation_message_webhook(
             message_id=root_message_id,
@@ -300,6 +328,10 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
     else:
         # fakechat WS 경로 — channel.py:_persist_and_broadcast와 동일 payload shape,
         # 다만 A2A엔 실 caller member가 없어 sender_id=None(시스템 발신, 기존 패턴).
+        # P1-S2(C): _broadcast는 ack가 없어 그 순간 연결 소켓 0이어도 예외가 안 난다 — 하드 실패로
+        # 단정하지 않고(메시지는 conversation_messages에 영속·재연결 시 여전히 도달 가능) 정보성
+        # 신호만 task_metadata에 남긴다. 최종 안전망은 A2A_TASK_TIMEOUT_MINUTES 백스톱(GetTask).
+        task_metadata["connected_at_send"] = bool(_rooms.get(str(member_id)))
         payload = json.dumps({
             "id": str(root_message_id),
             "conversation_id": str(conv_id),
@@ -317,6 +349,7 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
         root_message_id=root_message_id,
         member_id=member_id,
         state="TASK_STATE_WORKING",
+        task_metadata=task_metadata,
         history=[incoming.model_dump(by_alias=True, mode="json")],
         artifacts=[],
     ))
@@ -369,6 +402,35 @@ async def _handle_get_task(session: AsyncSession, member: TeamMember, params: di
             await session.flush()
             await session.commit()
             await session.refresh(task)
+        else:
+            # P1-S2(B, PO 크럭스 승인): 답신이 아직 없으면 2단 판정 — (1) Discord webhook 경로면
+            # 실 배달상태(ConversationWebhookDelivery, root_message_id로 조인 — 신규 컬럼 불요)로
+            # 확실히 아는 실패를 우선 반영. (2) 그것도 아니면 생성 후 타임아웃 경과를 두 경로
+            # 공통 백스톱으로 사용(fakechat WS는 ack가 없어 이게 유일한 실패 신호).
+            failure_reason: str | None = None
+
+            delivery = (await session.execute(
+                select(ConversationWebhookDelivery)
+                .where(ConversationWebhookDelivery.message_id == task.root_message_id)
+                .order_by(ConversationWebhookDelivery.created_at.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+            if delivery is not None and delivery.status == "failed":
+                failure_reason = (
+                    f"webhook delivery failed after {delivery.attempt_count} attempts: "
+                    f"{delivery.last_error or 'unknown error'}"
+                )
+            elif datetime.now(timezone.utc) - task.created_at > timedelta(minutes=A2A_TASK_TIMEOUT_MINUTES):
+                failure_reason = (
+                    f"timed out waiting for agent response after {A2A_TASK_TIMEOUT_MINUTES}m"
+                )
+
+            if failure_reason is not None:
+                task.state = "TASK_STATE_FAILED"
+                task.task_metadata = {**(task.task_metadata or {}), "failure_reason": failure_reason}
+                await session.flush()
+                await session.commit()
+                await session.refresh(task)
 
     return _task_to_dict(task)
 
@@ -383,9 +445,13 @@ _METHODS = {
 async def a2a_rpc(
     member_id: uuid.UUID,
     body: JsonRpcRequest,
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JsonRpcResponse:
-    member = await _get_agent_member(session, member_id)
+    """P1-S2: action-triggering 엔드포인트라 authed+org-scoped(PO 크럭스 — S1 PoC 리스크 노트
+    봉인). Card fetch(GET .../agent-card.json)는 P1-S1 판단대로 unauth 유지, 여기만 인증."""
+    member = await _get_agent_member(session, member_id, org_id)
 
     handler = _METHODS.get(body.method)
     if handler is None:
