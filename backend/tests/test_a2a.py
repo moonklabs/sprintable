@@ -56,6 +56,19 @@ def _result(value):
     r = MagicMock()
     r.scalar_one_or_none.return_value = value
     r.scalar_one.return_value = value
+    r.first.return_value = value
+    return r
+
+
+def _multi_row_result():
+    """라이브 E2E MUST(2026-07-06): 활성 WebhookConfig가 여러 개인 멤버 — .scalar_one_or_none()/
+    .scalar_one()을 호출하면 MultipleResultsFound가 나야 정상(회귀 감지용), .first()만 안전."""
+    from sqlalchemy.exc import MultipleResultsFound
+
+    r = MagicMock()
+    r.scalar_one_or_none.side_effect = MultipleResultsFound("multiple rows")
+    r.scalar_one.side_effect = MultipleResultsFound("multiple rows")
+    r.first.return_value = (uuid.uuid4(),)
     return r
 
 
@@ -183,6 +196,44 @@ async def test_send_message_working_when_webhook_configured():
             if call_count == 2:
                 return _result(webhook)
             return _result(working_task)  # 최종 requery
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+
+        with patch("app.routers.a2a.deliver_conversation_message_webhook", new_callable=AsyncMock) as mock_deliver:
+            async with client as c:
+                resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=_SEND_REQ)
+            mock_deliver.assert_called_once()
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["result"]["status"]["state"] == "TASK_STATE_WORKING"
+        assert body["error"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_send_message_working_when_member_has_multiple_active_webhooks():
+    """라이브 E2E MUST(2026-07-06, 오르테가군 스모크 발견): member-global+project별로 활성
+    WebhookConfig가 여러 개(디디 본인 케이스)여도 500(MultipleResultsFound) 없이 WORKING —
+    존재-여부 판정은 .first()만 쓰고 scalar_one_or_none()은 호출하지 않아야 한다."""
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        working_task = _mock_task("TASK_STATE_WORKING")
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _multi_row_result()  # 활성 webhook 2개 이상 시뮬레이션
+            return _result(working_task)
 
         session.execute = mock_execute
         session.flush = AsyncMock()
