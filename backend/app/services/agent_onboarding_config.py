@@ -40,6 +40,44 @@ def resolve_instruction_filename(runtime: str) -> str:
     return _INSTRUCTION_FILENAMES.get(runtime, _DEFAULT_INSTRUCTION_FILENAME)
 
 
+_RUNTIME_DISPLAY_NAMES: dict[str, str] = {
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "gemini": "Gemini",
+    "cursor": "Cursor",
+    CONNECTOR_RUNTIME: "Connector",
+}
+
+
+def list_runtime_capabilities() -> list[dict]:
+    """S6(유나/미르코 정합용) `GET /api/v2/runtime-capabilities` 계약 SSOT.
+
+    supported/tier는 **S5 emit 코드 실기준**(과대약속 금지) — recruiter/connection-artifact가
+    그 런타임으로 실제 아티팩트를 만들 수 있으면 supported=true. ``build_agent_mcp_config``는
+    MCP-native 4종(claude-code/codex/gemini/cursor) 모두 런타임-무관 동일 config를 emit하므로
+    전부 supported=true — 단 ``resolve_instruction_filename``이 claude-code만 확정 매핑(CLAUDE.md)
+    이고 나머지는 S7 shaping 전이라 generic fallback이므로 tier="experimental". connector는
+    `.mcp.json`은 성립 안 하나(``build_agent_mcp_config``가 None 반환) 안내 파일(CONNECTOR_SETUP.md)
+    emit은 성공하므로 supported=true·실 어댑터 조립은 후속이라 tier="experimental".
+    """
+    out = []
+    for runtime in sorted(SUPPORTED_RUNTIMES):
+        is_connector = runtime == CONNECTOR_RUNTIME
+        out.append({
+            "slug": runtime,
+            "display_name": _RUNTIME_DISPLAY_NAMES.get(runtime, runtime),
+            "supported": True,
+            "tier": "full" if runtime in _INSTRUCTION_FILENAMES else "experimental",
+            "transport": None if is_connector else default_transport_for_edition(),
+            "mcp_transport": [] if is_connector else sorted(SUPPORTED_TRANSPORTS),
+            "prompt_file": resolve_instruction_filename(runtime),
+            "guide_filename": "CONNECTOR_SETUP.md" if is_connector else None,
+            "supports_event_push": not is_connector,
+            "icon": None,
+        })
+    return out
+
+
 def build_connector_guidance(runtime_hint: str | None = None) -> str:
     """E-RECRUIT S5 Q2(PO 확정): connector 분기 = **포인터/안내만**(SSE dial-out은 `.mcp.json`과
     완전 별개 프로토콜 — 실제 어댑터 조립은 S7/후속). `connectors/{runtime}-sprintable/` 각 폴더의
