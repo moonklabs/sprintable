@@ -52,7 +52,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -78,6 +78,7 @@ from app.schemas.a2a import (
     JsonRpcError,
     JsonRpcRequest,
     JsonRpcResponse,
+    ListTasksParams,
     Message,
     Part,
     SendMessageParams,
@@ -91,6 +92,15 @@ router = APIRouter(prefix="/api/v2/a2a", tags=["a2a"])
 _METHOD_NOT_FOUND = -32601
 _INVALID_PARAMS = -32602
 _TASK_NOT_FOUND = -32001  # A2A-specific error range(-32001~-32099)
+_VERSION_NOT_SUPPORTED = -32009  # 스펙 §14.2.1: A2A-Version 헤더가 지원 범위 밖일 때
+
+# E-A2A-PROTO P1(2026-07-06): 스펙 §14.2.1 — 클라이언트는 A2A-Version 헤더를 MUST 전송.
+# 우리는 1.0만 지원(Card의 protocol_version과 동일 소스). ⚠️tradeoff(정직 문서화): 헤더
+# 부재 시 하드 거부하면 헤더를 아직 안 보내는 기존 PoC/내부 dogfood 트래픽이 전부 깨진다 —
+# PoC→Phase1 단계에선 **부재는 관대하게 허용**(스펙의 MUST는 클라 책무일 뿐 서버 강제는
+# 아님)하고, **명시적으로 잘못된 Major**(우리가 지원 안 하는 값)만 거부한다. 트래픽이
+# 실제로 헤더를 보내기 시작하면 이 관용을 좁히는 재검토가 필요하다.
+A2A_PROTOCOL_VERSION = "1.0"
 
 _TERMINAL_STATES = {
     "TASK_STATE_COMPLETED",
@@ -175,7 +185,7 @@ async def _build_agent_card(session: AsyncSession, member: TeamMember, base_url:
             AgentInterface(
                 url=interface_url,
                 protocol_binding="JSONRPC",
-                protocol_version="1.0",
+                protocol_version=A2A_PROTOCOL_VERSION,
                 tenant=str(member.id),
             )
         ],
@@ -458,14 +468,65 @@ async def _handle_get_task(session: AsyncSession, member: TeamMember, params: di
     return _task_to_dict(task)
 
 
+_DEFAULT_PAGE_SIZE = 50
+_MAX_PAGE_SIZE = 100
+
+
+async def _handle_list_tasks(session: AsyncSession, member: TeamMember, params: dict) -> dict:
+    """E-A2A-PROTO P1(story 미배정): ListTasksRequest 필수 필터만 구현(PoC) — tenant·
+    status_timestamp_after·history_length·include_artifacts는 REQUIRED 아니라 생략.
+    스코프는 GetTask와 동형으로 caller가 위임한 member 자신의 task만(`A2ATask.member_id`)."""
+    try:
+        list_params = ListTasksParams.model_validate(params)
+    except Exception as exc:  # noqa: BLE001
+        raise _JsonRpcException(_INVALID_PARAMS, f"Invalid params: {exc}") from exc
+
+    page_size = list_params.page_size or _DEFAULT_PAGE_SIZE
+    page_size = max(1, min(page_size, _MAX_PAGE_SIZE))
+    offset = 0
+    if list_params.page_token:
+        try:
+            offset = max(0, int(list_params.page_token))
+        except ValueError as exc:
+            raise _JsonRpcException(_INVALID_PARAMS, "Invalid pageToken") from exc
+
+    conditions = [A2ATask.member_id == member.id]
+    if list_params.context_id is not None:
+        conditions.append(A2ATask.context_id == uuid.UUID(list_params.context_id))
+    if list_params.status is not None:
+        conditions.append(A2ATask.state == list_params.status)
+
+    total_size = (await session.execute(
+        select(func.count()).select_from(A2ATask).where(*conditions)
+    )).scalar_one()
+
+    result = await session.execute(
+        select(A2ATask).where(*conditions).order_by(A2ATask.created_at.desc(), A2ATask.id.desc())
+        .offset(offset).limit(page_size)
+    )
+    tasks = result.scalars().all()
+
+    next_offset = offset + len(tasks)
+    next_page_token = str(next_offset) if next_offset < total_size else ""
+
+    return {
+        "tasks": [_task_to_dict(t) for t in tasks],
+        "nextPageToken": next_page_token,
+        "pageSize": page_size,
+        "totalSize": total_size,
+    }
+
+
 _METHODS = {
     "SendMessage": _handle_send_message,
     "GetTask": _handle_get_task,
+    "ListTasks": _handle_list_tasks,
 }
 
 
 @router.post("/members/{member_id}/rpc")
 async def a2a_rpc(
+    request: Request,
     member_id: uuid.UUID,
     body: JsonRpcRequest,
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -474,6 +535,18 @@ async def a2a_rpc(
 ) -> JsonRpcResponse:
     """P1-S2: action-triggering 엔드포인트라 authed+org-scoped(PO 크럭스 — S1 PoC 리스크 노트
     봉인). Card fetch(GET .../agent-card.json)는 P1-S1 판단대로 unauth 유지, 여기만 인증."""
+    version_header = request.headers.get("A2A-Version")
+    if version_header:
+        major = version_header.split(".", 1)[0]
+        if major != A2A_PROTOCOL_VERSION.split(".", 1)[0]:
+            return JsonRpcResponse(
+                id=body.id,
+                error=JsonRpcError(
+                    code=_VERSION_NOT_SUPPORTED,
+                    message=f"Unsupported A2A-Version: {version_header} (server supports {A2A_PROTOCOL_VERSION})",
+                ),
+            )
+
     member = await _get_agent_member(session, member_id, org_id)
 
     handler = _METHODS.get(body.method)
