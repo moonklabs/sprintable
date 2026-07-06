@@ -176,6 +176,7 @@ async def test_get_team_member_404():
 
 @pytest.mark.anyio
 async def test_update_team_member_200():
+    """S19(#2): human 경로가 self-or-org-admin 게이트를 통과해야 진행 — org-admin caller로 mock."""
     client, session, app = await _client()
     try:
         updated = _mock_member()
@@ -186,8 +187,9 @@ async def test_update_team_member_200():
         session.execute = AsyncMock(return_value=mock_result)
         session.expire = MagicMock()  # sync 메서드(AsyncMock 코루틴 경고 회피)
 
-        async with client as c:
-            resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}", json={"color": "#ff0000"})
+        with patch("app.routers.team_members._is_org_admin", AsyncMock(return_value=True)):
+            async with client as c:
+                resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}", json={"color": "#ff0000"})
 
         assert resp.status_code == 200
     finally:
@@ -195,8 +197,105 @@ async def test_update_team_member_200():
 
 
 @pytest.mark.anyio
+async def test_update_team_member_403_when_not_self_or_admin():
+    """S19(#2 MUST): human 대상이 본인도 org-admin도 아닌 caller가 수정 시 403."""
+    client, session, app = await _client()
+    try:
+        target = _mock_member()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.first.return_value = target
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.routers.team_members._is_org_admin", AsyncMock(return_value=False)):
+            async with client as c:
+                resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}", json={"color": "#ff0000"})
+
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_team_member_self_can_edit_profile_fields():
+    """산티아고 Phase A SME (c): self가 프로필 필드(color 등)만 건드리면 org-admin 없이도 통과."""
+    from app.main import app
+    from app.dependencies.auth import get_current_user
+    from app.dependencies.database import get_db
+
+    self_user_id = uuid.uuid4()
+    updated = _mock_member()
+    updated.user_id = self_user_id
+    updated.color = "#ff0000"
+
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.first.return_value = updated
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.expire = MagicMock()
+
+    ctx = MagicMock()
+    ctx.user_id = str(self_user_id)
+    ctx.claims = {"app_metadata": {"org_id": str(ORG_ID)}}
+
+    async def override_db():
+        yield mock_session
+
+    async def override_auth():
+        return ctx
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_auth
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.patch(f"/api/v2/team-members/{MEMBER_ID}", json={"color": "#ff0000"})
+        assert resp.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_update_team_member_self_403_when_escalating_role():
+    """산티아고 Phase A SME (c) MUST: self가 자기 role/can_manage_members/is_active/agent_config를
+    스스로 바꾸는 건 권한상승이라 org-admin 없이는 403 — 이전엔 self 경로가 전 필드를 허용했다."""
+    from app.main import app
+    from app.dependencies.auth import get_current_user
+    from app.dependencies.database import get_db
+
+    self_user_id = uuid.uuid4()
+    target = _mock_member()
+    target.user_id = self_user_id
+
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.first.return_value = target
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    ctx = MagicMock()
+    ctx.user_id = str(self_user_id)
+    ctx.claims = {"app_metadata": {"org_id": str(ORG_ID)}}
+
+    async def override_db():
+        yield mock_session
+
+    async def override_auth():
+        return ctx
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_auth
+    try:
+        with patch("app.routers.team_members._is_org_admin", AsyncMock(return_value=False)):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.patch(
+                    f"/api/v2/team-members/{MEMBER_ID}", json={"role": "admin"},
+                )
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_deactivate_team_member_200():
-    """DELETE → soft deactivate (is_active=False)."""
+    """DELETE → soft deactivate (is_active=False). S19(#3): org-admin caller로 mock."""
     client, session, app = await _client()
     try:
         active_member = _mock_member(is_active=True)
@@ -217,13 +316,33 @@ async def test_deactivate_team_member_200():
 
         session.execute = mock_execute
 
-        async with client as c:
-            resp = await c.delete(f"/api/v2/team-members/{MEMBER_ID}")
+        with patch("app.routers.team_members._is_org_admin", AsyncMock(return_value=True)):
+            async with client as c:
+                resp = await c.delete(f"/api/v2/team-members/{MEMBER_ID}")
 
         assert resp.status_code == 200
         body = resp.json()
         assert body["ok"] is True
         assert body["deactivated"] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_deactivate_team_member_403_when_not_self_or_admin():
+    """S19(#3 MUST): human 대상이 본인도 org-admin도 아닌 caller가 deactivate 시 403."""
+    client, session, app = await _client()
+    try:
+        active_member = _mock_member(is_active=True)
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.first.return_value = active_member
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("app.routers.team_members._is_org_admin", AsyncMock(return_value=False)):
+            async with client as c:
+                resp = await c.delete(f"/api/v2/team-members/{MEMBER_ID}")
+
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 

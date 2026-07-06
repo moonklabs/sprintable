@@ -28,8 +28,9 @@ from app.dependencies.auth import (
     get_verified_org_id_streaming,
 )
 from app.dependencies.database import get_db
+from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
-from app.services.member_resolver import resolve_member_identity
+from app.services.member_resolver import assert_caller_is_member, resolve_member_identity
 
 router = APIRouter(prefix="/api/v2/events", tags=["events"])
 
@@ -405,13 +406,26 @@ async def create_event(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> EventResponse:
     """POST /api/v2/events — 이벤트 생성 (내부용).
 
     recipient가 SSE 연결 중이면 즉시 전달 + status=delivered.
     미연결이면 status=pending 유지.
     Channel Router(S-A6)로 preference 기반 채널 결정 후 전달.
+
+    S19(SHOULD, PO 포함 승인): sender_id가 검증 없이 body에서 그대로 신뢰돼 caller가 임의
+    sender로 이벤트를 위조(임퍼스네이션)할 수 있었다. sender_id가 명시되면 caller 본인과
+    일치해야만 허용(시스템 이벤트의 sender_id=None 케이스는 그대로 무변경).
+
+    S19(발견·회귀수정): axis-safe 비교(assert_caller_is_member) 사용 — resolve_member()/.id
+    직접비교는 휴먼 JWT caller에서 축이 어긋나 본인 sender_id 지정도 403날 수 있었다.
     """
+    if body.sender_id is not None:
+        await assert_caller_is_member(
+            body.sender_id, auth, db, org_id, detail="sender_id must match the caller's own identity",
+        )
+
     # recipient가 동일 org 소속인지 + type 확정
     # E-MEMBER-SSOT Phase 0: grant-only 휴먼(org_member)도 수신자로 허용
     recipient = await resolve_member_identity(body.recipient_id, org_id, db)
@@ -469,12 +483,21 @@ async def get_pending_events(
     include_recent_delivered_minutes: int = Query(default=30, le=120),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[EventResponse]:
     """GET /api/v2/events/pending — 수신자별 pending + 최근 N분 delivered 이벤트 목록.
 
     include_recent_delivered_minutes: SSE로 delivered 마킹된 이벤트도 최근 N분 이내라면 반환.
     → SSE 전달과 poll_events 폴링 간 충돌(갭 2) 해소.
+
+    산티아고 SME 최종 MUST(S19): recipient_id 쿼리로 타 member 이벤트(payload/sender/source)를
+    auth·recipient 검증 없이 읽을 수 있었다 — mark_delivered(write)는 recipient==caller로
+    닫혔는데 같은 recipient 축의 이 read fallback이 열려있었다. 동일 패턴(순수 self, admin
+    대리열람 흐름 없음)으로 닫는다.
     """
+    await assert_caller_is_member(
+        recipient_id, auth, db, org_id, detail="Cannot read another member's events",
+    )
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=include_recent_delivered_minutes)
     status_filter = or_(
         Event.status == "pending",
@@ -499,14 +522,26 @@ async def mark_delivered(
     event_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> EventResponse:
-    """PATCH /api/v2/events/{id}/delivered — 전달 완료 마킹."""
+    """PATCH /api/v2/events/{id}/delivered — 전달 완료 마킹.
+
+    S19(#7 MUST): org-scope만 있고 recipient 확인이 없어 누구나 타 member의 이벤트를
+    delivered로 마킹(알림 은폐)할 수 있었다. caller==recipient 강제(axis-safe).
+
+    S19(발견·회귀수정): resolve_member()/.id 직접비교는 휴먼 JWT caller의 axis가 어긋나 본인
+    이벤트도 403날 수 있었다 — assert_caller_is_member로 교체.
+    """
     result = await db.execute(
         select(Event).where(Event.id == event_id, Event.org_id == org_id)
     )
     event = result.scalar_one_or_none()
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
+
+    await assert_caller_is_member(
+        event.recipient_id, auth, db, org_id, detail="Not the recipient of this event",
+    )
 
     event.status = "delivered"
     event.delivered_at = datetime.now(timezone.utc)
@@ -554,6 +589,13 @@ async def expire_stale_events_core(
 async def expire_stale_events(
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    """POST /api/v2/events/expire-stale — 30일 초과 pending → expired, 7일 초과 delivered 삭제."""
+    """POST /api/v2/events/expire-stale — 30일 초과 pending → expired, 7일 초과 delivered 삭제.
+
+    S19(SHOULD, PO 포함 승인): per-resource ownership 문제가 아니라 privilege 게이트 자체가
+    없어 org 내 임의 멤버가 org 전체 이벤트 만료/삭제를 강제할 수 있었다. org-admin 전용으로 닫는다.
+    """
+    if not await _is_org_admin(db, org_id, uuid.UUID(auth.user_id)):
+        raise HTTPException(status_code=403, detail="org admin/owner required")
     return await expire_stale_events_core(db, org_id)

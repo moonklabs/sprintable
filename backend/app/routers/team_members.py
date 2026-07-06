@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.dependencies.ownership import assert_agent_owner
+from app.dependencies.ownership import _is_org_admin, assert_agent_owner
 from app.models.pm import Story
 from app.models.team import TeamMember
 from app.repositories.team_member import TeamMemberRepository
@@ -17,6 +17,7 @@ from app.schemas.team_member import (
     ActiveStorySummary, TeamMemberCreate, TeamMemberResponse, TeamMemberUpdate,
 )
 from app.services.agent_onboarding_config import build_agent_mcp_config_bundle
+from app.services.member_resolver import assert_caller_is_member, is_caller_member
 
 
 class ClaimBody(BaseModel):
@@ -336,6 +337,42 @@ async def get_team_member(
     return TeamMemberResponse.model_validate(member)
 
 
+_SELF_EDITABLE_HUMAN_FIELDS: frozenset[str] = frozenset({"name", "avatar_url", "color"})
+
+
+async def _assert_can_manage_human(
+    member: TeamMember, session: AsyncSession, org_id: uuid.UUID, auth: AuthContext,
+    data: dict | None = None,
+) -> None:
+    """S19(#2/#3 MUST + 산티아고 Phase A SME (c) MUST): human 대상 mutation(update/deactivate)이
+    caller-ownership 확인 없이 통과되던 갭 — self(본인) 또는 org-admin만 허용한다.
+
+    산티아고 (c): self 경로가 ``TeamMemberUpdate`` 전 필드를 허용해 self가 자기 ``role``/
+    ``can_manage_members``/``is_active``/``agent_config`` 등을 스스로 바꿔 권한상승할 수
+    있었다(update 한정 — deactivate는 ``data=None``으로 호출돼 필드 제약이 없다. 이진 동작이라
+    승격 벡터가 없기 때문). self가 프로필 3종(name/avatar_url/color) 외 필드를 건드리면
+    org-admin도 함께 요구한다 — allowlist 방식이라 스키마에 필드가 추가돼도 기본이 admin-only.
+
+    ``auth.user_id``는 JWT 휴먼이면 users.id(=TeamMember.user_id와 직접 비교 가능), API키
+    에이전트면 그 에이전트 자신의 team_member.id다 — 후자는 어떤 human의 user_id/org_members
+    행과도 절대 일치하지 않으므로 별도 is_api_key 분기 없이 이 비교만으로 "에이전트가 human을
+    관리할 수 없다"는 의도된 거부까지 자연히 성립한다.
+    """
+    caller_id = uuid.UUID(auth.user_id)
+    is_self = member.user_id == caller_id
+    if is_self:
+        if data is None or not (set(data.keys()) - _SELF_EDITABLE_HUMAN_FIELDS):
+            return
+    if await _is_org_admin(session, org_id, caller_id):
+        return
+    if is_self:
+        raise HTTPException(
+            status_code=403,
+            detail="Self cannot modify authority fields (role/is_active/can_manage_members/agent_config/etc.)",
+        )
+    raise HTTPException(status_code=403, detail="Not authorized to manage this member")
+
+
 @router.patch("/{id}", response_model=TeamMemberResponse)
 async def update_team_member(
     id: uuid.UUID,
@@ -344,13 +381,17 @@ async def update_team_member(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> TeamMemberResponse:
+    """S19(#2 MUST): human 경로에 caller-ownership 확인이 아예 없어 org 내 임의 멤버가 타 human의
+    role/color/name 등을 수정할 수 있었다. self-or-org-admin 게이트 추가 — self는 프로필 필드만."""
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
+    data = body.model_dump(exclude_unset=True)
     if member.type == "agent":
         await assert_agent_owner(id, session, org_id, uuid.UUID(auth.user_id))
-    data = body.model_dump(exclude_unset=True)
+    else:
+        await _assert_can_manage_human(member, session, org_id, auth, data=data)
     # AC3-4 2-2: team_members 뷰 — 필드를 앵커 테이블로 라우팅(anchor-only). expire 후 뷰 재조회로 갱신값 반영.
     await repo.apply_anchor_update(member, data)
     session.expire(member)
@@ -363,12 +404,25 @@ async def heartbeat(
     id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    """AC1/2: last_seen_at = NOW(), agent_status = online 갱신."""
+    """AC1/2: last_seen_at = NOW(), agent_status = online 갱신.
+
+    S19(#1 MUST): auth 파라미터 자체가 없어 caller 확인이 전혀 없었다 — 누구나 임의 member의
+    presence(last_seen_at/agent_status)를 스푸핑할 수 있었다. claim/unclaim과 동일한
+    axis-safe self-scope(assert_caller_is_member)로 닫는다(대리 heartbeat 흐름 없음).
+
+    S19(발견·회귀수정): resolve_member()/.id 직접비교는 휴먼 JWT caller에서 OrgMember.id를
+    반환해 이 path의 team_members뷰 id와 축이 달라 본인 heartbeat도 403났다 —
+    assert_caller_is_member(agent=id 직접비교·human=user_id 비교)로 axis-safe하게 교체.
+    """
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
+
+    await assert_caller_is_member(id, auth, session, org_id, detail="Cannot heartbeat as another member")
+
     now = datetime.now(timezone.utc)
     # AC3-4 2-2: team_members 뷰 — presence는 agent_project_profiles가 유일 소스(anchor-only).
     from app.services.agent_anchor_sync import sync_agent_profile_presence
@@ -382,12 +436,23 @@ async def claim_story(
     body: ClaimBody,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    """AC1/3: active_story_id 갱신 + story 존재 검증."""
+    """AC1/3: active_story_id 갱신 + story 존재 검증.
+
+    S17(까심 델타 RC HIGH — file_locks.py와 같은 취약 클래스): auth 파라미터가 아예 없어
+    caller가 이 member 본인인지 확인 0이었다 — 다른 멤버 명의로 claim(active_story/participation
+    오염) 가능했음(관리자 대리 claim 흐름 없음 확인 후 순수 self-scope로 닫음).
+
+    S19(발견·회귀수정): resolve_member()/.id 직접비교는 휴먼 JWT caller의 axis(OrgMember.id)가
+    이 path의 team_members뷰 id와 달라 본인 claim도 403났다 — assert_caller_is_member로 교체.
+    """
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
+
+    await assert_caller_is_member(id, auth, session, org_id, detail="Cannot claim as another member")
 
     # AC3: story가 해당 project에 존재하는지 검증
     story_result = await session.execute(
@@ -413,12 +478,23 @@ async def unclaim_story(
     id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    """AC2: active_story_id = NULL. AC7: file lock 자동 해제."""
+    """AC2: active_story_id = NULL. AC7: file lock 자동 해제.
+
+    S17(까심 델타 RC HIGH — 파일락 경계의 마지막 구멍): auth 파라미터가 아예 없어 caller가
+    본인인지 확인 0 — Bob이 Alice 명의로 unclaim 호출 시 release_all_file_locks(session, id)가
+    org 필터도 없이 Alice의 모든 file lock을 해제할 수 있었다. claim과 동일 self-scope 패턴 적용.
+
+    S19(발견·회귀수정): assert_caller_is_member로 axis-safe 교체(claim과 동일 사유).
+    """
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
+
+    await assert_caller_is_member(id, auth, session, org_id, detail="Cannot unclaim as another member")
+
     # AC3-4 2-2: anchor-only — agent_project_profiles가 presence 유일 소스.
     from app.services.agent_anchor_sync import sync_agent_profile_presence
     await sync_agent_profile_presence(session, id, active_story_id=None)
@@ -435,12 +511,16 @@ async def deactivate_team_member(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
+    """S19(#3 MUST): human 경로에 caller-ownership 확인이 없어 org 내 임의 멤버가 타 human을
+    deactivate할 수 있었다. self-or-org-admin 게이트 추가(update_team_member와 동일 패턴)."""
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
     if member.type == "agent":
         await assert_agent_owner(id, session, org_id, uuid.UUID(auth.user_id))
+    else:
+        await _assert_can_manage_human(member, session, org_id, auth)
     ok = await repo.deactivate(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Team member not found")

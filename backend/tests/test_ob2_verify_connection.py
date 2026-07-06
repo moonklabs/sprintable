@@ -101,31 +101,50 @@ async def test_get_state_no_verify_all_pending():
 
 # ─── endpoints (handler-direct) ───────────────────────────────────────────────
 
+def _auth_ctx():
+    return SimpleNamespace(user_id=str(uuid.uuid4()))
+
+
 @pytest.mark.anyio
 async def test_verify_connection_404():
     from fastapi import HTTPException
     db = AsyncMock()
-    db.execute = AsyncMock(return_value=_scalar(None))
-    with pytest.raises(HTTPException) as ei:
-        await ag.verify_agent_connection(
-            uuid.uuid4(), session=db, auth=MagicMock(), org_id=uuid.uuid4()
-        )
+    with patch.object(ag, "assert_agent_owner",
+                      new=AsyncMock(side_effect=HTTPException(status_code=404, detail="Agent not found"))):
+        with pytest.raises(HTTPException) as ei:
+            await ag.verify_agent_connection(
+                uuid.uuid4(), session=db, auth=_auth_ctx(), org_id=uuid.uuid4()
+            )
     assert ei.value.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_verify_connection_403_when_caller_not_owner_or_admin():
+    """S19(#9 MUST): agent의 생성자도 org-admin도 아닌 caller는 연결검증 트리거 불가."""
+    from fastapi import HTTPException
+    db = AsyncMock()
+    with patch.object(ag, "assert_agent_owner",
+                      new=AsyncMock(side_effect=HTTPException(status_code=403, detail="Not the owner of this agent"))):
+        with pytest.raises(HTTPException) as ei:
+            await ag.verify_agent_connection(
+                uuid.uuid4(), session=db, auth=_auth_ctx(), org_id=uuid.uuid4()
+            )
+    assert ei.value.status_code == 403
 
 
 @pytest.mark.anyio
 async def test_verify_connection_starts_single_target_and_returns_rail():
     member = SimpleNamespace(id=uuid.uuid4(), project_id=uuid.uuid4())
     db = AsyncMock()
-    db.execute = AsyncMock(return_value=_scalar(member))
     db.commit = AsyncMock()
     rail = [{"state": s, "status": "pending"} for s in RAIL_STATES]
-    with patch.object(ag, "start_verification", new=AsyncMock(return_value=42)) as start, \
+    with patch.object(ag, "assert_agent_owner", new=AsyncMock(return_value=member)), \
+         patch.object(ag, "start_verification", new=AsyncMock(return_value=42)) as start, \
          patch.object(ag, "get_verification_state",
                       new=AsyncMock(return_value={"verified": False, "rail": rail, "verify_seq": 42})), \
          patch("app.routers.agent_gateway.wake_agent", new=MagicMock()) as wake:
         out = await ag.verify_agent_connection(
-            member.id, session=db, auth=MagicMock(), org_id=uuid.uuid4()
+            member.id, session=db, auth=_auth_ctx(), org_id=uuid.uuid4()
         )
     assert out["verification_seq"] == 42 and out["rail"] == rail
     start.assert_awaited_once()  # single-target verify 시작
