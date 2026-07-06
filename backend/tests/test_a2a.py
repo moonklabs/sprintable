@@ -1074,3 +1074,41 @@ async def test_agent_card_advertises_project_context_extension():
         assert extensions[0]["required"] is False
     finally:
         app.dependency_overrides.clear()
+
+
+# ── E-A2A-EXTERNAL(축4, 2026-07-06): securitySchemes 정직 광고 ────────────────
+
+
+@pytest.mark.anyio
+async def test_agent_card_advertises_bearer_security_scheme():
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        persona = _mock_persona()
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            return _result(persona)
+
+        session.execute = mock_execute
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/a2a/members/{MEMBER_ID}/agent-card.json")
+
+        body = resp.json()
+        schemes = body["securitySchemes"]
+        assert len(schemes) == 1
+        key = next(iter(schemes))
+        http_auth = schemes[key]["httpAuthSecurityScheme"]
+        assert http_auth["scheme"] == "Bearer"
+
+        requirements = body["securityRequirements"]
+        assert len(requirements) == 1
+        assert key in requirements[0]["schemes"]
+    finally:
+        app.dependency_overrides.clear()

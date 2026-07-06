@@ -83,12 +83,15 @@ from app.schemas.a2a import (
     AgentSkill,
     Artifact,
     GetTaskParams,
+    HTTPAuthSecurityScheme,
     JsonRpcError,
     JsonRpcRequest,
     JsonRpcResponse,
     ListTasksParams,
     Message,
     Part,
+    SecurityRequirement,
+    SecurityScheme,
     SendMessageParams,
     Task,
     TaskStatus,
@@ -114,6 +117,12 @@ A2A_PROTOCOL_VERSION = "1.0"
 # 코어 RPC 계약은 안 바꾸고 Message.metadata에 이 URI를 키로 한 구조화 payload를 얹는다.
 # opt-in만(A2A-Extensions 헤더에 이 URI를 선언한 요청에 한해 해석) — 미선언 시 완전 무회귀.
 PROJECT_CONTEXT_EXTENSION_URI = "https://sprintable.ai/a2a-ext/project-context/v1"
+
+# E-A2A-EXTERNAL(축4, 2026-07-06, 문서 `e-a2a-external-interop-crux`): Card.securitySchemes의
+# 키 이름 — 실제 /rpc 인증 요건(Bearer)을 스펙 표준으로 정직 광고. 외부 파트너용 자격증명
+# 발급 경로는 아직 없음(별도 crux 필요, 실 파트너 요청 대기) — 이 광고는 "우리가 뭘 요구하는지"
+# 정직하게 알리는 것뿐, 발급 메커니즘 자체를 새로 만드는 게 아니다.
+_SECURITY_SCHEME_KEY = "sprintableBearerAuth"
 
 
 def _parse_active_extensions(request: Request) -> frozenset[str]:
@@ -224,6 +233,16 @@ async def _build_agent_card(session: AsyncSession, member: TeamMember, base_url:
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
         skills=skills,
+        security_schemes={
+            _SECURITY_SCHEME_KEY: SecurityScheme(
+                http_auth_security_scheme=HTTPAuthSecurityScheme(
+                    scheme="Bearer",
+                    bearer_format="sk_live_ API key or JWT",
+                    description="/rpc 호출은 그 에이전트의 org에 소속된 Sprintable 발급 자격증명이 필요(외부 파트너 발급 경로는 미구현 — E-A2A-EXTERNAL 후속)",
+                ),
+            ),
+        },
+        security_requirements=[SecurityRequirement(schemes={_SECURITY_SCHEME_KEY: []})],
     )
 
 
