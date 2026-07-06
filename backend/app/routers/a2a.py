@@ -24,13 +24,20 @@ WS `_broadcast`로 전달(`TASK_STATE_WORKING`) → CC가 그 메시지의 threa
 GetTask가 그 thread를 폴링해 첫 답신을 발견하면 `TASK_STATE_COMPLETED` + artifact로 승격
 (PO 크럭스 채택안, Q1+Q2 결합 — 두 전달 경로 공통).
 
-⚠️ **알려진 한계(PO 크럭스 finding)**: (1) 완료 신호는 CC가 "task thread에 답신"하는 관례에
+⚠️ **알려진 한계(PO 크럭스 finding)**: 완료 신호는 CC가 "task thread에 답신"하는 관례에
 의존한다 — model-mediated 에이전트는 직접 완료 훅이 없어 A2A 표준이 기대하는 명시적 완료
-신호를 얻을 근본 방법이 없다. (2) fakechat WS 경로는 Discord webhook과 신뢰성이 다르다 —
-`_broadcast`는 그 순간 연결된 소켓에만 push하고 재시도/영속 큐가 없어(Discord webhook의
-`ConversationWebhookDelivery` retry+상태추적과 다름) CC가 그 순간 미접속이면 실시간 유실된다
-(단 `ConversationMessage` 자체는 DB에 영속). A2A는 인터페이스를 캡슐화하나 하위 채널의
-신뢰성 차이까지 없애진 못한다 — Phase 3 이후 재검토 대상.
+신호를 얻을 근본 방법이 없다.
+
+**헤드라인 fix(2026-07-06, 문서 `a2a-headline-sse-reroute-crux`)**: S2 재그라운딩의 "fakechat=
+ws_chat WS hub" 결론이 outdated였음이 드러남 — 실 CC-side fakechat 플러그인
+(`packages/fakechat/server.ts`)은 2026-06-02(`26f9cb76`)부로 그 WS hub를 안 쓰고
+`GET /agent/stream` SSE dial-out으로 전환됨(그 WS room의 유일한 실 소비자는 브라우저 사람
+UI). 무-webhook 분기는 이제 `ws_chat._broadcast` 대신 CC가 실제로 구독 중인 Event/
+`agent_gateway.py` SSE 파이프라인에 편승한다: `Event`(event_type="a2a.task_message") 생성→
+flush→`assign_recipient_seq`(같은 트랜잭션, flush 後·commit 前 필수)→commit→`wake_agent`
+(즉시 push). 미접속이어도 Event는 영속되고 재연결 시 backfill로 도달 — 최종 안전망은 여전히
+`A2A_TASK_TIMEOUT_MINUTES` 백스톱(P1-S2). Discord webhook 경로(`ConversationWebhookDelivery`
+retry+상태추적)와는 신뢰성 메커니즘이 다르나, 이제 최소한 "죽은 경로로 보내는" 문제는 해소됨.
 
 **S3(story 5578a8e2) — 발견→위임**: `GET /api/v2/a2a/members`(신규, 문서
 `e-a2a-poc-s3-design-crux`)가 org 내 활성 agent 전원의 Agent Card를 반환 + `?skill=` 필터.
@@ -41,7 +48,6 @@ GetTask가 그 thread를 폴링해 첫 답신을 발견하면 `TASK_STATE_COMPLE
 """
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -55,9 +61,12 @@ from app.models.a2a_task import A2ATask
 from app.models.agent_deployment import AgentPersona
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
+from app.models.event import Event
 from app.models.team import TeamMember
 from app.repositories.team_member import TeamMemberRepository
-from app.routers.ws_chat import _broadcast, _rooms
+from app.routers.agent_gateway import wake_agent
+from app.routers.events import _agent_connections
+from app.services.event_seq import assign_recipient_seq
 from app.services.webhook_targeting import active_webhook_member_ids
 from app.schemas.a2a import (
     AgentCapabilities,
@@ -323,21 +332,38 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
             targets=None,
         )
     else:
-        # fakechat WS 경로 — channel.py:_persist_and_broadcast와 동일 payload shape,
-        # 다만 A2A엔 실 caller member가 없어 sender_id=None(시스템 발신, 기존 패턴).
-        # P1-S2(C): _broadcast는 ack가 없어 그 순간 연결 소켓 0이어도 예외가 안 난다 — 하드 실패로
-        # 단정하지 않고(메시지는 conversation_messages에 영속·재연결 시 여전히 도달 가능) 정보성
-        # 신호만 task_metadata에 남긴다. 최종 안전망은 A2A_TASK_TIMEOUT_MINUTES 백스톱(GetTask).
-        task_metadata["connected_at_send"] = bool(_rooms.get(str(member_id)))
-        payload = json.dumps({
-            "id": str(root_message_id),
-            "conversation_id": str(conv_id),
-            "sender_id": None,
-            "sender_name": "A2A",
-            "content": text,
-            "ts": now.isoformat(),
-        })
-        await _broadcast(str(member_id), payload)
+        # fakechat 경로 — 헤드라인 fix(2026-07-06, PO 크럭스 `a2a-headline-sse-reroute-crux`):
+        # 이전엔 ws_chat._broadcast(WS /ws/chat/{agent_id} room)로 push했으나, 실 CC-side fakechat
+        # 플러그인(packages/fakechat/server.ts)이 2026-06-02(26f9cb76)부로 그 WS hub를 안 쓰고
+        # /agent/stream SSE dial-out으로 전환됐음이 그라운딩으로 드러남 — 그 room의 유일한 실
+        # 소비자는 브라우저 사람 UI뿐이라 무-webhook 에이전트에게 보낸 A2A task는 항상 실시간
+        # 유실→타임아웃 FAILED였다. 이제 CC가 실제로 구독 중인 Event/agent_gateway SSE 파이프라인에
+        # 편승한다: Event(event_type 자유 문자열 — /agent/stream이 필터 안 함) 생성→flush→
+        # assign_recipient_seq(같은 트랜잭션, flush 後·commit 前 필수)→commit→wake_agent(즉시 push,
+        # 미접속이어도 Event는 영속돼 재연결 backfill로 여전히 도달 — 최종 안전망은 기존
+        # A2A_TASK_TIMEOUT_MINUTES 백스톱).
+        event = Event(
+            project_id=member_project_id,
+            org_id=member_org_id,
+            event_type="a2a.task_message",
+            recipient_id=member_id,
+            recipient_type="agent",
+            sender_id=None,
+            payload={
+                "message_id": str(root_message_id),
+                "conversation_id": str(conv_id),
+                "content": text,
+            },
+            status="pending",
+        )
+        session.add(event)
+        await session.flush()
+        recipient_seq = await assign_recipient_seq(session, event)
+        await session.commit()
+        # "미연결" 신호(P1-S2 C 유지) — 죽은 ws_chat._rooms 대신 agent_gateway의 실제 SSE 연결
+        # 큐(_agent_connections)로 판정해야 "지금 CC가 진짜 붙어있나"를 뜻한다.
+        task_metadata["connected_at_send"] = str(member_id) in _agent_connections
+        wake_agent(str(member_id), recipient_seq)
 
     task_id = uuid.uuid4()
     session.add(A2ATask(
