@@ -276,7 +276,8 @@ async def test_list_agent_cards_requires_auth():
 # ── JSON-RPC: SendMessage / GetTask ────────────────────────────────────────────
 
 
-def _mock_task(state: str, artifacts=None, history=None, root_message_id=None, context_id=None) -> MagicMock:
+def _mock_task(state: str, artifacts=None, history=None, root_message_id=None, context_id=None,
+               created_at=None, task_metadata=None) -> MagicMock:
     t = MagicMock()
     t.id = uuid.uuid4()
     t.context_id = context_id or uuid.uuid4()
@@ -285,6 +286,8 @@ def _mock_task(state: str, artifacts=None, history=None, root_message_id=None, c
     t.artifacts = artifacts or []
     t.history = history or []
     t.updated_at = datetime.datetime.now(datetime.timezone.utc)
+    t.created_at = created_at or datetime.datetime.now(datetime.timezone.utc)
+    t.task_metadata = task_metadata
     return t
 
 
@@ -306,7 +309,7 @@ _SEND_REQ = {
 async def test_send_message_working_when_webhook_configured():
     """S2: webhook 있으면 task-thread 생성 + webhook 전달 후 WORKING(즉시 COMPLETED 아님 —
     완료는 CC의 thread 답신을 GetTask가 폴링해야 발생, PO 크럭스 채택안)."""
-    client, session, app = await _client()
+    client, session, app = await _authed_client(uuid.uuid4())
     try:
         member = _mock_member()
         webhook = MagicMock()  # 활성 WebhookConfig 존재
@@ -345,7 +348,7 @@ async def test_send_message_working_when_member_has_multiple_active_webhooks():
     """라이브 E2E MUST(2026-07-06, 오르테가군 스모크 발견): member-global+project별로 활성
     WebhookConfig가 여러 개(디디 본인 케이스)여도 500(MultipleResultsFound) 없이 WORKING —
     존재-여부 판정은 .first()만 쓰고 scalar_one_or_none()은 호출하지 않아야 한다."""
-    client, session, app = await _client()
+    client, session, app = await _authed_client(uuid.uuid4())
     try:
         member = _mock_member()
         working_task = _mock_task("TASK_STATE_WORKING")
@@ -382,7 +385,7 @@ async def test_send_message_working_when_member_has_multiple_active_webhooks():
 async def test_send_message_working_via_fakechat_ws_when_no_webhook():
     """S2 정정(2026-07-06): webhook 없는 멤버는 REJECTED가 아니라 fakechat WS(_broadcast)로
     전달 시도 후 WORKING — 플랫폼 기존 라우팅(webhook_targeting.py)과 동형 택일."""
-    client, session, app = await _client()
+    client, session, app = await _authed_client(uuid.uuid4())
     try:
         member = _mock_member()
         working_task = _mock_task("TASK_STATE_WORKING")
@@ -419,7 +422,7 @@ async def test_send_message_working_via_fakechat_ws_when_no_webhook():
 
 @pytest.mark.anyio
 async def test_send_message_invalid_params_returns_jsonrpc_error():
-    client, session, app = await _client()
+    client, session, app = await _authed_client(uuid.uuid4())
     try:
         member = _mock_member()
         session.execute = AsyncMock(return_value=_result(member))
@@ -438,7 +441,7 @@ async def test_send_message_invalid_params_returns_jsonrpc_error():
 
 @pytest.mark.anyio
 async def test_get_task_200():
-    client, session, app = await _client()
+    client, session, app = await _authed_client(uuid.uuid4())
     try:
         member = _mock_member()
         task_id = uuid.uuid4()
@@ -448,6 +451,7 @@ async def test_get_task_200():
         task.state = "TASK_STATE_COMPLETED"
         task.artifacts = []
         task.history = []
+        task.task_metadata = None
         import datetime
 
         task.updated_at = datetime.datetime.now(datetime.timezone.utc)
@@ -477,7 +481,7 @@ async def test_get_task_200():
 @pytest.mark.anyio
 async def test_get_task_still_working_when_no_reply_yet():
     """S2: WORKING task는 thread에 아직 답신 없으면 그대로 WORKING(폴링만, 전이 없음)."""
-    client, session, app = await _client()
+    client, session, app = await _authed_client(uuid.uuid4())
     try:
         member = _mock_member()
         root_message_id = uuid.uuid4()
@@ -511,7 +515,7 @@ async def test_get_task_still_working_when_no_reply_yet():
 @pytest.mark.anyio
 async def test_get_task_completes_when_thread_reply_found():
     """S2 핵심: CC가 task-thread에 답신하면 GetTask 폴링이 그걸 발견해 COMPLETED+artifact로 전이."""
-    client, session, app = await _client()
+    client, session, app = await _authed_client(uuid.uuid4())
     try:
         member = _mock_member()
         root_message_id = uuid.uuid4()
@@ -556,7 +560,7 @@ async def test_get_task_completes_when_thread_reply_found():
 
 @pytest.mark.anyio
 async def test_get_task_not_found_returns_a2a_error():
-    client, session, app = await _client()
+    client, session, app = await _authed_client(uuid.uuid4())
     try:
         member = _mock_member()
 
@@ -582,7 +586,7 @@ async def test_get_task_not_found_returns_a2a_error():
 
 @pytest.mark.anyio
 async def test_unknown_method_returns_method_not_found():
-    client, session, app = await _client()
+    client, session, app = await _authed_client(uuid.uuid4())
     try:
         member = _mock_member()
         session.execute = AsyncMock(return_value=_result(member))
@@ -594,5 +598,131 @@ async def test_unknown_method_returns_method_not_found():
 
         body = resp.json()
         assert body["error"]["code"] == -32601
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ── P1-S2: /rpc auth 하드닝 + 완료신호 robustness ─────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_rpc_requires_auth():
+    """P1-S2(story 7b93eb10): /rpc는 action-triggering이라 authed(PO 크럭스)."""
+    from app.main import app
+    from app.dependencies.database import get_db
+
+    mock_session = AsyncMock()
+
+    async def override_db():
+        yield mock_session
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=_SEND_REQ)
+        assert resp.status_code in (401, 403)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_rpc_cross_org_blocked():
+    """P1-S2(A): caller org와 다른 org의 agent에게는 404(존재 여부 누설 없이 차단) —
+    `_get_agent_member`에 org_id 검증 추가로 오늘 S20 클래스 IDOR 봉인."""
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        session.execute = AsyncMock(return_value=_result(None))  # org_id 불일치 → 조회 0행
+
+        async with client as c:
+            resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=_SEND_REQ)
+
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_task_transitions_to_failed_on_delivery_failure():
+    """P1-S2(B): 답신 없고 ConversationWebhookDelivery.status=="failed"면 타임아웃 전이라도
+    즉시 FAILED(실제 아는 정보 우선)."""
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        root_message_id = uuid.uuid4()
+        working_task = _mock_task("TASK_STATE_WORKING", root_message_id=root_message_id)
+
+        delivery = MagicMock()
+        delivery.status = "failed"
+        delivery.attempt_count = 3
+        delivery.last_error = "connection refused"
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _result(working_task)
+            if call_count == 3:
+                return _result(None)  # thread 폴링 — 답신 없음
+            return _result(delivery)  # webhook delivery 조회 — failed
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+        session.refresh = AsyncMock()
+
+        req = {"jsonrpc": "2.0", "id": 7, "method": "GetTask", "params": {"id": str(working_task.id)}}
+
+        async with client as c:
+            resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=req)
+
+        body = resp.json()
+        assert body["result"]["status"]["state"] == "TASK_STATE_FAILED"
+        assert "webhook delivery failed" in body["result"]["status"]["message"]["parts"][0]["text"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_task_transitions_to_failed_on_timeout():
+    """P1-S2(B): delivery 실패 신호도 없고 생성 후 A2A_TASK_TIMEOUT_MINUTES 경과 시
+    타임아웃 백스톱으로 FAILED(fakechat WS처럼 delivery 추적이 없는 경로의 유일한 실패 신호)."""
+    import datetime as dt
+    from app.routers.a2a import A2A_TASK_TIMEOUT_MINUTES
+
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        root_message_id = uuid.uuid4()
+        old_created_at = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=A2A_TASK_TIMEOUT_MINUTES + 1)
+        working_task = _mock_task("TASK_STATE_WORKING", root_message_id=root_message_id, created_at=old_created_at)
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _result(working_task)
+            return _result(None)  # 답신 없음 + delivery row 없음(fakechat 경로)
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+        session.refresh = AsyncMock()
+
+        req = {"jsonrpc": "2.0", "id": 8, "method": "GetTask", "params": {"id": str(working_task.id)}}
+
+        async with client as c:
+            resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=req)
+
+        body = resp.json()
+        assert body["result"]["status"]["state"] == "TASK_STATE_FAILED"
+        assert "timed out" in body["result"]["status"]["message"]["parts"][0]["text"]
     finally:
         app.dependency_overrides.clear()
