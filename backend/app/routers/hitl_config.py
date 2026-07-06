@@ -6,8 +6,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.dependencies.ownership import _is_org_admin
 from app.models.hitl_config import MemberGateOverride, OrgGateOverride, OrgGatePolicy
 from app.repositories.base import BaseRepository
 from app.schemas.hitl_config import (
@@ -48,8 +49,12 @@ async def upsert_org_policy(
     body: OrgGatePolicyCreate,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> OrgGatePolicyResponse:
+    """prod 핫픽스(S20 전수스캔 HIGH, expire-stale 동형): org-admin 게이트 — 이전엔 admin 체크가
+    전무해 org 내 임의 멤버가 org 전체 HITL gate posture를 바꿀 수 있었다."""
+    if not await _is_org_admin(session, org_id, uuid.UUID(auth.user_id)):
+        raise HTTPException(status_code=403, detail="org admin/owner required")
     r = await session.execute(
         select(OrgGatePolicy).where(OrgGatePolicy.org_id == org_id).limit(1)
     )
@@ -83,8 +88,11 @@ async def upsert_org_override(
     body: OrgGateOverrideCreate,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> OrgGateOverrideResponse:
+    """prod 핫픽스(S20 전수스캔 HIGH): org-admin 게이트 추가."""
+    if not await _is_org_admin(session, org_id, uuid.UUID(auth.user_id)):
+        raise HTTPException(status_code=403, detail="org admin/owner required")
     r = await session.execute(
         select(OrgGateOverride).where(
             OrgGateOverride.org_id == org_id,
@@ -111,8 +119,11 @@ async def delete_org_override(
     id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    """prod 핫픽스(S20 전수스캔 HIGH): org-admin 게이트 추가."""
+    if not await _is_org_admin(session, org_id, uuid.UUID(auth.user_id)):
+        raise HTTPException(status_code=403, detail="org admin/owner required")
     r = await session.execute(
         select(OrgGateOverride).where(OrgGateOverride.id == id, OrgGateOverride.org_id == org_id)
     )
@@ -131,8 +142,12 @@ async def upsert_member_override(
     body: MemberGateOverrideCreate,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> MemberGateOverrideResponse:
+    """prod 핫픽스(S20 전수스캔 HIGH): org-admin 게이트 — 이전엔 org 내 임의 멤버가 타 멤버의
+    gate override를 조작할 수 있었다."""
+    if not await _is_org_admin(session, org_id, uuid.UUID(auth.user_id)):
+        raise HTTPException(status_code=403, detail="org admin/owner required")
     r = await session.execute(
         select(MemberGateOverride).where(
             MemberGateOverride.org_id == org_id,
@@ -159,8 +174,11 @@ async def delete_member_override(
     id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    """prod 핫픽스(S20 전수스캔 HIGH): org-admin 게이트 추가."""
+    if not await _is_org_admin(session, org_id, uuid.UUID(auth.user_id)):
+        raise HTTPException(status_code=403, detail="org admin/owner required")
     r = await session.execute(
         select(MemberGateOverride).where(
             MemberGateOverride.id == id, MemberGateOverride.org_id == org_id
@@ -247,14 +265,19 @@ async def apply_adjustment(
     body: ApplyRecommendationRequest,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
     """인간 승인 후 override 적용.
 
     ⚠️ 자동 호출 금지 — 반드시 인간이 추천 검토 후 명시 호출.
     apply_as='member': member_gate_override upsert.
     apply_as='org_role': org_gate_override upsert (role_id 필수).
+
+    prod 핫픽스(S20 전수스캔 — upsert_org_policy/overrides와 동일 클래스, 스캔표엔 5건으로
+    적혔지만 이 엔드포인트도 override를 직접 upsert하면서 admin 게이트가 없었다): org-admin 게이트 추가.
     """
+    if not await _is_org_admin(session, org_id, uuid.UUID(auth.user_id)):
+        raise HTTPException(status_code=403, detail="org admin/owner required")
     from app.models.hitl_config import DISPOSITIONS
 
     if body.disposition not in DISPOSITIONS:
