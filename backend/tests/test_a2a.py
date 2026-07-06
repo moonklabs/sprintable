@@ -795,3 +795,128 @@ def test_artifact_has_metadata_and_extensions_fields():
     artifact2 = Artifact(artifact_id="a2", parts=[Part(text="result")])
     assert artifact2.metadata is None
     assert artifact2.extensions == []
+
+
+# ── E-A2A-PROTO P1(2026-07-06): A2A-Version 헤더 + ListTasks ──────────────────
+
+
+@pytest.mark.anyio
+async def test_rpc_accepts_matching_a2a_version_header():
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        session.execute = AsyncMock(return_value=_result(member))
+
+        async with client as c:
+            resp = await c.post(
+                f"/api/v2/a2a/members/{MEMBER_ID}/rpc",
+                json={"jsonrpc": "2.0", "id": 1, "method": "UnknownMethod", "params": {}},
+                headers={"A2A-Version": "1.0"},
+            )
+        body = resp.json()
+        # 버전 통과 후 정상적으로 method-not-found까지 도달(버전 게이트에서 안 막힘)
+        assert body["error"]["code"] == -32601
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_rpc_rejects_unsupported_a2a_version_major():
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        async with client as c:
+            resp = await c.post(
+                f"/api/v2/a2a/members/{MEMBER_ID}/rpc",
+                json={"jsonrpc": "2.0", "id": 1, "method": "SendMessage", "params": {}},
+                headers={"A2A-Version": "2.0"},
+            )
+        body = resp.json()
+        assert body["error"]["code"] == -32009
+        assert "Unsupported A2A-Version" in body["error"]["message"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_rpc_allows_missing_a2a_version_header_lenient():
+    """PoC→Phase1 tradeoff(문서화됨): 헤더 부재는 관대하게 허용 — 기존 dogfood 트래픽 무회귀."""
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        session.execute = AsyncMock(return_value=_result(member))
+
+        async with client as c:
+            resp = await c.post(
+                f"/api/v2/a2a/members/{MEMBER_ID}/rpc",
+                json={"jsonrpc": "2.0", "id": 1, "method": "UnknownMethod", "params": {}},
+            )
+        body = resp.json()
+        assert body["error"]["code"] == -32601  # 버전 게이트 안 걸림, method-not-found까지 도달
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_tasks_returns_paginated_tasks_scoped_to_member():
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        t1 = _mock_task("TASK_STATE_COMPLETED")
+        t2 = _mock_task("TASK_STATE_WORKING")
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _result(2)  # total_size count
+            return _list_result([t1, t2])
+
+        session.execute = mock_execute
+
+        req = {"jsonrpc": "2.0", "id": 1, "method": "ListTasks", "params": {}}
+        async with client as c:
+            resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=req)
+
+        body = resp.json()
+        assert body["error"] is None
+        assert len(body["result"]["tasks"]) == 2
+        assert body["result"]["totalSize"] == 2
+        assert body["result"]["pageSize"] == 50
+        assert body["result"]["nextPageToken"] == ""
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_tasks_next_page_token_when_more_results():
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        t1 = _mock_task("TASK_STATE_COMPLETED")
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _result(5)  # total_size larger than returned page
+            return _list_result([t1])
+
+        session.execute = mock_execute
+
+        req = {"jsonrpc": "2.0", "id": 1, "method": "ListTasks", "params": {"pageSize": 1}}
+        async with client as c:
+            resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=req)
+
+        body = resp.json()
+        assert body["result"]["nextPageToken"] == "1"
+        assert body["result"]["pageSize"] == 1
+    finally:
+        app.dependency_overrides.clear()

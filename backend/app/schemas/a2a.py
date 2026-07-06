@@ -169,6 +169,17 @@ class GetTaskParams(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class ListTasksParams(BaseModel):
+    """E-A2A-PROTO P1: ListTasksRequest 필수 필터만 구현(PoC) — tenant/status_timestamp_after/
+    history_length/include_artifacts는 스펙엔 있으나 REQUIRED 아니라 생략(Phase 3 후속)."""
+    context_id: str | None = Field(default=None, alias="contextId")
+    status: TaskState | None = None
+    page_size: int | None = Field(default=None, alias="pageSize")
+    page_token: str | None = Field(default=None, alias="pageToken")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class JsonRpcRequest(BaseModel):
     jsonrpc: Literal["2.0"] = "2.0"
     id: str | int
