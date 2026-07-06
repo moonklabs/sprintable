@@ -312,7 +312,6 @@ async def test_send_message_working_when_webhook_configured():
     client, session, app = await _authed_client(uuid.uuid4())
     try:
         member = _mock_member()
-        webhook = MagicMock()  # 활성 WebhookConfig 존재
         working_task = _mock_task("TASK_STATE_WORKING")
 
         call_count = 0
@@ -323,7 +322,7 @@ async def test_send_message_working_when_webhook_configured():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
-                return _result(webhook)
+                return _list_result([MEMBER_ID])  # active_webhook_member_ids: 활성 webhook 존재
             return _result(working_task)  # 최종 requery
 
         session.execute = mock_execute
@@ -345,9 +344,10 @@ async def test_send_message_working_when_webhook_configured():
 
 @pytest.mark.anyio
 async def test_send_message_working_when_member_has_multiple_active_webhooks():
-    """라이브 E2E MUST(2026-07-06, 오르테가군 스모크 발견): member-global+project별로 활성
-    WebhookConfig가 여러 개(디디 본인 케이스)여도 500(MultipleResultsFound) 없이 WORKING —
-    존재-여부 판정은 .first()만 쓰고 scalar_one_or_none()은 호출하지 않아야 한다."""
+    """라이브 E2E MUST(2026-07-06, 오르테가군 스모크 발견)+P1-S3 §10(SSOT 교체 후 회귀 확認):
+    member-global+project별로 활성 WebhookConfig가 여러 개(디디 본인 케이스)여도 500 없이
+    WORKING — active_webhook_member_ids는 .scalars().all()+set()이라 다중 행이 와도 예외가
+    없다(SSOT 자체가 이 케이스를 이미 안전하게 처리)."""
     client, session, app = await _authed_client(uuid.uuid4())
     try:
         member = _mock_member()
@@ -361,7 +361,7 @@ async def test_send_message_working_when_member_has_multiple_active_webhooks():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
-                return _multi_row_result()  # 활성 webhook 2개 이상 시뮬레이션
+                return _list_result([MEMBER_ID, MEMBER_ID])  # 활성 webhook 2개 이상(같은 멤버) 시뮬레이션
             return _result(working_task)
 
         session.execute = mock_execute
@@ -398,7 +398,7 @@ async def test_send_message_working_via_fakechat_ws_when_no_webhook():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
-                return _result(None)  # webhook 없음
+                return _list_result([])  # webhook 없음
             return _result(working_task)
 
         session.execute = mock_execute
