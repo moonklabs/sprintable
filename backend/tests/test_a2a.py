@@ -920,3 +920,157 @@ async def test_list_tasks_next_page_token_when_more_results():
         assert body["result"]["pageSize"] == 1
     finally:
         app.dependency_overrides.clear()
+
+
+# ── E-A2A-EXT(2026-07-06): project-context extension(profile, opt-in) ────────
+
+
+from app.routers.a2a import PROJECT_CONTEXT_EXTENSION_URI  # noqa: E402
+
+
+def _send_req_with_project_context(context: dict) -> dict:
+    return {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "SendMessage",
+        "params": {
+            "message": {
+                "messageId": str(uuid.uuid4()),
+                "role": "ROLE_USER",
+                "parts": [{"text": "please check the QA status"}],
+                "metadata": {PROJECT_CONTEXT_EXTENSION_URI: context},
+            }
+        },
+    }
+
+
+@pytest.mark.anyio
+async def test_project_context_extension_preserved_when_declared_no_webhook():
+    """A2A-Extensions 헤더로 선언 + Message.metadata에 컨텍스트 있으면 task_metadata와
+    fakechat Event payload 양쪽에 보존된다."""
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        working_task = _mock_task("TASK_STATE_WORKING")
+        context = {"project_id": "proj-1", "story_id": "story-1", "acceptance_criteria": ["AC1"]}
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _list_result([])  # webhook 없음
+            return _result(working_task)
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+        added_objects = []
+        session.add = MagicMock(side_effect=lambda obj: added_objects.append(obj))
+
+        with patch("app.routers.a2a.assign_recipient_seq", new_callable=AsyncMock, return_value=7), \
+             patch("app.routers.a2a.wake_agent"):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/a2a/members/{MEMBER_ID}/rpc",
+                    json=_send_req_with_project_context(context),
+                    headers={"A2A-Extensions": PROJECT_CONTEXT_EXTENSION_URI},
+                )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["error"] is None
+
+        from app.models.a2a_task import A2ATask
+        from app.models.event import Event
+
+        a2a_task_obj = next(o for o in added_objects if isinstance(o, A2ATask))
+        assert a2a_task_obj.task_metadata["project_context"] == context
+        assert a2a_task_obj.task_metadata["activated_extensions"] == [PROJECT_CONTEXT_EXTENSION_URI]
+
+        event_obj = next(o for o in added_objects if isinstance(o, Event))
+        assert event_obj.payload["project_context"] == context
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_project_context_extension_ignored_when_not_declared():
+    """헤더 미선언 시 Message.metadata에 컨텍스트가 있어도 완전히 무시된다(무회귀 opt-in)."""
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        working_task = _mock_task("TASK_STATE_WORKING")
+        context = {"project_id": "proj-1"}
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _list_result([])
+            return _result(working_task)
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+        added_objects = []
+        session.add = MagicMock(side_effect=lambda obj: added_objects.append(obj))
+
+        with patch("app.routers.a2a.assign_recipient_seq", new_callable=AsyncMock, return_value=7), \
+             patch("app.routers.a2a.wake_agent"):
+            async with client as c:
+                # A2A-Extensions 헤더 없음
+                resp = await c.post(
+                    f"/api/v2/a2a/members/{MEMBER_ID}/rpc",
+                    json=_send_req_with_project_context(context),
+                )
+
+        assert resp.status_code == 200
+        from app.models.a2a_task import A2ATask
+        from app.models.event import Event
+
+        a2a_task_obj = next(o for o in added_objects if isinstance(o, A2ATask))
+        assert "project_context" not in a2a_task_obj.task_metadata
+        assert "activated_extensions" not in a2a_task_obj.task_metadata
+
+        event_obj = next(o for o in added_objects if isinstance(o, Event))
+        assert "project_context" not in event_obj.payload
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_agent_card_advertises_project_context_extension():
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        persona = _mock_persona()
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            return _result(persona)
+
+        session.execute = mock_execute
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/a2a/members/{MEMBER_ID}/agent-card.json")
+
+        body = resp.json()
+        extensions = body["capabilities"]["extensions"]
+        assert len(extensions) == 1
+        assert extensions[0]["uri"] == PROJECT_CONTEXT_EXTENSION_URI
+        assert extensions[0]["required"] is False
+    finally:
+        app.dependency_overrides.clear()

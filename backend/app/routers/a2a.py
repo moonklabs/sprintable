@@ -45,6 +45,13 @@ retry+상태추적)와는 신뢰성 메커니즘이 다르나, 이제 최소한 
 (PO 판정 — 오늘 S20 IDOR 스윕과 동형 노출 클래스, `get_verified_org_id`+`get_current_user`로
 기존 `list_team_members`와 동일하게 authed). 발견된 member_id로 기존 S2 `SendMessage`/`GetTask`
 경로를 그대로 재사용(신규 위임 코드 없음).
+
+**E-A2A-EXT — 첫 A2A extension(문서 `e-a2a-ext-approach-crux`)**: profile 타입,
+`PROJECT_CONTEXT_EXTENSION_URI`. 클라가 `A2A-Extensions` 헤더로 이 URI를 선언하고
+`Message.metadata`에 그 키로 구조화 payload를 실으면, `_handle_send_message`가 이를
+`task_metadata["project_context"]`(GetTask로 조회 가능) + fakechat 전달 payload에 보존한다.
+⚠️webhook 경로는 스코프 밖(공유 함수 `deliver_conversation_message_webhook`이 plain text만
+받아 계약 확장은 과설계 — 코드 주석 참조). 헤더 미선언 시 이 로직 전체가 스킵돼 무회귀.
 """
 from __future__ import annotations
 
@@ -71,6 +78,7 @@ from app.services.webhook_targeting import active_webhook_member_ids
 from app.schemas.a2a import (
     AgentCapabilities,
     AgentCard,
+    AgentExtension,
     AgentInterface,
     AgentSkill,
     Artifact,
@@ -101,6 +109,19 @@ _VERSION_NOT_SUPPORTED = -32009  # 스펙 §14.2.1: A2A-Version 헤더가 지원
 # 아님)하고, **명시적으로 잘못된 Major**(우리가 지원 안 하는 값)만 거부한다. 트래픽이
 # 실제로 헤더를 보내기 시작하면 이 관용을 좁히는 재검토가 필요하다.
 A2A_PROTOCOL_VERSION = "1.0"
+
+# E-A2A-EXT(2026-07-06, PO 크럭스 `e-a2a-ext-approach-crux`): 첫 A2A extension — profile 타입,
+# 코어 RPC 계약은 안 바꾸고 Message.metadata에 이 URI를 키로 한 구조화 payload를 얹는다.
+# opt-in만(A2A-Extensions 헤더에 이 URI를 선언한 요청에 한해 해석) — 미선언 시 완전 무회귀.
+PROJECT_CONTEXT_EXTENSION_URI = "https://sprintable.ai/a2a-ext/project-context/v1"
+
+
+def _parse_active_extensions(request: Request) -> frozenset[str]:
+    """A2A-Extensions 헤더(콤마구분 URI 목록) 파싱 — 스펙 §7 클라 활성화 선언."""
+    header = request.headers.get("A2A-Extensions")
+    if not header:
+        return frozenset()
+    return frozenset(uri.strip() for uri in header.split(",") if uri.strip())
 
 _TERMINAL_STATES = {
     "TASK_STATE_COMPLETED",
@@ -190,7 +211,16 @@ async def _build_agent_card(session: AsyncSession, member: TeamMember, base_url:
             )
         ],
         version="0.1.0-poc",
-        capabilities=AgentCapabilities(streaming=False, push_notifications=False, extended_agent_card=False),
+        capabilities=AgentCapabilities(
+            streaming=False, push_notifications=False, extended_agent_card=False,
+            extensions=[
+                AgentExtension(
+                    uri=PROJECT_CONTEXT_EXTENSION_URI,
+                    description="Sprintable 프로젝트/AC/정책 컨텍스트를 A2A task에 첨부(opt-in, A2A-Extensions 헤더로 활성화)",
+                    required=False,
+                ),
+            ],
+        ),
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
         skills=skills,
@@ -272,7 +302,10 @@ def _first_text(message: Message) -> str:
     return ""
 
 
-async def _handle_send_message(session: AsyncSession, member: TeamMember, params: dict) -> dict:
+async def _handle_send_message(
+    session: AsyncSession, member: TeamMember, params: dict,
+    active_extensions: frozenset[str] = frozenset(),
+) -> dict:
     try:
         send_params = SendMessageParams.model_validate(params)
     except Exception as exc:  # noqa: BLE001 — JSON-RPC InvalidParamsError로 매핑
@@ -280,6 +313,13 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
 
     incoming = send_params.message
     text = _first_text(incoming)
+
+    # E-A2A-EXT project-context(profile, opt-in): 클라가 A2A-Extensions 헤더로 이 URI를
+    # 선언했고 Message.metadata에 그 키가 있으면 구조화 컨텍스트를 보존한다. 미선언 시
+    # 이 블록 전체가 스킵돼 기존 동작과 완전히 동일(무회귀).
+    project_context = None
+    if PROJECT_CONTEXT_EXTENSION_URI in active_extensions and incoming.metadata:
+        project_context = incoming.metadata.get(PROJECT_CONTEXT_EXTENSION_URI)
 
     # commit() 이후 이 세션에 로드된 모든 ORM 객체(member 포함)의 속성이 expire_on_commit
     # 기본값으로 만료돼 greenlet 컨텍스트 밖 lazy-load(MissingGreenlet)를 유발한다 —
@@ -327,8 +367,18 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
     await session.commit()
 
     task_metadata: dict = {"delivery_channel": "webhook" if has_webhook else "fakechat_ws"}
+    if active_extensions:
+        task_metadata["activated_extensions"] = sorted(active_extensions)
+    if project_context is not None:
+        task_metadata["project_context"] = project_context
 
     if has_webhook:
+        # ⚠️스코프 경계(E-A2A-EXT 첫 착수, 의도적): deliver_conversation_message_webhook은
+        # 다른 conversation 경로들과 공유하는 함수라 content(plain text)만 받는다 — 구조화
+        # project_context를 이 경로까지 실어보내려면 그 공유 함수의 계약 자체를 넓혀야 해서
+        # 첫 extension 스코프를 넘어선다(과설계 회피). webhook 경로는 CC에 텍스트만 전달되고,
+        # project_context는 task_metadata(GetTask로 조회 가능)에만 보존된다 — fakechat 경로만
+        # CC 전달 payload에도 포함(아래).
         await deliver_conversation_message_webhook(
             message_id=root_message_id,
             conversation_id=conv_id,
@@ -352,6 +402,13 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
         # assign_recipient_seq(같은 트랜잭션, flush 後·commit 前 필수)→commit→wake_agent(즉시 push,
         # 미접속이어도 Event는 영속돼 재연결 backfill로 여전히 도달 — 최종 안전망은 기존
         # A2A_TASK_TIMEOUT_MINUTES 백스톱).
+        event_payload = {
+            "message_id": str(root_message_id),
+            "conversation_id": str(conv_id),
+            "content": text,
+        }
+        if project_context is not None:
+            event_payload["project_context"] = project_context
         event = Event(
             project_id=member_project_id,
             org_id=member_org_id,
@@ -359,11 +416,7 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
             recipient_id=member_id,
             recipient_type="agent",
             sender_id=None,
-            payload={
-                "message_id": str(root_message_id),
-                "conversation_id": str(conv_id),
-                "content": text,
-            },
+            payload=event_payload,
             status="pending",
         )
         session.add(event)
@@ -395,7 +448,10 @@ async def _handle_send_message(session: AsyncSession, member: TeamMember, params
     return _task_to_dict(task)
 
 
-async def _handle_get_task(session: AsyncSession, member: TeamMember, params: dict) -> dict:
+async def _handle_get_task(
+    session: AsyncSession, member: TeamMember, params: dict,
+    active_extensions: frozenset[str] = frozenset(),  # noqa: ARG001 — 균일 dispatch 시그니처, 현재 미사용
+) -> dict:
     try:
         get_params = GetTaskParams.model_validate(params)
     except Exception as exc:  # noqa: BLE001
@@ -472,7 +528,10 @@ _DEFAULT_PAGE_SIZE = 50
 _MAX_PAGE_SIZE = 100
 
 
-async def _handle_list_tasks(session: AsyncSession, member: TeamMember, params: dict) -> dict:
+async def _handle_list_tasks(
+    session: AsyncSession, member: TeamMember, params: dict,
+    active_extensions: frozenset[str] = frozenset(),  # noqa: ARG001 — 균일 dispatch 시그니처, 현재 미사용
+) -> dict:
     """E-A2A-PROTO P1(story 미배정): ListTasksRequest 필수 필터만 구현(PoC) — tenant·
     status_timestamp_after·history_length·include_artifacts는 REQUIRED 아니라 생략.
     스코프는 GetTask와 동형으로 caller가 위임한 member 자신의 task만(`A2ATask.member_id`)."""
@@ -556,8 +615,10 @@ async def a2a_rpc(
             error=JsonRpcError(code=_METHOD_NOT_FOUND, message=f"Method not found: {body.method}"),
         )
 
+    active_extensions = _parse_active_extensions(request)
+
     try:
-        result = await handler(session, member, body.params or {})
+        result = await handler(session, member, body.params or {}, active_extensions)
     except _JsonRpcException as exc:
         return JsonRpcResponse(id=body.id, error=JsonRpcError(code=exc.code, message=exc.message))
 
