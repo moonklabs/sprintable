@@ -27,10 +27,17 @@ async def test_runtime_capabilities_200_and_shape():
         assert resp.status_code == 200
         data = resp.json()
         slugs = {r["slug"] for r in data}
-        assert slugs == {"claude-code", "codex", "gemini", "cursor", "connector"}
+        assert slugs == {
+            "claude-code", "codex", "gemini", "cursor", "connector",
+            "opencode", "openclaw", "hermes", "grok", "pi",
+        }
+        supported = {r["slug"] for r in data if r["supported"]}
+        assert supported == {"claude-code", "codex", "gemini", "cursor", "connector"}
         for r in data:
-            assert r["supported"] is True
-            assert r["tier"] in ("full", "experimental")
+            if r["supported"]:
+                assert r["tier"] in ("full", "experimental")
+            else:
+                assert r["tier"] is None
     finally:
         app.dependency_overrides.clear()
 
@@ -61,3 +68,16 @@ def test_claude_code_is_full_tier_others_experimental():
     for slug in ("claude-code", "codex", "gemini", "cursor"):
         assert caps[slug]["supports_event_push"] is True
         assert set(caps[slug]["mcp_transport"]) == {"stdio", "http"}
+
+
+def test_unsupported_runtimes_reported_honestly_for_coming_soon_section():
+    """PO(2026-07-06): FE 픽커의 '곧 지원' 섹션을 채우려면 미지원 런타임(RuntimeType 9종 중
+    SUPPORTED_RUNTIMES 밖 5종)도 응답에 있어야 한다 — supported=false·tier=None으로 정직하게."""
+    from app.services.agent_onboarding_config import list_runtime_capabilities
+
+    caps = {c["slug"]: c for c in list_runtime_capabilities()}
+    for slug in ("opencode", "openclaw", "hermes", "grok", "pi"):
+        assert caps[slug]["supported"] is False
+        assert caps[slug]["tier"] is None
+        assert caps[slug]["prompt_file"] is None
+        assert caps[slug]["mcp_transport"] == []

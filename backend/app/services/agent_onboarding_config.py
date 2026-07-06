@@ -45,6 +45,11 @@ _RUNTIME_DISPLAY_NAMES: dict[str, str] = {
     "codex": "Codex",
     "gemini": "Gemini",
     "cursor": "Cursor",
+    "opencode": "OpenCode",
+    "openclaw": "OpenClaw",
+    "hermes": "Hermes",
+    "grok": "Grok",
+    "pi": "Pi",
     CONNECTOR_RUNTIME: "Connector",
 }
 
@@ -59,20 +64,36 @@ def list_runtime_capabilities() -> list[dict]:
     이고 나머지는 S7 shaping 전이라 generic fallback이므로 tier="experimental". connector는
     `.mcp.json`은 성립 안 하나(``build_agent_mcp_config``가 None 반환) 안내 파일(CONNECTOR_SETUP.md)
     emit은 성공하므로 supported=true·실 어댑터 조립은 후속이라 tier="experimental".
+
+    PO 확인(2026-07-06): FE 픽커의 "곧 지원" 섹션이 채워지려면 **미지원 런타임도 응답에
+    포함**돼야 한다 — ``RuntimeType``(agent_runtime.py, member.runtime_type 9종 SSOT) 중
+    ``SUPPORTED_RUNTIMES``에 없는 5종(opencode/openclaw/hermes/grok/pi)은 recruit/
+    connection-artifact에 그 값 그대로 넘기면 400("unsupported runtime")이 난다 — 즉 개별
+    선택지로는 아직 미지원. ``supported=false``·``tier=None``으로 정직하게 반환한다(이들은
+    오늘도 ``connector`` 버킷을 통해 수동 가이드로는 연결 가능하나, 그건 별도 엔트리로 이미
+    표현됨 — 개별 런타임 엔트리 자체를 과대약속하지 않는다).
     """
+    from app.services.agent_runtime import RuntimeType
+
     out = []
-    for runtime in sorted(SUPPORTED_RUNTIMES):
+    all_slugs = sorted({rt.value for rt in RuntimeType} | SUPPORTED_RUNTIMES)
+    for runtime in all_slugs:
         is_connector = runtime == CONNECTOR_RUNTIME
+        supported = runtime in SUPPORTED_RUNTIMES
         out.append({
             "slug": runtime,
             "display_name": _RUNTIME_DISPLAY_NAMES.get(runtime, runtime),
-            "supported": True,
-            "tier": "full" if runtime in _INSTRUCTION_FILENAMES else "experimental",
-            "transport": None if is_connector else default_transport_for_edition(),
-            "mcp_transport": [] if is_connector else sorted(SUPPORTED_TRANSPORTS),
-            "prompt_file": resolve_instruction_filename(runtime),
+            "supported": supported,
+            "tier": (
+                None if not supported
+                else "full" if runtime in _INSTRUCTION_FILENAMES
+                else "experimental"
+            ),
+            "transport": None if (is_connector or not supported) else default_transport_for_edition(),
+            "mcp_transport": [] if (is_connector or not supported) else sorted(SUPPORTED_TRANSPORTS),
+            "prompt_file": resolve_instruction_filename(runtime) if supported else None,
             "guide_filename": "CONNECTOR_SETUP.md" if is_connector else None,
-            "supports_event_push": not is_connector,
+            "supports_event_push": supported and not is_connector,
             "icon": None,
         })
     return out
