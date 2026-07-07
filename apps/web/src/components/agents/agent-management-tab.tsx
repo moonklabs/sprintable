@@ -8,7 +8,6 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
-import { AddAgentDialog } from '@/components/agents/add-agent-dialog';
 
 interface OrgAgent {
   id: string;
@@ -26,21 +25,24 @@ interface AccessRecord {
   member_id?: string | null;
 }
 
+interface AgentManagementTabProps {
+  /** story d82c1092(생성경로 단일화) — "에이전트 추가"는 채용 탭으로 라우팅한다(별도 모달 제거). */
+  onAddAgent?: () => void;
+}
+
 /**
  * story d63d3f73 §5② — org 에이전트 목록(관리 탭). 접근 프로젝트 수 요약은 에이전트별
  * fan-out(A×P) 대신 프로젝트별 access 를 P 콜로 한 번만 조회해 member_id 기준으로 집계한다
  * (AgentProjectAccessSection 의 단일-에이전트 fan-out과 동일 원천, org 목록에 맞게 방향만 반전 —
  * Phase 2 매트릭스가 우려하는 N×M 콜과 다름: 프로젝트 수 P에만 비례, 에이전트 수와는 무관).
  */
-export function AgentManagementTab() {
+export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const t = useTranslations('settings');
   const ta = useTranslations('agents');
   const [agents, setAgents] = useState<OrgAgent[]>([]);
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [grantCounts, setGrantCounts] = useState<Record<string, number>>({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [addOpen, setAddOpen] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -90,7 +92,6 @@ export function AgentManagementTab() {
       if (projectsRes.ok) {
         const json = await projectsRes.json() as { data?: ProjectOption[] };
         projectList = (json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
-        setProjects(projectList);
       }
       await Promise.all([refreshAgents(), refreshGrantCounts(projectList)]);
       setLoading(false);
@@ -125,7 +126,7 @@ export function AgentManagementTab() {
               <p className="text-sm text-muted-foreground">{t('orgAgentsDescription')}</p>
             </div>
             {isAdmin ? (
-              <Button variant="hero" size="sm" className="shrink-0 gap-1.5" onClick={() => setAddOpen(true)}>
+              <Button variant="hero" size="sm" className="shrink-0 gap-1.5" onClick={onAddAgent}>
                 <Plus className="size-3.5" /> {ta('manageAddAgent')}
               </Button>
             ) : null}
@@ -183,13 +184,6 @@ export function AgentManagementTab() {
           )}
         </SectionCardBody>
       </SectionCard>
-
-      <AddAgentDialog
-        open={addOpen}
-        onClose={() => setAddOpen(false)}
-        projects={projects}
-        onCreated={() => { void refreshAgents(); void refreshGrantCounts(projects); }}
-      />
     </div>
   );
 }

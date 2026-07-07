@@ -1394,9 +1394,7 @@ export default function SettingsPage() {
           onClose={() => setAddMemberOpen(false)}
           orgId={orgId}
           projects={projects.map((p) => ({ id: p.id, name: p.name }))}
-          defaultType="human"
-          allowAgentType={false}
-          onAdded={(_type, message) => {
+          onAdded={(message) => {
             addToast({ type: 'success', title: message });
           }}
         />
