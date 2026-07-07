@@ -90,7 +90,7 @@ export function AgentsPageTabs() {
         </TabsContent>
 
         <TabsContent value="manage">
-          <AgentManagementTab />
+          <AgentManagementTab onAddAgent={() => setActiveTab('recruit')} />
         </TabsContent>
 
         <TabsContent value="recruit">

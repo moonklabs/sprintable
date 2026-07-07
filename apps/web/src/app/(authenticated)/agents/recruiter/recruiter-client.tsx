@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import {
-  Check, Copy, Download, RefreshCw, ChevronLeft, Info, Sparkles,
+  Check, CheckCircle2, Copy, Download, RefreshCw, ChevronLeft, Info, Sparkles,
   Palette, Cog, Search, ClipboardList, Briefcase, IdCard,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -22,7 +22,9 @@ import { RUNTIME_GUIDE_FILENAME_FALLBACK, RUNTIME_CAPABILITIES_FALLBACK } from '
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
-type Step = 1 | 2 | 3 | 4;
+// story d82c1092(생성경로 단일화): 5-step(직무›스코프›실행환경›번들›검증). equip-skip(역할 없이)
+// 경로는 3(직무·스코프·완료)만 쓰고 STEP3을 "결과" 화면으로 재사용한다(runtime 스텝 스킵).
+type Step = 1 | 2 | 3 | 4 | 5;
 
 const CATEGORY_ICON: Record<string, typeof Palette> = {
   frontend: Palette,
@@ -138,14 +140,7 @@ interface RawStep {
 
 // ─── 재사용 하위 컴포넌트 ────────────────────────────────────────────────────
 
-function StepperHeader({ step }: { step: Step }) {
-  const t = useTranslations('recruiter');
-  const stages: { n: Step; label: string }[] = [
-    { n: 1, label: t('stepRole') },
-    { n: 2, label: t('stepRuntime') },
-    { n: 3, label: t('stepBundle') },
-    { n: 4, label: t('stepVerify') },
-  ];
+function StepperHeader({ step, stages }: { step: Step; stages: { n: Step; label: string }[] }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-1 pb-3">
       {stages.map((s, i) => (
@@ -208,17 +203,20 @@ interface RecruiterClientProps {
 export function RecruiterClient({ projectId, showTopBar = true, onExit }: RecruiterClientProps) {
   const t = useTranslations('recruiter');
   const tAgents = useTranslations('agents');
+  // story d82c1092: 스코프 step(§3③) 카피는 AddAgentForm에서 그대로 하베스트(신규 토큰 0).
+  const tSettings = useTranslations('settings');
   // 오르테가 라이브 스모크 적출(2026-07-06): railXxx/railStageHosted 키는 connect-step이 원래
   // 정의한 'onboarding' 네임스페이스에 있는데 STEP4가 이걸 'agents'(tAgents)로 조회해 전부
   // MISSING_MESSAGE였음 — S4 merge(#1900) 때부터의 잠재 버그. 발견 즉시 여기서 수정.
   const tOnboarding = useTranslations('onboarding');
   const [step, setStep] = useState<Step>(1);
 
-  // STEP 1 — role catalog
+  // STEP 1 — role catalog (+ equip-skip: "역할 없이(키만)")
   const [roleTemplates, setRoleTemplates] = useState<RoleTemplateSummary[] | null>(null);
   const [roleError, setRoleError] = useState(false);
   const [selectedRoleSlug, setSelectedRoleSlug] = useState<string | null>(null);
   const [roleQuery, setRoleQuery] = useState('');
+  const [equipSkip, setEquipSkip] = useState(false);
 
   const fetchRoleTemplates = useCallback(async () => {
     setRoleError(false);
@@ -243,7 +241,88 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     [roleTemplates, roleQuery],
   );
 
-  // STEP 2 — runtime + agent(G1)
+  // STEP 2 — 스코프(story d82c1092 · AddAgentForm scope UI 하베스트). default=현 프로젝트
+  // pre-select(least surprise·기존 recruiter 단일-프로젝트 동작 보존).
+  const [scopeMode, setScopeMode] = useState<'org' | 'projects'>('projects');
+  const [scopeProjectIds, setScopeProjectIds] = useState<string[]>([projectId]);
+  const [orgProjects, setOrgProjects] = useState<{ id: string; name: string }[] | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await fetch('/api/projects');
+      if (!res.ok) return;
+      const json = (await res.json()) as { data?: { id: string; name: string }[] };
+      setOrgProjects((json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)));
+    })();
+  }, []);
+
+  const toggleScopeProject = (id: string) =>
+    setScopeProjectIds((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+
+  // equip-skip 전용("역할 없이(키만)" — AddAgentForm 2-phase 결과 UX 그대로 흡수).
+  const [equipName, setEquipName] = useState('');
+  const [equipRole, setEquipRole] = useState<'member' | 'admin'>('member');
+  const [equipCreating, setEquipCreating] = useState(false);
+  const [equipError, setEquipError] = useState<string | null>(null);
+  const [equipResult, setEquipResult] = useState<{
+    name: string;
+    fakechat_port: number | null;
+    mcp_config: Record<string, unknown> | null;
+    api_key: string | null;
+  } | null>(null);
+  const [equipMcpCopied, setEquipMcpCopied] = useState(false);
+
+  const handleEquipCreate = async () => {
+    const name = equipName.trim();
+    if (!name) { setEquipError(t('agentNameRequired')); return; }
+    if (scopeMode === 'projects' && scopeProjectIds.length === 0) return;
+    setEquipCreating(true);
+    setEquipError(null);
+    try {
+      const res = await fetch('/api/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          role: equipRole,
+          scope_mode: scopeMode,
+          project_ids: scopeMode === 'projects' ? scopeProjectIds : [],
+        }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as {
+          data?: { fakechat_port?: number | null; mcp_config?: Record<string, unknown> | null; api_key?: string | null };
+        };
+        setEquipResult({
+          name,
+          fakechat_port: json.data?.fakechat_port ?? null,
+          mcp_config: json.data?.mcp_config ?? null,
+          api_key: json.data?.api_key ?? null,
+        });
+        setStep(3);
+      } else {
+        const json = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        setEquipError(json?.error?.message ?? t('recruitFailed'));
+      }
+    } catch {
+      setEquipError(t('recruitFailed'));
+    } finally {
+      setEquipCreating(false);
+    }
+  };
+
+  const handleCopyEquipMcp = async () => {
+    if (!equipResult?.mcp_config) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(equipResult.mcp_config, null, 2));
+      setEquipMcpCopied(true);
+      setTimeout(() => setEquipMcpCopied(false), 2000);
+    } catch {
+      // ignore clipboard failure
+    }
+  };
+
+  // STEP 3(Full 경로) — runtime + agent(G1). equip-skip은 이 스텝을 건너뛰고 STEP2 이후 바로 생성한다.
   const [runtime, setRuntime] = useState<string>('claude-code');
   // E-RECRUIT S6: BE `GET /api/v2/runtime-capabilities`(agent_runtime.py 레지스트리 노출) 동적 소비.
   // 404(엔드포인트 아직 미배포·디디 미착지)는 "에러"가 아니라 "기능 아직 없음" — 조용히 S4 당시
@@ -332,10 +411,16 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
         // 빈 입력 = placeholder(제안값) 그대로 수락 — "가볍고 빠르게"(PO crux①) 유지.
         const name = newAgentName.trim() || suggestedAgentName;
         if (!name) { setRecruitError(t('agentNameRequired')); setRecruiting(false); return; }
+        // story d82c1092: 하드코딩(scope_mode:'projects', project_ids:[projectId]) 제거 —
+        // STEP2 스코프 값을 그대로 배선(org-scope 생성 능력 복원).
         const createRes = await fetch('/api/agents', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, scope_mode: 'projects', project_ids: [projectId] }),
+          body: JSON.stringify({
+            name,
+            scope_mode: scopeMode,
+            project_ids: scopeMode === 'projects' ? scopeProjectIds : [],
+          }),
         });
         const createJson = (await createRes.json().catch(() => null)) as { data?: { id: string } } | null;
         if (!createRes.ok || !createJson?.data?.id) throw new Error(t('recruitFailed'));
@@ -359,7 +444,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       setActiveAgentName(agentName);
       setCopiedGuide(false);
       setCopiedMcp(false);
-      setStep(3);
+      setStep(4);
     } catch (err) {
       setRecruitError(err instanceof Error ? err.message : t('recruitFailed'));
     } finally {
@@ -420,7 +505,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   }, [recruitResult]);
 
   useEffect(() => {
-    if (step !== 4 || !recruitResult) return;
+    if (step !== 5 || !recruitResult) return;
     void pollStatus();
     const iv = setInterval(() => void pollStatus(), 2500);
     return () => clearInterval(iv);
@@ -456,6 +541,21 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     [recruitResult],
   );
 
+  // story d82c1092: equip-skip은 3단계(직무·스코프·완료)만 쓴다 — STEP3을 "완료"로 재라벨.
+  const stages: { n: Step; label: string }[] = equipSkip
+    ? [
+        { n: 1, label: t('stepRole') },
+        { n: 2, label: t('stepScope') },
+        { n: 3, label: t('stepComplete') },
+      ]
+    : [
+        { n: 1, label: t('stepRole') },
+        { n: 2, label: t('stepScope') },
+        { n: 3, label: t('stepRuntime') },
+        { n: 4, label: t('stepBundle') },
+        { n: 5, label: t('stepVerify') },
+      ];
+
   return (
     <div className="mx-auto flex max-w-2xl flex-1 flex-col gap-4 p-4">
       {showTopBar ? (
@@ -474,7 +574,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
 
       <SectionCard>
         <SectionCardHeader>
-          <StepperHeader step={step} />
+          <StepperHeader step={step} stages={stages} />
         </SectionCardHeader>
         <SectionCardBody className="space-y-4">
 
@@ -482,6 +582,25 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
           {step === 1 && (
             <div className="space-y-3">
               <p className="text-sm font-semibold text-foreground">{t('roleQuestion')}</p>
+
+              {/* equip-skip(story d82c1092·C3): 역할 없이 키만 발급 — 맨몸추가(AddAgentForm) 흡수. */}
+              <button
+                type="button"
+                onClick={() => { setEquipSkip(true); setSelectedRoleSlug(null); }}
+                className={cn(
+                  'flex w-full items-center justify-between gap-3 rounded-xl border border-dashed p-3 text-left transition-colors',
+                  equipSkip ? 'border-primary/60 bg-primary/5 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
+                )}
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-foreground">{t('equipSkipCardTitle')}</p>
+                  <p className="text-xs text-muted-foreground">{t('equipSkipCardBody')}</p>
+                </div>
+                {equipSkip
+                  ? <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden />
+                  : <Badge variant="chip" className="shrink-0 text-[10px]">{t('equipSkipBadge')}</Badge>}
+              </button>
+
               {roleError ? (
                 <div className="flex items-center gap-2">
                   <p className="text-sm text-destructive">{t('roleLoadError')}</p>
@@ -518,7 +637,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                               <button
                                 key={role.id}
                                 type="button"
-                                onClick={() => setSelectedRoleSlug(role.slug)}
+                                onClick={() => { setSelectedRoleSlug(role.slug); setEquipSkip(false); }}
                                 className={cn(
                                   'relative flex flex-col gap-2 rounded-xl border p-3 text-left transition-colors',
                                   sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
@@ -553,7 +672,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               <div className="flex justify-end border-t border-border pt-3">
                 <Button
                   variant="hero"
-                  disabled={!selectedRoleSlug}
+                  disabled={!selectedRoleSlug && !equipSkip}
                   onClick={() => setStep(2)}
                 >
                   {t('next')}
@@ -562,8 +681,131 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
             </div>
           )}
 
-          {/* ── STEP 2 : 실행환경 + 에이전트(G1) ── */}
+          {/* ── STEP 2 : 스코프(story d82c1092·NEW·AddAgentForm scope UI 하베스트) ── */}
           {step === 2 && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-foreground">{t('scopeQuestion')}</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {(['org', 'projects'] as const).map((mode) => {
+                    const selected = scopeMode === mode;
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setScopeMode(mode)}
+                        className={cn(
+                          'rounded-md border px-4 py-4 text-left transition',
+                          selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-foreground">
+                              {mode === 'org' ? tSettings('agentScopeAllProjects') : tSettings('agentScopeSpecificProjects')}
+                            </p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {mode === 'org' ? tSettings('agentScopeAllProjectsBody') : tSettings('agentScopeSpecificProjectsBody')}
+                            </p>
+                          </div>
+                          {selected ? <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden /> : null}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {scopeMode === 'projects' && !orgProjects ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {[0, 1].map((i) => <Skeleton key={i} className="h-14 rounded-md" />)}
+                  </div>
+                ) : scopeMode === 'projects' ? (
+                  <div className="grid max-h-56 gap-3 overflow-y-auto sm:grid-cols-2">
+                    {(orgProjects ?? []).map((project) => {
+                      const selected = scopeProjectIds.includes(project.id);
+                      return (
+                        <button
+                          key={project.id}
+                          type="button"
+                          onClick={() => toggleScopeProject(project.id)}
+                          className={cn(
+                            'rounded-md border px-4 py-4 text-left transition',
+                            selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="truncate text-sm font-semibold text-foreground">{project.name}</p>
+                            {selected ? <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden /> : null}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+                    {tSettings('agentScopeAllProjectsHint', { count: orgProjects?.length ?? 0 })}
+                  </div>
+                )}
+
+                <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  {t('scopeStepGuide')}
+                </p>
+                <p className="text-xs text-muted-foreground">{tSettings('agentSeatCaption')}</p>
+              </div>
+
+              {equipSkip ? (
+                <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">{tSettings('agentNameLabel')}</label>
+                    <input
+                      type="text"
+                      value={equipName}
+                      onChange={(e) => setEquipName(e.target.value)}
+                      placeholder={tSettings('agentNamePlaceholder')}
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">{tSettings('agentRoleLabel')}</label>
+                    <select
+                      value={equipRole}
+                      onChange={(e) => setEquipRole(e.target.value as 'member' | 'admin')}
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    >
+                      <option value="member">{tSettings('agentRoleMember')}</option>
+                      <option value="admin">{tSettings('agentRoleAdmin')}</option>
+                    </select>
+                  </div>
+                  {equipError && <p className="text-xs text-destructive">{equipError}</p>}
+                </div>
+              ) : null}
+
+              <div className="flex justify-between gap-2 pt-2">
+                <Button variant="ghost" onClick={() => setStep(1)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
+                {equipSkip ? (
+                  <Button
+                    variant="hero"
+                    disabled={equipCreating || (scopeMode === 'projects' && scopeProjectIds.length === 0)}
+                    onClick={() => void handleEquipCreate()}
+                  >
+                    {equipCreating ? t('equipCreating') : t('equipCreateCta')}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="hero"
+                    disabled={scopeMode === 'projects' && scopeProjectIds.length === 0}
+                    onClick={() => setStep(3)}
+                  >
+                    {t('next')}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── STEP 3(Full 경로) : 실행환경 + 에이전트(G1) ── */}
+          {step === 3 && !equipSkip && (
             <div className="space-y-4">
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-foreground">{t('runtimeQuestion')}</p>
@@ -681,7 +923,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               {recruitError && <p className="text-sm text-destructive">{recruitError}</p>}
 
               <div className="flex justify-between gap-2 pt-2">
-                <Button variant="ghost" onClick={() => setStep(1)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
+                <Button variant="ghost" onClick={() => setStep(2)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
                 <Button variant="hero" disabled={recruiting} onClick={() => void handleRecruit()}>
                   {recruiting ? t('recruiting') : t('recruitCta')}
                 </Button>
@@ -689,8 +931,48 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
             </div>
           )}
 
-          {/* ── STEP 3 : 번들 프리뷰(파일 3종) ── */}
-          {step === 3 && recruitResult && selectedRole && (
+          {/* ── equip-skip 결과(story d82c1092·STEP3 재사용) — AddAgentForm 2-phase 결과 UX 그대로 ── */}
+          {step === 3 && equipSkip && equipResult && (
+            <div className="space-y-4">
+              <div className="space-y-3 rounded-md border border-success-border bg-success-tint p-4">
+                <p className="text-sm font-semibold text-success">{equipResult.name} 생성 완료</p>
+                {equipResult.fakechat_port ? (
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <Badge variant="info">SSE</Badge>
+                    <span className="font-mono text-foreground">Port: {equipResult.fakechat_port}</span>
+                    <span className="text-muted-foreground">— fakechat http://localhost:{equipResult.fakechat_port}/sse</span>
+                  </div>
+                ) : null}
+                {equipResult.api_key ? (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-foreground">API Key — 지금만 표시됩니다.</p>
+                    <code className="block break-all rounded border border-border bg-background p-2 font-mono text-xs text-foreground/80">
+                      {equipResult.api_key}
+                    </code>
+                  </div>
+                ) : null}
+                {equipResult.mcp_config ? (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-foreground">MCP Config</p>
+                      <Button variant="glass" size="sm" onClick={() => void handleCopyEquipMcp()}>
+                        {equipMcpCopied ? <><Check className="size-3" />{t('copied')}</> : <>{t('copy')}</>}
+                      </Button>
+                    </div>
+                    <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
+                      {JSON.stringify(equipResult.mcp_config, null, 2)}
+                    </pre>
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex justify-end">
+                <Button variant="hero" onClick={() => onExit?.()}>{t('equipDone')}</Button>
+              </div>
+            </div>
+          )}
+
+          {/* ── STEP 4 : 번들 프리뷰(파일 3종) ── */}
+          {step === 4 && recruitResult && selectedRole && (
             <div className="space-y-4">
               <Alert variant="warning">
                 <AlertDescription className="flex items-start gap-2">
@@ -759,13 +1041,13 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               </p>
 
               <div className="flex justify-end pt-2">
-                <Button variant="hero" onClick={() => setStep(4)}>{t('next')}</Button>
+                <Button variant="hero" onClick={() => setStep(5)}>{t('next')}</Button>
               </div>
             </div>
           )}
 
-          {/* ── STEP 4 : 검증 + 배치(G5) ── */}
-          {step === 4 && recruitResult && (
+          {/* ── STEP 5 : 검증 + 배치(G5) ── */}
+          {step === 5 && recruitResult && (
             <div className="space-y-4">
               <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -805,7 +1087,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               </p>
 
               <div className="flex justify-between gap-2 pt-2">
-                <Button variant="ghost" onClick={() => setStep(3)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
+                <Button variant="ghost" onClick={() => setStep(4)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
                 <Link href="/dashboard"><Button variant={verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
               </div>
             </div>
