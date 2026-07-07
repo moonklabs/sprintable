@@ -20,16 +20,24 @@ def _mock_member(agent_role: str | None = "qa") -> MagicMock:
     return m
 
 
-def _mock_persona() -> MagicMock:
+def _mock_persona(role_template_id: str | None = None) -> MagicMock:
     p = MagicMock()
     p.agent_id = MEMBER_ID
     p.name = "QA Engineer"
     p.slug = "qa"
     p.description = "QA testing role"
     p.config = {"tool_allowlist": ["stories", "tasks", "chat"]}
+    if role_template_id is not None:
+        p.config["role_template_id"] = role_template_id
     p.is_default = True
     p.deleted_at = None
     return p
+
+
+def _mock_role_template(skills: list[dict]) -> MagicMock:
+    rt = MagicMock()
+    rt.skills = skills
+    return rt
 
 
 @pytest.fixture
@@ -145,6 +153,83 @@ async def test_agent_card_200_reflects_role_template_skills():
         assert card["supportedInterfaces"][0]["protocolBinding"] == "JSONRPC"
         assert card["supportedInterfaces"][0]["protocolVersion"] == "1.0"
         assert card["supportedInterfaces"][0]["tenant"] == str(MEMBER_ID)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_agent_card_prefers_role_template_skills_when_linked():
+    """~300직군 카탈로그 S4: persona가 recruit_agent() 생성 marker(config.role_template_id)를
+    가지면, 카드-빌드 시점에 그 role_template.skills(카탈로그 실시간 값)를 우선 반영 —
+    persona 생성 시점 스냅샷(slug/tool_allowlist 파생 단일 skill)이 아니라."""
+    client, session, app = await _client()
+    try:
+        rt_id = str(uuid.uuid4())
+        member = _mock_member()
+        persona = _mock_persona(role_template_id=rt_id)
+        role_template = _mock_role_template(skills=[
+            {"id": "qa", "name": "QA Engineer", "description": "품질 보증", "tags": ["qa", "testing"]},
+            {"id": "automation", "name": "QA Automation", "description": "자동화", "tags": ["automation"]},
+        ])
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _result(persona)
+            return _result(role_template)
+
+        session.execute = mock_execute
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/a2a/members/{MEMBER_ID}/agent-card.json")
+
+        assert resp.status_code == 200
+        card = resp.json()
+        # persona-slug 파생 단일 skill(id=qa, tags=tool_allowlist)이 아니라 카탈로그의 2-skill 그대로.
+        assert len(card["skills"]) == 2
+        assert card["skills"][0]["tags"] == ["qa", "testing"]
+        assert card["skills"][1]["id"] == "automation"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_agent_card_falls_back_to_persona_when_role_template_skills_empty():
+    """role_template_id는 있으나 그 role_template.skills가 아직 비어있으면(카탈로그 구조화
+    미완료) persona-파생 단일 skill로 그레이스풀 폴백 — 빈 skills[] 노출 금지."""
+    client, session, app = await _client()
+    try:
+        rt_id = str(uuid.uuid4())
+        member = _mock_member()
+        persona = _mock_persona(role_template_id=rt_id)
+        role_template = _mock_role_template(skills=[])
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _result(persona)
+            return _result(role_template)
+
+        session.execute = mock_execute
+
+        async with client as c:
+            resp = await c.get(f"/api/v2/a2a/members/{MEMBER_ID}/agent-card.json")
+
+        assert resp.status_code == 200
+        card = resp.json()
+        assert len(card["skills"]) == 1
+        assert card["skills"][0]["id"] == "qa"
+        assert card["skills"][0]["tags"] == ["stories", "tasks", "chat"]
     finally:
         app.dependency_overrides.clear()
 

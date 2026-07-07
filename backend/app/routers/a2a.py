@@ -58,6 +58,14 @@ retry+상태추적)와는 신뢰성 메커니즘이 다르나, 이제 최소한 
 multi-webhook 멤버(채널 2개 이상)가 그중 하나만 실패해도 거짓 FAILED를 냈다(task bd4a6c0b 재현).
 그 메시지의 전 delivery를 모아 **전량 실패일 때만** FAILED로 승격하도록 교정 — 하나라도
 delivered면 이 판정에서는 실패 아님(응답 대기 지속, 타임아웃 백스톱은 그대로 유효).
+
+**~300직군 카탈로그 트랙 S4(2026-07-07, 문서 role-template-crud-api-crux)**: `_build_agent_card`가
+persona 존재 시 무조건 persona.slug/config.tool_allowlist 파생 단일 skill을 쓰던 것에서, persona가
+`config.role_template_id`(recruit_agent() marker)를 갖고 그 role_template.skills(admin CRUD/벌크로
+관리)가 채워져 있으면 **카드-빌드 시점에 그 실 skills를 직접 반영**하도록 확장 — persona 생성
+당시 스냅샷이 아니라 카탈로그 갱신을 재-recruit 없이 그대로 따라간다. role_template.skills가
+비어있으면(아직 구조화 미완료) 기존 persona 파생 단일 skill로 그레이스풀 폴백 — 무회귀(오늘
+수작업으로 만든 8명의 persona는 role_template_id가 없어 이 폴백 그대로, 크래시 없음).
 """
 from __future__ import annotations
 
@@ -75,6 +83,7 @@ from app.models.agent_deployment import AgentPersona
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
 from app.models.event import Event
+from app.models.role_template import RoleTemplate
 from app.models.team import TeamMember
 from app.repositories.team_member import TeamMemberRepository
 from app.routers.agent_gateway import wake_agent
@@ -180,9 +189,16 @@ async def _get_agent_member(
 
 
 async def _build_agent_card(session: AsyncSession, member: TeamMember, base_url: str) -> AgentCard:
-    """skills[]는 role_template 능력 반영 — 별도 저장 없이 요청 시 AgentPersona(config.tool_allowlist)
-    + role_template slug/name/description에서 동적 조립(SSOT는 role_templates, 문서
-    `e-a2a-poc-s1-design-crux` §A 판단)."""
+    """skills[]는 role_template 능력 반영 — SSOT는 role_templates(문서
+    `e-a2a-poc-s1-design-crux` §A 판단).
+
+    ~300직군 카탈로그 트랙 S4(문서 `role-template-crud-api-crux`): persona가 recruit_agent()로
+    생성되어 `config.role_template_id`(admin CRUD/벌크로 관리되는 role_templates.skills 의
+    marker)를 갖고 있으면, **그 role_template의 실 skills 를 카드-빌드 시점에 직접 조회**해
+    반영한다 — persona 생성 시점에 스냅샷된 정적 값이 아니라 카탈로그가 갱신되면 재-recruit
+    없이도 그대로 따라간다. role_template.skills 가 비어있으면(아직 카탈로그에 구조화 skills가
+    채워지지 않은 role) 기존 persona-slug 파생 단일 skill로 폴백(무회귀 — 오늘(2026-07-07)
+    수작업으로 만든 8명의 persona 는 role_template_id 가 없어 이 폴백 그대로 유지된다)."""
     persona_result = await session.execute(
         select(AgentPersona).where(
             AgentPersona.agent_id == member.id,
@@ -192,7 +208,19 @@ async def _build_agent_card(session: AsyncSession, member: TeamMember, base_url:
     )
     persona = persona_result.scalar_one_or_none()
 
-    if persona is not None:
+    role_template_skills: list[AgentSkill] | None = None
+    if persona is not None and isinstance(persona.config, dict):
+        role_template_id = persona.config.get("role_template_id")
+        if role_template_id:
+            role_template = (await session.execute(
+                select(RoleTemplate).where(RoleTemplate.id == uuid.UUID(role_template_id))
+            )).scalar_one_or_none()
+            if role_template is not None and role_template.skills:
+                role_template_skills = [AgentSkill(**s) for s in role_template.skills]
+
+    if role_template_skills is not None:
+        skills = role_template_skills
+    elif persona is not None:
         tool_allowlist = persona.config.get("tool_allowlist", []) if isinstance(persona.config, dict) else []
         skills = [
             AgentSkill(
