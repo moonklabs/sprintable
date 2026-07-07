@@ -2,6 +2,9 @@
 
 AC1: stdio .mcp.json(type=stdio·uvx·sprintable-mcp·env{SPRINTABLE_API_URL=backend-direct,
 AGENT_API_KEY})·AGENT_ID/WS_URL/port 미포함. backend-direct URL=env(FASTAPI_URL)·CF 금지·local fallback.
+
+E-RECRUIT S21(story 444d1d18): bare `uvx sprintable-mcp`는 PyPI 미게시라 args가
+`--from git+<repo>#subdirectory=...` 형태로 emit된다(실동작 검증 완료 — crux 참조).
 """
 from __future__ import annotations
 
@@ -17,7 +20,11 @@ def test_stdio_shape_with_key():
     server = cfg["mcpServers"]["sprintable"]
     assert server["type"] == "stdio"
     assert server["command"] == "uvx"
-    assert server["args"] == ["sprintable-mcp"]
+    assert server["args"] == [
+        "--from",
+        "git+https://github.com/moonklabs/sprintable.git#subdirectory=backend/sprintable_mcp",
+        "sprintable-mcp",
+    ]
     assert server["env"]["AGENT_API_KEY"] == "sk_live_abc"
     assert "SPRINTABLE_API_URL" in server["env"]
 
