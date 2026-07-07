@@ -89,7 +89,7 @@ def list_runtime_capabilities() -> list[dict]:
                 else "full" if runtime in _INSTRUCTION_FILENAMES
                 else "experimental"
             ),
-            "transport": None if (is_connector or not supported) else default_transport_for_edition(),
+            "transport": None if (is_connector or not supported) else default_transport_for_hosting(),
             "mcp_transport": [] if (is_connector or not supported) else sorted(SUPPORTED_TRANSPORTS),
             "prompt_file": resolve_instruction_filename(runtime) if supported else None,
             "guide_filename": "CONNECTOR_SETUP.md" if is_connector else None,
@@ -159,14 +159,17 @@ def resolve_mcp_public_url() -> str | None:
     return val.rstrip("/") if val else None
 
 
-def default_transport_for_edition() -> str:
-    """edition별 기본 transport — SaaS(EE)=http(무마찰 호스팅) / OSS=stdio(호스팅 배포 없음).
+def default_transport_for_hosting() -> str:
+    """호스팅 가용성별 기본 transport — MCP_PUBLIC_URL 세팅됨(호스팅 MCP 가용)=http(무마찰) /
+    미설정(자체호스팅·호스팅 배포 없음)=stdio.
 
-    기존 OSS/SaaS 스위치(``settings.is_ee_enabled``) 재사용 — 신규 플래그 0.
+    E-MCP-OPT S7(선생님 지적 2026-07-04·S3 근본 fix): 예전엔 ``settings.is_ee_enabled``(과금
+    스위치)로 갈랐으나, 이는 틀린 커플링 — EE 꺼진 배포(예: dev 기본값)에서도 호스팅 MCP가 실제로
+    떠 있으면(``MCP_PUBLIC_URL`` 세팅) 그 호스팅을 기본으로 써야 무마찰이 성립한다. 과금/EE 여부와
+    무관하게 "호스팅 MCP가 있느냐"만으로 판정 — ``resolve_mcp_public_url()``(= ``_build_http_config()``
+    non-None 가드)과 동일 신호를 재사용해 판정 신호가 하나로 정합된다.
     """
-    from app.core.config import settings
-
-    return HTTP if settings.is_ee_enabled else STDIO
+    return HTTP if resolve_mcp_public_url() is not None else STDIO
 
 
 def _build_stdio_config(api_key_plaintext: str | None) -> dict:
@@ -278,7 +281,7 @@ def build_agent_mcp_config_bundle(
     if runtime == CONNECTOR_RUNTIME:
         return {"default_transport": None, "mcp_config": None, "mcp_config_alternatives": {}}
 
-    default_transport = default_transport_for_edition()
+    default_transport = default_transport_for_hosting()
     configs = {
         t: build_agent_mcp_config(api_key_plaintext=api_key_plaintext, runtime=runtime, transport=t)
         for t in SUPPORTED_TRANSPORTS
