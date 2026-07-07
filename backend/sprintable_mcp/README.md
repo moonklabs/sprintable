@@ -1,4 +1,4 @@
-# sprintable-mcp
+# Sprintable MCP
 
 BYO 에이전트용 Sprintable MCP 서버. 에이전트 런타임을 Sprintable API에 stdio로 연결한다.
 **레포 clone 불필요** — `uvx` 한 줄로 구동.
@@ -8,14 +8,14 @@ BYO 에이전트용 Sprintable MCP 서버. 에이전트 런타임을 Sprintable 
 ```bash
 export SPRINTABLE_API_URL=https://app.sprintable.ai     # 또는 dev 백엔드 URL
 export AGENT_API_KEY=sk_live_...                         # 에이전트 API 키
-uvx sprintable-mcp
+uvx sprintable
 ```
 
 설치형:
 
 ```bash
-pip install sprintable-mcp
-sprintable-mcp        # 엔트리포인트
+pip install sprintable
+sprintable        # 엔트리포인트
 # 또는
 python -m sprintable_mcp
 ```
