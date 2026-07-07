@@ -472,7 +472,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                     })}
                   </span>
                   <Link
-                    href={`/settings/members/agents/${tg.agentId}`}
+                    href={`/agents/${tg.agentId}`}
                     className="shrink-0 rounded font-medium text-warning underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {t('commandViewSettings')}

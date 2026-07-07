@@ -1,20 +1,9 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { RecruiterClient } from './recruiter-client';
-import { useTranslations } from 'next-intl';
-
+/**
+ * 에이전트 관리 IA 통일(story d63d3f73) — 채용은 `/agents` 채용 탭으로 흡수.
+ * 기존 "채용관" CTA·딥링크 보존을 위해 이 경로는 탭으로 리다이렉트만 한다.
+ */
 export default function RecruiterPage() {
-  const { projectId, orgId } = useDashboardContext();
-  const t = useTranslations('recruiter');
-
-  if (!projectId) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <p className="text-sm text-muted-foreground">{t('noProject')}</p>
-      </div>
-    );
-  }
-
-  return <RecruiterClient projectId={projectId} orgId={orgId} />;
+  redirect('/agents?tab=recruit');
 }

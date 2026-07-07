@@ -36,7 +36,7 @@ export function CommandHintNotice({ hint }: { hint: BlockedHint }) {
           {t('commandBlockedAlt', { command: hint.command })}
         </p>
         <Link
-          href={`/settings/members/agents/${hint.agent_id}`}
+          href={`/agents/${hint.agent_id}`}
           className="inline-flex items-center gap-1 rounded text-xs font-medium text-info underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {t('commandBlockedSettings')}
