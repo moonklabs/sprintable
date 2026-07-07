@@ -1,4 +1,4 @@
-# sprintable-mcp
+# Sprintable MCP
 
 BYO 에이전트용 Sprintable MCP 서버. 에이전트 런타임을 Sprintable API에 stdio로 연결한다.
 **레포 clone 불필요** — `uvx` 한 줄로 구동.
