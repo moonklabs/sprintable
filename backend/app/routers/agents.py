@@ -30,7 +30,7 @@ from app.services.agent_onboarding_config import (
     build_agent_mcp_config,
     build_agent_mcp_config_bundle,
     build_connector_guidance,
-    default_transport_for_edition,
+    default_transport_for_hosting,
     resolve_instruction_filename,
 )
 from app.services.agent_verify import get_verification_state, start_verification
@@ -128,7 +128,8 @@ async def create_org_agent(
     effective_port = member.fakechat_port or int(os.environ.get("FAKECHAT_PORT", _FAKECHAT_BASE_PORT))
     response["fakechat_port"] = effective_port
     response["api_key_created"] = bool(api_key_plaintext)
-    # E-MCP-OPT S3: 단일 SSOT generator 소비 — edition 기본 + 두 transport 변형 동봉(FE round-trip 0).
+    # E-MCP-OPT S3/S7: 단일 SSOT generator 소비 — 호스팅 가용성 기본(MCP_PUBLIC_URL 존재) + 두
+    # transport 변형 동봉(FE round-trip 0).
     config_bundle = build_agent_mcp_config_bundle(api_key_plaintext=api_key_plaintext)
     response["mcp_config"] = config_bundle["mcp_config"]
     response["default_transport"] = config_bundle["default_transport"]
@@ -164,7 +165,8 @@ async def get_agent_connection_artifact(
     ``.limit(1)`` 로 MultipleResultsFound 차단(identity 조회·행 동형).
 
     E-MCP-OPT S3: ``transport`` 쿼리(``stdio``|``http``) — connect-step 토글이 다른 탭 선택 시 이
-    파라미터로 재요청(§5, FE round-trip 방식 선택). 미지정 시 edition 기본(SaaS=http·OSS=stdio).
+    파라미터로 재요청(§5, FE round-trip 방식 선택). 미지정 시 호스팅 가용성 기본(S7: MCP_PUBLIC_URL
+    세팅=http·미설정=stdio — 과금/EE 무관).
 
     E-RECRUIT S5 G4(블루프린트 핵심 발견 — ``agent_personas.system_prompt``가 저장은 되나 어떤
     런타임에도 전달 안 됨): 이 **공용** 레이어에 fix를 둬서 recruit(S3) 전용이 아니라 **일반
@@ -215,7 +217,7 @@ async def get_agent_connection_artifact(
         mcp_config: dict | None = None
         files.append({"filename": "CONNECTOR_SETUP.md", "content": build_connector_guidance(runtime)})
     else:
-        resolved_transport = transport or default_transport_for_edition()
+        resolved_transport = transport or default_transport_for_hosting()
         if resolved_transport not in SUPPORTED_TRANSPORTS:
             raise HTTPException(status_code=400, detail=f"unsupported transport: {transport}")
         mcp_config = build_agent_mcp_config(

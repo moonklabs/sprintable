@@ -59,17 +59,15 @@ def test_http_variant_no_auth_header_when_key_absent(monkeypatch):
     assert out["mcpServers"]["sprintable"]["headers"] == {}
 
 
-def test_default_transport_for_edition(monkeypatch):
-    from app.core.config import settings
-    monkeypatch.setattr(settings, "license_consent", "", raising=False)
-    assert cfg.default_transport_for_edition() == "stdio"
-    monkeypatch.setattr(settings, "license_consent", "agreed", raising=False)
-    assert cfg.default_transport_for_edition() == "http"
+def test_default_transport_for_hosting(monkeypatch):
+    """E-MCP-OPT S7: 판정 신호는 MCP_PUBLIC_URL 존재 단독 — is_ee_enabled/license_consent 무관."""
+    monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
+    assert cfg.default_transport_for_hosting() == "stdio"
+    monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
+    assert cfg.default_transport_for_hosting() == "http"
 
 
-def test_bundle_saas_with_hosting_available(monkeypatch):
-    from app.core.config import settings
-    monkeypatch.setattr(settings, "license_consent", "agreed", raising=False)
+def test_bundle_hosted_with_mcp_public_url_set(monkeypatch):
     monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
     bundle = cfg.build_agent_mcp_config_bundle(api_key_plaintext="k")
     assert bundle["default_transport"] == "http"
@@ -77,24 +75,25 @@ def test_bundle_saas_with_hosting_available(monkeypatch):
     assert set(bundle["mcp_config_alternatives"]) == {"stdio"}
 
 
-def test_bundle_oss_no_hosting_falls_back_to_stdio_only(monkeypatch):
-    """OSS(호스팅 미배포) — MCP_PUBLIC_URL 미설정이면 default가 http여도 stdio로 폴백·alternatives 비움."""
-    from app.core.config import settings
-    monkeypatch.setattr(settings, "license_consent", "agreed", raising=False)  # 가정: edition=SaaS이나
-    monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)                  # 이 인스턴스엔 호스팅 미배포
+def test_bundle_self_hosted_no_mcp_public_url_defaults_stdio(monkeypatch):
+    """자체호스팅(호스팅 MCP 미배포) — MCP_PUBLIC_URL 미설정이면 default=stdio·alternatives 비움."""
+    monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
     bundle = cfg.build_agent_mcp_config_bundle(api_key_plaintext="k")
     assert bundle["default_transport"] == "stdio"
     assert bundle["mcp_config"]["mcpServers"]["sprintable"]["type"] == "stdio"
     assert bundle["mcp_config_alternatives"] == {}
 
 
-def test_bundle_oss_default_stdio(monkeypatch):
+def test_bundle_hosting_decoupled_from_ee_flag(monkeypatch):
+    """E-MCP-OPT S7 회귀 가드: is_ee_enabled(License_consent)=False(dev 기본값)여도 MCP_PUBLIC_URL만
+    있으면 http가 기본 — 과금/EE 스위치와 완전 분리됐는지 직접 검증."""
     from app.core.config import settings
     monkeypatch.setattr(settings, "license_consent", "", raising=False)
-    monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")  # 배포는 있어도 OSS면 기본 stdio
+    monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
+    assert settings.is_ee_enabled is False
     bundle = cfg.build_agent_mcp_config_bundle(api_key_plaintext="k")
-    assert bundle["default_transport"] == "stdio"
-    assert set(bundle["mcp_config_alternatives"]) == {"http"}
+    assert bundle["default_transport"] == "http"
+    assert set(bundle["mcp_config_alternatives"]) == {"stdio"}
 
 
 # ── ② crux2 — verify rail transport-aware ─────────────────────────────────────
