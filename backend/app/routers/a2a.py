@@ -83,6 +83,7 @@ from app.models.agent_deployment import AgentPersona
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
 from app.models.event import Event
+from app.models.gate import Gate
 from app.models.role_template import RoleTemplate
 from app.models.team import TeamMember
 from app.repositories.team_member import TeamMemberRepository
@@ -517,7 +518,25 @@ async def _handle_get_task(
     if task is None:
         raise _JsonRpcException(_TASK_NOT_FOUND, "Task not found")
 
-    if task.state not in _TERMINAL_STATES and task.root_message_id is not None:
+    # HITL crux(story 7726a003, 문서 `a2a-hitl-input-auth-required-mapping-crux`, PO GO 승인
+    # 2026-07-07, 옵션 B): reader만 배선 — writer(task_metadata.linked_gate_id 기록)는 별도
+    # forward-work 스토리로 분리(아직 아무 delegate 경로도 이 필드를 안 씀 → 오늘은 항상
+    # no-op·무회귀). WORKING 에서만 판정(INPUT_REQUIRED 재진입 시 재판정 없음 — 복귀는
+    # transition_gate()의 전담 책임, 여기서 낙관적으로 되돌리지 않는다).
+    if task.state == "TASK_STATE_WORKING":
+        linked_gate_id = (task.task_metadata or {}).get("linked_gate_id")
+        if linked_gate_id is not None:
+            gate = (await session.execute(
+                select(Gate).where(Gate.id == uuid.UUID(linked_gate_id), Gate.org_id == member.org_id)
+            )).scalar_one_or_none()
+            if gate is not None and gate.status == "pending":
+                task.state = "TASK_STATE_INPUT_REQUIRED"
+                await session.flush()
+                await session.commit()
+                await session.refresh(task)
+                return _task_to_dict(task)
+
+    if task.state == "TASK_STATE_WORKING" and task.root_message_id is not None:
         reply = (await session.execute(
             select(ConversationMessage)
             .where(ConversationMessage.thread_id == task.root_message_id)
