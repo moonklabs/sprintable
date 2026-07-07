@@ -498,7 +498,9 @@ async def test_get_task_still_working_when_no_reply_yet():
                 return _result(member)
             if call_count == 2:
                 return _result(working_task)
-            return _result(None)  # thread 폴링 — 아직 답신 없음
+            if call_count == 3:
+                return _result(None)  # thread 폴링 — 아직 답신 없음
+            return _list_result([])  # delivery row 없음
 
         session.execute = mock_execute
 
@@ -645,7 +647,7 @@ async def test_rpc_cross_org_blocked():
 
 @pytest.mark.anyio
 async def test_get_task_transitions_to_failed_on_delivery_failure():
-    """P1-S2(B): 답신 없고 ConversationWebhookDelivery.status=="failed"면 타임아웃 전이라도
+    """P1-S2(B): 답신 없고 전 ConversationWebhookDelivery.status=="failed"면 타임아웃 전이라도
     즉시 FAILED(실제 아는 정보 우선)."""
     client, session, app = await _authed_client(uuid.uuid4())
     try:
@@ -669,7 +671,7 @@ async def test_get_task_transitions_to_failed_on_delivery_failure():
                 return _result(working_task)
             if call_count == 3:
                 return _result(None)  # thread 폴링 — 답신 없음
-            return _result(delivery)  # webhook delivery 조회 — failed
+            return _list_result([delivery])  # webhook delivery 조회 — 1건, 전량 failed
 
         session.execute = mock_execute
         session.flush = AsyncMock()
@@ -684,6 +686,57 @@ async def test_get_task_transitions_to_failed_on_delivery_failure():
         body = resp.json()
         assert body["result"]["status"]["state"] == "TASK_STATE_FAILED"
         assert "webhook delivery failed" in body["result"]["status"]["message"]["parts"][0]["text"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_task_not_failed_when_one_of_multiple_webhook_deliveries_succeeds():
+    """까심 크로스모델 QA(story 652c2842, task bd4a6c0b 재현): multi-webhook 멤버가 채널 2개 중
+    하나만 실패해도 "최신 1건"이 그 실패행이면 거짓 FAILED가 났던 버그. 전량 실패일 때만 FAILED로
+    승격해야 하며, 하나라도 delivered면 이 판정에서는 FAILED로 전이하지 않는다(WORKING 유지)."""
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        root_message_id = uuid.uuid4()
+        working_task = _mock_task("TASK_STATE_WORKING", root_message_id=root_message_id)
+
+        delivered = MagicMock()
+        delivered.status = "delivered"
+        delivered.attempt_count = 1
+        delivered.last_error = None
+
+        failed = MagicMock()
+        failed.status = "failed"
+        failed.attempt_count = 3
+        failed.last_error = "connection refused"
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _result(working_task)
+            if call_count == 3:
+                return _result(None)  # thread 폴링 — 답신 없음
+            # webhook delivery 조회 — 최신순 2건(가장 최신이 failed여도 다른 채널은 delivered)
+            return _list_result([failed, delivered])
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+        session.refresh = AsyncMock()
+
+        req = {"jsonrpc": "2.0", "id": 9, "method": "GetTask", "params": {"id": str(working_task.id)}}
+
+        async with client as c:
+            resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=req)
+
+        body = resp.json()
+        assert body["result"]["status"]["state"] == "TASK_STATE_WORKING"
     finally:
         app.dependency_overrides.clear()
 
@@ -711,7 +764,9 @@ async def test_get_task_transitions_to_failed_on_timeout():
                 return _result(member)
             if call_count == 2:
                 return _result(working_task)
-            return _result(None)  # 답신 없음 + delivery row 없음(fakechat 경로)
+            if call_count == 3:
+                return _result(None)  # thread 폴링 — 답신 없음
+            return _list_result([])  # delivery row 없음(fakechat 경로)
 
         session.execute = mock_execute
         session.flush = AsyncMock()
