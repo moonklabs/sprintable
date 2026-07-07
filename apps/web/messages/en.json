@@ -2374,6 +2374,7 @@
     "workflowVersionRemovedRules": "-{count}",
     "workflowVersionChangedRules": "~{count}",
     "title": "Agents",
+    "recruiterCta": "Recruiter",
     "tabDeployments": "Deployments",
     "tabPerformance": "Performance",
     "autoBadge": "Auto",
