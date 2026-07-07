@@ -2374,6 +2374,7 @@
     "workflowVersionRemovedRules": "삭제 {count}",
     "workflowVersionChangedRules": "변경 {count}",
     "title": "에이전트",
+    "recruiterCta": "채용관",
     "tabDeployments": "배포",
     "tabPerformance": "퍼포먼스",
     "autoBadge": "Auto",
