@@ -38,15 +38,15 @@ export function AgentsPageTabs() {
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as AgentsTab)}>
         <div className="border-b border-border px-6">
           <TabsList variant="line">
-            <TabsTrigger value="stats" className="data-active:text-primary after:bg-primary">
+            <TabsTrigger value="stats">
               <BarChart2 className="h-4 w-4" />
               {t('statsTab')}
             </TabsTrigger>
-            <TabsTrigger value="manage" className="data-active:text-primary after:bg-primary">
+            <TabsTrigger value="manage">
               <Settings2 className="h-4 w-4" />
               {t('manageTab')}
             </TabsTrigger>
-            <TabsTrigger value="recruit" className="data-active:text-primary after:bg-primary">
+            <TabsTrigger value="recruit">
               <UserPlus className="h-4 w-4" />
               {t('recruitTab')}
             </TabsTrigger>
