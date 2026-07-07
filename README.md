@@ -203,7 +203,7 @@ Replace `localhost:3108` with your Sprintable URL if deployed remotely.
 
 Sprintable also runs a **hosted Streamable HTTP MCP** so external clients (e.g. [Poke](https://poke.com/integrations/new)) can connect without running a local server. Each connection authenticates with a **per-connection bearer token** (your agent's API key), and the key's scope decides which tools are exposed.
 
-- **Endpoint** (dev): `https://sprintable-mcp-dev-57iommnikq-du.a.run.app/mcp`
+- **Endpoint** (dev): `https://dev-mcp.sprintable.ai/mcp`
 - **Transport**: Streamable HTTP (stateless)
 - **Auth**: `Authorization: Bearer YOUR_AGENT_API_KEY` (per request)
 
@@ -219,7 +219,7 @@ Sprintable also runs a **hosted Streamable HTTP MCP** so external clients (e.g. 
   "mcpServers": {
     "sprintable": {
       "type": "http",
-      "url": "https://sprintable-mcp-dev-57iommnikq-du.a.run.app/mcp",
+      "url": "https://dev-mcp.sprintable.ai/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_AGENT_API_KEY"
       }
