@@ -52,6 +52,12 @@ retry+상태추적)와는 신뢰성 메커니즘이 다르나, 이제 최소한 
 `task_metadata["project_context"]`(GetTask로 조회 가능) + fakechat 전달 payload에 보존한다.
 ⚠️webhook 경로는 스코프 밖(공유 함수 `deliver_conversation_message_webhook`이 plain text만
 받아 계약 확장은 과설계 — 코드 주석 참조). 헤더 미선언 시 이 로직 전체가 스킵돼 무회귀.
+
+**완료신호 multi-webhook 오판 fix(2026-07-07, story 652c2842, 까심 크로스모델 QA root 확定)**:
+`_handle_get_task`의 delivery 실패 판정이 `ConversationWebhookDelivery`를 "최신 1건만" 보고 있어
+multi-webhook 멤버(채널 2개 이상)가 그중 하나만 실패해도 거짓 FAILED를 냈다(task bd4a6c0b 재현).
+그 메시지의 전 delivery를 모아 **전량 실패일 때만** FAILED로 승격하도록 교정 — 하나라도
+delivered면 이 판정에서는 실패 아님(응답 대기 지속, 타임아웃 백스톱은 그대로 유효).
 """
 from __future__ import annotations
 
@@ -515,18 +521,24 @@ async def _handle_get_task(
             # 실 배달상태(ConversationWebhookDelivery, root_message_id로 조인 — 신규 컬럼 불요)로
             # 확실히 아는 실패를 우선 반영. (2) 그것도 아니면 생성 후 타임아웃 경과를 두 경로
             # 공통 백스톱으로 사용(fakechat WS는 ack가 없어 이게 유일한 실패 신호).
+            #
+            # 까심 크로스모델 QA(story 652c2842) — "최신 1건"이 아니라 **그 메시지의 전 delivery**를
+            # 봐야 한다: multi-webhook 멤버(웹훅 2개 이상)는 메시지당 delivery 행이 webhook_config
+            # 개수만큼 생기고, 그중 하나만 우연히 실패해도 "최신"이 그 실패행이면 다른 채널로는
+            # 실제 도달했음에도 거짓 FAILED가 났다(task bd4a6c0b 재현 케이스). 전량 실패일 때만
+            # FAILED로 승격 — 하나라도 delivered면 이 판정에서는 실패 아님(응답 대기 지속).
             failure_reason: str | None = None
 
-            delivery = (await session.execute(
+            deliveries = (await session.execute(
                 select(ConversationWebhookDelivery)
                 .where(ConversationWebhookDelivery.message_id == task.root_message_id)
                 .order_by(ConversationWebhookDelivery.created_at.desc())
-                .limit(1)
-            )).scalar_one_or_none()
-            if delivery is not None and delivery.status == "failed":
+            )).scalars().all()
+            if deliveries and all(d.status == "failed" for d in deliveries):
+                latest = deliveries[0]
                 failure_reason = (
-                    f"webhook delivery failed after {delivery.attempt_count} attempts: "
-                    f"{delivery.last_error or 'unknown error'}"
+                    f"webhook delivery failed on all {len(deliveries)} channel(s) after "
+                    f"{latest.attempt_count} attempts: {latest.last_error or 'unknown error'}"
                 )
             elif datetime.now(timezone.utc) - task.created_at > timedelta(minutes=A2A_TASK_TIMEOUT_MINUTES):
                 failure_reason = (
