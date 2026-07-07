@@ -1252,3 +1252,125 @@ async def test_agent_card_advertises_bearer_security_scheme():
         assert key in requirements[0]["schemes"]
     finally:
         app.dependency_overrides.clear()
+
+
+# ── HITL crux(story 7726a003) — INPUT_REQUIRED reader ─────────────────────────
+
+@pytest.mark.anyio
+async def test_get_task_input_required_when_linked_gate_pending():
+    """AC(Q2 reader): WORKING task + task_metadata.linked_gate_id가 pending Gate를 가리키면
+    reply-thread 폴링 전에 INPUT_REQUIRED로 단락(폴링 스킵 — delivery/timeout 로직 미도달)."""
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        gate_id = uuid.uuid4()
+        task = _mock_task("TASK_STATE_WORKING", task_metadata={"linked_gate_id": str(gate_id)})
+        gate = MagicMock()
+        gate.status = "pending"
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _result(task)
+            if call_count == 3:
+                return _result(gate)
+            raise AssertionError("reply-thread 폴링까지 도달하면 안 됨(INPUT_REQUIRED 단락 실패)")
+
+        session.execute = mock_execute
+
+        req = {"jsonrpc": "2.0", "id": 6, "method": "GetTask", "params": {"id": str(task.id)}}
+
+        async with client as c:
+            resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=req)
+
+        body = resp.json()
+        assert body["result"]["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+        assert call_count == 3
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_task_working_continues_when_linked_gate_not_pending():
+    """linked_gate_id가 있어도 Gate.status != 'pending'(예: approved)이면 정상 reply-thread
+    폴링 경로로 폴백 — 무회귀(WORKING 유지, 아직 답신 없으면)."""
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        gate_id = uuid.uuid4()
+        root_message_id = uuid.uuid4()
+        task = _mock_task(
+            "TASK_STATE_WORKING", root_message_id=root_message_id,
+            task_metadata={"linked_gate_id": str(gate_id)},
+        )
+        gate = MagicMock()
+        gate.status = "approved"
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _result(task)
+            if call_count == 3:
+                return _result(gate)
+            if call_count == 4:
+                return _result(None)  # thread 폴링 — 아직 답신 없음
+            return _list_result([])  # delivery row 없음
+
+        session.execute = mock_execute
+
+        req = {"jsonrpc": "2.0", "id": 7, "method": "GetTask", "params": {"id": str(task.id)}}
+
+        async with client as c:
+            resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=req)
+
+        body = resp.json()
+        assert body["result"]["status"]["state"] == "TASK_STATE_WORKING"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_task_input_required_state_persists_without_regate_check():
+    """이미 INPUT_REQUIRED인 task는 재판정 없이 그대로 반환 — 복귀는 transition_gate()
+    전담(여기서 낙관적으로 되돌리지 않음). Gate 재조회/reply-thread 폴링 모두 안 함."""
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        task = _mock_task(
+            "TASK_STATE_INPUT_REQUIRED",
+            task_metadata={"linked_gate_id": str(uuid.uuid4())},
+        )
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _result(task)
+            raise AssertionError("INPUT_REQUIRED 재진입 시 추가 쿼리 발생하면 안 됨")
+
+        session.execute = mock_execute
+
+        req = {"jsonrpc": "2.0", "id": 8, "method": "GetTask", "params": {"id": str(task.id)}}
+
+        async with client as c:
+            resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=req)
+
+        body = resp.json()
+        assert body["result"]["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+        assert call_count == 2
+    finally:
+        app.dependency_overrides.clear()
