@@ -170,7 +170,9 @@ async def test_list_role_templates_returns_all_22_roles_realdb():
             "release-manager", "growth-engineer", "data-analyst",
         }
         assert expected_new <= slugs
-        assert len(slugs) == 22
+        # 0160(story 10c6ecbd 후속): 마케팅 직군 2종(growth-hacker·performance-marketer) 추가.
+        assert {"growth-hacker", "performance-marketer"} <= slugs
+        assert len(slugs) == 24
     finally:
         await eng.dispose()
 
