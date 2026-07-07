@@ -57,8 +57,10 @@ def test_vendored_toolset_matches_backend_rules():
 def test_pyproject_metadata_and_entrypoint():
     with open(os.path.join(_PKG_DIR, "pyproject.toml"), "rb") as f:
         cfg = tomllib.load(f)
-    assert cfg["project"]["name"] == "sprintable-mcp"
-    assert cfg["project"]["scripts"]["sprintable-mcp"] == "sprintable_mcp.__main__:main"
+    # OB-PUBLISH(f5e1742d): dist/콘솔 스크립트명 = "sprintable"(PyPI project 등록값 정합). 모듈명은
+    # sprintable_mcp 그대로.
+    assert cfg["project"]["name"] == "sprintable"
+    assert cfg["project"]["scripts"]["sprintable"] == "sprintable_mcp.__main__:main"
     deps = " ".join(cfg["project"]["dependencies"])
     assert "mcp" in deps and "httpx" in deps and "pydantic" in deps
     # backend(app/*) 의존 미선언
