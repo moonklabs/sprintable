@@ -14,6 +14,9 @@ export interface RoleTemplateSummary {
   is_builtin: boolean;
   tier: string;
   version: number;
+  // ~300직군 카탈로그 트랙(division/emoji nullable) — BE routers/role_templates.py RoleTemplateSummary와 동형.
+  division: string | null;
+  emoji: string | null;
 }
 
 export interface McpServerConfig {

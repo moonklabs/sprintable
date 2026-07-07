@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import {
@@ -90,6 +90,36 @@ export function pickDefaultRuntime(supported: RuntimeCapabilityItem[], current: 
   return supported[0].slug;
 }
 
+export interface RoleGroup {
+  label: string;
+  roles: RoleTemplateSummary[];
+}
+
+/**
+ * 선생님 피드백(2026-07-07, ~110직군): STEP1 role 카탈로그가 플랫이라 탐색 불가 — division(없으면
+ * category로 폴백)으로 그루핑 + 검색(name/description/category/division 부분일치, 대소문자 무시).
+ * 그룹 순서는 BE가 이미 반환한 순서(category, name)에서 처음 등장한 순서를 그대로 보존(재정렬 안 함).
+ */
+export function groupAndFilterRoleTemplates(roles: RoleTemplateSummary[], query: string): RoleGroup[] {
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? roles.filter((r) =>
+        r.name.toLowerCase().includes(q)
+        || (r.description ?? '').toLowerCase().includes(q)
+        || r.category.toLowerCase().includes(q)
+        || (r.division ?? '').toLowerCase().includes(q))
+    : roles;
+
+  const order: string[] = [];
+  const byLabel = new Map<string, RoleTemplateSummary[]>();
+  for (const role of filtered) {
+    const label = role.division?.trim() || role.category;
+    if (!byLabel.has(label)) { byLabel.set(label, []); order.push(label); }
+    byLabel.get(label)!.push(role);
+  }
+  return order.map((label) => ({ label, roles: byLabel.get(label)! }));
+}
+
 function downloadTextFile(filename: string, content: string) {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -177,6 +207,7 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
   const [roleTemplates, setRoleTemplates] = useState<RoleTemplateSummary[] | null>(null);
   const [roleError, setRoleError] = useState(false);
   const [selectedRoleSlug, setSelectedRoleSlug] = useState<string | null>(null);
+  const [roleQuery, setRoleQuery] = useState('');
 
   const fetchRoleTemplates = useCallback(async () => {
     setRoleError(false);
@@ -193,6 +224,13 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
   useEffect(() => { void fetchRoleTemplates(); }, [fetchRoleTemplates]);
 
   const selectedRole = roleTemplates?.find((r) => r.slug === selectedRoleSlug) ?? null;
+  // 선생님 피드백(2026-07-07): 이전엔 이 제안값을 newAgentName에 실제로 채워 넣어 "이미 입력된 값"처럼
+  // 보였음(혼동) — 이제는 placeholder로만 노출하고, 제출 시 입력이 비어있으면 이 값으로 폴백한다.
+  const suggestedAgentName = selectedRole ? t('agentNameAutoFill', { role: selectedRole.name }) : '';
+  const roleGroups = useMemo(
+    () => groupAndFilterRoleTemplates(roleTemplates ?? [], roleQuery),
+    [roleTemplates, roleQuery],
+  );
 
   // STEP 2 — runtime + agent(G1)
   const [runtime, setRuntime] = useState<string>('claude-code');
@@ -237,7 +275,6 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
 
   const [agentMode, setAgentMode] = useState<'new' | 'existing'>('new');
   const [newAgentName, setNewAgentName] = useState('');
-  const autoFilledNameRef = useRef('');
   const [existingAgents, setExistingAgents] = useState<{ id: string; name: string }[] | null>(null);
   const [selectedExistingAgentId, setSelectedExistingAgentId] = useState('');
   const [recruiting, setRecruiting] = useState(false);
@@ -281,7 +318,8 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
       let agentId: string;
       let agentName: string;
       if (agentMode === 'new') {
-        const name = newAgentName.trim();
+        // 빈 입력 = placeholder(제안값) 그대로 수락 — "가볍고 빠르게"(PO crux①) 유지.
+        const name = newAgentName.trim() || suggestedAgentName;
         if (!name) { setRecruitError(t('agentNameRequired')); setRecruiting(false); return; }
         const createRes = await fetch('/api/agents', {
           method: 'POST',
@@ -419,7 +457,7 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
 
           {/* ── STEP 1 : 직무 선택 ── */}
           {step === 1 && (
-            <div className="space-y-4">
+            <div className="space-y-3">
               <p className="text-sm font-semibold text-foreground">{t('roleQuestion')}</p>
               {roleError ? (
                 <div className="flex items-center gap-2">
@@ -429,56 +467,71 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
               ) : !roleTemplates ? (
                 <p className="text-sm text-muted-foreground">{t('roleLoading')}</p>
               ) : (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {roleTemplates.map((role) => {
-                    const Icon = CATEGORY_ICON[role.category] ?? Briefcase;
-                    const sel = role.slug === selectedRoleSlug;
-                    return (
-                      <button
-                        key={role.id}
-                        type="button"
-                        onClick={() => setSelectedRoleSlug(role.slug)}
-                        className={cn(
-                          'relative flex flex-col gap-2 rounded-xl border p-3 text-left transition-colors',
-                          sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
-                        )}
-                      >
-                        {sel && <Check className="absolute right-2.5 top-2.5 h-4 w-4 text-primary" aria-hidden />}
-                        <span className="flex items-center gap-2 text-sm font-bold text-foreground">
-                          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                          {role.name}
-                        </span>
-                        {role.description && <span className="text-xs leading-relaxed text-muted-foreground">{role.description}</span>}
-                        <span className="flex flex-wrap gap-1 pt-0.5">
-                          {role.default_tool_groups.map((g) => (
-                            <span key={g} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                              {tAgents.has(`toolPermissions.groups.${g}`) ? tAgents(`toolPermissions.groups.${g}`) : g}
-                            </span>
-                          ))}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                <>
+                  {/* 선생님 피드백(2026-07-07, ~110직군): 플랫 리스트 탐색 불가 — 검색 + division 그루핑. */}
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                    <input
+                      type="text"
+                      value={roleQuery}
+                      onChange={(e) => setRoleQuery(e.target.value)}
+                      placeholder={t('roleSearchPlaceholder')}
+                      className="w-full rounded-lg border border-border bg-card py-2 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    />
+                  </div>
+                  {/* 다음 버튼이 긴 리스트 하단에 묻히지 않도록 리스트 자체를 bounded-height 스크롤로 격리 —
+                      버튼은 이 영역 밖(항상 보임)에 위치. */}
+                  <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-0.5">
+                    {roleGroups.length === 0 ? (
+                      <p className="py-6 text-center text-sm text-muted-foreground">{t('roleSearchEmpty')}</p>
+                    ) : roleGroups.map((group) => (
+                      <div key={group.label} className="space-y-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{group.label}</p>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {group.roles.map((role) => {
+                            const Icon = CATEGORY_ICON[role.category] ?? Briefcase;
+                            const sel = role.slug === selectedRoleSlug;
+                            return (
+                              <button
+                                key={role.id}
+                                type="button"
+                                onClick={() => setSelectedRoleSlug(role.slug)}
+                                className={cn(
+                                  'relative flex flex-col gap-2 rounded-xl border p-3 text-left transition-colors',
+                                  sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
+                                )}
+                              >
+                                {sel && <Check className="absolute right-2.5 top-2.5 h-4 w-4 text-primary" aria-hidden />}
+                                <span className="flex items-center gap-2 text-sm font-bold text-foreground">
+                                  <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                                  {role.name}
+                                </span>
+                                {role.description && <span className="text-xs leading-relaxed text-muted-foreground">{role.description}</span>}
+                                <span className="flex flex-wrap gap-1 pt-0.5">
+                                  {role.default_tool_groups.map((g) => (
+                                    <span key={g} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                                      {tAgents.has(`toolPermissions.groups.${g}`) ? tAgents(`toolPermissions.groups.${g}`) : g}
+                                    </span>
+                                  ))}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
               <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                 {t('roleGuide')}
               </p>
-              <div className="flex justify-end pt-2">
+              <div className="flex justify-end border-t border-border pt-3">
                 <Button
                   variant="hero"
                   disabled={!selectedRoleSlug}
-                  onClick={() => {
-                    // PO crux① "가볍고 빠르게" — 직무 고르면 에이전트 이름 자동 채움(스마트 기본값).
-                    // 유저가 이미 직접 수정했으면(자동채움 값과 다르면) 덮어쓰지 않는다.
-                    if (selectedRole && (newAgentName === '' || newAgentName === autoFilledNameRef.current)) {
-                      const auto = t('agentNameAutoFill', { role: selectedRole.name });
-                      autoFilledNameRef.current = auto;
-                      setNewAgentName(auto);
-                    }
-                    setStep(2);
-                  }}
+                  onClick={() => setStep(2)}
                 >
                   {t('next')}
                 </Button>
@@ -582,7 +635,7 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
                       type="text"
                       value={newAgentName}
                       onChange={(e) => setNewAgentName(e.target.value)}
-                      placeholder={t('agentNamePlaceholder')}
+                      placeholder={suggestedAgentName || t('agentNamePlaceholder')}
                       className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
                     />
                   ) : (
