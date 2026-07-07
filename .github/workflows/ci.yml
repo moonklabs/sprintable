@@ -292,3 +292,9 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
           LICENSE_CONSENT: agreed
+
+      # story d3dd358b 회귀가드: shared 패키지 stale dist 소비로 zod 스키마 신규 필드가
+      # silent strip되는 클래스(2026-06-10 발견, transpilePackages #1373으로 해소 확인)의
+      # 재발을 clean-checkout 빌드 산출물(.next/standalone) 검사로 자동 차단.
+      - name: Verify build schema integrity (story d3dd358b regression guard)
+        run: pnpm --filter web verify:build-schema-integrity
