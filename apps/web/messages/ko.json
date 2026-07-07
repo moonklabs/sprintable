@@ -3227,6 +3227,8 @@
     "roleLoading": "직무 카탈로그를 불러오는 중…",
     "roleLoadError": "직무 카탈로그를 불러오지 못했습니다.",
     "retry": "다시 시도",
+    "roleSearchPlaceholder": "직무 검색 (이름, 설명, 계열)",
+    "roleSearchEmpty": "검색 결과가 없습니다.",
     "roleGuide": "직무 카드의 도구 칩은 그 직무가 받을 기본 권한(default_tool_groups) 미리보기입니다. admin·삭제 계열은 기본 미포함입니다.",
     "next": "다음",
     "back": "이전",

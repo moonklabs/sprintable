@@ -3227,6 +3227,8 @@
     "roleLoading": "Loading role catalog…",
     "roleLoadError": "Couldn't load the role catalog.",
     "retry": "Retry",
+    "roleSearchPlaceholder": "Search roles (name, description, division)",
+    "roleSearchEmpty": "No roles match your search.",
     "roleGuide": "The tool chips on each role card preview the default permissions (default_tool_groups) it will receive. Admin/destructive tools are excluded by default.",
     "next": "Next",
     "back": "Back",

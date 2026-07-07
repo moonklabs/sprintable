@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { spliceApiKey, splitRuntimeCapabilities, pickDefaultRuntime } from './recruiter-client';
-import type { McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
+import { spliceApiKey, splitRuntimeCapabilities, pickDefaultRuntime, groupAndFilterRoleTemplates } from './recruiter-client';
+import type { McpConfigBundle, RuntimeCapabilityItem, RoleTemplateSummary } from '@/services/recruit';
 import { RUNTIME_CAPABILITIES_FALLBACK } from '@/services/recruit';
 
 describe('spliceApiKey (까심 QA RC HIGH① — transport별 키 위치)', () => {
@@ -129,5 +129,51 @@ describe('E-RECRUIT S6 — against the real captured GET /api/v2/runtime-capabil
     expect(bySlug['codex'].prompt_file).toBe('AGENT_INSTRUCTIONS.md'); // generic fallback pre-S7 shaping
     expect(bySlug['connector'].guide_filename).toBe('CONNECTOR_SETUP.md');
     expect(bySlug['claude-code'].guide_filename).toBeNull(); // NOT where the regular filename lives
+  });
+});
+
+// E-RECRUIT 카탈로그 탐색성(선생님 피드백, 2026-07-07) — division 그루핑 + 검색.
+function mkRole(overrides: Partial<RoleTemplateSummary> & Pick<RoleTemplateSummary, 'id' | 'slug' | 'name' | 'category'>): RoleTemplateSummary {
+  return {
+    description: null,
+    default_tool_groups: [],
+    default_workflow_recipe_slug: null,
+    is_builtin: true,
+    tier: 'full',
+    version: 1,
+    division: null,
+    emoji: null,
+    ...overrides,
+  };
+}
+
+describe('groupAndFilterRoleTemplates (E-RECRUIT 카탈로그 탐색성)', () => {
+  const roles: RoleTemplateSummary[] = [
+    mkRole({ id: '1', slug: 'fe-dev', name: 'Frontend Developer', category: 'frontend', division: 'Engineering', description: 'Builds UI' }),
+    mkRole({ id: '2', slug: 'be-dev', name: 'Backend Developer', category: 'backend', division: 'Engineering' }),
+    mkRole({ id: '3', slug: 'copywriter', name: 'Copywriter', category: 'marketing', division: 'Marketing', description: 'Writes ad copy' }),
+    // division 없는 레거시 롤 — category로 폴백해야 함
+    mkRole({ id: '4', slug: 'qa-tester', name: 'QA Tester', category: 'qa', division: null }),
+  ];
+
+  it('groups by division, falling back to category when division is null, preserving first-seen order', () => {
+    const groups = groupAndFilterRoleTemplates(roles, '');
+    expect(groups.map((g) => g.label)).toEqual(['Engineering', 'Marketing', 'qa']);
+    expect(groups[0].roles.map((r) => r.slug)).toEqual(['fe-dev', 'be-dev']);
+    expect(groups[2].roles.map((r) => r.slug)).toEqual(['qa-tester']);
+  });
+
+  it('filters case-insensitively across name/description/category/division', () => {
+    expect(groupAndFilterRoleTemplates(roles, 'frontend').flatMap((g) => g.roles.map((r) => r.slug))).toEqual(['fe-dev']);
+    expect(groupAndFilterRoleTemplates(roles, 'AD COPY').flatMap((g) => g.roles.map((r) => r.slug))).toEqual(['copywriter']); // description match
+    expect(groupAndFilterRoleTemplates(roles, 'engineering').flatMap((g) => g.roles.map((r) => r.slug))).toEqual(['fe-dev', 'be-dev']); // division match
+  });
+
+  it('returns an empty group list (not a crash) when nothing matches', () => {
+    expect(groupAndFilterRoleTemplates(roles, 'nonexistent-role-xyz')).toEqual([]);
+  });
+
+  it('handles an empty catalog', () => {
+    expect(groupAndFilterRoleTemplates([], '')).toEqual([]);
   });
 });
