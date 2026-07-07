@@ -135,8 +135,6 @@ _BACKEND_URL_ENV_KEY = "FASTAPI_URL"
 # E-MCP-OPT S3: 호스팅 MCP 깔끔 도메인 — README(구·문서만 언급) 대신 실제로 read. 미설정(OSS/로컬 —
 # 호스팅 배포 자체가 없음)이면 http 변형을 아예 생성하지 않는다(에러 아님·"그 탭 없음"이 정답).
 _MCP_PUBLIC_URL_ENV_KEY = "MCP_PUBLIC_URL"
-# E-RECRUIT S21: PyPI 미게시 동안 stdio uvx 가 clone 없이 이 subdirectory 를 직접 빌드하는 git 소스.
-_SPRINTABLE_REPO_URL = "https://github.com/moonklabs/sprintable.git"
 
 
 def resolve_backend_direct_url() -> str:
@@ -190,15 +188,11 @@ def _build_stdio_config(api_key_plaintext: str | None) -> dict:
     ``AGENT_GATEWAY_V2="1"`` 을 박아 신규 에이전트를 **V2 로 통일** — mcp_reachable+acked_seq 정렬로
     verified-green 이 성립한다(서버 무변경·기존 에이전트 무영향).
 
-    E-RECRUIT S21(story 444d1d18): ``uvx sprintable``(bare)는 PyPI 미게시(pypi.org 404 실측,
-    2026-07-07)라 복붙하면 100% 실패한다. PyPI 게시 전까지 ``uvx --from git+<repo>#subdirectory=...``
-    로 emit — 레포 public(자격증명 없이 clone 가능, 실측 완료)이고 ``sprintable_mcp`` 는 flat
-    레이아웃이라 backend app/* 비의존(subdirectory 단독 빌드 성립, 로컬 실행 검증 완료). PyPI 정식
-    게시는 별도 스토리 OB-PUBLISH(f5e1742d)가 추적 — 게시되면 이 args 를 bare 형태로 되돌리는 게 후속.
-
-    OB-PUBLISH(f5e1742d) 이름 정합: PyPI distribution/콘솔 스크립트명 = ``sprintable``(모듈명
-    ``sprintable_mcp`` 와 별개 — pyproject.toml ``[project.scripts] sprintable = ...``). 마지막
-    실행 인자가 콘솔 스크립트명이라 ``"sprintable"``(subdirectory 경로 문자열은 모듈 디렉터리라 무관).
+    E-RECRUIT S21(story 444d1d18, 2026-07-07): PyPI 미게시 동안 ``uvx --from git+<repo>#subdirectory=...``
+    로 우회 emit했었음. OB-PUBLISH(f5e1742d)가 ``sprintable`` 0.1.0을 PyPI에 실게시(dist/콘솔
+    스크립트명 = ``sprintable``, 모듈명은 ``sprintable_mcp`` 그대로) → 이 스토리(d306eb82)가 그
+    우회를 걷어내고 bare ``uvx sprintable`` 로 원복. 로컬에서 ``uvx sprintable`` 실행해 실 PyPI
+    resolve+fail-fast(env 미설정 에러 도달)까지 재확인 완료.
     """
     env: dict[str, str] = {
         "SPRINTABLE_API_URL": resolve_backend_direct_url(),
@@ -211,11 +205,7 @@ def _build_stdio_config(api_key_plaintext: str | None) -> dict:
             "sprintable": {
                 "type": "stdio",
                 "command": "uvx",
-                "args": [
-                    "--from",
-                    f"git+{_SPRINTABLE_REPO_URL}#subdirectory=backend/sprintable_mcp",
-                    "sprintable",
-                ],
+                "args": ["sprintable"],
                 "env": env,
             }
         }
