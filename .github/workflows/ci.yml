@@ -201,7 +201,13 @@ jobs:
 
       # ee_pricing(0146/0147)이 main 승격分에 섞여 들어왔다면 여기서 즉시 실패 — main은
       # 항상 단일 core head(0148 직계)여야 한다.
-      - name: Assert main migration file set (no ee_pricing, core 0148 present)
+      #
+      # story 21ade1fa: 0162(ee_pricing 0147 + core 0161 merge node)도 같은 이유로 제외
+      # 대상 — 하지만 0146/0147과 달리 main 히스토리에 "삭제됐던 적"이 없는 신규 파일이라
+      # `git merge develop`가 conflict 없이 조용히 add해버린다(dry-run 실측 확인, 2026-07-07).
+      # 즉 0146/0147은 git이 알아서 걸러주지만 0162는 사람이 명시적으로 git rm 해야 하고,
+      # 잊었을 때 이 assert가 없으면 실패가 알렘빅의 불친절한 KeyError로만 드러난다.
+      - name: Assert main migration file set (no ee_pricing/merge-node, core 0148 present)
         working-directory: backend
         run: |
           set -e
@@ -209,7 +215,10 @@ jobs:
           if [ -f alembic/versions/0146_pricing_versions.py ] || [ -f alembic/versions/0147_pricing_versions_live_seed.py ]; then
             echo "FAIL: ee_pricing migration(s) present in a main-bound file set"; exit 1
           fi
-          echo "OK: main file set has 0148(core), no ee_pricing"
+          if [ -f alembic/versions/0162_merge_ee_pricing_core_heads.py ]; then
+            echo "FAIL: develop-only merge node 0162 present in a main-bound file set (references ee_pricing 0147, which main doesn't have)"; exit 1
+          fi
+          echo "OK: main file set has 0148(core), no ee_pricing, no develop-only merge node"
 
       - name: Build revision graph (single head expected)
         working-directory: backend
