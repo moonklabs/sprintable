@@ -164,12 +164,7 @@ export default function SettingsPage() {
   const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
 
   const [graceUntil, setGraceUntil] = useState<string | null>(null);
-  const [membersSubTab, setMembersSubTab] = useState<'people' | 'agents'>('people');
   const [addMemberOpen, setAddMemberOpen] = useState(false); // 7363ec8a: 통합 "+멤버 추가" 모달
-  const [orgAgents, setOrgAgents] = useState<ProjectMember[]>([]);
-  // 에이전트 추가 v2(name·role·scope·결과)는 AddMemberModal 임베드 <AddAgentForm>가 호스팅(0c1a81b6 경로 통일).
-  const [deactivatingAgentId, setDeactivatingAgentId] = useState<string | null>(null);
-  const [agentActionMessage, setAgentActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [webhookEditing, setWebhookEditing] = useState<Record<string, string>>({});
   const [webhookSaving, setWebhookSaving] = useState<string | null>(null);
   const [webhookErrors, setWebhookErrors] = useState<Record<string, string>>({});
@@ -265,30 +260,6 @@ export default function SettingsPage() {
     }
   };
 
-  const refreshOrgAgents = async () => {
-    const res = await fetch('/api/team-members?type=agent&include_inactive=true');
-    if (!res.ok) return;
-    const json = await res.json();
-    setOrgAgents((json.data ?? []) as ProjectMember[]);
-  };
-
-  const handleToggleAgentActive = async (agent: ProjectMember) => {
-    setDeactivatingAgentId(agent.id);
-    setAgentActionMessage(null);
-    const res = await fetch(`/api/team-members/${agent.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_active: !agent.is_active }),
-    });
-    if (res.ok) {
-      setAgentActionMessage({ type: 'success', text: agent.is_active ? t('agentDeactivated') : t('agentActivated') });
-      await refreshOrgAgents();
-    } else {
-      const json = await res.json().catch(() => null);
-      setAgentActionMessage({ type: 'error', text: json?.error?.message ?? t('agentActionFailed') });
-    }
-    setDeactivatingAgentId(null);
-  };
 
   const refreshMemberData = async (projectId: string) => {
     if (!projectId) return;
@@ -389,17 +360,13 @@ export default function SettingsPage() {
     void refreshMemberData(memberProjectId).catch((err) => { console.error('멤버 데이터 로드 실패', err); });
   }, [memberProjectId]);
 
+  // api-keys 탭 접근 시 /agents(관리 탭)으로 자동 전환 (레거시 리다이렉트)
   useEffect(() => {
-    void refreshOrgAgents().catch((err) => { console.error('조직 에이전트 로드 실패', err); });
-  }, []);
-
-  // api-keys 탭 접근 시 Members > Agents로 자동 전환 (레거시 리다이렉트)
-  useEffect(() => {
+    // 에이전트 관리 IA 통일(story d63d3f73) — Members 서브탭 흡수, /agents(관리 탭)으로 재타겟.
     if (activeTab === 'api-keys') {
-      setActiveTab('members');
-      setMembersSubTab('agents');
+      router.push('/agents');
     }
-  }, [activeTab]);
+  }, [activeTab, router]);
 
   const applySettingOptimistic = (eventType: string, newEnabled: boolean) => {
     setSettings((prev) => {
@@ -750,14 +717,14 @@ export default function SettingsPage() {
               <SectionCard>
                 <SectionCardBody>
                   <p className="text-sm text-muted-foreground">
-                    에이전트 API Key 관리는 <strong>Members → Agents</strong> 탭으로 이관됐습니다.
+                    에이전트 API Key 관리는 <strong>에이전트 관리</strong>로 이관됐습니다.
                   </p>
                   <button
                     type="button"
-                    onClick={() => { setActiveTab('members'); setMembersSubTab('agents'); }}
+                    onClick={() => router.push('/agents')}
                     className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
                   >
-                    Members → Agents로 이동
+                    에이전트 관리로 이동
                   </button>
                 </SectionCardBody>
               </SectionCard>
@@ -1123,24 +1090,10 @@ export default function SettingsPage() {
             </TabsContent>
 
             <TabsContent value="members">
-              {/* 7363ec8a: People/Agents 공통 헤더 — 서브탭 토글 + "+멤버 추가" 단일 진입(분산 해소). */}
-              <div className="mb-6 flex items-center gap-3">
-                <div className="flex flex-1 gap-1 rounded-lg border border-border bg-muted/30 p-1">
-                  <button
-                    type="button"
-                    onClick={() => setMembersSubTab('people')}
-                    className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${membersSubTab === 'people' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                  >
-                    {t('membersTabPeople')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMembersSubTab('agents')}
-                    className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${membersSubTab === 'agents' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                  >
-                    {t('membersTabAgents')}
-                  </button>
-                </div>
+              {/* 에이전트 관리 IA 통일(story d63d3f73) — Members는 People 전용, 서브탭 제거.
+                  에이전트 목록·추가·상세는 `/agents`(관리 탭)로 흡수. */}
+              <div className="mb-6 flex items-center justify-between gap-3">
+                <h2 className="text-base font-semibold text-foreground">{t('membersTabPeople')}</h2>
                 {isAdmin ? (
                   <Button variant="hero" size="sm" className="shrink-0 gap-1.5" onClick={() => setAddMemberOpen(true)}>
                     <Plus className="size-3.5" /> {t('addMember')}
@@ -1148,74 +1101,6 @@ export default function SettingsPage() {
                 ) : null}
               </div>
 
-              {membersSubTab === 'agents' ? (
-                <div className="space-y-6">
-                  <SectionCard>
-                    <SectionCardHeader>
-                      <div className="space-y-1">
-                        <h2 className="text-base font-semibold text-foreground">{t('orgAgentsTitle')}</h2>
-                        <p className="text-sm text-muted-foreground">{t('orgAgentsDescription')}</p>
-                      </div>
-                    </SectionCardHeader>
-                    <SectionCardBody className="space-y-4">
-                      {agentActionMessage ? (
-                        <Alert variant={agentActionMessage.type === 'success' ? 'success' : 'destructive'}>
-                          <AlertDescription>{agentActionMessage.text}</AlertDescription>
-                        </Alert>
-                      ) : null}
-
-                      {orgAgents.length > 0 ? (
-                        <div className="space-y-2">
-                          {orgAgents.map((agent) => {
-                            const projectName = projects.find((p) => p.id === agent.project_id)?.name ?? agent.project_id;
-                            // 7519c3ea: webhook discoverability — 행에 status 한눈에(편집은 detail editor 링크=이름).
-                            const agentWebhook = webhooks.find((w) => w.member_id === agent.id);
-                            const webhookStatus: 'active' | 'inactive' | 'empty' = !agentWebhook?.url
-                              ? 'empty'
-                              : !agentWebhook.is_active ? 'inactive' : 'active';
-                            return (
-                              <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
-                                <div className="min-w-0">
-                                  <Link href={`/settings/members/agents/${agent.id}`} className="font-medium text-foreground hover:underline hover:text-primary">{agent.name}</Link>
-                                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                                    <Badge variant="secondary">{t('agentMember')}</Badge>
-                                    <Badge variant="outline">{agent.role}</Badge>
-                                    <Badge variant="info">SSE</Badge>
-                                    <Badge variant={webhookStatus === 'active' ? 'success' : webhookStatus === 'inactive' ? 'secondary' : 'outline'} className="gap-1">
-                                      <Webhook className="size-3" aria-hidden />
-                                      {webhookStatus === 'active' ? t('webhookStatusActive') : webhookStatus === 'inactive' ? t('webhookStatusInactive') : t('webhookStatusEmpty')}
-                                    </Badge>
-                                    {agent.fakechat_port ? <span className="font-mono text-[11px] text-muted-foreground">:{agent.fakechat_port}</span> : null}
-                                    <span className="text-xs text-muted-foreground">{projectName}</span>
-                                    {currentUserId && agent.created_by === currentUserId ? <Badge variant="outline" className="border-primary/40 text-primary text-[10px]">{t('agentOwner')}</Badge> : null}
-                                    {!agent.is_active ? <Badge variant="destructive">inactive</Badge> : null}
-                                  </div>
-                                </div>
-                                {isAdmin ? (
-                                <Button
-                                  variant="glass"
-                                  size="sm"
-                                  onClick={() => void handleToggleAgentActive(agent)}
-                                  disabled={deactivatingAgentId === agent.id}
-                                >
-                                  {deactivatingAgentId === agent.id ? '...' : agent.is_active ? t('deactivateAgent') : t('activateAgent')}
-                                </Button>
-                                ) : null}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="rounded-md border border-dashed border-border px-3 py-8 text-center">
-                          <p className="text-sm text-muted-foreground">{t('noOrgAgents')}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{t('noOrgAgentsCta')}</p>
-                        </div>
-                      )}
-
-                    </SectionCardBody>
-                  </SectionCard>
-                </div>
-              ) : (
               <div>
                 {currentProjectId ? (
                   <div className="space-y-6">
@@ -1277,7 +1162,6 @@ export default function SettingsPage() {
                   <p className="text-sm text-muted-foreground">프로젝트를 선택해주세요.</p>
                 )}
               </div>
-              )}
             </TabsContent>
 
 
@@ -1510,10 +1394,10 @@ export default function SettingsPage() {
           onClose={() => setAddMemberOpen(false)}
           orgId={orgId}
           projects={projects.map((p) => ({ id: p.id, name: p.name }))}
-          defaultType={membersSubTab === 'agents' ? 'agent' : 'human'}
-          onAdded={(type, message) => {
+          defaultType="human"
+          allowAgentType={false}
+          onAdded={(_type, message) => {
             addToast({ type: 'success', title: message });
-            if (type === 'agent') void refreshOrgAgents();
           }}
         />
       ) : null}

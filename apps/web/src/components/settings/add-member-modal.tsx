@@ -17,6 +17,9 @@ interface AddMemberModalProps {
   orgId: string;
   projects: { id: string; name: string }[];
   defaultType?: MemberType;
+  /** 에이전트 옵션 노출 여부. 에이전트 관리 IA 통일(story d63d3f73) 후 settings Members는
+   * People 전용이라 false로 꺼서 human-only 폼 하나만 보인다(에이전트 추가는 `/agents` 관리 탭). */
+  allowAgentType?: boolean;
   /** 제출 성공 시 호출 — 부모가 해당 subtab 갱신 + 토스트. */
   onAdded: (type: MemberType, message: string) => void;
 }
@@ -25,7 +28,7 @@ interface AddMemberModalProps {
  * 7363ec8a — 멤버/에이전트 추가 단일 진입(점진: "+멤버 추가" 모달). type 토글로 사람/에이전트
  * 조건부 폼. 기존 BE 계약 무변경(사람=POST invites / 에이전트=POST team-members)·기존 폼 재사용.
  */
-export function AddMemberModal({ open, onClose, orgId, projects, defaultType = 'human', onAdded }: AddMemberModalProps) {
+export function AddMemberModal({ open, onClose, orgId, projects, defaultType = 'human', allowAgentType = true, onAdded }: AddMemberModalProps) {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const [type, setType] = useState<MemberType>(defaultType);
@@ -87,6 +90,7 @@ export function AddMemberModal({ open, onClose, orgId, projects, defaultType = '
         </DialogHeader>
 
         {/* type 토글 — 사람/에이전트 segmented(radiogroup·roving tabindex·aria-checked·←→ 화살표 이동) */}
+        {allowAgentType && (
         <div
           role="radiogroup"
           aria-label={t('addMemberType')}
@@ -120,6 +124,7 @@ export function AddMemberModal({ open, onClose, orgId, projects, defaultType = '
             </button>
           ))}
         </div>
+        )}
 
         {type === 'human' ? (
           <div className="space-y-3">

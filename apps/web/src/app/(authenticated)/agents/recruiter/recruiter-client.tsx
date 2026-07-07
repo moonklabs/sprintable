@@ -194,7 +194,18 @@ function CopyDownloadButtons({
 
 // ─── 메인 컴포넌트 ───────────────────────────────────────────────────────────
 
-export function RecruiterClient({ projectId }: { projectId: string; orgId?: string }) {
+interface RecruiterClientProps {
+  projectId: string;
+  orgId?: string;
+  /** IA 통일(story d63d3f73) — `/agents` 채용 탭에 임베드될 때 상위 셸의 TopBarSlot과
+   * 경합하지 않도록 자체 TopBarSlot 렌더를 끈다(단일 소유자 원칙 — top-bar-context는 clearSlot이
+   * 무조건적이라 두 인스턴스가 동시에 마운트/언마운트되면 레이스가 난다). */
+  showTopBar?: boolean;
+  /** 임베드 컨텍스트에서 "목록으로" 나가기 — 지정 시 상단에 노출. */
+  onExit?: () => void;
+}
+
+export function RecruiterClient({ projectId, showTopBar = true, onExit }: RecruiterClientProps) {
   const t = useTranslations('recruiter');
   const tAgents = useTranslations('agents');
   // 오르테가 라이브 스모크 적출(2026-07-06): railXxx/railStageHosted 키는 connect-step이 원래
@@ -447,7 +458,19 @@ export function RecruiterClient({ projectId }: { projectId: string; orgId?: stri
 
   return (
     <div className="mx-auto flex max-w-2xl flex-1 flex-col gap-4 p-4">
-      <TopBarSlot title={<h1 className="flex items-center gap-2 text-sm font-medium"><IdCard className="h-4 w-4" aria-hidden />{t('title')}</h1>} />
+      {showTopBar ? (
+        <TopBarSlot title={<h1 className="flex items-center gap-2 text-sm font-medium"><IdCard className="h-4 w-4" aria-hidden />{t('title')}</h1>} />
+      ) : null}
+      {onExit ? (
+        <button
+          type="button"
+          onClick={onExit}
+          className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+          {tAgents('backToList')}
+        </button>
+      ) : null}
 
       <SectionCard>
         <SectionCardHeader>
