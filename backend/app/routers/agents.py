@@ -11,7 +11,7 @@ import os
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -413,3 +413,56 @@ async def agent_verification_status(
         "verified": state["verified"],
         "rail": state["rail"],
     }
+
+
+@router.get("/access-matrix")
+async def get_agent_access_matrix(
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> list[dict]:
+    """[에이전트 관리 IA·Phase 2] org-wide 에이전트×프로젝트 접근권한 매트릭스 시드(story da4c6b2d).
+
+    PO crux 승인(2026-07-07): 후보 A 채택 — 프로젝트별 fan-out(N agents × M projects 왕복) 대신
+    단일 인덱스드 쿼리로 org 전체 grant 를 한 번에 반환. FE 는 이미 별도로 가진 org 에이전트
+    전체 목록·org 프로젝트 전체 목록에 이 sparse grant 목록만 겹쳐 매트릭스 셀 상태를 정한다
+    (record_id 있음=허용, 없음=차단). 경로에 org path-param 을 안 둔다 — `get_verified_org_id` 로
+    caller 의 검증된 org 만 암묵 사용(클라이언트가 org id 조작해 타org 조회하는 경로 원천 차단).
+
+    **에이전트 격리(PO 승인조건 #1)**: `project_access.member_id` 는 에이전트 전용이 아니다 —
+    휴먼 grant 도 `ensure_human_member` 성공 시 member_id 를 org_member.id(=members.id 미러)로
+    세팅한다(`project_access.py` 휴먼 분기). 그래서 `member_id IS NOT NULL` 만으론 휴먼이 섞인다 —
+    `members` 를 명시 JOIN 해 `type = 'agent'` 로 직접 격리.
+
+    **인가(PO 승인조건 #2)**: 고객대면(org admin 이 자기 에이전트 접근을 조망) — `require_operator`
+    (플랫폼 운영자) 아닌 **org admin/owner**. 기존 `is_org_owner_or_admin`(project_access.py 의
+    role-설정 엔드포인트가 이미 씀) 재사용, 신규 프리미티브 0.
+    """
+    from app.services.project_auth import is_org_owner_or_admin
+
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="org owner or admin required")
+
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT pa.id AS record_id, pa.member_id AS agent_member_id, pa.project_id
+                FROM project_access pa
+                JOIN members m ON m.id = pa.member_id
+                JOIN projects p ON p.id = pa.project_id
+                WHERE m.type = 'agent' AND m.deleted_at IS NULL
+                  AND p.org_id = :org_id AND p.deleted_at IS NULL
+                """
+            ),
+            {"org_id": org_id},
+        )
+    ).mappings().all()
+    return [
+        {
+            "agent_member_id": str(r["agent_member_id"]),
+            "project_id": str(r["project_id"]),
+            "record_id": str(r["record_id"]),
+        }
+        for r in rows
+    ]
