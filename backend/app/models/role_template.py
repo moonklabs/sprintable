@@ -49,3 +49,13 @@ class RoleTemplate(Base, TimestampMixin):
     # (미래 recruit 서비스) 게이팅용 메타데이터일 뿐 이 S1 에선 아무 것도 강제하지 않는다.
     tier: Mapped[str] = mapped_column(Text, nullable=False, default="free")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # ~300직군 카탈로그 트랙 S1(문서 role-template-crud-api-crux §4): agency-agents 참고 상위
+    # 산업/부문 분류(15~25개 목표) — category(기존, 좁은 기능軸: engineering/design/growth 등)와
+    # 별개 축. curation 단계(S5)에서 값 확定, 지금은 nullable로 무회귀 확보.
+    division: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 순수 표시용 시각코딩(agency-agents 차용) — 로직 무관.
+    emoji: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A2A 발견 키 — app.schemas.a2a.AgentSkill(id·name·description·tags·examples) 그대로 재사용
+    # (신규 스키마 발명 안 함, A2A가 이미 소비하는 정확히 그 shape). S4에서 _build_agent_card가
+    # 이 필드를 직접 소비하게 되면 persona 수작업 없이 스케일에서 발견-by-capability가 열린다.
+    skills: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
