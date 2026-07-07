@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.role_template import RoleTemplate
+from app.schemas.a2a import AgentSkill
 
 router = APIRouter(prefix="/api/v2/role-templates", tags=["role-templates"])
 
@@ -33,6 +34,11 @@ class RoleTemplateSummary(BaseModel):
     is_builtin: bool
     tier: str
     version: int
+    # ~300직군 카탈로그 트랙 S1(문서 role-template-crud-api-crux §4) — division/emoji nullable,
+    # skills는 app.schemas.a2a.AgentSkill 그대로 재사용(신규 스키마 발명 안 함).
+    division: str | None = None
+    emoji: str | None = None
+    skills: list[AgentSkill] = []
 
     model_config = {"from_attributes": True}
 

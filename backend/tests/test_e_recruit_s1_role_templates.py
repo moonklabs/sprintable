@@ -69,6 +69,8 @@ def test_model_field_shape():
         "id", "slug", "name", "category", "description", "role_behaviors",
         "default_tool_groups", "default_workflow_recipe_slug", "runtime_overrides",
         "is_builtin", "is_published", "tier", "version", "created_at", "updated_at",
+        # 카탈로그 트랙 S1(0161, 문서 role-template-crud-api-crux §4).
+        "division", "emoji", "skills",
     }
 
 
