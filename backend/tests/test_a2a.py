@@ -158,6 +158,43 @@ async def test_agent_card_200_reflects_role_template_skills():
 
 
 @pytest.mark.anyio
+async def test_agent_card_interface_url_uses_backend_direct_url_not_request_scheme():
+    """버그/A2A P0(story 52bb1975): 인터페이스 url은 request.base_url(Cloud Run 뒤에서 프록시
+    헤더 미신뢰 시 내부 스킴 http 노출)이 아니라 배포가 주입하는 FASTAPI_URL SSOT
+    (resolve_backend_direct_url, MCP onboarding config와 동일 소스)로 구성돼야 한다 —
+    테스트 클라이언트는 http://test로 요청해도 카드 url은 그 값을 반영하면 안 됨."""
+    from app.routers import a2a as a2a_mod
+
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        persona = _mock_persona()
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            return _result(member) if call_count == 1 else _result(persona)
+
+        session.execute = mock_execute
+
+        with patch.object(
+            a2a_mod, "resolve_backend_direct_url",
+            return_value="https://sprintable-backend-dev-57iommnikq-du.a.run.app",
+        ):
+            async with client as c:
+                resp = await c.get(f"/api/v2/a2a/members/{MEMBER_ID}/agent-card.json")
+
+        card = resp.json()
+        url = card["supportedInterfaces"][0]["url"]
+        assert url.startswith("https://sprintable-backend-dev-57iommnikq-du.a.run.app/")
+        assert not url.startswith("http://test")
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_agent_card_prefers_role_template_skills_when_linked():
     """~300직군 카탈로그 S4: persona가 recruit_agent() 생성 marker(config.role_template_id)를
     가지면, 카드-빌드 시점에 그 role_template.skills(카탈로그 실시간 값)를 우선 반영 —

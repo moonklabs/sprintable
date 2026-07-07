@@ -89,6 +89,7 @@ from app.models.team import TeamMember
 from app.repositories.team_member import TeamMemberRepository
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _agent_connections
+from app.services.agent_onboarding_config import resolve_backend_direct_url
 from app.services.event_seq import assign_recipient_seq
 from app.services.webhook_targeting import active_webhook_member_ids
 from app.schemas.a2a import (
@@ -295,7 +296,6 @@ def _skill_matches(card: AgentCard, query: str) -> bool:
 
 @router.get("/members", response_model=list[AgentCard])
 async def list_agent_cards(
-    request: Request,
     skill: str | None = Query(default=None),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -307,7 +307,7 @@ async def list_agent_cards(
     repo = TeamMemberRepository(session, org_id)
     agents = await repo.list(type="agent", is_active=True)
 
-    base_url = str(request.base_url).rstrip("/")
+    base_url = resolve_backend_direct_url()
     cards = [await _build_agent_card(session, agent, base_url) for agent in agents]
 
     if skill:
@@ -319,11 +319,10 @@ async def list_agent_cards(
 @router.get("/members/{member_id}/agent-card.json")
 async def get_agent_card(
     member_id: uuid.UUID,
-    request: Request,
     session: AsyncSession = Depends(get_db),
 ) -> AgentCard:
     member = await _get_agent_member(session, member_id)
-    card = await _build_agent_card(session, member, str(request.base_url).rstrip("/"))
+    card = await _build_agent_card(session, member, resolve_backend_direct_url())
     return card
 
 
