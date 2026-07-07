@@ -10,6 +10,7 @@
     "type-check": "tsc --noEmit",
     "runtime:worker": "tsx scripts/background-runtime-worker.ts",
     "dispatch:slack-outbound": "tsx scripts/slack-outbound-dispatcher.ts",
+    "verify:build-schema-integrity": "tsx scripts/verify-build-schema-integrity.ts",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report"
