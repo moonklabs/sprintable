@@ -3,7 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "sprintable-mcp"
+# OB-PUBLISH(f5e1742d): distribution name = "sprintable" (선생님 PyPI project 등록값·uvx sprintable
+# 한 줄 정합). 내부 모듈명은 sprintable_mcp 그대로(dist명≠모듈명 — hatch sources remap 아래 유지).
+name = "sprintable"
 version = "0.1.0"
 description = "Sprintable MCP server — BYO agent toolset over the Sprintable API (stdio). No repo clone required."
 readme = "README.md"
@@ -21,10 +23,10 @@ dependencies = [
     "uvicorn>=0.30",   # http 모드 ASGI 서버(streamable_http_app + bearer auth 미들웨어 구동). stdio 무관.
 ]
 
-# E-MCP S4: 외부(레포 없음) 한 줄 구동 — `uvx sprintable-mcp`.
+# E-MCP S4: 외부(레포 없음) 한 줄 구동 — `uvx sprintable`.
 # 필수 env: SPRINTABLE_API_URL, AGENT_API_KEY (그 외 import 의존 0 — backend app/* 비의존).
 [project.scripts]
-sprintable-mcp = "sprintable_mcp.__main__:main"
+sprintable = "sprintable_mcp.__main__:main"
 
 [project.urls]
 Homepage = "https://sprintable.ai"
