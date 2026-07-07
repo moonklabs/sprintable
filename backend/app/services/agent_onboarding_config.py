@@ -190,11 +190,15 @@ def _build_stdio_config(api_key_plaintext: str | None) -> dict:
     ``AGENT_GATEWAY_V2="1"`` 을 박아 신규 에이전트를 **V2 로 통일** — mcp_reachable+acked_seq 정렬로
     verified-green 이 성립한다(서버 무변경·기존 에이전트 무영향).
 
-    E-RECRUIT S21(story 444d1d18): ``uvx sprintable-mcp``(bare)는 PyPI 미게시(pypi.org 404 실측,
+    E-RECRUIT S21(story 444d1d18): ``uvx sprintable``(bare)는 PyPI 미게시(pypi.org 404 실측,
     2026-07-07)라 복붙하면 100% 실패한다. PyPI 게시 전까지 ``uvx --from git+<repo>#subdirectory=...``
     로 emit — 레포 public(자격증명 없이 clone 가능, 실측 완료)이고 ``sprintable_mcp`` 는 flat
     레이아웃이라 backend app/* 비의존(subdirectory 단독 빌드 성립, 로컬 실행 검증 완료). PyPI 정식
     게시는 별도 스토리 OB-PUBLISH(f5e1742d)가 추적 — 게시되면 이 args 를 bare 형태로 되돌리는 게 후속.
+
+    OB-PUBLISH(f5e1742d) 이름 정합: PyPI distribution/콘솔 스크립트명 = ``sprintable``(모듈명
+    ``sprintable_mcp`` 와 별개 — pyproject.toml ``[project.scripts] sprintable = ...``). 마지막
+    실행 인자가 콘솔 스크립트명이라 ``"sprintable"``(subdirectory 경로 문자열은 모듈 디렉터리라 무관).
     """
     env: dict[str, str] = {
         "SPRINTABLE_API_URL": resolve_backend_direct_url(),
@@ -210,7 +214,7 @@ def _build_stdio_config(api_key_plaintext: str | None) -> dict:
                 "args": [
                     "--from",
                     f"git+{_SPRINTABLE_REPO_URL}#subdirectory=backend/sprintable_mcp",
-                    "sprintable-mcp",
+                    "sprintable",
                 ],
                 "env": env,
             }
