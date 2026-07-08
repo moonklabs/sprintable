@@ -1001,7 +1001,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 // 커넥터-라우팅 런타임(connector/grok/pi/hermes/openclaw/opencode)은 mcp_config=null —
                 // MCP transport가 없어 .mcp.json 자체가 무의미. 문자열 "null" 렌더/복사 방지(story 6f6ac081 후속).
                 <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
-                  {t('mcpNotApplicable', { file: guideFilename })}
+                  {t('mcpNotApplicable')}
                 </div>
               )}
 

@@ -3286,7 +3286,7 @@
     "keyOnceBody": "안전한 곳에 저장하세요. 아래 .mcp.json을 복사·다운로드하면 됩니다.",
     "guideFileNote": "· 자율 운영 지침 · read-only",
     "mcpFileNote": "· 연결 · 실 key inline",
-    "mcpNotApplicable": "이 런타임은 MCP transport를 사용하지 않습니다 — 별도 .mcp.json이 필요 없습니다. 위 {file} 지침을 따라 연결하세요.",
+    "mcpNotApplicable": "이 런타임은 MCP transport를 사용하지 않습니다 — SSE 커넥터 방식으로 별도 연결 설정이 필요합니다.",
     "copy": "복사",
     "copied": "복사됨",
     "download": "다운로드",
