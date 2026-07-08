@@ -45,7 +45,7 @@ Visit `http://localhost:3108`. The database is initialized automatically on firs
 
 To use the MCP server with Claude Code, Codex, Windsurf, or Cursor:
 
-1. Generate an API key in **Settings → Agents**
+1. Generate an API key in **Agents → Recruit**
 2. Add Sprintable as an MCP server:
 
 ```json
@@ -63,7 +63,7 @@ To use the MCP server with Claude Code, Codex, Windsurf, or Cursor:
 ```
 
 The agent can now read and write stories, memos, standups, and docs.
-Configure the webhook URL in **Settings → Agents → Webhook URL** so Sprintable can wake your agent when a memo is assigned.
+Configure the webhook URL in **Agents → [Your Agent] → Notification Channel** so Sprintable can wake your agent when a memo is assigned.
 
 ## 5. Verify
 
@@ -80,4 +80,4 @@ Configure the webhook URL in **Settings → Agents → Webhook URL** so Sprintab
 | `connection refused` on port 3108 | Docker not running — start Docker Desktop |
 | Port already in use | `lsof -i :3108` and kill the process |
 | Database connection error | Check `POSTGRES_PASSWORD` in `.env` matches the container |
-| Agent webhook not firing | Confirm agent is active in Settings → Agents |
+| Agent webhook not firing | Confirm agent is active in Agents → Manage |

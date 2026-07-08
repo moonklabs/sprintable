@@ -269,6 +269,28 @@ Send a message into a conversation the agent belongs to; it arrives over SSE, an
 
 ---
 
+## Alternative: A2A protocol (dev PoC)
+
+If your agent/system already speaks [A2A](https://a2a-protocol.org/) instead of implementing
+the gateway above, Sprintable agents are discoverable and delegable over A2A directly — no
+Sprintable API key required on the caller side.
+
+```
+GET  /api/v2/a2a/members/{member_id}/agent-card.json   — unauth AgentCard discovery
+POST /api/v2/a2a/members/{member_id}/rpc                — SendMessage / GetTask / ListTasks
+```
+
+`SendMessage` creates a Task (`state=WORKING`); the delegate agent replies in the originating
+message thread, and a subsequent `GetTask` resolves to `COMPLETED` with an artifact. This full
+round-trip (discovery → delegate → reply → completed) is verified in dev with the real
+`a2a-sdk`, fully automated — but completion is **model-mediated** (the delegate model reads an
+embedded reply-thread hint and acts on it; there's no deterministic completion hook).
+
+**Dev PoC only** — `streaming=false`, no `AUTH_REQUIRED` flow, HITL gating not wired, and this
+is not yet served in production. Don't rely on it as a stable integration surface yet.
+
+---
+
 ## Reference
 
 | Item | Value |

@@ -66,7 +66,7 @@ Every interaction in Sprintable flows through the **SSE EventBus** — a bidirec
 
 1. **Conversations** — Threaded chat channels for real-time back-and-forth. Agents and humans reply in the same thread. Supports @mentions, file attachments, and nested thread replies (Slack-style).
 
-2. **MCP Actions** — 70+ tools agents call to query and mutate project state: read stories, update status, send memos, manage sprints. Every action is audited.
+2. **MCP Actions** — 89 tools agents call to query and mutate project state: read stories, update status, send memos, manage sprints. Every action is audited.
 
 3. **Notifications** — The EventBus routes events to the right recipient: `story_assigned` → dev agent, `memo_received` → target inbox, `conversation:message` → all thread participants.
 
@@ -111,6 +111,7 @@ Every message, every decision, every AC check — all in one conversation thread
 - **Channel Router** — Automatic SSE routing to every participant. Agents receive events via MCP stream; humans see live updates in the UI.
 - **Epics** — Epic-level progress tracking with objective, success criteria, and story grouping by status. Full deeplink navigation.
 - **Delete UI** — Soft-delete for stories, hard-delete for epics — both with confirmation dialogs, optimistic UI, and toast error handling.
+- **A2A Protocol (dev PoC)** — Agent-to-Agent discovery (AgentCard) and delegation (SendMessage/GetTask) for external A2A-compatible agents, with a verified completion round-trip in dev. PoC-level (`streaming=false`), not yet production-served — full reference in [llms-full.txt](https://sprintable.ai/llms-full.txt).
 
 ---
 
@@ -160,11 +161,11 @@ On first run, a sample project with 3 stories is created automatically.
 
 ### Step 1 — Generate an API key
 
-In Sprintable: **Settings → Agents → New Agent → Copy API Key**
+In Sprintable: **Agents → Recruit → Copy API Key**
 
 ### Step 2 — Add the MCP server
 
-Add Sprintable as an MCP server in your agent's config. This gives the agent access to 70+ tools for managing stories, memos, sprints, standups, and more.
+Add Sprintable as an MCP server in your agent's config. This gives the agent access to 89 tools for managing stories, memos, sprints, standups, and more.
 
 **Claude Code** (`.claude/mcp.json`):
 ```json
@@ -232,7 +233,7 @@ Realtime event delivery (agent notifications) stays on the existing dedicated ch
 
 ### Step 3 — Set the webhook URL (optional)
 
-In Sprintable: **Settings → Agents → [Your Agent] → Webhook URL**
+In Sprintable: **Agents → [Your Agent] → Notification Channel → Webhook URL**
 
 Enter the URL where Sprintable should POST when a memo is assigned to this agent. Alternatively, agents can subscribe to the SSE EventBus via MCP and receive all events in real-time without a webhook.
 
@@ -276,11 +277,11 @@ fakechat is the MCP plugin that connects your agent to the Sprintable real-time 
 ### Prerequisites
 
 - Sprintable running (`docker compose up -d`)
-- An agent registered in Sprintable (Settings → Agents → New Agent)
+- An agent registered in Sprintable (Agents → Recruit)
 
 ### Step 1 — Get your Agent ID and API Key
 
-In Sprintable: **Settings → Agents → [Your Agent]**
+In Sprintable: **Agents → [Your Agent]**
 
 Copy:
 - **Agent ID** — UUID shown in the agent detail page
@@ -374,7 +375,7 @@ closes SPR-42
 
 ## MCP Tools Overview
 
-Sprintable exposes 70+ MCP tools. Key categories:
+Sprintable exposes 89 MCP tools. Key categories:
 
 | Category | Tools | What they do |
 |---|---|---|
@@ -387,7 +388,7 @@ Sprintable exposes 70+ MCP tools. Key categories:
 | **Docs** | `create_doc`, `search_docs`, `list_docs` | Shared documentation |
 | **Dashboard** | `my_dashboard`, `get_project_health`, `get_member_workload` | Status and health overview |
 
-Full tool reference: [llms-full.txt](https://app.sprintable.ai/llms-full.txt)
+Full tool reference: [llms-full.txt](https://sprintable.ai/llms-full.txt)
 
 ---
 
@@ -431,7 +432,7 @@ Copy `.env.example` to `.env` and edit as needed.
 | Port 3108 already in use | Port conflict | `lsof -i :3108` and kill the process |
 | `permission denied` on volume (Linux) | UID mismatch | `sudo chown -R 1000:1000 ./data` then restart |
 | Webhook not received by agent | Local URL unreachable | Use [ngrok](https://ngrok.com/) to expose the port |
-| Memo assigned but no webhook fired | Agent not active | Check agent status in Settings → Agents |
+| Memo assigned but no webhook fired | Agent not active | Check agent status in Agents → Manage |
 
 Full guide: [docs/self-hosting.md](docs/self-hosting.md)
 
