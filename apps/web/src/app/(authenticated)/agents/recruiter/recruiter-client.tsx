@@ -977,7 +977,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               <Alert variant="warning">
                 <AlertDescription className="flex items-start gap-2">
                   <span aria-hidden>🔑</span>
-                  <span><b>{t('keyOnceTitle')}</b> {t('keyOnceBody')}</span>
+                  <span><b>{t('keyOnceTitle')}</b> {recruitResult.mcp_config ? t('keyOnceBody') : t('keyOnceBodyNoMcp')}</span>
                 </AlertDescription>
               </Alert>
 
