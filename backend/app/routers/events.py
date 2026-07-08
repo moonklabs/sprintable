@@ -54,13 +54,11 @@ def publish_event(org_id: str, event_type: str, data: dict, _from_listener: bool
     for q in dead:
         _subscribers[org_id].discard(q)
     if not _from_listener:
-        try:
-            from app.services.pg_pubsub import pg_notify
-            asyncio.get_running_loop().create_task(
-                pg_notify("org", org_id, event_type, data)
-            )
-        except RuntimeError:
-            pass  # 이벤트 루프 없음 (테스트 등)
+        # prod 커넥션 누수 근본fix(2026-07-08): 참조 미보관 create_task는 GC가 pg_notify()의
+        # async with async_session_factory() 도중 태스크를 조기수거할 수 있다(공식 문서 경고) —
+        # fire_and_forget이 강한 참조를 보관해 이를 막는다.
+        from app.services.pg_pubsub import fire_and_forget, pg_notify
+        fire_and_forget(pg_notify("org", org_id, event_type, data))
 
 
 # ─── Agent connection registry (S2/S3: 에이전트별 SSE) ───────────────────────
@@ -119,13 +117,9 @@ def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) 
         for q in dead:
             queues.discard(q)
     if not _from_listener:
-        try:
-            from app.services.pg_pubsub import pg_notify
-            asyncio.get_running_loop().create_task(
-                pg_notify("agent", member_id, payload.get("event_type", ""), payload)
-            )
-        except RuntimeError:
-            pass  # 이벤트 루프 없음 (테스트 등)
+        # prod 커넥션 누수 근본fix(2026-07-08) — publish_event()와 동형(fire_and_forget 참조 보관).
+        from app.services.pg_pubsub import fire_and_forget, pg_notify
+        fire_and_forget(pg_notify("agent", member_id, payload.get("event_type", ""), payload))
     return pushed
 
 
