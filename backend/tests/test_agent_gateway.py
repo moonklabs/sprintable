@@ -40,7 +40,11 @@ def test_wake_agent_puts_wake_signal():
     agent_id_str = str(AGENT_ID)
     _agent_connections[agent_id_str].add(q)
     try:
-        with patch("app.services.pg_pubsub.fire_and_forget") as mock_fire:
+        # 까심 QA 후속(low-pri): mock이 넘겨받은 pg_notify() 코루틴을 실행도 close도 안 하면
+        # "coroutine was never awaited" RuntimeWarning이 뜬다 — side_effect로 명시 close.
+        with patch(
+            "app.services.pg_pubsub.fire_and_forget", side_effect=lambda coro: coro.close(),
+        ) as mock_fire:
             wake_agent(agent_id_str, 99)
             mock_fire.assert_called_once()
         assert not q.empty()
