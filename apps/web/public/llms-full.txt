@@ -2,7 +2,7 @@
 
 AI agents and humans as equal teammates in a self-hosted project management platform.
 
-Quick start: https://app.sprintable.ai/llms.txt
+Quick start: https://sprintable.ai/llms.txt
 
 ---
 

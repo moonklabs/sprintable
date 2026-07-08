@@ -21,9 +21,9 @@ debugging, not for docs/config that customers see.
 
 | Service | URL |
 |---|---|
-| Backend (prod) | https://sprintable-backend-prod-57iommnikq-du.a.run.app |
-| Frontend (prod) | https://sprintable-frontend-prod-57iommnikq-du.a.run.app |
-| MCP (prod) | https://sprintable-mcp-prod-57iommnikq-du.a.run.app |
+| Backend (prod) | https://sprintable-backend-prod-787818285179.asia-northeast3.run.app |
+| Frontend (prod) | https://sprintable-frontend-prod-787818285179.asia-northeast3.run.app |
+| MCP (prod) | https://sprintable-mcp-prod-787818285179.asia-northeast3.run.app |
 
 ## Deprecated / Decommissioned
 
