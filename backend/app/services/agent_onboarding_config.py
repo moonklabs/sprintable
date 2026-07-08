@@ -28,6 +28,21 @@ STDIO = "stdio"
 HTTP = "http"
 SUPPORTED_TRANSPORTS = frozenset({STDIO, HTTP})
 
+# E-I18N Phase A(story 11f1087c, 문서 `i18n-architecture-design-crux`, 선생님 GO
+# 2026-07-08): FE `apps/web/src/i18n/request.ts`의 `SUPPORTED_LOCALES=['en','ko']`와
+# 값을 정확히 일치시킨 BE SSOT — 둘이 어긋나면 "FE는 지원한다는데 BE가 거부" 류 불일치
+# 버그가 재발한다. DEFAULT_LOCALE은 FE와 달리 **ko**다(FE 기본값은 en이지만, 그건
+# "브라우저 방문자가 아무 신호도 없을 때"의 기본이고, 여긴 반대로 "오늘 유일하게 실
+# 콘텐츠가 존재하는 locale"이 기준 — role_templates/코드 상수 전부 한글이 원본이라
+# en 콘텐츠가 아직 없는 동안은 ko가 안전한 폴백).
+SUPPORTED_LOCALES = ("ko", "en")
+DEFAULT_LOCALE = "ko"
+
+
+def resolve_locale(locale: str | None) -> str:
+    """미지원/None locale → DEFAULT_LOCALE 폴백(크래시 없이 항상 유효한 locale 반환)."""
+    return locale if locale in SUPPORTED_LOCALES else DEFAULT_LOCALE
+
 # E-RECRUIT S5 G4 + 전 런타임 올지원(story 6f6ac081) — 런타임별 자율 운영 지침 파일명. 공식
 # 문서 실측(추측 0, crux doc에 출처 전부 명시): codex/cursor/grok/pi/hermes/openclaw/opencode
 # 7종이 `AGENTS.md`로 수렴(신흥 cross-tool 표준) — gemini만 `GEMINI.md` 예외. hermes는 우선순위

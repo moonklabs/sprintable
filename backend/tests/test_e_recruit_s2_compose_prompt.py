@@ -125,6 +125,71 @@ def test_compose_prompt_generic_connector_bucket_also_honest():
     assert "SSE 커넥터" in out
 
 
+# ── E-I18N Phase A(story 11f1087c, PO GO 2026-07-08) — 코드 상수 locale 분기 ────────
+
+def test_compose_prompt_default_locale_is_korean_backward_compatible():
+    """locale 인자를 안 주면(기존 호출부·recruit_service.py) 정확히 예전과 동일한 한글 출력."""
+    role = _role()
+    out = compose_prompt(role, _RECIPE, "claude-code")
+    assert "## 애자일 자율 운영 룰" in out
+    assert "## Sprintable 사용법" in out
+    assert "## 사용 가능 도구 (치트시트)" in out
+    assert "## Agile Autonomous Operating Rules" not in out
+
+
+def test_compose_prompt_english_locale_localizes_code_sections():
+    """[B]/[C]/[D]/[E] 전부 영어로 나오되, [A](role_behaviors 데이터)는 아직 한글 그대로
+    (Phase A 스코프 — 데이터 i18n은 Phase B/후속, 의도적).
+
+    까심 QA MUST-FIX(2026-07-08): 이전 버전은 recipe가 있을 때 [B] 내부(_generate_guide 고정
+    구조 문자열)의 한글 leak을 assert하지 않아 "[B] 전부 영어"라는 주장을 실증 못 했다. 이제
+    recipe가 실제로 세팅된 상태에서 고정 문자열의 영어화 + 한글 leak 부재를 명시 확인한다."""
+    role = _role(role_behaviors="스스로 판단해 claim하고 소통하세요.")
+    out = compose_prompt(role, _RECIPE, "claude-code", locale="en")
+    assert "## Agile Autonomous Operating Rules" in out
+    assert "## How to Use Sprintable" in out
+    assert "## Available Tools (Cheat Sheet)" in out
+    assert "## Runtime Notes" in out
+    assert "MCP connection/scope was already configured" in out
+    assert "## 애자일 자율 운영 룰" not in out
+    # section [A]는 의도적으로 미번역(Phase A 스코프 밖)
+    assert "스스로 판단해 claim하고 소통하세요." in out
+    assert "# Backend Engineer — Recruitment Instructions" in out
+    # [B] 내부 _generate_guide() 고정 구조 문자열도 영어화(까심 MUST-FIX) — 한글 leak 0
+    assert "## Workflow Steps" in out
+    assert "Step 1" in out
+    assert "**Responsible role**" in out
+    assert "**Expected action**" in out
+    assert "## How to Use" in out
+    assert "## 워크플로우 단계" not in out
+    assert "담당 역할" not in out
+    assert "기대 행동" not in out
+    assert "## 사용 지침" not in out
+    # recipe DATA 콘텐츠(name/description/step.label/step.action)는 의도적으로 미번역
+    # (workflow_recipes 자체 i18n = 별도 트랙, out-of-scope) — 그대로 한글이어야 정상.
+    assert _RECIPE["name"] in out
+    assert _RECIPE["steps"][0]["label"] in out
+
+
+def test_compose_prompt_english_connector_runtime_localized():
+    role = _role()
+    out = compose_prompt(role, _RECIPE, "grok", locale="en")
+    assert "no separate setup is needed" not in out
+    assert "SSE connector" in out
+    assert "connectors/grok-sprintable/" in out
+    assert "AGENT_API_KEY" in out
+
+
+def test_compose_prompt_tool_names_and_group_labels_stay_unlocalized_identifiers():
+    """도구/그룹 이름은 실 레지스트리 식별자라 en/ko 무관하게 그대로 — 래퍼 텍스트만 번역."""
+    role = _role(default_tool_groups=["stories", "tasks"])
+    out_ko = compose_prompt(role, None, "claude-code", locale="ko")
+    out_en = compose_prompt(role, None, "claude-code", locale="en")
+    for out in (out_ko, out_en):
+        assert "`sprintable_claim_story`" in out
+        assert "**stories**:" in out
+
+
 # ── G3: 도구 치트시트 = 단일 소스(ALL_TOOL_NAMES) 파생, 환각 0 ─────────────────
 def test_compose_prompt_tool_cheat_sheet_only_references_real_tool_names():
     role = _role(default_tool_groups=[
