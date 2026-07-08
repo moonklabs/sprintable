@@ -179,7 +179,7 @@ async def test_connection_artifact_transport_http_returns_http_content(monkeypat
     with patch("app.routers.agents.AgentPersonaRepository.list", new_callable=AsyncMock, return_value=[]):
         out = await get_agent_connection_artifact(
             agent_id, runtime="claude-code", transport="http",
-            session=db, auth=MagicMock(), org_id=uuid.uuid4(),
+            accept_language=None, session=db, auth=MagicMock(), org_id=uuid.uuid4(),
         )
     mcp_file = next(f for f in out["files"] if f["filename"] == ".mcp.json")
     parsed = json.loads(mcp_file["content"])
@@ -203,7 +203,7 @@ async def test_connection_artifact_transport_http_unavailable_400(monkeypatch):
         with pytest.raises(HTTPException) as ei:
             await get_agent_connection_artifact(
                 agent_id, runtime="claude-code", transport="http",
-                session=db, auth=MagicMock(), org_id=uuid.uuid4(),
+                accept_language=None, session=db, auth=MagicMock(), org_id=uuid.uuid4(),
             )
     assert ei.value.status_code == 400
 
@@ -222,7 +222,7 @@ async def test_connection_artifact_unsupported_transport_400():
          pytest.raises(HTTPException) as ei:
         await get_agent_connection_artifact(
             agent_id, runtime="claude-code", transport="carrier-pigeon",
-            session=db, auth=MagicMock(), org_id=uuid.uuid4(),
+            accept_language=None, session=db, auth=MagicMock(), org_id=uuid.uuid4(),
         )
     assert ei.value.status_code == 400
 

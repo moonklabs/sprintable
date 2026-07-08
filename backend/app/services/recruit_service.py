@@ -80,6 +80,7 @@ async def recruit_agent(
     role_template: RoleTemplate,
     runtime: str,
     actor_id: uuid.UUID,
+    locale: str = "ko",
 ) -> dict[str, Any]:
     """recruit 본체 — 반환: ``{persona, api_key_plaintext, tool_allowlist}``.
 
@@ -93,6 +94,10 @@ async def recruit_agent(
     존재하지 않는 행은 못 잠그므로(check-then-insert TOCTOU — 기존 [[feedback_check_then_insert_toctou]]
     교훈과 동형) agent-scoped `pg_advisory_xact_lock` 으로 이 함수 본문 전체(조회→분기→write)를
     직렬화한다 — 트랜잭션 종료 시 자동 해제, 기존 `onboarding_first_auth:{member_id}` 관례와 동일 패턴.
+
+    E-I18N Phase C(story 11f1087c): ``locale``은 request-scoped(호출부가 FE 전달값→Accept-Language
+    폴백으로 이미 정규화해 넘긴다) — 여기선 그대로 ``compose_prompt``에 전달만 한다. 기본값 "ko"라
+    이 함수를 직접 호출하는 기존/테스트 코드는 무변경 하위호환.
     """
     await acquire_agent_mutation_lock(session, agent_member.id)
 
@@ -100,7 +105,7 @@ async def recruit_agent(
     validate_tool_groups(tool_allowlist)  # fail-closed — ValueError 전파, 호출부가 400 매핑
 
     recipe = await resolve_recipe_by_slug(session, role_template.default_workflow_recipe_slug)
-    system_prompt = compose_prompt(role_template, recipe, runtime)
+    system_prompt = compose_prompt(role_template, recipe, runtime, locale)
 
     persona_repo = AgentPersonaRepository(session)
     existing = await persona_repo.get_recruited(org_id, agent_member.project_id, agent_member.id)
