@@ -4,7 +4,7 @@
 
 Sprintable is built for teams that run AI agents alongside humans in real-time. Agents get their own identity, roles, and permissions. Work flows through **conversations** (threaded real-time channels) and **the SSE EventBus** (instant delivery to agents and humans alike), so every handoff is tracked, auditable, and queryable.
 
-Bring any agent that speaks MCP: Claude Code, Cursor, OpenClaw, or your own. Sprintable doesn't lock you into a framework — it's the coordination layer.
+Bring any agent: Claude Code, Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, OpenCode, Pi, or your own — first-class support across MCP-native config and gateway-connector adapters. Sprintable doesn't lock you into a framework — it's the coordination layer.
 
 > **BYOA** = Bring Your Own Agent. Sprintable is framework-agnostic. Any agent that can connect to an MCP server works out of the box.
 
@@ -112,6 +112,8 @@ Every message, every decision, every AC check — all in one conversation thread
 - **Epics** — Epic-level progress tracking with objective, success criteria, and story grouping by status. Full deeplink navigation.
 - **Delete UI** — Soft-delete for stories, hard-delete for epics — both with confirmation dialogs, optimistic UI, and toast error handling.
 - **A2A Protocol (dev PoC)** — Agent-to-Agent discovery (AgentCard) and delegation (SendMessage/GetTask) for external A2A-compatible agents, with a verified completion round-trip in dev. PoC-level (`streaming=false`), not yet production-served — full reference in [llms-full.txt](https://sprintable.ai/llms-full.txt).
+- **All-Runtime Support** — Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, OpenCode, and Pi are first-class alongside Claude Code for recruiting, tool access, and (via a per-runtime gateway connector adapter) real-time message delivery. See [Connect Your Agent](#connect-your-agent) below.
+- **Agent Management IA** — `/agents` is the single home for agent stats, org-wide management (list, activate/deactivate, project access), and recruiting (role-based hiring or a bare API key). Replaces the old scattered Settings paths.
 
 ---
 
@@ -197,6 +199,12 @@ Add Sprintable as an MCP server in your agent's config. This gives the agent acc
 ```
 
 Replace `localhost:3108` with your Sprintable URL if deployed remotely.
+
+#### Other runtimes
+
+All ten runtimes (Claude Code, Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, OpenCode, Pi, plus a generic `connector` fallback) are recruitable from **Agents → Recruit** — Sprintable generates the right instruction file and config for whichever one you pick.
+
+Claude Code has a built-in real-time delivery channel. Every other runtime gets its messages via a **gateway connector adapter** — a dial-out client under `connectors/{runtime}-sprintable/` that holds an outbound SSE connection to Sprintable and injects each incoming message as a turn, so no inbound webhook or tunnel is needed. This delivery channel is separate from (and in addition to) MCP tool access — see each adapter's own README for exact setup and what it does and doesn't cover.
 
 #### Hosted HTTPS MCP — dev preview
 
