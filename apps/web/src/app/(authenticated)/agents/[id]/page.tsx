@@ -591,8 +591,8 @@ export default function AgentDetailPage() {
         <SectionCardHeader>
           <div className="flex items-center justify-between w-full">
             <div className="space-y-1">
-              <h2 className="text-base font-semibold text-foreground">MCP Config</h2>
-              <p className="text-sm text-muted-foreground">Claude Code나 MCP 클라이언트에 붙여넣으면 이 에이전트로 Sprintable에 연결됩니다.</p>
+              <h2 className="text-base font-semibold text-foreground">{t('agentMcpTitle')}</h2>
+              <p className="text-sm text-muted-foreground">{t('agentMcpDescription')}</p>
             </div>
             {freshApiKey && (
               <Button variant="glass" size="sm" onClick={() => void handleCopyMcp()}>
@@ -604,15 +604,15 @@ export default function AgentDetailPage() {
         <SectionCardBody>
           {freshApiKey ? (
             <>
-              <p className="text-xs text-emerald-500 mb-2">새 API Key가 포함된 설정입니다. 지금 복사해 두세요 — 페이지를 새로고침하면 사라집니다.</p>
+              <p className="text-xs text-emerald-500 mb-2">{t('agentMcpFreshKeyNote')}</p>
               <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
                 {buildMcpConfig(freshApiKey)}
               </pre>
             </>
           ) : !hasActiveKey ? (
-            <p className="text-xs text-amber-400">API Key를 먼저 발급하세요. 발급 직후 실제 키가 이 블록에 자동으로 포함됩니다.</p>
+            <p className="text-xs text-amber-400">{t('agentMcpKeyRequired')}</p>
           ) : (
-            <p className="text-xs text-muted-foreground">보안상 기존 키는 재표시되지 않습니다. 위 API Keys 섹션에서 새 키를 발급하면 실제 키가 포함된 Config가 여기에 자동으로 나타납니다.</p>
+            <p className="text-xs text-muted-foreground">{t('agentMcpSecurityNote')}</p>
           )}
         </SectionCardBody>
       </SectionCard>
@@ -623,11 +623,11 @@ export default function AgentDetailPage() {
           <div className="flex items-center justify-between w-full">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-semibold text-foreground">Fakechat 채널</h2>
+                <h2 className="text-base font-semibold text-foreground">{t('agentFakechatTitle')}</h2>
                 <Badge variant="info">SSE</Badge>
               </div>
               <p className="text-sm text-muted-foreground">
-                이 에이전트의 로컬 SSE 채널 설정입니다. fakechat 서버가 해당 포트에서 실행되어야 합니다.
+                {t('agentFakechatDescription')}
               </p>
             </div>
             {agent.fakechat_port ? (
@@ -657,7 +657,7 @@ export default function AgentDetailPage() {
             </>
           ) : (
             <p className="text-xs text-muted-foreground">
-              fakechat 포트 정보가 없습니다. 에이전트를 재생성하거나 관리자에게 문의하세요.
+              {t('agentFakechatPortMissing')}
             </p>
           )}
         </SectionCardBody>
