@@ -49,13 +49,26 @@ export interface RecruitResponse {
 }
 
 /** 런타임별 지침 파일명(P0=Claude Code 기준·핸드오프 §STEP3) — BE `runtime-capabilities`가 아직
- * 배포 전(디디 미착지)이거나 응답에 `prompt_file`이 없을 때만 쓰는 폴백. */
+ * 배포 전(디디 미착지)이거나 응답에 `prompt_file`이 없을 때만 쓰는 폴백. **다운로드 파일명으로는
+ * 쓰지 말 것** — 유저 정체성 파일(CLAUDE.md 등)과 이름이 충돌한다(아래 KIT_FILENAME 참고). 전달
+ * 카피에서 "이 런타임의 지침파일 컨벤션은 X"를 설명하는 용도로만 참조한다. */
 export const RUNTIME_GUIDE_FILENAME_FALLBACK: Record<string, string> = {
   'claude-code': 'CLAUDE.md',
   codex: 'AGENTS.md',
   gemini: 'GEMINI.md',
   cursor: 'CLAUDE.md',
 };
+
+/**
+ * 채용 kit 다운로드/복사 파일명 — BE `agent_onboarding_config.py::KIT_FILENAME`과 동일 문자열,
+ * 런타임 무관 단일 상수(story b1fe41cf, 정체성 파일 덮어쓰기 버그 fix). 예전엔 이 값을
+ * `RUNTIME_GUIDE_FILENAME_FALLBACK`/`prompt_file`(CLAUDE.md/AGENTS.md/GEMINI.md 런타임별 리터럴)로
+ * 채웠는데, 유저가 그 파일을 프로젝트 루트에 저장하면 자기 에이전트의 진짜 정체성 파일을 그대로
+ * 덮어썼다 — BE의 `_connection_artifact` 엔드포인트(사후 재발급용)는 #1967에서 이미 고쳤으나,
+ * recruit() 응답을 직접 쓰는 이 채용 위저드(STEP4)는 별개 경로라 반영이 안 돼 있었다(2026-07-08
+ * 재발견). 그 어떤 런타임의 정체성 파일명과도 충돌하지 않는다.
+ */
+export const KIT_FILENAME = 'SPRINTABLE_ONBOARDING.md';
 
 /**
  * E-RECRUIT S6 — `GET /api/v2/runtime-capabilities` 응답 항목. **실측 계약**(BE PR #1911,

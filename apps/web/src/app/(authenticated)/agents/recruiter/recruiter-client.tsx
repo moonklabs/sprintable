@@ -18,7 +18,7 @@ import {
   VerifyRail, RAIL_ORDER, HTTP_RAIL_ORDER, type DisplayStep, type RailState, type RailStatus,
 } from '@/app/onboarding/verify-rail';
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
-import { RUNTIME_GUIDE_FILENAME_FALLBACK, RUNTIME_CAPABILITIES_FALLBACK } from '@/services/recruit';
+import { RUNTIME_CAPABILITIES_FALLBACK, KIT_FILENAME } from '@/services/recruit';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -400,10 +400,12 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const [rotating, setRotating] = useState(false);
   const [rotateError, setRotateError] = useState<string | null>(null);
 
-  // 실측(BE PR #1911): 일반 런타임 지침 파일명은 `prompt_file`(`guide_filename`은 connector 전용
-  // "CONNECTOR_SETUP.md") — 당초 안내와 필드명이 달라 실 스키마로 정정.
-  const guideFilename = runtimeCapabilities?.find((r) => r.slug === runtime)?.prompt_file
-    ?? RUNTIME_GUIDE_FILENAME_FALLBACK[runtime] ?? 'CLAUDE.md';
+  // 2026-07-08 재발견(크럭스 recruit-output-kit-redesign-crux §0이 지목한 "리터럴 코드 지점" —
+  // #1967은 사후 재발급 엔드포인트(_connection_artifact)만 고치고 이 채용 위저드는 안 건드렸다):
+  // 다운로드/표시 파일명은 런타임별 리터럴(prompt_file — CLAUDE.md/AGENTS.md/GEMINI.md)을 쓰면
+  // 유저가 그 파일을 프로젝트 루트에 저장할 때 실제 정체성 파일을 덮어쓴다. KIT_FILENAME(런타임
+  // 무관 단일 상수)으로 고정 — BE `_connection_artifact`가 #1967 이후 쓰는 것과 동일 문자열.
+  const guideFilename = KIT_FILENAME;
 
   const handleRecruit = async () => {
     if (!selectedRoleSlug) return;
