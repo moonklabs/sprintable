@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { spliceApiKey, splitRuntimeCapabilities, pickDefaultRuntime, groupAndFilterRoleTemplates } from './recruiter-client';
+import { spliceApiKey, splitRuntimeCapabilities, pickDefaultRuntime, groupAndFilterRoleTemplates, resolveKitFilename } from './recruiter-client';
 import type { McpConfigBundle, RuntimeCapabilityItem, RoleTemplateSummary } from '@/services/recruit';
-import { RUNTIME_CAPABILITIES_FALLBACK } from '@/services/recruit';
+import { RUNTIME_CAPABILITIES_FALLBACK, KIT_FILENAME } from '@/services/recruit';
 
 describe('spliceApiKey (까심 QA RC HIGH① — transport별 키 위치)', () => {
   it('replaces the key in headers.Authorization for the http (hosted) shape', () => {
@@ -87,6 +87,35 @@ describe('pickDefaultRuntime (E-RECRUIT S6 — avoids recruit() 400 on an unsupp
 
   it('leaves the current value untouched when the supported list is empty (defensive, never crashes)', () => {
     expect(pickDefaultRuntime([], 'claude-code')).toBe('claude-code');
+  });
+});
+
+describe('resolveKitFilename (identity-overwrite regression guard — 까심 QA RC, 2026-07-08)', () => {
+  // 정체성 덮어쓰기 버그(recruit-output-kit-redesign-crux §0): STEP4 다운로드 파일명이 런타임의
+  // 진짜 정체성 파일명(prompt_file — CLAUDE.md/AGENTS.md/GEMINI.md)을 그대로 쓰면, 유저가 저장 시
+  // 자기 에이전트 정체성 파일을 덮어쓴다. BE #1967이 사후 재발급 엔드포인트만 고치고 이 위저드는
+  // 놓쳐 한 번 조용히 재발했다 — 이 테스트가 세 번째 재발을 막는다.
+  const identityFilenamesByRuntime: RuntimeCapabilityItem[] = [
+    mkCap({ slug: 'claude-code', display_name: 'Claude Code', supported: true, prompt_file: 'CLAUDE.md' }),
+    mkCap({ slug: 'codex', display_name: 'Codex', supported: true, prompt_file: 'AGENTS.md' }),
+    mkCap({ slug: 'gemini', display_name: 'Gemini', supported: true, prompt_file: 'GEMINI.md' }),
+    mkCap({ slug: 'cursor', display_name: 'Cursor', supported: true, prompt_file: 'AGENTS.md' }),
+  ];
+
+  it.each(identityFilenamesByRuntime.map((rc) => [rc.slug, rc.prompt_file] as const))(
+    'stays KIT_FILENAME for %s even though runtime-capabilities carries a real identity filename (%s)',
+    (slug) => {
+      expect(resolveKitFilename(slug, identityFilenamesByRuntime)).toBe(KIT_FILENAME);
+    },
+  );
+
+  it('never falls back to a runtime-literal filename when runtimeCapabilities is null/loading', () => {
+    expect(resolveKitFilename('claude-code', null)).toBe(KIT_FILENAME);
+  });
+
+  it('KIT_FILENAME itself does not collide with any known runtime identity filename', () => {
+    const identityFilenames = new Set(identityFilenamesByRuntime.map((rc) => rc.prompt_file));
+    expect(identityFilenames.has(KIT_FILENAME)).toBe(false);
   });
 });
 
