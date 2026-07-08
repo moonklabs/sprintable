@@ -176,9 +176,12 @@ async def route_dispatch_event(
     # S-C2: dispatch_triggered — agent recipient인 경우 기록 (AC2, AC6)
     if recipient_type == "agent":
         try:
+            # prod 커넥션 누수 근본fix(2026-07-08, 까심 QA #1970 후속 — 동일 취약 패턴):
+            # 참조 미보관 ensure_future는 GC가 record_activity_bg()의
+            # `async with async_session_factory()` 도중 태스크를 조기수거할 수 있다.
             from app.services.activity_log import record_activity_bg
-            import asyncio
-            asyncio.ensure_future(record_activity_bg(
+            from app.services.pg_pubsub import fire_and_forget
+            fire_and_forget(record_activity_bg(
                 org_id=event.org_id,
                 action="dispatch_triggered",
                 actor_id=recipient_id,
