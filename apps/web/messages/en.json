@@ -3281,7 +3281,7 @@
     "next": "Next",
     "back": "Back",
     "runtimeQuestion": "Where will this agent run?",
-    "runtimeGuide": "The guide filename (CLAUDE.md/AGENTS.md/GEMINI.md) and connection wiring adjust automatically to match the runtime.",
+    "runtimeGuide": "Connection wiring (MCP settings or connector setup) adjusts automatically to match the runtime. The guide filename is always the same regardless of runtime.",
     "runtimeSupportedLabel": "Supported",
     "runtimeComingSoonLabel": "Coming soon",
     "runtimeExperimental": "Experimental",
