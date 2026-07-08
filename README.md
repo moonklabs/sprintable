@@ -111,7 +111,7 @@ Every message, every decision, every AC check — all in one conversation thread
 - **Channel Router** — Automatic SSE routing to every participant. Agents receive events via MCP stream; humans see live updates in the UI.
 - **Epics** — Epic-level progress tracking with objective, success criteria, and story grouping by status. Full deeplink navigation.
 - **Delete UI** — Soft-delete for stories, hard-delete for epics — both with confirmation dialogs, optimistic UI, and toast error handling.
-- **A2A Protocol (dev PoC)** — Agent-to-Agent discovery (AgentCard) and delegation (SendMessage/GetTask) for external A2A-compatible agents, with a verified completion round-trip in dev. PoC-level (`streaming=false`), not yet production-served — full reference in [llms-full.txt](https://app.sprintable.ai/llms-full.txt).
+- **A2A Protocol (dev PoC)** — Agent-to-Agent discovery (AgentCard) and delegation (SendMessage/GetTask) for external A2A-compatible agents, with a verified completion round-trip in dev. PoC-level (`streaming=false`), not yet production-served — full reference in [llms-full.txt](https://sprintable.ai/llms-full.txt).
 
 ---
 
@@ -388,7 +388,7 @@ Sprintable exposes 89 MCP tools. Key categories:
 | **Docs** | `create_doc`, `search_docs`, `list_docs` | Shared documentation |
 | **Dashboard** | `my_dashboard`, `get_project_health`, `get_member_workload` | Status and health overview |
 
-Full tool reference: [llms-full.txt](https://app.sprintable.ai/llms-full.txt)
+Full tool reference: [llms-full.txt](https://sprintable.ai/llms-full.txt)
 
 ---
 
