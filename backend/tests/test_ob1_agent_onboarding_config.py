@@ -202,3 +202,28 @@ async def test_connection_artifact_not_found_404():
             uuid.uuid4(), runtime="claude-code", session=db, auth=MagicMock(), org_id=uuid.uuid4()
         )
     assert ei.value.status_code == 404
+
+
+# ── E-I18N Phase A(story 11f1087c) — resolve_locale SSOT ───────────────────────
+
+def test_supported_locales_matches_fe_exactly():
+    """FE apps/web/src/i18n/request.ts의 SUPPORTED_LOCALES=['en','ko']와 값 일치(순서 무관,
+    집합 동일) — 어긋나면 "FE는 지원한다는데 BE가 거부" 류 불일치 버그 재발."""
+    assert set(gen.SUPPORTED_LOCALES) == {"en", "ko"}
+
+
+def test_resolve_locale_passthrough_for_supported():
+    assert gen.resolve_locale("en") == "en"
+    assert gen.resolve_locale("ko") == "ko"
+
+
+def test_resolve_locale_falls_back_to_default_for_unsupported_or_none():
+    assert gen.resolve_locale("fr") == gen.DEFAULT_LOCALE
+    assert gen.resolve_locale(None) == gen.DEFAULT_LOCALE
+    assert gen.resolve_locale("") == gen.DEFAULT_LOCALE
+
+
+def test_default_locale_is_korean():
+    """FE 기본값(en, "방문자 신호 0"용)과 의도적으로 다르다 — BE는 오늘 실 콘텐츠가 있는
+    locale(ko)이 안전한 폴백(en 콘텐츠는 아직 없음, Phase A 스코프)."""
+    assert gen.DEFAULT_LOCALE == "ko"
