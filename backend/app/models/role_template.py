@@ -31,7 +31,13 @@ class RoleTemplate(Base, TimestampMixin):
     category: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 자율 운영 지침(markdown) — 큰 정적 프롬프트가 아니라 날씬한 매뉴얼(블루프린트 §3 개정).
+    # 이 컬럼 자체가 "ko" 캐논 소스(오늘 유일한 실 콘텐츠) — role_behaviors_i18n은 그 위 오버레이.
     role_behaviors: Mapped[str] = mapped_column(Text, nullable=False)
+    # E-I18N Phase B(story 11f1087c, migration 0164) — locale별 번역 오버레이({"en": "...", ...}).
+    # 빈 dict가 기본(마이그 시점 백필 없음, 순수 구조 추가) — 소비 코드는
+    # `role_behaviors_i18n.get(locale) or role_behaviors` 순서로 조회해 빈 키는 자동으로
+    # role_behaviors(ko)로 폴백한다(Phase C 이후 배선 예정, 이 스키마 자체는 무관).
+    role_behaviors_i18n: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     # mcp_toolset.py 의 그룹 vocabulary(stories/tasks/epics/chat/docs/sprints/...) — admin/
     # destructive-only 그룹 제외(직무별 최소권한). API key scope 로 그대로 흘러간다(S2/S3 소비).
     default_tool_groups: Mapped[list[str]] = mapped_column(
