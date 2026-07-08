@@ -18,7 +18,7 @@ import {
   VerifyRail, RAIL_ORDER, HTTP_RAIL_ORDER, type DisplayStep, type RailState, type RailStatus,
 } from '@/app/onboarding/verify-rail';
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
-import { RUNTIME_CAPABILITIES_FALLBACK, KIT_FILENAME } from '@/services/recruit';
+import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME } from '@/services/recruit';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -371,6 +371,14 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     [runtimeCapabilities],
   );
 
+  // story 5ea9bafe(P2): generic connector 슬롯이 named 9런타임 사이(알파벳순 3번째)에 끼어 있으면
+  // 특정 런타임으로 오인하기 쉽다는 유나 UX 지적 — **렌더 순서만** 마지막으로 미룬다(데이터 계약인
+  // `splitRuntimeCapabilities` 자체는 안 건드림 — 그 순서를 핀 고정하는 회귀가드 테스트가 있다).
+  const displayedSupportedRuntimes = useMemo(
+    () => [...supportedRuntimes].sort((a, b) => Number(a.slug === 'connector') - Number(b.slug === 'connector')),
+    [supportedRuntimes],
+  );
+
   // 로드된 목록에 현재 선택값이 없으면(예: 기본값 'claude-code'가 이 org enviro서 미지원) 첫 지원
   // 런타임으로 보정 — recruit() 400 방지.
   useEffect(() => {
@@ -382,6 +390,13 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   // escape hatch"로 재정의 — BE display_name("Connector")을 그대로 안 쓰고 명확한 라벨로 오버라이드.
   const runtimeDisplayName = (rc: RuntimeCapabilityItem) =>
     rc.slug === 'connector' ? t('runtimeCustomOtherLabel') : rc.display_name;
+
+  // story 5ea9bafe: STEP4 오리엔팅 헤더·전달 카피·STEP5 intro에서 공용으로 쓰는 현재 선택 런타임의
+  // 표시명(못 찾으면 slug 그대로 — 로딩 중 등 방어).
+  const currentRuntimeDisplayName = (() => {
+    const rc = runtimeCapabilities?.find((r) => r.slug === runtime);
+    return rc ? runtimeDisplayName(rc) : runtime;
+  })();
 
   const [agentMode, setAgentMode] = useState<'new' | 'existing'>('new');
   const [newAgentName, setNewAgentName] = useState('');
@@ -421,6 +436,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   // 유저가 그 파일을 프로젝트 루트에 저장할 때 실제 정체성 파일을 덮어쓴다. resolveKitFilename()이
   // 항상 KIT_FILENAME(런타임 무관 단일 상수)을 반환 — 회귀가드 테스트 대상(아래 함수 정의 참고).
   const guideFilename = resolveKitFilename(runtime, runtimeCapabilities);
+
+  // story 5ea9bafe(P1-b): 전달 카피에서 "이 런타임의 기존 지침파일 컨벤션은 X(그대로 둔다)"를
+  // 설명할 때만 참조 — 다운로드 파일명 용도 아님(그건 별도 fix #1974, KIT_FILENAME).
+  const runtimePromptFileConvention = runtimeCapabilities?.find((r) => r.slug === runtime)?.prompt_file
+    ?? RUNTIME_GUIDE_FILENAME_FALLBACK[runtime] ?? 'CLAUDE.md';
 
   const handleRecruit = async () => {
     if (!selectedRoleSlug) return;
@@ -537,8 +557,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     const be = beSteps?.find((s) => s.state === state);
     let status: RailStatus = be?.status ?? 'pending';
     if (state === 'config_copied' && status === 'pending') status = 'done'; // 번들 다운로드=STEP3 완주로 이미 완료
-    // 유나 가디언 polish#2: onboarding 공용 라벨("설정 복사됨")은 채용 맥락과 안 맞아 이 상태만 로컬 오버라이드.
-    const label = state === 'config_copied' ? t('railBundleDownloaded') : tOnboarding(RAIL_LABEL_KEY[state]);
+    // story 5ea9bafe §5.5: 크로스-플로우 SSOT 수렴 — recruiter만 로컬 오버라이드하던 라벨을 제거하고
+    // onboarding-connect와 동일한 공용 rail 라벨을 쓴다(공용 키 자체를 kit-model에 맞게 개정: "구성 적용").
+    const label = tOnboarding(RAIL_LABEL_KEY[state]);
     return { state, status, label, reason: be?.reason };
   });
   const verified = displaySteps.find((s) => s.state === 'verified')?.status === 'done';
@@ -605,24 +626,6 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
             <div className="space-y-3">
               <p className="text-sm font-semibold text-foreground">{t('roleQuestion')}</p>
 
-              {/* equip-skip(story d82c1092·C3): 역할 없이 키만 발급 — 맨몸추가(AddAgentForm) 흡수. */}
-              <button
-                type="button"
-                onClick={() => { setEquipSkip(true); setSelectedRoleSlug(null); }}
-                className={cn(
-                  'flex w-full items-center justify-between gap-3 rounded-xl border border-dashed p-3 text-left transition-colors',
-                  equipSkip ? 'border-primary/60 bg-primary/5 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
-                )}
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-foreground">{t('equipSkipCardTitle')}</p>
-                  <p className="text-xs text-muted-foreground">{t('equipSkipCardBody')}</p>
-                </div>
-                {equipSkip
-                  ? <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden />
-                  : <Badge variant="chip" className="shrink-0 text-[10px]">{t('equipSkipBadge')}</Badge>}
-              </button>
-
               {roleError ? (
                 <div className="flex items-center gap-2">
                   <p className="text-sm text-destructive">{t('roleLoadError')}</p>
@@ -687,6 +690,27 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   </div>
                 </>
               )}
+
+              {/* story 5ea9bafe(P2): equip-skip이 최상단이면 "역할 채용"이 주 경로라는 게 안 읽힌다는
+                  유나 UX 지적 — 카탈로그 하단(escape-hatch)으로 옮기고 톤 낮춤(d82c1092·C3 원 기능
+                  그대로, 위치/톤만 변경). */}
+              <button
+                type="button"
+                onClick={() => { setEquipSkip(true); setSelectedRoleSlug(null); }}
+                className={cn(
+                  'flex w-full items-center justify-between gap-3 rounded-xl border border-dashed p-2.5 text-left text-sm transition-colors',
+                  equipSkip ? 'border-primary/60 bg-primary/5 ring-1 ring-primary/40' : 'border-border/60 hover:border-primary/30',
+                )}
+              >
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-muted-foreground">{t('equipSkipCardTitle')}</p>
+                  <p className="text-xs text-muted-foreground">{t('equipSkipCardBody')}</p>
+                </div>
+                {equipSkip
+                  ? <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden />
+                  : <Badge variant="chip" className="shrink-0 text-[10px]">{t('equipSkipBadge')}</Badge>}
+              </button>
+
               <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                 {t('roleGuide')}
@@ -849,7 +873,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     <div className="space-y-1">
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
                       <div className="grid grid-cols-3 gap-2">
-                        {supportedRuntimes.map((rc) => {
+                        {displayedSupportedRuntimes.map((rc) => {
                           const sel = runtime === rc.slug;
                           return (
                             <button
@@ -1002,6 +1026,32 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
           {/* ── STEP 4 : 번들 프리뷰(파일 3종) ── */}
           {step === 4 && recruitResult && selectedRole && (
             <div className="space-y-4">
+              {/* story 5ea9bafe(P1-a): 오리엔팅 헤더 — 아래 두 아티팩트(연결/지침)를 왜·어떤 순서로
+                  세팅하는지 먼저 프레이밍(신 kit 모델이 구 "번들"보다 암묵적이라 유나 UX 지적). */}
+              <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
+                <p className="text-sm font-bold text-foreground">{t('kitOrientingTitle', { role: selectedRole.name })}</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">1</span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-foreground">{t('kitOrientingConnectLabel')}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {recruitResult.mcp_config
+                          ? t('kitOrientingConnectBodyMcp', { runtime: currentRuntimeDisplayName })
+                          : t('kitOrientingConnectBodyConnector')}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">2</span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-foreground">{t('kitOrientingGuideLabel')}</p>
+                      <p className="text-xs text-muted-foreground">{t('kitOrientingGuideBody', { filename: guideFilename })}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <Alert variant="warning">
                 <AlertDescription className="flex items-start gap-2">
                   <span aria-hidden>🔑</span>
@@ -1009,18 +1059,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 </AlertDescription>
               </Alert>
 
-              <div className="overflow-hidden rounded-md border border-border">
-                <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
-                  <span className="font-mono text-xs text-foreground">📄 {guideFilename} <span className="text-muted-foreground">{t('guideFileNote')}</span></span>
-                  <CopyDownloadButtons content={recruitResult.system_prompt} filename={guideFilename} copied={copiedGuide} onCopied={() => setCopiedGuide(true)} />
-                </div>
-                <p className="flex items-start gap-1.5 border-b border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                  {t('guideFileDeliveryNote')}
-                </p>
-                <pre className="max-h-64 overflow-auto bg-muted/40 p-3 text-xs leading-relaxed whitespace-pre-wrap">{recruitResult.system_prompt}</pre>
-              </div>
-
+              {/* story 5ea9bafe(P2): 키 배너가 "아래 .mcp.json"이라고 지칭하므로 .mcp.json 카드를
+                  배너 바로 아래(지침 카드보다 먼저)로 순서 정렬 — 예전엔 지침 카드가 먼저라 "아래"가
+                  가리키는 게 어긋났다. */}
               {recruitResult.mcp_config ? (
                 <div className="overflow-hidden rounded-md border border-border">
                   <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
@@ -1036,6 +1077,22 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   {t('mcpNotApplicable')}
                 </div>
               )}
+
+              <div className="overflow-hidden rounded-md border border-border">
+                <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
+                  <span className="font-mono text-xs text-foreground">📄 {guideFilename} <span className="text-muted-foreground">{t('guideFileNote')}</span></span>
+                  <CopyDownloadButtons content={recruitResult.system_prompt} filename={guideFilename} copied={copiedGuide} onCopied={() => setCopiedGuide(true)} />
+                </div>
+                <p className="flex items-start gap-1.5 border-b border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  {/* story 5ea9bafe(P1-b): "전달하세요"만으론 HOW가 없다는 유나 UX 지적 — 런타임-aware
+                      구체적 방법(MCP-native=작업폴더에 두고 읽으라 지시 / 커넥터=수동 연결 完 後 전달). */}
+                  {recruitResult.mcp_config
+                    ? t('guideFileDeliveryNoteMcp', { filename: guideFilename, promptFile: runtimePromptFileConvention })
+                    : t('guideFileDeliveryNoteConnector', { filename: guideFilename })}
+                </p>
+                <pre className="max-h-64 overflow-auto bg-muted/40 p-3 text-xs leading-relaxed whitespace-pre-wrap">{recruitResult.system_prompt}</pre>
+              </div>
 
               <div className="space-y-2 rounded-md border border-border p-3">
                 <div className="flex items-center justify-between">
@@ -1075,11 +1132,6 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 )}
               </div>
 
-              <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                {t('runtimeFilenameNote')}
-              </p>
-
               <div className="flex justify-end pt-2">
                 <Button variant="hero" onClick={() => setStep(5)}>{t('next')}</Button>
               </div>
@@ -1091,7 +1143,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
             <div className="space-y-4">
               <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                {t('verifyGuide')}
+                {recruitResult.mcp_config
+                  ? t('verifyGuideMcp', { runtime: currentRuntimeDisplayName })
+                  : t('verifyGuideConnector')}
               </p>
 
               <div className="flex items-center justify-between gap-2">
