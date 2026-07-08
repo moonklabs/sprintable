@@ -75,8 +75,7 @@ def test_tool_group_mapping_examples():
     assert by_tool["sprintable_delete_story"] == "stories"
     assert by_tool["sprintable_give_reward"] == "rewards"
     assert by_tool["sprintable_delete_sprint"] == "sprints"
-    # admin 그룹 = lock/unlock/emit_event/trigger_ai
-    assert by_tool["sprintable_lock_files"] == "admin"
+    # admin 그룹 = emit_event/trigger_ai/activate_sprint/close_sprint 등 진짜 파괴 작업만
     assert by_tool["sprintable_emit_event"] == "admin"
     # always-allowed(+orphan)는 core 로 통합(키워드 그룹서 제외)
     assert by_tool["sprintable_my_dashboard"] == "core"
@@ -84,6 +83,9 @@ def test_tool_group_mapping_examples():
     assert by_tool["sprintable_get_workflow_guide"] == "core"
     assert by_tool["sprintable_list_team_members"] == "core"
     assert by_tool["sprintable_poll_events"] == "core"
+    # S17: lock/unlock 은 org/project-scoped advisory 조율 도구(비파괴)로 재분류 — core(always-allow)
+    assert by_tool["sprintable_lock_files"] == "core"
+    assert by_tool["sprintable_unlock_files"] == "core"
     # 정상 그룹 매핑 sanity
     assert by_tool["sprintable_add_story"] == "stories"
     assert by_tool["sprintable_get_velocity"] == "analytics"

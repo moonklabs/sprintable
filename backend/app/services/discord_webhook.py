@@ -25,15 +25,19 @@ def to_discord_message_payload(payload: dict) -> dict:
     """
     content_text = (payload.get("content") or "")[:500]
     conversation_id = payload.get("conversation_id", "")
-    thread_id = payload.get("thread_id") or ""
+    # 정합 버그 fix(story ebd5cf18 크럭스 부수 발견, PO 승인): 예전엔 payload["thread_id"]를
+    # "message_id"로 오라벨했다 — 루트 메시지는 thread_id가 항상 None(자기 자신이 스레드
+    # 시작점)이라 정작 회신-대상 식별이 가장 필요한 순간(새 task 도착)에 표시가 사라졌다.
+    # 이 메시지 자신의 id(payload["message_id"])를 보여줘야 수신자가 그걸로 스레드 답신 가능.
+    message_id = payload.get("message_id") or ""
 
     discord_content = "📩 **새 메시지**"
     if content_text:
         discord_content += f"\n{content_text}"
     if conversation_id:
         discord_content += f"\n\nconversation_id: {conversation_id}"
-    if thread_id:
-        discord_content += f"\nmessage_id: {thread_id}"
+    if message_id:
+        discord_content += f"\nmessage_id: {message_id}"
 
     result: dict = {"content": discord_content}
     app_url = os.environ.get("NEXT_PUBLIC_APP_URL", "")

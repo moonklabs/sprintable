@@ -32,10 +32,19 @@ def test_tool_group_strips_prefix_no_sprint_false_match():
 def test_destructive_detection():
     assert is_destructive("sprintable_delete_story")
     assert is_destructive("sprintable_give_reward")
-    assert is_destructive("sprintable_lock_files")
     assert is_destructive("sprintable_close_sprint")
     assert not is_destructive("sprintable_add_story")
     assert not is_destructive("sprintable_list_stories")
+
+
+def test_lock_unlock_reclassified_non_destructive():
+    """S17: lock_files/unlock_files 는 file_locks.py 확인 결과 org/project-scoped advisory 조율
+    도구(데이터 삭제/변경 아님) — is_destructive/admin 그룹 오분류를 근본수정. 진짜 파괴 작업
+    (delete/give_reward/close_sprint)은 회귀 없이 여전히 destructive."""
+    assert not is_destructive("sprintable_lock_files")
+    assert not is_destructive("sprintable_unlock_files")
+    assert tool_group("sprintable_lock_files") == "core"
+    assert tool_group("sprintable_unlock_files") == "core"
 
 
 # ── is_tool_allowed: legacy / 명시 그룹 / destructive / always ─────────────────
@@ -66,9 +75,30 @@ def test_destructive_requires_explicit_grant():
     assert is_tool_allowed("sprintable_delete_story", ["stories", "admin"])
 
 
+def test_real_destructive_tools_still_blocked_without_admin_grant_after_s17():
+    """S17 회귀 확인: lock/unlock 재분류가 진짜 파괴 도구(delete/give_reward/close_sprint) 게이팅을
+    깨지 않는지 — 도메인 그룹만 있고 admin/destructive 미부여 시 여전히 차단되어야 한다."""
+    scope = ["stories", "tasks", "sprints", "chat", "docs", "rewards"]
+    assert not is_tool_allowed("sprintable_delete_story", scope)
+    assert not is_tool_allowed("sprintable_give_reward", scope)
+    assert not is_tool_allowed("sprintable_close_sprint", scope)
+    assert not is_tool_allowed("sprintable_delete_sprint", scope)
+
+
 def test_always_allowed_tools():
     assert is_tool_allowed("sprintable_ping", ["stories"])  # 핵심 도구는 그룹 무관 허용
     assert is_tool_allowed("ping", [])
+
+
+def test_lock_unlock_allowed_regardless_of_domain_scope():
+    """S17 AC: 파일을 다루는 모든 working role 이 자신의 default_tool_groups(도메인 그룹)와 무관하게
+    lock/unlock 을 호출할 수 있어야 한다(core/always-allow) — narrow-scope 키(예: data-analyst 류,
+    stories/tasks 없이 chat/docs/analytics 만 보유)로도 확인."""
+    narrow_scope = ["chat", "docs", "analytics", "hypotheses"]  # stories/tasks 없음(예: data-analyst)
+    assert is_tool_allowed("sprintable_lock_files", narrow_scope)
+    assert is_tool_allowed("sprintable_unlock_files", narrow_scope)
+    assert is_tool_allowed("sprintable_lock_files", [])
+    assert is_tool_allowed("sprintable_unlock_files", None)
 
 
 def test_resolve_policy():

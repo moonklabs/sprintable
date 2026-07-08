@@ -25,10 +25,15 @@ def test_discord_payload_uses_conversation_id():
 
 
 def test_discord_payload_uses_message_id():
-    """_to_discord_payload에서 message_id 필드명 사용 (reply_id 아님)."""
+    """_to_discord_payload에서 message_id 필드명 사용 (reply_id 아님).
+
+    버그 fix(story ebd5cf18 크럭스 부수 발견, PO 승인 2026-07-08): 원래 이 라인이 자기 자신의
+    payload["thread_id"]를 "message_id"로 잘못 라벨링했다 — 루트 메시지는 thread_id가 항상
+    None이라 새 task 도착 시점에 정작 필요한 회신-대상 정보가 사라졌다. payload["message_id"]
+    (메시지 자신의 id)를 읽어야 한다."""
     from app.services.conversation_webhook import _to_discord_payload
     source = inspect.getsource(_to_discord_payload)
-    assert "message_id: {thread_id}" in source
+    assert "message_id: {message_id}" in source
     assert "reply_id:" not in source
 
 
@@ -51,7 +56,7 @@ def test_to_discord_payload_content_fields():
     payload = {
         "content": "안녕하세요",
         "conversation_id": "conv-abc-123",
-        "thread_id": "msg-xyz-456",
+        "message_id": "msg-xyz-456",
     }
     result = _to_discord_payload(payload)
     content = result["content"]

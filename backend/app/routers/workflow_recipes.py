@@ -101,14 +101,48 @@ _BUILTIN_RECIPES: list[dict[str, Any]] = [
 _BUILTIN_BY_ID = {r["id"]: r for r in _BUILTIN_RECIPES}
 
 
-def _generate_guide(recipe: dict[str, Any]) -> str:
-    """AC3: steps를 자연어 마크다운으로 변환."""
+_GUIDE_TEXT: dict[str, dict[str, Any]] = {
+    "ko": {
+        "steps_heading": "## 워크플로우 단계",
+        "step_prefix": "{i}단계",
+        "role_label": "담당 역할",
+        "action_label": "기대 행동",
+        "usage_heading": "## 사용 지침",
+        "usage_bullets": [
+            "각 단계를 순서대로 진행하세요.",
+            "이전 단계 완료 후 다음 단계 담당자에게 메모로 인계하세요.",
+            "단계별 AC를 충족해야 다음 단계로 넘어갈 수 있습니다.",
+        ],
+    },
+    "en": {
+        "steps_heading": "## Workflow Steps",
+        "step_prefix": "Step {i}",
+        "role_label": "Responsible role",
+        "action_label": "Expected action",
+        "usage_heading": "## How to Use",
+        "usage_bullets": [
+            "Work through each step in order.",
+            "After finishing a step, hand off to the next step's owner via a memo.",
+            "Move to the next step only once that step's AC is satisfied.",
+        ],
+    },
+}
+
+
+def _generate_guide(recipe: dict[str, Any], locale: str = "ko") -> str:
+    """AC3: steps를 자연어 마크다운으로 변환.
+
+    E-I18N Phase A 후속(story 11f1087c, 까심 QA MUST-FIX) — 고정 구조 문자열([C]/[D]/[E]와
+    동형)만 locale 분기했다. `recipe['name']`/`description`/`step['label']`/`step['action']`은
+    DB/코드-상수 DATA라 이 스코프 밖(workflow_recipes 자체 i18n = 별도 트랙, 후속).
+    """
+    text = _GUIDE_TEXT[locale]
     lines = [
         f"# {recipe['name']}",
         "",
         recipe["description"],
         "",
-        "## 워크플로우 단계",
+        text["steps_heading"],
         "",
     ]
     for i, step in enumerate(recipe.get("steps", []), 1):
@@ -116,18 +150,13 @@ def _generate_guide(recipe: dict[str, Any]) -> str:
         label = step.get("label", "")
         action = step.get("action", "")
         lines += [
-            f"### {i}단계: {label}",
-            f"- **담당 역할**: {role}",
-            f"- **기대 행동**: {action}",
+            f"### {text['step_prefix'].format(i=i)}: {label}",
+            f"- **{text['role_label']}**: {role}",
+            f"- **{text['action_label']}**: {action}",
             "",
         ]
-    lines += [
-        "## 사용 지침",
-        "",
-        "- 각 단계를 순서대로 진행하세요.",
-        "- 이전 단계 완료 후 다음 단계 담당자에게 메모로 인계하세요.",
-        "- 단계별 AC를 충족해야 다음 단계로 넘어갈 수 있습니다.",
-    ]
+    lines += [text["usage_heading"], ""]
+    lines += [f"- {bullet}" for bullet in text["usage_bullets"]]
     return "\n".join(lines)
 
 

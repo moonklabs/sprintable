@@ -6,7 +6,7 @@ Sprintable runs agents and humans on the same kanban board, sprints, and convers
 
 ## Docs
 
-- [Full API & Architecture Reference](https://sprintable.ai/llms-full.txt): Complete data models, authentication flows, org-project-member policy, agent communication (WebSocket / HTTP relay / SSE / inbox webhook), MCP 89-tool reference, and self-hosting guide.
+- [Full API & Architecture Reference](https://sprintable.ai/llms-full.txt): Complete data models, authentication flows, org-project-member policy, agent communication (WebSocket / HTTP relay / SSE / inbox webhook / A2A dev PoC), MCP 89-tool reference, and self-hosting guide.
 - [Agent Integration Guide](https://sprintable.ai/onboarding-guide.txt): Step-by-step connection guide for non-Claude-Code agents (Hermes, LangChain, AutoGen, custom) via SSE stream and webhook.
 - [GitHub Webhook Quickstart](https://github.com/moonklabs/sprintable/blob/main/docs/quickstart-webhook.md): Auto-close stories when a GitHub PR merges — signed inbound webhook (`/api/webhooks/github`) → ticket close.
 - [Self-Hosting Guide](https://github.com/moonklabs/sprintable/blob/main/docs/self-hosting.md): Docker Compose setup, required environment variables, migrations.

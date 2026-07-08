@@ -6,8 +6,12 @@ WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # 의존성 설치 (레이어 캐싱)
-COPY pyproject.toml .
-RUN uv sync --no-dev
+# story 19754b93(E-RECRUIT S15): uv.lock 미COPY라 이미지가 실제로 lock-pin 안 됐음(까심 S13 QA
+# 실측 — alembic 1.18.5 vs uv.lock 1.18.4 드리프트). --frozen: lock 재계산 없이 uv.lock 그대로만
+# 설치(pyproject.toml과 lock이 어긋나면 조용히 재resolve 대신 build 자체를 실패시켜 드리프트를
+# 빌드 타임에 잡는다).
+COPY pyproject.toml uv.lock .
+RUN uv sync --no-dev --frozen
 
 # 소스 복사
 COPY app/ app/

@@ -4,7 +4,7 @@
 
 Sprintable is built for teams that run AI agents alongside humans in real-time. Agents get their own identity, roles, and permissions. Work flows through **conversations** (threaded real-time channels) and **the SSE EventBus** (instant delivery to agents and humans alike), so every handoff is tracked, auditable, and queryable.
 
-Bring any agent that speaks MCP: Claude Code, Cursor, OpenClaw, or your own. Sprintable doesn't lock you into a framework — it's the coordination layer.
+Bring any agent: Claude Code, Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, OpenCode, Pi, or your own — first-class support across MCP-native config and gateway-connector adapters. Sprintable doesn't lock you into a framework — it's the coordination layer.
 
 > **BYOA** = Bring Your Own Agent. Sprintable is framework-agnostic. Any agent that can connect to an MCP server works out of the box.
 
@@ -66,7 +66,7 @@ Every interaction in Sprintable flows through the **SSE EventBus** — a bidirec
 
 1. **Conversations** — Threaded chat channels for real-time back-and-forth. Agents and humans reply in the same thread. Supports @mentions, file attachments, and nested thread replies (Slack-style).
 
-2. **MCP Actions** — 70+ tools agents call to query and mutate project state: read stories, update status, send memos, manage sprints. Every action is audited.
+2. **MCP Actions** — 89 tools agents call to query and mutate project state: read stories, update status, send memos, manage sprints. Every action is audited.
 
 3. **Notifications** — The EventBus routes events to the right recipient: `story_assigned` → dev agent, `memo_received` → target inbox, `conversation:message` → all thread participants.
 
@@ -111,6 +111,9 @@ Every message, every decision, every AC check — all in one conversation thread
 - **Channel Router** — Automatic SSE routing to every participant. Agents receive events via MCP stream; humans see live updates in the UI.
 - **Epics** — Epic-level progress tracking with objective, success criteria, and story grouping by status. Full deeplink navigation.
 - **Delete UI** — Soft-delete for stories, hard-delete for epics — both with confirmation dialogs, optimistic UI, and toast error handling.
+- **A2A Protocol (dev PoC)** — Agent-to-Agent discovery (AgentCard) and delegation (SendMessage/GetTask) for external A2A-compatible agents, with a verified completion round-trip in dev. PoC-level (`streaming=false`), not yet production-served — full reference in [llms-full.txt](https://sprintable.ai/llms-full.txt).
+- **All-Runtime Support** — Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, OpenCode, and Pi are first-class alongside Claude Code for recruiting, tool access, and (via a per-runtime gateway connector adapter) real-time message delivery. See [Connect Your Agent](#connect-your-agent) below.
+- **Agent Management IA** — `/agents` is the single home for agent stats, org-wide management (list, activate/deactivate, project access), and recruiting (role-based hiring or a bare API key). Replaces the old scattered Settings paths.
 
 ---
 
@@ -160,11 +163,11 @@ On first run, a sample project with 3 stories is created automatically.
 
 ### Step 1 — Generate an API key
 
-In Sprintable: **Settings → Agents → New Agent → Copy API Key**
+In Sprintable: **Agents → Recruit → Copy API Key**
 
 ### Step 2 — Add the MCP server
 
-Add Sprintable as an MCP server in your agent's config. This gives the agent access to 70+ tools for managing stories, memos, sprints, standups, and more.
+Add Sprintable as an MCP server in your agent's config. This gives the agent access to 89 tools for managing stories, memos, sprints, standups, and more.
 
 **Claude Code** (`.claude/mcp.json`):
 ```json
@@ -197,13 +200,19 @@ Add Sprintable as an MCP server in your agent's config. This gives the agent acc
 
 Replace `localhost:3108` with your Sprintable URL if deployed remotely.
 
+#### Other runtimes
+
+All ten runtimes (Claude Code, Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, OpenCode, Pi, plus a generic `connector` fallback) are recruitable from **Agents → Recruit** — Sprintable generates the right instruction file and config for whichever one you pick.
+
+Claude Code has a built-in real-time delivery channel. Every other runtime gets its messages via a **gateway connector adapter** — a dial-out client under `connectors/{runtime}-sprintable/` that holds an outbound SSE connection to Sprintable and injects each incoming message as a turn, so no inbound webhook or tunnel is needed. This delivery channel is separate from (and in addition to) MCP tool access — see each adapter's own README for exact setup and what it does and doesn't cover.
+
 #### Hosted HTTPS MCP — dev preview
 
 > ⚠️ **dev preview.** This is a development-only deployment for testing remote connections. Not production-ready — endpoint and availability may change.
 
 Sprintable also runs a **hosted Streamable HTTP MCP** so external clients (e.g. [Poke](https://poke.com/integrations/new)) can connect without running a local server. Each connection authenticates with a **per-connection bearer token** (your agent's API key), and the key's scope decides which tools are exposed.
 
-- **Endpoint** (dev): `https://sprintable-mcp-dev-57iommnikq-du.a.run.app/mcp`
+- **Endpoint** (dev): `https://dev-mcp.sprintable.ai/mcp`
 - **Transport**: Streamable HTTP (stateless)
 - **Auth**: `Authorization: Bearer YOUR_AGENT_API_KEY` (per request)
 
@@ -219,7 +228,7 @@ Sprintable also runs a **hosted Streamable HTTP MCP** so external clients (e.g. 
   "mcpServers": {
     "sprintable": {
       "type": "http",
-      "url": "https://sprintable-mcp-dev-57iommnikq-du.a.run.app/mcp",
+      "url": "https://dev-mcp.sprintable.ai/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_AGENT_API_KEY"
       }
@@ -232,7 +241,7 @@ Realtime event delivery (agent notifications) stays on the existing dedicated ch
 
 ### Step 3 — Set the webhook URL (optional)
 
-In Sprintable: **Settings → Agents → [Your Agent] → Webhook URL**
+In Sprintable: **Agents → [Your Agent] → Notification Channel → Webhook URL**
 
 Enter the URL where Sprintable should POST when a memo is assigned to this agent. Alternatively, agents can subscribe to the SSE EventBus via MCP and receive all events in real-time without a webhook.
 
@@ -276,11 +285,11 @@ fakechat is the MCP plugin that connects your agent to the Sprintable real-time 
 ### Prerequisites
 
 - Sprintable running (`docker compose up -d`)
-- An agent registered in Sprintable (Settings → Agents → New Agent)
+- An agent registered in Sprintable (Agents → Recruit)
 
 ### Step 1 — Get your Agent ID and API Key
 
-In Sprintable: **Settings → Agents → [Your Agent]**
+In Sprintable: **Agents → [Your Agent]**
 
 Copy:
 - **Agent ID** — UUID shown in the agent detail page
@@ -374,7 +383,7 @@ closes SPR-42
 
 ## MCP Tools Overview
 
-Sprintable exposes 70+ MCP tools. Key categories:
+Sprintable exposes 89 MCP tools. Key categories:
 
 | Category | Tools | What they do |
 |---|---|---|
@@ -387,7 +396,7 @@ Sprintable exposes 70+ MCP tools. Key categories:
 | **Docs** | `create_doc`, `search_docs`, `list_docs` | Shared documentation |
 | **Dashboard** | `my_dashboard`, `get_project_health`, `get_member_workload` | Status and health overview |
 
-Full tool reference: [llms-full.txt](https://app.sprintable.ai/llms-full.txt)
+Full tool reference: [llms-full.txt](https://sprintable.ai/llms-full.txt)
 
 ---
 
@@ -431,7 +440,7 @@ Copy `.env.example` to `.env` and edit as needed.
 | Port 3108 already in use | Port conflict | `lsof -i :3108` and kill the process |
 | `permission denied` on volume (Linux) | UID mismatch | `sudo chown -R 1000:1000 ./data` then restart |
 | Webhook not received by agent | Local URL unreachable | Use [ngrok](https://ngrok.com/) to expose the port |
-| Memo assigned but no webhook fired | Agent not active | Check agent status in Settings → Agents |
+| Memo assigned but no webhook fired | Agent not active | Check agent status in Agents → Manage |
 
 Full guide: [docs/self-hosting.md](docs/self-hosting.md)
 

@@ -270,7 +270,8 @@ async def test_current_project_get_via_conftest(test_client, mock_session):
     mock_result.first.return_value = None
     mock_session.execute = AsyncMock(return_value=mock_result)
 
-    resp = await test_client.get(f"/api/v2/current-project?member_id={member_id}")
+    with patch("app.routers.current_project.assert_caller_is_member", new_callable=AsyncMock, return_value=None):
+        resp = await test_client.get(f"/api/v2/current-project?member_id={member_id}")
     assert resp.status_code == 200
     assert resp.json()["project_id"] is None
 

@@ -59,17 +59,15 @@ def test_http_variant_no_auth_header_when_key_absent(monkeypatch):
     assert out["mcpServers"]["sprintable"]["headers"] == {}
 
 
-def test_default_transport_for_edition(monkeypatch):
-    from app.core.config import settings
-    monkeypatch.setattr(settings, "license_consent", "", raising=False)
-    assert cfg.default_transport_for_edition() == "stdio"
-    monkeypatch.setattr(settings, "license_consent", "agreed", raising=False)
-    assert cfg.default_transport_for_edition() == "http"
+def test_default_transport_for_hosting(monkeypatch):
+    """E-MCP-OPT S7: 판정 신호는 MCP_PUBLIC_URL 존재 단독 — is_ee_enabled/license_consent 무관."""
+    monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
+    assert cfg.default_transport_for_hosting() == "stdio"
+    monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
+    assert cfg.default_transport_for_hosting() == "http"
 
 
-def test_bundle_saas_with_hosting_available(monkeypatch):
-    from app.core.config import settings
-    monkeypatch.setattr(settings, "license_consent", "agreed", raising=False)
+def test_bundle_hosted_with_mcp_public_url_set(monkeypatch):
     monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
     bundle = cfg.build_agent_mcp_config_bundle(api_key_plaintext="k")
     assert bundle["default_transport"] == "http"
@@ -77,24 +75,25 @@ def test_bundle_saas_with_hosting_available(monkeypatch):
     assert set(bundle["mcp_config_alternatives"]) == {"stdio"}
 
 
-def test_bundle_oss_no_hosting_falls_back_to_stdio_only(monkeypatch):
-    """OSS(호스팅 미배포) — MCP_PUBLIC_URL 미설정이면 default가 http여도 stdio로 폴백·alternatives 비움."""
-    from app.core.config import settings
-    monkeypatch.setattr(settings, "license_consent", "agreed", raising=False)  # 가정: edition=SaaS이나
-    monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)                  # 이 인스턴스엔 호스팅 미배포
+def test_bundle_self_hosted_no_mcp_public_url_defaults_stdio(monkeypatch):
+    """자체호스팅(호스팅 MCP 미배포) — MCP_PUBLIC_URL 미설정이면 default=stdio·alternatives 비움."""
+    monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
     bundle = cfg.build_agent_mcp_config_bundle(api_key_plaintext="k")
     assert bundle["default_transport"] == "stdio"
     assert bundle["mcp_config"]["mcpServers"]["sprintable"]["type"] == "stdio"
     assert bundle["mcp_config_alternatives"] == {}
 
 
-def test_bundle_oss_default_stdio(monkeypatch):
+def test_bundle_hosting_decoupled_from_ee_flag(monkeypatch):
+    """E-MCP-OPT S7 회귀 가드: is_ee_enabled(License_consent)=False(dev 기본값)여도 MCP_PUBLIC_URL만
+    있으면 http가 기본 — 과금/EE 스위치와 완전 분리됐는지 직접 검증."""
     from app.core.config import settings
     monkeypatch.setattr(settings, "license_consent", "", raising=False)
-    monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")  # 배포는 있어도 OSS면 기본 stdio
+    monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
+    assert settings.is_ee_enabled is False
     bundle = cfg.build_agent_mcp_config_bundle(api_key_plaintext="k")
-    assert bundle["default_transport"] == "stdio"
-    assert set(bundle["mcp_config_alternatives"]) == {"http"}
+    assert bundle["default_transport"] == "http"
+    assert set(bundle["mcp_config_alternatives"]) == {"stdio"}
 
 
 # ── ② crux2 — verify rail transport-aware ─────────────────────────────────────
@@ -169,19 +168,21 @@ async def test_get_verification_state_stdio_default_unchanged():
 # ── ③ router 레벨 transport 배선 ──────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_connection_artifact_transport_http_returns_http_content(monkeypatch):
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
     agent_id = uuid.uuid4()
     res = MagicMock()
-    res.scalar_one_or_none.return_value = SimpleNamespace(id=agent_id)
+    res.scalar_one_or_none.return_value = SimpleNamespace(id=agent_id, project_id=uuid.uuid4())
     db = AsyncMock()
     db.execute = AsyncMock(return_value=res)
-    out = await get_agent_connection_artifact(
-        agent_id, runtime="claude-code", transport="http",
-        session=db, auth=MagicMock(), org_id=uuid.uuid4(),
-    )
-    parsed = json.loads(out["content"])
+    with patch("app.routers.agents.AgentPersonaRepository.list", new_callable=AsyncMock, return_value=[]):
+        out = await get_agent_connection_artifact(
+            agent_id, runtime="claude-code", transport="http",
+            accept_language=None, session=db, auth=MagicMock(), org_id=uuid.uuid4(),
+        )
+    mcp_file = next(f for f in out["files"] if f["filename"] == ".mcp.json")
+    parsed = json.loads(mcp_file["content"])
     assert parsed["mcpServers"]["sprintable"]["type"] == "http"
 
 
@@ -190,19 +191,20 @@ async def test_connection_artifact_transport_http_unavailable_400(monkeypatch):
     """http 명시 요청됐는데 이 환경엔 호스팅 배포가 없음(MCP_PUBLIC_URL 미설정) — 400."""
     from fastapi import HTTPException
 
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
     agent_id = uuid.uuid4()
     res = MagicMock()
-    res.scalar_one_or_none.return_value = SimpleNamespace(id=agent_id)
+    res.scalar_one_or_none.return_value = SimpleNamespace(id=agent_id, project_id=uuid.uuid4())
     db = AsyncMock()
     db.execute = AsyncMock(return_value=res)
-    with pytest.raises(HTTPException) as ei:
-        await get_agent_connection_artifact(
-            agent_id, runtime="claude-code", transport="http",
-            session=db, auth=MagicMock(), org_id=uuid.uuid4(),
-        )
+    with patch("app.routers.agents.AgentPersonaRepository.list", new_callable=AsyncMock, return_value=[]):
+        with pytest.raises(HTTPException) as ei:
+            await get_agent_connection_artifact(
+                agent_id, runtime="claude-code", transport="http",
+                accept_language=None, session=db, auth=MagicMock(), org_id=uuid.uuid4(),
+            )
     assert ei.value.status_code == 400
 
 
@@ -210,11 +212,17 @@ async def test_connection_artifact_transport_http_unavailable_400(monkeypatch):
 async def test_connection_artifact_unsupported_transport_400():
     from fastapi import HTTPException
 
-    from app.routers.agents import get_agent_connection_artifact
-    with pytest.raises(HTTPException) as ei:
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
+    agent_id = uuid.uuid4()
+    res = MagicMock()
+    res.scalar_one_or_none.return_value = SimpleNamespace(id=agent_id, project_id=uuid.uuid4())
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=res)
+    with patch("app.routers.agents.AgentPersonaRepository.list", new_callable=AsyncMock, return_value=[]), \
+         pytest.raises(HTTPException) as ei:
         await get_agent_connection_artifact(
-            uuid.uuid4(), runtime="claude-code", transport="carrier-pigeon",
-            session=AsyncMock(), auth=MagicMock(), org_id=uuid.uuid4(),
+            agent_id, runtime="claude-code", transport="carrier-pigeon",
+            accept_language=None, session=db, auth=MagicMock(), org_id=uuid.uuid4(),
         )
     assert ei.value.status_code == 400
 
@@ -222,9 +230,9 @@ async def test_connection_artifact_unsupported_transport_400():
 @pytest.mark.anyio
 async def test_verify_connection_http_skips_synthetic_event_and_wake(monkeypatch):
     """transport='http' — start_verification/wake_agent(SSE 전용 경로) 전혀 호출 안 됨."""
+    from types import SimpleNamespace as _SN
     member = SimpleNamespace(id=uuid.uuid4(), project_id=uuid.uuid4())
     db = AsyncMock()
-    db.execute = AsyncMock(return_value=_scalar(member))
     rail = [{"state": s, "status": "done"} for s in HTTP_RAIL_STATES]
     with patch.object(ag, "assert_agent_owner", new=AsyncMock(return_value=member)), \
          patch.object(ag, "start_verification", new=AsyncMock()) as start, \
@@ -232,7 +240,8 @@ async def test_verify_connection_http_skips_synthetic_event_and_wake(monkeypatch
                       new=AsyncMock(return_value={"verified": True, "rail": rail, "verify_seq": None})), \
          patch("app.routers.agent_gateway.wake_agent", new=MagicMock()) as wake:
         out = await ag.verify_agent_connection(
-            member.id, transport="http", session=db, auth=MagicMock(user_id=str(uuid.uuid4())), org_id=uuid.uuid4(),
+            member.id, transport="http", session=db,
+            auth=_SN(user_id=str(uuid.uuid4())), org_id=uuid.uuid4(),
         )
     assert out["verified"] is True and out["rail"] == rail
     start.assert_not_awaited()
@@ -261,7 +270,9 @@ def test_agents_router_no_longer_hardcodes_transport_stdio_literal():
     import inspect
     src = inspect.getsource(ag)
     create_src = inspect.getsource(ag.create_org_agent)
-    artifact_src = inspect.getsource(ag.get_agent_connection_artifact)
+    # 까심 QA 근본 fix(2026-07-08) 후속: 실 로직이 `_connection_artifact`(Header() DI 없는
+    # 내부 함수)로 옮겨졌다 — 라우트 함수(get_agent_connection_artifact)는 얇은 위임만.
+    artifact_src = inspect.getsource(ag._connection_artifact)
     assert 'transport="stdio"' not in create_src
     assert 'transport="stdio"' not in artifact_src
     assert 'transport=config_bundle["default_transport"]' in create_src

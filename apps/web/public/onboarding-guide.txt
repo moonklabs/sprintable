@@ -155,7 +155,17 @@ and backoff are handled by the shared SDK; you only supply the runtime's injecti
 | **Hermes Agent** | A (platform plugin) | `connectors/hermes-sprintable/` | `handle_message()` |
 | **OpenClaw** | A (ChannelPlugin) | `connectors/openclaw-sprintable/` | `runtime.channel.inbound` |
 | **OpenCode** | A (plugin SDK) | `connectors/opencode-sprintable/` | `client.session.prompt()` |
+| **Codex** | B (stdio JSON-RPC host) | `connectors/codex-sprintable/` | spawns & owns `codex app-server`, injects via stdio JSON-RPC |
+| **Gemini** | B (ACP stdio JSON-RPC host) | `connectors/gemini-sprintable/` | spawns `gemini --acp` (Agent Client Protocol) |
+| **Grok** (xAI Grok Build) | B (Zed ACP stdio host) | `connectors/grok-sprintable/` | spawns `grok agent stdio` (same ACP as Gemini) |
+| **Pi** | B (JSONL/stdio host) | `connectors/pi-sprintable/` | spawns `pi --mode rpc` (line-delimited JSON, supports mid-stream `steer`) |
+| **Cursor** (Cloud Agents only) | C (HTTP sidecar) | `connectors/cursor-sprintable/` | Cursor Cloud Agents API — no child process, run-state managed over HTTP |
 | Custom (LangChain, etc.) | — | `connectors/sdk/` | shared SDK — inject in `onMessage` |
+
+> Category B/C adapters are for **background/headless** runs (a spawned CLI or cloud
+> run), not a local interactive editor session — e.g. the Cursor adapter only reaches
+> Cursor's Cloud (Background) Agents API, not a local Cursor editor. Each adapter's own
+> README states exactly what it does and doesn't reach.
 
 ### Example: Hermes
 
@@ -266,6 +276,28 @@ echo "$OUT" | grep -q "connected\|event:" && echo "  SSE: OK" || echo "  WARNING
 
 Send a message into a conversation the agent belongs to; it arrives over SSE, and Step 3 (ack)
 + Step 4 (reply) complete the round trip.
+
+---
+
+## Alternative: A2A protocol (dev PoC)
+
+If your agent/system already speaks [A2A](https://a2a-protocol.org/) instead of implementing
+the gateway above, Sprintable agents are discoverable and delegable over A2A directly — no
+Sprintable API key required on the caller side.
+
+```
+GET  /api/v2/a2a/members/{member_id}/agent-card.json   — unauth AgentCard discovery
+POST /api/v2/a2a/members/{member_id}/rpc                — SendMessage / GetTask / ListTasks
+```
+
+`SendMessage` creates a Task (`state=WORKING`); the delegate agent replies in the originating
+message thread, and a subsequent `GetTask` resolves to `COMPLETED` with an artifact. This full
+round-trip (discovery → delegate → reply → completed) is verified in dev with the real
+`a2a-sdk`, fully automated — but completion is **model-mediated** (the delegate model reads an
+embedded reply-thread hint and acts on it; there's no deterministic completion hook).
+
+**Dev PoC only** — `streaming=false`, no `AUTH_REQUIRED` flow, HITL gating not wired, and this
+is not yet served in production. Don't rely on it as a stable integration surface yet.
 
 ---
 

@@ -21,10 +21,11 @@
 #   GCP_PROJECT       (기본: sprintable-494803)
 #   GCP_REGION        (기본: asia-northeast3)
 #   AR_REPO           (기본: sprintable)
-#   COMMIT_SHA        이미지 태그 (기본: latest-<env>)
+#   COMMIT_SHA        이미지 태그 — **필수**(story 19754b93: `latest-<env>` floating 폴백 제거·
+#                     미지정 시 fail-fast, DRY_RUN=1 검증 시엔 예외)
 #   DEV_SQL_INSTANCE  (기본: sprintable-dev)
 #   PROD_SQL_INSTANCE (기본: sprintable-prod)
-#   DRY_RUN           1이면 gcloud 호출 없이 resolved config만 stdout 출력 (검증용)
+#   DRY_RUN           1이면 gcloud 호출 없이 resolved config만 stdout 출력 (검증용·COMMIT_SHA 불필요)
 
 set -euo pipefail
 
@@ -44,7 +45,18 @@ case "${ENV}" in
 esac
 
 JOB_NAME="sprintable-migrate-${ENV}"
-# dev 잡과 동일하게 env별 floating 태그를 기본 사용 (특정 SHA 고정 시 COMMIT_SHA 전달).
+# story 19754b93(E-RECRUIT S15): `${COMMIT_SHA:-latest-${ENV}}` floating-tag 폴백이 out-of-band
+# 수동 실행 시 stale 이미지에 도달할 수 있었다(#1886/S13 사고의 근본원인과 동형 — 잡이 코드와
+# 동기화 안 된 이미지를 물고 도는 것). cloudbuild.yaml(S13)의 자동 경로는 COMMIT_SHA를 항상
+# 명시 전달하므로 이 가드는 그 경로에 영향 없음 — 사람이 잊고 COMMIT_SHA 없이 수동 실행할 때만
+# fail-fast로 막는다(DRY_RUN=1 검증은 예외 — resolved config 확인 목적이라 SHA 없어도 됨).
+if [ -z "${COMMIT_SHA:-}" ] && [ "${DRY_RUN:-0}" != "1" ]; then
+    echo "ERROR: COMMIT_SHA is not set." >&2
+    echo "Manual provisioning requires an explicit image SHA — floating 'latest-${ENV}' tag fallback" >&2
+    echo "was removed (story 19754b93) to prevent stale-image drift on out-of-band runs." >&2
+    echo "Usage: COMMIT_SHA=<git-sha-or-image-tag> bash $0 ${ENV}" >&2
+    exit 1
+fi
 IMAGE_TAG="${COMMIT_SHA:-latest-${ENV}}"
 IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/backend:${IMAGE_TAG}"
 CLOUD_SQL_INSTANCE="${GCP_PROJECT}:${GCP_REGION}:${SQL_INSTANCE_NAME}"

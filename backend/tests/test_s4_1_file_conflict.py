@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 ORG_ID = uuid.uuid4()
 PROJECT_ID = uuid.uuid4()
@@ -136,6 +137,16 @@ def _mock_member():
     return m
 
 
+def _resolved(member_id: uuid.UUID):
+    """S17: resolve_member() 반환 mock — self-scope 검증 대상 caller 신원."""
+    from app.services.member_resolver import ResolvedMember
+
+    return ResolvedMember(
+        id=member_id, user_id=None, name="TestAgent", type="agent",
+        role="member", org_id=ORG_ID, project_id=PROJECT_ID,
+    )
+
+
 @pytest.mark.anyio
 async def test_file_lock_no_conflict_200():
     """AC1: 충돌 없을 때 200 + warning=null."""
@@ -150,7 +161,7 @@ async def test_file_lock_no_conflict_200():
             call_count += 1
             result = MagicMock()
             if call_count == 1:
-                result.scalar_one_or_none.return_value = member  # get member
+                result.scalars.return_value.first.return_value = member  # get member
             else:
                 result.scalars.return_value.all.return_value = []  # no conflicts
             return result
@@ -159,7 +170,8 @@ async def test_file_lock_no_conflict_200():
         session.flush = AsyncMock()
         session.add = MagicMock()
 
-        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock, return_value=None):
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/file-lock",
@@ -175,20 +187,17 @@ async def test_file_lock_no_conflict_200():
 
 
 @pytest.mark.anyio
-async def test_file_lock_403_when_caller_is_not_member():
-    """prod 핫픽스(까심 재QA CRITICAL): Bob이 Alice member_id로 file-lock 시도 시 403
-    (이전엔 _auth가 선언만 되고 미사용이라 caller-ownership 확인이 전혀 없었다)."""
-    from fastapi import HTTPException
-
+async def test_file_lock_403_when_caller_is_different_member():
+    """S17(산티아고 SME MUST②): self-scope — 자기 자신이 아닌 member 명의로 lock 시도 시 403."""
     client, session, app = await _client()
     try:
         member = _mock_member()
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = member
-        session.execute = AsyncMock(return_value=mock_result)
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = member
+        session.execute = AsyncMock(return_value=result)
 
         with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
-                   side_effect=HTTPException(status_code=403, detail="Cannot lock files as another member")):
+                   side_effect=HTTPException(status_code=403, detail="Cannot act as another member")):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/file-lock",
@@ -196,6 +205,26 @@ async def test_file_lock_403_when_caller_is_not_member():
                 )
 
         assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_file_lock_404_when_member_not_in_caller_org():
+    """S17(산티아고 SME MUST②): member 조회가 org_id로 스코프됨 — 타 org member_id는 404."""
+    client, session, app = await _client()
+    try:
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = None  # org 필터로 미발견
+        session.execute = AsyncMock(return_value=result)
+
+        async with client as c:
+            resp = await c.post(
+                f"/api/v2/team-members/{MEMBER_ID}/file-lock",
+                json={"file_paths": ["src/foo.py"]},
+            )
+
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 
@@ -219,7 +248,7 @@ async def test_file_lock_with_conflict_warning():
             call_count += 1
             result = MagicMock()
             if call_count == 1:
-                result.scalar_one_or_none.return_value = member
+                result.scalars.return_value.first.return_value = member
             else:
                 result.scalars.return_value.all.return_value = [conflict_lock]
             return result
@@ -230,7 +259,8 @@ async def test_file_lock_with_conflict_warning():
 
         with patch("app.routers.file_locks.publish_event"), \
              patch("app.routers.file_locks.fire_webhooks", new_callable=AsyncMock), \
-             patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock, return_value=None):
+             patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/file-lock",
@@ -249,14 +279,26 @@ async def test_file_lock_with_conflict_warning():
 
 @pytest.mark.anyio
 async def test_file_unlock_200():
-    """AC2: file-unlock → 200."""
+    """AC2: file-unlock → 200 (S17: 이제 member 존재/org+self-scope 확인 후 UPDATE)."""
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        session.execute = AsyncMock(return_value=mock_result)
+        member = _mock_member()
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalars.return_value.first.return_value = member  # get member
+            return result
+
+        session.execute = mock_execute
         session.flush = AsyncMock()
 
-        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock, return_value=None):
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/file-unlock",
@@ -270,17 +312,63 @@ async def test_file_unlock_200():
 
 
 @pytest.mark.anyio
-async def test_file_unlock_403_when_caller_is_not_member():
-    """prod 핫픽스(까심 재QA CRITICAL): lock과 동일 갭 — Bob이 Alice 명의로 unlock 시도 시 403."""
-    from fastapi import HTTPException
-
+async def test_file_unlock_update_where_scoped_to_member_project():
+    """S17 RC④(산티아고 최종 MUST): unlock UPDATE WHERE에 project_id 필터가 실제로 걸리는지 —
+    누락 시 같은 member가 org 내 여러 project에 같은 file_path 락을 갖고 있으면 한 project
+    컨텍스트의 unlock이 다른 project의 lock까지 release해 advisory-lock의 project 경계가 깨진다.
+    (프로젝트 격리의 실제 왕복 검증은 real-Postgres 스크립트로 별도 수행 — 여기선 컴파일된 WHERE에
+    project_id 조건이 존재하는지만 확인.)
+    """
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        session.execute = AsyncMock(return_value=mock_result)
+        member = _mock_member()
+        captured_stmts = []
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            captured_stmts.append(stmt)
+            result = MagicMock()
+            if call_count == 1:
+                result.scalars.return_value.first.return_value = member
+            return result
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
 
         with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
-                   side_effect=HTTPException(status_code=403, detail="Cannot unlock files as another member")):
+                   return_value=None):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-unlock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
+
+        assert resp.status_code == 200
+        update_stmt = captured_stmts[1]  # 2nd captured call = the UPDATE
+        assert "project_id" in str(update_stmt)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_file_unlock_403_when_caller_is_different_member():
+    """S17(산티아고 SME MUST①): self-scope — 타 member 명의 lock을 임의로 해제하지 못하게.
+
+    이전엔 이 엔드포인트가 member 조회/소유 확인 전혀 없이 path member_id 만 믿고 UPDATE했다
+    (org 필터도 없어 임의 member 락을 아무나 해제 가능한 구조 — 산티아고 SME MUST①의 핵심 갭).
+    """
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = member
+        session.execute = AsyncMock(return_value=result)
+
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   side_effect=HTTPException(status_code=403, detail="Cannot act as another member")):
             async with client as c:
                 resp = await c.post(
                     f"/api/v2/team-members/{MEMBER_ID}/file-unlock",
@@ -290,6 +378,235 @@ async def test_file_unlock_403_when_caller_is_not_member():
         assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_file_unlock_404_when_member_not_in_caller_org():
+    """S17(산티아고 SME MUST①): member 조회가 org_id로 스코프됨 — 타 org member_id는 404."""
+    client, session, app = await _client()
+    try:
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = None
+        session.execute = AsyncMock(return_value=result)
+
+        async with client as c:
+            resp = await c.post(
+                f"/api/v2/team-members/{MEMBER_ID}/file-unlock",
+                json={"file_paths": ["src/foo.py"]},
+            )
+
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ─── S17 SHOULD: file_paths 상한·path 정규화 ─────────────────────────────────
+
+def test_normalize_path_strips_dot_slash_and_dedupes_slashes():
+    from app.routers.file_locks import _normalize_path
+
+    assert _normalize_path("./src/foo.py") == "src/foo.py"
+    assert _normalize_path("src//foo.py") == "src/foo.py"
+    assert _normalize_path("././src/foo.py") == "src/foo.py"
+    assert _normalize_path("src/foo.py") == "src/foo.py"
+
+
+def test_file_lock_body_normalizes_paths_and_caps_count():
+    from app.routers.file_locks import FileLockBody, _MAX_FILE_PATHS_PER_REQUEST
+
+    body = FileLockBody(file_paths=["./src/foo.py", "src//bar.py"])
+    assert body.file_paths == ["src/foo.py", "src/bar.py"]
+
+    with pytest.raises(ValueError, match="exceeds max"):
+        FileLockBody(file_paths=["f.py"] * (_MAX_FILE_PATHS_PER_REQUEST + 1))
+
+
+@pytest.mark.anyio
+async def test_file_lock_rejects_over_max_paths_422():
+    client, session, app = await _client()
+    try:
+        from app.routers.file_locks import _MAX_FILE_PATHS_PER_REQUEST
+
+        async with client as c:
+            resp = await c.post(
+                f"/api/v2/team-members/{MEMBER_ID}/file-lock",
+                json={"file_paths": [f"f{i}.py" for i in range(_MAX_FILE_PATHS_PER_REQUEST + 1)]},
+            )
+
+        assert resp.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ─── S17 RC②(까심 델타): 빈 path 거부 + project 힌트 결정성 ────────────────────
+
+@pytest.mark.parametrize("raw", ["", ".", "./", ".//", "  ", "././"])
+def test_normalize_reduces_to_empty_is_rejected(raw):
+    from app.routers.file_locks import _validate_paths
+
+    with pytest.raises(ValueError, match="empty path"):
+        _validate_paths([raw])
+
+
+def test_file_lock_body_rejects_empty_after_normalization():
+    from app.routers.file_locks import FileLockBody
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        FileLockBody(file_paths=["./"])
+
+
+@pytest.mark.anyio
+async def test_file_lock_rejects_path_that_normalizes_to_empty_422():
+    client, session, app = await _client()
+    try:
+        async with client as c:
+            resp = await c.post(
+                f"/api/v2/team-members/{MEMBER_ID}/file-lock",
+                json={"file_paths": ["src/foo.py", "././"]},
+            )
+        assert resp.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_caller_project_hint_reads_app_metadata_project_id():
+    from app.dependencies.auth import AuthContext
+    from app.routers.file_locks import _caller_project_hint
+
+    pid = uuid.uuid4()
+    auth = AuthContext(user_id=str(uuid.uuid4()), email=None,
+                        claims={"app_metadata": {"project_id": str(pid)}})
+    assert _caller_project_hint(auth) == pid
+
+
+def test_caller_project_hint_none_when_absent_or_invalid():
+    from app.dependencies.auth import AuthContext
+    from app.routers.file_locks import _caller_project_hint
+
+    assert _caller_project_hint(
+        AuthContext(user_id=str(uuid.uuid4()), email=None, claims={"app_metadata": {}})
+    ) is None
+    assert _caller_project_hint(
+        AuthContext(user_id=str(uuid.uuid4()), email=None,
+                    claims={"app_metadata": {"project_id": "not-a-uuid"}})
+    ) is None
+
+
+@pytest.mark.anyio
+async def test_file_lock_uses_project_hint_to_scope_member_query():
+    """S17 RC②(까심 델타 MED): X-Project-Id/active project 컨텍스트가 있으면 member 조회가
+    그 project로 결정적으로 좁혀지는지 — 쿼리에 project_id 필터가 실제로 걸렸는지 stmt 검사."""
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        hint_project = member.project_id
+        captured_stmts = []
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            captured_stmts.append(stmt)
+            result = MagicMock()
+            if call_count == 1:
+                result.scalars.return_value.first.return_value = member
+            else:
+                result.scalars.return_value.all.return_value = []
+            return result
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.add = MagicMock()
+
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None), \
+             patch("app.routers.file_locks._caller_project_hint", return_value=hint_project) as hint_mock:
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-lock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
+
+        assert resp.status_code == 200
+        hint_mock.assert_called_once()
+        # member-fetch stmt (first captured) must reference project_id in its WHERE (compiled contains column name)
+        assert "project_id" in str(captured_stmts[0])
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_stale_project_hint_falls_back_instead_of_404():
+    """S17 RC③(까심+codex 델타 RC — false-404 회귀): project_hint가 stale/미스매치(0행)여도
+    hint 없는 결정적 폴백(ORDER BY project_id)으로 재조회해 정상 caller를 404시키지 않는다.
+    hint는 검증되지 않은 best-effort 최적화일 뿐 authz가 아니다(org_id+self-scope가 실제 게이트).
+    """
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        stale_hint = uuid.uuid4()  # caller가 접근 못 하는(혹은 소멸된) project
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalars.return_value.first.return_value = None  # hinted query: 0행
+            elif call_count == 2:
+                result.scalars.return_value.first.return_value = member  # fallback query: 발견
+            else:
+                result.scalars.return_value.all.return_value = []  # conflict-check
+            return result
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.add = MagicMock()
+
+        with patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None), \
+             patch("app.routers.file_locks._caller_project_hint", return_value=stale_hint):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/file-lock",
+                    json={"file_paths": ["src/foo.py"]},
+                )
+
+        assert resp.status_code == 200
+        assert call_count == 3  # hinted(miss) + fallback(hit) + conflict-check
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_fetch_scoped_member_falls_back_directly():
+    """_fetch_scoped_member 단위 검증: 힌트 쿼리 0행 → 힌트 없는 폴백 쿼리로 재시도."""
+    from app.routers.file_locks import _fetch_scoped_member
+    from app.dependencies.auth import AuthContext
+
+    member = _mock_member()
+    stale_hint = uuid.uuid4()
+    auth = AuthContext(user_id=str(MEMBER_ID), email=None,
+                        claims={"app_metadata": {"project_id": str(stale_hint)}})
+
+    session = AsyncMock()
+    call_count = 0
+
+    async def mock_execute(stmt, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        result = MagicMock()
+        result.scalars.return_value.first.return_value = None if call_count == 1 else member
+        return result
+
+    session.execute = mock_execute
+
+    out = await _fetch_scoped_member(session, MEMBER_ID, ORG_ID, auth)
+    assert out is member
+    assert call_count == 2
 
 
 @pytest.mark.anyio

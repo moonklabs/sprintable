@@ -197,8 +197,9 @@ mcpServers:
     startupTimeout: 10
 ```
 
-> `sprintable_mcp` 패키지 설치: `pip install sprintable-mcp` 또는
-> `uv add sprintable-mcp` (pypi 배포 전에는 `pip install -e ./backend`).
+> `sprintable_mcp` 패키지 설치: `pip install sprintable` 또는 `uv add sprintable`
+> (PyPI dist/콘솔 스크립트명 = `sprintable`, 모듈명은 `sprintable_mcp`). 외부 레포 없이 한 줄
+> 구동은 `uvx sprintable`.
 
 Claude Code `.mcp.json` 형식이라면:
 

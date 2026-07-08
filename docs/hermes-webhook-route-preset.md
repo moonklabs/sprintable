@@ -48,7 +48,7 @@ from fastapi import FastAPI, Request, HTTPException
 app = FastAPI()
 
 MY_AGENT_ID = "your-agent-team-member-uuid"
-WEBHOOK_SECRET = "your-webhook-secret"  # Settings → Agents → [Agent] → Webhook Secret
+WEBHOOK_SECRET = "your-webhook-secret"  # set to match your own verification secret
 
 
 def _verify_signature(raw_body: bytes, signature_header: str | None) -> bool:
