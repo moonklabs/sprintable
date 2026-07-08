@@ -33,7 +33,13 @@ class ReleaseNote(Base, TimestampMixin):
         DateTime(timezone=True), nullable=False, index=True
     )
     display_period: Mapped[str] = mapped_column(Text, nullable=False)
+    # 이 컬럼 자체가 "ko" 캐논 소스(오늘 유일한 실 콘텐츠) — title_i18n은 그 위 오버레이.
     title: Mapped[str] = mapped_column(Text, nullable=False)
+    # E-I18N Phase B(story 11f1087c, migration 0164) — locale별 번역 오버레이({"en": "...", ...}).
+    # 빈 dict가 기본(마이그 시점 백필 없음). 소비 코드는 `title_i18n.get(locale) or title` 순서로
+    # 조회해 빈 키는 자동으로 title(ko)로 폴백한다(Phase C 이후 배선 예정). summary/items i18n은
+    # 이번 스코프 밖(요청 범위 = title만 — 필요하면 후속 확장).
+    title_i18n: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     summary: Mapped[str] = mapped_column(Text, nullable=False, server_default="", default="")
     # [{text: str, href?: str}, ...]
     items: Mapped[list] = mapped_column(
