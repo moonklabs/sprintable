@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.routers.workflow_recipes import _generate_guide
+from app.services.agent_onboarding_config import MCP_NATIVE_RUNTIMES
 from app.services.mcp_toolset import ALL_GROUPS, ALL_TOOL_NAMES, _ALWAYS_ALLOWED, tool_group
 
 _AGILE_OPERATING_RULES = """## 애자일 자율 운영 룰
@@ -74,15 +75,24 @@ def _tool_cheat_sheet(tool_groups: list[str]) -> str:
 def _runtime_notes(runtime: str, runtime_overrides: dict[str, Any] | None) -> str:
     """[E] 런타임 노트 — runtime_overrides(JSONB)에 해당 runtime 항목이 있으면 이어붙인다.
 
-    E-RECRUIT S1 seed 는 runtime_overrides={} 라 오늘은 기본 문구만 나간다(메커니즘은 향후
-    런타임별 파일명/MCP 배선 노트(블루프린트 §4·S7)가 채워질 자리를 그대로 지원).
+    전 런타임 올지원(story 6f6ac081) 까심 QA 후속(2026-07-08): MCP-native 런타임만 채용 번들이
+    `.mcp.json`을 구성해 "별도 설정 불요"가 참이다. 커넥터-라우팅 런타임(MCP_NATIVE_RUNTIMES
+    밖 — connector 버킷 + 5종 커넥터 전용)은 `mcp_config=None`이라 그 문구가 거짓이었다(까심이
+    `compose_prompt(runtime="grok")`로 재현) — 실제로는 `connectors/{runtime}-sprintable/`
+    복사 + `AGENT_API_KEY` env 설정 + 어댑터 실행이 필요하다. 정직한 두 갈래로 분기.
     """
-    lines = [
-        "## 런타임 노트",
-        "",
-        f"이 프로젝트에서 당신의 실행 런타임은 `{runtime}` 입니다.",
-        "MCP 연결/스코프는 채용 시 제공된 번들이 이미 구성했습니다 — 별도 설정이 필요 없습니다.",
-    ]
+    lines = ["## 런타임 노트", "", f"이 프로젝트에서 당신의 실행 런타임은 `{runtime}` 입니다."]
+    if runtime in MCP_NATIVE_RUNTIMES:
+        lines.append(
+            "MCP 연결/스코프는 채용 시 제공된 번들이 이미 구성했습니다 — 별도 설정이 필요 없습니다."
+        )
+    else:
+        lines.append(
+            "이 런타임은 MCP가 아니라 SSE 커넥터 방식으로 연결합니다 — 채용 시 제공된 번들만으론 "
+            "연결이 자동 구성되지 않습니다. `connectors/{}-sprintable/` 폴더를 복사해 README "
+            "안내대로 `AGENT_API_KEY` 등 환경변수를 설정하고 어댑터를 직접 실행하세요."
+            .format(runtime if runtime != "connector" else "<선택한 런타임>")
+        )
     override = (runtime_overrides or {}).get(runtime)
     if override:
         lines += ["", f"**{runtime} 전용 노트**:", str(override)]

@@ -98,6 +98,33 @@ def test_compose_prompt_includes_runtime_override_when_present():
     assert "CLAUDE.md 에 이 지침을 저장하세요." in out
 
 
+# ── 까심 QA 후속(story 6f6ac081, 2026-07-08): 런타임 노트가 커넥터-라우팅 런타임에도 정직해야 함 ──
+def test_compose_prompt_mcp_native_runtime_says_no_setup_needed():
+    role = _role()
+    out = compose_prompt(role, _RECIPE, "claude-code")
+    assert "별도 설정이 필요 없습니다" in out
+    assert "SSE 커넥터" not in out
+
+
+def test_compose_prompt_connector_only_runtime_gives_honest_setup_instructions():
+    """전에는 grok/pi/hermes/openclaw/opencode 도 "별도 설정 불요"라는 거짓 안내를 받았다(까심
+    `compose_prompt(runtime="grok")` 재현) — mcp_config=None인 커넥터-라우팅 런타임은 실제로
+    connectors/{runtime}-sprintable/ 복사 + AGENT_API_KEY 설정 + 어댑터 실행이 필요하다."""
+    role = _role()
+    out = compose_prompt(role, _RECIPE, "grok")
+    assert "별도 설정이 필요 없습니다" not in out
+    assert "SSE 커넥터" in out
+    assert "connectors/grok-sprintable/" in out
+    assert "AGENT_API_KEY" in out
+
+
+def test_compose_prompt_generic_connector_bucket_also_honest():
+    role = _role()
+    out = compose_prompt(role, _RECIPE, "connector")
+    assert "별도 설정이 필요 없습니다" not in out
+    assert "SSE 커넥터" in out
+
+
 # ── G3: 도구 치트시트 = 단일 소스(ALL_TOOL_NAMES) 파생, 환각 0 ─────────────────
 def test_compose_prompt_tool_cheat_sheet_only_references_real_tool_names():
     role = _role(default_tool_groups=[
