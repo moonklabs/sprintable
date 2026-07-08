@@ -193,6 +193,12 @@ async def get_agent_connection_artifact(
     로직은 Header() 마커가 전혀 없는 ``_connection_artifact()``(plain str만 받음)로 옮기고, 이
     라우트 함수는 얇은 위임만 한다 — 직접-호출 테스트는 ``_connection_artifact``를 불러야 한다
     (Header DI는 라우트 경계에서만 받는다는 원칙).
+
+    채용-kit 재설계(story b1fe41cf, 선생님 GO 2026-07-08): ``resolve_instruction_filename()``이
+    이제 런타임 무관 단일 파일명(``KIT_FILENAME`` = ``SPRINTABLE_ONBOARDING.md``)을 반환한다 —
+    예전엔 CLAUDE.md/AGENTS.md 등 실제 정체성 파일명 리터럴을 써서, 유저가 다운로드해 프로젝트
+    루트에 저장하면 자기 에이전트의 진짜 정체성 파일을 덮어썼다(정체성 뭉갬 버그의 실제 코드
+    지점). 새 파일명은 그 어떤 런타임의 정체성 파일명과도 충돌하지 않는다.
     """
     return await _connection_artifact(
         agent_id, runtime, transport, locale, accept_language,
@@ -322,7 +328,7 @@ async def recruit_agent_endpoint(
     deactivate와 동일한 `assert_agent_owner`(생성자 또는 org-admin)로 닫는다.
 
     E-I18N Phase C(story 11f1087c): ``body.locale``(FE 명시 전달)→``Accept-Language`` 헤더(폴백)
-    순으로 정규화해 ``compose_prompt``에 배선 — 이 시점에 확정된 locale이 persona에 영속 기록된다
+    순으로 정규화해 ``compose_kit``에 배선 — 이 시점에 확정된 locale이 persona에 영속 기록된다
     (재채용 시 다른 locale로 다시 부르면 그 값으로 덮어씀, DB에 별도 locale 컬럼은 없음).
 
     까심 QA CI FAILURE 후속(2026-07-08, connection-artifact와 동형 근본 fix 선제 적용): Header()

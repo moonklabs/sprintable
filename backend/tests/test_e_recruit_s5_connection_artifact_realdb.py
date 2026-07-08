@@ -71,8 +71,8 @@ async def _seed_agent(session, *, with_persona: bool):
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
 @pytest.mark.anyio
 async def test_connection_artifact_emits_persona_file_real_decorate_path():
-    """G4: 실 AgentPersonaRepository.list()/_decorate() 경로(mock 아님)로 CLAUDE.md + .mcp.json
-    두 파일이 정확히 나오는지."""
+    """G4: 실 AgentPersonaRepository.list()/_decorate() 경로(mock 아님)로 SPRINTABLE_ONBOARDING.md
+    + .mcp.json 두 파일이 정확히 나오는지."""
     from types import SimpleNamespace
     from unittest.mock import MagicMock
     from sqlalchemy import text as _text
@@ -88,13 +88,13 @@ async def test_connection_artifact_emits_persona_file_real_decorate_path():
             await s.execute(_text("SET session_replication_role = replica"))
             out = await get_agent_connection_artifact(
                 agent.id, runtime="claude-code", session=s,
-                auth=MagicMock(), org_id=org_id,
+                accept_language=None, auth=MagicMock(), org_id=org_id,
             )
 
         assert len(out["files"]) == 2
         filenames = {f["filename"] for f in out["files"]}
-        assert filenames == {"CLAUDE.md", ".mcp.json"}
-        instruction = next(f for f in out["files"] if f["filename"] == "CLAUDE.md")
+        assert filenames == {"SPRINTABLE_ONBOARDING.md", ".mcp.json"}
+        instruction = next(f for f in out["files"] if f["filename"] == "SPRINTABLE_ONBOARDING.md")
         assert "백엔드 엔지니어" in instruction["content"]
         mcp_file = next(f for f in out["files"] if f["filename"] == ".mcp.json")
         parsed = json.loads(mcp_file["content"])
@@ -125,7 +125,7 @@ async def test_connection_artifact_no_persona_backward_compatible_real_db():
             await s.execute(_text("SET session_replication_role = replica"))
             out = await get_agent_connection_artifact(
                 agent.id, runtime="claude-code", session=s,
-                auth=MagicMock(), org_id=org_id,
+                accept_language=None, auth=MagicMock(), org_id=org_id,
             )
 
         assert len(out["files"]) == 1
@@ -155,12 +155,12 @@ async def test_connection_artifact_connector_runtime_real_db():
             await s.execute(_text("SET session_replication_role = replica"))
             out = await get_agent_connection_artifact(
                 agent.id, runtime="connector", session=s,
-                auth=MagicMock(), org_id=org_id,
+                accept_language=None, auth=MagicMock(), org_id=org_id,
             )
 
         assert out["mcp_config"] is None
         filenames = {f["filename"] for f in out["files"]}
-        assert filenames == {"AGENT_INSTRUCTIONS.md", "CONNECTOR_SETUP.md"}
+        assert filenames == {"SPRINTABLE_ONBOARDING.md", "CONNECTOR_SETUP.md"}
     finally:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
@@ -172,8 +172,8 @@ async def test_connection_artifact_connector_runtime_real_db():
 @pytest.mark.parametrize("runtime", ["opencode", "openclaw", "hermes", "grok", "pi"])
 async def test_connection_artifact_connector_only_runtimes_real_db(runtime):
     """전 런타임 올지원(story 6f6ac081): 커넥터 전용 5종도 connector 버킷과 동형 — mcp_config는
-    None, CONNECTOR_SETUP.md 포인터 파일 emit. 단 instruction 파일명은 확정 매핑이 있어(공식
-    문서 실측, crux doc 참조) generic AGENT_INSTRUCTIONS.md가 아니라 AGENTS.md."""
+    None, CONNECTOR_SETUP.md 포인터 파일 emit. 채용-kit 재설계(story b1fe41cf) 이후 instruction
+    파일명은 런타임 무관 SPRINTABLE_ONBOARDING.md 단일 상수."""
     from unittest.mock import MagicMock
     from sqlalchemy import text as _text
     from app.core.database import Base
@@ -188,12 +188,12 @@ async def test_connection_artifact_connector_only_runtimes_real_db(runtime):
             await s.execute(_text("SET session_replication_role = replica"))
             out = await get_agent_connection_artifact(
                 agent.id, runtime=runtime, session=s,
-                auth=MagicMock(), org_id=org_id,
+                accept_language=None, auth=MagicMock(), org_id=org_id,
             )
 
         assert out["mcp_config"] is None
         filenames = {f["filename"] for f in out["files"]}
-        assert filenames == {"AGENTS.md", "CONNECTOR_SETUP.md"}
+        assert filenames == {"SPRINTABLE_ONBOARDING.md", "CONNECTOR_SETUP.md"}
     finally:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
@@ -241,7 +241,7 @@ async def test_connection_artifact_no_default_persona_omits_instruction_file():
             await s.execute(_text("SET session_replication_role = replica"))
             out = await get_agent_connection_artifact(
                 agent.id, runtime="claude-code", session=s,
-                auth=MagicMock(), org_id=org_id,
+                accept_language=None, auth=MagicMock(), org_id=org_id,
             )
 
         assert len(out["files"]) == 1  # 지침 파일 생략 — .mcp.json만

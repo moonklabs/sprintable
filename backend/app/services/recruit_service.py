@@ -1,8 +1,13 @@
 """E-RECRUIT S3 (story ff2996d0): POST /recruit MVP 오케스트레이션.
 
-role_template + runtime → (S2) 합성 지침 + persona upsert(G7) + role-derived scope 로 API key
-회전(G2/G3) + 활성화 번들(mcp_config + 실 key 1회) 반환. compose_prompt 자체는 순수(S2 G4)라
-이 서비스가 그 순수 함수를 실 DB 상태(role_template/recipe/persona/key)에 배선하는 접합부다.
+role_template + runtime → (S2) 합성 kit + persona upsert(G7) + role-derived scope 로 API key
+회전(G2/G3) + 활성화 번들(mcp_config + 실 key 1회) 반환. compose_kit 자체는 순수(S2 G4)라
+이 서비스가 그 순수 함수를 실 DB 상태(role_template/persona/key)에 배선하는 접합부다.
+
+채용-kit 재설계(story b1fe41cf, 선생님 GO 2026-07-08) 이후: recipe DATA는 더 이상 kit
+합성에 쓰이지 않는다(워크플로는 유저것 — `sprintable_get_workflow_guide` 자가-pull로 대체,
+크럭스 결정①) — 이 파일이 예전에 갖고 있던 ``resolve_recipe_by_slug()``는 그래서 삭제됐다
+(다른 소비자 없음 확인, 죽은 코드 방치 안 함).
 """
 from __future__ import annotations
 
@@ -16,7 +21,7 @@ from app.models.role_template import RoleTemplate
 from app.repositories.agent_persona import AgentPersonaRepository
 from app.repositories.api_key import ApiKeyRepository
 from app.schemas.agent_persona import PersonaSummaryResponse
-from app.services.agent_recruiter import compose_prompt, validate_tool_groups
+from app.services.agent_recruiter import compose_kit, validate_tool_groups
 
 
 async def get_published_role_template(session: AsyncSession, slug: str) -> RoleTemplate | None:
@@ -24,24 +29,6 @@ async def get_published_role_template(session: AsyncSession, slug: str) -> RoleT
         select(RoleTemplate).where(RoleTemplate.slug == slug, RoleTemplate.is_published.is_(True))
     )
     return result.scalar_one_or_none()
-
-
-async def resolve_recipe_by_slug(session: AsyncSession, slug: str | None) -> dict[str, Any] | None:
-    """role_template.default_workflow_recipe_slug → workflow_recipes 형태 dict(builtin 또는 DB)."""
-    if not slug:
-        return None
-    from app.models.workflow_template import WorkflowTemplate
-    from app.routers.workflow_recipes import _BUILTIN_BY_ID, _template_to_recipe
-
-    if slug in _BUILTIN_BY_ID:
-        return _BUILTIN_BY_ID[slug]
-    result = await session.execute(
-        select(WorkflowTemplate).where(
-            WorkflowTemplate.slug == slug, WorkflowTemplate.is_enabled.is_(True)
-        )
-    )
-    template = result.scalar_one_or_none()
-    return _template_to_recipe(template) if template else None
 
 
 async def acquire_agent_mutation_lock(session: AsyncSession, agent_id: uuid.UUID) -> None:
@@ -96,16 +83,20 @@ async def recruit_agent(
     직렬화한다 — 트랜잭션 종료 시 자동 해제, 기존 `onboarding_first_auth:{member_id}` 관례와 동일 패턴.
 
     E-I18N Phase C(story 11f1087c): ``locale``은 request-scoped(호출부가 FE 전달값→Accept-Language
-    폴백으로 이미 정규화해 넘긴다) — 여기선 그대로 ``compose_prompt``에 전달만 한다. 기본값 "ko"라
+    폴백으로 이미 정규화해 넘긴다) — 여기선 그대로 ``compose_kit``에 전달만 한다. 기본값 "ko"라
     이 함수를 직접 호출하는 기존/테스트 코드는 무변경 하위호환.
+
+    채용-kit 재설계(story b1fe41cf): ``compose_kit``이 구조화 dict를 반환 — DB의 ``system_prompt``
+    컬럼(Text)은 여전히 단일 문자열이라 ``"\n\n".join(kit.values())``로 재구성한다(라이브
+    오케스트레이션 소비자가 없어 — §크럭스 §0 확인 — 이 join 순서/포맷 변경은 breaking 아님).
     """
     await acquire_agent_mutation_lock(session, agent_member.id)
 
     tool_allowlist = list(role_template.default_tool_groups)
     validate_tool_groups(tool_allowlist)  # fail-closed — ValueError 전파, 호출부가 400 매핑
 
-    recipe = await resolve_recipe_by_slug(session, role_template.default_workflow_recipe_slug)
-    system_prompt = compose_prompt(role_template, recipe, runtime, locale)
+    kit = compose_kit(role_template, runtime, locale)
+    system_prompt = "\n\n".join(kit.values())
 
     persona_repo = AgentPersonaRepository(session)
     existing = await persona_repo.get_recruited(org_id, agent_member.project_id, agent_member.id)

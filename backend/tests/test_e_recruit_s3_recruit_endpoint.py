@@ -2,7 +2,7 @@
 
 DB write 시맨틱(persona upsert/키 회전)은 realdb 테스트(test_e_recruit_s3_recruit_service_realdb.py)
 가 실증한다. 여기선 라우터 계층의 404/400 분기 + 응답 shape만 확인(순수 도메인 로직은 이미
-compose_prompt(S2)/recruit_agent(realdb)가 커버).
+compose_kit(S2)/recruit_agent(realdb)가 커버).
 """
 from __future__ import annotations
 

@@ -60,10 +60,10 @@ def test_role_behaviors_reference_verified_tool_names_only():
 
 
 def test_both_roles_compose_without_error_and_validate_against_default_tool_groups():
-    """S2 교차검증 동형: compose_prompt가 크래시 없이 완주하고, 치트시트가 실 default_tool_groups
+    """S2 교차검증 동형: compose_kit가 크래시 없이 완주하고, 치트시트가 실 default_tool_groups
     로부터만 파생되는지(환각 0·G3 단일소스)."""
     from types import SimpleNamespace
-    from app.services.agent_recruiter import compose_prompt, validate_tool_groups
+    from app.services.agent_recruiter import compose_kit, validate_tool_groups
     from app.services.mcp_toolset import ALL_TOOL_NAMES
 
     mod = _load_migration()
@@ -73,7 +73,7 @@ def test_both_roles_compose_without_error_and_validate_against_default_tool_grou
             name=name, role_behaviors=mod._ROLE_BEHAVIORS[slug],
             default_tool_groups=tool_groups, runtime_overrides={},
         )
-        out = compose_prompt(role, None, "claude-code")
+        out = compose_kit(role, "claude-code")["onboarding"]
         mentioned = set(re.findall(r"`(sprintable_[a-z_]+)`", out))
         assert mentioned <= set(ALL_TOOL_NAMES), (
             f"{slug}: invented tool names {mentioned - set(ALL_TOOL_NAMES)}"

@@ -55,13 +55,15 @@ async def test_no_role_template_retains_stale_runtime_note_block():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL) — alembic upgrade heads 전제")
 @pytest.mark.anyio
-async def test_compose_prompt_has_exactly_one_runtime_note_heading_for_seeded_role():
-    """0163 후 compose_prompt가 실 seed 데이터로 정확히 1개의 '## 런타임 노트' 헤딩만 생성 —
-    section [A](role_behaviors)와 section [E](_runtime_notes) 중복 없음."""
+async def test_compose_kit_has_exactly_one_runtime_note_heading_for_seeded_role():
+    """0163 후 compose_kit가 실 seed 데이터로 정확히 1개의 '## 런타임 노트' 헤딩만 생성 —
+    role_context(role_behaviors)와 onboarding(_runtime_notes) 중복 없음. 채용-kit
+    재설계(story b1fe41cf) 이후 compose_prompt→compose_kit로 전환됐어도 이 회귀가드의
+    의도(중복 0)는 그대로 유지."""
     from types import SimpleNamespace
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
-    from app.services.agent_recruiter import compose_prompt
+    from app.services.agent_recruiter import compose_kit
 
     url = _REAL_DB_URL
     for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
@@ -81,7 +83,7 @@ async def test_compose_prompt_has_exactly_one_runtime_note_heading_for_seeded_ro
             default_tool_groups=row["default_tool_groups"], runtime_overrides=row["runtime_overrides"] or {},
         )
         for runtime in ("claude-code", "grok"):
-            out = compose_prompt(role, None, runtime)
+            out = "\n\n".join(compose_kit(role, runtime).values())
             assert out.count("## 런타임 노트") == 1, f"runtime={runtime}"
     finally:
         await engine.dispose()

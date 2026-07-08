@@ -52,22 +52,24 @@ async def test_runtime_capabilities_401_when_unauthenticated():
 
 def test_instruction_filename_tiers_and_transport_by_runtime_class():
     """전 런타임 올지원(story 6f6ac081, 문서 `runtime-full-support-firstclass-crux`) 후 실기준:
-    _INSTRUCTION_FILENAMES에 확정 매핑이 있는 8종(claude-code·gemini·codex/cursor/grok/pi/
-    hermes/openclaw/opencode)은 tier=full — 매핑 없는 connector(범용·특정 툴 미확정)만
-    tier=experimental로 남는다(공식 문서 출처 실측 결과, crux doc 참조). MCP-native 4종만
-    mcp_transport 보유·event_push 지원 — 커넥터 전용 5종+connector는 SSE 경로라 전부 빈값."""
-    from app.services.agent_onboarding_config import list_runtime_capabilities
+    구체적으로 이름 붙은 8종(claude-code·gemini·codex/cursor/grok/pi/hermes/openclaw/opencode)은
+    tier=full — 범용 connector 버킷(특정 런타임 미확정)만 tier=experimental로 남는다. MCP-native
+    4종만 mcp_transport 보유·event_push 지원 — 커넥터 전용 5종+connector는 SSE 경로라 전부 빈값.
+
+    채용-kit 재설계(story b1fe41cf, 선생님 GO 2026-07-08): ``prompt_file``은 이제 런타임 무관
+    단일 파일명(``KIT_FILENAME`` = ``SPRINTABLE_ONBOARDING.md``) — 예전엔 CLAUDE.md/GEMINI.md/
+    AGENTS.md로 런타임별로 갈렸는데, 그 리터럴이 유저의 실제 정체성 파일을 덮어쓰는 버그의
+    원인이라 통일했다."""
+    from app.services.agent_onboarding_config import KIT_FILENAME, list_runtime_capabilities
 
     caps = {c["slug"]: c for c in list_runtime_capabilities()}
     assert caps["claude-code"]["tier"] == "full"
-    assert caps["claude-code"]["prompt_file"] == "CLAUDE.md"
     assert caps["gemini"]["tier"] == "full"
-    assert caps["gemini"]["prompt_file"] == "GEMINI.md"
     for slug in ("codex", "cursor", "grok", "pi", "hermes", "openclaw", "opencode"):
         assert caps[slug]["tier"] == "full", slug
-        assert caps[slug]["prompt_file"] == "AGENTS.md", slug
     assert caps["connector"]["tier"] == "experimental"
-    assert caps["connector"]["prompt_file"] == "AGENT_INSTRUCTIONS.md"
+    for slug in caps:
+        assert caps[slug]["prompt_file"] == KIT_FILENAME, slug
 
     for slug in ("claude-code", "codex", "gemini", "cursor"):
         assert caps[slug]["supports_event_push"] is True
