@@ -28,7 +28,10 @@ def _async_url() -> str:
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
 @pytest.mark.anyio
-async def test_summary_items_i18n_columns_exist_and_default_empty():
+async def test_summary_items_i18n_columns_exist_and_are_valid_dicts():
+    """0165 자체는 순수 구조 추가(백필 없음)가 원칙 — 컬럼 존재+dict 타입만 여기서 검증한다.
+    "항상 빈 {}" 단정은 안 함: 후속 마이그(0166, PR2 EN 네이티브 저작)가 head에서 의도적으로
+    "en" 키를 채우므로 그 상태와 모순되면 안 된다."""
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -39,8 +42,8 @@ async def test_summary_items_i18n_columns_exist_and_default_empty():
                 "SELECT summary_i18n, items_i18n FROM release_notes"
             ))).mappings().all()
         assert rows, "release_notes 비어있음 — seed 마이그 미적용?"
-        assert all(r["summary_i18n"] == {} for r in rows), "백필 없음이 원칙(순수 구조 추가)"
-        assert all(r["items_i18n"] == {} for r in rows), "백필 없음이 원칙(순수 구조 추가)"
+        assert all(isinstance(r["summary_i18n"], dict) for r in rows)
+        assert all(isinstance(r["items_i18n"], dict) for r in rows)
     finally:
         await engine.dispose()
 
