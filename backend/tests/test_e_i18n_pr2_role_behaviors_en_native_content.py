@@ -47,6 +47,36 @@ def test_en_role_behaviors_covers_every_ko_role():
     )
 
 
+def _all_ko_role_behaviors() -> dict[str, str]:
+    behaviors: dict[str, str] = {}
+    for mod in (
+        _load(_S1_MIGRATION, "rev_0156_pr2fidelity"),
+        _load(_S14_MIGRATION, "rev_0157_pr2fidelity"),
+        _load(_MARKETING_MIGRATION, "rev_0160_pr2fidelity"),
+    ):
+        behaviors.update(mod._ROLE_BEHAVIORS)
+    return behaviors
+
+
+def test_en_role_behaviors_preserve_ko_operating_contract():
+    """까심 QA HIGH 회귀 가드(#1973 RC, 2026-07-08): EN 네이티브 저작은 ko와 같은 콘텐츠의
+    영어 버전이지 조용한 운영계약 재설계가 아니다 — ko가 claim/lock/status 워크플로우를
+    지시하면 EN도 반드시 지시해야 한다(그 반대도 마찬가지). product-analyst/ux-researcher를
+    도구 목록만 보고 애널리스트 템플릿으로 잘못 분류해 이 계약을 조용히 바꿨던 버그의 재발
+    방지 — 24 role 전부에 대해 claim_story 존재 여부가 ko/EN 간 일치하는지 직접 대조한다."""
+    ko_behaviors = _all_ko_role_behaviors()
+    mod = _load(_MIGRATION, "rev_0166")
+    en_behaviors = mod._ROLE_BEHAVIORS_EN
+
+    mismatches = []
+    for slug in ko_behaviors:
+        ko_has_claim = "sprintable_claim_story" in ko_behaviors[slug]
+        en_has_claim = "sprintable_claim_story" in en_behaviors[slug]
+        if ko_has_claim != en_has_claim:
+            mismatches.append(f"{slug}: ko_claim={ko_has_claim} en_claim={en_has_claim}")
+    assert not mismatches, "ko/EN claim-workflow 계약 불일치:\n" + "\n".join(mismatches)
+
+
 def test_en_role_behaviors_reference_verified_tool_names_only():
     """0163 교훈과 동형 — EN 신규 저작도 환각 도구명 0건이어야."""
     mod = _load(_MIGRATION, "rev_0166")

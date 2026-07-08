@@ -18,6 +18,15 @@ items_i18n의 "en" 키에 **실 콘텐츠**를 채운다 — 데이터 마이그
 도구명 검증: 아래 EN 텍스트가 언급하는 모든 `sprintable_*` 식별자는 ko 원본과 동일한 실
 등록 도구명만 사용(신규 텍스트에서 새 도구를 지어내지 않음) — realdb 테스트가 EN 컬럼에도
 0163류 hallucinated-tool-name 가드를 동형 적용해 검증한다.
+
+까심 QA HIGH 수정(#1973 RC, 2026-07-08): 애널리스트 오프닝(overview→hypothesis→doc,
+claim/lock/status 없음)을 쓰는 ko 원본은 **data-analyst 1개뿐**이다 — product-analyst/
+ux-researcher는 ko(0157)에서 steps 1-5가 표준 템플릿(claim→lock→status)과 동일하고
+"자주 쓰는 도구" 목록만 애널리스트류로 다르다(ko 자체의 의도된 설계인지 내부모순인지는
+불명 — 그러나 **오늘 라이브 ko 캐논**이다). 최초 버전은 이 2롤을 도구 목록만 보고 애널리스트
+템플릿으로 잘못 분류해 claim/lock/status 워크플로우를 EN에서 조용히 제거했다(운영계약
+변경 — semantic fidelity 위반). 표준 템플릿(claim/lock/status 보존)+애널리스트 도구
+목록 유지로 정정.
 """
 from __future__ import annotations
 
@@ -33,7 +42,8 @@ depends_on = None
 
 
 # 영어권 에이전트 운영지침 관례로 네이티브 저작한 템플릿 2종(ko 원본의 두 갈래 구조와 동형) —
-# ko는 "표준"(claim→lock→status) vs "애널리스트"(overview→hypothesis→doc) 두 흐름으로 갈렸다.
+# ko는 "표준"(claim→lock→status, 23롤) vs "애널리스트"(overview→hypothesis→doc,
+# data-analyst 1롤뿐 — 까심 QA #1973 RC로 정정, 아래 참조)로 갈렸다.
 _STANDARD_TEMPLATE = """# {name} — Autonomous Operating Instructions
 
 You are the {name} on this project. You're responsible for {description}.
@@ -206,15 +216,12 @@ _STANDARD_ROLES: dict[str, dict[str, str]] = {
         step6="Only mark a design change done after confirming the actual rendering on screen — mockups alone aren't enough.",
         tools="`sprintable_list_stories` · `sprintable_update_story` · `sprintable_send_chat_message` · `sprintable_get_doc`.",
     ),
-}
-
-_ANALYST_ROLES: dict[str, dict[str, str]] = {
-    "data-analyst": dict(
-        name="Data Analyst",
-        description="data analysis, reporting, and surfacing insights",
-        step6="Always back your conclusions with evidence (queries, sample size) — never report a guess as a fact.",
-        tools="`sprintable_get_project_overview` · `sprintable_get_sprint_velocity_history` · `sprintable_create_hypothesis` · `sprintable_create_doc` · `sprintable_send_chat_message`.",
-    ),
+    # 까심 QA HIGH(#1973 RC, 2026-07-08): ko(0157 표준템플릿)는 이 2롤도 steps 1-5에 claim→
+    # lock→status 워크플로우를 그대로 지시한다("자주 쓰는 도구" 목록만 애널리스트류라 ko 자체가
+    # 내부모순 — 하지만 그게 오늘 라이브 ko 캐논이다). EN 네이티브 저작은 ko와 같은 콘텐츠의
+    # 영어 버전이지 조용한 운영계약 재설계가 아니므로, 이 2롤은 표준 템플릿(claim/lock/status
+    # 보존)으로 저작하고 도구 목록만 애널리스트류를 유지한다. ko 자체의 모순은 별도 백로그
+    # (PO가 스토리 개설 예정 — 두 locale 동시 수정 필요, EN만 조용히 고치면 로케일이 갈림).
     "product-analyst": dict(
         name="Product Analyst",
         description="metrics analysis, funnel diagnostics, and providing evidence for decisions",
@@ -226,6 +233,15 @@ _ANALYST_ROLES: dict[str, dict[str, str]] = {
         description="conducting user research and validating hypotheses",
         step6="Always back research conclusions with evidence (interviews, data) in a doc, tied to a hypothesis with a suggested next action.",
         tools="`sprintable_create_hypothesis` · `sprintable_confirm_hypothesis` · `sprintable_get_project_overview` · `sprintable_send_chat_message` · `sprintable_create_doc`.",
+    ),
+}
+
+_ANALYST_ROLES: dict[str, dict[str, str]] = {
+    "data-analyst": dict(
+        name="Data Analyst",
+        description="data analysis, reporting, and surfacing insights",
+        step6="Always back your conclusions with evidence (queries, sample size) — never report a guess as a fact.",
+        tools="`sprintable_get_project_overview` · `sprintable_get_sprint_velocity_history` · `sprintable_create_hypothesis` · `sprintable_create_doc` · `sprintable_send_chat_message`.",
     ),
 }
 
