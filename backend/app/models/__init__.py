@@ -1,3 +1,4 @@
+from app.models.a2a_task import A2ATask
 from app.models.agent_event_seq import AgentEventSeq
 from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
 from app.models.agent_deployment import AgentAuditLog, AgentDeployment, AgentPersona
@@ -47,8 +48,10 @@ from app.models.member import AgentProjectProfile, Member, MemberIdentityAlias
 from app.models.activity_event import ActivityEvent
 from app.models.asset import Asset, AssetFolder, AssetLink
 from app.models.release_note import ReleaseNote
+from app.models.role_template import RoleTemplate
 
 __all__ = [
+    "RoleTemplate",
     "ActivityEvent",
     "ReleaseNote",
     "Asset",

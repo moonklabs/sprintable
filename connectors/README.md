@@ -18,6 +18,29 @@ connectors/
     __init__.py
     adapter.py
     README.md
+  openclaw-sprintable/      # 카테고리 A: OpenClaw 어댑터 (ChannelPlugin)
+    index.ts
+    package.json
+    README.md
+  opencode-sprintable/      # 카테고리 A: OpenCode 어댑터 (plugin SDK)
+    index.ts
+    package.json
+    README.md
+  codex-sprintable/         # 카테고리 B: Codex 어댑터 (stdio JSON-RPC 호스트, `codex app-server` spawn)
+    host.py
+    README.md
+  gemini-sprintable/        # 카테고리 B: Gemini 어댑터 (ACP stdio JSON-RPC 호스트, `gemini --acp` spawn)
+    host.py
+    README.md
+  grok-sprintable/          # 카테고리 B: Grok(xAI) 어댑터 (Zed ACP stdio 호스트, `grok agent stdio` spawn)
+    host.py
+    README.md
+  pi-sprintable/            # 카테고리 B: Pi 어댑터 (JSONL/stdio 호스트, `pi --mode rpc` spawn)
+    host.py
+    README.md
+  cursor-sprintable/        # 카테고리 C: Cursor 어댑터 (HTTP sidecar — Cloud Agents API, 자식 프로세스 없음)
+    sidecar.py
+    README.md
 ```
 
 > 각 어댑터 폴더는 **자기완결**이다. fresh 온보딩은 폴더 하나만 복사하므로 sibling
@@ -87,12 +110,23 @@ POST /api/v2/agent/events/ack
 
 ## 어댑터 카테고리
 
+카테고리 A/B/C는 **주입 메커니즘**을 기준으로 나뉜다(A=런타임 프로세스 내부 plugin API 호출,
+B=자식 프로세스 spawn 후 stdio, C=자식 프로세스 없이 원격 HTTP API). 이 스킴은
+`apps/web/public/onboarding-guide.txt`의 Runtime catalog와 동일하게 유지한다.
+
 | 카테고리 | 런타임 | 주입 방식 | 디렉토리 |
 |----------|--------|-----------|----------|
+| **A** | Claude Code | `notifications/claude/channel` emit (fakechat pairing 필요) | `packages/fakechat/server.ts` |
 | **A** | Hermes Agent — dev (Python) | `handle_message()` → 세션 주입 | `connectors/hermes-sprintable/` |
 | **A** | Hermes Agent — prod (Python) | `handle_message()` → 세션 주입 (`SPRINTABLE_PROD_*`) | `connectors/hermes-sprintable-prod/` |
-| **B** | Claude Code (MCP) | `notifications/claude/channel` emit | `packages/fakechat/server.ts` |
-| **C** | 기타 (Codex, Gemini, Cursor, OpenClaw 등) | 런타임별 주입 API | `connectors/{runtime}-sprintable/` |
+| **A** | OpenClaw (TS, ChannelPlugin) | `runtime.channel.inbound` | `connectors/openclaw-sprintable/` |
+| **A** | OpenCode (TS, plugin SDK) | `client.session.prompt()` | `connectors/opencode-sprintable/` |
+| **B** | Codex (Python, stdio JSON-RPC 호스트) | 자식 프로세스 `codex app-server` spawn/own, stdio JSON-RPC 주입 | `connectors/codex-sprintable/` |
+| **B** | Gemini (Python, ACP stdio JSON-RPC 호스트) | 자식 프로세스 `gemini --acp` spawn/own (Agent Client Protocol) | `connectors/gemini-sprintable/` |
+| **B** | Grok — xAI Grok Build (Python, Zed ACP stdio 호스트) | 자식 프로세스 `grok agent stdio` spawn/own (Gemini와 동일 ACP) | `connectors/grok-sprintable/` |
+| **B** | Pi (Python, JSONL/stdio 호스트) | 자식 프로세스 `pi --mode rpc` spawn/own (줄단위 JSON, mid-stream `steer` 지원) | `connectors/pi-sprintable/` |
+| **C** | Cursor (Python, HTTP sidecar) | 자식 프로세스 없음 — Cursor **Cloud (Background) Agents API** HTTP 호출, run-state 관리(로컬 에디터 세션은 미지원) | `connectors/cursor-sprintable/` |
+| — | Custom (LangChain 등) | 공유 SDK로 직접 구현 | `connectors/sdk/` |
 
 ---
 

@@ -50,6 +50,13 @@ describe('proxy', () => {
     }
   });
 
+  it('serves onboarding-guide.txt as public — no 307-to-login (45a5a006)', async () => {
+    // PUBLIC_EXACT 누락 시 이 요청이 보호 라우트로 오인돼 /login 307로 튕겨나간다(공개 정적
+    // 문서가 로그인 뒤에 묶이는 회귀) — no-cookie 요청으로 그 정확한 실패 모드를 재현·가드.
+    const response = await middleware(makeRequest('/onboarding-guide.txt'));
+    expect(response.status).toBe(200);
+  });
+
   it('passes all /api/* paths without JWT check', async () => {
     const apiPaths = [
       '/api/v1/bridge/slack/interactions',

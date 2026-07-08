@@ -397,7 +397,7 @@ async def is_caller_member(
     team_member.id)엔 맞지만, JWT 휴먼은 ``resolve_member``가 ``OrgMember.id``(별개 테이블 PK)를
     반환해 이 path의 ``member_id``(=members anchor/team_members뷰 id)와 축이 달라 **본인이 본인
     claim/heartbeat/lock을 호출해도 403**나는 회귀를 냈다(까심의 "human 회귀 없음" 판정은 검증
-    시드가 같은 id를 재사용한 거짓양성 — 실 서로 다른 id로 재현하면 드러난다).
+    시드가 같은 id를 재사용한 거짓양성 — 실 서로 다른 id로 재현하면 드러남).
 
     axis-safe 비교: agent(API키)는 ``auth.user_id`` 자체가 이미 team_member.id이므로 직접비교.
     human(JWT)은 ``auth.user_id``=users.id이므로, member_id가 가리키는 team_members뷰 행의

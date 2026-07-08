@@ -154,6 +154,8 @@ async def transition_gate(
         await _advance_story_on_merge_approve(session, gate, new_status)
         # E-DG doc-gate(48f064e5): doc 결재 게이트 approve→confirmed·reject→denied.
         await _resolve_doc_gate(session, gate, new_status)
+        # HITL crux(story 7726a003) — A2A task INPUT_REQUIRED 복귀. writer 미배선이라 오늘은 no-op.
+        await _resume_a2a_task_on_gate_resolve(session, gate, new_status)
 
     await session.flush()
     await session.refresh(gate)
@@ -366,6 +368,30 @@ async def _resolve_doc_gate(session: AsyncSession, gate: Gate, new_status: str) 
     if doc is None or doc.status != "pending":
         return  # 멱등·pending 아니면 no-op(double-resolve/취소 방어).
     doc.status = "confirmed" if new_status == "approved" else "denied"
+    await session.flush()
+
+
+async def _resume_a2a_task_on_gate_resolve(session: AsyncSession, gate: Gate, new_status: str) -> None:
+    """HITL crux(story 7726a003, 문서 `a2a-hitl-input-auth-required-mapping-crux`, PO GO
+    2026-07-07 옵션 B): `A2ATask.task_metadata.linked_gate_id` 로 이 게이트에 연결된 task를
+    복귀시킨다. **writer(그 필드를 실제로 채우는 delegate-측 경로)는 별도 forward-work
+    스토리** — 오늘은 그 필드를 쓰는 경로가 전무해 이 함수는 항상 no-op(무회귀). approve→
+    `TASK_STATE_WORKING`(재개, 이후 기존 reply-thread 폴링이 COMPLETED까지 캐리) ·
+    reject→`TASK_STATE_REJECTED`(기존 terminal state, 신규 처리 불요).
+    """
+    if new_status not in ("approved", "rejected"):
+        return
+    from app.models.a2a_task import A2ATask  # 순환 회피 lazy import.
+
+    task = (await session.execute(
+        select(A2ATask).where(
+            A2ATask.task_metadata["linked_gate_id"].astext == str(gate.id),
+            A2ATask.state == "TASK_STATE_INPUT_REQUIRED",
+        )
+    )).scalar_one_or_none()
+    if task is None:
+        return  # 링크 없음(writer 미배선) 또는 이미 다른 경로로 해소됨 — no-op.
+    task.state = "TASK_STATE_WORKING" if new_status == "approved" else "TASK_STATE_REJECTED"
     await session.flush()
 
 

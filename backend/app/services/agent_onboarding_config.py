@@ -14,12 +14,192 @@ README·onboarding-form·in-app docs·로컬 buildMcpConfig 4갈래로 흩어져
 from __future__ import annotations
 
 import os
+from typing import Any
 
 DEFAULT_RUNTIME = "claude-code"
-SUPPORTED_RUNTIMES = frozenset({"claude-code"})
+# 전 런타임 올지원(story 6f6ac081, 문서 `runtime-full-support-firstclass-crux`, PO GO
+# 2026-07-08): MCP-native 4(claude-code/codex/gemini/cursor, transport config 공통) +
+# 커넥터 전용 5(opencode/openclaw/hermes/grok/pi, 실 SSE 어댑터가 connectors/ 에 이미 존재 —
+# vaporware 아님) + 범용 "connector" 버킷(어댑터가 따로 없는 런타임용 포인터 안내).
+CONNECTOR_RUNTIME = "connector"
+MCP_NATIVE_RUNTIMES = frozenset({"claude-code", "codex", "gemini", "cursor"})
+CONNECTOR_ONLY_RUNTIMES = frozenset({"opencode", "openclaw", "hermes", "grok", "pi"})
+SUPPORTED_RUNTIMES = MCP_NATIVE_RUNTIMES | CONNECTOR_ONLY_RUNTIMES | {CONNECTOR_RUNTIME}
 STDIO = "stdio"
 HTTP = "http"
 SUPPORTED_TRANSPORTS = frozenset({STDIO, HTTP})
+
+# E-I18N Phase A(story 11f1087c, 문서 `i18n-architecture-design-crux`, 선생님 GO
+# 2026-07-08): FE `apps/web/src/i18n/request.ts`의 `SUPPORTED_LOCALES=['en','ko']`와
+# 값을 정확히 일치시킨 BE SSOT — 둘이 어긋나면 "FE는 지원한다는데 BE가 거부" 류 불일치
+# 버그가 재발한다. DEFAULT_LOCALE은 FE와 달리 **ko**다(FE 기본값은 en이지만, 그건
+# "브라우저 방문자가 아무 신호도 없을 때"의 기본이고, 여긴 반대로 "오늘 유일하게 실
+# 콘텐츠가 존재하는 locale"이 기준 — role_templates/코드 상수 전부 한글이 원본이라
+# en 콘텐츠가 아직 없는 동안은 ko가 안전한 폴백).
+SUPPORTED_LOCALES = ("ko", "en")
+DEFAULT_LOCALE = "ko"
+
+
+def resolve_locale(locale: str | None) -> str:
+    """미지원/None locale → DEFAULT_LOCALE 폴백(크래시 없이 항상 유효한 locale 반환)."""
+    return locale if locale in SUPPORTED_LOCALES else DEFAULT_LOCALE
+
+
+def resolve_locale_from_request(explicit: str | None, accept_language: str | None) -> str:
+    """E-I18N Phase C(story 11f1087c, 문서 `i18n-architecture-design-crux` §1 결정 (a)+(b)):
+    콘텐츠-생성 엔드포인트의 locale 소스 우선순위 — ① FE가 명시 전달한 ``locale``(자기
+    next-intl locale 쿠키값, 가장 정확) ② 없으면 ``Accept-Language`` 헤더에서 유도(브라우저
+    기본 — FE 미변경 클라이언트에도 무회귀 폴백) ③ 그래도 없으면 ``DEFAULT_LOCALE``.
+
+    DB 영속 저장 없음(request-scoped) — org/user에 locale 컬럼을 두지 않는다는 crux 결정과 동형
+    (FE도 쿠키만 쓰고 DB엔 안 둔다 — 대칭 유지).
+    """
+    if explicit:
+        return resolve_locale(explicit)
+    if accept_language:
+        for tag in accept_language.split(","):
+            primary = tag.split(";", 1)[0].strip().split("-", 1)[0].lower()
+            if primary in SUPPORTED_LOCALES:
+                return primary
+    return DEFAULT_LOCALE
+
+# 채용-kit 재설계(story b1fe41cf, 문서 `recruit-output-kit-redesign-crux`, 선생님 GO
+# 2026-07-08 결정①): 예전엔 런타임별 CLAUDE.md/GEMINI.md/AGENTS.md **리터럴**을 다운로드
+# 파일명으로 썼다 — 유저가 그 파일명 그대로 프로젝트 루트에 저장하면 자기 에이전트의 **실제
+# 기존 정체성 파일을 덮어썼다**(선생님이 지적한 정체성 뭉갬의 실제 코드 지점). 이제 런타임 무관
+# **단일** 파일명(그 어떤 런타임의 실 정체성 파일명과도 충돌하지 않는 이름)으로 통일 — 유저가
+# 이 파일을 "자기 에이전트에게 건네" 자기화하게 하는 kit 모델(§크럭스 2/3).
+KIT_FILENAME = "SPRINTABLE_ONBOARDING.md"
+
+
+def resolve_instruction_filename(runtime: str) -> str:
+    """자율 운영 kit 파일명 — 채용-kit 재설계 이후 런타임 무관 단일 상수(KIT_FILENAME).
+
+    함수 시그니처(런타임 인자)는 호출부 변경을 최소화하려 유지하지만, 반환값은 이제 런타임에
+    의존하지 않는다(예전엔 CLAUDE.md/GEMINI.md/AGENTS.md로 갈렸음 — 정체성 파일 충돌 버그의
+    원인이라 제거)."""
+    return KIT_FILENAME
+
+
+_RUNTIME_DISPLAY_NAMES: dict[str, str] = {
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "gemini": "Gemini",
+    "cursor": "Cursor",
+    "opencode": "OpenCode",
+    "openclaw": "OpenClaw",
+    "hermes": "Hermes",
+    "grok": "Grok",
+    "pi": "Pi",
+    CONNECTOR_RUNTIME: "Connector",
+}
+
+
+def list_runtime_capabilities() -> list[dict]:
+    """S6(유나/미르코 정합용) `GET /api/v2/runtime-capabilities` 계약 SSOT.
+
+    supported/tier는 **S5 emit 코드 실기준**(과대약속 금지) — recruiter/connection-artifact가
+    그 런타임으로 실제 아티팩트를 만들 수 있으면 supported=true. 전 런타임 올지원(story
+    6f6ac081) 이후: MCP-native 4종은 `.mcp.json`(transport 선택 가능), 나머지 지원 런타임
+    (커넥터 전용 5종 + 범용 connector 버킷)은 전부 SSE 커넥터 경로(CONNECTOR_SETUP.md, transport
+    개념 자체가 없음) — 이 두 그룹의 경계가 ``MCP_NATIVE_RUNTIMES``(``is_connector_routed``)다.
+    tier는 구체적으로 이름 붙은 런타임이면 "full", 범용 ``connector`` 버킷(특정 런타임을 못
+    찾았을 때의 안내-only 폴백)이면 "experimental" — 채용-kit 재설계(story b1fe41cf) 이후
+    ``prompt_file``이 전 런타임 동일(``KIT_FILENAME``)이라 그걸로는 더 이상 tier를 구분할 수
+    없어, 원래 의도(구체 런타임 vs 범용 폴백)를 직접 표현한다.
+
+    PO 확인(2026-07-06): FE 픽커의 "곧 지원" 섹션이 채워지려면 **미지원 런타임도 응답에
+    포함**돼야 한다 — ``RuntimeType``(agent_runtime.py, member.runtime_type 9종 SSOT) 전부가
+    이제 ``SUPPORTED_RUNTIMES``에 있어 "곧 지원" 섹션은 비게 된다(의도된 결과 — 전 런타임
+    올지원이 이 스토리의 목표).
+    """
+    from app.services.agent_runtime import RuntimeType
+
+    out = []
+    all_slugs = sorted({rt.value for rt in RuntimeType} | SUPPORTED_RUNTIMES)
+    for runtime in all_slugs:
+        supported = runtime in SUPPORTED_RUNTIMES
+        is_connector_routed = supported and runtime not in MCP_NATIVE_RUNTIMES
+        out.append({
+            "slug": runtime,
+            "display_name": _RUNTIME_DISPLAY_NAMES.get(runtime, runtime),
+            "supported": supported,
+            "tier": (
+                None if not supported
+                else "experimental" if runtime == CONNECTOR_RUNTIME
+                else "full"
+            ),
+            "transport": None if (is_connector_routed or not supported) else default_transport_for_hosting(),
+            "mcp_transport": [] if (is_connector_routed or not supported) else sorted(SUPPORTED_TRANSPORTS),
+            "prompt_file": resolve_instruction_filename(runtime) if supported else None,
+            "guide_filename": "CONNECTOR_SETUP.md" if is_connector_routed else None,
+            "supports_event_push": supported and not is_connector_routed,
+            "icon": None,
+        })
+    return out
+
+
+_CONNECTOR_GUIDANCE_TEXT: dict[str, dict[str, Any]] = {
+    "ko": {
+        "title": "# Sprintable Connector 안내",
+        "intro": [
+            "Claude Code/Codex/Gemini/Cursor 처럼 MCP를 네이티브 지원하지 않는 런타임은 별도 SSE",
+            "커넥터 어댑터로 연결합니다 — `.mcp.json`이 아니라 `connectors/{runtime}-sprintable/` 폴더의",
+            "어댑터를 사용해 서버에 아웃바운드로 접속합니다(인바운드 도메인/웹훅 불필요).",
+        ],
+        "adapters_heading": "## 사용 가능한 어댑터",
+        "adapters_intro": "`connectors/` 레포 경로 아래 각 폴더가 자기완결(self-contained) 어댑터입니다:",
+        "setup_heading": "## 설정",
+        # 까심 QA MUST-FIX(2026-07-08, #1966): dict화 전 원문의 줄바꿈(1·3번 항목이 2줄로
+        # 쪼개져 있었음)을 그대로 보존 — PR이 "default-ko 100% 무변경"이라 주장했는데 실제로는
+        # 한 줄로 합쳐져 byte-diff가 있었다. 여기 임베드된 "\n   "이 원문 join 결과를 재현한다.
+        "setup_steps": [
+            "위 폴더 중 사용 중인 런타임에 맞는 폴더를 복사하세요(각 폴더는 sibling import 없이\n   독립 동작합니다).",
+            "폴더의 `README.md` 안내대로 `AGENT_API_KEY`(이 에이전트의 scoped key) 등 env를 설정하세요.",
+            "어댑터를 런타임 호스트에서 직접 실행하세요(호스팅 실행은 지원하지 않음 — 설치/실행은\n   사용자 수동).",
+        ],
+        "runtime_hint": "(선택한 런타임: {runtime})",
+    },
+    "en": {
+        "title": "# Sprintable Connector Guide",
+        "intro": [
+            "Runtimes that don't natively support MCP (e.g. Claude Code/Codex/Gemini/Cursor don't",
+            "need this — this is for the rest) connect via a separate SSE connector adapter instead",
+            "of `.mcp.json` — the adapter in `connectors/{runtime}-sprintable/` dials out to the",
+            "server (no inbound domain/webhook needed).",
+        ],
+        "adapters_heading": "## Available Adapters",
+        "adapters_intro": "Each folder under the `connectors/` repo path is a self-contained adapter:",
+        "setup_heading": "## Setup",
+        "setup_steps": [
+            "Copy the folder matching your runtime (each folder is self-contained, no sibling imports).",
+            "Set env vars per the folder's `README.md` (including `AGENT_API_KEY`, this agent's scoped key).",
+            "Run the adapter yourself on your runtime host (hosted execution isn't supported — install/run manually).",
+        ],
+        "runtime_hint": "(Selected runtime: {runtime})",
+    },
+}
+
+
+def build_connector_guidance(runtime_hint: str | None = None, locale: str = DEFAULT_LOCALE) -> str:
+    """E-RECRUIT S5 Q2(PO 확정): connector 분기 = **포인터/안내만**(SSE dial-out은 `.mcp.json`과
+    완전 별개 프로토콜 — 실제 어댑터 조립은 S7/후속). `connectors/{runtime}-sprintable/` 각 폴더의
+    README가 5조 계약(SSE dial-out·turn 주입·응답·ack·에러)을 담고 있어 여기선 안내만 재생산한다.
+
+    E-I18N Phase C(story 11f1087c) — locale 분기(compose_prompt류와 동형 dict 패턴). 기본값
+    ``DEFAULT_LOCALE``이라 기존 호출부(locale 인자 없이 호출)는 **byte-identical** 하위호환
+    (까심 QA MUST-FIX: dict화 시 실수로 원문 줄바꿈이 사라졌던 걸 복원 — 아래 realdb 테스트가
+    아니라 유닛 테스트가 원문 리터럴과 정확히 일치하는지 직접 assert한다).
+    """
+    text = _CONNECTOR_GUIDANCE_TEXT[resolve_locale(locale)]
+    lines = [text["title"], "", *text["intro"], "", text["adapters_heading"], text["adapters_intro"],
+        "hermes-sprintable · openclaw-sprintable · opencode-sprintable · grok-sprintable ·",
+        "pi-sprintable · codex-sprintable · cursor-sprintable · gemini-sprintable",
+        "", text["setup_heading"]]
+    lines += [f"{i}. {step}" for i, step in enumerate(text["setup_steps"], 1)]
+    if runtime_hint:
+        lines.insert(2, text["runtime_hint"].format(runtime=runtime_hint))
+    return "\n".join(lines)
 
 _LOCAL_FALLBACK_URL = "http://localhost:8000"
 # generator 가 backend-direct URL 을 읽는 런타임 env. 배포(deploy_backend.sh)가 주입한다.
@@ -52,14 +232,17 @@ def resolve_mcp_public_url() -> str | None:
     return val.rstrip("/") if val else None
 
 
-def default_transport_for_edition() -> str:
-    """edition별 기본 transport — SaaS(EE)=http(무마찰 호스팅) / OSS=stdio(호스팅 배포 없음).
+def default_transport_for_hosting() -> str:
+    """호스팅 가용성별 기본 transport — MCP_PUBLIC_URL 세팅됨(호스팅 MCP 가용)=http(무마찰) /
+    미설정(자체호스팅·호스팅 배포 없음)=stdio.
 
-    기존 OSS/SaaS 스위치(``settings.is_ee_enabled``) 재사용 — 신규 플래그 0.
+    E-MCP-OPT S7(선생님 지적 2026-07-04·S3 근본 fix): 예전엔 ``settings.is_ee_enabled``(과금
+    스위치)로 갈랐으나, 이는 틀린 커플링 — EE 꺼진 배포(예: dev 기본값)에서도 호스팅 MCP가 실제로
+    떠 있으면(``MCP_PUBLIC_URL`` 세팅) 그 호스팅을 기본으로 써야 무마찰이 성립한다. 과금/EE 여부와
+    무관하게 "호스팅 MCP가 있느냐"만으로 판정 — ``resolve_mcp_public_url()``(= ``_build_http_config()``
+    non-None 가드)과 동일 신호를 재사용해 판정 신호가 하나로 정합된다.
     """
-    from app.core.config import settings
-
-    return HTTP if settings.is_ee_enabled else STDIO
+    return HTTP if resolve_mcp_public_url() is not None else STDIO
 
 
 def _build_stdio_config(api_key_plaintext: str | None) -> dict:
@@ -79,6 +262,12 @@ def _build_stdio_config(api_key_plaintext: str | None) -> dict:
     안 만들어 verify ``mcp_reachable`` 가 false-negative(통합 dogfood 적출). 따라서 아티팩트에
     ``AGENT_GATEWAY_V2="1"`` 을 박아 신규 에이전트를 **V2 로 통일** — mcp_reachable+acked_seq 정렬로
     verified-green 이 성립한다(서버 무변경·기존 에이전트 무영향).
+
+    E-RECRUIT S21(story 444d1d18, 2026-07-07): PyPI 미게시 동안 ``uvx --from git+<repo>#subdirectory=...``
+    로 우회 emit했었음. OB-PUBLISH(f5e1742d)가 ``sprintable`` 0.1.0을 PyPI에 실게시(dist/콘솔
+    스크립트명 = ``sprintable``, 모듈명은 ``sprintable_mcp`` 그대로) → 이 스토리(d306eb82)가 그
+    우회를 걷어내고 bare ``uvx sprintable`` 로 원복. 로컬에서 ``uvx sprintable`` 실행해 실 PyPI
+    resolve+fail-fast(env 미설정 에러 도달)까지 재확인 완료.
     """
     env: dict[str, str] = {
         "SPRINTABLE_API_URL": resolve_backend_direct_url(),
@@ -91,7 +280,7 @@ def _build_stdio_config(api_key_plaintext: str | None) -> dict:
             "sprintable": {
                 "type": "stdio",
                 "command": "uvx",
-                "args": ["sprintable-mcp"],
+                "args": ["sprintable"],
                 "env": env,
             }
         }
@@ -130,12 +319,18 @@ def build_agent_mcp_config(
 ) -> dict | None:
     """`.mcp.json` 아티팩트 generator — transport 별 SSOT(E-MCP-OPT S3).
 
-    runtime 은 현재 ``claude-code`` 단일(향후 cursor 등 분기 여지). 미지원 값은 호출부(엔드포인트)가
-    400 으로 거른다 — generator 는 항상 canonical 아티팩트를 만든다.
+    E-RECRUIT S5 + 전 런타임 올지원(story 6f6ac081): MCP-native 런타임(``MCP_NATIVE_RUNTIMES`` —
+    transport config 공통, PO 확정)만 `.mcp.json`을 받는다. 그 외(범용 ``connector`` 버킷 +
+    커넥터 전용 5종 ``CONNECTOR_ONLY_RUNTIMES``)는 전부 None(SSE dial-out은 완전 별개 프로토콜이라
+    `.mcp.json` 자체가 성립 안 함 — 호출부가 ``build_connector_guidance()``로 대체). 가드를
+    단일 sentinel(``== CONNECTOR_RUNTIME``) 대신 ``not in MCP_NATIVE_RUNTIMES``로 반전한 이유:
+    전자는 커넥터 전용 5종을 그냥 통과시켜 `.mcp.json`을 오emit했다(PO 크럭스 승인 fix).
 
     ``transport="http"`` 인데 이 환경에 호스팅 배포가 없으면(``MCP_PUBLIC_URL`` 미설정) None 반환 —
     호출부가 이를 "그 변형 생성 불가"로 취급(에러 아님).
     """
+    if runtime not in MCP_NATIVE_RUNTIMES:
+        return None
     if transport == HTTP:
         return _build_http_config(api_key_plaintext)
     return _build_stdio_config(api_key_plaintext)
@@ -151,8 +346,15 @@ def build_agent_mcp_config_bundle(
     ``{"default_transport": ..., "mcp_config": <default 변형>,
     "mcp_config_alternatives": {<다른 transport>: <그 변형>, ...}}``. http 변형이 이 환경에서
     생성 불가(``MCP_PUBLIC_URL`` 미설정)면 alternatives 에서 생략(OSS 는 호스팅 탭 자체가 없음).
+
+    E-RECRUIT S5 + 전 런타임 올지원(story 6f6ac081): MCP-native가 아니면(범용 connector 버킷 +
+    커넥터 전용 5종) mcp_config 자체가 성립 안 하므로 전부 None/빈값(호출부가
+    ``build_connector_guidance()``로 안내 파일을 대신 emit — crash 대신 안전한 no-op).
     """
-    default_transport = default_transport_for_edition()
+    if runtime not in MCP_NATIVE_RUNTIMES:
+        return {"default_transport": None, "mcp_config": None, "mcp_config_alternatives": {}}
+
+    default_transport = default_transport_for_hosting()
     configs = {
         t: build_agent_mcp_config(api_key_plaintext=api_key_plaintext, runtime=runtime, transport=t)
         for t in SUPPORTED_TRANSPORTS

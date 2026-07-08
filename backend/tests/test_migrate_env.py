@@ -91,3 +91,20 @@ def test_migrate_sh_exists_and_has_alembic_check():
     # story bda4beac: ee_pricing(0146/0147)이 core 체인과 분기된 별도 head라 `heads`(복수)로
     # 전환 — dual-head(develop/ee)·single-head(main) 양쪽에서 안전.
     assert "alembic upgrade heads" in content
+
+
+# ── story dbda0baf(E-RECRUIT S13): #1886 EE-stamp 정합 게이트 ─────────────────
+
+def test_migrate_sh_has_ee_stamp_precheck():
+    """migrate.sh가 canonical 진입점 자체에 EE-stamp self-heal 게이트를 포함하는지 —
+    더 이상 별도 수동 override 스크립트(#1886 dev_ee_stamp_precheck.sh)를 기억해뒀다
+    돌릴 필요가 없어야 한다(모든 migrate 실행에서 자동)."""
+    import os
+    path = os.path.join(os.path.dirname(__file__), "..", "scripts", "migrate.sh")
+    content = open(path).read()
+    assert "uq_org_subscriptions_org_id" in content
+    assert "alembic stamp 0147" in content
+    # precheck는 upgrade heads보다 반드시 먼저 실행돼야 한다(순서 자체가 AC).
+    precheck_idx = content.index("uq_org_subscriptions_org_id")
+    upgrade_idx = content.index("alembic upgrade heads")
+    assert precheck_idx < upgrade_idx, "precheck가 upgrade heads보다 먼저 와야 함"

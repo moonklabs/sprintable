@@ -12,6 +12,7 @@ _SCRIPTS = os.path.join(os.path.dirname(__file__), "..", "scripts")
 _DEPLOY = os.path.join(_SCRIPTS, "deploy_backend.sh")
 _DEPLOY_FE = os.path.join(_SCRIPTS, "deploy_frontend.sh")
 _MIGRATE_JOB = os.path.join(_SCRIPTS, "provision_migrate_job.sh")
+_DOCKERFILE = os.path.join(os.path.dirname(__file__), "..", "Dockerfile")
 
 
 def _resolve(script: str, env: str, extra: dict | None = None) -> dict[str, str]:
@@ -93,6 +94,65 @@ def test_migrate_job_dev_prod_separated():
     assert dev["CLOUD_SQL_INSTANCE"] != prod["CLOUD_SQL_INSTANCE"]
     assert dev["ALEMBIC_SECRET_NAME"] != prod["ALEMBIC_SECRET_NAME"]
     assert dev["JOB_NAME"] != prod["JOB_NAME"]
+
+
+# ── story 19754b93(E-RECRUIT S15): 수동 실행 시 COMMIT_SHA 필수(latest-ENV 폴백 제거) ──────
+
+def test_migrate_job_requires_commit_sha_without_dry_run():
+    """COMMIT_SHA 없이 수동(DRY_RUN 아님) 실행 시 stale latest-ENV 태그로 조용히 폴백하지 않고
+    fail-fast — #1886/S13 사고(잡이 코드와 동기화 안 된 이미지를 물고 도는 것)의 재발 방지."""
+    environ = {k: v for k, v in os.environ.items() if k != "COMMIT_SHA"}
+    proc = subprocess.run(
+        ["bash", _MIGRATE_JOB, "dev"], capture_output=True, text=True, env=environ,
+    )
+    assert proc.returncode != 0
+    assert "COMMIT_SHA" in proc.stderr
+
+
+def test_migrate_job_dry_run_works_without_commit_sha():
+    """DRY_RUN=1(검증 목적)은 COMMIT_SHA 없이도 예외적으로 통과 — resolved config 확인용."""
+    environ = {k: v for k, v in os.environ.items() if k != "COMMIT_SHA"}
+    environ["DRY_RUN"] = "1"
+    proc = subprocess.run(
+        ["bash", _MIGRATE_JOB, "dev"], capture_output=True, text=True, env=environ, check=True,
+    )
+    assert "latest-dev" in proc.stdout
+
+
+def test_migrate_job_uses_exact_commit_sha_when_provided():
+    """COMMIT_SHA 제공 시 IMAGE가 정확히 그 태그를 쓰는지(floating latest-ENV 아님)."""
+    cfg = _resolve(_MIGRATE_JOB, "dev", {"COMMIT_SHA": "deadbeef123"})
+    assert cfg["IMAGE"].endswith(":deadbeef123")
+    assert "latest-dev" not in cfg["IMAGE"]
+
+
+# ── story 19754b93(E-RECRUIT S15): Dockerfile uv.lock lock-pin ─────────────────
+
+def test_dockerfile_copies_uv_lock_before_sync():
+    """까심 S13 QA 실측(alembic 1.18.5 vs uv.lock 1.18.4 드리프트): uv.lock을 COPY 안 하면
+    `uv sync`가 pyproject.toml 제약만으로 재resolve해 이미지가 실제로 lock-pin 안 된다."""
+    with open(_DOCKERFILE) as f:
+        lines = f.readlines()
+    # 실 Dockerfile 인스트럭션만(주석 제외) — strip 후 "COPY"로 시작해야 함.
+    copy_lock_idx = next(
+        (i for i, ln in enumerate(lines) if ln.strip().startswith("COPY") and "uv.lock" in ln), None
+    )
+    sync_idx = next(
+        (i for i, ln in enumerate(lines) if ln.strip().startswith("RUN") and "uv sync" in ln), None
+    )
+    assert copy_lock_idx is not None, "Dockerfile이 uv.lock을 COPY하지 않음(lock-pin 무효)"
+    assert sync_idx is not None
+    assert copy_lock_idx < sync_idx, "uv.lock COPY가 uv sync보다 먼저 와야 함"
+
+
+def test_dockerfile_uv_sync_uses_frozen():
+    """--frozen: lock 재계산 없이 uv.lock 그대로만 설치 — pyproject.toml과 어긋나면 조용히
+    재resolve하는 대신 build 자체가 실패해 드리프트를 빌드 타임에 잡는다."""
+    with open(_DOCKERFILE) as f:
+        src = f.read()
+    sync_lines = [ln for ln in src.splitlines() if "uv sync" in ln]
+    assert sync_lines, "uv sync 커맨드를 찾을 수 없음"
+    assert "--frozen" in sync_lines[0], f"--frozen 플래그 누락: {sync_lines[0]!r}"
 
 
 # ── deploy_backend.sh 4결함 fix (cutover 첫 prod 실행서 노출) ────────────────────

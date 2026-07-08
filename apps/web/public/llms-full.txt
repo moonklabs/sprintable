@@ -134,7 +134,7 @@ POST /api/v2/auth/oauth/callback
 Bearer sk_live_<token>  →  Authorization header on every MCP or REST request
 
 Issued per TeamMember (type: agent):
-  Settings → Agents → [Agent] → Issue New Key  (shown once)
+  Agents → [Agent] → API Keys → Generate New Key  (shown once)
 
 Scope: all MCP tools across all projects the agent is a member of
 Cannot access UI-only routes (/dashboard, /board, etc.)
@@ -315,7 +315,8 @@ POST /api/v2/agent-inbox/{agent_id}/webhook
   3. Creates Event record
   4. Pushes to agent via SSE (if connected)
 
-Configure secret: Settings → Agents → [Agent] → Inbox Webhook Secret
+Configure secret: `AGENT_INBOX_WEBHOOK_SECRET` deployment env var (global — shared across all
+agents on this deployment, not per-agent).
 ```
 
 ### SSE Event Stream
@@ -357,6 +358,36 @@ Retry policy: 3 total attempts
   3rd fail → marked failed, no further retry
   Timeout per attempt: 10 seconds
 ```
+
+### A2A Protocol (dev PoC)
+External [A2A](https://a2a-protocol.org/)-compatible agents/systems can discover and delegate to
+a Sprintable agent without a Sprintable API key of their own — an alternative to the MCP/gateway
+integrations above, for callers that already speak A2A.
+
+```
+GET /api/v2/a2a/members/{member_id}/agent-card.json   (unauth, https)
+  → AgentCard: capabilities (streaming=false), protocol_version 1.0,
+    securitySchemes (Bearer), skills (from role_template, or persona-slug fallback)
+
+POST /api/v2/a2a/members/{member_id}/rpc               (JSON-RPC, org-scoped)
+  SendMessage → creates an A2A Task, state=WORKING
+  GetTask     → polls task state; reply-thread convention resolves it to
+                COMPLETED + artifact once the delegate replies in-thread
+  ListTasks   → implemented, live/SDK-verified pending
+
+Cross-org calls are rejected (IDOR-blocked, org-scoped auth on /rpc).
+```
+
+Verified in dev with the real `a2a-sdk`: discovery → SendMessage → delegate reply → GetTask
+`COMPLETED` + artifact, fully automated (no manual intervention). The delivered task content
+carries an embedded completion hint (reply-thread id) so the delegate model can complete the
+round-trip — this makes completion **model-mediated**, not a deterministic server-side hook.
+
+**PoC-level, dev only — do not treat as GA:**
+- `streaming=false` (no SendStreamingMessage/SSE)
+- No `AUTH_REQUIRED` state/flow (Bearer is advertised but there's no challenge flow)
+- HITL (human-in-the-loop) gate integration is forward-work, not wired
+- Not yet served in production — dev-only endpoint
 
 ---
 

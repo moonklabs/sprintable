@@ -17,6 +17,13 @@ def _slugify(value: str) -> str:
     return slug or "persona"
 
 
+# E-RECRUIT S3 QA MEDIUM(config 병합 orphan 키 잔존, story ff2996d0): role_template 유래 config
+# 필드의 단일 소스 — update()가 이 키들을 전량 pop 후 새 값만 재설정(wholesale 교체)한다. 개별
+# if-in-fields 산발 patch였다면 S14 카탈로그 확장으로 필드가 늘 때 "이번엔 안 왔다"를 "그대로
+# 둬라"로 오독해 이전 role 의 값이 orphan 으로 남는다 — 이 상수 하나만 갱신하면 재발 안 함.
+_RECRUIT_CONFIG_KEYS = frozenset({"role_template_id", "tool_allowlist"})
+
+
 def _build_summary(persona: AgentPersona, is_in_use: bool, base: AgentPersona | None = None) -> PersonaSummaryResponse:
     config: dict[str, Any] = persona.config or {}
     base_persona_id = config.get("base_persona_id") if isinstance(config.get("base_persona_id"), str) else None
@@ -135,6 +142,24 @@ class AgentPersonaRepository:
             return None
         return await self._decorate(persona)
 
+    async def get_recruited(
+        self, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID
+    ) -> AgentPersona | None:
+        """E-RECRUIT S3(story ff2996d0) G7: 이 에이전트를 위해 recruit이 이미 만든 persona(있으면
+        정확히 1개 — ``config.role_template_id`` 로 표식) 조회. 재채용/역할변경은 이 행을 upsert
+        한다(수기 생성 persona 와 별개 — 그건 role_template_id 마커가 없다). raw ORM 행 반환(호출부가
+        직접 갱신하거나 rotate 대상 판별에 쓴다 — decorate 불필요한 내부 오케스트레이션용)."""
+        r = await self.session.execute(
+            select(AgentPersona).where(
+                AgentPersona.org_id == org_id,
+                AgentPersona.project_id == project_id,
+                AgentPersona.agent_id == agent_id,
+                AgentPersona.deleted_at.is_(None),
+                AgentPersona.config["role_template_id"].isnot(None),
+            )
+        )
+        return r.scalars().first()
+
     async def create(
         self,
         org_id: uuid.UUID,
@@ -150,6 +175,7 @@ class AgentPersonaRepository:
         base_persona_id: uuid.UUID | None = None,
         tool_allowlist: list[str] | None = None,
         is_default: bool = False,
+        role_template_id: uuid.UUID | None = None,
     ) -> PersonaSummaryResponse:
         if is_default:
             await self._clear_default(org_id, project_id, agent_id)
@@ -159,6 +185,10 @@ class AgentPersonaRepository:
             config["base_persona_id"] = str(base_persona_id)
         if tool_allowlist is not None:
             config["tool_allowlist"] = tool_allowlist
+        # E-RECRUIT S3(story ff2996d0): recruit이 생성한 persona 표식 — 재채용/역할변경 upsert(G7)
+        # 대상 판별에 쓰인다(get_recruited).
+        if role_template_id:
+            config["role_template_id"] = str(role_template_id)
 
         persona = AgentPersona(
             org_id=org_id,
@@ -186,8 +216,14 @@ class AgentPersonaRepository:
         org_id: uuid.UUID,
         project_id: uuid.UUID,
         actor_id: uuid.UUID,
+        force_none_fields: set[str] | None = None,
         **fields: Any,
     ) -> PersonaSummaryResponse | None:
+        """``force_none_fields``: E-RECRUIT S3 QA MEDIUM(persona description stale, story ff2996d0)
+        — 기본은 ``fields[key] is None`` 을 "이 필드 안 건드림"(부분 PATCH 관례, 기존 persona 편집
+        엔드포인트 호출부가 이미 그렇게 pre-filter 함)으로 해석한다. recruit 은 매번 role_template
+        전체를 명시 반영해야 하므로(새 role 의 description 이 None 이면 이전 role 의 description 이
+        잔존하면 안 됨) 이 집합에 있는 키만 None 도 "명시적으로 지워라"로 승격한다."""
         r = await self.session.execute(
             select(AgentPersona).where(
                 AgentPersona.id == persona_id,
@@ -202,21 +238,28 @@ class AgentPersonaRepository:
         if persona.is_builtin:
             raise ValueError("Built-in personas cannot be modified")
 
+        force_none_fields = force_none_fields or set()
+
         config = dict(persona.config or {})
         if "base_persona_id" in fields:
             bpid = fields.pop("base_persona_id")
             config["base_persona_id"] = str(bpid) if bpid else None
-        if "tool_allowlist" in fields:
-            tl = fields.pop("tool_allowlist")
+        if "tool_allowlist" in fields or "role_template_id" in fields:
+            tl = fields.pop("tool_allowlist", None)
+            rtid = fields.pop("role_template_id", None)
+            for key in _RECRUIT_CONFIG_KEYS:
+                config.pop(key, None)
             if tl is not None:
                 config["tool_allowlist"] = tl
+            if rtid:
+                config["role_template_id"] = str(rtid)
 
         if fields.get("is_default"):
             await self._clear_default(org_id, project_id, persona.agent_id, exclude_id=persona_id)
 
         patch: dict[str, Any] = {"config": config, "updated_at": datetime.now(timezone.utc)}
         for key in ("name", "slug", "description", "system_prompt", "style_prompt", "model", "is_default"):
-            if key in fields and fields[key] is not None:
+            if key in fields and (fields[key] is not None or key in force_none_fields):
                 val = fields[key]
                 if key == "name":
                     val = val.strip()

@@ -58,6 +58,23 @@ def test_conversation_message_payload_unchanged_regression():
     assert "안녕" in out["content"] and "conversation_id: c1" in out["content"]
 
 
+def test_message_id_line_reads_own_id_not_thread_id():
+    """버그 fix(story ebd5cf18 크럭스 부수 발견): "message_id:" 라인은 이 메시지 자신의
+    id(payload["message_id"])를 보여야 한다 — 예전엔 payload["thread_id"]를 오라벨해서,
+    thread_id가 항상 None인 루트 메시지(새 A2A task 등)에선 표시가 통째로 사라졌다."""
+    out = to_discord_message_payload({
+        "content": "hi", "conversation_id": "c1", "message_id": "m1", "thread_id": None,
+    })
+    assert "message_id: m1" in out["content"]
+    assert "message_id: None" not in out["content"]
+
+
+def test_message_id_line_absent_when_no_message_id_in_payload():
+    """message_id 자체가 payload에 없으면(예: deliver_injected_event_webhook 경로) 라인 생략."""
+    out = to_discord_message_payload({"content": "hi", "conversation_id": "c1"})
+    assert "message_id:" not in out["content"]
+
+
 # ─── fire_webhooks 통합: discord 변환 + 게이팅 ────────────────────────────────
 
 def _session(configs):

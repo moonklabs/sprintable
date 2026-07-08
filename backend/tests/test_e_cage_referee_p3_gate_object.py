@@ -354,6 +354,81 @@ async def test_transition_rejected_empty_note_graceful():
     assert gate.resolution_note is None
 
 
+# ── HITL crux(story 7726a003) — A2A task INPUT_REQUIRED 복귀(Q3 writer-side resolver) ─────
+
+@pytest.mark.anyio
+async def test_resume_a2a_task_working_on_approve():
+    """연결된 A2ATask(INPUT_REQUIRED)가 있으면 approve 시 WORKING으로 복귀."""
+    from app.services.gate_service import _resume_a2a_task_on_gate_resolve
+
+    gate = MagicMock()
+    gate.id = GATE_ID
+    task = MagicMock()
+    task.state = "TASK_STATE_INPUT_REQUIRED"
+
+    session = AsyncMock()
+    task_r = MagicMock()
+    task_r.scalar_one_or_none.return_value = task
+    session.execute = AsyncMock(return_value=task_r)
+    session.flush = AsyncMock()
+
+    await _resume_a2a_task_on_gate_resolve(session, gate, "approved")
+    assert task.state == "TASK_STATE_WORKING"
+
+
+@pytest.mark.anyio
+async def test_resume_a2a_task_rejected_on_reject():
+    """연결된 A2ATask가 있으면 reject 시 REJECTED(기존 terminal state)로 전이."""
+    from app.services.gate_service import _resume_a2a_task_on_gate_resolve
+
+    gate = MagicMock()
+    gate.id = GATE_ID
+    task = MagicMock()
+    task.state = "TASK_STATE_INPUT_REQUIRED"
+
+    session = AsyncMock()
+    task_r = MagicMock()
+    task_r.scalar_one_or_none.return_value = task
+    session.execute = AsyncMock(return_value=task_r)
+    session.flush = AsyncMock()
+
+    await _resume_a2a_task_on_gate_resolve(session, gate, "rejected")
+    assert task.state == "TASK_STATE_REJECTED"
+
+
+@pytest.mark.anyio
+async def test_resume_a2a_task_noop_when_no_linked_task():
+    """writer 미배선(오늘 기본상태) — 연결된 task가 없으면 no-op·무크래시."""
+    from app.services.gate_service import _resume_a2a_task_on_gate_resolve
+
+    gate = MagicMock()
+    gate.id = GATE_ID
+
+    session = AsyncMock()
+    task_r = MagicMock()
+    task_r.scalar_one_or_none.return_value = None
+    session.execute = AsyncMock(return_value=task_r)
+    session.flush = AsyncMock()
+
+    await _resume_a2a_task_on_gate_resolve(session, gate, "approved")
+    session.flush.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_resume_a2a_task_skips_query_for_non_terminal_status():
+    """new_status가 approved/rejected가 아니면(auto_passed 등) 쿼리조차 안 함."""
+    from app.services.gate_service import _resume_a2a_task_on_gate_resolve
+
+    gate = MagicMock()
+    gate.id = GATE_ID
+
+    session = AsyncMock()
+    session.execute = AsyncMock()
+
+    await _resume_a2a_task_on_gate_resolve(session, gate, "auto_passed")
+    session.execute.assert_not_called()
+
+
 # ── org 격리 ──────────────────────────────────────────────────────────────────
 
 @pytest.mark.anyio
