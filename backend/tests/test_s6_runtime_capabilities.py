@@ -56,11 +56,13 @@ def test_instruction_filename_tiers_and_transport_by_runtime_class():
     tier=full — 범용 connector 버킷(특정 런타임 미확정)만 tier=experimental로 남는다. MCP-native
     4종만 mcp_transport 보유·event_push 지원 — 커넥터 전용 5종+connector는 SSE 경로라 전부 빈값.
 
-    채용-kit 재설계(story b1fe41cf, 선생님 GO 2026-07-08): ``prompt_file``은 이제 런타임 무관
-    단일 파일명(``KIT_FILENAME`` = ``SPRINTABLE_ONBOARDING.md``) — 예전엔 CLAUDE.md/GEMINI.md/
-    AGENTS.md로 런타임별로 갈렸는데, 그 리터럴이 유저의 실제 정체성 파일을 덮어쓰는 버그의
-    원인이라 통일했다."""
-    from app.services.agent_onboarding_config import KIT_FILENAME, list_runtime_capabilities
+    유나 라이브픽셀 발견(2026-07-08, 승격 前 fix): ``prompt_file``은 kit 파일명(KIT_FILENAME=
+    SPRINTABLE_ONBOARDING.md, `agents.py`의 다운로드 아티팩트 — 그건 계속 런타임 무관 단일)이
+    **아니다** — 그 런타임 자신의 기존 정체성 지침 파일명이다(FE STEP4 전달노트 "기존 X 그대로"
+    문구용). #1967/#1974가 이 둘을 conflate해 전 런타임에 SPRINTABLE_ONBOARDING.md를 반환하는
+    자기모순("기존 SPRINTABLE_ONBOARDING.md 그대로" — 방금 새로 놓이는 파일인데 "기존"이라니)
+    버그를 냈다. apps/web/src/services/recruit.ts::RUNTIME_CAPABILITIES_FALLBACK과 값 동기화."""
+    from app.services.agent_onboarding_config import list_runtime_capabilities
 
     caps = {c["slug"]: c for c in list_runtime_capabilities()}
     assert caps["claude-code"]["tier"] == "full"
@@ -68,8 +70,16 @@ def test_instruction_filename_tiers_and_transport_by_runtime_class():
     for slug in ("codex", "cursor", "grok", "pi", "hermes", "openclaw", "opencode"):
         assert caps[slug]["tier"] == "full", slug
     assert caps["connector"]["tier"] == "experimental"
+    assert caps["claude-code"]["prompt_file"] == "CLAUDE.md"
+    assert caps["codex"]["prompt_file"] == "AGENTS.md"
+    assert caps["gemini"]["prompt_file"] == "GEMINI.md"
+    assert caps["connector"]["prompt_file"] == "AGENT_INSTRUCTIONS.md"
+    for slug in ("cursor", "grok", "pi", "hermes", "openclaw", "opencode"):
+        assert caps[slug]["prompt_file"] == "AGENTS.md", slug
     for slug in caps:
-        assert caps[slug]["prompt_file"] == KIT_FILENAME, slug
+        assert caps[slug]["prompt_file"] != "SPRINTABLE_ONBOARDING.md", (
+            f"{slug}: prompt_file must never equal the kit write-target filename"
+        )
 
     for slug in ("claude-code", "codex", "gemini", "cursor"):
         assert caps[slug]["supports_event_push"] is True
