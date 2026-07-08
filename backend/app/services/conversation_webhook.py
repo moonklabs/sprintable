@@ -361,10 +361,13 @@ async def deliver_conversation_message_webhook(
                 delivery_id = delivery.id
                 await db.commit()
 
-                # 별도 세션에서 retry 루프
-                asyncio.ensure_future(
-                    _retry_deliver(delivery_id, wh.url, wh.secret, payload)
-                )
+                # 별도 세션에서 retry 루프. prod 커넥션 누수 근본fix(2026-07-08, 까심 QA #1970
+                # 후속 — 동일 취약 패턴): 참조 미보관 ensure_future는 GC가 `_retry_deliver()`→
+                # `_update_delivery_status()`의 `async with async_session_factory()` 도중 태스크를
+                # 조기수거할 수 있다(webhook retry는 sleep으로 더 오래 pending — 위험 더 큼).
+                # fire_and_forget이 강한 참조를 보관해 이를 막는다.
+                from app.services.pg_pubsub import fire_and_forget
+                fire_and_forget(_retry_deliver(delivery_id, wh.url, wh.secret, payload))
 
         except Exception:
             logger.exception("conversation webhook schedule failed message_id=%s", message_id)

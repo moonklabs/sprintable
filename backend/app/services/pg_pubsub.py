@@ -3,6 +3,19 @@
 S1: publish_event() / _push_to_agent() 내부에서 pg_notify() 호출.
 S2: listen_loop() — 다른 인스턴스의 NOTIFY를 수신해 로컬 큐 디스패치.
 실패 시 로컬 전파는 정상 유지 — graceful degradation.
+
+prod 인시던트 근본fix(2026-07-08, ~2.5h마다 TooManyConnections 재발): `publish_event()`/
+`_push_to_agent()`/`wake_agent()`가 전부 `asyncio.get_running_loop().create_task(pg_notify(...))`
+로 **참조를 보관하지 않고** task를 발사했다 — Python 공식 문서 경고(asyncio.create_task:
+"Save a reference to the result... a task that isn't referenced elsewhere may get garbage
+collected at any time, even before it's done") 그대로, 이벤트 발행이 빈번한 prod에서 GC가
+`pg_notify()`의 `async with async_session_factory()` **도중** 그 Task를 수거하면 세션이
+close() 한 번 못 불리고 사라진다 — 정확히 prod 로그의 "garbage collector is trying to clean
+up non-checked-in connection" 경고와 일치. main.py lifespan의 기존 zombie-cleanup(engine.
+dispose)은 **shutdown 시점**만 다루지 이 **런타임 중 per-event 누수**는 못 잡는다.
+
+`fire_and_forget()`이 강한 참조를 모듈 레벨 set에 보관 + `add_done_callback`으로 완료 시
+제거(공식 문서가 제시하는 정석 패턴) — 모든 pg_notify 발사 지점이 이걸 통해야 한다.
 """
 from __future__ import annotations
 
@@ -10,6 +23,8 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Coroutine
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +33,25 @@ INSTANCE_ID: str = str(uuid.uuid4())
 
 _CHANNEL = "sse_events"
 _MAX_PAYLOAD_BYTES = 7500  # 8KB PG 제한 대비 여유
+
+# prod 커넥션 누수 근본fix — fire-and-forget 태스크의 강한 참조 보관(GC 조기수거 방지).
+_background_tasks: set[asyncio.Task] = set()
+
+
+def fire_and_forget(coro: "Coroutine[Any, Any, Any]") -> None:
+    """asyncio task를 발사하되 완료까지 강한 참조를 유지한다(GC 조기 수거 방지).
+
+    이벤트 루프가 없으면(테스트 등) 조용히 no-op — 기존 호출부들의 `except RuntimeError: pass`
+    관례와 동형(호출부가 개별 try/except를 반복할 필요 없음).
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        coro.close()  # 이벤트 루프 없음 — "coroutine was never awaited" 경고 방지
+        return
+    task = loop.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 # ── NOTIFY 발행 ────────────────────────────────────────────────────────────────
 
@@ -67,10 +101,9 @@ async def pg_notify(
 # ── LISTEN 수신기 ──────────────────────────────────────────────────────────────
 
 def _on_notification(conn: object, pid: int, channel: str, payload_str: str) -> None:
-    """asyncpg 알림 콜백 (sync). 수신 즉시 dispatch task 스케줄."""
+    """asyncpg 알림 콜백 (sync). 수신 즉시 dispatch task 스케줄(fire_and_forget — 참조 보관)."""
     try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_dispatch_received(payload_str))
+        fire_and_forget(_dispatch_received(payload_str))
     except Exception as exc:
         logger.warning("pg_listen dispatch schedule failed: %s", exc)
 
