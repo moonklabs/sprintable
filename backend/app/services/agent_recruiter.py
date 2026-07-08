@@ -232,7 +232,8 @@ def compose_kit(
 
     Args:
         role_template: role_templates 행(또는 동형 속성을 가진 객체) — role_behaviors·
-            default_tool_groups·runtime_overrides 를 속성으로 읽는다(duck-typing).
+            role_behaviors_i18n(선택, 없으면 ko 그대로)·default_tool_groups·runtime_overrides
+            를 속성으로 읽는다(duck-typing).
         runtime: 실행 런타임 식별자.
         locale: "ko"|"en" — 미지원 값은 호출부가 `resolve_locale()`로 정규화해 넘겨야 한다
             (이 함수는 방어적 폴백 없음 — `validate_tool_groups`와 동일한 fail-closed 철학).
@@ -250,10 +251,18 @@ def compose_kit(
     워크플로는 팀이 커스터마이즈하는 유저것이라 고정 텍스트 대신 `sprintable_get_workflow_guide`
     자가-pull 유도만 남긴다. **integration_prompt**(신규) — 정적 주입이 아니라 에이전트 스스로
     메모리에 반영하도록 유도하는 지시문(결정③), 기존 정체성 보존을 명시.
+
+    E-I18N EN 콘텐츠(story d6e3f407, 문서 `en-content-native-generation-crux` §3): section
+    [A](role_behaviors) 데이터도 이제 locale 분기한다 — `role_behaviors_i18n.get(locale) or
+    role_behaviors` 폴백(en 키가 비어있으면 자동 ko). Phase A 시점엔 의도적으로 미분기였으나
+    (§크럭스 §0: role_behaviors_i18n이 그때 전부 빈 `{}`라 소비해봤자 무의미했음), 이제 PR2에서
+    EN 콘텐츠가 채워지면 이 배선이 실효를 갖는다.
     """
+    role_behaviors_i18n = getattr(role_template, "role_behaviors_i18n", None) or {}
+    role_behaviors = role_behaviors_i18n.get(locale) or role_template.role_behaviors
     role_context = (
         _SECTION_A_HEADER[locale].format(name=role_template.name)
-        + f"\n\n{role_template.role_behaviors}"
+        + f"\n\n{role_behaviors}"
     )
 
     onboarding = "\n\n".join([
