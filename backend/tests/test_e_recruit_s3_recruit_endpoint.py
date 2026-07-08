@@ -26,7 +26,7 @@ def _auth_ctx():
 async def test_recruit_404_when_agent_not_found():
     """S19(#8): 이제 agent 존재+ownership 확인이 assert_agent_owner 단일 호출로 합쳐졌다."""
     from fastapi import HTTPException
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -44,7 +44,7 @@ async def test_recruit_404_when_agent_not_found():
 async def test_recruit_403_when_caller_not_owner_or_admin():
     """S19(#8 MUST): agent의 생성자도 org-admin도 아닌 caller는 재채용 불가."""
     from fastapi import HTTPException
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -61,7 +61,7 @@ async def test_recruit_403_when_caller_not_owner_or_admin():
 @pytest.mark.anyio
 async def test_recruit_400_on_unsupported_runtime():
     from fastapi import HTTPException
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -78,7 +78,7 @@ async def test_recruit_400_on_unsupported_runtime():
 @pytest.mark.anyio
 async def test_recruit_404_when_role_template_not_found():
     from fastapi import HTTPException
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -97,7 +97,7 @@ async def test_recruit_404_when_role_template_not_found():
 async def test_recruit_400_when_recruit_agent_raises_value_error():
     """QA MINOR 하드닝: recruit_agent의 fail-closed ValueError가 400으로 매핑되는지(500 아님)."""
     from fastapi import HTTPException
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -109,7 +109,7 @@ async def test_recruit_400_when_recruit_agent_raises_value_error():
          patch("app.routers.agents.recruit_agent", AsyncMock(side_effect=ValueError("unknown group"))):
         with pytest.raises(HTTPException) as ei:
             await recruit_agent_endpoint(
-                uuid.uuid4(), RecruitRequest(role_template_slug="bogus"),
+                uuid.uuid4(), RecruitRequest(role_template_slug="bogus"), accept_language=None,
                 session=session, auth=_auth_ctx(), org_id=uuid.uuid4(),
             )
     assert ei.value.status_code == 400
@@ -117,7 +117,7 @@ async def test_recruit_400_when_recruit_agent_raises_value_error():
 
 @pytest.mark.anyio
 async def test_recruit_success_response_shape():
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -143,7 +143,7 @@ async def test_recruit_success_response_shape():
          patch("app.routers.agents.build_agent_mcp_config_bundle", MagicMock(return_value=bundle)), \
          patch("app.routers.agents.emit_onboarding_event", AsyncMock()):
         response = await recruit_agent_endpoint(
-            agent_id, RecruitRequest(role_template_slug="backend"),
+            agent_id, RecruitRequest(role_template_slug="backend"), accept_language=None,
             session=session, auth=_auth_ctx(), org_id=uuid.uuid4(),
         )
 
@@ -163,7 +163,7 @@ async def test_recruit_success_connector_only_runtime_mcp_config_null_no_crash(r
     """전 런타임 올지원(story 6f6ac081): 커넥터 전용 5종으로 recruit() — 실 SUPPORTED_RUNTIMES
     가드 통과(400 아님) + 실 build_agent_mcp_config_bundle(mock 아님)이 mcp_config=None을
     반환해도 응답 구성이 크래시 없이 완료돼야 한다."""
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -183,7 +183,7 @@ async def test_recruit_success_connector_only_runtime_mcp_config_null_no_crash(r
          patch("app.routers.agents.recruit_agent", AsyncMock(return_value=recruit_result)), \
          patch("app.routers.agents.emit_onboarding_event", AsyncMock()):
         response = await recruit_agent_endpoint(
-            agent_id, RecruitRequest(role_template_slug="backend", runtime=runtime),
+            agent_id, RecruitRequest(role_template_slug="backend", runtime=runtime), accept_language=None,
             session=session, auth=_auth_ctx(), org_id=uuid.uuid4(),
         )
 
@@ -191,3 +191,62 @@ async def test_recruit_success_connector_only_runtime_mcp_config_null_no_crash(r
     assert response["mcp_config"] is None
     assert response["mcp_config_alternatives"] == {}
     session.commit.assert_awaited_once()
+
+
+# ── E-I18N Phase C(story 11f1087c) — locale 소스 배선(body.locale → Accept-Language 폴백) ──
+
+async def _recruit_with_locale(body, accept_language=None):
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
+
+    session = MagicMock()
+    session.commit = AsyncMock()
+    agent_id = uuid.uuid4()
+    member = SimpleNamespace(id=agent_id, project_id=uuid.uuid4())
+    role_template = SimpleNamespace(slug="backend", default_tool_groups=["stories", "tasks"])
+    persona = SimpleNamespace(id=uuid.uuid4(), system_prompt="합성된 지침 텍스트")
+    recruit_result = {
+        "persona": persona,
+        "api_key_plaintext": "sk_live_deadbeef",
+        "tool_allowlist": ["stories", "tasks"],
+    }
+    recruit_mock = AsyncMock(return_value=recruit_result)
+    with patch("app.routers.agents.assert_agent_owner", AsyncMock(return_value=member)), \
+         patch("app.routers.agents.get_published_role_template", AsyncMock(return_value=role_template)), \
+         patch("app.routers.agents.recruit_agent", recruit_mock), \
+         patch("app.routers.agents.emit_onboarding_event", AsyncMock()):
+        await recruit_agent_endpoint(
+            agent_id, body, accept_language=accept_language,
+            session=session, auth=_auth_ctx(), org_id=uuid.uuid4(),
+        )
+    return recruit_mock
+
+
+@pytest.mark.anyio
+async def test_recruit_locale_explicit_body_field_wins_over_header():
+    from app.schemas.recruit import RecruitRequest
+
+    recruit_mock = await _recruit_with_locale(
+        RecruitRequest(role_template_slug="backend", locale="en"),
+        accept_language="ko-KR,ko;q=0.9",
+    )
+    assert recruit_mock.call_args.kwargs["locale"] == "en"
+
+
+@pytest.mark.anyio
+async def test_recruit_locale_falls_back_to_accept_language_header():
+    from app.schemas.recruit import RecruitRequest
+
+    recruit_mock = await _recruit_with_locale(
+        RecruitRequest(role_template_slug="backend"),
+        accept_language="en-US,en;q=0.9",
+    )
+    assert recruit_mock.call_args.kwargs["locale"] == "en"
+
+
+@pytest.mark.anyio
+async def test_recruit_locale_no_signal_defaults_to_korean_backward_compatible():
+    """body.locale도 Accept-Language도 없으면(기존 FE 무변경 호출) 예전과 동일하게 ko."""
+    from app.schemas.recruit import RecruitRequest
+
+    recruit_mock = await _recruit_with_locale(RecruitRequest(role_template_slug="backend"))
+    assert recruit_mock.call_args.kwargs["locale"] == "ko"

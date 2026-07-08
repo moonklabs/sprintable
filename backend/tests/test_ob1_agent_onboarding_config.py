@@ -86,12 +86,13 @@ def _db_returning(member):
 
 @pytest.mark.anyio
 async def test_connection_artifact_returns_stdio_with_placeholder():
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     agent_id = uuid.uuid4()
     db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
     out = await get_agent_connection_artifact(
-        agent_id, runtime="claude-code", session=db, auth=MagicMock(), org_id=uuid.uuid4()
+        agent_id, runtime="claude-code", accept_language=None,
+        session=db, auth=MagicMock(), org_id=uuid.uuid4()
     )
     # E-RECRUIT S5 BE↔FE 계약(story 4fca5a3e): {files[], mcp_config, api_key, agent_id, runtime}
     assert out["agent_id"] == str(agent_id)
@@ -116,7 +117,7 @@ async def test_connection_artifact_with_persona_emits_instruction_file():
     거치므로, 이 라우터-계층 테스트는 그 메서드 자체를 patch(반환값만 확인)한다 — 실 DB 조회
     시맨틱은 별도 realdb 테스트가 검증."""
     from unittest.mock import patch
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     agent_id = uuid.uuid4()
     # 까심 QA RC(S5): is_default=True 명시 — list()의 정렬 순서([0])만으론 default 보장 안 됨.
@@ -128,7 +129,8 @@ async def test_connection_artifact_with_persona_emits_instruction_file():
         new_callable=AsyncMock, return_value=[persona],
     ):
         out = await get_agent_connection_artifact(
-            agent_id, runtime="claude-code", session=db, auth=MagicMock(), org_id=uuid.uuid4()
+            agent_id, runtime="claude-code", accept_language=None,
+            session=db, auth=MagicMock(), org_id=uuid.uuid4()
         )
     assert len(out["files"]) == 2
     filenames = {f["filename"] for f in out["files"]}
@@ -142,7 +144,7 @@ async def test_connection_artifact_non_default_persona_omits_instruction_file():
     """까심 QA RC(S5): personas[0]가 is_default=False면(list() 정렬만으론 default 안 보장) 지침
     파일을 emit하면 안 됨 — 안전 fallback으로 생략(.mcp.json만)."""
     from unittest.mock import patch
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     agent_id = uuid.uuid4()
     persona = SimpleNamespace(resolved_system_prompt="이건 authoritative 아님.", is_default=False)
@@ -153,7 +155,8 @@ async def test_connection_artifact_non_default_persona_omits_instruction_file():
         new_callable=AsyncMock, return_value=[persona],
     ):
         out = await get_agent_connection_artifact(
-            agent_id, runtime="claude-code", session=db, auth=MagicMock(), org_id=uuid.uuid4()
+            agent_id, runtime="claude-code", accept_language=None,
+            session=db, auth=MagicMock(), org_id=uuid.uuid4()
         )
     assert len(out["files"]) == 1
     assert out["files"][0]["filename"] == ".mcp.json"
@@ -162,17 +165,63 @@ async def test_connection_artifact_non_default_persona_omits_instruction_file():
 @pytest.mark.anyio
 async def test_connection_artifact_connector_runtime_returns_pointer_only():
     """Q2(PO 확정): connector 런타임은 `.mcp.json` 없이 포인터/안내 파일만."""
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     agent_id = uuid.uuid4()
     db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
     out = await get_agent_connection_artifact(
-        agent_id, runtime="connector", session=db, auth=MagicMock(), org_id=uuid.uuid4()
+        agent_id, runtime="connector", accept_language=None,
+        session=db, auth=MagicMock(), org_id=uuid.uuid4()
     )
     assert out["mcp_config"] is None
     assert len(out["files"]) == 1
     assert out["files"][0]["filename"] == "CONNECTOR_SETUP.md"
     assert "connectors/" in out["files"][0]["content"]
+
+
+@pytest.mark.anyio
+async def test_connection_artifact_connector_guidance_locale_from_explicit_query():
+    """E-I18N Phase C: locale 쿼리 파라미터가 CONNECTOR_SETUP.md 내용에 반영."""
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
+
+    agent_id = uuid.uuid4()
+    db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
+    out = await get_agent_connection_artifact(
+        agent_id, runtime="grok", locale="en", session=db, auth=MagicMock(), org_id=uuid.uuid4()
+    )
+    content = out["files"][0]["content"]
+    assert "# Sprintable Connector Guide" in content
+    assert "# Sprintable Connector 안내" not in content
+
+
+@pytest.mark.anyio
+async def test_connection_artifact_connector_guidance_locale_from_accept_language_fallback():
+    """locale 쿼리 미지정 시 Accept-Language 헤더로 폴백."""
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
+
+    agent_id = uuid.uuid4()
+    db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
+    out = await get_agent_connection_artifact(
+        agent_id, runtime="grok", accept_language="en-US,en;q=0.9",
+        session=db, auth=MagicMock(), org_id=uuid.uuid4(),
+    )
+    content = out["files"][0]["content"]
+    assert "# Sprintable Connector Guide" in content
+
+
+@pytest.mark.anyio
+async def test_connection_artifact_connector_guidance_no_locale_signal_stays_korean():
+    """locale도 Accept-Language도 없으면(기존 호출부 무변경) 기존과 동일한 한글 출력."""
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
+
+    agent_id = uuid.uuid4()
+    db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
+    out = await get_agent_connection_artifact(
+        agent_id, runtime="grok", accept_language=None,
+        session=db, auth=MagicMock(), org_id=uuid.uuid4()
+    )
+    content = out["files"][0]["content"]
+    assert "# Sprintable Connector 안내" in content
 
 
 @pytest.mark.anyio
@@ -182,7 +231,7 @@ async def test_connection_artifact_unsupported_runtime_400():
     문자열에만 여전히 걸려야 한다(방어 가드 자체는 무회귀)."""
     from fastapi import HTTPException
 
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
     with pytest.raises(HTTPException) as ei:
         await get_agent_connection_artifact(
             uuid.uuid4(), runtime="totally-unknown-runtime", session=AsyncMock(),
@@ -195,11 +244,12 @@ async def test_connection_artifact_unsupported_runtime_400():
 async def test_connection_artifact_not_found_404():
     from fastapi import HTTPException
 
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
     db = _db_returning(None)
     with pytest.raises(HTTPException) as ei:
         await get_agent_connection_artifact(
-            uuid.uuid4(), runtime="claude-code", session=db, auth=MagicMock(), org_id=uuid.uuid4()
+            uuid.uuid4(), runtime="claude-code", accept_language=None,
+            session=db, auth=MagicMock(), org_id=uuid.uuid4()
         )
     assert ei.value.status_code == 404
 
@@ -227,3 +277,74 @@ def test_default_locale_is_korean():
     """FE 기본값(en, "방문자 신호 0"용)과 의도적으로 다르다 — BE는 오늘 실 콘텐츠가 있는
     locale(ko)이 안전한 폴백(en 콘텐츠는 아직 없음, Phase A 스코프)."""
     assert gen.DEFAULT_LOCALE == "ko"
+
+
+# ── E-I18N Phase C(story 11f1087c) — locale 소스 배선(FE 명시→Accept-Language 폴백) ──────
+
+def test_resolve_locale_from_request_prefers_explicit_over_header():
+    assert gen.resolve_locale_from_request("en", "ko-KR,ko;q=0.9") == "en"
+
+
+def test_resolve_locale_from_request_falls_back_to_accept_language_header():
+    assert gen.resolve_locale_from_request(None, "en-US,en;q=0.9,ko;q=0.8") == "en"
+    assert gen.resolve_locale_from_request(None, "ko-KR,ko;q=0.9") == "ko"
+
+
+def test_resolve_locale_from_request_ignores_unsupported_header_tags():
+    """Accept-Language가 미지원 언어들뿐이면(fr 등) DEFAULT_LOCALE로 폴백 — 크래시 없음."""
+    assert gen.resolve_locale_from_request(None, "fr-FR,fr;q=0.9,de;q=0.8") == gen.DEFAULT_LOCALE
+
+
+def test_resolve_locale_from_request_no_signal_falls_back_to_default():
+    assert gen.resolve_locale_from_request(None, None) == gen.DEFAULT_LOCALE
+
+
+def test_resolve_locale_from_request_explicit_unsupported_falls_back_to_default():
+    """explicit이 있어도 미지원 값이면(resolve_locale 위임) DEFAULT_LOCALE — 헤더로 폴백하지
+    않는다(명시 전달 우선순위가 명확히 이겼으면 그 판단을 신뢰, 헤더 재시도는 안 함)."""
+    assert gen.resolve_locale_from_request("fr", "en-US,en;q=0.9") == gen.DEFAULT_LOCALE
+
+
+# ── E-I18N Phase C — build_connector_guidance locale 분기 ──────────────────────────
+
+def test_build_connector_guidance_default_locale_is_korean_backward_compatible():
+    """까심 QA MUST-FIX(2026-07-08, #1966): substring만 체크하면 dict화 과정에서 원문 줄바꿈이
+    사라지는 byte-diff를 못 잡는다(실제로 한 번 놓쳤다) — default-ko 출력이 dict화 이전 원문
+    리터럴과 정확히 byte-identical 인지 직접 assert한다."""
+    out = gen.build_connector_guidance("grok")
+    expected = "\n".join([
+        "# Sprintable Connector 안내",
+        "",
+        "(선택한 런타임: grok)",
+        "Claude Code/Codex/Gemini/Cursor 처럼 MCP를 네이티브 지원하지 않는 런타임은 별도 SSE",
+        "커넥터 어댑터로 연결합니다 — `.mcp.json`이 아니라 `connectors/{runtime}-sprintable/` 폴더의",
+        "어댑터를 사용해 서버에 아웃바운드로 접속합니다(인바운드 도메인/웹훅 불필요).",
+        "",
+        "## 사용 가능한 어댑터",
+        "`connectors/` 레포 경로 아래 각 폴더가 자기완결(self-contained) 어댑터입니다:",
+        "hermes-sprintable · openclaw-sprintable · opencode-sprintable · grok-sprintable ·",
+        "pi-sprintable · codex-sprintable · cursor-sprintable · gemini-sprintable",
+        "",
+        "## 설정",
+        "1. 위 폴더 중 사용 중인 런타임에 맞는 폴더를 복사하세요(각 폴더는 sibling import 없이",
+        "   독립 동작합니다).",
+        "2. 폴더의 `README.md` 안내대로 `AGENT_API_KEY`(이 에이전트의 scoped key) 등 env를 설정하세요.",
+        "3. 어댑터를 런타임 호스트에서 직접 실행하세요(호스팅 실행은 지원하지 않음 — 설치/실행은",
+        "   사용자 수동).",
+    ])
+    assert out == expected
+
+
+def test_build_connector_guidance_english_locale():
+    out = gen.build_connector_guidance("grok", locale="en")
+    assert "# Sprintable Connector Guide" in out
+    assert "(Selected runtime: grok)" in out
+    assert "## Available Adapters" in out
+    assert "## Setup" in out
+    assert "# Sprintable Connector 안내" not in out
+    assert "선택한 런타임" not in out
+
+
+def test_build_connector_guidance_unsupported_locale_falls_back_to_default():
+    out = gen.build_connector_guidance(locale="fr")
+    assert "# Sprintable Connector 안내" in out

@@ -14,6 +14,7 @@ README·onboarding-form·in-app docs·로컬 buildMcpConfig 4갈래로 흩어져
 from __future__ import annotations
 
 import os
+from typing import Any
 
 DEFAULT_RUNTIME = "claude-code"
 # 전 런타임 올지원(story 6f6ac081, 문서 `runtime-full-support-firstclass-crux`, PO GO
@@ -42,6 +43,25 @@ DEFAULT_LOCALE = "ko"
 def resolve_locale(locale: str | None) -> str:
     """미지원/None locale → DEFAULT_LOCALE 폴백(크래시 없이 항상 유효한 locale 반환)."""
     return locale if locale in SUPPORTED_LOCALES else DEFAULT_LOCALE
+
+
+def resolve_locale_from_request(explicit: str | None, accept_language: str | None) -> str:
+    """E-I18N Phase C(story 11f1087c, 문서 `i18n-architecture-design-crux` §1 결정 (a)+(b)):
+    콘텐츠-생성 엔드포인트의 locale 소스 우선순위 — ① FE가 명시 전달한 ``locale``(자기
+    next-intl locale 쿠키값, 가장 정확) ② 없으면 ``Accept-Language`` 헤더에서 유도(브라우저
+    기본 — FE 미변경 클라이언트에도 무회귀 폴백) ③ 그래도 없으면 ``DEFAULT_LOCALE``.
+
+    DB 영속 저장 없음(request-scoped) — org/user에 locale 컬럼을 두지 않는다는 crux 결정과 동형
+    (FE도 쿠키만 쓰고 DB엔 안 둔다 — 대칭 유지).
+    """
+    if explicit:
+        return resolve_locale(explicit)
+    if accept_language:
+        for tag in accept_language.split(","):
+            primary = tag.split(";", 1)[0].strip().split("-", 1)[0].lower()
+            if primary in SUPPORTED_LOCALES:
+                return primary
+    return DEFAULT_LOCALE
 
 # E-RECRUIT S5 G4 + 전 런타임 올지원(story 6f6ac081) — 런타임별 자율 운영 지침 파일명. 공식
 # 문서 실측(추측 0, crux doc에 출처 전부 명시): codex/cursor/grok/pi/hermes/openclaw/opencode
@@ -123,31 +143,66 @@ def list_runtime_capabilities() -> list[dict]:
     return out
 
 
-def build_connector_guidance(runtime_hint: str | None = None) -> str:
+_CONNECTOR_GUIDANCE_TEXT: dict[str, dict[str, Any]] = {
+    "ko": {
+        "title": "# Sprintable Connector 안내",
+        "intro": [
+            "Claude Code/Codex/Gemini/Cursor 처럼 MCP를 네이티브 지원하지 않는 런타임은 별도 SSE",
+            "커넥터 어댑터로 연결합니다 — `.mcp.json`이 아니라 `connectors/{runtime}-sprintable/` 폴더의",
+            "어댑터를 사용해 서버에 아웃바운드로 접속합니다(인바운드 도메인/웹훅 불필요).",
+        ],
+        "adapters_heading": "## 사용 가능한 어댑터",
+        "adapters_intro": "`connectors/` 레포 경로 아래 각 폴더가 자기완결(self-contained) 어댑터입니다:",
+        "setup_heading": "## 설정",
+        # 까심 QA MUST-FIX(2026-07-08, #1966): dict화 전 원문의 줄바꿈(1·3번 항목이 2줄로
+        # 쪼개져 있었음)을 그대로 보존 — PR이 "default-ko 100% 무변경"이라 주장했는데 실제로는
+        # 한 줄로 합쳐져 byte-diff가 있었다. 여기 임베드된 "\n   "이 원문 join 결과를 재현한다.
+        "setup_steps": [
+            "위 폴더 중 사용 중인 런타임에 맞는 폴더를 복사하세요(각 폴더는 sibling import 없이\n   독립 동작합니다).",
+            "폴더의 `README.md` 안내대로 `AGENT_API_KEY`(이 에이전트의 scoped key) 등 env를 설정하세요.",
+            "어댑터를 런타임 호스트에서 직접 실행하세요(호스팅 실행은 지원하지 않음 — 설치/실행은\n   사용자 수동).",
+        ],
+        "runtime_hint": "(선택한 런타임: {runtime})",
+    },
+    "en": {
+        "title": "# Sprintable Connector Guide",
+        "intro": [
+            "Runtimes that don't natively support MCP (e.g. Claude Code/Codex/Gemini/Cursor don't",
+            "need this — this is for the rest) connect via a separate SSE connector adapter instead",
+            "of `.mcp.json` — the adapter in `connectors/{runtime}-sprintable/` dials out to the",
+            "server (no inbound domain/webhook needed).",
+        ],
+        "adapters_heading": "## Available Adapters",
+        "adapters_intro": "Each folder under the `connectors/` repo path is a self-contained adapter:",
+        "setup_heading": "## Setup",
+        "setup_steps": [
+            "Copy the folder matching your runtime (each folder is self-contained, no sibling imports).",
+            "Set env vars per the folder's `README.md` (including `AGENT_API_KEY`, this agent's scoped key).",
+            "Run the adapter yourself on your runtime host (hosted execution isn't supported — install/run manually).",
+        ],
+        "runtime_hint": "(Selected runtime: {runtime})",
+    },
+}
+
+
+def build_connector_guidance(runtime_hint: str | None = None, locale: str = DEFAULT_LOCALE) -> str:
     """E-RECRUIT S5 Q2(PO 확정): connector 분기 = **포인터/안내만**(SSE dial-out은 `.mcp.json`과
     완전 별개 프로토콜 — 실제 어댑터 조립은 S7/후속). `connectors/{runtime}-sprintable/` 각 폴더의
-    README가 5조 계약(SSE dial-out·turn 주입·응답·ack·에러)을 담고 있어 여기선 안내만 재생산한다."""
-    lines = [
-        "# Sprintable Connector 안내",
-        "",
-        "Claude Code/Codex/Gemini/Cursor 처럼 MCP를 네이티브 지원하지 않는 런타임은 별도 SSE",
-        "커넥터 어댑터로 연결합니다 — `.mcp.json`이 아니라 `connectors/{runtime}-sprintable/` 폴더의",
-        "어댑터를 사용해 서버에 아웃바운드로 접속합니다(인바운드 도메인/웹훅 불필요).",
-        "",
-        "## 사용 가능한 어댑터",
-        "`connectors/` 레포 경로 아래 각 폴더가 자기완결(self-contained) 어댑터입니다:",
+    README가 5조 계약(SSE dial-out·turn 주입·응답·ack·에러)을 담고 있어 여기선 안내만 재생산한다.
+
+    E-I18N Phase C(story 11f1087c) — locale 분기(compose_prompt류와 동형 dict 패턴). 기본값
+    ``DEFAULT_LOCALE``이라 기존 호출부(locale 인자 없이 호출)는 **byte-identical** 하위호환
+    (까심 QA MUST-FIX: dict화 시 실수로 원문 줄바꿈이 사라졌던 걸 복원 — 아래 realdb 테스트가
+    아니라 유닛 테스트가 원문 리터럴과 정확히 일치하는지 직접 assert한다).
+    """
+    text = _CONNECTOR_GUIDANCE_TEXT[resolve_locale(locale)]
+    lines = [text["title"], "", *text["intro"], "", text["adapters_heading"], text["adapters_intro"],
         "hermes-sprintable · openclaw-sprintable · opencode-sprintable · grok-sprintable ·",
         "pi-sprintable · codex-sprintable · cursor-sprintable · gemini-sprintable",
-        "",
-        "## 설정",
-        "1. 위 폴더 중 사용 중인 런타임에 맞는 폴더를 복사하세요(각 폴더는 sibling import 없이",
-        "   독립 동작합니다).",
-        "2. 폴더의 `README.md` 안내대로 `AGENT_API_KEY`(이 에이전트의 scoped key) 등 env를 설정하세요.",
-        "3. 어댑터를 런타임 호스트에서 직접 실행하세요(호스팅 실행은 지원하지 않음 — 설치/실행은",
-        "   사용자 수동).",
-    ]
+        "", text["setup_heading"]]
+    lines += [f"{i}. {step}" for i, step in enumerate(text["setup_steps"], 1)]
     if runtime_hint:
-        lines.insert(2, f"(선택한 런타임: {runtime_hint})")
+        lines.insert(2, text["runtime_hint"].format(runtime=runtime_hint))
     return "\n".join(lines)
 
 _LOCAL_FALLBACK_URL = "http://localhost:8000"

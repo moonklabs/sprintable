@@ -10,7 +10,7 @@ import json
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +32,7 @@ from app.services.agent_onboarding_config import (
     build_connector_guidance,
     default_transport_for_hosting,
     resolve_instruction_filename,
+    resolve_locale_from_request,
 )
 from app.services.agent_verify import get_verification_state, start_verification
 from app.services.onboarding_funnel import emit_onboarding_event, safe_key_prefix
@@ -153,6 +154,8 @@ async def get_agent_connection_artifact(
     agent_id: uuid.UUID,
     runtime: str = DEFAULT_RUNTIME,
     transport: str | None = None,
+    locale: str | None = None,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -177,9 +180,42 @@ async def get_agent_connection_artifact(
     단일 파일에서 ``{files[], mcp_config, api_key}``(``api_key`` 는 GET 이라 placeholder 뿐)로
     교체 — S4 채용관 번들 프리뷰(파일 3종)와 recruit(S3) 응답 shape 에 맞춘다(G2: 재방문 시
     placeholder만·실키는 recruit 시점 1회).
+
+    E-I18N Phase C(story 11f1087c): ``locale`` 쿼리(명시)→``Accept-Language`` 헤더(폴백) 순으로
+    정규화해 ``build_connector_guidance()``(CONNECTOR_SETUP.md)에만 적용 — 이미 채용 시점에
+    확정 locale로 저장된 ``resolved_system_prompt``(persona 파일)는 재합성하지 않는다(그 값은
+    recruit() 호출 당시 locale의 정확한 기록이라, 여기서 다시 손대면 오히려 왜곡).
+
+    까심 QA CI FAILURE(2026-07-08, 근본 fix): ``accept_language``의 ``Header()`` DI 마커는
+    FastAPI ASGI 파이프라인을 통해서만 plain str/None으로 풀린다 — 이 함수를 realdb 테스트처럼
+    **Python에서 직접 호출**하면 ``Header`` 객체 그대로 남아 ``resolve_locale_from_request()``가
+    ``.split()``에서 AttributeError로 죽는다(HTTP 경로만 통과하는 QA로는 안 잡힘). 그래서 실제
+    로직은 Header() 마커가 전혀 없는 ``_connection_artifact()``(plain str만 받음)로 옮기고, 이
+    라우트 함수는 얇은 위임만 한다 — 직접-호출 테스트는 ``_connection_artifact``를 불러야 한다
+    (Header DI는 라우트 경계에서만 받는다는 원칙).
     """
+    return await _connection_artifact(
+        agent_id, runtime, transport, locale, accept_language,
+        session=session, auth=auth, org_id=org_id,
+    )
+
+
+async def _connection_artifact(
+    agent_id: uuid.UUID,
+    runtime: str = DEFAULT_RUNTIME,
+    transport: str | None = None,
+    locale: str | None = None,
+    accept_language: str | None = None,
+    *,
+    session: AsyncSession,
+    auth: AuthContext,
+    org_id: uuid.UUID,
+) -> dict:
+    """``get_agent_connection_artifact`` 실 로직 — Header() DI 마커 없음(plain str만).
+    직접-호출(realdb·유닛 테스트)은 이 함수를 부른다."""
     if runtime not in SUPPORTED_RUNTIMES:
         raise HTTPException(status_code=400, detail=f"unsupported runtime: {runtime}")
+    resolved_locale = resolve_locale_from_request(locale, accept_language)
 
     member = (await session.execute(
         select(TeamMember).where(
@@ -218,7 +254,10 @@ async def get_agent_connection_artifact(
         # 반전한 이유: 전자는 커넥터 전용 5종을 그냥 통과시켜 `.mcp.json`을 오emit했다.
         resolved_transport = None
         mcp_config: dict | None = None
-        files.append({"filename": "CONNECTOR_SETUP.md", "content": build_connector_guidance(runtime)})
+        files.append({
+            "filename": "CONNECTOR_SETUP.md",
+            "content": build_connector_guidance(runtime, resolved_locale),
+        })
     else:
         resolved_transport = transport or default_transport_for_hosting()
         if resolved_transport not in SUPPORTED_TRANSPORTS:
@@ -266,6 +305,7 @@ async def _fetch_org_agent(session: AsyncSession, agent_id: uuid.UUID, org_id: u
 async def recruit_agent_endpoint(
     agent_id: uuid.UUID,
     body: RecruitRequest,
+    accept_language: str | None = Header(None, alias="Accept-Language"),
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -280,7 +320,32 @@ async def recruit_agent_endpoint(
     확인이 없어 — org 내 임의 멤버가 자신이 만들지도 관리자도 아닌 agent를 재채용(키 로테이션+
     role/system_prompt 변경, 채용 엔드포인트 자체 탈취)할 수 있었다. team_members.py 업데이트/
     deactivate와 동일한 `assert_agent_owner`(생성자 또는 org-admin)로 닫는다.
+
+    E-I18N Phase C(story 11f1087c): ``body.locale``(FE 명시 전달)→``Accept-Language`` 헤더(폴백)
+    순으로 정규화해 ``compose_prompt``에 배선 — 이 시점에 확정된 locale이 persona에 영속 기록된다
+    (재채용 시 다른 locale로 다시 부르면 그 값으로 덮어씀, DB에 별도 locale 컬럼은 없음).
+
+    까심 QA CI FAILURE 후속(2026-07-08, connection-artifact와 동형 근본 fix 선제 적용): Header()
+    DI 마커는 라우트 경계에서만 받고, 실 로직은 plain str만 받는 ``_recruit_agent_endpoint()``로
+    분리 — 직접-호출 테스트가 FastAPI ASGI 파이프라인을 안 거쳐도 Header sentinel leak이 날 수
+    없다.
     """
+    return await _recruit_agent_endpoint(
+        agent_id, body, accept_language, session=session, auth=auth, org_id=org_id,
+    )
+
+
+async def _recruit_agent_endpoint(
+    agent_id: uuid.UUID,
+    body: RecruitRequest,
+    accept_language: str | None = None,
+    *,
+    session: AsyncSession,
+    auth: AuthContext,
+    org_id: uuid.UUID,
+) -> dict:
+    """``recruit_agent_endpoint`` 실 로직 — Header() DI 마커 없음(plain str만).
+    직접-호출(realdb·유닛 테스트)은 이 함수를 부른다."""
     member = await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
 
     if body.runtime not in SUPPORTED_RUNTIMES:
@@ -290,6 +355,7 @@ async def recruit_agent_endpoint(
     if role_template is None:
         raise HTTPException(status_code=404, detail="role_template not found")
 
+    resolved_locale = resolve_locale_from_request(body.locale, accept_language)
     try:
         result = await recruit_agent(
             session,
@@ -298,6 +364,7 @@ async def recruit_agent_endpoint(
             role_template=role_template,
             runtime=body.runtime,
             actor_id=uuid.UUID(auth.user_id),
+            locale=resolved_locale,
         )
     except ValueError as exc:
         # validate_tool_groups fail-closed(QA MINOR 하드닝) — 오염된 role_template 데이터 400.
