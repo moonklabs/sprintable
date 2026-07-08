@@ -13,7 +13,11 @@ import pytest
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
-pytestmark = pytest.mark.destructive_schema
+# CI 회귀(2026-07-08): destructive_schema 마커 안 씀 — 이 테스트는 Base.metadata.create_all/
+# drop_all로 스키마를 자체 관리하지 않는다(순수 SELECT, 마이그레이션이 이미 심은 role_templates
+# 데이터를 읽기만 함). destructive_schema로 마킹하면 CI가 격리된 미마이그 fresh DB(sprintable_
+# test_iso, alembic 미실행)를 배정해 role_templates 테이블 자체가 없어 UndefinedTableError.
+# 이 테스트는 "alembic upgrade heads가 이미 실행된 공유 DB"(non-destructive 버킷)를 전제한다.
 
 
 @pytest.fixture
