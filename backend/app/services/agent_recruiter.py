@@ -216,6 +216,11 @@ def compose_prompt(
     locale 분기했다. section [A](role_template.role_behaviors, DB 데이터)는 아직 한글 그대로
     — Phase B(스키마: role_behaviors_i18n)+후속(번역 콘텐츠, [[no-pr-for-data]] 게이트) 이후
     이 함수가 그 컬럼을 locale로 선택하도록 다시 손볼 예정(오늘은 미적용, 의도적).
+
+    까심 QA 후속(같은 날): section [B]가 recipe를 포함할 때 호출하는 `_generate_guide()`
+    (workflow_recipes.py)의 고정 구조 문자열도 locale 분기 완료 — [B] 전체가 이제 고정
+    문자열 기준 완전 locale화(recipe DATA 자체, 즉 `name`/`description`/`step.label`/
+    `step.action`은 여전히 미분기 — workflow_recipes 자체 i18n = 별도 트랙, 의도적 범위 밖).
     """
     sections = [
         _SECTION_A_HEADER[locale].format(name=role_template.name)
@@ -225,7 +230,7 @@ def compose_prompt(
     guide_text = _SECTION_B_TEXT[locale]
     guide_section = [guide_text["heading"]]
     if recipe is not None:
-        guide_section.append(_generate_guide(recipe))
+        guide_section.append(_generate_guide(recipe, locale))
     guide_section.append(guide_text["footer"])
     sections.append("\n".join(guide_section))
 

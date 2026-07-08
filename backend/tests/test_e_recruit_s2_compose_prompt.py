@@ -139,7 +139,11 @@ def test_compose_prompt_default_locale_is_korean_backward_compatible():
 
 def test_compose_prompt_english_locale_localizes_code_sections():
     """[B]/[C]/[D]/[E] 전부 영어로 나오되, [A](role_behaviors 데이터)는 아직 한글 그대로
-    (Phase A 스코프 — 데이터 i18n은 Phase B/후속, 의도적)."""
+    (Phase A 스코프 — 데이터 i18n은 Phase B/후속, 의도적).
+
+    까심 QA MUST-FIX(2026-07-08): 이전 버전은 recipe가 있을 때 [B] 내부(_generate_guide 고정
+    구조 문자열)의 한글 leak을 assert하지 않아 "[B] 전부 영어"라는 주장을 실증 못 했다. 이제
+    recipe가 실제로 세팅된 상태에서 고정 문자열의 영어화 + 한글 leak 부재를 명시 확인한다."""
     role = _role(role_behaviors="스스로 판단해 claim하고 소통하세요.")
     out = compose_prompt(role, _RECIPE, "claude-code", locale="en")
     assert "## Agile Autonomous Operating Rules" in out
@@ -151,6 +155,20 @@ def test_compose_prompt_english_locale_localizes_code_sections():
     # section [A]는 의도적으로 미번역(Phase A 스코프 밖)
     assert "스스로 판단해 claim하고 소통하세요." in out
     assert "# Backend Engineer — Recruitment Instructions" in out
+    # [B] 내부 _generate_guide() 고정 구조 문자열도 영어화(까심 MUST-FIX) — 한글 leak 0
+    assert "## Workflow Steps" in out
+    assert "Step 1" in out
+    assert "**Responsible role**" in out
+    assert "**Expected action**" in out
+    assert "## How to Use" in out
+    assert "## 워크플로우 단계" not in out
+    assert "담당 역할" not in out
+    assert "기대 행동" not in out
+    assert "## 사용 지침" not in out
+    # recipe DATA 콘텐츠(name/description/step.label/step.action)는 의도적으로 미번역
+    # (workflow_recipes 자체 i18n = 별도 트랙, out-of-scope) — 그대로 한글이어야 정상.
+    assert _RECIPE["name"] in out
+    assert _RECIPE["steps"][0]["label"] in out
 
 
 def test_compose_prompt_english_connector_runtime_localized():
