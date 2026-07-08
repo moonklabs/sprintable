@@ -164,13 +164,10 @@ def wake_agent(agent_id: str, seq: int, _from_listener: bool = False) -> None:
         for q in dead:
             queues.discard(q)
     if not _from_listener:
-        try:
-            from app.services.pg_pubsub import pg_notify
-            asyncio.get_running_loop().create_task(
-                pg_notify("agent", agent_id, "__wake__", {"seq": seq})
-            )
-        except RuntimeError:
-            pass
+        # prod 커넥션 누수 근본fix(2026-07-08) — events.py publish_event()/_push_to_agent()와
+        # 동형(fire_and_forget 참조 보관, GC 조기수거로 인한 non-checked-in connection 방지).
+        from app.services.pg_pubsub import fire_and_forget, pg_notify
+        fire_and_forget(pg_notify("agent", agent_id, "__wake__", {"seq": seq}))
 
 
 

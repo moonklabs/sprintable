@@ -27,16 +27,22 @@ def test_wake_agent_no_connection():
 
 
 def test_wake_agent_puts_wake_signal():
-    """연결 중인 큐에 __wake__ 신호 전달."""
+    """연결 중인 큐에 __wake__ 신호 전달.
+
+    prod 커넥션 누수 근본fix(2026-07-08) 후속: wake_agent()의 pg_notify 발사가
+    `app.services.pg_pubsub.fire_and_forget()`로 옮겨져 `asyncio.get_running_loop`을 더는
+    agent_gateway.py에서 직접 안 부른다 — 그 이름을 patch하면 asyncio 모듈 객체 자체가
+    전역 패치돼(같은 asyncio 싱글턴) pg_pubsub의 `_background_tasks`에 MagicMock이 새는
+    부작용이 있었다. fire_and_forget 자체를 patch해 격리한다."""
     import asyncio
     from app.routers.events import _agent_connections
     q = asyncio.Queue(maxsize=10)
     agent_id_str = str(AGENT_ID)
     _agent_connections[agent_id_str].add(q)
     try:
-        with patch("app.routers.agent_gateway.asyncio.get_running_loop") as mock_loop:
-            mock_loop.return_value.create_task = MagicMock()
+        with patch("app.services.pg_pubsub.fire_and_forget") as mock_fire:
             wake_agent(agent_id_str, 99)
+            mock_fire.assert_called_once()
         assert not q.empty()
         signal = q.get_nowait()
         assert signal["__wake__"] is True
