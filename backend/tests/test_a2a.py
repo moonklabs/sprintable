@@ -584,6 +584,57 @@ async def test_send_message_response_wraps_task_in_spec_envelope():
 
 
 @pytest.mark.anyio
+async def test_send_message_delivered_content_embeds_completion_protocol_hint():
+    """근본 fix(story ebd5cf18, 문서 `a2a-task-completion-roundtrip-crux`, PO GO 2026-07-08):
+    delegate에게 실제로 전달되는 content 자체에 완료 프로토콜(reply_thread_id=root_message_id·
+    conversation_id) 힌트가 파싱 가능한 `key: value` 라인으로 박혀 있어야 한다 — 전달 채널
+    (webhook/fakechat)과 무관하게 항상 도달(채널-불가지 fix)."""
+    import re
+
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        working_task = _mock_task("TASK_STATE_WORKING")
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _list_result([MEMBER_ID])  # webhook 있음
+            return _result(working_task)
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+
+        with patch("app.routers.a2a.deliver_conversation_message_webhook", new_callable=AsyncMock) as mock_deliver:
+            async with client as c:
+                resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=_SEND_REQ)
+            assert resp.status_code == 200
+
+        delivered_content = mock_deliver.call_args.kwargs["content"]
+
+        # session.add로 실제 생성된 Conversation/ConversationMessage에서 진짜 id를 뽑아 대조
+        added = [c.args[0] for c in session.add.call_args_list]
+        conv = next(o for o in added if type(o).__name__ == "Conversation")
+        root_msg = next(o for o in added if type(o).__name__ == "ConversationMessage")
+
+        assert f"reply_thread_id: {root_msg.id}" in delivered_content
+        assert f"conversation_id: {conv.id}" in delivered_content
+        assert "sprintable_send_chat_message" in delivered_content
+        # 저장된 ConversationMessage.content 자체에도 동일 힌트가 있어야(채널 무관 단일 소스)
+        assert root_msg.content == delivered_content
+        # 원본 client 메시지 텍스트는 파싱 안전성을 위해 힌트와 정규식으로 분리 가능해야 함
+        assert re.search(r"reply_thread_id: [0-9a-f-]{36}", delivered_content)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
 async def test_send_message_invalid_params_returns_jsonrpc_error():
     client, session, app = await _authed_client(uuid.uuid4())
     try:

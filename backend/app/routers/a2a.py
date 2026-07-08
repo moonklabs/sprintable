@@ -398,6 +398,22 @@ async def _handle_send_message(
     root_message_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
 
+    # 완료 라운드트립 크럭스(story ebd5cf18, 문서 `a2a-task-completion-roundtrip-crux`, PO GO
+    # 2026-07-08): 완료 신호(=이 메시지 스레드에 답신)는 실동작하는 메커니즘이나(실측 GREEN),
+    # delegate 가 reply-target(root_message_id)을 전달 페이로드에서 알아낼 길이 없었다(webhook
+    # 경로는 Discord 렌더러가 그 필드를 안 읽음·fakechat 클라 노출 여부도 레포 밖이라 불확定).
+    # 채널-불가지 근본 fix: delegate 가 실제로 받는 content 자체에 완료 프로토콜을 박아넣는다 —
+    # 두 전달 경로(webhook/fakechat)가 이 문자열을 공유하므로 매체와 무관하게 항상 도달한다.
+    # `history`(원본 client 메시지, `incoming.model_dump()`)는 안 건드려 A2A 관찰가능성 무회귀.
+    completion_hint = (
+        "\n\n---\n[A2A] 이 task의 완료 신호는 이 메시지 스레드에 대한 답신입니다.\n"
+        f"reply_thread_id: {root_message_id}\n"
+        f"conversation_id: {conv_id}\n"
+        "완료 시 sprintable_send_chat_message(thread_id=conversation_id, "
+        "reply_thread_id=reply_thread_id, content=<결과>)로 회신하세요."
+    )
+    delivered_content = text + completion_hint
+
     session.add(Conversation(
         id=conv_id,
         project_id=member_project_id,
@@ -412,7 +428,7 @@ async def _handle_send_message(
         id=root_message_id,
         conversation_id=conv_id,
         sender_id=None,
-        content=text,
+        content=delivered_content,
         thread_id=None,
         created_at=now,
     ))
@@ -441,7 +457,7 @@ async def _handle_send_message(
             thread_id=None,
             created_at=now,
             mentioned_ids=None,
-            content=text,
+            content=delivered_content,
             targets=None,
         )
     else:
@@ -458,7 +474,7 @@ async def _handle_send_message(
         event_payload = {
             "message_id": str(root_message_id),
             "conversation_id": str(conv_id),
-            "content": text,
+            "content": delivered_content,
         }
         if project_context is not None:
             event_payload["project_context"] = project_context
