@@ -31,6 +31,19 @@ cd /app
 # `alembic stamp 0147` 실행 → 0148-0161 재실행 → role_templates DuplicateTable). 리터럴 매칭을
 # **그래프 조상관계(ancestry) 검증**으로 교체 — "0147"이 현재 head(들)의 실제 조상인지
 # ScriptDirectory로 walk해서 판단하므로, 0162 이후 어떤 미래 리비전이 추가돼도 영구히 안전하다.
+#
+# 승격(2026-07-08, PR #1977) 후속 근본수정: main은 story bda4beac 이후 0146/0147/0162
+# **파일 자체가 없다**(ee_pricing 영구 제외) — 그런데 위 ancestry 검증은 "0147"이 현재 head의
+# 조상인지를 ScriptDirectory로 walk해서 판단하므로, 0147이 애초에 등록된 리비전이 아닌 main
+# 환경에서는 그 어떤 head에 대해서도 **영원히** False가 나온다(0148이 0147 대신 0145를 직접
+# 가리키게 reparent됐으므로 그래프가 아예 0147을 지나지 않는다). 즉 uq 제약만 있으면(0148 이후
+# 모든 DB가 다 그렇다) 매번 EE_STAMP_NEEDED=1이 뜨고, `alembic stamp 0147`이 등록되지 않은
+# 리비전이라 "Can't locate revision identified by '0147'"로 죽는다(prod migrate job 2026-07-08
+# 실패 재현). 애초에 0147이 파일로 없는 환경에선 `alembic upgrade heads`가 그 DDL을 재실행할
+# 길 자체가 없어(파일이 없으니 실행할 코드가 없다) 이 precheck가 막으려는 DuplicateTable
+# 시나리오가 구조적으로 불가능하다 — precheck 자체가 통째로 no-op이어야 정확하다. "0147"이
+# ScriptDirectory에 등록된 리비전인지부터 먼저 확인해, 없으면(main/prod) uq 제약 존재 여부와
+# 무관하게 즉시 0(스탬프 불필요)으로 판정한다.
 echo "[migrate] EE-stamp precheck: checking uq_org_subscriptions_org_id..."
 EE_STAMP_NEEDED=$(python3 <<'PYEOF'
 import os
@@ -38,34 +51,45 @@ from sqlalchemy import create_engine, text
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
-engine = create_engine(os.environ["ALEMBIC_DATABASE_URL"])
-with engine.connect() as conn:
-    constraint_exists = conn.execute(
-        text("SELECT 1 FROM pg_constraint WHERE conname = 'uq_org_subscriptions_org_id'")
-    ).scalar()
-    if not constraint_exists:
-        print(0)
-    else:
-        try:
-            heads = [row[0] for row in conn.execute(text("SELECT version_num FROM alembic_version"))]
-        except Exception:
-            heads = []
-        if not heads:
-            # alembic이 이 DB를 전혀 트래킹한 적 없는데 제약은 물리적으로 존재 — 진짜 구 체인 케이스.
-            print(1)
+cfg = Config("alembic.ini")
+script = ScriptDirectory.from_config(cfg)
+try:
+    script.get_revision("0147")
+    revision_0147_known = True
+except Exception:
+    revision_0147_known = False
+
+if not revision_0147_known:
+    # main/prod: 0146/0147/0162 파일 자체가 없다 — 이 precheck이 막으려는 "0147 DDL 재실행"
+    # 시나리오가 구조적으로 불가능(파일이 없으니 alembic이 그 revision을 실행할 방법이 없다).
+    print(0)
+else:
+    engine = create_engine(os.environ["ALEMBIC_DATABASE_URL"])
+    with engine.connect() as conn:
+        constraint_exists = conn.execute(
+            text("SELECT 1 FROM pg_constraint WHERE conname = 'uq_org_subscriptions_org_id'")
+        ).scalar()
+        if not constraint_exists:
+            print(0)
         else:
             try:
-                cfg = Config("alembic.ini")
-                script = ScriptDirectory.from_config(cfg)
-                already_applied = any(
-                    rev is not None and rev.revision == "0147"
-                    for rev in script.iterate_revisions(heads, "base")
-                )
-                print(0 if already_applied else 1)
+                heads = [row[0] for row in conn.execute(text("SELECT version_num FROM alembic_version"))]
             except Exception:
-                # 그래프 walk 실패 시 안전한 쪽(스탬프 안 함)으로 fail — 잘못된 재스탬프로
-                # 이미 정상인 alembic_version을 파괴하는 것보다, 다음 실행에서 재판단하는 게 낫다.
-                print(0)
+                heads = []
+            if not heads:
+                # alembic이 이 DB를 전혀 트래킹한 적 없는데 제약은 물리적으로 존재 — 진짜 구 체인 케이스.
+                print(1)
+            else:
+                try:
+                    already_applied = any(
+                        rev is not None and rev.revision == "0147"
+                        for rev in script.iterate_revisions(heads, "base")
+                    )
+                    print(0 if already_applied else 1)
+                except Exception:
+                    # 그래프 walk 실패 시 안전한 쪽(스탬프 안 함)으로 fail — 잘못된 재스탬프로
+                    # 이미 정상인 alembic_version을 파괴하는 것보다, 다음 실행에서 재판단하는 게 낫다.
+                    print(0)
 PYEOF
 )
 
