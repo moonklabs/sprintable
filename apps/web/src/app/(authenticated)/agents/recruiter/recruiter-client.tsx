@@ -92,6 +92,21 @@ export function pickDefaultRuntime(supported: RuntimeCapabilityItem[], current: 
   return supported[0].slug;
 }
 
+/**
+ * 채용 kit 다운로드/표시 파일명 — 항상 `KIT_FILENAME`(런타임 무관 상수). 회귀가드(까심 QA RC,
+ * 2026-07-08): 이 함수가 `runtime`/`runtimeCapabilities`를 받고도 입력과 무관하게 상수만
+ * 반환하는 게 의도다 — 예전엔 여기서 `prompt_file`(CLAUDE.md/AGENTS.md/GEMINI.md 런타임별
+ * 리터럴)을 읽어서 유저 정체성 파일 덮어쓰기 버그를 냈다. BE #1967이 사후 재발급 엔드포인트만
+ * 고치고 이 채용 위저드는 놓쳐 한 번 재발했다(§0 참고) — "더 정확한 파일명"으로 되돌리고 싶은
+ * 유혹을 아래 테스트가 막는다. 시그니처는 호출부 변경을 최소화하려 유지.
+ */
+export function resolveKitFilename(
+  _runtime: string,
+  _runtimeCapabilities: RuntimeCapabilityItem[] | null,
+): string {
+  return KIT_FILENAME;
+}
+
 export interface RoleGroup {
   label: string;
   roles: RoleTemplateSummary[];
@@ -403,9 +418,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   // 2026-07-08 재발견(크럭스 recruit-output-kit-redesign-crux §0이 지목한 "리터럴 코드 지점" —
   // #1967은 사후 재발급 엔드포인트(_connection_artifact)만 고치고 이 채용 위저드는 안 건드렸다):
   // 다운로드/표시 파일명은 런타임별 리터럴(prompt_file — CLAUDE.md/AGENTS.md/GEMINI.md)을 쓰면
-  // 유저가 그 파일을 프로젝트 루트에 저장할 때 실제 정체성 파일을 덮어쓴다. KIT_FILENAME(런타임
-  // 무관 단일 상수)으로 고정 — BE `_connection_artifact`가 #1967 이후 쓰는 것과 동일 문자열.
-  const guideFilename = KIT_FILENAME;
+  // 유저가 그 파일을 프로젝트 루트에 저장할 때 실제 정체성 파일을 덮어쓴다. resolveKitFilename()이
+  // 항상 KIT_FILENAME(런타임 무관 단일 상수)을 반환 — 회귀가드 테스트 대상(아래 함수 정의 참고).
+  const guideFilename = resolveKitFilename(runtime, runtimeCapabilities);
 
   const handleRecruit = async () => {
     if (!selectedRoleSlug) return;
