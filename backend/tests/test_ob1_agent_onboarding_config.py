@@ -86,7 +86,7 @@ def _db_returning(member):
 
 @pytest.mark.anyio
 async def test_connection_artifact_returns_stdio_with_placeholder():
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     agent_id = uuid.uuid4()
     db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
@@ -117,7 +117,7 @@ async def test_connection_artifact_with_persona_emits_instruction_file():
     거치므로, 이 라우터-계층 테스트는 그 메서드 자체를 patch(반환값만 확인)한다 — 실 DB 조회
     시맨틱은 별도 realdb 테스트가 검증."""
     from unittest.mock import patch
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     agent_id = uuid.uuid4()
     # 까심 QA RC(S5): is_default=True 명시 — list()의 정렬 순서([0])만으론 default 보장 안 됨.
@@ -144,7 +144,7 @@ async def test_connection_artifact_non_default_persona_omits_instruction_file():
     """까심 QA RC(S5): personas[0]가 is_default=False면(list() 정렬만으론 default 안 보장) 지침
     파일을 emit하면 안 됨 — 안전 fallback으로 생략(.mcp.json만)."""
     from unittest.mock import patch
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     agent_id = uuid.uuid4()
     persona = SimpleNamespace(resolved_system_prompt="이건 authoritative 아님.", is_default=False)
@@ -165,7 +165,7 @@ async def test_connection_artifact_non_default_persona_omits_instruction_file():
 @pytest.mark.anyio
 async def test_connection_artifact_connector_runtime_returns_pointer_only():
     """Q2(PO 확정): connector 런타임은 `.mcp.json` 없이 포인터/안내 파일만."""
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     agent_id = uuid.uuid4()
     db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
@@ -182,7 +182,7 @@ async def test_connection_artifact_connector_runtime_returns_pointer_only():
 @pytest.mark.anyio
 async def test_connection_artifact_connector_guidance_locale_from_explicit_query():
     """E-I18N Phase C: locale 쿼리 파라미터가 CONNECTOR_SETUP.md 내용에 반영."""
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     agent_id = uuid.uuid4()
     db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
@@ -197,7 +197,7 @@ async def test_connection_artifact_connector_guidance_locale_from_explicit_query
 @pytest.mark.anyio
 async def test_connection_artifact_connector_guidance_locale_from_accept_language_fallback():
     """locale 쿼리 미지정 시 Accept-Language 헤더로 폴백."""
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     agent_id = uuid.uuid4()
     db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
@@ -212,7 +212,7 @@ async def test_connection_artifact_connector_guidance_locale_from_accept_languag
 @pytest.mark.anyio
 async def test_connection_artifact_connector_guidance_no_locale_signal_stays_korean():
     """locale도 Accept-Language도 없으면(기존 호출부 무변경) 기존과 동일한 한글 출력."""
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     agent_id = uuid.uuid4()
     db = _db_returning(SimpleNamespace(id=agent_id, project_id=uuid.uuid4()))
@@ -231,7 +231,7 @@ async def test_connection_artifact_unsupported_runtime_400():
     문자열에만 여전히 걸려야 한다(방어 가드 자체는 무회귀)."""
     from fastapi import HTTPException
 
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
     with pytest.raises(HTTPException) as ei:
         await get_agent_connection_artifact(
             uuid.uuid4(), runtime="totally-unknown-runtime", session=AsyncMock(),
@@ -244,7 +244,7 @@ async def test_connection_artifact_unsupported_runtime_400():
 async def test_connection_artifact_not_found_404():
     from fastapi import HTTPException
 
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
     db = _db_returning(None)
     with pytest.raises(HTTPException) as ei:
         await get_agent_connection_artifact(

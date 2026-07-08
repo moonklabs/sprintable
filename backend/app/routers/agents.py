@@ -185,7 +185,34 @@ async def get_agent_connection_artifact(
     정규화해 ``build_connector_guidance()``(CONNECTOR_SETUP.md)에만 적용 — 이미 채용 시점에
     확정 locale로 저장된 ``resolved_system_prompt``(persona 파일)는 재합성하지 않는다(그 값은
     recruit() 호출 당시 locale의 정확한 기록이라, 여기서 다시 손대면 오히려 왜곡).
+
+    까심 QA CI FAILURE(2026-07-08, 근본 fix): ``accept_language``의 ``Header()`` DI 마커는
+    FastAPI ASGI 파이프라인을 통해서만 plain str/None으로 풀린다 — 이 함수를 realdb 테스트처럼
+    **Python에서 직접 호출**하면 ``Header`` 객체 그대로 남아 ``resolve_locale_from_request()``가
+    ``.split()``에서 AttributeError로 죽는다(HTTP 경로만 통과하는 QA로는 안 잡힘). 그래서 실제
+    로직은 Header() 마커가 전혀 없는 ``_connection_artifact()``(plain str만 받음)로 옮기고, 이
+    라우트 함수는 얇은 위임만 한다 — 직접-호출 테스트는 ``_connection_artifact``를 불러야 한다
+    (Header DI는 라우트 경계에서만 받는다는 원칙).
     """
+    return await _connection_artifact(
+        agent_id, runtime, transport, locale, accept_language,
+        session=session, auth=auth, org_id=org_id,
+    )
+
+
+async def _connection_artifact(
+    agent_id: uuid.UUID,
+    runtime: str = DEFAULT_RUNTIME,
+    transport: str | None = None,
+    locale: str | None = None,
+    accept_language: str | None = None,
+    *,
+    session: AsyncSession,
+    auth: AuthContext,
+    org_id: uuid.UUID,
+) -> dict:
+    """``get_agent_connection_artifact`` 실 로직 — Header() DI 마커 없음(plain str만).
+    직접-호출(realdb·유닛 테스트)은 이 함수를 부른다."""
     if runtime not in SUPPORTED_RUNTIMES:
         raise HTTPException(status_code=400, detail=f"unsupported runtime: {runtime}")
     resolved_locale = resolve_locale_from_request(locale, accept_language)
@@ -297,7 +324,28 @@ async def recruit_agent_endpoint(
     E-I18N Phase C(story 11f1087c): ``body.locale``(FE 명시 전달)→``Accept-Language`` 헤더(폴백)
     순으로 정규화해 ``compose_prompt``에 배선 — 이 시점에 확정된 locale이 persona에 영속 기록된다
     (재채용 시 다른 locale로 다시 부르면 그 값으로 덮어씀, DB에 별도 locale 컬럼은 없음).
+
+    까심 QA CI FAILURE 후속(2026-07-08, connection-artifact와 동형 근본 fix 선제 적용): Header()
+    DI 마커는 라우트 경계에서만 받고, 실 로직은 plain str만 받는 ``_recruit_agent_endpoint()``로
+    분리 — 직접-호출 테스트가 FastAPI ASGI 파이프라인을 안 거쳐도 Header sentinel leak이 날 수
+    없다.
     """
+    return await _recruit_agent_endpoint(
+        agent_id, body, accept_language, session=session, auth=auth, org_id=org_id,
+    )
+
+
+async def _recruit_agent_endpoint(
+    agent_id: uuid.UUID,
+    body: RecruitRequest,
+    accept_language: str | None = None,
+    *,
+    session: AsyncSession,
+    auth: AuthContext,
+    org_id: uuid.UUID,
+) -> dict:
+    """``recruit_agent_endpoint`` 실 로직 — Header() DI 마커 없음(plain str만).
+    직접-호출(realdb·유닛 테스트)은 이 함수를 부른다."""
     member = await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
 
     if body.runtime not in SUPPORTED_RUNTIMES:

@@ -26,7 +26,7 @@ def _auth_ctx():
 async def test_recruit_404_when_agent_not_found():
     """S19(#8): 이제 agent 존재+ownership 확인이 assert_agent_owner 단일 호출로 합쳐졌다."""
     from fastapi import HTTPException
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -44,7 +44,7 @@ async def test_recruit_404_when_agent_not_found():
 async def test_recruit_403_when_caller_not_owner_or_admin():
     """S19(#8 MUST): agent의 생성자도 org-admin도 아닌 caller는 재채용 불가."""
     from fastapi import HTTPException
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -61,7 +61,7 @@ async def test_recruit_403_when_caller_not_owner_or_admin():
 @pytest.mark.anyio
 async def test_recruit_400_on_unsupported_runtime():
     from fastapi import HTTPException
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -78,7 +78,7 @@ async def test_recruit_400_on_unsupported_runtime():
 @pytest.mark.anyio
 async def test_recruit_404_when_role_template_not_found():
     from fastapi import HTTPException
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -97,7 +97,7 @@ async def test_recruit_404_when_role_template_not_found():
 async def test_recruit_400_when_recruit_agent_raises_value_error():
     """QA MINOR 하드닝: recruit_agent의 fail-closed ValueError가 400으로 매핑되는지(500 아님)."""
     from fastapi import HTTPException
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -117,7 +117,7 @@ async def test_recruit_400_when_recruit_agent_raises_value_error():
 
 @pytest.mark.anyio
 async def test_recruit_success_response_shape():
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -163,7 +163,7 @@ async def test_recruit_success_connector_only_runtime_mcp_config_null_no_crash(r
     """전 런타임 올지원(story 6f6ac081): 커넥터 전용 5종으로 recruit() — 실 SUPPORTED_RUNTIMES
     가드 통과(400 아님) + 실 build_agent_mcp_config_bundle(mock 아님)이 mcp_config=None을
     반환해도 응답 구성이 크래시 없이 완료돼야 한다."""
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
     session = MagicMock()
@@ -196,7 +196,7 @@ async def test_recruit_success_connector_only_runtime_mcp_config_null_no_crash(r
 # ── E-I18N Phase C(story 11f1087c) — locale 소스 배선(body.locale → Accept-Language 폴백) ──
 
 async def _recruit_with_locale(body, accept_language=None):
-    from app.routers.agents import recruit_agent_endpoint
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
 
     session = MagicMock()
     session.commit = AsyncMock()

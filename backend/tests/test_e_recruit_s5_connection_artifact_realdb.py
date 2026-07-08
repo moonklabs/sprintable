@@ -77,7 +77,7 @@ async def test_connection_artifact_emits_persona_file_real_decorate_path():
     from unittest.mock import MagicMock
     from sqlalchemy import text as _text
     from app.core.database import Base
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     engine, Session = await _session()
     try:
@@ -114,7 +114,7 @@ async def test_connection_artifact_no_persona_backward_compatible_real_db():
     from unittest.mock import MagicMock
     from sqlalchemy import text as _text
     from app.core.database import Base
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     engine, Session = await _session()
     try:
@@ -144,7 +144,7 @@ async def test_connection_artifact_connector_runtime_real_db():
     from unittest.mock import MagicMock
     from sqlalchemy import text as _text
     from app.core.database import Base
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     engine, Session = await _session()
     try:
@@ -177,7 +177,7 @@ async def test_connection_artifact_connector_only_runtimes_real_db(runtime):
     from unittest.mock import MagicMock
     from sqlalchemy import text as _text
     from app.core.database import Base
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     engine, Session = await _session()
     try:
@@ -213,7 +213,7 @@ async def test_connection_artifact_no_default_persona_omits_instruction_file():
     from app.core.database import Base
     from app.models.team import TeamMember
     from app.models.agent_deployment import AgentPersona
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     engine, Session = await _session()
     try:

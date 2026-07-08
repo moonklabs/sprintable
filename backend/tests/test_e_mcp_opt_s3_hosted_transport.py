@@ -168,7 +168,7 @@ async def test_get_verification_state_stdio_default_unchanged():
 # ── ③ router 레벨 transport 배선 ──────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_connection_artifact_transport_http_returns_http_content(monkeypatch):
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
     agent_id = uuid.uuid4()
@@ -191,7 +191,7 @@ async def test_connection_artifact_transport_http_unavailable_400(monkeypatch):
     """http 명시 요청됐는데 이 환경엔 호스팅 배포가 없음(MCP_PUBLIC_URL 미설정) — 400."""
     from fastapi import HTTPException
 
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
 
     monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
     agent_id = uuid.uuid4()
@@ -212,7 +212,7 @@ async def test_connection_artifact_transport_http_unavailable_400(monkeypatch):
 async def test_connection_artifact_unsupported_transport_400():
     from fastapi import HTTPException
 
-    from app.routers.agents import get_agent_connection_artifact
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
     agent_id = uuid.uuid4()
     res = MagicMock()
     res.scalar_one_or_none.return_value = SimpleNamespace(id=agent_id, project_id=uuid.uuid4())
@@ -270,7 +270,9 @@ def test_agents_router_no_longer_hardcodes_transport_stdio_literal():
     import inspect
     src = inspect.getsource(ag)
     create_src = inspect.getsource(ag.create_org_agent)
-    artifact_src = inspect.getsource(ag.get_agent_connection_artifact)
+    # 까심 QA 근본 fix(2026-07-08) 후속: 실 로직이 `_connection_artifact`(Header() DI 없는
+    # 내부 함수)로 옮겨졌다 — 라우트 함수(get_agent_connection_artifact)는 얇은 위임만.
+    artifact_src = inspect.getsource(ag._connection_artifact)
     assert 'transport="stdio"' not in create_src
     assert 'transport="stdio"' not in artifact_src
     assert 'transport=config_bundle["default_transport"]' in create_src
