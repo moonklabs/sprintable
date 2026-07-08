@@ -308,10 +308,31 @@ def test_resolve_locale_from_request_explicit_unsupported_falls_back_to_default(
 # ── E-I18N Phase C — build_connector_guidance locale 분기 ──────────────────────────
 
 def test_build_connector_guidance_default_locale_is_korean_backward_compatible():
+    """까심 QA MUST-FIX(2026-07-08, #1966): substring만 체크하면 dict화 과정에서 원문 줄바꿈이
+    사라지는 byte-diff를 못 잡는다(실제로 한 번 놓쳤다) — default-ko 출력이 dict화 이전 원문
+    리터럴과 정확히 byte-identical 인지 직접 assert한다."""
     out = gen.build_connector_guidance("grok")
-    assert "# Sprintable Connector 안내" in out
-    assert "(선택한 런타임: grok)" in out
-    assert "grok-sprintable" in out
+    expected = "\n".join([
+        "# Sprintable Connector 안내",
+        "",
+        "(선택한 런타임: grok)",
+        "Claude Code/Codex/Gemini/Cursor 처럼 MCP를 네이티브 지원하지 않는 런타임은 별도 SSE",
+        "커넥터 어댑터로 연결합니다 — `.mcp.json`이 아니라 `connectors/{runtime}-sprintable/` 폴더의",
+        "어댑터를 사용해 서버에 아웃바운드로 접속합니다(인바운드 도메인/웹훅 불필요).",
+        "",
+        "## 사용 가능한 어댑터",
+        "`connectors/` 레포 경로 아래 각 폴더가 자기완결(self-contained) 어댑터입니다:",
+        "hermes-sprintable · openclaw-sprintable · opencode-sprintable · grok-sprintable ·",
+        "pi-sprintable · codex-sprintable · cursor-sprintable · gemini-sprintable",
+        "",
+        "## 설정",
+        "1. 위 폴더 중 사용 중인 런타임에 맞는 폴더를 복사하세요(각 폴더는 sibling import 없이",
+        "   독립 동작합니다).",
+        "2. 폴더의 `README.md` 안내대로 `AGENT_API_KEY`(이 에이전트의 scoped key) 등 env를 설정하세요.",
+        "3. 어댑터를 런타임 호스트에서 직접 실행하세요(호스팅 실행은 지원하지 않음 — 설치/실행은",
+        "   사용자 수동).",
+    ])
+    assert out == expected
 
 
 def test_build_connector_guidance_english_locale():

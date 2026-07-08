@@ -154,10 +154,13 @@ _CONNECTOR_GUIDANCE_TEXT: dict[str, dict[str, Any]] = {
         "adapters_heading": "## 사용 가능한 어댑터",
         "adapters_intro": "`connectors/` 레포 경로 아래 각 폴더가 자기완결(self-contained) 어댑터입니다:",
         "setup_heading": "## 설정",
+        # 까심 QA MUST-FIX(2026-07-08, #1966): dict화 전 원문의 줄바꿈(1·3번 항목이 2줄로
+        # 쪼개져 있었음)을 그대로 보존 — PR이 "default-ko 100% 무변경"이라 주장했는데 실제로는
+        # 한 줄로 합쳐져 byte-diff가 있었다. 여기 임베드된 "\n   "이 원문 join 결과를 재현한다.
         "setup_steps": [
-            "위 폴더 중 사용 중인 런타임에 맞는 폴더를 복사하세요(각 폴더는 sibling import 없이 독립 동작합니다).",
+            "위 폴더 중 사용 중인 런타임에 맞는 폴더를 복사하세요(각 폴더는 sibling import 없이\n   독립 동작합니다).",
             "폴더의 `README.md` 안내대로 `AGENT_API_KEY`(이 에이전트의 scoped key) 등 env를 설정하세요.",
-            "어댑터를 런타임 호스트에서 직접 실행하세요(호스팅 실행은 지원하지 않음 — 설치/실행은 사용자 수동).",
+            "어댑터를 런타임 호스트에서 직접 실행하세요(호스팅 실행은 지원하지 않음 — 설치/실행은\n   사용자 수동).",
         ],
         "runtime_hint": "(선택한 런타임: {runtime})",
     },
@@ -188,7 +191,9 @@ def build_connector_guidance(runtime_hint: str | None = None, locale: str = DEFA
     README가 5조 계약(SSE dial-out·turn 주입·응답·ack·에러)을 담고 있어 여기선 안내만 재생산한다.
 
     E-I18N Phase C(story 11f1087c) — locale 분기(compose_prompt류와 동형 dict 패턴). 기본값
-    ``DEFAULT_LOCALE``이라 기존 호출부(locale 인자 없이 호출)는 무변경 하위호환.
+    ``DEFAULT_LOCALE``이라 기존 호출부(locale 인자 없이 호출)는 **byte-identical** 하위호환
+    (까심 QA MUST-FIX: dict화 시 실수로 원문 줄바꿈이 사라졌던 걸 복원 — 아래 realdb 테스트가
+    아니라 유닛 테스트가 원문 리터럴과 정확히 일치하는지 직접 assert한다).
     """
     text = _CONNECTOR_GUIDANCE_TEXT[resolve_locale(locale)]
     lines = [text["title"], "", *text["intro"], "", text["adapters_heading"], text["adapters_intro"],
