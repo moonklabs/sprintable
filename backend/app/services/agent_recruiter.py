@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.routers.workflow_recipes import _generate_guide
 from app.services.agent_onboarding_config import MCP_NATIVE_RUNTIMES, resolve_locale
 from app.services.mcp_toolset import ALL_GROUPS, ALL_TOOL_NAMES, _ALWAYS_ALLOWED, tool_group
 
@@ -166,78 +165,109 @@ def _runtime_notes(
 
 
 _SECTION_A_HEADER: dict[str, str] = {
-    "ko": "# {name} — 채용 지침",
-    "en": "# {name} — Recruitment Instructions",
+    "ko": "# {name} — Sprintable 역할 컨텍스트",
+    "en": "# {name} — Sprintable Role Context",
 }
 _SECTION_B_TEXT: dict[str, dict[str, str]] = {
     "ko": {
-        "heading": "## Sprintable 사용법",
+        "heading": "## Sprintable 워크플로",
         "footer": (
-            "\n이 가이드가 오래됐다고 느껴지거나 막히면, 플랫폼이 알려주길 기다리지 말고 "
-            "스스로 `sprintable_get_workflow_guide`를 불러 최신 운영법을 확인하세요."
+            "\n이 조직의 워크플로는 여기 고정해두지 않습니다(팀마다 커스터마이즈하므로 stale해질 "
+            "수 있어서입니다) — 스스로 `sprintable_get_workflow_guide`를 불러 최신 운영법을 "
+            "확인하세요."
         ),
     },
     "en": {
-        "heading": "## How to Use Sprintable",
+        "heading": "## Sprintable Workflow",
         "footer": (
-            "\nIf this guide feels outdated or you're stuck, don't wait for the platform to "
-            "tell you — proactively call `sprintable_get_workflow_guide` yourself to check the "
-            "latest operating procedure."
+            "\nThis org's workflow isn't hardcoded here (teams customize it, so a fixed copy "
+            "would go stale) — proactively call `sprintable_get_workflow_guide` yourself to "
+            "check the current operating procedure."
         ),
     },
 }
+# 채용-kit 재설계(story b1fe41cf, 문서 `recruit-output-kit-redesign-crux`, 선생님 GO
+# 2026-07-08 결정③): kit 말미의 자기통합/메모리 유도 지시문 — 정적 텍스트 주입이 아니라
+# "전달받은 에이전트가 스스로 판단해 자기 메모리에 반영"하도록 유도한다(선생님 원안 문구
+# 그대로, en은 그 의미를 보존한 번역). **기존 정체성을 덮지 말라**는 명시적 경고가 핵심.
+_INTEGRATION_PROMPT_TEXT: dict[str, str] = {
+    "ko": """## 전달받은 에이전트에게
+
+이 문서는 당신 자신의 정체성 파일(CLAUDE.md/AGENTS.md 등)이 아니라, 이 Sprintable 조직에서
+활동하기 위한 컨텍스트 kit입니다. 다음을 스스로 판단해 당신의 메모리(또는 이미 쓰고 있는
+메모리/시스템 체계)에 반영하세요 — 이 파일 내용을 그대로 복사해 자신을 덮어쓰지 마세요:
+
+- 이 조직에서 당신이 맡은 역할(위 "역할 컨텍스트" 참고)
+- 자주 쓰게 될 `sprintable_*` 도구(위 "사용 가능 도구" 참고)
+- 워크플로는 고정 절차로 외우지 말고, 매번 `sprintable_get_workflow_guide`로 최신 확인
+
+**기존 정체성을 덮지 말고, 당신 방식대로 자기화하세요.**""",
+    "en": """## To the agent receiving this
+
+This document is not your own identity file (CLAUDE.md/AGENTS.md, etc.) — it's a context kit
+for operating in this Sprintable org. Use your own judgment to fold the following into your
+memory (or whatever memory/system you already use) — don't copy this file verbatim over
+yourself:
+
+- Your role in this org (see "Role Context" above)
+- The `sprintable_*` tools you'll use often (see "Available Tools" above)
+- Don't memorize the workflow as a fixed procedure — re-check it every time via
+  `sprintable_get_workflow_guide`
+
+**Don't overwrite your existing identity — integrate this in your own way.**""",
+}
 
 
-def compose_prompt(
+def compose_kit(
     role_template: Any,
-    recipe: dict[str, Any] | None,
     runtime: str,
     locale: str = "ko",
-) -> str:
-    """자율 운영 지침 합성 — 순수 함수(네트워크/DB 호출 0·부수효과 0. G4).
+) -> dict[str, str]:
+    """채용 kit 합성 — 순수 함수(네트워크/DB 호출 0·부수효과 0. G4).
+
+    채용-kit 재설계(story b1fe41cf, 문서 `recruit-output-kit-redesign-crux`, 선생님 GO
+    2026-07-08)로 옛 `compose_prompt`(CLAUDE.md **전체 대체**를 노린 단일 문자열)를 대체한다.
+    유저가 이미 자기 정체성을 가진 에이전트를 쓴다는 전제 — 이 kit은 그 정체성을 덮어쓰는 게
+    아니라, "이 조직에서 이 역할로 일하는 법"을 전달해 에이전트가 스스로 자기화하게 한다.
 
     Args:
         role_template: role_templates 행(또는 동형 속성을 가진 객체) — role_behaviors·
-            default_tool_groups·runtime_overrides 를 속성으로 읽는다(ORM 인스턴스·SimpleNamespace
-            등 duck-typing — dict 도 `.get`이 아니라 속성 접근이 필요하면 호출부가 변환).
-        recipe: workflow_recipes 형태의 dict({name, description, steps, ...}) 또는 None(추천
-            워크플로우 없음 — 섹션 [B] 워크플로우 가이드 부분만 생략, 나머지 섹션은 정상 생성).
-        runtime: 실행 런타임 식별자(예: "claude-code").
-        locale: E-I18N Phase A(story 11f1087c) — "ko"|"en", 미지원 값은 호출부가
-            `agent_onboarding_config.resolve_locale()`로 정규화해 넘겨야 한다(이 함수 자체는
-            방어적으로 `_AGILE_OPERATING_RULES`류 dict에 없는 키가 오면 KeyError — 순수함수라
-            폴백 로직을 여기 넣지 않고 호출부 책임으로 둔다, 기존 `validate_tool_groups`
-            fail-closed 철학과 동형).
+            default_tool_groups·runtime_overrides 를 속성으로 읽는다(duck-typing).
+        runtime: 실행 런타임 식별자.
+        locale: "ko"|"en" — 미지원 값은 호출부가 `resolve_locale()`로 정규화해 넘겨야 한다
+            (이 함수는 방어적 폴백 없음 — `validate_tool_groups`와 동일한 fail-closed 철학).
 
     Returns:
-        5섹션([A]~[E])을 이어붙인 markdown 문자열(diffable — 순수 문자열 결합, LLM 비호출).
+        구조화된 kit dict — ``{role_context, onboarding, workflow_pointer, integration_prompt}``.
+        키 순서가 곧 권장 표시/결합 순서(다운로드 파일에서 이 순서로 이어붙임). 하위호환이
+        필요하면(예: DB의 단일 ``system_prompt`` 컬럼) 호출부가 ``"\\n\\n".join(kit.values())``로
+        문자열 재구성 가능 — 라이브 오케스트레이션 소비자가 없어(§크럭스 §0 확인) 순서/포맷
+        변경 자체는 breaking이 아니다.
 
-    E-I18N Phase A(2026-07-08, 선생님 GO): section [B]/[C]/[D]/[E]의 코드 상수 텍스트를
-    locale 분기했다. section [A](role_template.role_behaviors, DB 데이터)는 아직 한글 그대로
-    — Phase B(스키마: role_behaviors_i18n)+후속(번역 콘텐츠, [[no-pr-for-data]] 게이트) 이후
-    이 함수가 그 컬럼을 locale로 선택하도록 다시 손볼 예정(오늘은 미적용, 의도적).
-
-    까심 QA 후속(같은 날): section [B]가 recipe를 포함할 때 호출하는 `_generate_guide()`
-    (workflow_recipes.py)의 고정 구조 문자열도 locale 분기 완료 — [B] 전체가 이제 고정
-    문자열 기준 완전 locale화(recipe DATA 자체, 즉 `name`/`description`/`step.label`/
-    `step.action`은 여전히 미분기 — workflow_recipes 자체 i18n = 별도 트랙, 의도적 범위 밖).
+    분류 근거(크럭스 §1): **role_context**([A], 지속) — 이 조직에서 맡은 역할, 기존 정체성을
+    대체하지 않는 추가 컨텍스트. **onboarding**([C]+[D]+[E] 병합, 일회성) — 도구 목록·운영
+    룰·연결 셋업, 처음 한 번 알면 되는 내용. **workflow_pointer**([B], recipe 하드코딩 제거) —
+    워크플로는 팀이 커스터마이즈하는 유저것이라 고정 텍스트 대신 `sprintable_get_workflow_guide`
+    자가-pull 유도만 남긴다. **integration_prompt**(신규) — 정적 주입이 아니라 에이전트 스스로
+    메모리에 반영하도록 유도하는 지시문(결정③), 기존 정체성 보존을 명시.
     """
-    sections = [
+    role_context = (
         _SECTION_A_HEADER[locale].format(name=role_template.name)
-        + f"\n\n{role_template.role_behaviors}",
-    ]
-
-    guide_text = _SECTION_B_TEXT[locale]
-    guide_section = [guide_text["heading"]]
-    if recipe is not None:
-        guide_section.append(_generate_guide(recipe, locale))
-    guide_section.append(guide_text["footer"])
-    sections.append("\n".join(guide_section))
-
-    sections.append(_tool_cheat_sheet(list(role_template.default_tool_groups), locale))
-    sections.append(_AGILE_OPERATING_RULES[locale])
-    sections.append(
-        _runtime_notes(runtime, getattr(role_template, "runtime_overrides", None), locale)
+        + f"\n\n{role_template.role_behaviors}"
     )
 
-    return "\n\n".join(sections)
+    onboarding = "\n\n".join([
+        _tool_cheat_sheet(list(role_template.default_tool_groups), locale),
+        _AGILE_OPERATING_RULES[locale],
+        _runtime_notes(runtime, getattr(role_template, "runtime_overrides", None), locale),
+    ])
+
+    guide_text = _SECTION_B_TEXT[locale]
+    workflow_pointer = "\n".join([guide_text["heading"], guide_text["footer"]])
+
+    return {
+        "role_context": role_context,
+        "onboarding": onboarding,
+        "workflow_pointer": workflow_pointer,
+        "integration_prompt": _INTEGRATION_PROMPT_TEXT[locale],
+    }

@@ -134,8 +134,8 @@ async def test_connection_artifact_with_persona_emits_instruction_file():
         )
     assert len(out["files"]) == 2
     filenames = {f["filename"] for f in out["files"]}
-    assert filenames == {"CLAUDE.md", ".mcp.json"}
-    instruction_file = next(f for f in out["files"] if f["filename"] == "CLAUDE.md")
+    assert filenames == {"SPRINTABLE_ONBOARDING.md", ".mcp.json"}
+    instruction_file = next(f for f in out["files"] if f["filename"] == "SPRINTABLE_ONBOARDING.md")
     assert instruction_file["content"] == "당신은 백엔드 엔지니어입니다."
 
 

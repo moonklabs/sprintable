@@ -63,28 +63,22 @@ def resolve_locale_from_request(explicit: str | None, accept_language: str | Non
                 return primary
     return DEFAULT_LOCALE
 
-# E-RECRUIT S5 G4 + 전 런타임 올지원(story 6f6ac081) — 런타임별 자율 운영 지침 파일명. 공식
-# 문서 실측(추측 0, crux doc에 출처 전부 명시): codex/cursor/grok/pi/hermes/openclaw/opencode
-# 7종이 `AGENTS.md`로 수렴(신흥 cross-tool 표준) — gemini만 `GEMINI.md` 예외. hermes는 우선순위
-# 체인(.hermes.md/HERMES.md→AGENTS.md→CLAUDE.md→.cursorrules)이라 우리가 AGENTS.md 하나만
-# emit해도 그 체인에서 정상 로드된다(더 앞순위 파일은 우리 쪽에서 안 만듦).
-_INSTRUCTION_FILENAMES: dict[str, str] = {
-    "claude-code": "CLAUDE.md",
-    "gemini": "GEMINI.md",
-    "codex": "AGENTS.md",
-    "cursor": "AGENTS.md",
-    "grok": "AGENTS.md",
-    "pi": "AGENTS.md",
-    "hermes": "AGENTS.md",
-    "openclaw": "AGENTS.md",
-    "opencode": "AGENTS.md",
-}
-_DEFAULT_INSTRUCTION_FILENAME = "AGENT_INSTRUCTIONS.md"
+# 채용-kit 재설계(story b1fe41cf, 문서 `recruit-output-kit-redesign-crux`, 선생님 GO
+# 2026-07-08 결정①): 예전엔 런타임별 CLAUDE.md/GEMINI.md/AGENTS.md **리터럴**을 다운로드
+# 파일명으로 썼다 — 유저가 그 파일명 그대로 프로젝트 루트에 저장하면 자기 에이전트의 **실제
+# 기존 정체성 파일을 덮어썼다**(선생님이 지적한 정체성 뭉갬의 실제 코드 지점). 이제 런타임 무관
+# **단일** 파일명(그 어떤 런타임의 실 정체성 파일명과도 충돌하지 않는 이름)으로 통일 — 유저가
+# 이 파일을 "자기 에이전트에게 건네" 자기화하게 하는 kit 모델(§크럭스 2/3).
+KIT_FILENAME = "SPRINTABLE_ONBOARDING.md"
 
 
 def resolve_instruction_filename(runtime: str) -> str:
-    """런타임별 자율 운영 지침 파일명(어댑터 3축 중 하나). 미확정 런타임은 generic 기본값."""
-    return _INSTRUCTION_FILENAMES.get(runtime, _DEFAULT_INSTRUCTION_FILENAME)
+    """자율 운영 kit 파일명 — 채용-kit 재설계 이후 런타임 무관 단일 상수(KIT_FILENAME).
+
+    함수 시그니처(런타임 인자)는 호출부 변경을 최소화하려 유지하지만, 반환값은 이제 런타임에
+    의존하지 않는다(예전엔 CLAUDE.md/GEMINI.md/AGENTS.md로 갈렸음 — 정체성 파일 충돌 버그의
+    원인이라 제거)."""
+    return KIT_FILENAME
 
 
 _RUNTIME_DISPLAY_NAMES: dict[str, str] = {
@@ -109,8 +103,10 @@ def list_runtime_capabilities() -> list[dict]:
     6f6ac081) 이후: MCP-native 4종은 `.mcp.json`(transport 선택 가능), 나머지 지원 런타임
     (커넥터 전용 5종 + 범용 connector 버킷)은 전부 SSE 커넥터 경로(CONNECTOR_SETUP.md, transport
     개념 자체가 없음) — 이 두 그룹의 경계가 ``MCP_NATIVE_RUNTIMES``(``is_connector_routed``)다.
-    tier는 ``_INSTRUCTION_FILENAMES``에 확정 매핑이 있으면 "full"(모든 지원 런타임이 이제 여기
-    포함 — 축2 완료), 없으면(현재 없음, 확장 여지만 유지) "experimental".
+    tier는 구체적으로 이름 붙은 런타임이면 "full", 범용 ``connector`` 버킷(특정 런타임을 못
+    찾았을 때의 안내-only 폴백)이면 "experimental" — 채용-kit 재설계(story b1fe41cf) 이후
+    ``prompt_file``이 전 런타임 동일(``KIT_FILENAME``)이라 그걸로는 더 이상 tier를 구분할 수
+    없어, 원래 의도(구체 런타임 vs 범용 폴백)를 직접 표현한다.
 
     PO 확인(2026-07-06): FE 픽커의 "곧 지원" 섹션이 채워지려면 **미지원 런타임도 응답에
     포함**돼야 한다 — ``RuntimeType``(agent_runtime.py, member.runtime_type 9종 SSOT) 전부가
@@ -130,8 +126,8 @@ def list_runtime_capabilities() -> list[dict]:
             "supported": supported,
             "tier": (
                 None if not supported
-                else "full" if runtime in _INSTRUCTION_FILENAMES
-                else "experimental"
+                else "experimental" if runtime == CONNECTOR_RUNTIME
+                else "full"
             ),
             "transport": None if (is_connector_routed or not supported) else default_transport_for_hosting(),
             "mcp_transport": [] if (is_connector_routed or not supported) else sorted(SUPPORTED_TRANSPORTS),
