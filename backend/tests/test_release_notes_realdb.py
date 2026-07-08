@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import select
@@ -27,20 +26,14 @@ def anyio_backend():
     return "asyncio"
 
 
-def _auth():
-    a = MagicMock()
-    a.user_id = str(uuid.uuid4())
-    return a
-
-
 @pytest.mark.anyio
 async def test_list_returns_seeded_newest_first():
-    from app.routers.release_notes import list_release_notes
+    from app.routers.release_notes import _list_release_notes as list_release_notes
     engine = create_async_engine(_ASYNC)
     Session = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with Session() as s:
-            out = await list_release_notes(session=s, _auth=_auth())
+            out = await list_release_notes(session=s)
             keys = [r.id for r in out]
             # 시드 4개가 newest-first(v1.5→v1.2)로 선두에(다른 테스트가 추가했을 수 있어 포함 검사).
             assert "2026-06-v1-5" in keys and "2026-05-v1-2" in keys
@@ -59,7 +52,7 @@ async def test_list_returns_seeded_newest_first():
 async def test_unpublished_excluded_from_list():
     """is_published=False 노트는 GET 제외·True 면 포함(published 필터 검증). write 엔드포인트 없이 ORM 직시드."""
     from app.models.release_note import ReleaseNote
-    from app.routers.release_notes import list_release_notes
+    from app.routers.release_notes import _list_release_notes as list_release_notes
     engine = create_async_engine(_ASYNC)
     Session = async_sessionmaker(engine, expire_on_commit=False)
     key = f"unpub-{uuid.uuid4()}"
@@ -71,13 +64,13 @@ async def test_unpublished_excluded_from_list():
                 display_period="2026년 8월", title="U", summary="", items=[], is_published=False,
             ))
             await s.commit()
-            assert key not in [r.id for r in await list_release_notes(session=s, _auth=_auth())]
+            assert key not in [r.id for r in await list_release_notes(session=s)]
             row = (await s.execute(
                 select(ReleaseNote).where(ReleaseNote.note_key == key)
             )).scalar_one()
             row.is_published = True
             await s.commit()
-            assert key in [r.id for r in await list_release_notes(session=s, _auth=_auth())]
+            assert key in [r.id for r in await list_release_notes(session=s)]
             await s.delete(row)
             await s.commit()
     finally:

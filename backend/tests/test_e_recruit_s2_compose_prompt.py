@@ -81,6 +81,43 @@ def test_compose_kit_role_context_includes_role_behaviors_verbatim():
     assert "스스로 판단해 claim하고 소통하세요." in kit["role_context"]
 
 
+# ── E-I18N EN 콘텐츠(story d6e3f407) — role_context 데이터 i18n 소비 배선 ──────────
+
+def test_compose_kit_role_context_falls_back_to_ko_when_role_behaviors_i18n_missing():
+    """role_behaviors_i18n 미설정(SimpleNamespace에 속성 자체 없음) — getattr 방어로 ko 그대로.
+    오늘 실 DB 상태(모든 role_templates.role_behaviors_i18n={})와 동형 — 무회귀 확인."""
+    role = _role(role_behaviors="스스로 판단해 claim하고 소통하세요.")
+    kit = compose_kit(role, "claude-code", locale="en")
+    assert "스스로 판단해 claim하고 소통하세요." in kit["role_context"]
+
+
+def test_compose_kit_role_context_falls_back_to_ko_when_en_key_empty():
+    role = _role(role_behaviors="한글 원문.", role_behaviors_i18n={})
+    kit = compose_kit(role, "claude-code", locale="en")
+    assert "한글 원문." in kit["role_context"]
+
+
+def test_compose_kit_role_context_uses_i18n_when_present():
+    role = _role(
+        role_behaviors="한글 원문.",
+        role_behaviors_i18n={"en": "You are a backend engineer, natively authored."},
+    )
+    kit = compose_kit(role, "claude-code", locale="en")
+    assert "You are a backend engineer, natively authored." in kit["role_context"]
+    assert "한글 원문." not in kit["role_context"]
+
+
+def test_compose_kit_role_context_ko_locale_uses_legacy_column_when_overlay_has_no_ko_key():
+    """locale="ko"인데 overlay엔 "en"만 있으면(오늘 생성 파이프라인이 실제로 채울 유일한 키)
+    레거시 ko 컬럼 그대로(캐논 소스) — overlay는 "en" 전용이라는 문서화된 설계와 정합."""
+    role = _role(
+        role_behaviors="한글 원문.",
+        role_behaviors_i18n={"en": "English content"},
+    )
+    kit = compose_kit(role, "claude-code", locale="ko")
+    assert "한글 원문." in kit["role_context"]
+
+
 def test_compose_kit_workflow_pointer_never_hardcodes_recipe_content():
     """크럭스 결정①: 워크플로는 유저것 — recipe DATA를 kit에 하드코딩하지 않는다. compose_kit는
     이제 recipe 인자 자체를 받지 않으므로(구조적으로 보장) workflow_pointer는 항상 동일한
