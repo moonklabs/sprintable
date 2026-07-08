@@ -935,7 +935,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
           {step === 3 && equipSkip && equipResult && (
             <div className="space-y-4">
               <div className="space-y-3 rounded-md border border-success-border bg-success-tint p-4">
-                <p className="text-sm font-semibold text-success">{equipResult.name} 생성 완료</p>
+                <p className="text-sm font-semibold text-success">{t('equipCreatedTitle', { name: equipResult.name })}</p>
                 {equipResult.fakechat_port ? (
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     <Badge variant="info">SSE</Badge>
@@ -945,7 +945,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 ) : null}
                 {equipResult.api_key ? (
                   <div className="space-y-1">
-                    <p className="text-xs font-medium text-foreground">API Key — 지금만 표시됩니다.</p>
+                    <p className="text-xs font-medium text-foreground">{t('equipKeyOnceLabel')}</p>
                     <code className="block break-all rounded border border-border bg-background p-2 font-mono text-xs text-foreground/80">
                       {equipResult.api_key}
                     </code>
@@ -954,7 +954,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 {equipResult.mcp_config ? (
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs font-medium text-foreground">MCP Config</p>
+                      <p className="text-xs font-medium text-foreground">{t('equipMcpConfigLabel')}</p>
                       <Button variant="glass" size="sm" onClick={() => void handleCopyEquipMcp()}>
                         {equipMcpCopied ? <><Check className="size-3" />{t('copied')}</> : <>{t('copy')}</>}
                       </Button>

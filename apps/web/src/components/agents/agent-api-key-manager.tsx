@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { Check, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SectionCard } from '@/components/ui/section-card';
@@ -33,6 +34,8 @@ interface AgentApiKeyManagerProps {
 }
 
 export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKeyManagerProps) {
+  const t = useTranslations('settings');
+  const tc = useTranslations('common');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(false);
   const [newKeyDialog, setNewKeyDialog] = useState(false);
@@ -51,8 +54,8 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   const LLMS_URL = 'https://sprintable.ai/llms.txt';
 
   const buildOnboardingMessage = (apiKey: string, mcpConfig?: string | null) =>
-    `아래의 정보를 읽고 온보딩하기 바람.\nsprintable agent name : ${agentName}\nsprintable agent api key : ${apiKey}\n${LLMS_URL}` +
-    (mcpConfig ? `\n\nMCP 서버 설정(.mcp.json에 병합):\n${mcpConfig}` : '');
+    t('agentApiKeyOnboardingMessageBase', { agentName, apiKey, llmsUrl: LLMS_URL }) +
+    (mcpConfig ? t('agentApiKeyOnboardingMessageMcpSuffix', { mcpConfig }) : '');
 
   const loadApiKeys = useCallback(async () => {
     if (!agentId) return;
@@ -181,7 +184,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
       addToast({ type: 'success', title: 'Copied', body: 'API key copied to clipboard' });
       window.setTimeout(() => setCopiedKey(false), 1500);
     } catch {
-      addToast({ type: 'error', title: 'Copy failed', body: '클립보드 접근에 실패했습니다.' });
+      addToast({ type: 'error', title: 'Copy failed', body: t('agentApiKeyClipboardFailBody') });
     }
   };
 
@@ -189,10 +192,10 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     try {
       await writeToClipboard(buildOnboardingMessage(apiKey, mcpConfig));
       setCopiedOnboarding(true);
-      addToast({ type: 'success', title: '온보딩 메시지 복사됨' });
+      addToast({ type: 'success', title: t('agentApiKeyOnboardingCopiedTitle') });
       window.setTimeout(() => setCopiedOnboarding(false), 1500);
     } catch {
-      addToast({ type: 'error', title: '복사 실패', body: '클립보드 접근에 실패했습니다.' });
+      addToast({ type: 'error', title: t('agentApiKeyCopyFailTitle'), body: t('agentApiKeyClipboardFailBody') });
     }
   };
 
@@ -220,7 +223,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
               className="gap-1.5"
             >
               {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
-              온보딩 메시지 복사
+              {t('agentApiKeyCopyOnboardingCta')}
             </Button>
             <Button
               onClick={() => {
@@ -304,18 +307,17 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
       <Dialog open={revokeConfirmDialog} onOpenChange={setRevokeConfirmDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>기존 키 무효화 후 새 키 발급</DialogTitle>
+            <DialogTitle>{t('agentApiKeyRevokeDialogTitle')}</DialogTitle>
             <DialogDescription>
-              활성 API 키 {activeKeys.length}개를 모두 무효화하고 새 키를 발급합니다.
-              기존 키로 연결된 에이전트는 새 키로 업데이트가 필요합니다.
+              {t('agentApiKeyRevokeDialogBody', { count: activeKeys.length })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRevokeConfirmDialog(false)}>
-              취소
+              {tc('cancel')}
             </Button>
             <Button variant="destructive" onClick={() => void revokeAllAndGenerate()}>
-              무효화하고 새 키 발급
+              {t('agentApiKeyRevokeConfirmCta')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -353,13 +355,13 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                 </code>
               </p>
               <div className="rounded-md bg-muted p-2">
-                <p className="text-xs font-medium text-foreground">이 키의 툴 권한 (scope)</p>
+                <p className="text-xs font-medium text-foreground">{t('agentApiKeyScopeLabel')}</p>
                 <p className="mt-1 font-mono text-xs text-muted-foreground break-all">
                   {['core', ...selectedScopes].join(' · ')}
                 </p>
               </div>
               <div className="pt-2 border-t border-border">
-                <p className="text-xs text-muted-foreground mb-2">에이전트에게 아래 온보딩 메시지를 전달하세요:</p>
+                <p className="text-xs text-muted-foreground mb-2">{t('agentApiKeyOnboardingInstruction')}</p>
                 <pre className="text-xs bg-muted rounded p-2 whitespace-pre-wrap break-all">{buildOnboardingMessage(generatedKey, generatedMcpConfig)}</pre>
                 <Button
                   variant="outline"
@@ -368,7 +370,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                   onClick={() => void copyOnboardingMessage(generatedKey, generatedMcpConfig)}
                 >
                   {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
-                  온보딩 메시지 복사
+                  {t('agentApiKeyCopyOnboardingCta')}
                 </Button>
               </div>
             </div>
