@@ -3284,6 +3284,7 @@
     "recruitFailed": "채용 처리에 실패했습니다. 다시 시도해 주세요.",
     "keyOnceTitle": "이 키는 지금만 보입니다 —",
     "keyOnceBody": "안전한 곳에 저장하세요. 아래 .mcp.json을 복사·다운로드하면 됩니다.",
+    "keyOnceBodyNoMcp": "안전한 곳에 저장하세요. 이 런타임은 MCP transport를 사용하지 않으니, 아래 지침 파일의 커넥터 설정 안내를 참고하세요.",
     "guideFileNote": "· 자율 운영 지침 · read-only",
     "mcpFileNote": "· 연결 · 실 key inline",
     "mcpNotApplicable": "이 런타임은 MCP transport를 사용하지 않습니다 — SSE 커넥터 방식으로 별도 연결 설정이 필요합니다.",
