@@ -177,14 +177,16 @@ async def test_connection_artifact_connector_runtime_returns_pointer_only():
 
 @pytest.mark.anyio
 async def test_connection_artifact_unsupported_runtime_400():
-    """Q1(PO 확정): S5 SUPPORTED_RUNTIMES는 S4 픽커 5종(claude-code/codex/gemini/cursor/connector)
-    으로 좁혔다 — RuntimeType 의 다른 9종 중 미채택 값(예: hermes)은 여전히 400."""
+    """전 런타임 올지원(story 6f6ac081) 후: RuntimeType 9종 전부 SUPPORTED_RUNTIMES에 포함돼
+    (hermes 등 예전엔 400이던 값도 이제 지원) — 400 가드는 RuntimeType에도 없는 완전 미지의
+    문자열에만 여전히 걸려야 한다(방어 가드 자체는 무회귀)."""
     from fastapi import HTTPException
 
     from app.routers.agents import get_agent_connection_artifact
     with pytest.raises(HTTPException) as ei:
         await get_agent_connection_artifact(
-            uuid.uuid4(), runtime="hermes", session=AsyncMock(), auth=MagicMock(), org_id=uuid.uuid4()
+            uuid.uuid4(), runtime="totally-unknown-runtime", session=AsyncMock(),
+            auth=MagicMock(), org_id=uuid.uuid4(),
         )
     assert ei.value.status_code == 400
 

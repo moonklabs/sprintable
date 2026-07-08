@@ -74,8 +74,8 @@ export interface RuntimeCapabilityItem {
   slug: string;
   display_name: string;
   supported: boolean;
-  /** supported=false면 항상 null. "full"=확정 지침파일 매핑 있음(claude-code만)·"experimental"=
-   * config emit은 되나 S7 프롬프트 shaping 前 generic fallback(codex/gemini/cursor/connector). */
+  /** supported=false면 항상 null. "full"=확정 지침파일 매핑 있음(전 런타임 올지원 후 connector
+   * 제외 전부)·"experimental"=config emit은 되나 특정 툴 미확정이라 generic fallback(connector만). */
   tier: 'full' | 'experimental' | null;
   transport: string | null;
   mcp_transport: string[];
@@ -85,11 +85,19 @@ export interface RuntimeCapabilityItem {
   icon: string | null;
 }
 
-/** BE `runtime-capabilities` 미배포(디디 S6 미착지) 동안의 폴백 — S4 당시 하드코딩과 동일한
- * "Claude Code만 활성" 동작을 그대로 보존해 회귀 0(엔드포인트 배포되면 자동으로 동적 전환). */
+/** BE `runtime-capabilities` 미배포/장애 동안의 폴백 — 전 런타임 올지원(story 6f6ac081) 후 실
+ * SSOT(`list_runtime_capabilities()`)와 동기화한 스냅샷(2026-07-08). BE 엔드포인트 자체가
+ * 죽었을 때만 노출되는 극단 경로라 여기서 갱신을 놓쳐도 기능은 안 깨지나(회귀는 아님), 낡은
+ * "claude-code만" 상태를 보여주는 정합 갭이었음 — 실 응답과 동기화. */
 export const RUNTIME_CAPABILITIES_FALLBACK: RuntimeCapabilityItem[] = [
-  { slug: 'claude-code', display_name: 'Claude Code', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['stdio'], prompt_file: 'CLAUDE.md', guide_filename: null, supports_event_push: true, icon: null },
-  { slug: 'codex', display_name: 'Codex', supported: false, tier: null, transport: null, mcp_transport: [], prompt_file: null, guide_filename: null, supports_event_push: false, icon: null },
-  { slug: 'gemini', display_name: 'Gemini', supported: false, tier: null, transport: null, mcp_transport: [], prompt_file: null, guide_filename: null, supports_event_push: false, icon: null },
-  { slug: 'cursor', display_name: 'Cursor', supported: false, tier: null, transport: null, mcp_transport: [], prompt_file: null, guide_filename: null, supports_event_push: false, icon: null },
+  { slug: 'claude-code', display_name: 'Claude Code', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'CLAUDE.md', guide_filename: null, supports_event_push: true, icon: null },
+  { slug: 'codex', display_name: 'Codex', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENTS.md', guide_filename: null, supports_event_push: true, icon: null },
+  { slug: 'connector', display_name: 'Connector', supported: true, tier: 'experimental', transport: null, mcp_transport: [], prompt_file: 'AGENT_INSTRUCTIONS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
+  { slug: 'cursor', display_name: 'Cursor', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENTS.md', guide_filename: null, supports_event_push: true, icon: null },
+  { slug: 'gemini', display_name: 'Gemini', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'GEMINI.md', guide_filename: null, supports_event_push: true, icon: null },
+  { slug: 'grok', display_name: 'Grok', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
+  { slug: 'hermes', display_name: 'Hermes', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
+  { slug: 'openclaw', display_name: 'OpenClaw', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
+  { slug: 'opencode', display_name: 'OpenCode', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
+  { slug: 'pi', display_name: 'Pi', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
 ];

@@ -169,6 +169,39 @@ async def test_connection_artifact_connector_runtime_real_db():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
 @pytest.mark.anyio
+@pytest.mark.parametrize("runtime", ["opencode", "openclaw", "hermes", "grok", "pi"])
+async def test_connection_artifact_connector_only_runtimes_real_db(runtime):
+    """전 런타임 올지원(story 6f6ac081): 커넥터 전용 5종도 connector 버킷과 동형 — mcp_config는
+    None, CONNECTOR_SETUP.md 포인터 파일 emit. 단 instruction 파일명은 확정 매핑이 있어(공식
+    문서 실측, crux doc 참조) generic AGENT_INSTRUCTIONS.md가 아니라 AGENTS.md."""
+    from unittest.mock import MagicMock
+    from sqlalchemy import text as _text
+    from app.core.database import Base
+    from app.routers.agents import get_agent_connection_artifact
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            agent, org_id = await _seed_agent(s, with_persona=True)
+
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            out = await get_agent_connection_artifact(
+                agent.id, runtime=runtime, session=s,
+                auth=MagicMock(), org_id=org_id,
+            )
+
+        assert out["mcp_config"] is None
+        filenames = {f["filename"] for f in out["files"]}
+        assert filenames == {"AGENTS.md", "CONNECTOR_SETUP.md"}
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
 async def test_connection_artifact_no_default_persona_omits_instruction_file():
     """까심 QA RC(S5): persona가 존재해도 전부 ``is_default=False``면(POST /agent-personas가
     is_default 생략 시 non-default 생성 가능 — "정확히 1개 default" 불변식 없음) list()의

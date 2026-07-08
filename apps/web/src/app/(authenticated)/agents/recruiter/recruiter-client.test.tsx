@@ -44,10 +44,13 @@ function mkCap(overrides: Partial<RuntimeCapabilityItem> & Pick<RuntimeCapabilit
 }
 
 describe('splitRuntimeCapabilities (E-RECRUIT S6)', () => {
-  it('splits the BE-not-deployed fallback into 1 supported + 3 coming-soon, preserving order', () => {
+  it('splits the fallback into all 10 supported + 0 coming-soon (전 런타임 올지원, story 6f6ac081)', () => {
     const { supported, comingSoon } = splitRuntimeCapabilities(RUNTIME_CAPABILITIES_FALLBACK);
-    expect(supported.map((r) => r.slug)).toEqual(['claude-code']);
-    expect(comingSoon.map((r) => r.slug)).toEqual(['codex', 'gemini', 'cursor']);
+    expect(supported.map((r) => r.slug)).toEqual([
+      'claude-code', 'codex', 'connector', 'cursor', 'gemini',
+      'grok', 'hermes', 'openclaw', 'opencode', 'pi',
+    ]);
+    expect(comingSoon).toEqual([]);
   });
 
   it('splits a real BE response (PR #1911) with multiple supported runtimes, incl. connector as a normal entry', () => {
@@ -87,35 +90,41 @@ describe('pickDefaultRuntime (E-RECRUIT S6 — avoids recruit() 400 on an unsupp
   });
 });
 
-// 실측: PR #1911 브랜치를 로컬 uvicorn(8001)으로 띄우고 실 사용자 JWT로 curl한 그대로(2026-07-06,
-// 순서는 BE가 slug 알파벳순 정렬해 반환한 그대로 보존). 이 고정값이 실제로 바뀌면 계약 드리프트니
-// 이 테스트가 먼저 깨져야 한다(회귀 가드).
+// 전 런타임 올지원(story 6f6ac081, 문서 `runtime-full-support-firstclass-crux`, PO GO
+// 2026-07-08) 후 기대 계약(BE `list_runtime_capabilities()` SSOT와 동기화, 순서는 BE가 slug
+// 알파벳순 정렬해 반환하는 그대로 보존). 이 고정값이 실제로 바뀌면 계약 드리프트니 이 테스트가
+// 먼저 깨져야 한다(회귀 가드) — 배포 후 라이브 curl로 재확認 예정(디디).
 const REAL_BE_RESPONSE: RuntimeCapabilityItem[] = [
   { slug: 'claude-code', display_name: 'Claude Code', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'CLAUDE.md', guide_filename: null, supports_event_push: true, icon: null },
-  { slug: 'codex', display_name: 'Codex', supported: true, tier: 'experimental', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENT_INSTRUCTIONS.md', guide_filename: null, supports_event_push: true, icon: null },
+  { slug: 'codex', display_name: 'Codex', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENTS.md', guide_filename: null, supports_event_push: true, icon: null },
   { slug: 'connector', display_name: 'Connector', supported: true, tier: 'experimental', transport: null, mcp_transport: [], prompt_file: 'AGENT_INSTRUCTIONS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
-  { slug: 'cursor', display_name: 'Cursor', supported: true, tier: 'experimental', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENT_INSTRUCTIONS.md', guide_filename: null, supports_event_push: true, icon: null },
-  { slug: 'gemini', display_name: 'Gemini', supported: true, tier: 'experimental', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENT_INSTRUCTIONS.md', guide_filename: null, supports_event_push: true, icon: null },
-  { slug: 'grok', display_name: 'Grok', supported: false, tier: null, transport: null, mcp_transport: [], prompt_file: null, guide_filename: null, supports_event_push: false, icon: null },
-  { slug: 'hermes', display_name: 'Hermes', supported: false, tier: null, transport: null, mcp_transport: [], prompt_file: null, guide_filename: null, supports_event_push: false, icon: null },
-  { slug: 'openclaw', display_name: 'OpenClaw', supported: false, tier: null, transport: null, mcp_transport: [], prompt_file: null, guide_filename: null, supports_event_push: false, icon: null },
-  { slug: 'opencode', display_name: 'OpenCode', supported: false, tier: null, transport: null, mcp_transport: [], prompt_file: null, guide_filename: null, supports_event_push: false, icon: null },
-  { slug: 'pi', display_name: 'Pi', supported: false, tier: null, transport: null, mcp_transport: [], prompt_file: null, guide_filename: null, supports_event_push: false, icon: null },
+  { slug: 'cursor', display_name: 'Cursor', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENTS.md', guide_filename: null, supports_event_push: true, icon: null },
+  { slug: 'gemini', display_name: 'Gemini', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'GEMINI.md', guide_filename: null, supports_event_push: true, icon: null },
+  { slug: 'grok', display_name: 'Grok', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
+  { slug: 'hermes', display_name: 'Hermes', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
+  { slug: 'openclaw', display_name: 'OpenClaw', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
+  { slug: 'opencode', display_name: 'OpenCode', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
+  { slug: 'pi', display_name: 'Pi', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
 ];
 
-describe('E-RECRUIT S6 — against the real captured GET /api/v2/runtime-capabilities response', () => {
-  it('splits into 5 supported (incl. connector) and 5 coming-soon', () => {
+describe('E-RECRUIT S6 — against the expected GET /api/v2/runtime-capabilities response (전 런타임 올지원)', () => {
+  it('splits into all 10 supported and 0 coming-soon', () => {
     const { supported, comingSoon } = splitRuntimeCapabilities(REAL_BE_RESPONSE);
-    expect(supported.map((r) => r.slug)).toEqual(['claude-code', 'codex', 'connector', 'cursor', 'gemini']);
-    expect(comingSoon.map((r) => r.slug)).toEqual(['grok', 'hermes', 'openclaw', 'opencode', 'pi']);
+    expect(supported.map((r) => r.slug)).toEqual([
+      'claude-code', 'codex', 'connector', 'cursor', 'gemini',
+      'grok', 'hermes', 'openclaw', 'opencode', 'pi',
+    ]);
+    expect(comingSoon).toEqual([]);
   });
 
-  it('exactly claude-code is tier=full (no badge); the other 4 supported are experimental (badge)', () => {
+  it('only connector is tier=experimental (badge); the other 9 are full (no badge)', () => {
     const { supported } = splitRuntimeCapabilities(REAL_BE_RESPONSE);
     const experimental = supported.filter((r) => r.tier === 'experimental').map((r) => r.slug);
     const full = supported.filter((r) => r.tier === 'full').map((r) => r.slug);
-    expect(full).toEqual(['claude-code']);
-    expect(experimental).toEqual(['codex', 'connector', 'cursor', 'gemini']);
+    expect(experimental).toEqual(['connector']);
+    expect(full).toEqual([
+      'claude-code', 'codex', 'cursor', 'gemini', 'grok', 'hermes', 'openclaw', 'opencode', 'pi',
+    ]);
   });
 
   it('default runtime stays claude-code (already first + tier=full)', () => {
@@ -123,12 +132,15 @@ describe('E-RECRUIT S6 — against the real captured GET /api/v2/runtime-capabil
     expect(pickDefaultRuntime(supported, 'claude-code')).toBe('claude-code');
   });
 
-  it("guideFilename derivation source: prompt_file carries the real per-runtime filename, guide_filename is connector-only", () => {
+  it("guideFilename derivation source: prompt_file carries the real per-runtime filename, guide_filename is connector-routed-only", () => {
     const bySlug = Object.fromEntries(REAL_BE_RESPONSE.map((r) => [r.slug, r]));
     expect(bySlug['claude-code'].prompt_file).toBe('CLAUDE.md');
-    expect(bySlug['codex'].prompt_file).toBe('AGENT_INSTRUCTIONS.md'); // generic fallback pre-S7 shaping
+    // 전 런타임 올지원(story 6f6ac081) — codex는 이제 확정 매핑(AGENTS.md), generic fallback 아님.
+    expect(bySlug['codex'].prompt_file).toBe('AGENTS.md');
+    expect(bySlug['grok'].prompt_file).toBe('AGENTS.md'); // 커넥터 전용 5종도 확정 매핑
     expect(bySlug['connector'].guide_filename).toBe('CONNECTOR_SETUP.md');
-    expect(bySlug['claude-code'].guide_filename).toBeNull(); // NOT where the regular filename lives
+    expect(bySlug['grok'].guide_filename).toBe('CONNECTOR_SETUP.md'); // 커넥터-라우팅이라 동일
+    expect(bySlug['claude-code'].guide_filename).toBeNull(); // MCP-native는 안내파일 없음
   });
 });
 
