@@ -989,13 +989,21 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 <pre className="max-h-64 overflow-auto bg-muted/40 p-3 text-xs leading-relaxed whitespace-pre-wrap">{recruitResult.system_prompt}</pre>
               </div>
 
-              <div className="overflow-hidden rounded-md border border-border">
-                <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
-                  <span className="font-mono text-xs text-foreground">📄 .mcp.json <span className="text-muted-foreground">{t('mcpFileNote')}</span></span>
-                  <CopyDownloadButtons content={mcpConfigText} filename=".mcp.json" copied={copiedMcp} onCopied={() => setCopiedMcp(true)} />
+              {recruitResult.mcp_config ? (
+                <div className="overflow-hidden rounded-md border border-border">
+                  <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
+                    <span className="font-mono text-xs text-foreground">📄 .mcp.json <span className="text-muted-foreground">{t('mcpFileNote')}</span></span>
+                    <CopyDownloadButtons content={mcpConfigText} filename=".mcp.json" copied={copiedMcp} onCopied={() => setCopiedMcp(true)} />
+                  </div>
+                  <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">{mcpConfigText}</pre>
                 </div>
-                <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">{mcpConfigText}</pre>
-              </div>
+              ) : (
+                // 커넥터-라우팅 런타임(connector/grok/pi/hermes/openclaw/opencode)은 mcp_config=null —
+                // MCP transport가 없어 .mcp.json 자체가 무의미. 문자열 "null" 렌더/복사 방지(story 6f6ac081 후속).
+                <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                  {t('mcpNotApplicable')}
+                </div>
+              )}
 
               <div className="space-y-2 rounded-md border border-border p-3">
                 <div className="flex items-center justify-between">

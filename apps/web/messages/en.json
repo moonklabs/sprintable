@@ -3286,6 +3286,7 @@
     "keyOnceBody": "save it somewhere safe. Copy or download the .mcp.json below.",
     "guideFileNote": "· autonomous operating guide · read-only",
     "mcpFileNote": "· connection · real key inline",
+    "mcpNotApplicable": "This runtime doesn't use MCP transport — it connects via a separate SSE connector setup instead.",
     "copy": "Copy",
     "copied": "Copied",
     "download": "Download",
