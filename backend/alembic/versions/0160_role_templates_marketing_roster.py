@@ -31,7 +31,14 @@ depends_on = None
 
 
 def _behaviors(role: str, mission: str, tools: str, extra_rule: str) -> str:
-    """0156/0157과 동일한 5요소 템플릿 — claim→lock→status→소통 표준 오프닝."""
+    """0156/0157과 동일한 5요소 템플릿 — claim→lock→status→소통 표준 오프닝.
+
+    ⚠️ DEPRECATED tail block(2026-07-08, migration 0163 참조): 아래 반환문 마지막
+    "## 런타임 노트" 문단은 런타임 무관 고정 문구라 커넥터-라우팅 런타임(grok/pi/hermes/
+    openclaw/opencode)엔 거짓이었다 — 0163이 이미 심긴 DB 데이터에서 제거했다. **향후
+    role_templates seed 마이그를 이 헬퍼 복사해서 작성한다면 그 tail 블록은 절대 넣지
+    마라** — 그 정보는 이제 app.services.agent_recruiter._runtime_notes()가 런타임별로
+    정확하게 동적 생성한다(compose_prompt section [E])."""
     return f"""# {role} — 자율 운영 지침
 
 당신은 이 프로젝트의 {role}입니다. {mission}
