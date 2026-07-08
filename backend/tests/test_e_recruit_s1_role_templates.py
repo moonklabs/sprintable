@@ -71,6 +71,8 @@ def test_model_field_shape():
         "is_builtin", "is_published", "tier", "version", "created_at", "updated_at",
         # 카탈로그 트랙 S1(0161, 문서 role-template-crud-api-crux §4).
         "division", "emoji", "skills",
+        # E-I18N Phase B(story 11f1087c, migration 0164) — locale 번역 오버레이.
+        "role_behaviors_i18n",
     }
 
 
