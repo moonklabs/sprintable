@@ -81,6 +81,31 @@ def resolve_instruction_filename(runtime: str) -> str:
     return KIT_FILENAME
 
 
+# 유나 라이브픽셀 발견(2026-07-08, 승격 前 fix): 위 KIT_FILENAME/resolve_instruction_filename은
+# "우리가 쓰는 kit 파일"(런타임 무관, 의도된 단일 상수) 개념인데, list_runtime_capabilities()의
+# ``prompt_file``은 그와 **다른** 개념 — "그 런타임 자신의 기존 정체성 지침 파일명"(FE STEP4
+# 전달노트가 "기존 X 파일은 그대로 둬라"에 채워 넣는 값)이다. #1967/#1974가 이 둘을 conflate해
+# 전 런타임에 SPRINTABLE_ONBOARDING.md를 반환 — "기존 SPRINTABLE_ONBOARDING.md 그대로"라는
+# 자기모순 문구를 냈다(SPRINTABLE_ONBOARDING.md는 방금 새로 놓이는 파일이지 "기존" 파일이 아님).
+# apps/web/src/services/recruit.ts::RUNTIME_CAPABILITIES_FALLBACK(2026-07-08 동기화판)과 값을
+# 맞춘다 — claude-code/codex/gemini만 실제 컨벤션 리터럴, connector(범용 버킷)는
+# AGENT_INSTRUCTIONS.md, 나머지(cursor + 커넥터 전용 5종)는 S7 shaping 전 generic fallback으로
+# AGENTS.md.
+_RUNTIME_PROMPT_FILENAMES: dict[str, str] = {
+    "claude-code": "CLAUDE.md",
+    "codex": "AGENTS.md",
+    "gemini": "GEMINI.md",
+    CONNECTOR_RUNTIME: "AGENT_INSTRUCTIONS.md",
+}
+_DEFAULT_RUNTIME_PROMPT_FILENAME = "AGENTS.md"
+
+
+def resolve_runtime_prompt_filename(runtime: str) -> str:
+    """런타임 자신의 기존 정체성 지침 파일명 — resolve_instruction_filename()(kit write-target,
+    런타임 무관 단일 상수)과는 별개 개념이니 혼동 금지."""
+    return _RUNTIME_PROMPT_FILENAMES.get(runtime, _DEFAULT_RUNTIME_PROMPT_FILENAME)
+
+
 _RUNTIME_DISPLAY_NAMES: dict[str, str] = {
     "claude-code": "Claude Code",
     "codex": "Codex",
@@ -104,9 +129,11 @@ def list_runtime_capabilities() -> list[dict]:
     (커넥터 전용 5종 + 범용 connector 버킷)은 전부 SSE 커넥터 경로(CONNECTOR_SETUP.md, transport
     개념 자체가 없음) — 이 두 그룹의 경계가 ``MCP_NATIVE_RUNTIMES``(``is_connector_routed``)다.
     tier는 구체적으로 이름 붙은 런타임이면 "full", 범용 ``connector`` 버킷(특정 런타임을 못
-    찾았을 때의 안내-only 폴백)이면 "experimental" — 채용-kit 재설계(story b1fe41cf) 이후
-    ``prompt_file``이 전 런타임 동일(``KIT_FILENAME``)이라 그걸로는 더 이상 tier를 구분할 수
-    없어, 원래 의도(구체 런타임 vs 범용 폴백)를 직접 표현한다.
+    찾았을 때의 안내-only 폴백)이면 "experimental" — 원래 의도(구체 런타임 vs 범용 폴백)를
+    직접 표현한다(``prompt_file``에 더는 얹지 않음 — 아래 참고).
+
+    ``prompt_file``은 kit 파일명(KIT_FILENAME)이 **아니다** — 그 런타임 자신의 기존 정체성
+    지침 파일명이다(resolve_runtime_prompt_filename() 참고, 유나 라이브픽셀 발견 fix).
 
     PO 확인(2026-07-06): FE 픽커의 "곧 지원" 섹션이 채워지려면 **미지원 런타임도 응답에
     포함**돼야 한다 — ``RuntimeType``(agent_runtime.py, member.runtime_type 9종 SSOT) 전부가
@@ -131,7 +158,7 @@ def list_runtime_capabilities() -> list[dict]:
             ),
             "transport": None if (is_connector_routed or not supported) else default_transport_for_hosting(),
             "mcp_transport": [] if (is_connector_routed or not supported) else sorted(SUPPORTED_TRANSPORTS),
-            "prompt_file": resolve_instruction_filename(runtime) if supported else None,
+            "prompt_file": resolve_runtime_prompt_filename(runtime) if supported else None,
             "guide_filename": "CONNECTOR_SETUP.md" if is_connector_routed else None,
             "supports_event_push": supported and not is_connector_routed,
             "icon": None,
