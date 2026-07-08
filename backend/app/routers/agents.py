@@ -23,8 +23,8 @@ from app.repositories.agent_persona import AgentPersonaRepository
 from app.schemas.recruit import RecruitRequest
 from app.schemas.team_member import OrgAgentCreate, TeamMemberResponse
 from app.services.agent_onboarding_config import (
-    CONNECTOR_RUNTIME,
     DEFAULT_RUNTIME,
+    MCP_NATIVE_RUNTIMES,
     SUPPORTED_RUNTIMES,
     SUPPORTED_TRANSPORTS,
     build_agent_mcp_config,
@@ -210,9 +210,12 @@ async def get_agent_connection_artifact(
             "content": default_persona.resolved_system_prompt,
         })
 
-    if runtime == CONNECTOR_RUNTIME:
-        # Q2(PO 확정): connector = 포인터/안내만 — SSE dial-out은 `.mcp.json`과 별개 프로토콜이라
-        # transport 파라미터 자체가 의미 없음(무시).
+    if runtime not in MCP_NATIVE_RUNTIMES:
+        # Q2(PO 확정) + 전 런타임 올지원(story 6f6ac081, PO 크럭스 승인): 범용 connector 버킷 +
+        # 커넥터 전용 5종(opencode/openclaw/hermes/grok/pi) 전부 이 분기 — 포인터/안내만(SSE
+        # dial-out은 `.mcp.json`과 별개 프로토콜이라 transport 파라미터 자체가 의미 없음/무시).
+        # 가드를 단일 sentinel(`== CONNECTOR_RUNTIME`) 대신 `not in MCP_NATIVE_RUNTIMES`로
+        # 반전한 이유: 전자는 커넥터 전용 5종을 그냥 통과시켜 `.mcp.json`을 오emit했다.
         resolved_transport = None
         mcp_config: dict | None = None
         files.append({"filename": "CONNECTOR_SETUP.md", "content": build_connector_guidance(runtime)})

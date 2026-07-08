@@ -16,21 +16,33 @@ from __future__ import annotations
 import os
 
 DEFAULT_RUNTIME = "claude-code"
-# E-RECRUIT S5(story 4fca5a3e) Q1(PO 확정): S4 픽커 그대로 — MCP-native 4(claude-code primary +
-# codex/gemini/cursor, transport config 공통) + "connector" 통칭 1개(9종 SSE 어댑터 개별 확장 X).
+# 전 런타임 올지원(story 6f6ac081, 문서 `runtime-full-support-firstclass-crux`, PO GO
+# 2026-07-08): MCP-native 4(claude-code/codex/gemini/cursor, transport config 공통) +
+# 커넥터 전용 5(opencode/openclaw/hermes/grok/pi, 실 SSE 어댑터가 connectors/ 에 이미 존재 —
+# vaporware 아님) + 범용 "connector" 버킷(어댑터가 따로 없는 런타임용 포인터 안내).
 CONNECTOR_RUNTIME = "connector"
 MCP_NATIVE_RUNTIMES = frozenset({"claude-code", "codex", "gemini", "cursor"})
-SUPPORTED_RUNTIMES = MCP_NATIVE_RUNTIMES | {CONNECTOR_RUNTIME}
+CONNECTOR_ONLY_RUNTIMES = frozenset({"opencode", "openclaw", "hermes", "grok", "pi"})
+SUPPORTED_RUNTIMES = MCP_NATIVE_RUNTIMES | CONNECTOR_ONLY_RUNTIMES | {CONNECTOR_RUNTIME}
 STDIO = "stdio"
 HTTP = "http"
 SUPPORTED_TRANSPORTS = frozenset({STDIO, HTTP})
 
-# E-RECRUIT S5 G4: 런타임별 자율 운영 지침 파일명 — 블루프린트 §4 어댑터 3축 중 "지침 파일명" 축.
-# P0=claude-code 만 확정(CLAUDE.md); 나머지 MCP-native 런타임(codex=AGENTS.md·cursor=.cursorrules
-# 등)의 정식 매핑은 S7 shaping(PO 확정) — 미확정 런타임은 이 기본값으로 폴백(크래시 없이 최선의
-# 파일명 제공, 회귀 없이 확장 여지만 남김).
+# E-RECRUIT S5 G4 + 전 런타임 올지원(story 6f6ac081) — 런타임별 자율 운영 지침 파일명. 공식
+# 문서 실측(추측 0, crux doc에 출처 전부 명시): codex/cursor/grok/pi/hermes/openclaw/opencode
+# 7종이 `AGENTS.md`로 수렴(신흥 cross-tool 표준) — gemini만 `GEMINI.md` 예외. hermes는 우선순위
+# 체인(.hermes.md/HERMES.md→AGENTS.md→CLAUDE.md→.cursorrules)이라 우리가 AGENTS.md 하나만
+# emit해도 그 체인에서 정상 로드된다(더 앞순위 파일은 우리 쪽에서 안 만듦).
 _INSTRUCTION_FILENAMES: dict[str, str] = {
     "claude-code": "CLAUDE.md",
+    "gemini": "GEMINI.md",
+    "codex": "AGENTS.md",
+    "cursor": "AGENTS.md",
+    "grok": "AGENTS.md",
+    "pi": "AGENTS.md",
+    "hermes": "AGENTS.md",
+    "openclaw": "AGENTS.md",
+    "opencode": "AGENTS.md",
 }
 _DEFAULT_INSTRUCTION_FILENAME = "AGENT_INSTRUCTIONS.md"
 
@@ -58,28 +70,25 @@ def list_runtime_capabilities() -> list[dict]:
     """S6(유나/미르코 정합용) `GET /api/v2/runtime-capabilities` 계약 SSOT.
 
     supported/tier는 **S5 emit 코드 실기준**(과대약속 금지) — recruiter/connection-artifact가
-    그 런타임으로 실제 아티팩트를 만들 수 있으면 supported=true. ``build_agent_mcp_config``는
-    MCP-native 4종(claude-code/codex/gemini/cursor) 모두 런타임-무관 동일 config를 emit하므로
-    전부 supported=true — 단 ``resolve_instruction_filename``이 claude-code만 확정 매핑(CLAUDE.md)
-    이고 나머지는 S7 shaping 전이라 generic fallback이므로 tier="experimental". connector는
-    `.mcp.json`은 성립 안 하나(``build_agent_mcp_config``가 None 반환) 안내 파일(CONNECTOR_SETUP.md)
-    emit은 성공하므로 supported=true·실 어댑터 조립은 후속이라 tier="experimental".
+    그 런타임으로 실제 아티팩트를 만들 수 있으면 supported=true. 전 런타임 올지원(story
+    6f6ac081) 이후: MCP-native 4종은 `.mcp.json`(transport 선택 가능), 나머지 지원 런타임
+    (커넥터 전용 5종 + 범용 connector 버킷)은 전부 SSE 커넥터 경로(CONNECTOR_SETUP.md, transport
+    개념 자체가 없음) — 이 두 그룹의 경계가 ``MCP_NATIVE_RUNTIMES``(``is_connector_routed``)다.
+    tier는 ``_INSTRUCTION_FILENAMES``에 확정 매핑이 있으면 "full"(모든 지원 런타임이 이제 여기
+    포함 — 축2 완료), 없으면(현재 없음, 확장 여지만 유지) "experimental".
 
     PO 확인(2026-07-06): FE 픽커의 "곧 지원" 섹션이 채워지려면 **미지원 런타임도 응답에
-    포함**돼야 한다 — ``RuntimeType``(agent_runtime.py, member.runtime_type 9종 SSOT) 중
-    ``SUPPORTED_RUNTIMES``에 없는 5종(opencode/openclaw/hermes/grok/pi)은 recruit/
-    connection-artifact에 그 값 그대로 넘기면 400("unsupported runtime")이 난다 — 즉 개별
-    선택지로는 아직 미지원. ``supported=false``·``tier=None``으로 정직하게 반환한다(이들은
-    오늘도 ``connector`` 버킷을 통해 수동 가이드로는 연결 가능하나, 그건 별도 엔트리로 이미
-    표현됨 — 개별 런타임 엔트리 자체를 과대약속하지 않는다).
+    포함**돼야 한다 — ``RuntimeType``(agent_runtime.py, member.runtime_type 9종 SSOT) 전부가
+    이제 ``SUPPORTED_RUNTIMES``에 있어 "곧 지원" 섹션은 비게 된다(의도된 결과 — 전 런타임
+    올지원이 이 스토리의 목표).
     """
     from app.services.agent_runtime import RuntimeType
 
     out = []
     all_slugs = sorted({rt.value for rt in RuntimeType} | SUPPORTED_RUNTIMES)
     for runtime in all_slugs:
-        is_connector = runtime == CONNECTOR_RUNTIME
         supported = runtime in SUPPORTED_RUNTIMES
+        is_connector_routed = supported and runtime not in MCP_NATIVE_RUNTIMES
         out.append({
             "slug": runtime,
             "display_name": _RUNTIME_DISPLAY_NAMES.get(runtime, runtime),
@@ -89,11 +98,11 @@ def list_runtime_capabilities() -> list[dict]:
                 else "full" if runtime in _INSTRUCTION_FILENAMES
                 else "experimental"
             ),
-            "transport": None if (is_connector or not supported) else default_transport_for_hosting(),
-            "mcp_transport": [] if (is_connector or not supported) else sorted(SUPPORTED_TRANSPORTS),
+            "transport": None if (is_connector_routed or not supported) else default_transport_for_hosting(),
+            "mcp_transport": [] if (is_connector_routed or not supported) else sorted(SUPPORTED_TRANSPORTS),
             "prompt_file": resolve_instruction_filename(runtime) if supported else None,
-            "guide_filename": "CONNECTOR_SETUP.md" if is_connector else None,
-            "supports_event_push": supported and not is_connector,
+            "guide_filename": "CONNECTOR_SETUP.md" if is_connector_routed else None,
+            "supports_event_push": supported and not is_connector_routed,
             "icon": None,
         })
     return out
@@ -244,14 +253,17 @@ def build_agent_mcp_config(
 ) -> dict | None:
     """`.mcp.json` 아티팩트 generator — transport 별 SSOT(E-MCP-OPT S3).
 
-    E-RECRUIT S5: MCP-native 런타임(``MCP_NATIVE_RUNTIMES`` — transport config 공통, PO 확정)만
-    `.mcp.json`을 받는다. ``runtime == CONNECTOR_RUNTIME``이면 None(SSE dial-out은 완전 별개
-    프로토콜이라 `.mcp.json` 자체가 성립 안 함 — 호출부가 ``build_connector_guidance()``로 대체).
+    E-RECRUIT S5 + 전 런타임 올지원(story 6f6ac081): MCP-native 런타임(``MCP_NATIVE_RUNTIMES`` —
+    transport config 공통, PO 확정)만 `.mcp.json`을 받는다. 그 외(범용 ``connector`` 버킷 +
+    커넥터 전용 5종 ``CONNECTOR_ONLY_RUNTIMES``)는 전부 None(SSE dial-out은 완전 별개 프로토콜이라
+    `.mcp.json` 자체가 성립 안 함 — 호출부가 ``build_connector_guidance()``로 대체). 가드를
+    단일 sentinel(``== CONNECTOR_RUNTIME``) 대신 ``not in MCP_NATIVE_RUNTIMES``로 반전한 이유:
+    전자는 커넥터 전용 5종을 그냥 통과시켜 `.mcp.json`을 오emit했다(PO 크럭스 승인 fix).
 
     ``transport="http"`` 인데 이 환경에 호스팅 배포가 없으면(``MCP_PUBLIC_URL`` 미설정) None 반환 —
     호출부가 이를 "그 변형 생성 불가"로 취급(에러 아님).
     """
-    if runtime == CONNECTOR_RUNTIME:
+    if runtime not in MCP_NATIVE_RUNTIMES:
         return None
     if transport == HTTP:
         return _build_http_config(api_key_plaintext)
@@ -269,10 +281,11 @@ def build_agent_mcp_config_bundle(
     "mcp_config_alternatives": {<다른 transport>: <그 변형>, ...}}``. http 변형이 이 환경에서
     생성 불가(``MCP_PUBLIC_URL`` 미설정)면 alternatives 에서 생략(OSS 는 호스팅 탭 자체가 없음).
 
-    E-RECRUIT S5: ``runtime == CONNECTOR_RUNTIME``이면 mcp_config 자체가 성립 안 하므로 전부 None/
-    빈값(호출부가 ``build_connector_guidance()``로 안내 파일을 대신 emit — crash 대신 안전한 no-op).
+    E-RECRUIT S5 + 전 런타임 올지원(story 6f6ac081): MCP-native가 아니면(범용 connector 버킷 +
+    커넥터 전용 5종) mcp_config 자체가 성립 안 하므로 전부 None/빈값(호출부가
+    ``build_connector_guidance()``로 안내 파일을 대신 emit — crash 대신 안전한 no-op).
     """
-    if runtime == CONNECTOR_RUNTIME:
+    if runtime not in MCP_NATIVE_RUNTIMES:
         return {"default_transport": None, "mcp_config": None, "mcp_config_alternatives": {}}
 
     default_transport = default_transport_for_hosting()

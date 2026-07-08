@@ -31,13 +31,12 @@ async def test_runtime_capabilities_200_and_shape():
             "claude-code", "codex", "gemini", "cursor", "connector",
             "opencode", "openclaw", "hermes", "grok", "pi",
         }
+        # 전 런타임 올지원(story 6f6ac081) — RuntimeType 9종 전부 supported=true(connector 포함
+        # 10 전부). "곧 지원" 섹션은 비게 된다(의도된 결과).
         supported = {r["slug"] for r in data if r["supported"]}
-        assert supported == {"claude-code", "codex", "gemini", "cursor", "connector"}
+        assert supported == slugs
         for r in data:
-            if r["supported"]:
-                assert r["tier"] in ("full", "experimental")
-            else:
-                assert r["tier"] is None
+            assert r["tier"] in ("full", "experimental")
     finally:
         app.dependency_overrides.clear()
 
@@ -51,33 +50,40 @@ async def test_runtime_capabilities_401_when_unauthenticated():
     assert resp.status_code in (401, 403)
 
 
-def test_claude_code_is_full_tier_others_experimental():
-    """S5 emit 실기준: instruction filename 확정 매핑(CLAUDE.md)이 있는 claude-code만 tier=full —
-    나머지 MCP-native(codex/gemini/cursor)는 S7 shaping 전 generic fallback이라 experimental.
-    connector는 실 어댑터 조립이 후속이라 experimental."""
+def test_instruction_filename_tiers_and_transport_by_runtime_class():
+    """전 런타임 올지원(story 6f6ac081, 문서 `runtime-full-support-firstclass-crux`) 후 실기준:
+    _INSTRUCTION_FILENAMES에 확정 매핑이 있는 8종(claude-code·gemini·codex/cursor/grok/pi/
+    hermes/openclaw/opencode)은 tier=full — 매핑 없는 connector(범용·특정 툴 미확정)만
+    tier=experimental로 남는다(공식 문서 출처 실측 결과, crux doc 참조). MCP-native 4종만
+    mcp_transport 보유·event_push 지원 — 커넥터 전용 5종+connector는 SSE 경로라 전부 빈값."""
     from app.services.agent_onboarding_config import list_runtime_capabilities
 
     caps = {c["slug"]: c for c in list_runtime_capabilities()}
     assert caps["claude-code"]["tier"] == "full"
     assert caps["claude-code"]["prompt_file"] == "CLAUDE.md"
-    for slug in ("codex", "gemini", "cursor", "connector"):
-        assert caps[slug]["tier"] == "experimental"
-    assert caps["connector"]["mcp_transport"] == []
-    assert caps["connector"]["supports_event_push"] is False
-    assert caps["connector"]["guide_filename"] == "CONNECTOR_SETUP.md"
+    assert caps["gemini"]["tier"] == "full"
+    assert caps["gemini"]["prompt_file"] == "GEMINI.md"
+    for slug in ("codex", "cursor", "grok", "pi", "hermes", "openclaw", "opencode"):
+        assert caps[slug]["tier"] == "full", slug
+        assert caps[slug]["prompt_file"] == "AGENTS.md", slug
+    assert caps["connector"]["tier"] == "experimental"
+    assert caps["connector"]["prompt_file"] == "AGENT_INSTRUCTIONS.md"
+
     for slug in ("claude-code", "codex", "gemini", "cursor"):
         assert caps[slug]["supports_event_push"] is True
         assert set(caps[slug]["mcp_transport"]) == {"stdio", "http"}
+    for slug in ("connector", "opencode", "openclaw", "hermes", "grok", "pi"):
+        assert caps[slug]["mcp_transport"] == [], slug
+        assert caps[slug]["supports_event_push"] is False, slug
+        assert caps[slug]["transport"] is None, slug
+        assert caps[slug]["guide_filename"] == "CONNECTOR_SETUP.md", slug
 
 
-def test_unsupported_runtimes_reported_honestly_for_coming_soon_section():
-    """PO(2026-07-06): FE 픽커의 '곧 지원' 섹션을 채우려면 미지원 런타임(RuntimeType 9종 중
-    SUPPORTED_RUNTIMES 밖 5종)도 응답에 있어야 한다 — supported=false·tier=None으로 정직하게."""
+def test_no_unsupported_runtimes_left_coming_soon_section_empty():
+    """전 런타임 올지원(story 6f6ac081) 목표 — RuntimeType 9종(+connector) 전부 supported=true.
+    '곧 지원' 섹션은 이제 비어야 한다(vaporware 0)."""
     from app.services.agent_onboarding_config import list_runtime_capabilities
 
-    caps = {c["slug"]: c for c in list_runtime_capabilities()}
-    for slug in ("opencode", "openclaw", "hermes", "grok", "pi"):
-        assert caps[slug]["supported"] is False
-        assert caps[slug]["tier"] is None
-        assert caps[slug]["prompt_file"] is None
-        assert caps[slug]["mcp_transport"] == []
+    caps = list_runtime_capabilities()
+    assert all(c["supported"] for c in caps)
+    assert all(c["tier"] is not None for c in caps)
