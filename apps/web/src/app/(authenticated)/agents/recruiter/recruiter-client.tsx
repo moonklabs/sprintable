@@ -363,6 +363,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     if (next !== runtime) setRuntime(next);
   }, [supportedRuntimes, runtime]);
 
+  // story 0dfa1d79: generic connector 슬롯은 named 9런타임 승격 後 "커스텀/미지원 런타임용 BYO
+  // escape hatch"로 재정의 — BE display_name("Connector")을 그대로 안 쓰고 명확한 라벨로 오버라이드.
+  const runtimeDisplayName = (rc: RuntimeCapabilityItem) =>
+    rc.slug === 'connector' ? t('runtimeCustomOtherLabel') : rc.display_name;
+
   const [agentMode, setAgentMode] = useState<'new' | 'existing'>('new');
   const [newAgentName, setNewAgentName] = useState('');
   const [existingAgents, setExistingAgents] = useState<{ id: string; name: string }[] | null>(null);
@@ -844,9 +849,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                                 'flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground',
                                 sel && 'bg-primary/15 text-primary',
                               )}>
-                                {rc.icon ?? rc.display_name.charAt(0).toUpperCase()}
+                                {rc.icon ?? runtimeDisplayName(rc).charAt(0).toUpperCase()}
                               </span>
-                              <span className="text-xs font-bold text-foreground">{rc.display_name}</span>
+                              <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
                               {rc.tier === 'experimental' && <Badge variant="info" className="text-[9px]">{t('runtimeExperimental')}</Badge>}
                             </button>
                           );
@@ -860,9 +865,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                         {comingSoonRuntimes.map((rc) => (
                           <button key={rc.slug} type="button" disabled className="flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-muted/40 p-2.5 text-left opacity-55">
                             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
-                              {rc.icon ?? rc.display_name.charAt(0).toUpperCase()}
+                              {rc.icon ?? runtimeDisplayName(rc).charAt(0).toUpperCase()}
                             </span>
-                            <span className="text-xs font-bold text-foreground">{rc.display_name}</span>
+                            <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
                             <Badge variant="chip" className="text-[9px]">{t('runtimeComingSoonBadge')}</Badge>
                           </button>
                         ))}
@@ -874,6 +879,12 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                   {t('runtimeGuide')}
                 </p>
+                {runtime === 'connector' && (
+                  <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                    {t('runtimeCustomOtherGuide')}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -986,6 +997,10 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   <span className="font-mono text-xs text-foreground">📄 {guideFilename} <span className="text-muted-foreground">{t('guideFileNote')}</span></span>
                   <CopyDownloadButtons content={recruitResult.system_prompt} filename={guideFilename} copied={copiedGuide} onCopied={() => setCopiedGuide(true)} />
                 </div>
+                <p className="flex items-start gap-1.5 border-b border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  {t('guideFileDeliveryNote')}
+                </p>
                 <pre className="max-h-64 overflow-auto bg-muted/40 p-3 text-xs leading-relaxed whitespace-pre-wrap">{recruitResult.system_prompt}</pre>
               </div>
 
