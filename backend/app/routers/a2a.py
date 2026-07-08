@@ -498,7 +498,11 @@ async def _handle_send_message(
     task = (await session.execute(
         select(A2ATask).where(A2ATask.id == task_id)
     )).scalar_one()
-    return _task_to_dict(task)
+    # 스펙(a2a.proto `rpc SendMessage(...) returns (SendMessageResponse)`) — result는 bare Task가
+    # 아니라 oneof 래퍼(`{"task": ...}` | `{"message": ...}`). GetTask/ListTasks와 달리(그쪽은
+    # 스펙상 bare Task/Task[] 리턴이 맞음) SendMessage만 이 래퍼가 필요 — 없으면 실 SDK 클라이언트
+    # 파서가 깨진다(a2a-sdk 라이브 실측, story 52bb1975 후속).
+    return {"task": _task_to_dict(task)}
 
 
 async def _handle_get_task(

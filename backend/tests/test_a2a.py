@@ -458,7 +458,7 @@ async def test_send_message_working_when_webhook_configured():
 
         assert resp.status_code == 200
         body = resp.json()
-        assert body["result"]["status"]["state"] == "TASK_STATE_WORKING"
+        assert body["result"]["task"]["status"]["state"] == "TASK_STATE_WORKING"
         assert body["error"] is None
     finally:
         app.dependency_overrides.clear()
@@ -497,7 +497,7 @@ async def test_send_message_working_when_member_has_multiple_active_webhooks():
 
         assert resp.status_code == 200
         body = resp.json()
-        assert body["result"]["status"]["state"] == "TASK_STATE_WORKING"
+        assert body["result"]["task"]["status"]["state"] == "TASK_STATE_WORKING"
         assert body["error"] is None
     finally:
         app.dependency_overrides.clear()
@@ -539,7 +539,46 @@ async def test_send_message_working_via_sse_pipeline_when_no_webhook():
 
         assert resp.status_code == 200
         body = resp.json()
-        assert body["result"]["status"]["state"] == "TASK_STATE_WORKING"
+        assert body["result"]["task"]["status"]["state"] == "TASK_STATE_WORKING"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_send_message_response_wraps_task_in_spec_envelope():
+    """버그(story 52bb1975 후속, 실 a2a-sdk E2E 적출): a2a.proto `SendMessageResponse`는
+    bare Task가 아니라 oneof 래퍼(`{"task": {...}}`) — 안 씌우면 실 클라이언트 파서가
+    "SendMessageResponse has no field named 'id'"로 깨짐(라이브 실측). result의 최상위 키가
+    task의 필드(id/contextId 등)가 아니라 정확히 `task` 하나여야 한다."""
+    client, session, app = await _authed_client(uuid.uuid4())
+    try:
+        member = _mock_member()
+        working_task = _mock_task("TASK_STATE_WORKING")
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _result(member)
+            if call_count == 2:
+                return _list_result([])  # webhook 없음 → SSE 경로
+            return _result(working_task)
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+
+        with patch("app.routers.a2a.deliver_conversation_message_webhook", new_callable=AsyncMock), \
+             patch("app.routers.a2a.assign_recipient_seq", new_callable=AsyncMock, return_value=1), \
+             patch("app.routers.a2a.wake_agent"):
+            async with client as c:
+                resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=_SEND_REQ)
+
+        body = resp.json()
+        assert set(body["result"].keys()) == {"task"}
+        assert body["result"]["task"]["id"] == str(working_task.id)
     finally:
         app.dependency_overrides.clear()
 
