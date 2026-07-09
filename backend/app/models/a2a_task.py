@@ -31,3 +31,7 @@ class A2ATask(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # E-A2A-완성 S-A1(story 2a57dc0f, migration 0168): WORKING 영구정체 방지 스위퍼가 폴링과
+    # 무관하게 판정할 수 있도록 생성 시점에 명시 기록. NULL=마이그 이전 레거시 행(폴백은
+    # 소비 코드가 created_at + A2A_TASK_TIMEOUT_MINUTES로 처리).
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

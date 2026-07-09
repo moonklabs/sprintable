@@ -399,7 +399,7 @@ async def test_list_agent_cards_requires_auth():
 
 
 def _mock_task(state: str, artifacts=None, history=None, root_message_id=None, context_id=None,
-               created_at=None, task_metadata=None) -> MagicMock:
+               created_at=None, task_metadata=None, deadline_at=None) -> MagicMock:
     t = MagicMock()
     t.id = uuid.uuid4()
     t.context_id = context_id or uuid.uuid4()
@@ -410,6 +410,10 @@ def _mock_task(state: str, artifacts=None, history=None, root_message_id=None, c
     t.updated_at = datetime.datetime.now(datetime.timezone.utc)
     t.created_at = created_at or datetime.datetime.now(datetime.timezone.utc)
     t.task_metadata = task_metadata
+    # S-A1(story 2a57dc0f): None(기본) = 레거시 행 시뮬레이션(effective_deadline이 created_at+
+    # 타임아웃으로 폴백) — MagicMock() 기본 auto-attr(항상 not-None)에 datetime 비교 연산자가
+    # TypeError 나는 걸 막는다. 명시 not-None 값을 넘기면 그 값을 deadline으로 그대로 사용.
+    t.deadline_at = deadline_at
     return t
 
 
