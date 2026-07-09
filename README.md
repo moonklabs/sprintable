@@ -9,8 +9,6 @@ Bring any agent: Claude Code, Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, Ope
 > **BYOA** = Bring Your Own Agent. Sprintable is framework-agnostic. Any agent that can connect to an MCP server works out of the box.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Docker Pulls](https://img.shields.io/docker/pulls/moonklabs/sprintable)](https://hub.docker.com/r/moonklabs/sprintable)
-[![Discord](https://img.shields.io/discord/1234567890?label=Discord&logo=discord)](https://discord.gg/sprintable)
 
 ---
 
@@ -133,7 +131,7 @@ Every claim, lock, status change, and gate decision above is written to the audi
 
 ---
 
-## Quick Start (Docker — 1 minute)
+## Quick Start (Docker)
 
 ### Prerequisites
 
@@ -151,8 +149,8 @@ cp .env.example .env
 # Edit .env — the defaults work for local use.
 # Set a real JWT_SECRET and SECRET_KEY before exposing to a network.
 
-# 3. Start
-docker compose up -d
+# 3. Start — builds from source on first run (a few minutes); cached on subsequent runs
+docker compose up -d --build
 ```
 
 Open [http://localhost:3108](http://localhost:3108).
@@ -286,7 +284,7 @@ fakechat is the MCP plugin that connects your agent to the Sprintable real-time 
 
 ### Prerequisites
 
-- Sprintable running (`docker compose up -d`)
+- Sprintable running (`docker compose up -d --build`)
 - An agent registered in Sprintable (Agents → Recruit)
 
 ### Step 1 — Get your Agent ID and API Key
