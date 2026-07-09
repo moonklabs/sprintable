@@ -560,6 +560,25 @@ async def assets_grace_hard_delete(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── GET /api/v2/internal/cron/a2a-task-deadline-sweep ────────────────────────
+# E-A2A-완성 S-A1(story 2a57dc0f): WORKING 영구정체 방지 — 기존 GetTask 인라인 판정(반응형,
+# 캐ller 폴링 의존)과 별개로 폴링과 무관하게 기한 초과 task를 능동적으로 FAILED 전이한다.
+
+@router.get("/a2a-task-deadline-sweep")
+async def a2a_task_deadline_sweep(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.a2a_task_lifecycle import sweep_expired_a2a_tasks
+        result = await sweep_expired_a2a_tasks(session)
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("cron error (a2a-task-deadline-sweep): %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 @router.get("/storage-usage-warn")
 async def storage_usage_warn(
     request: Request,

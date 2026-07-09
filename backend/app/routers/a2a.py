@@ -90,6 +90,11 @@ from app.repositories.team_member import TeamMemberRepository
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _agent_connections
 from app.services.agent_onboarding_config import resolve_backend_direct_url
+from app.services.a2a_task_lifecycle import (
+    A2A_TASK_TIMEOUT_MINUTES,
+    effective_deadline,
+    fail_task_if_still_working,
+)
 from app.services.event_seq import assign_recipient_seq
 from app.services.webhook_targeting import active_webhook_member_ids
 from app.schemas.a2a import (
@@ -156,13 +161,12 @@ _TERMINAL_STATES = {
     "TASK_STATE_REJECTED",
 }
 
-# P1-S2(story 7b93eb10, PO 크럭스 승인): model-mediated 완료신호 부재의 백스톱 — CC가 이 시간
-# 안에 task-thread 답신을 안 하면 GetTask가 폴링 시점에 TASK_STATE_FAILED로 전이한다(영구
-# WORKING 정체 방지). ⚠️ tradeoff(정직히 문서화, PO 지시): CC가 30분 넘게 조용히 오래 작업하는
-# 정상 케이스도 false-FAIL될 수 있다(interim ack 없는 model-mediated 구조의 근본 제약) — 실사용
-# 데이터가 쌓이면 이 값을 튜닝한다. PoC→P1 단계에선 설정가능화(요청별 override) 대신 고정 상수로
-# 시작(실사용 데이터 없이 설정 노출은 과설계).
-A2A_TASK_TIMEOUT_MINUTES = 30
+# P1-S2(story 7b93eb10, PO 크럭스 승인) + S-A1(story 2a57dc0f): model-mediated 완료신호 부재의
+# 백스톱 — CC가 이 시간 안에 task-thread 답신을 안 하면 FAILED로 전이한다(영구 WORKING 정체
+# 방지). ⚠️ tradeoff(정직히 문서화, PO 지시): CC가 30분 넘게 조용히 오래 작업하는 정상 케이스도
+# false-FAIL될 수 있다(interim ack 없는 model-mediated 구조의 근본 제약) — 실사용 데이터가
+# 쌓이면 이 값을 튜닝한다. 상수 자체는 `a2a_task_lifecycle`(cron 스위퍼와 공유 SSOT) 소유 —
+# 여기선 재-export만.
 
 
 class _JsonRpcException(Exception):
@@ -345,7 +349,7 @@ def _task_to_dict(task: A2ATask) -> dict:
         artifacts=[Artifact.model_validate(a) for a in task.artifacts],
         history=[Message.model_validate(m) for m in task.history],
         metadata=task.task_metadata,
-    ).model_dump(by_alias=True, mode="json")
+    ).model_dump(by_alias=True, mode="json", exclude_none=True)
 
 
 def _first_text(message: Message) -> str:
@@ -507,6 +511,8 @@ async def _handle_send_message(
         task_metadata=task_metadata,
         history=[incoming.model_dump(by_alias=True, mode="json")],
         artifacts=[],
+        # S-A1(story 2a57dc0f): 생성 시점에 명시 기록 — cron 스위퍼가 폴링과 무관하게 판정.
+        deadline_at=now + timedelta(minutes=A2A_TASK_TIMEOUT_MINUTES),
     ))
     await session.flush()
     await session.commit()
@@ -606,15 +612,18 @@ async def _handle_get_task(
                     f"webhook delivery failed on all {len(deliveries)} channel(s) after "
                     f"{latest.attempt_count} attempts: {latest.last_error or 'unknown error'}"
                 )
-            elif datetime.now(timezone.utc) - task.created_at > timedelta(minutes=A2A_TASK_TIMEOUT_MINUTES):
+            elif datetime.now(timezone.utc) > effective_deadline(task):
                 failure_reason = (
                     f"timed out waiting for agent response after {A2A_TASK_TIMEOUT_MINUTES}m"
                 )
 
             if failure_reason is not None:
-                task.state = "TASK_STATE_FAILED"
-                task.task_metadata = {**(task.task_metadata or {}), "failure_reason": failure_reason}
-                await session.flush()
+                # S-A1(story 2a57dc0f): 스위퍼와 동일 SSOT + CAS(까심 QA HIGH C fix) — 이
+                # 함수가 읽은 task는 이 시점엔 stale일 수 있다(사이에 스위퍼/AC2 훅이 먼저
+                # 전이시켰을 수 있음). CAS UPDATE가 그 경합을 흡수하고, 결과와 무관하게
+                # refresh로 DB의 진짜 현재 상태를 반영한다(이미 다른 경로가 이겼으면 그 결과
+                # 그대로 반환 — stale WORKING 기준으로 덮어쓰지 않는다).
+                await fail_task_if_still_working(session, task.id, failure_reason)
                 await session.commit()
                 await session.refresh(task)
 
