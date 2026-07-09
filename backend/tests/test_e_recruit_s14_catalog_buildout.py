@@ -156,12 +156,12 @@ async def _engine():
 @pytest.mark.anyio
 @pytest.mark.skipif(not _RAW, reason="real-DB URL 미설정 — skip")
 async def test_list_role_templates_returns_all_22_roles_realdb():
-    from app.routers.role_templates import list_role_templates
+    from app.routers.role_templates import _list_role_templates as list_role_templates
 
     eng, Session = await _engine()
     try:
         async with Session() as s:
-            out = await list_role_templates(session=s, org_id=uuid.uuid4(), _auth=None)
+            out = await list_role_templates(session=s)
         slugs = {rt.slug for rt in out}
         expected_new = {
             "mobile", "devops", "sre", "data-engineer", "ai-engineer", "security-engineer",
@@ -180,12 +180,12 @@ async def test_list_role_templates_returns_all_22_roles_realdb():
 @pytest.mark.anyio
 @pytest.mark.skipif(not _RAW, reason="real-DB URL 미설정 — skip")
 async def test_get_role_template_data_analyst_by_slug_realdb():
-    from app.routers.role_templates import get_role_template
+    from app.routers.role_templates import _get_role_template as get_role_template
 
     eng, Session = await _engine()
     try:
         async with Session() as s:
-            out = await get_role_template("data-analyst", session=s, org_id=uuid.uuid4(), _auth=None)
+            out = await get_role_template("data-analyst", session=s)
         assert out.slug == "data-analyst"
         assert out.category == "growth"
         assert "stories" not in out.default_tool_groups
