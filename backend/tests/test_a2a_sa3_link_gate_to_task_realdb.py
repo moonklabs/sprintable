@@ -109,7 +109,10 @@ async def test_delegate_can_link_gate_to_own_working_task():
                     f"/api/v2/a2a/tasks/{task.id}/link-gate", json={"gate_id": str(gate.id)},
                 )
             assert resp.status_code == 200
-            assert resp.json() == {"linked": True, "task_id": str(task.id), "gate_id": str(gate.id)}
+            # S-A5(story c140977f): 응답에 "reason" 키 추가(additive) — 미지정 시 None.
+            assert resp.json() == {
+                "linked": True, "task_id": str(task.id), "gate_id": str(gate.id), "reason": None,
+            }
 
             async with Session() as s:
                 reloaded = (await s.execute(select(A2ATask).where(A2ATask.id == task.id))).scalar_one()

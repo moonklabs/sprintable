@@ -538,10 +538,13 @@ async def _advance_task_state(session: AsyncSession, task: A2ATask, org_id: uuid
     할 수 있도록 JSON-RPC 래핑에서 분리했다(GetTask도 동일 함수 호출 — 판정 규칙 이원화 방지).
 
     HITL crux(story 7726a003, 문서 `a2a-hitl-input-auth-required-mapping-crux`, PO GO 승인
-    2026-07-07, 옵션 B): reader만 배선 — writer(task_metadata.linked_gate_id 기록)는 별도
-    forward-work 스토리로 분리(아직 아무 delegate 경로도 이 필드를 안 씀 → 오늘은 항상
-    no-op·무회귀). WORKING 에서만 판정(INPUT_REQUIRED 재진입 시 재판정 없음 — 복귀는
-    transition_gate()의 전담 책임, 여기서 낙관적으로 되돌리지 않는다)."""
+    2026-07-07, 옵션 B): reader만 배선 — writer(task_metadata.linked_gate_id 기록)는 S-A3
+    (story 6d0454c3)이 닫았다. WORKING 에서만 판정(INPUT_REQUIRED/AUTH_REQUIRED 재진입 시
+    재판정 없음 — 복귀는 transition_gate()의 전담 책임, 여기서 낙관적으로 되돌리지 않는다).
+
+    S-A5(story c140977f): `linked_gate_reason=="auth"`로 명시 선언된 경우만
+    TASK_STATE_AUTH_REQUIRED, 그 외(선언 없음 또는 다른 이유)는 기존과 동일 INPUT_REQUIRED —
+    크럭스 판정 유지(auth-pending **자동 감지**는 실신호 0이라 배제, 명시 선언만 유효 신호)."""
     if task.state == "TASK_STATE_WORKING":
         linked_gate_id = (task.task_metadata or {}).get("linked_gate_id")
         if linked_gate_id is not None:
@@ -549,7 +552,11 @@ async def _advance_task_state(session: AsyncSession, task: A2ATask, org_id: uuid
                 select(Gate).where(Gate.id == uuid.UUID(linked_gate_id), Gate.org_id == org_id)
             )).scalar_one_or_none()
             if gate is not None and gate.status == "pending":
-                task.state = "TASK_STATE_INPUT_REQUIRED"
+                linked_gate_reason = (task.task_metadata or {}).get("linked_gate_reason")
+                task.state = (
+                    "TASK_STATE_AUTH_REQUIRED" if linked_gate_reason == "auth"
+                    else "TASK_STATE_INPUT_REQUIRED"
+                )
                 await session.flush()
                 await session.commit()
                 await session.refresh(task)
@@ -833,8 +840,15 @@ async def a2a_rpc(
     return JsonRpcResponse(id=body.id, result=result)
 
 
+_VALID_LINK_GATE_REASONS = frozenset({"auth"})
+
+
 class LinkGateBody(BaseModel):
     gate_id: uuid.UUID
+    # S-A5(story c140977f): reason="auth" 는 "외부 크리덴셜 필요"의 명시 선언 — reader가
+    # TASK_STATE_AUTH_REQUIRED로 전이시키는 유일한 신호원(자동 감지는 크럭스가 배제한 죽은
+    # 배선). 미지정(None) = 기존 S-A3 동작(INPUT_REQUIRED) 그대로, 무회귀.
+    reason: str | None = None
 
 
 @router.post("/tasks/{task_id}/link-gate")
@@ -846,10 +860,10 @@ async def link_gate_to_task(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     """E-A2A-완성 S-A3(story `6d0454c3`, 크럭스 `a2a-hitl-input-auth-required-mapping-crux`
-    옵션 B — writer): delegate가 "이 gate가 이 A2A task를 블록한다"를 **명시 선언**한다.
-    reader(``_handle_get_task``의 ``linked_gate_id`` 체크, 이미 구현)와 복귀 트리거
-    (``gate_service.py::transition_gate`` 3번째 분기, 이미 구현)는 이 필드가 채워지길 그저
-    기다리고 있었을 뿐 — 이 엔드포인트가 그 유일한 writer다.
+    옵션 B — writer) + S-A5(story `c140977f`, auth 변형): delegate가 "이 gate가 이 A2A task를
+    블록한다"를 **명시 선언**한다. reader(``_advance_task_state``의 ``linked_gate_id``/
+    ``linked_gate_reason`` 체크)와 복귀 트리거(``gate_service.py::transition_gate`` 3번째
+    분기)는 이 필드가 채워지길 그저 기다리고 있었을 뿐 — 이 엔드포인트가 그 유일한 writer다.
 
     6개 ``create_gate()`` 호출지점에 conversation_id/task_id를 관통시키는 침습 배관(크럭스
     옵션 A)은 의도적으로 배제 — delegate가 자기 MCP 세션에서 이미 알고 있는 두 id(task_id는
@@ -858,6 +872,12 @@ async def link_gate_to_task(
 
     self-scope 게이트(``assert_caller_is_member`` 동형) — task.member_id 본인만 자기 task에
     링크 선언 가능(다른 에이전트의 task를 가로채 임의 gate로 블록시키는 것 방지)."""
+    if body.reason is not None and body.reason not in _VALID_LINK_GATE_REASONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported reason: {body.reason!r} (supported: {sorted(_VALID_LINK_GATE_REASONS)})",
+        )
+
     task = (await session.execute(
         select(A2ATask).where(A2ATask.id == task_id)
     )).scalar_one_or_none()
@@ -879,8 +899,11 @@ async def link_gate_to_task(
     if gate is None:
         raise HTTPException(status_code=404, detail="Gate not found")
 
-    task.task_metadata = {**(task.task_metadata or {}), "linked_gate_id": str(gate.id)}
+    task_metadata = {**(task.task_metadata or {}), "linked_gate_id": str(gate.id)}
+    if body.reason is not None:
+        task_metadata["linked_gate_reason"] = body.reason
+    task.task_metadata = task_metadata
     await session.flush()
     await session.commit()
 
-    return {"linked": True, "task_id": str(task.id), "gate_id": str(gate.id)}
+    return {"linked": True, "task_id": str(task.id), "gate_id": str(gate.id), "reason": body.reason}
