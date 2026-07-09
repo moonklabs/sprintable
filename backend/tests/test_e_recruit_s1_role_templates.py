@@ -339,3 +339,110 @@ async def test_get_role_template_description_locale_selects_i18n_overlay_realdb(
             await s.execute(text("DELETE FROM role_templates WHERE slug = 'desc-i18n-probe'"))
             await s.commit()
         await eng.dispose()
+
+
+# ─── ASGI 레벨(실 HTTP 쿼리파라미터·헤더 파싱) — mock_session/test_client(conftest) ────
+# 위 realdb 테스트는 `_get_role_template()`/`_list_role_templates()`를 직접 호출해 Header()
+# DI 마커·쿼리파라미터 파싱 자체(FastAPI 라우팅 레이어)는 안 거친다 — 그 레이어까지 실제로
+# 도는지는 여기서 실 ASGI 요청으로 확인한다.
+
+
+def _mock_role_template(**overrides):
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock
+    import uuid as uuid_mod
+
+    rt = MagicMock()
+    rt.id = uuid_mod.uuid4()
+    rt.slug = "http-probe"
+    rt.name = "HTTP Probe"
+    rt.category = "test"
+    rt.description = "English description"
+    rt.description_i18n = {"ko": "한글 설명"}
+    rt.default_tool_groups = ["stories"]
+    rt.default_workflow_recipe_slug = None
+    rt.is_builtin = False
+    rt.tier = "free"
+    rt.version = 1
+    rt.division = "Engineering"
+    rt.emoji = None
+    rt.skills = []
+    rt.role_behaviors = "ko body"
+    rt.role_behaviors_i18n = {"en": "en body"}
+    rt.runtime_overrides = {}
+    rt.created_at = datetime.now(timezone.utc)
+    rt.updated_at = datetime.now(timezone.utc)
+    for k, v in overrides.items():
+        setattr(rt, k, v)
+    return rt
+
+
+def _scalar_result(obj):
+    from unittest.mock import MagicMock
+
+    res = MagicMock()
+    res.scalar_one_or_none.return_value = obj
+    return res
+
+
+@pytest.mark.anyio
+async def test_get_role_template_locale_query_param_http(test_client, mock_session):
+    """실 HTTP GET ?locale=en — FastAPI 쿼리파라미터 파싱이 실제로 EN 을 골라내는지."""
+    from unittest.mock import AsyncMock
+
+    rt = _mock_role_template()
+    mock_session.execute = AsyncMock(return_value=_scalar_result(rt))
+    resp = await test_client.get("/api/v2/role-templates/http-probe", params={"locale": "en"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["role_behaviors"] == "en body"
+    assert body["description"] == "English description"
+    assert body["division"] == "Engineering"  # en → 매핑 미적용, 원문
+
+
+@pytest.mark.anyio
+async def test_get_role_template_accept_language_header_http(test_client, mock_session):
+    """실 HTTP GET — 명시 locale 없이 Accept-Language 헤더만으로 ko 표시명/en 오버레이 선택."""
+    from unittest.mock import AsyncMock
+
+    rt = _mock_role_template()
+    mock_session.execute = AsyncMock(return_value=_scalar_result(rt))
+    resp = await test_client.get(
+        "/api/v2/role-templates/http-probe",
+        headers={"Accept-Language": "ko-KR,ko;q=0.9"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["role_behaviors"] == "ko body"  # ko는 role_behaviors_i18n에 en만 있어 원문 폴백
+    assert body["description"] == "한글 설명"  # ko 오버레이 선택
+    assert body["division"] == "엔지니어링"  # ko 표시명 매핑 적용
+
+
+@pytest.mark.anyio
+async def test_get_role_template_no_locale_signal_defaults_ko_http(test_client, mock_session):
+    """locale 쿼리도 Accept-Language 헤더도 없으면 DEFAULT_LOCALE=ko(회귀 0 — 기존 클라이언트)."""
+    from unittest.mock import AsyncMock
+
+    rt = _mock_role_template()
+    mock_session.execute = AsyncMock(return_value=_scalar_result(rt))
+    resp = await test_client.get("/api/v2/role-templates/http-probe")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["description"] == "한글 설명"
+    assert body["division"] == "엔지니어링"
+
+
+@pytest.mark.anyio
+async def test_list_role_templates_locale_query_param_http(test_client, mock_session):
+    """실 HTTP GET list ?locale=ko — division/description 이 실제로 로케일 적용되는지."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    rt = _mock_role_template()
+    res = MagicMock()
+    res.scalars.return_value.all.return_value = [rt]
+    mock_session.execute = AsyncMock(return_value=res)
+    resp = await test_client.get("/api/v2/role-templates", params={"locale": "ko"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["division"] == "엔지니어링"
+    assert body[0]["description"] == "한글 설명"
