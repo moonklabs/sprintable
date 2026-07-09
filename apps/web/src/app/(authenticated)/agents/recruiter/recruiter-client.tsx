@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import {
   Check, CheckCircle2, Copy, Download, RefreshCw, ChevronLeft, Info, Sparkles,
   Palette, Cog, Search, ClipboardList, Briefcase, IdCard,
@@ -216,6 +216,9 @@ interface RecruiterClientProps {
 }
 
 export function RecruiterClient({ projectId, showTopBar = true, onExit }: RecruiterClientProps) {
+  // S25(ae844d74): 카탈로그·recruit이 소비할 활성 UI locale — locale-switcher가 쿠키 전환 후 풀
+  // 리로드하므로 마운트 시점 값이면 충분(별도 리스너 불필요).
+  const locale = useLocale();
   const t = useTranslations('recruiter');
   const tAgents = useTranslations('agents');
   // story d82c1092: 스코프 step(§3③) 카피는 AddAgentForm에서 그대로 하베스트(신규 토큰 0).
@@ -236,14 +239,15 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const fetchRoleTemplates = useCallback(async () => {
     setRoleError(false);
     try {
-      const res = await fetch('/api/role-templates');
+      // S25(ae844d74): 활성 UI locale 전달 → BE(S24)가 카드 name/description을 locale별로 반환.
+      const res = await fetch(`/api/role-templates?locale=${locale}`);
       if (!res.ok) { setRoleError(true); return; }
       const json = (await res.json()) as { data?: RoleTemplateSummary[] };
       setRoleTemplates(json.data ?? []);
     } catch {
       setRoleError(true);
     }
-  }, []);
+  }, [locale]);
 
   useEffect(() => { void fetchRoleTemplates(); }, [fetchRoleTemplates]);
 
@@ -474,10 +478,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
         agentName = existingAgents?.find((a) => a.id === agentId)?.name ?? '';
       }
 
+      // S25(ae844d74): 활성 UI locale 전달 → BE(S24)가 role_behaviors_i18n에서 해당 locale kit 합성.
       const recruitRes = await fetch(`/api/agents/${agentId}/recruit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role_template_slug: selectedRoleSlug, runtime }),
+        body: JSON.stringify({ role_template_slug: selectedRoleSlug, runtime, locale }),
       });
       const recruitJson = (await recruitRes.json().catch(() => null)) as { data?: RecruitResponse } | null;
       if (!recruitRes.ok || !recruitJson?.data) throw new Error(t('recruitFailed'));
