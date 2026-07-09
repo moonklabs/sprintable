@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.schemas.a2a import AgentSkill
 from app.services.agent_onboarding_config import MCP_NATIVE_RUNTIMES, resolve_locale
 from app.services.mcp_toolset import ALL_GROUPS, ALL_TOOL_NAMES, _ALWAYS_ALLOWED, tool_group
 
@@ -217,6 +218,32 @@ yourself:
 **Don't overwrite your existing identity — integrate this in your own way.**""",
 }
 
+# E-RECRUIT S27(story `8116d6f5`, S26 blueprint 발견2 후속): role_template.skills(AgentSkill·
+# SSOT section 5 "skills-for-discovery")가 compose_kit에서 0 참조였던 갭을 메운다. skills는
+# A2A 발견 키(app/schemas/a2a.py)라 여기서 새 스키마를 발명하지 않고 그대로 재사용한다
+# (role_templates.py 라우터의 ``AgentSkill.model_validate(s) for s in rt.skills`` 와 동형).
+_SKILLS_TEXT: dict[str, dict[str, str]] = {
+    "ko": {"heading": "## 발견 가능 스킬 (A2A)", "tags_label": "태그"},
+    "en": {"heading": "## Discoverable Skills (A2A)", "tags_label": "tags"},
+}
+
+
+def _skills_block(skills: list[dict], locale: str = "ko") -> str:
+    """[신규, section 5] skills 목록 → kit 텍스트 블록. 빈 목록이면 빈 문자열(호출부가 kit
+    dict에서 아예 키를 생략 — AC3 "빈 role은 빈 블록/생략, 깨짐 0" 및 기존 role_context/
+    onboarding 회귀 0)."""
+    if not skills:
+        return ""
+    text = _SKILLS_TEXT[locale]
+    lines = [text["heading"], ""]
+    for raw in skills:
+        skill = AgentSkill.model_validate(raw)
+        line = f"- **{skill.name}** (`{skill.id}`): {skill.description}"
+        if skill.tags:
+            line += f" [{text['tags_label']}: {', '.join(skill.tags)}]"
+        lines.append(line)
+    return "\n".join(lines)
+
 
 def compose_kit(
     role_template: Any,
@@ -232,25 +259,31 @@ def compose_kit(
 
     Args:
         role_template: role_templates 행(또는 동형 속성을 가진 객체) — role_behaviors·
-            role_behaviors_i18n(선택, 없으면 ko 그대로)·default_tool_groups·runtime_overrides
-            를 속성으로 읽는다(duck-typing).
+            role_behaviors_i18n(선택, 없으면 ko 그대로)·default_tool_groups·runtime_overrides·
+            skills(선택, 없거나 빈 리스트면 kit에서 생략)를 속성으로 읽는다(duck-typing).
         runtime: 실행 런타임 식별자.
         locale: "ko"|"en" — 미지원 값은 호출부가 `resolve_locale()`로 정규화해 넘겨야 한다
             (이 함수는 방어적 폴백 없음 — `validate_tool_groups`와 동일한 fail-closed 철학).
 
     Returns:
-        구조화된 kit dict — ``{role_context, onboarding, workflow_pointer, integration_prompt}``.
-        키 순서가 곧 권장 표시/결합 순서(다운로드 파일에서 이 순서로 이어붙임). 하위호환이
-        필요하면(예: DB의 단일 ``system_prompt`` 컬럼) 호출부가 ``"\\n\\n".join(kit.values())``로
-        문자열 재구성 가능 — 라이브 오케스트레이션 소비자가 없어(§크럭스 §0 확인) 순서/포맷
-        변경 자체는 breaking이 아니다.
+        구조화된 kit dict — ``{role_context, onboarding, skills(선택), workflow_pointer,
+        integration_prompt}``. ``skills``는 role_template.skills가 비어있으면 키 자체가
+        생략된다(AC3 — 빈 블록을 값으로 넣지 않고 키를 아예 안 만든다. 회귀 0). 키 순서가 곧
+        권장 표시/결합 순서(다운로드 파일에서 이 순서로 이어붙임). 하위호환이 필요하면(예: DB의
+        단일 ``system_prompt`` 컬럼) 호출부가 ``"\\n\\n".join(kit.values())``로 문자열 재구성
+        가능 — 라이브 오케스트레이션 소비자가 없어(§크럭스 §0 확인) 순서/포맷 변경 자체는
+        breaking이 아니다. S26의 ``render_kit_for_family``는 kit.items()를 무관하게 순회하므로
+        (키 스키마 고정 아님) ``skills`` 키가 있으면 자동으로 family 스타일이 입혀진다 — S26측
+        변경 불요.
 
-    분류 근거(크럭스 §1): **role_context**([A], 지속) — 이 조직에서 맡은 역할, 기존 정체성을
-    대체하지 않는 추가 컨텍스트. **onboarding**([C]+[D]+[E] 병합, 일회성) — 도구 목록·운영
-    룰·연결 셋업, 처음 한 번 알면 되는 내용. **workflow_pointer**([B], recipe 하드코딩 제거) —
-    워크플로는 팀이 커스터마이즈하는 유저것이라 고정 텍스트 대신 `sprintable_get_workflow_guide`
-    자가-pull 유도만 남긴다. **integration_prompt**(신규) — 정적 주입이 아니라 에이전트 스스로
-    메모리에 반영하도록 유도하는 지시문(결정③), 기존 정체성 보존을 명시.
+    분류 근거(크럭스 §1 + S26 blueprint 발견2 후속): **role_context**([A], 지속) — 이 조직에서
+    맡은 역할, 기존 정체성을 대체하지 않는 추가 컨텍스트. **onboarding**([C]+[D]+[E] 병합,
+    일회성) — 도구 목록·운영 룰·연결 셋업, 처음 한 번 알면 되는 내용. **skills**(신규, [section
+    5] "skills-for-discovery") — A2A로 발견 가능한 스킬 목록(app.schemas.a2a.AgentSkill 재사용,
+    신규 스키마 발명 안 함). **workflow_pointer**([B], recipe 하드코딩 제거) — 워크플로는 팀이
+    커스터마이즈하는 유저것이라 고정 텍스트 대신 `sprintable_get_workflow_guide` 자가-pull
+    유도만 남긴다. **integration_prompt**(신규) — 정적 주입이 아니라 에이전트 스스로 메모리에
+    반영하도록 유도하는 지시문(결정③), 기존 정체성 보존을 명시.
 
     E-I18N EN 콘텐츠(story d6e3f407, 문서 `en-content-native-generation-crux` §3): section
     [A](role_behaviors) 데이터도 이제 locale 분기한다 — `role_behaviors_i18n.get(locale) or
@@ -274,9 +307,21 @@ def compose_kit(
     guide_text = _SECTION_B_TEXT[locale]
     workflow_pointer = "\n".join([guide_text["heading"], guide_text["footer"]])
 
-    return {
+    kit = {
         "role_context": role_context,
         "onboarding": onboarding,
         "workflow_pointer": workflow_pointer,
         "integration_prompt": _INTEGRATION_PROMPT_TEXT[locale],
     }
+    skills_block = _skills_block(list(getattr(role_template, "skills", None) or []), locale)
+    if skills_block:
+        # dict는 삽입 순서를 보존 — "skills" 키를 workflow_pointer 앞에 두기 위해 재구성
+        # (section 4[tools, onboarding] 바로 다음이 section 5[skills]라는 SSOT 순서 반영).
+        kit = {
+            "role_context": kit["role_context"],
+            "onboarding": kit["onboarding"],
+            "skills": skills_block,
+            "workflow_pointer": kit["workflow_pointer"],
+            "integration_prompt": kit["integration_prompt"],
+        }
+    return kit
