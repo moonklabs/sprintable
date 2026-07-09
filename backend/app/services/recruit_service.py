@@ -22,6 +22,7 @@ from app.repositories.agent_persona import AgentPersonaRepository
 from app.repositories.api_key import ApiKeyRepository
 from app.schemas.agent_persona import PersonaSummaryResponse
 from app.services.agent_recruiter import compose_kit, validate_tool_groups
+from app.services.model_family import render_kit_for_family, resolve_model_family
 
 
 async def get_published_role_template(session: AsyncSession, slug: str) -> RoleTemplate | None:
@@ -89,6 +90,13 @@ async def recruit_agent(
     채용-kit 재설계(story b1fe41cf): ``compose_kit``이 구조화 dict를 반환 — DB의 ``system_prompt``
     컬럼(Text)은 여전히 단일 문자열이라 ``"\n\n".join(kit.values())``로 재구성한다(라이브
     오케스트레이션 소비자가 없어 — §크럭스 §0 확인 — 이 join 순서/포맷 변경은 breaking 아님).
+
+    E-RECRUIT S26(story `510a1ed4`, PO 오르테가 dead-path 지적 2026-07-09): ``render_kit_for_family``
+    는 여기서 **runtime 자동추론으로 상시 적용**한다(명시 opt-in 파라미터 아님) — 이미 받은
+    ``runtime``에서 family를 자동 도출해 렌더하는 게 "모델-aware"의 본질이지, 유저가 매번 family를
+    또 지정해야 하면 그게 더 이상한 설계다. 미매핑 runtime(cursor/grok/opencode/openclaw/hermes/pi)
+    은 ``resolve_model_family``가 GENERIC(=거의 no-op·terse pass-through)으로 fail-safe 해서
+    "family 미지정 시 기존 동작과 사실상 동일"이라는 회귀 요건도 자연히 충족한다.
     """
     await acquire_agent_mutation_lock(session, agent_member.id)
 
@@ -96,6 +104,7 @@ async def recruit_agent(
     validate_tool_groups(tool_allowlist)  # fail-closed — ValueError 전파, 호출부가 400 매핑
 
     kit = compose_kit(role_template, runtime, locale)
+    kit = render_kit_for_family(kit, resolve_model_family(runtime))
     system_prompt = "\n\n".join(kit.values())
 
     persona_repo = AgentPersonaRepository(session)
