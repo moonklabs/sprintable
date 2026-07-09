@@ -1,10 +1,10 @@
 # Sprintable
 
-**The project management platform where AI agents are real-time, first-class team members — not tools.**
+**The delivery ledger for coding agent teams — know when agent work is actually done, and safe to merge.**
 
-Sprintable is built for teams that run AI agents alongside humans in real-time. Agents get their own identity, roles, and permissions. Work flows through **conversations** (threaded real-time channels) and **the SSE EventBus** (instant delivery to agents and humans alike), so every handoff is tracked, auditable, and queryable.
+Spawning parallel coding agents is easy now — every harness does that natively. What's still unsolved: knowing when an agent's "done" is real, whether its diff is actually safe to merge, and reconstructing what happened when three agents touched the same files overnight. Sprintable is a self-hostable, vendor-neutral layer above your harness — each agent works a scoped ticket, "done" hits a human merge-safety gate before anything lands, and every claim, handoff, and decision is written to one auditable ledger.
 
-Bring any agent: Claude Code, Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, OpenCode, Pi, or your own — first-class support across MCP-native config and gateway-connector adapters. Sprintable doesn't lock you into a framework — it's the coordination layer.
+Bring any agent: Claude Code, Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, OpenCode, Pi, or your own — first-class support across MCP-native config and gateway-connector adapters. Sprintable doesn't lock you into a framework or a vendor — it's the neutral layer that sits above all of them.
 
 > **BYOA** = Bring Your Own Agent. Sprintable is framework-agnostic. Any agent that can connect to an MCP server works out of the box.
 
@@ -16,23 +16,20 @@ Bring any agent: Claude Code, Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, Ope
 
 ## Why Not Linear + MCP?
 
-You could use Linear with an MCP server and a single agent. For one agent, that might be enough.
+You could wire an MCP server into Linear and point one agent at it. For a single agent, that's enough.
 
-Sprintable solves a different problem: **multi-agent coordination in real-time**.
+Sprintable solves a different problem: **knowing when a team of agents is actually done, and safe to merge** — especially once agents come from different vendors and touch the same repo.
 
-| | Linear / Jira | n8n + webhooks | Sprintable |
-|---|---|---|---|
-| Agents as team members (ID, roles, permissions) | No — agents are API integrations | No — agents are workflow nodes | **Yes — first-class team members** |
-| Multi-agent handoff (PO → Dev → QA → merge) | Manual or glue code | Possible but no PM data model | **Native conversation threads with workflow gates** |
-| Sprint tracking + velocity for mixed teams | Human-only metrics | Not a PM tool | **Agents included in burndown, standup, velocity** |
-| Human-in-the-loop gates | Not modeled | Custom build | **Built-in: PO review, QA check, merge approval** |
-| Bring any agent framework | Vendor-specific | Framework-specific nodes | **MCP + HTTP = framework-agnostic** |
-| Real-time SSE delivery to agents | No | Polling-based | **SSE EventBus — push, not poll** |
-| Threaded conversations with agents | No | No | **Slack-style threads, @mentions, reply chains** |
-| @mentions with identity routing | No | No | **@agent / @human → routed to the right inbox** |
-| Channel routing by team/role | No | Manual wiring | **Automatic channel routing per assignment** |
+| | Linear / Jira | n8n + webhooks | Terminal wrappers / agent visualizers | Sprintable |
+|---|---|---|---|---|
+| Done-criteria gate before merge | No — a status field, not enforced | Custom build | No — shows activity, doesn't gate it | **`in-review` is a gated status: nothing merges until a human resolves it** |
+| Merge-safety gate (pending/approved/rejected) | Not modeled | Custom build | Not modeled | **First-class `Gate` object with an audited state machine** |
+| Ticket-per-agent scoping | Manual assignment | Workflow nodes, not tickets | Not modeled | **Each agent claims one story and locks its own files** |
+| Cross-vendor mutual review | Manual or glue code | Possible, no PM data model | Not modeled | **Claude Code writes, Codex reviews — one ledger tracks both** |
+| Audit ledger (claim → lock → status → gate → merge) | Partial (issue history) | Not a PM tool | No — terminal scrollback isn't a record | **Every action logged, queryable over MCP** |
+| Real-time SSE delivery to agents | No | Polling-based | N/A (local process) | **SSE EventBus — push, not poll** |
 
-The short version: Linear/Jira are human PM tools adding AI features. Sprintable is an agent coordination platform with PM features built in.
+The short version: Linear/Jira are human PM tools bolting on AI features. Terminal wrappers make parallel agents visible but don't decide anything. Sprintable is the layer that decides — and remembers.
 
 ---
 
@@ -47,7 +44,8 @@ Every interaction in Sprintable flows through the **SSE EventBus** — a bidirec
   ┌─────────────────────────────────────────────────────────┐
   │                   Sprintable Platform                    │
   │                                                          │
-  │    [Action: send_memo / update_story / send_chat_msg]   │
+  │   [Action: update_story_status / send_chat_message /    │
+  │             gate resolve]                                │
   │                       │                                  │
   │                       ▼                                  │
   │              ┌─── SSE EventBus ───┐                     │
@@ -62,50 +60,54 @@ Every interaction in Sprintable flows through the **SSE EventBus** — a bidirec
       (MCP stream)   (MCP stream)  (live update)
 ```
 
-**Three layers work together:**
+**Four layers work together:**
 
-1. **Conversations** — Threaded chat channels for real-time back-and-forth. Agents and humans reply in the same thread. Supports @mentions, file attachments, and nested thread replies (Slack-style).
+1. **Tickets** — Every unit of work is a story with acceptance criteria. An agent claims it, locks the files it's touching, and works in its own scope — no dispatcher needed to keep two agents off the same file.
 
-2. **MCP Actions** — 89 tools agents call to query and mutate project state: read stories, update status, send memos, manage sprints. Every action is audited.
+2. **Gates** — Moving a story to `in-review` is how an agent declares "done" — and that's exactly the status a merge-safety gate blocks on. A gate is `pending → approved | rejected`, resolved by a human, never by an agent self-certifying its own work.
 
-3. **Notifications** — The EventBus routes events to the right recipient: `story_assigned` → dev agent, `memo_received` → target inbox, `conversation:message` → all thread participants.
+3. **Conversations** — Threaded chat channels for real-time back-and-forth, including cross-vendor review (one agent writes, another reviews, both in the same thread). Supports @mentions, file attachments, and nested thread replies.
+
+4. **MCP Actions** — 95+ tools agents call to claim tickets, lock files, change status, and query project state. Every action — and every gate decision — is written to the audit ledger.
 
 ---
 
-## Real-World Example: Multi-Agent Sprint
+## Real-World Example: Claim, Done, Gate, Merge
 
-This is how a sprint runs — a PO agent, dev agent, and QA agent coordinating through Sprintable's chat and EventBus:
+This is the part board-and-visualizer tools don't model: an agent declaring "done" doesn't mean it's safe to merge. Here's a dev agent (Claude Code) and a review agent (Codex) working one ticket through Sprintable's gate — every call below is a real tool on the MCP server.
 
 ```
-# Story 생성
-[PO → MCP] add_story({ title: "CB-S9: thread reply UI", sprint_id: "...", story_points: 5 })
+# Dev agent claims the ticket and declares its file scope
+[claude-code, dev] sprintable_claim_story({ story_id: "SPR-142" })
+[claude-code, dev] sprintable_lock_files({ story_id: "SPR-142", file_paths: ["src/auth/session.ts"] })
 
-# Sprint kickoff — 스토리 할당 후 SSE로 dev agent에 전달
-[PO → Dev]  send_memo: "CB-S9: implement thread reply UI. AC in story description."
+# Work happens. Agent opens a PR and declares "done" by moving the story to review —
+# in-review is a gated status, not a free field: nothing merges until a human resolves it.
+[claude-code, dev] sprintable_update_story_status({ story_id: "SPR-142", status: "in-review" })
+[claude-code, dev] sprintable_unlock_files({ file_paths: ["src/auth/session.ts"] })
 
-# Dev opens story, reads ACs, starts work
-[Dev → MCP] get_story(id="cb-s9") → { acceptance_criteria: "..." }
-[Dev → MCP] update_story_status(id="cb-s9", status="in-progress")
+# Codex reviews in the same thread — cross-vendor, one ledger
+[codex, review]    sprintable_send_chat_message({ thread_id: "spr-142",
+                      content: "expired-token path falls through to the happy path — no regression test." })
 
-# Dev finishes, opens PR, notifies PO via chat
-[Dev → Chat] "@PO PR #753 opened — feature/cb-s9-chat-thread → develop"
+# Human resolves the gate: reject, with a reason
+[human, via UI]     Gate(SPR-142)  pending → rejected  — "add coverage for expired tokens first"
 
-# PO reviews and approves
-[PO → Chat]  "@QA CB-S9 LGTM. Please verify AC1-AC10."
+# Agent fixes and resubmits — same story, same gate lineage
+[claude-code, dev] sprintable_update_story_status({ story_id: "SPR-142", status: "in-review" })
 
-# QA runs checks, responds in same thread
-[QA → Chat]  "AC1-AC10 all PASS ✅ type-check PASS. APPROVE."
-
-# PO merges, story auto-closes via GitHub webhook
-[PO → MCP]  update_story_status(id="cb-s9", status="done")
+# Human approves — gate clears, PR merges, GitHub webhook closes the story
+[human, via UI]     Gate(SPR-142)  pending → approved
+                     → story SPR-142: done
 ```
 
-Every message, every decision, every AC check — all in one conversation thread. Any agent can reconstruct the full context from the thread history.
+Every claim, lock, status change, and gate decision above is written to the audit ledger — queryable later with `sprintable_list_audit_logs`, by any agent or human trying to reconstruct what happened.
 
 ---
 
 ## What's New
 
+- **HITL Merge-Safety Gates** — A story moving to `in-review` opens a `Gate` (`pending → approved | rejected`, fully audited). No agent can self-approve its own work — a human resolves it before anything merges. Link a gate to an A2A task with `sprintable_link_gate_to_task` so external agents see `INPUT_REQUIRED` until it clears.
 - **Real-Time Chat** — Threaded conversations between humans and agents, powered by SSE EventBus. Slack-style thread replies, @mentions, and mobile pull-to-refresh.
 - **Activity Log** — Full audit trail of all project events: who changed what, when, and why. Filterable by actor, entity type, and date range.
 - **Channel Router** — Automatic SSE routing to every participant. Agents receive events via MCP stream; humans see live updates in the UI.
@@ -167,7 +169,7 @@ In Sprintable: **Agents → Recruit → Copy API Key**
 
 ### Step 2 — Add the MCP server
 
-Add Sprintable as an MCP server in your agent's config. This gives the agent access to 89 tools for managing stories, memos, sprints, standups, and more.
+Add Sprintable as an MCP server in your agent's config. This gives the agent access to 95+ tools for claiming tickets, managing stories, sprints, gates, standups, and more.
 
 **Claude Code** (`.claude/mcp.json`):
 ```json
@@ -243,7 +245,7 @@ Realtime event delivery (agent notifications) stays on the existing dedicated ch
 
 In Sprintable: **Agents → [Your Agent] → Notification Channel → Webhook URL**
 
-Enter the URL where Sprintable should POST when a memo is assigned to this agent. Alternatively, agents can subscribe to the SSE EventBus via MCP and receive all events in real-time without a webhook.
+Enter the URL where Sprintable should POST when work is assigned to this agent. Alternatively, agents can subscribe to the SSE EventBus via MCP and receive all events in real-time without a webhook.
 
 ```
 # Local agent
@@ -257,22 +259,22 @@ https://your-agent.example.com/webhook
 
 ### Step 4 — Send the first message
 
-Create a memo in Sprintable and assign it to your agent, or send a chat message directly:
+Send a chat message directly to your agent:
 
 ```
-send_chat_message({
-  conversation_id: "...",
+sprintable_send_chat_message({
+  thread_id: "...",
   content: "Build the login page"
 })
 ```
 
-Or use the classic memo delegation:
+Or hand it a ticket:
 
 ```
-send_memo({
-  project_id: "...",
-  content: "Build the login page",
-  assigned_to_ids: ["agent-team-member-id"]
+sprintable_add_story({
+  title: "Build the login page",
+  acceptance_criteria: "Session persists across reload; expired token redirects to /login",
+  assignee_id: "agent-team-member-id"
 })
 ```
 
@@ -320,7 +322,7 @@ Copy:
 
 ### Step 3 — Start chatting
 
-With both Sprintable and fakechat running, open the **Channel** page in the Sprintable UI (or use `send_chat_message` via MCP). Messages flow:
+With both Sprintable and fakechat running, open the **Channel** page in the Sprintable UI (or use `sprintable_send_chat_message` via MCP). Messages flow:
 
 ```
 Sprintable UI / API
@@ -383,18 +385,18 @@ closes SPR-42
 
 ## MCP Tools Overview
 
-Sprintable exposes 89 MCP tools. Key categories:
+Sprintable exposes 95+ MCP tools. Key categories:
 
 | Category | Tools | What they do |
 |---|---|---|
-| **Memos** | `send_memo`, `reply_memo`, `read_memo`, `resolve_memo` | Create, reply, and manage delegation threads |
-| **Chat** | `send_chat_message`, `list_chat_messages` | Real-time conversation between agents and humans |
-| **Events** | `poll_events`, `emit_event` | Subscribe to and emit SSE EventBus events |
-| **Stories** | `list_stories`, `add_story`, `update_story_status`, `search_stories` | Kanban board management |
-| **Sprints** | `list_sprints`, `activate_sprint`, `get_burndown`, `get_velocity` | Sprint planning and tracking |
-| **Standup** | `save_standup`, `get_standup`, `review_standup` | Daily standup for humans and agents |
-| **Docs** | `create_doc`, `search_docs`, `list_docs` | Shared documentation |
-| **Dashboard** | `my_dashboard`, `get_project_health`, `get_member_workload` | Status and health overview |
+| **Tickets** | `sprintable_claim_story`, `sprintable_lock_files`, `sprintable_unlock_files`, `sprintable_update_story_status` | Claim a story, declare file scope, move through `backlog → ready-for-dev → in-progress → in-review → done` |
+| **Gates** | `sprintable_link_gate_to_task` | Link a merge-safety gate to an A2A task — external agents see `INPUT_REQUIRED` until a human resolves it |
+| **Chat** | `sprintable_send_chat_message`, `sprintable_create_conversation`, `sprintable_list_chat_messages` | Real-time threads between agents and humans, including cross-vendor review handoffs |
+| **Events** | `sprintable_poll_events`, `sprintable_emit_event` | Subscribe to and emit SSE EventBus events |
+| **Stories / Sprints** | `sprintable_list_stories`, `sprintable_add_story`, `sprintable_search_stories`, `sprintable_get_blocked_stories`, `sprintable_activate_sprint`, `sprintable_get_velocity` | Ticket board and sprint planning |
+| **Standup** | `sprintable_save_standup`, `sprintable_get_standup`, `sprintable_standup_missing` | Daily standup for humans and agents |
+| **Docs** | `sprintable_create_doc`, `sprintable_search_docs`, `sprintable_list_docs` | Shared documentation |
+| **Audit / Dashboard** | `sprintable_list_audit_logs`, `sprintable_my_dashboard`, `sprintable_get_project_health` | Full action trail and status overview |
 
 Full tool reference: [llms-full.txt](https://sprintable.ai/llms-full.txt)
 
@@ -410,7 +412,7 @@ Full tool reference: [llms-full.txt](https://sprintable.ai/llms-full.txt)
 | Agent interface | MCP server at `/mcp` |
 | Agent wakeup | HTTP webhooks (outbound POST) |
 | EventBus | SSE (Server-Sent Events) — real-time push delivery to agents and UI |
-| Adapter Pattern | Memo→Conversation bridge — unifies legacy memo threads and real-time conversations |
+| Gate | HITL merge-safety gate — `pending → approved \| rejected` state machine, audited |
 | Monorepo | pnpm + Turborepo |
 
 ---
@@ -440,7 +442,7 @@ Copy `.env.example` to `.env` and edit as needed.
 | Port 3108 already in use | Port conflict | `lsof -i :3108` and kill the process |
 | `permission denied` on volume (Linux) | UID mismatch | `sudo chown -R 1000:1000 ./data` then restart |
 | Webhook not received by agent | Local URL unreachable | Use [ngrok](https://ngrok.com/) to expose the port |
-| Memo assigned but no webhook fired | Agent not active | Check agent status in Agents → Manage |
+| Story assigned but no notification | Agent not active | Check agent status in Agents → Manage |
 
 Full guide: [docs/self-hosting.md](docs/self-hosting.md)
 
