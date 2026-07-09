@@ -373,9 +373,9 @@ async def _resolve_doc_gate(session: AsyncSession, gate: Gate, new_status: str) 
 
 async def _resume_a2a_task_on_gate_resolve(session: AsyncSession, gate: Gate, new_status: str) -> None:
     """HITL crux(story 7726a003, 문서 `a2a-hitl-input-auth-required-mapping-crux`, PO GO
-    2026-07-07 옵션 B): `A2ATask.task_metadata.linked_gate_id` 로 이 게이트에 연결된 task를
-    복귀시킨다. **writer(그 필드를 실제로 채우는 delegate-측 경로)는 별도 forward-work
-    스토리** — 오늘은 그 필드를 쓰는 경로가 전무해 이 함수는 항상 no-op(무회귀). approve→
+    2026-07-07 옵션 B) + S-A5(story c140977f, auth 변형): `A2ATask.task_metadata.linked_gate_id`
+    로 이 게이트에 연결된 task를 복귀시킨다. INPUT_REQUIRED든 AUTH_REQUIRED든(S-A3 writer의
+    `linked_gate_reason` 선언에 따라 갈린 상태) 복귀 트리거는 동일 — approve→
     `TASK_STATE_WORKING`(재개, 이후 기존 reply-thread 폴링이 COMPLETED까지 캐리) ·
     reject→`TASK_STATE_REJECTED`(기존 terminal state, 신규 처리 불요).
     """
@@ -386,7 +386,7 @@ async def _resume_a2a_task_on_gate_resolve(session: AsyncSession, gate: Gate, ne
     task = (await session.execute(
         select(A2ATask).where(
             A2ATask.task_metadata["linked_gate_id"].astext == str(gate.id),
-            A2ATask.state == "TASK_STATE_INPUT_REQUIRED",
+            A2ATask.state.in_(["TASK_STATE_INPUT_REQUIRED", "TASK_STATE_AUTH_REQUIRED"]),
         )
     )).scalar_one_or_none()
     if task is None:

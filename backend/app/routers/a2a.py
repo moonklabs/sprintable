@@ -69,13 +69,18 @@ persona 존재 시 무조건 persona.slug/config.tool_allowlist 파생 단일 sk
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import async_session_factory
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.a2a_task import A2ATask
@@ -90,6 +95,11 @@ from app.repositories.team_member import TeamMemberRepository
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _agent_connections
 from app.services.agent_onboarding_config import resolve_backend_direct_url
+from app.services.a2a_task_lifecycle import (
+    A2A_TASK_TIMEOUT_MINUTES,
+    effective_deadline,
+    fail_task_if_still_working,
+)
 from app.services.event_seq import assign_recipient_seq
 from app.services.webhook_targeting import active_webhook_member_ids
 from app.schemas.a2a import (
@@ -156,13 +166,12 @@ _TERMINAL_STATES = {
     "TASK_STATE_REJECTED",
 }
 
-# P1-S2(story 7b93eb10, PO 크럭스 승인): model-mediated 완료신호 부재의 백스톱 — CC가 이 시간
-# 안에 task-thread 답신을 안 하면 GetTask가 폴링 시점에 TASK_STATE_FAILED로 전이한다(영구
-# WORKING 정체 방지). ⚠️ tradeoff(정직히 문서화, PO 지시): CC가 30분 넘게 조용히 오래 작업하는
-# 정상 케이스도 false-FAIL될 수 있다(interim ack 없는 model-mediated 구조의 근본 제약) — 실사용
-# 데이터가 쌓이면 이 값을 튜닝한다. PoC→P1 단계에선 설정가능화(요청별 override) 대신 고정 상수로
-# 시작(실사용 데이터 없이 설정 노출은 과설계).
-A2A_TASK_TIMEOUT_MINUTES = 30
+# P1-S2(story 7b93eb10, PO 크럭스 승인) + S-A1(story 2a57dc0f): model-mediated 완료신호 부재의
+# 백스톱 — CC가 이 시간 안에 task-thread 답신을 안 하면 FAILED로 전이한다(영구 WORKING 정체
+# 방지). ⚠️ tradeoff(정직히 문서화, PO 지시): CC가 30분 넘게 조용히 오래 작업하는 정상 케이스도
+# false-FAIL될 수 있다(interim ack 없는 model-mediated 구조의 근본 제약) — 실사용 데이터가
+# 쌓이면 이 값을 튜닝한다. 상수 자체는 `a2a_task_lifecycle`(cron 스위퍼와 공유 SSOT) 소유 —
+# 여기선 재-export만.
 
 
 class _JsonRpcException(Exception):
@@ -257,7 +266,8 @@ async def _build_agent_card(session: AsyncSession, member: TeamMember, base_url:
         ],
         version="0.1.0-poc",
         capabilities=AgentCapabilities(
-            streaming=False, push_notifications=False, extended_agent_card=False,
+            # S-A4(story 03034d86): SendStreamingMessage 구현됨 — 정직 광고로 전환.
+            streaming=True, push_notifications=False, extended_agent_card=False,
             extensions=[
                 AgentExtension(
                     uri=PROJECT_CONTEXT_EXTENSION_URI,
@@ -345,7 +355,7 @@ def _task_to_dict(task: A2ATask) -> dict:
         artifacts=[Artifact.model_validate(a) for a in task.artifacts],
         history=[Message.model_validate(m) for m in task.history],
         metadata=task.task_metadata,
-    ).model_dump(by_alias=True, mode="json")
+    ).model_dump(by_alias=True, mode="json", exclude_none=True)
 
 
 def _first_text(message: Message) -> str:
@@ -507,6 +517,8 @@ async def _handle_send_message(
         task_metadata=task_metadata,
         history=[incoming.model_dump(by_alias=True, mode="json")],
         artifacts=[],
+        # S-A1(story 2a57dc0f): 생성 시점에 명시 기록 — cron 스위퍼가 폴링과 무관하게 판정.
+        deadline_at=now + timedelta(minutes=A2A_TASK_TIMEOUT_MINUTES),
     ))
     await session.flush()
     await session.commit()
@@ -521,39 +533,34 @@ async def _handle_send_message(
     return {"task": _task_to_dict(task)}
 
 
-async def _handle_get_task(
-    session: AsyncSession, member: TeamMember, params: dict,
-    active_extensions: frozenset[str] = frozenset(),  # noqa: ARG001 — 균일 dispatch 시그니처, 현재 미사용
-) -> dict:
-    try:
-        get_params = GetTaskParams.model_validate(params)
-    except Exception as exc:  # noqa: BLE001
-        raise _JsonRpcException(_INVALID_PARAMS, f"Invalid params: {exc}") from exc
+async def _advance_task_state(session: AsyncSession, task: A2ATask, org_id: uuid.UUID) -> A2ATask:
+    """GetTask의 반응형 상태-전이 판정 — S-A4(story 03034d86)에서 스트리밍 폴링 루프가 재사용
+    할 수 있도록 JSON-RPC 래핑에서 분리했다(GetTask도 동일 함수 호출 — 판정 규칙 이원화 방지).
 
-    result = await session.execute(
-        select(A2ATask).where(A2ATask.id == get_params.id, A2ATask.member_id == member.id)
-    )
-    task = result.scalar_one_or_none()
-    if task is None:
-        raise _JsonRpcException(_TASK_NOT_FOUND, "Task not found")
+    HITL crux(story 7726a003, 문서 `a2a-hitl-input-auth-required-mapping-crux`, PO GO 승인
+    2026-07-07, 옵션 B): reader만 배선 — writer(task_metadata.linked_gate_id 기록)는 S-A3
+    (story 6d0454c3)이 닫았다. WORKING 에서만 판정(INPUT_REQUIRED/AUTH_REQUIRED 재진입 시
+    재판정 없음 — 복귀는 transition_gate()의 전담 책임, 여기서 낙관적으로 되돌리지 않는다).
 
-    # HITL crux(story 7726a003, 문서 `a2a-hitl-input-auth-required-mapping-crux`, PO GO 승인
-    # 2026-07-07, 옵션 B): reader만 배선 — writer(task_metadata.linked_gate_id 기록)는 별도
-    # forward-work 스토리로 분리(아직 아무 delegate 경로도 이 필드를 안 씀 → 오늘은 항상
-    # no-op·무회귀). WORKING 에서만 판정(INPUT_REQUIRED 재진입 시 재판정 없음 — 복귀는
-    # transition_gate()의 전담 책임, 여기서 낙관적으로 되돌리지 않는다).
+    S-A5(story c140977f): `linked_gate_reason=="auth"`로 명시 선언된 경우만
+    TASK_STATE_AUTH_REQUIRED, 그 외(선언 없음 또는 다른 이유)는 기존과 동일 INPUT_REQUIRED —
+    크럭스 판정 유지(auth-pending **자동 감지**는 실신호 0이라 배제, 명시 선언만 유효 신호)."""
     if task.state == "TASK_STATE_WORKING":
         linked_gate_id = (task.task_metadata or {}).get("linked_gate_id")
         if linked_gate_id is not None:
             gate = (await session.execute(
-                select(Gate).where(Gate.id == uuid.UUID(linked_gate_id), Gate.org_id == member.org_id)
+                select(Gate).where(Gate.id == uuid.UUID(linked_gate_id), Gate.org_id == org_id)
             )).scalar_one_or_none()
             if gate is not None and gate.status == "pending":
-                task.state = "TASK_STATE_INPUT_REQUIRED"
+                linked_gate_reason = (task.task_metadata or {}).get("linked_gate_reason")
+                task.state = (
+                    "TASK_STATE_AUTH_REQUIRED" if linked_gate_reason == "auth"
+                    else "TASK_STATE_INPUT_REQUIRED"
+                )
                 await session.flush()
                 await session.commit()
                 await session.refresh(task)
-                return _task_to_dict(task)
+                return task
 
     if task.state == "TASK_STATE_WORKING" and task.root_message_id is not None:
         reply = (await session.execute(
@@ -606,18 +613,41 @@ async def _handle_get_task(
                     f"webhook delivery failed on all {len(deliveries)} channel(s) after "
                     f"{latest.attempt_count} attempts: {latest.last_error or 'unknown error'}"
                 )
-            elif datetime.now(timezone.utc) - task.created_at > timedelta(minutes=A2A_TASK_TIMEOUT_MINUTES):
+            elif datetime.now(timezone.utc) > effective_deadline(task):
                 failure_reason = (
                     f"timed out waiting for agent response after {A2A_TASK_TIMEOUT_MINUTES}m"
                 )
 
             if failure_reason is not None:
-                task.state = "TASK_STATE_FAILED"
-                task.task_metadata = {**(task.task_metadata or {}), "failure_reason": failure_reason}
-                await session.flush()
+                # S-A1(story 2a57dc0f): 스위퍼와 동일 SSOT + CAS(까심 QA HIGH C fix) — 이
+                # 함수가 읽은 task는 이 시점엔 stale일 수 있다(사이에 스위퍼/AC2 훅이 먼저
+                # 전이시켰을 수 있음). CAS UPDATE가 그 경합을 흡수하고, 결과와 무관하게
+                # refresh로 DB의 진짜 현재 상태를 반영한다(이미 다른 경로가 이겼으면 그 결과
+                # 그대로 반환 — stale WORKING 기준으로 덮어쓰지 않는다).
+                await fail_task_if_still_working(session, task.id, failure_reason)
                 await session.commit()
                 await session.refresh(task)
 
+    return task
+
+
+async def _handle_get_task(
+    session: AsyncSession, member: TeamMember, params: dict,
+    active_extensions: frozenset[str] = frozenset(),  # noqa: ARG001 — 균일 dispatch 시그니처, 현재 미사용
+) -> dict:
+    try:
+        get_params = GetTaskParams.model_validate(params)
+    except Exception as exc:  # noqa: BLE001
+        raise _JsonRpcException(_INVALID_PARAMS, f"Invalid params: {exc}") from exc
+
+    result = await session.execute(
+        select(A2ATask).where(A2ATask.id == get_params.id, A2ATask.member_id == member.id)
+    )
+    task = result.scalar_one_or_none()
+    if task is None:
+        raise _JsonRpcException(_TASK_NOT_FOUND, "Task not found")
+
+    task = await _advance_task_state(session, task, member.org_id)
     return _task_to_dict(task)
 
 
@@ -679,8 +709,86 @@ _METHODS = {
     "ListTasks": _handle_list_tasks,
 }
 
+# S-A4(story 03034d86): 폴링 간격 — 기존 상태전이 로직(_advance_task_state)을 이 주기로
+# 재호출해 변화를 감시한다(신규 브로커/큐 불요, GetTask 로직 그대로 재사용).
+_STREAM_POLL_INTERVAL_SECONDS = 2.0
 
-@router.post("/members/{member_id}/rpc")
+
+def _sse_frame(request_id: str | int | None, result: dict) -> str:
+    """실 SDK(`JsonRpcTransport._send_stream_request`) 실측 계약 — 각 `data:` 라인이 완결된
+    JSON-RPC 2.0 envelope이어야 `StreamResponse` oneof로 파싱된다(`json_format.ParseDict`
+    직접 검증 완료: `task`/`statusUpdate`/`artifactUpdate` 카멜케이스 확認)."""
+    envelope = {"jsonrpc": "2.0", "id": request_id, "result": result}
+    return f"data: {json.dumps(envelope)}\n\n"
+
+
+async def _stream_send_message(
+    request: Request, request_id: str | int | None,
+    session: AsyncSession, member: TeamMember, org_id: uuid.UUID, params: dict,
+    active_extensions: frozenset[str],
+) -> StreamingResponse:
+    """S-A4 AC1: `SendStreamingMessage` — task 생성(기존 `_handle_send_message` 그대로 재사용)
+    확인 프레임 → 상태 변화 폴링(기존 `_advance_task_state`, GetTask와 100% 동일 규칙) →
+    터미널 도달 시 artifact + 최종 status 프레임 후 스트림 종료(커넥션 close = 실 SDK에게
+    "끝" 신호, 별도 `final` 필드 불요 — 이 SDK 버전 스키마 실측 확認).
+
+    커넥션 수명 동안 주입받은 `session`(request-scoped `get_db`)을 계속 쓰지 않는다 — 장수명
+    SSE가 커넥션을 오래 점유하는 문제(기존 `/agent/stream` 주석과 동일 근거)를 피하려 task
+    생성 직후 명시적으로 close하고, 폴링 루프는 매 tick마다 `async_session_factory()`로 짧게
+    여닫는다(AsyncSession.close()는 멱등이라 FastAPI의 get_db teardown이 나중에 또 불러도 안전)."""
+    send_result = await _handle_send_message(session, member, params, active_extensions)
+    await session.close()  # 장수명 스트림 동안 request-scoped 커넥션 점유 방지(멱등 close).
+
+    task_id = uuid.UUID(send_result["task"]["id"])
+    member_id = member.id
+
+    async def generate():
+        yield _sse_frame(request_id, {"task": send_result["task"]})
+
+        last_state: str | None = send_result["task"]["status"]["state"]
+        while not await request.is_disconnected():
+            async with async_session_factory() as db:
+                result = await db.execute(
+                    select(A2ATask).where(A2ATask.id == task_id, A2ATask.member_id == member_id)
+                )
+                task = result.scalar_one_or_none()
+                if task is None:
+                    return  # task 삭제 등 이상계 — 조용히 스트림 종료(방어적, 정상 경로 아님)
+
+                task = await _advance_task_state(db, task, org_id)
+                current_dict = _task_to_dict(task)
+
+            if task.state != last_state:
+                yield _sse_frame(request_id, {
+                    "statusUpdate": {
+                        "taskId": current_dict["id"],
+                        "contextId": current_dict["contextId"],
+                        "status": current_dict["status"],
+                    },
+                })
+                last_state = task.state
+
+            if task.state in _TERMINAL_STATES:
+                for artifact in current_dict.get("artifacts", []):
+                    yield _sse_frame(request_id, {
+                        "artifactUpdate": {
+                            "taskId": current_dict["id"],
+                            "contextId": current_dict["contextId"],
+                            "artifact": artifact,
+                        },
+                    })
+                return  # 커넥션 close = 종료 신호(이 SDK 스키마엔 별도 final 필드 없음, 실측)
+
+            await asyncio.sleep(_STREAM_POLL_INTERVAL_SECONDS)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+@router.post("/members/{member_id}/rpc", response_model=None)
 async def a2a_rpc(
     request: Request,
     member_id: uuid.UUID,
@@ -688,7 +796,7 @@ async def a2a_rpc(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
-) -> JsonRpcResponse:
+) -> JsonRpcResponse | StreamingResponse:
     """P1-S2: action-triggering 엔드포인트라 authed+org-scoped(PO 크럭스 — S1 PoC 리스크 노트
     봉인). Card fetch(GET .../agent-card.json)는 P1-S1 판단대로 unauth 유지, 여기만 인증."""
     version_header = request.headers.get("A2A-Version")
@@ -704,6 +812,18 @@ async def a2a_rpc(
             )
 
     member = await _get_agent_member(session, member_id, org_id)
+    active_extensions = _parse_active_extensions(request)
+
+    # S-A4(story 03034d86): 유일하게 StreamingResponse를 반환하는 메소드 — 나머지 3개와
+    # 응답 타입 자체가 달라(JsonRpcResponse 단일 vs SSE) 균일 _METHODS 디스패치에 안 넣고
+    # 여기서 조기 분기한다.
+    if body.method == "SendStreamingMessage":
+        try:
+            return await _stream_send_message(
+                request, body.id, session, member, org_id, body.params or {}, active_extensions,
+            )
+        except _JsonRpcException as exc:
+            return JsonRpcResponse(id=body.id, error=JsonRpcError(code=exc.code, message=exc.message))
 
     handler = _METHODS.get(body.method)
     if handler is None:
@@ -712,11 +832,78 @@ async def a2a_rpc(
             error=JsonRpcError(code=_METHOD_NOT_FOUND, message=f"Method not found: {body.method}"),
         )
 
-    active_extensions = _parse_active_extensions(request)
-
     try:
         result = await handler(session, member, body.params or {}, active_extensions)
     except _JsonRpcException as exc:
         return JsonRpcResponse(id=body.id, error=JsonRpcError(code=exc.code, message=exc.message))
 
     return JsonRpcResponse(id=body.id, result=result)
+
+
+_VALID_LINK_GATE_REASONS = frozenset({"auth"})
+
+
+class LinkGateBody(BaseModel):
+    gate_id: uuid.UUID
+    # S-A5(story c140977f): reason="auth" 는 "외부 크리덴셜 필요"의 명시 선언 — reader가
+    # TASK_STATE_AUTH_REQUIRED로 전이시키는 유일한 신호원(자동 감지는 크럭스가 배제한 죽은
+    # 배선). 미지정(None) = 기존 S-A3 동작(INPUT_REQUIRED) 그대로, 무회귀.
+    reason: str | None = None
+
+
+@router.post("/tasks/{task_id}/link-gate")
+async def link_gate_to_task(
+    task_id: uuid.UUID,
+    body: LinkGateBody,
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """E-A2A-완성 S-A3(story `6d0454c3`, 크럭스 `a2a-hitl-input-auth-required-mapping-crux`
+    옵션 B — writer) + S-A5(story `c140977f`, auth 변형): delegate가 "이 gate가 이 A2A task를
+    블록한다"를 **명시 선언**한다. reader(``_advance_task_state``의 ``linked_gate_id``/
+    ``linked_gate_reason`` 체크)와 복귀 트리거(``gate_service.py::transition_gate`` 3번째
+    분기)는 이 필드가 채워지길 그저 기다리고 있었을 뿐 — 이 엔드포인트가 그 유일한 writer다.
+
+    6개 ``create_gate()`` 호출지점에 conversation_id/task_id를 관통시키는 침습 배관(크럭스
+    옵션 A)은 의도적으로 배제 — delegate가 자기 MCP 세션에서 이미 알고 있는 두 id(task_id는
+    SendMessage 응답에서, gate_id는 방금 자기가 만든 gate 응답에서)를 스스로 연결하는 경량
+    선언만 추가한다.
+
+    self-scope 게이트(``assert_caller_is_member`` 동형) — task.member_id 본인만 자기 task에
+    링크 선언 가능(다른 에이전트의 task를 가로채 임의 gate로 블록시키는 것 방지)."""
+    if body.reason is not None and body.reason not in _VALID_LINK_GATE_REASONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported reason: {body.reason!r} (supported: {sorted(_VALID_LINK_GATE_REASONS)})",
+        )
+
+    task = (await session.execute(
+        select(A2ATask).where(A2ATask.id == task_id)
+    )).scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=404, detail="A2A task not found")
+
+    if str(task.member_id) != auth.user_id:
+        raise HTTPException(status_code=403, detail="Cannot link a gate to another agent's task")
+
+    if task.state != "TASK_STATE_WORKING":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task must be WORKING to link a gate (current: {task.state})",
+        )
+
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == body.gate_id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    task_metadata = {**(task.task_metadata or {}), "linked_gate_id": str(gate.id)}
+    if body.reason is not None:
+        task_metadata["linked_gate_reason"] = body.reason
+    task.task_metadata = task_metadata
+    await session.flush()
+    await session.commit()
+
+    return {"linked": True, "task_id": str(task.id), "gate_id": str(gate.id), "reason": body.reason}

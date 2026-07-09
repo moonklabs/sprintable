@@ -53,6 +53,11 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 무관하게 협업해야 하므로 stories/tasks 같은 특정 도메인 그룹에 묶지 않고, chat/team_members
     # 등과 동형인 cross-cutting 코디네이션 유틸로 core 취급(always-allow)한다.
     "sprintable_lock_files", "sprintable_unlock_files",
+    # E-A2A-완성 S-A3(story 6d0454c3): link_gate_to_task — lock/unlock_files와 동형 cross-cutting
+    # 선언 유틸(엔드포인트 자체가 self-scope 게이트를 가져 자기 소유 task에만 작용 — 데이터 파괴
+    # 아님). A2A 위임을 받은 어떤 역할의 에이전트든 default_tool_groups와 무관하게 써야 하는 협업
+    # 도구라 특정 도메인 그룹에 안 묶는다(lock/unlock과 동일 논리).
+    "sprintable_link_gate_to_task",
 })
 
 # scope 토큰: 그룹명 외에 read/write(레거시·전체 비파괴 의미), admin/destructive(파괴적 허용)
@@ -263,6 +268,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_update_hypothesis", "sprintable_link_hypothesis", "sprintable_confirm_hypothesis",
     # loops (E-LOOP-LEDGER P1-S12)
     "sprintable_get_loop_context",
+    # a2a HITL writer (E-A2A-완성 S-A3)
+    "sprintable_link_gate_to_task",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.
