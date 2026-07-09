@@ -14,7 +14,6 @@ from app.models.user import RefreshToken, User
 from app.models.workflow_version import WorkflowVersion
 from app.models.api_key import ApiKey
 from app.models.org_subscription import OrgSubscription
-from app.models.pricing_version import PricingVersion
 from app.models.plan_tier_limit import PlanTierLimit
 from app.models.policy_document import PolicyDocument
 from app.models.audit import AuditLog
@@ -80,7 +79,6 @@ __all__ = [
     "UsageMeter",
     "ApiKey",
     "OrgSubscription",
-    "PricingVersion",
     "PlanTierLimit",
     "PolicyDocument",
     "AuditLog",
