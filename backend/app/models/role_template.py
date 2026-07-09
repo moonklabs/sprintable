@@ -29,6 +29,8 @@ class RoleTemplate(Base, TimestampMixin):
     slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(Text, nullable=False)
+    # ~80직군 카탈로그(track C)는 이 컬럼을 영어로 저작 — description_i18n(0167)이 그 위
+    # ko 오버레이(role_behaviors 와 오버레이 방향이 반대인 이유는 그 필드 주석 참고).
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 자율 운영 지침(markdown) — 큰 정적 프롬프트가 아니라 날씬한 매뉴얼(블루프린트 §3 개정).
     # 이 컬럼 자체가 "ko" 캐논 소스(오늘 유일한 실 콘텐츠) — role_behaviors_i18n은 그 위 오버레이.
@@ -65,3 +67,8 @@ class RoleTemplate(Base, TimestampMixin):
     # (신규 스키마 발명 안 함, A2A가 이미 소비하는 정확히 그 shape). S4에서 _build_agent_card가
     # 이 필드를 직접 소비하게 되면 persona 수작업 없이 스케일에서 발견-by-capability가 열린다.
     skills: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    # E-RECRUIT S24(story 25e8828d, migration 0167) — description locale 오버레이. 원본
+    # description 이 이미 영어(track C 저작)라 role_behaviors_i18n 과 반대로 **en(=원본)이
+    # canon, ko를 오버레이로 채운다**({"ko": "..."}). 소비 코드는 동일 원칙(
+    # `description_i18n.get(locale) or description`) — ko 콘텐츠 없는 행은 영어로 무회귀 폴백.
+    description_i18n: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
