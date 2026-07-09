@@ -45,6 +45,11 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # S17: lock/unlock — 백엔드 SSOT와 동일 사유(org/project-scoped advisory 조율 도구, 파괴 아님)
     # 로 core 취급. 드리프트 금지 원칙에 따라 백엔드와 동기화(app/services/mcp_toolset.py 참고).
     "sprintable_lock_files", "sprintable_unlock_files",
+    # E-A2A-완성 S-A3(story 6d0454c3): link_gate_to_task — lock/unlock_files와 동형 cross-cutting
+    # 선언 유틸(자기 소유 task에만 작용하는 self-scope 게이트가 서버측에 있어 데이터 파괴 아님).
+    # 특정 도메인 그룹(stories/tasks 등)에 안 묶는 이유도 lock/unlock과 동일 — A2A 위임을 받은
+    # 어떤 역할의 에이전트든 default_tool_groups와 무관하게 써야 하는 협업 도구.
+    "sprintable_link_gate_to_task",
 })
 
 _LEGACY_SCOPES: frozenset[str] = frozenset({"read", "write"})

@@ -1,4 +1,4 @@
-"""Sprintable MCP 서버 — 91개 도구 등록 (flat schema)."""
+"""Sprintable MCP 서버 — 92개 도구 등록 (flat schema)."""
 from __future__ import annotations
 
 import asyncio
@@ -27,6 +27,7 @@ from .schemas import SprintableInput
 # E-MCP S4: 독립 패키지 디탱글 — backend(app/*) import 제거. 규칙은 vendored .toolset 사용
 # (백엔드 app/services/mcp_toolset.py와 동일 규칙 유지·SSOT는 백엔드 매니페스트).
 from .toolset import is_tool_allowed
+from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
 from .tools.agent_runs import (
     EmitEventInput, PollEventsInput, UpdateRunStatusInput,
     emit_event, poll_events, update_run_status,
@@ -491,6 +492,11 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_unlock_files",
      "파일 작업 완료 선언 — lock 해제.",
      UnlockFilesInput, unlock_files),
+    # A2A HITL writer (1) — E-A2A-완성 S-A3
+    ("sprintable_link_gate_to_task",
+     "이 gate가 이 A2A task를 블록한다고 명시 선언 — 외부 GetTask가 INPUT_REQUIRED로 승격되고,"
+     " 사람이 gate를 승인/거부하면 task가 자동으로 WORKING/REJECTED 복귀한다.",
+     LinkGateToTaskInput, link_gate_to_task),
     # Chat (3)
     ("sprintable_send_chat_message",
      "conversation thread에 채팅 메시지 발송.",

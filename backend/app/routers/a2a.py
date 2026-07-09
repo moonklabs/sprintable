@@ -73,6 +73,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -720,3 +721,56 @@ async def a2a_rpc(
         return JsonRpcResponse(id=body.id, error=JsonRpcError(code=exc.code, message=exc.message))
 
     return JsonRpcResponse(id=body.id, result=result)
+
+
+class LinkGateBody(BaseModel):
+    gate_id: uuid.UUID
+
+
+@router.post("/tasks/{task_id}/link-gate")
+async def link_gate_to_task(
+    task_id: uuid.UUID,
+    body: LinkGateBody,
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """E-A2A-완성 S-A3(story `6d0454c3`, 크럭스 `a2a-hitl-input-auth-required-mapping-crux`
+    옵션 B — writer): delegate가 "이 gate가 이 A2A task를 블록한다"를 **명시 선언**한다.
+    reader(``_handle_get_task``의 ``linked_gate_id`` 체크, 이미 구현)와 복귀 트리거
+    (``gate_service.py::transition_gate`` 3번째 분기, 이미 구현)는 이 필드가 채워지길 그저
+    기다리고 있었을 뿐 — 이 엔드포인트가 그 유일한 writer다.
+
+    6개 ``create_gate()`` 호출지점에 conversation_id/task_id를 관통시키는 침습 배관(크럭스
+    옵션 A)은 의도적으로 배제 — delegate가 자기 MCP 세션에서 이미 알고 있는 두 id(task_id는
+    SendMessage 응답에서, gate_id는 방금 자기가 만든 gate 응답에서)를 스스로 연결하는 경량
+    선언만 추가한다.
+
+    self-scope 게이트(``assert_caller_is_member`` 동형) — task.member_id 본인만 자기 task에
+    링크 선언 가능(다른 에이전트의 task를 가로채 임의 gate로 블록시키는 것 방지)."""
+    task = (await session.execute(
+        select(A2ATask).where(A2ATask.id == task_id)
+    )).scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=404, detail="A2A task not found")
+
+    if str(task.member_id) != auth.user_id:
+        raise HTTPException(status_code=403, detail="Cannot link a gate to another agent's task")
+
+    if task.state != "TASK_STATE_WORKING":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task must be WORKING to link a gate (current: {task.state})",
+        )
+
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == body.gate_id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    task.task_metadata = {**(task.task_metadata or {}), "linked_gate_id": str(gate.id)}
+    await session.flush()
+    await session.commit()
+
+    return {"linked": True, "task_id": str(task.id), "gate_id": str(gate.id)}
