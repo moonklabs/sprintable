@@ -93,7 +93,7 @@ from app.services.agent_onboarding_config import resolve_backend_direct_url
 from app.services.a2a_task_lifecycle import (
     A2A_TASK_TIMEOUT_MINUTES,
     effective_deadline,
-    fail_task_in_place,
+    fail_task_if_still_working,
 )
 from app.services.event_seq import assign_recipient_seq
 from app.services.webhook_targeting import active_webhook_member_ids
@@ -618,9 +618,12 @@ async def _handle_get_task(
                 )
 
             if failure_reason is not None:
-                # S-A1(story 2a57dc0f): 스위퍼와 동일 SSOT(사유 문구 포맷·Artifact 첨부 일치).
-                fail_task_in_place(task, failure_reason)
-                await session.flush()
+                # S-A1(story 2a57dc0f): 스위퍼와 동일 SSOT + CAS(까심 QA HIGH C fix) — 이
+                # 함수가 읽은 task는 이 시점엔 stale일 수 있다(사이에 스위퍼/AC2 훅이 먼저
+                # 전이시켰을 수 있음). CAS UPDATE가 그 경합을 흡수하고, 결과와 무관하게
+                # refresh로 DB의 진짜 현재 상태를 반영한다(이미 다른 경로가 이겼으면 그 결과
+                # 그대로 반환 — stale WORKING 기준으로 덮어쓰지 않는다).
+                await fail_task_if_still_working(session, task.id, failure_reason)
                 await session.commit()
                 await session.refresh(task)
 

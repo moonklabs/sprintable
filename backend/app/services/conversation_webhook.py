@@ -410,11 +410,15 @@ async def _update_delivery_status(
 async def _fail_linked_a2a_task_if_all_deliveries_failed(db, message_id: uuid.UUID) -> None:
     """S-A1 AC2 훅. multi-webhook 멤버(채널 2개 이상)는 그중 하나만 실패해도 다른 채널로는
     도달했을 수 있다(GetTask 인라인 판정의 기존 "전량 실패일 때만" 원칙과 동일 — story 652c2842
-    까심 QA 교정과 동형). 전량 실패 확認 후에만 A2A task를 즉시 FAILED로 승격한다."""
+    까심 QA 교정과 동형). 전량 실패 확認 후에만 A2A task를 즉시 FAILED로 승격한다.
+
+    까심 QA HIGH C fix(2026-07-09): CAS UPDATE(`fail_task_if_still_working`) 사용 — 이 함수가
+    task를 읽은 시점과 실 전이 시점 사이에 다른 경로(GetTask 정상완료 등)가 먼저 그 task를
+    COMPLETED로 커밋했으면 조용히 skip(그 결과 존중, stale WORKING 기준으로 덮어쓰지 않음)."""
     from sqlalchemy import select
 
     from app.models.a2a_task import A2ATask
-    from app.services.a2a_task_lifecycle import fail_task_in_place
+    from app.services.a2a_task_lifecycle import fail_task_if_still_working
 
     task = (await db.execute(
         select(A2ATask).where(
@@ -431,8 +435,8 @@ async def _fail_linked_a2a_task_if_all_deliveries_failed(db, message_id: uuid.UU
         return  # 다른 채널이 아직 진행 중/성공 — 이 판정에서는 실패 아님(응답 대기 지속)
 
     latest = max(deliveries, key=lambda d: d.updated_at)
-    fail_task_in_place(
-        task,
+    await fail_task_if_still_working(
+        db, task.id,
         f"webhook delivery failed on all {len(deliveries)} channel(s) after "
         f"{latest.attempt_count} attempts: {latest.last_error or 'unknown error'}",
     )

@@ -74,6 +74,14 @@ def _list_result(items):
     return r
 
 
+def _update_result(rowcount: int):
+    """S-A1(story 2a57dc0f) CAS fix — `fail_task_if_still_working`가 실행하는 UPDATE 문의
+    mock 결과. rowcount=1이면 이 호출이 전이시켰음(경쟁 없음), 0이면 이미 다른 경로가 전이."""
+    r = MagicMock()
+    r.rowcount = rowcount
+    return r
+
+
 def _mock_agent(member_id, name, agent_role="qa"):
     m = MagicMock()
     m.id = member_id
@@ -887,12 +895,27 @@ async def test_get_task_transitions_to_failed_on_delivery_failure():
                 return _result(working_task)
             if call_count == 3:
                 return _result(None)  # thread 폴링 — 답신 없음
-            return _list_result([delivery])  # webhook delivery 조회 — 1건, 전량 failed
+            if call_count == 4:
+                return _list_result([delivery])  # webhook delivery 조회 — 1건, 전량 failed
+            return _update_result(1)  # CAS UPDATE(fail_task_if_still_working) — 경쟁 없음
+
+        async def mock_refresh(obj):
+            # S-A1(story 2a57dc0f) CAS fix — 실 DB라면 refresh()가 CAS UPDATE 결과(FAILED)를
+            # 반영한다. mock 세션은 그 UPDATE를 실행 안 하므로 refresh 시점에 동등 효과 시뮬레이션.
+            obj.state = "TASK_STATE_FAILED"
+            obj.task_metadata = {
+                **(obj.task_metadata or {}),
+                "failure_reason": "webhook delivery failed on all 1 channel(s) after 3 attempts: connection refused",
+            }
+            obj.artifacts = [*obj.artifacts, {
+                "artifactId": "x", "name": "failure-reason",
+                "parts": [{"text": "webhook delivery failed on all 1 channel(s) after 3 attempts: connection refused"}],
+            }]
 
         session.execute = mock_execute
         session.flush = AsyncMock()
         session.commit = AsyncMock()
-        session.refresh = AsyncMock()
+        session.refresh = mock_refresh
 
         req = {"jsonrpc": "2.0", "id": 7, "method": "GetTask", "params": {"id": str(working_task.id)}}
 
@@ -982,12 +1005,24 @@ async def test_get_task_transitions_to_failed_on_timeout():
                 return _result(working_task)
             if call_count == 3:
                 return _result(None)  # thread 폴링 — 답신 없음
-            return _list_result([])  # delivery row 없음(fakechat 경로)
+            if call_count == 4:
+                return _list_result([])  # delivery row 없음(fakechat 경로)
+            return _update_result(1)  # CAS UPDATE(fail_task_if_still_working) — 경쟁 없음
+
+        async def mock_refresh(obj):
+            # S-A1(story 2a57dc0f) CAS fix — 실 DB라면 refresh()가 CAS UPDATE 결과(FAILED)를
+            # 반영한다. mock 세션은 그 UPDATE를 실행 안 하므로 refresh 시점에 동등 효과 시뮬레이션.
+            reason = f"timed out waiting for agent response after {A2A_TASK_TIMEOUT_MINUTES}m"
+            obj.state = "TASK_STATE_FAILED"
+            obj.task_metadata = {**(obj.task_metadata or {}), "failure_reason": reason}
+            obj.artifacts = [*obj.artifacts, {
+                "artifactId": "x", "name": "failure-reason", "parts": [{"text": reason}],
+            }]
 
         session.execute = mock_execute
         session.flush = AsyncMock()
         session.commit = AsyncMock()
-        session.refresh = AsyncMock()
+        session.refresh = mock_refresh
 
         req = {"jsonrpc": "2.0", "id": 8, "method": "GetTask", "params": {"id": str(working_task.id)}}
 

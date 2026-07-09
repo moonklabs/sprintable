@@ -179,6 +179,63 @@ async def test_sweeper_ignores_non_working_states():
 
 
 @pytest.mark.anyio
+async def test_cas_prevents_sweeper_from_clobbering_concurrently_completed_task():
+    """까심 QA HIGH C 회귀 방지 — 실 PG 2세션 레이스 재현. 스위퍼가 후보를 SELECT한 *이후*,
+    다른 트랜잭션(GetTask 정상완료 경로 시뮬레이션)이 먼저 그 task를 진짜 artifact와 함께
+    COMPLETED로 커밋하면, 스위퍼의 CAS UPDATE는 `WHERE state='TASK_STATE_WORKING'`에 걸려
+    영향행 0 → skip해야 한다. fix 전엔 스위퍼가 무조건 덮어써 정상 완료된 task가 가짜
+    "deadline sweep" FAILED로 오염되고 자가치유되지 않았다(`state=='WORKING'` 게이트에
+    막혀 아무 경로도 재교정 안 함)."""
+    from app.models.a2a_task import A2ATask
+    from app.services.a2a_task_lifecycle import fail_task_if_still_working
+    from sqlalchemy import select, update
+
+    engine, Session = await _session()
+    try:
+        past_deadline = datetime.now(timezone.utc) - timedelta(minutes=1)
+        async with Session() as s:
+            task = await _make_task(s, deadline_at=past_deadline)
+            task_id = task.id
+
+        # TxA(스위퍼 시뮬레이션): 후보 SELECT — 이 시점엔 WORKING(TxB 커밋 전).
+        session_a = Session()
+        candidates = [
+            row[0] for row in (await session_a.execute(
+                select(A2ATask.id).where(A2ATask.id == task_id, A2ATask.state == "TASK_STATE_WORKING")
+            )).all()
+        ]
+        assert task_id in candidates
+
+        # TxB(GetTask 정상완료 경로): 독립 세션+독립 커밋 — SELECT~UPDATE 사이 윈도우에서
+        # 진짜로 먼저 COMPLETED 커밋(실 레이스 재현, mock 아님).
+        async with Session() as session_b:
+            await session_b.execute(
+                update(A2ATask).where(A2ATask.id == task_id).values(
+                    state="TASK_STATE_COMPLETED",
+                    artifacts=[{"artifactId": "real-reply", "name": "agent-reply",
+                                "parts": [{"text": "정상 완료된 실 작업 결과물"}]}],
+                )
+            )
+            await session_b.commit()
+
+        # TxA: 이제서야 CAS UPDATE 시도 — WHERE state='TASK_STATE_WORKING'에 이미 안 걸림.
+        transitioned = await fail_task_if_still_working(
+            session_a, task_id, "deadline sweep: no agent response within 30m of task creation",
+        )
+        await session_a.commit()
+        await session_a.close()
+        assert transitioned is False, "CAS가 이미 COMPLETED인 task를 덮어씀 — 회귀"
+
+        async with Session() as s:
+            final = (await s.execute(select(A2ATask).where(A2ATask.id == task_id))).scalar_one()
+            assert final.state == "TASK_STATE_COMPLETED"
+            assert final.artifacts[0]["name"] == "agent-reply"  # 진짜 artifact 보존
+            assert not any(a.get("name") == "failure-reason" for a in final.artifacts)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_immediate_fail_hook_on_all_webhook_deliveries_permanently_failed():
     """AC2: `_update_delivery_status(..., "failed")` 도달 즉시(폴링 없이) A2A task FAILED."""
     from app.models.a2a_task import A2ATask
