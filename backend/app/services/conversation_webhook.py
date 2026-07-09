@@ -379,7 +379,13 @@ async def _update_delivery_status(
     attempt_count: int | None = None,
     last_error: str | None = None,
 ) -> None:
-    """delivery 상태 업데이트 — 별도 세션."""
+    """delivery 상태 업데이트 — 별도 세션.
+
+    E-A2A-완성 S-A1(story 2a57dc0f) AC2: 이 delivery가 "failed"(재시도 소진 영구실패)로
+    확定되는 순간, 그 message_id를 가리키는 A2A task(WORKING)가 있으면 **즉시** FAILED로
+    전이한다 — 다음 GetTask 폴링이나 기한 스위퍼를 기다리지 않는다. 일반 채팅 웹훅(A2A 아닌
+    메시지)은 대응하는 A2ATask 행이 애초에 없어 이 블록이 완전 no-op(순수 additive, 기존
+    재시도·일반 채팅 동작 무영향)."""
     from app.core.database import async_session_factory
     from sqlalchemy import select
 
@@ -394,7 +400,46 @@ async def _update_delivery_status(
                 delivery.attempt_count = attempt_count
             if last_error is not None:
                 delivery.last_error = last_error
+
+            if status == "failed":
+                await _fail_linked_a2a_task_if_all_deliveries_failed(db, delivery.message_id)
+
             await db.commit()
+
+
+async def _fail_linked_a2a_task_if_all_deliveries_failed(db, message_id: uuid.UUID) -> None:
+    """S-A1 AC2 훅. multi-webhook 멤버(채널 2개 이상)는 그중 하나만 실패해도 다른 채널로는
+    도달했을 수 있다(GetTask 인라인 판정의 기존 "전량 실패일 때만" 원칙과 동일 — story 652c2842
+    까심 QA 교정과 동형). 전량 실패 확認 후에만 A2A task를 즉시 FAILED로 승격한다.
+
+    까심 QA HIGH C fix(2026-07-09): CAS UPDATE(`fail_task_if_still_working`) 사용 — 이 함수가
+    task를 읽은 시점과 실 전이 시점 사이에 다른 경로(GetTask 정상완료 등)가 먼저 그 task를
+    COMPLETED로 커밋했으면 조용히 skip(그 결과 존중, stale WORKING 기준으로 덮어쓰지 않음)."""
+    from sqlalchemy import select
+
+    from app.models.a2a_task import A2ATask
+    from app.services.a2a_task_lifecycle import fail_task_if_still_working
+
+    task = (await db.execute(
+        select(A2ATask).where(
+            A2ATask.root_message_id == message_id, A2ATask.state == "TASK_STATE_WORKING",
+        )
+    )).scalar_one_or_none()
+    if task is None:
+        return  # A2A task 아닌 일반 채팅 메시지(또는 이미 종결 상태) — no-op
+
+    deliveries = (await db.execute(
+        select(ConversationWebhookDelivery).where(ConversationWebhookDelivery.message_id == message_id)
+    )).scalars().all()
+    if not deliveries or not all(d.status == "failed" for d in deliveries):
+        return  # 다른 채널이 아직 진행 중/성공 — 이 판정에서는 실패 아님(응답 대기 지속)
+
+    latest = max(deliveries, key=lambda d: d.updated_at)
+    await fail_task_if_still_working(
+        db, task.id,
+        f"webhook delivery failed on all {len(deliveries)} channel(s) after "
+        f"{latest.attempt_count} attempts: {latest.last_error or 'unknown error'}",
+    )
 
 
 async def mark_agent_replied(conversation_id: uuid.UUID) -> None:
