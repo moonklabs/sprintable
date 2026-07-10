@@ -7,6 +7,7 @@ from app.models.agent_run import AgentRun
 from app.models.agent_session import AgentSession
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
 from app.models.embedding import Embedding
+from app.models.evidence import Evidence
 from app.models.gate import Gate
 from app.models.hitl import HitlPolicy, HitlRequest
 from app.models.mockup import MockupComponent, MockupPage, MockupScenario, MockupVersion, UsageMeter

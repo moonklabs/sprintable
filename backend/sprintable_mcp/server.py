@@ -28,6 +28,7 @@ from .schemas import SprintableInput
 # (백엔드 app/services/mcp_toolset.py와 동일 규칙 유지·SSOT는 백엔드 매니페스트).
 from .toolset import is_tool_allowed
 from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
+from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.agent_runs import (
     EmitEventInput, PollEventsInput, UpdateRunStatusInput,
     emit_event, poll_events, update_run_status,
@@ -497,6 +498,11 @@ _TOOL_DEFS: list[tuple] = [
      "이 gate가 이 A2A task를 블록한다고 명시 선언 — 외부 GetTask가 INPUT_REQUIRED로 승격되고,"
      " 사람이 gate를 승인/거부하면 task가 자동으로 WORKING/REJECTED 복귀한다.",
      LinkGateToTaskInput, link_gate_to_task),
+    # Evidence 자기증명 (1) — E-VERIFY V0-S1
+    ("sprintable_add_evidence",
+     "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
+     " 남김. 선택제(첨부 안 해도 무불이익).",
+     AddEvidenceInput, add_evidence),
     # Chat (3)
     ("sprintable_send_chat_message",
      "conversation thread에 채팅 메시지 발송.",
