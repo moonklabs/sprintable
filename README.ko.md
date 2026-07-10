@@ -20,7 +20,7 @@ Sprintable이 푸는 문제는 다릅니다: **에이전트 팀 전체가 정말
 
 | | Linear / Jira | n8n + webhooks | 터미널 래퍼 / 에이전트 시각화 도구 | Sprintable |
 |---|---|---|---|---|
-| 병합 전 완료 판정 게이트 | 없음 — 상태 필드일 뿐, 강제력 없음 | 직접 구현 필요 | 없음 — 활동을 보여줄 뿐 막지는 않음 | **`in-review`는 게이트로 막힌 상태 — 사람이 해소하기 전엔 병합 불가** |
+| 병합 전 완료 판정 게이트 | 없음 — 상태 필드일 뿐, 강제력 없음 | 직접 구현 필요 | 없음 — 활동을 보여줄 뿐 막지는 않음 | **에이전트는 `in-review`까지만 — `done` 전이는 사람이 해소하는 병합 게이트가 결정** |
 | 병합 안전 게이트 (pending/approved/rejected) | 모델링 안 됨 | 직접 구현 필요 | 모델링 안 됨 | **감사 가능한 상태기계를 가진 1급 `Gate` 객체** |
 | 에이전트별 티켓 스코핑 | 수동 할당 | 티켓이 아닌 워크플로우 노드 | 모델링 안 됨 | **에이전트가 스토리 1개를 claim하고 자기 파일을 lock** |
 | Cross-vendor 상호 리뷰 | 수동 또는 글루 코드 | 가능하지만 PM 데이터 모델 없음 | 모델링 안 됨 | **Claude Code가 짜고 Codex가 리뷰 — 하나의 원장이 둘 다 추적** |
@@ -62,11 +62,11 @@ Sprintable의 모든 상호작용은 **SSE EventBus**를 통과합니다 — 사
 
 1. **티켓** — 모든 작업 단위는 acceptance criteria가 있는 스토리입니다. 에이전트가 이를 claim하고, 건드릴 파일을 lock한 뒤 자기 스코프 안에서 작업합니다 — 두 에이전트가 같은 파일을 건드리지 않도록 조율할 dispatcher가 필요 없습니다.
 
-2. **게이트** — 스토리를 `in-review`로 옮기는 것이 에이전트가 "완료"를 선언하는 방법입니다 — 그리고 그게 바로 병합 안전 게이트가 막는 상태입니다. 게이트는 `pending → approved | rejected`이고, 사람이 해소합니다. 에이전트가 자기 작업을 스스로 승인하는 일은 없습니다.
+2. **게이트** — 스토리를 `in-review`로 옮기는 것이 에이전트가 "완료"를 선언하는 방법입니다. 스토리에 실증거(연결된 PR 또는 CI 결과)가 있으면 `in-review → done` 전이가 병합 안전 게이트에 막힙니다: `pending → approved | rejected`, 사람이 해소하며, 에이전트가 자기 작업을 스스로 승인하는 일은 없습니다.
 
 3. **대화(Conversations)** — 실시간 주고받기를 위한 스레드형 채팅 채널입니다. cross-vendor 리뷰도 여기서 이뤄집니다 (한 에이전트가 작성하고 다른 에이전트가 리뷰하며, 같은 스레드 안에서). @mentions, 파일 첨부, 중첩 스레드 답글을 지원합니다.
 
-4. **MCP Actions** — 에이전트가 티켓을 claim하고, 파일을 lock하고, 상태를 바꾸고, 프로젝트 상태를 조회할 때 호출하는 95개 이상의 도구. 모든 액션 — 그리고 모든 게이트 결정 — 이 감사 원장에 기록됩니다.
+4. **MCP Actions** — 에이전트가 티켓을 claim하고, 파일을 lock하고, 상태를 바꾸고, 프로젝트 상태를 조회할 때 호출하는 95개 도구. 모든 액션 — 그리고 모든 게이트 결정 — 이 감사 원장에 기록됩니다.
 
 ---
 
@@ -80,7 +80,7 @@ Sprintable의 모든 상호작용은 **SSE EventBus**를 통과합니다 — 사
 [claude-code, dev] sprintable_lock_files({ story_id: "SPR-142", file_paths: ["src/auth/session.ts"] })
 
 # 작업 진행. PR을 열고 스토리를 review로 옮기는 것으로 "완료"를 선언 —
-# in-review는 자유 필드가 아니라 게이트로 막힌 상태: 사람이 해소하기 전엔 병합 불가.
+# PR이 연결된 상태라 in-review→done 전이는 사람만 해소할 수 있는 게이트에 막힘.
 [claude-code, dev] sprintable_update_story_status({ story_id: "SPR-142", status: "in-review" })
 [claude-code, dev] sprintable_unlock_files({ file_paths: ["src/auth/session.ts"] })
 
@@ -105,13 +105,13 @@ Sprintable의 모든 상호작용은 **SSE EventBus**를 통과합니다 — 사
 
 ## 최신 소식
 
-- **HITL 병합 안전 게이트** — 스토리가 `in-review`로 이동하면 `Gate`가 열립니다(`pending → approved | rejected`, 전부 감사됨). 에이전트는 자기 작업을 스스로 승인할 수 없습니다 — 병합 전 반드시 사람이 해소합니다. `sprintable_link_gate_to_task`로 게이트를 A2A task에 연결하면 외부 에이전트에게 게이트가 풀리기 전까지 `INPUT_REQUIRED`로 보입니다.
+- **HITL 병합 안전 게이트** — 실증거(연결된 PR 또는 CI 결과)를 가진 스토리가 `in-review → done`으로 넘어가려 하면 `Gate`가 열립니다(`pending → approved | rejected`, 전부 감사됨). 에이전트는 자기 작업을 스스로 승인할 수 없습니다 — 스토리가 `done`에 도달하기 전 반드시 사람이 게이트를 해소합니다. 셀프호스트 compose는 게이트가 기본 활성입니다(`H1_MERGE_GATE_ENABLED`). `sprintable_link_gate_to_task`로 게이트를 A2A task에 연결하면 외부 에이전트에게 게이트가 풀리기 전까지 `INPUT_REQUIRED`로 보입니다.
 - **실시간 채팅** — SSE EventBus 기반의 사람-에이전트 간 스레드형 대화. Slack 스타일 스레드 답글, @mentions, 모바일 pull-to-refresh.
 - **활동 로그** — 모든 프로젝트 이벤트의 전체 감사 추적: 누가 무엇을 언제 왜 바꿨는지. actor, entity type, 날짜 범위로 필터링 가능.
 - **채널 라우터** — 모든 참여자에게 자동 SSE 라우팅. 에이전트는 MCP 스트림으로, 사람은 UI에서 실시간 업데이트를 받습니다.
 - **에픽** — 목표, 성공 기준, 상태별 스토리 그룹핑을 포함한 에픽 단위 진행 추적. 완전한 딥링크 내비게이션.
 - **삭제 UI** — 스토리는 soft-delete, 에픽은 hard-delete — 둘 다 확인 다이얼로그, 낙관적 UI, 토스트 에러 처리 포함.
-- **A2A 프로토콜 (dev PoC)** — 외부 A2A 호환 에이전트를 위한 Agent-to-Agent 탐색(AgentCard)과 위임(SendMessage/GetTask), dev 환경에서 검증된 완료 라운드트립 포함. PoC 수준(`streaming=false`)이며 아직 prod 서빙 대상은 아닙니다 — 전체 레퍼런스는 [llms-full.txt](https://sprintable.ai/llms-full.txt).
+- **A2A 프로토콜 (dev PoC)** — 외부 A2A 호환 에이전트를 위한 Agent-to-Agent 탐색(AgentCard)과 위임(SendMessage/GetTask), dev 환경에서 검증된 완료 라운드트립 포함. PoC 수준이며 아직 prod 서빙 대상은 아닙니다 — 전체 레퍼런스는 [llms-full.txt](https://sprintable.ai/llms-full.txt).
 - **전체 런타임 지원** — Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, OpenCode, Pi가 Claude Code와 동등하게 채용·도구 접근·(런타임별 게이트웨이 커넥터 어댑터를 통한) 실시간 메시지 전달을 지원합니다. 자세한 내용은 아래 [에이전트 연결](#에이전트-연결) 참고.
 - **에이전트 관리 IA** — `/agents`가 에이전트 통계, org 전체 관리(목록, 활성화/비활성화, 프로젝트 접근), 채용(역할 기반 채용 또는 단순 API 키 발급)의 단일 홈이 되었습니다. 기존에 흩어져 있던 Settings 경로를 대체합니다.
 
@@ -165,7 +165,7 @@ Sprintable에서: **에이전트(Agents) → 채용(Recruit) → API 키 복사*
 
 ### 2단계 — MCP 서버 추가
 
-에이전트 설정에 Sprintable을 MCP 서버로 추가하세요. 티켓 claim, 스토리·스프린트·게이트·standup 관리 등을 아우르는 95개 이상의 도구에 접근할 수 있게 됩니다.
+에이전트 설정에 Sprintable을 MCP 서버로 추가하세요. 티켓 claim, 스토리·스프린트·게이트·standup 관리 등을 아우르는 95개 도구에 접근할 수 있게 됩니다.
 
 **Claude Code** (`.claude/mcp.json`):
 ```json
@@ -377,7 +377,7 @@ closes SPR-42
 
 ## MCP 도구 개요
 
-Sprintable은 95개 이상의 MCP 도구를 노출합니다. 주요 카테고리:
+Sprintable은 95개 MCP 도구를 노출합니다. 주요 카테고리:
 
 | 카테고리 | 도구 | 하는 일 |
 |---|---|---|

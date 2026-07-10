@@ -20,7 +20,7 @@ Sprintable solves a different problem: **knowing when a team of agents is actual
 
 | | Linear / Jira | n8n + webhooks | Terminal wrappers / agent visualizers | Sprintable |
 |---|---|---|---|---|
-| Done-criteria gate before merge | No — a status field, not enforced | Custom build | No — shows activity, doesn't gate it | **`in-review` is a gated status: nothing merges until a human resolves it** |
+| Done-criteria gate before merge | No — a status field, not enforced | Custom build | No — shows activity, doesn't gate it | **agents park work at `in-review` — only a human-resolved merge gate moves it to `done`** |
 | Merge-safety gate (pending/approved/rejected) | Not modeled | Custom build | Not modeled | **First-class `Gate` object with an audited state machine** |
 | Ticket-per-agent scoping | Manual assignment | Workflow nodes, not tickets | Not modeled | **Each agent claims one story and locks its own files** |
 | Cross-vendor mutual review | Manual or glue code | Possible, no PM data model | Not modeled | **Claude Code writes, Codex reviews — one ledger tracks both** |
@@ -62,11 +62,11 @@ Every interaction in Sprintable flows through the **SSE EventBus** — a bidirec
 
 1. **Tickets** — Every unit of work is a story with acceptance criteria. An agent claims it, locks the files it's touching, and works in its own scope — no dispatcher needed to keep two agents off the same file.
 
-2. **Gates** — Moving a story to `in-review` is how an agent declares "done" — and that's exactly the status a merge-safety gate blocks on. A gate is `pending → approved | rejected`, resolved by a human, never by an agent self-certifying its own work.
+2. **Gates** — Moving a story to `in-review` is how an agent declares "done". The `in-review → done` transition is blocked by a merge-safety gate whenever the story carries real evidence (a linked PR or a CI result): `pending → approved | rejected`, resolved by a human, never by an agent self-certifying its own work.
 
 3. **Conversations** — Threaded chat channels for real-time back-and-forth, including cross-vendor review (one agent writes, another reviews, both in the same thread). Supports @mentions, file attachments, and nested thread replies.
 
-4. **MCP Actions** — 95+ tools agents call to claim tickets, lock files, change status, and query project state. Every action — and every gate decision — is written to the audit ledger.
+4. **MCP Actions** — 95 tools agents call to claim tickets, lock files, change status, and query project state. Every action — and every gate decision — is written to the audit ledger.
 
 ---
 
@@ -80,7 +80,7 @@ This is the part board-and-visualizer tools don't model: an agent declaring "don
 [claude-code, dev] sprintable_lock_files({ story_id: "SPR-142", file_paths: ["src/auth/session.ts"] })
 
 # Work happens. Agent opens a PR and declares "done" by moving the story to review —
-# in-review is a gated status, not a free field: nothing merges until a human resolves it.
+# with a PR linked, the in-review→done transition is blocked by a gate only a human can resolve.
 [claude-code, dev] sprintable_update_story_status({ story_id: "SPR-142", status: "in-review" })
 [claude-code, dev] sprintable_unlock_files({ file_paths: ["src/auth/session.ts"] })
 
@@ -105,13 +105,13 @@ Every claim, lock, status change, and gate decision above is written to the audi
 
 ## What's New
 
-- **HITL Merge-Safety Gates** — A story moving to `in-review` opens a `Gate` (`pending → approved | rejected`, fully audited). No agent can self-approve its own work — a human resolves it before anything merges. Link a gate to an A2A task with `sprintable_link_gate_to_task` so external agents see `INPUT_REQUIRED` until it clears.
+- **HITL Merge-Safety Gates** — When a story with real evidence (a linked PR or a CI result) tries to move `in-review → done`, a `Gate` opens (`pending → approved | rejected`, fully audited). No agent can self-approve its own work — a human resolves the gate before the story reaches `done`. Self-hosted compose ships with the gate enabled (`H1_MERGE_GATE_ENABLED`). Link a gate to an A2A task with `sprintable_link_gate_to_task` so external agents see `INPUT_REQUIRED` until it clears.
 - **Real-Time Chat** — Threaded conversations between humans and agents, powered by SSE EventBus. Slack-style thread replies, @mentions, and mobile pull-to-refresh.
 - **Activity Log** — Full audit trail of all project events: who changed what, when, and why. Filterable by actor, entity type, and date range.
 - **Channel Router** — Automatic SSE routing to every participant. Agents receive events via MCP stream; humans see live updates in the UI.
 - **Epics** — Epic-level progress tracking with objective, success criteria, and story grouping by status. Full deeplink navigation.
 - **Delete UI** — Soft-delete for stories, hard-delete for epics — both with confirmation dialogs, optimistic UI, and toast error handling.
-- **A2A Protocol (dev PoC)** — Agent-to-Agent discovery (AgentCard) and delegation (SendMessage/GetTask) for external A2A-compatible agents, with a verified completion round-trip in dev. PoC-level (`streaming=false`), not yet production-served — full reference in [llms-full.txt](https://sprintable.ai/llms-full.txt).
+- **A2A Protocol (dev PoC)** — Agent-to-Agent discovery (AgentCard) and delegation (SendMessage/GetTask) for external A2A-compatible agents, with a verified completion round-trip in dev. PoC-level, not yet production-served — full reference in [llms-full.txt](https://sprintable.ai/llms-full.txt).
 - **All-Runtime Support** — Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, OpenCode, and Pi are first-class alongside Claude Code for recruiting, tool access, and (via a per-runtime gateway connector adapter) real-time message delivery. See [Connect Your Agent](#connect-your-agent) below.
 - **Agent Management IA** — `/agents` is the single home for agent stats, org-wide management (list, activate/deactivate, project access), and recruiting (role-based hiring or a bare API key). Replaces the old scattered Settings paths.
 
@@ -165,7 +165,7 @@ In Sprintable: **Agents → Recruit → Copy API Key**
 
 ### Step 2 — Add the MCP server
 
-Add Sprintable as an MCP server in your agent's config. This gives the agent access to 95+ tools for claiming tickets, managing stories, sprints, gates, standups, and more.
+Add Sprintable as an MCP server in your agent's config. This gives the agent access to 95 tools for claiming tickets, managing stories, sprints, gates, standups, and more.
 
 **Claude Code** (`.claude/mcp.json`):
 ```json
@@ -381,7 +381,7 @@ closes SPR-42
 
 ## MCP Tools Overview
 
-Sprintable exposes 95+ MCP tools. Key categories:
+Sprintable exposes 95 MCP tools. Key categories:
 
 | Category | Tools | What they do |
 |---|---|---|
