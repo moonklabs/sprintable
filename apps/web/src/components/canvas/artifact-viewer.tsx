@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Check, Download, MessageCircle, Pencil } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { ArtifactStage } from './artifact-stage';
 import { ArtifactVersionRail } from './artifact-version-rail';
 import { AnchorPin } from './anchor-pin';
 import { DescriptionPane } from './description-pane';
+import { ExportDialog } from './export-dialog';
 import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canvas';
 import type { CommentThread, DescriptionMap } from '@/services/canvas-comments';
 
@@ -37,6 +38,8 @@ export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCoun
   const [selectedVersion, setSelectedVersion] = useState(artifact.current_version);
   const isViewingAnchor = selectedVersion === artifact.anchor_version;
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const captureTargetRef = useRef<HTMLDivElement>(null);
   const activeVersion = versions.find((v) => v.version === selectedVersion) ?? versions[0];
   const selectedThread = threads?.find((th) => th.id === selectedThreadId) ?? null;
   const selectedThreadDescription = selectedThread?.anchor.element_id
@@ -78,9 +81,14 @@ export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCoun
                 {isViewingAnchor ? t('editAsNewVersionAction') : t('editAction')}
               </button>
             ) : null}
-            <span title={t('exportComingSoon')} className="flex items-center gap-1 text-xs opacity-50">
+            <button
+              type="button"
+              onClick={() => setExportOpen(true)}
+              title={t('exportDialogTitle')}
+              className="flex items-center gap-1 text-xs hover:text-foreground"
+            >
               <Download className="h-3.5 w-3.5" aria-hidden />
-            </span>
+            </button>
             <span
               title={threads ? undefined : t('commentsComingSoon')}
               className={`flex items-center gap-1 text-xs ${threads ? '' : 'opacity-50'}`}
@@ -92,7 +100,7 @@ export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCoun
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_232px]">
-          <div className="relative bg-muted/20 p-4">
+          <div ref={captureTargetRef} className="relative bg-muted/20 p-4">
             {activeVersion ? (
               <ArtifactStage format={artifact.format} content={activeVersion.content} title={artifact.title} />
             ) : null}
@@ -125,6 +133,14 @@ export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCoun
           />
         </div>
       </div>
+      <ExportDialog
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        artifactId={artifact.id}
+        versionNumber={selectedVersion}
+        captureTargetRef={captureTargetRef}
+        artifactFormat={artifact.format}
+      />
     </div>
   );
 }
