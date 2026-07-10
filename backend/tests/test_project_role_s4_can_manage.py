@@ -100,7 +100,13 @@ async def test_org_agent_create_agent_no_admin_403():
     org = uuid.uuid4()
     body = OrgAgentCreate(name="cos", scope_mode="org")
     actor = _agent_actor()
-    session = MagicMock()
+    session = AsyncMock()
+    # E-SECURITY SEC-S8(O): _resolve_org_project_ids가 이제 role 체크보다 먼저 실행돼(grant
+    # 대상 전체를 role 검증 대상으로 삼기 위함) org 프로젝트 목록 조회를 먼저 만족시켜야 한다.
+    single_project_id = uuid.uuid4()
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(single_project_id,)]
+    session.execute = AsyncMock(return_value=mock_result)
 
     with patch("app.routers.team_members._resolve_actor", new=AsyncMock(return_value=actor)), patch(
         "app.services.project_auth.has_project_role", new=AsyncMock(return_value=False)
@@ -110,3 +116,5 @@ async def test_org_agent_create_agent_no_admin_403():
     assert ei.value.status_code == 403
     hpr.assert_awaited_once()
     assert hpr.await_args.kwargs.get("min_role") == "admin"
+    # O 회귀 확認: grant 대상(single_project_id) 기준으로 검증됐지 actor.project_id가 아니어야 함.
+    assert hpr.await_args.args[2] == single_project_id

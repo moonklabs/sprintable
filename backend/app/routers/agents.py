@@ -95,12 +95,22 @@ async def create_org_agent(
     # 권한: create_team_member 와 동일 규칙 재사용(agent actor 제약).
     from app.routers.team_members import _ROLE_RANK, _resolve_actor
 
+    # E-SECURITY SEC-S8(story 83ea3d6a) O: project_ids를 role 체크보다 먼저 해소해야 아래
+    # agent 분기가 실제 grant 대상 전체에 대해 admin 권한을 검증할 수 있다(기존엔 actor.project_id
+    # 하나만 봐서 grant 대상과 무관했다).
+    project_ids = await _resolve_org_project_ids(body, session, org_id)
+
     actor = await _resolve_actor(auth, session, org_id)
     if actor is not None and actor.type == "agent":
-        # S4: can_manage_members → has_project_role(min='admin') 단일 경로(role 에서 derived).
+        # E-SECURITY SEC-S8 O(까심 실HTTP 2단계 재현, PR#1557부터 존재): has_project_role이
+        # caller의 anchor project(actor.project_id) 하나만 검사해, P1에만 admin인 에이전트가
+        # scope_mode='projects'로 P2(본인 무권한 project)나 scope_mode='org'로 org 전체에
+        # 새 에이전트+API키를 찍어낼 수 있었다(grant 대상과 검증 대상 불일치). project_ids
+        # 전원에 대해 admin role을 요구 — 하나라도 admin이 아니면 전체 요청 차단.
         from app.services.project_auth import has_project_role
-        if not await has_project_role(session, actor.id, actor.project_id, min_role="admin"):
-            raise HTTPException(status_code=403, detail="project admin/owner role required to manage members")
+        for pid in project_ids:
+            if not await has_project_role(session, actor.id, pid, min_role="admin"):
+                raise HTTPException(status_code=403, detail="project admin/owner role required to manage members")
         if _ROLE_RANK.get(body.role, 1) > _ROLE_RANK.get(actor.role, 1):
             raise HTTPException(status_code=403, detail="Cannot assign role higher than your own")
         if body.name == actor.name:
@@ -115,8 +125,6 @@ async def create_org_agent(
         from app.services.project_auth import is_org_owner_or_admin
         if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
             raise HTTPException(status_code=403, detail="org admin/owner role required to manage members")
-
-    project_ids = await _resolve_org_project_ids(body, session, org_id)
 
     created_by = uuid.UUID(auth.user_id)  # 휴먼=user_id / 에이전트=member.id (anchor sync 가 휴먼만 owner 매칭)
     member, api_key_plaintext = await create_org_level_agent(
