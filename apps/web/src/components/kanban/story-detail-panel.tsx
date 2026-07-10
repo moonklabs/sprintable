@@ -18,6 +18,7 @@ import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outc
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
+import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
@@ -1284,6 +1285,8 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               ) : null}
               {/* H1-S8 surface②: 머지 게이트 evidence(read-only·gate 있을 때만 노출) */}
               <StoryMergeGate storyId={story.id} />
+              {/* E-CANVAS AC2 attachment point — BE(C1-S3) 미착지 동안 404→무표시(mock 0). */}
+              <ArtifactSection storyId={story.id} memberMap={memberMap} />
             </div>
 
             {/* Tabs for Tasks, Comments, Activity */}

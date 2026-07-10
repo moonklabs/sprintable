@@ -5,6 +5,9 @@
  * 컴포넌트는 그대로 소비(props 인터페이스 유지가 목표).
  */
 
+import type { ArtifactNode } from './canvas-nodes';
+import { resolveNodeTree } from './canvas-nodes';
+
 export type ArtifactFormat = 'html' | 'tree' | 'image';
 
 /** blueprint §2: `artifact_version`(내용 blob/tree·변경자·요약). */
@@ -35,6 +38,10 @@ export interface VisualArtifact {
   anchor_version: number | null;
   created_by: string;
   source: 'created' | 'imported';
+  /** BE 계약 §3 — 연결 대상 3종 中 최대 1개(nullable). AC2(스토리 첨부)의 조회 키. */
+  story_id?: string | null;
+  epic_id?: string | null;
+  doc_id?: string | null;
 }
 
 export interface MemberRef {
@@ -91,6 +98,41 @@ const MOCK_HTML_V4 = `<!doctype html><html><head><style>
     <div class="toast">카드가 거절되었습니다</div>
   </div>
 </body></html>`;
+
+// ─── 실 API 어댑터 (AC2 attachment point 준비) ──────────────────────────────
+// BE(`e-canvas-c1-be-contract` §4) `GET /api/v2/visual-artifacts/{id}` 구현 자체가 아직
+// 안 됐음(§6 체크리스트 전부 미완) — 정확한 응답 envelope은 실측 전. 이 어댑터의 입력 타입은
+// 계약 §3 스키마 기반 최선 추정이며, 실 응답 관찰 후 이 함수 시그니처만 정정하면
+// ArtifactSection/ArtifactViewer 등 하위 컴포넌트는 그대로 유지된다.
+
+export interface VisualArtifactDetailResponse {
+  artifact: VisualArtifact;
+  version_number: number;
+  nodes: ArtifactNode[];
+}
+
+export function adaptArtifactDetail(detail: VisualArtifactDetailResponse): { artifact: VisualArtifact; versions: ArtifactVersion[] } {
+  let content: string;
+  if (detail.artifact.format === 'tree') {
+    content = JSON.stringify(resolveNodeTree(detail.nodes));
+  } else {
+    // html_blob 캐치올 노드(§3)가 임포트/생성된 raw 콘텐츠를 담는다 — html은 props.html,
+    // image는 props.src(BE 계약 §3 "html_blob이면 {html, src} 등").
+    const blob = detail.nodes.find((n) => n.type === 'html_blob');
+    const key = detail.artifact.format === 'image' ? 'src' : 'html';
+    content = typeof blob?.props[key] === 'string' ? (blob.props[key] as string) : '';
+  }
+  const version: ArtifactVersion = {
+    id: `${detail.artifact.id}-v${detail.version_number}`,
+    artifact_id: detail.artifact.id,
+    version: detail.version_number,
+    content,
+    created_by: detail.artifact.created_by,
+    summary: null,
+    created_at: new Date().toISOString(),
+  };
+  return { artifact: detail.artifact, versions: [version] };
+}
 
 export const MOCK_VERSIONS: ArtifactVersion[] = [
   {
