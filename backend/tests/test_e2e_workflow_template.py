@@ -62,7 +62,8 @@ async def test_e2e_template_apply_three_step():
         role_mapping={f"step_{i+1}": str(agent_ids[i]) for i in range(3)},
     )
 
-    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo:
+    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo, \
+         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)):
         instance = AsyncMock()
         instance.get_by_slug = AsyncMock(return_value=tmpl)
         MockRepo.return_value = instance
@@ -90,7 +91,8 @@ async def test_e2e_template_apply_solo():
         role_mapping={"step_1": str(agent_ids[0])},
     )
 
-    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo:
+    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo, \
+         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)):
         instance = AsyncMock()
         instance.get_by_slug = AsyncMock(return_value=tmpl)
         MockRepo.return_value = instance
@@ -124,7 +126,8 @@ async def test_e2e_template_overwrite():
         overwrite_existing=True,
     )
 
-    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo:
+    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo, \
+         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)):
         instance = AsyncMock()
         instance.get_by_slug = AsyncMock(return_value=tmpl)
         MockRepo.return_value = instance
