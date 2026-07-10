@@ -76,6 +76,14 @@ async def _seed(session, *, human_id: uuid.UUID | None = None):
         om = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=human_id, role="member")
         session.add(om)
         await session.commit()
+        # E-SECURITY SEC-S3(story 90cd7e57) develop merge 정합: delete_story가 human-gate
+        # (SEC-S1) 외에 has_project_access(SEC-S3)도 요구하게 됐으므로, 삭제 성공을 검증하는
+        # 시나리오는 project grant가 필요하다(존재하지 않는 story 404 테스트는 이 체크에
+        # 도달하기 전에 404가 나므로 grant 유무와 무관).
+        session.add(ProjectAccess(
+            id=uuid.uuid4(), project_id=project.id, org_member_id=om.id, permission="granted",
+        ))
+        await session.commit()
         human_user_id = human_id
         human_org_member_id = om.id
 

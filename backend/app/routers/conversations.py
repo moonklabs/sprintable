@@ -695,15 +695,20 @@ async def create_conversation(
     """POST /api/v2/conversations — dm/group 생성 (dm 중복 방지)."""
     sender = await _resolve_member(auth, org_id, db, project_id=body.project_id)
 
+    # E-SECURITY SEC-S3(story 90cd7e57): participant_ids가 org 멤버십 필터 없이 그대로 insert
+    # 됐음(add_participant/멘션발송과 비대칭 — 그 두 경로는 이미 org-scope 검증). cross-org UUID를
+    # 참가자로 넣을 수 있던 갭 봉쇄 — 조용히 제거(에러 아님, 존재하는 유효 참가자만 방에 남음).
+    valid_participant_ids = await filter_org_member_ids(set(body.participant_ids), org_id, db)
+
     # ⭐ 인가 불변식: 휴먼↔에이전트 대화 — 에이전트 creator 동석 필수
-    await _enforce_agent_creator_policy(sender, body.participant_ids, db)
+    await _enforce_agent_creator_policy(sender, list(valid_participant_ids), db)
 
     # EF-S2 (db75ecd0): "기존방 다이렉트" 제거 — 동일 2인 pair여도 매 호출 신규 conversation 생성
     # (여러 conversation 공존·각 1주제·hermes 세션별 1방=1주제). 179db213 의 1-DM-per-pair
     # dedup + uq_conversations_dm_pair 정책 회귀(마이그 0111 에서 unique index drop).
     # 불변 보존: creator 동석/allow_list(_enforce_agent_creator_policy 위), 메시지 dedup(send_message·별개),
     # thread=스토리. dm_pair_key 컬럼은 2인 룸 태깅용으로 유지(non-unique·dedup 아님).
-    all_members = sorted({sender.id, *body.participant_ids})
+    all_members = sorted({sender.id, *valid_participant_ids})
     is_dm = len(all_members) == 2
     dm_pair_key = "|".join(str(m) for m in all_members) if is_dm else None
 
