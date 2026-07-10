@@ -8,6 +8,7 @@ import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
 import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { LabelChip } from '@/components/ui/label-chip';
+import { TrustSeal } from '@/components/verify/trust-seal';
 
 // E-MODERN A: 에픽 식별 dot — 기존 시맨틱 토큰만(신규 토큰/raw 팔레트 0). 신호색(warning=blocked·
 // accent-claim=agent·destructive) 회피해 의미 충돌 0. 랜덤 5색 채움 배지(loud)는 퇴출.
@@ -296,6 +297,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* E-VERIFY V0-S3 Lv0 — 증거 있는 done 카드에만(positive 단방향). 자리 예약 없이 조건부 렌더
+              (증거 없으면 완전 무표시 — 레이아웃 시프트 자체가 없음, §7 상태 매트릭스). */}
+          {story.status === 'done' && story.has_evidence ? <TrustSeal /> : null}
           {story.story_points != null ? (
             <span className="text-[11px] tabular-nums text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
           ) : null}

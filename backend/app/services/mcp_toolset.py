@@ -58,6 +58,11 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 아님). A2A 위임을 받은 어떤 역할의 에이전트든 default_tool_groups와 무관하게 써야 하는 협업
     # 도구라 특정 도메인 그룹에 안 묶는다(lock/unlock과 동일 논리).
     "sprintable_link_gate_to_task",
+    # E-VERIFY V0-S1(story 5a5ba27b): add_evidence — story/task 자기증명 첨부. work_item_id로
+    # story든 task든 첨부 가능해 단일 도메인 그룹(stories 또는 tasks)에 못 묶고, link_gate_to_task와
+    # 동형(자기 작업에 self-proof 첨부 = 데이터 파괴 아닌 협업/증명 유틸) — 어떤 역할의 working
+    # agent든 default_tool_groups 무관하게 done 첨부해야 하므로 always-allow.
+    "sprintable_add_evidence",
 })
 
 # scope 토큰: 그룹명 외에 read/write(레거시·전체 비파괴 의미), admin/destructive(파괴적 허용)
@@ -163,6 +168,9 @@ _ALWAYS_ALLOWED_PATH_PREFIXES: tuple[str, ...] = (
     "/api/v2/auth",
     "/api/v2/current-project",
     "/api/v2/agent",
+    # E-VERIFY V0-S1: evidence는 story/task 어느 쪽이든 첨부되는 cross-cutting 자기증명이라
+    # 단일 도메인 그룹에 안 묶임(_ALWAYS_ALLOWED의 sprintable_add_evidence와 동일 근거).
+    "/api/v2/evidence",
 )
 
 # path-prefix → toolset group(라우터 리소스 정렬). 모든 group 은 ALL_GROUPS 소속이어야 함.
@@ -270,6 +278,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_get_loop_context",
     # a2a HITL writer (E-A2A-완성 S-A3)
     "sprintable_link_gate_to_task",
+    # evidence (E-VERIFY V0-S1)
+    "sprintable_add_evidence",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.

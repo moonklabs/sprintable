@@ -3342,5 +3342,21 @@
     "viewInBoard": "View in board",
     "executionBoundaryNote": "Execution happens on your machine. Sprintable only generates the files — it doesn't run the compute.",
     "finish": "Go to dashboard"
+  },
+  "verify": {
+    "provenCompletion": "Proven completion",
+    "evidenceShow": "Show evidence",
+    "evidenceHide": "Hide evidence",
+    "evidenceCount": "{count} evidence items",
+    "evidenceSignedBy": "Evidence for this completion — left by {name}",
+    "evidenceMore": "{count} more evidence items",
+    "evidenceLoadError": "Couldn't load evidence",
+    "evidenceTypeUrl": "Link",
+    "evidenceTypeFile": "File",
+    "evidenceTypePr": "PR",
+    "evidenceTypeDeploy": "Deploy",
+    "evidenceTypeMetric": "Metric",
+    "evidenceTypeReport": "Report",
+    "evidenceTypeGateApproval": "Gate approval"
   }
 }

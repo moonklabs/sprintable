@@ -50,6 +50,10 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 특정 도메인 그룹(stories/tasks 등)에 안 묶는 이유도 lock/unlock과 동일 — A2A 위임을 받은
     # 어떤 역할의 에이전트든 default_tool_groups와 무관하게 써야 하는 협업 도구.
     "sprintable_link_gate_to_task",
+    # E-VERIFY V0-S1(story 5a5ba27b): add_evidence — story/task 어느 쪽에나 붙는 자기증명 첨부
+    # 유틸이라 단일 도메인 그룹에 못 묶음. link_gate_to_task와 동일 논리로 core 취급(백엔드
+    # SSOT와 동기화, app/services/mcp_toolset.py 참고).
+    "sprintable_add_evidence",
 })
 
 _LEGACY_SCOPES: frozenset[str] = frozenset({"read", "write"})
