@@ -8,7 +8,8 @@ import { ArtifactVersionRail } from './artifact-version-rail';
 import { AnchorPin } from './anchor-pin';
 import { DescriptionPane } from './description-pane';
 import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canvas';
-import type { CommentThread, DescriptionMap } from '@/services/canvas-comments';
+import type { ArtifactNode } from '@/services/canvas-nodes';
+import type { CommentThread } from '@/services/canvas-comments';
 
 interface ArtifactViewerProps {
   artifact: VisualArtifact;
@@ -19,7 +20,9 @@ interface ArtifactViewerProps {
   /** C2 — 좌표 앵커 스레드는 스테이지에 핀 오버레이. element 앵커는 후속(실 artifact tree
    * 좌표 유도 필요 — 지금은 좌표 앵커만 오버레이). */
   threads?: CommentThread[];
-  descriptions?: DescriptionMap;
+  /** description pane 소스 — C2-S6 실 컬럼(node.description)을 element 앵커 코멘트가 가리키는
+   * 노드에서 직접 조회(mock 시절 별도 DescriptionMap은 폐기 — 실 데이터 그대로 사용). */
+  nodes?: ArtifactNode[];
   /** C3 §1 — 뷰어→편집모드 진입점. format='tree'일 때만 노출(html/image는 이 UI로 편집
    * 불가). 정본 버전을 보는 중이면 "새 버전으로 편집" 라벨(정본 계약 보호 — 실제 분기 로직은
    * BE 연동 시, 지금은 라벨만 다르고 동일 콜백). */
@@ -32,7 +35,7 @@ interface ArtifactViewerProps {
  * BE(`visual_artifact`/`artifact_version`, 디디 C1-S3) 미착지 — 이 컴포넌트는 props로 데이터를
  * 받는 순수 뷰라 실 API 착지 시 fetch 래퍼만 새로 감싸면 됨(컴포넌트 자체는 안 바뀜).
  */
-export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCount = 0, threads, descriptions = {}, onEnterEdit, className }: ArtifactViewerProps) {
+export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCount = 0, threads, nodes = [], onEnterEdit, className }: ArtifactViewerProps) {
   const t = useTranslations('canvas');
   const [selectedVersion, setSelectedVersion] = useState(artifact.current_version);
   const isViewingAnchor = selectedVersion === artifact.anchor_version;
@@ -40,7 +43,7 @@ export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCoun
   const activeVersion = versions.find((v) => v.version === selectedVersion) ?? versions[0];
   const selectedThread = threads?.find((th) => th.id === selectedThreadId) ?? null;
   const selectedThreadDescription = selectedThread?.anchor.element_id
-    ? (descriptions[selectedThread.anchor.element_id] ?? null)
+    ? (nodes.find((n) => n.id === selectedThread.anchor.element_id)?.description ?? null)
     : null;
   const openThreadCount = threads?.filter((th) => th.rollup !== 'resolved').length ?? 0;
 

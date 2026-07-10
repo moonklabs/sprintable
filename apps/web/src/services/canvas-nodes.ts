@@ -11,6 +11,8 @@ export interface ArtifactNode {
   props: Record<string, unknown>;
   parent_id: string | null;
   sort_order: number;
+  /** E-CANVAS C2-S6 실 컬럼 — description pane("보이는 PRD"), 요소별 스펙 서술. */
+  description?: string | null;
 }
 
 export interface ResolvedNode extends ArtifactNode {
