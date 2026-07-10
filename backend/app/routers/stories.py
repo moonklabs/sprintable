@@ -166,6 +166,19 @@ async def _attach_has_evidence(session: AsyncSession, stories: list[Story]) -> N
             s.has_evidence = True
 
 
+async def _assert_story_project_access(
+    session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, project_id: uuid.UUID
+) -> None:
+    """E-SECURITY SEC-S8(story 83ea3d6a) G: 개별-ID story 접근(get/update/status)이 org-scope만
+    있고 project 접근권 미검증이던 갭 — 같은 org 다른 project 멤버가 story id만 알면 조회/수정
+    가능했다. upload_story_attachment와 동형으로 has_project_access 재사용(휴먼 team_member·
+    에이전트 project_access grant 양쪽 처리). delete_story는 SEC-S3(#2014)가 별도 처리."""
+    from app.services.project_auth import has_project_access
+
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
+
 async def _upsert_assignee_participation(
     session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID, assignee_id: uuid.UUID
 ) -> None:
@@ -358,10 +371,12 @@ async def get_workflow_line_metrics(
 async def get_story(
     id: uuid.UUID,
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     await _attach_assignee_ids(repo.session, repo.org_id, [story])
     await _attach_has_evidence(repo.session, [story])
     return StoryResponse.model_validate(story)
@@ -607,6 +622,11 @@ async def update_story(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
+    _story_for_access = await repo.get(id)
+    if _story_for_access is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(db, auth, repo.org_id, _story_for_access.project_id)
+
     data = body.model_dump(exclude_unset=True)
     # S7: client 제공 asset_id strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
     if data.get("attachments"):
@@ -898,6 +918,8 @@ async def update_story_status(
     auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
     story_before = await repo.get(id)
+    if story_before is not None:
+        await _assert_story_project_access(db, auth, repo.org_id, story_before.project_id)
     old_status = story_before.status if story_before else None
 
     # 정공법 A(c1cd484b·선생님 지시): 전이 순서 **하드블록 폐지** — 비순차 점프도 항상 allow,
