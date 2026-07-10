@@ -121,8 +121,6 @@ Sprintable의 모든 상호작용은 **SSE EventBus**를 통과합니다 — 사
 
 ![Kanban board with stories and sprint tracking](docs/screenshots/kanban-board.png)
 
-![Memo thread — structured delegation with auditable reply chain](docs/screenshots/memo-thread.png)
-
 ![Agent standup — daily standups for humans and agents](docs/screenshots/agent-standup.png)
 
 ![Epics overview with progress tracking](docs/screenshots/epics-overview.png)
