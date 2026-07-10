@@ -110,10 +110,16 @@ async def create_artifact(
     return _ok(detail.model_dump(mode="json"), status=201)
 
 
-async def _get_artifact_or_404(session: AsyncSession, org_id: uuid.UUID, id: uuid.UUID) -> VisualArtifact | None:
+async def _get_artifact_or_404(
+    session: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID, id: uuid.UUID
+) -> VisualArtifact | None:
+    """E-SECURITY SEC-S8(story 83ea3d6a) Q: org_id만 필터해 개별-ID GET/versions/version-detail/
+    DELETE가 G(N)의 list project_id 필터를 직접 우회했다(같은 org 다른 project의 artifact id를
+    알면 200) — list_artifacts와 동형으로 project_id도 함께 필터."""
     return (await session.execute(
         select(VisualArtifact).where(
-            VisualArtifact.id == id, VisualArtifact.org_id == org_id, VisualArtifact.deleted_at.is_(None),
+            VisualArtifact.id == id, VisualArtifact.org_id == org_id,
+            VisualArtifact.project_id == project_id, VisualArtifact.deleted_at.is_(None),
         )
     )).scalar_one_or_none()
 
@@ -146,10 +152,10 @@ async def get_artifact(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    org_id, _project_id = _get_org_project(auth)
-    if not org_id:
-        return _err("FORBIDDEN", "org_id required", 403)
-    artifact = await _get_artifact_or_404(session, org_id, id)
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
     if artifact is None:
         return _err("NOT_FOUND", "Artifact not found", 404)
     detail = await _load_detail(session, artifact, artifact.latest_version_number)
@@ -164,10 +170,10 @@ async def list_artifact_versions(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    org_id, _project_id = _get_org_project(auth)
-    if not org_id:
-        return _err("FORBIDDEN", "org_id required", 403)
-    artifact = await _get_artifact_or_404(session, org_id, id)
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
     if artifact is None:
         return _err("NOT_FOUND", "Artifact not found", 404)
     rows = (await session.execute(
@@ -185,10 +191,10 @@ async def get_artifact_version(
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """무-mutate 버전 조회 — 미르코 §6-1 갭 지적 대응(mockup은 restore=즉시 라이브 덮어씀)."""
-    org_id, _project_id = _get_org_project(auth)
-    if not org_id:
-        return _err("FORBIDDEN", "org_id required", 403)
-    artifact = await _get_artifact_or_404(session, org_id, id)
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
     if artifact is None:
         return _err("NOT_FOUND", "Artifact not found", 404)
     detail = await _load_detail(session, artifact, version_number)
@@ -234,10 +240,10 @@ async def delete_artifact(
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """생성자만 삭제 가능(Evidence 패턴 계승 — "누가 주어인가"). soft delete."""
-    org_id, _project_id = _get_org_project(auth)
-    if not org_id:
-        return _err("FORBIDDEN", "org_id required", 403)
-    artifact = await _get_artifact_or_404(session, org_id, id)
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
     if artifact is None:
         return _err("NOT_FOUND", "Artifact not found", 404)
     if artifact.created_by != uuid.UUID(auth.user_id):
