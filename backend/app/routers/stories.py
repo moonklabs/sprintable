@@ -20,7 +20,7 @@ from app.services.event_seq import assign_recipient_seq
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.schemas.story import StoryAttachment, StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
-from app.services.member_resolver import canonicalize_member_id
+from app.services.member_resolver import canonicalize_member_id, filter_org_member_ids
 from app.services.merge_verdict_gate import (
     AUTO_MERGE,
     evaluate_merge_gate,
@@ -1136,7 +1136,8 @@ async def _resolve_team_member_id(auth: AuthContext, org_id: uuid.UUID, db: Asyn
 @router.post("/{id}/comments", response_model=CommentResponse, status_code=201)
 async def add_comment(
     id: uuid.UUID,
-    content: str = Body(..., embed=True),
+    content: str = Body(...),
+    mentioned_ids: list[uuid.UUID] = Body(default=[]),
     db: AsyncSession = Depends(get_db),
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
@@ -1156,6 +1157,31 @@ async def add_comment(
     db.add(comment)
     await db.commit()
     await db.refresh(comment)
+
+    # E-CANVAS C0-S1(story cfa61434) §F4: comment.created 이벤트 전파 — 기반층 검증 케이스
+    # (blueprint 제1원칙 "이벤트 없는 기능 금지"). 수신자 = story assignee(멀티) + mentioned_ids
+    # (cross-org 필터, conversations.py와 동형 컨벤션 — content regex 파싱은 이 코드베이스가
+    # 이미 폐기함[channel_router.py]) − 작성자 본인(자기알림 제외). dispatch_notification이
+    # 휴먼(in-app+webhook)/에이전트(Event INSERT→SSE·webhook) 양쪽 다 처리하는 기존 SSOT.
+    sa_repo = StoryAssigneeRepository(db, repo.org_id)
+    assignee_ids = set(await sa_repo.list_member_ids(story.id))
+    if not assignee_ids and story.assignee_id:
+        assignee_ids = {story.assignee_id}
+    valid_mentioned_ids = await filter_org_member_ids(set(mentioned_ids), repo.org_id, db)
+    target_member_ids = list((assignee_ids | valid_mentioned_ids) - {created_by})
+    if target_member_ids:
+        await dispatch_notification(
+            db,
+            org_id=repo.org_id,
+            event_type="comment.created",
+            target_member_ids=target_member_ids,
+            title=f"새 코멘트: {story.title}",
+            body=content[:200],
+            reference_type="story",
+            reference_id=story.id,
+            source_project_id=story.project_id,
+        )
+
     return CommentResponse.model_validate(comment)
 
 
