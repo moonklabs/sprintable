@@ -1,13 +1,11 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Download } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { ComponentPalette } from './component-palette';
 import { EditCanvas } from './edit-canvas';
 import { PropertyPanel } from './property-panel';
 import { CommitBar } from './commit-bar';
-import { ExportDialog, type ExportFormat, type ExportTheme, type ExportViewport } from './export-dialog';
 import {
   resolveNodeTree, addNode, deleteNode, updateNodeProp, countNodeChanges, commitNodesToNextVersion,
   type ArtifactNode,
@@ -33,7 +31,6 @@ export function ArtifactEditor({ title, initialNodes, onCommit, onDone, classNam
   const [baseline, setBaseline] = useState(initialNodes);
   const [nodes, setNodes] = useState(initialNodes);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [exportOpen, setExportOpen] = useState(false);
 
   const tree = useMemo(() => resolveNodeTree(nodes), [nodes]);
   const selectedNode = nodes.find((n) => n.id === selectedId) ?? null;
@@ -50,9 +47,6 @@ export function ArtifactEditor({ title, initialNodes, onCommit, onDone, classNam
     onCommit?.(committed, summary);
     setBaseline(committed);
   };
-  const handleExport = (_format: ExportFormat, _viewport: ExportViewport, _theme: ExportTheme) => {
-    // mock — C1-S5(GCS export 파이프) 미착지. 실 연동 시 여기서 업로드 API 호출.
-  };
 
   return (
     <div className={className}>
@@ -62,14 +56,6 @@ export function ArtifactEditor({ title, initialNodes, onCommit, onDone, classNam
           <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
             {t('editModeLabel')}
           </span>
-          <button
-            type="button"
-            onClick={() => setExportOpen(true)}
-            className="ml-auto flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted"
-          >
-            <Download className="h-3 w-3" aria-hidden />
-            {t('exportAction')}
-          </button>
         </div>
 
         <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-[120px_1fr_160px]">
@@ -82,8 +68,6 @@ export function ArtifactEditor({ title, initialNodes, onCommit, onDone, classNam
           <CommitBar changeCount={changeCount} onCommit={handleCommit} onDone={onDone} />
         </div>
       </div>
-
-      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} onExport={handleExport} />
     </div>
   );
 }
