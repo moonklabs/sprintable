@@ -16,11 +16,13 @@ from app.models.visual_artifact import (
 from app.schemas.visual_artifact import (
     ArtifactCommentResponse,
     ArtifactExportResponse,
+    ArtifactNodeOperation,
     ArtifactNodeOut,
     ArtifactVersionSummary,
     CompleteExportRequest,
     CreateArtifactCommentRequest,
     CreateArtifactRequest,
+    EditArtifactRequest,
     ExportUploadUrlRequest,
     ExportUploadUrlResponse,
     VisualArtifactDetail,
@@ -117,6 +119,7 @@ async def create_artifact(
         anchor_version=artifact.anchor_version,
         created_by=artifact.created_by, created_at=artifact.created_at, updated_at=artifact.updated_at,
         version_number=version.version_number, version_summary=version.summary,
+        version_source_comment_id=version.source_comment_id,
         nodes=[ArtifactNodeOut.model_validate(n) for n in nodes],
     )
     return _ok(detail.model_dump(mode="json"), status=201)
@@ -154,6 +157,7 @@ async def _load_detail(session: AsyncSession, artifact: VisualArtifact, version_
         anchor_version=artifact.anchor_version,
         created_by=artifact.created_by, created_at=artifact.created_at, updated_at=artifact.updated_at,
         version_number=version.version_number, version_summary=version.summary,
+        version_source_comment_id=version.source_comment_id,
         nodes=[ArtifactNodeOut.model_validate(n) for n in node_rows],
     )
 
@@ -669,3 +673,147 @@ async def list_artifact_exports(
         for export, vn in rows
     ]
     return _ok(results)
+
+
+# ─── Edit (E-CANVAS C3-S7, story 940266db) ────────────────────────────────────
+# crux: 휴먼 딸깍(REST)과 에이전트 MCP(POST 동일 엔드포인트)가 **같은 서비스 경로**를 경유해
+# "같은 객체를 양쪽이 편집"을 보장한다(서로 다른 코드 경로면 drift 위험). 버전은 무-mutate
+# 원칙(C1-S3) 계승 — 편집은 항상 새 버전을 만든다. ⚠️ node id는 버전 간 안정하지 않다
+# (ArtifactNode.id가 테이블 전역 PK라 버전마다 독립 row=새 id 필수 — C1-S3의 "버전마다 자기
+# 소유 node row 세트" 설계와 정합). update/delete op은 편집 시점 최신 버전의 id로 대상만
+# 지정하고, 응답으로 돌아오는 새 id를 다음 편집에 사용한다.
+
+
+async def _apply_artifact_edit(
+    session: AsyncSession, artifact: VisualArtifact, operations: list[ArtifactNodeOperation],
+    *, actor_id: uuid.UUID, summary: str | None, source_comment_id: uuid.UUID | None = None,
+) -> ArtifactVersion:
+    latest = await _get_version_or_404(session, artifact.id, artifact.latest_version_number)
+    if latest is None:
+        raise ValueError("latest version not found — artifact 상태 비정상")
+
+    existing_rows = (await session.execute(
+        select(ArtifactNode).where(ArtifactNode.version_id == latest.id)
+    )).scalars().all()
+    working: dict[uuid.UUID, dict] = {
+        n.id: {
+            "type": n.type, "props": n.props, "parent_id": n.parent_id,
+            "sort_order": n.sort_order, "description": n.description,
+        }
+        for n in existing_rows
+    }
+
+    for op in operations:
+        if op.op == "add":
+            new_id = op.id or uuid.uuid4()
+            working[new_id] = {
+                "type": op.type or "text", "props": op.props or {}, "parent_id": op.parent_id,
+                "sort_order": op.sort_order or 0, "description": op.description,
+            }
+        elif op.op == "update":
+            if op.id is None or op.id not in working:
+                raise ValueError(f"update 대상 node를 찾을 수 없습니다: {op.id}")
+            node = working[op.id]
+            if op.type is not None:
+                node["type"] = op.type
+            if op.props is not None:
+                node["props"] = op.props
+            if op.parent_id is not None:
+                node["parent_id"] = op.parent_id
+            if op.sort_order is not None:
+                node["sort_order"] = op.sort_order
+            if op.description is not None:
+                node["description"] = op.description
+        elif op.op == "delete":
+            if op.id is None:
+                raise ValueError("delete op에는 id가 필요합니다")
+            working.pop(op.id, None)
+
+    new_version_number = artifact.latest_version_number + 1
+    new_version = ArtifactVersion(
+        id=uuid.uuid4(), artifact_id=artifact.id, version_number=new_version_number,
+        created_by=actor_id, summary=summary, source_comment_id=source_comment_id,
+    )
+    session.add(new_version)
+    await session.flush()
+
+    # ⚠️ ArtifactNode.id는 테이블 전역 PK다(버전별 복합키 아님) — C1-S3 "버전마다 자기 소유
+    # node row 세트" 설계상 매 버전은 독립 row 집합이라 이전 버전의 id를 재사용하면 PK 충돌.
+    # working 딕셔너리 키(현재 버전 id)는 연산 매칭(update/delete 대상 지정)에만 쓰고, 실제
+    # INSERT는 새 id로 한다 — parent_id가 "같은 편집에서 새로 추가된 부모"를 가리키면 그 새
+    # id로 리매핑(트리 구조 보존), 그 외(이전 버전에 이미 있던 parent)는 parent_id를 그대로
+    # 둔다(과거 버전 트리 참조는 새 버전에서 무의미하므로 앱 레이어가 무시·FE는 매 버전 응답의
+    # nodes[]를 그대로 신뢰).
+    id_remap: dict[uuid.UUID, uuid.UUID] = {old_id: uuid.uuid4() for old_id in working}
+    for old_id, data in working.items():
+        parent_id = data["parent_id"]
+        remapped_parent_id = id_remap.get(parent_id, parent_id) if parent_id is not None else None
+        session.add(ArtifactNode(
+            id=id_remap[old_id], artifact_id=artifact.id, version_id=new_version.id,
+            type=data["type"], props=data["props"], parent_id=remapped_parent_id,
+            sort_order=data["sort_order"], description=data["description"],
+        ))
+
+    artifact.latest_version_number = new_version_number
+    await session.flush()
+    return new_version
+
+
+async def _notify_artifact_updated(
+    session: AsyncSession, artifact: VisualArtifact, *, org_id: uuid.UUID, project_id: uuid.UUID,
+    editor_id: uuid.UUID,
+) -> None:
+    """AC③: 어느 쪽 수정이든(휴먼/에이전트) artifact.updated 이벤트가 상대에게 도달 — 대상=
+    artifact 생성자(편집자 본인 제외). C2-S6 comment.created 전파와 동형 패턴."""
+    target_member_ids = list({artifact.created_by} - {editor_id}) if artifact.created_by else []
+    if target_member_ids:
+        await dispatch_notification(
+            session, org_id=org_id, event_type="artifact.updated",
+            target_member_ids=target_member_ids,
+            title=f"산출물 수정됨: {artifact.title}",
+            body="artifact가 새 버전으로 갱신됐습니다.",
+            reference_type="visual_artifact", reference_id=artifact.id,
+            source_project_id=project_id,
+        )
+
+
+@router.post("/{id}/edit", status_code=201)
+async def edit_artifact(
+    id: uuid.UUID,
+    body: EditArtifactRequest,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """딸깍 편집(FE) + MCP 편집(에이전트) 공용 엔드포인트 — 요소 add/update/delete를 적용해
+    새 버전을 만든다(무-mutate 버전 원칙 계승)."""
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+
+    if body.source_comment_id is not None:
+        # 결과 연결도 cross-artifact 위조 차단(오늘 계열 SEC 원칙 동형) — 남의 artifact
+        # 코멘트를 내 편집 결과로 링크할 수 없음. 403(검증 오류 422와 구분되는 인가 축).
+        comment_owner = (await session.execute(
+            select(ArtifactComment.artifact_id).where(ArtifactComment.id == body.source_comment_id)
+        )).scalar_one_or_none()
+        if comment_owner != artifact.id:
+            return _err("FORBIDDEN", "source_comment_id가 이 artifact 소속이 아닙니다", 403)
+
+    actor_id = uuid.UUID(auth.user_id)
+    try:
+        new_version = await _apply_artifact_edit(
+            session, artifact, body.operations, actor_id=actor_id, summary=body.summary,
+            source_comment_id=body.source_comment_id,
+        )
+    except ValueError as exc:
+        return _err("INVALID_OPERATION", str(exc), 422)
+
+    await _notify_artifact_updated(session, artifact, org_id=org_id, project_id=project_id, editor_id=actor_id)
+
+    detail = await _load_detail(session, artifact, new_version.version_number)
+    if detail is None:
+        return _err("NOT_FOUND", "Artifact version not found", 404)
+    return _ok(detail.model_dump(mode="json"), status=201)
