@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import uuid
 
+from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +16,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # 이 집합으로 clamp 돼야 CHECK 위반(500)이 없다. 랭크: owner > admin > member.
 PROJECT_ROLES: tuple[str, ...] = ("owner", "admin", "member")
 PROJECT_ROLE_RANK: dict[str, int] = {"owner": 3, "admin": 2, "member": 1}
+
+
+def assert_target_in_caller_org(
+    caller_org_id: uuid.UUID,
+    target_org_id: uuid.UUID | None,
+    *,
+    not_found_detail: str = "Not found",
+) -> None:
+    """E-SECURITY SEC-S6/S7 계열 cross-org IDOR 공통 가드.
+
+    까심 QA 부수발견 D(roster: project_id)·E(persona: agent_id) 공통 근본 — 호출자 org를 body/
+    query param으로 받은 target(project·agent 등 어떤 org-scoped 엔티티든)의 **실제** org와 대조한
+    적이 없어, target_id만 알면 어느 org 소속이든 caller org와 무관하게 통과됐다. 호출부가
+    target의 실 org_id를 먼저 조회(엔티티마다 다른 쿼리)해 이 단일 비교 지점으로 넘기면 된다.
+    미존재(target_org_id=None)도 불일치와 동일하게 404 — 존재 비노출(타 org에 그 리소스가 있는지
+    자체가 정보 누수).
+    """
+    if target_org_id is None or target_org_id != caller_org_id:
+        raise HTTPException(status_code=404, detail=not_found_detail)
 
 
 def clamp_project_role(role: str | None) -> str:
