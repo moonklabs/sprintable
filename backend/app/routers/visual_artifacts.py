@@ -817,3 +817,48 @@ async def edit_artifact(
     if detail is None:
         return _err("NOT_FOUND", "Artifact version not found", 404)
     return _ok(detail.model_dump(mode="json"), status=201)
+
+
+# ─── Canonicalize (E-CANVAS C4-S8, story a5118cb0) ────────────────────────────
+# crux(유나 handoff `e-canvas-c4-canonical-handoff`): 정본화 = 합의된 계약(§1, 감시 관문 아님).
+# 기존 E-DG Decision Gate 재사용(신규 게이트 발명 금지) — 제안(이 엔드포인트)이 Gate를 만들고,
+# 승인/반려는 **기존 범용** `POST /api/v2/gates/{id}/transition`이 처리(human-only authz 이미
+# 강제됨). 여기서는 gate_service._resolve_artifact_canonicalize_gate가 해소를 anchor_version
+# set(승인)/재논의 코멘트(반려)로 연결.
+
+
+@router.post("/{id}/versions/{version_number}/canonicalize", status_code=201)
+async def propose_canonical_version(
+    id: uuid.UUID,
+    version_number: int,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """정본으로 제안 — AI는 제안만(MCP도 동일 엔드포인트), 승인은 always-HITL(gate_service).
+    이미 pending 제안이 있으면 멱등(create_gate 자체 멱등 재사용)."""
+    from app.services.gate_service import create_gate
+
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    version = await _get_version_or_404(session, artifact.id, version_number)
+    if version is None:
+        return _err("NOT_FOUND", "Artifact version not found", 404)
+
+    proposer_id = uuid.UUID(auth.user_id)
+    gate = await create_gate(
+        session, org_id, artifact.id, "visual_artifact", "artifact_canonicalize",
+        proposer_id, uuid.uuid4(),  # role_id: always-manual이라 disposition 미사용(placeholder)
+        neutral_facts={
+            "version_number": version_number, "requested_by_member_id": str(proposer_id),
+            "artifact_title": artifact.title,
+        },
+    )
+    await session.commit()
+    return _ok({
+        "gate_id": str(gate.id), "status": gate.status,
+        "artifact_id": str(artifact.id), "version_number": version_number,
+    }, status=201)

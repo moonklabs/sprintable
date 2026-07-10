@@ -85,17 +85,17 @@ EXPECTED_TOOLS = {
     "sprintable_link_gate_to_task",
     # evidence (1) — E-VERIFY V0-S1
     "sprintable_add_evidence",
-    # visual artifacts (5) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집)
+    # visual artifacts (6) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안)
     "sprintable_create_artifact", "sprintable_get_artifact",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
-    "sprintable_edit_artifact",
+    "sprintable_edit_artifact", "sprintable_propose_canonical_version",
     # smoke
     "ping",
 }
 
 
 def test_total_tool_count():
-    assert len(_TOOLS) == 98
+    assert len(_TOOLS) == 99
 
 
 def test_all_expected_tools_registered():

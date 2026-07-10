@@ -1,5 +1,6 @@
-"""시각 산출물(visual_artifact) MCP 도구(5개) — E-CANVAS C1-S3(story 8bace49e)+
-C2-S6(story 0edca31e, 코멘트 왕복)+C3-S7(story 940266db, 편집 왕복)."""
+"""시각 산출물(visual_artifact) MCP 도구(6개) — E-CANVAS C1-S3(story 8bace49e)+
+C2-S6(story 0edca31e, 코멘트 왕복)+C3-S7(story 940266db, 편집 왕복)+C4-S8(story a5118cb0,
+정본 제안 — 승인은 always-HITL이라 MCP 미제공)."""
 from __future__ import annotations
 
 from mcp.types import TextContent
@@ -60,6 +61,11 @@ class EditArtifactInput(SprintableInput):
     operations: list[ArtifactNodeOperationInput]
     summary: str | None = None  # 새 버전 변경 이유(선택)
     source_comment_id: str | None = None  # 이 편집이 응답한 코멘트(선택, closed-loop)
+
+
+class ProposeCanonicalInput(SprintableInput):
+    artifact_id: str
+    version_number: int
 
 
 async def create_artifact(args: CreateArtifactInput) -> list[TextContent]:
@@ -138,6 +144,18 @@ async def edit_artifact(args: EditArtifactInput) -> list[TextContent]:
         if args.source_comment_id:
             body["source_comment_id"] = args.source_comment_id
         result = await client.post(f"/api/v2/visual-artifacts/{args.artifact_id}/edit", json=body)
+        return ok(result)
+    except Exception as exc:
+        return err(str(exc))
+
+
+async def propose_canonical_version(args: ProposeCanonicalInput) -> list[TextContent]:
+    """이 버전을 정본으로 제안(E-DG 게이트 생성) — 제안만, **승인은 항상 휴먼**(에이전트는
+    이 도구로 제안까지만 가능. 승인/반려는 POST /api/v2/gates/{id}/transition, human-only)."""
+    try:
+        result = await client.post(
+            f"/api/v2/visual-artifacts/{args.artifact_id}/versions/{args.version_number}/canonicalize",
+        )
         return ok(result)
     except Exception as exc:
         return err(str(exc))
