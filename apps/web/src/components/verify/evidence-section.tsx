@@ -108,7 +108,9 @@ export function EvidenceSection({ workItemId, workItemType, hasEvidence, memberM
             {loading ? (
               <p className="text-[11px] text-muted-foreground">{tCommon('loading')}</p>
             ) : error ? (
-              <p className="text-[11px] text-destructive">{t('evidenceLoadError')}</p>
+              // 유나 디자인 가디언 리뷰: fetch 실패는 시스템 에러(에이전트 판단 아님) — "안심" 표면
+              // 일관성을 위해 destructive(빨강) 대신 중립 톤.
+              <p className="text-[11px] text-muted-foreground">{t('evidenceLoadError')}</p>
             ) : items && items.length > 0 ? (
               <>
                 {signerName ? (
