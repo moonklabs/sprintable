@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveCollaboration,
   deriveRoadmapStatus,
+  deriveVagueRecency,
   derivePhrase,
   filterMilestoneEvents,
   mergeRoadmap,
@@ -102,5 +103,22 @@ describe('filterMilestoneEvents ("누가"가 아닌 "무슨 일" — 허용목�
   it('drops unknown/noise actions (e.g. raw keystroke or heartbeat events)', () => {
     const items: BeActivityLogItem[] = [{ ...base, action: 'agent.heartbeat' }];
     expect(filterMilestoneEvents(items)).toHaveLength(0);
+  });
+});
+
+describe('deriveVagueRecency (목업 §④ 성긴 버킷 — 분 단위 정밀 경과 표시 0)', () => {
+  const NOW = new Date('2026-07-10T12:00:00Z').getTime();
+
+  it('buckets under 5 minutes as justNow', () => {
+    expect(deriveVagueRecency(NOW - 2 * 60_000, NOW)).toBe('justNow');
+  });
+  it('buckets under 1 hour (but over 5 min) as aWhileAgo', () => {
+    expect(deriveVagueRecency(NOW - 30 * 60_000, NOW)).toBe('aWhileAgo');
+  });
+  it('buckets under 24 hours (but over 1 hour) as today', () => {
+    expect(deriveVagueRecency(NOW - 5 * 60 * 60_000, NOW)).toBe('today');
+  });
+  it('buckets 24+ hours as earlier', () => {
+    expect(deriveVagueRecency(NOW - 2 * 24 * 60 * 60_000, NOW)).toBe('earlier');
   });
 });

@@ -2699,7 +2699,7 @@
     "loading": "불러오는 중...",
     "roadmapEmpty": "아직 로드맵이 없습니다.",
     "roadmapTitle": "로드맵 흐름",
-    "roadmapSummary": "{total}개 마일스톤 중 {position}번째",
+    "roadmapSummary": "{total}개 마일스톤 중 <b>{position}번째</b>",
     "currentMarker": "● 여기",
     "progressTitle": "현재 위치 · 진척",
     "progressDetail": "{done}/{total} 스토리 완료",
@@ -2722,7 +2722,13 @@
     "eventRunFailed": "실행 실패 — {entity}",
     "eventSprintStarted": "스프린트 시작 — {entity}",
     "eventSprintClosed": "스프린트 종료 — {entity}",
-    "eventDocCreated": "새 문서 등록 — {entity}"
+    "eventDocCreated": "새 문서 등록 — {entity}",
+    "recency": {
+      "justNow": "방금",
+      "aWhileAgo": "조금 전",
+      "today": "오늘",
+      "earlier": "이전"
+    }
   },
   "loops": {
     "title": "Loop 보드",

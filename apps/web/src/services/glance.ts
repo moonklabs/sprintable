@@ -137,3 +137,18 @@ const MILESTONE_ACTIONS = new Set([
 export function filterMilestoneEvents(items: BeActivityLogItem[]): BeActivityLogItem[] {
   return items.filter((i) => MILESTONE_ACTIONS.has(i.action));
 }
+
+export type VagueRecency = 'justNow' | 'aWhileAgo' | 'today' | 'earlier';
+
+/**
+ * 목업(`e-glance-glance-board-mockup-render`) §④ "방금"/"조금 전"/"오늘" — 분 단위 정밀 경과
+ * 표시("N분째") 없이 아주 성긴 버킷만. §8 "지연/멈춤 시간 강조 0" 리트머스 유지하며 시각
+ * 디테일만 보강(완전 시간 생략 대신 목업 그대로).
+ */
+export function deriveVagueRecency(occurredAtMs: number, nowMs: number): VagueRecency {
+  const diffMin = (nowMs - occurredAtMs) / 60000;
+  if (diffMin < 5) return 'justNow';
+  if (diffMin < 60) return 'aWhileAgo';
+  if (diffMin < 60 * 24) return 'today';
+  return 'earlier';
+}
