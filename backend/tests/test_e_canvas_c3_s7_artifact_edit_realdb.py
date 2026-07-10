@@ -1,6 +1,6 @@
 """E-CANVAS C3-S7(story 940266db): 딸깍 편집(REST) + MCP 편집이 공용 서비스 경로를 경유해
-같은 artifact를 편집(add/update/delete → 새 버전, node id 버전 간 안정)함을 실증. AC3(양방향
-이벤트 전파)·AC4(휴먼↔에이전트 편집 왕복) 검증."""
+같은 artifact를 편집(add/update/delete → 새 버전)함을 실증. AC3(양방향 이벤트 전파)·AC4
+(휴먼↔에이전트 편집 왕복)·source_comment_id(코멘트→편집 결과 연결, closed-loop) 검증."""
 from __future__ import annotations
 
 import os
@@ -375,6 +375,98 @@ async def test_ac4_agent_edits_human_creator_notified():
                 )
             )).scalars().all()
             assert len(rows) == 1, "휴먼 생성자에게 in-app 알림이 기록돼야 함"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_source_comment_id_links_edit_result_to_comment():
+    """closed-loop: 편집에 source_comment_id를 넘기면 새 버전에 링크되고(응답 노출), 코멘트
+    자체는 auto-resolve 안 됨(링크≠해결, 오르테가 승인 사항)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+
+        await _setup_app(app, Session, seeded["org_id"], seeded["project_id"])
+        client = _client_for(app)
+        try:
+            comment_resp = await client.post(
+                f"/api/v2/visual-artifacts/{seeded['artifact_id']}/comments",
+                json={"content": "이 버튼 라벨 바꿔주세요", "node_id": str(seeded["node_a_id"])},
+            )
+            comment_id = comment_resp.json()["data"]["id"]
+
+            edit_resp = await client.post(
+                f"/api/v2/visual-artifacts/{seeded['artifact_id']}/edit",
+                json={
+                    "operations": [
+                        {"op": "update", "id": str(seeded["node_a_id"]), "props": {"content": "Fixed"}},
+                    ],
+                    "source_comment_id": comment_id,
+                },
+            )
+            assert edit_resp.status_code == 201, edit_resp.text
+            assert edit_resp.json()["data"]["version_source_comment_id"] == comment_id
+
+            comments_resp = await client.get(f"/api/v2/visual-artifacts/{seeded['artifact_id']}/comments")
+            comment_after = next(c for c in comments_resp.json()["data"] if c["id"] == comment_id)
+            assert comment_after["resolved"] is False, "링크는 resolve를 자동으로 하지 않아야 함"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_source_comment_id_cross_artifact_forgery_blocked():
+    """crux: source_comment_id가 다른 artifact 소속 코멘트를 가리키면 403(오늘 SEC 계열과 동형).
+    같은 org/project 내 서로 다른 두 artifact로 구성(org 경계 문제인 Q와는 다른 축)."""
+    from app.models.visual_artifact import ArtifactVersion, VisualArtifact
+
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+            other_artifact = VisualArtifact(
+                id=uuid.uuid4(), org_id=seeded["org_id"], project_id=seeded["project_id"],
+                title="Other Artifact", source="created", latest_version_number=1,
+                created_by=seeded["creator_id"],
+            )
+            s.add(other_artifact)
+            await s.commit()
+            s.add(ArtifactVersion(
+                id=uuid.uuid4(), artifact_id=other_artifact.id, version_number=1,
+                created_by=seeded["creator_id"],
+            ))
+            await s.commit()
+            other_artifact_id = other_artifact.id
+
+        await _setup_app(app, Session, seeded["org_id"], seeded["project_id"])
+        client = _client_for(app)
+        try:
+            other_comment_resp = await client.post(
+                f"/api/v2/visual-artifacts/{other_artifact_id}/comments",
+                json={"content": "다른 artifact의 코멘트"},
+            )
+            other_comment_id = other_comment_resp.json()["data"]["id"]
+
+            resp = await client.post(
+                f"/api/v2/visual-artifacts/{seeded['artifact_id']}/edit",
+                json={
+                    "operations": [{"op": "add", "type": "text", "props": {}}],
+                    "source_comment_id": other_comment_id,
+                },
+            )
+            assert resp.status_code == 403, resp.text
+        finally:
+            await client.aclose()
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

@@ -52,6 +52,8 @@ class ArtifactVersionSummary(BaseModel):
     summary: str | None = None
     created_by: uuid.UUID | None = None
     created_at: datetime
+    # E-CANVAS C3-S7: 이 버전이 응답한 코멘트(closed-loop, 선택제).
+    source_comment_id: uuid.UUID | None = None
 
 
 class VisualArtifactSummary(BaseModel):
@@ -84,6 +86,8 @@ class VisualArtifactDetail(BaseModel):
     updated_at: datetime
     version_number: int
     version_summary: str | None = None
+    # E-CANVAS C3-S7: 이 버전이 응답한 코멘트(closed-loop, 선택제).
+    version_source_comment_id: uuid.UUID | None = None
     nodes: list[ArtifactNodeOut]
 
 
@@ -172,6 +176,9 @@ class EditArtifactRequest(BaseModel):
     operations: list[ArtifactNodeOperation]
     # 새 버전의 변경 이유(선택) — ArtifactVersion.summary와 동형(C1-S3 §11 갭②).
     summary: str | None = None
+    # 이 편집 커밋이 어느 코멘트에 응답했는지(선택, closed-loop). op-level 아닌 request-level
+    # — 편집=코멘트 응답 단위. auto-resolve 안 함(링크≠해결, 해결은 별도 명시 액션).
+    source_comment_id: uuid.UUID | None = None
 
     @field_validator("operations")
     @classmethod

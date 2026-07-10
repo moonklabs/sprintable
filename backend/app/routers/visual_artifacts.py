@@ -119,6 +119,7 @@ async def create_artifact(
         anchor_version=artifact.anchor_version,
         created_by=artifact.created_by, created_at=artifact.created_at, updated_at=artifact.updated_at,
         version_number=version.version_number, version_summary=version.summary,
+        version_source_comment_id=version.source_comment_id,
         nodes=[ArtifactNodeOut.model_validate(n) for n in nodes],
     )
     return _ok(detail.model_dump(mode="json"), status=201)
@@ -156,6 +157,7 @@ async def _load_detail(session: AsyncSession, artifact: VisualArtifact, version_
         anchor_version=artifact.anchor_version,
         created_by=artifact.created_by, created_at=artifact.created_at, updated_at=artifact.updated_at,
         version_number=version.version_number, version_summary=version.summary,
+        version_source_comment_id=version.source_comment_id,
         nodes=[ArtifactNodeOut.model_validate(n) for n in node_rows],
     )
 
@@ -684,7 +686,7 @@ async def list_artifact_exports(
 
 async def _apply_artifact_edit(
     session: AsyncSession, artifact: VisualArtifact, operations: list[ArtifactNodeOperation],
-    *, actor_id: uuid.UUID, summary: str | None,
+    *, actor_id: uuid.UUID, summary: str | None, source_comment_id: uuid.UUID | None = None,
 ) -> ArtifactVersion:
     latest = await _get_version_or_404(session, artifact.id, artifact.latest_version_number)
     if latest is None:
@@ -730,7 +732,7 @@ async def _apply_artifact_edit(
     new_version_number = artifact.latest_version_number + 1
     new_version = ArtifactVersion(
         id=uuid.uuid4(), artifact_id=artifact.id, version_number=new_version_number,
-        created_by=actor_id, summary=summary,
+        created_by=actor_id, summary=summary, source_comment_id=source_comment_id,
     )
     session.add(new_version)
     await session.flush()
@@ -791,10 +793,20 @@ async def edit_artifact(
     if artifact is None:
         return _err("NOT_FOUND", "Artifact not found", 404)
 
+    if body.source_comment_id is not None:
+        # 결과 연결도 cross-artifact 위조 차단(오늘 계열 SEC 원칙 동형) — 남의 artifact
+        # 코멘트를 내 편집 결과로 링크할 수 없음. 403(검증 오류 422와 구분되는 인가 축).
+        comment_owner = (await session.execute(
+            select(ArtifactComment.artifact_id).where(ArtifactComment.id == body.source_comment_id)
+        )).scalar_one_or_none()
+        if comment_owner != artifact.id:
+            return _err("FORBIDDEN", "source_comment_id가 이 artifact 소속이 아닙니다", 403)
+
     actor_id = uuid.UUID(auth.user_id)
     try:
         new_version = await _apply_artifact_edit(
             session, artifact, body.operations, actor_id=actor_id, summary=body.summary,
+            source_comment_id=body.source_comment_id,
         )
     except ValueError as exc:
         return _err("INVALID_OPERATION", str(exc), 422)

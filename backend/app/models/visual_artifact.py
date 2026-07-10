@@ -54,6 +54,11 @@ class ArtifactVersion(Base):
     # 유나 §11 field-level 대조 갭②: 변경 이유(커밋 요약) — raw diff가 아닌 lineage 서사(§6
     # 감시-게이트 핵심). C1은 POST body로 선택 set, C3 커밋 시 본격 사용.
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # E-CANVAS C3-S7(story 940266db): 코멘트→편집 결과 연결(closed-loop) — 이 버전이 어느
+    # 코멘트에 응답해 만들어졌는지의 계보만 기록(resolve와 독립·감시 아닌 신뢰 조각).
+    source_comment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_comments.id", ondelete="SET NULL"), nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

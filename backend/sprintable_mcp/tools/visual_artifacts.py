@@ -59,6 +59,7 @@ class EditArtifactInput(SprintableInput):
     artifact_id: str
     operations: list[ArtifactNodeOperationInput]
     summary: str | None = None  # 새 버전 변경 이유(선택)
+    source_comment_id: str | None = None  # 이 편집이 응답한 코멘트(선택, closed-loop)
 
 
 async def create_artifact(args: CreateArtifactInput) -> list[TextContent]:
@@ -134,6 +135,8 @@ async def edit_artifact(args: EditArtifactInput) -> list[TextContent]:
         }
         if args.summary:
             body["summary"] = args.summary
+        if args.source_comment_id:
+            body["source_comment_id"] = args.source_comment_id
         result = await client.post(f"/api/v2/visual-artifacts/{args.artifact_id}/edit", json=body)
         return ok(result)
     except Exception as exc:
