@@ -3358,5 +3358,16 @@
     "evidenceTypeMetric": "지표",
     "evidenceTypeReport": "리포트",
     "evidenceTypeGateApproval": "게이트 승인"
+  },
+  "canvas": {
+    "versionLineage": "버전 lineage",
+    "versionCurrentTag": "지금",
+    "versionAnchorTag": "정본",
+    "anchorBadge": "정본 v{version}",
+    "descriptionPaneToggle": "description pane",
+    "descriptionPaneComingSoon": "요소별 스펙(description pane)은 C2에서 제공 예정",
+    "exportComingSoon": "export는 C1-S5에서 제공 예정",
+    "commentsComingSoon": "코멘트는 C2에서 제공 예정",
+    "treeRenderPlaceholder": "트리 렌더는 준비 중"
   }
 }

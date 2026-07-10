@@ -3358,5 +3358,16 @@
     "evidenceTypeMetric": "Metric",
     "evidenceTypeReport": "Report",
     "evidenceTypeGateApproval": "Gate approval"
+  },
+  "canvas": {
+    "versionLineage": "Version lineage",
+    "versionCurrentTag": "current",
+    "versionAnchorTag": "anchor",
+    "anchorBadge": "Anchor v{version}",
+    "descriptionPaneToggle": "description pane",
+    "descriptionPaneComingSoon": "Per-element spec (description pane) arrives in C2",
+    "exportComingSoon": "Export arrives in C1-S5",
+    "commentsComingSoon": "Comments arrive in C2",
+    "treeRenderPlaceholder": "Tree rendering coming soon"
   }
 }
