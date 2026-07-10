@@ -1,4 +1,8 @@
-"""S3-6: 시스템 콜 계약 검증 — 100개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
+"""S3-6: 시스템 콜 계약 검증 — 96개 도구 등록 + 스키마 무결성 (Phase 3 완료).
+
+E-SECURITY SEC-S1(확장): delete_story/task/epic/doc 4종 제거(에이전트 hard-delete 차단) —
+98개 → story만 제거해 97 → task/epic/doc 3종 추가 제거해 94. E-CANVAS C1-S3: create_artifact/
+get_artifact 2종 추가 — 94 → 96."""
 from __future__ import annotations
 
 import os
@@ -13,18 +17,16 @@ from sprintable_mcp.server import mcp  # noqa: E402
 _TOOLS: dict = mcp._tool_manager._tools
 
 EXPECTED_TOOLS = {
-    # stories (8)
+    # stories (7) — E-SECURITY SEC-S1: delete_story 의도적 제거(에이전트 hard-delete 차단)
     "sprintable_list_stories", "sprintable_list_backlog", "sprintable_add_story",
-    "sprintable_update_story", "sprintable_delete_story",
+    "sprintable_update_story",
     "sprintable_assign_story_to_sprint", "sprintable_unassign_story_from_sprint",
     "sprintable_update_story_status",
-    # tasks (7)
+    # tasks (6) — E-SECURITY SEC-S1(확장): delete_task 의도적 제거(에이전트 hard-delete 차단)
     "sprintable_list_tasks", "sprintable_list_my_tasks", "sprintable_get_task",
     "sprintable_add_task", "sprintable_update_task", "sprintable_update_task_status",
-    "sprintable_delete_task",
-    # epics (4)
+    # epics (3) — E-SECURITY SEC-S1(확장): delete_epic 의도적 제거(에이전트 hard-delete 차단)
     "sprintable_list_epics", "sprintable_add_epic", "sprintable_update_epic",
-    "sprintable_delete_epic",
     # hypotheses (6) — E1-S5
     "sprintable_list_hypotheses", "sprintable_get_hypothesis", "sprintable_create_hypothesis",
     "sprintable_update_hypothesis", "sprintable_link_hypothesis", "sprintable_confirm_hypothesis",
@@ -32,9 +34,9 @@ EXPECTED_TOOLS = {
     "sprintable_list_sprints", "sprintable_sprint_summary", "sprintable_activate_sprint",
     "sprintable_close_sprint", "sprintable_get_velocity", "sprintable_create_sprint",
     "sprintable_update_sprint", "sprintable_delete_sprint",
-    # docs (6)
+    # docs (5) — E-SECURITY SEC-S1(확장): delete_doc 의도적 제거(에이전트 삭제 차단)
     "sprintable_list_docs", "sprintable_get_doc", "sprintable_search_docs",
-    "sprintable_create_doc", "sprintable_update_doc", "sprintable_delete_doc",
+    "sprintable_create_doc", "sprintable_update_doc",
     # analytics (11)
     "sprintable_get_project_overview", "sprintable_get_member_workload",
     "sprintable_get_sprint_velocity_history", "sprintable_search_stories",
@@ -89,7 +91,7 @@ EXPECTED_TOOLS = {
 
 
 def test_total_tool_count():
-    assert len(_TOOLS) == 100
+    assert len(_TOOLS) == 96
 
 
 def test_all_expected_tools_registered():

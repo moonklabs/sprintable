@@ -365,8 +365,19 @@ async def list_agent_cards(
 async def get_agent_card(
     member_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> AgentCard:
-    member = await _get_agent_member(session, member_id)
+    """E-SECURITY SEC-S2(story 48ff642a): authed+same-org로 승격 — 이전엔 unauth+org무관이라
+    member_id만 알면 org 밖에서도 아무 agent 카드(이름·skills·URL) 조회 가능했다(멀티테넌트
+    격리 위반). action(/rpc)은 이미 P1-S2로 authed+org-scoped라 대칭 정합.
+
+    선생님 확認: A2A cross-org discovery(임대·마켓플레이스류) 자체는 버그 아닌 로드맵이었으나
+    멀티테넌트 격리가 성숙하기 前까지는 org로 좁히는 게 현시점 기본 정책 — `_get_agent_member`의
+    `org_id`가 이미 optional(None=무필터)이라 이 변경 자체가 영구 봉인이 아니라 "org_id를
+    지금 넘긴다"는 호출부 선택일 뿐, 재개는 이 인자를 안 넘기는 것으로 되돌릴 수 있다(코드 구조상
+    확장점 보존, 새 flag 불필요)."""
+    member = await _get_agent_member(session, member_id, org_id)
     card = await _build_agent_card(session, member, resolve_backend_direct_url())
     return card
 
