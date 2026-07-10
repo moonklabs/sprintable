@@ -76,10 +76,15 @@ async def test_list_members_org_member_requires_grant():
     from app.routers.members import list_members
 
     project_id = uuid.uuid4()
+    org_id = uuid.uuid4()
     mock_session = AsyncMock()
 
     owner_id = uuid.uuid4()
     member_id = uuid.uuid4()
+
+    # E-SECURITY SEC-S6: list_members가 먼저 project의 실 org_id를 조회해 caller org와 대조한다.
+    org_lookup_mock = MagicMock()
+    org_lookup_mock.scalar_one_or_none.return_value = org_id
 
     # owner 포함, member 미포함 (grant 없음)
     human_mock = MagicMock()
@@ -91,10 +96,10 @@ async def test_list_members_org_member_requires_grant():
     agent_mock = MagicMock()
     agent_mock.scalars.return_value.all.return_value = []
 
-    mock_session.execute = AsyncMock(side_effect=[human_mock, agent_mock])
+    mock_session.execute = AsyncMock(side_effect=[org_lookup_mock, human_mock, agent_mock])
     mock_auth = MagicMock()
 
-    result = await list_members(project_id=project_id, session=mock_session, _auth=mock_auth)
+    result = await list_members(project_id=project_id, session=mock_session, _auth=mock_auth, org_id=org_id)
     assert len(result) == 1
     assert result[0].role == "owner"
 
@@ -105,10 +110,15 @@ async def test_list_members_member_with_grant_included():
     from app.routers.members import list_members
 
     project_id = uuid.uuid4()
+    org_id = uuid.uuid4()
     mock_session = AsyncMock()
 
     owner_id = uuid.uuid4()
     member_id = uuid.uuid4()
+
+    # E-SECURITY SEC-S6: list_members가 먼저 project의 실 org_id를 조회해 caller org와 대조한다.
+    org_lookup_mock = MagicMock()
+    org_lookup_mock.scalar_one_or_none.return_value = org_id
 
     # owner + member(grant 있음) 둘 다 포함
     human_mock = MagicMock()
@@ -120,10 +130,10 @@ async def test_list_members_member_with_grant_included():
     agent_mock = MagicMock()
     agent_mock.scalars.return_value.all.return_value = []
 
-    mock_session.execute = AsyncMock(side_effect=[human_mock, agent_mock])
+    mock_session.execute = AsyncMock(side_effect=[org_lookup_mock, human_mock, agent_mock])
     mock_auth = MagicMock()
 
-    result = await list_members(project_id=project_id, session=mock_session, _auth=mock_auth)
+    result = await list_members(project_id=project_id, session=mock_session, _auth=mock_auth, org_id=org_id)
     assert len(result) == 2
     roles = {r.role for r in result}
     assert "owner" in roles
