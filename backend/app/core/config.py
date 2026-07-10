@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     # 정책은 A(human-only enforcing)·advisory는 개발/관측용 임시 모드(미설정=enforcing 보존).
     h1_merge_gate_advisory: bool = False
 
+    # SPR-13: org 생성의 email verification 요구 스위치. 기본 True(호스티드/prod 동작 보존).
+    # 이메일 provider(RESEND_API_KEY) 미설정 셀프호스트는 인증 메일이 콘솔 폴백이라 org 생성이
+    # 영구 403(온보딩 데드엔드) — compose 가 False 로 내려 fresh 설치를 통과시킨다.
+    require_verified_email_for_org_create: bool = True
+
     # E-HITL-GATING S-GATE-2: config 게이트 집행 활성(default-off·dev allowlist 점진 rollout·무회귀).
     # off면 enforce_gate 미동작(기존 done/merge 무변경). allowlist 비면 enabled 시 전 org, 지정 시 해당 org만.
     gate_config_enforce_enabled: bool = False

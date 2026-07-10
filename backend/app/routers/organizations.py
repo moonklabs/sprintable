@@ -46,11 +46,12 @@ async def create_organization(
     repo: OrganizationRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
 ) -> OrganizationResponse:
-    # 이메일 미인증 사용자는 org 생성 차단
-    user_result = await session.execute(select(User).where(User.id == uuid.UUID(auth.user_id)))
-    user = user_result.scalar_one_or_none()
-    if user and not user.email_verified:
-        raise HTTPException(status_code=403, detail="Email verification required to create organization")
+    # 이메일 미인증 사용자는 org 생성 차단 — provider 미설정 셀프호스트는 설정으로 완화(SPR-13).
+    if settings.require_verified_email_for_org_create:
+        user_result = await session.execute(select(User).where(User.id == uuid.UUID(auth.user_id)))
+        user = user_result.scalar_one_or_none()
+        if user and not user.email_verified:
+            raise HTTPException(status_code=403, detail="Email verification required to create organization")
 
     # EE: Free 플랜 org 생성 제한 (OSS에서는 로드되지 않음)
     if settings.is_ee_enabled:

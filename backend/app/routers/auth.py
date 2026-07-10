@@ -608,10 +608,12 @@ async def register(
             ),
         )
         if not delivered:
+            # SPR-13: provider 미설정 설치에서 운영자가 로그로 인증을 완료할 수 있게 링크를 남긴다
+            # (자기 인스턴스 로그 = 운영자 신뢰 경계 안. 실발송 성공 시에는 안 찍힘).
             logger.warning(
                 "register: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s — "
-                "RESEND_API_KEY/EMAIL_FROM 미설정 또는 발송 실패 추정",
-                user.id, user.email,
+                "RESEND_API_KEY/EMAIL_FROM 미설정 또는 발송 실패 추정. 인증 링크: %s",
+                user.id, user.email, verify_link,
             )
     except Exception:
         logger.exception(
@@ -1251,8 +1253,10 @@ async def resend_verification(
     )
     if not delivered:
         # 콘솔 폴백(미발송)을 "sent"로 거짓 보고하지 않는다(데모 디버깅 가시화).
+        # SPR-13: 운영자가 로그로 인증을 완료할 수 있게 링크 포함(register 폴백과 동일).
         logger.warning(
-            "resend-verification: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s", user.id, user.email
+            "resend-verification: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s 인증 링크: %s",
+            user.id, user.email, verify_link,
         )
         return _ok({"message": "Verification email could not be delivered — check email configuration", "delivered": False})
     return _ok({"message": "Verification email sent", "delivered": True})
