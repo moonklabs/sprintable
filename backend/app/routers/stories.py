@@ -579,6 +579,8 @@ async def bulk_update_stories(
     except Exception:  # noqa: BLE001 — actor 해소 실패도 bulk 비차단.
         actor_id = None
 
+    from app.services.project_auth import has_project_access
+
     updated: list[Story] = []
     old_status_by_id: dict[uuid.UUID, str] = {}
     for item in payload.items:
@@ -591,6 +593,12 @@ async def bulk_update_stories(
         )
         story = q.scalar_one_or_none()
         if not story:
+            continue
+        # E-SECURITY SEC-S8(story 83ea3d6a) W2(까심 QA): org_id 필터로 cross-org는 닫혔으나
+        # same-org 다른 project의 story는 여전히 변조 가능했다(project-scope 부재, G/T와 동형).
+        # 개별-ID PATCH(_assert_story_project_access)와 동일 기준(has_project_access) 재사용 —
+        # 미접근 item은 not-found와 동형으로 조용히 스킵(존재 비노출·나머지 정당 item은 진행).
+        if not await has_project_access(db, uuid.UUID(auth.user_id), story.project_id, repo.org_id):
             continue
         update_data = item.model_dump(exclude={"id"}, exclude_none=True)
         # status 변경이면 전이 前 old_status 포착(violation 판정용·setattr 前).
