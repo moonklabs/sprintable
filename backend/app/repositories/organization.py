@@ -59,6 +59,11 @@ class OrganizationRepository:
                 ),
                 {"org_id": str(org.id), "member_id": str(owner_member_id)},
             )
+        # fresh org에 default implementation 역할 시드 — 없으면 merge gate가
+        # "no implementation participation"으로 gate row 없이 영구 보류(교착).
+        from app.services.participation_helpers import seed_default_participation_role
+
+        await seed_default_participation_role(self.session, org.id)
         return org
 
     async def list_for_user(self, user_id: uuid.UUID) -> list[OrganizationWithRole]:
