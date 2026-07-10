@@ -26,14 +26,22 @@ async def list_agent_runs(
     cursor: str | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
     repo: AgentRunRepository = Depends(_get_repo),
 ) -> list[AgentRunResponse]:
     """prod 핫픽스(S20 전수스캔 — create_agent_run과 동일 클래스): project_id가 caller org
-    소속인지 검증 없이 임의 project의 agent run 목록을 열람할 수 있었다(cross-org)."""
+    소속인지 검증 없이 임의 project의 agent run 목록을 열람할 수 있었다(cross-org).
+
+    E-SECURITY SEC-S8(story 83ea3d6a) Y(까심 전수스윕): org-scope는 이미 닫혔으나 caller의
+    실제 project 접근권(has_project_access)은 검증하지 않아, 같은 org 다른 project 멤버가
+    project_id만 알면 그 project의 agent run을 열람할 수 있었다(G-class)."""
+    from app.services.project_auth import has_project_access
+
     proj_r = await session.execute(select(Project.id).where(Project.id == project_id, Project.org_id == org_id))
     if proj_r.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
     runs = await repo.list(project_id=project_id, agent_id=agent_id, limit=limit, cursor=cursor)
     return [AgentRunResponse.model_validate(r) for r in runs]
 
