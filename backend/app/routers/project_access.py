@@ -134,6 +134,26 @@ async def create_project_access(
             session, member_id=body.member_id, project_id=project_id
         )
     else:
+        # E-SECURITY SEC-S8(story 83ea3d6a) J — 까심 전수스윕 CRITICAL: 에이전트 분기는
+        # target agent의 org가 project org와 일치하는지 검증하나(`m.org_id = p.org_id`), 휴먼
+        # 분기는 대칭 검증이 없었다(`ensure_human_member`는 org_member 존재만 확인). Org A
+        # owner가 임의 Org B org_member_id로 이 project에 grant 행을 만들 수 있었음(라이브
+        # 201 재현) — cross-org project_access 생성 자체가 SEC-S8 K(switch-project)의 토큰
+        # 발급 증폭으로 이어지는 근본. #1549(X-Project-Id 헤더 오버라이드)와는 무관한 축이라
+        # 회귀 없음 — 여기서 검증하는 건 body.org_member_id가 "이 project의 org" 소속인지뿐.
+        from sqlalchemy import text
+        target_org_ok = (await session.execute(
+            text(
+                "SELECT 1 FROM org_members om JOIN projects p ON p.id = :pid "
+                "WHERE om.id = :omid AND om.deleted_at IS NULL AND om.org_id = p.org_id LIMIT 1"
+            ),
+            {"pid": str(project_id), "omid": str(body.org_member_id)},
+        )).scalar_one_or_none()
+        if target_org_ok is None:
+            raise HTTPException(
+                status_code=400, detail="org_member_id must belong to the project's org"
+            )
+
         existing = await session.execute(
             select(ProjectAccess).where(
                 ProjectAccess.project_id == project_id,
