@@ -23,7 +23,7 @@ from app.services.project_auth import accessible_project_ids_in_org
 
 
 async def _entries_with_plan_stories(
-    entries: list[StandupEntry], session: AsyncSession, org_id: uuid.UUID
+    entries: list[StandupEntry], session: AsyncSession, org_id: uuid.UUID, viewer_user_id: uuid.UUID,
 ) -> list[StandupEntryResponse]:
     """a9e67531: 엔트리들의 plan_story_ids 를 **org-scope batch resolve**(N+1 회피) → plan_stories 주입.
 
@@ -31,10 +31,18 @@ async def _entries_with_plan_stories(
     stories 배열로는 미해소(미노출 버그). 여기서 org-scope 로 id+title+status(+priority/project/sprint) 해소해
     내려준다. ⭐org-scope 강제(`Story.org_id==org_id`)·삭제 제외·타org/미존재 id 는 **조용히 제외**(노출 0)·
     plan_story_ids **입력 순서 보존**. plan_story_ids 는 하위호환 유지(FE id-only fallback).
-    """
+
+    E-SECURITY SEC-S8(story 83ea3d6a) Z(까심 전수스윕, 실HTTP 확定): org-scope만으로는 부족했다 —
+    project_a만 grant된 caller가 project_b story_id를 plan_story_ids에 넣으면(쓰기 측 미검증) org-scope
+    enrich가 그대로 title/project_id를 노출했다(caller의 project 접근권과 무관한 read-side 정보유출).
+    viewer_user_id의 accessible_project_ids_in_org로 한 번 더 필터 — story의 project에 viewer가
+    접근권 없으면 조용히 제외(타org/삭제/미존재와 동일 취급, no oracle)."""
     all_ids = {sid for e in entries for sid in (e.plan_story_ids or [])}
     summaries: dict[uuid.UUID, PlanStorySummary] = {}
     if all_ids:
+        from app.services.project_auth import accessible_project_ids_in_org
+
+        accessible_pids = set(await accessible_project_ids_in_org(session, viewer_user_id, org_id))
         rows = (
             await session.execute(
                 select(
@@ -48,6 +56,8 @@ async def _entries_with_plan_stories(
             )
         ).all()
         for sid, title, status, priority, pid, spid in rows:
+            if pid not in accessible_pids:
+                continue  # viewer가 접근권 없는 project의 story는 조용히 제외(Z).
             summaries[sid] = PlanStorySummary(
                 id=sid, title=title, status=status, priority=priority,
                 project_id=pid, sprint_id=spid,
@@ -55,7 +65,7 @@ async def _entries_with_plan_stories(
     out: list[StandupEntryResponse] = []
     for e in entries:
         resp = StandupEntryResponse.model_validate(e)
-        # 순서 보존 + 미발견(타org/삭제/미존재) 조용히 제외.
+        # 순서 보존 + 미발견(타org/삭제/미존재/접근권 없음) 조용히 제외.
         resp.plan_stories = [summaries[sid] for sid in (e.plan_story_ids or []) if sid in summaries]
         out.append(resp)
     return out
@@ -81,6 +91,44 @@ async def _sync_org_level_links(
     await repo.resync_project_links(entry.id, accessible)
 
 
+async def _filter_write_links_to_accessible(
+    session: AsyncSession, org_id: uuid.UUID, caller_user_id: uuid.UUID,
+    sprint_id: uuid.UUID | None, plan_story_ids: list[uuid.UUID],
+) -> tuple[uuid.UUID | None, list[uuid.UUID]]:
+    """E-SECURITY SEC-S8(story 83ea3d6a) Z(까심 전수스윕, 실HTTP 확定): sprint_id/plan_story_ids가
+    caller 접근권 밖 project를 가리켜도 검증 없이 그대로 저장됐다(T-class) — project_a만 grant된
+    caller가 project_b sprint/story를 참조해도 막지 않았다. caller의 accessible_project_ids_in_org로
+    write 전에 필터 — 접근권 밖이면 sprint_id는 None으로, plan_story_ids는 조용히 제외(no oracle)."""
+    if sprint_id is None and not plan_story_ids:
+        return sprint_id, plan_story_ids  # 검증할 링크가 없으면 조회 자체를 스킵.
+
+    from app.services.project_auth import accessible_project_ids_in_org
+
+    accessible_pids = set(await accessible_project_ids_in_org(session, caller_user_id, org_id))
+
+    safe_sprint_id = sprint_id
+    if sprint_id is not None:
+        from app.models.pm import Sprint
+        sprint_pid = (await session.execute(
+            select(Sprint.project_id).where(Sprint.id == sprint_id, Sprint.org_id == org_id)
+        )).scalar_one_or_none()
+        if sprint_pid is None or sprint_pid not in accessible_pids:
+            safe_sprint_id = None
+
+    safe_plan_story_ids = plan_story_ids
+    if plan_story_ids:
+        rows = (await session.execute(
+            select(Story.id, Story.project_id).where(
+                Story.id.in_(plan_story_ids), Story.org_id == org_id, Story.deleted_at.is_(None),
+            )
+        )).all()
+        accessible_story_ids = {sid for sid, pid in rows if pid in accessible_pids}
+        # 순서 보존.
+        safe_plan_story_ids = [sid for sid in plan_story_ids if sid in accessible_story_ids]
+
+    return safe_sprint_id, safe_plan_story_ids
+
+
 def _get_repo(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -95,6 +143,7 @@ async def list_standups(
     sprint_id: uuid.UUID | None = Query(default=None),
     date_filter: date | None = Query(default=None, alias="date"),
     repo: StandupEntryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[StandupEntryResponse]:
     filters: dict = {}
     if project_id:
@@ -108,7 +157,7 @@ async def list_standups(
     if date_filter:
         filters["date"] = date_filter
     entries = await repo.list(**filters)
-    return await _entries_with_plan_stories(entries, repo.session, repo.org_id)
+    return await _entries_with_plan_stories(entries, repo.session, repo.org_id, uuid.UUID(auth.user_id))
 
 
 @router.post("", response_model=StandupEntryResponse, status_code=201)
@@ -121,20 +170,23 @@ async def upsert_standup(
     # AC3-3: 작성자 신원을 canonical members.id로 정규화(레거시 휴먼 team_member.id → alias 치환).
     # write↔read(카드/missing) 동일 canonical 정합 — #1167 회귀(API 200≠카드표시) 방지.
     author_id = await canonicalize_member_id(body.author_id, session)
+    safe_sprint_id, safe_plan_story_ids = await _filter_write_links_to_accessible(
+        session, org_id, uuid.UUID(auth.user_id), body.sprint_id, body.plan_story_ids,
+    )
     repo = StandupEntryRepository(session, org_id)
     entry = await repo.upsert(
         project_id=body.project_id,
         author_id=author_id,
         date=body.date,
-        sprint_id=body.sprint_id,
+        sprint_id=safe_sprint_id,
         done=body.done,
         plan=body.plan,
         blockers=body.blockers,
-        plan_story_ids=body.plan_story_ids,
+        plan_story_ids=safe_plan_story_ids,
     )
     # 1c2be9db: org-level write(project_id 없음) → author 접근 프로젝트로 링크 full overwrite.
     await _sync_org_level_links(repo, session, entry, body.project_id, auth.user_id, org_id)
-    return (await _entries_with_plan_stories([entry], session, org_id))[0]
+    return (await _entries_with_plan_stories([entry], session, org_id, uuid.UUID(auth.user_id)))[0]
 
 
 @router.put("", response_model=StandupEntryResponse)
@@ -155,20 +207,23 @@ async def update_standup(
     canonical로 함께** 옮겨 멀티프로젝트 휴먼 단일 신원(48e653e9 해소) + saved-but-not-displayed 회귀 0.
     """
     member = await resolve_member(auth, org_id, session, project_id=body.project_id)
+    safe_sprint_id, safe_plan_story_ids = await _filter_write_links_to_accessible(
+        session, org_id, uuid.UUID(auth.user_id), body.sprint_id, body.plan_story_ids,
+    )
     repo = StandupEntryRepository(session, org_id)
     entry = await repo.upsert(
         project_id=body.project_id,
         author_id=member.id,
         date=body.date,
-        sprint_id=body.sprint_id,
+        sprint_id=safe_sprint_id,
         done=body.done,
         plan=body.plan,
         blockers=body.blockers,
-        plan_story_ids=body.plan_story_ids,
+        plan_story_ids=safe_plan_story_ids,
     )
     # 1c2be9db: org-level self-save(project_id 없음) → author 접근 프로젝트로 링크 full overwrite.
     await _sync_org_level_links(repo, session, entry, body.project_id, auth.user_id, org_id)
-    return (await _entries_with_plan_stories([entry], session, org_id))[0]
+    return (await _entries_with_plan_stories([entry], session, org_id, uuid.UUID(auth.user_id)))[0]
 
 
 @router.get("/history", response_model=list[StandupEntryResponse])
@@ -176,6 +231,7 @@ async def list_standup_history(
     project_id: uuid.UUID = Query(...),
     limit: int = Query(default=30, ge=1, le=200),
     repo: StandupEntryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[StandupEntryResponse]:
     """GET /api/v2/standups/history — 최근 N개 스탠드업 히스토리 조회 (AC2 S-STANDUP-FIX).
 
@@ -183,7 +239,7 @@ async def list_standup_history(
     백로그→데일리 할일(plan_story_ids)이 plan_stories 빈 채 내려가 cross-board 미노출(SaaS FE 프록시 포함).
     """
     entries = await repo.list(project_id=project_id, limit=limit)
-    return await _entries_with_plan_stories(entries, repo.session, repo.org_id)
+    return await _entries_with_plan_stories(entries, repo.session, repo.org_id, uuid.UUID(auth.user_id))
 
 
 @router.get("/missing", response_model=list[uuid.UUID])
@@ -224,12 +280,13 @@ async def list_feedback(
 async def get_standup(
     id: uuid.UUID,
     repo: StandupEntryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> StandupEntryResponse:
     entry = await repo.get(id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Standup entry not found")
     # b47f9b05: 단건 조회도 plan_stories enrich(list/upsert/update 와 일관·cross-board 백로그 노출).
-    return (await _entries_with_plan_stories([entry], repo.session, repo.org_id))[0]
+    return (await _entries_with_plan_stories([entry], repo.session, repo.org_id, uuid.UUID(auth.user_id)))[0]
 
 
 @router.post("/{id}/feedback", response_model=FeedbackResponse, status_code=201)
