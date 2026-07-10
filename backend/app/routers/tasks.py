@@ -81,6 +81,11 @@ async def create_task(
         db=session,
         user_id=uuid.UUID(auth.user_id),
     )
+    # E-SECURITY SEC-S8(story 83ea3d6a) S: create_task는 GET/PATCH/DELETE와 달리
+    # `_assert_task_project_access`를 호출하지 않아 org-scope만(enforce_body_context는
+    # body_project_id 미전달이라 project 검증 스킵) — 같은 org 다른 project 멤버가 임의
+    # story_id로 task를 생성할 수 있었다(create 경로만 남은 갭). GET/PATCH/DELETE 동형 재사용.
+    await _assert_task_project_access(session, auth, org_id, body.story_id)
     repo = TaskRepository(session, org_id)
     task = await repo.create(
         story_id=body.story_id,
