@@ -168,7 +168,7 @@ async def create_team_member(
     # project)로 역할을 검사하던 것도 `body.project_id`(실제 target)로 정정(잠재적 자기-분기
     # target 불일치도 함께 봉합). auth.user_id는 API키(에이전트)=member.id·JWT(휴먼)=users.id라
     # has_project_role이 이미 양쪽을 다 매칭하는 단일 호출로 충분(신규 분기 불요).
-    from app.services.project_auth import assert_target_in_caller_org, has_project_role
+    from app.services.project_auth import assert_target_in_caller_org, get_project_role, has_project_role
 
     target_project_org_id = (await session.execute(
         text("SELECT org_id FROM projects WHERE id = :pid"), {"pid": str(body.project_id)},
@@ -180,9 +180,15 @@ async def create_team_member(
         raise HTTPException(status_code=403, detail="project admin/owner role required to manage members")
 
     if actor is not None and actor.type == "agent":
-        # AC3: target.role > actor.role → 403 (격상 차단)
+        # E-SECURITY SEC-S8(story 83ea3d6a) P — 까심 전수스윕: `_resolve_actor`가 team_members
+        # 뷰(멀티프로젝트 grant 시 member당 N행)에서 `.first()`로 임의 1행을 뽑아, actor.role이
+        # body.project_id와 무관한 다른 project의 role일 수 있었다(비결정). mixed-role 에이전트가
+        # role 낮은 target project에서도 다른 project의 높은 role을 빌려와 AC3를 우회 격상.
+        # fix=target project(body.project_id) 전용 effective role을 조회(위 has_project_role
+        # 게이트와 동일 project·SSOT)해 actor.role 대신 사용.
         target_rank = _ROLE_RANK.get(body.role, 1)
-        actor_rank = _ROLE_RANK.get(actor.role, 1)
+        actor_project_role = await get_project_role(session, uuid.UUID(auth.user_id), body.project_id)
+        actor_rank = _ROLE_RANK.get(actor_project_role, 1)
         if target_rank > actor_rank:
             raise HTTPException(status_code=403, detail="Cannot assign role higher than your own")
         # AC4: target.alias(name) == actor.name → 400 (self-replication 차단)

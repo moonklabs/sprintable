@@ -107,11 +107,19 @@ async def create_org_agent(
         # scope_mode='projects'로 P2(본인 무권한 project)나 scope_mode='org'로 org 전체에
         # 새 에이전트+API키를 찍어낼 수 있었다(grant 대상과 검증 대상 불일치). project_ids
         # 전원에 대해 admin role을 요구 — 하나라도 admin이 아니면 전체 요청 차단.
-        from app.services.project_auth import has_project_role
+        from app.services.project_auth import get_project_role, has_project_role
         for pid in project_ids:
             if not await has_project_role(session, actor.id, pid, min_role="admin"):
                 raise HTTPException(status_code=403, detail="project admin/owner role required to manage members")
-        if _ROLE_RANK.get(body.role, 1) > _ROLE_RANK.get(actor.role, 1):
+        # E-SECURITY SEC-S8(story 83ea3d6a) P 자매 갭(fix-on-sight, create_team_member와 동일
+        # `_resolve_actor().first()` 비결정 row-pick 원인): actor.role이 grant 대상과 무관한
+        # project의 role일 수 있어, scope_mode='org'|'projects'로 여러 project_ids 전원에 대해
+        # get_project_role의 최솟값(가장 낮은 role)으로 비교 — 하나라도 부족하면 격상 차단.
+        actor_ranks = [
+            _ROLE_RANK.get(await get_project_role(session, actor.id, pid), 1) for pid in project_ids
+        ]
+        actor_rank = min(actor_ranks) if actor_ranks else 1
+        if _ROLE_RANK.get(body.role, 1) > actor_rank:
             raise HTTPException(status_code=403, detail="Cannot assign role higher than your own")
         if body.name == actor.name:
             raise HTTPException(status_code=400, detail="Agent cannot create a member with the same name as itself")
