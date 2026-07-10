@@ -246,7 +246,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_close_sprint", "sprintable_create_conversation", "sprintable_create_doc",
     "sprintable_create_meeting", "sprintable_create_retro_session", "sprintable_create_sprint",
     "sprintable_delete_doc", "sprintable_delete_epic", "sprintable_delete_meeting",
-    "sprintable_delete_sprint", "sprintable_delete_story", "sprintable_delete_task",
+    # E-SECURITY SEC-S1: sprintable_delete_story 의도적 제거(에이전트 hard-delete 차단).
+    "sprintable_delete_sprint", "sprintable_delete_task",
     "sprintable_delete_webhook_config", "sprintable_emit_event", "sprintable_export_retro",
     "sprintable_get_agent_stats", "sprintable_get_blocked_stories", "sprintable_get_doc",
     "sprintable_get_epic_progress", "sprintable_get_leaderboard_v2", "sprintable_get_meeting",
