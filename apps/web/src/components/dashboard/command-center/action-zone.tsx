@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ShieldCheck, GitPullRequest, AlertTriangle, CheckCircle2, ChevronRight } from 'lucide-react';
-import { minutesSince, type MyActions, type Priority, type QueueItem, type AttentionItem } from './types';
+import { type MyActions, type Priority, type QueueItem, type AttentionItem } from './types';
 
 // 우선순위 좌border(색=신호): danger/warn만 색·info는 중립(canonical §4 alert만 색).
 const PRIORITY_BORDER: Record<Priority, string> = {
@@ -46,16 +46,18 @@ function QueueRow({ item }: { item: QueueItem }) {
 
 function AttentionRow({ item, resolveName, epicTitles }: { item: AttentionItem; resolveName: (id: string | null | undefined) => string | null; epicTitles: Record<string, string> }) {
   const t = useTranslations('dashboard');
-  // id+enum+time → 카피 조합(raw error/log 없음). entity 제목 resolve(없으면 타입 라벨)·정체 분·게이트.
+  // id+enum → 카피 조합(raw error/log 없음). entity 제목 resolve(없으면 타입 라벨)·게이트.
+  // 감시톤 재프레임(command-center-surveillance-reframe-handoff): stuck_since는 항목 surfacing
+  // 트리거로만 쓰이고(위쪽 필터링), 여기선 경과 분(minutesSince) 계산·표시를 걷었다 — "대기는
+  // 경보가 아니라 상태"(§1/§8 시간 강조 0). 색도 warning→info/muted 중립 톤.
   const entity = resolveName(item.entity_id) ?? epicTitles[item.entity_id] ?? item.entity_type;
-  const mins = minutesSince(item.stuck_since);
   const gate = item.gate_type ?? t('ccGateGeneric');
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/5 p-2.5 text-xs">
-      <span className="mt-1 size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
+    <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5 text-xs">
+      <span className="mt-1 size-1.5 shrink-0 rounded-full bg-info/60" aria-hidden="true" />
       <p className="min-w-0 flex-1 text-foreground">
         <span className="font-medium">{entity}</span>{' '}
-        <span className="text-muted-foreground">{t('ccAgentStuck', { minutes: mins, gate })}</span>
+        <span className="text-muted-foreground">{t('ccAgentStuck', { gate })}</span>
       </p>
     </div>
   );
@@ -89,7 +91,7 @@ export function ActionZone({ data, resolveName, epicTitles }: {
           {attention.length > 0 || hasPending ? (
             <div className="space-y-1.5">
               <div className="flex items-center gap-1.5">
-                <AlertTriangle className="size-3 text-warning" />
+                <AlertTriangle className="size-3 text-muted-foreground" />
                 <span className="text-[11px] font-medium text-foreground">{t('ccAttentionTitle')}</span>
                 <span className="rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">{t('ccAutoTag')}</span>
               </div>
