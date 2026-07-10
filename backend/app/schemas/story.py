@@ -211,3 +211,13 @@ class StoryResponse(BaseModel):
         # violation 은 ORM 컬럼이 아님 — from_attributes 시 비-dict(MagicMock auto-attr 등)는 None 처리
         # (_coerce_attachments 와 동형). 실제 flag 는 라우터가 model_validate 後 dict 로 할당한다.
         return v if isinstance(v, dict) else None
+
+    # E-VERIFY V0-S2(story 3fbd048d): evidence-backed 신호(positive 단방향) — True(있음) 또는
+    # None(신호 부재, violation과 동형 — 부정값 False 절대 안 씀). ORM 컬럼 아님·라우터가
+    # model_validate 前 transient attr로 세팅(assignee_ids 패턴 동형).
+    has_evidence: bool | None = None
+
+    @field_validator("has_evidence", mode="before")
+    @classmethod
+    def _coerce_has_evidence(cls, v):
+        return v if isinstance(v, bool) else None
