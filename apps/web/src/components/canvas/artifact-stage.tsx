@@ -47,9 +47,11 @@ interface ArtifactStageProps {
 }
 
 /**
- * 포맷별 렌더 스테이지. html=샌드박스 iframe(스크립트 차단 — `sandbox`에 allow-scripts 없음,
- * 핸드오프 §3-1)·image=바운드 img·tree=경량 노드 렌더(전신 componentCatalog의 리치 렌더는
- * 후속 — 지금은 shell 준비 단계).
+ * 포맷별 렌더 스테이지. html=완전 잠금 샌드박스 iframe(`sandbox=""` — allow-scripts·
+ * allow-same-origin 둘 다 없음, 핸드오프 §3-1 + 유나 디자인 가디언 보안 지적 반영).
+ * artifact HTML은 인라인 `<style>`만 쓰므로 same-origin 리소스 접근이 필요 없어 최대
+ * 잠금이 안전(CSS 렌더링은 sandbox 플래그와 무관하게 항상 동작함)·image=바운드 img·
+ * tree=경량 노드 렌더(전신 componentCatalog의 리치 렌더는 후속 — 지금은 shell 준비 단계).
  */
 export function ArtifactStage({ format, content, title }: ArtifactStageProps) {
   const t = useTranslations('canvas');
@@ -59,7 +61,7 @@ export function ArtifactStage({ format, content, title }: ArtifactStageProps) {
       <iframe
         title={title}
         srcDoc={content}
-        sandbox="allow-same-origin"
+        sandbox=""
         className="h-full min-h-[280px] w-full rounded-lg border border-border bg-background"
       />
     );

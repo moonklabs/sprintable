@@ -22,12 +22,13 @@ describe('ArtifactViewer (SSR snapshot)', () => {
     expect(markup).toContain('정본 v3');
   });
 
-  it('sandboxes the html stage without allow-scripts (감시/보안 게이트 — 핸드오프 §3-1)', () => {
+  it('fully locks down the html stage sandbox (no allow-scripts, no allow-same-origin — 유나 디자인 가디언 보안 지적 반영)', () => {
     const markup = renderToStaticMarkup(
       wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
     );
-    expect(markup).toContain('sandbox="allow-same-origin"');
+    expect(markup).toContain('sandbox=""');
     expect(markup).not.toContain('allow-scripts');
+    expect(markup).not.toContain('allow-same-origin');
   });
 
   it('omits the anchor badge entirely when the artifact has no anchor version yet (초안 중립·낙인 금지)', () => {
