@@ -20,7 +20,12 @@ export interface ArtifactVersion {
   created_at: string;
 }
 
-/** blueprint §2: `visual_artifact`(id·title·format·current/anchor_version·연결·created_by). */
+/**
+ * BE 계약 SSOT(`e-canvas-c1-be-contract` §3 `visual_artifacts`) 미러.
+ * `source`: 'created'(에이전트/휴먼 생성)|'imported'(Figma/HTML붙여넣기/이미지) — untrusted
+ * 임포트 콘텐츠의 iframe sandbox 차등 근거(§3 doc). 지금 FE는 두 source 모두 완전잠금
+ * `sandbox=""`으로 통일 처리 중 — source별 완화는 C1 실연동 때 minor 보완(유나 리뷰 합의).
+ */
 export interface VisualArtifact {
   id: string;
   title: string;
@@ -29,6 +34,7 @@ export interface VisualArtifact {
   /** 승인된 정본 버전 번호. null=아직 정본 없음(초안 중립 — 배지 무표시). */
   anchor_version: number | null;
   created_by: string;
+  source: 'created' | 'imported';
 }
 
 export interface MemberRef {
@@ -53,6 +59,18 @@ export const MOCK_ARTIFACT: VisualArtifact = {
   current_version: 4,
   anchor_version: 3,
   created_by: 'm2',
+  source: 'created',
+};
+
+/** C3 편집 데모용 — tree 포맷·정본 없음(초안이라 자유 편집 가능). */
+export const MOCK_EDITABLE_ARTIFACT: VisualArtifact = {
+  id: 'mock-artifact-2',
+  title: '결제 복구 플로우 (편집용 초안)',
+  format: 'tree',
+  current_version: 1,
+  anchor_version: null,
+  created_by: 'm1',
+  source: 'created',
 };
 
 const MOCK_HTML_V4 = `<!doctype html><html><head><style>

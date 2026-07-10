@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, Download, MessageCircle } from 'lucide-react';
+import { Check, Download, MessageCircle, Pencil } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { ArtifactStage } from './artifact-stage';
 import { ArtifactVersionRail } from './artifact-version-rail';
@@ -20,6 +20,10 @@ interface ArtifactViewerProps {
    * 좌표 유도 필요 — 지금은 좌표 앵커만 오버레이). */
   threads?: CommentThread[];
   descriptions?: DescriptionMap;
+  /** C3 §1 — 뷰어→편집모드 진입점. format='tree'일 때만 노출(html/image는 이 UI로 편집
+   * 불가). 정본 버전을 보는 중이면 "새 버전으로 편집" 라벨(정본 계약 보호 — 실제 분기 로직은
+   * BE 연동 시, 지금은 라벨만 다르고 동일 콜백). */
+  onEnterEdit?: () => void;
   className?: string;
 }
 
@@ -28,9 +32,10 @@ interface ArtifactViewerProps {
  * BE(`visual_artifact`/`artifact_version`, 디디 C1-S3) 미착지 — 이 컴포넌트는 props로 데이터를
  * 받는 순수 뷰라 실 API 착지 시 fetch 래퍼만 새로 감싸면 됨(컴포넌트 자체는 안 바뀜).
  */
-export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCount = 0, threads, descriptions = {}, className }: ArtifactViewerProps) {
+export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCount = 0, threads, descriptions = {}, onEnterEdit, className }: ArtifactViewerProps) {
   const t = useTranslations('canvas');
   const [selectedVersion, setSelectedVersion] = useState(artifact.current_version);
+  const isViewingAnchor = selectedVersion === artifact.anchor_version;
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const activeVersion = versions.find((v) => v.version === selectedVersion) ?? versions[0];
   const selectedThread = threads?.find((th) => th.id === selectedThreadId) ?? null;
@@ -63,6 +68,16 @@ export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCoun
             </span>
           ) : null}
           <span className="ml-auto flex items-center gap-3 text-muted-foreground">
+            {artifact.format === 'tree' && onEnterEdit ? (
+              <button
+                type="button"
+                onClick={onEnterEdit}
+                className="flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] font-semibold text-foreground hover:bg-muted"
+              >
+                <Pencil className="h-3 w-3" aria-hidden />
+                {isViewingAnchor ? t('editAsNewVersionAction') : t('editAction')}
+              </button>
+            ) : null}
             <span title={t('exportComingSoon')} className="flex items-center gap-1 text-xs opacity-50">
               <Download className="h-3.5 w-3.5" aria-hidden />
             </span>
