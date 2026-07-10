@@ -322,6 +322,10 @@ async def test_agent_id_cross_org_400():
             result = MagicMock()
             if call_count == 1:
                 result.scalar_one_or_none.return_value = story
+            elif call_count == 2:
+                # E-SECURITY SEC-S8 Z2: has_project_access 호출(story project 접근권) — 이
+                # 테스트는 그 뒤의 agent_id 검증(call 3)만 검증 대상이라 여기선 통과시킨다.
+                result.scalar_one_or_none.return_value = 1
             else:
                 result.scalar_one_or_none.return_value = None
             return result
