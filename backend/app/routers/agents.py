@@ -105,6 +105,16 @@ async def create_org_agent(
             raise HTTPException(status_code=403, detail="Cannot assign role higher than your own")
         if body.name == actor.name:
             raise HTTPException(status_code=400, detail="Agent cannot create a member with the same name as itself")
+    else:
+        # E-SECURITY SEC-S8(story 83ea3d6a) L 자매 갭 — create_team_member와 동일 패턴으로
+        # `if actor.type == "agent"`에 갇혀 휴먼 caller(또는 actor 미해소)면 인가가 통째로
+        # 스킵됐다. 이 엔드포인트는 단일 project가 아니라 org 범위(scope_mode='org'|'projects')
+        # 라 project 단위 role 대신 org owner/admin을 요구(target-org 검증은
+        # `_resolve_org_project_ids`가 이미 project_ids⊂org 소속으로 강제해 별도 조치 불요).
+        # 에이전트 분기는 원래 로직 그대로 무회귀(위 if 블록 미변경).
+        from app.services.project_auth import is_org_owner_or_admin
+        if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+            raise HTTPException(status_code=403, detail="org admin/owner role required to manage members")
 
     project_ids = await _resolve_org_project_ids(body, session, org_id)
 
