@@ -578,7 +578,13 @@ async def bulk_update_stories(
     updated: list[Story] = []
     old_status_by_id: dict[uuid.UUID, str] = {}
     for item in payload.items:
-        q = await db.execute(select(Story).where(Story.id == item.id))
+        # E-SECURITY SEC-S8(story 83ea3d6a) W(까심 QA, CRITICAL·실HTTP 확定): 이 raw 쿼리가
+        # org_id 필터 자체가 없어(정상 repo.get()은 self._org_filter() 명시·RLS도 0002서 off)
+        # 타 org의 story UUID만 알면 status/sprint_id/assignee_id/priority/position 전부
+        # 변조 가능했다(cross-org IDOR). repo.org_id로 스코프.
+        q = await db.execute(
+            select(Story).where(Story.id == item.id, Story.org_id == repo.org_id)
+        )
         story = q.scalar_one_or_none()
         if not story:
             continue
