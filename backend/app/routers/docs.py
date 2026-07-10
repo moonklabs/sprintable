@@ -127,6 +127,22 @@ async def list_docs(
     return [DocSummaryResponse.model_validate(d) for d in docs]
 
 
+async def _assert_doc_parent_in_project(
+    session: AsyncSession, project_id: uuid.UUID, parent_id: uuid.UUID | None,
+) -> None:
+    """E-SECURITY SEC-S8(story 83ea3d6a) Y(까심 전수스윕): parent_id가 project_id 소속인지
+    검증 없이 그대로 repo.create/setattr에 적용됐다(DocRepository.create는 BaseRepository
+    상속이라 소유권 검증 0) — 같은 org 다른 project의 doc을 parent로 지정해 doc 트리를
+    오염시킬 수 있었다(T/G와 동형 project-scope 부재). create/update 양쪽 재사용."""
+    if parent_id is None:
+        return
+    parent_project_id = (await session.execute(
+        select(Doc.project_id).where(Doc.id == parent_id, Doc.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if parent_project_id != project_id:
+        raise HTTPException(status_code=404, detail="Parent doc not found")
+
+
 @router.post("", response_model=DocResponse, status_code=201)
 async def create_doc(
     body: DocCreate,
@@ -143,6 +159,7 @@ async def create_doc(
         db=session,
         user_id=uuid.UUID(auth.user_id),
     )
+    await _assert_doc_parent_in_project(session, body.project_id, body.parent_id)
     # ⭐RC#1(body-trust 봉인): created_by 를 **인증 caller 로 강제**(body.created_by 무시·attribution
     # 위조 차단). 다른 doc write 경로(_resolve_doc_member_id·line~501)와 대칭. AC3-2d(2) canonical 유지.
     created_by = await _resolve_doc_member_id(auth, org_id, session)
@@ -330,6 +347,9 @@ async def update_doc(
                     "current_updated_at": doc.updated_at.isoformat(),
                 },
             )
+
+    if "parent_id" in data:
+        await _assert_doc_parent_in_project(session, doc.project_id, data["parent_id"])
 
     # 일반 필드 적용 (slug 제외)
     for attr, val in data.items():

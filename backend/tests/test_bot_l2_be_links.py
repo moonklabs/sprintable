@@ -77,9 +77,10 @@ async def _req(method, path, *, execute_results, org_id=ORG_A):
 # ── GET list ──────────────────────────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_list_links_same_org_returns_links():
-    # execute: story(org_a) → links([link]).
+    # execute: story(org_a) → has_project_access(truthy) → links([link]).
+    # E-SECURITY SEC-S8 Y: project-scope 검증(has_project_access) 호출이 추가돼 시퀀스가 하나 늘었다.
     resp, _ = await _req("GET", f"/api/v2/integrations/github/links?story_id={STORY_ID}",
-                         execute_results=[_story(ORG_A), [_link(ORG_A)]])
+                         execute_results=[_story(ORG_A), 1, [_link(ORG_A)]])
     assert resp.status_code == 200
     body = resp.json()
     data = body.get("data", body)
