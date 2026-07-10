@@ -1275,8 +1275,15 @@ async def switch_project(
     if user is None:
         return _err("USER_NOT_FOUND", "User not found", 404)
 
+    # E-SECURITY SEC-S8(story 83ea3d6a) K — org_id 미전달이면 has_project_access가 org 필터
+    # 없이 판정해, J(cross-org project_access grant)로 생긴 행 하나만 있어도 target org의
+    # 정식 access+refresh 토큰이 발급되는 증폭 경로였다(SEC-S5~S8 가드를 우회하는 크리덴셜
+    # 발급 자체이므로 단순 열람보다 파급이 큼). 현재 세션의 org 컨텍스트로 명시 스코핑.
+    caller_org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
+    caller_org_id = uuid.UUID(str(caller_org_id_str)) if caller_org_id_str else None
+
     # 인가 체크 — team_member ∪ project_access(granted) ∪ owner/admin (me/memberships 3-branch 정합)
-    if not await has_project_access(session, user.id, body.project_id):
+    if not await has_project_access(session, user.id, body.project_id, caller_org_id):
         return _err("NOT_MEMBER", "Not an active member of this project", 403)
 
     # target 캡처 — _build_app_metadata가 내부 fallback으로 last_project_id를 덮어쓰므로 먼저 고정

@@ -164,9 +164,31 @@ async def test_update_meeting_200():
 async def test_delete_meeting_200():
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = _mock_meeting()
-        session.execute = AsyncMock(return_value=mock_result)
+        # E-SECURITY SEC-S8(F): delete_meeting이 이제 순서대로 (1) target project의 org_id 조회
+        # (2) resolve_member의 OrgMember/User 조회 (3) repo.get (4) repo.delete 내부 get을
+        # 실행한다 — call_count 기반 목으로 각 단계에 맞는 응답을 준다.
+        om_mock = MagicMock()
+        om_mock.id = uuid.uuid4()
+        om_mock.role = "member"
+        meeting = _mock_meeting()
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            r = MagicMock()
+            if call_count == 1:
+                r.scalar_one_or_none.return_value = ORG_ID  # project org lookup
+            elif call_count == 2:
+                r.scalar_one_or_none.return_value = om_mock  # resolve_member: OrgMember
+            elif call_count == 3:
+                r.scalar_one_or_none.return_value = None  # resolve_member: User(optional)
+            else:
+                r.scalar_one_or_none.return_value = meeting  # repo.get / repo.delete 내부 get
+            return r
+
+        session.execute = mock_execute
         session.delete = AsyncMock()
         session.flush = AsyncMock()
 
