@@ -228,6 +228,21 @@ async def update_sprint(
     auth: AuthContext = Depends(get_current_user),
 ) -> SprintResponse:
     data = body.model_dump(exclude_unset=True)
+    # E-SECURITY SEC-S8(story 83ea3d6a) Z(까심 전수스윕): report_doc_id가 sprint의 project 소속인지
+    # 검증 없이 그대로 repo.update에 전달됐다(T-class) — 같은 org 다른 project의 doc을 sprint
+    # report로 지정할 수 있었다.
+    if "report_doc_id" in data and data["report_doc_id"] is not None:
+        from app.models.doc import Doc
+        _sprint_for_doc_check = await repo.get(id)
+        if _sprint_for_doc_check is None:
+            raise HTTPException(status_code=404, detail="Sprint not found")
+        doc_project_id = (await session.execute(
+            select(Doc.project_id).where(
+                Doc.id == data["report_doc_id"], Doc.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+        if doc_project_id != _sprint_for_doc_check.project_id:
+            raise HTTPException(status_code=404, detail="Report doc not found")
     # ⭐E-DG S26: status 변경은 transition_sprint 단일경로(FSM/overlay/human-gate) 경유 — PATCH 옆문
     # 봉인(S25 epic PATCH-bypass 교훈). 나머지 필드만 repo.update.
     _status_change = data.pop("status", None)

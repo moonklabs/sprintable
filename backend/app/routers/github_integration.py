@@ -282,11 +282,17 @@ async def list_links(
 async def delete_link(
     link_id: uuid.UUID,
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """PR↔story 링크 해제(Bot-L.2 UI '해제'·soft-delete). ⭐anti-IDOR: `link.id AND org_id` — 타 org/부재/
-    이미 삭제는 generic 404(존재 oracle 0). soft-delete(deleted_at) 라 close-on-merge resolver 에서 즉시 제외."""
+    이미 삭제는 generic 404(존재 oracle 0). soft-delete(deleted_at) 라 close-on-merge resolver 에서 즉시 제외.
+
+    E-SECURITY SEC-S8(story 83ea3d6a) Z(까심 QA, 라이브 확定): org_id만으론 부족했다 — create_explicit_
+    link/list_links(Y)는 project-scope를 이미 닫았는데 delete는 빠져 있었다(S/X와 동형 패턴). link이
+    가리키는 story의 project에 caller가 접근권 있는지도 검증."""
+    from app.services.project_auth import has_project_access
+
     link = (
         await session.execute(
             select(PullRequestStoryLink).where(
@@ -297,6 +303,13 @@ async def delete_link(
         )
     ).scalar_one_or_none()
     if link is None:
+        return JSONResponse(status_code=404, content={"error": "link_not_found"})
+    story_project_id = (
+        await session.execute(select(Story.project_id).where(Story.id == link.story_id))
+    ).scalar_one_or_none()
+    if story_project_id is None or not await has_project_access(
+        session, uuid.UUID(auth.user_id), story_project_id, org_id
+    ):
         return JSONResponse(status_code=404, content={"error": "link_not_found"})
     link.deleted_at = datetime.now(timezone.utc)
     await session.commit()

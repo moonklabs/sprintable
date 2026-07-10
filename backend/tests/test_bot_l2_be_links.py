@@ -100,9 +100,11 @@ async def test_list_links_cross_org_story_404_no_oracle():
 # ── DELETE unlink ───────────────────────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_delete_link_same_org_soft_deletes():
+    # execute: link → story.project_id(scalar) → has_project_access(truthy).
+    # E-SECURITY SEC-S8 Z: project-scope 검증(has_project_access) 호출이 추가돼 시퀀스가 둘 늘었다.
     link = _link(ORG_A)
     resp, session = await _req("DELETE", f"/api/v2/integrations/github/links/{LINK_ID}",
-                               execute_results=[link])
+                               execute_results=[link, uuid.uuid4(), 1])
     assert resp.status_code == 200
     assert link.deleted_at is not None      # soft-delete.
     session.commit.assert_awaited_once()
