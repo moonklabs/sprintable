@@ -126,9 +126,18 @@ async def test_patch_meeting_with_org_context_passes_auth():
     ctx = _mk_ctx(org_id=ORG_ID)
     client, session, app = await _client(ctx)
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        session.execute = AsyncMock(return_value=mock_result)
+        # E-SECURITY SEC-S8(G): _get_repo가 이제 먼저 has_project_access를 조회한다 —
+        # 1st call=access granted(truthy), 2nd call(repo.update 내부 get)=None(not found).
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            r = MagicMock()
+            r.scalar_one_or_none.return_value = 1 if call_count == 1 else None
+            return r
+
+        session.execute = mock_execute
 
         async with client as c:
             resp = await c.patch(
@@ -146,9 +155,18 @@ async def test_put_meeting_with_org_context_passes_auth():
     ctx = _mk_ctx(org_id=ORG_ID)
     client, session, app = await _client(ctx)
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        session.execute = AsyncMock(return_value=mock_result)
+        # E-SECURITY SEC-S8(G): _get_repo가 이제 먼저 has_project_access를 조회한다 —
+        # 1st call=access granted(truthy), 2nd call(repo.update 내부 get)=None(not found).
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            r = MagicMock()
+            r.scalar_one_or_none.return_value = 1 if call_count == 1 else None
+            return r
+
+        session.execute = mock_execute
 
         async with client as c:
             resp = await c.put(

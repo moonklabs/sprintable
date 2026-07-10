@@ -205,11 +205,16 @@ async def list_artifacts(
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    org_id, _project_id = _get_org_project(auth)
-    if not org_id:
-        return _err("FORBIDDEN", "org_id required", 403)
+    # E-SECURITY SEC-S8(story 83ea3d6a) G(N): project_id 필터가 아예 없어 story_id/epic_id/
+    # doc_id 미지정 호출(파라미터 없는 목록 조회)이 org 전체 artifact를 반환했다(cross-project
+    # 노출·미르코 라이브 실측). create_artifact/get_artifact와 동형으로 JWT/API키 컨텍스트의
+    # project_id(비-caller-suppliable)로 항상 스코프.
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
     q = select(VisualArtifact).where(
-        VisualArtifact.org_id == org_id, VisualArtifact.deleted_at.is_(None),
+        VisualArtifact.org_id == org_id, VisualArtifact.project_id == project_id,
+        VisualArtifact.deleted_at.is_(None),
     )
     if story_id is not None:
         q = q.where(VisualArtifact.story_id == story_id)

@@ -89,7 +89,7 @@ from .tools.rewards import (
 )
 from .tools.sprints import (
     CreateSprintInput, ListSprintsInput, SprintIdInput, UpdateSprintInput,
-    activate_sprint, close_sprint, create_sprint, delete_sprint,
+    activate_sprint, close_sprint, create_sprint,
     get_velocity, list_sprints, sprint_summary, update_sprint,
 )
 from .tools.standup import (
@@ -383,7 +383,7 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_confirm_hypothesis",
      "가설 확정(active) 또는 폐기(killed). active 확정은 휴먼 경로만.",
      ConfirmHypothesisInput, confirm_hypothesis),
-    # Sprints (8)
+    # Sprints (7) — E-SECURITY SEC-S8 확장: delete_sprint 제거(에이전트 hard-delete 차단)
     ("sprintable_list_sprints",
      "스프린트 목록 조회.",
      ListSprintsInput, list_sprints),
@@ -405,9 +405,6 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_update_sprint",
      "스프린트 수정.",
      UpdateSprintInput, update_sprint),
-    ("sprintable_delete_sprint",
-     "스프린트 삭제.",
-     SprintIdInput, delete_sprint),
     # Docs (5) — E-SECURITY SEC-S1 확장: delete_doc 제거(에이전트 삭제 차단)
     ("sprintable_list_docs",
      "문서 목록 조회 (tree 또는 tag 필터).",

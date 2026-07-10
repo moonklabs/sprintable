@@ -97,10 +97,13 @@ async def test_patch_story_is_excluded_true():
     marked_story.assignee_ids = []
     marked_story.meeting_id = None
     # E-BOARD S5: update_story가 _attach_assignee_ids로 story_assignees 조회 → 빈 결과 모킹
+    # E-SECURITY SEC-S8(G): update_story가 이제 먼저 repo.get(id)(access 체크용) +
+    # has_project_access(project_auth 원시SQL도 scalar_one_or_none)를 조회 — marked_story를
+    # 반환해 존재+접근권 둘 다 통과시킨다(단일 정적 목이라 모든 scalar_one_or_none 호출이 동일값).
     _empty = MagicMock()
     _empty.all.return_value = []
     _empty.scalars.return_value.all.return_value = []
-    _empty.scalar_one_or_none.return_value = None
+    _empty.scalar_one_or_none.return_value = marked_story
     _empty.scalar.return_value = None
     mock_session.execute.return_value = _empty
     marked_story.title = "Story 1"
