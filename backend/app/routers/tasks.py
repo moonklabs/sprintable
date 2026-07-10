@@ -6,9 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.pm import Story
+from app.models.pm import Story, Task
 from app.repositories.task import TaskRepository
 from app.schemas.task import TaskCreate, TaskResponse, TaskUpdate
+from app.services.evidence_service import batch_has_evidence
 from app.services.notification_dispatch import dispatch_notification
 
 router = APIRouter(prefix="/api/v2/tasks", tags=["tasks"])
@@ -19,6 +20,16 @@ def _get_repo(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> TaskRepository:
     return TaskRepository(session, org_id)
+
+
+async def _attach_has_evidence(session: AsyncSession, tasks: list[Task]) -> None:
+    """E-VERIFY V0-S2(story 3fbd048d) — stories.py `_attach_has_evidence`와 동형(배치 조회)."""
+    if not tasks:
+        return
+    ids_with_evidence = await batch_has_evidence(session, [t.id for t in tasks], "task")
+    for t in tasks:
+        if t.id in ids_with_evidence:
+            t.has_evidence = True
 
 
 @router.get("", response_model=list[TaskResponse])
@@ -36,6 +47,7 @@ async def list_tasks(
     if status_filter:
         filters["status"] = status_filter
     tasks = await repo.list(**filters)
+    await _attach_has_evidence(repo.session, tasks)
     return [TaskResponse.model_validate(t) for t in tasks]
 
 
@@ -72,6 +84,7 @@ async def get_task(
     task = await repo.get(id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    await _attach_has_evidence(repo.session, [task])
     return TaskResponse.model_validate(task)
 
 
@@ -107,6 +120,7 @@ async def update_task(
                 # S2: 멀티프로젝트 에이전트 assignee를 스토리 프로젝트로 정확 라우팅
                 source_project_id=story_row.project_id,
             )
+    await _attach_has_evidence(db, [task])
     return TaskResponse.model_validate(task)
 
 

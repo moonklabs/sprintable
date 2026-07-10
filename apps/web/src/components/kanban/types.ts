@@ -23,6 +23,8 @@ export interface KanbanStory {
   blocked_by?: string[];
   labels?: { id: string; name: string; color: string | null }[];
   gates?: { id: string; gate_type: string; status: string }[];
+  // E-VERIFY V0-S1/S2: 실증-done 신뢰 신호. true면 근거 有, null이면 완전 무표시.
+  has_evidence?: boolean | null;
 }
 
 export interface GateItem {

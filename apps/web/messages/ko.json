@@ -3342,5 +3342,21 @@
     "viewInBoard": "보드에서 보기",
     "executionBoundaryNote": "실행은 유저 머신에서 이뤄집니다. Sprintable은 파일만 만들고 컴퓨트는 짊어지지 않습니다.",
     "finish": "대시보드로"
+  },
+  "verify": {
+    "provenCompletion": "증명된 완결",
+    "evidenceShow": "근거 보기",
+    "evidenceHide": "근거 접기",
+    "evidenceCount": "근거 {count}건",
+    "evidenceSignedBy": "이 완결의 근거 — {name}가 남김",
+    "evidenceMore": "근거 {count}건 더 보기",
+    "evidenceLoadError": "근거를 불러오지 못했습니다",
+    "evidenceTypeUrl": "링크",
+    "evidenceTypeFile": "파일",
+    "evidenceTypePr": "PR",
+    "evidenceTypeDeploy": "배포",
+    "evidenceTypeMetric": "지표",
+    "evidenceTypeReport": "리포트",
+    "evidenceTypeGateApproval": "게이트 승인"
   }
 }

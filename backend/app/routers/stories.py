@@ -96,6 +96,7 @@ async def list_stories(
     if no_sprint and project_id:
         stories = await repo.list_backlog(project_id, limit=limit)
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
+        await _attach_has_evidence(repo.session, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # CB-S4: status + project_id 조합 시 board 쿼리 (order_by + cursor + done 7일 제한)
@@ -114,6 +115,7 @@ async def list_stories(
             if stories:
                 response.headers["X-Next-Cursor"] = stories[-1].created_at.isoformat()
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
+        await _attach_has_evidence(repo.session, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     filters: dict = {}
@@ -129,6 +131,7 @@ async def list_stories(
         filters["status"] = status_filter
     stories = await repo.list(limit=limit, **filters)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
+    await _attach_has_evidence(repo.session, stories)
     return [StoryResponse.model_validate(s) for s in stories]
 
 
@@ -146,6 +149,20 @@ async def _attach_assignee_ids(
         if not ids:
             ids = [s.assignee_id] if s.assignee_id else []
         s.assignee_ids = ids  # 매핑되지 않은 transient 속성 — from_attributes 전용
+
+
+async def _attach_has_evidence(session: AsyncSession, stories: list[Story]) -> None:
+    """E-VERIFY V0-S2(story 3fbd048d): evidence 있는 story에 has_evidence=True(transient attr) —
+    없으면 미설정(StoryResponse 기본값 None 유지, positive 단방향·부정 신호 0).
+    _attach_assignee_ids와 동형 배치 패턴."""
+    if not stories:
+        return
+    from app.services.evidence_service import batch_has_evidence
+
+    ids_with_evidence = await batch_has_evidence(session, [s.id for s in stories], "story")
+    for s in stories:
+        if s.id in ids_with_evidence:
+            s.has_evidence = True
 
 
 async def _upsert_assignee_participation(
@@ -345,6 +362,7 @@ async def get_story(
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
     await _attach_assignee_ids(repo.session, repo.org_id, [story])
+    await _attach_has_evidence(repo.session, [story])
     return StoryResponse.model_validate(story)
 
 
@@ -541,6 +559,7 @@ async def bulk_update_stories(
         await db.refresh(s)
     # refresh 後 transient assignee_ids 세팅(refresh 는 매핑 컬럼만 reload·transient 보존).
     await _attach_assignee_ids(db, repo.org_id, updated)
+    await _attach_has_evidence(db, updated)
 
     # 응답(violation flag 포함) + violation 이벤트 페이로드를 commit 前에 빌드(commit 시 attr expire→
     # MissingGreenlet 방지·기존 results 빌드와 동일 시점). 이벤트 발화는 commit 後(/status 와 동일 순서).
@@ -822,6 +841,7 @@ async def update_story(
         )
 
     await _attach_assignee_ids(db, repo.org_id, [story])
+    await _attach_has_evidence(db, [story])
     return StoryResponse.model_validate(story)
 
 
@@ -1040,6 +1060,7 @@ async def update_story_status(
         )
 
     await _attach_assignee_ids(db, repo.org_id, [story])
+    await _attach_has_evidence(db, [story])
     resp = StoryResponse.model_validate(story)
     # 정공법 A: 비순차 점프면 응답에 violation flag(차단 없이 가시화·/bulk 와 동일 SSOT).
     resp.violation = build_violation_flag(old_status, story.status)
