@@ -109,3 +109,31 @@ class ArtifactComment(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+ARTIFACT_EXPORT_FORMATS = frozenset({"png", "html"})
+
+
+class ArtifactExport(Base):
+    """E-CANVAS C1-S5(story 1f365e33): F6 export(PNG/HTML) 버전 귀속 기록.
+
+    바이너리 자체는 여기 없음 — 기존 assets 레지스트리(S1 IStorageService)의 asset_id 참조만
+    보관(storage 좌표는 Asset.container/object_path가 SSOT). PNG는 FE가 캡처해 signed write URL로
+    GCS에 직접 PUT하고 BE는 head_object 검증 후 편입만(바이너리가 BE를 경유하지 않음). HTML은
+    BE가 nodes 트리를 직렬화해 즉시 생성(렌더 불요·client-trust 이슈 없음).
+    """
+    __tablename__ = "artifact_exports"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    artifact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("visual_artifacts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_versions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    format: Mapped[str] = mapped_column(Text, nullable=False)
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
