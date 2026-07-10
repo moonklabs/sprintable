@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { useTheme } from 'next-themes';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import {
@@ -31,9 +32,12 @@ interface ExportDialogProps {
 export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, captureTargetRef, artifactFormat }: ExportDialogProps) {
   const t = useTranslations('canvas');
   const pngAllowed = canPngExport(artifactFormat);
+  // 유나 §① "보이는 그대로"(WYSIWYG) — 테마 토글 초기값은 지금 보고 있는 테마여야 한다
+  // (하드코딩 'light'는 위반). resolvedTheme이 'system'을 실제 적용 테마로 풀어준다.
+  const { resolvedTheme } = useTheme();
   const [format, setFormat] = useState<ExportFormat>(pngAllowed ? 'png' : 'html');
   const [viewport, setViewport] = useState<ExportViewport>('desktop');
-  const [theme, setTheme] = useState<ExportTheme>('light');
+  const [theme, setTheme] = useState<ExportTheme>(resolvedTheme === 'dark' ? 'dark' : 'light');
   const [phase, setPhase] = useState<'idle' | 'exporting' | 'done' | 'error'>('idle');
   const [result, setResult] = useState<BeArtifactExport | null>(null);
 

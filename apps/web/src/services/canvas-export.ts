@@ -105,7 +105,8 @@ export function canPngExport(format: ArtifactFormat): boolean {
 
 export async function captureElementAsPng(el: HTMLElement): Promise<Blob | null> {
   const { default: html2canvas } = await import('html2canvas');
-  const canvas = await html2canvas(el, { backgroundColor: null, useCORS: true });
+  // 유나 §③ "2x retina·흐릿=신뢰 깎임" — scale 미지정 시 1x라 export 첫인상이 흐릿해진다.
+  const canvas = await html2canvas(el, { backgroundColor: null, useCORS: true, scale: 2 });
   return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), 'image/png'));
 }
 
