@@ -48,13 +48,13 @@ from .tools.core import (
     my_dashboard, unclaim_story, unlock_files,
 )
 from .tools.docs import (
-    CreateDocInput, DeleteDocInput, GetDocInput, ListDocsInput,
+    CreateDocInput, GetDocInput, ListDocsInput,
     SearchDocsInput, UpdateDocInput,
-    create_doc, delete_doc, get_doc, list_docs, search_docs, update_doc,
+    create_doc, get_doc, list_docs, search_docs, update_doc,
 )
 from .tools.epics import (
-    AddEpicInput, DeleteEpicInput, ListEpicsInput, UpdateEpicInput,
-    add_epic, delete_epic, list_epics, update_epic,
+    AddEpicInput, ListEpicsInput, UpdateEpicInput,
+    add_epic, list_epics, update_epic,
 )
 from .tools.hypotheses import (
     ConfirmHypothesisInput, CreateHypothesisInput, GetHypothesisInput,
@@ -107,9 +107,9 @@ from .tools.stories import (
     update_story, update_story_status,
 )
 from .tools.tasks import (
-    AddTaskInput, DeleteTaskInput, GetTaskInput, ListMyTasksInput,
+    AddTaskInput, GetTaskInput, ListMyTasksInput,
     ListTasksInput, UpdateTaskInput, UpdateTaskStatusInput,
-    add_task, delete_task, get_task, list_my_tasks, list_tasks,
+    add_task, get_task, list_my_tasks, list_tasks,
     update_task, update_task_status,
 )
 from .tools.webhooks import (
@@ -328,7 +328,7 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_update_story_status",
      "스토리 상태 변경.",
      UpdateStoryStatusInput, update_story_status),
-    # Tasks (7)
+    # Tasks (6) — E-SECURITY SEC-S1 확장: delete_task 제거(에이전트 hard-delete 차단)
     ("sprintable_list_tasks",
      "태스크 목록 조회.",
      ListTasksInput, list_tasks),
@@ -347,10 +347,7 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_update_task_status",
      "태스크 상태 변경.",
      UpdateTaskStatusInput, update_task_status),
-    ("sprintable_delete_task",
-     "태스크 삭제.",
-     DeleteTaskInput, delete_task),
-    # Epics (4)
+    # Epics (3) — E-SECURITY SEC-S1 확장: delete_epic 제거(에이전트 hard-delete 차단)
     ("sprintable_list_epics",
      "에픽 목록 조회.",
      ListEpicsInput, list_epics),
@@ -360,9 +357,6 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_update_epic",
      "에픽 수정.",
      UpdateEpicInput, update_epic),
-    ("sprintable_delete_epic",
-     "에픽 삭제.",
-     DeleteEpicInput, delete_epic),
     # Hypotheses (6)
     ("sprintable_list_hypotheses",
      "가설 목록 조회 (compact). epic_id/story_id/status/owner_member_id 필터.",
@@ -413,7 +407,7 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_delete_sprint",
      "스프린트 삭제.",
      SprintIdInput, delete_sprint),
-    # Docs (6)
+    # Docs (5) — E-SECURITY SEC-S1 확장: delete_doc 제거(에이전트 삭제 차단)
     ("sprintable_list_docs",
      "문서 목록 조회 (tree 또는 tag 필터).",
      ListDocsInput, list_docs),
@@ -429,9 +423,6 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_update_doc",
      "문서 수정.",
      UpdateDocInput, update_doc),
-    ("sprintable_delete_doc",
-     "문서 소프트 삭제.",
-     DeleteDocInput, delete_doc),
     # Analytics (11)
     ("sprintable_get_project_overview",
      "프로젝트 개요 통계 조회.",

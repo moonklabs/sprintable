@@ -245,9 +245,10 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_check_notifications", "sprintable_checkin_sprint", "sprintable_claim_story",
     "sprintable_close_sprint", "sprintable_create_conversation", "sprintable_create_doc",
     "sprintable_create_meeting", "sprintable_create_retro_session", "sprintable_create_sprint",
-    "sprintable_delete_doc", "sprintable_delete_epic", "sprintable_delete_meeting",
-    # E-SECURITY SEC-S1: sprintable_delete_story 의도적 제거(에이전트 hard-delete 차단).
-    "sprintable_delete_sprint", "sprintable_delete_task",
+    "sprintable_delete_meeting",
+    # E-SECURITY SEC-S1(확장): sprintable_delete_story/task/epic/doc 의도적 제거(에이전트
+    # hard-delete 차단 — 까심 적대적 QA가 delete_story만으로는 반쪽임을 발견, story와 동형 확대).
+    "sprintable_delete_sprint",
     "sprintable_delete_webhook_config", "sprintable_emit_event", "sprintable_export_retro",
     "sprintable_get_agent_stats", "sprintable_get_blocked_stories", "sprintable_get_doc",
     "sprintable_get_epic_progress", "sprintable_get_leaderboard_v2", "sprintable_get_meeting",

@@ -1,4 +1,5 @@
-"""에픽 관련 MCP 도구 (4개)."""
+"""에픽 관련 MCP 도구 (3개) — E-SECURITY SEC-S1 확장: delete_epic 제거(에이전트 hard-delete 차단,
+delete_story와 동형 조치. 까심 적대적 QA 발견 갭 — cascade로 소속 stories까지 물리삭제)."""
 from __future__ import annotations
 
 from mcp.types import TextContent
@@ -32,10 +33,6 @@ class UpdateEpicInput(SprintableInput):
     success_criteria: str | None = None
     target_sp: int | None = None
     target_date: str | None = None
-
-
-class DeleteEpicInput(SprintableInput):
-    epic_id: str
 
 
 async def list_epics(args: ListEpicsInput) -> list[TextContent]:
@@ -80,14 +77,5 @@ async def update_epic(args: UpdateEpicInput) -> list[TextContent]:
         updates["target_sp"] = args.target_sp
     try:
         return ok(await client.patch(f"/api/v2/epics/{args.epic_id}", json=updates))
-    except Exception as exc:
-        return err(str(exc))
-
-
-async def delete_epic(args: DeleteEpicInput) -> list[TextContent]:
-    """에픽 삭제."""
-    try:
-        await client.delete(f"/api/v2/epics/{args.epic_id}")
-        return ok({"deleted": True})
     except Exception as exc:
         return err(str(exc))

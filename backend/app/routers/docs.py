@@ -427,6 +427,19 @@ async def delete_doc(
     # f69fcd91: 대상 doc 의 project 접근 강제(cross-project IDOR 차단·get_project_scoped_org_id 의 org-only
     # fallback 으로 同org 비-project caller 가 타 project doc 삭제 가능하던 갭). 없으면 404·무권한 403.
     await _require_doc_project_access(repo.session, id, uuid.UUID(auth.user_id), repo.org_id)
+    # E-SECURITY SEC-S1 확장(까심 적대적 QA 발견 갭): delete_story와 동형으로 휴먼 전용화 + 삭제 감사.
+    from app.services.member_resolver import resolve_member
+    deleter = await resolve_member(auth, repo.org_id, repo.session)
+    if deleter.type != "human":
+        raise HTTPException(status_code=403, detail="Doc 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    from app.models.deletion_audit import DeletionAuditLog
+    repo.session.add(DeletionAuditLog(
+        id=uuid.uuid4(), org_id=repo.org_id, actor_id=deleter.id,
+        entity_type="doc", entity_id=id, entity_title=doc.title,
+    ))
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Doc not found")
@@ -434,8 +447,6 @@ async def delete_doc(
     # 삭제 권한자(인증 caller) 트리거 system cascade — human-gate authz 우회 정당(별도 결재 아님). void 는
     # begin_nested 격리 best-effort라 삭제 비중단. pending 아니면 no-op(멱등)·doc_approval 만 스코핑.
     from app.services.gate_service import void_pending_doc_gate
-    from app.services.member_resolver import resolve_member
-    deleter = await resolve_member(auth, repo.org_id, repo.session)
     await void_pending_doc_gate(repo.session, repo.org_id, id, deleter.id)
     return {"ok": True}
 
