@@ -1,11 +1,17 @@
 """E-CANVAS C1-S3(story 8bace49e): visual_artifacts/artifact_versions/artifact_nodes — 시각
 산출물 1급 객체(전신 /mockups 트리 계승 + 하이브리드 html_blob 캐치올 + 보기전용 버전전환).
 
-Revision ID: 0170
+Revision ID: 0171
 Revises: 0169
 Create Date: 2026-07-10
 
 순수 additive 신규 테이블 3개 — 기존 스키마 무회귀.
+
+⚠️ 오르테가 crux(2026-07-10): SEC-S1 확장(#2001)이 0170_deletion_audit_logs를 이미 선점 —
+번호 충돌 회피로 0171 재넘버링. down_revision은 지금 이 브랜치 기준(SEC-S1 미포함) 0169로
+두지만, SEC-S1이 develop에 먼저 merge된 뒤 이 브랜치를 develop으로 재조정(rebase/재-base)할
+때는 반드시 down_revision을 SEC-S1의 "0170"으로 갱신해야 단일 선형 체인(0169→0170→0171)이
+된다 — 안 그러면 0169에서 두 갈래(0170·0171)로 갈라져 Multiple head revisions 재발.
 """
 from __future__ import annotations
 
@@ -13,8 +19,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0170"
-down_revision = "0169"
+revision = "0171"
+down_revision = "0169"  # ⚠️ SEC-S1 develop merge 후 재조정 시 "0170"으로 갱신 필수(위 주석 참고)
 branch_labels = None
 depends_on = None
 
