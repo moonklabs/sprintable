@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -281,14 +281,26 @@ async def unlock_files(
 
 @router.get("/api/v2/file-locks")
 async def list_file_locks(
+    project_id: uuid.UUID = Query(...),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[dict]:
-    """AC6: 현재 프로젝트 내 활성 file lock 목록."""
+    """AC6: 현재 프로젝트 내 활성 file lock 목록.
+
+    E-SECURITY SEC-S8(story 83ea3d6a) Y(까심 전수스윕): 독스트링은 "현재 프로젝트 내"지만
+    실제 쿼리는 FileLock.org_id만 필터하고 project_id 필터 자체가 없어 org 전체 lock이
+    노출됐다(같은 org 다른 project 멤버도 전 project의 활성 lock을 열람 가능). project_id를
+    필수 쿼리 파라미터로 받아 has_project_access로 caller의 실제 접근권도 검증한다."""
+    from app.services.project_auth import has_project_access
+
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
     result = await session.execute(
         select(FileLock).where(
             FileLock.org_id == org_id,
+            FileLock.project_id == project_id,
             FileLock.released_at.is_(None),
         )
     )
