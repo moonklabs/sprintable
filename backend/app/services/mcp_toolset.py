@@ -65,12 +65,12 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     "sprintable_add_evidence",
     # E-CANVAS C1-S3(story 8bace49e): create_artifact/get_artifact — story/epic/doc 中 어디에도
     # (또는 아무데도) 붙을 수 있는 시각 산출물 생성/조회. add_evidence와 동형(단일 도메인 그룹에
-    # 묶기 애매한 cross-cutting 자기생성 유틸). C2-S6(story 0edca31e) 코멘트 2종 + C3-S7
-    # (story 940266db) edit_artifact 1종 추가 — 5개로 늘었으나 여전히 story/epic/doc 무관
-    # cross-cutting이라 always-allow 유지(C4가 더 늘리면 그때 전용 "canvas" 그룹 신설 고려).
+    # 묶기 애매한 cross-cutting 자기생성 유틸). C2-S6(코멘트 2종)+C3-S7(edit 1종)+C4-S8(정본
+    # 제안 1종) 추가 — 6개(전신 C0~C5 트랙의 마지막 BE 배선). 여전히 story/epic/doc 무관
+    # cross-cutting이라 always-allow 유지(추가 성장 시 전용 "canvas" 그룹 신설 고려).
     "sprintable_create_artifact", "sprintable_get_artifact",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
-    "sprintable_edit_artifact",
+    "sprintable_edit_artifact", "sprintable_propose_canonical_version",
 })
 
 # scope 토큰: 그룹명 외에 read/write(레거시·전체 비파괴 의미), admin/destructive(파괴적 허용)
@@ -290,10 +290,10 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_link_gate_to_task",
     # evidence (E-VERIFY V0-S1)
     "sprintable_add_evidence",
-    # visual artifacts (E-CANVAS C1-S3 + C2-S6 코멘트 + C3-S7 편집)
+    # visual artifacts (E-CANVAS C1-S3 + C2-S6 코멘트 + C3-S7 편집 + C4-S8 정본 제안)
     "sprintable_create_artifact", "sprintable_get_artifact",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
-    "sprintable_edit_artifact",
+    "sprintable_edit_artifact", "sprintable_propose_canonical_version",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.

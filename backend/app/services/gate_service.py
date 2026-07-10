@@ -51,7 +51,10 @@ _DISPOSITION_TO_STATUS: dict[str, str] = {
 # disposition auto-pass/auto-deny 제외(인간 deliberation 이 정책 자동결정보다 우선).
 # 'loop_decision'(E-LOOP-LEDGER S5): variant 선택도 동일 이유로 항상 human pending — GATE_TYPES에도
 # 미등록(doc_approval과 동일 선례. org gate override 설정 대상에서 제외=애초에 자동화 불가 명시).
-_ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset({"doc_approval", "loop_decision"})
+# 'artifact_canonicalize'(E-CANVAS C4-S8): 정본화=계약(§1) — org auto posture 무관 항상 HITL.
+_ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset(
+    {"doc_approval", "loop_decision", "artifact_canonicalize"}
+)
 
 
 async def create_gate(
@@ -154,6 +157,8 @@ async def transition_gate(
         await _advance_story_on_merge_approve(session, gate, new_status)
         # E-DG doc-gate(48f064e5): doc 결재 게이트 approve→confirmed·reject→denied.
         await _resolve_doc_gate(session, gate, new_status)
+        # E-CANVAS C4-S8(story a5118cb0): 정본화 게이트 approve→anchor_version set·reject→재논의 코멘트.
+        await _resolve_artifact_canonicalize_gate(session, gate, new_status)
         # HITL crux(story 7726a003) — A2A task INPUT_REQUIRED 복귀. writer 미배선이라 오늘은 no-op.
         await _resume_a2a_task_on_gate_resolve(session, gate, new_status)
 
@@ -375,6 +380,65 @@ async def _resolve_doc_gate(session: AsyncSession, gate: Gate, new_status: str) 
         return  # 멱등·pending 아니면 no-op(double-resolve/취소 방어).
     doc.status = "confirmed" if new_status == "approved" else "denied"
     await session.flush()
+
+
+async def _resolve_artifact_canonicalize_gate(session: AsyncSession, gate: Gate, new_status: str) -> None:
+    """E-CANVAS C4-S8(story a5118cb0): 정본화 게이트 해소.
+
+    approve → anchor_version = 제안된 버전 번호(neutral_facts.version_number)·artifact.canonicalized
+    이벤트 전파. reject → **destructive 색 금지, info "재논의"** — resolution_note(사유)가 있으면
+    제안자에게 C2 앵커 스레드로 코멘트 전파(§5: 반려=학습 신호·죽은 반려 금지). anchor_version은
+    변경 안 함(멱등 no-op이 정답 — 재논의는 새 제안 사이클에서 다시 결정).
+    """
+    if gate.work_item_type != "visual_artifact" or gate.gate_type != "artifact_canonicalize":
+        return
+    if new_status not in ("approved", "rejected"):
+        return
+
+    from app.models.visual_artifact import ArtifactComment, VisualArtifact
+
+    artifact = (await session.execute(
+        select(VisualArtifact).where(
+            VisualArtifact.id == gate.work_item_id,
+            VisualArtifact.org_id == gate.org_id,
+            VisualArtifact.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if artifact is None:
+        return  # 멱등·삭제된 artifact no-op(방어심층).
+
+    facts = gate.neutral_facts or {}
+    version_number = facts.get("version_number")
+    requested_by = facts.get("requested_by_member_id")
+
+    if new_status == "approved":
+        if version_number is not None:
+            artifact.anchor_version = int(version_number)
+            await session.flush()
+        target_ids = {artifact.created_by}
+        if requested_by:
+            target_ids.add(uuid.UUID(str(requested_by)))
+        if gate.resolver_id:
+            target_ids.discard(gate.resolver_id)  # 승인자 본인 알림 제외
+        target_ids.discard(None)
+        if target_ids:
+            from app.services.notification_dispatch import dispatch_notification
+            await dispatch_notification(
+                session, org_id=gate.org_id, event_type="artifact.canonicalized",
+                target_member_ids=list(target_ids),
+                title=f"정본 확定: {artifact.title}",
+                body=f"v{version_number}이(가) 정본으로 확定됐습니다." if version_number else None,
+                reference_type="visual_artifact", reference_id=artifact.id,
+                source_project_id=artifact.project_id,
+            )
+    else:  # rejected — info 재논의(§5: destructive 색 절대 금지). 사유=코멘트로 제안자에게 전파.
+        if gate.resolution_note and requested_by:
+            session.add(ArtifactComment(
+                id=uuid.uuid4(), artifact_id=artifact.id, org_id=gate.org_id,
+                project_id=artifact.project_id, content=gate.resolution_note,
+                created_by=gate.resolver_id or artifact.created_by,
+            ))
+            await session.flush()
 
 
 async def _resume_a2a_task_on_gate_resolve(session: AsyncSession, gate: Gate, new_status: str) -> None:
