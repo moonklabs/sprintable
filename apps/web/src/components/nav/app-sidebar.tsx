@@ -16,6 +16,7 @@ import {
   Inbox,
   Layers,
   LayoutDashboard,
+  Map,
   MessageSquare,
   Repeat,
   Search,
@@ -229,6 +230,16 @@ export function AppSidebar({
                 >
                   <Layers />
                   <span>{t('epics')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/glance" />}
+                  isActive={isActive('/glance')}
+                  tooltip={t('glance')}
+                >
+                  <Map />
+                  <span>{t('glance')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
