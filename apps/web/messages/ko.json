@@ -3368,6 +3368,22 @@
     "descriptionPaneComingSoon": "요소별 스펙(description pane)은 C2에서 제공 예정",
     "exportComingSoon": "export는 C1-S5에서 제공 예정",
     "commentsComingSoon": "코멘트는 C2에서 제공 예정",
-    "treeRenderPlaceholder": "트리 렌더는 준비 중"
+    "treeRenderPlaceholder": "트리 렌더는 준비 중",
+    "descriptionPaneHeading": "description — 보이는 PRD",
+    "descriptionEmptyState": "핀을 선택하면 요소 스펙이 여기 표시됩니다",
+    "rollupOpen": "열림",
+    "rollupInProgress": "처리 중",
+    "rollupResolved": "해결됨",
+    "deliveringTo": "{name}에게 전달 중…",
+    "moreReached": "+{count} 도달",
+    "stateDelivered": "도달",
+    "stateRead": "열람",
+    "stateActing": "처리 중",
+    "stateResponded": "응답함",
+    "linkedVersionResult": "v{version} 생성 — 이 코멘트가 입력",
+    "coordinateAnchorNote": "v{version} 기준 위치",
+    "resolveAction": "해결",
+    "replyPlaceholder": "답글…",
+    "resolvedByNote": "{name}가 해결함"
   }
 }
