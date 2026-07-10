@@ -52,9 +52,13 @@ from app.models.activity_event import ActivityEvent
 from app.models.asset import Asset, AssetFolder, AssetLink
 from app.models.release_note import ReleaseNote
 from app.models.role_template import RoleTemplate
+from app.models.visual_artifact import ArtifactNode, ArtifactVersion, VisualArtifact
 
 __all__ = [
     "RoleTemplate",
+    "ArtifactNode",
+    "ArtifactVersion",
+    "VisualArtifact",
     "ActivityEvent",
     "ReleaseNote",
     "Asset",

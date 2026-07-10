@@ -1,7 +1,8 @@
-"""S3-6: 시스템 콜 계약 검증 — 94개 도구 등록 + 스키마 무결성 (Phase 3 완료).
+"""S3-6: 시스템 콜 계약 검증 — 96개 도구 등록 + 스키마 무결성 (Phase 3 완료).
 
 E-SECURITY SEC-S1(확장): delete_story/task/epic/doc 4종 제거(에이전트 hard-delete 차단) —
-98개 → story만 제거해 97 → task/epic/doc 3종 추가 제거해 94."""
+98개 → story만 제거해 97 → task/epic/doc 3종 추가 제거해 94. E-CANVAS C1-S3: create_artifact/
+get_artifact 2종 추가 — 94 → 96."""
 from __future__ import annotations
 
 import os
@@ -82,13 +83,15 @@ EXPECTED_TOOLS = {
     "sprintable_link_gate_to_task",
     # evidence (1) — E-VERIFY V0-S1
     "sprintable_add_evidence",
+    # visual artifacts (2) — E-CANVAS C1-S3
+    "sprintable_create_artifact", "sprintable_get_artifact",
     # smoke
     "ping",
 }
 
 
 def test_total_tool_count():
-    assert len(_TOOLS) == 94
+    assert len(_TOOLS) == 96
 
 
 def test_all_expected_tools_registered():
