@@ -2701,6 +2701,7 @@
     "roadmapEmpty": "No roadmap yet.",
     "roadmapTitle": "Roadmap",
     "roadmapSummary": "Milestone <b>{position}</b> of {total}",
+    "roadmapArcContext": "Showing this stretch out of {total} epics total",
     "currentMarker": "● here",
     "progressTitle": "Where we are",
     "progressDetail": "{done}/{total} stories done",

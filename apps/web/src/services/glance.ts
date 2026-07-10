@@ -34,6 +34,52 @@ export interface BeEpicListItem {
   created_at: string;
 }
 
+/**
+ * "현재 궤적"(current-arc) window — 유나 로드맵 서사 확定안 (b), 2026-07-10. 이 프로젝트는
+ * 실제로 에픽 100개+(수년 백로그 히스토리)를 갖고 있어 `/api/epics`를 그대로 로드맵에 넣으면
+ * "6개 마일스톤" 서사(목업)와 완전히 어긋나고, 에픽 수만큼 `/api/stories?epic_id=`를 병렬
+ * fetch하는 구조가 돼 규모가 커질수록 레이스/성능 문제까지 만든다(라이브 확認 中 발견).
+ *
+ * 신규 큐레이션 필드(태그 등) 없이 **기존 `epic.status` + created_at 순서만으로 도출**:
+ * active 에픽(들)을 anchor("● 여기")로 삼아 그 앞뒤로 소수만 window — 최근 완료(behind)·
+ * active 클러스터·다음 예정(ahead). active가 0개면 done/archived→draft 경계를 anchor로.
+ * 나머지는 이 window 밖(§9 "지난 여정" — 별도 온디맨드 UI는 후속, 지금은 생략만).
+ */
+const DEFAULT_ARC_WINDOW = { behind: 2, ahead: 2, bound: 8 } as const;
+
+export interface RoadmapArc {
+  epics: BeEpicListItem[];
+  totalCount: number;
+}
+
+export function scopeRoadmapEpics(
+  epics: BeEpicListItem[],
+  window: { behind: number; ahead: number; bound: number } = DEFAULT_ARC_WINDOW,
+): RoadmapArc {
+  const asc = [...epics].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const activeIndices: number[] = [];
+  for (let i = 0; i < asc.length; i++) if (asc[i]!.status === 'active') activeIndices.push(i);
+
+  let start: number;
+  let end: number;
+  if (activeIndices.length > 0) {
+    start = Math.max(0, Math.min(...activeIndices) - window.behind);
+    end = Math.min(asc.length, Math.max(...activeIndices) + 1 + window.ahead);
+  } else {
+    // active 0개 — 최근 완료(done/archived)의 끝과 다음 예정(draft)의 시작 사이를 anchor로.
+    let lastDoneIdx = -1;
+    for (let i = 0; i < asc.length; i++) if (asc[i]!.status === 'done' || asc[i]!.status === 'archived') lastDoneIdx = i;
+    const firstDraftIdx = asc.findIndex((e) => e.status === 'draft');
+    const anchor = lastDoneIdx >= 0 ? lastDoneIdx : (firstDraftIdx >= 0 ? firstDraftIdx : 0);
+    start = Math.max(0, anchor - window.behind + 1);
+    end = Math.min(asc.length, anchor + 1 + window.ahead);
+  }
+
+  let windowed = asc.slice(start, end);
+  if (windowed.length > window.bound) windowed = windowed.slice(0, window.bound);
+  return { epics: windowed, totalCount: asc.length };
+}
+
 /** epic.status(draft|active|done|archived — `epic-permissions.ts` ALLOWED_TRANSITIONS 확인)를 3버킷 로드맵 상태로 유도. */
 export function deriveRoadmapStatus(beStatus: string): RoadmapStatus {
   if (beStatus === 'done' || beStatus === 'archived') return 'done';

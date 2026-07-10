@@ -2701,6 +2701,7 @@
     "roadmapEmpty": "아직 로드맵이 없습니다.",
     "roadmapTitle": "로드맵 흐름",
     "roadmapSummary": "{total}개 마일스톤 중 <b>{position}번째</b>",
+    "roadmapArcContext": "전체 {total}개 에픽 중 지금 이 구간",
     "currentMarker": "● 여기",
     "progressTitle": "현재 위치 · 진척",
     "progressDetail": "{done}/{total} 스토리 완료",

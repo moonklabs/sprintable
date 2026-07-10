@@ -9,6 +9,7 @@ import {
   deriveCollaboration,
   filterMilestoneEvents,
   mergeRoadmap,
+  scopeRoadmapEpics,
   type BeActivityLogItem,
   type BeEpicListItem,
   type BeStoryListItem,
@@ -44,6 +45,7 @@ async function fetchJson(url: string): Promise<unknown> {
 export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
   const t = useTranslations('glance');
   const [roadmap, setRoadmap] = useState<RoadmapEpic[]>([]);
+  const [totalEpicCount, setTotalEpicCount] = useState(0);
   const [collaboration, setCollaboration] = useState<EpicCollaboration[]>([]);
   const [events, setEvents] = useState<BeActivityLogItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,9 +64,9 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
           fetchJson(`/api/activity-logs?project_id=${projectId}&limit=20`),
         ]);
 
-        const epics = unwrap<BeEpicListItem[]>(epicsJson) ?? [];
+        const arc = scopeRoadmapEpics(unwrap<BeEpicListItem[]>(epicsJson) ?? []);
         const overview = unwrap<{ project_status: { epics: EpicProgress[] } }>(overviewJson);
-        const mergedRoadmap = mergeRoadmap(epics, overview?.project_status.epics ?? []);
+        const mergedRoadmap = mergeRoadmap(arc.epics, overview?.project_status.epics ?? []);
 
         const memberRows = unwrap<{ id: string; name: string }[]>(membersJson) ?? [];
         const memberNames: Record<string, string> = {};
@@ -81,6 +83,7 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
 
         if (!cancelled) {
           setRoadmap(mergedRoadmap);
+          setTotalEpicCount(arc.totalCount);
           setCollaboration(collab);
           setEvents(milestoneEvents);
           setLoadedAt(Date.now());
@@ -115,7 +118,7 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
             <div className="text-sm font-semibold text-foreground">{t('roadmapTitle')}</div>
           </SectionCardHeader>
           <SectionCardBody>
-            <RoadmapFlow epics={roadmap} />
+            <RoadmapFlow epics={roadmap} totalEpicCount={totalEpicCount} />
           </SectionCardBody>
         </SectionCard>
 
