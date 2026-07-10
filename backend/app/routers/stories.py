@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.deletion_audit import DeletionAuditLog
 from app.models.event import Event
 from app.models.pm import Epic, Story, StoryActivity, StoryComment
 from app.models.team import TeamMember
@@ -20,7 +21,7 @@ from app.services.event_seq import assign_recipient_seq
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.schemas.story import StoryAttachment, StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
-from app.services.member_resolver import canonicalize_member_id, filter_org_member_ids
+from app.services.member_resolver import canonicalize_member_id, filter_org_member_ids, resolve_member
 from app.services.merge_verdict_gate import (
     AUTO_MERGE,
     evaluate_merge_gate,
@@ -851,10 +852,32 @@ async def delete_story(
     repo: StoryRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    """E-SECURITY SEC-S1(story 70c9e92c): hard-delete는 휴먼 전용 — 에이전트 API키(사람 승인
+    없는 즉시 물리삭제)는 403. 삭제 전 actor/target를 감사 기록(story row 자체는 삭제되므로
+    미리 캡처 — DeletionAuditLog는 story FK 없이 독립 테이블이라 삭제 후에도 생존)."""
     from app.repositories.dependency import DependencyRepository
     from app.repositories.label import ItemLabelRepository
     from app.repositories.participation import ParticipationRepository
+
+    resolved = await resolve_member(auth, org_id, session)
+    if resolved.type != "human":
+        raise HTTPException(status_code=403, detail="Story 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    session.add(DeletionAuditLog(
+        id=uuid.uuid4(),
+        org_id=org_id,
+        actor_id=resolved.id,
+        entity_type="story",
+        entity_id=id,
+        entity_title=story.title,
+    ))
+
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Story not found")

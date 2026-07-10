@@ -1,4 +1,4 @@
-"""S3-6: 시스템 콜 계약 검증 — 98개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
+"""S3-6: 시스템 콜 계약 검증 — 97개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
 from __future__ import annotations
 
 import os
@@ -13,9 +13,9 @@ from sprintable_mcp.server import mcp  # noqa: E402
 _TOOLS: dict = mcp._tool_manager._tools
 
 EXPECTED_TOOLS = {
-    # stories (8)
+    # stories (7) — E-SECURITY SEC-S1: delete_story 의도적 제거(에이전트 hard-delete 차단)
     "sprintable_list_stories", "sprintable_list_backlog", "sprintable_add_story",
-    "sprintable_update_story", "sprintable_delete_story",
+    "sprintable_update_story",
     "sprintable_assign_story_to_sprint", "sprintable_unassign_story_from_sprint",
     "sprintable_update_story_status",
     # tasks (7)
@@ -87,7 +87,7 @@ EXPECTED_TOOLS = {
 
 
 def test_total_tool_count():
-    assert len(_TOOLS) == 98
+    assert len(_TOOLS) == 97
 
 
 def test_all_expected_tools_registered():

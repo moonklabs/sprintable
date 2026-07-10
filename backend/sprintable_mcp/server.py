@@ -99,10 +99,10 @@ from .tools.standup import (
     save_standup, standup_history, standup_missing, update_retro_action_status,
 )
 from .tools.stories import (
-    AddStoryInput, AssignStoryToSprintInput, DeleteStoryInput,
+    AddStoryInput, AssignStoryToSprintInput,
     ListStoriesInput, UnassignStoryFromSprintInput, UpdateStoryInput,
     UpdateStoryStatusInput,
-    add_story, assign_story_to_sprint, delete_story,
+    add_story, assign_story_to_sprint,
     list_backlog, list_stories, unassign_story_from_sprint,
     update_story, update_story_status,
 )
@@ -318,9 +318,7 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_update_story",
      "스토리 수정.",
      UpdateStoryInput, update_story),
-    ("sprintable_delete_story",
-     "스토리 삭제.",
-     DeleteStoryInput, delete_story),
+    # E-SECURITY SEC-S1: sprintable_delete_story 의도적 제거(에이전트 hard-delete 차단).
     ("sprintable_assign_story_to_sprint",
      "스토리를 스프린트에 배정.",
      AssignStoryToSprintInput, assign_story_to_sprint),

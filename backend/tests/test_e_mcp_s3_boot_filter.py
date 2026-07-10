@@ -16,7 +16,8 @@ def test_disallowed_tools_explicit_group():
 def test_disallowed_tools_legacy_keeps_nondestructive_hides_destructive():
     d = server.disallowed_tools(["read", "write"])
     assert "sprintable_add_story" not in d     # 비파괴 → 노출
-    assert "sprintable_delete_story" in d       # destructive → 숨김(grant 없음)
+    # E-SECURITY SEC-S1: sprintable_delete_story 제거(에이전트 hard-delete 차단) — delete_task로 대체 예시
+    assert "sprintable_delete_task" in d        # destructive → 숨김(grant 없음)
     assert "sprintable_give_reward" in d
 
 
@@ -24,7 +25,7 @@ def test_disallowed_tools_none_fallback_equals_legacy():
     """매니페스트 fetch 실패(None) = 레거시 비파괴셋(destructive만 숨김)."""
     d = server.disallowed_tools(None)
     assert "sprintable_add_story" not in d
-    assert "sprintable_delete_story" in d
+    assert "sprintable_delete_task" in d
 
 
 def test_ping_never_in_disallowed():
@@ -48,5 +49,5 @@ def test_filter_fallback_none_hides_only_destructive(monkeypatch):
     removed: list[str] = []
     monkeypatch.setattr(server.mcp, "remove_tool", lambda name: removed.append(name))
     server.filter_tools_by_scope(None)  # degrade
-    assert "sprintable_delete_story" in removed     # destructive 숨김
-    assert "sprintable_add_story" not in removed     # 비파괴 보존
+    assert "sprintable_delete_task" in removed        # destructive 숨김
+    assert "sprintable_add_story" not in removed      # 비파괴 보존
