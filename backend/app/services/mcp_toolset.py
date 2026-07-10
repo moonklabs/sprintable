@@ -63,6 +63,11 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 동형(자기 작업에 self-proof 첨부 = 데이터 파괴 아닌 협업/증명 유틸) — 어떤 역할의 working
     # agent든 default_tool_groups 무관하게 done 첨부해야 하므로 always-allow.
     "sprintable_add_evidence",
+    # E-CANVAS C1-S3(story 8bace49e): create_artifact/get_artifact — story/epic/doc 中 어디에도
+    # (또는 아무데도) 붙을 수 있는 시각 산출물 생성/조회. add_evidence와 동형(단일 도메인 그룹에
+    # 묶기 애매한 cross-cutting 자기생성 유틸) — 향후 C2/C3가 관련 도구를 늘리면 그때 전용
+    # "canvas" 그룹 신설을 고려(지금은 2개뿐이라 조기 그룹화 안 함).
+    "sprintable_create_artifact", "sprintable_get_artifact",
 })
 
 # scope 토큰: 그룹명 외에 read/write(레거시·전체 비파괴 의미), admin/destructive(파괴적 허용)
@@ -280,6 +285,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_link_gate_to_task",
     # evidence (E-VERIFY V0-S1)
     "sprintable_add_evidence",
+    # visual artifacts (E-CANVAS C1-S3)
+    "sprintable_create_artifact", "sprintable_get_artifact",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.

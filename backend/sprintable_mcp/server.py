@@ -29,6 +29,7 @@ from .schemas import SprintableInput
 from .toolset import is_tool_allowed
 from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
 from .tools.evidence import AddEvidenceInput, add_evidence
+from .tools.visual_artifacts import CreateArtifactInput, GetArtifactInput, create_artifact, get_artifact
 from .tools.agent_runs import (
     EmitEventInput, PollEventsInput, UpdateRunStatusInput,
     emit_event, poll_events, update_run_status,
@@ -503,6 +504,14 @@ _TOOL_DEFS: list[tuple] = [
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
      " 남김. 선택제(첨부 안 해도 무불이익).",
      AddEvidenceInput, add_evidence),
+    # Visual artifacts (2) — E-CANVAS C1-S3
+    ("sprintable_create_artifact",
+     "시각 산출물 생성(에이전트 생성 입구) — 트리(nodes[])로 구조화. 임포트된 raw HTML/이미지는"
+     " type=\"html_blob\" 노드 하나로 감싸도 됨.",
+     CreateArtifactInput, create_artifact),
+    ("sprintable_get_artifact",
+     "시각 산출물 단건 조회(latest 버전 + nodes).",
+     GetArtifactInput, get_artifact),
     # Chat (3)
     ("sprintable_send_chat_message",
      "conversation thread에 채팅 메시지 발송.",

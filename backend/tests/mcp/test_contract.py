@@ -1,4 +1,4 @@
-"""S3-6: 시스템 콜 계약 검증 — 98개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
+"""S3-6: 시스템 콜 계약 검증 — 100개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
 from __future__ import annotations
 
 import os
@@ -81,13 +81,15 @@ EXPECTED_TOOLS = {
     "sprintable_link_gate_to_task",
     # evidence (1) — E-VERIFY V0-S1
     "sprintable_add_evidence",
+    # visual artifacts (2) — E-CANVAS C1-S3
+    "sprintable_create_artifact", "sprintable_get_artifact",
     # smoke
     "ping",
 }
 
 
 def test_total_tool_count():
-    assert len(_TOOLS) == 98
+    assert len(_TOOLS) == 100
 
 
 def test_all_expected_tools_registered():
