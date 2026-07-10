@@ -118,3 +118,32 @@ class ArtifactCommentResponse(BaseModel):
     resolved_at: datetime | None = None
     created_by: uuid.UUID
     created_at: datetime
+
+
+class ExportUploadUrlRequest(BaseModel):
+    content_type: str = "image/png"
+
+
+class ExportUploadUrlResponse(BaseModel):
+    upload_url: str
+    object_path: str
+    expires_at: datetime
+
+
+class CompleteExportRequest(BaseModel):
+    object_path: str
+
+
+class ArtifactExportResponse(BaseModel):
+    id: uuid.UUID
+    artifact_id: uuid.UUID
+    version_id: uuid.UUID
+    version_number: int
+    format: str
+    created_by: uuid.UUID | None = None
+    created_at: datetime
+    # 유나 UX 결정③(공유 링크 1급): asset_id는 안정적 공유 참조 — FE가
+    # GET /api/v2/attachments/authorize?asset_id=... (기존 인프라 재사용)로 인가된 caller에게
+    # 언제든 재서명 다운로드 URL을 새로 받을 수 있다. download_url은 즉시 사용 편의용 단기 서명.
+    asset_id: uuid.UUID
+    download_url: str | None = None

@@ -9,13 +9,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
-from app.models.visual_artifact import ArtifactComment, ArtifactNode, ArtifactVersion, VisualArtifact
+from app.models.asset import Asset
+from app.models.visual_artifact import (
+    ArtifactComment, ArtifactExport, ArtifactNode, ArtifactVersion, VisualArtifact,
+)
 from app.schemas.visual_artifact import (
     ArtifactCommentResponse,
+    ArtifactExportResponse,
     ArtifactNodeOut,
     ArtifactVersionSummary,
+    CompleteExportRequest,
     CreateArtifactCommentRequest,
     CreateArtifactRequest,
+    ExportUploadUrlRequest,
+    ExportUploadUrlResponse,
     VisualArtifactDetail,
     VisualArtifactSummary,
 )
@@ -372,3 +379,293 @@ async def resolve_artifact_comment(
     await session.flush()
     await session.refresh(comment)
     return _ok(ArtifactCommentResponse.model_validate(comment).model_dump(mode="json"))
+
+
+# ─── Export (E-CANVAS C1-S5, story 1f365e33) ──────────────────────────────────
+# crux(오르테가 승인): PNG는 클라 캡처 — BE는 바이너리를 경유하지 않고 signed write URL만 발급,
+# FE가 GCS에 직접 PUT 후 complete로 편입 알림(head_object 실체 검증 — client-trust 금지 원칙
+# 계승). HTML은 렌더 불요라 BE가 즉시 생성+저장(client-trust 이슈 없음). asset_id는 유나 UX③
+# (공유 링크 1급)의 안정 참조 — 기존 attachments.authorize(asset_id=) 인프라 재사용.
+
+_EXPORT_TTL_MIN = 30
+
+
+def _export_container() -> str:
+    from app.services.asset_registry import DEFAULT_CONTAINER
+    return DEFAULT_CONTAINER
+
+
+def _export_object_path(org_id: uuid.UUID, project_id: uuid.UUID, artifact_id: uuid.UUID, ext: str) -> str:
+    """SEC 계열 스코프 원칙 계승(org/project/artifact 전 segment exact 바인딩) — cross-project
+    export asset 오염/IDOR 차단."""
+    return f"org/{org_id}/project/{project_id}/artifact/{artifact_id}/export/{uuid.uuid4()}.{ext}"
+
+
+def _export_path_in_scope(object_path: str, org_id: uuid.UUID, project_id: uuid.UUID, artifact_id: uuid.UUID) -> bool:
+    expected_prefix = f"org/{org_id}/project/{project_id}/artifact/{artifact_id}/export/"
+    return object_path.startswith(expected_prefix)
+
+
+async def _get_version_or_404(
+    session: AsyncSession, artifact_id: uuid.UUID, version_number: int
+) -> ArtifactVersion | None:
+    return (await session.execute(
+        select(ArtifactVersion).where(
+            ArtifactVersion.artifact_id == artifact_id, ArtifactVersion.version_number == version_number,
+        )
+    )).scalar_one_or_none()
+
+
+async def _upsert_export_asset(
+    session: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID,
+    object_path: str, name: str, content_type: str, size_bytes: int, created_by: uuid.UUID,
+) -> uuid.UUID:
+    """assets 레지스트리 upsert(멱등) — asset_registry.sync_attachment_assets와 동일 ON CONFLICT
+    키 규칙(org_id/project_id/container/object_path)이나 AssetLink 폴리모픽 확장 없이 단독 사용
+    (ArtifactExport가 자체 귀속 테이블이라 소스타입 CHECK 확장 불요)."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    container = _export_container()
+    base_ins = pg_insert(Asset).values(
+        org_id=org_id, project_id=project_id, container=container, object_path=object_path,
+        name=name, content_type=content_type, size_bytes=size_bytes, created_by=created_by,
+    )
+    ins = base_ins.on_conflict_do_nothing(
+        index_elements=[Asset.org_id, Asset.project_id, Asset.container, Asset.object_path],
+        index_where=Asset.project_id.isnot(None),
+    ).returning(Asset.id)
+    asset_id = (await session.execute(ins)).scalar_one_or_none()
+    if asset_id is None:
+        sel = select(Asset.id).where(
+            Asset.org_id == org_id, Asset.project_id == project_id,
+            Asset.container == container, Asset.object_path == object_path,
+        )
+        asset_id = (await session.execute(sel)).scalar_one()
+    return asset_id
+
+
+async def _export_response(
+    session: AsyncSession, export: ArtifactExport, version_number: int, *, container: str,
+) -> ArtifactExportResponse:
+    from datetime import timedelta
+
+    from app.services.storage import get_storage_provider
+
+    asset = (await session.execute(select(Asset).where(Asset.id == export.asset_id))).scalar_one()
+    download_url = await get_storage_provider().signed_read_url(
+        container, asset.object_path, ttl=timedelta(minutes=_EXPORT_TTL_MIN),
+    )
+    return ArtifactExportResponse(
+        id=export.id, artifact_id=export.artifact_id, version_id=export.version_id,
+        version_number=version_number, format=export.format, created_by=export.created_by,
+        created_at=export.created_at, asset_id=export.asset_id, download_url=download_url,
+    )
+
+
+@router.post("/{id}/versions/{version_number}/export/png/upload-url")
+async def create_export_upload_url(
+    id: uuid.UUID,
+    version_number: int,
+    body: ExportUploadUrlRequest,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.storage import get_storage_provider
+
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    version = await _get_version_or_404(session, artifact.id, version_number)
+    if version is None:
+        return _err("NOT_FOUND", "Artifact version not found", 404)
+
+    object_path = _export_object_path(org_id, project_id, artifact.id, "png")
+    ttl = timedelta(minutes=_EXPORT_TTL_MIN)
+    upload_url = await get_storage_provider().signed_write_url(
+        _export_container(), object_path, ttl=ttl, content_type=body.content_type,
+    )
+    if upload_url is None:
+        return _err("STORAGE_ERROR", "signed write URL 발급 실패", 500)
+    return _ok(ExportUploadUrlResponse(
+        upload_url=upload_url, object_path=object_path,
+        expires_at=datetime.now(timezone.utc) + ttl,
+    ).model_dump(mode="json"))
+
+
+@router.post("/{id}/versions/{version_number}/export/png/complete", status_code=201)
+async def complete_png_export(
+    id: uuid.UUID,
+    version_number: int,
+    body: CompleteExportRequest,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from app.services.storage import get_storage_provider
+
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    version = await _get_version_or_404(session, artifact.id, version_number)
+    if version is None:
+        return _err("NOT_FOUND", "Artifact version not found", 404)
+
+    if not _export_path_in_scope(body.object_path, org_id, project_id, artifact.id):
+        return _err("FORBIDDEN", "object_path not in artifact export scope", 403)
+
+    container = _export_container()
+    size_bytes = await get_storage_provider().head_object(container, body.object_path)
+    if size_bytes is None:
+        return _err("NOT_FOUND", "업로드된 객체를 찾을 수 없습니다(head_object 실패)", 404)
+
+    created_by = uuid.UUID(auth.user_id)
+    asset_id = await _upsert_export_asset(
+        session, org_id=org_id, project_id=project_id, object_path=body.object_path,
+        name=f"{artifact.title}-v{version_number}.png", content_type="image/png",
+        size_bytes=size_bytes, created_by=created_by,
+    )
+    export = ArtifactExport(
+        id=uuid.uuid4(), artifact_id=artifact.id, version_id=version.id, format="png",
+        asset_id=asset_id, created_by=created_by,
+    )
+    session.add(export)
+    await session.flush()
+    await session.refresh(export)
+
+    target_member_ids = list({artifact.created_by} - {created_by}) if artifact.created_by else []
+    if target_member_ids:
+        await dispatch_notification(
+            session, org_id=org_id, event_type="artifact.exported",
+            target_member_ids=target_member_ids,
+            title=f"산출물 export: {artifact.title}",
+            body="PNG export가 완료됐습니다.",
+            reference_type="visual_artifact", reference_id=artifact.id,
+            source_project_id=project_id,
+        )
+
+    resp = await _export_response(session, export, version_number, container=container)
+    return _ok(resp.model_dump(mode="json"), status=201)
+
+
+@router.post("/{id}/versions/{version_number}/export/html", status_code=201)
+async def create_html_export(
+    id: uuid.UUID,
+    version_number: int,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """self-contained HTML export — 렌더 불요(nodes 트리를 BE가 직렬화), client-trust 이슈 없어
+    즉시 put_object(유나 UX②: as-authored — 별도 재테마 없이 저장된 props 그대로 직렬화)."""
+    from app.services.storage import get_storage_provider
+
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    version = await _get_version_or_404(session, artifact.id, version_number)
+    if version is None:
+        return _err("NOT_FOUND", "Artifact version not found", 404)
+
+    node_rows = (await session.execute(
+        select(ArtifactNode).where(ArtifactNode.version_id == version.id).order_by(ArtifactNode.sort_order)
+    )).scalars().all()
+    html = _render_self_contained_html(artifact.title, node_rows)
+    html_bytes = html.encode("utf-8")
+
+    container = _export_container()
+    object_path = _export_object_path(org_id, project_id, artifact.id, "html")
+    ok = await get_storage_provider().put_object(
+        container, object_path, html_bytes, content_type="text/html; charset=utf-8",
+    )
+    if not ok:
+        return _err("STORAGE_ERROR", "HTML export 업로드 실패", 500)
+
+    created_by = uuid.UUID(auth.user_id)
+    asset_id = await _upsert_export_asset(
+        session, org_id=org_id, project_id=project_id, object_path=object_path,
+        name=f"{artifact.title}-v{version_number}.html", content_type="text/html; charset=utf-8",
+        size_bytes=len(html_bytes), created_by=created_by,
+    )
+    export = ArtifactExport(
+        id=uuid.uuid4(), artifact_id=artifact.id, version_id=version.id, format="html",
+        asset_id=asset_id, created_by=created_by,
+    )
+    session.add(export)
+    await session.flush()
+    await session.refresh(export)
+
+    target_member_ids = list({artifact.created_by} - {created_by}) if artifact.created_by else []
+    if target_member_ids:
+        await dispatch_notification(
+            session, org_id=org_id, event_type="artifact.exported",
+            target_member_ids=target_member_ids,
+            title=f"산출물 export: {artifact.title}",
+            body="HTML export가 완료됐습니다.",
+            reference_type="visual_artifact", reference_id=artifact.id,
+            source_project_id=project_id,
+        )
+
+    resp = await _export_response(session, export, version_number, container=container)
+    return _ok(resp.model_dump(mode="json"), status=201)
+
+
+def _render_self_contained_html(title: str, nodes: list[ArtifactNode]) -> str:
+    """nodes 트리를 as-authored 그대로 직렬화한 self-contained HTML(외부 리소스 참조 0).
+    html_blob 노드는 props.html을 그대로 삽입(임포트 raw HTML 계승), 그 외는 최소 wrapper."""
+    import html as _html_mod
+    import json as _json
+
+    parts: list[str] = [
+        "<!doctype html>", "<html>", "<head>",
+        f"<meta charset=\"utf-8\"><title>{_html_mod.escape(title)}</title>",
+        "</head>", "<body>",
+    ]
+    for n in sorted(nodes, key=lambda x: x.sort_order):
+        if n.type == "html_blob":
+            parts.append(str(n.props.get("html", "")))
+        else:
+            data_props = _html_mod.escape(_json.dumps(n.props, ensure_ascii=False))
+            parts.append(
+                f"<div data-node-type=\"{_html_mod.escape(n.type)}\" data-node-props=\"{data_props}\">"
+                f"</div>"
+            )
+    parts.append("</body></html>")
+    return "\n".join(parts)
+
+
+@router.get("/{id}/exports")
+async def list_artifact_exports(
+    id: uuid.UUID,
+    version_number: int | None = Query(default=None),
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+
+    q = select(ArtifactExport, ArtifactVersion.version_number).join(
+        ArtifactVersion, ArtifactExport.version_id == ArtifactVersion.id,
+    ).where(ArtifactExport.artifact_id == artifact.id).order_by(ArtifactExport.created_at.desc())
+    if version_number is not None:
+        q = q.where(ArtifactVersion.version_number == version_number)
+    rows = (await session.execute(q)).all()
+
+    container = _export_container()
+    results = [
+        (await _export_response(session, export, vn, container=container)).model_dump(mode="json")
+        for export, vn in rows
+    ]
+    return _ok(results)
