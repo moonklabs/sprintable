@@ -17,6 +17,7 @@ import { DependencyGraph } from './dependency-graph';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
+import { EvidenceSection } from '@/components/verify/evidence-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
@@ -730,6 +731,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 })}
               </DropdownMenuContent>
             </DropdownMenu>
+            {/* E-VERIFY V0-S3 Lv1/Lv2 — 완료 badge의 연장으로 읽히도록 바로 아래. 증거 0이면
+                EvidenceSection 자체가 null 렌더(행 미노출, §7 상태 매트릭스). */}
+            <EvidenceSection
+              workItemId={story.id}
+              workItemType="story"
+              hasEvidence={story.has_evidence}
+              memberMap={memberMap}
+            />
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
