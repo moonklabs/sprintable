@@ -1,5 +1,5 @@
-"""시각 산출물(visual_artifact) MCP 도구(4개) — E-CANVAS C1-S3(story 8bace49e)+
-C2-S6(story 0edca31e, 코멘트 왕복)."""
+"""시각 산출물(visual_artifact) MCP 도구(5개) — E-CANVAS C1-S3(story 8bace49e)+
+C2-S6(story 0edca31e, 코멘트 왕복)+C3-S7(story 940266db, 편집 왕복)."""
 from __future__ import annotations
 
 from mcp.types import TextContent
@@ -43,6 +43,22 @@ class AddArtifactCommentInput(SprintableInput):
     anchor_y: float | None = None
     parent_id: str | None = None  # 답글이면 부모 코멘트 id
     mentioned_ids: list[str] | None = None
+
+
+class ArtifactNodeOperationInput(SprintableInput):
+    op: str  # "add" | "update" | "delete"
+    id: str | None = None  # add: 선택 / update·delete: 필수(대상 node id)
+    type: str | None = None  # add 필수
+    props: dict | None = None  # add: 초기값 / update: 지정 시 전체 교체
+    parent_id: str | None = None
+    sort_order: int | None = None
+    description: str | None = None
+
+
+class EditArtifactInput(SprintableInput):
+    artifact_id: str
+    operations: list[ArtifactNodeOperationInput]
+    summary: str | None = None  # 새 버전 변경 이유(선택)
 
 
 async def create_artifact(args: CreateArtifactInput) -> list[TextContent]:
@@ -103,6 +119,22 @@ async def add_artifact_comment(args: AddArtifactCommentInput) -> list[TextConten
         if args.mentioned_ids:
             body["mentioned_ids"] = args.mentioned_ids
         result = await client.post(f"/api/v2/visual-artifacts/{args.artifact_id}/comments", json=body)
+        return ok(result)
+    except Exception as exc:
+        return err(str(exc))
+
+
+async def edit_artifact(args: EditArtifactInput) -> list[TextContent]:
+    """artifact 요소를 add/update/delete로 편집 — 휴먼 딸깍 편집과 동일 엔드포인트를 경유해
+    "같은 객체를 양쪽이 편집"(AC4 왕복). 편집은 항상 새 버전을 만든다(무-mutate 버전 원칙).
+    대상자에게 artifact.updated 이벤트 전파."""
+    try:
+        body = {
+            "operations": [op.model_dump(exclude_none=True) for op in args.operations],
+        }
+        if args.summary:
+            body["summary"] = args.summary
+        result = await client.post(f"/api/v2/visual-artifacts/{args.artifact_id}/edit", json=body)
         return ok(result)
     except Exception as exc:
         return err(str(exc))

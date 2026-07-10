@@ -147,3 +147,35 @@ class ArtifactExportResponse(BaseModel):
     # 언제든 재서명 다운로드 URL을 새로 받을 수 있다. download_url은 즉시 사용 편의용 단기 서명.
     asset_id: uuid.UUID
     download_url: str | None = None
+
+
+class ArtifactNodeOperation(BaseModel):
+    """E-CANVAS C3-S7(story 940266db): 딸깍 편집(휴먼)·MCP 편집(에이전트) 공용 연산 — 동일
+    서비스 경로를 경유해 "같은 객체를 양쪽이 편집"을 보장한다."""
+    op: str  # "add" | "update" | "delete"
+    id: uuid.UUID | None = None  # add: 선택(미지정 시 서버 생성) / update·delete: 필수(대상 node id)
+    type: str | None = None  # add 필수
+    props: dict[str, Any] | None = None  # add: 초기값(미지정 {}) / update: 지정 시 전체 교체
+    parent_id: uuid.UUID | None = None
+    sort_order: int | None = None
+    description: str | None = None
+
+    @field_validator("op")
+    @classmethod
+    def _validate_op(cls, v: str) -> str:
+        if v not in ("add", "update", "delete"):
+            raise ValueError("op must be 'add', 'update', or 'delete'")
+        return v
+
+
+class EditArtifactRequest(BaseModel):
+    operations: list[ArtifactNodeOperation]
+    # 새 버전의 변경 이유(선택) — ArtifactVersion.summary와 동형(C1-S3 §11 갭②).
+    summary: str | None = None
+
+    @field_validator("operations")
+    @classmethod
+    def _non_empty_operations(cls, v: list) -> list:
+        if not v:
+            raise ValueError("operations must not be empty")
+        return v
