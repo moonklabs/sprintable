@@ -1,4 +1,5 @@
-"""태스크 관련 MCP 도구 (7개)."""
+"""태스크 관련 MCP 도구 (6개) — E-SECURITY SEC-S1 확장: delete_task 제거(에이전트 hard-delete 차단,
+delete_story와 동형 조치. 까심 적대적 QA 발견 갭)."""
 from __future__ import annotations
 
 from mcp.types import TextContent
@@ -40,10 +41,6 @@ class UpdateTaskInput(SprintableInput):
 class UpdateTaskStatusInput(SprintableInput):
     task_id: str
     status: TaskStatus
-
-
-class DeleteTaskInput(SprintableInput):
-    task_id: str
 
 
 async def list_tasks(args: ListTasksInput) -> list[TextContent]:
@@ -113,14 +110,5 @@ async def update_task_status(args: UpdateTaskStatusInput) -> list[TextContent]:
     """태스크 상태 변경."""
     try:
         return ok(await client.patch(f"/api/v2/tasks/{args.task_id}", json={"status": args.status.value}))
-    except Exception as exc:
-        return err(str(exc))
-
-
-async def delete_task(args: DeleteTaskInput) -> list[TextContent]:
-    """태스크 삭제."""
-    try:
-        await client.delete(f"/api/v2/tasks/{args.task_id}")
-        return ok({"deleted": True})
     except Exception as exc:
         return err(str(exc))
