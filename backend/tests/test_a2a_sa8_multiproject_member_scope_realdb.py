@@ -102,6 +102,23 @@ def _client_for(app):
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
+async def _authed_agent_card_overrides(app, org_id):
+    """E-SECURITY SEC-S2: agent-card.json이 authed+same-org로 승격 — 발견 테스트도 호출자 org 인증 필요."""
+    from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+
+    async def _auth():
+        return AuthContext(
+            user_id=str(uuid.uuid4()), email="caller@test",
+            claims={"app_metadata": {"org_id": str(org_id)}},
+        )
+
+    async def _org():
+        return org_id
+
+    app.dependency_overrides[get_current_user] = _auth
+    app.dependency_overrides[get_verified_org_id] = _org
+
+
 @pytest.mark.anyio
 async def test_agent_card_multiproject_member_no_longer_500s():
     """S-A8 AC3: 멀티-project agent의 agent-card가 200 정상 카드(회귀: 이전엔 MultipleResultsFound 500)."""
@@ -111,6 +128,14 @@ async def test_agent_card_multiproject_member_no_longer_500s():
     try:
         async with Session() as s:
             org_id, project_a, project_b, agent_id = await _seed_multiproject_agent(s)
+
+        async def _db():
+            async with Session() as s:
+                yield s
+
+        from app.dependencies.database import get_db
+        app.dependency_overrides[get_db] = _db
+        await _authed_agent_card_overrides(app, org_id)
 
         client = _client_for(app)
         try:
@@ -122,6 +147,7 @@ async def test_agent_card_multiproject_member_no_longer_500s():
         finally:
             await client.aclose()
     finally:
+        app.dependency_overrides.clear()
         await engine.dispose()
 
 
@@ -136,6 +162,14 @@ async def test_agent_card_single_project_member_regression_zero():
             org_id, project_a, project_b, _ = await _seed_multiproject_agent(s)
             solo_project_id, solo_agent_id = await _seed_single_project_agent(s, org_id)
 
+        async def _db():
+            async with Session() as s:
+                yield s
+
+        from app.dependencies.database import get_db
+        app.dependency_overrides[get_db] = _db
+        await _authed_agent_card_overrides(app, org_id)
+
         client = _client_for(app)
         try:
             resp = await client.get(f"/api/v2/a2a/members/{solo_agent_id}/agent-card.json")
@@ -144,6 +178,7 @@ async def test_agent_card_single_project_member_regression_zero():
         finally:
             await client.aclose()
     finally:
+        app.dependency_overrides.clear()
         await engine.dispose()
 
 
