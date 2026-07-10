@@ -56,6 +56,10 @@ async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | 
                 payload = decode_jwt(token)
             except JWTError:
                 return None
+            # E-SECURITY SEC-S5(story 278fe427·P0 핫픽스): get_current_user와 동일 타입혼동 갭 —
+            # WS 인증도 refresh 토큰을 그대로 받아들이던 봉인.
+            if payload.get("type") != "access":
+                return None
             user_id = payload.get("sub")
             if not user_id:
                 return None

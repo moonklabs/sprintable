@@ -234,6 +234,15 @@ async def get_current_user(
     except JWTError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
 
+    # E-SECURITY SEC-S5(story 278fe427·P0 핫픽스): refresh 토큰이 이 경로로 그대로 Bearer 인증을
+    # 통과하던 타입혼동 — create_access_token/create_refresh_token 둘 다 payload에 "type"을 이미
+    # 싣고 있었으나(access/refresh) 여기서 검사한 적이 없었다. refresh 토큰은 /auth/refresh 전용
+    # RefreshToken 테이블(revoked_at)로만 무효화되는데, get_current_user는 그 테이블을 전혀 보지
+    # 않고 서명·exp만 확인해 통과시켜 왔다 — 제거된 멤버의 (아직 만료 안 된) refresh 토큰이 access
+    # 토큰 대신 그대로 쓰일 수 있어 revoke가 사실상 무력화(까심 라이브 재현). access 전용으로 강제.
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+
     user_id: str | None = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing sub claim")
@@ -621,6 +630,11 @@ async def get_current_user_streaming(
         payload = decode_jwt(token)
     except JWTError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+
+    # E-SECURITY SEC-S5(story 278fe427·P0 핫픽스): get_current_user와 동일 타입혼동 갭 — SSE 전용
+    # 변형도 동일하게 refresh 토큰을 Bearer로 받아버려 별도 봉인 필요.
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
 
     user_id: str | None = payload.get("sub")
     if not user_id:
