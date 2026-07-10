@@ -851,10 +851,22 @@ async def delete_story(
     repo: StoryRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
     from app.repositories.dependency import DependencyRepository
     from app.repositories.label import ItemLabelRepository
     from app.repositories.participation import ParticipationRepository
+
+    # E-SECURITY SEC-S3(story 90cd7e57): DELETE가 org-only 스코핑이라 프로젝트 미멤버(같은 org의
+    # 다른 프로젝트 소속)도 스토리 삭제 가능했음 — upload_story_attachment와 동일 SSOT
+    # (has_project_access)로 project 인가 적용.
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(session, uuid.UUID(auth.user_id), story.project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Story not found")
