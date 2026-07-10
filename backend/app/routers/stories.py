@@ -889,6 +889,14 @@ async def delete_story(
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
 
+    # E-SECURITY SEC-S3(story 90cd7e57): DELETE가 org-only 스코핑이라 프로젝트 미멤버(같은 org의
+    # 다른 프로젝트 소속)도 스토리 삭제 가능했음 — upload_story_attachment와 동일 SSOT
+    # (has_project_access)로 project 인가 적용. SEC-S1의 human-gate(에이전트 차단)와는 직교 축
+    # (actor 타입 vs project 소속) — human이어도 무관한 project면 여전히 403.
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(session, uuid.UUID(auth.user_id), story.project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
     session.add(DeletionAuditLog(
         id=uuid.uuid4(),
         org_id=org_id,

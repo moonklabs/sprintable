@@ -215,12 +215,18 @@ async def test_group_request_2members_coerced_to_dm():
             obj.title = None
         session.refresh.side_effect = _refresh
 
-        async with client as c:
-            resp = await c.post("/api/v2/conversations", json={
-                "type": "group",   # label 은 group 이지만 2-member → DM 강제
-                "participant_ids": [str(uuid.uuid4())],
-                "project_id": str(PROJECT_ID),
-            })
+        # E-SECURITY SEC-S3: create_conversation이 먼저 participant_ids를 org 필터한다 — 이
+        # 테스트는 DM 강제 로직 검증이 목적이라 필터 자체는 통과-그대로(bypass)로 패치.
+        with patch(
+            "app.routers.conversations.filter_org_member_ids",
+            new=AsyncMock(side_effect=lambda ids, *a, **kw: ids),
+        ):
+            async with client as c:
+                resp = await c.post("/api/v2/conversations", json={
+                    "type": "group",   # label 은 group 이지만 2-member → DM 강제
+                    "participant_ids": [str(uuid.uuid4())],
+                    "project_id": str(PROJECT_ID),
+                })
         assert resp.status_code == 201
         body = resp.json()
         assert body["type"] == "dm", f"2-member group → DM 강제 실패: {body}"
@@ -253,12 +259,16 @@ async def test_create_dm_no_dedup_creates_new_session():
             obj.title = None
         session.refresh.side_effect = _refresh
 
-        async with client as c:
-            resp = await c.post("/api/v2/conversations", json={
-                "type": "dm",
-                "participant_ids": [str(other_id)],
-                "project_id": str(PROJECT_ID),
-            })
+        with patch(
+            "app.routers.conversations.filter_org_member_ids",
+            new=AsyncMock(side_effect=lambda ids, *a, **kw: ids),
+        ):
+            async with client as c:
+                resp = await c.post("/api/v2/conversations", json={
+                    "type": "dm",
+                    "participant_ids": [str(other_id)],
+                    "project_id": str(PROJECT_ID),
+                })
 
         assert resp.status_code == 201
         body = resp.json()
