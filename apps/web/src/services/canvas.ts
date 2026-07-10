@@ -42,6 +42,8 @@ export const MOCK_MEMBERS: Record<string, MemberRef> = {
   m1: { id: 'm1', name: '미르코 페트로비치' },
   m2: { id: 'm2', name: '유나 홀름' },
   m3: { id: 'm3', name: '디디 은와추쿠' },
+  m4: { id: 'm4', name: '파울로 오르테가' },
+  m5: { id: 'm5', name: '담롱 온찬' },
 };
 
 export const MOCK_ARTIFACT: VisualArtifact = {

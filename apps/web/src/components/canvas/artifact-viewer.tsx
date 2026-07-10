@@ -5,14 +5,21 @@ import { Check, Download, MessageCircle } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { ArtifactStage } from './artifact-stage';
 import { ArtifactVersionRail } from './artifact-version-rail';
+import { AnchorPin } from './anchor-pin';
+import { DescriptionPane } from './description-pane';
 import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canvas';
+import type { CommentThread, DescriptionMap } from '@/services/canvas-comments';
 
 interface ArtifactViewerProps {
   artifact: VisualArtifact;
   versions: ArtifactVersion[];
   memberMap?: Record<string, MemberRef>;
-  /** mock 목적 — 실 코멘트(C2) 착지 전까지 헤더 카운트 표시용. */
+  /** mock 목적 — threads가 없을 때만 쓰이는 폴백 헤더 카운트(C2 착지 전). */
   commentCount?: number;
+  /** C2 — 좌표 앵커 스레드는 스테이지에 핀 오버레이. element 앵커는 후속(실 artifact tree
+   * 좌표 유도 필요 — 지금은 좌표 앵커만 오버레이). */
+  threads?: CommentThread[];
+  descriptions?: DescriptionMap;
   className?: string;
 }
 
@@ -21,10 +28,16 @@ interface ArtifactViewerProps {
  * BE(`visual_artifact`/`artifact_version`, 디디 C1-S3) 미착지 — 이 컴포넌트는 props로 데이터를
  * 받는 순수 뷰라 실 API 착지 시 fetch 래퍼만 새로 감싸면 됨(컴포넌트 자체는 안 바뀜).
  */
-export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCount = 0, className }: ArtifactViewerProps) {
+export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCount = 0, threads, descriptions = {}, className }: ArtifactViewerProps) {
   const t = useTranslations('canvas');
   const [selectedVersion, setSelectedVersion] = useState(artifact.current_version);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const activeVersion = versions.find((v) => v.version === selectedVersion) ?? versions[0];
+  const selectedThread = threads?.find((th) => th.id === selectedThreadId) ?? null;
+  const selectedThreadDescription = selectedThread?.anchor.element_id
+    ? (descriptions[selectedThread.anchor.element_id] ?? null)
+    : null;
+  const openThreadCount = threads?.filter((th) => th.rollup !== 'resolved').length ?? 0;
 
   return (
     <div className={className}>
@@ -53,18 +66,33 @@ export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCoun
             <span title={t('exportComingSoon')} className="flex items-center gap-1 text-xs opacity-50">
               <Download className="h-3.5 w-3.5" aria-hidden />
             </span>
-            <span title={t('commentsComingSoon')} className="flex items-center gap-1 text-xs opacity-50">
+            <span
+              title={threads ? undefined : t('commentsComingSoon')}
+              className={`flex items-center gap-1 text-xs ${threads ? '' : 'opacity-50'}`}
+            >
               <MessageCircle className="h-3.5 w-3.5" aria-hidden />
-              {commentCount > 0 ? commentCount : null}
+              {threads ? (openThreadCount > 0 ? openThreadCount : null) : (commentCount > 0 ? commentCount : null)}
             </span>
           </span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_232px]">
-          <div className="bg-muted/20 p-4">
+          <div className="relative bg-muted/20 p-4">
             {activeVersion ? (
               <ArtifactStage format={artifact.format} content={activeVersion.content} title={artifact.title} />
             ) : null}
+            {/* C2 §1 — 좌표 앵커 스레드만 오버레이(element 앵커는 실 artifact tree 좌표 유도 필요, 후속). */}
+            {threads?.filter((th) => th.anchor.kind === 'coordinate').map((th) => (
+              <AnchorPin
+                key={th.id}
+                number={th.pin_number}
+                state={th.rollup === 'resolved' ? 'resolved' : 'open'}
+                active={th.id === selectedThreadId}
+                onClick={() => setSelectedThreadId((cur) => (cur === th.id ? null : th.id))}
+                className="absolute z-10"
+                style={{ left: `${th.anchor.x}%`, top: `${th.anchor.y}%` }}
+              />
+            ))}
           </div>
           <ArtifactVersionRail
             artifact={artifact}
@@ -72,6 +100,13 @@ export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCoun
             selectedVersion={selectedVersion}
             onSelectVersion={setSelectedVersion}
             memberMap={memberMap}
+            descriptionSlot={threads ? (
+              <DescriptionPane
+                description={selectedThreadDescription}
+                elementLabel={selectedThread?.element_label}
+                className="mt-1.5"
+              />
+            ) : undefined}
           />
         </div>
       </div>

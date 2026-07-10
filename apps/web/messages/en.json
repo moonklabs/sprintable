@@ -3368,6 +3368,22 @@
     "descriptionPaneComingSoon": "Per-element spec (description pane) arrives in C2",
     "exportComingSoon": "Export arrives in C1-S5",
     "commentsComingSoon": "Comments arrive in C2",
-    "treeRenderPlaceholder": "Tree rendering coming soon"
+    "treeRenderPlaceholder": "Tree rendering coming soon",
+    "descriptionPaneHeading": "description — visible PRD",
+    "descriptionEmptyState": "Select a pin to see its element spec here",
+    "rollupOpen": "open",
+    "rollupInProgress": "in progress",
+    "rollupResolved": "resolved",
+    "deliveringTo": "Delivering to {name}…",
+    "moreReached": "+{count} more reached",
+    "stateDelivered": "delivered",
+    "stateRead": "read",
+    "stateActing": "in progress",
+    "stateResponded": "responded",
+    "linkedVersionResult": "v{version} created — this comment was the input",
+    "coordinateAnchorNote": "position as of v{version}",
+    "resolveAction": "Resolve",
+    "replyPlaceholder": "Reply…",
+    "resolvedByNote": "Resolved by {name}"
   }
 }

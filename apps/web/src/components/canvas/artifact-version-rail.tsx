@@ -12,13 +12,16 @@ interface ArtifactVersionRailProps {
   selectedVersion: number;
   onSelectVersion: (version: number) => void;
   memberMap?: Record<string, MemberRef>;
+  /** C2 착지 후 슬롯 — 넘기면 "coming soon" 대신 이 노드(보통 `<DescriptionPane/>`)를 렌더.
+   * ArtifactVersionRail 자체는 C2 타입을 몰라도 되게 순수 슬롯으로 받는다. */
+  descriptionSlot?: React.ReactNode;
 }
 
 /**
  * E-CANVAS C1 Lv1 — 버전 lineage 레일. 각 엔트리 = 변경자·변경 이유(의미 단위)만.
  * raw 편집 나열 금지(핸드오프 §6 감시 게이트) — 여기 보이는 게 실제 저장된 커밋 단위 전부다.
  */
-export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSelectVersion, memberMap = {} }: ArtifactVersionRailProps) {
+export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSelectVersion, memberMap = {}, descriptionSlot }: ArtifactVersionRailProps) {
   const t = useTranslations('canvas');
   const [descOpen, setDescOpen] = useState(false);
   const sorted = [...versions].sort((a, b) => b.version - a.version);
@@ -78,7 +81,7 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
         {descOpen ? <ChevronUp className="h-3 w-3" aria-hidden /> : <ChevronDown className="h-3 w-3" aria-hidden />}
       </button>
       {descOpen ? (
-        <p className="mt-1.5 text-[11px] text-muted-foreground/80">{t('descriptionPaneComingSoon')}</p>
+        descriptionSlot ?? <p className="mt-1.5 text-[11px] text-muted-foreground/80">{t('descriptionPaneComingSoon')}</p>
       ) : null}
     </div>
   );
