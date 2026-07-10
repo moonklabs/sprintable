@@ -4,13 +4,11 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { AnchorPin } from './anchor-pin';
-import { PropagationStrip } from './propagation-strip';
 import type { MemberRef } from '@/services/canvas';
 import type { CommentThread } from '@/services/canvas-comments';
 
 const ROLLUP_LABEL_KEY: Record<CommentThread['rollup'], string> = {
   open: 'rollupOpen',
-  in_progress: 'rollupInProgress',
   resolved: 'rollupResolved',
 };
 
@@ -21,16 +19,17 @@ interface CommentThreadCardProps {
   onSelectPin?: (threadId: string) => void;
   onResolve?: (threadId: string) => void;
   onReply?: (threadId: string, body: string) => void;
-  onLinkedVersionClick?: (version: number) => void;
   className?: string;
 }
 
 /**
  * E-CANVAS C2 §2 — 코멘트 스레드 카드. 공통 코멘트 프리미티브(스토리 코멘트와 동일 인프라)
  * + artifact 앵커 필드만 additive. resolved 스레드는 가라앉음(opacity↓, §3 상태 매트릭스).
+ * 수신자별 읽음/응답 추적(PropagationStrip)은 실 BE에 데이터가 없고 §1 감시 리트머스에도
+ * 걸려 뺐다(오르테가/PO 승인, 2026-07-10) — resolved/resolved_by 2단계 실 신호만 노출.
  */
 export function CommentThreadCard({
-  thread, memberMap = {}, active, onSelectPin, onResolve, onReply, onLinkedVersionClick, className,
+  thread, memberMap = {}, active, onSelectPin, onResolve, onReply, className,
 }: CommentThreadCardProps) {
   const t = useTranslations('canvas');
   const [replyDraft, setReplyDraft] = useState('');
@@ -53,10 +52,7 @@ export function CommentThreadCard({
           active={active}
           onClick={onSelectPin ? () => onSelectPin(thread.id) : undefined}
         />
-        <span className="text-xs font-semibold text-foreground">{thread.element_label}</span>
-        {thread.anchor.kind === 'coordinate' && thread.anchor.pinned_at_version != null ? (
-          <span className="text-[10px] text-muted-foreground">{t('coordinateAnchorNote', { version: thread.anchor.pinned_at_version })}</span>
-        ) : null}
+        {thread.element_label ? <span className="text-xs font-semibold text-foreground">{thread.element_label}</span> : null}
         <span className={cn('ml-auto rounded px-1.5 py-0.5 text-[9px] font-bold', rollupTone)}>
           {t(ROLLUP_LABEL_KEY[thread.rollup])}
         </span>
@@ -71,13 +67,6 @@ export function CommentThreadCard({
             <p className="mt-0.5 text-xs leading-relaxed text-foreground">{c.body}</p>
           </div>
         ))}
-
-        <PropagationStrip
-          recipients={thread.recipients}
-          memberMap={memberMap}
-          linkedVersion={thread.linked_version}
-          onLinkedVersionClick={onLinkedVersionClick}
-        />
 
         {resolved && thread.resolved_by ? (
           <p className="text-[10px] text-muted-foreground/80">{t('resolvedByNote', { name: memberMap[thread.resolved_by]?.name ?? '—' })}</p>
