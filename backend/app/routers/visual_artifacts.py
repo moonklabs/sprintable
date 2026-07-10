@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,22 +55,28 @@ def _get_org_project(auth: AuthContext) -> tuple[uuid.UUID | None, uuid.UUID | N
 _LINK_TABLES = {"story_id": "stories", "epic_id": "epics", "doc_id": "docs"}
 
 
-async def _assert_link_target_in_org(
-    session: AsyncSession, caller_org_id: uuid.UUID, body: CreateArtifactRequest,
+async def _assert_link_target_in_scope(
+    session: AsyncSession, caller_org_id: uuid.UUID, caller_project_id: uuid.UUID, body: CreateArtifactRequest,
 ) -> None:
-    """E-CANVAS C1-S3(story 8bace49e) crux 확認 사항: story_id/epic_id/doc_id 연결 시 SEC-S6/S7
-    공통 가드(`assert_target_in_caller_org`) 재사용 — tenant 격리를 신규 기능에 재발시키지 않는다."""
+    """E-CANVAS C1-S3(story 8bace49e) crux + E-SECURITY SEC-S8 R(까심 전수스윕): story_id/epic_id/
+    doc_id 연결 시 SEC-S6/S7 공통 가드(`assert_target_in_caller_org`)로 org만 대조하고 project는
+    안 봐서, 같은 org 다른 project 스토리/에픽/doc에 artifact를 링크할 수 있었다(G/Q와 동형
+    project-scope 부재). org 대조와 동일 지점에서 target의 project_id도 함께 조회해 caller
+    project와 대조 — 불일치/미존재 모두 404(존재 비노출)."""
     for field, table in _LINK_TABLES.items():
         target_id = getattr(body, field)
         if target_id is None:
             continue
-        target_org_id = (await session.execute(
-            text(f"SELECT org_id FROM {table} WHERE id = :id"),  # noqa: S608 — table은 고정 allowlist(_LINK_TABLES), 요청값 아님
+        row = (await session.execute(
+            text(f"SELECT org_id, project_id FROM {table} WHERE id = :id"),  # noqa: S608 — table은 고정 allowlist(_LINK_TABLES), 요청값 아님
             {"id": target_id},
-        )).scalar_one_or_none()
-        assert_target_in_caller_org(
-            caller_org_id, target_org_id, not_found_detail=f"{field.replace('_id', '').title()} not found",
-        )
+        )).first()
+        target_org_id = row.org_id if row is not None else None
+        target_project_id = row.project_id if row is not None else None
+        not_found_detail = f"{field.replace('_id', '').title()} not found"
+        assert_target_in_caller_org(caller_org_id, target_org_id, not_found_detail=not_found_detail)
+        if target_project_id != caller_project_id:
+            raise HTTPException(status_code=404, detail=not_found_detail)
 
 
 @router.post("", status_code=201)
@@ -83,7 +89,7 @@ async def create_artifact(
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
 
-    await _assert_link_target_in_org(session, org_id, body)
+    await _assert_link_target_in_scope(session, org_id, project_id, body)
 
     created_by = uuid.UUID(auth.user_id)
     artifact = VisualArtifact(
