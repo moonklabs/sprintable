@@ -56,8 +56,18 @@ class ArtifactVersion(Base):
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     # E-CANVAS C3-S7(story 940266db): 코멘트→편집 결과 연결(closed-loop) — 이 버전이 어느
     # 코멘트에 응답해 만들어졌는지의 계보만 기록(resolve와 독립·감시 아닌 신뢰 조각).
+    # ⚠️ use_alter=True 필수: artifact_versions→artifact_comments(이 FK)→artifact_nodes
+    # (comments.node_id)→artifact_versions(nodes.version_id)로 순환 FK가 생겨 Base.metadata.
+    # create_all()(destructive_schema 테스트가 씀)가 CircularDependencyError로 실패했다(CI가
+    # 실측으로 잡음) — use_alter은 SQLAlchemy가 이 제약만 별도 ALTER TABLE로 뒤늦게 추가해
+    # 순환을 깬다(실제 alembic 마이그레이션은 원래도 순차 DDL이라 영향 없음).
     source_comment_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("artifact_comments.id", ondelete="SET NULL"), nullable=True,
+        UUID(as_uuid=True),
+        ForeignKey(
+            "artifact_comments.id", ondelete="SET NULL",
+            use_alter=True, name="fk_artifact_versions_source_comment_id",
+        ),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
