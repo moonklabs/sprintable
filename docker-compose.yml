@@ -40,6 +40,10 @@ services:
       # models and would miss the team_members VIEW etc. `bootstrap.py` → `alembic upgrade heads`
       # (story bda4beac: plural — ee_pricing branched as a separate head) runs the baseline.
       # The flag remains an explicit opt-in escape hatch only.
+      # Merge-safety gate: in-review→done is blocked by a human-resolved gate when the
+      # story has real evidence (linked PR / CI result). Code default is off (staged prod
+      # rollout) — self-hosted compose turns it on.
+      H1_MERGE_GATE_ENABLED: "True"
       # Agent chat file uploads (POST /api/v2/channel/upload)
       CHANNEL_FILES_DIR: /app/data/channel_files
     volumes:
