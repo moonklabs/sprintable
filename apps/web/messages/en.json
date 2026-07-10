@@ -66,6 +66,7 @@
     "chats": "Chats",
     "activity": "Activity Log",
     "epics": "Epics",
+    "glance": "Glance",
     "loops": "Loop",
     "storage": "Storage"
   },
@@ -2690,6 +2691,38 @@
     "deleteConfirmTitle": "Delete Epic?",
     "deleteConfirmDescription": "This is permanent and cannot be undone. All stories in this epic will be unlinked.",
     "deleteConfirmButton": "Delete permanently"
+  },
+  "glance": {
+    "pageTitle": "Project Glance",
+    "pageDescription": "See how far this project has come, together, at a glance",
+    "noProject": "No project selected.",
+    "loading": "Loading...",
+    "roadmapEmpty": "No roadmap yet.",
+    "roadmapTitle": "Roadmap",
+    "roadmapSummary": "Milestone {position} of {total}",
+    "currentMarker": "● here",
+    "progressTitle": "Where we are",
+    "progressDetail": "{done}/{total} stories done",
+    "progressNoStories": "No stories yet",
+    "phrase": {
+      "notStarted": "Not started",
+      "justStarted": "Just started",
+      "underway": "Underway",
+      "almostThere": "Almost there",
+      "wrappingUp": "Wrapping up"
+    },
+    "collaborationTitle": "Who's building together",
+    "collaborationEmpty": "Not yet assigned.",
+    "collaborationTogether": "building together",
+    "liveStreamTitle": "Happening now",
+    "liveStreamEmpty": "No recent activity.",
+    "eventStoryStatus": "Story status changed — {entity}",
+    "eventStoryCreated": "New story — {entity}",
+    "eventRunCompleted": "Run completed — {entity}",
+    "eventRunFailed": "Run failed — {entity}",
+    "eventSprintStarted": "Sprint started — {entity}",
+    "eventSprintClosed": "Sprint closed — {entity}",
+    "eventDocCreated": "New doc — {entity}"
   },
   "loops": {
     "title": "Loop Board",

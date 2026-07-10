@@ -66,6 +66,7 @@
     "chats": "채팅",
     "activity": "활동 로그",
     "epics": "에픽",
+    "glance": "현황판",
     "loops": "Loop",
     "storage": "스토리지"
   },
@@ -2690,6 +2691,38 @@
     "deleteConfirmTitle": "에픽을 삭제하시겠습니까?",
     "deleteConfirmDescription": "이 작업은 되돌릴 수 없습니다. 에픽에 포함된 스토리는 연결이 해제됩니다.",
     "deleteConfirmButton": "영구 삭제"
+  },
+  "glance": {
+    "pageTitle": "프로젝트 현황판",
+    "pageDescription": "이 프로젝트가 어디까지 함께 왔는지 한눈에",
+    "noProject": "프로젝트가 선택되지 않았습니다.",
+    "loading": "불러오는 중...",
+    "roadmapEmpty": "아직 로드맵이 없습니다.",
+    "roadmapTitle": "로드맵 흐름",
+    "roadmapSummary": "{total}개 마일스톤 중 {position}번째",
+    "currentMarker": "● 여기",
+    "progressTitle": "현재 위치 · 진척",
+    "progressDetail": "{done}/{total} 스토리 완료",
+    "progressNoStories": "아직 스토리가 없습니다",
+    "phrase": {
+      "notStarted": "시작 전",
+      "justStarted": "시작 단계",
+      "underway": "진행 중",
+      "almostThere": "거의 다 왔는",
+      "wrappingUp": "막바지"
+    },
+    "collaborationTitle": "참여 협업 지도",
+    "collaborationEmpty": "아직 배정 전입니다.",
+    "collaborationTogether": "함께 구축 중",
+    "liveStreamTitle": "지금",
+    "liveStreamEmpty": "최근 활동이 없습니다.",
+    "eventStoryStatus": "스토리 상태 변경 — {entity}",
+    "eventStoryCreated": "새 스토리 등록 — {entity}",
+    "eventRunCompleted": "실행 완료 — {entity}",
+    "eventRunFailed": "실행 실패 — {entity}",
+    "eventSprintStarted": "스프린트 시작 — {entity}",
+    "eventSprintClosed": "스프린트 종료 — {entity}",
+    "eventDocCreated": "새 문서 등록 — {entity}"
   },
   "loops": {
     "title": "Loop 보드",
