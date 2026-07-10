@@ -157,6 +157,12 @@ async def transition_gate(
         # HITL crux(story 7726a003) — A2A task INPUT_REQUIRED 복귀. writer 미배선이라 오늘은 no-op.
         await _resume_a2a_task_on_gate_resolve(session, gate, new_status)
 
+    # E-VERIFY V0-S2(story 3fbd048d): 휴먼 gate 승인 → gate_approval evidence 자동 편입(순수
+    # additive — approved+story/task work_item_type 아니면 no-op).
+    from app.services.evidence_service import create_gate_approval_evidence_if_applicable
+
+    await create_gate_approval_evidence_if_applicable(session, gate, new_status, resolver_id)
+
     await session.flush()
     await session.refresh(gate)
     return gate

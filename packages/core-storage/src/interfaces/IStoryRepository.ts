@@ -24,6 +24,9 @@ export interface Story {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  // E-VERIFY V0-S1/S2: 실증-done 신뢰 신호. positive 단방향(false 절대 안 씀) — true면 근거 有,
+  // null이면 완전 무표시(신뢰 표면 렌더 조건 그 자체).
+  has_evidence?: boolean | null;
 }
 
 export interface CreateStoryInput {
