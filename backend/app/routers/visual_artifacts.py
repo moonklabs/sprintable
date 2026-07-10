@@ -9,14 +9,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
-from app.models.visual_artifact import ArtifactNode, ArtifactVersion, VisualArtifact
+from app.models.visual_artifact import ArtifactComment, ArtifactNode, ArtifactVersion, VisualArtifact
 from app.schemas.visual_artifact import (
+    ArtifactCommentResponse,
     ArtifactNodeOut,
     ArtifactVersionSummary,
+    CreateArtifactCommentRequest,
     CreateArtifactRequest,
     VisualArtifactDetail,
     VisualArtifactSummary,
 )
+from app.services.member_resolver import filter_org_member_ids
+from app.services.notification_dispatch import dispatch_notification
 from app.services.project_auth import assert_target_in_caller_org
 
 router = APIRouter(prefix="/api/v2/visual-artifacts", tags=["visual-artifacts"])
@@ -93,6 +97,7 @@ async def create_artifact(
         node = ArtifactNode(
             id=n.id or uuid.uuid4(), artifact_id=artifact.id, version_id=version.id,
             type=n.type, props=n.props, parent_id=n.parent_id, sort_order=n.sort_order,
+            description=n.description,
         )
         session.add(node)
         nodes.append(node)
@@ -252,3 +257,118 @@ async def delete_artifact(
     artifact.deleted_at = datetime.now(timezone.utc)
     await session.flush()
     return _ok({"ok": True, "id": str(id)})
+
+
+# ─── Comments (E-CANVAS C2-S6, story 0edca31e) ────────────────────────────────
+# 스토리 코멘트(stories.py add_comment/list_comments)와 공통 프리미티브(content/created_by/
+# created_at + C0 이벤트 전파) 계승. artifact 특유의 앵커(node_id 또는 anchor_x/y)·스레드
+# (parent_id)·resolve 추가.
+
+
+@router.get("/{id}/comments")
+async def list_artifact_comments(
+    id: uuid.UUID,
+    limit: int = Query(default=50, le=200),
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    rows = (await session.execute(
+        select(ArtifactComment).where(ArtifactComment.artifact_id == id)
+        .order_by(ArtifactComment.created_at.asc()).limit(limit)
+    )).scalars().all()
+    return _ok([ArtifactCommentResponse.model_validate(r).model_dump(mode="json") for r in rows])
+
+
+@router.post("/{id}/comments", status_code=201)
+async def add_artifact_comment(
+    id: uuid.UUID,
+    body: CreateArtifactCommentRequest,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+
+    if body.node_id is not None:
+        node_owner = (await session.execute(
+            select(ArtifactNode.artifact_id).where(ArtifactNode.id == body.node_id)
+        )).scalar_one_or_none()
+        if node_owner != artifact.id:
+            return _err("NOT_FOUND", "Node not found on this artifact", 404)
+
+    if body.parent_id is not None:
+        parent_owner = (await session.execute(
+            select(ArtifactComment.artifact_id).where(ArtifactComment.id == body.parent_id)
+        )).scalar_one_or_none()
+        if parent_owner != artifact.id:
+            return _err("NOT_FOUND", "Parent comment not found on this artifact", 404)
+
+    created_by = uuid.UUID(auth.user_id)
+    comment = ArtifactComment(
+        id=uuid.uuid4(), artifact_id=artifact.id, org_id=org_id, project_id=project_id,
+        node_id=body.node_id, anchor_x=body.anchor_x, anchor_y=body.anchor_y,
+        content=body.content, parent_id=body.parent_id, created_by=created_by,
+    )
+    session.add(comment)
+    await session.flush()
+    await session.refresh(comment)
+
+    # E-CANVAS C0-S1 §F4 계승(stories.py add_comment와 동형): comment.created 이벤트 전파.
+    # 수신자 = artifact 생성자 + mentioned_ids(cross-org 필터) - 작성자 본인.
+    valid_mentioned_ids = await filter_org_member_ids(set(body.mentioned_ids), org_id, session)
+    target_member_ids = list(
+        (valid_mentioned_ids | ({artifact.created_by} if artifact.created_by else set())) - {created_by}
+    )
+    if target_member_ids:
+        await dispatch_notification(
+            session,
+            org_id=org_id,
+            event_type="comment.created",
+            target_member_ids=target_member_ids,
+            title=f"새 코멘트: {artifact.title}",
+            body=body.content[:200],
+            reference_type="visual_artifact",
+            reference_id=artifact.id,
+            source_project_id=project_id,
+        )
+
+    return _ok(ArtifactCommentResponse.model_validate(comment).model_dump(mode="json"), status=201)
+
+
+@router.post("/{id}/comments/{comment_id}/resolve")
+async def resolve_artifact_comment(
+    id: uuid.UUID,
+    comment_id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    comment = (await session.execute(
+        select(ArtifactComment).where(
+            ArtifactComment.id == comment_id, ArtifactComment.artifact_id == artifact.id,
+        )
+    )).scalar_one_or_none()
+    if comment is None:
+        return _err("NOT_FOUND", "Comment not found", 404)
+    from datetime import datetime, timezone
+    comment.resolved = True
+    comment.resolved_by = uuid.UUID(auth.user_id)
+    comment.resolved_at = datetime.now(timezone.utc)
+    await session.flush()
+    await session.refresh(comment)
+    return _ok(ArtifactCommentResponse.model_validate(comment).model_dump(mode="json"))

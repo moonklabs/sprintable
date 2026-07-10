@@ -1,4 +1,5 @@
-"""시각 산출물(visual_artifact) MCP 도구(2개) — E-CANVAS C1-S3(story 8bace49e)."""
+"""시각 산출물(visual_artifact) MCP 도구(4개) — E-CANVAS C1-S3(story 8bace49e)+
+C2-S6(story 0edca31e, 코멘트 왕복)."""
 from __future__ import annotations
 
 from mcp.types import TextContent
@@ -13,6 +14,7 @@ class ArtifactNodeInput(SprintableInput):
     props: dict | None = None
     parent_id: str | None = None
     sort_order: int | None = None
+    description: str | None = None  # C2-S6: description pane(요소별 스펙)
 
 
 class CreateArtifactInput(SprintableInput):
@@ -27,6 +29,20 @@ class CreateArtifactInput(SprintableInput):
 
 class GetArtifactInput(SprintableInput):
     artifact_id: str
+
+
+class ListArtifactCommentsInput(SprintableInput):
+    artifact_id: str
+
+
+class AddArtifactCommentInput(SprintableInput):
+    artifact_id: str
+    content: str
+    node_id: str | None = None  # 요소 앵커(특정 노드에 코멘트)
+    anchor_x: float | None = None  # 좌표 앵커(자유 핀 — node_id 대신 또는 병행)
+    anchor_y: float | None = None
+    parent_id: str | None = None  # 답글이면 부모 코멘트 id
+    mentioned_ids: list[str] | None = None
 
 
 async def create_artifact(args: CreateArtifactInput) -> list[TextContent]:
@@ -56,6 +72,37 @@ async def get_artifact(args: GetArtifactInput) -> list[TextContent]:
     """시각 산출물 단건 조회(latest 버전 + nodes)."""
     try:
         result = await client.get(f"/api/v2/visual-artifacts/{args.artifact_id}")
+        return ok(result)
+    except Exception as exc:
+        return err(str(exc))
+
+
+async def list_artifact_comments(args: ListArtifactCommentsInput) -> list[TextContent]:
+    """artifact 코멘트 스레드 조회(요소/좌표 앵커·resolve 상태 포함) — 휴먼 딸깍 피드백을
+    에이전트가 읽고 반응하는 왕복 입구."""
+    try:
+        result = await client.get(f"/api/v2/visual-artifacts/{args.artifact_id}/comments")
+        return ok(result)
+    except Exception as exc:
+        return err(str(exc))
+
+
+async def add_artifact_comment(args: AddArtifactCommentInput) -> list[TextContent]:
+    """artifact에 코멘트 추가 — node_id(요소 앵커) 또는 anchor_x/anchor_y(좌표 핀)로 위치 지정,
+    parent_id로 답글. 대상자에게 comment.created 이벤트 전파(C0)."""
+    try:
+        body: dict = {"content": args.content}
+        if args.node_id:
+            body["node_id"] = args.node_id
+        if args.anchor_x is not None:
+            body["anchor_x"] = args.anchor_x
+        if args.anchor_y is not None:
+            body["anchor_y"] = args.anchor_y
+        if args.parent_id:
+            body["parent_id"] = args.parent_id
+        if args.mentioned_ids:
+            body["mentioned_ids"] = args.mentioned_ids
+        result = await client.post(f"/api/v2/visual-artifacts/{args.artifact_id}/comments", json=body)
         return ok(result)
     except Exception as exc:
         return err(str(exc))

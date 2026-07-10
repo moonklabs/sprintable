@@ -74,4 +74,38 @@ class ArtifactNode(Base):
     props: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     parent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # E-CANVAS C2-S6(story 0edca31e): description pane — 요소별 스펙 서술(전신 spec_description
+    # 유산·"보이는 PRD"). 에이전트가 MCP로 읽어 요소 단위 계약으로 소비.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ArtifactComment(Base):
+    """E-CANVAS C2-S6(story 0edca31e): 요소/좌표 앵커 코멘트(Figma식 핀·스레드·resolve).
+
+    스토리 코멘트(StoryComment)와 공통 프리미티브(content/created_by/created_at + C0 이벤트
+    전파)를 공유하되, artifact 특유의 앵커(node_id 요소단위 또는 anchor_x/y 좌표핀)·스레드
+    (parent_id)·resolve 상태를 추가로 가진다.
+    """
+    __tablename__ = "artifact_comments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    artifact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("visual_artifacts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    node_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_nodes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    anchor_x: Mapped[float | None] = mapped_column(nullable=True)
+    anchor_y: Mapped[float | None] = mapped_column(nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_comments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    resolved: Mapped[bool] = mapped_column(nullable=False, default=False)
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
