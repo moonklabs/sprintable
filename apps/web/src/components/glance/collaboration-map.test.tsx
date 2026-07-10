@@ -35,4 +35,37 @@ describe('CollaborationMap (§5 ⭐감시 최고 위험 지점 — presence만, 
     const markup = renderToStaticMarkup(wrap(<CollaborationMap roadmap={ROADMAP} collaboration={collab} />));
     expect(markup).toContain('아직 배정 전');
   });
+
+  it('keeps the row for a done/active epic with zero collaborators (§9 매트릭스 — 목업 예시대로 행 유지, 통째로 숨기지 않음) alongside a populated epic', () => {
+    const roadmap: RoadmapEpic[] = [
+      { id: 'e1', title: 'E-CANVAS', roadmapStatus: 'active', done: 5, total: 8, completionPct: 62 },
+      { id: 'e2', title: 'E-GLANCE', roadmapStatus: 'done', done: 3, total: 3, completionPct: 100 },
+    ];
+    const collab: EpicCollaboration[] = [
+      { epicId: 'e1', collaborators: [{ id: 'm1', name: '미르코 페트로비치' }] },
+      { epicId: 'e2', collaborators: [] },
+    ];
+    const markup = renderToStaticMarkup(wrap(<CollaborationMap roadmap={roadmap} collaboration={collab} />));
+    expect(markup).toContain('E-CANVAS');
+    expect(markup).toContain('미르코 페트로비치');
+    expect(markup).toContain('E-GLANCE');
+    expect(markup).toContain('아직 배정 전');
+  });
+
+  it('excludes upcoming (never-started) epics from the list entirely, to avoid a long list of untouched rows', () => {
+    const roadmap: RoadmapEpic[] = [
+      { id: 'e1', title: 'E-CANVAS', roadmapStatus: 'active', done: 5, total: 8, completionPct: 62 },
+      { id: 'e2', title: 'E-MOBILE', roadmapStatus: 'upcoming', done: 0, total: 0, completionPct: 0 },
+    ];
+    const collab: EpicCollaboration[] = [{ epicId: 'e1', collaborators: [{ id: 'm1', name: '미르코 페트로비치' }] }];
+    const markup = renderToStaticMarkup(wrap(<CollaborationMap roadmap={roadmap} collaboration={collab} />));
+    expect(markup).not.toContain('E-MOBILE');
+  });
+
+  it('falls back to the full empty state when every epic is still upcoming', () => {
+    const roadmap: RoadmapEpic[] = [{ id: 'e1', title: 'E-MOBILE', roadmapStatus: 'upcoming', done: 0, total: 0, completionPct: 0 }];
+    const markup = renderToStaticMarkup(wrap(<CollaborationMap roadmap={roadmap} collaboration={[]} />));
+    expect(markup).toContain('아직 배정 전');
+    expect(markup).not.toContain('E-MOBILE');
+  });
 });

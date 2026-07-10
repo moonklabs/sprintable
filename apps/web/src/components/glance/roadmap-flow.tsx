@@ -1,4 +1,5 @@
 import { useTranslations } from 'next-intl';
+import Link from 'next/link';
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { RoadmapEpic } from '@/services/glance';
@@ -9,8 +10,11 @@ interface RoadmapFlowProps {
 }
 
 /**
- * E-GLANCE §3 로드맵 흐름 — 시퀀스(가로 흐름), 상태 3종(완료·진행·예정). 주어=프로젝트:
- * "6개 중 3번째"(개인/시간 지연 강조 0). 유나 UX handoff §3 권장(가로 타임라인) 채택.
+ * E-GLANCE §3 로드맵 흐름 — 노드+커넥터 타임라인. 시각 SSOT(`e-glance-glance-board-mockup-render`)
+ * §① 그대로: 완료 노드는 success 채움+체크, 진행 노드는 info 채움+링 글로우+"● 여기" 마커,
+ * 예정 노드는 muted 아웃라인. 커넥터는 완료 구간만 success로 채워져 "여기까지 왔다"를 표현.
+ * 주어=프로젝트: "6개 중 3번째"(개인/시간 지연 강조 0). §3 "마일스톤 클릭 → 해당 에픽
+ * 상세… 로드맵은 요약·드릴다운은 링크" — 각 마일스톤이 `/epics/{id}`로 드릴다운.
  */
 export function RoadmapFlow({ epics, className }: RoadmapFlowProps) {
   const t = useTranslations('glance');
@@ -21,28 +25,46 @@ export function RoadmapFlow({ epics, className }: RoadmapFlowProps) {
 
   return (
     <div className={className}>
-      <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
+      <div className="flex items-start">
         {epics.map((e, i) => (
-          <div key={e.id} className="flex items-center gap-1">
-            <span
-              className={cn(
-                'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium',
-                e.roadmapStatus === 'done' && 'border-success/30 bg-success/10 text-success',
-                e.roadmapStatus === 'active' && 'border-info/40 bg-info/10 text-info',
-                e.roadmapStatus === 'upcoming' && 'border-border bg-muted/30 text-muted-foreground',
-              )}
+          <div key={e.id} className="flex flex-1 items-start last:flex-none">
+            <Link
+              href={`/epics/${e.id}`}
+              className="flex min-w-0 flex-col items-center rounded-md p-1 transition-opacity hover:opacity-75"
             >
-              {e.roadmapStatus === 'done' ? <Check className="size-3" aria-hidden="true" /> : null}
-              {e.roadmapStatus === 'active' ? <span className="size-1.5 rounded-full bg-info" aria-hidden="true" /> : null}
-              {e.title}
-              {i === currentIndex ? <span className="ml-0.5 text-[9px] opacity-70">{t('currentMarker')}</span> : null}
-            </span>
-            {i < epics.length - 1 ? <span className="text-muted-foreground/40" aria-hidden="true">─</span> : null}
+              <span
+                className={cn(
+                  'flex size-8 shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold',
+                  e.roadmapStatus === 'done' && 'border-success bg-success/10 text-success',
+                  e.roadmapStatus === 'active' && 'border-info bg-info/10 text-info ring-4 ring-info/10',
+                  e.roadmapStatus === 'upcoming' && 'border-border bg-muted/30 text-muted-foreground',
+                )}
+              >
+                {e.roadmapStatus === 'done' ? <Check className="size-4" aria-hidden="true" /> : null}
+                {e.roadmapStatus === 'active' ? <span className="size-2.5 rounded-full bg-info" aria-hidden="true" /> : null}
+              </span>
+              <span
+                className={cn(
+                  'mt-2 max-w-[88px] truncate text-center text-[10.5px] font-semibold',
+                  e.roadmapStatus === 'upcoming' ? 'text-muted-foreground/70' : 'text-muted-foreground',
+                )}
+              >
+                {e.title}
+              </span>
+              {i === currentIndex ? <span className="mt-0.5 text-[9px] font-bold text-info">{t('currentMarker')}</span> : null}
+            </Link>
+            {i < epics.length - 1 ? (
+              <div className={cn('mt-4 h-0.5 flex-1', e.roadmapStatus === 'done' ? 'bg-success' : 'bg-border')} aria-hidden="true" />
+            ) : null}
           </div>
         ))}
       </div>
-      <p className="mt-2 text-[11px] text-muted-foreground">
-        {t('roadmapSummary', { position: currentIndex + 1, total: epics.length })}
+      <p className="mt-3 text-[11.5px] text-foreground">
+        {t.rich('roadmapSummary', {
+          position: currentIndex + 1,
+          total: epics.length,
+          b: (chunks) => <b className="text-info">{chunks}</b>,
+        })}
       </p>
     </div>
   );

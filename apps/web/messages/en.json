@@ -185,6 +185,7 @@
     "commandCenterDescription": "Everything you need to unblock work, see sprint health, and jump to docs.",
     "ccFleet": "Fleet {count}",
     "ccFleetBreakdownPending": "Status breakdown pending",
+    "ccGlanceTooltip": "See the project glance",
     "ccLoading": "Loading…",
     "ccZoneActions": "Your actions now",
     "ccClearTitle": "All clear",
@@ -2699,7 +2700,7 @@
     "loading": "Loading...",
     "roadmapEmpty": "No roadmap yet.",
     "roadmapTitle": "Roadmap",
-    "roadmapSummary": "Milestone {position} of {total}",
+    "roadmapSummary": "Milestone <b>{position}</b> of {total}",
     "currentMarker": "● here",
     "progressTitle": "Where we are",
     "progressDetail": "{done}/{total} stories done",
@@ -2722,7 +2723,13 @@
     "eventRunFailed": "Run failed — {entity}",
     "eventSprintStarted": "Sprint started — {entity}",
     "eventSprintClosed": "Sprint closed — {entity}",
-    "eventDocCreated": "New doc — {entity}"
+    "eventDocCreated": "New doc — {entity}",
+    "recency": {
+      "justNow": "just now",
+      "aWhileAgo": "a while ago",
+      "today": "today",
+      "earlier": "earlier"
+    }
   },
   "loops": {
     "title": "Loop Board",

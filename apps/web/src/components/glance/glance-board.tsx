@@ -47,6 +47,7 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
   const [collaboration, setCollaboration] = useState<EpicCollaboration[]>([]);
   const [events, setEvents] = useState<BeActivityLogItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadedAt, setLoadedAt] = useState(0);
 
   useEffect(() => {
     if (!projectId) return;
@@ -82,6 +83,7 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
           setRoadmap(mergedRoadmap);
           setCollaboration(collab);
           setEvents(milestoneEvents);
+          setLoadedAt(Date.now());
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -142,7 +144,7 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
               <div className="text-sm font-semibold text-foreground">{t('liveStreamTitle')}</div>
             </SectionCardHeader>
             <SectionCardBody>
-              <LiveStream events={events} />
+              <LiveStream events={events} now={loadedAt} />
             </SectionCardBody>
           </SectionCard>
         </div>
