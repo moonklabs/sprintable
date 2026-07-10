@@ -162,9 +162,15 @@ async def delete_epic(
     Supabase 레거시(db=undefined) 의존으로 깨져 있었고 그게 유일한 admin/owner 가드였다.
     삭제하면 권한 누수(org member/viewer 가 에픽 삭제)이므로 authz 를 BE SSOT 로 옮긴다.
     admin/owner 는 org-wide 접근권이라 project 접근권을 자동 충족한다(별도 project 게이트 불요).
+
+    E-SECURITY SEC-S1 확장(까심 적대적 QA 발견): is_org_owner_or_admin은 org_members(휴먼 전용
+    grant 테이블)만 조회해 에이전트가 구조적으로 통과 불가하나, 그건 암묵적 부산물일 뿐 — cascade로
+    소속 stories까지 물리삭제되는 파괴력을 고려해 delete_story와 동형인 명시적 human-only 체크를
+    추가한다(암묵적 방어에만 기대지 않음).
     """
     from app.repositories.dependency import DependencyRepository
     from app.repositories.label import ItemLabelRepository
+    from app.services.member_resolver import resolve_member
     from app.services.project_auth import is_org_owner_or_admin
 
     # 존재 검증 먼저(없으면 404) — authz 결과로 존재 여부가 새지 않도록 404 우선.
@@ -172,11 +178,20 @@ async def delete_epic(
     if epic is None:
         raise HTTPException(status_code=404, detail="Epic not found")
 
+    resolved = await resolve_member(auth, org_id, session)
+    if resolved.type != "human":
+        raise HTTPException(status_code=403, detail="Epic 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+
     if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
         raise HTTPException(
             status_code=403, detail="Epic deletion requires admin or owner role"
         )
 
+    from app.models.deletion_audit import DeletionAuditLog
+    session.add(DeletionAuditLog(
+        id=uuid.uuid4(), org_id=org_id, actor_id=resolved.id,
+        entity_type="epic", entity_id=id, entity_title=epic.title,
+    ))
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Epic not found")
