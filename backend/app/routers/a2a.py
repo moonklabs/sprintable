@@ -180,20 +180,55 @@ class _JsonRpcException(Exception):
         self.message = message
 
 
+def _caller_project_hint(auth: AuthContext) -> uuid.UUID | None:
+    """S-A8(story 7d4ad784): file_locks.py `_caller_project_hint`(S17, 까심+codex+산티아고
+    QA 통과)와 동일 패턴 — X-Project-Id 헤더/JWT app_metadata.project_id로 caller의 project
+    컨텍스트를 best-effort로 얻는다(검증은 아니고 결정적 좁히기용)."""
+    raw = auth.claims.get("app_metadata", {}).get("project_id")
+    if not raw:
+        return None
+    try:
+        return uuid.UUID(str(raw))
+    except (ValueError, TypeError):
+        return None
+
+
 async def _get_agent_member(
-    session: AsyncSession, member_id: uuid.UUID, org_id: uuid.UUID | None = None
+    session: AsyncSession, member_id: uuid.UUID, org_id: uuid.UUID | None = None,
+    auth: AuthContext | None = None,
 ) -> TeamMember:
     """P1-S2(story 7b93eb10, PO 크럭스 승인): `org_id`가 주어지면 caller org로 스코프한다 —
     `/rpc`는 이제 authed+org-scoped 호출이라 이 검증이 필수(이전엔 org_id 비교가 없어 caller
     org와 무관하게 아무 agent에게나 SendMessage 가능한 cross-org IDOR였다, S20과 동형).
-    Card fetch(`get_agent_card`)는 P1-S1 판단대로 org_id 없이(unauth) 그대로 호출한다."""
+    Card fetch(`get_agent_card`)는 P1-S1 판단대로 org_id 없이(unauth) 그대로 호출한다.
+
+    S-A8(story 7d4ad784, hotfix): `team_members`는 뷰(members⋈project_access, 마이그 0110
+    A안 — grant가 SSOT, 의도된 설계 — [[project_agent_multiproject_grant]])라 멀티프로젝트
+    grant 에이전트는 project_access 개수만큼 행으로 fan-out한다. 예전 `scalar_one_or_none()`이
+    PK 유일성을 가정해 다중행에서 `MultipleResultsFound`(→500 INTERNAL_ERROR)로 죽었다(prod
+    산티아고 c7a8dd0e 실사례, 2개 project 소속). file_locks.py `_fetch_scoped_member`(S17)와
+    동일 패턴으로 흡수: caller의 project 힌트(authed 호출)로 먼저 결정적으로 좁히고, 없거나
+    미스매치면 project_id 오름차순 결정적 폴백. `get_agent_card`(unauth)는 `auth=None`이라
+    바로 폴백 경로 — AgentCard 출력은 project-무관(identity/skills/security만)이라 어느 행을
+    골라도 동일 결과."""
     conditions = [
         TeamMember.id == member_id, TeamMember.type == "agent", TeamMember.is_active.is_(True)
     ]
     if org_id is not None:
         conditions.append(TeamMember.org_id == org_id)
-    result = await session.execute(select(TeamMember).where(*conditions))
-    member = result.scalar_one_or_none()
+    base_query = select(TeamMember).where(*conditions)
+
+    if auth is not None:
+        project_hint = _caller_project_hint(auth)
+        if project_hint is not None:
+            hinted = (await session.execute(
+                base_query.where(TeamMember.project_id == project_hint).limit(1)
+            )).scalars().first()
+            if hinted is not None:
+                return hinted
+
+    result = await session.execute(base_query.order_by(TeamMember.project_id).limit(1))
+    member = result.scalars().first()
     if member is None:
         raise HTTPException(status_code=404, detail="Agent not found")
     return member
@@ -811,7 +846,7 @@ async def a2a_rpc(
                 ),
             )
 
-    member = await _get_agent_member(session, member_id, org_id)
+    member = await _get_agent_member(session, member_id, org_id, auth)
     active_extensions = _parse_active_extensions(request)
 
     # S-A4(story 03034d86): 유일하게 StreamingResponse를 반환하는 메소드 — 나머지 3개와
