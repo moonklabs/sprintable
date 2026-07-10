@@ -1,4 +1,6 @@
-"""스토리 관련 MCP 도구 (8개)."""
+"""스토리 관련 MCP 도구 (7개). E-SECURITY SEC-S1: delete_story는 의도적으로 제거됨 — 에이전트
+hard-delete는 사람 승인 없는 물리삭제라 차단(DELETE 엔드포인트 자체는 유지, 휴먼 전용으로 승격).
+삭제가 필요한 워크플로우는 상태변경/archive로 대체."""
 from __future__ import annotations
 
 from mcp.types import CallToolResult, TextContent
@@ -41,10 +43,6 @@ class UpdateStoryInput(SprintableInput):
     # 기존 첨부에 **추가**된다(PATCH attachments 는 서버측 full-replace 라 update_story 가 먼저 기존
     # 첨부를 읽어 병합 — 새 첨부가 기존 걸 지우지 않는다).
     attachments: list[dict] | None = None
-
-
-class DeleteStoryInput(SprintableInput):
-    story_id: str
 
 
 class AssignStoryToSprintInput(SprintableInput):
@@ -147,15 +145,6 @@ async def update_story(args: UpdateStoryInput) -> list[TextContent]:
                 existing = current.get("attachments") or [] if isinstance(current, dict) else []
                 updates["attachments"] = existing + uploaded
         return ok(await client.patch(f"/api/v2/stories/{args.story_id}", json=updates))
-    except Exception as exc:
-        return err(str(exc))
-
-
-async def delete_story(args: DeleteStoryInput) -> list[TextContent]:
-    """스토리 삭제."""
-    try:
-        await client.delete(f"/api/v2/stories/{args.story_id}")
-        return ok({"deleted": True})
     except Exception as exc:
         return err(str(exc))
 

@@ -1,8 +1,11 @@
 /**
- * E-CANVAS C1 — 시각 산출물(visual artifact) FE 타입. blueprint `e-canvas-blueprint`(r3) §2
- * 객체 모델(초안) 미러 — BE 계약(디디 C1-S3, `visual_artifact`/`artifact_version`) 미착지 상태라
- * 이 타입/목업 데이터는 **잠정**이다. 실 API 착지 시 이 파일 타입만 계약대로 정정하면
- * 컴포넌트는 그대로 소비(props 인터페이스 유지가 목표).
+ * E-CANVAS C1 — 시각 산출물(visual artifact) FE 타입.
+ *
+ * `VisualArtifact`/`ArtifactVersion`(아래)은 **컴포넌트가 소비하는 FE-내부 shape**이고, 실
+ * BE 응답(flat, `format` 없음)과는 다르다 — 그 변환은 `adaptArtifactDetail`이 전담한다(§ 하단).
+ * BE 실 스키마는 2026-07-10 `feat/e-canvas-c1-s3-visual-artifact`(PR 대기 중) 소스를 직접 읽고
+ * 확認 — 더 이상 blueprint 추상 모델 추정이 아니다. dev 배포는 아직(브랜치 미머지) — 어댑터는
+ * 준비됐고 머지되는 순간 이 파이프가 실 렌더로 이어진다.
  */
 
 import type { ArtifactNode } from './canvas-nodes';
@@ -99,39 +102,87 @@ const MOCK_HTML_V4 = `<!doctype html><html><head><style>
   </div>
 </body></html>`;
 
-// ─── 실 API 어댑터 (AC2 attachment point 준비) ──────────────────────────────
-// BE(`e-canvas-c1-be-contract` §4) `GET /api/v2/visual-artifacts/{id}` 구현 자체가 아직
-// 안 됐음(§6 체크리스트 전부 미완) — 정확한 응답 envelope은 실측 전. 이 어댑터의 입력 타입은
-// 계약 §3 스키마 기반 최선 추정이며, 실 응답 관찰 후 이 함수 시그니처만 정정하면
-// ArtifactSection/ArtifactViewer 등 하위 컴포넌트는 그대로 유지된다.
+// ─── 실 API 어댑터 (AC2 attachment point) ───────────────────────────────────
+// BE(`feat/e-canvas-c1-s3-visual-artifact` — 실측 완료, PR 대기 중·2026-07-10) 실 라우터/스키마
+// (`backend/app/routers/visual_artifacts.py`·`schemas/visual_artifact.py`)를 직접 읽고 정정 —
+// 더 이상 추정 아님. 실 계약의 중요한 이탈점: **`format` 컬럼이 BE에 없다** — blueprint 추상
+// 모델엔 있었지만 실 스키마는 노드 구성으로 format을 암묵 표현한다(`html_blob` 캐치올 노드가
+// 있으면 그 props로 html/image 판별, 없으면 구조화 tree). `latest_version_number`도 실 필드명
+// (내 FE 컴포넌트의 `current_version`과 이름이 다름 — 여기 어댑터가 흡수, 컴포넌트는 안 건드림).
 
-export interface VisualArtifactDetailResponse {
-  artifact: VisualArtifact;
-  version_number: number;
-  nodes: ArtifactNode[];
+/** 살아있는 노드 구성으로 format을 유도 — BE가 저장하지 않는 파생값. */
+export function deriveFormat(nodes: ArtifactNode[]): ArtifactFormat {
+  const blob = nodes.find((n) => n.type === 'html_blob');
+  if (!blob) return 'tree';
+  return typeof blob.props['src'] === 'string' ? 'image' : 'html';
 }
 
-export function adaptArtifactDetail(detail: VisualArtifactDetailResponse): { artifact: VisualArtifact; versions: ArtifactVersion[] } {
+/** BE `ArtifactNodeOut`(schemas/visual_artifact.py) 미러 — canvas-nodes.ts의 `ArtifactNode`와 동형. */
+export type BeArtifactNode = ArtifactNode;
+
+/** BE `VisualArtifactDetail`(schemas/visual_artifact.py) 미러 — flat 응답(중첩 아님). */
+export interface BeVisualArtifactDetail {
+  id: string;
+  title: string;
+  story_id: string | null;
+  epic_id: string | null;
+  doc_id: string | null;
+  source: 'created' | 'imported';
+  latest_version_number: number;
+  anchor_version: number | null;
+  created_by: string | null;
+  created_at: string;
+  version_number: number;
+  version_summary: string | null;
+  nodes: BeArtifactNode[];
+}
+
+/** BE `VisualArtifactSummary` 미러 — `GET /api/v2/visual-artifacts?story_id=` 목록 항목(nodes 없음). */
+export interface BeVisualArtifactSummary {
+  id: string;
+  title: string;
+  story_id: string | null;
+  epic_id: string | null;
+  doc_id: string | null;
+  source: 'created' | 'imported';
+  latest_version_number: number;
+  anchor_version: number | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export function adaptArtifactDetail(detail: BeVisualArtifactDetail): { artifact: VisualArtifact; versions: ArtifactVersion[] } {
+  const format = deriveFormat(detail.nodes);
   let content: string;
-  if (detail.artifact.format === 'tree') {
+  if (format === 'tree') {
     content = JSON.stringify(resolveNodeTree(detail.nodes));
   } else {
-    // html_blob 캐치올 노드(§3)가 임포트/생성된 raw 콘텐츠를 담는다 — html은 props.html,
-    // image는 props.src(BE 계약 §3 "html_blob이면 {html, src} 등").
     const blob = detail.nodes.find((n) => n.type === 'html_blob');
-    const key = detail.artifact.format === 'image' ? 'src' : 'html';
+    const key = format === 'image' ? 'src' : 'html';
     content = typeof blob?.props[key] === 'string' ? (blob.props[key] as string) : '';
   }
+  const artifact: VisualArtifact = {
+    id: detail.id,
+    title: detail.title,
+    format,
+    current_version: detail.latest_version_number,
+    anchor_version: detail.anchor_version,
+    created_by: detail.created_by ?? '',
+    source: detail.source,
+    story_id: detail.story_id,
+    epic_id: detail.epic_id,
+    doc_id: detail.doc_id,
+  };
   const version: ArtifactVersion = {
-    id: `${detail.artifact.id}-v${detail.version_number}`,
-    artifact_id: detail.artifact.id,
+    id: `${detail.id}-v${detail.version_number}`,
+    artifact_id: detail.id,
     version: detail.version_number,
     content,
-    created_by: detail.artifact.created_by,
-    summary: null,
-    created_at: new Date().toISOString(),
+    created_by: detail.created_by ?? '',
+    summary: detail.version_summary,
+    created_at: detail.created_at,
   };
-  return { artifact: detail.artifact, versions: [version] };
+  return { artifact, versions: [version] };
 }
 
 export const MOCK_VERSIONS: ArtifactVersion[] = [

@@ -119,6 +119,11 @@ async def test_get_persona_not_found_404():
 async def test_create_persona_201():
     client, session, app = await _client()
     try:
+        # E-SECURITY SEC-S7: create_persona가 먼저 target agent의 실 org_id를 조회해 caller org
+        # (ORG_ID)와 대조한다 — 이 목이 그 조회에 응답해야 가드를 통과한다.
+        org_lookup_mock = MagicMock()
+        org_lookup_mock.scalar_one_or_none.return_value = ORG_ID
+        session.execute = AsyncMock(return_value=org_lookup_mock)
         with patch("app.repositories.agent_persona.AgentPersonaRepository.create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = _make_persona_summary()
             payload = {"agent_id": str(AGENT_ID), "name": "Test Persona", "system_prompt": "You are a helpful assistant."}
@@ -210,6 +215,10 @@ async def test_update_builtin_persona_403():
 async def test_seed_builtin_200():
     client, session, app = await _client()
     try:
+        # E-SECURITY SEC-S7: seed_builtin_personas도 동일하게 target agent org_id를 먼저 조회.
+        org_lookup_mock = MagicMock()
+        org_lookup_mock.scalar_one_or_none.return_value = ORG_ID
+        session.execute = AsyncMock(return_value=org_lookup_mock)
         with patch("app.repositories.agent_persona.AgentPersonaRepository.seed_builtin", new_callable=AsyncMock) as mock_seed:
             mock_seed.return_value = {"seeded": True}
             async with client as c:

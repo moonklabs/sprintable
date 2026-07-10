@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -153,16 +153,33 @@ async def create_team_member(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
-    # AC1/AC2: agent actor의 멤버 관리 권한 체크.
+    # AC1/AC2: 멤버 관리 권한 체크.
     # E-MEMBER-POLICY S4: can_manage_members 플래그 직접 읽기 → effective 프로젝트 역할(has_project_role)
     # 단일 경로로 전환(블루프린트 §6). can_manage_members 는 role 에서 derived(0122 백필 can_manage=
     # true→role admin). owner/admin 이 멤버 관리. 기존 통과자(can_manage=true→admin) 무회귀 +
     # owner/admin 추가 통과(additive).
+    #
+    # E-SECURITY SEC-S8(story 83ea3d6a) L — 까심 전수스윕 CRITICAL(누구나·라이브 확定): 이 게이트가
+    # `if actor is not None and actor.type == "agent":`에 갇혀 있어 **휴먼 caller(또는 actor 미해소)
+    # 면 인가가 통째로 스킵**됐다 — 아무 권한 없는 멤버가 role=admin 에이전트 + 작동 sk_live_
+    # API키(전체 스코프)를 임의 project_id(타 org 포함)로 찍어낼 수 있었음(201 실측). 게이트를
+    # actor 종류와 무관하게 무조건 실행하도록 승격 + target(body.project_id)의 실 org를 caller
+    # org와 대조(SEC-S6/S7 헬퍼 재사용) — 기존 agent 분기가 `actor.project_id`(actor 자신의
+    # project)로 역할을 검사하던 것도 `body.project_id`(실제 target)로 정정(잠재적 자기-분기
+    # target 불일치도 함께 봉합). auth.user_id는 API키(에이전트)=member.id·JWT(휴먼)=users.id라
+    # has_project_role이 이미 양쪽을 다 매칭하는 단일 호출로 충분(신규 분기 불요).
+    from app.services.project_auth import assert_target_in_caller_org, has_project_role
+
+    target_project_org_id = (await session.execute(
+        text("SELECT org_id FROM projects WHERE id = :pid"), {"pid": str(body.project_id)},
+    )).scalar_one_or_none()
+    assert_target_in_caller_org(org_id, target_project_org_id, not_found_detail="Project not found")
+
     actor = await _resolve_actor(auth, session, org_id)
+    if not await has_project_role(session, uuid.UUID(auth.user_id), body.project_id, min_role="admin"):
+        raise HTTPException(status_code=403, detail="project admin/owner role required to manage members")
+
     if actor is not None and actor.type == "agent":
-        from app.services.project_auth import has_project_role
-        if not await has_project_role(session, actor.id, actor.project_id, min_role="admin"):
-            raise HTTPException(status_code=403, detail="project admin/owner role required to manage members")
         # AC3: target.role > actor.role → 403 (격상 차단)
         target_rank = _ROLE_RANK.get(body.role, 1)
         actor_rank = _ROLE_RANK.get(actor.role, 1)

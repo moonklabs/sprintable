@@ -128,7 +128,25 @@ async def update_task(
 async def delete_task(
     id: uuid.UUID,
     repo: TaskRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    """E-SECURITY SEC-S1(story 70c9e92c) 확장: 까심 적대적 QA 발견 갭 봉쇄 — delete_story와
+    동형으로 휴먼 전용화 + 삭제 감사(hard-delete의 에이전트 우회 벡터 차단)."""
+    from app.models.deletion_audit import DeletionAuditLog
+    from app.services.member_resolver import resolve_member
+
+    resolved = await resolve_member(auth, org_id, session)
+    if resolved.type != "human":
+        raise HTTPException(status_code=403, detail="Task 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+    task = await repo.get(id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    session.add(DeletionAuditLog(
+        id=uuid.uuid4(), org_id=org_id, actor_id=resolved.id,
+        entity_type="task", entity_id=id, entity_title=task.title,
+    ))
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Task not found")

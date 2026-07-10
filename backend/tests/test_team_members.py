@@ -112,6 +112,10 @@ async def test_create_team_member_201():
         mock_result = MagicMock()
         mock_result.scalars.return_value.first.return_value = None  # _resolve_actor → non-agent
         mock_result.all.return_value = []  # fakechat_port 쿼리 → 기존 포트 없음
+        # E-SECURITY SEC-S8(L): 신규 target-org 조회(.scalar_one_or_none)·has_project_role 내부
+        # get_project_role 조회(.one_or_none)가 같은 mock_result의 다른 accessor라 독립 설정 가능.
+        mock_result.scalar_one_or_none.return_value = ORG_ID  # target project org = caller org
+        mock_result.one_or_none.return_value = ("admin", None)  # org_role=admin → has_project_role 통과
         session.execute = AsyncMock(return_value=mock_result)
 
         with patch("app.routers.team_members._resolve_actor", new=AsyncMock(return_value=None)), \
