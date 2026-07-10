@@ -65,6 +65,9 @@ def _result(value):
     r.scalar_one_or_none.return_value = value
     r.scalar_one.return_value = value
     r.first.return_value = value
+    # S-A8(story 7d4ad784): _get_agent_member이 scalar_one_or_none()→scalars().first()로
+    # 바뀌어(멀티프로젝트 fan-out 흡수) 이 accessor도 동일 value를 반환해야 기존 목 테스트가 산다.
+    r.scalars.return_value.first.return_value = value
     return r
 
 
