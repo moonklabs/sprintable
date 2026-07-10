@@ -185,6 +185,7 @@
     "commandCenterDescription": "업무를 막는 요소를 풀고, 스프린트 상태를 확인하고, 문서로 바로 이동할 수 있는 운영 허브입니다.",
     "ccFleet": "함대 {count}",
     "ccFleetBreakdownPending": "상태 집계 준비중",
+    "ccGlanceTooltip": "프로젝트 현황판 보기",
     "ccLoading": "불러오는 중…",
     "ccZoneActions": "지금 내 할 일",
     "ccClearTitle": "괜찮습니다",

@@ -1,4 +1,5 @@
 import { useTranslations } from 'next-intl';
+import Link from 'next/link';
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { RoadmapEpic } from '@/services/glance';
@@ -12,7 +13,8 @@ interface RoadmapFlowProps {
  * E-GLANCE §3 로드맵 흐름 — 노드+커넥터 타임라인. 시각 SSOT(`e-glance-glance-board-mockup-render`)
  * §① 그대로: 완료 노드는 success 채움+체크, 진행 노드는 info 채움+링 글로우+"● 여기" 마커,
  * 예정 노드는 muted 아웃라인. 커넥터는 완료 구간만 success로 채워져 "여기까지 왔다"를 표현.
- * 주어=프로젝트: "6개 중 3번째"(개인/시간 지연 강조 0).
+ * 주어=프로젝트: "6개 중 3번째"(개인/시간 지연 강조 0). §3 "마일스톤 클릭 → 해당 에픽
+ * 상세… 로드맵은 요약·드릴다운은 링크" — 각 마일스톤이 `/epics/{id}`로 드릴다운.
  */
 export function RoadmapFlow({ epics, className }: RoadmapFlowProps) {
   const t = useTranslations('glance');
@@ -26,7 +28,10 @@ export function RoadmapFlow({ epics, className }: RoadmapFlowProps) {
       <div className="flex items-start">
         {epics.map((e, i) => (
           <div key={e.id} className="flex flex-1 items-start last:flex-none">
-            <div className="flex min-w-0 flex-col items-center">
+            <Link
+              href={`/epics/${e.id}`}
+              className="flex min-w-0 flex-col items-center rounded-md p-1 transition-opacity hover:opacity-75"
+            >
               <span
                 className={cn(
                   'flex size-8 shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold',
@@ -47,7 +52,7 @@ export function RoadmapFlow({ epics, className }: RoadmapFlowProps) {
                 {e.title}
               </span>
               {i === currentIndex ? <span className="mt-0.5 text-[9px] font-bold text-info">{t('currentMarker')}</span> : null}
-            </div>
+            </Link>
             {i < epics.length - 1 ? (
               <div className={cn('mt-4 h-0.5 flex-1', e.roadmapStatus === 'done' ? 'bg-success' : 'bg-border')} aria-hidden="true" />
             ) : null}

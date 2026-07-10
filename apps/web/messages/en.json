@@ -185,6 +185,7 @@
     "commandCenterDescription": "Everything you need to unblock work, see sprint health, and jump to docs.",
     "ccFleet": "Fleet {count}",
     "ccFleetBreakdownPending": "Status breakdown pending",
+    "ccGlanceTooltip": "See the project glance",
     "ccLoading": "Loading…",
     "ccZoneActions": "Your actions now",
     "ccClearTitle": "All clear",
