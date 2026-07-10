@@ -253,13 +253,17 @@ _STORY_LINK_TABLES = {"epic_id": "epics", "sprint_id": "sprints", "meeting_id": 
 
 
 async def _assert_story_link_targets_in_project(
-    session: AsyncSession, project_id: uuid.UUID, body: StoryCreate,
+    session: AsyncSession, project_id: uuid.UUID, body: "StoryCreate | StoryUpdate",
 ) -> None:
     """E-SECURITY SEC-S8(story 83ea3d6a) T(까심 전수스윕, 실HTTP 확定): epic_id/sprint_id/
     meeting_id가 body.project_id 소속인지 검증 없이 그대로 repo.create에 전달됐다 — 같은 org
     다른 project의 epic/sprint/meeting에 story를 링크할 수 있었다(G/R와 동형 project-scope
     부재). enforce_body_context는 body.project_id 자체만 caller와 대조할 뿐, 그 project_id
-    "안에" 링크 대상이 실제로 속하는지는 안 본다."""
+    "안에" 링크 대상이 실제로 속하는지는 안 본다.
+
+    E-SECURITY SEC-S8 X(까심 전수스윕): T는 create_story만 닫았고 update_story(PATCH) 경로가
+    남아있었다 — 여기서 StoryUpdate도 받아 같은 검증을 update_story에도 재사용(대상 project는
+    기존 story 자신의 project_id, StoryUpdate엔 project_id 필드 자체가 없어 변경 불가)."""
     for field, table in _STORY_LINK_TABLES.items():
         target_id = getattr(body, field)
         if target_id is None:
@@ -658,6 +662,7 @@ async def update_story(
     if _story_for_access is None:
         raise HTTPException(status_code=404, detail="Story not found")
     await _assert_story_project_access(db, auth, repo.org_id, _story_for_access.project_id)
+    await _assert_story_link_targets_in_project(db, _story_for_access.project_id, body)
 
     data = body.model_dump(exclude_unset=True)
     # S7: client 제공 asset_id strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
