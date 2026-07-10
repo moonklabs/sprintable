@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, field_validator
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -249,6 +249,31 @@ def _enforce_mcp_attachment_declared_limit(attachments: list[dict]) -> None:
         )
 
 
+_STORY_LINK_TABLES = {"epic_id": "epics", "sprint_id": "sprints", "meeting_id": "meetings"}
+
+
+async def _assert_story_link_targets_in_project(
+    session: AsyncSession, project_id: uuid.UUID, body: StoryCreate,
+) -> None:
+    """E-SECURITY SEC-S8(story 83ea3d6a) T(까심 전수스윕, 실HTTP 확定): epic_id/sprint_id/
+    meeting_id가 body.project_id 소속인지 검증 없이 그대로 repo.create에 전달됐다 — 같은 org
+    다른 project의 epic/sprint/meeting에 story를 링크할 수 있었다(G/R와 동형 project-scope
+    부재). enforce_body_context는 body.project_id 자체만 caller와 대조할 뿐, 그 project_id
+    "안에" 링크 대상이 실제로 속하는지는 안 본다."""
+    for field, table in _STORY_LINK_TABLES.items():
+        target_id = getattr(body, field)
+        if target_id is None:
+            continue
+        target_project_id = (await session.execute(
+            text(f"SELECT project_id FROM {table} WHERE id = :id"),  # noqa: S608 — table은 고정 allowlist(_STORY_LINK_TABLES), 요청값 아님
+            {"id": target_id},
+        )).scalar_one_or_none()
+        if target_project_id != project_id:
+            raise HTTPException(
+                status_code=404, detail=f"{field.replace('_id', '').title()} not found",
+            )
+
+
 @router.post("", response_model=StoryResponse, status_code=201)
 async def create_story(
     body: StoryCreate,
@@ -265,6 +290,7 @@ async def create_story(
         db=session,
         user_id=uuid.UUID(auth.user_id),
     )
+    await _assert_story_link_targets_in_project(session, body.project_id, body)
     repo = StoryRepository(session, org_id)
     # E-BOARD S5: assignee_ids 제공 시 단일 assignee_id(주담당)는 첫 요소로 동기화(미지정 시).
     effective_ids = (
