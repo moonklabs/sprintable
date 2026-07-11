@@ -112,8 +112,6 @@ _FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
         "동일 패턴(sprint.project_id 조회 후 _assert_project_access)",
     "app.routers.workflow_executions:list_executions":
         "설계상 안전(SEC-S8 BB 정리) — non-admin은 target_agent_id==member_id로 self-scope, admin은 org 전체 권한으로 통과",
-    "app.routers.visual_artifacts:list_artifacts":
-        "이전 SEC-S8 finding(G/N)으로 이미 봉인 — project_id가 클라 파라미터가 아니라 auth 컨텍스트에서 서버파생(_get_org_project)",
     "app.routers.open_api_keys:create_project_api_key":
         "require_admin 가드 + project_id가 클라 파라미터가 아니라 JWT app_metadata에서 서버파생(_get_project_id)",
     "app.routers.open_api_keys:list_project_api_keys":
