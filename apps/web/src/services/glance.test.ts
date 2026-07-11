@@ -6,6 +6,7 @@ import {
   derivePhrase,
   filterMilestoneEvents,
   mergeRoadmap,
+  scopeRoadmapEpics,
   type BeActivityLogItem,
   type BeEpicListItem,
   type BeStoryListItem,
@@ -23,6 +24,55 @@ describe('deriveRoadmapStatus (epic.status → 3버킷, done/archived 통합)', 
   it('maps draft and any unknown value to upcoming (safe fallback)', () => {
     expect(deriveRoadmapStatus('draft')).toBe('upcoming');
     expect(deriveRoadmapStatus('something-unexpected')).toBe('upcoming');
+  });
+});
+
+describe('scopeRoadmapEpics ("현재 궤적" window — 유나 서사 확定(b), active(들)를 anchor로 앞뒤 소수만)', () => {
+  function epicAt(id: string, status: string, day: number): BeEpicListItem {
+    return { id, title: id, status, created_at: `2026-01-${String(day).padStart(2, '0')}T00:00:00Z` };
+  }
+
+  it('anchors on the single active epic and takes `behind` done epics before it, `ahead` upcoming after', () => {
+    const epics = [
+      epicAt('d1', 'done', 1), epicAt('d2', 'done', 2), epicAt('d3', 'done', 3),
+      epicAt('active', 'active', 4),
+      epicAt('u1', 'draft', 5), epicAt('u2', 'draft', 6), epicAt('u3', 'draft', 7),
+    ];
+    const arc = scopeRoadmapEpics(epics, { behind: 2, ahead: 2, bound: 8 });
+    expect(arc.epics.map((e) => e.id)).toEqual(['d2', 'd3', 'active', 'u1', 'u2']);
+    expect(arc.totalCount).toBe(7);
+  });
+
+  it('treats multiple simultaneous active epics as one cluster (anchor spans all of them)', () => {
+    const epics = [
+      epicAt('d1', 'done', 1),
+      epicAt('a1', 'active', 2), epicAt('a2', 'active', 3), epicAt('a3', 'active', 4),
+      epicAt('u1', 'draft', 5),
+    ];
+    const arc = scopeRoadmapEpics(epics, { behind: 1, ahead: 1, bound: 8 });
+    expect(arc.epics.map((e) => e.id)).toEqual(['d1', 'a1', 'a2', 'a3', 'u1']);
+  });
+
+  it('falls back to the done→draft boundary as the anchor when there is no active epic at all', () => {
+    const epics = [
+      epicAt('d1', 'done', 1), epicAt('d2', 'done', 2),
+      epicAt('u1', 'draft', 3), epicAt('u2', 'draft', 4),
+    ];
+    const arc = scopeRoadmapEpics(epics, { behind: 1, ahead: 1, bound: 8 });
+    expect(arc.epics.map((e) => e.id)).toEqual(['d2', 'u1']);
+  });
+
+  it('hard-caps the window to `bound` even if behind+active+ahead would exceed it', () => {
+    const epics = Array.from({ length: 6 }, (_, i) => epicAt(`a${i}`, 'active', i + 1));
+    const arc = scopeRoadmapEpics(epics, { behind: 2, ahead: 2, bound: 4 });
+    expect(arc.epics).toHaveLength(4);
+  });
+
+  it('returns everything (chronological order) when the whole project fits inside the window', () => {
+    const epics = [epicAt('a', 'done', 1), epicAt('b', 'active', 2)];
+    const arc = scopeRoadmapEpics(epics, { behind: 2, ahead: 2, bound: 8 });
+    expect(arc.epics.map((e) => e.id)).toEqual(['a', 'b']);
+    expect(arc.totalCount).toBe(2);
   });
 });
 
