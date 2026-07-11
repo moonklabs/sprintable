@@ -611,7 +611,10 @@ async def test_fetch_scoped_member_falls_back_directly():
 
 @pytest.mark.anyio
 async def test_list_file_locks_200():
-    """AC6: GET /api/v2/file-locks → 목록 반환."""
+    """AC6: GET /api/v2/file-locks?project_id=... → 목록 반환.
+
+    E-SECURITY SEC-S8 Y: project_id가 필수 쿼리 파라미터로 바뀌어(org 전체 노출 봉인)
+    has_project_access도 검증 대상 — 여기선 True로 patch해 목록 반환 경로만 격리 검증."""
     client, session, app = await _client()
     try:
         lock = MagicMock()
@@ -625,8 +628,9 @@ async def test_list_file_locks_200():
         mock_result.scalars.return_value.all.return_value = [lock]
         session.execute = AsyncMock(return_value=mock_result)
 
-        async with client as c:
-            resp = await c.get("/api/v2/file-locks")
+        with patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)):
+            async with client as c:
+                resp = await c.get("/api/v2/file-locks", params={"project_id": str(PROJECT_ID)})
 
         assert resp.status_code == 200
         body = resp.json()

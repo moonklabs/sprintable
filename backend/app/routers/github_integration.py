@@ -173,8 +173,11 @@ async def create_explicit_link(
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """PR↔story **명시연결**(explicit·confidence high·Bot-L.2 UI 의 BE). resolver 체인 최우선·close-on-merge
-    가능. ⭐anti-IDOR **2층**: ①story 가 caller org 소속 ②**repo 가 org 의 설치 context**(installation account)에
-    속함. 둘 다 미충족 = generic 404(타 org/repo 존재 oracle 0). per-org 격리·upsert·created_by=caller member.
+    가능. ⭐anti-IDOR **2+1층**: ①story 가 caller org 소속 ②caller가 그 story의 project 접근권 보유
+    (E-SECURITY SEC-S8 Y, 까심 전수스윕 — 기존엔 org-scope만 있고 project-scope가 없어 같은 org
+    다른 project의 story에도 PR 링크를 생성할 수 있었다·T/X와 동형) ③**repo 가 org 의 설치 context**
+    (installation account)에 속함. 전부 미충족 = generic 404(타 org/repo 존재 oracle 0). per-org
+    격리·upsert·created_by=caller member.
     """
     if not body.repo_full_name.strip() or "/" not in body.repo_full_name or body.pr_number <= 0:
         return JSONResponse(status_code=422, content={"error": "invalid_pr_identity"})
@@ -187,6 +190,10 @@ async def create_explicit_link(
         )
     ).scalar_one_or_none()
     if story is None:
+        return JSONResponse(status_code=404, content={"error": "story_not_found"})
+    # ②project-scope 검증(SEC-S8 Y) — org만으론 same-org cross-project 링크 생성을 못 막는다.
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(session, uuid.UUID(auth.user_id), story.project_id, org_id):
         return JSONResponse(status_code=404, content={"error": "story_not_found"})
     # ②repo 가 org 의 설치 context 에 속하는지(anti-IDOR·임의 repo high link 차단). org 의 active installation
     # account_login 과 repo owner 일치 요구. 미설치/owner 불일치 = generic 404(repo 존재 oracle 0).
@@ -238,11 +245,14 @@ def _link_view(link: PullRequestStoryLink) -> dict:
 async def list_links(
     story_id: uuid.UUID = Query(...),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """story 의 PR↔story 링크 목록(Bot-L.2 UI '연결 PR 표시'). org-scope·story 선검증(anti-IDOR).
-    타 org/부재 story = generic 404(존재 oracle 0). 링크는 org+story+미삭제만 반환."""
+    """story 의 PR↔story 링크 목록(Bot-L.2 UI '연결 PR 표시'). org-scope·project-scope·story
+    선검증(anti-IDOR, SEC-S8 Y fix-on-sight — create_explicit_link 자매 갭). 타 org/무권한
+    project/부재 story = generic 404(존재 oracle 0). 링크는 org+story+미삭제만 반환."""
+    from app.services.project_auth import has_project_access
+
     story = (
         await session.execute(
             select(Story).where(
@@ -251,6 +261,8 @@ async def list_links(
         )
     ).scalar_one_or_none()
     if story is None:
+        return JSONResponse(status_code=404, content={"error": "story_not_found"})
+    if not await has_project_access(session, uuid.UUID(auth.user_id), story.project_id, org_id):
         return JSONResponse(status_code=404, content={"error": "story_not_found"})
     links = (
         await session.execute(
@@ -270,11 +282,17 @@ async def list_links(
 async def delete_link(
     link_id: uuid.UUID,
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """PR↔story 링크 해제(Bot-L.2 UI '해제'·soft-delete). ⭐anti-IDOR: `link.id AND org_id` — 타 org/부재/
-    이미 삭제는 generic 404(존재 oracle 0). soft-delete(deleted_at) 라 close-on-merge resolver 에서 즉시 제외."""
+    이미 삭제는 generic 404(존재 oracle 0). soft-delete(deleted_at) 라 close-on-merge resolver 에서 즉시 제외.
+
+    E-SECURITY SEC-S8(story 83ea3d6a) Z(까심 QA, 라이브 확定): org_id만으론 부족했다 — create_explicit_
+    link/list_links(Y)는 project-scope를 이미 닫았는데 delete는 빠져 있었다(S/X와 동형 패턴). link이
+    가리키는 story의 project에 caller가 접근권 있는지도 검증."""
+    from app.services.project_auth import has_project_access
+
     link = (
         await session.execute(
             select(PullRequestStoryLink).where(
@@ -285,6 +303,13 @@ async def delete_link(
         )
     ).scalar_one_or_none()
     if link is None:
+        return JSONResponse(status_code=404, content={"error": "link_not_found"})
+    story_project_id = (
+        await session.execute(select(Story.project_id).where(Story.id == link.story_id))
+    ).scalar_one_or_none()
+    if story_project_id is None or not await has_project_access(
+        session, uuid.UUID(auth.user_id), story_project_id, org_id
+    ):
         return JSONResponse(status_code=404, content={"error": "link_not_found"})
     link.deleted_at = datetime.now(timezone.utc)
     await session.commit()

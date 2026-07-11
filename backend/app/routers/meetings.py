@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
@@ -11,19 +12,32 @@ from app.schemas.meeting import MeetingCreate, MeetingResponse, MeetingUpdate
 router = APIRouter(prefix="/api/v2/meetings", tags=["meetings"])
 
 
-def _get_repo(
+async def _get_repo(
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    _org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
     project_id_q: uuid.UUID | None = Query(default=None, alias="project_id"),
 ) -> MeetingRepository:
+    """E-SECURITY SEC-S8(story 83ea3d6a) G: `get_verified_org_id`가 계산만 되고(dead
+    computation) `MeetingRepository`는 project_id만으로 스코핑돼(org_id 개념 자체가 없는
+    repo) org/project 접근권 미검증인 채 임의 project_id(query param 또는 JWT app_metadata)를
+    그대로 받아들였다 — delete_meeting은 F에서 이미 봉쇄했으나 list/get/update/put은
+    미봉쇄였음(같은 `_get_repo` 공유라 여기 한 곳에서 닫으면 4개 핸들러 전부 커버).
+    has_project_access(org_id=)가 org-scope + project-scope(team_member/grant/owner-admin
+    floor)를 한 번에 강제한다."""
     pid = (str(project_id_q) if project_id_q else None) or auth.claims.get("app_metadata", {}).get("project_id")
     if not pid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="project_id required (query param or JWT app_metadata)",
         )
-    return MeetingRepository(session, uuid.UUID(str(pid)))
+    project_id = uuid.UUID(str(pid))
+
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
+    return MeetingRepository(session, project_id)
 
 
 @router.get("", response_model=list[MeetingResponse])
@@ -104,7 +118,38 @@ async def put_meeting(
 async def delete_meeting(
     id: uuid.UUID,
     repo: MeetingRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    """E-SECURITY SEC-S8(story 83ea3d6a) F — 까심 전수스윕 CRITICAL: `_get_repo`가
+    `get_verified_org_id`를 계산만 하고(`_org_id`, dead computation) `MeetingRepository`는
+    project_id만으로 스코핑돼(org_id 개념 자체가 없는 repo) org 무관 임의 project_id를 그대로
+    받아들였다 — Org B agent가 Org A meeting을 무인증 삭제(200·무감사) 가능했음. SEC-S1과
+    동형으로 human-gate + 삭제 감사 추가, 그 위에 target project의 실 org를 caller org와 대조
+    (SEC-S6/S7 헬퍼 재사용)."""
+    from app.services.member_resolver import resolve_member
+    from app.services.project_auth import assert_target_in_caller_org
+
+    target_org_id = (await session.execute(
+        text("SELECT org_id FROM projects WHERE id = :pid"), {"pid": str(repo.project_id)},
+    )).scalar_one_or_none()
+    assert_target_in_caller_org(org_id, target_org_id, not_found_detail="Meeting not found")
+
+    resolved = await resolve_member(auth, org_id, session)
+    if resolved.type != "human":
+        raise HTTPException(status_code=403, detail="Meeting 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+
+    meeting = await repo.get(id)
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    from app.models.deletion_audit import DeletionAuditLog
+    session.add(DeletionAuditLog(
+        id=uuid.uuid4(), org_id=org_id, actor_id=resolved.id,
+        entity_type="meeting", entity_id=id, entity_title=meeting.title,
+    ))
+
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Meeting not found")

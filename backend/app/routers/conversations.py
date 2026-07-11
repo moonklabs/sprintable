@@ -169,15 +169,27 @@ async def _resolve_member(
 
 
 async def _effective_org_role(
-    auth: AuthContext, org_id: uuid.UUID, db: AsyncSession, sender: "ResolvedMember | TeamMember"
+    auth: AuthContext, org_id: uuid.UUID, db: AsyncSession, sender: "ResolvedMember | TeamMember",
+    project_id: uuid.UUID | None = None,
 ) -> str:
     """sender.role에 org owner/admin 상속(S-MBR-03). team_members 뷰는 **project role만** 주므로
     org owner/admin이 project-member로 나오는 갭(#1223 agent-view 게이트 ↔ 멤버-SSOT 뷰)을 보정 —
-    /me effective-role과 일관(버그: org owner/admin이 agent-view 403). 에이전트(API키)는 org role
-    무관이라 sender.role 그대로."""
-    if sender.role in ("owner", "admin"):
-        return sender.role
+    /me effective-role과 일관(버그: org owner/admin이 agent-view 403).
+
+    E-SECURITY SEC-S8(story 83ea3d6a) V(까심 전수스윕, 실HTTP 확定): 에이전트는 org-wide role
+    개념이 없음(project_access.role만 존재)인데 `_resolve_member`의 agent 분기가 project_id
+    무관하게 `.first()`로 임의 1행을 뽑아(P와 동형 비결정 row-pick) sender.role을 그대로
+    신뢰했다 — mixed-role 에이전트(예: X=admin·Y=grant 0)가 project_x의 admin 지위를 빌려와
+    project_y의 agent-only 대화를 admin-bypass로 열람할 수 있었다(참가자 아님에도 200). fix=
+    project_id가 주어지면 **그 project 전용** effective role을 get_project_role(P가 쓴 SSOT)로
+    재평가 — 휴먼은 원래대로 org-wide OrgMember.role(진짜 org 전체 권한이라 무관)."""
     if bool(auth.claims.get("app_metadata", {}).get("api_key_id")):
+        if project_id is None:
+            return sender.role  # 레거시 폴백(project_id 미전달 호출부 — 현재 전 호출부가 전달함)
+        from app.services.project_auth import get_project_role
+        role = await get_project_role(db, sender.id, project_id)
+        return role or "member"
+    if sender.role in ("owner", "admin"):
         return sender.role
     om_role = (await db.execute(
         select(OrgMember.role).where(
@@ -695,15 +707,20 @@ async def create_conversation(
     """POST /api/v2/conversations — dm/group 생성 (dm 중복 방지)."""
     sender = await _resolve_member(auth, org_id, db, project_id=body.project_id)
 
+    # E-SECURITY SEC-S3(story 90cd7e57): participant_ids가 org 멤버십 필터 없이 그대로 insert
+    # 됐음(add_participant/멘션발송과 비대칭 — 그 두 경로는 이미 org-scope 검증). cross-org UUID를
+    # 참가자로 넣을 수 있던 갭 봉쇄 — 조용히 제거(에러 아님, 존재하는 유효 참가자만 방에 남음).
+    valid_participant_ids = await filter_org_member_ids(set(body.participant_ids), org_id, db)
+
     # ⭐ 인가 불변식: 휴먼↔에이전트 대화 — 에이전트 creator 동석 필수
-    await _enforce_agent_creator_policy(sender, body.participant_ids, db)
+    await _enforce_agent_creator_policy(sender, list(valid_participant_ids), db)
 
     # EF-S2 (db75ecd0): "기존방 다이렉트" 제거 — 동일 2인 pair여도 매 호출 신규 conversation 생성
     # (여러 conversation 공존·각 1주제·hermes 세션별 1방=1주제). 179db213 의 1-DM-per-pair
     # dedup + uq_conversations_dm_pair 정책 회귀(마이그 0111 에서 unique index drop).
     # 불변 보존: creator 동석/allow_list(_enforce_agent_creator_policy 위), 메시지 dedup(send_message·별개),
     # thread=스토리. dm_pair_key 컬럼은 2인 룸 태깅용으로 유지(non-unique·dedup 아님).
-    all_members = sorted({sender.id, *body.participant_ids})
+    all_members = sorted({sender.id, *valid_participant_ids})
     is_dm = len(all_members) == 2
     dm_pair_key = "|".join(str(m) for m in all_members) if is_dm else None
 
@@ -744,7 +761,9 @@ async def list_conversations(
 
     # AC5: include_agent_conversations는 owner/admin만 허용 (org-effective role — project team_member
     # role이 낮아도 org owner/admin이면 상속·#1223↔SSOT뷰 갭 보정)
-    if include_agent_conversations and await _effective_org_role(auth, org_id, db, sender) not in ("owner", "admin"):
+    if include_agent_conversations and await _effective_org_role(
+        auth, org_id, db, sender, project_id=project_id,
+    ) not in ("owner", "admin"):
         raise HTTPException(status_code=403, detail="Only owner/admin can view agent conversations.")
 
     conv_ids_result = await db.execute(
@@ -880,7 +899,9 @@ async def get_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     sender = await _resolve_member(auth, org_id, db, project_id=None)
-    is_admin = await _effective_org_role(auth, org_id, db, sender) in ("owner", "admin")
+    is_admin = await _effective_org_role(
+        auth, org_id, db, sender, project_id=conv.project_id,
+    ) in ("owner", "admin")
     # admin이어도 휴먼 참가(private) 대화면 participant 체크 폴백
     if (not is_admin) or await _conversation_has_human_participant(conversation_id, db):
         sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
@@ -931,7 +952,9 @@ async def list_messages(
     sender = await _resolve_member(auth, org_id, db, project_id=None)
 
     # org-effective role(S-MBR-03·#1223↔SSOT뷰 갭 보정) — project role 낮아도 org owner/admin 상속
-    is_admin = await _effective_org_role(auth, org_id, db, sender) in ("owner", "admin")
+    is_admin = await _effective_org_role(
+        auth, org_id, db, sender, project_id=conv_project_id,
+    ) in ("owner", "admin")
     # admin이어도 휴먼 참가(private) 대화면 participant 체크 폴백(사적 DM 프라이버시)
     if (not is_admin) or await _conversation_has_human_participant(conversation_id, db):
         # project isolation 보존 — project 소속 member 재확인

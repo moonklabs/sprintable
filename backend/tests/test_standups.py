@@ -95,10 +95,16 @@ async def test_list_standups_200():
 @pytest.mark.anyio
 async def test_upsert_standup_insert_201():
     """신규 스탠드업 upsert → INSERT."""
+    from app.services.member_resolver import ResolvedMember
+
     client, session, app = await _client()
     try:
         entry = _mock_entry()
-        with patch("app.repositories.standup.StandupEntryRepository.upsert", new_callable=AsyncMock) as mock_upsert:
+        member = ResolvedMember(
+            id=AUTHOR_ID, user_id=AUTHOR_ID, name="h", type="human", role="member", org_id=ORG_ID,
+        )
+        with patch("app.repositories.standup.StandupEntryRepository.upsert", new_callable=AsyncMock) as mock_upsert, \
+             patch("app.routers.standups.resolve_member", new=AsyncMock(return_value=member)):
             mock_upsert.return_value = entry
 
             async with client as c:

@@ -183,9 +183,11 @@ async def test_delete_doc_200():
         session.flush = AsyncMock()
 
         # b13352c2: delete_doc 가 cascade(resolve_member + void_pending_doc_gate) 호출 → 패치(이 테스트는 삭제만 검증·cascade는 별도).
+        # E-SECURITY SEC-S1(확장): resolve_member 결과의 type="human"이 아니면 delete_doc이 403을
+        # 내므로(에이전트 삭제 차단) 이 목의 type을 명시해야 한다.
         from unittest.mock import patch as _patch
         with _patch("app.services.member_resolver.resolve_member",
-                    new=AsyncMock(return_value=MagicMock(id=uuid.uuid4()))), \
+                    new=AsyncMock(return_value=MagicMock(id=uuid.uuid4(), type="human"))), \
              _patch("app.services.gate_service.void_pending_doc_gate", new=AsyncMock(return_value=False)):
             async with client as c:
                 resp = await c.delete(f"/api/v2/docs/{DOC_ID}")

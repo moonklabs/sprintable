@@ -3,12 +3,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, field_validator
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.deletion_audit import DeletionAuditLog
 from app.models.event import Event
 from app.models.pm import Epic, Story, StoryActivity, StoryComment
 from app.models.team import TeamMember
@@ -20,7 +21,7 @@ from app.services.event_seq import assign_recipient_seq
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.schemas.story import StoryAttachment, StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
-from app.services.member_resolver import canonicalize_member_id, filter_org_member_ids
+from app.services.member_resolver import canonicalize_member_id, filter_org_member_ids, resolve_member
 from app.services.merge_verdict_gate import (
     AUTO_MERGE,
     evaluate_merge_gate,
@@ -165,6 +166,19 @@ async def _attach_has_evidence(session: AsyncSession, stories: list[Story]) -> N
             s.has_evidence = True
 
 
+async def _assert_story_project_access(
+    session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, project_id: uuid.UUID
+) -> None:
+    """E-SECURITY SEC-S8(story 83ea3d6a) G: 개별-ID story 접근(get/update/status)이 org-scope만
+    있고 project 접근권 미검증이던 갭 — 같은 org 다른 project 멤버가 story id만 알면 조회/수정
+    가능했다. upload_story_attachment와 동형으로 has_project_access 재사용(휴먼 team_member·
+    에이전트 project_access grant 양쪽 처리). delete_story는 SEC-S3(#2014)가 별도 처리."""
+    from app.services.project_auth import has_project_access
+
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
+
 async def _upsert_assignee_participation(
     session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID, assignee_id: uuid.UUID
 ) -> None:
@@ -235,6 +249,35 @@ def _enforce_mcp_attachment_declared_limit(attachments: list[dict]) -> None:
         )
 
 
+_STORY_LINK_TABLES = {"epic_id": "epics", "sprint_id": "sprints", "meeting_id": "meetings"}
+
+
+async def _assert_story_link_targets_in_project(
+    session: AsyncSession, project_id: uuid.UUID, body: "StoryCreate | StoryUpdate",
+) -> None:
+    """E-SECURITY SEC-S8(story 83ea3d6a) T(까심 전수스윕, 실HTTP 확定): epic_id/sprint_id/
+    meeting_id가 body.project_id 소속인지 검증 없이 그대로 repo.create에 전달됐다 — 같은 org
+    다른 project의 epic/sprint/meeting에 story를 링크할 수 있었다(G/R와 동형 project-scope
+    부재). enforce_body_context는 body.project_id 자체만 caller와 대조할 뿐, 그 project_id
+    "안에" 링크 대상이 실제로 속하는지는 안 본다.
+
+    E-SECURITY SEC-S8 X(까심 전수스윕): T는 create_story만 닫았고 update_story(PATCH) 경로가
+    남아있었다 — 여기서 StoryUpdate도 받아 같은 검증을 update_story에도 재사용(대상 project는
+    기존 story 자신의 project_id, StoryUpdate엔 project_id 필드 자체가 없어 변경 불가)."""
+    for field, table in _STORY_LINK_TABLES.items():
+        target_id = getattr(body, field)
+        if target_id is None:
+            continue
+        target_project_id = (await session.execute(
+            text(f"SELECT project_id FROM {table} WHERE id = :id"),  # noqa: S608 — table은 고정 allowlist(_STORY_LINK_TABLES), 요청값 아님
+            {"id": target_id},
+        )).scalar_one_or_none()
+        if target_project_id != project_id:
+            raise HTTPException(
+                status_code=404, detail=f"{field.replace('_id', '').title()} not found",
+            )
+
+
 @router.post("", response_model=StoryResponse, status_code=201)
 async def create_story(
     body: StoryCreate,
@@ -251,6 +294,7 @@ async def create_story(
         db=session,
         user_id=uuid.UUID(auth.user_id),
     )
+    await _assert_story_link_targets_in_project(session, body.project_id, body)
     repo = StoryRepository(session, org_id)
     # E-BOARD S5: assignee_ids 제공 시 단일 assignee_id(주담당)는 첫 요소로 동기화(미지정 시).
     effective_ids = (
@@ -357,10 +401,12 @@ async def get_workflow_line_metrics(
 async def get_story(
     id: uuid.UUID,
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     await _attach_assignee_ids(repo.session, repo.org_id, [story])
     await _attach_has_evidence(repo.session, [story])
     return StoryResponse.model_validate(story)
@@ -533,12 +579,26 @@ async def bulk_update_stories(
     except Exception:  # noqa: BLE001 — actor 해소 실패도 bulk 비차단.
         actor_id = None
 
+    from app.services.project_auth import has_project_access
+
     updated: list[Story] = []
     old_status_by_id: dict[uuid.UUID, str] = {}
     for item in payload.items:
-        q = await db.execute(select(Story).where(Story.id == item.id))
+        # E-SECURITY SEC-S8(story 83ea3d6a) W(까심 QA, CRITICAL·실HTTP 확定): 이 raw 쿼리가
+        # org_id 필터 자체가 없어(정상 repo.get()은 self._org_filter() 명시·RLS도 0002서 off)
+        # 타 org의 story UUID만 알면 status/sprint_id/assignee_id/priority/position 전부
+        # 변조 가능했다(cross-org IDOR). repo.org_id로 스코프.
+        q = await db.execute(
+            select(Story).where(Story.id == item.id, Story.org_id == repo.org_id)
+        )
         story = q.scalar_one_or_none()
         if not story:
+            continue
+        # E-SECURITY SEC-S8(story 83ea3d6a) W2(까심 QA): org_id 필터로 cross-org는 닫혔으나
+        # same-org 다른 project의 story는 여전히 변조 가능했다(project-scope 부재, G/T와 동형).
+        # 개별-ID PATCH(_assert_story_project_access)와 동일 기준(has_project_access) 재사용 —
+        # 미접근 item은 not-found와 동형으로 조용히 스킵(존재 비노출·나머지 정당 item은 진행).
+        if not await has_project_access(db, uuid.UUID(auth.user_id), story.project_id, repo.org_id):
             continue
         update_data = item.model_dump(exclude={"id"}, exclude_none=True)
         # status 변경이면 전이 前 old_status 포착(violation 판정용·setattr 前).
@@ -606,6 +666,12 @@ async def update_story(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
+    _story_for_access = await repo.get(id)
+    if _story_for_access is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(db, auth, repo.org_id, _story_for_access.project_id)
+    await _assert_story_link_targets_in_project(db, _story_for_access.project_id, body)
+
     data = body.model_dump(exclude_unset=True)
     # S7: client 제공 asset_id strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
     if data.get("attachments"):
@@ -851,10 +917,40 @@ async def delete_story(
     repo: StoryRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    """E-SECURITY SEC-S1(story 70c9e92c): hard-delete는 휴먼 전용 — 에이전트 API키(사람 승인
+    없는 즉시 물리삭제)는 403. 삭제 전 actor/target를 감사 기록(story row 자체는 삭제되므로
+    미리 캡처 — DeletionAuditLog는 story FK 없이 독립 테이블이라 삭제 후에도 생존)."""
     from app.repositories.dependency import DependencyRepository
     from app.repositories.label import ItemLabelRepository
     from app.repositories.participation import ParticipationRepository
+
+    resolved = await resolve_member(auth, org_id, session)
+    if resolved.type != "human":
+        raise HTTPException(status_code=403, detail="Story 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    # E-SECURITY SEC-S3(story 90cd7e57): DELETE가 org-only 스코핑이라 프로젝트 미멤버(같은 org의
+    # 다른 프로젝트 소속)도 스토리 삭제 가능했음 — upload_story_attachment와 동일 SSOT
+    # (has_project_access)로 project 인가 적용. SEC-S1의 human-gate(에이전트 차단)와는 직교 축
+    # (actor 타입 vs project 소속) — human이어도 무관한 project면 여전히 403.
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(session, uuid.UUID(auth.user_id), story.project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
+    session.add(DeletionAuditLog(
+        id=uuid.uuid4(),
+        org_id=org_id,
+        actor_id=resolved.id,
+        entity_type="story",
+        entity_id=id,
+        entity_title=story.title,
+    ))
+
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -875,6 +971,8 @@ async def update_story_status(
     auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
     story_before = await repo.get(id)
+    if story_before is not None:
+        await _assert_story_project_access(db, auth, repo.org_id, story_before.project_id)
     old_status = story_before.status if story_before else None
 
     # 정공법 A(c1cd484b·선생님 지시): 전이 순서 **하드블록 폐지** — 비순차 점프도 항상 allow,

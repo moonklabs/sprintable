@@ -36,6 +36,15 @@ async def trigger_workflow(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> TriggerResponse:
+    # E-SECURITY SEC-S8(story 83ea3d6a) Z2(까심 전수스윕, 실HTTP 확定): body.project_id에
+    # has_project_access 검증 자체가 없어, project_a만 grant된 caller가 body.project_id=project_b로
+    # 요청하면 project_b 전용 enabled rule이 실제로 매치되고 WorkflowExecutionLog가 생성됐다
+    # (남의 project 워크플로 실행 트리거). has_project_access(org_id 지정)가 "project가 caller
+    # org 소속"과 "caller 접근권" 둘 다 커버.
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=_DEDUP_SECONDS)
     recent = await db.execute(
         select(WorkflowExecutionLog.id)

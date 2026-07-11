@@ -129,9 +129,13 @@ async def delete_project(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
+    from app.models.deletion_audit import DeletionAuditLog
+    from app.services.member_resolver import resolve_member
+
     repo = ProjectRepository(session, org_id)
+    project = await repo.get(id)
     # 미접근 멤버에겐 존재 비노출(404).
-    if await repo.get(id) is None or not await has_project_access(
+    if project is None or not await has_project_access(
         session, uuid.UUID(auth.user_id), id, org_id
     ):
         raise HTTPException(status_code=404, detail="Project not found")
@@ -141,6 +145,16 @@ async def delete_project(
             status_code=403,
             detail="프로젝트 삭제는 조직 owner/admin 권한이 필요합니다",
         )
+    # E-SECURITY SEC-S1 확장(까심 적대적 QA 발견): is_org_owner_or_admin은 org_members(휴먼 전용)만
+    # 조회해 에이전트가 구조적으로 통과 불가하나 암묵적 부산물일 뿐 — story·epic과 동형으로 명시적
+    # human-only 체크 + 삭제 감사를 추가한다(cascade 파괴력 고려).
+    resolved = await resolve_member(auth, org_id, session)
+    if resolved.type != "human":
+        raise HTTPException(status_code=403, detail="Project 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+    session.add(DeletionAuditLog(
+        id=uuid.uuid4(), org_id=org_id, actor_id=resolved.id,
+        entity_type="project", entity_id=id, entity_title=project.name,
+    ))
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Project not found")

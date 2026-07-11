@@ -8,6 +8,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 MEMBER_ID = uuid.uuid4()
+ORG_ID = uuid.uuid4()
 
 
 def _mock_member(agent_role: str | None = "qa") -> MagicMock:
@@ -139,7 +140,7 @@ def _multi_row_result():
 
 @pytest.mark.anyio
 async def test_agent_card_200_reflects_role_template_skills():
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         member = _mock_member()
         persona = _mock_persona()
@@ -176,7 +177,7 @@ async def test_agent_card_interface_url_uses_backend_direct_url_not_request_sche
     테스트 클라이언트는 http://test로 요청해도 카드 url은 그 값을 반영하면 안 됨."""
     from app.routers import a2a as a2a_mod
 
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         member = _mock_member()
         persona = _mock_persona()
@@ -210,7 +211,7 @@ async def test_agent_card_prefers_role_template_skills_when_linked():
     """~300직군 카탈로그 S4: persona가 recruit_agent() 생성 marker(config.role_template_id)를
     가지면, 카드-빌드 시점에 그 role_template.skills(카탈로그 실시간 값)를 우선 반영 —
     persona 생성 시점 스냅샷(slug/tool_allowlist 파생 단일 skill)이 아니라."""
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         rt_id = str(uuid.uuid4())
         member = _mock_member()
@@ -250,7 +251,7 @@ async def test_agent_card_prefers_role_template_skills_when_linked():
 async def test_agent_card_falls_back_to_persona_when_role_template_skills_empty():
     """role_template_id는 있으나 그 role_template.skills가 아직 비어있으면(카탈로그 구조화
     미완료) persona-파생 단일 skill로 그레이스풀 폴백 — 빈 skills[] 노출 금지."""
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         rt_id = str(uuid.uuid4())
         member = _mock_member()
@@ -285,7 +286,7 @@ async def test_agent_card_falls_back_to_persona_when_role_template_skills_empty(
 @pytest.mark.anyio
 async def test_agent_card_200_unassigned_agent_fallback_skill():
     """persona 없음(미채용) — team_members.agent_role 기반 최소 skill 하나로 폴백, 크래시 없음."""
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         member = _mock_member(agent_role=None)
 
@@ -311,7 +312,7 @@ async def test_agent_card_200_unassigned_agent_fallback_skill():
 
 @pytest.mark.anyio
 async def test_agent_card_404_unknown_member():
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         session.execute = AsyncMock(return_value=_result(None))
 
@@ -1357,7 +1358,7 @@ async def test_project_context_extension_ignored_when_not_declared():
 
 @pytest.mark.anyio
 async def test_agent_card_advertises_project_context_extension():
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         member = _mock_member()
         persona = _mock_persona()
@@ -1390,7 +1391,7 @@ async def test_agent_card_advertises_project_context_extension():
 
 @pytest.mark.anyio
 async def test_agent_card_advertises_bearer_security_scheme():
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         member = _mock_member()
         persona = _mock_persona()

@@ -1,4 +1,5 @@
-"""스프린트 관련 MCP 도구 (8개)."""
+"""스프린트 관련 MCP 도구 (7개) — E-SECURITY SEC-S8 확장: delete_sprint 제거(에이전트
+hard-delete 차단, delete_story와 동형 조치. 까심 적대적 QA 발견 갭)."""
 from __future__ import annotations
 
 from mcp.types import TextContent
@@ -102,13 +103,5 @@ async def update_sprint(args: UpdateSprintInput) -> list[TextContent]:
         updates["team_size"] = args.team_size
     try:
         return ok(await client.patch(f"/api/v2/sprints/{args.sprint_id}", json=updates))
-    except Exception as exc:
-        return err(str(exc))
-
-
-async def delete_sprint(args: SprintIdInput) -> list[TextContent]:
-    """스프린트 삭제."""
-    try:
-        return ok(await client.delete(f"/api/v2/sprints/{args.sprint_id}"))
     except Exception as exc:
         return err(str(exc))

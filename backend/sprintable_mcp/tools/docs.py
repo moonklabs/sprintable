@@ -1,4 +1,5 @@
-"""문서 관련 MCP 도구 (6개)."""
+"""문서 관련 MCP 도구 (5개) — E-SECURITY SEC-S1 확장: delete_doc 제거(에이전트 삭제 차단,
+delete_story와 동형 조치. 까심 적대적 QA 발견 갭)."""
 from __future__ import annotations
 
 from typing import Literal
@@ -50,10 +51,6 @@ class UpdateDocInput(SprintableInput):
     # 몰라도 됨)을 content 끝에 append. 이 호출에 content 를 안 실었으면 현재 저장된 content 를 먼저
     # 읽어 그 뒤에 append(기존 본문을 지우지 않음).
     attachments: list[dict] | None = None
-
-
-class DeleteDocInput(SprintableInput):
-    doc_id: str
 
 
 async def list_docs(args: ListDocsInput) -> list[TextContent]:
@@ -141,14 +138,5 @@ async def update_doc(args: UpdateDocInput) -> list[TextContent]:
                 snippets = "".join(a["embed_snippet"] for a in uploaded if isinstance(a, dict) and a.get("embed_snippet"))
                 updates["content"] = f"{base_content}\n{snippets}" if base_content else snippets
         return ok(await client.patch(f"/api/v2/docs/{args.doc_id}", json=updates))
-    except Exception as exc:
-        return err(str(exc))
-
-
-async def delete_doc(args: DeleteDocInput) -> list[TextContent]:
-    """문서 소프트 삭제."""
-    try:
-        await client.delete(f"/api/v2/docs/{args.doc_id}")
-        return ok({"deleted": True})
     except Exception as exc:
         return err(str(exc))

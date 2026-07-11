@@ -127,6 +127,22 @@ async def list_docs(
     return [DocSummaryResponse.model_validate(d) for d in docs]
 
 
+async def _assert_doc_parent_in_project(
+    session: AsyncSession, project_id: uuid.UUID, parent_id: uuid.UUID | None,
+) -> None:
+    """E-SECURITY SEC-S8(story 83ea3d6a) Y(까심 전수스윕): parent_id가 project_id 소속인지
+    검증 없이 그대로 repo.create/setattr에 적용됐다(DocRepository.create는 BaseRepository
+    상속이라 소유권 검증 0) — 같은 org 다른 project의 doc을 parent로 지정해 doc 트리를
+    오염시킬 수 있었다(T/G와 동형 project-scope 부재). create/update 양쪽 재사용."""
+    if parent_id is None:
+        return
+    parent_project_id = (await session.execute(
+        select(Doc.project_id).where(Doc.id == parent_id, Doc.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if parent_project_id != project_id:
+        raise HTTPException(status_code=404, detail="Parent doc not found")
+
+
 @router.post("", response_model=DocResponse, status_code=201)
 async def create_doc(
     body: DocCreate,
@@ -143,6 +159,7 @@ async def create_doc(
         db=session,
         user_id=uuid.UUID(auth.user_id),
     )
+    await _assert_doc_parent_in_project(session, body.project_id, body.parent_id)
     # ⭐RC#1(body-trust 봉인): created_by 를 **인증 caller 로 강제**(body.created_by 무시·attribution
     # 위조 차단). 다른 doc write 경로(_resolve_doc_member_id·line~501)와 대칭. AC3-2d(2) canonical 유지.
     created_by = await _resolve_doc_member_id(auth, org_id, session)
@@ -331,6 +348,9 @@ async def update_doc(
                 },
             )
 
+    if "parent_id" in data:
+        await _assert_doc_parent_in_project(session, doc.project_id, data["parent_id"])
+
     # 일반 필드 적용 (slug 제외)
     for attr, val in data.items():
         setattr(doc, attr, val)
@@ -427,6 +447,19 @@ async def delete_doc(
     # f69fcd91: 대상 doc 의 project 접근 강제(cross-project IDOR 차단·get_project_scoped_org_id 의 org-only
     # fallback 으로 同org 비-project caller 가 타 project doc 삭제 가능하던 갭). 없으면 404·무권한 403.
     await _require_doc_project_access(repo.session, id, uuid.UUID(auth.user_id), repo.org_id)
+    # E-SECURITY SEC-S1 확장(까심 적대적 QA 발견 갭): delete_story와 동형으로 휴먼 전용화 + 삭제 감사.
+    from app.services.member_resolver import resolve_member
+    deleter = await resolve_member(auth, repo.org_id, repo.session)
+    if deleter.type != "human":
+        raise HTTPException(status_code=403, detail="Doc 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    from app.models.deletion_audit import DeletionAuditLog
+    repo.session.add(DeletionAuditLog(
+        id=uuid.uuid4(), org_id=repo.org_id, actor_id=deleter.id,
+        entity_type="doc", entity_id=id, entity_title=doc.title,
+    ))
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Doc not found")
@@ -434,8 +467,6 @@ async def delete_doc(
     # 삭제 권한자(인증 caller) 트리거 system cascade — human-gate authz 우회 정당(별도 결재 아님). void 는
     # begin_nested 격리 best-effort라 삭제 비중단. pending 아니면 no-op(멱등)·doc_approval 만 스코핑.
     from app.services.gate_service import void_pending_doc_gate
-    from app.services.member_resolver import resolve_member
-    deleter = await resolve_member(auth, repo.org_id, repo.session)
     await void_pending_doc_gate(repo.session, repo.org_id, id, deleter.id)
     return {"ok": True}
 

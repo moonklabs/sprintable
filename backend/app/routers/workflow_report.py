@@ -148,6 +148,14 @@ async def report_done(
     if story is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Story not found")
 
+    # E-SECURITY SEC-S8(story 83ea3d6a) Z2(까심 전수스윕, 실HTTP 확定): org-scope(#12)는 있으나
+    # caller의 실제 project 접근권(has_project_access) 검증이 없어, project_a만 grant된 caller가
+    # project_b story_id로 이 엔드포인트를 호출하면 stage 전이가 실제로 반영됐다(DB 재조회로
+    # backlog→in-progress 변조 확定, G-class).
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(session, uuid.UUID(auth.user_id), story.project_id, org_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Story not found")
+
     # S20 finding #12(sibling): body.agent_id도 검증 없이 gate/line 평가의 actor로 그대로
     # 쓰였다 — 임의 agent_id로 actor 스푸핑 가능했던 갭. caller org 소속 member인지 확인.
     agent_check = await session.execute(

@@ -34,6 +34,10 @@ def _user():
 def _auth():
     a = MagicMock()
     a.user_id = str(USER)
+    # E-SECURITY SEC-S8(K): switch_project가 이제 auth.claims에서 caller org_id를 읽는다 —
+    # has_project_access는 이 테스트에서 AsyncMock(True)로 무조건 통과라 실제 org 검증은
+    # 무관하지만, .claims가 dict여야 .get() 체인이 MagicMock 대신 None을 정상 반환한다.
+    a.claims = {"app_metadata": {"org_id": str(ORG)}}
     return a
 
 

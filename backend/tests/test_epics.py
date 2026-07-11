@@ -374,11 +374,16 @@ def _delete_execute(*, epic, is_admin: bool):
     """delete_epic execute 시퀀스 모킹.
 
     1) repo.get → 존재 검증(scalar_one_or_none=에픽)
-    2) is_org_owner_or_admin → owner/admin 행 유무(scalar_one_or_none)
-    3) repo.delete 내부 self.get → 다시 에픽(없으면 False→404)
+    2) resolve_member — OrgMember 조회(E-SECURITY SEC-S1 확장: human-only 체크 신규 삽입)
+    3) resolve_member — User 조회(name 표시용, None이어도 무방)
+    4) is_org_owner_or_admin → owner/admin 행 유무(scalar_one_or_none)
+    5) repo.delete 내부 self.get → 다시 에픽(없으면 False→404)
     이후 cascade(dependency/label delete)는 영향 없음.
     """
     state = {"n": 0}
+    om_mock = MagicMock()
+    om_mock.id = uuid.uuid4()
+    om_mock.role = "admin" if is_admin else "member"
 
     async def _exec(stmt, *args, **kwargs):
         state["n"] += 1
@@ -386,8 +391,12 @@ def _delete_execute(*, epic, is_admin: bool):
         if state["n"] == 1:
             r.scalar_one_or_none.return_value = epic
         elif state["n"] == 2:
-            r.scalar_one_or_none.return_value = 1 if is_admin else None
+            r.scalar_one_or_none.return_value = om_mock
         elif state["n"] == 3:
+            r.scalar_one_or_none.return_value = None
+        elif state["n"] == 4:
+            r.scalar_one_or_none.return_value = 1 if is_admin else None
+        elif state["n"] == 5:
             r.scalar_one_or_none.return_value = epic
         else:
             r.scalar_one_or_none.return_value = None

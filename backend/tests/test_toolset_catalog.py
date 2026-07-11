@@ -72,9 +72,11 @@ def test_every_tool_covered_exactly_once():
 def test_tool_group_mapping_examples():
     by_tool = {t: g["key"] for g in build_toolset_catalog()["groups"] for t in g["tools"]}
     # 도메인 destructive 는 도메인 그룹(admin 아님)
-    assert by_tool["sprintable_delete_story"] == "stories"
+    # E-SECURITY SEC-S1(확장): sprintable_delete_story/task/epic/doc 제거(에이전트 hard-delete
+    # 차단) — delete_meeting으로 대체 예시(에이전트 MCP 표면에 남는 도메인 destructive 도구)
+    # E-SECURITY SEC-S8 확장: sprintable_delete_sprint도 동일 사유로 제거.
+    assert by_tool["sprintable_delete_meeting"] == "meetings"
     assert by_tool["sprintable_give_reward"] == "rewards"
-    assert by_tool["sprintable_delete_sprint"] == "sprints"
     # admin 그룹 = emit_event/trigger_ai/activate_sprint/close_sprint 등 진짜 파괴 작업만
     assert by_tool["sprintable_emit_event"] == "admin"
     # always-allowed(+orphan)는 core 로 통합(키워드 그룹서 제외)
