@@ -3417,6 +3417,8 @@
     "replyPlaceholder": "답글…",
     "resolvedByNote": "{name}가 해결함",
     "resultLinkNote": "↳ v{version} 생성 — 이 코멘트가 입력",
+    "proposeCanonicalAction": "정본으로 제안",
+    "canonicalizePendingBadge": "정본 제안 대기 중",
     "editModeLabel": "편집 모드",
     "paletteLabel": "부품",
     "propertyPanelEmpty": "요소를 선택하면 속성이 여기 표시됩니다",

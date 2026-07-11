@@ -7,6 +7,7 @@ import {
   type VisualArtifact, type BeVisualArtifactDetail, type BeVisualArtifactSummary,
 } from '@/services/canvas';
 import { adaptComments, type BeArtifactComment, type CommentThread } from '@/services/canvas-comments';
+import { derivePendingCanonicalizeVersion, type CanonicalizeGateLookup } from '@/services/canvas-canonicalize';
 import type { ArtifactNode } from '@/services/canvas-nodes';
 
 interface ArtifactSectionProps {
@@ -20,6 +21,7 @@ interface ArtifactItem {
   versions: ArtifactVersion[];
   threads: CommentThread[];
   nodes: ArtifactNode[];
+  pendingCanonicalizeVersion: number | null;
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T | null> {
@@ -39,6 +41,18 @@ async function loadArtifactThreads(artifactId: string, nodes: ArtifactNode[]): P
     fetchJson<BeArtifactVersionSummary[]>(`/api/visual-artifacts/${artifactId}/versions`),
   ]);
   return adaptComments(comments ?? [], nodes, versionSummaries ?? []);
+}
+
+/** GET /api/gates는 BE list_gates(response_model=list[...])를 그대로 pass-through — {data} 봉투가
+ * 없다(_ok() 미경유). fetchJson과 별개 helper로 raw 배열을 직접 받는다(gate-inbox.tsx와 동일 관례). */
+async function loadPendingCanonicalizeVersion(artifactId: string): Promise<number | null> {
+  try {
+    const res = await fetch(`/api/gates?work_item_id=${artifactId}&status=pending`);
+    const gates = res.ok ? (await res.json()) as CanonicalizeGateLookup[] : [];
+    return derivePendingCanonicalizeVersion(gates);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -61,9 +75,12 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
           const detail = await fetchJson<BeVisualArtifactDetail>(`/api/visual-artifacts/${a.id}`);
           if (!detail) return null;
           const { artifact, versions } = adaptArtifactDetail(detail);
-          const threads = await loadArtifactThreads(a.id, detail.nodes);
+          const [threads, pendingCanonicalizeVersion] = await Promise.all([
+            loadArtifactThreads(a.id, detail.nodes),
+            loadPendingCanonicalizeVersion(a.id),
+          ]);
 
-          return { artifact, versions, threads, nodes: detail.nodes };
+          return { artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion };
         }));
 
         if (!cancelled) setItems(resolved.filter((d): d is ArtifactItem => d !== null));
@@ -93,11 +110,17 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
     await refreshThreads(artifactId, nodes);
   }
 
+  async function handleProposeCanonical(artifactId: string, versionNumber: number) {
+    await fetchJson(`/api/visual-artifacts/${artifactId}/versions/${versionNumber}/canonicalize`, { method: 'POST' });
+    const pendingCanonicalizeVersion = await loadPendingCanonicalizeVersion(artifactId);
+    setItems((cur) => cur.map((it) => (it.artifact.id === artifactId ? { ...it, pendingCanonicalizeVersion } : it)));
+  }
+
   if (items.length === 0) return null;
 
   return (
     <div className={className}>
-      {items.map(({ artifact, versions, threads, nodes }) => (
+      {items.map(({ artifact, versions, threads, nodes, pendingCanonicalizeVersion }) => (
         <ArtifactViewer
           key={artifact.id}
           artifact={artifact}
@@ -107,6 +130,8 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
           nodes={nodes}
           onResolveThread={(threadId) => void handleResolve(artifact.id, nodes, threadId)}
           onReplyThread={(threadId, body) => void handleReply(artifact.id, nodes, threadId, body)}
+          pendingCanonicalizeVersion={pendingCanonicalizeVersion}
+          onProposeCanonical={(versionNumber) => void handleProposeCanonical(artifact.id, versionNumber)}
         />
       ))}
     </div>
