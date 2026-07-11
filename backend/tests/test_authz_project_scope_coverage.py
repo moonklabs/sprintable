@@ -145,8 +145,6 @@ _KNOWN_DEBT_ALLOWLIST: dict[str, str] = {
         "HIGH — org-scope만·project_id 필터에 접근권 검증 없음(리워드 원장 노출)",
     "app.routers.members:list_members":
         "HIGH — assert_target_in_caller_org가 cross-org만 막고 same-org cross-project는 미검증",
-    "app.routers.policy_documents:list_policy_documents":
-        "HIGH — org-scope만·project_id로 정책문서 content ILIKE 검색에 접근권 검증 없음",
     "app.routers.hypotheses:link_hypothesis":
         "MEDIUM — service._assert_targets_same_project가 sprint/epic/story 주입은 막지만 caller의 hyp.project_id 접근권 자체는 미검증",
     "app.routers.participation:add_participation":
