@@ -29,19 +29,27 @@ async function fetchJson(url: string): Promise<unknown> {
 }
 
 /**
- * 라이브 픽셀(2026-07-11)로 실측된 커밋-취소 레이스 fix — `/glance` 진입 직후 `useProjectSsot`의
- * URL `?p=` 정규화(router.replace)가 GlanceBoard를 재마운트시켜, 진행 중이던 fetch 체인이
- * "완주는 했지만 그 인스턴스의 cancelled 플래그가 이미 true"인 채로 끝나 영구 빈 화면이 됐다
- * (#2030의 "fan-out 100→8로 좁히면 레이스 소멸" 전제는 틀림 — fan-out 크기가 아니라 effect
- * cleanup이 로드 중 발동하는 구조 자체가 원인).
+ * #2053 in-flight dedup(2026-07-11 1차)만으로는 부족했다 — 오르테가 라이브 재검증(puppeteer)이
+ * dedup은 실제로 작동함(epic fetch 1회만)을 확인했는데도 여전히 빈 화면이었다. **핵심 통찰(오르테가
+ * 진단)**: promise를 공유해도 그걸 `await`하는 지점은 여전히 컴포넌트 effect 안이라 그 인스턴스의
+ * `cancelled`에 걸린다 — 재마운트가 반복되면(원인은 `useProjectSsot`의 router.replace뿐 아니라
+ * 다른 remount 트리거도 있는 것으로 실측됨, 순수 reload에도 재현) 어느 인스턴스도 살아있는 채로
+ * await을 끝내지 못해 영구 스킵될 수 있다. **await 경계가 취소 가능한 한 이 레이스는 안 죽는다.**
  *
- * 근본 fix: fetch 자체를 컴포넌트 인스턴스 밖(module-level in-flight map)으로 옮겨 dedupe한다.
- * 재마운트로 구 인스턴스가 취소돼도, 같은 projectId를 요청한 새 인스턴스가 **동일 in-flight
- * promise**를 그대로 이어받아 기다리므로 그 인스턴스의 커밋은 막히지 않는다(재마운트가 몇 차례
- * 일어나도 마지막으로 살아남은 인스턴스가 반드시 결과를 받는다). 완료 시 map에서 제거해 이후
- * 진짜 재로드(다른 projectId 등)는 새 fetch로 이어진다 — 무기한 캐시 아님.
+ * 근본 fix(2차): 해소된 데이터를 module-level 캐시에 **컴포넌트 생존 여부와 무관하게 무조건** 쓴다
+ * (`.then()`이 `cancelled`를 확인하지 않음 — fetch 자체가 컴포넌트 라이프사이클 밖에 있으므로).
+ * `GlanceBoard`는 마운트 시 이 캐시를 **동기적으로**(useState 초기값) 읽어 렌더한다 — await을
+ * 전혀 거치지 않으므로 취소될 여지 자체가 없다. 마지막까지 살아남은 인스턴스가 마운트되는 시점에
+ * 이미 캐시가 있으면(직전 인스턴스가 fetch를 진행시켜 놨을 것이므로 거의 항상 있음) 그 즉시 렌더.
+ * 없으면(최초 로드) 종전처럼 async fetch → 그 fetch가 뭘 하든 완료 즉시 캐시에 쓰이므로, 설령 그
+ * 인스턴스가 취소돼도 캐시는 남고 **다음(몇 번째든) 마운트가 동기 읽기로 즉시 성공**한다.
  */
 const inFlightByProject = new Map<string, Promise<GlanceData>>();
+const resolvedCacheByProject = new Map<string, GlanceData>();
+
+export function getCachedGlanceData(projectId: string): GlanceData | null {
+  return resolvedCacheByProject.get(projectId) ?? null;
+}
 
 async function fetchGlanceData(projectId: string): Promise<GlanceData> {
   const [epicsJson, overviewJson, membersJson, activityJson] = await Promise.all([
@@ -73,9 +81,15 @@ export function loadGlanceData(projectId: string): Promise<GlanceData> {
   const existing = inFlightByProject.get(projectId);
   if (existing) return existing;
 
-  const promise = fetchGlanceData(projectId).finally(() => {
-    inFlightByProject.delete(projectId);
-  });
+  const promise = fetchGlanceData(projectId)
+    .then((data) => {
+      // 컴포넌트 생존 여부와 무관하게 무조건 캐시(재마운트 레이스의 핵심 fix — 위 주석).
+      resolvedCacheByProject.set(projectId, data);
+      return data;
+    })
+    .finally(() => {
+      inFlightByProject.delete(projectId);
+    });
   inFlightByProject.set(projectId, promise);
   return promise;
 }
