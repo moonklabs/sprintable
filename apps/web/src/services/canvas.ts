@@ -151,6 +151,20 @@ export interface BeVisualArtifactSummary {
   created_at: string;
 }
 
+/**
+ * BE `ArtifactVersionSummary` 미러 — `GET /{id}/versions`(C1-S3) 목록 항목(nodes 없음).
+ * `source_comment_id`는 C3-S7(story 940266db) closed-loop 필드: 이 버전이 어느 코멘트에
+ * 응답해 생성됐는지. 신규 fetch 없이 이 목록만으로 "결과 연결(↳ vN)"을 유도할 수 있다.
+ */
+export interface BeArtifactVersionSummary {
+  id: string;
+  version_number: number;
+  summary: string | null;
+  created_by: string | null;
+  created_at: string;
+  source_comment_id: string | null;
+}
+
 export function adaptArtifactDetail(detail: BeVisualArtifactDetail): { artifact: VisualArtifact; versions: ArtifactVersion[] } {
   const format = deriveFormat(detail.nodes);
   let content: string;

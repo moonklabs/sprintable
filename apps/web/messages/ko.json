@@ -3416,6 +3416,7 @@
     "resolveAction": "해결",
     "replyPlaceholder": "답글…",
     "resolvedByNote": "{name}가 해결함",
+    "resultLinkNote": "↳ v{version} 생성 — 이 코멘트가 입력",
     "editModeLabel": "편집 모드",
     "paletteLabel": "부품",
     "propertyPanelEmpty": "요소를 선택하면 속성이 여기 표시됩니다",

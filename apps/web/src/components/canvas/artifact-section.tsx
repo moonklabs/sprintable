@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { ArtifactViewer } from './artifact-viewer';
-import { adaptArtifactDetail, type ArtifactVersion, type MemberRef, type VisualArtifact, type BeVisualArtifactDetail, type BeVisualArtifactSummary } from '@/services/canvas';
+import {
+  adaptArtifactDetail, type ArtifactVersion, type BeArtifactVersionSummary, type MemberRef,
+  type VisualArtifact, type BeVisualArtifactDetail, type BeVisualArtifactSummary,
+} from '@/services/canvas';
+import { adaptComments, type BeArtifactComment, type CommentThread } from '@/services/canvas-comments';
+import type { ArtifactNode } from '@/services/canvas-nodes';
 
 interface ArtifactSectionProps {
   storyId: string;
@@ -10,34 +15,58 @@ interface ArtifactSectionProps {
   className?: string;
 }
 
+interface ArtifactItem {
+  artifact: VisualArtifact;
+  versions: ArtifactVersion[];
+  threads: CommentThread[];
+  nodes: ArtifactNode[];
+}
+
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T | null> {
+  try {
+    const res = await fetch(url, init);
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: T };
+    return json.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadArtifactThreads(artifactId: string, nodes: ArtifactNode[]): Promise<CommentThread[]> {
+  const [comments, versionSummaries] = await Promise.all([
+    fetchJson<BeArtifactComment[]>(`/api/visual-artifacts/${artifactId}/comments`),
+    fetchJson<BeArtifactVersionSummary[]>(`/api/visual-artifacts/${artifactId}/versions`),
+  ]);
+  return adaptComments(comments ?? [], nodes, versionSummaries ?? []);
+}
+
 /**
- * E-CANVAS AC2(스토리 상세 첨부) — 실 데이터 attachment point. BE(`GET /api/visual-artifacts`,
- * C1-S3)는 실 스키마가 확定됐으나 아직 develop에 미머지(`feat/e-canvas-c1-s3-visual-artifact`,
- * PR 대기) — 그동안은 모든 스토리에서 404 → **완전 무표시**로 귀결된다(mock 폴백 0 — 선생님
- * slop 지적 반영, 없는 걸 있는 척 안 함). BE 머지·배포 즉시 이 컴포넌트가 실 artifact를 렌더한다.
+ * E-CANVAS AC2(스토리 상세 첨부) — 실 데이터 attachment point. C1(artifact/version)·
+ * C2(comments)·C3(source_comment_id 결과 연결)를 한 컴포넌트에서 병합 — 각자 실 엔드포인트가
+ * 있으니 신규 BE 0(2026-07-11 그라운딩). 404/빈 목록은 "첨부 없음"과 동일 취급, mock 폴백 0
+ * (선생님 slop 지적 반영 원칙 계승).
  */
 export function ArtifactSection({ storyId, memberMap = {}, className }: ArtifactSectionProps) {
-  const [items, setItems] = useState<{ artifact: VisualArtifact; versions: ArtifactVersion[] }[]>([]);
+  const [items, setItems] = useState<ArtifactItem[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const listRes = await fetch(`/api/visual-artifacts?story_id=${storyId}`);
-        if (!listRes.ok) return; // 404(BE 미착지) = "첨부 없음"과 동일 취급, 조용히 무표시
-        const listJson = (await listRes.json()) as { data?: BeVisualArtifactSummary[] };
-        const artifacts = listJson.data ?? [];
+        const artifacts = await fetchJson<BeVisualArtifactSummary[]>(`/api/visual-artifacts?story_id=${storyId}`) ?? [];
         if (artifacts.length === 0) return;
 
-        const details = await Promise.all(artifacts.map(async (a) => {
-          const detailRes = await fetch(`/api/visual-artifacts/${a.id}`);
-          if (!detailRes.ok) return null;
-          const detailJson = (await detailRes.json()) as { data?: BeVisualArtifactDetail };
-          if (!detailJson.data) return null;
-          return adaptArtifactDetail(detailJson.data);
+        const resolved = await Promise.all(artifacts.map(async (a): Promise<ArtifactItem | null> => {
+          const detail = await fetchJson<BeVisualArtifactDetail>(`/api/visual-artifacts/${a.id}`);
+          if (!detail) return null;
+          const { artifact, versions } = adaptArtifactDetail(detail);
+          const threads = await loadArtifactThreads(a.id, detail.nodes);
+
+          return { artifact, versions, threads, nodes: detail.nodes };
         }));
 
-        if (!cancelled) setItems(details.filter((d) => d !== null));
+        if (!cancelled) setItems(resolved.filter((d): d is ArtifactItem => d !== null));
       } catch {
         // 네트워크 예외도 "첨부 없음"과 동일 취급 — 스토리 상세 화면 자체를 깨뜨리지 않는다.
       }
@@ -45,12 +74,40 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
     return () => { cancelled = true; };
   }, [storyId]);
 
+  async function refreshThreads(artifactId: string, nodes: ArtifactNode[]) {
+    const threads = await loadArtifactThreads(artifactId, nodes);
+    setItems((cur) => cur.map((it) => (it.artifact.id === artifactId ? { ...it, threads } : it)));
+  }
+
+  async function handleResolve(artifactId: string, nodes: ArtifactNode[], threadId: string) {
+    await fetchJson(`/api/visual-artifacts/${artifactId}/comments/${threadId}/resolve`, { method: 'POST' });
+    await refreshThreads(artifactId, nodes);
+  }
+
+  async function handleReply(artifactId: string, nodes: ArtifactNode[], threadId: string, body: string) {
+    await fetchJson(`/api/visual-artifacts/${artifactId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: body, parent_id: threadId }),
+    });
+    await refreshThreads(artifactId, nodes);
+  }
+
   if (items.length === 0) return null;
 
   return (
     <div className={className}>
-      {items.map(({ artifact, versions }) => (
-        <ArtifactViewer key={artifact.id} artifact={artifact} versions={versions} memberMap={memberMap} />
+      {items.map(({ artifact, versions, threads, nodes }) => (
+        <ArtifactViewer
+          key={artifact.id}
+          artifact={artifact}
+          versions={versions}
+          memberMap={memberMap}
+          threads={threads}
+          nodes={nodes}
+          onResolveThread={(threadId) => void handleResolve(artifact.id, nodes, threadId)}
+          onReplyThread={(threadId, body) => void handleReply(artifact.id, nodes, threadId, body)}
+        />
       ))}
     </div>
   );

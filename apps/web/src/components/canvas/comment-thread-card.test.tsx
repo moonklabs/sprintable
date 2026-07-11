@@ -36,6 +36,19 @@ describe('CommentThreadCard', () => {
     expect(markup).toContain('해결');
   });
 
+  it('shows the result-link note when the thread has a resultVersion (C3-S7 closed-loop, "주어=결과")', () => {
+    const open = MOCK_THREADS.find((t) => t.rollup === 'open')!;
+    const withResult = { ...open, resultVersion: 5 };
+    const markup = renderToStaticMarkup(wrap(<CommentThreadCard thread={withResult} memberMap={MOCK_MEMBERS} />));
+    expect(markup).toContain('v5 생성');
+  });
+
+  it('omits the result-link note when resultVersion is null', () => {
+    const open = MOCK_THREADS.find((t) => t.rollup === 'open')!;
+    const markup = renderToStaticMarkup(wrap(<CommentThreadCard thread={{ ...open, resultVersion: null }} memberMap={MOCK_MEMBERS} />));
+    expect(markup).not.toContain('생성 — 이 코멘트가 입력');
+  });
+
   it('never uses surveillance vocabulary anywhere in the rendered markup (리트머스 회귀가드)', () => {
     const markup = MOCK_THREADS.map((t) => renderToStaticMarkup(wrap(<CommentThreadCard thread={t} memberMap={MOCK_MEMBERS} />))).join('');
     for (const forbidden of ['방치', '무시', '늦음', '감점', '응답률', '미처리']) {

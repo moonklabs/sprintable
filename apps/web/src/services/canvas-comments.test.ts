@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adaptComments, deriveAnchorKind, type BeArtifactComment } from './canvas-comments';
+import { adaptComments, deriveAnchorKind, deriveResultLinks, type BeArtifactComment } from './canvas-comments';
 
 const BASE = {
   artifact_id: 'a1', anchor_x: null, anchor_y: null, node_id: null, parent_id: null,
@@ -64,5 +64,46 @@ describe('adaptComments (flat parent_id 1단 스레드 → pin 번호 매긴 Com
     ];
     const [thread] = adaptComments(comments);
     expect(thread!.anchor).toMatchObject({ kind: 'coordinate', x: 82, y: 30 });
+  });
+
+  it('leaves resultVersion null when no version references this comment as its source', () => {
+    const comments: BeArtifactComment[] = [
+      { ...BASE, id: 'c1', content: 'x', created_by: 'm1', created_at: '2026-07-10T08:00:00Z' },
+    ];
+    const [thread] = adaptComments(comments, [], [{ version_number: 2, source_comment_id: null }]);
+    expect(thread!.resultVersion).toBeNull();
+  });
+
+  it('sets resultVersion from a version whose source_comment_id matches this thread root (C3-S7 closed-loop)', () => {
+    const comments: BeArtifactComment[] = [
+      { ...BASE, id: 'c1', content: 'x', created_by: 'm1', created_at: '2026-07-10T08:00:00Z' },
+    ];
+    const versions = [
+      { version_number: 1, source_comment_id: null },
+      { version_number: 2, source_comment_id: 'c1' },
+    ];
+    const [thread] = adaptComments(comments, [], versions);
+    expect(thread!.resultVersion).toBe(2);
+  });
+});
+
+describe('deriveResultLinks (버전 요약만으로 코멘트→결과버전 유도, 신규 fetch 0)', () => {
+  it('maps a source_comment_id to its version_number', () => {
+    const links = deriveResultLinks([{ version_number: 3, source_comment_id: 'c1' }]);
+    expect(links.get('c1')).toBe(3);
+  });
+
+  it('ignores versions with no source_comment_id', () => {
+    const links = deriveResultLinks([{ version_number: 1, source_comment_id: null }]);
+    expect(links.size).toBe(0);
+  });
+
+  it('picks the highest version_number when multiple versions cite the same comment', () => {
+    const links = deriveResultLinks([
+      { version_number: 2, source_comment_id: 'c1' },
+      { version_number: 5, source_comment_id: 'c1' },
+      { version_number: 3, source_comment_id: 'c1' },
+    ]);
+    expect(links.get('c1')).toBe(5);
   });
 });
