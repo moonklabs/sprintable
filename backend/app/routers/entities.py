@@ -1,15 +1,16 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import Doc
 from app.models.pm import Epic, Story, Task
+from app.services.project_auth import has_project_access
 
 router = APIRouter(prefix="/api/v2/entities", tags=["entities"])
 
@@ -32,7 +33,13 @@ async def search_entities(
     types: str | None = Query(default=None, description="Comma-separated: story,doc,epic,task"),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[EntitySearchResult]:
+    # ratchet round4(story 03ee87cc): project_id 쿼리파라미터(조회대상 자체)에 caller
+    # 접근권 검증이 없어 same-org cross-project의 story/doc/epic/task 4종 title(+ILIKE 검색
+    # 매칭 시 내용 존재여부)까지 한 엔드포인트에서 동시 노출됐다 — resource-actual 직접검증.
+    if not await has_project_access(db, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
 
     requested = set(types.split(",")) if types else VALID_TYPES
     requested = requested & VALID_TYPES
