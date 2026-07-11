@@ -12,7 +12,9 @@
 >
 > Sprintable is a self-hostable server that sits above your agents. Each agent gets a ticket with acceptance criteria and its own scoped permissions. When it claims "done", the work hits a human gate — approve, hold, or reject — before anything merges. Every handoff, message and decision lands in one auditable ledger, so any agent (or you) can reconstruct full context later.
 >
-> It's vendor-neutral: agents connect over MCP (95 tools) or A2A, receive work over SSE — Claude Code writing while Codex reviews works out of the box.
+> It's vendor-neutral: agents connect over MCP (98 tools) or A2A, receive work over SSE — Claude Code writing while Codex reviews works out of the box.
+
+<!-- tool 수는 발사 직전 `_TOOL_DEFS` 실측으로 갱신할 것 (7/11 실측 98, 계속 증가 중) -->
 >
 > `git clone && docker compose up -d` — running in about a minute. AGPL-3.0.
 >
@@ -53,7 +55,9 @@
 ## 체크리스트 (발사 전)
 
 - [ ] TTHW 실측 <5분 (Task #1 결과로 확정)
-- [ ] README 새 앵글 반영 (Task #2)
+- [x] README 새 앵글 반영 (Task #2) — 7/11 확인: 영/한 모두 delivery ledger 포지션 반영 완료
+- [ ] repo description 교체 (여전히 "AI-powered sprint management (MCP + SQLite + single-user)")
+- [ ] llms.txt / llms-full.txt tool 수 정정 ("89 tools" → 실측치)
 - [ ] gate 승인/차단 데모 GIF 또는 15초 클립
 - [ ] 토큰 비용 가시성 화면
 - [ ] r/ClaudeCode·r/ClaudeAI 셀프프로모션 규정 확인

@@ -5,6 +5,8 @@
 - 기준 커밋: `9602d73b feat(mcp): PyPI Trusted Publishing workflow + sprintable-mcp→sprintable rename (#1941)`
 - 분석 범위: README, 공개 LLM 레퍼런스, Next.js/FastAPI 코드, DB 모델/마이그레이션, 에이전트 런타임 문서, 최신 MCP/agent ecosystem 리서치
 
+> **⚠️ 2026-07-11 업데이트**: 본 문서의 수치(route 269, tool 70+/89)와 "A2A는 P2" 판단은 `problem-solution-fit-verification-2026-07-10.md` §2에서 정정됐고, §9에서 최신 develop 기준으로 재측정됐다(tool 98, operations 447). 포지셔닝 결론은 `gtm-1000-stars-2026-07.md` §2(coding-agent delivery ledger)로 단일화됐다. 본 문서는 판단 기록용 스냅샷으로 보존한다.
+
 ## 1. 결론
 
 Sprintable이 풀려는 문제는 **AI 에이전트가 실제 팀원처럼 일하기 시작했지만, 기존 PM/협업 도구는 에이전트를 “API 통합”이나 “보조 챗봇”으로만 취급해 멀티 에이전트 핸드오프, 권한, 실시간 수신, 감사, HITL 승인, sprint/standup/velocity 반영을 한 원장 안에서 관리하지 못한다**는 것이다.

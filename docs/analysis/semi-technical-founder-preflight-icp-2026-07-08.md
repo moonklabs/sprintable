@@ -4,6 +4,8 @@
 브랜치: `analysis/problem-solution-fit-20260708`  
 모드: Office Hours / Product Strategy
 
+> **⚠️ 2026-07-11 업데이트**: 본 문서의 ICP(세미기술 founder)와 pre-flight wedge는 `gtm-1000-stars-2026-07.md` §2에서 조정됐다 — 본체는 C(coding-agent delivery ledger), pre-flight gate(B)는 독립 제품이 아닌 보드 기능으로 흡수, 세미기술 founder는 star 오디언스가 아니므로 후순위. 한편 E-CANVAS(visual_artifact 모델·버전·코멘트)가 develop에 병합되어 §5의 "visual direction" 개념과 코드 접점이 생겼다(단 pre-flight 상태기계는 여전히 미구현). 본 문서는 판단 기록용 스냅샷으로 보존한다.
+
 ## 1. 결정
 
 Sprintable의 첫 ICP는 **세미기술 1인 창업자(semi-technical founder)** 로 잡는다.
