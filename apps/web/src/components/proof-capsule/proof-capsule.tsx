@@ -5,6 +5,7 @@ import { ArrowRight, Check, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { initials } from '@/lib/storage/format';
 import { Proofline, type ProofState } from './proofline';
+import { TrustSeal, type TrustSealClaimedProps, type TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 
 export type { ProofState } from './proofline';
 
@@ -49,6 +50,10 @@ export interface ProofCapsuleProps {
   now?: string;
   evidence?: ProofCapsuleEvidence;
   gate?: ProofCapsuleGate;
+  /** full 밀도 전용(claimed-vs-verified-spec-handoff) — "누가 증언하나"의 2주어 분화 스트립.
+   * 시각 스캐폴딩: 실 데이터(self_reported/human_verified)는 BE 계약 확정 후 배선, 지금은
+   * 타입·렌더만 준비(호출부 없음 무방 — density="full"와 동일 선례). */
+  trustSeal?: TrustSealClaimedProps | TrustSealVerifiedProps;
   density: ProofCapsuleDensity;
   /** card 밀도 전용 — claim/evidence 아래 호출부 컨텐츠(예: Board card의 담당자 스택·배지·
    * 컨텍스트 메뉴 앵커) 삽입 슬롯. Proof Capsule 자체 필드로 표현 안 되는 실 기능을 안 잃게. */
@@ -67,7 +72,7 @@ export interface ProofCapsuleProps {
  * glow·999px pill·숫자 KPI화·raw CoT·초록만-완료 전부 미사용(색은 항상 stateLabel 텍스트 병기).
  */
 export function ProofCapsule({
-  proofState, stateLabel, claim, human, agent, now, evidence, gate, density, footer, className,
+  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, density, footer, className,
 }: ProofCapsuleProps) {
   if (density === 'audit') {
     return (
@@ -90,7 +95,7 @@ export function ProofCapsule({
   return (
     <FullVariant
       proofState={proofState} stateLabel={stateLabel} claim={claim} human={human} agent={agent}
-      now={now} evidence={evidence} gate={gate} className={className}
+      now={now} evidence={evidence} gate={gate} trustSeal={trustSeal} className={className}
     />
   );
 }
@@ -217,7 +222,7 @@ function useEvidenceSweep(evidence: ProofCapsuleEvidence | undefined) {
 }
 
 function FullVariant({
-  proofState, stateLabel, claim, human, agent, now, evidence, gate, className,
+  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, className,
 }: Omit<ProofCapsuleProps, 'density'>) {
   const sweep = useEvidenceSweep(evidence);
   return (
@@ -244,6 +249,13 @@ function FullVariant({
           ) : null}
         </div>
         {evidence ? <EvidenceRow evidence={evidence} sweep={sweep} /> : null}
+        {/* claimed-vs-verified-spec-handoff §2 — "누가 증언하나"의 2주어 분화. 없으면 생략(무증거=
+            무표시, no-fiction). Human gate(pending 결재)와 별개 관심사라 GateRow와 공존 가능. */}
+        {trustSeal ? (
+          <div className="mt-3.5 border-t border-proof-line-soft pt-3">
+            <TrustSeal {...trustSeal} />
+          </div>
+        ) : null}
         {/* Human gate는 도크트린⑤(인간=책임 주체)상 책임자 없이 못 열림 — human 없으면 생략. */}
         {gate && human ? <GateRow gate={gate} human={human} /> : null}
       </div>
