@@ -9,6 +9,7 @@ from app.dependencies.auth import AuthContext, enforce_body_context, get_current
 from app.dependencies.database import get_db
 from app.repositories.epic import EpicRepository
 from app.schemas.epic import EpicCreate, EpicProgressResponse, EpicResponse, EpicUpdate
+from app.services.project_auth import has_project_access
 
 router = APIRouter(prefix="/api/v2/epics", tags=["epics"])
 
@@ -29,6 +30,8 @@ async def list_epics(
     cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
     order_by: str = Query(default="created_at"),
     repo: EpicRepository = Depends(_get_repo),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[EpicResponse]:
     """에픽 목록 — true cursor 페이지네이션 + 전체 카운트(X-Total-Count 헤더).
 
@@ -37,6 +40,13 @@ async def list_epics(
     limit 미지정 시 기존 동작(최대 1000)과 호환되며, 1000+ 인 경우에도 헤더로
     잘림 여부를 호출자가 인지할 수 있어 silent-truncation이 아니다.
     """
+    # ratchet round8(잔여 HIGH): project_id 필터(지정 시)에 caller 접근권 검증이 없어
+    # same-org cross-project epic(제목/목표/전략의도)이 노출됐다 — resource-actual
+    # project_id 직접검증. EE 훅 없음(이 엔드포인트는 EE RBAC 미적용 확認).
+    if project_id is not None:
+        if not await has_project_access(repo.session, uuid.UUID(auth.user_id), project_id, org_id):
+            raise HTTPException(status_code=404, detail="Project not found")
+
     filters: dict = {}
     if project_id:
         filters["project_id"] = project_id

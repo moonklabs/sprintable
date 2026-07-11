@@ -125,8 +125,6 @@ _FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
 # ── known debt: 실 GAP(HIGH/MEDIUM/LOW) — CRITICAL 3건(EE #2048)은 이미 fix, 나머지는
 # ratchet(PO 결 2026-07-11: baseline 동결 + 점진 상환). fix되면 이 dict에서 제거할 것.
 _KNOWN_DEBT_ALLOWLIST: dict[str, str] = {
-    "app.routers.epics:list_epics":
-        "HIGH — org-scope만·optional project_id 필터에 접근권 검증 없음(epic 제목/목표 노출)",
     "app.routers.members:list_members":
         "HIGH — assert_target_in_caller_org가 cross-org만 막고 same-org cross-project는 미검증",
     "app.routers.hypotheses:link_hypothesis":
