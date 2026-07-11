@@ -1,6 +1,6 @@
 'use client';
 
-import { startTransition, useEffect, useRef, useState } from 'react';
+import { startTransition, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, Check, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { initials } from '@/lib/storage/format';
@@ -38,12 +38,17 @@ export interface ProofCapsuleProps {
   proofState: ProofState;
   stateLabel: string;
   claim: string;
-  human: ProofCapsuleHuman;
+  /** full/audit만 사용 — card/row는 다중 담당자(예: Board card의 assignee 스택)를 자체
+   * 렌더하는 경우가 많아 요구하지 않는다(optional, 2026-07-11 Board 확산 시 완화). */
+  human?: ProofCapsuleHuman;
   agent?: ProofCapsuleAgent;
   now?: string;
   evidence?: ProofCapsuleEvidence;
   gate?: ProofCapsuleGate;
   density: ProofCapsuleDensity;
+  /** card 밀도 전용 — claim/evidence 아래 호출부 컨텐츠(예: Board card의 담당자 스택·배지·
+   * 컨텍스트 메뉴 앵커) 삽입 슬롯. Proof Capsule 자체 필드로 표현 안 되는 실 기능을 안 잃게. */
+  footer?: ReactNode;
   className?: string;
 }
 
@@ -58,7 +63,7 @@ export interface ProofCapsuleProps {
  * glow·999px pill·숫자 KPI화·raw CoT·초록만-완료 전부 미사용(색은 항상 stateLabel 텍스트 병기).
  */
 export function ProofCapsule({
-  proofState, stateLabel, claim, human, agent, now, evidence, gate, density, className,
+  proofState, stateLabel, claim, human, agent, now, evidence, gate, density, footer, className,
 }: ProofCapsuleProps) {
   if (density === 'audit') {
     return (
@@ -72,7 +77,7 @@ export function ProofCapsule({
   }
   if (density === 'card') {
     return (
-      <CardVariant proofState={proofState} stateLabel={stateLabel} claim={claim} evidence={evidence} className={className} />
+      <CardVariant proofState={proofState} stateLabel={stateLabel} claim={claim} evidence={evidence} footer={footer} className={className} />
     );
   }
   return (
@@ -217,7 +222,9 @@ function FullVariant({
         </div>
         <div className="text-[19px] font-bold leading-[1.25] tracking-[-0.012em] text-proof-ink">{claim}</div>
         <div className="mt-2.5 flex flex-wrap items-center gap-3 text-[11px] text-proof-ink-3">
-          <span className="inline-flex items-center gap-1.5"><ProofAvatar label={initials(human.name)} />책임 {human.name}</span>
+          {human ? (
+            <span className="inline-flex items-center gap-1.5"><ProofAvatar label={initials(human.name)} />책임 {human.name}</span>
+          ) : null}
           {agent ? (
             <span className="inline-flex items-center gap-1.5"><ProofAvatar label={agent.initial} isAgent />실행 {agent.name}</span>
           ) : null}
@@ -230,18 +237,19 @@ function FullVariant({
           ) : null}
         </div>
         {evidence ? <EvidenceRow evidence={evidence} sweep={sweep} /> : null}
-        {gate ? <GateRow gate={gate} human={human} /> : null}
+        {/* Human gate는 도크트린⑤(인간=책임 주체)상 책임자 없이 못 열림 — human 없으면 생략. */}
+        {gate && human ? <GateRow gate={gate} human={human} /> : null}
       </div>
     </CutCornerShell>
   );
 }
 
-function CardVariant({ proofState, stateLabel, claim, evidence, className }: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'evidence' | 'className'>) {
+function CardVariant({ proofState, stateLabel, claim, evidence, footer, className }: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'evidence' | 'footer' | 'className'>) {
   return (
     <CutCornerShell state={proofState} cut={16} className={cn('w-full max-w-[280px]', className)}>
       <div className="min-w-0 flex-1 px-3 py-2.5">
         <StateHeader state={proofState} label={stateLabel} />
-        <div className="mt-1.5 truncate text-[12.5px] font-semibold text-proof-ink">{claim}</div>
+        <div className="mt-1.5 line-clamp-2 text-[12.5px] font-semibold leading-snug text-proof-ink">{claim}</div>
         {evidence ? (
           <div className="mt-1.5 flex items-center gap-2.5 text-[10.5px] text-proof-ink-3">
             <span className="inline-flex items-center gap-1">
@@ -251,6 +259,7 @@ function CardVariant({ proofState, stateLabel, claim, evidence, className }: Pic
             {evidence.diff ? <span className="font-mono">+{evidence.diff.add}</span> : null}
           </div>
         ) : null}
+        {footer}
       </div>
     </CutCornerShell>
   );
@@ -286,7 +295,7 @@ function AuditRow({ proofState, claim, now, human, className }: Pick<ProofCapsul
     <div className={cn('flex items-center gap-2 rounded-[6px] border border-proof-line bg-proof-panel px-3 py-2 text-[11px]', className)}>
       <span className={cn('size-1.5 shrink-0 rounded-full', dotTone[proofState])} aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate font-medium text-proof-ink">{claim}</span>
-      <span className="shrink-0 font-mono text-[9.5px] text-proof-faint">{now ?? ''} {human.name}</span>
+      <span className="shrink-0 font-mono text-[9.5px] text-proof-faint">{[now, human?.name].filter(Boolean).join(' ')}</span>
     </div>
   );
 }

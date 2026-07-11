@@ -9,6 +9,14 @@ import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { LabelChip } from '@/components/ui/label-chip';
 import { TrustSeal } from '@/components/verify/trust-seal';
+import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
+
+// E-UI-DAEGBYEON P0 — Proof Capsule 확산(story `bf9037cb`). 상태→신뢰 파이프라인(후속 P0)이
+// status 모델 자체를 바꿀 예정이라 지금은 현 5-status를 4-Proofline색에 얇게만 매핑(과결합
+// 금지) — backlog/ready-for-dev/in-review는 전부 "대기"류라 amber로 묶는다(정밀 구분은 후속).
+const STATUS_TO_PROOF_STATE: Record<string, ProofState> = {
+  backlog: 'amber', 'ready-for-dev': 'amber', 'in-progress': 'blue', 'in-review': 'amber', done: 'green',
+};
 
 // E-MODERN A: 에픽 식별 dot — 기존 시맨틱 토큰만(신규 토큰/raw 팔레트 0). 신호색(warning=blocked·
 // accent-claim=agent·destructive) 회피해 의미 충돌 0. 랜덤 5색 채움 배지(loud)는 퇴출.
@@ -214,6 +222,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     { id: 'done', label: t('done') },
   ];
 
+  const proofState = STATUS_TO_PROOF_STATE[story.status] ?? 'amber';
+  const proofStateLabel = statuses.find((s) => s.id === story.status)?.label ?? story.status;
+
   return (
     <div
       ref={setNodeRef}
@@ -223,121 +234,135 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       onClick={onClick}
       onContextMenu={handleContextMenu}
       title={`#${story.id.slice(0, 6)}`}
-      className="group relative cursor-pointer rounded-lg border border-border bg-card p-3 transition hover:border-muted-foreground/30"
+      className="group relative cursor-pointer transition"
     >
-      {/* E-MODERN A: 에픽 = 작은 색 dot + muted 라벨(일관 식별·랜덤 채움배지 퇴출) */}
-      {epicName && story.epic_id ? (
-        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className={`size-1.5 shrink-0 rounded-sm ${getEpicDotClass(story.epic_id)}`} aria-hidden="true" />
-          <span className="min-w-0 truncate">{epicName}</span>
-        </div>
-      ) : null}
-      {/* E-MODERN A meta row — blocked=신호(text-warning+dot)·label 칩·line/gate=boy-scout 1배지(muted) */}
-      {(blockedBy.length > 0 && story.status !== 'done') || labels.length > 0 || lineBadge ? (
-        <div className="mb-2 flex flex-wrap items-center gap-1.5">
-          {blockedBy.length > 0 && story.status !== 'done' ? (
-            <span className="inline-flex items-center gap-1 text-[10px] text-warning">
-              <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
-              {t('blockedBy', { count: blockedBy.length })}
-            </span>
-          ) : null}
-          {labels.map((label) => (
-            <LabelChip key={label.id} label={label} />
-          ))}
-          {lineBadge === 'pending_gate' ? (
-            <Badge variant="outline" className="gap-1">
-              <Pause className="size-3 shrink-0" />
-              <span>{pendingGateType ? `${pendingGateType} ${tCage('gatePending')}` : tCage('gatePending')}</span>
-            </Badge>
-          ) : lineBadgeMeta ? (
-            // 가디언 fold-in: 실 alert(handoff_stuck=destructive·waiting_human=warning)는 색=신호 유지,
-            // 정보성(engine_degraded·grandfathered)만 outline. LINE_BADGE_META가 이미 그 위계라 variant 원복.
-            <Badge variant={lineBadgeMeta.variant} className="gap-1">
-              <lineBadgeMeta.Icon className="size-3 shrink-0" />
-              <span>{tCage(lineBadgeMeta.labelKey)}</span>
-            </Badge>
-          ) : null}
-        </div>
-      ) : null}
-      <p className="line-clamp-2 text-sm font-medium leading-snug text-foreground">{story.title}</p>
-      <div className="mt-2.5 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          {assigneeList.length > 0 ? (
-            <div className="flex -space-x-1.5">
-              {assigneeList.slice(0, 3).map((m) => (
-                <div
-                  key={m.id}
-                  className={`relative flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ring-1 ring-background ${
-                    m.type === 'agent'
-                      ? 'border-accent-claim/30 bg-accent-claim/10 text-accent-claim'
-                      : 'border-border bg-muted text-muted-foreground'
-                  }`}
-                  title={m.name}
-                >
-                  {getInitials(m.name)}
-                  {m.type === 'agent' && (
-                    <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-brand-strong ring-1 ring-background" />
-                  )}
-                </div>
-              ))}
-              {assigneeList.length > 3 && (
-                <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-medium text-muted-foreground ring-1 ring-background">
-                  +{assigneeList.length - 3}
-                </div>
-              )}
+      {/* E-UI-DAEGBYEON P0 — Board card = Proof Capsule(card density, #bf9037cb). 시각 셸만
+          교체(Proofline 4상태·컷코너·claim=제목) — 드래그/클릭/우클릭 메뉴는 전부 이 바깥 div가
+          그대로 소유(dnd-kit useSortable 노드=이 div 자체, 위 attributes/listeners 참고).
+          기존 카드의 실 기능(에픽·배지·담당자 스택·TrustSeal·SP·kickoff)은 하나도 안 잃고
+          footer 슬롯으로 그대로 이관 — no-fiction(evidence/gate는 실 데이터 없어 미전달). */}
+      <ProofCapsule
+        density="card"
+        proofState={proofState}
+        stateLabel={proofStateLabel}
+        claim={story.title}
+        footer={
+          <div className="mt-2">
+            {/* E-MODERN A: 에픽 = 작은 색 dot + muted 라벨(일관 식별·랜덤 채움배지 퇴출) */}
+            {epicName && story.epic_id ? (
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-proof-ink-3">
+                <span className={`size-1.5 shrink-0 rounded-sm ${getEpicDotClass(story.epic_id)}`} aria-hidden="true" />
+                <span className="min-w-0 truncate">{epicName}</span>
+              </div>
+            ) : null}
+            {/* E-MODERN A meta row — blocked=신호(text-warning+dot)·label 칩·line/gate=boy-scout 1배지(muted) */}
+            {(blockedBy.length > 0 && story.status !== 'done') || labels.length > 0 || lineBadge ? (
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                {blockedBy.length > 0 && story.status !== 'done' ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] text-warning">
+                    <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
+                    {t('blockedBy', { count: blockedBy.length })}
+                  </span>
+                ) : null}
+                {labels.map((label) => (
+                  <LabelChip key={label.id} label={label} />
+                ))}
+                {lineBadge === 'pending_gate' ? (
+                  <Badge variant="outline" className="gap-1">
+                    <Pause className="size-3 shrink-0" />
+                    <span>{pendingGateType ? `${pendingGateType} ${tCage('gatePending')}` : tCage('gatePending')}</span>
+                  </Badge>
+                ) : lineBadgeMeta ? (
+                  // 가디언 fold-in: 실 alert(handoff_stuck=destructive·waiting_human=warning)는 색=신호 유지,
+                  // 정보성(engine_degraded·grandfathered)만 outline. LINE_BADGE_META가 이미 그 위계라 variant 원복.
+                  <Badge variant={lineBadgeMeta.variant} className="gap-1">
+                    <lineBadgeMeta.Icon className="size-3 shrink-0" />
+                    <span>{tCage(lineBadgeMeta.labelKey)}</span>
+                  </Badge>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                {assigneeList.length > 0 ? (
+                  <div className="flex -space-x-1.5">
+                    {assigneeList.slice(0, 3).map((m) => (
+                      <div
+                        key={m.id}
+                        className={`relative flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ring-1 ring-background ${
+                          m.type === 'agent'
+                            ? 'border-accent-claim/30 bg-accent-claim/10 text-accent-claim'
+                            : 'border-border bg-muted text-muted-foreground'
+                        }`}
+                        title={m.name}
+                      >
+                        {getInitials(m.name)}
+                        {m.type === 'agent' && (
+                          <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-brand-strong ring-1 ring-background" />
+                        )}
+                      </div>
+                    ))}
+                    {assigneeList.length > 3 && (
+                      <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-medium text-muted-foreground ring-1 ring-background">
+                        +{assigneeList.length - 3}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div />
+                )}
+                {hasAgent && (
+                  <span className="inline-flex items-center gap-1 text-[10px] text-accent-claim">
+                    <span className="size-1.5 shrink-0 rounded-full bg-accent-claim" aria-hidden="true" />
+                    {t('filterAgents')}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {/* E-VERIFY V0-S3 Lv0 — 증거 있는 done 카드에만(positive 단방향). 자리 예약 없이 조건부 렌더
+                    (증거 없으면 완전 무표시 — 레이아웃 시프트 자체가 없음, §7 상태 매트릭스). */}
+                {story.status === 'done' && story.has_evidence ? <TrustSeal /> : null}
+                {story.story_points != null ? (
+                  <span className="text-[11px] tabular-nums text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
+                ) : null}
+                {/* E-MODERN A: 액션 점진 공개 — 데스크탑 hover 노출·모바일(hover 없음)은 상시(kickoff 도달성=기능 동결 보존) */}
+                <span className="flex items-center gap-1.5 opacity-100 transition focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+                  {lastExecution ? (
+                    <span
+                      title={[
+                        lastExecution.rule_name ?? '워크플로우 실행됨',
+                        lastExecution.completed_at ? new Date(lastExecution.completed_at).toLocaleString() : '',
+                        lastExecution.status === 'matched' ? '✅ 규칙 매칭' : '⊘ 규칙 없음',
+                      ].filter(Boolean).join(' · ')}
+                      className="flex h-5 w-5 items-center justify-center"
+                    >
+                      {lastExecution.status === 'matched' ? (
+                        <Zap className="h-3 w-3 text-warning" />
+                      ) : (
+                        <ZapOff className="h-3 w-3 text-muted-foreground/40" />
+                      )}
+                    </span>
+                  ) : null}
+                  {projectId ? (
+                    <button
+                      onClick={(e) => void handleKickoff(e)}
+                      disabled={triggering}
+                      title={t('kickoff')}
+                      className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition"
+                    >
+                      {triggering ? (
+                        <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+                      ) : (
+                        <Rocket className="h-3 w-3" />
+                      )}
+                    </button>
+                  ) : null}
+                </span>
+              </div>
             </div>
-          ) : (
-            <div />
-          )}
-          {hasAgent && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-accent-claim">
-              <span className="size-1.5 shrink-0 rounded-full bg-accent-claim" aria-hidden="true" />
-              {t('filterAgents')}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {/* E-VERIFY V0-S3 Lv0 — 증거 있는 done 카드에만(positive 단방향). 자리 예약 없이 조건부 렌더
-              (증거 없으면 완전 무표시 — 레이아웃 시프트 자체가 없음, §7 상태 매트릭스). */}
-          {story.status === 'done' && story.has_evidence ? <TrustSeal /> : null}
-          {story.story_points != null ? (
-            <span className="text-[11px] tabular-nums text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
-          ) : null}
-          {/* E-MODERN A: 액션 점진 공개 — 데스크탑 hover 노출·모바일(hover 없음)은 상시(kickoff 도달성=기능 동결 보존) */}
-          <span className="flex items-center gap-1.5 opacity-100 transition focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
-            {lastExecution ? (
-              <span
-                title={[
-                  lastExecution.rule_name ?? '워크플로우 실행됨',
-                  lastExecution.completed_at ? new Date(lastExecution.completed_at).toLocaleString() : '',
-                  lastExecution.status === 'matched' ? '✅ 규칙 매칭' : '⊘ 규칙 없음',
-                ].filter(Boolean).join(' · ')}
-                className="flex h-5 w-5 items-center justify-center"
-              >
-                {lastExecution.status === 'matched' ? (
-                  <Zap className="h-3 w-3 text-warning" />
-                ) : (
-                  <ZapOff className="h-3 w-3 text-muted-foreground/40" />
-                )}
-              </span>
-            ) : null}
-            {projectId ? (
-              <button
-                onClick={(e) => void handleKickoff(e)}
-                disabled={triggering}
-                title={t('kickoff')}
-                className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition"
-              >
-                {triggering ? (
-                  <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
-                ) : (
-                  <Rocket className="h-3 w-3" />
-                )}
-              </button>
-            ) : null}
-          </span>
-        </div>
-      </div>
+          </div>
+        }
+      />
 
       {/* Context Menu */}
       {contextMenuOpen && (
