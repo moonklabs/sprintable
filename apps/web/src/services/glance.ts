@@ -75,8 +75,12 @@ export function scopeRoadmapEpics(
     end = Math.min(asc.length, anchor + 1 + window.ahead);
   }
 
-  let windowed = asc.slice(start, end);
-  if (windowed.length > window.bound) windowed = windowed.slice(0, window.bound);
+  // 라이브 픽셀(2026-07-11) 적출 — active 클러스터가 넓게 퍼지면(behind~ahead 폭이 bound를
+  // 초과) 무조건 slice(0, bound)로 잘라내던 게 "가장 오래된 bound개"(대부분 done/archived)만
+  // 취해버려 "현재 궤적" 서사가 깨졌다. 잘라낼 땐 항상 뒤쪽(최신·anchor+ahead 방향)을 우선
+  // 남긴다 — "지금부터"(forward) 프레이밍과 정합.
+  if (end - start > window.bound) start = end - window.bound;
+  const windowed = asc.slice(start, end);
   return { epics: windowed, totalCount: asc.length };
 }
 

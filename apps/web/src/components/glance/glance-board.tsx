@@ -4,18 +4,8 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
-import type { EpicProgress } from '@/components/dashboard/command-center/types';
-import {
-  deriveCollaboration,
-  filterMilestoneEvents,
-  mergeRoadmap,
-  scopeRoadmapEpics,
-  type BeActivityLogItem,
-  type BeEpicListItem,
-  type BeStoryListItem,
-  type EpicCollaboration,
-  type RoadmapEpic,
-} from '@/services/glance';
+import type { BeActivityLogItem, EpicCollaboration, RoadmapEpic } from '@/services/glance';
+import { loadGlanceData } from './load-glance-data';
 import { RoadmapFlow } from './roadmap-flow';
 import { ProgressTrajectory } from './progress-trajectory';
 import { CollaborationMap } from './collaboration-map';
@@ -26,21 +16,12 @@ interface GlanceBoardProps {
   className?: string;
 }
 
-function unwrap<T>(json: unknown): T | null {
-  if (!json || typeof json !== 'object') return null;
-  const d = (json as { data?: unknown }).data;
-  return (d ?? json) as T;
-}
-
-async function fetchJson(url: string): Promise<unknown> {
-  return fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-}
-
 /**
  * E-GLANCE C1 현황판 오케스트레이터 — 실 fetch, mock 폴백 0. 서브 컴포넌트(RoadmapFlow 등)는
  * 전부 순수 props라 여기서만 §10 데이터 소스 4종을 병합한다: /api/epics(순서 SSOT) ·
  * /api/dashboard/overview(진척) · /api/stories?epic_id=(참여) · /api/activity-logs(생동).
  * 아무 데이터도 없으면(신규 프로젝트 등) 로드맵 자체가 빈 배열 — §9 매트릭스의 calm 빈 상태.
+ * 실 fetch 자체는 `load-glance-data.ts`(module-level dedupe) — 재마운트 레이스 fix 이유는 그쪽 주석.
  */
 export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
   const t = useTranslations('glance');
@@ -57,35 +38,12 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
     void (async () => {
       setLoading(true);
       try {
-        const [epicsJson, overviewJson, membersJson, activityJson] = await Promise.all([
-          fetchJson(`/api/epics?project_id=${projectId}&limit=100`),
-          fetchJson('/api/dashboard/overview'),
-          fetchJson('/api/team-members'),
-          fetchJson(`/api/activity-logs?project_id=${projectId}&limit=20`),
-        ]);
-
-        const arc = scopeRoadmapEpics(unwrap<BeEpicListItem[]>(epicsJson) ?? []);
-        const overview = unwrap<{ project_status: { epics: EpicProgress[] } }>(overviewJson);
-        const mergedRoadmap = mergeRoadmap(arc.epics, overview?.project_status.epics ?? []);
-
-        const memberRows = unwrap<{ id: string; name: string }[]>(membersJson) ?? [];
-        const memberNames: Record<string, string> = {};
-        for (const m of memberRows) memberNames[m.id] = m.name;
-
-        const storyLists = await Promise.all(
-          mergedRoadmap.map((e) => fetchJson(`/api/stories?epic_id=${e.id}&limit=100`)),
-        );
-        const stories = storyLists.flatMap((s) => unwrap<BeStoryListItem[]>(s) ?? []);
-        const collab = deriveCollaboration(mergedRoadmap.map((e) => e.id), stories, memberNames);
-
-        const activityItems = unwrap<BeActivityLogItem[]>(activityJson) ?? [];
-        const milestoneEvents = filterMilestoneEvents(activityItems);
-
+        const data = await loadGlanceData(projectId);
         if (!cancelled) {
-          setRoadmap(mergedRoadmap);
-          setTotalEpicCount(arc.totalCount);
-          setCollaboration(collab);
-          setEvents(milestoneEvents);
+          setRoadmap(data.roadmap);
+          setTotalEpicCount(data.totalEpicCount);
+          setCollaboration(data.collaboration);
+          setEvents(data.events);
           setLoadedAt(Date.now());
         }
       } finally {

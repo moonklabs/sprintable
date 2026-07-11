@@ -74,6 +74,20 @@ describe('scopeRoadmapEpics ("현재 궤적" window — 유나 서사 확定(b),
     expect(arc.epics.map((e) => e.id)).toEqual(['a', 'b']);
     expect(arc.totalCount).toBe(2);
   });
+
+  it('biases the bound cutoff toward the newest epics, not the oldest, when the active cluster itself is wider than bound (라이브 픽셀 2026-07-11 적출 — 200에픽/active44 실 데이터에서 old8개만 잡히던 버그)', () => {
+    // 100 epics ascending by created_at: idx 0-29 done, idx 30-99 active (mirrors the real
+    // project's "org never closes epics" shape reported live — active spans most of the array).
+    const epics = [
+      ...Array.from({ length: 30 }, (_, i) => epicAt(`d${i}`, 'done', i)),
+      ...Array.from({ length: 70 }, (_, i) => epicAt(`a${30 + i}`, 'active', 30 + i)),
+    ];
+    const arc = scopeRoadmapEpics(epics, { behind: 2, ahead: 2, bound: 8 });
+    // Old (buggy) behavior would take the OLDEST 8 of the [28,100) window → 'd28','d29','a30'..'a35'.
+    // Fixed behavior takes the NEWEST 8 — the tail closest to "now"/forward.
+    expect(arc.epics.map((e) => e.id)).toEqual(['a92', 'a93', 'a94', 'a95', 'a96', 'a97', 'a98', 'a99']);
+    expect(arc.totalCount).toBe(100);
+  });
 });
 
 describe('mergeRoadmap (epic 목록 순서 SSOT + 별도 진척 엔드포인트 병합)', () => {
