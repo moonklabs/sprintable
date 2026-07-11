@@ -58,7 +58,7 @@
 - [x] README 새 앵글 반영 (Task #2) — 7/11 확인: 영/한 모두 delivery ledger 포지션 반영 완료
 - [ ] repo description 교체 (여전히 "AI-powered sprint management (MCP + SQLite + single-user)")
 - [ ] llms.txt / llms-full.txt tool 수 정정 ("89 tools" → 실측치)
-- [ ] gate 승인/차단 데모 GIF 또는 15초 클립
+- [ ] gate 승인/차단 데모 GIF 또는 15초 클립 — 게이트 데모 = **Proof-of-Done 패킷 화면** (`counterpunch-proof-of-done-2026-07-11.md` §4/§7)
 - [ ] 토큰 비용 가시성 화면
 - [ ] r/ClaudeCode·r/ClaudeAI 셀프프로모션 규정 확인
 - [ ] HN 계정 상태 확인 (신규 계정 불리 — 기존 계정 사용)
