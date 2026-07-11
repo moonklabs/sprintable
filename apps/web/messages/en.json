@@ -1614,6 +1614,7 @@
   },
   "inbox": {
     "title": "Inbox",
+    "attentionTabLabel": "Today",
     "surfaceDescription": "Review story, memo, reward, and system notifications from one operator surface.",
     "markAllRead": "Mark all read",
     "markRead": "Mark read",

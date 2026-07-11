@@ -1614,6 +1614,7 @@
   },
   "inbox": {
     "title": "인박스",
+    "attentionTabLabel": "오늘",
     "surfaceDescription": "스토리, 메모, 리워드, 시스템 알림을 하나의 운영 표면으로 확인합니다.",
     "markAllRead": "전체 읽음",
     "markRead": "읽음",

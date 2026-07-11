@@ -27,9 +27,13 @@ export interface ProofCapsuleEvidence {
 }
 
 export interface ProofCapsuleGate {
-  risk: '낮음' | '보통' | '높음';
+  /** full 밀도(Human gate)만 사용 — Attention Queue의 row 밀도는 위험도 표시가 없어 생략 가능. */
+  risk?: '낮음' | '보통' | '높음';
   action: string;
   href?: string;
+  /** row 밀도(Attention Queue 재사용)에서 개입유형별 버튼 톤 분기. 기본 primary(기존
+   * Full/Row 호출부 무변경) — neutral=중립 outline(재작업/조율 등)·ready=Green solid(병합 대기). */
+  tone?: 'primary' | 'neutral' | 'ready';
 }
 
 export type ProofCapsuleDensity = 'full' | 'card' | 'row' | 'audit';
@@ -72,7 +76,10 @@ export function ProofCapsule({
   }
   if (density === 'row') {
     return (
-      <InlineRow proofState={proofState} stateLabel={stateLabel} claim={claim} gate={gate} className={className} />
+      <InlineRow
+        proofState={proofState} stateLabel={stateLabel} claim={claim} human={human} agent={agent}
+        gate={gate} className={className}
+      />
     );
   }
   if (density === 'card') {
@@ -180,7 +187,7 @@ function GateRow({ gate, human }: { gate: ProofCapsuleGate; human: ProofCapsuleH
       </div>
       <div className="flex flex-wrap items-center gap-3.5 text-[13px] text-proof-ink-2">
         <span>책임 <b className="text-proof-ink">{human.name}</b></span>
-        <span className="font-mono text-[10.5px]">위험도 {gate.risk}</span>
+        {gate.risk ? <span className="font-mono text-[10.5px]">위험도 {gate.risk}</span> : null}
         <a
           href={gate.href}
           className="ml-auto inline-flex items-center gap-1 rounded-[6px] border border-proof-blue bg-proof-blue-soft px-3 py-1 text-[11.5px] font-semibold text-proof-blue transition-colors duration-[140ms] hover:bg-proof-blue hover:text-white"
@@ -265,23 +272,35 @@ function CardVariant({ proofState, stateLabel, claim, evidence, footer, classNam
   );
 }
 
-function InlineRow({ proofState, stateLabel, claim, gate, className }: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'gate' | 'className'>) {
+const GATE_BUTTON_TONE: Record<NonNullable<ProofCapsuleGate['tone']>, string> = {
+  primary: 'border-proof-blue bg-proof-blue-soft text-proof-blue hover:bg-proof-blue hover:text-white',
+  neutral: 'border-proof-line text-proof-ink-2 hover:bg-proof-sunk',
+  ready: 'border-proof-green bg-proof-green-soft text-proof-green hover:bg-proof-green hover:text-white',
+};
+
+function InlineRow({
+  proofState, stateLabel, claim, human, agent, gate, className,
+}: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'human' | 'agent' | 'gate' | 'className'>) {
   return (
     <CutCornerShell state={proofState} cut={16} className={cn('w-full', className)}>
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5 px-3 py-2">
-        <StateHeader state={proofState} label={stateLabel} />
+      <div className="flex min-h-[52px] min-w-0 flex-1 items-center gap-2.5 px-3 py-2">
+        <span className="w-24 shrink-0"><StateHeader state={proofState} label={stateLabel} /></span>
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-proof-ink">{claim}</span>
-        {gate ? (
-          <span className="inline-flex shrink-0 items-center gap-2">
-            <span className="font-mono text-[10.5px] text-proof-ink-3">위험 {gate.risk}</span>
+        <span className="inline-flex shrink-0 items-center gap-2">
+          {human ? <ProofAvatar label={initials(human.name)} size={22} /> : null}
+          {agent ? <ProofAvatar label={agent.initial} isAgent size={22} /> : null}
+          {gate ? (
             <a
               href={gate.href}
-              className="rounded-[6px] border border-proof-blue bg-proof-blue-soft px-2.5 py-1 text-[10px] font-semibold text-proof-blue transition-colors duration-[140ms] hover:bg-proof-blue hover:text-white"
+              className={cn(
+                'rounded-[8px] border px-2.5 py-1 text-[10.5px] font-semibold transition-colors duration-[140ms]',
+                GATE_BUTTON_TONE[gate.tone ?? 'primary'],
+              )}
             >
               {gate.action}
             </a>
-          </span>
-        ) : null}
+          ) : null}
+        </span>
       </div>
     </CutCornerShell>
   );
