@@ -146,12 +146,16 @@ async def test_apply_template_cross_org_agent_422():
         role_mapping={"step_1": str(cross_org_id), "step_2": str(uuid.uuid4())},
     )
 
-    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo:
+    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo, \
+         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)):
         instance = AsyncMock()
         instance.get_by_slug = AsyncMock(return_value=tmpl)
         MockRepo.return_value = instance
         with pytest.raises(HTTPException) as exc:
-            await apply_template(slug="two-step", body=body, db=db, auth=MagicMock(), org_id=uuid.uuid4())
+            await apply_template(
+                slug="two-step", body=body, db=db,
+                auth=MagicMock(user_id=str(uuid.uuid4())), org_id=uuid.uuid4(),
+            )
 
     assert exc.value.status_code == 422
 
@@ -169,12 +173,16 @@ async def test_apply_template_missing_role_mapping_422():
         role_mapping={"step_1": str(uuid.uuid4())},
     )
 
-    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo:
+    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo, \
+         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)):
         instance = AsyncMock()
         instance.get_by_slug = AsyncMock(return_value=tmpl)
         MockRepo.return_value = instance
         with pytest.raises(HTTPException) as exc:
-            await apply_template(slug="two-step", body=body, db=db, auth=MagicMock(), org_id=uuid.uuid4())
+            await apply_template(
+                slug="two-step", body=body, db=db,
+                auth=MagicMock(user_id=str(uuid.uuid4())), org_id=uuid.uuid4(),
+            )
 
     assert exc.value.status_code == 422
 
@@ -187,12 +195,16 @@ async def test_apply_template_404():
     db = _mock_db()
     body = ApplyTemplateRequest(project_id=uuid.uuid4(), role_mapping={})
 
-    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo:
+    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo, \
+         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)):
         instance = AsyncMock()
         instance.get_by_slug = AsyncMock(return_value=None)
         MockRepo.return_value = instance
         with pytest.raises(HTTPException) as exc:
-            await apply_template(slug="ghost", body=body, db=db, auth=MagicMock(), org_id=uuid.uuid4())
+            await apply_template(
+                slug="ghost", body=body, db=db,
+                auth=MagicMock(user_id=str(uuid.uuid4())), org_id=uuid.uuid4(),
+            )
 
     assert exc.value.status_code == 404
 
@@ -229,11 +241,15 @@ async def test_apply_template_overwrite_deletes_existing():
         overwrite_existing=True,
     )
 
-    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo:
+    with patch("app.routers.workflow_templates.WorkflowTemplateRepository") as MockRepo, \
+         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)):
         instance = AsyncMock()
         instance.get_by_slug = AsyncMock(return_value=tmpl)
         MockRepo.return_value = instance
-        result = await apply_template(slug="two-step", body=body, db=db, auth=MagicMock(), org_id=uuid.uuid4())
+        result = await apply_template(
+            slug="two-step", body=body, db=db,
+            auth=MagicMock(user_id=str(uuid.uuid4())), org_id=uuid.uuid4(),
+        )
 
     assert result.ok is True
     assert result.rules_deleted == 1

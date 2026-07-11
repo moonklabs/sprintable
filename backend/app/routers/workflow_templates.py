@@ -96,6 +96,14 @@ async def apply_template(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> ApplyTemplateResponse:
+    # E-SECURITY SEC-S8(story 83ea3d6a) BB(까심 전수스윕, CRITICAL·라이브 확定): body.project_id에
+    # has_project_access 검증 자체가 없어, project_a member가 project_b에 AgentRoutingRule을
+    # 생성(201)할 수 있었다 — overwrite_existing=true면 기존 룰 삭제까지 겸해 파괴적 쓰기(남의
+    # project 자동화 룰 심기/지우기).
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+
     repo = WorkflowTemplateRepository(db)
     tmpl = await repo.get_by_slug(slug)
     if tmpl is None:
