@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { Check, Download, MessageCircle, Pencil } from 'lucide-react';
+import { Check, Clock, Download, MessageCircle, Pencil, Sparkles } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { ArtifactStage } from './artifact-stage';
 import { ArtifactVersionRail } from './artifact-version-rail';
@@ -33,6 +33,10 @@ interface ArtifactViewerProps {
   /** C2-S6 실 뮤테이션 — 생략하면 카드는 읽기전용(reply 입력/resolve 버튼이 no-op). */
   onResolveThread?: (threadId: string) => void;
   onReplyThread?: (threadId: string, body: string) => void;
+  /** C4-S8 정본화 — 승인은 새 UI 없이 기존 GateInbox가 처리(§1), 여기선 제안만. 선택된
+   * 버전에 이미 대기 중인 제안이 있으면 pendingCanonicalizeVersion === selectedVersion. */
+  pendingCanonicalizeVersion?: number | null;
+  onProposeCanonical?: (versionNumber: number) => void;
   className?: string;
 }
 
@@ -42,7 +46,8 @@ interface ArtifactViewerProps {
  * 받는 순수 뷰라 실 API 착지 시 fetch 래퍼만 새로 감싸면 됨(컴포넌트 자체는 안 바뀜).
  */
 export function ArtifactViewer({
-  artifact, versions, memberMap = {}, commentCount = 0, threads, nodes = [], onEnterEdit, onResolveThread, onReplyThread, className,
+  artifact, versions, memberMap = {}, commentCount = 0, threads, nodes = [], onEnterEdit, onResolveThread, onReplyThread,
+  pendingCanonicalizeVersion, onProposeCanonical, className,
 }: ArtifactViewerProps) {
   const t = useTranslations('canvas');
   const [selectedVersion, setSelectedVersion] = useState(artifact.current_version);
@@ -79,6 +84,25 @@ export function ArtifactViewer({
               <Check className="h-3 w-3" strokeWidth={2.6} aria-hidden />
               {t('anchorBadge', { version: artifact.anchor_version })}
             </span>
+          ) : null}
+          {/* C4-S8 §1 — 에이전트/사람 모두 제안만, 승인은 GateInbox(인간 전용). 이미 정본이거나
+           * 이미 대기 중인 제안이 있으면 제안 버튼을 숨긴다(중복 제안 방지). */}
+          {!isViewingAnchor && onProposeCanonical ? (
+            pendingCanonicalizeVersion === selectedVersion ? (
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                <Clock className="h-3 w-3" aria-hidden />
+                {t('canonicalizePendingBadge')}
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onProposeCanonical(selectedVersion)}
+                className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[11px] font-semibold text-foreground hover:bg-muted"
+              >
+                <Sparkles className="h-3 w-3" aria-hidden />
+                {t('proposeCanonicalAction')}
+              </button>
+            )
           ) : null}
           <span className="ml-auto flex items-center gap-3 text-muted-foreground">
             {artifact.format === 'tree' && onEnterEdit ? (

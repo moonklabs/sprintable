@@ -59,4 +59,36 @@ describe('ArtifactViewer (SSR snapshot)', () => {
     expect(markupNoThreads).not.toContain(MOCK_THREADS[0]!.comments[0]!.body);
     expect(markupEmptyThreads).not.toContain(MOCK_THREADS[0]!.comments[0]!.body);
   });
+
+  it('shows a propose-as-anchor button on a non-anchor version when onProposeCanonical is provided (C4-S8 §1 — 제안만, 승인은 GateInbox)', () => {
+    const markup = renderToStaticMarkup(
+      // MOCK_ARTIFACT.current_version=4 is selected by default, anchor_version=3 — non-anchor.
+      wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} onProposeCanonical={() => {}} />),
+    );
+    expect(markup).toContain('정본으로 제안');
+  });
+
+  it('shows a pending badge instead of the propose button when the selected version already has a pending proposal', () => {
+    const markup = renderToStaticMarkup(
+      wrap(
+        <ArtifactViewer
+          artifact={MOCK_ARTIFACT}
+          versions={MOCK_VERSIONS}
+          memberMap={MOCK_MEMBERS}
+          onProposeCanonical={() => {}}
+          pendingCanonicalizeVersion={MOCK_ARTIFACT.current_version}
+        />,
+      ),
+    );
+    expect(markup).toContain('정본 제안 대기 중');
+    expect(markup).not.toContain('정본으로 제안');
+  });
+
+  it('omits both the propose button and pending badge without onProposeCanonical (읽기전용 폴백)', () => {
+    const markup = renderToStaticMarkup(
+      wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+    );
+    expect(markup).not.toContain('정본으로 제안');
+    expect(markup).not.toContain('정본 제안 대기 중');
+  });
 });
