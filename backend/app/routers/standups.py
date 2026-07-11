@@ -167,16 +167,19 @@ async def upsert_standup(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> StandupEntryResponse:
-    # AC3-3: 작성자 신원을 canonical members.id로 정규화(레거시 휴먼 team_member.id → alias 치환).
-    # write↔read(카드/missing) 동일 canonical 정합 — #1167 회귀(API 200≠카드표시) 방지.
-    author_id = await canonicalize_member_id(body.author_id, session)
+    # E-SECURITY SEC-S8(story 83ea3d6a) EE(까심 전수스윕, CRITICAL·라이브확定): body.project_id
+    # 접근권 검증이 없었고 + body.author_id가 client-supplied 그대로 신뢰돼(canonicalize만·
+    # self-scope 검증 0) 남의 project에 남의 이름으로 standup을 위조할 수 있었다(impersonation).
+    # update_standup(PUT)은 이미 resolve_member(project_id=)로 안전했던 것과 동형으로 맞춘다 —
+    # body.author_id는 이제 무시(하위호환 위해 스키마엔 유지)하고 caller 신원을 서버파생한다.
+    member = await resolve_member(auth, org_id, session, project_id=body.project_id)
     safe_sprint_id, safe_plan_story_ids = await _filter_write_links_to_accessible(
         session, org_id, uuid.UUID(auth.user_id), body.sprint_id, body.plan_story_ids,
     )
     repo = StandupEntryRepository(session, org_id)
     entry = await repo.upsert(
         project_id=body.project_id,
-        author_id=author_id,
+        author_id=member.id,
         date=body.date,
         sprint_id=safe_sprint_id,
         done=body.done,
@@ -294,20 +297,25 @@ async def add_feedback(
     id: uuid.UUID,
     body: FeedbackCreate,
     session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> FeedbackResponse:
     from app.schemas.standup import REVIEW_TYPES
     if body.review_type not in REVIEW_TYPES:
         raise HTTPException(status_code=400, detail=f"review_type must be one of: {', '.join(REVIEW_TYPES)}")
 
+    # E-SECURITY SEC-S8(story 83ea3d6a) EE(까심 전수스윕, CRITICAL·라이브확定): "트랩#9" 주석으로
+    # 위험을 인지하고도 body.project_id 접근권 검증이 없었고 + body.feedback_by_id가
+    # client-supplied 그대로 신뢰돼(canonicalize만·self-scope 검증 0) 남의 project에 남의
+    # 이름으로 feedback을 위조할 수 있었다(upsert_standup과 동형 impersonation).
+    member = await resolve_member(auth, org_id, session, project_id=body.project_id)
+
     entry_repo = StandupEntryRepository(session, org_id)
     entry = await entry_repo.get(id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Standup entry not found")
 
-    # AC3-3 (트랩#9 co-write): feedback 작성자도 author_id와 동일 canonical members.id로 정규화.
-    feedback_by_id = await canonicalize_member_id(body.feedback_by_id, session)
+    feedback_by_id = member.id
     fb_repo = StandupFeedbackRepository(session, org_id)
     feedback = await fb_repo.create(
         project_id=body.project_id,
