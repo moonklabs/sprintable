@@ -273,6 +273,7 @@
     "proofCapsuleStateReviewing": "검증 대기",
     "proofCapsuleStateProven": "증명 완료",
     "proofCapsuleStateViolation": "정책 위반",
+    "workcellStateInProgress": "진행 중",
     "workcellDodMissing": "완료 조건 미기재",
     "workcellBlockedReason": "의존 스토리 대기 중",
     "workcellNextNeedInProgress": "작업 완료 후 리뷰 요청",

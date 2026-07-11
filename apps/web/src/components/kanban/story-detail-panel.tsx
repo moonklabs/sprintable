@@ -353,12 +353,20 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // - Evidence는 ProofCapsuleProps 실 매핑 인프라(EvidenceSection 재사용)가 후속 스코프라
   //   지금은 null(정직한 "아직 증거 없음" — 스펙이 명시적으로 허용하는 케이스).
   // - human assignee 없으면 Workcell 렌더 자체를 생략(허구 human 금지, ProofCapsule 배선과 동일 규율).
+  // P0-04 그라운딩(2026-07-11): GET /api/v2/agent-runs가 story_id 필터를 지원하지 않아(BE
+  // AgentRunRepository.list()는 project_id/agent_id만 필터) FE가 "지금 실제로 도는 에이전트가
+  // 있는지" 알 방법이 없다. 종전엔 blue 상태에 공용 "실행 중"(proofCapsuleStateRunning) 라벨을
+  // 썼는데, 이는 story.status='in-progress'라는 coarse 신호를 "에이전트가 지금 실행 중"이라는
+  // 더 구체적인 주장으로 과장한 것 — no-fiction 위반(파운더 독트린: 실시간 이벤트 텍스트≠실
+  // 실시간 신호). Workcell 전용으로 "진행 중"(workcellStateInProgress, 순수 status 반영, 실행
+  // 주장 없음)으로 정정. Board/Audit의 공용 blue="실행 중" 라벨은 별개 표면이라 스코프 밖
+  // (그쪽도 같은 근본 갭이 있으면 후속 별도 판단). 실 AgentRun story_id 필터는 디디 BE 티켓.
   const PROOF_STATE_BY_STATUS: Record<string, ProofState> = {
     'in-progress': 'blue', 'in-review': 'amber', done: 'green',
   };
   const proofState = PROOF_STATE_BY_STATUS[localStatus];
   const proofStateLabel = proofState
-    ? { blue: t('proofCapsuleStateRunning'), amber: t('proofCapsuleStateReviewing'), green: t('proofCapsuleStateProven'), red: t('proofCapsuleStateViolation') }[proofState]
+    ? { blue: t('workcellStateInProgress'), amber: t('proofCapsuleStateReviewing'), green: t('proofCapsuleStateProven'), red: t('proofCapsuleStateViolation') }[proofState]
     : null;
   const assigneeIds = story.assignee_ids?.length ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
   const proofHumanId = assigneeIds.find((id) => memberMap[id] && memberMap[id]!.type !== 'agent');
