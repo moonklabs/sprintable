@@ -32,13 +32,22 @@ async def _emit(
     db, org_id: uuid.UUID, event_type: str, event_data: dict[str, Any],
     *, notify_member_id: uuid.UUID | None,
 ) -> None:
-    """publish_event(항상)+fire_webhooks(관련자만 게이팅, member_id=null 브로드캐스트 보존)+
-    dispatch_notification(assignee 있을 때만). 각 effect는 best-effort(실패 격리)."""
+    """publish_event(항상)+fire_webhooks(assignee 있으면 관련자 게이팅, 없으면 무-게이팅=org
+    전체 구독 웹훅 도달)+dispatch_notification(assignee 있을 때만). 각 effect는
+    best-effort(실패 격리).
+
+    까심 QA(#2076 REQUEST_CHANGES) 재현 fix: fire_webhooks(recipient_member_ids=)는
+    **빈 집합도 "게이팅 활성"으로 취급**해 member-bound 웹훅을 전부 drop한다
+    (WebhookConfig.member_id가 nullable=False라 broadcast(member_id=null) 개념 자체가
+    없음 — preserve_broadcast로 구제될 여지도 없음). notify_member_id가 None(assignee
+    없음 — epic.reordered/removed는 항상 이 케이스)이면 반드시 recipient_member_ids=None
+    (게이팅 미적용)으로 넘겨야 오르테가 같은 org-wide 구독 웹훅이 실제로 수신한다.
+    `{notify_member_id} if notify_member_id else set()`(빈 집합)이 이 버그의 근본이었다."""
     from app.routers.events import publish_event
     from app.services.notification_dispatch import dispatch_notification
     from app.services.webhook_dispatch import fire_webhooks
 
-    notify_ids: set[uuid.UUID] = {notify_member_id} if notify_member_id else set()
+    notify_ids: set[uuid.UUID] | None = {notify_member_id} if notify_member_id else None
 
     publish_event(str(org_id), event_type, event_data)
     try:

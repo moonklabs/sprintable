@@ -419,3 +419,63 @@ async def test_list_epics_default_order_unchanged_no_position_field_forced():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_epic_reordered_real_webhook_config_actually_receives_delivery():
+    """까심 QA(#2076 REQUEST_CHANGES) #2 요구: fire_webhooks를 mock하지 않고 실 WebhookConfig
+    를 시드해 실제 함수(gating 로직 포함)를 그대로 실행 — 오직 네트워크 I/O 경계(httpx POST +
+    SSRF DNS 조회)만 캡처/우회한다. 이전 PR의 유닛테스트가 fire_webhooks 자체를 mock해서 empty-
+    set 게이팅 버그를 놓쳤던 정확한 갭을 닫는다. member-bound(오르테가류) WebhookConfig가
+    epic.reordered 구독 시 **실제로 정확히 1건 배달**됨을 증명(회귀 시 0건)."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.main import app
+    from app.models.member import Member
+    from app.models.webhook_config import WebhookConfig
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+            ortega = Member(id=uuid.uuid4(), org_id=seeded["org_a_id"], type="agent", name="Ortega")
+            s.add(ortega)
+            await s.commit()
+            s.add(WebhookConfig(
+                id=uuid.uuid4(), org_id=seeded["org_a_id"], member_id=ortega.id,
+                project_id=seeded["project_a_id"], url="https://ortega.example.com/webhook",
+                events=["epic.reordered"], channel="generic", is_active=True,
+            ))
+            await s.commit()
+
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])
+        client = _client_for(app)
+        captured_posts: list[tuple[str, str]] = []
+
+        async def _fake_post(self, url, *, content=None, headers=None, **kwargs):
+            captured_posts.append((url, content))
+            return MagicMock(status_code=200)
+
+        try:
+            with (
+                patch("app.services.webhook_dispatch.validate_webhook_url_async", AsyncMock()),
+                patch("httpx.AsyncClient.post", _fake_post),
+            ):
+                resp = await client.patch("/api/v2/epics/bulk", json={
+                    "items": [
+                        {"id": str(seeded["epic_a1_id"]), "position": 1},
+                        {"id": str(seeded["epic_a2_id"]), "position": 2},
+                    ]
+                })
+            assert resp.status_code == 200, resp.text
+            # 핵심 단언: fire_webhooks의 실 gating 로직을 거쳐 실제로 정확히 1건 HTTP POST됐다
+            # (버그 상태에선 recipient_member_ids=set()로 인해 이 리스트가 비어 0건).
+            assert len(captured_posts) == 1, f"expected exactly 1 real delivery, got {len(captured_posts)}"
+            url, body = captured_posts[0]
+            assert url == "https://ortega.example.com/webhook"
+            assert "epic.reordered" in body
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
