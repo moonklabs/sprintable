@@ -153,17 +153,28 @@ async def _attach_assignee_ids(
 
 
 async def _attach_has_evidence(session: AsyncSession, stories: list[Story]) -> None:
-    """E-VERIFY V0-S2(story 3fbd048d): evidence 있는 story에 has_evidence=True(transient attr) —
-    없으면 미설정(StoryResponse 기본값 None 유지, positive 단방향·부정 신호 0).
+    """E-VERIFY V0-S2(story 3fbd048d) + Claimed vs Verified(doc
+    claimed-vs-verified-spec-handoff §3): evidence 있는 story에 has_evidence/self_reported=True
+    (transient attr) — 없으면 미설정(StoryResponse 기본값 None 유지, positive 단방향·부정
+    신호 0). gate_approval evidence(휴먼 책임자 gate 승인, 스푸핑 불가)가 있으면 추가로
+    human_verified=True+human_verified_by(who)·human_verified_at(when) 세팅.
     _attach_assignee_ids와 동형 배치 패턴."""
     if not stories:
         return
-    from app.services.evidence_service import batch_has_evidence
+    from app.services.evidence_service import batch_has_evidence, batch_human_verified
 
-    ids_with_evidence = await batch_has_evidence(session, [s.id for s in stories], "story")
+    story_ids = [s.id for s in stories]
+    ids_with_evidence = await batch_has_evidence(session, story_ids, "story")
+    verified_map = await batch_human_verified(session, story_ids, "story")
     for s in stories:
         if s.id in ids_with_evidence:
             s.has_evidence = True
+            s.self_reported = True
+        verified = verified_map.get(s.id)
+        if verified is not None:
+            s.human_verified = True
+            s.human_verified_by = verified.created_by
+            s.human_verified_at = verified.created_at
 
 
 async def _assert_story_project_access(

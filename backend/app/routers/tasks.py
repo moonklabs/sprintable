@@ -9,7 +9,7 @@ from app.dependencies.database import get_db
 from app.models.pm import Story, Task
 from app.repositories.task import TaskRepository
 from app.schemas.task import TaskCreate, TaskResponse, TaskUpdate
-from app.services.evidence_service import batch_has_evidence
+from app.services.evidence_service import batch_has_evidence, batch_human_verified
 from app.services.notification_dispatch import dispatch_notification
 
 router = APIRouter(prefix="/api/v2/tasks", tags=["tasks"])
@@ -23,13 +23,22 @@ def _get_repo(
 
 
 async def _attach_has_evidence(session: AsyncSession, tasks: list[Task]) -> None:
-    """E-VERIFY V0-S2(story 3fbd048d) — stories.py `_attach_has_evidence`와 동형(배치 조회)."""
+    """E-VERIFY V0-S2(story 3fbd048d) + Claimed vs Verified(doc
+    claimed-vs-verified-spec-handoff §3) — stories.py `_attach_has_evidence`와 동형(배치 조회)."""
     if not tasks:
         return
-    ids_with_evidence = await batch_has_evidence(session, [t.id for t in tasks], "task")
+    task_ids = [t.id for t in tasks]
+    ids_with_evidence = await batch_has_evidence(session, task_ids, "task")
+    verified_map = await batch_human_verified(session, task_ids, "task")
     for t in tasks:
         if t.id in ids_with_evidence:
             t.has_evidence = True
+            t.self_reported = True
+        verified = verified_map.get(t.id)
+        if verified is not None:
+            t.human_verified = True
+            t.human_verified_by = verified.created_by
+            t.human_verified_at = verified.created_at
 
 
 async def _assert_task_project_access(

@@ -14,7 +14,9 @@ async def batch_has_evidence(
     session: AsyncSession, work_item_ids: list[uuid.UUID], work_item_type: str
 ) -> set[uuid.UUID]:
     """evidence가 1건이라도 있는 work_item_id 집합(N+1 회피 배치 조회) — story/task 응답의
-    has_evidence(positive 단방향) 신호원."""
+    self_reported(구 has_evidence, positive 단방향) 신호원. gate_approval 타입도 포함(휴먼
+    서명도 그 자체로 evidence 존재 사실이므로 self_reported의 상위집합 — human_verified가
+    true면 self_reported도 항상 true)."""
     if not work_item_ids:
         return set()
     result = await session.execute(
@@ -24,6 +26,31 @@ async def batch_has_evidence(
         )
     )
     return set(result.scalars().all())
+
+
+async def batch_human_verified(
+    session: AsyncSession, work_item_ids: list[uuid.UUID], work_item_type: str
+) -> dict[uuid.UUID, Evidence]:
+    """Claimed vs Verified(doc claimed-vs-verified-spec-handoff §3): human_verified 신호원 —
+    gate_approval 타입 evidence(휴먼 책임자 gate 승인 시에만 시스템이 생성·스푸핑 불가,
+    create_gate_approval_evidence_if_applicable 참고)만 필터링해 work_item_id별 **최신 1건**
+    반환. "같은 증거, 다른 주어"(§1.5) — self_reported/human_verified가 같은 evidence 테이블을
+    공유하되 type=gate_approval만 인간 서명으로 승격. created_by=who(member_id)·
+    created_at=when — 검토자 서명."""
+    if not work_item_ids:
+        return {}
+    result = await session.execute(
+        select(Evidence).where(
+            Evidence.work_item_type == work_item_type,
+            Evidence.work_item_id.in_(work_item_ids),
+            Evidence.type == "gate_approval",
+        ).order_by(Evidence.created_at.desc())
+    )
+    latest: dict[uuid.UUID, Evidence] = {}
+    for ev in result.scalars().all():
+        if ev.work_item_id not in latest:
+            latest[ev.work_item_id] = ev
+    return latest
 
 
 async def create_gate_approval_evidence_if_applicable(
