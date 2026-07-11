@@ -41,3 +41,24 @@ class TaskResponse(BaseModel):
     @classmethod
     def _coerce_has_evidence(cls, v):
         return v if isinstance(v, bool) else None
+
+    # Claimed vs Verified(doc claimed-vs-verified-spec-handoff §3) — story.py와 동형.
+    self_reported: bool | None = None
+    human_verified: bool | None = None
+    human_verified_by: uuid.UUID | None = None
+    human_verified_at: datetime | None = None
+
+    @field_validator("self_reported", "human_verified", mode="before")
+    @classmethod
+    def _coerce_evidence_bool_signal(cls, v):
+        return v if isinstance(v, bool) else None
+
+    @field_validator("human_verified_by", mode="before")
+    @classmethod
+    def _coerce_human_verified_by(cls, v):
+        return v if isinstance(v, uuid.UUID) else None
+
+    @field_validator("human_verified_at", mode="before")
+    @classmethod
+    def _coerce_human_verified_at(cls, v):
+        return v if isinstance(v, datetime) else None

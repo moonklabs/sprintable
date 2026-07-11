@@ -221,3 +221,27 @@ class StoryResponse(BaseModel):
     @classmethod
     def _coerce_has_evidence(cls, v):
         return v if isinstance(v, bool) else None
+
+    # Claimed vs Verified(doc claimed-vs-verified-spec-handoff §3): has_evidence(1 boolean) →
+    # 2신호 분리. self_reported=agent가 증거 첨부(has_evidence와 동일 신호원, 하위호환 유지용
+    # 별칭 관계). human_verified=책임자가 gate 승인(=gate_approval evidence)+who/when(검토자
+    # 서명). 셋 다 positive 단방향(True 또는 None, False 없음) — has_evidence와 동형 규율.
+    self_reported: bool | None = None
+    human_verified: bool | None = None
+    human_verified_by: uuid.UUID | None = None
+    human_verified_at: datetime | None = None
+
+    @field_validator("self_reported", "human_verified", mode="before")
+    @classmethod
+    def _coerce_evidence_bool_signal(cls, v):
+        return v if isinstance(v, bool) else None
+
+    @field_validator("human_verified_by", mode="before")
+    @classmethod
+    def _coerce_human_verified_by(cls, v):
+        return v if isinstance(v, uuid.UUID) else None
+
+    @field_validator("human_verified_at", mode="before")
+    @classmethod
+    def _coerce_human_verified_at(cls, v):
+        return v if isinstance(v, datetime) else None
