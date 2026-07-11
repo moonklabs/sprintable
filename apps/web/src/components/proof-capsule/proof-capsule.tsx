@@ -110,15 +110,17 @@ function StateHeader({ state, label }: { state: ProofState; label: string }) {
   );
 }
 
-function ProofAvatar({ label, isAgent }: { label: string; isAgent?: boolean }) {
+/** Workcell 등 다른 Proof Capsule 계열 컴포넌트가 동일 아바타 스타일을 재사용할 수 있게 export. */
+export function ProofAvatar({ label, isAgent, size = 19 }: { label: string; isAgent?: boolean; size?: number }) {
   return (
     <span
       className={cn(
-        'inline-flex size-[19px] shrink-0 items-center justify-center rounded-full border text-[9px] font-semibold',
+        'inline-flex shrink-0 items-center justify-center rounded-full border text-[9px] font-semibold',
         isAgent
           ? 'border-proof-blue bg-proof-blue-soft text-proof-blue'
           : 'border-proof-line bg-proof-sunk text-proof-ink-2',
       )}
+      style={{ width: size, height: size }}
     >
       {label}
     </span>

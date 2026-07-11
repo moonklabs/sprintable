@@ -18,7 +18,8 @@ import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outc
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
-import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
+import type { ProofState } from '@/components/proof-capsule/proof-capsule';
+import { Workcell, type WorkcellMessage } from '@/components/workcell/workcell';
 import { initials } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
@@ -344,10 +345,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const statusKey = statusKeyMap[localStatus];
   const statusLabel = statusKey ? t(statusKey) : localStatus;
 
-  // E-UI-DAEGBYEON P0 — Proof Capsule 최소 실화면 배선(story `f6e69d4a`, dead-path 방지).
-  // 정직한 최소 표면: 실 필드(title/status/assignee)만으로 채울 수 있는 것만 채운다 —
-  // evidence/gate는 이 스토리 스코프 밖(후속 화면 통합 스토리, EvidenceSection/StoryMergeGate
-  // 대체 아님)이라 넘기지 않는다. human assignee 없으면 렌더 자체를 생략(허구 human 금지).
+  // E-UI-DAEGBYEON P0 — Workcell 최소 실화면 배선(story `e5310d1b`, dead-path 방지).
+  // 정직한 최소 표면: 실 필드(title/status/assignee/description/acceptance_criteria/
+  // blocked_by/comments)만으로 채울 수 있는 것만 채운다 — 없는 값은 허구로 안 채움:
+  // - Run.now/stage는 story.status(coarse) 이상의 세부 행위 신호가 없어 statusLabel 그대로
+  //   사용(과장 없음). tools/scopes는 실 데이터 없어 빈 배열(빈 배열=정직, 조작 아님).
+  // - Evidence는 ProofCapsuleProps 실 매핑 인프라(EvidenceSection 재사용)가 후속 스코프라
+  //   지금은 null(정직한 "아직 증거 없음" — 스펙이 명시적으로 허용하는 케이스).
+  // - human assignee 없으면 Workcell 렌더 자체를 생략(허구 human 금지, ProofCapsule 배선과 동일 규율).
   const PROOF_STATE_BY_STATUS: Record<string, ProofState> = {
     'in-progress': 'blue', 'in-review': 'amber', done: 'green',
   };
@@ -360,6 +365,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const proofAgentId = assigneeIds.find((id) => memberMap[id]?.type === 'agent');
   const proofHuman = proofHumanId ? memberMap[proofHumanId] : null;
   const proofAgent = proofAgentId ? memberMap[proofAgentId] : null;
+
+  const WORKCELL_NEXT_NEED_BY_STATUS: Record<string, string> = {
+    'in-progress': t('workcellNextNeedInProgress'),
+    'in-review': t('workcellNextNeedInReview'),
+    done: t('workcellNextNeedDone'),
+  };
+  const workcellMessages: WorkcellMessage[] = comments.map((c) => ({
+    author: memberMap[c.created_by]?.name ?? c.created_by,
+    body: c.content,
+  }));
 
   const patchStory = async (body: Record<string, unknown>): Promise<KanbanStory | null> => {
     const res = await fetch(`/api/stories/${story.id}`, {
@@ -759,20 +774,6 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               hasEvidence={story.has_evidence}
               memberMap={memberMap}
             />
-            {/* E-UI-DAEGBYEON P0 — Proof Capsule 데뷔(최소 실화면 배선, story `f6e69d4a`).
-                evidence/gate 없는 최소 표면(허구 금지) — Board/Inbox/Audit 배선 + evidence/
-                gate 실 데이터 연결은 후속 스토리(EvidenceSection/StoryMergeGate 대체 아님). */}
-            {proofState && proofStateLabel && proofHuman ? (
-              <ProofCapsule
-                density="full"
-                proofState={proofState}
-                stateLabel={proofStateLabel}
-                claim={story.title}
-                human={{ name: proofHuman.name, role: 'human' }}
-                agent={proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined}
-                className="mt-2"
-              />
-            ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
@@ -788,6 +789,32 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         </div>
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
+            {/* E-UI-DAEGBYEON P0 — Workcell 4층 데뷔(최소 실화면 배선, story `e5310d1b`).
+                Evidence는 null(정직한 "아직 증거 없음" — EvidenceSection/StoryMergeGate 실
+                데이터 매핑은 후속 스코프, 대체 아님). human assignee 없으면 전체 생략. */}
+            {proofState && proofStateLabel && proofHuman ? (
+              <Workcell
+                title={story.title}
+                proofState={proofState}
+                stateLabel={proofStateLabel}
+                brief={{
+                  goal: story.description?.trim() || story.title,
+                  dod: story.acceptance_criteria?.trim() || t('workcellDodMissing'),
+                  owner: { name: proofHuman.name, role: 'human' },
+                  agent: proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined,
+                }}
+                run={{
+                  now: statusLabel,
+                  stage: statusLabel,
+                  tools: [],
+                  scopes: [],
+                  blocked: story.blocked_by?.length ? t('workcellBlockedReason') : null,
+                  nextNeed: WORKCELL_NEXT_NEED_BY_STATUS[localStatus] ?? statusLabel,
+                }}
+                evidence={null}
+                conversation={{ view: 'run', messages: workcellMessages }}
+              />
+            ) : null}
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>
