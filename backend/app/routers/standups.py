@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.pm import Story
+from app.models.pm import Sprint, Story
 from app.models.standup import StandupEntry, StandupEntryProject, StandupFeedback
 from app.repositories.standup import StandupEntryRepository, StandupFeedbackRepository
 from app.schemas.standup import (
@@ -19,7 +19,7 @@ from app.schemas.standup import (
     StandupUpsert,
 )
 from app.services.member_resolver import canonicalize_member_id, resolve_member
-from app.services.project_auth import accessible_project_ids_in_org
+from app.services.project_auth import accessible_project_ids_in_org, has_project_access
 
 
 async def _entries_with_plan_stories(
@@ -145,6 +145,28 @@ async def list_standups(
     repo: StandupEntryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[StandupEntryResponse]:
+    # ratchet round5(잔여 HIGH) + 까심 QA REQUEST_CHANGES fix: project_id·sprint_id 둘 다
+    # project로 좁히는 벡터라 각각 접근권 검증이 필요하다(project_id만 가드하면 sprint_id
+    # 단독으로 우회 가능 — Sprint.project_id는 필수 FK라 sprint_id만 알면 특정 project로
+    # 골라낼 수 있었다). sprint_id가 주어지면 org-scope로 실제 project_id를 서버에서
+    # 도출하고, project_id도 함께 주어졌으면 상호 일치까지 확인(불일치=404, 상세 비노출).
+    # project_id·sprint_id 둘 다 없는 org-wide 무필터 목록은 의도된 org 투명성 설계라 무변경.
+    target_project_id = project_id
+    if sprint_id is not None:
+        sprint_row = await repo.session.execute(
+            select(Sprint.project_id).where(Sprint.id == sprint_id, Sprint.org_id == repo.org_id)
+        )
+        sprint_project_id = sprint_row.scalar_one_or_none()
+        if sprint_project_id is None:
+            raise HTTPException(status_code=404, detail="Sprint not found")
+        if target_project_id is not None and target_project_id != sprint_project_id:
+            raise HTTPException(status_code=404, detail="Project not found")
+        target_project_id = sprint_project_id
+
+    if target_project_id is not None:
+        if not await has_project_access(repo.session, uuid.UUID(auth.user_id), target_project_id, repo.org_id):
+            raise HTTPException(status_code=404, detail="Project not found")
+
     filters: dict = {}
     if project_id:
         filters["project_id"] = project_id
@@ -241,6 +263,10 @@ async def list_standup_history(
     b47f9b05: list/upsert/update 와 동일하게 plan_stories org-scope enrich(a9e67531) 적용 — 미적용 시
     백로그→데일리 할일(plan_story_ids)이 plan_stories 빈 채 내려가 cross-board 미노출(SaaS FE 프록시 포함).
     """
+    # ratchet round5(잔여 HIGH): 동일 패턴(project_id 필터 미검증) — resource-actual 직접검증.
+    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), project_id, repo.org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+
     entries = await repo.list(project_id=project_id, limit=limit)
     return await _entries_with_plan_stories(entries, repo.session, repo.org_id, uuid.UUID(auth.user_id))
 

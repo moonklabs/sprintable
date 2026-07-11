@@ -133,10 +133,6 @@ _KNOWN_DEBT_ALLOWLIST: dict[str, str] = {
         "HIGH — org-scope만·optional project_id 필터에 접근권 검증 없음(epic 제목/목표 노출)",
     "app.routers.tasks:list_tasks":
         "HIGH — org-scope만·story_id 필터에 caller의 story project 접근권 검증 없음",
-    "app.routers.standups:list_standups":
-        "HIGH — top-level project_id 필터에 접근권 검증 없음(plan_stories enrichment만 가드됨)",
-    "app.routers.standups:list_standup_history":
-        "HIGH — 동일 패턴(project_id 필터 미검증)",
     "app.routers.members:list_members":
         "HIGH — assert_target_in_caller_org가 cross-org만 막고 same-org cross-project는 미검증",
     "app.routers.hypotheses:link_hypothesis":
