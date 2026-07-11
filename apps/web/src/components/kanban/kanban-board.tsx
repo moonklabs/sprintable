@@ -1247,6 +1247,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     assignees={(activeStory.assignee_ids ?? []).flatMap((id) => memberMap[id] ? [memberMap[id]] : [])}
                     onClick={() => {}}
                     lineStatus={storyLineMap[activeStory.id]}
+                    verifiedBy={activeStory.human_verified_by ? memberMap[activeStory.human_verified_by] : undefined}
                   />
                 </div>
               )}

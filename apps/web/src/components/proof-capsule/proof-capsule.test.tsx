@@ -173,12 +173,12 @@ describe('ProofCapsule (trustSeal slot — claimed-vs-verified-spec-handoff, ful
         proofState="amber"
         stateLabel="주장됨"
         density="full"
-        trustSeal={{ variant: 'claimed', agentName: '미르코', agentInitial: '미' }}
+        trustSeal={{ variant: 'claimed', agentInitial: '미' }}
       />,
     );
     expect(markup).toContain('주장됨');
     expect(markup).toContain('에이전트 주장');
-    expect(markup).toContain('검증 대기');
+    expect(markup).toContain('인간 검증 대기');
   });
 
   it('renders the verified strip (green, human subject) when trustSeal.variant is "verified"', () => {
@@ -203,7 +203,7 @@ describe('ProofCapsule (trustSeal slot — claimed-vs-verified-spec-handoff, ful
         proofState="amber"
         stateLabel="주장됨"
         density="full"
-        trustSeal={{ variant: 'claimed', agentName: '미르코', agentInitial: '미' }}
+        trustSeal={{ variant: 'claimed', agentInitial: '미' }}
       />,
     );
     expect(markup.toLowerCase()).not.toContain('proof-green');

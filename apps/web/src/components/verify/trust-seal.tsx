@@ -1,12 +1,14 @@
-import { Check } from 'lucide-react';
+import { Bot, Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { initials } from '@/lib/storage/format';
 
 export interface TrustSealClaimedProps {
   variant: 'claimed';
-  agentName: string;
-  agentInitial: string;
+  /** 특정 에이전트를 식별할 수 있을 때만(예: story assignee) — self_reported 신호 자체엔 "who"가
+   * 없어(BE 계약, human_verified만 _by를 동봉) 모르는 맥락(예: EvidenceSection Lv1)에선 생략하고
+   * 범용 봇 아이콘으로 정직하게 대체한다(없는 신원을 지어내지 않음). */
+  agentInitial?: string;
   className?: string;
 }
 
@@ -45,10 +47,10 @@ export function TrustSeal(props: TrustSealProps) {
     return (
       <div className={cn('flex items-center gap-2 rounded-[10px] bg-proof-amber-soft px-2.5 py-2 text-[11.5px]', props.className)}>
         <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full border border-proof-blue bg-proof-blue-soft text-[9px] font-bold text-proof-blue">
-          {props.agentInitial}
+          {props.agentInitial ?? <Bot className="size-3" aria-hidden="true" />}
         </span>
         <span className="min-w-0 flex-1 text-proof-ink-3">
-          <b className="font-bold text-proof-ink">{t('trustSealClaimedBy')}</b> · {t('trustSealAwaitingVerification')}
+          <b className="font-bold text-proof-ink">{t('trustSealClaimedBy')}</b> · {t('trustSealAwaitingVerificationLong')}
         </span>
         <span className="shrink-0 text-[10.5px] font-bold text-proof-amber">{t('trustSealAwaitingVerification')}</span>
       </div>

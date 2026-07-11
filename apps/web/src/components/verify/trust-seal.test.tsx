@@ -23,17 +23,24 @@ describe('TrustSeal (legacy icon — 하위호환, story-card.tsx has_evidence �
 
 describe('TrustSeal (claimed — Green 무결성 SOUL-LOCK, claimed-vs-verified-spec-handoff §1.3)', () => {
   it('never references any green token — agent 주장 단독은 Green이 될 수 없다', () => {
-    const markup = render({ variant: 'claimed', agentName: '미르코', agentInitial: '미' });
+    const markup = render({ variant: 'claimed', agentInitial: '미' });
     expect(markup.toLowerCase()).not.toContain('proof-green');
     expect(markup.toLowerCase()).not.toContain('text-success');
   });
 
-  it('renders the amber "주장" framing with agent avatar + text-paired "검증 대기" (색만 금지)', () => {
-    const markup = render({ variant: 'claimed', agentName: '미르코', agentInitial: '미' });
+  it('renders the amber "주장" framing with a specific agent avatar when agentInitial is given', () => {
+    const markup = render({ variant: 'claimed', agentInitial: '미' });
     expect(markup).toContain('proof-amber');
     expect(markup).toContain('에이전트 주장');
-    expect(markup).toContain('검증 대기');
-    expect(markup).toContain('>미<'); // agent initial avatar
+    expect(markup).toContain('인간 검증 대기');
+    expect(markup).toContain('>미<');
+  });
+
+  it('falls back to a generic bot glyph when no specific agent identity is known (no-fiction — self_reported has no "who" signal)', () => {
+    const markup = render({ variant: 'claimed' });
+    expect(markup).toContain('svg'); // Bot icon
+    expect(markup).toContain('에이전트 주장');
+    expect(markup).not.toContain('undefined');
   });
 });
 
