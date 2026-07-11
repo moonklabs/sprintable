@@ -275,6 +275,8 @@
     "proofCapsuleStateViolation": "정책 위반",
     "proofCapsuleStateClaimed": "주장됨",
     "proofCapsuleStateVerified": "검증됨",
+    "trustChipNeedsInput": "입력 필요",
+    "trustChipMergeReady": "병합 대기",
     "workcellStateInProgress": "진행 중",
     "workcellDodMissing": "완료 조건 미기재",
     "workcellBlockedReason": "의존 스토리 대기 중",

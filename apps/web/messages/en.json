@@ -275,6 +275,8 @@
     "proofCapsuleStateViolation": "Policy violation",
     "proofCapsuleStateClaimed": "Claimed",
     "proofCapsuleStateVerified": "Verified",
+    "trustChipNeedsInput": "Needs input",
+    "trustChipMergeReady": "Merge ready",
     "workcellStateInProgress": "In progress",
     "workcellDodMissing": "No DoD specified",
     "workcellBlockedReason": "Waiting on dependency stories",
