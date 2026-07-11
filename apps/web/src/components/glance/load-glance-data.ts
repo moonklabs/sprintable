@@ -59,7 +59,15 @@ async function fetchGlanceData(projectId: string): Promise<GlanceData> {
     fetchJson(`/api/activity-logs?project_id=${projectId}&limit=20`),
   ]);
 
-  const arc = scopeRoadmapEpics(unwrap<BeEpicListItem[]>(epicsJson) ?? []);
+  // 라이브 재현(2026-07-11, 오르테가 fiber 실측) — epics fetch가 초기 remount/타이밍 창에서
+  // 실패(네트워크/401/헤더 미부착 등)하면 fetchJson이 null로 삼켜 "에픽 0개"와 구분이 안 된다.
+  // 이걸 그대로 캐시하면 이후 모든 동기 읽기가 진짜 데이터 대신 이 유령 빈 결과를 영구히 반환한다
+  // (resolvedCache 오염). epics는 로드맵의 필수 소스라 실패 시 reject해 caller가 재시도하게 한다
+  // (loadGlanceData가 이 경우 캐시하지 않음 — 아래 참고).
+  const epicsRaw = unwrap<BeEpicListItem[]>(epicsJson);
+  if (epicsRaw === null) throw new Error('glance: epics fetch failed');
+
+  const arc = scopeRoadmapEpics(epicsRaw);
   const overview = unwrap<{ project_status: { epics: EpicProgress[] } }>(overviewJson);
   const roadmap = mergeRoadmap(arc.epics, overview?.project_status.epics ?? []);
 

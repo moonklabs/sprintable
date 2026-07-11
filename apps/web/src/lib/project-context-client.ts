@@ -63,14 +63,21 @@ export function installProjectHeaderInterceptor(): void {
 /**
  * 탭 effective project 해소 — 우선순위: URL `?p=` → sessionStorage backstop → 서버 prop(쿠키 유래).
  * 후보가 accessible(`accessibleIds`)일 때만 채택(UX/intent 필터, 보안 아님). 무효면 다음 우선순위.
+ *
+ * `hydrated`(기본 true, 명시적으로 false를 넘길 때만 sessionStorage 무시) — 라이브 재현(2026-07-11)
+ * 대응: sessionStorage는 브라우저 전용이라 SSR(`window` 없음)에선 원천적으로 못 읽는다. 이 함수
+ * 호출부(`useProjectSsot`)가 하이드레이션 완료 전엔 `hydrated=false`를 넘겨, 첫 클라이언트 렌더가
+ * 서버 렌더와 동일한 값(URL/serverProjectId 기준)을 내도록 강제한다 — 안 그러면 SSR과 첫 CSR
+ * 사이에 값이 갈려 하이드레이션 직후 예상 밖 URL 정규화(router.replace)가 발동할 수 있다.
  */
 export function resolveEffectiveProjectId(
   urlProjectId: string | null,
   serverProjectId: string | undefined,
   accessibleIds: ReadonlySet<string>,
+  hydrated = true,
 ): string | undefined {
   if (urlProjectId && accessibleIds.has(urlProjectId)) return urlProjectId;
-  if (typeof window !== 'undefined') {
+  if (hydrated && typeof window !== 'undefined') {
     const stored = window.sessionStorage.getItem(TAB_PROJECT_STORAGE_KEY);
     if (stored && accessibleIds.has(stored)) return stored;
   }

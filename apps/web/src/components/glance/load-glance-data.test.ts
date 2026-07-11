@@ -86,4 +86,32 @@ describe('getCachedGlanceData (해소된 데이터 module-level 캐시 — 2차 
     expect(second).toEqual(first); // same shape (mock always returns empty) but a fresh object from the 2nd fetch
     expect(vi.mocked(fetch).mock.calls.length).toBe(8); // confirms a real 2nd fetch happened, not a cache short-circuit
   });
+
+  function mockFetchWithEpicsFailure(epicsShouldFail: () => boolean) {
+    return vi.fn(async (url: string) => {
+      if (url.startsWith('/api/epics')) {
+        if (epicsShouldFail()) return { ok: false, json: async () => ({}) } as Response;
+        return jsonResponse([]);
+      }
+      if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
+      return jsonResponse([]);
+    });
+  }
+
+  it('never caches a result when the epics fetch itself failed (라이브 재현 — 실패를 "에픽 0개"로 오인해 캐시 오염하던 버그)', async () => {
+    vi.stubGlobal('fetch', mockFetchWithEpicsFailure(() => true));
+    await expect(loadGlanceData('proj-i')).rejects.toThrow();
+    expect(getCachedGlanceData('proj-i')).toBeNull();
+  });
+
+  it('lets a retry after an epics failure succeed and populate the cache normally', async () => {
+    let epicsShouldFail = true;
+    vi.stubGlobal('fetch', mockFetchWithEpicsFailure(() => epicsShouldFail));
+    await expect(loadGlanceData('proj-j')).rejects.toThrow();
+    expect(getCachedGlanceData('proj-j')).toBeNull();
+
+    epicsShouldFail = false;
+    await loadGlanceData('proj-j');
+    expect(getCachedGlanceData('proj-j')).not.toBeNull();
+  });
 });

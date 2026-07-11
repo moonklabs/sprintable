@@ -74,6 +74,9 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
         // 이 인스턴스가 살아있으면 즉시 반영(최신 데이터로 갱신) — 죽었어도 load-glance-data.ts가
         // 이미 캐시에 써놨으므로 다음 마운트가 동기 읽기로 성공한다(위 주석 핵심).
         if (!cancelled) applyGlanceData(data, setRoadmap, setTotalEpicCount, setCollaboration, setEvents, setLoadedAt);
+      } catch {
+        // epics fetch 실패(load-glance-data.ts 참고) — 캐시에 안 쓰였으니 다음 마운트/재시도가
+        // 유령 빈 결과 대신 fresh fetch를 다시 시도한다. 이 인스턴스는 조용히 빈 상태로 유지.
       } finally {
         if (!cancelled) setLoading(false);
       }
