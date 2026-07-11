@@ -79,7 +79,13 @@ async function fetchGlanceData(projectId: string): Promise<GlanceData> {
   const stories = storyLists.flatMap((s) => unwrap<BeStoryListItem[]>(s) ?? []);
   const collaboration = deriveCollaboration(roadmap.map((e) => e.id), stories, memberNames);
 
-  const activityItems = unwrap<BeActivityLogItem[]>(activityJson) ?? [];
+  // 실 근본원인(2026-07-11, BE 소스+동작 레퍼런스로 확인) — GET /api/v2/activity-logs는 flat
+  // 배열이 아니라 `ActivityLogListResponse{items,total,limit,offset}`(activity_logs.py:65)를
+  // 반환한다. `.items` 추출 없이 이 wrapper를 배열인 척 filterMilestoneEvents에 넘기면
+  // `items.filter is not a function`으로 **fetchGlanceData 자체가 매번 throw**했다 — 레이스나
+  // 재마운트가 아니라 결정적 크래시였다(#2053~#2055가 전부 안 먹힌 진짜 이유). 같은 엔드포인트를
+  // 쓰는 dashboard-activity-timeline.tsx가 `json.data.items`로 정확히 추출하는 걸 대조해 확인.
+  const activityItems = unwrap<{ items: BeActivityLogItem[] }>(activityJson)?.items ?? [];
   const events = filterMilestoneEvents(activityItems);
 
   return { roadmap, totalEpicCount: arc.totalCount, collaboration, events };
