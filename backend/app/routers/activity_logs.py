@@ -4,7 +4,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.activity_log import ActivityLog
+from app.services.project_auth import has_project_access
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +83,18 @@ async def list_activity_logs(
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> ActivityLogListResponse:
     from app.models.team import TeamMember
+
+    # ratchet round7(잔여 HIGH): project_id 필터(지정 시)에 caller 접근권 검증이 없어
+    # same-org cross-project 감사 로그(actor/action/entity/context 전문)가 노출됐다 —
+    # resource-actual project_id 직접검증. actor_id/entity_id/entity_type 등은 project로
+    # 직접 환원되는 FK가 아니라(result-level 노출 축은 별도 스토리 d3e5ca89로 분리 트래킹)
+    # 이 라운드 스코프 밖.
+    if project_id is not None:
+        if not await has_project_access(db, uuid.UUID(auth.user_id), project_id, org_id):
+            raise HTTPException(status_code=404, detail="Project not found")
 
     # AC5: org scope 필터 (외부 접근 불가 — get_verified_org_id가 403 처리)
     q = select(ActivityLog).where(ActivityLog.org_id == org_id)
