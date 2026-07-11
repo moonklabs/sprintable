@@ -2,11 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { deriveAuditProofState } from './derive-audit-proof-state';
 
 describe('deriveAuditProofState', () => {
-  it('maps failure/rejection/violation vocabulary to red', () => {
-    expect(deriveAuditProofState('gate.rejected')).toBe('red');
-    expect(deriveAuditProofState('story.blocked')).toBe('red');
+  it('maps genuine policy-violation/kill vocabulary to red', () => {
     expect(deriveAuditProofState('run.failed')).toBe('red');
     expect(deriveAuditProofState('policy.violation_detected')).toBe('red');
+    expect(deriveAuditProofState('access.denied')).toBe('red');
+    expect(deriveAuditProofState('run.errored')).toBe('red');
+  });
+
+  it('does NOT map reject to red (거부=학습 신호, 실패 아님 — amber로 완화)', () => {
+    expect(deriveAuditProofState('gate.rejected')).toBe('amber');
+  });
+
+  it('does NOT map block to red (막힘=amber 규율 + story.unblocked 오탐 방지 — amber로 완화)', () => {
+    expect(deriveAuditProofState('story.blocked')).toBe('amber');
+    expect(deriveAuditProofState('story.unblocked')).toBe('amber');
   });
 
   it('maps completion/approval/creation vocabulary to green', () => {
