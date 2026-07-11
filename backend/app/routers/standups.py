@@ -19,7 +19,7 @@ from app.schemas.standup import (
     StandupUpsert,
 )
 from app.services.member_resolver import canonicalize_member_id, resolve_member
-from app.services.project_auth import accessible_project_ids_in_org
+from app.services.project_auth import accessible_project_ids_in_org, has_project_access
 
 
 async def _entries_with_plan_stories(
@@ -145,6 +145,13 @@ async def list_standups(
     repo: StandupEntryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[StandupEntryResponse]:
+    # ratchet round5(잔여 HIGH): top-level project_id 필터(지정 시)에 caller 접근권 검증이
+    # 없어 same-org cross-project 스탠드업 자유텍스트(yesterday/today/blockers)가 노출됐다 —
+    # resource-actual project_id 직접검증.
+    if project_id is not None:
+        if not await has_project_access(repo.session, uuid.UUID(auth.user_id), project_id, repo.org_id):
+            raise HTTPException(status_code=404, detail="Project not found")
+
     filters: dict = {}
     if project_id:
         filters["project_id"] = project_id
@@ -241,6 +248,10 @@ async def list_standup_history(
     b47f9b05: list/upsert/update 와 동일하게 plan_stories org-scope enrich(a9e67531) 적용 — 미적용 시
     백로그→데일리 할일(plan_story_ids)이 plan_stories 빈 채 내려가 cross-board 미노출(SaaS FE 프록시 포함).
     """
+    # ratchet round5(잔여 HIGH): 동일 패턴(project_id 필터 미검증) — resource-actual 직접검증.
+    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), project_id, repo.org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+
     entries = await repo.list(project_id=project_id, limit=limit)
     return await _entries_with_plan_stories(entries, repo.session, repo.org_id, uuid.UUID(auth.user_id))
 
