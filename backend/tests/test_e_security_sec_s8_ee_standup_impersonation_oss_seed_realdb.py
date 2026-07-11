@@ -223,6 +223,9 @@ async def test_upsert_standup_same_project_still_works():
 
 @pytest.mark.anyio
 async def test_add_feedback_cross_project_blocked_no_row():
+    """entry가 project_b(caller 무권한) 소속인데 body.project_id를 project_a(caller 유권한)라
+    주장해도 차단돼야 한다 — 까심 QA가 잡은 bypass 벡터(body-claimed project 신뢰 금지,
+    entry.project_id가 실제 인가 기준)."""
     from app.main import app
     from app.models.standup import StandupEntry, StandupFeedback
 
@@ -230,8 +233,12 @@ async def test_add_feedback_cross_project_blocked_no_row():
     try:
         async with Session() as s:
             seeded = await _seed_two_humans_two_orgs(s)
+            from app.models.project import Project
+            project_c = Project(id=uuid.uuid4(), org_id=seeded["org_a_id"], name="Project C (no grant)")
+            s.add(project_c)
+            await s.commit()
             entry = StandupEntry(
-                id=uuid.uuid4(), org_id=seeded["org_a_id"], project_id=seeded["project_a_id"],
+                id=uuid.uuid4(), org_id=seeded["org_a_id"], project_id=project_c.id,
                 author_id=uuid.uuid4(), date=_date(2026, 7, 11),
             )
             s.add(entry)
@@ -243,7 +250,7 @@ async def test_add_feedback_cross_project_blocked_no_row():
         try:
             resp = await client.post(f"/api/v2/standups/{entry_id}/feedback", json={
                 "org_id": str(seeded["org_a_id"]),
-                "project_id": str(seeded["project_b_id"]),
+                "project_id": str(seeded["project_a_id"]),  # caller 유권한 project라 주장(bypass 시도)
                 "feedback_by_id": str(seeded["human_a_user_id"]),
                 "review_type": "comment", "feedback_text": "injected",
             })
@@ -256,7 +263,7 @@ async def test_add_feedback_cross_project_blocked_no_row():
             rows = (await s.execute(
                 select(StandupFeedback).where(StandupFeedback.standup_entry_id == entry_id)
             )).scalars().all()
-            assert rows == [], "무권한 project에 feedback이 생성되면 안 됨"
+            assert rows == [], "무권한 entry에 feedback이 생성되면 안 됨(body-claimed project 우회 차단)"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

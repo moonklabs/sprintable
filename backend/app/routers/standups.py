@@ -304,22 +304,30 @@ async def add_feedback(
     if body.review_type not in REVIEW_TYPES:
         raise HTTPException(status_code=400, detail=f"review_type must be one of: {', '.join(REVIEW_TYPES)}")
 
-    # E-SECURITY SEC-S8(story 83ea3d6a) EE(까심 전수스윕, CRITICAL·라이브확定): "트랩#9" 주석으로
-    # 위험을 인지하고도 body.project_id 접근권 검증이 없었고 + body.feedback_by_id가
-    # client-supplied 그대로 신뢰돼(canonicalize만·self-scope 검증 0) 남의 project에 남의
-    # 이름으로 feedback을 위조할 수 있었다(upsert_standup과 동형 impersonation).
-    member = await resolve_member(auth, org_id, session, project_id=body.project_id)
-
     entry_repo = StandupEntryRepository(session, org_id)
     entry = await entry_repo.get(id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Standup entry not found")
 
+    # E-SECURITY SEC-S8(story 83ea3d6a) EE(까심 전수스윕, CRITICAL·라이브확定): "트랩#9" 주석으로
+    # 위험을 인지하고도 body.project_id 접근권 검증이 없었고 + body.feedback_by_id가
+    # client-supplied 그대로 신뢰돼(canonicalize만·self-scope 검증 0) 남의 project에 남의
+    # 이름으로 feedback을 위조할 수 있었다(upsert_standup과 동형 impersonation).
+    #
+    # 까심 QA(1차 fix 이후 재확定): body.project_id(호출자 주장값)로만 접근권을 검증하면
+    # caller가 project_a grant인데 project_b entry에 body.project_id=project_a라 주장해
+    # 우회할 수 있었다 — "body가 주장하는 project를 믿지 말고 실제 리소스(entry)의 project를
+    # 써라"가 근본. entry.project_id(org-level entry면 None=project-scope 검사 스킵)로 검증.
+    member = await resolve_member(auth, org_id, session, project_id=entry.project_id)
+    safe_sprint_id, _ = await _filter_write_links_to_accessible(
+        session, org_id, uuid.UUID(auth.user_id), body.sprint_id, [],
+    )
+
     feedback_by_id = member.id
     fb_repo = StandupFeedbackRepository(session, org_id)
     feedback = await fb_repo.create(
         project_id=body.project_id,
-        sprint_id=body.sprint_id,
+        sprint_id=safe_sprint_id,
         standup_entry_id=id,
         feedback_by_id=feedback_by_id,
         review_type=body.review_type,
