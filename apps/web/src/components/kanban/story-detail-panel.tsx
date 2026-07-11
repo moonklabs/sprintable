@@ -18,6 +18,8 @@ import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outc
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
+import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
+import { initials } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
@@ -341,6 +343,23 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   };
   const statusKey = statusKeyMap[localStatus];
   const statusLabel = statusKey ? t(statusKey) : localStatus;
+
+  // E-UI-DAEGBYEON P0 — Proof Capsule 최소 실화면 배선(story `f6e69d4a`, dead-path 방지).
+  // 정직한 최소 표면: 실 필드(title/status/assignee)만으로 채울 수 있는 것만 채운다 —
+  // evidence/gate는 이 스토리 스코프 밖(후속 화면 통합 스토리, EvidenceSection/StoryMergeGate
+  // 대체 아님)이라 넘기지 않는다. human assignee 없으면 렌더 자체를 생략(허구 human 금지).
+  const PROOF_STATE_BY_STATUS: Record<string, ProofState> = {
+    'in-progress': 'blue', 'in-review': 'amber', done: 'green',
+  };
+  const proofState = PROOF_STATE_BY_STATUS[localStatus];
+  const proofStateLabel = proofState
+    ? { blue: t('proofCapsuleStateRunning'), amber: t('proofCapsuleStateReviewing'), green: t('proofCapsuleStateProven'), red: t('proofCapsuleStateViolation') }[proofState]
+    : null;
+  const assigneeIds = story.assignee_ids?.length ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
+  const proofHumanId = assigneeIds.find((id) => memberMap[id] && memberMap[id]!.type !== 'agent');
+  const proofAgentId = assigneeIds.find((id) => memberMap[id]?.type === 'agent');
+  const proofHuman = proofHumanId ? memberMap[proofHumanId] : null;
+  const proofAgent = proofAgentId ? memberMap[proofAgentId] : null;
 
   const patchStory = async (body: Record<string, unknown>): Promise<KanbanStory | null> => {
     const res = await fetch(`/api/stories/${story.id}`, {
@@ -740,6 +759,20 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               hasEvidence={story.has_evidence}
               memberMap={memberMap}
             />
+            {/* E-UI-DAEGBYEON P0 — Proof Capsule 데뷔(최소 실화면 배선, story `f6e69d4a`).
+                evidence/gate 없는 최소 표면(허구 금지) — Board/Inbox/Audit 배선 + evidence/
+                gate 실 데이터 연결은 후속 스토리(EvidenceSection/StoryMergeGate 대체 아님). */}
+            {proofState && proofStateLabel && proofHuman ? (
+              <ProofCapsule
+                density="full"
+                proofState={proofState}
+                stateLabel={proofStateLabel}
+                claim={story.title}
+                human={{ name: proofHuman.name, role: 'human' }}
+                agent={proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined}
+                className="mt-2"
+              />
+            ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
