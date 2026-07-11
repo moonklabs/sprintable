@@ -9,6 +9,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { DecisionsWaiting } from '@/components/inbox/decisions-waiting';
 import { GateInbox } from '@/components/cage/gate-inbox';
+import { AttentionQueueView } from '@/components/attention-queue/attention-queue-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast, ToastContainer } from '@/components/ui/toast';
 import {
@@ -375,9 +376,10 @@ export default function InboxPage() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {/* 탭 — 알림 / 게이트 */}
+        {/* 탭 — 오늘(Attention Queue) / 알림 / 게이트. AQ는 전용 뷰로 병행 추가(기존 탭 대체 아님). */}
         <div className="flex shrink-0 border-b border-border/80 px-4">
           {([
+            { key: 'attention', label: t('attentionTabLabel') },
             { key: 'notifications', label: t('title') },
             { key: 'gates', label: tCage('gateTabLabel') },
           ] as { key: string; label: string }[]).map(({ key, label }) => (
@@ -396,7 +398,15 @@ export default function InboxPage() {
           ))}
         </div>
 
-        {activeTab === 'gates' ? (
+        {activeTab === 'attention' ? (
+          <div className="flex-1 overflow-y-auto p-4">
+            {projectId ? (
+              <AttentionQueueView projectId={projectId} />
+            ) : (
+              <p className="text-xs text-muted-foreground">{t('loading')}</p>
+            )}
+          </div>
+        ) : activeTab === 'gates' ? (
           <div className="flex-1 overflow-y-auto p-4">
             {currentTeamMemberId ? (
               <GateInbox memberId={currentTeamMemberId} />
