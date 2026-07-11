@@ -41,3 +41,35 @@ export function deriveTrustStage(signal: TrustSignal): TrustStage {
   if (signal.self_reported) return 'claimed';
   return null;
 }
+
+/**
+ * P0-04 — trust-pipeline-minimal-decision(doc) 결정: 6레인 대시보드 기각·in-flight 전용 칩만
+ * 채택. done(주장됨/검증됨)엔 칩 0(TrustSeal이 담당·중복 금지). Queued/Running/범위이탈은
+ * BE 신호 자체가 없어(AgentRun story_id 필터 미착지·범위 스키마 무) 렌더 안 함(no-fiction).
+ */
+export type InFlightTrustChip = 'needs_input' | 'merge_ready' | null;
+
+interface ChipGate {
+  gate_type: string;
+  status: string;
+  neutral_facts?: Record<string, unknown> | null;
+}
+
+// _ALWAYS_MANUAL_GATE_TYPES(BE gate_service.py) 미러 — 항상 사람 입력 대기.
+const NEEDS_INPUT_GATE_TYPES = new Set(['doc_approval', 'loop_decision', 'artifact_canonicalize']);
+
+/**
+ * 결정 doc §스펙: Needs-input(gate 3종 pending)→"입력 필요"(amber)·Merge-ready(merge gate+
+ * ci_result=pass+pending)→"병합 대기"(green). story.status==='done'이면 항상 무표시.
+ */
+export function deriveInFlightTrustChip(storyStatus: string, gates: ChipGate[]): InFlightTrustChip {
+  if (storyStatus === 'done') return null;
+  const pending = gates.filter((g) => g.status === 'pending');
+  if (pending.some((g) => g.gate_type === 'merge' && g.neutral_facts?.['ci_result'] === 'pass')) {
+    return 'merge_ready';
+  }
+  if (pending.some((g) => NEEDS_INPUT_GATE_TYPES.has(g.gate_type))) {
+    return 'needs_input';
+  }
+  return null;
+}

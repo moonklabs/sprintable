@@ -18,6 +18,7 @@ import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outc
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
+import { deriveInFlightTrustChip } from '@/services/verify';
 import type { ProofState } from '@/components/proof-capsule/proof-capsule';
 import { Workcell, type WorkcellMessage } from '@/components/workcell/workcell';
 import { initials } from '@/lib/storage/format';
@@ -161,6 +162,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   const [deps, setDeps] = useState<DependencyEdge[]>([]);
   const [loadingDeps, setLoadingDeps] = useState(false);
+  // P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩. gate_type/status/
+  // neutral_facts.ci_result만 필요(GateItem 전체 불요) — 얇은 로컬 타입으로 충분.
+  const [chipGates, setChipGates] = useState<{ gate_type: string; status: string; neutral_facts?: Record<string, unknown> | null }[]>([]);
   const [showAddDep, setShowAddDep] = useState(false);
   const [depQuery, setDepQuery] = useState('');
   const [depQueryResults, setDepQueryResults] = useState<{ id: string; title: string }[]>([]);
@@ -330,6 +334,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       .finally(() => setLoadingDeps(false));
   }, [story.id]);
 
+  // P0-04 in-flight 신뢰 칩 — StoryMergeGate와 동형 데이터소스(work_item_id 필터, BE 추가 0).
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/gates?work_item_id=${story.id}&work_item_type=story`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((gates) => { if (!cancelled) setChipGates(Array.isArray(gates) ? gates : []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [story.id]);
+
   // Keep the locally-displayed status synced when a different story is selected or the
   // board pushes an external update. Optimistic in-panel changes set it directly (handler),
   // so the badge reflects immediately without waiting for the prop round-trip (S6 AC2 ④).
@@ -344,6 +358,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   };
   const statusKey = statusKeyMap[localStatus];
   const statusLabel = statusKey ? t(statusKey) : localStatus;
+
+  // P0-04(trust-pipeline-minimal-decision) — in-flight 전용 칩. done엔 항상 무표시(TrustSeal
+  // 담당·중복 금지, deriveInFlightTrustChip 내부에서 강제). 무신호=칩 자체 미렌더(no-fiction).
+  const trustChip = deriveInFlightTrustChip(localStatus, chipGates);
+  const trustChipLabel = trustChip === 'needs_input' ? t('trustChipNeedsInput') : trustChip === 'merge_ready' ? t('trustChipMergeReady') : null;
 
   // E-UI-DAEGBYEON P0 — Workcell 최소 실화면 배선(story `e5310d1b`, dead-path 방지).
   // 정직한 최소 표면: 실 필드(title/status/assignee/description/acceptance_criteria/
@@ -748,32 +767,49 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 <span className="mt-1 shrink-0 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">✎</span>
               </button>
             )}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <button type="button" disabled={savingStatus} aria-label={t('status')}>
-                    <StatusBadge status={localStatus} label={statusLabel} interactive />
-                  </button>
-                }
-              />
-              <DropdownMenuContent align="start">
-                {COLUMNS.map((col) => {
-                  const isCurrent = col.id === localStatus;
-                  // 정공법 A(c1cd484b): 전이-순서 disable 제거 — 어느 상태로든 선택 가능(하드블록 X).
-                  // 비정상 점프는 /status 응답 violation → 비차단 토스트로 가시화.
-                  return (
-                    <DropdownMenuItem
-                      key={col.id}
-                      disabled={savingStatus || isCurrent}
-                      onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
-                    >
-                      <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
-                      {t(statusKeyMap[col.id] ?? col.i18nKey)}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <button type="button" disabled={savingStatus} aria-label={t('status')}>
+                      <StatusBadge status={localStatus} label={statusLabel} interactive />
+                    </button>
+                  }
+                />
+                <DropdownMenuContent align="start">
+                  {COLUMNS.map((col) => {
+                    const isCurrent = col.id === localStatus;
+                    // 정공법 A(c1cd484b): 전이-순서 disable 제거 — 어느 상태로든 선택 가능(하드블록 X).
+                    // 비정상 점프는 /status 응답 violation → 비차단 토스트로 가시화.
+                    return (
+                      <DropdownMenuItem
+                        key={col.id}
+                        disabled={savingStatus || isCurrent}
+                        onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
+                      >
+                        <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
+                        {t(statusKeyMap[col.id] ?? col.i18nKey)}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {/* P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩(입력 필요/병합
+                  대기). done엔 렌더 0(TrustSeal 중복 방지)·무신호(gate 없음)면 칩 자체 미렌더. 5-status
+                  배지는 무변경(순수 additive 오버레이). 칸반 카드엔 안 얹음(Proofline이 이미 담당). */}
+              {trustChip && trustChipLabel ? (
+                <span
+                  className={
+                    trustChip === 'merge_ready'
+                      ? 'inline-flex items-center gap-1.5 rounded-[7px] bg-proof-green-soft px-2 py-0.5 text-[11px] font-semibold text-proof-green'
+                      : 'inline-flex items-center gap-1.5 rounded-[7px] bg-proof-amber-soft px-2 py-0.5 text-[11px] font-semibold text-proof-amber'
+                  }
+                >
+                  <span className={`size-1.5 rounded-full ${trustChip === 'merge_ready' ? 'bg-proof-green' : 'bg-proof-amber'}`} aria-hidden="true" />
+                  {trustChipLabel}
+                </span>
+              ) : null}
+            </div>
             {/* E-VERIFY V0-S3 Lv1/Lv2 + P0-04 Claimed-vs-Verified — 완료 badge의 연장으로 읽히도록
                 바로 아래. 증거 0이면 EvidenceSection 자체가 null 렌더(행 미노출, §7 상태 매트릭스). */}
             <EvidenceSection
