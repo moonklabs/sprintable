@@ -120,7 +120,7 @@ async def list_activity_logs(
         try:
             caller_tm = (await db.execute(
                 select(TeamMember).where(
-                    TeamMember.id == uuid.UUID(_auth.user_id),
+                    TeamMember.id == uuid.UUID(auth.user_id),
                     TeamMember.org_id == org_id,
                 ).limit(1)
             )).scalar_one_or_none()
@@ -131,8 +131,12 @@ async def list_activity_logs(
                     "activity_logs EE RBAC applied role=%s member_id=%s",
                     caller_tm.role, caller_tm.id,
                 )
-        except Exception:
-            logger.warning("activity_logs EE RBAC filter failed — fallback to flat log", exc_info=True)
+        # 까심 QA(#2073 REQUEST_CHANGES): 여기서 광범위 Exception을 삼키면 NameError류
+        # 코드버그까지 fail-open(무필터 flat log)으로 마스킹된다 — DB/타입 계열의 실제
+        # "필터 적용 실패"만 fail-open 허용하고, 나머지 코드 버그(NameError/AttributeError
+        # 등)는 그대로 전파해 500으로 가시화한다(조용한 권한 무력화 방지).
+        except (LookupError, ValueError, TypeError) as exc:
+            logger.warning("activity_logs EE RBAC filter failed — fallback to flat log: %s", exc, exc_info=True)
 
     total_result = await db.execute(select(func.count()).select_from(q.subquery()))
     total = total_result.scalar_one()
