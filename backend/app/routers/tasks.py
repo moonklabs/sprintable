@@ -63,7 +63,17 @@ async def list_tasks(
     assignee_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     repo: TaskRepository = Depends(_get_repo),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[TaskResponse]:
+    # ratchet round6(잔여 HIGH): 이 엔드포인트엔 project_id 파라미터 자체가 없고 story_id가
+    # 유일한 project-환원 파라미터라, story_id 지정 시 _assert_task_project_access(기존
+    # G-fix 재사용)로 caller의 story project 접근권을 검증한다. story_id 미지정 시 org 전체
+    # task가 나가던 기존 갭은 baseline 기술 그대로("org-scope만") — 이 라운드는 story_id
+    # 벡터만 닫는다(project_id 필터 부재라 round1~5의 project_id 직접검증 패턴 적용 불가).
+    if story_id is not None:
+        await _assert_task_project_access(repo.session, auth, org_id, story_id)
+
     filters: dict = {}
     if story_id:
         filters["story_id"] = story_id
