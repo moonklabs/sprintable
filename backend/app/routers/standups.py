@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.pm import Story
+from app.models.pm import Sprint, Story
 from app.models.standup import StandupEntry, StandupEntryProject, StandupFeedback
 from app.repositories.standup import StandupEntryRepository, StandupFeedbackRepository
 from app.schemas.standup import (
@@ -145,11 +145,26 @@ async def list_standups(
     repo: StandupEntryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[StandupEntryResponse]:
-    # ratchet round5(잔여 HIGH): top-level project_id 필터(지정 시)에 caller 접근권 검증이
-    # 없어 same-org cross-project 스탠드업 자유텍스트(yesterday/today/blockers)가 노출됐다 —
-    # resource-actual project_id 직접검증.
-    if project_id is not None:
-        if not await has_project_access(repo.session, uuid.UUID(auth.user_id), project_id, repo.org_id):
+    # ratchet round5(잔여 HIGH) + 까심 QA REQUEST_CHANGES fix: project_id·sprint_id 둘 다
+    # project로 좁히는 벡터라 각각 접근권 검증이 필요하다(project_id만 가드하면 sprint_id
+    # 단독으로 우회 가능 — Sprint.project_id는 필수 FK라 sprint_id만 알면 특정 project로
+    # 골라낼 수 있었다). sprint_id가 주어지면 org-scope로 실제 project_id를 서버에서
+    # 도출하고, project_id도 함께 주어졌으면 상호 일치까지 확인(불일치=404, 상세 비노출).
+    # project_id·sprint_id 둘 다 없는 org-wide 무필터 목록은 의도된 org 투명성 설계라 무변경.
+    target_project_id = project_id
+    if sprint_id is not None:
+        sprint_row = await repo.session.execute(
+            select(Sprint.project_id).where(Sprint.id == sprint_id, Sprint.org_id == repo.org_id)
+        )
+        sprint_project_id = sprint_row.scalar_one_or_none()
+        if sprint_project_id is None:
+            raise HTTPException(status_code=404, detail="Sprint not found")
+        if target_project_id is not None and target_project_id != sprint_project_id:
+            raise HTTPException(status_code=404, detail="Project not found")
+        target_project_id = sprint_project_id
+
+    if target_project_id is not None:
+        if not await has_project_access(repo.session, uuid.UUID(auth.user_id), target_project_id, repo.org_id):
             raise HTTPException(status_code=404, detail="Project not found")
 
     filters: dict = {}

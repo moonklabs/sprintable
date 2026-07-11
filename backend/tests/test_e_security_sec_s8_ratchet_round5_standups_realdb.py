@@ -47,9 +47,11 @@ async def _session_factory():
 
 
 async def _seed(session):
-    """org(project_a, project_b) + standup_b(project_b 링크, blockers="TOP SECRET BLOCKER") +
-    human_a(project_a에만 명시 grant, project_b 접근권 없음)."""
+    """org(project_a, project_b) + sprint_b(project_b) + standup_b(project_b 링크·sprint_b
+    귀속, blockers="TOP SECRET BLOCKER") + human_a(project_a에만 명시 grant, project_b
+    접근권 없음)."""
     from app.models.organization import Organization
+    from app.models.pm import Sprint
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
     from app.models.standup import StandupEntry, StandupEntryProject
@@ -64,10 +66,14 @@ async def _seed(session):
     session.add_all([project_a, project_b])
     await session.commit()
 
+    sprint_b = Sprint(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="Sprint B")
+    session.add(sprint_b)
+    await session.commit()
+
     standup_b = StandupEntry(
-        id=uuid.uuid4(), org_id=org.id, project_id=project_b.id,
+        id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, sprint_id=sprint_b.id,
         author_id=uuid.uuid4(), date=date(2026, 7, 11),
-        done="secret work", plan="secret plan", blockers="TOP SECRET BLOCKER",
+        done="secret work", plan="secret plan", blockers="SPRINT-ID-BYPASS TOP SECRET BLOCKER",
     )
     session.add(standup_b)
     await session.commit()
@@ -89,7 +95,7 @@ async def _seed(session):
 
     return {
         "org_id": org.id, "project_a_id": project_a.id, "project_b_id": project_b.id,
-        "human_user_id": human_user_id,
+        "sprint_b_id": sprint_b.id, "human_user_id": human_user_id,
     }
 
 
@@ -156,6 +162,55 @@ async def test_no_grant_human_cannot_list_other_project_standups():
         client = _client_for(app)
         try:
             resp = await client.get(f"/api/v2/standups?project_id={seeded['project_b_id']}")
+            assert resp.status_code == 404, resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_no_grant_human_cannot_bypass_via_sprint_id_alone():
+    """까심 QA REQUEST_CHANGES 재현+회귀: project_id 없이 sprint_id=<project_b sprint>만
+    넘겨 project_id 가드를 우회하던 벡터 — 이제 sprint_id로 실제 project_id를 서버에서
+    도출해 동일하게 404 차단(자유텍스트 secret이 응답에 없음 실증)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/standups?sprint_id={seeded['sprint_b_id']}")
+            assert resp.status_code == 404, resp.text
+            assert "SPRINT-ID-BYPASS TOP SECRET BLOCKER" not in resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_project_id_and_mismatched_sprint_id_returns_404():
+    """엣지: project_id와 sprint_id가 서로 다른 project를 가리키면(불일치) 404 — 상세 비노출."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(
+                f"/api/v2/standups?project_id={seeded['project_a_id']}&sprint_id={seeded['sprint_b_id']}"
+            )
             assert resp.status_code == 404, resp.text
         finally:
             await client.aclose()
