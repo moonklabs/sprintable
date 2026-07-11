@@ -44,6 +44,7 @@ async def _seed_org_project(s):
     for sql in [
         f"DELETE FROM sprints WHERE org_id='{ORG}'",
         f"DELETE FROM hypotheses WHERE org_id='{ORG}'",
+        f"DELETE FROM project_access WHERE org_member_id='{OM}'",
         f"DELETE FROM org_members WHERE org_id='{ORG}'",
         f"DELETE FROM projects WHERE org_id='{ORG}'",
         f"DELETE FROM users WHERE id='{USER}'",
@@ -53,6 +54,11 @@ async def _seed_org_project(s):
         f"login_fail_count,totp_enabled,totp_fail_count) VALUES ('{USER}','u@dd.test','x','U',true,true,0,false,0)",
         f"INSERT INTO org_members (id,org_id,user_id,role) VALUES ('{OM}','{ORG}','{USER}','member')",
         f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{PROJ}','{ORG}','P','none')",
+        # E-SECURITY SEC-S8(story 83ea3d6a) CC: sprint 라우터가 project-scope를 강제하게 되며
+        # 이 파일의 USER(role=member, 별도 grant 없음)가 sprint.project_id(PROJ) 접근권을
+        # 갖도록 명시 grant 필요(레거시 시드는 project-scope 이전 세계관).
+        f"INSERT INTO project_access (id,project_id,org_member_id,permission,role) "
+        f"VALUES ('{uuid.uuid4()}','{PROJ}','{OM}','granted','member')",
     ]:
         await s.execute(text(sql))
     await s.commit()

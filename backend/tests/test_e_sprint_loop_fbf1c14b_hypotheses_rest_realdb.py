@@ -108,7 +108,7 @@ async def test_get_returns_linked_hypotheses_flat_shape():
 
         async with Session() as s:
             repo = SprintRepository(s, ORG)
-            result = await list_sprint_hypotheses(sprint.id, repo=repo, session=s, org_id=ORG)
+            result = await list_sprint_hypotheses(sprint.id, repo=repo, session=s, org_id=ORG, auth=_auth())
         assert len(result) == 1
         item = result[0]
         assert item.id == hyp.id
@@ -138,7 +138,7 @@ async def test_get_unlinked_hypothesis_not_included():
 
         async with Session() as s:
             repo = SprintRepository(s, ORG)
-            result = await list_sprint_hypotheses(sprint.id, repo=repo, session=s, org_id=ORG)
+            result = await list_sprint_hypotheses(sprint.id, repo=repo, session=s, org_id=ORG, auth=_auth())
         assert result == []
     finally:
         await eng.dispose()
@@ -158,7 +158,7 @@ async def test_get_sprint_not_found_404():
         async with Session() as s:
             repo = SprintRepository(s, ORG)
             with pytest.raises(HTTPException) as ei:
-                await list_sprint_hypotheses(uuid.uuid4(), repo=repo, session=s, org_id=ORG)
+                await list_sprint_hypotheses(uuid.uuid4(), repo=repo, session=s, org_id=ORG, auth=_auth())
         assert ei.value.status_code == 404
         assert ei.value.detail["code"] == "SPRINT_NOT_FOUND"
     finally:

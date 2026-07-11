@@ -71,6 +71,13 @@ async def _seed(session):
     human_om = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=human_user_id, role="member")
     session.add(human_om)
     await session.commit()
+    # E-SECURITY SEC-S8(story 83ea3d6a) CC: delete_sprint가 project-scope를 강제하게 되며
+    # 이 휴먼(role=member)도 project 접근권 grant가 있어야 삭제가 통과한다.
+    session.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=project.id, org_member_id=human_om.id,
+        permission="granted", role="member",
+    ))
+    await session.commit()
 
     agent = Member(id=uuid.uuid4(), org_id=org.id, type="agent", name="agent-x", is_active=True)
     session.add(agent)
