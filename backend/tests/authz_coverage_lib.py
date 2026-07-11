@@ -1,4 +1,4 @@
-"""S20(`5736c1a5`): authz-coverage 스캐너 — enumerate/scan 유틸.
+"""S20(`5736c1a5`) + SEC-S8 CC 후속(`83ea3d6a`): authz-coverage 스캐너 — enumerate/scan 유틸.
 
 설계 근거: Sprintable 문서 `s20-authz-coverage-design`(SSOT). 핵심 발견 두 가지가 이 구현을
 결정한다:
@@ -12,7 +12,15 @@
    보호된다 — 이건 다른 축의 관심사라 스캐너 대상에서 자연히 제외해야 한다(안 그러면 오탐 100+건).
    그래서 대상은 "identity-shaped 파라미터를 가진" 라우트로 좁힌다(member_id/assignee_id/
    recipient_id/sender_id/agent_id/user_id — path/query든 body 모델 필드든).
-"""
+
+SEC-S8 CC 후속(2026-07-11): E-SECURITY SEC-S8(story `83ea3d6a`) R~CC 스윕이 발견한 취약점
+클래스는 identity-shaped가 아니라 **project-shaped**(project_id/story_id/sprint_id/epic_id/
+doc_id/meeting_id/parent_id) 파라미터에 caller의 project 접근권 검증이 없는 것 — org_id는
+검증하나 caller-supplied project-scoped id에 has_project_access류가 없어 same-org
+cross-project IDOR가 발생했다. 같은 스캔 축을 param-pattern/guard-set만 갈아끼워 재사용
+(신규 프리미티브 발명 금지) — 아래 ``enumerate_routes_matching``/``has_guard``가 일반화된
+버전이고, ``enumerate_identity_routes``/``has_declared_guard``는 S20 기존 axis용 thin wrapper로
+그대로 보존(회귀 0)."""
 from __future__ import annotations
 
 import ast
@@ -35,6 +43,22 @@ GUARD_FUNCTIONS: frozenset[str] = frozenset({
     "is_org_owner",
     "_assert_can_manage_human",
     "_assert_self_or_org_admin",
+})
+
+# ── SEC-S8 CC 후속: project-scope axis (identity axis와 별개 파라미터 클래스+가드셋) ──────────
+PROJECT_PARAM_RE = re.compile(
+    r"(?:^|_)(project_id|story_id|sprint_id|epic_id|doc_id|meeting_id|parent_id)$"
+)
+
+PROJECT_GUARD_FUNCTIONS: frozenset[str] = frozenset({
+    "has_project_access",
+    "resolve_member",
+    "accessible_project_ids_in_org",
+    "get_project_role",
+    "_assert_story_link_targets_in_project",
+    "_assert_doc_parent_in_project",
+    "_assert_link_target_in_scope",
+    "_assert_task_project_access",
 })
 
 # Depends(...) 콜러블 — 결과 id가 caller auth에서 서버-파생돼 클라이언트가 스푸핑할 여지가
@@ -68,31 +92,39 @@ class RouteTarget:
         return f"{self.module}:{self.qualname}"
 
 
-def _identity_fields_from_annotation(annotation) -> set[str]:
-    """파라미터 타입이 Pydantic body 모델이면 그 필드명 중 identity-shaped 것도 대상에 포함.
+def _fields_from_annotation(annotation, pattern: re.Pattern) -> set[str]:
+    """파라미터 타입이 Pydantic body 모델이면 그 필드명 중 pattern-shaped 것도 대상에 포함.
 
     (예: events.py create_event의 ``body: CreateEventRequest``의 ``sender_id`` 필드 — 최상위
     함수 시그니처엔 안 보이지만 body 모델 필드로 존재.)
     """
     try:
         if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-            return {name for name in annotation.model_fields if IDENTITY_PARAM_RE.search(name)}
+            return {name for name in annotation.model_fields if pattern.search(name)}
     except TypeError:
         pass
     return set()
 
 
-def _identity_params(endpoint) -> set[str]:
+def _matched_params(endpoint, pattern: re.Pattern) -> set[str]:
     try:
         sig = inspect.signature(endpoint)
     except (ValueError, TypeError):
         return set()
     found: set[str] = set()
     for name, p in sig.parameters.items():
-        if IDENTITY_PARAM_RE.search(name):
+        if pattern.search(name):
             found.add(name)
-        found |= _identity_fields_from_annotation(p.annotation)
+        found |= _fields_from_annotation(p.annotation, pattern)
     return found
+
+
+def _identity_fields_from_annotation(annotation) -> set[str]:
+    return _fields_from_annotation(annotation, IDENTITY_PARAM_RE)
+
+
+def _identity_params(endpoint) -> set[str]:
+    return _matched_params(endpoint, IDENTITY_PARAM_RE)
 
 
 def _called_names(endpoint) -> set[str]:
@@ -136,8 +168,10 @@ def _depends_callable_names(endpoint) -> set[str]:
     return names
 
 
-def enumerate_identity_routes(app, methods: frozenset[str] = COVERED_METHODS) -> list[RouteTarget]:
-    """앱의 전 라우트 중 covered method + identity-shaped param을 가진 것만 열거.
+def enumerate_routes_matching(
+    app, pattern: re.Pattern, methods: frozenset[str] = COVERED_METHODS,
+) -> list[RouteTarget]:
+    """앱의 전 라우트 중 covered method + pattern-shaped param을 가진 것만 열거.
 
     같은 엔드포인트 함수가 여러 route(예: 여러 path alias)에 바인딩된 경우 중복 제거.
     """
@@ -154,24 +188,32 @@ def enumerate_identity_routes(app, methods: frozenset[str] = COVERED_METHODS) ->
         if endpoint is None or endpoint in seen:
             continue
         seen.add(endpoint)
-        identity_params = _identity_params(endpoint)
-        if not identity_params:
+        matched_params = _matched_params(endpoint, pattern)
+        if not matched_params:
             continue
         out.append(RouteTarget(
             path=route.path,
             methods=tuple(sorted(matched)),
             module=endpoint.__module__,
             qualname=endpoint.__qualname__,
-            identity_params=tuple(sorted(identity_params)),
+            identity_params=tuple(sorted(matched_params)),
             endpoint=endpoint,
         ))
     return out
 
 
-def has_declared_guard(target: RouteTarget) -> bool:
+def enumerate_identity_routes(app, methods: frozenset[str] = COVERED_METHODS) -> list[RouteTarget]:
+    return enumerate_routes_matching(app, IDENTITY_PARAM_RE, methods)
+
+
+def has_guard(target: RouteTarget, guard_functions: frozenset[str] = GUARD_FUNCTIONS) -> bool:
     """이름 registry 매치(바디 호출) 또는 self-deriving Depends 매치 — 둘 중 하나면 가드 有."""
-    if _called_names(target.endpoint) & GUARD_FUNCTIONS:
+    if _called_names(target.endpoint) & guard_functions:
         return True
     if _depends_callable_names(target.endpoint) & SELF_DERIVING_DEPENDENCIES:
         return True
     return False
+
+
+def has_declared_guard(target: RouteTarget) -> bool:
+    return has_guard(target, GUARD_FUNCTIONS)
