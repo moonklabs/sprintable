@@ -1,10 +1,11 @@
-"""E-SECURITY SEC-S8(story 83ea3d6a) G: story/task/meeting/visual-artifacts 개별-ID 접근 +
-visual-artifacts list의 project-scope 미검증 봉쇄 실증.
+"""E-SECURITY SEC-S8(story 83ea3d6a) G: story/task/meeting 개별-ID 접근 project-scope 봉쇄 실증.
 
 근본: 개별-ID GET/PATCH 계열이 org-scope만 있고 project 접근권(has_project_access) 미검증이라
 같은 org 내 다른 project의(자신은 접근권 없는) member가 story/task/meeting id만 알면 조회/수정
-가능했다. visual-artifacts list는 project_id 필터 자체가 없어 파라미터 없는 호출이 org 전체를
-반환했다(미르코 라이브 실측 N)."""
+가능했다.
+
+(prod 선택승격 스코프 조정: G는 원래 visual-artifacts list의 project-scope 미검증도 포함했으나
+E-CANVAS가 이번 승격 범위 밖이라 그 부분/테스트는 제외 — develop 원본은 무영향.)"""
 from __future__ import annotations
 
 import os
@@ -47,14 +48,13 @@ async def _session_factory():
 
 async def _seed(session):
     """org(project_a, project_b) + story_a/task_a(project_a) + meeting_a(project_a) +
-    visual_artifact_a(project_a) + human_a(project_a에만 명시 grant, project_b 접근권 없음)."""
+    human_a(project_a에만 명시 grant, project_b 접근권 없음)."""
     from sqlalchemy import text
     from app.models.organization import Organization
     from app.models.pm import Story, Task
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
     from app.models.user import User
-    from app.models.visual_artifact import VisualArtifact
 
     org = Organization(id=uuid.uuid4(), name="Org", slug=f"org-{uuid.uuid4().hex[:8]}")
     session.add(org)
@@ -83,17 +83,6 @@ async def _seed(session):
     )
     await session.commit()
 
-    artifact_a = VisualArtifact(
-        id=uuid.uuid4(), org_id=org.id, project_id=project_a.id, title="Artifact A",
-        source="created", latest_version_number=1, created_by=uuid.uuid4(),
-    )
-    artifact_b = VisualArtifact(
-        id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="Artifact B",
-        source="created", latest_version_number=1, created_by=uuid.uuid4(),
-    )
-    session.add_all([artifact_a, artifact_b])
-    await session.commit()
-
     human_user_id = uuid.uuid4()
     human_user = User(id=human_user_id, email=f"human-{human_user_id.hex[:8]}@test.com", hashed_password="x")
     session.add(human_user)
@@ -110,7 +99,6 @@ async def _seed(session):
     return {
         "org_id": org.id, "project_a_id": project_a.id, "project_b_id": project_b.id,
         "story_a_id": story_a.id, "task_a_id": task_a.id, "meeting_a_id": meeting_a_id,
-        "artifact_a_id": artifact_a.id, "artifact_b_id": artifact_b.id,
         "human_user_id": human_user_id,
     }
 
@@ -229,33 +217,6 @@ async def test_no_grant_human_cannot_get_other_project_meeting():
                 f"/api/v2/meetings/{uuid.uuid4()}?project_id={seeded['project_b_id']}"
             )
             assert resp.status_code == 403, resp.text
-        finally:
-            await client.aclose()
-    finally:
-        app.dependency_overrides.clear()
-        await engine.dispose()
-
-
-@pytest.mark.anyio
-async def test_visual_artifacts_list_scoped_to_own_project_only():
-    """N 재현: visual-artifacts list가 project_id 필터 없이 org 전체를 반환하던 갭 —
-    이제 caller의 JWT project_id로 스코프돼 다른 project(project_b)의 artifact가 안 섞인다."""
-    from app.main import app
-
-    engine, Session = await _session_factory()
-    try:
-        async with Session() as s:
-            seeded = await _seed(s)
-
-        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_id"], seeded["project_a_id"])
-        client = _client_for(app)
-        try:
-            resp = await client.get("/api/v2/visual-artifacts")
-            assert resp.status_code == 200, resp.text
-            items = resp.json()["data"]
-            ids = {item["id"] for item in items}
-            assert str(seeded["artifact_a_id"]) in ids
-            assert str(seeded["artifact_b_id"]) not in ids, "다른 project(B) artifact가 섞이면 안 됨"
         finally:
             await client.aclose()
     finally:
