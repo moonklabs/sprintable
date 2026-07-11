@@ -3402,6 +3402,7 @@
     "trustSealClaimedBy": "Agent claim",
     "trustSealVerifiedBy": "{name} verified",
     "trustSealAwaitingVerification": "Awaiting verification",
+    "trustSealAwaitingVerificationLong": "Awaiting human verification",
     "trustSealSignedOff": "Signed off",
     "evidenceShow": "Show evidence",
     "evidenceHide": "Hide evidence",

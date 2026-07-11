@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { LabelChip } from '@/components/ui/label-chip';
 import { TrustSeal } from '@/components/verify/trust-seal';
+import { deriveTrustStage } from '@/services/verify';
+import { formatRelativeTime } from '@/lib/storage/format';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 
 // E-UI-DAEGBYEON P0 — Proof Capsule 확산(story `bf9037cb`). 상태→신뢰 파이프라인(후속 P0)이
@@ -86,13 +88,21 @@ interface StoryCardProps {
   labels?: { id: string; name: string; color: string | null }[];
   gates?: { id: string; gate_type: string; status: string }[];
   lineStatus?: LineStatusSummary;
+  /** E-VERIFY P0-04 — story.human_verified_by(UUID)를 호출부가 미리 resolve해 넘긴 것(assignee/
+   * assignees와 동일 패턴). 결재자가 현재 담당자가 아닐 수 있어(assigneeList와 별개 조회). */
+  verifiedBy?: KanbanMember;
 }
 
-export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus, verifiedBy }: StoryCardProps) {
   const t = useTranslations('board');
   // E-BOARD S6: 복수 assignee. assignees 우선, 없으면 단일 assignee 폴백. agent 한 명이라도 있으면 agent 취급(glow).
   const assigneeList = (assignees && assignees.length > 0) ? assignees : (assignee ? [assignee] : []);
   const hasAgent = assigneeList.some((m) => m.type === 'agent');
+  // E-VERIFY P0-04(claimed-vs-verified-spec-handoff §3) — has_evidence 뭉갬을 2신호로 분리.
+  // verified는 human_verified_by 실 resolve 성공 시만(없으면 "누가"를 지어내지 않고 무표시로
+  // 후퇴 — claimed는 특정 신원 없이도 범용 봇 아이콘으로 정직 렌더 가능해 후퇴 불필요).
+  const trustStage = deriveTrustStage(story);
+  const trustAgent = assigneeList.find((m) => m.type === 'agent');
   const tCage = useTranslations('cage');
   // S11 ①: line badge — 신규 4상태(LineStatusSummary) + 기존 pending gate merge, boy-scout 1배지.
   const hasPendingGate = gates.some((g) => g.status === 'pending');
@@ -319,9 +329,20 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                 )}
               </div>
               <div className="flex items-center gap-2">
-                {/* E-VERIFY V0-S3 Lv0 — 증거 있는 done 카드에만(positive 단방향). 자리 예약 없이 조건부 렌더
-                    (증거 없으면 완전 무표시 — 레이아웃 시프트 자체가 없음, §7 상태 매트릭스). */}
-                {story.status === 'done' && story.has_evidence ? <TrustSeal /> : null}
+                {/* E-VERIFY P0-04(claimed-vs-verified-spec-handoff §3) — 증거 있는 done 카드에만
+                    (positive 단방향). 자리 예약 없이 조건부 렌더(무증거=완전 무표시, §7 상태
+                    매트릭스). human_verified→verified(green·who/when 실명)·self_reported만→
+                    claimed(amber) — 과거 has_evidence 기반 green 단일표시 중 인간 미검증 건은
+                    여기서 amber로 "정정"된다(회귀 아님, 거짓 신뢰 신호 제거). */}
+                {story.status === 'done' && trustStage === 'verified' && verifiedBy ? (
+                  <TrustSeal
+                    variant="verified"
+                    humanName={verifiedBy.name}
+                    when={story.human_verified_at ? formatRelativeTime(story.human_verified_at) : ''}
+                  />
+                ) : story.status === 'done' && trustStage === 'claimed' ? (
+                  <TrustSeal variant="claimed" agentInitial={trustAgent ? getInitials(trustAgent.name) : undefined} />
+                ) : null}
                 {story.story_points != null ? (
                   <span className="text-[11px] tabular-nums text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
                 ) : null}

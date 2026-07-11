@@ -774,12 +774,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 })}
               </DropdownMenuContent>
             </DropdownMenu>
-            {/* E-VERIFY V0-S3 Lv1/Lv2 — 완료 badge의 연장으로 읽히도록 바로 아래. 증거 0이면
-                EvidenceSection 자체가 null 렌더(행 미노출, §7 상태 매트릭스). */}
+            {/* E-VERIFY V0-S3 Lv1/Lv2 + P0-04 Claimed-vs-Verified — 완료 badge의 연장으로 읽히도록
+                바로 아래. 증거 0이면 EvidenceSection 자체가 null 렌더(행 미노출, §7 상태 매트릭스). */}
             <EvidenceSection
               workItemId={story.id}
               workItemType="story"
-              hasEvidence={story.has_evidence}
+              selfReported={story.self_reported}
+              humanVerified={story.human_verified}
+              humanVerifiedBy={story.human_verified_by}
+              humanVerifiedAt={story.human_verified_at}
               memberMap={memberMap}
             />
           </div>

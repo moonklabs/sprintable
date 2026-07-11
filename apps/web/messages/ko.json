@@ -3402,6 +3402,7 @@
     "trustSealClaimedBy": "에이전트 주장",
     "trustSealVerifiedBy": "{name} 검증",
     "trustSealAwaitingVerification": "검증 대기",
+    "trustSealAwaitingVerificationLong": "인간 검증 대기",
     "trustSealSignedOff": "책임 서명",
     "evidenceShow": "근거 보기",
     "evidenceHide": "근거 접기",
