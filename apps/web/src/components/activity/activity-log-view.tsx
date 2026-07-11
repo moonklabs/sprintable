@@ -7,10 +7,12 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
+import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
+import { deriveAuditProofState } from './derive-audit-proof-state';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface ActivityLogItem {
+export interface ActivityLogItem {
   id: string;
   project_id: string;
   actor_id: string | null;
@@ -57,21 +59,7 @@ function getDefaultDates() {
 // ─── Row skeleton ─────────────────────────────────────────────────────────────
 
 function RowSkeleton() {
-  return (
-    <div className="grid h-12 animate-pulse grid-cols-[1fr_1fr_1fr_1fr_2fr] gap-4 rounded-md bg-muted px-4" />
-  );
-}
-
-// ─── Context cell ─────────────────────────────────────────────────────────────
-
-function ContextCell({ context }: { context: Record<string, unknown> | null }) {
-  if (!context || Object.keys(context).length === 0) return <span className="text-muted-foreground">—</span>;
-  const entries = Object.entries(context).slice(0, 3);
-  return (
-    <span className="truncate text-xs text-muted-foreground">
-      {entries.map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}
-    </span>
-  );
+  return <div className="h-9 animate-pulse rounded-[6px] bg-muted" />;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -246,8 +234,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
               <EmptyState title={t('forbiddenTitle')} description={t('forbiddenDescription')} />
             </div>
           ) : loading ? (
-            <div className="space-y-2">
-              <TableHeader t={t} />
+            <div className="space-y-1.5">
               {Array.from({ length: 8 }).map((_, i) => <RowSkeleton key={i} />)}
             </div>
           ) : items.length === 0 ? (
@@ -262,8 +249,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
               }
             />
           ) : (
-            <div className="space-y-1">
-              <TableHeader t={t} />
+            <div className="space-y-1.5">
               {items.map((item) => (
                 <ActivityRow key={item.id} item={item} />
               ))}
@@ -284,16 +270,15 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function TableHeader({ t }: { t: ReturnType<typeof useTranslations> }) {
-  return (
-    <div className="grid grid-cols-[140px_1fr_1fr_1fr_2fr] gap-4 border-b border-border/60 px-4 pb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-      <span>{t('colTime')}</span>
-      <span>{t('colActor')}</span>
-      <span>{t('colAction')}</span>
-      <span>{t('colEntity')}</span>
-      <span>{t('colContext')}</span>
-    </div>
-  );
+export function auditClaim(item: ActivityLogItem): string {
+  if (item.entity_title) return item.entity_type ? `${item.entity_type} · ${item.entity_title}` : item.entity_title;
+  return item.action;
+}
+
+export function auditContextTooltip(item: ActivityLogItem): string | undefined {
+  const entries = item.context ? Object.entries(item.context) : [];
+  const lines = [`action: ${item.action}`, ...entries.map(([k, v]) => `${k}: ${String(v)}`)];
+  return lines.join('\n');
 }
 
 function ActivityRow({ item }: { item: ActivityLogItem }) {
@@ -303,19 +288,15 @@ function ActivityRow({ item }: { item: ActivityLogItem }) {
   });
 
   return (
-    <div className="grid h-12 grid-cols-[140px_1fr_1fr_1fr_2fr] items-center gap-4 rounded-md px-4 text-sm transition hover:bg-muted/50">
-      <span className="truncate text-xs text-muted-foreground">{time}</span>
-      <span className="truncate font-medium">{item.actor_name ?? '—'}</span>
-      <span className="truncate font-mono text-xs">{item.action}</span>
-      <span className="truncate text-xs">
-        {item.entity_type ? (
-          <span className="inline-flex items-center gap-1">
-            <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{item.entity_type}</span>
-            {item.entity_title && <span className="truncate text-muted-foreground">{item.entity_title}</span>}
-          </span>
-        ) : '—'}
-      </span>
-      <ContextCell context={item.context} />
+    <div title={auditContextTooltip(item)}>
+      <ProofCapsule
+        density="audit"
+        proofState={deriveAuditProofState(item.action)}
+        stateLabel={item.action}
+        claim={auditClaim(item)}
+        now={time}
+        human={item.actor_name ? { name: item.actor_name, role: item.actor_type ?? 'human' } : undefined}
+      />
     </div>
   );
 }
