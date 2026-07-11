@@ -32,7 +32,7 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("tasks", ("task",)),
     ("stories", ("story", "stories", "backlog", "claim", "checkin")),
     ("admin", ("give_reward", "emit_event", "trigger_ai", "activate_sprint",
-               "close_sprint", "delete_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
+               "close_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
 ]
 
 _CORE = "core"  # ping/notifications-check 등 기본 — 항상 허용
@@ -248,7 +248,7 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_delete_meeting",
     # E-SECURITY SEC-S1(확장): sprintable_delete_story/task/epic/doc 의도적 제거(에이전트
     # hard-delete 차단 — 까심 적대적 QA가 delete_story만으로는 반쪽임을 발견, story와 동형 확대).
-    "sprintable_delete_sprint",
+    # E-SECURITY SEC-S8 확장: sprintable_delete_sprint도 동일 사유로 제거.
     "sprintable_delete_webhook_config", "sprintable_emit_event", "sprintable_export_retro",
     "sprintable_get_agent_stats", "sprintable_get_blocked_stories", "sprintable_get_doc",
     "sprintable_get_epic_progress", "sprintable_get_leaderboard_v2", "sprintable_get_meeting",

@@ -32,6 +32,22 @@ async def _attach_has_evidence(session: AsyncSession, tasks: list[Task]) -> None
             t.has_evidence = True
 
 
+async def _assert_task_project_access(
+    session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, story_id: uuid.UUID
+) -> None:
+    """E-SECURITY SEC-S8(story 83ea3d6a) G: Task는 project_id가 없어 story_id→project_id로
+    해소(org-scope만 있고 project 접근권 미검증이던 갭 — 같은 org 다른 project 멤버가 개별
+    task id만 알면 조회/수정 가능했다). upload_story_attachment와 동형으로 has_project_access
+    재사용(휴먼 team_member·에이전트 project_access grant 양쪽 처리)."""
+    from app.services.project_auth import has_project_access
+
+    project_id = (
+        await session.execute(select(Story.project_id).where(Story.id == story_id))
+    ).scalar_one_or_none()
+    if project_id is None or not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
+
 @router.get("", response_model=list[TaskResponse])
 async def list_tasks(
     story_id: uuid.UUID | None = Query(default=None),
@@ -80,10 +96,13 @@ async def create_task(
 async def get_task(
     id: uuid.UUID,
     repo: TaskRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> TaskResponse:
     task = await repo.get(id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    await _assert_task_project_access(repo.session, auth, org_id, task.story_id)
     await _attach_has_evidence(repo.session, [task])
     return TaskResponse.model_validate(task)
 
@@ -94,8 +113,13 @@ async def update_task(
     body: TaskUpdate,
     repo: TaskRepository = Depends(_get_repo),
     db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> TaskResponse:
     task_before = await repo.get(id)
+    if task_before is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    await _assert_task_project_access(db, auth, org_id, task_before.story_id)
     old_status = task_before.status if task_before else None
     data = body.model_dump(exclude_unset=True)
     task = await repo.update(id, **data)
@@ -143,6 +167,7 @@ async def delete_task(
     task = await repo.get(id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    await _assert_task_project_access(session, auth, org_id, task.story_id)
     session.add(DeletionAuditLog(
         id=uuid.uuid4(), org_id=org_id, actor_id=resolved.id,
         entity_type="task", entity_id=id, entity_title=task.title,

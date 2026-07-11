@@ -138,10 +138,12 @@ async def test_update_story_assignee_auto_creates_participation():
     """update_story assignee 변경 → _upsert_assignee_participation 호출 단언."""
     mock_session = AsyncMock()
     # E-BOARD S5: update_story가 _attach_assignee_ids로 story_assignees 조회 → 빈 결과 모킹
+    # E-SECURITY SEC-S8(G): has_project_access(raw SQL) 도 scalar_one_or_none을 쓰므로 truthy로
+    # 설정해 접근권 통과시킴(StoryRepository.get은 아래서 별도 patch).
     _empty = MagicMock()
     _empty.all.return_value = []
     _empty.scalars.return_value.all.return_value = []
-    _empty.scalar_one_or_none.return_value = None
+    _empty.scalar_one_or_none.return_value = 1
     _empty.scalar.return_value = None
     mock_session.execute.return_value = _empty
     story = _mock_story_obj(assignee_id=MEMBER_ID)

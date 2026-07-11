@@ -1,7 +1,9 @@
-"""S3-6: 시스템 콜 계약 검증 — 94개 도구 등록 + 스키마 무결성 (Phase 3 완료).
+"""S3-6: 시스템 콜 계약 검증 — 93개 도구 등록 + 스키마 무결성 (Phase 3 완료).
 
 E-SECURITY SEC-S1(확장): delete_story/task/epic/doc 4종 제거(에이전트 hard-delete 차단) —
-98개 → story만 제거해 97 → task/epic/doc 3종 추가 제거해 94."""
+98개 → story만 제거해 97 → task/epic/doc 3종 추가 제거해 94. E-SECURITY SEC-S8(확장):
+delete_sprint 제거 — 94 → 93. (prod 선택승격: E-CANVAS create_artifact/get_artifact 미포함이라
+develop의 95와 다름 — 이 브랜치 스코프 기준 정확한 카운트.)"""
 from __future__ import annotations
 
 import os
@@ -29,10 +31,10 @@ EXPECTED_TOOLS = {
     # hypotheses (6) — E1-S5
     "sprintable_list_hypotheses", "sprintable_get_hypothesis", "sprintable_create_hypothesis",
     "sprintable_update_hypothesis", "sprintable_link_hypothesis", "sprintable_confirm_hypothesis",
-    # sprints (8)
+    # sprints (7) — E-SECURITY SEC-S8(확장): delete_sprint 의도적 제거(에이전트 hard-delete 차단)
     "sprintable_list_sprints", "sprintable_sprint_summary", "sprintable_activate_sprint",
     "sprintable_close_sprint", "sprintable_get_velocity", "sprintable_create_sprint",
-    "sprintable_update_sprint", "sprintable_delete_sprint",
+    "sprintable_update_sprint",
     # docs (5) — E-SECURITY SEC-S1(확장): delete_doc 의도적 제거(에이전트 삭제 차단)
     "sprintable_list_docs", "sprintable_get_doc", "sprintable_search_docs",
     "sprintable_create_doc", "sprintable_update_doc",
@@ -88,7 +90,7 @@ EXPECTED_TOOLS = {
 
 
 def test_total_tool_count():
-    assert len(_TOOLS) == 94
+    assert len(_TOOLS) == 93
 
 
 def test_all_expected_tools_registered():

@@ -12,19 +12,32 @@ from app.schemas.meeting import MeetingCreate, MeetingResponse, MeetingUpdate
 router = APIRouter(prefix="/api/v2/meetings", tags=["meetings"])
 
 
-def _get_repo(
+async def _get_repo(
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    _org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
     project_id_q: uuid.UUID | None = Query(default=None, alias="project_id"),
 ) -> MeetingRepository:
+    """E-SECURITY SEC-S8(story 83ea3d6a) G: `get_verified_org_id`가 계산만 되고(dead
+    computation) `MeetingRepository`는 project_id만으로 스코핑돼(org_id 개념 자체가 없는
+    repo) org/project 접근권 미검증인 채 임의 project_id(query param 또는 JWT app_metadata)를
+    그대로 받아들였다 — delete_meeting은 F에서 이미 봉쇄했으나 list/get/update/put은
+    미봉쇄였음(같은 `_get_repo` 공유라 여기 한 곳에서 닫으면 4개 핸들러 전부 커버).
+    has_project_access(org_id=)가 org-scope + project-scope(team_member/grant/owner-admin
+    floor)를 한 번에 강제한다."""
     pid = (str(project_id_q) if project_id_q else None) or auth.claims.get("app_metadata", {}).get("project_id")
     if not pid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="project_id required (query param or JWT app_metadata)",
         )
-    return MeetingRepository(session, uuid.UUID(str(pid)))
+    project_id = uuid.UUID(str(pid))
+
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
+    return MeetingRepository(session, project_id)
 
 
 @router.get("", response_model=list[MeetingResponse])

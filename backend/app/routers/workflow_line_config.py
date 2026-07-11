@@ -96,8 +96,22 @@ async def _load_version(session: AsyncSession, org_id: uuid.UUID, version_id: uu
 
 
 async def _require_draft_author(session, actor, org_id, project_id) -> None:
-    """draft 관리 권한: project 스코프면 project admin/owner 또는 org owner/admin, org 스코프면 org owner/admin."""
+    """draft 관리 권한: project 스코프면 project admin/owner 또는 org owner/admin, org 스코프면 org owner/admin.
+
+    E-SECURITY SEC-S8(story 83ea3d6a) M: `is_org_owner_or_admin(session, actor, org_id)` fallback이
+    project_id의 실제 소속 org를 검증하지 않아, caller org의 owner/admin이 **타 org 소속 project_id**를
+    넘기면 `get_project_role`이 None을 반환해도 OR-fallback으로 통과했다(caller org 권한을 임의
+    project에 적용). project_id가 caller org 소속인지 assert_target_in_caller_org(SEC-S6)로 먼저
+    검증 — 다른 org project면 404로 존재 자체를 숨긴다(권한 실패로 project 존재를 노출하지 않음)."""
     if project_id is not None:
+        from app.models.project import Project
+        from app.services.project_auth import assert_target_in_caller_org
+
+        target_org_id = (
+            await session.execute(select(Project.org_id).where(Project.id == project_id))
+        ).scalar_one_or_none()
+        assert_target_in_caller_org(org_id, target_org_id, not_found_detail="Project not found")
+
         role = await get_project_role(session, actor, project_id)
         if role in ("owner", "admin") or await is_org_owner_or_admin(session, actor, org_id):
             return
