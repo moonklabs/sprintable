@@ -27,6 +27,8 @@ interface CommentThreadCardProps {
  * + artifact 앵커 필드만 additive. resolved 스레드는 가라앉음(opacity↓, §3 상태 매트릭스).
  * 수신자별 읽음/응답 추적(PropagationStrip)은 실 BE에 데이터가 없고 §1 감시 리트머스에도
  * 걸려 뺐다(오르테가/PO 승인, 2026-07-10) — resolved/resolved_by 2단계 실 신호만 노출.
+ * 결과 연결(resultVersion, C3-S7 source_comment_id closed-loop)은 §1 "주어=결과" —
+ * 누가/언제 응답했는지 아닌 "이 피드백이 vN을 낳았다"만 표시(오르테가/유나 승인, 2026-07-11).
  */
 export function CommentThreadCard({
   thread, memberMap = {}, active, onSelectPin, onResolve, onReply, className,
@@ -67,6 +69,10 @@ export function CommentThreadCard({
             <p className="mt-0.5 text-xs leading-relaxed text-foreground">{c.body}</p>
           </div>
         ))}
+
+        {thread.resultVersion != null ? (
+          <p className="text-[10px] font-semibold text-info">{t('resultLinkNote', { version: thread.resultVersion })}</p>
+        ) : null}
 
         {resolved && thread.resolved_by ? (
           <p className="text-[10px] text-muted-foreground/80">{t('resolvedByNote', { name: memberMap[thread.resolved_by]?.name ?? '—' })}</p>

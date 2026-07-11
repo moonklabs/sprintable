@@ -4,6 +4,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ArtifactViewer } from './artifact-viewer';
 import { MOCK_ARTIFACT, MOCK_VERSIONS, MOCK_MEMBERS } from '@/services/canvas';
+import { MOCK_THREADS } from '@/services/canvas-comments';
 
 function wrap(node: React.ReactNode) {
   return (
@@ -37,5 +38,25 @@ describe('ArtifactViewer (SSR snapshot)', () => {
       wrap(<ArtifactViewer artifact={draftArtifact} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
     );
     expect(markup).not.toContain('정본 v');
+  });
+
+  it('renders every thread as a comment card when threads is passed (C2 — 지금까지 핀/카운트 배지만 있고 실제 카드 목록이 없던 갭)', () => {
+    const markup = renderToStaticMarkup(
+      wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={MOCK_THREADS} />),
+    );
+    for (const thread of MOCK_THREADS) {
+      expect(markup).toContain(thread.comments[0]!.body);
+    }
+  });
+
+  it('renders no comment panel when threads is omitted or empty', () => {
+    const markupNoThreads = renderToStaticMarkup(
+      wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+    );
+    const markupEmptyThreads = renderToStaticMarkup(
+      wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} />),
+    );
+    expect(markupNoThreads).not.toContain(MOCK_THREADS[0]!.comments[0]!.body);
+    expect(markupEmptyThreads).not.toContain(MOCK_THREADS[0]!.comments[0]!.body);
   });
 });

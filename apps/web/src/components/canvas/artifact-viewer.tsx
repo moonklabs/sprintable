@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { ArtifactStage } from './artifact-stage';
 import { ArtifactVersionRail } from './artifact-version-rail';
 import { AnchorPin } from './anchor-pin';
+import { CommentThreadCard } from './comment-thread-card';
 import { DescriptionPane } from './description-pane';
 import { ExportDialog } from './export-dialog';
 import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canvas';
@@ -19,7 +20,8 @@ interface ArtifactViewerProps {
   /** mock 목적 — threads가 없을 때만 쓰이는 폴백 헤더 카운트(C2 착지 전). */
   commentCount?: number;
   /** C2 — 좌표 앵커 스레드는 스테이지에 핀 오버레이. element 앵커는 후속(실 artifact tree
-   * 좌표 유도 필요 — 지금은 좌표 앵커만 오버레이). */
+   * 좌표 유도 필요 — 지금은 좌표 앵커만 오버레이). 헤더 아래 스레드 목록 패널도 이 prop으로
+   * 렌더(있으면 element/coordinate 앵커 모두 카드로 나열 — 좌표 앵커만 핀 오버레이도 겸함). */
   threads?: CommentThread[];
   /** description pane 소스 — C2-S6 실 컬럼(node.description)을 element 앵커 코멘트가 가리키는
    * 노드에서 직접 조회(mock 시절 별도 DescriptionMap은 폐기 — 실 데이터 그대로 사용). */
@@ -28,6 +30,9 @@ interface ArtifactViewerProps {
    * 불가). 정본 버전을 보는 중이면 "새 버전으로 편집" 라벨(정본 계약 보호 — 실제 분기 로직은
    * BE 연동 시, 지금은 라벨만 다르고 동일 콜백). */
   onEnterEdit?: () => void;
+  /** C2-S6 실 뮤테이션 — 생략하면 카드는 읽기전용(reply 입력/resolve 버튼이 no-op). */
+  onResolveThread?: (threadId: string) => void;
+  onReplyThread?: (threadId: string, body: string) => void;
   className?: string;
 }
 
@@ -36,7 +41,9 @@ interface ArtifactViewerProps {
  * BE(`visual_artifact`/`artifact_version`, 디디 C1-S3) 미착지 — 이 컴포넌트는 props로 데이터를
  * 받는 순수 뷰라 실 API 착지 시 fetch 래퍼만 새로 감싸면 됨(컴포넌트 자체는 안 바뀜).
  */
-export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCount = 0, threads, nodes = [], onEnterEdit, className }: ArtifactViewerProps) {
+export function ArtifactViewer({
+  artifact, versions, memberMap = {}, commentCount = 0, threads, nodes = [], onEnterEdit, onResolveThread, onReplyThread, className,
+}: ArtifactViewerProps) {
   const t = useTranslations('canvas');
   const [selectedVersion, setSelectedVersion] = useState(artifact.current_version);
   const isViewingAnchor = selectedVersion === artifact.anchor_version;
@@ -135,6 +142,22 @@ export function ArtifactViewer({ artifact, versions, memberMap = {}, commentCoun
             ) : undefined}
           />
         </div>
+
+        {threads && threads.length > 0 ? (
+          <div className="space-y-2 border-t border-border bg-muted/10 p-3">
+            {threads.map((th) => (
+              <CommentThreadCard
+                key={th.id}
+                thread={th}
+                memberMap={memberMap}
+                active={th.id === selectedThreadId}
+                onSelectPin={(id) => setSelectedThreadId((cur) => (cur === id ? null : id))}
+                onResolve={onResolveThread}
+                onReply={onReplyThread}
+              />
+            ))}
+          </div>
+        ) : null}
       </div>
       <ExportDialog
         open={exportOpen}

@@ -3416,6 +3416,7 @@
     "resolveAction": "Resolve",
     "replyPlaceholder": "Reply…",
     "resolvedByNote": "Resolved by {name}",
+    "resultLinkNote": "↳ Became v{version} — this comment was the input",
     "editModeLabel": "Edit mode",
     "paletteLabel": "Components",
     "propertyPanelEmpty": "Select an element to see its properties here",

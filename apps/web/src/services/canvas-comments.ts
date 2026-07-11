@@ -42,6 +42,9 @@ export interface CommentThread {
   comments: ArtifactComment[];
   resolved_by?: string | null;
   resolved_at?: string | null;
+  /** C3-S7 결과 연결(closed-loop) — 이 코멘트에 응답해 만들어진 버전 번호(있으면).
+   * 주어=결과("이 피드백이 vN을 낳았다") — 누가/언제 응답했는지는 노출 안 함(§1). */
+  resultVersion?: number | null;
 }
 
 // ─── mock 데이터 (컴포넌트 개발용 — 실 라우트에 노출 금지, mock-preview-slop 교훈) ──────
@@ -111,12 +114,36 @@ function labelForNode(node: NodeLabelLookup | undefined, fallback: string): stri
   return typeof text === 'string' && text.trim() ? text : node.type;
 }
 
+interface VersionSourceLookup {
+  version_number: number;
+  source_comment_id: string | null;
+}
+
+/**
+ * C3-S7 결과 연결(closed-loop) — 버전 요약 목록만으로 "이 코멘트가 어느 버전을 낳았나"
+ * 유도(신규 fetch 0, `ArtifactVersionSummary.source_comment_id`가 이미 읽기에 노출돼있음).
+ * 같은 코멘트를 응답한 버전이 여럿이면 가장 최신(version_number 최대)만 표시.
+ */
+export function deriveResultLinks(versions: VersionSourceLookup[]): Map<string, number> {
+  const result = new Map<string, number>();
+  for (const v of versions) {
+    if (!v.source_comment_id) continue;
+    const existing = result.get(v.source_comment_id);
+    if (existing === undefined || v.version_number > existing) result.set(v.source_comment_id, v.version_number);
+  }
+  return result;
+}
+
 /**
  * flat 코멘트 목록(parent_id 얕은 1단 스레드 — 답글은 항상 루트에 붙는 UI 계약) →
  * pin 번호가 매겨진 스레드 목록. 루트(parent_id=null)만 pin_number를 받고 생성시각 순.
+ * `versions`를 넘기면 결과 연결(resultVersion)도 같이 유도(생략 시 undefined).
  */
-export function adaptComments(comments: BeArtifactComment[], nodes: NodeLabelLookup[] = []): CommentThread[] {
+export function adaptComments(
+  comments: BeArtifactComment[], nodes: NodeLabelLookup[] = [], versions: VersionSourceLookup[] = [],
+): CommentThread[] {
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const resultLinks = deriveResultLinks(versions);
   const roots = comments
     .filter((c) => c.parent_id === null)
     .sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -146,6 +173,7 @@ export function adaptComments(comments: BeArtifactComment[], nodes: NodeLabelLoo
       comments: allComments,
       resolved_by: root.resolved_by,
       resolved_at: root.resolved_at,
+      resultVersion: resultLinks.get(root.id) ?? null,
     };
   });
 }
