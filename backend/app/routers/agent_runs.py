@@ -22,6 +22,7 @@ def _get_repo(session: AsyncSession = Depends(get_db)) -> AgentRunRepository:
 async def list_agent_runs(
     project_id: uuid.UUID = Query(...),
     agent_id: uuid.UUID | None = Query(default=None),
+    story_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     cursor: str | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
@@ -34,7 +35,12 @@ async def list_agent_runs(
 
     E-SECURITY SEC-S8(story 83ea3d6a) Y(까심 전수스윕): org-scope는 이미 닫혔으나 caller의
     실제 project 접근권(has_project_access)은 검증하지 않아, 같은 org 다른 project 멤버가
-    project_id만 알면 그 project의 agent run을 열람할 수 있었다(G-class)."""
+    project_id만 알면 그 project의 agent run을 열람할 수 있었다(G-class).
+
+    story_id(story 7a7f6c36·Workcell 실 run 배선): 위 project 가드가 통과한 뒤, 이미
+    project-bound된 run 집합을 story 단위로 좁히는 옵션 narrowing 필터. AND 축소라 결과를
+    확장할 수 없고(A AND B ⊆ A) 신규 인가 축이 아니다 — 타 project story_id를 넣어도 그
+    project agent의 run은 이 집합 밖이라 0건."""
     from app.services.project_auth import has_project_access
 
     proj_r = await session.execute(select(Project.id).where(Project.id == project_id, Project.org_id == org_id))
@@ -42,7 +48,9 @@ async def list_agent_runs(
         raise HTTPException(status_code=404, detail="Project not found")
     if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
         raise HTTPException(status_code=403, detail="No access to this project")
-    runs = await repo.list(project_id=project_id, agent_id=agent_id, limit=limit, cursor=cursor)
+    runs = await repo.list(
+        project_id=project_id, agent_id=agent_id, story_id=story_id, limit=limit, cursor=cursor
+    )
     return [AgentRunResponse.model_validate(r) for r in runs]
 
 

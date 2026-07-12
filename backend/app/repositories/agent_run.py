@@ -17,6 +17,7 @@ class AgentRunRepository:
         self,
         project_id: uuid.UUID,
         agent_id: uuid.UUID | None = None,
+        story_id: uuid.UUID | None = None,
         limit: int = 50,
         cursor: str | None = None,
     ) -> list[AgentRun]:
@@ -28,6 +29,11 @@ class AgentRunRepository:
         q = select(AgentRun).where(AgentRun.agent_id.in_(agent_ids))
         if agent_id is not None:
             q = q.where(AgentRun.agent_id == agent_id)
+        # story_id: 이미 project 소속 agent들의 run으로 bound된 집합을 story 단위로 좁히는
+        # narrowing 필터(Workcell 실 run 배선용). 결과를 확장하지 않으므로 인가 축을 늘리지
+        # 않는다 — 타 project의 story_id를 넣어도 그 project agent의 run은 agent_ids에 없어 0건.
+        if story_id is not None:
+            q = q.where(AgentRun.story_id == story_id)
         if cursor:
             q = q.where(AgentRun.created_at < cursor)
         q = q.order_by(AgentRun.created_at.desc()).limit(min(limit, 200))
