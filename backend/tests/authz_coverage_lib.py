@@ -61,6 +61,7 @@ PROJECT_GUARD_FUNCTIONS: frozenset[str] = frozenset({
     "_assert_task_project_access",
     "_assert_story_project_access",
     "_assert_hypothesis_project_access",
+    "_assert_item_project_access",
     "_require_doc_project_access",
     "_require_retro_project_access",
 })
