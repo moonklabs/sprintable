@@ -38,8 +38,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 from authz_coverage_lib import (  # noqa: E402
     PROJECT_GUARD_FUNCTIONS,
     PROJECT_PARAM_RE,
+    enumerate_id_mutation_routes,
     enumerate_routes_matching,
     has_guard,
+    has_id_mutation_guard,
 )
 
 # ── false positive: 실제로는 안전 — 영구 allowlist(이유 주석 필수) ────────────────────
@@ -191,3 +193,178 @@ def test_known_debt_allowlist_shrinks_are_welcome_no_assertion():
     """placeholder — known-debt 항목이 fix되면 baseline dict에서 제거하는 게 상환 진행의
     증거(별도 assertion 없음, 다음 fix PR이 이 dict를 줄이면 그걸로 충분)."""
     assert True
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PATH_ID 뮤테이션 축 (story 5285888c) — `DELETE|PATCH|PUT /resource/{id}` 처럼 리소스 자기
+# PK(path `id`/`*_id`)로 잡는 뮤테이션이 대상 리소스의 project 접근권을 검증하는가.
+# PROJECT_PARAM_RE(project_id/story_id...)에 param 이름 `id`가 안 걸려 원천 비가시였던 계열 사각.
+# has_id_mutation_guard: project 가드(has_project_access류·resolve_member(project_id=)) OR
+# org/ownership/self 가드(GUARD_FUNCTIONS) OR resource-특정 Depends(_get_repo류) 바디 가드.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── false positive: 실제로는 안전 — org/user-level(project 축 없음)·self-derived·
+#    JWT-project 스코프·인라인/1-hop 가드(v1 정적스캔 미인식). 영구 allowlist(이유 필수). ──
+_ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
+    # JWT project_id로 리소스 fetch 스코프(비-스푸퍼블) — SELF_DERIVED
+    "app.routers.agent_deployments:delete_deployment": "JWT project_id 스코프로 deployment fetch(비-스푸퍼블)",
+    "app.routers.agent_deployments:patch_deployment": "동일 JWT project_id 스코프",
+    "app.routers.agent_personas:delete_persona": "JWT project_id 스코프로 persona fetch(비-스푸퍼블)",
+    "app.routers.agent_personas:update_persona": "동일 JWT project_id 스코프",
+    "app.routers.agent_sessions:transition_session": "JWT project_id 스코프로 session fetch(비-스푸퍼블)",
+    "app.routers.hitl:resolve_hitl_request": "JWT project_id 스코프로 HITL request fetch",
+    "app.routers.mockups:delete_mockup": "JWT project_id 스코프(비-스푸퍼블)+creator gate",
+    "app.routers.mockups:delete_scenario": "동일 JWT project_id 스코프",
+    "app.routers.mockups:update_mockup": "동일 JWT project_id 스코프",
+    "app.routers.mockups:update_scenario": "동일 JWT project_id 스코프",
+    "app.routers.visual_artifacts:delete_artifact": "JWT project_id 스코프+creator gate",
+    # caller-self / participant / recipient / creator — SELF_DERIVED
+    "app.routers.conversations:set_conversation_mute": "participant-membership gate(caller 참가 대화만)",
+    "app.routers.conversations:update_conversation": "participant-membership gate",
+    "app.routers.conversations:update_conversation_status": "participant-membership gate",
+    "app.routers.event_notifications:mark_read": "recipient-scoped(event.recipient_id==caller member)",
+    "app.routers.notifications:mark_read": "owner user_id 스코프(caller 소유 알림만)",
+    "app.routers.evidence:delete_evidence": "creator-only(created_by!=caller → 403)",
+    # org/user-level 리소스 — project 축 없음 — ORG_ONLY
+    "app.routers.labels:delete_label": "org taxonomy(project_id 컬럼 없음)·org-scope",
+    "app.routers.labels:detach_label": "org taxonomy·org-scope",
+    "app.routers.labels:update_label": "org taxonomy·org-scope",
+    "app.routers.organizations:delete_organization": "org owner/admin 게이트·project 축 없음",
+    "app.routers.organizations:update_organization": "org owner/admin 게이트·project 축 없음",
+    "app.routers.org_members:delete_org_member": "org owner/admin 게이트·project 축 없음",
+    "app.routers.org_members:update_org_member": "org owner/admin 게이트·project 축 없음",
+    "app.routers.org_invites:revoke_org_invite": "org owner/admin 게이트·project 축 없음",
+    "app.routers.workflow_trigger_types:delete_trigger_type": "_is_org_admin/require_admin·project 축 없음",
+    "app.routers.workflow_trigger_types:update_trigger_type": "동일 org-admin 게이트·project 축 없음",
+    # 실 가드가 있으나 v1 정적스캔이 인라인/1-hop 헬퍼를 미인식(guarded 확認)
+    "app.routers.open_api_keys:revoke_project_api_key": "resolves ProjectApiKey→key.project_id!=path project_id 인라인 체크(v1 스캔 miss)",
+    "app.routers.project_access:delete_project_access": "_require_owner_or_admin→has_project_role(admin) on path project_id(1-hop miss)",
+    "app.routers.workflow_line_config:update_draft_version": "_require_draft_author가 admin-level project_auth 접근권 강제(in-code 문서화)",
+}
+
+# ── known-debt: 실 project-scoped IDOR — 후속 라운드 상환(6후보·story 5285888c 감사). ──
+_ID_MUTATION_KNOWN_DEBT_ALLOWLIST: dict[str, str] = {
+    "app.routers.epics:update_epic":
+        "MEDIUM — auth 의존성 시그니처 없음·repo org-scope만·same-org cross-project로 epic title/goal/전략 무가드 write(형제 list_epics는 has_project_access 有). round1 우선.",
+    "app.routers.hypotheses:update_hypothesis":
+        "MEDIUM — resolve_member(project_id 없음)·service org-scope get만·caller의 hyp.project_id 접근권 미검증",
+    "app.routers.hypotheses:unlink_hypothesis":
+        "MEDIUM — org_id만·service org-scope get→remove_links·project 가드 0",
+    "app.routers.hypotheses:archive_hypothesis":
+        "MEDIUM — org_id만·soft-delete(status=archived)·project 가드 0",
+    "app.routers.agent_runs:update_agent_run":
+        "MEDIUM — AgentRun.project_id NOT NULL인데 org 체크(org_id!=org_id→404)만·형제 list/create는 has_project_access 有",
+    "app.routers.dependencies:delete_dependency":
+        "MEDIUM(borderline) — ItemDependency는 project_id 컬럼 없음·polymorphic from_id/to_id가 project-bound item 참조(semantic cross-project delete). polymorphic 판정 Q2 대기.",
+}
+
+
+def _id_mutation_baseline_valid_targets(app) -> set[str]:
+    return {r.key for r in enumerate_id_mutation_routes(app)}
+
+
+def test_no_new_unguarded_id_mutation_routes():
+    """ratchet(PATH_ID 축): baseline에 없는 미가드 {id}-뮤테이션 라우트가 생기면 CI 즉시 실패.
+    신규 DELETE/PATCH/PUT /resource/{id}가 대상 리소스의 project 접근권을 검증하지 않으면 발동 —
+    add_feedback/participation에 이은 {id} 계열 IDOR 사각을 자동 봉인(하나씩 손으로 찾기 종료)."""
+    from app.main import app
+
+    routes = enumerate_id_mutation_routes(app)
+    baseline = set(_ID_MUTATION_FALSE_POSITIVE_ALLOWLIST) | set(_ID_MUTATION_KNOWN_DEBT_ALLOWLIST)
+
+    unguarded_not_baselined = [
+        r for r in routes if not has_id_mutation_guard(r) and r.key not in baseline
+    ]
+    assert unguarded_not_baselined == [], (
+        "새 미가드 {id}-뮤테이션 라우트 발견 — 대상 리소스가 project-소속이면 그 리소스를 선조회해 "
+        "has_project_access류로 검증하거나(권장·participation.remove_participation 선례), org/user-level "
+        "리소스면 검토 후 _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST에 이유와 함께 등록하세요:\n" +
+        "\n".join(f"  {r.key} path_ids={r.identity_params}" for r in unguarded_not_baselined)
+    )
+
+
+def test_id_mutation_baseline_entries_are_not_stale():
+    """PATH_ID baseline이 가리키는 라우트가 실제로 존재하는지(rename/삭제 rot 검출)."""
+    from app.main import app
+
+    valid = _id_mutation_baseline_valid_targets(app)
+    stale = (set(_ID_MUTATION_FALSE_POSITIVE_ALLOWLIST) | set(_ID_MUTATION_KNOWN_DEBT_ALLOWLIST)) - valid
+    assert stale == set(), f"PATH_ID baseline에 rot된 라우트: {stale}"
+
+
+def test_id_mutation_calibration_candidates_flagged_and_safe_recognized():
+    """캘리브레이션(AC): 감사가 확定한 6 IDOR 후보는 반드시 flagged(미가드)로 인식되고,
+    이미 봉인된 라우트(participation.remove·standups.add_feedback류)와 SAFE 라우트(tasks/stories
+    delete/update)는 guarded로 인식돼야 한다. 스캐너의 정밀도 회귀 방지."""
+    from app.main import app
+
+    routes = {r.key: r for r in enumerate_id_mutation_routes(app)}
+
+    must_be_flagged = set(_ID_MUTATION_KNOWN_DEBT_ALLOWLIST)
+    for key in must_be_flagged:
+        assert key in routes, f"후보 라우트 {key}가 열거 안 됨(rename?)"
+        assert not has_id_mutation_guard(routes[key]), f"후보 {key}가 guarded로 오인식(false-negative)"
+
+    must_be_safe = [
+        "app.routers.participation:remove_participation",  # #2089 봉인
+        "app.routers.tasks:delete_task",
+        "app.routers.tasks:update_task",
+        "app.routers.stories:update_story",
+        "app.routers.stories:delete_story",
+        "app.routers.docs:delete_doc",
+        "app.routers.meetings:update_meeting",
+        "app.routers.sprints:delete_sprint",
+    ]
+    for key in must_be_safe:
+        if key in routes:  # 존재할 때만(리네임 내성)
+            assert has_id_mutation_guard(routes[key]), f"SAFE 라우트 {key}가 flagged로 오인식(false-positive)"
+
+
+def test_id_mutation_axis_has_teeth_on_synthetic_routes():
+    """스캐너 이빨(sabotage-proof): 합성 앱에 미가드 DELETE /{id}와 가드 DELETE /{id}를 심어
+    enumerate가 둘 다 잡고 has_id_mutation_guard가 정확히 구분하는지 실증. 이 축이 실제로 신규
+    미가드 {id}-뮤테이션을 RED로 만든다는 증거(가드 탐지 로직이 상수 True로 썩으면 즉시 실패)."""
+    import uuid
+
+    from fastapi import Depends, FastAPI
+
+    from app.services.project_auth import has_project_access
+
+    app = FastAPI()
+
+    @app.delete("/synthetic/unguarded/{id}")
+    async def _synthetic_unguarded(id: uuid.UUID):  # noqa: ANN202 — 가드 호출 전무
+        return {"ok": True}
+
+    async def _guard_dep() -> uuid.UUID:
+        # resource-특정 의존성이 project 가드를 호출(meetings _get_repo 패턴 모사)
+        await has_project_access(None, None, None, None)  # noqa — 존재만 검증(AST 스캔 대상)
+        return uuid.uuid4()
+
+    @app.delete("/synthetic/guarded/{id}")
+    async def _synthetic_guarded(id: uuid.UUID, _g: uuid.UUID = Depends(_guard_dep)):  # noqa: ANN202
+        return {"ok": True}
+
+    routes = {r.qualname.split(".")[-1]: r for r in enumerate_id_mutation_routes(app)}
+    assert "_synthetic_unguarded" in routes, "미가드 {id}-뮤테이션이 열거 안 됨(축 사각)"
+    assert "_synthetic_guarded" in routes
+    assert not has_id_mutation_guard(routes["_synthetic_unguarded"]), (
+        "미가드 라우트를 guarded로 오판 — 축의 이빨 상실(가드 탐지 로직 회귀)"
+    )
+    assert has_id_mutation_guard(routes["_synthetic_guarded"]), (
+        "Depends-바디 project 가드를 미탐지 — 오탐 회귀(_get_repo 패턴 무력화)"
+    )
+
+
+def test_sibling_asymmetry_advisory_surfaces_high_confidence_candidates():
+    """형제-비대칭 advisory(비-강제): read/create 형제가 project 가드를 부르는 모듈의 미가드
+    {id}-뮤테이션을 surface. epics(list_epics 가드)·agent_runs(list/create 가드)가 반드시 잡혀야
+    한다 — project-scoped 판정 없이 고신뢰 후보를 좁히는 휴리스틱의 회귀 방지. advisory라 CI를
+    RED로 만들진 않음(신규 항목 허용)."""
+    from app.main import app
+
+    from authz_coverage_lib import sibling_asymmetry_advisory
+
+    flagged = {r.key for r in sibling_asymmetry_advisory(app)}
+    for expected in ("app.routers.epics:update_epic", "app.routers.agent_runs:update_agent_run"):
+        assert expected in flagged, f"형제-비대칭 휴리스틱이 고신뢰 후보 {expected}를 놓침"
