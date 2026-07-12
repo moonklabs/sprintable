@@ -40,9 +40,12 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
   const [theme, setTheme] = useState<ExportTheme>(resolvedTheme === 'dark' ? 'dark' : 'light');
   const [phase, setPhase] = useState<'idle' | 'exporting' | 'done' | 'error'>('idle');
   const [result, setResult] = useState<BeArtifactExport | null>(null);
+  // export 실패 원인(캡처 throw 등)을 UI/로그에 노출 — 빈 catch가 삼켜 진단 불가였던 회귀 방지.
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
 
   const handleExport = async () => {
     setPhase('exporting');
+    setErrorDetail(null);
     try {
       if (format === 'html') {
         const r = await createHtmlExport(artifactId, versionNumber);
@@ -61,13 +64,16 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
       }
       setResult(r);
       setPhase(r ? 'done' : 'error');
-    } catch {
+    } catch (err) {
+      // 빈 catch 금지(AC2) — 캡처/업로드 단계 throw의 원인을 로그+UI에 드러내 다음 진단 가능하게.
+      console.error('[canvas-export] PNG export failed', err);
+      setErrorDetail(err instanceof Error ? err.message : String(err));
       setPhase('error');
     }
   };
 
   const handleClose = (o: boolean) => {
-    if (!o) { setPhase('idle'); setResult(null); }
+    if (!o) { setPhase('idle'); setResult(null); setErrorDetail(null); }
     onOpenChange(o);
   };
 
@@ -92,7 +98,12 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
             ) : null}
           </div>
         ) : phase === 'error' ? (
-          <p className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">{t('exportFailedNote')}</p>
+          <div className="space-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <p>{t('exportFailedNote')}</p>
+            {errorDetail ? (
+              <p className="break-words font-mono text-[10px] text-muted-foreground/70">{errorDetail}</p>
+            ) : null}
+          </div>
         ) : (
           <div className="space-y-3">
             <div>

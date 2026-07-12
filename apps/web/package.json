@@ -48,7 +48,7 @@
     "clsx": "^2.1.1",
     "dompurify": "^3.3.3",
     "framer-motion": "^12.38.0",
-    "html2canvas": "^1.4.1",
+    "html2canvas-pro": "^2.2.3",
     "jose": "^6.2.3",
     "katex": "^0.16.47",
     "lucide-react": "^1.7.0",
