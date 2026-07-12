@@ -68,7 +68,11 @@
     "epics": "Epics",
     "glance": "Glance",
     "loops": "Loop",
-    "storage": "Storage"
+    "storage": "Storage",
+    "zoneNow": "Now",
+    "zoneWork": "Work",
+    "zoneTrust": "Trust",
+    "zoneKnowledge": "Knowledge"
   },
   "storage": {
     "title": "Storage",
