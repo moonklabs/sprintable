@@ -32,6 +32,10 @@ export interface BeEpicListItem {
   title: string;
   status: string;
   created_at: string;
+  // E-GLANCE wedge #2(로드맵 조타): 큐레이션 순서(null=미조타). 아크는 이 순서를 소비만 한다
+  // (드래그 없음). BE order_by=position 미지정/미보유 시 전부 null 취급 → 기존 created_at 정렬과
+  // 동일(#2056 회귀0).
+  position?: number | null;
 }
 
 /**
@@ -56,7 +60,18 @@ export function scopeRoadmapEpics(
   epics: BeEpicListItem[],
   window: { behind: number; ahead: number; bound: number } = DEFAULT_ARC_WINDOW,
 ): RoadmapArc {
-  const asc = [...epics].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  // 큐레이션(position≠null) 우선(position ASC) → 나머지는 created_at ASC(아크의 과거→현재
+  // 시간 읽기 유지). BE order_by=position((position IS NULL) ASC, position ASC, created_at DESC)의
+  // curated-first를 아크가 소비만 반영 — 조타 결과가 로드맵 아크에도 비친다(wedge #2·소비 전용).
+  // position 전무 시(미조타) 전부 created_at ASC로 폴백 → 기존 렌더 100% 동일(#2056 회귀0).
+  const asc = [...epics].sort((a, b) => {
+    const ap = a.position;
+    const bp = b.position;
+    if (ap != null && bp != null) return ap - bp;
+    if (ap != null) return -1;
+    if (bp != null) return 1;
+    return a.created_at.localeCompare(b.created_at);
+  });
   const activeIndices: number[] = [];
   for (let i = 0; i < asc.length; i++) if (asc[i]!.status === 'active') activeIndices.push(i);
 

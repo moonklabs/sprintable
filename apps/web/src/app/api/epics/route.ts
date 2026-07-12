@@ -14,9 +14,14 @@ export async function GET(request: Request) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
     const { searchParams } = new URL(request.url);
+    const orderBy = searchParams.get('order_by') ?? undefined;
+    // 로드맵 조타(wedge #2): order_by="position"은 복합 정렬((position IS NULL) ASC, position ASC,
+    // created_at DESC)이라 BE가 X-Next-Cursor를 내지 않는다 → 커서 이어달리기 불가. 이 모드는
+    // 전량 로드가 전제이므로 over-fetch(+1)/커서 없이 요청 limit 그대로 받아 hasMore=false로 봉인(AC4).
+    const positionMode = orderBy === 'position';
     const pageInput = parseCursorPageInput({
       limit: searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined,
-      cursor: searchParams.get('cursor'),
+      cursor: positionMode ? undefined : searchParams.get('cursor'),
     }, { defaultLimit: 50, maxLimit: 100 });
     const repo = await createEpicRepository();
     const service = new EpicService(repo);
@@ -24,9 +29,13 @@ export async function GET(request: Request) {
     // in-memory 페이징(1000+ silent-truncation 유발) 대신 BE에 위임한다. over-fetch(+1)로 hasMore 판단.
     const epics = await service.list({
       project_id: searchParams.get('project_id') ?? undefined,
-      limit: pageInput.limit + 1,
-      cursor: pageInput.cursor,
+      limit: positionMode ? pageInput.limit : pageInput.limit + 1,
+      cursor: positionMode ? undefined : pageInput.cursor,
+      order_by: orderBy,
     });
+    if (positionMode) {
+      return apiSuccess(epics, { limit: pageInput.limit, hasMore: false, nextCursor: null });
+    }
     const { page, meta } = buildCursorPageMeta(epics, pageInput.limit, 'created_at');
     return apiSuccess(page, meta);
   } catch (err: unknown) { return handleApiError(err); }

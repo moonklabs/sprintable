@@ -90,6 +90,29 @@ describe('scopeRoadmapEpics ("현재 궤적" window — 유나 서사 확定(b),
   });
 });
 
+describe('scopeRoadmapEpics — 로드맵 조타 curated-first 소비(wedge #2·position 반영·#2056 회귀0)', () => {
+  function epic(id: string, status: string, day: number, position?: number | null): BeEpicListItem {
+    return { id, title: id, status, created_at: `2026-01-${String(day).padStart(2, '0')}T00:00:00Z`, position };
+  }
+
+  it('position 전무(미조타) 시 created_at ASC 폴백 — 기존 렌더와 동일(#2056 회귀0)', () => {
+    const epics = [epic('c', 'active', 3), epic('a', 'done', 1), epic('b', 'done', 2)];
+    const arc = scopeRoadmapEpics(epics, { behind: 5, ahead: 5, bound: 8 });
+    expect(arc.epics.map((e) => e.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('큐레이션(position≠null)을 position ASC로 앞에 고정, 나머지 null은 created_at ASC로 뒤에', () => {
+    const epics = [
+      epic('auto-old', 'active', 1),   // null → tail(created_at ASC)
+      epic('auto-new', 'draft', 9),    // null → tail
+      epic('cur-2', 'done', 5, 2),     // 큐레이션 2
+      epic('cur-1', 'draft', 8, 1),    // 큐레이션 1(가장 앞)
+    ];
+    const arc = scopeRoadmapEpics(epics, { behind: 9, ahead: 9, bound: 20 });
+    expect(arc.epics.map((e) => e.id)).toEqual(['cur-1', 'cur-2', 'auto-old', 'auto-new']);
+  });
+});
+
 describe('mergeRoadmap (epic 목록 순서 SSOT + 별도 진척 엔드포인트 병합)', () => {
   const epics: BeEpicListItem[] = [
     { id: 'e1', title: 'E-VERIFY', status: 'done', created_at: '2026-06-01T00:00:00Z' },

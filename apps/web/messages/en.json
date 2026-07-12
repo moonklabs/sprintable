@@ -2706,7 +2706,16 @@
     "deleteEpic": "Delete Epic",
     "deleteConfirmTitle": "Delete Epic?",
     "deleteConfirmDescription": "This is permanent and cannot be undone. All stories in this epic will be unlinked.",
-    "deleteConfirmButton": "Delete permanently"
+    "deleteConfirmButton": "Delete permanently",
+    "steerCurated": "Curated",
+    "steerAuto": "Auto (NULL)",
+    "steerLoopSuggest": "Loop suggestion",
+    "steerReorderAria": "Reorder {title}",
+    "steerHandoffReceived": "Steering received",
+    "steerHandoffOrchestrating": "Orchestrating",
+    "steerHandoffAgent": "Ortega",
+    "steerError": "Couldn't save the new order. Please try again.",
+    "steerCappedNote": "Showing the top {count}. Steering (curation) floats items to the front."
   },
   "glance": {
     "pageTitle": "Project Glance",
