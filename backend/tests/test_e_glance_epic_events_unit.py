@@ -130,28 +130,29 @@ async def test_emit_epic_removed_uses_pre_captured_title_not_epic_object():
 
 
 @pytest.mark.anyio
-async def test_emit_epic_reordered_fires_once_for_batch_not_per_item():
-    """배치당 1회 발화(N개 재정렬에 N번 웹훅 방지, §2.3) — items 배열 통째로 payload에."""
+async def test_emit_epic_reordered_fires_once_for_batch_gated_to_recipients():
+    """STEER 커밋 모델(ff662876): 배치당 1회 발화 + **지정 수신자 집합으로 게이팅**. 드래그가
+    아니라 명시적 커밋(steer-dispatch)에서만 호출되며, recipient_member_ids로 fire_webhooks를
+    게이팅하고 preserve_broadcast=False로 브로드캐스트를 폐지한다(현 None-브로드캐스트 과보정 폐기)."""
     items = [
         {"id": uuid.uuid4(), "title": "A", "project_id": uuid.uuid4(), "position": 1, "old_position": None},
         {"id": uuid.uuid4(), "title": "B", "project_id": uuid.uuid4(), "position": 2, "old_position": 5},
     ]
+    recipients = {uuid.uuid4()}
     publish = MagicMock()
     webhook = AsyncMock()
     with ExitStack() as stack:
         _base_patches(stack, publish=publish, webhook=webhook)
-        await emit_epic_reordered(AsyncMock(), uuid.uuid4(), items)
+        await emit_epic_reordered(AsyncMock(), uuid.uuid4(), items, recipients)
 
     publish.assert_called_once()
     webhook.assert_awaited_once()
     payload = publish.call_args[0][2]
     assert len(payload["items"]) == 2
     assert payload["items"][1]["old_position"] == 5
-    # 까심 QA(#2076) 재현 회귀가드: epic.reordered엔 assignee 개념이 없어 notify_member_id는
-    # 항상 None — recipient_member_ids도 반드시 None이어야 한다(까심이 실 배달 0건으로 재현한
-    # 정확한 버그: 이 값이 빈 집합이면 fire_webhooks가 게이팅을 활성화해 member-bound 웹훅을
-    # 전부 drop — WebhookConfig.member_id nullable=False라 broadcast 구제 경로도 없음).
-    assert webhook.call_args.kwargs["recipient_member_ids"] is None
+    # 커밋 모델: 지정 수신자로 게이팅(None 브로드캐스트 폐지)·activity-feed 브로드캐스트도 억제.
+    assert webhook.call_args.kwargs["recipient_member_ids"] == recipients
+    assert webhook.call_args.kwargs["preserve_broadcast"] is False
 
 
 @pytest.mark.anyio
@@ -159,7 +160,7 @@ async def test_emit_epic_reordered_empty_items_is_noop():
     publish = MagicMock()
     with ExitStack() as stack:
         _base_patches(stack, publish=publish)
-        await emit_epic_reordered(AsyncMock(), uuid.uuid4(), [])
+        await emit_epic_reordered(AsyncMock(), uuid.uuid4(), [], set())
     publish.assert_not_called()
 
 

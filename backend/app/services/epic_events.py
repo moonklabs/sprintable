@@ -99,17 +99,25 @@ async def emit_epic_removed(
 
 
 async def emit_epic_reordered(
-    db, org_id: uuid.UUID, items: list[dict[str, Any]], *, actor_id: uuid.UUID | None = None,
+    db, org_id: uuid.UUID, items: list[dict[str, Any]],
+    recipient_member_ids: set[uuid.UUID], *, actor_id: uuid.UUID | None = None,
 ) -> None:
-    """배치당 1회 발화(N개 재정렬에 N번 웹훅 방지) — payload에 items 배열 통째로.
+    """STEER 커밋(ff662876) 전용 발화 — 드래그(PATCH /epics/bulk)는 무이벤트 초안 저장이고,
+    이 함수는 명시적 조타 커밋(POST /epics/steer-dispatch)에서만 배치당 1회 호출된다. 인간이
+    로드맵을 번복하는 초안 사고과정은 이벤트로 새지 않고, 확定된 결정만 전달된다.
 
-    items: [{"id": uuid, "title": str, "project_id": uuid, "position": int,
-             "old_position": int | None}, ...] — 실제 변경 적용된 epic만(호출자가 필터).
-    project_id는 items의 첫 항목 기준(bulk는 단일-project 호출이 일반적이나 cross-project
-    silent-skip 후 남은 items가 여러 project에 걸칠 수 있어 대표값일 뿐 — FE는 items로 소비).
+    수신자는 커밋에서 지정된 집합(기본=project relay-owner)으로 **게이팅**한다 —
+    `preserve_broadcast=False`로 activity-feed 브로드캐스트도 억제해 지정 수신자만 도달.
+    현 None-브로드캐스트(전-에이전트 wake·#2076 과보정)를 폐지한다.
+
+    items: [{"id","title","project_id","position","old_position"}...]. 수신자 게이팅이라
+    dispatch_notification(assignee) 경로는 여기 없음 — 조타는 assignee 알림이 아니다.
     """
     if not items:
         return
+    from app.routers.events import publish_event
+    from app.services.webhook_dispatch import fire_webhooks
+
     representative = items[0]
     event_data = _base_event_data(
         representative["id"], representative["title"], representative["project_id"], org_id, actor_id,
@@ -123,4 +131,13 @@ async def emit_epic_reordered(
         }
         for it in items
     ]
-    await _emit(db, org_id, "epic.reordered", event_data, notify_member_id=None)
+    # publish_event(SSE/감사·항상) + 게이팅된 webhook(지정 수신자만). recipient_member_ids가
+    # 빈 집합이면(해소된 relay-owner 없음) member-bound webhook 전부 drop = 0 배달(no-fiction).
+    publish_event(str(org_id), "epic.reordered", event_data)
+    try:
+        await fire_webhooks(
+            db, org_id, "epic.reordered", event_data,
+            recipient_member_ids=recipient_member_ids, preserve_broadcast=False,
+        )
+    except Exception:
+        pass

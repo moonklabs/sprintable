@@ -226,8 +226,10 @@ async def test_bulk_reorder_same_org_cross_project_item_silently_skipped():
 
 
 @pytest.mark.anyio
-async def test_bulk_reorder_fires_single_epic_reordered_event():
-    """§2.3: 배치당 1회 발화 — 2건 재정렬해도 fire_webhooks는 정확히 1회."""
+async def test_bulk_reorder_emits_no_event_draft_model():
+    """⭐STEER 커밋 모델(ff662876·선생님 재정의): 드래그(PATCH /epics/bulk)는 **이벤트 0**이다.
+    인간이 로드맵을 번복하는 초안 사고과정이 실시간 이벤트로 새면 안 되므로, bulk는 position만
+    저장하고 아무 웹훅도 발화하지 않는다(fire_webhooks 미호출). 이벤트는 steer-dispatch에서만."""
     from unittest.mock import AsyncMock, patch
 
     from app.main import app
@@ -249,10 +251,8 @@ async def test_bulk_reorder_fires_single_epic_reordered_event():
                     ]
                 })
             assert resp.status_code == 200, resp.text
-            webhook.assert_awaited_once()
-            assert webhook.call_args[0][2] == "epic.reordered"
-            payload = webhook.call_args[0][3]
-            assert len(payload["items"]) == 2
+            # 드래그=무이벤트: fire_webhooks가 한 번도 안 불려야 한다.
+            webhook.assert_not_awaited()
         finally:
             await client.aclose()
     finally:
@@ -422,58 +422,231 @@ async def test_list_epics_default_order_unchanged_no_position_field_forced():
 
 
 @pytest.mark.anyio
-async def test_epic_reordered_real_webhook_config_actually_receives_delivery():
-    """까심 QA(#2076 REQUEST_CHANGES) #2 요구: fire_webhooks를 mock하지 않고 실 WebhookConfig
-    를 시드해 실제 함수(gating 로직 포함)를 그대로 실행 — 오직 네트워크 I/O 경계(httpx POST +
-    SSRF DNS 조회)만 캡처/우회한다. 이전 PR의 유닛테스트가 fire_webhooks 자체를 mock해서 empty-
-    set 게이팅 버그를 놓쳤던 정확한 갭을 닫는다. member-bound(오르테가류) WebhookConfig가
-    epic.reordered 구독 시 **실제로 정확히 1건 배달**됨을 증명(회귀 시 0건)."""
-    from unittest.mock import AsyncMock, MagicMock, patch
-
-    from app.main import app
+async def _seed_owner_and_orchestrator(s, seeded):
+    """⭐feedback_seed_masks_realdata_assumption 반영: owner(사람·role='owner'=실 relay-owner)와
+    orchestrator(별개 에이전트·role='member')를 **분리 시드**한다. 실데이터(송윤재=사람 owner,
+    오르테가=member 에이전트)와 동형. 둘 다 epic.reordered 구독 웹훅 보유 — 인간이 recipient로
+    orchestrator를 명시하면 orchestrator에게만 배달되고 relay-owner(사람)에겐 0건임을 실증
+    (BE가 relay-owner를 추측하지 않음·선생님 B). 반환=(owner canonical member id, orchestrator id)."""
     from app.models.member import Member
+    from app.models.project import OrgMember
+    from app.models.project_access import ProjectAccess
+    from app.models.user import User
     from app.models.webhook_config import WebhookConfig
+
+    # 사람 owner — resolve_project_relay_owner가 이 사람으로 해소(우선순위1 project_access owner).
+    owner_uid = uuid.uuid4()
+    s.add(User(id=owner_uid, email=f"owner-{owner_uid.hex[:8]}@test.com", hashed_password="x"))
+    await s.commit()
+    owner_om = OrgMember(id=uuid.uuid4(), org_id=seeded["org_a_id"], user_id=owner_uid, role="member")
+    s.add(owner_om)
+    await s.commit()
+    s.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=seeded["project_a_id"], org_member_id=owner_om.id,
+        permission="granted", role="owner",
+    ))
+    s.add(WebhookConfig(
+        id=uuid.uuid4(), org_id=seeded["org_a_id"], member_id=owner_om.id,
+        project_id=seeded["project_a_id"], url="https://human-owner.example.com/webhook",
+        events=["epic.reordered"], channel="generic", is_active=True,
+    ))
+    await s.commit()
+
+    # orchestrator 에이전트 — 인간이 커밋 시 지정할 수신자(role='member'·owner 아님).
+    orch = Member(id=uuid.uuid4(), org_id=seeded["org_a_id"], type="agent", name="Ortega")
+    s.add(orch)
+    await s.commit()
+    s.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=seeded["project_a_id"], member_id=orch.id,
+        permission="granted", role="member",
+    ))
+    s.add(WebhookConfig(
+        id=uuid.uuid4(), org_id=seeded["org_a_id"], member_id=orch.id,
+        project_id=seeded["project_a_id"], url="https://ortega.example.com/webhook",
+        events=["epic.reordered"], channel="generic", is_active=True,
+    ))
+    await s.commit()
+    return owner_om.id, orch.id
+
+
+async def test_steer_dispatch_delivers_only_to_human_specified_recipient_not_relay_owner():
+    """⭐STEER 커밋(선생님 B): 드래그(/bulk) 저장 뒤 명시적 커밋(POST /steer-dispatch)에서만 발화.
+    수신자는 **커밋한 인간이 명시**한 orchestrator(별개 에이전트)로 게이팅한다. 실 relay-owner는
+    사람 owner(role='owner')지만 BE는 relay-owner를 추측하지 않으므로 **사람 owner에겐 배달 0**·
+    지정된 orchestrator에게만 1건. owner≠orchestrator 분리 시드로 seed-마스킹 갭을 닫는다
+    ([[feedback_seed_masks_realdata_assumption]]). 실 WebhookConfig+실 gating(네트워크 I/O만 우회)."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from app.main import app
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             seeded = await _seed(s)
-            ortega = Member(id=uuid.uuid4(), org_id=seeded["org_a_id"], type="agent", name="Ortega")
-            s.add(ortega)
-            await s.commit()
-            s.add(WebhookConfig(
-                id=uuid.uuid4(), org_id=seeded["org_a_id"], member_id=ortega.id,
-                project_id=seeded["project_a_id"], url="https://ortega.example.com/webhook",
-                events=["epic.reordered"], channel="generic", is_active=True,
-            ))
-            await s.commit()
+            _owner_mid, orch_id = await _seed_owner_and_orchestrator(s, seeded)
 
         await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])
         client = _client_for(app)
         captured_posts: list[tuple[str, str]] = []
 
-        async def _fake_post(self, url, *, content=None, headers=None, **kwargs):
-            captured_posts.append((url, content))
-            return MagicMock(status_code=200)
+        import httpx
+        _orig_post = httpx.AsyncClient.post
+
+        async def _fake_post(self, url, **kwargs):
+            # 웹훅 배달(외부 URL)만 캡처·우회. 테스트 클라이언트의 POST(/steer-dispatch·http://test)는
+            # 실제 ASGI로 위임해야 엔드포인트 응답이 정상 반환된다(AsyncClient.post 전역 패치 함정).
+            if "example.com" in str(url):
+                captured_posts.append((str(url), kwargs.get("content")))
+                return MagicMock(status_code=200)
+            return await _orig_post(self, url, **kwargs)
 
         try:
+            # 1) 드래그 저장(초안·무이벤트)
+            with patch("app.services.webhook_dispatch.fire_webhooks", AsyncMock()) as wh:
+                r1 = await client.patch("/api/v2/epics/bulk", json={"items": [
+                    {"id": str(seeded["epic_a1_id"]), "position": 1},
+                    {"id": str(seeded["epic_a2_id"]), "position": 2},
+                ]})
+                assert r1.status_code == 200, r1.text
+                wh.assert_not_awaited()  # 드래그=무이벤트
+
+            # 2) 명시적 커밋 — 인간이 orchestrator(에이전트)를 recipient로 지정(relay-owner=사람 아님).
             with (
                 patch("app.services.webhook_dispatch.validate_webhook_url_async", AsyncMock()),
                 patch("httpx.AsyncClient.post", _fake_post),
             ):
-                resp = await client.patch("/api/v2/epics/bulk", json={
+                r2 = await client.post("/api/v2/epics/steer-dispatch", json={
                     "items": [
                         {"id": str(seeded["epic_a1_id"]), "position": 1},
                         {"id": str(seeded["epic_a2_id"]), "position": 2},
-                    ]
+                    ],
+                    "recipient_member_ids": [str(orch_id)],
                 })
-            assert resp.status_code == 200, resp.text
-            # 핵심 단언: fire_webhooks의 실 gating 로직을 거쳐 실제로 정확히 1건 HTTP POST됐다
-            # (버그 상태에선 recipient_member_ids=set()로 인해 이 리스트가 비어 0건).
-            assert len(captured_posts) == 1, f"expected exactly 1 real delivery, got {len(captured_posts)}"
+            assert r2.status_code == 200, r2.text
+            assert r2.json()["recipient_member_ids"] == [str(orch_id)]
+            # 게이팅 실증: 지정 orchestrator에게만 1건·사람 owner(relay-owner)에겐 0건(추측 폴백 없음).
+            assert len(captured_posts) == 1, f"expected 1 delivery(specified recipient only), got {len(captured_posts)}"
             url, body = captured_posts[0]
             assert url == "https://ortega.example.com/webhook"
             assert "epic.reordered" in body
+            assert not any("human-owner" in u for u, _ in captured_posts), "relay-owner(사람)에게 새면 안 됨"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_steer_dispatch_requires_recipient_member_ids_400():
+    """선생님 B: recipient_member_ids 필수 — None(미지정) 또는 빈 리스트면 400. BE가 relay-owner를
+    추측하지 않으므로(보편적 오케스트레이터란 없다) 인간이 반드시 수신자를 지정해야 한다."""
+    from unittest.mock import AsyncMock, patch
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])
+        client = _client_for(app)
+        try:
+            with patch("app.services.webhook_dispatch.fire_webhooks", AsyncMock()) as wh:
+                await client.patch("/api/v2/epics/bulk", json={"items": [{"id": str(seeded["epic_a1_id"]), "position": 1}]})
+                # recipient 미지정 → 400
+                r_none = await client.post("/api/v2/epics/steer-dispatch", json={
+                    "items": [{"id": str(seeded["epic_a1_id"]), "position": 1}],
+                })
+                # recipient 빈 리스트 → 400
+                r_empty = await client.post("/api/v2/epics/steer-dispatch", json={
+                    "items": [{"id": str(seeded["epic_a1_id"]), "position": 1}],
+                    "recipient_member_ids": [],
+                })
+            assert r_none.status_code == 400, r_none.text
+            assert r_empty.status_code == 400, r_empty.text
+            wh.assert_not_awaited()
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_steer_dispatch_cross_project_epic_blocked_403():
+    """신규 mutation 인가표면(add_feedback 교훈): 대상 epic이 caller 무접근 project(같은 org
+    project_b)면 has_project_access resource-actual 가드로 403 — 이벤트 발화 없음."""
+    from unittest.mock import AsyncMock, patch
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])
+        client = _client_for(app)
+        try:
+            with patch("app.services.webhook_dispatch.fire_webhooks", AsyncMock()) as wh:
+                resp = await client.post("/api/v2/epics/steer-dispatch", json={
+                    "items": [{"id": str(seeded["epic_b1_id"]), "position": 1}],
+                })
+            assert resp.status_code == 403, resp.text
+            wh.assert_not_awaited()
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_steer_dispatch_cross_org_recipient_injection_blocked_400():
+    """⭐recipient 인가표면: recipient_member_ids에 caller org 소속 아닌 member id를 주입하면
+    400(resolve_member_identity가 org에서 미해소) — cross-org 조타 배달 주입 차단(body-claimed 금지).
+    가드가 없으면 임의 org 밖 member로 조타 이벤트를 배달시킬 수 있다."""
+    from unittest.mock import AsyncMock, patch
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+            # epic_a1 position을 1로 저장(정합검증 통과용)
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])
+        client = _client_for(app)
+        try:
+            with patch("app.services.webhook_dispatch.fire_webhooks", AsyncMock()) as wh:
+                await client.patch("/api/v2/epics/bulk", json={"items": [{"id": str(seeded["epic_a1_id"]), "position": 1}]})
+                resp = await client.post("/api/v2/epics/steer-dispatch", json={
+                    "items": [{"id": str(seeded["epic_a1_id"]), "position": 1}],
+                    "recipient_member_ids": [str(uuid.uuid4())],  # org에 없는 member
+                })
+            assert resp.status_code == 400, resp.text
+            wh.assert_not_awaited()
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_steer_dispatch_position_snapshot_conflict_409():
+    """Q1 서버 정합검증: 커밋 스냅샷 position이 저장된 draft와 다르면 409(미저장/경합) —
+    커밋은 저장된 확定 상태의 전달이지 재-write가 아니다. 이벤트 발화 없음."""
+    from unittest.mock import AsyncMock, patch
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])
+        client = _client_for(app)
+        try:
+            with patch("app.services.webhook_dispatch.fire_webhooks", AsyncMock()) as wh:
+                await client.patch("/api/v2/epics/bulk", json={"items": [{"id": str(seeded["epic_a1_id"]), "position": 1}]})
+                # 저장은 1인데 커밋 스냅샷은 99 → 409
+                resp = await client.post("/api/v2/epics/steer-dispatch", json={
+                    "items": [{"id": str(seeded["epic_a1_id"]), "position": 99}],
+                })
+            assert resp.status_code == 409, resp.text
+            wh.assert_not_awaited()
         finally:
             await client.aclose()
     finally:
