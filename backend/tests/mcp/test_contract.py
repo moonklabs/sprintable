@@ -95,7 +95,8 @@ EXPECTED_TOOLS = {
 
 
 def test_total_tool_count():
-    assert len(_TOOLS) == 99
+    # C1-S3(e50563b4): sprintable_list_artifacts 추가로 98→99... +1=100.
+    assert len(_TOOLS) == 100
 
 
 def test_all_expected_tools_registered():
