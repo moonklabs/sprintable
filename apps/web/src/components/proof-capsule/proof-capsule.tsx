@@ -20,8 +20,9 @@ export interface ProofCapsuleAgent {
 }
 
 export interface ProofCapsuleEvidence {
-  acMet: number;
-  acTotal: number;
+  /** AC 충족 카운트 — per-AC 구조가 있는 소스에서만(freeform AC는 카운트=fiction). 둘 다 있을 때만 렌더. */
+  acMet?: number;
+  acTotal?: number;
   autoVerify?: 'passed' | 'failed' | null;
   diff?: { add: number; del: number };
   proofCount?: number;
@@ -157,10 +158,12 @@ function EvidenceRow({ evidence, sweep }: { evidence: ProofCapsuleEvidence; swee
         Evidence · 요구 대조
       </div>
       <div className="flex flex-wrap items-center gap-3.5 text-[13px] leading-[1.45] text-proof-ink-2">
-        <span className="inline-flex items-center gap-1">
-          <Check className="motion-safe:animate-proof-check-in size-3.5 text-proof-green" strokeWidth={3} aria-hidden="true" />
-          AC {evidence.acMet}/{evidence.acTotal} 충족
-        </span>
+        {evidence.acMet != null && evidence.acTotal != null ? (
+          <span className="inline-flex items-center gap-1">
+            <Check className="motion-safe:animate-proof-check-in size-3.5 text-proof-green" strokeWidth={3} aria-hidden="true" />
+            AC {evidence.acMet}/{evidence.acTotal} 충족
+          </span>
+        ) : null}
         {evidence.autoVerify === 'passed' ? (
           <span className="inline-flex items-center gap-1">
             <Check className="motion-safe:animate-proof-check-in size-3.5 text-proof-green" strokeWidth={3} aria-hidden="true" />
@@ -271,10 +274,12 @@ function CardVariant({ proofState, stateLabel, claim, evidence, footer, classNam
         <div className="mt-1.5 line-clamp-2 text-[12.5px] font-semibold leading-snug text-proof-ink">{claim}</div>
         {evidence ? (
           <div className="mt-1.5 flex items-center gap-2.5 text-[10.5px] text-proof-ink-3">
-            <span className="inline-flex items-center gap-1">
-              <Check className="size-3 text-proof-green" strokeWidth={3} aria-hidden="true" />
-              {evidence.acMet}/{evidence.acTotal}
-            </span>
+            {evidence.acMet != null && evidence.acTotal != null ? (
+              <span className="inline-flex items-center gap-1">
+                <Check className="size-3 text-proof-green" strokeWidth={3} aria-hidden="true" />
+                {evidence.acMet}/{evidence.acTotal}
+              </span>
+            ) : null}
             {evidence.diff ? <span className="font-mono">+{evidence.diff.add}</span> : null}
           </div>
         ) : null}

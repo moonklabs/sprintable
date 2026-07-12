@@ -14,6 +14,7 @@ import {
   type BeAttentionSignal,
   type ExceptionLabels,
 } from './derive-exception-signals';
+import type { HeroEnvelope } from './derive-hero-envelope';
 import type { HeroStory, HeroMember } from './hero-logic';
 
 interface GlanceBoardProps {
@@ -33,6 +34,7 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
   const [totalEpicCount, setTotalEpicCount] = useState(0);
   const [activeEpicTitle, setActiveEpicTitle] = useState<string | null>(null);
   const [heroStory, setHeroStory] = useState<HeroStory | null>(null);
+  const [heroEnvelope, setHeroEnvelope] = useState<HeroEnvelope | null>(null);
   const [memberMap, setMemberMap] = useState<Record<string, HeroMember>>({});
   const [attentionSignals, setAttentionSignals] = useState<BeAttentionSignal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,6 +51,7 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
           setTotalEpicCount(data.totalEpicCount);
           setActiveEpicTitle(data.activeEpicTitle);
           setHeroStory(data.heroStory);
+          setHeroEnvelope(data.heroEnvelope);
           setMemberMap(data.memberMap);
           setAttentionSignals(data.attentionSignals);
         }
@@ -109,7 +112,7 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.32fr_1fr]">
           <div>
             {heroStory ? (
-              <GlanceHero story={heroStory} memberMap={memberMap} />
+              <GlanceHero story={heroStory} memberMap={memberMap} envelope={heroEnvelope} />
             ) : (
               // 활성 story 없음 = 평온 빈상태(억지 렌더 0·no-fiction).
               <p className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
