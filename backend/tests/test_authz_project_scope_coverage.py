@@ -248,8 +248,8 @@ _ID_MUTATION_KNOWN_DEBT_ALLOWLIST: dict[str, str] = {
     # 사전검증으로 same-org cross-project epic 덮어쓰기 봉인 — 이제 스캐너가 guarded로 인식·감시.
     # 라운드2 상환(#2~4·hypotheses update/unlink/archive): _assert_hypothesis_project_access(hyp
     # 조회→hyp.project_id has_project_access·404) 라우터 가드로 봉인 — 스캐너 감시 전환.
-    "app.routers.agent_runs:update_agent_run":
-        "MEDIUM — AgentRun.project_id NOT NULL인데 org 체크(org_id!=org_id→404)만·형제 list/create는 has_project_access 有",
+    # 라운드3 상환(#5·agent_runs:update_agent_run): resolved-resource(existing.project_id) has_project_access
+    # 사전검증으로 same-org cross-project run 덮어쓰기 봉인 — 스캐너 감시 전환.
     "app.routers.dependencies:delete_dependency":
         "MEDIUM(borderline) — ItemDependency는 project_id 컬럼 없음·polymorphic from_id/to_id가 project-bound item 참조(semantic cross-project delete). polymorphic 판정 Q2 대기.",
 }
@@ -361,9 +361,11 @@ def test_sibling_asymmetry_advisory_surfaces_high_confidence_candidates():
 
     from authz_coverage_lib import sibling_asymmetry_advisory
 
-    flagged = {r.key for r in sibling_asymmetry_advisory(app)}
-    # agent_runs(list/create 형제 가드 有·update_agent_run 미가드)는 상환 순서상 마지막이라 이 축의
-    # 안정적 회귀 기준. (epics:update_epic은 라운드1에서 상환돼 이제 guarded → advisory서 빠짐=정상.)
-    assert "app.routers.agent_runs:update_agent_run" in flagged, (
-        "형제-비대칭 휴리스틱이 고신뢰 후보 agent_runs:update_agent_run을 놓침"
-    )
+    surfaced = sibling_asymmetry_advisory(app)
+    # 계약(paydown-무관 안정 기준): advisory가 surface하는 모든 엔트리는 반드시 (a) id-뮤테이션
+    # 라우트이고 (b) has_id_mutation_guard 미충족이며 (c) 형제가 project 가드를 부르는 모듈에 속한다.
+    # (특정 라우트 이름은 상환마다 바뀌므로 assert 안 함 — 후보가 상환되면 advisory서 빠지는 게 정상.)
+    id_route_keys = {r.key for r in enumerate_id_mutation_routes(app)}
+    for r in surfaced:
+        assert r.key in id_route_keys, f"advisory가 id-뮤테이션 아닌 라우트 surface: {r.key}"
+        assert not has_id_mutation_guard(r), f"advisory가 guarded 라우트 surface(오탐): {r.key}"
