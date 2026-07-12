@@ -475,7 +475,7 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: EpicR
           type="button"
           aria-label={t('steerReorderAria', { title: epic.title })}
           onClick={(e) => e.stopPropagation()}
-          className="mt-0.5 flex shrink-0 cursor-grab touch-none items-center text-muted-foreground/50 transition-colors hover:text-muted-foreground active:cursor-grabbing"
+          className="mt-0.5 flex shrink-0 cursor-grab items-center text-muted-foreground/50 transition-colors hover:text-muted-foreground active:cursor-grabbing"
           {...attributes}
           {...listeners}
         >
