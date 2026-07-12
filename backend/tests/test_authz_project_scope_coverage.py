@@ -370,3 +370,36 @@ def test_sibling_asymmetry_advisory_surfaces_high_confidence_candidates():
     for r in surfaced:
         assert r.key in id_route_keys, f"advisory가 id-뮤테이션 아닌 라우트 surface: {r.key}"
         assert not has_id_mutation_guard(r), f"advisory가 guarded 라우트 surface(오탐): {r.key}"
+
+
+def test_sibling_asymmetry_advisory_has_teeth_on_synthetic_app():
+    """공허-통과 봉인(까심 #2093 QA·27e339bc fast-follow): 위 계약 테스트는 surfaced==[]면 for-루프가
+    **공허참**으로 통과 → advisory가 return []로 죽어도(휴리스틱 침묵) 못 잡는다. 합성 앱에 [guarded
+    project 형제(project_id param+has_project_access) + 미가드 {id}-뮤테이션]을 같은 모듈에 심어
+    advisory가 **최소 1건 surface**함을 실증(positive 하한 단언). 휴리스틱이 조용히 죽으면 RED."""
+    import uuid
+
+    from fastapi import FastAPI
+
+    from app.services.project_auth import has_project_access
+    from authz_coverage_lib import sibling_asymmetry_advisory
+
+    app = FastAPI()
+
+    @app.get("/synthadv/{project_id}/items")  # guarded project 형제 — 이 모듈을 guarded module로 만듦
+    async def _synthadv_list(project_id: uuid.UUID):  # noqa: ANN202
+        await has_project_access(None, None, project_id, None)  # noqa — 존재만 검증(AST 스캔 대상)
+        return []
+
+    @app.delete("/synthadv/{id}")  # 미가드 {id}-뮤테이션(같은 모듈) — advisory가 집어야 함
+    async def _synthadv_delete(id: uuid.UUID):  # noqa: ANN202
+        return {"ok": True}
+
+    surfaced = sibling_asymmetry_advisory(app)
+    assert len(surfaced) >= 1, (
+        "advisory가 [guarded 형제 + 미가드 {id}-뮤테이션] 모듈에서 아무것도 surface 안 함 — "
+        "휴리스틱이 조용히 죽었다(sibling_asymmetry_advisory return [] 회귀)."
+    )
+    assert any(r.qualname.endswith("_synthadv_delete") for r in surfaced), (
+        "advisory가 미가드 {id}-뮤테이션(_synthadv_delete)을 못 집음"
+    )
