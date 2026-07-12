@@ -40,4 +40,19 @@ describe('computeReorderPatch (로드맵 조타 재정렬 → bulk PATCH diff·w
     const patch = computeReorderPatch([e('cur-1', 1), e('n1'), e('n2'), e('n3')], 0);
     expect(patch).toEqual([]); // 이미 pos1 정확 → 변경 0, tail 무손
   });
+
+  // 까심 QA nit(#2078): 엣지 커버리지 보강 — 실측 안전은 확認됐고 케이스만 빈다.
+  it('빈 리스트 — 크래시 없이 빈 diff(방어)', () => {
+    expect(computeReorderPatch([], 0)).toEqual([]);
+  });
+
+  it('단일 항목(이미 pos1) — 스퓨리어스 쓰기 0', () => {
+    expect(computeReorderPatch([e('solo', 1)], 0)).toEqual([]);
+  });
+
+  it('기존 중복 position(데이터 이상) — prefix renumber가 자연 정합(중복 해소)', () => {
+    // A·B 둘 다 pos1(이상). cutoff=1까지 renumber → B가 2로 밀려 중복 제거·A는 그대로.
+    const patch = computeReorderPatch([e('A', 1), e('B', 1), e('C')], 1);
+    expect(patch).toEqual([{ id: 'B', position: 2 }]);
+  });
 });
