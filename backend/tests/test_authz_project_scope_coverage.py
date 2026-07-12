@@ -246,12 +246,8 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
 _ID_MUTATION_KNOWN_DEBT_ALLOWLIST: dict[str, str] = {
     # 라운드1 상환(#1·epics:update_epic): resolved-resource has_project_access(current.project_id)
     # 사전검증으로 same-org cross-project epic 덮어쓰기 봉인 — 이제 스캐너가 guarded로 인식·감시.
-    "app.routers.hypotheses:update_hypothesis":
-        "MEDIUM — resolve_member(project_id 없음)·service org-scope get만·caller의 hyp.project_id 접근권 미검증",
-    "app.routers.hypotheses:unlink_hypothesis":
-        "MEDIUM — org_id만·service org-scope get→remove_links·project 가드 0",
-    "app.routers.hypotheses:archive_hypothesis":
-        "MEDIUM — org_id만·soft-delete(status=archived)·project 가드 0",
+    # 라운드2 상환(#2~4·hypotheses update/unlink/archive): _assert_hypothesis_project_access(hyp
+    # 조회→hyp.project_id has_project_access·404) 라우터 가드로 봉인 — 스캐너 감시 전환.
     "app.routers.agent_runs:update_agent_run":
         "MEDIUM — AgentRun.project_id NOT NULL인데 org 체크(org_id!=org_id→404)만·형제 list/create는 has_project_access 有",
     "app.routers.dependencies:delete_dependency":

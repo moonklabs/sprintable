@@ -35,8 +35,24 @@ from app.schemas.hypothesis import (
 )
 from app.services import hypothesis as svc
 from app.services.member_resolver import ResolvedMember, resolve_member
+from app.services.project_auth import has_project_access
 
 router = APIRouter(prefix="/api/v2/hypotheses", tags=["hypotheses"])
+
+
+async def _assert_hypothesis_project_access(
+    session: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID, hypothesis_id: uuid.UUID
+) -> None:
+    """update/unlink/archive는 hyp를 id로 잡는다(service가 org-scope get만 해 project 접근권 미검증).
+    resolved-resource(hyp.project_id)에 caller 접근권을 사전검증(404·존재 비노출·body-claimed 금지).
+    resolve_member(project_id=)는 no-access를 403으로 내 존재를 노출하므로, 여기선 has_project_access
+    직접호출로 404 통일(participation/epics 라운드 선례·존재 비노출)."""
+    hyp = await HypothesisRepository(session, org_id).get(hypothesis_id)
+    if hyp is None or not await has_project_access(session, user_id, hyp.project_id, org_id):
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "HYPOTHESIS_NOT_FOUND", "message": "가설을 찾을 수 없습니다."},
+        )
 
 _ADMIN_ROLES = frozenset({"owner", "admin"})
 
@@ -148,6 +164,7 @@ async def update_hypothesis(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> HypothesisResponse:
+    await _assert_hypothesis_project_access(session, uuid.UUID(auth.user_id), org_id, hypothesis_id)
     caller = await resolve_member(auth, org_id, session)
     try:
         return await svc.update_hypothesis(session, org_id, caller, hypothesis_id, body)
@@ -199,8 +216,10 @@ async def unlink_hypothesis(
     hypothesis_id: uuid.UUID,
     body: HypothesisUnlinkRequest,
     session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> HypothesisResponse:
+    await _assert_hypothesis_project_access(session, uuid.UUID(auth.user_id), org_id, hypothesis_id)
     try:
         return await svc.unlink_hypothesis(session, org_id, hypothesis_id, body)
     except svc.HypothesisServiceError as err:
@@ -211,8 +230,10 @@ async def unlink_hypothesis(
 async def archive_hypothesis(
     hypothesis_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
+    await _assert_hypothesis_project_access(session, uuid.UUID(auth.user_id), org_id, hypothesis_id)
     try:
         await svc.archive_hypothesis(session, org_id, hypothesis_id)
     except svc.HypothesisServiceError as err:
