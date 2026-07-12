@@ -6,17 +6,20 @@ merge_ready(리뷰/머지 대기). 유나 spec(glance-focus-legible-fe-spec-hand
 3 신호 전부 project_id 직스코프(approval.project_id·story.project_id 직결·조인은 title enrich만).
 """
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.dependency import ItemDependency
+from app.models.evidence import Evidence
 from app.models.gate import Gate
+from app.models.member import Member
 from app.models.pm import Story
 from app.models.workflow_line import WorkflowLineStepApproval
 from app.services.project_auth import has_project_access
@@ -133,3 +136,161 @@ async def glance_attention(
         items.append(AttentionItem(kind="merge_ready", story_id=story_id, title=title))
 
     return AttentionResponse(items=items)
+
+
+# ── hero ProofCapsule envelope (story b464daa1·E-GLANCE 2D) ─────────────────────
+# 현재 에픽 활성 story의 Proof Capsule 소비 계약. no-fiction(계약 doc glance-hero-proofcapsule
+# -be-contract): 정직 소스만 — claim·status·proof_count·auto_verify(merge gate)·gate 구조필드·
+# trustSeal(self_reported/human_verified·E-VERIFY V0-S2·스푸핑불가). ⛔미포함(발명 금지):
+# ac_met/ac_total(acceptance_criteria=freeform Text)·risk(플랫폼 위험도판정 안 함)·diff(미저장).
+# PO判定(2026-07-12): BE는 구조화 필드만·표시문자열/라벨 금지(i18n=FE lane)·라벨 합성은 FE가
+# decision_basis/auto_decision_reason verbatim으로.
+_AUTO_VERIFY_MAP = {"sufficient": "passed", "blocked": "failed"}
+
+
+class HeroMember(BaseModel):
+    member_id: uuid.UUID
+    name: str
+    role: str | None = None
+
+
+class HeroTrust(BaseModel):
+    self_reported: bool
+    human_verified: bool
+    human_verified_by: HeroMember | None = None
+    human_verified_at: datetime | None = None
+
+
+class HeroGate(BaseModel):
+    status: str
+    gate_type: str
+    requires_human: bool
+    decision_basis: str | None = None  # verbatim(FE가 라벨 합성)
+    auto_decision_reason: str | None = None  # verbatim
+
+
+class HeroResponse(BaseModel):
+    story_id: uuid.UUID
+    claim: str
+    status: str
+    proof_count: int
+    auto_verify: str | None = None  # "passed" | "failed" | null
+    gate: HeroGate | None = None
+    trust: HeroTrust
+
+
+@router.get("/hero", response_model=HeroResponse)
+async def glance_hero(
+    story_id: uuid.UUID = Query(...),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> HeroResponse:
+    """현재 에픽 활성 story의 Proof Capsule 소비 payload. project-scope 가드·no-fiction 구조필드만."""
+    story = (
+        await session.execute(
+            select(Story).where(
+                Story.id == story_id, Story.org_id == org_id, Story.deleted_at.is_(None)
+            )
+        )
+    ).scalar_one_or_none()
+    # resolved-resource project-scope 가드(404·존재 비노출·스캐너 PROJECT_PARAM 감시축).
+    if story is None or not await has_project_access(
+        session, uuid.UUID(auth.user_id), story.project_id, org_id
+    ):
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    # proof_count = evidence row 개수 → self_reported.
+    proof_count = (
+        await session.execute(
+            select(func.count(Evidence.id)).where(
+                Evidence.org_id == org_id,
+                Evidence.work_item_id == story_id,
+                Evidence.work_item_type == "story",
+            )
+        )
+    ).scalar_one()
+
+    # human_verified = 최신 gate_approval evidence(휴먼 서명·스푸핑불가). by/at + member name/role.
+    hv = (
+        await session.execute(
+            select(Evidence.created_by, Evidence.created_at)
+            .where(
+                Evidence.org_id == org_id,
+                Evidence.work_item_id == story_id,
+                Evidence.work_item_type == "story",
+                Evidence.type == "gate_approval",
+            )
+            .order_by(Evidence.created_at.desc())
+            .limit(1)
+        )
+    ).first()
+    hv_member: HeroMember | None = None
+    hv_at: datetime | None = None
+    if hv is not None:
+        hv_by, hv_at = hv
+        m = (
+            await session.execute(
+                select(Member.name, Member.org_role).where(Member.id == hv_by)
+            )
+        ).first()
+        hv_member = HeroMember(member_id=hv_by, name=m[0] if m else "", role=m[1] if m else None)
+
+    trust = HeroTrust(
+        self_reported=proof_count > 0,
+        human_verified=hv is not None,
+        human_verified_by=hv_member,
+        human_verified_at=hv_at,
+    )
+
+    # auto_verify = story의 merge gate evidence_status(없으면 null·대부분 story).
+    merge_status = (
+        await session.execute(
+            select(Gate.evidence_status)
+            .where(
+                Gate.org_id == org_id,
+                Gate.work_item_id == story_id,
+                Gate.work_item_type == "story",
+                Gate.gate_type == "merge",
+            )
+            .order_by(Gate.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    auto_verify = _AUTO_VERIFY_MAP.get(merge_status) if merge_status else None
+
+    # gate = story의 현재 pending gate(결정점) 구조필드·없으면 null.
+    gate_row = (
+        await session.execute(
+            select(Gate)
+            .where(
+                Gate.org_id == org_id,
+                Gate.work_item_id == story_id,
+                Gate.work_item_type == "story",
+                Gate.status == "pending",
+            )
+            .order_by(Gate.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    gate = (
+        HeroGate(
+            status=gate_row.status,
+            gate_type=gate_row.gate_type,
+            requires_human=gate_row.requires_human,
+            decision_basis=gate_row.decision_basis,
+            auto_decision_reason=gate_row.auto_decision_reason,
+        )
+        if gate_row is not None
+        else None
+    )
+
+    return HeroResponse(
+        story_id=story_id,
+        claim=story.title,
+        status=story.status,
+        proof_count=proof_count,
+        auto_verify=auto_verify,
+        gate=gate,
+        trust=trust,
+    )
