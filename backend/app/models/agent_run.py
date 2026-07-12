@@ -41,6 +41,11 @@ class AgentRun(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="running")
     result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # duration_ms_legacy: 백필-only vestigial 컬럼(baseline schema.sql). 모델엔 미매핑이었으나
+    # 아래 duration_ms의 GENERATED 표현식이 이를 참조하므로, create_all(모델 메타데이터로 테이블
+    # 구축하는 realdb 테스트)에서 컬럼 부재로 UndefinedColumnError가 났다. DB에 존재하는 컬럼을
+    # 명시 매핑해 create_all DDL이 prod(migrated)와 동형이 되게 한다(read-only 취급·write 경로 없음).
+    duration_ms_legacy: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 2a5f21d3: DB에선 GENERATED ALWAYS STORED(baseline schema.sql·started/finished_at 또는
     # duration_ms_legacy 폴백에서 파생)인데 모델이 plain writable Integer로 매핑해 SQLAlchemy가
     # INSERT/UPDATE에 이 컬럼을 항상 emit → GeneratedAlwaysError로 agent_runs 생성 전건 실패했다.
