@@ -1289,6 +1289,13 @@ async def add_comment(
             reference_type="story",
             reference_id=story.id,
             source_project_id=story.project_id,
+            # C0-S2: 에이전트가 payload만 보고 답글 달 수 있는 최소 반응 맥락(webhook generic payload).
+            context={
+                "story_id": str(story.id),
+                "comment_id": str(comment.id),
+                "content": content,
+                "author_member_id": str(created_by),
+            },
         )
 
     return CommentResponse.model_validate(comment)

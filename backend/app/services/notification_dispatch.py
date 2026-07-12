@@ -30,6 +30,9 @@ async def _deliver_personal_webhooks(
     title: str,
     body: str | None,
     event_type: str,
+    reference_type: str | None = None,
+    reference_id: uuid.UUID | None = None,
+    context: dict | None = None,
 ) -> None:
     """96af343e: 활성 개인(member-scoped) WebhookConfig 보유 휴먼에게 알림 webhook POST.
 
@@ -85,7 +88,17 @@ async def _deliver_personal_webhooks(
             payload = {"content": text}
             secret = None  # Discord 자체 인증 방식
         else:
-            payload = {"event": event_type, "title": title, "body": body}
+            # C0-S2: 에이전트가 payload만 보고 반응(답글)할 수 있도록 반응 맥락을 실는다 —
+            # reference(story 등) + context(comment_id·content·author). Discord(휴먼)는 content
+            # 텍스트 제약이라 위 분기 유지·structured 맥락은 generic(에이전트 런타임 endpoint) payload.
+            payload = {
+                "event": event_type,
+                "title": title,
+                "body": body,
+                "reference_type": reference_type,
+                "reference_id": str(reference_id) if reference_id else None,
+                "context": context or {},
+            }
             secret = cfg.secret
         try:
             await _post_with_retry(cfg.url, payload, secret, str(cfg.member_id))
@@ -104,6 +117,7 @@ async def dispatch_notification(
     reference_type: str | None = None,
     reference_id: uuid.UUID | None = None,
     source_project_id: uuid.UUID | None = None,
+    context: dict | None = None,
 ) -> None:
     """notification_settings 필터 후 enabled member에게 알림 발송.
 
@@ -273,14 +287,20 @@ async def dispatch_notification(
             from app.services.activity_stream import extract_activities_best_effort
             await extract_activities_best_effort(db, [e.id for e in created_events])
 
-        # 96af343e (옵션 C): 휴먼 개인 webhook 발송 — in-app Notification 과 동일 flush 타이밍
-        # best-effort. 활성 member-scoped WebhookConfig 보유 휴먼만(agent SSE 경로 무관).
-        human_member_ids = [
+        # 96af343e(옵션 C) + C0-S2(8bace49e 부활): 개인 webhook 발송 — 휴먼 + agent(활성 webhook).
+        # ⭐agent(활성 webhook)는 위에서 Event INSERT를 스킵했다("외부 채널로 전달" 전제). 그런데 그
+        # webhook을 여기서 실제로 쏘지 않으면 Event도 스킵·webhook도 미발송 = comment.created가
+        # webhook-agent에 미도달(죽은 경로). 이 경로를 부활시켜 에이전트 반응 왕복을 잇는다 —
+        # member-bound WebhookConfig·mute(NotificationPreference)·SSRF 재검증 기존 SSOT 재사용·
+        # Event-skip 유지라 이중배달 0(webhook 단일 채널).
+        webhook_deliver_ids = [
             m.id for m in members
-            if m.type != "agent" and getattr(m, "user_id", None)
+            if (m.type != "agent" and getattr(m, "user_id", None))
+            or (m.type == "agent" and m.id in webhook_member_ids)
         ]
         await _deliver_personal_webhooks(
-            db, org_id, human_member_ids, title=title, body=body, event_type=event_type
+            db, org_id, webhook_deliver_ids, title=title, body=body, event_type=event_type,
+            reference_type=reference_type, reference_id=reference_id, context=context,
         )
 
     except Exception:
