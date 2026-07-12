@@ -53,6 +53,33 @@
   animation: ai-loading-indeterminate 1.5s ease-in-out infinite;
 }
 
+/* E-UI-DAEGBYEON P0: Proof Capsule 모션(FE 스펙 §6) — 실행 중 1.8s 호흡(citron pulse)·
+   증거 추가 레일 1회 스윕·성공 700ms 체크 후 정지(무한 반복 금지). motion-safe:로만 적용
+   (prefers-reduced-motion 시 자동 제거, skeleton.tsx/presence-dot.tsx 관례 동일). */
+@keyframes proof-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--proof-citron) 30%, transparent); }
+  50% { opacity: 0.55; box-shadow: 0 0 0 5px color-mix(in srgb, var(--proof-citron) 15%, transparent); }
+}
+.animate-proof-pulse {
+  animation: proof-pulse 1.8s ease-in-out infinite;
+}
+@keyframes proof-sweep {
+  0% { transform: translateY(-100%); opacity: 0; }
+  40% { opacity: 1; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+.animate-proof-sweep {
+  animation: proof-sweep 0.6s ease-out 1;
+}
+@keyframes proof-check-in {
+  0% { opacity: 0; transform: scale(0.6); }
+  60% { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.animate-proof-check-in {
+  animation: proof-check-in 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 1 both;
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);
@@ -132,6 +159,27 @@
   --color-destructive-bg: var(--destructive-bg);
   --color-destructive-border: var(--destructive-border);
   --color-destructive-tint: var(--destructive-tint);
+
+  /* E-UI-DAEGBYEON P0: Proof Capsule 시그니처 토큰(proof-capsule-fe-spec-handoff §3) — 리포트
+     정확 hex값 그대로(기존 OKLCH 관례와 별개 네임스페이스, 브랜드 시그니처 의도적 예외). */
+  --color-proof-bg: var(--proof-bg);
+  --color-proof-panel: var(--proof-panel);
+  --color-proof-sunk: var(--proof-sunk);
+  --color-proof-line: var(--proof-line);
+  --color-proof-line-soft: var(--proof-line-soft);
+  --color-proof-ink: var(--proof-ink);
+  --color-proof-ink-2: var(--proof-ink-2);
+  --color-proof-ink-3: var(--proof-ink-3);
+  --color-proof-faint: var(--proof-faint);
+  --color-proof-blue: var(--proof-blue);
+  --color-proof-blue-soft: var(--proof-blue-soft);
+  --color-proof-citron: var(--proof-citron);
+  --color-proof-green: var(--proof-green);
+  --color-proof-green-soft: var(--proof-green-soft);
+  --color-proof-amber: var(--proof-amber);
+  --color-proof-amber-soft: var(--proof-amber-soft);
+  --color-proof-red: var(--proof-red);
+  --color-proof-red-soft: var(--proof-red-soft);
 }
 
 /* ─── Light Mode (OKLCH zinc) ─── */
@@ -220,6 +268,26 @@
   --tiptap-link: oklch(0.55 0.18 258);
   --tiptap-callout-border: oklch(0.55 0.16 145);
   --tiptap-callout-bg: oklch(0.55 0.16 145 / 8%);
+
+  /* E-UI-DAEGBYEON P0: Proof Capsule (Light · Bone) — proof-capsule-mockup-render 정확값 */
+  --proof-bg: #F4F2EC;
+  --proof-panel: #FFFFFF;
+  --proof-sunk: #ECEAE2;
+  --proof-line: #E0DDD3;
+  --proof-line-soft: #EAE8E0;
+  --proof-ink: #121310;
+  --proof-ink-2: #3B3D37;
+  --proof-ink-3: #6D6F67;
+  --proof-faint: #9C9E93;
+  --proof-blue: #3157FF;
+  --proof-blue-soft: #EAEEFF;
+  --proof-citron: #C7F85A;
+  --proof-green: #1F9D57;
+  --proof-green-soft: #E7F6EE;
+  --proof-amber: #B7791F;
+  --proof-amber-soft: #FBF1DE;
+  --proof-red: #C33B3B;
+  --proof-red-soft: #FBEAEA;
 }
 
 /* ─── Dark Mode (OKLCH zinc) ─── */
@@ -307,6 +375,27 @@
   --tiptap-link: oklch(0.75 0.14 258);
   --tiptap-callout-border: oklch(0.65 0.15 145);
   --tiptap-callout-bg: oklch(0.65 0.15 145 / 10%);
+
+  /* E-UI-DAEGBYEON P0: Proof Capsule (Dark · Carbon/Fog) — proof-capsule-mockup-render 정확값.
+     단순 반전 아님(§ 의미대비) — blue/green/amber/red 전부 dark 전용 값. */
+  --proof-bg: #0B0C0D;
+  --proof-panel: #17191C;
+  --proof-sunk: #111315;
+  --proof-line: #2B2E2D;
+  --proof-line-soft: #232628;
+  --proof-ink: #F2F4ED;
+  --proof-ink-2: #C4C7BE;
+  --proof-ink-3: #8D9088;
+  --proof-faint: #5F625B;
+  --proof-blue: #6B87FF;
+  --proof-blue-soft: #1C2438;
+  --proof-citron: #C7F85A;
+  --proof-green: #4FB97E;
+  --proof-green-soft: #14251C;
+  --proof-amber: #D9A441;
+  --proof-amber-soft: #2A2214;
+  --proof-red: #E06767;
+  --proof-red-soft: #2A1717;
 }
 
 /* Sidebar: open triggers get active background */

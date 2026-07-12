@@ -11,6 +11,7 @@ from app.models.project import Project
 from app.repositories.reward import RewardRepository
 from app.schemas.reward import BalanceResponse, GrantReward, LeaderboardEntry, RewardLedgerResponse
 from app.services.member_resolver import is_caller_member, resolve_member
+from app.services.project_auth import has_project_access
 
 router = APIRouter(prefix="/api/v2/rewards", tags=["rewards"])
 
@@ -37,7 +38,15 @@ async def list_rewards(
     project_id: uuid.UUID = Query(...),
     member_id: uuid.UUID | None = Query(default=None),
     repo: RewardRepository = Depends(_get_repo),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[RewardLedgerResponse]:
+    # ratchet round3(story 8aec83b3 패턴): org_id는 RewardRepository 생성자에서 이미 스코프되나
+    # project_id 쿼리파라미터(조회대상 자체)에 caller 접근권 검증이 없어 same-org cross-project
+    # 리워드 원장이 노출됐다 — resource-actual project_id 직접검증.
+    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+
     items = await repo.list(project_id=project_id, member_id=member_id)
     return [RewardLedgerResponse.model_validate(i) for i in items]
 

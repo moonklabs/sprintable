@@ -36,13 +36,42 @@ class EpicRepository(BaseRepository[Epic]):
         **filters: Any,
     ) -> tuple[list[Epic], int]:
         """기본 페이지네이션 + 연결 가설 집계(hypothesis_count·risky_status) + 스토리 집계
-        (total_stories·done_stories) 부착."""
-        epics, total = await super().list_paginated(
-            limit=limit, cursor=cursor, order_by=order_by, **filters
-        )
+        (total_stories·done_stories) 부착.
+
+        E-GLANCE wedge #2(story 96b19bc3) §1.3: order_by="position"은 옵트인 로드맵 조타
+        정렬 — (position IS NULL) ASC, position ASC, created_at DESC 복합 규칙이라 BaseRepository의
+        단조-컬럼 cursor 메커니즘(datetime 비교)과 shape가 달라 별도 경로로 처리한다(cursor
+        파라미터는 이 모드에서 미지원 — v1 스코프, #2056 기본 정렬 경로는 완전 무변경).
+        """
+        if order_by == "position":
+            epics, total = await self._list_paginated_by_position(limit=limit, **filters)
+        else:
+            epics, total = await super().list_paginated(
+                limit=limit, cursor=cursor, order_by=order_by, **filters
+            )
         await self._attach_hypothesis_aggregates(epics)
         await self._attach_story_aggregates(epics)
         return epics, total
+
+    async def _list_paginated_by_position(
+        self, *, limit: int | None, **filters: Any,
+    ) -> tuple[list[Epic], int]:
+        conds = [self._org_filter()]
+        for attr, val in filters.items():
+            conds.append(getattr(Epic, attr) == val)
+
+        count_result = await self.session.execute(
+            select(func.count()).select_from(Epic).where(*conds)
+        )
+        total = int(count_result.scalar_one() or 0)
+
+        q = (
+            select(Epic).where(*conds)
+            .order_by(Epic.position.is_(None).asc(), Epic.position.asc(), Epic.created_at.desc())
+            .limit(limit if limit is not None else 1000)
+        )
+        result = await self.session.execute(q)
+        return list(result.scalars().all()), total
 
     async def _attach_hypothesis_aggregates(self, epics: Sequence[Epic]) -> None:
         """페이지 전체 epic의 연결 가설 수/최위험 상태를 단일 쿼리로 집계해 부착.

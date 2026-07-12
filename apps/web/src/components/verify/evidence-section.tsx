@@ -2,12 +2,13 @@
 
 import { useCallback, useState } from 'react';
 import {
-  ChevronDown, ChevronUp, ExternalLink, Link2, Paperclip,
+  Check, ChevronDown, ChevronUp, ExternalLink, Link2, Paperclip,
   GitPullRequest, Rocket, TrendingUp, FileText, CheckCircle2,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { TrustSeal } from './trust-seal';
-import type { EvidenceItem, EvidenceType } from '@/services/verify';
+import { cn } from '@/lib/utils';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { deriveTrustStage, type EvidenceItem, type EvidenceType } from '@/services/verify';
 
 const VISIBLE_LIMIT = 4;
 
@@ -39,19 +40,29 @@ export function isLinkableRef(ref: string): boolean {
 interface EvidenceSectionProps {
   workItemId: string;
   workItemType: 'story' | 'task';
-  /** BE list/get 응답의 has_evidence 신호. false는 절대 오지 않음(null=무증거) — undefined도 무증거로 취급. */
-  hasEvidence: boolean | null | undefined;
+  /** E-VERIFY P0-04(claimed-vs-verified-spec-handoff §3) — has_evidence(1 boolean) 대체 2신호.
+   * false는 절대 오지 않음(null=무증거) — undefined도 무증거로 취급. */
+  selfReported: boolean | null | undefined;
+  humanVerified: boolean | null | undefined;
+  humanVerifiedBy: string | null | undefined;
+  humanVerifiedAt: string | null | undefined;
   memberMap?: Record<string, { name: string }>;
   className?: string;
 }
 
 /**
- * E-VERIFY V0-S3 Lv1(접힘 신뢰 행) + Lv2(펼침 evidence 카드). 유나 S4 핸드오프 §3/§4 준수.
+ * E-VERIFY V0-S3 Lv1(접힘 신뢰 행) + Lv2(펼침 evidence 카드) + P0-04 Claimed-vs-Verified 데이터
+ * 배선. 유나 S4 핸드오프 §3/§4 + claimed-vs-verified-spec-handoff §3 준수.
  * "근거 보기" 클릭 시에만 evidence 리스트를 호출한다(디디 BE 가이드 — 리스트 렌더 시 카드마다
- * 부르지 않는 게 정합, has_evidence 하나로 Lv0 씰 표시는 충분). 그래서 fetch 전엔 건수를 모른다 —
+ * 부르지 않는 게 정합, self_reported 하나로 Lv0 씰 표시는 충분). 그래서 fetch 전엔 건수를 모른다 —
  * Lv1 라벨은 펼치기 전엔 카운트 없이 "증명된 완결"만, 펼친 후 실 카운트로 채워진다.
+ *
+ * Lv0/Lv1 씰은 story/task 응답에 이미 동봉된 human_verified_by/at으로 즉시 정확하게 렌더된다
+ * (evidence 리스트 fetch를 기다릴 필요 없음 — verified 여부/who/when은 집계 필드).
  */
-export function EvidenceSection({ workItemId, workItemType, hasEvidence, memberMap = {}, className }: EvidenceSectionProps) {
+export function EvidenceSection({
+  workItemId, workItemType, selfReported, humanVerified, humanVerifiedBy, humanVerifiedAt, memberMap = {}, className,
+}: EvidenceSectionProps) {
   const t = useTranslations('verify');
   const tCommon = useTranslations('common');
   const [expanded, setExpanded] = useState(false);
@@ -81,19 +92,32 @@ export function EvidenceSection({ workItemId, workItemType, hasEvidence, memberM
   };
 
   // 증거 0 = 신뢰 행 자체를 렌더하지 않는다(§7 상태 매트릭스 — 현행과 동일 무표시, "증명 안 됨" 금지).
-  if (!hasEvidence) return null;
+  const trustStage = deriveTrustStage({ self_reported: selfReported, human_verified: humanVerified });
+  if (!trustStage) return null;
 
   const visibleItems = items && !showAll ? items.slice(0, VISIBLE_LIMIT) : items;
   const hiddenCount = items ? items.length - VISIBLE_LIMIT : 0;
   const signerId = items?.[0]?.created_by ?? null;
   const signerName = signerId ? memberMap[signerId]?.name : null;
+  // E-VERIFY P0-04 — Lv0/Lv1 씰은 이 자리에서 즉시 정확하게(evidence fetch 대기 없이): verified는
+  // human_verified_by 실명(who), claimed는 "에이전트 주장"(self_reported엔 who가 없어 일반화,
+  // §3 계약 그대로). 과거 무조건 초록 체크였던 자리 — human 미검증 건은 여기서 amber로 정정된다.
+  const verifiedByName = humanVerifiedBy ? (memberMap[humanVerifiedBy]?.name ?? humanVerifiedBy.slice(0, 6)) : null;
+  const verifiedWhen = humanVerifiedAt ? formatRelativeTime(humanVerifiedAt) : null;
+  const sealLabel = trustStage === 'verified'
+    ? (verifiedByName ? `${t('trustSealVerifiedBy', { name: verifiedByName })}${verifiedWhen ? ` · ${verifiedWhen}` : ''}` : t('provenCompletion'))
+    : t('trustSealClaimedBy');
 
   return (
     <div className={className}>
       <div className="rounded-lg border border-border p-2.5">
         <button type="button" onClick={handleToggle} className="flex w-full items-center gap-2 text-left">
-          <TrustSeal />
-          <span className="text-xs font-semibold text-foreground">{t('provenCompletion')}</span>
+          <Check
+            className={cn('h-3 w-3 shrink-0', trustStage === 'verified' ? 'text-success/85' : 'text-warning')}
+            strokeWidth={2.6}
+            aria-hidden
+          />
+          <span className="text-xs font-semibold text-foreground">{sealLabel}</span>
           {items ? (
             <span className="text-[11px] text-muted-foreground">· {t('evidenceCount', { count: items.length })}</span>
           ) : null}

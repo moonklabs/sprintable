@@ -115,6 +115,11 @@ def _base_epic_mock(outcome_status: str = "n_a") -> MagicMock:
     # E1 S8b: EpicResponse 신규 집계 필드 — MagicMock auto-attr ValidationError 방지.
     e.hypothesis_count = 0
     e.risky_status = None
+    e.total_stories = 0
+    e.done_stories = 0
+    # E-GLANCE wedge #2(story 96b19bc3): 신규 필드 — 동일 사유.
+    e.position = None
+    e.source_loop_id = None
     e.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     e.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     return e

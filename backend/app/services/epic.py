@@ -77,4 +77,10 @@ async def transition_epic(
 
     epic.status = to_status
     await session.flush()
+    # BaseRepository.update()와 동형(SEE feedback_base_repository_refresh) — updated_at이
+    # onupdate=func.now() 서버생성값이라 flush만으로는 파이썬 객체에 반영 안 되고 unloaded 상태로
+    # 남는다. 이후 EpicResponse.model_validate(from_attributes)가 동기 컨텍스트에서 이 속성을
+    # 읽으려 하면 lazy-load가 트리거돼 MissingGreenlet 500(story는 BaseRepository.update() 경유라
+    # refresh가 이미 있어 무증상 — epic만 직접 mutation이라 누락됐던 것).
+    await session.refresh(epic)
     return epic

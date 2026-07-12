@@ -2,12 +2,15 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.models.member import Member
 from app.repositories.agent_persona import AgentPersonaRepository
 from app.schemas.agent_persona import CreatePersonaRequest, UpdatePersonaRequest
+from app.services.project_auth import assert_target_in_caller_org
 
 router = APIRouter(prefix="/api/v2/agent-personas", tags=["agent-personas"])
 
@@ -33,6 +36,17 @@ def _get_org_project(auth: AuthContext) -> tuple[uuid.UUID, uuid.UUID]:
     return uuid.UUID(str(org_id_str)), uuid.UUID(str(project_id_str))
 
 
+async def _assert_agent_in_caller_org(session: AsyncSession, caller_org_id: uuid.UUID, agent_id: uuid.UUID) -> None:
+    """E-SECURITY SEC-S7(story a7dd0431·까심 QA 부수발견 E): create_persona/seed_builtin_personas가
+    caller의 org_id만으로 target agent_id에 persona를 생성해 타 org agent 오염(public AgentCard
+    내용 오염 + default persona collision DoS)이 가능했다. SEC-S6의 `assert_target_in_caller_org`
+    공통 가드 재사용 — target(agent)의 실제 org를 조회해 caller org와 대조."""
+    target_org_id = (await session.execute(
+        select(Member.org_id).where(Member.id == agent_id, Member.type == "agent")
+    )).scalar_one_or_none()
+    assert_target_in_caller_org(caller_org_id, target_org_id, not_found_detail="Agent not found")
+
+
 @router.get("")
 async def list_personas(
     agent_id: uuid.UUID = Query(...),
@@ -56,6 +70,7 @@ async def create_persona(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    await _assert_agent_in_caller_org(repo.session, org_id, body.agent_id)
     try:
         persona = await repo.create(
             org_id=org_id,
@@ -86,6 +101,7 @@ async def seed_builtin_personas(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    await _assert_agent_in_caller_org(repo.session, org_id, agent_id)
     result = await repo.seed_builtin(org_id, project_id, agent_id)
     return _ok(result)
 

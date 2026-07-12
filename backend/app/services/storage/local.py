@@ -83,6 +83,24 @@ class LocalStorageProvider(StorageProvider):
             logger.warning("local storage: signed url 생성 실패 path=%s", object_path, exc_info=True)
             return None
 
+    async def signed_write_url(
+        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None
+    ) -> str | None:
+        """signed_read_url과 동형이나 payload에 method=PUT을 바인딩(read 서명 재사용 방지).
+        ⚠️ FE `/api/storage/local/...` serve 라우트가 현재 GET만 문서화돼 있어 PUT 수신을
+        지원하려면 FE 측 대응 핸들러가 필요(OSS local provider 후속 — BE 서명 계약만 여기 마련)."""
+        secret = _signing_secret()
+        try:
+            base = os.environ.get("STORAGE_LOCAL_SERVE_BASE_URL", _DEFAULT_SERVE_BASE).rstrip("/")
+            exp = int((time.time() + ttl.total_seconds()) * 1000)
+            payload = f"PUT:{container}/{object_path}:{exp}".encode()
+            sig = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+            qs = urlencode({"exp": exp, "sig": sig, "method": "PUT"})
+            return f"{base}/api/storage/local/{container}/{object_path}?{qs}"
+        except Exception:
+            logger.warning("local storage: signed write url 생성 실패 path=%s", object_path, exc_info=True)
+            return None
+
     async def delete_object(self, container: str, object_path: str) -> bool:
         def _blocking() -> bool:
             _resolve_safe(container, object_path).unlink(missing_ok=True)  # 없어도 OK = 멱등

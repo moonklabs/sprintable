@@ -24,7 +24,14 @@ export interface KanbanStory {
   labels?: { id: string; name: string; color: string | null }[];
   gates?: { id: string; gate_type: string; status: string }[];
   // E-VERIFY V0-S1/S2: 실증-done 신뢰 신호. true면 근거 有, null이면 완전 무표시.
+  // has_evidence는 BE 하위호환용으로 유지(self_reported와 동일 값) — 신규 소비처는 아래 2신호 사용.
   has_evidence?: boolean | null;
+  // E-VERIFY P0-04(claimed-vs-verified-spec-handoff §3, PR #2069) — has_evidence를 대체하는
+  // 2신호. self_reported=agent 자가보고(증거 첨부)·human_verified=책임자 gate 승인(who/when 동봉).
+  self_reported?: boolean | null;
+  human_verified?: boolean | null;
+  human_verified_by?: string | null;
+  human_verified_at?: string | null;
 }
 
 export interface GateItem {

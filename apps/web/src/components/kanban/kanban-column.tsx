@@ -315,6 +315,7 @@ export function KanbanColumn({
                   labels={storyLabelsMap?.[story.id] ?? []}
                   gates={storyGatesMap?.[story.id] ?? []}
                   lineStatus={storyLineMap?.[story.id]}
+                  verifiedBy={story.human_verified_by ? memberMap[story.human_verified_by] : undefined}
                 />
               ))}
             </div>

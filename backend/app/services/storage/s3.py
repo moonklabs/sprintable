@@ -56,6 +56,23 @@ class S3StorageProvider(StorageProvider):
             logger.warning("s3 storage: signed url 생성 실패 path=%s", object_path, exc_info=True)
             return None
 
+    async def signed_write_url(
+        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None
+    ) -> str | None:
+        def _blocking() -> str:
+            params: dict = {"Bucket": container, "Key": object_path}
+            if content_type:
+                params["ContentType"] = content_type
+            return _client().generate_presigned_url(
+                "put_object", Params=params, ExpiresIn=int(ttl.total_seconds()),
+            )
+
+        try:
+            return await asyncio.to_thread(_blocking)
+        except Exception:
+            logger.warning("s3 storage: signed write url 생성 실패 path=%s", object_path, exc_info=True)
+            return None
+
     async def delete_object(self, container: str, object_path: str) -> bool:
         def _blocking() -> bool:
             _client().delete_object(Bucket=container, Key=object_path)  # S3 delete=멱등(없어도 성공)

@@ -18,6 +18,11 @@ import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outc
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
+import { deriveInFlightTrustChip } from '@/services/verify';
+import type { ProofState } from '@/components/proof-capsule/proof-capsule';
+import { Workcell, type WorkcellMessage } from '@/components/workcell/workcell';
+import { initials } from '@/lib/storage/format';
+import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
@@ -157,6 +162,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   const [deps, setDeps] = useState<DependencyEdge[]>([]);
   const [loadingDeps, setLoadingDeps] = useState(false);
+  // P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩. gate_type/status/
+  // neutral_facts.ci_result만 필요(GateItem 전체 불요) — 얇은 로컬 타입으로 충분.
+  const [chipGates, setChipGates] = useState<{ gate_type: string; status: string; neutral_facts?: Record<string, unknown> | null }[]>([]);
   const [showAddDep, setShowAddDep] = useState(false);
   const [depQuery, setDepQuery] = useState('');
   const [depQueryResults, setDepQueryResults] = useState<{ id: string; title: string }[]>([]);
@@ -326,6 +334,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       .finally(() => setLoadingDeps(false));
   }, [story.id]);
 
+  // P0-04 in-flight 신뢰 칩 — StoryMergeGate와 동형 데이터소스(work_item_id 필터, BE 추가 0).
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/gates?work_item_id=${story.id}&work_item_type=story`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((gates) => { if (!cancelled) setChipGates(Array.isArray(gates) ? gates : []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [story.id]);
+
   // Keep the locally-displayed status synced when a different story is selected or the
   // board pushes an external update. Optimistic in-panel changes set it directly (handler),
   // so the badge reflects immediately without waiting for the prop round-trip (S6 AC2 ④).
@@ -340,6 +358,50 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   };
   const statusKey = statusKeyMap[localStatus];
   const statusLabel = statusKey ? t(statusKey) : localStatus;
+
+  // P0-04(trust-pipeline-minimal-decision) — in-flight 전용 칩. done엔 항상 무표시(TrustSeal
+  // 담당·중복 금지, deriveInFlightTrustChip 내부에서 강제). 무신호=칩 자체 미렌더(no-fiction).
+  const trustChip = deriveInFlightTrustChip(localStatus, chipGates);
+  const trustChipLabel = trustChip === 'needs_input' ? t('trustChipNeedsInput') : trustChip === 'merge_ready' ? t('trustChipMergeReady') : null;
+
+  // E-UI-DAEGBYEON P0 — Workcell 최소 실화면 배선(story `e5310d1b`, dead-path 방지).
+  // 정직한 최소 표면: 실 필드(title/status/assignee/description/acceptance_criteria/
+  // blocked_by/comments)만으로 채울 수 있는 것만 채운다 — 없는 값은 허구로 안 채움:
+  // - Run.now/stage는 story.status(coarse) 이상의 세부 행위 신호가 없어 statusLabel 그대로
+  //   사용(과장 없음). tools/scopes는 실 데이터 없어 빈 배열(빈 배열=정직, 조작 아님).
+  // - Evidence는 ProofCapsuleProps 실 매핑 인프라(EvidenceSection 재사용)가 후속 스코프라
+  //   지금은 null(정직한 "아직 증거 없음" — 스펙이 명시적으로 허용하는 케이스).
+  // - human assignee 없으면 Workcell 렌더 자체를 생략(허구 human 금지, ProofCapsule 배선과 동일 규율).
+  // P0-04 그라운딩(2026-07-11): GET /api/v2/agent-runs가 story_id 필터를 지원하지 않아(BE
+  // AgentRunRepository.list()는 project_id/agent_id만 필터) FE가 "지금 실제로 도는 에이전트가
+  // 있는지" 알 방법이 없다. 종전엔 blue 상태에 공용 "실행 중"(proofCapsuleStateRunning) 라벨을
+  // 썼는데, 이는 story.status='in-progress'라는 coarse 신호를 "에이전트가 지금 실행 중"이라는
+  // 더 구체적인 주장으로 과장한 것 — no-fiction 위반(파운더 독트린: 실시간 이벤트 텍스트≠실
+  // 실시간 신호). Workcell 전용으로 "진행 중"(workcellStateInProgress, 순수 status 반영, 실행
+  // 주장 없음)으로 정정. Board/Audit의 공용 blue="실행 중" 라벨은 별개 표면이라 스코프 밖
+  // (그쪽도 같은 근본 갭이 있으면 후속 별도 판단). 실 AgentRun story_id 필터는 디디 BE 티켓.
+  const PROOF_STATE_BY_STATUS: Record<string, ProofState> = {
+    'in-progress': 'blue', 'in-review': 'amber', done: 'green',
+  };
+  const proofState = PROOF_STATE_BY_STATUS[localStatus];
+  const proofStateLabel = proofState
+    ? { blue: t('workcellStateInProgress'), amber: t('proofCapsuleStateReviewing'), green: t('proofCapsuleStateProven'), red: t('proofCapsuleStateViolation') }[proofState]
+    : null;
+  const assigneeIds = story.assignee_ids?.length ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
+  const proofHumanId = assigneeIds.find((id) => memberMap[id] && memberMap[id]!.type !== 'agent');
+  const proofAgentId = assigneeIds.find((id) => memberMap[id]?.type === 'agent');
+  const proofHuman = proofHumanId ? memberMap[proofHumanId] : null;
+  const proofAgent = proofAgentId ? memberMap[proofAgentId] : null;
+
+  const WORKCELL_NEXT_NEED_BY_STATUS: Record<string, string> = {
+    'in-progress': t('workcellNextNeedInProgress'),
+    'in-review': t('workcellNextNeedInReview'),
+    done: t('workcellNextNeedDone'),
+  };
+  const workcellMessages: WorkcellMessage[] = comments.map((c) => ({
+    author: memberMap[c.created_by]?.name ?? c.created_by,
+    body: c.content,
+  }));
 
   const patchStory = async (body: Record<string, unknown>): Promise<KanbanStory | null> => {
     const res = await fetch(`/api/stories/${story.id}`, {
@@ -705,38 +767,58 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 <span className="mt-1 shrink-0 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">✎</span>
               </button>
             )}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <button type="button" disabled={savingStatus} aria-label={t('status')}>
-                    <StatusBadge status={localStatus} label={statusLabel} interactive />
-                  </button>
-                }
-              />
-              <DropdownMenuContent align="start">
-                {COLUMNS.map((col) => {
-                  const isCurrent = col.id === localStatus;
-                  // 정공법 A(c1cd484b): 전이-순서 disable 제거 — 어느 상태로든 선택 가능(하드블록 X).
-                  // 비정상 점프는 /status 응답 violation → 비차단 토스트로 가시화.
-                  return (
-                    <DropdownMenuItem
-                      key={col.id}
-                      disabled={savingStatus || isCurrent}
-                      onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
-                    >
-                      <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
-                      {t(statusKeyMap[col.id] ?? col.i18nKey)}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {/* E-VERIFY V0-S3 Lv1/Lv2 — 완료 badge의 연장으로 읽히도록 바로 아래. 증거 0이면
-                EvidenceSection 자체가 null 렌더(행 미노출, §7 상태 매트릭스). */}
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <button type="button" disabled={savingStatus} aria-label={t('status')}>
+                      <StatusBadge status={localStatus} label={statusLabel} interactive />
+                    </button>
+                  }
+                />
+                <DropdownMenuContent align="start">
+                  {COLUMNS.map((col) => {
+                    const isCurrent = col.id === localStatus;
+                    // 정공법 A(c1cd484b): 전이-순서 disable 제거 — 어느 상태로든 선택 가능(하드블록 X).
+                    // 비정상 점프는 /status 응답 violation → 비차단 토스트로 가시화.
+                    return (
+                      <DropdownMenuItem
+                        key={col.id}
+                        disabled={savingStatus || isCurrent}
+                        onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
+                      >
+                        <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
+                        {t(statusKeyMap[col.id] ?? col.i18nKey)}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {/* P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩(입력 필요/병합
+                  대기). done엔 렌더 0(TrustSeal 중복 방지)·무신호(gate 없음)면 칩 자체 미렌더. 5-status
+                  배지는 무변경(순수 additive 오버레이). 칸반 카드엔 안 얹음(Proofline이 이미 담당). */}
+              {trustChip && trustChipLabel ? (
+                <span
+                  className={
+                    trustChip === 'merge_ready'
+                      ? 'inline-flex items-center gap-1.5 rounded-[7px] bg-proof-green-soft px-2 py-0.5 text-[11px] font-semibold text-proof-green'
+                      : 'inline-flex items-center gap-1.5 rounded-[7px] bg-proof-amber-soft px-2 py-0.5 text-[11px] font-semibold text-proof-amber'
+                  }
+                >
+                  <span className={`size-1.5 rounded-full ${trustChip === 'merge_ready' ? 'bg-proof-green' : 'bg-proof-amber'}`} aria-hidden="true" />
+                  {trustChipLabel}
+                </span>
+              ) : null}
+            </div>
+            {/* E-VERIFY V0-S3 Lv1/Lv2 + P0-04 Claimed-vs-Verified — 완료 badge의 연장으로 읽히도록
+                바로 아래. 증거 0이면 EvidenceSection 자체가 null 렌더(행 미노출, §7 상태 매트릭스). */}
             <EvidenceSection
               workItemId={story.id}
               workItemType="story"
-              hasEvidence={story.has_evidence}
+              selfReported={story.self_reported}
+              humanVerified={story.human_verified}
+              humanVerifiedBy={story.human_verified_by}
+              humanVerifiedAt={story.human_verified_at}
               memberMap={memberMap}
             />
           </div>
@@ -754,6 +836,32 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         </div>
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
+            {/* E-UI-DAEGBYEON P0 — Workcell 4층 데뷔(최소 실화면 배선, story `e5310d1b`).
+                Evidence는 null(정직한 "아직 증거 없음" — EvidenceSection/StoryMergeGate 실
+                데이터 매핑은 후속 스코프, 대체 아님). human assignee 없으면 전체 생략. */}
+            {proofState && proofStateLabel && proofHuman ? (
+              <Workcell
+                title={story.title}
+                proofState={proofState}
+                stateLabel={proofStateLabel}
+                brief={{
+                  goal: story.description?.trim() || story.title,
+                  dod: story.acceptance_criteria?.trim() || t('workcellDodMissing'),
+                  owner: { name: proofHuman.name, role: 'human' },
+                  agent: proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined,
+                }}
+                run={{
+                  now: statusLabel,
+                  stage: statusLabel,
+                  tools: [],
+                  scopes: [],
+                  blocked: story.blocked_by?.length ? t('workcellBlockedReason') : null,
+                  nextNeed: WORKCELL_NEXT_NEED_BY_STATUS[localStatus] ?? statusLabel,
+                }}
+                evidence={null}
+                conversation={{ view: 'run', messages: workcellMessages }}
+              />
+            ) : null}
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>
@@ -1284,6 +1392,8 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               ) : null}
               {/* H1-S8 surface②: 머지 게이트 evidence(read-only·gate 있을 때만 노출) */}
               <StoryMergeGate storyId={story.id} />
+              {/* E-CANVAS AC2 attachment point — BE(C1-S3) 미착지 동안 404→무표시(mock 0). */}
+              <ArtifactSection storyId={story.id} memberMap={memberMap} />
             </div>
 
             {/* Tabs for Tasks, Comments, Activity */}

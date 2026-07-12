@@ -18,6 +18,7 @@ from app.schemas.team_member import (
 )
 from app.services.agent_onboarding_config import build_agent_mcp_config_bundle
 from app.services.member_resolver import assert_caller_is_member, is_caller_member
+from app.services.project_auth import has_project_access
 
 
 class ClaimBody(BaseModel):
@@ -95,6 +96,7 @@ async def list_team_members(
     repo: TeamMemberRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[TeamMemberResponse]:
     # S:166051f0 — org-level(project_id 없음): 휴먼 = org_members SSOT **직접** 해소
     # (team_members 뷰=members⋈project_access 비의존 → project_access.member_id NULL 인
@@ -114,6 +116,12 @@ async def list_team_members(
             agents = await repo.list(**agent_filters)
             result.extend(await _inject_active_stories(agents, session))
         return result
+
+    # ratchet round2(story 8aec83b3): project_id 지정 분기가 접근권 검증 없이 repo.list로
+    # 직행해 same-org cross-project roster(이름/역할)가 노출됐다 — resource-actual project_id
+    # (쿼리파라미터 자체가 조회대상) 직접 검증.
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
 
     filters: dict = {"project_id": project_id}
     if type_filter:
