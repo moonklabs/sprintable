@@ -130,10 +130,7 @@ _KNOWN_DEBT_ALLOWLIST: dict[str, str] = {
     # (test_e_security_sec_s8_ratchet_round9_members_realdb.py). 잔여는 MEDIUM/LOW.
     "app.routers.hypotheses:link_hypothesis":
         "MEDIUM — service._assert_targets_same_project가 sprint/epic/story 주입은 막지만 caller의 hyp.project_id 접근권 자체는 미검증",
-    "app.routers.participation:add_participation":
-        "MEDIUM — org-scope만·body.story_id에 caller의 project 접근권 검증 없음",
-    "app.routers.participation:list_participation":
-        "MEDIUM — org-scope만·story_id 쿼리에 접근권 검증 없음",
+    # participation add/list 2건 상환(story-bound·_assert_story_project_access resource-actual 가드).
     "app.routers.exclusion:exclusion_dry_run":
         "MEDIUM — org-scope만·optional project_id에 접근권 검증 없음",
     "app.routers.standups:get_missing_standups":

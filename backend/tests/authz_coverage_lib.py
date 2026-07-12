@@ -59,6 +59,7 @@ PROJECT_GUARD_FUNCTIONS: frozenset[str] = frozenset({
     "_assert_doc_parent_in_project",
     "_assert_link_target_in_scope",
     "_assert_task_project_access",
+    "_assert_story_project_access",
 })
 
 # Depends(...) 콜러블 — 결과 id가 caller auth에서 서버-파생돼 클라이언트가 스푸핑할 여지가
