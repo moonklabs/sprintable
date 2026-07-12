@@ -31,8 +31,49 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
     // 2D 재설계(dee92c96): GlanceData에 hero 필드 추가(active 에픽/story 없으면 전부 빈값·no-fiction).
     expect(data).toEqual({
       roadmap: [], totalEpicCount: 0, collaboration: [], events: [],
-      activeEpicTitle: null, heroStory: null, memberMap: {}, attentionSignals: [],
+      activeEpicTitle: null, heroStory: null, memberMap: {}, attentionSignals: [], heroEnvelope: null,
     });
+  });
+
+  it('fetches + unwraps the hero envelope for the focal story of the active epic (form {data:{…}})', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/epics')) return jsonResponse([{ id: 'e1', title: 'Epic One', status: 'active', created_at: '2026-07-01T00:00:00Z' }]);
+      if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
+      if (url.startsWith('/api/team-members')) return jsonResponse([]);
+      if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
+      if (url.startsWith('/api/glance/attention')) return jsonResponse({ items: [] });
+      if (url.startsWith('/api/stories')) return jsonResponse([{ id: 's1', epic_id: 'e1', assignee_id: null, title: 'Story One', status: 'in-progress' }]);
+      if (url.startsWith('/api/glance/hero')) {
+        return jsonResponse({
+          story_id: 's1', claim: 'Story One', status: 'in-progress', proof_count: 2, auto_verify: 'passed',
+          gate: { status: 'pending', gate_type: 'merge', requires_human: true, decision_basis: null, auto_decision_reason: null },
+          trust: { self_reported: true, human_verified: false, human_verified_by: null, human_verified_at: null },
+        });
+      }
+      return jsonResponse([]);
+    }));
+    const data = await loadGlanceData('proj-hero');
+    expect(data.heroStory?.id).toBe('s1');
+    expect(data.heroEnvelope).not.toBeNull();
+    expect(data.heroEnvelope!.proof_count).toBe(2);
+    expect(data.heroEnvelope!.auto_verify).toBe('passed');
+    expect(data.heroEnvelope!.gate?.gate_type).toBe('merge');
+  });
+
+  it('leaves heroEnvelope null when the hero fetch fails (not-ok) — minimal render fallback, no throw', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/epics')) return jsonResponse([{ id: 'e1', title: 'Epic One', status: 'active', created_at: '2026-07-01T00:00:00Z' }]);
+      if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
+      if (url.startsWith('/api/team-members')) return jsonResponse([]);
+      if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
+      if (url.startsWith('/api/glance/attention')) return jsonResponse({ items: [] });
+      if (url.startsWith('/api/stories')) return jsonResponse([{ id: 's1', epic_id: 'e1', assignee_id: null, title: 'Story One', status: 'in-progress' }]);
+      if (url.startsWith('/api/glance/hero')) return { ok: false, json: async () => ({}) } as Response;
+      return jsonResponse([]);
+    }));
+    const data = await loadGlanceData('proj-hero-fail');
+    expect(data.heroStory?.id).toBe('s1');
+    expect(data.heroEnvelope).toBeNull();
   });
 
   it('unwraps the attention envelope {data:{items}} into attentionSignals — 형상 불일치 crash 없이 실신호 배선', async () => {

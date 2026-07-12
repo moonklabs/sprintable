@@ -12,6 +12,7 @@ import {
 } from '@/services/glance';
 import { pickFocalStory, type HeroStory, type HeroMember } from './hero-logic';
 import { parseAttentionSignals, type BeAttentionSignal } from './derive-exception-signals';
+import { parseHeroEnvelope, type HeroEnvelope } from './derive-hero-envelope';
 
 export interface GlanceData {
   roadmap: RoadmapEpic[];
@@ -25,6 +26,9 @@ export interface GlanceData {
   // 예외 스트림(story 0441a197): #2097 glance/attention 실신호(gate_pending·blocked·merge_ready).
   // 미가용/실패는 빈 배열로 정직 처리(throw 0) — 예외 스트림은 없으면 "손 필요한 것 없음" 빈상태.
   attentionSignals: BeAttentionSignal[];
+  // hero ProofCapsule 리치 envelope(story 04da0281): #2099 glance/hero. 형상 붕괴/미가용은 null →
+  // hero 최소 렌더 폴백(claim+state+참여자만·no-fiction). heroStory 없으면 애초에 fetch 안 함.
+  heroEnvelope: HeroEnvelope | null;
 }
 
 function unwrap<T>(json: unknown): T | null {
@@ -90,6 +94,14 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
     heroStory = pickFocalStory(activeStories);
   }
 
+  // hero 리치 envelope — focal story가 있을 때만 fetch(#2099 glance/hero). 실패/형상붕괴는 null →
+  // hero 최소 렌더 폴백(parseHeroEnvelope가 방어). 신규 fetch는 hero 있는 경우 1회뿐(추가부하 최소).
+  let heroEnvelope: HeroEnvelope | null = null;
+  if (heroStory) {
+    const heroJson = await fetchJson(`/api/glance/hero?story_id=${heroStory.id}`);
+    heroEnvelope = parseHeroEnvelope(heroJson);
+  }
+
   // activity-logs는 flat 배열이 아니라 {items,...} wrapper — 위 함수 doc 참고.
   const activityItems = unwrap<{ items: BeActivityLogItem[] }>(activityJson)?.items ?? [];
   const events = filterMilestoneEvents(activityItems);
@@ -106,5 +118,6 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
     heroStory,
     memberMap,
     attentionSignals,
+    heroEnvelope,
   };
 }
