@@ -75,6 +75,22 @@ async def _seed(session):
     return {"org_id": org.id, "project_id": project.id, "agent_id": agent.id, "story_id": story.id, "task_id": task.id}
 
 
+async def _seed_human_approver(session, org_id: uuid.UUID) -> uuid.UUID:
+    """org owner 휴먼을 시드하고 org_member.id 반환 — e1063967 SOUL-LOCK choke-point가
+    gate_approval evidence를 실제 휴먼 resolver에만 생성하므로, gate 승인 시나리오의 resolver는
+    실 휴먼이어야 human_verified가 세팅된다(라우터가 강제하는 resolved.id와 동형)."""
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    user_id = uuid.uuid4()
+    session.add(User(id=user_id, email=f"approver-{user_id.hex[:8]}@test.com", hashed_password="x"))
+    await session.commit()
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user_id, role="owner")
+    session.add(om)
+    await session.commit()
+    return om.id
+
+
 def _client_for(app):
     from httpx import AsyncClient, ASGITransport
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
@@ -175,7 +191,7 @@ async def test_story_verified_state_after_gate_approval_with_who_and_when():
     try:
         async with Session() as s:
             seeded = await _seed(s)
-            approver_id = uuid.uuid4()
+            approver_id = await _seed_human_approver(s, seeded["org_id"])
             role_id = uuid.uuid4()
 
             gate = await create_gate(
@@ -215,7 +231,7 @@ async def test_task_verified_state_mirrors_story():
     try:
         async with Session() as s:
             seeded = await _seed(s)
-            approver_id = uuid.uuid4()
+            approver_id = await _seed_human_approver(s, seeded["org_id"])
             role_id = uuid.uuid4()
 
             gate = await create_gate(
