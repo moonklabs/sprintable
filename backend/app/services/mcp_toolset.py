@@ -68,7 +68,7 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 묶기 애매한 cross-cutting 자기생성 유틸). C2-S6(코멘트 2종)+C3-S7(edit 1종)+C4-S8(정본
     # 제안 1종) 추가 — 6개(전신 C0~C5 트랙의 마지막 BE 배선). 여전히 story/epic/doc 무관
     # cross-cutting이라 always-allow 유지(추가 성장 시 전용 "canvas" 그룹 신설 고려).
-    "sprintable_create_artifact", "sprintable_get_artifact",
+    "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
 })
@@ -291,7 +291,7 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     # evidence (E-VERIFY V0-S1)
     "sprintable_add_evidence",
     # visual artifacts (E-CANVAS C1-S3 + C2-S6 코멘트 + C3-S7 편집 + C4-S8 정본 제안)
-    "sprintable_create_artifact", "sprintable_get_artifact",
+    "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
 )

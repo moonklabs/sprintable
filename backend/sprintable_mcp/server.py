@@ -31,9 +31,9 @@ from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.visual_artifacts import (
     AddArtifactCommentInput, CreateArtifactInput, EditArtifactInput, GetArtifactInput,
-    ListArtifactCommentsInput, ProposeCanonicalInput,
+    ListArtifactCommentsInput, ListArtifactsInput, ProposeCanonicalInput,
     add_artifact_comment, create_artifact, edit_artifact, get_artifact, list_artifact_comments,
-    propose_canonical_version,
+    list_artifacts, propose_canonical_version,
 )
 from .tools.agent_runs import (
     EmitEventInput, PollEventsInput, UpdateRunStatusInput,
@@ -495,7 +495,7 @@ _TOOL_DEFS: list[tuple] = [
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
      " 남김. 선택제(첨부 안 해도 무불이익).",
      AddEvidenceInput, add_evidence),
-    # Visual artifacts (6) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안)
+    # Visual artifacts (7) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안)
     ("sprintable_create_artifact",
      "시각 산출물 생성(에이전트 생성 입구) — 트리(nodes[])로 구조화. 임포트된 raw HTML/이미지는"
      " type=\"html_blob\" 노드 하나로 감싸도 됨.",
@@ -503,6 +503,10 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_get_artifact",
      "시각 산출물 단건 조회(latest 버전 + nodes).",
      GetArtifactInput, get_artifact),
+    ("sprintable_list_artifacts",
+     "현재 프로젝트 시각 산출물 목록 조회(각 항목=메타+latest 버전 번호·노드 트리 미포함·상세는"
+     " get_artifact) — story_id/epic_id/doc_id로 필터(미지정=프로젝트 전체).",
+     ListArtifactsInput, list_artifacts),
     ("sprintable_list_artifact_comments",
      "artifact 코멘트 스레드 조회(요소/좌표 앵커·resolve 상태) — 휴먼 피드백 왕복 입구.",
      ListArtifactCommentsInput, list_artifact_comments),

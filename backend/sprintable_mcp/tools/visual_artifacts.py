@@ -1,4 +1,4 @@
-"""시각 산출물(visual_artifact) MCP 도구(6개) — E-CANVAS C1-S3(story 8bace49e)+
+"""시각 산출물(visual_artifact) MCP 도구(7개) — E-CANVAS C1-S3(story 8bace49e)+
 C2-S6(story 0edca31e, 코멘트 왕복)+C3-S7(story 940266db, 편집 왕복)+C4-S8(story a5118cb0,
 정본 제안 — 승인은 always-HITL이라 MCP 미제공)."""
 from __future__ import annotations
@@ -68,6 +68,13 @@ class ProposeCanonicalInput(SprintableInput):
     version_number: int
 
 
+class ListArtifactsInput(SprintableInput):
+    # 프로젝트 스코프는 서버-파생(키 컨텍스트·비-caller-suppliable) — 아래 필터만 선택 지정.
+    story_id: str | None = None
+    epic_id: str | None = None
+    doc_id: str | None = None
+
+
 async def create_artifact(args: CreateArtifactInput) -> list[TextContent]:
     """시각 산출물 생성(에이전트 생성 입구, blueprint §F1) — 트리(nodes[])로 구조화해 전달.
     임포트된 raw HTML/이미지는 type="html_blob" 노드 하나로 감싸도 된다."""
@@ -95,6 +102,24 @@ async def get_artifact(args: GetArtifactInput) -> list[TextContent]:
     """시각 산출물 단건 조회(latest 버전 + nodes)."""
     try:
         result = await client.get(f"/api/v2/visual-artifacts/{args.artifact_id}")
+        return ok(result)
+    except Exception as exc:
+        return err(str(exc))
+
+
+async def list_artifacts(args: ListArtifactsInput) -> list[TextContent]:
+    """현재 프로젝트의 시각 산출물 목록 조회 — story_id/epic_id/doc_id로 필터 가능(미지정 시
+    프로젝트 전체). 각 항목은 artifact 메타(title·story/epic/doc 연결·latest 버전 번호)만 반환하며
+    노드 트리는 미포함 — 특정 artifact의 nodes/상세는 get_artifact로 조회."""
+    try:
+        params: dict = {}
+        if args.story_id:
+            params["story_id"] = args.story_id
+        if args.epic_id:
+            params["epic_id"] = args.epic_id
+        if args.doc_id:
+            params["doc_id"] = args.doc_id
+        result = await client.get("/api/v2/visual-artifacts", params=params)
         return ok(result)
     except Exception as exc:
         return err(str(exc))
