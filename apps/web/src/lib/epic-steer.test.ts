@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeReorderPatch, type SteerEpic } from './epic-steer';
+import { computeReorderPatch, resolveRecipientPrefill, type SteerEpic } from './epic-steer';
 
 const e = (id: string, position?: number | null): SteerEpic => ({ id, position });
 
@@ -54,5 +54,23 @@ describe('computeReorderPatch (로드맵 조타 재정렬 → bulk PATCH diff·w
     // A·B 둘 다 pos1(이상). cutoff=1까지 renumber → B가 2로 밀려 중복 제거·A는 그대로.
     const patch = computeReorderPatch([e('A', 1), e('B', 1), e('C')], 1);
     expect(patch).toEqual([{ id: 'B', position: 2 }]);
+  });
+});
+
+describe('resolveRecipientPrefill (STEER v2 커밋 수신자 프리필·마지막 선택 ∩ 가용·하드코딩 없음)', () => {
+  it('기억된 선택을 현재 가용 멤버와 교집합(순서 보존)', () => {
+    expect(resolveRecipientPrefill(['m2', 'm1'], ['m1', 'm2', 'm3'])).toEqual(['m2', 'm1']);
+  });
+
+  it('떠난/사라진 멤버는 자동 탈락', () => {
+    expect(resolveRecipientPrefill(['gone', 'm1'], ['m1', 'm2'])).toEqual(['m1']);
+  });
+
+  it('기억 없음 → 빈 배열(인간이 새로 선택·필수)', () => {
+    expect(resolveRecipientPrefill([], ['m1', 'm2'])).toEqual([]);
+  });
+
+  it('전부 무효 → 빈 배열(하드코딩 폴백 없음·org-agnostic)', () => {
+    expect(resolveRecipientPrefill(['x', 'y'], ['m1'])).toEqual([]);
   });
 });

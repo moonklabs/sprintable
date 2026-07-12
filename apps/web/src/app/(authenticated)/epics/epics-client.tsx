@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ChevronLeft, GripVertical, Plus, Trash2, X } from 'lucide-react';
+import { ChevronLeft, GripVertical, Plus, Send, Trash2, X } from 'lucide-react';
 import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -19,6 +19,7 @@ import {
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
 import { HypothesesSummary } from '@/components/hypotheses/hypotheses-summary';
+import { SteerDispatchModal } from './steer-dispatch-modal';
 
 // ─── Drag sensor ──────────────────────────────────────────────────────────────
 
@@ -790,8 +791,11 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   const [deleting, setDeleting] = useState(false);
   // wedge #2 로드맵 조타
   const [capped, setCapped] = useState(false);          // 상위 STEER_LIMIT 초과(honest 표시·silent-truncation 금지)
-  const [justSteered, setJustSteered] = useState(false); // 조타 후 핸드오프 compact("받았고 움직인다")
-  const [reordering, setReordering] = useState(false);   // bulk PATCH in-flight
+  const [reordering, setReordering] = useState(false);   // bulk PATCH(초안 저장) in-flight
+  // STEER v2: 드래그=조용한 초안(핸드오프 없음). 핸드오프는 명시적 커밋("조타 보내기") 성공 後에만.
+  const [showDispatch, setShowDispatch] = useState(false);
+  const [justDispatched, setJustDispatched] = useState(false);
+  const [dispatchedTo, setDispatchedTo] = useState<string[]>([]); // 지정 수신자 이름(핸드오프 표시용)
   const sensors = useSensors(useSensor(MousePointerSensor, { activationConstraint: { distance: 8 } }));
 
   // wedge #2: order_by=position 옵트인 — 큐레이션 prefix + 자동(NULL) tail. position 모드는 BE가
@@ -842,7 +846,8 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
       // 응답=갱신본만 → 서버 position으로 정합(실 persist 확인·끝단 반영).
       const updById = new Map((data ?? []).map((e) => [e.id, e.position]));
       setEpics((cur) => cur.map((e) => (updById.has(e.id) ? { ...e, position: updById.get(e.id) ?? e.position } : e)));
-      setJustSteered(true); // 핸드오프 compact 노출("조타 접수·오케스트레이션 중")
+      // STEER v2: 드래그는 조용한 초안 저장 — 핸드오프/이벤트 없음(#2078 배선 제거). 신뢰 발화는
+      // 명시적 커밋(POST /epics/steer-dispatch)에서만. 인간이 A→B→A로 번복하는 초안은 새지 않는다.
     } catch (err) {
       console.error('[epics] 재정렬 저장 실패', err);
       setEpics(prev); // 롤백(낙관 UI ≠ 저장)
@@ -909,6 +914,8 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   const filteredEpics = statusFilter === 'all' ? epics : epics.filter((e) => e.status === statusFilter);
   // 조타(드래그 재정렬)는 전체 뷰에서만 — 필터 서브셋은 전역 position을 오염시킨다.
   const sortable = statusFilter === 'all';
+  // 커밋("조타 보내기")은 큐레이션(position≠null)이 하나라도 있을 때만 의미 있다.
+  const hasCurated = epics.some((e) => typeof e.position === 'number');
 
   const listPanel = (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-muted/35">
@@ -931,13 +938,28 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
         ))}
       </div>
 
-      {/* wedge #2 조타→핸드오프 confirm — "감시 아니라 신뢰": 현재 신뢰단계 1개만("받았고 움직인다").
-          활동량/타임스탬프/이벤트 나열 0. Proof Blue·부드러운 호흡·reduced-motion 대응. */}
-      {justSteered ? (
+      {/* STEER v2 조타 보내기(커밋) — 드래그(조용한 초안)와 분리된 명시적 발화. 큐레이션이 있고
+          전체 뷰일 때만. 누르면 수신자 선택 모달 → POST /epics/steer-dispatch. */}
+      {sortable && hasCurated ? (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-proof-line-soft px-4 py-2">
+          <span className="min-w-0 truncate text-[11px] text-muted-foreground">{t('steerCommitHint')}</span>
+          <Button size="sm" variant="outline" className="shrink-0" onClick={() => setShowDispatch(true)}>
+            <Send className="mr-1.5 h-3.5 w-3.5" />
+            {t('steerCommit')}
+          </Button>
+        </div>
+      ) : null}
+
+      {/* 조타→핸드오프 confirm — "감시 아니라 신뢰": 신뢰단계 1개만("받았고 움직인다"). STEER v2에선
+          **커밋 성공 後에만** 표시(드래그 아님·no-fiction). 지정 수신자만 표기·활동량/타임스탬프 0.
+          Proof Blue·부드러운 호흡·reduced-motion 대응. */}
+      {justDispatched ? (
         <div className="flex shrink-0 items-center gap-2 border-y border-proof-line-soft bg-proof-blue-soft px-4 py-2 text-[11.5px] font-semibold text-proof-blue">
           <span className="size-1.5 shrink-0 rounded-full bg-proof-blue motion-safe:animate-pulse" aria-hidden="true" />
           <span>{t('steerHandoffReceived')} · <b className="font-bold">{t('steerHandoffOrchestrating')}</b></span>
-          <span className="ml-auto text-[9.5px] font-bold text-proof-blue/80">{t('steerHandoffAgent')}</span>
+          {dispatchedTo.length > 0 ? (
+            <span className="ml-auto max-w-[45%] truncate text-[9.5px] font-bold text-proof-blue/80">{dispatchedTo.join(', ')}</span>
+          ) : null}
         </div>
       ) : null}
 
@@ -1034,6 +1056,18 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
           orgId={orgId}
           onCreated={handleCreated}
           onClose={() => setShowCreate(false)}
+        />
+      ) : null}
+
+      {/* STEER v2 조타 보내기(커밋) 모달 — 지정 수신자 선택 → POST /epics/steer-dispatch */}
+      {showDispatch ? (
+        <SteerDispatchModal
+          projectId={projectId}
+          items={epics
+            .filter((e) => typeof e.position === 'number')
+            .map((e) => ({ id: e.id, position: e.position as number }))}
+          onClose={() => setShowDispatch(false)}
+          onDispatched={(names) => { setDispatchedTo(names); setJustDispatched(true); setShowDispatch(false); }}
         />
       ) : null}
 

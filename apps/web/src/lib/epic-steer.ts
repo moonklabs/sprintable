@@ -36,3 +36,14 @@ export function computeReorderPatch(reordered: SteerEpic[], movedNewIndex: numbe
   }
   return patch;
 }
+
+/**
+ * STEER v2 조타 커밋 수신자 프리필(story 2628a53b). 기억된 마지막 선택(`remembered`)을 현재
+ * 가용 멤버(`availableIds`)와 교집합해 돌려준다 — 사라진/떠난 멤버는 자동 탈락하고, 순서는
+ * remembered를 보존한다. **하드코딩/오르테가 고정 없음**(org-agnostic·순전히 인간의 이전 선택).
+ * 기억이 없거나 전부 무효면 빈 배열 → 인간이 새로 선택(필수).
+ */
+export function resolveRecipientPrefill(remembered: string[], availableIds: string[]): string[] {
+  const available = new Set(availableIds);
+  return remembered.filter((id) => available.has(id));
+}
