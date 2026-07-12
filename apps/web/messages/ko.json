@@ -68,7 +68,11 @@
     "epics": "에픽",
     "glance": "현황판",
     "loops": "Loop",
-    "storage": "스토리지"
+    "storage": "스토리지",
+    "zoneNow": "지금",
+    "zoneWork": "작업",
+    "zoneTrust": "신뢰",
+    "zoneKnowledge": "지식"
   },
   "storage": {
     "title": "스토리지",

@@ -155,7 +155,9 @@ export function AppSidebar({
       </SidebarHeader>
 
       <SidebarContent>
+        {/* ① 지금 / Now — 개입할 것(인박스·대시보드·채팅). ia-4zone SSOT 확定. */}
         <SidebarGroup>
+          <SidebarGroupLabel>{t('zoneNow')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
@@ -197,8 +199,9 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
 
+        {/* ② 작업 / Work — 흐르는 일(보드·스프린트·에픽·현황판·Loop·스탠드업·회고). ia-4zone SSOT 확定. */}
         <SidebarGroup>
-          <SidebarGroupLabel>{t('sprint')}</SidebarGroupLabel>
+          <SidebarGroupLabel>{t('zoneWork')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
@@ -278,41 +281,11 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
 
+        {/* ③ 신뢰 / Trust — 증명된 일(활동 로그·감사). 검증 표면 확장 자리(ia-4zone SSOT 확定). */}
         <SidebarGroup>
-          <SidebarGroupLabel>{t('workspace')}</SidebarGroupLabel>
+          <SidebarGroupLabel>{t('zoneTrust')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/docs" />}
-                  isActive={isActive('/docs')}
-                  tooltip={t('docs')}
-                >
-                  <BookOpen />
-                  <span>{t('docs')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              {/* E-SETTINGS S5: Meetings 메뉴 숨김 — /meetings 진입 차단(route thin guard 404). */}
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/agents" />}
-                  isActive={isActive('/agents')}
-                  tooltip={t('agents')}
-                >
-                  <Bot />
-                  <span>{t('agents')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/storage" />}
-                  isActive={isActive('/storage')}
-                  tooltip={t('storage')}
-                >
-                  <HardDrive />
-                  <span>{t('storage')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   render={<Link href="/activity" />}
@@ -327,8 +300,48 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
 
+        {/* ④ 지식 / Knowledge — 팀 기억(문서·스토리지·에이전트). ia-4zone SSOT 확定. */}
         <SidebarGroup>
-          <SidebarGroupLabel>{t('configure')}</SidebarGroupLabel>
+          <SidebarGroupLabel>{t('zoneKnowledge')}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/docs" />}
+                  isActive={isActive('/docs')}
+                  tooltip={t('docs')}
+                >
+                  <BookOpen />
+                  <span>{t('docs')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/storage" />}
+                  isActive={isActive('/storage')}
+                  tooltip={t('storage')}
+                >
+                  <HardDrive />
+                  <span>{t('storage')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              {/* E-SETTINGS S5: Meetings 메뉴 숨김 — /meetings 진입 차단(route thin guard 404). */}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/agents" />}
+                  isActive={isActive('/agents')}
+                  tooltip={t('agents')}
+                >
+                  <Bot />
+                  <span>{t('agents')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* 설정 — zone 밖·하단(ia-4zone 확定: 유틸 푸터·zone 라벨 없음). */}
+        <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
