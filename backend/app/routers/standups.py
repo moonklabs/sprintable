@@ -345,6 +345,17 @@ async def add_feedback(
     # 우회할 수 있었다 — "body가 주장하는 project를 믿지 말고 실제 리소스(entry)의 project를
     # 써라"가 근본. entry.project_id(org-level entry면 None=project-scope 검사 스킵)로 검증.
     member = await resolve_member(auth, org_id, session, project_id=entry.project_id)
+
+    # SEC MEDIUM(write-target project scope·까심 인접발견): 위 resolve_member는 리소스(entry)의
+    # project 접근권만 검증하나, feedback row는 아래에서 body.project_id로 persist된다 — 그
+    # body-주장 project 접근권은 미검증이라 caller가 접근권 없는 project로 feedback을 주입할 수
+    # 있었다(entry-access ≠ write-target). 특히 org-level entry(entry.project_id=None)는 위
+    # resolve_member의 project 체크가 스킵돼 무제한이었다. persist 대상 body.project_id를
+    # resource-actual has_project_access로 직접 검증(body-claimed 금지·휴먼/에이전트 공용).
+    if body.project_id is not None:
+        if not await has_project_access(session, uuid.UUID(auth.user_id), body.project_id, org_id):
+            raise HTTPException(status_code=403, detail="No access to this project")
+
     safe_sprint_id, _ = await _filter_write_links_to_accessible(
         session, org_id, uuid.UUID(auth.user_id), body.sprint_id, [],
     )
