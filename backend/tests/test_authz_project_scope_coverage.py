@@ -125,8 +125,9 @@ _FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
 # ── known debt: 실 GAP(HIGH/MEDIUM/LOW) — CRITICAL 3건(EE #2048)은 이미 fix, 나머지는
 # ratchet(PO 결 2026-07-11: baseline 동결 + 점진 상환). fix되면 이 dict에서 제거할 것.
 _KNOWN_DEBT_ALLOWLIST: dict[str, str] = {
-    "app.routers.members:list_members":
-        "HIGH — assert_target_in_caller_org가 cross-org만 막고 same-org cross-project는 미검증",
+    # ratchet round9(#2050): app.routers.members:list_members 상환 완료 — HIGH baseline 0 도달.
+    # has_project_access 사전검증(404)으로 same-org cross-project 로스터 열거 봉인
+    # (test_e_security_sec_s8_ratchet_round9_members_realdb.py). 잔여는 MEDIUM/LOW.
     "app.routers.hypotheses:link_hypothesis":
         "MEDIUM — service._assert_targets_same_project가 sprint/epic/story 주입은 막지만 caller의 hyp.project_id 접근권 자체는 미검증",
     "app.routers.participation:add_participation":
