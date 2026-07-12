@@ -85,6 +85,10 @@ class EpicResponse(BaseModel):
     # bloat 방지). 미부착 경로(get/create/update)는 기본값. detail은 별도 /progress 유지.
     total_stories: int = 0
     done_stories: int = 0
+    # E-GLANCE wedge #2(story 96b19bc3): 로드맵 조타 큐레이션(Story.position 동형) — null=아직
+    # 큐레이션 안 됨. source_loop_id는 계보 인터페이스뿐(배선은 P3 후속).
+    position: int | None = None
+    source_loop_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 

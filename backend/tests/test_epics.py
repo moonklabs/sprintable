@@ -38,6 +38,9 @@ def _mock_epic(status: str = "active") -> MagicMock:
     # 0d4c89e8: 연결 스토리 집계. 동일 사유(MagicMock auto-attr 방지)로 명시 세팅.
     e.total_stories = 0
     e.done_stories = 0
+    # E-GLANCE wedge #2(story 96b19bc3): 신규 필드 — MagicMock auto-attr ValidationError 방지.
+    e.position = None
+    e.source_loop_id = None
     e.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     e.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     return e

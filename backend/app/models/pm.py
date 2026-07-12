@@ -70,6 +70,14 @@ class Epic(Base, OrgScopedMixin, TimestampMixin):
     # E-BOARD-SCHEMA: 채점 필드 (outcome, 채점잡 전용)
     outcome_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="n_a")
     outcome_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # E-GLANCE wedge #2(story 96b19bc3) — 로드맵 조타 큐레이션. Story.position과 완전 동형
+    # (null=아직 큐레이션 안 됨·자동도출 순서 유지). 0175 additive nullable.
+    position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # source_loop_id: 어떤 epic이 어느 Loop 결과에서 파생 제안됐는지 계보 인터페이스(컬럼만·
+    # 배선은 P3 후속). Loop이 epic을 자동 생성하지 않음(STEER: 휴먼이 항상 약속을 얹는다).
+    source_loop_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("loop_runs.id", ondelete="SET NULL"), nullable=True
+    )
 
     project: Mapped["Project"] = relationship("Project", back_populates="epics")
     stories: Mapped[list["Story"]] = relationship("Story", back_populates="epic", lazy="select")

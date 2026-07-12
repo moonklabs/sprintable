@@ -3,6 +3,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
@@ -67,7 +68,9 @@ async def list_epics(
         limit=limit, cursor=cursor_dt, order_by=order_by, **filters
     )
     response.headers["X-Total-Count"] = str(total)
-    if epics:
+    # order_by="position"(옵트인 로드맵 조타 정렬, wedge #2)은 복합 정렬이라 created_at cursor로
+    # 이어붙일 수 없다 — 이 모드에서는 X-Next-Cursor 미노출(호출자가 이어달리기 시도 안 하도록).
+    if epics and order_by != "position":
         response.headers["X-Next-Cursor"] = epics[-1].created_at.isoformat()
     return [EpicResponse.model_validate(e) for e in epics]
 
@@ -110,6 +113,17 @@ async def create_epic(
         measure_after=body.measure_after,
         outcome_status=_resolve_outcome_status(body.metric_definition, body.measure_after),
     )
+    # E-GLANCE wedge #2(story 96b19bc3): epic.created 이벤트 — 오르테가 구독 채널(fire_webhooks).
+    # actor 해소 실패는 emit 자체를 막지 않는다(bulk_update_stories와 동형 best-effort).
+    from app.services.epic_events import emit_epic_created
+    from app.services.member_resolver import resolve_member
+
+    _actor_id: uuid.UUID | None = None
+    try:
+        _actor_id = (await resolve_member(auth, org_id, session)).id
+    except Exception:  # noqa: BLE001
+        _actor_id = None
+    await emit_epic_created(session, org_id, epic, actor_id=_actor_id)
     return EpicResponse.model_validate(epic)
 
 
@@ -122,6 +136,76 @@ async def get_epic(
     if epic is None:
         raise HTTPException(status_code=404, detail="Epic not found")
     return EpicResponse.model_validate(epic)
+
+
+class BulkEpicPositionItem(BaseModel):
+    id: uuid.UUID
+    position: int
+
+
+class BulkEpicPositionRequest(BaseModel):
+    # stories.py bulk_update_stories와 동일 계약(items 래퍼) — FE dnd 공통 패턴.
+    items: list[BulkEpicPositionItem]
+
+
+# ⚠️ /bulk 은 /{id} 보다 **먼저** 선언해야 한다(FastAPI 라우트 매칭=선언 순서·specific-before-
+# parameterized) — stories.py bulk_update_stories와 동일 교훈(PATCH /bulk가 /{id}에 매칭돼
+# id="bulk" UUID 파싱 422로 shadow되는 사고 재발 방지).
+@router.patch("/bulk", response_model=list[EpicResponse])
+async def bulk_update_epics(
+    payload: BulkEpicPositionRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[EpicResponse]:
+    """PATCH /api/v2/epics/bulk — 로드맵 조타(재정렬, story 96b19bc3 §1.4).
+
+    SEC-S8 W/W2 하드닝을 **처음부터** 내장(bulk_update_stories 템플릿 그대로 이식 — 회귀로
+    나중에 패치하지 않고 설계 단계서 봉인): org_id 필터로 cross-org IDOR 원천 차단(W) +
+    has_project_access(대상 epic.project_id, resource-actual — body-claimed 아님)로 same-org
+    cross-project도 차단(W2). 미접근 item은 not-found와 동형으로 조용히 스킵(존재 비노출·
+    나머지 정당 item은 진행).
+    """
+    from app.models.pm import Epic
+
+    updated: list[Epic] = []
+    reordered_items: list[dict] = []
+    for item in payload.items:
+        q = await session.execute(
+            select(Epic).where(Epic.id == item.id, Epic.org_id == org_id)
+        )
+        epic = q.scalar_one_or_none()
+        if not epic:
+            continue
+        if not await has_project_access(session, uuid.UUID(auth.user_id), epic.project_id, org_id):
+            continue
+        old_position = epic.position
+        epic.position = item.position
+        updated.append(epic)
+        reordered_items.append({
+            "id": epic.id, "title": epic.title, "project_id": epic.project_id,
+            "position": item.position, "old_position": old_position,
+        })
+
+    # P0/MissingGreenlet: setattr 후 flush만으로는 onupdate 서버생성 컬럼(updated_at)이 파이썬
+    # 객체에 반영 안 됨 — bulk_update_stories와 동형으로 flush+refresh 후 commit.
+    await session.flush()
+    for e in updated:
+        await session.refresh(e)
+    await session.commit()
+
+    # epic.reordered 배치당 1회 발화(N개 재정렬에 N번 웹훅 방지, §2.3).
+    from app.services.epic_events import emit_epic_reordered
+    from app.services.member_resolver import resolve_member
+
+    _actor_id: uuid.UUID | None = None
+    try:
+        _actor_id = (await resolve_member(auth, org_id, session)).id
+    except Exception:  # noqa: BLE001
+        _actor_id = None
+    await emit_epic_reordered(session, org_id, reordered_items, actor_id=_actor_id)
+
+    return [EpicResponse.model_validate(e) for e in updated]
 
 
 @router.patch("/{id}", response_model=EpicResponse)
@@ -202,11 +286,19 @@ async def delete_epic(
         id=uuid.uuid4(), org_id=org_id, actor_id=resolved.id,
         entity_type="epic", entity_id=id, entity_title=epic.title,
     ))
+    # E-GLANCE wedge #2: 삭제 前 title/project_id 캡처(삭제 後 조회 불가) — epic.removed 이벤트용.
+    _epic_title = epic.title
+    _epic_project_id = epic.project_id
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Epic not found")
     await DependencyRepository(session, org_id).delete_by_item(id, "epic")
     await ItemLabelRepository(session, org_id).delete_by_item(id, "epic")
+
+    from app.services.epic_events import emit_epic_removed
+    await emit_epic_removed(
+        session, org_id, id, _epic_title, _epic_project_id, actor_id=resolved.id,
+    )
     return {"ok": True}
 
 
@@ -235,13 +327,23 @@ async def transition_epic_endpoint(
 ) -> EpicResponse:
     """E-DG S25: epic decision lifecycle 전이(create/update 분리). draft→active(human-only)·active→done
     line overlay. caller 는 인증 컨텍스트에서 도출(RC① 패턴·body 신뢰 X)."""
+    from sqlalchemy import select
+
+    from app.models.pm import Epic
     from app.services.epic import EpicTransitionError, transition_epic
+    from app.services.epic_events import emit_epic_status_changed
     from app.services.member_resolver import resolve_member
 
     caller = await resolve_member(auth, org_id, session)
     try:
+        # E-GLANCE wedge #2: 전이 前 old_status 포착(overlay-gate로 실제 미변경일 수도 있음 —
+        # emit_epic_status_changed가 old==new no-op 자체 가드하므로 안전).
+        _old_status = (await session.execute(
+            select(Epic.status).where(Epic.id == id, Epic.org_id == org_id)
+        )).scalar_one_or_none()
         epic = await transition_epic(session, org_id, caller, id, body.status)
         await session.commit()
+        await emit_epic_status_changed(session, org_id, epic, _old_status, actor_id=caller.id)
         return EpicResponse.model_validate(epic)
     except EpicTransitionError as e:
         _codes = {
