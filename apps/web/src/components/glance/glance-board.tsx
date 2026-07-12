@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import type { RoadmapEpic } from '@/services/glance';
@@ -9,6 +9,11 @@ import { RoadmapFlow } from './roadmap-flow';
 import { GlanceHero } from './glance-hero';
 import { GlanceEpicList } from './glance-epic-list';
 import { ExceptionStream } from './exception-stream';
+import {
+  toExceptionQueueItems,
+  type BeAttentionSignal,
+  type ExceptionLabels,
+} from './derive-exception-signals';
 import type { HeroStory, HeroMember } from './hero-logic';
 
 interface GlanceBoardProps {
@@ -29,6 +34,7 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
   const [activeEpicTitle, setActiveEpicTitle] = useState<string | null>(null);
   const [heroStory, setHeroStory] = useState<HeroStory | null>(null);
   const [memberMap, setMemberMap] = useState<Record<string, HeroMember>>({});
+  const [attentionSignals, setAttentionSignals] = useState<BeAttentionSignal[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -44,6 +50,7 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
           setActiveEpicTitle(data.activeEpicTitle);
           setHeroStory(data.heroStory);
           setMemberMap(data.memberMap);
+          setAttentionSignals(data.attentionSignals);
         }
       } catch {
         // epics fetch 실패(load-glance-data.ts) — 조용히 빈 상태로 유지, 크래시시키지 않음.
@@ -56,6 +63,23 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
 
   const activeEpic = roadmap.find((e) => e.roadmapStatus === 'active') ?? null;
   const restEpics = roadmap.filter((e) => e.id !== activeEpic?.id);
+
+  // 예외 스트림 렌더 항목 — 순수 매퍼(derive-exception-signals)에 i18n 라벨(glance 네임스페이스)만 주입.
+  const exceptionItems = useMemo(() => {
+    const labels: ExceptionLabels = {
+      kind: {
+        gate_pending: t('exceptionKindGatePending'),
+        blocked: t('exceptionKindBlocked'),
+        merge_ready: t('exceptionKindMergeReady'),
+      },
+      action: {
+        gate_pending: t('exceptionActionGatePending'),
+        blocked: t('exceptionActionBlocked'),
+        merge_ready: t('exceptionActionMergeReady'),
+      },
+    };
+    return toExceptionQueueItems(attentionSignals, labels);
+  }, [attentionSignals, t]);
 
   if (loading) {
     return (
@@ -100,8 +124,8 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
               <p className="mb-2 px-1 text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
                 {t('exceptionsTitle')}
               </p>
-              {/* v1 = 실 gate-pending/blocked 배선 前 정직 빈상태 폴백. 디디 gate BE 오면 items 주입. */}
-              <ExceptionStream />
+              {/* #2097 glance/attention 실신호 배선(story 0441a197) — 없으면 정직 빈상태. */}
+              <ExceptionStream items={exceptionItems} />
             </div>
           </div>
         </div>

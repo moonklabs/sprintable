@@ -11,6 +11,7 @@ import {
   type RoadmapEpic,
 } from '@/services/glance';
 import { pickFocalStory, type HeroStory, type HeroMember } from './hero-logic';
+import { parseAttentionSignals, type BeAttentionSignal } from './derive-exception-signals';
 
 export interface GlanceData {
   roadmap: RoadmapEpic[];
@@ -21,6 +22,9 @@ export interface GlanceData {
   activeEpicTitle: string | null;
   heroStory: HeroStory | null;
   memberMap: Record<string, HeroMember>;
+  // 예외 스트림(story 0441a197): #2097 glance/attention 실신호(gate_pending·blocked·merge_ready).
+  // 미가용/실패는 빈 배열로 정직 처리(throw 0) — 예외 스트림은 없으면 "손 필요한 것 없음" 빈상태.
+  attentionSignals: BeAttentionSignal[];
 }
 
 function unwrap<T>(json: unknown): T | null {
@@ -44,13 +48,15 @@ async function fetchJson(url: string): Promise<unknown> {
  * 복잡도는 걷어냈다(#c3d1565d, less-is-more) — 단순 1회 fetch로 되돌린다.
  */
 export async function loadGlanceData(projectId: string): Promise<GlanceData> {
-  const [epicsJson, overviewJson, membersJson, activityJson] = await Promise.all([
+  const [epicsJson, overviewJson, membersJson, activityJson, attentionJson] = await Promise.all([
     // wedge #2: order_by=position 옵트인 — 조타(큐레이션) 결과를 아크가 curated-first로 소비만
     // 반영(드래그 없음). position 모드는 커서 미발행이나 아크는 원래 전량로드(limit=100)라 무관.
     fetchJson(`/api/epics?project_id=${projectId}&limit=100&order_by=position`),
     fetchJson('/api/dashboard/overview'),
     fetchJson('/api/team-members'),
     fetchJson(`/api/activity-logs?project_id=${projectId}&limit=20`),
+    // 예외 스트림 실신호(#2097) — project-scope 가드는 BE(404). 실패/미가용은 null→[](정직 빈상태).
+    fetchJson(`/api/glance/attention?project_id=${projectId}`),
   ]);
 
   // epics는 로드맵의 필수 소스 — fetch 실패를 "에픽 0개"로 오인하면 정직하지 않은 빈 상태가
@@ -88,6 +94,9 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   const activityItems = unwrap<{ items: BeActivityLogItem[] }>(activityJson)?.items ?? [];
   const events = filterMilestoneEvents(activityItems);
 
+  // 예외 스트림: {data:{items}} envelope를 방어적으로 unwrap+검증(형상 불일치=생략, throw 0).
+  const attentionSignals = parseAttentionSignals(attentionJson);
+
   return {
     roadmap,
     totalEpicCount: arc.totalCount,
@@ -96,5 +105,6 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
     activeEpicTitle: activeEpic?.title ?? null,
     heroStory,
     memberMap,
+    attentionSignals,
   };
 }

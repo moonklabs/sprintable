@@ -1,7 +1,7 @@
 import type { ProofState } from '@/components/proof-capsule/proof-capsule';
 import type { GateItem } from '@/components/kanban/types';
 
-export type AttentionKind = 'verify_fail' | 'decision_needed' | 'blocked' | 'merge_ready';
+export type AttentionKind = 'verify_fail' | 'decision_needed' | 'gate_pending' | 'blocked' | 'merge_ready';
 
 export interface AttentionActor {
   name: string;
@@ -37,6 +37,7 @@ export interface AttentionMember {
 export const ATTENTION_KIND_LABEL: Record<AttentionKind, string> = {
   verify_fail: '검증 실패',
   decision_needed: '결정 필요',
+  gate_pending: '승인 대기',
   blocked: '막힘',
   merge_ready: '병합 대기',
 };
@@ -60,6 +61,7 @@ function toEpoch(iso: string | undefined): number {
 const PROOF_STATE: Record<AttentionKind, ProofState> = {
   verify_fail: 'amber',
   decision_needed: 'amber',
+  gate_pending: 'amber',
   blocked: 'amber',
   merge_ready: 'green',
 };
@@ -137,7 +139,7 @@ export function deriveBlockedAttentionItems(
 }
 
 const KIND_PRIORITY: Record<AttentionKind, number> = {
-  verify_fail: 0, decision_needed: 0, blocked: 0, merge_ready: 1,
+  verify_fail: 0, decision_needed: 0, gate_pending: 0, blocked: 0, merge_ready: 1,
 };
 
 /**
