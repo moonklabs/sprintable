@@ -66,22 +66,30 @@ async def list_tasks(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[TaskResponse]:
-    # ratchet round6(잔여 HIGH): 이 엔드포인트엔 project_id 파라미터 자체가 없고 story_id가
-    # 유일한 project-환원 파라미터라, story_id 지정 시 _assert_task_project_access(기존
-    # G-fix 재사용)로 caller의 story project 접근권을 검증한다. story_id 미지정 시 org 전체
-    # task가 나가던 기존 갭은 baseline 기술 그대로("org-scope만") — 이 라운드는 story_id
-    # 벡터만 닫는다(project_id 필터 부재라 round1~5의 project_id 직접검증 패턴 적용 불가).
+    # story_id 지정 시: round6(#2072)에서 _assert_task_project_access(기존 G-fix 재사용)로
+    # caller의 story project 접근권을 직접 검증(단일 story 스코프).
     if story_id is not None:
         await _assert_task_project_access(repo.session, auth, org_id, story_id)
+        filters: dict = {"story_id": story_id}
+        if assignee_id:
+            filters["assignee_id"] = assignee_id
+        if status_filter:
+            filters["status"] = status_filter
+        tasks = await repo.list(**filters)
+    else:
+        # d3e5ca89(SEC fast-follow): story_id 미지정(org-wide) 분기는 예전엔 org 전체 task를
+        # result-level로 흘렸다 — 같은 org 다른 project의 task title/assignee_id/status를 접근권
+        # 없이 열거. round6은 story_id 벡터만 닫고 이 result-level 누출은 분리 트래킹됐다(d3e5ca89).
+        # caller가 실제 접근권을 가진 project의 task로만 스코프(Task엔 project_id가 없어 Story
+        # JOIN으로 환원). 접근권 0이면 빈 리스트. assignee_id/status는 그 위 추가 narrowing 필터.
+        from app.services.project_auth import accessible_project_ids_in_org
 
-    filters: dict = {}
-    if story_id:
-        filters["story_id"] = story_id
-    if assignee_id:
-        filters["assignee_id"] = assignee_id
-    if status_filter:
-        filters["status"] = status_filter
-    tasks = await repo.list(**filters)
+        accessible = await accessible_project_ids_in_org(
+            repo.session, uuid.UUID(auth.user_id), org_id
+        )
+        tasks = await repo.list_in_projects(
+            accessible, assignee_id=assignee_id, status=status_filter
+        )
     await _attach_has_evidence(repo.session, tasks)
     return [TaskResponse.model_validate(t) for t in tasks]
 
