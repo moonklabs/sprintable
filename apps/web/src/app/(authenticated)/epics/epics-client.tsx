@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ChevronLeft, Plus, Trash2, X } from 'lucide-react';
+import { ChevronLeft, GripVertical, Plus, Trash2, X } from 'lucide-react';
+import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { computeReorderPatch } from '@/lib/epic-steer';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +19,25 @@ import {
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
 import { HypothesesSummary } from '@/components/hypotheses/hypotheses-summary';
+
+// ─── Drag sensor ──────────────────────────────────────────────────────────────
+
+/**
+ * 좌클릭(button===0)·비터치만 드래그 — 터치는 네이티브 스크롤(kanban-board.tsx 0d142311 RC와
+ * 동형·산티아고 QA 확定). 로드맵 조타 리스트도 터치 no-drag 가디언 락을 이 센서로 충족한다.
+ */
+class MousePointerSensor extends PointerSensor {
+  static activators = [
+    {
+      eventName: 'onPointerDown' as const,
+      handler: ({ nativeEvent }: { nativeEvent: PointerEvent }) =>
+        nativeEvent.isPrimary && nativeEvent.button === 0 && nativeEvent.pointerType !== 'touch',
+    },
+  ];
+}
+
+/** 조타 모드 전량 로드 상한(BE/route maxLimit=100). 초과분은 honest 표시(silent-truncation 금지). */
+const STEER_LIMIT = 100;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,6 +72,10 @@ interface Epic {
   // 0d4c89e8: BE list 응답 story count 집계(#1527). detail/미부착 경로는 stories 폴백.
   total_stories?: number;
   done_stories?: number;
+  // wedge #2(로드맵 조타·BE #2076): 큐레이션 순서(null=미조타·자동도출). source_loop_id는 Loop
+  // 제안 hook — 실 배선 P3/v2, v1은 미표시(no-fiction).
+  position?: number | null;
+  source_loop_id?: string | null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -393,10 +420,22 @@ interface EpicRowProps {
   isSelected: boolean;
   onClick: () => void;
   onDeleteRequest: (id: string) => void;
+  /** 조타 모드(status 필터=전체)일 때만 드래그 핸들·큐레이션 마커 노출. */
+  sortable: boolean;
 }
 
-function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
+function EpicRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: EpicRowProps) {
   const t = useTranslations('epics');
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: epic.id,
+    disabled: !sortable,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    ...(isDragging ? { zIndex: 20, opacity: 0.9 } : {}),
+  };
+  const curated = typeof epic.position === 'number';
   const stories = epic.stories ?? [];
   // 0d4c89e8: BE 집계(total_stories/done_stories·#1527) 우선·detail-shape(집계 미부착)는 stories 폴백.
   // list 응답은 stories 미부착이라 폴백만으론 0/0 → BE 집계로 카드 카운트/진행바 정상화.
@@ -423,20 +462,52 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest }: EpicRowProps) {
 
   return (
     <div
-      className={`group relative w-full rounded-xl border px-4 py-3.5 text-left transition-all duration-150 cursor-pointer ${
+      ref={setNodeRef}
+      style={style}
+      className={`group relative flex w-full items-start gap-2 rounded-xl border px-3 py-3.5 text-left transition-all duration-150 ${
         isSelected
           ? 'border-primary/40 bg-primary/5'
           : 'border-border bg-card hover:border-primary/30 hover:bg-primary/5'
-      }`}
-      onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
+      } ${isDragging ? 'shadow-lg' : ''}`}
     >
-      <div className="space-y-2.5">
+      {sortable ? (
+        <button
+          type="button"
+          aria-label={t('steerReorderAria', { title: epic.title })}
+          onClick={(e) => e.stopPropagation()}
+          className="mt-0.5 flex shrink-0 cursor-grab touch-none items-center text-muted-foreground/50 transition-colors hover:text-muted-foreground active:cursor-grabbing"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="size-4" aria-hidden="true" />
+        </button>
+      ) : null}
+      <div
+        className="min-w-0 flex-1 cursor-pointer space-y-2.5"
+        onClick={onClick}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
+      >
         <div className="flex items-start justify-between gap-2">
           <p className="text-sm font-semibold leading-snug text-foreground">{epic.title}</p>
           <div className="flex shrink-0 items-center gap-1.5">
+            {sortable ? (
+              curated ? (
+                <span className="inline-flex items-center gap-1 rounded bg-proof-amber-soft px-1.5 py-0.5 text-[10px] font-bold text-proof-amber">
+                  {t('steerCurated')} {epic.position}
+                </span>
+              ) : (
+                <span className="text-[10px] font-medium text-muted-foreground/70">{t('steerAuto')}</span>
+              )
+            ) : null}
+            {/* Loop 제안 hook — source_loop_id 배선(P3/v2) 전엔 미표시(no-fiction·sparkle 0·claimed amber 언어). */}
+            {epic.source_loop_id ? (
+              <span className="inline-flex items-center gap-1 rounded bg-proof-amber-soft px-1.5 py-0.5 text-[10px] font-bold text-proof-amber">
+                <span className="size-1 rounded-full bg-proof-amber" aria-hidden="true" />
+                {t('steerLoopSuggest')}
+              </span>
+            ) : null}
             <Badge variant={statusBadgeVariant(epic.status)}>{statusLabel[epic.status]}</Badge>
             <Badge variant={priorityBadgeVariant(epic.priority)}>{priorityLabel[epic.priority]}</Badge>
             <button
@@ -714,49 +785,72 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
-  const [epicsHasMore, setEpicsHasMore] = useState(false);
-  const [epicsNextCursor, setEpicsNextCursor] = useState<string | null>(null);
-  const [epicsLoadingMore, setEpicsLoadingMore] = useState(false);
-  const [epicsLoadMoreError, setEpicsLoadMoreError] = useState(false);
   const [statusFilter, setStatusFilter] = useState<EpicStatus | 'all'>('all');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // wedge #2 로드맵 조타
+  const [capped, setCapped] = useState(false);          // 상위 STEER_LIMIT 초과(honest 표시·silent-truncation 금지)
+  const [justSteered, setJustSteered] = useState(false); // 조타 후 핸드오프 compact("받았고 움직인다")
+  const [reordering, setReordering] = useState(false);   // bulk PATCH in-flight
+  const sensors = useSensors(useSensor(MousePointerSensor, { activationConstraint: { distance: 8 } }));
 
-  const fetchEpics = useCallback(async (cursor?: string | null) => {
+  // wedge #2: order_by=position 옵트인 — 큐레이션 prefix + 자동(NULL) tail. position 모드는 BE가
+  // 커서를 발행하지 않으므로 이어달리기(cursor pagination) 없이 전량(상위 STEER_LIMIT) 로드한다(AC4).
+  const fetchEpics = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ project_id: projectId, limit: '20' });
-      if (cursor) params.set('cursor', cursor);
+      const params = new URLSearchParams({ project_id: projectId, limit: String(STEER_LIMIT), order_by: 'position' });
       const res = await fetch(`/api/epics?${params.toString()}`);
       if (!res.ok) throw new Error(`Failed to fetch epics: ${res.status}`);
-      const { data, meta } = await res.json() as { data: Epic[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
-      if (cursor) {
-        // append 시 id 기준 중복 방어 (cursor 전진 버그 재발 대비 안전망)
-        setEpics((prev) => {
-          const seen = new Set(prev.map((e) => e.id));
-          return [...prev, ...(data ?? []).filter((e) => !seen.has(e.id))];
-        });
-      } else {
-        setEpics(data ?? []);
-      }
-      setEpicsHasMore(meta?.hasMore ?? false);
-      setEpicsNextCursor(meta?.nextCursor ?? null);
-      setEpicsLoadMoreError(false);
+      const { data } = await res.json() as { data: Epic[] };
+      setEpics(data ?? []);
+      setCapped((data?.length ?? 0) >= STEER_LIMIT);
     } catch (err) {
-      // AC3: silent-swallow 금지 — 최소 로깅 + (더보기 실패 시) 인라인 표시
+      // AC3: silent-swallow 금지 — 최소 로깅.
       console.error('[epics] 목록을 불러오지 못했습니다', err);
-      if (cursor) setEpicsLoadMoreError(true);
     } finally {
       setLoading(false);
-      setEpicsLoadingMore(false);
     }
   }, [projectId]);
 
-  const loadMoreEpics = useCallback(async () => {
-    if (!epicsHasMore || !epicsNextCursor || epicsLoadingMore) return;
-    setEpicsLoadingMore(true);
-    setEpicsLoadMoreError(false);
-    await fetchEpics(epicsNextCursor);
-  }, [epicsHasMore, epicsNextCursor, epicsLoadingMore, fetchEpics]);
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    // 조타는 전체(status=all) 뷰에서만 — 필터 서브셋 재정렬은 전역 position을 오염시킨다(가드).
+    if (statusFilter !== 'all') return;
+    const oldIndex = epics.findIndex((e) => e.id === active.id);
+    const newIndex = epics.findIndex((e) => e.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+
+    const reordered = arrayMove(epics, oldIndex, newIndex);
+    const patch = computeReorderPatch(reordered, newIndex);
+    if (patch.length === 0) { setEpics(reordered); return; }
+
+    // 낙관 반영(마커 즉시 갱신) 후 실 PATCH — 성공 시 서버 확정본으로 정합, 실패 시 롤백.
+    const posById = new Map(patch.map((p) => [p.id, p.position]));
+    const optimistic = reordered.map((e) => (posById.has(e.id) ? { ...e, position: posById.get(e.id)! } : e));
+    const prev = epics;
+    setEpics(optimistic);
+    setReordering(true);
+    try {
+      const res = await fetch('/api/epics/bulk', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: patch }),
+      });
+      if (!res.ok) throw new Error(`bulk reorder failed: ${res.status}`);
+      const { data } = await res.json() as { data: Epic[] };
+      // 응답=갱신본만 → 서버 position으로 정합(실 persist 확인·끝단 반영).
+      const updById = new Map((data ?? []).map((e) => [e.id, e.position]));
+      setEpics((cur) => cur.map((e) => (updById.has(e.id) ? { ...e, position: updById.get(e.id) ?? e.position } : e)));
+      setJustSteered(true); // 핸드오프 compact 노출("조타 접수·오케스트레이션 중")
+    } catch (err) {
+      console.error('[epics] 재정렬 저장 실패', err);
+      setEpics(prev); // 롤백(낙관 UI ≠ 저장)
+      addToast({ type: 'error', title: t('steerError') });
+    } finally {
+      setReordering(false);
+    }
+  }, [epics, statusFilter, addToast, t]);
 
   // (silent-catch sweep) `_fetchEpicDetail`(dead·호출처 0·handleSelectEpic이 /epics/[id]
   // 딥링크로 대체)는 제거했다 — 실행되지 않던 silent catch였으므로 toast가 아니라 dead code 삭제.
@@ -813,6 +907,8 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   }
 
   const filteredEpics = statusFilter === 'all' ? epics : epics.filter((e) => e.status === statusFilter);
+  // 조타(드래그 재정렬)는 전체 뷰에서만 — 필터 서브셋은 전역 position을 오염시킨다.
+  const sortable = statusFilter === 'all';
 
   const listPanel = (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-muted/35">
@@ -835,8 +931,18 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
         ))}
       </div>
 
+      {/* wedge #2 조타→핸드오프 confirm — "감시 아니라 신뢰": 현재 신뢰단계 1개만("받았고 움직인다").
+          활동량/타임스탬프/이벤트 나열 0. Proof Blue·부드러운 호흡·reduced-motion 대응. */}
+      {justSteered ? (
+        <div className="flex shrink-0 items-center gap-2 border-y border-proof-line-soft bg-proof-blue-soft px-4 py-2 text-[11.5px] font-semibold text-proof-blue">
+          <span className="size-1.5 shrink-0 rounded-full bg-proof-blue motion-safe:animate-pulse" aria-hidden="true" />
+          <span>{t('steerHandoffReceived')} · <b className="font-bold">{t('steerHandoffOrchestrating')}</b></span>
+          <span className="ml-auto text-[9.5px] font-bold text-proof-blue/80">{t('steerHandoffAgent')}</span>
+        </div>
+      ) : null}
+
       {/* List body */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4" aria-busy={reordering}>
         {filteredEpics.length === 0 ? (
           <EmptyState
             title={t('noEpics')}
@@ -849,29 +955,25 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
             }
           />
         ) : (
-          <div className="space-y-2">
-            {filteredEpics.map((epic) => (
-              <EpicRow
-                key={epic.id}
-                epic={epic}
-                isSelected={selectedEpic?.id === epic.id}
-                onClick={() => { void handleSelectEpic(epic); }}
-                onDeleteRequest={(id) => setDeleteConfirmId(id)}
-              />
-            ))}
-            {epicsLoadMoreError ? (
-              <div className="flex flex-col items-center gap-1 py-2">
-                <p className="text-xs text-destructive">에픽을 더 불러오지 못했습니다.</p>
-                <Button variant="ghost" size="sm" onClick={() => void loadMoreEpics()} disabled={epicsLoadingMore}>
-                  {epicsLoadingMore ? '로딩 중...' : '다시 시도'}
-                </Button>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => void handleDragEnd(e)}>
+            <SortableContext items={filteredEpics.map((e) => e.id)} strategy={verticalListSortingStrategy}>
+              <div className="space-y-2">
+                {filteredEpics.map((epic) => (
+                  <EpicRow
+                    key={epic.id}
+                    epic={epic}
+                    sortable={sortable}
+                    isSelected={selectedEpic?.id === epic.id}
+                    onClick={() => { void handleSelectEpic(epic); }}
+                    onDeleteRequest={(id) => setDeleteConfirmId(id)}
+                  />
+                ))}
+                {capped ? (
+                  <p className="pt-1 text-center text-[11px] text-muted-foreground/70">{t('steerCappedNote', { count: STEER_LIMIT })}</p>
+                ) : null}
               </div>
-            ) : epicsHasMore ? (
-              <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => void loadMoreEpics()} disabled={epicsLoadingMore}>
-                {epicsLoadingMore ? '로딩 중...' : '더 보기'}
-              </Button>
-            ) : null}
-          </div>
+            </SortableContext>
+          </DndContext>
         )}
       </div>
     </div>

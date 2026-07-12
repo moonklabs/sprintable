@@ -1,4 +1,4 @@
-import type { IEpicRepository, Epic, CreateEpicInput, UpdateEpicInput, EpicListFilters, RepositoryScopeContext } from '@sprintable/core-storage';
+import type { IEpicRepository, Epic, CreateEpicInput, UpdateEpicInput, EpicListFilters, EpicPositionItem, RepositoryScopeContext } from '@sprintable/core-storage';
 import { fastapiCall } from './utils';
 
 export class ApiEpicRepository implements IEpicRepository {
@@ -19,6 +19,12 @@ export class ApiEpicRepository implements IEpicRepository {
         order_by: filters.order_by,
       },
     });
+  }
+
+  async bulkUpdatePositions(items: EpicPositionItem[]): Promise<Epic[]> {
+    // 로드맵 조타 재정렬(wedge #2·BE §1.4). org_id/project 인가는 BE 단일 소스(SEC-S8 W/W2)라
+    // FE는 thin proxy — items만 포워드(백필0·갱신본만 반환). /{id}보다 먼저 매칭되도록 BE가 /bulk 선언.
+    return fastapiCall<Epic[]>('PATCH', '/api/v2/epics/bulk', this.accessToken, { body: { items } });
   }
 
   async getById(id: string, _scope?: RepositoryScopeContext): Promise<Epic> {

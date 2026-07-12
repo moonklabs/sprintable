@@ -2706,7 +2706,16 @@
     "deleteEpic": "에픽 삭제",
     "deleteConfirmTitle": "에픽을 삭제하시겠습니까?",
     "deleteConfirmDescription": "이 작업은 되돌릴 수 없습니다. 에픽에 포함된 스토리는 연결이 해제됩니다.",
-    "deleteConfirmButton": "영구 삭제"
+    "deleteConfirmButton": "영구 삭제",
+    "steerCurated": "큐레이션",
+    "steerAuto": "자동(NULL)",
+    "steerLoopSuggest": "Loop 제안",
+    "steerReorderAria": "{title} 순서 변경",
+    "steerHandoffReceived": "조타 접수",
+    "steerHandoffOrchestrating": "오케스트레이션 중",
+    "steerHandoffAgent": "오르테가군",
+    "steerError": "재정렬을 저장하지 못했습니다. 다시 시도해 주세요.",
+    "steerCappedNote": "상위 {count}개만 표시됩니다. 조타(큐레이션)는 상위 항목을 앞으로 올립니다."
   },
   "glance": {
     "pageTitle": "프로젝트 현황판",

@@ -40,7 +40,9 @@ async function fetchJson(url: string): Promise<unknown> {
  */
 export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   const [epicsJson, overviewJson, membersJson, activityJson] = await Promise.all([
-    fetchJson(`/api/epics?project_id=${projectId}&limit=100`),
+    // wedge #2: order_by=position 옵트인 — 조타(큐레이션) 결과를 아크가 curated-first로 소비만
+    // 반영(드래그 없음). position 모드는 커서 미발행이나 아크는 원래 전량로드(limit=100)라 무관.
+    fetchJson(`/api/epics?project_id=${projectId}&limit=100&order_by=position`),
     fetchJson('/api/dashboard/overview'),
     fetchJson('/api/team-members'),
     fetchJson(`/api/activity-logs?project_id=${projectId}&limit=20`),
