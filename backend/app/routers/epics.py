@@ -150,8 +150,9 @@ class BulkEpicPositionRequest(BaseModel):
 
 class SteerDispatchRequest(BaseModel):
     """STEER 조타 커밋(ff662876). items=커밋된 순서 스냅샷(드래그로 이미 /bulk 저장된 상태와
-    일치해야 함·서버 정합검증). recipient_member_ids=인간이 커밋 시 지정(생략/빈 값이면 대상
-    project의 relay-owner=오케스트레이터 기본 프리필)."""
+    일치해야 함·서버 정합검증). recipient_member_ids=커밋한 인간이 **명시**하는 수신자(필수·
+    None/빈값→400). 보편적 오케스트레이터란 없다(선생님 B)—BE는 추측 안 하고 인간 지정만 받는다.
+    프리필 편의(오르테가 등)는 FE 몫."""
     items: list[BulkEpicPositionItem]
     recipient_member_ids: list[uuid.UUID] | None = None
 
@@ -219,14 +220,12 @@ async def steer_dispatch(
     from app.models.pm import Epic
     from app.services.epic_events import emit_epic_reordered
     from app.services.member_resolver import resolve_member, resolve_member_identity
-    from app.services.project_auth import resolve_project_relay_owner
 
     if not payload.items:
         raise HTTPException(status_code=400, detail="items required")
 
     # 1) 대상 epic 검증 + 서버 정합검증(Q1: payload 스냅샷 신뢰하되 저장 position과 대조).
     committed: list[dict] = []
-    project_ids: set[uuid.UUID] = set()
     for item in payload.items:
         epic = (await session.execute(
             select(Epic).where(Epic.id == item.id, Epic.org_id == org_id)
@@ -243,21 +242,19 @@ async def steer_dispatch(
             "id": epic.id, "title": epic.title, "project_id": epic.project_id,
             "position": epic.position, "old_position": None,
         })
-        project_ids.add(epic.project_id)
 
-    # 2) 수신자 해소. 지정 시 각각 caller org 소속 검증(cross-org 주입 차단), 생략 시 대상 project
-    #    relay-owner(=orchestrator) union 프리필(신규 원천데이터 불요).
+    # 2) 수신자 = **커밋한 인간이 명시**(선생님 B 확定): 보편적 오케스트레이터란 없다 — org마다
+    #    팀 구성이 다르고 relay-owner=사람 owner는 특정 조직 가정이라, 매 조타마다 인간이 자기
+    #    project 멤버 중 수신자를 지정하는 게 유일하게 일반적이다. relay-owner 추측 폴백 없음
+    #    (None/빈값→400). 각 recipient는 caller org 소속 member인지 검증(cross-org 주입 차단·
+    #    body-claimed 금지). 프리필 편의(오르테가 등)는 FE 몫이지 BE 추측이 아니다.
+    if not payload.recipient_member_ids:
+        raise HTTPException(status_code=400, detail="recipient_member_ids required")
     recipients: set[uuid.UUID] = set()
-    if payload.recipient_member_ids:
-        for mid in payload.recipient_member_ids:
-            if await resolve_member_identity(mid, org_id, session) is None:
-                raise HTTPException(status_code=400, detail="recipient_member_id not in org")
-            recipients.add(mid)
-    else:
-        for pid in project_ids:
-            owner = await resolve_project_relay_owner(session, pid, org_id)
-            if owner is not None:
-                recipients.add(owner)
+    for mid in payload.recipient_member_ids:
+        if await resolve_member_identity(mid, org_id, session) is None:
+            raise HTTPException(status_code=400, detail="recipient_member_id not in org")
+        recipients.add(mid)
 
     # 3) actor(best-effort) + emit 1회(지정 수신자 게이팅·preserve_broadcast=False).
     actor_id: uuid.UUID | None = None

@@ -422,50 +422,59 @@ async def test_list_epics_default_order_unchanged_no_position_field_forced():
 
 
 @pytest.mark.anyio
-async def _seed_ortega_relay_owner(s, seeded, *, extra_agent=False):
-    """오르테가를 project_a의 relay-owner(project_access role='owner')로 시드 + epic.reordered
-    구독 WebhookConfig. extra_agent=True면 비-owner 에이전트+그 웹훅도 추가(게이팅 실증용)."""
+async def _seed_owner_and_orchestrator(s, seeded):
+    """⭐feedback_seed_masks_realdata_assumption 반영: owner(사람·role='owner'=실 relay-owner)와
+    orchestrator(별개 에이전트·role='member')를 **분리 시드**한다. 실데이터(송윤재=사람 owner,
+    오르테가=member 에이전트)와 동형. 둘 다 epic.reordered 구독 웹훅 보유 — 인간이 recipient로
+    orchestrator를 명시하면 orchestrator에게만 배달되고 relay-owner(사람)에겐 0건임을 실증
+    (BE가 relay-owner를 추측하지 않음·선생님 B). 반환=(owner canonical member id, orchestrator id)."""
     from app.models.member import Member
+    from app.models.project import OrgMember
     from app.models.project_access import ProjectAccess
+    from app.models.user import User
     from app.models.webhook_config import WebhookConfig
-    ortega = Member(id=uuid.uuid4(), org_id=seeded["org_a_id"], type="agent", name="Ortega")
-    s.add(ortega)
+
+    # 사람 owner — resolve_project_relay_owner가 이 사람으로 해소(우선순위1 project_access owner).
+    owner_uid = uuid.uuid4()
+    s.add(User(id=owner_uid, email=f"owner-{owner_uid.hex[:8]}@test.com", hashed_password="x"))
+    await s.commit()
+    owner_om = OrgMember(id=uuid.uuid4(), org_id=seeded["org_a_id"], user_id=owner_uid, role="member")
+    s.add(owner_om)
     await s.commit()
     s.add(ProjectAccess(
-        id=uuid.uuid4(), project_id=seeded["project_a_id"], member_id=ortega.id,
-        permission="granted", role="owner",  # ⇒ resolve_project_relay_owner 우선순위1
+        id=uuid.uuid4(), project_id=seeded["project_a_id"], org_member_id=owner_om.id,
+        permission="granted", role="owner",
     ))
     s.add(WebhookConfig(
-        id=uuid.uuid4(), org_id=seeded["org_a_id"], member_id=ortega.id,
+        id=uuid.uuid4(), org_id=seeded["org_a_id"], member_id=owner_om.id,
+        project_id=seeded["project_a_id"], url="https://human-owner.example.com/webhook",
+        events=["epic.reordered"], channel="generic", is_active=True,
+    ))
+    await s.commit()
+
+    # orchestrator 에이전트 — 인간이 커밋 시 지정할 수신자(role='member'·owner 아님).
+    orch = Member(id=uuid.uuid4(), org_id=seeded["org_a_id"], type="agent", name="Ortega")
+    s.add(orch)
+    await s.commit()
+    s.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=seeded["project_a_id"], member_id=orch.id,
+        permission="granted", role="member",
+    ))
+    s.add(WebhookConfig(
+        id=uuid.uuid4(), org_id=seeded["org_a_id"], member_id=orch.id,
         project_id=seeded["project_a_id"], url="https://ortega.example.com/webhook",
         events=["epic.reordered"], channel="generic", is_active=True,
     ))
     await s.commit()
-    other_id = None
-    if extra_agent:
-        other = Member(id=uuid.uuid4(), org_id=seeded["org_a_id"], type="agent", name="OtherAgent")
-        s.add(other)
-        await s.commit()
-        s.add(ProjectAccess(
-            id=uuid.uuid4(), project_id=seeded["project_a_id"], member_id=other.id,
-            permission="granted", role="member",
-        ))
-        s.add(WebhookConfig(
-            id=uuid.uuid4(), org_id=seeded["org_a_id"], member_id=other.id,
-            project_id=seeded["project_a_id"], url="https://other.example.com/webhook",
-            events=["epic.reordered"], channel="generic", is_active=True,
-        ))
-        await s.commit()
-        other_id = other.id
-    return ortega.id, other_id
+    return owner_om.id, orch.id
 
 
-async def test_steer_dispatch_delivers_to_relay_owner_only_not_all_agents():
-    """⭐STEER 커밋: 드래그(/bulk)로 저장한 뒤 명시적 커밋(POST /steer-dispatch)에서만 발화하고,
-    수신자를 **project relay-owner(=오르테가)로 게이팅**한다. 비-owner 에이전트(OtherAgent)도
-    epic.reordered를 구독하지만 **배달 0**(현 None-브로드캐스트 과보정 폐지). relay-owner↔seed된
-    owner 일치 실증(오르테가가 project_access owner라 resolve가 오르테가 반환). 실 WebhookConfig+
-    실 fire_webhooks gating(네트워크 I/O만 우회)."""
+async def test_steer_dispatch_delivers_only_to_human_specified_recipient_not_relay_owner():
+    """⭐STEER 커밋(선생님 B): 드래그(/bulk) 저장 뒤 명시적 커밋(POST /steer-dispatch)에서만 발화.
+    수신자는 **커밋한 인간이 명시**한 orchestrator(별개 에이전트)로 게이팅한다. 실 relay-owner는
+    사람 owner(role='owner')지만 BE는 relay-owner를 추측하지 않으므로 **사람 owner에겐 배달 0**·
+    지정된 orchestrator에게만 1건. owner≠orchestrator 분리 시드로 seed-마스킹 갭을 닫는다
+    ([[feedback_seed_masks_realdata_assumption]]). 실 WebhookConfig+실 gating(네트워크 I/O만 우회)."""
     from unittest.mock import AsyncMock, MagicMock, patch
     from app.main import app
 
@@ -473,7 +482,7 @@ async def test_steer_dispatch_delivers_to_relay_owner_only_not_all_agents():
     try:
         async with Session() as s:
             seeded = await _seed(s)
-            ortega_id, other_id = await _seed_ortega_relay_owner(s, seeded, extra_agent=True)
+            _owner_mid, orch_id = await _seed_owner_and_orchestrator(s, seeded)
 
         await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])
         client = _client_for(app)
@@ -500,22 +509,60 @@ async def test_steer_dispatch_delivers_to_relay_owner_only_not_all_agents():
                 assert r1.status_code == 200, r1.text
                 wh.assert_not_awaited()  # 드래그=무이벤트
 
-            # 2) 명시적 커밋(수신자 미지정→기본 relay-owner=오르테가)
+            # 2) 명시적 커밋 — 인간이 orchestrator(에이전트)를 recipient로 지정(relay-owner=사람 아님).
             with (
                 patch("app.services.webhook_dispatch.validate_webhook_url_async", AsyncMock()),
                 patch("httpx.AsyncClient.post", _fake_post),
             ):
-                r2 = await client.post("/api/v2/epics/steer-dispatch", json={"items": [
-                    {"id": str(seeded["epic_a1_id"]), "position": 1},
-                    {"id": str(seeded["epic_a2_id"]), "position": 2},
-                ]})
+                r2 = await client.post("/api/v2/epics/steer-dispatch", json={
+                    "items": [
+                        {"id": str(seeded["epic_a1_id"]), "position": 1},
+                        {"id": str(seeded["epic_a2_id"]), "position": 2},
+                    ],
+                    "recipient_member_ids": [str(orch_id)],
+                })
             assert r2.status_code == 200, r2.text
-            assert r2.json()["recipient_member_ids"] == [str(ortega_id)]  # relay-owner 해소=오르테가
-            # 게이팅 실증: 오르테가에게만 정확히 1건·OtherAgent(구독중)엔 0건.
-            assert len(captured_posts) == 1, f"expected 1 delivery(relay-owner only), got {len(captured_posts)}"
+            assert r2.json()["recipient_member_ids"] == [str(orch_id)]
+            # 게이팅 실증: 지정 orchestrator에게만 1건·사람 owner(relay-owner)에겐 0건(추측 폴백 없음).
+            assert len(captured_posts) == 1, f"expected 1 delivery(specified recipient only), got {len(captured_posts)}"
             url, body = captured_posts[0]
             assert url == "https://ortega.example.com/webhook"
             assert "epic.reordered" in body
+            assert not any("human-owner" in u for u, _ in captured_posts), "relay-owner(사람)에게 새면 안 됨"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_steer_dispatch_requires_recipient_member_ids_400():
+    """선생님 B: recipient_member_ids 필수 — None(미지정) 또는 빈 리스트면 400. BE가 relay-owner를
+    추측하지 않으므로(보편적 오케스트레이터란 없다) 인간이 반드시 수신자를 지정해야 한다."""
+    from unittest.mock import AsyncMock, patch
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])
+        client = _client_for(app)
+        try:
+            with patch("app.services.webhook_dispatch.fire_webhooks", AsyncMock()) as wh:
+                await client.patch("/api/v2/epics/bulk", json={"items": [{"id": str(seeded["epic_a1_id"]), "position": 1}]})
+                # recipient 미지정 → 400
+                r_none = await client.post("/api/v2/epics/steer-dispatch", json={
+                    "items": [{"id": str(seeded["epic_a1_id"]), "position": 1}],
+                })
+                # recipient 빈 리스트 → 400
+                r_empty = await client.post("/api/v2/epics/steer-dispatch", json={
+                    "items": [{"id": str(seeded["epic_a1_id"]), "position": 1}],
+                    "recipient_member_ids": [],
+                })
+            assert r_none.status_code == 400, r_none.text
+            assert r_empty.status_code == 400, r_empty.text
+            wh.assert_not_awaited()
         finally:
             await client.aclose()
     finally:
