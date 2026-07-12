@@ -276,9 +276,16 @@ async def update_epic(
     id: uuid.UUID,
     body: EpicUpdate,
     repo: EpicRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> EpicResponse:
     current = await repo.get(id)
     if current is None:
+        raise HTTPException(status_code=404, detail="Epic not found")
+    # 5285888c 라운드1(#1): repo는 org-scope만이라 접근권 없는 same-org 다른 project의 epic을
+    # title/goal/전략까지 무가드로 덮어쓸 수 있었다(PATH_ID 뮤테이션 project-scope IDOR). resolved
+    # -resource(현 epic의 실 project_id)에 has_project_access 사전검증(404·존재 비노출·body-claimed
+    # 금지). EpicUpdate엔 project_id 필드 없어 cross-project 이동 경로는 원천 부재.
+    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), current.project_id, repo.org_id):
         raise HTTPException(status_code=404, detail="Epic not found")
     data = body.model_dump(exclude_unset=True)
     # ⭐RC#2(D1' 봉인): epic status(lifecycle) **변경**은 generic PATCH 금지 — 전용 transition 엔드포인트

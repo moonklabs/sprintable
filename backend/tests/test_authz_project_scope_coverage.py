@@ -244,8 +244,8 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
 
 # ── known-debt: 실 project-scoped IDOR — 후속 라운드 상환(6후보·story 5285888c 감사). ──
 _ID_MUTATION_KNOWN_DEBT_ALLOWLIST: dict[str, str] = {
-    "app.routers.epics:update_epic":
-        "MEDIUM — auth 의존성 시그니처 없음·repo org-scope만·same-org cross-project로 epic title/goal/전략 무가드 write(형제 list_epics는 has_project_access 有). round1 우선.",
+    # 라운드1 상환(#1·epics:update_epic): resolved-resource has_project_access(current.project_id)
+    # 사전검증으로 same-org cross-project epic 덮어쓰기 봉인 — 이제 스캐너가 guarded로 인식·감시.
     "app.routers.hypotheses:update_hypothesis":
         "MEDIUM — resolve_member(project_id 없음)·service org-scope get만·caller의 hyp.project_id 접근권 미검증",
     "app.routers.hypotheses:unlink_hypothesis":
@@ -366,5 +366,8 @@ def test_sibling_asymmetry_advisory_surfaces_high_confidence_candidates():
     from authz_coverage_lib import sibling_asymmetry_advisory
 
     flagged = {r.key for r in sibling_asymmetry_advisory(app)}
-    for expected in ("app.routers.epics:update_epic", "app.routers.agent_runs:update_agent_run"):
-        assert expected in flagged, f"형제-비대칭 휴리스틱이 고신뢰 후보 {expected}를 놓침"
+    # agent_runs(list/create 형제 가드 有·update_agent_run 미가드)는 상환 순서상 마지막이라 이 축의
+    # 안정적 회귀 기준. (epics:update_epic은 라운드1에서 상환돼 이제 guarded → advisory서 빠짐=정상.)
+    assert "app.routers.agent_runs:update_agent_run" in flagged, (
+        "형제-비대칭 휴리스틱이 고신뢰 후보 agent_runs:update_agent_run을 놓침"
+    )
