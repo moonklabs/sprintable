@@ -26,7 +26,11 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
   it('resolves an empty-but-valid GlanceData when every source is genuinely empty', async () => {
     vi.stubGlobal('fetch', mockEmptyFetch());
     const data = await loadGlanceData('proj-a');
-    expect(data).toEqual({ roadmap: [], totalEpicCount: 0, collaboration: [], events: [] });
+    // 2D 재설계(dee92c96): GlanceData에 hero 필드 추가(active 에픽/story 없으면 전부 빈값·no-fiction).
+    expect(data).toEqual({
+      roadmap: [], totalEpicCount: 0, collaboration: [], events: [],
+      activeEpicTitle: null, heroStory: null, memberMap: {},
+    });
   });
 
   it('does not throw when activity-logs returns the real BE envelope shape {items,total,limit,offset} (not a flat array) — 로드맵 blank 진짜 근본 회귀가드', async () => {

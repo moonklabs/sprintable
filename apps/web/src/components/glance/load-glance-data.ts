@@ -10,12 +10,17 @@ import {
   type EpicCollaboration,
   type RoadmapEpic,
 } from '@/services/glance';
+import { pickFocalStory, type HeroStory, type HeroMember } from './hero-logic';
 
 export interface GlanceData {
   roadmap: RoadmapEpic[];
   totalEpicCount: number;
   collaboration: EpicCollaboration[];
   events: BeActivityLogItem[];
+  // E-GLANCE 2D 재설계(dee92c96): hero = 현재(active) 에픽의 focal 활성 story·없으면 null(hero 미표시).
+  activeEpicTitle: string | null;
+  heroStory: HeroStory | null;
+  memberMap: Record<string, HeroMember>;
 }
 
 function unwrap<T>(json: unknown): T | null {
@@ -57,17 +62,39 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   const overview = unwrap<{ project_status: { epics: EpicProgress[] } }>(overviewJson);
   const roadmap = mergeRoadmap(arc.epics, overview?.project_status.epics ?? []);
 
-  const memberRows = unwrap<{ id: string; name: string }[]>(membersJson) ?? [];
+  const memberRows = unwrap<{ id: string; name: string; type?: string }[]>(membersJson) ?? [];
   const memberNames: Record<string, string> = {};
-  for (const m of memberRows) memberNames[m.id] = m.name;
+  const memberMap: Record<string, HeroMember> = {};
+  for (const m of memberRows) {
+    memberNames[m.id] = m.name;
+    memberMap[m.id] = { name: m.name, type: m.type ?? 'human' };
+  }
 
   const storyLists = await Promise.all(roadmap.map((e) => fetchJson(`/api/stories?epic_id=${e.id}&limit=100`)));
   const stories = storyLists.flatMap((s) => unwrap<BeStoryListItem[]>(s) ?? []);
   const collaboration = deriveCollaboration(roadmap.map((e) => e.id), stories, memberNames);
 
+  // 2D 재설계: hero = 현재(active) 에픽의 focal 활성 story. 위에서 이미 per-epic으로 받은
+  // 스토리 목록(storyLists)을 재사용해 활성 에픽의 full 스토리에서 focal을 고른다(추가 fetch 0).
+  const activeEpic = roadmap.find((e) => e.roadmapStatus === 'active') ?? null;
+  let heroStory: HeroStory | null = null;
+  if (activeEpic) {
+    const idx = roadmap.findIndex((e) => e.id === activeEpic.id);
+    const activeStories = unwrap<HeroStory[]>(storyLists[idx]) ?? [];
+    heroStory = pickFocalStory(activeStories);
+  }
+
   // activity-logs는 flat 배열이 아니라 {items,...} wrapper — 위 함수 doc 참고.
   const activityItems = unwrap<{ items: BeActivityLogItem[] }>(activityJson)?.items ?? [];
   const events = filterMilestoneEvents(activityItems);
 
-  return { roadmap, totalEpicCount: arc.totalCount, collaboration, events };
+  return {
+    roadmap,
+    totalEpicCount: arc.totalCount,
+    collaboration,
+    events,
+    activeEpicTitle: activeEpic?.title ?? null,
+    heroStory,
+    memberMap,
+  };
 }
