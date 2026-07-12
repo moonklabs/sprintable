@@ -148,6 +148,14 @@ class BulkEpicPositionRequest(BaseModel):
     items: list[BulkEpicPositionItem]
 
 
+class SteerDispatchRequest(BaseModel):
+    """STEER 조타 커밋(ff662876). items=커밋된 순서 스냅샷(드래그로 이미 /bulk 저장된 상태와
+    일치해야 함·서버 정합검증). recipient_member_ids=인간이 커밋 시 지정(생략/빈 값이면 대상
+    project의 relay-owner=오케스트레이터 기본 프리필)."""
+    items: list[BulkEpicPositionItem]
+    recipient_member_ids: list[uuid.UUID] | None = None
+
+
 # ⚠️ /bulk 은 /{id} 보다 **먼저** 선언해야 한다(FastAPI 라우트 매칭=선언 순서·specific-before-
 # parameterized) — stories.py bulk_update_stories와 동일 교훈(PATCH /bulk가 /{id}에 매칭돼
 # id="bulk" UUID 파싱 422로 shadow되는 사고 재발 방지).
@@ -169,7 +177,6 @@ async def bulk_update_epics(
     from app.models.pm import Epic
 
     updated: list[Epic] = []
-    reordered_items: list[dict] = []
     for item in payload.items:
         q = await session.execute(
             select(Epic).where(Epic.id == item.id, Epic.org_id == org_id)
@@ -179,13 +186,8 @@ async def bulk_update_epics(
             continue
         if not await has_project_access(session, uuid.UUID(auth.user_id), epic.project_id, org_id):
             continue
-        old_position = epic.position
         epic.position = item.position
         updated.append(epic)
-        reordered_items.append({
-            "id": epic.id, "title": epic.title, "project_id": epic.project_id,
-            "position": item.position, "old_position": old_position,
-        })
 
     # P0/MissingGreenlet: setattr 후 flush만으로는 onupdate 서버생성 컬럼(updated_at)이 파이썬
     # 객체에 반영 안 됨 — bulk_update_stories와 동형으로 flush+refresh 후 commit.
@@ -194,18 +196,82 @@ async def bulk_update_epics(
         await session.refresh(e)
     await session.commit()
 
-    # epic.reordered 배치당 1회 발화(N개 재정렬에 N번 웹훅 방지, §2.3).
-    from app.services.epic_events import emit_epic_reordered
-    from app.services.member_resolver import resolve_member
-
-    _actor_id: uuid.UUID | None = None
-    try:
-        _actor_id = (await resolve_member(auth, org_id, session)).id
-    except Exception:  # noqa: BLE001
-        _actor_id = None
-    await emit_epic_reordered(session, org_id, reordered_items, actor_id=_actor_id)
-
+    # STEER 커밋-모델(ff662876·선생님 재정의): 드래그 재정렬은 **이벤트 0**(순수 초안 저장)이다.
+    # 인간이 로드맵을 A→B→다시A로 번복하는 사고과정은 사적 초안이라 실시간 이벤트로 새면 안 된다.
+    # epic.reordered 발화는 명시적 조타 커밋(POST /epics/steer-dispatch)에서만 1회. 여기선 emit 없음.
     return [EpicResponse.model_validate(e) for e in updated]
+
+
+# ⚠️ /steer-dispatch 도 /{id} 보다 먼저 선언(정적 경로 shadow 방지 — /bulk와 동일 교훈).
+@router.post("/steer-dispatch", status_code=200)
+async def steer_dispatch(
+    payload: SteerDispatchRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """STEER 조타 커밋-디스패치(ff662876·선생님 재정의). 드래그(PATCH /epics/bulk)는 무이벤트
+    초안 저장이고, 이 명시적 커밋에서만 epic.reordered를 1회 발화한다(확定된 결정의 전달·초안
+    사고과정 비노출). 커밋 endpoint는 신규 mutation 인가표면이므로(add_feedback 교훈): 대상 epic
+    has_project_access(resource-actual) + recipient_member_ids 각각이 caller org 소속 member인지
+    검증(body-claimed/cross-org 주입 차단).
+    """
+    from app.models.pm import Epic
+    from app.services.epic_events import emit_epic_reordered
+    from app.services.member_resolver import resolve_member, resolve_member_identity
+    from app.services.project_auth import resolve_project_relay_owner
+
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="items required")
+
+    # 1) 대상 epic 검증 + 서버 정합검증(Q1: payload 스냅샷 신뢰하되 저장 position과 대조).
+    committed: list[dict] = []
+    project_ids: set[uuid.UUID] = set()
+    for item in payload.items:
+        epic = (await session.execute(
+            select(Epic).where(Epic.id == item.id, Epic.org_id == org_id)
+        )).scalar_one_or_none()
+        if epic is None:
+            raise HTTPException(status_code=404, detail="Epic not found")
+        if not await has_project_access(session, uuid.UUID(auth.user_id), epic.project_id, org_id):
+            raise HTTPException(status_code=403, detail="No access to this project")
+        # 커밋 스냅샷 position이 이미 /bulk로 저장된 확定 상태와 일치해야(미저장/경합 시 409 —
+        # 커밋은 저장된 결정의 전달이지 재-write가 아니다).
+        if epic.position != item.position:
+            raise HTTPException(status_code=409, detail="Position snapshot conflict — save draft before dispatch")
+        committed.append({
+            "id": epic.id, "title": epic.title, "project_id": epic.project_id,
+            "position": epic.position, "old_position": None,
+        })
+        project_ids.add(epic.project_id)
+
+    # 2) 수신자 해소. 지정 시 각각 caller org 소속 검증(cross-org 주입 차단), 생략 시 대상 project
+    #    relay-owner(=orchestrator) union 프리필(신규 원천데이터 불요).
+    recipients: set[uuid.UUID] = set()
+    if payload.recipient_member_ids:
+        for mid in payload.recipient_member_ids:
+            if await resolve_member_identity(mid, org_id, session) is None:
+                raise HTTPException(status_code=400, detail="recipient_member_id not in org")
+            recipients.add(mid)
+    else:
+        for pid in project_ids:
+            owner = await resolve_project_relay_owner(session, pid, org_id)
+            if owner is not None:
+                recipients.add(owner)
+
+    # 3) actor(best-effort) + emit 1회(지정 수신자 게이팅·preserve_broadcast=False).
+    actor_id: uuid.UUID | None = None
+    try:
+        actor_id = (await resolve_member(auth, org_id, session)).id
+    except Exception:  # noqa: BLE001
+        actor_id = None
+    await emit_epic_reordered(session, org_id, committed, recipients, actor_id=actor_id)
+
+    return {
+        "dispatched": True,
+        "epic_count": len(committed),
+        "recipient_member_ids": [str(r) for r in recipients],
+    }
 
 
 @router.patch("/{id}", response_model=EpicResponse)
