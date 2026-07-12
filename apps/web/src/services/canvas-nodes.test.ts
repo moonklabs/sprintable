@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   resolveNodeTree, addNode, deleteNode, updateNodeProp, countNodeChanges, commitNodesToNextVersion,
+  deriveNodeOperations,
   type ArtifactNode,
 } from './canvas-nodes';
 
@@ -97,5 +98,59 @@ describe('commitNodesToNextVersion (⭐node.id 버전 간 안정성 — C1 계�
     const newId = withNew[3]!.id;
     const committed = commitNodesToNextVersion(withNew);
     expect(committed.some((n) => n.id === newId)).toBe(true);
+  });
+});
+
+describe('deriveNodeOperations (편집 baseline↔committed → BE /edit operations diff)', () => {
+  it('returns [] when nothing changed (커밋이 no-op이면 호출 안 함의 근거)', () => {
+    expect(deriveNodeOperations(BASE, BASE)).toEqual([]);
+  });
+
+  it('emits an add op (full fields, id 보존) for a newly-added node', () => {
+    const withNew = addNode(BASE, 'Image', 'root');
+    const newNode = withNew.find((n) => !BASE.some((b) => b.id === n.id))!;
+    const ops = deriveNodeOperations(BASE, withNew);
+    expect(ops).toEqual([
+      { op: 'add', id: newNode.id, type: 'Image', props: {}, parent_id: 'root', sort_order: newNode.sort_order, description: null },
+    ]);
+  });
+
+  it('emits a delete op with the target id for a removed node', () => {
+    const ops = deriveNodeOperations(BASE, deleteNode(BASE, 'child-b'));
+    expect(ops).toEqual([{ op: 'delete', id: 'child-b' }]);
+  });
+
+  it('emits an update op (full editable fields) for a prop edit', () => {
+    const ops = deriveNodeOperations(BASE, updateNodeProp(BASE, 'child-a', 'text', 'edited'));
+    expect(ops).toEqual([
+      { op: 'update', id: 'child-a', type: 'Text', props: { text: 'edited' }, parent_id: 'root', sort_order: 0, description: null },
+    ]);
+  });
+
+  it('⭐ captures a reorder-only change (sort_order 변경·add/delete 없음) as an update — 재정렬 커밋이 silent no-op 되지 않음', () => {
+    const reordered = BASE.map((n) => (n.id === 'child-a' ? { ...n, sort_order: 5 } : n));
+    const ops = deriveNodeOperations(BASE, reordered);
+    expect(ops).toEqual([
+      { op: 'update', id: 'child-a', type: 'Text', props: { text: 'a' }, parent_id: 'root', sort_order: 5, description: null },
+    ]);
+  });
+
+  it('captures a move (parent_id 변경) as an update', () => {
+    const moved = BASE.map((n) => (n.id === 'child-b' ? { ...n, parent_id: 'child-a' } : n));
+    const ops = deriveNodeOperations(BASE, moved);
+    expect(ops).toEqual([
+      { op: 'update', id: 'child-b', type: 'Button', props: { text: 'b' }, parent_id: 'child-a', sort_order: 1, description: null },
+    ]);
+  });
+
+  it('combines add + delete + update in one diff', () => {
+    let current = addNode(BASE, 'Image', 'root');
+    current = deleteNode(current, 'child-b');
+    current = updateNodeProp(current, 'child-a', 'text', 'edited');
+    const ops = deriveNodeOperations(BASE, current);
+    expect(ops.filter((o) => o.op === 'add')).toHaveLength(1);
+    expect(ops).toContainEqual({ op: 'delete', id: 'child-b' });
+    expect(ops.some((o) => o.op === 'update' && o.id === 'child-a')).toBe(true);
+    expect(ops).toHaveLength(3);
   });
 });

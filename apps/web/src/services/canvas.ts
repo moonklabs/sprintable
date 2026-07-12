@@ -8,7 +8,7 @@
  * 준비됐고 머지되는 순간 이 파이프가 실 렌더로 이어진다.
  */
 
-import type { ArtifactNode } from './canvas-nodes';
+import type { ArtifactNode, NodeOperation } from './canvas-nodes';
 import { resolveNodeTree } from './canvas-nodes';
 
 export type ArtifactFormat = 'html' | 'tree' | 'image';
@@ -197,6 +197,31 @@ export function adaptArtifactDetail(detail: BeVisualArtifactDetail): { artifact:
     created_at: detail.created_at,
   };
   return { artifact, versions: [version] };
+}
+
+/**
+ * 딸깍 편집 커밋(C3-S7 휴먼 절반) — MCP `sprintable_edit_artifact`와 **동일 BE 엔드포인트**
+ * (`POST /api/v2/visual-artifacts/{id}/edit`·같은 서비스 `_apply_artifact_edit`·신규 BE 0).
+ * operations diff를 적용해 새 버전을 만들고 갱신된 detail을 반환한다. `artifact.updated` 이벤트
+ * 전파(휴먼↔에이전트 양방향 도달)는 BE가 수행 — FE는 배선만. 변경 0(빈 operations)이면 호출
+ * 안 함(BE operations non-empty 계약·재정렬 없는 커밋 방지).
+ */
+export async function editArtifact(
+  artifactId: string, operations: NodeOperation[], summary?: string,
+): Promise<BeVisualArtifactDetail | null> {
+  if (operations.length === 0) return null;
+  try {
+    const res = await fetch(`/api/visual-artifacts/${artifactId}/edit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operations, summary: summary ?? null }),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: BeVisualArtifactDetail };
+    return json.data ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export const MOCK_VERSIONS: ArtifactVersion[] = [

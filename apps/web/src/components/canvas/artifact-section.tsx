@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { ArtifactViewer } from './artifact-viewer';
+import { ArtifactEditor } from './artifact-editor';
 import {
-  adaptArtifactDetail, type ArtifactVersion, type BeArtifactVersionSummary, type MemberRef,
+  adaptArtifactDetail, editArtifact, type ArtifactVersion, type BeArtifactVersionSummary, type MemberRef,
   type VisualArtifact, type BeVisualArtifactDetail, type BeVisualArtifactSummary,
 } from '@/services/canvas';
 import { adaptComments, type BeArtifactComment, type CommentThread } from '@/services/canvas-comments';
 import { derivePendingCanonicalizeVersion, type CanonicalizeGateLookup } from '@/services/canvas-canonicalize';
-import type { ArtifactNode } from '@/services/canvas-nodes';
+import { deriveNodeOperations, type ArtifactNode } from '@/services/canvas-nodes';
 
 interface ArtifactSectionProps {
   storyId: string;
@@ -63,6 +64,9 @@ async function loadPendingCanonicalizeVersion(artifactId: string): Promise<numbe
  */
 export function ArtifactSection({ storyId, memberMap = {}, className }: ArtifactSectionProps) {
   const [items, setItems] = useState<ArtifactItem[]>([]);
+  // C3-S7 휴먼 딸깍 편집 — 어느 artifact가 편집 모드인지(tree만 진입·viewer가 게이트). 커밋 성공
+  // 후 종료해 fresh 재로드(BE가 버전마다 node.id 리매핑하므로 stale id 재사용 원천 차단).
+  const [editingArtifactId, setEditingArtifactId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,24 +120,65 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
     setItems((cur) => cur.map((it) => (it.artifact.id === artifactId ? { ...it, pendingCanonicalizeVersion } : it)));
   }
 
+  /**
+   * 딸깍 편집 커밋 — 편집기의 최종 노드셋을 baseline(현 버전 노드)과 diff해 operations로 유도,
+   * MCP와 동일한 `/edit` 엔드포인트로 커밋(새 버전). 성공 시 새 detail로 아이템을 갱신하고 편집
+   * 모드를 종료(fresh 재로드·정본 불변). 변경 0이면 조용히 종료, 실패면 편집 유지(원인 로깅).
+   */
+  async function handleCommitEdit(item: ArtifactItem, committedNodes: ArtifactNode[], summary: string) {
+    const operations = deriveNodeOperations(item.nodes, committedNodes);
+    if (operations.length === 0) { setEditingArtifactId(null); return; }
+    const detail = await editArtifact(item.artifact.id, operations, summary);
+    if (!detail) {
+      // 빈 catch 금지 계열 — 커밋 실패를 삼키지 않고 로깅, 편집 모드 유지(사용자 재시도 가능).
+      console.error('[canvas-edit] artifact edit commit failed', item.artifact.id);
+      return;
+    }
+    const { artifact, versions } = adaptArtifactDetail(detail);
+    const [threads, pendingCanonicalizeVersion] = await Promise.all([
+      loadArtifactThreads(artifact.id, detail.nodes),
+      loadPendingCanonicalizeVersion(artifact.id),
+    ]);
+    setItems((cur) => cur.map((it) => (it.artifact.id === artifact.id
+      ? { artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion }
+      : it)));
+    setEditingArtifactId(null);
+  }
+
   if (items.length === 0) return null;
 
   return (
     <div className={className}>
-      {items.map(({ artifact, versions, threads, nodes, pendingCanonicalizeVersion }) => (
-        <ArtifactViewer
-          key={artifact.id}
-          artifact={artifact}
-          versions={versions}
-          memberMap={memberMap}
-          threads={threads}
-          nodes={nodes}
-          onResolveThread={(threadId) => void handleResolve(artifact.id, nodes, threadId)}
-          onReplyThread={(threadId, body) => void handleReply(artifact.id, nodes, threadId, body)}
-          pendingCanonicalizeVersion={pendingCanonicalizeVersion}
-          onProposeCanonical={(versionNumber) => void handleProposeCanonical(artifact.id, versionNumber)}
-        />
-      ))}
+      {items.map((item) => {
+        const { artifact, versions, threads, nodes, pendingCanonicalizeVersion } = item;
+        // 편집 모드 = 뷰어 대신 편집기(같은 자리). tree 진입은 viewer의 onEnterEdit 게이트가 보장.
+        if (editingArtifactId === artifact.id) {
+          return (
+            <ArtifactEditor
+              key={artifact.id}
+              title={artifact.title}
+              initialNodes={nodes}
+              onCommit={(committed, summary) => void handleCommitEdit(item, committed, summary)}
+              onDone={() => setEditingArtifactId(null)}
+            />
+          );
+        }
+        return (
+          <ArtifactViewer
+            key={artifact.id}
+            artifact={artifact}
+            versions={versions}
+            memberMap={memberMap}
+            threads={threads}
+            nodes={nodes}
+            onEnterEdit={() => setEditingArtifactId(artifact.id)}
+            onResolveThread={(threadId) => void handleResolve(artifact.id, nodes, threadId)}
+            onReplyThread={(threadId, body) => void handleReply(artifact.id, nodes, threadId, body)}
+            pendingCanonicalizeVersion={pendingCanonicalizeVersion}
+            onProposeCanonical={(versionNumber) => void handleProposeCanonical(artifact.id, versionNumber)}
+          />
+        );
+      })}
     </div>
   );
 }
