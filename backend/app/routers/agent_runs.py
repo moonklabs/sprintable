@@ -124,13 +124,20 @@ async def update_agent_run(
     id: uuid.UUID,
     body: UpdateAgentRun,
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
     repo: AgentRunRepository = Depends(_get_repo),
 ) -> AgentRunResponse:
     """prod 핫픽스(S20 전수스캔 — create_agent_run과 동일 클래스): run id만으로 org 검증 없이
     임의 org의 agent run을 수정할 수 있었다."""
+    from app.services.project_auth import has_project_access
+
     existing = await repo.get(id)
     if existing is None or existing.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    # 스캐너 라운드3(#5): org 검증은 있으나 resolved-resource(existing.project_id·AgentRun.project_id
+    # NOT NULL)의 project 접근권 미검증 → same-org 다른 project 멤버가 run status/tokens/cost/error를
+    # 덮어쓸 수 있었다(형제 list/create는 이미 has_project_access 有·불일치 시그널이 지목). 404·body-claimed 금지.
+    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), existing.project_id, org_id):
         raise HTTPException(status_code=404, detail="Agent run not found")
     run = await repo.update(
         id,
