@@ -29,7 +29,14 @@ os.environ.setdefault("JWT_SECRET", "test-secret-key-for-pytest-only")
 # 있어도 하드-거부(deny-list)하고, 그 외엔 테스트 신호(이름 패턴) 또는 명시 opt-in env가 있을 때만
 # 허용(allow-list). 둘 다 통과해야 리셋 — 아니면 즉시 fail-fast(실 DB는 절대 건드리지 않는다).
 _FORBIDDEN_DB_RE = re.compile(r"prod|production|sprintable-dev|sprintable-prod", re.IGNORECASE)
-_TEST_DB_SIGNAL_RE = re.compile(r"test|parity|_ca\d*|_ci\b|ci_|ephemeral|scratch|tmp", re.IGNORECASE)
+# ⚠️ 까심 QA(#2095 RC): 테스트 신호는 반드시 **토큰 경계**로 매치한다 — substring 매치는 fail-open이라
+# "test"가 다른 단어 안에 우연히 든 실 DB 이름(customer_data_latest·contest_entries·protest_data·
+# orders_latest_snapshot)이 opt-in 없이 통과해 파괴적 DROP SCHEMA가 발동했다. `_`/`-` 또는 문자열
+# 경계로 구분된 **온전한 토큰**일 때만 인정(latest 안의 test·contest 안의 test는 불인정).
+_TEST_DB_SIGNAL_RE = re.compile(
+    r"(?:^|[_-])(?:test\d*|parity|ci|ca\d+|ephemeral|scratch|tmp)(?=$|[_-])",
+    re.IGNORECASE,
+)
 
 
 def _db_name(url: str) -> str:
