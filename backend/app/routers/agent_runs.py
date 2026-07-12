@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -48,8 +49,17 @@ async def list_agent_runs(
         raise HTTPException(status_code=404, detail="Project not found")
     if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
         raise HTTPException(status_code=403, detail="No access to this project")
+    # 까심 부수발견(HIGH): cursor는 ISO created_at 문자열인데 repo가 timestamptz 컬럼에
+    # varchar로 직비교해 asyncpg 캐스팅 실패(DataError)→500이었다. HTTP 계층에서 datetime으로
+    # 파싱해 timestamptz 파라미터로 바인딩하고, 비-ISO cursor는 400으로 명시(500·조용한 무시 금지).
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor (expected ISO 8601 datetime)")
     runs = await repo.list(
-        project_id=project_id, agent_id=agent_id, story_id=story_id, limit=limit, cursor=cursor
+        project_id=project_id, agent_id=agent_id, story_id=story_id, limit=limit, cursor=cursor_dt
     )
     return [AgentRunResponse.model_validate(r) for r in runs]
 
