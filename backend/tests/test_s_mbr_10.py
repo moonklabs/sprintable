@@ -96,10 +96,16 @@ async def test_list_members_org_member_requires_grant():
     agent_mock = MagicMock()
     agent_mock.scalars.return_value.all.return_value = []
 
-    mock_session.execute = AsyncMock(side_effect=[org_lookup_mock, human_mock, agent_mock])
-    mock_auth = MagicMock()
+    # round9(#2050): has_project_access 사전검증이 org_lookup과 human_rows 사이에 execute
+    # 1회를 추가한다(caller의 실 project 접근권 대조). 이 목이 그 호출에 truthy 응답.
+    access_mock = MagicMock()
+    access_mock.scalar_one_or_none.return_value = 1
 
-    result = await list_members(project_id=project_id, session=mock_session, _auth=mock_auth, org_id=org_id)
+    mock_session.execute = AsyncMock(side_effect=[org_lookup_mock, access_mock, human_mock, agent_mock])
+    mock_auth = MagicMock()
+    mock_auth.user_id = str(uuid.uuid4())
+
+    result = await list_members(project_id=project_id, session=mock_session, auth=mock_auth, org_id=org_id)
     assert len(result) == 1
     assert result[0].role == "owner"
 
@@ -130,10 +136,16 @@ async def test_list_members_member_with_grant_included():
     agent_mock = MagicMock()
     agent_mock.scalars.return_value.all.return_value = []
 
-    mock_session.execute = AsyncMock(side_effect=[org_lookup_mock, human_mock, agent_mock])
-    mock_auth = MagicMock()
+    # round9(#2050): has_project_access 사전검증이 org_lookup과 human_rows 사이에 execute
+    # 1회를 추가한다(caller의 실 project 접근권 대조). 이 목이 그 호출에 truthy 응답.
+    access_mock = MagicMock()
+    access_mock.scalar_one_or_none.return_value = 1
 
-    result = await list_members(project_id=project_id, session=mock_session, _auth=mock_auth, org_id=org_id)
+    mock_session.execute = AsyncMock(side_effect=[org_lookup_mock, access_mock, human_mock, agent_mock])
+    mock_auth = MagicMock()
+    mock_auth.user_id = str(uuid.uuid4())
+
+    result = await list_members(project_id=project_id, session=mock_session, auth=mock_auth, org_id=org_id)
     assert len(result) == 2
     roles = {r.role for r in result}
     assert "owner" in roles
