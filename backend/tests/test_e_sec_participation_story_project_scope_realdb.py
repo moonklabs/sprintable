@@ -75,9 +75,10 @@ async def _seed(session):
     role = ParticipationRole(id=uuid.uuid4(), org_id=org.id, key="reviewer", label="Reviewer")
     session.add(role)
     await session.commit()
-    # story_b(무접근)에 시크릿 participation — list 노출 감시.
+    # story_b(무접근)에 시크릿 participation — list 노출 감시 + cross-project delete 대상.
+    partic_b_id = uuid.uuid4()
     session.add(Participation(
-        id=uuid.uuid4(), org_id=org.id, story_id=story_b.id, member_id=_SECRET_MEMBER_ID, role_id=role.id,
+        id=partic_b_id, org_id=org.id, story_id=story_b.id, member_id=_SECRET_MEMBER_ID, role_id=role.id,
     ))
     await session.commit()
 
@@ -95,7 +96,7 @@ async def _seed(session):
 
     return {
         "org_id": org.id, "story_a_id": story_a.id, "story_b_id": story_b.id,
-        "role_id": role.id, "caller_id": caller_id,
+        "role_id": role.id, "caller_id": caller_id, "partic_b_id": partic_b_id,
     }
 
 
@@ -224,6 +225,70 @@ async def test_list_participation_cross_project_blocked_404_no_roster_leak():
             resp = await client.get(f"/api/v2/participation?story_id={seeded['story_b_id']}")
             assert resp.status_code == 404, resp.text
             assert str(_SECRET_MEMBER_ID) not in resp.text, "cross-project participation 로스터 유출"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_remove_participation_cross_project_blocked_404_not_deleted():
+    """봉인(mutation 대상 project-scope IDOR·5a19b637): project_a grant caller가 접근권 없는
+    project_b story의 participation을 id만으로 삭제 시도 → 404 + **미삭제 직조회**(seed된 시크릿
+    participation이 그대로 남아있음)."""
+    from sqlalchemy import text
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.delete(f"/api/v2/participation/{seeded['partic_b_id']}")
+            assert resp.status_code == 404, resp.text
+            # 실제로 삭제 안 됐는지 직조회.
+            async with Session() as s2:
+                cnt = (await s2.execute(
+                    text("SELECT count(*) FROM participation WHERE id = :i"),
+                    {"i": seeded["partic_b_id"]},
+                )).scalar_one()
+                assert cnt == 1, "cross-project participation이 삭제됨(IDOR)"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_remove_participation_own_story_200():
+    """회귀0: 접근권 있는 story_a participation은 정상 삭제(200)."""
+    import uuid as _uuid
+    from sqlalchemy import text
+    from app.main import app
+    from app.models.participation import Participation
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+            partic_a_id = _uuid.uuid4()
+            s.add(Participation(
+                id=partic_a_id, org_id=seeded["org_id"], story_id=seeded["story_a_id"],
+                member_id=_uuid.uuid4(), role_id=seeded["role_id"],
+            ))
+            await s.commit()
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.delete(f"/api/v2/participation/{partic_a_id}")
+            assert resp.status_code == 200, resp.text
+            async with Session() as s2:
+                cnt = (await s2.execute(
+                    text("SELECT count(*) FROM participation WHERE id = :i"), {"i": partic_a_id}
+                )).scalar_one()
+                assert cnt == 0
         finally:
             await client.aclose()
     finally:
