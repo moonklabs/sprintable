@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -19,7 +20,7 @@ class AgentRunRepository:
         agent_id: uuid.UUID | None = None,
         story_id: uuid.UUID | None = None,
         limit: int = 50,
-        cursor: str | None = None,
+        cursor: datetime | None = None,
     ) -> list[AgentRun]:
         from app.models.team import TeamMember
         agent_ids_q = select(TeamMember.id).where(TeamMember.project_id == project_id)
