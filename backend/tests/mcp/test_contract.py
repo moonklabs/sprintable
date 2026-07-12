@@ -85,8 +85,8 @@ EXPECTED_TOOLS = {
     "sprintable_link_gate_to_task",
     # evidence (1) — E-VERIFY V0-S1
     "sprintable_add_evidence",
-    # visual artifacts (6) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안)
-    "sprintable_create_artifact", "sprintable_get_artifact",
+    # visual artifacts (7) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안)
+    "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
     # smoke
@@ -103,6 +103,11 @@ def test_all_expected_tools_registered():
     registered = set(_TOOLS.keys())
     missing = EXPECTED_TOOLS - registered
     assert not missing, f"미등록 도구: {missing}"
+    # ⭐양방향 봉인(까심 QA #2106): EXPECTED-registered 한 방향만 검사하면 신규 등록 툴이
+    # EXPECTED_TOOLS에 빠져도 공허통과한다(#2093/#2096 advisory 공허통과와 동형). 역방향으로
+    # "등록됐는데 EXPECTED에 없는 툴"을 잡아 신규 툴이 계약 목록 누락 시 즉시 RED로 봉인.
+    extra = registered - EXPECTED_TOOLS
+    assert not extra, f"EXPECTED_TOOLS에 없는 등록 툴(계약 목록 갱신 필요): {extra}"
 
 
 @pytest.mark.parametrize("tool_name", [

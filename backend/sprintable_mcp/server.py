@@ -504,7 +504,8 @@ _TOOL_DEFS: list[tuple] = [
      "시각 산출물 단건 조회(latest 버전 + nodes).",
      GetArtifactInput, get_artifact),
     ("sprintable_list_artifacts",
-     "현재 프로젝트 시각 산출물 목록 조회 — story_id/epic_id/doc_id로 필터(미지정=프로젝트 전체).",
+     "현재 프로젝트 시각 산출물 목록 조회(각 항목=메타+latest 버전 번호·노드 트리 미포함·상세는"
+     " get_artifact) — story_id/epic_id/doc_id로 필터(미지정=프로젝트 전체).",
      ListArtifactsInput, list_artifacts),
     ("sprintable_list_artifact_comments",
      "artifact 코멘트 스레드 조회(요소/좌표 앵커·resolve 상태) — 휴먼 피드백 왕복 입구.",

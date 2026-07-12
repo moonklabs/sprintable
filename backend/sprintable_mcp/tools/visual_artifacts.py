@@ -109,7 +109,8 @@ async def get_artifact(args: GetArtifactInput) -> list[TextContent]:
 
 async def list_artifacts(args: ListArtifactsInput) -> list[TextContent]:
     """현재 프로젝트의 시각 산출물 목록 조회 — story_id/epic_id/doc_id로 필터 가능(미지정 시
-    프로젝트 전체). 각 항목은 artifact 메타(title·story/epic/doc 연결·latest 버전)."""
+    프로젝트 전체). 각 항목은 artifact 메타(title·story/epic/doc 연결·latest 버전 번호)만 반환하며
+    노드 트리는 미포함 — 특정 artifact의 nodes/상세는 get_artifact로 조회."""
     try:
         params: dict = {}
         if args.story_id:
