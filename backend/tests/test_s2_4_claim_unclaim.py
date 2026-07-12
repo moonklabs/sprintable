@@ -304,6 +304,9 @@ async def test_list_members_active_story_injected():
             call_count += 1
             result = MagicMock()
             if call_count == 1:
+                # ratchet round2: has_project_access 사전검증(project 소속 확認)
+                result.scalar_one_or_none.return_value = True
+            elif call_count == 2:
                 # list members
                 result.scalars.return_value.all.return_value = [member]
             else:
@@ -341,6 +344,9 @@ async def test_list_members_active_story_null_when_no_claim():
             call_count += 1
             result = MagicMock()
             if call_count == 1:
+                # ratchet round2: has_project_access 사전검증(project 소속 확認)
+                result.scalar_one_or_none.return_value = True
+            elif call_count == 2:
                 result.scalars.return_value.all.return_value = [member]
             else:
                 result.scalars.return_value.all.return_value = []

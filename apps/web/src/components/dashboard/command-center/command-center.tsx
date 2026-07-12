@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Loader2 } from 'lucide-react';
+import Link from 'next/link';
+import { Loader2, Map } from 'lucide-react';
 import { isPending, type MyActions, type Overview } from './types';
 import { ActionZone } from './action-zone';
 import { OverviewZone } from './overview-zone';
+import { derivePhrase } from '@/services/glance';
 
 /**
  * E-MODERN [Track C] 커맨드 센터 — 현 대시보드 위젯 교체. 2구역+헤더.
@@ -21,6 +23,7 @@ function unwrap<T>(json: unknown): T | null {
 
 export function CommandCenter({ projectName }: { projectName?: string | null }) {
   const t = useTranslations('dashboard');
+  const tGlance = useTranslations('glance');
   const [myActions, setMyActions] = useState<MyActions | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
@@ -55,23 +58,37 @@ export function CommandCenter({ projectName }: { projectName?: string | null }) 
     id ? (memberNames[id] ?? epicTitles[id] ?? null) : null;
 
   const fleet = overview?.fleet;
+  const activeEpic = overview?.project_status.epics.find((e) => e.status === 'active') ?? null;
 
   return (
     <div className="space-y-4">
-      {/* 헤더: 커맨드 센터 + 프로젝트 + 우측 함대 라이브 */}
+      {/* 헤더: 커맨드 센터 + 프로젝트 + 우측 함대 라이브 + E-GLANCE 요약(§11 결정②: 전용 뷰+요약 카드) */}
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-baseline gap-2">
           <h2 className="text-sm font-semibold text-foreground">{t('commandCenter')}</h2>
           {projectName ? <span className="text-xs text-muted-foreground">· {projectName}</span> : null}
         </div>
-        {fleet ? (
-          <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-[11px]">
-            <span className="font-medium text-foreground">{t('ccFleet', { count: fleet.total_agents })}</span>
-            {isPending(fleet.status_breakdown) ? (
-              <span className="text-muted-foreground/70">· {t('ccFleetBreakdownPending')}</span>
-            ) : null}
-          </div>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {activeEpic ? (
+            <Link
+              href="/glance"
+              title={t('ccGlanceTooltip')}
+              className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Map className="size-3 shrink-0" aria-hidden="true" />
+              <span className="max-w-[120px] truncate font-medium text-foreground">{activeEpic.title}</span>
+              <span className="shrink-0">· {tGlance(`phrase.${derivePhrase(activeEpic.completion_pct, activeEpic.total)}`)}</span>
+            </Link>
+          ) : null}
+          {fleet ? (
+            <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-[11px]">
+              <span className="font-medium text-foreground">{t('ccFleet', { count: fleet.total_agents })}</span>
+              {isPending(fleet.status_breakdown) ? (
+                <span className="text-muted-foreground/70">· {t('ccFleetBreakdownPending')}</span>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </header>
 
       {loading && !myActions && !overview ? (

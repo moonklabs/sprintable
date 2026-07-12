@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useCallback, useEffect, useMemo } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useState, startTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   TAB_PROJECT_STORAGE_KEY,
@@ -110,7 +110,17 @@ function useProjectSsot(serverProjectId: string | undefined, memberships: Dashbo
   const urlProjectId = searchParams.get('p');
 
   const accessibleIds = useMemo(() => new Set(memberships.map((m) => m.projectId)), [memberships]);
-  const effectiveProjectId = resolveEffectiveProjectId(urlProjectId, serverProjectId, accessibleIds);
+
+  // 라이브 재현(2026-07-11, React fiber 실측) — sessionStorage(브라우저 전용)는 `typeof window`
+  // 가드로만 갈리면 SSR(undefined→skip)과 첫 클라이언트 렌더(defined→읽음) 사이에서
+  // effectiveProjectId 값이 바뀔 수 있다. 그 값이 서버 렌더 결과와 다르면 하이드레이션 직후
+  // useEffect가 즉시 다른 URL로 replace를 걸어 자식(GlanceBoard 등) subtree를 다시 흔든다.
+  // hydrated로 한 틱 미뤄 첫 렌더(서버+첫 클라이언트 둘 다)를 항상 동일하게 만들면 이 잦은
+  // 재-replace 근원 하나가 사라진다 — router.replace 자체(2번째 소스)는 여전히 필요하면 실행.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => { startTransition(() => setHydrated(true)); }, []);
+
+  const effectiveProjectId = resolveEffectiveProjectId(urlProjectId, serverProjectId, accessibleIds, hydrated);
 
   // ref 동기화 + 인터셉터 설치를 **렌더 단계**에서 — effect(자식→부모 순)에 두면 부모(DashboardShell)
   // 설치 effect 가 자식(app-sidebar·use-team-presence·kanban-board) 초기 fetch *후* 실행돼 첫 로드

@@ -1,14 +1,32 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.models.pm import Story
 from app.repositories.participation import ParticipationRepository, ParticipationRoleRepository
 from app.schemas.participation import ParticipationCreate, ParticipationResponse, ParticipationRoleResponse
+from app.services.project_auth import has_project_access
 
 router = APIRouter(prefix="/api/v2/participation", tags=["participation"])
+
+
+async def _assert_story_project_access(
+    session: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID, story_id: uuid.UUID
+) -> None:
+    """participation은 story-bound다. story_id의 실 project 접근권을 resource-actual로 검증한다
+    (body/query-claimed story_id를 믿지 않음). story가 caller org에 없거나 그 project 접근권이
+    없으면 404(존재 비노출). round1~9/add_feedback와 동형 규율 — has_project_access 직접호출."""
+    project_id = (
+        await session.execute(
+            select(Story.project_id).where(Story.id == story_id, Story.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if project_id is None or not await has_project_access(session, user_id, project_id, org_id):
+        raise HTTPException(status_code=404, detail="Story not found")
 
 
 def _get_role_repo(
@@ -38,8 +56,11 @@ async def list_roles(
 async def add_participation(
     body: ParticipationCreate,
     repo: ParticipationRepository = Depends(_get_repo),
-    _auth=Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> ParticipationResponse:
+    # write-path IDOR 봉인: body.story_id에 caller 접근권 검증 없이 임의 story에 participation을
+    # 주입할 수 있었다(cross-project/org). resource-actual project-scope 가드.
+    await _assert_story_project_access(repo.session, uuid.UUID(auth.user_id), repo.org_id, body.story_id)
     if await repo.exists(body.story_id, body.member_id, body.role_id):
         raise HTTPException(status_code=409, detail="이미 존재하는 참여 기록")
     p = await repo.create(
@@ -54,8 +75,10 @@ async def add_participation(
 async def list_participation(
     story_id: uuid.UUID = Query(...),
     repo: ParticipationRepository = Depends(_get_repo),
-    _auth=Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[ParticipationResponse]:
+    # read exposure 봉인: 접근권 없는 story의 participation 로스터 열람 차단.
+    await _assert_story_project_access(repo.session, uuid.UUID(auth.user_id), repo.org_id, story_id)
     items = await repo.list_by_story(story_id)
     return [ParticipationResponse.model_validate(i) for i in items]
 
@@ -64,8 +87,16 @@ async def list_participation(
 async def remove_participation(
     id: uuid.UUID,
     repo: ParticipationRepository = Depends(_get_repo),
-    _auth=Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    # 5a19b637(까심 fast-follow): repo.delete는 org_id 스코프만이라 접근권 없는 same-org
+    # 다른 project의 participation을 id만으로 삭제할 수 있었다(mutation 대상 project-scope IDOR).
+    # 대상 participation을 선조회해 그 story의 project 접근권을 resource-actual로 검증(404·존재
+    # 비노출·add/list와 동일 가드 재사용). 통과해야 delete.
+    p = await repo.get(id)
+    if p is None:
+        raise HTTPException(status_code=404, detail="참여 기록을 찾을 수 없음")
+    await _assert_story_project_access(repo.session, uuid.UUID(auth.user_id), repo.org_id, p.story_id)
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="참여 기록을 찾을 수 없음")

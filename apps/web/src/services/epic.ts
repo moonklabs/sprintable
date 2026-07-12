@@ -1,5 +1,5 @@
-import type { IEpicRepository, CreateEpicInput, UpdateEpicInput, RepositoryScopeContext } from '@sprintable/core-storage';
-export type { CreateEpicInput, UpdateEpicInput } from '@sprintable/core-storage';
+import type { IEpicRepository, CreateEpicInput, UpdateEpicInput, EpicPositionItem, RepositoryScopeContext } from '@sprintable/core-storage';
+export type { CreateEpicInput, UpdateEpicInput, EpicPositionItem } from '@sprintable/core-storage';
 import { validateStatusTransition } from '@/lib/epic-permissions';
 
 export class EpicService {
@@ -12,8 +12,13 @@ export class EpicService {
     return this.repository.create(input);
   }
 
-  async list(filters: { project_id?: string; limit?: number; cursor?: string | null }) {
+  async list(filters: { project_id?: string; limit?: number; cursor?: string | null; order_by?: string }) {
     return this.repository.list(filters);
+  }
+
+  /** 로드맵 조타 재정렬 — 큐레이션한 에픽만 position 갱신(백필0). */
+  async bulkUpdatePositions(items: EpicPositionItem[]) {
+    return this.repository.bulkUpdatePositions(items);
   }
 
   async getById(id: string, scope?: RepositoryScopeContext) {

@@ -46,6 +46,9 @@ export function GateInbox({ memberId }: GateInboxProps) {
   // doc gate는 머지 verdict의 requires_human/auto_decision 메타가 없어 gateNeedsAction이 false → 사람 결재 액션이
   // 떠야 하므로 별도 분기로 승인/반려를 surface한다(human-only authz는 BE 강제).
   const isDocGate = (g: GateItem) => g.work_item_type === 'doc' || g.gate_type === 'doc_approval';
+  // C4-S8: artifact_canonicalize도 BE _ALWAYS_MANUAL_GATE_TYPES(항상 pending·requires_human 미설정)라
+  // isDocGate와 동일하게 별도 액션 노출 분기 필요(안 하면 gateNeedsAction()이 false라 승인/반려 버튼이 안 뜸).
+  const isCanonicalizeGate = (g: GateItem) => g.gate_type === 'artifact_canonicalize';
   const resolveName = (id: string) => memberNames[id] ?? id.slice(0, 6);
   // S11 ②: 라인 컨텍스트(active step_run by story_id) + approver 이름맵.
   const [lineMap, setLineMap] = useState<Record<string, WorkflowLineStepRun>>({});
@@ -220,6 +223,13 @@ export function GateInbox({ memberId }: GateInboxProps) {
                   <span className="truncate text-xs text-muted-foreground" title={gate.work_item_summary.title}>
                     {t('docGateTitlePrefix')}{gate.work_item_summary.title}
                   </span>
+                ) : isCanonicalizeGate(gate) && typeof gate.neutral_facts?.['artifact_title'] === 'string' ? (
+                  // C4-S8: work_item_summary enrich는 doc gate 전용이라 artifact gate는 대상 없음 —
+                  // BE가 gate 생성 시 이미 neutral_facts에 담아준 artifact_title/version_number로 대체(신규 fetch 0).
+                  <span className="truncate text-xs text-muted-foreground">
+                    {gate.neutral_facts['artifact_title'] as string}
+                    {typeof gate.neutral_facts['version_number'] === 'number' ? ` v${gate.neutral_facts['version_number']}` : ''}
+                  </span>
                 ) : (
                   <span className="truncate text-xs text-muted-foreground">#{gate.work_item_id.slice(0, 6)}</span>
                 )}
@@ -291,7 +301,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
                     {t('resumeAction')}
                   </Button>
                 </>
-              ) : gateNeedsAction(gate) || isDocGate(gate) ? (
+              ) : gateNeedsAction(gate) || isDocGate(gate) || isCanonicalizeGate(gate) ? (
                 <>
                   {/* doc gate: "문서에서 검토" 딥링크 primary(in-context 결재·rubber-stamp 방지). slug null이면 omit. */}
                   {isDocGate(gate) && gate.work_item_summary?.slug ? (

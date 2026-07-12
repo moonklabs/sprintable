@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.team import TeamMember
-from app.services.project_auth import assert_target_in_caller_org
+from app.services.project_auth import assert_target_in_caller_org, has_project_access
 
 router = APIRouter(prefix="/api/v2/members", tags=["members"])
 
@@ -27,7 +27,7 @@ class MemberResponse(BaseModel):
 async def list_members(
     project_id: uuid.UUID = Query(...),
     session: AsyncSession = Depends(get_db),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> list[MemberResponse]:
     """프로젝트 멤버 목록.
@@ -44,6 +44,15 @@ async def list_members(
     )
     project_org_id = project_org_row.scalar_one_or_none()
     assert_target_in_caller_org(org_id, project_org_id, not_found_detail="Project not found")
+
+    # ratchet round9(#2050 SEC HIGH baseline 마지막 1건): 위 가드는 cross-org IDOR만 막고
+    # same-org cross-project는 미검증이라, 같은 org 내 접근권 없는 project_id를 주입하면
+    # 그 프로젝트의 휴먼+에이전트 로스터(name/role)가 그대로 열거됐다. project_id는 쿼리
+    # 파라미터 자체가 조회 대상이므로 resource-actual 직접검증. 유일한 project-환원 벡터이며
+    # (다른 필터/검색어 없음) EE RBAC 등 특수 훅도 없음을 그라운딩으로 확認(round7 교훈).
+    # 존재/무접근권 모두 404(존재 비노출·기존 가드와 동형 시맨틱).
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
 
     result: list[MemberResponse] = []
 

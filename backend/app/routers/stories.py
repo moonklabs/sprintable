@@ -153,17 +153,41 @@ async def _attach_assignee_ids(
 
 
 async def _attach_has_evidence(session: AsyncSession, stories: list[Story]) -> None:
-    """E-VERIFY V0-S2(story 3fbd048d): evidence 있는 story에 has_evidence=True(transient attr) —
-    없으면 미설정(StoryResponse 기본값 None 유지, positive 단방향·부정 신호 0).
+    """E-VERIFY V0-S2(story 3fbd048d) + Claimed vs Verified(doc
+    claimed-vs-verified-spec-handoff §3): evidence 있는 story에 has_evidence/self_reported=True
+    (transient attr) — 없으면 미설정(StoryResponse 기본값 None 유지, positive 단방향·부정
+    신호 0). gate_approval evidence(휴먼 책임자 gate 승인, 스푸핑 불가)가 있으면 추가로
+    human_verified=True+human_verified_by(who)·human_verified_at(when) 세팅.
     _attach_assignee_ids와 동형 배치 패턴."""
     if not stories:
         return
-    from app.services.evidence_service import batch_has_evidence
+    from app.services.evidence_service import batch_has_evidence, batch_human_verified
 
-    ids_with_evidence = await batch_has_evidence(session, [s.id for s in stories], "story")
+    story_ids = [s.id for s in stories]
+    ids_with_evidence = await batch_has_evidence(session, story_ids, "story")
+    verified_map = await batch_human_verified(session, story_ids, "story")
     for s in stories:
         if s.id in ids_with_evidence:
             s.has_evidence = True
+            s.self_reported = True
+        verified = verified_map.get(s.id)
+        if verified is not None:
+            s.human_verified = True
+            s.human_verified_by = verified.created_by
+            s.human_verified_at = verified.created_at
+
+
+async def _assert_story_project_access(
+    session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, project_id: uuid.UUID
+) -> None:
+    """E-SECURITY SEC-S8(story 83ea3d6a) G: 개별-ID story 접근(get/update/status)이 org-scope만
+    있고 project 접근권 미검증이던 갭 — 같은 org 다른 project 멤버가 story id만 알면 조회/수정
+    가능했다. upload_story_attachment와 동형으로 has_project_access 재사용(휴먼 team_member·
+    에이전트 project_access grant 양쪽 처리). delete_story는 SEC-S3(#2014)가 별도 처리."""
+    from app.services.project_auth import has_project_access
+
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
 
 
 async def _assert_story_project_access(

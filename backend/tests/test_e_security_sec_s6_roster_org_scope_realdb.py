@@ -149,8 +149,14 @@ async def test_cross_org_project_id_roster_blocked():
 
 
 @pytest.mark.anyio
-async def test_same_org_project_id_roster_still_free():
-    """회귀 0: Org B caller가 자기 org의 project_id로 조회하면 정상 로스터(휴먼+에이전트) 반환."""
+async def test_same_org_no_project_access_now_blocked_round9():
+    """round9(#2050 SEC HIGH baseline 최종) 계약 강화: SEC-S6 시절엔 이 엔드포인트가
+    cross-org만 막고 same-org는 'JWT 클레임 org == project org'만 대조해 자유였다
+    (그래서 members가 _KNOWN_DEBT HIGH로 남았다). 여기 caller_user_id는 실제로는 Org A
+    소속 멤버이고 org_b_id를 JWT로 '주장'만 할 뿐 — Org B project_b에 대한 team_member/
+    grant/owner-admin 접근권이 하나도 없다. round9의 has_project_access 사전검증은 실
+    접근권을 요구하므로 이제 404(로스터 verbatim 비노출까지 실증). 정당한 org-wide 접근
+    (owner/admin) 회귀0는 round9 realdb의 test_org_owner_can_list_any_project_roster_unchanged가 커버."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -162,11 +168,10 @@ async def test_same_org_project_id_roster_still_free():
         client = _client_for(app)
         try:
             resp = await client.get(f"/api/v2/members?project_id={seeded['project_b_id']}")
-            assert resp.status_code == 200, resp.text
-            members = resp.json()
-            names = {m["name"] for m in members}
-            assert seeded["target_admin_name"] in names
-            assert "Org B Agent" in names
+            assert resp.status_code == 404, resp.text
+            # 접근권 없는 same-org caller에게 로스터 PII가 새지 않는다.
+            assert seeded["target_admin_name"] not in resp.text
+            assert "Org B Agent" not in resp.text
         finally:
             await client.aclose()
     finally:

@@ -29,6 +29,12 @@ from .schemas import SprintableInput
 from .toolset import is_tool_allowed
 from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
 from .tools.evidence import AddEvidenceInput, add_evidence
+from .tools.visual_artifacts import (
+    AddArtifactCommentInput, CreateArtifactInput, EditArtifactInput, GetArtifactInput,
+    ListArtifactCommentsInput, ProposeCanonicalInput,
+    add_artifact_comment, create_artifact, edit_artifact, get_artifact, list_artifact_comments,
+    propose_canonical_version,
+)
 from .tools.agent_runs import (
     EmitEventInput, PollEventsInput, UpdateRunStatusInput,
     emit_event, poll_events, update_run_status,
@@ -489,6 +495,26 @@ _TOOL_DEFS: list[tuple] = [
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
      " 남김. 선택제(첨부 안 해도 무불이익).",
      AddEvidenceInput, add_evidence),
+    # Visual artifacts (6) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안)
+    ("sprintable_create_artifact",
+     "시각 산출물 생성(에이전트 생성 입구) — 트리(nodes[])로 구조화. 임포트된 raw HTML/이미지는"
+     " type=\"html_blob\" 노드 하나로 감싸도 됨.",
+     CreateArtifactInput, create_artifact),
+    ("sprintable_get_artifact",
+     "시각 산출물 단건 조회(latest 버전 + nodes).",
+     GetArtifactInput, get_artifact),
+    ("sprintable_list_artifact_comments",
+     "artifact 코멘트 스레드 조회(요소/좌표 앵커·resolve 상태) — 휴먼 피드백 왕복 입구.",
+     ListArtifactCommentsInput, list_artifact_comments),
+    ("sprintable_add_artifact_comment",
+     "artifact에 코멘트 추가(요소/좌표 앵커·답글 가능) — 대상자에게 이벤트 전파.",
+     AddArtifactCommentInput, add_artifact_comment),
+    ("sprintable_edit_artifact",
+     "artifact 요소 add/update/delete 편집 — 휴먼 딸깍과 같은 경로, 항상 새 버전 생성·이벤트 전파.",
+     EditArtifactInput, edit_artifact),
+    ("sprintable_propose_canonical_version",
+     "이 버전을 정본으로 제안(게이트 생성) — 제안만, 승인/반려는 항상 휴먼.",
+     ProposeCanonicalInput, propose_canonical_version),
     # Chat (3)
     ("sprintable_send_chat_message",
      "conversation thread에 채팅 메시지 발송.",
