@@ -2715,7 +2715,16 @@
     "steerHandoffOrchestrating": "Orchestrating",
     "steerHandoffAgent": "Ortega",
     "steerError": "Couldn't save the new order. Please try again.",
-    "steerCappedNote": "Showing the top {count}. Steering (curation) floats items to the front."
+    "steerCappedNote": "Showing the top {count}. Steering (curation) floats items to the front.",
+    "steerCommit": "Send steering",
+    "steerCommitHint": "Dragging saves a draft",
+    "steerCommitTitle": "Send steering",
+    "steerCommitDesc": "Choose which agents receive this order.",
+    "steerRecipientRequired": "Select at least one agent.",
+    "steerNoAgents": "No agents are assigned to this project.",
+    "steerDispatchSend": "Send",
+    "steerDispatchConflict": "The order wasn't saved. Refresh the list and try again.",
+    "steerDispatchError": "Couldn't send the steering. Please try again."
   },
   "glance": {
     "pageTitle": "Project Glance",
