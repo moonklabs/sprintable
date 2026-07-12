@@ -250,8 +250,9 @@ _ID_MUTATION_KNOWN_DEBT_ALLOWLIST: dict[str, str] = {
     # 조회→hyp.project_id has_project_access·404) 라우터 가드로 봉인 — 스캐너 감시 전환.
     # 라운드3 상환(#5·agent_runs:update_agent_run): resolved-resource(existing.project_id) has_project_access
     # 사전검증으로 same-org cross-project run 덮어쓰기 봉인 — 스캐너 감시 전환.
-    "app.routers.dependencies:delete_dependency":
-        "MEDIUM(borderline) — ItemDependency는 project_id 컬럼 없음·polymorphic from_id/to_id가 project-bound item 참조(semantic cross-project delete). polymorphic 판정 Q2 대기.",
+    # 라운드4 상환(#6·dependencies 서브시스템·story aa365768): create+delete+list+graph 전부 양쪽
+    # -아이템/조회-아이템 project 게이트(_assert_item_project_access)로 봉인·graph 응답 필터. 반쪽
+    # 금지(delete만 아닌 서브시스템 전체). 6후보 상환 완결 → id-뮤테이션 IDOR 계열 known-debt 0.
 }
 
 

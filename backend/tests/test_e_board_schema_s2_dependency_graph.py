@@ -97,7 +97,7 @@ async def test_cycle_chain_detected():
 @pytest.mark.anyio
 async def test_cycle_safe_addition():
     """A→B, A→C 있는 상태에서 B→C 추가는 사이클 없음."""
-    a, b, c = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    _a, b, c = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
 
     call_count = 0
 
@@ -122,6 +122,22 @@ async def test_cycle_safe_addition():
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def _bypass_project_gate():
+    """이 파일은 dependency CRUD/그래프 메커닉을 mock 세션으로 검증한다. 서브시스템 project 게이트
+    (_assert_item_project_access·graph 응답 필터)는 별도 realdb 스위트(test_e_sec_dependencies_
+    subsystem_project_scope_realdb)가 실 PG로 커버하므로, 여기선 no-op/pass-through 패치해 mock
+    세션과의 충돌을 피한다(create/delete/list 가드 우회 + graph 필터를 전-노드 visible로)."""
+    from unittest.mock import patch
+    _p = uuid.uuid4()
+    _pmap = MagicMock()
+    _pmap.get.return_value = _p  # 모든 노드가 accessible project에 속한 것처럼
+    with patch("app.routers.dependencies._assert_item_project_access", new_callable=AsyncMock), \
+         patch("app.routers.dependencies.accessible_project_ids_in_org", new_callable=AsyncMock, return_value=[_p]), \
+         patch("app.routers.dependencies._items_project_map", new_callable=AsyncMock, return_value=_pmap):
+        yield
 
 
 DEP_ID = uuid.uuid4()
@@ -365,7 +381,7 @@ async def test_graph_endpoint_200():
     client, app = await _make_client(mock_session)
     try:
         async with client as c:
-            resp = await c.get(f"/api/v2/dependencies/graph?item_type=story")
+            resp = await c.get("/api/v2/dependencies/graph?item_type=story")
         assert resp.status_code == 200
         body = resp.json()
         assert body["item_type"] == "story"
@@ -402,7 +418,7 @@ async def test_delete_story_cleans_up_dependencies():
     흐름: DELETE /stories/{id} → repo.delete() → DependencyRepository.delete_by_item() 호출.
     이 테스트는 delete_by_item이 실제로 와이어링됐는지 검증 — seed로 우회 없이.
     """
-    from unittest.mock import patch, AsyncMock as AM
+    from unittest.mock import patch
 
     story_id = uuid.uuid4()
     mock_session = AsyncMock()
