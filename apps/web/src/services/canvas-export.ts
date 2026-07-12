@@ -104,7 +104,10 @@ export function canPngExport(format: ArtifactFormat): boolean {
 }
 
 export async function captureElementAsPng(el: HTMLElement): Promise<Blob | null> {
-  const { default: html2canvas } = await import('html2canvas');
+  // html2canvas-pro(드롭인 fork) — 원본 html2canvas@1.4.1은 oklch()/color-mix(in oklch,…)를
+  // "unsupported color function"으로 throw했다(우리 디자인 토큰 globals.css 145곳). pro는 modern
+  // CSS 색 함수(oklch·color-mix·lab·lch)를 네이티브 파싱해 캡처가 throw 없이 성공한다.
+  const { default: html2canvas } = await import('html2canvas-pro');
   // 유나 §③ "2x retina·흐릿=신뢰 깎임" — scale 미지정 시 1x라 export 첫인상이 흐릿해진다.
   const canvas = await html2canvas(el, { backgroundColor: null, useCORS: true, scale: 2 });
   return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), 'image/png'));
