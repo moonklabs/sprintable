@@ -131,9 +131,15 @@ async def test_list_agent_runs_missing_project_id_422():
 async def test_create_agent_run_201():
     client, session, app = await _client()
     try:
-        mock_member = MagicMock()
-        mock_member.scalar_one_or_none.return_value = ORG_ID
-        session.execute = AsyncMock(return_value=mock_member)
+        # 2a5f21d3: create가 project_id 필수 + project 존재(404)/has_project_access(403) 가드 →
+        # execute 3회(project·access·agent). 순서대로 truthy로 목킹.
+        proj_mock = MagicMock()
+        proj_mock.scalar_one_or_none.return_value = PROJECT_ID
+        access_mock = MagicMock()
+        access_mock.scalar_one_or_none.return_value = 1
+        agent_mock = MagicMock()
+        agent_mock.scalar_one_or_none.return_value = AGENT_ID
+        session.execute = AsyncMock(side_effect=[proj_mock, access_mock, agent_mock])
 
         with patch("app.repositories.agent_run.AgentRunRepository.create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = _mock_run()
@@ -141,6 +147,7 @@ async def test_create_agent_run_201():
             async with client as c:
                 resp = await c.post("/api/v2/agent-runs", json={
                     "agent_id": str(AGENT_ID),
+                    "project_id": str(PROJECT_ID),
                     "trigger": "manual",
                 })
 
@@ -155,13 +162,19 @@ async def test_create_agent_run_201():
 async def test_create_agent_run_invalid_agent_400():
     client, session, app = await _client()
     try:
-        mock_member = MagicMock()
-        mock_member.scalar_one_or_none.return_value = None
-        session.execute = AsyncMock(return_value=mock_member)
+        # project·access는 통과(truthy), agent만 None → 400에 도달(2a5f21d3 가드 순서 반영).
+        proj_mock = MagicMock()
+        proj_mock.scalar_one_or_none.return_value = PROJECT_ID
+        access_mock = MagicMock()
+        access_mock.scalar_one_or_none.return_value = 1
+        agent_mock = MagicMock()
+        agent_mock.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(side_effect=[proj_mock, access_mock, agent_mock])
 
         async with client as c:
             resp = await c.post("/api/v2/agent-runs", json={
                 "agent_id": str(uuid.uuid4()),
+                "project_id": str(PROJECT_ID),
                 "trigger": "manual",
             })
 

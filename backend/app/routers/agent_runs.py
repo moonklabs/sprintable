@@ -69,13 +69,28 @@ async def create_agent_run(
     body: CreateAgentRun,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
     repo: AgentRunRepository = Depends(_get_repo),
 ) -> AgentRunResponse:
     """prod 핫픽스(S20 전수스캔 MUST): cross-org IDOR — org_id를 body.agent_id가 속한 org에서
     그대로 파생해(caller org 검증 없이) 타 org agent 명의로 run을 생성할 수 있었다. caller의
     get_verified_org_id로 파생하고 agent_id가 그 org 소속인지 검증한다.
+
+    2a5f21d3: project_id는 DB NOT NULL·모델 정합으로 이제 필수 입력이다. body로 project_id를
+    받는 순간 신규 mutation 인가 표면이 되므로 resource-actual has_project_access로 caller의
+    실 접근권을 검증(body-claimed 금지·round1~9 규율)한다. 존재/타org=404, same-org 무접근권=403.
     """
+    from app.services.project_auth import has_project_access
+
+    # project_id 인가: caller org 소속 project인지(존재/타org 비노출 404) + 실 접근권(403).
+    proj_r = await session.execute(
+        select(Project.id).where(Project.id == body.project_id, Project.org_id == org_id)
+    )
+    if proj_r.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not await has_project_access(session, uuid.UUID(auth.user_id), body.project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
     # team_members 는 projection VIEW — 멀티프로젝트 grant 면 같은 agent_id 가 N 행. org_id 필터로
     # caller org 소속만 통과(cross-org 차단) — .limit(1) 로 MultipleResultsFound 회피.
     member_r = await session.execute(
@@ -90,6 +105,7 @@ async def create_agent_run(
     run = await repo.create(
         org_id=org_id,
         agent_id=body.agent_id,
+        project_id=body.project_id,
         trigger=body.trigger,
         model=body.model,
         story_id=body.story_id,
@@ -99,7 +115,6 @@ async def create_agent_run(
         input_tokens=body.input_tokens,
         output_tokens=body.output_tokens,
         cost_usd=body.cost_usd,
-        duration_ms=body.duration_ms,
     )
     return AgentRunResponse.model_validate(run)
 
@@ -124,7 +139,6 @@ async def update_agent_run(
         input_tokens=body.input_tokens,
         output_tokens=body.output_tokens,
         cost_usd=body.cost_usd,
-        duration_ms=body.duration_ms,
         last_error_code=body.last_error_code,
     )
     if run is None:
