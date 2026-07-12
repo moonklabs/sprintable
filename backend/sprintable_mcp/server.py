@@ -514,7 +514,9 @@ _TOOL_DEFS: list[tuple] = [
      "artifact에 코멘트 추가(요소/좌표 앵커·답글 가능) — 대상자에게 이벤트 전파.",
      AddArtifactCommentInput, add_artifact_comment),
     ("sprintable_edit_artifact",
-     "artifact 요소 add/update/delete 편집 — 휴먼 딸깍과 같은 경로, 항상 새 버전 생성·이벤트 전파.",
+     "artifact 요소를 operations[]로 편집(휴먼 딸깍과 같은 경로·항상 새 버전·이벤트 전파). 각 op="
+     "{op:add|update|delete, id, type?, props?}. ⭐update/delete 대상 노드는 `id` 필드로 지정"
+     "(get_artifact의 node.id·코멘트 앵커 node_id 아님)·add는 type 필수.",
      EditArtifactInput, edit_artifact),
     ("sprintable_propose_canonical_version",
      "이 버전을 정본으로 제안(게이트 생성) — 제안만, 승인/반려는 항상 휴먼.",

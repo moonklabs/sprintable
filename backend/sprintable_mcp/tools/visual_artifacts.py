@@ -157,9 +157,14 @@ async def add_artifact_comment(args: AddArtifactCommentInput) -> list[TextConten
 
 
 async def edit_artifact(args: EditArtifactInput) -> list[TextContent]:
-    """artifact 요소를 add/update/delete로 편집 — 휴먼 딸깍 편집과 동일 엔드포인트를 경유해
-    "같은 객체를 양쪽이 편집"(AC4 왕복). 편집은 항상 새 버전을 만든다(무-mutate 버전 원칙).
-    대상자에게 artifact.updated 이벤트 전파."""
+    """artifact 요소를 operations[]로 편집 — 휴먼 딸깍 편집과 동일 엔드포인트를 경유해 "같은 객체를
+    양쪽이 편집"(AC4 왕복). 편집은 항상 새 버전을 만든다(무-mutate 버전 원칙). 대상자에게
+    artifact.updated 이벤트 전파.
+    각 operation = {op, id, type?, props?, parent_id?, sort_order?, description?}:
+      · op="add": 새 노드(type 필수·props 초기값·id 미지정 시 서버 생성).
+      · op="update": **대상 노드 = `id`**(get_artifact의 node.id·`node_id` 아님)·props 지정 시 전체 교체.
+      · op="delete": **대상 노드 = `id`**만.
+    (대상 요소는 항상 `id` 필드로 지정 — 코멘트 앵커의 node_id와 혼동 주의.)"""
     try:
         body = {
             "operations": [op.model_dump(exclude_none=True) for op in args.operations],
