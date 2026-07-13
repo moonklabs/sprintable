@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.asset import Asset
 from app.models.visual_artifact import (
@@ -88,6 +88,7 @@ async def create_artifact(
     body: CreateArtifactRequest,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     org_id, project_id = _get_org_project(auth)
     if not org_id:
@@ -270,6 +271,7 @@ async def delete_artifact(
     id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     """생성자만 삭제 가능(Evidence 패턴 계승 — "누가 주어인가"). soft delete."""
     org_id, project_id = _get_org_project(auth)
@@ -318,6 +320,7 @@ async def add_artifact_comment(
     body: CreateArtifactCommentRequest,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     org_id, project_id = _get_org_project(auth)
     if not org_id or not project_id:
@@ -378,6 +381,7 @@ async def resolve_artifact_comment(
     comment_id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     org_id, project_id = _get_org_project(auth)
     if not org_id or not project_id:
@@ -437,6 +441,7 @@ async def create_spec_pin(
     body: CreateSpecPinRequest,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     org_id, project_id = _get_org_project(auth)
     if not org_id or not project_id:
@@ -491,6 +496,7 @@ async def update_spec_pin(
     body: UpdateSpecPinRequest,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     org_id, project_id = _get_org_project(auth)
     if not org_id or not project_id:
@@ -512,6 +518,7 @@ async def delete_spec_pin(
     pin_id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     org_id, project_id = _get_org_project(auth)
     if not org_id or not project_id:
@@ -615,6 +622,7 @@ async def create_export_upload_url(
     body: ExportUploadUrlRequest,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     from datetime import datetime, timedelta, timezone
 
@@ -650,6 +658,7 @@ async def complete_png_export(
     body: CompleteExportRequest,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     from app.services.storage import get_storage_provider
 
@@ -706,6 +715,7 @@ async def create_html_export(
     version_number: int,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     """self-contained HTML export — 렌더 불요(nodes 트리를 BE가 직렬화), client-trust 이슈 없어
     즉시 put_object(유나 UX②: as-authored — 별도 재테마 없이 저장된 props 그대로 직렬화)."""
@@ -955,6 +965,7 @@ async def edit_artifact(
     body: EditArtifactRequest,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     """딸깍 편집(FE) + MCP 편집(에이전트) 공용 엔드포인트 — 요소 add/update/delete를 적용해
     새 버전을 만든다(무-mutate 버전 원칙 계승)."""
@@ -1009,6 +1020,7 @@ async def propose_canonical_version(
     version_number: int,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     """정본으로 제안 — AI는 제안만(MCP도 동일 엔드포인트), 승인은 always-HITL(gate_service).
     이미 pending 제안이 있으면 멱등(create_gate 자체 멱등 재사용)."""

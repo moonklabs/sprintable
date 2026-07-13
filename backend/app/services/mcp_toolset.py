@@ -11,7 +11,7 @@ from __future__ import annotations
 
 # ── toolset 그룹 키워드(tool 이름 부분일치, 위에서부터 우선) ──────────────────────
 # 그룹: stories/tasks/sprints/epics/chat/docs/analytics/retro/standup/meetings/
-#       notifications/webhooks/rewards/audit/agent_runs/admin/core
+#       notifications/webhooks/rewards/audit/agent_runs/canvas/admin/core
 _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("rewards", ("reward", "wallet", "leaderboard")),
     ("analytics", ("velocity", "health", "dashboard", "overview", "stats", "standup_missing",
@@ -31,6 +31,10 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("epics", ("epic",)),
     ("tasks", ("task",)),
     ("stories", ("story", "stories", "backlog", "claim", "checkin")),
+    # story b4027b2e: E-CANVAS visual_artifacts가 임계(11개 도구·전용 REST 도메인)에 도달해
+    # cross-cutting always-allow에서 전용 그룹으로 승격(C1-S3 당시 예고된 신설). "canonical_version"
+    # (propose_canonical_version은 "artifact" substring이 없음)·"spec_pin"(핀 4종)까지 포괄.
+    ("canvas", ("artifact", "canonical_version", "spec_pin")),
     ("admin", ("give_reward", "emit_event", "trigger_ai", "activate_sprint",
                "close_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
 ]
@@ -63,17 +67,14 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 동형(자기 작업에 self-proof 첨부 = 데이터 파괴 아닌 협업/증명 유틸) — 어떤 역할의 working
     # agent든 default_tool_groups 무관하게 done 첨부해야 하므로 always-allow.
     "sprintable_add_evidence",
-    # E-CANVAS C1-S3(story 8bace49e): create_artifact/get_artifact — story/epic/doc 中 어디에도
-    # (또는 아무데도) 붙을 수 있는 시각 산출물 생성/조회. add_evidence와 동형(단일 도메인 그룹에
-    # 묶기 애매한 cross-cutting 자기생성 유틸). C2-S6(코멘트 2종)+C3-S7(edit 1종)+C4-S8(정본
-    # 제안 1종) 추가 — 6개(전신 C0~C5 트랙의 마지막 BE 배선). 여전히 story/epic/doc 무관
-    # cross-cutting이라 always-allow 유지(추가 성장 시 전용 "canvas" 그룹 신설 고려).
-    "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
-    "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
-    "sprintable_edit_artifact", "sprintable_propose_canonical_version",
-    # 편집 캔버스 핀 저작(story 7fe16274) — 위 6개와 동형 cross-cutting(artifact 하위 자원).
-    "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
-    "sprintable_delete_spec_pin",
+    # story b4027b2e(SEC — 까심 #2140 QA④): E-CANVAS visual_artifacts 11종(원 6개 + 7fe16274
+    # 핀 4종 + list_spec_pins)을 여기서 제거하고 전용 "canvas" 그룹(_GROUP_KEYWORDS)으로 이관했다.
+    # 이전엔 cross-cutting always-allow였는데(C1-S3 당시 "추가 성장 시 전용 canvas 그룹 신설
+    # 고려" 예고), REST 쪽 `/api/v2/visual-artifacts`가 `_PATH_GROUP_PREFIXES` 미등록 + 라우터가
+    # scope 체크 의존성 자체를 안 씀 → toolgroup-제한(예 scope=['docs']) 키가 REST로 artifact
+    # mutation을 무제한 통과(까심 라이브 실증: POST→201). REST를 조이면서 MCP 쪽을 always-allow로
+    # 남기면 "도구는 보이는데 호출은 403"이 되므로 양쪽을 canvas 그룹으로 동시 이관(레거시
+    # read/write scope 키는 설계상 전 그룹 허용이라 무회귀).
     # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project — 키 자기 신원/스코프 조회·전환
     # 유틸(sprintable_my_dashboard·sprintable_ping과 동형: 특정 비즈니스 도메인 아닌 self-scope
     # 도구). set_default_project는 write지만 caller 자신의 기본 프로젝트 설정만 바꾸는 self-scope
@@ -209,6 +210,11 @@ _PATH_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
     ("/api/v2/docs", "docs"),
     ("/api/v2/agent-runs", "agent_runs"),
     ("/api/v2/analytics", "analytics"),
+    # story b4027b2e(SEC): 미등록 시 permissive-unmapped 폴백으로 toolgroup-제한 키가 전부 통과
+    # (까심 라이브 실증). ⚠️ 등록만으론 불충분 — app/routers/visual_artifacts.py 라우터가
+    # `get_verified_org_id`(이 체크를 트리거하는 의존성)를 안 쓰면 이 매핑 자체가 무효라 라우터
+    # 쪽 의존성 배선도 함께 필요(이 변경과 짝).
+    ("/api/v2/visual-artifacts", "canvas"),
 )
 
 
@@ -299,7 +305,7 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_link_gate_to_task",
     # evidence (E-VERIFY V0-S1)
     "sprintable_add_evidence",
-    # visual artifacts (E-CANVAS C1-S3 + C2-S6 코멘트 + C3-S7 편집 + C4-S8 정본 제안)
+    # visual artifacts (E-CANVAS C1-S3 + C2-S6 코멘트 + C3-S7 편집 + C4-S8 정본 제안 + 핀 저작 story 7fe16274)
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
@@ -312,7 +318,7 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.
 _CATALOG_DISPLAY_ORDER: tuple[str, ...] = (
     "stories", "tasks", "sprints", "epics", "hypotheses", "chat", "docs", "analytics", "retro",
-    "standup", "meetings", "notifications", "webhooks", "rewards", "audit", "agent_runs",
+    "standup", "meetings", "notifications", "webhooks", "rewards", "audit", "agent_runs", "canvas",
 )
 
 
