@@ -3557,6 +3557,8 @@
     "galleryAnchorPill": "정본 v{version}",
     "galleryLatestChip": "v{version}까지",
     "galleryLazyHint": "펼치면 이전 버전을 불러옵니다",
-    "galleryVersionsUnavailable": "이전 버전을 불러올 수 없습니다"
+    "galleryVersionsUnavailable": "이전 버전을 불러올 수 없습니다",
+    "viewerFitToggleFit": "전체 보기",
+    "viewerFitToggleActual": "실제 크기"
   }
 }

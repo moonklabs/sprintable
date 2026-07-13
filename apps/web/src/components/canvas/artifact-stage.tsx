@@ -1,5 +1,17 @@
+import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { ArtifactFormat } from '@/services/canvas';
+
+/**
+ * story 385eb89a — 고정 넓이 html_blob 잘림 대책. sandbox=""(allow-same-origin 없음)라 iframe
+ * 내부 문서 폭을 측정할 수 없어(cross-origin) 실 콘텐츠 폭을 알 방법이 없다 — 대신 iframe 자체
+ * 박스를 이 고정 "캔버스" 폭으로 렌더해 내용이 접히지 않게 하고, wrapper가 스크롤(실제 크기)
+ * 하거나 wrapper 자기 자신의 폭(우리가 소유한 DOM이라 측정 가능)에 맞춰 transform:scale로
+ * 축소(전체 보기)한다 — html_blob 내부 측정은 여전히 0(보안 트레이드오프 유지, canvas-export.ts
+ * §PNG export 제외 결정과 동일 원칙).
+ */
+const HTML_STAGE_WIDTH = 1200;
+const HTML_STAGE_HEIGHT = 280;
 
 /**
  * E-CANVAS C1 — tree 포맷 최소 노드 shape. BE 계약(디디 C1-S3) 착지 전 잠정 — 실 계약이
@@ -44,6 +56,8 @@ interface ArtifactStageProps {
   format: ArtifactFormat;
   content: string;
   title: string;
+  /** html 포맷 전체보기(fit) 토글 — tree/image는 이 prop을 무시(토글 자체가 미노출). */
+  fitToView?: boolean;
 }
 
 /**
@@ -53,17 +67,44 @@ interface ArtifactStageProps {
  * 잠금이 안전(CSS 렌더링은 sandbox 플래그와 무관하게 항상 동작함)·image=바운드 img·
  * tree=경량 노드 렌더(전신 componentCatalog의 리치 렌더는 후속 — 지금은 shell 준비 단계).
  */
-export function ArtifactStage({ format, content, title }: ArtifactStageProps) {
+export function ArtifactStage({ format, content, title, fitToView = false }: ArtifactStageProps) {
   const t = useTranslations('canvas');
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [fitRatio, setFitRatio] = useState(1);
+
+  useEffect(() => {
+    if (format !== 'html' || !fitToView) return;
+    const el = wrapperRef.current;
+    if (!el) return;
+    const measure = () => setFitRatio(Math.min(1, el.clientWidth / HTML_STAGE_WIDTH));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [format, fitToView]);
 
   if (format === 'html') {
     return (
-      <iframe
-        title={title}
-        srcDoc={content}
-        sandbox=""
-        className="h-full min-h-[280px] w-full rounded-lg border border-border bg-background"
-      />
+      <div
+        ref={wrapperRef}
+        className="w-full rounded-lg border border-border bg-background"
+        style={fitToView
+          ? { height: HTML_STAGE_HEIGHT * fitRatio, overflow: 'hidden' }
+          : { overflowX: 'auto' }}
+      >
+        <iframe
+          title={title}
+          srcDoc={content}
+          sandbox=""
+          className="rounded-lg"
+          style={{
+            width: HTML_STAGE_WIDTH,
+            height: HTML_STAGE_HEIGHT,
+            transform: fitToView ? `scale(${fitRatio})` : undefined,
+            transformOrigin: 'top left',
+          }}
+        />
+      </div>
     );
   }
 
