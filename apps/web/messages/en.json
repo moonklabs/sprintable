@@ -3535,6 +3535,11 @@
     "concurrencyMerge": "Merge onto mine",
     "exportAction": "Export",
     "editAction": "Edit",
-    "editAsNewVersionAction": "Edit as new version"
+    "editAsNewVersionAction": "Edit as new version",
+    "sectionLabel": "Artifacts",
+    "emptyTitle": "No artifacts yet",
+    "emptyHint": "Draw one yourself, or hand it to an agent.",
+    "createCta": "Draw artifact",
+    "untitledArtifact": "Untitled"
   }
 }

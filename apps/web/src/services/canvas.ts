@@ -200,6 +200,29 @@ export function adaptArtifactDetail(detail: BeVisualArtifactDetail): { artifact:
 }
 
 /**
+ * 캔버스 휴먼 진입점(story 9449da0e) — 빈 스토리에서 "그리기" 생성 딸깍 커밋. MCP `create_artifact`와
+ * **동일 BE 엔드포인트**(`POST /api/v2/visual-artifacts`·같은 서비스 `create_artifact`·신규 BE 0).
+ * story 귀속 v1을 만들고 생성된 detail을 반환 — 실패는 null(호출부가 편집 모드 유지 + 로깅, 빈
+ * catch 금지 계열).
+ */
+export async function createArtifact(
+  storyId: string, title: string, nodes: ArtifactNode[], summary?: string,
+): Promise<BeVisualArtifactDetail | null> {
+  try {
+    const res = await fetch('/api/visual-artifacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ story_id: storyId, title, nodes, summary: summary ?? null }),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: BeVisualArtifactDetail };
+    return json.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 딸깍 편집 커밋(C3-S7 휴먼 절반) — MCP `sprintable_edit_artifact`와 **동일 BE 엔드포인트**
  * (`POST /api/v2/visual-artifacts/{id}/edit`·같은 서비스 `_apply_artifact_edit`·신규 BE 0).
  * operations diff를 적용해 새 버전을 만들고 갱신된 detail을 반환한다. `artifact.updated` 이벤트

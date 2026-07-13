@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
+import { PenLine } from 'lucide-react';
 import { ArtifactViewer } from './artifact-viewer';
 import { ArtifactEditor } from './artifact-editor';
 import {
-  adaptArtifactDetail, editArtifact, type ArtifactVersion, type BeArtifactVersionSummary, type MemberRef,
-  type VisualArtifact, type BeVisualArtifactDetail, type BeVisualArtifactSummary,
+  adaptArtifactDetail, createArtifact, editArtifact, type ArtifactVersion, type BeArtifactVersionSummary,
+  type MemberRef, type VisualArtifact, type BeVisualArtifactDetail, type BeVisualArtifactSummary,
 } from '@/services/canvas';
 import { adaptComments, type BeArtifactComment, type CommentThread } from '@/services/canvas-comments';
 import { derivePendingCanonicalizeVersion, type CanonicalizeGateLookup } from '@/services/canvas-canonicalize';
@@ -63,10 +65,13 @@ async function loadPendingCanonicalizeVersion(artifactId: string): Promise<numbe
  * (선생님 slop 지적 반영 원칙 계승).
  */
 export function ArtifactSection({ storyId, memberMap = {}, className }: ArtifactSectionProps) {
+  const t = useTranslations('canvas');
   const [items, setItems] = useState<ArtifactItem[]>([]);
   // C3-S7 휴먼 딸깍 편집 — 어느 artifact가 편집 모드인지(tree만 진입·viewer가 게이트). 커밋 성공
   // 후 종료해 fresh 재로드(BE가 버전마다 node.id 리매핑하므로 stale id 재사용 원천 차단).
   const [editingArtifactId, setEditingArtifactId] = useState<string | null>(null);
+  // 9449da0e 캔버스 휴먼 진입점 — 빈 상태 "그리기" 딸깍 → create 모드(initialNodes=[]).
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,7 +150,61 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
     setEditingArtifactId(null);
   }
 
-  if (items.length === 0) return null;
+  /**
+   * "그리기" 생성 딸깍 커밋(9449da0e) — 빈 편집기(initialNodes=[])의 최종 노드셋을 story 귀속
+   * v1으로 생성. micro-decision (A) 확定: 제목은 항상 기본값("제목 없는 산출물"/"Untitled") —
+   * rename은 후속(갤러리 트랙). 성공 시 뷰어로 전환(fresh items). 실패는 silent 금지 — 로깅 +
+   * 생성 모드 유지(handleCommitEdit과 동일 규율).
+   */
+  async function handleCreateCommit(nodes: ArtifactNode[], summary: string) {
+    const detail = await createArtifact(storyId, t('untitledArtifact'), nodes, summary || undefined);
+    if (!detail) {
+      console.error('[canvas-create] artifact create commit failed', storyId);
+      return;
+    }
+    const { artifact, versions } = adaptArtifactDetail(detail);
+    const [threads, pendingCanonicalizeVersion] = await Promise.all([
+      loadArtifactThreads(artifact.id, detail.nodes),
+      loadPendingCanonicalizeVersion(artifact.id),
+    ]);
+    setItems((cur) => [...cur, { artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion }]);
+    setCreating(false);
+  }
+
+  if (items.length === 0 && !creating) {
+    return (
+      <div className={className}>
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-border bg-card px-6 py-9 text-center">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {t('sectionLabel')}
+          </div>
+          <PenLine className="size-6 text-muted-foreground/60" aria-hidden="true" />
+          <p className="text-sm font-medium text-foreground">{t('emptyTitle')}</p>
+          <p className="max-w-sm text-xs text-muted-foreground">{t('emptyHint')}</p>
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="mt-1 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            {t('createCta')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (creating) {
+    return (
+      <div className={className}>
+        <ArtifactEditor
+          title={t('untitledArtifact')}
+          initialNodes={[]}
+          onCommit={(committed, summary) => void handleCreateCommit(committed, summary)}
+          onDone={() => setCreating(false)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className={className}>
