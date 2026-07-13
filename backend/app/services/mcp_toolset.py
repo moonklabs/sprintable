@@ -71,6 +71,12 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
+    # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project — 키 자기 신원/스코프 조회·전환
+    # 유틸(sprintable_my_dashboard·sprintable_ping과 동형: 특정 비즈니스 도메인 아닌 self-scope
+    # 도구). set_default_project는 write지만 caller 자신의 기본 프로젝트 설정만 바꾸는 self-scope
+    # 조작이라 파괴적이지 않음(has_project_access로 대상 검증). vendored 사본과 동기화 필수
+    # (sprintable_mcp/toolset.py).
+    "sprintable_list_projects", "sprintable_set_default_project",
 })
 
 # scope 토큰: 그룹명 외에 read/write(레거시·전체 비파괴 의미), admin/destructive(파괴적 허용)
@@ -294,6 +300,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
+    # projects (E-MCP-OPT story ff6cb90d)
+    "sprintable_list_projects", "sprintable_set_default_project",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.

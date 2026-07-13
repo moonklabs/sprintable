@@ -46,8 +46,9 @@ EXPECTED_TOOLS = {
     "sprintable_get_overdue_tasks", "sprintable_get_recent_activity",
     "sprintable_get_epic_progress", "sprintable_get_agent_stats",
     "sprintable_get_project_health",
-    # core (2)
+    # core (4) — E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가.
     "sprintable_list_team_members", "sprintable_my_dashboard",
+    "sprintable_list_projects", "sprintable_set_default_project",
     # chat (3)
     "sprintable_send_chat_message", "sprintable_create_conversation", "sprintable_list_chat_messages",
     # meetings (6)
@@ -96,7 +97,8 @@ EXPECTED_TOOLS = {
 
 def test_total_tool_count():
     # C1-S3(e50563b4): sprintable_list_artifacts 추가로 98→99... +1=100.
-    assert len(_TOOLS) == 100
+    # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가 — 100→102.
+    assert len(_TOOLS) == 102
 
 
 def test_all_expected_tools_registered():

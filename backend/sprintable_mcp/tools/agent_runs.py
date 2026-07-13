@@ -46,13 +46,16 @@ class PollEventsInput(SprintableInput):
 
 async def emit_event(args: EmitEventInput) -> list[TextContent]:
     """에이전트 런 이벤트 발행."""
-    body: dict = {"agent_id": args.agent_id, "trigger": args.trigger, "project_id": client.project_id}
-    for field in ("model", "story_id", "memo_id", "result_summary", "status",
-                  "error_message", "input_tokens", "output_tokens", "started_at", "finished_at"):
-        val = getattr(args, field)
-        if val is not None:
-            body[field] = val
     try:
+        body: dict = {
+            "agent_id": args.agent_id, "trigger": args.trigger,
+            "project_id": client.require_project_id(),  # E-MCP-OPT ff6cb90d: try 안에서 호출(가이드 에러 캡처).
+        }
+        for field in ("model", "story_id", "memo_id", "result_summary", "status",
+                      "error_message", "input_tokens", "output_tokens", "started_at", "finished_at"):
+            val = getattr(args, field)
+            if val is not None:
+                body[field] = val
         return ok(await client.post("/api/v2/agent-runs", json=body))
     except Exception as exc:
         return err(str(exc))

@@ -86,6 +86,15 @@ EVENT_TAXONOMY: dict[str, list[EventParam]] = {
         EventParam("actor_id", "uuid", False, "실행자 member UUID"),
         EventParam("timestamp", "str", True, "ISO 8601 UTC 타임스탬프"),
     ],
+    # E-MCP-OPT(story ff6cb90d·doc mcp-multiproject-scoping-design §3/§7②): 멀티프로젝트 MCP 키의
+    # 기본 프로젝트 전환 — updated_at만으론 "무엇→무엇"이 안 남아 감사 목적 신규 이벤트로 보강.
+    "member.default_project_changed": [
+        EventParam("member_id", "uuid", True, "멤버 UUID"),
+        EventParam("org_id", "uuid", True, "조직 UUID"),
+        EventParam("old_default_project_id", "uuid", False, "변경 전 기본 프로젝트(미설정이면 null)"),
+        EventParam("new_default_project_id", "uuid", True, "변경 후 기본 프로젝트"),
+        EventParam("timestamp", "str", True, "ISO 8601 UTC 타임스탬프"),
+    ],
 }
 
 

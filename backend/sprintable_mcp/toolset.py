@@ -54,6 +54,12 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 유틸이라 단일 도메인 그룹에 못 묶음. link_gate_to_task와 동일 논리로 core 취급(백엔드
     # SSOT와 동기화, app/services/mcp_toolset.py 참고).
     "sprintable_add_evidence",
+    # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project — 키 자기 신원/스코프 조회·전환
+    # 유틸(sprintable_my_dashboard·sprintable_ping과 동형: 특정 비즈니스 도메인 아닌 self-scope
+    # 도구). set_default_project는 write지만 caller 자신의 기본 프로젝트 설정만 바꾸는 self-scope
+    # 조작이라 파괴적이지 않음(has_project_access로 대상 검증). 백엔드 SSOT와 동기화 필수
+    # (app/services/mcp_toolset.py).
+    "sprintable_list_projects", "sprintable_set_default_project",
 })
 
 _LEGACY_SCOPES: frozenset[str] = frozenset({"read", "write"})

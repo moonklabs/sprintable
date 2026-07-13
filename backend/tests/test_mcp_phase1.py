@@ -60,7 +60,10 @@ async def test_resolve_auth_context_caches_ids():
     mock_resp.json.return_value = {
         "member_id": member_id,
         "org_id": org_id,
-        "project_id": project_id,
+        # E-MCP-OPT(ff6cb90d §1): 근본 판정 필드 — 단일 접근가능 프로젝트라 가정(ambiguous=False).
+        "resolved_default_project_id": project_id,
+        "is_project_ambiguous": False,
+        "accessible_project_ids": [project_id],
     }
 
     with patch("httpx.AsyncClient.request", new_callable=AsyncMock, return_value=mock_resp):
