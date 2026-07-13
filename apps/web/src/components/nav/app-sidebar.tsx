@@ -11,6 +11,7 @@ import {
   CircleHelp,
   ClipboardList,
   FolderKanban,
+  GalleryVerticalEnd,
   Gauge,
   HardDrive,
   Inbox,
@@ -300,7 +301,8 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* ④ 지식 / Knowledge — 팀 기억(문서·스토리지·에이전트). ia-4zone SSOT 확定. */}
+        {/* ④ 지식 / Knowledge — 팀 기억(문서·산출물·스토리지·에이전트). ia-4zone SSOT 확定.
+            산출물(story a15cea4f) — 스토리 귀속 ArtifactSection과 별개인 모아보기 발견 표면. */}
         <SidebarGroup>
           <SidebarGroupLabel>{t('zoneKnowledge')}</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -313,6 +315,16 @@ export function AppSidebar({
                 >
                   <BookOpen />
                   <span>{t('docs')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/artifacts" />}
+                  isActive={isActive('/artifacts')}
+                  tooltip={t('artifacts')}
+                >
+                  <GalleryVerticalEnd />
+                  <span>{t('artifacts')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
