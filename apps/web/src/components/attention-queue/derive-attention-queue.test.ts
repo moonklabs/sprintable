@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createTranslator } from 'next-intl';
 import {
-  parseAttentionQueueSignals, buildAttentionQueueFromBe, buildAttentionQueue,
+  parseAttentionQueueSignals, buildAttentionQueueFromBe, buildAttentionQueue, diffAttentionQueueItemIds,
   type BeAttentionItem, type AttentionQueueItem, type AttentionQueueTranslator,
 } from './derive-attention-queue';
 import koMessagesRaw from '../../../messages/ko.json';
@@ -178,5 +178,36 @@ describe('buildAttentionQueue', () => {
     const { shown, overflow } = buildAttentionQueue([item('verify_fail', 1)]);
     expect(shown).toHaveLength(1);
     expect(overflow).toBe(0);
+  });
+});
+
+describe('diffAttentionQueueItemIds (9ef0f914 — SSE-triggered refetch diff)', () => {
+  function item(id: string, claim: string): AttentionQueueItem {
+    return {
+      id, kind: 'blocked', kindLabel: '막힘', proofState: 'amber', claim,
+      actor: null, actionLabel: '조율', actionTone: 'neutral', href: '/board', sortKey: 0,
+    };
+  }
+
+  it('marks a newly-appeared id as changed', () => {
+    const changed = diffAttentionQueueItemIds([], [item('a', 'x')]);
+    expect(changed).toEqual(new Set(['a']));
+  });
+
+  it('marks an id whose claim text changed, and leaves unchanged ids out (no full-list flash)', () => {
+    const prev = [item('a', 'old claim'), item('b', 'stable claim')];
+    const next = [item('a', 'new claim'), item('b', 'stable claim')];
+    expect(diffAttentionQueueItemIds(prev, next)).toEqual(new Set(['a']));
+  });
+
+  it('returns an empty set when nothing changed (no spurious highlight)', () => {
+    const list = [item('a', 'same'), item('b', 'same2')];
+    expect(diffAttentionQueueItemIds(list, list)).toEqual(new Set());
+  });
+
+  it('does not mark removed ids (removal itself is the signal — no separate flash needed)', () => {
+    const prev = [item('a', 'x'), item('b', 'y')];
+    const next = [item('a', 'x')];
+    expect(diffAttentionQueueItemIds(prev, next)).toEqual(new Set());
   });
 });

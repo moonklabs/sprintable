@@ -154,6 +154,25 @@ export function buildAttentionQueueFromBe(
   return items;
 }
 
+/**
+ * SSE `story.trust_stage_changed`(9ef0f914 — 이벤트는 트리거, 진실은 서버) 수신 後 `/glance/attention`
+ * 단발 재조회 결과를 이전 리스트와 비교 — **신규 등장 또는 claim 텍스트가 바뀐 행의 id만** 반환.
+ * 소비측(attention-queue-view.tsx)이 이 id들만 1회 하이라이트하고 나머지는 무반짝(全행 반짝 금지
+ * 모션 규율). 제거된 행은 별도 표시 없이 그냥 사라짐(제거 자체가 충분한 신호).
+ */
+export function diffAttentionQueueItemIds(
+  prev: AttentionQueueItem[],
+  next: AttentionQueueItem[],
+): Set<string> {
+  const prevClaimById = new Map(prev.map((item) => [item.id, item.claim]));
+  const changed = new Set<string>();
+  for (const item of next) {
+    const prevClaim = prevClaimById.get(item.id);
+    if (prevClaim === undefined || prevClaim !== item.claim) changed.add(item.id);
+  }
+  return changed;
+}
+
 const KIND_PRIORITY: Record<AttentionKind, number> = {
   verify_fail: 0, decision_needed: 0, gate_pending: 0, blocked: 0, merge_ready: 1,
 };
