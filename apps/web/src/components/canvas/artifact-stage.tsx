@@ -85,6 +85,11 @@ interface ArtifactStageProps {
    * 전체가 pointer-events:none으로 전환돼 핀 위에서 시작한 드래그가 pan으로만 해석된다
    * (핀 자신의 onClick은 무변경 — 임계 미달 클릭만 정상 발화). */
   overlay?: React.ReactNode;
+  /** story 1948d19d §3(PR B) — 'edit'이면 콘텐츠 레이어(TreeStageContent)를 렌더하지 않는다.
+   * tree는 cross-origin 콘텐츠가 없는 우리 DOM이라 편집 UI(선택 가능한 노드)를 그대로
+   * `overlay`로 넘기면 되고, 그럼 content 레이어에 비활성 트리를 중복 렌더할 이유가 없다
+   * (핀과 동일한 pointer-events 토글 메커니즘을 재사용 — 새 로직 불필요). 기본 'view'. */
+  mode?: 'view' | 'edit';
 }
 
 /**
@@ -93,9 +98,9 @@ interface ArtifactStageProps {
  * 안쪽만 다름). sandbox 무완화 유지(iframe은 여전히 `sandbox=""`) — pointer-events:none이라
  * 상호작용 레이어와 물리적으로 분리되므로 완화할 필요 자체가 없다.
  */
-function CanvasViewport({ format, content, title, canvasBounds, overlay }: {
+function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 'view' }: {
   format: ArtifactFormat; content: string; title: string;
-  canvasBounds?: { w: number; h: number } | null; overlay?: React.ReactNode;
+  canvasBounds?: { w: number; h: number } | null; overlay?: React.ReactNode; mode?: 'view' | 'edit';
 }) {
   const t = useTranslations('canvas');
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -259,7 +264,7 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay }: {
                 if (img.naturalWidth > 0 && img.naturalHeight > 0) setImageBounds({ w: img.naturalWidth, h: img.naturalHeight });
               }}
             />
-          ) : (
+          ) : mode === 'edit' ? null : (
             <TreeStageContent content={content} placeholder={t('treeRenderPlaceholder')} />
           )}
           {overlay ? (
@@ -309,6 +314,6 @@ function TreeStageContent({ content, placeholder }: { content: string; placehold
  * allow-same-origin 둘 다 없음, 핸드오프 §3-1 + 유나 디자인 가디언 보안 지적 반영) 유지 —
  * pointer-events:none이 상호작용 레이어와 물리적으로 분리해 완화가 애초에 불필요.
  */
-export function ArtifactStage({ format, content, title, canvasBounds, overlay }: ArtifactStageProps) {
-  return <CanvasViewport format={format} content={content} title={title} canvasBounds={canvasBounds} overlay={overlay} />;
+export function ArtifactStage({ format, content, title, canvasBounds, overlay, mode }: ArtifactStageProps) {
+  return <CanvasViewport format={format} content={content} title={title} canvasBounds={canvasBounds} overlay={overlay} mode={mode} />;
 }
