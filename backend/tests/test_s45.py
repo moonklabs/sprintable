@@ -111,6 +111,11 @@ async def test_patch_hitl_policy_saves_and_returns():
     try:
         snapshot = MagicMock()
         snapshot.model_dump.return_value = _make_snapshot_dict()
+        # story f0c99070: update_hitl_policy가 이제 요청시점 재해소(resolve_required_project_id)를
+        # 거친다 — accessible_project_ids_in_org의 단일-접근-프로젝트 단축 경로를 태우도록 mock.
+        _accessible_result = MagicMock()
+        _accessible_result.all.return_value = [(PROJECT_ID,)]
+        session.execute = AsyncMock(return_value=_accessible_result)
         with patch("app.repositories.hitl.HitlRepository.save_policy", new_callable=AsyncMock) as mock_save:
             mock_save.return_value = snapshot
             payload = {

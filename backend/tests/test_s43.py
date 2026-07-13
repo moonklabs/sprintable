@@ -158,6 +158,11 @@ async def test_reorder_rules_200():
 async def test_disable_all_200():
     client, session, app = await _client()
     try:
+        # story f0c99070: disable_all 분기가 이제 요청시점 재해소(resolve_required_project_id)를
+        # 거친다 — accessible_project_ids_in_org의 단일-접근-프로젝트 단축 경로를 태우도록 mock.
+        _accessible_result = MagicMock()
+        _accessible_result.all.return_value = [(PROJECT_ID,)]
+        session.execute = AsyncMock(return_value=_accessible_result)
         with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.disable_all", new_callable=AsyncMock) as mock_disable:
             disabled = _make_rule()
             disabled.is_enabled = False
