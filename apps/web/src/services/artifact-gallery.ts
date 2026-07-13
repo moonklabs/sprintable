@@ -34,6 +34,7 @@ interface StoryRef {
   id: string;
   title: string;
   sprint_id: string | null;
+  epic_id: string | null;
 }
 
 export interface GalleryLookups {
@@ -75,8 +76,11 @@ function groupBy(
 }
 
 /**
- * 축별 그룹핑. 스프린트만 간접(artifact.story_id → Story.sprint_id 1홉, FE join) — 나머지는
- * artifact의 직접 FK. story_id가 NULL이거나 해당 story의 sprint_id가 NULL이면 무소속.
+ * 축별 그룹핑. 에픽·스프린트는 간접 유도(artifact.story_id → Story.epic_id/sprint_id 1홉,
+ * FE join) — 에이전트/휴먼 저작 산출물은 항상 스토리에 앵커되고 artifact.epic_id를 직접
+ * 지정하는 경우가 드물어(story ca37b2b0 — dev 실데이터 전건 epic_id NULL), 직접 FK를
+ * 우선하되 없으면 스토리 경유로 유도한다. doc/story 축은 artifact의 직접 FK만(스토리 경유가
+ * 의미 없음). story_id가 NULL이거나 해당 story의 epic_id/sprint_id가 NULL이면 무소속.
  */
 export function buildGalleryGroups(
   axis: GalleryAxis,
@@ -84,11 +88,18 @@ export function buildGalleryGroups(
   lookups: GalleryLookups,
   unassignedLabel: string,
 ): GalleryGroup[] {
-  if (axis === 'epic') return groupBy(artifacts, lookups.epics, (a) => a.epic_id, unassignedLabel);
   if (axis === 'doc') return groupBy(artifacts, lookups.docs, (a) => a.doc_id, unassignedLabel);
   if (axis === 'story') {
     const storyRefs: EntityRef[] = lookups.stories.map((s) => ({ id: s.id, title: s.title }));
     return groupBy(artifacts, storyRefs, (a) => a.story_id, unassignedLabel);
+  }
+  if (axis === 'epic') {
+    const epicIdByStoryId = new Map(lookups.stories.map((s) => [s.id, s.epic_id]));
+    return groupBy(
+      artifacts, lookups.epics,
+      (a) => a.epic_id ?? (a.story_id ? epicIdByStoryId.get(a.story_id) ?? null : null),
+      unassignedLabel,
+    );
   }
   // sprint: story_id → sprint_id 1홉 join.
   const sprintIdByStoryId = new Map(lookups.stories.map((s) => [s.id, s.sprint_id]));

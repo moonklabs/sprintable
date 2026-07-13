@@ -23,7 +23,7 @@ async function fetchJson<T>(url: string): Promise<T | null> {
   }
 }
 
-interface StoryListItem { id: string; title: string; sprint_id: string | null }
+interface StoryListItem { id: string; title: string; sprint_id: string | null; epic_id: string | null }
 interface EpicListItem { id: string; title: string }
 interface SprintListItem { id: string; title: string }
 interface DocListItem { id: string; title: string }
@@ -42,7 +42,7 @@ async function fetchGalleryData(projectId: string): Promise<{ artifacts: BeVisua
     artifacts: artifacts ?? [],
     lookups: {
       epics: (epics ?? []).map((e) => ({ id: e.id, title: e.title })),
-      stories: (stories ?? []).map((s) => ({ id: s.id, title: s.title, sprint_id: s.sprint_id })),
+      stories: (stories ?? []).map((s) => ({ id: s.id, title: s.title, sprint_id: s.sprint_id, epic_id: s.epic_id })),
       sprints: (sprints ?? []).map((s) => ({ id: s.id, title: s.title })),
       docs: (docs ?? []).map((d) => ({ id: d.id, title: d.title })),
     },
