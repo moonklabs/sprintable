@@ -92,12 +92,28 @@ async def create_dependency(
     if await would_create_cycle(session, org_id, body.from_id, body.to_id, body.item_type):
         raise HTTPException(status_code=422, detail="사이클이 발생하는 의존성은 허용되지 않음")
 
+    # P0-04(doc trust-pipeline-be-design §4 훅②): trust_stage mutation 전 스냅샷(blocked 신호는 story
+    # +blocks 타입만 영향 — to_id가 막히는 쪽).
+    _trust_before = None
+    if body.item_type == "story" and body.dep_type == "blocks":
+        from app.services.trust_pipeline import compute_trust_facts
+
+        _trust_before = await compute_trust_facts(session, org_id, body.to_id)
+
     dep = await repo.create(
         from_id=body.from_id,
         to_id=body.to_id,
         dep_type=body.dep_type,
         item_type=body.item_type,
     )
+
+    if _trust_before is not None:
+        from app.services.trust_pipeline import maybe_emit_trust_stage_changed
+
+        await maybe_emit_trust_stage_changed(
+            session, org_id, body.to_id, _trust_before, actor_id=user_id
+        )
+
     return DependencyResponse.model_validate(dep)
 
 
@@ -130,9 +146,25 @@ async def delete_dependency(
     user_id = uuid.UUID(auth.user_id)
     await _assert_item_project_access(repo.session, user_id, repo.org_id, dep.from_id, dep.item_type)
     await _assert_item_project_access(repo.session, user_id, repo.org_id, dep.to_id, dep.item_type)
+
+    # P0-04(doc trust-pipeline-be-design §4 훅②): trust_stage mutation 전 스냅샷.
+    _trust_before = None
+    if dep.item_type == "story" and dep.dep_type == "blocks":
+        from app.services.trust_pipeline import compute_trust_facts
+
+        _trust_before = await compute_trust_facts(repo.session, repo.org_id, dep.to_id)
+
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="의존성을 찾을 수 없음")
+
+    if _trust_before is not None:
+        from app.services.trust_pipeline import maybe_emit_trust_stage_changed
+
+        await maybe_emit_trust_stage_changed(
+            repo.session, repo.org_id, dep.to_id, _trust_before, actor_id=user_id
+        )
+
     return {"ok": True}
 
 
