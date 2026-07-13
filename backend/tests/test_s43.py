@@ -112,9 +112,15 @@ async def test_create_rule_201():
 async def test_replace_rules_200():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.replace", new_callable=AsyncMock) as mock_replace:
+        # story f0c99070: bulk-replace 분기도 이제 요청시점 재해소를 거친다 — body에 project_id를
+        # 실어보내(FE PR #2120과 동일 계약) explicit 경로로 단락, has_project_access만 mock.
+        with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.replace", new_callable=AsyncMock) as mock_replace, \
+             patch("app.services.project_auth.has_project_access", new_callable=AsyncMock, return_value=True):
             mock_replace.return_value = [_make_rule()]
-            payload = {"items": [{"agent_id": str(AGENT_ID), "name": "Test Rule"}]}
+            payload = {
+                "items": [{"agent_id": str(AGENT_ID), "name": "Test Rule"}],
+                "project_id": str(PROJECT_ID),
+            }
             async with client as c:
                 resp = await c.put("/api/v2/agent-routing-rules", json=payload)
             assert resp.status_code == 200
@@ -144,9 +150,12 @@ async def test_update_rule_200():
 async def test_reorder_rules_200():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.reorder", new_callable=AsyncMock) as mock_reorder:
+        # story f0c99070: reorder-items 분기도 이제 요청시점 재해소를 거친다 — body에 project_id를
+        # 실어보내(FE PR #2120과 동일 계약) explicit 경로로 단락.
+        with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.reorder", new_callable=AsyncMock) as mock_reorder, \
+             patch("app.services.project_auth.has_project_access", new_callable=AsyncMock, return_value=True):
             mock_reorder.return_value = [_make_rule()]
-            payload = {"items": [{"id": str(RULE_ID), "priority": 5}]}
+            payload = {"items": [{"id": str(RULE_ID), "priority": 5}], "project_id": str(PROJECT_ID)}
             async with client as c:
                 resp = await c.patch("/api/v2/agent-routing-rules", json=payload)
             assert resp.status_code == 200

@@ -92,15 +92,33 @@ async def create_rule(
 
 @router.put("")
 async def replace_or_update_rules(
+    request: Request,
     body: dict,
     auth: AuthContext = Depends(get_current_user),
     repo: AgentRoutingRuleRepository = Depends(_repo),
 ) -> JSONResponse:
-    org_id, project_id = _get_org_project(auth)
-    if not org_id:
+    # ⚠️org_id는 project_id와 독립적으로 먼저 해소(story f0c99070·reorder_or_disable_rules와 동일 이유).
+    org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
+    if not org_id_str:
         return _err("FORBIDDEN", "org_id required", 403)
+    org_id = uuid.UUID(str(org_id_str))
 
     if "items" in body:
+        # E-MCP-OPT 후속(story f0c99070·doc legacy-project-fallback-sweep-audit §2.2 2단계): id 없이
+        # (org_id,project_id)만으로 기존 룰 전부 soft-delete+재삽입 — fail-closed 앵커 0. FE 선행배선
+        # (PR #2120)이 body.project_id를 명시 실어보내므로 최우선 소스로 소비(무회귀).
+        explicit = body.get("project_id")
+        try:
+            replace_project_id = await resolve_required_project_id(
+                repo.session, request, auth, org_id,
+                explicit_project_id=uuid.UUID(str(explicit)) if explicit else None,
+            )
+        except HTTPException as exc:
+            return _err(
+                exc.detail.get("code", "PROJECT_ID_REQUIRED") if isinstance(exc.detail, dict) else "FORBIDDEN",
+                exc.detail.get("message", str(exc.detail)) if isinstance(exc.detail, dict) else str(exc.detail),
+                exc.status_code,
+            )
         req = ReplaceRulesRequest.model_validate(body)
         items = [
             {
@@ -121,11 +139,15 @@ async def replace_or_update_rules(
             for item in req.items
         ]
         try:
-            rules = await repo.replace(org_id, project_id, uuid.UUID(auth.user_id), items)
+            rules = await repo.replace(org_id, replace_project_id, uuid.UUID(auth.user_id), items)
         except ValueError as exc:
             return _err("BAD_REQUEST", str(exc), 400)
         return _ok([r.model_dump(mode="json") for r in rules])
 
+    # 단일-룰 update 분기: 기존 raw project_id 폴백 그대로(Tier 1 fail-closed — id 매치 요구라
+    # 이번 스토리 스코프 아님, doc §2.2 4단계 후속).
+    project_id_str = auth.claims.get("app_metadata", {}).get("project_id")
+    project_id = uuid.UUID(str(project_id_str)) if project_id_str else None
     req_update = UpdateRoutingRuleRequest.model_validate(body)
     try:
         rule = await repo.update(
@@ -172,13 +194,23 @@ async def reorder_or_disable_rules(
         rules = await repo.disable_all(org_id, disable_project_id)
         return _ok([r.model_dump(mode="json") for r in rules])
 
-    # reorder-items 분기: 기존 raw project_id 폴백 그대로(Tier 1 fail-closed — id 매치 요구라
-    # 이번 스토리 스코프 아님, doc §2.2 4단계 후속).
-    project_id_str = auth.claims.get("app_metadata", {}).get("project_id")
-    project_id = uuid.UUID(str(project_id_str)) if project_id_str else None
+    # reorder-items 분기(story f0c99070·PO 확定 — FE 선행배선 PR #2120 착지 後 강제): id 매치라
+    # Tier 1 fail-closed였지만, FE가 body.project_id를 이제 명시 실어보내므로 최우선 소스로 소비.
+    explicit = body.get("project_id")
+    try:
+        reorder_project_id = await resolve_required_project_id(
+            repo.session, request, auth, org_id,
+            explicit_project_id=uuid.UUID(str(explicit)) if explicit else None,
+        )
+    except HTTPException as exc:
+        return _err(
+            exc.detail.get("code", "PROJECT_ID_REQUIRED") if isinstance(exc.detail, dict) else "FORBIDDEN",
+            exc.detail.get("message", str(exc.detail)) if isinstance(exc.detail, dict) else str(exc.detail),
+            exc.status_code,
+        )
     req = ReorderRulesRequest.model_validate(body)
     items = [{"id": str(item.id), "priority": item.priority} for item in req.items]
-    rules = await repo.reorder(org_id, project_id, items)
+    rules = await repo.reorder(org_id, reorder_project_id, items)
     return _ok([r.model_dump(mode="json") for r in rules])
 
 

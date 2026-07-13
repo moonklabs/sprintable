@@ -384,3 +384,147 @@ async def test_create_project_api_key_default_project_id_scopes_correctly():
             assert await _key_count(s, seeded["project_b"]) == 0  # 형제 project 무변경.
     finally:
         await engine.dispose()
+
+
+# ── agent_routing_rules::replace_or_update_rules(bulk-replace, FE 선행배선 後) ─
+
+async def _rule_deleted(session, rule_id) -> bool:
+    from sqlalchemy import select
+    from app.models.agent_routing_rule import AgentRoutingRule
+    deleted_at = (await session.execute(
+        select(AgentRoutingRule.deleted_at).where(AgentRoutingRule.id == rule_id)
+    )).scalar_one()
+    return deleted_at is not None
+
+
+async def _active_rule_count(session, project_id) -> int:
+    from sqlalchemy import func, select
+    from app.models.agent_routing_rule import AgentRoutingRule
+    return (await session.execute(
+        select(func.count()).select_from(AgentRoutingRule).where(
+            AgentRoutingRule.project_id == project_id, AgentRoutingRule.deleted_at.is_(None),
+        )
+    )).scalar_one()
+
+
+async def test_bulk_replace_explicit_body_project_id_scopes_correctly_sibling_untouched():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_two_project_agent(s)
+            rule_a = await _seed_rule(s, seeded["org_id"], seeded["project_a"], seeded["agent_id"])
+            rule_b = await _seed_rule(s, seeded["org_id"], seeded["project_b"], seeded["agent_id"])
+
+        async with Session() as s:
+            from app.routers.agent_routing_rules import replace_or_update_rules
+            from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+
+            resp = await replace_or_update_rules(
+                request=_request(None),
+                body={
+                    "items": [{"agent_id": str(seeded["agent_id"]), "name": "new-rule"}],
+                    "project_id": str(seeded["project_a"]),
+                },
+                auth=_auth(seeded["agent_id"], seeded["org_id"]),
+                repo=AgentRoutingRuleRepository(s),
+            )
+            assert resp.status_code == 200
+            await s.commit()
+
+        async with Session() as s:
+            assert await _rule_deleted(s, rule_a) is True    # project_a 구 룰 replace로 소실(의도됨).
+            assert await _rule_deleted(s, rule_b) is False   # project_b는 완전 무변경 — 교차테넌트 파괴 0.
+            assert await _active_rule_count(s, seeded["project_a"]) == 1  # 신규 룰 1개.
+            assert await _active_rule_count(s, seeded["project_b"]) == 1  # rule_b 그대로.
+    finally:
+        await engine.dispose()
+
+
+async def test_bulk_replace_ambiguous_no_project_id_400_no_mutation():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_two_project_agent(s)
+            rule_a = await _seed_rule(s, seeded["org_id"], seeded["project_a"], seeded["agent_id"])
+            rule_b = await _seed_rule(s, seeded["org_id"], seeded["project_b"], seeded["agent_id"])
+
+        async with Session() as s:
+            from app.routers.agent_routing_rules import replace_or_update_rules
+            from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+
+            resp = await replace_or_update_rules(
+                request=_request(None),
+                body={"items": [{"agent_id": str(seeded["agent_id"]), "name": "new-rule"}]},
+                auth=_auth(seeded["agent_id"], seeded["org_id"]),
+                repo=AgentRoutingRuleRepository(s),
+            )
+            assert resp.status_code == 400
+
+        async with Session() as s:
+            assert await _rule_deleted(s, rule_a) is False
+            assert await _rule_deleted(s, rule_b) is False
+    finally:
+        await engine.dispose()
+
+
+# ── agent_routing_rules::reorder_or_disable_rules(reorder-items, FE 선행배선 後) ─
+
+async def _rule_priority(session, rule_id) -> int:
+    from sqlalchemy import select
+    from app.models.agent_routing_rule import AgentRoutingRule
+    return (await session.execute(
+        select(AgentRoutingRule.priority).where(AgentRoutingRule.id == rule_id)
+    )).scalar_one()
+
+
+async def test_reorder_items_explicit_body_project_id_scopes_correctly_sibling_untouched():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_two_project_agent(s)
+            rule_a = await _seed_rule(s, seeded["org_id"], seeded["project_a"], seeded["agent_id"])
+            rule_b = await _seed_rule(s, seeded["org_id"], seeded["project_b"], seeded["agent_id"])
+
+        async with Session() as s:
+            from app.routers.agent_routing_rules import reorder_or_disable_rules
+            from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+
+            resp = await reorder_or_disable_rules(
+                request=_request(None),
+                body={"items": [{"id": str(rule_a), "priority": 5}], "project_id": str(seeded["project_a"])},
+                auth=_auth(seeded["agent_id"], seeded["org_id"]),
+                repo=AgentRoutingRuleRepository(s),
+            )
+            assert resp.status_code == 200
+            await s.commit()
+
+        async with Session() as s:
+            assert await _rule_priority(s, rule_a) == 5
+            assert await _rule_priority(s, rule_b) == 100  # 형제 project 무변경.
+    finally:
+        await engine.dispose()
+
+
+async def test_reorder_items_ambiguous_no_project_id_400_no_mutation():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_two_project_agent(s)
+            rule_a = await _seed_rule(s, seeded["org_id"], seeded["project_a"], seeded["agent_id"])
+
+        async with Session() as s:
+            from app.routers.agent_routing_rules import reorder_or_disable_rules
+            from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+
+            resp = await reorder_or_disable_rules(
+                request=_request(None),
+                body={"items": [{"id": str(rule_a), "priority": 5}]},
+                auth=_auth(seeded["agent_id"], seeded["org_id"]),
+                repo=AgentRoutingRuleRepository(s),
+            )
+            assert resp.status_code == 400
+
+        async with Session() as s:
+            assert await _rule_priority(s, rule_a) == 100  # 무변경.
+    finally:
+        await engine.dispose()
