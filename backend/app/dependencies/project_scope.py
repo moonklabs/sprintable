@@ -23,6 +23,17 @@ _AMBIGUOUS_MESSAGE = (
 )
 
 
+def enforce_write_scope(auth: AuthContext, request: Request) -> None:
+    """API-key write-scope 강제(story d764522c·산티아고 SME finding).
+
+    `_check_api_key_scope`(app/dependencies/auth.py)는 보통 `get_verified_org_id` 경유로만
+    실행되는데, 이 모듈의 project_id 재해소를 쓰는 라우터들은 org_id를 자체 해소하고
+    `get_verified_org_id`를 거치지 않아 그 실행점이 빠져 있었다 — read-only API key가 mutation을
+    호출할 수 있던 갭. JWT(human) 경로는 `_check_api_key_scope` 내부에서 자동 스킵."""
+    from app.dependencies.auth import _check_api_key_scope
+    _check_api_key_scope(auth, request.method, request.url.path)
+
+
 async def resolve_required_project_id(
     session: AsyncSession,
     request: Request,
