@@ -7,12 +7,14 @@ import { ArtifactStage } from './artifact-stage';
 import { ArtifactExpandDialog } from './artifact-expand-dialog';
 import { ArtifactVersionRail } from './artifact-version-rail';
 import { AnchorPin } from './anchor-pin';
+import { SpecPinMarker } from './spec-pin-marker';
 import { CommentThreadCard } from './comment-thread-card';
 import { DescriptionPane } from './description-pane';
 import { ExportDialog } from './export-dialog';
 import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canvas';
 import type { ArtifactNode } from '@/services/canvas-nodes';
 import type { CommentThread } from '@/services/canvas-comments';
+import type { SpecPin } from '@/services/canvas-spec-pins';
 
 interface ArtifactViewerProps {
   artifact: VisualArtifact;
@@ -27,6 +29,11 @@ interface ArtifactViewerProps {
   /** description pane 소스 — C2-S6 실 컬럼(node.description)을 element 앵커 코멘트가 가리키는
    * 노드에서 직접 조회(mock 시절 별도 DescriptionMap은 폐기 — 실 데이터 그대로 사용). */
   nodes?: ArtifactNode[];
+  /** story 7fe16274 — 스펙 핀(좌표 앵커, doc `artifact-pin-authoring-spec` v1). BE는 항상
+   * artifact의 latest version만 대상으로 하므로, 뷰어가 latest가 아닌 과거 버전을 보는
+   * 중이면(버전 셀렉터로 이동) 핀을 그리지 않는다 — 다른 버전 레이아웃 위에 latest 스냅샷
+   * 좌표를 얹으면 위치가 어긋난다(코드 정합성, no-fiction). */
+  specPins?: SpecPin[];
   /** C3 §1 — 뷰어→편집모드 진입점. format='tree'일 때만 노출(html/image는 이 UI로 편집
    * 불가). 정본 버전을 보는 중이면 "새 버전으로 편집" 라벨(정본 계약 보호 — 실제 분기 로직은
    * BE 연동 시, 지금은 라벨만 다르고 동일 콜백). */
@@ -47,14 +54,16 @@ interface ArtifactViewerProps {
  * 받는 순수 뷰라 실 API 착지 시 fetch 래퍼만 새로 감싸면 됨(컴포넌트 자체는 안 바뀜).
  */
 export function ArtifactViewer({
-  artifact, versions, memberMap = {}, commentCount = 0, threads, nodes = [], onEnterEdit, onResolveThread, onReplyThread,
+  artifact, versions, memberMap = {}, commentCount = 0, threads, nodes = [], specPins, onEnterEdit, onResolveThread, onReplyThread,
   pendingCanonicalizeVersion, onProposeCanonical, className,
 }: ArtifactViewerProps) {
   const t = useTranslations('canvas');
   const [selectedVersion, setSelectedVersion] = useState(artifact.current_version);
   const [expandOpen, setExpandOpen] = useState(false);
   const isViewingAnchor = selectedVersion === artifact.anchor_version;
+  const isViewingLatest = selectedVersion === artifact.current_version;
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [selectedSpecPinId, setSelectedSpecPinId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   // story d72db00a — ArtifactStage의 콘텐츠 레이어에 직접 꽂힌다(contentRef prop 경유),
   // 뷰어 크롬 wrapper가 아니다 — PNG export가 크롬 없이 아트보드 전체 프레임만 캡처하도록.
@@ -64,7 +73,17 @@ export function ArtifactViewer({
   const selectedThreadDescription = selectedThread?.anchor.element_id
     ? (nodes.find((n) => n.id === selectedThread.anchor.element_id)?.description ?? null)
     : null;
+  const selectedSpecPin = specPins?.find((p) => p.id === selectedSpecPinId) ?? null;
   const openThreadCount = threads?.filter((th) => th.rollup !== 'resolved').length ?? 0;
+
+  function selectThread(id: string) {
+    setSelectedThreadId((cur) => (cur === id ? null : id));
+    setSelectedSpecPinId(null);
+  }
+  function selectSpecPin(id: string) {
+    setSelectedSpecPinId((cur) => (cur === id ? null : id));
+    setSelectedThreadId(null);
+  }
 
   return (
     <div className={className}>
@@ -171,11 +190,23 @@ export function ArtifactViewer({
                           number={th.pin_number}
                           state={th.rollup === 'resolved' ? 'resolved' : 'open'}
                           active={th.id === selectedThreadId}
-                          onClick={() => setSelectedThreadId((cur) => (cur === th.id ? null : th.id))}
+                          onClick={() => selectThread(th.id)}
                           className="absolute z-10"
                           style={{ left: `${th.anchor.x}%`, top: `${th.anchor.y}%` }}
                         />
                       ))}
+                      {/* story 7fe16274 — 스펙 핀. latest 버전 볼 때만(BE가 항상 latest 대상이라
+                       * 과거 버전엔 어긋난 좌표가 됨, 위 prop 주석 참고). 좌표는 %(코멘트)가
+                       * 아니라 canvas_bounds px — 단위가 달라도 각자의 left/top는 서로 무간섭. */}
+                      {isViewingLatest ? specPins?.map((pin) => (
+                        <SpecPinMarker
+                          key={pin.id}
+                          active={pin.id === selectedSpecPinId}
+                          onClick={() => selectSpecPin(pin.id)}
+                          className="absolute z-10"
+                          style={{ left: pin.anchorX ?? 0, top: pin.anchorY ?? 0 }}
+                        />
+                      )) : null}
                     </>
                   }
                 />
@@ -188,10 +219,10 @@ export function ArtifactViewer({
             selectedVersion={selectedVersion}
             onSelectVersion={setSelectedVersion}
             memberMap={memberMap}
-            descriptionSlot={threads ? (
+            descriptionSlot={threads || specPins ? (
               <DescriptionPane
-                description={selectedThreadDescription}
-                elementLabel={selectedThread?.element_label}
+                description={selectedSpecPin ? selectedSpecPin.description : selectedThreadDescription}
+                elementLabel={selectedSpecPin ? undefined : selectedThread?.element_label}
                 className="mt-1.5"
               />
             ) : undefined}
@@ -206,7 +237,7 @@ export function ArtifactViewer({
                 thread={th}
                 memberMap={memberMap}
                 active={th.id === selectedThreadId}
-                onSelectPin={(id) => setSelectedThreadId((cur) => (cur === id ? null : id))}
+                onSelectPin={selectThread}
                 onResolve={onResolveThread}
                 onReply={onReplyThread}
               />

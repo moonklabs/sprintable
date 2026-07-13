@@ -17,6 +17,10 @@ interface ArtifactEditorProps {
   /** 커밋 시 호출 — 실 연동에선 이게 `POST .../versions`(node.id 보존 계약)가 됨. */
   onCommit?: (nodes: ArtifactNode[], summary: string) => void;
   onDone?: () => void;
+  /** story 7fe16274 — 스펙 핀 저작(EditCanvas)에 전달. 신규 생성 중(첫 커밋 전)엔 artifact가
+   * 아직 없어 undefined — EditCanvas가 핀 도구를 스스로 비활성 처리한다. */
+  artifactId?: string;
+  canvasBounds?: { w: number; h: number } | null;
   className?: string;
 }
 
@@ -26,7 +30,7 @@ interface ArtifactEditorProps {
  * — id 재발급 없이 mutate만 하므로 커밋해도 살아있는 요소의 node.id가 자동 보존된다
  * (C1 계약 §3이 C3로 defer한 "버전 간 node.id 안정성"의 실제 구현 — 별도 로직 불필요).
  */
-export function ArtifactEditor({ title, initialNodes, onCommit, onDone, className }: ArtifactEditorProps) {
+export function ArtifactEditor({ title, initialNodes, onCommit, onDone, artifactId, canvasBounds, className }: ArtifactEditorProps) {
   const t = useTranslations('canvas');
   const [baseline, setBaseline] = useState(initialNodes);
   const [nodes, setNodes] = useState(initialNodes);
@@ -60,7 +64,7 @@ export function ArtifactEditor({ title, initialNodes, onCommit, onDone, classNam
 
         <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-[120px_1fr_160px]">
           <ComponentPalette onAdd={handleAdd} />
-          <EditCanvas tree={tree} selectedId={selectedId} onSelect={setSelectedId} />
+          <EditCanvas tree={tree} selectedId={selectedId} onSelect={setSelectedId} artifactId={artifactId} canvasBounds={canvasBounds} />
           <PropertyPanel node={selectedNode} onChangeText={handleChangeText} onDelete={handleDelete} />
         </div>
 
