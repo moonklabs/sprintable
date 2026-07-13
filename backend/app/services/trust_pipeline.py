@@ -12,6 +12,7 @@ glance/attention·glance/hero와 동일한 기존 파생 패턴의 확장(이중
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -24,6 +25,8 @@ from app.models.dependency import ItemDependency
 from app.models.gate import Gate
 from app.models.pm import Story
 from app.services.evidence_service import batch_human_verified
+
+logger = logging.getLogger(__name__)
 
 TRUST_STAGES = ("queued", "running", "needs_input", "claimed_done", "verified", "merge_ready")
 
@@ -174,7 +177,7 @@ async def _maybe_emit(
         return  # 변경 없음 — 이벤트 폭주 방지(doc §4).
     from app.routers.events import publish_event  # lazy import — service→router 순환 회피.
 
-    publish_event(str(org_id), "story.trust_stage_changed", {
+    event_data = {
         "story_id": str(story_id),
         "project_id": str(after.project_id),
         "org_id": str(org_id),
@@ -183,7 +186,27 @@ async def _maybe_emit(
         "exception_signals": new_signals,
         "actor_id": str(actor_id) if actor_id else None,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
+    }
+    publish_event(str(org_id), "story.trust_stage_changed", event_data)
+
+    # E-UI-DAEGBYEON P0-04 후속(story 9ef0f914): org publish는 `_subscribers[org_id]`(구독
+    # 엔드포인트 없음 — 실측 확인)로만 가고 FE가 실제로 붙는 `_agent_connections[member_id]`에는
+    # 안 닿는다 — "레지스트리 통합"이 아니라 project 인가 필터를 낀 포워딩으로 그 갭을 메운다.
+    # 순수 transient push(Event row 생성 0 — 오프라인 백필 불필요·PO 가드레일)·연결 안 된 멤버는
+    # _push_to_agent 자체가 조용히 no-op.
+    try:
+        from app.routers.events import _push_to_agent
+        from app.services.project_auth import project_accessible_member_ids
+
+        member_ids = await project_accessible_member_ids(session, org_id, after.project_id)
+        sse_payload = {"event_type": "story.trust_stage_changed", **event_data}
+        for member_id in member_ids:
+            _push_to_agent(str(member_id), dict(sse_payload))
+    except Exception:
+        logger.warning(
+            "trust_stage_changed SSE 포워딩 실패(story=%s project=%s) — org publish는 이미 발행됨",
+            story_id, after.project_id, exc_info=True,
+        )
 
 
 async def maybe_emit_trust_stage_changed(
