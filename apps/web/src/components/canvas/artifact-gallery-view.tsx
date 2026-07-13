@@ -28,18 +28,30 @@ interface EpicListItem { id: string; title: string }
 interface SprintListItem { id: string; title: string }
 interface DocListItem { id: string; title: string }
 
+/**
+ * story ca37b2b0 — stories lookup은 artifacts 응답에 실제로 등장하는 story_id만 배치 조회
+ * (BE #2131 `ids` 파라미터)로 전환. 기존 `limit=100` 전량 fetch는 프로젝트에 스토리가 100개
+ * 넘으면 최신 스토리가 잘려나가 에픽/스프린트 축이 무소속으로 오판하는 근본 결함이 있었다.
+ * artifacts를 먼저 받아야 어떤 id들이 필요한지 알 수 있어 자연히 2단계 fetch가 되는데,
+ * epics/sprints/docs는 artifacts와 무관하니 1단계에서 같이 병렬 처리해 낭비를 최소화한다.
+ */
 async function fetchGalleryData(projectId: string): Promise<{ artifacts: BeVisualArtifactSummary[]; lookups: GalleryLookups }> {
-  const [artifacts, epics, stories, sprints, docs] = await Promise.all([
+  const [artifacts, epics, sprints, docs] = await Promise.all([
     // 무쿼리 호출=project-wide(BE가 JWT/API키 컨텍스트의 project_id로 항상 스코프 — 클라 지정
     // 불가 SEC-S8 가드). 기존 프록시 쿼리 forward 그대로라 신규 프록시 0(doc §5).
     fetchJson<BeVisualArtifactSummary[]>('/api/visual-artifacts'),
     fetchJson<EpicListItem[]>(`/api/epics?project_id=${projectId}&limit=100`),
-    fetchJson<StoryListItem[]>(`/api/stories?project_id=${projectId}&limit=100`),
     fetchJson<SprintListItem[]>(`/api/sprints?project_id=${projectId}`),
     fetchJson<DocListItem[]>(`/api/docs?project_id=${projectId}&limit=100`),
   ]);
+  const resolvedArtifacts = artifacts ?? [];
+  const storyIds = [...new Set(resolvedArtifacts.map((a) => a.story_id).filter((id): id is string => id != null))];
+  // 빈 ids면 호출 자체를 생략(no-fiction — 조회할 대상이 없는데 빈 배치를 쏘지 않는다).
+  const stories = storyIds.length > 0
+    ? await fetchJson<StoryListItem[]>(`/api/stories?project_id=${projectId}&ids=${storyIds.join(',')}`)
+    : [];
   return {
-    artifacts: artifacts ?? [],
+    artifacts: resolvedArtifacts,
     lookups: {
       epics: (epics ?? []).map((e) => ({ id: e.id, title: e.title })),
       stories: (stories ?? []).map((s) => ({ id: s.id, title: s.title, sprint_id: s.sprint_id, epic_id: s.epic_id })),
