@@ -23,6 +23,21 @@ class StoryRepository(BaseRepository[Story]):
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         super().__init__(Story, session, org_id)
 
+    async def list_by_ids(self, ids: list[uuid.UUID]) -> list[Story]:
+        """배치 앵커 조회(story ca37b2b0 ② — 갤러리 등 정확한 story 집합 필요 소비자용).
+
+        org-scoped exact-id IN 조회. ORDER BY 없음 — 호출자가 id 집합 그대로를 필요로 하는
+        용도(base.list()의 "첫 N건" 비결정 순서 문제와 무관, id 정확 매칭이라 순서 개념 자체가 없음).
+        """
+        if not ids:
+            return []
+        result = await self.session.execute(
+            select(Story).where(
+                self._org_filter(), Story.id.in_(ids), Story.deleted_at.is_(None),
+            )
+        )
+        return list(result.scalars().all())
+
     async def list_board(
         self,
         project_id: uuid.UUID,

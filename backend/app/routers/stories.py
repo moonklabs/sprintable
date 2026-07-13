@@ -88,12 +88,35 @@ async def list_stories(
     assignee_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     no_sprint: bool = Query(default=False, description="sprint 미배정 스토리만 반환"),
+    ids: str | None = Query(default=None, description="comma-separated story ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관)"),
     limit: int = Query(default=1000, ge=1, le=2000),
     cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
     response: Response = None,  # type: ignore[assignment]
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[StoryResponse]:
     from datetime import datetime
+
+    if ids is not None:
+        # story ca37b2b0 ②: 갤러리 등 정확한 story 집합이 필요한 소비자용 — base.list()의
+        # ORDER BY 부재(별건 d8787fa6)와 무관하게 요청한 id를 전부(또는 접근권 있는 만큼) 반환.
+        try:
+            story_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="invalid story id in ids")
+        if not story_ids:
+            return []
+        if len(story_ids) > 200:  # 워크플로우-라인 배치와 동형 방어(과대 IN 금지).
+            raise HTTPException(status_code=422, detail="too many ids (max 200)")
+        stories = await repo.list_by_ids(story_ids)
+        # 인가 스코프: org 소속이어도 caller가 접근 못 하는 project의 story는 조용히 필터링
+        # (타 project id가 섞여 들어와도 유출 0 — has_project_access와 동일 SSOT 배치 버전 재사용).
+        from app.services.project_auth import accessible_project_ids_in_org
+        accessible = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id)
+        stories = [s for s in stories if s.project_id in accessible]
+        await _attach_assignee_ids(repo.session, repo.org_id, stories)
+        await _attach_has_evidence(repo.session, stories)
+        return [StoryResponse.model_validate(s) for s in stories]
 
     if no_sprint and project_id:
         stories = await repo.list_backlog(project_id, limit=limit)
