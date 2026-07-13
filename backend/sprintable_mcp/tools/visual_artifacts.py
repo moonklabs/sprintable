@@ -18,6 +18,14 @@ class ArtifactNodeInput(SprintableInput):
     description: str | None = None  # C2-S6: description pane(요소별 스펙)
 
 
+class CanvasBoundsInput(SprintableInput):
+    """뷰어 통합 재설계(story 1948d19d): sandbox iframe은 내부 콘텐츠 크기를 서버가 측정할 수
+    없어, 렌더 산출물이 자기 프레임 크기(CSS px)를 직접 선언한다. w/h는 양수·상한(20000px)
+    — 위반 시 서버가 422로 거절."""
+    w: int
+    h: int
+
+
 class CreateArtifactInput(SprintableInput):
     title: str
     story_id: str | None = None
@@ -26,6 +34,9 @@ class CreateArtifactInput(SprintableInput):
     source: str | None = None  # "created" | "imported" — 기본 created
     nodes: list[ArtifactNodeInput] | None = None
     summary: str | None = None  # 최초 버전 변경 이유(선택)
+    # 뷰어 통합 재설계(story 1948d19d): 생성 시점 프레임 크기(선택 — 미선언 시 FE가 기본
+    # 아트보드 규약으로 폴백). 최초 버전(version_number=1)에 저장된다.
+    canvas_bounds: CanvasBoundsInput | None = None
 
 
 class GetArtifactInput(SprintableInput):
@@ -58,9 +69,15 @@ class ArtifactNodeOperationInput(SprintableInput):
 
 class EditArtifactInput(SprintableInput):
     artifact_id: str
-    operations: list[ArtifactNodeOperationInput]
+    # 뷰어 통합 재설계(story 1948d19d): canvas_bounds만으로도 편집 호출 가능해져 operations가
+    # 선택제로 바뀌었다(둘 다 비면 서버가 422) — 프레임 크기만 갱신하는 호출도 유효.
+    operations: list[ArtifactNodeOperationInput] = []
     summary: str | None = None  # 새 버전 변경 이유(선택)
     source_comment_id: str | None = None  # 이 편집이 응답한 코멘트(선택, closed-loop)
+    # 프레임 크기 재선언(선택) — 버전 단위 SSOT라 이것만 바뀌어도 무-mutate 버전 원칙대로 새
+    # 버전이 생긴다. 미지정 시 직전 버전 값을 그대로 이어받는다(operations만으로 편집해도
+    # 프레임은 자동 보존됨 — 매 호출마다 재선언할 필요 없음).
+    canvas_bounds: CanvasBoundsInput | None = None
 
 
 class ProposeCanonicalInput(SprintableInput):
@@ -77,7 +94,9 @@ class ListArtifactsInput(SprintableInput):
 
 async def create_artifact(args: CreateArtifactInput) -> list[TextContent]:
     """시각 산출물 생성(에이전트 생성 입구, blueprint §F1) — 트리(nodes[])로 구조화해 전달.
-    임포트된 raw HTML/이미지는 type="html_blob" 노드 하나로 감싸도 된다."""
+    임포트된 raw HTML/이미지는 type="html_blob" 노드 하나로 감싸도 된다.
+    canvas_bounds{w,h}(선택): 렌더 결과의 자기 프레임 크기(CSS px) — sandbox iframe이라 서버가
+    내부 콘텐츠를 측정할 수 없어 호출자 선언이 필요. 미지정 시 FE가 기본 아트보드로 폴백."""
     try:
         body: dict = {"title": args.title}
         if args.story_id:
@@ -92,6 +111,8 @@ async def create_artifact(args: CreateArtifactInput) -> list[TextContent]:
             body["nodes"] = [n.model_dump(exclude_none=True) for n in args.nodes]
         if args.summary:
             body["summary"] = args.summary
+        if args.canvas_bounds:
+            body["canvas_bounds"] = args.canvas_bounds.model_dump(exclude_none=True)
         result = await client.post("/api/v2/visual-artifacts", json=body)
         return ok(result)
     except Exception as exc:
@@ -164,15 +185,20 @@ async def edit_artifact(args: EditArtifactInput) -> list[TextContent]:
       · op="add": 새 노드(type 필수·props 초기값·id 미지정 시 서버 생성).
       · op="update": **대상 노드 = `id`**(get_artifact의 node.id·`node_id` 아님)·props 지정 시 전체 교체.
       · op="delete": **대상 노드 = `id`**만.
-    (대상 요소는 항상 `id` 필드로 지정 — 코멘트 앵커의 node_id와 혼동 주의.)"""
+    (대상 요소는 항상 `id` 필드로 지정 — 코멘트 앵커의 node_id와 혼동 주의.)
+    canvas_bounds{w,h}(선택): 프레임 크기 재선언 — 버전 단위 SSOT라 미지정 시 직전 버전 값을
+    그대로 이어받는다(매 편집마다 재선언 불요). operations를 비우고 canvas_bounds만 보내
+    프레임 크기만 갱신하는 호출도 유효(둘 다 비면 서버가 422)."""
     try:
-        body = {
+        body: dict = {
             "operations": [op.model_dump(exclude_none=True) for op in args.operations],
         }
         if args.summary:
             body["summary"] = args.summary
         if args.source_comment_id:
             body["source_comment_id"] = args.source_comment_id
+        if args.canvas_bounds:
+            body["canvas_bounds"] = args.canvas_bounds.model_dump(exclude_none=True)
         result = await client.post(f"/api/v2/visual-artifacts/{args.artifact_id}/edit", json=body)
         return ok(result)
     except Exception as exc:

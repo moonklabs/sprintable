@@ -33,6 +33,11 @@ class VisualArtifact(Base):
     # 유나 §11 field-level 대조 갭①: 정본 버전 — set은 C4(승인 게이트)의 몫, C1은 컬럼만 마련
     # (null=정본 없음=뷰어 무표시·초안 중립). C4 착수 시 스키마 변경 없이 값만 채우면 됨.
     anchor_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 뷰어 통합 재설계(story 1948d19d·doc artifact-canvas-viewport-spec §4): SSOT는
+    # ArtifactVersion.canvas_bounds(버전 단위 — iframe 1개=버전 전체 node 합성 렌더라 프레임
+    # 개념이 버전 스코프). 이 필드는 latest_version_number와 동일 목적의 **denorm 캐시**
+    # (매 GET/list마다 버전 서브쿼리 회피) — 새 버전 생성마다 그 버전 값과 동기화된다.
+    canvas_bounds: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -69,6 +74,10 @@ class ArtifactVersion(Base):
         ),
         nullable=True,
     )
+    # 뷰어 통합 재설계(story 1948d19d·doc artifact-canvas-viewport-spec §4): 이 버전이 선언한
+    # 프레임 크기(SSOT) — iframe 1개=버전 전체 node 합성 렌더(_render_self_contained_html)라
+    # 버전 단위 개념. 0179 additive nullable — 미선언(None)=FE 기본 아트보드 규약 폴백.
+    canvas_bounds: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
