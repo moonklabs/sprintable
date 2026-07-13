@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ArtifactViewer } from './artifact-viewer';
-import { MOCK_ARTIFACT, MOCK_VERSIONS, MOCK_MEMBERS } from '@/services/canvas';
+import { MOCK_ARTIFACT, MOCK_EDITABLE_ARTIFACT, MOCK_VERSIONS, MOCK_MEMBERS } from '@/services/canvas';
 import { MOCK_THREADS } from '@/services/canvas-comments';
 
 function wrap(node: React.ReactNode) {
@@ -90,5 +90,36 @@ describe('ArtifactViewer (SSR snapshot)', () => {
     );
     expect(markup).not.toContain('정본으로 제안');
     expect(markup).not.toContain('정본 제안 대기 중');
+  });
+
+  describe('story 385eb89a — 고정 넓이 html 잘림 대책', () => {
+    it('renders the html stage bounded to a fixed canvas width instead of forcing 100%(잘림 원인 제거)', () => {
+      const markup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(markup).toContain('width:1200px');
+    });
+
+    it('shows the fit/actual-size toggle only for html format', () => {
+      const htmlMarkup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(htmlMarkup).toContain('전체 보기');
+      expect(htmlMarkup).toContain('실제 크기');
+
+      const treeMarkup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_EDITABLE_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(treeMarkup).not.toContain('전체 보기');
+      expect(treeMarkup).not.toContain('실제 크기');
+    });
+
+    it('tree format render is unaffected (회귀 0 — placeholder path untouched)', () => {
+      const markup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_EDITABLE_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(markup).toContain('트리 렌더는 준비 중');
+      expect(markup).not.toContain('width:1200px');
+    });
   });
 });

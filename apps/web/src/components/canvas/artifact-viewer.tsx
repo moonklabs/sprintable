@@ -51,6 +51,7 @@ export function ArtifactViewer({
 }: ArtifactViewerProps) {
   const t = useTranslations('canvas');
   const [selectedVersion, setSelectedVersion] = useState(artifact.current_version);
+  const [fitToView, setFitToView] = useState(false);
   const isViewingAnchor = selectedVersion === artifact.anchor_version;
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -79,6 +80,28 @@ export function ArtifactViewer({
               <option key={v.id} value={v.version}>v{v.version}</option>
             ))}
           </select>
+          {/* story 385eb89a v1+ — 고정 넓이 html 전용 전체보기/실제크기 토글. tree/image는
+           * 이미 컨테이너에 맞춰 렌더돼 토글 자체가 무의미해 노출하지 않는다. */}
+          {artifact.format === 'html' ? (
+            <div className="flex items-center rounded-md border border-border text-[11px] font-medium text-muted-foreground">
+              <button
+                type="button"
+                onClick={() => setFitToView(true)}
+                aria-pressed={fitToView}
+                className={`rounded-l-md px-1.5 py-0.5 ${fitToView ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'}`}
+              >
+                {t('viewerFitToggleFit')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setFitToView(false)}
+                aria-pressed={!fitToView}
+                className={`rounded-r-md px-1.5 py-0.5 ${!fitToView ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'}`}
+              >
+                {t('viewerFitToggleActual')}
+              </button>
+            </div>
+          ) : null}
           {artifact.anchor_version != null ? (
             <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-success/85">
               <Check className="h-3 w-3" strokeWidth={2.6} aria-hidden />
@@ -133,10 +156,10 @@ export function ArtifactViewer({
           </span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-[1fr_232px]">
-          <div ref={captureTargetRef} className="relative bg-muted/20 p-4">
+        <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_232px]">
+          <div ref={captureTargetRef} className="relative min-w-0 bg-muted/20 p-4">
             {activeVersion ? (
-              <ArtifactStage format={artifact.format} content={activeVersion.content} title={artifact.title} />
+              <ArtifactStage format={artifact.format} content={activeVersion.content} title={artifact.title} fitToView={fitToView} />
             ) : null}
             {/* C2 §1 — 좌표 앵커 스레드만 오버레이(element 앵커는 실 artifact tree 좌표 유도 필요, 후속). */}
             {threads?.filter((th) => th.anchor.kind === 'coordinate').map((th) => (
