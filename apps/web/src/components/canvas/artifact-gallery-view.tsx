@@ -5,12 +5,17 @@ import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronRight, Frame } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import type { BeVisualArtifactSummary, BeArtifactVersionSummary } from '@/services/canvas';
+import {
+  adaptArtifactDetail, getArtifactVersionDetail,
+  type ArtifactFormat, type BeVisualArtifactSummary, type BeArtifactVersionSummary,
+} from '@/services/canvas';
 import {
   buildGalleryGroups, GALLERY_AXES,
   type GalleryAxis, type GalleryGroup, type GalleryLookups,
 } from '@/services/artifact-gallery';
 import { ArtifactGalleryTimeline, type GalleryTimelineVersion } from './artifact-gallery-timeline';
+import { ArtifactThumbnail } from './artifact-thumbnail';
+import { ArtifactExpandDialog } from './artifact-expand-dialog';
 
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
@@ -72,7 +77,7 @@ function GroupListSkeleton() {
 }
 
 function ArtifactRow({
-  artifact, axisT, expanded, versions, versionsLoading, onToggle,
+  artifact, axisT, expanded, versions, versionsLoading, onToggle, onOpen, onOpenVersion,
 }: {
   artifact: GalleryGroup['artifacts'][number];
   axisT: ReturnType<typeof useTranslations>;
@@ -80,6 +85,10 @@ function ArtifactRow({
   versions: GalleryTimelineVersion[] | undefined;
   versionsLoading: boolean;
   onToggle: () => void;
+  /** story 3d888ba2 — 썸네일 클릭→실물 열람(기본 버전=anchor??latest). 행 전체 클릭(onToggle)과
+   * 별개 클릭 타깃(stopPropagation)이라 기존 펼침 토글 회귀 0. */
+  onOpen: () => void;
+  onOpenVersion: (versionNumber: number) => void;
 }) {
   return (
     <div className="border-t border-border/60 first:border-t-0">
@@ -90,7 +99,19 @@ function ArtifactRow({
         onKeyDown={(e) => { if (e.key === 'Enter') onToggle(); }}
         className="flex cursor-pointer items-center gap-3 px-1 py-3"
       >
-        <span className="h-[22px] w-[30px] shrink-0 rounded border border-border bg-muted/50" aria-hidden="true" />
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onOpen(); }}
+          title={axisT('galleryOpenArtifactAction')}
+          className="shrink-0 rounded transition-opacity hover:opacity-80"
+        >
+          <ArtifactThumbnail
+            artifactId={artifact.id}
+            latestVersionNumber={artifact.latestVersionNumber}
+            anchorVersion={artifact.anchorVersion}
+            className="h-10 w-14"
+          />
+        </button>
         <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-foreground">
           {artifact.title}
         </span>
@@ -105,12 +126,12 @@ function ArtifactRow({
         {expanded ? <ChevronDown className="size-3 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3 shrink-0 text-muted-foreground" />}
       </div>
       {expanded ? (
-        <div className="pb-4 pl-[41px] pr-1">
+        <div className="pb-4 pl-[68px] pr-1">
           <p className="mb-2 text-[9.5px] tracking-wide text-muted-foreground/70">{axisT('galleryLazyHint')}</p>
           {versionsLoading ? (
             <div className="h-10 animate-pulse rounded bg-muted/50" />
           ) : versions && versions.length > 0 ? (
-            <ArtifactGalleryTimeline versions={versions} />
+            <ArtifactGalleryTimeline versions={versions} onSelectVersion={onOpenVersion} />
           ) : (
             <p className="text-[11.5px] text-muted-foreground">{axisT('galleryVersionsUnavailable')}</p>
           )}
@@ -138,6 +159,7 @@ export function ArtifactGalleryView() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [versionsByArtifact, setVersionsByArtifact] = useState<Record<string, GalleryTimelineVersion[]>>({});
   const [versionsLoadingId, setVersionsLoadingId] = useState<string | null>(null);
+  const [expandTarget, setExpandTarget] = useState<{ format: ArtifactFormat; content: string; title: string } | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -179,6 +201,20 @@ export function ArtifactGalleryView() {
       .map((v) => ({ versionNumber: v.version_number, summary: v.summary, isAnchor: v.version_number === detail?.anchorVersion }));
     setVersionsByArtifact((cur) => ({ ...cur, [artifactId]: mapped }));
     setVersionsLoadingId(null);
+  }
+
+  /**
+   * story 3d888ba2 — 실물 열람. 갤러리 요약엔 format이 없어(BE 계약상 nodes 파생) 버전 상세를
+   * 열 때마다 받아야 한다 — 실패(삭제된 버전 등)면 조용히 아무것도 안 함(no-fiction: 깨진/빈
+   * 모달을 여는 것보다 아무 반응 없는 게 정직).
+   */
+  async function handleOpenArtifact(artifactId: string, versionNumber: number, title: string) {
+    const detail = await getArtifactVersionDetail(artifactId, versionNumber);
+    if (!detail) return;
+    const { artifact, versions } = adaptArtifactDetail(detail);
+    const content = versions[0]?.content;
+    if (!content) return;
+    setExpandTarget({ format: artifact.format, content, title });
   }
 
   const axisLabel = (a: GalleryAxis) => t(`galleryAxis${a[0]!.toUpperCase()}${a.slice(1)}`);
@@ -267,6 +303,8 @@ export function ArtifactGalleryView() {
                     versions={versionsByArtifact[artifact.id]}
                     versionsLoading={versionsLoadingId === artifact.id}
                     onToggle={() => void handleToggleExpand(artifact.id)}
+                    onOpen={() => void handleOpenArtifact(artifact.id, artifact.anchorVersion ?? artifact.latestVersionNumber, artifact.title)}
+                    onOpenVersion={(versionNumber) => void handleOpenArtifact(artifact.id, versionNumber, artifact.title)}
                   />
                 ))}
               </>
@@ -274,6 +312,15 @@ export function ArtifactGalleryView() {
           </div>
         </div>
       )}
+      {expandTarget ? (
+        <ArtifactExpandDialog
+          open={expandTarget !== null}
+          onOpenChange={(next) => { if (!next) setExpandTarget(null); }}
+          title={expandTarget.title}
+          format={expandTarget.format}
+          content={expandTarget.content}
+        />
+      ) : null}
     </div>
   );
 }

@@ -3567,6 +3567,10 @@
     "galleryLazyHint": "Expanding loads earlier versions.",
     "galleryVersionsUnavailable": "Couldn't load earlier versions.",
     "viewerExpandAction": "Expand view",
-    "viewerPanHint": "Drag to move"
+    "viewerPanHint": "Drag to move",
+    "galleryFormatHtml": "Web page",
+    "galleryFormatImage": "Image",
+    "galleryFormatTree": "Layout",
+    "galleryOpenArtifactAction": "Open artifact"
   }
 }
