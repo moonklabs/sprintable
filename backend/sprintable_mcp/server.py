@@ -53,6 +53,9 @@ from .tools.core import (
     claim_story, get_workflow_guide, list_team_members, lock_files,
     my_dashboard, unclaim_story, unlock_files,
 )
+from .tools.projects import (
+    ListProjectsInput, SetDefaultProjectInput, list_projects, set_default_project,
+)
 from .tools.docs import (
     CreateDocInput, GetDocInput, ListDocsInput,
     SearchDocsInput, UpdateDocInput,
@@ -460,13 +463,20 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_get_project_health",
      "프로젝트 전체 건강도 조회.",
      SprintableInput, get_project_health),
-    # Core (4)
+    # Core (6) — E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가.
     ("sprintable_list_team_members",
      "프로젝트 팀 멤버 목록 조회.",
      SprintableInput, list_team_members),
     ("sprintable_my_dashboard",
      "팀원 대시보드 요약 조회.",
      DashboardInput, my_dashboard),
+    ("sprintable_list_projects",
+     "이 키(멤버)가 접근 가능한 프로젝트 목록 조회(id·이름·org) — 무권한/타조직 미노출.",
+     ListProjectsInput, list_projects),
+    ("sprintable_set_default_project",
+     "이 키의 기본 프로젝트를 서버에 저장(감사 가능) — project_id 없는 후속 호출이 이 프로젝트로"
+     " 해소됨. 지정 project_id에 접근권 없으면 403.",
+     SetDefaultProjectInput, set_default_project),
     ("sprintable_claim_story",
      "현재 작업 중인 스토리를 claim — active_story_id 갱신, 중복 배정 방지.",
      ClaimStoryInput, claim_story),
