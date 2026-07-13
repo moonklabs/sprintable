@@ -3567,6 +3567,10 @@
     "galleryLazyHint": "펼치면 이전 버전을 불러옵니다",
     "galleryVersionsUnavailable": "이전 버전을 불러올 수 없습니다",
     "viewerExpandAction": "크게 보기",
-    "viewerPanHint": "끌어서 이동"
+    "viewerPanHint": "끌어서 이동",
+    "galleryFormatHtml": "웹 페이지",
+    "galleryFormatImage": "이미지",
+    "galleryFormatTree": "레이아웃",
+    "galleryOpenArtifactAction": "산출물 열기"
   }
 }

@@ -200,6 +200,25 @@ export function adaptArtifactDetail(detail: BeVisualArtifactDetail): { artifact:
 }
 
 /**
+ * story 3d888ba2 — 갤러리 변천사에서 특정 버전 실물 열람. `GET /{id}/versions/{versionNumber}`
+ * 는 `[id]`(최신 버전)와 동일 shape(`BeVisualArtifactDetail`)를 버전 지정으로 반환 — 신규 BE
+ * 0(이미 존재하는 엔드포인트, FE 프록시만 신설). `adaptArtifactDetail`을 그대로 재사용해
+ * format/content를 뽑아낼 수 있다.
+ */
+export async function getArtifactVersionDetail(
+  artifactId: string, versionNumber: number,
+): Promise<BeVisualArtifactDetail | null> {
+  try {
+    const res = await fetch(`/api/visual-artifacts/${artifactId}/versions/${versionNumber}`);
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: BeVisualArtifactDetail };
+    return json.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 캔버스 휴먼 진입점(story 9449da0e) — 빈 스토리에서 "그리기" 생성 딸깍 커밋. MCP `create_artifact`와
  * **동일 BE 엔드포인트**(`POST /api/v2/visual-artifacts`·같은 서비스 `create_artifact`·신규 BE 0).
  * story 귀속 v1을 만들고 생성된 detail을 반환 — 실패는 null(호출부가 편집 모드 유지 + 로깅, 빈

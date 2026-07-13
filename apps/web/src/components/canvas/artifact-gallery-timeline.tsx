@@ -12,6 +12,8 @@ export interface GalleryTimelineVersion {
 interface ArtifactGalleryTimelineProps {
   versions: GalleryTimelineVersion[];
   className?: string;
+  /** story 3d888ba2 — 변천사에서 특정 버전 클릭→그 버전 실물 열람. 생략 시 정적 라벨(회귀 0). */
+  onSelectVersion?: (versionNumber: number) => void;
 }
 
 /**
@@ -21,14 +23,14 @@ interface ArtifactGalleryTimelineProps {
  * 더 엄격함 — **주어는 산출물/버전의 진화**뿐, 작성자·편집 횟수·경과시간은 렌더 자체가 없다.
  * anchor(정본)=success 톤 노드, 그 외=info 톤 — 빨강 0.
  */
-export function ArtifactGalleryTimeline({ versions, className }: ArtifactGalleryTimelineProps) {
+export function ArtifactGalleryTimeline({ versions, className, onSelectVersion }: ArtifactGalleryTimelineProps) {
   const t = useTranslations('canvas');
   return (
     <div className={cn('flex items-start gap-0 overflow-x-auto', className)}>
       {versions.map((v, i) => {
         const isLast = i === versions.length - 1;
-        return (
-          <div key={v.versionNumber} className={cn('min-w-0', isLast ? 'flex-none' : 'flex-1 pr-3.5')}>
+        const label = (
+          <>
             <div className="mb-1.5 flex items-center gap-0">
               <span
                 className={cn(
@@ -44,6 +46,15 @@ export function ArtifactGalleryTimeline({ versions, className }: ArtifactGallery
               {v.isAnchor ? <span className="ml-1 font-medium">{t('versionAnchorTag')}</span> : null}
             </p>
             {v.summary ? <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">{v.summary}</p> : null}
+          </>
+        );
+        return (
+          <div key={v.versionNumber} className={cn('min-w-0', isLast ? 'flex-none' : 'flex-1 pr-3.5')}>
+            {onSelectVersion ? (
+              <button type="button" onClick={() => onSelectVersion(v.versionNumber)} className="w-full text-left hover:opacity-80">
+                {label}
+              </button>
+            ) : label}
           </div>
         );
       })}
