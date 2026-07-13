@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
-from app.dependencies.project_scope import resolve_required_project_id
+from app.dependencies.project_scope import enforce_write_scope, resolve_required_project_id
 from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
 from app.schemas.agent_routing_rule import (
     CreateRoutingRuleRequest,
@@ -61,10 +61,15 @@ async def list_or_get_rules(
 
 @router.post("")
 async def create_rule(
+    request: Request,
     body: CreateRoutingRuleRequest,
     auth: AuthContext = Depends(get_current_user),
     repo: AgentRoutingRuleRepository = Depends(_repo),
 ) -> JSONResponse:
+    try:
+        enforce_write_scope(auth, request)
+    except HTTPException as exc:
+        return _err("FORBIDDEN", str(exc.detail), exc.status_code)
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
@@ -97,6 +102,10 @@ async def replace_or_update_rules(
     auth: AuthContext = Depends(get_current_user),
     repo: AgentRoutingRuleRepository = Depends(_repo),
 ) -> JSONResponse:
+    try:
+        enforce_write_scope(auth, request)
+    except HTTPException as exc:
+        return _err("FORBIDDEN", str(exc.detail), exc.status_code)
     # ⚠️org_id는 project_id와 독립적으로 먼저 해소(story f0c99070·reorder_or_disable_rules와 동일 이유).
     org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
     if not org_id_str:
@@ -107,11 +116,20 @@ async def replace_or_update_rules(
         # E-MCP-OPT 후속(story f0c99070·doc legacy-project-fallback-sweep-audit §2.2 2단계): id 없이
         # (org_id,project_id)만으로 기존 룰 전부 soft-delete+재삽입 — fail-closed 앵커 0. FE 선행배선
         # (PR #2120)이 body.project_id를 명시 실어보내므로 최우선 소스로 소비(무회귀).
+        # story d764522c LOW: `if explicit`(truthy) 대신 `is not None`(존재 여부) 기준 — ""/0/False
+        # 같은 falsy 값을 "미지정"으로 오인해 malformed를 조용히 통과시키지 않는다.
         explicit = body.get("project_id")
+        if explicit is not None:
+            try:
+                explicit_project_id = uuid.UUID(str(explicit))
+            except ValueError:
+                return _err("BAD_REQUEST", "Invalid project_id format", 400)
+        else:
+            explicit_project_id = None
         try:
             replace_project_id = await resolve_required_project_id(
                 repo.session, request, auth, org_id,
-                explicit_project_id=uuid.UUID(str(explicit)) if explicit else None,
+                explicit_project_id=explicit_project_id,
             )
         except HTTPException as exc:
             return _err(
@@ -170,6 +188,10 @@ async def reorder_or_disable_rules(
     auth: AuthContext = Depends(get_current_user),
     repo: AgentRoutingRuleRepository = Depends(_repo),
 ) -> JSONResponse:
+    try:
+        enforce_write_scope(auth, request)
+    except HTTPException as exc:
+        return _err("FORBIDDEN", str(exc.detail), exc.status_code)
     # ⚠️org_id는 project_id와 독립적으로 먼저 해소(story f0c99070) — 기존 `_get_org_project`는
     # project_id도 함께 없으면 org_id까지 None으로 뭉개(둘 다 app_metadata 필수 가정), 멀티프로젝트+
     # 미설정(정당 ambiguous) 에이전트가 "org_id required" 403으로 오판정된다(reorder-items 분기는
@@ -196,11 +218,20 @@ async def reorder_or_disable_rules(
 
     # reorder-items 분기(story f0c99070·PO 확定 — FE 선행배선 PR #2120 착지 後 강제): id 매치라
     # Tier 1 fail-closed였지만, FE가 body.project_id를 이제 명시 실어보내므로 최우선 소스로 소비.
+    # story d764522c LOW: `if explicit`(truthy) 대신 `is not None`(존재 여부) 기준 — ""/0/False
+    # 같은 falsy 값을 "미지정"으로 오인해 malformed를 조용히 통과시키지 않는다.
     explicit = body.get("project_id")
+    if explicit is not None:
+        try:
+            explicit_project_id = uuid.UUID(str(explicit))
+        except ValueError:
+            return _err("BAD_REQUEST", "Invalid project_id format", 400)
+    else:
+        explicit_project_id = None
     try:
         reorder_project_id = await resolve_required_project_id(
             repo.session, request, auth, org_id,
-            explicit_project_id=uuid.UUID(str(explicit)) if explicit else None,
+            explicit_project_id=explicit_project_id,
         )
     except HTTPException as exc:
         return _err(
@@ -216,10 +247,15 @@ async def reorder_or_disable_rules(
 
 @router.delete("")
 async def delete_rule(
+    request: Request,
     id: uuid.UUID = Query(...),
     auth: AuthContext = Depends(get_current_user),
     repo: AgentRoutingRuleRepository = Depends(_repo),
 ) -> JSONResponse:
+    try:
+        enforce_write_scope(auth, request)
+    except HTTPException as exc:
+        return _err("FORBIDDEN", str(exc.detail), exc.status_code)
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)

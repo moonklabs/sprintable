@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
-from app.dependencies.project_scope import resolve_required_project_id
+from app.dependencies.project_scope import enforce_write_scope, resolve_required_project_id
 from app.repositories.hitl import HitlRepository
 from app.schemas.hitl import PatchHitlPolicyRequest, ResolveHitlRequestBody
 
@@ -53,6 +53,10 @@ async def update_hitl_policy(
     auth: AuthContext = Depends(get_current_user),
     repo: HitlRepository = Depends(_repo),
 ) -> JSONResponse:
+    try:
+        enforce_write_scope(auth, request)
+    except HTTPException as exc:
+        return _err("FORBIDDEN", str(exc.detail), exc.status_code)
     # E-MCP-OPT 후속(story f0c99070·doc legacy-project-fallback-sweep-audit §2.2 2단계): 이 라우트는
     # project_id 단독(org_id도 미검사) singleton upsert라 fail-closed 앵커가 없다 — 요청시점 재해소
     # 강제(무헤더 direct REST 실호출처 0 실측 확인, 즉시 강제 안전).
@@ -97,9 +101,14 @@ async def list_hitl_requests(
 async def resolve_hitl_request(
     request_id: uuid.UUID,
     body: ResolveHitlRequestBody,
+    request: Request,
     auth: AuthContext = Depends(get_current_user),
     repo: HitlRepository = Depends(_repo),
 ) -> JSONResponse:
+    try:
+        enforce_write_scope(auth, request)
+    except HTTPException as exc:
+        return _err("FORBIDDEN", str(exc.detail), exc.status_code)
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
