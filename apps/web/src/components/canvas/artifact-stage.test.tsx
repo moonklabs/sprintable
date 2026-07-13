@@ -254,4 +254,203 @@ describe('ArtifactStage — 캔버스 뷰포트(story 1948d19d)', () => {
       expect(readTransform(content).scale).toBeCloseTo(0.5, 5);
     });
   });
+
+  describe('모바일 터치(story 74d6047e) — 2-finger 핀치 줌·더블탭 fit/100% 토글, 데스크톱 회귀 0', () => {
+    let rectSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+        x: 0, y: 0, left: 0, top: 0, right: 640, bottom: 480, width: 640, height: 480, toJSON() { return {}; },
+      } as DOMRect);
+    });
+    afterEach(() => { rectSpy.mockRestore(); });
+
+    function touchDown(el: EventTarget, pointerId: number, clientX: number, clientY: number) {
+      press(el, 'pointerdown', { pointerId, pointerType: 'touch', clientX, clientY, button: 0 });
+    }
+    function touchMove(el: EventTarget, pointerId: number, clientX: number, clientY: number) {
+      press(el, 'pointermove', { pointerId, pointerType: 'touch', clientX, clientY });
+    }
+    function touchUp(el: EventTarget, pointerId: number, clientX: number, clientY: number) {
+      press(el, 'pointerup', { pointerId, pointerType: 'touch', clientX, clientY });
+    }
+
+    it('two fingers moving apart (distance ratio) zoom in, anchored at the pinch midpoint', async () => {
+      await mount();
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+      const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+      const before = readTransform(content);
+
+      await act(async () => {
+        touchDown(viewport, 1, 100, 100);
+        touchDown(viewport, 2, 200, 100); // baseline distance = 100
+      });
+      await act(async () => {
+        touchMove(viewport, 1, 50, 100);
+        touchMove(viewport, 2, 250, 100); // distance = 200 → 2x baseline
+      });
+
+      const after = readTransform(content);
+      expect(after.scale).toBeCloseTo(before.scale * 2, 3);
+    });
+
+    it('pinch midpoint moving (without changing distance) pans simultaneously (Figma 표준 — 핀치+pan 동시)', async () => {
+      await mount();
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+      const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+
+      await act(async () => {
+        touchDown(viewport, 1, 100, 100);
+        touchDown(viewport, 2, 200, 100); // baseline midpoint = (150,100)
+      });
+      const afterBaseline = readTransform(content);
+
+      await act(async () => {
+        // same distance(100), midpoint shifted +50 in x
+        touchMove(viewport, 1, 150, 100);
+        touchMove(viewport, 2, 250, 100); // new midpoint = (200,100)
+      });
+      const after = readTransform(content);
+
+      expect(after.scale).toBeCloseTo(afterBaseline.scale, 5); // distance unchanged → no zoom
+      expect(after.tx).toBeCloseTo(afterBaseline.tx + 50, 3); // midpoint moved +50 → pan +50
+    });
+
+    it('crux — capturing a 2nd finger mid-drag re-baselines instead of jumping (1→2 전이)', async () => {
+      await mount();
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+      const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+      const before = readTransform(content);
+
+      await act(async () => {
+        touchDown(viewport, 1, 100, 100);
+        touchMove(viewport, 1, 130, 100); // 1-finger pan by +30 (past 4px threshold)
+      });
+      const afterOneFingerPan = readTransform(content);
+      expect(afterOneFingerPan.tx).toBeCloseTo(before.tx + 30, 3);
+
+      // 2nd finger touches down at the SAME position as finger 1 currently is + a fixed offset —
+      // baseline should capture from THIS moment, not jump based on finger 1's original down position.
+      await act(async () => { touchDown(viewport, 2, 230, 100); });
+      const afterSecondDown = readTransform(content);
+      expect(afterSecondDown).toEqual(afterOneFingerPan); // pointerdown alone never mutates transform
+
+      await act(async () => {
+        touchMove(viewport, 1, 130, 100); // no movement from baseline
+        touchMove(viewport, 2, 230, 100); // no movement from baseline
+      });
+      const afterNoMovePinch = readTransform(content);
+      expect(afterNoMovePinch).toEqual(afterSecondDown); // zero delta from a fresh baseline = zero change (no jump)
+    });
+
+    it('crux — lifting one finger mid-pinch re-baselines pan for the remaining finger (2→1 전이, no jump)', async () => {
+      await mount();
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+      const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+
+      await act(async () => {
+        touchDown(viewport, 1, 100, 100);
+        touchDown(viewport, 2, 300, 100); // baseline distance = 200
+      });
+      await act(async () => {
+        touchMove(viewport, 1, 150, 100);
+        touchMove(viewport, 2, 350, 100); // distance still 200 (both shifted +50) → pan only, no zoom
+      });
+      const afterPinchPan = readTransform(content);
+
+      await act(async () => { touchUp(viewport, 1, 150, 100); }); // lift finger 1, finger 2 (at 350,100) remains
+      await act(async () => { touchMove(viewport, 2, 350, 100); }); // no movement yet from the fresh baseline
+      expect(readTransform(content)).toEqual(afterPinchPan); // no jump immediately after the finger-count transition
+
+      await act(async () => { touchMove(viewport, 2, 380, 100); }); // now drag the remaining finger +30
+      const afterResumedPan = readTransform(content);
+      expect(afterResumedPan.tx).toBeCloseTo(afterPinchPan.tx + 30, 3);
+      expect(afterResumedPan.scale).toBeCloseTo(afterPinchPan.scale, 5); // single remaining finger never zooms
+    });
+
+    it('clamps pinch zoom to the same 10%~400% range as desktop', async () => {
+      await mount();
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+      const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+
+      await act(async () => {
+        touchDown(viewport, 1, 300, 100);
+        touchDown(viewport, 2, 320, 100); // baseline distance = 20 (tiny)
+      });
+      await act(async () => {
+        touchMove(viewport, 1, 0, 100);
+        touchMove(viewport, 2, 640, 100); // distance = 640 → 32x baseline, way past 400%
+      });
+      expect(readTransform(content).scale).toBeLessThanOrEqual(4);
+    });
+
+    it('a single tap (no follow-up within the window) does not toggle zoom', async () => {
+      const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(1000);
+      await mount();
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+      const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+      const before = readTransform(content);
+
+      await act(async () => {
+        touchDown(viewport, 1, 100, 100);
+        touchUp(viewport, 1, 100, 100);
+      });
+      expect(readTransform(content)).toEqual(before);
+      nowSpy.mockRestore();
+    });
+
+    it('double-tap within the time/distance window toggles zoom, centered on the tap point', async () => {
+      const nowSpy = vi.spyOn(performance, 'now');
+      await mount();
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+      const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+      const before = readTransform(content);
+
+      nowSpy.mockReturnValue(1000);
+      await act(async () => { touchDown(viewport, 1, 100, 100); touchUp(viewport, 1, 100, 100); }); // 1st tap
+      nowSpy.mockReturnValue(1150); // within DOUBLE_TAP_MS(300) window
+      await act(async () => { touchDown(viewport, 1, 105, 102); touchUp(viewport, 1, 105, 102); }); // 2nd tap, close position
+
+      const after = readTransform(content);
+      expect(after.scale).not.toBeCloseTo(before.scale, 3); // toggled to the other target scale
+      nowSpy.mockRestore();
+    });
+
+    it('two taps outside the time window are treated as two independent single taps (no toggle)', async () => {
+      const nowSpy = vi.spyOn(performance, 'now');
+      await mount();
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+      const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+      const before = readTransform(content);
+
+      nowSpy.mockReturnValue(1000);
+      await act(async () => { touchDown(viewport, 1, 100, 100); touchUp(viewport, 1, 100, 100); });
+      nowSpy.mockReturnValue(2000); // 1000ms later, past the 300ms window
+      await act(async () => { touchDown(viewport, 1, 100, 100); touchUp(viewport, 1, 100, 100); });
+
+      expect(readTransform(content)).toEqual(before);
+      nowSpy.mockRestore();
+    });
+
+    it('mouse pointer events are entirely unaffected by the touch branch (pointerType gate — 데스크톱 회귀 0)', async () => {
+      await mount();
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+      const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+      const before = readTransform(content);
+
+      // a 2nd "pointer" with pointerType='mouse' must never be treated as a pinch partner.
+      await act(async () => { press(viewport, 'pointerdown', { pointerId: 1, pointerType: 'mouse', clientX: 100, clientY: 100, button: 0 }); });
+      await act(async () => { press(viewport, 'pointermove', { pointerId: 1, pointerType: 'mouse', clientX: 160, clientY: 130 }); });
+      const after = readTransform(content);
+      expect(after.tx).toBe(before.tx + 60);
+      expect(after.ty).toBe(before.ty + 30);
+      expect(after.scale).toBe(before.scale); // pan only, never zoom — single mouse pointer isn't a pinch
+    });
+
+    it('keeps touch-action:none (touch-none) on the viewport — 네이티브 핀치줌/스크롤 위임 없음, 우리 transform이 유일 소비자', async () => {
+      await mount();
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+      expect(viewport.className).toContain('touch-none');
+    });
+  });
 });

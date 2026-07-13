@@ -20,6 +20,13 @@ import type { ArtifactFormat } from '@/services/canvas';
  *   `pointer-events:auto`로 상호작용 가능 — 이동-임계값(4px) 초과 드래그 중엔 오버레이도
  *   pointer-events:none으로 전환해 "핀 위에서 시작한 드래그가 pan으로 해석"을 순수 CSS로
  *   구현한다(핀 자체의 onClick은 무변경 — 임계 미달=일반 클릭이 그대로 발화).
+ *
+ * story 74d6047e — 모바일 터치(2-finger 핀치 줌·더블탭 fit/100% 토글) 추가. 1-finger는 이미
+ * 제네릭 Pointer Events pan 경로가 그대로 작동해 신규 로직 불필요(선생님 실사용 지적으로
+ * 발견된 갭은 핀치뿐). `touch-none`(touch-action:none)은 그대로 유지 — 우리 transform이
+ * 유일 소비자라 브라우저 네이티브 핀치줌/스크롤로의 위임이 애초에 없다(휠 배타성 #2138과
+ * 동일 원칙이지만, wheel의 React onWheel passive 문제와 달리 touch-action:none은 CSS
+ * 네이티브 옵트아웃이라 preventDefault 트릭이 따로 필요 없다).
  */
 
 // 문서형 기본 아트보드 — canvas_bounds 미선언 폴백(§4, 가짜 추정 아님·명시된 규약). export —
@@ -31,6 +38,8 @@ const MAX_SCALE = 4;
 const DRAG_THRESHOLD_PX = 4;
 const PAN_MARGIN_PX = 120; // soft bound — 콘텐츠가 이 여백 밖으로 완전히 사라지진 않게
 const WHEEL_ZOOM_SENSITIVITY = 0.0015;
+const DOUBLE_TAP_MS = 300; // story 74d6047e §4 — 더블탭 판정 시간 창(지도/사진 앱 관례)
+const DOUBLE_TAP_PX = 40; // 손가락은 마우스만큼 정밀하지 않아 클릭보다 넓은 허용 반경
 
 function clamp(v: number, min: number, max: number) {
   return Math.min(max, Math.max(min, v));
@@ -119,6 +128,11 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
   const [imageBounds, setImageBounds] = useState<{ w: number; h: number } | null>(null);
   const dragRef = useRef({ startX: 0, startY: 0, startTx: 0, startTy: 0, movedPast: false, pointerId: -1 });
   const firedFitRef = useRef(false);
+  // story 74d6047e — 2-finger 핀치 줌. 활성 터치 포인터 위치 추적 + 핀치 baseline(포인터 수가
+  // 바뀔 때마다 재캡처 — crux: delta는 항상 "이 순간"의 baseline 대비라 점프가 없다).
+  const touchPointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchBaselineRef = useRef<{ distance: number; midX: number; midY: number; scale: number; tx: number; ty: number } | null>(null);
+  const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null);
 
   // image=실측 우선(로드 후 자연 크기가 선언보다 정확) → 그 다음 선언된 canvas_bounds(§4,
   // BE #2135) → 마지막 포맷별 기본 아트보드(가짜 추정 아님·명시된 폴백 규약).
@@ -167,6 +181,23 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
     setTransform({ tx, ty, scale: 1 });
   }, [viewportSize, bounds.w, bounds.h]);
 
+  // story 74d6047e §4 — 더블탭=fit↔100% 토글(탭 지점 중심, 지도/사진 앱 관례). ⌘/Ctrl+휠 커서중심
+  // 줌과 동일한 수학(고정 화면점 아래 콘텐츠점을 유지) — 목표 scale만 연속값 대신 두 값 중 토글.
+  const toggleZoomAtPoint = useCallback((screenX: number, screenY: number) => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const localX = screenX - rect.left;
+    const localY = screenY - rect.top;
+    const fitScale = clamp(Math.min(viewportSize.w / bounds.w, viewportSize.h / bounds.h), MIN_SCALE, MAX_SCALE);
+    setTransform((cur) => {
+      const nextScale = Math.abs(cur.scale - 1) < 0.02 ? fitScale : 1;
+      const contentX = (localX - cur.tx) / cur.scale;
+      const contentY = (localY - cur.ty) / cur.scale;
+      const next = clampPan(localX - contentX * nextScale, localY - contentY * nextScale, nextScale, viewportSize.w, viewportSize.h);
+      return { ...next, scale: nextScale };
+    });
+  }, [viewportSize, bounds.w, bounds.h, clampPan]);
+
   // 최초 진입 = fit(콘텐츠 전체가 즉시 보이는 것이 재설계의 근본 목적 — "잘림 상태 부존재").
   useEffect(() => {
     if (firedFitRef.current) return;
@@ -177,6 +208,27 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
   }, [viewportSize.w, viewportSize.h]);
 
   function handlePointerDown(e: React.PointerEvent) {
+    // story 74d6047e — 1-finger는 이미 pointer 이벤트 제네릭 pan 경로가 그대로 작동한다(터치
+    // 전용 신규 로직 불필요, 아래 공유 코드로 진행). 2-finger째만 핀치로 분기.
+    if (e.pointerType === 'touch') {
+      touchPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touchPointersRef.current.size === 2) {
+        const el = e.currentTarget as HTMLElement;
+        if (typeof el.setPointerCapture === 'function') el.setPointerCapture(e.pointerId);
+        // crux — 포인터 수 1→2 전이 시 baseline 재캡처(delta는 항상 이 순간 기준) — 점프 방지.
+        // midpoint는 viewport-local로 변환(transform.tx/ty와 같은 좌표계라야 아래 공식이 맞다 —
+        // touchPointersRef 자체는 dragRef와 동형으로 raw client 유지, 여기서만 rect 보정).
+        const rect = el.getBoundingClientRect();
+        const [p1, p2] = [...touchPointersRef.current.values()];
+        pinchBaselineRef.current = {
+          distance: Math.hypot(p2.x - p1.x, p2.y - p1.y),
+          midX: (p1.x + p2.x) / 2 - rect.left, midY: (p1.y + p2.y) / 2 - rect.top,
+          scale: transform.scale, tx: transform.tx, ty: transform.ty,
+        };
+        dragRef.current.pointerId = -1; // 1-터치 pan 경로 무력화 — 핀치와 동시 구동 방지
+        return;
+      }
+    }
     if (e.button !== 0) return;
     dragRef.current = { startX: e.clientX, startY: e.clientY, startTx: transform.tx, startTy: transform.ty, movedPast: false, pointerId: e.pointerId };
     const el = e.currentTarget as HTMLElement;
@@ -186,6 +238,28 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
   }
 
   function handlePointerMove(e: React.PointerEvent) {
+    if (e.pointerType === 'touch' && touchPointersRef.current.has(e.pointerId)) {
+      touchPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touchPointersRef.current.size === 2 && pinchBaselineRef.current) {
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const [p1, p2] = [...touchPointersRef.current.values()];
+        const baseline = pinchBaselineRef.current;
+        const newDistance = Math.hypot(p2.x - p1.x, p2.y - p1.y); // rect-invariant(차분이라 보정 불필요)
+        const newMidX = (p1.x + p2.x) / 2 - rect.left; // baseline과 동일 좌표계(viewport-local)로 변환
+        const newMidY = (p1.y + p2.y) / 2 - rect.top;
+        // 거리비=scale(baseline 대비) — 클램프는 데스크톱과 동일 10~400%.
+        const nextScale = clamp(baseline.scale * (newDistance / baseline.distance), MIN_SCALE, MAX_SCALE);
+        // baseline midpoint 아래 있던 콘텐츠 점을 구해, 그 점이 "지금" midpoint(이동했을 수 있음)
+        // 아래 있도록 재배치 — 줌(거리비)과 pan(midpoint 이동)이 한 수식으로 동시에 풀린다.
+        const contentX = (baseline.midX - baseline.tx) / baseline.scale;
+        const contentY = (baseline.midY - baseline.ty) / baseline.scale;
+        const next = clampPan(newMidX - contentX * nextScale, newMidY - contentY * nextScale, nextScale, viewportSize.w, viewportSize.h);
+        setIsDragging(true); // 핀치 중엔 오버레이(핀 등) pointer-events:none — 기존 드래그 규약 재사용
+        setTransform({ ...next, scale: nextScale });
+        return;
+      }
+      // 1터치째는 여기서 return하지 않고 아래 공유 pan 로직으로 그대로 진행(신규 로직 0).
+    }
     const d = dragRef.current;
     if (d.pointerId !== e.pointerId) return;
     const dx = e.clientX - d.startX;
@@ -201,6 +275,46 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
   }
 
   function handlePointerUp(e: React.PointerEvent) {
+    if (e.pointerType === 'touch') {
+      const wasPinching = touchPointersRef.current.size === 2;
+      const liftedPos = touchPointersRef.current.get(e.pointerId);
+      touchPointersRef.current.delete(e.pointerId);
+      const el = e.currentTarget as HTMLElement;
+      if (typeof el.releasePointerCapture === 'function') el.releasePointerCapture(e.pointerId);
+      const remaining = [...touchPointersRef.current.entries()];
+
+      if (wasPinching && remaining.length === 1) {
+        // crux — 2→1 전이 시 남은 손가락 기준 pan baseline 재캡처(delta 0부터) — 점프 방지.
+        const [remainingId, remainingPos] = remaining[0]!;
+        dragRef.current = {
+          startX: remainingPos.x, startY: remainingPos.y, startTx: transform.tx, startTy: transform.ty,
+          movedPast: true, pointerId: remainingId,
+        };
+        pinchBaselineRef.current = null;
+        return;
+      }
+      if (remaining.length === 0) {
+        pinchBaselineRef.current = null;
+        // 더블탭 판정 — 핀치의 일부였던 리프트(wasPinching)는 탭이 아니다. 순수 탭(이동<임계값)만.
+        const d = dragRef.current;
+        const wasTap = !wasPinching && d.pointerId === e.pointerId && !d.movedPast;
+        if (wasTap && liftedPos) {
+          const now = performance.now();
+          const last = lastTapRef.current;
+          const isDoubleTap = !!last && now - last.time < DOUBLE_TAP_MS
+            && Math.hypot(liftedPos.x - last.x, liftedPos.y - last.y) < DOUBLE_TAP_PX;
+          if (isDoubleTap) {
+            lastTapRef.current = null;
+            toggleZoomAtPoint(liftedPos.x, liftedPos.y);
+          } else {
+            lastTapRef.current = { time: now, x: liftedPos.x, y: liftedPos.y };
+          }
+        }
+        dragRef.current.pointerId = -1;
+        setIsDragging(false);
+      }
+      return;
+    }
     const d = dragRef.current;
     if (d.pointerId !== e.pointerId) return;
     const el = e.currentTarget as HTMLElement;
