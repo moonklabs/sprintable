@@ -136,11 +136,32 @@ async def list_stories(
     return [StoryResponse.model_validate(s) for s in stories]
 
 
+async def _attach_agent_delegate_ids(session: AsyncSession, stories: list[Story]) -> None:
+    """P0-03(doc trust-pipeline-be-design §5): 각 Story에 agent_delegate_ids(transient attr)를
+    채운다 — assignee_ids(이미 세팅돼 있다고 가정)를 Member.type=="agent"로 필터한 파생 뷰(신규
+    저장 0). N+1 회피 위해 배치. `_attach_assignee_ids` 뒤에, 또는 create_story처럼 assignee_ids를
+    인라인으로 세팅한 직후 호출한다."""
+    if not stories:
+        return
+    from app.services.member_resolver import lookup_members_by_ids
+
+    all_ids: set[uuid.UUID] = set()
+    for s in stories:
+        all_ids.update(s.assignee_ids)
+    resolved = await lookup_members_by_ids(all_ids, session)
+    for s in stories:
+        s.agent_delegate_ids = [
+            mid for mid in s.assignee_ids if resolved.get(mid) and resolved[mid].type == "agent"
+        ]
+
+
 async def _attach_assignee_ids(
     session: AsyncSession, org_id: uuid.UUID, stories: list[Story]
 ) -> None:
     """E-BOARD S5: 각 Story에 assignee_ids(transient attr)를 채워 StoryResponse.from_attributes가
-    읽도록 한다. join 비어있으면 단일 assignee_id로 폴백(레거시 행 back-compat). N+1 회피 위해 배치."""
+    읽도록 한다. join 비어있으면 단일 assignee_id로 폴백(레거시 행 back-compat). N+1 회피 위해 배치.
+
+    P0-03(doc trust-pipeline-be-design §5): 같은 배치에서 agent_delegate_ids도 채운다."""
     if not stories:
         return
     sa_repo = StoryAssigneeRepository(session, org_id)
@@ -150,6 +171,7 @@ async def _attach_assignee_ids(
         if not ids:
             ids = [s.assignee_id] if s.assignee_id else []
         s.assignee_ids = ids  # 매핑되지 않은 transient 속성 — from_attributes 전용
+    await _attach_agent_delegate_ids(session, stories)
 
 
 async def _attach_has_evidence(session: AsyncSession, stories: list[Story]) -> None:
@@ -289,6 +311,24 @@ async def _assert_story_link_targets_in_project(
             )
 
 
+async def _assert_human_owner(
+    session: AsyncSession, org_id: uuid.UUID, member_id: uuid.UUID | None,
+) -> None:
+    """P0-03(doc trust-pipeline-be-design §5) write-time 강제: human_owner_member_id로 지정된
+    member가 human이 아니면(에이전트·미해소) 400. resolve_member_identity 재사용(evidence_service의
+    gate_approval choke-point와 동일 SOUL-LOCK 규율 — body-claimed 신뢰 대신 서버 해소값만 신뢰)."""
+    if member_id is None:
+        return
+    from app.services.member_resolver import resolve_member_identity
+
+    resolved = await resolve_member_identity(member_id, org_id, session)
+    if resolved is None or resolved.type != "human":
+        raise HTTPException(
+            status_code=400,
+            detail="human_owner_member_id는 human member만 지정할 수 있습니다.",
+        )
+
+
 @router.post("", response_model=StoryResponse, status_code=201)
 async def create_story(
     body: StoryCreate,
@@ -306,6 +346,7 @@ async def create_story(
         user_id=uuid.UUID(auth.user_id),
     )
     await _assert_story_link_targets_in_project(session, body.project_id, body)
+    await _assert_human_owner(session, org_id, body.human_owner_member_id)
     repo = StoryRepository(session, org_id)
     # E-BOARD S5: assignee_ids 제공 시 단일 assignee_id(주담당)는 첫 요소로 동기화(미지정 시).
     effective_ids = (
@@ -328,6 +369,7 @@ async def create_story(
         epic_id=body.epic_id,
         sprint_id=body.sprint_id,
         assignee_id=primary_assignee,
+        human_owner_member_id=body.human_owner_member_id,
         meeting_id=body.meeting_id,
         status=body.status,
         priority=body.priority,
@@ -369,6 +411,9 @@ async def create_story(
     if primary_assignee:
         await _upsert_assignee_participation(session, org_id, story.id, primary_assignee)
     story.assignee_ids = saved_ids or ([story.assignee_id] if story.assignee_id else [])
+    # P0-03(doc trust-pipeline-be-design §5): agent_delegate_ids(transient) — update_story는
+    # _attach_assignee_ids 경유로 이미 채워지나, create_story는 인라인 경로라 별도 호출 필요.
+    await _attach_agent_delegate_ids(session, [story])
     # 활동로그: story 생성 이벤트 기록 (생성류 미기록 갭 — 피드 정상화)
     from app.services.activity_log import record_created_activity
     await record_created_activity(
@@ -682,6 +727,8 @@ async def update_story(
         raise HTTPException(status_code=404, detail="Story not found")
     await _assert_story_project_access(db, auth, repo.org_id, _story_for_access.project_id)
     await _assert_story_link_targets_in_project(db, _story_for_access.project_id, body)
+    if body.human_owner_member_id is not None:
+        await _assert_human_owner(db, repo.org_id, body.human_owner_member_id)
 
     data = body.model_dump(exclude_unset=True)
     # S7: client 제공 asset_id strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.

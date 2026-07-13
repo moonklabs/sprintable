@@ -102,6 +102,13 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    # P0-03(doc trust-pipeline-be-design §5·story 23b9bdac): Human owner — assignee_id/assignee_ids
+    # (혼합 human/agent)와 별도 필드. 0176 additive nullable. FK 미부여(assignee_id와 동일 이유 —
+    # team_members VIEW/org_members 양쪽 해소값이라 단일 물리 FK 불가). write-time에 resolve_
+    # member_identity로 human 강제(app-level).
+    human_owner_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     meeting_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="SET NULL"), nullable=True
     )

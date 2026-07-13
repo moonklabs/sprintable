@@ -30,6 +30,10 @@ def _story(assignee_id):
     s.sprint_id = None
     s.assignee_id = assignee_id
     s.assignee_ids = [assignee_id] if assignee_id else []
+    # P0-03(doc trust-pipeline-be-design §5): 신규 필드 — MagicMock 반환 MagicMock이 Pydantic UUID
+    # 검증 실패하므로 명시 세팅.
+    s.human_owner_member_id = None
+    s.agent_delegate_ids = []
     s.meeting_id = None
     s.title = "Build login"
     s.description = "OAuth + password"
