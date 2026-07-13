@@ -24,14 +24,24 @@ _AMBIGUOUS_MESSAGE = (
 
 
 def enforce_write_scope(auth: AuthContext, request: Request) -> None:
-    """API-key write-scope 강제(story d764522c·산티아고 SME finding).
+    """API-key write-scope 강제(story d764522c·산티아고 SME 2차 finding).
 
-    `_check_api_key_scope`(app/dependencies/auth.py)는 보통 `get_verified_org_id` 경유로만
-    실행되는데, 이 모듈의 project_id 재해소를 쓰는 라우터들은 org_id를 자체 해소하고
-    `get_verified_org_id`를 거치지 않아 그 실행점이 빠져 있었다 — read-only API key가 mutation을
-    호출할 수 있던 갭. JWT(human) 경로는 `_check_api_key_scope` 내부에서 자동 스킵."""
-    from app.dependencies.auth import _check_api_key_scope
-    _check_api_key_scope(auth, request.method, request.url.path)
+    ⚠️`_check_api_key_scope`(app/dependencies/auth.py) 그대로 위임하지 않는다 — 그 함수의
+    Stage 1(레거시 read/write coarse 게이트)은 `set(scope) & _LEGACY_SCOPES`일 때만 발동하고,
+    explicit toolset-scope 키(예: `scope=['docs']`)는 Stage 1을 건너뛰어 Stage 2(path→toolgroup)
+    만 적용된다. 그런데 `agent_routing_rules`/`hitl`은 어떤 toolset group에도 대응하지 않는
+    admin-adjacent 설정 표면이라 `_PATH_GROUP_PREFIXES`에 없고, 미매핑 path는 "core 취급 허용"이
+    기본값(`path_allowed_for_scope`의 over-block 방지 설계)이라 **어떤 toolgroup-scope 키든
+    무제한 통과**했다(산티아고 실DB 실증 — `scope=['docs']`로 6개 mutation 전부 성공).
+
+    이 6라우트는 toolgroup 개념이 아예 없으므로, scope 타입 불문 **레거시 'write' 토큰 명시 보유**
+    만 통과시킨다(path-group 우회 경로 자체를 안 탐 — 가장 보수적 근본). JWT(human) 경로는
+    api_key_id 부재로 자동 스킵(기존 `_check_api_key_scope`와 동일 관례)."""
+    if not auth.claims.get("app_metadata", {}).get("api_key_id"):
+        return  # JWT(human) 경로 — 스킵.
+    scope: list[str] = auth.claims.get("app_metadata", {}).get("scope") or ["read", "write"]
+    if "write" not in scope:
+        raise HTTPException(status_code=403, detail="API Key scope 'write' required")
 
 
 async def resolve_required_project_id(

@@ -7,6 +7,12 @@ open_api_keys.py는 이미 `get_verified_org_id` 사용 중이라 스코프 밖(
 
 각 라우트: read-key(scope=['read'])=403·write-key(scope=['read','write'])=200 무회귀.
 + replace/reorder의 malformed body project_id UUID → 400(500 아님) 2건.
+
+산티아고 2차 finding(2026-07-13): `_check_api_key_scope`의 Stage 1(레거시 read/write coarse
+게이트)은 explicit toolset-scope 키(예 `scope=['docs']`)엔 스킵되고, Stage 2(path→toolgroup)는
+이 6라우트가 어떤 toolgroup에도 안 걸려(_PATH_GROUP_PREFIXES 미매핑) "미매핑=core=허용"으로
+무제한 통과시켰다 — `enforce_write_scope`가 이제 `_check_api_key_scope`에 위임하지 않고 scope
+타입 불문 레거시 'write' 토큰 명시 보유만 통과시킨다. toolgroup-scope sabotage 6건 추가.
 """
 from __future__ import annotations
 
@@ -426,5 +432,157 @@ async def test_resolve_hitl_request_write_key_200_no_regression():
                 repo=HitlRepository(s),
             )
             assert resp.status_code == 200
+    finally:
+        await engine.dispose()
+
+
+# ── 산티아고 2차 finding: toolgroup-scope(scope=['docs']) sabotage — 6라우트 전부 403 ─────
+
+async def test_create_rule_toolgroup_scope_403_no_bypass():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_single_project_agent(s)
+        async with Session() as s:
+            from app.routers.agent_routing_rules import create_rule
+            from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+            from app.schemas.agent_routing_rule import CreateRoutingRuleRequest
+
+            resp = await create_rule(
+                request=_request("/api/v2/agent-routing-rules", "POST"),
+                body=CreateRoutingRuleRequest(agent_id=seeded["agent_id"], name="r"),
+                auth=_auth(seeded["agent_id"], seeded["org_id"], seeded["project_id"], scope=["docs"]),
+                repo=AgentRoutingRuleRepository(s),
+            )
+            assert resp.status_code == 403
+    finally:
+        await engine.dispose()
+
+
+async def test_replace_rules_toolgroup_scope_403_no_bypass():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_single_project_agent(s)
+            await _seed_rule(s, seeded["org_id"], seeded["project_id"], seeded["agent_id"])
+        async with Session() as s:
+            from app.routers.agent_routing_rules import replace_or_update_rules
+            from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+
+            resp = await replace_or_update_rules(
+                request=_request("/api/v2/agent-routing-rules", "PUT"),
+                body={"items": [{"agent_id": str(seeded["agent_id"]), "name": "new"}], "project_id": str(seeded["project_id"])},
+                auth=_auth(seeded["agent_id"], seeded["org_id"], seeded["project_id"], scope=["docs"]),
+                repo=AgentRoutingRuleRepository(s),
+            )
+            assert resp.status_code == 403
+    finally:
+        await engine.dispose()
+
+
+async def test_disable_all_toolgroup_scope_403_no_bypass():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_single_project_agent(s)
+        async with Session() as s:
+            from app.routers.agent_routing_rules import reorder_or_disable_rules
+            from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+
+            resp = await reorder_or_disable_rules(
+                request=_request("/api/v2/agent-routing-rules", "PATCH"),
+                body={"disable_all": True},
+                auth=_auth(seeded["agent_id"], seeded["org_id"], seeded["project_id"], scope=["docs"]),
+                repo=AgentRoutingRuleRepository(s),
+            )
+            assert resp.status_code == 403
+    finally:
+        await engine.dispose()
+
+
+async def test_delete_rule_toolgroup_scope_403_no_bypass():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_single_project_agent(s)
+            rule_id = await _seed_rule(s, seeded["org_id"], seeded["project_id"], seeded["agent_id"])
+        async with Session() as s:
+            from app.routers.agent_routing_rules import delete_rule
+            from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+
+            resp = await delete_rule(
+                request=_request("/api/v2/agent-routing-rules", "DELETE"),
+                id=rule_id,
+                auth=_auth(seeded["agent_id"], seeded["org_id"], seeded["project_id"], scope=["docs"]),
+                repo=AgentRoutingRuleRepository(s),
+            )
+            assert resp.status_code == 403
+    finally:
+        await engine.dispose()
+
+
+async def test_update_hitl_policy_toolgroup_scope_403_no_bypass():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_single_project_agent(s)
+        async with Session() as s:
+            from app.routers.hitl import update_hitl_policy
+            from app.repositories.hitl import HitlRepository
+            from app.schemas.hitl import PatchHitlPolicyRequest
+
+            resp = await update_hitl_policy(
+                request=_request("/api/v2/hitl/policy", "PATCH"),
+                body=PatchHitlPolicyRequest(approval_rules=[], timeout_classes=[]),
+                auth=_auth(seeded["agent_id"], seeded["org_id"], seeded["project_id"], scope=["docs"]),
+                repo=HitlRepository(s),
+            )
+            assert resp.status_code == 403
+    finally:
+        await engine.dispose()
+
+
+async def test_resolve_hitl_request_toolgroup_scope_403_no_bypass():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_single_project_agent(s)
+            req_id = await _seed_hitl_request(s, seeded["org_id"], seeded["project_id"], seeded["agent_id"])
+        async with Session() as s:
+            from app.routers.hitl import resolve_hitl_request
+            from app.repositories.hitl import HitlRepository
+            from app.schemas.hitl import ResolveHitlRequestBody
+
+            resp = await resolve_hitl_request(
+                request_id=req_id,
+                body=ResolveHitlRequestBody(status="approved"),
+                request=_request("/api/v2/hitl/requests/x", "PATCH"),
+                auth=_auth(seeded["agent_id"], seeded["org_id"], seeded["project_id"], scope=["docs"]),
+                repo=HitlRepository(s),
+            )
+            assert resp.status_code == 403
+    finally:
+        await engine.dispose()
+
+
+# ── malformed-vs-unspecified project_id(falsy 값 오인 방지) ───────────────────
+
+async def test_replace_rules_empty_string_project_id_400_not_treated_as_unspecified():
+    """`project_id: ""`(falsy지만 명시 제공)는 미지정이 아닌 malformed로 400 처리돼야 함."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_single_project_agent(s)
+        async with Session() as s:
+            from app.routers.agent_routing_rules import replace_or_update_rules
+            from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+
+            resp = await replace_or_update_rules(
+                request=_request("/api/v2/agent-routing-rules", "PUT"),
+                body={"items": [{"agent_id": str(seeded["agent_id"]), "name": "new"}], "project_id": ""},
+                auth=_auth(seeded["agent_id"], seeded["org_id"], seeded["project_id"], scope=["read", "write"]),
+                repo=AgentRoutingRuleRepository(s),
+            )
+            assert resp.status_code == 400
     finally:
         await engine.dispose()

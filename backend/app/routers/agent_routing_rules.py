@@ -116,12 +116,16 @@ async def replace_or_update_rules(
         # E-MCP-OPT 후속(story f0c99070·doc legacy-project-fallback-sweep-audit §2.2 2단계): id 없이
         # (org_id,project_id)만으로 기존 룰 전부 soft-delete+재삽입 — fail-closed 앵커 0. FE 선행배선
         # (PR #2120)이 body.project_id를 명시 실어보내므로 최우선 소스로 소비(무회귀).
+        # story d764522c LOW: `if explicit`(truthy) 대신 `is not None`(존재 여부) 기준 — ""/0/False
+        # 같은 falsy 값을 "미지정"으로 오인해 malformed를 조용히 통과시키지 않는다.
         explicit = body.get("project_id")
-        try:
-            explicit_project_id = uuid.UUID(str(explicit)) if explicit else None
-        except ValueError:
-            # story d764522c LOW: malformed project_id가 500으로 새던 것 — 명시 400.
-            return _err("BAD_REQUEST", "Invalid project_id format", 400)
+        if explicit is not None:
+            try:
+                explicit_project_id = uuid.UUID(str(explicit))
+            except ValueError:
+                return _err("BAD_REQUEST", "Invalid project_id format", 400)
+        else:
+            explicit_project_id = None
         try:
             replace_project_id = await resolve_required_project_id(
                 repo.session, request, auth, org_id,
@@ -214,12 +218,16 @@ async def reorder_or_disable_rules(
 
     # reorder-items 분기(story f0c99070·PO 확定 — FE 선행배선 PR #2120 착지 後 강제): id 매치라
     # Tier 1 fail-closed였지만, FE가 body.project_id를 이제 명시 실어보내므로 최우선 소스로 소비.
+    # story d764522c LOW: `if explicit`(truthy) 대신 `is not None`(존재 여부) 기준 — ""/0/False
+    # 같은 falsy 값을 "미지정"으로 오인해 malformed를 조용히 통과시키지 않는다.
     explicit = body.get("project_id")
-    try:
-        explicit_project_id = uuid.UUID(str(explicit)) if explicit else None
-    except ValueError:
-        # story d764522c LOW: malformed project_id가 500으로 새던 것 — 명시 400.
-        return _err("BAD_REQUEST", "Invalid project_id format", 400)
+    if explicit is not None:
+        try:
+            explicit_project_id = uuid.UUID(str(explicit))
+        except ValueError:
+            return _err("BAD_REQUEST", "Invalid project_id format", 400)
+    else:
+        explicit_project_id = None
     try:
         reorder_project_id = await resolve_required_project_id(
             repo.session, request, auth, org_id,
