@@ -56,6 +56,8 @@ export function ArtifactViewer({
   const isViewingAnchor = selectedVersion === artifact.anchor_version;
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  // story d72db00a — ArtifactStage의 콘텐츠 레이어에 직접 꽂힌다(contentRef prop 경유),
+  // 뷰어 크롬 wrapper가 아니다 — PNG export가 크롬 없이 아트보드 전체 프레임만 캡처하도록.
   const captureTargetRef = useRef<HTMLDivElement>(null);
   const activeVersion = versions.find((v) => v.version === selectedVersion) ?? versions[0];
   const selectedThread = threads?.find((th) => th.id === selectedThreadId) ?? null;
@@ -149,7 +151,7 @@ export function ArtifactViewer({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_232px]">
-          <div ref={captureTargetRef} className="relative min-w-0 bg-muted/20 p-4">
+          <div className="relative min-w-0 bg-muted/20 p-4">
             {activeVersion ? (
               <div className="h-[320px] w-full">
                 <ArtifactStage
@@ -157,6 +159,7 @@ export function ArtifactViewer({
                   content={activeVersion.content}
                   title={artifact.title}
                   canvasBounds={activeVersion.canvasBounds}
+                  contentRef={captureTargetRef}
                   overlay={
                     // C2 §1 — 좌표 앵커 스레드만 오버레이(element 앵커는 실 artifact tree 좌표 유도 필요, 후속).
                     // story 1948d19d §2 — 이제 ArtifactStage의 캔버스 좌표계 안에서 pan/zoom을 그대로
