@@ -12,7 +12,12 @@ export class ApiStoryRepository implements IStoryRepository {
   async list(filters: StoryListFilters): Promise<Story[]> {
     return fastapiCall<Story[]>('GET', '/api/v2/stories', this.accessToken, {
       // RC1: cursor + limit 전달 (CB-S4 cursor 페이징)
-      query: { project_id: filters.project_id, epic_id: filters.epic_id, sprint_id: filters.sprint_id, assignee_id: filters.assignee_id, status: filters.status, cursor: filters.cursor, limit: filters.limit },
+      // story ca37b2b0: ids가 있으면 배치 lookup(BE #2131) — comma-separated로 그대로 전달.
+      query: {
+        project_id: filters.project_id, epic_id: filters.epic_id, sprint_id: filters.sprint_id,
+        assignee_id: filters.assignee_id, status: filters.status, cursor: filters.cursor, limit: filters.limit,
+        ids: filters.ids?.join(','),
+      },
     });
   }
 
