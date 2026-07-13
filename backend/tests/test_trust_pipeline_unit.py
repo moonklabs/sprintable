@@ -22,6 +22,7 @@ def _facts(
     has_pending_human_gate: bool = False,
     has_verify_fail: bool = False,
     has_unresolved_blocker: bool = False,
+    has_scope_violation: bool = False,
     project_id: uuid.UUID | None = None,
 ) -> TrustFacts:
     return TrustFacts(
@@ -31,6 +32,7 @@ def _facts(
         has_pending_human_gate=has_pending_human_gate,
         has_verify_fail=has_verify_fail,
         has_unresolved_blocker=has_unresolved_blocker,
+        has_scope_violation=has_scope_violation,
     )
 
 
@@ -105,8 +107,8 @@ def test_exception_signals_needs_input():
     assert signals["merge_ready"] is False
 
 
-def test_scope_violation_always_false():
-    """§7 확定② — 이번 스코프 미구현, 어떤 facts 조합이든 항상 False(정직한 미가용)."""
+def test_scope_violation_false_when_no_signal():
+    """174be6bc 실체화 — has_scope_violation=False(미선언/무신호)이면 다른 facts 조합과 무관하게 항상 False."""
     for status in ("backlog", "ready-for-dev", "in-progress", "in-review", "done"):
         for hv in (True, False):
             for gate in (True, False):
@@ -117,6 +119,12 @@ def test_scope_violation_always_false():
                             has_verify_fail=vf, has_unresolved_blocker=blocker,
                         )
                         assert derive_exception_signals(facts)["scope_violation"] is False
+
+
+def test_scope_violation_true_passthrough():
+    """174be6bc 실체화 — has_scope_violation=True는 다른 facts와 무관하게 신호 그대로 통과."""
+    facts = _facts("in-review", human_verified=True, has_scope_violation=True)
+    assert derive_exception_signals(facts)["scope_violation"] is True
 
 
 # ── _maybe_emit: 변경시에만 emit(이벤트 폭주 방지·doc §4) ───────────────────

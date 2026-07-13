@@ -26,11 +26,13 @@ from app.models.github_installation import GithubInstallation, GithubWebhookDeli
 from app.models.pm import Story
 from app.routers.cron import CRON_SECRET, _err, _ok, verify_cron
 from app.services.github_app import get_installation_token
-from app.services.pr_story_link import resolve_story_for_pr
+from app.services.pr_story_link import merge_link_evidence, resolve_story_for_pr
 from app.services.story_status_events import advance_story_to_done
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
     capture_review_verdict,
+    check_scope_violation,
+    fetch_pr_changed_files,
     fetch_status_check_rollup,
     parse_story_id,
 )
@@ -277,10 +279,14 @@ async def _process_webhook_event(
     추론 금지·resolve 先). **legacy**=resolver 가 SID 전역→story.org_id(무회귀). story 해소=resolver 체인
     (explicit>auto high>SID>text). **close-on-merge**=should_auto_close(confident)+merge → advance_story_to_done
     (단일 idempotent 헬퍼). native CI(Bot-M.1)=installation 토큰. caller 가 동일 트랜잭션으로 commit/rollback.
+
+    P0-05 후속(doc scope-violation-signal-design §2): scope-violation 판정은 머지/CI 액션가능신호와
+    **독립**(PR 자체 이벤트에서 판정) — resolver를 그 skip보다 먼저 실행해 두 판정이 서로를 막지 않게 한다.
     """
     texts = _candidate_texts(payload)
     repo = (payload.get("repository") or {}).get("full_name") or ""
     pr_number, merged, ci_conclusion, head_sha = _extract_pr_ci(event, payload)
+    pr_action = payload.get("action") if event == "pull_request" else None
 
     installation: GithubInstallation | None = None
     org_id: uuid.UUID | None = None
@@ -301,17 +307,29 @@ async def _process_webhook_event(
         org_id = installation.org_id
         delivery.org_id = org_id
 
-    # 행동 가능한 신호(머지 또는 CI 완료)가 없으면 skip(in_progress 등) — resolve/side-effect 前.
-    if not merged and ci_conclusion is None:
-        return {"skipped_reason": "no_actionable_signal", "recorded": []}, "ignored"
-
     # Bot-L.1 resolver 체인: explicit>auto high>SID>text. app=org-scoped(org 알려짐)·legacy=SID 전역→story.org_id.
+    # ⚠️행동가능신호(merged/ci) skip **前**에 실행 — scope-check(§2)가 그 신호와 무관하게 판정돼야 함.
     rl = await resolve_story_for_pr(session, org_id, repo, pr_number, texts)
     if rl.story_id is None:
         return {"skipped_reason": rl.reason, "recorded": []}, "ignored"  # no_match/auto suggestion 등.
     story_id = rl.story_id
     org_id = rl.org_id  # app=입력 org·legacy=story.org_id(resolver 검증). 단일 진실원.
     delivery.org_id = org_id
+
+    # P0-05 후속(doc scope-violation-signal-design §2·§3): PR 자체 이벤트(opened/synchronize/reopened)
+    # + confident link(should_auto_close 동일 신뢰 등급)일 때만 판정. 3중 침묵 조건은 헬퍼 내부.
+    scope_result: dict | None = None
+    if pr_action in ("opened", "synchronize", "reopened") and rl.should_auto_close:
+        scope_result = await _maybe_check_scope_violation(
+            session, org_id, story_id, repo, pr_number, installation, rl,
+        )
+
+    # 행동 가능한 신호(머지 또는 CI 완료)가 없으면 verdict capture는 skip — scope_result는 이미 반영됐다.
+    if not merged and ci_conclusion is None:
+        result: dict = {"skipped_reason": "no_actionable_signal", "recorded": []}
+        if scope_result is not None:
+            result["scope_check"] = scope_result
+        return result, ("processed" if scope_result is not None else "ignored")
 
     # Bot-M.1: native CI 채움 — **installation 토큰**(org-scope)으로 statusCheckRollup pull(⚠️PAT fallback 없음).
     # app source 는 위서 resolve된 installation(suspended 제외) 직접 사용·legacy 는 org→installation resolve.
@@ -371,7 +389,65 @@ async def _process_webhook_event(
             **result,
             "auto_close": {"closed": closed, "source": rl.source, "confidence": rl.confidence},
         }
+    if scope_result is not None:
+        result = {**result, "scope_check": scope_result}
     return result, "processed"
+
+
+async def _maybe_check_scope_violation(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    story_id: uuid.UUID,
+    repo: str,
+    pr_number: int,
+    installation: GithubInstallation | None,
+    rl,
+) -> dict | None:
+    """P0-05 후속(doc scope-violation-signal-design §2·§4) — 3중 침묵 조건 집행.
+
+    ①declared_scope_paths 미설정 → None(fetch 자체 안 함). ②installation/토큰/changed-files fetch
+    실패 → None(추측 금지 — "판정 불가"≠"위반 아님"). ③실제 판정(위반 여부 무관하게 결과를 evidence에
+    기록 — violated=False도 유효한 판정 결과). merge_link_evidence로 dict-merge(기존 evidence 키 보존).
+    """
+    story = await session.get(Story, story_id)
+    if story is None or story.org_id != org_id:
+        return None
+    declared = story.declared_scope_paths
+    if not declared:
+        return None  # 침묵①: 미선언.
+
+    inst = installation
+    if inst is None:  # legacy(app 미상): org→installation resolve(suspended 제외).
+        inst = (
+            await session.execute(
+                select(GithubInstallation).where(
+                    GithubInstallation.org_id == org_id,
+                    GithubInstallation.suspended_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+    if inst is None:
+        return None  # 침묵②: installation 없음.
+
+    token = await get_installation_token(inst.installation_id)
+    if not token:
+        return None  # 침묵②: 토큰 발급 실패.
+
+    changed_files = await fetch_pr_changed_files(repo, pr_number, token)
+    if changed_files is None:
+        return None  # 침묵②: fetch 실패/판정불가(추측 금지).
+
+    violated, out_of_scope = check_scope_violation(declared, changed_files)
+    await merge_link_evidence(
+        session, org_id, story_id, repo, pr_number,
+        link_source=rl.source or "auto_match", confidence=rl.confidence or "low",
+        patch={"scope_check": {
+            "violated": violated,
+            "out_of_scope_files": out_of_scope,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    return {"violated": violated, "out_of_scope_files": out_of_scope}
 
 
 @router.post("/github-webhook")

@@ -95,6 +95,17 @@ EVENT_TAXONOMY: dict[str, list[EventParam]] = {
         EventParam("new_default_project_id", "uuid", True, "변경 후 기본 프로젝트"),
         EventParam("timestamp", "str", True, "ISO 8601 UTC 타임스탬프"),
     ],
+    # P0-05 후속(story 174be6bc·doc scope-violation-signal-design §1 확定): 선언 주체 제한 없음(자기신고
+    # 허용)이라 도중 축소/해제 회피 경로가 있음 — 이 감사 이벤트가 그 억지력(PO 필수 채택 지시).
+    "story.declared_scope_changed": [
+        EventParam("story_id", "uuid", True, "스토리 UUID"),
+        EventParam("project_id", "uuid", True, "프로젝트 UUID"),
+        EventParam("org_id", "uuid", True, "조직 UUID"),
+        EventParam("old_declared_scope_paths", "str", False, "변경 전 글롭 배열(JSON 직렬화, 미설정 null)"),
+        EventParam("new_declared_scope_paths", "str", False, "변경 후 글롭 배열(JSON 직렬화, 해제 시 null)"),
+        EventParam("actor_id", "uuid", False, "실행자 member UUID"),
+        EventParam("timestamp", "str", True, "ISO 8601 UTC 타임스탬프"),
+    ],
 }
 
 
