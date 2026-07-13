@@ -19,6 +19,7 @@ def anyio_backend():
 def _client(**methods):
     c = MagicMock()
     c.project_id = "proj-1"
+    c.require_project_id = MagicMock(return_value="proj-1")  # E-MCP-OPT ff6cb90d
     for name, ret in methods.items():
         setattr(c, name, AsyncMock(return_value=ret))
     return c

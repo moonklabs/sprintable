@@ -43,9 +43,11 @@ async def set_default_project(args: SetDefaultProjectInput) -> list:
         new_default = result.get("resolved_default_project_id")
         if new_default:
             client._project_id = new_default  # stdio(override 無) 경로.
+            client._project_id_ambiguous = False
             _key = _api_key_override.get() or client._api_key
             if _key in _auth_ctx_cache:
                 _auth_ctx_cache[_key]["project_id"] = new_default
+                _auth_ctx_cache[_key]["is_project_ambiguous"] = False
         return ok(result)
     except Exception as exc:
         return err(str(exc))

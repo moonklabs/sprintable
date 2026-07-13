@@ -34,10 +34,10 @@ class UpdateSprintInput(SprintableInput):
 
 async def list_sprints(args: ListSprintsInput) -> list[TextContent]:
     """스프린트 목록 조회."""
-    params: dict = {"project_id": client.project_id}
-    if args.status:
-        params["status"] = args.status.value
     try:
+        params: dict = {"project_id": client.require_project_id()}
+        if args.status:
+            params["status"] = args.status.value
         return ok(await client.get("/api/v2/sprints", params=params))
     except Exception as exc:
         return err(str(exc))
@@ -77,14 +77,14 @@ async def get_velocity(args: SprintIdInput) -> list[TextContent]:
 
 async def create_sprint(args: CreateSprintInput) -> list[TextContent]:
     """스프린트 생성."""
-    body: dict = {"title": args.title, "project_id": client.project_id}
-    if args.start_date:
-        body["start_date"] = args.start_date
-    if args.end_date:
-        body["end_date"] = args.end_date
-    if args.team_size is not None:
-        body["team_size"] = args.team_size
     try:
+        body: dict = {"title": args.title, "project_id": client.require_project_id()}
+        if args.start_date:
+            body["start_date"] = args.start_date
+        if args.end_date:
+            body["end_date"] = args.end_date
+        if args.team_size is not None:
+            body["team_size"] = args.team_size
         return ok(await client.post("/api/v2/sprints", json=body))
     except Exception as exc:
         return err(str(exc))
