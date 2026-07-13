@@ -1621,6 +1621,27 @@
     "grantFailed": "Grant failed",
     "adminOnlyHint": "Only org admin/owner can grant rewards"
   },
+  "attentionQueue": {
+    "kicker": "Today · Attention Queue",
+    "title": "Needs your call",
+    "count": "<b>{count}</b> to review · no log needed",
+    "allClear": "ALL CLEAR",
+    "emptyTitle": "Nothing needs your call",
+    "emptyBody": "Everything's flowing. Exceptions will show up here.",
+    "flowDemoted": "The rest is flowing — {overflow} more not shown here",
+    "kindVerifyFail": "Verify failed",
+    "kindDecisionNeeded": "Decision needed",
+    "kindBlocked": "Blocked",
+    "kindMergeReady": "Merge ready",
+    "claimVerifyFail": "{title} — CI check failed, needs rework",
+    "claimMergeReady": "{title} — Verified, ready to merge",
+    "claimDecisionNeeded": "{title} — needs a direction call",
+    "claimBlocked": "{title} — blocked by {count}, needs coordination",
+    "actionRework": "Send back",
+    "actionMerge": "Merge",
+    "actionDecide": "Decide",
+    "actionCoordinate": "Coordinate"
+  },
   "inbox": {
     "title": "Inbox",
     "attentionTabLabel": "Today",

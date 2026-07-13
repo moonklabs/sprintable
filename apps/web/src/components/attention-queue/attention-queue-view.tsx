@@ -2,15 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { ShieldCheck } from 'lucide-react';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import type { GateItem, DependencyEdge } from '@/components/kanban/types';
 import {
   deriveGateAttentionItems, deriveBlockedAttentionItems, buildAttentionQueue,
-  type AttentionStoryLite, type AttentionMember, type AttentionQueueItem,
+  type AttentionStoryLite, type AttentionMember, type AttentionQueueItem, type AttentionQueueTranslator,
 } from './derive-attention-queue';
 
-// P0-06("오늘" 구역) 착지 전까지 임시 스코프 — kanban 활성 상태만(done 제외, 개입 후보 풀).
+// 지금/Now 존(P0-06) 안 개입 후보 풀 — kanban 활성 상태만(done 제외).
 const ACTIVE_STATUSES = ['backlog', 'ready-for-dev', 'in-progress', 'in-review'];
 const CAP = 7;
 
@@ -37,7 +38,7 @@ async function fetchActiveStories(projectId: string): Promise<StoryListItem[]> {
   return results.flat();
 }
 
-async function fetchAttentionQueue(projectId: string): Promise<AttentionQueueItem[]> {
+async function fetchAttentionQueue(projectId: string, t: AttentionQueueTranslator): Promise<AttentionQueueItem[]> {
   const [gatesJson, graphJson, membersJson, stories] = await Promise.all([
     fetch('/api/gates?status=pending').then((r) => (r.ok ? r.json() : [])).catch(() => [] as GateItem[]),
     fetch('/api/dependencies/graph?item_type=story')
@@ -64,8 +65,8 @@ async function fetchAttentionQueue(projectId: string): Promise<AttentionQueueIte
   );
 
   return [
-    ...deriveGateAttentionItems(gates, storiesById, membersById),
-    ...deriveBlockedAttentionItems(blockedByMap, storiesById, membersById),
+    ...deriveGateAttentionItems(gates, storiesById, membersById, t),
+    ...deriveBlockedAttentionItems(blockedByMap, storiesById, membersById, t),
   ];
 }
 
@@ -102,14 +103,17 @@ function AttentionRow({ item, onNavigate }: { item: AttentionQueueItem; onNaviga
 }
 
 /**
- * Attention Queue(E-UI-DAEGBYEON P0-05, story 5f25c615). "지금 개입할 3~7개"만 — 원시 이벤트
- * 나열 아니라 판단이 필요한 것만. Proof Capsule row density 재사용(신규 컴포넌트 아님).
+ * Attention Queue(E-UI-DAEGBYEON P0-05, story 7ff12083, 설계 5f25c615). "지금 개입할 3~7개"만 —
+ * 원시 이벤트 나열 아니라 판단이 필요한 것만. Proof Capsule row density 재사용(신규 컴포넌트 아님).
+ * 배치 = `/inbox?tab=attention`(지금/Now 존·기존 인박스 병행 — PO 확定 2026-07-13).
  *
- * v1 스코프: 5유형 중 4개만(검증실패/결정필요/막힘/병합대기) — 범위이탈(Red)은 BE에 "승인범위
- * 밖" 판정 신호가 아직 없어 no-fiction 원칙상 제외(P0-04 착지 후 추가 예정, PO 승인·2026-07-11).
+ * 1단계 스코프: 5유형 중 4개만(검증실패/결정필요/막힘/병합대기) — 범위이탈(Red)은 BE에 "승인범위
+ * 밖" 판정 신호가 아직 없어 no-fiction 원칙상 제외(P0-04 파이프라인 impl 착지 후 추가 예정).
+ * 데이터 소스=클라 파생(derive-attention-queue.ts); 2단계에서 `/glance/attention` BE 계약으로 스왑.
  */
 export function AttentionQueueView({ projectId }: { projectId: string }) {
   const router = useRouter();
+  const t = useTranslations('attentionQueue');
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<AttentionQueueItem[]>([]);
 
@@ -117,14 +121,14 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
     let cancelled = false;
     async function load() {
       setLoading(true);
-      const result = await fetchAttentionQueue(projectId);
+      const result = await fetchAttentionQueue(projectId, t);
       if (cancelled) return;
       setItems(result);
       setLoading(false);
     }
     void load();
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, t]);
 
   const { shown, overflow } = buildAttentionQueue(items, CAP);
 
@@ -132,12 +136,12 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
     <div className="overflow-hidden rounded-2xl border border-proof-line bg-proof-panel" style={{ clipPath: 'polygon(0 0, calc(100% - 24px) 0, 100% 24px, 100% 100%, 0 100%)' }}>
       <div className="flex items-baseline justify-between gap-3 border-b border-proof-line-soft px-5 py-3.5">
         <div>
-          <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-proof-faint">오늘 · Attention Queue</div>
-          <h2 className="text-[19px] font-extrabold leading-tight tracking-[-0.014em] text-proof-ink">지금 개입할 것</h2>
+          <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-proof-faint">{t('kicker')}</div>
+          <h2 className="text-[19px] font-extrabold leading-tight tracking-[-0.014em] text-proof-ink">{t('title')}</h2>
         </div>
         {!loading ? (
           <div className="shrink-0 text-[13px] font-medium text-proof-ink-3">
-            <b className="text-proof-ink">{shown.length}</b>건 · 로그 안 열고 판단
+            {t.rich('count', { count: shown.length, b: (chunks) => <b className="text-proof-ink">{chunks}</b> })}
           </div>
         ) : null}
       </div>
@@ -147,10 +151,10 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
       ) : shown.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-5 py-10 text-center">
           <div className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-[0.02em] text-proof-green">
-            <ShieldCheck className="size-3.5" aria-hidden="true" />ALL CLEAR
+            <ShieldCheck className="size-3.5" aria-hidden="true" />{t('allClear')}
           </div>
-          <p className="text-[15px] font-semibold text-proof-ink-2">지금 개입할 것 없음</p>
-          <p className="text-[12.5px] text-proof-faint">모든 작업이 흐르고 있는. 예외가 생기면 여기 올라오는.</p>
+          <p className="text-[15px] font-semibold text-proof-ink-2">{t('emptyTitle')}</p>
+          <p className="text-[12.5px] text-proof-faint">{t('emptyBody')}</p>
         </div>
       ) : (
         <div>
@@ -160,7 +164,7 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
           {overflow > 0 ? (
             <div className="flex items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-[12.5px] text-proof-ink-3">
               <span className="size-1 rounded-full bg-proof-faint" aria-hidden="true" />
-              나머지는 흐르는 중 — {overflow}건은 여기 안 올림
+              {t('flowDemoted', { overflow })}
             </div>
           ) : null}
         </div>

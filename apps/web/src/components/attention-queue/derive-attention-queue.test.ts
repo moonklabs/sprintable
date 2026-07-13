@@ -1,9 +1,25 @@
 import { describe, expect, it } from 'vitest';
+import { createTranslator } from 'next-intl';
 import {
   deriveGateAttentionItems, deriveBlockedAttentionItems, buildAttentionQueue,
-  type AttentionStoryLite, type AttentionMember, type AttentionQueueItem,
+  type AttentionStoryLite, type AttentionMember, type AttentionQueueItem, type AttentionQueueTranslator,
 } from './derive-attention-queue';
 import type { GateItem } from '@/components/kanban/types';
+import koMessagesRaw from '../../../messages/ko.json';
+import enMessagesRaw from '../../../messages/en.json';
+
+// production `t` (useTranslations()) resolves against the permissive default `IntlMessages`
+// generic (no global next-intl message-type augmentation in this repo) — cast here so the test
+// translator has the same loose type instead of the JSON import's inferred literal-key type.
+type LooseMessages = { [key: string]: string | LooseMessages };
+const koMessages = koMessagesRaw as unknown as LooseMessages;
+const enMessages = enMessagesRaw as unknown as LooseMessages;
+// next-intl's Translator<M,N> overload set doesn't structurally satisfy our minimal
+// AttentionQueueTranslator call-signature for a non-literal LooseMessages import (same
+// friction as loop-create-dialog.test.tsx's RecipeTranslator) — cast at the boundary, runtime
+// behavior is unaffected (createTranslator's t(key, values) works exactly as at production).
+const t = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'attentionQueue' }) as unknown as AttentionQueueTranslator;
+const tEn = createTranslator({ locale: 'en', messages: enMessages, namespace: 'attentionQueue' }) as unknown as AttentionQueueTranslator;
 
 function gate(overrides: Partial<GateItem> = {}): GateItem {
   return {
@@ -26,7 +42,7 @@ const members = new Map<string, AttentionMember>([
 describe('deriveGateAttentionItems', () => {
   it('maps merge gate + ci_result=fail to verify_fail (amber, neutral tone)', () => {
     const items = deriveGateAttentionItems(
-      [gate({ neutral_facts: { ci_result: 'fail' } })], stories, members,
+      [gate({ neutral_facts: { ci_result: 'fail' } })], stories, members, t,
     );
     expect(items).toHaveLength(1);
     expect(items[0]!.kind).toBe('verify_fail');
@@ -37,7 +53,7 @@ describe('deriveGateAttentionItems', () => {
 
   it('maps merge gate + ci_result=pass to merge_ready (green, ready tone)', () => {
     const items = deriveGateAttentionItems(
-      [gate({ neutral_facts: { ci_result: 'pass' } })], stories, members,
+      [gate({ neutral_facts: { ci_result: 'pass' } })], stories, members, t,
     );
     expect(items[0]!.kind).toBe('merge_ready');
     expect(items[0]!.proofState).toBe('green');
@@ -46,25 +62,25 @@ describe('deriveGateAttentionItems', () => {
 
   it('maps loop_decision gate to decision_needed (amber, primary tone) regardless of ci_result', () => {
     const items = deriveGateAttentionItems(
-      [gate({ gate_type: 'loop_decision', neutral_facts: null })], stories, members,
+      [gate({ gate_type: 'loop_decision', neutral_facts: null })], stories, members, t,
     );
     expect(items[0]!.kind).toBe('decision_needed');
     expect(items[0]!.actionTone).toBe('primary');
   });
 
   it('resolves the assignee as actor when present, omits when absent (no-fiction)', () => {
-    const withActor = deriveGateAttentionItems([gate({ neutral_facts: { ci_result: 'fail' } })], stories, members);
+    const withActor = deriveGateAttentionItems([gate({ neutral_facts: { ci_result: 'fail' } })], stories, members, t);
     expect(withActor[0]!.actor).toEqual({ name: '미르코', isAgent: true });
 
     const withoutActor = deriveGateAttentionItems(
-      [gate({ work_item_id: 'story-2', neutral_facts: { ci_result: 'fail' } })], stories, members,
+      [gate({ work_item_id: 'story-2', neutral_facts: { ci_result: 'fail' } })], stories, members, t,
     );
     expect(withoutActor[0]!.actor).toBeNull();
   });
 
   it('skips gates whose story is unknown (never fabricates a claim)', () => {
     const items = deriveGateAttentionItems(
-      [gate({ work_item_id: 'story-unknown', neutral_facts: { ci_result: 'fail' } })], stories, members,
+      [gate({ work_item_id: 'story-unknown', neutral_facts: { ci_result: 'fail' } })], stories, members, t,
     );
     expect(items).toHaveLength(0);
   });
@@ -76,15 +92,25 @@ describe('deriveGateAttentionItems', () => {
         gate({ status: 'rejected', neutral_facts: { ci_result: 'fail' } }),
         gate({ gate_type: 'merge', neutral_facts: { ci_result: null } }), // no honest signal → skip
       ],
-      stories, members,
+      stories, members, t,
     );
     expect(items).toHaveLength(0);
+  });
+
+  it('renders claim/kindLabel/actionLabel in English when given the en translator (ko/en parity)', () => {
+    const items = deriveGateAttentionItems(
+      [gate({ neutral_facts: { ci_result: 'fail' } })], stories, members, tEn,
+    );
+    expect(items[0]!.kindLabel).toBe('Verify failed');
+    expect(items[0]!.actionLabel).toBe('Send back');
+    expect(items[0]!.claim).toContain('CI check failed');
+    expect(items[0]!.claim).not.toContain('CI 검증 실패');
   });
 });
 
 describe('deriveBlockedAttentionItems', () => {
   it('maps a non-empty blockedByMap entry to a blocked item with the real blocker count', () => {
-    const items = deriveBlockedAttentionItems({ 'story-1': ['story-9', 'story-10'] }, stories, members);
+    const items = deriveBlockedAttentionItems({ 'story-1': ['story-9', 'story-10'] }, stories, members, t);
     expect(items).toHaveLength(1);
     expect(items[0]!.kind).toBe('blocked');
     expect(items[0]!.claim).toContain('2건');
@@ -93,9 +119,14 @@ describe('deriveBlockedAttentionItems', () => {
 
   it('skips empty blocker arrays and unknown story ids', () => {
     const items = deriveBlockedAttentionItems(
-      { 'story-1': [], 'story-unknown': ['story-9'] }, stories, members,
+      { 'story-1': [], 'story-unknown': ['story-9'] }, stories, members, t,
     );
     expect(items).toHaveLength(0);
+  });
+
+  it('renders the blocked count in English when given the en translator', () => {
+    const items = deriveBlockedAttentionItems({ 'story-1': ['story-9', 'story-10'] }, stories, members, tEn);
+    expect(items[0]!.claim).toContain('blocked by 2');
   });
 });
 
