@@ -159,7 +159,15 @@
     "goAgents": "에이전트로 이동",
     "goDocs": "문서로 이동",
     "documents": "문서",
-    "goSprints": "스프린트로 이동"
+    "goSprints": "스프린트로 이동",
+    "actionDelegateStory": "{title} 위임하기",
+    "actionDelegateStoryImpact": "{title}을 담당자에게 위임합니다. 스토리 화면으로 이동합니다.",
+    "actionGateDecision": "게이트 결재하기",
+    "actionGateDecisionImpact": "게이트 결재 화면으로 이동합니다.",
+    "actionRecruitAgent": "에이전트 모집하기",
+    "actionRecruitAgentImpact": "채용 위저드로 이동합니다.",
+    "actionDangerPill": "위험 명령 · 확인 단계 경유",
+    "contextChip": "{title} · 스토리"
   },
   "channel": {
     "title": "채널 채팅",

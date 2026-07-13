@@ -159,7 +159,15 @@
     "goAgents": "Go to Agents",
     "goDocs": "Go to Docs",
     "documents": "Documents",
-    "goSprints": "Go to Sprints"
+    "goSprints": "Go to Sprints",
+    "actionDelegateStory": "Delegate {title}",
+    "actionDelegateStoryImpact": "Delegates {title} to a teammate. Takes you to the story.",
+    "actionGateDecision": "Review a gate decision",
+    "actionGateDecisionImpact": "Takes you to the gate approval screen.",
+    "actionRecruitAgent": "Recruit an agent",
+    "actionRecruitAgentImpact": "Takes you to the recruiting wizard.",
+    "actionDangerPill": "Sensitive · goes through a confirm step",
+    "contextChip": "{title} · Story"
   },
   "channel": {
     "title": "Channel Chat",

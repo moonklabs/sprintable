@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
   BookOpen,
@@ -70,8 +70,11 @@ export function AppSidebar({
   userName,
 }: AppSidebarProps) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
+  // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/board?story={id}`)에서 열렸을 때만 context 주입.
+  const contextStoryId = pathname === '/board' ? (searchParams.get('story') ?? undefined) : undefined;
 
   // 4dad38d3: 모바일 nav 아이템 선택 후 드로어 auto-close. route 변경 시 닫는다(전 아이템 DRY 커버).
   // 데스크탑은 isMobile 가드로 no-op·백드롭 탭 닫기(Sheet onOpenChange)는 무영향.
@@ -390,7 +393,7 @@ export function AppSidebar({
       </SidebarFooter>
 
       <SidebarRail />
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} projectId={projectId} />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} projectId={projectId} contextStoryId={contextStoryId} />
     </Sidebar>
   );
 }
