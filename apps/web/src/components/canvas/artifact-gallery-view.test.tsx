@@ -98,6 +98,27 @@ describe('ArtifactGalleryView (story a15cea4f)', () => {
     expect(container.textContent).not.toContain('m1');
   });
 
+  // story ca37b2b0 — dev 실데이터 재현: 산출물은 story_id만 있고 epic_id는 NULL(에이전트 저작
+  // 산출물 기본형). story 경유 유도가 없으면 에픽 탭이 전건 무소속으로 떨어지던 근본원인.
+  it('resolves the epic through the artifact\'s story when the artifact has no direct epic_id (스토리 경유 유도)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/visual-artifacts/')) return jsonRes([]);
+      if (url.startsWith('/api/visual-artifacts')) return jsonRes([
+        { id: 'a1', title: '스토리 앵커 산출물', story_id: 's1', epic_id: null, doc_id: null, source: 'created', latest_version_number: 1, anchor_version: null, created_by: 'm1', created_at: '2026-07-01T00:00:00Z' },
+      ]);
+      if (url.startsWith('/api/epics')) return jsonRes([{ id: 'e1', title: '온보딩 캠페인' }]);
+      if (url.startsWith('/api/stories')) return jsonRes([{ id: 's1', title: '웰컴 이메일 스토리', sprint_id: null, epic_id: 'e1' }]);
+      if (url.startsWith('/api/sprints')) return jsonRes([]);
+      if (url.startsWith('/api/docs')) return jsonRes([]);
+      return jsonRes(null);
+    }) as unknown as typeof fetch);
+    await mount();
+    expect(container.textContent).toContain('온보딩 캠페인');
+    expect(container.textContent).toContain('스토리 앵커 산출물');
+    // 스토리 경유로 해소됐으니 무소속 그룹 자체가 없어야 한다.
+    expect(container.textContent).not.toContain('무소속');
+  });
+
   it('renders the empty state when the project has no artifacts at all', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/api/visual-artifacts')) return jsonRes([]);
