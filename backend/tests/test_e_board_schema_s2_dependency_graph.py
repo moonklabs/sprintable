@@ -190,6 +190,10 @@ async def test_create_dependency_201():
         r = MagicMock()
         r.scalar_one_or_none.return_value = None  # not exists
         r.all.return_value = []  # no cycle (BFS empty)
+        # P0-04 trust_stage 훅(compute_trust_facts)의 story 조회 — 여기선 mock story 없음 취급으로
+        # 훅 자체가 no-op(story 조회 None → 훅 전체 skip). 이 파일은 CRUD 메커닉만 검증(realdb
+        # 스위트가 trust_stage 배선을 별도 커버).
+        r.first.return_value = None
         return r
 
     mock_session.execute = mock_execute
@@ -337,6 +341,8 @@ async def test_delete_dependency_200():
 
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = dep
+    # P0-04 trust_stage 훅의 story 조회(.first()) — mock story 없음 취급으로 훅 전체 no-op.
+    mock_result.first.return_value = None
     mock_session.execute = AsyncMock(return_value=mock_result)
     mock_session.delete = AsyncMock()
     mock_session.flush = AsyncMock()

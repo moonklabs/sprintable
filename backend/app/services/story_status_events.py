@@ -146,6 +146,15 @@ async def emit_story_status_changed(
         except Exception:
             pass
 
+    # P0-04(doc trust-pipeline-be-design §4 훅③): trust_stage 파생 재계산 — 변경 시에만
+    # story.trust_stage_changed emit. best-effort 격리(다른 4종과 동일 — 실패해도 status 전이 무영향).
+    try:
+        from app.services.trust_pipeline import emit_on_story_status_change
+
+        await emit_on_story_status_change(db, org_id, story.id, old_status, actor_id=actor_id)
+    except Exception:
+        pass
+
 
 async def advance_story_to_done(
     db: AsyncSession,

@@ -126,6 +126,13 @@ async def transition_gate(
             f"pending에서만 approved|rejected로 전이 가능."
         )
 
+    # P0-04(doc trust-pipeline-be-design §4 훅①): trust_stage mutation 전 스냅샷(story 대상 게이트만).
+    _trust_before = None
+    if gate.work_item_type == "story":
+        from app.services.trust_pipeline import compute_trust_facts
+
+        _trust_before = await compute_trust_facts(session, org_id, gate.work_item_id)
+
     gate.status = new_status
     gate.resolver_id = resolver_id
     gate.resolved_at = datetime.now(timezone.utc)
@@ -170,6 +177,14 @@ async def transition_gate(
 
     await session.flush()
     await session.refresh(gate)
+
+    if _trust_before is not None:
+        from app.services.trust_pipeline import maybe_emit_trust_stage_changed
+
+        await maybe_emit_trust_stage_changed(
+            session, org_id, gate.work_item_id, _trust_before, actor_id=resolver_id
+        )
+
     return gate
 
 
