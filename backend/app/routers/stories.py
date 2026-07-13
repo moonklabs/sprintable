@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -370,6 +371,7 @@ async def create_story(
         sprint_id=body.sprint_id,
         assignee_id=primary_assignee,
         human_owner_member_id=body.human_owner_member_id,
+        declared_scope_paths=body.declared_scope_paths,
         meeting_id=body.meeting_id,
         status=body.status,
         priority=body.priority,
@@ -949,6 +951,24 @@ async def update_story(
                 await db.flush()
             except Exception:
                 pass
+
+    # P0-05 후속(doc scope-violation-signal-design §1 확定): declared_scope_paths 변경(설정/해제)
+    # 감사 이벤트 — 선언 주체 제한 없음(자기신고 허용)이라 도중 축소/해제의 회피 억지력.
+    if "declared_scope_paths" in data and _story_for_access.declared_scope_paths != story.declared_scope_paths:
+        publish_event(str(repo.org_id), "story.declared_scope_changed", {
+            "story_id": str(id),
+            "project_id": str(story.project_id),
+            "org_id": str(repo.org_id),
+            "old_declared_scope_paths": (
+                json.dumps(_story_for_access.declared_scope_paths)
+                if _story_for_access.declared_scope_paths else None
+            ),
+            "new_declared_scope_paths": (
+                json.dumps(story.declared_scope_paths) if story.declared_scope_paths else None
+            ),
+            "actor_id": str(actor_id) if actor_id else None,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
 
     # S-C2: story_updated — actor가 agent인 경우 기록 (AC2, AC6)
     if actor_id:

@@ -104,6 +104,9 @@ class StoryCreate(BaseModel):
     # P0-03(doc trust-pipeline-be-design §5): Human owner(assignee와 별도 책임 필드). 라우터가
     # write-time에 human 강제(비-human 지정 시 400).
     human_owner_member_id: uuid.UUID | None = None
+    # P0-05 후속(doc scope-violation-signal-design §3): 착수 시점 자발적 선언 파일-경로 글롭.
+    # 미지정(None) = 판정 무신호(scope_violation 항상 False).
+    declared_scope_paths: list[str] | None = None
     # E-FILE S4: 보드 스토리 첨부 (기본 [], 최대 10).
     attachments: list[StoryAttachment] = []
     meeting_id: uuid.UUID | None = None
@@ -138,6 +141,9 @@ class StoryUpdate(BaseModel):
     assignee_ids: list[uuid.UUID] | None = None
     # P0-03(doc trust-pipeline-be-design §5): Human owner. 미지정(exclude_unset)이면 변경 안 함.
     human_owner_member_id: uuid.UUID | None = None
+    # P0-05 후속(doc scope-violation-signal-design §3): exclude_unset이면 변경 안 함. 명시 []/null로
+    # 해제 가능(story.declared_scope_changed 감사 이벤트가 라우터에서 old/new 기록).
+    declared_scope_paths: list[str] | None = None
     # E-FILE S4: 보드 스토리 첨부. 미지정(None)이면 변경 안 함(back-compat).
     attachments: list[StoryAttachment] | None = None
     meeting_id: uuid.UUID | None = None
@@ -182,6 +188,13 @@ class StoryResponse(BaseModel):
     assignee_ids: list[uuid.UUID] = []
     # P0-03(doc trust-pipeline-be-design §5): Human owner — 실 컬럼(ORM 그대로 노출).
     human_owner_member_id: uuid.UUID | None = None
+    # P0-05 후속(doc scope-violation-signal-design §3): 실 컬럼(ORM 그대로 노출).
+    declared_scope_paths: list[str] | None = None
+
+    @field_validator("declared_scope_paths", mode="before")
+    @classmethod
+    def _coerce_declared_scope_paths(cls, v):
+        return v if isinstance(v, list) else None
     # agent_delegate_ids: assignee_ids를 Member.type=="agent"로 필터한 파생 뷰(신규 저장 0) —
     # ORM 컬럼 아님·라우터가 model_validate 前 transient attr로 세팅(assignee_ids 패턴 동형).
     agent_delegate_ids: list[uuid.UUID] = []
