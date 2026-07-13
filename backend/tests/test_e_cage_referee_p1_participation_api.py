@@ -26,6 +26,10 @@ def _mock_story_obj(assignee_id=None):
     s.sprint_id = None
     s.assignee_id = assignee_id
     s.assignee_ids = [assignee_id] if assignee_id else []  # E-BOARD S5
+    # P0-03(doc trust-pipeline-be-design §5): 신규 필드 — MagicMock 반환 MagicMock이 Pydantic UUID
+    # 검증 실패하므로 명시 세팅.
+    s.human_owner_member_id = None
+    s.agent_delegate_ids = []
     s.meeting_id = None
     s.title = "Story 1"
     s.status = "backlog"
@@ -84,6 +88,15 @@ async def _make_client(mock_session):
 async def test_create_story_with_assignee_auto_creates_participation():
     """create_story + assignee → _upsert_assignee_participation 호출 단언."""
     mock_session = AsyncMock()
+    # P0-03(doc trust-pipeline-be-design §5): create_story가 assignee 有 시 _attach_agent_delegate_ids
+    # →lookup_members_by_ids로 신규 session.execute(select(TeamMember)...) 호출 — 미설정 AsyncMock은
+    # .scalars()가 코루틴을 반환해 .all() 실패(test_update_story_...와 동일 _empty 패턴 재사용).
+    _empty = MagicMock()
+    _empty.all.return_value = []
+    _empty.scalars.return_value.all.return_value = []
+    _empty.scalar_one_or_none.return_value = 1
+    _empty.scalar.return_value = None
+    mock_session.execute.return_value = _empty
     story = _mock_story_obj(assignee_id=MEMBER_ID)
 
     client, app = await _make_client(mock_session)
