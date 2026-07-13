@@ -3535,6 +3535,11 @@
     "concurrencyMerge": "내 편집 위에 병합",
     "exportAction": "내보내기",
     "editAction": "편집",
-    "editAsNewVersionAction": "새 버전으로 편집"
+    "editAsNewVersionAction": "새 버전으로 편집",
+    "sectionLabel": "산출물",
+    "emptyTitle": "아직 산출물이 없는",
+    "emptyHint": "직접 그리거나, 에이전트에게 맡겨 만들 수 있는",
+    "createCta": "산출물 그리기",
+    "untitledArtifact": "제목 없는 산출물"
   }
 }
