@@ -92,25 +92,41 @@ describe('ArtifactViewer (SSR snapshot)', () => {
     expect(markup).not.toContain('정본 제안 대기 중');
   });
 
-  describe('story 385eb89a — 고정 넓이 html 잘림 대책', () => {
-    it('renders the html stage bounded to a fixed canvas width instead of forcing 100%(잘림 원인 제거)', () => {
+  describe('story 1948d19d — 캔버스 뷰포트 재설계(v1~v2.1 스크롤/오버레이 모델 전면 폐기)', () => {
+    it('renders the transform-canvas viewport for html — no more fixed 1200px scroll container', () => {
       const markup = renderToStaticMarkup(
         wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
       );
-      expect(markup).toContain('width:1200px');
+      expect(markup).toContain('data-artifact-canvas-viewport');
+      expect(markup).toContain('data-artifact-canvas-content');
+      expect(markup).not.toContain('width:1200px');
     });
 
-    it('tree format render is unaffected (회귀 0 — placeholder path untouched)', () => {
+    it('tree format shares the same canvas viewport (전 포맷 통일 — html-only 분기 소멸)', () => {
       const markup = renderToStaticMarkup(
         wrap(<ArtifactViewer artifact={MOCK_EDITABLE_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
       );
       expect(markup).toContain('트리 렌더는 준비 중');
-      expect(markup).not.toContain('width:1200px');
+      expect(markup).toContain('data-artifact-canvas-viewport');
     });
-  });
 
-  describe('story d425dccc — 뷰어 v2(pan + 크게 보기), 축소-fit 토글 제거', () => {
-    it('shows the expand("크게 보기") entry point only for html format, not tree/image', () => {
+    it('marks the html iframe pointer-events:none (crux — 상시 캡처 오버레이 폐기, iframe은 렌더된 오브젝트일 뿐)', () => {
+      const markup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(markup).toContain('pointer-events-none');
+    });
+
+    it('never renders the v1~v2.1 scroll/overlay remnants (data-artifact-stage-scroll·data-pan-overlay·고정폭 잘림 카피)', () => {
+      const markup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(markup).not.toContain('data-artifact-stage-scroll');
+      expect(markup).not.toContain('data-pan-overlay');
+      expect(markup).not.toContain('끌어서 이동');
+    });
+
+    it('shows the expand("크게 보기") entry point only for html format, not tree/image (기존 스코프 유지)', () => {
       const htmlMarkup = renderToStaticMarkup(
         wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
       );
@@ -122,45 +138,18 @@ describe('ArtifactViewer (SSR snapshot)', () => {
       expect(treeMarkup).not.toContain('크게 보기');
     });
 
-    it('never renders the removed shrink-to-fit toggle copy (방향 오판 정정 — 회귀 방지)', () => {
-      const markup = renderToStaticMarkup(
-        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
-      );
-      expect(markup).not.toContain('전체 보기');
-      expect(markup).not.toContain('aria-pressed');
-    });
-
-    it('renders the always-visible-scrollbar hook for the inline html stage', () => {
-      const markup = renderToStaticMarkup(
-        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
-      );
-      expect(markup).toContain('data-artifact-stage-scroll');
-    });
-
     it('the expand dialog is not rendered in the DOM when closed by default (base-ui portal, no leaked markup)', () => {
       const markup = renderToStaticMarkup(
         wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
       );
       expect(markup).not.toContain('90vw');
     });
-  });
 
-  describe('story e4cce704(v2.1) — space 게이트 완전 제거, 직접-드래그 pan', () => {
-    it('the pan overlay always renders with the grab cursor (즉시 가시 어포던스, space 대기 없음)', () => {
+    it('renders the coordinate-anchor pin overlay inside the canvas content layer (description pane 부활의 전제)', () => {
       const markup = renderToStaticMarkup(
-        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={MOCK_THREADS} />),
       );
-      expect(markup).toContain('data-pan-overlay');
-      expect(markup).toContain('cursor:grab');
-      expect(markup).not.toContain('pointer-events:none');
-    });
-
-    it('renders the updated drag hint copy, never the discarded space-based instruction', () => {
-      const markup = renderToStaticMarkup(
-        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
-      );
-      expect(markup).toContain('끌어서 이동');
-      expect(markup).not.toContain('스페이스');
+      expect(markup).toContain('data-artifact-canvas-overlay');
     });
   });
 });

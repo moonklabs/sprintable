@@ -24,6 +24,9 @@ export interface ArtifactVersion {
   /** 변경 이유(의미 단위) — raw 편집 나열 아님(핸드오프 §6 감시 게이트). */
   summary: string | null;
   created_at: string;
+  /** story 1948d19d §4(BE #2135) — 그 버전의 불변 스냅샷 아트보드 크기. nullable(레거시/미선언) —
+   * ArtifactStage가 null이면 포맷별 기본 아트보드로 폴백(가짜 추정 0, 측정 아니라 선언). */
+  canvasBounds?: { w: number; h: number } | null;
 }
 
 /**
@@ -120,7 +123,12 @@ export function deriveFormat(nodes: ArtifactNode[]): ArtifactFormat {
 /** BE `ArtifactNodeOut`(schemas/visual_artifact.py) 미러 — canvas-nodes.ts의 `ArtifactNode`와 동형. */
 export type BeArtifactNode = ArtifactNode;
 
-/** BE `VisualArtifactDetail`(schemas/visual_artifact.py) 미러 — flat 응답(중첩 아님). */
+/**
+ * BE `VisualArtifactDetail`(schemas/visual_artifact.py) 미러 — flat 응답(중첩 아님).
+ * `canvas_bounds`: story 1948d19d §4(BE #2135) — 이 버전(`version_number`)의 불변 스냅샷
+ * 아트보드 크기. nullable(레거시/미선언 허용) — #2135 머지 전엔 항상 undefined로 와도 무해
+ * (FE는 폴백 우선 설계라 옵셔널로만 소비).
+ */
 export interface BeVisualArtifactDetail {
   id: string;
   title: string;
@@ -135,9 +143,11 @@ export interface BeVisualArtifactDetail {
   version_number: number;
   version_summary: string | null;
   nodes: BeArtifactNode[];
+  canvas_bounds?: { w: number; h: number } | null;
 }
 
-/** BE `VisualArtifactSummary` 미러 — `GET /api/v2/visual-artifacts?story_id=` 목록 항목(nodes 없음). */
+/** BE `VisualArtifactSummary` 미러 — `GET /api/v2/visual-artifacts?story_id=` 목록 항목(nodes 없음).
+ * `canvas_bounds`: BE #2135 — latest 버전의 denorm 캐시(§4-1). */
 export interface BeVisualArtifactSummary {
   id: string;
   title: string;
@@ -149,6 +159,7 @@ export interface BeVisualArtifactSummary {
   anchor_version: number | null;
   created_by: string | null;
   created_at: string;
+  canvas_bounds?: { w: number; h: number } | null;
 }
 
 /**
@@ -195,6 +206,7 @@ export function adaptArtifactDetail(detail: BeVisualArtifactDetail): { artifact:
     created_by: detail.created_by ?? '',
     summary: detail.version_summary,
     created_at: detail.created_at,
+    canvasBounds: detail.canvas_bounds,
   };
   return { artifact, versions: [version] };
 }

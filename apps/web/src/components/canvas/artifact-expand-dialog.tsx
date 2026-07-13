@@ -12,14 +12,18 @@ interface ArtifactExpandDialogProps {
   title: string;
   format: ArtifactFormat;
   content: string;
+  /** story 1948d19d §4 — 선언된 아트보드 크기(있으면). 없으면 ArtifactStage가 기본 폴백. */
+  canvasBounds?: { w: number; h: number } | null;
 }
 
 /**
  * "크게 보기" 모달(story d425dccc 원조·story 3d888ba2에서 스토리 상세 뷰어와 갤러리가 공유하도록
- * 추출) — 큰 표면(≈90vw×85vh)에서 ArtifactStage를 `fill` 모드로 재렌더(html=실제 크기+직접
- * 드래그 pan, image/tree=해당 포맷 그대로). 신규 뷰어 0 — 기존 컴포넌트 재사용.
+ * 추출·story 1948d19d에서 ArtifactStage가 캔버스 뷰포트로 재작성되며 자동 계승) — 큰 표면
+ * (≈90vw×85vh)에서 같은 ArtifactStage를 재렌더. ArtifactStage는 이제 자기 컨테이너 크기를
+ * 그대로 채우는 캔버스 뷰포트라 별도 "fill 모드" 개념이 없다 — CSS로 큰 박스를 주면 그게 곧
+ * 큰 뷰포트다(인라인 카드도 동일 컴포넌트, 크기만 다름). 신규 뷰어 0 — 기존 컴포넌트 재사용.
  */
-export function ArtifactExpandDialog({ open, onOpenChange, title, format, content }: ArtifactExpandDialogProps) {
+export function ArtifactExpandDialog({ open, onOpenChange, title, format, content, canvasBounds }: ArtifactExpandDialogProps) {
   const t = useTranslations('canvas');
 
   return (
@@ -45,7 +49,7 @@ export function ArtifactExpandDialog({ open, onOpenChange, title, format, conten
             </DialogPrimitive.Close>
           </div>
           <div className="min-h-0 flex-1 overflow-hidden p-4">
-            <ArtifactStage format={format} content={content} title={title} fill />
+            <ArtifactStage format={format} content={content} title={title} canvasBounds={canvasBounds} />
           </div>
         </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>
