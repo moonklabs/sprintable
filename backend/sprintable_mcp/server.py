@@ -30,10 +30,12 @@ from .toolset import is_tool_allowed
 from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.visual_artifacts import (
-    AddArtifactCommentInput, CreateArtifactInput, EditArtifactInput, GetArtifactInput,
-    ListArtifactCommentsInput, ListArtifactsInput, ProposeCanonicalInput,
-    add_artifact_comment, create_artifact, edit_artifact, get_artifact, list_artifact_comments,
-    list_artifacts, propose_canonical_version,
+    AddArtifactCommentInput, CreateArtifactInput, CreateSpecPinInput, DeleteSpecPinInput,
+    EditArtifactInput, GetArtifactInput, ListArtifactCommentsInput, ListArtifactsInput,
+    ListSpecPinsInput, ProposeCanonicalInput, UpdateSpecPinInput,
+    add_artifact_comment, create_artifact, create_spec_pin, delete_spec_pin, edit_artifact,
+    get_artifact, list_artifact_comments, list_artifacts, list_spec_pins,
+    propose_canonical_version, update_spec_pin,
 )
 from .tools.agent_runs import (
     EmitEventInput, PollEventsInput, UpdateRunStatusInput,
@@ -505,7 +507,8 @@ _TOOL_DEFS: list[tuple] = [
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
      " 남김. 선택제(첨부 안 해도 무불이익).",
      AddEvidenceInput, add_evidence),
-    # Visual artifacts (7) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안)
+    # Visual artifacts (11) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
+    # 핀 저작(story 7fe16274)
     ("sprintable_create_artifact",
      "시각 산출물 생성(에이전트 생성 입구) — 트리(nodes[])로 구조화. 임포트된 raw HTML/이미지는"
      " type=\"html_blob\" 노드 하나로 감싸도 됨. canvas_bounds{w,h}(선택): 렌더 자기 프레임 크기"
@@ -531,6 +534,23 @@ _TOOL_DEFS: list[tuple] = [
      " 프레임 크기 재선언 — 미지정 시 직전 버전 값 유지·operations 비우고 이것만 보내도 유효"
      "(둘 다 비면 오류).",
      EditArtifactInput, edit_artifact),
+    ("sprintable_list_spec_pins",
+     "artifact 최신 버전의 스펙 핀 목록 조회(description pane 저작 대상 — 코멘트와 별개 레이어)."
+     " 작성자/시간 미노출(감시금지).",
+     ListSpecPinsInput, list_spec_pins),
+    ("sprintable_create_spec_pin",
+     "artifact에 스펙 핀 추가 — 요소/좌표에 description(핸드오프 스펙)을 앵커. anchor_type="
+     "\"coord\"면 anchor_x/anchor_y(canvas_bounds 좌표계, 0 이상) 둘 다 필수·node_id 금지."
+     " \"node\"면 node_id(get_artifact의 node.id) 필수·좌표 금지. description은 non-empty 강제"
+     "(빈 스펙 저장 불가). 핀은 최신 버전에 붙고 이후 edit_artifact마다 자동 계승(node 앵커는"
+     " 그 노드가 삭제되면 핀도 함께 소멸).",
+     CreateSpecPinInput, create_spec_pin),
+    ("sprintable_update_spec_pin",
+     "스펙 핀 description 재저작(덮어씀·스레드/이력 없음) — 최신 버전 소속 핀만 대상.",
+     UpdateSpecPinInput, update_spec_pin),
+    ("sprintable_delete_spec_pin",
+     "스펙 핀 삭제(최신 버전 소속만 대상).",
+     DeleteSpecPinInput, delete_spec_pin),
     ("sprintable_propose_canonical_version",
      "이 버전을 정본으로 제안(게이트 생성) — 제안만, 승인/반려는 항상 휴먼.",
      ProposeCanonicalInput, propose_canonical_version),

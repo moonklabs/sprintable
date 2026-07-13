@@ -71,6 +71,9 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
+    # 편집 캔버스 핀 저작(story 7fe16274) — 위 6개와 동형 cross-cutting(artifact 하위 자원).
+    "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
+    "sprintable_delete_spec_pin",
     # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project — 키 자기 신원/스코프 조회·전환
     # 유틸(sprintable_my_dashboard·sprintable_ping과 동형: 특정 비즈니스 도메인 아닌 self-scope
     # 도구). set_default_project는 write지만 caller 자신의 기본 프로젝트 설정만 바꾸는 self-scope
@@ -300,6 +303,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
+    "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
+    "sprintable_delete_spec_pin",
     # projects (E-MCP-OPT story ff6cb90d)
     "sprintable_list_projects", "sprintable_set_default_project",
 )

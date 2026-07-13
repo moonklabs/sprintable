@@ -11,7 +11,7 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.asset import Asset
 from app.models.visual_artifact import (
-    ArtifactComment, ArtifactExport, ArtifactNode, ArtifactVersion, VisualArtifact,
+    ArtifactComment, ArtifactExport, ArtifactNode, ArtifactSpecPin, ArtifactVersion, VisualArtifact,
 )
 from app.schemas.visual_artifact import (
     ArtifactCommentResponse,
@@ -23,9 +23,12 @@ from app.schemas.visual_artifact import (
     CompleteExportRequest,
     CreateArtifactCommentRequest,
     CreateArtifactRequest,
+    CreateSpecPinRequest,
     EditArtifactRequest,
     ExportUploadUrlRequest,
     ExportUploadUrlResponse,
+    SpecPinResponse,
+    UpdateSpecPinRequest,
     VisualArtifactDetail,
     VisualArtifactSummary,
 )
@@ -396,6 +399,132 @@ async def resolve_artifact_comment(
     await session.flush()
     await session.refresh(comment)
     return _ok(ArtifactCommentResponse.model_validate(comment).model_dump(mode="json"))
+
+
+# ─── Spec pins (편집 캔버스 핀 저작, story 7fe16274) ──────────────────────────
+# 그라운딩(디디): ArtifactComment(코멘트 핀)와 캔버스 핀 레이어를 공유하되(FE 시각 구분) 신설
+# 엔티티로 분리 — 버전 스코프(carry-forward 필요)·스레드/resolve 없음·명시 anchor_type 판별자가
+# 코멘트 모델과 근본적으로 달라 재사용 시 무의미한 컬럼이 방치됨(ArtifactSpecPin 클래스 docstring
+# 참조). 스펙 핀은 항상 artifact의 **latest version**을 대상으로 조회/생성/수정/삭제한다(과거
+# 버전의 핀은 그 버전 스냅샷으로 고정·불변 — carry-forward는 _apply_artifact_edit에서만 발생).
+
+
+@router.get("/{id}/pins")
+async def list_spec_pins(
+    id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    latest = await _get_version_or_404(session, artifact.id, artifact.latest_version_number)
+    if latest is None:
+        return _err("NOT_FOUND", "Artifact version not found", 404)
+    rows = (await session.execute(
+        select(ArtifactSpecPin).where(ArtifactSpecPin.version_id == latest.id)
+        .order_by(ArtifactSpecPin.created_at.asc())
+    )).scalars().all()
+    return _ok([SpecPinResponse.model_validate(r).model_dump(mode="json") for r in rows])
+
+
+@router.post("/{id}/pins", status_code=201)
+async def create_spec_pin(
+    id: uuid.UUID,
+    body: CreateSpecPinRequest,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    latest = await _get_version_or_404(session, artifact.id, artifact.latest_version_number)
+    if latest is None:
+        return _err("NOT_FOUND", "Artifact version not found", 404)
+
+    if body.anchor_type == "node":
+        # cross-artifact 위조 차단 동형(source_comment_id·comment.node_id 패턴) + node는 반드시
+        # **latest version** 소속이어야 함(구버전 node는 이번 edit 스냅샷 밖 — carry-forward
+        # id_remap 대상이 아니라 즉시 stale).
+        node_owner = (await session.execute(
+            select(ArtifactNode.artifact_id).where(
+                ArtifactNode.id == body.node_id, ArtifactNode.version_id == latest.id,
+            )
+        )).scalar_one_or_none()
+        if node_owner != artifact.id:
+            return _err("NOT_FOUND", "Node not found on the artifact's latest version", 404)
+
+    pin = ArtifactSpecPin(
+        id=uuid.uuid4(), artifact_id=artifact.id, version_id=latest.id,
+        anchor_type=body.anchor_type, anchor_x=body.anchor_x, anchor_y=body.anchor_y,
+        node_id=body.node_id, description=body.description,
+    )
+    session.add(pin)
+    await session.flush()
+    return _ok(SpecPinResponse.model_validate(pin).model_dump(mode="json"), status=201)
+
+
+async def _get_latest_spec_pin_or_404(
+    session: AsyncSession, artifact: VisualArtifact, pin_id: uuid.UUID,
+) -> ArtifactSpecPin | None:
+    latest = await _get_version_or_404(session, artifact.id, artifact.latest_version_number)
+    if latest is None:
+        return None
+    return (await session.execute(
+        select(ArtifactSpecPin).where(
+            ArtifactSpecPin.id == pin_id, ArtifactSpecPin.artifact_id == artifact.id,
+            ArtifactSpecPin.version_id == latest.id,
+        )
+    )).scalar_one_or_none()
+
+
+@router.patch("/{id}/pins/{pin_id}")
+async def update_spec_pin(
+    id: uuid.UUID,
+    pin_id: uuid.UUID,
+    body: UpdateSpecPinRequest,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    pin = await _get_latest_spec_pin_or_404(session, artifact, pin_id)
+    if pin is None:
+        return _err("NOT_FOUND", "Spec pin not found on the artifact's latest version", 404)
+    pin.description = body.description
+    await session.flush()
+    return _ok(SpecPinResponse.model_validate(pin).model_dump(mode="json"))
+
+
+@router.delete("/{id}/pins/{pin_id}")
+async def delete_spec_pin(
+    id: uuid.UUID,
+    pin_id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    pin = await _get_latest_spec_pin_or_404(session, artifact, pin_id)
+    if pin is None:
+        return _err("NOT_FOUND", "Spec pin not found on the artifact's latest version", 404)
+    await session.delete(pin)
+    await session.flush()
+    return _ok({"ok": True, "id": str(pin_id)})
 
 
 # ─── Export (E-CANVAS C1-S5, story 1f365e33) ──────────────────────────────────
@@ -772,6 +901,29 @@ async def _apply_artifact_edit(
             type=data["type"], props=data["props"], parent_id=remapped_parent_id,
             sort_order=data["sort_order"], description=data["description"],
         ))
+
+    # 스펙 핀 carry-forward(story 7fe16274) — node와 동형 이유로 새 버전이 자기 소유 pin row
+    # 세트를 갖는다. coord 앵커는 그대로 계승·node 앵커는 id_remap으로 재해석(reflow-safe).
+    # 이번 edit에서 삭제된 노드를 가리키던 pin은 계승 안 함(no-fiction — 죽은 앵커를 이어가지
+    # 않음, 조용히 drop).
+    existing_pins = (await session.execute(
+        select(ArtifactSpecPin).where(ArtifactSpecPin.version_id == latest.id)
+    )).scalars().all()
+    for pin in existing_pins:
+        if pin.anchor_type == "node":
+            new_node_id = id_remap.get(pin.node_id)
+            if new_node_id is None:
+                continue
+            session.add(ArtifactSpecPin(
+                id=uuid.uuid4(), artifact_id=artifact.id, version_id=new_version.id,
+                anchor_type="node", node_id=new_node_id, description=pin.description,
+            ))
+        else:
+            session.add(ArtifactSpecPin(
+                id=uuid.uuid4(), artifact_id=artifact.id, version_id=new_version.id,
+                anchor_type="coord", anchor_x=pin.anchor_x, anchor_y=pin.anchor_y,
+                description=pin.description,
+            ))
 
     artifact.latest_version_number = new_version_number
     artifact.canvas_bounds = new_canvas_bounds
