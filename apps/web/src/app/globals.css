@@ -423,6 +423,13 @@
   *::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
   *::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
+  /* story d425dccc — 산출물 뷰어 가로 스크롤바 상시 가시화. 앱 전역 스크롤바(6px·10% 불투명
+   * thumb)는 macOS에서 낮은 대비로 "스크롤 자체가 없다"는 오인을 낳았다(선생님 실사용 지적) —
+   * 이 스테이지만 더 두껍고 고대비인 thumb으로 발견성을 높인다. */
+  [data-artifact-stage-scroll]::-webkit-scrollbar { width: 10px; height: 10px; }
+  [data-artifact-stage-scroll]::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb-hover); border-radius: 5px; }
+  [data-artifact-stage-scroll] { scrollbar-width: auto; }
+
   html {
     @apply font-sans;
     text-autospace: ideograph-alpha ideograph-numeric;

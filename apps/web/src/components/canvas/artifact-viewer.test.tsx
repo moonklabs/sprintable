@@ -100,26 +100,57 @@ describe('ArtifactViewer (SSR snapshot)', () => {
       expect(markup).toContain('width:1200px');
     });
 
-    it('shows the fit/actual-size toggle only for html format', () => {
-      const htmlMarkup = renderToStaticMarkup(
-        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
-      );
-      expect(htmlMarkup).toContain('전체 보기');
-      expect(htmlMarkup).toContain('실제 크기');
-
-      const treeMarkup = renderToStaticMarkup(
-        wrap(<ArtifactViewer artifact={MOCK_EDITABLE_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
-      );
-      expect(treeMarkup).not.toContain('전체 보기');
-      expect(treeMarkup).not.toContain('실제 크기');
-    });
-
     it('tree format render is unaffected (회귀 0 — placeholder path untouched)', () => {
       const markup = renderToStaticMarkup(
         wrap(<ArtifactViewer artifact={MOCK_EDITABLE_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
       );
       expect(markup).toContain('트리 렌더는 준비 중');
       expect(markup).not.toContain('width:1200px');
+    });
+  });
+
+  describe('story d425dccc — 뷰어 v2(pan + 크게 보기), 축소-fit 토글 제거', () => {
+    it('shows the expand("크게 보기") entry point only for html format, not tree/image', () => {
+      const htmlMarkup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(htmlMarkup).toContain('크게 보기');
+
+      const treeMarkup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_EDITABLE_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(treeMarkup).not.toContain('크게 보기');
+    });
+
+    it('never renders the removed shrink-to-fit toggle copy (방향 오판 정정 — 회귀 방지)', () => {
+      const markup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(markup).not.toContain('전체 보기');
+      expect(markup).not.toContain('aria-pressed');
+    });
+
+    it('renders the always-visible-scrollbar hook and pan hint copy for the inline html stage', () => {
+      const markup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(markup).toContain('data-artifact-stage-scroll');
+      expect(markup).toContain('스페이스를 누른 채 드래그하면 이동합니다');
+    });
+
+    it('the pan overlay starts inert (pointer-events:none) until space is held — no accidental capture', () => {
+      const markup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(markup).toContain('data-pan-overlay');
+      expect(markup).not.toContain('data-pan-active');
+    });
+
+    it('the expand dialog is not rendered in the DOM when closed by default (base-ui portal, no leaked markup)', () => {
+      const markup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(markup).not.toContain('90vw');
     });
   });
 });

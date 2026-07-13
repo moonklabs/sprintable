@@ -1,8 +1,10 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { Check, Clock, Download, MessageCircle, Pencil, Sparkles } from 'lucide-react';
+import { Check, Clock, Download, Maximize2, MessageCircle, Pencil, Sparkles } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
+import { cn } from '@/lib/utils';
 import { ArtifactStage } from './artifact-stage';
 import { ArtifactVersionRail } from './artifact-version-rail';
 import { AnchorPin } from './anchor-pin';
@@ -51,7 +53,7 @@ export function ArtifactViewer({
 }: ArtifactViewerProps) {
   const t = useTranslations('canvas');
   const [selectedVersion, setSelectedVersion] = useState(artifact.current_version);
-  const [fitToView, setFitToView] = useState(false);
+  const [expandOpen, setExpandOpen] = useState(false);
   const isViewingAnchor = selectedVersion === artifact.anchor_version;
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -80,27 +82,18 @@ export function ArtifactViewer({
               <option key={v.id} value={v.version}>v{v.version}</option>
             ))}
           </select>
-          {/* story 385eb89a v1+ — 고정 넓이 html 전용 전체보기/실제크기 토글. tree/image는
-           * 이미 컨테이너에 맞춰 렌더돼 토글 자체가 무의미해 노출하지 않는다. */}
+          {/* story d425dccc — 고정 넓이 html 전용 확대 뷰 진입점. v1의 축소-fit 토글은 방향
+           * 오판으로 제거(스펙 ⓒ 판정) — 대신 큰 표면에서 실제 크기+pan으로 본다.
+           * tree/image는 컨테이너에 맞춰 이미 렌더돼 대상이 아니다. */}
           {artifact.format === 'html' ? (
-            <div className="flex items-center rounded-md border border-border text-[11px] font-medium text-muted-foreground">
-              <button
-                type="button"
-                onClick={() => setFitToView(true)}
-                aria-pressed={fitToView}
-                className={`rounded-l-md px-1.5 py-0.5 ${fitToView ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'}`}
-              >
-                {t('viewerFitToggleFit')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setFitToView(false)}
-                aria-pressed={!fitToView}
-                className={`rounded-r-md px-1.5 py-0.5 ${!fitToView ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'}`}
-              >
-                {t('viewerFitToggleActual')}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setExpandOpen(true)}
+              className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <Maximize2 className="h-3 w-3" aria-hidden />
+              {t('viewerExpandAction')}
+            </button>
           ) : null}
           {artifact.anchor_version != null ? (
             <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-success/85">
@@ -159,7 +152,7 @@ export function ArtifactViewer({
         <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_232px]">
           <div ref={captureTargetRef} className="relative min-w-0 bg-muted/20 p-4">
             {activeVersion ? (
-              <ArtifactStage format={artifact.format} content={activeVersion.content} title={artifact.title} fitToView={fitToView} />
+              <ArtifactStage format={artifact.format} content={activeVersion.content} title={artifact.title} />
             ) : null}
             {/* C2 §1 — 좌표 앵커 스레드만 오버레이(element 앵커는 실 artifact tree 좌표 유도 필요, 후속). */}
             {threads?.filter((th) => th.anchor.kind === 'coordinate').map((th) => (
@@ -214,6 +207,35 @@ export function ArtifactViewer({
         captureTargetRef={captureTargetRef}
         artifactFormat={artifact.format}
       />
+      {activeVersion && artifact.format === 'html' ? (
+        <DialogPrimitive.Root open={expandOpen} onOpenChange={setExpandOpen}>
+          <DialogPrimitive.Portal>
+            <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/40 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+            <DialogPrimitive.Popup
+              className={cn(
+                'fixed top-1/2 left-1/2 z-50 flex h-[85vh] w-[90vw] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden',
+                'rounded-xl bg-card shadow-lg ring-1 ring-foreground/10 outline-none',
+                'data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95',
+                'data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95',
+              )}
+            >
+              <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+                <DialogPrimitive.Title className="truncate text-sm font-semibold text-foreground">
+                  {artifact.title}
+                </DialogPrimitive.Title>
+                <DialogPrimitive.Close
+                  className="ml-auto rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  {t('closeAction')}
+                </DialogPrimitive.Close>
+              </div>
+              <div className="min-h-0 flex-1 overflow-hidden p-4">
+                <ArtifactStage format={artifact.format} content={activeVersion.content} title={artifact.title} fill />
+              </div>
+            </DialogPrimitive.Popup>
+          </DialogPrimitive.Portal>
+        </DialogPrimitive.Root>
+      ) : null}
     </div>
   );
 }

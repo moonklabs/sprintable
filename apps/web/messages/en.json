@@ -3566,7 +3566,7 @@
     "galleryLatestChip": "Up to v{version}",
     "galleryLazyHint": "Expanding loads earlier versions.",
     "galleryVersionsUnavailable": "Couldn't load earlier versions.",
-    "viewerFitToggleFit": "Fit to view",
-    "viewerFitToggleActual": "Actual size"
+    "viewerExpandAction": "Expand view",
+    "viewerPanHint": "Hold space and drag to pan"
   }
 }
