@@ -151,20 +151,33 @@ export function ArtifactViewer({
         <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_232px]">
           <div ref={captureTargetRef} className="relative min-w-0 bg-muted/20 p-4">
             {activeVersion ? (
-              <ArtifactStage format={artifact.format} content={activeVersion.content} title={artifact.title} />
+              <div className="h-[320px] w-full">
+                <ArtifactStage
+                  format={artifact.format}
+                  content={activeVersion.content}
+                  title={artifact.title}
+                  canvasBounds={activeVersion.canvasBounds}
+                  overlay={
+                    // C2 §1 — 좌표 앵커 스레드만 오버레이(element 앵커는 실 artifact tree 좌표 유도 필요, 후속).
+                    // story 1948d19d §2 — 이제 ArtifactStage의 캔버스 좌표계 안에서 pan/zoom을 그대로
+                    // 물려받는다(v2.1 상시 캡처 오버레이가 삼켰던 핀 클릭이 여기서 복원된다).
+                    <>
+                      {threads?.filter((th) => th.anchor.kind === 'coordinate').map((th) => (
+                        <AnchorPin
+                          key={th.id}
+                          number={th.pin_number}
+                          state={th.rollup === 'resolved' ? 'resolved' : 'open'}
+                          active={th.id === selectedThreadId}
+                          onClick={() => setSelectedThreadId((cur) => (cur === th.id ? null : th.id))}
+                          className="absolute z-10"
+                          style={{ left: `${th.anchor.x}%`, top: `${th.anchor.y}%` }}
+                        />
+                      ))}
+                    </>
+                  }
+                />
+              </div>
             ) : null}
-            {/* C2 §1 — 좌표 앵커 스레드만 오버레이(element 앵커는 실 artifact tree 좌표 유도 필요, 후속). */}
-            {threads?.filter((th) => th.anchor.kind === 'coordinate').map((th) => (
-              <AnchorPin
-                key={th.id}
-                number={th.pin_number}
-                state={th.rollup === 'resolved' ? 'resolved' : 'open'}
-                active={th.id === selectedThreadId}
-                onClick={() => setSelectedThreadId((cur) => (cur === th.id ? null : th.id))}
-                className="absolute z-10"
-                style={{ left: `${th.anchor.x}%`, top: `${th.anchor.y}%` }}
-              />
-            ))}
           </div>
           <ArtifactVersionRail
             artifact={artifact}
@@ -213,6 +226,7 @@ export function ArtifactViewer({
           title={artifact.title}
           format={artifact.format}
           content={activeVersion.content}
+          canvasBounds={activeVersion.canvasBounds}
         />
       ) : null}
     </div>

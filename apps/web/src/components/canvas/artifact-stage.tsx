@@ -1,25 +1,37 @@
-import { useEffect, useRef, useState } from 'react';
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { cn } from '@/lib/utils';
+import { Maximize2, Scan } from 'lucide-react';
 import type { ArtifactFormat } from '@/services/canvas';
 
 /**
- * story 385eb89a — 고정 넓이 html_blob 잘림 대책. sandbox=""(allow-same-origin 없음)라 iframe
- * 내부 문서 폭을 측정할 수 없어(cross-origin) 실 콘텐츠 폭을 알 방법이 없다 — 대신 iframe 자체
- * 박스를 이 고정 "캔버스" 폭으로 렌더해 내용이 접히지 않게 하고, wrapper가 스크롤한다.
+ * story 1948d19d — 캔버스 뷰포트 전면 재설계. 설계 SSOT: doc `artifact-canvas-viewport-spec`.
+ * v1(385eb89a·스크롤+overflow) → v2(d425dccc·space+드래그 pan) → v2.1(e4cce704·상시 오버레이
+ * 직접드래그) 세 번의 "증상 단위" 패치가 전부 틀린 모델(스크롤 문서 창) 안에서 반복됐던 게
+ * 근본 문제 — 산출물은 스크롤 문서가 아니라 **캔버스 위 오브젝트**(Figma 캔버스 뷰포트 레퍼런스).
  *
- * story d425dccc — v1의 축소-fit "전체 보기" 토글은 선생님 실사용 결과 제거(유나 스펙 ⓒ 판정 —
- * 축소는 디테일을 못 보게 해 원하는 것과 반대). 대신 ⓐ space+드래그 pan ⓑ 가로 스크롤바 상시
- * 가시화로 대체 — wrapper는 항상 실제 크기로 렌더하고 이동 수단만 강화한다.
- *
- * story e4cce704(v2.1) — space 게이트를 완전 제거(선생님 실사용 지적 3차: 뷰어 밖에서 space를
- * 누르면 그대로 페이지 스크롤 다운으로 새 — hover-gate라 게이트 상태가 비가시라 "고장"으로
- * 읽힘). 오버레이를 상시 활성화해 **드래그만으로 pan**하도록 단순화(유나 판정 확定, KISS —
- * "클릭 통과" 절충은 cross-origin에서 반쯤 작동하는 복잡 상태라 명시 거부됨). 트레이드오프:
- * 오버레이가 항상 포인터를 가로채 iframe 내부 텍스트 선택은 포기(뷰어=탐색이 본업).
+ * 이 재작성으로 v1~v2.1의 overflow·스크롤바·space 잔재가 전부 소멸한다:
+ * - 뷰포트 = `transform: translate(tx,ty) scale(s)` 하나 — pan은 전방향(가로/세로 구분 없음)·
+ *   "잘림" 상태 자체가 없다(콘텐츠는 항상 캔버스 위 어딘가에 있고, 안 보이면 이동하면 그만).
+ * - 휠=pan·⌘/Ctrl+휠(트랙패드 핀치와 동일 신호)=커서 중심 줌.
+ * - **crux(v2.1 오류 교정)**: 상시 전면 캡처 오버레이를 폐기 — iframe/img/tree 콘텐츠는 항상
+ *   `pointer-events:none`(렌더된 오브젝트일 뿐, 상호작용 대상이 아님). 핀 등 우리 DOM 오버레이만
+ *   `pointer-events:auto`로 상호작용 가능 — 이동-임계값(4px) 초과 드래그 중엔 오버레이도
+ *   pointer-events:none으로 전환해 "핀 위에서 시작한 드래그가 pan으로 해석"을 순수 CSS로
+ *   구현한다(핀 자체의 onClick은 무변경 — 임계 미달=일반 클릭이 그대로 발화).
  */
-const HTML_STAGE_WIDTH = 1200;
-const HTML_STAGE_HEIGHT = 280;
+
+const DEFAULT_BOUNDS = { w: 1280, h: 800 }; // 문서형 기본 아트보드 — canvas_bounds 미선언 폴백(§4, 가짜 추정 아님·명시된 규약)
+const MIN_SCALE = 0.1;
+const MAX_SCALE = 4;
+const DRAG_THRESHOLD_PX = 4;
+const PAN_MARGIN_PX = 120; // soft bound — 콘텐츠가 이 여백 밖으로 완전히 사라지진 않게
+const WHEEL_ZOOM_SENSITIVITY = 0.0015;
+
+function clamp(v: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, v));
+}
 
 /**
  * E-CANVAS C1 — tree 포맷 최소 노드 shape. BE 계약(디디 C1-S3) 착지 전 잠정 — 실 계약이
@@ -64,114 +76,239 @@ interface ArtifactStageProps {
   format: ArtifactFormat;
   content: string;
   title: string;
-  /** story d425dccc — "크게 보기" 모달 전용. true면 인라인 프리뷰의 고정 280px 대신 부모
-   * 컨테이너 높이를 꽉 채운다(더 넓은 뷰포트로 스크롤/pan 부담을 줄이는 게 모달의 목적).
-   * html 포맷 외엔 무시. */
-  fill?: boolean;
+  /** story 1948d19d §4(BE #2135) — 선언된 아트보드 크기(그 버전의 불변 스냅샷). null/undefined
+   * (레거시·미선언·#2135 착지 전)면 포맷별 기본 아트보드로 폴백(가짜 추정 0 — 측정이 아니라
+   * 선언된 규약). image 포맷은 이 값과 무관하게 로드 후 실측 자연 크기를 우선한다. */
+  canvasBounds?: { w: number; h: number } | null;
+  /** story 1948d19d §2 — 캔버스 좌표계(bounds 기준 %) 오버레이(핀·앵커·마커 등 우리 DOM).
+   * 뷰포트 transform을 그대로 물려받아 pan/zoom에 동반 이동한다. 드래그 확定 중엔 이 레이어
+   * 전체가 pointer-events:none으로 전환돼 핀 위에서 시작한 드래그가 pan으로만 해석된다
+   * (핀 자신의 onClick은 무변경 — 임계 미달 클릭만 정상 발화). */
+  overlay?: React.ReactNode;
 }
 
 /**
- * html 산출물의 직접-드래그 pan(story e4cce704, v2.1). sandbox=""(allow-scripts 없음) iframe은
- * 자기 자신의 포인터 이벤트를 소비해 드래그가 iframe 경계에서 끊기므로, 투명 오버레이(우리
- * DOM)로 포인터를 상시 가로채는 방식으로 우회한다 — sandbox 완화 없음(iframe 내부는 여전히
- * 0접근). space 게이트 없음(v2에서 hover-gate로 있었으나 뷰어 밖에서 space 누르면 그대로
- * 페이지 스크롤로 새는 혼란이라 완전 제거) — 오버레이가 항상 pointer-events:auto+grab
- * 커서라 즉시 가시적인 어포던스, mousedown 즉시 드래그 시작. 트레이드오프: iframe 내부
- * 텍스트 선택은 포기(뷰어=탐색이 본업, 유나 확定).
+ * story 1948d19d — transform 캔버스 뷰포트 엔진. 3포맷(html/image/tree) 공유 — "전 표면 통일"의
+ * 핵심은 이 하나의 pan/zoom/선택 계약이지 포맷별 렌더 방식이 아니다(포맷은 콘텐츠 레이어
+ * 안쪽만 다름). sandbox 무완화 유지(iframe은 여전히 `sandbox=""`) — pointer-events:none이라
+ * 상호작용 레이어와 물리적으로 분리되므로 완화할 필요 자체가 없다.
  */
-function PanOverlay({ wrapperRef }: { wrapperRef: React.RefObject<HTMLDivElement | null> }) {
-  const [dragging, setDragging] = useState(false);
-  const dragStartRef = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+function CanvasViewport({ format, content, title, canvasBounds, overlay }: {
+  format: ArtifactFormat; content: string; title: string;
+  canvasBounds?: { w: number; h: number } | null; overlay?: React.ReactNode;
+}) {
+  const t = useTranslations('canvas');
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 });
+  const [transform, setTransform] = useState({ tx: 0, ty: 0, scale: 1 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [imageBounds, setImageBounds] = useState<{ w: number; h: number } | null>(null);
+  const dragRef = useRef({ startX: 0, startY: 0, startTx: 0, startTy: 0, movedPast: false, pointerId: -1 });
+  const firedFitRef = useRef(false);
 
+  // image=실측 우선(로드 후 자연 크기가 선언보다 정확) → 그 다음 선언된 canvas_bounds(§4,
+  // BE #2135) → 마지막 포맷별 기본 아트보드(가짜 추정 아님·명시된 폴백 규약).
+  const bounds = format === 'image' && imageBounds ? imageBounds : (canvasBounds ?? DEFAULT_BOUNDS);
+
+  useEffect(() => { setImageBounds(null); firedFitRef.current = false; }, [content]);
+
+  // ResizeObserver 미지원 환경(구형 브라우저·이 프로젝트 vitest jsdom) — 정적 폴백, 크래시 방지.
   useEffect(() => {
-    if (!dragging) return;
-    function onMouseMove(e: MouseEvent) {
-      const el = wrapperRef.current;
-      if (!el) return;
-      const { x, y, scrollLeft, scrollTop } = dragStartRef.current;
-      el.scrollLeft = scrollLeft - (e.clientX - x);
-      el.scrollTop = scrollTop - (e.clientY - y);
-    }
-    function onMouseUp() {
-      setDragging(false);
-    }
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-  }, [dragging, wrapperRef]);
-
-  function handleMouseDown(e: React.MouseEvent) {
-    const el = wrapperRef.current;
+    const el = viewportRef.current;
     if (!el) return;
-    dragStartRef.current = { x: e.clientX, y: e.clientY, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop };
-    setDragging(true);
+    const measure = () => setViewportSize({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const clampPan = useCallback((tx: number, ty: number, scale: number, vw: number, vh: number) => {
+    const contentW = bounds.w * scale;
+    const contentH = bounds.h * scale;
+    const minTx = vw - contentW - PAN_MARGIN_PX;
+    const maxTx = PAN_MARGIN_PX;
+    const minTy = vh - contentH - PAN_MARGIN_PX;
+    const maxTy = PAN_MARGIN_PX;
+    return {
+      tx: minTx <= maxTx ? clamp(tx, minTx, maxTx) : (vw - contentW) / 2,
+      ty: minTy <= maxTy ? clamp(ty, minTy, maxTy) : (vh - contentH) / 2,
+    };
+  }, [bounds.w, bounds.h]);
+
+  const fitToView = useCallback(() => {
+    const { w: vw, h: vh } = viewportSize;
+    if (vw === 0 || vh === 0) return;
+    const scale = clamp(Math.min(vw / bounds.w, vh / bounds.h), MIN_SCALE, MAX_SCALE);
+    const tx = (vw - bounds.w * scale) / 2;
+    const ty = (vh - bounds.h * scale) / 2;
+    setTransform({ tx, ty, scale });
+  }, [viewportSize, bounds.w, bounds.h]);
+
+  const actualSize = useCallback(() => {
+    const { w: vw, h: vh } = viewportSize;
+    const tx = (vw - bounds.w) / 2;
+    const ty = (vh - bounds.h) / 2;
+    setTransform({ tx, ty, scale: 1 });
+  }, [viewportSize, bounds.w, bounds.h]);
+
+  // 최초 진입 = fit(콘텐츠 전체가 즉시 보이는 것이 재설계의 근본 목적 — "잘림 상태 부존재").
+  useEffect(() => {
+    if (firedFitRef.current) return;
+    if (viewportSize.w === 0 || viewportSize.h === 0) return;
+    firedFitRef.current = true;
+    fitToView();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 최초 1회만(콘텐츠/뷰포트 변경 시 재-fit 강제 안 함, 사용자가 이미 조작했을 수 있음)
+  }, [viewportSize.w, viewportSize.h]);
+
+  function handlePointerDown(e: React.PointerEvent) {
+    if (e.button !== 0) return;
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startTx: transform.tx, startTy: transform.ty, movedPast: false, pointerId: e.pointerId };
+    const el = e.currentTarget as HTMLElement;
+    // 구형 브라우저·이 프로젝트 vitest jsdom 둘 다 미지원 가능 — pan 자체는 capture 없이도
+    // 동작(빠른 드래그가 요소 밖으로 나가면 move를 놓칠 수 있는 정도의 성능 저하일 뿐).
+    if (typeof el.setPointerCapture === 'function') el.setPointerCapture(e.pointerId);
+  }
+
+  function handlePointerMove(e: React.PointerEvent) {
+    const d = dragRef.current;
+    if (d.pointerId !== e.pointerId) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+    if (!d.movedPast && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
+      d.movedPast = true;
+      setIsDragging(true);
+    }
+    if (d.movedPast) {
+      const next = clampPan(d.startTx + dx, d.startTy + dy, transform.scale, viewportSize.w, viewportSize.h);
+      setTransform((cur) => ({ ...cur, ...next }));
+    }
+  }
+
+  function handlePointerUp(e: React.PointerEvent) {
+    const d = dragRef.current;
+    if (d.pointerId !== e.pointerId) return;
+    const el = e.currentTarget as HTMLElement;
+    if (typeof el.releasePointerCapture === 'function') el.releasePointerCapture(e.pointerId);
+    dragRef.current.pointerId = -1;
+    setIsDragging(false);
+  }
+
+  function handleWheel(e: React.WheelEvent) {
+    e.preventDefault();
+    const rect = viewportRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    if (e.ctrlKey || e.metaKey) {
+      // ⌘/Ctrl+휠 · 트랙패드 핀치(브라우저가 ctrlKey=true wheel로 합성) — 커서 중심 줌.
+      const localX = e.clientX - rect.left;
+      const localY = e.clientY - rect.top;
+      setTransform((cur) => {
+        const nextScale = clamp(cur.scale * (1 - e.deltaY * WHEEL_ZOOM_SENSITIVITY), MIN_SCALE, MAX_SCALE);
+        const contentX = (localX - cur.tx) / cur.scale;
+        const contentY = (localY - cur.ty) / cur.scale;
+        const next = clampPan(localX - contentX * nextScale, localY - contentY * nextScale, nextScale, viewportSize.w, viewportSize.h);
+        return { ...next, scale: nextScale };
+      });
+    } else {
+      setTransform((cur) => {
+        const next = clampPan(cur.tx - e.deltaX, cur.ty - e.deltaY, cur.scale, viewportSize.w, viewportSize.h);
+        return { ...cur, ...next };
+      });
+    }
   }
 
   return (
-    <div
-      role="presentation"
-      data-pan-overlay
-      onMouseDown={handleMouseDown}
-      className="absolute inset-0"
-      style={{ cursor: dragging ? 'grabbing' : 'grab' }}
-    />
-  );
-}
-
-/**
- * 포맷별 렌더 스테이지. html=완전 잠금 샌드박스 iframe(`sandbox=""` — allow-scripts·
- * allow-same-origin 둘 다 없음, 핸드오프 §3-1 + 유나 디자인 가디언 보안 지적 반영).
- * artifact HTML은 인라인 `<style>`만 쓰므로 same-origin 리소스 접근이 필요 없어 최대
- * 잠금이 안전(CSS 렌더링은 sandbox 플래그와 무관하게 항상 동작함)·image=바운드 img·
- * tree=경량 노드 렌더(전신 componentCatalog의 리치 렌더는 후속 — 지금은 shell 준비 단계).
- */
-export function ArtifactStage({ format, content, title, fill = false }: ArtifactStageProps) {
-  const t = useTranslations('canvas');
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  if (format === 'html') {
-    return (
-      <div className={fill ? 'flex h-full w-full flex-col' : 'w-full'}>
-        {/* overlay는 스크롤 컨테이너 밖(형제)에 둔다 — 안에 두면 pan으로 스크롤될 때 overlay
-         * 자신도 같이 밀려나 뷰포트 밖으로 나가버린다(자기 자신이 캡처하는 영역을 잃는 순환
-         * 버그). 밖에 두면 wrapper의 보이는 영역(clientHeight)에 항상 고정된다. */}
-        <div className={fill ? 'relative min-h-0 w-full flex-1' : 'relative w-full'}>
-          <div
-            ref={wrapperRef}
-            data-artifact-stage-scroll
-            className={cn('w-full overflow-auto rounded-lg border border-border bg-background', fill && 'h-full')}
-            style={{ scrollbarGutter: 'stable' }}
-          >
+    <div className="flex h-full w-full flex-col">
+      <div
+        ref={viewportRef}
+        data-artifact-canvas-viewport
+        className="relative min-h-0 w-full flex-1 touch-none overflow-hidden rounded-lg border border-border bg-muted/20"
+        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onWheel={handleWheel}
+      >
+        <div
+          data-artifact-canvas-content
+          className="absolute top-0 left-0"
+          style={{
+            width: bounds.w, height: bounds.h,
+            transform: `translate(${transform.tx}px, ${transform.ty}px) scale(${transform.scale})`,
+            transformOrigin: '0 0',
+          }}
+        >
+          {format === 'html' ? (
             <iframe
               title={title}
               srcDoc={content}
               sandbox=""
-              className="rounded-lg"
-              style={{ width: HTML_STAGE_WIDTH, height: fill ? '100%' : HTML_STAGE_HEIGHT }}
+              className="pointer-events-none rounded-lg bg-background"
+              style={{ width: bounds.w, height: bounds.h }}
             />
-          </div>
-          <PanOverlay wrapperRef={wrapperRef} />
+          ) : format === 'image' ? (
+            // eslint-disable-next-line @next/next/no-img-element -- artifact content는 외부/동적 URL이라 next/image 화이트리스트와 안 맞음.
+            <img
+              src={content}
+              alt={title}
+              className="pointer-events-none block h-full w-full rounded-lg object-contain"
+              onLoad={(e) => {
+                const img = e.currentTarget;
+                if (img.naturalWidth > 0 && img.naturalHeight > 0) setImageBounds({ w: img.naturalWidth, h: img.naturalHeight });
+              }}
+            />
+          ) : (
+            <TreeStageContent content={content} placeholder={t('treeRenderPlaceholder')} />
+          )}
+          {overlay ? (
+            <div
+              data-artifact-canvas-overlay
+              className="absolute inset-0"
+              style={{ pointerEvents: isDragging ? 'none' : 'auto' }}
+            >
+              {overlay}
+            </div>
+          ) : null}
         </div>
-        <p className="mt-1.5 shrink-0 text-[11px] text-muted-foreground">{t('viewerPanHint')}</p>
       </div>
-    );
-  }
+      <div className="mt-1.5 flex shrink-0 items-center justify-between gap-2">
+        <p className="text-[11px] text-muted-foreground">{t('viewerCanvasHint')}</p>
+        <div className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+          <span className="tabular-nums">{Math.round(transform.scale * 100)}%</span>
+          <button type="button" onClick={fitToView} title={t('viewerFitAction')} className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 hover:bg-muted hover:text-foreground">
+            <Scan className="size-3" aria-hidden />
+            {t('viewerFitAction')}
+          </button>
+          <button type="button" onClick={actualSize} title={t('viewerActualSizeAction')} className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 hover:bg-muted hover:text-foreground">
+            <Maximize2 className="size-3" aria-hidden />
+            {t('viewerActualSizeAction')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  if (format === 'image') {
-    // eslint-disable-next-line @next/next/no-img-element -- artifact content는 외부/동적 URL(임의 도메인)이라 next/image 도메인 화이트리스트와 안 맞음.
-    return <img src={content} alt={title} className="mx-auto max-h-[420px] max-w-full rounded-lg object-contain" />;
-  }
-
+function TreeStageContent({ content, placeholder }: { content: string; placeholder: string }) {
   const tree = parseArtifactTree(content);
   if (!tree) {
-    return <p className="p-4 text-xs text-muted-foreground">{t('treeRenderPlaceholder')}</p>;
+    return <p className="pointer-events-none p-4 text-xs text-muted-foreground">{placeholder}</p>;
   }
   return (
-    <div className="space-y-2 p-2">
+    <div className="pointer-events-none h-full w-full space-y-2 overflow-hidden rounded-lg bg-background p-2">
       {tree.map((node) => <TreeNodeBox key={node.id} node={node} />)}
     </div>
   );
+}
+
+/**
+ * 포맷별 렌더 스테이지 — 이제 3포맷 전부 같은 `CanvasViewport` 엔진(transform pan/zoom)을
+ * 공유한다(story 1948d19d §1~§3). 완전 잠금 샌드박스 iframe(`sandbox=""` — allow-scripts·
+ * allow-same-origin 둘 다 없음, 핸드오프 §3-1 + 유나 디자인 가디언 보안 지적 반영) 유지 —
+ * pointer-events:none이 상호작용 레이어와 물리적으로 분리해 완화가 애초에 불필요.
+ */
+export function ArtifactStage({ format, content, title, canvasBounds, overlay }: ArtifactStageProps) {
+  return <CanvasViewport format={format} content={content} title={title} canvasBounds={canvasBounds} overlay={overlay} />;
 }

@@ -159,7 +159,7 @@ export function ArtifactGalleryView() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [versionsByArtifact, setVersionsByArtifact] = useState<Record<string, GalleryTimelineVersion[]>>({});
   const [versionsLoadingId, setVersionsLoadingId] = useState<string | null>(null);
-  const [expandTarget, setExpandTarget] = useState<{ format: ArtifactFormat; content: string; title: string } | null>(null);
+  const [expandTarget, setExpandTarget] = useState<{ format: ArtifactFormat; content: string; title: string; canvasBounds?: { w: number; h: number } | null } | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -214,7 +214,7 @@ export function ArtifactGalleryView() {
     const { artifact, versions } = adaptArtifactDetail(detail);
     const content = versions[0]?.content;
     if (!content) return;
-    setExpandTarget({ format: artifact.format, content, title });
+    setExpandTarget({ format: artifact.format, content, title, canvasBounds: versions[0]?.canvasBounds });
   }
 
   const axisLabel = (a: GalleryAxis) => t(`galleryAxis${a[0]!.toUpperCase()}${a.slice(1)}`);
@@ -319,6 +319,7 @@ export function ArtifactGalleryView() {
           title={expandTarget.title}
           format={expandTarget.format}
           content={expandTarget.content}
+          canvasBounds={expandTarget.canvasBounds}
         />
       ) : null}
     </div>
