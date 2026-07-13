@@ -212,6 +212,16 @@ describe('ArtifactStage — 캔버스 뷰포트(story 1948d19d)', () => {
     expect(container.textContent).not.toContain('끌어서 이동');
   });
 
+  it('contentRef attaches to the content layer itself, excluding the chrome bar (story d72db00a — PNG export capture target)', async () => {
+    const contentRef = { current: null } as React.RefObject<HTMLDivElement | null>;
+    await mount({ contentRef });
+    const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+    expect(contentRef.current).toBe(content);
+    // 크롬 바(힌트·줌%·fit/100% 버튼)는 이 div의 형제라, ref 대상 안에는 없다.
+    expect(contentRef.current?.textContent).not.toContain('전체 보기');
+    expect(contentRef.current?.textContent).not.toContain('실제 크기');
+  });
+
   describe('fit/초기 진입 — 뷰포트 실측 필요(jsdom clientWidth/Height는 기본 0, 스텁 필요)', () => {
     let widthSpy: ReturnType<typeof vi.spyOn>;
     let heightSpy: ReturnType<typeof vi.spyOn>;
