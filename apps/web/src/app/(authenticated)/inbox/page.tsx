@@ -401,7 +401,7 @@ export default function InboxPage() {
         {activeTab === 'attention' ? (
           <div className="flex-1 overflow-y-auto p-4">
             {projectId ? (
-              <AttentionQueueView projectId={projectId} />
+              <AttentionQueueView projectId={projectId} memberId={currentTeamMemberId} />
             ) : (
               <p className="text-xs text-muted-foreground">{t('loading')}</p>
             )}
