@@ -45,14 +45,14 @@ class UpdateTaskStatusInput(SprintableInput):
 
 async def list_tasks(args: ListTasksInput) -> list[TextContent]:
     """태스크 목록 조회."""
-    params: dict = {"project_id": client.project_id}
-    if args.story_id:
-        params["story_id"] = args.story_id
-    if args.assignee_id:
-        params["assignee_id"] = args.assignee_id
-    if args.status:
-        params["status"] = args.status.value
     try:
+        params: dict = {"project_id": client.require_project_id()}
+        if args.story_id:
+            params["story_id"] = args.story_id
+        if args.assignee_id:
+            params["assignee_id"] = args.assignee_id
+        if args.status:
+            params["status"] = args.status.value
         return ok(await client.get("/api/v2/tasks", params=params))
     except Exception as exc:
         return err(str(exc))
@@ -60,9 +60,9 @@ async def list_tasks(args: ListTasksInput) -> list[TextContent]:
 
 async def list_my_tasks(args: ListMyTasksInput) -> list[TextContent]:
     """내 태스크 목록 조회."""
-    assignee = args.assignee_id or client.member_id
-    params: dict = {"assignee_id": assignee, "project_id": client.project_id}
     try:
+        assignee = args.assignee_id or client.member_id
+        params: dict = {"assignee_id": assignee, "project_id": client.require_project_id()}
         return ok(await client.get("/api/v2/tasks", params=params))
     except Exception as exc:
         return err(str(exc))

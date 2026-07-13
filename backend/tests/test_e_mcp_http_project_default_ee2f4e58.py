@@ -35,17 +35,23 @@ def _fresh_client(api_url="https://be", api_key="envkey"):
 
 @pytest.mark.anyio
 async def test_ensure_auth_context_resolves_and_caches_per_key():
-    """키별 /auth/me 1회 해소·캐시(같은 키 재호출은 캐시 히트·다른 키는 새 fetch). 빈 키는 no-op."""
+    """키별 /auth/me 1회 해소·캐시(같은 키 재호출은 캐시 히트·다른 키는 새 fetch). 빈 키는 no-op.
+
+    E-MCP-OPT(ff6cb90d §1): project_id는 이제 resolved_default_project_id(근본 판정)에서 채운다."""
     c = _fresh_client()
     calls = {"n": 0}
 
     async def _fake_get(path, **kw):
         calls["n"] += 1
-        return {"member_id": "m1", "org_id": "o1", "project_id": "p1"}
+        return {"member_id": "m1", "org_id": "o1", "resolved_default_project_id": "p1",
+                "is_project_ambiguous": False, "accessible_project_ids": ["p1"]}
 
     with patch.object(c, "get", new=AsyncMock(side_effect=_fake_get)):
         ctx = await c.ensure_auth_context("keyA")
-        assert ctx == {"member_id": "m1", "org_id": "o1", "project_id": "p1"}
+        assert ctx == {
+            "member_id": "m1", "org_id": "o1", "project_id": "p1",
+            "is_project_ambiguous": False, "accessible_project_ids": ["p1"],
+        }
         await c.ensure_auth_context("keyA")            # 캐시 히트(추가 fetch X)
         assert calls["n"] == 1
         await c.ensure_auth_context("keyB")            # 다른 키 → 새 fetch
@@ -62,7 +68,8 @@ async def test_http_default_resolved_when_no_explicit_project():
     c._project_id = c._org_id = c._member_id = ""                # http 싱글톤 미해소 상태
 
     async def _fake_get(path, **kw):
-        return {"member_id": "mh", "org_id": "oh", "project_id": "ph"}
+        return {"member_id": "mh", "org_id": "oh", "resolved_default_project_id": "ph",
+                "is_project_ambiguous": False, "accessible_project_ids": ["ph"]}
 
     with patch.object(c, "get", new=AsyncMock(side_effect=_fake_get)):
         ktok = set_api_key_override("reqkeyA")
@@ -88,7 +95,8 @@ async def test_explicit_project_override_wins_poke_no_regression():
     c._project_id = ""
 
     async def _fake_get(path, **kw):
-        return {"member_id": "mh", "org_id": "oh", "project_id": "ph"}
+        return {"member_id": "mh", "org_id": "oh", "resolved_default_project_id": "ph",
+                "is_project_ambiguous": False, "accessible_project_ids": ["ph"]}
 
     with patch.object(c, "get", new=AsyncMock(side_effect=_fake_get)):
         ktok = set_api_key_override("reqkeyA")
@@ -121,7 +129,8 @@ async def test_override_none_falls_through_not_explicit_empty():
     c._project_id = ""
 
     async def _fake_get(path, **kw):
-        return {"member_id": "", "org_id": "", "project_id": "ph"}
+        return {"member_id": "", "org_id": "", "resolved_default_project_id": "ph",
+                "is_project_ambiguous": False, "accessible_project_ids": ["ph"]}
 
     with patch.object(c, "get", new=AsyncMock(side_effect=_fake_get)):
         ktok = set_api_key_override("reqkeyA")

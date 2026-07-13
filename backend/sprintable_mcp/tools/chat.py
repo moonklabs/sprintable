@@ -73,16 +73,14 @@ async def send_chat_message(args: SendChatInput) -> list[TextContent]:
 
 async def create_conversation(args: CreateConversationInput) -> list[TextContent]:
     """새 conversation thread 생성."""
-    if not client.project_id:
-        return err("project_id not set — agent must be bound to a project before creating conversations")
-    body: dict = {
-        "type": "group",
-        "participant_ids": args.participant_ids,
-        "project_id": client.project_id,
-    }
-    if args.title:
-        body["title"] = args.title
     try:
+        body: dict = {
+            "type": "group",
+            "participant_ids": args.participant_ids,
+            "project_id": client.require_project_id(),  # E-MCP-OPT ff6cb90d: 무인자+ambiguous 명시 에러.
+        }
+        if args.title:
+            body["title"] = args.title
         conv = await client.post("/api/v2/conversations", json=body)
         conv_id = conv.get("id") if isinstance(conv, dict) else None
         return ok({"conversation_id": conv_id, **(conv if isinstance(conv, dict) else {})})

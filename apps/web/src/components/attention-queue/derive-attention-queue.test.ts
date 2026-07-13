@@ -1,101 +1,152 @@
 import { describe, expect, it } from 'vitest';
+import { createTranslator } from 'next-intl';
 import {
-  deriveGateAttentionItems, deriveBlockedAttentionItems, buildAttentionQueue,
-  type AttentionStoryLite, type AttentionMember, type AttentionQueueItem,
+  parseAttentionQueueSignals, buildAttentionQueueFromBe, buildAttentionQueue, diffAttentionQueueItemIds,
+  type BeAttentionItem, type AttentionQueueItem, type AttentionQueueTranslator,
 } from './derive-attention-queue';
-import type { GateItem } from '@/components/kanban/types';
+import koMessagesRaw from '../../../messages/ko.json';
+import enMessagesRaw from '../../../messages/en.json';
 
-function gate(overrides: Partial<GateItem> = {}): GateItem {
-  return {
-    id: 'gate-1', work_item_id: 'story-1', work_item_type: 'story', gate_type: 'merge',
-    status: 'pending', resolver_id: null, resolved_at: null, resolution_note: null,
-    neutral_facts: null, created_at: '2026-07-01T00:00:00Z', updated_at: '2026-07-01T00:00:00Z',
-    ...overrides,
-  };
+// production `t` (useTranslations()) resolves against the permissive default `IntlMessages`
+// generic (no global next-intl message-type augmentation in this repo) — cast here so the test
+// translator has the same loose type instead of the JSON import's inferred literal-key type.
+type LooseMessages = { [key: string]: string | LooseMessages };
+const koMessages = koMessagesRaw as unknown as LooseMessages;
+const enMessages = enMessagesRaw as unknown as LooseMessages;
+// next-intl's Translator<M,N> overload set doesn't structurally satisfy our minimal
+// AttentionQueueTranslator call-signature for a non-literal LooseMessages import (same
+// friction as loop-create-dialog.test.tsx's RecipeTranslator) — cast at the boundary, runtime
+// behavior is unaffected (createTranslator's t(key, values) works exactly as at production).
+const t = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'attentionQueue' }) as unknown as AttentionQueueTranslator;
+const tEn = createTranslator({ locale: 'en', messages: enMessages, namespace: 'attentionQueue' }) as unknown as AttentionQueueTranslator;
+
+function beItem(overrides: Partial<BeAttentionItem> = {}): BeAttentionItem {
+  return { kind: 'verify_fail', story_id: 'story-1', title: '결제 복구 플로우', ref: {}, ...overrides };
 }
 
-const stories = new Map<string, AttentionStoryLite>([
-  ['story-1', { id: 'story-1', title: '결제 복구 플로우', assignee_id: 'm-1' }],
-  ['story-2', { id: 'story-2', title: '온보딩 위저드', assignee_id: null }],
-]);
+describe('parseAttentionQueueSignals', () => {
+  it('unwraps the double-wrapped {data:{items}} proxy envelope', () => {
+    const items = parseAttentionQueueSignals({ data: { items: [beItem()] } });
+    expect(items).toHaveLength(1);
+    expect(items[0]!.kind).toBe('verify_fail');
+  });
 
-const members = new Map<string, AttentionMember>([
-  ['m-1', { name: '미르코', type: 'agent' }],
-]);
+  it('unwraps the raw BE {items} shape (no proxy wrap)', () => {
+    const items = parseAttentionQueueSignals({ items: [beItem({ kind: 'blocked' })] });
+    expect(items).toHaveLength(1);
+  });
 
-describe('deriveGateAttentionItems', () => {
-  it('maps merge gate + ci_result=fail to verify_fail (amber, neutral tone)', () => {
-    const items = deriveGateAttentionItems(
-      [gate({ neutral_facts: { ci_result: 'fail' } })], stories, members,
-    );
+  it('returns [] for malformed shapes (no items array anywhere) — throw 0', () => {
+    expect(parseAttentionQueueSignals(null)).toEqual([]);
+    expect(parseAttentionQueueSignals(undefined)).toEqual([]);
+    expect(parseAttentionQueueSignals({ foo: 'bar' })).toEqual([]);
+    expect(parseAttentionQueueSignals('not an object')).toEqual([]);
+  });
+
+  it('keeps all 5 known BE kinds including gate_pending (PO 콜: 결정필요 버킷 합류)', () => {
+    const items = parseAttentionQueueSignals({
+      items: [
+        beItem({ kind: 'gate_pending' }),
+        beItem({ kind: 'blocked' }),
+        beItem({ kind: 'merge_ready' }),
+        beItem({ kind: 'needs_input' }),
+        beItem({ kind: 'verify_fail' }),
+      ],
+    });
+    expect(items).toHaveLength(5);
+  });
+
+  it('skips unknown/malformed kinds without crashing (no-fiction)', () => {
+    const items = parseAttentionQueueSignals({
+      items: [beItem(), { kind: 'scope_violation', story_id: 's', title: 't', ref: {} }, { kind: 123 }],
+    });
+    expect(items).toHaveLength(1);
+  });
+
+  it('skips items missing title or story_id (cannot fabricate claim/href)', () => {
+    const items = parseAttentionQueueSignals({
+      items: [
+        beItem({ title: null }),
+        beItem({ title: '' }),
+        beItem({ story_id: null }),
+      ],
+    });
+    expect(items).toHaveLength(0);
+  });
+});
+
+describe('buildAttentionQueueFromBe', () => {
+  it('maps verify_fail to an amber/neutral-tone item', () => {
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'verify_fail' })], t);
     expect(items).toHaveLength(1);
     expect(items[0]!.kind).toBe('verify_fail');
     expect(items[0]!.proofState).toBe('amber');
     expect(items[0]!.actionTone).toBe('neutral');
     expect(items[0]!.claim).toContain('결제 복구 플로우');
+    expect(items[0]!.actor).toBeNull(); // BE AttentionItem엔 assignee 필드 없음(no-fiction)
+    expect(items[0]!.href).toBe('/board?story=story-1');
   });
 
-  it('maps merge gate + ci_result=pass to merge_ready (green, ready tone)', () => {
-    const items = deriveGateAttentionItems(
-      [gate({ neutral_facts: { ci_result: 'pass' } })], stories, members,
-    );
+  it('maps merge_ready to a green/ready-tone item', () => {
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'merge_ready' })], t);
     expect(items[0]!.kind).toBe('merge_ready');
     expect(items[0]!.proofState).toBe('green');
     expect(items[0]!.actionTone).toBe('ready');
   });
 
-  it('maps loop_decision gate to decision_needed (amber, primary tone) regardless of ci_result', () => {
-    const items = deriveGateAttentionItems(
-      [gate({ gate_type: 'loop_decision', neutral_facts: null })], stories, members,
-    );
+  it('maps needs_input to internal decision_needed (amber/primary-tone)', () => {
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'needs_input' })], t);
     expect(items[0]!.kind).toBe('decision_needed');
     expect(items[0]!.actionTone).toBe('primary');
   });
 
-  it('resolves the assignee as actor when present, omits when absent (no-fiction)', () => {
-    const withActor = deriveGateAttentionItems([gate({ neutral_facts: { ci_result: 'fail' } })], stories, members);
-    expect(withActor[0]!.actor).toEqual({ name: '미르코', isAgent: true });
-
-    const withoutActor = deriveGateAttentionItems(
-      [gate({ work_item_id: 'story-2', neutral_facts: { ci_result: 'fail' } })], stories, members,
-    );
-    expect(withoutActor[0]!.actor).toBeNull();
+  it('maps gate_pending to internal decision_needed too (PO 콜: 스킵 대신 결정필요 합류)', () => {
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'gate_pending' })], t);
+    expect(items[0]!.kind).toBe('decision_needed');
   });
 
-  it('skips gates whose story is unknown (never fabricates a claim)', () => {
-    const items = deriveGateAttentionItems(
-      [gate({ work_item_id: 'story-unknown', neutral_facts: { ci_result: 'fail' } })], stories, members,
-    );
-    expect(items).toHaveLength(0);
+  it('merges gate_pending + needs_input on the same story into one decision_needed row', () => {
+    const items = buildAttentionQueueFromBe([
+      beItem({ kind: 'gate_pending', story_id: 'story-1' }),
+      beItem({ kind: 'needs_input', story_id: 'story-1' }),
+    ], t);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.kind).toBe('decision_needed');
   });
 
-  it('skips non-story gates (e.g. doc_approval) and non-pending gates', () => {
-    const items = deriveGateAttentionItems(
-      [
-        gate({ work_item_type: 'doc', gate_type: 'doc_approval' }),
-        gate({ status: 'rejected', neutral_facts: { ci_result: 'fail' } }),
-        gate({ gate_type: 'merge', neutral_facts: { ci_result: null } }), // no honest signal → skip
-      ],
-      stories, members,
-    );
-    expect(items).toHaveLength(0);
+  it('keeps decision_needed rows for distinct stories separate', () => {
+    const items = buildAttentionQueueFromBe([
+      beItem({ kind: 'needs_input', story_id: 'story-1' }),
+      beItem({ kind: 'gate_pending', story_id: 'story-2', title: '온보딩 위저드' }),
+    ], t);
+    expect(items).toHaveLength(2);
   });
-});
 
-describe('deriveBlockedAttentionItems', () => {
-  it('maps a non-empty blockedByMap entry to a blocked item with the real blocker count', () => {
-    const items = deriveBlockedAttentionItems({ 'story-1': ['story-9', 'story-10'] }, stories, members);
+  it('aggregates multiple blocked edges for the same story into one row with the real blocker count', () => {
+    const items = buildAttentionQueueFromBe([
+      beItem({ kind: 'blocked', story_id: 'story-1' }),
+      beItem({ kind: 'blocked', story_id: 'story-1' }),
+    ], t);
     expect(items).toHaveLength(1);
     expect(items[0]!.kind).toBe('blocked');
     expect(items[0]!.claim).toContain('2건');
     expect(items[0]!.claim).toContain('결제 복구 플로우');
   });
 
-  it('skips empty blocker arrays and unknown story ids', () => {
-    const items = deriveBlockedAttentionItems(
-      { 'story-1': [], 'story-unknown': ['story-9'] }, stories, members,
-    );
-    expect(items).toHaveLength(0);
+  it('renders claim/kindLabel/actionLabel in English when given the en translator (ko/en parity)', () => {
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'verify_fail' })], tEn);
+    expect(items[0]!.kindLabel).toBe('Verify failed');
+    expect(items[0]!.actionLabel).toBe('Send back');
+    expect(items[0]!.claim).toContain('CI check failed');
+    expect(items[0]!.claim).not.toContain('CI 검증 실패');
+  });
+
+  it('renders the blocked count in English when given the en translator', () => {
+    const items = buildAttentionQueueFromBe([
+      beItem({ kind: 'blocked', story_id: 'story-1' }),
+      beItem({ kind: 'blocked', story_id: 'story-1' }),
+    ], tEn);
+    expect(items[0]!.claim).toContain('blocked by 2');
   });
 });
 
@@ -127,5 +178,36 @@ describe('buildAttentionQueue', () => {
     const { shown, overflow } = buildAttentionQueue([item('verify_fail', 1)]);
     expect(shown).toHaveLength(1);
     expect(overflow).toBe(0);
+  });
+});
+
+describe('diffAttentionQueueItemIds (9ef0f914 — SSE-triggered refetch diff)', () => {
+  function item(id: string, claim: string): AttentionQueueItem {
+    return {
+      id, kind: 'blocked', kindLabel: '막힘', proofState: 'amber', claim,
+      actor: null, actionLabel: '조율', actionTone: 'neutral', href: '/board', sortKey: 0,
+    };
+  }
+
+  it('marks a newly-appeared id as changed', () => {
+    const changed = diffAttentionQueueItemIds([], [item('a', 'x')]);
+    expect(changed).toEqual(new Set(['a']));
+  });
+
+  it('marks an id whose claim text changed, and leaves unchanged ids out (no full-list flash)', () => {
+    const prev = [item('a', 'old claim'), item('b', 'stable claim')];
+    const next = [item('a', 'new claim'), item('b', 'stable claim')];
+    expect(diffAttentionQueueItemIds(prev, next)).toEqual(new Set(['a']));
+  });
+
+  it('returns an empty set when nothing changed (no spurious highlight)', () => {
+    const list = [item('a', 'same'), item('b', 'same2')];
+    expect(diffAttentionQueueItemIds(list, list)).toEqual(new Set());
+  });
+
+  it('does not mark removed ids (removal itself is the signal — no separate flash needed)', () => {
+    const prev = [item('a', 'x'), item('b', 'y')];
+    const next = [item('a', 'x')];
+    expect(diffAttentionQueueItemIds(prev, next)).toEqual(new Set());
   });
 });

@@ -61,20 +61,20 @@ class UpdateStoryStatusInput(SprintableInput):
 
 async def list_stories(args: ListStoriesInput) -> list[TextContent]:
     """프로젝트 스토리 목록 조회."""
-    params: dict = {"project_id": client.project_id}
-    if client.org_id:
-        params["org_id"] = client.org_id
-    if args.sprint_id:
-        params["sprint_id"] = args.sprint_id
-    if args.epic_id:
-        params["epic_id"] = args.epic_id
-    if args.status:
-        params["status"] = args.status.value
-    if args.priority:
-        params["priority"] = args.priority.value
-    if args.assignee_id:
-        params["assignee_id"] = args.assignee_id
     try:
+        params: dict = {"project_id": client.require_project_id()}
+        if client.org_id:
+            params["org_id"] = client.org_id
+        if args.sprint_id:
+            params["sprint_id"] = args.sprint_id
+        if args.epic_id:
+            params["epic_id"] = args.epic_id
+        if args.status:
+            params["status"] = args.status.value
+        if args.priority:
+            params["priority"] = args.priority.value
+        if args.assignee_id:
+            params["assignee_id"] = args.assignee_id
         return ok(await client.get("/api/v2/stories", params=params))
     except Exception as exc:
         return err(str(exc))
@@ -87,7 +87,7 @@ async def list_backlog(args: SprintableInput) -> list[TextContent]:
     # ⚠️ no_sprint 는 project_id 와 함께여야 backlog 분기 동작(stories.py list_stories).
     try:
         return ok(await client.get(
-            "/api/v2/stories", params={"project_id": client.project_id, "no_sprint": "true"}
+            "/api/v2/stories", params={"project_id": client.require_project_id(), "no_sprint": "true"}
         ))
     except Exception as exc:
         return err(str(exc))
@@ -95,22 +95,22 @@ async def list_backlog(args: SprintableInput) -> list[TextContent]:
 
 async def add_story(args: AddStoryInput) -> list[TextContent]:
     """스토리 생성."""
-    body: dict = {"title": args.title, "project_id": client.project_id}
-    if args.epic_id:
-        body["epic_id"] = args.epic_id
-    if args.sprint_id:
-        body["sprint_id"] = args.sprint_id
-    if args.assignee_id:
-        body["assignee_id"] = args.assignee_id
-    if args.priority:
-        body["priority"] = args.priority.value
-    if args.story_points:
-        body["story_points"] = args.story_points.value
-    if args.description:
-        body["description"] = args.description
-    if args.acceptance_criteria:
-        body["acceptance_criteria"] = args.acceptance_criteria
     try:
+        body: dict = {"title": args.title, "project_id": client.require_project_id()}
+        if args.epic_id:
+            body["epic_id"] = args.epic_id
+        if args.sprint_id:
+            body["sprint_id"] = args.sprint_id
+        if args.assignee_id:
+            body["assignee_id"] = args.assignee_id
+        if args.priority:
+            body["priority"] = args.priority.value
+        if args.story_points:
+            body["story_points"] = args.story_points.value
+        if args.description:
+            body["description"] = args.description
+        if args.acceptance_criteria:
+            body["acceptance_criteria"] = args.acceptance_criteria
         return ok(await client.post("/api/v2/stories", json=body))
     except Exception as exc:
         return err(str(exc))

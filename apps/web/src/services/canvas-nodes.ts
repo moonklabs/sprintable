@@ -96,6 +96,47 @@ export function countNodeChanges(baseline: ArtifactNode[], current: ArtifactNode
   return changes;
 }
 
+/** BE `ArtifactNodeOperation`(schemas/visual_artifact.py) 미러 — `/edit` 커밋 diff의 한 연산. */
+export interface NodeOperation {
+  op: 'add' | 'update' | 'delete';
+  id?: string;
+  type?: string;
+  props?: Record<string, unknown>;
+  parent_id?: string | null;
+  sort_order?: number;
+  description?: string | null;
+}
+
+/** update 비교/전송 대상 = 노드의 편집 가능 필드(id 제외). BE update는 지정 필드 전체교체라 변경 노드는 전 필드 전송. */
+function editableFields(n: ArtifactNode) {
+  return { type: n.type, props: n.props, parent_id: n.parent_id, sort_order: n.sort_order, description: n.description ?? null };
+}
+
+/**
+ * 편집 baseline↔committed 노드셋을 BE `/edit` 연산(add/update/delete)으로 유도한다 — `countNodeChanges`
+ * 와 동형 diff. baseline에만 있으면 delete, committed에만 있으면 add(전 필드), 양쪽에 있고 편집 필드가
+ * 다르면 update(전 필드 재전송·BE props 전체교체 계약). 변경 없으면 빈 배열(호출부가 no-op 처리).
+ * 살아있는 노드의 id는 그대로 실려 BE가 update/delete 대상을 매칭한다(node.id 안정성 계약, canvas-nodes §3).
+ */
+export function deriveNodeOperations(baseline: ArtifactNode[], committed: ArtifactNode[]): NodeOperation[] {
+  const baseMap = new Map(baseline.map((n) => [n.id, n]));
+  const curMap = new Map(committed.map((n) => [n.id, n]));
+  const ops: NodeOperation[] = [];
+  for (const id of baseMap.keys()) {
+    if (!curMap.has(id)) ops.push({ op: 'delete', id });
+  }
+  for (const n of committed) {
+    const base = baseMap.get(n.id);
+    const fields = editableFields(n);
+    if (!base) {
+      ops.push({ op: 'add', id: n.id, ...fields });
+    } else if (JSON.stringify(editableFields(base)) !== JSON.stringify(fields)) {
+      ops.push({ op: 'update', id: n.id, ...fields });
+    }
+  }
+  return ops;
+}
+
 export const PALETTE_TYPES = ['Container', 'Text', 'Button', 'Card', 'Image'] as const;
 
 export const MOCK_EDITABLE_NODES: ArtifactNode[] = [

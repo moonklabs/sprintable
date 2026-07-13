@@ -441,3 +441,29 @@ async def accessible_project_ids_in_org(
         {"user_id": user_id, "org_id": org_id},
     )
     return [uuid.UUID(str(r[0])) for r in rows.all()]
+
+
+async def project_accessible_member_ids(
+    session: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID,
+) -> set[uuid.UUID]:
+    """E-UI-DAEGBYEON P0-04 후속(story 9ef0f914) — `accessible_project_ids_in_org`의 역방향
+    (project 고정 → 접근 가능 member_id 집합). `team_members`(VIEW, human+agent grant를 이미
+    member_id 공간으로 통합)만 조회 — 단일 쿼리 배치(N+1 없음).
+
+    ⚠️ org owner/admin의 암묵 org-wide 접근 분기(has_project_access 3번째 조건)는 **의도적으로
+    제외**한다 — 이 함수는 실시간 SSE push 수신자 해소 전용이라, 명시 project 소속이 없는 admin에게
+    안 밀리는 쪽(false negative)이 잘못 밀리는 쪽(false positive·cross-project 누설)보다 안전.
+    write 인가(has_project_access)는 이 함수를 쓰지 않는다 — 그쪽은 기존 3-branch 그대로."""
+    rows = await session.execute(
+        text(
+            """
+            SELECT tm.id
+            FROM team_members tm
+            WHERE tm.project_id = :project_id
+              AND tm.org_id = :org_id
+              AND tm.is_active = true
+            """
+        ),
+        {"project_id": project_id, "org_id": org_id},
+    )
+    return {uuid.UUID(str(r[0])) for r in rows.all()}

@@ -79,18 +79,18 @@ def _compact(h: dict) -> dict:
 
 async def list_hypotheses(args: ListHypothesesInput) -> list[TextContent]:
     """가설 목록(compact). epic_id/story_id/status/owner_member_id/limit 필터."""
-    params: dict = {"project_id": client.project_id}
-    if args.epic_id:
-        params["epic_id"] = args.epic_id
-    if args.story_id:
-        params["story_id"] = args.story_id
-    if args.status is not None:
-        params["status"] = args.status.value
-    if args.owner_member_id:
-        params["owner_member_id"] = args.owner_member_id
-    if args.limit is not None:
-        params["limit"] = args.limit
     try:
+        params: dict = {"project_id": client.require_project_id()}
+        if args.epic_id:
+            params["epic_id"] = args.epic_id
+        if args.story_id:
+            params["story_id"] = args.story_id
+        if args.status is not None:
+            params["status"] = args.status.value
+        if args.owner_member_id:
+            params["owner_member_id"] = args.owner_member_id
+        if args.limit is not None:
+            params["limit"] = args.limit
         rows = await client.get("/api/v2/hypotheses", params=params)
         return ok([_compact(h) for h in (rows or [])])
     except Exception as exc:
@@ -124,17 +124,17 @@ async def create_hypothesis(args: CreateHypothesisInput) -> list[TextContent]:
     임의 휴먼을 추측-주입하는 것은 owner 의미를 왜곡한다. 따라서 여기서는 default를 만들지 않고,
     개선된 에러 표면화(api_client._extract_error_message)로 사유를 명확히 전달하는 쪽을 택한다.
     """
-    body: dict = {
-        "project_id": client.project_id,
-        "statement": args.statement,
-        "metric_definition": args.metric_definition,
-        "measure_after": args.measure_after,
-    }
-    for field in ("owner_member_id", "epic_ids", "story_ids", "source_type", "source_id"):
-        val = getattr(args, field)
-        if val is not None:
-            body[field] = val
     try:
+        body: dict = {
+            "project_id": client.require_project_id(),
+            "statement": args.statement,
+            "metric_definition": args.metric_definition,
+            "measure_after": args.measure_after,
+        }
+        for field in ("owner_member_id", "epic_ids", "story_ids", "source_type", "source_id"):
+            val = getattr(args, field)
+            if val is not None:
+                body[field] = val
         return ok(await client.post("/api/v2/hypotheses", json=body))
     except Exception as exc:
         return err(str(exc))

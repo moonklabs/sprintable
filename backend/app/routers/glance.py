@@ -22,7 +22,9 @@ from app.models.gate import Gate
 from app.models.member import Member
 from app.models.pm import Story
 from app.models.workflow_line import WorkflowLineStepApproval
+from app.services.evidence_service import batch_human_verified
 from app.services.project_auth import has_project_access
+from app.services.trust_pipeline import batch_unresolved_blocker, batch_verify_fail
 
 router = APIRouter(prefix="/api/v2/glance", tags=["glance"])
 
@@ -32,7 +34,9 @@ _LIMIT = 100
 
 
 class AttentionItem(BaseModel):
-    kind: str  # "gate_pending" | "blocked" | "merge_ready"
+    # P0-04(doc trust-pipeline-be-design §6): AQ 5신호 계약(attention-queue-fe-spec-handoff §6).
+    # scope_violation은 §7 확定②로 이번 스코프 미구현 — 항상 빈 신호(kind로 등장 안 함·정직한 미가용).
+    kind: str  # "gate_pending" | "blocked" | "merge_ready" | "needs_input" | "verify_fail"
     story_id: uuid.UUID | None = None
     title: str | None = None
     ref: dict = Field(default_factory=dict)
@@ -119,7 +123,9 @@ async def glance_attention(
             ref={"blocker_story_id": str(blocker_id)},
         ))
 
-    # ③ merge_ready = 프로젝트의 in-review story(리뷰/머지 대기).
+    # ③ merge_ready = 프로젝트의 in-review story 중 **실제 병합 가능**(P0-04 엄격화 — doc
+    # trust-pipeline-be-design §2/§3: human_verified + 미해결 blocker 없음 + verify_fail 없음.
+    # 기존 완화판(status==in-review만)보다 좁아짐 — 회귀 아닌 의도된 강화(doc §8)).
     review_rows = (
         await session.execute(
             select(Story.id, Story.title)
@@ -132,8 +138,56 @@ async def glance_attention(
             .limit(_LIMIT)
         )
     ).all()
+    review_ids = [r[0] for r in review_rows]
+    verified_map = await batch_human_verified(session, review_ids, "story")
+    verify_fail_ids = await batch_verify_fail(session, org_id, review_ids)
+    blocked_ids = await batch_unresolved_blocker(session, org_id, review_ids)
     for story_id, title in review_rows:
-        items.append(AttentionItem(kind="merge_ready", story_id=story_id, title=title))
+        if story_id in verified_map and story_id not in verify_fail_ids and story_id not in blocked_ids:
+            items.append(AttentionItem(kind="merge_ready", story_id=story_id, title=title))
+
+    # ④ needs_input = 프로젝트의 오픈 story 중 사람 판단 대기(§7 확定① — Gate(requires_human, pending)).
+    needs_input_rows = (
+        await session.execute(
+            select(Story.id, Story.title)
+            .select_from(Gate)
+            .join(Story, (Story.id == Gate.work_item_id) & (Gate.work_item_type == "story"))
+            .where(
+                Gate.org_id == org_id,
+                Gate.status == "pending",
+                Gate.requires_human.is_(True),
+                Story.project_id == project_id,
+                Story.status.not_in(_OPEN_EXCLUDED_STATUSES),
+                Story.deleted_at.is_(None),
+            )
+            .limit(_LIMIT)
+        )
+    ).all()
+    for story_id, title in needs_input_rows:
+        items.append(AttentionItem(kind="needs_input", story_id=story_id, title=title))
+
+    # ⑤ verify_fail = 프로젝트의 오픈 story 중 검증(merge gate) 실패(glance/hero의 기존
+    # evidence_status=="blocked" 계약 재사용).
+    verify_fail_rows = (
+        await session.execute(
+            select(Story.id, Story.title)
+            .select_from(Gate)
+            .join(Story, (Story.id == Gate.work_item_id) & (Gate.work_item_type == "story"))
+            .where(
+                Gate.org_id == org_id,
+                Gate.gate_type == "merge",
+                Gate.evidence_status == "blocked",
+                Story.project_id == project_id,
+                Story.status.not_in(_OPEN_EXCLUDED_STATUSES),
+                Story.deleted_at.is_(None),
+            )
+            .limit(_LIMIT)
+        )
+    ).all()
+    for story_id, title in verify_fail_rows:
+        items.append(AttentionItem(kind="verify_fail", story_id=story_id, title=title))
+
+    # scope_violation: §7 확定② — 이번 스코프 미구현. 쿼리 자체가 없음(정직한 미가용·항상 빈 신호).
 
     return AttentionResponse(items=items)
 

@@ -38,23 +38,23 @@ class UpdateEpicInput(SprintableInput):
 async def list_epics(args: ListEpicsInput) -> list[TextContent]:
     """에픽 목록 조회."""
     try:
-        return ok(await client.get("/api/v2/epics", params={"project_id": client.project_id}))
+        return ok(await client.get("/api/v2/epics", params={"project_id": client.require_project_id()}))
     except Exception as exc:
         return err(str(exc))
 
 
 async def add_epic(args: AddEpicInput) -> list[TextContent]:
     """에픽 생성."""
-    body: dict = {"title": args.title, "project_id": client.project_id}
-    if args.priority:
-        body["priority"] = args.priority.value
-    for field in ("description", "objective", "success_criteria", "target_date"):
-        val = getattr(args, field)
-        if val is not None:
-            body[field] = val
-    if args.target_sp is not None:
-        body["target_sp"] = args.target_sp
     try:
+        body: dict = {"title": args.title, "project_id": client.require_project_id()}
+        if args.priority:
+            body["priority"] = args.priority.value
+        for field in ("description", "objective", "success_criteria", "target_date"):
+            val = getattr(args, field)
+            if val is not None:
+                body[field] = val
+        if args.target_sp is not None:
+            body["target_sp"] = args.target_sp
         return ok(await client.post("/api/v2/epics", json=body))
     except Exception as exc:
         return err(str(exc))

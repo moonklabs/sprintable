@@ -101,6 +101,9 @@ class StoryCreate(BaseModel):
     assignee_id: uuid.UUID | None = None
     # E-BOARD S5: 복수 assignee. 미지정(None)이면 assignee_id 단독 동작(back-compat).
     assignee_ids: list[uuid.UUID] | None = None
+    # P0-03(doc trust-pipeline-be-design §5): Human owner(assignee와 별도 책임 필드). 라우터가
+    # write-time에 human 강제(비-human 지정 시 400).
+    human_owner_member_id: uuid.UUID | None = None
     # E-FILE S4: 보드 스토리 첨부 (기본 [], 최대 10).
     attachments: list[StoryAttachment] = []
     meeting_id: uuid.UUID | None = None
@@ -133,6 +136,8 @@ class StoryUpdate(BaseModel):
     assignee_id: uuid.UUID | None = None
     # E-BOARD S5: 복수 assignee. 미지정(None)이면 join 미변경(back-compat).
     assignee_ids: list[uuid.UUID] | None = None
+    # P0-03(doc trust-pipeline-be-design §5): Human owner. 미지정(exclude_unset)이면 변경 안 함.
+    human_owner_member_id: uuid.UUID | None = None
     # E-FILE S4: 보드 스토리 첨부. 미지정(None)이면 변경 안 함(back-compat).
     attachments: list[StoryAttachment] | None = None
     meeting_id: uuid.UUID | None = None
@@ -175,6 +180,16 @@ class StoryResponse(BaseModel):
     assignee_id: uuid.UUID | None = None
     # E-BOARD S5: 복수 assignee. join 테이블 멤버. 레거시 행은 [assignee_id] 폴백.
     assignee_ids: list[uuid.UUID] = []
+    # P0-03(doc trust-pipeline-be-design §5): Human owner — 실 컬럼(ORM 그대로 노출).
+    human_owner_member_id: uuid.UUID | None = None
+    # agent_delegate_ids: assignee_ids를 Member.type=="agent"로 필터한 파생 뷰(신규 저장 0) —
+    # ORM 컬럼 아님·라우터가 model_validate 前 transient attr로 세팅(assignee_ids 패턴 동형).
+    agent_delegate_ids: list[uuid.UUID] = []
+
+    @field_validator("agent_delegate_ids", mode="before")
+    @classmethod
+    def _coerce_agent_delegate_ids(cls, v):
+        return v if isinstance(v, list) else []
     # E-FILE S4: 보드 스토리 첨부 (column 값). list 아니면 [](레거시 None/mock 안전).
     attachments: list[dict] = []
     meeting_id: uuid.UUID | None = None

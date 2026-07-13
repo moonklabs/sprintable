@@ -31,9 +31,9 @@ from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.visual_artifacts import (
     AddArtifactCommentInput, CreateArtifactInput, EditArtifactInput, GetArtifactInput,
-    ListArtifactCommentsInput, ProposeCanonicalInput,
+    ListArtifactCommentsInput, ListArtifactsInput, ProposeCanonicalInput,
     add_artifact_comment, create_artifact, edit_artifact, get_artifact, list_artifact_comments,
-    propose_canonical_version,
+    list_artifacts, propose_canonical_version,
 )
 from .tools.agent_runs import (
     EmitEventInput, PollEventsInput, UpdateRunStatusInput,
@@ -52,6 +52,9 @@ from .tools.core import (
     ClaimStoryInput, DashboardInput, LockFilesInput, UnlockFilesInput,
     claim_story, get_workflow_guide, list_team_members, lock_files,
     my_dashboard, unclaim_story, unlock_files,
+)
+from .tools.projects import (
+    ListProjectsInput, SetDefaultProjectInput, list_projects, set_default_project,
 )
 from .tools.docs import (
     CreateDocInput, GetDocInput, ListDocsInput,
@@ -460,13 +463,20 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_get_project_health",
      "프로젝트 전체 건강도 조회.",
      SprintableInput, get_project_health),
-    # Core (4)
+    # Core (6) — E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가.
     ("sprintable_list_team_members",
      "프로젝트 팀 멤버 목록 조회.",
      SprintableInput, list_team_members),
     ("sprintable_my_dashboard",
      "팀원 대시보드 요약 조회.",
      DashboardInput, my_dashboard),
+    ("sprintable_list_projects",
+     "이 키(멤버)가 접근 가능한 프로젝트 목록 조회(id·이름·org) — 무권한/타조직 미노출.",
+     ListProjectsInput, list_projects),
+    ("sprintable_set_default_project",
+     "이 키의 기본 프로젝트를 서버에 저장(감사 가능) — project_id 없는 후속 호출이 이 프로젝트로"
+     " 해소됨. 지정 project_id에 접근권 없으면 403.",
+     SetDefaultProjectInput, set_default_project),
     ("sprintable_claim_story",
      "현재 작업 중인 스토리를 claim — active_story_id 갱신, 중복 배정 방지.",
      ClaimStoryInput, claim_story),
@@ -495,7 +505,7 @@ _TOOL_DEFS: list[tuple] = [
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
      " 남김. 선택제(첨부 안 해도 무불이익).",
      AddEvidenceInput, add_evidence),
-    # Visual artifacts (6) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안)
+    # Visual artifacts (7) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안)
     ("sprintable_create_artifact",
      "시각 산출물 생성(에이전트 생성 입구) — 트리(nodes[])로 구조화. 임포트된 raw HTML/이미지는"
      " type=\"html_blob\" 노드 하나로 감싸도 됨.",
@@ -503,6 +513,10 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_get_artifact",
      "시각 산출물 단건 조회(latest 버전 + nodes).",
      GetArtifactInput, get_artifact),
+    ("sprintable_list_artifacts",
+     "현재 프로젝트 시각 산출물 목록 조회(각 항목=메타+latest 버전 번호·노드 트리 미포함·상세는"
+     " get_artifact) — story_id/epic_id/doc_id로 필터(미지정=프로젝트 전체).",
+     ListArtifactsInput, list_artifacts),
     ("sprintable_list_artifact_comments",
      "artifact 코멘트 스레드 조회(요소/좌표 앵커·resolve 상태) — 휴먼 피드백 왕복 입구.",
      ListArtifactCommentsInput, list_artifact_comments),
@@ -510,7 +524,9 @@ _TOOL_DEFS: list[tuple] = [
      "artifact에 코멘트 추가(요소/좌표 앵커·답글 가능) — 대상자에게 이벤트 전파.",
      AddArtifactCommentInput, add_artifact_comment),
     ("sprintable_edit_artifact",
-     "artifact 요소 add/update/delete 편집 — 휴먼 딸깍과 같은 경로, 항상 새 버전 생성·이벤트 전파.",
+     "artifact 요소를 operations[]로 편집(휴먼 딸깍과 같은 경로·항상 새 버전·이벤트 전파). 각 op="
+     "{op:add|update|delete, id, type?, props?}. ⭐update/delete 대상 노드는 `id` 필드로 지정"
+     "(get_artifact의 node.id·코멘트 앵커 node_id 아님)·add는 type 필수.",
      EditArtifactInput, edit_artifact),
     ("sprintable_propose_canonical_version",
      "이 버전을 정본으로 제안(게이트 생성) — 제안만, 승인/반려는 항상 휴먼.",

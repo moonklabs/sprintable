@@ -7,6 +7,7 @@ from app.models.agent_run import AgentRun
 from app.models.agent_session import AgentSession
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
 from app.models.deletion_audit import DeletionAuditLog
+from app.models.dependency import ItemDependency
 from app.models.embedding import Embedding
 from app.models.evidence import Evidence
 from app.models.gate import Gate
@@ -78,6 +79,7 @@ __all__ = [
     "Gate",
     "HitlPolicy",
     "HitlRequest",
+    "ItemDependency",
     "MockupComponent",
     "MockupPage",
     "MockupScenario",

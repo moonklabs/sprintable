@@ -49,9 +49,15 @@ def _story(org_id, project_id, title, status="in-progress"):
 
 
 async def _seed(session):
-    """project_a(grant·3신호 다 有)·project_b(무접근)·project_c(grant·신호0)."""
+    """project_a(grant·3신호 다 有)·project_b(무접근)·project_c(grant·신호0).
+
+    P0-04(doc trust-pipeline-be-design) merge_ready 엄격화: in-review story가 human_verified(gate_
+    approval evidence)까지 있어야 merge_ready로 잡힌다 — "Review Story"에 evidence를 명시 부여해
+    엄격화 後에도 이 회귀 스위트가 원 계약(3신호 전부 반환)을 그대로 실증하게 한다."""
+    from app.models.evidence import Evidence
     from app.models.gate import Gate
     from app.models.dependency import ItemDependency
+    from app.models.member import Member
     from app.models.organization import Organization
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
@@ -89,8 +95,17 @@ async def _seed(session):
         id=uuid.uuid4(), org_id=org.id, from_id=story_blocker.id, to_id=story_blocked.id,
         dep_type="blocks", item_type="story",
     ))
-    # merge_ready: in-review story in project_a.
-    session.add(_story(org.id, pa.id, "Review Story", status="in-review"))
+    # merge_ready: in-review story in project_a + human_verified(gate_approval evidence·P0-04 엄격화).
+    story_review = _story(org.id, pa.id, "Review Story", status="in-review")
+    session.add(story_review)
+    await session.commit()
+    reviewer = Member(id=uuid.uuid4(), org_id=org.id, type="human", name="Reviewer", org_role="admin")
+    session.add(reviewer)
+    await session.commit()
+    session.add(Evidence(
+        id=uuid.uuid4(), org_id=org.id, work_item_id=story_review.id, work_item_type="story",
+        type="gate_approval", ref="approved", created_by=reviewer.id,
+    ))
     await session.commit()
 
     caller_id = uuid.uuid4()
