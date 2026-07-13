@@ -5,69 +5,19 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ShieldCheck } from 'lucide-react';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
-import type { GateItem, DependencyEdge } from '@/components/kanban/types';
 import {
-  deriveGateAttentionItems, deriveBlockedAttentionItems, buildAttentionQueue,
-  type AttentionStoryLite, type AttentionMember, type AttentionQueueItem, type AttentionQueueTranslator,
+  parseAttentionQueueSignals, buildAttentionQueueFromBe, buildAttentionQueue,
+  type AttentionQueueItem, type AttentionQueueTranslator,
 } from './derive-attention-queue';
 
-// 지금/Now 존(P0-06) 안 개입 후보 풀 — kanban 활성 상태만(done 제외).
-const ACTIVE_STATUSES = ['backlog', 'ready-for-dev', 'in-progress', 'in-review'];
 const CAP = 7;
 
-interface StoryListItem {
-  id: string;
-  title: string;
-  assignee_id: string | null;
-}
-
-interface TeamMemberItem {
-  id: string;
-  name: string | null;
-  type: 'human' | 'agent';
-}
-
-async function fetchActiveStories(projectId: string): Promise<StoryListItem[]> {
-  const results = await Promise.all(ACTIVE_STATUSES.map((status) => {
-    const params = new URLSearchParams({ project_id: projectId, status, limit: '100' });
-    return fetch(`/api/stories?${params}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json: { data?: StoryListItem[] } | null) => json?.data ?? [])
-      .catch(() => [] as StoryListItem[]);
-  }));
-  return results.flat();
-}
-
 async function fetchAttentionQueue(projectId: string, t: AttentionQueueTranslator): Promise<AttentionQueueItem[]> {
-  const [gatesJson, graphJson, membersJson, stories] = await Promise.all([
-    fetch('/api/gates?status=pending').then((r) => (r.ok ? r.json() : [])).catch(() => [] as GateItem[]),
-    fetch('/api/dependencies/graph?item_type=story')
-      .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null as { edges?: DependencyEdge[] } | null),
-    fetch('/api/team-members')
-      .then((r) => (r.ok ? r.json() : { data: [] }))
-      .catch(() => ({ data: [] as TeamMemberItem[] })),
-    fetchActiveStories(projectId),
-  ]);
-
-  const gates = gatesJson as GateItem[];
-  const blockedByMap: Record<string, string[]> = {};
-  for (const edge of (graphJson as { edges?: DependencyEdge[] } | null)?.edges ?? []) {
-    if (edge.dep_type === 'blocks') (blockedByMap[edge.to_id] ??= []).push(edge.from_id);
-  }
-  const members = ((membersJson as { data?: TeamMemberItem[] }).data ?? []);
-
-  const storiesById = new Map<string, AttentionStoryLite>(
-    stories.map((s) => [s.id, { id: s.id, title: s.title, assignee_id: s.assignee_id }]),
-  );
-  const membersById = new Map<string, AttentionMember>(
-    members.map((m) => [m.id, { name: m.name, type: m.type }]),
-  );
-
-  return [
-    ...deriveGateAttentionItems(gates, storiesById, membersById, t),
-    ...deriveBlockedAttentionItems(blockedByMap, storiesById, membersById, t),
-  ];
+  const json = await fetch(`/api/glance/attention?project_id=${projectId}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+  const signals = parseAttentionQueueSignals(json);
+  return buildAttentionQueueFromBe(signals, t);
 }
 
 function RowSkeleton() {
@@ -107,9 +57,12 @@ function AttentionRow({ item, onNavigate }: { item: AttentionQueueItem; onNaviga
  * 원시 이벤트 나열 아니라 판단이 필요한 것만. Proof Capsule row density 재사용(신규 컴포넌트 아님).
  * 배치 = `/inbox?tab=attention`(지금/Now 존·기존 인박스 병행 — PO 확定 2026-07-13).
  *
- * 1단계 스코프: 5유형 중 4개만(검증실패/결정필요/막힘/병합대기) — 범위이탈(Red)은 BE에 "승인범위
- * 밖" 판정 신호가 아직 없어 no-fiction 원칙상 제외(P0-04 파이프라인 impl 착지 후 추가 예정).
- * 데이터 소스=클라 파생(derive-attention-queue.ts); 2단계에서 `/glance/attention` BE 계약으로 스왑.
+ * 2단계(BE 계약 스왑) 완료: 데이터 소스 = `/glance/attention`(P0-04 trust 파이프라인 파생, doc
+ * trust-pipeline-be-design §6). 4유형(검증실패/결정필요[needs_input+gate_pending 합류]/막힘/
+ * 병합대기) — 범위이탈(Red)은 BE가 §7 확定②로 여전히 미구현이라 항상 빈 신호(no-fiction 렌더
+ * 생략). actor(human/agent 아바타)는 BE `AttentionItem`에 assignee 필드가 없어 당분간 없음
+ * (P0-03 `human_owner_member_id` 노출 시 복원 예정 — 별도 low 스토리). SSE 실시간 반영(P0-04
+ * "새로고침 없이" 완료기준의 잔여)은 BE 브릿지 미비로 이 스토리 스코프 밖(별도 high 스토리).
  */
 export function AttentionQueueView({ projectId }: { projectId: string }) {
   const router = useRouter();
