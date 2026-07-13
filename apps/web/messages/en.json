@@ -3567,6 +3567,6 @@
     "galleryLazyHint": "Expanding loads earlier versions.",
     "galleryVersionsUnavailable": "Couldn't load earlier versions.",
     "viewerExpandAction": "Expand view",
-    "viewerPanHint": "Hold space and drag to pan"
+    "viewerPanHint": "Drag to move"
   }
 }
