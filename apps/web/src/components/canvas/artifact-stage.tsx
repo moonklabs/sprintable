@@ -208,6 +208,16 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
   const handleWheelRef = useRef<(e: WheelEvent) => void>(() => {});
 
   function handleWheel(e: WheelEvent) {
+    if (!(e.ctrlKey || e.metaKey)) {
+      // story 1948d19d §3(PR#2137 까심 QA 비차단 발견, 이 fix로 preventDefault가 실제로 먹기
+      // 시작하면서 노출됨) — 편집 캔버스의 긴 노드트리(overflow-auto)는 자체 내부 스크롤이
+      // 있다. plain wheel(=pan 의도)이 실제로 넘칠 내용이 있는 스크롤 가능 영역 위에서
+      // 시작됐으면 캔버스 pan 대신 네이티브 내부 스크롤에 양보한다(우리가 소비 안 함).
+      // ctrl/meta+wheel(=줌 의도)은 무조건 우리가 소비 — 그래야 네이티브 페이지 줌 누출
+      // 방지(이 PR의 crux)가 전 영역에서 안 깨진다.
+      const scrollable = (e.target as HTMLElement | null)?.closest?.('[data-canvas-scrollable]') as HTMLElement | null;
+      if (scrollable && scrollable.scrollHeight > scrollable.clientHeight) return;
+    }
     e.preventDefault();
     const rect = viewportRef.current?.getBoundingClientRect();
     if (!rect) return;

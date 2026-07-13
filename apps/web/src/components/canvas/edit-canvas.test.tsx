@@ -55,4 +55,10 @@ describe('EditCanvas (C3 §2 — 클릭 선택만, 중첩 트리 재귀 렌더, 
     expect(markup).toContain('전체 보기');
     expect(markup).toContain('실제 크기');
   });
+
+  it('marks the node list as data-canvas-scrollable (PR#2138 — 긴 트리 내부 스크롤을 캔버스 pan에서 양보받는 마커)', () => {
+    const tree: ResolvedNode[] = [{ id: 'n1', type: 'Card', props: {}, parent_id: null, sort_order: 0, children: [] }];
+    const markup = renderToStaticMarkup(wrap(<EditCanvas tree={tree} selectedId={null} onSelect={vi.fn()} />));
+    expect(markup).toContain('data-canvas-scrollable');
+  });
 });
