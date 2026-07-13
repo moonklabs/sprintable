@@ -11,6 +11,12 @@ import type { ArtifactFormat } from '@/services/canvas';
  * story d425dccc — v1의 축소-fit "전체 보기" 토글은 선생님 실사용 결과 제거(유나 스펙 ⓒ 판정 —
  * 축소는 디테일을 못 보게 해 원하는 것과 반대). 대신 ⓐ space+드래그 pan ⓑ 가로 스크롤바 상시
  * 가시화로 대체 — wrapper는 항상 실제 크기로 렌더하고 이동 수단만 강화한다.
+ *
+ * story e4cce704(v2.1) — space 게이트를 완전 제거(선생님 실사용 지적 3차: 뷰어 밖에서 space를
+ * 누르면 그대로 페이지 스크롤 다운으로 새 — hover-gate라 게이트 상태가 비가시라 "고장"으로
+ * 읽힘). 오버레이를 상시 활성화해 **드래그만으로 pan**하도록 단순화(유나 판정 확定, KISS —
+ * "클릭 통과" 절충은 cross-origin에서 반쯤 작동하는 복잡 상태라 명시 거부됨). 트레이드오프:
+ * 오버레이가 항상 포인터를 가로채 iframe 내부 텍스트 선택은 포기(뷰어=탐색이 본업).
  */
 const HTML_STAGE_WIDTH = 1200;
 const HTML_STAGE_HEIGHT = 280;
@@ -54,13 +60,6 @@ function TreeNodeBox({ node }: { node: ArtifactTreeNode }) {
   );
 }
 
-const TYPING_TAGS = new Set(['INPUT', 'TEXTAREA']);
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return TYPING_TAGS.has(target.tagName) || target.isContentEditable;
-}
-
 interface ArtifactStageProps {
   format: ArtifactFormat;
   content: string;
@@ -72,51 +71,17 @@ interface ArtifactStageProps {
 }
 
 /**
- * html 산출물의 space+드래그 pan(story d425dccc). sandbox=""(allow-scripts 없음) iframe은
+ * html 산출물의 직접-드래그 pan(story e4cce704, v2.1). sandbox=""(allow-scripts 없음) iframe은
  * 자기 자신의 포인터 이벤트를 소비해 드래그가 iframe 경계에서 끊기므로, 투명 오버레이(우리
- * DOM)로 포인터를 가로채는 방식으로 우회한다 — sandbox 완화 없음(iframe 내부는 여전히 0접근).
- * space를 누르고 있을 때만 오버레이가 pointer-events를 받아 grab/grabbing 커서로 드래그하고,
- * 뗄 때 원복(iframe 자체 상호작용에 지장 없음).
+ * DOM)로 포인터를 상시 가로채는 방식으로 우회한다 — sandbox 완화 없음(iframe 내부는 여전히
+ * 0접근). space 게이트 없음(v2에서 hover-gate로 있었으나 뷰어 밖에서 space 누르면 그대로
+ * 페이지 스크롤로 새는 혼란이라 완전 제거) — 오버레이가 항상 pointer-events:auto+grab
+ * 커서라 즉시 가시적인 어포던스, mousedown 즉시 드래그 시작. 트레이드오프: iframe 내부
+ * 텍스트 선택은 포기(뷰어=탐색이 본업, 유나 확定).
  */
 function PanOverlay({ wrapperRef }: { wrapperRef: React.RefObject<HTMLDivElement | null> }) {
-  const [spaceHeld, setSpaceHeld] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const hoveringRef = useRef(false);
   const dragStartRef = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
-
-  // hover 감지는 wrapper(스크롤 컨테이너)에 직접 건다 — 오버레이 자신은 space 안 눌렀을 때
-  // pointer-events:none이라 자기 위의 mouseenter/leave를 못 받는다(순환 의존 방지).
-  useEffect(() => {
-    const el = wrapperRef.current;
-    if (!el) return;
-    function onEnter() { hoveringRef.current = true; }
-    function onLeave() { hoveringRef.current = false; }
-    el.addEventListener('mouseenter', onEnter);
-    el.addEventListener('mouseleave', onLeave);
-    return () => {
-      el.removeEventListener('mouseenter', onEnter);
-      el.removeEventListener('mouseleave', onLeave);
-    };
-  }, [wrapperRef]);
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.code !== 'Space' || !hoveringRef.current || isTypingTarget(e.target)) return;
-      e.preventDefault(); // 페이지 스크롤(space=page down) 억제
-      setSpaceHeld(true);
-    }
-    function onKeyUp(e: KeyboardEvent) {
-      if (e.code !== 'Space') return;
-      setSpaceHeld(false);
-      setDragging(false);
-    }
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-    };
-  }, []);
 
   useEffect(() => {
     if (!dragging) return;
@@ -139,7 +104,6 @@ function PanOverlay({ wrapperRef }: { wrapperRef: React.RefObject<HTMLDivElement
   }, [dragging, wrapperRef]);
 
   function handleMouseDown(e: React.MouseEvent) {
-    if (!spaceHeld) return;
     const el = wrapperRef.current;
     if (!el) return;
     dragStartRef.current = { x: e.clientX, y: e.clientY, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop };
@@ -150,13 +114,9 @@ function PanOverlay({ wrapperRef }: { wrapperRef: React.RefObject<HTMLDivElement
     <div
       role="presentation"
       data-pan-overlay
-      data-pan-active={spaceHeld || undefined}
       onMouseDown={handleMouseDown}
       className="absolute inset-0"
-      style={{
-        pointerEvents: spaceHeld ? 'auto' : 'none',
-        cursor: dragging ? 'grabbing' : spaceHeld ? 'grab' : undefined,
-      }}
+      style={{ cursor: dragging ? 'grabbing' : 'grab' }}
     />
   );
 }

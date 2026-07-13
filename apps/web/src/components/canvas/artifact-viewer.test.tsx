@@ -130,20 +130,11 @@ describe('ArtifactViewer (SSR snapshot)', () => {
       expect(markup).not.toContain('aria-pressed');
     });
 
-    it('renders the always-visible-scrollbar hook and pan hint copy for the inline html stage', () => {
+    it('renders the always-visible-scrollbar hook for the inline html stage', () => {
       const markup = renderToStaticMarkup(
         wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
       );
       expect(markup).toContain('data-artifact-stage-scroll');
-      expect(markup).toContain('스페이스를 누른 채 드래그하면 이동합니다');
-    });
-
-    it('the pan overlay starts inert (pointer-events:none) until space is held — no accidental capture', () => {
-      const markup = renderToStaticMarkup(
-        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
-      );
-      expect(markup).toContain('data-pan-overlay');
-      expect(markup).not.toContain('data-pan-active');
     });
 
     it('the expand dialog is not rendered in the DOM when closed by default (base-ui portal, no leaked markup)', () => {
@@ -151,6 +142,25 @@ describe('ArtifactViewer (SSR snapshot)', () => {
         wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
       );
       expect(markup).not.toContain('90vw');
+    });
+  });
+
+  describe('story e4cce704(v2.1) — space 게이트 완전 제거, 직접-드래그 pan', () => {
+    it('the pan overlay always renders with the grab cursor (즉시 가시 어포던스, space 대기 없음)', () => {
+      const markup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(markup).toContain('data-pan-overlay');
+      expect(markup).toContain('cursor:grab');
+      expect(markup).not.toContain('pointer-events:none');
+    });
+
+    it('renders the updated drag hint copy, never the discarded space-based instruction', () => {
+      const markup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+      );
+      expect(markup).toContain('끌어서 이동');
+      expect(markup).not.toContain('스페이스');
     });
   });
 });
