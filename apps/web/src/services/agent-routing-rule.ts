@@ -641,7 +641,7 @@ export class AgentRoutingRuleService {
         'Content-Type': 'application/json',
         ...(this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {}),
       },
-      body: JSON.stringify({ items: preparedItems }),
+      body: JSON.stringify({ items: preparedItems, project_id: input.projectId }),
     });
     if (!replaceRes.ok) {
       const body = await replaceRes.json().catch(() => ({}));
@@ -782,7 +782,7 @@ export class AgentRoutingRuleService {
         'Content-Type': 'application/json',
         ...(this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {}),
       },
-      body: JSON.stringify({ items: cleaned }),
+      body: JSON.stringify({ items: cleaned, project_id: scope.projectId }),
     });
     if (!reorderRes.ok) {
       const body = await reorderRes.json().catch(() => ({}));

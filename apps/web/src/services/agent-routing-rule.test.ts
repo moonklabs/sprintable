@@ -235,7 +235,7 @@ describe('AgentRoutingRuleService.reorderPriorities', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/v2/agent-routing-rules'),
-      expect.objectContaining({ method: 'PATCH' }),
+      expect.objectContaining({ method: 'PATCH', body: expect.stringContaining('"project_id":"project-1"') }),
     );
     expect(result.map((rule) => rule.id)).toEqual(['rule-1', 'rule-2']);
     fetchMock.mockRestore();
@@ -332,7 +332,7 @@ describe('AgentRoutingRuleService.replaceRules', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/v2/agent-routing-rules'),
-      expect.objectContaining({ method: 'PUT' }),
+      expect.objectContaining({ method: 'PUT', body: expect.stringContaining('"project_id":"project-1"') }),
     );
     expect(result.map((rule) => rule.id)).toEqual(['rule-1', 'rule-2']);
     fetchMock.mockRestore();
