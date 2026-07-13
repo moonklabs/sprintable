@@ -34,13 +34,14 @@ export interface AttentionMember {
   type: 'human' | 'agent';
 }
 
-export const ATTENTION_KIND_LABEL: Record<AttentionKind, string> = {
-  verify_fail: '검증 실패',
-  decision_needed: '결정 필요',
-  gate_pending: '승인 대기',
-  blocked: '막힘',
-  merge_ready: '병합 대기',
-};
+/** next-intl `useTranslations('attentionQueue')`의 `t` 표면만 뽑은 최소 구조 타입(call-signature) —
+ * 파생 함수는 React 밖이라 값으로 주입받는다(derive-exception-signals.ts의 ExceptionLabels 주입
+ * 패턴과 동형). 함수 타입 별칭 대신 call-signature로 선언해 next-intl `Translator<M,N>`의 깊은
+ * 오버로드 제네릭에 결합하지 않고 테스트의 `createTranslator()` 결과도 그대로 대입 가능
+ * (loop-create-dialog.tsx `RecipeTranslator` 선례). */
+export interface AttentionQueueTranslator {
+  (key: string, values?: Record<string, string | number>): string;
+}
 
 function actorFor(
   story: AttentionStoryLite | undefined,
@@ -75,6 +76,7 @@ export function deriveGateAttentionItems(
   gates: GateItem[],
   storiesById: Map<string, AttentionStoryLite>,
   membersById: Map<string, AttentionMember>,
+  t: AttentionQueueTranslator,
 ): AttentionQueueItem[] {
   const items: AttentionQueueItem[] = [];
   for (const gate of gates) {
@@ -87,21 +89,21 @@ export function deriveGateAttentionItems(
 
     if (gate.gate_type === 'merge' && ciResult === 'fail') {
       items.push({
-        ...base, kind: 'verify_fail', kindLabel: ATTENTION_KIND_LABEL.verify_fail,
-        proofState: PROOF_STATE.verify_fail, claim: `${story.title} — CI 검증 실패, 재작업 필요`,
-        actionLabel: '재작업 지시', actionTone: 'neutral',
+        ...base, kind: 'verify_fail', kindLabel: t('kindVerifyFail'),
+        proofState: PROOF_STATE.verify_fail, claim: t('claimVerifyFail', { title: story.title }),
+        actionLabel: t('actionRework'), actionTone: 'neutral',
       });
     } else if (gate.gate_type === 'merge' && ciResult === 'pass') {
       items.push({
-        ...base, kind: 'merge_ready', kindLabel: ATTENTION_KIND_LABEL.merge_ready,
-        proofState: PROOF_STATE.merge_ready, claim: `${story.title} — 검증 완료, 병합 대기`,
-        actionLabel: '병합', actionTone: 'ready',
+        ...base, kind: 'merge_ready', kindLabel: t('kindMergeReady'),
+        proofState: PROOF_STATE.merge_ready, claim: t('claimMergeReady', { title: story.title }),
+        actionLabel: t('actionMerge'), actionTone: 'ready',
       });
     } else if (gate.gate_type === 'loop_decision') {
       items.push({
-        ...base, kind: 'decision_needed', kindLabel: ATTENTION_KIND_LABEL.decision_needed,
-        proofState: PROOF_STATE.decision_needed, claim: `${story.title} — 방향 결정 필요`,
-        actionLabel: '결정', actionTone: 'primary',
+        ...base, kind: 'decision_needed', kindLabel: t('kindDecisionNeeded'),
+        proofState: PROOF_STATE.decision_needed, claim: t('claimDecisionNeeded', { title: story.title }),
+        actionLabel: t('actionDecide'), actionTone: 'primary',
       });
     }
   }
@@ -116,6 +118,7 @@ export function deriveBlockedAttentionItems(
   blockedByMap: Record<string, string[]>,
   storiesById: Map<string, AttentionStoryLite>,
   membersById: Map<string, AttentionMember>,
+  t: AttentionQueueTranslator,
 ): AttentionQueueItem[] {
   const items: AttentionQueueItem[] = [];
   for (const [storyId, blockers] of Object.entries(blockedByMap)) {
@@ -125,11 +128,11 @@ export function deriveBlockedAttentionItems(
     items.push({
       id: `blocked-${storyId}`,
       kind: 'blocked',
-      kindLabel: ATTENTION_KIND_LABEL.blocked,
+      kindLabel: t('kindBlocked'),
       proofState: PROOF_STATE.blocked,
-      claim: `${story.title} — ${blockers.length}건에 막혀 진행 불가, 조율 필요`,
+      claim: t('claimBlocked', { title: story.title, count: blockers.length }),
       actor: actorFor(story, membersById),
-      actionLabel: '조율',
+      actionLabel: t('actionCoordinate'),
       actionTone: 'neutral',
       href: `/board?story=${story.id}`,
       sortKey: 0,

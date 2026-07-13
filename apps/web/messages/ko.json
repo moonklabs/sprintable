@@ -1621,6 +1621,27 @@
     "grantFailed": "지급 실패",
     "adminOnlyHint": "조직 관리자/소유자만 리워드 지급 가능"
   },
+  "attentionQueue": {
+    "kicker": "오늘 · Attention Queue",
+    "title": "지금 개입할 것",
+    "count": "<b>{count}</b>건 · 로그 안 열고 판단",
+    "allClear": "ALL CLEAR",
+    "emptyTitle": "지금 개입할 것 없음",
+    "emptyBody": "모든 작업이 흐르고 있는. 예외가 생기면 여기 올라오는.",
+    "flowDemoted": "나머지는 흐르는 중 — {overflow}건은 여기 안 올림",
+    "kindVerifyFail": "검증 실패",
+    "kindDecisionNeeded": "결정 필요",
+    "kindBlocked": "막힘",
+    "kindMergeReady": "병합 대기",
+    "claimVerifyFail": "{title} — CI 검증 실패, 재작업 필요",
+    "claimMergeReady": "{title} — 검증 완료, 병합 대기",
+    "claimDecisionNeeded": "{title} — 방향 결정 필요",
+    "claimBlocked": "{title} — {count}건에 막혀 진행 불가, 조율 필요",
+    "actionRework": "재작업 지시",
+    "actionMerge": "병합",
+    "actionDecide": "결정",
+    "actionCoordinate": "조율"
+  },
   "inbox": {
     "title": "인박스",
     "attentionTabLabel": "오늘",
