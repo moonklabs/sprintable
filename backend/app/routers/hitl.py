@@ -1,11 +1,12 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.dependencies.project_scope import resolve_required_project_id
 from app.repositories.hitl import HitlRepository
 from app.schemas.hitl import PatchHitlPolicyRequest, ResolveHitlRequestBody
 
@@ -47,13 +48,26 @@ async def get_hitl_policy(
 
 @router.patch("/policy")
 async def update_hitl_policy(
+    request: Request,
     body: PatchHitlPolicyRequest,
     auth: AuthContext = Depends(get_current_user),
     repo: HitlRepository = Depends(_repo),
 ) -> JSONResponse:
-    org_id, project_id = _get_org_project(auth)
-    if not org_id:
+    # E-MCP-OPT 후속(story f0c99070·doc legacy-project-fallback-sweep-audit §2.2 2단계): 이 라우트는
+    # project_id 단독(org_id도 미검사) singleton upsert라 fail-closed 앵커가 없다 — 요청시점 재해소
+    # 강제(무헤더 direct REST 실호출처 0 실측 확인, 즉시 강제 안전).
+    org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
+    if not org_id_str:
         return _err("FORBIDDEN", "org_id required", 403)
+    org_id = uuid.UUID(str(org_id_str))
+    try:
+        project_id = await resolve_required_project_id(repo.session, request, auth, org_id)
+    except HTTPException as exc:
+        return _err(
+            exc.detail.get("code", "PROJECT_ID_REQUIRED") if isinstance(exc.detail, dict) else "FORBIDDEN",
+            exc.detail.get("message", str(exc.detail)) if isinstance(exc.detail, dict) else str(exc.detail),
+            exc.status_code,
+        )
     snapshot = await repo.save_policy(
         org_id=org_id,
         project_id=project_id,
