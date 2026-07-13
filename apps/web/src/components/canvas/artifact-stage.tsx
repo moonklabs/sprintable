@@ -22,7 +22,10 @@ import type { ArtifactFormat } from '@/services/canvas';
  *   구현한다(핀 자체의 onClick은 무변경 — 임계 미달=일반 클릭이 그대로 발화).
  */
 
-const DEFAULT_BOUNDS = { w: 1280, h: 800 }; // 문서형 기본 아트보드 — canvas_bounds 미선언 폴백(§4, 가짜 추정 아님·명시된 규약)
+// 문서형 기본 아트보드 — canvas_bounds 미선언 폴백(§4, 가짜 추정 아님·명시된 규약). export —
+// story 7fe16274(핀 저작)이 클릭 좌표→canvas_bounds 좌표계 환산에 동일 값을 참조해야
+// 배치 시점(edit)과 렌더 시점(view)의 좌표계가 어긋나지 않는다(값 중복선언 금지).
+export const DEFAULT_BOUNDS = { w: 1280, h: 800 };
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 4;
 const DRAG_THRESHOLD_PX = 4;

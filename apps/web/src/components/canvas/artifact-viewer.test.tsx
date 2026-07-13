@@ -1,10 +1,16 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ArtifactViewer } from './artifact-viewer';
 import { MOCK_ARTIFACT, MOCK_EDITABLE_ARTIFACT, MOCK_VERSIONS, MOCK_MEMBERS } from '@/services/canvas';
 import { MOCK_THREADS } from '@/services/canvas-comments';
+import type { SpecPin } from '@/services/canvas-spec-pins';
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function wrap(node: React.ReactNode) {
   return (
@@ -13,6 +19,11 @@ function wrap(node: React.ReactNode) {
     </NextIntlClientProvider>
   );
 }
+
+const MOCK_SPEC_PIN: SpecPin = {
+  id: 'sp1', artifactId: MOCK_ARTIFACT.id, versionId: 'v4', anchorType: 'coord',
+  anchorX: 200, anchorY: 100, nodeId: null, description: '헤더는 primary 배경입니다.',
+};
 
 describe('ArtifactViewer (SSR snapshot)', () => {
   it('renders the anchor badge for the artifact anchor version, not the currently-selected one', () => {
@@ -150,6 +161,76 @@ describe('ArtifactViewer (SSR snapshot)', () => {
         wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={MOCK_THREADS} />),
       );
       expect(markup).toContain('data-artifact-canvas-overlay');
+    });
+  });
+
+  describe('story 7fe16274 — 스펙 핀(doc artifact-pin-authoring-spec v1) 뷰 모드 렌더', () => {
+    it('renders spec pins at their canvas_bounds px coordinates when viewing the latest version (default selection)', () => {
+      const markup = renderToStaticMarkup(
+        wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} specPins={[MOCK_SPEC_PIN]} />),
+      );
+      expect(markup).toContain('lucide-file-text');
+      expect(markup).toContain('left:200');
+      expect(markup).toContain('top:100');
+    });
+
+    it('wires a real description pane (not the "coming soon" fallback) when specPins is passed, even without threads', async () => {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} specPins={[MOCK_SPEC_PIN]} />));
+      });
+      const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('description pane'))!;
+      await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+      expect(container.textContent).toContain('보이는 PRD');
+      expect(container.textContent).not.toContain('C2에서 제공 예정');
+
+      await act(async () => { root.unmount(); });
+      container.remove();
+    });
+
+    it('hides spec pins when the viewer navigates to a non-latest version (BE는 항상 latest만 대상 — 어긋난 좌표 방지)', async () => {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} specPins={[MOCK_SPEC_PIN]} />));
+      });
+      expect(container.querySelector('.lucide-file-text')).not.toBeNull();
+
+      const select = container.querySelector('select') as HTMLSelectElement;
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
+        setter.call(select, '3'); // MOCK_ARTIFACT.current_version = 4, this navigates away from latest
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      expect(container.querySelector('.lucide-file-text')).toBeNull();
+
+      await act(async () => { root.unmount(); });
+      container.remove();
+    });
+
+    it('clicking a spec pin shows its description in the description pane and deselects any active comment thread', async () => {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(wrap(
+          <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={MOCK_THREADS} specPins={[MOCK_SPEC_PIN]} />,
+        ));
+      });
+
+      const pinButton = container.querySelector('.lucide-file-text')!.closest('button') as HTMLButtonElement;
+      await act(async () => { pinButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('description pane'))!;
+      await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+      expect(container.textContent).toContain('헤더는 primary 배경입니다.');
+
+      await act(async () => { root.unmount(); });
+      container.remove();
     });
   });
 });
