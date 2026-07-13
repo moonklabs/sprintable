@@ -19,6 +19,10 @@ def _mock_story(status: str = "backlog") -> MagicMock:
     s.epic_id = None
     s.sprint_id = None
     s.assignee_id = None
+    # P0-03(doc trust-pipeline-be-design §5): 신규 필드 — MagicMock 반환 MagicMock이 Pydantic UUID
+    # 검증 실패하므로 명시 세팅(위 outcome 필드와 동일 이유).
+    s.human_owner_member_id = None
+    s.agent_delegate_ids = []
     s.meeting_id = None
     s.title = "Story 1"
     s.status = status
