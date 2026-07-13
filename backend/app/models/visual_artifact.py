@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -132,6 +132,53 @@ class ArtifactComment(Base):
     resolved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+ARTIFACT_SPEC_PIN_ANCHOR_TYPES = frozenset({"coord", "node"})
+
+
+class ArtifactSpecPin(Base):
+    """편집 캔버스 핀 저작(story 7fe16274·doc artifact-pin-authoring-spec §2) — 요소/좌표 스펙
+    앵커(description pane 저작 입구). ArtifactComment(코멘트 핀)와 같은 캔버스 핀 레이어를
+    공유하되(FE §4 시각 구분) 별도 엔티티로 분리한 이유(그라운딩·재사용 대신 신설 판단):
+      · **버전 스코프**(canvas_bounds·ArtifactNode와 동형) — 코멘트는 artifact 레벨로 버전과
+        무관하게 영속되지만(node_id가 있어도 carry-forward 안 됨·구버전 참조로 방치), 스펙 핀은
+        그 버전 레이아웃(좌표/노드)의 스냅샷이라 edit마다 함께 carry-forward한다
+        (_apply_artifact_edit — 무-mutate 버전 원칙·reflow-safe 계승).
+      · **스레드/resolve 없음** — 단일값 description(재편집=덮어씀). 코멘트의 토론형(parent_id
+        스레드·resolved 상태)과 근본적으로 다른 생명주기라 같은 테이블에 넣으면 코멘트 전용
+        컬럼이 스펙 핀 행마다 의미 없이 방치됨.
+      · **anchor_type 명시 판별자** — 코멘트의 암묵적 nullable 타이핑(node_id 있으면 노드,
+        anchor_x/y 있으면 좌표)과 달리 명시 컬럼 + CHECK로 고정. anchor 테이블 오타입 no-op
+        함정(암묵 타이핑 시 잘못된 조합이 조용히 통과) 회피.
+      · **감시금지**(doc §4) — created_by/created_at 등 작성자·시간 속성을 아예 갖지 않는다
+        (ArtifactNode와 동형 — attribution 노출 0을 스키마 레벨에서 강제).
+    """
+    __tablename__ = "artifact_spec_pins"
+    __table_args__ = (
+        CheckConstraint(
+            "(anchor_type = 'coord' AND anchor_x IS NOT NULL AND anchor_y IS NOT NULL AND node_id IS NULL) OR "
+            "(anchor_type = 'node' AND node_id IS NOT NULL AND anchor_x IS NULL AND anchor_y IS NULL)",
+            name="ck_artifact_spec_pins_anchor_consistency",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    artifact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("visual_artifacts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_versions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    anchor_type: Mapped[str] = mapped_column(Text, nullable=False)
+    anchor_x: Mapped[float | None] = mapped_column(nullable=True)
+    anchor_y: Mapped[float | None] = mapped_column(nullable=True)
+    node_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_nodes.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # description=null 금지 계보(doc §3 — 빈 스펙 저장 차단, 핸드오프 계약 규율).
+    description: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

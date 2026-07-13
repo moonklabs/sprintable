@@ -60,6 +60,17 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 조작이라 파괴적이지 않음(has_project_access로 대상 검증). 백엔드 SSOT와 동기화 필수
     # (app/services/mcp_toolset.py).
     "sprintable_list_projects", "sprintable_set_default_project",
+    # story 7fe16274 발견·즉시 수정: E-CANVAS visual_artifacts 그룹(C1-S3~C4-S8) 전체가 이
+    # vendored 사본의 _ALWAYS_ALLOWED에 처음부터 누락돼 있었다 — "artifact"/"pin"/"canvas"가
+    # 어떤 _GROUP_KEYWORDS와도 매칭 안 돼 tool_group()이 기본값 `_CORE`로 떨어지고, 명시 scope를
+    # 지정한 키(예: scope=['docs'])는 "core"를 별도로 안 넣는 한 이 도구들을 전혀 못 쓰는 상태였다
+    # (백엔드 SSOT app/services/mcp_toolset.py는 처음부터 always-allow였음 — 드리프트). 백엔드
+    # SSOT와 동기화(7개 기존 + 4개 신규 핀 도구).
+    "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
+    "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
+    "sprintable_edit_artifact", "sprintable_propose_canonical_version",
+    "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
+    "sprintable_delete_spec_pin",
 })
 
 _LEGACY_SCOPES: frozenset[str] = frozenset({"read", "write"})

@@ -86,10 +86,13 @@ EXPECTED_TOOLS = {
     "sprintable_link_gate_to_task",
     # evidence (1) — E-VERIFY V0-S1
     "sprintable_add_evidence",
-    # visual artifacts (7) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안)
+    # visual artifacts (11) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
+    # 핀 저작(story 7fe16274)
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
+    "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
+    "sprintable_delete_spec_pin",
     # smoke
     "ping",
 }
@@ -98,7 +101,8 @@ EXPECTED_TOOLS = {
 def test_total_tool_count():
     # C1-S3(e50563b4): sprintable_list_artifacts 추가로 98→99... +1=100.
     # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가 — 100→102.
-    assert len(_TOOLS) == 102
+    # 편집 캔버스 핀 저작(story 7fe16274): spec pin 4종 추가 — 102→106.
+    assert len(_TOOLS) == 106
 
 
 def test_all_expected_tools_registered():

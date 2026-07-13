@@ -156,6 +156,77 @@ class ArtifactCommentResponse(BaseModel):
     created_at: datetime
 
 
+_SPEC_PIN_ANCHOR_TYPES = ("coord", "node")
+
+
+class CreateSpecPinRequest(BaseModel):
+    """편집 캔버스 핀 저작(story 7fe16274) — anchor_type이 좌표/노드 중 무엇이든 description은
+    non-null 강제(doc §3 — 빈 스펙 커밋 차단)."""
+    anchor_type: str
+    anchor_x: float | None = None
+    anchor_y: float | None = None
+    node_id: uuid.UUID | None = None
+    description: str
+
+    @field_validator("anchor_type")
+    @classmethod
+    def _validate_anchor_type(cls, v: str) -> str:
+        if v not in _SPEC_PIN_ANCHOR_TYPES:
+            raise ValueError("anchor_type must be 'coord' or 'node'")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def _description_non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("description must not be empty")
+        return v
+
+    @model_validator(mode="after")
+    def _validate_anchor_consistency(self) -> "CreateSpecPinRequest":
+        # DB CHECK(ck_artifact_spec_pins_anchor_consistency)와 동형 — API 레벨에서 먼저 422로 거름.
+        if self.anchor_type == "coord":
+            if self.anchor_x is None or self.anchor_y is None:
+                raise ValueError("coord anchor requires both anchor_x and anchor_y")
+            if self.node_id is not None:
+                raise ValueError("coord anchor must not set node_id")
+            if self.anchor_x < 0 or self.anchor_y < 0:
+                raise ValueError("anchor_x/anchor_y must be non-negative")
+        else:  # node
+            if self.node_id is None:
+                raise ValueError("node anchor requires node_id")
+            if self.anchor_x is not None or self.anchor_y is not None:
+                raise ValueError("node anchor must not set anchor_x/anchor_y")
+        return self
+
+
+class UpdateSpecPinRequest(BaseModel):
+    description: str
+
+    @field_validator("description")
+    @classmethod
+    def _description_non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("description must not be empty")
+        return v
+
+
+class SpecPinResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    artifact_id: uuid.UUID
+    version_id: uuid.UUID
+    anchor_type: str
+    anchor_x: float | None = None
+    anchor_y: float | None = None
+    node_id: uuid.UUID | None = None
+    description: str
+    # ⛔감시금지(doc §4): created_by/created_at 미노출 — 모델 자체에 attribution 컬럼이 없음
+    # (ArtifactNode와 동형).
+
+
 class ExportUploadUrlRequest(BaseModel):
     content_type: str = "image/png"
 
