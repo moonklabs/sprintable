@@ -157,6 +157,53 @@ describe('ArtifactStage — 캔버스 뷰포트(story 1948d19d)', () => {
     expect(readTransform(content).scale).toBe(1);
   });
 
+  it('attaches wheel via a native non-passive listener (crux — React onWheel silently no-ops preventDefault, leaking to page scroll/native ctrl-wheel zoom)', async () => {
+    const addSpy = vi.spyOn(HTMLElement.prototype, 'addEventListener');
+    await mount();
+    const wheelCall = addSpy.mock.calls.find((call) => call[0] === 'wheel');
+    expect(wheelCall).toBeDefined();
+    expect(wheelCall?.[2]).toMatchObject({ passive: false });
+    addSpy.mockRestore();
+  });
+
+  it('plain wheel over a [data-canvas-scrollable] region with real overflow yields to native inner scroll instead of panning (까심 QA 발견, PR#2138)', async () => {
+    await mount({
+      overlay: (
+        <div data-canvas-scrollable data-testid="scroll-region">
+          <button type="button" data-testid="node">node</button>
+        </div>
+      ),
+    });
+    const scrollRegion = container.querySelector('[data-canvas-scrollable]') as HTMLElement;
+    Object.defineProperty(scrollRegion, 'scrollHeight', { value: 2000, configurable: true });
+    Object.defineProperty(scrollRegion, 'clientHeight', { value: 400, configurable: true });
+    const node = container.querySelector('[data-testid="node"]') as HTMLElement;
+    const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+    const before = readTransform(content);
+
+    await act(async () => { press(node, 'wheel', { deltaX: 0, deltaY: 50, ctrlKey: false }); });
+    expect(readTransform(content)).toEqual(before);
+  });
+
+  it('ctrl/meta+wheel over the same overflowing region still zooms (줌 의도는 무조건 소비 — 네이티브 페이지 줌 누출 방지가 어디서도 안 깨짐)', async () => {
+    await mount({
+      overlay: (
+        <div data-canvas-scrollable data-testid="scroll-region">
+          <button type="button" data-testid="node">node</button>
+        </div>
+      ),
+    });
+    const scrollRegion = container.querySelector('[data-canvas-scrollable]') as HTMLElement;
+    Object.defineProperty(scrollRegion, 'scrollHeight', { value: 2000, configurable: true });
+    Object.defineProperty(scrollRegion, 'clientHeight', { value: 400, configurable: true });
+    const node = container.querySelector('[data-testid="node"]') as HTMLElement;
+    const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+    const before = readTransform(content);
+
+    await act(async () => { press(node, 'wheel', { deltaY: -100, ctrlKey: true, clientX: 10, clientY: 10 }); });
+    expect(readTransform(content).scale).toBeGreaterThan(before.scale);
+  });
+
   it('renders the fit and actual-size chrome buttons plus a live zoom percentage — no v1~v2.1 scrollbar/space chrome', async () => {
     await mount();
     expect(container.textContent).toContain('전체 보기');

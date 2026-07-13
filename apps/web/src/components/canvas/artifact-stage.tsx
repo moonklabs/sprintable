@@ -200,7 +200,24 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
     setIsDragging(false);
   }
 
-  function handleWheel(e: React.WheelEvent) {
+  // crux(선생님 실사용 즉시지적) — React onWheel은 루트에 passive 위임으로 붙어 e.preventDefault()가
+  // 조용히 무효화된다(React 17+ 표준 동작). 그 결과 우리 pan/줌이 실행되는 **동시에** 브라우저
+  // 네이티브 스크롤(휠)과 네이티브 Ctrl+휠 페이지 줌이 함께 새어나갔다("휠=pan 배타 소비" 계약
+  // 위반). 해법은 표준적으로 known: ref에 네이티브 `addEventListener('wheel', h, {passive:false})`를
+  // 직접 붙여야 preventDefault()가 실제로 먹는다 — React 합성 이벤트 prop으로는 안 됨.
+  const handleWheelRef = useRef<(e: WheelEvent) => void>(() => {});
+
+  function handleWheel(e: WheelEvent) {
+    if (!(e.ctrlKey || e.metaKey)) {
+      // story 1948d19d §3(PR#2137 까심 QA 비차단 발견, 이 fix로 preventDefault가 실제로 먹기
+      // 시작하면서 노출됨) — 편집 캔버스의 긴 노드트리(overflow-auto)는 자체 내부 스크롤이
+      // 있다. plain wheel(=pan 의도)이 실제로 넘칠 내용이 있는 스크롤 가능 영역 위에서
+      // 시작됐으면 캔버스 pan 대신 네이티브 내부 스크롤에 양보한다(우리가 소비 안 함).
+      // ctrl/meta+wheel(=줌 의도)은 무조건 우리가 소비 — 그래야 네이티브 페이지 줌 누출
+      // 방지(이 PR의 crux)가 전 영역에서 안 깨진다.
+      const scrollable = (e.target as HTMLElement | null)?.closest?.('[data-canvas-scrollable]') as HTMLElement | null;
+      if (scrollable && scrollable.scrollHeight > scrollable.clientHeight) return;
+    }
     e.preventDefault();
     const rect = viewportRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -222,6 +239,15 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
       });
     }
   }
+  handleWheelRef.current = handleWheel;
+
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const listener = (e: WheelEvent) => handleWheelRef.current(e);
+    el.addEventListener('wheel', listener, { passive: false });
+    return () => el.removeEventListener('wheel', listener);
+  }, []);
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -234,7 +260,6 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onWheel={handleWheel}
       >
         <div
           data-artifact-canvas-content
