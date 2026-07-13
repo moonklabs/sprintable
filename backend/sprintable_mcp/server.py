@@ -508,7 +508,8 @@ _TOOL_DEFS: list[tuple] = [
     # Visual artifacts (7) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안)
     ("sprintable_create_artifact",
      "시각 산출물 생성(에이전트 생성 입구) — 트리(nodes[])로 구조화. 임포트된 raw HTML/이미지는"
-     " type=\"html_blob\" 노드 하나로 감싸도 됨.",
+     " type=\"html_blob\" 노드 하나로 감싸도 됨. canvas_bounds{w,h}(선택): 렌더 자기 프레임 크기"
+     "(CSS px, 양수·≤20000) — sandbox iframe이라 서버가 측정 불가해 선언 필요·미지정=FE 기본 아트보드.",
      CreateArtifactInput, create_artifact),
     ("sprintable_get_artifact",
      "시각 산출물 단건 조회(latest 버전 + nodes).",
@@ -526,7 +527,9 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_edit_artifact",
      "artifact 요소를 operations[]로 편집(휴먼 딸깍과 같은 경로·항상 새 버전·이벤트 전파). 각 op="
      "{op:add|update|delete, id, type?, props?}. ⭐update/delete 대상 노드는 `id` 필드로 지정"
-     "(get_artifact의 node.id·코멘트 앵커 node_id 아님)·add는 type 필수.",
+     "(get_artifact의 node.id·코멘트 앵커 node_id 아님)·add는 type 필수. canvas_bounds{w,h}(선택):"
+     " 프레임 크기 재선언 — 미지정 시 직전 버전 값 유지·operations 비우고 이것만 보내도 유효"
+     "(둘 다 비면 오류).",
      EditArtifactInput, edit_artifact),
     ("sprintable_propose_canonical_version",
      "이 버전을 정본으로 제안(게이트 생성) — 제안만, 승인/반려는 항상 휴먼.",

@@ -19,6 +19,7 @@ from app.schemas.visual_artifact import (
     ArtifactNodeOperation,
     ArtifactNodeOut,
     ArtifactVersionSummary,
+    CanvasBounds,
     CompleteExportRequest,
     CreateArtifactCommentRequest,
     CreateArtifactRequest,
@@ -92,17 +93,21 @@ async def create_artifact(
     await _assert_link_target_in_scope(session, org_id, project_id, body)
 
     created_by = uuid.UUID(auth.user_id)
+    # 뷰어 통합 재설계(story 1948d19d): canvas_bounds SSOT=버전(아래 version.canvas_bounds).
+    # artifact.canvas_bounds는 latest_version_number와 동형 denorm 캐시 — 항상 최신 버전과 동기화.
+    canvas_bounds_dict = body.canvas_bounds.model_dump() if body.canvas_bounds else None
     artifact = VisualArtifact(
         id=uuid.uuid4(), org_id=org_id, project_id=project_id, title=body.title,
         story_id=body.story_id, epic_id=body.epic_id, doc_id=body.doc_id,
         source=body.source, latest_version_number=1, created_by=created_by,
+        canvas_bounds=canvas_bounds_dict,
     )
     session.add(artifact)
     await session.flush()
 
     version = ArtifactVersion(
         id=uuid.uuid4(), artifact_id=artifact.id, version_number=1, created_by=created_by,
-        summary=body.summary,
+        summary=body.summary, canvas_bounds=canvas_bounds_dict,
     )
     session.add(version)
     await session.flush()
@@ -125,7 +130,7 @@ async def create_artifact(
         anchor_version=artifact.anchor_version,
         created_by=artifact.created_by, created_at=artifact.created_at, updated_at=artifact.updated_at,
         version_number=version.version_number, version_summary=version.summary,
-        version_source_comment_id=version.source_comment_id,
+        version_source_comment_id=version.source_comment_id, canvas_bounds=version.canvas_bounds,
         nodes=[ArtifactNodeOut.model_validate(n) for n in nodes],
     )
     return _ok(detail.model_dump(mode="json"), status=201)
@@ -163,7 +168,7 @@ async def _load_detail(session: AsyncSession, artifact: VisualArtifact, version_
         anchor_version=artifact.anchor_version,
         created_by=artifact.created_by, created_at=artifact.created_at, updated_at=artifact.updated_at,
         version_number=version.version_number, version_summary=version.summary,
-        version_source_comment_id=version.source_comment_id,
+        version_source_comment_id=version.source_comment_id, canvas_bounds=version.canvas_bounds,
         nodes=[ArtifactNodeOut.model_validate(n) for n in node_rows],
     )
 
@@ -202,6 +207,8 @@ async def list_artifact_versions(
         select(ArtifactVersion).where(ArtifactVersion.artifact_id == id)
         .order_by(ArtifactVersion.version_number.desc())
     )).scalars().all()
+    # canvas_bounds는 이제 ArtifactVersion 실 컬럼(story 1948d19d §4 확定 — 버전 단위 SSOT)이라
+    # model_validate(from_attributes)가 그대로 픽업 — 별도 세팅 불요.
     return _ok([ArtifactVersionSummary.model_validate(r).model_dump(mode="json") for r in rows])
 
 
@@ -693,10 +700,15 @@ async def list_artifact_exports(
 async def _apply_artifact_edit(
     session: AsyncSession, artifact: VisualArtifact, operations: list[ArtifactNodeOperation],
     *, actor_id: uuid.UUID, summary: str | None, source_comment_id: uuid.UUID | None = None,
+    canvas_bounds: CanvasBounds | None = None,
 ) -> ArtifactVersion:
     latest = await _get_version_or_404(session, artifact.id, artifact.latest_version_number)
     if latest is None:
         raise ValueError("latest version not found — artifact 상태 비정상")
+
+    # 뷰어 통합 재설계(story 1948d19d): 프레임 크기는 버전 SSOT — 이번 edit에서 명시 재선언
+    # 안 하면 직전 버전 값을 그대로 이어받는다(node가 그대로 복제 계승되는 것과 동형).
+    new_canvas_bounds = canvas_bounds.model_dump() if canvas_bounds is not None else latest.canvas_bounds
 
     existing_rows = (await session.execute(
         select(ArtifactNode).where(ArtifactNode.version_id == latest.id)
@@ -739,6 +751,7 @@ async def _apply_artifact_edit(
     new_version = ArtifactVersion(
         id=uuid.uuid4(), artifact_id=artifact.id, version_number=new_version_number,
         created_by=actor_id, summary=summary, source_comment_id=source_comment_id,
+        canvas_bounds=new_canvas_bounds,
     )
     session.add(new_version)
     await session.flush()
@@ -761,6 +774,7 @@ async def _apply_artifact_edit(
         ))
 
     artifact.latest_version_number = new_version_number
+    artifact.canvas_bounds = new_canvas_bounds
     await session.flush()
     return new_version
 
@@ -809,10 +823,14 @@ async def edit_artifact(
             return _err("FORBIDDEN", "source_comment_id가 이 artifact 소속이 아닙니다", 403)
 
     actor_id = uuid.UUID(auth.user_id)
+
+    # 뷰어 통합 재설계(story 1948d19d): canvas_bounds는 버전 단위 SSOT — 무-mutate 버전 원칙대로
+    # operations 없이 canvas_bounds만 와도(model_validator가 둘 다 없는 요청은 거름) 새 버전을
+    # 만든다. 미지정 시 _apply_artifact_edit이 직전 버전 값을 이어받는다.
     try:
         new_version = await _apply_artifact_edit(
             session, artifact, body.operations, actor_id=actor_id, summary=body.summary,
-            source_comment_id=body.source_comment_id,
+            source_comment_id=body.source_comment_id, canvas_bounds=body.canvas_bounds,
         )
     except ValueError as exc:
         return _err("INVALID_OPERATION", str(exc), 422)
