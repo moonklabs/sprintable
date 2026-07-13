@@ -157,6 +157,15 @@ describe('ArtifactStage — 캔버스 뷰포트(story 1948d19d)', () => {
     expect(readTransform(content).scale).toBe(1);
   });
 
+  it('attaches wheel via a native non-passive listener (crux — React onWheel silently no-ops preventDefault, leaking to page scroll/native ctrl-wheel zoom)', async () => {
+    const addSpy = vi.spyOn(HTMLElement.prototype, 'addEventListener');
+    await mount();
+    const wheelCall = addSpy.mock.calls.find((call) => call[0] === 'wheel');
+    expect(wheelCall).toBeDefined();
+    expect(wheelCall?.[2]).toMatchObject({ passive: false });
+    addSpy.mockRestore();
+  });
+
   it('renders the fit and actual-size chrome buttons plus a live zoom percentage — no v1~v2.1 scrollbar/space chrome', async () => {
     await mount();
     expect(container.textContent).toContain('전체 보기');
