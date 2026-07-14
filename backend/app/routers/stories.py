@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -87,12 +88,36 @@ async def list_stories(
     assignee_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     no_sprint: bool = Query(default=False, description="sprint 미배정 스토리만 반환"),
+    ids: str | None = Query(default=None, description="comma-separated story ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관)"),
+    q: str | None = Query(default=None, description="title 부분검색(ILIKE) — 기존 필터와 AND 결합"),
     limit: int = Query(default=1000, ge=1, le=2000),
     cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
     response: Response = None,  # type: ignore[assignment]
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[StoryResponse]:
     from datetime import datetime
+
+    if ids is not None:
+        # story ca37b2b0 ②: 갤러리 등 정확한 story 집합이 필요한 소비자용 — base.list()의
+        # ORDER BY 부재(별건 d8787fa6)와 무관하게 요청한 id를 전부(또는 접근권 있는 만큼) 반환.
+        try:
+            story_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="invalid story id in ids")
+        if not story_ids:
+            return []
+        if len(story_ids) > 200:  # 워크플로우-라인 배치와 동형 방어(과대 IN 금지).
+            raise HTTPException(status_code=422, detail="too many ids (max 200)")
+        stories = await repo.list_by_ids(story_ids)
+        # 인가 스코프: org 소속이어도 caller가 접근 못 하는 project의 story는 조용히 필터링
+        # (타 project id가 섞여 들어와도 유출 0 — has_project_access와 동일 SSOT 배치 버전 재사용).
+        from app.services.project_auth import accessible_project_ids_in_org
+        accessible = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id)
+        stories = [s for s in stories if s.project_id in accessible]
+        await _attach_assignee_ids(repo.session, repo.org_id, stories)
+        await _attach_has_evidence(repo.session, stories)
+        return [StoryResponse.model_validate(s) for s in stories]
 
     if no_sprint and project_id:
         stories = await repo.list_backlog(project_id, limit=limit)
@@ -130,7 +155,7 @@ async def list_stories(
         filters["assignee_id"] = assignee_id
     if status_filter:
         filters["status"] = status_filter
-    stories = await repo.list(limit=limit, **filters)
+    stories = await repo.list(limit=limit, q=q, **filters)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
     await _attach_has_evidence(repo.session, stories)
     return [StoryResponse.model_validate(s) for s in stories]
@@ -383,6 +408,7 @@ async def create_story(
         sprint_id=body.sprint_id,
         assignee_id=primary_assignee,
         human_owner_member_id=body.human_owner_member_id,
+        declared_scope_paths=body.declared_scope_paths,
         meeting_id=body.meeting_id,
         status=body.status,
         priority=body.priority,
@@ -962,6 +988,24 @@ async def update_story(
                 await db.flush()
             except Exception:
                 pass
+
+    # P0-05 후속(doc scope-violation-signal-design §1 확定): declared_scope_paths 변경(설정/해제)
+    # 감사 이벤트 — 선언 주체 제한 없음(자기신고 허용)이라 도중 축소/해제의 회피 억지력.
+    if "declared_scope_paths" in data and _story_for_access.declared_scope_paths != story.declared_scope_paths:
+        publish_event(str(repo.org_id), "story.declared_scope_changed", {
+            "story_id": str(id),
+            "project_id": str(story.project_id),
+            "org_id": str(repo.org_id),
+            "old_declared_scope_paths": (
+                json.dumps(_story_for_access.declared_scope_paths)
+                if _story_for_access.declared_scope_paths else None
+            ),
+            "new_declared_scope_paths": (
+                json.dumps(story.declared_scope_paths) if story.declared_scope_paths else None
+            ),
+            "actor_id": str(actor_id) if actor_id else None,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
 
     # S-C2: story_updated — actor가 agent인 경우 기록 (AC2, AC6)
     if actor_id:

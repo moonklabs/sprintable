@@ -28,6 +28,10 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("epics", ("epic",)),
     ("tasks", ("task",)),
     ("stories", ("story", "stories", "backlog", "claim", "checkin")),
+    # story b4027b2e(SEC): 백엔드 SSOT와 동기화 — E-CANVAS visual_artifacts가 전용 그룹으로 승격
+    # (app/services/mcp_toolset.py 참고. "canonical_version"은 propose_canonical_version에
+    # "artifact" substring이 없어 별도 키워드 필요, "spec_pin"은 핀 4종).
+    ("canvas", ("artifact", "canonical_version", "spec_pin")),
     ("admin", ("give_reward", "emit_event", "trigger_ai", "activate_sprint",
                "close_sprint", "delete_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
 ]
@@ -60,6 +64,9 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 조작이라 파괴적이지 않음(has_project_access로 대상 검증). 백엔드 SSOT와 동기화 필수
     # (app/services/mcp_toolset.py).
     "sprintable_list_projects", "sprintable_set_default_project",
+    # story b4027b2e(SEC): story 7fe16274가 여기 심었던 visual_artifacts 11종 always-allow는
+    # 이 스토리에서 "canvas" 전용 그룹(_GROUP_KEYWORDS)으로 대체(상위 mcp_toolset.py 커밋 참고) —
+    # always-allow에 남기면 REST 쪽 canvas 그룹 신설과 불일치(도구는 보이는데 REST는 403).
 })
 
 _LEGACY_SCOPES: frozenset[str] = frozenset({"read", "write"})

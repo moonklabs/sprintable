@@ -48,7 +48,7 @@ export function commitNodesToNextVersion(nodes: ArtifactNode[]): ArtifactNode[] 
 
 const now = () => new Date().toISOString();
 
-function newNodeId(): string {
+export function newNodeId(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
     : `node-${Math.random().toString(36).slice(2)}`;

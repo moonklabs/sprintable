@@ -28,6 +28,9 @@ class AddStoryInput(SprintableInput):
     story_points: StoryPoints | None = None
     description: str | None = None
     acceptance_criteria: str | None = None
+    # P0-05 후속(doc scope-violation-signal-design §1 확定): 선언 주체 제한 없음 — 에이전트
+    # 자기신고 착수시점 파일-경로 글롭 선언(예: ["backend/app/routers/stories.py", "backend/tests/**"]).
+    declared_scope_paths: list[str] | None = None
 
 
 class UpdateStoryInput(SprintableInput):
@@ -39,6 +42,8 @@ class UpdateStoryInput(SprintableInput):
     acceptance_criteria: str | None = None
     assignee_id: str | None = None
     epic_id: str | None = None
+    # P0-05 후속: 도중 재선언/축소/해제(빈 배열)도 가능 — story.declared_scope_changed 감사 이벤트로 기록.
+    declared_scope_paths: list[str] | None = None
     # [{content_base64, name, content_type}, ...] — 스샷/작은 문서(최대 5개·파일당 2MiB·총 6MiB).
     # 기존 첨부에 **추가**된다(PATCH attachments 는 서버측 full-replace 라 update_story 가 먼저 기존
     # 첨부를 읽어 병합 — 새 첨부가 기존 걸 지우지 않는다).
@@ -111,6 +116,8 @@ async def add_story(args: AddStoryInput) -> list[TextContent]:
             body["description"] = args.description
         if args.acceptance_criteria:
             body["acceptance_criteria"] = args.acceptance_criteria
+        if args.declared_scope_paths is not None:
+            body["declared_scope_paths"] = args.declared_scope_paths
         return ok(await client.post("/api/v2/stories", json=body))
     except Exception as exc:
         return err(str(exc))
@@ -133,6 +140,8 @@ async def update_story(args: UpdateStoryInput) -> list[TextContent]:
         updates["assignee_id"] = args.assignee_id
     if args.epic_id is not None:
         updates["epic_id"] = args.epic_id
+    if args.declared_scope_paths is not None:
+        updates["declared_scope_paths"] = args.declared_scope_paths
     try:
         if args.attachments:
             uploaded = await upload_attachments(

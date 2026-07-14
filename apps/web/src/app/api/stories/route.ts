@@ -33,6 +33,9 @@ export async function POST(request: Request) {
   }
 }
 
+// story ca37b2b0 — BE 배치 lookup(#2131) cap과 동일 상한. FE에서 먼저 잘라 보내 BE 422를 피한다.
+const IDS_BATCH_CAP = 200;
+
 export async function GET(request: Request) {
   try {
     const me = await getAuthContext(request);
@@ -41,12 +44,27 @@ export async function GET(request: Request) {
     const dbClient = undefined;
 
     const { searchParams } = new URL(request.url);
+    const idsParam = searchParams.get('ids');
+    const parsedIds = idsParam ? idsParam.split(',').map((id) => id.trim()).filter(Boolean).slice(0, IDS_BATCH_CAP) : [];
+    const ids = parsedIds.length > 0 ? parsedIds : undefined;
+
+    const repo = await createStoryRepository();
+    const service = new StoryService(repo, dbClient);
+
+    // ids 배치 lookup은 커서 페이지네이션과 무관한 고정 집합 조회 — 페이지 meta 없이 그대로 반환.
+    if (ids && ids.length > 0) {
+      const stories = await service.list({
+        project_id: searchParams.get('project_id') ?? undefined,
+        ids,
+        limit: ids.length,
+      });
+      return apiSuccess(stories);
+    }
+
     const pageInput = parseCursorPageInput({
       limit: searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined,
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 50, maxLimit: 100 });
-    const repo = await createStoryRepository();
-    const service = new StoryService(repo, dbClient);
     const stories = await service.list({
       sprint_id: searchParams.get('sprint_id') ?? undefined,
       epic_id: searchParams.get('epic_id') ?? undefined,

@@ -175,7 +175,8 @@ async def test_attention_merge_ready_strict_and_new_kinds():
             verify_fail_ids = {i["story_id"] for i in items if i["kind"] == "verify_fail"}
             assert str(seeded["story_verify_fail"]) in verify_fail_ids
 
-            # scope_violation: §7 확定②로 이번 스코프 미구현 — 어떤 item도 이 kind로 안 나옴.
+            # scope_violation(174be6bc 실체화 後): 이 시드엔 declared_scope_paths/PR 링크가 없어
+            # 무신호(§2 침묵①) — 어떤 item도 이 kind로 안 나옴(기존 무회귀 확인).
             assert not any(i["kind"] == "scope_violation" for i in items)
         finally:
             await client.aclose()

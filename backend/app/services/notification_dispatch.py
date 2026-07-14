@@ -22,6 +22,28 @@ from app.services.webhook_targeting import active_webhook_member_ids
 logger = logging.getLogger(__name__)
 
 
+async def _query_muted_member_ids(
+    db: AsyncSession, member_ids: list[uuid.UUID],
+) -> set[uuid.UUID]:
+    """story 75570ab8: global mute(채널 막론) 멤버 집합 — 단일 조회로 SSOT화(이전엔
+    `_deliver_personal_webhooks`만 알고 있어서, mute+webhook 동시보유 에이전트가 Event-skip
+    판정(webhook이 커버한다고 가정)과 webhook mute-skip 둘 다에 걸려 **총 무전달**이었다).
+    호출자가 이 결과를 Event-skip 판정에도 반영해야 무음 조합이 사라진다."""
+    if not member_ids:
+        return set()
+    from app.models.notification_preference import NotificationPreference
+
+    rows = await db.execute(
+        select(NotificationPreference.member_id).where(
+            NotificationPreference.member_id.in_(member_ids),
+            NotificationPreference.scope_type == "global",
+            NotificationPreference.scope_id.is_(None),
+            NotificationPreference.level == "mute",
+        )
+    )
+    return {m for m in rows.scalars().all()}
+
+
 async def _deliver_personal_webhooks(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -33,6 +55,7 @@ async def _deliver_personal_webhooks(
     reference_type: str | None = None,
     reference_id: uuid.UUID | None = None,
     context: dict | None = None,
+    muted_member_ids: set[uuid.UUID] | None = None,
 ) -> None:
     """96af343e: 활성 개인(member-scoped) WebhookConfig 보유 휴먼에게 알림 webhook POST.
 
@@ -40,11 +63,14 @@ async def _deliver_personal_webhooks(
     (채널 막론 mute 우선). SSRF 검증·HMAC 서명·Discord URL 포맷·retry 는
     dispatch_router._post_with_retry / app.core.ssrf 재사용. agent SSE 경로
     (route_dispatch_event)는 미변경(무회귀). 개별 POST 실패는 swallow → in-app 무영향.
+
+    muted_member_ids: story 75570ab8 — 호출자(dispatch_notification)가 이미 계산한 mute
+    집합을 넘기면 재조회 생략(Event-skip 판정과 동일 SSOT 재사용, 드리프트 방지). None이면
+    이 함수가 자체 조회(단독 호출 하위호환).
     """
     if not member_ids:
         return
     from app.core.ssrf import validate_webhook_url_async
-    from app.models.notification_preference import NotificationPreference
     from app.services.dispatch_router import _post_with_retry
 
     wh_rows = await db.execute(
@@ -60,15 +86,10 @@ async def _deliver_personal_webhooks(
         return
 
     # global mute 멤버 skip (CP②: 채널 막론 mute 우선)
-    muted_rows = await db.execute(
-        select(NotificationPreference.member_id).where(
-            NotificationPreference.member_id.in_([c.member_id for c in configs]),
-            NotificationPreference.scope_type == "global",
-            NotificationPreference.scope_id.is_(None),
-            NotificationPreference.level == "mute",
-        )
-    )
-    muted = {m for m in muted_rows.scalars().all()}
+    if muted_member_ids is None:
+        muted = await _query_muted_member_ids(db, [c.member_id for c in configs])
+    else:
+        muted = muted_member_ids
 
     for cfg in configs:
         if cfg.member_id in muted:
@@ -163,6 +184,15 @@ async def dispatch_notification(
         webhook_member_ids = await active_webhook_member_ids(
             db, org_id, enabled_member_ids
         )
+        # story 75570ab8: mute+webhook 동시보유 재판정 — active_webhook_member_ids는 mute를
+        # 모른다. 그래서 muted 에이전트가 "webhook이 커버한다"고 오판돼 Event insert도 스킵되고,
+        # 뒤이어 _deliver_personal_webhooks 자체 mute 체크로 webhook도 스킵돼 **총 무전달**이었다
+        # (그라운딩 0f428e1e 때 확인한 dispatch_notification 경로 지식 재사용). mute의 옳은
+        # 의미론 = "능동 push(webhook)만 끔" — 수동 backlog(Event/poll_events로 나중에 발견 가능)
+        # 까지 지우면 안 됨(webhook_targeting.py 자체가 명시한 "silent loss 방지" 설계 철학과
+        # 정합). 따라서 muted 멤버는 webhook-covered 취급에서 제외해 Event insert 경로로 폴백.
+        muted_member_ids = await _query_muted_member_ids(db, list(webhook_member_ids))
+        event_skip_member_ids = webhook_member_ids - muted_member_ids
 
         # BUG-2 수정: user_id.isnot(None) 필터 제거 — agent는 user_id=NULL이므로 제외됐던 문제
         # type 및 project_id도 함께 조회
@@ -215,8 +245,9 @@ async def dispatch_notification(
         created_events: list[Event] = []  # L1 BE-3: fan-out 수렴용 event 수집
         for member_row in members:
             if member_row.type == "agent":
-                # 활성 웹훅 있는 에이전트 → 외부 채널로 전달되므로 내장 Event 스킵
-                if member_row.id in webhook_member_ids:
+                # 활성 웹훅 있는 에이전트 → 외부 채널로 전달되므로 내장 Event 스킵(단, muted면
+                # webhook도 안 나가므로 Event insert로 폴백 — 위 event_skip_member_ids 참고).
+                if member_row.id in event_skip_member_ids:
                     logger.debug(
                         "dispatch_notification: skip agent %s — has active webhook", member_row.id
                     )
@@ -301,6 +332,7 @@ async def dispatch_notification(
         await _deliver_personal_webhooks(
             db, org_id, webhook_deliver_ids, title=title, body=body, event_type=event_type,
             reference_type=reference_type, reference_id=reference_id, context=context,
+            muted_member_ids=muted_member_ids,
         )
 
     except Exception:
