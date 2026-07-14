@@ -33,7 +33,7 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     caller_id, spoofed = uuid.uuid4(), uuid.uuid4()
     captured = {}
 
-    async def _fake_transition(session, org_id, gid, status, resolver_id, note):
+    async def _fake_transition(session, org_id, gid, status, resolver_id, note, *, pending_deliveries=None):
         captured["resolver_id"] = resolver_id
         return MagicMock()
 
@@ -50,8 +50,10 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     _g.gate_type = "merge"
     _gr.scalar_one_or_none.return_value = _g
     _sess.execute = AsyncMock(return_value=_gr)
+    from fastapi import BackgroundTasks
     await gm.transition_gate_endpoint(
-        uuid.uuid4(), body, session=_sess, org_id=uuid.uuid4(), auth=MagicMock())
+        uuid.uuid4(), body, background_tasks=BackgroundTasks(),
+        session=_sess, org_id=uuid.uuid4(), auth=MagicMock())
     assert captured["resolver_id"] == caller_id  # ⭐조작된 spoofed 가 아니라 인증 caller
     assert captured["resolver_id"] != spoofed
 
