@@ -3569,8 +3569,6 @@
     "galleryGroupEmpty": "이 그룹에는 아직 산출물이 없습니다",
     "galleryAnchorPill": "정본 v{version}",
     "galleryLatestChip": "v{version}까지",
-    "galleryLazyHint": "펼치면 이전 버전을 불러옵니다",
-    "galleryVersionsUnavailable": "이전 버전을 불러올 수 없습니다",
     "viewerExpandAction": "크게 보기",
     "galleryFormatHtml": "웹 페이지",
     "galleryFormatImage": "이미지",
