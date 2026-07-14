@@ -89,6 +89,7 @@ async def list_stories(
     status_filter: str | None = Query(default=None, alias="status"),
     no_sprint: bool = Query(default=False, description="sprint 미배정 스토리만 반환"),
     ids: str | None = Query(default=None, description="comma-separated story ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관)"),
+    q: str | None = Query(default=None, description="title 부분검색(ILIKE) — 기존 필터와 AND 결합"),
     limit: int = Query(default=1000, ge=1, le=2000),
     cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
     response: Response = None,  # type: ignore[assignment]
@@ -154,7 +155,7 @@ async def list_stories(
         filters["assignee_id"] = assignee_id
     if status_filter:
         filters["status"] = status_filter
-    stories = await repo.list(limit=limit, **filters)
+    stories = await repo.list(limit=limit, q=q, **filters)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
     await _attach_has_evidence(repo.session, stories)
     return [StoryResponse.model_validate(s) for s in stories]
