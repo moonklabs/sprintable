@@ -19,6 +19,7 @@ import {
   LayoutDashboard,
   Map,
   MessageSquare,
+  Newspaper,
   Repeat,
   Search,
   Settings,
@@ -164,6 +165,16 @@ export function AppSidebar({
           <SidebarGroupLabel>{t('zoneNow')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/org-briefing" />}
+                  isActive={isActive('/org-briefing')}
+                  tooltip={t('orgBriefing')}
+                >
+                  <Newspaper />
+                  <span>{t('orgBriefing')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   render={<Link href="/inbox" />}
