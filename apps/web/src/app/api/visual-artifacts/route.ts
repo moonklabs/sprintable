@@ -22,3 +22,19 @@ export async function GET(request: Request) {
     return apiSuccess(json.data ?? []);
   } catch (err: unknown) { return handleApiError(err); }
 }
+
+/**
+ * POST /api/visual-artifacts — 캔버스 휴먼 진입점(story 9449da0e) "그리기" 생성 딸깍 커밋.
+ * MCP `create_artifact`와 **동일 BE 엔드포인트**(`POST /api/v2/visual-artifacts`)로 프록시 —
+ * 신규 BE 로직 0(순수 plumbing). GET과 동일하게 BE `_ok()` 이중 봉투를 벗겨 재포장.
+ */
+export async function POST(request: Request) {
+  try {
+    const me = await getAuthContext(request);
+    if (!me) return ApiErrors.unauthorized();
+    const _r = await proxyToFastapi(request, '/api/v2/visual-artifacts');
+    if (!_r.ok) return _r;
+    const json = (await _r.json()) as { data?: unknown };
+    return apiSuccess(json.data ?? null, undefined, 201);
+  } catch (err: unknown) { return handleApiError(err); }
+}

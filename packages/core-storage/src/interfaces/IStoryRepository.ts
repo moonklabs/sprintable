@@ -88,6 +88,10 @@ export interface StoryListFilters extends PaginationOptions {
   project_id?: string;
   q?: string;
   unassigned?: boolean;
+  /** story ca37b2b0 — 고정 id 집합 배치 조회(BE 200개 cap). 주어지면 커서 페이지네이션과
+   * 무관한 배치 lookup 의미론(정확히 이 id들만, project 필터와 무관하게 cross-project는
+   * BE가 조용히 걸러냄). */
+  ids?: string[];
 }
 
 export interface IStoryRepository {

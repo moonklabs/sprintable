@@ -114,25 +114,48 @@ export async function captureElementAsPng(el: HTMLElement): Promise<Blob | null>
 }
 
 /**
- * PNG 캡처 직전 뷰포트/테마를 DOM에 순간 적용 — 복원 함수를 반환(호출부가 try/finally로
- * 반드시 되돌린다). BE 계약엔 없는 순수 클라 조건(위 파일 헤더 참고).
+ * PNG 캡처 직전 테마를 DOM에 순간 적용 — 복원 함수를 반환(호출부가 try/finally로 반드시
+ * 되돌린다). BE 계약엔 없는 순수 클라 조건(위 파일 헤더 참고).
+ *
+ * story d72db00a 그라운딩 발견(발견 즉시 수정 — 별도 방치 안 함): 원래 여기 있던 `viewport`
+ * (desktop/mobile 폭 시뮬레이션) 파라미터는 story 1948d19d(canvas_bounds 고정 아트보드
+ * 도입) 이후로 이미 무효였다 — html iframe/tree 콘텐츠가 `bounds.w/h` 인라인 style로
+ * 고정 렌더되어 조상 요소의 width를 바꿔도 반응하지 않는다. 게다가 캡처 대상이 이제
+ * 콘텐츠 레이어 자체(`contentRef`)라 el.style.width를 덮어쓰면 "아트보드 전체 프레임"
+ * 계약(AC1)과 직접 충돌한다. 아무 효과 없는 토글을 남겨두는 게 더 위험한 기만이라 UI·
+ * 타입·이 함수 인자에서 전부 제거했다(뷰포트 시뮬레이션 자체의 재설계는 이 스토리 범위 밖).
  */
-export function applyCaptureConditions(
-  el: HTMLElement, viewport: 'desktop' | 'mobile', theme: 'light' | 'dark',
-): () => void {
-  const prevWidth = el.style.width;
+export function applyCaptureConditions(el: HTMLElement, theme: 'light' | 'dark'): () => void {
   const hadDark = el.classList.contains('dark');
-  if (viewport === 'mobile') el.style.width = '390px';
   if (theme === 'dark') el.classList.add('dark'); else el.classList.remove('dark');
   return () => {
-    el.style.width = prevWidth;
     if (hadDark) el.classList.add('dark'); else el.classList.remove('dark');
   };
 }
 
+/**
+ * story d72db00a AC1~2 — PNG export=아트보드 전체 프레임(canvas_bounds 기준)을 100% 스케일로,
+ * 뷰포트 pan/zoom 상태와 무관하게. 캡처 대상(`data-artifact-canvas-content`)은 항상
+ * CanvasViewport의 현재 pan/zoom `transform: translate(tx,ty) scale(s)`를 인라인 style로
+ * 갖고 있다 — 캡처 직전 이걸 identity로 순간 고정하고 복원한다. width/height는 이미
+ * `bounds.w/h`로 고정돼 있어 건드릴 필요 없다(포맷별로 canvas_bounds 또는 image 실측
+ * 크기가 이미 반영됨). 사용자 선택 옵션이 아니라 구조적 요구사항이라 테마 토글과 분리.
+ */
+export function neutralizeCaptureTransform(el: HTMLElement): () => void {
+  const prevTransform = el.style.transform;
+  el.style.transform = 'translate(0px, 0px) scale(1)';
+  return () => { el.style.transform = prevTransform; };
+}
+
 /** 3-step 전체 오케스트레이션 — 캡처→upload-url→PUT→complete. 실패 지점을 그대로 반환. */
 export async function exportPng(artifactId: string, versionNumber: number, el: HTMLElement): Promise<BeArtifactExport | null> {
-  const blob = await captureElementAsPng(el);
+  const restoreTransform = neutralizeCaptureTransform(el);
+  let blob: Blob | null;
+  try {
+    blob = await captureElementAsPng(el);
+  } finally {
+    restoreTransform();
+  }
   if (!blob) return null;
   const uploadInfo = await requestPngUploadUrl(artifactId, versionNumber);
   if (!uploadInfo) return null;

@@ -30,8 +30,8 @@ def test_catalog_structure_and_contract_fields():
     cat = build_toolset_catalog()
     assert set(cat.keys()) == {"groups"}
     groups = cat["groups"]
-    # core + 16 비파괴 + admin = 18 (E1-S5 hypotheses 그룹 추가)
-    assert len(groups) == 18
+    # core + 17 비파괴(story b4027b2e: canvas 그룹 추가) + admin = 19
+    assert len(groups) == 19
     for g in groups:
         assert set(g.keys()) == _CONTRACT_FIELDS, f"{g['key']} 필드 계약 불일치"
         assert isinstance(g["key"], str) and g["key"]
@@ -39,8 +39,8 @@ def test_catalog_structure_and_contract_fields():
         assert isinstance(g["is_core"], bool) and isinstance(g["is_destructive"], bool)
         assert isinstance(g["order"], int)
         assert g["tools"], f"{g['key']} 빈 그룹 — 모든 그룹은 멤버 보유"
-    # order = 배열 순서와 일치(0..17 단조)
-    assert [g["order"] for g in groups] == list(range(18))
+    # order = 배열 순서와 일치(0..18 단조)
+    assert [g["order"] for g in groups] == list(range(19))
 
 
 def test_core_first_admin_last_flags():

@@ -7,11 +7,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.asset import Asset
 from app.models.visual_artifact import (
-    ArtifactComment, ArtifactExport, ArtifactNode, ArtifactVersion, VisualArtifact,
+    ArtifactComment, ArtifactExport, ArtifactNode, ArtifactSpecPin, ArtifactVersion, VisualArtifact,
 )
 from app.schemas.visual_artifact import (
     ArtifactCommentResponse,
@@ -19,12 +19,16 @@ from app.schemas.visual_artifact import (
     ArtifactNodeOperation,
     ArtifactNodeOut,
     ArtifactVersionSummary,
+    CanvasBounds,
     CompleteExportRequest,
     CreateArtifactCommentRequest,
     CreateArtifactRequest,
+    CreateSpecPinRequest,
     EditArtifactRequest,
     ExportUploadUrlRequest,
     ExportUploadUrlResponse,
+    SpecPinResponse,
+    UpdateSpecPinRequest,
     VisualArtifactDetail,
     VisualArtifactSummary,
 )
@@ -79,11 +83,44 @@ async def _assert_link_target_in_scope(
             raise HTTPException(status_code=404, detail=not_found_detail)
 
 
+async def _notify_artifact_created(
+    session: AsyncSession, artifact: VisualArtifact, *, org_id: uuid.UUID, project_id: uuid.UUID,
+    creator_id: uuid.UUID,
+) -> None:
+    """§F4(이벤트 없는 기능 금지) 갭 봉인(story 04e059e5·미르코 그라운딩 PR #2119): create만
+    dispatch_notification이 누락돼 있었다(edit/comment/export는 이미 전파). edit/comment 패턴
+    ("생성자 - 편집자")은 여기 적용 불가(생성 시점엔 "이미 알고 있던 이전 당사자"가 없음) — 대신
+    ①생성자 본인(자기 알림 — done-gate 라이브 실증이 자기 생성→자기 웹훅 도달을 검증하므로 제외
+    하면 테스트 불가) ②연결된 story/epic/doc의 assignee(있으면·창작자와 다르면 타 사용자 도달,
+    story/epic/doc 셋 다 assignee_id 컬럼 보유 확인)로 대상을 구성한다."""
+    target_member_ids: set[uuid.UUID] = {creator_id}
+    for field, table in _LINK_TABLES.items():
+        link_id = getattr(artifact, field)
+        if link_id is None:
+            continue
+        row = (await session.execute(
+            text(f"SELECT assignee_id FROM {table} WHERE id = :id"),  # noqa: S608 — table은 고정 allowlist(_LINK_TABLES), 요청값 아님
+            {"id": link_id},
+        )).first()
+        if row is not None and row.assignee_id is not None:
+            target_member_ids.add(row.assignee_id)
+
+    await dispatch_notification(
+        session, org_id=org_id, event_type="artifact.created",
+        target_member_ids=list(target_member_ids),
+        title=f"새 산출물 생성됨: {artifact.title}",
+        body="새 시각 산출물이 생성됐습니다.",
+        reference_type="visual_artifact", reference_id=artifact.id,
+        source_project_id=project_id,
+    )
+
+
 @router.post("", status_code=201)
 async def create_artifact(
     body: CreateArtifactRequest,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     org_id, project_id = _get_org_project(auth)
     if not org_id:
@@ -92,17 +129,21 @@ async def create_artifact(
     await _assert_link_target_in_scope(session, org_id, project_id, body)
 
     created_by = uuid.UUID(auth.user_id)
+    # 뷰어 통합 재설계(story 1948d19d): canvas_bounds SSOT=버전(아래 version.canvas_bounds).
+    # artifact.canvas_bounds는 latest_version_number와 동형 denorm 캐시 — 항상 최신 버전과 동기화.
+    canvas_bounds_dict = body.canvas_bounds.model_dump() if body.canvas_bounds else None
     artifact = VisualArtifact(
         id=uuid.uuid4(), org_id=org_id, project_id=project_id, title=body.title,
         story_id=body.story_id, epic_id=body.epic_id, doc_id=body.doc_id,
         source=body.source, latest_version_number=1, created_by=created_by,
+        canvas_bounds=canvas_bounds_dict,
     )
     session.add(artifact)
     await session.flush()
 
     version = ArtifactVersion(
         id=uuid.uuid4(), artifact_id=artifact.id, version_number=1, created_by=created_by,
-        summary=body.summary,
+        summary=body.summary, canvas_bounds=canvas_bounds_dict,
     )
     session.add(version)
     await session.flush()
@@ -118,6 +159,8 @@ async def create_artifact(
         nodes.append(node)
     await session.flush()
 
+    await _notify_artifact_created(session, artifact, org_id=org_id, project_id=project_id, creator_id=created_by)
+
     detail = VisualArtifactDetail(
         id=artifact.id, org_id=artifact.org_id, project_id=artifact.project_id, title=artifact.title,
         story_id=artifact.story_id, epic_id=artifact.epic_id, doc_id=artifact.doc_id,
@@ -125,7 +168,7 @@ async def create_artifact(
         anchor_version=artifact.anchor_version,
         created_by=artifact.created_by, created_at=artifact.created_at, updated_at=artifact.updated_at,
         version_number=version.version_number, version_summary=version.summary,
-        version_source_comment_id=version.source_comment_id,
+        version_source_comment_id=version.source_comment_id, canvas_bounds=version.canvas_bounds,
         nodes=[ArtifactNodeOut.model_validate(n) for n in nodes],
     )
     return _ok(detail.model_dump(mode="json"), status=201)
@@ -163,7 +206,7 @@ async def _load_detail(session: AsyncSession, artifact: VisualArtifact, version_
         anchor_version=artifact.anchor_version,
         created_by=artifact.created_by, created_at=artifact.created_at, updated_at=artifact.updated_at,
         version_number=version.version_number, version_summary=version.summary,
-        version_source_comment_id=version.source_comment_id,
+        version_source_comment_id=version.source_comment_id, canvas_bounds=version.canvas_bounds,
         nodes=[ArtifactNodeOut.model_validate(n) for n in node_rows],
     )
 
@@ -202,6 +245,8 @@ async def list_artifact_versions(
         select(ArtifactVersion).where(ArtifactVersion.artifact_id == id)
         .order_by(ArtifactVersion.version_number.desc())
     )).scalars().all()
+    # canvas_bounds는 이제 ArtifactVersion 실 컬럼(story 1948d19d §4 확定 — 버전 단위 SSOT)이라
+    # model_validate(from_attributes)가 그대로 픽업 — 별도 세팅 불요.
     return _ok([ArtifactVersionSummary.model_validate(r).model_dump(mode="json") for r in rows])
 
 
@@ -260,6 +305,7 @@ async def delete_artifact(
     id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     """생성자만 삭제 가능(Evidence 패턴 계승 — "누가 주어인가"). soft delete."""
     org_id, project_id = _get_org_project(auth)
@@ -308,6 +354,7 @@ async def add_artifact_comment(
     body: CreateArtifactCommentRequest,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     org_id, project_id = _get_org_project(auth)
     if not org_id or not project_id:
@@ -368,6 +415,7 @@ async def resolve_artifact_comment(
     comment_id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     org_id, project_id = _get_org_project(auth)
     if not org_id or not project_id:
@@ -389,6 +437,135 @@ async def resolve_artifact_comment(
     await session.flush()
     await session.refresh(comment)
     return _ok(ArtifactCommentResponse.model_validate(comment).model_dump(mode="json"))
+
+
+# ─── Spec pins (편집 캔버스 핀 저작, story 7fe16274) ──────────────────────────
+# 그라운딩(디디): ArtifactComment(코멘트 핀)와 캔버스 핀 레이어를 공유하되(FE 시각 구분) 신설
+# 엔티티로 분리 — 버전 스코프(carry-forward 필요)·스레드/resolve 없음·명시 anchor_type 판별자가
+# 코멘트 모델과 근본적으로 달라 재사용 시 무의미한 컬럼이 방치됨(ArtifactSpecPin 클래스 docstring
+# 참조). 스펙 핀은 항상 artifact의 **latest version**을 대상으로 조회/생성/수정/삭제한다(과거
+# 버전의 핀은 그 버전 스냅샷으로 고정·불변 — carry-forward는 _apply_artifact_edit에서만 발생).
+
+
+@router.get("/{id}/pins")
+async def list_spec_pins(
+    id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    latest = await _get_version_or_404(session, artifact.id, artifact.latest_version_number)
+    if latest is None:
+        return _err("NOT_FOUND", "Artifact version not found", 404)
+    rows = (await session.execute(
+        select(ArtifactSpecPin).where(ArtifactSpecPin.version_id == latest.id)
+        .order_by(ArtifactSpecPin.created_at.asc())
+    )).scalars().all()
+    return _ok([SpecPinResponse.model_validate(r).model_dump(mode="json") for r in rows])
+
+
+@router.post("/{id}/pins", status_code=201)
+async def create_spec_pin(
+    id: uuid.UUID,
+    body: CreateSpecPinRequest,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
+) -> JSONResponse:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    latest = await _get_version_or_404(session, artifact.id, artifact.latest_version_number)
+    if latest is None:
+        return _err("NOT_FOUND", "Artifact version not found", 404)
+
+    if body.anchor_type == "node":
+        # cross-artifact 위조 차단 동형(source_comment_id·comment.node_id 패턴) + node는 반드시
+        # **latest version** 소속이어야 함(구버전 node는 이번 edit 스냅샷 밖 — carry-forward
+        # id_remap 대상이 아니라 즉시 stale).
+        node_owner = (await session.execute(
+            select(ArtifactNode.artifact_id).where(
+                ArtifactNode.id == body.node_id, ArtifactNode.version_id == latest.id,
+            )
+        )).scalar_one_or_none()
+        if node_owner != artifact.id:
+            return _err("NOT_FOUND", "Node not found on the artifact's latest version", 404)
+
+    pin = ArtifactSpecPin(
+        id=uuid.uuid4(), artifact_id=artifact.id, version_id=latest.id,
+        anchor_type=body.anchor_type, anchor_x=body.anchor_x, anchor_y=body.anchor_y,
+        node_id=body.node_id, description=body.description,
+    )
+    session.add(pin)
+    await session.flush()
+    return _ok(SpecPinResponse.model_validate(pin).model_dump(mode="json"), status=201)
+
+
+async def _get_latest_spec_pin_or_404(
+    session: AsyncSession, artifact: VisualArtifact, pin_id: uuid.UUID,
+) -> ArtifactSpecPin | None:
+    latest = await _get_version_or_404(session, artifact.id, artifact.latest_version_number)
+    if latest is None:
+        return None
+    return (await session.execute(
+        select(ArtifactSpecPin).where(
+            ArtifactSpecPin.id == pin_id, ArtifactSpecPin.artifact_id == artifact.id,
+            ArtifactSpecPin.version_id == latest.id,
+        )
+    )).scalar_one_or_none()
+
+
+@router.patch("/{id}/pins/{pin_id}")
+async def update_spec_pin(
+    id: uuid.UUID,
+    pin_id: uuid.UUID,
+    body: UpdateSpecPinRequest,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
+) -> JSONResponse:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    pin = await _get_latest_spec_pin_or_404(session, artifact, pin_id)
+    if pin is None:
+        return _err("NOT_FOUND", "Spec pin not found on the artifact's latest version", 404)
+    pin.description = body.description
+    await session.flush()
+    return _ok(SpecPinResponse.model_validate(pin).model_dump(mode="json"))
+
+
+@router.delete("/{id}/pins/{pin_id}")
+async def delete_spec_pin(
+    id: uuid.UUID,
+    pin_id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
+) -> JSONResponse:
+    org_id, project_id = _get_org_project(auth)
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+    pin = await _get_latest_spec_pin_or_404(session, artifact, pin_id)
+    if pin is None:
+        return _err("NOT_FOUND", "Spec pin not found on the artifact's latest version", 404)
+    await session.delete(pin)
+    await session.flush()
+    return _ok({"ok": True, "id": str(pin_id)})
 
 
 # ─── Export (E-CANVAS C1-S5, story 1f365e33) ──────────────────────────────────
@@ -479,6 +656,7 @@ async def create_export_upload_url(
     body: ExportUploadUrlRequest,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     from datetime import datetime, timedelta, timezone
 
@@ -514,6 +692,7 @@ async def complete_png_export(
     body: CompleteExportRequest,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     from app.services.storage import get_storage_provider
 
@@ -570,6 +749,7 @@ async def create_html_export(
     version_number: int,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     """self-contained HTML export — 렌더 불요(nodes 트리를 BE가 직렬화), client-trust 이슈 없어
     즉시 put_object(유나 UX②: as-authored — 별도 재테마 없이 저장된 props 그대로 직렬화)."""
@@ -693,10 +873,15 @@ async def list_artifact_exports(
 async def _apply_artifact_edit(
     session: AsyncSession, artifact: VisualArtifact, operations: list[ArtifactNodeOperation],
     *, actor_id: uuid.UUID, summary: str | None, source_comment_id: uuid.UUID | None = None,
+    canvas_bounds: CanvasBounds | None = None,
 ) -> ArtifactVersion:
     latest = await _get_version_or_404(session, artifact.id, artifact.latest_version_number)
     if latest is None:
         raise ValueError("latest version not found — artifact 상태 비정상")
+
+    # 뷰어 통합 재설계(story 1948d19d): 프레임 크기는 버전 SSOT — 이번 edit에서 명시 재선언
+    # 안 하면 직전 버전 값을 그대로 이어받는다(node가 그대로 복제 계승되는 것과 동형).
+    new_canvas_bounds = canvas_bounds.model_dump() if canvas_bounds is not None else latest.canvas_bounds
 
     existing_rows = (await session.execute(
         select(ArtifactNode).where(ArtifactNode.version_id == latest.id)
@@ -739,6 +924,7 @@ async def _apply_artifact_edit(
     new_version = ArtifactVersion(
         id=uuid.uuid4(), artifact_id=artifact.id, version_number=new_version_number,
         created_by=actor_id, summary=summary, source_comment_id=source_comment_id,
+        canvas_bounds=new_canvas_bounds,
     )
     session.add(new_version)
     await session.flush()
@@ -760,7 +946,31 @@ async def _apply_artifact_edit(
             sort_order=data["sort_order"], description=data["description"],
         ))
 
+    # 스펙 핀 carry-forward(story 7fe16274) — node와 동형 이유로 새 버전이 자기 소유 pin row
+    # 세트를 갖는다. coord 앵커는 그대로 계승·node 앵커는 id_remap으로 재해석(reflow-safe).
+    # 이번 edit에서 삭제된 노드를 가리키던 pin은 계승 안 함(no-fiction — 죽은 앵커를 이어가지
+    # 않음, 조용히 drop).
+    existing_pins = (await session.execute(
+        select(ArtifactSpecPin).where(ArtifactSpecPin.version_id == latest.id)
+    )).scalars().all()
+    for pin in existing_pins:
+        if pin.anchor_type == "node":
+            new_node_id = id_remap.get(pin.node_id)
+            if new_node_id is None:
+                continue
+            session.add(ArtifactSpecPin(
+                id=uuid.uuid4(), artifact_id=artifact.id, version_id=new_version.id,
+                anchor_type="node", node_id=new_node_id, description=pin.description,
+            ))
+        else:
+            session.add(ArtifactSpecPin(
+                id=uuid.uuid4(), artifact_id=artifact.id, version_id=new_version.id,
+                anchor_type="coord", anchor_x=pin.anchor_x, anchor_y=pin.anchor_y,
+                description=pin.description,
+            ))
+
     artifact.latest_version_number = new_version_number
+    artifact.canvas_bounds = new_canvas_bounds
     await session.flush()
     return new_version
 
@@ -789,6 +999,7 @@ async def edit_artifact(
     body: EditArtifactRequest,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     """딸깍 편집(FE) + MCP 편집(에이전트) 공용 엔드포인트 — 요소 add/update/delete를 적용해
     새 버전을 만든다(무-mutate 버전 원칙 계승)."""
@@ -809,10 +1020,14 @@ async def edit_artifact(
             return _err("FORBIDDEN", "source_comment_id가 이 artifact 소속이 아닙니다", 403)
 
     actor_id = uuid.UUID(auth.user_id)
+
+    # 뷰어 통합 재설계(story 1948d19d): canvas_bounds는 버전 단위 SSOT — 무-mutate 버전 원칙대로
+    # operations 없이 canvas_bounds만 와도(model_validator가 둘 다 없는 요청은 거름) 새 버전을
+    # 만든다. 미지정 시 _apply_artifact_edit이 직전 버전 값을 이어받는다.
     try:
         new_version = await _apply_artifact_edit(
             session, artifact, body.operations, actor_id=actor_id, summary=body.summary,
-            source_comment_id=body.source_comment_id,
+            source_comment_id=body.source_comment_id, canvas_bounds=body.canvas_bounds,
         )
     except ValueError as exc:
         return _err("INVALID_OPERATION", str(exc), 422)
@@ -839,6 +1054,7 @@ async def propose_canonical_version(
     version_number: int,
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     """정본으로 제안 — AI는 제안만(MCP도 동일 엔드포인트), 승인은 always-HITL(gate_service).
     이미 pending 제안이 있으면 멱등(create_gate 자체 멱등 재사용)."""

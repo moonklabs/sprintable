@@ -24,6 +24,9 @@ export interface ArtifactVersion {
   /** 변경 이유(의미 단위) — raw 편집 나열 아님(핸드오프 §6 감시 게이트). */
   summary: string | null;
   created_at: string;
+  /** story 1948d19d §4(BE #2135) — 그 버전의 불변 스냅샷 아트보드 크기. nullable(레거시/미선언) —
+   * ArtifactStage가 null이면 포맷별 기본 아트보드로 폴백(가짜 추정 0, 측정 아니라 선언). */
+  canvasBounds?: { w: number; h: number } | null;
 }
 
 /**
@@ -120,7 +123,12 @@ export function deriveFormat(nodes: ArtifactNode[]): ArtifactFormat {
 /** BE `ArtifactNodeOut`(schemas/visual_artifact.py) 미러 — canvas-nodes.ts의 `ArtifactNode`와 동형. */
 export type BeArtifactNode = ArtifactNode;
 
-/** BE `VisualArtifactDetail`(schemas/visual_artifact.py) 미러 — flat 응답(중첩 아님). */
+/**
+ * BE `VisualArtifactDetail`(schemas/visual_artifact.py) 미러 — flat 응답(중첩 아님).
+ * `canvas_bounds`: story 1948d19d §4(BE #2135) — 이 버전(`version_number`)의 불변 스냅샷
+ * 아트보드 크기. nullable(레거시/미선언 허용) — #2135 머지 전엔 항상 undefined로 와도 무해
+ * (FE는 폴백 우선 설계라 옵셔널로만 소비).
+ */
 export interface BeVisualArtifactDetail {
   id: string;
   title: string;
@@ -135,9 +143,11 @@ export interface BeVisualArtifactDetail {
   version_number: number;
   version_summary: string | null;
   nodes: BeArtifactNode[];
+  canvas_bounds?: { w: number; h: number } | null;
 }
 
-/** BE `VisualArtifactSummary` 미러 — `GET /api/v2/visual-artifacts?story_id=` 목록 항목(nodes 없음). */
+/** BE `VisualArtifactSummary` 미러 — `GET /api/v2/visual-artifacts?story_id=` 목록 항목(nodes 없음).
+ * `canvas_bounds`: BE #2135 — latest 버전의 denorm 캐시(§4-1). */
 export interface BeVisualArtifactSummary {
   id: string;
   title: string;
@@ -149,6 +159,7 @@ export interface BeVisualArtifactSummary {
   anchor_version: number | null;
   created_by: string | null;
   created_at: string;
+  canvas_bounds?: { w: number; h: number } | null;
 }
 
 /**
@@ -195,8 +206,55 @@ export function adaptArtifactDetail(detail: BeVisualArtifactDetail): { artifact:
     created_by: detail.created_by ?? '',
     summary: detail.version_summary,
     created_at: detail.created_at,
+    canvasBounds: detail.canvas_bounds,
   };
   return { artifact, versions: [version] };
+}
+
+/**
+ * story 3d888ba2 — 갤러리 변천사에서 특정 버전 실물 열람. `GET /{id}/versions/{versionNumber}`
+ * 는 `[id]`(최신 버전)와 동일 shape(`BeVisualArtifactDetail`)를 버전 지정으로 반환 — 신규 BE
+ * 0(이미 존재하는 엔드포인트, FE 프록시만 신설). `adaptArtifactDetail`을 그대로 재사용해
+ * format/content를 뽑아낼 수 있다.
+ */
+export async function getArtifactVersionDetail(
+  artifactId: string, versionNumber: number,
+): Promise<BeVisualArtifactDetail | null> {
+  try {
+    const res = await fetch(`/api/visual-artifacts/${artifactId}/versions/${versionNumber}`);
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: BeVisualArtifactDetail };
+    return json.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 캔버스 휴먼 진입점(story 9449da0e) — 빈 스토리에서 "그리기" 생성 딸깍 커밋. MCP `create_artifact`와
+ * **동일 BE 엔드포인트**(`POST /api/v2/visual-artifacts`·같은 서비스 `create_artifact`·신규 BE 0).
+ * story 귀속 v1을 만들고 생성된 detail을 반환 — 실패는 null(호출부가 편집 모드 유지 + 로깅, 빈
+ * catch 금지 계열).
+ *
+ * story 64010b05(C5 임포트 v1) — `source`(옵트인, 기본 생략=BE가 'created'로 기본값 채움) 추가.
+ * `CreateArtifactRequest.source`는 이미 BE 계약에 존재(schemas/visual_artifact.py) — 신규 BE 0,
+ * 이 함수가 그 필드를 그냥 안 보내고 있었을 뿐(그리기 호출부는 여전히 미지정 그대로 무변경).
+ */
+export async function createArtifact(
+  storyId: string, title: string, nodes: ArtifactNode[], summary?: string, source?: 'created' | 'imported',
+): Promise<BeVisualArtifactDetail | null> {
+  try {
+    const res = await fetch('/api/visual-artifacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ story_id: storyId, title, nodes, summary: summary ?? null, ...(source ? { source } : {}) }),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: BeVisualArtifactDetail };
+    return json.data ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**

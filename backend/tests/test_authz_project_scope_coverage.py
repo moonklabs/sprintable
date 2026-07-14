@@ -216,6 +216,11 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.mockups:update_mockup": "동일 JWT project_id 스코프",
     "app.routers.mockups:update_scenario": "동일 JWT project_id 스코프",
     "app.routers.visual_artifacts:delete_artifact": "JWT project_id 스코프+creator gate",
+    "app.routers.visual_artifacts:update_spec_pin": (
+        "JWT project_id 스코프로 artifact(_get_artifact_or_404) 선조회 후 pin_id를 그 artifact.id로"
+        " 재스코프(_get_latest_spec_pin_or_404) — delete_artifact와 동일 non-spoofable 패턴"
+    ),
+    "app.routers.visual_artifacts:delete_spec_pin": "동일 JWT project_id 스코프+artifact-scoped pin_id 재스코프",
     # caller-self / participant / recipient / creator — SELF_DERIVED
     "app.routers.conversations:set_conversation_mute": "participant-membership gate(caller 참가 대화만)",
     "app.routers.conversations:update_conversation": "participant-membership gate",

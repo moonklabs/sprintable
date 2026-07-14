@@ -109,6 +109,9 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     human_owner_member_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    # P0-05 후속(doc scope-violation-signal-design §3·story 174be6bc): 작업 착수 시점 자발적 선언
+    # 파일-경로 글롭 배열(0178 additive). None/빈 배열 = 판정 무신호(scope_violation 항상 False 유지).
+    declared_scope_paths: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     meeting_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="SET NULL"), nullable=True
     )

@@ -11,6 +11,7 @@ from app.models.dependency import ItemDependency
 from app.models.embedding import Embedding
 from app.models.evidence import Evidence
 from app.models.gate import Gate
+from app.models.github_installation import GithubInstallation, GithubInstallNonce, GithubWebhookDelivery
 from app.models.hitl import HitlPolicy, HitlRequest
 from app.models.mockup import MockupComponent, MockupPage, MockupScenario, MockupVersion, UsageMeter
 from app.models.user import RefreshToken, User
@@ -39,6 +40,7 @@ from app.models.loop import LoopRun
 from app.models.story_assignee import StoryAssignee
 from app.models.project import OrgMember, Project
 from app.models.project_setting import ProjectSetting
+from app.models.pull_request_story_link import PullRequestStoryLink
 from app.models.retro import RetroAction, RetroItem, RetroSession, RetroVote
 from app.models.reward import RewardLedger
 from app.models.login_audit_log import LoginAuditLog
@@ -77,6 +79,9 @@ __all__ = [
     "BridgeUserMapping",
     "Embedding",
     "Gate",
+    "GithubInstallation",
+    "GithubInstallNonce",
+    "GithubWebhookDelivery",
     "HitlPolicy",
     "HitlRequest",
     "ItemDependency",
@@ -113,6 +118,7 @@ __all__ = [
     "Organization",
     "Project",
     "ProjectSetting",
+    "PullRequestStoryLink",
     "RetroAction",
     "RetroItem",
     "RetroSession",

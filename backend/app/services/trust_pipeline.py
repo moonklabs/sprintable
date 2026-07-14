@@ -6,7 +6,8 @@ glance/attention·glance/hero와 동일한 기존 파생 패턴의 확장(이중
 
 오픈 질문 4건 확定(오르테가·선생님 GO 2026-07-13):
 ①needs_input = 기존 Gate(requires_human=True, status=pending) — 신규 gate_type 없이 시작.
-②scope_violation = 이번 스코프 미구현·항상 빈 신호(정직한 미가용·후속 스토리 174be6bc 분리).
+②scope_violation = 이번 스코프 미구현·항상 빈 신호(정직한 미가용·후속 스토리 174be6bc 분리) —
+  **174be6bc(doc scope-violation-signal-design)에서 실체화 완료. 아래 batch_scope_violation 참조.**
 ③신규 이벤트 = dot 표기(story.trust_stage_changed) — 기존 dot/underscore 혼재 정리는 별건(ab9de360).
 ④done = 파이프라인 뷰 스코프 밖(None).
 """
@@ -17,13 +18,14 @@ import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.models.dependency import ItemDependency
 from app.models.gate import Gate
 from app.models.pm import Story
+from app.models.pull_request_story_link import PullRequestStoryLink
 from app.services.evidence_service import batch_human_verified
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,7 @@ class TrustFacts:
     has_pending_human_gate: bool  # needs_input 신호원(§7 확定①)
     has_verify_fail: bool  # verify_fail 신호원
     has_unresolved_blocker: bool  # blocked 신호원
+    has_scope_violation: bool  # scope_violation 신호원(174be6bc 실체화)
 
 
 def derive_trust_stage(facts: TrustFacts) -> str | None:
@@ -59,13 +62,14 @@ def derive_trust_stage(facts: TrustFacts) -> str | None:
 
 
 def derive_exception_signals(facts: TrustFacts) -> dict[str, bool]:
-    """doc §3·§6 — AQ 5신호(attention-queue-fe-spec-handoff §6 계약). scope_violation은 §7 확定②로
-    이번 스코프 미구현·항상 False(정직한 미가용 — 실체화는 후속 스토리)."""
+    """doc §3·§6 — AQ 5신호(attention-queue-fe-spec-handoff §6 계약). scope_violation은 174be6bc
+    (doc scope-violation-signal-design)에서 실체화 — declared_scope_paths 미선언 story는 항상
+    has_scope_violation=False(무신호 원칙 계승, §7 확定②와 동형)."""
     return {
         "blocked": facts.has_unresolved_blocker,
         "verify_fail": facts.has_verify_fail,
         "needs_input": facts.has_pending_human_gate,
-        "scope_violation": False,
+        "scope_violation": facts.has_scope_violation,
         "merge_ready": derive_trust_stage(facts) == "merge_ready",
     }
 
@@ -131,6 +135,40 @@ async def batch_unresolved_blocker(
     return set(result.scalars().all())
 
 
+async def batch_scope_violation(
+    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """scope_violation 신호원(174be6bc 실체화) — story별 **최신** confident PullRequestStoryLink의
+    evidence->scope_check->violated=true story_id 집합(배치). confident = should_auto_close와 동일
+    신뢰 등급(explicit 또는 auto_match/sid+confidence=high) — 오매치 링크 기준 오탐 방지."""
+    if not story_ids:
+        return set()
+    latest = (
+        select(PullRequestStoryLink.story_id, PullRequestStoryLink.evidence)
+        .distinct(PullRequestStoryLink.story_id)
+        .where(
+            PullRequestStoryLink.org_id == org_id,
+            PullRequestStoryLink.story_id.in_(story_ids),
+            PullRequestStoryLink.deleted_at.is_(None),
+            or_(
+                PullRequestStoryLink.link_source == "explicit",
+                and_(
+                    PullRequestStoryLink.link_source.in_(("auto_match", "sid")),
+                    PullRequestStoryLink.confidence == "high",
+                ),
+            ),
+        )
+        .order_by(PullRequestStoryLink.story_id, PullRequestStoryLink.updated_at.desc())
+        .subquery()
+    )
+    result = await session.execute(
+        select(latest.c.story_id).where(
+            latest.c.evidence["scope_check"]["violated"].astext == "true"
+        )
+    )
+    return set(result.scalars().all())
+
+
 async def compute_trust_facts(
     session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID
 ) -> TrustFacts | None:
@@ -150,6 +188,7 @@ async def compute_trust_facts(
     pending_gate_ids = await batch_pending_human_gate(session, org_id, ids)
     verify_fail_ids = await batch_verify_fail(session, org_id, ids)
     blocker_ids = await batch_unresolved_blocker(session, org_id, ids)
+    scope_violation_ids = await batch_scope_violation(session, org_id, ids)
     return TrustFacts(
         status=status,
         project_id=project_id,
@@ -157,6 +196,7 @@ async def compute_trust_facts(
         has_pending_human_gate=story_id in pending_gate_ids,
         has_verify_fail=story_id in verify_fail_ids,
         has_unresolved_blocker=story_id in blocker_ids,
+        has_scope_violation=story_id in scope_violation_ids,
     )
 
 
