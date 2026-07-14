@@ -64,6 +64,13 @@ describe('NowFace', () => {
     expect(html).toContain('이상 신호');
     expect(html).toContain('완료 보고');
     expect(html).toContain('BE 계약 완료');
+    // 까심 REQUEST_CHANGES(#2162 축3) — 이 테스트는 이미 원시 슬러그(context.kind='canonical',
+    // gate_type='merge')를 입력으로 제공하는데 그 슬러그가 카피에 안 새는지 확인하는 negative
+    // 어서션이 없었다 — 카피 스윕이 decideGateContextKind 분기·{gate} 인터폴레이션을 걷어냈어도
+    // 이 테스트 자체는 구버전(슬러그 그대로 노출)이 되돌아와도 계속 PASS하는 공허 통과였다
+    // (S2/S3와 동형 클래스). 입력에 실제로 준 슬러그가 렌더 결과에 없다는 걸 여기서 직접 검증한다.
+    expect(html).not.toContain('canonical'); // context.kind 슬러그 미노출
+    expect(html).not.toContain('merge'); // gate_type 슬러그 미노출
   });
 
   it('renders the calm empty state ("모두 확인했어요") when both sources are empty — no alarming iconography text', async () => {
