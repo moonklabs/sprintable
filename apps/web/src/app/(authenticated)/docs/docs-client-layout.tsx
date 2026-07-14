@@ -21,6 +21,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, FileText, Plus, X } from 'lucid
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { DocsLayoutContext, type Doc, type DocUpdate } from './docs-context';
 import { useSwipeDrawer } from '@/lib/use-swipe-drawer';
+import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 
 export function DocsClientLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -102,9 +103,11 @@ export function DocsClientLayout({ children }: { children: React.ReactNode }) {
 
   const handleSelectDoc = useCallback((slug: string) => {
     pushRecent(slug);
-    router.push(`/docs/${slug}`);
+    // prod P0(2026-07-14) — createDoc과 같은 버그 클래스(doc-project-url.ts 헤더 참고).
+    // projectId가 아직 해소 전(극단 엣지)이면 구 동작(?p= 없이 push)으로 안전 폴백.
+    router.push(projectId ? docUrl(slug, projectId) : `/docs/${slug}`);
     setTreeDrawerOpen(false);
-  }, [router, pushRecent]);
+  }, [router, pushRecent, projectId]);
 
   const handleReorder = useCallback(async (docId: string, newSortOrder: number) => {
     setTree((prev) => prev.map((doc) => (doc.id === docId ? { ...doc, sort_order: newSortOrder } : doc)));
@@ -161,7 +164,8 @@ export function DocsClientLayout({ children }: { children: React.ReactNode }) {
       if (!res.ok) throw new Error('Failed to create doc');
       const { data } = await res.json();
       setTree((prev) => [{ id: data.id, parent_id: data.parent_id || null, title: data.title, slug: data.slug, icon: data.icon || null, sort_order: data.sort_order || 0, is_folder: data.is_folder || false }, ...prev]);
-      router.push(`/docs/${data.slug}?new=1`);
+      // prod P0(2026-07-14) — doc-project-url.ts 헤더 코멘트 참고(레이스 근본).
+      router.push(newDocUrl(data.slug, projectId));
     } catch {
       addToast({ title: t('createFailed'), type: 'error' });
     } finally {
