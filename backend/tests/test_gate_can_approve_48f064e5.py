@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from app.routers import gates as gates_mod
 from app.routers.gates import (
@@ -66,6 +66,7 @@ async def _call(resolved, *, execute_results, has_access=None, status="approved"
             stack.enter_context(p)
         result = await transition_gate_endpoint(
             id=uuid.uuid4(), body=GateTransitionRequest(status=status),
+            background_tasks=BackgroundTasks(),
             session=session, org_id=uuid.uuid4(), auth=auth,
         )
     return result, transition
@@ -85,6 +86,7 @@ async def test_doc_gate_self_approval_forbidden():
         with pytest.raises(HTTPException) as ei:
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
             )
     assert ei.value.status_code == 403
@@ -104,6 +106,7 @@ async def test_doc_gate_missing_requester_fail_closed():
         with pytest.raises(HTTPException) as ei:
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
             )
     assert ei.value.status_code == 403
@@ -125,6 +128,7 @@ async def test_doc_gate_no_project_access_forbidden():
         with pytest.raises(HTTPException) as ei:
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
             )
     assert ei.value.status_code == 403
@@ -145,6 +149,7 @@ async def test_doc_gate_deleted_doc_forbidden():
         with pytest.raises(HTTPException) as ei:
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
             )
     assert ei.value.status_code == 403

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from app.routers import gates as gates_mod
 from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
@@ -43,7 +43,8 @@ async def _call(status: str, member_type: str):
          patch.object(gates_mod, "transition_gate", transition), \
          patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
         result = await transition_gate_endpoint(
-            id=uuid.uuid4(), body=body, session=session, org_id=org_id, auth=SimpleNamespace(),
+            id=uuid.uuid4(), body=body, background_tasks=BackgroundTasks(),
+            session=session, org_id=org_id, auth=SimpleNamespace(),
         )
     return result, transition
 
@@ -73,6 +74,7 @@ async def test_agent_approve_does_not_call_transition():
         with pytest.raises(HTTPException):
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=AsyncMock(), org_id=uuid.uuid4(), auth=SimpleNamespace(),
             )
     transition.assert_not_awaited()

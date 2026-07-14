@@ -116,6 +116,95 @@ async def _fetch_entity(
     return r[0], r[1], r[2], r[3]
 
 
+async def _finalize_dispatch(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    entity_type: str,
+    entity_id: uuid.UUID,
+    recipient_id: uuid.UUID,
+    member_type: str,
+    sender_id: uuid.UUID | None,
+    payload: dict[str, Any],
+    content: str,
+    title: str,
+    message: str | None,
+    commit: bool,
+    hypothesis_anchor: dict[str, Any] | None = None,
+    context_pack: str | None = None,
+) -> tuple[DispatchResponse, dict[str, Any] | None]:
+    """ccbcd9da(A-2): Event 생성+flush+seq+활동추출+notification+(commit 시)wake 의 **단일 공통 경로**.
+
+    ``dispatch_entity_to_assignee``/``dispatch_payload_to_member`` 두 형제함수가 이 로직을 각자
+    따로 구현해온 것 자체가 재발 원인(#1364 는 한쪽만 고쳐짐 — [[project_dispatch_payload_to_member_silent_gap]]).
+    이후 이 경로를 고치면 두 형제 모두 자동 반영돼 재이원화가 구조적으로 불가능해진다.
+
+    commit=False 면 여기서 commit/wake 하지 않는다(호출자 트랜잭션 합류·P1-2) — 단 delivery 는
+    **항상** 반환하므로 호출자가 자기 commit 후 스케줄한다(#1364 선례와 동일 계약).
+    """
+    event = Event(
+        project_id=project_id,
+        org_id=org_id,
+        event_type=EventType.dispatched.value,
+        source_entity_type=entity_type,
+        source_entity_id=entity_id,
+        sender_id=sender_id,
+        recipient_id=recipient_id,
+        recipient_type=member_type,
+        payload=payload,
+        status="pending",
+    )
+    db.add(event)
+    await db.flush()
+    if member_type == "agent":
+        await assign_recipient_seq(db, event)
+
+    await extract_activities_best_effort(db, [event.id])
+
+    if member_type != "agent":
+        await dispatch_notification(
+            db,
+            org_id=org_id,
+            event_type="dispatched",
+            target_member_ids=[recipient_id],
+            title=title,
+            body=message or None,
+            reference_type=entity_type,
+            reference_id=entity_id,
+        )
+
+    if commit:
+        await db.commit()  # commit 후 seq 확정
+        if member_type == "agent":
+            if event.recipient_seq is not None:
+                wake_agent(str(recipient_id), event.recipient_seq)
+            else:
+                _push_to_agent(str(recipient_id), _event_to_payload(event))
+
+    response = DispatchResponse(
+        dispatched=True,
+        event_id=event.id,
+        assignee_id=recipient_id,
+        assignee_type=member_type,
+        recipient_seq=event.recipient_seq,
+        reason="ok",
+    )
+    # 1f01c1ad: CC 릴레이(member webhook) 주입 파라미터 — 호출자가 스케줄(commit=True 도 delivery
+    # 는 항상 반환·라우터가 background_tasks 로 스케줄하는 기존 계약 유지).
+    delivery = {
+        "org_id": org_id,
+        "recipient_id": recipient_id,
+        "content": content,
+        "event_type": "dispatched",
+        "source_entity_type": entity_type,
+        "source_entity_id": entity_id,
+        "hypothesis_anchor": hypothesis_anchor,
+        "context_pack": context_pack,
+    }
+    return response, delivery
+
+
 async def dispatch_entity_to_assignee(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -185,71 +274,26 @@ async def dispatch_entity_to_assignee(
     if trigger_metadata is not None:
         payload["trigger_metadata"] = trigger_metadata  # AC③: L2 트리거 출처 additive
 
-    event = Event(
-        project_id=project_id,
-        org_id=org_id,
-        event_type=EventType.dispatched.value,
-        source_entity_type=entity_type,
-        source_entity_id=entity_id,
-        sender_id=sender_id,
-        recipient_id=assignee_id,
-        recipient_type=member_type,
-        payload=payload,
-        status="pending",
-    )
-    db.add(event)
-    await db.flush()
-    # per-recipient dense seq 발급 (agent recipient만 — commit 순서 직렬화 보장)
-    if member_type == "agent":
-        await assign_recipient_seq(db, event)
-
-    # L1 BE-3: direct dispatch event → activity_events 1행(best-effort·delivery 무영향).
-    await extract_activities_best_effort(db, [event.id])
-
-    if member_type != "agent":
-        await dispatch_notification(
-            db,
-            org_id=org_id,
-            event_type="dispatched",
-            target_member_ids=[assignee_id],
-            title=f"[{entity_type}] {title}",
-            body=message or (description or "")[:200] or None,
-            reference_type=entity_type,
-            reference_id=entity_id,
-        )
-
     # E-DG S7: commit=False면 호출자 트랜잭션에 합류 — 여기서 commit/wake 하지 않는다(P1-2
     # partial-failure 방지). 호출자가 status/step_run/event 를 한 트랜잭션으로 commit 한 뒤 wake 한다
-    # (recipient_seq 확정 commit 후 wake 불변식). event.id/recipient_seq 는 위 flush 로 이미 확정.
-    if commit:
-        await db.commit()  # commit 후 seq 확정
-        # agent: commit 후 wake (gateway_seq 확정 보장, 이중전달 방지)
-        if member_type == "agent":
-            if event.recipient_seq is not None:
-                wake_agent(str(assignee_id), event.recipient_seq)
-            else:
-                _push_to_agent(str(assignee_id), _event_to_payload(event))
-
-    response = DispatchResponse(
-        dispatched=True,
-        event_id=event.id,
-        assignee_id=assignee_id,
-        assignee_type=member_type,
-        recipient_seq=event.recipient_seq,
-        reason="ok",
+    # (recipient_seq 확정 commit 후 wake 불변식).
+    return await _finalize_dispatch(
+        db,
+        org_id=org_id,
+        project_id=project_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        recipient_id=assignee_id,
+        member_type=member_type,
+        sender_id=sender_id,
+        payload=payload,
+        content=content,
+        title=f"[{entity_type}] {title}",
+        message=message or (description or "")[:200] or None,
+        commit=commit,
+        hypothesis_anchor=hypothesis_anchor,
+        context_pack=context_pack,
     )
-    # 1f01c1ad: CC 릴레이(member webhook) 주입 파라미터 — 호출자가 스케줄(라우터=background_tasks).
-    delivery = {
-        "org_id": org_id,
-        "recipient_id": assignee_id,
-        "content": content,
-        "event_type": "dispatched",
-        "source_entity_type": entity_type,
-        "source_entity_id": entity_id,
-        "hypothesis_anchor": hypothesis_anchor,
-        "context_pack": context_pack,
-    }
-    return response, delivery
 
 
 async def dispatch_payload_to_member(
@@ -266,14 +310,18 @@ async def dispatch_payload_to_member(
     trigger_metadata: dict[str, Any] | None = None,
     sender_id: uuid.UUID | None = None,
     commit: bool = True,
-) -> DispatchResponse:
+) -> tuple[DispatchResponse, dict[str, Any] | None]:
     """S22: entity assignee 와 무관하게 **특정 member**(예: doc author=created_by)에게 dispatched
-    이벤트 생성 + (agent) wake. ``dispatch_entity_to_assignee`` 의 member-dispatch core 를 author-wake
-    용으로 분리한 lower-level helper(assignee 고정 우회). 순서/불변식 동일(flush→seq→commit 후 wake).
-    ⚠️ commit=False 면 호출자 트랜잭션 합류(여기서 commit/wake 안 함·P1-2)."""
+    이벤트 생성 + notification(human) + (agent) wake. ``dispatch_entity_to_assignee`` 와 동일한
+    ``_finalize_dispatch`` 공통 경로 사용(ccbcd9da A-2 — 형제함수 이원화가 #1364 부분수정 재발 원인).
+
+    반환: (DispatchResponse, delivery) — ``dispatch_entity_to_assignee`` 와 동형 계약. delivery 는
+    commit 여부와 무관하게 dispatched=True 일 때 항상 반환되므로, commit=False 호출자는 **자기
+    commit 후** delivery 로 wake/webhook 을 스케줄해야 한다(전엔 이 반환 자체가 없어 무음이었음).
+    ⚠️ commit=False 면 여기서 commit/wake 하지 않는다(호출자 트랜잭션 합류·P1-2)."""
     member = await resolve_member_identity(member_id, org_id, db)
     if member is None:
-        return DispatchResponse(dispatched=False, assignee_id=member_id, reason="unresolved_member")
+        return DispatchResponse(dispatched=False, assignee_id=member_id, reason="unresolved_member"), None
     member_type = member.type
 
     payload: dict[str, Any] = {
@@ -287,32 +335,18 @@ async def dispatch_payload_to_member(
     if trigger_metadata is not None:
         payload["trigger_metadata"] = trigger_metadata  # 새 event type 금지·trigger_metadata additive
 
-    event = Event(
-        project_id=project_id,
+    return await _finalize_dispatch(
+        db,
         org_id=org_id,
-        event_type=EventType.dispatched.value,
-        source_entity_type=source_entity_type,
-        source_entity_id=source_entity_id,
-        sender_id=sender_id,
+        project_id=project_id,
+        entity_type=source_entity_type,
+        entity_id=source_entity_id,
         recipient_id=member_id,
-        recipient_type=member_type,
+        member_type=member_type,
+        sender_id=sender_id,
         payload=payload,
-        status="pending",
-    )
-    db.add(event)
-    await db.flush()
-    if member_type == "agent":
-        await assign_recipient_seq(db, event)
-    await extract_activities_best_effort(db, [event.id])
-
-    if commit:
-        await db.commit()
-        if member_type == "agent":
-            if event.recipient_seq is not None:
-                wake_agent(str(member_id), event.recipient_seq)
-            else:
-                _push_to_agent(str(member_id), _event_to_payload(event))
-    return DispatchResponse(
-        dispatched=True, event_id=event.id, assignee_id=member_id,
-        assignee_type=member_type, recipient_seq=event.recipient_seq, reason="ok",
+        content=content,
+        title=title,
+        message=message,
+        commit=commit,
     )
