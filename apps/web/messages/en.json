@@ -321,7 +321,12 @@
     "loopPhraseWrappingUp": "Wrapping up",
     "loopEmpty": "No hypotheses under test right now",
     "workforceTitle": "Workforce",
-    "workforceSubject": "Subject · collaboration + trust"
+    "workforceSubject": "Subject · collaboration + trust",
+    "workforceTrustVerified": "Human verified",
+    "workforceTrustClaimed": "Agent claimed · awaiting review",
+    "workforceTogether": "Building together",
+    "workforceUnassigned": "Not yet assigned",
+    "workforceEmpty": "No active work areas right now"
   },
   "board": {
     "title": "Kanban Board",

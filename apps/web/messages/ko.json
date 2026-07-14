@@ -321,7 +321,12 @@
     "loopPhraseWrappingUp": "막바지",
     "loopEmpty": "지금 검증 중인 가설이 없습니다",
     "workforceTitle": "워크포스",
-    "workforceSubject": "주어 · 협업 + 신뢰"
+    "workforceSubject": "주어 · 협업 + 신뢰",
+    "workforceTrustVerified": "인간 검증 완",
+    "workforceTrustClaimed": "에이전트 주장 · 검토 대기",
+    "workforceTogether": "함께 짓는 중",
+    "workforceUnassigned": "아직 배정 전입니다",
+    "workforceEmpty": "지금 진행 중인 작업 영역이 없습니다"
   },
   "board": {
     "title": "칸반 보드",

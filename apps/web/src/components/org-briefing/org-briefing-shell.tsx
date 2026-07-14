@@ -4,11 +4,12 @@ import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { NowFace } from './now-face';
 import { LoopFace } from './loop-face';
+import { WorkforceFace } from './workforce-face';
 
-// story ded31cb3(S1)+6b707960(S2) — 조직 브리핑 셸. 목업 Frame A 배치 1:1: ①지금(hero·상단·폭 전체)
-// → ②루프|③워크포스(2단·하단, lg 미만 스택 — GNB lg:hidden과 일치, md 사용 금지). 유나 보강(conv
-// 32b8cff9 11:42:42): 루프/워크포스는 S1에서 레이아웃 골격만 확定 — S2/S3에서 자리 이동 없이 데이터만
-// 증분 장착(루프=이번, 워크포스=S3). 헤더 인사말/시간대 카피는 근거 없는 장식이라 생략(no-fiction).
+// story ded31cb3(S1)+6b707960(S2)+09fa254e(S3) — 조직 브리핑 셸. 목업 Frame A 배치 1:1: ①지금
+// (hero·상단·폭 전체) → ②루프|③워크포스(2단·하단, lg 미만 스택 — GNB lg:hidden과 일치, md 사용 금지).
+// 유나 보강(conv 32b8cff9 11:42:42): 루프/워크포스는 S1에서 레이아웃 골격만 확定 — 자리 이동 없이
+// 데이터만 증분 장착(루프=S2, 워크포스=이번). 헤더 인사말/시간대 카피는 근거 없는 장식이라 생략(no-fiction).
 
 function FaceSkeletonPanel({ title, subject }: { title: string; subject: string }) {
   return (
@@ -46,7 +47,7 @@ export function OrgBriefingShell() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {projectId ? <LoopFace projectId={projectId} /> : <FaceSkeletonPanel title={t('loopTitle')} subject={t('loopSubject')} />}
-        <FaceSkeletonPanel title={t('workforceTitle')} subject={t('workforceSubject')} />
+        {projectId ? <WorkforceFace projectId={projectId} /> : <FaceSkeletonPanel title={t('workforceTitle')} subject={t('workforceSubject')} />}
       </div>
     </div>
   );
