@@ -3569,8 +3569,6 @@
     "galleryGroupEmpty": "This group doesn't have any artifacts yet.",
     "galleryAnchorPill": "Anchor v{version}",
     "galleryLatestChip": "Up to v{version}",
-    "galleryLazyHint": "Expanding loads earlier versions.",
-    "galleryVersionsUnavailable": "Couldn't load earlier versions.",
     "viewerExpandAction": "Expand view",
     "galleryFormatHtml": "Web page",
     "galleryFormatImage": "Image",

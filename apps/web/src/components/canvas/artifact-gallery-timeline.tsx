@@ -14,6 +14,9 @@ interface ArtifactGalleryTimelineProps {
   className?: string;
   /** story 3d888ba2 — 변천사에서 특정 버전 클릭→그 버전 실물 열람. 생략 시 정적 라벨(회귀 0). */
   onSelectVersion?: (versionNumber: number) => void;
+  /** story 39313b40 — 모달 내 버전 탭으로 재사용 시, 지금 보고 있는 버전을 강조(정본=success와
+   * 별개 신호 — 정본이 아닌 버전을 보는 중일 수도 있어 시각 구분 필요). */
+  selectedVersion?: number;
 }
 
 /**
@@ -23,12 +26,13 @@ interface ArtifactGalleryTimelineProps {
  * 더 엄격함 — **주어는 산출물/버전의 진화**뿐, 작성자·편집 횟수·경과시간은 렌더 자체가 없다.
  * anchor(정본)=success 톤 노드, 그 외=info 톤 — 빨강 0.
  */
-export function ArtifactGalleryTimeline({ versions, className, onSelectVersion }: ArtifactGalleryTimelineProps) {
+export function ArtifactGalleryTimeline({ versions, className, onSelectVersion, selectedVersion }: ArtifactGalleryTimelineProps) {
   const t = useTranslations('canvas');
   return (
     <div className={cn('flex items-start gap-0 overflow-x-auto', className)}>
       {versions.map((v, i) => {
         const isLast = i === versions.length - 1;
+        const isSelected = v.versionNumber === selectedVersion;
         const label = (
           <>
             <div className="mb-1.5 flex items-center gap-0">
@@ -36,12 +40,13 @@ export function ArtifactGalleryTimeline({ versions, className, onSelectVersion }
                 className={cn(
                   'h-[11px] w-[11px] shrink-0 rounded-full border-2',
                   v.isAnchor ? 'border-success bg-success' : 'border-info bg-background',
+                  isSelected && 'ring-2 ring-offset-1 ring-info/50',
                 )}
                 aria-hidden="true"
               />
               {!isLast ? <span className="h-0.5 flex-1 bg-border" aria-hidden="true" /> : null}
             </div>
-            <p className={cn('text-[11px] font-bold tabular-nums', v.isAnchor ? 'text-success' : 'text-foreground')}>
+            <p className={cn('text-[11px] font-bold tabular-nums', v.isAnchor ? 'text-success' : 'text-foreground', isSelected && 'underline underline-offset-2')}>
               v{v.versionNumber}
               {v.isAnchor ? <span className="ml-1 font-medium">{t('versionAnchorTag')}</span> : null}
             </p>

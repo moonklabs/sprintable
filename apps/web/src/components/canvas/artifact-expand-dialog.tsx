@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 import { cn } from '@/lib/utils';
 import { ArtifactStage } from './artifact-stage';
+import { ArtifactGalleryTimeline, type GalleryTimelineVersion } from './artifact-gallery-timeline';
 import type { ArtifactFormat } from '@/services/canvas';
 
 interface ArtifactExpandDialogProps {
@@ -14,6 +15,13 @@ interface ArtifactExpandDialogProps {
   content: string;
   /** story 1948d19d §4 — 선언된 아트보드 크기(있으면). 없으면 ArtifactStage가 기본 폴백. */
   canvasBounds?: { w: number; h: number } | null;
+  /** story 39313b40 — 갤러리 카드 그리드: 그리드 인라인 펼침 대신 모달 내 버전 탭으로 변천사를
+   * 보여준다(reflow 회피, doc §3). 스토리 상세 뷰어(artifact-viewer.tsx)는 이 3개 prop을
+   * 생략 → 탭 미노출, 기존 동작 그대로(회귀 0). 재사용: ArtifactGalleryTimeline(갤러리 변천사와
+   * 동일 컴포넌트, 신규 UI 0). */
+  versions?: GalleryTimelineVersion[];
+  selectedVersion?: number;
+  onSelectVersion?: (versionNumber: number) => void;
 }
 
 /**
@@ -23,7 +31,9 @@ interface ArtifactExpandDialogProps {
  * 그대로 채우는 캔버스 뷰포트라 별도 "fill 모드" 개념이 없다 — CSS로 큰 박스를 주면 그게 곧
  * 큰 뷰포트다(인라인 카드도 동일 컴포넌트, 크기만 다름). 신규 뷰어 0 — 기존 컴포넌트 재사용.
  */
-export function ArtifactExpandDialog({ open, onOpenChange, title, format, content, canvasBounds }: ArtifactExpandDialogProps) {
+export function ArtifactExpandDialog({
+  open, onOpenChange, title, format, content, canvasBounds, versions, selectedVersion, onSelectVersion,
+}: ArtifactExpandDialogProps) {
   const t = useTranslations('canvas');
 
   return (
@@ -48,6 +58,14 @@ export function ArtifactExpandDialog({ open, onOpenChange, title, format, conten
               {t('closeAction')}
             </DialogPrimitive.Close>
           </div>
+          {versions && versions.length > 1 ? (
+            <ArtifactGalleryTimeline
+              versions={versions}
+              selectedVersion={selectedVersion}
+              onSelectVersion={onSelectVersion}
+              className="shrink-0 border-b border-border px-4 py-2.5"
+            />
+          ) : null}
           <div className="min-h-0 flex-1 overflow-hidden p-4">
             <ArtifactStage format={format} content={content} title={title} canvasBounds={canvasBounds} />
           </div>

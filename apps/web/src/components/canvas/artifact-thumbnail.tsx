@@ -6,14 +6,16 @@ import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { adaptArtifactDetail, getArtifactVersionDetail, type ArtifactFormat } from '@/services/canvas';
 import { listArtifactExports } from '@/services/canvas-export';
-
-const THUMB_CANVAS_WIDTH = 480;
-const THUMB_CANVAS_HEIGHT = 280;
+import { DEFAULT_BOUNDS } from './artifact-stage';
 
 type ThumbnailState =
   | { kind: 'loading' }
   | { kind: 'image'; url: string }
-  | { kind: 'live'; content: string }
+  /** story 39313b40 — bounds는 이제 그 버전의 실 canvas_bounds(§3 "아트보드 축소" 요구사항.
+   * 이전엔 480×280 임의 상수를 썼는데, ArtifactStage의 실제 기본 아트보드(1280×800)와도
+   * 어긋나 클릭 시 열리는 크게 보기 모달과 썸네일의 종횡비가 서로 달랐다 — 그라운딩 중 발견,
+   * 즉시 수정). null이면 ArtifactStage와 동일한 DEFAULT_BOUNDS 폴백(가짜 추정 아님). */
+  | { kind: 'live'; content: string; bounds: { w: number; h: number } }
   | { kind: 'placeholder'; format: ArtifactFormat };
 
 const FORMAT_ICON: Record<ArtifactFormat, typeof FileCode2> = {
@@ -79,23 +81,26 @@ export function ArtifactThumbnail({ artifactId, latestVersionNumber, anchorVersi
       const { artifact, versions } = adaptArtifactDetail(detail);
       const content = versions[0]?.content;
       if (artifact.format === 'tree' || !content) { setState({ kind: 'placeholder', format: artifact.format }); return; }
-      setState(artifact.format === 'image' ? { kind: 'image', url: content } : { kind: 'live', content });
+      setState(artifact.format === 'image'
+        ? { kind: 'image', url: content }
+        : { kind: 'live', content, bounds: versions[0]?.canvasBounds ?? DEFAULT_BOUNDS });
     })();
     return () => { cancelled = true; };
   }, [inView, artifactId, anchorVersion, latestVersionNumber]);
 
   useEffect(() => {
     if (state.kind !== 'live') return;
+    const boundsW = state.bounds.w;
     const el = stageRef.current;
     if (!el) return;
-    const measure = () => setScale(Math.min(1, el.clientWidth / THUMB_CANVAS_WIDTH));
+    const measure = () => setScale(Math.min(1, el.clientWidth / boundsW));
     measure();
     // ResizeObserver 미지원 환경 — 초기 측정값(또는 fallback 1)으로 정적 유지, 크래시 방지.
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [state.kind]);
+  }, [state]);
 
   return (
     <div
@@ -109,7 +114,7 @@ export function ArtifactThumbnail({ artifactId, latestVersionNumber, anchorVersi
         // eslint-disable-next-line @next/next/no-img-element -- PNG export/artifact content는 외부·동적 URL이라 next/image 도메인 화이트리스트와 안 맞음.
         <img src={state.url} alt="" className="size-full object-cover" />
       ) : state.kind === 'live' ? (
-        <div ref={stageRef} className="pointer-events-none size-full" style={{ height: THUMB_CANVAS_HEIGHT * scale }}>
+        <div ref={stageRef} className="pointer-events-none size-full" style={{ height: state.bounds.h * scale }}>
           <iframe
             title=""
             aria-hidden="true"
@@ -117,7 +122,7 @@ export function ArtifactThumbnail({ artifactId, latestVersionNumber, anchorVersi
             srcDoc={state.content}
             sandbox=""
             style={{
-              width: THUMB_CANVAS_WIDTH, height: THUMB_CANVAS_HEIGHT,
+              width: state.bounds.w, height: state.bounds.h,
               transform: `scale(${scale})`, transformOrigin: 'top left',
             }}
           />
