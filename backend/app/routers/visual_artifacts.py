@@ -83,6 +83,38 @@ async def _assert_link_target_in_scope(
             raise HTTPException(status_code=404, detail=not_found_detail)
 
 
+async def _notify_artifact_created(
+    session: AsyncSession, artifact: VisualArtifact, *, org_id: uuid.UUID, project_id: uuid.UUID,
+    creator_id: uuid.UUID,
+) -> None:
+    """§F4(이벤트 없는 기능 금지) 갭 봉인(story 04e059e5·미르코 그라운딩 PR #2119): create만
+    dispatch_notification이 누락돼 있었다(edit/comment/export는 이미 전파). edit/comment 패턴
+    ("생성자 - 편집자")은 여기 적용 불가(생성 시점엔 "이미 알고 있던 이전 당사자"가 없음) — 대신
+    ①생성자 본인(자기 알림 — done-gate 라이브 실증이 자기 생성→자기 웹훅 도달을 검증하므로 제외
+    하면 테스트 불가) ②연결된 story/epic/doc의 assignee(있으면·창작자와 다르면 타 사용자 도달,
+    story/epic/doc 셋 다 assignee_id 컬럼 보유 확인)로 대상을 구성한다."""
+    target_member_ids: set[uuid.UUID] = {creator_id}
+    for field, table in _LINK_TABLES.items():
+        link_id = getattr(artifact, field)
+        if link_id is None:
+            continue
+        row = (await session.execute(
+            text(f"SELECT assignee_id FROM {table} WHERE id = :id"),  # noqa: S608 — table은 고정 allowlist(_LINK_TABLES), 요청값 아님
+            {"id": link_id},
+        )).first()
+        if row is not None and row.assignee_id is not None:
+            target_member_ids.add(row.assignee_id)
+
+    await dispatch_notification(
+        session, org_id=org_id, event_type="artifact.created",
+        target_member_ids=list(target_member_ids),
+        title=f"새 산출물 생성됨: {artifact.title}",
+        body="새 시각 산출물이 생성됐습니다.",
+        reference_type="visual_artifact", reference_id=artifact.id,
+        source_project_id=project_id,
+    )
+
+
 @router.post("", status_code=201)
 async def create_artifact(
     body: CreateArtifactRequest,
@@ -126,6 +158,8 @@ async def create_artifact(
         session.add(node)
         nodes.append(node)
     await session.flush()
+
+    await _notify_artifact_created(session, artifact, org_id=org_id, project_id=project_id, creator_id=created_by)
 
     detail = VisualArtifactDetail(
         id=artifact.id, org_id=artifact.org_id, project_id=artifact.project_id, title=artifact.title,
