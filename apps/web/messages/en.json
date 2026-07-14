@@ -3523,6 +3523,7 @@
     "propertyDeleteAction": "Delete",
     "specPinToolAction": "Add spec pin",
     "specPinToolUnavailableForNewArtifact": "Available once a version is saved",
+    "specPinPlacementHint": "Click where you want to place the pin.",
     "specPinPopoverTitle": "Spec pin",
     "specPinDescriptionPlaceholder": "Describe the spec for this point…",
     "specPinSaveAction": "Save",
@@ -3575,6 +3576,7 @@
     "galleryFormatTree": "Layout",
     "galleryOpenArtifactAction": "Open artifact",
     "viewerCanvasHint": "Drag to move, scroll to zoom",
+    "viewerCanvasHintTouch": "Move with one finger, zoom with two. Double-tap to fit.",
     "viewerFitAction": "Fit to view",
     "viewerActualSizeAction": "Actual size"
   }

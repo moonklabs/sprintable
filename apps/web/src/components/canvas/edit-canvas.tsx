@@ -126,21 +126,28 @@ export function EditCanvas({ tree, selectedId, onSelect, artifactId, canvasBound
     return true;
   }
 
+  // story 70a06b22 — 배치 제스처 발견성. 배치 캐처와 완전히 같은 조건(툴 활성+draft/editing
+  // 없음)이라 sticky 도구가 다음 배치를 위해 재노출될 때 힌트도 함께 자연히 재노출된다.
+  const showPlacementHint = pinToolActive && !draftPin && !editingPin;
+
   return (
     <div className={cn('space-y-2', className)}>
-      <button
-        type="button"
-        onClick={() => setPinToolActive((v) => !v)}
-        disabled={!artifactId}
-        title={artifactId ? undefined : t('specPinToolUnavailableForNewArtifact')}
-        className={cn(
-          'flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-          pinToolActive ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted',
-        )}
-      >
-        <FileText className="size-3" aria-hidden />
-        {t('specPinToolAction')}
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setPinToolActive((v) => !v)}
+          disabled={!artifactId}
+          title={artifactId ? undefined : t('specPinToolUnavailableForNewArtifact')}
+          className={cn(
+            'flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+            pinToolActive ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted',
+          )}
+        >
+          <FileText className="size-3" aria-hidden />
+          {t('specPinToolAction')}
+        </button>
+        {showPlacementHint ? <p className="text-[11px] text-muted-foreground">{t('specPinPlacementHint')}</p> : null}
+      </div>
 
       <div className="h-[420px] w-full">
         <ArtifactStage

@@ -121,6 +121,11 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
   contentRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   const t = useTranslations('canvas');
+  // story 70a06b22 — 어제(74d6047e) 만든 터치 핀치/더블탭이 힌트 카피에 반영 안 된 발견성 갭
+  // 봉합. `(pointer: coarse)` 1회 판정(라이브 세션 중 입력 수단이 바뀌는 하이브리드 기기는
+  // 희귀 엣지케이스라 리스너로 추적하지 않음 — SSR 안전을 위해 lazy initializer로 분기,
+  // effect 안 동기 setState 지양(기존 IntersectionObserver 가드와 동형 패턴).
+  const [isTouchDevice] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 });
   const [transform, setTransform] = useState({ tx: 0, ty: 0, scale: 1 });
@@ -428,7 +433,7 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
         </div>
       </div>
       <div className="mt-1.5 flex shrink-0 items-center justify-between gap-2">
-        <p className="text-[11px] text-muted-foreground">{t('viewerCanvasHint')}</p>
+        <p className="text-[11px] text-muted-foreground">{t(isTouchDevice ? 'viewerCanvasHintTouch' : 'viewerCanvasHint')}</p>
         <div className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
           <span className="tabular-nums">{Math.round(transform.scale * 100)}%</span>
           <button type="button" onClick={fitToView} title={t('viewerFitAction')} className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 hover:bg-muted hover:text-foreground">
