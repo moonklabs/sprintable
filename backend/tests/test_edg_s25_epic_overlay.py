@@ -139,6 +139,60 @@ async def test_default_off_agent_activation_blocked():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
+async def test_apply_active_done_wakes_assignee(monkeypatch):
+    """ccbcd9da(A-1): active→done(SoD 무관) 승인 → epic.assignee_id 자동재개 wake 페이로드가
+    _apply_epic_transition 반환값으로 전파(전엔 dispatch_payload_to_member 반환 자체가 없어 무음)."""
+    from app.services.workflow_line_resolution import _apply_epic_transition
+    from app.models.pm import Epic
+    from app.models.workflow_line import WorkflowLineStepRun
+    from app.models.project import Project
+    import app.services.agent_dispatch as ad
+    captured = {}
+
+    async def _fake_wake(db, org_id, member_id, **kw):
+        captured["member_id"] = member_id
+        captured["commit"] = kw.get("commit")
+        from app.services.agent_dispatch import DispatchResponse
+        resp = DispatchResponse(
+            dispatched=True, assignee_id=member_id, assignee_type="agent",
+            recipient_seq=3, reason="ok",
+        )
+        delivery = {
+            "org_id": org_id, "recipient_id": member_id, "content": kw.get("content"),
+            "event_type": "dispatched", "source_entity_type": kw.get("source_entity_type"),
+            "source_entity_id": kw.get("source_entity_id"),
+        }
+        return resp, delivery
+
+    monkeypatch.setattr(ad, "dispatch_payload_to_member", _fake_wake)
+    engine, Session = await _session()
+    async with Session() as s:
+        org, proj, assignee, approver = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        s.add(Project(id=proj, org_id=org, name="p"))
+        await s.flush()
+        epic = Epic(org_id=org, project_id=proj, title="e", status="active", assignee_id=assignee)
+        s.add(epic)
+        await s.flush()
+        sr = WorkflowLineStepRun(
+            org_id=org, project_id=proj, entity_type="epic", entity_id=epic.id,
+            from_status="active", to_status="done", status="gate_pending", mode="enforcing",
+            correlation_id=uuid.uuid4(), transition_id=uuid.uuid4().hex,
+        )
+        s.add(sr)
+        await s.flush()
+        wake_payload = await _apply_epic_transition(s, sr, resolver_id=approver)
+        await s.commit()
+        assert sr.status == "applied"
+        assert captured["member_id"] == assignee and captured["commit"] is False
+        # ⭐A-1 핵심: 호출자(gates.py)가 commit 후 wake_agent/webhook 스케줄할 수 있게 페이로드 반환.
+        assert wake_payload is not None
+        assert wake_payload["agent_wake"] == {"recipient_id": str(assignee), "recipient_seq": 3}
+        assert wake_payload["delivery"]["recipient_id"] == assignee
+    await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
 async def test_resolver_epic_aggregate_included():
     """⭐active→done routing material: resolver 가 epic 산하 story aggregate 포함(advisory)."""
     from app.services.workflow_line_resolver import resolve_routing_context

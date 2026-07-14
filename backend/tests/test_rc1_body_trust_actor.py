@@ -56,7 +56,7 @@ async def test_transition_forces_resolver_ignoring_body():
     forged = uuid.uuid4()  # 타인 UUID
     captured = {}
 
-    async def _fake_transition(session, org_id, gate_id, status, resolver_id, note):
+    async def _fake_transition(session, org_id, gate_id, status, resolver_id, note, *, pending_deliveries=None):
         captured["resolver_id"] = resolver_id
         return SimpleNamespace(id=gate_id, org_id=org_id, work_item_id=uuid.uuid4(),
                                work_item_type="story", gate_type="merge", status=status,
@@ -66,10 +66,12 @@ async def test_transition_forces_resolver_ignoring_body():
                                created_at=__import__("datetime").datetime.now(),
                                updated_at=__import__("datetime").datetime.now())
 
+    from fastapi import BackgroundTasks
     with patch.object(mod, "resolve_member", AsyncMock(return_value=caller)), \
          patch.object(mod, "transition_gate", _fake_transition):
         await transition_gate_endpoint(
             id=uuid.uuid4(), body=GateTransitionRequest(status="approved", resolver_id=forged),
+            background_tasks=BackgroundTasks(),
             session=_non_doc_gate_session(), org_id=uuid.uuid4(),
             auth=SimpleNamespace(user_id=str(uuid.uuid4())))
     assert captured["resolver_id"] == caller.id     # caller 강제
@@ -85,10 +87,12 @@ async def test_transition_agent_rejected_403():
     from fastapi import HTTPException
     agent = ResolvedMember(id=uuid.uuid4(), user_id=None, name="a", type="agent",
                            role="member", org_id=uuid.uuid4())
+    from fastapi import BackgroundTasks
     with patch.object(mod, "resolve_member", AsyncMock(return_value=agent)):
         with pytest.raises(HTTPException) as ei:
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=AsyncMock(), org_id=uuid.uuid4(),
                 auth=SimpleNamespace(user_id=str(uuid.uuid4())))
     assert ei.value.status_code == 403

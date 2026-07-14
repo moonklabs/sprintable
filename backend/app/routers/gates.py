@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,7 @@ from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
+from app.routers.agent_gateway import wake_agent
 from app.services.gate_service import (
     create_gate,
     hold_gate,
@@ -22,6 +23,22 @@ from app.services.gate_service import (
 )
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import has_project_access, is_org_owner, is_org_owner_or_admin
+
+
+def _schedule_pending_deliveries(
+    background_tasks: BackgroundTasks, pending_deliveries: list[dict],
+) -> None:
+    """ccbcd9da(A-1): transition_gate/override_gate 가 모은 wake/delivery 페이로드를 commit 후
+    발화(#1364/relay_agent_handoff 선례 동형 — recipient_seq 확정 commit 후 wake 불변식)."""
+    from app.services.conversation_webhook import deliver_injected_event_webhook
+
+    for payload in pending_deliveries:
+        agent_wake = payload.get("agent_wake")
+        if agent_wake:
+            wake_agent(agent_wake["recipient_id"], agent_wake["recipient_seq"])
+        delivery = payload.get("delivery")
+        if delivery:
+            background_tasks.add_task(deliver_injected_event_webhook, **delivery)
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +262,7 @@ async def list_gates(
 async def transition_gate_endpoint(
     id: uuid.UUID,
     body: GateTransitionRequest,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
@@ -286,9 +304,15 @@ async def transition_gate_endpoint(
     # ⭐S23 RC① + RC#1(방어심층): resolver_id 를 **전 status 무조건 인증 caller 로 강제**(body 무시).
     # body 조작(타인 UUID)으로 SoD(approver≠owner) 우회·confirmed_by_member_id 위조 차단.
     _resolver_id = resolved.id
+    _pending_deliveries: list[dict] = []
     try:
-        gate = await transition_gate(session, org_id, id, body.status, _resolver_id, body.note)
+        gate = await transition_gate(
+            session, org_id, id, body.status, _resolver_id, body.note,
+            pending_deliveries=_pending_deliveries,
+        )
         await session.commit()
+        # ccbcd9da(A-1): doc/epic 자동재개 wake — commit(recipient_seq 확정) 후 발화(이중전달 방지).
+        _schedule_pending_deliveries(background_tasks, _pending_deliveries)
         return GateResponse.model_validate(gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -474,6 +498,7 @@ async def _require_gate_owner(session, auth, org_id):
 async def override_gate_endpoint(
     id: uuid.UUID,
     body: GateOverrideRequest,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
@@ -482,9 +507,15 @@ async def override_gate_endpoint(
     reason 필수·owner_id=인증 caller 강제(S23 RC①)·정상 결재(quorum/SoD) 우회. 가장 민감한 액션."""
     from app.services.gate_service import override_gate
     resolved = await _require_gate_owner(session, auth, org_id)
+    _pending_deliveries: list[dict] = []
     try:
-        gate = await override_gate(session, org_id, id, resolved.id, body.decision, body.reason)
+        gate = await override_gate(
+            session, org_id, id, resolved.id, body.decision, body.reason,
+            pending_deliveries=_pending_deliveries,
+        )
         await session.commit()
+        # ccbcd9da(A-1): override 도 transition_gate 재사용 경로라 동일하게 doc/epic wake 대상.
+        _schedule_pending_deliveries(background_tasks, _pending_deliveries)
         return GateResponse.model_validate(gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

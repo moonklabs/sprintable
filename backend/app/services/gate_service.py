@@ -111,8 +111,14 @@ async def transition_gate(
     new_status: str,
     resolver_id: uuid.UUID | None = None,
     note: str | None = None,
+    *,
+    pending_deliveries: list[dict[str, Any]] | None = None,
 ) -> Gate:
-    """게이트 상태 전이 — 불법 전이 시 ValueError 발생."""
+    """게이트 상태 전이 — 불법 전이 시 ValueError 발생.
+
+    ``pending_deliveries``(ccbcd9da A-1, additive): 넘기면 line resolution(doc/epic 자동재개)이 만든
+    wake/delivery 페이로드를 append — 호출자가 자기 commit 후 wake_agent/webhook 스케줄(#1364 선례
+    동형). 생략(기존 호출자 전부)은 무변경(수집 안 함·이 함수 자체는 commit 하지 않음)."""
     gate_r = await session.execute(
         select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
     )
@@ -158,7 +164,11 @@ async def transition_gate(
 
     _line_step_run_id = await find_active_step_run_for_gate(session, org_id, gate.id)
     if _line_step_run_id is not None:
-        await apply_workflow_line_resolution(session, _line_step_run_id, new_status, resolver_id=resolver_id)
+        _wake_payload = await apply_workflow_line_resolution(
+            session, _line_step_run_id, new_status, resolver_id=resolver_id
+        )
+        if _wake_payload is not None and pending_deliveries is not None:
+            pending_deliveries.append(_wake_payload)
     else:
         # H1-FIX-2: merge 게이트 approve → work item 스토리를 done으로 진행(_preflight 재평가 우회).
         await _advance_story_on_merge_approve(session, gate, new_status)
@@ -607,6 +617,8 @@ async def override_gate(
     owner_id: uuid.UUID,
     decision: str,
     reason: str,
+    *,
+    pending_deliveries: list[dict[str, Any]] | None = None,
 ) -> Gate:
     """⭐E-DG S33 owner force-resolve: owner(최종권한자)가 막힌/긴급 gate 를 **강제 결정**한다.
 
@@ -653,7 +665,10 @@ async def override_gate(
         )).scalar_one_or_none()
 
     # ⭐force-resolve: quorum/SoD 우회·S6 hook 라인전이 자동 적용.
-    await transition_gate(session, org_id, gate_id, decision, resolver_id=owner_id, note=reason)
+    await transition_gate(
+        session, org_id, gate_id, decision, resolver_id=owner_id, note=reason,
+        pending_deliveries=pending_deliveries,
+    )
 
     # parallel approver row 닫기(overridden·강제 닫힘이지 승인 아님·dangling/SLA 방지).
     now = datetime.now(timezone.utc)
