@@ -57,16 +57,19 @@ describe('ArtifactSection — 빈 상태 1급화 (story 9449da0e)', () => {
     await mount('ko');
     expect(container.textContent).toContain('산출물'); // 섹션 라벨 상시 노출
     expect(container.textContent).toContain('아직 산출물이 없습니다');
-    expect(container.textContent).toContain('직접 그리거나 에이전트에게 맡겨 만들 수 있습니다');
-    expect(container.querySelector('button')?.textContent).toBe('산출물 그리기');
+    // story 64010b05 — 임포트 co-located 이후 카피 갱신(doc SSOT).
+    expect(container.textContent).toContain('직접 그리거나, 이미지·HTML을 임포트해 시작할 수 있습니다');
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons).toEqual(['산출물 그리기', '임포트']);
   });
 
   it('renders the same empty state in English (ko/en parity, AC3)', async () => {
     await mount('en');
     expect(container.textContent).toContain('Artifacts');
     expect(container.textContent).toContain('No artifacts yet');
-    expect(container.textContent).toContain('Draw one yourself, or hand it to an agent.');
-    expect(container.querySelector('button')?.textContent).toBe('Draw artifact');
+    expect(container.textContent).toContain('Draw one yourself, or import an image or HTML to get started.');
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons).toEqual(['Draw artifact', 'Import']);
   });
 
   it('clicking "Draw artifact" enters create mode — mounts the real ArtifactEditor (no mock)', async () => {
@@ -77,5 +80,15 @@ describe('ArtifactSection — 빈 상태 1급화 (story 9449da0e)', () => {
     // 빈 상태는 사라지고 편집기(CommitBar의 "버전으로 저장" 액션)가 뜬다 — mock 0, 실 컴포넌트.
     expect(container.textContent).not.toContain('아직 산출물이 없습니다');
     expect(container.textContent).toContain('버전으로 저장');
+  });
+
+  it('clicking "임포트" opens the import dialog — co-located 2번째 입구(story 64010b05)', async () => {
+    await mount('ko');
+    const importButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '임포트')!;
+    await act(async () => { importButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // base-ui Dialog는 document.body에 포탈.
+    expect(document.body.textContent).toContain('산출물 임포트');
+    expect(document.body.textContent).toContain('이미지');
+    expect(document.body.textContent).toContain('HTML 붙여넣기');
   });
 });

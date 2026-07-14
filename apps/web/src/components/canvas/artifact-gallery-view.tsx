@@ -18,6 +18,7 @@ import { ArtifactThumbnail } from './artifact-thumbnail';
 import { ArtifactExpandDialog } from './artifact-expand-dialog';
 import { ArtifactEditor } from './artifact-editor';
 import { StoryPickerDialog } from './story-picker-dialog';
+import { ImportArtifactDialog } from './import-artifact-dialog';
 
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
@@ -150,6 +151,10 @@ export function ArtifactGalleryView() {
    * createArtifact(storyId,...) 시그니처 무변경. */
   const [pickerOpen, setPickerOpen] = useState(false);
   const [creatingStoryId, setCreatingStoryId] = useState<string | null>(null);
+  /** story 64010b05 — 임포트도 갤러리에선 같은 스토리 피커를 경유해야 한다(귀속 필요, 083176e8과
+   * 동일 이유). 피커는 공유하되 선택 후 어느 플로우로 갈지만 이 intent로 분기한다. */
+  const [pickerIntent, setPickerIntent] = useState<'create' | 'import'>('create');
+  const [importingStoryId, setImportingStoryId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -219,6 +224,24 @@ export function ArtifactGalleryView() {
     setLoading(false);
   }
 
+  /** story 64010b05 — handleCreateCommit과 동형이나 source='imported'만 다르다. */
+  async function handleImportCommit(storyId: string, nodes: Parameters<typeof createArtifact>[2]): Promise<boolean> {
+    const detail = await createArtifact(storyId, t('untitledArtifact'), nodes, undefined, 'imported');
+    if (!detail) {
+      console.error('[canvas-gallery-import] artifact import commit failed', storyId);
+      return false;
+    }
+    setImportingStoryId(null);
+    if (projectId) {
+      setLoading(true);
+      const result = await fetchGalleryData(projectId);
+      setArtifacts(result.artifacts);
+      setLookups(result.lookups);
+      setLoading(false);
+    }
+    return true;
+  }
+
   const axisLabel = (a: GalleryAxis) => t(`galleryAxis${a[0]!.toUpperCase()}${a.slice(1)}`);
 
   // story 6d0a0e3a — GROUP BY(축 선택+그룹 목록) 배치를 목업(0d852d24) SSOT대로 좌측 레일에
@@ -285,6 +308,12 @@ export function ArtifactGalleryView() {
           onCommit={(committed, summary) => void handleCreateCommit(creatingStoryId, committed, summary)}
           onDone={() => setCreatingStoryId(null)}
         />
+      ) : importingStoryId ? (
+        <ImportArtifactDialog
+          open
+          onOpenChange={(next) => { if (!next) setImportingStoryId(null); }}
+          onImport={(nodes) => handleImportCommit(importingStoryId, nodes)}
+        />
       ) : loading ? (
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[200px_1fr]">
           <GroupListSkeleton />
@@ -295,13 +324,24 @@ export function ArtifactGalleryView() {
           <Frame className="size-6 text-muted-foreground/60" aria-hidden="true" />
           <p className="text-sm font-medium text-foreground">{t('galleryEmptyTitle')}</p>
           <p className="max-w-sm text-xs text-muted-foreground">{t('emptyHint')}</p>
-          <button
-            type="button"
-            onClick={() => setPickerOpen(true)}
-            className="mt-1 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            {t('createCta')}
-          </button>
+          {/* story 64010b05 §2 — 임포트=그리기와 co-located 2번째 입구. 갤러리는 스토리 귀속이
+           * 필요해(083176e8 이유 동일) 둘 다 같은 피커를 경유(intent로 분기). */}
+          <div className="mt-1 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => { setPickerIntent('create'); setPickerOpen(true); }}
+              className="rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              {t('createCta')}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPickerIntent('import'); setPickerOpen(true); }}
+              className="rounded-md border border-border px-4 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              {t('importCta')}
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[200px_1fr]">
@@ -360,7 +400,10 @@ export function ArtifactGalleryView() {
           open={pickerOpen}
           onOpenChange={setPickerOpen}
           projectId={projectId}
-          onSelect={(storyId) => { setPickerOpen(false); setCreatingStoryId(storyId); }}
+          onSelect={(storyId) => {
+            setPickerOpen(false);
+            if (pickerIntent === 'import') setImportingStoryId(storyId); else setCreatingStoryId(storyId);
+          }}
         />
       ) : null}
     </div>
