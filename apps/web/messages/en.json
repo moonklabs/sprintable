@@ -3578,6 +3578,9 @@
     "viewerCanvasHint": "Drag to move, scroll to zoom",
     "viewerCanvasHintTouch": "Move with one finger, zoom with two. Double-tap to fit.",
     "viewerFitAction": "Fit to view",
-    "viewerActualSizeAction": "Actual size"
+    "viewerActualSizeAction": "Actual size",
+    "responsivePreviewDesktop": "Desktop",
+    "responsivePreviewTablet": "Tablet",
+    "responsivePreviewMobile": "Mobile"
   }
 }

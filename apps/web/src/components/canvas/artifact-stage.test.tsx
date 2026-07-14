@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { ArtifactStage } from './artifact-stage';
+import { ArtifactStage, isResponsiveHtml } from './artifact-stage';
 import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -478,5 +478,37 @@ describe('ArtifactStage — 캔버스 뷰포트(story 1948d19d)', () => {
       expect(container.textContent).toContain('한 손가락으로 이동하고, 두 손가락으로 확대·축소합니다. 더블탭하면 화면에 맞춥니다.');
       expect(container.textContent).not.toContain('드래그로 이동, 휠로 확대·축소합니다');
     });
+  });
+
+  describe('반응형 미리보기(story 3d0d60a3) — previewWidth override는 iframe 자기 폭을 직접 교체한다(래퍼가 아니라, 구 토글 실패 원인 회피)', () => {
+    it('overrides both the content layer and the iframe itself to previewWidth, keeping the authored height', async () => {
+      await mount({ previewWidth: 375, canvasBounds: { w: 1280, h: 800 } });
+      const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+      const iframe = container.querySelector('iframe') as HTMLIFrameElement;
+      expect(content.style.width).toBe('375px');
+      expect(content.style.height).toBe('800px'); // 저작 높이 유지(cross-origin이라 리플로우 높이 측정 불가·정직 단순화)
+      expect(iframe.style.width).toBe('375px');
+      expect(iframe.style.height).toBe('800px');
+    });
+
+    it('falls back to the authored canvas_bounds width when previewWidth is absent (데스크톱=원본, override 부재)', async () => {
+      await mount({ canvasBounds: { w: 1280, h: 800 } });
+      const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+      expect(content.style.width).toBe('1280px');
+    });
+  });
+});
+
+describe('isResponsiveHtml(story 3d0d60a3) — @media 소스 파싱(유나 1순위 판정, 신규 BE 0)', () => {
+  it('detects an actual @media rule with a body', () => {
+    expect(isResponsiveHtml('<style>@media (max-width: 600px) { .a { color: red } }</style>')).toBe(true);
+  });
+
+  it('does not false-positive on the bare word "@media" appearing without a rule body', () => {
+    expect(isResponsiveHtml('<p>이 문서는 @media 쿼리를 설명하는 글입니다</p>')).toBe(false);
+  });
+
+  it('returns false for fixed-width html with no media query at all (보수적 미노출, no-fiction)', () => {
+    expect(isResponsiveHtml('<div style="width:1280px">fixed</div>')).toBe(false);
   });
 });
