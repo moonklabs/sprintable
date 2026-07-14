@@ -76,10 +76,14 @@ describe('LoopFace', () => {
       { data: { project_status: { epics: [] } } },
     );
     await mount();
-    // Badge's shared CVA base class always carries `aria-invalid:border-destructive` boilerplate
-    // (inert unless aria-invalid is set) — assert on the actual selected variant, not the substring.
-    expect(container.innerHTML).not.toContain('data-variant="destructive"');
-    expect(container.innerHTML).not.toContain('text-red');
+    // 오르테가 리뷰 관찰① — 이전 버전은 공허 통과 어서션이었다: `data-variant="destructive"` 부재는
+    // 코드가 실제로 info를 쓰기 때문에 트리비얼하게 항상 참이고, `text-red`는 이 디자인시스템이 애초에
+    // 쓰지 않는 클래스명(destructive variant는 `text-destructive`)이라 실제 회귀가 나도 절대 안 걸린다
+    // (27e339bc 공허-통과 테스트 버그 클래스). 양성 어서션(현재 올바른 info 클래스가 실제로 있다)과
+    // 진짜 존재하는 위험 클래스명(text-destructive)에 대한 음성 어서션으로 교체 — variant가
+    // destructive로 바뀌면 이 테스트가 실제로 실패한다.
+    expect(container.innerHTML).toContain('text-info');
+    expect(container.innerHTML).not.toContain('text-destructive');
   });
 
   it('excludes killed/archived hypotheses (forward-only) and renders the calm empty state when nothing qualifies', async () => {
