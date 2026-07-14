@@ -1,12 +1,14 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { NowFace } from './now-face';
+import { LoopFace } from './loop-face';
 
-// story ded31cb3 — 조직 브리핑 셸. 목업 Frame A 배치 1:1: ①지금(hero·상단·폭 전체) → ②루프|③워크포스
-// (2단·하단, lg 미만 스택 — GNB lg:hidden과 일치, md 사용 금지). 유나 보강(conv 32b8cff9 11:42:42):
-// 루프/워크포스는 이번 스토리에서 데이터 배선 없이 "레이아웃 골격"만 확定 — S2/S3에서 자리 이동 없이
-// 데이터만 증분 장착. 헤더 인사말/시간대 카피는 근거 없는 장식이라 생략(no-fiction).
+// story ded31cb3(S1)+6b707960(S2) — 조직 브리핑 셸. 목업 Frame A 배치 1:1: ①지금(hero·상단·폭 전체)
+// → ②루프|③워크포스(2단·하단, lg 미만 스택 — GNB lg:hidden과 일치, md 사용 금지). 유나 보강(conv
+// 32b8cff9 11:42:42): 루프/워크포스는 S1에서 레이아웃 골격만 확定 — S2/S3에서 자리 이동 없이 데이터만
+// 증분 장착(루프=이번, 워크포스=S3). 헤더 인사말/시간대 카피는 근거 없는 장식이라 생략(no-fiction).
 
 function FaceSkeletonPanel({ title, subject }: { title: string; subject: string }) {
   return (
@@ -31,6 +33,7 @@ function FaceSkeletonPanel({ title, subject }: { title: string; subject: string 
 
 export function OrgBriefingShell() {
   const t = useTranslations('orgBriefing');
+  const { projectId } = useDashboardContext();
 
   return (
     <div className="mx-auto max-w-7xl space-y-5 p-4 lg:p-6">
@@ -42,7 +45,7 @@ export function OrgBriefingShell() {
       <NowFace />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <FaceSkeletonPanel title={t('loopTitle')} subject={t('loopSubject')} />
+        {projectId ? <LoopFace projectId={projectId} /> : <FaceSkeletonPanel title={t('loopTitle')} subject={t('loopSubject')} />}
         <FaceSkeletonPanel title={t('workforceTitle')} subject={t('workforceSubject')} />
       </div>
     </div>
