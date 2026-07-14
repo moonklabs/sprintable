@@ -81,12 +81,23 @@ describe('WorkforceFace', () => {
     expect(container.innerHTML).toContain('아직 배정 전입니다');
   });
 
-  it('never renders a per-person count, ranking, or elapsed-time string (collaboration-map.test.tsx parity — highest surveillance-risk surface)', async () => {
+  it('never renders a per-person count, ranking, or elapsed-time string alongside the actual rendered row (collaboration-map.test.tsx parity — highest surveillance-risk surface)', async () => {
+    // 까심 REQUEST_CHANGES(#2161) — S2(425085b4)와 동일 공허-통과 클래스: negative 정규식만 걸면
+    // 컴포넌트가 통째로 빈 화면을 뱉어도 항상 통과한다. 같은 mount·같은 DOM에서 실제 아바타/씰이
+    // 렌더됐다는 positive 어서션을 먼저 확認한 뒤에만 negative를 의미 있게 걸 수 있다.
     stubFetch(OVERVIEW, {
       e1: { data: [{ assignee_ids: ['m1', 'm2'], self_reported: true, human_verified: true }] },
     }, MEMBERS);
     await mount();
     const html = container.innerHTML;
+
+    // positive — 협업 아바타(참여자 이니셜 툴팁)와 신뢰 씰이 실제로 이 DOM에 렌더됐다.
+    expect(html).toContain('title="Yuna"');
+    expect(html).toContain('title="Miruko"');
+    expect(html).toContain('함께 짓는 중');
+    expect(html).toContain('인간 검증 완');
+
+    // negative — 위 실렌더 상태에서도 개수/순위/경과시간 낙인 문구는 전혀 없다.
     expect(html).not.toMatch(/\d+\s*명/);
     expect(html).not.toMatch(/\d+\s*개\s*완료/);
     expect(html).not.toMatch(/\d+\s*(분|시간|일)(?!건)/);
