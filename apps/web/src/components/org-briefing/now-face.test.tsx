@@ -66,14 +66,13 @@ describe('NowFace', () => {
     expect(html).toContain('BE 계약 완료');
   });
 
-  it('renders the calm empty state ("지금 개입할 일이 없습니다") when both sources are empty — no alarming iconography text', async () => {
+  it('renders the calm empty state ("모두 확인했어요") when both sources are empty — no alarming iconography text', async () => {
     stubFetch(
       { action_queue: { items: [] }, attention: { items: [] } },
       { data: [] },
     );
     await mount();
-    expect(container.innerHTML).toContain('지금 개입할 일이 없습니다');
-    expect(container.innerHTML).toContain('팀이 흐르는 중입니다');
+    expect(container.innerHTML).toContain('모두 확인했어요');
   });
 
   it('caps at 5 rows by default with a "+N 더" toggle, and clicking it reveals the rest in place (no priority cut, no navigation away)', async () => {
@@ -87,7 +86,7 @@ describe('NowFace', () => {
     await mount();
     const rowsBefore = container.querySelectorAll('a').length;
     expect(rowsBefore).toBe(5);
-    expect(container.innerHTML).toContain('+3 더');
+    expect(container.innerHTML).toContain('3개 더 보기');
 
     const moreButton = container.querySelector('button');
     expect(moreButton).toBeTruthy();
@@ -95,7 +94,7 @@ describe('NowFace', () => {
 
     const rowsAfter = container.querySelectorAll('a').length;
     expect(rowsAfter).toBe(8);
-    expect(container.innerHTML).not.toContain('+3 더');
+    expect(container.innerHTML).not.toContain('3개 더 보기');
   });
 
   it('never leaks raw elapsed-time digits into the anomaly row copy (surveillance framing ban)', async () => {

@@ -72,7 +72,7 @@ describe('buildWorkforceFace', () => {
       e1: [story({ humanVerified: false }), story({ humanVerified: true })],
     }, t);
     expect(items[0]!.trust).toBe('verified');
-    expect(items[0]!.trustLabel).toBe('인간 검증 완');
+    expect(items[0]!.trustLabel).toBe('사람이 확인함');
   });
 
   it('marks trust=claimed when no story is verified but at least one is self-reported', () => {
