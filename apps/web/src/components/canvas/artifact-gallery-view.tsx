@@ -195,40 +195,65 @@ export function ArtifactGalleryView() {
 
   const axisLabel = (a: GalleryAxis) => t(`galleryAxis${a[0]!.toUpperCase()}${a.slice(1)}`);
 
+  // story 6d0a0e3a — GROUP BY(축 선택+그룹 목록) 배치를 목업(0d852d24) SSOT대로 좌측 레일에
+  // 통합(#2124 이래 우측 상단 탭으로 어긋나 있던 걸 정정). 로직은 완전 무변경 — axis/setAxis·
+  // groups·selectedGroupId 전부 그대로, 렌더 "위치"만 옮긴다(AC "배치만 변경").
+  const railContent = (
+    <>
+      <div className="flex flex-wrap gap-0.5 border-b border-border p-1.5">
+        {GALLERY_AXES.map((a) => (
+          <button
+            key={a}
+            type="button"
+            onClick={() => setAxis(a)}
+            className={cn(
+              'rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors',
+              axis === a ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {axisLabel(a)}
+          </button>
+        ))}
+        <button
+          type="button"
+          disabled
+          title={t('galleryFeatureAxisUnsupported')}
+          className="cursor-not-allowed rounded-md px-2.5 py-1.5 text-xs font-semibold text-muted-foreground/40"
+        >
+          {t('galleryAxisFeature')}
+        </button>
+      </div>
+      <div className="space-y-1.5 p-1.5">
+        {groups.map((g) => (
+          <button
+            key={g.id}
+            type="button"
+            onClick={() => setSelectedGroupId(g.id)}
+            className={cn(
+              'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors',
+              selectedGroupId === g.id ? 'bg-muted/70' : 'hover:bg-muted/40',
+            )}
+          >
+            <span className={cn('size-1.5 shrink-0 rounded-full', selectedGroupId === g.id ? 'bg-info' : 'bg-muted-foreground/40')} aria-hidden="true" />
+            <span className={cn('min-w-0 flex-1 truncate font-medium', g.unassigned ? 'italic text-muted-foreground' : 'text-foreground')}>
+              {g.label}
+            </span>
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{g.artifacts.length}</span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-[20px] font-extrabold tracking-tight text-foreground">{t('galleryTitle')}</h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('gallerySubtitle')}</p>
-        </div>
-        <div className="flex shrink-0 gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5">
-          {GALLERY_AXES.map((a) => (
-            <button
-              key={a}
-              type="button"
-              onClick={() => setAxis(a)}
-              className={cn(
-                'rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors',
-                axis === a ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {axisLabel(a)}
-            </button>
-          ))}
-          <button
-            type="button"
-            disabled
-            title={t('galleryFeatureAxisUnsupported')}
-            className="cursor-not-allowed rounded-md px-2.5 py-1.5 text-xs font-semibold text-muted-foreground/40"
-          >
-            {t('galleryAxisFeature')}
-          </button>
-        </div>
+      <div className="mb-4">
+        <h1 className="text-[20px] font-extrabold tracking-tight text-foreground">{t('galleryTitle')}</h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">{t('gallerySubtitle')}</p>
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-[200px_1fr] gap-3.5">
+        <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[200px_1fr]">
           <GroupListSkeleton />
           <div className="h-40 animate-pulse rounded-xl bg-muted/40" />
         </div>
@@ -239,25 +264,17 @@ export function ArtifactGalleryView() {
           <p className="max-w-sm text-xs text-muted-foreground">{t('galleryEmptyHint')}</p>
         </div>
       ) : (
-        <div className="grid grid-cols-[200px_1fr] gap-3.5">
-          <div className="h-fit rounded-xl border border-border bg-card p-1.5">
-            {groups.map((g) => (
-              <button
-                key={g.id}
-                type="button"
-                onClick={() => setSelectedGroupId(g.id)}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors',
-                  selectedGroupId === g.id ? 'bg-muted/70' : 'hover:bg-muted/40',
-                )}
-              >
-                <span className={cn('size-1.5 shrink-0 rounded-full', selectedGroupId === g.id ? 'bg-info' : 'bg-muted-foreground/40')} aria-hidden="true" />
-                <span className={cn('min-w-0 flex-1 truncate font-medium', g.unassigned ? 'italic text-muted-foreground' : 'text-foreground')}>
-                  {g.label}
-                </span>
-                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{g.artifacts.length}</span>
-              </button>
-            ))}
+        <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[200px_1fr]">
+          {/* 반응형(유나 판정 위임 — 목업은 데스크톱만 명시): 좁은 화면=상단 접이식 셀렉터로
+           * collapse(네이티브 details/summary — 접근성 기본 제공), lg+=상시 노출 레일 유지. */}
+          <details className="rounded-xl border border-border bg-card lg:hidden">
+            <summary className="cursor-pointer select-none rounded-xl px-3 py-2.5 text-[13px] font-semibold text-foreground">
+              {axisLabel(axis)} · {selectedGroup?.label ?? ''}
+            </summary>
+            {railContent}
+          </details>
+          <div className="hidden h-fit rounded-xl border border-border bg-card lg:block">
+            {railContent}
           </div>
 
           <div
