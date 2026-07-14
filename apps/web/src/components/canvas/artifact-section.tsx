@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { PenLine } from 'lucide-react';
 import { ArtifactViewer } from './artifact-viewer';
 import { ArtifactEditor } from './artifact-editor';
+import { ImportArtifactDialog } from './import-artifact-dialog';
 import {
   adaptArtifactDetail, createArtifact, editArtifact, type ArtifactVersion, type BeArtifactVersionSummary,
   type MemberRef, type VisualArtifact, type BeVisualArtifactDetail, type BeVisualArtifactSummary,
@@ -77,6 +78,8 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
   const [editingArtifactId, setEditingArtifactId] = useState<string | null>(null);
   // 9449da0e 캔버스 휴먼 진입점 — 빈 상태 "그리기" 딸깍 → create 모드(initialNodes=[]).
   const [creating, setCreating] = useState(false);
+  // story 64010b05(C5 임포트 v1) — "그리기"와 co-located된 2번째 진입점.
+  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -187,6 +190,23 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
     setCreating(false);
   }
 
+  /** story 64010b05 — "임포트" 딸깍 커밋. handleCreateCommit과 동형이나 source='imported'만
+   * 다르다(신규 artifact 프리미티브 0 — 이후 편집/코멘트/정본/export는 동일 경로). */
+  async function handleImportCommit(nodes: ArtifactNode[]): Promise<boolean> {
+    const detail = await createArtifact(storyId, t('untitledArtifact'), nodes, undefined, 'imported');
+    if (!detail) {
+      console.error('[canvas-import] artifact import commit failed', storyId);
+      return false;
+    }
+    const { artifact, versions } = adaptArtifactDetail(detail);
+    const [threads, pendingCanonicalizeVersion] = await Promise.all([
+      loadArtifactThreads(artifact.id, detail.nodes),
+      loadPendingCanonicalizeVersion(artifact.id),
+    ]);
+    setItems((cur) => [...cur, { artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion, specPins: [] }]);
+    return true;
+  }
+
   if (items.length === 0 && !creating) {
     return (
       <div className={className}>
@@ -197,14 +217,25 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
           <PenLine className="size-6 text-muted-foreground/60" aria-hidden="true" />
           <p className="text-sm font-medium text-foreground">{t('emptyTitle')}</p>
           <p className="max-w-sm text-xs text-muted-foreground">{t('emptyHint')}</p>
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="mt-1 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            {t('createCta')}
-          </button>
+          {/* story 64010b05 §2 — 임포트는 "그리기"와 co-located된 2번째 입구(별도 숨은 경로 X). */}
+          <div className="mt-1 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              {t('createCta')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setImportOpen(true)}
+              className="rounded-md border border-border px-4 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              {t('importCta')}
+            </button>
+          </div>
         </div>
+        <ImportArtifactDialog open={importOpen} onOpenChange={setImportOpen} onImport={handleImportCommit} />
       </div>
     );
   }

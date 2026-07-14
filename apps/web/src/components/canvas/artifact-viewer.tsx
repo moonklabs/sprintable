@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { Check, Clock, Download, Maximize2, MessageCircle, Pencil, Sparkles } from 'lucide-react';
+import { Check, Clock, Download, Import, Maximize2, MessageCircle, Pencil, Sparkles } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { ArtifactStage } from './artifact-stage';
 import { ArtifactExpandDialog } from './artifact-expand-dialog';
@@ -93,6 +93,14 @@ export function ArtifactViewer({
           <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
             {artifact.format}
           </span>
+          {/* story 64010b05 §5 — provenance는 신뢰(투명성) 축이지 감시 축이 아니다. 낙인/경고색
+           * 0(muted 중립), created엔 라벨 자체가 없다(무표시=디폴트). */}
+          {artifact.source === 'imported' ? (
+            <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <Import className="h-3 w-3" aria-hidden />
+              {t('provenanceImportedBadge')}
+            </span>
+          ) : null}
           <select
             value={selectedVersion}
             onChange={(e) => setSelectedVersion(Number(e.target.value))}

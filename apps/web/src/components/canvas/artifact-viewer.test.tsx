@@ -234,3 +234,20 @@ describe('ArtifactViewer (SSR snapshot)', () => {
     });
   });
 });
+
+describe('ArtifactViewer — provenance 중립 라벨(story 64010b05, §5 감시금지·낙인0)', () => {
+  it('shows the neutral "임포트됨" badge when source is imported', () => {
+    const importedArtifact = { ...MOCK_ARTIFACT, source: 'imported' as const };
+    const markup = renderToStaticMarkup(
+      wrap(<ArtifactViewer artifact={importedArtifact} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+    );
+    expect(markup).toContain('임포트됨');
+  });
+
+  it('shows no provenance label at all when source is created (무표시=디폴트, 낙인 0)', () => {
+    const markup = renderToStaticMarkup(
+      wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+    );
+    expect(markup).not.toContain('임포트됨');
+  });
+});

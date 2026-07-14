@@ -235,15 +235,19 @@ export async function getArtifactVersionDetail(
  * **동일 BE 엔드포인트**(`POST /api/v2/visual-artifacts`·같은 서비스 `create_artifact`·신규 BE 0).
  * story 귀속 v1을 만들고 생성된 detail을 반환 — 실패는 null(호출부가 편집 모드 유지 + 로깅, 빈
  * catch 금지 계열).
+ *
+ * story 64010b05(C5 임포트 v1) — `source`(옵트인, 기본 생략=BE가 'created'로 기본값 채움) 추가.
+ * `CreateArtifactRequest.source`는 이미 BE 계약에 존재(schemas/visual_artifact.py) — 신규 BE 0,
+ * 이 함수가 그 필드를 그냥 안 보내고 있었을 뿐(그리기 호출부는 여전히 미지정 그대로 무변경).
  */
 export async function createArtifact(
-  storyId: string, title: string, nodes: ArtifactNode[], summary?: string,
+  storyId: string, title: string, nodes: ArtifactNode[], summary?: string, source?: 'created' | 'imported',
 ): Promise<BeVisualArtifactDetail | null> {
   try {
     const res = await fetch('/api/visual-artifacts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ story_id: storyId, title, nodes, summary: summary ?? null }),
+      body: JSON.stringify({ story_id: storyId, title, nodes, summary: summary ?? null, ...(source ? { source } : {}) }),
     });
     if (!res.ok) return null;
     const json = (await res.json()) as { data?: BeVisualArtifactDetail };
