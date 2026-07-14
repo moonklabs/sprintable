@@ -114,9 +114,44 @@ async def _apply_hypothesis_active(
     await session.flush()
 
 
+async def _schedule_member_dispatch(
+    session: AsyncSession, org_id: uuid.UUID, member_id: uuid.UUID, *,
+    title: str, content: str, source_entity_type: str, source_entity_id: uuid.UUID,
+    project_id: uuid.UUID | None, trigger_metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    """ccbcd9da(A-1): dispatch_payload_to_member(commit=False) 호출을 SAVEPOINT 로 격리하고
+    delivery/agent_wake 페이로드를 호출자(gates.py commit 지점)에게 반환 — #1364/relay_agent_handoff
+    선례와 동형(발명 0). 실패해도 gate 승인 자체는 비차단(fail-open·[[feedback_savepoint_failopen_session_poison]])."""
+    from app.services.agent_dispatch import dispatch_payload_to_member
+
+    try:
+        async with session.begin_nested():
+            resp, delivery = await dispatch_payload_to_member(
+                session, org_id, member_id,
+                title=title, content=content,
+                source_entity_type=source_entity_type, source_entity_id=source_entity_id,
+                project_id=project_id, trigger_metadata=trigger_metadata, commit=False,
+            )
+    except Exception:  # noqa: BLE001 — dispatch 실패도 gate 승인 비차단(fail-open).
+        logger.warning(
+            "workflow_line dispatch 실패(비중단) org=%s member=%s entity=%s/%s",
+            org_id, member_id, source_entity_type, source_entity_id, exc_info=True,
+        )
+        return None
+    if not resp.dispatched:
+        return None
+    return {
+        "agent_wake": (
+            {"recipient_id": str(resp.assignee_id), "recipient_seq": resp.recipient_seq}
+            if resp.assignee_type == "agent" and resp.recipient_seq is not None else None
+        ),
+        "delivery": delivery,
+    }
+
+
 async def _apply_doc_confirmed(
     session: AsyncSession, sr: WorkflowLineStepRun, resolver_id: uuid.UUID | None
-) -> None:
+) -> dict[str, Any] | None:
     """S22: doc draft→confirmed gate 승인 적용. native ``transition_doc`` 재사용(parallel 0). ⭐SoD:
     approver ≠ doc.created_by(author·자기 doc 자기 confirm 차단). 승인 후 author(created_by) 자동재개
     wake(commit=False·gate 트랜잭션 합류·§6 dispatch tx commit 0)."""
@@ -131,17 +166,17 @@ async def _apply_doc_confirmed(
         sr.status = "approved"
         sr.resolved_at = _now()
         await session.flush()
-        return
+        return None
     if doc.status == "confirmed":  # 멱등: 이미 confirmed → no-op.
         sr.status = "applied"
         sr.resolved_at = _now()
         await session.flush()
-        return
+        return None
     if doc.status != "draft":  # stale: draft 아니면 미적용.
         sr.status = "skipped"
         sr.resolved_at = _now()
         await session.flush()
-        return
+        return None
     # ⭐SoD(RC②): approver 미상 OR author 불명(created_by None) OR author 자신이면 차단. ⚠️created_by
     # None 을 fail-closed 로 막지 않으면 created_by=null doc 생성 후 self-confirm 으로 SoD 우회([[feedback_actor_type_failclosed]]).
     if resolver_id is None or doc.created_by is None or resolver_id == doc.created_by:
@@ -151,30 +186,31 @@ async def _apply_doc_confirmed(
         logger.warning(
             "doc_confirm_sod_block sr=%s approver=%s author=%s", sr.id, resolver_id, doc.created_by,
         )
-        return
+        return None
     approver = ResolvedMember(
         id=resolver_id, user_id=None, name="gate_approver", type="human", role="member",
         org_id=sr.org_id,
     )
     await transition_doc(session, sr.org_id, approver, doc.id, "confirmed", via_gate=True)
-    # author 자동재개(success_hypothesis): created_by 에게 dispatched 이벤트(commit=False → gate
-    # 트랜잭션 합류·gates.py:137 commit 후 agent 가 consume·새 event type 0·trigger_metadata만).
+    # author 자동재개(ccbcd9da): created_by 에게 dispatched 이벤트(commit=False → gate 트랜잭션 합류·
+    # gates.py commit 후 호출자가 wake/webhook 스케줄·새 event type 0·trigger_metadata만).
+    wake_payload = None
     if doc.created_by is not None:
-        from app.services.agent_dispatch import dispatch_payload_to_member
-        await dispatch_payload_to_member(
+        wake_payload = await _schedule_member_dispatch(
             session, sr.org_id, doc.created_by,
             title=doc.title or "doc", content=f"[doc confirmed] {doc.title or ''}".strip(),
             source_entity_type="doc", source_entity_id=doc.id, project_id=doc.project_id,
-            trigger_metadata={"source": "workflow_line", "reason": "doc_confirmed"}, commit=False,
+            trigger_metadata={"source": "workflow_line", "reason": "doc_confirmed"},
         )
     sr.status = "applied"
     sr.resolved_at = _now()
     await session.flush()
+    return wake_payload
 
 
 async def _apply_epic_transition(
     session: AsyncSession, sr: WorkflowLineStepRun, resolver_id: uuid.UUID | None
-) -> None:
+) -> dict[str, Any] | None:
     """S25: epic draft→active / active→done gate 승인 적용. native ``transition_epic``(via_gate) 재사용
     (parallel 0). ⭐SoD(draft→active activation 만): approver ≠ epic.assignee_id(owner proxy·fail-closed).
     ⚠️epic assignee 흔히 null→enforcing 시 과차단 — enforcing 전 SoD 대상 project owner 로 정교화 필요
@@ -190,17 +226,17 @@ async def _apply_epic_transition(
         sr.status = "approved"
         sr.resolved_at = _now()
         await session.flush()
-        return
+        return None
     if epic.status == sr.to_status:  # 멱등
         sr.status = "applied"
         sr.resolved_at = _now()
         await session.flush()
-        return
+        return None
     if sr.from_status is not None and epic.status != sr.from_status:  # stale
         sr.status = "skipped"
         sr.resolved_at = _now()
         await session.flush()
-        return
+        return None
     # ⭐SoD(RC#2): activation(draft→active)만·approver ≠ **project owner** 강제(self-activation 차단·
     # fail-closed). epic.assignee_id(흔히 null→과차단·line 180 주석) 대신 project_auth SSOT relay-owner
     # 사용(null-의존 제거·robust). [[feedback_relay_owner_project_auth_ssot]].
@@ -215,24 +251,26 @@ async def _apply_epic_transition(
                 "epic_activation_sod_block sr=%s approver=%s owner=%s",
                 sr.id, resolver_id, _sod_owner,
             )
-            return
+            return None
     approver = ResolvedMember(
         id=resolver_id, user_id=None, name="gate_approver", type="human", role="member",
         org_id=sr.org_id,
     )
     await transition_epic(session, sr.org_id, approver, epic.id, sr.to_status, via_gate=True)
-    # assignee 자동재개: epic assignee 에게 dispatched(commit=False·gate 트랜잭션 합류·§6 tx commit 0).
+    # assignee 자동재개(ccbcd9da): epic assignee 에게 dispatched(commit=False·gate 트랜잭션 합류·
+    # 호출자가 commit 후 wake/webhook 스케줄).
+    wake_payload = None
     if epic.assignee_id is not None:
-        from app.services.agent_dispatch import dispatch_payload_to_member
-        await dispatch_payload_to_member(
+        wake_payload = await _schedule_member_dispatch(
             session, sr.org_id, epic.assignee_id,
             title=epic.title or "epic", content=f"[epic {sr.to_status}] {epic.title or ''}".strip(),
             source_entity_type="epic", source_entity_id=epic.id, project_id=epic.project_id,
-            trigger_metadata={"source": "workflow_line", "reason": f"epic_{sr.to_status}"}, commit=False,
+            trigger_metadata={"source": "workflow_line", "reason": f"epic_{sr.to_status}"},
         )
     sr.status = "applied"
     sr.resolved_at = _now()
     await session.flush()
+    return wake_payload
 
 
 async def _apply_sprint_transition(
@@ -283,23 +321,26 @@ async def _apply_sprint_transition(
 async def apply_workflow_line_resolution(
     session: AsyncSession, step_run_id: uuid.UUID, new_status: str,
     resolver_id: uuid.UUID | None = None,
-) -> None:
+) -> dict[str, Any] | None:
     """gate 해소(approved|rejected)를 line step_run 정책대로 적용.
 
     approve + ``on_approve.apply_transition=true`` → story 를 step_run.to_status 로 전이(H1 과 동일
     ``emit_story_status_changed`` 경로). reject → Phase1 기본 in-review 유지(status set/relay 안 함).
     row lock + stale from_status 미적용(P1-1).
+
+    반환(ccbcd9da A-1): doc/epic 자동재개가 만든 wake/delivery 페이로드(``{agent_wake, delivery}``)
+    또는 None(dispatch 없음). 호출자(``transition_gate``)가 commit 후 wake/webhook 스케줄한다.
     """
     sr = (await session.execute(
         select(WorkflowLineStepRun).where(WorkflowLineStepRun.id == step_run_id).with_for_update()
     )).scalar_one_or_none()
     if sr is None:
-        return
+        return None
     # S21: story 외 엔티티는 readiness matrix gating_eligible 로 판정(현 story 만)·미지원은 로그+no-op.
     _desc = get_readiness(sr.entity_type)
     if _desc is None or not _desc.gating_eligible:
         record_unsupported_entity_attempt(sr.entity_type, sr.from_status, sr.to_status, sr.entity_id)
-        return
+        return None
     step = await _step_config(session, sr)
 
     if new_status == "rejected":
@@ -307,31 +348,29 @@ async def apply_workflow_line_resolution(
         sr.status = "rejected"
         sr.resolved_at = _now()
         await session.flush()
-        return
+        return None
 
     if new_status != "approved":
-        return
+        return None
 
     on_approve = step.get("on_approve") if isinstance(step.get("on_approve"), dict) else {}
     if not on_approve.get("apply_transition"):  # AC⑤: 명시 true 일 때만 status 변경.
         sr.status = "approved"
         sr.resolved_at = _now()
         await session.flush()
-        return
+        return None
 
     # S23/S22: hypothesis/doc 는 native FSM 재사용(transition_*·parallel 0). story 는 기존 inline.
     if sr.entity_type == "hypothesis":
         await _apply_hypothesis_active(session, sr, resolver_id)
-        return
+        return None
     if sr.entity_type == "doc":
-        await _apply_doc_confirmed(session, sr, resolver_id)
-        return
+        return await _apply_doc_confirmed(session, sr, resolver_id)
     if sr.entity_type == "epic":
-        await _apply_epic_transition(session, sr, resolver_id)
-        return
+        return await _apply_epic_transition(session, sr, resolver_id)
     if sr.entity_type == "sprint":
         await _apply_sprint_transition(session, sr, resolver_id)
-        return
+        return None
 
     from app.models.pm import Story  # 순환 회피 lazy import.
 
@@ -342,7 +381,7 @@ async def apply_workflow_line_resolution(
         sr.status = "approved"
         sr.resolved_at = _now()
         await session.flush()
-        return
+        return None
 
     # 이미 목표 status 면 멱등 applied(다른 경로로 도달했어도 결과 동일). 그 외 stale from_status
     # (story 가 제3 status 로 이동)면 미적용(P1-1). 순서: 멱등 우선 → stale.
@@ -350,12 +389,12 @@ async def apply_workflow_line_resolution(
         sr.status = "applied"
         sr.resolved_at = _now()
         await session.flush()
-        return
+        return None
     if sr.from_status is not None and story.status != sr.from_status:
         sr.status = "skipped"
         sr.resolved_at = _now()
         await session.flush()
-        return
+        return None
 
     old_status = story.status
     story.status = sr.to_status
