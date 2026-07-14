@@ -3578,6 +3578,9 @@
     "viewerCanvasHint": "드래그로 이동, 휠로 확대·축소합니다",
     "viewerCanvasHintTouch": "한 손가락으로 이동하고, 두 손가락으로 확대·축소합니다. 더블탭하면 화면에 맞춥니다.",
     "viewerFitAction": "전체 보기",
-    "viewerActualSizeAction": "실제 크기"
+    "viewerActualSizeAction": "실제 크기",
+    "responsivePreviewDesktop": "데스크톱",
+    "responsivePreviewTablet": "태블릿",
+    "responsivePreviewMobile": "모바일"
   }
 }

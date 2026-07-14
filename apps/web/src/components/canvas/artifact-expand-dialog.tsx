@@ -1,11 +1,14 @@
 'use client';
 
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 import { cn } from '@/lib/utils';
-import { ArtifactStage } from './artifact-stage';
+import { ArtifactStage, isResponsiveHtml, RESPONSIVE_PREVIEW_BREAKPOINTS, type ResponsivePreviewBreakpoint } from './artifact-stage';
 import { ArtifactGalleryTimeline, type GalleryTimelineVersion } from './artifact-gallery-timeline';
 import type { ArtifactFormat } from '@/services/canvas';
+
+type PreviewBreakpoint = ResponsivePreviewBreakpoint | 'desktop';
 
 interface ArtifactExpandDialogProps {
   open: boolean;
@@ -35,6 +38,19 @@ export function ArtifactExpandDialog({
   open, onOpenChange, title, format, content, canvasBounds, versions, selectedVersion, onSelectVersion,
 }: ArtifactExpandDialogProps) {
   const t = useTranslations('canvas');
+  // story 3d0d60a3 — 반응형 미리보기. @media 판정=html 포맷에서만(유나 1순위·값싼 소스 파싱,
+  // 신규 BE 0). 판정 실패(고정폭)면 셀렉터 자체를 렌더하지 않는다(disabled 아님·부재 — no-fiction).
+  const showBreakpointSelector = format === 'html' && isResponsiveHtml(content);
+  const [breakpoint, setBreakpoint] = useState<PreviewBreakpoint>('desktop');
+  // 다른 버전/아트팩트로 전환되면 이전 브레이크포인트 선택이 새 콘텐츠에 그대로 남아있을
+  // 이유가 없다 — 매번 데스크톱(=원본 canvas_bounds)으로 리셋. effect가 아니라 렌더 중 조정
+  // (React 공식 "prop 변경 시 state 리셋" 패턴) — set-state-in-effect lint 대상이 아니다.
+  const [prevContent, setPrevContent] = useState(content);
+  if (content !== prevContent) {
+    setPrevContent(content);
+    setBreakpoint('desktop');
+  }
+  const previewWidth = breakpoint === 'desktop' ? undefined : RESPONSIVE_PREVIEW_BREAKPOINTS[breakpoint];
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -58,6 +74,23 @@ export function ArtifactExpandDialog({
               {t('closeAction')}
             </DialogPrimitive.Close>
           </div>
+          {showBreakpointSelector ? (
+            <div className="flex shrink-0 items-center gap-0.5 border-b border-border px-4 py-2">
+              {(['desktop', 'tablet', 'mobile'] as const).map((bp) => (
+                <button
+                  key={bp}
+                  type="button"
+                  onClick={() => setBreakpoint(bp)}
+                  className={cn(
+                    'rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors',
+                    breakpoint === bp ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {t(`responsivePreview${bp[0]!.toUpperCase()}${bp.slice(1)}`)}
+                </button>
+              ))}
+            </div>
+          ) : null}
           {versions && versions.length > 1 ? (
             <ArtifactGalleryTimeline
               versions={versions}
@@ -67,7 +100,7 @@ export function ArtifactExpandDialog({
             />
           ) : null}
           <div className="min-h-0 flex-1 overflow-hidden p-4">
-            <ArtifactStage format={format} content={content} title={title} canvasBounds={canvasBounds} />
+            <ArtifactStage format={format} content={content} title={title} canvasBounds={canvasBounds} previewWidth={previewWidth} />
           </div>
         </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>

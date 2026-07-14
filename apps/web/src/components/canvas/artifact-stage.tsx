@@ -57,6 +57,22 @@ export interface ArtifactTreeNode {
   children?: ArtifactTreeNode[];
 }
 
+// story 3d0d60a3 — 반응형 미리보기 브레이크포인트 프리셋. 데스크톱은 canvas_bounds.w 그대로라
+// 별도 프리셋이 없다(override 부재=데스크톱).
+export const RESPONSIVE_PREVIEW_BREAKPOINTS = { mobile: 375, tablet: 768 } as const;
+export type ResponsivePreviewBreakpoint = keyof typeof RESPONSIVE_PREVIEW_BREAKPOINTS;
+
+/**
+ * story 3d0d60a3 — 반응형 판정(유나 1순위: 소스 @media 파싱). html_blob은 iframe에 srcDoc으로
+ * 주입되기 전 우리 손 안의 문자열이라 cross-origin과 무관하게 값싸게 검사 가능(신규 BE 0).
+ * `@media` 뒤에 `{`가 오는지까지 확인해 "@media"라는 글자가 우연히 텍스트/주석에 등장하는
+ * false-positive를 줄인다. @media 없는 유동(flex/grid %) 레이아웃은 false-negative로 보수적
+ * 미노출 — PO/유나 확定(no-fiction: 과대 판정보다 과소 판정이 안전).
+ */
+export function isResponsiveHtml(content: string): boolean {
+  return /@media[^{}]*\{/i.test(content);
+}
+
 /** content 문자열을 tree 노드 배열로 안전 파싱 — 형태가 아니면 null(크래시 대신 폴백 렌더). */
 export function parseArtifactTree(content: string): ArtifactTreeNode[] | null {
   try {
@@ -107,6 +123,15 @@ interface ArtifactStageProps {
    * 이 ref로 캡처하면 자동으로 제외된다 — canvas_bounds 고정 width/height라 pan/zoom
    * transform만 캡처 직전 순간 정규화하면(canvas-export.ts) 아트보드 전체 프레임이 나온다. */
   contentRef?: React.RefObject<HTMLDivElement | null>;
+  /** story 3d0d60a3 — 반응형 미리보기 브레이크포인트 폭 override(html 포맷 전용, 뷰어 모달
+   * 브레이크포인트 셀렉터에서만 넘어온다). 넘어오면 `bounds.w`를 이 값으로 교체해 pan/zoom
+   * 엔진(fit/clampPan) 전부가 그대로 이 폭 기준으로 재계산되고, 콘텐츠 레이어와 iframe 자기
+   * 자신의 width가 함께 바뀌어 실제 리플로우가 일어난다(래퍼 폭만 바꾸던 구 토글의 실패
+   * 원인 회피 — 그라운딩 결론 그대로). 높이는 canvas_bounds.h 유지(iframe이 sandbox=""라
+   * 리플로우 후 실제 콘텐츠 높이를 부모가 측정할 방법이 없음 — cross-origin 격리, 정직 단순화).
+   * 저작 시점 canvasBounds 자체는 건드리지 않는다(핀 좌표·썸네일 등 다른 소비처와 무관).
+   */
+  previewWidth?: number;
 }
 
 /**
@@ -115,10 +140,11 @@ interface ArtifactStageProps {
  * 안쪽만 다름). sandbox 무완화 유지(iframe은 여전히 `sandbox=""`) — pointer-events:none이라
  * 상호작용 레이어와 물리적으로 분리되므로 완화할 필요 자체가 없다.
  */
-function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 'view', contentRef }: {
+function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 'view', contentRef, previewWidth }: {
   format: ArtifactFormat; content: string; title: string;
   canvasBounds?: { w: number; h: number } | null; overlay?: React.ReactNode; mode?: 'view' | 'edit';
   contentRef?: React.RefObject<HTMLDivElement | null>;
+  previewWidth?: number;
 }) {
   const t = useTranslations('canvas');
   // story 70a06b22 — 어제(74d6047e) 만든 터치 핀치/더블탭이 힌트 카피에 반영 안 된 발견성 갭
@@ -141,7 +167,10 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
 
   // image=실측 우선(로드 후 자연 크기가 선언보다 정확) → 그 다음 선언된 canvas_bounds(§4,
   // BE #2135) → 마지막 포맷별 기본 아트보드(가짜 추정 아님·명시된 폴백 규약).
-  const bounds = format === 'image' && imageBounds ? imageBounds : (canvasBounds ?? DEFAULT_BOUNDS);
+  const authoredBounds = format === 'image' && imageBounds ? imageBounds : (canvasBounds ?? DEFAULT_BOUNDS);
+  // story 3d0d60a3 — previewWidth가 있으면 폭만 교체(높이는 저작 아트보드 그대로) — fit/pan/
+  // iframe 렌더 전부 이 하나의 bounds를 참조하므로 재계산 로직 추가 없이 재렌더가 성립한다.
+  const bounds = previewWidth != null ? { w: previewWidth, h: authoredBounds.h } : authoredBounds;
 
   useEffect(() => { setImageBounds(null); firedFitRef.current = false; }, [content]);
 
@@ -468,6 +497,6 @@ function TreeStageContent({ content, placeholder }: { content: string; placehold
  * allow-same-origin 둘 다 없음, 핸드오프 §3-1 + 유나 디자인 가디언 보안 지적 반영) 유지 —
  * pointer-events:none이 상호작용 레이어와 물리적으로 분리해 완화가 애초에 불필요.
  */
-export function ArtifactStage({ format, content, title, canvasBounds, overlay, mode, contentRef }: ArtifactStageProps) {
-  return <CanvasViewport format={format} content={content} title={title} canvasBounds={canvasBounds} overlay={overlay} mode={mode} contentRef={contentRef} />;
+export function ArtifactStage({ format, content, title, canvasBounds, overlay, mode, contentRef, previewWidth }: ArtifactStageProps) {
+  return <CanvasViewport format={format} content={content} title={title} canvasBounds={canvasBounds} overlay={overlay} mode={mode} contentRef={contentRef} previewWidth={previewWidth} />;
 }
