@@ -13,9 +13,13 @@ export class ApiStoryRepository implements IStoryRepository {
     return fastapiCall<Story[]>('GET', '/api/v2/stories', this.accessToken, {
       // RC1: cursor + limit 전달 (CB-S4 cursor 페이징)
       // story ca37b2b0: ids가 있으면 배치 lookup(BE #2131) — comma-separated로 그대로 전달.
+      // story 083176e8 — q(제목검색)가 이 query 객체에서 소실돼 있었다(까심 #2148 QA 적출).
+      // StoryListFilters엔 이미 q 필드가 있었고 BE #2149도 이미 title ILIKE를 지원하는데,
+      // 이 한 줄이 빠져 있어 검색이 전 구간(FE→BE) 중 정확히 여기서만 끊겨 장식이 됐다.
       query: {
         project_id: filters.project_id, epic_id: filters.epic_id, sprint_id: filters.sprint_id,
-        assignee_id: filters.assignee_id, status: filters.status, cursor: filters.cursor, limit: filters.limit,
+        assignee_id: filters.assignee_id, status: filters.status, q: filters.q,
+        cursor: filters.cursor, limit: filters.limit,
         ids: filters.ids?.join(','),
       },
     });
