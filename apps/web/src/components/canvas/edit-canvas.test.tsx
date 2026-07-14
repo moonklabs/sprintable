@@ -189,4 +189,23 @@ describe('EditCanvas — 스펙 핀 저작 왕복 (story 7fe16274, doc artifact-
     expect(document.body.querySelector('textarea')).toBeNull();
     expect(fetchMock.mock.calls.some((c) => c[1]?.method === 'POST')).toBe(false);
   });
+
+  it('shows the placement gesture hint only while the tool is armed and no popover is open (story 70a06b22)', async () => {
+    await mount();
+    expect(container.textContent).not.toContain('핀을 놓을 지점을 클릭합니다.');
+
+    const toolButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '스펙 핀 추가')!;
+    await act(async () => { toolButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.textContent).toContain('핀을 놓을 지점을 클릭합니다.');
+
+    // 배치 캐처와 동일 조건 — 팝오버가 열리면(draftPin 존재) 힌트도 함께 사라진다.
+    const catcher = container.querySelector('[data-pin-placement-catcher]') as HTMLDivElement;
+    await act(async () => { catcher.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 })); });
+    expect(container.textContent).not.toContain('핀을 놓을 지점을 클릭합니다.');
+
+    // ESC로 draft 폐기하면 sticky 도구가 여전히 활성이라 힌트가 재노출된다.
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    await act(async () => { await Promise.resolve(); });
+    expect(container.textContent).toContain('핀을 놓을 지점을 클릭합니다.');
+  });
 });

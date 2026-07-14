@@ -6,7 +6,7 @@ import { Frame } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
-  adaptArtifactDetail, createArtifact, getArtifactVersionDetail,
+  adaptArtifactDetail, getArtifactVersionDetail,
   type ArtifactFormat, type BeVisualArtifactSummary, type BeArtifactVersionSummary,
 } from '@/services/canvas';
 import {
@@ -16,8 +16,6 @@ import {
 import { type GalleryTimelineVersion } from './artifact-gallery-timeline';
 import { ArtifactThumbnail } from './artifact-thumbnail';
 import { ArtifactExpandDialog } from './artifact-expand-dialog';
-import { ArtifactEditor } from './artifact-editor';
-import { StoryPickerDialog } from './story-picker-dialog';
 
 async function fetchJson<T>(url: string): Promise<T | null> {
   try {
@@ -143,12 +141,6 @@ export function ArtifactGalleryView() {
     artifactId: string; format: ArtifactFormat; content: string; title: string;
     canvasBounds?: { w: number; h: number } | null; versionNumber: number; versions: GalleryTimelineVersion[];
   } | null>(null);
-  /** story 70a06b22 — 빈상태 CTA 귀속. 갤러리는 프로젝트 전역이라 story/epic/doc 앵커가 없어
-   * (BE에 생성 후 재배선 엔드포인트도 없음, 그라운딩+PO 확定) 생성 전 스토리를 먼저 골라야 한다.
-   * 피커에서 고른 storyId로 기존 ArtifactEditor 생성 플로우(ArtifactSection.handleCreateCommit과
-   * 동일 패턴)를 그대로 재사용 — createArtifact(storyId,...) 시그니처 무변경. */
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [creatingStoryId, setCreatingStoryId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -199,23 +191,6 @@ export function ArtifactGalleryView() {
       artifactId, format: artifact.format, content, title,
       canvasBounds: versions[0]?.canvasBounds, versionNumber, versions: mappedVersions,
     });
-  }
-
-  /** story 70a06b22 — ArtifactSection.handleCreateCommit과 동일 규율: 실패는 silent 금지(로깅+
-   * 생성 모드 유지, 재시도 가능), 성공 시 갤러리 데이터를 다시 받아 새 산출물이 즉시 보이게 한다. */
-  async function handleCreateCommit(storyId: string, nodes: Parameters<typeof createArtifact>[2], summary: string) {
-    const detail = await createArtifact(storyId, t('untitledArtifact'), nodes, summary || undefined);
-    if (!detail) {
-      console.error('[canvas-gallery-create] artifact create commit failed', storyId);
-      return;
-    }
-    setCreatingStoryId(null);
-    if (!projectId) return;
-    setLoading(true);
-    const result = await fetchGalleryData(projectId);
-    setArtifacts(result.artifacts);
-    setLookups(result.lookups);
-    setLoading(false);
   }
 
   const axisLabel = (a: GalleryAxis) => t(`galleryAxis${a[0]!.toUpperCase()}${a.slice(1)}`);
@@ -277,14 +252,7 @@ export function ArtifactGalleryView() {
         <p className="mt-0.5 text-xs text-muted-foreground">{t('gallerySubtitle')}</p>
       </div>
 
-      {creatingStoryId ? (
-        <ArtifactEditor
-          title={t('untitledArtifact')}
-          initialNodes={[]}
-          onCommit={(committed, summary) => void handleCreateCommit(creatingStoryId, committed, summary)}
-          onDone={() => setCreatingStoryId(null)}
-        />
-      ) : loading ? (
+      {loading ? (
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[200px_1fr]">
           <GroupListSkeleton />
           <div className="h-40 animate-pulse rounded-xl bg-muted/40" />
@@ -293,14 +261,7 @@ export function ArtifactGalleryView() {
         <div className="flex flex-col items-center gap-2 rounded-xl border border-border bg-card px-6 py-12 text-center">
           <Frame className="size-6 text-muted-foreground/60" aria-hidden="true" />
           <p className="text-sm font-medium text-foreground">{t('galleryEmptyTitle')}</p>
-          <p className="max-w-sm text-xs text-muted-foreground">{t('emptyHint')}</p>
-          <button
-            type="button"
-            onClick={() => setPickerOpen(true)}
-            className="mt-1 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            {t('createCta')}
-          </button>
+          <p className="max-w-sm text-xs text-muted-foreground">{t('galleryEmptyHint')}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[200px_1fr]">
@@ -352,14 +313,6 @@ export function ArtifactGalleryView() {
           versions={expandTarget.versions}
           selectedVersion={expandTarget.versionNumber}
           onSelectVersion={(versionNumber) => void handleOpenArtifact(expandTarget.artifactId, versionNumber, expandTarget.title)}
-        />
-      ) : null}
-      {projectId ? (
-        <StoryPickerDialog
-          open={pickerOpen}
-          onOpenChange={setPickerOpen}
-          projectId={projectId}
-          onSelect={(storyId) => { setPickerOpen(false); setCreatingStoryId(storyId); }}
         />
       ) : null}
     </div>

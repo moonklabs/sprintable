@@ -453,4 +453,30 @@ describe('ArtifactStage — 캔버스 뷰포트(story 1948d19d)', () => {
       expect(viewport.className).toContain('touch-none');
     });
   });
+
+  describe('발견성 힌트(story 70a06b22) — pointer:coarse 판정에 따라 힌트 카피가 갈린다', () => {
+    let matchMediaSpy: ReturnType<typeof vi.fn>;
+
+    function stubMatchMedia(matches: boolean) {
+      matchMediaSpy = vi.fn().mockReturnValue({ matches } as MediaQueryList);
+      vi.stubGlobal('matchMedia', matchMediaSpy);
+    }
+
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it('shows the mouse hint when the device is not pointer:coarse (기존 회귀 0)', async () => {
+      stubMatchMedia(false);
+      await mount();
+      expect(container.textContent).toContain('드래그로 이동, 휠로 확대·축소합니다');
+      expect(container.textContent).not.toContain('한 손가락으로 이동');
+      expect(matchMediaSpy).toHaveBeenCalledWith('(pointer: coarse)');
+    });
+
+    it('shows the touch hint when the device matches pointer:coarse (#2143에서 누락됐던 갭 봉합)', async () => {
+      stubMatchMedia(true);
+      await mount();
+      expect(container.textContent).toContain('한 손가락으로 이동하고, 두 손가락으로 확대·축소합니다. 더블탭하면 화면에 맞춥니다.');
+      expect(container.textContent).not.toContain('드래그로 이동, 휠로 확대·축소합니다');
+    });
+  });
 });
