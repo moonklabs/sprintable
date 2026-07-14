@@ -1,8 +1,9 @@
 """에이전트 발견성 3층 fix(story 037a8aa8·78f07614 그라운딩 후속·PO 판정) 실증.
 
 ①툴셋: ui-designer/design-system role_templates에 canvas 그룹 부여(migration 0182).
-③MCP description: canvas 11종에 "언제 쓰는지" ⭐트리거 1줄 추가 — 기계적 서술은 그대로 유지.
-②(role_behaviors 문구)는 유나+PO 문구 확定 후 별도 커밋으로 합류 예정 — 이 스토리 스코프 밖."""
+②role_behaviors: ui-designer/design-system/frontend에 "캔버스 저작" 섹션(유나+PO 확定 verbatim
+문구) 추가 + ui-designer 구 "목업" 문장 정밀화(migration 0183).
+③MCP description: canvas 11종에 "언제 쓰는지" ⭐트리거 1줄 추가 — 기계적 서술은 그대로 유지."""
 from __future__ import annotations
 
 import os
@@ -106,3 +107,88 @@ def test_create_artifact_trigger_mentions_ui_design_visual_deliverable():
 
     desc = mcp._tool_manager._tools["sprintable_create_artifact"].description
     assert "UI" in desc or "디자인" in desc or "시각 산출물" in desc
+
+
+# ── ② role_behaviors "캔버스 저작" 섹션(realdb) ────────────────────────────
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+@pytest.mark.anyio
+async def test_ui_designer_design_system_frontend_have_canvas_authoring_section():
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy import select
+
+    from app.models.role_template import RoleTemplate
+
+    url = _REAL_DB_URL
+    for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
+        if url.startswith(prefix):
+            url = "postgresql+asyncpg://" + url[len(prefix):]
+            break
+    engine = create_async_engine(url)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            rows = (await s.execute(
+                select(RoleTemplate).where(RoleTemplate.slug.in_(("ui-designer", "design-system", "frontend")))
+            )).scalars().all()
+            by_slug = {r.slug: r for r in rows}
+            for slug in ("ui-designer", "design-system", "frontend"):
+                behaviors = by_slug[slug].role_behaviors
+                assert "## 캔버스 저작" in behaviors, f"{slug}에 캔버스 저작 섹션 없음"
+                assert "create_artifact" in behaviors
+                assert "edit_artifact" in behaviors
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+@pytest.mark.anyio
+async def test_ui_designer_old_mockup_sentence_refined():
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy import select
+
+    from app.models.role_template import RoleTemplate
+
+    url = _REAL_DB_URL
+    for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
+        if url.startswith(prefix):
+            url = "postgresql+asyncpg://" + url[len(prefix):]
+            break
+    engine = create_async_engine(url)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            row = (await s.execute(
+                select(RoleTemplate).where(RoleTemplate.slug == "ui-designer")
+            )).scalar_one()
+            behaviors = row.role_behaviors
+            assert "목업만으론 충분하지 않습니다" not in behaviors, "구 문장이 아직 남아있음"
+            assert "done-gate는 배포 후 라이브 렌더·실사용 확인입니다" in behaviors
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+@pytest.mark.anyio
+async def test_other_roles_unaffected_by_behavior_migration():
+    """무회귀: canvas 저작 섹션은 대상 3역할에만 추가되고 다른 role_template은 그대로."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy import select
+
+    from app.models.role_template import RoleTemplate
+
+    url = _REAL_DB_URL
+    for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
+        if url.startswith(prefix):
+            url = "postgresql+asyncpg://" + url[len(prefix):]
+            break
+    engine = create_async_engine(url)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            row = (await s.execute(
+                select(RoleTemplate).where(RoleTemplate.slug == "backend")
+            )).scalar_one()
+            assert "## 캔버스 저작" not in row.role_behaviors
+    finally:
+        await engine.dispose()
