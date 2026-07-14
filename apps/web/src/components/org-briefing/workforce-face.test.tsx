@@ -63,15 +63,15 @@ describe('WorkforceFace', () => {
     await mount();
     const html = container.innerHTML;
     expect(html).toContain('E-CANVAS');
-    expect(html).toContain('인간 검증 완');
-    expect(html).toContain('함께 짓는 중');
+    expect(html).toContain('사람이 확인함');
+    expect(html).toContain('함께 일하는 중');
   });
 
   it('renders a claimed seal (not verified) when self-reported but not yet human-verified', async () => {
     stubFetch(OVERVIEW, { e1: { data: [{ assignee_ids: ['m1'], self_reported: true, human_verified: false }] } }, MEMBERS);
     await mount();
-    expect(container.innerHTML).toContain('에이전트 주장 · 검토 대기');
-    expect(container.innerHTML).not.toContain('인간 검증 완');
+    expect(container.innerHTML).toContain('에이전트 완료 · 검토 대기');
+    expect(container.innerHTML).not.toContain('사람이 확인함');
   });
 
   it('renders the neutral "아직 배정 전입니다" row instead of hiding the epic when it has no assignees', async () => {
@@ -94,8 +94,8 @@ describe('WorkforceFace', () => {
     // positive — 협업 아바타(참여자 이니셜 툴팁)와 신뢰 씰이 실제로 이 DOM에 렌더됐다.
     expect(html).toContain('title="Yuna"');
     expect(html).toContain('title="Miruko"');
-    expect(html).toContain('함께 짓는 중');
-    expect(html).toContain('인간 검증 완');
+    expect(html).toContain('함께 일하는 중');
+    expect(html).toContain('사람이 확인함');
 
     // negative — 위 실렌더 상태에서도 개수/순위/경과시간 낙인 문구는 전혀 없다.
     expect(html).not.toMatch(/\d+\s*명/);

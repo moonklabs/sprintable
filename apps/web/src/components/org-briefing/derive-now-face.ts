@@ -143,12 +143,11 @@ export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNoti
 
   for (const q of raw.queue) {
     if (q.type === 'gate_approval') {
-      const kind = ctxStr(q.context, 'kind');
       items.push({
         id: `gate_approval-${ctxStr(q.context, 'gate_id') ?? ctxStr(q.context, 'approval_group_id') ?? items.length}`,
         kind: 'decide', kindLabel: t('kindDecide'),
         title: t('decideGateTitle'),
-        context: kind ? t('decideGateContextKind', { kind }) : t('decideGateContext'),
+        context: t('decideGateContext'),
         actionLabel: t('actionApprove'), actionTone: 'ghost',
         href: '/inbox?tab=gates',
         priority: PRIORITY_RANK[q.priority ?? 'info'] ?? 2,
@@ -184,7 +183,9 @@ export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNoti
         id: `agent_stuck-${a.entity_id ?? items.length}`,
         kind: 'signal', kindLabel: t('kindSignal'),
         title: t('signalAgentStuckTitle'),
-        context: t('signalAgentStuckContext', { gate: a.gate_type ?? t('gateGeneric') }),
+        // a.gate_type는 BE 내부 워크플로우 슬러그(예: merge/loop_decision) — 번역 사전이 없어 그대로
+        // 노출하면 원시 enum 유출이 된다(카피 스윕 §3-4). 고정 문구만 쓴다(no-fiction).
+        context: t('signalAgentStuckContext'),
         actionLabel: t('actionOpen'), actionTone: 'ghost',
         href: a.entity_type === 'story' && a.entity_id ? `/board?story=${a.entity_id}` : '/inbox?tab=gates',
         priority: 20,

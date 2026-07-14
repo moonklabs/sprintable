@@ -66,7 +66,7 @@ describe('LoopFace', () => {
     expect(html).toContain('검증 중');
     expect(html).toContain('달성');
     expect(html).toContain('배움');
-    expect(html).toContain('다음 루프');
+    expect(html).toContain('다음 실험');
     expect(html).toContain('E-CANVAS');
   });
 
@@ -92,7 +92,7 @@ describe('LoopFace', () => {
       { data: { project_status: { epics: [] } } },
     );
     await mount();
-    expect(container.innerHTML).toContain('지금 검증 중인 가설이 없습니다');
+    expect(container.innerHTML).toContain('검증 중인 가설이 없습니다');
     expect(container.innerHTML).not.toContain('중단된 가설');
   });
 });

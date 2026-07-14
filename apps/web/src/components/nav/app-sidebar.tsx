@@ -10,6 +10,7 @@ import {
   CalendarRange,
   CircleHelp,
   ClipboardList,
+  FlaskConical,
   FolderKanban,
   GalleryVerticalEnd,
   Gauge,
@@ -20,7 +21,6 @@ import {
   Map,
   MessageSquare,
   Newspaper,
-  Repeat,
   Search,
   Settings,
   Users,
@@ -266,7 +266,7 @@ export function AppSidebar({
                   isActive={isActive('/loops')}
                   tooltip={t('loops')}
                 >
-                  <Repeat />
+                  <FlaskConical />
                   <span>{t('loops')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>

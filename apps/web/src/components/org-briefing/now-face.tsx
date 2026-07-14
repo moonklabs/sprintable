@@ -85,7 +85,6 @@ export function NowFace() {
     <section aria-label={t('nowTitle')}>
       <div className="mb-2.5 flex items-baseline gap-2.5">
         <h2 className="text-sm font-semibold text-foreground">{t('nowTitle')}</h2>
-        <span className="text-[11px] text-muted-foreground">{t('nowSubject')}</span>
         {items && items.length > 0 ? (
           <span className="ml-auto text-[11px] text-muted-foreground">{t('nowNote', { count: items.length })}</span>
         ) : null}
@@ -97,7 +96,6 @@ export function NowFace() {
           <div className="flex flex-col items-center gap-1.5 px-5 py-10 text-center">
             <CheckCircle2 className="size-5 text-success/70" aria-hidden="true" />
             <p className="text-sm font-medium text-foreground">{t('nowEmptyTitle')}</p>
-            <p className="text-xs text-muted-foreground">{t('nowEmptyBody')}</p>
           </div>
         ) : (
           <>
