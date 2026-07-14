@@ -3523,6 +3523,7 @@
     "propertyDeleteAction": "Delete",
     "specPinToolAction": "Add spec pin",
     "specPinToolUnavailableForNewArtifact": "Available once a version is saved",
+    "specPinPlacementHint": "Click where you want to place the pin.",
     "specPinPopoverTitle": "Spec pin",
     "specPinDescriptionPlaceholder": "Describe the spec for this point…",
     "specPinSaveAction": "Save",
@@ -3565,7 +3566,10 @@
     "galleryFeatureAxisUnsupported": "Grouping by feature isn't supported yet.",
     "galleryUnassignedGroup": "Unassigned",
     "galleryEmptyTitle": "No artifacts have been collected yet.",
-    "galleryEmptyHint": "Artifacts will show up here once they're created.",
+    "storyPickerTitle": "Choose a story",
+    "storyPickerSearchPlaceholder": "Search stories",
+    "storyPickerLoading": "Loading",
+    "storyPickerEmpty": "No matching stories",
     "galleryGroupEmpty": "This group doesn't have any artifacts yet.",
     "galleryAnchorPill": "Anchor v{version}",
     "galleryLatestChip": "Up to v{version}",
@@ -3575,6 +3579,7 @@
     "galleryFormatTree": "Layout",
     "galleryOpenArtifactAction": "Open artifact",
     "viewerCanvasHint": "Drag to move, scroll to zoom",
+    "viewerCanvasHintTouch": "Move with one finger, zoom with two. Double-tap to fit.",
     "viewerFitAction": "Fit to view",
     "viewerActualSizeAction": "Actual size"
   }
