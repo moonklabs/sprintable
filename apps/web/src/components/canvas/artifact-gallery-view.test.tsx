@@ -136,6 +136,28 @@ describe('ArtifactGalleryView (story a15cea4f)', () => {
     expect(container.textContent).toContain('정본 v3');
   });
 
+  it('story 6d0a0e3a — GROUP BY(axis segment + group list) is integrated into the same left rail container, not split into a header-top tab row (목업 0d852d24 배치 SSOT)', async () => {
+    await mount();
+    // 둘 다 같은 좌 레일 컨테이너 안에 있다(desktop lg:block 사본 기준) — 서로 다른 컨테이너로
+    // 쪼개져 있던 #2124 이래의 배치 오류(우측 상단 탭)가 아니다.
+    const desktopRail = container.querySelector('.hidden.h-fit.lg\\:block');
+    expect(desktopRail).not.toBeNull();
+    const epicBtn = [...(desktopRail?.querySelectorAll('button') ?? [])].find((b) => b.textContent === '에픽');
+    const groupBtn = [...(desktopRail?.querySelectorAll('button') ?? [])].find((b) => b.textContent?.includes('온보딩 캠페인'));
+    expect(epicBtn).toBeDefined();
+    expect(groupBtn).toBeDefined();
+  });
+
+  it('story 6d0a0e3a — provides a native collapsible top selector for narrow viewports (details/summary), in addition to the always-visible desktop rail', async () => {
+    await mount();
+    const details = container.querySelector('details.lg\\:hidden');
+    expect(details).not.toBeNull();
+    expect(details?.querySelector('summary')).not.toBeNull();
+    // 접이식 셀렉터 안에도 동일한 축 세그먼트+그룹 목록이 있다(데스크톱 사본과 동일 내용).
+    const collapsibleEpicBtn = [...(details?.querySelectorAll('button') ?? [])].find((b) => b.textContent === '에픽');
+    expect(collapsibleEpicBtn).toBeDefined();
+  });
+
   it('story 39313b40 — renders artifacts as a responsive multi-column card grid, not a row list (doc §3, no row/grid toggle in v1)', async () => {
     await mount();
     const grid = container.querySelector('.grid.grid-cols-\\[repeat\\(auto-fill\\,minmax\\(220px\\,1fr\\)\\)\\]');
