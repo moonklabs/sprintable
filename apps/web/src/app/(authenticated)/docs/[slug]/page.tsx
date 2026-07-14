@@ -8,6 +8,7 @@ import { DocGateSection } from '@/components/docs/doc-gate-section';
 import { DocUrlChip } from '@/components/docs/doc-url-chip';
 import { DocUrlDialog, type SlugSubmitResult } from '@/components/docs/doc-url-dialog';
 import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug';
+import { docsListUrl } from '@/components/docs/lib/doc-project-url';
 import { useDocSync, unwrapDocResponse, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
@@ -185,13 +186,19 @@ export default function DocSlugPage() {
       // re-seeds the editor with an outdated baseline and can re-trigger an overwrite.
       const res = await fetch(`/api/docs?project_id=${projectId}&slug=${slug}`, { cache: 'no-store' });
       if (!res.ok) {
-        setSelectedDoc(null);
+        // prod P0(2026-07-14) — 이전엔 setSelectedDoc(null)만 하고 끝나 이 슬러그가 현재
+        // project_id에 없는(삭제됐든, project 전환 레이스로 어긋났든) 모든 경우가 회복 경로
+        // 없는 "문서를 찾을 수 없습니다" 정적 화면에 영구 고립됐다 — 새로고침도 같은
+        // project_id+slug 조합을 그대로 재질의할 뿐이라 무효(라이브 재현 완료). 이 slug가
+        // 지금 projectId엔 없다는 사실은 원인이 뭐든 동일하므로, 살아있는 목록으로 되돌려
+        // 회복 경로를 준다(진짜 없는 문서를 억지로 보여주지 않으면서도 dead-end는 피한다).
+        router.replace(docsListUrl(projectId));
         return;
       }
       const json = await res.json();
       const data = json?.data ?? null;
       if (!data) {
-        setSelectedDoc(null);
+        router.replace(docsListUrl(projectId));
         return;
       }
       setSelectedDoc(data);
