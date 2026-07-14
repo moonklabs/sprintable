@@ -23,6 +23,20 @@ class StoryRepository(BaseRepository[Story]):
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         super().__init__(Story, session, org_id)
 
+    async def list(self, limit: int = 1000, *, q: str | None = None, **filters) -> list[Story]:
+        """story 083176e8(까심 #2148 QA 적출): 갤러리 피커 실검색 — `q`는 title ILIKE 부분일치로
+        기존 동등비교 필터(**filters, base.list() 상속)와 AND 결합. BaseRepository.list()는
+        범용(모든 리포지토리 공유)이라 q ILIKE 개념을 거기 얹지 않고 story 전용으로 오버라이드
+        (list_board/list_by_ids와 동일하게 자체 쿼리 구성 — 기존 관례).
+        """
+        query = select(Story).where(self._org_filter(), Story.deleted_at.is_(None))
+        for attr, val in filters.items():
+            query = query.where(getattr(Story, attr) == val)
+        if q:
+            query = query.where(Story.title.ilike(f"%{q}%"))
+        result = await self.session.execute(query.limit(limit))
+        return list(result.scalars().all())
+
     async def list_by_ids(self, ids: list[uuid.UUID]) -> list[Story]:
         """배치 앵커 조회(story ca37b2b0 ② — 갤러리 등 정확한 story 집합 필요 소비자용).
 
