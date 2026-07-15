@@ -748,34 +748,42 @@ async def refresh_token(
     try:
         payload = decode_jwt(body.refresh_token)
     except JWTError:
+        logger.warning("auth.refresh 실패 reason=invalid_jwt")
         return _err("INVALID_TOKEN", "Invalid refresh token", 401)
 
     if payload.get("type") != "refresh":
+        logger.warning("auth.refresh 실패 reason=not_refresh_type sub=%s", payload.get("sub"))
         return _err("INVALID_TOKEN", "Not a refresh token", 401)
 
     token_hash = hash_token(body.refresh_token)
-    result = await session.execute(
-        select(RefreshToken).where(
+    correlation_key = token_hash[:12]  # story e5225c0a: 산티아고 관측성 요구 — 로그 상관키(PII 아님)
+
+    # ⚠️story e5225c0a(P0): switch_account(위)와 동형의 원자 rotation. 기존 SELECT→별도 UPDATE는
+    # 비원자라 Cloud Run 멀티 인스턴스 간 동시 refresh가 둘 다 "아직 안 revoke"로 통과하는 race의
+    # 근본 원인이었다(산티아고 prod 로그 실측: /auth/refresh 239건 중 230건 401). 검증+revoke를
+    # 단일 UPDATE...WHERE revoked_at IS NULL...RETURNING으로 묶어 동시 요청 중 정확히 1건만 매치.
+    revoked_user_id = (await session.execute(
+        update(RefreshToken)
+        .where(
             RefreshToken.token_hash == token_hash,
             RefreshToken.revoked_at.is_(None),
             RefreshToken.expires_at > datetime.now(timezone.utc),
         )
-    )
-    stored = result.scalar_one_or_none()
-    if not stored:
+        .values(revoked_at=datetime.now(timezone.utc))
+        .returning(RefreshToken.user_id)
+    )).scalar_one_or_none()
+    if revoked_user_id is None:
+        logger.warning(
+            "auth.refresh 실패 reason=token_not_found_or_revoked_or_expired key=%s", correlation_key,
+        )
         return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
 
-    user_id = uuid.UUID(payload["sub"])
-    user = await _get_user_by_id(session, user_id)
+    user = await _get_user_by_id(session, revoked_user_id)
     if not user:
+        logger.warning(
+            "auth.refresh 실패 reason=user_not_found key=%s user_id=%s", correlation_key, revoked_user_id,
+        )
         return _err("USER_NOT_FOUND", "User not found", 401)
-
-    # 기존 토큰 무효화 (rotation)
-    await session.execute(
-        update(RefreshToken)
-        .where(RefreshToken.token_hash == token_hash)
-        .values(revoked_at=datetime.now(timezone.utc))
-    )
 
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:

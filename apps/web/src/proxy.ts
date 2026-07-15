@@ -194,6 +194,16 @@ function applyTokenCookies(
   response.cookies.set(SP_RT_COOKIE, refreshToken, { ...base, maxAge: 30 * 24 * 60 * 60 });
 }
 
+// story e5225c0a(P0): refresh 최종 실패(BE 가 401 반환·rotation 실패) 시 sp_at/sp_rt 를 지운다.
+// 안 지우면 30일 sp_rt 쿠키가 매 요청마다 실패한 refresh 를 재시도해 401 무한 재생산(산티아고
+// prod 로그 실측: /auth/refresh 239건 중 230건 401). RC2(refreshMatchesActive=false, 다른/
+// superseded 계정의 late refresh 억제)와는 다른 경우 — 그건 refresh 자체는 성공했으므로
+// 쿠키를 유지해야 한다(clearAuthCookies 를 이 경우엔 호출하지 않음).
+function clearAuthCookies(response: NextResponse): void {
+  response.cookies.delete(SP_AT_COOKIE);
+  response.cookies.delete(SP_RT_COOKIE);
+}
+
 /** Rebuild request headers with updated sp_at/sp_rt so route handlers see fresh tokens */
 function buildRefreshedHeaders(
   request: NextRequest,
@@ -218,6 +228,16 @@ function loginRedirect(request: NextRequest): NextResponse {
   url.searchParams.set('next', nextTarget); // searchParams.set 이 encode
   url.searchParams.set('reason', SESSION_EXPIRED_REASON);
   return NextResponse.redirect(url);
+}
+
+// story e5225c0a(P0): refresh 시도 후 세션을 못 살렸을 때의 공통 응답. `refreshFailed`=true
+// (singleFlightRefresh 자체가 null — BE 401/rotation 실패)일 때만 clearAuthCookies 호출.
+// refreshMatchesActive=false(RC2, superseded 계정의 늦은 refresh)는 refresh 자체는 성공이므로
+// 쿠키를 그대로 둔다 — 두 실패 사유를 여기서 한 번만 구분해 양쪽 호출부의 분기를 통일한다.
+function handleUnauthenticated(request: NextRequest, isApiPath: boolean, refreshFailed: boolean): NextResponse {
+  const response = isApiPath ? NextResponse.next({ request }) : loginRedirect(request);
+  if (refreshFailed) clearAuthCookies(response);
+  return response;
 }
 
 export async function proxy(request: NextRequest) {
@@ -247,10 +267,10 @@ export async function proxy(request: NextRequest) {
 
   if (!accessToken) {
     const tokens = await singleFlightRefresh(request);
-    // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지.
-    if (!tokens || !(await refreshMatchesActive(request, tokens.accessToken))) {
-      if (isApiPath) return NextResponse.next({ request }); // let handler return 401
-      return loginRedirect(request);
+    if (!tokens) return handleUnauthenticated(request, isApiPath, true);
+    // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
+    if (!(await refreshMatchesActive(request, tokens.accessToken))) {
+      return handleUnauthenticated(request, isApiPath, false);
     }
     const headers = buildRefreshedHeaders(request, tokens);
     const response = NextResponse.next({ request: { headers } });
@@ -263,10 +283,10 @@ export async function proxy(request: NextRequest) {
   if (!claims) {
     // access token invalid/expired — try refresh
     const tokens = await singleFlightRefresh(request);
-    // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지.
-    if (!tokens || !(await refreshMatchesActive(request, tokens.accessToken))) {
-      if (isApiPath) return NextResponse.next({ request }); // let handler return 401
-      return loginRedirect(request);
+    if (!tokens) return handleUnauthenticated(request, isApiPath, true);
+    // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
+    if (!(await refreshMatchesActive(request, tokens.accessToken))) {
+      return handleUnauthenticated(request, isApiPath, false);
     }
     const headers = buildRefreshedHeaders(request, tokens);
     const response = NextResponse.next({ request: { headers } });
