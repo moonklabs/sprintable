@@ -8,6 +8,8 @@ import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { loginWithPassword } from '@/lib/db/client';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { safeNextPath, SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
+import { FIREBASE_AUTH_ENABLED } from '@/lib/auth/firebase-client';
+import { signInAndExchangeFirebaseSession } from '@/lib/auth/firebase-login-flow';
 
 export default function LoginPage() {
   const t = useTranslations('login');
@@ -32,6 +34,27 @@ export default function LoginPage() {
     errorCode ? (oauthErrors[errorCode] ?? t('loginFailed')) : null
   );
   const [loading, setLoading] = useState(false);
+  const [firebaseLoading, setFirebaseLoading] = useState(false);
+
+  // story a0118204: 스캐폴드 — NEXT_PUBLIC_FIREBASE_AUTH_ENABLED가 꺼져있으면(기본) 버튼 자체가
+  // 안 보이니 호출 불가. 켜져 있어도 서버 플래그(FIREBASE_AUTH_ISSUE_SESSION)가 꺼져있으면
+  // BFF가 501을 반환 — 클라 플래그는 UX 노출 게이트일 뿐 실 발급 권위가 아니다.
+  const handleFirebaseLogin = async () => {
+    if (!email.trim() || !password.trim()) return;
+    setFirebaseLoading(true);
+    setError(null);
+    try {
+      const result = await signInAndExchangeFirebaseSession(email.trim(), password);
+      if (result.error) {
+        setError(result.error.message);
+        return;
+      }
+      router.push(safeNextPath(nextParam));
+      router.refresh();
+    } finally {
+      setFirebaseLoading(false);
+    }
+  };
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) return;
@@ -119,6 +142,15 @@ export default function LoginPage() {
           >
             {loading ? t('signingIn') : t('signIn')}
           </button>
+          {FIREBASE_AUTH_ENABLED && (
+            <button
+              onClick={handleFirebaseLogin}
+              disabled={firebaseLoading || !email.trim() || !password.trim()}
+              className="flex w-full min-h-[44px] items-center justify-center rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground/80 transition hover:bg-muted/50 disabled:opacity-50"
+            >
+              {firebaseLoading ? t('signingIn') : t('firebaseSignIn')}
+            </button>
+          )}
         </div>
 
         {process.env.NEXT_PUBLIC_OAUTH_ENABLED === 'true' && (

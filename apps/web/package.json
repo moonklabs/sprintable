@@ -47,6 +47,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dompurify": "^3.3.3",
+    "firebase": "^11.6.0",
     "framer-motion": "^12.38.0",
     "html2canvas-pro": "^2.2.3",
     "jose": "^6.2.3",

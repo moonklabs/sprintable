@@ -470,6 +470,7 @@
     "password": "Password",
     "signIn": "Sign in",
     "signingIn": "Signing in...",
+    "firebaseSignIn": "Sign in with Firebase",
     "totpPlaceholder": "6-digit authenticator code",
     "totpRequired": "Enter the 6-digit code from your authenticator app.",
     "loginFailed": "Login failed. Please try again.",
