@@ -13,6 +13,7 @@ import {
   DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { useEpicsRoute } from '../epics-context';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
@@ -205,6 +206,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
 export default function EpicDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { wsSlug, projSlug } = useEpicsRoute();
   const { toasts, addToast, dismissToast } = useToast();
   const [epic, setEpic] = useState<Epic | null>(null);
   const [loading, setLoading] = useState(true);
@@ -223,14 +225,14 @@ export default function EpicDetailPage() {
         addToast({ type: 'error', title: json?.error?.message ?? '에픽 삭제에 실패했습니다.' });
         return;
       }
-      router.replace('/epics');
+      router.replace(`/${wsSlug}/${projSlug}/epics`);
     } catch {
       addToast({ type: 'error', title: '에픽 삭제에 실패했습니다.' });
     } finally {
       setDeleting(false);
       setShowDeleteConfirm(false);
     }
-  }, [epic, router, addToast]);
+  }, [epic, router, addToast, wsSlug, projSlug]);
 
   useEffect(() => {
     fetch(`/api/epics/${id}`)
@@ -240,9 +242,9 @@ export default function EpicDetailPage() {
         setEpic(data);
         setEpicAssigneeId(data.assignee_id ?? null);
       })
-      .catch(() => router.replace('/epics'))
+      .catch(() => router.replace(`/${wsSlug}/${projSlug}/epics`))
       .finally(() => setLoading(false));
-  }, [id, router]);
+  }, [id, router, wsSlug, projSlug]);
 
   if (loading) {
     return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">불러오는 중…</div>;
@@ -260,7 +262,7 @@ export default function EpicDetailPage() {
       <TopBarSlot
         title={
           <div className="flex items-center gap-2">
-            <Link href="/epics" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <Link href={`/${wsSlug}/${projSlug}/epics`} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
               <ArrowLeft className="h-3.5 w-3.5" />
               에픽 목록
             </Link>

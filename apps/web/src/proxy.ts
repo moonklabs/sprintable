@@ -94,6 +94,7 @@ const MIGRATED_RESOURCES: Record<string, string[]> = {
   mockups: [],
   sprints: [],
   storage: [],
+  epics: [],
 };
 
 /**

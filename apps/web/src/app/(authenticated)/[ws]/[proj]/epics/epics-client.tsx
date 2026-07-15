@@ -8,6 +8,7 @@ import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors, cl
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { computeReorderPatch } from '@/lib/epic-steer';
+import { useEpicsRoute } from './epics-context';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -613,6 +614,7 @@ interface EpicDetailPanelProps {
 function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
   const t = useTranslations('epics');
   const router = useRouter();
+  const { wsSlug, projSlug } = useEpicsRoute();
   const [isEditing, setIsEditing] = useState(false);
 
   const stories = epic.stories ?? [];
@@ -655,7 +657,7 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
         <div className="flex items-center gap-2">
           {!isEditing ? (
             <>
-              <Button size="sm" variant="outline" onClick={() => router.push(`/epics/${epic.id}`)}>
+              <Button size="sm" variant="outline" onClick={() => router.push(`/${wsSlug}/${projSlug}/epics/${epic.id}`)}>
                 {t('viewFull')}
               </Button>
               <Button size="sm" variant="outline" onClick={() => setIsEditing(true)}>
@@ -823,6 +825,7 @@ interface EpicsClientProps {
 export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   const t = useTranslations('epics');
   const router = useRouter();
+  const { wsSlug, projSlug } = useEpicsRoute();
   const { toasts, addToast, dismissToast } = useToast();
   const [epics, setEpics] = useState<Epic[]>([]);
   const [selectedEpic, setSelectedEpic] = useState<Epic | null>(null);
@@ -905,8 +908,8 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
 
   const handleSelectEpic = useCallback((epic: Epic) => {
     // AC5: 모든 디바이스에서 /epics/[id] 딥링크로 이동
-    router.push(`/epics/${epic.id}`);
-  }, [router]);
+    router.push(`/${wsSlug}/${projSlug}/epics/${epic.id}`);
+  }, [router, wsSlug, projSlug]);
 
   const handleDeleteEpic = useCallback(async (id: string) => {
     setDeleting(true);
