@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.dependencies.database import get_db
-from app.models.auth_identity import AuthIdentity
+from app.models.auth_identity import AuthIdentity, AuthMigration
 from app.models.user import User
 from app.services.firebase_session_mint import mint_session_cookie, mint_session_cookie_for_uid
 from app.services.firebase_verifier import verify_firebase_id_token
@@ -67,10 +67,19 @@ def _require_internal_secret(authorization: str | None) -> None:
 
 def check_internal_secret_config(s=None) -> None:
     """fail-closed(산티아고 §9 finding 4): non-local 환경에서 시크릿 미설정이면 startup
-    차단(check_listen_config()와 동일 패턴, main lifespan이 호출)."""
+    차단(check_listen_config()와 동일 패턴, main lifespan이 호출).
+
+    ⚠️산티아고 #2202 재검토(2026-07-15) 배포 회귀 발견·즉시 fix: 최초 구현이 Firebase
+    기능 플래그와 무관하게 non-local이면 무조건 시크릿을 요구해서, **Firebase 전부
+    default-off인 지금 상태로 배포해도**(`deploy_backend.sh`가 아직
+    `FIREBASE_BFF_INTERNAL_SECRET`을 SECRETS_SPEC에 배선하지 않음) backend 전체가
+    startup에서 죽는 회귀였다(직접 probe: prod_features_off_missing_secret_startup_
+    allowed=False). 이 내부 엔드포인트를 실제로 쓰는 기능(세션 발급/모바일 부트스트랩)이
+    켜져 있을 때만 시크릿을 요구한다."""
     if s is None:
         from app.core.config import settings as s
-    if s.app_env not in _LOCAL_ENVS and not s.firebase_bff_internal_secret:
+    firebase_internal_enabled = s.firebase_auth_issue_session or s.firebase_auth_mobile_issue
+    if firebase_internal_enabled and s.app_env not in _LOCAL_ENVS and not s.firebase_bff_internal_secret:
         raise RuntimeError(
             f"APP_ENV={s.app_env}인데 FIREBASE_BFF_INTERNAL_SECRET 미설정 — 내부 세션 mint/"
             "consume 엔드포인트가 인증 없이 공개된다(fail-closed·산티아고 §9 finding 4)."
@@ -184,11 +193,16 @@ async def consume_native_bootstrap(
         logger.warning("auth.native_bootstrap.consume rejected reason=user_inactive_at_consume")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
 
+    # 산티아고 #2202 3차 재검토(2026-07-15) 잔여 2: (issuer,subject)만 보고 unlinked 여부만
+    # 확인하면 그 사이 identity가 **다른 user_id로 재연결**된 레이스를 못 잡는다(구 행
+    # unlink+동일 firebase_uid로 신규 행이 다른 사용자에게 연결돼도 partial-unique 제약은
+    # 통과) — consumed.user_id와 정확히 같은 행인지까지 재확認.
     still_linked = (
         await db.execute(
             select(AuthIdentity.id).where(
                 AuthIdentity.issuer == f"https://securetoken.google.com/{settings.firebase_project_id}",
                 AuthIdentity.subject == consumed.firebase_uid,
+                AuthIdentity.user_id == consumed.user_id,
                 AuthIdentity.unlinked_at.is_(None),
             )
         )
@@ -196,6 +210,18 @@ async def consume_native_bootstrap(
     if still_linked is None:
         logger.warning("auth.native_bootstrap.consume rejected reason=identity_unlinked_at_consume")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Identity no longer linked")
+
+    # 산티아고 #2202 3차 재검토 잔여 2(HIGH): AuthMigration.state 검증 없이는
+    # reset_required/rollback_hold 사용자가 bootstrap custom-token으로 새 세션을 발급받아
+    # coordinated forced-reset 정책(doc §6.1)과 정면 충돌한다. auth_migrations 행이 없거나
+    # (Phase 3 cohort 미편입) provisioning/firebase 상태가 아니면 거부 — fail-closed.
+    migration = await db.get(AuthMigration, consumed.user_id)
+    if migration is None or migration.state not in ("provisioning", "firebase"):
+        logger.warning(
+            "auth.native_bootstrap.consume rejected reason=ineligible_migration_state state=%s",
+            migration.state if migration else None,
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not eligible for Firebase session")
 
     valid_duration_seconds = 5 * 24 * 60 * 60
     session_cookie = await mint_session_cookie_for_uid(

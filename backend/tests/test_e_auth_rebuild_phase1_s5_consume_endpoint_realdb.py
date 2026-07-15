@@ -46,9 +46,11 @@ async def _session_factory():
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def _seed_user_and_code(session, *, device_binding_hash=None, mapped=True):
+async def _seed_user_and_code(
+    session, *, device_binding_hash=None, mapped=True, migration_state="firebase", link_identity_to_other_user=False
+):
     from app.core.security import hash_password
-    from app.models.auth_identity import AuthIdentity
+    from app.models.auth_identity import AuthIdentity, AuthMigration
     from app.models.user import User
     from app.services.native_bootstrap import issue_bootstrap_code
 
@@ -61,11 +63,24 @@ async def _seed_user_and_code(session, *, device_binding_hash=None, mapped=True)
     await session.commit()
 
     if mapped:
+        identity_owner = user_id
+        if link_identity_to_other_user:
+            other_user_id = uuid.uuid4()
+            session.add(User(
+                id=other_user_id, email=f"authreb-s5-other-{other_user_id.hex[:8]}@test.com",
+                hashed_password=hash_password("x"), is_active=True, email_verified=True,
+            ))
+            await session.commit()
+            identity_owner = other_user_id
         session.add(AuthIdentity(
-            id=uuid.uuid4(), user_id=user_id,
+            id=uuid.uuid4(), user_id=identity_owner,
             issuer=f"https://securetoken.google.com/{PROJECT_ID}", subject=firebase_uid,
             provider_id="password",
         ))
+        await session.commit()
+
+    if migration_state is not None:
+        session.add(AuthMigration(user_id=user_id, state=migration_state))
         await session.commit()
 
     raw_code = await issue_bootstrap_code(
@@ -379,6 +394,78 @@ async def test_consume_time_reverify_rejects_identity_unlinked_after_issuance(mo
                 .values(unlinked_at=datetime.now(timezone.utc))
             )
             await s.commit()
+
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await consume_native_bootstrap(
+                    NativeBootstrapConsumeRequest(code=raw_code), authorization=None, db=s
+                )
+            assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("ineligible_state", ["reset_required", "rollback_hold", "legacy", "provisioning_typo"])
+async def test_ineligible_migration_state_rejected(monkeypatch, ineligible_state):
+    """산티아고 #2202 3차 재검토 잔여 2(HIGH): reset_required 사용자가 bootstrap
+    custom-token으로 새 세션을 발급받으면 coordinated forced-reset 정책(doc §6.1)과
+    충돌한다 — provisioning/firebase 외 모든 상태는 거부."""
+    from app.routers.auth_firebase_internal import NativeBootstrapConsumeRequest, consume_native_bootstrap
+
+    _setup_common(monkeypatch)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            raw_code, _user_id = await _seed_user_and_code(s, migration_state=ineligible_state)
+
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await consume_native_bootstrap(
+                    NativeBootstrapConsumeRequest(code=raw_code), authorization=None, db=s
+                )
+            assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_missing_migration_row_rejected(monkeypatch):
+    """auth_migrations 행 자체가 없는(Phase 3 cohort 미편입) 사용자는 fail-closed로 거부
+    — 아직 아무도 migration state 행이 없는 현재(Phase 1) 시점의 안전한 기본값."""
+    from app.routers.auth_firebase_internal import NativeBootstrapConsumeRequest, consume_native_bootstrap
+
+    _setup_common(monkeypatch)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            raw_code, _user_id = await _seed_user_and_code(s, migration_state=None)
+
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await consume_native_bootstrap(
+                    NativeBootstrapConsumeRequest(code=raw_code), authorization=None, db=s
+                )
+            assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_identity_reassigned_to_different_user_rejected(monkeypatch):
+    """산티아고 #2202 3차 재검토 잔여 2: (issuer,subject)만 보고 unlinked 여부만 보면 그
+    사이 identity가 다른 user_id로 재연결된 레이스를 못 잡는다 — consumed.user_id와
+    정확히 같은 행인지까지 확인해야 한다."""
+    from app.routers.auth_firebase_internal import NativeBootstrapConsumeRequest, consume_native_bootstrap
+
+    _setup_common(monkeypatch)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            raw_code, _user_id = await _seed_user_and_code(s, link_identity_to_other_user=True)
 
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
