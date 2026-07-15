@@ -57,4 +57,24 @@ describe('POST /api/auth/refresh', () => {
     expect(setCookie).toContain('sp_at=;');
     expect(setCookie).toContain('sp_rt=;');
   });
+
+  it('domain-scoped 환경(NEXT_PUBLIC_COOKIE_DOMAIN 설정)에서도 삭제에 Domain이 실림 — prod 근본 회귀 가드(3차)', async () => {
+    process.env['NEXT_PUBLIC_APP_URL'] = 'https://app.sprintable.ai';
+    process.env['NEXT_PUBLIC_COOKIE_DOMAIN'] = 'app.sprintable.ai';
+    try {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { code: 'TOKEN_REVOKED', message: 'revoked' } }),
+      });
+      const res = await POST(makeRequest());
+      expect(res.status).toBe(401);
+      const setCookie = res.headers.get('set-cookie') ?? '';
+      const domainCount = (setCookie.match(/Domain=app\.sprintable\.ai/g) ?? []).length;
+      expect(domainCount).toBe(2);
+    } finally {
+      delete process.env['NEXT_PUBLIC_APP_URL'];
+      delete process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
+    }
+  });
 });
