@@ -2,6 +2,7 @@
 
 핵심: 대표 Gate 1개 + approver row N개(orphan 0)·quorum all/any/count·any_reject_blocks·
 consult/non-blocking quorum 제외·SoD self-approval guard(생성 시 + 해소 시)·transition_gate 단일 rail.
+story c1475cb5: 승인자 알림 갭 봉합(blocking approver에게 dispatch_notification 배선).
 """
 from __future__ import annotations
 
@@ -300,4 +301,100 @@ async def test_sod_guard_at_resolution_and_foreign_resolver():
         await s.flush()
         with pytest.raises(SelfApprovalError):
             await record_parallel_decision(s, appr2.id, "approved", uuid.uuid4())
+    await engine.dispose()
+
+
+# ── story c1475cb5: 승인자 알림 갭 봉합 ──────────────────────────────────────
+
+async def _seed_org_member_approver(s, org):
+    """실제로 dispatch_notification이 해소 가능한 휴먼(User+OrgMember) — Notification 검증용.
+    project_access/team_members 뷰는 안 건드림(그 경로는 다른 회귀 스코프) — org_member 폴백
+    경로(OrgMember.id 직접 매칭)만으로 in-app Notification 생성 여부 검증에 충분하다.
+    반환: (org_member.id, user.id) — approver_member_id에는 전자, Notification.user_id 대조는 후자."""
+    from app.models.project import OrgMember
+    from app.models.user import User
+    user_id = uuid.uuid4()
+    s.add(User(id=user_id, email=f"approver-{user_id.hex[:8]}@test.com", hashed_password="x"))
+    await s.flush()
+    om = OrgMember(id=uuid.uuid4(), org_id=org, user_id=user_id, role="member")
+    s.add(om)
+    await s.flush()
+    return om.id, user_id
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_blocking_approver_gets_pending_notification():
+    """핵심 회귀: create_parallel_gate가 blocking approver에게 in-app Notification을 남긴다
+    (수정 전엔 approver row만 생기고 통지가 전혀 발생하지 않았다)."""
+    from app.services.workflow_parallel_approval import create_parallel_gate
+    from app.models.notification import Notification
+    from sqlalchemy import select
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        sr = await _seed_step_run(s, org)
+        approver_id, approver_user_id = await _seed_org_member_approver(s, org)
+        gate, _group = await create_parallel_gate(
+            s, sr, approvers=[_approver(member_id=approver_id)], quorum={"type": "all"},
+            member_id=uuid.uuid4(), role_id=uuid.uuid4(),
+        )
+        await s.commit()
+        notifs = (await s.execute(
+            select(Notification).where(Notification.reference_id == gate.id)
+        )).scalars().all()
+        assert len(notifs) == 1, "blocking approver 1명 → Notification 정확히 1건"
+        assert notifs[0].reference_type == "gate"
+        assert notifs[0].type == "gate_approval_requested"
+        assert notifs[0].user_id == approver_user_id
+    await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_consult_approver_not_notified():
+    """consult(non-blocking) approver는 의사결정 주체가 아니므로 알림 대상에서 제외."""
+    from app.services.workflow_parallel_approval import create_parallel_gate
+    from app.models.notification import Notification
+    from sqlalchemy import select
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        sr = await _seed_step_run(s, org)
+        consult_id, _consult_user_id = await _seed_org_member_approver(s, org)
+        gate, _group = await create_parallel_gate(
+            s, sr, approvers=[_approver(member_id=consult_id, kind="consult", blocking=False)],
+            quorum={"type": "all"}, member_id=uuid.uuid4(), role_id=uuid.uuid4(),
+        )
+        await s.commit()
+        notifs = (await s.execute(
+            select(Notification).where(Notification.reference_id == gate.id)
+        )).scalars().all()
+        assert len(notifs) == 0, "consult(non-blocking)는 통지 대상 아님"
+    await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_multiple_blocking_approvers_each_notified_once():
+    """이중발송 0: blocking approver N명 → 각자 정확히 1건씩(N건), 중복 없음."""
+    from app.services.workflow_parallel_approval import create_parallel_gate
+    from app.models.notification import Notification
+    from sqlalchemy import select
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        sr = await _seed_step_run(s, org)
+        a1_id, a1_user_id = await _seed_org_member_approver(s, org)
+        a2_id, a2_user_id = await _seed_org_member_approver(s, org)
+        gate, _group = await create_parallel_gate(
+            s, sr, approvers=[_approver(member_id=a1_id), _approver(member_id=a2_id)],
+            quorum={"type": "all"}, member_id=uuid.uuid4(), role_id=uuid.uuid4(),
+        )
+        await s.commit()
+        notifs = (await s.execute(
+            select(Notification).where(Notification.reference_id == gate.id)
+        )).scalars().all()
+        assert len(notifs) == 2, "blocking approver 2명 → 정확히 2건(중복 0)"
+        assert {n.user_id for n in notifs} == {a1_user_id, a2_user_id}
     await engine.dispose()
