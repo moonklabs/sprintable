@@ -347,7 +347,7 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
     delete process.env['JWT_SECRET'];
   });
 
-  it.each(['standup', 'retro', 'loops', 'artifacts', 'mockups', 'sprints', 'storage'])(
+  it.each(['standup', 'retro', 'loops', 'artifacts', 'mockups', 'sprints', 'storage', 'epics'])(
     'bare /%s(/*) → 실 slug로 301(redirectLegacyResourcePath 일반화 증명)',
     async (resource) => {
       const token = await makeAccessToken({ orgId: 'org-1' });

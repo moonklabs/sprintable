@@ -96,6 +96,7 @@ export function AppSidebar({
   const artifactsLink = resourceLink('artifacts');
   const sprintsLink = resourceLink('sprints');
   const storageLink = resourceLink('storage');
+  const epicsLink = resourceLink('epics');
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
   // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/board?story={id}`)에서 열렸을 때만 context 주입.
@@ -328,8 +329,8 @@ export function AppSidebar({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  render={<Link href="/epics" />}
-                  isActive={isActive('/epics')}
+                  render={<Link href={epicsLink.href} />}
+                  isActive={epicsLink.isActive}
                   tooltip={t('epics')}
                 >
                   <Layers />
