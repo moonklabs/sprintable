@@ -35,6 +35,11 @@ class ListChatMessagesInput(SprintableInput):
     before: str | None = None
 
 
+class GetChatMessageInput(SprintableInput):
+    thread_id: str  # conversation_id — send/list_chat_message와 동일 네이밍 관례
+    message_id: str
+
+
 async def send_chat_message(args: SendChatInput) -> list[TextContent]:
     """conversation thread에 채팅 메시지 발송."""
     payload: dict = {"content": args.content}
@@ -97,5 +102,13 @@ async def list_chat_messages(args: ListChatMessagesInput) -> list[TextContent]:
         params["before"] = args.before
     try:
         return ok(await client.get(f"/api/v2/conversations/{args.thread_id}/messages", params=params))
+    except Exception as exc:
+        return err(str(exc))
+
+
+async def get_chat_message(args: GetChatMessageInput) -> list[TextContent]:
+    """메시지 단건 원문 조회 — 웹훅 payload가 잘렸을 때 message_id로 즉시 원문 픽업."""
+    try:
+        return ok(await client.get(f"/api/v2/conversations/{args.thread_id}/messages/{args.message_id}"))
     except Exception as exc:
         return err(str(exc))

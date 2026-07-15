@@ -926,20 +926,14 @@ async def get_conversation(
     return resp
 
 
-@router.get("/{conversation_id}/messages")
-async def list_messages(
+async def _authorize_message_read(
     conversation_id: uuid.UUID,
-    limit: int = Query(default=30, le=200),
-    before: str | None = Query(default=None),
-    thread_id: uuid.UUID | None = Query(default=None),
-    db: AsyncSession = Depends(get_db),
-    auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
-) -> dict:
-    """GET /api/v2/conversations/{id}/messages — cursor 기반 페이지네이션.
-
-    thread_id 미지정: top-level 메시지만 반환 (thread_id IS NULL).
-    thread_id 지정: 해당 thread의 reply 목록 반환.
+    db: AsyncSession,
+    auth: AuthContext,
+    org_id: uuid.UUID,
+) -> uuid.UUID:
+    """메시지 조회(목록/단건/리플) 공용 인가. #1262: admin-bypass=agent-only 대화 한정 —
+    휴먼 참가 대화(=private)는 participant only. 반환: conversation.project_id.
     """
     conv_project_id = (await db.execute(
         select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
@@ -947,7 +941,6 @@ async def list_messages(
     if conv_project_id is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # #1262: admin-bypass=agent-only 대화 한정 — 휴먼 참가 대화(=private)는 participant only.
     # owner/admin: org-level 조회(project 소속 무관 접근), member: project-level 유지
     sender = await _resolve_member(auth, org_id, db, project_id=None)
 
@@ -967,6 +960,25 @@ async def list_messages(
         )).scalar_one_or_none()
         if participant is None:
             raise HTTPException(status_code=403, detail="Not a participant")
+    return conv_project_id
+
+
+@router.get("/{conversation_id}/messages")
+async def list_messages(
+    conversation_id: uuid.UUID,
+    limit: int = Query(default=30, le=200),
+    before: str | None = Query(default=None),
+    thread_id: uuid.UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """GET /api/v2/conversations/{id}/messages — cursor 기반 페이지네이션.
+
+    thread_id 미지정: top-level 메시지만 반환 (thread_id IS NULL).
+    thread_id 지정: 해당 thread의 reply 목록 반환.
+    """
+    await _authorize_message_read(conversation_id, db, auth, org_id)
 
     if thread_id is None:
         thread_filter = ConversationMessage.thread_id.is_(None)
@@ -976,6 +988,81 @@ async def list_messages(
     stmt = (
         select(ConversationMessage)
         .where(ConversationMessage.conversation_id == conversation_id, thread_filter)
+        .order_by(ConversationMessage.created_at.desc())
+        .limit(limit + 1)
+    )
+    if before:
+        try:
+            before_dt = datetime.fromisoformat(before)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor format")
+        stmt = stmt.where(ConversationMessage.created_at < before_dt)
+
+    rows = (await db.execute(stmt)).scalars().all()
+    has_more = len(rows) > limit
+    msgs = list(reversed(rows[:limit]))
+
+    sender_ids = {m.sender_id for m in msgs if m.sender_id}
+    member_map = await lookup_members_by_ids(sender_ids, db)
+
+    data = [_msg_payload(m, member_map.get(m.sender_id)) for m in msgs]
+    next_cursor = msgs[0].created_at.isoformat() if has_more and msgs else None
+
+    return {"data": data, "meta": {"next_cursor": next_cursor, "has_more": has_more}}
+
+
+@router.get("/{conversation_id}/messages/{message_id}")
+async def get_message(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """GET /api/v2/conversations/{id}/messages/{message_id} — 단건 원문 조회(최상위+리플 공용).
+
+    story 3cf50d90: 게이트/QA 리플이 웹훅 payload 잘림으로 도달하면 원문 재조회 경로가 없어
+    "잘렸다·재발신" 왕복이 반복됐다. 인가는 list_messages와 동형(참여자 전용·admin-bypass는
+    agent-only 대화 한정).
+    """
+    await _authorize_message_read(conversation_id, db, auth, org_id)
+
+    msg = (await db.execute(
+        select(ConversationMessage).where(
+            ConversationMessage.id == message_id,
+            ConversationMessage.conversation_id == conversation_id,
+        )
+    )).scalar_one_or_none()
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    sender_map = await lookup_members_by_ids({msg.sender_id} if msg.sender_id else set(), db)
+    return _msg_payload(msg, sender_map.get(msg.sender_id))
+
+
+@router.get("/{conversation_id}/messages/{message_id}/replies")
+async def list_message_replies(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    limit: int = Query(default=30, le=200),
+    before: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """GET /api/v2/conversations/{id}/messages/{message_id}/replies — 이 메시지의 리플 목록.
+
+    story 3cf50d90: list_messages의 `?thread_id=` 파라미터와 동형 필터(discoverability용 전용
+    서브리소스 — 호출자가 thread_id 쿼리파라미터의 존재를 몰라도 원문 리플 왕복이 가능하도록).
+    """
+    await _authorize_message_read(conversation_id, db, auth, org_id)
+
+    stmt = (
+        select(ConversationMessage)
+        .where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.thread_id == message_id,
+        )
         .order_by(ConversationMessage.created_at.desc())
         .limit(limit + 1)
     )

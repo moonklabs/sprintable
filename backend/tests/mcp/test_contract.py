@@ -49,8 +49,9 @@ EXPECTED_TOOLS = {
     # core (4) — E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가.
     "sprintable_list_team_members", "sprintable_my_dashboard",
     "sprintable_list_projects", "sprintable_set_default_project",
-    # chat (3)
+    # chat (4) — story 3cf50d90: get_chat_message(단건 원문 조회) 추가.
     "sprintable_send_chat_message", "sprintable_create_conversation", "sprintable_list_chat_messages",
+    "sprintable_get_chat_message",
     # meetings (6)
     "sprintable_list_meetings", "sprintable_get_meeting", "sprintable_create_meeting",
     "sprintable_update_meeting", "sprintable_delete_meeting", "sprintable_trigger_ai_summary",
@@ -102,7 +103,8 @@ def test_total_tool_count():
     # C1-S3(e50563b4): sprintable_list_artifacts 추가로 98→99... +1=100.
     # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가 — 100→102.
     # 편집 캔버스 핀 저작(story 7fe16274): spec pin 4종 추가 — 102→106.
-    assert len(_TOOLS) == 106
+    # story 3cf50d90: get_chat_message(단건 원문 조회) 추가 — 106→107.
+    assert len(_TOOLS) == 107
 
 
 def test_all_expected_tools_registered():
