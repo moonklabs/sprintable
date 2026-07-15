@@ -370,7 +370,8 @@ _TOOL_DEFS: list[tuple] = [
      UpdateEpicInput, update_epic),
     # Hypotheses (6)
     ("sprintable_list_hypotheses",
-     "[일감] 가설 목록 조회 (compact). epic_id/story_id/status/owner_member_id 필터.",
+     "[일감] 가설 목록 조회 (compact). epic_id/story_id/status/owner_member_id 필터."
+     " all_projects=true면 project_id 대신 org 전체(접근 가능한 모든 project)에서 조회.",
      ListHypothesesInput, list_hypotheses),
     ("sprintable_get_hypothesis",
      "[일감] 가설 단건 조회 (full).",

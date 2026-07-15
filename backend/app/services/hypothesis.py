@@ -208,7 +208,7 @@ async def get_hypothesis(
 async def list_hypotheses(
     session: AsyncSession,
     org_id: uuid.UUID,
-    project_id: uuid.UUID,
+    project_id: uuid.UUID | None,
     *,
     status: str | None = None,
     owner_member_id: uuid.UUID | None = None,
