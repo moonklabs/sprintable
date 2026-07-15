@@ -91,6 +91,45 @@ describe('proxy', () => {
     expect(loc).toContain('reason=session_expired');
   });
 
+  it('clears sp_at/sp_rt cookies on definitive refresh failure — UI path (story e5225c0a P0)', async () => {
+    // 산티아고 실측: refresh 실패 시 쿠키를 안 지워 30일 sp_rt 가 401 무한 재생산. 이 테스트는
+    // 그 정확한 실패 모드를 재현하고 수정을 고정한다.
+    mockFetch.mockResolvedValue({ ok: false, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
+    const response = await middleware(makeRequest('/dashboard', { sp_rt: 'stale-rt-ui' }));
+    expect(response.status).toBe(307);
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('sp_rt=;');
+    expect(setCookie).toContain('sp_at=;');
+  });
+
+  it('clears sp_at/sp_rt cookies on definitive refresh failure — API path (story e5225c0a P0)', async () => {
+    mockFetch.mockResolvedValue({ ok: false, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
+    const response = await middleware(makeRequest('/api/notifications', { sp_rt: 'stale-rt-api' }));
+    expect(response.status).toBe(200); // handler 가 401 반환하도록 통과
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('sp_rt=;');
+    expect(setCookie).toContain('sp_at=;');
+  });
+
+  it('does NOT clear cookies when refresh succeeds but is suppressed for a different active account (RC2 regression guard)', async () => {
+    // refreshMatchesActive=false 는 refresh 자체가 실패한 게 아니라(다른 계정의 늦은 refresh를
+    // 의도적으로 무시하는 것) — clearAuthCookies 를 호출하면 안 된다. sp_active_account 포인터를
+    // 새 토큰의 sub('user-123')와 다르게 둬서 이 분기를 트리거.
+    const now = Math.floor(Date.now() / 1000);
+    const newAt = await makeAccessToken({ exp: now + 900 });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { access_token: newAt, refresh_token: 'new-rt' } }),
+    });
+    const response = await middleware(
+      makeRequest('/dashboard', { sp_rt: 'rc2-suppressed-rt', sp_active_account: 'someone-else' }),
+    );
+    expect(response.status).toBe(307); // 이 요청 자체는 여전히 미인증(다른 계정) — 로그인 리다이렉트
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).not.toContain('sp_rt=;');
+    expect(setCookie).not.toContain('sp_at=;');
+  });
+
   it('allows access with valid sp_at cookie', async () => {
     const token = await makeAccessToken();
     const response = await middleware(makeRequest('/dashboard', { sp_at: token }));
