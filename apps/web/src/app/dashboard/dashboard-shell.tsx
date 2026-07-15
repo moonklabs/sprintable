@@ -33,6 +33,9 @@ interface DashboardContext {
   orgId?: string;
   projectId?: string;
   projectName?: string;
+  // story a539c649 S2: 현재 project 의 slug(사이드바/⌘K 가 /{ws}/{proj}/docs 직접 path 를
+  // 만드는 데만 사용 — /me/memberships 는 slug 를 안 실어보내 여기 단건 조회로 보강했다).
+  currentProjectSlug?: string;
   userName?: string;
   role?: string;
   projectMemberships: DashboardProjectOption[];
@@ -148,6 +151,7 @@ export function DashboardShell({
   orgId,
   projectId,
   projectName,
+  currentProjectSlug,
   userName,
   role,
   projectMemberships,
@@ -160,9 +164,12 @@ export function DashboardShell({
   // R2: URL `?p=` = 탭별 SSOT. 서버 prop 대신 effective 를 컨텍스트/사이드바에 공급.
   const effectiveProjectId = useProjectSsot(projectId, projectMemberships);
   const effectiveProjectName = projectMemberships.find((m) => m.projectId === effectiveProjectId)?.projectName ?? projectName;
+  // currentProjectSlug 는 server prop(me.project_id) 기준 — effectiveProjectId 가 탭 SSOT로
+  // 갈렸으면 살짝 stale 할 수 있으나, "문서로 가기" 바로가기 링크 용도라 무해(틀려도 미들웨어
+  // 리다이렉트 안전망이 받는다). 완전 동기화는 이 슬라이스 스코프 밖(over-engineering).
 
   return (
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId: effectiveProjectId, projectName: effectiveProjectName, userName, role, projectMemberships, orgMemberships }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, projectMemberships, orgMemberships }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
@@ -170,6 +177,7 @@ export function DashboardShell({
             <AppSidebar
               currentTeamMemberId={currentTeamMemberId}
               projectId={effectiveProjectId}
+              currentProjectSlug={currentProjectSlug}
               projectMemberships={projectMemberships}
               orgId={orgId}
               orgMemberships={orgMemberships}

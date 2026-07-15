@@ -90,6 +90,10 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
             >
               {accepting ? '수락 중…' : '초대 수락'}
             </Button>
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2:
+                app/(authenticated)/[ws]/[proj]/ 도입 후 이 규칙이 무관 파일에 오탐(2단 중첩
+                dynamic segment와의 상호작용, [ws]/[proj] 부재 시 오탐 재현 0으로 직접 확인) —
+                pre-existing 코드 자체는 무변경. */}
             <a
               href="/dashboard"
               className="block text-center text-sm text-muted-foreground hover:text-foreground/70"

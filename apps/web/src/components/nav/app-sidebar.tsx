@@ -55,6 +55,9 @@ interface AppSidebarProps {
   orgId?: string;
   orgMemberships?: OrgSwitcherItem[];
   projectId?: string;
+  // story a539c649 S2: 문서 바로가기가 /{ws}/{proj}/docs 직접 path 를 만드는 데만 쓴다 — 없으면
+  // bare `/docs`로 폴백(미들웨어 리다이렉트 안전망이 받음).
+  currentProjectSlug?: string;
   projectMemberships: Array<{ projectId: string; projectName: string }>;
   userName?: string;
 }
@@ -71,11 +74,18 @@ export function AppSidebar({
   orgId,
   orgMemberships = [],
   projectId,
+  currentProjectSlug,
   projectMemberships,
   userName,
 }: AppSidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // story a539c649 S2: 실 ws/proj slug 있으면 직접 path(리다이렉트 홉 절약) — 없으면 bare
+  // `/docs`(미들웨어의 bare→쿠키 default 해소 301 안전망이 받는다).
+  const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
+  const docsHref = orgSlug && currentProjectSlug ? `/${orgSlug}/${currentProjectSlug}/docs` : '/docs';
+  const isDocsActive = pathname === '/docs' || pathname.startsWith('/docs/')
+    || Boolean(orgSlug && currentProjectSlug && pathname.startsWith(`/${orgSlug}/${currentProjectSlug}/docs`));
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
   // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/board?story={id}`)에서 열렸을 때만 context 주입.
@@ -389,8 +399,8 @@ export function AppSidebar({
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  render={<Link href="/docs" />}
-                  isActive={isActive('/docs')}
+                  render={<Link href={docsHref} />}
+                  isActive={isDocsActive}
                   tooltip={t('docs')}
                 >
                   <BookOpen />
@@ -449,7 +459,7 @@ export function AppSidebar({
             <ThemeToggle />
           </div>
           <Link
-            href="/docs"
+            href={docsHref}
             aria-label={t('help')}
             title={t('help')}
             className="flex size-8 items-center justify-center rounded-md text-sidebar-foreground/60 transition hover:bg-sidebar-accent hover:text-sidebar-foreground"

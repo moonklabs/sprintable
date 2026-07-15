@@ -72,12 +72,24 @@ export default async function AuthenticatedLayout({
     role: o.role,
   }));
 
+  // story a539c649 S2: 사이드바/⌘K "문서" 바로가기가 /{ws}/{proj}/docs 직접 path를 만들려면
+  // 현재 project의 slug가 필요 — /me/memberships는 slug를 안 실어 보내(BE 스코프 밖, FE 단독
+  // 수정 범위 유지 위해 이미 존재하는 단건 조회를 재사용). 실패해도 sidebar/cmd-palette는
+  // bare `/docs`로 폴백해 미들웨어 리다이렉트 안전망을 타므로 무해.
+  const currentProjectSlug = me?.project_id
+    ? await fetch(`${fastapiUrl}/api/v2/projects/${me.project_id}`, { headers: authHeader, cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((json: { slug?: string | null } | null) => json?.slug ?? undefined)
+        .catch(() => undefined)
+    : undefined;
+
   return (
     <DashboardShell
       currentTeamMemberId={me?.id}
       orgId={me?.org_id}
       projectId={me?.project_id}
       projectName={me?.project_name ?? undefined}
+      currentProjectSlug={currentProjectSlug}
       userName={me?.name}
       role={me?.role}
       projectMemberships={projectMemberships}

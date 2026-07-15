@@ -8,7 +8,7 @@ import { DocGateSection } from '@/components/docs/doc-gate-section';
 import { DocUrlChip } from '@/components/docs/doc-url-chip';
 import { DocUrlDialog, type SlugSubmitResult } from '@/components/docs/doc-url-dialog';
 import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug';
-import { docsListUrl } from '@/components/docs/lib/doc-project-url';
+import { docsListUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { useDocSync, unwrapDocResponse, type SaveStatus } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import Link from 'next/link';
@@ -126,7 +126,7 @@ export default function DocSlugPage() {
   const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
   const isNew = isNewRef.current;
 
-  const { projectId, tree, setTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer } = useDocsLayout();
+  const { wsSlug, projSlug, projectId, tree, setTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer } = useDocsLayout();
 
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
   const [docLoading, setDocLoading] = useState(true);
@@ -149,9 +149,9 @@ export default function DocSlugPage() {
     if (typeof doc.slug_locked === 'boolean') setSlugLocked(doc.slug_locked);
     // Slug auto-derived / canonicalized server-side → move the URL to the canonical slug.
     if (doc.slug && doc.slug !== slug) {
-      router.replace(`/docs/${doc.slug}`);
+      router.replace(docUrl(wsSlug, projSlug, doc.slug));
     }
-  }, [setTree, slug, router]);
+  }, [setTree, slug, router, wsSlug, projSlug]);
 
   const handleTitleChange = useCallback((value: string) => {
     setTitle(value);
@@ -192,13 +192,15 @@ export default function DocSlugPage() {
         // project_id+slug 조합을 그대로 재질의할 뿐이라 무효(라이브 재현 완료). 이 slug가
         // 지금 projectId엔 없다는 사실은 원인이 뭐든 동일하므로, 살아있는 목록으로 되돌려
         // 회복 경로를 준다(진짜 없는 문서를 억지로 보여주지 않으면서도 dead-end는 피한다).
-        router.replace(docsListUrl(projectId));
+        // story a539c649 S2: 이 회복 자체는 여전히 유효(project 안에 그 slug가 진짜 없는 경우
+        // 대응) — 소거된 건 "잘못된 project로 재질의"였던 원인(#2154), 이 증상 대응 코드는 유지.
+        router.replace(docsListUrl(wsSlug, projSlug));
         return;
       }
       const json = await res.json();
       const data = json?.data ?? null;
       if (!data) {
-        router.replace(docsListUrl(projectId));
+        router.replace(docsListUrl(wsSlug, projSlug));
         return;
       }
       setSelectedDoc(data);
@@ -209,13 +211,13 @@ export default function DocSlugPage() {
       // AC3: the request resolved via an old/alias slug → canonicalize the URL so
       // bookmarks and internal links settle on the live address (BE sends canonical_slug).
       const canonical = data.canonical_slug ?? data.slug;
-      if (canonical && canonical !== slug) router.replace(`/docs/${canonical}`);
+      if (canonical && canonical !== slug) router.replace(docUrl(wsSlug, projSlug, canonical));
     } catch {
       setSelectedDoc(null);
     } finally {
       setDocLoading(false);
     }
-  }, [projectId, slug, router]);
+  }, [projectId, slug, router, wsSlug, projSlug]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
 
@@ -260,9 +262,9 @@ export default function DocSlugPage() {
       const res = await fetch(`/api/docs/${selectedDoc.id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete doc');
       setTree((prev) => prev.filter((d) => d.id !== selectedDoc.id));
-      router.replace('/docs');
+      router.replace(docsListUrl(wsSlug, projSlug));
     } catch { /* delete failed */ }
-  }, [selectedDoc, projectId, router, setTree, t]);
+  }, [selectedDoc, projectId, router, setTree, t, wsSlug, projSlug]);
 
   // AC2: explicit slug edit. Locks the slug (slug_locked: true) so auto-derivation
   // stops, and surfaces BE conflicts (409 → suggested -N) / format errors (422).
@@ -315,8 +317,8 @@ export default function DocSlugPage() {
   }, [selectedDoc, title, handleDocSaved]);
 
   const handleNavigate = useCallback((targetSlug: string) => {
-    router.push(`/docs/${targetSlug}`);
-  }, [router]);
+    router.push(docUrl(wsSlug, projSlug, targetSlug));
+  }, [router, wsSlug, projSlug]);
 
   if (docLoading) {
     return (
@@ -360,7 +362,7 @@ export default function DocSlugPage() {
           <MoreHorizontal className="h-4 w-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuItem render={<Link href={`/docs/${slug}/view`} />}>
+          <DropdownMenuItem render={<Link href={`${docUrl(wsSlug, projSlug, slug)}/view`} />}>
             <Eye className="mr-2 h-4 w-4" />
             {t('preview')}
           </DropdownMenuItem>

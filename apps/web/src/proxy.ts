@@ -6,6 +6,7 @@ import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
 import {
   fetchResolve,
   looksLikeWorkspaceSegment,
+  resolveLegacyDocsPath,
   RESOLVE_CACHE_TTL_SECONDS,
   signResolveCache,
   SP_RESOLVE_CACHE_COOKIE,
@@ -62,6 +63,47 @@ async function verifyAccessToken(token: string): Promise<{ exp?: number } | null
   } catch {
     return null;
   }
+}
+
+// @/lib/auth-helpers.ts 의 CURRENT_PROJECT_COOKIE 와 동일 값 — 그 모듈은 next/headers(cookies())
+// 를 top-level import 해 proxy.ts(별도 번들 경계)로 끌어오면 런타임 불일치 위험이 있어 리터럴만
+// 복제(둘 다 이 문자열이 바뀔 일은 없음 — 서버-발급 세션 쿠키 이름).
+const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
+
+async function getOrgIdFromAccessToken(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, getJwtSecretBytes());
+    const orgId = (payload['app_metadata'] as Record<string, unknown> | undefined)?.['org_id'];
+    return typeof orgId === 'string' ? orgId : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * story a539c649 S2 — 옛 flat `/docs/*` 를 default(현재 org+project) 로 해소해 301. 해소
+ * 불가(로그인 직후 project 미선택 등)면 null — 호출부가 개입 없이 통과시켜 Next 자체 404.
+ */
+async function redirectLegacyDocsPath(
+  request: NextRequest,
+  pathname: string,
+  accessToken: string,
+): Promise<NextResponse | null> {
+  if (pathname !== '/docs' && !pathname.startsWith('/docs/')) return null;
+  if (pathname.startsWith('/docs/design-tokens')) return null; // 비-project 정적 페이지, 무변경
+
+  const orgId = await getOrgIdFromAccessToken(accessToken);
+  const projectId = request.cookies.get(CURRENT_PROJECT_COOKIE)?.value;
+  if (!orgId || !projectId) return null;
+
+  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const slugs = await resolveLegacyDocsPath(fastapiUrl, orgId, projectId, accessToken);
+  if (!slugs) return null;
+
+  const rest = pathname.slice('/docs'.length); // '' | '/{slug}' | '/{slug}/view'
+  const url = request.nextUrl.clone();
+  url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/docs${rest}`;
+  return NextResponse.redirect(url, 301);
 }
 
 // bf305fa0 멀티계정 — active 포인터(switch가 set). 없으면 단일계정(back-compat).
@@ -238,6 +280,13 @@ export async function proxy(request: NextRequest) {
   const now = Math.floor(Date.now() / 1000);
   const fwdHeaders = new Headers(request.headers);
   fwdHeaders.set('x-pathname', pathname + request.nextUrl.search);
+
+  // story a539c649 S2 — 옛 flat `/docs/*`(ws/proj 세그먼트 없음)는 목적지 페이지가 이제 없다
+  // (S2가 `/{ws}/{proj}/docs/*`로 전량 이관). 여기서 잡아 default(현재 org+project) 해소 후
+  // 301 — 안 잡으면 사이드바 밖 9개 딥링크 호출부(알림·게이트·챗 등, 전부 bare 링크였음)가
+  // 전부 즉시 404 나던 것을 막는 안전망(PO 승인 스코프, 한계=route-resolve.ts 헤더 참고).
+  const legacyDocsRedirect = await redirectLegacyDocsPath(request, pathname, accessToken);
+  if (legacyDocsRedirect) return legacyDocsRedirect;
 
   // story a539c649(S-route-project) S1 — path 위계 resolve. fwdHeaders 를 response 구성 *전에*
   // 채워야 downstream RSC/route handler 가 x-resolved-* 를 실제로 읽을 수 있다(x-pathname 과

@@ -1,4 +1,4 @@
-import type { Doc } from '@/app/(authenticated)/docs/docs-context';
+import type { Doc } from '@/app/(authenticated)/[ws]/[proj]/docs/docs-context';
 
 export function buildDocPath(docId: string, docs: Doc[]): Doc[] {
   const docMap = new Map(docs.map((d) => [d.id, d]));
