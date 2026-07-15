@@ -284,6 +284,8 @@
   "orgBriefing": {
     "title": "조직 브리핑",
     "subtitle": "내게 온 요청, 우리가 배우는 것, 누가 무엇을 맡고 있는지 — 한눈에.",
+    "greeting": "{name}님, 오늘 조직의 지금이에요",
+    "nowHeroBadge": "지금",
     "nowTitle": "받은 요청",
     "nowNote": "확인할 {count}건",
     "nowFoot": "나머지 진행 상황은 아래 실험실·워크포스에 있습니다 · 결정이 필요한 일만 여기 모입니다",
@@ -322,14 +324,15 @@
     "loopPhraseUnderway": "진행 중",
     "loopPhraseAlmostThere": "거의 다 왔습니다",
     "loopPhraseWrappingUp": "막바지",
-    "loopEmpty": "검증 중인 가설이 없습니다",
+    "loopEmpty": "가설을 세우면 검증까지 이어지는 과정이 여기 모입니다",
+    "loopEmptyCta": "첫 가설 만들기",
     "workforceTitle": "워크포스",
     "workforceSubject": "누가 무엇을 맡고 있는지",
     "workforceTrustVerified": "사람이 확인함",
     "workforceTrustClaimed": "에이전트 완료 · 검토 대기",
     "workforceTogether": "함께 일하는 중",
     "workforceUnassigned": "아직 배정 전입니다",
-    "workforceEmpty": "진행 중인 작업이 없습니다"
+    "workforceEmpty": "사람과 AI가 함께 맡은 일이 여기 모입니다"
   },
   "organization": {
     "rolesTitle": "권한",

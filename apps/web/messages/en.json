@@ -284,6 +284,8 @@
   "orgBriefing": {
     "title": "Org Briefing",
     "subtitle": "What's come to you, what we're learning, and who's on what — at a glance.",
+    "greeting": "Hi {name}, here's your org today",
+    "nowHeroBadge": "Now",
     "nowTitle": "Requests",
     "nowNote": "{count} to review",
     "nowFoot": "Everything else lives below in Lab and Workforce — only decisions surface here",
@@ -322,14 +324,15 @@
     "loopPhraseUnderway": "Underway",
     "loopPhraseAlmostThere": "Almost there",
     "loopPhraseWrappingUp": "Wrapping up",
-    "loopEmpty": "No hypotheses under test right now",
+    "loopEmpty": "Set a hypothesis and the whole path to verifying it shows up here",
+    "loopEmptyCta": "Start your first hypothesis",
     "workforceTitle": "Workforce",
     "workforceSubject": "Who's on what",
     "workforceTrustVerified": "Human verified",
     "workforceTrustClaimed": "Agent-reported · awaiting review",
     "workforceTogether": "Working together",
     "workforceUnassigned": "Not yet assigned",
-    "workforceEmpty": "No active work right now"
+    "workforceEmpty": "Work that people and AI take on together shows up here"
   },
   "organization": {
     "rolesTitle": "Permissions",

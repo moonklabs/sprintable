@@ -112,4 +112,11 @@ describe('NowFace', () => {
     await mount();
     expect(container.innerHTML).not.toMatch(/\d+\s*(분|시간|일)(?!건)/);
   });
+
+  it('story 64b9a879 — "지금" hero 뱃지가 타이틀 옆에 렌더된다(정보 위계 강조)', async () => {
+    stubFetch({ action_queue: { items: [] }, attention: { items: [] } }, { data: [] });
+    await mount();
+    const badge = [...container.querySelectorAll('span')].find((s) => s.textContent === '지금');
+    expect(badge).not.toBeUndefined();
+  });
 });
