@@ -1,4 +1,4 @@
-"""Sprintable MCP 서버 — 92개 도구 등록 (flat schema)."""
+"""Sprintable MCP 서버 — 106개 도구 등록 (flat schema)."""
 from __future__ import annotations
 
 import asyncio
@@ -80,8 +80,8 @@ from .tools.meetings import (
     trigger_ai_summary, update_meeting,
 )
 from .tools.chat import (
-    CreateConversationInput, ListChatMessagesInput, SendChatInput,
-    create_conversation, list_chat_messages, send_chat_message,
+    CreateConversationInput, GetChatMessageInput, ListChatMessagesInput, SendChatInput,
+    create_conversation, get_chat_message, list_chat_messages, send_chat_message,
 )
 from .tools.notifications import (
     CheckNotificationsInput, MarkAllNotificationsReadInput, MarkNotificationReadInput,
@@ -564,7 +564,7 @@ _TOOL_DEFS: list[tuple] = [
      "이 버전을 정본으로 제안(게이트 생성) — 제안만, 승인/반려는 항상 휴먼. ⭐이 버전이 확定될"
      " 준비가 됐다고 판단될 때 휴먼 승인을 요청.",
      ProposeCanonicalInput, propose_canonical_version),
-    # Chat (3)
+    # Chat (4)
     ("sprintable_send_chat_message",
      "conversation thread에 채팅 메시지 발송.",
      SendChatInput, send_chat_message),
@@ -574,6 +574,11 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_list_chat_messages",
      "conversation thread 메시지 목록 조회.",
      ListChatMessagesInput, list_chat_messages),
+    ("sprintable_get_chat_message",
+     "conversation thread 내 메시지 단건 원문 조회(message_id로 즉시 픽업). ⭐웹훅 payload가"
+     " 잘렸거나 원문이 의심될 때 재발신 요청 대신 이걸로 먼저 확인 — thread_id=conversation_id,"
+     " message_id=조회할 메시지 id(top-level·리플 공용).",
+     GetChatMessageInput, get_chat_message),
     # Meetings (6)
     ("sprintable_list_meetings",
      "프로젝트 미팅 목록 조회.",
