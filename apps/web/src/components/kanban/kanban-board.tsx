@@ -63,6 +63,8 @@ interface Task {
 
 interface KanbanBoardProps {
   projectId?: string;
+  wsSlug: string;
+  projSlug: string;
 }
 
 // WIP limit localStorage 키
@@ -102,7 +104,7 @@ function saveWipLimit(projectId: string | undefined, status: string, limit: numb
   }
 }
 
-export function KanbanBoard({ projectId }: KanbanBoardProps) {
+export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const t = useTranslations('board');
@@ -142,8 +144,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     else params.delete(key);
     const storyId = searchParams.get('story');
     if (storyId) params.set('story', storyId);
-    router.replace(`/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
-  }, [router, searchParams]);
+    router.replace(`/${wsSlug}/${projSlug}/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+  }, [router, searchParams, wsSlug, projSlug]);
 
   // BOARD-03: done 컬럼 collapse 상태
   const [doneCollapsed, setDoneCollapsed] = useState(false);
@@ -425,8 +427,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     setAutoComposeNonce((n) => n + 1);
     const params = new URLSearchParams(searchParams.toString());
     params.delete('view');
-    router.replace(`/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
-  }, [searchParams, router]);
+    router.replace(`/${wsSlug}/${projSlug}/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+  }, [searchParams, router, wsSlug, projSlug]);
 
   // URL에서 스토리 ID 읽어서 자동으로 패널 열기
   useEffect(() => {
@@ -909,7 +911,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
               </div>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => router.push('/sprints')}>
+                <DropdownMenuItem onClick={() => router.push(`/${wsSlug}/${projSlug}/sprints`)}>
                   <span className="flex-1 text-xs text-muted-foreground">{t('manageSprints')}</span>
                 </DropdownMenuItem>
               </DropdownMenuGroup>
@@ -969,7 +971,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
               </div>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => router.push('/epics')}>
+                <DropdownMenuItem onClick={() => router.push(`/${wsSlug}/${projSlug}/epics`)}>
                   <span className="flex-1 text-xs text-muted-foreground">{t('manageEpics')}</span>
                 </DropdownMenuItem>
               </DropdownMenuGroup>

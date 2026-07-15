@@ -70,7 +70,10 @@ export async function attachNotificationHrefs<T extends NotificationReference>(
     }
 
     if (notification.reference_type === 'task') {
-      return { ...notification, href: '/boards' };
+      // story a539c649 S3d 그라운딩 중 발견: '/boards'(오탈자·복수형)+task_id 자체 누락이라
+      // 이 알림 클릭 자체가 항상 무효였다(존재하지 않는 라우트+참조 ID 미실림). notification-bell.tsx
+      // getEntityHref와 동형 패턴(/board?task_id=)으로 정정 — URL 이관과 무관한 별도 버그 fix.
+      return { ...notification, href: `/board?task_id=${referenceId}` };
     }
 
     if (notification.reference_type === 'sprint') {

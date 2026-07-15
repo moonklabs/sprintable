@@ -51,4 +51,20 @@ describe('attachNotificationHrefs', () => {
       expect.objectContaining({ id: 'notif-5', href: null }),
     ]);
   });
+
+  it('builds board deep links for task/story and a bare sprints link (story a539c649 S3d 발견 버그 회귀가드)', async () => {
+    // '/boards'(오탈자·복수형)+task_id 누락으로 task 알림 클릭이 항상 무효였다(존재하지 않는
+    // 라우트로 이동+참조 ID 자체가 안 실림) — notification-bell.tsx getEntityHref와 동형으로 정정.
+    const notifications = await attachNotificationHrefs(createDbStub(), [
+      { id: 'notif-6', reference_type: 'task', reference_id: 'task-1' },
+      { id: 'notif-7', reference_type: 'sprint', reference_id: 'sprint-1' },
+      { id: 'notif-8', reference_type: 'story', reference_id: 'story-1' },
+    ]);
+
+    expect(notifications).toEqual([
+      expect.objectContaining({ id: 'notif-6', href: '/board?task_id=task-1' }),
+      expect.objectContaining({ id: 'notif-7', href: '/sprints' }),
+      expect.objectContaining({ id: 'notif-8', href: '/board?story=story-1' }),
+    ]);
+  });
 });

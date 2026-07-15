@@ -77,10 +77,18 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   const t = useTranslations('commandPalette');
   const { orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
-  const docsHref = orgSlug && currentProjectSlug ? `/${orgSlug}/${currentProjectSlug}/docs` : '/docs';
+  function resourceHref(resource: string): string {
+    return orgSlug && currentProjectSlug ? `/${orgSlug}/${currentProjectSlug}/${resource}` : `/${resource}`;
+  }
+  const docsHref = resourceHref('docs');
+  const boardHref = resourceHref('board');
   const ITEMS = useMemo(
-    () => STATIC_ITEMS.map((item) => (item.id === 'go-docs' ? { ...item, href: docsHref } : item)),
-    [docsHref],
+    () => STATIC_ITEMS.map((item) => {
+      if (item.id === 'go-docs') return { ...item, href: docsHref };
+      if (item.id === 'go-board') return { ...item, href: boardHref };
+      return item;
+    }),
+    [docsHref, boardHref],
   );
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -105,9 +113,9 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   }, [open, contextStoryId]);
 
   const actionItems = useMemo(
-    () => buildActionCommands(t, contextStory ? { storyId: contextStory.id, storyTitle: contextStory.title } : undefined),
+    () => buildActionCommands(t, contextStory ? { storyId: contextStory.id, storyTitle: contextStory.title, boardHref } : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- t는 로케일 불변 함수
-    [contextStory],
+    [contextStory, boardHref],
   );
 
   const filteredNavigate = useMemo(() => {

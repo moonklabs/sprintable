@@ -12,6 +12,9 @@ export interface ActionCommandTranslator {
 export interface StoryContext {
   storyId: string;
   storyTitle: string;
+  /** story a539c649 S3d: 이 스토리가 열려있던 board 의 실 path(/{ws}/{proj}/board 또는 아직
+   * ws/proj slug 미해소 시 bare /board — 미들웨어 legacy-redirect 안전망이 받는다). */
+  boardHref: string;
 }
 
 export interface ActionCommand {
@@ -39,7 +42,7 @@ export function buildActionCommands(t: ActionCommandTranslator, context?: StoryC
       group: 'action',
       labelKey: 'actionDelegateStory',
       label: t('actionDelegateStory', { title: context.storyTitle }),
-      targetRoute: `/board?story=${context.storyId}`,
+      targetRoute: `${context.boardHref}?story=${context.storyId}`,
       impact: t('actionDelegateStoryImpact', { title: context.storyTitle }),
       danger: false,
     });
