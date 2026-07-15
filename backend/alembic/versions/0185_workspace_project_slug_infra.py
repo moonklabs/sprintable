@@ -1,12 +1,16 @@
 """story 139d2405(S-slug-infra): projects.slug additive+백필(이름 kebab 파생·org-scoped 유일) +
 entity_slug_history 테이블(rename 이력·향후 301용).
 
-Revision ID: 0184
-Revises: 0183
+Revision ID: 0185
+Revises: 0184
 Create Date: 2026-07-15
 
+⚠️renumber(2026-07-15): 병렬 BE PR(#2168 push_devices)이 동시에 "0184"를 채번해 develop에
+dual-head가 발생 — 먼저 머지된 #2168의 0184(push_devices)를 선점으로 두고 이 마이그를
+0184→0185로 renumber(원 revision/down_revision은 각각 0184/0183였음). 내용 변경 없음.
+
 organizations.slug는 이미 존재하는 컬럼(모델 unique=True 선언)·이 마이그와 무관 — 단, 실측
-결과 DB 레벨 UNIQUE 제약이 baseline부터 누락돼있던 별개 갭을 발견해 0185에서 봉합한다(발견
+결과 DB 레벨 UNIQUE 제약이 baseline부터 누락돼있던 별개 갭을 발견해 0186에서 봉합한다(발견
 즉시 수정). 순수 additive — 기존 스키마 무회귀. 백필: name→slugify(app.services.doc_slug와
 동일 유니코드 NFC 계약)·org 내 충돌은 `-2`,`-3`… suffix(생성 순서=created_at ASC로 결정적)로
 해소.
@@ -17,8 +21,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0184"
-down_revision = "0183"
+revision = "0185"
+down_revision = "0184"
 branch_labels = None
 depends_on = None
 

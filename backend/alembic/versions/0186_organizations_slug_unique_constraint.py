@@ -1,8 +1,12 @@
 """story 139d2405(S-slug-infra) 후속 발견: organizations.slug UNIQUE 제약 누락 봉합.
 
-Revision ID: 0185
-Revises: 0184
+Revision ID: 0186
+Revises: 0185
 Create Date: 2026-07-15
+
+⚠️renumber(2026-07-15): 병렬 BE PR(#2168 push_devices)이 동시에 "0184"를 채번해 develop에
+dual-head가 발생 — 이 마이그는 0185→0186으로 renumber(원 revision/down_revision은 각각
+0185/0184였음). 내용 변경 없음.
 
 SQLAlchemy 모델(app/models/organization.py)은 `slug: Mapped[str] = mapped_column(..., unique=True)`
 로 선언돼 있었지만, baseline schema.sql부터 실제 DB엔 이 제약이 한 번도 반영된 적이 없었다
@@ -20,8 +24,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0185"
-down_revision = "0184"
+revision = "0186"
+down_revision = "0185"
 branch_labels = None
 depends_on = None
 
