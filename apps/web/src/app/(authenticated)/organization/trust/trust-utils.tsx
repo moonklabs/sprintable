@@ -98,6 +98,43 @@ export function TrustBadge({ hitRate, resolved, t }: { hitRate: number | null; r
   return <Badge variant="chip">{t('trustHitRate', { rate: Math.round(hitRate * 100) })}</Badge>;
 }
 
+// Ortega 지시(C2a 심화): history 드릴다운을 스파크라인으로 보강 — "성과 추이 그래프/감시"가
+// 아니라 이미 리스트로 노출 중인 데이터의 가독성 개선일 뿐이므로, 신규 데이터/신규 신호를
+// 만들지 않는다(숫자는 여전히 리스트가 SSOT). 콜드스타트(hit_rate=null) 지점은 값이 없어
+// 그릴 수 없으므로 제외(0으로 대체하면 "나쁜 성과"로 왜곡 — isColdStart와 동일 원칙).
+// BE history는 computed_at DESC(최신 우선)로 오므로 좌→우 시간순으로 보이도록 뒤집는다.
+export function extractSparklineValues(snapshots: HistorySnapshot[]): number[] {
+  return [...snapshots].reverse()
+    .filter((s) => !isColdStart(s.hit_rate, s.resolved))
+    .map((s) => s.hit_rate as number);
+}
+
+// 순수 SVG 폴리라인 — 신규 차트 라이브러리 의존성 도입 안 함(과확대 방지·코드베이스에 선례
+// 없음을 그라운딩으로 확認). E-VERIFY 톤: 단일 중립색(text-muted-foreground)만, red/yellow/green
+// 등급 컬러 없음·축/라벨/숫자 없음(수치는 옆 리스트가 SSOT, 스파크라인은 형태만 보조).
+export function Sparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return null;
+  const width = 120;
+  const height = 24;
+  const pad = 2;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const points = values
+    .map((v, i) => {
+      const x = pad + (i / (values.length - 1)) * (width - pad * 2);
+      const y = height - pad - ((v - min) / range) * (height - pad * 2);
+      return `${x},${y}`;
+    })
+    .join(' ');
+
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="text-muted-foreground/60" aria-hidden="true">
+      <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function HistoryDrilldown({ memberId, roleKey, t }: { memberId: string; roleKey: string; t: Translator }) {
   const [open, setOpen] = useState(false);
   const [snapshots, setSnapshots] = useState<HistorySnapshot[] | null>(null);
@@ -132,12 +169,15 @@ export function HistoryDrilldown({ memberId, roleKey, t }: { memberId: string; r
           ) : snapshots.length === 0 ? (
             <p className="text-xs text-muted-foreground">{t('trustHistoryEmpty')}</p>
           ) : (
-            snapshots.map((s) => (
-              <div key={s.computed_at} className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{formatDate(s.computed_at)}</span>
-                <TrustBadge hitRate={s.hit_rate} resolved={s.resolved} t={t} />
-              </div>
-            ))
+            <>
+              <Sparkline values={extractSparklineValues(snapshots)} />
+              {snapshots.map((s) => (
+                <div key={s.computed_at} className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{formatDate(s.computed_at)}</span>
+                  <TrustBadge hitRate={s.hit_rate} resolved={s.resolved} t={t} />
+                </div>
+              ))}
+            </>
           )}
         </div>
       ) : null}

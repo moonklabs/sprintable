@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { isColdStart, groupRosterByRole, mergeMemberLookup, sortGroupMembersByName } from './trust-utils';
-import type { RosterMember } from './trust-utils';
+import { isColdStart, groupRosterByRole, mergeMemberLookup, sortGroupMembersByName, extractSparklineValues } from './trust-utils';
+import type { RosterMember, HistorySnapshot } from './trust-utils';
 
 describe('isColdStart (story 7e21a8b5 — E-VERIFY 콜드스타트 중립 판정)', () => {
   it('is cold-start when hit_rate is null (표본 없음)', () => {
@@ -104,5 +104,30 @@ describe('mergeMemberLookup (org-members 우선, team-members는 보강만 — i
 
   it('returns an empty map for two empty sources', () => {
     expect(mergeMemberLookup([], []).size).toBe(0);
+  });
+});
+
+describe('extractSparklineValues (Ortega 지시 C2a 심화 — 가독성 개선용, 감시 신호 아님)', () => {
+  const snap = (computed_at: string, hit_rate: number | null, resolved: number | null = 5): HistorySnapshot =>
+    ({ computed_at, hit_rate, resolved });
+
+  it('reverses BE order (computed_at DESC → 좌→우 시간순) so oldest is first', () => {
+    // BE history는 최신이 먼저 온다(computed_at DESC) — 스파크라인은 시간순으로 읽혀야 하므로
+    // 순서가 뒤집혀야 한다. 뒤집지 않으면 그래프가 시간 역행으로 그려진다(치명적 오독).
+    const snapshots = [snap('2026-07-15T00:00:00Z', 0.9), snap('2026-07-01T00:00:00Z', 0.1)];
+    expect(extractSparklineValues(snapshots)).toEqual([0.1, 0.9]);
+  });
+
+  it('excludes cold-start snapshots (hit_rate=null) — never plotted as 0 (E-VERIFY 왜곡 방지)', () => {
+    const snapshots = [
+      snap('2026-07-01T00:00:00Z', null, 0),
+      snap('2026-07-08T00:00:00Z', 0.5),
+      snap('2026-07-15T00:00:00Z', null, 0),
+    ];
+    expect(extractSparklineValues(snapshots)).toEqual([0.5]);
+  });
+
+  it('returns an empty array when every snapshot is cold-start', () => {
+    expect(extractSparklineValues([snap('2026-07-01T00:00:00Z', null, 0)])).toEqual([]);
   });
 });
