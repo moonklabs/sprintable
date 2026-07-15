@@ -83,6 +83,7 @@ async def create_parallel_gate(
         "reject_policy": quorum.get("reject_policy", "any_reject_blocks"),
     }
 
+    blocking_approver_ids: list[uuid.UUID] = []
     for a in approvers:
         kind = a.get("kind", "approver")
         blocking = a.get("blocking", kind == "approver")
@@ -101,8 +102,43 @@ async def create_parallel_gate(
             implementation_member_id=implementation_member_id,
             role_key=a.get("role_key"), kind=kind, blocking=blocking, status="pending",
         ))
+        if blocking and aid not in blocking_approver_ids:
+            blocking_approver_ids.append(aid)
     await session.flush()
+
+    # story c1475cb5(E-MOBILE M0 S1): 승인자 알림 갭 봉합 — approver row는 만들면서 통지는 안 나가던
+    # 경로. doc.py `_notify_doc_approval_requested` 선례와 동형(best-effort·기존 dispatch_notification
+    # 파이프라인 재사용·신규 채널/테이블 0).
+    await _notify_parallel_gate_approvers(session, step_run, gate, blocking_approver_ids)
+
     return gate, group_id
+
+
+async def _notify_parallel_gate_approvers(
+    session: AsyncSession,
+    step_run: WorkflowLineStepRun,
+    gate: Gate,
+    approver_ids: list[uuid.UUID],
+) -> None:
+    """story c1475cb5: parallel gate 생성 시 blocking approver에게 pending 통지.
+
+    doc.py `_notify_doc_approval_requested`와 동형(best-effort·비중단 — 알림 실패가 게이트 생성을
+    막지 않음). consult/non-blocking approver는 quorum에 안 들어 의사결정 주체가 아니므로 제외.
+    """
+    if not approver_ids:
+        return
+    try:
+        from app.services.notification_dispatch import dispatch_notification
+        await dispatch_notification(
+            session, org_id=step_run.org_id, event_type="gate_approval_requested",
+            target_member_ids=approver_ids,
+            title="게이트 결재 요청",
+            body=f"{step_run.entity_type} 항목의 {gate.gate_type} 결재가 대기 중입니다.",
+            reference_type="gate", reference_id=gate.id,
+            source_project_id=step_run.project_id,
+        )
+    except Exception:  # noqa: BLE001 — 알림 실패는 게이트 생성 비중단.
+        logger.warning("parallel gate 승인자 알림 실패 gate=%s", gate.id, exc_info=True)
 
 
 async def _tally_blocking(session: AsyncSession, group_id: uuid.UUID) -> dict[str, int]:
