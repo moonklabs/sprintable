@@ -19,6 +19,9 @@ import {
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
 import { HypothesesSummary } from '@/components/hypotheses/hypotheses-summary';
+import { EpicHypothesisDeclarationSection } from '@/components/epics/hypothesis-declaration-section';
+import type { HypothesisDeclarationValue } from '@/services/hypothesis-declaration';
+import { toEpicHypothesisCreatePayload, toEpicHypothesisLink } from '@/services/hypothesis-declaration-epic';
 import { SteerDispatchModal } from './steer-dispatch-modal';
 
 // ─── Drag sensor ──────────────────────────────────────────────────────────────
@@ -171,8 +174,39 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
   const [priority, setPriority] = useState<EpicPriority>('medium');
   const [targetDate, setTargetDate] = useState('');
   const [targetSp, setTargetSp] = useState('');
+  const [declarations, setDeclarations] = useState<HypothesisDeclarationValue[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // story 671ea3b8(S4) — 가설 선언은 에픽 생성 자체를 막지 않는다(에픽엔 스프린트의
+  // HYPOTHESIS_REQUIRED_FOR_ACTIVATION 동형 BE 하드게이트가 없다 — 그라운딩 확認). 에픽 생성
+  // 성공 후 선언된 가설을 개별로 생성/링크(best-effort, 스프린트 쪽 배선과 동형 — 개별 실패는
+  // 에픽 생성 자체를 되돌리지 않고 조용히 넘어간다).
+  const wireDeclarations = useCallback(async (epicId: string) => {
+    await Promise.all(declarations.map(async (d) => {
+      try {
+        const createPayload = toEpicHypothesisCreatePayload(d, projectId, epicId);
+        if (createPayload) {
+          await fetch('/api/hypotheses', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(createPayload),
+          });
+          return;
+        }
+        const link = toEpicHypothesisLink(d, epicId);
+        if (link) {
+          await fetch(`/api/hypotheses/${link.hypothesisId}/links`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(link.payload),
+          });
+        }
+      } catch {
+        // best-effort — 개별 가설 배선 실패가 에픽 생성 자체를 되돌리지 않는다.
+      }
+    }));
+  }, [declarations, projectId]);
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,13 +235,14 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
       if (!res.ok) throw new Error('Failed to create epic');
 
       const { data } = await res.json() as { data: Epic };
+      await wireDeclarations(data.id);
       onCreated(data);
     } catch {
       setError('에픽 생성에 실패했습니다. 다시 시도해 주세요.');
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, targetDate, targetSp, projectId, orgId, onCreated]);
+  }, [title, description, priority, targetDate, targetSp, projectId, orgId, onCreated, wireDeclarations]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -271,6 +306,14 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
           className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
+
+      <EpicHypothesisDeclarationSection
+        projectId={projectId}
+        contextTitle={title}
+        contextGoal={description}
+        declarations={declarations}
+        onChange={setDeclarations}
+      />
 
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
 
