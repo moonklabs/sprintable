@@ -124,7 +124,7 @@ async def test_admin_can_configure_another_members_webhook():
             caller_member_id = await _get_caller_member_id(auth=auth, org_id=ORG, session=s)
             assert caller_member_id == ADMIN_OM  # 그라운딩: admin 캐스팅이 예상 축과 일치
 
-            body = UpsertWebhookConfig(member_id=AGENT_TARGET, url="https://hooks.example.com/agent-target")
+            body = UpsertWebhookConfig(member_id=AGENT_TARGET, url="https://example.com/agent-target")
             result = await upsert_webhook_config(
                 body=body, repo=WebhookConfigRepository(s, ORG),
                 caller_member_id=caller_member_id, auth=auth, org_id=ORG, session=s,
@@ -133,7 +133,7 @@ async def test_admin_can_configure_another_members_webhook():
             assert result.member_id == AGENT_TARGET  # admin 자신(ADMIN_OM) 아닌 target에 반영
 
         async with Session() as s:
-            assert await _webhook_row(s, ORG, AGENT_TARGET) == "https://hooks.example.com/agent-target"
+            assert await _webhook_row(s, ORG, AGENT_TARGET) == "https://example.com/agent-target"
             assert await _webhook_row(s, ORG, ADMIN_OM) is None  # admin 자신 행은 생성 0
     finally:
         await engine.dispose()
@@ -160,7 +160,7 @@ async def test_non_admin_cross_member_blocked_no_silent_self_write():
             caller_member_id = await _get_caller_member_id(auth=auth, org_id=ORG, session=s)
             assert caller_member_id == MEMBER_OM
 
-            body = UpsertWebhookConfig(member_id=AGENT_TARGET, url="https://hooks.example.com/sabotage-attempt")
+            body = UpsertWebhookConfig(member_id=AGENT_TARGET, url="https://example.com/sabotage-attempt")
             with pytest.raises(HTTPException) as exc:
                 await upsert_webhook_config(
                     body=body, repo=WebhookConfigRepository(s, ORG),
@@ -196,7 +196,7 @@ async def test_self_service_unaffected_agent_caller():
             caller_member_id = await _get_caller_member_id(auth=auth, org_id=ORG, session=s)
             assert caller_member_id == AGENT_TARGET
 
-            body = UpsertWebhookConfig(member_id=AGENT_TARGET, url="https://hooks.example.com/self")
+            body = UpsertWebhookConfig(member_id=AGENT_TARGET, url="https://example.com/self")
             result = await upsert_webhook_config(
                 body=body, repo=WebhookConfigRepository(s, ORG),
                 caller_member_id=caller_member_id, auth=auth, org_id=ORG, session=s,
@@ -205,7 +205,7 @@ async def test_self_service_unaffected_agent_caller():
             assert result.member_id == AGENT_TARGET
 
         async with Session() as s:
-            assert await _webhook_row(s, ORG, AGENT_TARGET) == "https://hooks.example.com/self"
+            assert await _webhook_row(s, ORG, AGENT_TARGET) == "https://example.com/self"
     finally:
         await engine.dispose()
 
@@ -229,7 +229,7 @@ async def test_cross_org_target_404_not_body_claimed():
             auth = _admin_auth()
             caller_member_id = await _get_caller_member_id(auth=auth, org_id=ORG, session=s)
 
-            body = UpsertWebhookConfig(member_id=OTHER_ORG_AGENT, url="https://hooks.example.com/cross-org")
+            body = UpsertWebhookConfig(member_id=OTHER_ORG_AGENT, url="https://example.com/cross-org")
             with pytest.raises(HTTPException) as exc:
                 await upsert_webhook_config(
                     body=body, repo=WebhookConfigRepository(s, ORG),

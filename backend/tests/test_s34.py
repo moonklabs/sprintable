@@ -98,7 +98,12 @@ async def test_upsert_config_create_200():
     client, session, app = await _client()
     try:
         with patch("app.schemas.webhook_config.validate_webhook_url"), \
-             patch("app.repositories.webhook_config.WebhookConfigRepository.upsert", new_callable=AsyncMock) as mock_upsert:
+             patch("app.repositories.webhook_config.WebhookConfigRepository.upsert", new_callable=AsyncMock) as mock_upsert, \
+             patch("app.routers.webhooks._resolve_target_member_id", new=AsyncMock(return_value=MEMBER_ID)):
+            # story 933248fa: body.member_id==MEMBER_ID(=overridden caller)라 자기서비스 경로 —
+            # 신규 target 재해소(_resolve_target_member_id, 실 DB 쿼리)는 이 단위테스트 스코프 밖이라
+            # mock. CRUD 200 계약만 검증(target-resolution 자체는 test_webhook_config_target_member_
+            # realdb.py가 커버).
             mock_upsert.return_value = _mock_config()
 
             async with client as c:
@@ -121,7 +126,8 @@ async def test_upsert_config_update_200():
     try:
         updated = _mock_config(is_active=False)
         with patch("app.schemas.webhook_config.validate_webhook_url"), \
-             patch("app.repositories.webhook_config.WebhookConfigRepository.upsert", new_callable=AsyncMock) as mock_upsert:
+             patch("app.repositories.webhook_config.WebhookConfigRepository.upsert", new_callable=AsyncMock) as mock_upsert, \
+             patch("app.routers.webhooks._resolve_target_member_id", new=AsyncMock(return_value=MEMBER_ID)):
             mock_upsert.return_value = updated
 
             async with client as c:
