@@ -5,5 +5,5 @@ import { redirect } from 'next/navigation';
  * 기존 "채용관" CTA·딥링크 보존을 위해 이 경로는 탭으로 리다이렉트만 한다.
  */
 export default function RecruiterPage() {
-  redirect('/agents?tab=recruit');
+  redirect('/organization/workforce?tab=recruit');
 }

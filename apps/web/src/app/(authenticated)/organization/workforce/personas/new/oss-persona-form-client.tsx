@@ -17,7 +17,7 @@ export function OssPersonaFormClient({ agents }: { agents: Array<{ id: string; n
             description: fd.get('description'),
           }),
         });
-        if (res.ok) window.location.href = '/agents';
+        if (res.ok) window.location.href = '/organization/workforce';
       }}
     >
       <div className="space-y-2">

@@ -35,7 +35,7 @@ describe('buildActionCommands — v1 inventory (route-first, no-fiction)', () =>
   it('recruit-agent routes to the recruiter wizard and is not a danger command', () => {
     const items = buildActionCommands(t);
     const recruit = items.find((i) => i.id === 'action-recruit-agent')!;
-    expect(recruit.targetRoute).toBe('/agents/recruiter');
+    expect(recruit.targetRoute).toBe('/organization/workforce/recruiter');
     expect(recruit.danger).toBe(false);
   });
 

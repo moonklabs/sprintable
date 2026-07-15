@@ -5,8 +5,10 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
+  Award,
   BookOpen,
   Bot,
+  Brain,
   CalendarRange,
   CircleHelp,
   ClipboardList,
@@ -23,7 +25,9 @@ import {
   Newspaper,
   Search,
   Settings,
+  Shield,
   Users,
+  Users2,
 } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
@@ -352,14 +356,65 @@ export function AppSidebar({
                 </SidebarMenuButton>
               </SidebarMenuItem>
               {/* E-SETTINGS S5: Meetings 메뉴 숨김 — /meetings 진입 차단(route thin guard 404). */}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* ⑤ 조직 / Organization — 주체·구조 프레임(4구역=주의 모드와 별개 축). story c4980e70·
+            doc org-1st-class-surface-ia-design-b §1. 에이전트=1급 멤버·조직/워크포스 1차 홈(🔒확定).
+            신뢰·기억은 C 트랙 전 자리(slot)만 — no-fiction. */}
+        <SidebarGroup>
+          <SidebarGroupLabel>{t('zoneOrganization')}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  render={<Link href="/agents" />}
-                  isActive={isActive('/agents')}
-                  tooltip={t('agents')}
+                  render={<Link href="/organization/members" />}
+                  isActive={isActive('/organization/members')}
+                  tooltip={t('orgMembers')}
+                >
+                  <Users2 />
+                  <span>{t('orgMembers')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/organization/workforce" />}
+                  isActive={isActive('/organization/workforce')}
+                  tooltip={t('workforce')}
                 >
                   <Bot />
-                  <span>{t('agents')}</span>
+                  <span>{t('workforce')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/organization/roles" />}
+                  isActive={isActive('/organization/roles')}
+                  tooltip={t('orgRoles')}
+                >
+                  <Shield />
+                  <span>{t('orgRoles')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/organization/trust" />}
+                  isActive={isActive('/organization/trust')}
+                  tooltip={t('orgTrust')}
+                >
+                  <Award />
+                  <span>{t('orgTrust')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/organization/memory" />}
+                  isActive={isActive('/organization/memory')}
+                  tooltip={t('orgMemory')}
+                >
+                  <Brain />
+                  <span>{t('orgMemory')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

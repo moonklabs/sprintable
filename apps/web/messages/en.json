@@ -74,7 +74,13 @@
     "zoneWork": "Work",
     "zoneTrust": "Trust",
     "zoneKnowledge": "Knowledge",
-    "orgBriefing": "Org Briefing"
+    "orgBriefing": "Org Briefing",
+    "zoneOrganization": "Organization",
+    "orgMembers": "Members",
+    "workforce": "Workforce",
+    "orgRoles": "Roles",
+    "orgTrust": "Trust",
+    "orgMemory": "Memory"
   },
   "storage": {
     "title": "Storage",
@@ -324,6 +330,18 @@
     "workforceTogether": "Working together",
     "workforceUnassigned": "Not yet assigned",
     "workforceEmpty": "No active work right now"
+  },
+  "organization": {
+    "rolesTitle": "Roles",
+    "rolesDescription": "View and change organization members' roles, grouped by role.",
+    "roleGroupOwner": "Owner",
+    "roleGroupAdmin": "Admin",
+    "roleGroupMember": "Member",
+    "roleGroupEmpty": "No members with this role.",
+    "trustSlotTitle": "Trust",
+    "trustSlotBody": "Org-level trust capital is coming soon.",
+    "memorySlotTitle": "Memory",
+    "memorySlotBody": "Org-level accumulated memory is coming soon."
   },
   "board": {
     "title": "Kanban Board",

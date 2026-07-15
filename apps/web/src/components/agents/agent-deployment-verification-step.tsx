@@ -95,7 +95,7 @@ export function AgentDeploymentVerificationStep({
           <li>{mcpValidationErrorCount !== null && mcpValidationErrorCount !== undefined ? t('verificationCheckpointMcp', { count: mcpValidationErrorCount }) : t('verificationCheckpointMcpFallback')}</li>
         </ul>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Link href="/agents" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('verificationOpenDashboardCta')}</Link>
+          <Link href="/organization/workforce" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('verificationOpenDashboardCta')}</Link>
           <Link href="/dashboard/settings" className={buttonVariants({ variant: 'glass', size: 'lg' })}>{t('verificationOpenSettingsCta')}</Link>
           {!verificationCompleted ? (
             <Button variant="glass" size="lg" disabled={verificationSubmitting} onClick={onCompleteVerification}>
