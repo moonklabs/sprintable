@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { isColdStart, groupRosterByRole, mergeMemberLookup } from './trust-utils';
+import { isColdStart, groupRosterByRole, mergeMemberLookup, sortGroupMembersByName } from './trust-utils';
+import type { RosterMember } from './trust-utils';
 
 describe('isColdStart (story 7e21a8b5 — E-VERIFY 콜드스타트 중립 판정)', () => {
   it('is cold-start when hit_rate is null (표본 없음)', () => {
@@ -44,6 +45,35 @@ describe('groupRosterByRole (E-VERIFY 중립 정렬 — 성과순 금지, 라벨
 
   it('returns empty for an empty roster', () => {
     expect(groupRosterByRole([])).toEqual([]);
+  });
+});
+
+describe('sortGroupMembersByName (유나 가디언 지적 PR#2191 — within-group 순위 누수 fix)', () => {
+  const row = (member_id: string, hit_rate: number | null = null, resolved: number | null = 0) =>
+    ({ member_id, role_key: 'dev', role_label: '개발', hit_rate, resolved, computed_at: '2026-07-15T00:00:00Z' });
+  const lookup = (entries: Array<[string, string]>) =>
+    new Map<string, RosterMember>(entries.map(([id, name]) => [id, { id, name }]));
+
+  it('sorts by resolved name, ignoring hit_rate (BE org-summary는 ORDER BY 없음 — FE가 방어)', () => {
+    // BE 응답 순서를 그대로 시뮬레이션: hit_rate 높은 순으로 옴(우연한 성과순 — 실제 BE엔
+    // ORDER BY 자체가 없어 발생 가능한 상황). FE 재정렬 없이 그대로 쓰면 줄세우기로 읽힌다.
+    const rows = [row('m-charlie', 0.99, 10), row('m-alice', 0.1, 10), row('m-bob', 0.5, 10)];
+    const names = lookup([['m-charlie', 'Charlie'], ['m-alice', 'Alice'], ['m-bob', 'Bob']]);
+    const sorted = sortGroupMembersByName(rows, names);
+    expect(sorted.map((r) => r.member_id)).toEqual(['m-alice', 'm-bob', 'm-charlie']);
+  });
+
+  it('pushes unresolved (name-lookup miss) members to the end, not first', () => {
+    const rows = [row('m-unknown'), row('m-alice')];
+    const names = lookup([['m-alice', 'Alice']]);
+    const sorted = sortGroupMembersByName(rows, names);
+    expect(sorted.map((r) => r.member_id)).toEqual(['m-alice', 'm-unknown']);
+  });
+
+  it('tie-breaks by member_id when both are unresolved (결정론적 — 알 수 없는 구성원끼리 순서 안정)', () => {
+    const rows = [row('m-zzz'), row('m-aaa')];
+    const sorted = sortGroupMembersByName(rows, new Map());
+    expect(sorted.map((r) => r.member_id)).toEqual(['m-aaa', 'm-zzz']);
   });
 });
 

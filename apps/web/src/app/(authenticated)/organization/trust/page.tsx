@@ -10,6 +10,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import {
   groupRosterByRole,
   mergeMemberLookup,
+  sortGroupMembersByName,
   HistoryDrilldown,
   TrustBadge,
   type OrgSummaryRow,
@@ -93,7 +94,7 @@ export default function OrganizationTrustPage() {
               </SectionCardHeader>
               <SectionCardBody>
                 <div className="space-y-2">
-                  {rows.map((row) => {
+                  {sortGroupMembersByName(rows, rosterMembers).map((row) => {
                     const member = rosterMembers.get(row.member_id);
                     return (
                       <MemberRow

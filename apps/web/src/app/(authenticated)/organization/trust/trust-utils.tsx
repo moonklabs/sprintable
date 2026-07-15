@@ -55,6 +55,22 @@ export function groupRosterByRole(rows: OrgSummaryRow[]): Array<[string, OrgSumm
   return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
 }
 
+// 유나 가디언 리뷰(PR#2191) 지적: groupRosterByRole은 그룹 자체는 이름순이지만, 그룹 시점엔
+// 멤버 이름이 아직 미해소라 그룹 "내부" 멤버 순서는 BE org-summary 응답 순서 그대로 남는다 —
+// BE가 성과(hit_rate)순으로 반환하면 그룹 안에서 줄세우기로 읽힐 수 있다(E-VERIFY 위반).
+// BE 응답 순서를 신뢰하지 않고 FE에서 명시적으로 이름 기준 중립 재정렬한다 — 이름 미해소
+// 멤버(lookup 미스)는 뒤로 밀되 member_id로 결정적 tie-break(리렌더마다 순서 흔들림 방지).
+export function sortGroupMembersByName(rows: OrgSummaryRow[], lookup: Map<string, RosterMember>): OrgSummaryRow[] {
+  return [...rows].sort((a, b) => {
+    const nameA = lookup.get(a.member_id)?.name;
+    const nameB = lookup.get(b.member_id)?.name;
+    if (nameA && nameB) return nameA.localeCompare(nameB);
+    if (nameA) return -1;
+    if (nameB) return 1;
+    return a.member_id.localeCompare(b.member_id);
+  });
+}
+
 // org-members(OrgMember id 공간)+team-members(TeamMember id 공간) 두 소스를 병합 — org-summary의
 // member_id는 legacy 시절 team_member.id를 canonicalize 안 한 채 저장된 경우가 있어(BE
 // member_resolver.py canonicalize_member_id 패턴) 어느 쪽 id 공간이든 이름 해소가 가능해야 한다.
