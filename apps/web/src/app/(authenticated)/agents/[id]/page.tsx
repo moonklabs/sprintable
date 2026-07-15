@@ -327,6 +327,10 @@ export default function AgentDetailPage() {
     (currentUserId !== null && agent.created_by === currentUserId) ||
     orgRole === 'admin' ||
     orgRole === 'owner';
+  // story 933248fa — 타 멤버 웹훅 설정은 BE가 admin/owner role만 허용(creator 단독은 불가, 산티아고
+  // IDOR 방어 유지). canEdit(creator 포함)보다 엄격하게 별도 게이트 — 아니면 편집 UI가 "가능해 보이는데
+  // 실제로 실패"하는 정직하지 않은 상태가 재발한다(§673 프로젝트 grant 게이트와 동일 패턴).
+  const canEditWebhook = orgRole === 'admin' || orgRole === 'owner';
 
   const handleSaveRuntime = async () => {
     setSavingRuntime(true);
@@ -549,6 +553,9 @@ export default function AgentDetailPage() {
               </div>
             </SectionCardHeader>
             <SectionCardBody className="space-y-3">
+              {!canEditWebhook ? (
+                <p className="text-xs text-muted-foreground">{t('webhookAdminOnly')}</p>
+              ) : null}
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium">{t('webhookEnabledToggle')}</p>
@@ -557,7 +564,7 @@ export default function AgentDetailPage() {
                 <Switch
                   checked={webhookActive}
                   onCheckedChange={(next) => void handleToggle(next)}
-                  disabled={savingWebhook}
+                  disabled={savingWebhook || !canEditWebhook}
                 />
               </div>
               <div className="flex gap-2">
@@ -567,13 +574,13 @@ export default function AgentDetailPage() {
                   onChange={(e) => setWebhookUrl(e.target.value)}
                   placeholder="https://your-agent.example.com/webhook"
                   className="flex-1 font-mono text-xs"
-                  disabled={!webhookActive}
+                  disabled={!webhookActive || !canEditWebhook}
                 />
                 <Button
                   variant="hero"
                   size="sm"
                   onClick={() => void handleSaveWebhook()}
-                  disabled={savingWebhook || !webhookActive || !webhookUrl.trim()}
+                  disabled={savingWebhook || !webhookActive || !webhookUrl.trim() || !canEditWebhook}
                 >
                   {savingWebhook ? '...' : tc('save')}
                 </Button>

@@ -161,23 +161,74 @@ async def test_delete_is_member_scoped_404_for_other():
     assert repo.delete.await_args.args[1] == caller
 
 
-@pytest.mark.anyio
-async def test_upsert_uses_caller_member_ignoring_body():
-    """PUT 은 body.member_id 를 무시하고 **caller_member_id 로 강제** upsert(타 멤버 설정 불가)."""
-    from app.routers.webhooks import upsert_webhook_config
-    repo = AsyncMock()
-    repo.upsert = AsyncMock(return_value=SimpleNamespace(
-        id=uuid.uuid4(), org_id=uuid.uuid4(), member_id=uuid.uuid4(), project_id=None,
+def _mock_response_for(member_id: uuid.UUID) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid.uuid4(), org_id=uuid.uuid4(), member_id=member_id, project_id=None,
         url="https://x/h", events=[], channel="generic", is_active=True,
         created_at=__import__("datetime").datetime(2026, 1, 1), secret=None,
-    ))
+    )
+
+
+def _auth(role: str) -> SimpleNamespace:
+    return SimpleNamespace(user_id=str(uuid.uuid4()), email=None, claims={"app_metadata": {"role": role}})
+
+
+@pytest.mark.anyio
+async def test_upsert_self_service_bypasses_admin_check():
+    """story 933248fa fix: target(재해소된 body.member_id)==caller 면 role 무관 무회귀(자기서비스)."""
+    from app.routers.webhooks import upsert_webhook_config
+    repo = AsyncMock()
+    caller = uuid.uuid4()
+    repo.upsert = AsyncMock(return_value=_mock_response_for(caller))
+    body = SimpleNamespace(
+        member_id=caller, url="https://x/h", project_id=None, events=[], is_active=True, secret=None
+    )
+    with patch("app.routers.webhooks._resolve_target_member_id", new=AsyncMock(return_value=caller)):
+        await upsert_webhook_config(
+            body, repo=repo, caller_member_id=caller,
+            auth=_auth("member"), org_id=uuid.uuid4(), session=AsyncMock(),
+        )
+    assert repo.upsert.await_args.kwargs["member_id"] == caller
+
+
+@pytest.mark.anyio
+async def test_upsert_non_admin_cross_member_403_no_silent_fallback():
+    """story 933248fa fix — 이번 버그의 핵심: 비-admin이 타 멤버(재해소된 target!=caller)를 노리면
+    예전처럼 caller 로 침묵 강제 upsert 하지 않는다. 명시 403 **AND repo.upsert 자체가 호출되지
+    않음**까지 확認(부작용 0 직접 증명 — realdb IDOR sabotage 테스트의 단위테스트 짝)."""
+    from fastapi import HTTPException
+    from app.routers.webhooks import upsert_webhook_config
+    repo = AsyncMock()
     caller, other = uuid.uuid4(), uuid.uuid4()
     body = SimpleNamespace(
         member_id=other, url="https://x/h", project_id=None, events=[], is_active=True, secret=None
     )
-    await upsert_webhook_config(body, repo=repo, caller_member_id=caller)
-    # body.member_id(other) 가 아니라 caller 로 upsert — 타 멤버 설정 불가
-    assert repo.upsert.await_args.kwargs["member_id"] == caller
+    with patch("app.routers.webhooks._resolve_target_member_id", new=AsyncMock(return_value=other)):
+        with pytest.raises(HTTPException) as exc:
+            await upsert_webhook_config(
+                body, repo=repo, caller_member_id=caller,
+                auth=_auth("member"), org_id=uuid.uuid4(), session=AsyncMock(),
+            )
+    assert exc.value.status_code == 403
+    repo.upsert.assert_not_awaited()  # ⭐caller 에게도 침묵 저장 0(이번 버그의 실제 부작용 재발 방지)
+
+
+@pytest.mark.anyio
+async def test_upsert_admin_can_target_another_member():
+    """story 933248fa fix: admin(JWT role)이면 재해소된 target(!=caller)으로 upsert 허용."""
+    from app.routers.webhooks import upsert_webhook_config
+    repo = AsyncMock()
+    caller, other = uuid.uuid4(), uuid.uuid4()
+    repo.upsert = AsyncMock(return_value=_mock_response_for(other))
+    body = SimpleNamespace(
+        member_id=other, url="https://x/h", project_id=None, events=[], is_active=True, secret=None
+    )
+    with patch("app.routers.webhooks._resolve_target_member_id", new=AsyncMock(return_value=other)):
+        await upsert_webhook_config(
+            body, repo=repo, caller_member_id=caller,
+            auth=_auth("admin"), org_id=uuid.uuid4(), session=AsyncMock(),
+        )
+    assert repo.upsert.await_args.kwargs["member_id"] == other
 
 
 # ─── 멤버 축 정합: _get_caller_member_id = resolve_member().id (산티아고/PO hotfix) ──

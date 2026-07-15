@@ -842,6 +842,7 @@
     "webhookHelperEmpty": "This agent uses the in-app fakechat channel for notifications. Enable the webhook to forward to external systems.",
     "webhookHelperActive": "Events are forwarded to the configured URL. In-app fakechat is not used.",
     "webhookHelperPaused": "The webhook URL is preserved but currently inactive. Re-enable the toggle to resume.",
+    "webhookAdminOnly": "Only admins can configure another member's webhook.",
     "webhookUrlRequired": "Enter a URL first.",
     "webhookListTitle": "My webhooks",
     "webhookScopeGlobal": "Global",
