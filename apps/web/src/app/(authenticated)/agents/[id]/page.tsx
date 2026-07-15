@@ -162,7 +162,12 @@ export default function AgentDetailPage() {
   }, []);
 
   const fetchWebhookConfigs = useCallback(async (projectId: string) => {
-    const res = await fetch(`/api/webhooks/config?project_id=${encodeURIComponent(projectId)}`);
+    // story 933248fa 재오픈: GET은 기본 caller-scope라 project_id만으로는 "내(caller) 웹훅"만
+    // 돌아온다 — admin이 타 멤버(id) 상세를 보는 중이면 ?member_id=로 그 타깃을 명시 조회해야
+    // BE의 admin override(list_webhook_configs)가 실제로 작동한다(write_ok≠read_success).
+    const res = await fetch(
+      `/api/webhooks/config?project_id=${encodeURIComponent(projectId)}&member_id=${encodeURIComponent(id)}`,
+    );
     if (!res.ok) return;
     const json = await res.json() as { data: WebhookConfig[] };
     const agentConfigs = (json.data ?? []).filter((c) => c.member_id === id);

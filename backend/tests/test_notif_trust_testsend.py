@@ -136,15 +136,71 @@ async def test_test_send_uses_owned_scope_with_caller_member():
     assert repo.get_owned.await_args.args[1] == caller  # caller member 로 소유 검증
 
 
+def _dummy_auth(role: str = "member") -> SimpleNamespace:
+    return SimpleNamespace(user_id=str(uuid.uuid4()), email=None, claims={"app_metadata": {"role": role}})
+
+
 @pytest.mark.anyio
 async def test_list_is_member_scoped():
-    """list 는 caller member-scope — org-wide leak 차단."""
+    """list 는 caller member-scope(member_id 쿼리 미지정) — org-wide leak 차단. 무회귀."""
     from app.routers.webhooks import list_webhook_configs
     repo = AsyncMock()
     repo.list = AsyncMock(return_value=[])
     caller = uuid.uuid4()
-    await list_webhook_configs(project_id=None, repo=repo, caller_member_id=caller)
+    await list_webhook_configs(
+        project_id=None, member_id=None, repo=repo, caller_member_id=caller,
+        auth=_dummy_auth(), org_id=uuid.uuid4(), session=AsyncMock(),
+    )
     assert repo.list.await_args.kwargs["member_id"] == caller
+
+
+@pytest.mark.anyio
+async def test_list_member_id_self_is_noop():
+    """story 933248fa 재오픈: ?member_id=자기자신 이면 role 무관 무회귀(자기서비스)."""
+    from app.routers.webhooks import list_webhook_configs
+    repo = AsyncMock()
+    repo.list = AsyncMock(return_value=[])
+    caller = uuid.uuid4()
+    with patch("app.routers.webhooks._resolve_target_member_id", new=AsyncMock(return_value=caller)):
+        await list_webhook_configs(
+            project_id=None, member_id=caller, repo=repo, caller_member_id=caller,
+            auth=_dummy_auth("member"), org_id=uuid.uuid4(), session=AsyncMock(),
+        )
+    assert repo.list.await_args.kwargs["member_id"] == caller
+
+
+@pytest.mark.anyio
+async def test_list_non_admin_cross_member_403_no_silent_scope_widen():
+    """story 933248fa 재오픈 — GET에도 PUT과 동형 방어: 비-admin이 ?member_id=타멤버 요청하면
+    caller-scope로 침묵 대체하지 않고 명시 403(+repo.list 자체 미호출까지 확認)."""
+    from fastapi import HTTPException
+    from app.routers.webhooks import list_webhook_configs
+    repo = AsyncMock()
+    caller, other = uuid.uuid4(), uuid.uuid4()
+    with patch("app.routers.webhooks._resolve_target_member_id", new=AsyncMock(return_value=other)):
+        with pytest.raises(HTTPException) as exc:
+            await list_webhook_configs(
+                project_id=None, member_id=other, repo=repo, caller_member_id=caller,
+                auth=_dummy_auth("member"), org_id=uuid.uuid4(), session=AsyncMock(),
+            )
+    assert exc.value.status_code == 403
+    repo.list.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_list_admin_can_view_another_members_config():
+    """story 933248fa 재오픈 fix — admin이 ?member_id=타멤버로 조회하면 그 타깃 스코프로 반환
+    (PUT admin override의 GET 대칭 — write_ok≠read_success 재발 방지)."""
+    from app.routers.webhooks import list_webhook_configs
+    repo = AsyncMock()
+    repo.list = AsyncMock(return_value=[])
+    caller, other = uuid.uuid4(), uuid.uuid4()
+    with patch("app.routers.webhooks._resolve_target_member_id", new=AsyncMock(return_value=other)):
+        await list_webhook_configs(
+            project_id=None, member_id=other, repo=repo, caller_member_id=caller,
+            auth=_dummy_auth("admin"), org_id=uuid.uuid4(), session=AsyncMock(),
+        )
+    assert repo.list.await_args.kwargs["member_id"] == other
 
 
 @pytest.mark.anyio

@@ -1,4 +1,4 @@
-"""story 933248fa — webhook config PUT의 admin-scoped target override + IDOR sabotage 방어 realdb.
+"""story 933248fa(+재오픈) — webhook config PUT/GET의 admin-scoped target override + IDOR sabotage 방어 realdb.
 
 근본: 산티아고의 원 IDOR 방어(caller-only, body.member_id 완전 무시)가 admin의 정당한 타 멤버
 설정 요구까지 침묵으로 caller 자신에 덮어썼다("200인데 미반영" + 실제 부작용=caller 자기 config
@@ -241,5 +241,88 @@ async def test_cross_org_target_404_not_body_claimed():
         async with Session() as s:
             assert await _webhook_row(s, OTHER_ORG, OTHER_ORG_AGENT) is None
             assert await _webhook_row(s, ORG, ADMIN_OM) is None  # admin 자신에게도 침묵 저장 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_admin_get_sees_target_member_config_after_admin_put():
+    """933248fa 재오픈 근본 — write_ok≠read_success: PUT의 admin override는 있었지만 GET이
+    caller-scope 그대로라 admin이 방금 저장한 타 멤버 config가 목록에 안 보였다(선생님 라이브
+    재현). admin이 PUT 후 같은 admin이 GET ?member_id=target 하면 실제로 보여야 한다."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.repositories.webhook_config import WebhookConfigRepository
+    from app.routers.webhooks import _get_caller_member_id, list_webhook_configs, upsert_webhook_config
+    from app.schemas.webhook_config import UpsertWebhookConfig
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _seed(s)
+
+        async with Session() as s:
+            auth = _admin_auth()
+            caller_member_id = await _get_caller_member_id(auth=auth, org_id=ORG, session=s)
+            body = UpsertWebhookConfig(member_id=AGENT_TARGET, url="https://example.com/read-after-write")
+            await upsert_webhook_config(
+                body=body, repo=WebhookConfigRepository(s, ORG),
+                caller_member_id=caller_member_id, auth=auth, org_id=ORG, session=s,
+            )
+            await s.commit()
+
+        async with Session() as s:
+            auth = _admin_auth()
+            caller_member_id = await _get_caller_member_id(auth=auth, org_id=ORG, session=s)
+            items = await list_webhook_configs(
+                project_id=None, member_id=AGENT_TARGET,
+                repo=WebhookConfigRepository(s, ORG),
+                caller_member_id=caller_member_id, auth=auth, org_id=ORG, session=s,
+            )
+            assert len(items) == 1
+            assert items[0].member_id == AGENT_TARGET
+            assert items[0].url == "https://example.com/read-after-write"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_non_admin_get_cross_member_403_and_own_scope_unaffected():
+    """비-admin이 ?member_id=타멤버로 GET하면 caller-scope로 침묵 대체하지 않고 403 —
+    ?member_id= 자체를 아예 안 보낸 자기 조회는 기존 그대로 캐치(무회귀)."""
+    from fastapi import HTTPException
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.repositories.webhook_config import WebhookConfigRepository
+    from app.routers.webhooks import _get_caller_member_id, list_webhook_configs
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _seed(s)
+
+        async with Session() as s:
+            auth = _member_auth()
+            caller_member_id = await _get_caller_member_id(auth=auth, org_id=ORG, session=s)
+            assert caller_member_id == MEMBER_OM
+            with pytest.raises(HTTPException) as exc:
+                await list_webhook_configs(
+                    project_id=None, member_id=AGENT_TARGET,
+                    repo=WebhookConfigRepository(s, ORG),
+                    caller_member_id=caller_member_id, auth=auth, org_id=ORG, session=s,
+                )
+            assert exc.value.status_code == 403
+
+        async with Session() as s:
+            auth = _member_auth()
+            caller_member_id = await _get_caller_member_id(auth=auth, org_id=ORG, session=s)
+            items = await list_webhook_configs(
+                project_id=None, member_id=None,
+                repo=WebhookConfigRepository(s, ORG),
+                caller_member_id=caller_member_id, auth=auth, org_id=ORG, session=s,
+            )
+            assert items == []  # 자기 config 0건인 것 확인(존재 자체를 안 만든 케이스), 예외 없이 통과
     finally:
         await engine.dispose()
