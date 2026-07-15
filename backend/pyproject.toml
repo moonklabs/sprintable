@@ -34,6 +34,9 @@ dependencies = [
     # ADC 인증(신규 크리덴셜 0). Gemini 피벗(2026-07-03)으로 anthropic[vertex](claude-sonnet-5
     # 생성형 경로)는 완전 은퇴 — moonklabs org GCP credit이 Vertex Claude 미포함.
     "google-genai>=1.0.0",
+    # E-AUTH-REBUILD M2 Phase1-S4: ADC 액세스 토큰(Identity Toolkit createSessionCookie 호출).
+    # google-cloud-storage의 전이 의존성으로 이미 설치돼 있었으나 직접 import하므로 명시 선언.
+    "google-auth>=2.30.0",
 ]
 
 [dependency-groups]
