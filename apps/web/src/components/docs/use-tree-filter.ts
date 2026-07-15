@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { Doc } from '@/app/(authenticated)/docs/docs-context';
+import type { Doc } from '@/app/(authenticated)/[ws]/[proj]/docs/docs-context';
 
 export function useTreeFilter(docs: Doc[], query: string) {
   const isSearching = query.trim().length > 0;

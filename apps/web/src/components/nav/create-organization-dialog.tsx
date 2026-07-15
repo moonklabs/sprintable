@@ -112,6 +112,7 @@ export function CreateOrganizationDialog({
             <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm space-y-1">
               <p className="font-medium text-amber-800">Free 플랜 Organization 한도 초과</p>
               <p className="text-amber-700">Free 플랜은 Organization 1개까지만 생성할 수 있습니다.</p>
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
               <a
                 href="/settings?tab=billing"
                 className="inline-block mt-1 text-xs font-medium text-amber-800 underline underline-offset-2 hover:text-amber-900"

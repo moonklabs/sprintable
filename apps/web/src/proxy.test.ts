@@ -14,9 +14,13 @@ import { proxy as middleware } from './proxy';
 
 const JWT_SECRET = 'test-secret-for-proxy-tests';
 
-async function makeAccessToken(overrides: { exp?: number; type?: string } = {}): Promise<string> {
+async function makeAccessToken(overrides: { exp?: number; type?: string; orgId?: string } = {}): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  return new SignJWT({ type: overrides.type ?? 'access', email: 'test@example.com' })
+  return new SignJWT({
+    type: overrides.type ?? 'access',
+    email: 'test@example.com',
+    ...(overrides.orgId ? { app_metadata: { org_id: overrides.orgId } } : {}),
+  })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject('user-123')
     .setIssuedAt(now)
@@ -208,5 +212,87 @@ describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
     const response = await middleware(makeRequest('/moonklabs/board', { sp_at: token, sp_resolve_cache: cacheToken }));
     expect(response.status).toBe(200);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+
+  it('/docs/design-tokens 는 개입 없이 통과(project-scoped 아닌 정적 페이지, 무회귀)', async () => {
+    // org_id+current-project 쿠키 둘 다 갖춰 다른 가드가 이 케이스를 우연히 가려주지 않게 한다
+    // (design-tokens 제외 가드 자체를 직접 증명 — 뮤테이션 셀프체크로 확인).
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/organizations/org-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      }
+      if (url.includes('/api/v2/projects/proj-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const response = await middleware(makeRequest('/docs/design-tokens', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(200);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('bare /docs/{slug} + org_id(JWT)+current-project 쿠키 있으면 실 slug로 301', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/organizations/org-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      }
+      if (url.includes('/api/v2/projects/proj-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const response = await middleware(makeRequest('/docs/my-doc', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
+  });
+
+  it('bare /docs(list, slug 없음)도 동일하게 301', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/organizations/org-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      }
+      if (url.includes('/api/v2/projects/proj-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const response = await middleware(makeRequest('/docs', { sp_at: token, sprintable_current_project_id: 'proj-1' }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs');
+  });
+
+  it('current-project 쿠키 없으면 개입 없이 통과 — Next 자체 404로 정직하게 실패(과잉확장 아님)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest('/docs/my-doc', { sp_at: token }));
+    expect(response.status).toBe(200);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('org/project 단건 조회 실패(예: 삭제됨) 시 개입 없이 통과', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockResolvedValue({ ok: false, status: 404 });
+    const response = await middleware(makeRequest('/docs/my-doc', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(200);
   });
 });

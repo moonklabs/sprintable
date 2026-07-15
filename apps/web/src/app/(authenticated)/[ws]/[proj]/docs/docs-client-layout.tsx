@@ -18,18 +18,26 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChevronDown, ChevronLeft, ChevronRight, FileText, Plus, X } from 'lucide-react';
-import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { DocsLayoutContext, type Doc, type DocUpdate } from './docs-context';
 import { useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 
-export function DocsClientLayout({ children }: { children: React.ReactNode }) {
+interface DocsClientLayoutProps {
+  children: React.ReactNode;
+  wsSlug: string;
+  projSlug: string;
+  projectId: string;
+}
+
+// story a539c649 S2: projectId/wsSlug/projSlug 는 이제 서버 layout(headers() 경유 resolve 결과)
+// 이 prop 으로 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 **이 URL 이
+// 가리키는 project** 를 써야 #2154 클래스가 재발하지 않는다(자세한 배경은 layout.tsx 참고).
+export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: DocsClientLayoutProps) {
   const router = useRouter();
   const params = useParams();
   const currentSlug = typeof params.slug === 'string' ? params.slug : null;
   const t = useTranslations('docs');
   const tc = useTranslations('common');
-  const { projectId } = useDashboardContext();
   const { recentSlugs, pushRecent } = useRecentDocs(projectId);
   const { expandFolder } = useTreeExpanded(projectId);
   const { toasts, addToast, dismissToast } = useToast();
@@ -103,11 +111,11 @@ export function DocsClientLayout({ children }: { children: React.ReactNode }) {
 
   const handleSelectDoc = useCallback((slug: string) => {
     pushRecent(slug);
-    // prod P0(2026-07-14) — createDoc과 같은 버그 클래스(doc-project-url.ts 헤더 참고).
-    // projectId가 아직 해소 전(극단 엣지)이면 구 동작(?p= 없이 push)으로 안전 폴백.
-    router.push(projectId ? docUrl(slug, projectId) : `/docs/${slug}`);
+    // story a539c649 S2: wsSlug/projSlug 는 layout.tsx 가 항상 보장(notFound() 미보장 시 차단)
+    // — #2154 폴백 분기 자체가 불필요해졌다(구조적 소거).
+    router.push(docUrl(wsSlug, projSlug, slug));
     setTreeDrawerOpen(false);
-  }, [router, pushRecent, projectId]);
+  }, [router, pushRecent, wsSlug, projSlug]);
 
   const handleReorder = useCallback(async (docId: string, newSortOrder: number) => {
     setTree((prev) => prev.map((doc) => (doc.id === docId ? { ...doc, sort_order: newSortOrder } : doc)));
@@ -164,14 +172,14 @@ export function DocsClientLayout({ children }: { children: React.ReactNode }) {
       if (!res.ok) throw new Error('Failed to create doc');
       const { data } = await res.json();
       setTree((prev) => [{ id: data.id, parent_id: data.parent_id || null, title: data.title, slug: data.slug, icon: data.icon || null, sort_order: data.sort_order || 0, is_folder: data.is_folder || false }, ...prev]);
-      // prod P0(2026-07-14) — doc-project-url.ts 헤더 코멘트 참고(레이스 근본).
-      router.push(newDocUrl(data.slug, projectId));
+      // story a539c649 S2 — doc-project-url.ts 헤더 참고(#2154 구조적 소거).
+      router.push(newDocUrl(wsSlug, projSlug, data.slug));
     } catch {
       addToast({ title: t('createFailed'), type: 'error' });
     } finally {
       setIsCreating(false);
     }
-  }, [projectId, isCreating, router, addToast, t]);
+  }, [projectId, isCreating, router, addToast, t, wsSlug, projSlug]);
 
   const handleNewDoc = useCallback(() => { void createDoc(null); }, [createDoc]);
   const handleAddChild = useCallback((parentId: string) => createDoc(parentId), [createDoc]);
@@ -267,7 +275,7 @@ export function DocsClientLayout({ children }: { children: React.ReactNode }) {
 
 
   return (
-    <DocsLayoutContext.Provider value={{ projectId, tree, setTree, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer: openDrawer }}>
+    <DocsLayoutContext.Provider value={{ wsSlug, projSlug, projectId, tree, setTree, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer: openDrawer }}>
       <TopBarSlot
         title={topBarTitle}
         actions={topBarActions}

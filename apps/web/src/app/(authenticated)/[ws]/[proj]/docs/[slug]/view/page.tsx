@@ -10,6 +10,7 @@ import { extractDocHeadings } from '@/components/docs/doc-heading-utils';
 import { Button } from '@/components/ui/button';
 import { Edit2 } from 'lucide-react';
 import { useDocsLayout } from '../../docs-context';
+import { docUrl } from '@/components/docs/lib/doc-project-url';
 
 interface DocDetail {
   id: string;
@@ -26,7 +27,7 @@ export default function DocViewPage() {
   const params = useParams();
   const slug = typeof params.slug === 'string' ? params.slug : '';
   const t = useTranslations('docs');
-  const { projectId } = useDocsLayout();
+  const { wsSlug, projSlug, projectId } = useDocsLayout();
 
   const [doc, setDoc] = useState<DocState>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -75,7 +76,7 @@ export default function DocViewPage() {
                 onHeadingClick={scrollToHeading}
               />
               <Button asChild size="sm" variant="ghost">
-                <Link href={`/docs/${slug}`}>
+                <Link href={docUrl(wsSlug, projSlug, slug)}>
                   <Edit2 className="mr-1.5 h-3.5 w-3.5" />
                   {t('editDoc')}
                 </Link>

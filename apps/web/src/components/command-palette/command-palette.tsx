@@ -19,6 +19,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { buildActionCommands, type ActionCommand } from './command-palette-actions';
 
 interface CommandItem {
@@ -42,7 +43,9 @@ interface StoryTitleResult {
   title: string;
 }
 
-const ITEMS: CommandItem[] = [
+// story a539c649 S2: 'go-docs' 의 href 는 컴포넌트 내부에서 실 ws/proj slug 로 override 된다
+// (없으면 이 bare '/docs' 로 폴백 — 미들웨어 리다이렉트 안전망이 받는다).
+const STATIC_ITEMS: CommandItem[] = [
   { id: 'go-inbox', group: 'navigate', icon: Inbox, labelKey: 'goInbox', href: '/inbox', shortcut: ['G', 'I'] },
   { id: 'go-dashboard', group: 'navigate', icon: LayoutDashboard, labelKey: 'goDashboard', href: '/dashboard', shortcut: ['G', 'D'] },
   { id: 'go-board', group: 'navigate', icon: FolderKanban, labelKey: 'goBoard', href: '/board', shortcut: ['G', 'B'] },
@@ -72,6 +75,13 @@ export interface CommandPaletteProps {
 export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }: CommandPaletteProps) {
   const router = useRouter();
   const t = useTranslations('commandPalette');
+  const { orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
+  const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
+  const docsHref = orgSlug && currentProjectSlug ? `/${orgSlug}/${currentProjectSlug}/docs` : '/docs';
+  const ITEMS = useMemo(
+    () => STATIC_ITEMS.map((item) => (item.id === 'go-docs' ? { ...item, href: docsHref } : item)),
+    [docsHref],
+  );
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [docResults, setDocResults] = useState<DocResult[]>([]);
@@ -104,7 +114,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
     const q = query.trim().toLowerCase();
     if (!q) return ITEMS;
     return ITEMS.filter((item) => t(item.labelKey).toLowerCase().includes(q));
-  }, [query, t]);
+  }, [query, t, ITEMS]);
 
   const filteredActions = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -177,7 +187,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   }
 
   function handleSelectDoc(doc: DocResult) {
-    router.push(`/docs/${doc.slug}`);
+    router.push(`${docsHref}/${doc.slug}`);
     handleOpenChange(false);
   }
 
