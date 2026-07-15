@@ -336,7 +336,7 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
   });
 });
 
-describe('proxy — legacy resource redirect generalized to non-docs resources (story a539c649 S3a)', () => {
+describe('proxy — legacy resource redirect generalized to non-docs resources (story a539c649 S3a/b)', () => {
   beforeEach(() => {
     process.env['JWT_SECRET'] = JWT_SECRET;
     process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
@@ -347,7 +347,7 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
     delete process.env['JWT_SECRET'];
   });
 
-  it.each(['standup', 'retro', 'loops', 'artifacts', 'mockups'])(
+  it.each(['standup', 'retro', 'loops', 'artifacts', 'mockups', 'sprints', 'storage'])(
     'bare /%s(/*) → 실 slug로 301(redirectLegacyResourcePath 일반화 증명)',
     async (resource) => {
       const token = await makeAccessToken({ orgId: 'org-1' });

@@ -22,9 +22,12 @@ import type {
   StorageViewMode,
 } from '@/lib/storage/types';
 
-export function StorageView() {
+// story a539c649 S3a/b: projectId 는 이제 page.tsx(headers() 경유 resolve 결과)가 prop 으로
+// 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 URL 이 가리키는 project.
+// projectName 은 순수 표시용(폴더 트리 헤더)이라 전역 컨텍스트 그대로 유지(artifacts와 동형).
+export function StorageView({ projectId }: { projectId: string }) {
   const t = useTranslations('storage');
-  const { projectId, projectName } = useDashboardContext();
+  const { projectName } = useDashboardContext();
 
   const [folders, setFolders] = useState<Folder[]>([]);
   const [items, setItems] = useState<Asset[]>([]);
