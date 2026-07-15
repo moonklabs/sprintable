@@ -335,6 +335,18 @@ async def dispatch_notification(
             muted_member_ids=muted_member_ids,
         )
 
+        # E-MOBILE M0·S3: EE 푸시 채널(웹훅과 나란한 별개 채널) — 등록 push_devices 로 Expo 발송.
+        # 대상 = enabled(설정 통과) − mute 멤버(deliver_expo_push 내부 필터). 웹훅 유무와 독립.
+        # EE 게이트(비-EE 무동작·core 무영향)·best-effort(발송 실패가 파이프라인 안 되돌림).
+        from app.core.config import settings as _settings
+        if _settings.is_ee_enabled:
+            from ee.services.expo_push import deliver_expo_push
+            await deliver_expo_push(
+                db, org_id, enabled_member_ids, title=title, body=body, event_type=event_type,
+                reference_type=reference_type, reference_id=reference_id, context=context,
+                muted_member_ids=muted_member_ids,
+            )
+
     except Exception:
         # BUG-1 수정: 에러 삼킴 제거 → 스택 트레이스 로깅
         logger.exception("dispatch_notification failed org_id=%s event_type=%s", org_id, event_type)
