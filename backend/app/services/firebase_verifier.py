@@ -283,9 +283,17 @@ class VerifiedAppCheck:
     app_id: str  # App Check 토큰의 sub — Firebase App ID(설치별 고유값 아님, 위 경고 참조)
 
 
-async def verify_app_check_token(token: str, project_number: str) -> VerifiedAppCheck | None:
-    """App Check 토큰 정확 검증(doc §9.3 "App Check is defense-in-depth"). issuer=
-    `https://firebaseappcheck.googleapis.com/<project_number>` — ⚠️여기의 project_number는
+async def verify_app_check_token(
+    token: str, project_number: str, allowed_app_ids: frozenset[str]
+) -> VerifiedAppCheck | None:
+    """App Check 토큰 정확 검증(doc §9.3 "App Check is defense-in-depth").
+
+    ⚠️산티아고 §9 검토 finding 1(HIGH, 2026-07-15) 수정 — 최초 구현이 `verify_aud: False`로
+    audience 검증을 아예 꺼두고 app-ID allowlist도 없어서 **직접 probe로 wrong audience·
+    미승인 app ID가 전부 통과**함을 실증했다(`accepted_app_id=1:123:web:unapproved-app`).
+    지금은 (a) aud에 `projects/<project_number>`가 정확히 포함됨을 jose가 강제 검증하고
+    (b) sub(App Check 토큰의 app ID)가 호출부가 넘긴 승인 allowlist에 있어야만 통과한다.
+    issuer=`https://firebaseappcheck.googleapis.com/<project_number>` — ⚠️이 project_number는
     다른 검증기들이 쓰는 project_id와 다른 값(Firebase 프로젝트 번호, 문자열 ID 아님)."""
     try:
         header = jose_jwt.get_unverified_header(token)
@@ -312,7 +320,7 @@ async def verify_app_check_token(token: str, project_number: str) -> VerifiedApp
             jwk,
             algorithms=["RS256"],
             issuer=expected_issuer,
-            options={"verify_aud": False},  # aud=projects/<num>/apps/<app_id> 배열 — 호출부가 app_id 매칭.
+            audience=f"projects/{project_number}",
         )
     except JWTError:
         return None
@@ -320,5 +328,22 @@ async def verify_app_check_token(token: str, project_number: str) -> VerifiedApp
     sub = payload.get("sub")
     if not sub:
         return None
+    if sub not in allowed_app_ids:
+        return None
 
     return VerifiedAppCheck(issuer=str(payload.get("iss")), app_id=str(sub))
+
+
+def check_mobile_app_check_config(s=None) -> None:
+    """fail-closed(산티아고 §9 finding 1 필수수정): 모바일 발급이 켜졌는데 App Check가
+    필수로 안 켜져 있으면 startup에서 차단한다 — device binding 없는 부트스트랩 발급이
+    prod에 살아 나가는 misconfig를 배포 전에 잡는다(check_listen_config()와 동일 패턴,
+    main lifespan이 호출)."""
+    if s is None:
+        from app.core.config import settings as s
+    if s.firebase_auth_mobile_issue and not s.firebase_auth_mobile_app_check_required:
+        raise RuntimeError(
+            "FIREBASE_AUTH_MOBILE_ISSUE=true인데 FIREBASE_AUTH_MOBILE_APP_CHECK_REQUIRED=false — "
+            "App Check 없는 네이티브 부트스트랩 발급은 device binding 없는 단회코드를 공개 발급하는 "
+            "것과 같다(fail-closed·산티아고 §9 finding 1)."
+        )

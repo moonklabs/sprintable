@@ -46,23 +46,33 @@ async def _session_factory():
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def _seed_user_and_code(session, *, device_binding_hash=None):
+async def _seed_user_and_code(session, *, device_binding_hash=None, mapped=True):
     from app.core.security import hash_password
+    from app.models.auth_identity import AuthIdentity
     from app.models.user import User
     from app.services.native_bootstrap import issue_bootstrap_code
 
     user_id = uuid.uuid4()
+    firebase_uid = f"fb-uid-{user_id.hex[:8]}"
     session.add(User(
         id=user_id, email=f"authreb-s5-consume-{user_id.hex[:8]}@test.com",
         hashed_password=hash_password("x"), is_active=True, email_verified=True,
     ))
     await session.commit()
 
+    if mapped:
+        session.add(AuthIdentity(
+            id=uuid.uuid4(), user_id=user_id,
+            issuer=f"https://securetoken.google.com/{PROJECT_ID}", subject=firebase_uid,
+            provider_id="password",
+        ))
+        await session.commit()
+
     raw_code = await issue_bootstrap_code(
-        session, user_id=user_id, firebase_uid=f"fb-uid-{user_id.hex[:8]}", project_id=PROJECT_ID,
+        session, user_id=user_id, firebase_uid=firebase_uid, project_id=PROJECT_ID,
         device_binding_hash=device_binding_hash,
     )
-    return raw_code
+    return raw_code, user_id
 
 
 def _setup_common(monkeypatch, *, mobile_issue: bool = True):
@@ -144,7 +154,7 @@ async def test_success_returns_minted_cookie(monkeypatch):
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            raw_code = await _seed_user_and_code(s)
+            raw_code, _user_id = await _seed_user_and_code(s)
 
         async with Session() as s:
             result = await consume_native_bootstrap(
@@ -170,7 +180,7 @@ async def test_replay_after_success_rejected(monkeypatch):
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            raw_code = await _seed_user_and_code(s)
+            raw_code, _user_id = await _seed_user_and_code(s)
 
         async with Session() as s:
             first = await consume_native_bootstrap(
@@ -202,7 +212,7 @@ async def test_mint_failure_returns_502(monkeypatch):
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            raw_code = await _seed_user_and_code(s)
+            raw_code, _user_id = await _seed_user_and_code(s)
 
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
@@ -223,13 +233,157 @@ async def test_device_binding_mismatch_rejected(monkeypatch):
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            raw_code = await _seed_user_and_code(s, device_binding_hash="correct-hash")
+            raw_code, _user_id = await _seed_user_and_code(s, device_binding_hash="correct-hash")
 
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
                 await consume_native_bootstrap(
                     NativeBootstrapConsumeRequest(code=raw_code, device_binding_hash="wrong-hash"),
                     authorization=None, db=s,
+                )
+            assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_prod_missing_internal_secret_fail_closed_503(monkeypatch):
+    """산티아고 §9 finding 4(HIGH) 회귀 가드 — 최초 구현은 환경 무관 fail-open이었다
+    (직접 probe: app_env=production+secret 미설정→prod_missing_internal_secret_allowed=True).
+    non-local 환경은 secret 미설정 시 503 fail-closed로 바뀌었다."""
+    from app.core.config import settings
+    from app.routers.auth_firebase_internal import NativeBootstrapConsumeRequest, consume_native_bootstrap
+
+    _setup_common(monkeypatch)
+    monkeypatch.setattr(settings, "app_env", "production")
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await consume_native_bootstrap(
+                    NativeBootstrapConsumeRequest(code="whatever"), authorization=None, db=s
+                )
+            assert exc_info.value.status_code == 503
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_existing_session_different_user_rejected(monkeypatch):
+    """산티아고 §9 finding 3(HIGH) 최소 반영 — attacker가 자기 code를 피해자 WebView에
+    소비시키는 login-CSRF: 기존 __Host-sp_fs 세션의 검증된 user_id와 코드 소유자가 다르면
+    무조건 거부(조용한 account-switch 금지)."""
+    import app.routers.auth_firebase_internal as router_mod
+    from app.routers.auth_firebase_internal import NativeBootstrapConsumeRequest, consume_native_bootstrap
+
+    _setup_common(monkeypatch)
+
+    async def fake_mint_for_uid(firebase_uid, project_id, web_api_key, valid_duration_seconds):
+        return "should-never-be-returned"
+    monkeypatch.setattr(router_mod, "mint_session_cookie_for_uid", fake_mint_for_uid)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            raw_code, _code_owner_user_id = await _seed_user_and_code(s)
+
+        attacker_controlled_different_user_id = str(uuid.uuid4())
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await consume_native_bootstrap(
+                    NativeBootstrapConsumeRequest(
+                        code=raw_code, existing_session_user_id=attacker_controlled_different_user_id
+                    ),
+                    authorization=None, db=s,
+                )
+            assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_existing_session_same_user_allowed(monkeypatch):
+    """finding 3 회귀 가드 반대편 — 기존 세션 사용자와 코드 소유자가 동일하면(정상 재인증)
+    거부하면 안 된다."""
+    import app.routers.auth_firebase_internal as router_mod
+    from app.routers.auth_firebase_internal import NativeBootstrapConsumeRequest, consume_native_bootstrap
+
+    _setup_common(monkeypatch)
+
+    async def fake_mint_for_uid(firebase_uid, project_id, web_api_key, valid_duration_seconds):
+        return "minted-cookie"
+    monkeypatch.setattr(router_mod, "mint_session_cookie_for_uid", fake_mint_for_uid)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            raw_code, code_owner_user_id = await _seed_user_and_code(s)
+
+        async with Session() as s:
+            result = await consume_native_bootstrap(
+                NativeBootstrapConsumeRequest(
+                    code=raw_code, existing_session_user_id=str(code_owner_user_id)
+                ),
+                authorization=None, db=s,
+            )
+        assert result.session_cookie == "minted-cookie"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_consume_time_reverify_rejects_user_disabled_after_issuance(monkeypatch):
+    """산티아고 §9 finding 6 회귀 가드 — 발급~소비 사이(최대 45초)에 계정이 비활성화되면
+    atomic consume 자체는 성공해도(코드는 유효) mint 직전 재검증에서 거부해야 한다."""
+    from sqlalchemy import update
+    from app.models.user import User
+    from app.routers.auth_firebase_internal import NativeBootstrapConsumeRequest, consume_native_bootstrap
+
+    _setup_common(monkeypatch)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            raw_code, user_id = await _seed_user_and_code(s)
+            await s.execute(update(User).where(User.id == user_id).values(is_active=False))
+            await s.commit()
+
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await consume_native_bootstrap(
+                    NativeBootstrapConsumeRequest(code=raw_code), authorization=None, db=s
+                )
+            assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_consume_time_reverify_rejects_identity_unlinked_after_issuance(monkeypatch):
+    """finding 6 회귀 가드 — 발급 후 identity가 unlink되면(보안 이벤트로 인한 강제 해제 등)
+    atomic consume은 성공해도 mint 직전 재검증에서 거부해야 한다."""
+    from sqlalchemy import update
+    from app.models.auth_identity import AuthIdentity
+    from app.routers.auth_firebase_internal import NativeBootstrapConsumeRequest, consume_native_bootstrap
+
+    _setup_common(monkeypatch)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            raw_code, user_id = await _seed_user_and_code(s)
+            from datetime import datetime, timezone
+            await s.execute(
+                update(AuthIdentity).where(AuthIdentity.user_id == user_id)
+                .values(unlinked_at=datetime.now(timezone.utc))
+            )
+            await s.commit()
+
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await consume_native_bootstrap(
+                    NativeBootstrapConsumeRequest(code=raw_code), authorization=None, db=s
                 )
             assert exc_info.value.status_code == 401
     finally:

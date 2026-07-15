@@ -16,6 +16,7 @@ from app.services import firebase_verifier as fv
 
 PROJECT_NUMBER = "1234567890"
 KID = "app-check-kid-1"
+ALLOWED_APP_IDS = frozenset({"1:123:android:abc"})
 
 
 @pytest.fixture
@@ -66,7 +67,7 @@ async def test_accepts_correctly_signed_app_check_token(monkeypatch):
     key_pem, jwk = _make_rsa_keypair()
     _patch_fetch(monkeypatch, {KID: jwk})
     token = _make_app_check_token(key_pem)
-    result = await fv.verify_app_check_token(token, PROJECT_NUMBER)
+    result = await fv.verify_app_check_token(token, PROJECT_NUMBER, ALLOWED_APP_IDS)
     assert result is not None
     assert result.app_id == "1:123:android:abc"
 
@@ -76,7 +77,7 @@ async def test_rejects_wrong_issuer(monkeypatch):
     key_pem, jwk = _make_rsa_keypair()
     _patch_fetch(monkeypatch, {KID: jwk})
     token = _make_app_check_token(key_pem, iss="https://securetoken.google.com/other")
-    result = await fv.verify_app_check_token(token, PROJECT_NUMBER)
+    result = await fv.verify_app_check_token(token, PROJECT_NUMBER, ALLOWED_APP_IDS)
     assert result is None
 
 
@@ -85,7 +86,7 @@ async def test_rejects_wrong_project_number_in_issuer(monkeypatch):
     key_pem, jwk = _make_rsa_keypair()
     _patch_fetch(monkeypatch, {KID: jwk})
     token = _make_app_check_token(key_pem, iss="https://firebaseappcheck.googleapis.com/other-project")
-    result = await fv.verify_app_check_token(token, PROJECT_NUMBER)
+    result = await fv.verify_app_check_token(token, PROJECT_NUMBER, ALLOWED_APP_IDS)
     assert result is None
 
 
@@ -99,7 +100,7 @@ async def test_rejects_missing_kid(monkeypatch):
          "iss": f"https://firebaseappcheck.googleapis.com/{PROJECT_NUMBER}", "aud": [f"projects/{PROJECT_NUMBER}"]},
         key_pem, algorithm="RS256",
     )
-    result = await fv.verify_app_check_token(no_kid, PROJECT_NUMBER)
+    result = await fv.verify_app_check_token(no_kid, PROJECT_NUMBER, ALLOWED_APP_IDS)
     assert result is None
 
 
@@ -108,7 +109,7 @@ async def test_rejects_unknown_kid(monkeypatch):
     key_pem, jwk = _make_rsa_keypair()
     _patch_fetch(monkeypatch, {"some-other-kid": jwk})
     token = _make_app_check_token(key_pem, kid=KID)
-    result = await fv.verify_app_check_token(token, PROJECT_NUMBER)
+    result = await fv.verify_app_check_token(token, PROJECT_NUMBER, ALLOWED_APP_IDS)
     assert result is None
 
 
@@ -117,7 +118,7 @@ async def test_rejects_expired_token(monkeypatch):
     key_pem, jwk = _make_rsa_keypair()
     _patch_fetch(monkeypatch, {KID: jwk})
     token = _make_app_check_token(key_pem, exp_delta=-3600)
-    result = await fv.verify_app_check_token(token, PROJECT_NUMBER)
+    result = await fv.verify_app_check_token(token, PROJECT_NUMBER, ALLOWED_APP_IDS)
     assert result is None
 
 
@@ -127,5 +128,34 @@ async def test_rejects_forged_signature_untrusted_key(monkeypatch):
     attacker_key_pem, _attacker_jwk = _make_rsa_keypair()
     _patch_fetch(monkeypatch, {KID: jwk})
     forged = _make_app_check_token(attacker_key_pem, kid=KID)
-    result = await fv.verify_app_check_token(forged, PROJECT_NUMBER)
+    result = await fv.verify_app_check_token(forged, PROJECT_NUMBER, ALLOWED_APP_IDS)
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_rejects_wrong_audience(monkeypatch):
+    """산티아고 §9 finding 1(HIGH) 회귀 가드 — 최초 구현은 verify_aud:False라 이 케이스가
+    통과했다(직접 probe: wrong_audience_unapproved_app_accepted=True)."""
+    key_pem, jwk = _make_rsa_keypair()
+    _patch_fetch(monkeypatch, {KID: jwk})
+    now = int(time.time())
+    wrong_aud = jose_jwt.encode(
+        {"sub": "1:123:android:abc", "iat": now, "exp": now + 3600,
+         "iss": f"https://firebaseappcheck.googleapis.com/{PROJECT_NUMBER}",
+         "aud": ["projects/some-other-project-number"]},
+        key_pem, algorithm="RS256", headers={"kid": KID},
+    )
+    result = await fv.verify_app_check_token(wrong_aud, PROJECT_NUMBER, ALLOWED_APP_IDS)
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_rejects_unapproved_app_id(monkeypatch):
+    """산티아고 §9 finding 1(HIGH) 회귀 가드 — allowlist 없이는 서명·issuer·audience가
+    전부 정확해도 승인 안 된 app이 통과했다(직접 probe: accepted_app_id=
+    1:123:web:unapproved-app)."""
+    key_pem, jwk = _make_rsa_keypair()
+    _patch_fetch(monkeypatch, {KID: jwk})
+    token = _make_app_check_token(key_pem, sub="1:123:web:unapproved-app")
+    result = await fv.verify_app_check_token(token, PROJECT_NUMBER, ALLOWED_APP_IDS)
     assert result is None

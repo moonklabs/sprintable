@@ -16,12 +16,13 @@ import hashlib
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.dependencies.database import get_db
 from app.models.auth_identity import AuthIdentity
 from app.models.user import User
@@ -51,12 +52,24 @@ def _extract_bearer(authorization: str | None) -> str | None:
     return authorization[len("Bearer "):]
 
 
+def _allowed_app_ids() -> frozenset[str]:
+    raw = settings.firebase_app_check_allowed_app_ids
+    return frozenset(x.strip() for x in raw.split(",") if x.strip())
+
+
+# 산티아고 §9(2026-07-15) 잔여 하드닝: public issuance는 rate limit 없음 지적 — 로그인류
+# 엔드포인트와 동일 임계값(app/routers/auth.py register 패턴 재사용).
 @router.post("/native-bootstrap", response_model=NativeBootstrapResponse)
+@limiter.limit("10/minute")
 async def native_bootstrap(
+    request: Request,
     body: NativeBootstrapRequest,
+    response: Response,
     authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> NativeBootstrapResponse:
+    response.headers["Cache-Control"] = "no-store"  # 산티아고 §9 잔여 하드닝.
+
     if not settings.firebase_auth_mobile_issue:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Native bootstrap not enabled")
 
@@ -98,7 +111,9 @@ async def native_bootstrap(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="App Check token required")
 
     if body.app_check_token:
-        app_check = await verify_app_check_token(body.app_check_token, settings.firebase_project_number)
+        app_check = await verify_app_check_token(
+            body.app_check_token, settings.firebase_project_number, _allowed_app_ids()
+        )
         if app_check is None:
             logger.warning("auth.native_bootstrap rejected reason=app_check_invalid")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid App Check token")

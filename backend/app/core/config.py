@@ -182,6 +182,9 @@ class Settings(BaseSettings):
     firebase_web_api_key: str = ""
     firebase_project_number: str = ""
     firebase_auth_mobile_app_check_required: bool = False
+    # 산티아고 §9 finding 1(2026-07-15): App Check sub(App ID) allowlist — 콤마 구분 문자열.
+    # 미승인 앱이 App Check 토큰을 정확 서명해와도 이 목록에 없으면 거부.
+    firebase_app_check_allowed_app_ids: str = ""
 
     @property
     def is_ee_enabled(self) -> bool:

@@ -46,13 +46,35 @@ class FirebaseSessionMintResponse(BaseModel):
     expires_in: int
 
 
+# 산티아고 §9 finding 4(HIGH, 2026-07-15): 최초 구현이 cron.py CRON_SECRET 패턴을 그대로
+# 따라 "시크릿 미설정=허용"이었는데, cron과 달리 이 엔드포인트는 세션쿠키 mint 능력 자체라
+# 환경 무관 fail-open이 위험하다 — 직접 probe로 `app_env=production`+시크릿 미설정 시
+# 내부 consume/mint 엔드포인트가 공개됨을 실증. non-local 환경은 fail-closed(503), 로컬
+# 개발(APP_ENV=development)만 예외 허용.
+_LOCAL_ENVS = {"development"}
+
+
 def _require_internal_secret(authorization: str | None) -> None:
     secret = settings.firebase_bff_internal_secret
     if not secret:
-        # cron.py와 동일 정책: 로컬 개발에서 시크릿 미설정 시 허용(운영은 반드시 설정).
-        return
+        if settings.app_env in _LOCAL_ENVS:
+            return  # 로컬 개발 전용 예외
+        logger.warning("auth.firebase.internal_secret_missing_in_non_local_env app_env=%s", settings.app_env)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service misconfigured")
     if authorization != f"Bearer {secret}":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal credential")
+
+
+def check_internal_secret_config(s=None) -> None:
+    """fail-closed(산티아고 §9 finding 4): non-local 환경에서 시크릿 미설정이면 startup
+    차단(check_listen_config()와 동일 패턴, main lifespan이 호출)."""
+    if s is None:
+        from app.core.config import settings as s
+    if s.app_env not in _LOCAL_ENVS and not s.firebase_bff_internal_secret:
+        raise RuntimeError(
+            f"APP_ENV={s.app_env}인데 FIREBASE_BFF_INTERNAL_SECRET 미설정 — 내부 세션 mint/"
+            "consume 엔드포인트가 인증 없이 공개된다(fail-closed·산티아고 §9 finding 4)."
+        )
 
 
 @router.post("/firebase-session", response_model=FirebaseSessionMintResponse)
@@ -109,6 +131,12 @@ async def mint_firebase_session(
 class NativeBootstrapConsumeRequest(BaseModel):
     code: str
     device_binding_hash: str | None = None
+    # 산티아고 §9 finding 3(HIGH) 최소 반영(④⑤·전체 per-installation attestation은 별도
+    # 후속 판단): 호출부(Next.js BFF)가 이미 유효한 __Host-sp_fs 세션을 갖고 있으면 그
+    # 세션의 검증된 user_id를 넘긴다 — attacker가 자기 code를 피해자 WebView에서 열게
+    # 만들어도(login-CSRF) 기존 세션 사용자와 code의 소유자가 다르면 무조건 거부한다
+    # (조용한 account-switch 금지).
+    existing_session_user_id: str | None = None
 
 
 class NativeBootstrapConsumeResponse(BaseModel):
@@ -125,7 +153,11 @@ async def consume_native_bootstrap(
     """story 4dee942b(Phase1-S5): Next.js `/auth/native?code=` 라우트(FE lane)가 호출하는
     내부 atomic-consume API. 원본 Firebase ID token은 발급 순간 이후로 존재하지 않으므로
     firebase_uid만으로 custom token 경유 세션쿠키를 새로 mint한다(S4 mint_session_cookie
-    재사용, 오르테가군 판정). 실패 사유(만료/재사용/불일치)는 전부 동일한 401로 통일."""
+    재사용, 오르테가군 판정). 실패 사유(만료/재사용/불일치)는 전부 동일한 401로 통일.
+
+    ⚠️산티아고 §9 검토(2026-07-15) finding 6 반영: atomic consume 성공만으로 곧장 mint하지
+    않는다 — 코드 발급~소비 사이(최대 45초)에 계정이 비활성화되거나 identity가 unlink됐을
+    수 있어 **소비 직후 다시** user.is_active/identity.unlinked_at을 재확認한다."""
     _require_internal_secret(authorization)
 
     if not settings.firebase_auth_mobile_issue:
@@ -140,6 +172,30 @@ async def consume_native_bootstrap(
     if consumed is None:
         logger.warning("auth.native_bootstrap.consume rejected reason=invalid_expired_or_replayed")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired bootstrap code")
+
+    if body.existing_session_user_id and body.existing_session_user_id != str(consumed.user_id):
+        logger.warning("auth.native_bootstrap.consume rejected reason=session_user_mismatch")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session user mismatch")
+
+    # finding 6: consume-time 재검증 — 발급 시점 검증(user active+identity linked)이 최대
+    # 45초 전이라 그 사이 상태 변화(계정 비활성화/identity unlink)를 반드시 다시 본다.
+    post_consume_user = await db.get(User, consumed.user_id)
+    if post_consume_user is None or not post_consume_user.is_active:
+        logger.warning("auth.native_bootstrap.consume rejected reason=user_inactive_at_consume")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+
+    still_linked = (
+        await db.execute(
+            select(AuthIdentity.id).where(
+                AuthIdentity.issuer == f"https://securetoken.google.com/{settings.firebase_project_id}",
+                AuthIdentity.subject == consumed.firebase_uid,
+                AuthIdentity.unlinked_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if still_linked is None:
+        logger.warning("auth.native_bootstrap.consume rejected reason=identity_unlinked_at_consume")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Identity no longer linked")
 
     valid_duration_seconds = 5 * 24 * 60 * 60
     session_cookie = await mint_session_cookie_for_uid(

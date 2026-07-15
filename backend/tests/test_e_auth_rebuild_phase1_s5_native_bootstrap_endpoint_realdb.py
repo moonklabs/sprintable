@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from fastapi import Response
 from jose import jwt as jose_jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
@@ -140,6 +141,7 @@ def _setup_common(monkeypatch, *, mobile_issue: bool = True, app_check_required:
     monkeypatch.setattr(settings, "firebase_project_id", PROJECT_ID)
     monkeypatch.setattr(settings, "firebase_project_number", PROJECT_NUMBER)
     monkeypatch.setattr(settings, "firebase_auth_mobile_app_check_required", app_check_required)
+    monkeypatch.setattr(settings, "firebase_app_check_allowed_app_ids", "1:123:android:abc")
 
 
 @pytest.mark.anyio
@@ -153,7 +155,7 @@ async def test_flag_off_returns_501(monkeypatch):
         async with Session() as s:
             from fastapi import HTTPException
             with pytest.raises(HTTPException) as exc_info:
-                await native_bootstrap(NativeBootstrapRequest(), authorization=None, db=s)
+                await native_bootstrap(request=None, body=NativeBootstrapRequest(), response=Response(), authorization=None, db=s)
             assert exc_info.value.status_code == 501
     finally:
         await engine.dispose()
@@ -170,7 +172,7 @@ async def test_missing_bearer_rejected(monkeypatch):
     try:
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await native_bootstrap(NativeBootstrapRequest(), authorization=None, db=s)
+                await native_bootstrap(request=None, body=NativeBootstrapRequest(), response=Response(), authorization=None, db=s)
             assert exc_info.value.status_code == 401
     finally:
         await engine.dispose()
@@ -195,11 +197,14 @@ async def test_success_issues_code(monkeypatch):
 
         token = _make_id_token(key_pem, seeded["firebase_uid"])
         async with Session() as s:
+            response = Response()
             result = await native_bootstrap(
-                NativeBootstrapRequest(), authorization=f"Bearer {token}", db=s
+                request=None, body=NativeBootstrapRequest(), response=response,
+                authorization=f"Bearer {token}", db=s,
             )
         assert result.code
         assert result.expires_in == 45
+        assert response.headers["Cache-Control"] == "no-store"
     finally:
         await engine.dispose()
 
@@ -225,7 +230,7 @@ async def test_stale_auth_time_rejected(monkeypatch):
         stale_token = _make_id_token(key_pem, seeded["firebase_uid"], auth_time=int(time.time()) - 3600)
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await native_bootstrap(NativeBootstrapRequest(), authorization=f"Bearer {stale_token}", db=s)
+                await native_bootstrap(request=None, body=NativeBootstrapRequest(), response=Response(), authorization=f"Bearer {stale_token}", db=s)
             assert exc_info.value.status_code == 401
     finally:
         await engine.dispose()
@@ -252,7 +257,7 @@ async def test_unmapped_identity_rejected(monkeypatch):
         token = _make_id_token(key_pem, seeded["firebase_uid"])
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await native_bootstrap(NativeBootstrapRequest(), authorization=f"Bearer {token}", db=s)
+                await native_bootstrap(request=None, body=NativeBootstrapRequest(), response=Response(), authorization=f"Bearer {token}", db=s)
             assert exc_info.value.status_code == 401
     finally:
         await engine.dispose()
@@ -279,7 +284,7 @@ async def test_inactive_user_rejected(monkeypatch):
         token = _make_id_token(key_pem, seeded["firebase_uid"])
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await native_bootstrap(NativeBootstrapRequest(), authorization=f"Bearer {token}", db=s)
+                await native_bootstrap(request=None, body=NativeBootstrapRequest(), response=Response(), authorization=f"Bearer {token}", db=s)
             assert exc_info.value.status_code == 401
     finally:
         await engine.dispose()
@@ -306,7 +311,7 @@ async def test_app_check_required_but_missing_rejected(monkeypatch):
         token = _make_id_token(key_pem, seeded["firebase_uid"])
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
-                await native_bootstrap(NativeBootstrapRequest(), authorization=f"Bearer {token}", db=s)
+                await native_bootstrap(request=None, body=NativeBootstrapRequest(), response=Response(), authorization=f"Bearer {token}", db=s)
             assert exc_info.value.status_code == 401
     finally:
         await engine.dispose()
@@ -340,7 +345,9 @@ async def test_app_check_required_and_valid_binds_device_hash(monkeypatch):
         app_check_token = _make_app_check_token(app_check_key_pem)
         async with Session() as s:
             result = await native_bootstrap(
-                NativeBootstrapRequest(app_check_token=app_check_token, device_install_hint="install-1"),
+                request=None,
+                body=NativeBootstrapRequest(app_check_token=app_check_token, device_install_hint="install-1"),
+                response=Response(),
                 authorization=f"Bearer {token}", db=s,
             )
         assert result.code
