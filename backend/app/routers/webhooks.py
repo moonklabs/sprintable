@@ -94,11 +94,33 @@ async def _resolve_target_member_id(
 @router.get("/config", response_model=list[WebhookConfigResponse])
 async def list_webhook_configs(
     project_id: uuid.UUID | None = Query(default=None),
+    member_id: uuid.UUID | None = Query(default=None),
     repo: WebhookConfigRepository = Depends(_get_repo),
     caller_member_id: uuid.UUID = Depends(_get_caller_member_id),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    session: AsyncSession = Depends(get_db),
 ) -> list[WebhookConfigResponse]:
-    # IDOR(산티아고): caller member-scope — org_id 만이면 same-org 타 멤버 config(URL) 가 leak.
-    items = await repo.list(member_id=caller_member_id, project_id=project_id)
+    """story 933248fa 재오픈 fix — PUT은 admin override가 있었지만 GET은 caller-scope 그대로라
+    admin이 방금 저장한 타 멤버 webhook이 목록에 안 보였다(write_ok≠read_success).
+
+    IDOR(산티아고) 원 방어는 **바이트 단위로 그대로 유지**: `?member_id=` 미지정 시 caller
+    member-scope(org_id 만으로 same-org 타 멤버 config 전체가 leak되는 것 차단), 비-admin은
+    `?member_id=`를 보내도 무조건 caller-scope로 강제(자기 자신 조회로 취급) — PUT과 동일
+    SEC 규율②(admin/owner role 필수, JWT app_metadata.role — 서버 검증된 클레임).
+    """
+    scope_member_id = caller_member_id
+    if member_id is not None:
+        target_member_id = await _resolve_target_member_id(member_id, org_id, session)
+        if target_member_id != caller_member_id:
+            role = auth.claims.get("app_metadata", {}).get("role", "member")
+            if role not in ("admin", "owner"):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Admin role required to view another member's webhook config",
+                )
+        scope_member_id = target_member_id
+    items = await repo.list(member_id=scope_member_id, project_id=project_id)
     return [WebhookConfigResponse.model_validate(i) for i in items]
 
 
