@@ -72,7 +72,7 @@ function LoopRow({ loop, onClick }: { loop: Loop; onClick: () => void }) {
   );
 }
 
-export function LoopsClient({ projectId }: { projectId: string }) {
+export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string; wsSlug: string; projSlug: string }) {
   const t = useTranslations('loops');
   const router = useRouter();
   const [loops, setLoops] = useState<Loop[]>([]);
@@ -123,7 +123,7 @@ export function LoopsClient({ projectId }: { projectId: string }) {
         projectId={projectId}
         open={createOpen}
         onOpenChange={setCreateOpen}
-        onCreated={(loop) => router.push(`/loops/${loop.id}`)}
+        onCreated={(loop) => router.push(`/${wsSlug}/${projSlug}/loops/${loop.id}`)}
       />
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div className="flex shrink-0 flex-wrap gap-1 px-4 pt-3 pb-1">
@@ -149,7 +149,7 @@ export function LoopsClient({ projectId }: { projectId: string }) {
           ) : (
             <div className="mx-auto max-w-2xl space-y-2">
               {loops.map((loop) => (
-                <LoopRow key={loop.id} loop={loop} onClick={() => router.push(`/loops/${loop.id}`)} />
+                <LoopRow key={loop.id} loop={loop} onClick={() => router.push(`/${wsSlug}/${projSlug}/loops/${loop.id}`)} />
               ))}
             </div>
           )}

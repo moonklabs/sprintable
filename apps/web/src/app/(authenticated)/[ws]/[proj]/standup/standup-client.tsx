@@ -11,7 +11,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { formatSeoulDate } from '@/lib/date';
-import { useDashboardContext } from '../../dashboard/dashboard-shell';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { BoardBridgeModal, type BoardBridgeStory } from '@/components/standup/board-bridge-modal';
 import { StandupBoardCard } from '@/components/standup/standup-board-card';
 import { StandupFeedbackDialog } from '@/components/standup/standup-feedback-dialog';
@@ -104,9 +104,15 @@ function shiftDate(dateStr: string, days: number): string {
   return formatSeoulDate(d);
 }
 
-export default function StandupPage() {
+interface StandupClientProps {
+  projectId: string;
+}
+
+// story a539c649 S3a: projectId 는 이제 서버 layout(headers() 경유 resolve 결과)이 prop 으로
+// 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 URL 이 가리키는 project.
+export default function StandupPage({ projectId }: StandupClientProps) {
   const t = useTranslations('standup');
-  const { currentTeamMemberId, projectId, projectMemberships } = useDashboardContext();
+  const { currentTeamMemberId, projectMemberships } = useDashboardContext();
 
   const [date, setDate] = useState(() => formatSeoulDate());
   const [entries, setEntries] = useState<StandupEntryRow[]>([]);

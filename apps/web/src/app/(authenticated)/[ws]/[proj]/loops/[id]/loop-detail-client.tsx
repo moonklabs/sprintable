@@ -50,7 +50,7 @@ interface DocSummary {
  * brief state가 잔존하는 버그 클래스(A3 AuditClient·S8 TenantsClient에 이은 3번째 재발
  * ·까심 QA 적출) — route param으로 fetch하는 상세 page는 항상 key-remount.
  */
-export function LoopDetailClient({ loopId }: { loopId: string }) {
+export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string; wsSlug: string; projSlug: string }) {
   const t = useTranslations('loops');
   const th = useTranslations('hypotheses');
   const router = useRouter();
@@ -126,7 +126,7 @@ export function LoopDetailClient({ loopId }: { loopId: string }) {
         <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
         <div className="flex h-64 flex-col items-center justify-center gap-3">
           <p className="text-sm text-muted-foreground">{t('notFound')}</p>
-          <button type="button" onClick={() => router.push('/loops')} className="text-xs text-primary hover:underline">
+          <button type="button" onClick={() => router.push(`/${wsSlug}/${projSlug}/loops`)} className="text-xs text-primary hover:underline">
             {t('backToList')}
           </button>
         </div>
@@ -144,7 +144,7 @@ export function LoopDetailClient({ loopId }: { loopId: string }) {
         title={
           <button
             type="button"
-            onClick={() => router.push('/loops')}
+            onClick={() => router.push(`/${wsSlug}/${projSlug}/loops`)}
             className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="size-3.5" />

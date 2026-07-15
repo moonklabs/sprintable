@@ -80,12 +80,20 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  // story a539c649 S2: 실 ws/proj slug 있으면 직접 path(리다이렉트 홉 절약) — 없으면 bare
-  // `/docs`(미들웨어의 bare→쿠키 default 해소 301 안전망이 받는다).
+  // story a539c649(S2 최초·S3 리소스 확장) — 실 ws/proj slug 있으면 직접 path(리다이렉트 홉
+  // 절약) — 없으면 bare `/{resource}`(미들웨어의 bare→쿠키 default 해소 301 안전망이 받는다).
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
-  const docsHref = orgSlug && currentProjectSlug ? `/${orgSlug}/${currentProjectSlug}/docs` : '/docs';
-  const isDocsActive = pathname === '/docs' || pathname.startsWith('/docs/')
-    || Boolean(orgSlug && currentProjectSlug && pathname.startsWith(`/${orgSlug}/${currentProjectSlug}/docs`));
+  function resourceLink(resource: string): { href: string; isActive: boolean } {
+    const href = orgSlug && currentProjectSlug ? `/${orgSlug}/${currentProjectSlug}/${resource}` : `/${resource}`;
+    const isActive = pathname === `/${resource}` || pathname.startsWith(`/${resource}/`)
+      || Boolean(orgSlug && currentProjectSlug && pathname.startsWith(`/${orgSlug}/${currentProjectSlug}/${resource}`));
+    return { href, isActive };
+  }
+  const docsLink = resourceLink('docs');
+  const standupLink = resourceLink('standup');
+  const retroLink = resourceLink('retro');
+  const loopsLink = resourceLink('loops');
+  const artifactsLink = resourceLink('artifacts');
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
   // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/board?story={id}`)에서 열렸을 때만 context 주입.
@@ -338,8 +346,8 @@ export function AppSidebar({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  render={<Link href="/loops" />}
-                  isActive={isActive('/loops')}
+                  render={<Link href={loopsLink.href} />}
+                  isActive={loopsLink.isActive}
                   tooltip={t('loops')}
                 >
                   <FlaskConical />
@@ -348,8 +356,8 @@ export function AppSidebar({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  render={<Link href="/standup" />}
-                  isActive={isActive('/standup')}
+                  render={<Link href={standupLink.href} />}
+                  isActive={standupLink.isActive}
                   tooltip={t('standup')}
                 >
                   <Users />
@@ -359,8 +367,8 @@ export function AppSidebar({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  render={<Link href="/retro" />}
-                  isActive={isActive('/retro')}
+                  render={<Link href={retroLink.href} />}
+                  isActive={retroLink.isActive}
                   tooltip={t('retro')}
                 >
                   <Gauge />
@@ -399,8 +407,8 @@ export function AppSidebar({
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  render={<Link href={docsHref} />}
-                  isActive={isDocsActive}
+                  render={<Link href={docsLink.href} />}
+                  isActive={docsLink.isActive}
                   tooltip={t('docs')}
                 >
                   <BookOpen />
@@ -409,8 +417,8 @@ export function AppSidebar({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  render={<Link href="/artifacts" />}
-                  isActive={isActive('/artifacts')}
+                  render={<Link href={artifactsLink.href} />}
+                  isActive={artifactsLink.isActive}
                   tooltip={t('artifacts')}
                 >
                   <GalleryVerticalEnd />
@@ -459,7 +467,7 @@ export function AppSidebar({
             <ThemeToggle />
           </div>
           <Link
-            href={docsHref}
+            href={docsLink.href}
             aria-label={t('help')}
             title={t('help')}
             className="flex size-8 items-center justify-center rounded-md text-sidebar-foreground/60 transition hover:bg-sidebar-accent hover:text-sidebar-foreground"

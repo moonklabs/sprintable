@@ -10,7 +10,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { OperatorSelect } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { useDashboardContext } from '../../dashboard/dashboard-shell';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useRetroRoute } from './retro-context';
 import { RETRO_PHASE_TO_STAGE, RETRO_STAGE_VARIANTS, type RetroSessionPhase } from '@/services/retro-session';
 
 interface RetroSession {
@@ -30,7 +31,10 @@ export default function RetroPage() {
   const t = useTranslations('retro');
   const tc = useTranslations('common');
   const shellT = useTranslations('shell');
-  const { projectId, orgId } = useDashboardContext();
+  // story a539c649 S3a: projectId 는 URL 경로(retro-context.tsx, layout.tsx가 헤더 경유 주입)
+  // 가 SSOT — useDashboardContext()(전역 "현재 프로젝트")가 아니다. orgId 는 경로 무관 그대로.
+  const { projectId, wsSlug, projSlug } = useRetroRoute();
+  const { orgId } = useDashboardContext();
   const [sessions, setSessions] = useState<RetroSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
@@ -198,7 +202,7 @@ export default function RetroPage() {
               {sessions.map((session) => (
                 <Link
                   key={session.id}
-                  href={`/retro/${session.id}`}
+                  href={`/${wsSlug}/${projSlug}/retro/${session.id}`}
                   className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3 transition hover:bg-muted/40"
                 >
                   <div className="min-w-0">

@@ -6,7 +6,7 @@ import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
 import {
   fetchResolve,
   looksLikeWorkspaceSegment,
-  resolveLegacyDocsPath,
+  resolveLegacyResourcePath,
   RESOLVE_CACHE_TTL_SECONDS,
   signResolveCache,
   SP_RESOLVE_CACHE_COOKIE,
@@ -81,28 +81,46 @@ async function getOrgIdFromAccessToken(token: string): Promise<string | null> {
 }
 
 /**
- * story a539c649 S2 — 옛 flat `/docs/*` 를 default(현재 org+project) 로 해소해 301. 해소
- * 불가(로그인 직후 project 미선택 등)면 null — 호출부가 개입 없이 통과시켜 Next 자체 404.
+ * story a539c649 S-route-project — 이관 완료된 Project-tier 리소스 목록(flat 첫 세그먼트 →
+ * 그 리소스 밑에서 project-scope 아닌 채로 존치되는 서브패스 제외 목록). 슬라이스가 리소스를
+ * `/{ws}/{proj}/{resource}`로 옮길 때마다 여기 키 하나씩 추가한다(S2=docs, S3a=standup 등).
  */
-async function redirectLegacyDocsPath(
+const MIGRATED_RESOURCES: Record<string, string[]> = {
+  docs: ['design-tokens'], // 비-project 정적 페이지, 존치
+  standup: [],
+  retro: [],
+  loops: [],
+  artifacts: [],
+  mockups: [],
+};
+
+/**
+ * story a539c649(S2 최초 도입·S3에서 리소스 파라미터화) — 옛 flat `/{resource}/*` 를
+ * default(현재 org+project) 로 해소해 301. 해소 불가(로그인 직후 project 미선택 등)면 null
+ * — 호출부가 개입 없이 통과시켜 Next 자체 404.
+ */
+async function redirectLegacyResourcePath(
   request: NextRequest,
   pathname: string,
   accessToken: string,
 ): Promise<NextResponse | null> {
-  if (pathname !== '/docs' && !pathname.startsWith('/docs/')) return null;
-  if (pathname.startsWith('/docs/design-tokens')) return null; // 비-project 정적 페이지, 무변경
+  const segments = pathname.split('/').filter(Boolean);
+  const resourceName = segments[0];
+  if (!resourceName || !(resourceName in MIGRATED_RESOURCES)) return null;
+  const excluded = MIGRATED_RESOURCES[resourceName] ?? [];
+  if (excluded.some((sub) => pathname.startsWith(`/${resourceName}/${sub}`))) return null;
 
   const orgId = await getOrgIdFromAccessToken(accessToken);
   const projectId = request.cookies.get(CURRENT_PROJECT_COOKIE)?.value;
   if (!orgId || !projectId) return null;
 
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
-  const slugs = await resolveLegacyDocsPath(fastapiUrl, orgId, projectId, accessToken);
+  const slugs = await resolveLegacyResourcePath(fastapiUrl, orgId, projectId, accessToken);
   if (!slugs) return null;
 
-  const rest = pathname.slice('/docs'.length); // '' | '/{slug}' | '/{slug}/view'
+  const rest = pathname.slice(`/${resourceName}`.length); // '' | '/{sub}' | '/{sub}/{sub2}'
   const url = request.nextUrl.clone();
-  url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/docs${rest}`;
+  url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/${resourceName}${rest}`;
   return NextResponse.redirect(url, 301);
 }
 
@@ -301,12 +319,13 @@ export async function proxy(request: NextRequest) {
   const fwdHeaders = new Headers(request.headers);
   fwdHeaders.set('x-pathname', pathname + request.nextUrl.search);
 
-  // story a539c649 S2 — 옛 flat `/docs/*`(ws/proj 세그먼트 없음)는 목적지 페이지가 이제 없다
-  // (S2가 `/{ws}/{proj}/docs/*`로 전량 이관). 여기서 잡아 default(현재 org+project) 해소 후
-  // 301 — 안 잡으면 사이드바 밖 9개 딥링크 호출부(알림·게이트·챗 등, 전부 bare 링크였음)가
-  // 전부 즉시 404 나던 것을 막는 안전망(PO 승인 스코프, 한계=route-resolve.ts 헤더 참고).
-  const legacyDocsRedirect = await redirectLegacyDocsPath(request, pathname, accessToken);
-  if (legacyDocsRedirect) return legacyDocsRedirect;
+  // story a539c649(S2 최초·S3 일반화) — 이관 완료된 리소스(MIGRATED_RESOURCES)의 옛 flat
+  // `/{resource}/*`(ws/proj 세그먼트 없음)는 목적지 페이지가 이제 없다. 여기서 잡아
+  // default(현재 org+project) 해소 후 301 — 안 잡으면 사이드바 밖 외부 딥링크 호출부(알림·
+  // 게이트·챗 등, 전부 bare 링크였음)가 전부 즉시 404 나던 것을 막는 안전망(PO 승인 스코프,
+  // 한계=route-resolve.ts 헤더 참고).
+  const legacyResourceRedirect = await redirectLegacyResourcePath(request, pathname, accessToken);
+  if (legacyResourceRedirect) return legacyResourceRedirect;
 
   // story a539c649(S-route-project) S1 — path 위계 resolve. fwdHeaders 를 response 구성 *전에*
   // 채워야 downstream RSC/route handler 가 x-resolved-* 를 실제로 읽을 수 있다(x-pathname 과
