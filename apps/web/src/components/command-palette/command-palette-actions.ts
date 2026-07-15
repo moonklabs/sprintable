@@ -58,7 +58,7 @@ export function buildActionCommands(t: ActionCommandTranslator, context?: StoryC
     group: 'action',
     labelKey: 'actionRecruitAgent',
     label: t('actionRecruitAgent'),
-    targetRoute: '/agents/recruiter',
+    targetRoute: '/organization/workforce/recruiter',
     impact: t('actionRecruitAgentImpact'),
     danger: false,
   });

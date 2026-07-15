@@ -152,7 +152,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
             <div className="space-y-2">
               {agents.map((agent) => (
                 <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
-                  <Link href={`/agents/${agent.id}`} className="min-w-0 flex-1">
+                  <Link href={`/organization/workforce/${agent.id}`} className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate font-medium text-foreground hover:underline hover:text-primary">{agent.name}</span>
                       {!agent.is_active ? <Badge variant="destructive">inactive</Badge> : null}
@@ -174,7 +174,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                         {togglingId === agent.id ? '...' : agent.is_active ? t('deactivateAgent') : t('activateAgent')}
                       </Button>
                     ) : null}
-                    <Link href={`/agents/${agent.id}`} className="text-muted-foreground hover:text-foreground">
+                    <Link href={`/organization/workforce/${agent.id}`} className="text-muted-foreground hover:text-foreground">
                       <ChevronRight className="size-4" />
                     </Link>
                   </div>

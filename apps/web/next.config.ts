@@ -67,6 +67,17 @@ const nextConfig: NextConfig = {
       // app(한)↔랜딩(영) 내용 상이로 별도 콘텐츠 스토리에서 처리한다.
       { source: '/llms.txt', destination: 'https://sprintable.ai/llms.txt', statusCode: 301, has: [{ type: 'host', value: 'app.sprintable.ai' }] },
       { source: '/llms-full.txt', destination: 'https://sprintable.ai/llms-full.txt', statusCode: 301, has: [{ type: 'host', value: 'app.sprintable.ai' }] },
+      // story c4980e70(조직 1급화 IA·doc org-1st-class-surface-ia-design-b §1): 에이전트 관리가
+      // /agents → /organization/workforce(조직=1급 구역)로 승격. 서브라우트 전체(상세·runs·recruiter 등) 보존.
+      { source: '/agents', destination: '/organization/workforce', permanent: true },
+      { source: '/agents/:path*', destination: '/organization/workforce/:path*', permanent: true },
+      // org-members 탭(settings)도 같은 승격 — 조직 구성원 관리의 새 1급 홈은 /organization/members.
+      {
+        source: '/settings',
+        has: [{ type: 'query', key: 'tab', value: 'org-members' }],
+        destination: '/organization/members',
+        permanent: true,
+      },
     ];
   },
   async rewrites() {

@@ -48,7 +48,7 @@ const ITEMS: CommandItem[] = [
   { id: 'go-board', group: 'navigate', icon: FolderKanban, labelKey: 'goBoard', href: '/board', shortcut: ['G', 'B'] },
   { id: 'go-sprints', group: 'navigate', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
   { id: 'go-chats', group: 'navigate', icon: MessageSquareMore, labelKey: 'goChats', href: '/chats', shortcut: ['G', 'M'] },
-  { id: 'go-agents', group: 'navigate', icon: Bot, labelKey: 'goAgents', href: '/agents', shortcut: ['G', 'A'] },
+  { id: 'go-agents', group: 'navigate', icon: Bot, labelKey: 'goAgents', href: '/organization/workforce', shortcut: ['G', 'A'] },
   { id: 'go-docs', group: 'navigate', icon: BookOpen, labelKey: 'goDocs', href: '/docs', shortcut: ['G', 'S'] },
 ];
 

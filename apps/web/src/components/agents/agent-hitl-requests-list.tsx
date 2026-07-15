@@ -100,7 +100,7 @@ export function AgentHitlRequestsList() {
               <RefreshCw className={`mr-1.5 size-3.5 ${refreshing ? 'animate-spin' : ''}`} />
               {t('refresh')}
             </Button>
-            <Link href="/agents" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+            <Link href="/organization/workforce" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               <ArrowLeft className="mr-1.5 size-3.5" />
               {t('backToAgents')}
             </Link>

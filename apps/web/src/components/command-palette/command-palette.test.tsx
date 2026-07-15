@@ -92,7 +92,7 @@ describe('CommandPalette — action commands (story 4f991165)', () => {
     const recruitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('에이전트 모집하기'));
     expect(recruitBtn).toBeDefined();
     await act(async () => { recruitBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(pushMock).toHaveBeenCalledWith('/agents/recruiter');
+    expect(pushMock).toHaveBeenCalledWith('/organization/workforce/recruiter');
   });
 
   it('does not render any command execution history/count/recency (surveillance-reframe guard)', async () => {

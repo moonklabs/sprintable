@@ -319,7 +319,7 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
             title={<h1 className="text-sm font-medium">{t('statusTitle')}</h1>}
             actions={
               canManageMembers ? (
-                <Link href="/agents/deploy" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+                <Link href="/organization/workforce/deploy" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
                   <Rocket className="mr-1.5 size-3.5" />
                   {t('openWizard')}
                 </Link>
@@ -358,7 +358,7 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                   <p className="mt-2 text-sm text-muted-foreground">{t('emptyDeploymentsBody')}</p>
                   {canManageMembers && (
                     <div className="mt-6 flex flex-wrap justify-center gap-2">
-                      <Link href="/agents/deploy" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('openWizard')}</Link>
+                      <Link href="/organization/workforce/deploy" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('openWizard')}</Link>
                     </div>
                   )}
                 </div>
@@ -568,13 +568,13 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                   {cue === 'hitl' && (
-                                    <Link href="/agents/hitl" className={buttonVariants({ variant: 'glass', size: 'sm' })}>
+                                    <Link href="/organization/workforce/hitl" className={buttonVariants({ variant: 'glass', size: 'sm' })}>
                                       <TriangleAlert className="mr-1 size-3" />
                                       {t('hitlQueueCta')}
                                     </Link>
                                   )}
                                   {cue === 'deploy_failed' && (
-                                    <Link href="/agents/deploy" className={buttonVariants({ variant: 'glass', size: 'sm' })}>
+                                    <Link href="/organization/workforce/deploy" className={buttonVariants({ variant: 'glass', size: 'sm' })}>
                                       <Rocket className="mr-1 size-3" />
                                       {t('openWizard')}
                                     </Link>
@@ -590,7 +590,7 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                                     </Button>
                                   )}
                                   {(cue === 'retrying' || cue === 'manual_retry' || cue === 'inspect_failure') && (
-                                    <Link href="/agents/runs" className={buttonVariants({ variant: 'glass', size: 'sm' })}>
+                                    <Link href="/organization/workforce/runs" className={buttonVariants({ variant: 'glass', size: 'sm' })}>
                                       <History className="mr-1 size-3" />
                                       {tr('runHistory')}
                                     </Link>

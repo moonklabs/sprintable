@@ -74,7 +74,13 @@
     "zoneWork": "작업",
     "zoneTrust": "신뢰",
     "zoneKnowledge": "지식",
-    "orgBriefing": "조직 브리핑"
+    "orgBriefing": "조직 브리핑",
+    "zoneOrganization": "조직",
+    "orgMembers": "구성원",
+    "workforce": "워크포스",
+    "orgRoles": "역할",
+    "orgTrust": "신뢰",
+    "orgMemory": "기억"
   },
   "storage": {
     "title": "스토리지",
@@ -324,6 +330,18 @@
     "workforceTogether": "함께 일하는 중",
     "workforceUnassigned": "아직 배정 전입니다",
     "workforceEmpty": "진행 중인 작업이 없습니다"
+  },
+  "organization": {
+    "rolesTitle": "역할",
+    "rolesDescription": "조직 구성원의 역할을 그룹별로 확인하고 변경합니다.",
+    "roleGroupOwner": "소유자",
+    "roleGroupAdmin": "관리자",
+    "roleGroupMember": "구성원",
+    "roleGroupEmpty": "해당 역할의 구성원이 없습니다.",
+    "trustSlotTitle": "신뢰",
+    "trustSlotBody": "조직 단위 신뢰 자본은 준비 중입니다.",
+    "memorySlotTitle": "기억",
+    "memorySlotBody": "조직 단위 축적 기억은 준비 중입니다."
   },
   "board": {
     "title": "칸반 보드",

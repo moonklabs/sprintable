@@ -140,7 +140,7 @@ export default function AgentDetailPage() {
 
   const fetchAgent = useCallback(async () => {
     const res = await fetch(`/api/team-members/${id}`);
-    if (!res.ok) { router.push('/agents?tab=manage'); return; }
+    if (!res.ok) { router.push('/organization/workforce?tab=manage'); return; }
     const json = await res.json() as { data: AgentMember };
     setAgent(json.data);
   }, [id, router]);
@@ -388,7 +388,7 @@ export default function AgentDetailPage() {
   return (
     <div className="w-full max-w-3xl mx-auto p-6 space-y-6">
       <div className="flex items-center gap-3">
-        <Link href="/agents?tab=manage" className="text-muted-foreground hover:text-foreground transition-colors">
+        <Link href="/organization/workforce?tab=manage" className="text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <h1 className="text-lg font-semibold text-foreground">{t('orgAgentsTitle')}</h1>
