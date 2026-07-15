@@ -71,7 +71,7 @@ async def _enrich_doc_summary(doc, session: AsyncSession) -> DocSummaryResponse:
     resp.assignee, resp.revisions = await _resolve_doc_extras(doc, session)
     return resp
 
-router = APIRouter(prefix="/api/v2/docs", tags=["docs"])
+router = APIRouter(prefix="/api/v2/docs", tags=["docs", "Knowledge"])
 
 
 def _get_repo(

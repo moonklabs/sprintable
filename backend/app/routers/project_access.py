@@ -12,7 +12,7 @@ from app.dependencies.database import get_db
 from app.models.project_access import ProjectAccess
 from app.repositories.organization import OrganizationRepository
 
-router = APIRouter(prefix="/api/v2/projects", tags=["project-access"])
+router = APIRouter(prefix="/api/v2/projects", tags=["project-access", "Organization"])
 
 
 class ProjectAccessCreate(BaseModel):

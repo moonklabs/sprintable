@@ -12,7 +12,7 @@ from app.repositories.epic import EpicRepository
 from app.schemas.epic import EpicCreate, EpicProgressResponse, EpicResponse, EpicUpdate
 from app.services.project_auth import has_project_access
 
-router = APIRouter(prefix="/api/v2/epics", tags=["epics"])
+router = APIRouter(prefix="/api/v2/epics", tags=["epics", "Work"])
 
 
 def _get_repo(

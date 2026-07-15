@@ -59,6 +59,17 @@ async def lifespan(app: FastAPI):
 
 from app.routers import a2a, account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, context_pack, gate_config, gate_metrics, attachments, audit_logs, auth, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, loops, mcp, me, meetings, members, merge_gate, mockups, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, release_notes, retros, rewards, role_templates, runtime_capabilities, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
+# 도메인 축 B(org-1st-class-surface-ia-design-b §3): OpenAPI 태그 조직-우선 위계.
+# 개별 라우터는 기존 세부 tag(예 "stories")를 그대로 유지하고 이 4축 태그를 추가로 보유(다중
+# tags·additive) — FastAPI가 이 openapi_tags 순서대로 문서를 그룹핑하고, 여기 없는 세부 tag는
+# 뒤이어 처음 등장한 순서로 노출된다. URL·오퍼레이션·세부 tag 값 불변(하위호환 100%).
+_OPENAPI_TAGS = [
+    {"name": "Organization", "description": "조직 — 구성원·역할·워크포스·신뢰 프로필·설정·통신"},
+    {"name": "Work", "description": "작업 — 스토리·에픽·스프린트·워크플로우·산출물"},
+    {"name": "Trust", "description": "신뢰 — 게이트·검증·감사 로그"},
+    {"name": "Knowledge", "description": "지식 — 문서·스토리지·조직 학습(loop)"},
+]
+
 app = FastAPI(
     title="Sprintable API v2",
     description="FastAPI backend — Phase B migration layer",
@@ -66,6 +77,7 @@ app = FastAPI(
     docs_url="/api/v2/_swagger" if settings.debug else None,
     redoc_url=None,
     lifespan=lifespan,
+    openapi_tags=_OPENAPI_TAGS,
 )
 
 _HTTP_CODE_MAP: dict[int, str] = {

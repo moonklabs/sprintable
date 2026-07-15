@@ -11,7 +11,7 @@ from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
 from app.repositories.webhook_config import WebhookConfigRepository
 from app.schemas.webhook_config import UpsertWebhookConfig, WebhookConfigResponse
 
-router = APIRouter(prefix="/api/v2/webhooks", tags=["webhooks"])
+router = APIRouter(prefix="/api/v2/webhooks", tags=["webhooks", "Organization"])
 
 
 class DeliveryStatusResponse(BaseModel):

@@ -9,8 +9,8 @@ from app.models.label import ITEM_TYPES
 from app.repositories.label import ItemLabelRepository, LabelRepository
 from app.schemas.label import ItemLabelCreate, ItemLabelResponse, LabelCreate, LabelResponse, LabelUpdate
 
-router = APIRouter(prefix="/api/v2/labels", tags=["labels"])
-item_label_router = APIRouter(prefix="/api/v2/item-labels", tags=["labels"])
+router = APIRouter(prefix="/api/v2/labels", tags=["labels", "Work"])
+item_label_router = APIRouter(prefix="/api/v2/item-labels", tags=["labels", "Work"])
 
 
 def _get_label_repo(

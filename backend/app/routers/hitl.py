@@ -10,7 +10,7 @@ from app.dependencies.project_scope import enforce_write_scope, resolve_required
 from app.repositories.hitl import HitlRepository
 from app.schemas.hitl import PatchHitlPolicyRequest, ResolveHitlRequestBody
 
-router = APIRouter(prefix="/api/v2/hitl", tags=["hitl"])
+router = APIRouter(prefix="/api/v2/hitl", tags=["hitl", "Trust"])
 
 
 def _repo(session: AsyncSession = Depends(get_db)) -> HitlRepository:

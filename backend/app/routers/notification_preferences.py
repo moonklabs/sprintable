@@ -16,7 +16,7 @@ from app.models.notification_preference import NotificationPreference
 from app.models.team import TeamMember
 from app.services.member_resolver import ResolvedMember, resolve_member
 
-router = APIRouter(prefix="/api/v2/notification-preferences", tags=["notification-preferences"])
+router = APIRouter(prefix="/api/v2/notification-preferences", tags=["notification-preferences", "Organization"])
 
 _VALID_CHANNELS = {"sse", "discord", "telegram", "in_app"}
 _VALID_LEVELS = {"all", "mentions", "mute"}

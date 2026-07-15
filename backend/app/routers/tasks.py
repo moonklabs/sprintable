@@ -12,7 +12,7 @@ from app.schemas.task import TaskCreate, TaskResponse, TaskUpdate
 from app.services.evidence_service import batch_has_evidence, batch_human_verified
 from app.services.notification_dispatch import dispatch_notification
 
-router = APIRouter(prefix="/api/v2/tasks", tags=["tasks"])
+router = APIRouter(prefix="/api/v2/tasks", tags=["tasks", "Work"])
 
 
 def _get_repo(

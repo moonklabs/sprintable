@@ -26,7 +26,7 @@ try:
 except Exception:
     pass
 
-router = APIRouter(prefix="/api/v2/activity-logs", tags=["activity-logs"])
+router = APIRouter(prefix="/api/v2/activity-logs", tags=["activity-logs", "Trust"])
 
 _ENTITY_TITLE_MODELS: dict[str, type] = {}
 

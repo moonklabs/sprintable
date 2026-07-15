@@ -36,7 +36,7 @@ from app.services.member_resolver import filter_org_member_ids
 from app.services.notification_dispatch import dispatch_notification
 from app.services.project_auth import assert_target_in_caller_org
 
-router = APIRouter(prefix="/api/v2/visual-artifacts", tags=["visual-artifacts"])
+router = APIRouter(prefix="/api/v2/visual-artifacts", tags=["visual-artifacts", "Work"])
 
 
 def _ok(data: object, status: int = 200) -> JSONResponse:

@@ -32,7 +32,7 @@ from app.services.project_auth import accessible_project_ids_in_org, has_project
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v2", tags=["assets"])
+router = APIRouter(prefix="/api/v2", tags=["assets", "Knowledge"])
 
 _SNIPPET = 80
 

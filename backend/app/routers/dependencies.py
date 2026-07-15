@@ -13,7 +13,7 @@ from app.schemas.dependency import DependencyCreate, DependencyGraphResponse, De
 from app.services.dependency_graph import get_graph, would_create_cycle
 from app.services.project_auth import accessible_project_ids_in_org, has_project_access
 
-router = APIRouter(prefix="/api/v2/dependencies", tags=["dependencies"])
+router = APIRouter(prefix="/api/v2/dependencies", tags=["dependencies", "Work"])
 
 # item_type → project-소속 모델. epic/sprint/story 셋 다 project_id 직접 컬럼(pm.py) — polymorphic
 # 간접(task→story) 없음. dependency 자체엔 project_id가 없어 아이템→project로 해소해 게이팅한다.

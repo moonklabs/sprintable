@@ -30,7 +30,7 @@ from app.routers.events import _agent_connections, _event_to_payload
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v2/agent", tags=["agent-gateway"])
+router = APIRouter(prefix="/api/v2/agent", tags=["agent-gateway", "Organization"])
 
 _SSE_HEARTBEAT: float = float(os.getenv("SSE_HEARTBEAT_TIMEOUT", "30"))
 _BACKFILL_LIMIT: int = int(os.getenv("AGENT_GATEWAY_BACKFILL_LIMIT", "100"))

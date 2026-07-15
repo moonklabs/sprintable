@@ -26,7 +26,7 @@ from app.services.onboarding_funnel import (
     safe_key_prefix,
 )
 
-router = APIRouter(prefix="/api/v2/onboarding", tags=["onboarding"])
+router = APIRouter(prefix="/api/v2/onboarding", tags=["onboarding", "Organization"])
 
 
 class OnboardingEventBody(BaseModel):

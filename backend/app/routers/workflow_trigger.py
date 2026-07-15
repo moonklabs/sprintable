@@ -12,7 +12,7 @@ from app.models.workflow_execution_log import WorkflowExecutionLog
 from app.services.rule_evaluator import EventContext
 from app.services.workflow_pipeline import process_event
 
-router = APIRouter(prefix="/api/v2/workflow", tags=["workflow"])
+router = APIRouter(prefix="/api/v2/workflow", tags=["workflow", "Work"])
 
 _DEDUP_SECONDS = 30
 

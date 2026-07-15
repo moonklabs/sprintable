@@ -37,7 +37,7 @@ from app.services import hypothesis as svc
 from app.services.member_resolver import ResolvedMember, resolve_member
 from app.services.project_auth import has_project_access
 
-router = APIRouter(prefix="/api/v2/hypotheses", tags=["hypotheses"])
+router = APIRouter(prefix="/api/v2/hypotheses", tags=["hypotheses", "Work"])
 
 
 async def _assert_hypothesis_project_access(

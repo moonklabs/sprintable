@@ -9,7 +9,7 @@ from app.dependencies.database import get_db
 from app.models.policy_document import PolicyDocument
 from app.schemas.policy_document import PolicyDocumentResponse
 
-router = APIRouter(prefix="/api/v2/policy-documents", tags=["policy-documents"])
+router = APIRouter(prefix="/api/v2/policy-documents", tags=["policy-documents", "Organization"])
 
 
 @router.get("", response_model=list[PolicyDocumentResponse])

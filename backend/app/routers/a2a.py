@@ -125,7 +125,7 @@ from app.schemas.a2a import (
 )
 from app.services.conversation_webhook import deliver_conversation_message_webhook
 
-router = APIRouter(prefix="/api/v2/a2a", tags=["a2a"])
+router = APIRouter(prefix="/api/v2/a2a", tags=["a2a", "Organization"])
 
 _METHOD_NOT_FOUND = -32601
 _INVALID_PARAMS = -32602

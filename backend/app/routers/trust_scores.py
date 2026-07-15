@@ -9,7 +9,7 @@ from app.dependencies.ownership import _is_org_admin
 from app.services.member_resolver import is_caller_member
 from app.services.trust_score import DEFAULT_WINDOW_DAYS, compute_member_trust_scores
 
-router = APIRouter(prefix="/api/v2/trust-scores", tags=["trust-scores"])
+router = APIRouter(prefix="/api/v2/trust-scores", tags=["trust-scores", "Organization"])
 
 
 async def _assert_self_or_org_admin(
