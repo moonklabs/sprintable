@@ -71,14 +71,23 @@ describe('LoopsClient — 실험실 first-touch 정체성', () => {
     expect(container.textContent).not.toContain('Loop 보드');
   });
 
-  it('빈 상태가 정체성 explainer(headline+설명+visual+CTA+AI hint) 5요소로 렌더된다', async () => {
+  it('빈 상태가 정체성 explainer(headline+설명+4노드 가로 플로우+CTA+AI hint) 5요소로 렌더된다 — 스토리 1eb18bd8 AC 원문 카피', async () => {
     await mount();
     const html = container.innerHTML;
-    expect(html).toContain('아직 시작한 실험이 없어요');
-    expect(html).toContain('가설을 세우고 실행');
-    expect(container.querySelector('svg')).not.toBeNull(); // 4노드 사이클 glyph
+    // 오르테가군 리뷰(유나 조건부 GREEN) — headline/explainer/CTA 단위 용어를 "Loop"으로 통일
+    // (surface명 "실험실"과 단위명 "Loop" 분리, "실험"↔"Loop" 혼용 제거).
+    expect(html).toContain('아직 시작한 Loop이 없어요');
+    expect(html).toContain('Loop은 가설에서 시작해 실행·검증·학습으로 이어지는 하나의 사이클이에요');
+    // 4노드(가설→실행→검증→학습)+↻다음 Loop 라벨이 아이콘과 함께 렌더.
+    expect(html).toContain('가설');
+    expect(html).toContain('실행');
+    expect(html).toContain('검증');
+    expect(html).toContain('학습');
+    expect(html).toContain('다음 Loop');
+    expect(container.querySelectorAll('svg').length).toBeGreaterThanOrEqual(5); // headline icon + 4노드 icon + next-loop icon
     expect(html).toContain('첫 Loop 시작하기');
-    expect(html).toContain('AI가 초안을 도와줘요');
+    expect(html).toContain('가설 하나로 충분해요');
+    expect(html).toContain('AI가 초안을 도와요');
     expect(html).not.toContain('Loop이 없습니다'); // 구 카피 소거
   });
 
