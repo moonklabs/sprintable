@@ -370,7 +370,7 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
     delete process.env['JWT_SECRET'];
   });
 
-  it.each(['standup', 'retro', 'loops', 'artifacts', 'mockups', 'sprints', 'storage', 'epics'])(
+  it.each(['standup', 'retro', 'loops', 'artifacts', 'mockups', 'sprints', 'storage', 'epics', 'board'])(
     'bare /%s(/*) → 실 slug로 301(redirectLegacyResourcePath 일반화 증명)',
     async (resource) => {
       const token = await makeAccessToken({ orgId: 'org-1' });
@@ -391,9 +391,11 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
     },
   );
 
-  it('이관 안 된 리소스(예: /board)는 개입 없이 통과 — MIGRATED_RESOURCES 밖', async () => {
+  it('이관 안 된 리소스(예: /meetings — dead feature, S-route-project 스코프 밖)는 개입 없이 통과 — MIGRATED_RESOURCES 밖', async () => {
+    // story a539c649 S3d: board는 이관 완료(MIGRATED_RESOURCES 편입)라 이 예시로 더 이상 부적합
+    // — meetings는 확인된 미사용/비활성 기능이라 마이그레이션 스코프 자체에서 제외됨(교사 승인).
     const token = await makeAccessToken({ orgId: 'org-1' });
-    const response = await middleware(makeRequest('/board', {
+    const response = await middleware(makeRequest('/meetings', {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
     expect(response.status).toBe(200);
