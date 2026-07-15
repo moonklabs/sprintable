@@ -175,6 +175,14 @@ class Settings(BaseSettings):
     # cron.py CRON_SECRET과 동일 패턴 — 미설정(로컬 개발) 시 인증 생략.
     firebase_bff_internal_secret: str = ""
 
+    # story 4dee942b(Phase1-S5): 네이티브 부트스트랩 — custom token→ID token 교환용 Firebase
+    # Web API key(공개 클라이언트 키, ADC와 별개). App Check 검증용 project number(project_id와
+    # 다른 값 — doc §9.3/산티아고 §9). App Check 필수 여부 게이트(기본 off — 모바일 클라이언트
+    # per-install challenge 메커니즘이 아직 없어 강제 시 발급 자체가 막힘, 별도 모바일 스토리 필요).
+    firebase_web_api_key: str = ""
+    firebase_project_number: str = ""
+    firebase_auth_mobile_app_check_required: bool = False
+
     @property
     def is_ee_enabled(self) -> bool:
         return self.license_consent.lower() == "agreed"

@@ -227,3 +227,98 @@ async def verify_firebase_id_token(id_token: str, project_id: str) -> VerifiedFi
         email=payload.get("email"),
         auth_time=payload.get("auth_time"),
     )
+
+
+# story 4dee942b(Phase1-S5·산티아고 §9): App Check 토큰 검증 — device binding의 "App Check
+# 앱 무결성 증명" 부분만 커버한다. ⚠️App Check 토큰 자체엔 설치별(per-installation) 고유
+# challenge가 없다(sub=Firebase App ID, 앱 전체에 공통 — 특정 기기 인스턴스를 구분 못 함).
+# 산티아고가 요구한 "설치별 key/challenge" 수준의 완전한 device binding은 모바일 클라이언트가
+# 별도 challenge-response 메커니즘을 구현해야 하는 별개 스코프(모바일 스토리 필요) — 이
+# 함수는 그 전제조건인 "요청이 진짜 앱에서 왔다"만 정확 검증한다(App Check 표준 용도).
+FIREBASE_APP_CHECK_JWKS_URL = "https://firebaseappcheck.googleapis.com/v1/jwks"
+
+_app_check_key_cache: dict[str, dict] = {}
+_app_check_key_cache_expires_at: float = 0.0
+
+
+def _reset_app_check_key_cache_for_tests() -> None:
+    global _app_check_key_cache, _app_check_key_cache_expires_at
+    _app_check_key_cache = {}
+    _app_check_key_cache_expires_at = 0.0
+
+
+async def _fetch_app_check_jwks() -> dict[str, dict]:
+    """표준 JWKS 포맷(kid→JWK dict) — 세션쿠키/ID token의 kid→X.509 PEM 포맷과 다르다.
+    PEM 파싱 불요, jose가 JWK dict를 직접 받는다."""
+    global _app_check_key_cache, _app_check_key_cache_expires_at
+    now = time.time()
+    if _app_check_key_cache and _app_check_key_cache_expires_at > now:
+        return _app_check_key_cache
+
+    async with httpx.AsyncClient() as client:
+        res = await client.get(FIREBASE_APP_CHECK_JWKS_URL)
+    if res.status_code != 200:
+        raise RuntimeError("app_check_jwks_fetch_failed")
+    body = res.json()
+    keys_by_kid = {jwk["kid"]: jwk for jwk in body.get("keys", []) if "kid" in jwk}
+
+    cache_control = res.headers.get("cache-control", "")
+    max_age = _DEFAULT_KEY_CACHE_SECONDS
+    for part in cache_control.split(","):
+        part = part.strip()
+        if part.startswith("max-age="):
+            try:
+                max_age = min(int(part.split("=", 1)[1]), _MAX_KEY_CACHE_SECONDS)
+            except ValueError:
+                pass
+
+    _app_check_key_cache = keys_by_kid
+    _app_check_key_cache_expires_at = now + max_age
+    return keys_by_kid
+
+
+@dataclass
+class VerifiedAppCheck:
+    issuer: str
+    app_id: str  # App Check 토큰의 sub — Firebase App ID(설치별 고유값 아님, 위 경고 참조)
+
+
+async def verify_app_check_token(token: str, project_number: str) -> VerifiedAppCheck | None:
+    """App Check 토큰 정확 검증(doc §9.3 "App Check is defense-in-depth"). issuer=
+    `https://firebaseappcheck.googleapis.com/<project_number>` — ⚠️여기의 project_number는
+    다른 검증기들이 쓰는 project_id와 다른 값(Firebase 프로젝트 번호, 문자열 ID 아님)."""
+    try:
+        header = jose_jwt.get_unverified_header(token)
+    except JWTError:
+        return None
+
+    kid = header.get("kid")
+    if not kid:
+        return None
+
+    try:
+        keys = await _fetch_app_check_jwks()
+    except RuntimeError:
+        return None
+
+    jwk = keys.get(kid)
+    if jwk is None:
+        return None
+
+    expected_issuer = f"https://firebaseappcheck.googleapis.com/{project_number}"
+    try:
+        payload = jose_jwt.decode(
+            token,
+            jwk,
+            algorithms=["RS256"],
+            issuer=expected_issuer,
+            options={"verify_aud": False},  # aud=projects/<num>/apps/<app_id> 배열 — 호출부가 app_id 매칭.
+        )
+    except JWTError:
+        return None
+
+    sub = payload.get("sub")
+    if not sub:
+        return None
+
+    return VerifiedAppCheck(issuer=str(payload.get("iss")), app_id=str(sub))

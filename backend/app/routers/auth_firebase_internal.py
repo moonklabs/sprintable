@@ -26,8 +26,9 @@ from app.core.config import settings
 from app.dependencies.database import get_db
 from app.models.auth_identity import AuthIdentity
 from app.models.user import User
-from app.services.firebase_session_mint import mint_session_cookie
+from app.services.firebase_session_mint import mint_session_cookie, mint_session_cookie_for_uid
 from app.services.firebase_verifier import verify_firebase_id_token
+from app.services.native_bootstrap import consume_bootstrap_code
 
 logger = logging.getLogger(__name__)
 
@@ -103,3 +104,50 @@ async def mint_firebase_session(
 
     logger.info("auth.firebase.session_mint success")
     return FirebaseSessionMintResponse(session_cookie=session_cookie, expires_in=valid_duration_seconds)
+
+
+class NativeBootstrapConsumeRequest(BaseModel):
+    code: str
+    device_binding_hash: str | None = None
+
+
+class NativeBootstrapConsumeResponse(BaseModel):
+    session_cookie: str
+    expires_in: int
+
+
+@router.post("/native-bootstrap/consume", response_model=NativeBootstrapConsumeResponse)
+async def consume_native_bootstrap(
+    body: NativeBootstrapConsumeRequest,
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> NativeBootstrapConsumeResponse:
+    """story 4dee942b(Phase1-S5): Next.js `/auth/native?code=` 라우트(FE lane)가 호출하는
+    내부 atomic-consume API. 원본 Firebase ID token은 발급 순간 이후로 존재하지 않으므로
+    firebase_uid만으로 custom token 경유 세션쿠키를 새로 mint한다(S4 mint_session_cookie
+    재사용, 오르테가군 판정). 실패 사유(만료/재사용/불일치)는 전부 동일한 401로 통일."""
+    _require_internal_secret(authorization)
+
+    if not settings.firebase_auth_mobile_issue:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Native bootstrap not enabled")
+
+    consumed = await consume_bootstrap_code(
+        db,
+        code=body.code,
+        project_id=settings.firebase_project_id,
+        device_binding_hash=body.device_binding_hash,
+    )
+    if consumed is None:
+        logger.warning("auth.native_bootstrap.consume rejected reason=invalid_expired_or_replayed")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired bootstrap code")
+
+    valid_duration_seconds = 5 * 24 * 60 * 60
+    session_cookie = await mint_session_cookie_for_uid(
+        consumed.firebase_uid, settings.firebase_project_id, settings.firebase_web_api_key, valid_duration_seconds
+    )
+    if session_cookie is None:
+        logger.warning("auth.native_bootstrap.consume failed reason=mint_failed")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Session cookie mint failed")
+
+    logger.info("auth.native_bootstrap.consume success")
+    return NativeBootstrapConsumeResponse(session_cookie=session_cookie, expires_in=valid_duration_seconds)
