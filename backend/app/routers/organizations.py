@@ -10,6 +10,11 @@ from app.dependencies.database import get_db
 from app.models.user import User
 from app.repositories.organization import OrganizationRepository
 from app.services.agent_anchor_sync import ensure_human_member
+from app.services.entity_slug import (
+    RESERVED_WORKSPACE_SLUGS,
+    is_valid_slug_format,
+    is_workspace_slug_taken,
+)
 from app.schemas.organization import (
     CreateOrganization,
     DeleteOrganization,
@@ -57,6 +62,13 @@ async def create_organization(
         from ee.plan_limits import check_org_create_limit  # type: ignore[import]
         await check_org_create_limit(session, auth.user_id)
 
+    # story 139d2405(S-slug-infra): workspace slug=root bare 경로라 앱 라우트 예약어와 충돌
+    # 방지(형식도 함께 방어 — URL path segment).
+    if not is_valid_slug_format(body.slug):
+        raise HTTPException(status_code=400, detail="Invalid slug format")
+    if body.slug in RESERVED_WORKSPACE_SLUGS:
+        raise HTTPException(status_code=400, detail="Slug is reserved")
+
     org = await repo.create(name=body.name, slug=body.slug, owner_member_id=body.owner_member_id)
     if org is None:
         raise HTTPException(status_code=409, detail="Slug already exists")
@@ -90,6 +102,24 @@ async def create_organization(
     return OrganizationResponse.model_validate(org)
 
 
+@router.get("/resolve", response_model=MyOrganizationResponse)
+async def resolve_organization_by_slug(
+    slug: str,
+    auth: AuthContext = Depends(get_current_user),
+    repo: OrganizationRepository = Depends(_get_repo),
+) -> MyOrganizationResponse:
+    """story 139d2405(S-slug-infra): workspace slug → org 해소(S-route-workspace FE middleware가
+    소비 예정). 전역 유일이라 org_id 사전지정 불요. 비소속이면 404(존재 노출 금지 — get_organization
+    과 동형 원칙). ⚠️`/{id}` 라우트보다 먼저 등록해야 "resolve"가 UUID 파싱으로 새지 않는다."""
+    org = await repo.get_by_slug(slug)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    role = await repo.get_member_role(org_id=org.id, user_id=uuid.UUID(auth.user_id))
+    if role is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return MyOrganizationResponse(id=org.id, name=org.name, slug=org.slug, plan=org.plan, role=role)
+
+
 @router.get("/{id}", response_model=OrganizationResponse)
 async def get_organization(
     id: uuid.UUID,
@@ -114,17 +144,38 @@ async def update_organization(
     repo: OrganizationRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
 ) -> OrganizationResponse:
-    """Organization 이름 수정 — owner/admin만 가능."""
+    """Organization 이름/슬러그 수정 — owner/admin만 가능."""
     role = await repo.get_member_role(org_id=id, user_id=uuid.UUID(auth.user_id))
     if role is None:
         raise HTTPException(status_code=404, detail="Organization not found")
     if role not in ("owner", "admin"):
         raise HTTPException(status_code=403, detail="owner or admin role required")
 
-    org = await repo.update_name(org_id=id, name=body.name)
+    org = await repo.get(id)
     if org is None:
         raise HTTPException(status_code=404, detail="Organization not found")
 
+    if body.name is not None:
+        org.name = body.name
+
+    # story 139d2405(S-slug-infra): workspace rename — 형식/예약어/전역 유일성(자기 제외) 검증 +
+    # 이력 기록(향후 S-route-workspace의 301 해소용). old==new(무변경 재전송)면 이력 skip.
+    if body.slug is not None and body.slug != org.slug:
+        if not is_valid_slug_format(body.slug):
+            raise HTTPException(status_code=400, detail="Invalid slug format")
+        if body.slug in RESERVED_WORKSPACE_SLUGS:
+            raise HTTPException(status_code=400, detail="Slug is reserved")
+        if await is_workspace_slug_taken(session, body.slug, exclude_org_id=id):
+            raise HTTPException(status_code=409, detail="Slug already exists")
+        from app.models.entity_slug_history import EntitySlugHistory
+        session.add(EntitySlugHistory(
+            org_id=id, entity_type="organization", entity_id=id,
+            old_slug=org.slug, new_slug=body.slug,
+        ))
+        org.slug = body.slug
+
+    await session.flush()
+    await session.refresh(org)
     await session.commit()
     return OrganizationResponse.model_validate(org)
 
