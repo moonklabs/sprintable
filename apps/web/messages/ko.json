@@ -336,7 +336,7 @@
     "rolesDescription": "조직 구성원의 역할을 그룹별로 확인하고 변경합니다.",
     "roleGroupOwner": "소유자",
     "roleGroupAdmin": "관리자",
-    "roleGroupMember": "멤버",
+    "roleGroupMember": "구성원",
     "roleGroupEmpty": "해당 역할의 구성원이 없습니다.",
     "trustSlotTitle": "신뢰",
     "trustSlotBody": "조직 단위 신뢰 자본은 준비 중입니다.",
