@@ -78,7 +78,7 @@
     "zoneOrganization": "조직",
     "orgMembers": "구성원",
     "workforce": "워크포스",
-    "orgRoles": "역할",
+    "orgRoles": "권한",
     "orgTrust": "신뢰",
     "orgMemory": "기억"
   },
@@ -332,7 +332,7 @@
     "workforceEmpty": "진행 중인 작업이 없습니다"
   },
   "organization": {
-    "rolesTitle": "역할",
+    "rolesTitle": "권한",
     "rolesDescription": "조직 구성원의 역할을 그룹별로 확인하고 변경합니다.",
     "roleGroupOwner": "소유자",
     "roleGroupAdmin": "관리자",
