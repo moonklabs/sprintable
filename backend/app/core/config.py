@@ -171,6 +171,10 @@ class Settings(BaseSettings):
 
     firebase_project_id: str = ""  # Firebase/Identity Platform GCP 프로젝트 ID(dev/prod 분리)
 
+    # story 132e7204(Phase1-S4): Next.js BFF↔FastAPI 세션쿠키 발급 내부 호출 공유시크릿.
+    # cron.py CRON_SECRET과 동일 패턴 — 미설정(로컬 개발) 시 인증 생략.
+    firebase_bff_internal_secret: str = ""
+
     @property
     def is_ee_enabled(self) -> bool:
         return self.license_consent.lower() == "agreed"
