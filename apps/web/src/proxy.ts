@@ -149,9 +149,17 @@ function applyTokenCookies(
 // prod 로그 실측: /auth/refresh 239건 중 230건 401). RC2(refreshMatchesActive=false, 다른/
 // superseded 계정의 late refresh 억제)와는 다른 경우 — 그건 refresh 자체는 성공했으므로
 // 쿠키를 유지해야 한다(clearAuthCookies 를 이 경우엔 호출하지 않음).
+//
+// ⚠️3차 재진단(산티아고 prod gcloud 실측 근본 확定): prod FE Cloud Run엔
+// `NEXT_PUBLIC_COOKIE_DOMAIN=app.sprintable.ai`가 Secret Manager로 설정돼(dev엔 없음)
+// cookieBase() SET 시 Domain 속성이 붙는다. bare `response.cookies.delete(name)`는 Domain
+// 없이 나가 브라우저가 다른 쿠키로 취급 — 삭제가 조용히 no-op되고 죽은 sp_rt가 남아 401이
+// 무한 재생산됐다(1·2차 fix가 못 잡은 진짜 근본). SET과 완전히 동일한 속성(...cookieBase())
+// 으로 값 빈 문자열+maxAge=0 — 반드시 동일 쿠키로 매칭되게 한다.
 function clearAuthCookies(response: NextResponse): void {
-  response.cookies.delete(SP_AT_COOKIE);
-  response.cookies.delete(SP_RT_COOKIE);
+  const base = cookieBase();
+  response.cookies.set(SP_AT_COOKIE, '', { ...base, maxAge: 0 });
+  response.cookies.set(SP_RT_COOKIE, '', { ...base, maxAge: 0 });
 }
 
 /** Rebuild request headers with updated sp_at/sp_rt so route handlers see fresh tokens */
