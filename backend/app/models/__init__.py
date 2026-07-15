@@ -23,6 +23,7 @@ from app.models.plan_tier_limit import PlanTierLimit
 from app.models.policy_document import PolicyDocument
 from app.models.audit import AuditLog
 from app.models.webhook_config import WebhookConfig
+from app.models.push_device import PushDevice
 from app.models.doc import Doc, DocShareToken, DocSlugAlias
 from app.models.meeting import Meeting
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
@@ -98,6 +99,7 @@ __all__ = [
     "PolicyDocument",
     "AuditLog",
     "WebhookConfig",
+    "PushDevice",
     "Doc",
     "Epic",
     "Hypothesis",

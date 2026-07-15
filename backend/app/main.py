@@ -245,3 +245,6 @@ app.include_router(ws_chat.router)
 if settings.is_ee_enabled:
     from ee.routers import billing  # type: ignore[import]
     app.include_router(billing.router, prefix="/api/v2/billing")
+
+    from ee.routers import push_devices  # type: ignore[import]
+    app.include_router(push_devices.router, prefix="/api/v2/push")
