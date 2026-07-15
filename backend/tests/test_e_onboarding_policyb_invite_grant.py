@@ -122,7 +122,7 @@ async def test_list_projects_returns_only_accessible(monkeypatch):
     from datetime import datetime, timezone
     _now = datetime(2026, 6, 5, tzinfo=timezone.utc)
     proj = MagicMock()
-    proj.id = P1; proj.org_id = ORG_ID; proj.name = "P1"
+    proj.id = P1; proj.org_id = ORG_ID; proj.name = "P1"; proj.slug = "p1"
     proj.description = None; proj.created_at = _now; proj.updated_at = _now; proj.deleted_at = None
     proj.violation_level = "warn"
     scalars = MagicMock(); scalars.all.return_value = [proj]

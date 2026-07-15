@@ -43,6 +43,13 @@ class OrganizationRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def get_by_slug(self, slug: str) -> Organization | None:
+        """story 139d2405(S-slug-infra): workspace slug 해소용(slug 전역 유일)."""
+        result = await self.session.execute(
+            select(Organization).where(Organization.slug == slug)
+        )
+        return result.scalar_one_or_none()
+
     async def create(self, name: str, slug: str, owner_member_id: uuid.UUID | None) -> Organization | None:
         if await self.slug_exists(slug):
             return None
