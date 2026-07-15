@@ -111,6 +111,29 @@ describe('proxy', () => {
     expect(setCookie).toContain('sp_at=;');
   });
 
+  it('clears cookies with matching Domain attribute when NEXT_PUBLIC_COOKIE_DOMAIN is set (prod root cause — story e5225c0a 3차)', async () => {
+    // 산티아고 gcloud 실측 근본: prod FE Cloud Run엔 NEXT_PUBLIC_COOKIE_DOMAIN=app.sprintable.ai가
+    // Secret Manager로 설정돼있다(dev엔 없어 이 시나리오가 dev 검증을 통과했던 이유). SET 시 Domain이
+    // 붙는데 delete가 Domain 없이 나가면 브라우저가 다른 쿠키로 취급해 삭제가 조용히 no-op된다 —
+    // 이 테스트는 그 domain-scoped 환경을 시뮬레이트해 삭제 Set-Cookie에 Domain이 실려야 함을 고정한다.
+    process.env['NEXT_PUBLIC_APP_URL'] = 'https://app.sprintable.ai';
+    process.env['NEXT_PUBLIC_COOKIE_DOMAIN'] = 'app.sprintable.ai';
+    try {
+      mockFetch.mockResolvedValue({ ok: false, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
+      const response = await middleware(makeRequest('/dashboard', { sp_rt: 'stale-rt-domain' }));
+      expect(response.status).toBe(307);
+      const setCookie = response.headers.get('set-cookie') ?? '';
+      expect(setCookie).toContain('Domain=app.sprintable.ai');
+      // 두 쿠키 모두에 Domain이 실렸는지(하나만 고치는 회귀 방지) — sp_at/sp_rt 각각의 Set-Cookie
+      // 청크에 Domain이 붙어있어야 하므로 개수로 확인.
+      const domainCount = (setCookie.match(/Domain=app\.sprintable\.ai/g) ?? []).length;
+      expect(domainCount).toBe(2);
+    } finally {
+      delete process.env['NEXT_PUBLIC_APP_URL'];
+      delete process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
+    }
+  });
+
   it('does NOT clear cookies when refresh succeeds but is suppressed for a different active account (RC2 regression guard)', async () => {
     // refreshMatchesActive=false 는 refresh 자체가 실패한 게 아니라(다른 계정의 늦은 refresh를
     // 의도적으로 무시하는 것) — clearAuthCookies 를 호출하면 안 된다. sp_active_account 포인터를
