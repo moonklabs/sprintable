@@ -3,6 +3,14 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
+import {
+  fetchResolve,
+  looksLikeWorkspaceSegment,
+  RESOLVE_CACHE_TTL_SECONDS,
+  signResolveCache,
+  SP_RESOLVE_CACHE_COOKIE,
+  verifyResolveCache,
+} from '@/lib/route-resolve';
 
 const PUBLIC_EXACT = [
   '/',
@@ -230,7 +238,18 @@ export async function proxy(request: NextRequest) {
   const now = Math.floor(Date.now() / 1000);
   const fwdHeaders = new Headers(request.headers);
   fwdHeaders.set('x-pathname', pathname + request.nextUrl.search);
+
+  // story a539c649(S-route-project) S1 — path 위계 resolve. fwdHeaders 를 response 구성 *전에*
+  // 채워야 downstream RSC/route handler 가 x-resolved-* 를 실제로 읽을 수 있다(x-pathname 과
+  // 동일 관례 — response.headers.set 은 브라우저행 응답 헤더일 뿐 forwarded request 에 안 실림).
+  const resolved = await resolveWorkspaceProject(request, pathname, accessToken, fwdHeaders);
+  if (resolved.kind === 'redirect') return resolved.response;
+
   const response = NextResponse.next({ request: { headers: fwdHeaders } });
+  if (resolved.kind === 'set-cache') {
+    response.cookies.set(SP_RESOLVE_CACHE_COOKIE, resolved.token, { ...cookieBase(), maxAge: RESOLVE_CACHE_TTL_SECONDS });
+  }
+
   if (claims.exp !== undefined && claims.exp - now < 300) {
     const tokens = await singleFlightRefresh(request);
     // RC2: stale refresh(다른 계정)면 적용 안 함 — 현 active 세션 유지.
@@ -246,6 +265,65 @@ export async function proxy(request: NextRequest) {
   }
 
   return response;
+}
+
+type ResolveWiringResult =
+  | { kind: 'skip' }
+  | { kind: 'set-cache'; token: string }
+  | { kind: 'redirect'; response: NextResponse };
+
+/**
+ * story a539c649(S-route-project) S1 — `/{ws}/{proj}/...` path 위계 resolve. RESERVED_FIRST_
+ * SEGMENTS 와 안 겹치는 첫 세그먼트에만 시도해 기존 flat 라우트 전부 무회귀 통과시킨다(오르테가군
+ * 확定 스코프). flat→path 301 은 여기서 안 켠다 — 목적지 페이지가 아직 없어(S2/S3 몫) 걸면 즉시
+ * 404. S1 은 미들웨어 단(캐시 hit/miss·resolve 성공/실패·구 slug 301-chase)만 증명한다.
+ *
+ * `fwdHeaders` 를 직접 mutate 해 downstream 으로 x-resolved-* 를 실어 보낸다(캐시 hit 이어도
+ * 매 요청 동일하게 — 헤더가 fetch 왕복에 안 걸리므로 hit/miss 무관 항상 채운다).
+ */
+async function resolveWorkspaceProject(
+  request: NextRequest,
+  pathname: string,
+  accessToken: string,
+  fwdHeaders: Headers,
+): Promise<ResolveWiringResult> {
+  const segments = pathname.split('/').filter(Boolean);
+  const wsSlug = segments[0];
+  if (!looksLikeWorkspaceSegment(wsSlug)) return { kind: 'skip' };
+  const projSlug = looksLikeWorkspaceSegment(segments[1]) ? segments[1] : undefined;
+
+  const cached = request.cookies.get(SP_RESOLVE_CACHE_COOKIE)?.value;
+  if (cached) {
+    const hit = await verifyResolveCache(cached, wsSlug, projSlug);
+    if (hit) {
+      setResolvedHeaders(fwdHeaders, hit);
+      return { kind: 'skip' }; // 캐시 hit — fetch 생략, 쿠키 재설정 불요(아직 유효)
+    }
+  }
+
+  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const outcome = await fetchResolve(fastapiUrl, wsSlug, projSlug, accessToken);
+
+  if (outcome.kind === 'not_found') return { kind: 'skip' }; // resolve 실패 — 개입 없이 통과(Next 자체 404)
+
+  if (outcome.kind === 'redirect') {
+    const url = request.nextUrl.clone();
+    const nextSegments = [...segments];
+    if (outcome.workspace) nextSegments[0] = outcome.workspace;
+    if (outcome.project && nextSegments.length > 1) nextSegments[1] = outcome.project;
+    url.pathname = '/' + nextSegments.join('/');
+    return { kind: 'redirect', response: NextResponse.redirect(url, 301) };
+  }
+
+  setResolvedHeaders(fwdHeaders, outcome.context);
+  const token = await signResolveCache(wsSlug, projSlug, outcome.context);
+  return { kind: 'set-cache', token };
+}
+
+function setResolvedHeaders(fwdHeaders: Headers, context: { orgId: string; orgRole: string; projectId?: string }): void {
+  fwdHeaders.set('x-resolved-org-id', context.orgId);
+  fwdHeaders.set('x-resolved-org-role', context.orgRole);
+  if (context.projectId) fwdHeaders.set('x-resolved-project-id', context.projectId);
 }
 
 export const config = {

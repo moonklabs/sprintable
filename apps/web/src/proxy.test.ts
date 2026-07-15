@@ -140,3 +140,73 @@ describe('proxy', () => {
     expect(response.status).toBe(403);
   });
 });
+
+describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+
+  it('reserved 첫 세그먼트(현존 flat 라우트)는 resolve fetch 자체를 시도 안 함 — 회귀 0 핵심 증명', async () => {
+    const token = await makeAccessToken();
+    const response = await middleware(makeRequest('/dashboard', { sp_at: token }));
+    expect(response.status).toBe(200);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('실 ws slug(reserved 아님) 진입 시 resolve 성공 → 200 + sp_resolve_cache 쿠키 세팅', async () => {
+    const token = await makeAccessToken();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ org_id: 'org-1', org_slug: 'moonklabs', org_role: 'admin', project_id: 'proj-1', project_slug: 'sprintable' }),
+    });
+    const response = await middleware(makeRequest('/moonklabs/sprintable/board', { sp_at: token }));
+    expect(response.status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v2/resolve?workspace=moonklabs&project=sprintable'),
+      expect.any(Object),
+    );
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('sp_resolve_cache=');
+  });
+
+  it('resolve 실패(미존재/미소속) → 개입 없이 통과(200) — Next 자체 404 렌더에 위임', async () => {
+    const token = await makeAccessToken();
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({}) });
+    const response = await middleware(makeRequest('/ghost-workspace/proj/board', { sp_at: token }));
+    expect(response.status).toBe(200);
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).not.toContain('sp_resolve_cache=');
+  });
+
+  it('옛 slug(rename 이력) → BE redirect 필드를 미들웨어가 자체 301로 승격', async () => {
+    const token = await makeAccessToken();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ org_id: 'org-1', org_slug: 'new-moonklabs', org_role: 'admin', redirect: { workspace: 'new-moonklabs' } }),
+    });
+    const response = await middleware(makeRequest('/old-moonklabs/board', { sp_at: token }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/new-moonklabs/board');
+  });
+
+  it('캐시 hit(유효 sp_resolve_cache 쿠키+동일 slug) → resolve fetch 생략', async () => {
+    const token = await makeAccessToken();
+    const cacheToken = await new SignJWT({
+      wsSlug: 'moonklabs', projSlug: null,
+      orgId: 'org-1', orgSlug: 'moonklabs', orgRole: 'admin',
+    })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt()
+      .setExpirationTime('50s')
+      .sign(new TextEncoder().encode(JWT_SECRET));
+    const response = await middleware(makeRequest('/moonklabs/board', { sp_at: token, sp_resolve_cache: cacheToken }));
+    expect(response.status).toBe(200);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});

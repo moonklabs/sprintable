@@ -78,7 +78,7 @@
     "zoneOrganization": "Organization",
     "orgMembers": "Members",
     "workforce": "Workforce",
-    "orgRoles": "Roles",
+    "orgRoles": "Permissions",
     "orgTrust": "Trust",
     "orgMemory": "Memory"
   },
@@ -332,7 +332,7 @@
     "workforceEmpty": "No active work right now"
   },
   "organization": {
-    "rolesTitle": "Roles",
+    "rolesTitle": "Permissions",
     "rolesDescription": "View and change organization members' roles, grouped by role.",
     "roleGroupOwner": "Owner",
     "roleGroupAdmin": "Admin",
