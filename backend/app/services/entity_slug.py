@@ -26,9 +26,25 @@ def is_valid_slug_format(slug: str) -> bool:
 
 # 유나 doc org-1st-class-surface-ia-design-b §2a — root bare workspace slug라 앱 라우트와
 # 충돌 방지(GitHub org 예약어 관례). project slug는 workspace 하위(non-root)라 denylist 불요.
+#
+# 미르코 S-route-project 그라운딩 발견(근본 강화, 2026-07-15): §2a denylist가 FE 플랫
+# 최상위 라우트명(apps/web/src/app 실측)을 전부 커버하지 않아 ws slug="board" 같은 생성이
+# 허용되고 있었다 — /{ws}/... 마이그 이후 /board/...가 workspace로 오배정될 여지. 실측
+# 근거(apps/web/src/app 디렉토리 직접 대조, 두 그룹 모두 반영 — 발견은 (authenticated) 하위
+# 리소스 라우트만 지목했으나, 동일 충돌 메커니즘이 그 바깥 top-level 페이지(auth/dashboard 등)
+# 에도 적용돼 함께 봉합):
+#   (authenticated)/*: activity·artifacts·board·channel·chats·docs·epics·glance·inbox·
+#     loops·meetings·mockups·org-briefing·retro·rewards·sprints·standup·storage
+#   app/* top-level: auth·dashboard·forgot-password·internal-dogfood·invite·mfa·privacy·
+#     register·reset-password·share·terms·verify-email
 RESERVED_WORKSPACE_SLUGS: frozenset[str] = frozenset({
     "api", "login", "logout", "onboarding", "settings", "organization", "o", "admin",
     "help", "static", "_next", "404",
+    "activity", "artifacts", "board", "channel", "chats", "docs", "epics", "glance",
+    "inbox", "loops", "meetings", "mockups", "org-briefing", "retro", "rewards",
+    "sprints", "standup", "storage",
+    "auth", "dashboard", "forgot-password", "internal-dogfood", "invite", "mfa",
+    "privacy", "register", "reset-password", "share", "terms", "verify-email",
 })
 
 
