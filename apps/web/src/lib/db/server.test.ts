@@ -172,10 +172,11 @@ describe('getServerSession — Firebase 세션쿠키(__Host-sp_fs) 라우팅', (
       email: 'fb-user@test.com',
       authTime: 1700000000,
     });
-    global.fetch = vi.fn(async () => new Response(
+    const fetchSpy = vi.fn(async () => new Response(
       JSON.stringify({ member_id: 'sprintable-user-1', org_id: 'org-9', project_id: 'proj-9', resolved_default_project_id: null }),
       { status: 200 },
-    )) as unknown as typeof fetch;
+    ));
+    global.fetch = fetchSpy as unknown as typeof fetch;
 
     const { getServerSession } = await import('./server');
     const session = await getServerSession();
@@ -183,12 +184,19 @@ describe('getServerSession — Firebase 세션쿠키(__Host-sp_fs) 라우팅', (
     expect(session).toEqual({
       user_id: 'sprintable-user-1',
       email: 'fb-user@test.com',
-      access_token: '',
+      // S4 재검증에서 발견: BE get_current_user는 HTTPBearer로만 자격을 읽는다(Cookie 추출
+      // 경로 없음) — 세션쿠키 값 자체가 Bearer 자격이라 access_token에도 그대로 채운다.
+      access_token: 'fs-cookie-value',
       org_id: 'org-9',
       project_id: 'proj-9',
     });
     // legacy jwtVerify 경로로 안 샜는지 확인 — sp_at 쿠키가 아예 안 읽혔어야 함은 라우팅 순서로 보장.
     expect(verifySprintableSessionMock).toHaveBeenCalledWith('fs-cookie-value', 'test-project');
+    // BE에 Cookie 헤더가 아니라 Authorization: Bearer로 자격이 전달되는지 계약 고정(S4 재검증 핵심).
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v2/me'),
+      expect.objectContaining({ headers: { Authorization: 'Bearer fs-cookie-value' } }),
+    );
   });
 
   it('Firebase 검증 실패 시 legacy 폴백 없이 null을 반환한다(다운그레이드 금지)', async () => {

@@ -37,10 +37,13 @@ export async function signInAndExchangeFirebaseSession(email: string, password: 
     return { ok: false, error: { code: 'FIREBASE_SIGNIN_FAILED', message: 'Firebase sign-in failed' } };
   }
 
+  // story 132e7204(S4) route.ts는 body.id_token(snake_case)을 읽는다 — camelCase로 보내면
+  // 항상 undefined→400 INVALID_REQUEST(S1 스캐폴드 시절엔 501로 가려져 있어 안 드러났던 계약
+  // 불일치, S4 재검증 그라운딩에서 직접 발견).
   const res = await fetch('/api/auth/firebase/session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ idToken }),
+    body: JSON.stringify({ id_token: idToken }),
   }).catch(() => null);
 
   if (!res) return { ok: false, error: { code: 'NETWORK_ERROR', message: 'Session exchange request failed' } };
