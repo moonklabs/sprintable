@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { Users, Bot } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import {
   buildWorkforceFace, parseActiveEpics, parseEpicStories, parseTeamMembers,
@@ -10,6 +11,8 @@ import {
 
 // story 09fa254e — 조직 브리핑 "워크포스" 면. S1 셸의 스켈레톤 자리에 배치 이동 없이 증분 장착.
 // 아바타 클러스터는 collaboration-map.tsx(E-GLANCE §5)와 동일 스타일(숫자 배지 0, presence만).
+// story 64b9a879: 빈상태를 "사람과 AI가 함께 맡은 일이 여기 모입니다"로 전환·Users+Bot 아이콘
+// 페어로 인간+AI 하이브리드 정체성을 gentle하게 신호(무거운 일러스트 아닌 절제된 아이콘 2개).
 const REFRESH_MS = 60_000;
 
 interface WorkforceData {
@@ -93,8 +96,9 @@ export function WorkforceFace({ projectId }: { projectId: string }) {
   }, [projectId, t]);
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-4">
+    <div className="rounded-2xl border border-border bg-card p-4 transition-shadow hover:shadow-sm">
       <div className="mb-3 flex items-baseline gap-2.5">
+        <span className="size-1.5 shrink-0 rounded-full bg-success" aria-hidden="true" />
         <h2 className="text-sm font-semibold text-foreground">{t('workforceTitle')}</h2>
         <span className="text-[11px] text-muted-foreground">{t('workforceSubject')}</span>
       </div>
@@ -104,7 +108,13 @@ export function WorkforceFace({ projectId }: { projectId: string }) {
           <RowSkeleton />
         </>
       ) : data.items.length === 0 ? (
-        <p className="py-6 text-center text-xs text-muted-foreground">{t('workforceEmpty')}</p>
+        <div className="space-y-2 py-6 text-center">
+          <div className="flex items-center justify-center gap-1.5 text-muted-foreground/50" aria-hidden="true">
+            <Users className="size-4" />
+            <Bot className="size-4" />
+          </div>
+          <p className="text-xs text-muted-foreground">{t('workforceEmpty')}</p>
+        </div>
       ) : (
         data.items.map((item) => <WorkforceRow key={item.id} item={item} memberNames={data.memberNames} t={t} />)
       )}

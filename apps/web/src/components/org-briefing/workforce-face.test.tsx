@@ -81,6 +81,14 @@ describe('WorkforceFace', () => {
     expect(container.innerHTML).toContain('아직 배정 전입니다');
   });
 
+  it('story 64b9a879 — 활성 에픽 자체가 없으면 인간+AI 하이브리드 정체성 빈상태(Users+Bot 아이콘·발견성 카피)를 렌더한다', async () => {
+    stubFetch({ data: { project_status: { epics: [] } } }, {}, MEMBERS);
+    await mount();
+    expect(container.innerHTML).toContain('사람과 AI가 함께 맡은 일이 여기 모입니다');
+    // lucide 아이콘은 svg로 렌더 — Users+Bot 2개가 정확히 뜨는지(가벼운 아이콘 2개, 무거운 일러스트 아님).
+    expect(container.querySelectorAll('svg').length).toBe(2);
+  });
+
   it('never renders a per-person count, ranking, or elapsed-time string alongside the actual rendered row (collaboration-map.test.tsx parity — highest surveillance-risk surface)', async () => {
     // 까심 REQUEST_CHANGES(#2161) — S2(425085b4)와 동일 공허-통과 클래스: negative 정규식만 걸면
     // 컴포넌트가 통째로 빈 화면을 뱉어도 항상 통과한다. 같은 mount·같은 DOM에서 실제 아바타/씰이

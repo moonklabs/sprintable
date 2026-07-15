@@ -84,12 +84,15 @@ export function NowFace() {
   return (
     <section aria-label={t('nowTitle')}>
       <div className="mb-2.5 flex items-baseline gap-2.5">
+        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-primary">
+          {t('nowHeroBadge')}
+        </span>
         <h2 className="text-sm font-semibold text-foreground">{t('nowTitle')}</h2>
         {items && items.length > 0 ? (
           <span className="ml-auto text-[11px] text-muted-foreground">{t('nowNote', { count: items.length })}</span>
         ) : null}
       </div>
-      <div className="rounded-2xl border border-border bg-card">
+      <div className="rounded-2xl border border-border bg-card transition-shadow hover:shadow-sm">
         {items === null ? (
           Array.from({ length: 3 }).map((_, i) => <RowSkeleton key={i} />)
         ) : list.length === 0 ? (

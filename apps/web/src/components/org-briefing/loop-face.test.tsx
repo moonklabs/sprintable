@@ -86,13 +86,28 @@ describe('LoopFace', () => {
     expect(container.innerHTML).not.toContain('text-destructive');
   });
 
-  it('excludes killed/archived hypotheses (forward-only) and renders the calm empty state when nothing qualifies', async () => {
+  it('excludes killed/archived hypotheses (forward-only) and renders the identity-forward empty state when nothing qualifies', async () => {
     stubFetch(
       { data: [{ id: 'h1', status: 'killed', statement: '중단된 가설', epic_ids: [], created_at: '2026-07-01T00:00:00Z' }] },
       { data: { project_status: { epics: [] } } },
     );
     await mount();
-    expect(container.innerHTML).toContain('검증 중인 가설이 없습니다');
+    // story 64b9a879: "없습니다" 부재형이 아니라 "~하면 여기 모입니다" 발견성 카피로 전환.
+    expect(container.innerHTML).toContain('가설을 세우면 검증까지 이어지는 과정이 여기 모입니다');
     expect(container.innerHTML).not.toContain('중단된 가설');
+  });
+
+  it('빈상태에서 C1 학습 루프(/loops) 진입점이 gentle 텍스트 링크로 노출된다', async () => {
+    stubFetch({ data: [] }, { data: { project_status: { epics: [] } } });
+    await mount();
+    const link = container.querySelector('a[href$="/loops"]');
+    expect(link).not.toBeNull();
+    expect(link?.textContent).toContain('첫 가설 만들기');
+  });
+
+  it('타이틀 옆에 파란 dot(bg-info)이 렌더된다', async () => {
+    stubFetch({ data: [] }, { data: { project_status: { epics: [] } } });
+    await mount();
+    expect(container.innerHTML).toContain('bg-info');
   });
 });
