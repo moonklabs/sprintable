@@ -12,8 +12,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-os.environ.setdefault("LICENSE_CONSENT", "agreed")  # EE 게이트 on (app import 前·단독 실행 권장)
-
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = pytest.mark.skipif(
@@ -37,6 +35,16 @@ def _async_url() -> str:
         if url.startswith(prefix):
             return "postgresql+asyncpg://" + url[len(prefix):]
     return url
+
+
+def _ee_on():
+    """is_ee_enabled property 를 결정적으로 True 로 — env/import-order 무관(까심 QA #2168 동일 클래스 fix).
+
+    core 훅(dispatch_notification)이 런타임에 `settings.is_ee_enabled`를 읽으므로, module-level env 대신
+    호출 구간을 이 patch 로 감싸 결정적으로 EE 를 켠다.
+    """
+    from app.core.config import settings
+    return patch.object(type(settings), "is_ee_enabled", property(lambda self: True))
 
 
 class _Resp:
@@ -107,7 +115,7 @@ async def test_dispatch_notification_sends_expo_and_expires_dead_token_realdb():
 
         # dispatch_notification 실구동(EE on) — Expo HTTP 만 mock.
         async with SessionLocal() as s:
-            with patch("ee.services.expo_push.httpx.AsyncClient", new=fake):
+            with _ee_on(), patch("ee.services.expo_push.httpx.AsyncClient", new=fake):
                 await dispatch_notification(
                     s, org_id=ORG, event_type="gate_pending",
                     target_member_ids=[MEMBER_X], title="게이트 대기", body="승인 필요",
