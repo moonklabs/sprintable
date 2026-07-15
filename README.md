@@ -1,8 +1,21 @@
 # Sprintable
 
-**The delivery ledger for coding agent teams — know when agent work is actually done, and safe to merge.**
+**The operating system for hybrid teams — where humans and AI agents run real sprints: hypothesis → execution → verification → learning.**
 
-Spawning parallel coding agents is easy now — every harness does that natively. What's still unsolved: knowing when an agent's "done" is real, whether its diff is actually safe to merge, and reconstructing what happened when three agents touched the same files overnight. Sprintable is a self-hostable, vendor-neutral layer above your harness — each agent works a scoped ticket, "done" hits a human merge-safety gate before anything lands, and every claim, handoff, and decision is written to one auditable ledger.
+AI made individual work faster, but team delivery didn't move — because the bottleneck was never the work. It's the organization: deciding what to try, verifying what's actually done, and learning from what shipped. Most teams never run a real sprint — no hypothesis, no measurement, no looking back — so AI's speed never becomes the organization's growth.
+
+Sprintable makes an organization *sprint-able*. Every initiative starts as a hypothesis. Every "done" — human or agent — passes a human decision gate before it counts. Every result, proven or disproven, becomes learning the organization keeps. Humans and AI agents are first-class members of the same org, working one loop, on one auditable record.
+
+## What makes it an operating system
+
+**Learning — the org gets smarter, not just busier.**
+Sprints are bundles of hypotheses under test, not bags of tickets. Each one resolves to achieved or disproven — and a disproven hypothesis is learning, not failure, written into the organization's memory for the next loop.
+
+**Trust — a "done" is a claim until a human signs it.**
+When an agent reports work complete, that is *claimed*, not verified. Only a human sign-off makes it *verified*. Sprintable keeps claimed and verified as distinct, first-class states — so you always know which "done" you can trust.
+
+**Governance — nothing consequential lands on a claim.**
+Work parks at review; a human decision gate (`Gate` — a first-class object with an audited pending → approved / rejected state machine) is what moves it forward. A code merge is one kind of gate; any consequential decision can be one.
 
 Bring any agent: Claude Code, Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, OpenCode, Pi, or your own — first-class support across MCP-native config and gateway-connector adapters. Sprintable doesn't lock you into a framework or a vendor — it's the neutral layer that sits above all of them.
 
@@ -12,22 +25,20 @@ Bring any agent: Claude Code, Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, Ope
 
 ---
 
-## Why Not Linear + MCP?
+## Where Sprintable sits
 
-You could wire an MCP server into Linear and point one agent at it. For a single agent, that's enough.
+Three kinds of tools each own one piece. None owns the whole:
 
-Sprintable solves a different problem: **knowing when a team of agents is actually done, and safe to merge** — especially once agents come from different vendors and touch the same repo.
-
-| | Linear / Jira | n8n + webhooks | Terminal wrappers / agent visualizers | Sprintable |
+|  | PM tools (Linear, Jira) | Human org OS (Rippling, flex) | AI-workforce tools (Frontier, Workday) | **Sprintable** |
 |---|---|---|---|---|
-| Done-criteria gate before merge | No — a status field, not enforced | Custom build | No — shows activity, doesn't gate it | **agents park work at `in-review` — only a human-resolved merge gate moves it to `done`** |
-| Merge-safety gate (pending/approved/rejected) | Not modeled | Custom build | Not modeled | **First-class `Gate` object with an audited state machine** |
-| Ticket-per-agent scoping | Manual assignment | Workflow nodes, not tickets | Not modeled | **Each agent claims one story and locks its own files** |
-| Cross-vendor mutual review | Manual or glue code | Possible, no PM data model | Not modeled | **Claude Code writes, Codex reviews — one ledger tracks both** |
-| Audit ledger (claim → lock → status → gate → merge) | Partial (issue history) | Not a PM tool | No — terminal scrollback isn't a record | **Every action logged, queryable over MCP** |
-| Real-time SSE delivery to agents | No | Polling-based | N/A (local process) | **SSE EventBus — push, not poll** |
+| First-class citizen | Tickets & tasks | The org (people, roles, approvals) | AI co-workers (hire, onboard) | **A hybrid org running real sprints** |
+| Humans + AI as equal members | AI bolted on | Humans only | AI-centric | **Both, first-class, in one org** |
+| Methodology — *how* you work | You bring your own | — | — | **Sprint-able, built in: hypothesis → execute → verify → learn** |
+| Governance — *who* decides | A status field | HR approval chains | — | **Human decision gates on any consequential step** |
+| Trust — is "done" real? | — | — | Whatever the AI claims | **Claimed vs. human-verified, as a first-class state** |
+| Learning — does the org compound? | — | — | — | **Hypotheses verified or disproven → organizational memory** |
 
-The short version: Linear/Jira are human PM tools bolting on AI features. Terminal wrappers make parallel agents visible but don't decide anything. Sprintable is the layer that decides — and remembers.
+PM tools track the work but not the organization. Human org OSes model the organization but not agents, method, or learning. AI-workforce tools hire agents but not *how the org works and learns*. Sprintable is the seat no one is in: the organization, its human and AI members, the method that makes it sprint-able, and the trust and learning loops that let it compound.
 
 ---
 
