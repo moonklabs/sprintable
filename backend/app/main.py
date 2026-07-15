@@ -19,11 +19,15 @@ _logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.core.database import engine
+    from app.routers.auth_firebase_internal import check_internal_secret_config
     from app.routers.verdict_capture import warn_if_webhook_secret_misconfigured
+    from app.services.firebase_verifier import check_mobile_app_check_config
     from app.services.pg_pubsub import check_listen_config, listen_loop
 
     warn_if_webhook_secret_misconfigured()  # Bot-M.2 P3: 웹훅 secret misconfig 를 트래픽 前 경고.
     check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
+    check_internal_secret_config()  # 산티아고 §9 finding 4: non-local + 시크릿 미설정 fail-closed.
+    check_mobile_app_check_config()  # 산티아고 §9 finding 1: mobile 발급 on + App Check 미필수 fail-closed.
     task = asyncio.create_task(listen_loop())
     # E-L2 S5: 휴리스틱 트리거 워커는 default-off — 명시 활성화 시에만 task 생성(AC①).
     l2_task = None
@@ -57,7 +61,7 @@ async def lifespan(app: FastAPI):
             await engine.dispose()
 
 
-from app.routers import a2a, account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, context_pack, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, loops, mcp, me, meetings, members, merge_gate, mockups, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import a2a, account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, context_pack, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, loops, mcp, me, meetings, members, merge_gate, mockups, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 # 도메인 축 B(org-1st-class-surface-ia-design-b §3): OpenAPI 태그 조직-우선 위계.
 # 개별 라우터는 기존 세부 tag(예 "stories")를 그대로 유지하고 이 4축 태그를 추가로 보유(다중
@@ -239,6 +243,7 @@ app.include_router(agent_sessions.router)
 app.include_router(bridge.router)
 app.include_router(cron.router)
 app.include_router(auth_firebase_internal.router)
+app.include_router(auth_native_bootstrap.router)
 app.include_router(hitl.router)
 app.include_router(integrations.router)
 app.include_router(workflow_versions.router)
