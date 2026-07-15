@@ -8,7 +8,12 @@ import { join } from 'node:path';
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
-import { _resetKeyCacheForTests, verifySprintableSession } from './firebase-session';
+import { NextResponse } from 'next/server';
+import {
+  _resetKeyCacheForTests,
+  setFirebaseSessionCookie,
+  verifySprintableSession,
+} from './firebase-session';
 
 const PROJECT_ID = 'test-project';
 const KID = 'test-kid-1';
@@ -133,5 +138,24 @@ describe('verifySprintableSession', () => {
     const forged = await makeSessionCookie(attackerKeyPem); // signed with attacker key, claims trusted kid
     const result = await verifySprintableSession(forged, PROJECT_ID);
     expect(result).toBeNull();
+  });
+});
+
+describe('setFirebaseSessionCookie — __Host-sp_fs domain-less regression guard (story e5225c0a 3차 근본 재발 방지)', () => {
+  it('sets the cookie WITHOUT a Domain attribute even when NEXT_PUBLIC_COOKIE_DOMAIN is configured', () => {
+    process.env['NEXT_PUBLIC_APP_URL'] = 'https://app.sprintable.ai';
+    process.env['NEXT_PUBLIC_COOKIE_DOMAIN'] = 'app.sprintable.ai';
+    try {
+      const response = NextResponse.json({ data: { ok: true } });
+      setFirebaseSessionCookie(response, 'fake-session-cookie-value');
+      const setCookie = response.headers.get('set-cookie') ?? '';
+      expect(setCookie).toContain('__Host-sp_fs=fake-session-cookie-value');
+      expect(setCookie).not.toContain('Domain=');
+      expect(setCookie).toContain('Path=/');
+      expect(setCookie).toContain('HttpOnly');
+    } finally {
+      delete process.env['NEXT_PUBLIC_APP_URL'];
+      delete process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
+    }
   });
 });

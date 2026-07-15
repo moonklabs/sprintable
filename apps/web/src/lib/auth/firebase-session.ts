@@ -8,6 +8,33 @@
  * 표준 포맷이 아닌 kid→PEM X.509 맵이라 jose의 커스텀 JWTVerifyGetKey로 직접 캐시+해석한다.
  */
 import { importX509, jwtVerify, type JWTVerifyGetKey } from 'jose';
+import type { NextResponse } from 'next/server';
+import { cookieBase } from '@/lib/auth/cookies';
+
+// story 386a8b56 까심 REQUEST_CHANGES(2026-07-15): Next.js route.ts는 HTTP 메서드+route
+// segment config만 export 허용 — 임의 심볼 export는 next build 타입 에러(smoke-test FAIL).
+// 쿠키 상수/헬퍼를 route.ts 밖 이 모듈로 분리.
+export const SP_FS_COOKIE = '__Host-sp_fs';
+// doc §1.1: Firebase 세션쿠키 수명 5분~2주 공식 허용, POC는 5일 고정(prod 상향은 별도 결정 필요·14일 상한).
+export const FIREBASE_SESSION_MAX_AGE_SECONDS = 5 * 24 * 60 * 60;
+
+/**
+ * ⚠️story e5225c0a 3차 근본(prod 쿠키 domain 불일치로 삭제 no-op) 재발 방지 — `__Host-` prefix
+ * 쿠키는 브라우저 스펙(RFC 6265bis)상 Domain 속성이 있으면 Set-Cookie 자체가 거부된다. 즉
+ * cookieBase()의 domain을 여기서 절대 쓰면 안 되고(써도 브라우저가 무시/거부), 그 제약이 오히려
+ * 이 쿠키를 domain-drift 클래스 버그로부터 구조적으로 안전하게 만든다.
+ */
+export function setFirebaseSessionCookie(response: NextResponse, sessionCookieValue: string): void {
+  const { secure } = cookieBase();
+  response.cookies.set(SP_FS_COOKIE, sessionCookieValue, {
+    httpOnly: true,
+    secure,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: FIREBASE_SESSION_MAX_AGE_SECONDS,
+    // domain 의도적 생략 — __Host- prefix 요건.
+  });
+}
 
 // Firebase 공식 문서(doc §14): 세션쿠키 검증용 공개키 — ID token용 URL과 다르다(혼동 시 issuer
 // confusion — doc §4.2 명시 위험).
