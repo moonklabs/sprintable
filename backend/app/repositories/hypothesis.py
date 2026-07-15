@@ -29,7 +29,7 @@ class HypothesisRepository(BaseRepository[Hypothesis]):
     async def list_filtered(
         self,
         *,
-        project_id: uuid.UUID,
+        project_id: uuid.UUID | None,
         status: str | None = None,
         owner_member_id: uuid.UUID | None = None,
         epic_id: uuid.UUID | None = None,
@@ -37,10 +37,11 @@ class HypothesisRepository(BaseRepository[Hypothesis]):
         sprint_id: uuid.UUID | None = None,
         limit: int = 100,
     ) -> list[Hypothesis]:
-        q = select(Hypothesis).where(
-            Hypothesis.org_id == self.org_id,
-            Hypothesis.project_id == project_id,
-        )
+        # story fca4723d(C1): project_id 생략 시 org 전체(모든 project) 조회 — 접근권 후필터는
+        # 호출자(router)의 책임(retro list_sessions와 동형 분업).
+        q = select(Hypothesis).where(Hypothesis.org_id == self.org_id)
+        if project_id is not None:
+            q = q.where(Hypothesis.project_id == project_id)
         if status is not None:
             q = q.where(Hypothesis.status == status)
         if owner_member_id is not None:
