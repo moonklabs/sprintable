@@ -156,6 +156,21 @@ class Settings(BaseSettings):
     rate_limit_backend: str = "memory"  # "memory" | "redis"
     redis_url: str = "redis://localhost:6379/0"
 
+    # E-AUTH-REBUILD M2 Phase 1(story b07ad526·doc firebase-auth-identity-platform-migration-poc
+    # §10.1): Firebase Auth/Identity Platform 이행 플래그. 전부 default off — Phase 1 스키마+검증기
+    # 구현은 이 플래그들 뒤에서 dead code로 존재(prod 무영향). LEGACY_AUTH_ISSUE/VERIFY만 on이
+    # 기본이라 기존 self-issued JWT 로그인/세션이 그대로 SSOT.
+    firebase_auth_accept_id: bool = False        # native/direct 경로에서 Firebase ID token 수락
+    firebase_auth_accept_session: bool = False   # Firebase 세션쿠키(__Host-sp_fs) 수락
+    firebase_auth_issue_session: bool = False    # 신규 Firebase 세션쿠키 발급
+    firebase_auth_reset_cutover: bool = False    # Phase 4 coordinated forced-reset 전이 허용
+    firebase_auth_cohort_percent: int = 0        # Phase 5 점진 롤아웃 비율(0~100)
+    firebase_auth_mobile_issue: bool = False     # M2 모바일 native bootstrap 발급
+    legacy_auth_issue: bool = True               # 기존 self-issued JWT 로그인/refresh 발급
+    legacy_auth_verify: bool = True              # 기존 self-issued JWT 검증(proxy.ts·FastAPI)
+
+    firebase_project_id: str = ""  # Firebase/Identity Platform GCP 프로젝트 ID(dev/prod 분리)
+
     @property
     def is_ee_enabled(self) -> bool:
         return self.license_consent.lower() == "agreed"
