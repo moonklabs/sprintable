@@ -53,7 +53,7 @@ from app.schemas.loop import (
 from app.services import loop as svc
 from app.services.member_resolver import resolve_member
 
-router = APIRouter(prefix="/api/v2/loops", tags=["loops"])
+router = APIRouter(prefix="/api/v2/loops", tags=["loops", "Knowledge"])
 
 # 서비스 도메인 오류 code → HTTP status.
 _ERROR_STATUS: dict[str, int] = {

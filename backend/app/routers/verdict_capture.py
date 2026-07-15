@@ -39,7 +39,7 @@ from app.services.verdict_capture import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v2/internal/verdict", tags=["verdict-capture"])
+router = APIRouter(prefix="/api/v2/internal/verdict", tags=["verdict-capture", "Trust"])
 
 
 class CaptureBody(BaseModel):

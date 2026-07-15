@@ -10,7 +10,7 @@ from app.dependencies.database import get_db
 from app.models.team import TeamMember
 from app.services.project_auth import assert_target_in_caller_org, has_project_access
 
-router = APIRouter(prefix="/api/v2/members", tags=["members"])
+router = APIRouter(prefix="/api/v2/members", tags=["members", "Organization"])
 
 
 class MemberResponse(BaseModel):

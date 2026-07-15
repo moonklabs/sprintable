@@ -8,7 +8,7 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.repositories.workflow_version import WorkflowVersionRepository
 
-router = APIRouter(prefix="/api/v2/workflow-versions", tags=["workflow-versions"])
+router = APIRouter(prefix="/api/v2/workflow-versions", tags=["workflow-versions", "Work"])
 
 
 def _repo(session: AsyncSession = Depends(get_db)) -> WorkflowVersionRepository:

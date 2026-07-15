@@ -61,7 +61,7 @@ from app.models.team import TeamMember
 from app.models.login_audit_log import LoginAuditLog
 from app.models.user import RefreshToken, User
 
-router = APIRouter(prefix="/api/v2/auth", tags=["auth"])
+router = APIRouter(prefix="/api/v2/auth", tags=["auth", "Organization"])
 logger = logging.getLogger(__name__)
 
 

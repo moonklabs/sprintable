@@ -13,7 +13,7 @@ from app.schemas.project_api_key import (
     ProjectApiKeyResponse,
 )
 
-router = APIRouter(prefix="/api/v2", tags=["open-api-keys"])
+router = APIRouter(prefix="/api/v2", tags=["open-api-keys", "Organization"])
 
 
 def _get_repo(session: AsyncSession = Depends(get_db)) -> ProjectApiKeyRepository:

@@ -10,7 +10,7 @@ from app.dependencies.database import get_db
 from app.models.pm import Story
 from app.services.project_auth import has_project_access
 
-router = APIRouter(prefix="/api/v2/oss", tags=["oss"])
+router = APIRouter(prefix="/api/v2/oss", tags=["oss", "Organization"])
 
 _SAMPLE_STORIES = [
     {"title": "SPR-1: GitHub Webhook 연동하기", "status": "backlog", "priority": "high"},

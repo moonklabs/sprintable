@@ -27,7 +27,7 @@ from app.services.asset_registry import path_in_source_scope
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import has_project_access
 
-router = APIRouter(prefix="/api/v2/attachments", tags=["attachments"])
+router = APIRouter(prefix="/api/v2/attachments", tags=["attachments", "Knowledge"])
 
 _BUCKET = os.environ.get("GCS_MEMO_ATTACHMENTS_BUCKET", "sprintable-memo-attachments")
 _PUBLIC_PREFIX = f"https://storage.googleapis.com/{_BUCKET}/"

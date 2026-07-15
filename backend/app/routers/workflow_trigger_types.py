@@ -9,7 +9,7 @@ from app.dependencies.auth import get_verified_org_id, require_admin
 from app.dependencies.database import get_db
 from app.repositories.workflow_trigger_type import WorkflowTriggerTypeRepository
 
-router = APIRouter(prefix="/api/v2/workflow-trigger-types", tags=["workflow-trigger-types"])
+router = APIRouter(prefix="/api/v2/workflow-trigger-types", tags=["workflow-trigger-types", "Work"])
 
 
 class TriggerTypeResponse(BaseModel):

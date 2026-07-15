@@ -17,7 +17,7 @@ from app.services.project_auth import (
     is_org_owner_or_admin,
 )
 
-router = APIRouter(prefix="/api/v2/projects", tags=["projects"])
+router = APIRouter(prefix="/api/v2/projects", tags=["projects", "Organization"])
 
 
 @router.get("", response_model=list[ProjectResponse])

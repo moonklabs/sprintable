@@ -35,7 +35,7 @@ from app.schemas.retro import (
     VoteResponse,
 )
 
-router = APIRouter(prefix="/api/v2/retros", tags=["retros"])
+router = APIRouter(prefix="/api/v2/retros", tags=["retros", "Work"])
 
 
 def _get_session_repo(

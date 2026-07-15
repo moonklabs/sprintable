@@ -31,7 +31,7 @@ from app.models.pm import Epic, Story, StoryActivity
 from app.models.workflow_line import WorkflowLineStepApproval, WorkflowLineStepRun
 from app.services.member_resolver import resolve_member
 
-router = APIRouter(prefix="/api/v2/command-center", tags=["command-center"])
+router = APIRouter(prefix="/api/v2/command-center", tags=["command-center", "Work"])
 
 # 자동 이상감지 임계. step_run pending 정체=에이전트 멈춤·story 무진행=정체·blocker 무응답.
 _AGENT_STUCK_MINUTES = 30

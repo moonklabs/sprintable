@@ -32,7 +32,7 @@ from app.models.role_template import RoleTemplate
 from app.schemas.a2a import AgentSkill
 from app.services.agent_onboarding_config import resolve_locale_from_request
 
-router = APIRouter(prefix="/api/v2/role-templates", tags=["role-templates"])
+router = APIRouter(prefix="/api/v2/role-templates", tags=["role-templates", "Organization"])
 
 # S24(story 25e8828d) — division 12개 고정값 → ko 표시명(PO 제공·선생님 확認 2026-07-09).
 # en(기본)은 저장된 원문 그대로(매핑 불요) — ko 요청시에만 이 dict로 치환.

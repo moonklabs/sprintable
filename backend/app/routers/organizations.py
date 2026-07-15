@@ -19,7 +19,7 @@ from app.schemas.organization import (
     UpdateOrganization,
 )
 
-router = APIRouter(prefix="/api/v2/organizations", tags=["organizations"])
+router = APIRouter(prefix="/api/v2/organizations", tags=["organizations", "Organization"])
 
 
 def _get_repo(session: AsyncSession = Depends(get_db)) -> OrganizationRepository:

@@ -47,7 +47,7 @@ from app.services.workflow_violation import (
     check_transition,
 )
 
-router = APIRouter(prefix="/api/v2/stories", tags=["stories"])
+router = APIRouter(prefix="/api/v2/stories", tags=["stories", "Work"])
 
 
 async def _resolve_actor_info(

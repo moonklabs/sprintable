@@ -32,7 +32,7 @@ from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
 from app.services.member_resolver import assert_caller_is_member, resolve_member_identity
 
-router = APIRouter(prefix="/api/v2/events", tags=["events"])
+router = APIRouter(prefix="/api/v2/events", tags=["events", "Organization"])
 
 # ─── In-process event bus (C-S6: memo SSE) ────────────────────────────────────
 # org_id → set of queues (one per connected SSE client)

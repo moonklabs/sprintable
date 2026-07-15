@@ -41,7 +41,7 @@ from app.services.storage import get_storage_provider
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v2/conversations", tags=["conversations"])
+router = APIRouter(prefix="/api/v2/conversations", tags=["conversations", "Organization"])
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

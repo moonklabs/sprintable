@@ -11,7 +11,7 @@ from app.repositories.participation import ParticipationRepository, Participatio
 from app.schemas.participation import ParticipationCreate, ParticipationResponse, ParticipationRoleResponse
 from app.services.project_auth import has_project_access
 
-router = APIRouter(prefix="/api/v2/participation", tags=["participation"])
+router = APIRouter(prefix="/api/v2/participation", tags=["participation", "Trust"])
 
 
 async def _assert_story_project_access(

@@ -12,7 +12,7 @@ from app.models.doc import Doc
 from app.models.pm import Epic, Story, Task
 from app.services.project_auth import has_project_access
 
-router = APIRouter(prefix="/api/v2/entities", tags=["entities"])
+router = APIRouter(prefix="/api/v2/entities", tags=["entities", "Work"])
 
 VALID_TYPES = {"story", "doc", "epic", "task"}
 DEFAULT_LIMIT = 10

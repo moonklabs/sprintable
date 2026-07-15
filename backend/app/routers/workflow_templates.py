@@ -17,7 +17,7 @@ from app.models.team import TeamMember
 from app.repositories.agent_routing_rule import _normalize_action, _normalize_conditions
 from app.repositories.workflow_template import WorkflowTemplateRepository, resolve_rules_template
 
-router = APIRouter(prefix="/api/v2/workflow-templates", tags=["workflow-templates"])
+router = APIRouter(prefix="/api/v2/workflow-templates", tags=["workflow-templates", "Work"])
 
 
 class TemplateStepResponse(BaseModel):

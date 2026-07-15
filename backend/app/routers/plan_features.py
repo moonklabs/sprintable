@@ -8,7 +8,7 @@ from app.dependencies.rate_limit import rate_limit
 from app.repositories.plan_feature import PlanFeatureRepository
 from app.schemas.plan_feature import PlanFeatureResponse
 
-router = APIRouter(prefix="/api/v2", tags=["plan-features"])
+router = APIRouter(prefix="/api/v2", tags=["plan-features", "Organization"])
 
 
 def _get_repo(session: AsyncSession = Depends(get_db)) -> PlanFeatureRepository:

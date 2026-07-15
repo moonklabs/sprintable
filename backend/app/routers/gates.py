@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # 사람 검증 행위(approve/reject) — "human-validated" 웨지 integrity상 휴먼 member만 허용.
 _HUMAN_REVIEW_STATUSES = frozenset({"approved", "rejected"})
 
-router = APIRouter(prefix="/api/v2/gates", tags=["gates"])
+router = APIRouter(prefix="/api/v2/gates", tags=["gates", "Trust"])
 
 
 class GateCreateRequest(BaseModel):

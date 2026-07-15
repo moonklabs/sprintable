@@ -18,7 +18,7 @@ from app.schemas.mockup import (
     UpdateMockupRequest, UpdateScenarioRequest, UsageMeterOut,
 )
 
-router = APIRouter(prefix="/api/v2", tags=["mockups"])
+router = APIRouter(prefix="/api/v2", tags=["mockups", "Work"])
 
 
 def _ok(data: object, status: int = 200) -> JSONResponse:

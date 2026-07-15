@@ -13,7 +13,7 @@ from app.schemas.agent_deployment import (
 )
 from app.services.deployment_lifecycle import DeploymentLifecycleError, DeploymentLifecycleService
 
-router = APIRouter(prefix="/api/v2/agent-deployments", tags=["agent-deployments"])
+router = APIRouter(prefix="/api/v2/agent-deployments", tags=["agent-deployments", "Organization"])
 
 
 def _svc(session: AsyncSession = Depends(get_db)) -> DeploymentLifecycleService:

@@ -49,7 +49,7 @@ async def _inject_active_stories(
 
 _FAKECHAT_BASE_PORT = 8787
 
-router = APIRouter(prefix="/api/v2/team-members", tags=["team-members"])
+router = APIRouter(prefix="/api/v2/team-members", tags=["team-members", "Organization"])
 
 
 def _get_repo(
