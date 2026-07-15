@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Frame } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
   adaptArtifactDetail, createArtifact, getArtifactVersionDetail,
   type ArtifactFormat, type BeVisualArtifactSummary, type BeArtifactVersionSummary,
@@ -129,9 +128,10 @@ function ArtifactCard({
  * 선fetch 0. "기능" 축은 데이터 모델에 연결 필드가 없어 미지원(no-fiction) — 토글에 비활성
  * 세그먼트로 정직 표기(숨기지 않음).
  */
-export function ArtifactGalleryView() {
+// story a539c649 S3a: projectId 는 이제 page.tsx(headers() 경유 resolve 결과)가 prop 으로
+// 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 URL 이 가리키는 project.
+export function ArtifactGalleryView({ projectId }: { projectId: string }) {
   const t = useTranslations('canvas');
-  const { projectId } = useDashboardContext();
   const [loading, setLoading] = useState(true);
   const [artifacts, setArtifacts] = useState<BeVisualArtifactSummary[]>([]);
   const [lookups, setLookups] = useState<GalleryLookups>({ epics: [], stories: [], sprints: [], docs: [] });

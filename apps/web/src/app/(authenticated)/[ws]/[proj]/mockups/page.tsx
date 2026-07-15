@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,8 @@ export default function MockupsPage() {
   const t = useTranslations('mockup');
   const tc = useTranslations('common');
   const router = useRouter();
+  // story a539c649 S3a: [ws]/[proj] 는 이 페이지가 사는 경로 자체의 dynamic segment.
+  const { ws: wsSlug, proj: projSlug } = useParams<{ ws: string; proj: string }>();
   const [mockups, setMockups] = useState<MockupPage[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -128,7 +130,7 @@ export default function MockupsPage() {
                 key={mockup.id}
                 type="button"
                 className="group rounded-3xl border border-white/8 bg-muted/55 p-4 text-left transition hover:border-brand/18 hover:bg-white/8"
-                onClick={() => router.push(`/mockups/${mockup.id}`)}
+                onClick={() => router.push(`/${wsSlug}/${projSlug}/mockups/${mockup.id}`)}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -147,7 +149,7 @@ export default function MockupsPage() {
                     size="sm"
                     onClick={(e) => {
                       e.stopPropagation();
-                      router.push(`/mockups/${mockup.id}/edit`);
+                      router.push(`/${wsSlug}/${projSlug}/mockups/${mockup.id}/edit`);
                     }}
                   >
                     {t('editMockup')}

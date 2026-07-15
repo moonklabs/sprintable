@@ -296,3 +296,45 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     expect(response.status).toBe(200);
   });
 });
+
+describe('proxy — legacy resource redirect generalized to non-docs resources (story a539c649 S3a)', () => {
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+
+  it.each(['standup', 'retro', 'loops', 'artifacts', 'mockups'])(
+    'bare /%s(/*) → 실 slug로 301(redirectLegacyResourcePath 일반화 증명)',
+    async (resource) => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/api/v2/organizations/org-1')) {
+          return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+        }
+        if (url.includes('/api/v2/projects/proj-1')) {
+          return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      });
+      const response = await middleware(makeRequest(`/${resource}`, {
+        sp_at: token, sprintable_current_project_id: 'proj-1',
+      }));
+      expect(response.status).toBe(301);
+      expect(response.headers.get('location')).toBe(`https://app.example.com/moonklabs/sprintable/${resource}`);
+    },
+  );
+
+  it('이관 안 된 리소스(예: /board)는 개입 없이 통과 — MIGRATED_RESOURCES 밖', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest('/board', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(200);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});

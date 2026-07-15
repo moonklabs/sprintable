@@ -13,7 +13,8 @@ import { OperatorInput, OperatorSelect, OperatorTextarea } from '@/components/ui
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { cn } from '@/lib/utils';
-import { useDashboardContext } from '../../../dashboard/dashboard-shell';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useRetroRoute } from '../retro-context';
 import {
   RETRO_PHASE_TO_STAGE,
   RETRO_STAGE_ORDER,
@@ -177,7 +178,8 @@ function RetroEntrySkeleton() {
 
 export default function RetroSessionPage() {
   const t = useTranslations('retro');
-  const { projectId, currentTeamMemberId } = useDashboardContext();
+  const { projectId, wsSlug, projSlug } = useRetroRoute();
+  const { currentTeamMemberId } = useDashboardContext();
   const params = useParams<{ id: string }>();
   const sessionId = params.id;
 
@@ -581,7 +583,7 @@ export default function RetroSessionPage() {
       <TopBarSlot
         title={
           <div className="flex items-center gap-2">
-            <Link href="/retro" className="text-xs text-muted-foreground hover:text-foreground">
+            <Link href={`/${wsSlug}/${projSlug}/retro`} className="text-xs text-muted-foreground hover:text-foreground">
               {t('backToList')}
             </Link>
             <span className="text-muted-foreground">/</span>

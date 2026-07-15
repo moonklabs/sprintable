@@ -153,18 +153,19 @@ export async function fetchResolve(
 }
 
 /**
- * story a539c649(S-route-project) S2 — bare `/docs/*`(옛 flat URL, ws/proj 세그먼트 없음)를
- * 위한 default 해소. JWT의 org_id + `sprintable_current_project_id` 쿠키(기존 "현재 project"
- * 시스템과 동일 시맨틱 — 새 리스크 없음, 마이그 전에도 이 bare 링크들은 이미 이 쿠키에 암묵
- * 의존이었다)로 org/project 를 슬러그로 역해소한다. 여기서 못 찾으면(예: 아직 project 미선택)
- * null — 호출부가 개입 없이 통과시켜 Next 자체 404 로 정직하게 실패한다.
+ * story a539c649(S-route-project, S2 최초 도입·S3 리소스 파라미터화) — 이관 완료된 리소스의
+ * bare `/{resource}/*`(옛 flat URL, ws/proj 세그먼트 없음)를 위한 default 해소. JWT의
+ * org_id + `sprintable_current_project_id` 쿠키(기존 "현재 project" 시스템과 동일 시맨틱
+ * — 새 리스크 없음, 마이그 전에도 이 bare 링크들은 이미 이 쿠키에 암묵 의존이었다)로
+ * org/project 를 슬러그로 역해소한다. 여기서 못 찾으면(예: 아직 project 미선택) null —
+ * 호출부가 개입 없이 통과시켜 Next 자체 404 로 정직하게 실패한다.
  *
  * ⚠️한계(PO 승인 확定 — done-gate에 명시): 이 default 해소는 "현재 project"만 본다. 링크된
- * doc이 실제로는 **다른** project 소속이면(cross-project 딥링크) 여전히 못 찾는다 — 마이그
- * 전부터 있던 기존 갭이라 회귀는 아니지만 근본 미해결. 알림/게이트/챗 등 외부 호출부가 doc의
+ * 엔티티가 실제로는 **다른** project 소속이면(cross-project 딥링크) 여전히 못 찾는다 — 마이그
+ * 전부터 있던 기존 갭이라 회귀는 아니지만 근본 미해결. 알림/게이트/챗 등 외부 호출부가 엔티티의
  * 진짜 project를 직접 실어보내는 후속 스토리(오르테가군 등재 예정)가 근본 해법이다.
  */
-export async function resolveLegacyDocsPath(
+export async function resolveLegacyResourcePath(
   fastapiUrl: string,
   orgId: string,
   projectId: string,
