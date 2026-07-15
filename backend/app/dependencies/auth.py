@@ -209,6 +209,66 @@ async def _resolve_api_key(
     )
 
 
+async def _resolve_firebase_session(token: str, db: AsyncSession) -> AuthContext:
+    """story 455e528d(doc §3.3): Firebase 세션 검증 후 resource-actual AuthContext 구성.
+
+    (issuer, sub) → auth_identities → 실 users.id 매핑. disabled/deleted/unmapped 거부.
+
+    ⚠️발견 즉시 수정: get_org_scope/require_role/require_admin이 전부 auth.claims의
+    app_metadata.role/org_id를 읽는다(legacy JWT는 로그인 시점에 이 claim을 정적으로 굽는다).
+    Firebase 세션쿠키는 이 필드를 안 실어(doc §3.3 명시 — custom claim에 org/role 안 옮김)
+    role을 안 채우면 require_role/require_admin이 전부 기본값 "member"로 평가돼 실제 admin도
+    권한 거부당한다 — **매 요청 실 DB에서 org role을 조회**해 채운다(legacy처럼 로그인 시점
+    1회 굽는 게 아니라 요청마다 live 조회라 오히려 stale 위험이 legacy보다 낮음. _build_app_
+    metadata() 전체는 재사용 안 함 — 그건 invite 자동수락 등 로그인 전용 side effect가 있어
+    매 요청 호출에 부적합, 여기선 role만 순수 조회).
+    """
+    from app.core.config import settings as _settings
+    from app.models.auth_identity import AuthIdentity
+    from app.models.project import OrgMember
+    from app.models.user import User
+    from app.services.firebase_verifier import verify_firebase_session
+
+    verified = await verify_firebase_session(token, _settings.firebase_project_id)
+    if verified is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    identity_row = (await db.execute(
+        select(AuthIdentity).where(
+            AuthIdentity.issuer == verified.issuer,
+            AuthIdentity.subject == verified.firebase_uid,
+            AuthIdentity.unlinked_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if identity_row is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unmapped Firebase identity")
+
+    user = await db.get(User, identity_row.user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    org_id = str(user.last_org_id) if user.last_org_id else None
+    app_metadata: dict = {}
+    if org_id:
+        app_metadata["org_id"] = org_id
+        role = (await db.execute(
+            select(OrgMember.role).where(
+                OrgMember.org_id == user.last_org_id,
+                OrgMember.user_id == user.id,
+                OrgMember.deleted_at.is_(None),
+            ).limit(1)
+        )).scalar_one_or_none()
+        if role:
+            app_metadata["role"] = role
+
+    return AuthContext(
+        user_id=str(user.id),
+        email=user.email,
+        claims={"auth_issuer": verified.issuer, "app_metadata": app_metadata},
+        org_id=org_id,
+    )
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     x_agent_api_key: str | None = Header(default=None, alias="x-agent-api-key"),
@@ -227,6 +287,15 @@ async def get_current_user(
     # sk_live_* prefix → API key 경로 (DB 조회)
     if token.startswith("sk_live_"):
         return await _resolve_api_key(token, db, transport=x_mcp_transport)
+
+    # story 455e528d(E-AUTH-REBUILD Phase1-S2·doc §4.2): Firebase 세션(RS256)은 alg 헤더로
+    # 정확 분기 — 순차 fallback 아님. FIREBASE_AUTH_ACCEPT_SESSION=false(기본)면 이 분기는
+    # 절대 안 타므로(alg 판정과 무관하게) 기존 동작 100% 유지 — dead code.
+    from app.core.config import settings as _settings
+    from app.services.firebase_verifier import looks_like_rs256
+
+    if _settings.firebase_auth_accept_session and looks_like_rs256(token):
+        return await _resolve_firebase_session(token, db)
 
     # JWT 경로 (기존)
     try:
@@ -625,6 +694,16 @@ async def get_current_user_streaming(
     if token.startswith("sk_live_"):
         async with async_session_factory() as db:
             return await _resolve_api_key(token, db)
+
+    # story 455e528d(doc §4.3 "mirror the dual verifier in get_current_user_streaming"):
+    # get_current_user와 동일하게 alg 헤더로 정확 분기(순차 fallback 아님). 단명 세션으로
+    # 매핑만 수행 후 즉시 close(스트림 yield 구간에 커넥션 미점유, 기존 API key 경로와 동형).
+    from app.core.config import settings as _settings
+    from app.services.firebase_verifier import looks_like_rs256
+
+    if _settings.firebase_auth_accept_session and looks_like_rs256(token):
+        async with async_session_factory() as db:
+            return await _resolve_firebase_session(token, db)
 
     try:
         payload = decode_jwt(token)
