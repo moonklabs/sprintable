@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { isColdStart, groupRosterByRole, mergeMemberLookup, sortGroupMembersByName } from './trust-utils';
-import type { RosterMember } from './trust-utils';
+import { isColdStart, groupRosterByRole, mergeMemberLookup, sortGroupMembersByName, extractSparklineValues, sparklinePoints } from './trust-utils';
+import type { RosterMember, HistorySnapshot } from './trust-utils';
 
 describe('isColdStart (story 7e21a8b5 — E-VERIFY 콜드스타트 중립 판정)', () => {
   it('is cold-start when hit_rate is null (표본 없음)', () => {
@@ -104,5 +104,62 @@ describe('mergeMemberLookup (org-members 우선, team-members는 보강만 — i
 
   it('returns an empty map for two empty sources', () => {
     expect(mergeMemberLookup([], []).size).toBe(0);
+  });
+});
+
+describe('extractSparklineValues (Ortega 지시 C2a 심화 — 가독성 개선용, 감시 신호 아님)', () => {
+  const snap = (computed_at: string, hit_rate: number | null, resolved: number | null = 5): HistorySnapshot =>
+    ({ computed_at, hit_rate, resolved });
+
+  it('reverses BE order (computed_at DESC → 좌→우 시간순) so oldest is first', () => {
+    // BE history는 최신이 먼저 온다(computed_at DESC) — 스파크라인은 시간순으로 읽혀야 하므로
+    // 순서가 뒤집혀야 한다. 뒤집지 않으면 그래프가 시간 역행으로 그려진다(치명적 오독).
+    const snapshots = [snap('2026-07-15T00:00:00Z', 0.9), snap('2026-07-01T00:00:00Z', 0.1)];
+    expect(extractSparklineValues(snapshots)).toEqual([0.1, 0.9]);
+  });
+
+  it('excludes cold-start snapshots (hit_rate=null) — never plotted as 0 (E-VERIFY 왜곡 방지)', () => {
+    const snapshots = [
+      snap('2026-07-01T00:00:00Z', null, 0),
+      snap('2026-07-08T00:00:00Z', 0.5),
+      snap('2026-07-15T00:00:00Z', null, 0),
+    ];
+    expect(extractSparklineValues(snapshots)).toEqual([0.5]);
+  });
+
+  it('returns an empty array when every snapshot is cold-start', () => {
+    expect(extractSparklineValues([snap('2026-07-01T00:00:00Z', null, 0)])).toEqual([]);
+  });
+});
+
+describe('sparklinePoints (유나 가디언 지적 PR#2194 — 고정 0-1 스케일, 상대 min-max 정규화 금지)', () => {
+  function yOf(pointsStr: string, index: number): number {
+    return Number(pointsStr.split(' ')[index]!.split(',')[1]);
+  }
+
+  it('places near-identical values at near-identical y (상대정규화였다면 지그재그로 과장됐을 것)', () => {
+    // 0.80→0.81→0.79 — 성과 그래프로 오독시키는 사례로 유나양이 직접 지적한 케이스.
+    const points = sparklinePoints([0.8, 0.81, 0.79]);
+    const ys = [0, 1, 2].map((i) => yOf(points, i));
+    const maxSwing = Math.max(...ys) - Math.min(...ys);
+    expect(maxSwing).toBeLessThan(1); // 20px 그리기영역 중 1px 미만 — 육안상 사실상 평평
+  });
+
+  it('renders a constant series flat at its true height, not pinned to the floor', () => {
+    // range=0(전부 동일)일 때 구 상대정규화는 0으로 나눠 바닥(y=height-pad)에 고정시켰다 —
+    // hit_rate=0.9(좋은 신뢰)인데 그래프상 최하단처럼 보이는 왜곡.
+    const points = sparklinePoints([0.9, 0.9, 0.9]);
+    const ys = [0, 1, 2].map((i) => yOf(points, i));
+    expect(new Set(ys).size).toBe(1); // 셋 다 정확히 같은 높이
+    const height = 24, pad = 2;
+    const expectedY = height - pad - 0.9 * (height - pad * 2); // 상단 근처 — 바닥 아님
+    expect(ys[0]).toBeCloseTo(expectedY);
+  });
+
+  it('maps hit_rate 0 to the floor and 1 to the ceiling (fixed 0-1 scale, not relative)', () => {
+    const points = sparklinePoints([0, 1]);
+    const height = 24, pad = 2;
+    expect(yOf(points, 0)).toBeCloseTo(height - pad); // 0 → 바닥
+    expect(yOf(points, 1)).toBeCloseTo(pad); // 1 → 천장
   });
 });
