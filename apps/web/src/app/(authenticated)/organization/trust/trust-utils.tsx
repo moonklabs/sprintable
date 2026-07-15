@@ -109,28 +109,28 @@ export function extractSparklineValues(snapshots: HistorySnapshot[]): number[] {
     .map((s) => s.hit_rate as number);
 }
 
+// 유나 가디언 리뷰(PR#2194) 지적: 상대 min-max 정규화는 미세변동(0.80→0.81→0.79)을 height
+// 가득 채워 극적 지그재그로 과장 렌더해 "성과 추이 그래프/감시"로 오독시킨다(오르테가군 명시
+// 요구와 직결). hit_rate는 원래 0-1로 유계이므로 **고정 스케일**을 쓴다 — 미세변동은 작게,
+// 상수값은 그 실제 높이에 평평하게(range=0일 때 바닥으로 왜곡되던 문제도 해소).
+export function sparklinePoints(values: number[], width = 120, height = 24, pad = 2): string {
+  return values
+    .map((v, i) => {
+      const x = pad + (i / (values.length - 1)) * (width - pad * 2);
+      const y = height - pad - v * (height - pad * 2);
+      return `${x},${y}`;
+    })
+    .join(' ');
+}
+
 // 순수 SVG 폴리라인 — 신규 차트 라이브러리 의존성 도입 안 함(과확대 방지·코드베이스에 선례
 // 없음을 그라운딩으로 확認). E-VERIFY 톤: 단일 중립색(text-muted-foreground)만, red/yellow/green
 // 등급 컬러 없음·축/라벨/숫자 없음(수치는 옆 리스트가 SSOT, 스파크라인은 형태만 보조).
 export function Sparkline({ values }: { values: number[] }) {
   if (values.length < 2) return null;
-  const width = 120;
-  const height = 24;
-  const pad = 2;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const points = values
-    .map((v, i) => {
-      const x = pad + (i / (values.length - 1)) * (width - pad * 2);
-      const y = height - pad - ((v - min) / range) * (height - pad * 2);
-      return `${x},${y}`;
-    })
-    .join(' ');
-
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="text-muted-foreground/60" aria-hidden="true">
-      <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width={120} height={24} viewBox="0 0 120 24" className="text-muted-foreground/60" aria-hidden="true">
+      <polyline points={sparklinePoints(values)} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
