@@ -2928,12 +2928,14 @@
     }
   },
   "loops": {
-    "title": "Loop Board",
+    "title": "Lab",
     "subtitle": "Compounding organizational memory — manage experiment loops and variant decisions.",
     "noProject": "No project selected.",
     "loading": "Loading...",
-    "noLoops": "No loops",
-    "noLoopsDescription": "Loops will appear here once created.",
+    "noLoops": "No experiments started yet",
+    "noLoopsDescription": "The Lab is where you set a hypothesis and carry it through execution, verification, and learning. Each experiment builds on the last.",
+    "noLoopsCta": "Start your first Loop",
+    "noLoopsAiHint": "AI helps draft it",
     "filterAll": "All",
     "statusDraft": "Draft",
     "statusBriefing": "Briefing",

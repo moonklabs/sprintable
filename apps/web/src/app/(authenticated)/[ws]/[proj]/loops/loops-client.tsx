@@ -12,6 +12,28 @@ import { LoopStatusBadge, type LoopStatus } from '@/components/loops/loop-status
 import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { LoopCreateDialog } from '@/components/loops/loop-create-dialog';
 
+// doc resource-view-firsttouch-identity-pattern §2/§4 — 실험실(loops) 파일럿: 빈 first-touch를
+// "없습니다"가 아니라 정체성 explainer로. §4 visual 열 "4노드 사이클"을 최소 subtle glyph로
+// 표현(장식 아닌 의미 — 가설→실행→검증→학습 4단계를 카디널 4점+점선 호로 암시).
+function LoopCycleGlyph() {
+  return (
+    <svg viewBox="0 0 48 48" className="size-9" aria-hidden="true">
+      <path
+        d="M24 8 A16 16 0 1 1 8 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeDasharray="1 5"
+      />
+      <circle cx="24" cy="8" r="2.5" fill="currentColor" />
+      <circle cx="40" cy="24" r="2.5" fill="currentColor" />
+      <circle cx="24" cy="40" r="2.5" fill="currentColor" />
+      <circle cx="8" cy="24" r="2.5" fill="currentColor" />
+    </svg>
+  );
+}
+
 interface Loop {
   id: string;
   project_id: string;
@@ -145,7 +167,20 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
 
         <div className="flex-1 overflow-y-auto p-4">
           {loops.length === 0 ? (
-            <EmptyState title={t('noLoops')} description={t('noLoopsDescription')} />
+            <EmptyState
+              icon={<LoopCycleGlyph />}
+              title={t('noLoops')}
+              description={t('noLoopsDescription')}
+              action={
+                <div className="flex flex-col items-center gap-1.5">
+                  <Button size="sm" onClick={() => setCreateOpen(true)}>
+                    <Plus className="size-3.5" />
+                    {t('noLoopsCta')}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">{t('noLoopsAiHint')}</p>
+                </div>
+              }
+            />
           ) : (
             <div className="mx-auto max-w-2xl space-y-2">
               {loops.map((loop) => (
