@@ -13,6 +13,7 @@ def _s(**overrides):
         "firebase_bff_internal_secret": "",
         "firebase_auth_issue_session": False,
         "firebase_auth_mobile_issue": False,
+        "firebase_oauth_handoff_enabled": False,
         "firebase_auth_mobile_app_check_required": False,
     }
     base.update(overrides)
@@ -75,6 +76,18 @@ def test_internal_secret_config_raises_when_prod_and_empty_and_mobile_issue_on()
         check_internal_secret_config(_s(
             app_env="production", firebase_bff_internal_secret="",
             firebase_auth_issue_session=False, firebase_auth_mobile_issue=True,
+        ))
+
+
+def test_internal_secret_config_raises_when_prod_and_empty_and_oauth_handoff_on():
+    """story 1931 — 신규 firebase_oauth_handoff_enabled 플래그도 다른 Firebase 내부
+    엔드포인트 플래그와 동일하게 fail-closed 대상이어야 한다(누락 시 secret 없이 배포돼도
+    startup이 안 죽는 회귀 — check_internal_secret_config_ok_when_prod_and_empty_but_all_
+    firebase_features_off와 대칭되는 온-케이스)."""
+    from app.routers.auth_firebase_internal import check_internal_secret_config
+    with pytest.raises(RuntimeError):
+        check_internal_secret_config(_s(
+            app_env="production", firebase_bff_internal_secret="", firebase_oauth_handoff_enabled=True,
         ))
 
 

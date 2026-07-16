@@ -7,6 +7,7 @@ from app.models.agent_run import AgentRun
 from app.models.agent_session import AgentSession
 from app.models.auth_identity import AuthIdentity, AuthMigration, AuthMigrationEvent
 from app.models.auth_native_bootstrap import AuthNativeBootstrapCode
+from app.models.oauth_handoff_code import OAuthHandoffCode
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
 from app.models.deletion_audit import DeletionAuditLog
 from app.models.dependency import ItemDependency
@@ -70,6 +71,7 @@ __all__ = [
     "AuthMigration",
     "AuthMigrationEvent",
     "AuthNativeBootstrapCode",
+    "OAuthHandoffCode",
     "DeviceInstallation",
     "DeviceProofChallenge",
     "ArtifactNode",
