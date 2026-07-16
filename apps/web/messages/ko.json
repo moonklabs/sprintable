@@ -3637,6 +3637,7 @@
     "exportComingSoon": "export는 C1-S5에서 제공 예정",
     "commentsComingSoon": "코멘트는 C2에서 제공 예정",
     "treeRenderPlaceholder": "트리 렌더는 준비 중",
+    "canvasEmptyContent": "이 산출물에는 아직 콘텐츠가 없습니다",
     "descriptionPaneHeading": "description — 보이는 PRD",
     "descriptionEmptyState": "핀을 선택하면 요소 스펙이 여기 표시됩니다",
     "rollupOpen": "열림",

@@ -3637,6 +3637,7 @@
     "exportComingSoon": "Export arrives in C1-S5",
     "commentsComingSoon": "Comments arrive in C2",
     "treeRenderPlaceholder": "Tree rendering coming soon",
+    "canvasEmptyContent": "This artifact doesn't have any content yet",
     "descriptionPaneHeading": "description — visible PRD",
     "descriptionEmptyState": "Select a pin to see its element spec here",
     "rollupOpen": "open",

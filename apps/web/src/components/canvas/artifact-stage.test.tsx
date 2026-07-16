@@ -497,6 +497,27 @@ describe('ArtifactStage — 캔버스 뷰포트(story 1948d19d)', () => {
       expect(content.style.width).toBe('1280px');
     });
   });
+
+  describe('tree 포맷 — nodes=[] 조용한 폴백 방지(story 1da4cccf, 산출물 8de4e981 진단에서 발견)', () => {
+    it('empty parsed tree("[]") shows an explicit "no content" placeholder, not a silent blank box', async () => {
+      await mount({ format: 'tree', content: '[]' });
+      expect(container.textContent).toContain('이 산출물에는 아직 콘텐츠가 없습니다');
+      expect(container.textContent).not.toContain('트리 렌더는 준비 중');
+    });
+
+    it('unparseable content still shows the original parse-failure placeholder (별도 문구, 원인이 다름)', async () => {
+      await mount({ format: 'tree', content: 'not json' });
+      expect(container.textContent).toContain('트리 렌더는 준비 중');
+      expect(container.textContent).not.toContain('이 산출물에는 아직 콘텐츠가 없습니다');
+    });
+
+    it('a non-empty tree renders its nodes as before (회귀 없음, 두 placeholder 모두 안 뜸)', async () => {
+      await mount({ format: 'tree', content: JSON.stringify([{ id: 'n1', type: 'text', props: { text: 'hello' } }]) });
+      expect(container.textContent).toContain('hello');
+      expect(container.textContent).not.toContain('이 산출물에는 아직 콘텐츠가 없습니다');
+      expect(container.textContent).not.toContain('트리 렌더는 준비 중');
+    });
+  });
 });
 
 describe('isResponsiveHtml(story 3d0d60a3) — @media 소스 파싱(유나 1순위 판정, 신규 BE 0)', () => {
