@@ -448,7 +448,7 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
               }}
             />
           ) : mode === 'edit' ? null : (
-            <TreeStageContent content={content} placeholder={t('treeRenderPlaceholder')} />
+            <TreeStageContent content={content} placeholder={t('treeRenderPlaceholder')} emptyPlaceholder={t('canvasEmptyContent')} />
           )}
           {overlay ? (
             <div
@@ -479,10 +479,17 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
   );
 }
 
-function TreeStageContent({ content, placeholder }: { content: string; placeholder: string }) {
+function TreeStageContent(
+  { content, placeholder, emptyPlaceholder }: { content: string; placeholder: string; emptyPlaceholder: string }
+) {
   const tree = parseArtifactTree(content);
   if (!tree) {
     return <p className="pointer-events-none p-4 text-xs text-muted-foreground">{placeholder}</p>;
+  }
+  // story 1da4cccf — nodes=[](html_blob 못 찾아 tree로 폴백 or 진짜 빈 tree) 둘 다 조용한 빈
+  // 화면 대신 명시적 안내. treeRenderPlaceholder(파싱 실패)와 원인이 달라 별도 문구.
+  if (tree.length === 0) {
+    return <p className="pointer-events-none p-4 text-xs text-muted-foreground">{emptyPlaceholder}</p>;
   }
   return (
     <div className="pointer-events-none h-full w-full space-y-2 overflow-hidden rounded-lg bg-background p-2">
