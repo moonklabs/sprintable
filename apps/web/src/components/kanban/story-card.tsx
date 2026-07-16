@@ -243,7 +243,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       {...listeners}
       onClick={onClick}
       onContextMenu={handleContextMenu}
-      title={story.story_number ? `#${story.story_number}` : `#${story.id.slice(0, 6)}`}
+      title={story.story_number ? `#${story.story_number}` : story.title}
       className="group relative cursor-pointer transition"
     >
       {/* E-UI-DAEGBYEON P0 — Board card = Proof Capsule(card density, #bf9037cb). 시각 셸만
