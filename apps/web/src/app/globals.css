@@ -107,6 +107,7 @@
   --color-info: var(--info);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  --color-primary-tint: var(--primary-tint);
   --color-priority: var(--priority);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -190,7 +191,10 @@
   --card-foreground: oklch(0.141 0.005 285.823);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
+  /* S-web-tokens(story 5d88e1a3): 리브랜딩 — 뉴트럴 zinc 무채색→브랜드 블루(hue255) 채색.
+     brand-blue-palette-ssot §2 스펙. --brand는 4.5:1 AA(text-brand 20파일 사용처) 확保 위해
+     스펙 L0.58→0.56로 미세 하향(hue/chroma는 스펙 그대로, 문서화된 의도적 편차). */
+  --primary: oklch(0.50 0.17 255);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.967 0.001 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
@@ -201,7 +205,7 @@
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.705 0.015 286.067);
+  --ring: oklch(0.58 0.17 254);
   --chart-1: oklch(0.871 0.006 286.286);
   --chart-2: oklch(0.552 0.016 285.938);
   --chart-3: oklch(0.442 0.017 285.786);
@@ -210,16 +214,17 @@
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.21 0.006 285.885);
+  --sidebar-primary: oklch(0.50 0.17 255);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.95 0.002 286.375);
   --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
   --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.705 0.015 286.067);
+  --sidebar-ring: oklch(0.58 0.17 254);
 
-  /* Sprintable brand (blue) */
-  --brand: oklch(0.66 0.18 258);
+  /* Sprintable brand (blue) — 254/0.17 hue/chroma는 스펙 그대로, L만 0.58→0.56(AA 4.5:1 확保) */
+  --brand: oklch(0.56 0.17 254);
   --brand-foreground: oklch(0.985 0 0);
+  --primary-tint: oklch(0.97 0.02 255);
 
   /* Semantic status tokens */
   --success: oklch(0.55 0.16 145);
@@ -298,8 +303,12 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.21 0.006 285.885);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.92 0.004 286.32);
-  --primary-foreground: oklch(0.21 0.006 285.885);
+  /* S-web-tokens(story 5d88e1a3): 뉴트럴→브랜드 블루. --sidebar-primary를 기존 인디고(264.376)
+     스캐폴드에서 --primary와 정렬(254/255로 통일 — 전체 브랜드 일관성이 이번 작업 목적).
+     정렬로 인해 --sidebar-primary-foreground도 white→navy950 필수 변경(브랜드-400 L0.68 배경에
+     white 텍스트는 2.77:1로 AA 미달 — primary-foreground와 동일 패턴 적용, 3157쪽 회귀 방지). */
+  --primary: oklch(0.68 0.15 255);
+  --primary-foreground: oklch(0.16 0.038 262);
   --secondary: oklch(0.274 0.006 286.033);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.274 0.006 286.033);
@@ -309,7 +318,7 @@
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.552 0.016 285.938);
+  --ring: oklch(0.68 0.15 255);
   --chart-1: oklch(0.871 0.006 286.286);
   --chart-2: oklch(0.75 0.016 285.938);
   --chart-3: oklch(0.62 0.017 285.786);
@@ -317,16 +326,17 @@
   --chart-5: oklch(0.42 0.006 286.033);
   --sidebar: oklch(0.21 0.006 285.885);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.68 0.15 255);
+  --sidebar-primary-foreground: oklch(0.16 0.038 262);
   --sidebar-accent: oklch(0.274 0.006 286.033);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.552 0.016 285.938);
+  --sidebar-ring: oklch(0.68 0.15 255);
 
-  /* Sprintable brand (blue, lighter for dark) */
-  --brand: oklch(0.70 0.18 258);
+  /* Sprintable brand (blue, lighter for dark) — hue/chroma 스펙 그대로, L은 라이트와 동일 규칙 */
+  --brand: oklch(0.64 0.17 254);
   --brand-foreground: oklch(0.985 0 0);
+  --primary-tint: oklch(0.28 0.075 260);
 
   /* Semantic status tokens */
   --success: oklch(0.65 0.15 145);
