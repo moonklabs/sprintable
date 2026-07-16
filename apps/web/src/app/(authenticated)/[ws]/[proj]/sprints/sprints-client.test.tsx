@@ -66,7 +66,7 @@ describe('SprintsClient — 스프린트 first-touch 정체성', () => {
     stubFetch([]);
     await mount();
     const html = container.innerHTML;
-    expect(html).toContain('아직 스프린트가 없어요');
+    expect(html).toContain('아직 시작한 스프린트가 없어요');
     expect(html).toContain('스프린트는 한 번의 집중 사이클이에요');
     expect(html).toContain('첫 스프린트 시작하기');
     expect(html).toContain('시작할 때 가설 하나만 선언하면 돼요');
@@ -88,7 +88,7 @@ describe('SprintsClient — 스프린트 first-touch 정체성', () => {
     await mount();
     const html = container.innerHTML;
     expect(html).toContain('Sprint 1');
-    expect(html).not.toContain('아직 스프린트가 없어요');
+    expect(html).not.toContain('아직 시작한 스프린트가 없어요');
     expect(html).not.toContain('첫 스프린트 시작하기');
   });
 });

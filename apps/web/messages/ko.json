@@ -3039,7 +3039,7 @@
     "title": "스프린트",
     "loading": "로딩 중...",
     "noProject": "프로젝트가 선택되지 않았습니다.",
-    "noSprints": "아직 스프린트가 없어요",
+    "noSprints": "아직 시작한 스프린트가 없어요",
     "noSprintsDescription": "스프린트는 한 번의 집중 사이클이에요. 시작할 때 가설을 선언하고, 끝나면 배운 것을 종합합니다.",
     "noSprintsCta": "첫 스프린트 시작하기",
     "noSprintsHint": "시작할 때 가설 하나만 선언하면 돼요",
