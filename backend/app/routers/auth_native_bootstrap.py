@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
@@ -25,9 +26,17 @@ from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.dependencies.database import get_db
 from app.models.auth_identity import AuthIdentity
+from app.models.device_installation import DeviceInstallation
 from app.models.user import User
+from app.services.device_proof import (
+    PURPOSE_BOOTSTRAP_ISSUE,
+    TTL_BOOTSTRAP_ISSUE_SECONDS,
+    ChallengeAlreadyActiveError,
+    issue_challenge,
+)
 from app.services.firebase_verifier import verify_app_check_token, verify_firebase_id_token
 from app.services.native_bootstrap import DEFAULT_TTL_SECONDS, issue_bootstrap_code
+from app.services.native_request_auth import verify_native_request
 
 logger = logging.getLogger(__name__)
 
@@ -131,3 +140,87 @@ async def native_bootstrap(
     )
     logger.info("auth.native_bootstrap success")
     return NativeBootstrapResponse(code=code, expires_in=DEFAULT_TTL_SECONDS)
+
+
+# story 822817a0(C1·doc §7.1/§7.5): bootstrap_issue 챌린지 발급 — §7.5 2단계 원자 트랜잭션의
+# 1단계 준비물(실제 원자 issue+redeem-challenge 동시생성 배선은 C4). 여기서는 이미 등록된
+# active 설치가 자신의 것임을 확인하고 챌린지만 발급한다. App Check는 필수(구 위 엔드포인트의
+# optional 스킴과 다름 — §7 신규 프로토콜은 강제).
+class NativeBootstrapChallengeRequest(BaseModel):
+    app_check_token: str | None = None
+    installation_id: str
+
+
+class NativeBootstrapChallengeResponse(BaseModel):
+    challenge_id: str
+    client_data_b64url: str
+    expires_in: int
+
+
+@router.post("/native-bootstrap/challenges", response_model=NativeBootstrapChallengeResponse)
+@limiter.limit("10/minute")
+async def native_bootstrap_challenge(
+    request: Request,
+    body: NativeBootstrapChallengeRequest,
+    response: Response,
+    authorization: str | None = Header(default=None),
+    x_firebase_appcheck: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> NativeBootstrapChallengeResponse:
+    response.headers["Cache-Control"] = "no-store"
+
+    if not settings.firebase_auth_mobile_issue:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Native bootstrap not enabled")
+
+    app_check_token = body.app_check_token or x_firebase_appcheck
+    verified = await verify_native_request(
+        authorization=authorization,
+        app_check_token=app_check_token,
+        db=db,
+        log_prefix="auth.native_bootstrap.challenge",
+    )
+
+    try:
+        installation_uuid = uuid.UUID(body.installation_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown installation")
+
+    installation = await db.get(DeviceInstallation, installation_uuid)
+    # 존재하지 않음/타인 소유/미활성/project 불일치 — 전부 동일하게 401(enumeration 방지,
+    # native_bootstrap.py 소비부 기존 관례와 동일).
+    if (
+        installation is None
+        or installation.user_id != verified.user_id
+        or installation.status != "active"
+        or installation.project_id != settings.firebase_project_id
+    ):
+        logger.warning("auth.native_bootstrap.challenge rejected reason=installation_not_eligible")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown installation")
+
+    try:
+        issued = await issue_challenge(
+            db,
+            purpose=PURPOSE_BOOTSTRAP_ISSUE,
+            user_id=verified.user_id,
+            firebase_uid=verified.firebase_uid,
+            project_id=settings.firebase_project_id,
+            tenant_id=None,
+            environment=installation.environment,
+            platform=installation.platform,
+            app_id=installation.app_id,
+            http_method="POST",
+            route="/api/v2/auth/native-bootstrap",
+            web_origin=str(request.base_url).rstrip("/"),
+            ttl_seconds=TTL_BOOTSTRAP_ISSUE_SECONDS,
+            installation_id=installation.id,
+            key_version=installation.key_version,
+        )
+    except ChallengeAlreadyActiveError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bootstrap challenge already active")
+
+    logger.info("auth.native_bootstrap.challenge success")
+    return NativeBootstrapChallengeResponse(
+        challenge_id=issued.challenge_id,
+        client_data_b64url=issued.client_data_b64url,
+        expires_in=TTL_BOOTSTRAP_ISSUE_SECONDS,
+    )

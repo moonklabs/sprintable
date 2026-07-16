@@ -10,6 +10,7 @@ from app.models.auth_native_bootstrap import AuthNativeBootstrapCode
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
 from app.models.deletion_audit import DeletionAuditLog
 from app.models.dependency import ItemDependency
+from app.models.device_installation import DeviceInstallation, DeviceProofChallenge
 from app.models.entity_slug_history import EntitySlugHistory
 from app.models.embedding import Embedding
 from app.models.evidence import Evidence
@@ -69,6 +70,8 @@ __all__ = [
     "AuthMigration",
     "AuthMigrationEvent",
     "AuthNativeBootstrapCode",
+    "DeviceInstallation",
+    "DeviceProofChallenge",
     "ArtifactNode",
     "ArtifactVersion",
     "VisualArtifact",
