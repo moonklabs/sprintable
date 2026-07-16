@@ -68,10 +68,12 @@ describe('GlanceBoard — 현황판 first-touch 정체성', () => {
     const html = container.innerHTML;
     expect(html).toContain('아직 시작한 여정이 없어요');
     expect(html).toContain('현황판은 프로젝트가 어디서 시작해');
+    // 유나 가디언 리뷰(어긋남2) — 2번째 문장 복원: 에픽/스프린트 누적이 왜 여정을 그리는지 CTA와 연결.
+    expect(html).toContain('에픽과 스프린트가 쌓이면 프로젝트의 여정이 여기 그려집니다');
     expect(html).toContain('시작');
     expect(html).toContain('지금');
     expect(html).toContain('앞으로');
-    expect(html).toContain('첫 에픽 시작하기');
+    expect(html).toContain('첫 에픽으로 여정 시작하기');
     expect(html).toContain('에픽 하나면 여정이 시작돼요');
     expect(html).not.toContain('아직 로드맵이 없습니다.'); // 구 카피 소거
   });
@@ -81,7 +83,7 @@ describe('GlanceBoard — 현황판 first-touch 정체성', () => {
     await mount();
     const link = container.querySelector('a[href="/epics"]');
     expect(link).not.toBeNull();
-    expect(link?.textContent).toContain('첫 에픽 시작하기');
+    expect(link?.textContent).toContain('첫 에픽으로 여정 시작하기');
   });
 
   it('로드맵 데이터가 있으면 기존 보드(에디토리얼 타이틀)가 그대로 렌더되고 explainer는 미노출된다(회귀 0)', async () => {
@@ -94,6 +96,6 @@ describe('GlanceBoard — 현황판 first-touch 정체성', () => {
     await mount();
     const html = container.innerHTML;
     expect(html).not.toContain('아직 시작한 여정이 없어요');
-    expect(html).not.toContain('첫 에픽 시작하기');
+    expect(html).not.toContain('첫 에픽으로 여정 시작하기');
   });
 });
