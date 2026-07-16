@@ -20,10 +20,10 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: pushMock }) }));
 let container: HTMLDivElement;
 let root: Root;
 
-function stubFetch() {
+function stubFetch(storyOverrides: Record<string, unknown> = {}) {
   return vi.fn(async (url: string) => {
     if (url.startsWith('/api/stories/')) {
-      return { ok: true, status: 200, json: async () => ({ data: { id: 's1', title: '웰컴 이메일 시안' } }) };
+      return { ok: true, status: 200, json: async () => ({ data: { id: 's1', title: '웰컴 이메일 시안', ...storyOverrides } }) };
     }
     return { ok: true, status: 200, json: async () => ({ data: [] }) };
   }) as unknown as typeof fetch;
@@ -80,6 +80,19 @@ describe('CommandPalette — action commands (story 4f991165)', () => {
     await mount({ contextStoryId: 's1' });
     expect(document.body.textContent).toContain('웰컴 이메일 시안 · 스토리');
     expect(document.body.textContent).toContain('웰컴 이메일 시안 위임하기');
+  });
+
+  it('story 9ac9b80f — context chip prefixes the human-readable #N when story_number is present', async () => {
+    vi.stubGlobal('fetch', stubFetch({ story_number: 42 }));
+    await mount({ contextStoryId: 's1' });
+    expect(document.body.textContent).toContain('#42 웰컴 이메일 시안 · 스토리');
+  });
+
+  it('story 9ac9b80f — omits the #N prefix when story_number is null (pre-backfill story, no-fiction)', async () => {
+    vi.stubGlobal('fetch', stubFetch({ story_number: null }));
+    await mount({ contextStoryId: 's1' });
+    expect(document.body.textContent).toContain('웰컴 이메일 시안 · 스토리');
+    expect(document.body.textContent).not.toContain('#null');
   });
 
   it('flags the gate-decision command as a sensitive/danger pill (amber, not red — learning-signal)', async () => {

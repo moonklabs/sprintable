@@ -243,7 +243,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       {...listeners}
       onClick={onClick}
       onContextMenu={handleContextMenu}
-      title={`#${story.id.slice(0, 6)}`}
+      title={story.story_number ? `#${story.story_number}` : `#${story.id.slice(0, 6)}`}
       className="group relative cursor-pointer transition"
     >
       {/* E-UI-DAEGBYEON P0 — Board card = Proof Capsule(card density, #bf9037cb). 시각 셸만
@@ -255,7 +255,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
         density="card"
         proofState={proofState}
         stateLabel={proofStateLabel}
-        claim={story.title}
+        claim={story.story_number ? `#${story.story_number} ${story.title}` : story.title}
         footer={
           <div className="mt-2">
             {/* E-MODERN A: 에픽 = 작은 색 dot + muted 라벨(일관 식별·랜덤 채움배지 퇴출) */}
