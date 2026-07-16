@@ -1484,6 +1484,68 @@ async def send_message(
             except Exception:
                 logger.warning("mention event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
 
+        # story 1934(선생님 앱 done-gate — 대상은 human만): 멘션 대상 human에게 in-app
+        # Notification + Expo push. **agent는 명시 제외** — agent는 이미 _dispatch_mention_events
+        # (위)로 SSE/Event 전달을 별도 경로로 받고 있어, 여기서 또 dispatch_notification을 태우면
+        # 같은 메시지에 대해 Event가 이중 INSERT된다(event_type 다른 두 행 — 폴링 중복 수신).
+        # best-effort.
+        if mention_targets:
+            try:
+                human_mention_rows = (await db.execute(
+                    select(TeamMember.id).where(
+                        TeamMember.id.in_(mention_targets), TeamMember.type == "human",
+                    )
+                )).all()
+                human_mention_targets = [r[0] for r in human_mention_rows]
+                if human_mention_targets:
+                    from app.services.notification_dispatch import dispatch_notification
+                    await dispatch_notification(
+                        db, org_id=org_id, event_type="conversation.mention",
+                        target_member_ids=human_mention_targets,
+                        title=f"{sender.name}님이 회원님을 멘션했습니다",
+                        body=(msg.content or "")[:200],
+                        reference_type="conversation", reference_id=conversation_id,
+                        source_project_id=conv.project_id,
+                    )
+            except Exception:
+                logger.warning(
+                    "conversation.mention notification failed conversation_id=%s", conversation_id, exc_info=True,
+                )
+
+    # story 1934(선생님 명시 스코프 확장 — human만): 멘션 여부 무관 스레드 참여 human 전원에게
+    # 새 메시지 in-app Notification + Expo push. agent는 제외(위와 동일 이유 — agent는
+    # _dispatch_conversation_event로 이미 Event 전달받는 중, 여기서 또 태우면 이중 INSERT).
+    # 이미 conversation.mention으로 알림 받은 대상은 제외(중복 push 방지 — 멘션이 더 구체적).
+    # best-effort.
+    try:
+        participant_rows = (await db.execute(
+            select(ConversationParticipant.member_id)
+            .where(ConversationParticipant.conversation_id == conversation_id)
+        )).all()
+        candidate_targets = (
+            {r[0] for r in participant_rows}
+            - {sender.id} - discord_exclude_ids - blocked_agent_ids - set(msg.mentioned_ids or [])
+        )
+        if candidate_targets:
+            human_message_rows = (await db.execute(
+                select(TeamMember.id).where(
+                    TeamMember.id.in_(candidate_targets), TeamMember.type == "human",
+                )
+            )).all()
+            message_targets = [r[0] for r in human_message_rows]
+            if message_targets:
+                from app.services.notification_dispatch import dispatch_notification
+                await dispatch_notification(
+                    db, org_id=org_id, event_type="conversation.message",
+                    target_member_ids=message_targets,
+                    title=f"{sender.name}님의 새 메시지",
+                    body=(msg.content or "")[:200],
+                    reference_type="conversation", reference_id=conversation_id,
+                    source_project_id=conv.project_id,
+                )
+    except Exception:
+        logger.warning("conversation.message notification failed conversation_id=%s", conversation_id, exc_info=True)
+
     # conversation updated_at 갱신
     conv.updated_at = datetime.now(timezone.utc)
 
