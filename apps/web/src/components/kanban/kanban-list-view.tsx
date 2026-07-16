@@ -69,7 +69,10 @@ function ListStoryRow({ story, epicMap, memberMap, onStoryClick, onChangeStatus 
             <span className="text-[10px] text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
           )}
         </div>
-        <p className="mt-1 text-sm font-medium text-foreground line-clamp-2 relative z-10">{story.title}</p>
+        <p className="mt-1 text-sm font-medium text-foreground line-clamp-2 relative z-10">
+          {story.story_number ? <span className="mr-1 text-muted-foreground">#{story.story_number}</span> : null}
+          {story.title}
+        </p>
         {story.assignee_id && memberMap[story.assignee_id] && (
           <div className="mt-1 flex items-center gap-2 relative z-10">
             <p className="text-xs text-muted-foreground">{memberMap[story.assignee_id].name}</p>
