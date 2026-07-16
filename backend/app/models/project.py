@@ -33,7 +33,7 @@ class Project(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     # relationships (string refs to avoid circular imports)
     team_members: Mapped[list["TeamMember"]] = relationship("TeamMember", back_populates="project", lazy="select")
     sprints: Mapped[list["Sprint"]] = relationship("Sprint", back_populates="project", lazy="select")
-    epics: Mapped[list["Epic"]] = relationship("Epic", back_populates="project", lazy="select")
+    epics: Mapped[list["Goal"]] = relationship("Goal", back_populates="project", lazy="select")
 
 
 class OrgMember(Base):

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.pm import Epic, Sprint, Story, Task
+from app.models.pm import Goal, Sprint, Story, Task
 from app.models.team import TeamMember
 
 
@@ -22,7 +22,7 @@ class AnalyticsRepository:
         sprint_rows = sprints_r.all()
 
         epics_r = await self.session.execute(
-            select(func.count()).select_from(Epic).where(Epic.project_id == project_id, Epic.org_id == self.org_id)
+            select(func.count()).select_from(Goal).where(Goal.project_id == project_id, Goal.org_id == self.org_id)
         )
         epic_count = epics_r.scalar_one()
 

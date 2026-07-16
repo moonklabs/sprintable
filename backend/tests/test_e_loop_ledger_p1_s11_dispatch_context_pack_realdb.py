@@ -199,7 +199,7 @@ async def test_story_without_primary_link_falls_back_to_epic_primary_real_db():
     from app.models.doc import Doc
     from app.models.hypothesis import Hypothesis, HypothesisEpicLink
     from app.models.loop import LoopRun
-    from app.models.pm import Epic, Story
+    from app.models.pm import Goal, Story
     from app.services.hypothesis import resolve_dispatch_context_pack
 
     engine, Session = await _session()
@@ -213,7 +213,7 @@ async def test_story_without_primary_link_falls_back_to_epic_primary_real_db():
         async with Session() as s:
             await s.execute(_text("SET session_replication_role = replica"))
             s.add_all([
-                Epic(id=epic_id, org_id=org, project_id=project, title="epic"),
+                Goal(id=epic_id, org_id=org, project_id=project, title="epic"),
                 Hypothesis(
                     id=hyp_id, org_id=org, project_id=project, owner_member_id=uuid.uuid4(),
                     statement="가설", metric_definition={"metric": "x", "source": "manual", "target": 1, "direction": "up"},

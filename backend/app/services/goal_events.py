@@ -1,5 +1,12 @@
-"""E-GLANCE wedge #2(story 96b19bc3) — epic.* 이벤트 발화(app/services/story_status_events.py
+"""E-GLANCE wedge #2(story 96b19bc3) — goal(구 epic).* 이벤트 발화(app/services/story_status_events.py
 축소판).
+
+계층 리네이밍 B1(story 1925): 구 epic_events.py — 함수/모듈명만 rename. ⚠️발화되는
+event_type 문자열("epic.created"/"epic.status_changed"/"epic.removed"/"epic.reordered")은
+**의도적으로 변경하지 않음** — 오르테가(웹훅 구독자)가 정확히 이 문자열로 필터링하는 라이브
+계약이라, REST/MCP 별칭 설계(hierarchy-rename-alias-mechanism-design)가 다루지 않은 **4번째
+외부 계약 표면**(웹훅 event_type)이다. 이걸 바꾸려면 별도 별칭/이관 계획이 필요 — B1 스코프 밖,
+PO/선생님 대조 필요 사항으로 별도 보고.
 
 Story의 5-effect(publish_event·fire_webhooks·process_event·dispatch_notification·
 StoryActivity) 전부를 복제하지 않는다 — 근거(BE design doc §2.2): 이 이벤트의 1차 소비자는
@@ -62,7 +69,7 @@ async def _emit(
                 org_id=org_id,
                 event_type=event_type.replace(".", "_"),
                 target_member_ids=list(notify_ids),
-                title=f"에픽 {event_type.split('.')[-1]}: {event_data.get('epic_title')}",
+                title=f"목표 {event_type.split('.')[-1]}: {event_data.get('epic_title')}",
                 body=None,
                 reference_type="epic",
                 reference_id=uuid.UUID(event_data["epic_id"]),
@@ -72,12 +79,12 @@ async def _emit(
             pass
 
 
-async def emit_epic_created(db, org_id: uuid.UUID, epic, *, actor_id: uuid.UUID | None = None) -> None:
+async def emit_goal_created(db, org_id: uuid.UUID, epic, *, actor_id: uuid.UUID | None = None) -> None:
     event_data = _base_event_data(epic.id, epic.title, epic.project_id, org_id, actor_id)
     await _emit(db, org_id, "epic.created", event_data, notify_member_id=epic.assignee_id)
 
 
-async def emit_epic_status_changed(
+async def emit_goal_status_changed(
     db, org_id: uuid.UUID, epic, old_status: str | None, *, actor_id: uuid.UUID | None = None,
 ) -> None:
     """old==new면 no-op(emit_story_status_changed와 동형 규율)."""
@@ -89,7 +96,7 @@ async def emit_epic_status_changed(
     await _emit(db, org_id, "epic.status_changed", event_data, notify_member_id=epic.assignee_id)
 
 
-async def emit_epic_removed(
+async def emit_goal_removed(
     db, org_id: uuid.UUID, epic_id: uuid.UUID, epic_title: str, project_id: uuid.UUID,
     *, actor_id: uuid.UUID | None = None,
 ) -> None:
@@ -98,12 +105,12 @@ async def emit_epic_removed(
     await _emit(db, org_id, "epic.removed", event_data, notify_member_id=None)
 
 
-async def emit_epic_reordered(
+async def emit_goal_reordered(
     db, org_id: uuid.UUID, items: list[dict[str, Any]],
     recipient_member_ids: set[uuid.UUID], *, actor_id: uuid.UUID | None = None,
 ) -> None:
-    """STEER 커밋(ff662876) 전용 발화 — 드래그(PATCH /epics/bulk)는 무이벤트 초안 저장이고,
-    이 함수는 명시적 조타 커밋(POST /epics/steer-dispatch)에서만 배치당 1회 호출된다. 인간이
+    """STEER 커밋(ff662876) 전용 발화 — 드래그(PATCH /goals/bulk)는 무이벤트 초안 저장이고,
+    이 함수는 명시적 조타 커밋(POST /goals/steer-dispatch)에서만 배치당 1회 호출된다. 인간이
     로드맵을 번복하는 초안 사고과정은 이벤트로 새지 않고, 확定된 결정만 전달된다.
 
     수신자는 커밋에서 지정된 집합(기본=project relay-owner)으로 **게이팅**한다 —

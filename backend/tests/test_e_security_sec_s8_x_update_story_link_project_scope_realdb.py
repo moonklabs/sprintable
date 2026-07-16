@@ -49,7 +49,7 @@ async def _seed(session):
     epic_b/sprint_b/meeting_b(project_b) + human_a(project_a에만 명시 grant)."""
     from sqlalchemy import text
     from app.models.organization import Organization
-    from app.models.pm import Epic, Sprint, Story
+    from app.models.pm import Goal, Sprint, Story
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
     from app.models.user import User
@@ -67,8 +67,8 @@ async def _seed(session):
     session.add(story_a)
     await session.commit()
 
-    epic_a = Epic(id=uuid.uuid4(), org_id=org.id, project_id=project_a.id, title="Epic A")
-    epic_b = Epic(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="Epic B")
+    epic_a = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project_a.id, title="Epic A")
+    epic_b = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="Epic B")
     sprint_a = Sprint(id=uuid.uuid4(), org_id=org.id, project_id=project_a.id, title="Sprint A")
     sprint_b = Sprint(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="Sprint B")
     session.add_all([epic_a, epic_b, sprint_a, sprint_b])

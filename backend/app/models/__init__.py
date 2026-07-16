@@ -35,7 +35,7 @@ from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
 from app.models.notification import InboxItem, Notification, NotificationSetting
 from app.models.notification_preference import NotificationPreference
 from app.models.organization import Organization
-from app.models.pm import Epic, Sprint, Story, Task
+from app.models.pm import Goal, Sprint, Story, Task
 from app.models.hypothesis import (
     Hypothesis,
     HypothesisEpicLink,
@@ -114,7 +114,7 @@ __all__ = [
     "WebhookConfig",
     "PushDevice",
     "Doc",
-    "Epic",
+    "Goal",
     "Hypothesis",
     "HypothesisEpicLink",
     "HypothesisSprintLink",

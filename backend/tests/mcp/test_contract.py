@@ -27,8 +27,11 @@ EXPECTED_TOOLS = {
     # tasks (6) — E-SECURITY SEC-S1(확장): delete_task 의도적 제거(에이전트 hard-delete 차단)
     "sprintable_list_tasks", "sprintable_list_my_tasks", "sprintable_get_task",
     "sprintable_add_task", "sprintable_update_task", "sprintable_update_task_status",
-    # epics (3) — E-SECURITY SEC-S1(확장): delete_epic 의도적 제거(에이전트 hard-delete 차단)
+    # epics/goals (6) — E-SECURITY SEC-S1(확장): delete_epic 의도적 제거(에이전트 hard-delete
+    # 차단). 계층 리네이밍 B1(story 1925): sprintable_*_goal이 신(primary)·sprintable_*_epic은
+    # 같은 핸들러를 가리키는 deprecated 별칭(hierarchy-rename-alias-mechanism-design §1).
     "sprintable_list_epics", "sprintable_add_epic", "sprintable_update_epic",
+    "sprintable_list_goals", "sprintable_add_goal", "sprintable_update_goal",
     # hypotheses (6) — E1-S5
     "sprintable_list_hypotheses", "sprintable_get_hypothesis", "sprintable_create_hypothesis",
     "sprintable_update_hypothesis", "sprintable_link_hypothesis", "sprintable_confirm_hypothesis",
@@ -44,7 +47,7 @@ EXPECTED_TOOLS = {
     "sprintable_get_sprint_velocity_history", "sprintable_search_stories",
     "sprintable_get_blocked_stories", "sprintable_get_unassigned_stories",
     "sprintable_get_overdue_tasks", "sprintable_get_recent_activity",
-    "sprintable_get_epic_progress", "sprintable_get_agent_stats",
+    "sprintable_get_epic_progress", "sprintable_get_goal_progress", "sprintable_get_agent_stats",
     "sprintable_get_project_health",
     # core (4) — E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가.
     "sprintable_list_team_members", "sprintable_my_dashboard",
@@ -104,7 +107,9 @@ def test_total_tool_count():
     # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가 — 100→102.
     # 편집 캔버스 핀 저작(story 7fe16274): spec pin 4종 추가 — 102→106.
     # story 3cf50d90: get_chat_message(단건 원문 조회) 추가 — 106→107.
-    assert len(_TOOLS) == 107
+    # 계층 리네이밍 B1(story 1925): sprintable_*_goal 4종 신설(add/list/update/get_progress) —
+    # 구 sprintable_*_epic 4종은 deprecated 별칭으로 유지(제거 아님) — 107→111.
+    assert len(_TOOLS) == 111
 
 
 def test_all_expected_tools_registered():

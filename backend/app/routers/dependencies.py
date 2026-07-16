@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.dependency import ITEM_TYPES
-from app.models.pm import Epic, Sprint, Story
+from app.models.pm import Goal, Sprint, Story
 from app.repositories.dependency import DependencyRepository
 from app.schemas.dependency import DependencyCreate, DependencyGraphResponse, DependencyResponse
 from app.services.dependency_graph import get_graph, would_create_cycle
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/v2/dependencies", tags=["dependencies", "Work"])
 
 # item_type → project-소속 모델. epic/sprint/story 셋 다 project_id 직접 컬럼(pm.py) — polymorphic
 # 간접(task→story) 없음. dependency 자체엔 project_id가 없어 아이템→project로 해소해 게이팅한다.
-_ITEM_MODEL = {"epic": Epic, "sprint": Sprint, "story": Story}
+_ITEM_MODEL = {"epic": Goal, "sprint": Sprint, "story": Story}
 
 
 def _get_repo(

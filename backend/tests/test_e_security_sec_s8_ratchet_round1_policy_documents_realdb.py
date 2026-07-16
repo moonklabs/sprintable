@@ -49,7 +49,7 @@ async def _seed(session):
     """org(project_a, project_b) + policy_document_a(project_a, content="SECRET POLICY A") +
     human_a(project_a에만 명시 grant, project_b 접근권 없음)."""
     from app.models.organization import Organization
-    from app.models.pm import Epic, Sprint
+    from app.models.pm import Goal, Sprint
     from app.models.policy_document import PolicyDocument
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
@@ -65,7 +65,7 @@ async def _seed(session):
     await session.commit()
 
     sprint_a = Sprint(id=uuid.uuid4(), org_id=org.id, project_id=project_a.id, title="Sprint A")
-    epic_a = Epic(id=uuid.uuid4(), org_id=org.id, project_id=project_a.id, title="Epic A")
+    epic_a = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project_a.id, title="Epic A")
     session.add_all([sprint_a, epic_a])
     await session.commit()
 

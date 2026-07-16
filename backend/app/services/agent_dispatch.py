@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.doc import Doc
 from app.models.event import Event, EventType
 from app.models.hypothesis import Hypothesis
-from app.models.pm import Epic, Sprint, Story
+from app.models.pm import Goal, Sprint, Story
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _event_to_payload, _push_to_agent
 from app.services.activity_stream import extract_activities_best_effort
@@ -68,8 +68,8 @@ async def _fetch_entity(
     """(assignee_id, title, description, project_id) 반환."""
     if entity_type == "epic":
         row = await db.execute(
-            select(Epic.assignee_id, Epic.title, Epic.description, Epic.project_id).where(
-                Epic.id == entity_id, Epic.org_id == org_id
+            select(Goal.assignee_id, Goal.title, Goal.description, Goal.project_id).where(
+                Goal.id == entity_id, Goal.org_id == org_id
             )
         )
         r = row.one_or_none()

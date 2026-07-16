@@ -49,7 +49,7 @@ async def _session_factory():
 
 async def _seed(session, *, epic_status: str = "active"):
     from app.models.organization import Organization
-    from app.models.pm import Epic
+    from app.models.pm import Goal
     from app.models.project import OrgMember, Project
     from app.models.user import User
 
@@ -69,7 +69,7 @@ async def _seed(session, *, epic_status: str = "active"):
     session.add(om)
     await session.commit()
 
-    epic = Epic(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="Epic", status=epic_status)
+    epic = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="Epic", status=epic_status)
     session.add(epic)
     await session.commit()
 

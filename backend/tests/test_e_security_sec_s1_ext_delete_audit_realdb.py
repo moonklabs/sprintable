@@ -47,7 +47,7 @@ async def _seed(session, *, admin_role: str | None = None):
     from app.models.organization import Organization
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
-    from app.models.pm import Epic, Story, Task
+    from app.models.pm import Goal, Story, Task
     from app.models.doc import Doc
     from app.models.user import User
 
@@ -70,7 +70,7 @@ async def _seed(session, *, admin_role: str | None = None):
     await session.commit()
 
     task = Task(id=uuid.uuid4(), org_id=org.id, story_id=story.id, title="To Be Deleted Task", status="todo")
-    epic = Epic(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="To Be Deleted Epic")
+    epic = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="To Be Deleted Epic")
     doc = Doc(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="To Be Deleted Doc", slug=f"doc-{uuid.uuid4().hex[:8]}")
     session.add_all([task, epic, doc])
     await session.commit()
