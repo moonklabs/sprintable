@@ -40,6 +40,7 @@ interface DocResult {
 interface StoryTitleResult {
   id: string;
   title: string;
+  story_number?: number | null;
 }
 
 const ITEMS: CommandItem[] = [
@@ -87,8 +88,8 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
       try {
         const res = await fetch(`/api/stories/${contextStoryId}`);
         if (!res.ok) return;
-        const json = (await res.json()) as { data?: { id: string; title: string } };
-        if (!cancelled && json.data) setContextStory({ id: json.data.id, title: json.data.title });
+        const json = (await res.json()) as { data?: { id: string; title: string; story_number?: number | null } };
+        if (!cancelled && json.data) setContextStory({ id: json.data.id, title: json.data.title, story_number: json.data.story_number });
       } catch { /* no-fiction: 조회 실패면 그냥 context 없음과 동일 취급 */ }
     })();
     return () => { cancelled = true; };
@@ -244,7 +245,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
           {contextStory ? (
             <div className="flex items-center gap-1.5 border-b border-border/60 bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
               <span className="text-info" aria-hidden="true">◆</span>
-              {t('contextChip', { title: contextStory.title })}
+              {t('contextChip', { title: contextStory.story_number ? `#${contextStory.story_number} ${contextStory.title}` : contextStory.title })}
             </div>
           ) : null}
 
