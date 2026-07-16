@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { NextIntlClientProvider } from 'next-intl';
+import koMessages from '../../../messages/ko.json';
 import { Workcell, type WorkcellProps } from './workcell';
 
 const BASE: WorkcellProps = {
@@ -78,16 +80,20 @@ describe('Workcell Evidence layer (Proof Capsule 재사용 · null=정직한 빈
   });
 
   it('renders the actual ProofCapsule component when evidence is provided', () => {
+    // ProofCapsule의 FullVariant/EvidenceRow/GateRow가 proofCapsule i18n 배선(useTranslations)을
+    // 쓰므로 NextIntlClientProvider 필수(다른 Workcell 테스트는 evidence=null이라 이 경로를 안 탐).
     const markup = renderToStaticMarkup(
-      <Workcell
-        {...BASE}
-        evidence={{
-          proofState: 'green', stateLabel: '증명 완료', claim: '재시도 로직 구현 완료',
-          human: { name: '윤재', role: 'human' }, density: 'full',
-          evidence: { acMet: 4, acTotal: 4, autoVerify: 'passed' },
-          gate: { risk: '낮음', action: 'Merge gate 열기' },
-        }}
-      />,
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <Workcell
+          {...BASE}
+          evidence={{
+            proofState: 'green', stateLabel: '증명 완료', claim: '재시도 로직 구현 완료',
+            human: { name: '윤재', role: 'human' }, density: 'full',
+            evidence: { acMet: 4, acTotal: 4, autoVerify: 'passed' },
+            gate: { risk: '낮음', action: 'Merge gate 열기' },
+          }}
+        />
+      </NextIntlClientProvider>,
     );
     expect(markup).toContain('재시도 로직 구현 완료');
     expect(markup).toContain('AC 4/4');

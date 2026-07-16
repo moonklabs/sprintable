@@ -281,6 +281,31 @@
     "sprintCycleProgress": "Time elapsed",
     "agentsActive": "{count} active"
   },
+  "proofCapsule": {
+    "claim": {
+      "label": "Claim · Agent says done",
+      "executor": "By {name}",
+      "now": "Now: <b>{now}</b>",
+      "running": "Running"
+    },
+    "evidence": {
+      "label": "Evidence · Against requirements",
+      "acMet": "AC {met}/{total} met",
+      "autoPassed": "Auto-check passed",
+      "autoFailed": "Auto-check failed",
+      "count": "{count} evidence"
+    },
+    "gate": {
+      "label": "Human gate · Human is accountable",
+      "owner": "Owned by <b>{name}</b>",
+      "risk": "Risk: {risk}"
+    },
+    "risk": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High"
+    }
+  },
   "orgBriefing": {
     "title": "Org Briefing",
     "subtitle": "What's come to you, what we're learning, and who's on what — at a glance.",
