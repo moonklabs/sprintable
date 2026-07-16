@@ -2,11 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 import { ProofCapsule, type ProofCapsuleProps, type ProofState } from './proof-capsule';
 
 function renderWithIntl(node: React.ReactNode) {
   return renderToStaticMarkup(
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>,
+  );
+}
+
+function renderWithIntlEn(node: React.ReactNode) {
+  return renderToStaticMarkup(
+    <NextIntlClientProvider locale="en" messages={enMessages} timeZone="Asia/Seoul">
       {node}
     </NextIntlClientProvider>,
   );
@@ -30,14 +39,14 @@ const STATES: { state: ProofState; label: string }[] = [
 describe('ProofCapsule (density variants)', () => {
   it('renders the claim text in all four density variants', () => {
     for (const density of ['full', 'card', 'row', 'audit'] as const) {
-      const markup = renderToStaticMarkup(<ProofCapsule {...BASE} density={density} />);
+      const markup = renderWithIntl(<ProofCapsule {...BASE} density={density} />);
       expect(markup).toContain(BASE.claim);
     }
   });
 
   it('applies a clip-path cut-corner on full/card/row (not a plain rounded-full pill anywhere)', () => {
     for (const density of ['full', 'card', 'row'] as const) {
-      const markup = renderToStaticMarkup(<ProofCapsule {...BASE} density={density} />);
+      const markup = renderWithIntl(<ProofCapsule {...BASE} density={density} />);
       expect(markup).toContain('polygon(');
     }
   });
@@ -46,7 +55,7 @@ describe('ProofCapsule (density variants)', () => {
 describe('ProofCapsule (4 proof states — 색만으로 의미 전달 금지, stateLabel 텍스트 항상 병기)', () => {
   for (const { state, label } of STATES) {
     it(`renders the "${label}" text alongside the ${state} state (not color-only)`, () => {
-      const markup = renderToStaticMarkup(<ProofCapsule {...BASE} proofState={state} stateLabel={label} density="full" />);
+      const markup = renderWithIntl(<ProofCapsule {...BASE} proofState={state} stateLabel={label} density="full" />);
       expect(markup).toContain(label);
     });
   }
@@ -54,14 +63,14 @@ describe('ProofCapsule (4 proof states — 색만으로 의미 전달 금지, st
 
 describe('ProofCapsule (optional fields — evidence/gate/agent 없이도 정직하게 렌더)', () => {
   it('renders without evidence, gate, or agent fields present (no "undefined" leaking into markup)', () => {
-    const markup = renderToStaticMarkup(<ProofCapsule {...BASE} density="full" />);
+    const markup = renderWithIntl(<ProofCapsule {...BASE} density="full" />);
     expect(markup).not.toContain('undefined');
     expect(markup).not.toContain('Evidence');
     expect(markup).not.toContain('Human gate');
   });
 
   it('renders the agent avatar distinctly from the human avatar when an agent is present', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithIntl(
       <ProofCapsule {...BASE} agent={{ name: '미르코', initial: '미' }} density="full" />,
     );
     expect(markup).toContain('실행 미르코');
@@ -69,7 +78,7 @@ describe('ProofCapsule (optional fields — evidence/gate/agent 없이도 정직
   });
 
   it('renders evidence and gate sections only when those props are provided', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithIntl(
       <ProofCapsule
         {...BASE}
         evidence={{ acMet: 4, acTotal: 4, autoVerify: 'passed', diff: { add: 142, del: 18 } }}
@@ -86,7 +95,7 @@ describe('ProofCapsule (optional fields — evidence/gate/agent 없이도 정직
 
 describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회귀가드)', () => {
   it('never renders raw activity-log-style vocabulary or a KPI-style numeric-only summary', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithIntl(
       <ProofCapsule
         {...BASE}
         evidence={{ acMet: 4, acTotal: 4, proofCount: 3 }}
@@ -99,7 +108,7 @@ describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회�
   });
 
   it('does not use a fully-rounded (999px pill) shape for the gate action button (small circular status dots are fine, buttons are not)', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithIntl(
       <ProofCapsule {...BASE} gate={{ risk: '보통', action: '결재 →' }} density="row" />,
     );
     const gateButtonMatch = markup.match(/<a class="([^"]*)"/);
@@ -109,7 +118,7 @@ describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회�
   });
 
   it('supports a human/agent avatar + tone-varied gate button in row density (Attention Queue 재사용, 5f25c615)', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithIntl(
       <ProofCapsule
         {...BASE}
         density="row"
@@ -127,7 +136,7 @@ describe('ProofCapsule (human optional — Board card 확산, bf9037cb) — 다�
   it('renders full/audit density without a human prop, omitting the human-dependent UI instead of crashing or leaking "undefined"', () => {
     for (const density of ['full', 'audit'] as const) {
       const { human: _human, ...withoutHuman } = BASE;
-      const markup = renderToStaticMarkup(<ProofCapsule {...withoutHuman} density={density} />);
+      const markup = renderWithIntl(<ProofCapsule {...withoutHuman} density={density} />);
       expect(markup).not.toContain('undefined');
       expect(markup).not.toContain('책임');
     }
@@ -135,7 +144,7 @@ describe('ProofCapsule (human optional — Board card 확산, bf9037cb) — 다�
 
   it('omits the Human gate section when gate is provided but human is not (도크트린⑤ — 책임자 없이 게이트 없음)', () => {
     const { human: _human, ...withoutHuman } = BASE;
-    const markup = renderToStaticMarkup(
+    const markup = renderWithIntl(
       <ProofCapsule {...withoutHuman} gate={{ risk: '낮음', action: 'Merge gate 열기' }} density="full" />,
     );
     expect(markup).not.toContain('Human gate');
@@ -145,7 +154,7 @@ describe('ProofCapsule (human optional — Board card 확산, bf9037cb) — 다�
 
 describe('ProofCapsule (footer slot — card density, Board card 확산 실기능 이관)', () => {
   it('renders arbitrary footer content below the claim/evidence in card density', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithIntl(
       <ProofCapsule
         {...BASE}
         density="card"
@@ -157,7 +166,7 @@ describe('ProofCapsule (footer slot — card density, Board card 확산 실기�
 
   it('ignores the footer prop on non-card densities (no accidental leak)', () => {
     for (const density of ['full', 'row', 'audit'] as const) {
-      const markup = renderToStaticMarkup(
+      const markup = renderWithIntl(
         <ProofCapsule {...BASE} density={density} footer={<span>카드 전용 마커</span>} />,
       );
       expect(markup).not.toContain('카드 전용 마커');
@@ -213,5 +222,51 @@ describe('ProofCapsule (trustSeal slot — claimed-vs-verified-spec-handoff, ful
     const markup = renderWithIntl(<ProofCapsule {...BASE} density="full" />);
     expect(markup).not.toContain('책임 서명');
     expect(markup).not.toContain('검증 대기');
+  });
+});
+
+describe('ProofCapsule (EN locale — regression: 전면 하드코딩 한국어였던 것 i18n 배선, 유나 ko/en 카피 13키)', () => {
+  it('renders claim/evidence/gate/risk entirely in English, no raw Korean or raw i18n key leaking through', () => {
+    const markup = renderWithIntlEn(
+      <ProofCapsule
+        {...BASE}
+        agent={{ name: 'Alex', initial: 'A' }}
+        now="2h ago"
+        evidence={{ acMet: 4, acTotal: 4, autoVerify: 'passed', proofCount: 3 }}
+        gate={{ risk: '낮음', action: 'Open merge gate' }}
+        density="full"
+      />,
+    );
+    expect(markup).toContain('Claim · Agent says done');
+    expect(markup).toContain('By Alex');
+    expect(markup).toContain('Now: <b>2h ago</b>');
+    expect(markup).toContain('Evidence · Against requirements');
+    expect(markup).toContain('AC 4/4 met');
+    expect(markup).toContain('Auto-check passed');
+    expect(markup).toContain('3 evidence');
+    expect(markup).toContain('Human gate · Human is accountable');
+    expect(markup).toContain('Owned by');
+    expect(markup).toContain('Risk: Low');
+    // former hardcoded-Korean UI chrome must not survive in EN render (test fixture data like
+    // stateLabel/human.name is expected to stay whatever language the caller passes — only the
+    // component's own chrome strings are in scope here).
+    for (const formerHardcoded of ['실행', '책임', '위험도', '자동검증', '지금:', '증거', 'Human gate · 인간']) {
+      expect(markup).not.toContain(formerHardcoded);
+    }
+    expect(markup).not.toContain('proofCapsule.');
+  });
+
+  it('translates all three risk levels correctly (canonical ko literal -> EN label, not passthrough)', () => {
+    const cases = [
+      { risk: '낮음' as const, expected: 'Risk: Low' },
+      { risk: '보통' as const, expected: 'Risk: Medium' },
+      { risk: '높음' as const, expected: 'Risk: High' },
+    ];
+    for (const { risk, expected } of cases) {
+      const markup = renderWithIntlEn(
+        <ProofCapsule {...BASE} gate={{ risk, action: 'Review' }} density="full" />,
+      );
+      expect(markup).toContain(expected);
+    }
   });
 });

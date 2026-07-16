@@ -281,6 +281,31 @@
     "sprintCycleProgress": "기간 진행",
     "agentsActive": "{count}명 활성"
   },
+  "proofCapsule": {
+    "claim": {
+      "label": "Claim · 에이전트 완료 주장",
+      "executor": "실행 {name}",
+      "now": "지금: <b>{now}</b>",
+      "running": "실행 중"
+    },
+    "evidence": {
+      "label": "Evidence · 요구 대조",
+      "acMet": "AC {met}/{total} 충족",
+      "autoPassed": "자동검증 passed",
+      "autoFailed": "자동검증 failed",
+      "count": "증거 {count}건"
+    },
+    "gate": {
+      "label": "Human gate · 인간이 책임집니다",
+      "owner": "책임 <b>{name}</b>",
+      "risk": "위험도 {risk}"
+    },
+    "risk": {
+      "low": "낮음",
+      "medium": "보통",
+      "high": "높음"
+    }
+  },
   "orgBriefing": {
     "title": "조직 브리핑",
     "subtitle": "내게 온 요청, 우리가 배우는 것, 누가 무엇을 맡고 있는지 — 한눈에.",
