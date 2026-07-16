@@ -78,6 +78,23 @@ describe('proxy', () => {
     expect(response.status).toBe(307);
   });
 
+  it('treats /auth/oauth-handoff as public — no 307-to-login (e-mobile-oauth-native-handoff-contract §5, same class of gap as story 26170479)', async () => {
+    // 세션을 만드는 공개 엔드포인트라 호출 시점엔 세션이 없는 게 정상 — /auth/native와 동일
+    // 이유로 PUBLIC 목록에 있어야 한다(#2224 교훈 선제 적용, 실제 사고 재발 전에 가드).
+    const response = await middleware(makeRequest('/auth/oauth-handoff'));
+    expect(response.status).toBe(200);
+  });
+
+  it('treats /.well-known/assetlinks.json as public — App Link 검증기는 인증 쿠키 없이 호출(§10.2)', async () => {
+    const response = await middleware(makeRequest('/.well-known/assetlinks.json'));
+    expect(response.status).toBe(200);
+  });
+
+  it('treats /apple-app-site-association as public — Universal Link 검증기는 인증 쿠키 없이 호출(§10.2)', async () => {
+    const response = await middleware(makeRequest('/apple-app-site-association'));
+    expect(response.status).toBe(200);
+  });
+
   it('passes all /api/* paths without JWT check', async () => {
     const apiPaths = [
       '/api/v1/bridge/slack/interactions',

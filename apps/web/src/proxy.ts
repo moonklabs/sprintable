@@ -44,6 +44,12 @@ const PUBLIC_PREFIX = [
   // story 26170479: 세션을 만드는 공개 엔드포인트(호출 시점엔 세션이 없는 게 정상) — 누락
   // 시 위 인증가드가 보호 라우트로 오인해 /login 307(민군 축c 실측으로 발견).
   '/auth/native',
+  // e-mobile-oauth-native-handoff-contract §5/§10.1 — 격리 rail consume 착지도 동일하게 세션
+  // 생성 전 호출된다(/auth/native와 같은 이유, PR#2224 교훈 선제 적용).
+  '/auth/oauth-handoff',
+  // §10.2: App Link/Universal Link 검증파일 — OS 레벨 검증기가 인증 쿠키 없이 호출.
+  '/.well-known/',
+  '/apple-app-site-association',
   '/invite',
   '/internal-dogfood',
   '/terms',
