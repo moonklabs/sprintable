@@ -148,7 +148,7 @@ describe('POST /auth/oauth-handoff', () => {
 
     const res = await POST(makeJsonRequest({ code: 'valid-code', code_verifier: 'valid-verifier' }));
     expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toBe('http://localhost/glance');
+    expect(res.headers.get('location')).toBe('http://localhost:3108/glance');
     expect(res.headers.get('cache-control')).toBe('no-store');
     expect(res.headers.get('referrer-policy')).toBe('no-referrer');
 
@@ -168,6 +168,6 @@ describe('POST /auth/oauth-handoff', () => {
     process.env['FIREBASE_OAUTH_HANDOFF_ENABLED'] = 'true';
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ access_token: 'at', refresh_token: 'rt' }) });
     const res = await POST(makeJsonRequest({ code: 'c', code_verifier: 'v', redirect_path: '//evil.com/phish' }));
-    expect(res.headers.get('location')).toBe('http://localhost/glance');
+    expect(res.headers.get('location')).toBe('http://localhost:3108/glance');
   });
 });
