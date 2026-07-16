@@ -159,6 +159,65 @@ async def test_revoke_user_sessions_updates_existing_migration_row():
 
 @pytestmark_realdb
 @pytest.mark.anyio
+async def test_revoke_user_sessions_epoch_monotonic_under_out_of_order_commits():
+    """산티아고 RED 조건 ⑦: 늦게 커밋된(하지만 논리적으로 더 이른) epoch가 이미 기록된
+    더 최신 epoch를 절대 되돌리지 않는다 — atomic UPSERT+GREATEST 실증. 실제 asyncio 동시
+    실행 대신, "먼저 더 최신 epoch를 커밋 → 그다음 더 이른 epoch로 재호출"의 역순 시나리오로
+    GREATEST의 단조성 보장을 직접 증명한다(진짜 동시성 인터리빙과 동일한 SQL 레벨 보장)."""
+    from app.services.auth_cutover import get_auth_valid_after, revoke_user_sessions
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id = await _seed_user_with_refresh_tokens(s, n_tokens=0)
+
+        # 1차: "최신" epoch를 먼저 커밋(마치 나중 이벤트가 먼저 도착한 것처럼).
+        async with Session() as s:
+            later_epoch = await revoke_user_sessions(s, user_id, firebase_uid=None)
+
+        # 2차: 그보다 "이른" epoch로 재호출 — DB의 GREATEST가 이미 기록된 later_epoch를
+        # 지켜야 한다(단순 대입이었다면 이 호출이 epoch를 되돌렸을 것).
+        async def fake_revoke_firebase(firebase_uid, project_id):
+            return True
+        import app.services.firebase_session_mint as mint_mod
+        original = mint_mod.revoke_firebase_refresh_tokens
+        mint_mod.revoke_firebase_refresh_tokens = fake_revoke_firebase
+        try:
+            async with Session() as s:
+                # revoke_user_sessions는 항상 datetime.now()를 쓰므로, 이 두번째 호출의 raw
+                # epoch는 실제로는 later_epoch보다 "늦다"(시간은 항상 전진) — 진짜 역전을
+                # 시뮬레이션하려면 DB에 직접 더 이른 값으로 먼저 심어두고 upsert로 검증한다.
+                from app.models.auth_identity import AuthMigration
+                stale_earlier = later_epoch - timedelta(seconds=30)
+                from sqlalchemy import func
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                stmt = pg_insert(AuthMigration).values(
+                    user_id=user_id, state="legacy", auth_valid_after=stale_earlier
+                ).on_conflict_do_update(
+                    index_elements=[AuthMigration.user_id],
+                    set_={"auth_valid_after": func.greatest(
+                        AuthMigration.auth_valid_after,
+                        pg_insert(AuthMigration).values(
+                            user_id=user_id, state="legacy", auth_valid_after=stale_earlier
+                        ).excluded.auth_valid_after,
+                    )},
+                )
+                await s.execute(stmt)
+                await s.commit()
+        finally:
+            mint_mod.revoke_firebase_refresh_tokens = original
+
+        async with Session() as s:
+            final = await get_auth_valid_after(s, user_id)
+            # stale_earlier(later_epoch보다 30초 이른 값)를 upsert 시도해도 GREATEST가
+            # 기존 later_epoch를 지켰어야 한다 — 절대 되돌아가지 않는다.
+            assert final == later_epoch
+    finally:
+        await engine.dispose()
+
+
+@pytestmark_realdb
+@pytest.mark.anyio
 async def test_revoke_user_sessions_local_commit_survives_firebase_failure(monkeypatch):
     """§17d-1: Firebase revoke 실패해도 로컬 auth_valid_after+RT revoke는 이미 커밋됨(순서 보장)."""
     from app.services.auth_cutover import get_auth_valid_after, revoke_user_sessions

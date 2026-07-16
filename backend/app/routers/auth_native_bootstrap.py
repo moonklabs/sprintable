@@ -25,9 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.dependencies.database import get_db
-from app.models.auth_identity import AuthIdentity
+from app.models.auth_identity import AuthIdentity, AuthMigration
 from app.models.device_installation import DeviceInstallation
 from app.models.user import User
+from app.services.auth_cutover import is_before_cutover
 from app.services.device_proof import (
     PURPOSE_BOOTSTRAP_ISSUE,
     TTL_BOOTSTRAP_ISSUE_SECONDS,
@@ -114,6 +115,21 @@ async def native_bootstrap(
         logger.warning("auth.native_bootstrap rejected reason=inactive_or_missing_user")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
 
+    # story bea25062(§17d-1 RED 조건 ②⑥): 이전엔 이 issue 엔드포인트가 migration state/cutover
+    # epoch를 전혀 안 봤다(consume에만 있던 검사) — provisioning/firebase가 아닌 사용자(예:
+    # reset_required)도 코드를 발급받을 수 있었고, revoke 이후 예전 ID token으로도 발급이
+    # 통과했다(BLOCKER 2 공격의 첫 단계). issue 시점에도 consume과 동일한 state+cutover
+    # 검사를 강제 — auth_time은 이 코드에 원본 값으로 저장돼 consume 시 재검증된다.
+    migration = await db.get(AuthMigration, identity_row.user_id)
+    if migration is None or migration.state not in ("provisioning", "firebase"):
+        logger.warning("auth.native_bootstrap rejected reason=ineligible_migration_state")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not eligible")
+
+    auth_time_dt = datetime.fromtimestamp(verified.auth_time, tz=timezone.utc)
+    if is_before_cutover(migration.auth_valid_after, auth_time_dt):
+        logger.warning("auth.native_bootstrap rejected reason=before_cutover")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
+
     device_binding_hash: str | None = None
     if settings.firebase_auth_mobile_app_check_required and not body.app_check_token:
         logger.warning("auth.native_bootstrap rejected reason=app_check_required_missing")
@@ -137,6 +153,7 @@ async def native_bootstrap(
         project_id=settings.firebase_project_id,
         device_binding_hash=device_binding_hash,
         ttl_seconds=DEFAULT_TTL_SECONDS,
+        auth_time=auth_time_dt,
     )
     logger.info("auth.native_bootstrap success")
     return NativeBootstrapResponse(code=code, expires_in=DEFAULT_TTL_SECONDS)

@@ -209,26 +209,41 @@ async def _resolve_api_key(
     )
 
 
-async def _reject_if_before_cutover(user_id: str, unix_timestamp: int | None, db: AsyncSession) -> None:
+async def _reject_if_before_cutover(user_id: str | uuid.UUID, unix_timestamp: int | None, db: AsyncSession) -> None:
     """story bea25062(§17d-1 cutover epoch authority): legacy iat/Firebase auth_time이
-    이 사용자의 auth_valid_after 이전(또는 동일)이면 거부. AuthMigration 행이 없거나
-    auth_valid_after가 NULL이면(현재 대부분의 사용자) 제약 없음 — 기존 동작 100% 무변화.
+    이 사용자의 auth_valid_after 이전(또는 동일)이거나, migration.state가 강제 재설정
+    대상(`reset_required`)이면 거부. AuthMigration 행이 없으면(Phase 1~3 cohort 미편입
+    대부분의 현재 사용자) 제약 없음 — 기존 동작 100% 무변화.
 
-    ⚠️전역 존재-캐시(`check_any_cutover_epoch_exists()`)를 먼저 본다 — revoke가 시스템
-    전체에 단 한 번도 없었다면(오늘의 현실) 이 요청의 `db`/`user_id`를 전혀 건드리지 않고
-    즉시 반환한다. 이게 없으면 legacy JWT 검증(원래 DB 완전 무접촉)이 인증된 모든 요청마다
-    DB 왕복 1건을 영구히 추가하게 되고, `db=None`/`AsyncMock()`으로 이 경로를 호출하는
-    기존 단위 테스트들도 깨진다(자체 발견 — auth_cutover.py 모듈 docstring 참조)."""
-    if unix_timestamp is None:
+    ⚠️산티아고 RED 조건 ①③(2026-07-16): 이전엔 전역 존재-캐시로 DB 조회를 생략했으나 —
+    다른 인스턴스의 캐시 지연·DB 장애 시 기본값 반환이 전부 fail-open이었다(BLOCKER 1).
+    캐시를 제거하고 **매 호출마다 무조건** `AuthMigration`을 PK 조회한다 — DB 조회가
+    실패하면 예외를 그대로 전파해(auth 요청 실패) fail-closed를 유지한다.
+
+    ⚠️조건 ②: `auth_valid_after`만 보면 `reset_required`인데 아직 epoch가 안 채워진(또는
+    부분 커밋된) 사용자가 그냥 통과한다 — state 자체도 함께 거부 조건에 넣는다.
+
+    ⚠️조건 ③: iat/auth_time이 없거나 정수가 아니면(위조/손상 클레임) 예전엔 "제약 없음"으로
+    통과시켰다 — 이제 fail-closed(401)로 뒤집는다. 정상 발급 토큰은 항상 iat/auth_time을
+    갖고 있어 무회귀.
+
+    ⚠️까심 결함 A(2026-07-16): `uuid.UUID(user_id)`가 user_id를 항상 str로 가정해 이미
+    `uuid.UUID` 객체인 호출부에서 `ValueError`. isinstance로 방어해 4 verifier 전 경로에서
+    타입 일관 처리."""
+    if not isinstance(unix_timestamp, int):
+        logger.warning("auth.cutover.reject reason=missing_or_invalid_timestamp")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication timestamp")
+
+    from app.models.auth_identity import AuthMigration
+    from app.services.auth_cutover import is_before_cutover
+
+    user_uuid = user_id if isinstance(user_id, uuid.UUID) else uuid.UUID(user_id)
+    migration = await db.get(AuthMigration, user_uuid)
+    if migration is None:
         return
-    from app.services.auth_cutover import check_any_cutover_epoch_exists, get_auth_valid_after, is_before_cutover
 
-    if not await check_any_cutover_epoch_exists():
-        return
-
-    auth_valid_after = await get_auth_valid_after(db, uuid.UUID(user_id))
     reference_time = datetime.fromtimestamp(unix_timestamp, tz=timezone.utc)
-    if is_before_cutover(auth_valid_after, reference_time):
+    if migration.state == "reset_required" or is_before_cutover(migration.auth_valid_after, reference_time):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
 
 

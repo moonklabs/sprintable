@@ -22,6 +22,10 @@ class AuthNativeBootstrapCode(Base):
     project_id: Mapped[str] = mapped_column(Text, nullable=False)
     code_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     device_binding_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story bea25062(§17d-1 BLOCKER 2): 이 코드 발급의 근거가 된 원본 Firebase ID token의
+    # auth_time — created_at(코드 발급 시각)과 다르다. cutover 재검증은 항상 이 값을 기준으로
+    # 한다(revoke 이후 예전 ID token으로 새 코드를 발급받는 우회 차단).
+    auth_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

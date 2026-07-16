@@ -224,13 +224,38 @@ async def consume_native_bootstrap(
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not eligible for Firebase session")
 
-    # 산티아고 #2202 3차 재검토 orphan finding(story bea25062로 종결): 코드 발급 후 45초
-    # 이내 revoke가 발생해도(user-wide Firebase revoke는 이미 발급된 custom-token 재생성
-    # 경로를 자동 차단하지 않음) 코드 자체는 아직 안 만료됐으면 여기까지 통과해버렸다.
-    # consumed.created_at(코드 발급 시각)을 cutover epoch와 비교해 발급 이후 revoke가
-    # 있었으면 거부 — §17d-1과 동일 기준, native-bootstrap 소비 시점에 재적용.
-    if is_before_cutover(migration.auth_valid_after, consumed.created_at):
+    # 산티아고 #2202 3차 재검토 orphan finding + BLOCKER 2 시정(story bea25062·2026-07-16):
+    # 이전엔 consumed.created_at(코드 발급 시각)을 cutover epoch와 비교했는데, revoke 이후에도
+    # 예전(pre-cutover) Firebase ID token으로 여전히 새 코드를 "발급"받을 수 있었다(당시 issue
+    # 엔드포인트가 cutover를 안 봤다) — created_at은 revoke보다 늦지만 그 코드의 근거가 된
+    # 실제 인증(auth_time)은 revoke 이전이라 우회가 가능했다. 이제 issue 엔드포인트도 발급
+    # 시점에 cutover를 검사하지만(방어 심화), 여기 consume 재검증은 항상 원본 auth_time
+    # 기준으로 다시 본다 — 발급~소비 사이(최대 45초)에 새로 revoke가 발생했을 수 있어서다.
+    # auth_time이 없으면(데이터 무결성 문제) fail-closed.
+    if consumed.auth_time is None:
+        logger.warning("auth.native_bootstrap.consume rejected reason=missing_auth_time")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
+
+    if is_before_cutover(migration.auth_valid_after, consumed.auth_time):
         logger.warning("auth.native_bootstrap.consume rejected reason=revoked_after_issuance")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
+
+    # 산티아고 RED 조건 ⑤(consume/mint 중간 revoke TOCTOU): 위 검사와 실제 mint(Firebase
+    # 네트워크 왕복 포함) 사이에도 revoke가 끼어들 수 있다 — mint 직전에 migration을 다시
+    # 읽어 동일 기준(state+원본 auth_time)으로 재확인해 창을 최대한 좁힌다. 별도 revoke
+    # 트랜잭션과 이 요청 사이의 완전한 원자성은 분산 락 없이는 불가능하지만, 재확인 시점을
+    # mint 직전까지 당겨 잔여 창을 실질적으로 최소화한다.
+    # ⚠️자체 발견: `Session.get()`은 동일 세션의 identity map에 이미 로드된 행이면 SQL을
+    # 아예 다시 안 날리고 캐시된 in-memory 객체를 그대로 반환한다(문서화된 기본 동작) — 위
+    # 첫 `migration` 조회와 같은 PK라 `populate_existing=True` 없인 이 재확인이 완전히
+    # 무력한 no-op이 된다(재조회처럼 보이지만 실제론 DB를 안 건드림). 반드시 강제 재조회.
+    migration_at_mint = await db.get(AuthMigration, consumed.user_id, populate_existing=True)
+    if (
+        migration_at_mint is None
+        or migration_at_mint.state not in ("provisioning", "firebase")
+        or is_before_cutover(migration_at_mint.auth_valid_after, consumed.auth_time)
+    ):
+        logger.warning("auth.native_bootstrap.consume rejected reason=revoked_before_mint")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
 
     valid_duration_seconds = 5 * 24 * 60 * 60

@@ -18,79 +18,31 @@ defense-in-depth" — 순서가 중요하다. 로컬 auth_valid_after 기록+leg
 재시도(Firebase 쪽 user-wide revoke가 끝내 실패해 남아있는 상태를 감지/재시도)는 Phase 4
 대량 cutover 운영 도구(Story B) 스코프다.
 
-⚠️**성능 트레이드오프(자체 발견, Santiago 리뷰에서 판단 필요)**: `_reject_if_before_cutover`가
-매 legacy/Firebase 요청마다 DB를 직접 조회하면, revoke가 단 한 번도 없는 정상 상태(오늘의
-현실 — 사용자 전원)에서도 **인증된 모든 요청에 DB 왕복 1회가 영구히 추가**된다(원래 legacy
-JWT 검증은 서명/exp만 보고 DB를 전혀 안 건드렸다). `check_any_cutover_epoch_exists()`로
-"지금까지 단 한 명이라도 revoke된 적 있는가"를 프로세스 전역 짧은 캐시(기본 30초)로 먼저
-확인해 — **없으면(현재 100% 상태) DB를 아예 안 건드리고 즉시 통과**, 있으면(실제 보안
-이벤트 발생 후) 그때부터 사용자별 정밀 검사로 전환한다. `revoke_user_sessions()` 호출
-즉시 같은 프로세스의 캐시는 True로 갱신되지만, **다른 Cloud Run 인스턴스는 캐시 TTL(최대
-30초)까지 갱신이 늦을 수 있다** — 이는 §17d-1이 요구하는 "즉시" fail-closed보다 느슨한
-근사치다. 다만 legacy refresh_tokens 일괄 revoke는 이 캐시와 무관하게 즉시 커밋되므로
-"revoke된 사용자가 신규 refresh는 절대 못 받는다"는 이미 즉시 보장되고, 이 캐시가 관장하는
-건 "이미 발급된, 아직 안 만료된 access token(최대 60분)"의 즉시성뿐이다 — 캐시 없는 현재
-설계(access token은 revoke 개념 자체가 아예 없음, doc H2 finding)보다는 명백히 개선.
+⚠️**HEAD 98d65136 RED 포워딩(산티아고·2026-07-16) BLOCKER 1 시정**: 최초 구현은 여기에
+프로세스-전역 30초 negative existence-cache를 뒀다("revoke가 한 번도 없으면 DB 무접촉") —
+산티아고 직접 probe로 (a) 다른 Cloud Run 인스턴스는 revoke 후 최대 30초까지 캐시가 갱신 안
+돼 이미 발급된 pre-cutover 토큰이 통과하고 (b) 콜드 스타트/캐시 만료 중 DB 조회 실패 시
+기본값 False를 반환해 **fail-open**(§17d-1이 요구하는 "즉시 local fail-closed authority"의
+정면 위반)임을 실증했다. **캐시를 완전히 제거**한다 — `_reject_if_before_cutover`는 매
+legacy/Firebase/SSE 요청마다 `AuthMigration`을 PK(user_id) 인덱스 조회로 직접 확인하고,
+DB 조회 자체가 실패하면 예외를 그대로 전파해(auth 요청 실패) 절대 "허용"으로 떨어지지
+않는다. 매 인증 요청에 DB 왕복 1회가 영구히 추가되는 성능 트레이드오프를 감수한다 —
+산티아고가 명시적으로 이 최적화를 기각(공유 authoritative 캐시 없인 process-local TTL
+불가 판정).
 """
 from __future__ import annotations
 
 import logging
-import time
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import func, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.auth_identity import AuthMigration
 from app.models.user import RefreshToken
 
 logger = logging.getLogger(__name__)
-
-_ANY_CUTOVER_CACHE_SECONDS = 30
-_any_cutover_epoch_exists: bool = False
-_any_cutover_cache_expires_at: float = 0.0
-
-
-def _reset_cutover_existence_cache_for_tests() -> None:
-    """테스트 전용 — 프로세스 전역 캐시가 테스트 간 상태를 누출하지 않도록 초기화."""
-    global _any_cutover_epoch_exists, _any_cutover_cache_expires_at
-    _any_cutover_epoch_exists = False
-    _any_cutover_cache_expires_at = 0.0
-
-
-async def check_any_cutover_epoch_exists() -> bool:
-    """전역 짧은-TTL 캐시 — auth_migrations에 auth_valid_after가 채워진 행이 하나라도
-    있는지. False(현재 사실상 항상 이 값)면 호출부가 사용자별 DB 조회를 완전히 생략할 수
-    있다. 요청의 db 세션을 재사용하지 않고 자체 단명 세션을 연다(캐시 값은 어느 요청과도
-    무관한 프로세스 전역 상태라 특정 요청의 db 객체에 의존하면 안 됨 — mock/None db로
-    호출되는 기존 단위 테스트들과도 독립적이어야 하는 이유)."""
-    global _any_cutover_epoch_exists, _any_cutover_cache_expires_at
-    now = time.time()
-    if _any_cutover_cache_expires_at > now:
-        return _any_cutover_epoch_exists
-
-    from app.core.database import async_session_factory
-
-    try:
-        async with async_session_factory() as db:
-            exists = (
-                await db.execute(
-                    select(AuthMigration.user_id).where(AuthMigration.auth_valid_after.is_not(None)).limit(1)
-                )
-            ).scalar_one_or_none() is not None
-    except Exception:
-        # DB 접속 불가 시 이 존재-확인 자체를 실패로 raise하면, 원래 DB를 전혀 안 건드리던
-        # legacy JWT 검증 경로가 이 최적화 캐시 하나 때문에 죽는다(자체 발견 — mock/None db
-        # 단위 테스트뿐 아니라 실 배포에서도 DB 일시 장애가 무관한 인증 전체를 막으면 안 됨).
-        # 직전 캐시값을 그대로 유지하고(콜드 스타트면 기본 False=과거 100% 동작과 동일) 짧게
-        # 재시도하도록 만료시각만 소폭 미룬다.
-        logger.warning("auth.cutover.check_any_cutover_epoch_exists db_unavailable_fallback")
-        _any_cutover_cache_expires_at = now + _ANY_CUTOVER_CACHE_SECONDS
-        return _any_cutover_epoch_exists
-
-    _any_cutover_epoch_exists = exists
-    _any_cutover_cache_expires_at = now + _ANY_CUTOVER_CACHE_SECONDS
-    return exists
 
 
 def is_before_cutover(auth_valid_after: datetime | None, reference_time: datetime) -> bool:
@@ -112,18 +64,25 @@ async def revoke_user_sessions(db: AsyncSession, user_id, *, firebase_uid: str |
     """단일 사용자 revoke primitive(§17d-1 ①②③, 대량 코호트 버전 아님 — Story B).
 
     1. auth_valid_after=now() 기록(행 없으면 생성) — **먼저 커밋**, 이게 즉시 fail-closed 통제.
+       ⚠️산티아고 RED 조건 ⑦: ORM `get()`+조건부 mutate는 (a) 동시 두 revoke가 모두 "행 없음"을
+       보고 동시 insert 시도하는 race, (b) 늦게 커밋된 오래된 epoch가 이미 기록된 더 최신
+       epoch를 덮어쓰는 monotonicity 위반 둘 다에 취약하다. 단일 원자 UPSERT
+       (`INSERT...ON CONFLICT(user_id) DO UPDATE SET auth_valid_after=GREATEST(...)`)로 교체 —
+       PG가 충돌 시 row-level lock으로 직렬화하고, GREATEST가 "이 revoke가 기존 epoch보다
+       늦더라도 절대 앞당겨지지 않는다"를 보장한다(NULL은 GREATEST가 무시 — 최초 삽입도 그대로
+       동작).
     2. 해당 사용자 live legacy refresh_tokens 일괄 revoked_at=now().
     3. (커밋 후, best-effort) Firebase user-wide revoke — 실패해도 1·2가 이미 효력이 있어
        접근 허용으로 이어지지 않는다.
     """
     epoch = datetime.now(timezone.utc)
 
-    migration = await db.get(AuthMigration, user_id)
-    if migration is None:
-        migration = AuthMigration(user_id=user_id, state="legacy", auth_valid_after=epoch)
-        db.add(migration)
-    else:
-        migration.auth_valid_after = epoch
+    upsert = pg_insert(AuthMigration).values(user_id=user_id, state="legacy", auth_valid_after=epoch)
+    upsert = upsert.on_conflict_do_update(
+        index_elements=[AuthMigration.user_id],
+        set_={"auth_valid_after": func.greatest(AuthMigration.auth_valid_after, upsert.excluded.auth_valid_after)},
+    ).returning(AuthMigration.auth_valid_after)
+    stored_epoch = (await db.execute(upsert)).scalar_one()
 
     await db.execute(
         update(RefreshToken)
@@ -132,12 +91,6 @@ async def revoke_user_sessions(db: AsyncSession, user_id, *, firebase_uid: str |
     )
     await db.commit()
     logger.info("auth.cutover.revoke_user_sessions local_committed")
-
-    # 이 프로세스는 즉시 정밀검사 모드로 전환(다른 인스턴스는 캐시 TTL까지 지연 — 모듈
-    # 상단 docstring의 성능/즉시성 트레이드오프 설명 참조).
-    global _any_cutover_epoch_exists, _any_cutover_cache_expires_at
-    _any_cutover_epoch_exists = True
-    _any_cutover_cache_expires_at = time.time() + _ANY_CUTOVER_CACHE_SECONDS
 
     if firebase_uid:
         from app.core.config import settings
@@ -150,4 +103,7 @@ async def revoke_user_sessions(db: AsyncSession, user_id, *, firebase_uid: str |
         except Exception:
             logger.warning("auth.cutover.revoke_user_sessions firebase_revoke_exception")
 
-    return epoch
+    # stored_epoch(DB의 최종 authoritative 값)를 반환 — 동시 revoke 중 이 호출보다 늦게
+    # 커밋된 더 최신 epoch가 이미 있었다면 GREATEST가 그걸 보존했을 수 있어 epoch와 다를
+    # 수 있다(monotonicity 보장의 직접적 증거).
+    return stored_epoch

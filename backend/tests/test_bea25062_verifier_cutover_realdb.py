@@ -34,13 +34,10 @@ def anyio_backend():
 
 @pytest.fixture(autouse=True)
 async def _reset_caches_and_dispose():
-    from app.services import auth_cutover as ac
     from app.services import firebase_verifier as fv
     fv._reset_key_cache_for_tests()
-    ac._reset_cutover_existence_cache_for_tests()
     yield
     fv._reset_key_cache_for_tests()
-    ac._reset_cutover_existence_cache_for_tests()
     from app.core.database import engine as _global_engine
     await _global_engine.dispose()
 
@@ -283,5 +280,81 @@ async def test_sse_streaming_legacy_rejected_when_before_cutover(monkeypatch):
         with pytest.raises(HTTPException) as exc_info:
             await auth_module.get_current_user_streaming(credentials=credentials, x_agent_api_key=None)
         assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+# ─── 산티아고 RED 포워딩(2026-07-16) GREEN 조건 real-DB 회귀 ─────────────────
+
+@pytest.mark.anyio
+async def test_legacy_token_fails_closed_when_migration_lookup_raises(monkeypatch):
+    """조건 ①: 캐시 제거 후 DB 조회 자체가 실패하면(콜드 스타트/장애) 예외가 그대로
+    전파돼야 한다 — 절대 "허용"으로 떨어지면 안 된다(이전 캐시의 fail-open 반대편 증명)."""
+    from app.core.security import create_access_token
+    from app.dependencies.auth import get_current_user
+
+    user_id = uuid.uuid4()
+    token = create_access_token(str(user_id))
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    class _ExplodingDb:
+        async def get(self, *a, **kw):
+            raise ConnectionError("simulated DB outage")
+
+    with pytest.raises(ConnectionError):
+        await get_current_user(
+            credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=_ExplodingDb()
+        )
+
+
+@pytest.mark.anyio
+async def test_legacy_token_rejected_when_state_reset_required_even_without_epoch(monkeypatch):
+    """조건 ②: auth_valid_after가 NULL(또는 부분 커밋)이어도 state='reset_required'면 그
+    자체로 거부 — epoch만 보는 낡은 계약으로는 이 사용자가 그냥 통과했다."""
+    from app.core.security import create_access_token
+    from app.dependencies.auth import get_current_user
+    from app.models.auth_identity import AuthMigration
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id = await _seed_legacy_user(s)
+            s.add(AuthMigration(user_id=user_id, state="reset_required", auth_valid_after=None))
+            await s.commit()
+
+        token = create_access_token(str(user_id))
+        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=s)
+            assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_legacy_token_rejected_when_iat_missing():
+    """조건 ③: iat 클레임이 없으면(위조/손상) fail-closed — 이전엔 "제약 없음"으로 통과."""
+    from app.dependencies.auth import _reject_if_before_cutover
+    from unittest.mock import AsyncMock
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _reject_if_before_cutover(str(uuid.uuid4()), None, AsyncMock())
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_reject_if_before_cutover_accepts_uuid_object_user_id(monkeypatch):
+    """까심 결함 A 회귀 가드: user_id가 이미 uuid.UUID 객체여도 ValueError 없이 정상 동작."""
+    from app.dependencies.auth import _reject_if_before_cutover
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id = await _seed_legacy_user(s)
+        async with Session() as s:
+            # user_id를 str이 아니라 uuid.UUID 객체 그대로 전달 — ValueError 없이 통과해야 함
+            # (AuthMigration 행이 없으니 제약 없음 → None 반환, 예외 없음).
+            await _reject_if_before_cutover(user_id, int(datetime.now(timezone.utc).timestamp()), s)
     finally:
         await engine.dispose()
