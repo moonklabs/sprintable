@@ -37,6 +37,15 @@ def test_destructive_detection():
     assert not is_destructive("sprintable_list_stories")
 
 
+def test_standup_missing_grouped_with_standup_not_analytics():
+    """story 205e6831: standup_missing이 analytics 키워드 그룹에 잘못 묶여 있었음 — scrum-master
+    role_template처럼 'standup' scope는 있지만 'analytics'는 없는 키가 자기 핵심 업무 도구인
+    standup_missing을 호출하지 못하던 실버그. standup 그룹으로 재분류."""
+    assert tool_group("sprintable_standup_missing") == "standup"
+    assert is_tool_allowed("sprintable_standup_missing", ["standup"])
+    assert not is_tool_allowed("sprintable_standup_missing", ["analytics"])
+
+
 def test_lock_unlock_reclassified_non_destructive():
     """S17: lock_files/unlock_files 는 file_locks.py 확인 결과 org/project-scoped advisory 조율
     도구(데이터 삭제/변경 아님) — is_destructive/admin 그룹 오분류를 근본수정. 진짜 파괴 작업
