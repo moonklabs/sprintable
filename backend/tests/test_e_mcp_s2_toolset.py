@@ -38,12 +38,11 @@ def test_destructive_detection():
 
 
 def test_standup_missing_grouped_with_standup_not_analytics():
-    """story 205e6831: standup_missing이 analytics 키워드 그룹에 잘못 묶여 있었음 — scrum-master
-    role_template처럼 'standup' scope는 있지만 'analytics'는 없는 키가 자기 핵심 업무 도구인
-    standup_missing을 호출하지 못하던 실버그. standup 그룹으로 재분류."""
+    """story 205e6831: standup_missing이 analytics 키워드 그룹에 잘못 묶여 있었음(피커 라벨
+    오분류) — standup 그룹으로 재분류. 이후 스탠드업 5종이 core(_ALWAYS_ALLOWED)로 편입돼
+    is_tool_allowed는 scope 무관 항상 True가 됐지만(별도 테스트), tool_group()의 분류 자체는
+    여전히 "analytics"가 아닌 "standup"이어야 한다(피커 UI 라벨 정합)."""
     assert tool_group("sprintable_standup_missing") == "standup"
-    assert is_tool_allowed("sprintable_standup_missing", ["standup"])
-    assert not is_tool_allowed("sprintable_standup_missing", ["analytics"])
 
 
 def test_lock_unlock_reclassified_non_destructive():

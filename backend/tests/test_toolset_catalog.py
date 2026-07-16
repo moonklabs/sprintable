@@ -30,8 +30,10 @@ def test_catalog_structure_and_contract_fields():
     cat = build_toolset_catalog()
     assert set(cat.keys()) == {"groups"}
     groups = cat["groups"]
-    # core + 17 비파괴(story b4027b2e: canvas 그룹 추가) + admin = 19
-    assert len(groups) == 19
+    # core + 16 비파괴(story b4027b2e: canvas 그룹 추가·story 205e6831: standup이 core로 전량
+    # 흡수돼 카탈로그 그룹 목록에서 제거 — _GROUP_KEYWORDS/ALL_GROUPS엔 여전히 존재, 여긴 picker
+    # 표시 목록만) + admin = 18
+    assert len(groups) == 18
     for g in groups:
         assert set(g.keys()) == _CONTRACT_FIELDS, f"{g['key']} 필드 계약 불일치"
         assert isinstance(g["key"], str) and g["key"]
@@ -39,8 +41,8 @@ def test_catalog_structure_and_contract_fields():
         assert isinstance(g["is_core"], bool) and isinstance(g["is_destructive"], bool)
         assert isinstance(g["order"], int)
         assert g["tools"], f"{g['key']} 빈 그룹 — 모든 그룹은 멤버 보유"
-    # order = 배열 순서와 일치(0..18 단조)
-    assert [g["order"] for g in groups] == list(range(19))
+    # order = 배열 순서와 일치(0..17 단조)
+    assert [g["order"] for g in groups] == list(range(18))
 
 
 def test_core_first_admin_last_flags():
@@ -54,10 +56,13 @@ def test_core_first_admin_last_flags():
 
 def test_group_keys_match_mcp_toolset_ssot():
     keys = [g["key"] for g in build_toolset_catalog()["groups"]]
-    # core + admin + ALL_GROUPS 비-core = 전체
+    # core + admin + ALL_GROUPS 비-core = 전체 — story 205e6831 예외: "standup"은 ALL_GROUPS엔
+    # 남아있지만(pm/scrum-master role_template.default_tool_groups 하위호환용 literal 토큰,
+    # validate_tool_groups unknown-group 방지) 스탠드업 5종 전부가 core로 흡수돼 카탈로그엔
+    # 빈 그룹으로 안 나타난다("standup" != core 그러나 catalog엔 미표시).
     assert "core" in keys and "admin" in keys
     non_core_admin = {k for k in keys if k not in ("core", "admin")}
-    assert non_core_admin == {g for g in ALL_GROUPS if g != "core"}  # 16 비파괴 그룹
+    assert non_core_admin == {g for g in ALL_GROUPS if g not in ("core", "standup")}
 
 
 def test_every_tool_covered_exactly_once():
