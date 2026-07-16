@@ -1,7 +1,7 @@
 import { proxyToFastapiWrapped } from '@/lib/fastapi-proxy';
 
 /**
- * POST /api/epics/steer-dispatch — STEER v2 조타 커밋(story 2628a53b·BE #2086).
+ * POST /api/goals/steer-dispatch — STEER v2 조타 커밋(story 2628a53b·BE #2086).
  * 드래그(/epics/bulk)는 무이벤트 초안 저장이고, 이 명시적 커밋에서만 epic.reordered 1회 발화한다.
  * payload={items:[{id,position}](커밋 스냅샷), recipient_member_ids:[uuid](필수)}.
  *

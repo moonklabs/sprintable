@@ -132,7 +132,7 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
             <RoadmapWaypoints t={t} />
             <div className="flex flex-col items-center gap-1.5">
               <Button size="sm" asChild>
-                <Link href="/epics">{t('roadmapEmptyCta')}</Link>
+                <Link href="/goals">{t('roadmapEmptyCta')}</Link>
               </Button>
               <p className="text-xs text-muted-foreground">{t('roadmapEmptyAiHint')}</p>
             </div>

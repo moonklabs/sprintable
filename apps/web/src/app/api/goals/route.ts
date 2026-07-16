@@ -1,11 +1,11 @@
 import { createEpicSchema } from '@sprintable/shared';
 
-import { EpicService, type CreateEpicInput } from '@/services/epic';
+import { GoalService, type CreateEpicInput } from '@/services/goal';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
-import { createEpicRepository } from '@/lib/storage/factory';
+import { createGoalRepository } from '@/lib/storage/factory';
 
 export async function GET(request: Request) {
   try {
@@ -23,8 +23,8 @@ export async function GET(request: Request) {
       limit: searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined,
       cursor: positionMode ? undefined : searchParams.get('cursor'),
     }, { defaultLimit: 50, maxLimit: 100 });
-    const repo = await createEpicRepository();
-    const service = new EpicService(repo);
+    const repo = await createGoalRepository();
+    const service = new GoalService(repo);
     // 569f5316: 백엔드 GET /api/v2/epics 가 cursor/limit/order_by + total(X-Total-Count)을 지원하므로
     // in-memory 페이징(1000+ silent-truncation 유발) 대신 BE에 위임한다. over-fetch(+1)로 hasMore 판단.
     const epics = await service.list({
@@ -65,8 +65,8 @@ export async function POST(request: Request) {
     if (!body.org_id) body.org_id = me.org_id;
     const parsed = createEpicSchema.safeParse(body);
     if (!parsed.success) return apiError('VALIDATION_ERROR', JSON.stringify(parsed.error.issues), 400);
-    const repo = await createEpicRepository();
-    const service = new EpicService(repo);
+    const repo = await createGoalRepository();
+    const service = new GoalService(repo);
     const epic = await service.create(parsed.data as unknown as CreateEpicInput);
     return apiSuccess(epic, undefined, 201);
   } catch (err: unknown) { return handleApiError(err); }

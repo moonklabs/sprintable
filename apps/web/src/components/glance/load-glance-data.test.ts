@@ -7,7 +7,7 @@ function jsonResponse(data: unknown): Response {
 
 function mockEmptyFetch() {
   return vi.fn(async (url: string) => {
-    if (url.startsWith('/api/epics')) return jsonResponse([]);
+    if (url.startsWith('/api/goals')) return jsonResponse([]);
     if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
     if (url.startsWith('/api/team-members')) return jsonResponse([]);
     // 실 BE shape(activity_logs.py ActivityLogListResponse) — flat 배열 아님. 이 mock이 예전엔
@@ -37,7 +37,7 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
 
   it('fetches + unwraps the hero envelope for the focal story of the active epic (form {data:{…}})', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.startsWith('/api/epics')) return jsonResponse([{ id: 'e1', title: 'Epic One', status: 'active', created_at: '2026-07-01T00:00:00Z' }]);
+      if (url.startsWith('/api/goals')) return jsonResponse([{ id: 'e1', title: 'Epic One', status: 'active', created_at: '2026-07-01T00:00:00Z' }]);
       if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
       if (url.startsWith('/api/team-members')) return jsonResponse([]);
       if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
@@ -62,7 +62,7 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
 
   it('leaves heroEnvelope null when the hero fetch fails (not-ok) — minimal render fallback, no throw', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.startsWith('/api/epics')) return jsonResponse([{ id: 'e1', title: 'Epic One', status: 'active', created_at: '2026-07-01T00:00:00Z' }]);
+      if (url.startsWith('/api/goals')) return jsonResponse([{ id: 'e1', title: 'Epic One', status: 'active', created_at: '2026-07-01T00:00:00Z' }]);
       if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
       if (url.startsWith('/api/team-members')) return jsonResponse([]);
       if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
@@ -78,7 +78,7 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
 
   it('unwraps the attention envelope {data:{items}} into attentionSignals — 형상 불일치 crash 없이 실신호 배선', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.startsWith('/api/epics')) return jsonResponse([]);
+      if (url.startsWith('/api/goals')) return jsonResponse([]);
       if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
       if (url.startsWith('/api/team-members')) return jsonResponse([]);
       if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
@@ -98,7 +98,7 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
 
   it('degrades attentionSignals to [] when the attention fetch fails (not-ok) without throwing', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.startsWith('/api/epics')) return jsonResponse([]);
+      if (url.startsWith('/api/goals')) return jsonResponse([]);
       if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
       if (url.startsWith('/api/team-members')) return jsonResponse([]);
       if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
@@ -111,7 +111,7 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
 
   it('does not throw when activity-logs returns the real BE envelope shape {items,total,limit,offset} (not a flat array) — 로드맵 blank 진짜 근본 회귀가드', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.startsWith('/api/epics')) return jsonResponse([]);
+      if (url.startsWith('/api/goals')) return jsonResponse([]);
       if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
       if (url.startsWith('/api/team-members')) return jsonResponse([]);
       if (url.startsWith('/api/activity-logs')) {
@@ -129,7 +129,7 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
 
   it('rejects when the epics fetch fails (essential source — failure must not be mistaken for "0 epics")', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.startsWith('/api/epics')) return { ok: false, json: async () => ({}) } as Response;
+      if (url.startsWith('/api/goals')) return { ok: false, json: async () => ({}) } as Response;
       if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
       return jsonResponse([]);
     }));

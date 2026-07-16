@@ -46,7 +46,7 @@ export interface EmbedCardData {
 
 const ENTITY_API: Record<string, (id: string) => string> = {
   story: (id) => `/api/stories/${id}`,
-  epic: (id) => `/api/epics/${id}`,
+  epic: (id) => `/api/goals/${id}`,
   doc: (id) => `/api/docs/${id}`,
   asset: (id) => `/api/assets/${id}`,
 };

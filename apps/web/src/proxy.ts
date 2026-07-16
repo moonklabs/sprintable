@@ -131,6 +131,29 @@ async function redirectLegacyResourcePath(
   return NextResponse.redirect(url, 301);
 }
 
+/**
+ * story 8fc51517(계층 리네이밍 B1, doc hierarchy-renaming-url-implementation-design §ⓑ) —
+ * `/{ws}/{proj}/{resource}` 안의 **경로 리터럴**이 신 용어로 바뀔 때(에픽→목표 등)의 301.
+ * `redirectLegacyResourcePath`(위)와 다른 관심사 — 저건 ws/proj 세그먼트 자체가 없던 옛 flat
+ * URL을 org/project 재조회로 채워 넣는 것이고, 이건 ws/proj가 **이미 URL에 있으므로** 3번째
+ * 세그먼트(리소스명)만 신 이름으로 교체하면 된다(org/project 재조회 fetch 불요, 훨씬 가벼움).
+ */
+const RENAMED_RESOURCES: Record<string, string> = {
+  epics: 'goals',
+};
+
+function redirectRenamedResourcePath(request: NextRequest, pathname: string): NextResponse | null {
+  const segments = pathname.split('/').filter(Boolean);
+  const resourceName = segments[2]; // [ws]/[proj]/{resourceName}/...
+  if (!resourceName) return null;
+  const newName = RENAMED_RESOURCES[resourceName];
+  if (!newName) return null;
+  const url = request.nextUrl.clone();
+  segments[2] = newName;
+  url.pathname = '/' + segments.join('/');
+  return NextResponse.redirect(url, 301);
+}
+
 // bf305fa0 멀티계정 — active 포인터(switch가 set). 없으면 단일계정(back-compat).
 const ACTIVE_ACCOUNT_COOKIE = 'sp_active_account';
 
@@ -341,6 +364,11 @@ export async function proxy(request: NextRequest) {
   // 한계=route-resolve.ts 헤더 참고).
   const legacyResourceRedirect = await redirectLegacyResourcePath(request, pathname, accessToken);
   if (legacyResourceRedirect) return legacyResourceRedirect;
+
+  // story 8fc51517 — [ws]/[proj]/{resource} 경로 리터럴 rename(에픽→목표 등). org/project는
+  // 이미 URL에 있으므로 fetch 없이 순수 문자열 치환(legacyResourceRedirect보다 가벼움).
+  const renamedResourceRedirect = redirectRenamedResourcePath(request, pathname);
+  if (renamedResourceRedirect) return renamedResourceRedirect;
 
   // story a539c649(S-route-project) S1 — path 위계 resolve. fwdHeaders 를 response 구성 *전에*
   // 채워야 downstream RSC/route handler 가 x-resolved-* 를 실제로 읽을 수 있다(x-pathname 과

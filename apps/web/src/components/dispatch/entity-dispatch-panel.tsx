@@ -78,7 +78,7 @@ export function EntityDispatchPanel({
       // 84f57f97 fix②: dispatch 前 assignee를 전 entity type 영속화(이전엔 story만 스킵→미영속→
       // BE dispatch가 담당자 못 봐 core flow 막힘). story=assignee_ids 배열·doc/epic=assignee_id.
       const patchPath = entityType === 'doc' ? `/api/docs/${entityId}`
-        : entityType === 'epic' ? `/api/epics/${entityId}`
+        : entityType === 'epic' ? `/api/goals/${entityId}`
         : `/api/stories/${entityId}`;
       const patchBody = entityType === 'story'
         ? { assignee_ids: [assigneeId] }

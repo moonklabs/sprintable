@@ -1,11 +1,11 @@
-import { EpicService, type EpicPositionItem } from '@/services/epic';
+import { GoalService, type EpicPositionItem } from '@/services/goal';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
 import { getAuthContext } from '@/lib/auth-helpers';
-import { createEpicRepository } from '@/lib/storage/factory';
+import { createGoalRepository } from '@/lib/storage/factory';
 
 /**
- * PATCH /api/epics/bulk — 로드맵 조타 재정렬(wedge #2·story 2258ccd6). 큐레이션한 에픽만
+ * PATCH /api/goals/bulk — 로드맵 조타 재정렬(wedge #2·story 2258ccd6). 큐레이션한 에픽만
  * position 세팅(백필0)해 BE `PATCH /api/v2/epics/bulk`로 실 persist(낙관 아님). 인가(org/project·
  * SEC-S8 W/W2)는 BE 단일 소스라 FE는 thin proxy — 형상만 검증하고 items를 그대로 포워드한다.
  */
@@ -43,8 +43,8 @@ export async function PATCH(request: Request) {
       items.push({ id, position });
     }
 
-    const repo = await createEpicRepository();
-    const service = new EpicService(repo);
+    const repo = await createGoalRepository();
+    const service = new GoalService(repo);
     const updated = await service.bulkUpdatePositions(items);
     return apiSuccess(updated);
   } catch (err: unknown) { return handleApiError(err); }

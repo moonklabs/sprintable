@@ -36,7 +36,7 @@ export function EpicHypothesisDeclarationSection({
   declarations: HypothesisDeclarationValue[];
   onChange: (v: HypothesisDeclarationValue[]) => void;
 }) {
-  const t = useTranslations('epics');
+  const t = useTranslations('goals');
   const [linkableHypotheses, setLinkableHypotheses] = useState<Hypothesis[] | null>(null);
 
   useEffect(() => {

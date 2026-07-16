@@ -35,7 +35,7 @@ export function HypothesisDeclarationCard({
   onRemove?: () => void;
   linkableHypotheses: Hypothesis[] | null;
 }) {
-  const t = useTranslations('epics');
+  const t = useTranslations('goals');
   const th = useTranslations('hypotheses');
   const [linkSearch, setLinkSearch] = useState('');
   const [drafting, setDrafting] = useState(false);

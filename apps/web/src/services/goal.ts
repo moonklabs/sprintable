@@ -2,7 +2,7 @@ import type { IEpicRepository, CreateEpicInput, UpdateEpicInput, EpicPositionIte
 export type { CreateEpicInput, UpdateEpicInput, EpicPositionItem } from '@sprintable/core-storage';
 import { validateStatusTransition } from '@/lib/epic-permissions';
 
-export class EpicService {
+export class GoalService {
   constructor(private readonly repository: IEpicRepository) {}
 
   async create(input: CreateEpicInput) {
