@@ -70,7 +70,7 @@ interface AuthMeResponse {
  * 이 재검증에서 실제 BE 계약과 어긋남이 확인되어 정정 — 플래그/발급로직 부재로 오늘은
  * 미도달이라 무해했지만 활성화됐다면 항상 401로 실패했을 것이다.)
  */
-const resolveFirebaseServerSession = cache(async (sessionCookie: string): Promise<ServerSession | null> => {
+export const resolveFirebaseServerSession = cache(async (sessionCookie: string): Promise<ServerSession | null> => {
   const projectId = process.env['NEXT_PUBLIC_FIREBASE_PROJECT_ID'] ?? '';
   if (!projectId) return null;
 
