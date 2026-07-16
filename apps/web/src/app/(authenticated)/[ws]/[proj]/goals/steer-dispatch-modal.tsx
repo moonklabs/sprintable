@@ -45,12 +45,12 @@ function readRemembered(projectId: string): string[] {
 
 /**
  * STEER v2 조타 커밋 모달(story 2628a53b). 드래그는 조용한 초안, 이 "보내기"에서만 지정 수신자에게
- * 커밋을 전달한다(POST /api/epics/steer-dispatch → epic.reordered 1회). 수신자는 프로젝트 에이전트
+ * 커밋을 전달한다(POST /api/goals/steer-dispatch → epic.reordered 1회). 수신자는 프로젝트 에이전트
  * 중 인간이 명시(필수). BE엔 기본 수신자가 없으므로(보편 orchestrator 가정 금지) 프리필은 순전히
  * FE 편의 = 마지막 선택 기억. 409(스냅샷 conflict)는 재확認 안내로 구분 처리.
  */
 export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: SteerDispatchModalProps) {
-  const t = useTranslations('epics');
+  const t = useTranslations('goals');
   const [agents, setAgents] = useState<AgentMember[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
@@ -95,7 +95,7 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
     setSending(true);
     setError(null);
     try {
-      const res = await fetch('/api/epics/steer-dispatch', {
+      const res = await fetch('/api/goals/steer-dispatch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items, recipient_member_ids: [...selected] }),

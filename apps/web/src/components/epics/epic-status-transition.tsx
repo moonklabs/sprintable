@@ -8,7 +8,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 /**
  * E-DG RC#2 ⓶ — epic status-transition 컨트롤(상세 헤더). status badge + 유효 next-state만 dropdown
- * → POST /epics/{id}/transition {status}. FSM 유효 전이만 노출(invalid 미노출·"보이는=실행가능"·422 차단).
+ * → PATCH /api/goals/{id} {status}. FSM 유효 전이만 노출(invalid 미노출·"보이는=실행가능"·422 차단).
+ * (8fc51517 fix: 존재한 적 없는 POST .../transition 대신 실재하는 PATCH 엔드포인트로 교정 — 클릭해도
+ * 조용히 실패하던 사전 버그, 이번 rename sweep 중 발견 즉시 수정.)
  * ⭐draft→active·active→done은 human/aggregate-gate(overlay)라 enforcing 시 gate 생성·status 유지 →
  * 낙관적 반영 X·반환 status가 target과 다르면(미변경) "승인 대기"(gate pending) 표시(PO note②·S24 gate 어휘).
  * BE _EPIC_VALID_TRANSITIONS 미러. 신규 토큰 0(ChevronDown/ShieldCheck/Clock).
@@ -43,7 +45,7 @@ export function EpicStatusTransition({
   status: string;
   onTransitioned: (newStatus: string) => void;
 }) {
-  const t = useTranslations('epics');
+  const t = useTranslations('goals');
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(false); // gate 생성·승인 대기(status 미변경)
 
@@ -53,8 +55,8 @@ export function EpicStatusTransition({
     if (busy) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/epics/${epicId}/transition`, {
-        method: 'POST',
+      const res = await fetch(`/api/goals/${epicId}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: to }),
       });

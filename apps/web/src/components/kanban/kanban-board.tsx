@@ -255,7 +255,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       const [storyResults, sprintsRes, epicsRes, membersRes] = await Promise.all([
         Promise.all(statuses.map((s) => fetchStoriesByStatus(s))),
         fetch(`/api/sprints${sprintParams}`),
-        fetch(`/api/epics?${epicParams.toString()}`),
+        fetch(`/api/goals?${epicParams.toString()}`),
         fetch(`/api/members${memberParams}`),
       ]);
 
@@ -972,7 +972,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               </div>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => router.push(`/${wsSlug}/${projSlug}/epics`)}>
+                <DropdownMenuItem onClick={() => router.push(`/${wsSlug}/${projSlug}/goals`)}>
                   <span className="flex-1 text-xs text-muted-foreground">{t('manageEpics')}</span>
                 </DropdownMenuItem>
               </DropdownMenuGroup>
@@ -1328,7 +1328,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 if (projectId) params.set('project_id', projectId);
                 params.set('limit', '50');
                 params.set('cursor', epicsNextCursor);
-                const res = await fetch(`/api/epics?${params.toString()}`);
+                const res = await fetch(`/api/goals?${params.toString()}`);
                 if (res.ok) {
                   const json = await res.json();
                   setEpics((prev) => [...prev, ...(json.data ?? [])]);

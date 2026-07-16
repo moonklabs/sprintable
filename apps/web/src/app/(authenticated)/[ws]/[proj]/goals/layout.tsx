@@ -1,6 +1,6 @@
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
-import { EpicsRouteProvider } from './epics-context';
+import { GoalsRouteProvider } from './goals-context';
 
 interface EpicsLayoutProps {
   children: React.ReactNode;
@@ -21,8 +21,8 @@ export default async function EpicsLayout({ children, params }: EpicsLayoutProps
   if (!orgId || !projectId) notFound();
 
   return (
-    <EpicsRouteProvider wsSlug={ws} projSlug={proj} projectId={projectId} orgId={orgId}>
+    <GoalsRouteProvider wsSlug={ws} projSlug={proj} projectId={projectId} orgId={orgId}>
       {children}
-    </EpicsRouteProvider>
+    </GoalsRouteProvider>
   );
 }

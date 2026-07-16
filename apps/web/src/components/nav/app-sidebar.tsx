@@ -96,7 +96,7 @@ export function AppSidebar({
   const artifactsLink = resourceLink('artifacts');
   const sprintsLink = resourceLink('sprints');
   const storageLink = resourceLink('storage');
-  const epicsLink = resourceLink('epics');
+  const goalsLink = resourceLink('goals');
   const boardLink = resourceLink('board');
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
@@ -332,12 +332,12 @@ export function AppSidebar({
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  render={<Link href={epicsLink.href} />}
-                  isActive={epicsLink.isActive}
-                  tooltip={t('epics')}
+                  render={<Link href={goalsLink.href} />}
+                  isActive={goalsLink.isActive}
+                  tooltip={t('goals')}
                 >
                   <Layers />
-                  <span>{t('epics')}</span>
+                  <span>{t('goals')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>

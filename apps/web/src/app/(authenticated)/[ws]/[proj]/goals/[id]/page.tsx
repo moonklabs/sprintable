@@ -13,7 +13,7 @@ import {
   DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { useEpicsRoute } from '../epics-context';
+import { useGoalsRoute } from '../goals-context';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
@@ -151,7 +151,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
     if (!title.trim()) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/epics/${epic.id}`, {
+      const res = await fetch(`/api/goals/${epic.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -206,7 +206,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
 export default function EpicDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { wsSlug, projSlug } = useEpicsRoute();
+  const { wsSlug, projSlug } = useGoalsRoute();
   const { toasts, addToast, dismissToast } = useToast();
   const [epic, setEpic] = useState<Epic | null>(null);
   const [loading, setLoading] = useState(true);
@@ -219,13 +219,13 @@ export default function EpicDetailPage() {
     if (!epic) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/epics/${epic.id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/goals/${epic.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
         addToast({ type: 'error', title: json?.error?.message ?? '에픽 삭제에 실패했습니다.' });
         return;
       }
-      router.replace(`/${wsSlug}/${projSlug}/epics`);
+      router.replace(`/${wsSlug}/${projSlug}/goals`);
     } catch {
       addToast({ type: 'error', title: '에픽 삭제에 실패했습니다.' });
     } finally {
@@ -235,14 +235,14 @@ export default function EpicDetailPage() {
   }, [epic, router, addToast, wsSlug, projSlug]);
 
   useEffect(() => {
-    fetch(`/api/epics/${id}`)
+    fetch(`/api/goals/${id}`)
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then((json) => {
         const data = (json as { data: Epic }).data;
         setEpic(data);
         setEpicAssigneeId(data.assignee_id ?? null);
       })
-      .catch(() => router.replace(`/${wsSlug}/${projSlug}/epics`))
+      .catch(() => router.replace(`/${wsSlug}/${projSlug}/goals`))
       .finally(() => setLoading(false));
   }, [id, router, wsSlug, projSlug]);
 
@@ -262,7 +262,7 @@ export default function EpicDetailPage() {
       <TopBarSlot
         title={
           <div className="flex items-center gap-2">
-            <Link href={`/${wsSlug}/${projSlug}/epics`} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <Link href={`/${wsSlug}/${projSlug}/goals`} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
               <ArrowLeft className="h-3.5 w-3.5" />
               에픽 목록
             </Link>

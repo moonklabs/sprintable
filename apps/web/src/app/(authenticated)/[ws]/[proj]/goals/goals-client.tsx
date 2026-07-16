@@ -8,7 +8,7 @@ import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors, cl
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { computeReorderPatch } from '@/lib/epic-steer';
-import { useEpicsRoute } from './epics-context';
+import { useGoalsRoute } from './goals-context';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
@@ -18,7 +18,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 // 목표·여러 스토리가 성과로·visual=선택 그룹hint): 작은 점 3개가 큰 원 하나로 모이는 형태 —
 // 실험실(4노드 원형 사이클)·현황판(3-waypoint 직선)·스프린트(기간bar)와 differentiate. 과설명
 // 금지 — 점+원뿐, 라벨 없음(그룹핑 자체가 메시지).
-function EpicGroupHint() {
+function GoalGroupHint() {
   return (
     <svg viewBox="0 0 48 24" className="size-6 w-12 text-muted-foreground/50" aria-hidden="true">
       <circle cx="10" cy="8" r="2" fill="currentColor" opacity="0.5" />
@@ -61,8 +61,8 @@ const STEER_LIMIT = 100;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
-type EpicPriority = 'critical' | 'high' | 'medium' | 'low';
+type GoalStatus = 'draft' | 'active' | 'done' | 'archived';
+type GoalPriority = 'critical' | 'high' | 'medium' | 'low';
 
 interface Story {
   id: string;
@@ -71,12 +71,12 @@ interface Story {
   story_points?: number;
 }
 
-interface Epic {
+interface Goal {
   id: string;
   title: string;
   description?: string;
-  status: EpicStatus;
-  priority: EpicPriority;
+  status: GoalStatus;
+  priority: GoalPriority;
   target_date?: string;
   target_sp?: number;
   created_at: string;
@@ -100,7 +100,7 @@ interface Epic {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function statusBadgeVariant(status: EpicStatus): 'secondary' | 'info' | 'success' | 'outline' {
+function statusBadgeVariant(status: GoalStatus): 'secondary' | 'info' | 'success' | 'outline' {
   switch (status) {
     case 'active':
       return 'info';
@@ -113,7 +113,7 @@ function statusBadgeVariant(status: EpicStatus): 'secondary' | 'info' | 'success
   }
 }
 
-function priorityBadgeVariant(priority: EpicPriority): 'destructive' | 'secondary' | 'outline' | 'chip' {
+function priorityBadgeVariant(priority: GoalPriority): 'destructive' | 'secondary' | 'outline' | 'chip' {
   switch (priority) {
     case 'critical':
       return 'destructive';
@@ -176,18 +176,18 @@ function ProgressBar({ done, total, label }: ProgressBarProps) {
 
 // ─── Epic Create Form ─────────────────────────────────────────────────────────
 
-interface EpicCreateFormProps {
+interface GoalCreateFormProps {
   projectId: string;
   orgId?: string;
-  onCreated: (epic: Epic) => void;
+  onCreated: (epic: Goal) => void;
   onCancel: () => void;
 }
 
-function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFormProps) {
-  const t = useTranslations('epics');
+function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFormProps) {
+  const t = useTranslations('goals');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<EpicPriority>('medium');
+  const [priority, setPriority] = useState<GoalPriority>('medium');
   const [targetDate, setTargetDate] = useState('');
   const [targetSp, setTargetSp] = useState('');
   const [declarations, setDeclarations] = useState<HypothesisDeclarationValue[]>([]);
@@ -242,7 +242,7 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
       if (targetDate) body.target_date = targetDate;
       if (targetSp) body.target_sp = Number(targetSp);
 
-      const res = await fetch('/api/epics', {
+      const res = await fetch('/api/goals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -250,7 +250,7 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
 
       if (!res.ok) throw new Error('Failed to create epic');
 
-      const { data } = await res.json() as { data: Epic };
+      const { data } = await res.json() as { data: Goal };
       await wireDeclarations(data.id);
       onCreated(data);
     } catch {
@@ -290,7 +290,7 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
           <label className="text-xs font-medium text-muted-foreground">{t('fieldPriority')}</label>
           <select
             value={priority}
-            onChange={(e) => setPriority(e.target.value as EpicPriority)}
+            onChange={(e) => setPriority(e.target.value as GoalPriority)}
             className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
           >
             <option value="critical">{t('priorityCritical')}</option>
@@ -338,7 +338,7 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
           {t('cancel')}
         </Button>
         <Button type="submit" size="sm" disabled={submitting || !title.trim()}>
-          {submitting ? '...' : t('createEpic')}
+          {submitting ? '...' : t('createGoal')}
         </Button>
       </div>
     </form>
@@ -347,17 +347,17 @@ function EpicCreateForm({ projectId, orgId, onCreated, onCancel }: EpicCreateFor
 
 // ─── Epic Edit Form ───────────────────────────────────────────────────────────
 
-interface EpicEditFormProps {
-  epic: Epic;
-  onSaved: (epic: Epic) => void;
+interface GoalEditFormProps {
+  epic: Goal;
+  onSaved: (epic: Goal) => void;
   onCancel: () => void;
 }
 
-function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
-  const t = useTranslations('epics');
+function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
+  const t = useTranslations('goals');
   const [title, setTitle] = useState(epic.title);
   const [description, setDescription] = useState(epic.description ?? '');
-  const [priority, setPriority] = useState<EpicPriority>(epic.priority);
+  const [priority, setPriority] = useState<GoalPriority>(epic.priority);
   const [targetDate, setTargetDate] = useState(epic.target_date?.slice(0, 10) ?? '');
   const [targetSp, setTargetSp] = useState(epic.target_sp !== undefined ? String(epic.target_sp) : '');
   const [submitting, setSubmitting] = useState(false);
@@ -380,7 +380,7 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
       if (targetDate) body.target_date = targetDate;
       if (targetSp) body.target_sp = Number(targetSp);
 
-      const res = await fetch(`/api/epics/${epic.id}`, {
+      const res = await fetch(`/api/goals/${epic.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -388,7 +388,7 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
 
       if (!res.ok) throw new Error('Failed to update epic');
 
-      const { data } = await res.json() as { data: Epic };
+      const { data } = await res.json() as { data: Goal };
       onSaved({ ...data, stories: epic.stories });
     } catch {
       setError('에픽 수정에 실패했습니다. 다시 시도해 주세요.');
@@ -425,7 +425,7 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
         <label className="text-xs font-medium text-muted-foreground">{t('fieldPriority')}</label>
         <select
           value={priority}
-          onChange={(e) => setPriority(e.target.value as EpicPriority)}
+          onChange={(e) => setPriority(e.target.value as GoalPriority)}
           className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         >
           <option value="critical">{t('priorityCritical')}</option>
@@ -475,8 +475,8 @@ function EpicEditForm({ epic, onSaved, onCancel }: EpicEditFormProps) {
 
 // ─── Epic List Row ────────────────────────────────────────────────────────────
 
-interface EpicRowProps {
-  epic: Epic;
+interface GoalRowProps {
+  epic: Goal;
   isSelected: boolean;
   onClick: () => void;
   onDeleteRequest: (id: string) => void;
@@ -484,8 +484,8 @@ interface EpicRowProps {
   sortable: boolean;
 }
 
-function EpicRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: EpicRowProps) {
-  const t = useTranslations('epics');
+function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalRowProps) {
+  const t = useTranslations('goals');
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: epic.id,
     disabled: !sortable,
@@ -506,14 +506,14 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: EpicR
   const spProgress = calcSpProgress(stories);
   const spExceeded = typeof epic.target_sp === 'number' && epic.target_sp > 0 && spProgress.total > epic.target_sp;
 
-  const statusLabel: Record<EpicStatus, string> = {
+  const statusLabel: Record<GoalStatus, string> = {
     draft: t('statusDraft'),
     active: t('statusActive'),
     done: t('statusDone'),
     archived: t('statusArchived'),
   };
 
-  const priorityLabel: Record<EpicPriority, string> = {
+  const priorityLabel: Record<GoalPriority, string> = {
     critical: t('priorityCritical'),
     high: t('priorityHigh'),
     medium: t('priorityMedium'),
@@ -572,7 +572,7 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: EpicR
             <Badge variant={priorityBadgeVariant(epic.priority)}>{priorityLabel[epic.priority]}</Badge>
             <button
               type="button"
-              aria-label={t('deleteEpic')}
+              aria-label={t('deleteGoal')}
               onClick={(e) => { e.stopPropagation(); onDeleteRequest(epic.id); }}
               className="hidden group-hover:flex items-center justify-center rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
             >
@@ -620,16 +620,16 @@ function EpicRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: EpicR
 
 // ─── Epic Detail Panel ────────────────────────────────────────────────────────
 
-interface EpicDetailPanelProps {
-  epic: Epic;
-  onUpdate: (epic: Epic) => void;
+interface GoalDetailPanelProps {
+  epic: Goal;
+  onUpdate: (epic: Goal) => void;
   onClose: () => void;
 }
 
-function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
-  const t = useTranslations('epics');
+function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
+  const t = useTranslations('goals');
   const router = useRouter();
-  const { wsSlug, projSlug } = useEpicsRoute();
+  const { wsSlug, projSlug } = useGoalsRoute();
   const [isEditing, setIsEditing] = useState(false);
 
   const stories = epic.stories ?? [];
@@ -637,14 +637,14 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
   const spProgress = calcSpProgress(stories);
   const spExceeded = typeof epic.target_sp === 'number' && epic.target_sp > 0 && spProgress.total > epic.target_sp;
 
-  const statusLabel: Record<EpicStatus, string> = {
+  const statusLabel: Record<GoalStatus, string> = {
     draft: t('statusDraft'),
     active: t('statusActive'),
     done: t('statusDone'),
     archived: t('statusArchived'),
   };
 
-  const priorityLabel: Record<EpicPriority, string> = {
+  const priorityLabel: Record<GoalPriority, string> = {
     critical: t('priorityCritical'),
     high: t('priorityHigh'),
     medium: t('priorityMedium'),
@@ -672,11 +672,11 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
         <div className="flex items-center gap-2">
           {!isEditing ? (
             <>
-              <Button size="sm" variant="outline" onClick={() => router.push(`/${wsSlug}/${projSlug}/epics/${epic.id}`)}>
+              <Button size="sm" variant="outline" onClick={() => router.push(`/${wsSlug}/${projSlug}/goals/${epic.id}`)}>
                 {t('viewFull')}
               </Button>
               <Button size="sm" variant="outline" onClick={() => setIsEditing(true)}>
-                {t('editEpic')}
+                {t('editGoal')}
               </Button>
             </>
           ) : null}
@@ -694,7 +694,7 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
       <div className="flex-1 overflow-y-auto px-5 py-5">
         {isEditing ? (
           <div className="space-y-4">
-            <EpicEditForm
+            <GoalEditForm
               epic={epic}
               onSaved={(updated) => { onUpdate(updated); setIsEditing(false); }}
               onCancel={() => setIsEditing(false)}
@@ -789,12 +789,12 @@ function EpicDetailPanel({ epic, onUpdate, onClose }: EpicDetailPanelProps) {
 interface CreateModalProps {
   projectId: string;
   orgId?: string;
-  onCreated: (epic: Epic) => void;
+  onCreated: (epic: Goal) => void;
   onClose: () => void;
 }
 
 function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps) {
-  const t = useTranslations('epics');
+  const t = useTranslations('goals');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -806,7 +806,7 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
       />
       <div className="relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col rounded-2xl border border-border bg-card shadow-xl">
         <div className="flex flex-shrink-0 items-center justify-between px-6 pb-4 pt-6">
-          <h2 className="text-base font-bold text-foreground">{t('createEpic')}</h2>
+          <h2 className="text-base font-bold text-foreground">{t('createGoal')}</h2>
           <button
             type="button"
             onClick={onClose}
@@ -818,7 +818,7 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
         {/* Scrollable body — long forms (outcome 추가 등) overflow the viewport otherwise;
             internal scroll keeps every field + the submit button reachable (S5). */}
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
-          <EpicCreateForm
+          <GoalCreateForm
             projectId={projectId}
             orgId={orgId}
             onCreated={(epic) => { onCreated(epic); onClose(); }}
@@ -832,22 +832,22 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
 
 // ─── Main Client Component ────────────────────────────────────────────────────
 
-interface EpicsClientProps {
+interface GoalsClientProps {
   projectId: string;
   orgId?: string;
 }
 
-export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
-  const t = useTranslations('epics');
+export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
+  const t = useTranslations('goals');
   const router = useRouter();
-  const { wsSlug, projSlug } = useEpicsRoute();
+  const { wsSlug, projSlug } = useGoalsRoute();
   const { toasts, addToast, dismissToast } = useToast();
-  const [epics, setEpics] = useState<Epic[]>([]);
-  const [selectedEpic, setSelectedEpic] = useState<Epic | null>(null);
+  const [epics, setGoals] = useState<Goal[]>([]);
+  const [selectedEpic, setSelectedEpic] = useState<Goal | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
-  const [statusFilter, setStatusFilter] = useState<EpicStatus | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<GoalStatus | 'all'>('all');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   // wedge #2 로드맵 조타
@@ -861,13 +861,13 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
 
   // wedge #2: order_by=position 옵트인 — 큐레이션 prefix + 자동(NULL) tail. position 모드는 BE가
   // 커서를 발행하지 않으므로 이어달리기(cursor pagination) 없이 전량(상위 STEER_LIMIT) 로드한다(AC4).
-  const fetchEpics = useCallback(async () => {
+  const fetchGoals = useCallback(async () => {
     try {
       const params = new URLSearchParams({ project_id: projectId, limit: String(STEER_LIMIT), order_by: 'position' });
-      const res = await fetch(`/api/epics?${params.toString()}`);
+      const res = await fetch(`/api/goals?${params.toString()}`);
       if (!res.ok) throw new Error(`Failed to fetch epics: ${res.status}`);
-      const { data } = await res.json() as { data: Epic[] };
-      setEpics(data ?? []);
+      const { data } = await res.json() as { data: Goal[] };
+      setGoals(data ?? []);
       setCapped((data?.length ?? 0) >= STEER_LIMIT);
     } catch (err) {
       // AC3: silent-swallow 금지 — 최소 로깅.
@@ -888,30 +888,30 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
 
     const reordered = arrayMove(epics, oldIndex, newIndex);
     const patch = computeReorderPatch(reordered, newIndex);
-    if (patch.length === 0) { setEpics(reordered); return; }
+    if (patch.length === 0) { setGoals(reordered); return; }
 
     // 낙관 반영(마커 즉시 갱신) 후 실 PATCH — 성공 시 서버 확정본으로 정합, 실패 시 롤백.
     const posById = new Map(patch.map((p) => [p.id, p.position]));
     const optimistic = reordered.map((e) => (posById.has(e.id) ? { ...e, position: posById.get(e.id)! } : e));
     const prev = epics;
-    setEpics(optimistic);
+    setGoals(optimistic);
     setReordering(true);
     try {
-      const res = await fetch('/api/epics/bulk', {
+      const res = await fetch('/api/goals/bulk', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: patch }),
       });
       if (!res.ok) throw new Error(`bulk reorder failed: ${res.status}`);
-      const { data } = await res.json() as { data: Epic[] };
+      const { data } = await res.json() as { data: Goal[] };
       // 응답=갱신본만 → 서버 position으로 정합(실 persist 확인·끝단 반영).
       const updById = new Map((data ?? []).map((e) => [e.id, e.position]));
-      setEpics((cur) => cur.map((e) => (updById.has(e.id) ? { ...e, position: updById.get(e.id) ?? e.position } : e)));
+      setGoals((cur) => cur.map((e) => (updById.has(e.id) ? { ...e, position: updById.get(e.id) ?? e.position } : e)));
       // STEER v2: 드래그는 조용한 초안 저장 — 핸드오프/이벤트 없음(#2078 배선 제거). 신뢰 발화는
       // 명시적 커밋(POST /epics/steer-dispatch)에서만. 인간이 A→B→A로 번복하는 초안은 새지 않는다.
     } catch (err) {
       console.error('[epics] 재정렬 저장 실패', err);
-      setEpics(prev); // 롤백(낙관 UI ≠ 저장)
+      setGoals(prev); // 롤백(낙관 UI ≠ 저장)
       addToast({ type: 'error', title: t('steerError') });
     } finally {
       setReordering(false);
@@ -921,45 +921,45 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
   // (silent-catch sweep) `_fetchEpicDetail`(dead·호출처 0·handleSelectEpic이 /epics/[id]
   // 딥링크로 대체)는 제거했다 — 실행되지 않던 silent catch였으므로 toast가 아니라 dead code 삭제.
 
-  const handleSelectEpic = useCallback((epic: Epic) => {
+  const handleSelectEpic = useCallback((epic: Goal) => {
     // AC5: 모든 디바이스에서 /epics/[id] 딥링크로 이동
-    router.push(`/${wsSlug}/${projSlug}/epics/${epic.id}`);
+    router.push(`/${wsSlug}/${projSlug}/goals/${epic.id}`);
   }, [router, wsSlug, projSlug]);
 
   const handleDeleteEpic = useCallback(async (id: string) => {
     setDeleting(true);
-    setEpics((prev) => prev.filter((e) => e.id !== id));
+    setGoals((prev) => prev.filter((e) => e.id !== id));
     setSelectedEpic((prev) => prev?.id === id ? null : prev);
     try {
-      const res = await fetch(`/api/epics/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/goals/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
         addToast({ type: 'error', title: json?.error?.message ?? '에픽 삭제에 실패했습니다.' });
-        void fetchEpics();
+        void fetchGoals();
       }
     } catch {
       addToast({ type: 'error', title: '에픽 삭제에 실패했습니다.' });
-      void fetchEpics();
+      void fetchGoals();
     } finally {
       setDeleting(false);
       setDeleteConfirmId(null);
     }
-  }, [fetchEpics, addToast]);
+  }, [fetchGoals, addToast]);
 
-  const handleCreated = useCallback((epic: Epic) => {
-    setEpics((prev) => [epic, ...prev]);
+  const handleCreated = useCallback((epic: Goal) => {
+    setGoals((prev) => [epic, ...prev]);
     setSelectedEpic(epic);
     setMobileView('detail');
   }, []);
 
-  const handleUpdate = useCallback((updated: Epic) => {
+  const handleUpdate = useCallback((updated: Goal) => {
     setSelectedEpic(updated);
-    setEpics((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+    setGoals((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
   }, []);
 
   useEffect(() => {
-    void fetchEpics();
-  }, [fetchEpics]);
+    void fetchGoals();
+  }, [fetchGoals]);
 
   if (loading) {
     return (
@@ -972,7 +972,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
     );
   }
 
-  const filteredEpics = statusFilter === 'all' ? epics : epics.filter((e) => e.status === statusFilter);
+  const filteredGoals = statusFilter === 'all' ? epics : epics.filter((e) => e.status === statusFilter);
   // 조타(드래그 재정렬)는 전체 뷰에서만 — 필터 서브셋은 전역 position을 오염시킨다.
   const sortable = statusFilter === 'all';
   // 커밋("조타 보내기")은 큐레이션(position≠null)이 하나라도 있을 때만 의미 있다.
@@ -1026,7 +1026,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
 
       {/* List body */}
       <div className="flex-1 overflow-y-auto p-4" aria-busy={reordering}>
-        {filteredEpics.length === 0 ? (
+        {filteredGoals.length === 0 ? (
           // story 3995840c — 정체성 explainer는 "진짜 빈 프로젝트"(epics.length===0)에만.
           // 필터 적용 중 결과 0건(예: 전부 done인데 draft 필터)은 "아직 시작 안 함"이 거짓이라
           // 별개의 중립 카피 유지(no-fiction — resource-view-firsttouch-identity-pattern §3
@@ -1034,35 +1034,35 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
           epics.length === 0 ? (
             <EmptyState
               icon={<Flag className="size-8" />}
-              title={t('noEpics')}
-              description={t('noEpicsDescription')}
+              title={t('noGoals')}
+              description={t('noGoalsDescription')}
               action={
                 <div className="flex flex-col items-center gap-4">
-                  <EpicGroupHint />
+                  <GoalGroupHint />
                   <Button size="sm" onClick={() => setShowCreate(true)}>
                     <Plus className="size-4" />
-                    {t('newEpic')}
+                    {t('newGoal')}
                   </Button>
                 </div>
               }
             />
           ) : (
             <EmptyState
-              title={t('noEpicsFiltered')}
+              title={t('noGoalsFiltered')}
               action={
                 <Button size="sm" onClick={() => setShowCreate(true)}>
                   <Plus className="size-4" />
-                  {t('newEpic')}
+                  {t('newGoal')}
                 </Button>
               }
             />
           )
         ) : (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => void handleDragEnd(e)}>
-            <SortableContext items={filteredEpics.map((e) => e.id)} strategy={verticalListSortingStrategy}>
+            <SortableContext items={filteredGoals.map((e) => e.id)} strategy={verticalListSortingStrategy}>
               <div className="space-y-2">
-                {filteredEpics.map((epic) => (
-                  <EpicRow
+                {filteredGoals.map((epic) => (
+                  <GoalRow
                     key={epic.id}
                     epic={epic}
                     sortable={sortable}
@@ -1089,7 +1089,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
         actions={
           <Button size="sm" variant="outline" onClick={() => setShowCreate(true)}>
             <Plus className="mr-1.5 h-3.5 w-3.5" />
-            {t('newEpic')}
+            {t('newGoal')}
           </Button>
         }
       />
@@ -1101,7 +1101,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
         </div>
         {selectedEpic ? (
           <div className="flex-1 min-w-0">
-            <EpicDetailPanel
+            <GoalDetailPanel
               epic={selectedEpic}
               onUpdate={handleUpdate}
               onClose={() => setSelectedEpic(null)}
@@ -1120,7 +1120,7 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
         ) : (
           <div className="min-h-0 flex-1">
             {selectedEpic ? (
-              <EpicDetailPanel
+              <GoalDetailPanel
                 epic={selectedEpic}
                 onUpdate={handleUpdate}
                 onClose={() => { setSelectedEpic(null); setMobileView('list'); }}

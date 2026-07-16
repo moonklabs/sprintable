@@ -2,22 +2,22 @@
 
 import { createContext, useContext } from 'react';
 
-interface EpicsRouteContextType {
+interface GoalsRouteContextType {
   wsSlug: string;
   projSlug: string;
   projectId: string;
   orgId: string;
 }
 
-const EpicsRouteContext = createContext<EpicsRouteContextType | null>(null);
+const EpicsRouteContext = createContext<GoalsRouteContextType | null>(null);
 
-export function EpicsRouteProvider({
+export function GoalsRouteProvider({
   wsSlug,
   projSlug,
   projectId,
   orgId,
   children,
-}: EpicsRouteContextType & { children: React.ReactNode }) {
+}: GoalsRouteContextType & { children: React.ReactNode }) {
   return (
     <EpicsRouteContext.Provider value={{ wsSlug, projSlug, projectId, orgId }}>
       {children}
@@ -25,8 +25,8 @@ export function EpicsRouteProvider({
   );
 }
 
-export function useEpicsRoute(): EpicsRouteContextType {
+export function useGoalsRoute(): GoalsRouteContextType {
   const ctx = useContext(EpicsRouteContext);
-  if (!ctx) throw new Error('useEpicsRoute must be used within EpicsRouteProvider');
+  if (!ctx) throw new Error('useGoalsRoute must be used within GoalsRouteProvider');
   return ctx;
 }

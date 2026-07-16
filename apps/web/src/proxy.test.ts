@@ -419,3 +419,59 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
     expect(mockFetch).not.toHaveBeenCalled();
   });
 });
+
+describe('proxy — 경로 리터럴 rename 301(story 8fc51517, 에픽→목표): [ws]/[proj]/epics/* → [ws]/[proj]/goals/*', () => {
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+
+  it('/{ws}/{proj}/epics → 301 /{ws}/{proj}/goals(같은 ws/proj 세그먼트 보존, org/project 재조회 없음)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest('/moonklabs/sprintable/epics', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/goals');
+    // 3번째 세그먼트만 교체하는 순수 문자열 치환이라 org/project fetch가 전혀 없어야 한다.
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('/{ws}/{proj}/epics/{id} — 딥링크(id 서브패스)도 손실 없이 이동', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest('/moonklabs/sprintable/epics/e-123', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/goals/e-123');
+  });
+
+  it('다른 리소스(예: /{ws}/{proj}/board)는 스코프 밖이라 개입 없이 통과 — RENAMED_RESOURCES에 없는 이름은 무변경', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ org_id: 'org-1', org_slug: 'moonklabs', org_role: 'member', project_id: 'proj-1', project_slug: 'sprintable' }),
+    });
+    const response = await middleware(makeRequest('/moonklabs/sprintable/board', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).not.toBe(301);
+  });
+
+  it('이미 신 경로(/goals)로 들어온 요청은 재리다이렉트 없이 그대로 통과(무한루프 방지 확인)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ org_id: 'org-1', org_slug: 'moonklabs', org_role: 'member', project_id: 'proj-1', project_slug: 'sprintable' }),
+    });
+    const response = await middleware(makeRequest('/moonklabs/sprintable/goals', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).not.toBe(301);
+  });
+});
