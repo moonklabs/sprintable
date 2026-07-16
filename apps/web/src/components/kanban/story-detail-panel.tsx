@@ -736,6 +736,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       <div className="flex h-full flex-col">
         <div className="flex items-start justify-between border-b border-border p-5">
           <div className="flex-1 space-y-2 pr-3">
+            {story.story_number ? (
+              <span className="block text-xs font-medium text-muted-foreground">#{story.story_number}</span>
+            ) : null}
             {editingTitle ? (
               <div className="space-y-2">
                 <input

@@ -3,6 +3,8 @@ import type { SendAttachment } from '@/hooks/use-chat-sse';
 
 export interface KanbanStory {
   id: string;
+  // story 9ac9b80f: 프로젝트 내 사람-읽는 순차 #N. 서버 채번, 백필 전 구스토리는 null 가능.
+  story_number?: number | null;
   title: string;
   status: string;
   priority: string;

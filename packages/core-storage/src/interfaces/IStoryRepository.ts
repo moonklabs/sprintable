@@ -9,6 +9,9 @@ export interface Story {
   epic_id: string | null;
   sprint_id: string | null;
   assignee_id: string | null;
+  // story 9ac9b80f(BE #2222): 프로젝트 내 사람-읽는 순차 #N. 서버 채번(allocate_story_number)
+  // 전용, client-settable 아님. 구 스토리는 백필 전이면 null일 수 있음(정직 미표시).
+  story_number: number | null;
   title: string;
   status: string;
   priority: string;
