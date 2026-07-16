@@ -8,17 +8,20 @@ Firebase에 인증된 시각)은 다른 값이다 — revoke 이후 예전(pre-c
 
 additive — nullable(기존 행 없음, 아직 활성화 전 default-off 상태).
 
-Revision ID: 0191
-Revises: 0190
+Revision ID: 0192
+Revises: 0191
 Create Date: 2026-07-16
+
+⚠️renumber(2026-07-16, PO 채번 조율 실패 정정): #2213(C1) develop 0190 선점으로 밀림 —
+로직 무변, 파일번호+down_revision만.
 """
 from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0191"
-down_revision = "0190"
+revision = "0192"
+down_revision = "0191"
 branch_labels = None
 depends_on = None
 
