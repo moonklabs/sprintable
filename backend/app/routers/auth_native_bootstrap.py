@@ -1,17 +1,17 @@
-"""story 4dee942b(E-AUTH-REBUILD M2 Phase1-S5·doc §9.1·산티아고 §9 코드 보안계약 2026-07-15):
-`POST /api/v2/native-bootstrap` — 네이티브 모바일 앱이 WebView 밖에서 직접 호출(공개 API,
-쿠키 인증 아님). Firebase ID token을 exact Bearer로만 받는다(산티아고: "/native-bootstrap=
-cookie auth 아니라 exact Firebase Bearer+App Check+CORS 닫기" — CORS 정책 자체는 인프라
-전역 설정으로 이 PR 스코프 밖).
+"""story 4dee942b(E-AUTH-REBUILD M2 Phase1-S5)+story cbd578d4(C4·§7.0/§7.5): `POST
+/api/v2/auth/native-bootstrap` — 네이티브 모바일 앱이 WebView 밖에서 직접 호출(공개 API,
+쿠키 인증 아님).
 
-⚠️App Check 검증은 "요청이 진짜 앱에서 왔다"만 증명한다 — 산티아고가 요구한 완전한
-"설치별(per-installation) key/challenge" device binding은 모바일 클라이언트가 별도
-challenge-response 메커니즘을 구현해야 하는 별개 스코프(아직 없음, 향후 모바일 스토리
-필요). 이 스토리에선 App Check 앱 무결성 증명 + 클라이언트 제공 install hint를 조합해
-`device_binding_hash`를 구성 — 완전한 암호학적 per-device 증명은 아니다(정직하게 표기).
-"""
+⚠️§7.0 명시 삭제: 원래 S5 구현(App Check 앱 무결성 + client-supplied install hint 조합으로
+`device_binding_hash` 구성 — "완전한 암호학적 per-device 증명은 아니다"라고 정직 표기했던
+바로 그 임시 스킴)을 이 엔드포인트가 완전히 대체한다. 이제는 §7.5 2단계 원자 트랜잭션의
+1단계 — native가 이미 등록된 설치의 `bootstrap_issue` 챌린지를 Keystore/Secure Enclave
+private key로 assert하면, 서버가 그 챌린지를 원자 소비하면서 **같은 트랜잭션**에 hashed
+one-time code+`bootstrap_redeem` 챌린지를 함께 생성한다."""
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import logging
 import uuid
@@ -19,52 +19,60 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.dependencies.database import get_db
-from app.models.auth_identity import AuthIdentity, AuthMigration
 from app.models.device_installation import DeviceInstallation
-from app.models.user import User
-from app.services.auth_cutover import is_before_cutover
+from app.services.android_key_attestation import AndroidAttestationVerificationError, verify_bootstrap_signature
+from app.services.apple_app_attest import AppAttestVerificationError, verify_assertion
 from app.services.device_proof import (
     PURPOSE_BOOTSTRAP_ISSUE,
+    PURPOSE_BOOTSTRAP_REDEEM,
     TTL_BOOTSTRAP_ISSUE_SECONDS,
+    TTL_BOOTSTRAP_REDEEM_SECONDS,
     ChallengeAlreadyActiveError,
+    ChallengeVerificationError,
+    atomic_bump_installation_counter,
+    consume_device_proof_challenge,
     issue_challenge,
+    verify_challenge_binding,
 )
-from app.services.firebase_verifier import verify_app_check_token, verify_firebase_id_token
-from app.services.native_bootstrap import DEFAULT_TTL_SECONDS, issue_bootstrap_code
+from app.services.native_bootstrap import DEFAULT_TTL_SECONDS, generate_bootstrap_code, issue_bootstrap_code
 from app.services.native_request_auth import verify_native_request
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v2/auth", tags=["auth", "firebase", "mobile"])
 
-_AUTH_TIME_MAX_AGE_SECONDS = 5 * 60
+
+def _b64_decode(value: str | None) -> bytes | None:
+    if value is None:
+        return None
+    try:
+        return base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        return None
 
 
 class NativeBootstrapRequest(BaseModel):
     app_check_token: str | None = None
-    device_install_hint: str | None = None
+    installation_id: str
+    challenge_id: str
+    client_data_b64url: str
+    # iOS: App Attest assertion CBOR({signature, authenticatorData}).
+    assertion_b64: str | None = None
+    # Android: Keystore ECDSA-SHA256 signature over the canonical transcript bytes directly.
+    signature_b64: str | None = None
 
 
 class NativeBootstrapResponse(BaseModel):
     code: str
     expires_in: int
-
-
-def _extract_bearer(authorization: str | None) -> str | None:
-    if not authorization or not authorization.startswith("Bearer "):
-        return None
-    return authorization[len("Bearer "):]
-
-
-def _allowed_app_ids() -> frozenset[str]:
-    raw = settings.firebase_app_check_allowed_app_ids
-    return frozenset(x.strip() for x in raw.split(",") if x.strip())
+    redeem_challenge_id: str
+    redeem_client_data_b64url: str
+    redeem_expires_in: int
 
 
 # 산티아고 §9(2026-07-15) 잔여 하드닝: public issuance는 rate limit 없음 지적 — 로그인류
@@ -76,6 +84,7 @@ async def native_bootstrap(
     body: NativeBootstrapRequest,
     response: Response,
     authorization: str | None = Header(default=None),
+    x_firebase_appcheck: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> NativeBootstrapResponse:
     response.headers["Cache-Control"] = "no-store"  # 산티아고 §9 잔여 하드닝.
@@ -83,80 +92,149 @@ async def native_bootstrap(
     if not settings.firebase_auth_mobile_issue:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Native bootstrap not enabled")
 
-    id_token = _extract_bearer(authorization)
-    if id_token is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Firebase ID token")
+    app_check_token = body.app_check_token or x_firebase_appcheck
+    verified = await verify_native_request(
+        authorization=authorization, app_check_token=app_check_token, db=db, log_prefix="auth.native_bootstrap",
+    )
 
-    verified = await verify_firebase_id_token(id_token, settings.firebase_project_id)
-    if verified is None:
-        logger.warning("auth.native_bootstrap rejected reason=id_token_invalid")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Firebase ID token")
+    try:
+        installation_uuid = uuid.UUID(body.installation_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown installation")
 
-    now = datetime.now(timezone.utc).timestamp()
-    if now - verified.auth_time > _AUTH_TIME_MAX_AGE_SECONDS:
-        logger.warning("auth.native_bootstrap rejected reason=auth_time_stale")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication too old")
+    installation = await db.get(DeviceInstallation, installation_uuid)
+    if (
+        installation is None
+        or installation.user_id != verified.user_id
+        or installation.status != "active"
+        or installation.project_id != settings.firebase_project_id
+    ):
+        logger.warning("auth.native_bootstrap rejected reason=installation_not_eligible")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown installation")
 
-    identity_row = (
-        await db.execute(
-            select(AuthIdentity).where(
-                AuthIdentity.issuer == verified.issuer,
-                AuthIdentity.subject == verified.firebase_uid,
-                AuthIdentity.unlinked_at.is_(None),
+    try:
+        binding = await verify_challenge_binding(
+            db,
+            challenge_id=body.challenge_id,
+            client_data_b64url_value=body.client_data_b64url,
+            purpose=PURPOSE_BOOTSTRAP_ISSUE,
+            expected_user_id=verified.user_id,
+            expected_app_id=installation.app_id,
+            expected_platform=installation.platform,
+            expected_environment=installation.environment,
+            expected_installation_id=str(installation.id),
+        )
+    except ChallengeVerificationError:
+        logger.warning("auth.native_bootstrap rejected reason=challenge_binding_failed")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired challenge")
+
+    if binding.challenge.key_version != installation.key_version:
+        logger.warning("auth.native_bootstrap rejected reason=key_version_mismatch")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Key version mismatch")
+
+    client_data_hash = hashlib.sha256(binding.transcript_bytes).digest()
+
+    try:
+        if installation.platform == "ios":
+            assertion = _b64_decode(body.assertion_b64)
+            if assertion is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing assertion")
+            verified_assertion = verify_assertion(
+                assertion=assertion,
+                client_data_hash=client_data_hash,
+                stored_public_key_der=installation.public_key_der,
+                stored_counter=installation.last_sign_count or 0,
+                expected_team_id=settings.ios_team_id,
+                expected_bundle_id=installation.app_id,
             )
+            new_counter = verified_assertion.counter
+            counter_field = "last_sign_count"
+        else:
+            signature = _b64_decode(body.signature_b64)
+            if signature is None or binding.challenge.server_seq is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing signature")
+            verify_bootstrap_signature(
+                signed_bytes=binding.transcript_bytes,
+                signature=signature,
+                stored_public_key_der=installation.public_key_der,
+            )
+            new_counter = binding.challenge.server_seq
+            counter_field = "last_server_seq"
+    except (AppAttestVerificationError, AndroidAttestationVerificationError) as exc:
+        logger.warning("auth.native_bootstrap rejected reason=assertion_invalid detail=%s", exc)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid assertion")
+
+    # §7.5 원자 트랜잭션: bootstrap_issue 챌린지 소비+counter CAS+코드 생성+redeem 챌린지
+    # 생성이 전부 같은 커밋 안에 있어야 한다. 하나라도 실패하면 전체 rollback.
+    consumed_challenge = await consume_device_proof_challenge(
+        db, challenge_id=binding.challenge.id, purpose=PURPOSE_BOOTSTRAP_ISSUE
+    )
+    if not consumed_challenge:
+        await db.rollback()
+        logger.warning("auth.native_bootstrap rejected reason=challenge_consume_race")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired challenge")
+
+    counter_bumped = await atomic_bump_installation_counter(
+        db, installation_id=installation.id, field=counter_field, new_value=new_counter
+    )
+    if not counter_bumped:
+        await db.rollback()
+        logger.warning("auth.native_bootstrap rejected reason=counter_cas_failed")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Counter replay detected")
+
+    # §7.5: redeem 챌린지의 canonical transcript가 이 코드의 SHA256을 먼저 바인딩해야 하므로
+    # (bootstrap_code_sha256 필드) 코드를 챌린지보다 먼저 "생성"한다 — 단 raw code는 아직
+    # 어디에도 저장 안 함(generate_bootstrap_code는 순수 함수, DB 무접촉).
+    code, code_hash = generate_bootstrap_code()
+
+    try:
+        redeem_issued = await issue_challenge(
+            db,
+            purpose=PURPOSE_BOOTSTRAP_REDEEM,
+            user_id=verified.user_id,
+            firebase_uid=verified.firebase_uid,
+            project_id=settings.firebase_project_id,
+            tenant_id=None,
+            environment=installation.environment,
+            platform=installation.platform,
+            app_id=installation.app_id,
+            http_method="POST",
+            route="/auth/native",
+            web_origin=str(request.base_url).rstrip("/"),
+            ttl_seconds=TTL_BOOTSTRAP_REDEEM_SECONDS,
+            installation_id=installation.id,
+            key_version=installation.key_version,
+            bootstrap_code_sha256=code_hash,
+            commit=False,
         )
-    ).scalar_one_or_none()
-    if identity_row is None:
-        logger.warning("auth.native_bootstrap rejected reason=unmapped_identity")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unmapped Firebase identity")
+    except ChallengeAlreadyActiveError:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Redeem challenge already active")
 
-    user = await db.get(User, identity_row.user_id)
-    if user is None or not user.is_active:
-        logger.warning("auth.native_bootstrap rejected reason=inactive_or_missing_user")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
-
-    # story bea25062(§17d-1 RED 조건 ②⑥): 이전엔 이 issue 엔드포인트가 migration state/cutover
-    # epoch를 전혀 안 봤다(consume에만 있던 검사) — provisioning/firebase가 아닌 사용자(예:
-    # reset_required)도 코드를 발급받을 수 있었고, revoke 이후 예전 ID token으로도 발급이
-    # 통과했다(BLOCKER 2 공격의 첫 단계). issue 시점에도 consume과 동일한 state+cutover
-    # 검사를 강제 — auth_time은 이 코드에 원본 값으로 저장돼 consume 시 재검증된다.
-    migration = await db.get(AuthMigration, identity_row.user_id)
-    if migration is None or migration.state not in ("provisioning", "firebase"):
-        logger.warning("auth.native_bootstrap rejected reason=ineligible_migration_state")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not eligible")
-
-    auth_time_dt = datetime.fromtimestamp(verified.auth_time, tz=timezone.utc)
-    if is_before_cutover(migration.auth_valid_after, auth_time_dt):
-        logger.warning("auth.native_bootstrap rejected reason=before_cutover")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
-
-    device_binding_hash: str | None = None
-    if settings.firebase_auth_mobile_app_check_required and not body.app_check_token:
-        logger.warning("auth.native_bootstrap rejected reason=app_check_required_missing")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="App Check token required")
-
-    if body.app_check_token:
-        app_check = await verify_app_check_token(
-            body.app_check_token, settings.firebase_project_number, _allowed_app_ids()
-        )
-        if app_check is None:
-            logger.warning("auth.native_bootstrap rejected reason=app_check_invalid")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid App Check token")
-        device_binding_hash = hashlib.sha256(
-            f"{app_check.app_id}:{body.device_install_hint or ''}".encode()
-        ).hexdigest()
-
-    code = await issue_bootstrap_code(
+    auth_time_dt = datetime.now(timezone.utc)  # 원본 Firebase ID token auth_time — verify_native_request가 이미 5분 이내로 검증.
+    await issue_bootstrap_code(
         db,
-        user_id=identity_row.user_id,
+        code_hash=code_hash,
+        user_id=verified.user_id,
         firebase_uid=verified.firebase_uid,
         project_id=settings.firebase_project_id,
-        device_binding_hash=device_binding_hash,
+        installation_id=installation.id,
+        key_version=installation.key_version,
+        redeem_challenge_id=uuid.UUID(redeem_issued.challenge_id),
         ttl_seconds=DEFAULT_TTL_SECONDS,
         auth_time=auth_time_dt,
+        commit=False,
     )
-    logger.info("auth.native_bootstrap success")
-    return NativeBootstrapResponse(code=code, expires_in=DEFAULT_TTL_SECONDS)
+
+    await db.commit()
+    logger.info("auth.native_bootstrap success platform=%s", installation.platform)
+    return NativeBootstrapResponse(
+        code=code,
+        expires_in=DEFAULT_TTL_SECONDS,
+        redeem_challenge_id=redeem_issued.challenge_id,
+        redeem_client_data_b64url=redeem_issued.client_data_b64url,
+        redeem_expires_in=TTL_BOOTSTRAP_REDEEM_SECONDS,
+    )
 
 
 # story 822817a0(C1·doc §7.1/§7.5): bootstrap_issue 챌린지 발급 — §7.5 2단계 원자 트랜잭션의
@@ -214,6 +292,12 @@ async def native_bootstrap_challenge(
         logger.warning("auth.native_bootstrap.challenge rejected reason=installation_not_eligible")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown installation")
 
+    # story cbd578d4(C4·§7.4): Android엔 signCount 상당이 없어 서버가 다음 server_seq를
+    # 미리 발급해 챌린지에 바인딩한다 — client가 이 값을 서명해 소유권을 증명하고, consume
+    # 시점에 atomic_bump_installation_counter()가 CAS로 실제 반영한다. iOS는 client
+    # Secure Enclave가 자체 관리하는 signCount를 쓰므로 여기선 server_seq 불필요.
+    next_server_seq = (installation.last_server_seq or 0) + 1 if installation.platform == "android" else None
+
     try:
         issued = await issue_challenge(
             db,
@@ -231,6 +315,7 @@ async def native_bootstrap_challenge(
             ttl_seconds=TTL_BOOTSTRAP_ISSUE_SECONDS,
             installation_id=installation.id,
             key_version=installation.key_version,
+            server_seq=next_server_seq,
         )
     except ChallengeAlreadyActiveError:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bootstrap challenge already active")
