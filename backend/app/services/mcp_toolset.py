@@ -14,7 +14,7 @@ from __future__ import annotations
 #       notifications/webhooks/rewards/audit/agent_runs/canvas/admin/core
 _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("rewards", ("reward", "wallet", "leaderboard")),
-    ("analytics", ("velocity", "health", "dashboard", "overview", "stats", "standup_missing",
+    ("analytics", ("velocity", "health", "dashboard", "overview", "stats",
                    "sprint_summary", "recent_activity", "agent_stats", "blocked_stories",
                    "unassigned_stories", "member_workload", "overdue", "epic_progress")),
     ("agent_runs", ("agent_run", "run_status", "update_run")),
