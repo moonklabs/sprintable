@@ -300,6 +300,24 @@ async def evaluate_merge_gate(
     self_report_only = bool(capture.get("skipped_reason")) or not capture.get("recorded")
 
     # 3. 정책 disposition 아티팩트 gate row(Cage·AC⑥). create_gate가 disposition→status 설정·멱등.
+    facts = {
+        "ci_result": ci,
+        "pr_result": pr,
+        # HO-S6(AC⑥): 신뢰 근거 = 가설 적중 이력(CI clean-pass 아님). 명시 노출.
+        "trust_basis": TRUST_BASIS,
+        "trust": trust,  # outcome hit_rate(점추정)
+        "outcome_hit_rate": outcome.hit_rate,
+        "outcome_lower_bound": round(outcome.lower_bound, 4),
+        "outcome_resolved": outcome.resolved,
+        "outcome_hit": outcome.hit,
+        "outcome_pending": outcome.pending,
+        "outcome_regret": outcome.regret,
+        "trust_threshold": trust_threshold,
+        "min_outcome_sample": MIN_OUTCOME_SAMPLE,
+        "pr_number": pr_number,
+        "repo": repo,
+        "self_report_only": self_report_only,
+    }
     gate = await create_gate(
         session,
         org_id,
@@ -308,25 +326,37 @@ async def evaluate_merge_gate(
         MERGE_GATE_TYPE,
         member_id,
         role_id,
-        neutral_facts={
-            "ci_result": ci,
-            "pr_result": pr,
-            # HO-S6(AC⑥): 신뢰 근거 = 가설 적중 이력(CI clean-pass 아님). 명시 노출.
-            "trust_basis": TRUST_BASIS,
-            "trust": trust,  # outcome hit_rate(점추정)
-            "outcome_hit_rate": outcome.hit_rate,
-            "outcome_lower_bound": round(outcome.lower_bound, 4),
-            "outcome_resolved": outcome.resolved,
-            "outcome_hit": outcome.hit,
-            "outcome_pending": outcome.pending,
-            "outcome_regret": outcome.regret,
-            "trust_threshold": trust_threshold,
-            "min_outcome_sample": MIN_OUTCOME_SAMPLE,
-            "pr_number": pr_number,
-            "repo": repo,
-            "self_report_only": self_report_only,
-        },
+        neutral_facts=facts,
     )
+
+    # 재제출 re-open(doc-gate 48f064e5 선례 이식): uq(work_item,gate_type)=1행 + terminal=immutable
+    # → create_gate 멱등이 rejected/voided gate 를 그대로 반환하면 아래 _decide 가 deny BLOCK 을
+    # 영구 반환한다(void/override 는 pending 전용이라 API 복구 경로 0 — reject→수정→재제출 불가).
+    # 재제출=새 결재 사이클: 이전 결재를 decision_history 로 보존(감사)하고 pending re-open + 새
+    # 평가 facts 로 갱신. approved 는 landed 작업이라 유지(기존 결재 무효화 금지). resolver 해소
+    # 필드는 transition_gate 가 재해소 시 다시 채운다.
+    if gate.status in ("rejected", "voided"):
+        prior = {
+            "status": gate.status,
+            "resolver_id": str(gate.resolver_id) if gate.resolver_id else None,
+            "resolved_at": gate.resolved_at.isoformat() if gate.resolved_at else None,
+            "resolution_note": gate.resolution_note,
+        }
+        reopened_facts = dict(facts)
+        reopened_facts["decision_history"] = [
+            *((gate.neutral_facts or {}).get("decision_history") or []),
+            prior,
+        ]
+        gate.status = "pending"
+        gate.resolver_id = None
+        gate.resolved_at = None
+        gate.resolution_note = None
+        gate.neutral_facts = reopened_facts  # JSONB in-place 변경 미감지 — 재할당.
+        await session.flush()
+        logger.info(
+            "merge gate re-opened on resubmit story=%s gate=%s prior=%s",
+            story_id, gate.id, prior["status"],
+        )
 
     # 4. 정책 + 증거(CI/PR) + outcome trust 합성 decision.
     decision, reason = _decide(
