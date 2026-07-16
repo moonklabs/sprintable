@@ -47,8 +47,10 @@ async def _session_factory():
 
 
 async def _seed_user_and_code(
-    session, *, device_binding_hash=None, mapped=True, migration_state="firebase", link_identity_to_other_user=False
+    session, *, device_binding_hash=None, mapped=True, migration_state="firebase", link_identity_to_other_user=False,
+    auth_time=None,
 ):
+    from datetime import datetime, timezone
     from app.core.security import hash_password
     from app.models.auth_identity import AuthIdentity, AuthMigration
     from app.models.user import User
@@ -83,9 +85,15 @@ async def _seed_user_and_code(
         session.add(AuthMigration(user_id=user_id, state=migration_state))
         await session.commit()
 
+    # story bea25062(§17d-1 BLOCKER 2·2026-07-16): consume이 이제 원본 auth_time을
+    # fail-closed로 요구한다 — 이 fixture가 만드는 코드는 "방금 정상 로그인"을 대표하도록
+    # 기본값 now()를 쓴다(None으로 두면 모든 정상-경로 테스트가 공허하게 401로 깨진다).
+    if auth_time is None:
+        auth_time = datetime.now(timezone.utc)
+
     raw_code = await issue_bootstrap_code(
         session, user_id=user_id, firebase_uid=firebase_uid, project_id=PROJECT_ID,
-        device_binding_hash=device_binding_hash,
+        device_binding_hash=device_binding_hash, auth_time=auth_time,
     )
     return raw_code, user_id
 

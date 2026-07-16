@@ -126,6 +126,19 @@ async def mint_firebase_session(
         logger.warning("auth.firebase.session_mint rejected reason=inactive_or_missing_user")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
 
+    # 산티아고 #2206 갱신 재검토(2026-07-16): 이 엔드포인트는 5분 freshness만 보고 migration
+    # state/cutover epoch를 전혀 안 봤다(§17d-1 위반) — native issue와 동일 guard를
+    # session-cookie mint 전에도 강제. reset_required/rollback_hold나 revoke 이후 예전 ID
+    # token으로도 여기선 세션쿠키가 그대로 발급될 수 있었다.
+    auth_time_dt = datetime.fromtimestamp(verified.auth_time, tz=timezone.utc)
+    migration = await db.get(AuthMigration, identity_row.user_id)
+    if migration is None or migration.state not in ("provisioning", "firebase"):
+        logger.warning("auth.firebase.session_mint rejected reason=ineligible_migration_state")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not eligible")
+    if is_before_cutover(migration.auth_valid_after, auth_time_dt):
+        logger.warning("auth.firebase.session_mint rejected reason=before_cutover")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
+
     valid_duration_seconds = 5 * 24 * 60 * 60
     session_cookie = await mint_session_cookie(
         body.id_token, settings.firebase_project_id, valid_duration_seconds
@@ -133,6 +146,17 @@ async def mint_firebase_session(
     if session_cookie is None:
         logger.warning("auth.firebase.session_mint failed reason=mint_failed")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Session cookie mint failed")
+
+    # native consume과 동일 이유(Firebase 네트워크 왕복 중 revoke TOCTOU) — cookie 반환 직전
+    # 세 번째 authoritative 재조회. 실패 시 이미 mint된 cookie는 반환하지 않는다.
+    migration_after_mint = await db.get(AuthMigration, identity_row.user_id, populate_existing=True)
+    if (
+        migration_after_mint is None
+        or migration_after_mint.state not in ("provisioning", "firebase")
+        or is_before_cutover(migration_after_mint.auth_valid_after, auth_time_dt)
+    ):
+        logger.warning("auth.firebase.session_mint rejected reason=revoked_during_mint")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
 
     logger.info("auth.firebase.session_mint success")
     return FirebaseSessionMintResponse(session_cookie=session_cookie, expires_in=valid_duration_seconds)
@@ -265,6 +289,26 @@ async def consume_native_bootstrap(
     if session_cookie is None:
         logger.warning("auth.native_bootstrap.consume failed reason=mint_failed")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Session cookie mint failed")
+
+    # 산티아고 #2206 갱신 재검토(2026-07-16) — mint 직전 재확인만으론 여전히 Firebase 네트워크
+    # 왕복(custom-token 발급→signInWithCustomToken→createSessionCookie, 수백ms~초 단위) 도중의
+    # revoke를 못 잡는다(probe: revoke_during_mint_cookie_returned=True). 분산 락 없이 이 창을
+    # 완전히 닫는 산티아고의 정확한 해법 — **cookie를 반환하기 직전 세 번째 authoritative
+    # 재조회**. revoke가 mint 이전/도중에 커밋됐으면 이 조회가 잡고, 만에 하나 이 조회 "이후"에
+    # revoke가 커밋되더라도 방금 mint된 Firebase 세션쿠키 자체의 auth_time은 여전히 revoke
+    # 이전이므로 이후 모든 요청에서 통상 verifier(`_resolve_firebase_session`)가 거부한다 —
+    # 즉 네트워크 구간 전체가 이 시점 기준으로 닫힌다. 재확인 실패 시 이미 mint된 cookie는
+    # 폐기(반환하지 않는다 — Firebase 측에 남은 세션 자체는 최초 auth_valid_after 갱신 시의
+    # best-effort user-wide revoke가 이미 정리를 시도했었고, 로컬이 어차피 이 값을 안 돌려주면
+    # 클라이언트가 쓸 수 없다).
+    migration_after_mint = await db.get(AuthMigration, consumed.user_id, populate_existing=True)
+    if (
+        migration_after_mint is None
+        or migration_after_mint.state not in ("provisioning", "firebase")
+        or is_before_cutover(migration_after_mint.auth_valid_after, consumed.auth_time)
+    ):
+        logger.warning("auth.native_bootstrap.consume rejected reason=revoked_during_mint")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
 
     logger.info("auth.native_bootstrap.consume success")
     return NativeBootstrapConsumeResponse(session_cookie=session_cookie, expires_in=valid_duration_seconds)

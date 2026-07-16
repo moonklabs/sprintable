@@ -305,3 +305,44 @@ async def test_consume_mint_interleaved_revoke_rejected(monkeypatch):
         assert mint_called["value"] is False
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_revoke_during_mint_network_roundtrip_rejects_and_discards_cookie(monkeypatch):
+    """산티아고 #2206 갱신 재검토(2026-07-16) 정확한 지적: mint 직전 재확인만으론 Firebase
+    네트워크 왕복(custom-token 발급→signInWithCustomToken→createSessionCookie) '도중'의
+    revoke를 못 잡는다(probe: revoke_during_mint_cookie_returned=True). 여기선 fake mint
+    함수 **내부**(=mint 네트워크 호출이 실제로 진행 중인 시점을 대표)에서 별도 DB session으로
+    revoke를 커밋한 뒤 cookie를 반환하게 해 그 정확한 타이밍을 재현 — cookie 반환 직전 세
+    번째 authoritative 재조회가 이를 잡아 최종 401이어야 하고, 절대 그 cookie 값이
+    호출부까지 반환되면 안 된다."""
+    import app.routers.auth_firebase_internal as router_mod
+    from app.routers.auth_firebase_internal import NativeBootstrapConsumeRequest, consume_native_bootstrap
+    from app.services.auth_cutover import revoke_user_sessions
+
+    _setup_common(monkeypatch)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            raw_code, user_id = await _seed_eligible_user_and_code(s)
+
+        async def fake_mint_for_uid_with_interleaved_revoke(firebase_uid, project_id, web_api_key, valid_duration_seconds):
+            # mint 네트워크 호출이 "진행 중"인 시점에 별도 트랜잭션으로 revoke가 커밋되는
+            # 상황을 정확히 대표 — mint 직전 재확인(2번째 조회)은 이미 통과한 뒤다.
+            async with Session() as revoke_session:
+                await revoke_user_sessions(revoke_session, user_id, firebase_uid=None)
+            return "cookie-minted-during-race-must-never-be-returned"
+
+        monkeypatch.setattr(router_mod, "mint_session_cookie_for_uid", fake_mint_for_uid_with_interleaved_revoke)
+
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await consume_native_bootstrap(
+                    NativeBootstrapConsumeRequest(code=raw_code), authorization=None, db=s
+                )
+            assert exc_info.value.status_code == 401
+            # cookie 값이 예외 detail 등 어디에도 새어나가지 않았는지 확인.
+            assert "cookie-minted-during-race" not in str(exc_info.value.detail)
+    finally:
+        await engine.dispose()
