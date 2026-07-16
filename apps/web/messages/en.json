@@ -1570,6 +1570,8 @@
     "assigneeUnassigned": "Assign owner",
     "noProject": "No project selected",
     "selectDoc": "Select a document",
+    "emptyTitle": "No docs yet",
+    "emptyDescription": "Docs are where your org's knowledge, decisions, and context build up. The more that piles up, the easier the next decision gets.",
     "lastUpdated": "Last updated",
     "newDoc": "New Document",
     "save": "Save",
