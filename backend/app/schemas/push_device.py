@@ -15,7 +15,10 @@ class RegisterPushDevice(BaseModel):
     """디바이스 등록 요청. member_id 는 body 에 없음 — auth context 서 산출(IDOR: 타 멤버 등록 불가)."""
 
     expo_push_token: str
-    platform: Literal["ios", "android"]
+    # story 1935: v0.2.4 앱이 platform 없이 register하는 실 케이스 발견 — optional화(fake
+    # default 아닌 진짜 미보고). 신 버전이 보내면 그대로 저장, 안 보내면 NULL(repo가 기존
+    # 값을 덮어쓰지 않음 — upsert COALESCE).
+    platform: Literal["ios", "android"] | None = None
     device_id: str | None = None
     app_version: str | None = None
 
@@ -35,7 +38,7 @@ class PushDeviceResponse(BaseModel):
     org_id: uuid.UUID
     member_id: uuid.UUID
     expo_push_token: str
-    platform: str
+    platform: str | None = None
     device_id: str | None = None
     app_version: str | None = None
     is_active: bool

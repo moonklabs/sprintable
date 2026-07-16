@@ -19,7 +19,12 @@ class PushDevice(Base):
     __table_args__ = (
         # 재등록(같은 디바이스 토큰) = upsert 자연 멱등 — on_conflict 타깃.
         UniqueConstraint("expo_push_token", name="uq_push_devices_expo_push_token"),
-        CheckConstraint("platform IN ('ios', 'android')", name="push_devices_platform_check"),
+        # story 1935: v0.2.4 앱이 platform 없이 register해 422→row 미생성이던 실 갭 수정 —
+        # NULL 허용(미보고=아직 모름, fake default 아님). Expo Push API 자체가 platform을
+        # 안 쓰므로(expo_push.py) 발송기 영향 없음.
+        CheckConstraint(
+            "platform IS NULL OR platform IN ('ios', 'android')", name="push_devices_platform_check"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -30,7 +35,7 @@ class PushDevice(Base):
     # org_id AND member_id 필터로 강제(repo list/get_owned/delete).
     member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     expo_push_token: Mapped[str] = mapped_column(Text, nullable=False)  # ExponentPushToken[...] (UNIQUE)
-    platform: Mapped[str] = mapped_column(Text, nullable=False)  # ios | android (CHECK)
+    platform: Mapped[str | None] = mapped_column(Text, nullable=True)  # ios | android | 미보고(CHECK)
     device_id: Mapped[str | None] = mapped_column(Text, nullable=True)  # 앱 설치 단위 식별(관측용, 선택)
     app_version: Mapped[str | None] = mapped_column(Text, nullable=True)  # 관측용
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)  # DeviceNotRegistered→false(S3)

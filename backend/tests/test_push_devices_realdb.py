@@ -167,3 +167,80 @@ async def test_push_device_register_list_revoke_round_trip_realdb():
             await s.execute(text("DELETE FROM organizations WHERE id=:o"), {"o": str(ORG)})  # cascade → devices
             await s.commit()
         await engine.dispose()
+
+
+TOKEN_C = "ExponentPushToken[s2-round-trip-CCCC]"
+
+
+@pytest.mark.anyio
+async def test_push_device_register_without_platform_realdb():
+    """story 1935: v0.2.4 앱(platform 필드 없이 {expo_push_token}만 전송)이 422 없이 등록되고
+    (platform=None 저장), 이후 v0.2.5류 재등록이 platform을 채우면 저장되며, 그 뒤 다시
+    platform 없는 재등록이 와도 기존 값을 지우지 않는지(COALESCE) 실증."""
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.dependencies.auth import get_verified_org_id
+    from app.dependencies.database import get_db
+    from ee.routers import push_devices as pd
+
+    app = FastAPI()
+    app.include_router(pd.router, prefix="/api/v2/push")
+
+    engine = create_async_engine(_async_url())
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with SessionLocal() as s:
+        await s.execute(text("DELETE FROM push_devices WHERE org_id=:o"), {"o": str(ORG)})
+        await s.execute(text("DELETE FROM organizations WHERE id=:o"), {"o": str(ORG)})
+        await s.execute(
+            text("INSERT INTO organizations (id,name,slug,plan) VALUES (:o,'S2 Org','s2-mobile','free')"),
+            {"o": str(ORG)},
+        )
+        await s.commit()
+
+    async def _override_db():
+        async with SessionLocal() as sess:
+            yield sess
+            await sess.commit()
+
+    def _make_caller_override(member_id: uuid.UUID):
+        async def _override():
+            return member_id
+        return _override
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_verified_org_id] = lambda: ORG
+    app.dependency_overrides[pd._get_caller_member_id] = _make_caller_override(MEMBER_X)
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            with _ee_on():
+                # 1) v0.2.4류 register — platform 필드 자체가 없음 → 422 아니라 200, platform=None.
+                r = await client.post("/api/v2/push/devices", json={"expo_push_token": TOKEN_C})
+                assert r.status_code == 200, r.text
+                assert r.json()["platform"] is None
+                dev_id = r.json()["id"]
+
+                # 2) 같은 토큰 재등록, 이번엔 platform 포함(v0.2.5류) → platform 채워짐.
+                r = await client.post(
+                    "/api/v2/push/devices", json={"expo_push_token": TOKEN_C, "platform": "android"},
+                )
+                assert r.status_code == 200, r.text
+                assert r.json()["id"] == dev_id
+                assert r.json()["platform"] == "android"
+
+                # 3) 다시 platform 없이 재등록(v0.2.4 재실행 등) → 기존 android 값 유지(COALESCE,
+                # 덮어써서 잃어버리지 않음).
+                r = await client.post("/api/v2/push/devices", json={"expo_push_token": TOKEN_C})
+                assert r.status_code == 200, r.text
+                assert r.json()["id"] == dev_id
+                assert r.json()["platform"] == "android"
+    finally:
+        app.dependency_overrides.clear()
+        async with SessionLocal() as s:
+            await s.execute(text("DELETE FROM organizations WHERE id=:o"), {"o": str(ORG)})
+            await s.commit()
+        await engine.dispose()
