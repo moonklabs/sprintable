@@ -1,7 +1,9 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy import (
+    BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -85,11 +87,25 @@ class Epic(Base, OrgScopedMixin, TimestampMixin):
 
 class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "stories"
+    __table_args__ = (
+        # story 9ac9b80f(FR·대표요청): 프로젝트별 사람-읽는 sequential #N — race-safe 채번은
+        # app.repositories.story.allocate_story_number(advisory xact lock)이 보장, 이 제약은
+        # 그 보장이 깨졌을 때(버그·우회 write) 조용히 중복 채번되는 걸 막는 최후 방어선.
+        UniqueConstraint("project_id", "story_number", name="uq_stories_project_id_story_number"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # story 9ac9b80f: 프로젝트 스코프 sequential 사람-읽는 ID(#N) — UUID(id)는 그대로 canonical
+    # PK 유지, 이건 additive 참조 편의 컬럼. 서버(allocate_story_number)만 채번, client-settable
+    # 아님(StoryCreate에 없음). 실 생성 경로(StoryRepository.create·oss_seed) 둘 다 항상 채번하므로
+    # 실 데이터는 전부 non-null — nullable=True는 스키마 관용이 아니라, 이 모델을 직접 ORM
+    # construct하는 기존 테스트 fixture 51개(레포지토리 우회, 이 스토리와 무관한 다른 에픽들)를
+    # 강제 개조하지 않기 위함. Postgres UNIQUE는 NULL을 서로 다른 값으로 취급해 다건 NULL과
+    # 충돌 없이 공존(제약 무력화 아님 — non-null 값끼리는 여전히 프로젝트 내 유일 강제).
+    story_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     epic_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("epics.id", ondelete="SET NULL"), nullable=True
     )
