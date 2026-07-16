@@ -25,6 +25,7 @@ import { NextResponse } from 'next/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
+import { resolveAppUrl } from '@/services/app-url';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -108,7 +109,11 @@ export async function POST(request: Request) {
 
   // §10.9: 리다이렉트 목적지는 상대경로 고정(/glance) — client-supplied redirect_path 없음
   // (attested /auth/native와 달리 이 흐름엔 그런 파라미터 자체가 계약에 없다).
-  const res = NextResponse.redirect(new URL('/glance', request.url), 303);
+  // ⚠️base는 request.url이 아니라 resolveAppUrl()이어야 한다 — Cloud Run에서 request.url의
+  // origin이 내부 bind 주소(0.0.0.0:PORT)로 해석돼 웹뷰가 unreachable host로 리다이렉트되는
+  // 사고를 오르테가 실측으로 잡았다(선생님 3번째 에러 근본원인). /api/auth/callback/[provider]
+  // 의 origin(=resolveAppUrl(null)) 패턴과 동일하게 맞춘다.
+  const res = NextResponse.redirect(`${resolveAppUrl(null)}/glance`, 303);
   res.headers.set('Cache-Control', 'no-store');
   res.headers.set('Referrer-Policy', 'no-referrer');
   res.cookies.set(SP_AT_COOKIE, consumeJson.access_token, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
