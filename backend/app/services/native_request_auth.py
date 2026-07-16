@@ -1,14 +1,11 @@
 """story 822817a0(E-AUTH-REBUILD 활성화게이트][C1]·doc §7 SSOT 서두): §7 신규 public native
-엔드포인트(챌린지 발급 2종, 이후 register/consume은 C4)가 공유하는 전처리 —
-exact Firebase Bearer ID token(auth_time<=5m) + exact App Check(REQUIRED, optional 아님 —
-구 S5 `native_bootstrap.py` 스킴과의 차이) + eligible migration state.
+엔드포인트가 공유하는 전처리 — exact Firebase Bearer ID token(auth_time<=5m) + exact App
+Check(REQUIRED, optional 아님 — 구 S5 `native_bootstrap.py` 스킴과의 차이) + eligible
+migration state + auth_valid_after cutover epoch(story bea25062).
 
-⚠️`auth_valid_after` cutover 재확인(story bea25062·PR #2206)은 이 헬퍼에 아직 없다 —
-Story A가 이 브랜치 기준(origin/develop)엔 아직 머지되지 않았다(PR #2206 오픈·산티아고
-리뷰 대기). 이 엔드포인트들은 `firebase_auth_mobile_issue` 플래그가 모든 non-test 환경에서
-False로 유지되는 한 501로 완전 비활성 상태이므로 라이브 보안 영향은 없다 — Story A 머지 후
-후속 소패치로 `_reject_if_before_cutover` 호출을 추가한다(C4 활성화 게이트 §7.7 체크리스트
-항목)."""
+⚠️story cbd578d4(C4) 후속: Story A(PR #2206)가 develop에 머지돼 `_reject_if_before_
+cutover`를 여기 추가한다(예고했던 소패치, §7.7 활성화 게이트 체크리스트 항목) — revoke된
+사용자의 pre-cutover ID token이 register/bootstrap 챌린지 발급·소비를 통과하는 걸 막는다."""
 from __future__ import annotations
 
 import logging
@@ -101,6 +98,10 @@ async def verify_native_request(
     if migration is None or migration.state not in ("provisioning", "firebase"):
         logger.warning("%s rejected reason=ineligible_migration_state", log_prefix)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not eligible")
+
+    from app.dependencies.auth import _reject_if_before_cutover
+
+    await _reject_if_before_cutover(identity_row.user_id, int(verified.auth_time), db)
 
     return VerifiedNativeRequest(
         user_id=identity_row.user_id, firebase_uid=verified.firebase_uid, app_check_app_id=app_check.app_id

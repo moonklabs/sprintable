@@ -186,6 +186,17 @@ class Settings(BaseSettings):
     # 미승인 앱이 App Check 토큰을 정확 서명해와도 이 목록에 없으면 거부.
     firebase_app_check_allowed_app_ids: str = ""
 
+    # story cbd578d4(C4·산티아고 §7.3): per-install register 엔드포인트가 attestation
+    # rpIdHash/AttestationApplicationId 검증에 강제하는 exact 값들. 미설정 시 register는
+    # 항상 거부(fail-closed) — dev/prod 실 앱 식별자 프로비저닝 후 채워진다.
+    ios_team_id: str = ""
+    android_signing_cert_digest_sha256_hex: str = ""
+    android_min_version_code: int = 0
+    play_integrity_project_number: str = ""
+    # §7.3: 사용자당 bounded N개 active installation — 초과 등록은 fresh re-auth(이미 강제,
+    # 5분 auth_time freshness)+MFA(user.totp_enabled 전제) 요구.
+    device_installation_max_active_per_user: int = 5
+
     @property
     def is_ee_enabled(self) -> bool:
         return self.license_consent.lower() == "agreed"
