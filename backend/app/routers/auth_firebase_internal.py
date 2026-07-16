@@ -33,7 +33,7 @@ from app.models.device_installation import DeviceInstallation
 from app.models.user import User
 from app.services.android_key_attestation import AndroidAttestationVerificationError, verify_bootstrap_signature
 from app.services.apple_app_attest import AppAttestVerificationError, verify_assertion
-from app.services.auth_cutover import get_auth_valid_after, is_before_cutover
+from app.services.auth_cutover import is_before_cutover
 from app.services.device_proof import (
     PURPOSE_BOOTSTRAP_REDEEM,
     ChallengeVerificationError,
@@ -505,15 +505,16 @@ async def issue_oauth_handoff(
         logger.warning("auth.oauth_handoff.issue rejected reason=inactive_or_missing_user")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
 
-    # 산티아고 §10 재확認 조건3(revoke↔mint TOCTOU): 이 발급 자체가 "지금 막 완결된" OAuth의
-    # 산물이라 reference_time=now — 그래도 발급 순간과 정확히 겹치는 revoke 레이스에 대비해
-    # mint_firebase_session과 동일하게 이 시점에도 한 번 확인한다(방어 심화, 필수 차단선은
-    # consume 3중 재검증).
+    # 산티아고 §10.8(reset_required+cutover epoch, issue+consume 양시점): 이 발급 자체가
+    # "지금 막 완결된" OAuth의 산물이라 reference_time=now — 그래도 발급 순간과 정확히 겹치는
+    # revoke 레이스에 대비해 이 시점에도 한 번 확인한다(방어 심화, 필수 차단선은 consume 3중
+    # 재검증). `_reject_if_before_cutover`(app/dependencies/auth.py)를 그대로 재사용 —
+    # cutover epoch뿐 아니라 `reset_required` state도 함께 거부(§10.8 명시 요구, get_auth_
+    # valid_after 단독으론 epoch만 보고 state를 놓쳤던 이전 구현의 갭 수정).
+    from app.dependencies.auth import _reject_if_before_cutover
+
     now = datetime.now(timezone.utc)
-    valid_after = await get_auth_valid_after(db, user_uuid)
-    if is_before_cutover(valid_after, now):
-        logger.warning("auth.oauth_handoff.issue rejected reason=before_cutover")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
+    await _reject_if_before_cutover(user_uuid, int(now.timestamp()), db)
 
     code, code_hash = generate_handoff_code()
     await issue_handoff_code(db, code_hash=code_hash, user_id=user_uuid, code_challenge=body.code_challenge)
@@ -574,16 +575,16 @@ async def consume_oauth_handoff(
         logger.warning("auth.oauth_handoff.consume rejected reason=user_inactive_at_consume")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
 
-    valid_after = await get_auth_valid_after(db, consumed.user_id)
-    if is_before_cutover(valid_after, consumed.created_at):
-        logger.warning("auth.oauth_handoff.consume rejected reason=revoked_after_issuance")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
+    from app.dependencies.auth import _reject_if_before_cutover
 
-    # mint 직전 재확인 — 코드 발급~consume 사이(최대 45초)의 revoke 레이스를 좁힌다.
-    valid_after_at_mint = await get_auth_valid_after(db, consumed.user_id)
-    if is_before_cutover(valid_after_at_mint, consumed.created_at):
-        logger.warning("auth.oauth_handoff.consume rejected reason=revoked_before_mint")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
+    consumed_ts = int(consumed.created_at.timestamp())
+    # §10.8: issue+consume 양시점 재검증. 3중 재확인(mint 전·직전·직후, native consume과
+    # 동형 TOCTOU 패턴) — `_reject_if_before_cutover` 재사용으로 reset_required state까지
+    # 함께 거부(get_auth_valid_after 단독으론 놓쳤던 갭 수정).
+    await _reject_if_before_cutover(consumed.user_id, consumed_ts, db)
+
+    # mint 직전 재확인 — 코드 발급~consume 사이(최대 120초)의 revoke 레이스를 좁힌다.
+    await _reject_if_before_cutover(consumed.user_id, consumed_ts, db)
 
     from datetime import timedelta
 
@@ -600,10 +601,7 @@ async def consume_oauth_handoff(
 
     # mint 직후(레거시 토큰 서명+RT 저장 커밋 이후) 재확인 — native consume의 "3번째
     # authoritative 재조회"와 동형: mint 도중 revoke가 끼어들었으면 방금 발급한 토큰을 폐기.
-    valid_after_after_mint = await get_auth_valid_after(db, consumed.user_id)
-    if is_before_cutover(valid_after_after_mint, consumed.created_at):
-        logger.warning("auth.oauth_handoff.consume rejected reason=revoked_during_mint")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
+    await _reject_if_before_cutover(consumed.user_id, consumed_ts, db)
 
     logger.info("auth.oauth_handoff.consume success")
     return OAuthHandoffConsumeResponse(

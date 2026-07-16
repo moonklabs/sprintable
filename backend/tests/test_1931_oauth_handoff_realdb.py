@@ -150,6 +150,48 @@ async def test_consume_wrong_verifier_rejected(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_consume_wrong_verifier_burns_code_no_retry(monkeypatch):
+    """§10.4 MUST("실패 mint가 재사용 상태로 되돌리지 않음"): code_hash 조건만으로 먼저
+    원자 소비하고 그 다음 constant-time PKCE 비교를 하므로, 틀린 verifier로 한 번 시도하면
+    코드가 이미 소모돼 그 뒤 올바른 verifier로도 재시도가 불가해야 한다(무제한 verifier
+    추측 방지)."""
+    from app.routers.auth_firebase_internal import (
+        OAuthHandoffConsumeRequest, OAuthHandoffIssueRequest, consume_oauth_handoff, issue_oauth_handoff,
+    )
+
+    _setup_common(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id = await _seed_eligible_user(s)
+
+        verifier, challenge = _pkce_pair()
+        async with Session() as s:
+            issued = await issue_oauth_handoff(
+                OAuthHandoffIssueRequest(user_id=str(user_id), code_challenge=challenge),
+                authorization=None, db=s,
+            )
+
+        wrong_verifier, _ = _pkce_pair()
+        async with Session() as s:
+            with pytest.raises(HTTPException):
+                await consume_oauth_handoff(
+                    OAuthHandoffConsumeRequest(code=issued.code, code_verifier=wrong_verifier),
+                    authorization=None, db=s,
+                )
+
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await consume_oauth_handoff(
+                    OAuthHandoffConsumeRequest(code=issued.code, code_verifier=verifier),
+                    authorization=None, db=s,
+                )
+            assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_consume_replay_after_success_rejected(monkeypatch):
     from app.routers.auth_firebase_internal import (
         OAuthHandoffConsumeRequest, OAuthHandoffIssueRequest, consume_oauth_handoff, issue_oauth_handoff,
@@ -311,7 +353,7 @@ async def test_issue_rejected_short_code_challenge(monkeypatch):
 
 @pytest.mark.anyio
 async def test_orphan_finding_revoke_between_issue_and_consume_rejected(monkeypatch):
-    """Story A(bea25062)/C4 orphan-finding 회귀와 동형 — issue 이후(45초 내 미만료) revoke가
+    """Story A(bea25062)/C4 orphan-finding 회귀와 동형 — issue 이후(120초 내 미만료) revoke가
     발생하면 consume이 cutover 재검증에서 거부돼야 한다(레거시 세션도 동일 §17d 메커니즘)."""
     from app.routers.auth_firebase_internal import (
         OAuthHandoffConsumeRequest, OAuthHandoffIssueRequest, consume_oauth_handoff, issue_oauth_handoff,
