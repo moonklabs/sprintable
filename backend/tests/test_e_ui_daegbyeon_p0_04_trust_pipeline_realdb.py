@@ -363,11 +363,11 @@ async def test_dependency_create_noop_for_non_story_item_type():
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            from app.models.pm import Epic
+            from app.models.pm import Goal
 
             org_id, project_id, caller_id = await _base_org_project_caller(s)
-            epic_a = Epic(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title="Epic A")
-            epic_b = Epic(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title="Epic B")
+            epic_a = Goal(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title="Epic A")
+            epic_b = Goal(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title="Epic B")
             s.add_all([epic_a, epic_b])
             await s.commit()
             epic_a_id, epic_b_id = epic_a.id, epic_b.id

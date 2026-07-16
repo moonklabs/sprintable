@@ -16,7 +16,8 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # tool_group() 피커 라벨 정합을 위해 analytics 오분류를 남겨두지 않는다).
     ("analytics", ("velocity", "health", "dashboard", "overview", "stats",
                    "sprint_summary", "recent_activity", "agent_stats", "blocked_stories",
-                   "unassigned_stories", "member_workload", "overdue", "epic_progress")),
+                   "unassigned_stories", "member_workload", "overdue", "epic_progress",
+                   "goal_progress")),
     ("agent_runs", ("agent_run", "run_status", "update_run")),
     ("audit", ("audit",)),
     ("webhooks", ("webhook",)),
@@ -28,7 +29,9 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("chat", ("chat", "message", "conversation")),
     ("sprints", ("sprint",)),
     ("hypotheses", ("hypothes",)),
-    ("epics", ("epic",)),
+    # 계층 리네이밍 B1(story 1925): "goal" 추가 — 백엔드 SSOT(app/services/mcp_toolset.py)와
+    # 동기화(sprintable_add_goal 등 신 이름도 이 그룹).
+    ("epics", ("epic", "goal")),
     ("tasks", ("task",)),
     ("stories", ("story", "stories", "backlog", "claim", "checkin")),
     # story b4027b2e(SEC): 백엔드 SSOT와 동기화 — E-CANVAS visual_artifacts가 전용 그룹으로 승격

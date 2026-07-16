@@ -155,7 +155,7 @@ class HypothesisEpicLink(Base):
         UUID(as_uuid=True), ForeignKey("hypotheses.id", ondelete="CASCADE"), nullable=False
     )
     epic_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("epics.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("goals.id", ondelete="CASCADE"), nullable=False
     )
     link_type: Mapped[str] = mapped_column(String(24), nullable=False, server_default="primary")
     created_at: Mapped[datetime] = mapped_column(

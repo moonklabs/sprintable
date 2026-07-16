@@ -56,7 +56,7 @@ def _get_org_project(auth: AuthContext) -> tuple[uuid.UUID | None, uuid.UUID | N
     return uuid.UUID(str(o)), uuid.UUID(str(p))
 
 
-_LINK_TABLES = {"story_id": "stories", "epic_id": "epics", "doc_id": "docs"}
+_LINK_TABLES = {"story_id": "stories", "epic_id": "goals", "doc_id": "docs"}
 
 
 async def _assert_link_target_in_scope(

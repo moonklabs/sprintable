@@ -27,7 +27,7 @@ from app.models.agent_run import AgentRun
 from app.models.dependency import ItemDependency
 from app.models.hypothesis import Hypothesis
 from app.models.member import AgentProjectProfile, Member
-from app.models.pm import Epic, Story, StoryActivity
+from app.models.pm import Goal, Story, StoryActivity
 from app.models.workflow_line import WorkflowLineStepApproval, WorkflowLineStepRun
 from app.services.member_resolver import resolve_member
 
@@ -255,7 +255,7 @@ async def overview(
     ).all()
     counts = {epic_id: (total, done) for epic_id, total, done in rows}
     epics_q = (
-        await session.execute(select(Epic).where(Epic.org_id == org_id))
+        await session.execute(select(Goal).where(Goal.org_id == org_id))
     ).scalars().all()
     epics = []
     for e in epics_q:

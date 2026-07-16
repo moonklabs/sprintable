@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 async def _epic_title(db: AsyncSession, epic_id: uuid.UUID | None) -> str | None:
     if not epic_id:
         return None
-    from app.models.pm import Epic
+    from app.models.pm import Goal
 
-    result = await db.execute(select(Epic).where(Epic.id == epic_id).limit(1))
+    result = await db.execute(select(Goal).where(Goal.id == epic_id).limit(1))
     epic = result.scalar_one_or_none()
     return epic.title if epic else None
 

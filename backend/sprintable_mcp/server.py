@@ -42,9 +42,9 @@ from .tools.agent_runs import (
     emit_event, poll_events, update_run_status,
 )
 from .tools.analytics import (
-    ActivityInput, AgentStatsInput, EpicProgressInput, OverdueMemberInput,
+    ActivityInput, AgentStatsInput, GoalProgressInput, OverdueMemberInput,
     SearchStoriesInput, SprintFilterInput, WorkloadInput,
-    get_agent_stats, get_blocked_stories, get_epic_progress,
+    get_agent_stats, get_blocked_stories, get_goal_progress,
     get_member_workload, get_overdue_tasks, get_project_health,
     get_project_overview, get_recent_activity, get_sprint_velocity_history,
     get_unassigned_stories, search_stories,
@@ -63,9 +63,9 @@ from .tools.docs import (
     SearchDocsInput, UpdateDocInput,
     create_doc, get_doc, list_docs, search_docs, update_doc,
 )
-from .tools.epics import (
-    AddEpicInput, ListEpicsInput, UpdateEpicInput,
-    add_epic, list_epics, update_epic,
+from .tools.goals import (
+    AddGoalInput, ListGoalsInput, UpdateGoalInput,
+    add_goal, list_goals, update_goal,
 )
 from .tools.hypotheses import (
     ConfirmHypothesisInput, CreateHypothesisInput, GetHypothesisInput,
@@ -358,16 +358,28 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_update_task_status",
      "[일감] 태스크 상태 변경.",
      UpdateTaskStatusInput, update_task_status),
-    # Epics (3) — E-SECURITY SEC-S1 확장: delete_epic 제거(에이전트 hard-delete 차단)
+    # Goals(구 Epics, 3) — E-SECURITY SEC-S1 확장: delete_goal 제거(에이전트 hard-delete 차단).
+    # 계층 리네이밍 B1(story 1925): 신 이름이 primary, 구 이름(sprintable_*_epic)은 **같은 핸들러
+    # 함수**를 참조하는 deprecated 별칭(hierarchy-rename-alias-mechanism-design §1 — 로직 복제
+    # 0, 드리프트 불가). 별칭 유지 기간 동안 무중단 서빙.
+    ("sprintable_list_goals",
+     "[일감] 목표 목록 조회.",
+     ListGoalsInput, list_goals),
+    ("sprintable_add_goal",
+     "[일감] 목표 생성.",
+     AddGoalInput, add_goal),
+    ("sprintable_update_goal",
+     "[일감] 목표 수정.",
+     UpdateGoalInput, update_goal),
     ("sprintable_list_epics",
-     "[일감] 에픽 목록 조회.",
-     ListEpicsInput, list_epics),
+     "[일감] [DEPRECATED→sprintable_list_goals] 에픽 목록 조회.",
+     ListGoalsInput, list_goals),
     ("sprintable_add_epic",
-     "[일감] 에픽 생성.",
-     AddEpicInput, add_epic),
+     "[일감] [DEPRECATED→sprintable_add_goal] 에픽 생성.",
+     AddGoalInput, add_goal),
     ("sprintable_update_epic",
-     "[일감] 에픽 수정.",
-     UpdateEpicInput, update_epic),
+     "[일감] [DEPRECATED→sprintable_update_goal] 에픽 수정.",
+     UpdateGoalInput, update_goal),
     # Hypotheses (6)
     ("sprintable_list_hypotheses",
      "[일감] 가설 목록 조회 (compact). epic_id/story_id/status/owner_member_id 필터."
@@ -457,9 +469,12 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_get_recent_activity",
      "[일감] 최근 프로젝트 활동 조회.",
      ActivityInput, get_recent_activity),
+    ("sprintable_get_goal_progress",
+     "[일감] 목표 진행 현황 조회.",
+     GoalProgressInput, get_goal_progress),
     ("sprintable_get_epic_progress",
-     "[일감] 에픽 진행 현황 조회.",
-     EpicProgressInput, get_epic_progress),
+     "[일감] [DEPRECATED→sprintable_get_goal_progress] 에픽 진행 현황 조회.",
+     GoalProgressInput, get_goal_progress),
     ("sprintable_get_agent_stats",
      "[일감] 에이전트 성과 통계 조회.",
      AgentStatsInput, get_agent_stats),

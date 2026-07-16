@@ -52,7 +52,7 @@ _FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
         "_scope_filter(auth,org_id,project_id) 헬퍼가 has_project_access/accessible_project_ids_in_org를 1-hop 아래서 호출",
     "app.routers.conversations:list_conversations":
         "_resolve_member(auth,org_id,db,project_id=) 로컬 wrapper가 resolve_member(project_id=)를 1-hop 아래서 호출",
-    "app.routers.epics:create_epic":
+    "app.routers.goals:create_goal":
         "enforce_body_context()가 has_project_access를 내부에서 호출(캐노니컬 가드, 이름만 다름)",
     "app.routers.hypotheses:list_hypotheses":
         "Depends(get_project_scoped_org_id)가 동일 project_id 쿼리파라미터로 has_project_access 검증",

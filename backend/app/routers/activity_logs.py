@@ -35,10 +35,10 @@ def _get_entity_models() -> dict[str, type]:
     if not _ENTITY_TITLE_MODELS:
         from app.models.conversation import Conversation
         from app.models.doc import Doc
-        from app.models.pm import Epic, Story, Task
+        from app.models.pm import Goal, Story, Task
         _ENTITY_TITLE_MODELS.update({
             "story": Story,
-            "epic": Epic,
+            "epic": Goal,
             "task": Task,
             "doc": Doc,
             "conversation": Conversation,

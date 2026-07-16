@@ -13,11 +13,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.epic_events import (
-    emit_epic_created,
-    emit_epic_reordered,
-    emit_epic_removed,
-    emit_epic_status_changed,
+from app.services.goal_events import (
+    emit_goal_created,
+    emit_goal_reordered,
+    emit_goal_removed,
+    emit_goal_status_changed,
 )
 
 
@@ -44,13 +44,13 @@ def _base_patches(stack: ExitStack, *, publish=None, webhook=None, notif=None):
 
 
 @pytest.mark.anyio
-async def test_emit_epic_created_fires_publish_and_webhook_with_correct_shape():
+async def test_emit_goal_created_fires_publish_and_webhook_with_correct_shape():
     epic = _epic()
     publish = MagicMock()
     webhook = AsyncMock()
     with ExitStack() as stack:
         _base_patches(stack, publish=publish, webhook=webhook)
-        await emit_epic_created(AsyncMock(), uuid.uuid4(), epic, actor_id=uuid.uuid4())
+        await emit_goal_created(AsyncMock(), uuid.uuid4(), epic, actor_id=uuid.uuid4())
 
     publish.assert_called_once()
     args = publish.call_args[0]
@@ -68,20 +68,20 @@ async def test_emit_epic_created_fires_publish_and_webhook_with_correct_shape():
 
 
 @pytest.mark.anyio
-async def test_emit_epic_created_with_assignee_gates_to_that_member_not_empty_set():
+async def test_emit_goal_created_with_assignee_gates_to_that_member_not_empty_set():
     """assignee 있으면 그 멤버로 게이팅(의도된 동작) — None도 빈 집합도 아님."""
     assignee_id = uuid.uuid4()
     epic = _epic(assignee_id=assignee_id)
     webhook = AsyncMock()
     with ExitStack() as stack:
         _base_patches(stack, webhook=webhook)
-        await emit_epic_created(AsyncMock(), uuid.uuid4(), epic)
+        await emit_goal_created(AsyncMock(), uuid.uuid4(), epic)
 
     assert webhook.call_args.kwargs["recipient_member_ids"] == {assignee_id}
 
 
 @pytest.mark.anyio
-async def test_emit_epic_status_changed_no_op_when_old_equals_new():
+async def test_emit_goal_status_changed_no_op_when_old_equals_new():
     """old_status == epic.status면 완전 no-op(publish_event조차 호출 안 됨) —
     emit_story_status_changed와 동형 규율."""
     epic = _epic(status="active")
@@ -89,19 +89,19 @@ async def test_emit_epic_status_changed_no_op_when_old_equals_new():
     webhook = AsyncMock()
     with ExitStack() as stack:
         _base_patches(stack, publish=publish, webhook=webhook)
-        await emit_epic_status_changed(AsyncMock(), uuid.uuid4(), epic, "active")
+        await emit_goal_status_changed(AsyncMock(), uuid.uuid4(), epic, "active")
 
     publish.assert_not_called()
     webhook.assert_not_awaited()
 
 
 @pytest.mark.anyio
-async def test_emit_epic_status_changed_fires_with_old_and_new_status():
+async def test_emit_goal_status_changed_fires_with_old_and_new_status():
     epic = _epic(status="done")
     publish = MagicMock()
     with ExitStack() as stack:
         _base_patches(stack, publish=publish)
-        await emit_epic_status_changed(AsyncMock(), uuid.uuid4(), epic, "active")
+        await emit_goal_status_changed(AsyncMock(), uuid.uuid4(), epic, "active")
 
     publish.assert_called_once()
     payload = publish.call_args[0][2]
@@ -110,7 +110,7 @@ async def test_emit_epic_status_changed_fires_with_old_and_new_status():
 
 
 @pytest.mark.anyio
-async def test_emit_epic_removed_uses_pre_captured_title_not_epic_object():
+async def test_emit_goal_removed_uses_pre_captured_title_not_epic_object():
     """삭제 後엔 epic 객체 조회 불가 — 호출자가 넘긴 title/project_id로만 payload 구성."""
     publish = MagicMock()
     webhook = AsyncMock()
@@ -118,7 +118,7 @@ async def test_emit_epic_removed_uses_pre_captured_title_not_epic_object():
     project_id = uuid.uuid4()
     with ExitStack() as stack:
         _base_patches(stack, publish=publish, webhook=webhook)
-        await emit_epic_removed(AsyncMock(), uuid.uuid4(), epic_id, "Deleted Epic", project_id)
+        await emit_goal_removed(AsyncMock(), uuid.uuid4(), epic_id, "Deleted Epic", project_id)
 
     payload = publish.call_args[0][2]
     assert payload["epic_id"] == str(epic_id)
@@ -130,7 +130,7 @@ async def test_emit_epic_removed_uses_pre_captured_title_not_epic_object():
 
 
 @pytest.mark.anyio
-async def test_emit_epic_reordered_fires_once_for_batch_gated_to_recipients():
+async def test_emit_goal_reordered_fires_once_for_batch_gated_to_recipients():
     """STEER 커밋 모델(ff662876): 배치당 1회 발화 + **지정 수신자 집합으로 게이팅**. 드래그가
     아니라 명시적 커밋(steer-dispatch)에서만 호출되며, recipient_member_ids로 fire_webhooks를
     게이팅하고 preserve_broadcast=False로 브로드캐스트를 폐지한다(현 None-브로드캐스트 과보정 폐기)."""
@@ -143,7 +143,7 @@ async def test_emit_epic_reordered_fires_once_for_batch_gated_to_recipients():
     webhook = AsyncMock()
     with ExitStack() as stack:
         _base_patches(stack, publish=publish, webhook=webhook)
-        await emit_epic_reordered(AsyncMock(), uuid.uuid4(), items, recipients)
+        await emit_goal_reordered(AsyncMock(), uuid.uuid4(), items, recipients)
 
     publish.assert_called_once()
     webhook.assert_awaited_once()
@@ -156,11 +156,11 @@ async def test_emit_epic_reordered_fires_once_for_batch_gated_to_recipients():
 
 
 @pytest.mark.anyio
-async def test_emit_epic_reordered_empty_items_is_noop():
+async def test_emit_goal_reordered_empty_items_is_noop():
     publish = MagicMock()
     with ExitStack() as stack:
         _base_patches(stack, publish=publish)
-        await emit_epic_reordered(AsyncMock(), uuid.uuid4(), [], set())
+        await emit_goal_reordered(AsyncMock(), uuid.uuid4(), [], set())
     publish.assert_not_called()
 
 
@@ -171,7 +171,7 @@ async def test_webhook_failure_does_not_propagate():
     webhook = AsyncMock(side_effect=RuntimeError("webhook down"))
     with ExitStack() as stack:
         _base_patches(stack, webhook=webhook)
-        await emit_epic_created(AsyncMock(), uuid.uuid4(), epic)  # 예외 없이 반환.
+        await emit_goal_created(AsyncMock(), uuid.uuid4(), epic)  # 예외 없이 반환.
     webhook.assert_awaited_once()
 
 
@@ -182,12 +182,12 @@ async def test_dispatch_notification_only_called_when_assignee_present():
     notif = AsyncMock()
     with ExitStack() as stack:
         _base_patches(stack, notif=notif)
-        await emit_epic_created(AsyncMock(), uuid.uuid4(), epic)
+        await emit_goal_created(AsyncMock(), uuid.uuid4(), epic)
     notif.assert_not_awaited()
 
     epic_with_assignee = _epic(assignee_id=uuid.uuid4())
     notif2 = AsyncMock()
     with ExitStack() as stack:
         _base_patches(stack, notif=notif2)
-        await emit_epic_created(AsyncMock(), uuid.uuid4(), epic_with_assignee)
+        await emit_goal_created(AsyncMock(), uuid.uuid4(), epic_with_assignee)
     notif2.assert_awaited_once()
