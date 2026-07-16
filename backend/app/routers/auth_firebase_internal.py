@@ -26,6 +26,7 @@ from app.core.config import settings
 from app.dependencies.database import get_db
 from app.models.auth_identity import AuthIdentity, AuthMigration
 from app.models.user import User
+from app.services.auth_cutover import is_before_cutover
 from app.services.firebase_session_mint import mint_session_cookie, mint_session_cookie_for_uid
 from app.services.firebase_verifier import verify_firebase_id_token
 from app.services.native_bootstrap import consume_bootstrap_code
@@ -222,6 +223,15 @@ async def consume_native_bootstrap(
             migration.state if migration else None,
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not eligible for Firebase session")
+
+    # 산티아고 #2202 3차 재검토 orphan finding(story bea25062로 종결): 코드 발급 후 45초
+    # 이내 revoke가 발생해도(user-wide Firebase revoke는 이미 발급된 custom-token 재생성
+    # 경로를 자동 차단하지 않음) 코드 자체는 아직 안 만료됐으면 여기까지 통과해버렸다.
+    # consumed.created_at(코드 발급 시각)을 cutover epoch와 비교해 발급 이후 revoke가
+    # 있었으면 거부 — §17d-1과 동일 기준, native-bootstrap 소비 시점에 재적용.
+    if is_before_cutover(migration.auth_valid_after, consumed.created_at):
+        logger.warning("auth.native_bootstrap.consume rejected reason=revoked_after_issuance")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
 
     valid_duration_seconds = 5 * 24 * 60 * 60
     session_cookie = await mint_session_cookie_for_uid(

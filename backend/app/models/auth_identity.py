@@ -62,6 +62,10 @@ class AuthMigration(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+    # story bea25062(§17d-1 cutover epoch authority): NULL=제약 없음(기본, 기존 동작 무변화).
+    # 값이 있으면 그 시각 이전에 발급된 자격증명(iat/auth_time)은 전부 거부 — 단일 사용자
+    # revoke나 Phase 4 대량 cutover 둘 다 이 컬럼 하나로 표현된다.
+    auth_valid_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AuthMigrationEvent(Base):

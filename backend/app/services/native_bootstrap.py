@@ -61,6 +61,7 @@ async def issue_bootstrap_code(
 class ConsumedBootstrapCode:
     user_id: object
     firebase_uid: str
+    created_at: datetime  # story bea25062: 발급 시각 — cutover epoch 비교의 기준 시점
 
 
 async def consume_bootstrap_code(
@@ -93,11 +94,15 @@ async def consume_bootstrap_code(
         update(AuthNativeBootstrapCode)
         .where(*conditions)
         .values(consumed_at=now)
-        .returning(AuthNativeBootstrapCode.user_id, AuthNativeBootstrapCode.firebase_uid)
+        .returning(
+            AuthNativeBootstrapCode.user_id,
+            AuthNativeBootstrapCode.firebase_uid,
+            AuthNativeBootstrapCode.created_at,
+        )
     )
     result = await db.execute(stmt)
     row = result.first()
     await db.commit()
     if row is None:
         return None
-    return ConsumedBootstrapCode(user_id=row[0], firebase_uid=row[1])
+    return ConsumedBootstrapCode(user_id=row[0], firebase_uid=row[1], created_at=row[2])

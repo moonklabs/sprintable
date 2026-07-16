@@ -209,6 +209,29 @@ async def _resolve_api_key(
     )
 
 
+async def _reject_if_before_cutover(user_id: str, unix_timestamp: int | None, db: AsyncSession) -> None:
+    """story bea25062(§17d-1 cutover epoch authority): legacy iat/Firebase auth_time이
+    이 사용자의 auth_valid_after 이전(또는 동일)이면 거부. AuthMigration 행이 없거나
+    auth_valid_after가 NULL이면(현재 대부분의 사용자) 제약 없음 — 기존 동작 100% 무변화.
+
+    ⚠️전역 존재-캐시(`check_any_cutover_epoch_exists()`)를 먼저 본다 — revoke가 시스템
+    전체에 단 한 번도 없었다면(오늘의 현실) 이 요청의 `db`/`user_id`를 전혀 건드리지 않고
+    즉시 반환한다. 이게 없으면 legacy JWT 검증(원래 DB 완전 무접촉)이 인증된 모든 요청마다
+    DB 왕복 1건을 영구히 추가하게 되고, `db=None`/`AsyncMock()`으로 이 경로를 호출하는
+    기존 단위 테스트들도 깨진다(자체 발견 — auth_cutover.py 모듈 docstring 참조)."""
+    if unix_timestamp is None:
+        return
+    from app.services.auth_cutover import check_any_cutover_epoch_exists, get_auth_valid_after, is_before_cutover
+
+    if not await check_any_cutover_epoch_exists():
+        return
+
+    auth_valid_after = await get_auth_valid_after(db, uuid.UUID(user_id))
+    reference_time = datetime.fromtimestamp(unix_timestamp, tz=timezone.utc)
+    if is_before_cutover(auth_valid_after, reference_time):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
+
+
 async def _resolve_firebase_session(token: str, db: AsyncSession) -> AuthContext:
     """story 455e528d(doc §3.3): Firebase 세션 검증 후 resource-actual AuthContext 구성.
 
@@ -246,6 +269,8 @@ async def _resolve_firebase_session(token: str, db: AsyncSession) -> AuthContext
     user = await db.get(User, identity_row.user_id)
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    await _reject_if_before_cutover(str(user.id), verified.auth_time, db)
 
     org_id = str(user.last_org_id) if user.last_org_id else None
     app_metadata: dict = {}
@@ -315,6 +340,8 @@ async def get_current_user(
     user_id: str | None = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing sub claim")
+
+    await _reject_if_before_cutover(user_id, payload.get("iat"), db)
 
     org_id: str | None = payload.get("app_metadata", {}).get("org_id")
 
@@ -718,6 +745,11 @@ async def get_current_user_streaming(
     user_id: str | None = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing sub claim")
+
+    # story bea25062: legacy 경로도 cutover epoch 검사 필요 — API key/Firebase 경로와 동형으로
+    # 단명 세션(async with)만 이 검사를 위해 열고 즉시 close(스트림 yield 구간 미점유 유지).
+    async with async_session_factory() as db:
+        await _reject_if_before_cutover(user_id, payload.get("iat"), db)
 
     return AuthContext(
         user_id=user_id,
