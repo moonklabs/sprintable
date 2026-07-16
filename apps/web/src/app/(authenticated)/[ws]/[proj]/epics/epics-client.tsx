@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ChevronLeft, GripVertical, Plus, Send, Trash2, X } from 'lucide-react';
+import { ChevronLeft, GripVertical, Plus, Send, Trash2, X, Flag } from 'lucide-react';
 import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -13,6 +13,21 @@ import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
+
+// story 3995840c(doc resource-view-firsttouch-identity-pattern §4 "에픽" 행 — 정체성=하나의 큰
+// 목표·여러 스토리가 성과로·visual=선택 그룹hint): 작은 점 3개가 큰 원 하나로 모이는 형태 —
+// 실험실(4노드 원형 사이클)·현황판(3-waypoint 직선)·스프린트(기간bar)와 differentiate. 과설명
+// 금지 — 점+원뿐, 라벨 없음(그룹핑 자체가 메시지).
+function EpicGroupHint() {
+  return (
+    <svg viewBox="0 0 48 24" className="size-6 w-12 text-muted-foreground/50" aria-hidden="true">
+      <circle cx="10" cy="8" r="2" fill="currentColor" opacity="0.5" />
+      <circle cx="10" cy="16" r="2" fill="currentColor" opacity="0.5" />
+      <circle cx="4" cy="12" r="2" fill="currentColor" opacity="0.5" />
+      <circle cx="34" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
 import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
@@ -1012,16 +1027,36 @@ export function EpicsClient({ projectId, orgId }: EpicsClientProps) {
       {/* List body */}
       <div className="flex-1 overflow-y-auto p-4" aria-busy={reordering}>
         {filteredEpics.length === 0 ? (
-          <EmptyState
-            title={t('noEpics')}
-            description={t('noEpicsDescription')}
-            action={
-              <Button size="sm" onClick={() => setShowCreate(true)}>
-                <Plus className="size-4" />
-                {t('newEpic')}
-              </Button>
-            }
-          />
+          // story 3995840c — 정체성 explainer는 "진짜 빈 프로젝트"(epics.length===0)에만.
+          // 필터 적용 중 결과 0건(예: 전부 done인데 draft 필터)은 "아직 시작 안 함"이 거짓이라
+          // 별개의 중립 카피 유지(no-fiction — resource-view-firsttouch-identity-pattern §3
+          // "이 패턴은 빈상태 전용" 규율).
+          epics.length === 0 ? (
+            <EmptyState
+              icon={<Flag className="size-8" />}
+              title={t('noEpics')}
+              description={t('noEpicsDescription')}
+              action={
+                <div className="flex flex-col items-center gap-4">
+                  <EpicGroupHint />
+                  <Button size="sm" onClick={() => setShowCreate(true)}>
+                    <Plus className="size-4" />
+                    {t('newEpic')}
+                  </Button>
+                </div>
+              }
+            />
+          ) : (
+            <EmptyState
+              title={t('noEpicsFiltered')}
+              action={
+                <Button size="sm" onClick={() => setShowCreate(true)}>
+                  <Plus className="size-4" />
+                  {t('newEpic')}
+                </Button>
+              }
+            />
+          )
         ) : (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => void handleDragEnd(e)}>
             <SortableContext items={filteredEpics.map((e) => e.id)} strategy={verticalListSortingStrategy}>
