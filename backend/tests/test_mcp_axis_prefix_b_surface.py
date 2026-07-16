@@ -60,6 +60,7 @@ def test_anchor_tools_match_doc_examples():
 
 
 def test_tool_names_and_param_models_untouched():
-    """이름·시그니처 불변 — 여전히 106개, 이름 형식 sprintable_* 그대로."""
-    assert len(_TOOL_DEFS) == 106
+    """이름·시그니처 불변 — 계층 리네이밍 B1(story 1925)이 sprintable_*_goal 4종을 신설(구
+    sprintable_*_epic 4종은 deprecated 별칭 유지, 제거 아님) — 106→110."""
+    assert len(_TOOL_DEFS) == 110
     assert all(name.startswith("sprintable_") for name in _TOOLS)
