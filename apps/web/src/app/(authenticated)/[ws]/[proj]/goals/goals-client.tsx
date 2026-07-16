@@ -254,7 +254,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
       await wireDeclarations(data.id);
       onCreated(data);
     } catch {
-      setError('에픽 생성에 실패했습니다. 다시 시도해 주세요.');
+      setError('목표 생성에 실패했습니다. 다시 시도해 주세요.');
     } finally {
       setSubmitting(false);
     }
@@ -391,7 +391,7 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
       const { data } = await res.json() as { data: Goal };
       onSaved({ ...data, stories: epic.stories });
     } catch {
-      setError('에픽 수정에 실패했습니다. 다시 시도해 주세요.');
+      setError('목표 수정에 실패했습니다. 다시 시도해 주세요.');
     } finally {
       setSubmitting(false);
     }
@@ -934,11 +934,11 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       const res = await fetch(`/api/goals/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? '에픽 삭제에 실패했습니다.' });
+        addToast({ type: 'error', title: json?.error?.message ?? '목표 삭제에 실패했습니다.' });
         void fetchGoals();
       }
     } catch {
-      addToast({ type: 'error', title: '에픽 삭제에 실패했습니다.' });
+      addToast({ type: 'error', title: '목표 삭제에 실패했습니다.' });
       void fetchGoals();
     } finally {
       setDeleting(false);
@@ -1156,9 +1156,9 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       <Dialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>에픽을 삭제하시겠습니까?</DialogTitle>
+            <DialogTitle>목표를 삭제하시겠습니까?</DialogTitle>
             <DialogDescription>
-              이 작업은 되돌릴 수 없습니다. 에픽에 포함된 스토리는 연결이 해제됩니다.
+              이 작업은 되돌릴 수 없습니다. 목표에 포함된 스토리는 연결이 해제됩니다.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -222,12 +222,12 @@ export default function EpicDetailPage() {
       const res = await fetch(`/api/goals/${epic.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? '에픽 삭제에 실패했습니다.' });
+        addToast({ type: 'error', title: json?.error?.message ?? '목표 삭제에 실패했습니다.' });
         return;
       }
       router.replace(`/${wsSlug}/${projSlug}/goals`);
     } catch {
-      addToast({ type: 'error', title: '에픽 삭제에 실패했습니다.' });
+      addToast({ type: 'error', title: '목표 삭제에 실패했습니다.' });
     } finally {
       setDeleting(false);
       setShowDeleteConfirm(false);
@@ -264,7 +264,7 @@ export default function EpicDetailPage() {
           <div className="flex items-center gap-2">
             <Link href={`/${wsSlug}/${projSlug}/goals`} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
               <ArrowLeft className="h-3.5 w-3.5" />
-              에픽 목록
+              목표 목록
             </Link>
             <span className="text-muted-foreground">/</span>
             <span className="text-sm font-medium truncate max-w-[200px]">{epic.title}</span>
@@ -290,7 +290,7 @@ export default function EpicDetailPage() {
                 type="button"
                 onClick={() => setShowDeleteConfirm(true)}
                 className="flex items-center gap-1.5 rounded-lg border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
-                aria-label="에픽 삭제"
+                aria-label="목표 삭제"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 삭제
@@ -433,9 +433,9 @@ export default function EpicDetailPage() {
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>에픽을 삭제하시겠습니까?</DialogTitle>
+            <DialogTitle>목표를 삭제하시겠습니까?</DialogTitle>
             <DialogDescription>
-              이 작업은 되돌릴 수 없습니다. 에픽에 포함된 스토리는 연결이 해제됩니다.
+              이 작업은 되돌릴 수 없습니다. 목표에 포함된 스토리는 연결이 해제됩니다.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
