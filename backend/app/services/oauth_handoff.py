@@ -25,6 +25,11 @@ from app.models.oauth_handoff_code import OAuthHandoffCode
 
 DEFAULT_TTL_SECONDS = 45  # 산티아고 §9 계약과 동일(native_bootstrap.py DEFAULT_TTL_SECONDS)
 
+# 산티아고 §10.1.1/.7(2026-07-16 조건부 GREEN MUST): 이 테이블의 모든 행은 이 고정 purpose만
+# 가진다 — attested 코드와 물리적으로 다른 테이블일 뿐 아니라, consume 쿼리 자체도 이 값을
+# 조건으로 명시해 "일반 assertion consume의 optional 분기로 구현 금지"를 코드로 재확인한다.
+PURPOSE_NATIVE_OAUTH_HANDOFF = "native_oauth_handoff"
+
 
 def _hash_code(code: str) -> str:
     return hashlib.sha256(code.encode()).hexdigest()
@@ -62,6 +67,7 @@ async def issue_handoff_code(
         firebase_uid=firebase_uid,
         project_id=project_id,
         code_hash=code_hash,
+        purpose=PURPOSE_NATIVE_OAUTH_HANDOFF,
         code_challenge=code_challenge,
         auth_time=auth_time,
         created_at=now,
@@ -101,6 +107,7 @@ async def consume_handoff_code(
         update(OAuthHandoffCode)
         .where(
             OAuthHandoffCode.code_hash == code_hash,
+            OAuthHandoffCode.purpose == PURPOSE_NATIVE_OAUTH_HANDOFF,
             OAuthHandoffCode.code_challenge == expected_challenge,
             OAuthHandoffCode.consumed_at.is_(None),
             OAuthHandoffCode.expires_at > now,

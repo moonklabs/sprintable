@@ -1,6 +1,7 @@
-"""story 1931(계약 doc `e-mobile-oauth-native-handoff-contract` §4/§7.5(b)): OAuth 완결→
-웹뷰 세션 핸드오프용 단회 코드 테이블 신설. attested `auth_native_bootstrap_codes`(§7.5)와
-물리적으로 분리 — installation/challenge FK 없음, 대신 PKCE `code_challenge`에 바인딩.
+"""story 1931(계약 doc `e-mobile-oauth-native-handoff-contract` §4/§7.5(b)·산티아고 §10 MUST):
+OAuth 완결→웹뷰 세션 핸드오프용 단회 코드 테이블 신설. attested `auth_native_bootstrap_codes`
+(§7.5)와 물리적으로 분리 — installation/challenge FK 없음, 대신 PKCE `code_challenge`에 바인딩
++ `purpose` discriminator(§10.1.1) 고정.
 
 Revision ID: 0196
 Revises: 0195
@@ -29,6 +30,7 @@ def upgrade() -> None:
         sa.Column("firebase_uid", sa.Text(), nullable=False),
         sa.Column("project_id", sa.Text(), nullable=False),
         sa.Column("code_hash", sa.Text(), nullable=False, unique=True),
+        sa.Column("purpose", sa.Text(), nullable=False),
         sa.Column("code_challenge", sa.Text(), nullable=False),
         sa.Column("auth_time", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
