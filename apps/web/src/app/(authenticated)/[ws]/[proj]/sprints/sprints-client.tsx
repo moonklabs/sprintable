@@ -6,7 +6,22 @@ import { useTranslations } from 'next-intl';
 import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target, Clock, Users, Calendar, Ban } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+
+// story 5e229540(doc resource-view-firsttouch-identity-pattern §4 "스프린트" 행 — 정체성=
+// 한 번의 집중 사이클·시작 시 가설 선언·끝에 배움 종합·visual=선택 기간bar): 실험실(원형
+// 4노드)·현황판(직선 3-waypoint)과 differentiate — 스프린트는 "담긴 기간"이라 컨테인드
+// 바(bounded bar) 형태. 과설명 금지 — 시작/종합 라벨 2개뿐.
+function SprintCycleBar({ startLabel, endLabel }: { startLabel: string; endLabel: string }) {
+  return (
+    <div className="flex items-center gap-2 text-muted-foreground/70" aria-hidden="true">
+      <span className="text-[10px] leading-none">{startLabel}</span>
+      <div className="h-2 w-24 rounded-full bg-gradient-to-r from-info/60 to-info/20" />
+      <span className="text-[10px] leading-none">{endLabel}</span>
+    </div>
+  );
+}
 import type { MetricDefinition } from '@/components/outcome/outcome-intent-fields';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import type { OutcomeStatus } from '@/components/outcome/outcome-status-badge';
@@ -619,7 +634,23 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       {/* Sprint list */}
       <div className={`flex flex-col gap-3 overflow-y-auto p-6 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>
         {sprints.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t('noSprints')}</p>
+          <EmptyState
+            icon={<Target className="size-8" />}
+            title={t('noSprints')}
+            description={t('noSprintsDescription')}
+            action={
+              <div className="flex flex-col items-center gap-4">
+                <SprintCycleBar startLabel={t('noSprintsBarStart')} endLabel={t('noSprintsBarEnd')} />
+                <div className="flex flex-col items-center gap-1.5">
+                  <Button size="sm" onClick={() => setShowCreate(true)}>
+                    <Plus className="size-3.5" />
+                    {t('noSprintsCta')}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">{t('noSprintsHint')}</p>
+                </div>
+              </div>
+            }
+          />
         ) : (
           <ul className="space-y-2">
             {sprints.map((sprint) => (
