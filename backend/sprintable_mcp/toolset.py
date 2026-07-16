@@ -11,7 +11,10 @@ from __future__ import annotations
 
 _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("rewards", ("reward", "wallet", "leaderboard")),
-    ("analytics", ("velocity", "health", "dashboard", "overview", "stats", "standup_missing",
+    # story 205e6831: "standup_missing" 키워드를 여기서 제거 — 백엔드 SSOT(app/services/
+    # mcp_toolset.py)와 동기화(standup_missing이 이제 core 편입돼 그룹 분류 자체는 무관해졌지만,
+    # tool_group() 피커 라벨 정합을 위해 analytics 오분류를 남겨두지 않는다).
+    ("analytics", ("velocity", "health", "dashboard", "overview", "stats",
                    "sprint_summary", "recent_activity", "agent_stats", "blocked_stories",
                    "unassigned_stories", "member_workload", "overdue", "epic_progress")),
     ("agent_runs", ("agent_run", "run_status", "update_run")),
@@ -67,6 +70,10 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # story b4027b2e(SEC): story 7fe16274가 여기 심었던 visual_artifacts 11종 always-allow는
     # 이 스토리에서 "canvas" 전용 그룹(_GROUP_KEYWORDS)으로 대체(상위 mcp_toolset.py 커밋 참고) —
     # always-allow에 남기면 REST 쪽 canvas 그룹 신설과 불일치(도구는 보이는데 REST는 403).
+    # story 205e6831(FR·대표요청): 스탠드업 5종을 core 편입(백엔드 SSOT와 동기화, 사유는
+    # app/services/mcp_toolset.py 참고 — role_template 특정 대신 범용 업무로 core 승격).
+    "sprintable_get_standup", "sprintable_save_standup", "sprintable_list_standup_entries",
+    "sprintable_standup_history", "sprintable_standup_missing",
 })
 
 _LEGACY_SCOPES: frozenset[str] = frozenset({"read", "write"})
