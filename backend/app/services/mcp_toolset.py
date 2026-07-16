@@ -81,6 +81,14 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 조작이라 파괴적이지 않음(has_project_access로 대상 검증). vendored 사본과 동기화 필수
     # (sprintable_mcp/toolset.py).
     "sprintable_list_projects", "sprintable_set_default_project",
+    # story 205e6831(FR·대표요청): 대표 role이 불명확(role_template 22개 중 어느 것이든 될 수
+    # 있음) — 개별 role의 default_tool_groups를 고치는 대신 스탠드업을 범용 업무로 core 편입
+    # (선생님 방향: 스탠드업은 직무 무관 공통 업무). tool_group()은 여전히 "standup" 그룹으로
+    # 분류하지만(피커 UI 라벨용), is_tool_allowed는 이 목록을 먼저 체크해 그룹/scope 무관 항상
+    # 허용 — role_template.default_tool_groups에 "standup" 유무와 무관하게 모든 role이 호출
+    # 가능해진다(pm/scrum-master 전용이던 걸 22개 role 전체로 확대 = 회귀 아닌 기능 추가).
+    "sprintable_get_standup", "sprintable_save_standup", "sprintable_list_standup_entries",
+    "sprintable_standup_history", "sprintable_standup_missing",
 })
 
 # scope 토큰: 그룹명 외에 read/write(레거시·전체 비파괴 의미), admin/destructive(파괴적 허용)
@@ -189,11 +197,16 @@ _ALWAYS_ALLOWED_PATH_PREFIXES: tuple[str, ...] = (
     # E-VERIFY V0-S1: evidence는 story/task 어느 쪽이든 첨부되는 cross-cutting 자기증명이라
     # 단일 도메인 그룹에 안 묶임(_ALWAYS_ALLOWED의 sprintable_add_evidence와 동일 근거).
     "/api/v2/evidence",
+    # story 205e6831(FR·대표요청): MCP _ALWAYS_ALLOWED에 스탠드업 5종을 core 편입했는데 여기(REST
+    # path scope)를 같이 안 고치면 canvas 선례(b4027b2e)와 동일한 "도구는 보이는데 호출은 403"
+    # 불일치가 재발한다 — tools/list는 항상 노출하지만 실제 HTTP 호출은 _check_api_key_scope가
+    # 여전히 "standup" 그룹 미보유 키를 막았을 것. 아래 _PATH_GROUP_PREFIXES의 standup 매핑도 같이
+    # 제거(이 prefix가 먼저 매치돼 always-allowed로 빠지므로 그 매핑은 이제 도달 불가 dead 항목).
+    "/api/v2/standups",
 )
 
 # path-prefix → toolset group(라우터 리소스 정렬). 모든 group 은 ALL_GROUPS 소속이어야 함.
 _PATH_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
-    ("/api/v2/standups", "standup"),
     ("/api/v2/rewards", "rewards"),
     ("/api/v2/wallet", "rewards"),
     ("/api/v2/leaderboard", "rewards"),
@@ -317,9 +330,15 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.
+# story 205e6831: "standup"을 여기서 제거 — 스탠드업 5종 전부가 _ALWAYS_ALLOWED(core)로 편입돼
+# build_toolset_catalog()의 always-allowed 제외 로직상 이 그룹은 영구적으로 tools=[]가 된다
+# (모든 그룹은 멤버를 가져야 하는 카탈로그 계약 위반). "standup"은 _GROUP_KEYWORDS/ALL_GROUPS엔
+# 그대로 남겨둔다 — pm/scrum-master role_template.default_tool_groups가 여전히 이 literal
+# 토큰을 갖고 있어 제거 시 validate_tool_groups()가 unknown-group ValueError를 던진다(그
+# 토큰 자체는 이제 no-op이지만 seed seed 마이그 없이 여길 건드리면 recruit/rotate가 깨진다).
 _CATALOG_DISPLAY_ORDER: tuple[str, ...] = (
     "stories", "tasks", "sprints", "epics", "hypotheses", "chat", "docs", "analytics", "retro",
-    "standup", "meetings", "notifications", "webhooks", "rewards", "audit", "agent_runs", "canvas",
+    "meetings", "notifications", "webhooks", "rewards", "audit", "agent_runs", "canvas",
 )
 
 
