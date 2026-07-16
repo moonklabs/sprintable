@@ -179,6 +179,11 @@ class StoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    # story 9ac9b80f(FR·대표요청): 프로젝트 스코프 사람-읽는 #N — id(UUID)는 canonical 유지,
+    # 이건 additive 참조 편의 필드(project_id 내에서만 유일, 서버 채번·client-settable 아님).
+    # int | None: 실 생성 경로(REST API·oss_seed)는 항상 채번하지만, 레포지토리를 우회해 직접
+    # ORM construct하는 기존 테스트 fixture(이 스토리와 무관한 다른 에픽들) 행은 null일 수 있다.
+    story_number: int | None = None
     project_id: uuid.UUID
     org_id: uuid.UUID
     epic_id: uuid.UUID | None = None

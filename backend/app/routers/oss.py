@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.pm import Story
+from app.repositories.story import allocate_story_number
 from app.services.project_auth import has_project_access
 
 router = APIRouter(prefix="/api/v2/oss", tags=["oss"])
@@ -42,10 +43,14 @@ async def oss_seed(
         return {"seeded": False, "reason": "already_has_data"}
 
     for story_data in _SAMPLE_STORIES:
+        # story 9ac9b80f: StoryRepository.create()를 거치지 않는 직접 ORM 구성 경로 —
+        # allocate_story_number를 여기서도 명시 호출해야 story_number NOT NULL을 채운다.
+        story_number = await allocate_story_number(session, project_id)
         session.add(
             Story(
                 project_id=project_id,
                 org_id=org_id,
+                story_number=story_number,
                 title=story_data["title"],
                 status=story_data["status"],
                 priority=story_data["priority"],

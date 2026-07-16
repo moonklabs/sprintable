@@ -16,6 +16,8 @@ def _mock_story(status: str = "backlog") -> MagicMock:
     s.id = STORY_ID
     s.org_id = ORG_ID
     s.project_id = PROJECT_ID
+    # story 9ac9b80f: MagicMock 자동 속성은 Pydantic int|None 검증 실패 — 명시 세팅.
+    s.story_number = 1
     s.epic_id = None
     s.sprint_id = None
     s.assignee_id = None
@@ -101,7 +103,12 @@ async def test_create_story_201():
     client, session, app = await _client()
     try:
         story = _mock_story()
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+        # story 9ac9b80f: StoryRepository.create()가 이제 BaseRepository.create() 前에
+        # allocate_story_number()(실 DB advisory lock+MAX 쿼리)를 먼저 호출한다 — mock 세션에
+        # 그 호출까지 재현하지 않고 라우터 wiring만 검증하려면 서브클래스 레벨(StoryRepository.create)
+        # 을 patch해야 한다(BaseRepository.create만 patch하면 allocate_story_number가 mock
+        # session.execute()에 그대로 부딪혀 TypeError).
+        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = story
 
             async with client as c:
@@ -377,7 +384,12 @@ async def test_create_story_with_intent_fields_201():
         story.metric_definition = _VALID_METRIC
         story.measure_after = datetime(2026, 7, 1, tzinfo=timezone.utc)
 
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+        # story 9ac9b80f: StoryRepository.create()가 이제 BaseRepository.create() 前에
+        # allocate_story_number()(실 DB advisory lock+MAX 쿼리)를 먼저 호출한다 — mock 세션에
+        # 그 호출까지 재현하지 않고 라우터 wiring만 검증하려면 서브클래스 레벨(StoryRepository.create)
+        # 을 patch해야 한다(BaseRepository.create만 patch하면 allocate_story_number가 mock
+        # session.execute()에 그대로 부딪혀 TypeError).
+        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = story
 
             async with client as c:
@@ -441,7 +453,12 @@ async def test_create_story_outcome_fields_ignored():
     client, session, app = await _client()
     try:
         story = _mock_story()
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+        # story 9ac9b80f: StoryRepository.create()가 이제 BaseRepository.create() 前에
+        # allocate_story_number()(실 DB advisory lock+MAX 쿼리)를 먼저 호출한다 — mock 세션에
+        # 그 호출까지 재현하지 않고 라우터 wiring만 검증하려면 서브클래스 레벨(StoryRepository.create)
+        # 을 patch해야 한다(BaseRepository.create만 patch하면 allocate_story_number가 mock
+        # session.execute()에 그대로 부딪혀 TypeError).
+        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = story
 
             async with client as c:
