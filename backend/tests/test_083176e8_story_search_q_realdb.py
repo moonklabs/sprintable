@@ -94,7 +94,7 @@ async def _call_list_stories(session, org_id, agent_id, **kwargs):
     repo = StoryRepository(session, org_id)
     params = dict(
         project_id=None, epic_id=None, sprint_id=None, assignee_id=None,
-        status_filter=None, no_sprint=False, ids=None, q=None, limit=1000,
+        status_filter=None, no_sprint=False, ids=None, story_number=None, q=None, limit=1000,
         cursor=None, response=None,
     )
     params.update(kwargs)

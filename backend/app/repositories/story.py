@@ -19,9 +19,33 @@ _PRIORITY_ORDER = case(
 )
 
 
+async def allocate_story_number(session: AsyncSession, project_id: uuid.UUID) -> int:
+    """story 9ac9b80f(FR·대표요청): 프로젝트별 race-safe sequential #N 채번.
+
+    advisory xact lock으로 동일 project_id 동시생성을 직렬화(recruit_service.
+    acquire_agent_mutation_lock과 동형 관례) — MAX()+1은 잠금 없이는 TOCTOU(두 트랜잭션이
+    같은 max를 읽어 같은 번호를 계산)에 취약하지만, 잠금이 이 함수 호출부터 caller의 커밋/롤백
+    까지 동일 project_id 락을 직렬화하므로 안전. 별도 unlock 불요(트랜잭션 종료 시 자동 해제).
+    caller는 이 호출과 실제 INSERT를 **같은 트랜잭션**(같은 session, 중간 commit 없음)에서
+    수행해야 한다."""
+    await session.execute(
+        select(func.pg_advisory_xact_lock(func.hashtext(f"story_number:{project_id}")))
+    )
+    result = await session.execute(
+        select(func.coalesce(func.max(Story.story_number), 0)).where(Story.project_id == project_id)
+    )
+    return int(result.scalar_one()) + 1
+
+
 class StoryRepository(BaseRepository[Story]):
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         super().__init__(Story, session, org_id)
+
+    async def create(self, **data) -> Story:
+        """story 9ac9b80f: story_number는 client-settable 아님 — 항상 서버가 project_id로
+        allocate_story_number 호출해 채번한다(BaseRepository.create 전 오버라이드)."""
+        story_number = await allocate_story_number(self.session, data["project_id"])
+        return await super().create(story_number=story_number, **data)
 
     async def list(self, limit: int = 1000, *, q: str | None = None, **filters) -> list[Story]:
         """story 083176e8(까심 #2148 QA 적출): 갤러리 피커 실검색 — `q`는 title ILIKE 부분일치로
