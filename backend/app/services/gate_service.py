@@ -33,6 +33,28 @@ from app.services.gate_resolver import resolve_disposition
 
 logger = logging.getLogger(__name__)
 
+
+async def _resolve_gate_notification_targets(session: AsyncSession, org_id: uuid.UUID) -> list[uuid.UUID]:
+    """story 1934: gate 생성 알림 대상 = org owner/admin 전원(수신자를 org_members에서 직접
+    해소 — team_members VIEW는 grant-only 휴먼을 탈락시키므로 쓰지 않는다, feedback_team_
+    members_view_human_drop 교훈).
+
+    ⚠️휴먼은 `members.id == org_members.id`(E-MEMBER-SSOT AC2-1 앵커 백필 불변식)라 org_members.id
+    를 그대로 dispatch_notification의 target_member_ids(member_id 공간)로 쓸 수 있다 — 별도
+    JOIN/변환 불필요."""
+    from sqlalchemy import text
+
+    rows = await session.execute(
+        text(
+            """
+            SELECT id FROM org_members
+            WHERE org_id = :org_id AND deleted_at IS NULL AND role IN ('owner', 'admin')
+            """
+        ),
+        {"org_id": org_id},
+    )
+    return [row[0] for row in rows.all()]
+
 # verdict source → gate_type 매핑
 _SOURCE_TO_GATE_TYPE: dict[str, str] = {
     "pr": "pr_review",
@@ -101,6 +123,29 @@ async def create_gate(
     session.add(gate)
     await session.flush()
     await session.refresh(gate)
+
+    # story 1934(선생님 앱 done-gate: "디스코드 떼고 승인게이트 실시간 알림+즉시 액션"):
+    # pending 상태(진짜 결재 대기)일 때만 알림 — auto_passed/rejected는 즉시 확정이라 결재
+    # 액션이 없다. best-effort(알림 실패가 게이트 생성 자체를 롤백하면 안 됨 — deliver_expo_
+    # push/override 알림과 동일 관례).
+    if status == "pending":
+        try:
+            target_ids = await _resolve_gate_notification_targets(session, org_id)
+            if target_ids:
+                from app.services.notification_dispatch import dispatch_notification
+                await dispatch_notification(
+                    session, org_id=org_id, event_type="gate.pending_approval",
+                    target_member_ids=target_ids,
+                    title="결재 대기 중인 게이트가 있습니다",
+                    body=f"{gate_type} 게이트가 승인/거부를 기다리고 있습니다.",
+                    reference_type="gate", reference_id=gate.id,
+                )
+        except Exception:
+            logger.warning(
+                "gate.pending_approval notification failed gate_id=%s (swallowed·best-effort)",
+                gate.id, exc_info=True,
+            )
+
     return gate
 
 
