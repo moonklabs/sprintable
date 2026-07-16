@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { GitBranch, Plus } from 'lucide-react';
+import { GitBranch, Plus, Lightbulb, Play, CheckCircle2, Sparkles, ArrowRight, RotateCcw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -11,6 +11,36 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { LoopStatusBadge, type LoopStatus } from '@/components/loops/loop-status-badge';
 import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { LoopCreateDialog } from '@/components/loops/loop-create-dialog';
+
+// story 1eb18bd8(doc resource-view-firsttouch-identity-pattern §2/§4 — 실험실 파일럿): 빈
+// first-touch 정체성 visual = "4노드(가설→실행→검증→학습+↻다음 Loop) 가로 플로우(과설명 금지·
+// 아이콘+라벨)"(스토리 AC 원문). 아이콘+짧은 라벨만 — 문장 설명 없음.
+function LoopCycleFlow({ t }: { t: (key: 'loopNodeHypothesis' | 'loopNodeExecute' | 'loopNodeVerify' | 'loopNodeLearn' | 'loopNodeNext') => string }) {
+  const nodes: Array<{ Icon: typeof Lightbulb; label: string }> = [
+    { Icon: Lightbulb, label: t('loopNodeHypothesis') },
+    { Icon: Play, label: t('loopNodeExecute') },
+    { Icon: CheckCircle2, label: t('loopNodeVerify') },
+    { Icon: Sparkles, label: t('loopNodeLearn') },
+  ];
+  return (
+    <div className="flex items-center gap-1.5 text-muted-foreground/70" aria-hidden="true">
+      {nodes.map(({ Icon, label }, i) => (
+        <span key={label} className="flex items-center gap-1.5">
+          {i > 0 ? <ArrowRight className="size-3 shrink-0 text-muted-foreground/40" /> : null}
+          <span className="flex flex-col items-center gap-1">
+            <Icon className="size-4" />
+            <span className="text-[10px] leading-none">{label}</span>
+          </span>
+        </span>
+      ))}
+      <ArrowRight className="size-3 shrink-0 text-muted-foreground/40" />
+      <span className="flex flex-col items-center gap-1">
+        <RotateCcw className="size-4" />
+        <span className="text-[10px] leading-none">{t('loopNodeNext')}</span>
+      </span>
+    </div>
+  );
+}
 
 interface Loop {
   id: string;
@@ -145,7 +175,23 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
 
         <div className="flex-1 overflow-y-auto p-4">
           {loops.length === 0 ? (
-            <EmptyState title={t('noLoops')} description={t('noLoopsDescription')} />
+            <EmptyState
+              icon={<Lightbulb className="size-8" />}
+              title={t('noLoops')}
+              description={t('noLoopsDescription')}
+              action={
+                <div className="flex flex-col items-center gap-4">
+                  <LoopCycleFlow t={t} />
+                  <div className="flex flex-col items-center gap-1.5">
+                    <Button size="sm" onClick={() => setCreateOpen(true)}>
+                      <Plus className="size-3.5" />
+                      {t('noLoopsCta')}
+                    </Button>
+                    <p className="text-xs text-muted-foreground">{t('noLoopsAiHint')}</p>
+                  </div>
+                </div>
+              }
+            />
           ) : (
             <div className="mx-auto max-w-2xl space-y-2">
               {loops.map((loop) => (

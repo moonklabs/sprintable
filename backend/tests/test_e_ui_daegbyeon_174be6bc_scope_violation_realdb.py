@@ -78,7 +78,7 @@ async def _seed(session, *, declared_scope_paths=None, org_id=None):
     ).scalar_one_or_none()
     if inst is None:
         inst = GithubInstallation(
-            id=uuid.uuid4(), org_id=org, installation_id=90000 + abs(hash(str(org))) % 1000,
+            id=uuid.uuid4(), org_id=org, installation_id=uuid.uuid4().int % (10**9) + 1,
             account_login="moonklabs", account_type="Organization", suspended_at=None,
         )
         session.add(inst)
