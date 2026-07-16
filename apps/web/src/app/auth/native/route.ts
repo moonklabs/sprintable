@@ -1,10 +1,19 @@
 /**
  * story f755b1a9(E-AUTH-REBUILD M2 활성화 게이트 6ae1ecac 하위·doc §9.1): `POST /auth/native` —
- * 네이티브 WebView가 단회 부트스트랩 코드를 들고 오는 착지 라우트. code+device_binding_hash를
+ * 네이티브 WebView가 단회 부트스트랩 코드를 들고 오는 착지 라우트. code+redeem 증명 필드를
  * **exact-origin POST body로만** 받는다(query 사용 금지 — PO 확定, doc §9.1의 `?code=`
  * best-known을 대체). 내부 atomic-consume API(`/api/v2/internal/auth/native-bootstrap/consume`,
  * S4와 동일 공유시크릿 패턴)를 호출해 `__Host-sp_fs` 세션쿠키를 받아 그대로 심고, 원래 딥링크
  * 경로로 303 리다이렉트한다.
+ *
+ * ⚠️story cbd578d4(C4·§7.5) 계약 갱신 반영: consume 요청 필드가 `device_binding_hash`(구)에서
+ * `installation_id`/`challenge_id`/`client_data_b64url`/`key_version`/`assertion_b64|
+ * signature_b64`(신, per-installation redeem 증명)로 전면 재구성됐다. 이 값들은 네이티브
+ * 앱이 **설치 바인딩 키**(Android Keystore/iOS Secure Enclave — 기기 밖으로 절대 안 나옴)로
+ * 직접 서명해 `/auth/native` POST body에 실어 보내는 것 — **BFF는 이 필드들을 검증도 서명도
+ * 하지 않고 그대로 내부 consume 호출에 전달만 한다**(실 검증은 전부 BE `consume_native_
+ * bootstrap`의 단일 트랜잭션 안에서 수행). 흐름 로직(existing_session_user_id 서버도출·303·
+ * open-redirect·로그위생·동일401)은 이 계약 갱신과 무관하게 그대로 유효(까심 QA 1차 검증분).
  *
  * ⚠️logged-out login-CSRF(story 6ae1ecac AC#2): BE `existing_session_user_id` 비교는 이미
  * 머지돼있다(#2202 finding3) — 이 라우트의 책임은 그 값을 **클라이언트가 body/query로 보낸
@@ -41,9 +50,18 @@ function bootstrapFailedResponse(): NextResponse {
 
 interface NativeBootstrapBody {
   code?: unknown;
-  device_binding_hash?: unknown;
+  installation_id?: unknown;
+  challenge_id?: unknown;
+  client_data_b64url?: unknown;
+  key_version?: unknown;
+  assertion_b64?: unknown;
+  signature_b64?: unknown;
   redirect_path?: unknown;
 }
+
+const PASSTHROUGH_STRING_FIELDS = [
+  'code', 'installation_id', 'challenge_id', 'client_data_b64url', 'assertion_b64', 'signature_b64',
+] as const;
 
 async function parseBody(request: Request): Promise<NativeBootstrapBody | null> {
   const contentType = request.headers.get('content-type') ?? '';
@@ -54,11 +72,11 @@ async function parseBody(request: Request): Promise<NativeBootstrapBody | null> 
     // application/x-www-form-urlencoded(자동제출 form/native postUrl 페이로드) 지원.
     const raw = await request.text();
     const params = new URLSearchParams(raw);
-    return {
-      code: params.get('code') ?? undefined,
-      device_binding_hash: params.get('device_binding_hash') ?? undefined,
-      redirect_path: params.get('redirect_path') ?? undefined,
-    };
+    const body: NativeBootstrapBody = { redirect_path: params.get('redirect_path') ?? undefined };
+    for (const field of PASSTHROUGH_STRING_FIELDS) body[field] = params.get(field) ?? undefined;
+    const keyVersionRaw = params.get('key_version');
+    body.key_version = keyVersionRaw === null ? undefined : Number(keyVersionRaw);
+    return body;
   } catch {
     return null;
   }
@@ -85,7 +103,16 @@ export async function POST(request: Request) {
     return bootstrapFailedResponse();
   }
   const code = body.code;
-  const deviceBindingHash = typeof body.device_binding_hash === 'string' ? body.device_binding_hash : undefined;
+  // story cbd578d4(C4·§7.5) redeem 증명 필드 — BFF는 검증도 서명도 하지 않고 그대로
+  // 전달만 한다(installation-바인딩 키는 기기 밖으로 안 나옴). 필드별 필수/선택 검증은
+  // 의도적으로 BE(consume_native_bootstrap 단일 트랜잭션)에만 둔다 — 여기서 중복 검증하면
+  // 두 계층이 계약 드리프트할 위험만 커진다(BE가 authoritative).
+  const installationId = typeof body.installation_id === 'string' ? body.installation_id : undefined;
+  const challengeId = typeof body.challenge_id === 'string' ? body.challenge_id : undefined;
+  const clientDataB64Url = typeof body.client_data_b64url === 'string' ? body.client_data_b64url : undefined;
+  const keyVersion = typeof body.key_version === 'number' && Number.isFinite(body.key_version) ? body.key_version : undefined;
+  const assertionB64 = typeof body.assertion_b64 === 'string' ? body.assertion_b64 : undefined;
+  const signatureB64 = typeof body.signature_b64 === 'string' ? body.signature_b64 : undefined;
   const redirectPathInput = typeof body.redirect_path === 'string' ? body.redirect_path : undefined;
 
   // logged-out login-CSRF(story 6ae1ecac AC#2): existing_session_user_id는 client body/query
@@ -107,7 +134,12 @@ export async function POST(request: Request) {
     },
     body: JSON.stringify({
       code,
-      device_binding_hash: deviceBindingHash,
+      installation_id: installationId,
+      challenge_id: challengeId,
+      client_data_b64url: clientDataB64Url,
+      key_version: keyVersion,
+      assertion_b64: assertionB64,
+      signature_b64: signatureB64,
       existing_session_user_id: existingSessionUserId,
     }),
   }).catch(() => null);

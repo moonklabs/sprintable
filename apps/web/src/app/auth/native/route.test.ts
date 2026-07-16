@@ -88,6 +88,41 @@ describe('POST /auth/native', () => {
     expect(sentBody.code).toBe('the-code');
   });
 
+  // story cbd578d4(C4·§7.5) 계약: redeem 증명 필드는 BFF가 검증/서명하지 않고 그대로
+  // 내부 consume 호출에 전달만 한다 — 이 테스트는 그 pass-through 자체를 고정한다.
+  it('forwards all C4 redeem-proof fields (installation_id/challenge_id/client_data_b64url/key_version/assertion|signature) unmodified to the internal consume call', async () => {
+    process.env['FIREBASE_AUTH_MOBILE_ISSUE'] = 'true';
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ session_cookie: 'c' }) });
+    await POST(makeJsonRequest({
+      code: 'the-code',
+      installation_id: 'install-uuid-1',
+      challenge_id: 'challenge-uuid-1',
+      client_data_b64url: 'ZXhhbXBsZQ',
+      key_version: 2,
+      assertion_b64: 'YXNzZXJ0aW9u',
+    }));
+    const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const sentBody = JSON.parse(opts.body as string) as Record<string, unknown>;
+    expect(sentBody).toMatchObject({
+      code: 'the-code',
+      installation_id: 'install-uuid-1',
+      challenge_id: 'challenge-uuid-1',
+      client_data_b64url: 'ZXhhbXBsZQ',
+      key_version: 2,
+      assertion_b64: 'YXNzZXJ0aW9u',
+    });
+  });
+
+  it('forwards Android signature_b64 in place of iOS assertion_b64 (platform-dependent field, both optional)', async () => {
+    process.env['FIREBASE_AUTH_MOBILE_ISSUE'] = 'true';
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ session_cookie: 'c' }) });
+    await POST(makeJsonRequest({ code: 'x', signature_b64: 'c2lnbmF0dXJl' }));
+    const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const sentBody = JSON.parse(opts.body as string) as Record<string, unknown>;
+    expect(sentBody['signature_b64']).toBe('c2lnbmF0dXJl');
+    expect(sentBody['assertion_b64']).toBeUndefined();
+  });
+
   it('returns 401 when internal consume call fails', async () => {
     process.env['FIREBASE_AUTH_MOBILE_ISSUE'] = 'true';
     mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({}) });
