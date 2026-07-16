@@ -9,6 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 const { loadGlanceDataMock } = vi.hoisted(() => ({
   loadGlanceDataMock: vi.fn(),
@@ -26,6 +27,14 @@ let root: Root;
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {node}
+    </NextIntlClientProvider>
+  );
+}
+
+function wrapEn(node: React.ReactNode) {
+  return (
+    <NextIntlClientProvider locale="en" messages={enMessages} timeZone="Asia/Seoul">
       {node}
     </NextIntlClientProvider>
   );
@@ -58,6 +67,12 @@ afterEach(async () => {
 async function mount() {
   const { GlanceBoard } = await import('./glance-board');
   await act(async () => { root.render(wrap(<GlanceBoard projectId="proj-1" />)); });
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+}
+
+async function mountEn() {
+  const { GlanceBoard } = await import('./glance-board');
+  await act(async () => { root.render(wrapEn(<GlanceBoard projectId="proj-1" />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -98,5 +113,19 @@ describe('GlanceBoard — 현황판 first-touch 정체성', () => {
     const html = container.innerHTML;
     expect(html).not.toContain('아직 시작한 여정이 없어요');
     expect(html).not.toContain('첫 목표로 여정 시작하기');
+  });
+
+  it('interpolates boardChapterActive correctly in EN locale, not the raw i18n key (regression: en.json used {goal} while the call site passes epic)', async () => {
+    loadGlanceDataMock.mockResolvedValue({
+      ...EMPTY_DATA,
+      roadmap: [{ id: 'e1', title: 'Checkout Redesign', roadmapStatus: 'active' }],
+      totalEpicCount: 1,
+      activeEpicTitle: 'Checkout Redesign',
+    });
+    await mountEn();
+    const html = container.innerHTML;
+    expect(html).toContain('Checkout Redesign');
+    expect(html).not.toContain('boardChapterActive');
+    expect(html).not.toMatch(/\{(goal|epic)\}/);
   });
 });
