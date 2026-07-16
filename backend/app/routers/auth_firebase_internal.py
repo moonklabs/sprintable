@@ -22,7 +22,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +45,8 @@ from app.services.device_proof import (
 from app.services.firebase_session_mint import mint_session_cookie, mint_session_cookie_for_uid
 from app.services.firebase_verifier import verify_firebase_id_token
 from app.services.native_bootstrap import consume_bootstrap_code
+from app.services.oauth_handoff import DEFAULT_TTL_SECONDS as OAUTH_HANDOFF_TTL_SECONDS
+from app.services.oauth_handoff import consume_handoff_code, generate_handoff_code, issue_handoff_code
 
 
 def _b64_decode(value: str | None) -> bytes | None:
@@ -104,7 +106,9 @@ def check_internal_secret_config(s=None) -> None:
     켜져 있을 때만 시크릿을 요구한다."""
     if s is None:
         from app.core.config import settings as s
-    firebase_internal_enabled = s.firebase_auth_issue_session or s.firebase_auth_mobile_issue
+    firebase_internal_enabled = (
+        s.firebase_auth_issue_session or s.firebase_auth_mobile_issue or s.firebase_oauth_handoff_enabled
+    )
     if firebase_internal_enabled and s.app_env not in _LOCAL_ENVS and not s.firebase_bff_internal_secret:
         raise RuntimeError(
             f"APP_ENV={s.app_env}인데 FIREBASE_BFF_INTERNAL_SECRET 미설정 — 내부 세션 mint/"
@@ -443,3 +447,164 @@ async def consume_native_bootstrap(
 
     logger.info("auth.native_bootstrap.consume success")
     return NativeBootstrapConsumeResponse(session_cookie=session_cookie, expires_in=valid_duration_seconds)
+
+
+# story 1931(계약 doc e-mobile-oauth-native-handoff-contract §4/§7.5(b)): OAuth 완결→웹뷰
+# 세션 핸드오프 — 위 attested native-bootstrap(§7.5, installation/challenge/counter 바인딩)
+# 과 물리적으로 분리된 경량 issue/consume. 코드는 PKCE code_challenge에 바인딩되고, 원자
+# 소비 시 code_verifier로 재계산한 challenge와 일치해야 한다(oauth_handoff.py).
+#
+# ⚠️미르코 실측 정정(2026-07-16, 산티아고 §10 재확認 조건부 승인): 실 라이브 web OAuth
+# (`app/routers/auth.py:990 oauth_callback()`)는 Firebase 무접촉 — 레거시 self-issued
+# JWT(`create_tokens()`)만 발급한다. 그래서 이 흐름도 Firebase id_token 검증이 아니라
+# BFF가 `oauth_callback()`으로 이미 해소한 user_id를 그대로 신뢰(내부시크릿이 신뢰 근거,
+# mint_firebase_session/consume_native_bootstrap과 동형)하고, consume은 레거시
+# access/refresh 토큰 쌍을 mint한다.
+_OAUTH_HANDOFF_MIN_CHALLENGE_LEN = 43  # base64url(SHA256) 무패딩 최소 길이(RFC 7636)
+
+
+class OAuthHandoffIssueRequest(BaseModel):
+    # 산티아고 §10.1.2 계열 defense-in-depth: 이 내부 엔드포인트는 BFF 전용이라 공개 공격면은
+    # 아니지만, 스키마가 정의한 두 필드 외 어떤 것도 조용히 무시하지 않는다(§10.6 음성테스트 7과
+    # 동일 원칙 — "무시 아님, 거부").
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str  # BFF가 oauth_callback()으로 이미 해소한 서버-확定 subject.
+    code_challenge: str  # PKCE S256 = base64url(SHA256(code_verifier)), 패딩 없음
+
+
+class OAuthHandoffIssueResponse(BaseModel):
+    code: str
+    expires_in: int
+
+
+@router.post("/oauth-handoff/issue", response_model=OAuthHandoffIssueResponse)
+async def issue_oauth_handoff(
+    body: OAuthHandoffIssueRequest,
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> OAuthHandoffIssueResponse:
+    """Next.js BFF(`?native=1` OAuth 콜백 분기)가 `oauth_callback()` 성공 직후 호출 — 셸이
+    OAuth-start에서 생성한 PKCE code_challenge에 바인딩된 단회 코드를 발급한다. 이 코드는
+    쿠키/토큰을 세팅하지 않는다(§3: 콜백 리다이렉트는 code만, mint는 consume에서)."""
+    _require_internal_secret(authorization)
+
+    if not settings.firebase_oauth_handoff_enabled:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="OAuth handoff not enabled")
+
+    if len(body.code_challenge) < _OAUTH_HANDOFF_MIN_CHALLENGE_LEN:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid code_challenge")
+
+    try:
+        user_uuid = uuid.UUID(body.user_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+
+    user = await db.get(User, user_uuid)
+    if user is None or not user.is_active:
+        logger.warning("auth.oauth_handoff.issue rejected reason=inactive_or_missing_user")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+
+    # 산티아고 §10.8(reset_required+cutover epoch, issue+consume 양시점): 이 발급 자체가
+    # "지금 막 완결된" OAuth의 산물이라 reference_time=now — 그래도 발급 순간과 정확히 겹치는
+    # revoke 레이스에 대비해 이 시점에도 한 번 확인한다(방어 심화, 필수 차단선은 consume 3중
+    # 재검증). `_reject_if_before_cutover`(app/dependencies/auth.py)를 그대로 재사용 —
+    # cutover epoch뿐 아니라 `reset_required` state도 함께 거부(§10.8 명시 요구, get_auth_
+    # valid_after 단독으론 epoch만 보고 state를 놓쳤던 이전 구현의 갭 수정).
+    from app.dependencies.auth import _reject_if_before_cutover
+
+    now = datetime.now(timezone.utc)
+    await _reject_if_before_cutover(user_uuid, int(now.timestamp()), db)
+
+    code, code_hash = generate_handoff_code()
+    await issue_handoff_code(db, code_hash=code_hash, user_id=user_uuid, code_challenge=body.code_challenge)
+
+    logger.info("auth.oauth_handoff.issue success")
+    return OAuthHandoffIssueResponse(code=code, expires_in=OAUTH_HANDOFF_TTL_SECONDS)
+
+
+class OAuthHandoffConsumeRequest(BaseModel):
+    # 산티아고 §10.1.2/§10.6 음성테스트 1·7(MUST, 2026-07-16 조건부 GREEN): 계약 doc §3이
+    # 이 스키마를 정확히 `{code, code_verifier}`로 고정 — Firebase assertion/install
+    # assertion/ID token/임의 user·install ID 등 다른 어떤 필드도 "무시"가 아니라 요청 자체를
+    # 거부해야 한다(extra="forbid"). native consume의 `existing_session_user_id`류 부가 필드를
+    # 여기 들여오지 않는다 — 이 흐름은 애초에 기존 세션이 없는 최초 로그인 핸드오프다.
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    code_verifier: str
+
+
+class OAuthHandoffConsumeResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str
+    expires_in: int
+
+
+# story 1931(산티아고 §10 재확認 조건4): 레거시 JWT엔 assurance 클레임이 없다 — 지금 이걸
+# 소비하는 라우트는 없지만(§10.5 seam), OAuth-handoff로 mint된 세션은 항상 이 표식을 달아
+# 향후 attestation-gated 기능이 "이 세션은 device-attested가 아니다"를 판별할 수 있게 한다.
+_OAUTH_HANDOFF_AUTH_SOURCE = "oauth_handoff"
+
+
+@router.post("/oauth-handoff/consume", response_model=OAuthHandoffConsumeResponse)
+async def consume_oauth_handoff(
+    body: OAuthHandoffConsumeRequest,
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> OAuthHandoffConsumeResponse:
+    """Next.js BFF `/auth/native` 라우트(웹뷰 top-level POST 착지점)가 호출 — PKCE
+    code_verifier로 code_challenge를 재계산해 원자 검증+소비하고(단일 쿼리, TOCTOU 없음),
+    consume-time 3중 재검증(mint 전·직전·직후 cutover 재확인, native consume과 동형 패턴)을
+    거쳐 레거시 access/refresh 토큰 쌍을 mint한다(`oauth_callback()`과 동일 발급 경로 재사용
+    — `create_tokens()`+`_store_refresh_token()`). attested §7.5 6조건 트랜잭션과는 완전히
+    분리된 경로 — installation/challenge/counter를 전혀 참조하지 않는다."""
+    _require_internal_secret(authorization)
+
+    if not settings.firebase_oauth_handoff_enabled:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="OAuth handoff not enabled")
+
+    consumed = await consume_handoff_code(db, code=body.code, code_verifier=body.code_verifier)
+    if consumed is None:
+        logger.warning("auth.oauth_handoff.consume rejected reason=code_consume_failed")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired code")
+
+    user = await db.get(User, consumed.user_id)
+    if user is None or not user.is_active:
+        logger.warning("auth.oauth_handoff.consume rejected reason=user_inactive_at_consume")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+
+    from app.dependencies.auth import _reject_if_before_cutover
+
+    consumed_ts = int(consumed.created_at.timestamp())
+    # §10.8: issue+consume 양시점 재검증. 3중 재확인(mint 전·직전·직후, native consume과
+    # 동형 TOCTOU 패턴) — `_reject_if_before_cutover` 재사용으로 reset_required state까지
+    # 함께 거부(get_auth_valid_after 단독으론 놓쳤던 갭 수정).
+    await _reject_if_before_cutover(consumed.user_id, consumed_ts, db)
+
+    # mint 직전 재확인 — 코드 발급~consume 사이(최대 120초)의 revoke 레이스를 좁힌다.
+    await _reject_if_before_cutover(consumed.user_id, consumed_ts, db)
+
+    from datetime import timedelta
+
+    from app.core.security import REFRESH_TOKEN_EXPIRE_DAYS, create_tokens
+    from app.routers.auth import _build_app_metadata, _store_refresh_token
+
+    app_metadata = await _build_app_metadata(user, db)
+    tokens = create_tokens(
+        str(user.id), user.email, app_metadata,
+        auth_source=_OAUTH_HANDOFF_AUTH_SOURCE, device_attested=False,
+    )
+    refresh_expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    await _store_refresh_token(db, user, tokens["refresh_token"], refresh_expires_at)
+
+    # mint 직후(레거시 토큰 서명+RT 저장 커밋 이후) 재확인 — native consume의 "3번째
+    # authoritative 재조회"와 동형: mint 도중 revoke가 끼어들었으면 방금 발급한 토큰을 폐기.
+    await _reject_if_before_cutover(consumed.user_id, consumed_ts, db)
+
+    logger.info("auth.oauth_handoff.consume success")
+    return OAuthHandoffConsumeResponse(
+        access_token=tokens["access_token"], refresh_token=tokens["refresh_token"],
+        token_type=tokens["token_type"], expires_in=tokens["expires_in"],
+    )

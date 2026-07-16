@@ -166,6 +166,9 @@ class Settings(BaseSettings):
     firebase_auth_reset_cutover: bool = False    # Phase 4 coordinated forced-reset 전이 허용
     firebase_auth_cohort_percent: int = 0        # Phase 5 점진 롤아웃 비율(0~100)
     firebase_auth_mobile_issue: bool = False     # M2 모바일 native bootstrap 발급
+    # story 1931(OAuth 핸드오프·doc e-mobile-oauth-native-handoff-contract §4/§7.5(b)):
+    # attested native bootstrap(§7.5)과 별개인 경량 OAuth-handoff issue/consume(PKCE) 발급.
+    firebase_oauth_handoff_enabled: bool = False
     legacy_auth_issue: bool = True               # 기존 self-issued JWT 로그인/refresh 발급
     legacy_auth_verify: bool = True              # 기존 self-issued JWT 검증(proxy.ts·FastAPI)
 
