@@ -86,9 +86,15 @@ describe('POST /auth/oauth-handoff', () => {
   it('sends only {code, code_verifier} to consume — no attested/installation fields leak through (isolation rail)', async () => {
     process.env['FIREBASE_OAUTH_HANDOFF_ENABLED'] = 'true';
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ access_token: 'at', refresh_token: 'rt' }) });
+    // 까심 QA(#2230): attested 필드 세트를 전량 커버해야 격리 보장이 완전함 — /auth/native의
+    // 실 스키마(installation_id/challenge_id/client_data_b64url/key_version/assertion_b64/
+    // signature_b64) + device_key까지 전부 hostile payload에 실어 하나도 안 새는지 확認.
     await POST(makeJsonRequest({
       code: 'c', code_verifier: 'v',
-      installation_id: 'should-be-ignored', challenge_id: 'should-be-ignored', assertion_b64: 'should-be-ignored',
+      installation_id: 'should-be-ignored', challenge_id: 'should-be-ignored',
+      client_data_b64url: 'should-be-ignored', key_version: 1,
+      assertion_b64: 'should-be-ignored', signature_b64: 'should-be-ignored',
+      device_key: 'should-be-ignored',
     }));
     const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
     const sentBody = JSON.parse(opts.body as string) as Record<string, unknown>;
