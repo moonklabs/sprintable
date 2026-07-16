@@ -81,9 +81,9 @@ def _make_id_token(key_pem: str, sub: str, *, auth_time: int | None = None, exp_
     return jose_jwt.encode(claims, key_pem, algorithm="RS256", headers={"kid": KID})
 
 
-async def _seed(session, *, user_active: bool = True, mapped: bool = True):
+async def _seed(session, *, user_active: bool = True, mapped: bool = True, eligible: bool = True):
     from app.core.security import hash_password
-    from app.models.auth_identity import AuthIdentity
+    from app.models.auth_identity import AuthIdentity, AuthMigration
     from app.models.user import User
 
     user_id = uuid.uuid4()
@@ -100,6 +100,14 @@ async def _seed(session, *, user_active: bool = True, mapped: bool = True):
             id=uuid.uuid4(), user_id=user_id, issuer=issuer, subject=firebase_uid,
             provider_id="password",
         ))
+        await session.commit()
+
+    # story bea25062(§17d-1 갱신 재검토 2026-07-16): 이 엔드포인트도 이제 issue-time에
+    # migration state+cutover epoch를 검사한다(산티아고 "native issue와 동일 guard") —
+    # eligible=True(기본값)가 이 fixture로 만드는 사용자가 실 프로덕션에서 이 엔드포인트를
+    # 호출할 수 있는 정상 상태(이미 Firebase 마이그레이션됨)를 정확히 대표한다.
+    if eligible:
+        session.add(AuthMigration(user_id=user_id, state="firebase"))
         await session.commit()
 
     return {"user_id": user_id, "firebase_uid": firebase_uid}
@@ -289,6 +297,110 @@ async def test_success_returns_minted_cookie(monkeypatch):
             )
         assert result.session_cookie == "minted-cookie-xyz"
         assert result.expires_in == 5 * 24 * 60 * 60
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ineligible_migration_state_rejected(monkeypatch):
+    """story bea25062(2026-07-16): reset_required 등 부적격 state는 mint 전 거부 — 산티아고
+    "native issue와 동일 guard를 session-cookie mint 전에도" 반영."""
+    from app.routers.auth_firebase_internal import FirebaseSessionMintRequest, mint_firebase_session
+    from app.services import firebase_verifier as fv
+
+    _setup_common(monkeypatch)
+    key_pem, cert_pem = _make_self_signed_cert()
+
+    async def fake_id_fetch():
+        return {KID: cert_pem}
+    monkeypatch.setattr(fv, "_fetch_id_token_public_keys", fake_id_fetch)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            from app.models.auth_identity import AuthMigration
+            seeded = await _seed(s, eligible=False)
+            s.add(AuthMigration(user_id=seeded["user_id"], state="reset_required"))
+            await s.commit()
+
+        token = _make_id_token(key_pem, seeded["firebase_uid"])
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await mint_firebase_session(
+                    FirebaseSessionMintRequest(id_token=token), authorization=None, db=s
+                )
+            assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_revoked_before_cutover_rejected(monkeypatch):
+    from app.routers.auth_firebase_internal import FirebaseSessionMintRequest, mint_firebase_session
+    from app.services import firebase_verifier as fv
+
+    _setup_common(monkeypatch)
+    key_pem, cert_pem = _make_self_signed_cert()
+
+    async def fake_id_fetch():
+        return {KID: cert_pem}
+    monkeypatch.setattr(fv, "_fetch_id_token_public_keys", fake_id_fetch)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        auth_time = int(time.time())
+        async with Session() as s:
+            from app.services.auth_cutover import revoke_user_sessions
+            await revoke_user_sessions(s, seeded["user_id"], firebase_uid=None)
+
+        token = _make_id_token(key_pem, seeded["firebase_uid"], auth_time=auth_time)
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await mint_firebase_session(
+                    FirebaseSessionMintRequest(id_token=token), authorization=None, db=s
+                )
+            assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_revoke_during_mint_network_roundtrip_rejects_and_discards_cookie(monkeypatch):
+    """산티아고 갱신 재검토(2026-07-16): mint 네트워크 호출 도중 revoke가 커밋되면 cookie
+    반환 직전 세 번째 재확인이 잡아야 한다 — fake mint 내부에서 별도 세션으로 revoke."""
+    from app.routers.auth_firebase_internal import FirebaseSessionMintRequest, mint_firebase_session
+    import app.routers.auth_firebase_internal as router_mod
+    from app.services import firebase_verifier as fv
+    from app.services.auth_cutover import revoke_user_sessions
+
+    _setup_common(monkeypatch)
+    key_pem, cert_pem = _make_self_signed_cert()
+
+    async def fake_id_fetch():
+        return {KID: cert_pem}
+    monkeypatch.setattr(fv, "_fetch_id_token_public_keys", fake_id_fetch)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+
+        async def fake_mint_with_interleaved_revoke(id_token, project_id, valid_duration_seconds):
+            async with Session() as revoke_session:
+                await revoke_user_sessions(revoke_session, seeded["user_id"], firebase_uid=None)
+            return "cookie-minted-during-race-must-never-be-returned"
+        monkeypatch.setattr(router_mod, "mint_session_cookie", fake_mint_with_interleaved_revoke)
+
+        token = _make_id_token(key_pem, seeded["firebase_uid"])
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await mint_firebase_session(
+                    FirebaseSessionMintRequest(id_token=token), authorization=None, db=s
+                )
+            assert exc_info.value.status_code == 401
+            assert "cookie-minted-during-race" not in str(exc_info.value.detail)
     finally:
         await engine.dispose()
 

@@ -111,9 +111,9 @@ def _make_app_check_token(key_pem: str, *, kid: str = APP_CHECK_KID, app_id: str
     return jose_jwt.encode(claims, key_pem, algorithm="RS256", headers={"kid": kid})
 
 
-async def _seed(session, *, user_active: bool = True, mapped: bool = True):
+async def _seed(session, *, user_active: bool = True, mapped: bool = True, eligible: bool = True):
     from app.core.security import hash_password
-    from app.models.auth_identity import AuthIdentity
+    from app.models.auth_identity import AuthIdentity, AuthMigration
     from app.models.user import User
 
     user_id = uuid.uuid4()
@@ -130,6 +130,14 @@ async def _seed(session, *, user_active: bool = True, mapped: bool = True):
             id=uuid.uuid4(), user_id=user_id, issuer=issuer, subject=firebase_uid,
             provider_id="password",
         ))
+        await session.commit()
+
+    # story bea25062(§17d-1 RED 조건 ②⑥·2026-07-16): issue 엔드포인트도 이제 migration
+    # state+cutover epoch를 검사한다 — eligible=True(기본값)가 이 fixture의 사용자를 실
+    # 프로덕션에서 이 엔드포인트를 호출할 수 있는 정상(이미 Firebase 마이그레이션됨) 상태로
+    # 정확히 대표한다.
+    if eligible:
+        session.add(AuthMigration(user_id=user_id, state="firebase"))
         await session.commit()
 
     return {"user_id": user_id, "firebase_uid": firebase_uid}
@@ -285,6 +293,72 @@ async def test_inactive_user_rejected(monkeypatch):
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
                 await native_bootstrap(request=None, body=NativeBootstrapRequest(), response=Response(), authorization=f"Bearer {token}", db=s)
+            assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ineligible_migration_state_rejected(monkeypatch):
+    """story bea25062(2026-07-16): issue 엔드포인트도 이제 consume과 동일하게 provisioning/
+    firebase 외 state는 거부 — reset_required 사용자가 새 코드를 발급받는 첫 단계를 막는다."""
+    from app.routers.auth_native_bootstrap import NativeBootstrapRequest, native_bootstrap
+    from app.services import firebase_verifier as fv
+    from fastapi import HTTPException
+
+    _setup_common(monkeypatch)
+    key_pem, cert_pem = _make_self_signed_cert()
+
+    async def fake_id_fetch():
+        return {KID: cert_pem}
+    monkeypatch.setattr(fv, "_fetch_id_token_public_keys", fake_id_fetch)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            from app.models.auth_identity import AuthMigration
+            seeded = await _seed(s, eligible=False)
+            s.add(AuthMigration(user_id=seeded["user_id"], state="reset_required"))
+            await s.commit()
+
+        token = _make_id_token(key_pem, seeded["firebase_uid"])
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await native_bootstrap(request=None, body=NativeBootstrapRequest(), response=Response(), authorization=f"Bearer {token}", db=s)
+            assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_issue_pre_cutover_auth_after_revoke_rejected(monkeypatch):
+    """산티아고 BLOCKER 2 정확한 공격 시나리오의 issue-time 절반: revoke *이후* 예전
+    (pre-cutover) ID token으로 새 코드 발급을 시도해도 issue 시점에 이미 거부돼야 한다
+    (consume에만 있던 방어를 issue에도 대칭 반영)."""
+    from app.routers.auth_native_bootstrap import NativeBootstrapRequest, native_bootstrap
+    from app.services import firebase_verifier as fv
+    from app.services.auth_cutover import revoke_user_sessions
+    from fastapi import HTTPException
+
+    _setup_common(monkeypatch)
+    key_pem, cert_pem = _make_self_signed_cert()
+
+    async def fake_id_fetch():
+        return {KID: cert_pem}
+    monkeypatch.setattr(fv, "_fetch_id_token_public_keys", fake_id_fetch)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        pre_cutover_auth_time = int(time.time()) - 60  # 아직 5분 freshness 내
+        async with Session() as s:
+            await revoke_user_sessions(s, seeded["user_id"], firebase_uid=None)
+
+        old_token = _make_id_token(key_pem, seeded["firebase_uid"], auth_time=pre_cutover_auth_time)
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await native_bootstrap(request=None, body=NativeBootstrapRequest(), response=Response(), authorization=f"Bearer {old_token}", db=s)
             assert exc_info.value.status_code == 401
     finally:
         await engine.dispose()

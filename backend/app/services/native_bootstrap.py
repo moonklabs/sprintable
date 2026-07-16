@@ -38,9 +38,15 @@ async def issue_bootstrap_code(
     project_id: str,
     device_binding_hash: str | None = None,
     ttl_seconds: int = DEFAULT_TTL_SECONDS,
+    auth_time: datetime | None = None,
 ) -> str:
     """raw code를 반환 — 이 함수 반환 이후로는 raw code가 어디에도 다시 나타나지 않는다
-    (DB엔 hash만, 로그에도 절대 남기지 않는다 — 호출부 책임)."""
+    (DB엔 hash만, 로그에도 절대 남기지 않는다 — 호출부 책임).
+
+    ⚠️story bea25062(§17d-1 BLOCKER 2): `auth_time`은 이 코드 발급의 근거가 된 원본 Firebase
+    ID token의 실제 인증 시각 — 호출부(`native_bootstrap()` 엔드포인트)가 반드시 검증된
+    토큰에서 뽑아 전달해야 한다(전달하지 않으면 이후 cutover 재검증이 무력화된다 — 호출부
+    책임이라 여기선 required 취급을 강제하지 않되 auth_native_bootstrap.py는 항상 채워 넣는다)."""
     code = secrets.token_urlsafe(32)  # 256bit 이상 엔트로피
     now = datetime.now(timezone.utc)
     row = AuthNativeBootstrapCode(
@@ -49,6 +55,7 @@ async def issue_bootstrap_code(
         project_id=project_id,
         code_hash=_hash_code(code),
         device_binding_hash=device_binding_hash,
+        auth_time=auth_time,
         created_at=now,
         expires_at=now + timedelta(seconds=ttl_seconds),
     )
@@ -61,6 +68,8 @@ async def issue_bootstrap_code(
 class ConsumedBootstrapCode:
     user_id: object
     firebase_uid: str
+    created_at: datetime  # 코드 발급 시각(TTL/감사용) — cutover 비교엔 쓰지 않는다.
+    auth_time: datetime | None  # story bea25062: 원본 ID token 인증 시각 — cutover 비교 기준.
 
 
 async def consume_bootstrap_code(
@@ -93,11 +102,16 @@ async def consume_bootstrap_code(
         update(AuthNativeBootstrapCode)
         .where(*conditions)
         .values(consumed_at=now)
-        .returning(AuthNativeBootstrapCode.user_id, AuthNativeBootstrapCode.firebase_uid)
+        .returning(
+            AuthNativeBootstrapCode.user_id,
+            AuthNativeBootstrapCode.firebase_uid,
+            AuthNativeBootstrapCode.created_at,
+            AuthNativeBootstrapCode.auth_time,
+        )
     )
     result = await db.execute(stmt)
     row = result.first()
     await db.commit()
     if row is None:
         return None
-    return ConsumedBootstrapCode(user_id=row[0], firebase_uid=row[1])
+    return ConsumedBootstrapCode(user_id=row[0], firebase_uid=row[1], created_at=row[2], auth_time=row[3])

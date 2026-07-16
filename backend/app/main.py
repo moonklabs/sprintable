@@ -28,6 +28,11 @@ async def lifespan(app: FastAPI):
     check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
     check_internal_secret_config()  # 산티아고 §9 finding 4: non-local + 시크릿 미설정 fail-closed.
     check_mobile_app_check_config()  # 산티아고 §9 finding 1: mobile 발급 on + App Check 미필수 fail-closed.
+    # story bea25062: cutover 존재-캐시는 의도적으로 startup에서 warm 안 함(자체 발견 —
+    # TestClient(app)로 lifespan을 태우는 기존 SSE 테스트들이 라우트 전용으로 짜둔 유한한
+    # mock db.execute() 순서-큐를 startup 시점의 이 캐시 조회가 몰래 하나 소비해 실패시켰다).
+    # 지연 초기화(첫 실 요청에서 채워짐)만으로 충분 — check_any_cutover_epoch_exists() 자체가
+    # DB 접속 불가/미준비 시에도 fail-safe라 startup에서 먼저 확인해둘 실익이 크지 않다.
     task = asyncio.create_task(listen_loop())
     # E-L2 S5: 휴리스틱 트리거 워커는 default-off — 명시 활성화 시에만 task 생성(AC①).
     l2_task = None

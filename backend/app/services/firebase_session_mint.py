@@ -35,6 +35,7 @@ _SIGN_IN_WITH_CUSTOM_TOKEN_URL_TEMPLATE = (
 _CUSTOM_TOKEN_AUDIENCE = (
     "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit"
 )
+_ACCOUNTS_UPDATE_URL_TEMPLATE = "https://identitytoolkit.googleapis.com/v1/projects/{project_id}/accounts:update"
 
 
 def _get_access_token() -> str:
@@ -192,3 +193,40 @@ async def mint_session_cookie_for_uid(
     if id_token is None:
         return None
     return await mint_session_cookie(id_token, project_id, valid_duration_seconds)
+
+
+async def _call_accounts_update_valid_since(access_token: str, uid: str, project_id: str) -> httpx.Response:
+    """실 Google REST 호출 지점 — 테스트에서 모킹. `validSince`를 현재 시각으로 설정하면
+    그 이전에 발급된 모든 refresh token이 무효화된다(Admin SDK `revokeRefreshTokens(uid)`와
+    동등한 REST 형태 — 공식 문서: https://firebase.google.com/docs/auth/admin/manage-sessions)."""
+    url = _ACCOUNTS_UPDATE_URL_TEMPLATE.format(project_id=project_id)
+    async with httpx.AsyncClient() as client:
+        return await client.post(
+            url,
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"localId": uid, "validSince": str(int(time.time()))},
+        )
+
+
+async def revoke_firebase_refresh_tokens(firebase_uid: str, project_id: str) -> bool:
+    """story bea25062(§17d-1 ③): Firebase user-wide refresh token revoke. best-effort —
+    실패해도 로컬 auth_valid_after가 이미 authoritative fail-closed 통제이므로 호출부가
+    이 결과로 접근을 허용/거부하지 않는다(로깅만). ⛔uid/응답 값은 로그에 남기지 않는다."""
+    try:
+        access_token = _get_access_token()
+    except Exception:
+        logger.warning("auth.firebase.revoke failed reason=adc_token_unavailable")
+        return False
+
+    try:
+        response = await _call_accounts_update_valid_since(access_token, firebase_uid, project_id)
+    except httpx.HTTPError:
+        logger.warning("auth.firebase.revoke failed reason=network_error")
+        return False
+
+    if response.status_code != 200:
+        logger.warning("auth.firebase.revoke failed reason=google_rejected status=%d", response.status_code)
+        return False
+
+    logger.info("auth.firebase.revoke success")
+    return True
