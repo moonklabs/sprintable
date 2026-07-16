@@ -1,21 +1,20 @@
 """story 1931(계약 doc `e-mobile-oauth-native-handoff-contract` §4/§7.5(b)·산티아고 §10 MUST
-2026-07-16 조건부 GREEN): 경량 OAuth-handoff issue/consume — attested native-bootstrap
-(§7.5, C4)과 물리적으로 분리된 PKCE 기반 단회코드 발급/소비. issue는 Firebase ID token
-검증+identity/migration eligibility(mint_firebase_session과 동형 게이트), consume은
-code_verifier→code_challenge 재계산 원자 검증+세션쿠키 mint(native consume과 동형 TOCTOU
-재검증)를 실증한다.
+2026-07-16 조건부 GREEN, 이후 미르코 실측 정정+산티아고 재확認): 경량 OAuth-handoff
+issue/consume — attested native-bootstrap(§7.5, C4)과 물리적으로 분리된 PKCE 기반 단회코드
+발급/소비. 실 라이브 web OAuth(`app/routers/auth.py:990 oauth_callback()`)는 Firebase
+무접촉·레거시 self-issued JWT만 발급하므로, issue는 BFF가 이미 해소한 user_id를 그대로
+신뢰(내부시크릿=신뢰근거)하고 consume은 레거시 access/refresh 토큰 쌍을 mint한다
+(`create_tokens()`+`_store_refresh_token()` 재사용).
 
-§10.6 필수 음성 테스트 7종 중 이 파일이 커버하는 것: 1(Firebase/install assertion류 필드
-주입 거부)·3(잘못된 verifier 거부)·4(동시 소비 정확히 1회)·7(purpose/user ID 위조 필드
-schema 거부, 무시 아님) — 2(구 attested consume이 신규 코드를 소비 못 함)는 물리적 테이블
-분리 자체가 증명(별도 테스트로 명시)."""
+§10.6 필수 음성 테스트 7종 중 이 파일이 커버하는 것: 1(assertion류 필드 주입 거부)·
+3(잘못된 verifier 거부)·4(동시 소비 정확히 1회)·7(위조 필드 schema 거부, 무시 아님) —
+2(구 attested consume이 신규 코드를 소비 못 함)는 물리적 테이블 분리 자체가 증명."""
 from __future__ import annotations
 
 import asyncio
 import os
 import secrets
 import uuid
-from datetime import datetime, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -26,8 +25,6 @@ _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATAB
 pytestmark = [
     pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요"),
 ]
-
-PROJECT_ID = "test-project"
 
 
 @pytest.fixture
@@ -59,47 +56,22 @@ async def _session_factory():
 def _setup_common(monkeypatch):
     from app.core.config import settings
     monkeypatch.setattr(settings, "firebase_oauth_handoff_enabled", True)
-    monkeypatch.setattr(settings, "firebase_project_id", PROJECT_ID)
     monkeypatch.setattr(settings, "firebase_bff_internal_secret", "")
     monkeypatch.setattr(settings, "app_env", "development")
+    monkeypatch.setattr(settings, "jwt_secret", "test-jwt-secret", raising=False)
 
 
 async def _seed_eligible_user(session):
     from app.core.security import hash_password
-    from app.models.auth_identity import AuthIdentity, AuthMigration
     from app.models.user import User
 
     user_id = uuid.uuid4()
-    firebase_uid = f"fb-uid-{user_id.hex[:8]}"
     session.add(User(
         id=user_id, email=f"oauth-handoff-{user_id.hex[:8]}@test.com",
         hashed_password=hash_password("x"), is_active=True, email_verified=True,
     ))
     await session.commit()
-    session.add(AuthMigration(user_id=user_id, state="firebase"))
-    session.add(AuthIdentity(
-        id=uuid.uuid4(), user_id=user_id,
-        issuer=f"https://securetoken.google.com/{PROJECT_ID}", subject=firebase_uid, provider_id="google.com",
-    ))
-    await session.commit()
-    return user_id, firebase_uid
-
-
-def _mock_verify_id_token(monkeypatch, *, firebase_uid: str, auth_time: int | None = None):
-    import app.routers.auth_firebase_internal as internal_mod
-    from app.services.firebase_verifier import VerifiedFirebaseIdToken
-
-    if auth_time is None:
-        auth_time = int(datetime.now(timezone.utc).timestamp())
-
-    async def fake_verify(id_token, project_id):
-        if id_token != "valid-id-token":
-            return None
-        return VerifiedFirebaseIdToken(
-            issuer=f"https://securetoken.google.com/{PROJECT_ID}", firebase_uid=firebase_uid,
-            email=None, auth_time=auth_time,
-        )
-    monkeypatch.setattr(internal_mod, "verify_firebase_id_token", fake_verify)
+    return user_id
 
 
 def _pkce_pair():
@@ -118,27 +90,30 @@ async def test_issue_and_consume_round_trip_success(monkeypatch):
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            user_id, firebase_uid = await _seed_eligible_user(s)
-        _mock_verify_id_token(monkeypatch, firebase_uid=firebase_uid)
+            user_id = await _seed_eligible_user(s)
 
         verifier, challenge = _pkce_pair()
         async with Session() as s:
             issued = await issue_oauth_handoff(
-                OAuthHandoffIssueRequest(id_token="valid-id-token", code_challenge=challenge),
+                OAuthHandoffIssueRequest(user_id=str(user_id), code_challenge=challenge),
                 authorization=None, db=s,
             )
         assert issued.code
-
-        async def fake_mint(firebase_uid, project_id, web_api_key, valid_duration_seconds):
-            return "minted-cookie"
-        import app.routers.auth_firebase_internal as internal_mod
-        monkeypatch.setattr(internal_mod, "mint_session_cookie_for_uid", fake_mint)
 
         async with Session() as s:
             consumed = await consume_oauth_handoff(
                 OAuthHandoffConsumeRequest(code=issued.code, code_verifier=verifier), authorization=None, db=s,
             )
-        assert consumed.session_cookie == "minted-cookie"
+        assert consumed.access_token
+        assert consumed.refresh_token
+        assert consumed.token_type == "bearer"
+        assert consumed.expires_in > 0
+
+        from app.core.security import decode_jwt
+        claims = decode_jwt(consumed.access_token)
+        assert claims["sub"] == str(user_id)
+        assert claims["auth_source"] == "oauth_handoff"
+        assert claims["device_attested"] is False
     finally:
         await engine.dispose()
 
@@ -153,13 +128,12 @@ async def test_consume_wrong_verifier_rejected(monkeypatch):
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            user_id, firebase_uid = await _seed_eligible_user(s)
-        _mock_verify_id_token(monkeypatch, firebase_uid=firebase_uid)
+            user_id = await _seed_eligible_user(s)
 
         _verifier, challenge = _pkce_pair()
         async with Session() as s:
             issued = await issue_oauth_handoff(
-                OAuthHandoffIssueRequest(id_token="valid-id-token", code_challenge=challenge),
+                OAuthHandoffIssueRequest(user_id=str(user_id), code_challenge=challenge),
                 authorization=None, db=s,
             )
 
@@ -180,30 +154,24 @@ async def test_consume_replay_after_success_rejected(monkeypatch):
     from app.routers.auth_firebase_internal import (
         OAuthHandoffConsumeRequest, OAuthHandoffIssueRequest, consume_oauth_handoff, issue_oauth_handoff,
     )
-    import app.routers.auth_firebase_internal as internal_mod
 
     _setup_common(monkeypatch)
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            user_id, firebase_uid = await _seed_eligible_user(s)
-        _mock_verify_id_token(monkeypatch, firebase_uid=firebase_uid)
+            user_id = await _seed_eligible_user(s)
 
         verifier, challenge = _pkce_pair()
         async with Session() as s:
             issued = await issue_oauth_handoff(
-                OAuthHandoffIssueRequest(id_token="valid-id-token", code_challenge=challenge),
+                OAuthHandoffIssueRequest(user_id=str(user_id), code_challenge=challenge),
                 authorization=None, db=s,
             )
-
-        async def fake_mint(*a, **kw):
-            return "minted-cookie"
-        monkeypatch.setattr(internal_mod, "mint_session_cookie_for_uid", fake_mint)
 
         req = OAuthHandoffConsumeRequest(code=issued.code, code_verifier=verifier)
         async with Session() as s:
             first = await consume_oauth_handoff(req, authorization=None, db=s)
-        assert first.session_cookie == "minted-cookie"
+        assert first.access_token
 
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
@@ -215,32 +183,23 @@ async def test_consume_replay_after_success_rejected(monkeypatch):
 
 @pytest.mark.anyio
 async def test_concurrent_consume_exactly_one_succeeds(monkeypatch):
-    """산티아고 §9 native consume 게이트와 동형 요구 — 병렬 N-way 동시성에도 정확히 1회만 mint."""
+    """산티아고 §9/§10 native consume 게이트와 동형 요구 — 병렬 N-way 동시성에도 정확히 1회만 mint."""
     from app.routers.auth_firebase_internal import (
         OAuthHandoffConsumeRequest, OAuthHandoffIssueRequest, consume_oauth_handoff, issue_oauth_handoff,
     )
-    import app.routers.auth_firebase_internal as internal_mod
 
     _setup_common(monkeypatch)
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            user_id, firebase_uid = await _seed_eligible_user(s)
-        _mock_verify_id_token(monkeypatch, firebase_uid=firebase_uid)
+            user_id = await _seed_eligible_user(s)
 
         verifier, challenge = _pkce_pair()
         async with Session() as s:
             issued = await issue_oauth_handoff(
-                OAuthHandoffIssueRequest(id_token="valid-id-token", code_challenge=challenge),
+                OAuthHandoffIssueRequest(user_id=str(user_id), code_challenge=challenge),
                 authorization=None, db=s,
             )
-
-        mint_call_count = {"n": 0}
-
-        async def fake_mint(*a, **kw):
-            mint_call_count["n"] += 1
-            return "minted-cookie"
-        monkeypatch.setattr(internal_mod, "mint_session_cookie_for_uid", fake_mint)
 
         req = OAuthHandoffConsumeRequest(code=issued.code, code_verifier=verifier)
 
@@ -254,7 +213,6 @@ async def test_concurrent_consume_exactly_one_succeeds(monkeypatch):
         results = await asyncio.gather(*[_attempt() for _ in range(5)])
         successes = [r for r in results if r is not None]
         assert len(successes) == 1
-        assert mint_call_count["n"] == 1
     finally:
         await engine.dispose()
 
@@ -268,11 +226,13 @@ async def test_issue_rejected_when_feature_disabled(monkeypatch):
     monkeypatch.setattr(settings, "firebase_oauth_handoff_enabled", False)
     engine, Session = await _session_factory()
     try:
+        async with Session() as s:
+            user_id = await _seed_eligible_user(s)
         _verifier, challenge = _pkce_pair()
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
                 await issue_oauth_handoff(
-                    OAuthHandoffIssueRequest(id_token="valid-id-token", code_challenge=challenge),
+                    OAuthHandoffIssueRequest(user_id=str(user_id), code_challenge=challenge),
                     authorization=None, db=s,
                 )
             assert exc_info.value.status_code == 501
@@ -281,18 +241,46 @@ async def test_issue_rejected_when_feature_disabled(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_issue_rejected_unmapped_identity(monkeypatch):
+async def test_issue_rejected_unknown_user(monkeypatch):
     from app.routers.auth_firebase_internal import OAuthHandoffIssueRequest, issue_oauth_handoff
 
     _setup_common(monkeypatch)
-    _mock_verify_id_token(monkeypatch, firebase_uid="fb-uid-never-registered")
     engine, Session = await _session_factory()
     try:
         _verifier, challenge = _pkce_pair()
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
                 await issue_oauth_handoff(
-                    OAuthHandoffIssueRequest(id_token="valid-id-token", code_challenge=challenge),
+                    OAuthHandoffIssueRequest(user_id=str(uuid.uuid4()), code_challenge=challenge),
+                    authorization=None, db=s,
+                )
+            assert exc_info.value.status_code == 401
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_issue_rejected_inactive_user(monkeypatch):
+    from app.routers.auth_firebase_internal import OAuthHandoffIssueRequest, issue_oauth_handoff
+    from app.core.security import hash_password
+    from app.models.user import User
+
+    _setup_common(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        user_id = uuid.uuid4()
+        async with Session() as s:
+            s.add(User(
+                id=user_id, email=f"inactive-{user_id.hex[:8]}@test.com",
+                hashed_password=hash_password("x"), is_active=False, email_verified=True,
+            ))
+            await s.commit()
+
+        _verifier, challenge = _pkce_pair()
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await issue_oauth_handoff(
+                    OAuthHandoffIssueRequest(user_id=str(user_id), code_challenge=challenge),
                     authorization=None, db=s,
                 )
             assert exc_info.value.status_code == 401
@@ -308,13 +296,12 @@ async def test_issue_rejected_short_code_challenge(monkeypatch):
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            _user_id, firebase_uid = await _seed_eligible_user(s)
-        _mock_verify_id_token(monkeypatch, firebase_uid=firebase_uid)
+            user_id = await _seed_eligible_user(s)
 
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
                 await issue_oauth_handoff(
-                    OAuthHandoffIssueRequest(id_token="valid-id-token", code_challenge="too-short"),
+                    OAuthHandoffIssueRequest(user_id=str(user_id), code_challenge="too-short"),
                     authorization=None, db=s,
                 )
             assert exc_info.value.status_code == 400
@@ -325,33 +312,27 @@ async def test_issue_rejected_short_code_challenge(monkeypatch):
 @pytest.mark.anyio
 async def test_orphan_finding_revoke_between_issue_and_consume_rejected(monkeypatch):
     """Story A(bea25062)/C4 orphan-finding 회귀와 동형 — issue 이후(45초 내 미만료) revoke가
-    발생하면 consume이 cutover 재검증에서 거부돼야 한다."""
+    발생하면 consume이 cutover 재검증에서 거부돼야 한다(레거시 세션도 동일 §17d 메커니즘)."""
     from app.routers.auth_firebase_internal import (
         OAuthHandoffConsumeRequest, OAuthHandoffIssueRequest, consume_oauth_handoff, issue_oauth_handoff,
     )
-    import app.routers.auth_firebase_internal as internal_mod
     from app.services.auth_cutover import revoke_user_sessions
 
     _setup_common(monkeypatch)
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            user_id, firebase_uid = await _seed_eligible_user(s)
-        _mock_verify_id_token(monkeypatch, firebase_uid=firebase_uid)
+            user_id = await _seed_eligible_user(s)
 
         verifier, challenge = _pkce_pair()
         async with Session() as s:
             issued = await issue_oauth_handoff(
-                OAuthHandoffIssueRequest(id_token="valid-id-token", code_challenge=challenge),
+                OAuthHandoffIssueRequest(user_id=str(user_id), code_challenge=challenge),
                 authorization=None, db=s,
             )
 
         async with Session() as s:
             await revoke_user_sessions(s, user_id, firebase_uid=None)
-
-        async def fake_mint(*a, **kw):
-            return "should-never-be-returned"
-        monkeypatch.setattr(internal_mod, "mint_session_cookie_for_uid", fake_mint)
 
         async with Session() as s:
             with pytest.raises(HTTPException) as exc_info:
@@ -367,8 +348,8 @@ async def test_orphan_finding_revoke_between_issue_and_consume_rejected(monkeypa
 # ─── §10.6 음성 테스트 — schema-level 거부(extra="forbid") ─────────────────────
 
 def test_consume_schema_rejects_unknown_fields():
-    """§10.6 voice test 7: purpose/user·install ID 등 위조 필드는 조용히 무시되면 안 되고
-    스키마 자체가 거부해야 한다."""
+    """§10.6 voice test 7: user ID 등 위조 필드는 조용히 무시되면 안 되고 스키마 자체가
+    거부해야 한다."""
     from app.routers.auth_firebase_internal import OAuthHandoffConsumeRequest
 
     with pytest.raises(ValidationError):
@@ -390,7 +371,7 @@ def test_issue_schema_rejects_unknown_fields():
     from app.routers.auth_firebase_internal import OAuthHandoffIssueRequest
 
     with pytest.raises(ValidationError):
-        OAuthHandoffIssueRequest(id_token="t", code_challenge="c" * 43, installation_id="x")
+        OAuthHandoffIssueRequest(user_id=str(uuid.uuid4()), code_challenge="c" * 43, installation_id="x")
 
 
 # ─── §10.6 voice test 2 — 물리적 테이블 분리(구 attested consume이 신규 코드 소비 불가) ──
@@ -404,7 +385,6 @@ async def test_oauth_handoff_code_not_consumable_via_attested_native_consume(mon
     from app.routers.auth_firebase_internal import (
         NativeBootstrapConsumeRequest, OAuthHandoffIssueRequest, consume_native_bootstrap, issue_oauth_handoff,
     )
-
     from app.core.config import settings
 
     _setup_common(monkeypatch)
@@ -412,13 +392,12 @@ async def test_oauth_handoff_code_not_consumable_via_attested_native_consume(mon
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            user_id, firebase_uid = await _seed_eligible_user(s)
-        _mock_verify_id_token(monkeypatch, firebase_uid=firebase_uid)
+            user_id = await _seed_eligible_user(s)
 
         _verifier, challenge = _pkce_pair()
         async with Session() as s:
             issued = await issue_oauth_handoff(
-                OAuthHandoffIssueRequest(id_token="valid-id-token", code_challenge=challenge),
+                OAuthHandoffIssueRequest(user_id=str(user_id), code_challenge=challenge),
                 authorization=None, db=s,
             )
 

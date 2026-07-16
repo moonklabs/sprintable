@@ -33,7 +33,7 @@ from app.models.device_installation import DeviceInstallation
 from app.models.user import User
 from app.services.android_key_attestation import AndroidAttestationVerificationError, verify_bootstrap_signature
 from app.services.apple_app_attest import AppAttestVerificationError, verify_assertion
-from app.services.auth_cutover import is_before_cutover
+from app.services.auth_cutover import get_auth_valid_after, is_before_cutover
 from app.services.device_proof import (
     PURPOSE_BOOTSTRAP_REDEEM,
     ChallengeVerificationError,
@@ -452,8 +452,14 @@ async def consume_native_bootstrap(
 # story 1931(계약 doc e-mobile-oauth-native-handoff-contract §4/§7.5(b)): OAuth 완결→웹뷰
 # 세션 핸드오프 — 위 attested native-bootstrap(§7.5, installation/challenge/counter 바인딩)
 # 과 물리적으로 분리된 경량 issue/consume. 코드는 PKCE code_challenge에 바인딩되고, 원자
-# 소비 시 code_verifier로 재계산한 challenge와 일치해야 한다(oauth_handoff.py). identity/
-# migration eligibility 게이트는 mint_firebase_session과 동일(§4.4 계약).
+# 소비 시 code_verifier로 재계산한 challenge와 일치해야 한다(oauth_handoff.py).
+#
+# ⚠️미르코 실측 정정(2026-07-16, 산티아고 §10 재확認 조건부 승인): 실 라이브 web OAuth
+# (`app/routers/auth.py:990 oauth_callback()`)는 Firebase 무접촉 — 레거시 self-issued
+# JWT(`create_tokens()`)만 발급한다. 그래서 이 흐름도 Firebase id_token 검증이 아니라
+# BFF가 `oauth_callback()`으로 이미 해소한 user_id를 그대로 신뢰(내부시크릿이 신뢰 근거,
+# mint_firebase_session/consume_native_bootstrap과 동형)하고, consume은 레거시
+# access/refresh 토큰 쌍을 mint한다.
 _OAUTH_HANDOFF_MIN_CHALLENGE_LEN = 43  # base64url(SHA256) 무패딩 최소 길이(RFC 7636)
 
 
@@ -463,7 +469,7 @@ class OAuthHandoffIssueRequest(BaseModel):
     # 동일 원칙 — "무시 아님, 거부").
     model_config = ConfigDict(extra="forbid")
 
-    id_token: str
+    user_id: str  # BFF가 oauth_callback()으로 이미 해소한 서버-확定 subject.
     code_challenge: str  # PKCE S256 = base64url(SHA256(code_verifier)), 패딩 없음
 
 
@@ -478,9 +484,9 @@ async def issue_oauth_handoff(
     authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> OAuthHandoffIssueResponse:
-    """Next.js BFF(`?native=1` OAuth 콜백 분기)가 호출 — 웹 OAuth가 이미 완결시킨 id_token을
-    검증하고, 셸이 OAuth-start에서 생성한 PKCE code_challenge에 바인딩된 단회 코드를 발급한다.
-    이 코드는 쿠키를 세팅하지 않는다(§3: 콜백 리다이렉트는 code만, mint는 consume에서)."""
+    """Next.js BFF(`?native=1` OAuth 콜백 분기)가 `oauth_callback()` 성공 직후 호출 — 셸이
+    OAuth-start에서 생성한 PKCE code_challenge에 바인딩된 단회 코드를 발급한다. 이 코드는
+    쿠키/토큰을 세팅하지 않는다(§3: 콜백 리다이렉트는 code만, mint는 consume에서)."""
     _require_internal_secret(authorization)
 
     if not settings.firebase_oauth_handoff_enabled:
@@ -489,53 +495,28 @@ async def issue_oauth_handoff(
     if len(body.code_challenge) < _OAUTH_HANDOFF_MIN_CHALLENGE_LEN:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid code_challenge")
 
-    verified = await verify_firebase_id_token(body.id_token, settings.firebase_project_id)
-    if verified is None:
-        logger.warning("auth.oauth_handoff.issue rejected reason=id_token_invalid")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Firebase ID token")
+    try:
+        user_uuid = uuid.UUID(body.user_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
 
-    now = datetime.now(timezone.utc).timestamp()
-    if now - verified.auth_time > _AUTH_TIME_MAX_AGE_SECONDS:
-        logger.warning("auth.oauth_handoff.issue rejected reason=auth_time_stale")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication too old")
-
-    identity_row = (
-        await db.execute(
-            select(AuthIdentity).where(
-                AuthIdentity.issuer == verified.issuer,
-                AuthIdentity.subject == verified.firebase_uid,
-                AuthIdentity.unlinked_at.is_(None),
-            )
-        )
-    ).scalar_one_or_none()
-    if identity_row is None:
-        logger.warning("auth.oauth_handoff.issue rejected reason=unmapped_identity")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unmapped Firebase identity")
-
-    user = await db.get(User, identity_row.user_id)
+    user = await db.get(User, user_uuid)
     if user is None or not user.is_active:
         logger.warning("auth.oauth_handoff.issue rejected reason=inactive_or_missing_user")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
 
-    auth_time_dt = datetime.fromtimestamp(verified.auth_time, tz=timezone.utc)
-    migration = await db.get(AuthMigration, identity_row.user_id)
-    if migration is None or migration.state not in ("provisioning", "firebase"):
-        logger.warning("auth.oauth_handoff.issue rejected reason=ineligible_migration_state")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not eligible")
-    if is_before_cutover(migration.auth_valid_after, auth_time_dt):
+    # 산티아고 §10 재확認 조건3(revoke↔mint TOCTOU): 이 발급 자체가 "지금 막 완결된" OAuth의
+    # 산물이라 reference_time=now — 그래도 발급 순간과 정확히 겹치는 revoke 레이스에 대비해
+    # mint_firebase_session과 동일하게 이 시점에도 한 번 확인한다(방어 심화, 필수 차단선은
+    # consume 3중 재검증).
+    now = datetime.now(timezone.utc)
+    valid_after = await get_auth_valid_after(db, user_uuid)
+    if is_before_cutover(valid_after, now):
         logger.warning("auth.oauth_handoff.issue rejected reason=before_cutover")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
 
     code, code_hash = generate_handoff_code()
-    await issue_handoff_code(
-        db,
-        code_hash=code_hash,
-        user_id=identity_row.user_id,
-        firebase_uid=verified.firebase_uid,
-        project_id=settings.firebase_project_id,
-        code_challenge=body.code_challenge,
-        auth_time=auth_time_dt,
-    )
+    await issue_handoff_code(db, code_hash=code_hash, user_id=user_uuid, code_challenge=body.code_challenge)
 
     logger.info("auth.oauth_handoff.issue success")
     return OAuthHandoffIssueResponse(code=code, expires_in=OAUTH_HANDOFF_TTL_SECONDS)
@@ -554,8 +535,16 @@ class OAuthHandoffConsumeRequest(BaseModel):
 
 
 class OAuthHandoffConsumeResponse(BaseModel):
-    session_cookie: str
+    access_token: str
+    refresh_token: str
+    token_type: str
     expires_in: int
+
+
+# story 1931(산티아고 §10 재확認 조건4): 레거시 JWT엔 assurance 클레임이 없다 — 지금 이걸
+# 소비하는 라우트는 없지만(§10.5 seam), OAuth-handoff로 mint된 세션은 항상 이 표식을 달아
+# 향후 attestation-gated 기능이 "이 세션은 device-attested가 아니다"를 판별할 수 있게 한다.
+_OAUTH_HANDOFF_AUTH_SOURCE = "oauth_handoff"
 
 
 @router.post("/oauth-handoff/consume", response_model=OAuthHandoffConsumeResponse)
@@ -565,77 +554,59 @@ async def consume_oauth_handoff(
     db: AsyncSession = Depends(get_db),
 ) -> OAuthHandoffConsumeResponse:
     """Next.js BFF `/auth/native` 라우트(웹뷰 top-level POST 착지점)가 호출 — PKCE
-    code_verifier로 code_challenge를 재계산해 원자 검증+소비하고, native consume과 동일한
-    consume-time 재검증(user active·identity linked·migration state·cutover, mint 전/후
-    TOCTOU 재확인)을 거쳐 세션쿠키를 mint한다. attested §7.5 6조건 트랜잭션과는 완전히
+    code_verifier로 code_challenge를 재계산해 원자 검증+소비하고(단일 쿼리, TOCTOU 없음),
+    consume-time 3중 재검증(mint 전·직전·직후 cutover 재확인, native consume과 동형 패턴)을
+    거쳐 레거시 access/refresh 토큰 쌍을 mint한다(`oauth_callback()`과 동일 발급 경로 재사용
+    — `create_tokens()`+`_store_refresh_token()`). attested §7.5 6조건 트랜잭션과는 완전히
     분리된 경로 — installation/challenge/counter를 전혀 참조하지 않는다."""
     _require_internal_secret(authorization)
 
     if not settings.firebase_oauth_handoff_enabled:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="OAuth handoff not enabled")
 
-    consumed = await consume_handoff_code(
-        db, code=body.code, code_verifier=body.code_verifier, project_id=settings.firebase_project_id,
-    )
+    consumed = await consume_handoff_code(db, code=body.code, code_verifier=body.code_verifier)
     if consumed is None:
         logger.warning("auth.oauth_handoff.consume rejected reason=code_consume_failed")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired code")
 
-    post_consume_user = await db.get(User, consumed.user_id)
-    if post_consume_user is None or not post_consume_user.is_active:
+    user = await db.get(User, consumed.user_id)
+    if user is None or not user.is_active:
         logger.warning("auth.oauth_handoff.consume rejected reason=user_inactive_at_consume")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
 
-    still_linked = (
-        await db.execute(
-            select(AuthIdentity.id).where(
-                AuthIdentity.issuer == f"https://securetoken.google.com/{settings.firebase_project_id}",
-                AuthIdentity.subject == consumed.firebase_uid,
-                AuthIdentity.user_id == consumed.user_id,
-                AuthIdentity.unlinked_at.is_(None),
-            )
-        )
-    ).scalar_one_or_none()
-    if still_linked is None:
-        logger.warning("auth.oauth_handoff.consume rejected reason=identity_unlinked_at_consume")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Identity no longer linked")
-
-    migration = await db.get(AuthMigration, consumed.user_id)
-    if migration is None or migration.state not in ("provisioning", "firebase"):
-        logger.warning("auth.oauth_handoff.consume rejected reason=ineligible_migration_state")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Account not eligible for Firebase session"
-        )
-
-    if is_before_cutover(migration.auth_valid_after, consumed.auth_time):
+    valid_after = await get_auth_valid_after(db, consumed.user_id)
+    if is_before_cutover(valid_after, consumed.created_at):
         logger.warning("auth.oauth_handoff.consume rejected reason=revoked_after_issuance")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
 
-    migration_at_mint = await db.get(AuthMigration, consumed.user_id, populate_existing=True)
-    if (
-        migration_at_mint is None
-        or migration_at_mint.state not in ("provisioning", "firebase")
-        or is_before_cutover(migration_at_mint.auth_valid_after, consumed.auth_time)
-    ):
+    # mint 직전 재확인 — 코드 발급~consume 사이(최대 45초)의 revoke 레이스를 좁힌다.
+    valid_after_at_mint = await get_auth_valid_after(db, consumed.user_id)
+    if is_before_cutover(valid_after_at_mint, consumed.created_at):
         logger.warning("auth.oauth_handoff.consume rejected reason=revoked_before_mint")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
 
-    valid_duration_seconds = 5 * 24 * 60 * 60
-    session_cookie = await mint_session_cookie_for_uid(
-        consumed.firebase_uid, settings.firebase_project_id, settings.firebase_web_api_key, valid_duration_seconds
-    )
-    if session_cookie is None:
-        logger.warning("auth.oauth_handoff.consume failed reason=mint_failed")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Session cookie mint failed")
+    from datetime import timedelta
 
-    migration_after_mint = await db.get(AuthMigration, consumed.user_id, populate_existing=True)
-    if (
-        migration_after_mint is None
-        or migration_after_mint.state not in ("provisioning", "firebase")
-        or is_before_cutover(migration_after_mint.auth_valid_after, consumed.auth_time)
-    ):
+    from app.core.security import REFRESH_TOKEN_EXPIRE_DAYS, create_tokens
+    from app.routers.auth import _build_app_metadata, _store_refresh_token
+
+    app_metadata = await _build_app_metadata(user, db)
+    tokens = create_tokens(
+        str(user.id), user.email, app_metadata,
+        auth_source=_OAUTH_HANDOFF_AUTH_SOURCE, device_attested=False,
+    )
+    refresh_expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    await _store_refresh_token(db, user, tokens["refresh_token"], refresh_expires_at)
+
+    # mint 직후(레거시 토큰 서명+RT 저장 커밋 이후) 재확인 — native consume의 "3번째
+    # authoritative 재조회"와 동형: mint 도중 revoke가 끼어들었으면 방금 발급한 토큰을 폐기.
+    valid_after_after_mint = await get_auth_valid_after(db, consumed.user_id)
+    if is_before_cutover(valid_after_after_mint, consumed.created_at):
         logger.warning("auth.oauth_handoff.consume rejected reason=revoked_during_mint")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
 
     logger.info("auth.oauth_handoff.consume success")
-    return OAuthHandoffConsumeResponse(session_cookie=session_cookie, expires_in=valid_duration_seconds)
+    return OAuthHandoffConsumeResponse(
+        access_token=tokens["access_token"], refresh_token=tokens["refresh_token"],
+        token_type=tokens["token_type"], expires_in=tokens["expires_in"],
+    )
