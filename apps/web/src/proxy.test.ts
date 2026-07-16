@@ -61,6 +61,23 @@ describe('proxy', () => {
     expect(response.status).toBe(200);
   });
 
+  it('treats /auth/native as public — no 307-to-login (story 26170479, 민군 축c 실측 발견)', async () => {
+    // /auth/native는 세션을 만드는 공개 엔드포인트라 호출 시점엔 세션이 없는 게 정상 — PUBLIC
+    // 목록 누락 시 보호 라우트로 오인돼 /login 307로 튕겨나간다(실 왕복 통합검증에서 잡힌
+    // 크로스레이어 갭, route.ts 단위테스트로는 안 잡힘). no-cookie 요청으로 그 정확한 실패
+    // 모드를 재현·가드.
+    const response = await middleware(makeRequest('/auth/native'));
+    expect(response.status).toBe(200);
+  });
+
+  it('does not accidentally widen the guard to all of /auth/* — /auth/reset-required stays protected', async () => {
+    // 스코프 정확성 회귀가드 — "/auth/native만 열고 /auth/ 전체는 열지 않는다"는 명시 요구를
+    // 실제로 지켰는지 확인. /auth/reset-required는 보호 라우트로 남아있어야 함.
+    mockFetch.mockResolvedValue({ ok: false, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
+    const response = await middleware(makeRequest('/auth/reset-required'));
+    expect(response.status).toBe(307);
+  });
+
   it('passes all /api/* paths without JWT check', async () => {
     const apiPaths = [
       '/api/v1/bridge/slack/interactions',

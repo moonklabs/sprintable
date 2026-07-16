@@ -41,6 +41,9 @@ const PUBLIC_PREFIX = [
   '/verify-email',
   '/auth/callback',
   '/auth/login',
+  // story 26170479: 세션을 만드는 공개 엔드포인트(호출 시점엔 세션이 없는 게 정상) — 누락
+  // 시 위 인증가드가 보호 라우트로 오인해 /login 307(민군 축c 실측으로 발견).
+  '/auth/native',
   '/invite',
   '/internal-dogfood',
   '/terms',
