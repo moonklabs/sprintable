@@ -48,7 +48,7 @@ class PushDeviceRepository:
         self,
         member_id: uuid.UUID,
         expo_push_token: str,
-        platform: str,
+        platform: str | None,
         device_id: str | None = None,
         app_version: str | None = None,
     ) -> PushDevice:
@@ -57,25 +57,29 @@ class PushDeviceRepository:
         같은 디바이스가 재등록(앱 재설치·토큰 회전·기기 이관)하면 토큰 충돌 → 소유 org/멤버·플랫폼·메타·
         last_seen 갱신 + is_active 복구(True). crux §3: 발송기가 DeviceNotRegistered 수신 시 is_active=false
         로 내리므로 재등록이 활성 복구를 겸한다. org_id 도 set_ 에 포함 — 기기 이관 시 새 org 로 re-home
-        (get() 재조회가 self.org_id 스코프라 조용한 500 방지)."""
+        (get() 재조회가 self.org_id 스코프라 조용한 500 방지).
+
+        story 1935: platform은 COALESCE(신규값, 기존값) — 구버전 앱(platform 미전송, None)이
+        재등록해도 이전에 알려진 platform을 지우지 않는다(v0.2.5가 이미 보고한 값을 v0.2.4
+        재등록이 덮어써 잃어버리는 회귀 방지)."""
         now = func.now()
+        insert_stmt = pg_insert(PushDevice).values(
+            org_id=self.org_id,
+            member_id=member_id,
+            expo_push_token=expo_push_token,
+            platform=platform,
+            device_id=device_id,
+            app_version=app_version,
+            is_active=True,
+        )
         stmt = (
-            pg_insert(PushDevice)
-            .values(
-                org_id=self.org_id,
-                member_id=member_id,
-                expo_push_token=expo_push_token,
-                platform=platform,
-                device_id=device_id,
-                app_version=app_version,
-                is_active=True,
-            )
+            insert_stmt
             .on_conflict_do_update(
                 index_elements=["expo_push_token"],
                 set_={
                     "org_id": self.org_id,
                     "member_id": member_id,
-                    "platform": platform,
+                    "platform": func.coalesce(insert_stmt.excluded.platform, PushDevice.platform),
                     "device_id": device_id,
                     "app_version": app_version,
                     "is_active": True,
