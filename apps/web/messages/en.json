@@ -492,7 +492,8 @@
     "oauthMissingParams": "OAuth parameters missing. Please try again.",
     "csrfMismatch": "Security check failed. Please try again.",
     "oauthNoToken": "Authentication token not received. Please try again.",
-    "invalidProvider": "Invalid OAuth provider."
+    "invalidProvider": "Invalid OAuth provider.",
+    "oauthNativeIssueFailed": "Failed to hand off your login to the app. Please try again."
   },
   "onboarding": {
     "createOrg": "Create Organization",

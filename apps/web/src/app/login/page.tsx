@@ -25,6 +25,9 @@ export default function LoginPage() {
     csrf_mismatch: t('csrfMismatch'),
     oauth_no_token: t('oauthNoToken'),
     invalid_provider: t('invalidProvider'),
+    // e-mobile-oauth-native-handoff-contract — 네이티브 핸드오프 issue 실패(유나 가디언 지적,
+    // 신규 에러코드가 매핑 누락돼 로그인 페이지가 밋밋한 loginFailed로 후퇴할 뻔했음).
+    oauth_native_issue_failed: t('oauthNativeIssueFailed'),
   };
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
