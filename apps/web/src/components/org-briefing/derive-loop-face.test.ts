@@ -5,10 +5,13 @@ import {
   type LoopFaceTranslator, type RawHypothesis,
 } from './derive-loop-face';
 import koMessagesRaw from '../../../messages/ko.json';
+import enMessagesRaw from '../../../messages/en.json';
 
 type LooseMessages = { [key: string]: string | LooseMessages };
 const koMessages = koMessagesRaw as unknown as LooseMessages;
+const enMessages = enMessagesRaw as unknown as LooseMessages;
 const t = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'orgBriefing' }) as unknown as LoopFaceTranslator;
+const tEn = createTranslator({ locale: 'en', messages: enMessages, namespace: 'orgBriefing' }) as unknown as LoopFaceTranslator;
 
 function hyp(overrides: Partial<RawHypothesis> = {}): RawHypothesis {
   return { id: 'h1', status: 'active', statement: '테스트 가설', epicId: null, createdAt: '2026-07-01T00:00:00Z', ...overrides };
@@ -105,6 +108,17 @@ describe('buildLoopFace', () => {
     expect(items[0]!.trajectoryLabel).toContain('E-CANVAS');
     expect(items[0]!.trajectoryLabel).toContain('막바지');
     expect(items[0]!.trajectoryPct).toBe(95);
+  });
+
+  it('interpolates loopTrajectoryNote correctly in EN locale, not the raw i18n key (regression: en.json used {goal} while the call site passes epic)', () => {
+    const items = buildLoopFace(
+      [hyp({ id: 'h1', status: 'active', epicId: 'e1' })],
+      { e1: { title: 'Checkout Redesign', completionPct: 40, total: 5 } },
+      tEn,
+    );
+    expect(items[0]!.trajectoryLabel).toContain('Checkout Redesign');
+    expect(items[0]!.trajectoryLabel).not.toContain('orgBriefing.loopTrajectoryNote');
+    expect(items[0]!.trajectoryLabel).not.toMatch(/\{(goal|epic)\}/);
   });
 
   it('omits the trajectory entirely when the hypothesis has no linked epic or the epic is unresolved (no-fiction, no fabricated progress)', () => {
