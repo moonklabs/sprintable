@@ -10,23 +10,24 @@ import { Badge } from '@/components/ui/badge';
 import { GateEvidence, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 
 // story #1954(P1a-S4) — Gate 3종(게이트·문서결재·머지게이트) canonical 상세. P1a·P2 공용 유일
 // per-gate 라우트(중복 빌드 봉쇄) — decision(inbox_items)은 별도 표면(오르테가군 PO 판단+
 // 디디군·유나양 2줄검증 확定, 2026-07-17). #1951 매니페스트 target=gate_detail·parentTab=approvals.
 //
-// ⚠️BE 계약 갭(story #1970, 디디군 오너, 진행 중): `GET /api/v2/gates/{id}` 단건 조회 엔드포인트
-// 자체가 아직 없다(list_gates 필터만 존재) + GateResponse에 project_id 필드 부재 + work_item_summary
-// enrich가 doc 타입 한정. 이 페이지는 그 계약이 확定되는 즉시 소비하도록 GateDetail 타입을 그
-// shape 초안 그대로 맞춰뒀다 — 라우트/컴포넌트 골격은 지금 완성, 데이터 바인딩만 계약 확定 후 마무리.
+// BE 계약(story #1970, 디디군, PR#2253 — 스레드 합의 shape 그대로 구현·까심 QA 중): `GET
+// /api/v2/gates/{id}` 신설 — project_id(신규, resolve_work_item_project_id 재사용)·
+// work_item_summary(doc=title+slug, story/task=title만+slug=null, 그 외=null) 응답. PR#2253
+// 머지+배포 전까지 이 프록시는 404를 그대로 패스스루(notFound 상태로 자연 처리).
 //
-// ⚠️위험도(risk) 필드도 BE에 아직 없다(gate.py에 risk_level 류 없음) — "저·고위험=동일 BE 위험도
-// 필드"(AC) 요구를 만족하려면 이것도 #1970 계약 논의에 포함돼야 한다. 그때까지 riskLevel은 항상
-// 'unknown'으로 렌더되며(추측 배지 금지), 실 필드가 오면 deriveRiskLevel 한 곳만 교체하면 된다.
+// ⚠️위험도(risk) 필드는 #1970 스코프 밖 — 여전히 미존재(gate.py에 risk_level 류 없음). "저·고위험
+// =동일 BE 위험도 필드"(AC) 요구는 별도 후속 계약 논의 필요. 그때까지 riskLevel은 항상 'unknown'
+// 으로 렌더되며(추측 배지 금지), 실 필드가 오면 deriveRiskLevel 한 곳만 교체하면 된다.
 interface GateDetail extends GateItem {
   org_id: string;
-  project_id?: string | null; // #1970 신규 예정 필드
+  project_id?: string | null;
 }
 
 type RiskLevel = 'low' | 'high' | 'unknown';
@@ -40,6 +41,9 @@ export default function GateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const t = useTranslations('cage');
+  // 조직/프로젝트 식별(AC) — 현재 탭이 이미 로드해둔 멤버십 목록에서 이름 조회(신규 fetch 0).
+  // 크로스 프로젝트 게이트(현재 탭 프로젝트가 아닌 경우)는 매칭 실패 → ID 스니펫 폴백(정직한 값).
+  const { orgMemberships, projectMemberships } = useDashboardContext();
   // story #1959(P2-S3): 딥링크 매니페스트(gate_detail→parentTab=approvals) — 콜드 진입 시 "결재함"
   // 탭 루트를 BACK 대상으로 선주입. 결재함 목록에서 클릭해 온 경우(history.length>1)는 no-op.
   useSyntheticParentTabHistory('/inbox');
@@ -112,8 +116,12 @@ export default function GateDetailPage() {
                 {gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
               </h1>
               <p className="text-xs text-muted-foreground">
-                {t('gateDetailOrgContext', { org: gate.org_id.slice(0, 8) })}
-                {gate.project_id ? ` · ${gate.project_id.slice(0, 8)}` : ''}
+                {t('gateDetailOrgContext', {
+                  org: orgMemberships.find((o) => o.orgId === gate.org_id)?.orgName ?? gate.org_id.slice(0, 8),
+                })}
+                {gate.project_id
+                  ? ` · ${projectMemberships.find((p) => p.projectId === gate.project_id)?.projectName ?? gate.project_id.slice(0, 8)}`
+                  : ''}
               </p>
             </div>
 

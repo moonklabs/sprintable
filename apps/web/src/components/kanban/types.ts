@@ -53,8 +53,9 @@ export interface GateItem {
   neutral_facts: Record<string, unknown> | null;
   // doc-side 결재(24f5ea18): doc gate(work_item_type='doc' / gate_type='doc_approval')일 때 BE가
   // 대상 문서 요약을 동봉(디디 BE PR #1742·additive). non-doc/삭제된 문서 gate는 null → `?.` 가드 폴백.
-  // slug는 향후 deep-link 후속용(MVP 미사용).
-  work_item_summary?: { title: string; slug: string } | null;
+  // story #1970(P1a-S4): GET /{id} 단건 조회에서 story/task 타입까지 확장 — 그 타입들은 slug
+  // 개념 자체가 없어 항상 null(BE WorkItemSummary.slug: str | None 그대로 반영).
+  work_item_summary?: { title: string; slug: string | null } | null;
   // doc-gate in-doc 결재 자격(89484c8c): doc_approval gate 한정·per-caller·rule A(human+has_project_access+not-author).
   // BE가 gates 리스트 응답 각 gate에 동봉(additive). undefined/false → in-doc 승인/반려 버튼 미노출(fail-closed). 실 authz=BE 403.
   can_approve?: boolean;
