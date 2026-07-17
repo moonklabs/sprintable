@@ -3515,6 +3515,7 @@
     "evidenceNonePrompt": "No evidence yet — review by content",
     "gateDetailBackToInbox": "Approvals",
     "gateDetailNotFound": "Gate not found.",
+    "gateDetailResolvedStatus": "Already resolved — status: {status}",
     "gateDetailOrgContext": "Org {org}",
     "riskUnknown": "Risk pending",
     "sigEvidenceLabel": "Evidence",

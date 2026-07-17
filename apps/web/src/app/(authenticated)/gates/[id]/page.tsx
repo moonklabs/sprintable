@@ -61,6 +61,15 @@ export default function GateDetailPage() {
 
   useEffect(() => { void fetchGate(); }, [fetchGate]);
 
+  // gate-inbox.tsx와 동형 판정(중복 빌드 봉쇄 취지상 동일 규칙 재사용) — doc/canonicalize gate는
+  // requires_human 메타가 없어(BE 구조상) gateNeedsAction()만으로는 액션 필요 여부를 못 잡는다.
+  // ⚠️버그 fix(라이브 실측 중 자체 발견): status===pending 가드가 없으면 이미 approved/rejected
+  // 된 게이트도 액션 UI(서명/승인 버튼)가 활성 상태로 다시 뜬다 — 결재 완료된 게이트를 재차
+  // 승인 가능한 것처럼 보이는 게 실 결함이라 canonical의 첫 라이브 실측에서 바로 잡았다.
+  const isDocGate = gate?.work_item_type === 'doc' || gate?.gate_type === 'doc_approval';
+  const isCanonicalizeGate = gate?.gate_type === 'artifact_canonicalize';
+  const needsAction = !!gate && gate.status === 'pending' && (gateNeedsAction(gate) || isDocGate || isCanonicalizeGate);
+
   const transition = useCallback(async (status: 'approved' | 'rejected', note?: string) => {
     if (!gate) return;
     setResolving(true);
@@ -117,7 +126,16 @@ export default function GateDetailPage() {
               </p>
             </div>
 
-            {usesSignatureFlow(deriveRiskLevel(gate)) ? (
+            {!needsAction ? (
+              <div className="space-y-3">
+                <GateEvidence gate={gate} />
+                <p className="text-[11px] text-muted-foreground">
+                  {gate.status !== 'pending'
+                    ? t('gateDetailResolvedStatus', { status: gate.status })
+                    : gateDecision(gate) === 'block' ? t('gateReadonlyBlock') : t('gateReadonlyAuto')}
+                </p>
+              </div>
+            ) : usesSignatureFlow(deriveRiskLevel(gate)) ? (
               <GateSignatureApproval
                 gate={gate}
                 resolving={resolving}
@@ -127,31 +145,25 @@ export default function GateDetailPage() {
             ) : (
               <div className="space-y-3">
                 <GateEvidence gate={gate} />
-                {gateNeedsAction(gate) ? (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      className="min-h-12 flex-1 gap-1.5"
-                      disabled={resolving}
-                      onClick={() => void transition('rejected')}
-                    >
-                      <XCircle className="size-4" />
-                      {t('gateReject')}
-                    </Button>
-                    <Button
-                      className="min-h-12 flex-1 gap-1.5"
-                      disabled={resolving}
-                      onClick={() => void transition('approved')}
-                    >
-                      <CheckCircle className="size-4" />
-                      {resolving ? '...' : t('gateApprove')}
-                    </Button>
-                  </div>
-                ) : (
-                  <p className="text-[11px] text-muted-foreground">
-                    {gateDecision(gate) === 'block' ? t('gateReadonlyBlock') : t('gateReadonlyAuto')}
-                  </p>
-                )}
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="min-h-12 flex-1 gap-1.5"
+                    disabled={resolving}
+                    onClick={() => void transition('rejected')}
+                  >
+                    <XCircle className="size-4" />
+                    {t('gateReject')}
+                  </Button>
+                  <Button
+                    className="min-h-12 flex-1 gap-1.5"
+                    disabled={resolving}
+                    onClick={() => void transition('approved')}
+                  >
+                    <CheckCircle className="size-4" />
+                    {resolving ? '...' : t('gateApprove')}
+                  </Button>
+                </div>
               </div>
             )}
           </>
