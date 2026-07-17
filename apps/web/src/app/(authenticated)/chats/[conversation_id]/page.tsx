@@ -8,6 +8,7 @@ import { ChatView } from '@/components/chat/chat-view';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
+import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 
 interface Participant {
   member_id: string;
@@ -40,6 +41,9 @@ function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string): str
 export default function ConversationPage() {
   const { conversation_id } = useParams<{ conversation_id: string }>();
   const router = useRouter();
+  // story #1959(P2-S3): 딥링크 매니페스트(chat_thread→parentTab=chat) — 콜드 진입 시 "채팅"
+  // 탭 루트를 BACK 대상으로 선주입. 목록에서 클릭해 온 경우(history.length>1)는 no-op.
+  useSyntheticParentTabHistory('/chats');
   // Deeplink (ade2d6d5): /chats/{id}?messageId={uuid} → ChatView scrolls to + highlights it.
   // ChatView has key={conversation_id} so this is read fresh per conversation.
   const searchParams = useSearchParams();

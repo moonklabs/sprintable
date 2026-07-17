@@ -25,6 +25,7 @@ import {
 import { useDocsLayout } from '../docs-context';
 import { DocAssigneeControl } from '@/components/docs/doc-assignee-control';
 import { DocBreadcrumb } from '@/components/docs/doc-breadcrumb';
+import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 
 interface DocDetail {
   id: string;
@@ -118,6 +119,9 @@ function InlineSaveIndicator({
 export default function DocSlugPage() {
   const params = useParams();
   const slug = typeof params.slug === 'string' ? params.slug : '';
+  // story #1959(P2-S3): 딥링크 매니페스트(doc_detail→parentTab=all) — 콜드 진입 시 "전체"
+  // 탭 루트를 BACK 대상으로 선주입. 목록에서 클릭해 온 경우(history.length>1)는 no-op.
+  useSyntheticParentTabHistory('/more');
   const router = useRouter();
   const t = useTranslations('docs');
   const tc = useTranslations('common');
