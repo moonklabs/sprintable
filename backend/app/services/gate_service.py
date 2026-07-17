@@ -18,13 +18,14 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
+from app.models.hitl_config import OrgGatePolicy
 from app.models.pm import Story, Task
 from app.models.workflow_line import (
     WorkflowLineStepApproval,
@@ -34,6 +35,64 @@ from app.models.workflow_line import (
 from app.services.gate_resolver import resolve_disposition
 
 logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# story #1972(P1a-S4): 게이트 위험도 UX 등급 파생.
+#
+# SSOT: doc `gate-risk-ux-classification-criteria` §2 판정표. ⚠️철학(models/hitl_config.py:3)
+# 준수 — "새 위험도 판정"이 아니라 **기존 신호(OrgGatePolicy.posture + Gate.gate_type) 파생**이다.
+# 새 risk_level 필드/컬럼/마이그레이션 없음. `resolve_disposition()`(gate_resolver.py)은 member/org
+# override까지 태우는 HITL **정책** 해소 함수라 이 UX 등급 파생과는 완전히 별개 축(doc §4 "경계
+# 명확화") — 절대 호출하지 않는다. `get_org_posture()`는 org_id 하나로 org_gate_policy 단일 쿼리만
+# 수행(gate_resolver.py의 3번째 폴백 단계와 같은 쿼리 형태를 참고했을 뿐, 그 함수를 호출하지는
+# 않음).
+# ─────────────────────────────────────────────────────────────────────────────
+
+RiskGrade = Literal["low", "high"]
+
+# 2차 축(doc §2.2): posture가 미확定(balanced/미설정)일 때만 참조.
+_HIGH_RISK_GATE_TYPES: frozenset[str] = frozenset({"merge", "deploy", "workflow_config_publish"})
+_LOW_RISK_GATE_TYPES: frozenset[str] = frozenset({"pr_review", "qa"})
+
+
+def derive_risk_grade(posture: str | None, gate_type: str) -> RiskGrade:
+    """doc `gate-risk-ux-classification-criteria` §2 판정표를 그대로 코드화한 순수 함수.
+
+    입력: org posture 값(``OrgGatePolicy.posture`` 또는 row 없으면 None) + gate_type 문자열.
+    출력: UX 등급("low"|"high"). DB 접근 없음(순수 함수) — posture는 호출부가 ``get_org_posture()``
+    로 미리 조회해 넘긴다.
+
+    판정 순서(doc §2 그대로):
+      1차 축(posture) — conservative→high · permissive→low · balanced/None→2차 축.
+      2차 축(gate_type, 1차가 미확定일 때만) — merge/deploy/workflow_config_publish→high ·
+        pr_review/qa→low.
+      폴백(doc §2.3) — 둘 다 미확定(신규/미분류 gate_type)이면 **보수적 고위험**(안전판).
+    """
+    if posture == "conservative":
+        return "high"
+    if posture == "permissive":
+        return "low"
+    # posture in (None, "balanced") → 2차 축(gate_type)으로.
+    if gate_type in _HIGH_RISK_GATE_TYPES:
+        return "high"
+    if gate_type in _LOW_RISK_GATE_TYPES:
+        return "low"
+    # 폴백: 신규/미분류 gate_type — 보수적 고위험(doc §2.3 안전판).
+    return "high"
+
+
+async def get_org_posture(session: AsyncSession, org_id: uuid.UUID) -> str | None:
+    """org_id 단일 값으로 ``OrgGatePolicy.posture`` 직접 조회(org당 1행). row 없으면 None(미설정).
+
+    ⚠️`resolve_disposition()`(gate_resolver.py)을 호출하지 않는다 — 그 함수는 member_gate_override →
+    org_gate_override → org_gate_policy → 시스템 기본값 순 **전체 precedence**를 태우는 HITL disposition
+    해소 함수고, 이 헬퍼는 story #1972 위험도 UX 등급 파생 전용 별개 경로(doc §4)다. 쿼리 형태만
+    gate_resolver.py의 3번째 폴백 단계(org posture 조회)를 참고했다."""
+    row = await session.execute(
+        select(OrgGatePolicy.posture).where(OrgGatePolicy.org_id == org_id).limit(1)
+    )
+    return row.scalar_one_or_none()
 
 
 async def _resolve_gate_notification_targets(session: AsyncSession, org_id: uuid.UUID) -> list[uuid.UUID]:

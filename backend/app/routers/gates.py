@@ -16,7 +16,10 @@ from app.models.gate import Gate, is_valid_transition
 from app.models.pm import Story, Task
 from app.routers.agent_gateway import wake_agent
 from app.services.gate_service import (
+    RiskGrade,
     create_gate,
+    derive_risk_grade,
+    get_org_posture,
     hold_gate,
     resolve_work_item_project_id,
     transition_gate,
@@ -114,6 +117,14 @@ class GateResponse(BaseModel):
     # decider 버튼 게이팅 소스(parallel-approver 목록 아님). 비-doc/무자격/비-휴먼은 False(fail-closed·
     # additive 하위호환). ⚠️실 authz 는 BE transition 강제(이 필드는 가시성뿐). [[can_approve_doc_gate_reason]]
     can_approve: bool = False
+    # story #1972(P1a-S4): 게이트 위험도 UX 등급 — **새 위험도 판정 필드가 아니다**. 기존
+    # OrgGatePolicy.posture + Gate.gate_type을 순수 파생(gate_service.derive_risk_grade)한 UX
+    # 힌트일 뿐(doc `gate-risk-ux-classification-criteria` §2 SSOT). "risk_level" 이름은 의도적으로
+    # 피했다 — 플랫폼이 위험도를 판정한다는 오인을 부르기 때문(models/hitl_config.py:3 철학과
+    # 정면충돌). additive·nullable(project_id/work_item_summary와 동일 선례 — 이 필드를 채우지 않는
+    # 타 엔드포인트(create/transition/void/hold/unhold/override)는 Gate ORM 객체에 이 속성이 없어
+    # from_attributes 기본값 None으로 조용히 통과). list_gates·get_gate_endpoint 둘 다에서 채운다.
+    risk_grade: "RiskGrade | None" = None
     gate_type: str
     status: str
     resolver_id: uuid.UUID | None = None
@@ -225,6 +236,15 @@ async def list_gates(
     gates = list(result.scalars().all())
     responses = [GateResponse.model_validate(g) for g in gates]
 
+    # story #1972(P1a-S4): 위험도 UX 등급 enrich — org posture는 org_id 단일값(gate당 축 없음)이라
+    # 목록 전체에 **1회**만 조회(N+1 0). gate_type은 gate별 값이라 derive_risk_grade는 gate마다 호출.
+    # ⚠️resp.gate_type이 아닌 원본 gate.gate_type을 쓴다(zip) — can_approve enrich와 동일하게 원본
+    # ORM 객체에서 읽어 GateResponse.model_validate를 대체하는 테스트 더블과도 무관하게 동작.
+    if gates:
+        _posture = await get_org_posture(session, org_id)
+        for resp, g in zip(responses, gates):
+            resp.risk_grade = derive_risk_grade(_posture, g.gate_type)
+
     # doc-side enrich 2종 Doc 조회를 **한 배치**로(org-scope·soft-delete 가드·N+1 0):
     #  ⓐ work_item_summary(24f5ae18): work_item_type=='doc' gate → title/slug.
     #  ⓑ can_approve(89484c8c): gate_type=='doc_approval' gate → project_id.
@@ -316,7 +336,7 @@ async def get_gate_endpoint(
     """story #1970(P1a-S4): gate 단건 조회 — 알림 payload 의 reference_id(gate.id, gate_service.py
     :150,774)로 딥링크 콜드 진입(목록 경유 없이 상세 화면 직행)을 지원한다. 응답 shape=list 아이템과
     동일(GateResponse, 단건)·미르코(FE) canonical 게이트 상세 화면이 그대로 소비하는 스레드 합의
-    계약(변경 금지). project_id/work_item_summary 만 신규 enrich.
+    계약(변경 금지). project_id/work_item_summary 만 신규 enrich(risk_grade는 story #1972가 추가).
 
     authz: gate 의 work_item 실제 project(resolve_work_item_project_id — story #1968 SSOT 재사용)
     에 has_project_access 강제. project_id 가 해소되면(story/task/doc 은 항상 해소) 그 project
@@ -344,6 +364,10 @@ async def get_gate_endpoint(
     resp.work_item_summary = await _resolve_work_item_summary(
         session, org_id, gate.work_item_type, gate.work_item_id,
     )
+    # story #1972(P1a-S4): 위험도 UX 등급 — org posture(org_id 단일 쿼리·resolve_disposition()
+    # 미경유) + 이 gate의 gate_type을 derive_risk_grade()로 파생(doc §2 SSOT).
+    _posture = await get_org_posture(session, org_id)
+    resp.risk_grade = derive_risk_grade(_posture, gate.gate_type)
     return resp
 
 

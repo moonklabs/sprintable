@@ -165,7 +165,8 @@ async def _list_gates(gate, *, has_access, resolved=None, resolve_raises=False):
     )
     with patch.object(gates_mod.GateResponse, "model_validate", _resp), \
          patch.object(gates_mod, "resolve_member", rm), \
-         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=has_access)):
+         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=has_access)), \
+         patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         return await list_gates(
             work_item_id=None, work_item_type=None, status=None,
             session=session, org_id=org, auth=auth,
@@ -212,7 +213,8 @@ async def test_list_gates_non_doc_gate_untouched():
     rm = AsyncMock(return_value=_human(uuid.uuid4()))
     with patch.object(gates_mod.GateResponse, "model_validate", _resp), \
          patch.object(gates_mod, "resolve_member", rm), \
-         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)):
+         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
+         patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(
             work_item_id=None, work_item_type=None, status=None,
             session=session, org_id=org, auth=auth,
@@ -247,7 +249,8 @@ async def test_list_gates_can_approve_uses_doc_approval_predicate_not_work_item_
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     with patch.object(gates_mod.GateResponse, "model_validate", _resp), \
          patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_human(uuid.uuid4()))), \
-         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)):
+         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
+         patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(
             work_item_id=None, work_item_type=None, status=None,
             session=session, org_id=org, auth=auth,
