@@ -110,6 +110,12 @@ async def deliver_expo_push(
                 "data": data_payload,
                 "sound": "default",
                 "priority": "high",
+                # story 1934/1935 후속(2026-07-17): Android 8+는 notification channel의
+                # importance가 실제 헤드업/소리 여부를 결정(priority:"high"는 FCM 배달
+                # 우선순위일 뿐 UI 표시와 무관) — 민 앱이 HIGH importance로 등록하는 채널
+                # ID와 정확히 일치해야 한다(Expo 관례 "default"). 앱측 채널 ID가 다르면
+                # 여기도 맞춰야 함.
+                "channelId": "default",
             }
             for d in devices
         ]
