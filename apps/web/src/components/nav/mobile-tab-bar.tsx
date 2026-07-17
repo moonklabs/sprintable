@@ -41,6 +41,12 @@ export function MobileTabBar() {
   // `/api/gates?status=pending` 재사용(신규 집계 안 만듦). gate_overridden은 override 시
   // approver row status가 "overridden"으로 전이돼(gate_service.py) pending 조회에서 자동 제외
   // — 별도 필터 불요(백엔드 확認 완료).
+  //
+  // ⚠️fix(story #1974, 선생님 실사용 지적, prod 승격 예정): 이 fetch가 caller 스코프 필터 없이
+  // org 전체 pending을 반환해 "남의 게이트도 내 배지로 세는" 구조적 오배지였다(코드로 확定).
+  // `assigned_to_me=true`(디디 BE 계약, #1974)로 "내가 승인 가능한 것만" 스코프. BE 배포 전엔
+  // FastAPI가 미인식 쿼리파라미터를 무시하므로 안전한 no-op(기존과 동일 org-wide 동작) — 배포되면
+  // 자동으로 개인화 적용.
   const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
@@ -52,18 +58,27 @@ export function MobileTabBar() {
     if (typeof window === 'undefined' || window.innerWidth >= MOBILE_BREAKPOINT) return;
 
     let cancelled = false;
-    void (async () => {
+    // ⚠️fix(story #1974, 선생님 실사용 지적): 마운트 1회 fetch뿐이라 게이트를 다른 탭/기기에서
+    // 처리해도 배지가 안 줄어드는 stale 문제 — DB 실측(2026-07-17)으로 확認(dev pending=0인데
+    // 사용자 배지는 그대로 남아있었음). window focus 복귀 시 재조회해 완화(전형적인 "다른 곳에서
+    // 처리하고 이 탭으로 돌아옴" 시나리오를 커버 — 실시간 push는 아니지만 이 스토리 스코프에선
+    // 충분, 완전한 실시간 갱신은 #1960 결재함 큐 스코프).
+    async function loadPendingCount() {
       try {
-        const res = await fetch('/api/gates?status=pending');
+        const res = await fetch('/api/gates?status=pending&assigned_to_me=true');
         if (!res.ok) return;
         const gates = (await res.json()) as GateItem[];
         if (!cancelled) setPendingCount(Array.isArray(gates) ? gates.length : 0);
       } catch {
         // 배지 카운트 실패는 치명적이지 않음 — 숫자 없이 탭만 정상 동작.
       }
-    })();
+    }
+
+    void loadPendingCount();
+    window.addEventListener('focus', loadPendingCount);
     return () => {
       cancelled = true;
+      window.removeEventListener('focus', loadPendingCount);
     };
   }, []);
 
