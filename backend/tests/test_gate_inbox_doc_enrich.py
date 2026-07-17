@@ -49,7 +49,7 @@ async def test_doc_gate_enriched_with_title_slug():
          patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(work_item_id=None, work_item_type="doc", status="pending",
-                               session=session, org_id=org, auth=auth)
+                               assigned_to_me=False, session=session, org_id=org, auth=auth)
     assert out[0].work_item_summary is not None
     assert out[0].work_item_summary.title == "설계 문서"
     assert out[0].work_item_summary.slug == "design-doc"
@@ -65,6 +65,6 @@ async def test_non_doc_gate_no_enrich_no_extra_query():
     session.execute = AsyncMock(side_effect=[gates_res])
     with patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(work_item_id=None, work_item_type=None, status=None,
-                               session=session, org_id=org, auth=None)
+                               assigned_to_me=False, session=session, org_id=org, auth=None)
     assert out[0].work_item_summary is None
     assert session.execute.await_count == 1  # gates 쿼리만(doc/can_approve enrich 쿼리 0·posture는 mocked)

@@ -103,7 +103,7 @@ async def test_list_gates_sort_urgency_calls_helper():
                        MagicMock(side_effect=lambda q: q)) as sort_spy, \
          patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         await list_gates(work_item_id=None, work_item_type=None, status=None, sort="urgency",
-                          session=session, org_id=org, auth=auth)
+                          assigned_to_me=False, session=session, org_id=org, auth=auth)
 
     sort_spy.assert_called_once()
 
@@ -126,7 +126,7 @@ async def test_list_gates_no_sort_param_skips_urgency_helper():
                        MagicMock(side_effect=AssertionError("호출되면 안 됨"))) as sort_spy, \
          patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(work_item_id=None, work_item_type=None, status=None, sort=None,
-                                session=session, org_id=org, auth=auth)
+                                assigned_to_me=False, session=session, org_id=org, auth=auth)
 
     assert len(out) == 1
     sort_spy.assert_not_called()
@@ -148,7 +148,7 @@ async def test_list_gates_sort_other_value_skips_urgency_helper():
     with patch.object(gates_mod, "apply_gate_urgency_sort",
                        MagicMock(side_effect=AssertionError("호출되면 안 됨"))) as sort_spy:
         out = await list_gates(work_item_id=None, work_item_type=None, status=None, sort="created_at",
-                                session=session, org_id=org, auth=auth)
+                                assigned_to_me=False, session=session, org_id=org, auth=auth)
 
     assert out == []
     sort_spy.assert_not_called()

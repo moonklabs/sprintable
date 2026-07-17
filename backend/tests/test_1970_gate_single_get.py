@@ -581,7 +581,7 @@ async def test_list_gates_regression_doc_enrich_unaffected_by_project_id_field()
     with patch.object(gates_mod, "resolve_member", AsyncMock(side_effect=Exception("no doc_approval enrich needed"))), \
          patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(work_item_id=None, work_item_type="doc", status="pending",
-                               session=session, org_id=org, auth=auth)
+                               assigned_to_me=False, session=session, org_id=org, auth=auth)
 
     assert out[0].work_item_summary.title == "설계 문서"
     assert out[0].project_id is None  # list는 project_id 를 채우지 않는다(GET /{id} 전용 enrich)

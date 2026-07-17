@@ -28,7 +28,12 @@ from app.services.gate_service import (
     void_gate,
 )
 from app.services.member_resolver import resolve_member
-from app.services.project_auth import has_project_access, is_org_owner, is_org_owner_or_admin
+from app.services.project_auth import (
+    get_project_role,
+    has_project_access,
+    is_org_owner,
+    is_org_owner_or_admin,
+)
 
 
 def _schedule_pending_deliveries(
@@ -217,12 +222,33 @@ async def create_gate_endpoint(
     return GateResponse.model_validate(gate)
 
 
+async def _non_doc_gate_approvable(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+) -> bool:
+    """story #1974(P1a-S5): ``assigned_to_me`` 판정 rule B — doc_approval **이 아닌** gate_type
+    (pr_review/qa/merge/deploy/workflow_config_publish)의 "caller 가 승인 가능한가" 단일 규칙.
+
+    project_id 가 해소되면(story/task/doc 은 항상 해소) 그 project 의 **effective** 역할
+    (``get_project_role`` — project_access ∪ org owner/admin floor, project_auth.py SSOT 재사용·
+    재구현 금지)이 owner/admin 이면 승인 가능. project_id 가 구조적으로 None 이면(project-무관
+    work_item — 예: workflow_line_config 류) project 경계가 없으므로 **org owner/admin**
+    (``is_org_owner_or_admin``)에게만 노출 — doc.py:36 의 org owner/admin 체크와 동일 기준."""
+    if project_id is not None:
+        role = await get_project_role(session, user_id, project_id)
+        return role in ("owner", "admin")
+    return await is_org_owner_or_admin(session, user_id, org_id)
+
+
 @router.get("", response_model=list[GateResponse])
 async def list_gates(
     work_item_id: uuid.UUID | None = Query(default=None),
     work_item_type: str | None = Query(default=None),
     status: str | None = Query(default=None),
     sort: str | None = Query(default=None),
+    assigned_to_me: bool = Query(default=False),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
@@ -280,23 +306,96 @@ async def list_gates(
     # transition 강제와 can_approve_doc_gate_reason 단일 규칙 공용(DRY). 배치 project_id 주입(N+1 0)·비-휴먼/
     # 무자격/삭제 doc = False(default·fail-closed). additive — 실 authz 는 transition BE 가 강제(이 필드=가시성뿐).
     doc_gates = [(resp, g) for resp, g in zip(responses, gates) if g.gate_type == "doc_approval"]
-    if doc_gates:
+    # story #1974(P1a-S5): assigned_to_me 도 doc_approval 경로는 can_approve 와 **동일 계산**이라
+    # caller 식별(resolve_member)을 can_approve enrich 와 공유 — 1회만 resolve(중복 계산 0).
+    resolved = None
+    _uid: uuid.UUID | None = None
+    if doc_gates or assigned_to_me:
         try:
             resolved = await resolve_member(auth, org_id, session)
             _uid = uuid.UUID(auth.user_id)
-            for resp, g in doc_gates:
-                _reason = await can_approve_doc_gate_reason(
-                    session, g, resolved, _uid, org_id,
-                    doc_project_id=doc_proj.get(g.work_item_id),
-                )
-                # 완전 DRY(codex): "지금 승인 가능" = authz(rule A·helper) **AND** FSM 으로 resolvable
-                # (pending). transition 도 authz(helper) + transition_gate FSM(is_valid_transition) 이중이므로
-                # enrich 도 동일 is_valid_transition 으로 FSM 반영 — terminal/held gate 는 can_approve=False(승인/
-                # 반려 둘 다 pending 전제라 "approved" 한 방향 검사로 충분). authz-only 의미 갈림 제거.
-                resp.can_approve = _reason is None and is_valid_transition(g.status, "approved")
-        except Exception:  # noqa: BLE001 — can_approve 가시성 enrich 실패는 목록 비중단(fail-closed=False 유지).
-            logger.warning("list_gates can_approve enrich 실패(비중단) org=%s", org_id, exc_info=True)
-    return responses
+        except Exception:  # noqa: BLE001 — caller resolve 실패는 목록 비중단(fail-closed).
+            logger.warning("list_gates caller resolve 실패(비중단) org=%s", org_id, exc_info=True)
+            resolved = None
+            _uid = None
+
+    if doc_gates and resolved is not None:
+        for resp, g in doc_gates:
+            _reason = await can_approve_doc_gate_reason(
+                session, g, resolved, _uid, org_id,
+                doc_project_id=doc_proj.get(g.work_item_id),
+            )
+            # 완전 DRY(codex): "지금 승인 가능" = authz(rule A·helper) **AND** FSM 으로 resolvable
+            # (pending). transition 도 authz(helper) + transition_gate FSM(is_valid_transition) 이중이므로
+            # enrich 도 동일 is_valid_transition 으로 FSM 반영 — terminal/held gate 는 can_approve=False(승인/
+            # 반려 둘 다 pending 전제라 "approved" 한 방향 검사로 충분). authz-only 의미 갈림 제거.
+            resp.can_approve = _reason is None and is_valid_transition(g.status, "approved")
+
+    if not assigned_to_me:
+        return responses
+
+    # story #1974(P1a-S5): assigned_to_me=true → "caller 가 실제로 승인 가능(can_approve)한 pending
+    # 게이트만"(대원칙). ⚠️휴먼 전용 불변식: transition_gate_endpoint(위 383~392)는 gate_type 무관
+    # resolved.type != "human" 이면 무조건 403("사람 검증 행위는 휴먼 member만" — 웨지 integrity).
+    # doc_approval 은 can_approve_doc_gate_reason 이 이미 not_human 을 거부사유로 반환해 자동 배제되지만,
+    # rule B(project-role/org-role)는 human 체크가 없어 그대로 두면 "에이전트가 owner/admin project
+    # role 을 가진 경우 배지엔 뜨는데 transition 에서 403" 모순이 재발한다 — 여기서 한 번 더 fail-closed.
+    if resolved is None or resolved.type != "human":
+        return []
+
+    non_doc_pending = [
+        (resp, g) for resp, g in zip(responses, gates)
+        if g.gate_type != "doc_approval" and g.status == "pending"
+    ]
+
+    # project_id 배치 해소(story #1968 resolve_work_item_project_id 의 IN-clause 배치 버전 — 개별
+    # gate 마다 신규 쿼리 금지). doc 은 위에서 이미 배치 조회한 doc_proj 재사용(중복 쿼리 0).
+    project_id_by_work_item: dict[uuid.UUID, uuid.UUID | None] = dict(doc_proj)
+    story_ids = {g.work_item_id for _, g in non_doc_pending if g.work_item_type == "story"}
+    task_ids = {g.work_item_id for _, g in non_doc_pending if g.work_item_type == "task"}
+    if story_ids:
+        rows = (await session.execute(
+            select(Story.id, Story.project_id).where(
+                Story.id.in_(story_ids), Story.org_id == org_id,
+            )
+        )).all()
+        project_id_by_work_item.update({sid: pid for sid, pid in rows})
+    if task_ids:
+        rows = (await session.execute(
+            select(Task.id, Story.project_id)
+            .join(Story, Task.story_id == Story.id)
+            .where(Task.id.in_(task_ids), Task.org_id == org_id)
+        )).all()
+        project_id_by_work_item.update({tid: pid for tid, pid in rows})
+
+    # N+1 방지: gate 여러 건이 같은 project 를 가리켜도 get_project_role/is_org_owner_or_admin 은
+    # **고유 project_id(및 org-fallback 1회)당 1회**만 호출(캐시) — gate 개수와 무관.
+    role_cache: dict[uuid.UUID, bool] = {}
+    org_admin_cache: bool | None = None
+    eligible_ids: set[uuid.UUID] = set()
+    for _resp, g in non_doc_pending:
+        pid = project_id_by_work_item.get(g.work_item_id)
+        if pid is not None:
+            if pid not in role_cache:
+                role_cache[pid] = await _non_doc_gate_approvable(session, _uid, org_id, pid)
+            if role_cache[pid]:
+                eligible_ids.add(g.id)
+        else:
+            if org_admin_cache is None:
+                org_admin_cache = await _non_doc_gate_approvable(session, _uid, org_id, None)
+            if org_admin_cache:
+                eligible_ids.add(g.id)
+
+    filtered: list[GateResponse] = []
+    for resp, g in zip(responses, gates):
+        if g.status != "pending":
+            continue
+        if g.gate_type == "doc_approval":
+            if resp.can_approve:
+                filtered.append(resp)
+        elif g.id in eligible_ids:
+            filtered.append(resp)
+    return filtered
 
 
 async def _resolve_work_item_summary(

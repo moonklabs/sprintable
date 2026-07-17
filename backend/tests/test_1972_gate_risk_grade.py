@@ -233,7 +233,7 @@ async def test_list_gates_populates_risk_grade_for_all_rows():
 
     with patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)) as posture_spy:
         out = await list_gates(work_item_id=None, work_item_type=None, status=None,
-                                session=session, org_id=org, auth=auth)
+                                assigned_to_me=False, session=session, org_id=org, auth=auth)
 
     assert out[0].risk_grade == "high"  # posture=None(미설정) + merge → 2차 축 high
     assert out[1].risk_grade == "low"   # posture=None + qa → 2차 축 low
@@ -256,7 +256,7 @@ async def test_list_gates_empty_skips_posture_query():
     with patch.object(gates_mod, "get_org_posture",
                        AsyncMock(side_effect=AssertionError("호출되면 안 됨"))) as posture_spy:
         out = await list_gates(work_item_id=None, work_item_type=None, status=None,
-                                session=session, org_id=org, auth=auth)
+                                assigned_to_me=False, session=session, org_id=org, auth=auth)
 
     assert out == []
     posture_spy.assert_not_called()
@@ -288,7 +288,7 @@ async def test_list_gates_risk_grade_independent_of_member_gate_override_disposi
 
     with patch.object(gates_mod, "get_org_posture", AsyncMock(return_value="balanced")):
         out = await list_gates(work_item_id=None, work_item_type=None, status=None,
-                                session=session, org_id=org, auth=auth)
+                                assigned_to_me=False, session=session, org_id=org, auth=auth)
 
     assert out[0].risk_grade == "high"
     assert out[1].risk_grade == "high"
