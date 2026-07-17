@@ -14,11 +14,19 @@
 `grep -rl "Notification(" backend/app` 결과 `models/notification.py`(정의)와
 `services/notification_dispatch.py`(유일한 사용처) 뿐).
 
-Expo push data payload(`ee/services/expo_push.py:deliver_expo_push`)는 다음 필드만 담는다:
-    {"event_type": str, "reference_type": str | None, "reference_id": str | None}
-→ 클라이언트가 딥링크를 결정할 수 있는 **유일한 실제 재료**가 이 세 필드다. 이 매니페스트의
+Expo push data payload(`ee/services/expo_push.py:deliver_expo_push`)는 (story #1951 초안 당시)
+다음 필드만 담았다: {"event_type": str, "reference_type": str | None, "reference_id": str | None}
+→ 클라이언트가 딥링크를 결정할 수 있는 **유일한 실제 재료**가 이 세 필드였다. 이 매니페스트의
 `type`/`entity_type` 룩업 키는 이 payload 필드와 정확히 대응하도록 설계했다(아래 "룩업 알고리즘"
 참고).
+
+**갱신(story #1953, P1a-S3, 2026-07-17)**: S1이 남긴 열린 질문 5번(org_id/project_id가 실제로
+필요하면 BE가 아직 안 보내고 있다는 뜻) 정정 — `_build_push_data_payload()`
+(ee/services/expo_push.py)가 이제 `org_id`(전 타입 항상)·`project_id`(호출부가 아는 경우)를
+payload에 추가로 싣는다. `task_completed`는 `story_id`, 가설 관련(`dispatched`/`handoff_stuck`의
+entity_type="hypothesis") 엔트리는 `sprint_id`도 추가로 싣는다(§ Layer 2 필드 상세는
+`DeepLinkPayloadFields` 참고). event_type/reference_type/reference_id 3필드 거동은 무변경
+(PATCH 수준 additive — schema_version 안 올림).
 
 ## 3-레이어 필드 분리 (AC3)
 
@@ -172,14 +180,24 @@ class DeepLinkPayloadFields(BaseModel):
     org_id_included: bool = Field(
         default=False,
         description=(
-            "push data payload에 org_id가 포함되는가. 현재 deliver_expo_push()는 "
-            "data payload에 org_id를 넣지 않는다(코드 실측: event_type/reference_type/"
-            "reference_id 셋뿐) — 이 필드가 org_id 전부 False인 이유. AC 스코프 필드명 "
-            "그대로 유지하되 '항상 False'라는 사실 자체가 열린 질문 5번(org_id/project_id "
-            "가 실제로 필요하면 BE가 아직 안 보내고 있다는 뜻)."
+            "push data payload에 org_id가 포함되는가. story #1953(P1a-S3) 갱신: "
+            "deliver_expo_push()의 _build_push_data_payload()가 org_id를 전 타입 항상 "
+            "포함한다(dispatch_notification()의 org_id는 non-null 필수 파라미터라 항상 "
+            "값이 있음) — 그래서 매니페스트 전 엔트리가 True. (S1 초안 당시엔 실제로 "
+            "전부 False였다 — 이 갭이 이번 스토리의 존재 이유였다.)"
         ),
     )
-    project_id_included: bool = Field(default=False)
+    project_id_included: bool = Field(
+        default=False,
+        description=(
+            "push data payload에 project_id가 포함되는가. story #1953 갱신: 대부분의 "
+            "알림 타입은 project-scoped 엔티티(story/epic/doc/sprint/hypothesis 등, "
+            "project_id NOT NULL 컬럼)에서 발화돼 True. 예외(False로 남은 엔트리) = "
+            "`gate.pending_approval`·`gate_overridden` — 이 둘은 여러 gate_type/여러 "
+            "호출부(create_gate 공용 chokepoint, 일부는 org-level work_item)에 걸쳐 있어 "
+            "project_id가 항상 보장되지 않는다(엔트리별 주석 참고)."
+        ),
+    )
     required_payload: list[str] = Field(
         default_factory=list,
         description=(
@@ -317,14 +335,26 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="gate.pending_approval", target="gate_detail", parent_tab=ParentTab.approvals,
                 target_promotion_pending=True,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            # story #1953(P1a-S3): org_id는 전 타입 공통으로 이제 항상 포함(True). project_id는
+            # create_gate()가 여러 gate_type(merge/doc_approval/artifact_canonicalize/
+            # workflow_config_publish/직접생성 등) 공용 chokepoint라 호출부별로 project_id를
+            # 아는 경우(artifact_canonicalize·doc_approval·parallel merge 등)에만 실어 보내고,
+            # 모르는 호출부(범용 gates.py 직접생성·workflow_line_config 등 org-level work_item)는
+            # 그대로 생략된다 — 전부 보장은 아니라서 False로 정직하게 유지(실측 불일치 방지).
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=False,
+                required_payload=["reference_id"],
+            ),
         ),
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="gate_approval_requested", target="gate_detail", parent_tab=ParentTab.approvals,
                 target_promotion_pending=True,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
         ),
         DeepLinkManifestEntry(
@@ -332,7 +362,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="gate_reassigned", target="gate_detail", parent_tab=ParentTab.approvals,
                 target_promotion_pending=True,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
         ),
         DeepLinkManifestEntry(
@@ -340,7 +373,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="gate_escalated", target="gate_detail", parent_tab=ParentTab.approvals,
                 target_promotion_pending=True,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
         ),
         DeepLinkManifestEntry(
@@ -348,7 +384,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="gate_reminder", target="gate_detail", parent_tab=ParentTab.approvals,
                 target_promotion_pending=True,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
         ),
         DeepLinkManifestEntry(
@@ -362,7 +401,13 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 counts_toward_queue_badge=False,
                 target_promotion_pending=True,  # gate_detail 공통 사유 — 위 결재함 섹션 헤더 주석 참고.
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            # story #1953: project_id는 라인 step_run(sr)이 해소될 때만 실림(gate_service.py
+            # override_gate — 단일 gate엔 활성 step_run이 없을 수 있어 sr=None 케이스 존재) →
+            # 항상 보장은 아니라 False.
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=False,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
         DeepLinkManifestEntry(
@@ -372,7 +417,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="doc_approval_requested", target="gate_detail", parent_tab=ParentTab.approvals,
                 target_promotion_pending=True,  # gate_detail 공통 사유 — 위 결재함 섹션 헤더 주석 참고.
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
         ),
 
@@ -387,13 +435,19 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             app=DeepLinkAppFields(
                 type="dispatched", entity_type="story", target="story_detail", parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
         ),
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="dispatched", entity_type="epic", target="goal_detail", parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
         ),
         DeepLinkManifestEntry(
             # 미르코 point ④(3자 검토): doc_detail 착지 시 id↔slug 불일치 우려 — 신규
@@ -405,7 +459,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             app=DeepLinkAppFields(
                 type="dispatched", entity_type="doc", target="doc_detail", parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
         ),
         DeepLinkManifestEntry(
             # 열린 질문 7번 답변(유나, 3자 검토) — "target 실존 원칙": hypothesis 독립 상세
@@ -417,19 +474,34 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             # PR에서 target이 실제 라우트로 승격되면 이 값과 flag를 갱신한다.
             # (handoff_stuck:hypothesis 엔트리도 동일 원칙으로 통일됨 — 오르테가 정정,
             # 2026-07-17.)
+            #
+            # story #1953(P1a-S3) GATE1 재확인(2026-07-17): apps/web에 hypothesis 상세 라우트가
+            # 여전히 없다(`apps/web/src/app/**/hypotheses/**` 0건·searchParams 기반 hypothesis
+            # id 소비 컴포넌트도 0건 — epics/sprints 페이지에 인라인 카드/뱃지(hypothesis-
+            # declaration-card 등)만 있고 독립 상세 화면 없음). target 실존 원칙(S1 열린 질문
+            # 7번 결론) 유지 — target="now" 폴백·target_promotion_pending=True 그대로 보류.
+            # sprint_id는 target 승격과 무관하게 이번 스토리 스코프(가설 관련 알림에 타겟
+            # 식별자 보강) — FE가 향후 라우트를 만들 때 바로 쓸 수 있도록 payload에는 먼저
+            # 싣는다(HypothesisRepository.get_sprint_id 재사용, N:1 — 가설당 최대 1개).
             app=DeepLinkAppFields(
                 type="dispatched", entity_type="hypothesis", target="now",
                 parent_tab=ParentTab.all,
                 target_promotion_pending=True,
                 return_policy=ReturnPolicy.fallback_now,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id", "sprint_id"],
+            ),
         ),
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="dispatched", entity_type="sprint", target="sprint_detail", parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
         ),
 
         # --- story 계열 ---
@@ -440,14 +512,20 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             app=DeepLinkAppFields(
                 type="story_assigned", target="story_detail", parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
         ),
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="story_status_changed", target="story_detail", parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
         DeepLinkManifestEntry(
@@ -455,7 +533,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="comment.created", entity_type="story", target="story_detail",
                 parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
         ),
 
         # --- task — 열린 질문 8번 답변(유나+미르코, 3자 검토): task_completed payload에
@@ -467,10 +548,17 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         # derive-attention-queue.ts에서 이미 쓰는 패턴 — story_id 없이도 보드로 착지).
         # 등급은 B(정보성) — #1956 채널 등급 확정 시 참고.
         DeepLinkManifestEntry(
+            # story #1953(P1a-S3): story_id를 payload에 추가(발판 — 향후 story_detail 폴백
+            # 승격 시 이 필드로 "/board?story=" 조립 없이 직접 착지 가능해진다). task.story_id
+            # FK는 tasks.py 호출부가 이미 story_row.id로 알고 있어(task는 항상 story 소속)
+            # 신규 조회 없이 그대로 흘려보낸다 — 항상 존재(Task는 story 없이 존재 불가).
             app=DeepLinkAppFields(
                 type="task_completed", target="/board?story=", parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id", "story_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
 
@@ -490,14 +578,20 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="comment.created", entity_type="visual_artifact", target="artifact_detail",
                 parent_tab=ParentTab.all, target_promotion_pending=True,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
         ),
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="artifact.created", target="artifact_detail", parent_tab=ParentTab.all,
                 target_promotion_pending=True,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
         DeepLinkManifestEntry(
@@ -505,7 +599,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="artifact.exported", target="artifact_detail", parent_tab=ParentTab.all,
                 target_promotion_pending=True,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
         DeepLinkManifestEntry(
@@ -513,7 +610,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="artifact.updated", target="artifact_detail", parent_tab=ParentTab.all,
                 target_promotion_pending=True,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
         DeepLinkManifestEntry(
@@ -521,7 +621,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="artifact.canonicalized", target="artifact_detail", parent_tab=ParentTab.all,
                 target_promotion_pending=True,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
 
@@ -530,14 +633,20 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             app=DeepLinkAppFields(
                 type="conversation.mention", target="chat_thread", parent_tab=ParentTab.chat,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
         ),
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="conversation.message", target="chat_thread", parent_tab=ParentTab.chat,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
 
@@ -546,14 +655,20 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             app=DeepLinkAppFields(
                 type="epic_created", target="goal_detail", parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="epic_status_changed", target="goal_detail", parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
 
@@ -562,7 +677,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             app=DeepLinkAppFields(
                 type="sprint_closed", target="sprint_detail", parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
 
@@ -571,7 +689,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             app=DeepLinkAppFields(
                 type="agent_joined", target="team_member_detail", parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
 
@@ -597,7 +718,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="handoff_stuck", entity_type="story", target="story_detail",
                 parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
         ),
         DeepLinkManifestEntry(
@@ -605,7 +729,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="handoff_stuck", entity_type="epic", target="goal_detail",
                 parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
         ),
         DeepLinkManifestEntry(
@@ -613,7 +740,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="handoff_stuck", entity_type="doc", target="doc_detail",
                 parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
         ),
         DeepLinkManifestEntry(
@@ -624,13 +754,24 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             # 동일 target을 쓰면서 다른 처리를 받는 내부 불일치. dispatched:hypothesis와
             # 동일 원칙(target 실존 원칙)으로 통일 — target="now" 폴백 + 승격 대기 표시.
             # S3(가설 상세 라우트 신설) PR에서 dispatched:hypothesis와 함께 일괄 승격.
+            #
+            # story #1953(P1a-S3) 재확인(2026-07-17): FE에 hypothesis 상세 라우트 여전히 없음
+            # (위 dispatched:hypothesis 엔트리 주석 참고 — 동일 GATE1 조사) → 승격 보류 유지.
+            # sprint_id는 required_payload에 추가(가설 관련 알림 타겟 보강 — 이번 스토리 스코프).
+            # sprint_id가 없을 수 있는 가설(sprint 미연결)은 validate_push_payload가
+            # MissingRequiredDeepLinkPayloadError → AC4 폴백으로 처리하는데, 이 엔트리는 이미
+            # target="now"라 폴백 목적지와 동일(무해) — sprint-anchored 가설만 향후 승격 시
+            # 정밀 착지가 가능해진다는 신호로 남겨둔다.
             app=DeepLinkAppFields(
                 type="handoff_stuck", entity_type="hypothesis", target="now",
                 parent_tab=ParentTab.all,
                 target_promotion_pending=True,
                 return_policy=ReturnPolicy.fallback_now,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id", "sprint_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
         ),
         DeepLinkManifestEntry(
@@ -638,7 +779,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="handoff_stuck", entity_type="sprint", target="sprint_detail",
                 parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
         ),
         DeepLinkManifestEntry(
@@ -646,7 +790,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="handoff_fallback", entity_type="story", target="story_detail",
                 parent_tab=ParentTab.all,
             ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
         ),
     ],

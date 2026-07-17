@@ -88,8 +88,17 @@ async def create_gate(
     member_id: uuid.UUID,
     role_id: uuid.UUID,
     neutral_facts: dict[str, Any] | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> Gate:
-    """config 기반 게이트 생성 (멱등: 이미 있으면 기존 반환)."""
+    """config 기반 게이트 생성 (멱등: 이미 있으면 기존 반환).
+
+    project_id: story #1953(P1a-S3) — gate.pending_approval 알림 payload의 project_id 보강용
+    (선택적). create_gate()는 gate_type/work_item_type을 가리지 않는 공용 chokepoint라
+    work_item_type별 project_id 해소 로직을 여기 내장하지 않는다 — 호출부가 이미 알고 있으면
+    (artifact_canonicalize·doc_approval·parallel merge 등) 그대로 넘기고, 모르는 호출부(범용
+    gates.py 직접생성·workflow_line_config 등 org-level work_item)는 생략(None)해도 무방하다
+    (신규 조회 강제 없음 — 매니페스트 project_id_included=False로 이 부분성을 정직하게 표시).
+    """
     # 멱등: 이미 존재하면 기존 반환
     existing_r = await session.execute(
         select(Gate).where(
@@ -139,6 +148,7 @@ async def create_gate(
                     title="결재 대기 중인 게이트가 있습니다",
                     body=f"{gate_type} 게이트가 승인/거부를 기다리고 있습니다.",
                     reference_type="gate", reference_id=gate.id,
+                    source_project_id=project_id,
                 )
         except Exception:
             logger.warning(
@@ -762,6 +772,10 @@ async def override_gate(
                 title="게이트가 강제 결정되었습니다",
                 body=f"owner 가 게이트를 {decision} 로 강제 결정했습니다: {reason}",
                 reference_type="gate", reference_id=gate_id,
+                # story #1953: sr(라인 step_run)이 해소된 경우에만 project_id를 안다(단일
+                # gate엔 활성 step_run이 없을 수 있어 sr=None 케이스 존재 — 그래서 매니페스트
+                # project_id_included=False로 정직하게 유지·여기선 best-effort로만 실음).
+                source_project_id=(sr.project_id if sr is not None else None),
             )
         except Exception:  # noqa: BLE001 — notification 실패는 비중단(override 자체는 성공).
             pass

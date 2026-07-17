@@ -175,6 +175,9 @@ async def update_task(
                 reference_id=task.id,
                 # S2: 멀티프로젝트 에이전트 assignee를 스토리 프로젝트로 정확 라우팅
                 source_project_id=story_row.project_id,
+                # story #1953(P1a-S3): task는 항상 story 소속(story_id NOT NULL) — 신규 조회
+                # 없이 FK 그대로 payload에 실음(향후 story_detail 폴백 승격 발판).
+                story_id=task.story_id,
             )
     await _attach_has_evidence(db, [task])
     return TaskResponse.model_validate(task)

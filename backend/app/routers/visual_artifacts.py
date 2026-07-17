@@ -1078,6 +1078,7 @@ async def propose_canonical_version(
             "version_number": version_number, "requested_by_member_id": str(proposer_id),
             "artifact_title": artifact.title,
         },
+        project_id=project_id,
     )
     await session.commit()
     return _ok({

@@ -74,6 +74,7 @@ async def create_parallel_gate(
             "requested_by_member_id": str(requested_by_member_id) if requested_by_member_id else None,
             "parallel": True,
         },
+        project_id=step_run.project_id,
     )
     group_id = uuid.uuid4()
     step_run.gate_id = gate.id  # ⭐S6 hook 연결: transition_gate→find_active_step_run_for_gate→라인 전이
@@ -341,6 +342,9 @@ async def reassign_approver(
             target_member_ids=[new_approver_id], title="결재자로 재지정됨",
             body="관리자가 당신을 이 결재의 새 결재자로 지정했습니다.",
             reference_type="gate", reference_id=gate_id,
+            # story #1953: target(WorkflowLineStepApproval).project_id NOT NULL — 신규 조회
+            # 없이 그대로 실음.
+            source_project_id=target.project_id,
         )
     except Exception:  # noqa: BLE001 — notification 실패는 비중단(재지정 자체는 성공).
         pass

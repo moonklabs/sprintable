@@ -56,6 +56,41 @@ async def _expo_send_chunk(messages: list[dict]) -> list[dict]:
     return []
 
 
+def _build_push_data_payload(
+    *,
+    event_type: str,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None = None,
+    reference_type: str | None = None,
+    reference_id: uuid.UUID | None = None,
+    story_id: uuid.UUID | None = None,
+    sprint_id: uuid.UUID | None = None,
+) -> dict:
+    """story #1953(P1a-S3): Expo push data payload 구성(순수 함수 — DB/IO 없음).
+
+    org_id는 dispatch_notification()의 non-null 필수 파라미터라 **전 타입 항상 포함**
+    (manifest DeepLinkPayloadFields.org_id_included=True 근거). project_id는 호출부가
+    알고 있으면 포함하되(대부분의 타입은 project-scoped라 알고 있음), org-wide 브로드캐스트
+    등 미상인 경우 키 자체를 생략(None/빈문자열로 오염하지 않음 — 클라이언트가 "값 없음"과
+    "필드 없음"을 구분할 필요가 없게 아예 안 실음).
+
+    story_id(task_completed)·sprint_id(가설 관련 dispatched/handoff_stuck)는 특정 타입에서만
+    유의미한 타겟 보강 식별자 — 호출부가 안 넘기면(None) 생략.
+    """
+    data: dict = {"event_type": event_type, "org_id": str(org_id)}
+    if project_id:
+        data["project_id"] = str(project_id)
+    if reference_type:
+        data["reference_type"] = reference_type
+    if reference_id:
+        data["reference_id"] = str(reference_id)
+    if story_id:
+        data["story_id"] = str(story_id)
+    if sprint_id:
+        data["sprint_id"] = str(sprint_id)
+    return data
+
+
 async def deliver_expo_push(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -68,6 +103,9 @@ async def deliver_expo_push(
     reference_id: uuid.UUID | None = None,
     context: dict | None = None,
     muted_member_ids: set[uuid.UUID] | None = None,
+    project_id: uuid.UUID | None = None,
+    story_id: uuid.UUID | None = None,
+    sprint_id: uuid.UUID | None = None,
 ) -> None:
     """활성 push_devices 로 Expo push 발송(웹훅과 나란한 별개 채널).
 
@@ -75,6 +113,8 @@ async def deliver_expo_push(
     - 디바이스당 1발(이중발송 0). 배치 ≤100·메시지 최소화(≤4096B).
     - best-effort: 어떤 실패도 알림 파이프라인으로 전파 안 함(발송 실패가 in-app/Event 안 되돌림).
     - DeviceNotRegistered ticket → 그 토큰 is_active=false(자동 만료). 재발송 대상서 제외됨.
+    - story #1953(P1a-S3): project_id/story_id/sprint_id는 딥링크 매니페스트 Layer 2 계약
+      보강 필드 — dispatch_notification()이 이미 아는 값을 그대로 흘려보낸다(신규 조회 없음).
     """
     try:
         if not member_ids:
@@ -96,11 +136,11 @@ async def deliver_expo_push(
             return
 
         # 딥링크용 data(4096B 상한 고려 최소 필드만 — 탭→화면 착지에 필요한 것).
-        data_payload: dict = {"event_type": event_type}
-        if reference_type:
-            data_payload["reference_type"] = reference_type
-        if reference_id:
-            data_payload["reference_id"] = str(reference_id)
+        data_payload = _build_push_data_payload(
+            event_type=event_type, org_id=org_id, project_id=project_id,
+            reference_type=reference_type, reference_id=reference_id,
+            story_id=story_id, sprint_id=sprint_id,
+        )
 
         messages = [
             {

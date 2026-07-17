@@ -84,6 +84,8 @@ async def _notify(session: AsyncSession, sr: WorkflowLineStepRun, target_id: uui
             session, org_id=sr.org_id, event_type=event_type, target_member_ids=[target_id],
             title=title, body=f"{sr.entity_type} {sr.entity_id} {sr.from_status}→{sr.to_status}",
             reference_type=sr.entity_type, reference_id=sr.entity_id,
+            # story #1953: sr.project_id NOT NULL — 신규 조회 없이 그대로 실음.
+            source_project_id=sr.project_id,
         )
     except Exception:  # noqa: BLE001 — notification 실패는 비중단(best-effort).
         pass

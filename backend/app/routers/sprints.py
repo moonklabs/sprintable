@@ -438,6 +438,9 @@ async def close_sprint(
                 body=None,
                 reference_type="sprint",
                 reference_id=sprint.id,
+                # story #1953: 이미 `if sprint.project_id and ...`로 non-null 확인된 후라
+                # 신규 조회 없이 그대로 실음.
+                source_project_id=sprint.project_id,
             )
     return SprintResponse.model_validate(sprint)
 
