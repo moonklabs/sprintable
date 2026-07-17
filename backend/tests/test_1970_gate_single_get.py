@@ -578,7 +578,8 @@ async def test_list_gates_regression_doc_enrich_unaffected_by_project_id_field()
     session.execute = AsyncMock(side_effect=[gates_res, docs_res])
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
 
-    with patch.object(gates_mod, "resolve_member", AsyncMock(side_effect=Exception("no doc_approval enrich needed"))):
+    with patch.object(gates_mod, "resolve_member", AsyncMock(side_effect=Exception("no doc_approval enrich needed"))), \
+         patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(work_item_id=None, work_item_type="doc", status="pending",
                                session=session, org_id=org, auth=auth)
 
