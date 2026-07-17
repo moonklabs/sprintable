@@ -34,8 +34,9 @@ def _agent(mid: uuid.UUID) -> ResolvedMember:
     )
 
 
-def _gate(requester_id, *, work_item_id=None, status="pending"):
+def _gate(requester_id, *, work_item_id=None, status="pending", gate_id=None):
     return SimpleNamespace(
+        id=gate_id or uuid.uuid4(),
         gate_type="doc_approval",
         neutral_facts={"requested_by_member_id": str(requester_id)} if requester_id else {},
         work_item_id=work_item_id or uuid.uuid4(),
@@ -237,7 +238,7 @@ async def test_list_gates_can_approve_uses_doc_approval_predicate_not_work_item_
     키잉하면 project_id=None→can_approve False 로 갈림(이 테스트가 그 회귀를 잠금)."""
     org, doc_id, pid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     g = SimpleNamespace(  # 이상: gate_type=doc_approval 이나 work_item_type≠doc
-        gate_type="doc_approval", work_item_type="story", work_item_id=doc_id,
+        id=uuid.uuid4(), gate_type="doc_approval", work_item_type="story", work_item_id=doc_id,
         neutral_facts={"requested_by_member_id": str(uuid.uuid4())}, status="pending",
     )
     gates_result = MagicMock()
