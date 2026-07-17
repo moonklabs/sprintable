@@ -396,7 +396,7 @@ async def list_gates(
         if g.gate_type == "doc_approval":
             if resp.can_approve:
                 filtered.append(resp)
-        elif g.id in eligible_ids and g.status == "pending":
+        elif g.id in eligible_ids:
             filtered.append(resp)
     return filtered
 
