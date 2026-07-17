@@ -132,6 +132,11 @@ interface ChatInputProps {
 
 export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets }: ChatInputProps) {
   const t = useTranslations('chats');
+  // story 1946(PO 실기기 발견): 터치(가상 키보드)엔 Cmd/Shift 조합이 없어 Enter=발송이면 장문
+  // 지시 중 오발송이 잦다. 뷰포트가 아니라 입력 capability로 분기(물리 키보드 연결 태블릿은
+  // 데스크톱 거동이 자연스러움) — artifact-stage.tsx와 동형 패턴(`(pointer: coarse)` 1회 판정,
+  // SSR 안전 lazy initializer, 하이브리드 기기 중간 전환은 희귀 엣지케이스라 리스너 미부착).
+  const [isTouchDevice] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches);
   const [text, setText] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [uploadFailed, setUploadFailed] = useState(false);
@@ -352,7 +357,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); const m = mentionMembers[mentionIndex] ?? mentionMembers[0]; if (m) selectMention(m); return; }
       if (e.key === 'Escape') { setMentionQuery(null); setMentionMembers([]); return; }
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // 터치: Enter=개행(기본 textarea 동작 그대로 통과) · 발송=전송 버튼만(PO 방향, story 1946).
+    // 데스크톱: 기존 그대로 Enter=발송·Shift+Enter=개행.
+    if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice) {
       e.preventDefault();
       void handleSend();
     }
