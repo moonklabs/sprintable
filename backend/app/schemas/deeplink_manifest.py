@@ -140,6 +140,25 @@ class DeepLinkAppFields(BaseModel):
     )
     parent_tab: ParentTab
     return_policy: ReturnPolicy = ReturnPolicy.synthesize_parent
+    counts_toward_queue_badge: bool = Field(
+        default=True,
+        description=(
+            "결재함(approvals) 탭 배지/큐 카운트에 이 엔트리를 포함할지. parent_tab이 "
+            "approvals여도 False면 화면 자체는 그대로 결재함에 남되 배지 숫자·큐 목록 "
+            "카운트에서는 제외된다(예: gate_overridden — 이미 확정된 FYI 통보라 액션 "
+            "대기 큐가 아님). 긴급성/정보성 구분의 실제 등급 매핑은 #1956(채널 등급)이 "
+            "담당 — 여기서는 큐 카운트 제외 여부만 스텁으로 표현."
+        ),
+    )
+    target_promotion_pending: bool = Field(
+        default=False,
+        description=(
+            "target이 아직 전용 라우트로 승격되지 않은 잠정/폴백 상태임을 FE가 하이라이트 "
+            "표시하는 데 쓰는 플래그. True인 엔트리는 target이 가리키는 화면이 실제로는 "
+            "아직 없고(또는 아직 모바일 전용 라우트가 없고) 승격 시점까지 안전 폴백으로 "
+            "동작한다는 뜻 — 승격 스토리는 엔트리별 주석 참고."
+        ),
+    )
 
 
 class DeepLinkPayloadFields(BaseModel):
@@ -283,15 +302,24 @@ def validate_push_payload(
 DEEPLINK_MANIFEST = DeepLinkManifest(
     entries=[
         # --- 결재함(gate) 계열: reference_type 항상 "gate" → 단일 canonical 상세(P1a-S4) ---
+        # target_promotion_pending=True(이 섹션 전체 7개 엔트리 공통): 유나 3자 검토 반영 —
+        # "gate_detail(S4에서 승격 예정)도 [hypothesis와] 동일 패턴" 지시. gate_detail 자체는
+        # 이미 확정된 canonical 타겟명이지만(웹에는 이미 존재하는 개념), 모바일 전용 라우트는
+        # 아직 없고 P1a-S4가 신설한다 — 그 전까지 이 target을 만나는 클라이언트는 승격 대기
+        # 상태임을 하이라이트 표시해야 한다는 신호. target 문자열 자체("gate_detail")는 유지
+        # (hypothesis처럼 "now" 폴백으로 낮추지 않음 — S4 계획이 확정적이라 target 실존 원칙
+        # 위반이 아님). S4 완료 후 flag를 False로 되돌린다.
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="gate.pending_approval", target="gate_detail", parent_tab=ParentTab.approvals,
+                target_promotion_pending=True,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
         ),
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="gate_approval_requested", target="gate_detail", parent_tab=ParentTab.approvals,
+                target_promotion_pending=True,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
@@ -299,6 +327,7 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="gate_reassigned", target="gate_detail", parent_tab=ParentTab.approvals,
+                target_promotion_pending=True,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
@@ -306,6 +335,7 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="gate_escalated", target="gate_detail", parent_tab=ParentTab.approvals,
+                target_promotion_pending=True,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
@@ -313,15 +343,21 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="gate_reminder", target="gate_detail", parent_tab=ParentTab.approvals,
+                target_promotion_pending=True,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
         ),
         DeepLinkManifestEntry(
-            # FYI: 강제결정 통보 — 액션 불필요(이미 확정됨). approvals 탭에 남기되
-            # returnPolicy는 동일(synthesize_parent). 열린 질문 6번: 지금 탭이 더 맞지 않나.
+            # 열린 질문 6번 답변(유나, 3자 검토): target은 approvals 그대로 유지 — 이미
+            # 확정된 FYI 통보라 결재함 화면 자체에 남기는 게 맞다. 다만 액션이 불필요하므로
+            # 결재함 큐/배지 카운트에서는 제외(counts_toward_queue_badge=False) — 스키마에
+            # 그 구분을 표현할 필드가 없었어서 이번에 추가. 긴급성/정보성 등급 매핑 자체는
+            # #1956(채널 등급, 등급 B)이 확정한다 — channel_grade=b는 이미 그 스텁.
             app=DeepLinkAppFields(
                 type="gate_overridden", target="gate_detail", parent_tab=ParentTab.approvals,
+                counts_toward_queue_badge=False,
+                target_promotion_pending=True,  # gate_detail 공통 사유 — 위 결재함 섹션 헤더 주석 참고.
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
@@ -331,53 +367,75 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             # doc.py가 gate_id를 reference_id로 넘긴다(문서 자체 id 아님).
             app=DeepLinkAppFields(
                 type="doc_approval_requested", target="gate_detail", parent_tab=ParentTab.approvals,
+                target_promotion_pending=True,  # gate_detail 공통 사유 — 위 결재함 섹션 헤더 주석 참고.
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
         ),
 
         # --- dispatched(범용) — reference_type 5종 분기. entity_type 필수. ---
+        # 정정(유나 3자 검토, 필수·조건부 GREEN의 조건): parentTab은 target의 순수 함수여야
+        # 한다("same target ⇒ same parentTab") — 4탭 공간 모델·합성 history(P2-S3) 전제.
+        # 아래 5종 전부 parent_tab을 now → all로 정정(기존 now는 잘못 — story_detail 등
+        # 동일 target을 쓰는 다른 타입들(story_assigned·comment.created 등)이 이미 all이라
+        # 불변식 위반이었다). 정보성/개입성 구분은 parentTab이 아니라 Layer 3(#1956 채널
+        # 등급)의 몫.
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
-                type="dispatched", entity_type="story", target="story_detail", parent_tab=ParentTab.now,
+                type="dispatched", entity_type="story", target="story_detail", parent_tab=ParentTab.all,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
         ),
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
-                type="dispatched", entity_type="epic", target="goal_detail", parent_tab=ParentTab.now,
+                type="dispatched", entity_type="epic", target="goal_detail", parent_tab=ParentTab.all,
+            ),
+            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+        ),
+        DeepLinkManifestEntry(
+            # 미르코 point ④(3자 검토): doc_detail 착지 시 id↔slug 불일치 우려 — 신규
+            # 리졸버 불필요. reference_id(doc.id)로 기존 GET /api/docs/{id}를 호출하면
+            # 응답(DocResponse, backend/app/schemas/doc.py:94 slug: str 필드)에 이미
+            # slug/canonical_slug가 실려 있다(backend/app/routers/docs.py GET /{id} 핸들러가
+            # DocResponse.model_validate(doc)로 그대로 반환) — 탭 시점에 그 응답의 slug로
+            # resolve하면 된다. 매니페스트/FE 문서화만 반영, docs 라우터 코드 변경 불요.
+            app=DeepLinkAppFields(
+                type="dispatched", entity_type="doc", target="doc_detail", parent_tab=ParentTab.all,
+            ),
+            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
+        ),
+        DeepLinkManifestEntry(
+            # 열린 질문 7번 답변(유나, 3자 검토) — "target 실존 원칙": hypothesis 독립 상세
+            # 라우트가 아직 없다(story #1634 backlog, 확정 계획 없음 — gate_detail과 달리
+            # 정해진 승격 스토리 슬롯이 없었다). "hypothesis_detail"이라는 존재하지 않는
+            # target명을 그대로 두면 AC2 CI(S2)의 "target이 미존재 웹 라우트면 실패" 조건과
+            # 충돌한다 — 그래서 target 자체를 현재 안전 폴백("now")으로 낮추고
+            # target_promotion_pending=True로 하이라이트 표시한다. S3(가설 상세 라우트 신설)
+            # PR에서 target이 실제 라우트로 승격되면 이 값과 flag를 갱신한다.
+            # (참고: handoff_stuck:hypothesis 엔트리는 여전히 target="hypothesis_detail"을
+            # 쓴다 — 이 정정은 dispatched:hypothesis에 한정된 유나 지시 범위라 임의 확장하지
+            # 않았다. 동일 갭이 있으니 S2/S3에서 재확인 필요 — 잔여 오픈아이템으로 남김.)
+            app=DeepLinkAppFields(
+                type="dispatched", entity_type="hypothesis", target="now",
+                parent_tab=ParentTab.all,
+                target_promotion_pending=True,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
         ),
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
-                type="dispatched", entity_type="doc", target="doc_detail", parent_tab=ParentTab.now,
-            ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
-        ),
-        DeepLinkManifestEntry(
-            # 열린 질문 7번: hypothesis 독립 상세 라우트가 아직 없다(story #1634 backlog).
-            # target="hypothesis_detail"은 아직 짓지 않은 화면을 가리킨다 — FE가 P1a-S3
-            # 전까지 이 target을 안전 폴백(지금)으로 취급해야 함(매니페스트 등재는 됐지만
-            # 실제 라우트 미존재 = 별개 리스크. AC2 CI(S2)가 "target이 미존재 웹 라우트면
-            # 실패" 조건과 바로 충돌하는 사례이기도 함).
-            app=DeepLinkAppFields(
-                type="dispatched", entity_type="hypothesis", target="hypothesis_detail",
-                parent_tab=ParentTab.now,
-            ),
-            payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
-        ),
-        DeepLinkManifestEntry(
-            app=DeepLinkAppFields(
-                type="dispatched", entity_type="sprint", target="sprint_detail", parent_tab=ParentTab.now,
+                type="dispatched", entity_type="sprint", target="sprint_detail", parent_tab=ParentTab.all,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
         ),
 
         # --- story 계열 ---
         DeepLinkManifestEntry(
+            # 정정(유나 3자 검토): parentTab now → all — story_detail을 쓰는 다른 엔트리
+            # (dispatched:story·story_status_changed·comment.created:story 등)와 동일
+            # parentTab이어야 "same target ⇒ same parentTab" 불변식을 만족한다.
             app=DeepLinkAppFields(
-                type="story_assigned", target="story_detail", parent_tab=ParentTab.now,
+                type="story_assigned", target="story_detail", parent_tab=ParentTab.all,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
@@ -397,13 +455,17 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
         ),
 
-        # --- task — 열린 질문 8번: task_completed payload에 story_id가 없다(reference_type=
-        # "task"·reference_id=task.id뿐). "story_detail" target을 쓰려면 FE가 task_id→
-        # story_id를 별도 API로 풀어야 한다 — 전용 task 상세 화면이 없다면 이 자체가 BE
-        # payload 확장(story_id 추가) 필요 사항일 수 있다. ---
+        # --- task — 열린 질문 8번 답변(유나+미르코, 3자 검토): task_completed payload에
+        # story_id가 없다(reference_type="task"·reference_id=task.id뿐) — 전용 task 상세
+        # 화면도 신설하지 않는다(신규 라우트 불필요, 미르코 point ⑤와 동일 원칙). target을
+        # 조건부 로직을 암시하는 이름("task_detail_or_story_fallback" — "FE가 조건 분기해야
+        # 하나?"라는 오해 유발, SSOT 위반) 대신 팀이 이미 쓰는 고정 폴백 컨벤션인
+        # "/board?story="로 확정한다(apps/web goals-client.tsx·embed-card.tsx·
+        # derive-attention-queue.ts에서 이미 쓰는 패턴 — story_id 없이도 보드로 착지).
+        # 등급은 B(정보성) — #1956 채널 등급 확정 시 참고.
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
-                type="task_completed", target="task_detail_or_story_fallback", parent_tab=ParentTab.all,
+                type="task_completed", target="/board?story=", parent_tab=ParentTab.all,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
@@ -502,11 +564,21 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         # story/epic/doc/hypothesis/sprint) 아무거나에서 발생할 수 있어 dispatched와 동형
         # 처리 — 열린 질문 9번: 실제로 story 외 엔티티에서 handoff_stuck이 발생한 라이브
         # 사례가 있는지 확인 필요(코드상 가능성은 있으나 이 초안은 5종 전부 등재해 fail-closed
-        # 쪽으로 보수적으로 잡음). ---
+        # 쪽으로 보수적으로 잡음).
+        #
+        # 정정(유나 3자 검토, 필수·조건부 GREEN의 조건): parentTab approvals → all로 정정.
+        # handoff_stuck/handoff_fallback은 결재함(P2-S4) 4유형 큐(게이트·결정·문서결재·
+        # 머지게이트) 어디에도 속하지 않는 유형이라 approvals 탭에 두면 안 된다 — 그 4유형
+        # 큐와 나란히 놓이면 사용자가 "이것도 결재 대상"으로 오인한다. 또한 story_detail/
+        # goal_detail/doc_detail/sprint_detail target을 쓰는 다른 엔트리(dispatched·
+        # story_status_changed 등)가 전부 all이므로 approvals로 두면 "same target ⇒ same
+        # parentTab" 불변식도 깨진다. 긴급성 신호는 parentTab이 아니라 #1956(채널 등급 A1/
+        # A2)의 몫으로 넘긴다 — channel_grade=a1은 그대로 유지(이미 긴급 등급으로 스텁돼
+        # 있었음). ---
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="handoff_stuck", entity_type="story", target="story_detail",
-                parent_tab=ParentTab.approvals,
+                parent_tab=ParentTab.all,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
@@ -514,7 +586,7 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="handoff_stuck", entity_type="epic", target="goal_detail",
-                parent_tab=ParentTab.approvals,
+                parent_tab=ParentTab.all,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
@@ -522,15 +594,20 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="handoff_stuck", entity_type="doc", target="doc_detail",
-                parent_tab=ParentTab.approvals,
+                parent_tab=ParentTab.all,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
         ),
         DeepLinkManifestEntry(
+            # 열린 질문 7번 스코프 밖(잔여 오픈아이템): 이 엔트리는 여전히
+            # target="hypothesis_detail"을 쓴다 — dispatched:hypothesis만 "target 실존
+            # 원칙"에 따라 "now" 폴백으로 낮추라는 게 유나 지시 범위였고 이 handoff_stuck
+            # 변형은 명시 대상이 아니었다. 동일 갭(hypothesis_detail 미존재)이 있으므로
+            # S2/S3에서 재확인 필요.
             app=DeepLinkAppFields(
                 type="handoff_stuck", entity_type="hypothesis", target="hypothesis_detail",
-                parent_tab=ParentTab.approvals,
+                parent_tab=ParentTab.all,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
@@ -538,7 +615,7 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="handoff_stuck", entity_type="sprint", target="sprint_detail",
-                parent_tab=ParentTab.approvals,
+                parent_tab=ParentTab.all,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
@@ -546,7 +623,7 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="handoff_fallback", entity_type="story", target="story_detail",
-                parent_tab=ParentTab.approvals,
+                parent_tab=ParentTab.all,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),

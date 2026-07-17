@@ -141,3 +141,24 @@ def test_no_duplicate_lookup_keys():
 
 def test_schema_version_is_current():
     assert DEEPLINK_MANIFEST.schema_version == MANIFEST_SCHEMA_VERSION == 1
+
+
+def test_same_target_implies_same_parent_tab():
+    """유나(FE 착지화면 오너) 3자 검토 필수 불변식: parentTab은 target의 순수 함수여야
+    한다 — "same target ⇒ same parentTab". 같은 착지 화면이 알림 타입에 따라 소속 탭이
+    갈리면 4탭 공간 모델과 합성 history(P2-S3) 전제가 깨진다.
+
+    이 테스트는 draft 파일에만 존재하지만(story #1951 스코프), story #1952(P1a-S2 계약
+    CI)에서 정식 CI 불변식으로 편입될 예정이다 — 유나 지시로 지금 여기 넣어둔다.
+
+    전체 레지스트리를 target으로 grouping해서 그룹 내 parentTab이 유일한지 확인한다
+    (양방향: 그룹이 2개 이상의 서로 다른 parentTab을 가지면 실패)."""
+    by_target: dict[str, set[ParentTab]] = {}
+    for entry in DEEPLINK_MANIFEST.entries:
+        by_target.setdefault(entry.app.target, set()).add(entry.app.parent_tab)
+
+    violations = {target: tabs for target, tabs in by_target.items() if len(tabs) > 1}
+    assert not violations, (
+        f"target이 서로 다른 parentTab을 가리키는 위반 발견(same target ⇒ same parentTab "
+        f"불변식 깨짐): {violations}"
+    )
