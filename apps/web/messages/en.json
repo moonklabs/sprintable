@@ -3512,7 +3512,19 @@
     "seedKeep": "Keep",
     "seedKill": "Kill",
     "outcomeAccumulating": "Awaiting verdict data",
-    "evidenceNonePrompt": "No evidence yet — review by content"
+    "evidenceNonePrompt": "No evidence yet — review by content",
+    "gateDetailBackToInbox": "Approvals",
+    "gateDetailNotFound": "Gate not found.",
+    "gateDetailResolvedStatus": "Already resolved — status: {status}",
+    "gateDetailOrgContext": "Org {org}",
+    "riskUnknown": "Risk pending",
+    "sigEvidenceLabel": "Evidence",
+    "sigEvidenceViewedLabel": "I have reviewed the evidence above",
+    "sigReasonLabel": "Decision reason",
+    "sigReasonPlaceholder": "Enter a reason to record with this decision",
+    "sigConsequenceNote": "Approving records your signature",
+    "sigRequestChanges": "Request changes",
+    "sigApproveAndSign": "Approve & sign"
   },
   "workflowRecipes": {
     "scrum-3step": {

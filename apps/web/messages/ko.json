@@ -3512,7 +3512,19 @@
     "seedKeep": "유지 예측",
     "seedKill": "중단 예측",
     "outcomeAccumulating": "판정 데이터 누적 중",
-    "evidenceNonePrompt": "근거 데이터 없음 — 내용으로 직접 판단"
+    "evidenceNonePrompt": "근거 데이터 없음 — 내용으로 직접 판단",
+    "gateDetailBackToInbox": "결재함",
+    "gateDetailNotFound": "게이트를 찾을 수 없습니다.",
+    "gateDetailResolvedStatus": "이미 처리됨 — 상태: {status}",
+    "gateDetailOrgContext": "조직 {org}",
+    "riskUnknown": "위험도 확인 중",
+    "sigEvidenceLabel": "근거",
+    "sigEvidenceViewedLabel": "위 근거를 확인했습니다",
+    "sigReasonLabel": "결정 사유",
+    "sigReasonPlaceholder": "기록에 남을 결정 사유를 입력하세요",
+    "sigConsequenceNote": "승인은 당신의 서명으로 기록됩니다",
+    "sigRequestChanges": "변경 요청",
+    "sigApproveAndSign": "승인하고 서명"
   },
   "workflowRecipes": {
     "scrum-3step": {
