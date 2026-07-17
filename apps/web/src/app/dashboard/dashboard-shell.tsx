@@ -9,6 +9,7 @@ import {
   setEffectiveProjectId,
 } from '@/lib/project-context-client';
 import { useTranslations } from 'next-intl';
+import { cn } from '@/lib/utils';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { AppSidebar } from '@/components/nav/app-sidebar';
@@ -53,7 +54,16 @@ interface DashboardShellProps extends DashboardContext {
   children: React.ReactNode;
 }
 
-function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: React.ReactNode }) {
+// story #1958(P2-S2) 유나 노트⑶: 768~1023(태블릿, lg 미만)은 모바일 IA를 유지하되 콘텐츠만
+// 640 중앙폭으로 밀도 조정(시안 511bc035 v2 "태블릿 세로 768" 프레임 — `.tablet .content{max-width:640px}`).
+// 2단 그리드 미도입 — 4탭 루트(지금·결재함·채팅·전체)에만 적용, /board 등 기존 데스크톱 페이지는 제외.
+const TAB_ROOT_PREFIXES = ['/glance', '/inbox', '/chats', '/more'];
+
+function isTabRootPage(pathname: string): boolean {
+  return TAB_ROOT_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
+function ScrollShell({ showTopBar, tabletCentered, children }: { showTopBar: boolean; tabletCentered: boolean; children: React.ReactNode }) {
   const { setScrollContainer } = useTopBar();
   const setRef = useCallback((el: HTMLDivElement | null) => {
     setScrollContainer(el);
@@ -90,7 +100,10 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
           className="min-h-0 flex-1"
           inlineColumnsClassName="2xl:grid-cols-[minmax(0,1fr)_320px]"
           panelClassName="2xl:col-start-2 2xl:row-start-1"
-          contentClassName="flex min-h-0 min-w-0 flex-col 2xl:col-start-1 2xl:row-start-1"
+          contentClassName={cn(
+            'flex min-h-0 min-w-0 flex-col 2xl:col-start-1 2xl:row-start-1',
+            tabletCentered && 'min-[768px]:mx-auto min-[768px]:w-full min-[768px]:max-w-[640px] lg:max-w-none lg:mx-0',
+          )}
         >
           {children}
         </ContextualPanelLayout>
@@ -165,6 +178,7 @@ export function DashboardShell({
 }: DashboardShellProps) {
   const pathname = usePathname();
   const showTopBar = !pathname.startsWith('/settings');
+  const tabletCentered = isTabRootPage(pathname);
 
   // R2: URL `?p=` = 탭별 SSOT. 서버 prop 대신 effective 를 컨텍스트/사이드바에 공급.
   const effectiveProjectId = useProjectSsot(projectId, projectMemberships);
@@ -188,7 +202,7 @@ export function DashboardShell({
               orgMemberships={orgMemberships}
               userName={userName}
             />
-            <ScrollShell showTopBar={showTopBar}>
+            <ScrollShell showTopBar={showTopBar} tabletCentered={tabletCentered}>
               {children}
             </ScrollShell>
           </SidebarProvider>
