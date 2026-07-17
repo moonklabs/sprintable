@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { GateEvidence, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
+import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
@@ -22,19 +23,10 @@ import type { GateItem } from '@/components/kanban/types';
 // work_item_summary(doc=title+slug, story/task=title만+slug=null, 그 외=null) 응답. PR#2253
 // 머지+배포 전까지 이 프록시는 404를 그대로 패스스루(notFound 상태로 자연 처리).
 //
-// ⚠️위험도(risk) 필드는 #1970 스코프 밖 — 여전히 미존재(gate.py에 risk_level 류 없음). "저·고위험
-// =동일 BE 위험도 필드"(AC) 요구는 별도 후속 계약 논의 필요. 그때까지 riskLevel은 항상 'unknown'
-// 으로 렌더되며(추측 배지 금지), 실 필드가 오면 deriveRiskLevel 한 곳만 교체하면 된다.
+// 위험도(risk) 판정+보수적 unknown 처리 정책은 gate-risk.ts 참고(deriveRiskLevel/usesSignatureFlow).
 interface GateDetail extends GateItem {
   org_id: string;
   project_id?: string | null;
-}
-
-type RiskLevel = 'low' | 'high' | 'unknown';
-
-// TODO(#1970): BE 위험도 필드 확定되면 그 필드를 그대로 매핑 — 추측 휴리스틱 금지.
-function deriveRiskLevel(_gate: GateDetail): RiskLevel {
-  return 'unknown';
 }
 
 export default function GateDetailPage() {
@@ -125,7 +117,7 @@ export default function GateDetailPage() {
               </p>
             </div>
 
-            {deriveRiskLevel(gate) === 'high' ? (
+            {usesSignatureFlow(deriveRiskLevel(gate)) ? (
               <GateSignatureApproval
                 gate={gate}
                 resolving={resolving}
