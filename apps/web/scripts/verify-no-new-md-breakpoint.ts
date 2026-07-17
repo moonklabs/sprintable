@@ -33,7 +33,6 @@ const ALLOWLIST = new Set([
   'components/agents/agent-persona-composer.tsx',
   'components/agents/agent-run-detail.tsx',
   'components/agents/agents-dashboard.tsx',
-  'components/chat/presence-dot.tsx',
   'components/dashboard/dashboard-skeleton.tsx',
   'components/dispatch/entity-dispatch-panel.tsx',
   'components/docs/doc-editor.tsx',
