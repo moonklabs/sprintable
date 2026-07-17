@@ -281,7 +281,7 @@ jobs:
       # story #1957(P2-S1) breakpoint SSOT 회귀가드: md:(768) 신규 사용은 useIsMobile()의
       # 1024 기준과 어긋나는 route 내 md·lg 혼재를 재도입한다. 기존 사용은 grandfather
       # allowlist로 통과, 새 파일/allowlist 밖 파일에서만 실패.
-      - name: Verify no new md: breakpoint (story #1957 regression guard)
+      - name: "Verify no new md: breakpoint (story #1957 regression guard)"
         run: pnpm --filter web verify:no-new-md-breakpoint
 
       - name: Test
