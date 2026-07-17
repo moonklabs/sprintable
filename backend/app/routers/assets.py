@@ -297,11 +297,11 @@ async def create_folder(
 
     await _assert_folder_parent_in_scope(db, org_id, body.project_id, body.parent_id)
 
-    # ⚠️ uq_asset_folders_parent_name은 project_id/parent_id가 nullable이라 PG NULL-distinct 함정
-    # (이 파일 상단 Asset.uq_assets_proj_null 주석과 동형 함정): 두 컬럼 다 NULL인 최상위(root) 폴더는
-    # DB UNIQUE가 동일 이름 중복을 잡지 못한다(NULL <> NULL이라 항상 무충돌). 그래서 app-level 명시
-    # 사전조회로 1차 방어(root 케이스의 실질 SSOT) + 아래 flush IntegrityError는 non-null parent_id
-    # 케이스의 동시성 레이스 2차 방어로 유지.
+    # uq_asset_folders_parent_name은 0198(까심 QA fix)부터 UNIQUE NULLS NOT DISTINCT — NULL도 값으로
+    # 취급해 project_id/parent_id가 NULL인 조합(root/project-only/parent-only) 포함 4개 조합 전부를
+    # DB 레벨에서 강제한다. 아래 사전조회는 UX용 1차 방어(친절한 409·불필요한 flush 회피)일 뿐이고,
+    # 실질 SSOT/동시성 레이스 방어는 이 사전조회가 아니라 아래 flush의 IntegrityError catch다(TOCTOU:
+    # 동시 요청 2건이 사전조회를 동시에 통과해도 DB UNIQUE가 최종적으로 하나만 커밋을 허용).
     dup_clauses = [
         AssetFolder.org_id == org_id,
         AssetFolder.name == name,

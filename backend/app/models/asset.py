@@ -33,8 +33,13 @@ class AssetFolder(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
 
     __tablename__ = "asset_folders"
     __table_args__ = (
+        # NULLS NOT DISTINCT(PG15+, 0198): project_id/parent_id nullable(root=둘 다 NULL,
+        # project 최상위=project_id만 SET 등)이라 기본 NULLS DISTINCT UNIQUE는 NULL 포함 조합에서
+        # 발동하지 않는다(NULL <> NULL 항상 무충돌 — TOCTOU 레이스로 중복 폴더 생성 가능). NULL도
+        # 값으로 취급해 4개 조합(root/project-only/parent-only/both-set) 전부 DB 레벨에서 강제.
         UniqueConstraint(
-            "org_id", "project_id", "parent_id", "name", name="uq_asset_folders_parent_name"
+            "org_id", "project_id", "parent_id", "name", name="uq_asset_folders_parent_name",
+            postgresql_nulls_not_distinct=True,
         ),
         Index("ix_asset_folders_project_parent", "org_id", "project_id", "parent_id"),
     )

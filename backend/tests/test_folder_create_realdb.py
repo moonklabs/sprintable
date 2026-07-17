@@ -2,10 +2,12 @@
 
 DB env(ALEMBIC_DATABASE_URL) 없으면 skip. 커버: 정상 생성(project-scoped/org-level)·project
 접근권 IDOR(403)·parent_id cross-project/cross-org 스코프(404)·중복 이름 충돌(409)·이름 정규화
-delegate(422).
+delegate(422)·동시 생성 레이스(0198 NULLS NOT DISTINCT — case (b) project_id SET+parent_id
+NULL 시나리오, 실 동시 INSERT 2건이 정확히 201/409 하나씩으로 갈리는지 mock 없이 실측).
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 
@@ -293,5 +295,58 @@ async def test_create_folder_roundtrip_visible_in_list_folders():
             assert created.id in ids  # write_ok 만이 아니라 read_success 까지 확인
             match = next(f for f in listed if f.id == created.id)
             assert match.name == "Roundtrip"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_folder_concurrent_race_project_scoped_one_wins() -> None:
+    """까심 QA 재작업 검증(0198 UNIQUE NULLS NOT DISTINCT): case (b) — project_id SET+parent_id
+    NULL — 은 이전 구현의 DB 제약이 NULL-distinct 함정으로 발동 안 하던 조합이라, app-level
+    사전조회만으로는 동시 요청 2건이 둘 다 사전조회를 통과하면 중복 폴더가 조용히 2건 생겼다
+    (TOCTOU). 이 테스트는 **mock 없이 실 PG 커넥션 2개**로 진짜 동시 INSERT를 발사해, DB UNIQUE
+    NULLS NOT DISTINCT가 실제로 하나만 커밋을 허용하는지(201 정확히 1건 + 409 정확히 1건) 실측
+    검증한다. 두 세션이 각자 독립 커넥션이라 사전조회~flush 사이에서 진짜 인터리빙이 발생한다.
+    """
+    from fastapi import HTTPException
+
+    from app.routers.assets import FolderCreate, create_folder
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        # 시드는 별도 세션에서 커밋 확정(두 레이스 세션이 동일 seed 를 보게).
+        async with Session() as seed_s:
+            await _reset_and_seed(seed_s)
+
+        # 독립 커넥션 2개(진짜 별도 PG 세션) — 동일 커넥션 재사용시 자동 직렬화되어 레이스가 안 생김.
+        async with Session() as s1, Session() as s2:
+            results = await asyncio.gather(
+                create_folder(
+                    FolderCreate(name="RaceFolder", project_id=PROJ_A, parent_id=None),
+                    db=s1, auth=_auth(), org_id=ORG,
+                ),
+                create_folder(
+                    FolderCreate(name="RaceFolder", project_id=PROJ_A, parent_id=None),
+                    db=s2, auth=_auth(), org_id=ORG,
+                ),
+                return_exceptions=True,
+            )
+
+        successes = [r for r in results if not isinstance(r, BaseException)]
+        failures = [r for r in results if isinstance(r, BaseException)]
+        assert len(successes) == 1, f"정확히 1건만 201 이어야(TOCTOU 레이스 막힘 검증) — got {results}"
+        assert len(failures) == 1, f"정확히 1건만 409 여야 — got {results}"
+        [exc] = failures
+        assert isinstance(exc, HTTPException), f"실패는 HTTPException(409) 이어야 — got {exc!r}"
+        assert exc.status_code == 409, f"패자는 409 여야 — got {exc.status_code}"
+
+        # DB 최종 상태: row 정확히 1건(중복 미생성 실증 — 이게 이번 QA fix 의 핵심 단정).
+        async with Session() as verify_s:
+            n = (await verify_s.execute(text(
+                f"SELECT count(*) FROM asset_folders WHERE org_id='{ORG}' AND project_id='{PROJ_A}' "
+                "AND parent_id IS NULL AND name='RaceFolder'"
+            ))).scalar_one()
+            assert n == 1, f"레이스 후에도 DB row 는 정확히 1건이어야(TOCTOU 미방어시 2건 생김) — got {n}"
     finally:
         await engine.dispose()
