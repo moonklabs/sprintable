@@ -343,16 +343,21 @@ async def list_gates(
     if resolved is None or resolved.type != "human":
         return []
 
-    non_doc_pending = [
+    # 오르테가 정정(까심 #1960 QA 적출, story #1974 후속): assigned_to_me 은 게이트가 **누구
+    # 것인지(WHO)** 의 문제지 pending/held 등 상태와 무관하다 — held 게이트도 같은 approver가
+    # 승인할 대상이고 paused 일 뿐 "내 것"이다. 바깥 `status` 쿼리 필터가 이미 gates 를 원하는
+    # 상태로 좁혀놨으니(예: status=held) 여기서 다시 "pending" 으로 하드코딩해 재필터하면 안
+    # 된다 — 예전엔 그래서 `status=held&assigned_to_me=true` 가 항상 빈 배열이었다.
+    non_doc_gates = [
         (resp, g) for resp, g in zip(responses, gates)
-        if g.gate_type != "doc_approval" and g.status == "pending"
+        if g.gate_type != "doc_approval"
     ]
 
     # project_id 배치 해소(story #1968 resolve_work_item_project_id 의 IN-clause 배치 버전 — 개별
     # gate 마다 신규 쿼리 금지). doc 은 위에서 이미 배치 조회한 doc_proj 재사용(중복 쿼리 0).
     project_id_by_work_item: dict[uuid.UUID, uuid.UUID | None] = dict(doc_proj)
-    story_ids = {g.work_item_id for _, g in non_doc_pending if g.work_item_type == "story"}
-    task_ids = {g.work_item_id for _, g in non_doc_pending if g.work_item_type == "task"}
+    story_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "story"}
+    task_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "task"}
     if story_ids:
         rows = (await session.execute(
             select(Story.id, Story.project_id).where(
@@ -373,7 +378,7 @@ async def list_gates(
     role_cache: dict[uuid.UUID, bool] = {}
     org_admin_cache: bool | None = None
     eligible_ids: set[uuid.UUID] = set()
-    for _resp, g in non_doc_pending:
+    for _resp, g in non_doc_gates:
         pid = project_id_by_work_item.get(g.work_item_id)
         if pid is not None:
             if pid not in role_cache:
@@ -388,8 +393,6 @@ async def list_gates(
 
     filtered: list[GateResponse] = []
     for resp, g in zip(responses, gates):
-        if g.status != "pending":
-            continue
         if g.gate_type == "doc_approval":
             if resp.can_approve:
                 filtered.append(resp)

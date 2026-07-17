@@ -267,12 +267,30 @@ async def test_assigned_to_me_org_level_none_project_member_excluded():
 
 
 @pytest.mark.anyio
-async def test_assigned_to_me_non_pending_status_excluded():
+async def test_assigned_to_me_held_status_included():
+    """까심 #1960 QA 적출 회귀: assigned_to_me 은 WHO(승인 자격) 판정이지 STATE(pending/held)
+    판정이 아니다. `status=held&assigned_to_me=true`가 항상 빈 배열이었던 버그(g.status!="pending"
+    하드코딩 2곳) 수정 — held 게이트도 caller가 project owner/admin이면 포함돼야 한다(바깥
+    `status` 쿼리 필터가 이미 gates 목록을 원하는 상태로 좁혀놨다는 전제 — 이 테스트는 그 전제를
+    시뮬레이션하듯 held 게이트를 직접 넘겨 eligibility 판정만 검증)."""
+    g = _story_gate(gate_type="merge", status="held")
+    out = await _call_list_gates(
+        [g], project_role="owner", story_rows=[(g.work_item_id, uuid.uuid4())],
+    )
+    assert len(out) == 1
+    assert out[0].id == g.id
+
+
+@pytest.mark.anyio
+async def test_assigned_to_me_approved_status_included_when_role_eligible():
+    """터미널 상태(approved)도 STATE 필터가 아니라 WHO 필터라 role eligible이면 포함 — status
+    필터링 책임은 전적으로 바깥 `status` 쿼리 파라미터(list_gates 최상단 select)에 있다."""
     g = _story_gate(gate_type="merge", status="approved")
     out = await _call_list_gates(
         [g], project_role="owner", story_rows=[(g.work_item_id, uuid.uuid4())],
     )
-    assert out == []  # terminal status → 애초에 non_doc_pending 대상 아님
+    assert len(out) == 1
+    assert out[0].id == g.id
 
 
 @pytest.mark.anyio
@@ -643,4 +661,55 @@ async def test_realdb_assigned_to_me_query_count_scales_with_unique_projects_not
             await client.aclose()
     finally:
         app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_realdb_status_held_assigned_to_me_included():
+    """까심 #1960 QA 적출 회귀(story #1974 후속): `?status=held&assigned_to_me=true`가 항상 빈
+    배열이었던 버그 — held+merge+human+project-owner 조합이 이제 정확히 1건 반환되는지 실 HTTP
+    라운드트립으로 실측(구두 주장 아니라 캡처)."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.models.pm import Story
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_org_project_users(s)
+            org_id, project_id = seeded["org_id"], seeded["project_id"]
+            a_id = seeded["user_a_id"]
+
+            story = Story(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title="held-story")
+            s.add(story)
+            await s.flush()
+            held_gate = Gate(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story.id, work_item_type="story",
+                gate_type="merge", status="held", held_until=None,
+            )
+            s.add(held_gate)
+            await s.commit()
+
+        await _setup_app(app, Session, org_id, a_id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(
+                "/api/v2/gates", params={"status": "held", "assigned_to_me": "true"},
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            print("\n=== realdb status=held&assigned_to_me=true capture (A=project-owner-grant) ===")
+            for row in body:
+                print(f"  id={row['id']} status={row['status']} gate_type={row['gate_type']}")
+            ids = {row["id"] for row in body}
+            assert str(held_gate.id) in ids, (
+                "held+merge+human+owner 조합이 assigned_to_me=true 결과에서 빠짐 — "
+                "status!='pending' 하드코딩 회귀 재발"
+            )
+            assert len(body) == 1
+        finally:
+            await client.aclose()
+        app.dependency_overrides.clear()
+    finally:
         await engine.dispose()
