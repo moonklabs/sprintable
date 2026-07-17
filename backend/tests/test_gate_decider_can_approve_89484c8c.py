@@ -168,7 +168,7 @@ async def _list_gates(gate, *, has_access, resolved=None, resolve_raises=False):
          patch.object(gates_mod, "has_project_access", AsyncMock(return_value=has_access)), \
          patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         return await list_gates(
-            work_item_id=None, work_item_type=None, status=None,
+            work_item_id=None, work_item_type=None, status=None, assigned_to_me=False,
             session=session, org_id=org, auth=auth,
         )
 
@@ -216,7 +216,7 @@ async def test_list_gates_non_doc_gate_untouched():
          patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(
-            work_item_id=None, work_item_type=None, status=None,
+            work_item_id=None, work_item_type=None, status=None, assigned_to_me=False,
             session=session, org_id=org, auth=auth,
         )
     assert out[0].can_approve is False
@@ -252,7 +252,7 @@ async def test_list_gates_can_approve_uses_doc_approval_predicate_not_work_item_
          patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(
-            work_item_id=None, work_item_type=None, status=None,
+            work_item_id=None, work_item_type=None, status=None, assigned_to_me=False,
             session=session, org_id=org, auth=auth,
         )
     assert out[0].can_approve is True  # project_id 가 doc_approval predicate 로 조회됨(work_item_type 무관)
