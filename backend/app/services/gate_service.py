@@ -23,7 +23,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
+from app.models.pm import Story, Task
 from app.models.workflow_line import (
     WorkflowLineStepApproval,
     WorkflowLineStepRun,
@@ -69,6 +71,39 @@ _DISPOSITION_TO_STATUS: dict[str, str] = {
     "deny": "rejected",
 }
 
+async def resolve_work_item_project_id(
+    session: AsyncSession, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
+) -> uuid.UUID | None:
+    """story #1968: work_item_type/work_item_id → project_id 타입별 조회(신규 쿼리).
+
+    ⚠️호출 전 먼저 확인: 그 함수 스코프에 이미 로드된 엔티티(story/doc/task/loop/artifact 등
+    객체)가 있으면 이 헬퍼를 쓰지 말고 그 객체의 ``.project_id``를 직접 재사용할 것(신규 쿼리
+    최소 원칙 — doc.py/loop.py/visual_artifacts.py/workflow_parallel_approval.py가 이미 이렇게
+    한다). 이 헬퍼는 work_item_id(uuid)만 있고 엔티티가 아직 로드 안 된 호출부 전용
+    (routers/gates.py 제네릭 생성 엔드포인트·merge_verdict_gate.py evaluate_merge_gate)과
+    override_gate()의 sr(step_run)=None 폴백용.
+
+    Story/Doc.project_id는 NOT NULL이라 row가 있으면 항상 값이 있다. Task는 project_id 컬럼이
+    없어 story JOIN. 미지원/미인식 work_item_type(예: workflow_line_config의 org-level
+    'wf_line_version' — 실제로 project-무관일 수 있음)은 None(best-effort — silent 실패가
+    아니라 구조적으로 project-scoped가 아닐 수 있다는 정직한 신호)."""
+    if work_item_type == "story":
+        return (await session.execute(
+            select(Story.project_id).where(Story.id == work_item_id, Story.org_id == org_id)
+        )).scalar_one_or_none()
+    if work_item_type == "task":
+        return (await session.execute(
+            select(Story.project_id)
+            .join(Task, Task.story_id == Story.id)
+            .where(Task.id == work_item_id, Task.org_id == org_id)
+        )).scalar_one_or_none()
+    if work_item_type == "doc":
+        return (await session.execute(
+            select(Doc.project_id).where(Doc.id == work_item_id, Doc.org_id == org_id)
+        )).scalar_one_or_none()
+    return None
+
+
 # doc-gate v2 갭1: deliberate 인간 결재 gate — org allow_auto/deny posture 무관하게 항상 manual(pending).
 # disposition auto-pass/auto-deny 제외(인간 deliberation 이 정책 자동결정보다 우선).
 # 'loop_decision'(E-LOOP-LEDGER S5): variant 선택도 동일 이유로 항상 human pending — GATE_TYPES에도
@@ -92,12 +127,15 @@ async def create_gate(
 ) -> Gate:
     """config 기반 게이트 생성 (멱등: 이미 있으면 기존 반환).
 
-    project_id: story #1953(P1a-S3) — gate.pending_approval 알림 payload의 project_id 보강용
-    (선택적). create_gate()는 gate_type/work_item_type을 가리지 않는 공용 chokepoint라
-    work_item_type별 project_id 해소 로직을 여기 내장하지 않는다 — 호출부가 이미 알고 있으면
-    (artifact_canonicalize·doc_approval·parallel merge 등) 그대로 넘기고, 모르는 호출부(범용
-    gates.py 직접생성·workflow_line_config 등 org-level work_item)는 생략(None)해도 무방하다
-    (신규 조회 강제 없음 — 매니페스트 project_id_included=False로 이 부분성을 정직하게 표시).
+    project_id: story #1953(P1a-S3)이 처음 배선·story #1968(P1a-S3 잔여)이 완성 — gate.pending_
+    approval 알림 payload의 project_id 보강용(선택적). create_gate()는 gate_type/work_item_type을
+    가리지 않는 공용 chokepoint라 work_item_type별 project_id 해소 로직을 여기 내장하지 않는다 —
+    호출부가 이미 로드된 엔티티에서 알고 있으면(artifact_canonicalize·doc_approval·loop_decision·
+    parallel merge 등) 그대로 넘기고, work_item_id만 갖고 엔티티가 없는 호출부(범용 gates.py
+    직접생성·merge 게이트)는 ``resolve_work_item_project_id()``로 조회해 넘긴다(story #1968).
+    workflow_line_config(wf_line_version)처럼 진짜 org-level(project 무관)일 수 있는 work_item은
+    ``version.project_id``(nullable)를 그대로 넘겨 None이 나올 수 있다 — 이건 미해결이 아니라
+    구조적으로 project-scoped가 아니라는 정직한 값이다.
     """
     # 멱등: 이미 존재하면 기존 반환
     existing_r = await session.execute(
@@ -772,10 +810,16 @@ async def override_gate(
                 title="게이트가 강제 결정되었습니다",
                 body=f"owner 가 게이트를 {decision} 로 강제 결정했습니다: {reason}",
                 reference_type="gate", reference_id=gate_id,
-                # story #1953: sr(라인 step_run)이 해소된 경우에만 project_id를 안다(단일
-                # gate엔 활성 step_run이 없을 수 있어 sr=None 케이스 존재 — 그래서 매니페스트
-                # project_id_included=False로 정직하게 유지·여기선 best-effort로만 실음).
-                source_project_id=(sr.project_id if sr is not None else None),
+                # story #1953: sr(라인 step_run)이 해소된 경우 project_id는 그 값 그대로(신규
+                # 쿼리 0). story #1968: sr=None(단일 gate·활성 step_run 없음) 케이스는
+                # resolve_work_item_project_id()로 gate.work_item_type/work_item_id에서
+                # 폴백 조회 — best-effort(실패해도 이 알림 전체가 try 블록 안이라 비중단).
+                source_project_id=(
+                    sr.project_id if sr is not None
+                    else await resolve_work_item_project_id(
+                        session, org_id, gate.work_item_type, gate.work_item_id,
+                    )
+                ),
             )
         except Exception:  # noqa: BLE001 — notification 실패는 비중단(override 자체는 성공).
             pass

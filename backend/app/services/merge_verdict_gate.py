@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.participation import ParticipationRole
 from app.services.gate_resolver import resolve_disposition
-from app.services.gate_service import create_gate
+from app.services.gate_service import create_gate, resolve_work_item_project_id
 from app.services.trust_score import compute_member_trust_scores
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
@@ -300,6 +300,9 @@ async def evaluate_merge_gate(
     self_report_only = bool(capture.get("skipped_reason")) or not capture.get("recorded")
 
     # 3. 정책 disposition 아티팩트 gate row(Cage·AC⑥). create_gate가 disposition→status 설정·멱등.
+    # story #1968: 이 함수는 story_id(uuid)만 갖고 Story 객체를 로드하지 않으므로(participation/
+    # verdict/trust 경로 전부 story_id만 소비) resolve_work_item_project_id()로 신규 조회.
+    project_id = await resolve_work_item_project_id(session, org_id, "story", story_id)
     gate = await create_gate(
         session,
         org_id,
@@ -308,6 +311,7 @@ async def evaluate_merge_gate(
         MERGE_GATE_TYPE,
         member_id,
         role_id,
+        project_id=project_id,
         neutral_facts={
             "ci_result": ci,
             "pr_result": pr,
