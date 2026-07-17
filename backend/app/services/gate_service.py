@@ -20,8 +20,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
@@ -33,6 +34,7 @@ from app.models.workflow_line import (
     WorkflowLineStepRunEvent,
 )
 from app.services.gate_resolver import resolve_disposition
+from app.services.workflow_line_resolution import _OPEN_STEP_RUN_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +95,52 @@ async def get_org_posture(session: AsyncSession, org_id: uuid.UUID) -> str | Non
         select(OrgGatePolicy.posture).where(OrgGatePolicy.org_id == org_id).limit(1)
     )
     return row.scalar_one_or_none()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# story #1973(P1a-S4): ?sort=urgency ORDER BY 절 조립 — 결재함 통합 큐(#1960) 기본 정렬 근거.
+#
+# ⚠️SQL 레벨 정렬만(파이썬 후처리 정렬 금지) — 페이지네이션/필터와 조합 가능해야 하고 DB가
+# 하는 게 맞다. overdue 판정은 gate당 correlated EXISTS 서브쿼리 하나로 목록 전체를 커버한다
+# (find_active_step_run_for_gate가 gate 1건 조회하는 gate_id OR h1_gate_id·open status 패턴을
+# 재사용하되, 리스트 전체에 대해 단일 SQL statement로 — N+1 0. session.execute 호출 수는 여전히
+# 1회, DB 플래너가 correlated subquery를 gate별로 평가하는 것뿐).
+# 우선순위(스토리 AC 그대로): 1) held(향후 만료)=최하단 2) SLA overdue=최상위 3) created_at
+# ASC(오래된 것 상위 — "노화"). 3번째 키는 overdue/non-overdue 그룹 내부에도 동일 적용된다
+# (전역 ORDER BY 절이라 그룹별로 별도 지정할 필요 없음 — 상위 키가 이미 그룹을 가른 뒤 그
+# 안에서 created_at ASC가 자연히 작동).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def apply_gate_urgency_sort(query, *, now: Any | None = None):
+    """``?sort=urgency`` ORDER BY 절을 query(Select[Gate])에 덧붙여 반환한다.
+
+    ``now``는 테스트 결정성용 override(기본 ``func.now()`` — DB 시계 기준, 앱-DB 시계 차이 회피).
+    overdue 판정: gate에 연결된(``gate_id`` OR ``h1_gate_id``, 동일 org) open
+    ``WorkflowLineStepRun``(``_OPEN_STEP_RUN_STATUSES``) 중 ``sla_due_at``이 now 이전인 게 하나라도
+    있으면 그 gate는 overdue(EXISTS correlated subquery — gate 개수와 무관하게 SQL 1개).
+    """
+    now_expr = func.now() if now is None else now
+    step_run = aliased(WorkflowLineStepRun)
+    overdue_exists = (
+        select(literal(1))
+        .where(
+            or_(step_run.gate_id == Gate.id, step_run.h1_gate_id == Gate.id),
+            step_run.org_id == Gate.org_id,
+            step_run.status.in_(_OPEN_STEP_RUN_STATUSES),
+            step_run.sla_due_at.isnot(None),
+            step_run.sla_due_at < now_expr,
+        )
+        .correlate(Gate)
+        .exists()
+    )
+    # 1차: held(향후 만료)=1(최하단)·그 외=0(상위). 2차: overdue=0(최상위)·그 외=1. 3차: created_at
+    # ASC(오래된 것 상위).
+    held_rank = case(
+        (and_(Gate.held_until.isnot(None), Gate.held_until > now_expr), 1), else_=0,
+    )
+    overdue_rank = case((overdue_exists, 0), else_=1)
+    return query.order_by(held_rank.asc(), overdue_rank.asc(), Gate.created_at.asc())
 
 
 async def _resolve_gate_notification_targets(session: AsyncSession, org_id: uuid.UUID) -> list[uuid.UUID]:
