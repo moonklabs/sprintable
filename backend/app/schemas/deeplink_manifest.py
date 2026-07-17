@@ -192,10 +192,16 @@ class DeepLinkPayloadFields(BaseModel):
         description=(
             "push data payload에 project_id가 포함되는가. story #1953 갱신: 대부분의 "
             "알림 타입은 project-scoped 엔티티(story/epic/doc/sprint/hypothesis 등, "
-            "project_id NOT NULL 컬럼)에서 발화돼 True. 예외(False로 남은 엔트리) = "
-            "`gate.pending_approval`·`gate_overridden` — 이 둘은 여러 gate_type/여러 "
-            "호출부(create_gate 공용 chokepoint, 일부는 org-level work_item)에 걸쳐 있어 "
-            "project_id가 항상 보장되지 않는다(엔트리별 주석 참고)."
+            "project_id NOT NULL 컬럼)에서 발화돼 True. story #1968(P1a-S3 잔여) 갱신: "
+            "`gate.pending_approval`·`gate_overridden`도 True로 승격(31/33→33/33) — "
+            "create_gate() 7개 호출부 전부(routers/gates.py 제네릭 생성·"
+            "workflow_line_config.py·merge_verdict_gate.py 잔여 3곳 포함)가 이제 "
+            "work_item_type별로 project_id를 조회/재사용해 넘기고, override_gate()의 "
+            "gate_overridden 알림도 sr(활성 step_run)=None 폴백 시 동일 로직"
+            "(gate_service.resolve_work_item_project_id)으로 조회한다. 유일한 구조적 "
+            "None 케이스(workflow_line_config의 org-level 'wf_line_version' — project "
+            "자체가 없는 org 전체 config)는 실패/미해결이 아니라 project-scoped가 아니라는 "
+            "정직한 값이다(엔트리별 주석 참고)."
         ),
     )
     required_payload: list[str] = Field(
@@ -335,14 +341,17 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="gate.pending_approval", target="gate_detail", parent_tab=ParentTab.approvals,
                 target_promotion_pending=True,
             ),
-            # story #1953(P1a-S3): org_id는 전 타입 공통으로 이제 항상 포함(True). project_id는
-            # create_gate()가 여러 gate_type(merge/doc_approval/artifact_canonicalize/
-            # workflow_config_publish/직접생성 등) 공용 chokepoint라 호출부별로 project_id를
-            # 아는 경우(artifact_canonicalize·doc_approval·parallel merge 등)에만 실어 보내고,
-            # 모르는 호출부(범용 gates.py 직접생성·workflow_line_config 등 org-level work_item)는
-            # 그대로 생략된다 — 전부 보장은 아니라서 False로 정직하게 유지(실측 불일치 방지).
+            # story #1953(P1a-S3): org_id는 전 타입 공통으로 이제 항상 포함(True).
+            # story #1968(P1a-S3 잔여): project_id도 True로 승격 — create_gate()가 여러
+            # gate_type(merge/doc_approval/artifact_canonicalize/workflow_config_publish/
+            # 직접생성 등) 공용 chokepoint인 건 여전하지만, 이제 호출부 7곳 전부가 project_id를
+            # 싣는다 — 이미 로드된 엔티티에서 재사용(artifact_canonicalize·doc_approval·
+            # loop_decision·parallel merge)하거나, work_item_id만 있으면
+            # gate_service.resolve_work_item_project_id()로 신규 조회(범용 gates.py 직접생성·
+            # merge 게이트). workflow_line_config(org-level 'wf_line_version')만 구조적으로
+            # None일 수 있다(project 자체가 없는 org 전체 config — 미해결 아님).
             payload=DeepLinkPayloadFields(
-                org_id_included=True, project_id_included=False,
+                org_id_included=True, project_id_included=True,
                 required_payload=["reference_id"],
             ),
         ),
@@ -401,11 +410,12 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 counts_toward_queue_badge=False,
                 target_promotion_pending=True,  # gate_detail 공통 사유 — 위 결재함 섹션 헤더 주석 참고.
             ),
-            # story #1953: project_id는 라인 step_run(sr)이 해소될 때만 실림(gate_service.py
-            # override_gate — 단일 gate엔 활성 step_run이 없을 수 있어 sr=None 케이스 존재) →
-            # 항상 보장은 아니라 False.
+            # story #1953: project_id는 라인 step_run(sr)이 해소될 때 그 값(신규 쿼리 0).
+            # story #1968(P1a-S3 잔여): sr=None 케이스(단일 gate·활성 step_run 없음)도
+            # gate_service.resolve_work_item_project_id(gate.work_item_type/work_item_id)로
+            # 폴백 조회하도록 override_gate()를 갱신 — True로 승격.
             payload=DeepLinkPayloadFields(
-                org_id_included=True, project_id_included=False,
+                org_id_included=True, project_id_included=True,
                 required_payload=["reference_id"],
             ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),

@@ -136,7 +136,8 @@ def test_wilson_lower_bound_sample_aware():
 
 # ── evaluate_merge_gate 오케스트레이션 (Cage 합성·AC⑥) ──────────────────────────
 
-def _patch_cage(*, gate_status="auto_passed", trust_scores=None, capture=None, participation=True):
+def _patch_cage(*, gate_status="auto_passed", trust_scores=None, capture=None, participation=True,
+                 project_id=None):
     part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4()) if participation else None
     gate = SimpleNamespace(id=uuid.uuid4(), status=gate_status)
     ctx = [
@@ -148,6 +149,10 @@ def _patch_cage(*, gate_status="auto_passed", trust_scores=None, capture=None, p
                      AsyncMock(return_value=trust_scores or {"scores": [{
                          "role_key": "implementation", "clean_pass_rate": 0.9,
                          "hit": 90, "resolved": 100, "pending": 0, "hit_rate": 0.9}]})),
+        # story #1968: evaluate_merge_gate이 story_id만 갖고 있어(Story 객체 미로드)
+        # resolve_work_item_project_id()로 project_id를 신규 조회 — 실 DB 없는 단위테스트라 mock.
+        patch.object(mod, "resolve_work_item_project_id",
+                     AsyncMock(return_value=project_id if project_id is not None else uuid.uuid4())),
         patch.object(mod, "create_gate", AsyncMock(return_value=gate)),
     ]
     return ctx, gate
@@ -252,6 +257,7 @@ async def test_trust_computed_before_capture_records():
          patch.object(mod, "_role_key", AsyncMock(return_value="implementation")), \
          patch.object(mod, "compute_member_trust_scores", side_effect=_trust), \
          patch.object(mod, "capture_pr_ci_verdict", side_effect=_capture), \
+         patch.object(mod, "resolve_work_item_project_id", AsyncMock(return_value=uuid.uuid4())), \
          patch.object(mod, "create_gate", AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4(), status="auto_passed"))):
         await evaluate_merge_gate(AsyncMock(), uuid.uuid4(), uuid.uuid4(), pr_number=1, repo="o/r", ci_result="pass")
 

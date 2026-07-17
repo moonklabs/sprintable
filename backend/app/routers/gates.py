@@ -17,6 +17,7 @@ from app.routers.agent_gateway import wake_agent
 from app.services.gate_service import (
     create_gate,
     hold_gate,
+    resolve_work_item_project_id,
     transition_gate,
     unhold_gate,
     void_gate,
@@ -177,6 +178,11 @@ async def create_gate_endpoint(
             status_code=403,
             detail="doc 결재 게이트는 doc 상신 경로로만 생성됩니다 (직접 생성 불가).",
         )
+    # story #1968: 제네릭 게이트 생성은 story/doc/task 등 work_item 객체를 로드하지 않으므로
+    # (client가 work_item_id/work_item_type만 보냄) resolve_work_item_project_id()로 신규 조회.
+    project_id = await resolve_work_item_project_id(
+        session, org_id, body.work_item_type, body.work_item_id,
+    )
     gate = await create_gate(
         session=session,
         org_id=org_id,
@@ -186,6 +192,7 @@ async def create_gate_endpoint(
         member_id=body.member_id,
         role_id=body.role_id,
         neutral_facts=body.neutral_facts,
+        project_id=project_id,
     )
     await session.commit()
     return GateResponse.model_validate(gate)
