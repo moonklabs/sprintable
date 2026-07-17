@@ -80,7 +80,6 @@ event_type이 어차피 단일 reference_type만 발화한다는 뜻(예: `gate.
 """
 from __future__ import annotations
 
-import uuid
 from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
