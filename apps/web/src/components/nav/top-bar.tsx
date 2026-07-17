@@ -24,7 +24,7 @@ export function TopBar({ className }: TopBarProps) {
         className,
       )}
     >
-      <SidebarTrigger className="mr-2 md:hidden" />
+      <SidebarTrigger className="mr-2 lg:hidden" />
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {title}
       </div>
