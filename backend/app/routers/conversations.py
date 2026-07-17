@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, field_validator
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -233,6 +233,81 @@ async def _conversations_with_human_participant(conv_ids: list[uuid.UUID], db: A
         if mid not in agent_ids:  # human 참가자 발견
             result.add(cid)
     return result
+
+
+# ─── story #1976 (E-CHAT-REALTIME 트랙A): read state 서버 truth ──────────────────
+# doc: chat-realtime-track-a-read-state-design §3/§4. 순수 SQLAlchemy 쿼리/stmt 조립
+# 함수(DB 실행 없음) — 단위 테스트 가능(TDD RED→GREEN, DB 미기동 시에도 compile() 검증 가능).
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)  # last_read_at NULL(한 번도 안 읽음) 기준선
+
+
+def _mark_read_update_stmt(conversation_id: uuid.UUID, member_id: uuid.UUID, up_to: datetime):
+    """GREATEST 래칫 UPDATE — last_read_at을 단조증가만 허용(멱등·역행 방지, §4-3).
+
+    GREATEST(COALESCE(last_read_at, epoch), up_to): 이미 더 최신 read 상태면 과거 up_to로
+    덮어쓰지 않는다. WHERE가 (conversation_id, member_id) 매치 0행이면 비참여자 — 호출부가
+    RETURNING 결과 None으로 403 판단.
+    """
+    return (
+        update(ConversationParticipant)
+        .where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.member_id == member_id,
+        )
+        .values(
+            last_read_at=func.greatest(
+                func.coalesce(ConversationParticipant.last_read_at, text("'epoch'::timestamptz")),
+                up_to,
+            )
+        )
+        .returning(ConversationParticipant.last_read_at)
+    )
+
+
+def _unread_count_stmt(conversation_id: uuid.UUID, member_id: uuid.UUID, since: datetime | None):
+    """단건 unread_count — last_read_at(since) 이후 & sender IS DISTINCT FROM 나(§4-1).
+
+    IS DISTINCT FROM(NOT !=) 필수: sender_id nullable(발신자 탈퇴 시 SET NULL) 이라 `!=`는
+    SQL 3-값 논리상 NULL != x → NULL(제외) 이 돼 발신자소실 메시지가 unread에서 누락된다.
+    since=None(한 번도 안 읽음)이면 _EPOCH 기준선 사용.
+    """
+    baseline = since if since is not None else _EPOCH
+    return select(func.count(ConversationMessage.id)).where(
+        ConversationMessage.conversation_id == conversation_id,
+        ConversationMessage.created_at > baseline,
+        ConversationMessage.sender_id.is_distinct_from(member_id),
+    )
+
+
+def _list_unread_counts_stmt(member_id: uuid.UUID, conv_id_list: list[uuid.UUID]):
+    """list_conversations 배치 unread_count — 단일 JOIN+GROUP BY(N+1 방지, §4-2).
+
+    대화마다 기준 시각(last_read_at)이 다른 상관 카운트라 순수 IN 배치로는 불가 — JOIN
+    조건에 기준 시각 비교를 박아 넣어 페이지 대화 수(N)와 무관하게 쿼리 1회로 해결.
+    INNER JOIN이라 unread=0인 대화는 결과행 자체가 없음(호출부가 dict.get(id, 0)으로 처리).
+    """
+    return (
+        select(
+            ConversationParticipant.conversation_id,
+            func.count(ConversationMessage.id),
+        )
+        .join(
+            ConversationMessage,
+            and_(
+                ConversationMessage.conversation_id == ConversationParticipant.conversation_id,
+                ConversationMessage.created_at > func.coalesce(
+                    ConversationParticipant.last_read_at, text("'epoch'::timestamptz")
+                ),
+                ConversationMessage.sender_id.is_distinct_from(member_id),
+            ),
+        )
+        .where(
+            ConversationParticipant.member_id == member_id,
+            ConversationParticipant.conversation_id.in_(conv_id_list),
+        )
+        .group_by(ConversationParticipant.conversation_id)
+    )
 
 
 _SUMMARY_PREVIEW_MAX = 80
@@ -590,6 +665,10 @@ class ConversationResponse(BaseModel):
     updated_at: datetime
     # 270c87e6: caller의 알림 mute 상태(participant muted_at 기반) — FE mute 토글 초기 상태용(#1426).
     muted: bool = False
+    # story #1976 (E-CHAT-REALTIME 트랙A): caller의 read state(participant.last_read_at) +
+    # 파생 unread_count. 비참여자(admin-bypass agent-only 대화)는 last_read_at=None·unread_count=0.
+    last_read_at: datetime | None = None
+    unread_count: int = 0
 
 
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
@@ -695,6 +774,13 @@ class MuteRequest(BaseModel):
     muted: bool
 
 
+class MarkReadRequest(BaseModel):
+    """story #1976: up_to 지정 시 그 시각으로 SET(FE 실 렌더 마지막 메시지 timestamp — 권장 경로).
+    up_to 생략 시 서버 now() 사용 — 이는 "전체 읽음"(mark-all-read) 명시 액션 전용 의도(§3-2)."""
+
+    up_to: datetime | None = None
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("", status_code=201)
@@ -767,7 +853,11 @@ async def list_conversations(
         raise HTTPException(status_code=403, detail="Only owner/admin can view agent conversations.")
 
     conv_ids_result = await db.execute(
-        select(ConversationParticipant.conversation_id, ConversationParticipant.muted_at).where(
+        select(
+            ConversationParticipant.conversation_id,
+            ConversationParticipant.muted_at,
+            ConversationParticipant.last_read_at,
+        ).where(
             ConversationParticipant.member_id == sender.id
         )
     )
@@ -776,6 +866,9 @@ async def list_conversations(
     # 270c87e6: caller의 대화별 mute 상태(FE 토글 초기 상태·#1426). admin-bypass로 추가되는
     # agent-only 대화는 caller가 참여자 아니라 자연히 False.
     caller_muted = {r.conversation_id: r.muted_at is not None for r in _caller_rows}
+    # story #1976: caller의 대화별 read state(participant.last_read_at) — 같은 배치 쿼리에 편승
+    # (신규 쿼리 추가 아님·N+1 무영향). admin-bypass agent-only 대화는 caller 미참여라 자연히 None.
+    caller_last_read_at = {r.conversation_id: r.last_read_at for r in _caller_rows}
 
     # AC1/2 + #1262: admin-bypass는 **agent-only 대화로 한정**(사적 DM 프라이버시).
     # project 내 agent type member가 participant인 conversation 후보를 모으되,
@@ -850,6 +943,13 @@ async def list_conversations(
             "runtime_type": runtime_type_map.get(r.member_id),
         })
 
+    # story #1976: unread_count 배치 — 단일 JOIN+GROUP BY(N+1 방지, §4-2). INNER JOIN이라
+    # unread=0 대화는 결과행 없음 → dict.get(id, 0)으로 자연 0 처리.
+    unread_rows = (await db.execute(
+        _list_unread_counts_stmt(sender.id, conv_id_list)
+    )).all() if conv_id_list else []
+    unread_map: dict[uuid.UUID, int] = {r[0]: r[1] for r in unread_rows}
+
     result = []
     for conv in convs:
         latest_msg = (await db.execute(
@@ -868,6 +968,12 @@ async def list_conversations(
             "resolved_at": conv.resolved_at.isoformat() if conv.resolved_at else None,
             "participants": conv_participants.get(conv.id, []),
             "muted": caller_muted.get(conv.id, False),  # 270c87e6: FE mute 토글 초기 상태
+            # story #1976: caller read state + 파생 unread_count(단일 JOIN+GROUP BY, N+1 없음).
+            "last_read_at": (
+                caller_last_read_at.get(conv.id).isoformat()
+                if caller_last_read_at.get(conv.id) else None
+            ),
+            "unread_count": unread_map.get(conv.id, 0),
             "latest_message": {
                 "content": latest_msg.content,
                 "created_at": latest_msg.created_at.isoformat(),
@@ -915,14 +1021,20 @@ async def get_conversation(
             raise HTTPException(status_code=403, detail="Not a participant")
 
     # 270c87e6: caller의 mute 상태 노출(FE 토글 초기 상태·#1426). 비참여자(admin-bypass agent-only)는 False.
-    caller_muted_at = (await db.execute(
-        select(ConversationParticipant.muted_at).where(
+    # story #1976: 같은 단건 조회에 last_read_at도 편승(신규 쿼리 아님) — unread_count는 참여자일 때만 계산.
+    caller_row = (await db.execute(
+        select(ConversationParticipant.muted_at, ConversationParticipant.last_read_at).where(
             ConversationParticipant.conversation_id == conversation_id,
             ConversationParticipant.member_id == sender.id,
         )
-    )).scalar_one_or_none()
+    )).one_or_none()
     resp = ConversationResponse.model_validate(conv)
-    resp.muted = caller_muted_at is not None
+    resp.muted = caller_row is not None and caller_row.muted_at is not None
+    if caller_row is not None:
+        resp.last_read_at = caller_row.last_read_at
+        resp.unread_count = (await db.execute(
+            _unread_count_stmt(conversation_id, sender.id, caller_row.last_read_at)
+        )).scalar_one()
     return resp
 
 
@@ -1157,6 +1269,63 @@ async def set_conversation_mute(
     participant.muted_at = datetime.now(timezone.utc) if body.muted else None
     await db.commit()
     return {"conversation_id": str(conversation_id), "muted": body.muted}
+
+
+@router.post("/{conversation_id}/read")
+async def mark_conversation_read(
+    conversation_id: uuid.UUID,
+    body: MarkReadRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """POST /api/v2/conversations/{id}/read — read state 서버 truth 갱신(멱등·GREATEST 래칫).
+
+    story #1976(E-CHAT-REALTIME 트랙A, doc chat-realtime-track-a-read-state-design §3):
+    up_to 지정 시 그 시각으로 SET(FE가 실 렌더된 마지막 메시지 timestamp 전달 — 권장 경로,
+    §4-3 레이스 방지). up_to 생략 시 서버 now() 사용 — "전체 읽음"(mark-all-read) 명시 액션
+    전용 의도(§3-2/§3-4). GREATEST(last_read_at, up_to) 원자 UPDATE로 역행 방지(여러 번
+    호출해도 안전 — 오래된 up_to가 늦게 도착해도 무해). 비참여자는 403(읽음 상태는 본인 것만
+    의미 있음 — admin-bypass 없음).
+    """
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    up_to = body.up_to or datetime.now(timezone.utc)
+
+    result = await db.execute(_mark_read_update_stmt(conversation_id, sender.id, up_to))
+    new_last_read_at = result.scalar_one_or_none()
+    if new_last_read_at is None:
+        raise HTTPException(status_code=403, detail="Not a participant")
+    await db.commit()
+
+    # 재계산(가정 아님 — up_to가 최신 메시지보다 과거인 엣지케이스에서 0이 아닐 수 있음, §3-3).
+    unread_count = (await db.execute(
+        _unread_count_stmt(conversation_id, sender.id, new_last_read_at)
+    )).scalar_one()
+
+    sse_payload = {
+        "event_type": "conversation.read",
+        "conversation_id": str(conversation_id),
+        "member_id": str(sender.id),
+        "last_read_at": new_last_read_at.isoformat(),
+        "unread_count": unread_count,
+    }
+    # 본인의 타 커넥션에만 전파(read-receipt=상대방 노출은 스코프 아웃, §5-1 PO 확定).
+    # _push_to_agent가 member_id의 모든 열린 탭/기기 큐에 자동 팬아웃(trust_pipeline.py 선례
+    # 동형 패턴, §1-3/§5-2) — Event DB row 미생성(순수 transient push, org 브로드캐스트 아님).
+    _push_to_agent(str(sender.id), sse_payload)
+
+    return {
+        "conversation_id": str(conversation_id),
+        "member_id": str(sender.id),
+        "last_read_at": new_last_read_at.isoformat(),
+        "unread_count": unread_count,
+    }
 
 
 @router.post("/{conversation_id}/participants", status_code=201)
