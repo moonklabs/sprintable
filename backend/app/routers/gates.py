@@ -13,6 +13,7 @@ from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
+from app.models.pm import Story, Task
 from app.routers.agent_gateway import wake_agent
 from app.services.gate_service import (
     create_gate,
@@ -98,6 +99,12 @@ class GateResponse(BaseModel):
 
     id: uuid.UUID
     org_id: uuid.UUID
+    # story #1970(P1a-S4): GET /{id} 단건 조회 신규 enrich(Gate 모델 자체엔 project_id 컬럼이
+    # 없다 — resolve_work_item_project_id()로 조회해 채운다). additive·nullable(project-무관
+    # work_item은 None — 정직한 값, feedback_infra_value 류 fallback 아님). 기존 create/list/
+    # transition 등 타 엔드포인트는 Gate ORM 객체에 이 속성이 없어 from_attributes 기본값
+    # None으로 조용히 통과(work_item_summary/can_approve와 동일 선례).
+    project_id: uuid.UUID | None = None
     work_item_id: uuid.UUID
     work_item_type: str
     # doc-side 결재 UX(24f5ae18): gate row 는 work_item_id 만이라 인박스가 doc 를 못 그림 → enrich.
@@ -263,6 +270,81 @@ async def list_gates(
         except Exception:  # noqa: BLE001 — can_approve 가시성 enrich 실패는 목록 비중단(fail-closed=False 유지).
             logger.warning("list_gates can_approve enrich 실패(비중단) org=%s", org_id, exc_info=True)
     return responses
+
+
+async def _resolve_work_item_summary(
+    session: AsyncSession, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
+) -> WorkItemSummary | None:
+    """story #1970(P1a-S4): GET /{id} 단건 조회 전용 work_item_summary 조립 — list_gates 의
+    doc-only 배치 enrich(24f5ae18)를 story/task 까지 확장한다. 단건 조회라 배치 최적화(N+1 회피)
+    필요 없음 — 타입별 단일 쿼리로 충분. doc=title+slug(기존 로직 그대로), story/task=title만
+    (slug 개념 자체가 없어 항상 None), 그 외/미인식 타입·미존재 엔티티는 None(list_gates 비-doc
+    분기와 동일하게 fail-soft — work_item_summary 는 additive enrich 이지 authz 게이트가 아니다).
+    ⚠️list_gates 의 배치 doc 조회와 별도 코드경로 — 강제 공유하면 단건 쿼리가 불필요한 다건
+    IN-clause 배치 인프라를 상속해 오히려 복잡해진다(1건 조회에 배치 이점 없음)."""
+    if work_item_type == "doc":
+        row = (await session.execute(
+            select(Doc.title, Doc.slug).where(
+                Doc.id == work_item_id, Doc.org_id == org_id, Doc.deleted_at.is_(None),
+            )
+        )).one_or_none()
+        return WorkItemSummary(title=row[0], slug=row[1]) if row is not None else None
+    if work_item_type == "story":
+        title = (await session.execute(
+            select(Story.title).where(
+                Story.id == work_item_id, Story.org_id == org_id, Story.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+        return WorkItemSummary(title=title) if title is not None else None
+    if work_item_type == "task":
+        title = (await session.execute(
+            select(Task.title).where(
+                Task.id == work_item_id, Task.org_id == org_id, Task.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+        return WorkItemSummary(title=title) if title is not None else None
+    return None
+
+
+@router.get("/{id}", response_model=GateResponse)
+async def get_gate_endpoint(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """story #1970(P1a-S4): gate 단건 조회 — 알림 payload 의 reference_id(gate.id, gate_service.py
+    :150,774)로 딥링크 콜드 진입(목록 경유 없이 상세 화면 직행)을 지원한다. 응답 shape=list 아이템과
+    동일(GateResponse, 단건)·미르코(FE) canonical 게이트 상세 화면이 그대로 소비하는 스레드 합의
+    계약(변경 금지). project_id/work_item_summary 만 신규 enrich.
+
+    authz: gate 의 work_item 실제 project(resolve_work_item_project_id — story #1968 SSOT 재사용)
+    에 has_project_access 강제. project_id 가 해소되면(story/task/doc 은 항상 해소) 그 project
+    접근권 필수·무권한은 403 이 아닌 404(participation.py `_assert_story_project_access` 와 동일
+    SSOT 패턴 — 존재 여부 자체를 비노출). project_id 가 None 이면(구조적으로 project-무관 work_item
+    — resolve_work_item_project_id 주석 참고) project 경계가 없으므로 접근 차단 대상이 아니다 —
+    get_verified_org_id 가 이미 강제한 org 멤버십으로 충분(gate 조회 자체가 org_id 로 스코프됨).
+    미존재 gate 도 동일하게 404 로 흡수(존재 비노출 규율)."""
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    project_id = await resolve_work_item_project_id(
+        session, org_id, gate.work_item_type, gate.work_item_id,
+    )
+    if project_id is not None and not await has_project_access(
+        session, uuid.UUID(auth.user_id), project_id, org_id
+    ):
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    resp = GateResponse.model_validate(gate)
+    resp.project_id = project_id
+    resp.work_item_summary = await _resolve_work_item_summary(
+        session, org_id, gate.work_item_type, gate.work_item_id,
+    )
+    return resp
 
 
 @router.post("/{id}/transition", response_model=GateResponse)
