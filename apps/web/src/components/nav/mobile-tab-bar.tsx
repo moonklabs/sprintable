@@ -58,7 +58,12 @@ export function MobileTabBar() {
     if (typeof window === 'undefined' || window.innerWidth >= MOBILE_BREAKPOINT) return;
 
     let cancelled = false;
-    void (async () => {
+    // ⚠️fix(story #1974, 선생님 실사용 지적): 마운트 1회 fetch뿐이라 게이트를 다른 탭/기기에서
+    // 처리해도 배지가 안 줄어드는 stale 문제 — DB 실측(2026-07-17)으로 확認(dev pending=0인데
+    // 사용자 배지는 그대로 남아있었음). window focus 복귀 시 재조회해 완화(전형적인 "다른 곳에서
+    // 처리하고 이 탭으로 돌아옴" 시나리오를 커버 — 실시간 push는 아니지만 이 스토리 스코프에선
+    // 충분, 완전한 실시간 갱신은 #1960 결재함 큐 스코프).
+    async function loadPendingCount() {
       try {
         const res = await fetch('/api/gates?status=pending&assigned_to_me=true');
         if (!res.ok) return;
@@ -67,9 +72,13 @@ export function MobileTabBar() {
       } catch {
         // 배지 카운트 실패는 치명적이지 않음 — 숫자 없이 탭만 정상 동작.
       }
-    })();
+    }
+
+    void loadPendingCount();
+    window.addEventListener('focus', loadPendingCount);
     return () => {
       cancelled = true;
+      window.removeEventListener('focus', loadPendingCount);
     };
   }, []);
 
