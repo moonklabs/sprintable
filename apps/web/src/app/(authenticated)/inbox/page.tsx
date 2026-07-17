@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { DecisionsWaiting } from '@/components/inbox/decisions-waiting';
-import { GateInbox } from '@/components/cage/gate-inbox';
+import { ApprovalsQueue } from '@/components/inbox/approvals-queue';
 import { AttentionQueueView } from '@/components/attention-queue/attention-queue-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast, ToastContainer } from '@/components/ui/toast';
@@ -408,11 +408,7 @@ export default function InboxPage() {
           </div>
         ) : activeTab === 'gates' ? (
           <div className="flex-1 overflow-y-auto p-4">
-            {currentTeamMemberId ? (
-              <GateInbox memberId={currentTeamMemberId} />
-            ) : (
-              <p className="text-xs text-muted-foreground">{t('loading')}</p>
-            )}
+            <ApprovalsQueue />
           </div>
         ) : (
         <>
