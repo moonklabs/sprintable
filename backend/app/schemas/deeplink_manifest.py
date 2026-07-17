@@ -104,8 +104,12 @@ class ReturnPolicy(str, Enum):
     # (P2-S3 AC "직접 상세 진입 시 parentTab 루트 엔트리 선존재").
     synthesize_parent = "synthesize_parent"
     # 미등재 타입/필수 필드 누락 등 검증 실패 시: target 자체를 포기하고 `지금` 탭으로
-    # 안전 폴백한다(AC4). 매니페스트에 이 값을 가진 엔트리는 없다 — validate 실패 시
-    # 클라이언트가 자체적으로 이 정책을 적용한다는 뜻의 상수로만 존재.
+    # 안전 폴백한다(AC4) — validate 실패 시 클라이언트가 자체적으로 이 정책을 적용한다는
+    # 뜻의 상수. **또한 target="now" 자체를 등재한 엔트리도 이 값을 명시해야 한다**
+    # (유나 정정, 2026-07-17): target이 이미 `지금` 탭이면 parentTab(all) 루트를 history에
+    # 심고 그 위에 target을 push하는 synthesize_parent가 "all 루트 위에 now 탭을 스택으로
+    # 쌓는" 시맨틱 모순이 된다 — now 탭 전환만 하고 스택 push는 하지 않는다(parentTab
+    # don't-care).
     fallback_now = "fallback_now"
 
 
@@ -418,6 +422,7 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="dispatched", entity_type="hypothesis", target="now",
                 parent_tab=ParentTab.all,
                 target_promotion_pending=True,
+                return_policy=ReturnPolicy.fallback_now,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
         ),
@@ -610,6 +615,7 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 type="handoff_stuck", entity_type="hypothesis", target="now",
                 parent_tab=ParentTab.all,
                 target_promotion_pending=True,
+                return_policy=ReturnPolicy.fallback_now,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
