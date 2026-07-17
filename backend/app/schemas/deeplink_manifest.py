@@ -475,16 +475,27 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         ),
 
         # --- visual artifact 계열 ---
+        # target_promotion_pending=True(이 섹션 전체 5개 엔트리 공통): story #1952(P1a-S2)
+        # FE 라우트 대조 CI 조사에서 확인 — `apps/web/src/components/canvas/
+        # artifact-gallery-view.tsx`(및 `[ws]/[proj]/artifacts/page.tsx`) 전수 확인 결과
+        # "artifact_detail"로 직접 딥링크 가능한 웹 라우트가 없다(useSearchParams/동적
+        # `[id]` 서브라우트 0건 — `ArtifactExpandDialog`는 순수 클라이언트 인메모리 상태로만
+        # 열림). S1 초안 당시엔 "미확인"으로만 표시됐던 항목(doc `draft-1951-deeplink-manifest-v1`
+        # §2)이 이번 조사로 실제 GAP으로 확인됨 — gate_detail(P1a-S4 승격 예정)과 동일 패턴으로
+        # target_promotion_pending=True 표시(target 문자열 자체는 유지, hypothesis처럼 "now"로
+        # 낮추지 않음 — 승격 스토리 슬롯은 후속 결정 필요). AC3(target 실존 원칙) CI 체크
+        # 대상에서 이 플래그로 제외됨.
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="comment.created", entity_type="visual_artifact", target="artifact_detail",
-                parent_tab=ParentTab.all,
+                parent_tab=ParentTab.all, target_promotion_pending=True,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
         ),
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="artifact.created", target="artifact_detail", parent_tab=ParentTab.all,
+                target_promotion_pending=True,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
@@ -492,6 +503,7 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="artifact.exported", target="artifact_detail", parent_tab=ParentTab.all,
+                target_promotion_pending=True,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
@@ -499,6 +511,7 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="artifact.updated", target="artifact_detail", parent_tab=ParentTab.all,
+                target_promotion_pending=True,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
@@ -506,6 +519,7 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="artifact.canonicalized", target="artifact_detail", parent_tab=ParentTab.all,
+                target_promotion_pending=True,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
