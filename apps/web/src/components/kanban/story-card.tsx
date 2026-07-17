@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useTranslations } from 'next-intl';
@@ -12,6 +12,7 @@ import { TrustSeal } from '@/components/verify/trust-seal';
 import { deriveTrustStage } from '@/services/verify';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
+import { cn } from '@/lib/utils';
 
 // E-UI-DAEGBYEON P0 — Proof Capsule 확산(story `bf9037cb`). 상태→신뢰 파이프라인(후속 P0)이
 // status 모델 자체를 바꿀 예정이라 지금은 현 5-status를 4-Proofline색에 얇게만 매핑(과결합
@@ -113,6 +114,13 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [triggering, setTriggering] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  // #1942: 보드 컬럼이 overflow-x-auto 가로스크롤이라 카드가 뷰포트 어디든(특히 390px 모바일에서
+  // 우측 근처) 위치할 수 있음 — "오른쪽에 항상 공간이 있다"는 데스크톱 가정이 깨짐. 두 메뉴 모두
+  // 기본 정렬로 먼저 그린 뒤 실측 rect로 뷰포트 밖이면 반대쪽으로 flip한다(portal 없이 해결 가능한
+  // 범위 — flip만으로 두 메뉴 다 뷰포트 안에 들어옴을 390px 실측으로 확인함).
+  const [contextMenuAlign, setContextMenuAlign] = useState<'left' | 'right'>('left');
+  const [statusMenuAlign, setStatusMenuAlign] = useState<'right' | 'left'>('right');
+  const statusMenuRef = useRef<HTMLDivElement>(null);
 
   const handleKickoff = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -189,9 +197,29 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     return () => document.removeEventListener('keydown', handleEscape);
   }, [contextMenuOpen]);
 
+  // 정렬 state는 open과 같은 이벤트 핸들러 틱에서 기본값으로 리셋해둔다(아래가 아니라 클릭 핸들러
+  // 쪽에서) — 그래야 메뉴가 "기본 정렬로 마운트된 실제 DOM"을 그대로 실측할 수 있다. 여기서 리셋하면
+  // 직전 flip 상태가 남은 stale DOM을 재는 꼴이라 판정이 어긋난다.
+  useLayoutEffect(() => {
+    if (!contextMenuOpen || !menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+      setContextMenuAlign('right');
+    }
+  }, [contextMenuOpen]);
+
+  useLayoutEffect(() => {
+    if (!statusMenuOpen || !statusMenuRef.current) return;
+    const rect = statusMenuRef.current.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+      setStatusMenuAlign('left');
+    }
+  }, [statusMenuOpen]);
+
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    setContextMenuAlign('left');
     setContextMenuOpen(true);
   }, []);
 
@@ -389,7 +417,10 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       {contextMenuOpen && (
         <div
           ref={menuRef}
-          className="absolute left-0 top-full z-50 mt-1 w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+          className={cn(
+            'absolute top-full z-50 mt-1 w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md',
+            contextMenuAlign === 'left' ? 'left-0' : 'right-0',
+          )}
           onClick={(e) => e.stopPropagation()}
         >
           {onEdit && (
@@ -403,14 +434,23 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           {onChangeStatus && (
             <div className="relative">
               <button
-                onClick={() => setStatusMenuOpen(!statusMenuOpen)}
+                onClick={() => {
+                  setStatusMenuAlign('right');
+                  setStatusMenuOpen(!statusMenuOpen);
+                }}
                 className="flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
               >
                 {t('changeStatus')}
                 <ChevronRight className="size-3.5" />
               </button>
               {statusMenuOpen && (
-                <div className="absolute left-full top-0 ml-1 w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md">
+                <div
+                  ref={statusMenuRef}
+                  className={cn(
+                    'absolute top-0 z-50 w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md',
+                    statusMenuAlign === 'right' ? 'left-full ml-1' : 'right-full mr-1',
+                  )}
+                >
                   {statuses.map((status) => (
                     <button
                       key={status.id}
