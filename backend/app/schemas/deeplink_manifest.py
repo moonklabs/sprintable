@@ -412,9 +412,8 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             # 충돌한다 — 그래서 target 자체를 현재 안전 폴백("now")으로 낮추고
             # target_promotion_pending=True로 하이라이트 표시한다. S3(가설 상세 라우트 신설)
             # PR에서 target이 실제 라우트로 승격되면 이 값과 flag를 갱신한다.
-            # (참고: handoff_stuck:hypothesis 엔트리는 여전히 target="hypothesis_detail"을
-            # 쓴다 — 이 정정은 dispatched:hypothesis에 한정된 유나 지시 범위라 임의 확장하지
-            # 않았다. 동일 갭이 있으니 S2/S3에서 재확인 필요 — 잔여 오픈아이템으로 남김.)
+            # (handoff_stuck:hypothesis 엔트리도 동일 원칙으로 통일됨 — 오르테가 정정,
+            # 2026-07-17.)
             app=DeepLinkAppFields(
                 type="dispatched", entity_type="hypothesis", target="now",
                 parent_tab=ParentTab.all,
@@ -600,14 +599,17 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
         ),
         DeepLinkManifestEntry(
-            # 열린 질문 7번 스코프 밖(잔여 오픈아이템): 이 엔트리는 여전히
-            # target="hypothesis_detail"을 쓴다 — dispatched:hypothesis만 "target 실존
-            # 원칙"에 따라 "now" 폴백으로 낮추라는 게 유나 지시 범위였고 이 handoff_stuck
-            # 변형은 명시 대상이 아니었다. 동일 갭(hypothesis_detail 미존재)이 있으므로
-            # S2/S3에서 재확인 필요.
+            # 오르테가 정정(2026-07-17): 앞선 self-flag("스코프 밖")를 보류하지 않고 즉시
+            # 반영 — target="hypothesis_detail"을 그대로 두면 ①"target 실존 원칙"
+            # 위반(hypothesis_detail 라우트 미존재, S2 CI red 또는 오착지) ②방금 정정한
+            # handoff_stuck 5종의 parentTab=all 불변식과 별개로, dispatched:hypothesis와
+            # 동일 target을 쓰면서 다른 처리를 받는 내부 불일치. dispatched:hypothesis와
+            # 동일 원칙(target 실존 원칙)으로 통일 — target="now" 폴백 + 승격 대기 표시.
+            # S3(가설 상세 라우트 신설) PR에서 dispatched:hypothesis와 함께 일괄 승격.
             app=DeepLinkAppFields(
-                type="handoff_stuck", entity_type="hypothesis", target="hypothesis_detail",
+                type="handoff_stuck", entity_type="hypothesis", target="now",
                 parent_tab=ParentTab.all,
+                target_promotion_pending=True,
             ),
             payload=DeepLinkPayloadFields(required_payload=["reference_id"]),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a1),
