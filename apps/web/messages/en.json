@@ -3520,6 +3520,7 @@
     "queueAgeDays": "Waiting {days}d",
     "gateDetailOrgContext": "Org {org}",
     "riskUnknown": "Risk pending",
+    "riskHigh": "High risk · review closely",
     "sigEvidenceLabel": "Evidence",
     "sigEvidenceViewedLabel": "I have reviewed the evidence above",
     "sigReasonLabel": "Decision reason",

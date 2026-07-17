@@ -62,6 +62,10 @@ export interface GateItem {
   // doc-gate in-doc 결재 자격(89484c8c): doc_approval gate 한정·per-caller·rule A(human+has_project_access+not-author).
   // BE가 gates 리스트 응답 각 gate에 동봉(additive). undefined/false → in-doc 승인/반려 버튼 미노출(fail-closed). 실 authz=BE 403.
   can_approve?: boolean;
+  // story #1972(P1a-S4): 위험도 UX 등급 파생 결과("low"|"high") — BE gate_service.derive_risk_grade()
+  // 가 OrgGatePolicy.posture+gate_type에서 순수 파생해 list/단건 조회 둘 다 동봉(additive). null/undefined는
+  // BE가 아직 못 보낸 구버전 응답 대비 방어적 폴백일 뿐 — 정상 응답은 항상 "low"|"high" 둘 중 하나.
+  risk_grade?: 'low' | 'high' | null;
   // H1-S3 머지 verdict 게이트 evidence(GateResponse·additive·하위호환 default). null≠0(AC③).
   requires_human?: boolean;
   evidence_status?: string | null; // sufficient | blocked | insufficient
