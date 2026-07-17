@@ -291,12 +291,16 @@ async def _resolve_work_item_summary(
         return WorkItemSummary(title=row[0], slug=row[1]) if row is not None else None
     if work_item_type == "story":
         title = (await session.execute(
-            select(Story.title).where(Story.id == work_item_id, Story.org_id == org_id)
+            select(Story.title).where(
+                Story.id == work_item_id, Story.org_id == org_id, Story.deleted_at.is_(None),
+            )
         )).scalar_one_or_none()
         return WorkItemSummary(title=title) if title is not None else None
     if work_item_type == "task":
         title = (await session.execute(
-            select(Task.title).where(Task.id == work_item_id, Task.org_id == org_id)
+            select(Task.title).where(
+                Task.id == work_item_id, Task.org_id == org_id, Task.deleted_at.is_(None),
+            )
         )).scalar_one_or_none()
         return WorkItemSummary(title=title) if title is not None else None
     return None

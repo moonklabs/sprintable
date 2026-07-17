@@ -11,6 +11,8 @@ doc-only 배치 enrich를 story/task까지 확장) 만 추가 enrich. 미르코(
 - get_gate_endpoint 라우트(mocked session) — 200 전 필드·404 미존재·404 무권한(project_id
   해소됨 케이스)·project_id=None(project-무관 work_item) 은 access 체크 skip.
 - realdb 통합(story/task/doc 각 타입 실 gate 콜드 GET 200 전 필드 실측 + 무권한 404).
+- realdb soft-delete 회귀(까심 QA PR #2253 REQUEST_CHANGES): story/task 분기도 doc 과 동형으로
+  deleted_at.is_(None) 필터가 적용돼 work_item_summary 가 None(유령 title 미노출)으로 떨어지는지.
 - list_gates 회귀 없음(기존 doc-only enrich 그대로, project_id 필드 추가로 인한 크래시 없음).
 """
 from __future__ import annotations
@@ -454,6 +456,102 @@ async def test_realdb_cold_get_doc_gate_200_all_fields():
             # 존재하지 않는 gate id → 404
             resp3 = await client.get(f"/api/v2/gates/{uuid.uuid4()}")
             assert resp3.status_code == 404, resp3.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_realdb_cold_get_story_gate_summary_none_when_soft_deleted():
+    """까심 QA(PR #2253 REQUEST_CHANGES): doc 분기는 Doc.deleted_at.is_(None) 필터가 있는데
+    story/task 분기는 없어 soft-delete 된 story/task 를 gate 가 참조하면 stale 유령 title 이
+    샌다(doc 과 달리 graceful None 이 아님). story 분기는 soft-delete 후 work_item_summary 가
+    None 으로 떨어져야 한다 — gate 자체는 200(project_id 는 resolve_work_item_project_id 가
+    deleted_at 무관하게 그대로 해소하므로 채워짐), summary 만 fail-soft."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.models.pm import Story
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_common(s)
+            story = Story(id=uuid.uuid4(), org_id=seeded["org_id"], project_id=seeded["project_id"],
+                          title="삭제될 스토리 제목")
+            s.add(story)
+            await s.commit()
+            gate = Gate(id=uuid.uuid4(), org_id=seeded["org_id"], work_item_id=story.id,
+                        work_item_type="story", gate_type="merge", status="pending")
+            s.add(gate)
+            await s.commit()
+            gate_id = gate.id
+
+            # soft-delete
+            story.deleted_at = datetime.now(timezone.utc)
+            s.add(story)
+            await s.commit()
+
+        await _setup_app(app, Session, seeded["org_id"], seeded["caller_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/gates/{gate_id}")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["id"] == str(gate_id)
+            assert body["project_id"] == str(seeded["project_id"])  # project_id 는 deleted_at 무관 해소
+            assert body["work_item_type"] == "story"
+            assert body["work_item_summary"] is None  # soft-delete 된 story → 유령 title 대신 None
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_realdb_cold_get_task_gate_summary_none_when_soft_deleted():
+    """story 케이스와 동형 — task 분기도 soft-delete 시 work_item_summary None."""
+    from app.main import app
+    from app.models.gate import Gate
+    from app.models.pm import Story, Task
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_common(s)
+            story = Story(id=uuid.uuid4(), org_id=seeded["org_id"], project_id=seeded["project_id"],
+                          title="부모 스토리")
+            s.add(story)
+            await s.commit()
+            task = Task(id=uuid.uuid4(), org_id=seeded["org_id"], story_id=story.id,
+                        title="삭제될 태스크 제목")
+            s.add(task)
+            await s.commit()
+            gate = Gate(id=uuid.uuid4(), org_id=seeded["org_id"], work_item_id=task.id,
+                        work_item_type="task", gate_type="qa", status="approved")
+            s.add(gate)
+            await s.commit()
+            gate_id = gate.id
+
+            # soft-delete
+            task.deleted_at = datetime.now(timezone.utc)
+            s.add(task)
+            await s.commit()
+
+        await _setup_app(app, Session, seeded["org_id"], seeded["caller_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/gates/{gate_id}")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["id"] == str(gate_id)
+            assert body["project_id"] == str(seeded["project_id"])  # Task 는 컬럼 없음(Story JOIN, deleted_at 무관)
+            assert body["work_item_type"] == "task"
+            assert body["work_item_summary"] is None  # soft-delete 된 task → 유령 title 대신 None
         finally:
             await client.aclose()
     finally:
