@@ -44,6 +44,14 @@
     "reloginRequired": "재로그인 필요",
     "capReached": "계정 한도에 도달했습니다"
   },
+  "mobileTabBar": {
+    "navLabel": "모바일 탭 내비게이션",
+    "now": "지금",
+    "approvals": "결재함",
+    "chat": "채팅",
+    "more": "전체",
+    "moreTempNotice": "임시 목록입니다 — 정식 화면으로 곧 교체됩니다."
+  },
   "nav": {
     "dashboard": "대시보드",
     "sprintManagement": "스프린트 관리",

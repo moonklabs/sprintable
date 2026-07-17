@@ -12,6 +12,7 @@ import { useTranslations } from 'next-intl';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { AppSidebar } from '@/components/nav/app-sidebar';
+import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
@@ -94,6 +95,10 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
           {children}
         </ContextualPanelLayout>
       </div>
+      {/* story #1958(P2-S2): <1024(lg 미만) 전용 하단 탭바 — SidebarInset의 flex-col 안에서
+          scroll 컨테이너의 형제(자식 아님)로 둬야 콘텐츠가 스크롤돼도 탭바가 자기 flex row를
+          유지한다(position:fixed 오버레이+패딩 보정 불요 — 시안 511bc035의 flex 레이아웃과 동형). */}
+      <MobileTabBar />
     </SidebarInset>
     </TeamPresenceToggleProvider>
     </ReleaseNotesProvider>

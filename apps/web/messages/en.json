@@ -44,6 +44,14 @@
     "reloginRequired": "Re-login required",
     "capReached": "Account limit reached"
   },
+  "mobileTabBar": {
+    "navLabel": "Mobile tab navigation",
+    "now": "Now",
+    "approvals": "Approvals",
+    "chat": "Chat",
+    "more": "More",
+    "moreTempNotice": "Temporary list — will be replaced by the full screen soon."
+  },
   "nav": {
     "dashboard": "Dashboard",
     "sprintManagement": "Sprint Management",
