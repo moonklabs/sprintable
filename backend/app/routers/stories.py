@@ -963,6 +963,8 @@ async def update_story(
                     body=None,
                     reference_type="story",
                     reference_id=story.id,
+                    # story #1953: story.project_id NOT NULL — 신규 조회 없이 그대로 실음.
+                    source_project_id=story.project_id,
                 )
         if actor_id:
             try:

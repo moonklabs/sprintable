@@ -72,6 +72,69 @@ async def test_send_chunk_retries_on_5xx_then_empty():
     assert post.await_count == expo._WEBHOOK_MAX_RETRIES  # 전량 재시도 소진
 
 
+# ─── _build_push_data_payload (story #1953 P1a-S3: org/project/story/sprint 식별자 enrichment) ──
+
+def test_build_push_data_payload_always_includes_org_id():
+    """전 타입 공통: org_id는 항상 payload에 포함(dispatch_notification의 org_id는 non-null
+    필수 파라미터라 언제나 값이 있음 — manifest DeepLinkPayloadFields.org_id_included=True 근거)."""
+    org_id = uuid.uuid4()
+    data = expo._build_push_data_payload(event_type="agent_joined", org_id=org_id)
+    assert data["org_id"] == str(org_id)
+    assert data["event_type"] == "agent_joined"
+
+
+def test_build_push_data_payload_includes_project_id_when_given():
+    org_id, project_id = uuid.uuid4(), uuid.uuid4()
+    data = expo._build_push_data_payload(event_type="story_assigned", org_id=org_id, project_id=project_id)
+    assert data["project_id"] == str(project_id)
+
+
+def test_build_push_data_payload_omits_project_id_when_none():
+    """project_id 미상(예: 멀티프로젝트 org-wide 브로드캐스트) — 없는 키로 생략(빈 문자열/None 오염 금지)."""
+    data = expo._build_push_data_payload(event_type="agent_joined", org_id=uuid.uuid4(), project_id=None)
+    assert "project_id" not in data
+
+
+def test_build_push_data_payload_includes_story_id_for_task_completed():
+    org_id = uuid.uuid4()
+    story_id = uuid.uuid4()
+    data = expo._build_push_data_payload(
+        event_type="task_completed", org_id=org_id, reference_type="task",
+        reference_id=uuid.uuid4(), story_id=story_id,
+    )
+    assert data["story_id"] == str(story_id)
+
+
+def test_build_push_data_payload_includes_sprint_id_for_hypothesis_dispatch():
+    org_id = uuid.uuid4()
+    sprint_id = uuid.uuid4()
+    data = expo._build_push_data_payload(
+        event_type="dispatched", org_id=org_id, reference_type="hypothesis",
+        reference_id=uuid.uuid4(), sprint_id=sprint_id,
+    )
+    assert data["sprint_id"] == str(sprint_id)
+
+
+def test_build_push_data_payload_omits_story_id_and_sprint_id_when_none():
+    data = expo._build_push_data_payload(event_type="epic_created", org_id=uuid.uuid4())
+    assert "story_id" not in data
+    assert "sprint_id" not in data
+
+
+def test_build_push_data_payload_preserves_existing_reference_fields():
+    """무회귀: event_type/reference_type/reference_id 기존 3필드 거동 불변."""
+    org_id, ref_id = uuid.uuid4(), uuid.uuid4()
+    data = expo._build_push_data_payload(
+        event_type="gate.pending_approval", org_id=org_id, reference_type="gate", reference_id=ref_id,
+    )
+    assert data == {
+        "event_type": "gate.pending_approval",
+        "org_id": str(org_id),
+        "reference_type": "gate",
+        "reference_id": str(ref_id),
+    }
+
+
 # ─── deliver_expo_push (배치·만료·mute·best-effort) ───────────────────────────
 
 @pytest.mark.anyio
@@ -148,6 +211,34 @@ async def test_no_send_when_no_devices():
     with patch("ee.services.expo_push._expo_send_chunk", new=sent):
         await expo.deliver_expo_push(db, uuid.uuid4(), [uuid.uuid4()], title="T", body="B", event_type="e")
     sent.assert_not_awaited()  # 디바이스 0 → 발송 없음
+
+
+@pytest.mark.anyio
+async def test_deliver_expo_push_includes_org_project_story_sprint_in_data_payload():
+    """story #1953: deliver_expo_push가 실제로 org_id/project_id/story_id/sprint_id를
+    push data payload에 실어 보내는지(구성 함수 호출뿐 아니라 실제 배선까지) 확인."""
+    dev = _dev("ExponentPushToken[GOOD]")
+    db = _mock_db([dev])
+    org_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    story_id = uuid.uuid4()
+    captured: list[dict] = []
+
+    async def _fake_chunk(msgs):
+        captured.extend(msgs)
+        return [{"status": "ok"} for _ in msgs]
+
+    with patch("ee.services.expo_push._expo_send_chunk", new=_fake_chunk):
+        await expo.deliver_expo_push(
+            db, org_id, [dev.member_id], title="T", body="B", event_type="task_completed",
+            reference_type="task", reference_id=uuid.uuid4(),
+            project_id=project_id, story_id=story_id,
+        )
+    assert len(captured) == 1
+    data = captured[0]["data"]
+    assert data["org_id"] == str(org_id)
+    assert data["project_id"] == str(project_id)
+    assert data["story_id"] == str(story_id)
 
 
 @pytest.mark.anyio

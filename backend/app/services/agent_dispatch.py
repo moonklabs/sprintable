@@ -163,6 +163,17 @@ async def _finalize_dispatch(
     await extract_activities_best_effort(db, [event.id])
 
     if member_type != "agent":
+        # story #1953(P1a-S3): 가설(hypothesis) dispatched 알림은 sprint_id를 타겟 보강
+        # 식별자로 추가(딥링크 매니페스트 Layer 2 계약 — HypothesisRepository.get_sprint_id
+        # 재사용, N:1이라 가설당 최대 1개). 다른 4종 엔티티(story/epic/doc/sprint)는
+        # sprint 링크 개념이 없어 None(생략).
+        _sprint_id: uuid.UUID | None = None
+        if entity_type == "hypothesis":
+            from app.repositories.hypothesis import HypothesisRepository
+            try:
+                _sprint_id = await HypothesisRepository(db, org_id).get_sprint_id(entity_id)
+            except Exception:  # noqa: BLE001 — best-effort 보강, dispatch critical path 비중단.
+                _sprint_id = None
         await dispatch_notification(
             db,
             org_id=org_id,
@@ -172,6 +183,9 @@ async def _finalize_dispatch(
             body=message or None,
             reference_type=entity_type,
             reference_id=entity_id,
+            # story #1953: project_id는 이미 함수 파라미터로 갖고 있음(신규 조회 0).
+            source_project_id=project_id,
+            sprint_id=_sprint_id,
         )
 
     if commit:
