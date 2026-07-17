@@ -1,8 +1,10 @@
-"""story #1951 (E-MOBILE P1a-S1) DRAFT fixture — GET /api/v2/deeplink-manifest 서빙 엔드포인트.
+"""story #1951 (E-MOBILE P1a-S1) — GET /api/v2/deeplink-manifest 서빙 엔드포인트.
 
-PO 재정(3자 검토 스코프 확장)으로 이번 스토리에 추가된 런타임 API. mcp.py의
-/api/v2/mcp/manifest 테스트 패턴(test_e_mcp_s2_toolset.py)을 그대로 따른다 — 이 파일도
-draft(3자 검토 전 로컬 실행 확인용)이고, CI 정식 편입은 story #1952 스코프.
+PO 재정(3자 검토 스코프 확장)으로 story #1951에서 추가된 런타임 API. mcp.py의
+/api/v2/mcp/manifest 테스트 패턴(test_e_mcp_s2_toolset.py)을 그대로 따른다.
+
+story #1952(P1a-S2)에서 CI 정식 편입 — "draft" 딱지 제거(`test_deeplink_manifest_endpoint_draft.py`
+→ 이 파일). 로직 변경 없음(3자 검토 확정 산출물 그대로 승격).
 """
 from __future__ import annotations
 
