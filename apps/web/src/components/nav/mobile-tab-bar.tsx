@@ -41,6 +41,12 @@ export function MobileTabBar() {
   // `/api/gates?status=pending` 재사용(신규 집계 안 만듦). gate_overridden은 override 시
   // approver row status가 "overridden"으로 전이돼(gate_service.py) pending 조회에서 자동 제외
   // — 별도 필터 불요(백엔드 확認 완료).
+  //
+  // ⚠️fix(story #1974, 선생님 실사용 지적, prod 승격 예정): 이 fetch가 caller 스코프 필터 없이
+  // org 전체 pending을 반환해 "남의 게이트도 내 배지로 세는" 구조적 오배지였다(코드로 확定).
+  // `assigned_to_me=true`(디디 BE 계약, #1974)로 "내가 승인 가능한 것만" 스코프. BE 배포 전엔
+  // FastAPI가 미인식 쿼리파라미터를 무시하므로 안전한 no-op(기존과 동일 org-wide 동작) — 배포되면
+  // 자동으로 개인화 적용.
   const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
@@ -54,7 +60,7 @@ export function MobileTabBar() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch('/api/gates?status=pending');
+        const res = await fetch('/api/gates?status=pending&assigned_to_me=true');
         if (!res.ok) return;
         const gates = (await res.json()) as GateItem[];
         if (!cancelled) setPendingCount(Array.isArray(gates) ? gates.length : 0);
