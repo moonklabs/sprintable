@@ -319,23 +319,33 @@ async def list_gates(
             resolved = None
             _uid = None
 
+    # story #1983(까심 #1960 QA 적출 회귀, story #2259 후속 — non-doc gate 대칭): can_approve_doc_gate_reason
+    # 의 반환값(_reason) 자체는 WHO-only(human·project-access·not-author) 판정이라 FSM 을 전혀 안 담고 있다 —
+    # 아래 resp.can_approve 계산에서 is_valid_transition(...)을 **별도로 AND** 붙이는 게 그 증거. assigned_to_me
+    # 필터링(하단)은 이 WHO-only reason 을 그대로 재사용해야 하므로, doc_gates enrich 루프에서 이미 계산하는
+    # _reason 을 {gate_id: reason} dict 로 들고 간다(이중 쿼리·이중 계산 0 — can_approve_doc_gate_reason 재호출 없음).
+    doc_gate_who_reason: dict[uuid.UUID, str | None] = {}
     if doc_gates and resolved is not None:
         for resp, g in doc_gates:
             _reason = await can_approve_doc_gate_reason(
                 session, g, resolved, _uid, org_id,
                 doc_project_id=doc_proj.get(g.work_item_id),
             )
+            doc_gate_who_reason[g.id] = _reason
             # 완전 DRY(codex): "지금 승인 가능" = authz(rule A·helper) **AND** FSM 으로 resolvable
             # (pending). transition 도 authz(helper) + transition_gate FSM(is_valid_transition) 이중이므로
             # enrich 도 동일 is_valid_transition 으로 FSM 반영 — terminal/held gate 는 can_approve=False(승인/
             # 반려 둘 다 pending 전제라 "approved" 한 방향 검사로 충분). authz-only 의미 갈림 제거.
+            # ⚠️story #1983: 이 필드는 FE "지금 버튼 눌러도 되는가" 게이팅용이라 FSM-aware 가 **정답**
+            # (held→approved 직접 전이 불가하니 held 게이트는 can_approve=False 가 맞다) — 건드리지 않는다.
             resp.can_approve = _reason is None and is_valid_transition(g.status, "approved")
 
     if not assigned_to_me:
         return responses
 
-    # story #1974(P1a-S5): assigned_to_me=true → "caller 가 실제로 승인 가능(can_approve)한 pending
-    # 게이트만"(대원칙). ⚠️휴먼 전용 불변식: transition_gate_endpoint(위 383~392)는 gate_type 무관
+    # story #1974(P1a-S5)/#1983: assigned_to_me=true → "caller 가 승인 자격(WHO)이 있는 게이트만"
+    # (대원칙 — STATE(pending/held/terminal) 는 바깥 status 쿼리가 관장, 여기서 재필터 안 함).
+    # ⚠️휴먼 전용 불변식: transition_gate_endpoint(위 383~392)는 gate_type 무관
     # resolved.type != "human" 이면 무조건 403("사람 검증 행위는 휴먼 member만" — 웨지 integrity).
     # doc_approval 은 can_approve_doc_gate_reason 이 이미 not_human 을 거부사유로 반환해 자동 배제되지만,
     # rule B(project-role/org-role)는 human 체크가 없어 그대로 두면 "에이전트가 owner/admin project
@@ -394,7 +404,15 @@ async def list_gates(
     filtered: list[GateResponse] = []
     for resp, g in zip(responses, gates):
         if g.gate_type == "doc_approval":
-            if resp.can_approve:
+            # story #1983(까심 #1960 QA 적출 회귀, story #2259 후속): doc_approval assigned_to_me
+            # 도 WHO(승인 자격) 판정이지 STATE(pending/held) 판정이 아니다 — story #2259가 non-doc
+            # gate 에서 g.status != "pending" 하드코딩 2곳을 제거한 것과 동일 원칙을 여기 대칭
+            # 적용한다. 예전엔 resp.can_approve(FSM-aware — is_valid_transition AND)를 그대로
+            # 재사용해서 held doc_approval 게이트가 자격자(reviewer·non-author·project-access 有)
+            # 여도 사라졌다(held→approved 직접 전이 불가라 FSM 이 항상 False). 여기서는
+            # doc_gate_who_reason(WHO-only·FSM 미포함)만 본다 — .get(..., sentinel)로 dict 에
+            # 없는 경우도 fail-closed(미enrich=배제). 바깥 status 쿼리 파라미터가 STATE 를 관장.
+            if doc_gate_who_reason.get(g.id, "not_enriched") is None:
                 filtered.append(resp)
         elif g.id in eligible_ids:
             filtered.append(resp)
