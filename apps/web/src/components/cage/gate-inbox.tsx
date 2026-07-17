@@ -214,7 +214,10 @@ export function GateInbox({ memberId }: GateInboxProps) {
         </div>
       ) : (
         activeGates.map((gate) => (
-          <div key={gate.id} className="flex items-start justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
+          // #1943: 좁은 뷰포트(390px)에서 shrink-0 액션버튼열(문서에서 검토/승인/반려/⋯, 최대 4개)이
+          // min-w-0 flex-1 콘텐츠열을 31.86px까지 압착해 GateEvidence 근거 텍스트가 판독 불가했다.
+          // 액션열을 데스크톱 나란히 배치에서만 유지하고 모바일은 콘텐츠 아래 별도 줄로 내린다.
+          <div key={gate.id} className="flex flex-col gap-3 rounded-xl border border-border bg-card px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex items-center gap-2">
                 <span className="shrink-0 text-xs font-medium text-foreground">{gate.gate_type}</span>
@@ -279,7 +282,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
               ) : null}
             </div>
             {/* 액션 = requires_human 기준(block 제외·읽기전용·AC⑤). + S30 admin ⋯ 무효화(전 pending gate·admin only). */}
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex flex-wrap shrink-0 items-center justify-end gap-1.5">
               {isHeld(gate) ? (
                 <>
                   {/* S31 보류중: ⏸ Pause(중립 secondary·재개가능)·SLA 일시정지 */}
