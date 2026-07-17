@@ -36,6 +36,7 @@ import {
   DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 
 interface Task {
   id: string;
@@ -115,6 +116,9 @@ function DescriptionViewer({ description }: { description: string }) {
 
 export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId }: StoryDetailPanelProps) {
   const t = useTranslations('board');
+  // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
+  // 탭 루트를 BACK 대상으로 선주입. 카드 클릭으로 연 경우(history.length>1)는 no-op.
+  useSyntheticParentTabHistory('/more');
   const { toasts, addToast, dismissToast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);

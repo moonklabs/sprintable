@@ -52,7 +52,9 @@ export default function LoginPage() {
         setError(result.error.message);
         return;
       }
-      router.push(safeNextPath(nextParam));
+      // story #1959(P2-S3) AC: 로그인 복귀 후 /login history 잔존 0 — push 는 스택에 남아
+      // 복귀 화면에서 BACK 1회가 로그인 폼으로 돌아가 버린다(재제출 위험). replace 로 스왑.
+      router.replace(safeNextPath(nextParam));
       router.refresh();
     } finally {
       setFirebaseLoading(false);
@@ -74,7 +76,8 @@ export default function LoginPage() {
         setError(result.error.message);
         return;
       }
-      router.push(safeNextPath(nextParam));
+      // story #1959(P2-S3): 위와 동일 사유 — replace 로 /login history 잔존 방지.
+      router.replace(safeNextPath(nextParam));
       router.refresh();
     } catch {
       setError(t('loginFailed'));

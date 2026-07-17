@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { CircleDot, Inbox, MessageSquare, Grid2x2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { GateItem } from '@/components/kanban/types';
+import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
 
 // story #1958(P2-S2, mobile-p2-p1a-story-breakdown SSOT) — 모바일 4탭 셸. <1024(lg 미만)에서만
 // 렌더되고 데스크톱 GNB(AppSidebar)를 대체한다(P2-S1의 lg:1024 SSOT와 동일 경계 — route 내
@@ -43,6 +44,13 @@ export function MobileTabBar() {
   const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
+    // 유나 가디언 지적(#2249 병합 처리) — 탭바 자체는 `lg:hidden`(CSS 시각 게이팅)이지만
+    // CSS hidden은 DOM 마운트/effect 실행을 막지 않는다. 배지 fetch는 <1024에서만 필요하니
+    // 데스크톱에서도 매번 나가던 것을 막는다. useIsMobile()의 mount-시 undefined→effect
+    // 확定 타이밍 레이스(유나 지적)를 피하려 여기서도 use-synthetic-parent-tab-history.ts와
+    // 동일하게 window.innerWidth를 effect 내부에서 동기 판정한다(첫 렌더 즉시 정확한 값).
+    if (typeof window === 'undefined' || window.innerWidth >= MOBILE_BREAKPOINT) return;
+
     let cancelled = false;
     void (async () => {
       try {
