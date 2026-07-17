@@ -23,6 +23,10 @@ function setHistoryState(state: unknown) {
   Object.defineProperty(window.history, 'state', { value: state, configurable: true });
 }
 
+function setViewportWidth(w: number) {
+  Object.defineProperty(window, 'innerWidth', { value: w, configurable: true, writable: true });
+}
+
 function TestComp({ parentTabHref }: { parentTabHref: string }) {
   useSyntheticParentTabHistory(parentTabHref);
   return null;
@@ -35,6 +39,7 @@ beforeEach(() => {
   pushSpy = vi.spyOn(window.history, 'pushState');
   replaceSpy = vi.spyOn(window.history, 'replaceState');
   setHistoryState(null);
+  setViewportWidth(390); // 기본값 = 모바일. 데스크톱 게이팅 테스트만 개별 override.
 });
 
 afterEach(() => {
@@ -85,5 +90,23 @@ describe('useSyntheticParentTabHistory', () => {
     expect(pushSpy).not.toHaveBeenCalled();
 
     window.history.pushState(null, '', originalHref);
+  });
+
+  it('데스크톱(≥1024)이면 콜드 진입이어도 합성하지 않는다 — 탭 IA 자체가 없음(까심 QA #2249 지적)', () => {
+    setViewportWidth(1024);
+    setHistoryLength(1);
+    act(() => root.render(<TestComp parentTabHref="/more" />));
+
+    expect(replaceSpy).not.toHaveBeenCalled();
+    expect(pushSpy).not.toHaveBeenCalled();
+  });
+
+  it('경계값 1023(모바일)은 정상 합성, 1024(데스크톱)는 no-op — MOBILE_BREAKPOINT SSOT 경계 확인', () => {
+    setViewportWidth(1023);
+    setHistoryLength(1);
+    act(() => root.render(<TestComp parentTabHref="/more" />));
+
+    expect(replaceSpy).toHaveBeenCalledTimes(1);
+    expect(pushSpy).toHaveBeenCalledTimes(1);
   });
 });

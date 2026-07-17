@@ -1,10 +1,20 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { MOBILE_BREAKPOINT } from './use-mobile';
 
 // story #1959(P2-S3): 딥링크로 상세 화면에 직접 진입("콜드 진입")했을 때 뒤로가기 1회로
 // 소속 탭 루트(parentTab, #1951 매니페스트 SSOT)에 복귀하도록 루트 history entry 를
 // 선주입한다.
+//
+// 뷰포트 게이팅(까심 QA 지적, #2249 재작업) — 이 합성은 <1024(모바일 4탭 IA, #1957 SSOT
+// `MOBILE_BREAKPOINT` 재사용) 에서만 동작한다. ≥1024(데스크톱)는 탭바 자체가 없어(lg:hidden)
+// "탭 루트"라는 개념이 없다 — 게이팅 없이 전역 실행하면 데스크톱 콜드 진입(공유 링크·새 탭)
+// 후 BACK 이 모바일 전용 스텁(`/more`)으로 튀는 오동작이 난다. `useIsMobile()`(React state,
+// 초기 렌더 false→effect 후 실측)를 그대로 합성하면 그 첫 렌더의 false 가 doneRef 를 조기
+// 소모해 실측 후 재시도가 막히므로, 여기서는 effect 내부에서 `window.innerWidth` 를
+// 직접(동기) 읽는다 — 이 effect 자체가 client-only·mount 1회이므로 SSR/하이드레이션
+// 불일치 우려가 없다.
 //
 // 콜드 진입 판별 = 이 페이지가 mount 된 시점의 `window.history.length`. 새 탭에서 상세
 // URL 을 직접 열면(딥링크·북마크·주소창 입력) 이 페이지가 그 탭의 첫 entry 라 length===1.
@@ -18,8 +28,10 @@ import { useEffect, useRef } from 'react';
 //
 // window.history.back() 은 호출하지 않는다 — Next.js App Router 내부 history 스택과
 // 충돌해 이후 router.push() 가 깨지는 회귀가 있었다([[feedback-history-back-nextjs]]).
-// 대신 replaceState+pushState 로 raw history API 만 건드리는 chat-view.tsx
-// openThread/popstate 패턴과 동형.
+// 대신 replaceState+pushState 로 raw history API 만 건드린다(chat-view.tsx 의
+// openThread 도 같은 이유로 pushState 를 직접 쓰지만, popstate 시 pushState 로만
+// 되돌리는 단방향 패턴이라 이 훅의 replaceState+pushState 조합과 완전히 동일하지는
+// 않다 — 같은 "raw history API, router 비개입" 원칙을 공유하는 것으로 이해할 것).
 const SYNTHESIZED_MARKER = '_sprintableSyntheticRoot';
 
 interface SyntheticHistoryState {
@@ -33,6 +45,7 @@ export function useSyntheticParentTabHistory(parentTabHref: string) {
     if (doneRef.current) return;
     doneRef.current = true;
     if (typeof window === 'undefined') return;
+    if (window.innerWidth >= MOBILE_BREAKPOINT) return; // 데스크톱 — 탭 IA 없음, no-op
 
     const state = window.history.state as SyntheticHistoryState | null;
     if (state?.[SYNTHESIZED_MARKER]) return; // 새로고침 후 재마운트 — 이미 합성됨(멱등 가드)
