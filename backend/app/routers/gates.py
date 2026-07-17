@@ -17,6 +17,7 @@ from app.models.pm import Story, Task
 from app.routers.agent_gateway import wake_agent
 from app.services.gate_service import (
     RiskGrade,
+    apply_gate_urgency_sort,
     create_gate,
     derive_risk_grade,
     get_org_posture,
@@ -221,6 +222,7 @@ async def list_gates(
     work_item_id: uuid.UUID | None = Query(default=None),
     work_item_type: str | None = Query(default=None),
     status: str | None = Query(default=None),
+    sort: str | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
@@ -232,6 +234,11 @@ async def list_gates(
         q = q.where(Gate.work_item_type == work_item_type)
     if status:
         q = q.where(Gate.status == status)
+    # story #1973(P1a-S4): ?sort=urgency = SLA overdue 최상위 → age(created_at) 오래된 순 →
+    # held(향후 만료) 최하단(gate_service.apply_gate_urgency_sort). 미지정 시(기본) 기존 동작
+    # (무정렬/삽입순) 그대로 — 회귀 없음.
+    if sort == "urgency":
+        q = apply_gate_urgency_sort(q)
     result = await session.execute(q)
     gates = list(result.scalars().all())
     responses = [GateResponse.model_validate(g) for g in gates]
