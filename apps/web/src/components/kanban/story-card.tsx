@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useTranslations } from 'next-intl';
@@ -12,7 +13,17 @@ import { TrustSeal } from '@/components/verify/trust-seal';
 import { deriveTrustStage } from '@/services/verify';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
-import { cn } from '@/lib/utils';
+
+// #1942 재작업(까심 REQUEST_CHANGES): 카드-상대 flip(left-0/right-0)은 보드가 가로스크롤이라
+// 카드 자체가 뷰포트 밖으로 밀려나면(신고 재현: 컬럼 280px, 카드 x=215~471, 뷰포트 390px) 어느
+// 쪽으로 flip해도 못 푼다 — 카드 우측 모서리(471)조차 이미 뷰포트 밖이라 "카드 기준 반대쪽"도
+// 여전히 뷰포트 밖. 뷰포트 좌표로 직접 clamp해야 카드 위치와 무관하게 항상 화면 안에 들어온다.
+const MENU_WIDTH = 192; // Tailwind w-48
+const VIEWPORT_MARGIN = 8;
+
+function clampToViewport(x: number): number {
+  return Math.min(Math.max(x, VIEWPORT_MARGIN), window.innerWidth - MENU_WIDTH - VIEWPORT_MARGIN);
+}
 
 // E-UI-DAEGBYEON P0 — Proof Capsule 확산(story `bf9037cb`). 상태→신뢰 파이프라인(후속 P0)이
 // status 모델 자체를 바꿀 예정이라 지금은 현 5-status를 4-Proofline색에 얇게만 매핑(과결합
@@ -114,13 +125,13 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [triggering, setTriggering] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  // #1942: 보드 컬럼이 overflow-x-auto 가로스크롤이라 카드가 뷰포트 어디든(특히 390px 모바일에서
-  // 우측 근처) 위치할 수 있음 — "오른쪽에 항상 공간이 있다"는 데스크톱 가정이 깨짐. 두 메뉴 모두
-  // 기본 정렬로 먼저 그린 뒤 실측 rect로 뷰포트 밖이면 반대쪽으로 flip한다(portal 없이 해결 가능한
-  // 범위 — flip만으로 두 메뉴 다 뷰포트 안에 들어옴을 390px 실측으로 확인함).
-  const [contextMenuAlign, setContextMenuAlign] = useState<'left' | 'right'>('left');
-  const [statusMenuAlign, setStatusMenuAlign] = useState<'right' | 'left'>('right');
   const statusMenuRef = useRef<HTMLDivElement>(null);
+  const statusTriggerRef = useRef<HTMLButtonElement>(null);
+  // #1942: 두 메뉴 다 position:fixed + 뷰포트 좌표 clamp(clampToViewport)로 연다 — 트리거(카드/
+  // 버튼)의 화면 위치와 무관하게 항상 뷰포트 안에 들어온다(카드-상대 anchor는 카드 자체가 뷰포트
+  // 밖일 때 답이 없다는 게 까심 QA 적출).
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [statusMenuPos, setStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
 
   const handleKickoff = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -167,12 +178,16 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     touchAction: 'pan-x pan-y' as const,
   };
 
-  // Close menu on click outside
+  // Close menu on click outside — 서브메뉴는 이제 별도 portal(body 직계)이라 menuRef 서브트리
+  // 밖에 있다. 둘 중 하나라도 담고 있으면 outside로 치지 않는다.
   useEffect(() => {
     if (!contextMenuOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideMenu = menuRef.current?.contains(target);
+      const insideStatusMenu = statusMenuRef.current?.contains(target);
+      if (!insideMenu && !insideStatusMenu) {
         setContextMenuOpen(false);
         setStatusMenuOpen(false);
       }
@@ -197,29 +212,30 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     return () => document.removeEventListener('keydown', handleEscape);
   }, [contextMenuOpen]);
 
-  // 정렬 state는 open과 같은 이벤트 핸들러 틱에서 기본값으로 리셋해둔다(아래가 아니라 클릭 핸들러
-  // 쪽에서) — 그래야 메뉴가 "기본 정렬로 마운트된 실제 DOM"을 그대로 실측할 수 있다. 여기서 리셋하면
-  // 직전 flip 상태가 남은 stale DOM을 재는 꼴이라 판정이 어긋난다.
-  useLayoutEffect(() => {
-    if (!contextMenuOpen || !menuRef.current) return;
-    const rect = menuRef.current.getBoundingClientRect();
-    if (rect.right > window.innerWidth) {
-      setContextMenuAlign('right');
-    }
+  // 열려있는 동안 스크롤/리사이즈되면 닫는다(까심 QA 지적 ②) — 보드 컬럼의 overflow-x-auto
+  // 가로스크롤은 캡처 리스너로만 잡힌다(스크롤 이벤트는 버블링하지 않음). 재측정 대신 close가
+  // 더 안전한 이유: 열려 있는 동안 실측 위치를 계속 갱신하면 클릭 도중 메뉴가 움직여 오조작
+  // 위험이 생긴다 — 스크롤 즉시 닫고 다시 열게 하는 편이 안전.
+  useEffect(() => {
+    if (!contextMenuOpen) return;
+    const closeOnScrollOrResize = () => {
+      setContextMenuOpen(false);
+      setStatusMenuOpen(false);
+    };
+    window.addEventListener('scroll', closeOnScrollOrResize, true);
+    window.addEventListener('resize', closeOnScrollOrResize);
+    return () => {
+      window.removeEventListener('scroll', closeOnScrollOrResize, true);
+      window.removeEventListener('resize', closeOnScrollOrResize);
+    };
   }, [contextMenuOpen]);
-
-  useLayoutEffect(() => {
-    if (!statusMenuOpen || !statusMenuRef.current) return;
-    const rect = statusMenuRef.current.getBoundingClientRect();
-    if (rect.right > window.innerWidth) {
-      setStatusMenuAlign('left');
-    }
-  }, [statusMenuOpen]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setContextMenuAlign('left');
+    // 우클릭/롱프레스 지점(뷰포트 좌표)을 그대로 앵커로 쓰고 뷰포트 폭 안으로 clamp — 카드가
+    // 어디 있든(가로스크롤로 화면 밖까지 걸쳐 있어도) 메뉴는 항상 화면 안에서 뜬다.
+    setMenuPos({ top: e.clientY, left: clampToViewport(e.clientX) });
     setContextMenuOpen(true);
   }, []);
 
@@ -413,14 +429,12 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
         }
       />
 
-      {/* Context Menu */}
-      {contextMenuOpen && (
+      {/* Context Menu — body portal + position:fixed(뷰포트 좌표 clamp), 카드 위치와 무관하게 항상 화면 안 */}
+      {contextMenuOpen && menuPos && createPortal(
         <div
           ref={menuRef}
-          className={cn(
-            'absolute top-full z-50 mt-1 w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md',
-            contextMenuAlign === 'left' ? 'left-0' : 'right-0',
-          )}
+          style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, width: MENU_WIDTH }}
+          className="z-50 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
           onClick={(e) => e.stopPropagation()}
         >
           {onEdit && (
@@ -434,8 +448,12 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           {onChangeStatus && (
             <div className="relative">
               <button
+                ref={statusTriggerRef}
                 onClick={() => {
-                  setStatusMenuAlign('right');
+                  const rect = statusTriggerRef.current?.getBoundingClientRect();
+                  if (rect) {
+                    setStatusMenuPos({ top: rect.top, left: clampToViewport(rect.right + 4) });
+                  }
                   setStatusMenuOpen(!statusMenuOpen);
                 }}
                 className="flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
@@ -443,13 +461,12 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                 {t('changeStatus')}
                 <ChevronRight className="size-3.5" />
               </button>
-              {statusMenuOpen && (
+              {statusMenuOpen && statusMenuPos && createPortal(
                 <div
                   ref={statusMenuRef}
-                  className={cn(
-                    'absolute top-0 z-50 w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md',
-                    statusMenuAlign === 'right' ? 'left-full ml-1' : 'right-full mr-1',
-                  )}
+                  style={{ position: 'fixed', top: statusMenuPos.top, left: statusMenuPos.left, width: MENU_WIDTH }}
+                  className="z-50 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+                  onClick={(e) => e.stopPropagation()}
                 >
                   {statuses.map((status) => (
                     <button
@@ -460,7 +477,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                       {status.label}
                     </button>
                   ))}
-                </div>
+                </div>,
+                document.body,
               )}
             </div>
           )}
@@ -480,7 +498,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
               {t('deleteStory')}
             </button>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
