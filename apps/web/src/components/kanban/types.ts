@@ -38,6 +38,9 @@ export interface KanbanStory {
 
 export interface GateItem {
   id: string;
+  // story #1960(P2-S4): 결재함 통합 큐가 org 이름 표시에 사용(BE GateResponse엔 항상 존재하는
+  // 필드인데 이 타입에 이제껏 누락돼 있었음 — additive, 기존 소비부 무영향).
+  org_id?: string;
   work_item_id: string;
   work_item_type: string;
   gate_type: string;

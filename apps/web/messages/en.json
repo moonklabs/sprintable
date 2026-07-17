@@ -3516,6 +3516,8 @@
     "gateDetailBackToInbox": "Approvals",
     "gateDetailNotFound": "Gate not found.",
     "gateDetailResolvedStatus": "Already resolved — status: {status}",
+    "queueAgeToday": "Filed today",
+    "queueAgeDays": "Waiting {days}d",
     "gateDetailOrgContext": "Org {org}",
     "riskUnknown": "Risk pending",
     "sigEvidenceLabel": "Evidence",
