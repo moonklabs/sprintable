@@ -77,6 +77,34 @@ export function StorageView({ projectId }: { projectId: string }) {
     };
   }, [projectId]);
 
+  // story #1939: 루트 레벨 폴더 생성. BE는 raw FastAPI 에러 바디({detail})를 그대로 통과시키므로
+  // (POST 핸들러가 !ok 응답을 apiSuccess로 감싸지 않고 원본 그대로 반환) 그 형태로 파싱한다.
+  const handleCreateFolder = useCallback(
+    async (name: string): Promise<{ ok: true } | { ok: false; errorMessage: string }> => {
+      if (!projectId) return { ok: false, errorMessage: t('newFolderGenericError') };
+      try {
+        const res = await fetch('/api/folders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, project_id: projectId }),
+        });
+        if (!res.ok) {
+          if (res.status === 409) return { ok: false, errorMessage: t('newFolderDuplicateError') };
+          return { ok: false, errorMessage: t('newFolderGenericError') };
+        }
+        const json = (await res.json()) as { data?: Folder };
+        const created = json.data;
+        if (!created) return { ok: false, errorMessage: t('newFolderGenericError') };
+        setFolders((prev) => [...prev, created]);
+        setSelectedFolderId(created.id);
+        return { ok: true };
+      } catch {
+        return { ok: false, errorMessage: t('newFolderGenericError') };
+      }
+    },
+    [projectId, t],
+  );
+
   const buildAssetsUrl = useCallback(
     (cursor?: string | null) => {
       const p = new URLSearchParams();
@@ -269,6 +297,7 @@ export function StorageView({ projectId }: { projectId: string }) {
           projectName={projectName}
           folderSearch={folderSearch}
           onFolderSearchChange={setFolderSearch}
+          onCreateFolder={handleCreateFolder}
         />
 
         <StorageAssetList
