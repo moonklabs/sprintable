@@ -140,7 +140,8 @@ export default function AgentDetailPage() {
 
   const fetchAgent = useCallback(async () => {
     const res = await fetch(`/api/team-members/${id}`);
-    if (!res.ok) { router.push('/organization/workforce?tab=manage'); return; }
+    // story #1990: replace — 뒤로가기 재진입 트랩 방지(§3.2 원칙, gate/chat/goal/loop과 동일).
+    if (!res.ok) { router.replace('/organization/workforce?tab=manage'); return; }
     const json = await res.json() as { data: AgentMember };
     setAgent(json.data);
   }, [id, router]);
@@ -388,7 +389,8 @@ export default function AgentDetailPage() {
   return (
     <div className="w-full max-w-3xl mx-auto p-6 space-y-6">
       <div className="flex items-center gap-3">
-        <Link href="/organization/workforce?tab=manage" className="text-muted-foreground hover:text-foreground transition-colors">
+        {/* story #1990: replace, 기본 push 아님 — 뒤로가기 재진입 트랩 방지(§3.2). */}
+        <Link href="/organization/workforce?tab=manage" replace className="text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <h1 className="text-lg font-semibold text-foreground">{t('orgAgentsTitle')}</h1>
