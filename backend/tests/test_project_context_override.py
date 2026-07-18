@@ -95,14 +95,34 @@ async def test_no_x_project_id_keeps_jwt_project_id():
 
 
 def test_has_project_access_has_toplevel_org_scope():
-    """QA RC HIGH① 회귀 가드: has_project_access 최상위 WHERE 에 p.org_id 스코프 — team_members
-    분기 cross-org 누수 차단(X-Project-Id 로 cross-org 주입 방지). 실 PG 로 cross-org 0행 실증함."""
-    import inspect
+    """QA RC HIGH① 회귀 가드: has_project_access 최상위 WHERE 에 org 스코프 — team_members 분기
+    cross-org 누수 차단(X-Project-Id 로 cross-org 주입 방지). 실 PG 로 cross-org 0행 실증함.
 
-    from app.services import project_auth
+    story #1994 §5회차: `has_project_access`가 raw text() SQL(`"p.org_id = :org_id"` 리터럴
+    소스 문자열 매칭 가능)에서 SQLAlchemy Core `_project_access_predicate`(atom-level SSOT,
+    `project_access_valid_correlated`와 공유)로 이식됐다 — 소스 텍스트 grep 대신 컴파일된 SQL을
+    직접 검사해 같은 불변식(org 스코프가 team_member 분기를 포함한 **모든 4개 EXISTS 분기보다
+    앞선 최상위 WHERE**에 있다 — 특정 분기 안에만 있는 게 아니다)을 구조적으로 증명한다."""
+    import uuid as _uuid
 
-    src = inspect.getsource(project_auth.has_project_access)
-    assert "p.org_id = :org_id" in src
+    from sqlalchemy.dialects import postgresql
+
+    from app.services.project_auth import _project_access_predicate
+
+    org_id = _uuid.uuid4()
+    predicate = _project_access_predicate(_uuid.uuid4(), user_id=_uuid.uuid4(), org_id=org_id)
+    compiled = predicate.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+    sql = str(compiled)
+
+    # 전체 predicate 자체가 최상위 `EXISTS(SELECT 1 FROM projects WHERE ...)` 래퍼이므로
+    # sql은 "EXISTS"로 시작한다 — 그 최상위 WHERE 본문은 1번째와 2번째 "EXISTS"(첫 분기
+    # 서브쿼리 진입) 사이 구간이다. org 스코프가 거기 있어야 "모든 분기 공통 가드"다(특정
+    # 분기의 nested EXISTS 안에만 있으면 다른 분기는 여전히 무방비).
+    top_level_where = sql.split("EXISTS")[1]
+    assert "projects.org_id" in top_level_where, (
+        "top-level(첫 EXISTS 분기 진입 전) WHERE에 projects.org_id 스코프가 없음 — QA RC HIGH① "
+        f"회귀(team_members 분기 cross-org 누수 재발 위험) — {sql}"
+    )
 
 
 @pytest.mark.anyio

@@ -1083,6 +1083,132 @@ async def get_conversation(
     return resp
 
 
+async def _can_read_conversation(
+    conversation_id: uuid.UUID,
+    db: AsyncSession,
+    auth: AuthContext,
+    org_id: uuid.UUID,
+    *,
+    _conv_project_id: uuid.UUID | None = None,
+) -> bool:
+    """story #1994(E-KNOWLEDGE-LINK S2) 4~6회차 pass §8②: 메시지 조회 인가의 canonical bool 술어.
+
+    실제 판정 로직(participant∧project-access-valid ∨ ¬human-participant∧admin-bypass)은
+    `app.services.conversation_auth.conversation_readable_predicate`(SSOT — 문서화된 캐노니컬
+    predicate, `app/services/backlinks.py`의 벌크 쿼리도 **같은 함수**를 호출해 SAME WHERE절에
+    correlate한다)에 있다. §6회차부터 `admin_bypass_eligible` atom도 `backlinks.py`와 **같은**
+    correlated SSOT(`org_admin_valid_correlated`/`project_admin_valid_correlated`,
+    project_auth.py)를 재사용한다(재구현 0) — 예전엔 `_effective_org_role`의 사전 해소 결과를
+    bool 리터럴로 넘겼다(별개 pre-resolve TOCTOU 클래스, 아래 본문 참조). `project_access_valid`
+    atom은 여전히 `has_project_access` 단건 호출(§6회차 스코프 밖 — reviewer round-5 verdict가
+    `admin_bypass_eligible`만 잔여로 지목). 이 함수는 그 앞뒤로 project_id 조회·caller 신원
+    해소(이 hot path의 기존 pre-fetch 관례 유지 — 성능/행동 불변)를 감싸고, 존재하지
+    않는 대화/비참여자 판정 모두 raise 대신 False를 반환하는 total-boolean 계약을 지킨다.
+    백링크 API처럼 404/403 semantics(존재 비노출 오라클 회피)가 필요 없는 호출부가 "읽을 수
+    있는가"만 물을 때 쓴다. 404/403이 필요한 기존 호출부는 여전히 `_authorize_message_read`를
+    쓴다(zero duplication — 그쪽이 이 함수를 얇게 감싼다).
+
+    **계약: 이 함수는 절대 raise하지 않는다(total boolean predicate)** — story #1994 B1
+    하드닝(산티아고 sabotage-probe): `_resolve_member`가 project-scoped 해소에서 grant-loss
+    시 HTTPException(403)을 raise할 수 있었는데, 과거엔 이게 여기서 안 잡혀 백링크 API처럼
+    행 단위 판정을 기대하는 호출부까지 통째로 poison했다. 아래 본문은 try/except HTTPException
+    로 감싸 False로 정규화한다.
+
+    `_conv_project_id`: `_authorize_message_read`가 이미 조회해둔 project_id를 넘기면 동일 PK
+    SELECT를 중복 실행하지 않는다(메시지 목록/단건/리플 등 hot path 성능 보존). 직접 호출부
+    (백링크)는 생략 — 이 함수가 자체적으로 조회한다.
+    """
+    conv_project_id = _conv_project_id
+    if conv_project_id is None:
+        conv_project_id = (await db.execute(
+            select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+        )).scalar_one_or_none()
+        if conv_project_id is None:
+            return False
+
+    # story #1994 B1 하드닝(산티아고 sabotage-probe 발견): 아래(org-level 1차 해소부터
+    # project-access 재확인까지)는 `_resolve_member` → `member_resolver.resolve_member`가
+    # project_id 스코프에서 HTTPException(403 "No access to this project")을 raise할 수 있다
+    # (caller가 SOURCE project 접근을 잃은 grant-loss 케이스). 이 함수는 "raise 없는 total
+    # boolean predicate" 계약이다(백링크 API처럼 존재-비노출 오라클이 필요한 호출부가 mention
+    # 행 단위 판정에 쓴다) — raise가 새면 mention 한 행의 미인가가 전체 backlinks 응답을
+    # poison한다(B1: 한 행 제외가 아니라 엔드포인트 전체 실패). try/except로 전 구간을 봉합 —
+    # `_authorize_message_read`(아래·기존 raise-based wrapper)는 이 함수가 False를 반환하면
+    # 자신의 403을 별도로 raise하므로, 실제 메시지 엔드포인트(list/get)가 외부에 노출하는
+    # "grant-loss ⇒ 403" 동작 자체는 그대로 유지된다(상태코드 불변, 회귀 아님).
+    try:
+        # owner/admin: org-level 조회(project 소속 무관 접근), member: project-level 유지
+        sender = await _resolve_member(auth, org_id, db, project_id=None)
+
+        # §6회차(마지막 atom, 산티아고 명시 요구 — "_can_read_conversation 단건도 같은 atom"):
+        # `admin_bypass_eligible`을 더 이상 `_effective_org_role`의 사전 해소 결과(bool 리터럴)로
+        # 소싱하지 않는다. 예전엔 `_effective_org_role(...)`이 별도 SELECT(휴먼=OrgMember.role
+        # 조회, 에이전트=`get_project_role`)로 admin 여부를 **먼저** 확정한 뒤, 그 결과를 bool
+        # 리터럴로 아래 `select(predicate)` 메인 조회에 바인딩했다 — `backlinks.py`가 5회차
+        # 이전까지 갖고 있던 것과 동형인 "pre-resolve → 메인 statement 리터럴 바인딩" TOCTOU
+        # 클래스(그 SELECT와 이 메인 조회 사이에 org role/project grant가 revoke되면 메인
+        # 조회는 그 revoke를 못 본다). `backlinks.py`가 6회차에서 이 atom을
+        # `org_admin_valid_correlated`/`project_admin_valid_correlated`(project_auth.py)로
+        # 전환한 것과 정확히 같은 SSOT 함수를, 이 단건 소비자도 그대로 재사용한다(재구현 0) —
+        # human/agent 판별(`is_api_key`)만 여기서 하고, 어느 correlated 표현식을 쓸지 결정한
+        # 뒤 그 표현식 자체는 아래 `select(predicate)` 실행 시점까지 평가를 미룬다(pre-resolve
+        # 없음). `_effective_org_role`은 이 함수 밖의 다른 소비자(`list_conversations`의
+        # `include_agent_conversations` 게이트, `get_conversation`의 participant-bypass 여부
+        # 판단)에서 여전히 쓰이므로 그대로 유지 — 이 함수만 소싱 방식을 바꾼다.
+        from sqlalchemy import literal
+
+        from app.services.project_auth import (
+            has_project_access,
+            org_admin_valid_correlated,
+            project_admin_valid_correlated,
+        )
+
+        is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+
+        admin_bypass_eligible = (
+            project_admin_valid_correlated(
+                literal(conv_project_id), caller_id=sender.id, org_id=org_id,
+            )
+            if is_api_key
+            else org_admin_valid_correlated(caller_id=uuid.UUID(auth.user_id), org_id=org_id)
+        )
+
+        # project_access_valid(B1 grant-loss recheck — "참가 당시"가 아니라 "지금" 접근 가능한가):
+        # `has_project_access`(project_auth.py SSOT)를 boolean으로 직접 호출한다(재구현 아님).
+        #
+        # §5회차(산티아고 Blocker 2): 예전엔 API-key(에이전트) caller에게 `project_access_valid`를
+        # `True`로 하드코딩하고 재검증을 생략했다("기존 `_resolve_member`의 is_api_key 분기가
+        # project_id 무관하게 TeamMember.id 매치만 확인했다"는 이유로 그 동작을 "보존"한 것 — 그러나
+        # 산티아고 지적대로 이 "보존된" 동작 자체가 버그였다: grant가 회수된 에이전트도 여기선 계속
+        # `project_access_valid=True`를 받아, 같은 caller/project 쌍에 대해 `backlinks.py`(항상 live
+        # grant set을 correlate)와 이 함수(항상 True)가 서로 다른 답을 내는 "사실 하나·구현 둘" 드리프트가
+        # 있었다. `has_project_access`의 4-branch WHERE는 이미 caller type별로 내부 분기한다
+        # (`tm.type='human'` team_member 분기 vs `m.type='agent'` project_access grant 분기) —
+        # human/agent 무관하게 그냥 호출하면 두 caller 모두 정확한 답을 받는다(Python 레벨
+        # is_api_key 분기 자체가 불필요 — 재구현 0, project_auth.py가 이미 caller-type-aware SSOT).
+        #
+        # 이 atom(`project_access_valid`)은 §6회차 스코프 밖 — 여전히 요청당 1회 사전 SELECT로
+        # 소싱한다(reviewer round-5 verdict가 `admin_bypass_eligible` 하나만 잔여로 지목했다).
+        project_access_valid = await has_project_access(
+            db, uuid.UUID(auth.user_id), conv_project_id, org_id,
+        )
+
+        from app.services.conversation_auth import conversation_readable_predicate
+
+        predicate = conversation_readable_predicate(
+            literal(conversation_id),
+            caller_member_id=sender.id,
+            project_access_valid=project_access_valid,
+            # §6회차 fix: 위에서 조립한 correlated EXISTS — `_effective_org_role`의 사전
+            # 해소 bool이 아니라, 이 `select(predicate)` 실행 시점의 스냅샷으로 평가된다.
+            admin_bypass_eligible=admin_bypass_eligible,
+        )
+        result = (await db.execute(select(predicate))).scalar_one()
+        return bool(result)
+    except HTTPException:
+        return False
+
+
 async def _authorize_message_read(
     conversation_id: uuid.UUID,
     db: AsyncSession,
@@ -1091,32 +1217,17 @@ async def _authorize_message_read(
 ) -> uuid.UUID:
     """메시지 조회(목록/단건/리플) 공용 인가. #1262: admin-bypass=agent-only 대화 한정 —
     휴먼 참가 대화(=private)는 participant only. 반환: conversation.project_id.
+
+    story #1994 리팩터: 실제 판정 로직은 `_can_read_conversation`(canonical bool 술어)에 있다 —
+    이 함수는 그 위에 404(대화 없음)/403(비참여자) raise semantics만 얹는 얇은 wrapper.
     """
     conv_project_id = (await db.execute(
         select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
     )).scalar_one_or_none()
     if conv_project_id is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-
-    # owner/admin: org-level 조회(project 소속 무관 접근), member: project-level 유지
-    sender = await _resolve_member(auth, org_id, db, project_id=None)
-
-    # org-effective role(S-MBR-03·#1223↔SSOT뷰 갭 보정) — project role 낮아도 org owner/admin 상속
-    is_admin = await _effective_org_role(
-        auth, org_id, db, sender, project_id=conv_project_id,
-    ) in ("owner", "admin")
-    # admin이어도 휴먼 참가(private) 대화면 participant 체크 폴백(사적 DM 프라이버시)
-    if (not is_admin) or await _conversation_has_human_participant(conversation_id, db):
-        # project isolation 보존 — project 소속 member 재확인
-        sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
-        participant = (await db.execute(
-            select(ConversationParticipant.id).where(
-                ConversationParticipant.conversation_id == conversation_id,
-                ConversationParticipant.member_id == sender.id,
-            )
-        )).scalar_one_or_none()
-        if participant is None:
-            raise HTTPException(status_code=403, detail="Not a participant")
+    if not await _can_read_conversation(conversation_id, db, auth, org_id, _conv_project_id=conv_project_id):
+        raise HTTPException(status_code=403, detail="Not a participant")
     return conv_project_id
 
 

@@ -317,6 +317,24 @@ def _messages_routing_db(*, conv_id, project_id, participant_member_ids, agent_i
             res = MagicMock()
             res.scalar_one_or_none.return_value = project_id
             return res
+        # story #1994 4회차: `_can_read_conversation`이 이제 participant∧admin-bypass 판정을
+        # `conversation_auth.conversation_readable_predicate`(SSOT) 하나의 `SELECT (<bool expr>)`
+        # 스칼라 쿼리로 접어 낸다(과거엔 참가자 존재 여부·human-participant 여부가 각각 별도
+        # `db.execute` 호출이었다 — 그래서 아래 `conversation_participants`/`team_members`
+        # 분기가 각각 독립적으로 답했다). 이 새 쿼리는 correlated EXISTS로 컴파일되므로 여전히
+        # sql 문자열에 "conversation_participants"/"team_members"가 등장하지만, 정답은 그
+        # 존재만으로 답할 수 있는 단일 값이 아니라 이 테스트 시나리오의 파라미터
+        # (participant_member_ids/agent_ids/requester_is_participant/admin_role)를 조합해야
+        # 나온다 — 그래서 "exists (select 1"이 나타나는 쿼리(이 predicate 특유의 시그니처)를
+        # 가장 먼저·가장 구체적으로 매치해 직접 계산한다(하위 범용 분기가 가로채기 전에).
+        if "exists (select 1" in sql and "conversation_participants" in sql:
+            has_human = any(mid not in agent_ids for mid in participant_member_ids)
+            admin_bypass = (not has_human) and admin_role in ("owner", "admin")
+            answer = bool(requester_is_participant or admin_bypass)
+            res = MagicMock()
+            res.scalar_one.return_value = answer
+            res.scalar_one_or_none.return_value = answer
+            return res
         if "org_members" in sql:
             res = MagicMock()
             res.scalar_one_or_none.return_value = admin_role
