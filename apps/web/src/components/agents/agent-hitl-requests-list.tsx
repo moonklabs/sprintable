@@ -100,6 +100,8 @@ export function AgentHitlRequestsList() {
               <RefreshCw className={`mr-1.5 size-3.5 ${refreshing ? 'animate-spin' : ''}`} />
               {t('refresh')}
             </Button>
+            {/* story #1990 스코프 제외(까심 확認, 2026-07-18): 이 컴포넌트는 import/렌더 0인 죽은코드라
+                라이브 트랩 재현 불가 — push() 미교체는 의도적(no-fiction). */}
             <Link href="/organization/workforce" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               <ArrowLeft className="mr-1.5 size-3.5" />
               {t('backToAgents')}
