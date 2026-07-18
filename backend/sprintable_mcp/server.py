@@ -64,8 +64,8 @@ from .tools.docs import (
     create_doc, get_doc, list_docs, search_docs, update_doc,
 )
 from .tools.goals import (
-    AddGoalInput, ListGoalsInput, UpdateGoalInput,
-    add_goal, list_goals, update_goal,
+    AddGoalInput, ListGoalsInput, TransitionGoalInput, UpdateGoalInput,
+    add_goal, list_goals, transition_goal, update_goal,
 )
 from .tools.hypotheses import (
     ConfirmHypothesisInput, CreateHypothesisInput, GetHypothesisInput,
@@ -358,7 +358,7 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_update_task_status",
      "[일감] 태스크 상태 변경.",
      UpdateTaskStatusInput, update_task_status),
-    # Goals(구 Epics, 3) — E-SECURITY SEC-S1 확장: delete_goal 제거(에이전트 hard-delete 차단).
+    # Goals(구 Epics, 4) — E-SECURITY SEC-S1 확장: delete_goal 제거(에이전트 hard-delete 차단).
     # 계층 리네이밍 B1(story 1925): 신 이름이 primary, 구 이름(sprintable_*_epic)은 **같은 핸들러
     # 함수**를 참조하는 deprecated 별칭(hierarchy-rename-alias-mechanism-design §1 — 로직 복제
     # 0, 드리프트 불가). 별칭 유지 기간 동안 무중단 서빙.
@@ -371,6 +371,16 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_update_goal",
      "[일감] 목표 수정.",
      UpdateGoalInput, update_goal),
+    # story #2010: 목표 lifecycle 전이 전용 도구(rename B1 이후 신설이라 구 _epic 별칭 없음 —
+    # update_goal의 status 필드는 백엔드가 422로 거부해 이 도구만이 유일한 전이 경로).
+    # ⚠️draft→active·active→done 은 line overlay-gated — enforcing 라인이면 백엔드가 200을
+    # 반환하면서도 status는 유지(결재 대기)한다. 이 도구는 응답 status가 요청 status와 다르면
+    # transitioned=False + note로 명시해 겉보기 성공과 구분한다(tools/goals.py 참고).
+    ("sprintable_transition_goal",
+     "[일감] 목표 상태 전이(draft/active/done/archived). draft→active는 휴먼 전용"
+     "(에이전트 호출 시 HUMAN_CONFIRM_REQUIRED). 결재 게이트가 있으면 status가 유지된 채"
+     " '결재 대기' 응답을 받을 수 있다(transitioned=False로 표시).",
+     TransitionGoalInput, transition_goal),
     ("sprintable_list_epics",
      "[일감] [DEPRECATED→sprintable_list_goals] 에픽 목록 조회.",
      ListGoalsInput, list_goals),

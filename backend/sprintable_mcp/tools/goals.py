@@ -1,10 +1,15 @@
-"""목표(구 에픽) 관련 MCP 도구 (3개) — E-SECURITY SEC-S1 확장: delete_goal 제거(에이전트
+"""목표(구 에픽) 관련 MCP 도구 (4개) — E-SECURITY SEC-S1 확장: delete_goal 제거(에이전트
 hard-delete 차단, delete_story와 동형 조치. 까심 적대적 QA 발견 갭 — cascade로 소속 stories까지
 물리삭제).
 
 계층 리네이밍 B1(story 1925): 구 tools/epics.py — REST 호출 대상을 신 경로(/api/v2/goals)로
 전환. tool 이름 자체는 server.py의 _TOOL_DEFS가 신(sprintable_*_goal)+구(sprintable_*_epic)
 양쪽으로 별칭 등록(같은 함수 재사용, 로직 복제 0) — hierarchy-rename-alias-mechanism-design §1.
+
+story #2010: transition_goal(신규) 추가 — 목표 lifecycle 전이(draft/active/done/archived) 전용
+도구. update_goal의 status 필드는 백엔드가 422로 거부(FSM 우회 방지, goals.py:280 주석 "use POST
+/transition instead")하므로 이 도구를 통해서만 전이 가능. transition_goal은 rename(B1) 이후
+신설이라 구 sprintable_*_epic 별칭 없음(server.py 참고).
 """
 from __future__ import annotations
 
@@ -87,5 +92,40 @@ async def update_goal(args: UpdateGoalInput) -> list[TextContent]:
         updates["target_sp"] = args.target_sp
     try:
         return ok(await client.patch(f"/api/v2/goals/{args.goal_id}", json=updates))
+    except Exception as exc:
+        return err(str(exc))
+
+
+class TransitionGoalInput(SprintableInput):
+    goal_id: str
+    status: GoalStatus
+
+
+async def transition_goal(args: TransitionGoalInput) -> list[TextContent]:
+    """목표 상태 전이(lifecycle transition) — draft/active/done/archived. update_goal의 status 필드는
+    422로 거부되므로(FSM 우회 방지), 상태 전이는 이 도구를 써야 한다.
+
+    ⚠️결재 게이트 주의: draft→active·active→done 은 line overlay-gated 전이라 라인이 enforcing이면
+    백엔드가 200을 반환하면서도 실제 status는 바꾸지 않고(게이트 생성·결재 대기) 그대로 둔다(요청
+    실패가 아니라 '보류'). 이 도구는 응답의 status가 요청한 status와 다르면 이를 감지해
+    transitioned=False + 안내 메시지로 명시한다 — 겉보기 200 성공과 절대 혼동하지 말 것.
+    """
+    try:
+        resp = await client.post(
+            f"/api/v2/goals/{args.goal_id}/transition", json={"status": args.status.value}
+        )
+        actual_status = resp.get("status") if isinstance(resp, dict) else None
+        if actual_status is not None and actual_status != args.status.value:
+            return ok({
+                **resp,
+                "transitioned": False,
+                "requested_status": args.status.value,
+                "note": (
+                    "결재 게이트가 생성되어 status가 변경되지 않았습니다(결재 대기) — "
+                    f"현재 status는 여전히 '{actual_status}'입니다. 게이트가 승인되면 자동으로 "
+                    f"'{args.status.value}'로 전이됩니다. 이 응답은 성공이 아니라 보류 상태입니다."
+                ),
+            })
+        return ok({**resp, "transitioned": True}) if isinstance(resp, dict) else ok(resp)
     except Exception as exc:
         return err(str(exc))
