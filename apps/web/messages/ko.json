@@ -566,6 +566,7 @@
     "skip": "건너뛰기",
     "stepOf": "{current} / {total}",
     "createOrgFailed": "조직 생성에 실패했습니다",
+    "networkError": "네트워크 오류 — 연결을 확인하고 다시 시도해 주세요",
     "apiKeyFailedMembers": "API Key 발급에 실패했습니다. Settings > Members > Agents에서 수동으로 발급하세요.",
     "goToMembersAgents": "Members > Agents에서 관리하기",
     "copyConfig": "복사",

@@ -566,6 +566,7 @@
     "skip": "Skip",
     "stepOf": "{current} / {total}",
     "createOrgFailed": "Failed to create organization",
+    "networkError": "Network error — please check your connection and try again",
     "apiKeyFailedMembers": "API key generation failed. Go to Settings > Members > Agents to issue one manually.",
     "goToMembersAgents": "Manage in Members > Agents",
     "copyConfig": "Copy",
