@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import and_, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -326,6 +326,49 @@ def _total_unread_count_stmt(member_id: uuid.UUID):
     """
     per_conv = _list_unread_counts_stmt(member_id).subquery()
     return select(func.coalesce(func.sum(per_conv.c.unread_count), 0))
+
+
+async def _fetch_conversation_participants(
+    conv_ids: list[uuid.UUID],
+    db: AsyncSession,
+) -> dict[uuid.UUID, list[dict]]:
+    """story #2009: conversation(들)의 participants 배치 조회 — list_conversations의 기존
+    N+1 방지 배치 로직을 단건(`get_conversation`)에서도 재사용하도록 추출(로직 복제 금지, AC).
+
+    반환 dict shape는 두 엔드포인트가 항상 동일 JSON을 내려주도록 고정:
+    `{"member_id", "name", "avatar_url", "type", "runtime_type"}` (list_conversations의
+    participants 항목과 byte-identical — FE 파싱 일관성).
+    """
+    if not conv_ids:
+        return {}
+
+    p_rows = (await db.execute(
+        select(ConversationParticipant.conversation_id, ConversationParticipant.member_id)
+        .where(ConversationParticipant.conversation_id.in_(conv_ids))
+    )).all()
+
+    all_member_ids = {r.member_id for r in p_rows}
+    resolved_map = await lookup_members_by_ids(all_member_ids, db) if all_member_ids else {}
+
+    # E-CHAT-CMD S8b: participant 의 runtime_type 노출(team_members 뷰서 read — 에이전트만 값, 휴먼 NULL).
+    runtime_type_map: dict[uuid.UUID, str | None] = {}
+    if all_member_ids:
+        rt_rows = (await db.execute(
+            select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(all_member_ids))
+        )).all()
+        runtime_type_map = {r.id: r.runtime_type for r in rt_rows}
+
+    conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
+    for r in p_rows:
+        resolved = resolved_map.get(r.member_id)
+        conv_participants[r.conversation_id].append({
+            "member_id": str(r.member_id),
+            "name": resolved.name if resolved else str(r.member_id)[:8],
+            "avatar_url": getattr(resolved, "avatar_url", None) if resolved else None,
+            "type": resolved.type if resolved else "human",
+            "runtime_type": runtime_type_map.get(r.member_id),
+        })
+    return conv_participants
 
 
 _SUMMARY_PREVIEW_MAX = 80
@@ -687,6 +730,9 @@ class ConversationResponse(BaseModel):
     # 파생 unread_count. 비참여자(admin-bypass agent-only 대화)는 last_read_at=None·unread_count=0.
     last_read_at: datetime | None = None
     unread_count: int = 0
+    # story #2009: list_conversations와 동일 shape의 participants(재사용, 로직 복제 금지 — AC).
+    # dict 그대로 노출(별도 Pydantic 서브모델 미도입) — list 엔드포인트와 byte-identical JSON 보장.
+    participants: list[dict] = Field(default_factory=list)
 
 
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
@@ -931,35 +977,9 @@ async def list_conversations(
         .limit(limit).offset(offset)
     )).scalars().all()
 
-    # participants 배치 조회 (N+1 방지)
+    # participants 배치 조회 (N+1 방지) — story #2009: get_conversation과 공유하는 헬퍼로 추출.
     conv_id_list = [c.id for c in convs]
-    p_rows = (await db.execute(
-        select(ConversationParticipant.conversation_id, ConversationParticipant.member_id)
-        .where(ConversationParticipant.conversation_id.in_(conv_id_list))
-    )).all()
-
-    all_member_ids = {r.member_id for r in p_rows}
-    resolved_map = await lookup_members_by_ids(all_member_ids, db) if all_member_ids else {}
-
-    # E-CHAT-CMD S8b: participant 의 runtime_type 노출(team_members 뷰서 read — 에이전트만 값, 휴먼 NULL).
-    # S8 composer 가 미지원 런타임 에이전트 pre-send 경고를 그리려면 participant 응답에 runtime_type 필요.
-    runtime_type_map: dict[uuid.UUID, str | None] = {}
-    if all_member_ids:
-        rt_rows = (await db.execute(
-            select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(all_member_ids))
-        )).all()
-        runtime_type_map = {r.id: r.runtime_type for r in rt_rows}
-
-    conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
-    for r in p_rows:
-        resolved = resolved_map.get(r.member_id)
-        conv_participants[r.conversation_id].append({
-            "member_id": str(r.member_id),
-            "name": resolved.name if resolved else str(r.member_id)[:8],
-            "avatar_url": getattr(resolved, "avatar_url", None) if resolved else None,
-            "type": resolved.type if resolved else "human",
-            "runtime_type": runtime_type_map.get(r.member_id),
-        })
+    conv_participants = await _fetch_conversation_participants(conv_id_list, db)
 
     # story #1976: unread_count 배치 — 단일 JOIN+GROUP BY(N+1 방지, §4-2). INNER JOIN이라
     # unread=0 대화는 결과행 없음 → dict.get(id, 0)으로 자연 0 처리.
@@ -1073,13 +1093,31 @@ async def get_conversation(
             ConversationParticipant.member_id == sender.id,
         )
     )).one_or_none()
-    resp = ConversationResponse.model_validate(conv)
+    # story #2009: `ConversationResponse.model_validate(conv)`(from_attributes) 대신 필드별
+    # 명시 구성 — `Conversation.participants`는 SQLAlchemy 관계(lazy="select")라 동명의
+    # Pydantic 필드를 자동추출 시도하면 sync getattr가 비동기 세션 lazy-load를 트리거해
+    # `MissingGreenlet`으로 500(신규 필드 도입 시 실측 발견). 배치 헬퍼 결과로 아래서 명시 대입.
+    resp = ConversationResponse(
+        id=conv.id,
+        project_id=conv.project_id,
+        org_id=conv.org_id,
+        type=conv.type,
+        title=conv.title,
+        status=conv.status,
+        created_by=conv.created_by,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
+    )
     resp.muted = caller_row is not None and caller_row.muted_at is not None
     if caller_row is not None:
         resp.last_read_at = caller_row.last_read_at
         resp.unread_count = (await db.execute(
             _unread_count_stmt(conversation_id, sender.id, caller_row.last_read_at)
         )).scalar_one()
+    # story #2009: 단건 조회도 list_conversations와 동일 participants shape을 자체 포함 —
+    # FE가 30건 캡 있는 list 엔드포인트에 기대던 workaround(.find() miss 버그) 제거.
+    participants_map = await _fetch_conversation_participants([conversation_id], db)
+    resp.participants = participants_map.get(conversation_id, [])
     return resp
 
 
