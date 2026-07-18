@@ -460,6 +460,10 @@ async def test_send_message_working_when_webhook_configured():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([MEMBER_ID])  # active_webhook_member_ids: 활성 webhook 존재
             return _result(working_task)  # 최종 requery
 
@@ -499,6 +503,10 @@ async def test_send_message_working_when_member_has_multiple_active_webhooks():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([MEMBER_ID, MEMBER_ID])  # 활성 webhook 2개 이상(같은 멤버) 시뮬레이션
             return _result(working_task)
 
@@ -537,6 +545,10 @@ async def test_send_message_working_via_sse_pipeline_when_no_webhook():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([])  # webhook 없음
             return _result(working_task)
 
@@ -579,6 +591,10 @@ async def test_send_message_response_wraps_task_in_spec_envelope():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([])  # webhook 없음 → SSE 경로
             return _result(working_task)
 
@@ -620,6 +636,10 @@ async def test_send_message_delivered_content_embeds_completion_protocol_hint():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([MEMBER_ID])  # webhook 있음
             return _result(working_task)
 
@@ -1290,6 +1310,10 @@ async def test_project_context_extension_preserved_when_declared_no_webhook():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([])  # webhook 없음
             return _result(working_task)
 
@@ -1342,6 +1366,10 @@ async def test_project_context_extension_ignored_when_not_declared():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([])
             return _result(working_task)
 

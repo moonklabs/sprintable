@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Text, func
+from sqlalchemy import DateTime, Index, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -10,7 +10,12 @@ from app.core.database import Base
 
 class A2ATask(Base):
     """E-A2A-POC S1(story 480e81fb): A2A Task 생명주기 저장소. PoC 스코프 — org_id/인증 없음
-    (member_id로만 스코프, Phase 3서 org-scope+인증 추가 예정)."""
+    (member_id로만 스코프, Phase 3서 org-scope+인증 추가 예정).
+
+    story #2004(E-A2A-PROTO Phase B P1-b, 마이그 0201): `client_message_id`(=클라이언트
+    `Message.message_id`)는 SendMessage 멱등 dedup 키 — 방어선 1은
+    `_handle_send_message`의 `pg_advisory_xact_lock`(TOCTOU 구조적 봉인), 이 partial
+    UNIQUE 인덱스는 방어선 2(DB 레벨 최종 백스톱, 락 우회 시에도 중복 row는 못 들어옴)."""
 
     __tablename__ = "a2a_tasks"
 
@@ -35,3 +40,13 @@ class A2ATask(Base):
     # 무관하게 판정할 수 있도록 생성 시점에 명시 기록. NULL=마이그 이전 레거시 행(폴백은
     # 소비 코드가 created_at + A2A_TASK_TIMEOUT_MINUTES로 처리).
     deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    client_message_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "uq_a2a_tasks_member_client_message_id",
+            "member_id", "client_message_id",
+            unique=True,
+            postgresql_where=text("client_message_id IS NOT NULL"),
+        ),
+    )
