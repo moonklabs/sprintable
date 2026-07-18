@@ -39,10 +39,16 @@ interface AgentManagementTabProps {
 export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const t = useTranslations('settings');
   const ta = useTranslations('agents');
+  const tc = useTranslations('common');
   const [agents, setAgents] = useState<OrgAgent[]>([]);
   const [grantCounts, setGrantCounts] = useState<Record<string, number>>({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  // story #1989: mount effect가 try/catch 없이 fetch를 직결해 네트워크 실패(오프라인 등) 시
+  // fetch가 throw → setLoading(false)가 영영 안 불려 스켈레톤이 무한 행("loading은 finally에서
+  // 해소" 하우스룰 위반). loadError로 실패를 별도 상태화해 재시도 affordance를 노출한다.
+  const [loadError, setLoadError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -79,24 +85,30 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   useEffect(() => {
     void (async () => {
       setLoading(true);
-      const [meRes, projectsRes] = await Promise.all([
-        fetch('/api/me'),
-        fetch('/api/projects'),
-      ]);
-      if (meRes.ok) {
-        const meJson = await meRes.json() as { data?: { role?: string } };
-        const role = meJson.data?.role ?? 'member';
-        setIsAdmin(role === 'admin' || role === 'owner');
+      setLoadError(false);
+      try {
+        const [meRes, projectsRes] = await Promise.all([
+          fetch('/api/me'),
+          fetch('/api/projects'),
+        ]);
+        if (meRes.ok) {
+          const meJson = await meRes.json() as { data?: { role?: string } };
+          const role = meJson.data?.role ?? 'member';
+          setIsAdmin(role === 'admin' || role === 'owner');
+        }
+        let projectList: ProjectOption[] = [];
+        if (projectsRes.ok) {
+          const json = await projectsRes.json() as { data?: ProjectOption[] };
+          projectList = (json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
+        }
+        await Promise.all([refreshAgents(), refreshGrantCounts(projectList)]);
+      } catch {
+        setLoadError(true);
+      } finally {
+        setLoading(false);
       }
-      let projectList: ProjectOption[] = [];
-      if (projectsRes.ok) {
-        const json = await projectsRes.json() as { data?: ProjectOption[] };
-        projectList = (json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
-      }
-      await Promise.all([refreshAgents(), refreshGrantCounts(projectList)]);
-      setLoading(false);
     })();
-  }, []);
+  }, [retryKey]);
 
   const handleToggleActive = async (agent: OrgAgent) => {
     setTogglingId(agent.id);
@@ -142,6 +154,14 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
           {loading ? (
             <div className="space-y-2">
               {[1, 2, 3].map((i) => <div key={i} className="h-14 animate-pulse rounded-md bg-muted" />)}
+            </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border px-3 py-8 text-center">
+              <p className="text-sm text-muted-foreground">{tc('error')}</p>
+              <p className="text-xs text-muted-foreground">{tc('errorDescription')}</p>
+              <Button size="sm" variant="outline" onClick={() => setRetryKey((k) => k + 1)}>
+                {tc('retry')}
+              </Button>
             </div>
           ) : agents.length === 0 ? (
             <div className="rounded-md border border-dashed border-border px-3 py-8 text-center">
