@@ -315,7 +315,13 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_mark_notification_read", "sprintable_my_dashboard", "sprintable_poll_events",
     "sprintable_save_standup", "sprintable_search_docs", "sprintable_search_stories",
     "sprintable_send_chat_message", "sprintable_sprint_summary", "sprintable_standup_history",
-    "sprintable_standup_missing", "sprintable_trigger_ai_summary",
+    "sprintable_standup_missing",
+    # story #2010: sprintable_transition_goal — 목표 lifecycle 전이 전용 신설(구 _epic 별칭
+    # 없음). tool_group()은 "goal" substring 매칭으로 "epics" 그룹에 귀속(add_goal/update_goal/
+    # list_goals와 동일 그룹) — role_template.default_tool_groups의 "epics" literal이 그대로
+    # 커버하므로 role_template 데이터 마이그 불요.
+    "sprintable_transition_goal",
+    "sprintable_trigger_ai_summary",
     "sprintable_unassign_story_from_sprint", "sprintable_unclaim_story", "sprintable_unlock_files",
     "sprintable_update_doc", "sprintable_update_epic", "sprintable_update_goal",
     "sprintable_update_meeting",
