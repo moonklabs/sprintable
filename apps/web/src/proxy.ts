@@ -89,6 +89,24 @@ async function getOrgIdFromAccessToken(token: string): Promise<string | null> {
   }
 }
 
+// story #1998(급, 선생님 실사용 "보드가 404") — access token의 app_metadata.project_id를
+// CURRENT_PROJECT_COOKIE 부재 시 fallback으로 쓴다. 근본원인: 이 쿠키는 onboarding-form.tsx·
+// switch-project·switch-org 명시 액션에서만 SET되고 평범한 로그인(POST /api/auth/login)에서는
+// 전혀 SET되지 않는다(grep 확認·curl 재현: 로그인 직후 쿠키잔에 sp_at/sp_rt만 있고 이 쿠키는
+// 없음) — 즉 온보딩 세션이 만료/새 기기/쿠키 삭제 후 "그냥 로그인"한 리턴 유저는 전원 이 안전망이
+// 무력화돼 bare 레거시 링크(board·loops·docs 등, MIGRATED_RESOURCES)가 즉시 404. JWT 자체엔
+// 로그인 시점 project_id가 이미 실려있으므로(app_metadata, org_id와 동일 위치) 그걸 재사용하면
+// 추가 DB조회 없이 이 갭을 메운다 — 쿠키가 있으면 쿠키 우선(명시 switch-project 결과 존중).
+async function getProjectIdFromAccessToken(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, getJwtSecretBytes());
+    const projectId = (payload['app_metadata'] as Record<string, unknown> | undefined)?.['project_id'];
+    return typeof projectId === 'string' ? projectId : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * story a539c649 S-route-project — 이관 완료된 Project-tier 리소스 목록(flat 첫 세그먼트 →
  * 그 리소스 밑에서 project-scope 아닌 채로 존치되는 서브패스 제외 목록). 슬라이스가 리소스를
@@ -124,7 +142,9 @@ async function redirectLegacyResourcePath(
   if (excluded.some((sub) => pathname.startsWith(`/${resourceName}/${sub}`))) return null;
 
   const orgId = await getOrgIdFromAccessToken(accessToken);
-  const projectId = request.cookies.get(CURRENT_PROJECT_COOKIE)?.value;
+  // story #1998: 쿠키 우선(명시 switch-project 결과) — 없으면 JWT app_metadata.project_id로 fallback.
+  const projectId = request.cookies.get(CURRENT_PROJECT_COOKIE)?.value
+    ?? await getProjectIdFromAccessToken(accessToken);
   if (!orgId || !projectId) return null;
 
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
