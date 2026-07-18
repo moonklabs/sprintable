@@ -66,6 +66,25 @@ persona 존재 시 무조건 persona.slug/config.tool_allowlist 파생 단일 sk
 당시 스냅샷이 아니라 카탈로그 갱신을 재-recruit 없이 그대로 따라간다. role_template.skills가
 비어있으면(아직 구조화 미완료) 기존 persona 파생 단일 skill로 그레이스풀 폴백 — 무회귀(오늘
 수작업으로 만든 8명의 persona는 role_template_id가 없어 이 폴백 그대로, 크래시 없음).
+
+**SendMessage 멱등키(2026-07-18, story #2004, E-A2A-PROTO Phase B P1-b)**: 클라가 네트워크
+타임아웃/수동 재시도로 동일 `message_id`를 재발송하면 기존엔 매번 새 Conversation+Task+실
+위임(webhook/Event+wake_agent)이 벌어졌다(중복 실행). `_handle_send_message`가 이제
+`(member_id, client_message_id)`를 dedup 키로 쓴다 — `pg_advisory_xact_lock`(첫 DB
+연산으로 획득)이 "존재 확인→A2ATask insert→(그 A2ATask insert를 포함하는) 첫 commit"까지의
+전 구간을 직렬화해 TOCTOU를 구조적으로 막는다(naive insert-then-catch-conflict는 이미 실
+webhook/Event 부작용이 나간 뒤에야 충돌을 잡아 AC3 위반 — 채택 안 함).
+
+⚠️설계 노트(기존 흐름과의 유일한 순서 변경): 이 함수는 `A2ATask` insert를 원래 맨 끝(webhook/
+Event 디스패치 이후)에서 **Conversation/Message insert 직후·기존 첫 commit 이전**으로
+당겼다. 이유: `deliver_conversation_message_webhook`이 별도 세션(`async_session_factory`)으로
+Conversation/Participant를 재조회하므로 그 첫 commit은 원래도 필수였다(제거 불가) — advisory
+xact lock은 commit 시 자동 해제되므로, A2ATask insert가 원래 위치(그 이후, 두 번째·세 번째
+commit 뒤)에 남아 있으면 락이 실제 dedup-마커 커밋 전에 먼저 풀려 동시 두 콜이 모두 "미존재"를
+보고 통과할 수 있었다(레이스 미봉인). A2ATask를 첫 commit **안**으로 포함시키면 락이 커버하는
+구간 = "그 dedup 마커가 durable해지는 시점"과 정확히 일치해 구조적으로 막힌다. webhook/Event
+디스패치 로직 자체(내용·순서·별도 세션)는 완전히 무변경 — fakechat 경로의
+`task_metadata["connected_at_send"]`만 이제 이미 insert된 행에 대한 후속 UPDATE로 반영한다.
 """
 from __future__ import annotations
 
@@ -79,6 +98,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory
@@ -498,6 +518,36 @@ def _first_text(message: Message) -> str:
     return ""
 
 
+async def _acquire_send_message_dedup_lock(
+    session: AsyncSession, member_id: uuid.UUID, client_message_id: str,
+) -> A2ATask | None:
+    """story #2004(E-A2A-PROTO Phase B P1-b): `_handle_send_message`의 첫 DB 연산 —
+    `(member_id, client_message_id)` 네임스페이스 advisory xact lock(story.py::
+    allocate_story_number/recruit_service.py::acquire_agent_mutation_lock과 동일 관례,
+    [[feedback_check_then_insert_toctou]] 교훈 재적용) 획득 직후 같은 키의 기존 task를
+    재확인한다. 반환값이 not-None이면 그게 곧 멱등 재생 대상(caller는 그걸 그대로 반환하고
+    Conversation/Message/webhook/Event/wake_agent/새 A2ATask 무엇도 만들면 안 된다) — None이면
+    신규 처리를 계속한다.
+
+    락은 트랜잭션 종료(commit/rollback) 시 자동 해제 — caller가 이 함수 반환 후 A2ATask
+    insert를 기존 첫 commit 안에 포함시켜야(모듈 docstring "설계 노트") 이 락이 "dedup
+    마커가 durable해지는 시점"까지 끊김 없이 커버한다.
+
+    순수 리팩터로 분리(동작 무변경) — mutation self-check 테스트가 이 함수만 monkeypatch해
+    (예: 항상 None 반환) dedup을 우회시켜 RED(중복 task+중복 dispatch)를 실증하고, 원복해
+    GREEN을 확인할 수 있도록."""
+    await session.execute(
+        select(func.pg_advisory_xact_lock(
+            func.hashtext(f"a2a_send_message:{member_id}:{client_message_id}")
+        ))
+    )
+    return (await session.execute(
+        select(A2ATask).where(
+            A2ATask.member_id == member_id, A2ATask.client_message_id == client_message_id,
+        )
+    )).scalar_one_or_none()
+
+
 async def _handle_send_message(
     session: AsyncSession, member: TeamMember, params: dict,
     active_extensions: frozenset[str] = frozenset(),
@@ -510,20 +560,32 @@ async def _handle_send_message(
     incoming = send_params.message
     text = _first_text(incoming)
 
+    # story #2004: client_message_id = 클라 Message.message_id — 어떤 DB write보다도 먼저
+    # 추출(멱등 락/조회 키). commit() 이후 이 세션에 로드된 모든 ORM 객체(member 포함)의
+    # 속성이 expire_on_commit 기본값으로 만료돼 greenlet 컨텍스트 밖 lazy-load
+    # (MissingGreenlet)를 유발한다 — commit 전에 필요한 member 필드를 로컬 변수로 고정해두고
+    # 이후엔 이것만 쓴다.
+    client_message_id = incoming.message_id
+    member_id = member.id
+    member_org_id = member.org_id
+    member_project_id = member.project_id
+    member_name = member.name
+
+    # story #2004: 첫 DB 연산 — advisory xact lock 획득 + 같은 키 기존 task 재확인(분리된
+    # 이유·의미론은 `_acquire_send_message_dedup_lock` 참조).
+    existing_task = await _acquire_send_message_dedup_lock(session, member_id, client_message_id)
+    if existing_task is not None:
+        # 멱등 재생 경로 — 락 보유 중 재확인해 이미 커밋된 task를 찾았으니 Conversation/Message/
+        # webhook/Event/wake_agent/새 A2ATask 그 무엇도 만들지 않고 그대로 반환한다(AC3:
+        # 중복 실행 지시 0).
+        return {"task": _task_to_dict(existing_task)}
+
     # E-A2A-EXT project-context(profile, opt-in): 클라가 A2A-Extensions 헤더로 이 URI를
     # 선언했고 Message.metadata에 그 키가 있으면 구조화 컨텍스트를 보존한다. 미선언 시
     # 이 블록 전체가 스킵돼 기존 동작과 완전히 동일(무회귀).
     project_context = None
     if PROJECT_CONTEXT_EXTENSION_URI in active_extensions and incoming.metadata:
         project_context = incoming.metadata.get(PROJECT_CONTEXT_EXTENSION_URI)
-
-    # commit() 이후 이 세션에 로드된 모든 ORM 객체(member 포함)의 속성이 expire_on_commit
-    # 기본값으로 만료돼 greenlet 컨텍스트 밖 lazy-load(MissingGreenlet)를 유발한다 —
-    # commit 전에 필요한 member 필드를 로컬 변수로 고정해두고 이후엔 이것만 쓴다.
-    member_id = member.id
-    member_org_id = member.org_id
-    member_project_id = member.project_id
-    member_name = member.name
 
     # S2(정정 2026-07-06)+P1-S3 §10(SSOT 교체): 플랫폼 기존 라우팅과 동형으로 택일 —
     # member-bound WebhookConfig 有→Discord webhook, 無→fakechat WS(_broadcast). "존재 여부"
@@ -576,13 +638,51 @@ async def _handle_send_message(
         created_at=now,
     ))
     await session.flush()
-    await session.commit()
 
     task_metadata: dict = {"delivery_channel": "webhook" if has_webhook else "fakechat_ws"}
     if active_extensions:
         task_metadata["activated_extensions"] = sorted(active_extensions)
     if project_context is not None:
         task_metadata["project_context"] = project_context
+
+    # story #2004: A2ATask(=dedup 마커) insert를 여기(원래 함수 맨 끝, webhook/Event 디스패치
+    # 이후)에서 이 지점(Conversation/Message insert 직후, 기존 첫 commit 이전)으로 당겼다 —
+    # 모듈 docstring "설계 노트" 참조. advisory xact lock이 이 commit까지 끊김 없이 커버해야
+    # dedup이 구조적으로 봉인되기 때문. task_metadata는 아직 webhook/Event 디스패치 전이라
+    # `connected_at_send`(fakechat 경로 전용)는 비어 있다 — 아래에서 후속 UPDATE로 채운다.
+    task_id = uuid.uuid4()
+    task = A2ATask(
+        id=task_id,
+        context_id=conv_id,
+        root_message_id=root_message_id,
+        member_id=member_id,
+        client_message_id=client_message_id,
+        state="TASK_STATE_WORKING",
+        task_metadata=task_metadata,
+        history=[incoming.model_dump(by_alias=True, mode="json")],
+        artifacts=[],
+        # S-A1(story 2a57dc0f): 생성 시점에 명시 기록 — cron 스위퍼가 폴링과 무관하게 판정.
+        deadline_at=now + timedelta(minutes=A2A_TASK_TIMEOUT_MINUTES),
+    )
+    session.add(task)
+    try:
+        await session.flush()
+    except IntegrityError:
+        # 방어선 2(백스톱, story #2004): 정상 동작에선 advisory lock이 이 경합을 구조적으로
+        # 막아 여기 도달하지 않아야 한다 — 그래도 락이 우회되는 경로가 생기면 UNIQUE 인덱스
+        # (마이그 0201, `uq_a2a_tasks_member_client_message_id`)가 최종 봉인. 이 미커밋
+        # 트랜잭션의 Conversation/Participant/Message도 함께 rollback하고, 승자가 이미 커밋한
+        # task를 재조회해 그대로 반환한다(크래시 대신 멱등 응답).
+        await session.rollback()
+        winner = (await session.execute(
+            select(A2ATask).where(
+                A2ATask.member_id == member_id, A2ATask.client_message_id == client_message_id,
+            )
+        )).scalar_one_or_none()
+        if winner is not None:
+            return {"task": _task_to_dict(winner)}
+        raise
+    await session.commit()
 
     if has_webhook:
         # ⚠️스코프 경계(E-A2A-EXT 첫 착수, 의도적): deliver_conversation_message_webhook은
@@ -637,24 +737,18 @@ async def _handle_send_message(
         await session.commit()
         # "미연결" 신호(P1-S2 C 유지) — 죽은 ws_chat._rooms 대신 agent_gateway의 실제 SSE 연결
         # 큐(_agent_connections)로 판정해야 "지금 CC가 진짜 붙어있나"를 뜻한다.
-        task_metadata["connected_at_send"] = str(member_id) in _agent_connections
+        #
+        # story #2004: task는 위에서 이미 insert+commit된 행이라(dedup 마커, 첫 commit 안에
+        # 포함) 여기선 새 A2ATask를 만들지 않고 그 task_metadata를 채워 후속 UPDATE로 반영한다
+        # — 전체 재대입(`task.task_metadata = {...}`)이라 SQLAlchemy dirty-tracking이 그대로
+        # 잡는다(부분 in-place mutation 아님, MutableDict 불요).
+        task.task_metadata = {
+            **(task.task_metadata or {}),
+            "connected_at_send": str(member_id) in _agent_connections,
+        }
         wake_agent(str(member_id), recipient_seq)
-
-    task_id = uuid.uuid4()
-    session.add(A2ATask(
-        id=task_id,
-        context_id=conv_id,
-        root_message_id=root_message_id,
-        member_id=member_id,
-        state="TASK_STATE_WORKING",
-        task_metadata=task_metadata,
-        history=[incoming.model_dump(by_alias=True, mode="json")],
-        artifacts=[],
-        # S-A1(story 2a57dc0f): 생성 시점에 명시 기록 — cron 스위퍼가 폴링과 무관하게 판정.
-        deadline_at=now + timedelta(minutes=A2A_TASK_TIMEOUT_MINUTES),
-    ))
-    await session.flush()
-    await session.commit()
+        await session.flush()
+        await session.commit()
 
     task = (await session.execute(
         select(A2ATask).where(A2ATask.id == task_id)
