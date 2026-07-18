@@ -412,7 +412,16 @@ async def test_get_conversation_200_returns_project_id():
         muted_result = MagicMock()
         muted_result.one_or_none.return_value = None
 
-        session.execute = AsyncMock(side_effect=[conv_result, member_result, pids_result, agents_result, muted_result])
+        # story #2009: get_conversation이 `_fetch_conversation_participants`(list_conversations와
+        # 공유하는 배치 헬퍼)를 마지막에 1회 더 호출 — participant 행 0건으로 모킹(단순화, 이
+        # 테스트의 검증 대상은 project_id이지 participants shape 자체는 아래 shape parity 테스트가
+        # 커버)하면 후속 lookup_members_by_ids/runtime_type 쿼리도 스킵된다(all_member_ids 공집합).
+        participants_result = MagicMock()
+        participants_result.all.return_value = []
+
+        session.execute = AsyncMock(side_effect=[
+            conv_result, member_result, pids_result, agents_result, muted_result, participants_result,
+        ])
 
         async with client as c:
             resp = await c.get(f"/api/v2/conversations/{CONV_ID}")
@@ -421,6 +430,7 @@ async def test_get_conversation_200_returns_project_id():
         body = resp.json()
         assert body["id"] == str(CONV_ID)
         assert body["project_id"] == str(PROJECT_ID)  # 업로드 path server-side 도출의 근거
+        assert body["participants"] == []
     finally:
         app.dependency_overrides.clear()
 
