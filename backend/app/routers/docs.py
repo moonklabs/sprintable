@@ -178,6 +178,15 @@ async def create_doc(
         content_format=body.content_format,
         tags=body.tags,
     )
+    # story #1993(E-KNOWLEDGE-LINK S1): mentions write-path — 신규 doc 이라 existing=∅(순수 insert
+    # 로 귀결하는 reconcile 재사용). **같은 트랜잭션**(try/except 로 삼키지 않음) — 실패 시 예외
+    # propagate 로 doc 생성 전체가 롤백된다(AC4 원자성). created_by 는 위에서 이미 canonicalize
+    # 됐지만 reconcile_doc_mentions 는 raw id 를 받아 자체적으로 재정규화(idempotent·재사용 함수
+    # 계약 단순화 — create/update 양쪽에서 canonical 여부와 무관하게 동일하게 호출 가능).
+    from app.services.mention_parser import reconcile_doc_mentions
+    await reconcile_doc_mentions(
+        session, org_id=org_id, doc_id=doc.id, html_content=doc.content, created_by=created_by,
+    )
     # 활동로그: doc 생성 이벤트 기록 (생성류 미기록 갭 — 피드 정상화)
     from app.services.activity_log import record_created_activity
     await record_created_activity(
@@ -433,6 +442,15 @@ async def update_doc(
                 DocRevision.doc_id == id,
                 DocRevision.created_at <= cutoff_sq,
             )
+        )
+
+        # story #1993(E-KNOWLEDGE-LINK S1): mentions write-path — content 가 실제로 바뀐 patch 에서만
+        # diff reconcile(변경 없는 필드만 patch 하는 호출에서 불필요한 재파싱 skip). **같은 트랜잭션**
+        # (try/except 로 삼키지 않음) — 실패 시 예외 propagate 로 doc 수정 전체가 롤백된다(AC4 원자성).
+        from app.services.mention_parser import reconcile_doc_mentions
+        actor_id = await _resolve_doc_member_id(auth, repo.org_id, session)
+        await reconcile_doc_mentions(
+            session, org_id=repo.org_id, doc_id=doc.id, html_content=doc.content, created_by=actor_id,
         )
 
     return DocResponse.model_validate(doc)
