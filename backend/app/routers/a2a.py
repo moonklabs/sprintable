@@ -71,11 +71,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -131,6 +132,92 @@ _METHOD_NOT_FOUND = -32601
 _INVALID_PARAMS = -32602
 _TASK_NOT_FOUND = -32001  # A2A-specific error range(-32001~-32099)
 _VERSION_NOT_SUPPORTED = -32009  # 스펙 §14.2.1: A2A-Version 헤더가 지원 범위 밖일 때
+
+# story #2003(Phase B P1-a, E-A2A-PROTO 리라이어빌리티): 위 4개는 `a2a_rpc`의 자체 try/except가
+# 잡는 `_JsonRpcException`용(핸들러 body 안에서 발생 — 정상 JSON-RPC 경로). 아래는 핸들러 밖에서
+# 발생해 main.py의 글로벌 예외 핸들러(HTTPException/Exception)로 이스케이프하는 3가지 축용:
+# auth 실패(`get_verified_org_id`/`get_current_user` Depends, endpoint body 진입 前)·agent-not
+# -found(`_get_agent_member`의 `HTTPException(404)`, try/except 밖에서 호출됨)·미처리 예외.
+# 이전엔 이 3축이 전부 REST 엔벨로프(`{"data":None,"error":{...},"meta":None}`)로 렌더돼 스펙
+# 준수 A2A 클라이언트가 파싱 불가했다(root cause) — main.py가 `is_a2a_rpc_path`로 /rpc 요청만
+# 정밀 매치해 이 테이블로 JSON-RPC envelope을 대신 렌더한다(아래 `build_rpc_error_response`).
+_UNAUTHORIZED = -32010  # 401/403 — reserved server-error range(-32000~-32099), 기존 -32001/-32009와 미충돌
+_AGENT_NOT_FOUND = -32011  # 404 — `_get_agent_member`의 404 이스케이프. `get_agent_card`(REST 라우트)는 이 매핑을 타지 않는다(경로 불일치, 아래 `is_a2a_rpc_path` 참조) — REST 엔벨로프 그대로 유지.
+_INTERNAL_ERROR = -32603  # JSON-RPC 2.0 표준 코드("Internal error", 스펙 §7) — 미처리 예외 전용, 커스텀 번호 금지
+
+# HTTP status → JSON-RPC code(SSOT 단일 테이블, 감사/확장 용이하게 조건 흩뿌리지 않음). 표에
+# 없는 status(5xx 포함)는 표준 Internal error로 수렴 — unhandled_exception_handler는 항상 500만
+# 넘기므로 자동으로 이 폴백을 탄다.
+_RPC_HTTP_STATUS_TO_JSONRPC_CODE: dict[int, int] = {
+    400: _INVALID_PARAMS,
+    401: _UNAUTHORIZED,
+    403: _UNAUTHORIZED,
+    404: _AGENT_NOT_FOUND,
+    422: _INVALID_PARAMS,
+}
+
+
+def rpc_error_code_for_status(status_code: int) -> int:
+    return _RPC_HTTP_STATUS_TO_JSONRPC_CODE.get(status_code, _INTERNAL_ERROR)
+
+
+def rpc_error_is_retryable(status_code: int) -> bool:
+    """5xx/transient(연결 레벨 포함)=True, 4xx/permanent(400/401/403/404/422 등)=False —
+    `error.data.retryable` 힌트(클라가 자동 재시도해도 되는지)."""
+    return status_code >= 500
+
+
+_RPC_PATH_PATTERN = re.compile(r"^/api/v2/a2a/members/[^/]+/rpc$")
+
+
+def is_a2a_rpc_path(path: object) -> bool:
+    """main.py 글로벌 핸들러가 /rpc 요청만 정밀 매치하기 위한 헬퍼 — 토큰경계 정규식(느슨한
+    substring 아님): `/api/v2/a2a/members/{id}/rpc`만 매치하고, 이 파일의 다른 라우트
+    (`agent-card.json`(unauth·REST 계약 유지 필수)·`/members`(발견)·`link-gate`)는 매치하지
+    않는다 — REST 엔벨로프 유지가 필요한 라우트에 실수로 번지는 걸 구조적으로 차단.
+
+    실 FastAPI `Request.url.path`는 항상 str이지만, 기존 단위테스트
+    (`test_error_envelope_dict_detail.py`)가 핸들러를 `MagicMock()` request로 직접 호출하는
+    선례가 있어(`request.url.path`가 MagicMock) — 그 경로에서 TypeError로 깨지지 않도록
+    non-str은 그냥 False(REST 엔벨로프 유지)로 방어."""
+    if not isinstance(path, str):
+        return False
+    return bool(_RPC_PATH_PATTERN.match(path))
+
+
+async def _best_effort_rpc_id(request: Request) -> str | int | None:
+    """JSON-RPC 2.0 §5: id 판정 불가 시 null이 스펙 준수 폴백. Starlette가 `Request.body()`를
+    최초 read 시 캐시하므로, dependency 단계(get_verified_org_id 등)가 이미 body를 소비한
+    뒤라도 여기서 재조회하면 여전히 실 id를 스레딩할 수 있다 — 파싱 자체가 불가능한 경우
+    (빈 body·비JSON·JSON이지만 dict 아님·id 타입이 str/int가 아님)에만 null로 폴백."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001 — 파싱 불가는 id=null 폴백(과설계 회피, 스펙 허용 범위)
+        return None
+    if not isinstance(payload, dict):
+        return None
+    rpc_id = payload.get("id")
+    return rpc_id if isinstance(rpc_id, (str, int)) else None
+
+
+async def build_rpc_error_response(request: Request, status_code: int, message: str) -> JSONResponse:
+    """main.py의 `http_exception_handler`/`unhandled_exception_handler`가 `is_a2a_rpc_path`로
+    매치된 요청에서만 호출 — REST 엔벨로프 대신 JSON-RPC 2.0 error envelope을 렌더한다.
+
+    HTTP status는 200 고정 — `a2a_rpc` 자신의 기존 in-handler JSON-RPC 에러 반환(`_JsonRpcException`
+    을 잡아 `JsonRpcResponse(...)`를 정상 return — 예외가 아니라 return이라 FastAPI 기본 status는
+    200)과 동일 컨벤션(JSON-RPC-over-HTTP 관례: transport status=success, 에러는 body에)을 맞춘다
+    — 여기서 실 HTTP status(401/404/500 등)를 그대로 쓰면 같은 엔드포인트 안에 세 번째 불일치
+    (in-handler=200 vs global-handler=실status)가 새로 생긴다."""
+    response = JsonRpcResponse(
+        id=await _best_effort_rpc_id(request),
+        error=JsonRpcError(
+            code=rpc_error_code_for_status(status_code),
+            message=message,
+            data={"retryable": rpc_error_is_retryable(status_code)},
+        ),
+    )
+    return JSONResponse(status_code=200, content=response.model_dump(mode="json"))
 
 # E-A2A-PROTO P1(2026-07-06): 스펙 §14.2.1 — 클라이언트는 A2A-Version 헤더를 MUST 전송.
 # 우리는 1.0만 지원(Card의 protocol_version과 동일 소스). ⚠️tradeoff(정직 문서화): 헤더
