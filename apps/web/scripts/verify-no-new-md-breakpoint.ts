@@ -22,7 +22,6 @@ export const ALLOWLIST = new Set([
   'app/(authenticated)/[ws]/[proj]/mockups/page.tsx',
   'app/(authenticated)/[ws]/[proj]/retro/[id]/page.tsx',
   'app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx',
-  'app/(authenticated)/inbox/page.tsx',
   'app/(authenticated)/settings/page.tsx',
   'app/internal-dogfood/page.tsx',
   'components/agents/agent-deployment-verification-step.tsx',
