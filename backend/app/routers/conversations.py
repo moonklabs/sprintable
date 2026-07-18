@@ -1613,6 +1613,16 @@ async def send_message(
 
     await db.flush()
 
+    # story #1993(E-KNOWLEDGE-LINK S1): org 지식 연결 레이어 — mentions 정규화 테이블 write-path.
+    # insert-only(메시지 불변 전제 — 재조정 불필요). 기존 mentioned_ids(멤버 알림) 파이프라인과
+    # 완전 별개 병행 경로(비접촉). **같은 트랜잭션**(try/except 로 삼키지 않음) — 파싱/insert 실패 시
+    # 예외가 그대로 propagate 되어 메시지 전송 전체가 롤백된다(AC4 원자성 — 아래 best-effort 블록들과
+    # 의도적으로 다른 격리 수준).
+    from app.services.mention_parser import insert_chat_mentions
+    await insert_chat_mentions(
+        db, org_id=org_id, message_id=msg.id, content=msg.content, created_by=sender.id,
+    )
+
     # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
     # S7: 반환 url→asset_id 로 JSONB asset_id 역기입(denorm·catch#4: asset_links=SSOT·JSONB=denorm).
     if body.attachments:
