@@ -100,6 +100,11 @@ def test_tool_group_mapping_examples():
     # 이 도구가 SSOT 목록에서 빠져 role-template picker/치트시트에 노출되지 않던 회귀 가드).
     # "goal" substring 매칭으로 add_goal/update_goal/list_goals와 동일 "epics" 그룹.
     assert by_tool["sprintable_transition_goal"] == "epics"
+    # story #1922: sprintable_delete_artifact — ALL_TOOL_NAMES 누락 시 KeyError(#2010과 동일
+    # 회귀 클래스, 이번엔 최초 커밋부터 등록해 애초에 발생하지 않게 함 — 이 assert는 그 보장의
+    # 회귀 가드). "artifact" substring 매칭으로 create_artifact/edit_artifact/delete_spec_pin과
+    # 동일 "canvas" 그룹.
+    assert by_tool["sprintable_delete_artifact"] == "canvas"
 
 
 # ── 엔드포인트 admin 게이트 ────────────────────────────────────────────────────

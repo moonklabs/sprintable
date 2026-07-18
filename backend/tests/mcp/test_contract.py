@@ -93,13 +93,13 @@ EXPECTED_TOOLS = {
     "sprintable_link_gate_to_task",
     # evidence (1) — E-VERIFY V0-S1
     "sprintable_add_evidence",
-    # visual artifacts (11) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
-    # 핀 저작(story 7fe16274)
+    # visual artifacts (12) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
+    # 핀 저작(story 7fe16274) + story #1922(delete_artifact, soft delete·생성자 전용)
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
     "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
-    "sprintable_delete_spec_pin",
+    "sprintable_delete_spec_pin", "sprintable_delete_artifact",
     # smoke
     "ping",
 }
@@ -113,8 +113,9 @@ def test_total_tool_count():
     # 계층 리네이밍 B1(story 1925): sprintable_*_goal 4종 신설(add/list/update/get_progress) —
     # 구 sprintable_*_epic 4종은 deprecated 별칭으로 유지(제거 아님) — 107→111.
     # story #2010: sprintable_transition_goal 1종 신설(목표 lifecycle 전이, 구 _epic 별칭 없음) —
-    # 111→112.
-    assert len(_TOOLS) == 112
+    # 111→112. story #1922: sprintable_delete_artifact 1종 신설(artifact soft delete, 생성자
+    # 전용) — 112→113.
+    assert len(_TOOLS) == 113
 
 
 def test_all_expected_tools_registered():
