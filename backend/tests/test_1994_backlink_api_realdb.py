@@ -89,60 +89,113 @@ async def _make_project(session, org_id, name="P"):
 
 
 async def _make_human_member(session, org_id, project_id):
-    """휴먼 TeamMember(project-scoped) — `has_project_access`/`accessible_project_ids_in_org`의
-    team_member 분기로 project 접근을 얻는 동시에 conversation 관련 FK(`conversation_participants
-    .member_id`/`conversations.created_by`/`conversation_messages.sender_id`가 전부
-    `team_members.id`를 참조한다)를 만족한다. `_resolve_member`(routers/conversations.py, 레거시
-    디폴트 `member_ssot_resolver_shadow=False`)는 JWT 휴먼에 대해 **TeamMember를 먼저 시도**하므로
-    `sender.id == tm.id` — 아래 helper들이 반환하는 id를 그대로 `ConversationParticipant.member_id`/
-    `Mention.created_by`에 써도 정합.
+    """휴먼 멤버 — anchor 테이블(members + org_members + project_access) 직접 write.
 
-    §fixture 하드닝(pre-existing 버그 수정, story #1994 재구현 중 발견 — B1/B2/B3와 무관하지만
-    "여전히 유효한 테스트" 판정 전 이 버그부터 봉합해야 실제로 통과/실증이 가능했다): 이전 fixture는
-    `members`+`org_members`(`ProjectAccess.member_id`, 에이전트 분기 전용 컬럼)로 휴먼 grant를
-    시도했는데, (a) `has_project_access`의 휴먼 grant 분기는 `ProjectAccess.org_member_id`를
-    요구해 어떤 backlink 인가 테스트도 실제로 authorized 경로를 실증하지 못했고(항상 403),
-    (b) `conversations`/`conversation_participants`/`conversation_messages`는 전부
-    `team_members.id` FK라 `members.id` 기반 참가자는 FK violation으로 세팅조차 안 됐다."""
-    from app.models.team import TeamMember
+    §Issue A(QA 까심 발견 — 3회차 pass): 이전 두 회차의 fixture는 `team_members`에
+    `TeamMember(...)` ORM 인스턴스를 `session.add()`+`commit()`으로 **INSERT**하려 했다. 이건
+    항상 실패해야 정상이다 — 마이그 0088(`0088_team_members_projection_view.py`)이
+    `team_members`를 물리 테이블에서 `members ⋈ project_access`(휴먼) / `members ⋈
+    agent_project_profiles`(에이전트) VIEW로 강등했고(실 테이블은 `team_members_legacy`로
+    rename), Postgres는 plain INSERT를 뷰에 허용하지 않는다("cannot insert into view").
+    직전 pass의 docstring은 이 fixture가 이미 고쳐졌다고 주장했지만 실제 코드는 여전히 뷰에
+    INSERT를 시도하고 있었다(별개의 FK/컬럼 불일치 버그를 고친 것과 혼동) — 산티아고 sabotage-
+    probe가 실 PG로 이 파일을 실행해서야 드러났다. 프로덕션 코드(`app/routers/team_members.py`
+    `create_team_member`)도 동일 원칙을 따른다: `TeamMember(...)`는 응답 shape용 transient
+    객체로만 만들고 절대 `session.add()`하지 않으며, 실제 영속은 `members`/
+    `agent_project_profiles`/`project_access` anchor로만 한다.
+
+    이 helper는 그 anchor 경로를 그대로 재현한다:
+      1. `User` 생성(JWT auth의 user_id).
+      2. `OrgMember(org_id, user_id, role='member')` 생성 — id는 0075 ID-보존 불변식의 canonical
+         값(휴먼은 `Member.id == OrgMember.id`, `_make_org_owner`와 동일 패턴).
+      3. `Member(id=om.id, type='human', ...)` — 같은 id로 신원 앵커.
+      4. `ProjectAccess(project_id=project_id, org_member_id=om.id, member_id=m.id, ...)` —
+         **양쪽 다 세팅**해야 한다: `team_members` VIEW(→ `_resolve_member`/`_can_read_conversation`/
+         conversation 참가자 FK)는 `project_access.member_id = members.id`로 조인하고,
+         `get_project_role`(project_auth.py, 여러 authz 판정의 SSOT)의 휴먼 branch는
+         `project_access.org_member_id → org_members.id → user_id`로만 매칭한다 — 하나만
+         세팅하면 다른 쪽 authz 경로가 조용히 실패(false-403)한다.
+
+    반환 `(member.id, user_id)` — `member.id`가 `conversation_participants.member_id`/
+    `mentions.created_by`/`conversation_messages.sender_id`가 실제로 참조하는 값이다(이 컬럼들에
+    걸린 FK/모델 주석의 "team_members.id"라는 표현은 뷰의 투영 id를 가리킬 뿐 — Postgres FK는
+    뷰를 타겟할 수 없고, 실제로 baseline schema.sql엔 이 컬럼들에 FK 제약 자체가 없다. 값은
+    `members.id`를 직접 쓴다)."""
+    from app.models.member import Member
+    from app.models.project import OrgMember
+    from app.models.project_access import ProjectAccess
     from app.models.user import User
 
     user_id = uuid.uuid4()
     user = User(id=user_id, email=f"h-{user_id.hex[:8]}@test.com", hashed_password="x")
     session.add(user)
     await session.commit()
-    tm = TeamMember(
-        id=uuid.uuid4(), org_id=org_id, project_id=project_id, user_id=user_id,
-        type="human", name=f"M-{user_id.hex[:6]}", role="member", is_active=True,
-    )
-    session.add(tm)
+
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user_id, role="member")
+    session.add(om)
     await session.commit()
-    return tm.id, user_id
+
+    m = Member(id=om.id, org_id=org_id, type="human", user_id=user_id, name=f"M-{user_id.hex[:6]}")
+    session.add(m)
+    await session.commit()
+
+    pa = ProjectAccess(
+        id=uuid.uuid4(), project_id=project_id, org_member_id=om.id, member_id=m.id,
+        permission="granted", role="member",
+    )
+    session.add(pa)
+    await session.commit()
+    return m.id, user_id
 
 
 async def _grant_project_access(session, org_id, project_id, user_id, role="member"):
-    """caller(기존 TeamMember 보유)에게 추가 project 접근 — TeamMember는 project-scoped 1:1
-    (project당 별도 행)이라, 새 project엔 같은 `user_id`로 새 TeamMember 행을 추가한다.
-    반환된 id는 이 새 project 스코프에서의 `sender.id`(`_resolve_member(project_id=...)`가
-    project_id로 필터링해 이 행을 정확히 찾는다) — revocation 테스트(B1)는 이 id를 삭제한다."""
-    from app.models.team import TeamMember
-    tm = TeamMember(
-        id=uuid.uuid4(), org_id=org_id, project_id=project_id, user_id=user_id,
-        type="human", name=f"grant-{user_id.hex[:6]}", role=role, is_active=True,
+    """기존 휴먼(이미 `_make_human_member`로 생성됨, `user_id`로 식별)에게 **추가** project
+    접근을 부여 — 새 `Member` 행을 만들지 않는다(휴먼은 org당 `Member` 행이 정확히 1개, 모델
+    docstring의 partial unique index로 강제). 기존 `(org_id, user_id)`의 `Member`/`OrgMember`를
+    조회해 새 `ProjectAccess` 행 하나만 insert한다(`project_id=project_id,
+    member_id=<기존 member.id>, org_member_id=<기존 org_member.id>, role=role`).
+
+    반환값은 member id(기존과 동일한 값 — "새 team-member id" 개념 자체가 anchor 아키텍처엔
+    없다, 새 grant 행이 생겼을 뿐). revocation(B1 sabotage test)은 이 member id + project_id로
+    해당 `ProjectAccess` 행 하나만 찾아 삭제한다(`_revoke_team_member` 참조)."""
+    from sqlalchemy import select
+    from app.models.member import Member
+    from app.models.project import OrgMember
+    from app.models.project_access import ProjectAccess
+
+    om = (await session.execute(
+        select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
+    )).scalars().first()
+    m = (await session.execute(
+        select(Member).where(
+            Member.org_id == org_id, Member.user_id == user_id, Member.type == "human",
+        )
+    )).scalars().first()
+
+    pa = ProjectAccess(
+        id=uuid.uuid4(), project_id=project_id, org_member_id=om.id, member_id=m.id,
+        permission="granted", role=role,
     )
-    session.add(tm)
+    session.add(pa)
     await session.commit()
-    return tm.id
+    return m.id
 
 
-async def _revoke_team_member(session, team_member_id):
-    """story #1994 B1 sabotage repro: grant 회수 = team_member 행 삭제(산티아고 스펙 문구 그대로
-    "delete the grant/team_member row"). 이후 해당 project에 caller의 접근 경로가 전혀 없으면
-    `_resolve_member(project_id=...)`가 `resolve_member()`로 폴백해 HTTPException을 raise —
-    B1 수정 전엔 이게 `_can_read_conversation`을 뚫고 나가 backlinks 전체를 poison했다."""
+async def _revoke_team_member(session, member_id, project_id):
+    """story #1994 B1 sabotage repro: grant 회수 = 그 member+project의 `ProjectAccess` 행 삭제
+    (더 이상 `team_members` 물리 행이 없으므로 "team_member 삭제"는 anchor 아키텍처에서
+    `ProjectAccess` 회수와 동형이다 — 이게 그 project에 대한 caller의 유일한 접근 경로였다면,
+    이후 `team_members` VIEW에서도 그 (member, project) 조합이 사라져
+    `_resolve_member(project_id=...)`가 `resolve_member()`로 폴백 → HTTPException(403 "No
+    access to this project")을 raise할 수 있다 — B1 수정 전엔 이게 `_can_read_conversation`을
+    뚫고 나가 backlinks 전체를 poison했다."""
     from sqlalchemy import delete as sa_delete
-    from app.models.team import TeamMember
-    await session.execute(sa_delete(TeamMember).where(TeamMember.id == team_member_id))
+    from app.models.project_access import ProjectAccess
+    await session.execute(
+        sa_delete(ProjectAccess).where(
+            ProjectAccess.member_id == member_id, ProjectAccess.project_id == project_id,
+        )
+    )
     await session.commit()
 
 
@@ -168,17 +221,33 @@ async def _make_org_owner(session, org_id):
 
 
 async def _make_agent_member(session, org_id, project_id, role="member"):
-    """TeamMember(type=agent) — conversation FK 충족 + `_conversation_has_human_participant`의
-    agent-판정(TeamMember.type='agent')도 이 테이블을 직접 쿼리하므로 동시 충족."""
-    from app.models.team import TeamMember
+    """에이전트 멤버 — `Member(type='agent')` + `AgentProjectProfile`(뷰의 agent-branch 런타임
+    조인 `agent_project_profiles.member_id = members.id`) + `ProjectAccess`(뷰가 role/color를
+    LEFT JOIN하는 곳이자, `has_project_access`의 에이전트 grant branch가 `project_access
+    .member_id = members.id AND permission='granted'`로 직접 요구하는 행 — 프로덕션
+    `write_agent_project_placement`(app/services/agent_anchor_sync.py)와 동형 3-write 패턴)."""
+    from app.models.member import AgentProjectProfile, Member
+    from app.models.project_access import ProjectAccess
 
-    tm = TeamMember(
-        id=uuid.uuid4(), org_id=org_id, project_id=project_id,
-        type="agent", name=f"agent-{uuid.uuid4().hex[:6]}", role=role, is_active=True,
+    member_id = uuid.uuid4()
+    m = Member(
+        id=member_id, org_id=org_id, type="agent", user_id=None,
+        name=f"agent-{member_id.hex[:6]}",
     )
-    session.add(tm)
+    session.add(m)
     await session.commit()
-    return tm.id
+
+    profile = AgentProjectProfile(id=uuid.uuid4(), member_id=member_id, project_id=project_id)
+    session.add(profile)
+    await session.commit()
+
+    pa = ProjectAccess(
+        id=uuid.uuid4(), project_id=project_id, org_member_id=None, member_id=member_id,
+        permission="granted", role=role,
+    )
+    session.add(pa)
+    await session.commit()
+    return member_id
 
 
 async def _make_doc(session, org_id, project_id, title="Doc", content="", deleted=False):
@@ -345,9 +414,20 @@ async def test_doc_source_backlink_visible_when_caller_has_both_target_and_sourc
 
 async def test_chat_message_source_dm_non_participant_zero_leak_with_mutation_proof():
     """AC3: caller가 참여하지 않는 DM이 target_doc을 멘션 → backlinks에서 0-leak(item-list +
-    aggregate 둘 다). 이어서 MUTATION self-check: `_can_read_conversation`을 always-True로
-    바꿔치기(authz predicate 제거) → leak 재현(RED) 확인 → 복원 → 다시 0-leak(GREEN) 확인.
-    RED가 재현되지 않으면 이 테스트가 실제로 그 가드를 검증하지 못한다는 뜻(자기증명)."""
+    aggregate 둘 다). 이어서 MUTATION self-check: authz predicate 제거 → leak 재현(RED) 확인 →
+    복원 → 다시 0-leak(GREEN) 확인. RED가 재현되지 않으면 이 테스트가 실제로 그 가드를 검증하지
+    못한다는 뜻(자기증명).
+
+    §Blocker 2 재구현 후 mutation target 변경: 이전 pass는 `app.routers.conversations
+    ._can_read_conversation`을 always-True로 패치했다 — 당시 `_resolve_readable_conversation_ids`
+    가 candidate conversation마다 이 함수를 직접 호출했기 때문에 유효한 self-check였다. 이번
+    재구현으로 그 per-conversation 호출 자체가 제거됐다(§Blocker 2 — O(N) 쿼리 oracle 근본 수정,
+    `_can_read_conversation`은 더 이상 이 hot path에서 전혀 호출되지 않는다) — 그 함수를 패치해도
+    이제 backlinks에 아무 영향이 없어 self-check가 무의미해진다(패치해도 조용히 GREEN 유지 = 가드
+    미검증). mutation target을 새 authz 결정 지점인 `app.services.backlinks
+    ._resolve_readable_conversation_ids` 자체로 옮긴다 — 이 함수를 "무조건 이 conversation을
+    readable로 반환"으로 바꿔치기해 `list_doc_backlinks`의 Phase 2 쿼리가 실제로 이 함수의 반환값에
+    의존하는지(하드코드된 별도 우회 경로가 없는지) 증명한다."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -379,10 +459,10 @@ async def test_chat_message_source_dm_non_participant_zero_leak_with_mutation_pr
             assert body["data"] == [], body
             assert body["meta"]["has_more"] is False, body["meta"]
 
-            # ── MUTATION self-check: predicate 제거 → RED(leak) 재현.
+            # ── MUTATION self-check: authz predicate 제거 → RED(leak) 재현.
             with patch(
-                "app.routers.conversations._can_read_conversation",
-                new=AsyncMock(return_value=True),
+                "app.services.backlinks._resolve_readable_conversation_ids",
+                new=AsyncMock(return_value={conv_id}),
             ):
                 resp_red = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
                 assert resp_red.status_code == 200, resp_red.text
@@ -837,9 +917,9 @@ async def test_sabotage_revoked_grant_excludes_only_that_item_not_whole_call():
             assert len(body_before["data"]) == 1, body_before
             assert body_before["data"][0]["source_id"] == str(msg.id)
 
-            # ── revoke: project_conv 접근을 회수(team_member 행 삭제) ──
+            # ── revoke: project_conv 접근을 회수(project_access 행 삭제) ──
             async with Session() as s:
-                await _revoke_team_member(s, caller_conv_tm_id)
+                await _revoke_team_member(s, caller_conv_tm_id, project_conv.id)
 
             # (b) HTTP 레벨: 전체 호출은 여전히 200, 그 item만 제외(전체 poison 안 됨).
             resp_after = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
@@ -1079,3 +1159,236 @@ async def test_sabotage_starvation_large_hidden_set_still_returns_authorized():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 3회차 pass — Issue A(fixture 근본원인) + Blocker 1(org-scope) + Blocker 2(쿼리-카운트) 필수 테스트
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ─── (1) fixture 유효성 sanity — Issue A 회귀 가드 ─────────────────────────────
+
+
+async def test_fixture_sanity_grant_actually_authorizes_not_silent_403():
+    """Issue A 회귀 가드: `_make_human_member`/`_grant_project_access`가 실제로 유효한 project
+    접근을 부여하는지 최소 단위로 직접 검증한다. Issue A(fixture가 `team_members` VIEW에 직접
+    INSERT를 시도) 재발 시, 이 테스트가 **조용한 403/빈 목록이 아니라 명시적으로** 실패해야
+    한다 — 그래서 baseline positive case에서 200 + non-empty data를 먼저 강하게 단정한다(다른
+    negative/sabotage 테스트들이 "우연히 0-leak"으로 통과하는 걸 가려내는 것과 같은 원리를
+    거꾸로 적용: 여기선 "우연히 0건이라 통과"를 막는다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            target_doc = await _make_doc(s, org.id, project.id, title="Target")
+            source_doc = await _make_doc(s, org.id, project.id, title="Source")
+            await _make_mention(s, org.id, "doc", source_doc.id, target_doc.id, created_by=caller_id)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
+            assert resp.status_code == 200, (
+                "Issue A 회귀 의심: 정상 grant 시나리오가 200이 아님(fixture가 team_members VIEW "
+                f"직접 INSERT를 다시 시도하고 있을 수 있음) — {resp.status_code} {resp.text}"
+            )
+            body = resp.json()
+            assert len(body["data"]) == 1, (
+                "Issue A 회귀 의심: grant된 caller가 자신이 접근 가능한 project의 source doc "
+                f"backlink를 못 봄(fixture가 실제로 인가를 부여하지 못하고 있음) — {body}"
+            )
+            assert body["data"][0]["source_id"] == str(source_doc.id)
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ─── (2)(3) Blocker 1: created_by/sender org-scope — 타org 해소 시 null(행은 유지) ──
+
+
+async def test_created_by_nulled_when_resolves_to_foreign_org_member():
+    """산티아고 Blocker 1: `mention.created_by`가 (오손 데이터 등으로) caller org가 아닌 다른
+    org의 member id를 가리키면, backlink 행 자체(source_id/doc 등)는 그대로 노출하되
+    `created_by`는 그 신원 요약을 null로 가려야 한다(행을 숨기는 게 아니라 신원 요약만)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_a = await _make_org(s, "Org A")
+            project_a = await _make_project(s, org_a.id)
+            caller_id, caller_user_id = await _make_human_member(s, org_a.id, project_a.id)
+            target_doc = await _make_doc(s, org_a.id, project_a.id, title="Target")
+            source_doc = await _make_doc(s, org_a.id, project_a.id, title="Source")
+
+            org_b = await _make_org(s, "Org B")
+            project_b = await _make_project(s, org_b.id)
+            foreign_id, _ = await _make_human_member(s, org_b.id, project_b.id)
+
+            await _make_mention(
+                s, org_a.id, "doc", source_doc.id, target_doc.id, created_by=foreign_id,
+            )
+
+        await _setup_app_human(app, Session, caller_user_id, org_a.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert len(body["data"]) == 1, (
+                "타org created_by가 mention 행 자체를 가림(과차단) — 행은 유지돼야 함", body,
+            )
+            item = body["data"][0]
+            assert item["source_id"] == str(source_doc.id)
+            assert item["doc"] == {"id": str(source_doc.id), "title": "Source"}
+            assert item["created_by"] is None, (
+                "Blocker 1 회귀: 타org member로 해소되는 created_by가 신원 요약(name 등)을 "
+                f"caller org로 노출함(cross-org IDOR) — {item}"
+            )
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_chat_sender_nulled_when_resolves_to_foreign_org_member():
+    """산티아고 Blocker 1: chat_message source의 `sender_id`가 caller org가 아닌 다른 org의
+    member id를 가리키면(오손 데이터), `message.sender`는 null이어야 하되 message 행 자체
+    (content_snippet 등)는 그대로 노출돼야 한다 — created_by와 동형 처리."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_a = await _make_org(s, "Org A")
+            project_a = await _make_project(s, org_a.id)
+            caller_id, caller_user_id = await _make_human_member(s, org_a.id, project_a.id)
+            target_doc = await _make_doc(s, org_a.id, project_a.id, title="Target")
+
+            org_b = await _make_org(s, "Org B")
+            project_b = await _make_project(s, org_b.id)
+            foreign_id, _ = await _make_human_member(s, org_b.id, project_b.id)
+
+            # caller가 참가자인 org_a 대화 — sender_id만 org_b 소속 member id(이상 데이터).
+            conv_id = await _make_conversation(
+                s, org_a.id, project_a.id, [caller_id], created_by=caller_id, conv_type="dm",
+            )
+            msg = await _add_message(
+                s, conv_id, foreign_id, f"[참고](entity:doc:{target_doc.id})", _t(1),
+            )
+            await _make_mention(
+                s, org_a.id, "chat_message", msg.id, target_doc.id, created_by=caller_id,
+            )
+
+        await _setup_app_human(app, Session, caller_user_id, org_a.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert len(body["data"]) == 1, (
+                "타org sender_id가 message 행 자체를 가림(과차단) — 행은 유지돼야 함", body,
+            )
+            item = body["data"][0]
+            assert item["message"]["id"] == str(msg.id)
+            assert item["message"]["conversation_id"] == str(conv_id)
+            assert item["message"]["sender"] is None, (
+                "Blocker 1 회귀: 타org member로 해소되는 sender_id가 신원 요약을 caller org로 "
+                f"노출함(cross-org IDOR) — {item}"
+            )
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ─── (4) Blocker 2: query-count amplification proof(N+1/oracle 재실증) ────────
+
+
+async def test_query_count_o1_regardless_of_hidden_conversation_count():
+    """산티아고 Blocker 2 재실증(정적분석): hidden(caller가 못 읽는) chat_message-source candidate
+    conversation 수가 1개 → 50개로 50배 늘어도, 동일한 수의 authorized item이 있는 두 시나리오의
+    backlinks GET 1회 총 DB 쿼리 수는 **동일**해야 한다 — per-conversation 루프(구 아키텍처)였다면
+    쿼리 수가 hidden 개수에 선형 비례했을 것이다(query-count/timing amplification). 이 테스트는
+    wall-clock이 아니라 이 코드베이스의 기존 N+1 가드 관례(`test_1992_unread_count_total_realdb.py`
+    등)와 동일한 SQLAlchemy `before_cursor_execute` 이벤트 쿼리-카운트 단정을 쓴다."""
+    from app.main import app
+    from sqlalchemy import event
+
+    async def _scenario(hidden_n: int, authorized_n: int) -> int:
+        engine, Session = await _session_factory()
+        try:
+            async with Session() as s:
+                org = await _make_org(s)
+                project = await _make_project(s, org.id)
+                caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+                target_doc = await _make_doc(s, org.id, project.id, title="Target")
+
+                # authorized: caller가 참가자인 DM(휴먼-휴먼) — 정상 노출 대상.
+                for i in range(authorized_n):
+                    other_id, _ = await _make_human_member(s, org.id, project.id)
+                    conv_id = await _make_conversation(
+                        s, org.id, project.id, [caller_id, other_id],
+                        created_by=caller_id, conv_type="dm",
+                    )
+                    msg = await _add_message(
+                        s, conv_id, caller_id, f"[a{i}](entity:doc:{target_doc.id})", _t(i + 1),
+                    )
+                    await _make_mention(
+                        s, org.id, "chat_message", msg.id, target_doc.id, created_by=caller_id,
+                    )
+
+                # hidden: caller 비참여 agent-only 대화(admin도 아님) — 완전 미인가.
+                for i in range(hidden_n):
+                    agent_a = await _make_agent_member(s, org.id, project.id)
+                    agent_b = await _make_agent_member(s, org.id, project.id)
+                    hconv_id = await _make_conversation(
+                        s, org.id, project.id, [agent_a, agent_b],
+                        created_by=agent_a, conv_type="dm",
+                    )
+                    hmsg = await _add_message(
+                        s, hconv_id, agent_a, f"[h{i}](entity:doc:{target_doc.id})", _t(-i - 1),
+                    )
+                    await _make_mention(
+                        s, org.id, "chat_message", hmsg.id, target_doc.id, created_by=agent_a,
+                    )
+
+            await _setup_app_human(app, Session, caller_user_id, org.id)
+            client = _client_for(app)
+
+            query_count = 0
+
+            def _count(conn, cursor, statement, parameters, context, executemany):
+                nonlocal query_count
+                query_count += 1
+
+            event.listen(engine.sync_engine, "before_cursor_execute", _count)
+            try:
+                resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks?limit=30")
+                assert resp.status_code == 200, resp.text
+                body = resp.json()
+                # no-oracle: hidden 항목 절대 노출 0 — authorized_n개만 정확히.
+                assert len(body["data"]) == authorized_n, body
+            finally:
+                event.remove(engine.sync_engine, "before_cursor_execute", _count)
+                await client.aclose()
+                app.dependency_overrides.clear()
+            return query_count
+        finally:
+            await engine.dispose()
+
+    count_1_hidden = await _scenario(hidden_n=1, authorized_n=2)
+    count_50_hidden = await _scenario(hidden_n=50, authorized_n=2)
+
+    assert count_1_hidden == count_50_hidden, (
+        "Blocker 2 회귀: hidden conversation 수(1→50)에 따라 backlinks 쿼리 수가 달라짐"
+        f"(per-conversation 루프 재도입 의심) — 1개:{count_1_hidden}회, 50개:{count_50_hidden}회"
+    )

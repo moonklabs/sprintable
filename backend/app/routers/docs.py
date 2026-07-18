@@ -696,8 +696,10 @@ async def get_doc_backlinks(
     can_read(target_doc) AND can_read(source_resource). target 접근은 여기서
     `_require_doc_project_access`(docs.py의 기존 canonical 인가 — 무권한/미존재 모두 404,
     existence 오라클 없음)로 검증한다. **source**(멘션을 발신한 chat_message/doc) 접근은
-    2-phase SQL-authz(app.services.backlinks §8②·accessible_project_ids_in_org/
-    `_can_read_conversation` 재사용)로 판정 — target doc의 project 접근을 source에 상속하지
+    2-phase SQL-authz(app.services.backlinks §8②·doc은 `accessible_project_ids_in_org`,
+    chat_message는 `_resolve_readable_conversation_ids`의 고정-개수 bulk 쿼리 — 산티아고
+    Blocker 2 이후 `_can_read_conversation`은 이 hot path에서 더 이상 호출되지 않는다)로
+    판정 — target doc의 project 접근을 source에 상속하지
     않는다(멀티프로젝트 org에서 target/source project가 다를 수 있다는 게 산티아고 리뷰가
     잡은 이전 draft의 버그이자 이 story의 근본 이유). count/has_more는 authz-embedded 단일
     쿼리 결과에서만 계산된다(no pagination oracle) — 미인가 source가 있어도 그 존재는 어디에도
