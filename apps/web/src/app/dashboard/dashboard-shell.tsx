@@ -111,7 +111,7 @@ function ScrollShell({ showTopBar, tabletCentered, children }: { showTopBar: boo
       {/* story #1958(P2-S2): <1024(lg 미만) 전용 하단 탭바 — SidebarInset의 flex-col 안에서
           scroll 컨테이너의 형제(자식 아님)로 둬야 콘텐츠가 스크롤돼도 탭바가 자기 flex row를
           유지한다(position:fixed 오버레이+패딩 보정 불요 — 시안 511bc035의 flex 레이아웃과 동형). */}
-      <MobileTabBar />
+      <MobileTabBar currentTeamMemberId={currentTeamMemberId} />
     </SidebarInset>
     </TeamPresenceToggleProvider>
     </ReleaseNotesProvider>

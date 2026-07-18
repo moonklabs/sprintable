@@ -25,6 +25,10 @@ interface ChatViewProps {
   presenceById?: Record<string, PresenceStatus>;
   // Deeplink (ade2d6d5): 진입 시 스크롤+하이라이트할 메시지 id(?messageId=). 없으면 일반 동작(하단 스크롤).
   scrollToMessageId?: string;
+  // story #1977(트랙B): #1976 read state 계약(last_read_at)의 caller 값. undefined=아직 로드
+  // 전(meta fetch 레이스, "여기부터 안읽음" 마커 계산을 그 값 도착까지 보류) · null=한 번도 안
+  // 읽음(모든 타인 메시지 앞에 마커) · string=그 시각 이후 타인 메시지 앞에 마커.
+  initialLastReadAt?: string | null;
 }
 
 interface MessageGroup {
@@ -47,7 +51,7 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
-export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', commandTargets, presenceById, scrollToMessageId }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
@@ -107,6 +111,31 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const [pullDistance, setPullDistance] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const PULL_THRESHOLD = 64;
+  // story #1977: "여기부터 안읽음" 마커 경계 — 진입 시점 initialLastReadAt에 동결(첫 정의값에서만
+  // 1회 세팅). initialLastReadAt은 meta fetch(page.tsx)와 별개 레이스로 undefined→값 순서로
+  // 도착할 수 있어 useEffect로 "처음 정의되는 순간"을 잡는다 — 그 이후로는 이 화면에서 스크롤이나
+  // mark-read가 일어나도 마커 위치가 안 움직인다(같은 방문 세션 내 유지, 재방문 시에만 재계산).
+  const [markerBoundary, setMarkerBoundary] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (markerBoundary === undefined && initialLastReadAt !== undefined) {
+      setMarkerBoundary(initialLastReadAt);
+    }
+  }, [initialLastReadAt, markerBoundary]);
+  // story #1977: mark-read 중복 POST 가드 — 이미 이 up_to까지 보냈으면 재전송 안 함(멱등이라
+  // 서버는 안전하지만, 스크롤/신규메시지마다 매번 쏘는 낭비 방지).
+  const markedReadUpToRef = useRef<string | null>(null);
+  const markRead = useCallback((upToIso: string) => {
+    if (markedReadUpToRef.current && markedReadUpToRef.current >= upToIso) return;
+    markedReadUpToRef.current = upToIso;
+    fetch(`${apiPrefix}/${threadId}/read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ up_to: upToIso }),
+    }).catch(() => {
+      // 실패 시 재시도 허용 — 다음 스크롤/신규메시지 트리거가 다시 시도(§4-3 GREATEST 래칫이라 안전).
+      markedReadUpToRef.current = null;
+    });
+  }, [apiPrefix, threadId]);
 
   const scrollToBottom = useCallback((smooth = false) => {
     bottomRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' });
@@ -151,10 +180,16 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     if (!loading && isFirstLoad.current) {
       // Deeplink (ade2d6d5): scrollToMessageId가 있으면 하단 자동스크롤을 건너뛴다
       // (scroll-to-message와 충돌 방지). 일반 진입(messageId 부재)은 기존대로 하단 스크롤.
-      if (!scrollToMessageId) scrollToBottom();
+      if (!scrollToMessageId) {
+        scrollToBottom();
+        // story #1977: 딥링크(특정 옛 메시지로 진입)가 아닌 일반 진입은 곧장 최신까지 본 것 —
+        // 마지막 메시지 시각으로 mark-read. 딥링크 경로는 스크롤로 하단 도달 시(아래 onScroll)에만.
+        const latest = messages[messages.length - 1];
+        if (latest) markRead(latest.created_at);
+      }
       isFirstLoad.current = false;
     }
-  }, [loading, scrollToBottom, scrollToMessageId]);
+  }, [loading, scrollToBottom, scrollToMessageId, messages, markRead]);
 
   // Deeplink (ade2d6d5): 언마운트 시 타이머/rAF 정리(메모리·setState-after-unmount 방지).
   useEffect(() => () => {
@@ -178,10 +213,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     // CB-S8: setTimeout 대신 ref 플래그 → render 완료 후 useEffect에서 스크롤
     if (nearBottom) {
       shouldScrollToBottomRef.current = true;
+      // story #1977: 이미 하단을 보고 있던 활성 뷰어라면 신규 메시지도 즉시 mark-read —
+      // 안 그러면 GNB/리스트 배지가 능동 열람 중에도 잠깐 튀어오른다.
+      markRead(msg.created_at);
     } else {
       setShowNewIndicator(true);
     }
-  }, [isNearBottom, clearTyping]);
+  }, [isNearBottom, clearTyping, markRead]);
 
   const handleNewMessage = useCallback((msg: ChatMessage) => {
     if (msg.memo_id !== threadId) return;
@@ -439,14 +477,21 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     }
   }, [scrollToMessageId, loading, messages, hasMore, loadingMore, handleLoadMore]);
 
-  // 스크롤을 직접 내리면 인디케이터 자동 해제
+  // 스크롤을 직접 내리면 인디케이터 자동 해제 + story #1977: 하단 근접 시 mark-read(마커를
+  // 지나 실제로 최신까지 봤을 때만 — 시안 "스크롤 하단 근접 시 POST /read up_to=최신 본 메시지").
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const onScroll = () => { if (isNearBottom()) setShowNewIndicator(false); };
+    const onScroll = () => {
+      if (isNearBottom()) {
+        setShowNewIndicator(false);
+        const latest = messages[messages.length - 1];
+        if (latest) markRead(latest.created_at);
+      }
+    };
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
-  }, [isNearBottom]);
+  }, [isNearBottom, messages, markRead]);
 
   // Auto-load when scrolled to top (IntersectionObserver watches topSentinelRef inside scrollRef)
   useEffect(() => {
@@ -468,6 +513,17 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   }, [loading, hasMore, loadingMore, handleLoadMore]);
 
   const groups = groupByDate(messages);
+
+  // story #1977: "여기부터 안읽음" 마커 위치 — markerBoundary(동결된 진입 시점 last_read_at)
+  // 이후·타인 발신(§4-1 BE unread 정의 sender IS DISTINCT FROM 나와 동형) 첫 메시지 앞.
+  // markerBoundary===undefined(아직 로드 전)면 마커 계산을 보류(오판 방지) — 값 도착 시 자동 재계산.
+  const unreadMarkerMessageId = markerBoundary === undefined ? null : (() => {
+    const boundaryMs = markerBoundary === null ? 0 : new Date(markerBoundary).getTime();
+    const firstUnread = messages.find(
+      (m) => m.created_by !== currentTeamMemberId && new Date(m.created_at).getTime() > boundaryMs,
+    );
+    return firstUnread?.id ?? null;
+  })();
 
   // CB-S9: 모바일에서 스레드 뷰로 전환 중인지 (< lg)
   const isMobileThreadView = activeThread !== null;
@@ -554,6 +610,16 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                       const isGrouped = Boolean(prev && prev.created_by === msg.created_by);
                       return (
                         <Fragment key={msg.id}>
+                          {/* story #1977: "여기부터 안읽음" — info 톤(안내), 빨강 0(시안 768e89b5 v2). */}
+                          {msg.id === unreadMarkerMessageId && (
+                            <div className="my-1 flex items-center gap-2.5" role="separator" aria-label={t('unreadMarker')}>
+                              <div className="h-px flex-1 bg-info/50" />
+                              <span className="rounded-full bg-info-tint px-3 py-0.5 text-[11px] font-bold text-info">
+                                {t('unreadMarker')}
+                              </span>
+                              <div className="h-px flex-1 bg-info/50" />
+                            </div>
+                          )}
                           <ChatBubble
                             message={msg}
                             isMine={msg.created_by === currentTeamMemberId}

@@ -26,6 +26,9 @@ interface ConversationMeta {
   // per-대화 알림 mute (270c87e6). conversation list/detail 응답의 caller `muted`
   // (#1427에서 노출)로 벨 초기 상태를 그린다. 부재 시 false로 graceful(하위호환).
   muted: boolean;
+  // story #1977(트랙B): #1976 read state 계약 — caller last_read_at. ChatView의 "여기부터
+  // 안읽음" 마커 경계로 소비(진입 시점 값만 필요, 마커는 이 화면 방문 내내 동결).
+  lastReadAt: string | null;
 }
 
 function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string): string {
@@ -60,10 +63,18 @@ export default function ConversationPage() {
       const res = await fetch(`/api/conversations?project_id=${projectId}`);
       if (!res.ok) return;
       const json = await res.json() as {
-        data: Array<{ id: string; title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean }>;
+        data: Array<{ id: string; title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean; last_read_at?: string | null }>;
       };
       const conv = json.data.find((c) => c.id === conversation_id);
-      if (conv) setMeta({ title: conv.title, type: conv.type, participants: conv.participants ?? [], muted: conv.muted ?? false });
+      if (conv) {
+        setMeta({
+          title: conv.title,
+          type: conv.type,
+          participants: conv.participants ?? [],
+          muted: conv.muted ?? false,
+          lastReadAt: conv.last_read_at ?? null,
+        });
+      }
     } catch { /* non-critical */ }
   }, [conversation_id, projectId]);
 
@@ -238,6 +249,7 @@ export default function ConversationPage() {
           commandTargets={commandTargets}
           presenceById={presenceById}
           scrollToMessageId={scrollToMessageId}
+          initialLastReadAt={meta ? meta.lastReadAt : undefined}
         />
       </div>
 

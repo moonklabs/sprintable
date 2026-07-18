@@ -8,6 +8,7 @@ import { CircleDot, Inbox, MessageSquare, Grid2x2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { GateItem } from '@/components/kanban/types';
 import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
+import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
 
 // story #1958(P2-S2, mobile-p2-p1a-story-breakdown SSOT) — 모바일 4탭 셸. <1024(lg 미만)에서만
 // 렌더되고 데스크톱 GNB(AppSidebar)를 대체한다(P2-S1의 lg:1024 SSOT와 동일 경계 — route 내
@@ -49,9 +50,14 @@ export function getActiveTabKey(pathname: string): (typeof TABS)[number]['key'] 
   return 'more';
 }
 
-export function MobileTabBar() {
+export function MobileTabBar({ currentTeamMemberId }: { currentTeamMemberId?: string }) {
   const t = useTranslations('mobileTabBar');
   const pathname = usePathname();
+  // story #1977(트랙B): GNB ③ 채팅 unread 총합(유나 시안 768e89b5 v2) — 데스크톱 사이드바
+  // 채팅 항목(app-sidebar.tsx)과 동일 훅·동일 소스. AppSidebar와 같은 이유로 currentTeamMemberId를
+  // dashboard-shell.tsx(ScrollShell)에서 prop으로 받는다 — useDashboardContext() 직접 import는
+  // MobileTabBar를 dashboard-shell.tsx가 직접 렌더하므로 순환 참조가 된다(AppSidebar와 동일 회피).
+  const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
   // 결재함 배지 = 서명 대기 수(유나 §3.1 정합) — GateInbox가 이미 쓰는 것과 동일한
   // `/api/gates?status=pending` 재사용(신규 집계 안 만듦). gate_overridden은 override 시
   // approver row status가 "overridden"으로 전이돼(gate_service.py) pending 조회에서 자동 제외
@@ -106,7 +112,13 @@ export function MobileTabBar() {
     >
       {TABS.map(({ key, href, icon: Icon, labelKey }) => {
         const active = key === activeKey;
-        const badge = key === 'approvals' && pendingCount > 0 ? pendingCount : null;
+        // story #1977: "채팅" 탭 배지 = GNB unread 총합(결재함 배지와 동일 brand, 구분은
+        // 색이 아니라 아이콘+탭 순서 — 유나 시안 768e89b5 v2 디자인 노트).
+        const badge = key === 'approvals' && pendingCount > 0
+          ? pendingCount
+          : key === 'chat' && chatUnreadTotal > 0
+            ? chatUnreadTotal
+            : null;
         return (
           <Link
             key={key}
@@ -124,7 +136,8 @@ export function MobileTabBar() {
                   aria-hidden
                   className="absolute -top-1 left-full ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-primary-foreground"
                 >
-                  {badge > 9 ? '9+' : badge}
+                  {/* story #1977: 채팅 unread 총합은 99+ 상한(시안 768e89b5 v2) — 결재함은 기존 9+ 유지 */}
+                  {key === 'chat' ? (badge > 99 ? '99+' : badge) : badge > 9 ? '9+' : badge}
                 </span>
               ) : null}
             </span>
