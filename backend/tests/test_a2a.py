@@ -839,7 +839,13 @@ async def test_unknown_method_returns_method_not_found():
 
 @pytest.mark.anyio
 async def test_rpc_requires_auth():
-    """P1-S2(story 7b93eb10): /rpc는 action-triggering이라 authed(PO 크럭스)."""
+    """P1-S2(story 7b93eb10): /rpc는 action-triggering이라 authed(PO 크럭스).
+
+    story #2003(Phase B P1-a): 인증 실패는 이제 REST status(401/403)가 아니라 JSON-RPC 2.0
+    envelope(HTTP 200 고정 + error.code=-32010 UNAUTHORIZED)으로 렌더 — get_current_user
+    Depends가 endpoint body 진입 前 raise한 HTTPException이 main.py 글로벌 핸들러의 /rpc
+    경로-분기로 이스케이프해 JSON-RPC 계약을 유지한다(회귀 아님 — 보안 판정 자체는 불변,
+    렌더 형식만 계약 통일)."""
     from app.main import app
     from app.dependencies.database import get_db
 
@@ -852,15 +858,23 @@ async def test_rpc_requires_auth():
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=_SEND_REQ)
-        assert resp.status_code in (401, 403)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["jsonrpc"] == "2.0"
+        assert body.get("result") is None
+        assert body["error"]["code"] == -32010
+        assert body["error"]["data"]["retryable"] is False
+        assert isinstance(body["error"]["code"], int)  # REST 엔벨로프 문자열 코드("UNAUTHORIZED")가 아님
     finally:
         app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
 async def test_rpc_cross_org_blocked():
-    """P1-S2(A): caller org와 다른 org의 agent에게는 404(존재 여부 누설 없이 차단) —
-    `_get_agent_member`에 org_id 검증 추가로 오늘 S20 클래스 IDOR 봉인."""
+    """P1-S2(A): caller org와 다른 org의 agent에게는 존재 여부 누설 없이 차단(`_get_agent_member`
+    에 org_id 검증 추가로 오늘 S20 클래스 IDOR 봉인) — story #2003: 이제 REST 404가 아니라
+    JSON-RPC envelope(HTTP 200 + error.code=-32011 AGENT_NOT_FOUND)으로 렌더된다. IDOR 차단
+    자체(0-row 조회)는 완전히 불변, 렌더 형식만 바뀜."""
     client, session, app = await _authed_client(uuid.uuid4())
     try:
         session.execute = AsyncMock(return_value=_result(None))  # org_id 불일치 → 조회 0행
@@ -868,7 +882,11 @@ async def test_rpc_cross_org_blocked():
         async with client as c:
             resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=_SEND_REQ)
 
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["jsonrpc"] == "2.0"
+        assert body["error"]["code"] == -32011
+        assert body["error"]["data"]["retryable"] is False
     finally:
         app.dependency_overrides.clear()
 

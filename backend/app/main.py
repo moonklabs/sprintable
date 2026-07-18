@@ -102,6 +102,15 @@ _HTTP_CODE_MAP: dict[int, str] = {
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    # story #2003(Phase B P1-a, E-A2A-PROTO): /rpc는 JSON-RPC 2.0 엔드포인트라 auth 실패
+    # (get_verified_org_id/get_current_user Depends)와 agent-not-found(_get_agent_member)가
+    # 핸들러 try/except 밖(dependency 단계/조기 호출)에서 raise 돼 REST 엔벨로프 대신 JSON-RPC
+    # error envelope으로 렌더해야 한다. 경로 정밀 매치(`is_a2a_rpc_path`)라 이 파일의 다른 라우트
+    # (agent-card.json 등)는 전혀 영향받지 않는다 — 아래 mapped/REST 분기는 그대로 유지.
+    if a2a.is_a2a_rpc_path(request.url.path):
+        message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        return await a2a.build_rpc_error_response(request, exc.status_code, message)
+
     mapped = _HTTP_CODE_MAP.get(exc.status_code, f"HTTP_{exc.status_code}")
     detail = exc.detail
     # dict detail 은 구조화 에러 의도(code/message/suggestion·retry_after 등) → error 객체로 패스스루.
@@ -138,6 +147,12 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     """예상치 못한 500 에러 — 내부 정보는 로그에만, 클라이언트엔 일반 메시지."""
     _logger.exception("Unhandled exception on %s %s: %s", request.method, request.url.path, exc)
     detail = str(exc) if settings.debug else "Internal server error"
+
+    # story #2003: /rpc의 미처리 예외도 JSON-RPC envelope으로(code=-32603 표준 Internal error,
+    # retryable=True — 5xx 분류). http_exception_handler와 동일 경로-정밀 매치.
+    if a2a.is_a2a_rpc_path(request.url.path):
+        return await a2a.build_rpc_error_response(request, 500, detail)
+
     return JSONResponse(
         status_code=500,
         content={"data": None, "error": {"code": "INTERNAL_ERROR", "message": detail}, "meta": None},
