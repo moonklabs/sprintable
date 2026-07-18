@@ -1098,6 +1098,12 @@ async def _can_read_conversation(
     "읽을 수 있는가"만 물을 때 쓴다. 404/403이 필요한 기존 호출부는 여전히
     `_authorize_message_read`를 쓴다(zero duplication — 그쪽이 이 함수를 얇게 감싼다).
 
+    **계약: 이 함수는 절대 raise하지 않는다(total boolean predicate)** — story #1994 B1
+    하드닝(산티아고 sabotage-probe): `_resolve_member`가 project-scoped 해소에서 grant-loss
+    시 HTTPException(403)을 raise할 수 있었는데, 과거엔 이게 여기서 안 잡혀 백링크 API처럼
+    행 단위 판정을 기대하는 호출부까지 통째로 poison했다. 아래 본문은 try/except HTTPException
+    로 감싸 False로 정규화한다.
+
     `_conv_project_id`: `_authorize_message_read`가 이미 조회해둔 project_id를 넘기면 동일 PK
     SELECT를 중복 실행하지 않는다(메시지 목록/단건/리플 등 hot path 성능 보존). 직접 호출부
     (백링크)는 생략 — 이 함수가 자체적으로 조회한다.
@@ -1110,26 +1116,41 @@ async def _can_read_conversation(
         if conv_project_id is None:
             return False
 
-    # owner/admin: org-level 조회(project 소속 무관 접근), member: project-level 유지
-    sender = await _resolve_member(auth, org_id, db, project_id=None)
+    # story #1994 B1 하드닝(산티아고 sabotage-probe 발견): 아래(org-level 1차 해소부터
+    # project-scoped 재확인까지)는 `_resolve_member` → `member_resolver.resolve_member`가
+    # project_id 스코프에서 HTTPException(403 "No access to this project")을 raise할 수 있다
+    # (caller가 SOURCE project 접근을 잃은 grant-loss 케이스 — 특히 두 번째 `_resolve_member`
+    # (project_id=conv_project_id) 호출이 이 경로다). 이 함수는 "raise 없는 total boolean
+    # predicate" 계약이다(백링크 API처럼 존재-비노출 오라클이 필요한 호출부가 mention 행 단위
+    # 판정에 쓴다) — raise가 새면 mention 한 행의 미인가가 전체 backlinks 응답을 poison한다(B1:
+    # 한 행 제외가 아니라 엔드포인트 전체 실패). try/except로 전 구간(첫 번째 호출 포함, 방어적
+    # superset)을 봉합 — `_authorize_message_read`(아래·기존 raise-based wrapper)는 이 함수가
+    # False를 반환하면 자신의 403을 별도로 raise하므로, 실제 메시지 엔드포인트(list/get)가
+    # 외부에 노출하는 "grant-loss ⇒ 403" 동작 자체는 그대로 유지된다(detail 문구만 "No access
+    # to this project" → "Not a participant"로 바뀔 수 있음 — 상태코드 불변, 회귀 아님).
+    try:
+        # owner/admin: org-level 조회(project 소속 무관 접근), member: project-level 유지
+        sender = await _resolve_member(auth, org_id, db, project_id=None)
 
-    # org-effective role(S-MBR-03·#1223↔SSOT뷰 갭 보정) — project role 낮아도 org owner/admin 상속
-    is_admin = await _effective_org_role(
-        auth, org_id, db, sender, project_id=conv_project_id,
-    ) in ("owner", "admin")
-    # admin이어도 휴먼 참가(private) 대화면 participant 체크 폴백(사적 DM 프라이버시)
-    if (not is_admin) or await _conversation_has_human_participant(conversation_id, db):
-        # project isolation 보존 — project 소속 member 재확인
-        sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
-        participant = (await db.execute(
-            select(ConversationParticipant.id).where(
-                ConversationParticipant.conversation_id == conversation_id,
-                ConversationParticipant.member_id == sender.id,
-            )
-        )).scalar_one_or_none()
-        if participant is None:
-            return False
-    return True
+        # org-effective role(S-MBR-03·#1223↔SSOT뷰 갭 보정) — project role 낮아도 org owner/admin 상속
+        is_admin = await _effective_org_role(
+            auth, org_id, db, sender, project_id=conv_project_id,
+        ) in ("owner", "admin")
+        # admin이어도 휴먼 참가(private) 대화면 participant 체크 폴백(사적 DM 프라이버시)
+        if (not is_admin) or await _conversation_has_human_participant(conversation_id, db):
+            # project isolation 보존 — project 소속 member 재확인
+            sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
+            participant = (await db.execute(
+                select(ConversationParticipant.id).where(
+                    ConversationParticipant.conversation_id == conversation_id,
+                    ConversationParticipant.member_id == sender.id,
+                )
+            )).scalar_one_or_none()
+            if participant is None:
+                return False
+        return True
+    except HTTPException:
+        return False
 
 
 async def _authorize_message_read(

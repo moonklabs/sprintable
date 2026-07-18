@@ -696,24 +696,22 @@ async def get_doc_backlinks(
     can_read(target_doc) AND can_read(source_resource). target 접근은 여기서
     `_require_doc_project_access`(docs.py의 기존 canonical 인가 — 무권한/미존재 모두 404,
     existence 오라클 없음)로 검증한다. **source**(멘션을 발신한 chat_message/doc) 접근은
-    항목 단위로 독립 판정(app.services.backlinks §8②·has_project_access/`_can_read_conversation`
-    재사용) — target doc의 project 접근을 source에 상속하지 않는다(멀티프로젝트 org에서
-    target/source project가 다를 수 있다는 게 산티아고 리뷰가 잡은 이전 draft의 버그이자
-    이 story의 근본 이유). count/has_more는 authz 필터를 통과한 집합에서만 계산된다(no
-    pagination oracle) — 미인가 source가 있어도 그 존재는 어디에도 드러나지 않는다.
+    2-phase SQL-authz(app.services.backlinks §8②·accessible_project_ids_in_org/
+    `_can_read_conversation` 재사용)로 판정 — target doc의 project 접근을 source에 상속하지
+    않는다(멀티프로젝트 org에서 target/source project가 다를 수 있다는 게 산티아고 리뷰가
+    잡은 이전 draft의 버그이자 이 story의 근본 이유). count/has_more는 authz-embedded 단일
+    쿼리 결과에서만 계산된다(no pagination oracle) — 미인가 source가 있어도 그 존재는 어디에도
+    드러나지 않는다.
+
+    `before`: story #1994 B3 — opaque composite cursor(base64, `(created_at, id)` 인코드).
+    클라이언트는 이전 응답의 `meta.next_cursor` 값을 그대로 되돌려주기만 하면 된다(파싱 금지 —
+    불투명 토큰). 디코드/검증은 `app.services.backlinks.decode_cursor`가 담당(손상 시 400).
     """
     await _require_doc_project_access(session, id, uuid.UUID(auth.user_id), repo.org_id)
 
-    before_dt = None
-    if before:
-        try:
-            before_dt = datetime.fromisoformat(before)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid cursor format")
-
     from app.services.backlinks import list_doc_backlinks
     return await list_doc_backlinks(
-        session, org_id=repo.org_id, doc_id=id, auth=auth, limit=limit, before=before_dt,
+        session, org_id=repo.org_id, doc_id=id, auth=auth, limit=limit, cursor=before,
     )
 
 
