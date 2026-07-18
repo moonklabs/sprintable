@@ -188,7 +188,10 @@ async def test_realdb_creator_only_403_readable_via_http():
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"], user_id=creator_id)
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Mine"})
+            create_resp = await client.post(
+                "/api/v2/visual-artifacts",
+                json={"title": "Mine", "nodes": [{"type": "text", "props": {}}]},
+            )
             artifact_id = create_resp.json()["data"]["id"]
         finally:
             await client.aclose()
@@ -236,7 +239,7 @@ async def test_realdb_mcp_create_delete_then_get_and_list_exclude():
         os.environ.setdefault("AGENT_API_KEY", "sk_test")
 
         from sprintable_mcp.tools.visual_artifacts import (
-            CreateArtifactInput, DeleteArtifactInput, GetArtifactInput, ListArtifactsInput,
+            ArtifactNodeInput, CreateArtifactInput, DeleteArtifactInput, GetArtifactInput, ListArtifactsInput,
             create_artifact, delete_artifact, get_artifact, list_artifacts,
         )
         from sprintable_mcp import api_client as api_client_mod
@@ -263,7 +266,9 @@ async def test_realdb_mcp_create_delete_then_get_and_list_exclude():
         orig_post, orig_get, orig_delete = real_client.post, real_client.get, real_client.delete
         real_client.post, real_client.get, real_client.delete = _post, _get, _delete
         try:
-            created = json.loads((await create_artifact(CreateArtifactInput(title="To Delete")))[0].text)
+            created = json.loads((await create_artifact(CreateArtifactInput(
+                title="To Delete", nodes=[ArtifactNodeInput(type="text")],
+            )))[0].text)
             artifact_id = created["id"]
 
             # 삭제 전: list에 보임.
