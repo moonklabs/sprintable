@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { DndContext, useDraggable, useDroppable, type DragEndEvent } from '@dnd-kit/core';
 import { Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
@@ -12,6 +12,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { OperatorInput, OperatorSelect, OperatorTextarea } from '@/components/ui/operator-control';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useRetroRoute } from '../retro-context';
@@ -480,7 +481,9 @@ export default function RetroSessionPage() {
     void groupItem(String(active.id), String(over.id));
   }
 
-  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  // story #1988(C): 순수 PointerSensor는 모바일 터치 스크롤을 드래그로 하이재킹한다 —
+  // kanban-board.tsx 0d142311 fix와 동일하게 터치는 드래그 활성화 자체를 배제.
+  const dndSensors = useTouchSafePointerSensor(8);
 
   async function addAction() {
     const text = newActionText.trim();
