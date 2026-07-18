@@ -57,24 +57,25 @@ export default function ConversationPage() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
 
+  // story #2009: 목록 통호출(`/api/conversations?project_id=`, default limit 30)+client
+  // `.find()` 우회를 폐기 — 대화 1건 메타 보려고 매번 최대30건치 쿼리(latest_message N+1
+  // 포함)를 낭비했고, org 대화가 30건 넘으면 최근 30건 밖 대화를 열 때 `.find()`가 undefined를
+  // 반환해 헤더가 영구 공백이었다(정합성 버그, BE #2286이 단독조회에 participants 추가해 해소).
   const fetchMeta = useCallback(async () => {
     if (!projectId) return;
     try {
-      const res = await fetch(`/api/conversations?project_id=${projectId}`);
+      const res = await fetch(`/api/conversations/${conversation_id}`);
       if (!res.ok) return;
-      const json = await res.json() as {
-        data: Array<{ id: string; title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean; last_read_at?: string | null }>;
+      const conv = await res.json() as {
+        title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean; last_read_at?: string | null;
       };
-      const conv = json.data.find((c) => c.id === conversation_id);
-      if (conv) {
-        setMeta({
-          title: conv.title,
-          type: conv.type,
-          participants: conv.participants ?? [],
-          muted: conv.muted ?? false,
-          lastReadAt: conv.last_read_at ?? null,
-        });
-      }
+      setMeta({
+        title: conv.title,
+        type: conv.type,
+        participants: conv.participants ?? [],
+        muted: conv.muted ?? false,
+        lastReadAt: conv.last_read_at ?? null,
+      });
     } catch { /* non-critical */ }
   }, [conversation_id, projectId]);
 
