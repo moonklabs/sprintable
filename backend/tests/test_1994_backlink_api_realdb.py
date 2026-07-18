@@ -418,16 +418,17 @@ async def test_chat_message_source_dm_non_participant_zero_leak_with_mutation_pr
     복원 → 다시 0-leak(GREEN) 확인. RED가 재현되지 않으면 이 테스트가 실제로 그 가드를 검증하지
     못한다는 뜻(자기증명).
 
-    §Blocker 2 재구현 후 mutation target 변경: 이전 pass는 `app.routers.conversations
-    ._can_read_conversation`을 always-True로 패치했다 — 당시 `_resolve_readable_conversation_ids`
-    가 candidate conversation마다 이 함수를 직접 호출했기 때문에 유효한 self-check였다. 이번
-    재구현으로 그 per-conversation 호출 자체가 제거됐다(§Blocker 2 — O(N) 쿼리 oracle 근본 수정,
-    `_can_read_conversation`은 더 이상 이 hot path에서 전혀 호출되지 않는다) — 그 함수를 패치해도
-    이제 backlinks에 아무 영향이 없어 self-check가 무의미해진다(패치해도 조용히 GREEN 유지 = 가드
-    미검증). mutation target을 새 authz 결정 지점인 `app.services.backlinks
-    ._resolve_readable_conversation_ids` 자체로 옮긴다 — 이 함수를 "무조건 이 conversation을
-    readable로 반환"으로 바꿔치기해 `list_doc_backlinks`의 Phase 2 쿼리가 실제로 이 함수의 반환값에
-    의존하는지(하드코드된 별도 우회 경로가 없는지) 증명한다."""
+    §4회차 재구현 후 mutation target 재변경: 3회차는 `app.services.backlinks
+    ._resolve_readable_conversation_ids`(Python이 미리 만든 readable id 집합)를 패치했다 —
+    이번 pass는 그 2-phase 헬퍼 자체를 완전히 삭제하고, chat-source 인가 판정을 메인 SQL
+    문의 WHERE절에 correlate되는 `conversation_auth.conversation_readable_predicate`
+    표현식으로 접었다(TOCTOU-by-construction). 새 mutation target은 `app.services.backlinks`
+    네임스페이스로 import된 그 함수 자체 — "무조건 readable"인 표현식(`true()`)을 반환하도록
+    바꿔치기해, 메인 쿼리가 실제로 이 predicate의 값에 의존하는지(하드코드된 별도 우회 경로가
+    없는지) 증명한다. patch target은 `app.services.conversation_auth.conversation_readable_
+    predicate`가 아니라 `app.services.backlinks.conversation_readable_predicate`(backlinks.py가
+    `from ... import conversation_readable_predicate`로 자기 네임스페이스에 바인딩한 참조) —
+    전자를 패치하면 이미 바인딩된 backlinks의 로컬 참조엔 영향이 없어 self-check가 무의미해진다."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -459,16 +460,18 @@ async def test_chat_message_source_dm_non_participant_zero_leak_with_mutation_pr
             assert body["data"] == [], body
             assert body["meta"]["has_more"] is False, body["meta"]
 
-            # ── MUTATION self-check: authz predicate 제거 → RED(leak) 재현.
+            # ── MUTATION self-check: authz predicate 제거(always-true로 치환) → RED(leak) 재현.
+            from sqlalchemy import true as _sa_true
+
             with patch(
-                "app.services.backlinks._resolve_readable_conversation_ids",
-                new=AsyncMock(return_value={conv_id}),
+                "app.services.backlinks.conversation_readable_predicate",
+                new=lambda *a, **kw: _sa_true(),
             ):
                 resp_red = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
                 assert resp_red.status_code == 200, resp_red.text
                 body_red = resp_red.json()
                 assert len(body_red["data"]) == 1, (
-                    "MUTATION 기대: _can_read_conversation 제거 시 leak 재현(RED) — "
+                    "MUTATION 기대: conversation_readable_predicate 제거 시 leak 재현(RED) — "
                     "재현 안 되면 이 테스트가 실제로 IDOR 가드를 검증하지 못하는 것"
                 )
                 assert body_red["data"][0]["source_id"] == str(msg.id)
@@ -955,8 +958,8 @@ async def test_sabotage_human_participant_privacy_carveout_survives_rewrite():
     """휴먼 참가자가 있는 group 대화 + private DM 둘 다 target_doc을 멘션 — org owner(참가자
     아님)는 admin-bypass가 적용되지 않아(휴먼 참가 = private carve-out, `_conversation_has_
     human_participant`) 두 항목 모두 못 본다. 실제 참가자는 자신이 참가한 대화(DM)의 항목을
-    정상적으로 본다. 2-phase 재구현(Phase 1b `_resolve_readable_conversation_ids`) 후에도
-    이 carve-out이 살아있는지(회귀 0) 실증."""
+    정상적으로 본다. 4회차 단일-statement 재구현(`conversation_auth.conversation_readable_
+    predicate`가 메인 SQL WHERE절에 correlate) 후에도 이 carve-out이 살아있는지(회귀 0) 실증."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -1392,3 +1395,153 @@ async def test_query_count_o1_regardless_of_hidden_conversation_count():
         "Blocker 2 회귀: hidden conversation 수(1→50)에 따라 backlinks 쿼리 수가 달라짐"
         f"(per-conversation 루프 재도입 의심) — 1개:{count_1_hidden}회, 50개:{count_50_hidden}회"
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4회차 pass — 산티아고 아키텍처 지적(재구현 자체가 드리프트 원인) 필수 테스트
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ─── (1) Blocker 1(4회차): foreign-org chat source — admin-bypass org 경계 누락 ──
+
+
+async def test_sabotage_foreign_org_chat_source_admin_bypass_excluded():
+    """산티아고 Blocker 1(4회차 재발견): org A 휴먼 owner/admin caller — org B에 agent-only
+    대화(휴먼 참가자 없음)의 메시지가 있고, `Mention.org_id=org_A.id`(호출자 org)이지만
+    `source_id`는 그 org-B 메시지를 가리키는 mention 행을 심는다(write-path 버그 또는
+    적대적/오손 데이터 시뮬레이션 — 어떻게 그 상태에 도달했든 read-time 방어가 이걸 잡아야
+    한다는 게 핵심). org A owner의 admin-bypass가 org 경계 없이 `agent_only_candidates`
+    전체에 적용됐던 3회차 버그의 정확한 재현 시나리오.
+
+    RED/GREEN 수동 검증(이 pass 구현 중 직접 확인 — `app/services/backlinks.py`의
+    `Conversation.org_id == org_id` join 조건을 임시로 `true()`로 치환하고 이 정확한 시나리오를
+    재현: RED에서 org-B 메시지 content/conversation_id가 그대로 leak됐고, 조건 복원 후 GREEN
+    (0-leak)을 재확인했다 — 커밋 히스토리/PR 본문 참조): 이 테스트는 그 GREEN 상태를 회귀
+    가드로 고정한다. admin-bypass가 org 경계 없이 통과하면 이 assert가 즉시 실패한다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_a = await _make_org(s, "Org A")
+            owner_id, owner_user_id = await _make_org_owner(s, org_a.id)
+            project_a = await _make_project(s, org_a.id)
+            target_doc = await _make_doc(s, org_a.id, project_a.id, title="Target")
+
+            org_b = await _make_org(s, "Org B")
+            project_b = await _make_project(s, org_b.id)
+            agent_a = await _make_agent_member(s, org_b.id, project_b.id)
+            agent_b = await _make_agent_member(s, org_b.id, project_b.id)
+            conv_b = await _make_conversation(
+                s, org_b.id, project_b.id, [agent_a, agent_b], created_by=agent_a, conv_type="dm",
+            )
+            msg_b = await _add_message(
+                s, conv_b, agent_a, f"[cross-org secret](entity:doc:{target_doc.id})", _t(1),
+            )
+            # mentions.org_id = 호출자 org(A) — source_id는 org B의 메시지를 가리킴(오손/adversarial).
+            await _make_mention(
+                s, org_a.id, "chat_message", msg_b.id, target_doc.id, created_by=owner_id,
+            )
+
+        await _setup_app_human(app, Session, owner_user_id, org_a.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["data"] == [], (
+                "Blocker 1(4회차) 회귀: org A owner가 admin-bypass로 org B의 agent-only 대화 "
+                f"메시지를 열람함(cross-org IDOR) — {body}"
+            )
+            assert body["meta"]["has_more"] is False, (
+                "no-oracle: 제외된 항목이 has_more/count에 흔적을 남기면 안 됨", body["meta"],
+            )
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ─── (2) Blocker 2(4회차): SSOT 구조 증명 — mentions 대상 SELECT 정확히 1회 ──
+
+
+async def test_ssot_single_select_against_mentions_proves_no_two_phase():
+    """산티아고 Blocker 2(4회차) 구조 증명: doc-source와 chat-message-source가 섞인 backlinks
+    요청 하나가 `mentions` 테이블을 대상으로 하는 SELECT를 **정확히 1회**만 실행하는지 검증한다.
+
+    증명 방식 선택 이유: `hasattr`/import-존재 체크(`_resolve_readable_conversation_ids`가
+    없다는 것만 확인)는 "그 이름의 함수가 없다"만 증명하지, "다른 이름으로 된 동형의 2-phase
+    헬퍼가 새로 안 생겼는지"는 증명하지 못한다(이름만 바뀐 재발을 못 잡음). 이 테스트는 대신
+    이 파일 전체가 이미 쓰는 `before_cursor_execute` 쿼리-카운트 이벤트 관례(B2 O(1) 증명과
+    동일 패턴)로 **"mentions 테이블을 건드리는 SELECT 개수"** 자체를 직접 세어, 그게 1이라는
+    걸 구조적으로 증명한다 — "readable id 집합을 먼저 SELECT해 Python에 들고 있다가 나중에
+    IN절에 쓰는" 어떤 형태의 2-phase 재구현이든(이름 무관) mentions 대상 SELECT가 여전히
+    1회라는 사실 자체와는 직교하므로, 대신 그 어떤 2-phase 헬퍼도 mentions를 두 번 건드리게
+    설계될 리는 없다는 점에서 이 지표가 오탐할 순 있다 — 그래서 TOCTOU의 핵심 주장(단일
+    statement = 단일 스냅샷)을 가장 직접적으로 증명하는 지표로 "**전체 응답을 만드는 데 관여한
+    모든 SELECT 중, WHERE/FROM/JOIN 어디에든 `mentions`가 등장하는 것이 정확히 1개**"를 쓴다
+    — chat-source 인가(참가자·admin-bypass)가 mentions와 **같은** 단일 statement 안에서
+    correlate돼 평가된다면 이 개수는 필연적으로 1이고, 별도 SELECT로 먼저 readable 집합을
+    만드는 어떤 구현이든(구조상 그 별도 SELECT는 mentions를 아예 참조하지 않거나 — 이 경우도
+    이 테스트가 못 잡음 — 혹은 mentions를 다시 참조하며 2회로 잡힌다는 점에서, "mentions
+    참조 SELECT가 정확히 1개"는 "메인 페이지 쿼리 자체가 mentions 스캔부터 authz까지 전부를
+    한 statement로 수행한다"는 것의 필요조건이자, 이 구현이 실제로 만족하는 충분조건이다."""
+    from app.main import app
+    from sqlalchemy import event
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            other_id, _ = await _make_human_member(s, org.id, project.id)
+            target_doc = await _make_doc(s, org.id, project.id, title="Target")
+
+            # doc-source(authorized).
+            source_doc = await _make_doc(s, org.id, project.id, title="Source Doc")
+            await _make_mention(
+                s, org.id, "doc", source_doc.id, target_doc.id, created_by=caller_id, created_at=_t(1),
+            )
+
+            # chat-source(authorized — caller가 참가자).
+            conv_id = await _make_conversation(
+                s, org.id, project.id, [caller_id, other_id], created_by=caller_id, conv_type="dm",
+            )
+            msg = await _add_message(
+                s, conv_id, other_id, f"[참고](entity:doc:{target_doc.id})", _t(2),
+            )
+            await _make_mention(s, org.id, "chat_message", msg.id, target_doc.id, created_by=other_id)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+
+        statements: list[str] = []
+
+        def _capture(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement)
+
+        event.listen(engine.sync_engine, "before_cursor_execute", _capture)
+        try:
+            resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks?limit=30")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            # 의미 있는 커버리지 확인: doc-source + chat-source 둘 다 실제로 반환됨(빈 응답으로
+            # "우연히" mentions SELECT가 스킵돼 통과하는 걸 방지).
+            assert len(body["data"]) == 2, body
+            source_types = {item["source_type"] for item in body["data"]}
+            assert source_types == {"doc", "chat_message"}, body
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", _capture)
+            await client.aclose()
+            app.dependency_overrides.clear()
+
+        mentions_selects = [sql for sql in statements if "mentions" in sql.lower()]
+        assert len(mentions_selects) == 1, (
+            "SSOT 구조 회귀(Blocker 2, 4회차): mentions 테이블을 건드리는 SELECT가 1개가 "
+            f"아님(2-phase 재구현 의심) — {len(mentions_selects)}개:\n"
+            + "\n---\n".join(mentions_selects)
+        )
+    finally:
+        await engine.dispose()

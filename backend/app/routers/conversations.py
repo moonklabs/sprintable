@@ -1091,12 +1091,17 @@ async def _can_read_conversation(
     *,
     _conv_project_id: uuid.UUID | None = None,
 ) -> bool:
-    """story #1994(E-KNOWLEDGE-LINK S2) §8②: 메시지 조회 인가의 canonical bool 술어 — 근본 설계
-    doc design-org-knowledge-mentions-backlinks §8②가 요구하는 "재사용" 대상. `_authorize_message_read`
-    (아래)의 원래 body 그대로이되, 존재하지 않는 대화/비참여자 판정 모두 raise 대신 False를
-    반환한다 — 백링크 API처럼 404/403 semantics(존재 비노출 오라클 회피)가 필요 없는 호출부가
-    "읽을 수 있는가"만 물을 때 쓴다. 404/403이 필요한 기존 호출부는 여전히
-    `_authorize_message_read`를 쓴다(zero duplication — 그쪽이 이 함수를 얇게 감싼다).
+    """story #1994(E-KNOWLEDGE-LINK S2) 4회차 pass §8②: 메시지 조회 인가의 canonical bool 술어.
+
+    실제 판정 로직(participant∧project-access-valid ∨ ¬human-participant∧admin-bypass)은
+    `app.services.conversation_auth.conversation_readable_predicate`(SSOT — 문서화된 캐노니컬
+    predicate, `app/services/backlinks.py`의 벌크 쿼리도 **같은 함수**를 호출해 SAME WHERE절에
+    correlate한다)에 있다. 이 함수는 그 앞뒤로 project_id 조회·caller 신원 해소·admin 여부
+    계산(둘 다 이 hot path의 기존 pre-fetch 관례 유지 — 성능/행동 불변)을 감싸고, 존재하지
+    않는 대화/비참여자 판정 모두 raise 대신 False를 반환하는 total-boolean 계약을 지킨다.
+    백링크 API처럼 404/403 semantics(존재 비노출 오라클 회피)가 필요 없는 호출부가 "읽을 수
+    있는가"만 물을 때 쓴다. 404/403이 필요한 기존 호출부는 여전히 `_authorize_message_read`를
+    쓴다(zero duplication — 그쪽이 이 함수를 얇게 감싼다).
 
     **계약: 이 함수는 절대 raise하지 않는다(total boolean predicate)** — story #1994 B1
     하드닝(산티아고 sabotage-probe): `_resolve_member`가 project-scoped 해소에서 grant-loss
@@ -1117,38 +1122,55 @@ async def _can_read_conversation(
             return False
 
     # story #1994 B1 하드닝(산티아고 sabotage-probe 발견): 아래(org-level 1차 해소부터
-    # project-scoped 재확인까지)는 `_resolve_member` → `member_resolver.resolve_member`가
+    # project-access 재확인까지)는 `_resolve_member` → `member_resolver.resolve_member`가
     # project_id 스코프에서 HTTPException(403 "No access to this project")을 raise할 수 있다
-    # (caller가 SOURCE project 접근을 잃은 grant-loss 케이스 — 특히 두 번째 `_resolve_member`
-    # (project_id=conv_project_id) 호출이 이 경로다). 이 함수는 "raise 없는 total boolean
-    # predicate" 계약이다(백링크 API처럼 존재-비노출 오라클이 필요한 호출부가 mention 행 단위
-    # 판정에 쓴다) — raise가 새면 mention 한 행의 미인가가 전체 backlinks 응답을 poison한다(B1:
-    # 한 행 제외가 아니라 엔드포인트 전체 실패). try/except로 전 구간(첫 번째 호출 포함, 방어적
-    # superset)을 봉합 — `_authorize_message_read`(아래·기존 raise-based wrapper)는 이 함수가
-    # False를 반환하면 자신의 403을 별도로 raise하므로, 실제 메시지 엔드포인트(list/get)가
-    # 외부에 노출하는 "grant-loss ⇒ 403" 동작 자체는 그대로 유지된다(detail 문구만 "No access
-    # to this project" → "Not a participant"로 바뀔 수 있음 — 상태코드 불변, 회귀 아님).
+    # (caller가 SOURCE project 접근을 잃은 grant-loss 케이스). 이 함수는 "raise 없는 total
+    # boolean predicate" 계약이다(백링크 API처럼 존재-비노출 오라클이 필요한 호출부가 mention
+    # 행 단위 판정에 쓴다) — raise가 새면 mention 한 행의 미인가가 전체 backlinks 응답을
+    # poison한다(B1: 한 행 제외가 아니라 엔드포인트 전체 실패). try/except로 전 구간을 봉합 —
+    # `_authorize_message_read`(아래·기존 raise-based wrapper)는 이 함수가 False를 반환하면
+    # 자신의 403을 별도로 raise하므로, 실제 메시지 엔드포인트(list/get)가 외부에 노출하는
+    # "grant-loss ⇒ 403" 동작 자체는 그대로 유지된다(상태코드 불변, 회귀 아님).
     try:
         # owner/admin: org-level 조회(project 소속 무관 접근), member: project-level 유지
         sender = await _resolve_member(auth, org_id, db, project_id=None)
 
-        # org-effective role(S-MBR-03·#1223↔SSOT뷰 갭 보정) — project role 낮아도 org owner/admin 상속
+        # org-effective role(S-MBR-03·#1223↔SSOT뷰 갭 보정, 휴먼=org owner/admin·에이전트=이
+        # project의 get_project_role owner/admin) — project role 낮아도 org owner/admin 상속.
+        # 이 값을 SSOT predicate의 `admin_bypass_eligible`로 그대로 넘긴다 — 산티아고 스펙의
+        # "human-caller-is-org-admin ∨ agent-project-admin" 두 분기를 `_effective_org_role`이
+        # 이미 캐노니컬하게 하나의 bool로 축약해 계산하고 있어(agent 분기는 get_project_role로
+        # project별 재평가) 별도 재구현이 필요 없다.
         is_admin = await _effective_org_role(
             auth, org_id, db, sender, project_id=conv_project_id,
         ) in ("owner", "admin")
-        # admin이어도 휴먼 참가(private) 대화면 participant 체크 폴백(사적 DM 프라이버시)
-        if (not is_admin) or await _conversation_has_human_participant(conversation_id, db):
-            # project isolation 보존 — project 소속 member 재확인
-            sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
-            participant = (await db.execute(
-                select(ConversationParticipant.id).where(
-                    ConversationParticipant.conversation_id == conversation_id,
-                    ConversationParticipant.member_id == sender.id,
-                )
-            )).scalar_one_or_none()
-            if participant is None:
-                return False
-        return True
+
+        # project_access_valid(B1 grant-loss recheck — "참가 당시"가 아니라 "지금" 접근 가능한가):
+        # 구현 전 `_resolve_member(project_id=conv_project_id)`가 raise-based로 검증하던 것과
+        # 동일한 근본 함수(`has_project_access` — `resolve_member`의 grant-only 휴먼 분기가
+        # 내부적으로 호출하는 바로 그 SSOT)를 boolean으로 직접 호출한다(재구현 아님). 에이전트는
+        # 기존 `_resolve_member`의 is_api_key 분기가 project_id 무관하게 TeamMember.id 매치만
+        # 확인했다(재검증 없음) — 그 기존 동작을 그대로 보존(True 고정, 행동 불변).
+        is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+        if is_api_key:
+            project_access_valid: bool = True
+        else:
+            from app.services.project_auth import has_project_access
+            project_access_valid = await has_project_access(
+                db, uuid.UUID(auth.user_id), conv_project_id, org_id,
+            )
+
+        from app.services.conversation_auth import conversation_readable_predicate
+        from sqlalchemy import literal
+
+        predicate = conversation_readable_predicate(
+            literal(conversation_id),
+            caller_member_id=sender.id,
+            project_access_valid=project_access_valid,
+            admin_bypass_eligible=is_admin,
+        )
+        result = (await db.execute(select(predicate))).scalar_one()
+        return bool(result)
     except HTTPException:
         return False
 
