@@ -27,11 +27,14 @@ EXPECTED_TOOLS = {
     # tasks (6) — E-SECURITY SEC-S1(확장): delete_task 의도적 제거(에이전트 hard-delete 차단)
     "sprintable_list_tasks", "sprintable_list_my_tasks", "sprintable_get_task",
     "sprintable_add_task", "sprintable_update_task", "sprintable_update_task_status",
-    # epics/goals (6) — E-SECURITY SEC-S1(확장): delete_epic 의도적 제거(에이전트 hard-delete
+    # epics/goals (7) — E-SECURITY SEC-S1(확장): delete_epic 의도적 제거(에이전트 hard-delete
     # 차단). 계층 리네이밍 B1(story 1925): sprintable_*_goal이 신(primary)·sprintable_*_epic은
     # 같은 핸들러를 가리키는 deprecated 별칭(hierarchy-rename-alias-mechanism-design §1).
+    # story #2010: sprintable_transition_goal 신설(목표 lifecycle 전이 전용, rename 이후 신설이라
+    # 구 _epic 별칭 없음).
     "sprintable_list_epics", "sprintable_add_epic", "sprintable_update_epic",
     "sprintable_list_goals", "sprintable_add_goal", "sprintable_update_goal",
+    "sprintable_transition_goal",
     # hypotheses (6) — E1-S5
     "sprintable_list_hypotheses", "sprintable_get_hypothesis", "sprintable_create_hypothesis",
     "sprintable_update_hypothesis", "sprintable_link_hypothesis", "sprintable_confirm_hypothesis",
@@ -109,7 +112,9 @@ def test_total_tool_count():
     # story 3cf50d90: get_chat_message(단건 원문 조회) 추가 — 106→107.
     # 계층 리네이밍 B1(story 1925): sprintable_*_goal 4종 신설(add/list/update/get_progress) —
     # 구 sprintable_*_epic 4종은 deprecated 별칭으로 유지(제거 아님) — 107→111.
-    assert len(_TOOLS) == 111
+    # story #2010: sprintable_transition_goal 1종 신설(목표 lifecycle 전이, 구 _epic 별칭 없음) —
+    # 111→112.
+    assert len(_TOOLS) == 112
 
 
 def test_all_expected_tools_registered():
