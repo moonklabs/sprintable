@@ -57,7 +57,7 @@ async function mount(props: Partial<React.ComponentProps<typeof CommandPalette>>
 describe('CommandPalette — existing navigate/search behavior (regression guard)', () => {
   it('still renders all 7 navigate destinations with no context (existing behavior untouched)', async () => {
     await mount();
-    expect(document.body.textContent).toContain('인박스로 이동');
+    expect(document.body.textContent).toContain('결재함으로 이동');
     expect(document.body.textContent).toContain('보드로 이동');
     expect(document.body.textContent).toContain('문서로 이동');
   });
