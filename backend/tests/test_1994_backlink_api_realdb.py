@@ -806,16 +806,20 @@ async def test_mention_row_with_mismatched_org_id_not_leaked():
         await engine.dispose()
 
 
-# ─── N+1 회피(Phase 1 bulk 해소 — B2 재구현 후 accessible_project_ids_in_org) ──────
+# ─── §5회차 Blocker 1: project_access_valid atom 사전 materialize 완전 소거 증명 ──
 
 
-async def test_no_n_plus_1_accessible_project_ids_call_per_request():
-    """story #1994 B2 재구현: 구 아키텍처는 "project당 1회"(메모이제이션)가 목표였지만, 새
-    2-phase 아키텍처는 그보다 강한 형태 — `accessible_project_ids_in_org`가 **요청당 정확히 1회**
-    (윈도우/라운드 재호출 0)만 호출된다. 3개의 distinct project에 걸친 authorized source doc이
-    섞여 있어도 여전히 1회임을 검증(구 테스트의 "project당 1회"보다 엄격 — project 개수 무관 O(1))."""
+async def test_no_accessible_project_ids_pre_resolve_call_bulk():
+    """story #1994 §5회차 Blocker 1 구조 증명: 4회차까지는 `accessible_project_ids_in_org`가
+    "요청당 정확히 1회" 호출되는 게 목표였다(구 N+1 회피 테스트 — 이 테스트가 대체함). 5회차는
+    그 사전 호출 자체를 완전히 없앴다 — `project_access_valid` atom이 이제 메인 statement에
+    correlated EXISTS로 직접 심겨서 별도 SELECT가 아예 존재하지 않는다(TOCTOU 윈도우 자체가
+    구조적으로 사라짐). `app.services.project_auth.accessible_project_ids_in_org`(원본 정의
+    — backlinks.py는 더 이상 이 이름을 import조차 하지 않는다)를 패치해 **0회** 호출을 단정한다.
+    3개의 distinct project에 걸친 authorized source doc이 섞여 있어도(4회차 테스트와 동일 시드)
+    여전히 0회임을 검증."""
     from app.main import app
-    import app.services.backlinks as backlinks_mod
+    import app.services.project_auth as project_auth_mod
 
     engine, Session = await _session_factory()
     try:
@@ -840,14 +844,14 @@ async def test_no_n_plus_1_accessible_project_ids_call_per_request():
         client = _client_for(app)
 
         call_count = 0
-        original = backlinks_mod.accessible_project_ids_in_org
+        original = project_auth_mod.accessible_project_ids_in_org
 
         async def _counting(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             return await original(*args, **kwargs)
 
-        with patch("app.services.backlinks.accessible_project_ids_in_org", new=_counting):
+        with patch("app.services.project_auth.accessible_project_ids_in_org", new=_counting):
             try:
                 resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks?limit=30")
                 assert resp.status_code == 200, resp.text
@@ -855,12 +859,203 @@ async def test_no_n_plus_1_accessible_project_ids_call_per_request():
             finally:
                 await client.aclose()
 
-        assert call_count == 1, (
-            f"3개 distinct project인데 accessible_project_ids_in_org가 {call_count}회 호출됨"
-            "(윈도우/라운드 재호출 재도입 의심 — B2 회귀)"
+        assert call_count == 0, (
+            f"accessible_project_ids_in_org가 {call_count}회 호출됨 — §5회차가 없앤 project_access_"
+            "valid 사전 bulk materialize가 재도입된 회귀(Blocker 1 재발, atom-level TOCTOU 윈도우 부활)"
         )
     finally:
         app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+def _psycopg2_dsn() -> str:
+    """`_REAL_DB_URL`(psycopg2/asyncpg 스킴 무관)을 plain `postgresql://` DSN으로 정규화 —
+    psycopg2.connect()는 스킴 접미사(+asyncpg/+psycopg2)를 이해 못 한다."""
+    url = _REAL_DB_URL
+    for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://"):
+        if url.startswith(prefix):
+            return "postgresql://" + url[len(prefix):]
+    return url
+
+
+async def test_sabotage_intra_statement_revoke_barrier_doc_source_project_access_valid():
+    """story #1994 §5회차 Blocker 1 — **문자 그대로**(literal) intra-statement interleave 실증.
+    메인 backlinks SELECT가 실제로 DB에 전송되기 **직전**(SQLAlchemy `before_cursor_execute` —
+    `cursor.execute()` 호출 바로 앞)에, 완전히 별개의 동기 psycopg2 커넥션으로 caller의 유일한
+    project grant를 DELETE+커밋한다. 4회차까지의 2-phase(사전 `accessible_project_ids_in_org`
+    SELECT → Python set → 메인 쿼리 `.in_()`) 아키텍처였다면 이 타이밍의 revoke는 그 사전 SELECT
+    이후에 커밋되므로 메인 쿼리가 여전히 stale 멤버십을 신뢰했을 것이다(정확히 Blocker 1이 잡은
+    TOCTOU). §5회차 구현은 `project_access_valid`가 메인 statement 자체의 correlated EXISTS라
+    이 타이밍(같은 statement 실행 시작 직전 커밋)의 revoke도 READ COMMITTED 스냅샷에 반영돼야
+    한다 — 이 테스트는 그 반영을 직접 확인한다(Python 레벨 사전 SELECT의 부재를 "증명"하는 게
+    아니라 실제 동시성 결과 자체를 실증)."""
+    from app.main import app
+    from sqlalchemy import event
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            target_doc = await _make_doc(s, org.id, project.id, title="Target")
+            source_doc = await _make_doc(s, org.id, project.id, title="Source")
+            await _make_mention(
+                s, org.id, "doc", source_doc.id, target_doc.id, created_by=caller_id, created_at=_t(1),
+            )
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+
+        revoked = {"done": False}
+
+        def _revoke_mid_statement(conn, cursor, statement, parameters, context, executemany):
+            if revoked["done"] or "mentions" not in statement.lower():
+                return
+            revoked["done"] = True
+            import psycopg2
+            pg = psycopg2.connect(_psycopg2_dsn())
+            try:
+                pg.autocommit = True
+                with pg.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM project_access WHERE member_id = %s AND project_id = %s",
+                        (str(caller_id), str(project.id)),
+                    )
+            finally:
+                pg.close()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", _revoke_mid_statement)
+        try:
+            resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", _revoke_mid_statement)
+            await client.aclose()
+            app.dependency_overrides.clear()
+
+        assert revoked["done"] is True, "revoke hook 미발동(mentions 쿼리 미탐지) — 테스트 자체 결함"
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"] == [], (
+            "Blocker 1(§5회차) 회귀: 메인 statement 실행 직전 커밋된 revoke가 doc-source "
+            f"project_access_valid atom에 반영되지 않음(stale materialize 부활) — {resp.json()}"
+        )
+    finally:
+        await engine.dispose()
+
+
+async def test_sabotage_intra_statement_revoke_barrier_chat_source_project_access_valid():
+    """위 테스트의 chat-source 짝 — `conversation_readable_predicate`에 넘기는
+    `project_access_valid`도 같은 `project_access_valid_correlated` SSOT를 쓰므로(Conversation.
+    project_id에 correlate) 동일한 intra-statement revoke barrier를 만족해야 한다. caller가
+    conversation 참가자이고(participant atom 유지) admin도 아닌 상태에서, source message가 속한
+    project에 대한 grant만 메인 쿼리 실행 직전에 revoke한다."""
+    from app.main import app
+    from sqlalchemy import event
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            other_id, _ = await _make_human_member(s, org.id, project.id)
+            target_doc = await _make_doc(s, org.id, project.id, title="Target")
+            conv_id = await _make_conversation(
+                s, org.id, project.id, [caller_id, other_id], created_by=caller_id, conv_type="dm",
+            )
+            msg = await _add_message(
+                s, conv_id, other_id, f"[참고](entity:doc:{target_doc.id})", _t(1),
+            )
+            await _make_mention(s, org.id, "chat_message", msg.id, target_doc.id, created_by=other_id)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+
+        revoked = {"done": False}
+
+        def _revoke_mid_statement(conn, cursor, statement, parameters, context, executemany):
+            if revoked["done"] or "mentions" not in statement.lower():
+                return
+            revoked["done"] = True
+            import psycopg2
+            pg = psycopg2.connect(_psycopg2_dsn())
+            try:
+                pg.autocommit = True
+                with pg.cursor() as cur:
+                    cur.execute(
+                        "DELETE FROM project_access WHERE member_id = %s AND project_id = %s",
+                        (str(caller_id), str(project.id)),
+                    )
+            finally:
+                pg.close()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", _revoke_mid_statement)
+        try:
+            resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", _revoke_mid_statement)
+            await client.aclose()
+            app.dependency_overrides.clear()
+
+        assert revoked["done"] is True, "revoke hook 미발동(mentions 쿼리 미탐지) — 테스트 자체 결함"
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"] == [], (
+            "Blocker 1(§5회차) 회귀: 메인 statement 실행 직전 커밋된 revoke가 chat-source "
+            f"project_access_valid atom(conversation_readable_predicate 경유)에 반영되지 않음 — {resp.json()}"
+        )
+    finally:
+        await engine.dispose()
+
+
+# ─── §5회차 Blocker 2: `_can_read_conversation`의 project_access_valid — agent grant-loss ──
+
+
+async def test_can_read_conversation_agent_grant_loss_atom_direct():
+    """산티아고 Blocker 2(§5회차): `_can_read_conversation`이 API-key(에이전트) caller의
+    `project_access_valid`를 `True`로 하드코딩(재검증 없음)하던 구 동작을 없애고, human과 동일하게
+    `has_project_access`를 실제로 호출하는지 **직접**(HTTP 왕복이 아니라 함수 자체) 실증한다 —
+    "어떤 status code가 뜨는가"가 아니라 predicate의 진리값 자체를 단정해 어떤 atom을 겨냥하는지
+    모호함이 없게 한다.
+
+    유효 grant 보유 시 True(과차단 회귀 아님을 함께 확인) → grant 회수(`_revoke_team_member` —
+    이 project에 대한 유일한 project_access 행 삭제, agent_project_profiles는 유지되므로
+    `_resolve_member`의 sender 해소 자체는 여전히 성공한다 — False가 sender-resolution 실패가
+    아니라 project_access_valid 재평가 자체에서 나온다는 것을 보장) 후 False."""
+    from app.routers.conversations import _can_read_conversation
+    from app.dependencies.auth import AuthContext
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            agent_id = await _make_agent_member(s, org.id, project.id)
+            conv_id = await _make_conversation(
+                s, org.id, project.id, [agent_id], created_by=agent_id, conv_type="dm",
+            )
+
+        auth = AuthContext(
+            user_id=str(agent_id), email="agent@test",
+            claims={"app_metadata": {"org_id": str(org.id), "api_key_id": str(uuid.uuid4())}},
+        )
+
+        async with Session() as s:
+            result_before = await _can_read_conversation(conv_id, s, auth, org.id)
+        assert result_before is True, (
+            "유효 grant 보유 에이전트가 자기 참가 대화를 못 읽음(과차단 회귀) — "
+            f"result={result_before}"
+        )
+
+        async with Session() as s:
+            await _revoke_team_member(s, agent_id, project.id)
+
+        async with Session() as s:
+            result_after = await _can_read_conversation(conv_id, s, auth, org.id)
+        assert result_after is False, (
+            "Blocker 2(§5회차) 회귀: 에이전트 grant 회수 후에도 _can_read_conversation이 True를 "
+            "반환함 — project_access_valid가 is_api_key=True로 하드코딩된 채 재검증 안 됨"
+        )
+    finally:
         await engine.dispose()
 
 

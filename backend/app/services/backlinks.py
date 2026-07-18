@@ -6,6 +6,29 @@ design-org-knowledge-mentions-backlinks §8.
 mention 행 단위로 독립 판정한다(target 검사를 source에 상속하지 않는다 — 산티아고 리뷰가
 잡은 갭: 멀티프로젝트 org에서 target doc project ≠ source doc project일 수 있다).
 
+## 5회차 pass — 산티아고 Blocker 1(project_access_valid atom 자체가 stale pre-resolved list)
+
+4회차는 top-level 불리언 **구조**(participant∧project_access_valid ∨ ¬human∧admin_bypass_
+eligible)를 `conversation_auth.conversation_readable_predicate`로 SSOT화했지만, 그 안의
+`project_access_valid` **atom**은 여전히 이 모듈이 메인 statement 실행 **이전**에 별도
+`accessible_project_ids_in_org(db, uid, org_id)` SELECT로 Python `set`/`list`로 materialize한
+뒤 `Doc.project_id.in_(accessible_pids)`/`Conversation.project_id.in_(accessible_pids)`로
+메인 statement에 리터럴 바인딩했다 — "판정 로직의 불리언 구조는 같은 statement·같은 스냅샷
+안에서 평가된다"는 4회차의 TOCTOU-by-construction 주장이 top-level 구조에만 해당했지,
+`project_access_valid` atom 자체에는 적용되지 않았던 것(그 사전 SELECT와 메인 statement
+사이에 grant가 revoke되면 메인 statement는 그 revoke를 못 본다 — 정확히 4회차가 없앴다고
+주장한 그 2-phase TOCTOU 클래스가 atom 레벨에서 재발).
+
+fix: `app.services.project_auth.project_access_valid_correlated`(신규) — `has_project_access`의
+4-branch WHERE-로직을 `_project_access_predicate`(SSOT)로 뽑아 SQLAlchemy Core `exists()`로
+재작성, 리터럴 project_id(has_project_access)든 outer 쿼리의 correlated 컬럼(`Doc.project_id`/
+`Conversation.project_id`)이든 **같은 함수**가 컴파일한다(문자열 템플릿 중복 타이핑 없음 —
+Core exists()가 컬럼 참조의 정체에 무관하게 동일 로직을 렌더). 이 모듈은 이제 `accessible_
+project_ids_in_org`를 전혀 호출하지 않는다 — doc-source·chat-source 양쪽 `project_access_valid`
+모두 메인 statement의 WHERE절에 직접 correlate된 EXISTS로 심는다. `admin_bypass_eligible`은
+다른 atom(caller-level 사실 — 요청당 1회 사전계산이 4회차 자체 논리로 정당함, staleness
+문제 없음 확인)이라 그대로 사전계산 유지.
+
 ## 4회차 pass — 산티아고 아키텍처 지적(재구현 자체가 드리프트 원인) 근본수정
 
 3회차의 `_resolve_readable_conversation_ids`는 "conversation을 읽을 수 있는가"를
@@ -43,16 +66,19 @@ join 자체가 실패하면 애초에 평가되지 않는다).
 
 ## 캐노니컬 predicate 재사용(재구현 0, §8②)
 
-  · doc source  ⇒ `accessible_project_ids_in_org`(project_auth.py — `has_project_access`와
-    동일 3-way grant∪team_member∪owner-admin EXISTS의 **bulk** 형태. docs.py
-    `_require_doc_project_access`가 쓰는 per-project SSOT를 요청당 1회 집합으로 해소).
+  · doc source  ⇒ `project_access_valid_correlated(Doc.project_id, ...)`(project_auth.py —
+    `has_project_access`와 **같은** `_project_access_predicate` SSOT를 `Doc.project_id`에
+    correlate. §5회차부터 사전 bulk SELECT 없음 — 메인 statement 안에서 행마다 correlated
+    EXISTS로 평가).
   · chat_message source ⇒ `conversation_auth.conversation_readable_predicate`(위 §4회차
-    참조) — `project_access_valid`엔 위와 **같은** `accessible_pids` 집합을 재사용(참가자
-    grant-loss recheck을 doc-source와 동일 SSOT로 통일 — 별도 헬퍼 없음), `admin_bypass_
-    eligible`엔 호출부가 요청당 정확히 1회 해소한 caller-level 사실(휴먼=org owner/admin
-    bool, 에이전트=owner/admin grant를 가진 project id 집합)을 넘긴다. 두 값 모두 candidate
-    개수 N과 무관한 고정 쿼리 수로 계산되므로(Blocker 2 — 아래 참조), predicate 평가 자체는
-    Python 루프/추가 쿼리 없이 메인 statement 안에서 끝난다.
+    참조) — `project_access_valid`엔 `project_access_valid_correlated(Conversation.project_id,
+    ...)`(doc-source와 동일 SSOT 호출, `Conversation.project_id`에 correlate)를 넘긴다,
+    `admin_bypass_eligible`엔 호출부가 요청당 정확히 1회 해소한 caller-level 사실(휴먼=org
+    owner/admin bool, 에이전트=owner/admin grant를 가진 project id 집합)을 넘긴다.
+    `project_access_valid`는 이제 candidate 개수 N과 무관한 게 아니라 **행마다 correlated
+    서브쿼리로 재평가**된다(단일 메인 statement 안에서 — 별도 쿼리/왕복 없음, 아래 Blocker 2
+    갱신 참조). `admin_bypass_eligible`만 여전히 요청당 1회 사전계산(다른 atom, staleness
+    문제 없음).
 
 ## 산티아고 정적분석 Blocker 2(2·3회차, per-conversation timing/query-count oracle) — 근본 해소
 
@@ -60,11 +86,19 @@ join 자체가 실패하면 애초에 평가되지 않는다).
 `_can_read_conversation` 호출)를 냈다. 4회차는 애초에 "readable conversation id 집합"이라는
 개념 자체를 없앴다 — candidate conversation을 나열하는 쿼리조차 존재하지 않는다(메인
 statement가 mentions→conversation_messages→conversations JOIN으로 필요한 후보만 이미
-스캔한다). 요청당 정확히 1회씩만 실행되는 것은: `accessible_project_ids_in_org`(doc+chat
-공용), caller 신원 해소(`_resolve_member`, 1~2 SELECT), admin-bypass 사실 해소(휴먼=
-`is_org_owner_or_admin` 1회, 에이전트=owner/admin grant project id bulk 1회) — 전부 candidate
-개수 N과 무관한 고정 쿼리 수(O(1)). 메인 페이지 쿼리 1회 + 최종 페이지 행의 sender/created_by
-배치 해소 1회(N+1 없음, 기존 관례 유지)를 더해도 요청당 쿼리 수는 여전히 N-무관 상수.
+스캔한다). §5회차: `accessible_project_ids_in_org` 사전 SELECT까지 제거돼(Blocker 1 fix —
+`project_access_valid`가 이제 메인 statement 내부의 correlated EXISTS), 왕복 쿼리 수는 4회차
+대비 **1개 더 줄었다**. 요청당 정확히 1회씩만 실행되는 것은: 캐너 신원 해소(`_resolve_member`,
+1~2 SELECT), admin-bypass 사실 해소(휴먼= `is_org_owner_or_admin` 1회, 에이전트=owner/admin
+grant project id bulk 1회) — 전부 candidate 개수 N과 무관한 고정 쿼리 수(O(1), round-trip 기준).
+`project_access_valid`는 더 이상 별도 쿼리가 아니라 메인 페이지 쿼리 1개의 SQL 텍스트 안에
+correlated 서브쿼리(EXISTS)로 인라인된다 — PostgreSQL 플래너가 그 서브쿼리를 후보 행마다
+재평가하지만, 이는 **네트워크 왕복(round-trip)이 아니라 단일 statement 내부 실행 비용**이므로
+"쿼리 수(round-trip count)" O(1) 불변식은 그대로 유지된다(round-trip count와 단일 statement의
+내부 SQL 실행 계획 복잡도는 별개 축 — §8③④ no-oracle 불변식은 round-trip/응답 shape 기준이라
+영향 없음). 메인 페이지 쿼리 1회 + 최종 페이지 행의 sender/created_by 배치 해소 1회(N+1 없음,
+기존 관례 유지)를 더해도 요청당 **round-trip** 쿼리 수는 4회차의 7에서 **6**으로 줄었다(아래
+구조적 증명 테스트 참조 — `accessible_project_ids_in_org` 사전 SELECT 소멸분).
 
 Phase 2 SQL — **단일** 쿼리로 인가+doc/chat 두 source-type join+keyset 페이지네이션
 (`(created_at DESC, id DESC)` 복합 정렬 + opaque composite cursor — B3, 아래 참조)을 모두
@@ -121,8 +155,8 @@ from app.models.project_access import ProjectAccess
 from app.services.conversation_auth import conversation_readable_predicate
 from app.services.member_resolver import ResolvedMember, lookup_members_by_ids
 from app.services.project_auth import (
-    accessible_project_ids_in_org,
     is_org_owner_or_admin,
+    project_access_valid_correlated,
 )
 
 _SNIPPET_MAX = 160
@@ -175,7 +209,6 @@ async def _chat_predicate_inputs(
     db: AsyncSession,
     org_id: uuid.UUID,
     auth: AuthContext,
-    accessible_pids: set[uuid.UUID],
 ):
     """§4회차: 메인 쿼리의 chat-source WHERE절에 correlate할 `conversation_readable_predicate`
     입력(caller_member_id·admin_bypass_eligible)을 **요청당 정확히 1회**(candidate 개수 N과
@@ -183,6 +216,12 @@ async def _chat_predicate_inputs(
     conversation을 단 하나도 조회하지 않는다("readable id 집합"이라는 개념이 이제 없다) — caller
     가 누구인지·admin인지만 O(1)로 알아낸다. 반환값은 그대로 `conversation_readable_predicate`에
     넘겨져 메인 statement의 correlated EXISTS/`.in_()` 표현식으로 컴파일된다.
+
+    §5회차(산티아고 Blocker 1): `project_access_valid` atom은 이 함수가 다루지 않는다 — 그건
+    `list_doc_backlinks`가 `project_access_valid_correlated(Conversation.project_id, ...)`를
+    메인 statement에 직접 correlate해 심는다(별도 사전 SELECT 없음). 이 함수는 여전히
+    admin_bypass_eligible(caller-level 사실, O(1) 사전계산이 정당한 이유는 모듈 docstring 참조)만
+    다룬다.
 
     caller 신원 해소가 실패하면(HTTPException — grant-loss/orphan 등, `_can_read_conversation`의
     "절대 raise하지 않는다" 계약과 동일 정신) `caller_member_id=None`을 반환해 호출부가 chat-source
@@ -249,24 +288,28 @@ async def list_doc_backlinks(
     if cursor:
         cursor_key = decode_cursor(cursor)
 
-    # ── 요청당 정확히 1회, candidate 개수 N과 무관하게 해소하는 caller-level 사실들
-    #    (doc-source·chat-source 공용 accessible_pids + chat-source 전용 admin-bypass 사실) ──
+    # ── 요청당 정확히 1회, candidate 개수 N과 무관하게 해소하는 caller-level 사실(admin-bypass) ──
+    # §5회차(산티아고 Blocker 1): `project_access_valid`는 더 이상 여기서 사전 SELECT/materialize
+    # 하지 않는다 — `project_access_valid_correlated(...)`를 메인 statement의 WHERE절에 직접
+    # correlate해 심는다(아래 stmt 참조). caller-level admin-bypass 사실만 O(1) 사전계산(round 4
+    # 근거 그대로 — 별개 atom, staleness 문제 없음: admin 여부는 project별 project_access_valid와
+    # 달리 room/grant revoke 타이밍에 좌우되지 않는 caller 신원 사실).
     uid = uuid.UUID(str(auth.user_id))
-    accessible_pids_set = set(await accessible_project_ids_in_org(db, uid, org_id))
-    accessible_pids = list(accessible_pids_set)
 
-    caller_member_id, admin_bypass_eligible = await _chat_predicate_inputs(
-        db, org_id, auth, accessible_pids_set,
-    )
+    caller_member_id, admin_bypass_eligible = await _chat_predicate_inputs(db, org_id, auth)
     if caller_member_id is None:
         chat_predicate = sa_false()
     else:
         chat_predicate = conversation_readable_predicate(
             Conversation.id,
             caller_member_id=caller_member_id,
-            # B1 grant-loss recheck: doc-source와 **같은** accessible_pids 집합 재사용(참가
-            # 당시 스냅샷이 아니라 caller가 지금 그 project에 접근 가능한지) — 별도 헬퍼 없음.
-            project_access_valid=Conversation.project_id.in_(accessible_pids),
+            # §5회차 Blocker 1 fix: 별도 사전 SELECT로 만든 project id 집합의 `.in_()` 멤버십이
+            # 아니라, 메인 statement와 **같은 스냅샷**에서 평가되는 correlated EXISTS(doc-source의
+            # `project_access_valid_correlated(Doc.project_id, ...)`와 동일 SSOT 호출) —
+            # TOCTOU-by-construction을 project_access_valid atom에도 적용.
+            project_access_valid=project_access_valid_correlated(
+                Conversation.project_id, caller_id=uid, org_id=org_id,
+            ),
             admin_bypass_eligible=admin_bypass_eligible,
         )
 
@@ -317,7 +360,9 @@ async def list_doc_backlinks(
             or_(
                 and_(
                     Mention.source_type == "doc",
-                    Doc.project_id.in_(accessible_pids),
+                    # §5회차 Blocker 1 fix: 사전 IN-list가 아니라 correlated EXISTS(같은 statement
+                    # ·같은 스냅샷 — 위 chat-source project_access_valid와 동일 SSOT 호출).
+                    project_access_valid_correlated(Doc.project_id, caller_id=uid, org_id=org_id),
                 ),
                 and_(
                     Mention.source_type == "chat_message",

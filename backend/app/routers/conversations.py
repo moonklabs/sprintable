@@ -1091,7 +1091,7 @@ async def _can_read_conversation(
     *,
     _conv_project_id: uuid.UUID | None = None,
 ) -> bool:
-    """story #1994(E-KNOWLEDGE-LINK S2) 4회차 pass §8②: 메시지 조회 인가의 canonical bool 술어.
+    """story #1994(E-KNOWLEDGE-LINK S2) 4~5회차 pass §8②: 메시지 조회 인가의 canonical bool 술어.
 
     실제 판정 로직(participant∧project-access-valid ∨ ¬human-participant∧admin-bypass)은
     `app.services.conversation_auth.conversation_readable_predicate`(SSOT — 문서화된 캐노니컬
@@ -1146,19 +1146,22 @@ async def _can_read_conversation(
         ) in ("owner", "admin")
 
         # project_access_valid(B1 grant-loss recheck — "참가 당시"가 아니라 "지금" 접근 가능한가):
-        # 구현 전 `_resolve_member(project_id=conv_project_id)`가 raise-based로 검증하던 것과
-        # 동일한 근본 함수(`has_project_access` — `resolve_member`의 grant-only 휴먼 분기가
-        # 내부적으로 호출하는 바로 그 SSOT)를 boolean으로 직접 호출한다(재구현 아님). 에이전트는
-        # 기존 `_resolve_member`의 is_api_key 분기가 project_id 무관하게 TeamMember.id 매치만
-        # 확인했다(재검증 없음) — 그 기존 동작을 그대로 보존(True 고정, 행동 불변).
-        is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
-        if is_api_key:
-            project_access_valid: bool = True
-        else:
-            from app.services.project_auth import has_project_access
-            project_access_valid = await has_project_access(
-                db, uuid.UUID(auth.user_id), conv_project_id, org_id,
-            )
+        # `has_project_access`(project_auth.py SSOT)를 boolean으로 직접 호출한다(재구현 아님).
+        #
+        # §5회차(산티아고 Blocker 2): 예전엔 API-key(에이전트) caller에게 `project_access_valid`를
+        # `True`로 하드코딩하고 재검증을 생략했다("기존 `_resolve_member`의 is_api_key 분기가
+        # project_id 무관하게 TeamMember.id 매치만 확인했다"는 이유로 그 동작을 "보존"한 것 — 그러나
+        # 산티아고 지적대로 이 "보존된" 동작 자체가 버그였다: grant가 회수된 에이전트도 여기선 계속
+        # `project_access_valid=True`를 받아, 같은 caller/project 쌍에 대해 `backlinks.py`(항상 live
+        # grant set을 correlate)와 이 함수(항상 True)가 서로 다른 답을 내는 "사실 하나·구현 둘" 드리프트가
+        # 있었다. `has_project_access`의 4-branch WHERE는 이미 caller type별로 내부 분기한다
+        # (`tm.type='human'` team_member 분기 vs `m.type='agent'` project_access grant 분기) —
+        # human/agent 무관하게 그냥 호출하면 두 caller 모두 정확한 답을 받는다(Python 레벨
+        # is_api_key 분기 자체가 불필요 — 재구현 0, project_auth.py가 이미 caller-type-aware SSOT).
+        from app.services.project_auth import has_project_access
+        project_access_valid = await has_project_access(
+            db, uuid.UUID(auth.user_id), conv_project_id, org_id,
+        )
 
         from app.services.conversation_auth import conversation_readable_predicate
         from sqlalchemy import literal
