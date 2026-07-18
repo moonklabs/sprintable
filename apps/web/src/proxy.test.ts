@@ -14,12 +14,14 @@ import { proxy as middleware } from './proxy';
 
 const JWT_SECRET = 'test-secret-for-proxy-tests';
 
-async function makeAccessToken(overrides: { exp?: number; type?: string; orgId?: string } = {}): Promise<string> {
+async function makeAccessToken(overrides: { exp?: number; type?: string; orgId?: string; projectId?: string } = {}): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   return new SignJWT({
     type: overrides.type ?? 'access',
     email: 'test@example.com',
-    ...(overrides.orgId ? { app_metadata: { org_id: overrides.orgId } } : {}),
+    ...((overrides.orgId || overrides.projectId)
+      ? { app_metadata: { ...(overrides.orgId ? { org_id: overrides.orgId } : {}), ...(overrides.projectId ? { project_id: overrides.projectId } : {}) } }
+      : {}),
   })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject('user-123')
@@ -424,6 +426,39 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
       expect(response.headers.get('location')).toBe(`https://app.example.com/moonklabs/sprintable/${resource}`);
     },
   );
+
+  it('story #1999: CURRENT_PROJECT_COOKIE 부재(평범한 로그인 직후) 시 access token app_metadata.project_id로 fallback — 여전히 301', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/organizations/org-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      }
+      if (url.includes('/api/v2/projects/proj-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    // 쿠키 없이 sp_at만 — 온보딩/switch-project를 거치지 않은 순수 로그인 세션 재현.
+    const response = await middleware(makeRequest('/board?story=abc', { sp_at: token }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/board?story=abc');
+  });
+
+  it('story #1999: 쿠키와 JWT project_id가 다르면 쿠키 우선(명시 switch-project 결과 존중)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-old' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/organizations/org-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      }
+      if (url.includes('/api/v2/projects/proj-new')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-new', slug: 'newer-project' }) });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const response = await middleware(makeRequest('/board', { sp_at: token, sprintable_current_project_id: 'proj-new' }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/newer-project/board');
+  });
 
   it('이관 안 된 리소스(예: /meetings — dead feature, S-route-project 스코프 밖)는 개입 없이 통과 — MIGRATED_RESOURCES 밖', async () => {
     // story a539c649 S3d: board는 이관 완료(MIGRATED_RESOURCES 편입)라 이 예시로 더 이상 부적합
