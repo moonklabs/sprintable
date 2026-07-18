@@ -300,6 +300,77 @@ def project_access_valid_correlated(
     return _project_access_predicate(project_id_col, user_id=caller_id, org_id=org_id)
 
 
+def org_admin_valid_correlated(
+    caller_id: "ColumnElement | uuid.UUID",
+    org_id: uuid.UUID,
+) -> ColumnElement:
+    """story #1994(E-KNOWLEDGE-LINK S2) 6회차(마지막 atom) pass: `admin_bypass_eligible`의
+    **휴먼** 분기 — `is_org_owner_or_admin`과 정확히 같은 판정(org_members.role IN owner/admin,
+    deleted_at IS NULL, org_id 일치)을 요청 시작 시 별도 SELECT로 사전 계산해 bool 리터럴로
+    박아넣는 대신, 메인 statement의 WHERE절에 직접 correlate할 수 있는 `exists()` 표현식으로
+    노출한다. 5회차가 `project_access_valid` atom에 적용했던 "pre-resolve 사전 SELECT → 메인
+    statement 안 correlated EXISTS" 전환을, 이번엔 `admin_bypass_eligible` atom에도 동형으로
+    적용한다(같은 버그 클래스, 마지막 atom).
+
+    `is_org_owner_or_admin`(SELECT 1 ... LIMIT 1 스칼라 호출부)은 이 함수와 별개로 그대로
+    유지한다 — 코드베이스 전역 15+ 콜사이트(gates.py/projects.py/agents.py 등)가 "즉시 awaited
+    bool"을 기대하는 destructive-action 게이트라 correlated 표현식으로 바꿀 이유가 없다(그
+    콜사이트들은 애초에 벌크/per-row 쿼리에 embed되지 않는다 — staleness 문제 자체가 없음).
+    이 함수는 오직 `conversation_readable_predicate`/`backlinks.py` 메인 statement처럼 "다른
+    쿼리의 WHERE절 안에서 같은 스냅샷으로 평가돼야 하는" 소비자를 위한 것이다.
+    """
+    return (
+        select(1)
+        .select_from(OrgMember)
+        .where(
+            OrgMember.user_id == caller_id,
+            OrgMember.role.in_(("owner", "admin")),
+            OrgMember.deleted_at.is_(None),
+            OrgMember.org_id == org_id,
+        )
+        .exists()
+    )
+
+
+def project_admin_valid_correlated(
+    project_id_col: ColumnElement,
+    *,
+    caller_id: "ColumnElement | uuid.UUID",
+    org_id: uuid.UUID,
+) -> ColumnElement:
+    """story #1994 6회차(마지막 atom) pass: `admin_bypass_eligible`의 **에이전트** 분기 — caller가
+    `project_id_col`(outer 쿼리의 correlated 컬럼, 예: `Conversation.project_id`)에 대해
+    owner/admin `project_access` grant를 갖고 있는지를 correlated `exists()`로 표현한다.
+
+    이전엔 `backlinks.py`가 이 사실을 요청당 1회 별도 bulk SELECT(`ProjectAccess.project_id
+    ... role IN (owner,admin) ... permission='granted' ...`)로 Python `set[UUID]`에
+    materialize한 뒤 `Conversation.project_id.in_(admin_project_ids)`로 메인 statement에 리터럴
+    바인딩했다 — 그 사전 SELECT와 메인 statement 사이에 grant가 revoke되면 메인 statement는
+    그 revoke를 못 본다(5회차가 `project_access_valid` atom에서 이미 근절한 것과 정확히 같은
+    TOCTOU 클래스가 `admin_bypass_eligible` atom에 남아 있었다). 이 함수는 그 사전 SELECT를
+    아예 없애고, 같은 판정 로직을 메인 statement의 WHERE절에 직접 correlate되는 EXISTS로
+    렌더한다 — `project_access_valid_correlated`와 구조적으로 동일한 패턴(다만 role 필터가
+    "granted 아무 역할"이 아니라 `owner`/`admin`으로 좁혀짐).
+
+    `org_id` 스코프(`Project.org_id == org_id`)는 원본 bulk SELECT가 이미 명시했던 것과 동일 —
+    write-path 불변식만 믿지 않고 read-time에도 grant가 caller org 소속 project를 가리키는지
+    재검증한다(이 story 반복 교훈, `_project_access_predicate`의 org-scope 원칙과 동형).
+    """
+    return (
+        select(1)
+        .select_from(ProjectAccess)
+        .join(Project, Project.id == ProjectAccess.project_id)
+        .where(
+            ProjectAccess.project_id == project_id_col,
+            ProjectAccess.member_id == caller_id,
+            ProjectAccess.role.in_(("owner", "admin")),
+            ProjectAccess.permission == "granted",
+            Project.org_id == org_id,
+        )
+        .exists()
+    )
+
+
 async def has_project_access(
     session: AsyncSession,
     user_id: uuid.UUID,

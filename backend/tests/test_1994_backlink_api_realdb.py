@@ -329,6 +329,32 @@ async def _setup_app_human(app, Session, user_id, org_id):
     app.dependency_overrides[get_current_user] = _auth
 
 
+async def _setup_app_agent(app, Session, agent_member_id, org_id):
+    """§6회차: API-key(에이전트) caller로 HTTP 레벨 backlinks 호출을 실증하기 위한 헬퍼
+    (`_setup_app_human`의 에이전트 짝) — `claims.app_metadata.api_key_id`를 채워
+    `_resolve_member`/`_chat_predicate_inputs`의 `is_api_key` 분기가 타도록 한다."""
+    from app.dependencies.auth import AuthContext, get_current_user
+    from app.dependencies.database import get_db
+
+    async def _db():
+        async with Session() as s:
+            try:
+                yield s
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+
+    async def _auth():
+        return AuthContext(
+            user_id=str(agent_member_id), email="agent@test",
+            claims={"app_metadata": {"org_id": str(org_id), "api_key_id": str(uuid.uuid4())}},
+        )
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = _auth
+
+
 T0 = datetime(2026, 7, 17, 8, 0, 0, tzinfo=timezone.utc)
 
 
@@ -1002,6 +1028,172 @@ async def test_sabotage_intra_statement_revoke_barrier_chat_source_project_acces
         assert resp.json()["data"] == [], (
             "Blocker 1(§5회차) 회귀: 메인 statement 실행 직전 커밋된 revoke가 chat-source "
             f"project_access_valid atom(conversation_readable_predicate 경유)에 반영되지 않음 — {resp.json()}"
+        )
+    finally:
+        await engine.dispose()
+
+
+# ─── §6회차(마지막 atom): admin_bypass_eligible intra-statement revoke barrier ─────
+
+
+async def test_sabotage_intra_statement_revoke_barrier_human_admin_bypass_eligible():
+    """story #1994 §6회차(마지막 atom) — admin_bypass_eligible의 **휴먼** 분기 intra-statement
+    revoke barrier(위 project_access_valid 짝 테스트와 동일 기법, `admin_bypass_eligible`
+    atom 겨냥). caller는 org owner이고, 참가하지 않는 agent-only 대화(휴먼 참가자 없음)의
+    메시지가 target_doc을 멘션한다(admin-bypass eligible — participant 아님에도 노출).
+    baseline으로 200 + item 노출을 먼저 확인한 뒤, 메인 backlinks SELECT가 실제로 DB에
+    전송되기 **직전**(`before_cursor_execute`)에 완전히 별개의 동기 psycopg2 커넥션으로
+    caller의 org role을 owner→member로 강등(UPDATE org_members)한다.
+
+    5회차까지의 아키텍처였다면 `admin_bypass_eligible`은 요청 시작 시 `is_org_owner_or_admin`
+    1회 SELECT로 미리 확정돼(`True`) 메인 statement에 bool 리터럴로 바인딩됐다 — 이 타이밍의
+    revoke는 그 사전 SELECT **이후**에 커밋되므로 메인 statement가 여전히 stale `True`를
+    신뢰했을 것이다(project_access_valid가 5회차 이전에 가졌던 것과 정확히 같은 TOCTOU
+    클래스, atom만 다름). 6회차 구현은 `admin_bypass_eligible`이 메인 statement 자체의
+    correlated EXISTS(`org_admin_valid_correlated`)라 이 타이밍의 revoke도 READ COMMITTED
+    스냅샷에 반영돼야 한다 — 이 테스트는 그 반영을 직접 확인한다."""
+    from app.main import app
+    from sqlalchemy import event
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            owner_id, owner_user_id = await _make_org_owner(s, org.id)
+            target_doc = await _make_doc(s, org.id, project.id, title="Target")
+
+            # caller(owner)가 참가하지 않는 agent-only 대화(휴먼 참가자 없음) — admin-bypass로만 노출.
+            agent_a = await _make_agent_member(s, org.id, project.id)
+            agent_b = await _make_agent_member(s, org.id, project.id)
+            conv_id = await _make_conversation(
+                s, org.id, project.id, [agent_a, agent_b], created_by=agent_a, conv_type="dm",
+            )
+            msg = await _add_message(
+                s, conv_id, agent_a, f"[T](entity:doc:{target_doc.id})", _t(1),
+            )
+            await _make_mention(s, org.id, "chat_message", msg.id, target_doc.id, created_by=agent_a)
+
+        await _setup_app_human(app, Session, owner_user_id, org.id)
+        client = _client_for(app)
+
+        # ── baseline: owner가 org owner라 admin-bypass 적용 — 정상 노출(과차단 아님을 확인).
+        resp_before = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
+        assert resp_before.status_code == 200, resp_before.text
+        assert len(resp_before.json()["data"]) == 1, (
+            "baseline: org owner가 admin-bypass로 agent-only 대화를 못 봄(과차단 회귀)",
+            resp_before.json(),
+        )
+
+        revoked = {"done": False}
+
+        def _revoke_mid_statement(conn, cursor, statement, parameters, context, executemany):
+            if revoked["done"] or "mentions" not in statement.lower():
+                return
+            revoked["done"] = True
+            import psycopg2
+            pg = psycopg2.connect(_psycopg2_dsn())
+            try:
+                pg.autocommit = True
+                with pg.cursor() as cur:
+                    cur.execute(
+                        "UPDATE org_members SET role = 'member' WHERE id = %s AND org_id = %s",
+                        (str(owner_id), str(org.id)),
+                    )
+            finally:
+                pg.close()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", _revoke_mid_statement)
+        try:
+            resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", _revoke_mid_statement)
+            await client.aclose()
+            app.dependency_overrides.clear()
+
+        assert revoked["done"] is True, "revoke hook 미발동(mentions 쿼리 미탐지) — 테스트 자체 결함"
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"] == [], (
+            "§6회차 회귀: 메인 statement 실행 직전 커밋된 org role revoke(owner→member)가 "
+            f"admin_bypass_eligible(휴먼 분기) atom에 반영되지 않음(stale pre-resolve 부활) — {resp.json()}"
+        )
+    finally:
+        await engine.dispose()
+
+
+async def test_sabotage_intra_statement_revoke_barrier_agent_admin_bypass_eligible():
+    """위 테스트의 **에이전트** 분기 짝 — `admin_bypass_eligible`의 `project_admin_valid_
+    correlated` 경로. caller agent는 conversation의 project에 대해 owner/admin
+    `project_access` grant를 갖고 있어(non-participant) admin-bypass로 다른 두 에이전트만
+    참가한 agent-only 대화의 chat-source backlink item을 본다. baseline 확인 후, 메인
+    statement 실행 직전 별개 psycopg2 커넥션으로 그 grant의 role을 admin→member로 강등한다
+    (project_admin_valid_correlated가 더 이상 매치하지 않아야 한다)."""
+    from app.main import app
+    from sqlalchemy import event
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            target_doc = await _make_doc(s, org.id, project.id, title="Target")
+
+            caller_agent = await _make_agent_member(s, org.id, project.id, role="admin")
+
+            # caller가 참가하지 않는 agent-only 대화(다른 두 에이전트) — admin-bypass로만 노출.
+            agent_a = await _make_agent_member(s, org.id, project.id)
+            agent_b = await _make_agent_member(s, org.id, project.id)
+            conv_id = await _make_conversation(
+                s, org.id, project.id, [agent_a, agent_b], created_by=agent_a, conv_type="dm",
+            )
+            msg = await _add_message(
+                s, conv_id, agent_a, f"[T](entity:doc:{target_doc.id})", _t(1),
+            )
+            await _make_mention(s, org.id, "chat_message", msg.id, target_doc.id, created_by=agent_a)
+
+        await _setup_app_agent(app, Session, caller_agent, org.id)
+        client = _client_for(app)
+
+        # ── baseline: caller가 project admin grant를 갖고 있어 admin-bypass 적용 — 정상 노출.
+        resp_before = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
+        assert resp_before.status_code == 200, resp_before.text
+        assert len(resp_before.json()["data"]) == 1, (
+            "baseline: project admin grant 보유 에이전트가 admin-bypass로 agent-only 대화를 "
+            f"못 봄(과차단 회귀) — {resp_before.json()}"
+        )
+
+        revoked = {"done": False}
+
+        def _revoke_mid_statement(conn, cursor, statement, parameters, context, executemany):
+            if revoked["done"] or "mentions" not in statement.lower():
+                return
+            revoked["done"] = True
+            import psycopg2
+            pg = psycopg2.connect(_psycopg2_dsn())
+            try:
+                pg.autocommit = True
+                with pg.cursor() as cur:
+                    cur.execute(
+                        "UPDATE project_access SET role = 'member' "
+                        "WHERE member_id = %s AND project_id = %s",
+                        (str(caller_agent), str(project.id)),
+                    )
+            finally:
+                pg.close()
+
+        event.listen(engine.sync_engine, "before_cursor_execute", _revoke_mid_statement)
+        try:
+            resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", _revoke_mid_statement)
+            await client.aclose()
+            app.dependency_overrides.clear()
+
+        assert revoked["done"] is True, "revoke hook 미발동(mentions 쿼리 미탐지) — 테스트 자체 결함"
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"] == [], (
+            "§6회차 회귀: 메인 statement 실행 직전 커밋된 project_access role revoke(admin→member)가 "
+            f"admin_bypass_eligible(에이전트 분기) atom에 반영되지 않음(stale pre-resolve 부활) — {resp.json()}"
         )
     finally:
         await engine.dispose()
