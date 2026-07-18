@@ -438,9 +438,12 @@ export default function InboxPage() {
         )}
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Left: notification list. max-md master-detail (efcb3840 ⓑ): full-width list,
-            hidden once a detail is open so the detail can take the screen (md+ unchanged). */}
-        <div className={`flex w-full min-w-[320px] flex-col border-r border-border/80 md:max-w-[420px] max-md:min-w-0 ${selectedId ? 'max-md:hidden' : ''}`}>
+        {/* Left: notification list. max-lg master-detail (efcb3840 ⓑ, story #1986 breakpoint fix):
+            full-width list, hidden once a detail is open so the detail can take the screen
+            (lg+ unchanged). lg(1024px) matches MOBILE_BREAKPOINT/GNB lg:hidden SSOT — md(768px)
+            caused a 768-1023 tablet seam where the mobile bottom-tab shell and this master-detail
+            split disagreed on what "mobile" means. */}
+        <div className={`flex w-full min-w-[320px] flex-col border-r border-border/80 lg:max-w-[420px] max-lg:min-w-0 ${selectedId ? 'max-lg:hidden' : ''}`}>
           <div className="flex-1 overflow-y-auto py-2">
             {loading ? (
               <div className="space-y-2 px-3 pt-2">
@@ -563,14 +566,14 @@ export default function InboxPage() {
           </div>
         </div>
 
-        {/* Right: detail panel. max-md: hidden when nothing selected (the list owns the
-            screen); full-screen with a back button when an item is tapped (efcb3840 ⓑ). */}
-        <div className={`flex min-w-0 flex-1 flex-col overflow-y-auto ${!selectedId ? 'max-md:hidden' : ''}`}>
+        {/* Right: detail panel. max-lg: hidden when nothing selected (the list owns the
+            screen); full-screen with a back button when an item is tapped (efcb3840 ⓑ, #1986). */}
+        <div className={`flex min-w-0 flex-1 flex-col overflow-y-auto ${!selectedId ? 'max-lg:hidden' : ''}`}>
           {selectedNotification ? (
             <button
               type="button"
               onClick={() => setSelectedId(null)}
-              className="flex shrink-0 items-center gap-1.5 border-b border-border/80 px-4 py-2.5 text-sm font-medium text-muted-foreground transition hover:text-foreground md:hidden"
+              className="flex shrink-0 items-center gap-1.5 border-b border-border/80 px-4 py-2.5 text-sm font-medium text-muted-foreground transition hover:text-foreground lg:hidden"
             >
               <ArrowLeft className="size-4" />
               {t('backToList')}
