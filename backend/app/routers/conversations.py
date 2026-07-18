@@ -1011,12 +1011,13 @@ async def get_unread_count_total(
     """GET /api/v2/conversations/unread-count — story #1992: GNB 채팅 unread 총합(count-only).
 
     caller(인증된 member)가 참여 중인 **전 대화**(페이지네이션 무관)의 unread_count를 SUM한
-    `{"total": int}`만 반환 — 대화 메타데이터(제목/참가자 등) 미포함. list_conversations의
+    `{"count": int}`만 반환 — 대화 메타데이터(제목/참가자 등) 미포함. list_conversations의
     per-conversation unread_count(story #1976, §4-2 `_list_unread_counts_stmt`)와 동일
     SSOT 쿼리를 확장(`_total_unread_count_stmt`)해 재사용 — 계산 로직 재구현 없음.
 
     project_id 미지정: GNB는 프로젝트 무관 org-wide 집계(다른 count-only 엔드포인트인
-    event-notifications/unread-count와 동일 관례 — `{"total": int}` shape로 통일).
+    event-notifications/unread-count·notifications/count와 동일 관례로 `{"count": int}`
+    shape 통일 — PO 정정, 2026-07-18: 초안은 `{"total"}`이었으나 API 일관성 우선).
 
     주의(기존 아키텍처 갭 · 본 story 스코프 밖): `_resolve_member`가 project_id 없이 호출되면
     복수 project의 team_member 행을 가진 human은 `.first()`로 임의 1개 project만 해소된다
@@ -1025,7 +1026,7 @@ async def get_unread_count_total(
     """
     sender = await _resolve_member(auth, org_id, db)
     total = (await db.execute(_total_unread_count_stmt(sender.id))).scalar_one()
-    return {"total": int(total)}
+    return {"count": int(total)}
 
 
 @router.get("/{conversation_id}", response_model=ConversationResponse)

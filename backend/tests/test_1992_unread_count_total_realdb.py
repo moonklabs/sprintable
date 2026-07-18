@@ -204,8 +204,8 @@ async def test_unread_count_total_sums_across_all_participating_conversations():
             assert resp.status_code == 200, resp.text
             body = resp.json()
             # count-only: total 외 다른 필드(제목/참가자 등) 없어야 함.
-            assert set(body.keys()) == {"total"}, body
-            assert body["total"] == 5, body  # A:3(본인발신 1건 제외) + B:0 + C:2
+            assert set(body.keys()) == {"count"}, body
+            assert body["count"] == 5, body  # A:3(본인발신 1건 제외) + B:0 + C:2
         finally:
             await client.aclose()
     finally:
@@ -226,7 +226,7 @@ async def test_unread_count_total_decreases_after_mark_read():
         client = _client_for(app)
         try:
             resp0 = await client.get("/api/v2/conversations/unread-count")
-            assert resp0.json()["total"] == 5, resp0.json()
+            assert resp0.json()["count"] == 5, resp0.json()
 
             # conv_a 전체 read 처리 (unread 3 -> 0).
             mark_resp = await client.post(
@@ -236,7 +236,7 @@ async def test_unread_count_total_decreases_after_mark_read():
 
             resp1 = await client.get("/api/v2/conversations/unread-count")
             assert resp1.status_code == 200, resp1.text
-            assert resp1.json()["total"] == 2, resp1.json()  # C만 남음
+            assert resp1.json()["count"] == 2, resp1.json()  # C만 남음
         finally:
             await client.aclose()
     finally:
@@ -266,7 +266,7 @@ async def test_unread_count_total_excludes_non_participating_conversation():
         try:
             resp = await client.get("/api/v2/conversations/unread-count")
             assert resp.status_code == 200, resp.text
-            assert resp.json()["total"] == 5, resp.json()  # 제3자 대화 미반영, 여전히 5
+            assert resp.json()["count"] == 5, resp.json()  # 제3자 대화 미반영, 여전히 5
         finally:
             await client.aclose()
     finally:
@@ -290,7 +290,7 @@ async def test_unread_count_total_zero_when_no_conversations():
         try:
             resp = await client.get("/api/v2/conversations/unread-count")
             assert resp.status_code == 200, resp.text
-            assert resp.json()["total"] == 0, resp.json()
+            assert resp.json()["count"] == 0, resp.json()
         finally:
             await client.aclose()
     finally:
@@ -333,7 +333,7 @@ async def test_unread_count_total_single_query_not_n_plus_1():
         try:
             resp = await client.get("/api/v2/conversations/unread-count")
             assert resp.status_code == 200, resp.text
-            assert resp.json()["total"] == 5, resp.json()
+            assert resp.json()["count"] == 5, resp.json()
         finally:
             event.remove(engine.sync_engine, "before_cursor_execute", _before_cursor_execute)
             await client.aclose()
