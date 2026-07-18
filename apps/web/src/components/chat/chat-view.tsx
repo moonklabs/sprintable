@@ -101,6 +101,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const shouldScrollToBottomRef = useRef(false);
   // CB-S8: pull-to-refresh 터치 추적
   const touchStartYRef = useRef<number | null>(null);
+  // story #1987: 네이티브 터치 리스너(non-passive)에서 즉시 읽을 pullDistance — state는 리렌더 배치라
+  // 다음 touchmove 틱까지 반영이 안 늦어질 수 있어 판정용으로는 ref를 별도로 둔다(렌더용 state는 유지).
+  const pullDistanceRef = useRef(0);
   const [pullDistance, setPullDistance] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const PULL_THRESHOLD = 64;
@@ -266,29 +269,50 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   }, []);
 
   // CB-S8: 모바일 pull-to-refresh — 스크롤 최상단에서 아래로 당기면 새로고침
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+  // fix(story #1987): React onTouch* prop은 루트에 passive로 위임돼 있어(React 17+) preventDefault()가
+  // 무효화된다([[feedback-react-onwheel-passive-preventdefault]]와 동일 근본 클래스 — onWheel에서 이미
+  // 겪은 버그). 네이티브 오버스크롤 바운스와 커스텀 pull 인디케이터가 동시에 뜨는 원인이었다. addEventListener를
+  // {passive: false}로 직결해야 preventDefault가 실제로 네이티브 스크롤을 억제한다.
+  useEffect(() => {
     const el = scrollRef.current;
-    if (!el || el.scrollTop > 0) return;
-    touchStartYRef.current = e.touches[0]?.clientY ?? null;
-  }, []);
+    if (!el) return;
 
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (touchStartYRef.current === null) return;
-    const delta = (e.touches[0]?.clientY ?? 0) - touchStartYRef.current;
-    if (delta > 0) {
-      setPullDistance(Math.min(delta, PULL_THRESHOLD * 1.5));
-    }
-  }, []);
+    const onTouchStart = (e: TouchEvent) => {
+      if (el.scrollTop > 0) return;
+      touchStartYRef.current = e.touches[0]?.clientY ?? null;
+    };
 
-  const handleTouchEnd = useCallback(async () => {
-    if (pullDistance >= PULL_THRESHOLD) {
-      setIsRefreshing(true);
-      await fetchMessages();
-      setIsRefreshing(false);
-    }
-    setPullDistance(0);
-    touchStartYRef.current = null;
-  }, [pullDistance, fetchMessages]);
+    const onTouchMove = (e: TouchEvent) => {
+      if (touchStartYRef.current === null) return;
+      const delta = (e.touches[0]?.clientY ?? 0) - touchStartYRef.current;
+      if (delta > 0) {
+        // 최상단에서 아래로 당기는 제스처만 가로챈다 — 그 외 스크롤은 네이티브 그대로 통과.
+        e.preventDefault();
+        const next = Math.min(delta, PULL_THRESHOLD * 1.5);
+        pullDistanceRef.current = next;
+        setPullDistance(next);
+      }
+    };
+
+    const onTouchEnd = () => {
+      if (pullDistanceRef.current >= PULL_THRESHOLD) {
+        setIsRefreshing(true);
+        void fetchMessages().finally(() => setIsRefreshing(false));
+      }
+      pullDistanceRef.current = 0;
+      setPullDistance(0);
+      touchStartYRef.current = null;
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [fetchMessages]);
 
   // CB-S9: 메시지 삭제 (본인 메시지만)
   const handleDeleteMessage = useCallback(async (messageId: string) => {
@@ -475,9 +499,6 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           <div
             ref={scrollRef}
             className="relative min-h-0 flex-1 overflow-y-auto px-4 py-3"
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={() => void handleTouchEnd()}
           >
             {/* CB-S8: pull-to-refresh 인디케이터 */}
             {(pullDistance > 0 || isRefreshing) && (
