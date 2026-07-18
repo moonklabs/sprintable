@@ -126,7 +126,8 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
         <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
         <div className="flex h-64 flex-col items-center justify-center gap-3">
           <p className="text-sm text-muted-foreground">{t('notFound')}</p>
-          <button type="button" onClick={() => router.push(`/${wsSlug}/${projSlug}/loops`)} className="text-xs text-primary hover:underline">
+          {/* story #1990: replace — 뒤로가기 재진입 트랩 방지(§3.2). */}
+          <button type="button" onClick={() => router.replace(`/${wsSlug}/${projSlug}/loops`)} className="text-xs text-primary hover:underline">
             {t('backToList')}
           </button>
         </div>
@@ -144,7 +145,10 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
         title={
           <button
             type="button"
-            onClick={() => router.push(`/${wsSlug}/${projSlug}/loops`)}
+            // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를
+            // 쌓지 않아 브라우저 BACK 재진입 트랩을 없앤다(§3.2). back()류 직접호출 금지
+            // ([[feedback-history-back-nextjs]]) 준수.
+            onClick={() => router.replace(`/${wsSlug}/${projSlug}/loops`)}
             className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="size-3.5" />

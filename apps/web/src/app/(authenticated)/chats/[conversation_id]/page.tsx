@@ -163,7 +163,10 @@ export default function ConversationPage() {
           <div className="flex min-w-0 items-center gap-1">
             <button
               type="button"
-              onClick={() => router.push('/chats')}
+              // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를
+              // 쌓지 않아 브라우저 BACK 재진입 트랩을 구조적으로 없앤다(§3.2). back()류 직접
+              // 호출은 하지 않는다([[feedback-history-back-nextjs]]).
+              onClick={() => router.replace('/chats')}
               className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
               <ChevronLeft className="h-4 w-4" />

@@ -262,7 +262,8 @@ export default function EpicDetailPage() {
       <TopBarSlot
         title={
           <div className="flex items-center gap-2">
-            <Link href={`/${wsSlug}/${projSlug}/goals`} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            {/* story #1990: replace, 기본 push 아님 — 뒤로가기 재진입 트랩 방지(gates/chats와 동일 원칙, §3.2). */}
+            <Link href={`/${wsSlug}/${projSlug}/goals`} replace className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
               <ArrowLeft className="h-3.5 w-3.5" />
               목표 목록
             </Link>

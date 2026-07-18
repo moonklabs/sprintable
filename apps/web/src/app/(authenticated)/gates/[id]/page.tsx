@@ -79,7 +79,11 @@ export default function GateDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, note: note?.trim() || null }),
       });
-      if (res.ok) router.push('/inbox');
+      // story #1990: push()는 콜드-진입 합성 스택([parentTab, target])에 세번째 엔트리를
+      // 쌓아 브라우저 BACK 1회가 이 상세를 재진입시키는 트랩을 만든다(§3.2 재진입 트랩).
+      // replace()는 현재 엔트리를 그대로 교체해 스택 길이를 늘리지 않는다 — router.back()/
+      // window.history.back() 직접호출([[feedback-history-back-nextjs]] 금지) 없이 동일 효과.
+      if (res.ok) router.replace('/inbox');
     } finally {
       setResolving(false);
     }
@@ -91,7 +95,7 @@ export default function GateDetailPage() {
         title={
           <button
             type="button"
-            onClick={() => router.push('/inbox')}
+            onClick={() => router.replace('/inbox')}
             className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <ChevronLeft className="h-4 w-4" />
