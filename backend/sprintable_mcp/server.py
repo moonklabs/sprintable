@@ -30,11 +30,11 @@ from .toolset import is_tool_allowed
 from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.visual_artifacts import (
-    AddArtifactCommentInput, CreateArtifactInput, CreateSpecPinInput, DeleteSpecPinInput,
-    EditArtifactInput, GetArtifactInput, ListArtifactCommentsInput, ListArtifactsInput,
-    ListSpecPinsInput, ProposeCanonicalInput, UpdateSpecPinInput,
-    add_artifact_comment, create_artifact, create_spec_pin, delete_spec_pin, edit_artifact,
-    get_artifact, list_artifact_comments, list_artifacts, list_spec_pins,
+    AddArtifactCommentInput, CreateArtifactInput, CreateSpecPinInput, DeleteArtifactInput,
+    DeleteSpecPinInput, EditArtifactInput, GetArtifactInput, ListArtifactCommentsInput,
+    ListArtifactsInput, ListSpecPinsInput, ProposeCanonicalInput, UpdateSpecPinInput,
+    add_artifact_comment, create_artifact, create_spec_pin, delete_artifact, delete_spec_pin,
+    edit_artifact, get_artifact, list_artifact_comments, list_artifacts, list_spec_pins,
     propose_canonical_version, update_spec_pin,
 )
 from .tools.agent_runs import (
@@ -533,8 +533,8 @@ _TOOL_DEFS: list[tuple] = [
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
      " 남김. 선택제(첨부 안 해도 무불이익).",
      AddEvidenceInput, add_evidence),
-    # Visual artifacts (11) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
-    # 핀 저작(story 7fe16274)
+    # Visual artifacts (12) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
+    # 핀 저작(story 7fe16274) + story #1922(delete_artifact, soft delete·생성자 전용)
     ("sprintable_create_artifact",
      "[일감] 시각 산출물 생성(에이전트 생성 입구) — 트리(nodes[])로 구조화. 임포트된 raw HTML/이미지는"
      " type=\"html_blob\" 노드 하나로 감싸도 됨. canvas_bounds{w,h}(선택): 렌더 자기 프레임 크기"
@@ -586,6 +586,12 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_delete_spec_pin",
      "[일감] 스펙 핀 삭제(최신 버전 소속만 대상). ⭐더 이상 유효하지 않은 스펙 핀을 치울 때.",
      DeleteSpecPinInput, delete_spec_pin),
+    ("sprintable_delete_artifact",
+     "[일감] artifact 삭제(soft delete — deleted_at만 세팅, 자식 row 물리삭제 없음). **생성자만"
+     " 삭제 가능**(story/task/epic처럼 admin/owner가 아니라 생성자 본인만·403 시 '생성자만 삭제할"
+     " 수 있습니다'). 삭제 후 get_artifact/list_artifacts에서 더 이상 노출되지 않는다. ⭐잘못"
+     " 만들었거나 빈/중복 산출물을 치울 때(재발행 대신 이걸로 정리).",
+     DeleteArtifactInput, delete_artifact),
     ("sprintable_propose_canonical_version",
      "[신뢰] 이 버전을 정본으로 제안(게이트 생성) — 제안만, 승인/반려는 항상 휴먼. ⭐이 버전이 확定될"
      " 준비가 됐다고 판단될 때 휴먼 승인을 요청.",

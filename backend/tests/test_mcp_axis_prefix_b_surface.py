@@ -62,6 +62,7 @@ def test_anchor_tools_match_doc_examples():
 def test_tool_names_and_param_models_untouched():
     """이름·시그니처 불변 — 계층 리네이밍 B1(story 1925)이 sprintable_*_goal 4종을 신설(구
     sprintable_*_epic 4종은 deprecated 별칭 유지, 제거 아님) — 106→110. story #2010:
-    sprintable_transition_goal 1종 신설(구 _epic 별칭 없음) — 110→111."""
-    assert len(_TOOL_DEFS) == 111
+    sprintable_transition_goal 1종 신설(구 _epic 별칭 없음) — 110→111. story #1922:
+    sprintable_delete_artifact 1종 신설(artifact soft delete, 생성자 전용) — 111→112."""
+    assert len(_TOOL_DEFS) == 112
     assert all(name.startswith("sprintable_") for name in _TOOLS)

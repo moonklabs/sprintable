@@ -344,6 +344,14 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
     "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
     "sprintable_delete_spec_pin",
+    # story #1922: sprintable_delete_artifact — artifact soft delete(생성자 전용) 전용 신설.
+    # #2010(sprintable_transition_goal)이 이 SSOT 목록 등록을 처음 커밋에서 빠뜨려 role-template
+    # picker 카탈로그/신규 에이전트 채용 치트시트에서 누락됐던 갭(follow-up 커밋 8126465e로 정정)을
+    # 이번엔 최초 커밋부터 함께 반영. tool_group()은 "artifact" substring 매칭으로 "canvas" 그룹
+    # 귀속(create_artifact/edit_artifact/delete_spec_pin과 동일 경로) — role_template의 "canvas"
+    # literal이 그대로 커버해 데이터 마이그 불요. is_destructive()도 "sprintable_delete" 접두로
+    # True(delete_spec_pin과 동형 — canvas 그룹 + destructive scope 둘 다 필요).
+    "sprintable_delete_artifact",
     # projects (E-MCP-OPT story ff6cb90d)
     "sprintable_list_projects", "sprintable_set_default_project",
 )
