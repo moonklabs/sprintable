@@ -26,12 +26,27 @@ const TABS = [
   { key: 'more', href: '/more', icon: Grid2x2, labelKey: 'more' as const },
 ] as const;
 
-function isTabActive(pathname: string, href: string): boolean {
-  if (href === '/inbox') {
-    // "결재함" 탭은 /inbox 루트만 자기 것으로 친다(하위 라우트 없음 — bare path 매치).
-    return pathname === '/inbox';
-  }
-  return pathname === href || pathname.startsWith(`${href}/`);
+// story #1991(navigate 불안정 1차 근원 B, 유나 UX 감사): 기존 isTabActive는 4탭 href 자체와
+// 정확일치/그 직계 하위 경로만 인식해, gate/doc/story 상세(canonical 라우트가 탭 href 트리
+// 밖에 있음)나 프로젝트/org 영역(board/goals/loops/organization/... 등, #1965 "전체" 스텁
+// 목록 그대로) 전부 활성 탭이 없어 하단바가 회색이 됐다. #1951 매니페스트가 이미 확定해둔
+// 상세→parentTab 매핑(useSyntheticParentTabHistory 호출부와 동일 SSOT)을 여기서도 재사용해
+// "이 경로는 소속상 어느 탭인가"를 판정하는 단일 함수로 교체한다.
+//
+// 판정 순서(구체적인 것부터, 마지막이 fallback):
+//  ① /glance — "지금" 탭 자기 자신(+하위 경로 있으면 포함).
+//  ② /inbox(정확일치) 또는 /gates/* — "결재함". gate 상세는 #1951에서 parentTab=/inbox로
+//     이미 확定(gates/[id]/page.tsx의 useSyntheticParentTabHistory('/inbox') 그대로).
+//  ③ /chats(+하위) — "채팅".
+//  ④ 그 외 전부 — "전체"(more). doc 상세(parentTab=/more)·story 상세(parentTab=/more)·
+//     board/goals/loops/sprints/standup/retro/organization/settings/... 는 애초에 4탭
+//     밖의 프로젝트/org 영역이라 more 페이지 자체가 이들의 진입점(ITEMS 목록, #1958 확定)
+//     — "전체"가 이 전부의 소속 탭이라는 게 이미 그 스텁 페이지 설계로 확定돼 있다.
+export function getActiveTabKey(pathname: string): (typeof TABS)[number]['key'] {
+  if (pathname === '/glance' || pathname.startsWith('/glance/')) return 'now';
+  if (pathname === '/inbox' || pathname.startsWith('/gates/')) return 'approvals';
+  if (pathname === '/chats' || pathname.startsWith('/chats/')) return 'chat';
+  return 'more';
 }
 
 export function MobileTabBar() {
@@ -82,13 +97,15 @@ export function MobileTabBar() {
     };
   }, []);
 
+  const activeKey = getActiveTabKey(pathname);
+
   return (
     <nav
       aria-label={t('navLabel')}
       className="flex h-16 shrink-0 border-t border-border bg-card lg:hidden"
     >
       {TABS.map(({ key, href, icon: Icon, labelKey }) => {
-        const active = isTabActive(pathname, href);
+        const active = key === activeKey;
         const badge = key === 'approvals' && pendingCount > 0 ? pendingCount : null;
         return (
           <Link
