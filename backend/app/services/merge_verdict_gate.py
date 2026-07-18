@@ -204,10 +204,21 @@ def _decide(
     # ask posture → 사람 보류.
     if gate_status == "pending":
         return ASK_HUMAN, "policy disposition=ask"
-    # 기본 안전 — 자동 조건 미충족(하한<임계, PR fail 등). 근거 명시.
+    # 기본 안전 — 자동 조건(gate_status==auto_passed·ci==pass·pr==pass·lower_bound>=threshold)
+    # 중 실제로 미충족된 항목만 정확히 명시(#1388: 이전엔 항상 lower_bound 미달로 표시돼 pr==fail
+    # 등 다른 실제 사유를 오분류했다). 동시에 여러 조건이 미충족일 수 있어 전부 열거한다(단일 사유로
+    # 단순화 금지 — 그러면 미달로 표시 안 된 나머지 조건에서 동일한 부정확 문제가 재발한다).
+    unmet: list[str] = []
+    if gate_status != "auto_passed":
+        unmet.append(f"policy disposition!=allow_auto (gate_status={gate_status})")
+    if ci != "pass":
+        unmet.append(f"CI!=pass (ci={ci})")
+    if pr != "pass":
+        unmet.append(f"PR!=pass (pr={pr})")
+    if outcome.lower_bound < threshold:
+        unmet.append(f"outcome lower_bound {outcome.lower_bound:.2f}<{threshold}")
     return ASK_HUMAN, (
-        f"auto-merge conditions unmet (outcome lower_bound {outcome.lower_bound:.2f}<{threshold}, "
-        f"basis={TRUST_BASIS})"
+        f"auto-merge conditions unmet ({', '.join(unmet)}, basis={TRUST_BASIS})"
     )
 
 

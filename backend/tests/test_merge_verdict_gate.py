@@ -107,6 +107,46 @@ def test_decide_pr_fail_not_auto():
     assert _d(pr="fail")[0] == ASK_HUMAN
 
 
+# ── story #1388: fallback reason 정확도(pr==fail인데 lower_bound 사유로 오분류 금지) ──────
+
+def test_decide_pr_fail_reason_names_pr_not_lower_bound():
+    # 정확 재현 시나리오: pr=="fail"이지만 outcome lower_bound는 임계 이상(정상) — reason이
+    # lower_bound 미달을 주장하면 안 되고, PR 실패를 실제 사유로 명시해야 한다.
+    dec, reason = _d(pr="fail", outcome=_OC_STRONG)  # _OC_STRONG lower_bound ≈0.83>=0.8
+    assert dec == ASK_HUMAN
+    assert "lower_bound" not in reason  # LB는 실제로 멀쩡 — 오분류 금지.
+    assert "PR" in reason and "fail" in reason  # 실제 사유(PR fail)가 명시돼야.
+
+
+def test_decide_lower_bound_below_threshold_reason_cites_lower_bound():
+    # 회귀 가드: pr/ci/gate_status 전부 정상이나 lower_bound만 미달 → reason은 여전히
+    # lower_bound를 정확히 지목해야(이전부터 맞았던 케이스 — 변경으로 깨지면 안 됨).
+    dec, reason = _d(outcome=_oc(8, 10))  # LB≈0.49<0.8
+    assert dec == ASK_HUMAN
+    assert "lower_bound" in reason
+    assert "PR" not in reason  # PR은 정상이므로 사유에 섞이면 안 됨.
+
+
+def test_decide_multiple_unmet_conditions_names_all():
+    # pr fail AND lower_bound 미달이 동시 발생 → 둘 다 사유에 명시(단일 사유로 뭉개기 금지).
+    dec, reason = _d(pr="fail", outcome=_oc(8, 10))
+    assert dec == ASK_HUMAN
+    assert "PR" in reason and "fail" in reason
+    assert "lower_bound" in reason
+
+
+def test_decide_reason_accuracy_does_not_change_decision():
+    # decision(ASK_HUMAN)은 reason 정확도 수정과 무관하게 그대로여야 — 이 스토리는 진단
+    # 메시지 품질 수정이지 decision 로직 변경이 아님.
+    for kwargs in (
+        {"pr": "fail", "outcome": _OC_STRONG},
+        {"outcome": _oc(8, 10)},
+        {"pr": "fail", "outcome": _oc(8, 10)},
+    ):
+        dec, _ = _d(**kwargs)
+        assert dec == ASK_HUMAN
+
+
 # ── helper ─────────────────────────────────────────────────────────────────────
 
 def test_normalize_result():
