@@ -1,14 +1,13 @@
 import type { GateItem } from '@/components/kanban/types';
 
-// story #1954(P1a-S4) — 위험도(risk) BE 필드는 아직 미존재(gate.py에 risk_level 류 없음).
-// "저·고위험=동일 BE 위험도 필드"(AC) 요구는 별도 후속 계약 논의 필요(BE 위험도 스토리 별도
-// 등재 예정, 판정 기준은 유나 기획+디디 BE 협의 — 제품 결정 성격). 그때까지 riskLevel은
-// 항상 'unknown'으로 렌더되며(추측 배지 금지), 실 필드가 오면 deriveRiskLevel 한 곳만 교체.
+// story #1972(P1a-S4) — 위험도 UX 이원화 활성. BE `risk_grade`(gate_service.derive_risk_grade,
+// OrgGatePolicy.posture+gate_type 순수 파생, doc `gate-risk-ux-classification-criteria` §2)를
+// 그대로 매핑한다 — FE는 추측/휴리스틱을 두지 않는다(SSOT=BE). risk_grade가 null/undefined인
+// 구버전 응답만 'unknown'(보수적 고위험 안전판)으로 폴백.
 export type RiskLevel = 'low' | 'high' | 'unknown';
 
-// TODO(#1970 후속 위험도 스토리): BE 위험도 필드 확定되면 그 필드를 그대로 매핑 — 추측 휴리스틱 금지.
-export function deriveRiskLevel(_gate: GateItem): RiskLevel {
-  return 'unknown';
+export function deriveRiskLevel(gate: GateItem): RiskLevel {
+  return gate.risk_grade ?? 'unknown';
 }
 
 // ⭐임시 정책(오르테가군 판정, 2026-07-17): unknown은 "보수적 고위험 취급" — 근거 열람+사유

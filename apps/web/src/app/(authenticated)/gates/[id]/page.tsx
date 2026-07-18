@@ -109,7 +109,9 @@ export default function GateDetailPage() {
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-1.5">
                 <Badge variant="chip">{gate.gate_type}</Badge>
-                {deriveRiskLevel(gate) === 'unknown' ? (
+                {deriveRiskLevel(gate) === 'high' ? (
+                  <Badge variant="warning">{t('riskHigh')}</Badge>
+                ) : deriveRiskLevel(gate) === 'unknown' ? (
                   <Badge variant="outline" className="text-muted-foreground">{t('riskUnknown')}</Badge>
                 ) : null}
               </div>
