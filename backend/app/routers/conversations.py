@@ -280,17 +280,21 @@ def _unread_count_stmt(conversation_id: uuid.UUID, member_id: uuid.UUID, since: 
     )
 
 
-def _list_unread_counts_stmt(member_id: uuid.UUID, conv_id_list: list[uuid.UUID]):
+def _list_unread_counts_stmt(member_id: uuid.UUID, conv_id_list: list[uuid.UUID] | None = None):
     """list_conversations 배치 unread_count — 단일 JOIN+GROUP BY(N+1 방지, §4-2).
 
     대화마다 기준 시각(last_read_at)이 다른 상관 카운트라 순수 IN 배치로는 불가 — JOIN
     조건에 기준 시각 비교를 박아 넣어 페이지 대화 수(N)와 무관하게 쿼리 1회로 해결.
     INNER JOIN이라 unread=0인 대화는 결과행 자체가 없음(호출부가 dict.get(id, 0)으로 처리).
+
+    conv_id_list=None이면 caller가 참여 중인 **모든** 대화를 대상(전량, 페이지네이션 무관) —
+    story #1992(GNB unread 총합)가 `_total_unread_count_stmt`로 이 "전량 모드"를 서브쿼리로
+    감싸 SUM 재사용(동일 JOIN+`IS DISTINCT FROM` 조건 SSOT, 중복 없음).
     """
-    return (
+    stmt = (
         select(
             ConversationParticipant.conversation_id,
-            func.count(ConversationMessage.id),
+            func.count(ConversationMessage.id).label("unread_count"),
         )
         .join(
             ConversationMessage,
@@ -302,12 +306,26 @@ def _list_unread_counts_stmt(member_id: uuid.UUID, conv_id_list: list[uuid.UUID]
                 ConversationMessage.sender_id.is_distinct_from(member_id),
             ),
         )
-        .where(
-            ConversationParticipant.member_id == member_id,
-            ConversationParticipant.conversation_id.in_(conv_id_list),
-        )
+        .where(ConversationParticipant.member_id == member_id)
         .group_by(ConversationParticipant.conversation_id)
     )
+    if conv_id_list is not None:
+        stmt = stmt.where(ConversationParticipant.conversation_id.in_(conv_id_list))
+    return stmt
+
+
+def _total_unread_count_stmt(member_id: uuid.UUID):
+    """story #1992: GNB 채팅 unread 총합(count-only) — caller의 전 참여 대화(페이지네이션 무관)
+    unread_count SUM.
+
+    `_list_unread_counts_stmt(member_id)`(conv_id_list=None → 전량 모드)를 서브쿼리로 감싸
+    SUM 래퍼만 추가한다 — JOIN+`IS DISTINCT FROM` 계산 로직 재구현 없음(단일 SSOT, list_conversations
+    의 per-conversation unread_count와 동일 정의). INNER JOIN 특성상 대화별 최소 1건이라도 unread가
+    있어야 그룹행이 생기므로, 참여 대화가 전무하거나 전부 unread 0이면 서브쿼리 결과가 0행 —
+    COALESCE(SUM(...), 0)으로 NULL을 0으로 정규화한다.
+    """
+    per_conv = _list_unread_counts_stmt(member_id).subquery()
+    return select(func.coalesce(func.sum(per_conv.c.unread_count), 0))
 
 
 _SUMMARY_PREVIEW_MAX = 80
@@ -982,6 +1000,33 @@ async def list_conversations(
         })
 
     return {"data": result, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/unread-count")
+async def get_unread_count_total(
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """GET /api/v2/conversations/unread-count — story #1992: GNB 채팅 unread 총합(count-only).
+
+    caller(인증된 member)가 참여 중인 **전 대화**(페이지네이션 무관)의 unread_count를 SUM한
+    `{"count": int}`만 반환 — 대화 메타데이터(제목/참가자 등) 미포함. list_conversations의
+    per-conversation unread_count(story #1976, §4-2 `_list_unread_counts_stmt`)와 동일
+    SSOT 쿼리를 확장(`_total_unread_count_stmt`)해 재사용 — 계산 로직 재구현 없음.
+
+    project_id 미지정: GNB는 프로젝트 무관 org-wide 집계(다른 count-only 엔드포인트인
+    event-notifications/unread-count·notifications/count와 동일 관례로 `{"count": int}`
+    shape 통일 — PO 정정, 2026-07-18: 초안은 `{"total"}`이었으나 API 일관성 우선).
+
+    주의(기존 아키텍처 갭 · 본 story 스코프 밖): `_resolve_member`가 project_id 없이 호출되면
+    복수 project의 team_member 행을 가진 human은 `.first()`로 임의 1개 project만 해소된다
+    (event_notifications.py `_resolve_member_id`도 동일 관례). grant-only 휴먼은 canonical
+    org_member.id로 해소되어 이 갭이 없다.
+    """
+    sender = await _resolve_member(auth, org_id, db)
+    total = (await db.execute(_total_unread_count_stmt(sender.id))).scalar_one()
+    return {"count": int(total)}
 
 
 @router.get("/{conversation_id}", response_model=ConversationResponse)
