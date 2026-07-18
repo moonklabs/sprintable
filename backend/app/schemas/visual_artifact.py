@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # 뷰어 통합 재설계(story 1948d19d): 비정상 거대값 방어 상한. Figma류 대형 캔버스 툴의 실용 한계보다
 # 넉넉하되(20000px), 정수 오버플로/스토리지 남용성 값은 확실히 막는 값 — 특정 스펙 수치가 아니라
@@ -53,7 +53,12 @@ class CreateArtifactRequest(BaseModel):
     epic_id: uuid.UUID | None = None
     doc_id: uuid.UUID | None = None
     source: str = "created"
-    nodes: list[ArtifactNodeIn] = []
+    # story #1920: 빈 nodes로 생성된 산출물이 조용히 만들어져 온보딩/뷰어 혼란을 유발(8de4e981
+    # 계열 사고 재발 방지 — 그 사고 자체의 사후처리는 #1922로 별도 완료, 이건 재발 방지책).
+    # min_length=1 — loop.py::LoopDecisionRequest.decisions와 동일 컨벤션(Field(min_length=1)).
+    # 빈 리스트는 FastAPI 기본 RequestValidationError → 422(이 스키마 파일의 기존 필드
+    # validator들과 마찬가지로 라우터에서 별도 400 처리하지 않음 — 코드베이스 전역 컨벤션).
+    nodes: list[ArtifactNodeIn] = Field(min_length=1)
     # 유나 §11 갭②: 최초 버전의 변경 이유(보통 "초기 생성"류·선택제).
     summary: str | None = None
     # 뷰어 통합 재설계(story 1948d19d): 생성 시점 프레임 크기 선언(선택 — 미선언=FE 기본 아트보드).
