@@ -57,6 +57,14 @@ const docMarkdownSanitizeSchema = {
       'dataSize',
       'dataMimeType',
       'dataFileData',
+      // story #1996: pageEmbed 원자 노드(page-embed-node.tsx renderHTML) 속성 — 이전엔
+      // 스키마 미포함이라 markdown 포맷 문서에서 rehype-sanitize가 전부 걷어내 querySelector
+      // 식별 자체가 불가능했다(HTML 포맷 문서만 우연히 살아남았을 갭).
+      'dataPageEmbed',
+      'dataDocId',
+      'dataTitle',
+      'dataIcon',
+      'dataSlug',
     ],
   },
 };
@@ -245,6 +253,36 @@ export function DocContentRenderer({
       const handleClick = () => { if (slug) window.location.href = `/docs/${slug}`; };
       span.addEventListener('click', handleClick);
       return () => span.removeEventListener('click', handleClick);
+    });
+
+    // Page embed handlers (viewer) — story #1996(no-sloppy): 에디터 NodeView(PageEmbedExtension
+    // renderHTML)가 만드는 <div data-page-embed data-doc-id data-title data-icon data-slug>
+    // 원자 노드를 읽기전용 뷰가 렌더할 핸들러가 아예 없어(grep 0건) 빈 div로 깨져 보였다.
+    // wikiLink 핸들러와 동일 관례(카드 자체는 publicMode에서도 유지 — 제목/아이콘은 이미 원본
+    // 문서에 박힌 정적 메타라 노출 자체는 meta-leak 아님·클릭 네비게이션만 authed 전용으로 제한).
+    const pageEmbeds = Array.from(root.querySelectorAll<HTMLElement>('[data-page-embed]'));
+    const pageEmbedCleanup = pageEmbeds.map((block) => {
+      const title = block.getAttribute('data-title') || '';
+      const icon = block.getAttribute('data-icon') || '';
+      const slug = block.getAttribute('data-slug') || '';
+      const iconMarkup = icon
+        ? `<span class="shrink-0 text-lg">${escapeHtmlText(icon)}</span>`
+        : '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';
+      block.className = publicMode || !slug
+        ? 'not-prose my-2 flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3'
+        : 'not-prose my-2 flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 transition-colors hover:bg-muted/40';
+      block.innerHTML = `
+        ${iconMarkup}
+        <div class="min-w-0 flex-1">
+          <p class="truncate text-sm font-medium">${escapeHtmlText(title || '(제목 없음)')}</p>
+          ${slug ? `<p class="truncate text-xs opacity-60">/${escapeHtmlText(slug)}</p>` : ''}
+        </div>`;
+      // publicMode: doc-to-doc traversal 금지(wikiLink와 동일 meta-leak 경계) — 카드 렌더는
+      // 유지하되 클릭 네비게이션만 뺀다.
+      if (publicMode || !slug) return () => { /* no handler attached */ };
+      const handleClick = () => { window.location.href = `/docs/${slug}`; };
+      block.addEventListener('click', handleClick);
+      return () => block.removeEventListener('click', handleClick);
     });
 
     // Math block rendering (viewer)
@@ -452,6 +490,7 @@ export function DocContentRenderer({
     return () => {
       cleanup.forEach((dispose) => dispose());
       wikiCleanup.forEach((dispose) => dispose());
+      pageEmbedCleanup.forEach((dispose) => dispose());
       fileCleanup.forEach((dispose) => dispose());
       assetImgCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
