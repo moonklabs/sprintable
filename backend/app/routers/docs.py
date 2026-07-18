@@ -677,6 +677,46 @@ async def list_doc_revisions(
     return [DocRevisionResponse.model_validate(r) for r in result.scalars()]
 
 
+# ─── Backlinks (story #1994·E-KNOWLEDGE-LINK S2) ───────────────────────────────
+
+@router.get("/{id}/backlinks")
+async def get_doc_backlinks(
+    id: uuid.UUID,
+    limit: int = Query(default=30, ge=1, le=200),
+    before: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: DocRepository = Depends(_get_repo),
+) -> dict:
+    """GET /api/v2/docs/{id}/backlinks — 이 doc을 멘션한 chat_message/doc 목록(cursor 페이지네이션,
+    `list_messages`(conversations.py)와 동일 convention: `?limit=&before=`, 응답
+    `{"data": [...], "meta": {"next_cursor", "has_more"}}`).
+
+    근본 설계 doc design-org-knowledge-mentions-backlinks §8① 불변식: backlink 공개 =
+    can_read(target_doc) AND can_read(source_resource). target 접근은 여기서
+    `_require_doc_project_access`(docs.py의 기존 canonical 인가 — 무권한/미존재 모두 404,
+    existence 오라클 없음)로 검증한다. **source**(멘션을 발신한 chat_message/doc) 접근은
+    항목 단위로 독립 판정(app.services.backlinks §8②·has_project_access/`_can_read_conversation`
+    재사용) — target doc의 project 접근을 source에 상속하지 않는다(멀티프로젝트 org에서
+    target/source project가 다를 수 있다는 게 산티아고 리뷰가 잡은 이전 draft의 버그이자
+    이 story의 근본 이유). count/has_more는 authz 필터를 통과한 집합에서만 계산된다(no
+    pagination oracle) — 미인가 source가 있어도 그 존재는 어디에도 드러나지 않는다.
+    """
+    await _require_doc_project_access(session, id, uuid.UUID(auth.user_id), repo.org_id)
+
+    before_dt = None
+    if before:
+        try:
+            before_dt = datetime.fromisoformat(before)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor format")
+
+    from app.services.backlinks import list_doc_backlinks
+    return await list_doc_backlinks(
+        session, org_id=repo.org_id, doc_id=id, auth=auth, limit=limit, before=before_dt,
+    )
+
+
 class DocTransitionRequest(BaseModel):
     status: str
 

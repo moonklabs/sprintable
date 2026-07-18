@@ -1083,20 +1083,32 @@ async def get_conversation(
     return resp
 
 
-async def _authorize_message_read(
+async def _can_read_conversation(
     conversation_id: uuid.UUID,
     db: AsyncSession,
     auth: AuthContext,
     org_id: uuid.UUID,
-) -> uuid.UUID:
-    """메시지 조회(목록/단건/리플) 공용 인가. #1262: admin-bypass=agent-only 대화 한정 —
-    휴먼 참가 대화(=private)는 participant only. 반환: conversation.project_id.
+    *,
+    _conv_project_id: uuid.UUID | None = None,
+) -> bool:
+    """story #1994(E-KNOWLEDGE-LINK S2) §8②: 메시지 조회 인가의 canonical bool 술어 — 근본 설계
+    doc design-org-knowledge-mentions-backlinks §8②가 요구하는 "재사용" 대상. `_authorize_message_read`
+    (아래)의 원래 body 그대로이되, 존재하지 않는 대화/비참여자 판정 모두 raise 대신 False를
+    반환한다 — 백링크 API처럼 404/403 semantics(존재 비노출 오라클 회피)가 필요 없는 호출부가
+    "읽을 수 있는가"만 물을 때 쓴다. 404/403이 필요한 기존 호출부는 여전히
+    `_authorize_message_read`를 쓴다(zero duplication — 그쪽이 이 함수를 얇게 감싼다).
+
+    `_conv_project_id`: `_authorize_message_read`가 이미 조회해둔 project_id를 넘기면 동일 PK
+    SELECT를 중복 실행하지 않는다(메시지 목록/단건/리플 등 hot path 성능 보존). 직접 호출부
+    (백링크)는 생략 — 이 함수가 자체적으로 조회한다.
     """
-    conv_project_id = (await db.execute(
-        select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
-    )).scalar_one_or_none()
+    conv_project_id = _conv_project_id
     if conv_project_id is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        conv_project_id = (await db.execute(
+            select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+        )).scalar_one_or_none()
+        if conv_project_id is None:
+            return False
 
     # owner/admin: org-level 조회(project 소속 무관 접근), member: project-level 유지
     sender = await _resolve_member(auth, org_id, db, project_id=None)
@@ -1116,7 +1128,29 @@ async def _authorize_message_read(
             )
         )).scalar_one_or_none()
         if participant is None:
-            raise HTTPException(status_code=403, detail="Not a participant")
+            return False
+    return True
+
+
+async def _authorize_message_read(
+    conversation_id: uuid.UUID,
+    db: AsyncSession,
+    auth: AuthContext,
+    org_id: uuid.UUID,
+) -> uuid.UUID:
+    """메시지 조회(목록/단건/리플) 공용 인가. #1262: admin-bypass=agent-only 대화 한정 —
+    휴먼 참가 대화(=private)는 participant only. 반환: conversation.project_id.
+
+    story #1994 리팩터: 실제 판정 로직은 `_can_read_conversation`(canonical bool 술어)에 있다 —
+    이 함수는 그 위에 404(대화 없음)/403(비참여자) raise semantics만 얹는 얇은 wrapper.
+    """
+    conv_project_id = (await db.execute(
+        select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv_project_id is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if not await _can_read_conversation(conversation_id, db, auth, org_id, _conv_project_id=conv_project_id):
+        raise HTTPException(status_code=403, detail="Not a participant")
     return conv_project_id
 
 
