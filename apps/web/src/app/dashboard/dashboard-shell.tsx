@@ -20,6 +20,7 @@ import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { TeamPresencePanel } from '@/components/presence/team-presence-panel';
 import { useTeamPresence } from '@/components/presence/use-team-presence';
+import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
 import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-gate';
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
@@ -63,7 +64,7 @@ function isTabRootPage(pathname: string): boolean {
   return TAB_ROOT_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
-function ScrollShell({ showTopBar, tabletCentered, children }: { showTopBar: boolean; tabletCentered: boolean; children: React.ReactNode }) {
+function ScrollShell({ showTopBar, tabletCentered, chatUnreadTotal, children }: { showTopBar: boolean; tabletCentered: boolean; chatUnreadTotal: number; children: React.ReactNode }) {
   const { setScrollContainer } = useTopBar();
   const setRef = useCallback((el: HTMLDivElement | null) => {
     setScrollContainer(el);
@@ -111,7 +112,7 @@ function ScrollShell({ showTopBar, tabletCentered, children }: { showTopBar: boo
       {/* story #1958(P2-S2): <1024(lg 미만) 전용 하단 탭바 — SidebarInset의 flex-col 안에서
           scroll 컨테이너의 형제(자식 아님)로 둬야 콘텐츠가 스크롤돼도 탭바가 자기 flex row를
           유지한다(position:fixed 오버레이+패딩 보정 불요 — 시안 511bc035의 flex 레이아웃과 동형). */}
-      <MobileTabBar currentTeamMemberId={currentTeamMemberId} />
+      <MobileTabBar chatUnreadTotal={chatUnreadTotal} />
     </SidebarInset>
     </TeamPresenceToggleProvider>
     </ReleaseNotesProvider>
@@ -187,6 +188,13 @@ export function DashboardShell({
   // 갈렸으면 살짝 stale 할 수 있으나, "문서로 가기" 바로가기 링크 용도라 무해(틀려도 미들웨어
   // 리다이렉트 안전망이 받는다). 완전 동기화는 이 슬라이스 스코프 밖(over-engineering).
 
+  // story #2007(perf·서버부하): GNB 채팅 unread 총합을 AppSidebar+MobileTabBar가 각자
+  // useChatUnreadTotal()을 호출해 SSE(EventSource) 연결을 독립적으로 2개 열던 것을 여기 한
+  // 곳에서만 계산해 두 표면에 값만 prop으로 내려준다 — 동일 유저 event-stream 동시 연결
+  // 4개(presence·notifications·GNB×2) 중 2개를 1개로 줄인다(배지 값은 뷰포트 무관 동일해야
+  // 하므로 공유가 정확도 손실 없이 순수 절감).
+  const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
+
   return (
     <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, projectMemberships, orgMemberships }}>
       <RefreshProvider>
@@ -194,15 +202,15 @@ export function DashboardShell({
         <TopBarProvider>
           <SidebarProvider className="h-svh">
             <AppSidebar
-              currentTeamMemberId={currentTeamMemberId}
               projectId={effectiveProjectId}
               currentProjectSlug={currentProjectSlug}
               projectMemberships={projectMemberships}
               orgId={orgId}
               orgMemberships={orgMemberships}
               userName={userName}
+              chatUnreadTotal={chatUnreadTotal}
             />
-            <ScrollShell showTopBar={showTopBar} tabletCentered={tabletCentered}>
+            <ScrollShell showTopBar={showTopBar} tabletCentered={tabletCentered} chatUnreadTotal={chatUnreadTotal}>
               {children}
             </ScrollShell>
           </SidebarProvider>

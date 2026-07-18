@@ -8,7 +8,6 @@ import { CircleDot, Inbox, MessageSquare, Grid2x2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { GateItem } from '@/components/kanban/types';
 import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
-import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
 
 // story #1958(P2-S2, mobile-p2-p1a-story-breakdown SSOT) — 모바일 4탭 셸. <1024(lg 미만)에서만
 // 렌더되고 데스크톱 GNB(AppSidebar)를 대체한다(P2-S1의 lg:1024 SSOT와 동일 경계 — route 내
@@ -50,14 +49,13 @@ export function getActiveTabKey(pathname: string): (typeof TABS)[number]['key'] 
   return 'more';
 }
 
-export function MobileTabBar({ currentTeamMemberId }: { currentTeamMemberId?: string }) {
+export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
   const t = useTranslations('mobileTabBar');
   const pathname = usePathname();
   // story #1977(트랙B): GNB ③ 채팅 unread 총합(유나 시안 768e89b5 v2) — 데스크톱 사이드바
-  // 채팅 항목(app-sidebar.tsx)과 동일 훅·동일 소스. AppSidebar와 같은 이유로 currentTeamMemberId를
-  // dashboard-shell.tsx(ScrollShell)에서 prop으로 받는다 — useDashboardContext() 직접 import는
-  // MobileTabBar를 dashboard-shell.tsx가 직접 렌더하므로 순환 참조가 된다(AppSidebar와 동일 회피).
-  const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
+  // 채팅 항목(app-sidebar.tsx)과 동일 소스. story #2007(perf·서버부하): 여기서 직접
+  // useChatUnreadTotal()을 호출하면 AppSidebar와 각자 SSE(EventSource) 연결을 열어 동일
+  // 유저 event-stream 연결이 중복된다 — dashboard-shell.tsx가 단일 호출한 값을 prop으로 받는다.
   // 결재함 배지 = 서명 대기 수(유나 §3.1 정합) — GateInbox가 이미 쓰는 것과 동일한
   // `/api/gates?status=pending` 재사용(신규 집계 안 만듦). gate_overridden은 override 시
   // approver row status가 "overridden"으로 전이돼(gate_service.py) pending 조회에서 자동 제외

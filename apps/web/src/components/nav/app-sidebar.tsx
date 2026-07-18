@@ -34,7 +34,6 @@ import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
 import { ProfileMenu } from '@/components/nav/profile-menu';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
-import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
 import {
   Sidebar,
   SidebarContent,
@@ -52,7 +51,6 @@ import {
 } from '@/components/ui/sidebar';
 
 interface AppSidebarProps {
-  currentTeamMemberId?: string;
   orgId?: string;
   orgMemberships?: OrgSwitcherItem[];
   projectId?: string;
@@ -61,6 +59,9 @@ interface AppSidebarProps {
   currentProjectSlug?: string;
   projectMemberships: Array<{ projectId: string; projectName: string }>;
   userName?: string;
+  // story #2007(perf·서버부하): dashboard-shell.tsx가 단일 useChatUnreadTotal() 호출 결과를
+  // prop으로 내려준다 — 여기서 직접 훅을 호출하면 MobileTabBar와 각자 SSE 연결을 열게 된다.
+  chatUnreadTotal: number;
 }
 
 function KbdHint({ children }: { children: React.ReactNode }) {
@@ -72,13 +73,13 @@ function KbdHint({ children }: { children: React.ReactNode }) {
 }
 
 export function AppSidebar({
-  currentTeamMemberId,
   orgId,
   orgMemberships = [],
   projectId,
   currentProjectSlug,
   projectMemberships,
   userName,
+  chatUnreadTotal,
 }: AppSidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -114,8 +115,8 @@ export function AppSidebar({
   }, [pathname, isMobile, setOpenMobile]);
 
   const [inboxUnreadCount, setInboxUnreadCount] = useState(0);
-  // story #1977(트랙B): GNB ③ 채팅 unread 총합(유나 시안 768e89b5 v2).
-  const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
+  // story #1977(트랙B) GNB ③ 채팅 unread 총합 — story #2007로 dashboard-shell.tsx의 단일
+  // useChatUnreadTotal() 호출 결과를 prop으로 받는다(MobileTabBar와 SSE 연결 중복 제거).
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
