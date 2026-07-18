@@ -91,6 +91,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -164,6 +165,24 @@ _VERSION_NOT_SUPPORTED = -32009  # 스펙 §14.2.1: A2A-Version 헤더가 지원
 _UNAUTHORIZED = -32010  # 401/403 — reserved server-error range(-32000~-32099), 기존 -32001/-32009와 미충돌
 _AGENT_NOT_FOUND = -32011  # 404 — `_get_agent_member`의 404 이스케이프. `get_agent_card`(REST 라우트)는 이 매핑을 타지 않는다(경로 불일치, 아래 `is_a2a_rpc_path` 참조) — REST 엔벨로프 그대로 유지.
 _INTERNAL_ERROR = -32603  # JSON-RPC 2.0 표준 코드("Internal error", 스펙 §7) — 미처리 예외 전용, 커스텀 번호 금지
+_REQUEST_TIMEOUT = -32012  # 서버 핸들러 상한 초과(reserved server-error range, 다음 free 번호 — -32001/-32009/-32010/-32011과 미충돌)
+
+# story #2005(Phase B P1-c, E-A2A-PROTO 리라이어빌리티): `/rpc`엔 오늘까지 애플리케이션 레벨
+# 타임아웃이 전혀 없었다(grep 확認 — `asyncio.wait_for`/`asyncio.timeout` 0건, 전체 파일). 유일한
+# 상한은 Cloud Run 플랫폼 자체 요청 타임아웃뿐이었고, 그마저도 `cloudbuild.yaml`의
+# `deploy-backend` 스텝에 `--timeout` 플래그가 명시된 적이 없어(grep 확認) 인프라 기본값에
+# 암묵 의존 중이었다. PO가 라이브 `gcloud`로 실측한 현재 유효값(2026-07-17 확認, 이 세션은
+# gcloud 접근 없이 그 실측을 그대로 신뢰):
+#   - backend-prod  = 300s
+#   - backend-dev   = 3600s
+#   - mcp-prod      = 300s (concurrency=80)
+# 아래 상한은 그 실측값 중 가장 빡빡한 값(prod 300s)보다 낮게 잡아(20s 여유) Cloud Run이
+# 커넥션을 강제로 끊기 전에 애플리케이션이 먼저 깔끔한 JSON-RPC 에러 envelope(story #2003의
+# `error.data.retryable` 계약 재사용, 타임아웃은 본질적으로 일시적이라 True 고정)으로 응답하게
+# 한다 — 원시 커넥션 킬은 클라가 파싱할 body가 없어 실패 원인을 알 수 없다. SendStreamingMessage
+# (SSE)의 전체-스트림 상한에도 동일 상수를 재사용한다(아래 `_stream_send_message` 참조) — dev의
+# 3600s는 이 상수보다 훨씬 커서 두 환경 모두에서 안전하게 먼저 트리거된다.
+_A2A_RPC_TIMEOUT_SECONDS = 280
 
 # HTTP status → JSON-RPC code(SSOT 단일 테이블, 감사/확장 용이하게 조건 흩뿌리지 않음). 표에
 # 없는 status(5xx 포함)는 표준 Internal error로 수렴 — unhandled_exception_handler는 항상 500만
@@ -282,9 +301,12 @@ _TERMINAL_STATES = {
 
 
 class _JsonRpcException(Exception):
-    def __init__(self, code: int, message: str) -> None:
+    def __init__(self, code: int, message: str, data: dict | None = None) -> None:
         self.code = code
         self.message = message
+        # story #2005: optional — 기존 4개 raise 지점(invalid params/task not found)은 여전히
+        # data 없이 생성돼 무회귀(`error.data`가 None으로 렌더, story #2003 이전 동작 그대로).
+        self.data = data
 
 
 def _caller_project_hint(auth: AuthContext) -> uuid.UUID | None:
@@ -949,6 +971,18 @@ def _sse_frame(request_id: str | int | None, result: dict) -> str:
     return f"data: {json.dumps(envelope)}\n\n"
 
 
+def _sse_error_frame(request_id: str | int | None, code: int, message: str) -> str:
+    """story #2005: SSE 스트림 도중 애플리케이션 상한에 걸렸을 때 쓰는 에러 프레임 —
+    `_sse_frame`의 `result` oneof 대신 JSON-RPC 2.0 표준 `error` 필드를 실은 envelope(§7).
+    커넥션을 그냥 끊는(원시 kill) 대신 클라가 파싱 가능한 마지막 프레임을 하나 보내고
+    종료한다."""
+    envelope = {
+        "jsonrpc": "2.0", "id": request_id,
+        "error": {"code": code, "message": message, "data": {"retryable": True}},
+    }
+    return f"data: {json.dumps(envelope)}\n\n"
+
+
 async def _stream_send_message(
     request: Request, request_id: str | int | None,
     session: AsyncSession, member: TeamMember, org_id: uuid.UUID, params: dict,
@@ -970,10 +1004,29 @@ async def _stream_send_message(
     member_id = member.id
 
     async def generate():
+        # story #2005: SSE는 "사실상 무기한"이라 blanket `asyncio.wait_for`로 이 제너레이터
+        # 전체를 감싸는 건 어색하다(정상적으로 긴 스트림까지 함께 끊어버림) — 대신 여기서
+        # deadline을 직접 추적하는 **overall-ceiling** 방식을 택했다. per-chunk/idle-timeout
+        # (매 이벤트마다 리셋)도 검토했지만 기각: (1) task는 이미 DB에 영속돼 있어(GetTask로
+        # 계속 조회 가능) SSE는 그 상태를 미러링하는 부가 채널일 뿐이고, (2) 폴링 간격이
+        # `_STREAM_POLL_INTERVAL_SECONDS`(2s)로 고정이라 "활동"이 사실상 항상 있어 idle-timeout이
+        # 트리거될 일이 거의 없어 의미가 옅다, (3) Cloud Run 자신도 "한 커넥션 = 한 상한"
+        # 모델(idle 여부 무관)이라 여기서도 그 모델을 그대로 미러링하는 게 정합적이다.
+        # 상한은 non-streaming 경로와 동일한 `_A2A_RPC_TIMEOUT_SECONDS`(prod 실효값 300s보다
+        # 낮게, dev 3600s보다는 훨씬 낮게 — 두 환경 모두에서 Cloud Run이 끊기 전에 먼저
+        # 트리거됨) 재사용.
+        stream_deadline = time.monotonic() + _A2A_RPC_TIMEOUT_SECONDS
+
         yield _sse_frame(request_id, {"task": send_result["task"]})
 
         last_state: str | None = send_result["task"]["status"]["state"]
         while not await request.is_disconnected():
+            if time.monotonic() >= stream_deadline:
+                yield _sse_error_frame(
+                    request_id, _REQUEST_TIMEOUT,
+                    f"Stream exceeded server timeout ({_A2A_RPC_TIMEOUT_SECONDS}s)",
+                )
+                return
             async with async_session_factory() as db:
                 result = await db.execute(
                     select(A2ATask).where(A2ATask.id == task_id, A2ATask.member_id == member_id)
@@ -1045,12 +1098,30 @@ async def a2a_rpc(
     # 응답 타입 자체가 달라(JsonRpcResponse 단일 vs SSE) 균일 _METHODS 디스패치에 안 넣고
     # 여기서 조기 분기한다.
     if body.method == "SendStreamingMessage":
+        # story #2005: 이 await는 `_stream_send_message`의 task-생성 단계(`_handle_send_message`)
+        # 까지만 감싼다 — 스트림 본문(`generate()`)은 이 함수가 반환한 `StreamingResponse`가
+        # FastAPI에 의해 나중에 소비되며 실행되므로 여기 wait_for 밖이다(그 부분의 상한은
+        # `generate()` 내부의 overall-ceiling 로직, 위 `_stream_send_message` 참조).
         try:
-            return await _stream_send_message(
-                request, body.id, session, member, org_id, body.params or {}, active_extensions,
+            return await asyncio.wait_for(
+                _stream_send_message(
+                    request, body.id, session, member, org_id, body.params or {}, active_extensions,
+                ),
+                timeout=_A2A_RPC_TIMEOUT_SECONDS,
             )
         except _JsonRpcException as exc:
-            return JsonRpcResponse(id=body.id, error=JsonRpcError(code=exc.code, message=exc.message))
+            return JsonRpcResponse(
+                id=body.id, error=JsonRpcError(code=exc.code, message=exc.message, data=exc.data),
+            )
+        except TimeoutError:
+            return JsonRpcResponse(
+                id=body.id,
+                error=JsonRpcError(
+                    code=_REQUEST_TIMEOUT,
+                    message=f"SendStreamingMessage setup exceeded server timeout ({_A2A_RPC_TIMEOUT_SECONDS}s)",
+                    data={"retryable": True},
+                ),
+            )
 
     handler = _METHODS.get(body.method)
     if handler is None:
@@ -1059,10 +1130,28 @@ async def a2a_rpc(
             error=JsonRpcError(code=_METHOD_NOT_FOUND, message=f"Method not found: {body.method}"),
         )
 
+    # story #2005(Phase B P1-c): 서버 핸들러 상한 — `/rpc`엔 오늘까지 애플리케이션 레벨
+    # 타임아웃이 전혀 없었다(Cloud Run 플랫폼 타임아웃에만 암묵 의존, 위 `_A2A_RPC_TIMEOUT_SECONDS`
+    # 주석 참조). `asyncio.TimeoutError`는 3.11+부터 `TimeoutError`의 별칭이라 `except TimeoutError`
+    # 로 충분(`asyncio.wait_for`가 실제로 raise하는 타입도 이것).
     try:
-        result = await handler(session, member, body.params or {}, active_extensions)
+        result = await asyncio.wait_for(
+            handler(session, member, body.params or {}, active_extensions),
+            timeout=_A2A_RPC_TIMEOUT_SECONDS,
+        )
     except _JsonRpcException as exc:
-        return JsonRpcResponse(id=body.id, error=JsonRpcError(code=exc.code, message=exc.message))
+        return JsonRpcResponse(
+            id=body.id, error=JsonRpcError(code=exc.code, message=exc.message, data=exc.data),
+        )
+    except TimeoutError:
+        return JsonRpcResponse(
+            id=body.id,
+            error=JsonRpcError(
+                code=_REQUEST_TIMEOUT,
+                message=f"Method {body.method} exceeded server timeout ({_A2A_RPC_TIMEOUT_SECONDS}s)",
+                data={"retryable": True},
+            ),
+        )
 
     return JsonRpcResponse(id=body.id, result=result)
 
