@@ -34,6 +34,7 @@ import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
 import { ProfileMenu } from '@/components/nav/profile-menu';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
+import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
 import {
   Sidebar,
   SidebarContent,
@@ -71,6 +72,7 @@ function KbdHint({ children }: { children: React.ReactNode }) {
 }
 
 export function AppSidebar({
+  currentTeamMemberId,
   orgId,
   orgMemberships = [],
   projectId,
@@ -112,6 +114,8 @@ export function AppSidebar({
   }, [pathname, isMobile, setOpenMobile]);
 
   const [inboxUnreadCount, setInboxUnreadCount] = useState(0);
+  // story #1977(트랙B): GNB ③ 채팅 unread 총합(유나 시안 768e89b5 v2).
+  const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
@@ -298,6 +302,13 @@ export function AppSidebar({
                 >
                   <MessageSquare />
                   <span>{t('chats')}</span>
+                  {/* story #1977(트랙B): 유나 시안 768e89b5 v2 ③ — 결재함 배지와 동일 brand,
+                      구분은 색이 아니라 아이콘+탭 순서(디자인 노트). */}
+                  {chatUnreadTotal > 0 ? (
+                    <SidebarMenuBadge>
+                      {chatUnreadTotal > 99 ? '99+' : chatUnreadTotal}
+                    </SidebarMenuBadge>
+                  ) : null}
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

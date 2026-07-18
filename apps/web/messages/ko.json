@@ -3186,6 +3186,7 @@
     "empty": "표시할 에이전트가 없습니다"
   },
   "chats": {
+    "unreadMarker": "여기부터 안읽음",
     "inputPlaceholderMobile": "메시지를 입력하세요… (@ 멘션)",
     "inputPlaceholderFull": "메시지를 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈 / @ 멘션 / # 엔티티)",
     "isTyping": "{name} 님이 입력 중",
