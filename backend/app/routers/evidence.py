@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.evidence import _CLIENT_CREATABLE_TYPES, Evidence
+from app.models.gate import Gate
+from app.services.advisor_context import RESERVED_EVIDENCE_SOURCE
 from app.models.pm import Story, Task
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import has_project_access
@@ -26,6 +28,13 @@ class EvidenceCreateRequest(BaseModel):
     ref: str
     source: str | None = None
     note: str | None = None
+
+    @field_validator("source")
+    @classmethod
+    def reject_reserved_source(cls, value: str | None) -> str | None:
+        if value and value.startswith("advisor."):
+            raise ValueError("advisor.* evidence sources are reserved for internal claims")
+        return value
 
     @field_validator("work_item_type")
     @classmethod
@@ -162,6 +171,23 @@ async def delete_evidence(
     caller = await resolve_member(auth, org_id, session)
     if evidence.created_by != caller.id:
         raise HTTPException(status_code=403, detail="Only the creator can retract evidence")
+
+    if evidence.source == RESERVED_EVIDENCE_SOURCE:
+        # Lock linked gates in stable order so a creator cannot make a pending
+        # human decision unverifiable between transition validation and commit.
+        candidates = list((await session.execute(
+            select(Gate).where(
+                Gate.org_id == org_id,
+                Gate.status == "pending",
+                Gate.work_item_type == "story",
+                Gate.neutral_facts.isnot(None),
+                Gate.neutral_facts["advisor_origin"]["evidence_id"].astext == str(evidence.id),
+            ).order_by(Gate.id).with_for_update()
+        )).scalars())
+        for gate in candidates:
+            origin = (gate.neutral_facts or {}).get("advisor_origin")
+            if origin and str(origin.get("evidence_id")) == str(evidence.id):
+                raise HTTPException(status_code=409, detail={"code": "ADVISOR_EVIDENCE_IN_USE", "message": "Advisor evidence is linked to a pending gate"})
 
     await session.delete(evidence)
     await session.commit()

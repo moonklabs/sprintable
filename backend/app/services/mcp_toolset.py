@@ -35,7 +35,7 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # literal은 유지 — 데이터 마이그 불요, 스탠드업 core-promotion 때와 동일 관례).
     ("epics", ("epic", "goal")),
     ("tasks", ("task",)),
-    ("stories", ("story", "stories", "backlog", "claim", "checkin")),
+    ("stories", ("story", "stories", "backlog", "claim", "checkin", "advisor", "report_done")),
     # story b4027b2e: E-CANVAS visual_artifacts가 임계(11개 도구·전용 REST 도메인)에 도달해
     # cross-cutting always-allow에서 전용 그룹으로 승격(C1-S3 당시 예고된 신설). "canonical_version"
     # (propose_canonical_version은 "artifact" substring이 없음)·"spec_pin"(핀 4종)까지 포괄.
@@ -212,6 +212,8 @@ _ALWAYS_ALLOWED_PATH_PREFIXES: tuple[str, ...] = (
 
 # path-prefix → toolset group(라우터 리소스 정렬). 모든 group 은 ALL_GROUPS 소속이어야 함.
 _PATH_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("/api/v2/advisor", "stories"),
+    ("/api/v2/workflow/report-done", "stories"),
     ("/api/v2/rewards", "rewards"),
     ("/api/v2/wallet", "rewards"),
     ("/api/v2/leaderboard", "rewards"),
@@ -284,6 +286,7 @@ def resolve_manifest(scope: list[str] | None, all_tool_names: list[str]) -> dict
 #    도구 추가/삭제 시 여기 동기화(테스트가 그룹 커버리지·core/admin 정합 검증).
 ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_ping",
+    "sprintable_advisor_context", "sprintable_report_done",
     "sprintable_activate_sprint", "sprintable_add_epic", "sprintable_add_goal",
     "sprintable_add_retro_action",
     "sprintable_add_retro_item", "sprintable_add_story", "sprintable_add_task",

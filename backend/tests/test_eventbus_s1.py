@@ -217,6 +217,9 @@ async def test_get_pending_events_returns_list(client, mock_session):
     data = resp.json()
     assert len(data) == 3
     assert all(e["status"] == "pending" for e in data)
+    assert all("recipient_seq" in e for e in data)
+    compiled = str(mock_session.execute.await_args.args[0].compile(compile_kwargs={"literal_binds": True}))
+    assert "recipient_seq" in compiled and "created_at" in compiled
 
 
 @pytest.mark.anyio

@@ -9,6 +9,7 @@ import datetime
 import json
 import uuid
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from app.routers.events import _event_to_payload
 from app.routers.agent_gateway import _row_to_payload
@@ -36,11 +37,22 @@ def test_event_to_payload_hoists_content_top_level():
     p = _event_to_payload(_ev({"content": "[story] Build — ship it", "title": "Build"}))
     assert p["content"] == "[story] Build — ship it"  # top-level
     assert p["payload"]["content"] == "[story] Build — ship it"  # payload에도 유지
+    assert p["recipient_seq"] is None  # legacy Event-like objects remain compatible
 
 
 def test_event_to_payload_content_none_when_absent():
     p = _event_to_payload(_ev({"title": "no content"}))
     assert p["content"] is None  # 없으면 None (안전)
+
+
+def test_event_to_payload_normalizes_mock_sequence_but_preserves_integer():
+    legacy_event = _ev({"content": "legacy"})
+    legacy_event.recipient_seq = MagicMock()
+    assert _event_to_payload(legacy_event)["recipient_seq"] is None
+
+    sequenced_event = _ev({"content": "advisor"})
+    sequenced_event.recipient_seq = 42
+    assert _event_to_payload(sequenced_event)["recipient_seq"] == 42
 
 
 def test_row_to_payload_hoists_content_dict_and_str():

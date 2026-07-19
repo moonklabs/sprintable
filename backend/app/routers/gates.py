@@ -67,6 +67,13 @@ class GateCreateRequest(BaseModel):
     role_id: uuid.UUID
     neutral_facts: dict[str, Any] | None = None
 
+    @field_validator("neutral_facts")
+    @classmethod
+    def reject_advisor_reserved_fields(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value and any(key == "advisor_origin" or key.startswith("advisor_") or key.startswith("executor_advisor_") for key in value):
+            raise ValueError("Advisor namespace is reserved for internal workflow claims")
+        return value
+
     @field_validator("gate_type")
     @classmethod
     def validate_gate_type(cls, v: str) -> str:

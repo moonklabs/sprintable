@@ -1,17 +1,18 @@
 """POST /api/v2/workflow/report-done — 에이전트 작업 완료 보고 + 다음 단계 자동 트리거."""
 import logging
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.gate import Gate
+from app.models.evidence import Evidence
 from app.models.pm import Story
 from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
@@ -23,6 +24,11 @@ from app.services.merge_verdict_gate import (
     merge_gate_active,
     merge_gate_advisory,
 )
+from app.services.advisor_context import (
+    RESERVED_EVIDENCE_SOURCE, advisor_enabled_for, canonical_claim,
+    lock_and_stamp_advisor_origin,
+)
+from app.services.member_resolver import resolve_member
 
 logger = logging.getLogger(__name__)
 
@@ -81,11 +87,50 @@ _TRANSITIONS: dict[str, dict[str, Any]] = {
 
 # ─── Schema ──────────────────────────────────────────────────────────────────
 
+class AdvisorFinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(max_length=1000)
+    severity: Literal["low", "medium", "high"]
+    message: str = Field(max_length=1000)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=20)
+
+    def model_post_init(self, __context: Any) -> None:
+        if any(len(ref) > 1000 for ref in self.evidence_refs):
+            raise ValueError("evidence_refs items must be at most 1000 characters")
+
+
+class AdvisorSelfReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1]
+    mode: Literal["local"]
+    verdict: Literal["likely_pass", "likely_reject", "uncertain"]
+    advisor_model: str | None = Field(default=None, max_length=200)
+    findings: list[AdvisorFinding] = Field(default_factory=list, max_length=20)
+    keep: list[str] = Field(default_factory=list, max_length=10)
+
+    def model_post_init(self, __context: Any) -> None:
+        if any(len(item) > 1000 for item in self.keep):
+            raise ValueError("keep items must be at most 1000 characters")
+
+
 class ReportDoneRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     story_id: uuid.UUID
     stage: str
     agent_id: uuid.UUID
     context: dict[str, Any] | None = None
+    summary: str | None = Field(None, max_length=2000)
+    head_sha: str | None = Field(None, pattern=r"^[0-9a-fA-F]{7,64}$")
+    intent_hash: str | None = Field(None, pattern=r"^[0-9a-fA-F]{64}$")
+    self_review: AdvisorSelfReview | None = None
+
+    def advisor_envelope(self) -> dict[str, Any] | None:
+        values = {key: getattr(self, key) for key in ("summary", "head_sha", "intent_hash")}
+        values["self_review"] = self.self_review.model_dump(mode="json") if self.self_review else None
+        return values if any(value is not None for value in values.values()) else None
 
 
 class ReportDoneResponse(BaseModel):
@@ -153,6 +198,20 @@ async def report_done(
     # project_b story_id로 이 엔드포인트를 호출하면 stage 전이가 실제로 반영됐다(DB 재조회로
     # backlog→in-progress 변조 확定, G-class).
     from app.services.project_auth import has_project_access
+    # Advisor extensions are opt-in and use strict canonical identity before
+    # configuration gates, Evidence, line engine, or Story mutations.
+    envelope = body.advisor_envelope()
+    advisor_claim: tuple[str, str] | None = None
+    advisor_evidence: Evidence | None = None
+    if envelope is not None:
+        if not advisor_enabled_for(org_id):
+            raise HTTPException(status_code=404, detail="Advisor claims are disabled")
+        caller = await resolve_member(auth, org_id, session)
+        if caller.type != "agent" or caller.id != body.agent_id:
+            raise HTTPException(status_code=403, detail="Advisor claim caller must be the reporting agent")
+        if not await has_project_access(session, caller.id, story.project_id, org_id):
+            raise HTTPException(status_code=404, detail="Story not found")
+        advisor_claim = canonical_claim(envelope)
     if not await has_project_access(session, uuid.UUID(auth.user_id), story.project_id, org_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Story not found")
 
@@ -165,6 +224,14 @@ async def report_done(
     )
     if agent_check.scalar_one_or_none() is None:
         raise HTTPException(status_code=400, detail="agent_id not found in this organization")
+
+    if advisor_claim is not None:
+        note, claim_hash = advisor_claim
+        advisor_evidence = Evidence(id=uuid.uuid4(), org_id=story.org_id, work_item_id=story.id,
+                                    work_item_type="story", type="report", ref=f"sha256:{claim_hash}",
+                                    source=RESERVED_EVIDENCE_SOURCE, note=note, created_by=body.agent_id)
+        session.add(advisor_evidence)
+        await session.flush()
 
     transition = _TRANSITIONS[body.stage]
     next_stage: str = transition["next_stage"]
@@ -197,6 +264,13 @@ async def report_done(
             pr_result=ctx.get("pr_result"),
         )
         await _record_gate_evidence(session, gate_info)
+        # A local review never decides a Gate.  It only anchors the first
+        # pending human merge Gate to immutable Evidence for later audit.
+        if advisor_claim is not None and advisor_evidence is not None and gate_info.gate_id and gate_info.decision != AUTO_MERGE:
+            _, claim_hash = advisor_claim
+            await lock_and_stamp_advisor_origin(
+                session, gate_info.gate_id, story, body.agent_id, advisor_evidence.id, claim_hash,
+            )
         # advisory(B): eval/gate evidence/metrics는 기록(위)하되 차단(409/202·done 보류)은 면제 →
         # decision 무관 done 통과(관측만). enforcing(미설정)은 아래 분기 그대로.
         if gate_info.decision != AUTO_MERGE and not merge_gate_advisory():

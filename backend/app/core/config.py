@@ -99,6 +99,27 @@ class Settings(BaseSettings):
     # 정책은 A(human-only enforcing)·advisory는 개발/관측용 임시 모드(미설정=enforcing 보존).
     h1_merge_gate_advisory: bool = False
 
+    # Harness-local Advisor P0. A non-empty finite allowlist is required so a
+    # deployment cannot accidentally enable an un-preflighted namespace.
+    advisor_p0_enabled: bool = False
+    advisor_p0_org_allowlist: str = ""
+    advisor_p0_provenance_approved_orgs: str = ""
+
+    def validate_advisor_p0_rollout(self) -> None:
+        """Fail closed before startup when Advisor rollout configuration is unsafe."""
+        if not self.advisor_p0_enabled:
+            return
+        allowlisted = {item.strip() for item in self.advisor_p0_org_allowlist.split(",") if item.strip()}
+        approved = {
+            item.strip()
+            for item in self.advisor_p0_provenance_approved_orgs.split(",")
+            if item.strip()
+        }
+        if not allowlisted or not approved:
+            raise ValueError("Advisor P0 requires non-empty org allowlist and provenance-approved orgs")
+        if not allowlisted.issubset(approved):
+            raise ValueError("Advisor P0 allowlist must be a subset of provenance-approved orgs")
+
     # E-HITL-GATING S-GATE-2: config 게이트 집행 활성(default-off·dev allowlist 점진 rollout·무회귀).
     # off면 enforce_gate 미동작(기존 done/merge 무변경). allowlist 비면 enabled 시 전 org, 지정 시 해당 org만.
     gate_config_enforce_enabled: bool = False

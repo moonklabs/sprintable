@@ -320,11 +320,24 @@ async def transition_gate(
     wake/delivery 페이로드를 append — 호출자가 자기 commit 후 wake_agent/webhook 스케줄(#1364 선례
     동형). 생략(기존 호출자 전부)은 무변경(수집 안 함·이 함수 자체는 commit 하지 않음)."""
     gate_r = await session.execute(
-        select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
+        select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id).with_for_update()
     )
     gate = gate_r.scalar_one_or_none()
     if gate is None:
         raise ValueError(f"Gate {gate_id} not found")
+
+    advisor_origin: dict[str, Any] | None = None
+    if isinstance(gate.neutral_facts, dict) and "advisor_origin" in gate.neutral_facts:
+        origin_value = gate.neutral_facts["advisor_origin"]
+        if not isinstance(origin_value, dict):
+            raise ValueError("Advisor-origin integrity error")
+        if origin_value.get("schema_version") != 1:
+            raise ValueError("Advisor-origin integrity error")
+        advisor_origin = origin_value
+    if advisor_origin is not None:
+        if new_status not in {"approved", "rejected"}:
+            raise ValueError("Advisor-origin gates only support approved/rejected resolution")
+        await _validate_advisor_resolution(session, gate, advisor_origin, resolver_id)
 
     if not is_valid_transition(gate.status, new_status):
         raise ValueError(
@@ -385,6 +398,9 @@ async def transition_gate(
 
     await create_gate_approval_evidence_if_applicable(session, gate, new_status, resolver_id)
 
+    if advisor_origin is not None:
+        await _emit_advisor_resolution_event(session, gate, advisor_origin, new_status, resolver_id, note)
+
     await session.flush()
     await session.refresh(gate)
 
@@ -396,6 +412,71 @@ async def transition_gate(
         )
 
     return gate
+
+
+async def _validate_advisor_resolution(session: AsyncSession, gate: Gate, origin: dict[str, Any], resolver_id: uuid.UUID | None) -> None:
+    """Locked service-level authority check for Advisor-origin Gates."""
+    import json
+    from app.models.evidence import Evidence
+    from app.models.member import Member
+    from app.models.pm import Story
+    from app.services.advisor_context import RESERVED_EVIDENCE_SOURCE, canonical_claim
+    from app.services.member_resolver import resolve_member_identity
+    from app.services.project_auth import has_project_access
+    if resolver_id is None:
+        raise ValueError("Advisor-origin gates require a human resolver")
+    resolver = await resolve_member_identity(resolver_id, gate.org_id, session)
+    if resolver is None or resolver.type != "human" or resolver.user_id is None:
+        raise ValueError("Advisor-origin gates require an active human resolver")
+    canonical_resolver = (await session.execute(select(Member).where(
+        Member.id == resolver.id, Member.org_id == gate.org_id, Member.type == "human",
+        Member.is_active.is_(True), Member.deleted_at.is_(None),
+    ))).scalar_one_or_none()
+    if canonical_resolver is None:
+        raise ValueError("Advisor-origin gates require an active human resolver")
+    try:
+        story_id = uuid.UUID(str(origin["story_id"])); project_id = uuid.UUID(str(origin["project_id"])); evidence_id = uuid.UUID(str(origin["evidence_id"])); recipient_id = uuid.UUID(str(origin["recipient_id"]))
+    except (KeyError, ValueError, TypeError) as exc:
+        raise ValueError("Advisor-origin integrity error") from exc
+    story = (await session.execute(select(Story).where(Story.id == story_id, Story.org_id == gate.org_id, Story.deleted_at.is_(None)))).scalar_one_or_none()
+    evidence = await session.get(Evidence, evidence_id)
+    recipient = (await session.execute(select(Member).where(
+        Member.id == recipient_id, Member.org_id == gate.org_id, Member.type == "agent",
+        Member.is_active.is_(True), Member.deleted_at.is_(None),
+    ))).scalar_one_or_none()
+    if story is None or story.project_id != project_id or gate.work_item_id != story_id or gate.work_item_type != "story":
+        raise ValueError("Advisor-origin integrity error")
+    if not await has_project_access(session, resolver.user_id, project_id, gate.org_id):
+        raise ValueError("Resolver lacks project access")
+    if recipient is None or evidence is None or evidence.org_id != gate.org_id or evidence.work_item_id != story_id or evidence.work_item_type != "story" or evidence.type != "report" or evidence.source != RESERVED_EVIDENCE_SOURCE or evidence.created_by != recipient.id:
+        raise ValueError("Advisor-origin integrity error")
+    try:
+        parsed = json.loads(evidence.note or "")
+        canonical, hash_value = canonical_claim(parsed)
+    except Exception as exc:
+        raise ValueError("Advisor-origin integrity error") from exc
+    if canonical != evidence.note or evidence.ref != f"sha256:{hash_value}" or origin.get("claim_hash") != hash_value:
+        raise ValueError("Advisor-origin integrity error")
+
+
+async def _emit_advisor_resolution_event(session: AsyncSession, gate: Gate, origin: dict[str, Any], status: str, resolver_id: uuid.UUID | None, note: str | None) -> None:
+    from app.models.event import Event, EventRecipientType, EventStatus, EventType
+    from app.services.event_seq import assign_recipient_seq
+    recipient_id = uuid.UUID(str(origin["recipient_id"]))
+    existing = (await session.execute(select(Event).where(Event.org_id == gate.org_id, Event.event_type == EventType.gate_resolved.value, Event.source_entity_type == "gate", Event.source_entity_id == gate.id, Event.recipient_id == recipient_id))).scalar_one_or_none()
+    if existing is not None:
+        return
+    event = Event(id=uuid.uuid4(), org_id=gate.org_id, project_id=uuid.UUID(str(origin["project_id"])),
+                  event_type=EventType.gate_resolved.value, source_entity_type="gate", source_entity_id=gate.id,
+                  sender_id=None, recipient_id=recipient_id, recipient_type=EventRecipientType.agent.value,
+                  status=EventStatus.pending.value, payload={"schema_version": 1, "gate_id": str(gate.id),
+                  "story_id": origin["story_id"], "status": status, "note": note,
+                  "resolver_id": str(resolver_id), "resolved_at": gate.resolved_at.isoformat() if gate.resolved_at else None,
+                  "next_stage": "done" if status == "approved" else "revise"})
+    session.add(event)
+    await session.flush()
+    await assign_recipient_seq(session, event)
+    await session.flush()
 
 
 async def void_gate(
