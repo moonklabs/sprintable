@@ -1,0 +1,278 @@
+<title>Advisor 호출 모델 설계 리포트</title>
+<style>
+  :root{
+    --paper:#f7f6f2; --ink:#232838; --ink-soft:#5b6478; --line:#dcd9d0;
+    --card:#ffffff; --card-line:#e5e2d9;
+    --seal:#c8402f; --seal-soft:#fbeae6; --seal-line:#eac2b8;
+    --auto:#2e8b6e; --auto-soft:#e7f2ed; --auto-line:#bcd9cd;
+    --defer:#8a8fa0; --defer-soft:#eeeef1; --defer-line:#d5d6dd;
+    --code-bg:#eeece5; --code-ink:#3a4054;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#171a24; --ink:#e8e7e2; --ink-soft:#9aa0b2; --line:#31374a;
+      --card:#1f2432; --card-line:#333a4e;
+      --seal:#e8674f; --seal-soft:#33231f; --seal-line:#5c352c;
+      --auto:#4db894; --auto-soft:#1c2b26; --auto-line:#2e4a40;
+      --defer:#8a8fa0; --defer-soft:#242736; --defer-line:#3a3e52;
+      --code-bg:#12141d; --code-ink:#c6cadb;
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#f7f6f2; --ink:#232838; --ink-soft:#5b6478; --line:#dcd9d0;
+    --card:#ffffff; --card-line:#e5e2d9;
+    --seal:#c8402f; --seal-soft:#fbeae6; --seal-line:#eac2b8;
+    --auto:#2e8b6e; --auto-soft:#e7f2ed; --auto-line:#bcd9cd;
+    --defer:#8a8fa0; --defer-soft:#eeeef1; --defer-line:#d5d6dd;
+    --code-bg:#eeece5; --code-ink:#3a4054;
+  }
+  :root[data-theme="dark"]{
+    --paper:#171a24; --ink:#e8e7e2; --ink-soft:#9aa0b2; --line:#31374a;
+    --card:#1f2432; --card-line:#333a4e;
+    --seal:#e8674f; --seal-soft:#33231f; --seal-line:#5c352c;
+    --auto:#4db894; --auto-soft:#1c2b26; --auto-line:#2e4a40;
+    --defer:#8a8fa0; --defer-soft:#242736; --defer-line:#3a3e52;
+    --code-bg:#12141d; --code-ink:#c6cadb;
+  }
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;
+    line-height:1.65; font-size:16px;
+  }
+  .wrap{max-width:860px; margin:0 auto; padding:56px 24px 96px}
+  .eyebrow{font-size:12px; letter-spacing:.14em; color:var(--ink-soft); text-transform:uppercase; margin-bottom:14px}
+  h1{font-size:clamp(26px,4.5vw,38px); font-weight:800; letter-spacing:-.03em; line-height:1.25; margin:0 0 10px; text-wrap:balance}
+  .sub{color:var(--ink-soft); margin:0 0 40px; max-width:44em}
+  h2{font-size:21px; font-weight:800; letter-spacing:-.02em; margin:64px 0 6px}
+  h2 .no{color:var(--ink-soft); font-weight:700; margin-right:8px}
+  .h2sub{color:var(--ink-soft); font-size:14px; margin:0 0 20px}
+  code,.mono{font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:.86em; background:var(--code-bg); color:var(--code-ink); padding:2px 6px; border-radius:5px}
+  a{color:inherit}
+
+  /* 핵심 답 박스 */
+  .thesis{border:1.5px solid var(--ink); background:var(--card); padding:26px 28px; margin:0 0 8px}
+  .thesis .label{font-size:12px; letter-spacing:.14em; font-weight:800; color:var(--seal); margin-bottom:10px}
+  .thesis p{margin:0; font-size:18.5px; font-weight:700; line-height:1.6; text-wrap:balance}
+  .thesis p b{color:var(--seal)}
+  .thesis .after{font-weight:400; font-size:15px; color:var(--ink-soft); margin-top:12px}
+
+  /* 범례 + 배지 */
+  .legend{display:flex; gap:18px; flex-wrap:wrap; margin:20px 0 26px; font-size:13.5px; color:var(--ink-soft)}
+  .badge{display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:800; letter-spacing:.06em; padding:3px 10px; border-radius:999px; white-space:nowrap}
+  .badge::before{content:""; width:7px; height:7px; border-radius:50%}
+  .b-auto{background:var(--auto-soft); color:var(--auto); border:1px solid var(--auto-line)}
+  .b-auto::before{background:var(--auto)}
+  .b-man{background:var(--seal-soft); color:var(--seal); border:1px solid var(--seal-line)}
+  .b-man::before{background:var(--seal)}
+  .b-defer{background:var(--defer-soft); color:var(--defer); border:1px solid var(--defer-line)}
+  .b-defer::before{background:var(--defer)}
+
+  /* 루프 다이어그램 */
+  .flow{display:flex; flex-direction:column}
+  .step{display:grid; grid-template-columns:52px 1fr; gap:0 18px}
+  .rail{display:flex; flex-direction:column; align-items:center}
+  .dot{width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:17px; flex-shrink:0; background:var(--card); border:2px solid var(--line)}
+  .step[data-k="auto"] .dot{border-color:var(--auto); color:var(--auto)}
+  .step[data-k="man"] .dot{border-color:var(--seal); color:var(--seal)}
+  .step[data-k="none"] .dot{border-color:var(--defer); color:var(--defer)}
+  .rail .cord{width:2px; flex:1; background:var(--line); min-height:22px}
+  .stepbody{padding-bottom:26px}
+  .stephead{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:2px 0 6px}
+  .stephead h3{margin:0; font-size:16.5px; font-weight:800; letter-spacing:-.01em}
+  .steptext{margin:0; color:var(--ink-soft); font-size:14.5px; max-width:40em}
+  .steptext b{color:var(--ink); font-weight:700}
+  .say{margin:12px 0 0; background:var(--code-bg); border-left:3px solid var(--line); padding:10px 14px; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:13px; color:var(--code-ink); border-radius:0 8px 8px 0; overflow-x:auto}
+  .say .who{color:var(--ink-soft); font-family:inherit}
+  .step[data-k="auto"] .say{border-left-color:var(--auto)}
+  .step[data-k="man"] .say{border-left-color:var(--seal)}
+
+  /* 역할 카드 3장 */
+  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px}
+  .card{background:var(--card); border:1px solid var(--card-line); border-radius:12px; padding:20px 22px}
+  .card .top{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px}
+  .card h3{margin:0; font-size:17px; font-weight:800}
+  .card .one{font-size:14px; font-weight:700; margin:0 0 10px}
+  .card ul{margin:0; padding-left:18px; font-size:13.5px; color:var(--ink-soft)}
+  .card li{margin:4px 0}
+  .card li b{color:var(--ink)}
+  .card.defer{border-style:dashed; background:transparent}
+
+  /* 도그푸드 대화 타임라인 */
+  .scene{background:var(--card); border:1px solid var(--card-line); border-radius:12px; padding:8px 22px 18px; overflow-x:auto}
+  .turn{display:grid; grid-template-columns:96px 1fr; gap:14px; padding:13px 0; border-bottom:1px dashed var(--line); align-items:start}
+  .turn:last-child{border-bottom:none}
+  .turn .actor{font-size:12px; font-weight:800; letter-spacing:.05em; padding-top:3px; white-space:nowrap}
+  .turn[data-a="human"] .actor{color:var(--seal)}
+  .turn[data-a="agent"] .actor{color:var(--auto)}
+  .turn[data-a="sys"] .actor{color:var(--defer)}
+  .turn p{margin:0; font-size:14px}
+  .turn p .m{font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:12.5px; background:var(--code-bg); color:var(--code-ink); padding:1px 6px; border-radius:5px; white-space:nowrap}
+  .turn p .note{color:var(--ink-soft); font-size:13px}
+
+  /* Phase 타임라인 */
+  .phases{display:flex; flex-direction:column; gap:12px}
+  .phase{display:grid; grid-template-columns:110px 1fr; gap:16px; background:var(--card); border:1px solid var(--card-line); border-radius:12px; padding:16px 20px; align-items:start}
+  .phase .tag{font-weight:800; font-size:14px}
+  .phase .tag small{display:block; font-weight:700; color:var(--ink-soft); font-size:12px; margin-top:2px}
+  .phase p{margin:0; font-size:14px; color:var(--ink-soft)}
+  .phase p b{color:var(--ink)}
+  .phase.now{border-color:var(--auto); border-width:1.5px}
+  .phase.gated{border-style:dashed}
+
+  /* 체크리스트 */
+  .checks{margin:0; padding:0; list-style:none; counter-reset:ck}
+  .checks li{counter-increment:ck; display:grid; grid-template-columns:30px 1fr; gap:12px; padding:11px 0; border-bottom:1px dashed var(--line); font-size:14.5px}
+  .checks li::before{content:counter(ck); font-weight:800; color:var(--ink-soft); font-family:ui-monospace,Menlo,monospace; font-size:13px; padding-top:2px}
+  .checks li b{color:var(--seal)}
+
+  .foot{margin-top:64px; padding-top:18px; border-top:1px solid var(--line); font-size:12.5px; color:var(--ink-soft)}
+  @media (max-width:560px){
+    .step{grid-template-columns:40px 1fr; gap:0 12px}
+    .dot{width:40px; height:40px; font-size:14px}
+    .turn{grid-template-columns:74px 1fr}
+    .phase{grid-template-columns:1fr}
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .card{transition:border-color .15s ease}
+    .card:hover{border-color:var(--ink-soft)}
+  }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">Sprintable · 설계 플랜 리포트 · 2026-07-19</div>
+  <h1>Advisor는 누가, 언제 부르나 — 호출 모델 설계</h1>
+  <p class="sub">백엔드(advisor_context · report_done · gate.resolved)는 이미 완성돼 있습니다. 비어 있는 것은 "누가 언제 호출하는지"를 정의하는 레이어 — 이 리포트는 그 레이어를 Skill·Command·Hook 세 부품으로 어떻게 만들지의 계획입니다.</p>
+
+  <div class="thesis">
+    <div class="label">핵심 답 한 문장</div>
+    <p>개발자(사람)는 아무 툴도 직접 호출하지 않는다 — <b>에이전트가 호출</b>하고, <b>스킬이 에이전트에게 "언제 호출할지"를 가르친다</b>.</p>
+    <p class="after">Skill = 자동(세션의 기본 동작) · Command = 수동 진입점(시작·강제·확인) · Hook = 나중에(불가역 경계 강제, 가설 확증 후). 사람이 하는 일은 단 하나 — 게이트에서 증거를 보고 도장을 찍는 것.</p>
+  </div>
+
+  <h2><span class="no">1</span>5단계 루프 — 무엇이 자동이고 무엇이 수동인가</h2>
+  <p class="h2sub">에이전트가 티켓 하나를 처리하는 전체 흐름. 색이 곧 답입니다.</p>
+  <div class="legend">
+    <span class="badge b-auto">자동 — 에이전트·스킬</span>
+    <span class="badge b-man">수동 — 사람</span>
+    <span class="badge b-defer">개입 없음</span>
+  </div>
+
+  <div class="flow">
+    <div class="step" data-k="man">
+      <div class="rail"><div class="dot">①</div><div class="cord"></div></div>
+      <div class="stepbody">
+        <div class="stephead"><h3>티켓 수신</h3><span class="badge b-man">진입은 수동</span><span class="badge b-auto">이후 자동</span></div>
+        <p class="steptext">사람이 <code>/sprintable:work SPR-31</code>을 입력하거나, 에이전트의 <code>poll_events</code> 루프에 배정 이벤트가 도착하면 시작됩니다.</p>
+        <div class="say"><span class="who">agent&gt;</span> SPR-31 시작합니다. AC 3개 확인.</div>
+      </div>
+    </div>
+    <div class="step" data-k="auto">
+      <div class="rail"><div class="dot">②</div><div class="cord"></div></div>
+      <div class="stepbody">
+        <div class="stephead"><h3>Kickoff Advisor</h3><span class="badge b-auto">자동 (Skill)</span></div>
+        <p class="steptext">스킬 규범에 따라 에이전트가 <code>advisor_context(kickoff)</code>를 호출 → 서버가 내려준 프롬프트를 <b>자기 로컬 서브에이전트로 실행</b>합니다. 서버는 모델을 돌리지 않습니다. 과거 이 프로젝트에서 사람이 reject한 이력이 작업 계획에 반영됩니다.</p>
+        <div class="say"><span class="who">advisor&gt;</span> 과거 reject 이력 2건 참고: AC마다 근거 필수.</div>
+      </div>
+    </div>
+    <div class="step" data-k="none">
+      <div class="rail"><div class="dot">③</div><div class="cord"></div></div>
+      <div class="stepbody">
+        <div class="stephead"><h3>작업</h3><span class="badge b-defer">Sprintable 불개입</span></div>
+        <p class="steptext">코딩은 지금처럼 harness(Claude Code·Codex) 안에서. 쓰던 도구를 하나도 바꾸지 않습니다.</p>
+      </div>
+    </div>
+    <div class="step" data-k="auto">
+      <div class="rail"><div class="dot">④</div><div class="cord"></div></div>
+      <div class="stepbody">
+        <div class="stephead"><h3>Preflight → 완료 보고</h3><span class="badge b-auto">자동 (Skill)</span><span class="badge b-man">/sprintable:done 으로 강제 가능</span></div>
+        <p class="steptext">에이전트가 "완료"라고 판단하면 스킬이 지시합니다: <code>advisor_context(preflight)</code> → 서브에이전트가 self_review(verdict·findings·keep)를 생성 → <code>report_done</code>에 첨부. merge 단계면 게이트가 판단해 <b>200(자동 통과) / 202(사람 대기) / 409(차단)</b>으로 답합니다. self_review는 <b>주장이지 승인이 아닙니다</b> — 게이트에 증거로 봉인될 뿐.</p>
+        <div class="say"><span class="who">agent&gt;</span> self_review: likely_pass · findings 1건 → 202, 사람 게이트 대기. 다른 티켓 진행합니다.</div>
+      </div>
+    </div>
+    <div class="step" data-k="man">
+      <div class="rail"><div class="dot">⑤</div></div>
+      <div class="stepbody">
+        <div class="stephead"><h3>판정 → 재작업</h3><span class="badge b-man">도장은 사람</span><span class="badge b-auto">수신·재작업은 자동</span></div>
+        <p class="steptext">사람이 게이트 화면에서 증거를 보고 approve/reject — <b>루프 전체에서 사람이 하는 유일한 일</b>입니다. 판정은 <code>gate.resolved</code> 이벤트로 에이전트에게 돌아가고, rejected면 note·keep을 준수하며 자동으로 재작업 후 ④로 복귀합니다.</p>
+        <div class="say"><span class="who">agent&gt;</span> rejected · next_stage=revise — keep 목록 보존하고 재작업 시작.</div>
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="no">2</span>세 부품의 역할 분담</h2>
+  <p class="h2sub">같은 루프를 세 아티팩트가 나눠 구동합니다 — 겹치지 않고, 하나가 빠져도 나머지로 돌아갑니다.</p>
+  <div class="cards">
+    <div class="card">
+      <div class="top"><h3>Skill</h3><span class="badge b-auto">자동</span></div>
+      <p class="one">세션의 기본 동작 — 루프 규범</p>
+      <ul>
+        <li>티켓 시작 시 <b>kickoff advisor</b> 실행</li>
+        <li>완료 판단 시 <b>preflight → report_done</b></li>
+        <li>202는 대기가 아니라 <b>다른 티켓 진행</b> 신호</li>
+        <li>rejected 수신 시 keep 보존 <b>재작업 규칙</b></li>
+        <li>금지 규칙: self_review ≠ 승인, 주입 방어</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="top"><h3>Command</h3><span class="badge b-man">수동</span></div>
+      <p class="one">사람의 명시적 진입점 3개</p>
+      <ul>
+        <li><b>/sprintable:work</b> — 티켓 시작</li>
+        <li><b>/sprintable:done</b> — 완료 선언 강제 실행</li>
+        <li><b>/sprintable:status</b> — 게이트·이벤트 확인</li>
+        <li>스킬이 안 도는 상황의 탈출구 + 데모용</li>
+      </ul>
+    </div>
+    <div class="card defer">
+      <div class="top"><h3>Hook</h3><span class="badge b-defer">P2 연기</span></div>
+      <p class="one">불가역 경계에서만 강제</p>
+      <ul>
+        <li><b>git push / merge 직전</b> preflight 없으면 차단</li>
+        <li>H-도장 가설 확증(7/31) 후에만 도입</li>
+        <li>안티 세리머니 — <b>확증 전에 강제부터 넣지 않는다</b></li>
+      </ul>
+    </div>
+  </div>
+
+  <h2><span class="no">3</span>도그푸드 시나리오 — 실제 티켓 1건의 대화</h2>
+  <p class="h2sub">Phase 1의 수용 테스트이자 H-영수증 가설의 첫 계측(게이트 open→resolve 시간).</p>
+  <div class="scene">
+    <div class="turn" data-a="human"><div class="actor">사람</div><p><span class="m">/sprintable:work SPR-31</span> <span class="note">— 루프에서 사람이 입력하는 첫 번째이자 (판정 전까지) 마지막 명령</span></p></div>
+    <div class="turn" data-a="agent"><div class="actor">에이전트</div><p><span class="m">advisor_context(kickoff)</span> 호출 → 서브에이전트 실행 → "reject 이력 2건 참고" 반영 후 작업 시작</p></div>
+    <div class="turn" data-a="agent"><div class="actor">에이전트</div><p>작업 완료 판단 → <span class="m">advisor_context(preflight)</span> → self_review 생성 → <span class="m">report_done(self_review)</span></p></div>
+    <div class="turn" data-a="sys"><div class="actor">서버</div><p><b>202</b> — 사람 게이트 생성, self_review를 증거로 봉인(advisor_origin). <span class="note">에이전트는 다른 티켓으로.</span></p></div>
+    <div class="turn" data-a="human"><div class="actor">사람</div><p>게이트 화면에서 증거 확인 → <b>reject</b> + note 입력 <span class="note">(예: "권한은 project_auth 헬퍼로")</span></p></div>
+    <div class="turn" data-a="agent"><div class="actor">에이전트</div><p><span class="m">poll_events</span>에 <span class="m">gate.resolved(rejected, next_stage=revise)</span> 도착 → 자동 재작업 → 두 번째 <span class="m">report_done</span></p></div>
+    <div class="turn" data-a="human"><div class="actor">사람</div><p><b>approve</b> — 도장. 티켓 done, 판정 근거는 원장에 영구 기록</p></div>
+  </div>
+
+  <h2><span class="no">4</span>실행 계획 — 4개 Phase</h2>
+  <div class="phases">
+    <div class="phase">
+      <div class="tag">Phase 0<small>0.5일</small></div>
+      <p><b>백엔드 착지.</b> 워킹 트리의 Advisor P0 + gate.resolved 코드를 develop 기준 <code>feature/advisor-p0</code> 브랜치로 분리 커밋 → 테스트 10개 파일 통과 확인 → PR.</p>
+    </div>
+    <div class="phase now">
+      <div class="tag">Phase 1<small>1일 · 이번 주</small></div>
+      <p><b>Skill + Command 작성, 도그푸딩.</b> 이 repo <code>.claude/</code>에 SKILL.md 1개 + 커맨드 3개 작성 → 자사 org에 플래그 활성화(provenance 사전검사 포함) → 실제 티켓 1건 풀루프(위 시나리오)로 수용 테스트.</p>
+    </div>
+    <div class="phase">
+      <div class="tag">Phase 2<small>1~2일</small></div>
+      <p><b>배포 패키징.</b> <code>packages/claude-plugin/</code> 신설, CLI <code>connect</code>가 MCP 설정과 함께 스킬을 자동 설치 — "MCP 한 줄 + 스킬 자동 설치"로 TTHW&lt;5분 유지. quickstart 문서에 루프 다이어그램 추가.</p>
+    </div>
+    <div class="phase gated">
+      <div class="tag">Phase 3<small>가설 게이트</small></div>
+      <p><b>후행 — 결과 나와야 착수.</b> PreToolUse Hook(불가역 경계 강제)은 H-도장 확증(7/31) 후. Codex 변형(AGENTS.md + codex exec 레시피), AC별 self_assessment 구조화는 별도 세션.</p>
+    </div>
+  </div>
+
+  <h2><span class="no">5</span>검증 — 무엇이 되면 "된 것"인가</h2>
+  <ul class="checks">
+    <li><span>Phase 0: advisor 테스트 10개 파일 + MCP contract 테스트 전체 통과</span></li>
+    <li><span>도그푸드 E2E: 완료 선언 시 스킬이 <b>사람 개입 없이</b> preflight → report_done을 실행하고 202 + gate_id가 확인된다</span></li>
+    <li><span>웹 게이트 화면에 advisor_origin 증거가 표시되고, reject 후 <code>gate.resolved(revise)</code>가 에이전트에 도착해 <b>재작업이 자동 시작</b>된다</span></li>
+    <li><span>계측: 게이트 open→resolve 시간 기록 — H-영수증 목표는 판정 중앙값 <b>5분 이내</b></span></li>
+  </ul>
+
+  <div class="foot">근거 문서: docs/analysis/advisor-invocation-plan-2026-07-19.md · docs/advisor-harness-p0.md · proof-of-done-packet-design-2026-07-12.md §5 · problem-hypothesis-sharpening-2026-07-17.md (H-도장·H-영수증)</div>
+</div>
