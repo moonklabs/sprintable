@@ -109,6 +109,20 @@
   .turn p .m{font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:12.5px; background:var(--code-bg); color:var(--code-ink); padding:1px 6px; border-radius:5px; white-space:nowrap}
   .turn p .note{color:var(--ink-soft); font-size:13px}
 
+  /* 아하 모먼트 */
+  .ahas{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px}
+  .aha{background:var(--card); border:1px solid var(--card-line); border-radius:12px; padding:20px 22px; display:flex; flex-direction:column; gap:8px}
+  .aha .when{font-size:12px; font-weight:800; letter-spacing:.06em; color:var(--ink-soft)}
+  .aha .when b{color:var(--auto)}
+  .aha h3{margin:0; font-size:16.5px; font-weight:800; line-height:1.45; text-wrap:balance}
+  .aha h3 q{quotes:"“" "”"; color:var(--seal)}
+  .aha p{margin:0; font-size:13.5px; color:var(--ink-soft)}
+  .aha p b{color:var(--ink)}
+  .aha.hero{border-color:var(--seal); border-width:1.5px}
+  .aha .chip{align-self:flex-start; font-size:11px; font-weight:800; letter-spacing:.08em; color:var(--seal); background:var(--seal-soft); border:1px solid var(--seal-line); border-radius:999px; padding:2px 9px}
+  .notaha{margin-top:14px; border:1px dashed var(--defer-line); border-radius:12px; padding:14px 20px; font-size:13.5px; color:var(--ink-soft)}
+  .notaha b{color:var(--ink)}
+
   /* Phase 타임라인 */
   .phases{display:flex; flex-direction:column; gap:12px}
   .phase{display:grid; grid-template-columns:110px 1fr; gap:16px; background:var(--card); border:1px solid var(--card-line); border-radius:12px; padding:16px 20px; align-items:start}
@@ -246,7 +260,29 @@
     <div class="turn" data-a="human"><div class="actor">사람</div><p><b>approve</b> — 도장. 티켓 done, 판정 근거는 원장에 영구 기록</p></div>
   </div>
 
-  <h2><span class="no">4</span>실행 계획 — 4개 Phase</h2>
+  <h2><span class="no">4</span>아하 모먼트 — 언제 "이거다"를 느끼나</h2>
+  <p class="h2sub">세 개가 있고, 오는 시점이 다릅니다. 온보딩의 진짜 목적지는 MCP 등록이 아니라 아하 1입니다.</p>
+  <div class="ahas">
+    <div class="aha">
+      <div class="when">아하 1 · <b>첫 티켓, 첫 5분</b></div>
+      <h3><q>코드를 안 열었는데 판정이 끝났다</q></h3>
+      <p>첫 202 게이트 화면 — self_review와 증거가 나란히 붙어 있어 <b>3초 안에 approve</b>. "다 했어요"를 의심하며 전부 다시 열던 사람이 처음으로 안 열어본 순간. <b>H-영수증</b>(판정 중앙값 &lt;5분)이 정확히 이 순간을 계측합니다.</p>
+    </div>
+    <div class="aha hero">
+      <span class="chip">가장 강한 순간 · 데모의 하이라이트</span>
+      <div class="when">아하 2 · <b>첫 reject, 같은 날</b></div>
+      <h3><q>reject했더니 복붙 없이 알아서 고쳐왔다</q></h3>
+      <p>note 한 줄 적고 reject → <code>gate.resolved</code>가 날아가고, 에이전트가 keep은 보존한 채 재작업한 <b>두 번째 패킷이 돌아온다</b>. 리뷰 코멘트를 터미널에 복붙하던 루프가 사라지는, <b>루프가 닫혔다는 감각</b>. PoD 설계에 사전 등록된 "가장 보여줘야 할 장면".</p>
+    </div>
+    <div class="aha">
+      <div class="when">아하 3 · <b>티켓 3~5개 후 (리텐션 훅)</b></div>
+      <h3><q>내 도장이 데이터가 됐다</q></h3>
+      <p>kickoff advisor가 <b>"과거 reject 이력 2건 참고"</b>라고 말하는 순간 — 내가 찍은 판정이 다음 작업의 스펙으로 되먹임되는 걸 목격. 첫날엔 못 느끼고(이력이 없으니), <b>쓸수록 좋아진다</b>는 신호라 리텐션을 만드는 아하.</p>
+    </div>
+  </div>
+  <div class="notaha"><b>아하가 아닌 것</b>: kickoff advisor의 첫 출력 자체(똑똑한 컨텍스트 주입으로 보일 뿐), 42% 숫자(광고의 훅이지 제품의 아하가 아님). — <b>설계 함의</b>: ① 도그푸드·데모 시나리오에 reject를 일부러 한 번 넣는다(happy path로 가면 아하 2를 못 보여줌 — §3 시나리오에 반영됨). ② 온보딩은 "첫 202 게이트"까지의 시간을 최단으로.</div>
+
+  <h2><span class="no">5</span>실행 계획 — 4개 Phase</h2>
   <div class="phases">
     <div class="phase">
       <div class="tag">Phase 0<small>0.5일</small></div>
@@ -266,7 +302,7 @@
     </div>
   </div>
 
-  <h2><span class="no">5</span>검증 — 무엇이 되면 "된 것"인가</h2>
+  <h2><span class="no">6</span>검증 — 무엇이 되면 "된 것"인가</h2>
   <ul class="checks">
     <li><span>Phase 0: advisor 테스트 10개 파일 + MCP contract 테스트 전체 통과</span></li>
     <li><span>도그푸드 E2E: 완료 선언 시 스킬이 <b>사람 개입 없이</b> preflight → report_done을 실행하고 202 + gate_id가 확인된다</span></li>
