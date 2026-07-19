@@ -508,6 +508,9 @@ async def _run_substance(*, ci_result, pr_number, disposition):
         stack.enter_context(patch.object(mod, "_role_key", AsyncMock(return_value="implementation")))
         stack.enter_context(patch.object(mod, "resolve_disposition",
                                          AsyncMock(return_value=disposition)))
+        # SPR-36: 무증거 opt-in 기본 off — 현행 no-substance 경로 검증 유지.
+        stack.enter_context(patch.object(mod, "_no_evidence_requires_human",
+                                         AsyncMock(return_value=False)))
         stack.enter_context(patch.object(mod, "capture_pr_ci_verdict",
                                          AsyncMock(return_value={"recorded": [], "skipped_reason": "no_sid_tag"})))
         stack.enter_context(patch.object(mod, "compute_member_trust_scores",

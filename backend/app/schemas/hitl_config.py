@@ -8,6 +8,8 @@ from app.models.hitl_config import DISPOSITIONS, GATE_TYPES, POSTURES
 
 class OrgGatePolicyCreate(BaseModel):
     posture: str = "balanced"
+    # SPR-36 opt-in: 무증거 report-done도 게이트 실체화(ask_human). 기본 false=현행 유지.
+    require_human_without_evidence: bool = False
 
     @field_validator("posture")
     @classmethod
@@ -23,6 +25,7 @@ class OrgGatePolicyResponse(BaseModel):
     id: uuid.UUID
     org_id: uuid.UUID
     posture: str
+    require_human_without_evidence: bool = False
     created_at: datetime
     updated_at: datetime
 

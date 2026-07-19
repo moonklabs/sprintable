@@ -60,10 +60,14 @@ async def upsert_org_policy(
     )
     policy = r.scalar_one_or_none()
     if policy is None:
-        policy = OrgGatePolicy(id=uuid.uuid4(), org_id=org_id, posture=body.posture)
+        policy = OrgGatePolicy(
+            id=uuid.uuid4(), org_id=org_id, posture=body.posture,
+            require_human_without_evidence=body.require_human_without_evidence,
+        )
         session.add(policy)
     else:
         policy.posture = body.posture
+        policy.require_human_without_evidence = body.require_human_without_evidence
     await session.flush()
     await session.refresh(policy)
     return OrgGatePolicyResponse.model_validate(policy)

@@ -10,7 +10,7 @@ gate_type: pr_review | qa | merge | deploy (확장 가능 String).
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,6 +39,11 @@ class OrgGatePolicy(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
     posture: Mapped[str] = mapped_column(String(20), nullable=False, server_default="balanced")
+    # SPR-36 opt-in(0202): true면 CI/PR 증거 없는 report-done도 merge 게이트를 실체화해 사람에게
+    # 보낸다(ask_human). 기본 false = 현행 no-substance no-gate(빈 shell 방지) 유지.
+    require_human_without_evidence: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
