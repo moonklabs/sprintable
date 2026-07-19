@@ -2858,6 +2858,8 @@
     "transitionAction": "Change status",
     "transitionPending": "Pending approval",
     "transitionGateHint": "This transition goes through an approval gate",
+    "transitionFailedTitle": "Status change failed",
+    "transitionFailedFallback": "Couldn't change status due to a temporary issue. Please try again shortly.",
     "fieldStatus": "Status",
     "doneSp": "Done SP",
     "totalSp": "Total SP",

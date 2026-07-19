@@ -5,12 +5,18 @@ import { useTranslations } from 'next-intl';
 import { ChevronDown, ShieldCheck, Clock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { ToastContainer, useToast } from '@/components/ui/toast';
 
 /**
  * E-DG RC#2 ⓶ — epic status-transition 컨트롤(상세 헤더). status badge + 유효 next-state만 dropdown
- * → PATCH /api/goals/{id} {status}. FSM 유효 전이만 노출(invalid 미노출·"보이는=실행가능"·422 차단).
- * (8fc51517 fix: 존재한 적 없는 POST .../transition 대신 실재하는 PATCH 엔드포인트로 교정 — 클릭해도
- * 조용히 실패하던 사전 버그, 이번 rename sweep 중 발견 즉시 수정.)
+ * → POST /api/goals/{id}/transition. FSM 유효 전이만 노출(invalid 미노출·"보이는=실행가능").
+ *
+ * story #2013(2026-07-19, 선생님 draft→active 차단 재보고): 8fc51517이 그때는 옳게(POST .../transition이
+ * 존재한 적 없어 PATCH로 교정)했으나, 이후 E-DG S25가 POST .../transition을 신설하며 동시에 generic
+ * PATCH의 status 변경을 422로 막았음(routers/goals.py:297) — FE만 옛 경로에 남아 시차 드리프트,
+ * 클릭해도 무반응(422 삼킴)이었던 것을 이번에 POST 경로 교체 + 에러 표면화로 근본 수정.
+ * 형제표면 steer-dispatch/route.ts와 동일 근거로 proxyToFastapiWrapped 사용(구조화 에러 보존).
+ *
  * ⭐draft→active·active→done은 human/aggregate-gate(overlay)라 enforcing 시 gate 생성·status 유지 →
  * 낙관적 반영 X·반환 status가 target과 다르면(미변경) "승인 대기"(gate pending) 표시(PO note②·S24 gate 어휘).
  * BE _EPIC_VALID_TRANSITIONS 미러. 신규 토큰 0(ChevronDown/ShieldCheck/Clock).
@@ -48,6 +54,7 @@ export function EpicStatusTransition({
   const t = useTranslations('goals');
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(false); // gate 생성·승인 대기(status 미변경)
+  const { toasts, addToast, dismissToast } = useToast();
 
   const nexts = VALID_NEXT[status] ?? [];
 
@@ -55,13 +62,28 @@ export function EpicStatusTransition({
     if (busy) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/goals/${epicId}`, {
-        method: 'PATCH',
+      const res = await fetch(`/api/goals/${epicId}/transition`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: to }),
       });
-      if (!res.ok) return;
-      const json = (await res.json()) as { data?: { status?: string } };
+      const json = (await res.json()) as {
+        data?: { status?: string };
+        error?: { code?: string; message?: string };
+      };
+      if (!res.ok) {
+        // story #2013 리뷰 FIX A: 무반응이 이 버그의 본체 — 거부 사유(HUMAN_CONFIRM_REQUIRED·
+        // INVALID_EPIC_TRANSITION 등)를 그대로 화면에 띄운다(삼키지 않음). code+message 둘 다
+        // verbatim 보존(code만 있고 message가 없어도, message만 있어도 안 잃도록 각각 optional).
+        const code = json?.error?.code;
+        const message = json?.error?.message || t('transitionFailedFallback');
+        addToast({
+          type: 'error',
+          title: t('transitionFailedTitle'),
+          body: code ? `[${code}] ${message}` : message,
+        });
+        return;
+      }
       const returned = json?.data?.status;
       if (returned === to) {
         setPending(false);
@@ -70,6 +92,8 @@ export function EpicStatusTransition({
         // enforcing gate 생성 → status 유지·승인 대기(낙관적 반영 X·PO note②)
         setPending(true);
       }
+    } catch {
+      addToast({ type: 'error', title: t('transitionFailedTitle'), body: t('transitionFailedFallback') });
     } finally {
       setBusy(false);
     }
@@ -108,6 +132,7 @@ export function EpicStatusTransition({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
