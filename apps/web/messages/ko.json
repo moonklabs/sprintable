@@ -2858,6 +2858,8 @@
     "transitionAction": "상태 변경",
     "transitionPending": "승인 대기",
     "transitionGateHint": "이 전이는 승인 게이트를 거칩니다",
+    "transitionFailedTitle": "상태 변경 실패",
+    "transitionFailedFallback": "일시적인 문제로 상태를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요.",
     "fieldStatus": "상태",
     "doneSp": "완료 SP",
     "totalSp": "전체 SP",
