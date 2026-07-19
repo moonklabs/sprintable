@@ -11,6 +11,7 @@
  *   Step 7: 답장 도착 확인 (GET /api/v2/conversations/{id}/messages)
  */
 import input from "@inquirer/input"
+import { DEFAULT_API_URL } from "../api.js"
 
 const STEP_TIMEOUT_MS = 10_000
 
@@ -116,7 +117,7 @@ export async function healthCheckCommand(): Promise<void> {
   const apiUrl = (
     await input({
       message: "Sprintable API URL",
-      default: "https://app.sprintable.ai",
+      default: DEFAULT_API_URL,
       validate: (v) => (v.startsWith("http") ? true : "http(s)://로 시작해야 합니다"),
     })
   ).replace(/\/$/, "")
