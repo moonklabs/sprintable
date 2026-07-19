@@ -1,0 +1,203 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "Sprintable을 매일 쓰는 개발자 도구로 만드는 방향",
+    "description": "Linear·Claude·Codex·GitHub 사이에서 Sprintable의 일일 사용 루프, 기능 우선순위, edge runtime 경계, 가설 실험을 정리한 제품 의사결정 보고서",
+    "generatedAt": "2026-07-18T03:43:13Z",
+    "charts": [
+      {
+        "id": "github_review_signal",
+        "title": "GitHub Copilot code review 결과 구성",
+        "subtitle": "2026년 3월 공개 수치, 전체 review 중 actionable feedback와 무코멘트 비중",
+        "type": "bar",
+        "dataset": "github_review_signal",
+        "sourceId": "github_review",
+        "encodings": {
+          "x": {
+            "field": "outcome",
+            "type": "nominal",
+            "label": "Review 결과"
+          },
+          "y": {
+            "field": "share",
+            "type": "quantitative",
+            "label": "비중",
+            "format": "percent"
+          }
+        },
+        "valueFormat": "percent",
+        "layout": "full"
+      }
+    ],
+    "sources": [
+      {
+        "id": "analysis_corpus",
+        "label": "Sprintable 제품 분석 문서 묶음",
+        "path": "docs/analysis"
+      },
+      {
+        "id": "acceptance_thesis",
+        "label": "수용 병목 테제",
+        "path": "docs/analysis/acceptance-bottleneck-thesis-2026-07-17.md"
+      },
+      {
+        "id": "integration_strategy",
+        "label": "Linear·GitHub 연동 전략",
+        "path": "docs/analysis/integration-strategy-linear-github-2026-07-15.md"
+      },
+      {
+        "id": "proof_packet",
+        "label": "Proof-of-Done 패킷 설계",
+        "path": "docs/analysis/proof-of-done-packet-design-2026-07-12.md"
+      },
+      {
+        "id": "linear_agents",
+        "label": "Linear Assign and delegate issues",
+        "url": "https://linear.app/docs/assigning-issues"
+      },
+      {
+        "id": "github_review",
+        "label": "GitHub Copilot code review evidence",
+        "url": "https://github.blog/ai-and-ml/github-copilot/60-million-copilot-code-reviews-and-counting/",
+        "query": {
+          "engine": "document transcription",
+          "language": "sql",
+          "description": "GitHub가 공개한 71% actionable feedback와 29% no-comment 비중을 차트 행으로 재현",
+          "sql": "SELECT 'Actionable feedback' AS outcome, 0.71 AS share UNION ALL SELECT 'No comment' AS outcome, 0.29 AS share",
+          "url": "https://github.blog/ai-and-ml/github-copilot/60-million-copilot-code-reviews-and-counting/",
+          "executed_at": "2026-07-18T03:43:13Z",
+          "metric_definitions": {
+            "share": "GitHub가 공개한 전체 Copilot code review 중 해당 결과 유형의 비중"
+          },
+          "filters": [
+            "GitHub 공개 글의 2026년 3월 시점 집계"
+          ]
+        }
+      },
+      {
+        "id": "anthropic_advisor",
+        "label": "Anthropic Advisor Strategy",
+        "url": "https://claude.com/blog/the-advisor-strategy"
+      },
+      {
+        "id": "codex_plugins",
+        "label": "OpenAI Codex plugin examples",
+        "url": "https://github.com/openai/plugins"
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# Sprintable을 매일 쓰는 개발자 도구로 만드는 방향"
+      },
+      {
+        "id": "executive_summary",
+        "type": "markdown",
+        "body": "## Executive Summary\n\n- **시작할 가치가 있다.** 다만 Sprintable을 또 하나의 이슈 트래커나 에이전트 관제 화면으로 확장하는 것이 아니라, Linear의 의도와 GitHub의 머지 사이에서 `완료 증명 → 선제 수정 → 사람 판정 → 구조화 재작업`을 닫는 **수용 레이어**로 좁혀야 한다.\n- **매일 쓰인다는 뜻은 매일 Sprintable 화면을 연다는 뜻이 아니다.** Linear에서 이슈를 고르고 Claude/Codex에서 작업하고 GitHub에서 머지하는 기존 루프마다 Sprintable이 자동 실행되고, 사람은 불확실한 예외만 `Decision Inbox`에서 처리해야 한다. 깨끗한 작업에는 침묵하는 것이 핵심 UX다.\n- **별도 side library는 필요하지만 full harness는 만들면 안 된다.** 벤더 중립 `Ready Check edge runtime` 하나가 로컬 git·테스트 증거 수집, 훅 수신, fingerprint, API 호출, 수정 지시 반환만 담당하고 Claude/Codex 플러그인은 얇은 어댑터로 둔다. 원장·Advisor·정책은 Sprintable 서버가 소유한다.\n- **첫 기능은 더 똑똑한 Advisor가 아니라 끊어진 회로를 닫는 일이다.** 구조화 `report-done`, `gate.resolved`, Proof-of-Done 패킷, GitHub Check를 먼저 완성한 뒤 승인 이력 기반 Advisor를 얹어야 한다. 현재 가설 문서는 풍부하지만 실험 결과 시트는 비어 있으므로, 대규모 기능 투자가 아니라 4~6주 파일럿으로 반복 사용과 실제 구조율을 검증해야 한다."
+      },
+      {
+        "id": "trend",
+        "type": "markdown",
+        "body": "## 시장은 ‘에이전트 실행’보다 ‘판단과 검토’ 쪽으로 이동하고 있다\n\n**Linear는 이미 사람 소유권과 에이전트 위임을 분리하고 있다.** 이슈의 사람 assignee는 책임을 유지한 채 agent에게 delegate할 수 있고, Linear에서 Claude Code나 Codex로 이슈 컨텍스트를 넘겨 작업을 시작할 수 있다. 따라서 Sprintable이 `AI에게 이슈 배정` 자체를 차별점으로 삼으면 인컴번트와 정면 충돌한다.\n\n**GitHub의 경쟁도 단순 리뷰 코멘트 수가 아니라 신호 품질·맥락·침묵으로 이동했다.** GitHub는 29%의 리뷰에서 아무 코멘트도 하지 않는 것을 품질로 보고, linked issue와 과거 리뷰 맥락을 활용하며, 약간의 지연보다 실제로 고칠 만한 finding을 우선한다. Sprintable도 ‘항상 무언가 말하는 검토봇’이 아니라, 조직의 수용 기준을 근거로 잔여 불확실성만 전달해야 한다.\n\n**Claude와 Codex 모두 확장 지점이 생겼다.** MCP는 데이터와 도구 연결에 적합하고, 플러그인·skill·hook은 반복 워크플로우와 자동 호출 시점을 포장하기에 적합하다. 이것은 공통 코어와 얇은 벤더 어댑터를 배포할 수 있다는 뜻이지, 모델이 매번 자발적으로 MCP를 호출할 것이라고 믿어도 된다는 뜻은 아니다."
+      },
+      {
+        "id": "github_review_signal_chart",
+        "type": "chart",
+        "chartId": "github_review_signal",
+        "layout": "full"
+      },
+      {
+        "id": "daily_loop",
+        "type": "markdown",
+        "body": "## 일일 사용의 골든 패스는 기존 도구를 바꾸지 않는 6단계다\n\n1. **Linear가 의도의 정본이다.** 개발자는 평소처럼 issue를 선택한다. Sprintable은 issue id, AC, project, risk hint만 얇게 읽고 자체 Story를 전체 미러링하지 않는다.\n2. **Claude/Codex가 실행한다.** 플러그인 또는 hook이 issue id, baseline SHA, repo rules, 필요한 증거 계약을 세션에 주입한다.\n3. **Ready Check가 자동 개입한다.** Stop 또는 PR 생성 직전에 로컬 edge runtime이 diff, 변경 파일, 실행한 명령, exit code, CI 상태, AC별 claim을 수집한다.\n4. **Advisor는 최대 3개의 잔여 위험만 말한다.** 결과는 `READY`, `FIX_FIRST`, `ASK_HUMAN`, `UNVERIFIED` 중 하나다. 고칠 수 있는 finding은 같은 agent에게 자동 반환하고 다시 검증한다.\n5. **GitHub가 수용 표면이다.** Check Run에는 한 줄 판정과 상위 finding만 보이고, 사람은 필요할 때 증거 패킷을 펼친다. Merge처럼 불가역한 경계에서만 사람 승인을 요구한다.\n6. **결과가 기억으로 돌아간다.** 승인·거절·수정 이유와 outcome을 Sprintable이 기록하고, Linear에는 요약 상태만 역반사한다. 다음 작업의 kickoff와 pre-review가 이 조직의 실제 reject 패턴을 사용한다.\n\n이 루프의 효능은 ‘더 많은 컨텍스트를 저장했다’가 아니라 **사람에게 오기 전에 실제 결함 하나가 고쳐지고, 같은 이유로 다시 reject되지 않는 순간**에서 발생한다."
+      },
+      {
+        "id": "boundary",
+        "type": "markdown",
+        "body": "## 데이터 경계는 Linear·Sprintable·GitHub·harness가 서로 다른 정본을 가져야 한다\n\n- **Linear:** 무엇을 왜 해야 하는가 — issue, owner, priority, project, lightweight AC.\n- **Claude/Codex session:** 지금 어떻게 수행 중인가 — 대화, tool trace, 임시 계획, 로컬 상태. 전체 transcript는 Sprintable의 전략 자산이 아니다.\n- **Sprintable:** 무엇이 완료되었다고 주장됐고, 어떤 증거로 누가 받아들였으며, 왜 거절됐는가 — Work Manifest, Evidence, Gate, Verdict, approval/reject memory.\n- **GitHub:** 어떤 코드가 실제로 합쳐지는가 — diff, CI, review, merge SHA.\n\n**Sprintable이 저장해야 할 것은 대화 전체가 아니라 Work Manifest다.** issue id, baseline/current SHA, changed files, 실행 명령과 exit code, agent claim, evidence reference, scope deviation, approver identity를 보관하면 재현·감사·학습이 가능하면서도 프라이버시와 저장 비용을 줄일 수 있다."
+      },
+      {
+        "id": "option_table",
+        "type": "markdown",
+        "body": "## 제품 전략 선택지\n\n| 순위 | 선택지 | 판정 | 핵심 이유 |\n|---:|---|---|---|\n| 1 | Headless Gate Engine + Ready Check edge runtime + 얇은 Claude/Codex 어댑터 | **채택** | 기존 습관을 유지하면서 자동 개입·교차벤더 원장·구조화 재작업을 소유 |\n| 2 | MCP만 제공하는 backend integration | **보조 수단** | 공통 데이터·도구 plane에는 적합하지만 완료 시점 자동 개입을 보장하지 못함 |\n| 3 | Linear deep sync 또는 Linear 대체 PM 기능 | **보류/반대** | 이중 SSOT와 동기화 비용, 인컴번트의 delegation과 정면 경쟁 |\n| 4 | 별도 full agent harness | **기각** | Claude/Codex의 session·tool·memory 경쟁 영역으로 들어감 |\n| 5 | 승인 데이터 기반 조직 eval/회고 플랫폼 | **후행 확장** | 장기 자산이지만 초기 직접 지불의사와 반복 사용 증거가 약함 |"
+      },
+      {
+        "id": "side_library",
+        "type": "markdown",
+        "body": "## 별도 library는 ‘harness’가 아니라 ‘검증 edge runtime’이어야 한다\n\n권장 형태는 하나의 작은 실행 코어다. 가칭 `sprintable-ready` CLI/library가 로컬에서 안전하게 읽을 수 있는 증거를 수집하고, hook 이벤트를 정규화하고, fingerprint·dedupe·retry를 처리한 뒤 Sprintable API에 Work Manifest를 보낸다. Claude와 Codex에는 각각 plugin manifest, skill, hook 설정만 제공한다.\n\n**edge runtime이 가져야 할 책임:** issue/session 연결, git·test evidence 수집, deterministic preflight, 로컬 redaction, idempotency, 서버 판정의 렌더링, agent에게 repair instruction 반환.\n\n**가져가면 안 되는 책임:** agent spawning, 대화/메모리 관리, 모델 routing, 전체 task orchestration, merge 권한, 사람 approval credential. 이 선을 넘으면 Claude/Codex와 경쟁하는 또 하나의 harness가 되고 유지비가 폭증한다.\n\nMCP는 공통 데이터·액션 plane으로 유지하되 **자동 호출 보장은 hook이 담당**한다. 또한 agent token은 evidence 제출만 가능하고, human approval은 별도 로그인·토큰·서버측 identity로만 허용해야 한다. 같은 사람이 agent 세션을 조작했더라도 그 세션이 사람 승인 credential을 가질 수 없게 해야 한다."
+      },
+      {
+        "id": "sequence_intro",
+        "type": "markdown",
+        "body": "## 4~6주 동안은 기능을 넓히지 말고 닫힌 회로와 반복 효능을 검증해야 한다\n\n첫 단계는 현재 시스템에 없는 `gate.resolved` 반환과 AC별 완료 주장이다. 이 회로가 없으면 Advisor가 좋은 finding을 내도 agent가 자동으로 고치지 못해 사용자가 복사·붙여넣기를 해야 한다. 그 다음 local edge runtime과 GitHub Check를 붙이고, 마지막에 approval history prior를 추가한다."
+      },
+      {
+        "id": "sequence_table",
+        "type": "markdown",
+        "body": "### 권장 개발·검증 순서\n\n| 단계 | 구현 범위 | 다음 단계 진입 조건 |\n|---:|---|---|\n| 0 | eligible task·Work Manifest·outcome event·active review 정의와 계측 | 분모·event schema·privacy/redaction 합의 |\n| 1 | AC별 self-assessment, evidence contract, `gate.resolved`, structured reject | reject payload delivery ≥80%, packet chain 연결 |\n| 2 | `sprintable-ready` edge runtime, Claude/Codex Stop hook, deterministic checks | 설치→첫 실행 <10분, auto-trigger coverage ≥90% |\n| 3 | fresh-context Advisor, 최대 3 findings, auto repair/recheck | finding acceptance ≥60%, unsupported blocker ≤15%, same-reason leakage ≤10% |\n| 4 | GitHub Check, Linear thin link/state reflection, terminal/org inbox | 과반 사용자가 주 3회 이상 자동 실행, clean-task noise 허용 |\n| 5 | approval history prior, kickoff clarification, org policy/audit | history-enabled cohort uplift와 실제 paid conversion |"
+      },
+      {
+        "id": "use_cases",
+        "type": "markdown",
+        "body": "## 첫 베타에서 보여줘야 할 ‘아하’ 유즈케이스\n\n### 1. Done이라고 했지만 테스트를 안 돌린 작업\nAgent가 완료를 선언하면 Ready Check가 요구된 command가 없거나 baseline 이후 증거가 없음을 감지한다. Agent가 테스트를 실행하고 실패를 고친 뒤에만 사람에게 올라온다. 사람은 ‘내가 다시 열어보지 않아도 이 기본 실수는 걸러졌다’를 즉시 느낀다.\n\n### 2. Linear 요구사항과 diff가 어긋난 작업\n코드는 깨끗하지만 linked issue의 AC 한 항목이 증거와 연결되지 않는다. Advisor는 일반론 대신 해당 AC와 파일/테스트를 인용해 `FIX_FIRST`를 낸다. Agent가 수정하고 동일 항목을 다시 증명한다.\n\n### 3. 여러 프로젝트·여러 agent의 승인 대기\n사용자는 프로젝트별 화면을 순회하지 않는다. `sprintable inbox` 또는 한 개 org-level My Work에서 merge/deploy처럼 불가역한 결정만 보고, 이미 해결된 자동 finding은 접힌 이력으로 확인한다.\n\n### 4. 사람의 reject가 재작업 프롬프트가 되는 순간\n사람이 `AC-2 미충족`, `테스트 구조는 유지`, `auth helper 사용`을 선택하면 `gate.resolved`가 Claude/Codex 세션에 전달된다. Agent가 잘된 부분을 보존한 채 수정하고 새 패킷을 제출한다. 이 왕복의 제거가 독립적인 리뷰봇보다 더 강한 차별점이다.\n\n### 5. 조직 기억의 첫 배당\n같은 repository에서 과거에 auth boundary 누락으로 여러 번 reject됐다면 새 작업의 kickoff에서 요구사항 보완 질문을 만들고, pre-review에서는 해당 경로 변경만 더 깊게 검사한다. generic best practice가 아니라 ‘우리 팀이 실제로 놓친 것’이기 때문에 신뢰할 이유가 생긴다."
+      },
+      {
+        "id": "metrics_intro",
+        "type": "markdown",
+        "body": "## 효능은 ‘리뷰 시간을 절약했다’가 아니라 관찰 가능한 구조와 누출로 측정해야 한다\n\n현재 코드의 `human_review_minutes`는 사람이 실제로 읽은 시간이 아니라 gate 생성부터 해소까지의 대기 시간을 합산한다. 따라서 이를 절감 시간으로 표시하면 안 된다. 또한 ‘리뷰 한 번을 절약했다’는 반사실적 추정이다. 첫 파일럿은 **사람에게 오기 전에 해결된 finding**과 **같은 이유로 human reject가 다시 발생했는지**를 사실 지표로 삼아야 한다."
+      },
+      {
+        "id": "metric_table",
+        "type": "markdown",
+        "body": "### 파일럿 측정 계약\n\n| 지표 | 정의 | 초기 목표 |\n|---|---|---|\n| Verified Pre-review Rescue | human review 전 수정되고 같은 이유로 reject되지 않은 task | 첫 5개 task 내 rescue 경험 사용자 ≥30% |\n| Auto-trigger Coverage | eligible task 중 수동 명령 없이 실행 | ≥90% |\n| Finding Acceptance | blocker 중 실제 수정·수용된 비율 | ≥60% |\n| Unsupported Blocker | 근거 없거나 관련 없는 blocker 비율 | ≤10~15% |\n| Same-reason Leakage | Ready Check 후 동일 이유 human reject | ≤10% |\n| Decision Active Time | packet open부터 결정까지 활동 시간 | 중앙값 <5분은 가설 |\n| Post-acceptance Regret | 승인 후 revert·hotfix·reopen·incident | baseline 대비 악화 없음 |\n| Two-week Repeated Use | 2주차에도 eligible task 자동 실행 지속 | 초기 cohort 과반 |"
+      },
+      {
+        "id": "missing_hypotheses",
+        "type": "markdown",
+        "body": "## 현재 문서에서 추가로 검증해야 할 빠진 가설\n\n1. **Ambient 사용 가설:** 사용자가 Sprintable 화면을 열지 않아도 매 작업에서 가치가 발생하면 ‘일일 사용’으로 볼 것인가. 제품 활성 정의를 page view가 아니라 eligible task의 자동 실행으로 바꿔야 한다.\n2. **Issue-link coverage:** 실제 일일 작업 중 Linear issue에 연결된 비율이 충분한가. 긴급 수정·탐색·리팩터링이 issue 없이 시작되면 branch/commit/PR에서 역으로 연결하는 fallback이 필요하다.\n3. **AC 품질:** Linear 자유 텍스트가 Advisor가 판단할 만큼 구체적인가. 불충분하면 pre-review보다 kickoff clarification이 먼저 가치를 낼 수 있다.\n4. **Noise tolerance:** 최대 3개 finding도 매번 나오면 피로하다. clean-task silence와 bypass율을 핵심 guardrail로 둬야 한다.\n5. **Solo approval semantics:** 혼자 개발하는 사용자는 독립 승인자가 아니다. 이를 ‘독립 검토’로 포장하지 말고 owner risk acceptance로 명확히 기록해야 한다.\n6. **Privacy boundary:** diff·test log·issue 내용 중 무엇이 서버로 올라가도 되는가. local-only deterministic mode와 redaction이 enterprise 이전에도 필요하다.\n7. **Multi-session identity:** 같은 issue를 여러 worktree·Claude/Codex 세션이 만질 때 어느 결과가 최신인지, 어떤 evidence가 어느 SHA에 속하는지 고정해야 한다.\n8. **Outcome 품질:** 승인 후 `Story.status != done`은 regret의 약한 proxy다. revert, hotfix, reopened issue, incident, same-reason reject 같은 실제 outcome event가 필요하다.\n9. **지불자:** solo, 2~5인 팀, agency 중 누가 반복 사용 뒤 실제로 돈을 내는지는 아직 검증되지 않았다. 현재 실험 설계만 있고 결과가 없으므로 세그먼트를 확정하면 안 된다.\n10. **플랫폼 잠식:** Linear와 GitHub가 issue-context review와 agent verification을 빠르게 내장하고 있다. 어댑터 UI가 아니라 cross-vendor decision ledger와 structured rework semantics를 해자로 검증해야 한다."
+      },
+      {
+        "id": "recommendations",
+        "type": "markdown",
+        "body": "## 권장 다음 행동\n\n1. **제품 결정을 고정한다:** Sprintable의 첫 일일 wedge를 `Linear-linked Ready Check`로 정의하고, 별도 task manager나 full harness 확장은 중단한다.\n2. **회로부터 닫는다:** `report-done.self_assessment`, immutable Work Manifest, `gate.resolved`, structured reject payload를 P0로 둔다.\n3. **공통 edge runtime을 만든다:** Claude/Codex plugin은 같은 `sprintable-ready` 코어를 호출하도록 하고, MCP-only 의존을 피한다.\n4. **GitHub를 먼저 깊게 연결한다:** Check Run에 한 줄+상위 3 finding을 게시하고, Linear는 issue fetch·link·상태 역반사만 제공한다.\n5. **3단 실험을 운영한다:** 과거 reject 30~50건 replay → 라이브 20~30건 shadow mode → 30~50건 intervention 순으로 진행한다.\n6. **실제 결과로만 확대한다:** 첫 5개 eligible task 안에 한 번 이상 verified rescue를 경험한 사용자 비율과 2주 반복 사용을 본 뒤 org My Work, kickoff Advisor, hosted policy를 확장한다."
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## 다음 결정을 바꾸는 질문\n\n- 첫 베타의 판정 표면을 **GitHub Check + terminal inbox**로 고정할 것인가, 아니면 Sprintable 자체 gate 화면을 우선할 것인가? 현재 증거는 전자를 지지한다.\n- 사용자가 첫 5개 작업 안에 느껴야 하는 단 하나의 효능을 `human review 전에 결함 1건 자동 수정`으로 고정할 것인가?\n- 과금은 Advisor 호출량이 아니라 org policy, audit ledger, cross-project inbox에 둘 것인가?\n- Linear issue 없는 작업을 허용할 때, Sprintable의 intent anchor를 PR description과 branch naming 중 어디까지 자동 추론할 것인가?"
+      },
+      {
+        "id": "caveats",
+        "type": "markdown",
+        "body": "## Caveats and Assumptions\n\n- `docs/analysis`의 핵심 논리는 서로 잘 정렬되어 있지만, 가설 실험 workbook의 결과 영역은 아직 채워지지 않았다. 본 권고는 시장 확정이 아니라 **narrow build를 정당화하는 설계·추세 근거**다.\n- 과거 문서의 ‘42% 거짓 완료’는 45개 hidden-test 과제에 대한 단일 실험 결과다. 일반 개발자 전체 비율로 사용하면 안 된다.\n- Anthropic Advisor의 성능·비용 개선 수치는 Anthropic 내부 실행자/조언자 구성 결과이며 Sprintable의 예상 효과로 전이할 수 없다. Sprintable은 자체 replay와 live intervention으로 별도 측정해야 한다.\n- 제시한 초기 목표치는 시장 벤치마크가 아니라 pilot 운영 임계값이다. 데이터가 쌓이면 cohort와 task risk별로 재보정해야 한다."
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-18T03:43:13Z",
+    "status": "ready",
+    "datasets": {
+      "github_review_signal": [
+        {
+          "outcome": "Actionable feedback",
+          "share": 0.71
+        },
+        {
+          "outcome": "No comment",
+          "share": 0.29
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "analysis_corpus",
+      "label": "Sprintable 제품 분석 문서 묶음",
+      "path": "docs/analysis"
+    }
+  ]
+}

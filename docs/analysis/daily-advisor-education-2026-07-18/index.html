@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Linear, Claude, Codex, GitHub 사이의 승인 병목과 Sprintable Daily Advisor를 비개발자도 이해할 수 있게 설명하는 교육자료">
+  <title>AI가 일을 끝냈다. 이제 누가 믿어도 된다고 말할까? | Sprintable 교육자료</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3f5f2;
+      --surface: #ffffff;
+      --surface-2: #eef2ed;
+      --ink: #17201b;
+      --muted: #5d6861;
+      --line: #d7ded8;
+      --brand: #17643a;
+      --brand-soft: #e5f3e9;
+      --blue: #245b9b;
+      --blue-soft: #e8f0fb;
+      --amber: #8b5a08;
+      --amber-soft: #fff2d6;
+      --red: #a33b32;
+      --red-soft: #fdeae7;
+      --purple: #7046a1;
+      --purple-soft: #f1eafb;
+      --shadow: 0 16px 44px rgba(23, 32, 27, .08);
+      --radius: 22px;
+      --radius-sm: 14px;
+      --page: 1120px;
+    }
+
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #111612;
+      --surface: #19201b;
+      --surface-2: #202a23;
+      --ink: #f0f5f1;
+      --muted: #aeb9b1;
+      --line: #344039;
+      --brand: #7ed59b;
+      --brand-soft: #203b2a;
+      --blue: #8eb8ee;
+      --blue-soft: #20334d;
+      --amber: #f0c66f;
+      --amber-soft: #44351b;
+      --red: #f3a198;
+      --red-soft: #452725;
+      --purple: #c2a1eb;
+      --purple-soft: #352746;
+      --shadow: 0 18px 50px rgba(0, 0, 0, .25);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.72;
+      letter-spacing: -.018em;
+    }
+    button, input { font: inherit; }
+    a { color: var(--brand); text-underline-offset: 3px; }
+    img, svg { max-width: 100%; }
+    strong { font-weight: 760; }
+    code {
+      padding: .12em .38em;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface-2);
+      font-size: .9em;
+    }
+    :focus-visible { outline: 3px solid var(--brand); outline-offset: 3px; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid color-mix(in srgb, var(--line), transparent 15%);
+      background: color-mix(in srgb, var(--bg), transparent 8%);
+      backdrop-filter: blur(15px);
+    }
+    .topbar-inner {
+      width: min(calc(100% - 32px), var(--page));
+      min-height: 58px;
+      margin: auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .brand-lockup {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 780;
+      font-size: .93rem;
+    }
+    .brand-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: var(--brand);
+      box-shadow: 0 0 0 5px var(--brand-soft);
+    }
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    .icon-button, .chapter-link {
+      border: 1px solid var(--line);
+      color: var(--ink);
+      background: var(--surface);
+      border-radius: 999px;
+      padding: 8px 12px;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: .82rem;
+      font-weight: 700;
+    }
+    .chapter-link { display: none; }
+
+    .page { width: min(calc(100% - 32px), var(--page)); margin: 0 auto; }
+    .hero {
+      min-height: 72vh;
+      display: grid;
+      grid-template-columns: minmax(0, 1.08fr) minmax(320px, .72fr);
+      align-items: center;
+      gap: clamp(34px, 7vw, 92px);
+      padding: clamp(72px, 10vw, 126px) 0 80px;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 18px;
+      color: var(--brand);
+      font-size: .82rem;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .eyebrow::before { content: ""; width: 26px; height: 2px; background: currentColor; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      margin-bottom: 22px;
+      font-size: clamp(2.75rem, 6.6vw, 5.7rem);
+      line-height: 1.03;
+      letter-spacing: -.06em;
+      text-wrap: balance;
+    }
+    .hero-copy {
+      max-width: 710px;
+      color: var(--muted);
+      font-size: clamp(1.08rem, 1.5vw, 1.28rem);
+    }
+    .hero-copy strong { color: var(--ink); }
+    .hero-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: .8rem;
+      font-weight: 700;
+    }
+    .hero-card {
+      position: relative;
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .hero-card::before {
+      content: "학습 목표";
+      position: absolute;
+      top: -14px;
+      left: 22px;
+      padding: 5px 11px;
+      border-radius: 999px;
+      background: var(--brand);
+      color: #fff;
+      font-size: .72rem;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+    html[data-theme="dark"] .hero-card::before { color: #102317; }
+    .hero-card p { margin: 8px 0 20px; font-size: 1.05rem; }
+    .goal-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 11px; }
+    .goal-list li { display: grid; grid-template-columns: 24px 1fr; gap: 9px; color: var(--muted); font-size: .9rem; }
+    .goal-list b {
+      width: 22px; height: 22px; display: grid; place-items: center;
+      border-radius: 50%; background: var(--brand-soft); color: var(--brand); font-size: .72rem;
+    }
+
+    .chapter-nav {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 10px 0 16px;
+      scrollbar-width: none;
+    }
+    .chapter-nav::-webkit-scrollbar { display: none; }
+    .chapter-nav a {
+      flex: none;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: var(--surface);
+      font-size: .78rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .chapter-nav a:hover { color: var(--brand); border-color: var(--brand); }
+
+    .section { padding: clamp(70px, 10vw, 118px) 0; border-top: 1px solid var(--line); }
+    .section-head {
+      display: grid;
+      grid-template-columns: 140px minmax(0, 1fr);
+      gap: 28px;
+      margin-bottom: 46px;
+    }
+    .chapter-no { color: var(--brand); font-weight: 850; letter-spacing: .08em; font-size: .78rem; text-transform: uppercase; }
+    h2 {
+      margin-bottom: 14px;
+      font-size: clamp(2rem, 4vw, 3.65rem);
+      line-height: 1.12;
+      letter-spacing: -.05em;
+      text-wrap: balance;
+    }
+    .section-intro { max-width: 760px; margin-bottom: 0; color: var(--muted); font-size: 1.05rem; }
+    h3 { margin-bottom: 10px; font-size: 1.2rem; line-height: 1.35; letter-spacing: -.03em; }
+    .grid-2, .grid-3, .grid-4 { display: grid; gap: 18px; }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .card {
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+    }
+    .card p:last-child { margin-bottom: 0; }
+    .card-label {
+      display: inline-block;
+      margin-bottom: 14px;
+      color: var(--muted);
+      font-size: .72rem;
+      font-weight: 850;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .muted { color: var(--muted); }
+    .big-number { display: block; margin-bottom: 6px; font-size: 2.2rem; line-height: 1; font-weight: 850; letter-spacing: -.05em; }
+
+    .story-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 18px; }
+    .chat-card { padding: 28px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .chat-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+    .chat-row:last-child { margin-bottom: 0; }
+    .avatar {
+      flex: none; width: 34px; height: 34px; display: grid; place-items: center;
+      border-radius: 10px; background: var(--surface-2); font-size: .82rem; font-weight: 850;
+    }
+    .bubble { padding: 12px 15px; border-radius: 3px 15px 15px 15px; background: var(--surface-2); font-size: .93rem; }
+    .chat-row.ai .avatar { background: var(--brand-soft); color: var(--brand); }
+    .chat-row.ai .bubble { background: var(--brand-soft); }
+    .surprise-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+    .surprise-list li { padding: 13px 15px; border-left: 4px solid var(--red); border-radius: 0 10px 10px 0; background: var(--red-soft); font-size: .9rem; }
+
+    .takeaway {
+      margin-top: 28px;
+      padding: 22px 24px;
+      border-left: 5px solid var(--brand);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      background: var(--brand-soft);
+      font-size: 1.03rem;
+    }
+    .takeaway b { color: var(--brand); }
+
+    .bottleneck-figure { padding: 28px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .bottleneck-figure svg { display: block; width: 100%; height: auto; }
+    .figure-caption { margin: 18px 0 0; color: var(--muted); text-align: center; font-size: .84rem; }
+    .symptom-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }
+    .symptom { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); text-align: center; }
+    .symptom span { display: block; font-size: 1.45rem; }
+    .symptom b { font-size: .88rem; }
+
+    .system-card { position: relative; overflow: hidden; min-height: 236px; }
+    .system-card .system-icon { width: 46px; height: 46px; display: grid; place-items: center; margin-bottom: 28px; border-radius: 13px; font-weight: 900; }
+    .system-card:nth-child(1) .system-icon { color: var(--purple); background: var(--purple-soft); }
+    .system-card:nth-child(2) .system-icon { color: var(--blue); background: var(--blue-soft); }
+    .system-card:nth-child(3) .system-icon { color: var(--ink); background: var(--surface-2); }
+    .system-card:nth-child(4) { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+    .system-card:nth-child(4) .system-icon { color: var(--brand); background: var(--brand-soft); }
+    .source-tag { display: inline-block; margin-top: 12px; color: var(--muted); font-size: .78rem; font-weight: 700; }
+    .source-tag::before { content: "정본 · "; color: var(--brand); }
+
+    .versus { display: grid; grid-template-columns: 1fr 64px 1fr; align-items: stretch; }
+    .versus-card { padding: 28px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .versus-mark { display: grid; place-items: center; color: var(--muted); font-weight: 900; }
+    .versus-card ul { margin: 16px 0 0; padding-left: 20px; color: var(--muted); }
+    .receipt {
+      margin-top: 22px; padding: 20px; border: 1px dashed var(--line); border-radius: 12px;
+      background: var(--surface-2); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem;
+    }
+    .receipt-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+    .receipt-row:last-child { border-bottom: 0; }
+
+    .advisor-flow { display: grid; grid-template-columns: repeat(7, auto); align-items: center; justify-content: center; gap: 10px; padding: 30px 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow-x: auto; }
+    .flow-node { min-width: 130px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); text-align: center; }
+    .flow-node b { display: block; margin-bottom: 3px; }
+    .flow-node small { color: var(--muted); }
+    .flow-node.advisor { border-color: var(--brand); background: var(--brand-soft); }
+    .flow-arrow { color: var(--muted); font-weight: 900; }
+    .status-grid { margin-top: 18px; }
+    .status { padding: 18px; border-radius: 12px; }
+    .status b { display: block; margin-bottom: 5px; font-size: .83rem; letter-spacing: .04em; }
+    .status p { margin: 0; color: var(--muted); font-size: .86rem; }
+    .status.ready { background: var(--brand-soft); color: var(--brand); }
+    .status.fix { background: var(--amber-soft); color: var(--amber); }
+    .status.ask { background: var(--purple-soft); color: var(--purple); }
+    .status.unknown { background: var(--red-soft); color: var(--red); }
+
+    .daily-flow { counter-reset: step; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+    .daily-step { position: relative; min-height: 188px; padding: 20px 17px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+    .daily-step::before {
+      counter-increment: step; content: counter(step); width: 26px; height: 26px; display: grid; place-items: center;
+      margin-bottom: 32px; border-radius: 50%; background: var(--brand-soft); color: var(--brand); font-size: .75rem; font-weight: 850;
+    }
+    .daily-step::after { content: "→"; position: absolute; top: 20px; right: -11px; z-index: 2; color: var(--muted); font-weight: 900; }
+    .daily-step:last-child::after { display: none; }
+    .daily-step h3 { font-size: .98rem; }
+    .daily-step p { margin-bottom: 0; color: var(--muted); font-size: .82rem; }
+    .quiet-loud { margin-top: 22px; }
+    .quiet-loud .card { min-height: 190px; }
+
+    .role-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+    .role-tab {
+      padding: 10px 15px; border: 1px solid var(--line); border-radius: 999px;
+      background: var(--surface); color: var(--muted); cursor: pointer; font-weight: 780;
+    }
+    .role-tab[aria-selected="true"] { border-color: var(--brand); background: var(--brand); color: #fff; }
+    html[data-theme="dark"] .role-tab[aria-selected="true"] { color: #102317; }
+    .role-panel { display: none; padding: 28px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .role-panel.active { display: block; }
+    .role-example { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .role-example > div { padding: 18px; border-radius: 12px; background: var(--surface-2); }
+    .role-example small { color: var(--brand); font-weight: 850; }
+    .role-example p { margin: 8px 0 0; font-size: .9rem; }
+
+    .analogy { display: grid; grid-template-columns: .8fr 1.2fr; gap: 18px; }
+    .factory-card { padding: 30px; border-radius: var(--radius); }
+    .factory-card.old { background: var(--red-soft); }
+    .factory-card.new { background: var(--brand-soft); }
+    .factory-card .emoji { display: block; margin-bottom: 18px; font-size: 2.6rem; }
+    details { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    details + details { margin-top: 10px; }
+    summary { padding: 15px 18px; cursor: pointer; font-weight: 780; }
+    details p { padding: 0 18px 18px; margin: 0; color: var(--muted); }
+
+    .roadmap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .phase { position: relative; padding: 26px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .phase-no { display: block; margin-bottom: 28px; color: var(--brand); font-size: .78rem; font-weight: 850; letter-spacing: .07em; }
+    .phase ul { margin-bottom: 0; padding-left: 20px; color: var(--muted); font-size: .9rem; }
+    .not-now { margin-top: 24px; padding: 24px; border: 1px dashed var(--line); border-radius: var(--radius); }
+    .not-now-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .not-now-list span { padding: 7px 10px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: .8rem; font-weight: 700; }
+
+    .metric-card { min-height: 230px; }
+    .metric-card .metric-target { display: block; margin: 16px 0 8px; font-size: 1.65rem; line-height: 1.15; font-weight: 850; letter-spacing: -.04em; }
+    .metric-note { margin-top: 20px; padding: 16px 18px; border-radius: 12px; background: var(--amber-soft); color: var(--amber); font-size: .86rem; }
+
+    .final-card {
+      padding: clamp(32px, 6vw, 68px);
+      border-radius: calc(var(--radius) + 8px);
+      background: var(--ink);
+      color: var(--bg);
+    }
+    .final-card .eyebrow { color: var(--brand); }
+    .final-card h2 { max-width: 900px; }
+    .final-card p { max-width: 760px; color: color-mix(in srgb, var(--bg), transparent 24%); font-size: 1.05rem; }
+    .one-line { margin: 34px 0 0; padding: 22px; border: 1px solid color-mix(in srgb, var(--bg), transparent 76%); border-radius: 14px; font-size: 1.12rem; font-weight: 740; }
+
+    .quiz-list { display: grid; gap: 14px; }
+    .quiz-item { padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+    .quiz-item h3 { font-size: 1rem; }
+    .answers { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .answer {
+      padding: 11px 13px; border: 1px solid var(--line); border-radius: 10px;
+      background: var(--surface-2); color: var(--ink); cursor: pointer; text-align: left; font-size: .88rem;
+    }
+    .answer:hover { border-color: var(--brand); }
+    .answer.correct { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
+    .answer.wrong { border-color: var(--red); background: var(--red-soft); color: var(--red); }
+    .answer:disabled { cursor: default; }
+    .explanation { display: none; margin: 12px 0 0; padding: 12px 14px; border-radius: 10px; background: var(--surface-2); color: var(--muted); font-size: .85rem; }
+    .explanation.show { display: block; }
+    .quiz-score { margin-top: 18px; padding: 20px; border-radius: 14px; background: var(--brand-soft); color: var(--brand); font-weight: 780; text-align: center; }
+
+    .glossary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    footer { padding: 48px 0 70px; border-top: 1px solid var(--line); color: var(--muted); font-size: .84rem; }
+    .footer-inner { display: flex; justify-content: space-between; align-items: flex-start; gap: 30px; }
+    .footer-links { display: flex; flex-wrap: wrap; gap: 14px; }
+
+    @media (min-width: 860px) { .chapter-link { display: inline-flex; } }
+    @media (max-width: 920px) {
+      .hero { grid-template-columns: 1fr; min-height: auto; }
+      .hero-card { max-width: 660px; }
+      .grid-4 { grid-template-columns: repeat(2, 1fr); }
+      .daily-flow { grid-template-columns: repeat(3, 1fr); }
+      .daily-step:nth-child(3)::after { display: none; }
+      .role-example { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      .page, .topbar-inner { width: min(calc(100% - 24px), var(--page)); }
+      .hero { padding-top: 58px; }
+      .section-head { grid-template-columns: 1fr; gap: 8px; }
+      .grid-2, .grid-3, .grid-4, .story-grid, .analogy, .roadmap, .glossary { grid-template-columns: 1fr; }
+      .symptom-list { grid-template-columns: 1fr; }
+      .versus { grid-template-columns: 1fr; gap: 10px; }
+      .versus-mark { min-height: 30px; }
+      .versus-mark::before { content: "↓"; }
+      .versus-mark { font-size: 0; }
+      .advisor-flow { grid-template-columns: 1fr; justify-content: stretch; }
+      .flow-arrow { text-align: center; transform: rotate(90deg); }
+      .daily-flow { grid-template-columns: 1fr; }
+      .daily-step { min-height: 0; }
+      .daily-step::after { top: auto; right: 50%; bottom: -17px; transform: rotate(90deg); }
+      .daily-step:nth-child(3)::after { display: block; }
+      .answers { grid-template-columns: 1fr; }
+      .footer-inner { flex-direction: column; }
+    }
+    @media (max-width: 460px) {
+      .topbar-inner { min-height: 54px; }
+      .brand-lockup span:last-child { display: none; }
+      .hero-card, .card, .chat-card, .role-panel { padding: 20px; }
+      h1 { font-size: 2.7rem; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media print {
+      .topbar, .chapter-nav, .role-tabs, .quiz-list, .quiz-score { display: none !important; }
+      body { background: #fff; color: #111; }
+      .page { width: 100%; }
+      .hero { min-height: auto; padding: 30px 0; }
+      .section { padding: 38px 0; break-inside: avoid; }
+      .role-panel { display: block !important; margin-bottom: 12px; }
+      .card, .hero-card, .phase, .bottleneck-figure { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand-lockup"><span class="brand-dot" aria-hidden="true"></span><span>Sprintable Learning</span></div>
+      <div class="top-actions">
+        <a class="chapter-link" href="#daily">매일 쓰는 흐름 보기</a>
+        <button class="icon-button" id="theme-toggle" type="button" aria-label="어두운 테마로 전환">◐ 테마</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="hero" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">12분 교육 · 비개발 직군도 이해하는 AI 업무 승인</p>
+        <h1 id="page-title">AI가 일을 끝냈다.<br>이제 누가 믿어도 된다고 말할까?</h1>
+        <p class="hero-copy">Claude와 Codex가 코드를 빠르게 만들수록 팀의 진짜 병목은 <strong>“만들기”에서 “확인하고 받아들이기”</strong>로 이동합니다. 이 자료는 Linear와 GitHub를 몰라도 그 변화와 Sprintable의 역할을 이해하도록 돕습니다.</p>
+        <div class="hero-meta">
+          <span class="pill">대상 · 기획자</span><span class="pill">디자이너</span><span class="pill">팀 리드</span><span class="pill">개발자</span>
+        </div>
+      </div>
+      <aside class="hero-card">
+        <p>이 자료를 읽고 나면 다음 문장을 자신의 말로 설명할 수 있습니다.</p>
+        <ul class="goal-list">
+          <li><b>1</b><span>AI가 많아질수록 왜 승인 대기가 늘어나는가</span></li>
+          <li><b>2</b><span>Linear·Claude/Codex·GitHub가 각각 무엇을 기억하는가</span></li>
+          <li><b>3</b><span>Advisor가 사람 대신 승인하지 않고도 어떻게 일을 줄이는가</span></li>
+          <li><b>4</b><span>Sprintable이 매일 호출되는 작은 습관이 되려면 무엇을 해야 하는가</span></li>
+        </ul>
+      </aside>
+    </section>
+
+    <nav class="chapter-nav" aria-label="교육 목차">
+      <a href="#story">1. 이야기</a><a href="#bottleneck">2. 병목</a><a href="#systems">3. 도구 역할</a><a href="#memory">4. 기억</a><a href="#advisor">5. Advisor</a><a href="#daily">6. 일일 흐름</a><a href="#roles">7. 역할별 사례</a><a href="#runtime">8. 제품 형태</a><a href="#roadmap">9. 개발 순서</a><a href="#metrics">10. 효능 측정</a><a href="#quiz">확인 퀴즈</a>
+    </nav>
+
+    <section class="section" id="story">
+      <div class="section-head">
+        <div class="chapter-no">Chapter 01 · 이야기</div>
+        <div><h2>출시 전날, 모두가 “완료”라고 말했다</h2><p class="section-intro">기획서도 있고, 화면도 있고, 코드도 있습니다. 그런데 팀장이 확인을 시작하자 빠진 것이 한꺼번에 보입니다.</p></div>
+      </div>
+      <div class="story-grid">
+        <div class="chat-card" aria-label="AI 작업 완료 대화 예시">
+          <div class="chat-row"><div class="avatar">PM</div><div class="bubble">신규 가입 화면과 결제 안내까지 오늘 완료할 수 있을까요?</div></div>
+          <div class="chat-row ai"><div class="avatar">AI</div><div class="bubble"><strong>완료했습니다.</strong> 화면을 만들고 코드도 수정했으며 PR도 열었습니다.</div></div>
+          <div class="chat-row"><div class="avatar">리드</div><div class="bubble">오류가 날 때 화면은요? 모바일은요? 결제 실패 후 재시도는요?</div></div>
+          <div class="chat-row ai"><div class="avatar">AI</div><div class="bubble">그 부분은 요구사항에 명시되지 않아 포함하지 않았습니다.</div></div>
+        </div>
+        <div class="card">
+          <span class="card-label">검토하면서 뒤늦게 발견한 것</span>
+          <ul class="surprise-list">
+            <li>빈 상태와 오류 상태가 없다</li>
+            <li>모바일에서 버튼이 가려진다</li>
+            <li>테스트를 만들었지만 실행하지 않았다</li>
+            <li>기획서의 “재시도” 조건이 코드에 없다</li>
+            <li>누가 최종 승인해야 하는지 정해지지 않았다</li>
+          </ul>
+        </div>
+      </div>
+      <div class="takeaway"><b>핵심:</b> 산출물이 생겼다는 사실과, 팀이 결과를 믿고 받아들일 수 있다는 사실은 다릅니다. AI 시대의 “완료”는 생성이 아니라 <strong>수용 가능한 근거가 모인 상태</strong>입니다.</div>
+    </section>
+
+    <section class="section" id="bottleneck">
+      <div class="section-head">
+        <div class="chapter-no">Chapter 02 · 병목</div>
+        <div><h2>작업자는 늘었지만 승인자는 늘지 않았다</h2><p class="section-intro">한 사람이 여러 AI 작업을 동시에 시작할 수 있어도, 중요한 결과를 이해하고 책임지는 사람의 시간은 여전히 하루 8시간입니다.</p></div>
+      </div>
+      <figure class="bottleneck-figure">
+        <svg viewBox="0 0 940 330" role="img" aria-labelledby="bottle-title bottle-desc">
+          <title id="bottle-title">여러 AI 작업이 한 사람의 승인 대기열로 모이는 그림</title>
+          <desc id="bottle-desc">Claude, Codex, 자동화 에이전트가 동시에 산출물을 만들고, 확인되지 않은 결과가 한 명의 사람 승인자에게 집중된다.</desc>
+          <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/></marker></defs>
+          <g fill="none" stroke="currentColor" stroke-width="3" opacity=".34" marker-end="url(#arrow)">
+            <path d="M180 55 C360 55 370 156 520 156"/><path d="M180 135 C360 135 370 165 520 165"/><path d="M180 215 C360 215 370 174 520 174"/><path d="M180 295 C360 295 370 183 520 183"/>
+          </g>
+          <g font-family="system-ui, sans-serif" font-weight="700">
+            <g><rect x="20" y="22" width="160" height="66" rx="16" fill="var(--blue-soft)" stroke="var(--blue)"/><text x="100" y="62" text-anchor="middle" fill="var(--blue)">Claude 작업</text></g>
+            <g><rect x="20" y="102" width="160" height="66" rx="16" fill="var(--purple-soft)" stroke="var(--purple)"/><text x="100" y="142" text-anchor="middle" fill="var(--purple)">Codex 작업</text></g>
+            <g><rect x="20" y="182" width="160" height="66" rx="16" fill="var(--amber-soft)" stroke="var(--amber)"/><text x="100" y="222" text-anchor="middle" fill="var(--amber)">자동 Agent</text></g>
+            <g><rect x="20" y="262" width="160" height="66" rx="16" fill="var(--surface-2)" stroke="var(--muted)"/><text x="100" y="302" text-anchor="middle" fill="var(--muted)">팀원 작업</text></g>
+            <path d="M520 90 L650 90 L625 240 L545 240 Z" fill="var(--red-soft)" stroke="var(--red)" stroke-width="2"/>
+            <text x="586" y="143" text-anchor="middle" fill="var(--red)">확인되지 않은</text><text x="586" y="170" text-anchor="middle" fill="var(--red)">완료 대기열</text>
+            <path d="M650 165 H730" fill="none" stroke="currentColor" stroke-width="3" opacity=".34" marker-end="url(#arrow)"/>
+            <circle cx="805" cy="165" r="62" fill="var(--brand-soft)" stroke="var(--brand)" stroke-width="2"/><text x="805" y="158" text-anchor="middle" fill="var(--brand)">사람</text><text x="805" y="184" text-anchor="middle" fill="var(--brand)">승인자 1명</text>
+          </g>
+        </svg>
+        <figcaption class="figure-caption">생성 속도는 병렬로 늘지만, 책임 있는 판단은 자동으로 병렬화되지 않습니다.</figcaption>
+      </figure>
+      <div class="symptom-list">
+        <div class="symptom"><span>🔀</span><b>채팅과 PR을 계속 오간다</b></div>
+        <div class="symptom"><span>🧠</span><b>매번 요구사항을 다시 떠올린다</b></div>
+        <div class="symptom"><span>⏳</span><b>완료보다 확인 대기가 길어진다</b></div>
+      </div>
+      <div class="takeaway"><b>문제 가설:</b> 코딩 에이전트를 쓰는 개발자와 리드는 “코드를 만드는 속도”가 아니라 <strong>여러 에이전트의 결과를 다시 이해하고, 빠진 근거를 찾고, 책임 있게 승인하는 비용</strong> 때문에 고통받습니다.</div>
+    </section>
+
+    <section class="section" id="systems">
+      <div class="section-head">
+        <div class="chapter-no">Chapter 03 · 도구 역할</div>
+        <div><h2>한 도구가 모든 것을 기억할 필요는 없다</h2><p class="section-intro">각 도구는 서로 다른 질문에 답합니다. Sprintable의 기회는 기존 도구를 복제하는 것이 아니라 그 사이에서 사라지는 판단을 연결하는 데 있습니다.</p></div>
+      </div>
+      <div class="grid-4">
+        <article class="card system-card"><div class="system-icon">L</div><h3>Linear</h3><p class="muted">무엇을 왜 해야 하는지, 누구의 업무인지 기록합니다.</p><span class="source-tag">의도와 책임</span></article>
+        <article class="card system-card"><div class="system-icon">AI</div><h3>Claude · Codex</h3><p class="muted">대화 속에서 계획하고, 만들고, 고치고, 실행합니다.</p><span class="source-tag">작업 과정</span></article>
+        <article class="card system-card"><div class="system-icon">GH</div><h3>GitHub</h3><p class="muted">실제로 어떤 코드가 바뀌었고 검사가 통과했는지 보관합니다.</p><span class="source-tag">변경과 검사</span></article>
+        <article class="card system-card"><div class="system-icon">S</div><h3>Sprintable</h3><p class="muted">무엇을 근거로, 누가, 어떤 조건에서 받아들였는지 기억합니다.</p><span class="source-tag">판정과 수용</span></article>
+      </div>
+      <div class="takeaway"><b>경계 원칙:</b> Linear를 또 만들거나 GitHub의 코드를 복사하지 않습니다. Sprintable은 여러 정본을 읽어 <strong>“이 작업은 지금 사람에게 보여도 되는가?”</strong>를 설명하는 연결 계층입니다.</div>
+    </section>
+
+    <section class="section" id="memory">
+      <div class="section-head">
+        <div class="chapter-no">Chapter 04 · 기억</div>
+        <div><h2>컨텍스트를 보내는 것과 판단을 남기는 것은 다르다</h2><p class="section-intro">좋은 시작 정보는 오늘의 작업을 돕고, 좋은 판정 기록은 내일 같은 실수를 막습니다. Sprintable에는 둘 다 필요하지만 저장 목적은 다릅니다.</p></div>
+      </div>
+      <div class="versus">
+        <article class="versus-card"><span class="card-label">Just-in-time context</span><h3>지금 일을 잘 시작하도록</h3><p class="muted">요구사항, 디자인 링크, 관련 결정, 금지사항을 현재 Claude·Codex 세션에 전달합니다.</p><ul><li>무엇을 만들어야 하나?</li><li>어떤 제약을 지켜야 하나?</li><li>어디까지가 범위인가?</li></ul></article>
+        <div class="versus-mark" aria-hidden="true">≠</div>
+        <article class="versus-card"><span class="card-label">Decision memory</span><h3>다음 일을 더 잘 판단하도록</h3><p class="muted">사람이 왜 승인·반려했는지, 어떤 증거가 부족했는지, 어떻게 해결했는지를 구조화합니다.</p><ul><li>무엇이 실제로 확인됐나?</li><li>왜 반려됐나?</li><li>다음에는 무엇을 먼저 볼까?</li></ul></article>
+      </div>
+      <div class="grid-2" style="margin-top:18px">
+        <div class="card"><span class="card-label">저장하지 말아야 할 기본값</span><h3>채팅 전체를 무조건 복사</h3><p class="muted">양은 많지만 핵심 근거와 결정이 묻히고, 민감한 정보와 비용이 늘어납니다.</p></div>
+        <div class="card"><span class="card-label">저장할 기본 단위</span><h3>Work Manifest · 작업 영수증</h3><div class="receipt" aria-label="작업 영수증 예시"><div class="receipt-row"><span>요구사항</span><strong>LIN-248</strong></div><div class="receipt-row"><span>변경본</span><strong>commit a81f…</strong></div><div class="receipt-row"><span>검사</span><strong>tests 34/34</strong></div><div class="receipt-row"><span>Advisor</span><strong>FIX FIRST → READY</strong></div><div class="receipt-row"><span>사람 판정</span><strong>김리드 · 승인</strong></div></div></div>
+      </div>
+      <div class="takeaway"><b>실무 원칙:</b> 모든 대화를 저장하기보다 <strong>의도 → 실행본 → 검증 근거 → Advisor 조언 → 사람의 최종 판정</strong>을 한 묶음으로 연결해야 합니다.</div>
+    </section>
+
+    <section class="section" id="advisor">
+      <div class="section-head">
+        <div class="chapter-no">Chapter 05 · Advisor</div>
+        <div><h2>Advisor는 결재자가 아니라, 결재 전 선임 검토자다</h2><p class="section-intro">실무자가 보고서를 작성하고 선임이 누락을 먼저 잡은 뒤 책임자가 승인하는 것과 같습니다. AI가 자기 일을 스스로 승인하지 않도록 실행과 판정을 분리합니다.</p></div>
+      </div>
+      <div class="advisor-flow" aria-label="실행자, Advisor, 사람 승인자의 업무 흐름">
+        <div class="flow-node"><b>실행자</b><small>Claude·Codex</small></div><div class="flow-arrow">→</div>
+        <div class="flow-node advisor"><b>Advisor</b><small>빠진 근거 찾기</small></div><div class="flow-arrow">→</div>
+        <div class="flow-node"><b>자동 수리</b><small>고칠 수 있으면 재작업</small></div><div class="flow-arrow">→</div>
+        <div class="flow-node"><b>사람</b><small>책임 있는 최종 결정</small></div>
+      </div>
+      <div class="grid-4 status-grid">
+        <div class="status ready"><b>READY</b><p>필수 근거가 있고 사람 검토로 넘겨도 됨</p></div>
+        <div class="status fix"><b>FIX FIRST</b><p>사람을 부르기 전에 자동으로 고칠 수 있음</p></div>
+        <div class="status ask"><b>ASK HUMAN</b><p>제품 판단·예외 승인처럼 사람이 결정해야 함</p></div>
+        <div class="status unknown"><b>UNVERIFIED</b><p>근거가 없거나 실행본을 특정할 수 없음</p></div>
+      </div>
+      <div class="grid-2" style="margin-top:18px">
+        <div class="card"><span class="card-label">Agent가 해도 되는 일</span><h3>근거를 모으고 비교하고 수리하기</h3><p class="muted">테스트 실행, 요구사항 대비 누락 탐지, 실패 원인 요약, 고칠 수 있는 문제 재작업.</p></div>
+        <div class="card"><span class="card-label">사람에게 남길 일</span><h3>가치·책임·되돌릴 수 없는 결정</h3><p class="muted">범위 변경, 고객 영향 감수, 배포·병합·비용 집행, 정책 예외, 최종 승인.</p></div>
+      </div>
+      <div class="takeaway"><b>승인 무결성:</b> 터미널에서 버튼을 눌렀다는 사실만으로 사람 승인이 되지 않습니다. <strong>사람의 신원, 현재 실행본, 의도적 확인, 판정 시각</strong>이 묶여야 하며 Agent 토큰은 사람 승인 토큰을 사용할 수 없어야 합니다.</div>
+    </section>
+
+    <section class="section" id="daily">
+      <div class="section-head">
+        <div class="chapter-no">Chapter 06 · 매일 쓰는 흐름</div>
+        <div><h2>새 화면을 하나 더 여는 대신, 기존 습관에 끼어든다</h2><p class="section-intro">개발자는 Linear와 Claude·Codex, GitHub를 계속 씁니다. Sprintable은 중요한 경계에서 자동으로 호출되고, 문제가 있을 때만 짧게 말해야 합니다.</p></div>
+      </div>
+      <div class="daily-flow">
+        <article class="daily-step"><h3>Linear에서 시작</h3><p>목표, 담당자, 완료 조건을 읽습니다.</p></article>
+        <article class="daily-step"><h3>AI가 작업</h3><p>Claude·Codex 채팅에서 계획하고 구현합니다.</p></article>
+        <article class="daily-step"><h3>Ready Check</h3><p>세션 종료나 “완료” 시 자동 검사합니다.</p></article>
+        <article class="daily-step"><h3>먼저 수리</h3><p>명백한 누락은 사람 전에 되돌려 보냅니다.</p></article>
+        <article class="daily-step"><h3>사람이 결정</h3><p>Top 3 위험과 근거만 보고 승인합니다.</p></article>
+        <article class="daily-step"><h3>다음에 재사용</h3><p>반려 이유와 해결을 다음 작업에 반영합니다.</p></article>
+      </div>
+      <div class="grid-2 quiet-loud">
+        <article class="card"><span class="card-label">정상 작업</span><span class="big-number">조용하게</span><p class="muted">필수 검사가 통과하면 긴 보고서 대신 <strong>READY · 4개 근거 확인</strong> 한 줄만 보여줍니다.</p></article>
+        <article class="card"><span class="card-label">문제 작업</span><span class="big-number">Top 3만</span><p class="muted">중요도 순으로 누락, 영향, 다음 행동을 보여주고 고칠 수 있는 항목은 즉시 재작업시킵니다.</p></article>
+      </div>
+      <div class="takeaway"><b>매일 쓰게 만드는 조건:</b> 사용자가 또 기록하게 만들지 말고, 기존 도구에서 발생한 사건을 자동 연결해야 합니다. 깨끗한 작업에는 침묵하고, 위험한 작업에는 <strong>바로 행동할 수 있는 짧은 조언</strong>을 줍니다.</div>
+    </section>
+
+    <section class="section" id="roles">
+      <div class="section-head">
+        <div class="chapter-no">Chapter 07 · 역할별 사례</div>
+        <div><h2>같은 Ready Check도 직군마다 “아하”가 다르다</h2><p class="section-intro">아래에서 자신의 역할을 선택해 사람이 확인하기 전에 Advisor가 어떤 일을 덜어주는지 살펴보세요.</p></div>
+      </div>
+      <div class="role-tabs" role="tablist" aria-label="역할별 사례 선택">
+        <button class="role-tab" role="tab" aria-selected="true" aria-controls="role-planner" id="tab-planner" data-role="planner">기획자</button>
+        <button class="role-tab" role="tab" aria-selected="false" aria-controls="role-designer" id="tab-designer" data-role="designer">디자이너</button>
+        <button class="role-tab" role="tab" aria-selected="false" aria-controls="role-leader" id="tab-leader" data-role="leader">대표·리드</button>
+        <button class="role-tab" role="tab" aria-selected="false" aria-controls="role-developer" id="tab-developer" data-role="developer">개발자</button>
+      </div>
+      <article class="role-panel active" role="tabpanel" tabindex="0" id="role-planner" aria-labelledby="tab-planner">
+        <h3>기획자 · “내가 쓴 완료 조건이 실제 결과에 들어갔나?”</h3>
+        <div class="role-example"><div><small>예전</small><p>PR과 채팅을 열어 재시도·권한·예외 조건이 반영됐는지 개발자에게 하나씩 묻습니다.</p></div><div><small>Ready Check</small><p>Linear 완료 조건과 변경 증거를 대조해 “결제 실패 후 재시도 조건의 근거 없음”을 먼저 표시합니다.</p></div><div><small>효과</small><p>코드를 읽지 않아도 <strong>어떤 요구가 확인됐고 무엇이 비었는지</strong>를 말할 수 있습니다.</p></div></div>
+      </article>
+      <article class="role-panel" role="tabpanel" tabindex="0" id="role-designer" aria-labelledby="tab-designer">
+        <h3>디자이너 · “정상 화면 말고 실제 사용 상황도 구현됐나?”</h3>
+        <div class="role-example"><div><small>예전</small><p>배포 후에야 빈 상태, 오류 상태, 긴 문장, 모바일 잘림, 키보드 접근 문제를 발견합니다.</p></div><div><small>Ready Check</small><p>디자인 체크리스트와 화면 증거를 비교해 빠진 상태와 검증되지 않은 뷰포트를 묶어 보여줍니다.</p></div><div><small>효과</small><p>픽셀 감시가 아니라 <strong>사용 경험의 빠진 상태</strong>에 집중해 승인할 수 있습니다.</p></div></div>
+      </article>
+      <article class="role-panel" role="tabpanel" tabindex="0" id="role-leader" aria-labelledby="tab-leader">
+        <h3>대표·리드 · “내가 봐야 하는 것만 올라왔나?”</h3>
+        <div class="role-example"><div><small>예전</small><p>여러 프로젝트의 채팅과 PR을 번갈아 열고, 이미 자동으로 고칠 문제까지 직접 지적합니다.</p></div><div><small>Ready Check</small><p>명백한 문제는 먼저 돌려보내고, 고객 영향·범위 변경·배포처럼 사람 판단이 필요한 항목만 올립니다.</p></div><div><small>효과</small><p>리뷰어가 아니라 <strong>결정권자로서의 시간</strong>을 사용합니다.</p></div></div>
+      </article>
+      <article class="role-panel" role="tabpanel" tabindex="0" id="role-developer" aria-labelledby="tab-developer">
+        <h3>개발자 · “다시 모든 맥락을 설명하지 않고 넘길 수 있나?”</h3>
+        <div class="role-example"><div><small>예전</small><p>AI가 “완료”라고 하면 테스트 실행 여부, 현재 커밋, 요구사항 대응을 다시 캐묻고 복사해 전달합니다.</p></div><div><small>Ready Check</small><p>실행본 SHA, 테스트 결과, 미확인 항목, 재작업 내역을 Work Manifest로 자동 묶습니다.</p></div><div><small>효과</small><p>리뷰 요청 전에 <strong>거짓 완료를 스스로 발견하고 수리</strong>할 수 있습니다.</p></div></div>
+      </article>
+    </section>
+
+    <section class="section" id="runtime">
+      <div class="section-head">
+        <div class="chapter-no">Chapter 08 · 제품 형태</div>
+        <div><h2>새 공장을 짓지 말고, 공통 품질 게이트를 연결한다</h2><p class="section-intro">Claude와 Codex에는 각자의 작업 방식이 있습니다. Sprintable이 둘을 대체하려 하면 사용자는 옮기지 않습니다. 대신 어디서 일하든 같은 판정 형식을 제공해야 합니다.</p></div>
+      </div>
+      <div class="analogy">
+        <article class="factory-card old"><span class="emoji">🏭</span><span class="card-label">권하지 않음 · Full harness</span><h3>모든 작업을 Sprintable 안에서만 하게 만들기</h3><p>새 채팅, 새 실행기, 새 프로젝트 관리 방식을 모두 배워야 합니다. 기존 Claude·Codex 생태계와 경쟁하게 됩니다.</p></article>
+        <article class="factory-card new"><span class="emoji">🛂</span><span class="card-label">권장 · Ready Check runtime</span><h3>각 도구의 출구에 같은 품질 게이트 연결하기</h3><p>Claude hook, Codex plugin, MCP에서 같은 <code>check → advise → repair → report</code> 규칙을 호출하고 결과만 Sprintable에 기록합니다.</p></article>
+      </div>
+      <div style="margin-top:18px">
+        <details><summary>Plugin은 무엇인가요?</summary><p>Claude·Codex 같은 도구 안에 Sprintable 명령과 화면을 넣는 작은 확장 기능입니다. 사용자는 익숙한 채팅창을 떠나지 않고 Ready Check를 실행합니다.</p></details>
+        <details><summary>MCP는 무엇인가요?</summary><p>AI가 Linear, Sprintable 같은 외부 도구를 공통 방식으로 읽고 쓰게 해주는 연결 규격입니다. 업무 조회와 결과 보고에 적합하지만, 사람 승인을 대신 증명하지는 않습니다.</p></details>
+        <details><summary>Hook은 무엇인가요?</summary><p>세션 종료, “완료” 보고, PR 생성처럼 특정 사건이 생겼을 때 검사를 자동 실행하는 장치입니다. 매일 쓰게 만드는 핵심은 사용자가 명령을 기억하는 대신 hook이 적절한 순간을 잡는 것입니다.</p></details>
+        <details><summary>왜 작은 side library가 필요한가요?</summary><p>Claude와 Codex의 연결 방식은 달라도 판정 규칙과 출력 형식은 같아야 하기 때문입니다. 단, 작업 실행 전체를 지배하는 harness가 아니라 검증 경계만 담당해야 합니다.</p></details>
+      </div>
+      <div class="takeaway"><b>제품 한 줄:</b> <code>sprintable-ready</code>는 AI 실행기가 아니라 <strong>어느 실행기에서도 같은 증거 계약과 판정 언어를 쓰게 하는 작은 edge runtime</strong>이어야 합니다.</div>
+    </section>
+
+    <section class="section" id="roadmap">
+      <div class="section-head">
+        <div class="chapter-no">Chapter 09 · 개발 순서</div>
+        <div><h2>기억을 크게 쌓기 전에, 한 번의 도움을 완결한다</h2><p class="section-intro">조직 학습은 매력적이지만 처음부터 거대한 지식 시스템을 만들면 가치가 보이기 전에 입력 부담이 생깁니다. 먼저 한 작업에서 폐쇄 루프를 만듭니다.</p></div>
+      </div>
+      <div class="roadmap">
+        <article class="phase"><span class="phase-no">PHASE 01 · 닫힌 회로</span><h3>완료 보고와 반려를 연결</h3><ul><li>실행본을 정확히 특정</li><li>필수 증거 묶기</li><li>구조화된 승인·반려</li><li>반려 사유를 재작업으로 반환</li></ul></article>
+        <article class="phase"><span class="phase-no">PHASE 02 · 자동 Ready Check</span><h3>Claude·Codex 경계에 삽입</h3><ul><li>완료 시 자동 호출</li><li>Linear 조건과 GitHub 근거 대조</li><li>고칠 수 있으면 자동 수리</li><li>사람에게 Top 3만 전달</li></ul></article>
+        <article class="phase"><span class="phase-no">PHASE 03 · Advisor 기억</span><h3>반복 반려를 다음 일에 활용</h3><ul><li>반려 이유 정규화</li><li>프로젝트별 체크 강화</li><li>유사 작업 시작 시 경고</li><li>규칙 효과를 데이터로 검증</li></ul></article>
+      </div>
+      <aside class="not-now"><strong>처음부터 만들지 않을 것</strong><div class="not-now-list"><span>Linear 복제</span><span>Claude·Codex 대체 실행기</span><span>모든 채팅 장기 저장</span><span>범용 코드 리뷰어</span><span>거대한 조직 평가 대시보드</span></div></aside>
+    </section>
+
+    <section class="section" id="metrics">
+      <div class="section-head">
+        <div class="chapter-no">Chapter 10 · 효능 측정</div>
+        <div><h2>“시간을 줄였다”보다 먼저 관찰할 수 있는 것을 잰다</h2><p class="section-intro">저장된 타임스탬프만으로 절감 시간을 주장하면 안 됩니다. 초기 파일럿에서는 Advisor가 실제 문제를 사람 전에 잡았는지와 팀이 반복 사용했는지를 봅니다.</p></div>
+      </div>
+      <div class="grid-4">
+        <article class="card metric-card"><span class="card-label">첫 효능</span><span class="metric-target">5개 작업 안에 1회</span><p class="muted">사람에게 가기 전 실제 누락을 발견하고 자동으로 고친 사례.</p></article>
+        <article class="card metric-card"><span class="card-label">Pre-review rescue</span><span class="metric-target">사람 전 수리율</span><p class="muted">Advisor가 잡아낸 중요한 문제 중 사람 리뷰 전에 해결된 비율.</p></article>
+        <article class="card metric-card"><span class="card-label">Same-reason leakage</span><span class="metric-target">같은 반려의 재발</span><p class="muted">이미 학습한 반려 사유가 다음 작업에서 사람에게 다시 도달한 비율.</p></article>
+        <article class="card metric-card"><span class="card-label">Habit signal</span><span class="metric-target">2주 반복 사용</span><p class="muted">명령을 강요하지 않아도 자동 Ready Check가 지속된 활성 팀 비율.</p></article>
+      </div>
+      <div class="metric-note"><strong>정량 수치 주의:</strong> 기존 문서의 42%는 45개 hidden-test 과제에 대한 단일 실험이며 전체 개발 시장의 비율이 아닙니다. GitHub·Anthropic의 외부 수치도 Sprintable의 예상 성과로 그대로 옮길 수 없습니다. 초기 목표는 시장 벤치마크가 아니라 파일럿 판단선으로 사용해야 합니다.</div>
+      <div class="takeaway"><b>가장 좋은 첫 증거:</b> “어제 Advisor가 모바일 결제 실패 흐름의 누락을 먼저 잡아 자동 수정했고, 나는 고객 영향만 확인하고 승인했다”처럼 <strong>한 건의 구체적 구조 사례</strong>가 막연한 시간 절감 추정보다 강합니다.</div>
+    </section>
+
+    <section class="section" aria-labelledby="final-title">
+      <div class="final-card">
+        <p class="eyebrow">이제 동료에게 이렇게 설명하세요</p>
+        <h2 id="final-title">Sprintable은 AI를 더 많이 일시키는 도구가 아니라, AI가 만든 일을 사람이 더 적게 의심하고 더 정확히 받아들이게 하는 도구다.</h2>
+        <p>실행은 Claude·Codex에 남겨두고, 의도는 Linear에서 읽고, 실제 변경은 GitHub에서 확인합니다. Sprintable은 이 근거를 한 작업으로 묶어 Advisor가 먼저 누락을 줄이고 사람의 최종 판정을 기록합니다.</p>
+        <div class="one-line">Linear는 <strong>무엇을 할지</strong> 기억하고, Claude·Codex는 <strong>만들고</strong>, GitHub는 <strong>실제 변경</strong>을 보관한다. Sprintable은 <strong>무엇을 근거로 누가 받아들였는지</strong> 기억한다.</div>
+      </div>
+    </section>
+
+    <section class="section" id="quiz">
+      <div class="section-head">
+        <div class="chapter-no">Knowledge Check</div>
+        <div><h2>5문제로 핵심을 확인해 보세요</h2><p class="section-intro">정답을 누르면 바로 이유를 확인할 수 있습니다.</p></div>
+      </div>
+      <div class="quiz-list">
+        <article class="quiz-item" data-answered="false"><h3>1. AI 작업자가 늘 때 가장 먼저 새 병목이 되기 쉬운 것은?</h3><div class="answers"><button class="answer" data-correct="false">코드 입력 속도</button><button class="answer" data-correct="true">결과를 이해하고 승인하는 시간</button></div><p class="explanation">생성은 병렬화되지만 책임 있는 판단은 자동으로 늘지 않기 때문에 수용과 승인 대기열이 병목이 됩니다.</p></article>
+        <article class="quiz-item" data-answered="false"><h3>2. Sprintable이 정본으로 가져야 할 것은?</h3><div class="answers"><button class="answer" data-correct="true">근거와 사람의 최종 판정</button><button class="answer" data-correct="false">모든 소스 코드와 모든 채팅 원문</button></div><p class="explanation">코드는 GitHub, 작업 과정은 Claude·Codex에 둡니다. Sprintable은 의도와 근거, 판정을 연결합니다.</p></article>
+        <article class="quiz-item" data-answered="false"><h3>3. Advisor의 올바른 역할은?</h3><div class="answers"><button class="answer" data-correct="false">Agent를 대신해 최종 승인하기</button><button class="answer" data-correct="true">사람 전 누락을 찾고 수리 가능한 일을 돌려보내기</button></div><p class="explanation">Advisor는 선임 검토자입니다. 가치 판단과 책임이 따르는 최종 승인은 사람에게 남습니다.</p></article>
+        <article class="quiz-item" data-answered="false"><h3>4. 매일 쓰게 만드는 가장 좋은 방식은?</h3><div class="answers"><button class="answer" data-correct="false">사용자에게 매번 긴 보고서를 작성하게 하기</button><button class="answer" data-correct="true">기존 도구의 완료 경계에서 자동 호출하기</button></div><p class="explanation">습관을 새로 요구하기보다 세션 종료·PR 생성 같은 기존 사건에 hook으로 연결해야 반복 사용이 쉽습니다.</p></article>
+        <article class="quiz-item" data-answered="false"><h3>5. 파일럿 초기에 가장 믿을 만한 효능 증거는?</h3><div class="answers"><button class="answer" data-correct="true">사람 전 실제 결함을 발견하고 고친 구체적 사례</button><button class="answer" data-correct="false">근거 없이 추정한 총 절감 시간</button></div><p class="explanation">첫 단계에는 관찰 가능한 rescue 사례와 재발률을 측정해야 합니다. 타임스탬프만으로 절감 시간을 단정하면 안 됩니다.</p></article>
+      </div>
+      <div class="quiz-score" id="quiz-score" role="status" aria-live="polite">아직 푼 문제가 없습니다.</div>
+    </section>
+
+    <section class="section" aria-labelledby="glossary-title">
+      <div class="section-head"><div class="chapter-no">Glossary</div><div><h2 id="glossary-title">회의에서 바로 쓰는 용어 사전</h2></div></div>
+      <div class="glossary">
+        <details><summary>수용 병목 · Acceptance bottleneck</summary><p>결과를 만드는 속도보다 결과를 확인하고 책임 있게 받아들이는 속도가 느려진 상태.</p></details>
+        <details><summary>Proof of Done</summary><p>“완료했다”는 말이 아니라 테스트 결과, 실행본, 요구사항 대응처럼 완료를 확인할 수 있는 증거 묶음.</p></details>
+        <details><summary>Advisor</summary><p>실행 결과를 독립적으로 검토해 누락과 위험을 찾고, 사람에게 가기 전 수리를 돕는 역할.</p></details>
+        <details><summary>Work Manifest</summary><p>작업 의도, 실제 변경본, 검사, Advisor 결과, 사람 판정을 이어주는 구조화된 작업 영수증.</p></details>
+        <details><summary>Human approval</summary><p>특정 사람이 특정 실행본을 의도적으로 확인하고 책임 있는 결정을 남긴 사건.</p></details>
+        <details><summary>Edge runtime</summary><p>Claude·Codex처럼 서로 다른 실행 도구의 경계에서 같은 검증 규칙을 실행하는 작은 공통 계층.</p></details>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="page footer-inner">
+      <div><strong>Sprintable Daily Advisor 교육자료</strong><br>2026-07-18 · 제품 가설을 교육용 언어로 재구성</div>
+      <div class="footer-links"><a href="README.md">사용 안내</a><a href="facilitator-guide.md">진행자 가이드</a><a href="workshop-sheet.md">실습지</a><a href="sources.md">근거와 수치 주의사항</a></div>
+    </div>
+  </footer>
+
+  <script>
+    const root = document.documentElement;
+    const themeButton = document.getElementById('theme-toggle');
+    const savedTheme = localStorage.getItem('sprintable-education-theme');
+    if (savedTheme) root.dataset.theme = savedTheme;
+    const updateThemeLabel = () => {
+      const dark = root.dataset.theme === 'dark';
+      themeButton.setAttribute('aria-label', dark ? '밝은 테마로 전환' : '어두운 테마로 전환');
+    };
+    updateThemeLabel();
+    themeButton.addEventListener('click', () => {
+      root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('sprintable-education-theme', root.dataset.theme);
+      updateThemeLabel();
+    });
+
+    const tabs = [...document.querySelectorAll('.role-tab')];
+    const panels = [...document.querySelectorAll('.role-panel')];
+    const activateRole = (tab) => {
+      tabs.forEach((item) => item.setAttribute('aria-selected', String(item === tab)));
+      panels.forEach((panel) => panel.classList.toggle('active', panel.id === `role-${tab.dataset.role}`));
+    };
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => activateRole(tab));
+      tab.addEventListener('keydown', (event) => {
+        if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+        event.preventDefault();
+        const delta = event.key === 'ArrowRight' ? 1 : -1;
+        const next = tabs[(index + delta + tabs.length) % tabs.length];
+        activateRole(next);
+        next.focus();
+      });
+    });
+
+    const quizItems = [...document.querySelectorAll('.quiz-item')];
+    const score = document.getElementById('quiz-score');
+    const updateScore = () => {
+      const answered = quizItems.filter((item) => item.dataset.answered === 'true');
+      const correct = answered.filter((item) => item.dataset.result === 'correct').length;
+      score.textContent = answered.length === 0
+        ? '아직 푼 문제가 없습니다.'
+        : `${answered.length}/5문제 완료 · ${correct}문제 정답${answered.length === 5 ? ' — 핵심 학습을 마쳤습니다.' : ''}`;
+    };
+    quizItems.forEach((item) => {
+      item.querySelectorAll('.answer').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (item.dataset.answered === 'true') return;
+          const isCorrect = button.dataset.correct === 'true';
+          item.dataset.answered = 'true';
+          item.dataset.result = isCorrect ? 'correct' : 'wrong';
+          item.querySelectorAll('.answer').forEach((answer) => {
+            answer.disabled = true;
+            if (answer.dataset.correct === 'true') answer.classList.add('correct');
+          });
+          if (!isCorrect) button.classList.add('wrong');
+          item.querySelector('.explanation').classList.add('show');
+          updateScore();
+        });
+      });
+    });
+  </script>
+</body>
+</html>
