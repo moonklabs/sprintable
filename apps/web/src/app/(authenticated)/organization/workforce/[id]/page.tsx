@@ -39,12 +39,6 @@ const RUNTIME_STATUS_UI: Record<
   unknown: { variant: 'destructive', labelKey: 'runtimeUnknown', helpKey: 'runtimeUnknownHelp', Icon: XCircle },
 };
 
-function getAppOrigin() {
-  if (typeof window !== 'undefined') return window.location.origin;
-  return process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.sprintable.ai';
-}
-const MCP_SERVER_URL = () => `${getAppOrigin()}/api/v2/mcp`;
-
 interface AgentMember {
   id: string;
   name: string;
@@ -77,22 +71,6 @@ interface ApiKey {
 interface ProjectOption {
   id: string;
   name: string;
-}
-
-function buildMcpConfig(apiKey: string) {
-  return JSON.stringify(
-    {
-      mcpServers: {
-        sprintable: {
-          type: 'streamable-http',
-          url: MCP_SERVER_URL(),
-          headers: { Authorization: `Bearer ${apiKey}` },
-        },
-      },
-    },
-    null,
-    2,
-  );
 }
 
 function getWebhookState(configs: WebhookConfig[]): 'empty' | 'active' | 'paused' {
@@ -132,6 +110,7 @@ export default function AgentDetailPage() {
   const [savingWebhook, setSavingWebhook] = useState(false);
 
   const [freshApiKey, setFreshApiKey] = useState<string | null>(null);
+  const [freshMcpConfig, setFreshMcpConfig] = useState<string | null>(null);
   const [hasActiveKey, setHasActiveKey] = useState(false);
   const [mcpCopied, setMcpCopied] = useState(false);
   const [fakechatMcpCopied, setFakechatMcpCopied] = useState(false);
@@ -294,9 +273,8 @@ export default function AgentDetailPage() {
   };
 
   const handleCopyMcp = async () => {
-    const key = freshApiKey ?? '<YOUR_API_KEY>';
     try {
-      await navigator.clipboard.writeText(buildMcpConfig(key));
+      await navigator.clipboard.writeText(freshMcpConfig ?? '');
       setMcpCopied(true);
       setTimeout(() => setMcpCopied(false), 2000);
     } catch {
@@ -530,7 +508,7 @@ export default function AgentDetailPage() {
         <AgentApiKeyManager
           agentId={id}
           agentName={agent.name}
-          onNewKey={(key) => { setFreshApiKey(key); setHasActiveKey(true); }}
+          onNewKey={(key, mcpConfig) => { setFreshApiKey(key); setFreshMcpConfig(mcpConfig ?? null); setHasActiveKey(true); }}
         />
       )}
 
@@ -608,19 +586,19 @@ export default function AgentDetailPage() {
               <h2 className="text-base font-semibold text-foreground">{t('agentMcpTitle')}</h2>
               <p className="text-sm text-muted-foreground">{t('agentMcpDescription')}</p>
             </div>
-            {freshApiKey && (
-              <Button variant="glass" size="sm" onClick={() => void handleCopyMcp()}>
+            {freshApiKey && freshMcpConfig && (
+              <Button variant="glass" size="sm" onClick={() => void handleCopyMcp()} disabled={!freshMcpConfig}>
                 {mcpCopied ? <Check className="h-3.5 w-3.5" /> : 'Copy'}
               </Button>
             )}
           </div>
         </SectionCardHeader>
         <SectionCardBody>
-          {freshApiKey ? (
+          {freshApiKey && freshMcpConfig ? (
             <>
               <p className="text-xs text-emerald-500 mb-2">{t('agentMcpFreshKeyNote')}</p>
               <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
-                {buildMcpConfig(freshApiKey)}
+                {freshMcpConfig}
               </pre>
             </>
           ) : !hasActiveKey ? (

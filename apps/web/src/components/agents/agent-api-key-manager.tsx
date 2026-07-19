@@ -30,7 +30,7 @@ interface ApiKey {
 interface AgentApiKeyManagerProps {
   agentId: string;
   agentName: string;
-  onNewKey?: (apiKey: string) => void;
+  onNewKey?: (apiKey: string, mcpConfig?: string | null) => void;
 }
 
 export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKeyManagerProps) {
@@ -94,11 +94,10 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
       const result = await response.json() as { data?: { api_key?: string; mcp_config?: unknown } };
       const rawKey = (result.data?.api_key ?? '') as string;
       const rawMcp = result.data?.mcp_config;
+      const mcpConfigStr = rawMcp == null ? null : typeof rawMcp === 'string' ? rawMcp : JSON.stringify(rawMcp, null, 2);
       setGeneratedKey(rawKey);
-      setGeneratedMcpConfig(
-        rawMcp == null ? null : typeof rawMcp === 'string' ? rawMcp : JSON.stringify(rawMcp, null, 2),
-      );
-      onNewKey?.(rawKey);
+      setGeneratedMcpConfig(mcpConfigStr);
+      onNewKey?.(rawKey, mcpConfigStr);
       await loadApiKeys();
     } catch (error) {
       addToast({
