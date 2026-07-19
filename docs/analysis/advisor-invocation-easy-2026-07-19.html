@@ -1,0 +1,193 @@
+<title>인턴에게 보고 습관 가르치기 — 쉬운 설명판</title>
+<style>
+  :root{
+    --paper:#faf8f4; --ink:#2b2a33; --ink-soft:#6d6b78; --line:#e3ded4;
+    --card:#ffffff; --card-line:#e8e3d8;
+    --seal:#c8402f; --seal-soft:#fbeae6; --seal-line:#eac2b8;
+    --auto:#2e8b6e; --auto-soft:#e7f2ed; --auto-line:#bcd9cd;
+    --hl:#fff3cf; --hl-line:#eadb9e;
+    --code-bg:#f0ede5;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#191a21; --ink:#eae8e2; --ink-soft:#9d9ba8; --line:#33343f;
+      --card:#22232d; --card-line:#363744;
+      --seal:#e8674f; --seal-soft:#33231f; --seal-line:#5c352c;
+      --auto:#4db894; --auto-soft:#1c2b26; --auto-line:#2e4a40;
+      --hl:#33301f; --hl-line:#565034;
+      --code-bg:#14151c;
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#faf8f4; --ink:#2b2a33; --ink-soft:#6d6b78; --line:#e3ded4;
+    --card:#ffffff; --card-line:#e8e3d8;
+    --seal:#c8402f; --seal-soft:#fbeae6; --seal-line:#eac2b8;
+    --auto:#2e8b6e; --auto-soft:#e7f2ed; --auto-line:#bcd9cd;
+    --hl:#fff3cf; --hl-line:#eadb9e;
+    --code-bg:#f0ede5;
+  }
+  :root[data-theme="dark"]{
+    --paper:#191a21; --ink:#eae8e2; --ink-soft:#9d9ba8; --line:#33343f;
+    --card:#22232d; --card-line:#363744;
+    --seal:#e8674f; --seal-soft:#33231f; --seal-line:#5c352c;
+    --auto:#4db894; --auto-soft:#1c2b26; --auto-line:#2e4a40;
+    --hl:#33301f; --hl-line:#565034;
+    --code-bg:#14151c;
+  }
+  body{margin:0; background:var(--paper); color:var(--ink);
+    font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;
+    line-height:1.8; font-size:16.5px}
+  .wrap{max-width:720px; margin:0 auto; padding:56px 24px 96px}
+  .eyebrow{font-size:12px; letter-spacing:.14em; color:var(--ink-soft); margin-bottom:14px}
+  h1{font-size:clamp(26px,5vw,36px); font-weight:800; letter-spacing:-.03em; line-height:1.3; margin:0 0 28px; text-wrap:balance}
+  h2{font-size:20px; font-weight:800; letter-spacing:-.02em; margin:60px 0 14px}
+  p{margin:0 0 16px; max-width:38em}
+  p b{font-weight:700}
+  .goal{background:var(--hl); border:1.5px solid var(--hl-line); border-radius:14px; padding:22px 26px; margin-bottom:8px}
+  .goal .t{font-size:12px; font-weight:800; letter-spacing:.12em; color:var(--ink-soft); margin-bottom:8px}
+  .goal p{margin:0; font-size:17.5px; font-weight:700; line-height:1.7}
+  .goal p mark{background:transparent; color:var(--seal)}
+  .story{border-left:3px solid var(--line); padding-left:20px; color:var(--ink); font-size:16px}
+  .story p{margin-bottom:14px}
+  .punch{background:var(--card); border:1px solid var(--card-line); border-radius:14px; padding:18px 24px; font-weight:700; font-size:16.5px; margin:20px 0}
+  .punch mark{background:transparent; color:var(--seal)}
+  .items{display:flex; flex-direction:column; gap:12px; margin:20px 0}
+  .item{background:var(--card); border:1px solid var(--card-line); border-radius:14px; padding:18px 24px; display:grid; grid-template-columns:44px 1fr; gap:16px; align-items:start}
+  .item .ico{font-size:26px; line-height:1.3}
+  .item h3{margin:0 0 4px; font-size:16.5px; font-weight:800}
+  .item h3 small{font-weight:700; color:var(--ink-soft); font-size:12.5px; margin-left:6px}
+  .item p{margin:0; font-size:14.5px; color:var(--ink-soft)}
+  .item p b{color:var(--ink)}
+  .item.later{border-style:dashed; background:transparent}
+  .tag{display:inline-block; font-size:11.5px; font-weight:800; letter-spacing:.06em; padding:2px 10px; border-radius:999px; vertical-align:2px}
+  .t-auto{background:var(--auto-soft); color:var(--auto); border:1px solid var(--auto-line)}
+  .t-man{background:var(--seal-soft); color:var(--seal); border:1px solid var(--seal-line)}
+  .day{background:var(--card); border:1px solid var(--card-line); border-radius:14px; padding:6px 24px 14px; margin:20px 0}
+  .day .row{display:grid; grid-template-columns:64px 1fr; gap:14px; padding:14px 0; border-bottom:1px dashed var(--line); align-items:start; font-size:15px}
+  .day .row:last-child{border-bottom:none}
+  .day .who{font-size:12.5px; font-weight:800; padding-top:4px; white-space:nowrap}
+  .day .row[data-a="human"] .who{color:var(--seal)}
+  .day .row[data-a="agent"] .who{color:var(--auto)}
+  .day .row p{margin:0}
+  .day .row p small{display:block; color:var(--ink-soft); font-size:13px; margin-top:2px}
+  .ahas{display:flex; flex-direction:column; gap:12px; margin:20px 0}
+  .aha{background:var(--card); border:1px solid var(--card-line); border-radius:14px; padding:18px 24px}
+  .aha .when{font-size:12.5px; font-weight:800; color:var(--ink-soft); margin-bottom:4px}
+  .aha .q{font-size:17px; font-weight:800; margin:0 0 6px}
+  .aha .q::before{content:"“"; color:var(--seal)} .aha .q::after{content:"”"; color:var(--seal)}
+  .aha p{margin:0; font-size:14.5px; color:var(--ink-soft)}
+  .aha p b{color:var(--ink)}
+  .aha.hero{border-color:var(--seal); border-width:1.5px}
+  .aha.hero .star{display:inline-block; font-size:11px; font-weight:800; letter-spacing:.08em; color:var(--seal); background:var(--seal-soft); border:1px solid var(--seal-line); border-radius:999px; padding:2px 9px; margin-bottom:8px}
+  .week{margin:20px 0; padding:0; list-style:none}
+  .week li{display:grid; grid-template-columns:88px 1fr; gap:14px; padding:12px 0; border-bottom:1px dashed var(--line); font-size:15px}
+  .week li:last-child{border-bottom:none}
+  .week .d{font-weight:800; font-size:13.5px; color:var(--ink-soft); padding-top:2px}
+  .week li p{margin:0}
+  .quiz{background:var(--card); border:1px solid var(--card-line); border-radius:14px; padding:10px 24px; margin:20px 0}
+  .quiz details{padding:14px 0; border-bottom:1px dashed var(--line)}
+  .quiz details:last-child{border-bottom:none}
+  .quiz summary{cursor:pointer; font-weight:700; font-size:15.5px; list-style:none; display:flex; gap:10px}
+  .quiz summary::before{content:"Q"; font-weight:800; color:var(--seal); flex-shrink:0}
+  .quiz summary:focus-visible{outline:2px solid var(--seal); outline-offset:3px; border-radius:6px}
+  .quiz .a{margin:10px 0 0 24px; font-size:14.5px; color:var(--ink-soft); background:var(--code-bg); border-radius:10px; padding:12px 16px}
+  .quiz .a b{color:var(--ink)}
+  .foot{margin-top:64px; padding-top:18px; border-top:1px solid var(--line); font-size:12.5px; color:var(--ink-soft)}
+  @media (max-width:520px){ .day .row{grid-template-columns:52px 1fr} .week li{grid-template-columns:1fr} }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">SPRINTABLE · 쉬운 설명판 · 2026-07-19</div>
+  <h1>인턴에게 "보고 습관"을 가르치는 일</h1>
+
+  <div class="goal">
+    <div class="t">이 문서를 읽고 나면, 이 한 문장을 설명할 수 있습니다</div>
+    <p>이번 주에 만드는 것은 새 기능이 아니라 <mark>에이전트가 스스로 보고하게 만드는 업무 매뉴얼 한 장</mark>이다 — 그러면 사람이 하는 일은 <mark>싸인 하나</mark>만 남는다.</p>
+  </div>
+
+  <h2>1. 지금 상황 — 다 만들어놓고 왜 안 돌아갈까</h2>
+  <div class="story">
+    <p>우리 회사엔 밤새 일하는 성실한 인턴(AI 에이전트)이 있습니다. 그리고 이미 이런 시스템도 다 만들어져 있습니다:</p>
+    <p>· 인턴이 일 시작 전에 참고할 수 있는 <b>선배의 조언 노트</b> (이 프로젝트에서 예전에 뭐가 반려됐는지)<br>
+    · 일이 끝나면 증거를 붙여 제출하는 <b>영수증 양식</b><br>
+    · 제출된 보고가 쌓이는 <b>사장님 우편함</b>과, 승인·반려 <b>싸인</b><br>
+    · 싸인 결과가 인턴에게 자동으로 돌아가는 <b>회신 배달</b></p>
+    <p>그런데 시스템이 텅 비어 있습니다. 왜일까요?</p>
+  </div>
+  <div class="punch">아무도 인턴에게 <mark>"일 끝나면 영수증 붙여서 우편함에 넣어라"</mark>라고 가르친 적이 없기 때문입니다. 도구는 다 있는데, <mark>습관</mark>이 없는 겁니다.</div>
+  <p>그래서 이번 주에 만드는 건 서버도 기능도 아니고, <b>인턴이 자동으로 따르게 되는 업무 매뉴얼</b>입니다.</p>
+
+  <h2>2. 만드는 것은 딱 세 가지</h2>
+  <div class="items">
+    <div class="item">
+      <div class="ico">📖</div>
+      <div>
+        <h3>업무 매뉴얼 <small>개발자 용어로는 "스킬"</small> <span class="tag t-auto">자동</span></h3>
+        <p>인턴이 읽고 몸에 배는 규칙. <b>"일 받으면 선배 조언부터 확인 → 끝나면 스스로 점검하고 영수증 붙여 제출 → 반려되면 지적된 부분만 고쳐서 다시 제출."</b> 한 번 넣어두면 사람이 시키지 않아도 매번 그렇게 일합니다.</p>
+      </div>
+    </div>
+    <div class="item">
+      <div class="ico">🔘</div>
+      <div>
+        <h3>버튼 세 개 <small>개발자 용어로는 "슬래시 커맨드"</small> <span class="tag t-man">수동</span></h3>
+        <p>사람이 직접 시키고 싶을 때 누르는 버튼. <b>"이 티켓 시작해" / "지금 제출해" / "우편함 상태 보여줘"</b> 세 개뿐입니다. 매뉴얼이 안 통하는 상황의 비상구이기도 합니다.</p>
+      </div>
+    </div>
+    <div class="item later">
+      <div class="ico">🚧</div>
+      <div>
+        <h3>차단기 <small>개발자 용어로는 "훅" — 지금은 안 만듦</small></h3>
+        <p>되돌릴 수 없는 문(코드 합치기·배포) 앞에서 "영수증 없으면 통과 금지"를 강제하는 장치. <b>사람들이 정말 그 지점에서만 확인을 원하는지 인터뷰로 확인한 뒤(7/31)</b>에 만듭니다 — 확인도 안 된 규칙부터 강제하면 잔소리가 되니까요.</p>
+      </div>
+    </div>
+  </div>
+
+  <h2>3. 하루가 이렇게 흘러갑니다</h2>
+  <p>주목할 점: 아래에서 <b>사람이 등장하는 줄은 딱 두 번</b>입니다.</p>
+  <div class="day">
+    <div class="row" data-a="human"><div class="who">사람</div><p>"이 티켓 시작해" <small>버튼 한 번 — 여기서부터 퇴근해도 됩니다</small></p></div>
+    <div class="row" data-a="agent"><div class="who">인턴</div><p>선배 조언 노트 확인 — "이 프로젝트, 예전에 근거 없이 냈다가 두 번 반려됐음" → 참고하고 일 시작</p></div>
+    <div class="row" data-a="agent"><div class="who">인턴</div><p>일 끝 → 스스로 점검표 작성 → 증거(영수증) 붙여서 우편함에 제출 → <b>기다리지 않고 다음 티켓으로</b></p></div>
+    <div class="row" data-a="human"><div class="who">사람</div><p>우편함 열기 → 영수증 보고 3초 판단 → 승인 싸인, 또는 "이 부분만 고쳐" 한 줄 적고 반려</p></div>
+    <div class="row" data-a="agent"><div class="who">인턴</div><p>반려 회신이 자동 도착 → 잘한 부분은 그대로 두고 지적된 부분만 고쳐서 재제출 → 승인 → 완료</p></div>
+  </div>
+  <p>사람이 리뷰하러 코드를 뒤지는 장면이 없다는 것 — 그게 이 설계의 전부입니다. <b>확인하는 일은 시스템과 인턴이 하고, 사람은 책임지는 일(싸인)만 합니다.</b></p>
+
+  <h2>4. "이거다" 싶은 순간은 세 번 옵니다</h2>
+  <div class="ahas">
+    <div class="aha">
+      <div class="when">첫날, 첫 5분</div>
+      <p class="q">코드를 안 열었는데 판단이 끝났네?</p>
+      <p>첫 보고서를 열었더니 영수증이 붙어 있어서 <b>3초 만에 싸인</b>한 순간. 못 믿어서 전부 다시 열어보던 사람이 처음으로 안 열어봅니다.</p>
+    </div>
+    <div class="aha hero">
+      <span class="star">가장 강한 순간</span>
+      <div class="when">첫 반려, 같은 날</div>
+      <p class="q">반려했더니 알아서 고쳐왔네?</p>
+      <p>지금까지는 반려 사유를 인턴 자리까지 가서 일일이 다시 설명(복사·붙여넣기)해야 했습니다. 이제 반려 사유 한 줄만 적으면 <b>회신이 자동 배달되고, 고친 보고서가 돌아옵니다.</b></p>
+    </div>
+    <div class="aha">
+      <div class="when">티켓 3~5개쯤 후</div>
+      <p class="q">내 싸인이 데이터가 됐네?</p>
+      <p>인턴이 새 일을 시작하며 <b>"예전에 반려하신 이유를 참고했습니다"</b>라고 말하는 순간. 싸인할수록 인턴이 좋아집니다 — 계속 쓰게 되는 이유.</p>
+    </div>
+  </div>
+
+  <h2>5. 이번 주 일정</h2>
+  <ul class="week">
+    <li><div class="d">반나절</div><p>이미 만들어둔 시스템(우편함·영수증·회신 배달)을 정식 코드로 합치기</p></li>
+    <li><div class="d">1일</div><p>업무 매뉴얼 + 버튼 3개 작성 → <b>우리가 첫 손님</b>이 되어 진짜 티켓 1건을 처음부터 끝까지 돌려보기 (반려도 일부러 한 번 해봅니다 — 가장 강한 순간을 확인해야 하니까)</p></li>
+    <li><div class="d">1~2일</div><p>다른 사용자도 설치 한 번으로 매뉴얼까지 자동으로 받도록 포장</p></li>
+    <li><div class="d">나중에</div><p>차단기(훅)는 7/31 인터뷰 결과 보고 결정</p></li>
+  </ul>
+
+  <h2>6. 확인 퀴즈</h2>
+  <div class="quiz">
+    <details><summary>이번 주에 만드는 건 새 기능인가요?</summary><div class="a"><b>아니요.</b> 시스템(우편함·영수증·싸인·회신)은 이미 다 만들어져 있습니다. 만드는 건 인턴이 그 시스템을 스스로 쓰게 만드는 <b>업무 매뉴얼(습관)</b>입니다.</div></details>
+    <details><summary>사람은 하루에 몇 번 등장하나요?</summary><div class="a"><b>두 번.</b> 시작시키기(버튼 한 번)와 싸인하기. 리뷰하러 코드를 뒤지는 일은 사라지는 게 목표입니다.</div></details>
+    <details><summary>차단기(강제 장치)는 왜 지금 안 만드나요?</summary><div class="a">사람들이 정말 "되돌릴 수 없는 지점"에서만 확인을 원하는지 <b>아직 확인이 안 됐기 때문</b>입니다(7/31 인터뷰). 확인 전에 강제부터 하면 도움이 아니라 잔소리가 됩니다.</div></details>
+    <details><summary>가장 강한 "이거다" 순간은 언제인가요?</summary><div class="a"><b>첫 반려 때.</b> 한 줄 적고 반려했더니, 다시 설명하러 갈 필요 없이 인턴이 알아서 고쳐서 돌아오는 순간입니다. 그래서 데모에서도 반려를 일부러 한 번 보여줍니다.</div></details>
+  </div>
+
+  <div class="foot">기술 상세판: advisor-invocation-report-2026-07-19.html · 원본 플랜: docs/analysis/advisor-invocation-plan-2026-07-19.md</div>
+</div>

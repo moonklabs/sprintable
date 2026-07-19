@@ -160,7 +160,7 @@
   <div class="thesis">
     <div class="label">핵심 답 한 문장</div>
     <p>개발자(사람)는 아무 툴도 직접 호출하지 않는다 — <b>에이전트가 호출</b>하고, <b>스킬이 에이전트에게 "언제 호출할지"를 가르친다</b>.</p>
-    <p class="after">Skill = 자동(세션의 기본 동작) · Command = 수동 진입점(시작·강제·확인) · Hook = 나중에(불가역 경계 강제, 가설 확증 후). 사람이 하는 일은 단 하나 — 게이트에서 증거를 보고 도장을 찍는 것.</p>
+    <p class="after">Skill = 자동(세션의 기본 동작) · Command = 수동 진입점(시작·강제·확인) · Hook = 나중에(불가역 경계 강제, 가설 확증 후). 사람이 하는 일은 단 하나 — 게이트에서 증거를 보고 싸인하는 것.</p>
   </div>
 
   <h2><span class="no">1</span>5단계 루프 — 무엇이 자동이고 무엇이 수동인가</h2>
@@ -206,7 +206,7 @@
     <div class="step" data-k="man">
       <div class="rail"><div class="dot">⑤</div></div>
       <div class="stepbody">
-        <div class="stephead"><h3>판정 → 재작업</h3><span class="badge b-man">도장은 사람</span><span class="badge b-auto">수신·재작업은 자동</span></div>
+        <div class="stephead"><h3>판정 → 재작업</h3><span class="badge b-man">싸인은 사람</span><span class="badge b-auto">수신·재작업은 자동</span></div>
         <p class="steptext">사람이 게이트 화면에서 증거를 보고 approve/reject — <b>루프 전체에서 사람이 하는 유일한 일</b>입니다. 판정은 <code>gate.resolved</code> 이벤트로 에이전트에게 돌아가고, rejected면 note·keep을 준수하며 자동으로 재작업 후 ④로 복귀합니다.</p>
         <div class="say"><span class="who">agent&gt;</span> rejected · next_stage=revise — keep 목록 보존하고 재작업 시작.</div>
       </div>
@@ -257,7 +257,7 @@
     <div class="turn" data-a="sys"><div class="actor">서버</div><p><b>202</b> — 사람 게이트 생성, self_review를 증거로 봉인(advisor_origin). <span class="note">에이전트는 다른 티켓으로.</span></p></div>
     <div class="turn" data-a="human"><div class="actor">사람</div><p>게이트 화면에서 증거 확인 → <b>reject</b> + note 입력 <span class="note">(예: "권한은 project_auth 헬퍼로")</span></p></div>
     <div class="turn" data-a="agent"><div class="actor">에이전트</div><p><span class="m">poll_events</span>에 <span class="m">gate.resolved(rejected, next_stage=revise)</span> 도착 → 자동 재작업 → 두 번째 <span class="m">report_done</span></p></div>
-    <div class="turn" data-a="human"><div class="actor">사람</div><p><b>approve</b> — 도장. 티켓 done, 판정 근거는 원장에 영구 기록</p></div>
+    <div class="turn" data-a="human"><div class="actor">사람</div><p><b>approve</b> — 싸인. 티켓 done, 판정 근거는 원장에 영구 기록</p></div>
   </div>
 
   <h2><span class="no">4</span>아하 모먼트 — 언제 "이거다"를 느끼나</h2>
@@ -276,7 +276,7 @@
     </div>
     <div class="aha">
       <div class="when">아하 3 · <b>티켓 3~5개 후 (리텐션 훅)</b></div>
-      <h3><q>내 도장이 데이터가 됐다</q></h3>
+      <h3><q>내 싸인이 데이터가 됐다</q></h3>
       <p>kickoff advisor가 <b>"과거 reject 이력 2건 참고"</b>라고 말하는 순간 — 내가 찍은 판정이 다음 작업의 스펙으로 되먹임되는 걸 목격. 첫날엔 못 느끼고(이력이 없으니), <b>쓸수록 좋아진다</b>는 신호라 리텐션을 만드는 아하.</p>
     </div>
   </div>
