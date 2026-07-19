@@ -88,7 +88,7 @@ async def test_ensure_implementation_participation_idempotent():
 
 
 @pytest.mark.anyio
-async def test_ensure_skips_when_no_default_role():
+async def test_ensure_lazy_seeds_when_no_default_role():
     from sqlalchemy import text as _text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -111,14 +111,17 @@ async def test_ensure_skips_when_no_default_role():
             await s.execute(_text("SET session_replication_role = replica"))
             s.add(Story(id=story_id, org_id=org, project_id=project, title="S", status="backlog"))
             await s.commit()
-        # default role 미시드 → skip(False)·participation 0(거짓 attribution 금지).
+        # SPR-35: default role 미시드 → **lazy 시드** 후 participation 생성(True).
+        # (구 계약은 skip=False였으나 신규 org에서 merge gate가 영영 실체화되지 않는 온보딩
+        # 갭이라 변경. "거짓 attribution 금지"는 명시 비-default implementation 역할 케이스가
+        # 이어받는다 — tests/test_participation_default_role_seed.py 참조.)
         async with Session() as s:
             await s.execute(_text("SET session_replication_role = replica"))
             ok = await ensure_implementation_participation(s, org, story_id, member)
             await s.commit()
-            assert ok is False
+            assert ok is True
         async with Session() as s:
-            assert await _count_part(s, org, story_id, member) == 0
+            assert await _count_part(s, org, story_id, member) == 1
     finally:
         async with engine.begin() as c:
             await c.run_sync(Base.metadata.drop_all)
