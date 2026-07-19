@@ -72,12 +72,15 @@ export function EpicStatusTransition({
         error?: { code?: string; message?: string };
       };
       if (!res.ok) {
-        // story #2013: 무반응이 이 버그의 본체 — 거부 사유(HUMAN_CONFIRM_REQUIRED·
-        // INVALID_EPIC_TRANSITION 등)를 그대로 화면에 띄운다(삼키지 않음).
+        // story #2013 리뷰 FIX A: 무반응이 이 버그의 본체 — 거부 사유(HUMAN_CONFIRM_REQUIRED·
+        // INVALID_EPIC_TRANSITION 등)를 그대로 화면에 띄운다(삼키지 않음). code+message 둘 다
+        // verbatim 보존(code만 있고 message가 없어도, message만 있어도 안 잃도록 각각 optional).
+        const code = json?.error?.code;
+        const message = json?.error?.message || t('transitionFailedFallback');
         addToast({
           type: 'error',
           title: t('transitionFailedTitle'),
-          body: json?.error?.message || t('transitionFailedFallback'),
+          body: code ? `[${code}] ${message}` : message,
         });
         return;
       }
