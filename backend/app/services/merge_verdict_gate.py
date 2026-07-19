@@ -323,6 +323,10 @@ async def evaluate_merge_gate(
         member_id,
         role_id,
         project_id=project_id,
+        # SPR-34: 사람이 reject한(resolver_id 있는) 최신 게이트는 terminal이 아니라 "재작업 지시" —
+        # 재보고 시 새 pending 게이트(다음 시도)를 열어 reject→재작업→재판정 루프를 닫는다.
+        # 정책 deny 아티팩트는 재도전 대상이 아니어서 기존 하드블록(_decide rejected→BLOCK) 보존.
+        reopen_after_human_reject=True,
         neutral_facts={
             "ci_result": ci,
             "pr_result": pr,

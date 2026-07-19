@@ -113,6 +113,50 @@ async def build_context(session: AsyncSession, story: Story, max_prior_decisions
             if len(decisions) == max_prior_decisions:
                 break
 
+    # SPR-34: 재개방(reopen)된 게이트의 과거 판정은 status/resolver_id가 리셋돼 위 쿼리에 잡히지
+    # 않는다 — 행에 보존된 neutral_facts.resolution_history 스냅샷에서 복원한다. 재작업 중 스토리의
+    # 자기 reject 사유가 advisor 컨텍스트에서 사라지면 reject-학습 신호(과거 사유 되먹임)가 끊긴다.
+    # 스냅샷은 사람-reject 재개방 경로에서만 쓰이므로 resolver는 human으로 검증된 상태다.
+    if max_prior_decisions and len(decisions) < max_prior_decisions:
+        hist_gates = list(
+            (
+                await session.execute(
+                    select(Gate)
+                    .join(
+                        Story,
+                        (Story.id == Gate.work_item_id)
+                        & (Story.org_id == Gate.org_id),
+                    )
+                    .where(
+                        Gate.org_id == story.org_id,
+                        Gate.work_item_type == "story",
+                        Story.project_id == story.project_id,
+                        Story.deleted_at.is_(None),
+                        Gate.neutral_facts.has_key("resolution_history"),
+                    )
+                    .order_by(Gate.updated_at.desc(), Gate.id.desc())
+                    .limit(50)
+                )
+            ).scalars()
+        )
+        for gate in hist_gates:
+            snapshots = (gate.neutral_facts or {}).get("resolution_history") or []
+            for snap in reversed(snapshots):  # 최신 시도부터
+                if not isinstance(snap, dict) or snap.get("status") not in ("approved", "rejected"):
+                    continue
+                decisions.append(
+                    {
+                        "status": snap.get("status"),
+                        "resolution_note": clamp(snap.get("resolution_note"), 1000),
+                        "decision_basis": None,
+                        "resolved_at": snap.get("resolved_at"),
+                    }
+                )
+                if len(decisions) == max_prior_decisions:
+                    break
+            if len(decisions) == max_prior_decisions:
+                break
+
     bundle = {
         "story": {
             "id": str(story.id),
