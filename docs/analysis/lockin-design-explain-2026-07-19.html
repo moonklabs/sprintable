@@ -1,0 +1,225 @@
+<title>락인 설계 상세 — 3겹 중력 루프</title>
+<style>
+  :root{
+    --paper:#f7f6f2; --ink:#232838; --ink-soft:#5b6478; --line:#dcd9d0;
+    --card:#ffffff; --card-line:#e5e2d9;
+    --seal:#c8402f; --seal-soft:#fbeae6; --seal-line:#eac2b8;
+    --auto:#2e8b6e; --auto-soft:#e7f2ed; --auto-line:#bcd9cd;
+    --code-bg:#eeece5; --code-ink:#3a4054;
+    --hl:#fff3cf; --hl-line:#eadb9e;
+    --bad:#b3261e; --bad-soft:#fdeceb;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#171a24; --ink:#e8e7e2; --ink-soft:#9aa0b2; --line:#31374a;
+      --card:#1f2432; --card-line:#333a4e;
+      --seal:#e8674f; --seal-soft:#33231f; --seal-line:#5c352c;
+      --auto:#4db894; --auto-soft:#1c2b26; --auto-line:#2e4a40;
+      --code-bg:#12141d; --code-ink:#c6cadb;
+      --hl:#33301f; --hl-line:#565034;
+      --bad:#e57373; --bad-soft:#3a2422;
+    }
+  }
+  :root[data-theme="light"]{
+    --paper:#f7f6f2; --ink:#232838; --ink-soft:#5b6478; --line:#dcd9d0;
+    --card:#ffffff; --card-line:#e5e2d9;
+    --seal:#c8402f; --seal-soft:#fbeae6; --seal-line:#eac2b8;
+    --auto:#2e8b6e; --auto-soft:#e7f2ed; --auto-line:#bcd9cd;
+    --code-bg:#eeece5; --code-ink:#3a4054;
+    --hl:#fff3cf; --hl-line:#eadb9e;
+    --bad:#b3261e; --bad-soft:#fdeceb;
+  }
+  :root[data-theme="dark"]{
+    --paper:#171a24; --ink:#e8e7e2; --ink-soft:#9aa0b2; --line:#31374a;
+    --card:#1f2432; --card-line:#333a4e;
+    --seal:#e8674f; --seal-soft:#33231f; --seal-line:#5c352c;
+    --auto:#4db894; --auto-soft:#1c2b26; --auto-line:#2e4a40;
+    --code-bg:#12141d; --code-ink:#c6cadb;
+    --hl:#33301f; --hl-line:#565034;
+    --bad:#e57373; --bad-soft:#3a2422;
+  }
+  body{margin:0; background:var(--paper); color:var(--ink);
+    font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;
+    line-height:1.75; font-size:16px}
+  .wrap{max-width:720px; margin:0 auto; padding:56px 24px 96px}
+  .eyebrow{font-size:12px; letter-spacing:.14em; color:var(--ink-soft); margin-bottom:14px}
+  h1{font-size:clamp(25px,4.5vw,34px); font-weight:800; letter-spacing:-.03em; line-height:1.3; margin:0 0 24px; text-wrap:balance}
+  h2{font-size:20px; font-weight:800; letter-spacing:-.02em; margin:60px 0 14px}
+  h3{font-size:16.5px; font-weight:800; margin:28px 0 8px}
+  p{margin:0 0 16px; max-width:40em}
+  code{font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:.86em; background:var(--code-bg); color:var(--code-ink); padding:2px 6px; border-radius:5px}
+  .core{background:var(--hl); border:1.5px solid var(--hl-line); border-radius:14px; padding:22px 26px; margin-bottom:8px}
+  .core .t{font-size:12px; font-weight:800; letter-spacing:.12em; color:var(--ink-soft); margin-bottom:8px}
+  .core p{margin:0; font-size:17.5px; font-weight:700; line-height:1.7}
+  .core p mark{background:transparent; color:var(--seal)}
+  .punch{background:var(--card); border:1px solid var(--card-line); border-radius:14px; padding:16px 22px; font-weight:700; margin:20px 0}
+  .punch mark{background:transparent; color:var(--seal)}
+  /* 3겹 다이어그램 */
+  .rings{display:flex; flex-direction:column; gap:0; margin:24px 0; align-items:stretch}
+  .ring{border-radius:14px; padding:16px 22px; border:1.5px solid}
+  .ring+.ring{margin-top:-2px}
+  .ring .rh{display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap}
+  .ring h4{margin:0; font-size:15.5px; font-weight:800}
+  .ring .rw{font-size:12px; font-weight:800; color:var(--ink-soft)}
+  .ring p{margin:6px 0 0; font-size:13.5px; color:var(--ink-soft)}
+  .ring p b{color:var(--ink)}
+  .r1{background:var(--auto-soft); border-color:var(--auto-line)}
+  .r2{background:var(--card); border-color:var(--seal); box-shadow:0 2px 14px #0001}
+  .r3{background:transparent; border-color:var(--line); border-style:dashed}
+  .arrow{align-self:center; color:var(--ink-soft); font-size:18px; line-height:1; padding:6px 0}
+  /* 2주 타임라인 */
+  .tl{background:var(--card); border:1px solid var(--card-line); border-radius:14px; padding:6px 22px 14px; margin:20px 0}
+  .tl .row{display:grid; grid-template-columns:74px 1fr; gap:14px; padding:13px 0; border-bottom:1px dashed var(--line); font-size:14.5px}
+  .tl .row:last-child{border-bottom:none}
+  .tl .d{font-weight:800; font-size:12.5px; color:var(--ink-soft); padding-top:3px; white-space:nowrap}
+  .tl .row p{margin:0}
+  .tl .row p b{color:var(--seal)}
+  table{border-collapse:collapse; width:100%; font-size:14px; margin:16px 0}
+  th,td{text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+  th{font-size:12.5px; letter-spacing:.04em; color:var(--ink-soft)}
+  .tablewrap{overflow-x:auto}
+  .honest{border:1px dashed var(--line); border-radius:14px; padding:16px 22px; margin:20px 0; font-size:14.5px; color:var(--ink-soft)}
+  .honest b{color:var(--ink)}
+  /* 퀴즈 */
+  .quiz{margin:20px 0}
+  .q{background:var(--card); border:1px solid var(--card-line); border-radius:14px; padding:18px 22px; margin-bottom:14px}
+  .q .qt{font-weight:700; margin:0 0 12px; font-size:15.5px}
+  .q .qt::before{content:"Q. "; font-weight:800; color:var(--seal)}
+  .opts{display:flex; flex-direction:column; gap:8px}
+  .opt{text-align:left; font:inherit; font-size:14px; line-height:1.55; padding:10px 14px; border-radius:10px; border:1px solid var(--line); background:transparent; color:var(--ink); cursor:pointer}
+  .opt:hover{border-color:var(--ink-soft)}
+  .opt:focus-visible{outline:2px solid var(--seal); outline-offset:2px}
+  .opt.correct{background:var(--auto-soft); border-color:var(--auto); font-weight:700}
+  .opt.wrong{background:var(--bad-soft); border-color:var(--bad)}
+  .expl{display:none; margin:12px 0 0; font-size:13.5px; color:var(--ink-soft); background:var(--code-bg); border-radius:10px; padding:12px 16px}
+  .expl b{color:var(--ink)}
+  .q.answered .expl{display:block}
+  .foot{margin-top:64px; padding-top:18px; border-top:1px solid var(--line); font-size:12.5px; color:var(--ink-soft)}
+  @media (max-width:520px){ .tl .row{grid-template-columns:58px 1fr} }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">SPRINTABLE · 이해 문서 (설계 상세) · 2026-07-19</div>
+  <h1>락인 설계 상세 — 왜 스킬이 아니라 이력이 해자인가</h1>
+
+  <div class="core">
+    <div class="t">이 문서의 핵심 문장</div>
+    <p>락인은 스킬이 아니라 <mark>스킬이 채우는 판정 이력</mark>에서 나온다 — 이력이 advisor로 되먹임되는 순간, <mark>스위칭 코스트는 사용량에 비례해 커진다</mark>.</p>
+  </div>
+
+  <h2>1. Background — 락인의 두 종류, 그리고 우리가 이미 가진 것</h2>
+  <p>개발자 도구에서 락인은 두 방식으로 만들어집니다.</p>
+  <p><b>벽(가두기)</b>: 데이터 수출 차단, 독점 포맷, 해지 마찰. 개발자 시장에서는 역효과가 큽니다 — 발견되는 순간 신뢰가 깨지고, Show HN 같은 채널에서는 공격 포인트가 됩니다.</p>
+  <p><b>중력(쌓이기)</b>: 쓸수록 다른 곳에서 재현할 수 없는 것이 축적되어, 떠나는 것이 손해가 되는 구조. GitHub의 이슈·PR 히스토리, Datadog의 대시보드·알람 설정이 이 방식입니다. 사용자는 갇혀 있다고 느끼지 않지만 실제로는 떠나기 어렵습니다.</p>
+  <p>반면교사도 있습니다. vibe-kanban(27k 스타)은 벽도 중력도 없었습니다 — 로컬에서 무료로 잘 쓰이지만 아무것도 축적되지 않아, 사용자는 언제든 떠날 수 있었고 과금 전환은 0이었습니다. 인기와 락인은 별개라는 증거입니다.</p>
+  <p>우리가 이미 가진 자산을 이 렌즈로 보면: 게이트 판정 기록(누가, 무슨 증거로, 왜 승인/반려했나), 구조화된 reject 사유(<code>unmet_criteria</code>·keep·change), 그리고 그 이력을 다음 작업의 입력으로 되먹임하는 advisor 컨텍스트(<code>prior_decisions</code> — 사람이 판정한 것만 필터해서 제공). <b>축적되고, 되먹임되고, 다른 곳에 없는 것</b> — 중력의 세 조건을 전부 갖췄습니다. 문제는 이 원장이 지금 비어 있다는 것이고, 그래서 스킬이 필요합니다.</p>
+  <div class="punch">스킬의 역할은 편의가 아니라 <mark>사용자 노력 없이 원장을 채우는 깔때기</mark>다.</div>
+
+  <h2>2. Intuition — 개발자 지수의 3주</h2>
+  <p>구체적인 예로 감을 잡아봅시다. 솔로 개발자 지수가 스킬을 설치한 뒤의 3주입니다.</p>
+  <div class="tl">
+    <div class="row"><div class="d">1주차</div><p>티켓 4개를 루프로 처리. 지수가 한 일은 시작 명령과 싸인뿐 — 그런데 그 사이에 <b>완료 보고 4건, 증거 11개, reject 1건(사유: "마이그레이션은 직접 수정 금지")</b>이 원장에 쌓였다. 지수는 데이터를 쌓는다는 자각이 없다.</p></div>
+    <div class="row"><div class="d">3주차</div><p>새 티켓 시작. 에이전트가 말한다: <b>"과거 이 프로젝트의 reject 이력을 참고했습니다 — 마이그레이션은 건드리지 않고 진행합니다."</b> 지난번에 났던 사고가 반복되지 않는다. (아하 3: 내 싸인이 데이터가 됐다)</p></div>
+    <div class="row"><div class="d">가정</div><p>이때 경쟁 도구 X가 나타나서 "우리도 스킬 있어요, 더 예뻐요"라고 한다. 지수가 옮기면? X의 advisor는 지수의 reject 이력을 모른다. <b>3주차의 에이전트가 1주차 수준으로 돌아간다.</b> 지수가 X로 옮기지 않는 이유는 스킬의 품질이 아니라, 옮기는 순간 잃는 학습이다.</p></div>
+  </div>
+  <p>이것이 "스위칭 코스트 ∝ 사용량"의 뜻입니다. 티켓 4개일 때 떠나는 비용과 400개일 때 떠나는 비용이 다르고, 그 차이를 만드는 건 스킬 파일이 아니라 원장입니다.</p>
+  <p>이 중력을 세 겹이 함께 만듭니다:</p>
+  <div class="rings">
+    <div class="ring r1">
+      <div class="rh"><h4>1겹 · 습관 — Skill + Command</h4><span class="rw">Phase 1 · 지금</span></div>
+      <p>루프를 <b>기본 동작</b>으로 만든다. 에이전트가 알아서 보고하므로 사용자는 노력 0으로 데이터를 쌓는다. 이 겹만으로는 락인이 아니다 — 깔때기다.</p>
+    </div>
+    <div class="arrow">↓ 원장이 쌓인다</div>
+    <div class="ring r2">
+      <div class="rh"><h4>2겹 · 데이터 중력 — 원장 + Advisor 되먹임</h4><span class="rw">자동 축적 · 진짜 해자</span></div>
+      <p>티켓 ~5개부터 advisor가 과거 reject 이력을 인용하기 시작. <b>떠나면 이 학습이 리셋</b>되므로 스위칭 코스트가 사용량에 비례해 커진다.</p>
+    </div>
+    <div class="arrow">↓ 개인 습관이 조직 표준이 된다</div>
+    <div class="ring r3">
+      <div class="rh"><h4>3겹 · 경계 점유 — Hook</h4><span class="rw">Phase 3 · H-도장 확증 후</span></div>
+      <p>불가역 경계(push/merge)의 관문을 점유. 조직 정책이 되면 <b>팀 전체가 통과해야 하는 표준</b>이 된다 — 지불(정책·감사·SSO)이 발생하는 겹.</p>
+    </div>
+  </div>
+  <div class="punch">1겹이 채우고, 2겹이 붙잡고, 3겹이 조직에 못 박는다. <mark>순서를 건너뛸 수 없다</mark> — 원장이 비어 있으면 2겹이 없고, 2겹 없이 3겹(강제)부터 하면 세리머니 반발만 산다.</div>
+
+  <h2>3. Detail — 페르소나별 진입, 계측, 그리고 정직한 한계</h2>
+
+  <h3>3-1. 페르소나별 진입 경로 (커맨드 스펙에 반영됨)</h3>
+  <p>중력은 일단 루프에 들어와야 작동합니다. 진입 마찰이 페르소나마다 다르므로 <code>/sprintable:work</code>는 인자 3형태를 받습니다.</p>
+  <div class="tablewrap"><table>
+    <tr><th>페르소나</th><th>진입 설계</th><th>락인 포인트</th></tr>
+    <tr><td><b>Linear 사용자</b></td><td>"떠나라" 금지, "얹어라". <code>/sprintable:work &lt;Linear URL&gt;</code> → 스토리 자동 미러, 게이트 판정은 Linear 코멘트로 회신 (배선은 Phase 2)</td><td>Linear에 없는 기록 카테고리 — Linear는 <b>할 일</b>의 기록, 우리는 <b>수용</b>의 기록. 마이그레이션을 요구하지 않으니 진입 마찰 최소, 그런데 수용 기록은 우리 쪽에만 쌓임</td></tr>
+    <tr><td><b>일반 사용자</b> (PM 도구 없음)</td><td><code>/sprintable:work "결제 웹훅 재시도"</code> — 자유 텍스트면 스토리+AC 초안 자동 생성 후 루프 시작</td><td>티켓 시스템이 없던 사람에게 Sprintable이 사실상 첫 PM 도구가 됨. 터미널 밖으로 안 나가므로 TTHW&lt;5분 유지</td></tr>
+    <tr><td><b>팀/조직</b> (지불자)</td><td>개인 습관의 조직 승격 — 게이트 정책·감사·SSO (Phase 3+)</td><td>vibe-kanban 교훈: 솔로 락인은 과금 0. <b>결제는 조직 통제 레이어에서만</b> 발생</td></tr>
+  </table></div>
+
+  <h3>3-2. 교차-벤더 중립의 역설</h3>
+  <p>"Claude Code에서 Codex로 갈아타도 판정 이력은 그대로"는 표면적으로 락인의 반대말처럼 들립니다. 실제로는 락인의 이동입니다 — <b>하니스(벤더)에 대한 락인을 풀어주는 대가로, 이력의 보관처(우리)에 대한 락인을 얻습니다.</b> 벤더 락인 해방은 개발자에게 팔리는 메시지이므로, 우리 락인은 마케팅 자산이기도 합니다.</p>
+
+  <h3>3-3. 락인 계측 — 사전 등록 3개</h3>
+  <p><b>① 아하 3 도달률</b>: advisor 컨텍스트에 자기 reject 이력이 인용되기 시작한 사용자 비율(티켓 5개 이상 기준). 2겹 작동의 직접 증거. <b>② 자동/수동 비율</b>: 스킬 자동 실행 vs 커맨드 수동 호출 — 자동 비율 상승이 습관화(1겹)의 프록시. <b>③ Linear 클릭백</b>: Linear 회신 코멘트에서 Sprintable 게이트로의 방문 전환율 — Linear 사용자 침투의 프록시.</p>
+
+  <h3>3-4. 정직한 한계 두 가지</h3>
+  <div class="honest">
+    <b>① 스킬은 복제된다.</b> 커맨드 이름, SKILL.md 구조, 훅 아이디어 — 경쟁사가 하루면 따라 만든다. 스킬 품질로 경쟁하면 지는 게임이고, 원장을 먼저·많이 채우는 게임을 해야 한다. 그래서 launch 시점이 중요하다 — 중력은 시간 × 사용량의 함수다.<br><br>
+    <b>② 2겹은 아직 가설이다.</b> "reject 이력 되먹임이 실제로 재작업 품질을 높인다"는 우리가 믿는 것이지 증명된 것이 아니다. 도그푸드와 첫 코호트에서 아하 3 도달률로 확인해야 하고, 만약 인용이 체감 가치를 못 만들면 2겹 설계(무엇을 몇 개 되먹임할지)를 다시 다듬어야 한다.
+  </div>
+
+  <h2>4. Quiz — 이해 확인</h2>
+  <p>다음으로 넘어가기 전 속도 조절기입니다. 선택지를 눌러 확인하세요.</p>
+  <div class="quiz">
+    <div class="q">
+      <p class="qt">경쟁사가 우리 스킬·커맨드를 그대로 복제해서 출시했다. 우리 락인에 가장 큰 위협이 되는 경우는?</p>
+      <div class="opts">
+        <button class="opt" data-c="0">복제 스킬의 UX가 우리보다 편리한 경우</button>
+        <button class="opt" data-c="1">사용자의 판정 이력이 아직 몇 건 쌓이지 않은 초기에 복제된 경우</button>
+        <button class="opt" data-c="0">복제 스킬이 무료로 배포되는 경우</button>
+      </div>
+      <div class="expl"><b>이력이 얇을 때가 유일하게 위험한 순간입니다.</b> 스킬 UX나 가격은 1겹(습관)의 경쟁일 뿐이고, 원장이 쌓인 사용자에게는 옮기는 순간 잃는 학습이 스위칭 비용입니다. 그래서 위협은 "더 좋은 복제품"이 아니라 "우리 원장이 비어 있는 시기"입니다.</div>
+    </div>
+    <div class="q">
+      <p class="qt">Linear 사용자 전략이 "Linear에서 이사 오세요"가 아닌 이유는?</p>
+      <div class="opts">
+        <button class="opt" data-c="0">Linear와의 제휴 관계를 지키기 위해서</button>
+        <button class="opt" data-c="0">Linear가 기능이 더 많아 정면 승부가 불가능해서</button>
+        <button class="opt" data-c="1">마이그레이션은 진입 마찰만 키우고, 우리가 쌓는 기록(수용)은 Linear와 겹치지 않아서</button>
+      </div>
+      <div class="expl"><b>기록 카테고리가 다릅니다.</b> Linear는 "무엇을 할지"의 기록이고 우리는 "무엇을 근거로 누가 받아들였는지"의 기록입니다. 겹치지 않으니 뺏을 필요 없이 얹으면 되고, 얹는 쪽이 진입 마찰이 압도적으로 낮습니다. 수용 기록은 어차피 우리 쪽에만 쌓입니다.</div>
+    </div>
+    <div class="q">
+      <p class="qt">3겹(Hook 강제)을 지금 만들지 않는 이유로 옳은 것은?</p>
+      <div class="opts">
+        <button class="opt" data-c="1">확인 욕구가 불가역 경계에 수렴하는지 미확증인데 강제부터 하면 세리머니 반발을 사기 때문</button>
+        <button class="opt" data-c="0">훅 구현이 기술적으로 어려워 시간이 오래 걸리기 때문</button>
+        <button class="opt" data-c="0">훅은 유료 기능이라 무료 사용자에게 먼저 줄 수 없기 때문</button>
+      </div>
+      <div class="expl"><b>순서의 문제입니다.</b> 구현은 쉽습니다(PreToolUse 훅 하나). 하지만 2겹(가치 체감) 없이 3겹(강제)부터 넣으면 "게이트 = 잔소리"가 되고, H-도장 가설(확인은 불가역 경계에서만 원한다, 7/31 측정)이 확증돼야 강제의 위치가 정당화됩니다.</div>
+    </div>
+    <div class="q">
+      <p class="qt">"교차-벤더 중립(CC↔Codex 갈아타기 자유)"과 락인의 관계는?</p>
+      <div class="opts">
+        <button class="opt" data-c="0">락인과 반대되는 가치라서 마케팅에서는 숨겨야 한다</button>
+        <button class="opt" data-c="1">벤더 락인을 풀어주는 대가로 이력 보관처(우리)에 대한 락인을 얻는 구조다</button>
+        <button class="opt" data-c="0">중립을 지키려면 우리 락인도 포기해야 한다</button>
+      </div>
+      <div class="expl"><b>락인의 이동입니다.</b> 하니스를 갈아타도 판정 이력은 우리에게 남으므로, 사용자가 얻는 자유(벤더 선택)와 우리가 얻는 중력(이력 보관)이 동시에 성립합니다. 개발자에게 팔리는 메시지이므로 숨길 게 아니라 전면에 내세울 자산입니다.</div>
+    </div>
+  </div>
+
+  <div class="foot">플랜 원문: docs/analysis/advisor-invocation-plan-2026-07-19.md (락인 설계 §) · 호출 모델 리포트: advisor-invocation-report-2026-07-19.html · 근거: vibe-kanban 사인 분석(2026-07-10), H-도장·H-영수증(problem-hypothesis-sharpening-2026-07-17.md)</div>
+</div>
+
+<script>
+document.querySelectorAll('.q').forEach(function(q){
+  q.querySelectorAll('.opt').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if(q.classList.contains('answered')) return;
+      q.classList.add('answered');
+      q.querySelectorAll('.opt').forEach(function(b){
+        if(b.dataset.c === '1') b.classList.add('correct');
+      });
+      if(btn.dataset.c !== '1') btn.classList.add('wrong');
+    });
+  });
+});
+</script>
