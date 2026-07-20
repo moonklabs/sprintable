@@ -35,8 +35,27 @@ def test_application_name_truncated_to_postgres_namedatalen(monkeypatch):
     # truncate로 인한 서로 다른 리비전의 우연한 충돌(뒤 63자 초과분 소실)을 명시적으로 통제한다.
     monkeypatch.setenv("K_SERVICE", "sprintable-backend-dev")
     monkeypatch.setenv("K_REVISION", "x" * 80)
-    name = db_application_name("listen")
+    name = db_application_name()
     assert len(name) == 63
+
+
+def test_application_name_truncation_preserves_listen_suffix(monkeypatch):
+    """오르테가군 적발(2026-07-20): 꼬리부터 자르면 리비전이 길 때 `:listen`이 잘려나가
+    pooled와 raw LISTEN이 pg_stat_activity에서 구분 불가해진다 — AC2 목적 자체가 무효화되는
+    회귀. 리비전이 짧아도 길어도 판별자는 항상 보존돼야 한다."""
+    monkeypatch.setenv("K_SERVICE", "sprintable-backend-prod")
+    monkeypatch.setenv("K_REVISION", "sprintable-backend-prod-00227-abc")  # 실측 예시(57자 base)
+    name = db_application_name("listen")
+    assert name.endswith(":listen")
+    assert len(name) <= 63
+
+
+def test_application_name_truncation_preserves_listen_suffix_extreme(monkeypatch):
+    monkeypatch.setenv("K_SERVICE", "sprintable-backend-dev")
+    monkeypatch.setenv("K_REVISION", "x" * 80)
+    name = db_application_name("listen")
+    assert name.endswith(":listen")
+    assert len(name) <= 63
 
 
 def test_engine_connect_args_carries_application_name(monkeypatch):

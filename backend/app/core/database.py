@@ -13,13 +13,17 @@ def db_application_name(suffix: str = "") -> str:
 
     Cloud Run이 K_SERVICE/K_REVISION을 자동 주입한다(설정 불필요) — 로컬/테스트는 fallback.
     Postgres application_name은 NAMEDATALEN=64(63자 초과 시 silent truncate)라 63자로 자른다.
+    ⚠️ 오르테가군 적발: 꼬리부터 자르면 판별자(`:listen`)가 긴 리비전에 먹혀 pooled와 raw
+    LISTEN이 구분 불가해진다(AC2의 목적 자체가 무효화) — suffix를 먼저 확보하고 `K_SERVICE:
+    K_REVISION` 쪽만 줄인다.
     """
     service = os.environ.get("K_SERVICE", "local")
     revision = os.environ.get("K_REVISION", "dev")
-    name = f"{service}:{revision}"
-    if suffix:
-        name = f"{name}:{suffix}"
-    return name[:63]
+    base = f"{service}:{revision}"
+    if not suffix:
+        return base[:63]
+    tail = f":{suffix}"
+    return base[: 63 - len(tail)] + tail
 
 # S20/E-INFRA S2 + ee7794eb: DB 풀 **rollout-safe** right-size — SSE는 대기 구간 커넥션 미점유(개별 세션).
 # ⚠️ 인스턴스당 실 커넥션 = (pool_size+max_overflow) + **pool 밖 raw 연결**(pg_pubsub.listen_loop 상시 1·

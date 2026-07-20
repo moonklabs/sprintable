@@ -31,9 +31,11 @@ rollout_worst_case(env) = 2 × maxScale(env) × per_instance
 | backend rollout worst-case = `2×maxScale×5` | 80 | 50 |
 | worst-case가 `max_connections`에서 차지하는 비율 | 40% | 25% |
 
-dev/prod는 별도 Cloud SQL 인스턴스로 확인된 바 있다([[feedback_shared_dev_prod_db]] 메모) — 이 표는
-그 전제로 작성했다. `.github/workflows/cloud-build.yml`의 dev 블록 주석이 "dev/prod 공유 DB라면
-합산 점검 필요"라고 남겨둔 캐비어트는 위 전제로 해소되나, gcloud로 직접 재확인은 못 했다.
+dev/prod는 별도 Cloud SQL 인스턴스다 — 오르테가군 PO가 2026-07-20 gcloud로 직접 재확인(`sprintable-dev`
+db-g1-small / `sprintable-prod` db-custom-2-8192, 별개 인스턴스 2개)했고, Cloud Monitoring `num_backends`도
+`database_id`별 독립 시계열로 잡힌다(dev 피크 97 / prod 최대 17 — 같은 DB라면 같은 수치가 나왔을 것).
+`.github/workflows/cloud-build.yml`의 dev 블록 주석이 "dev/prod 공유 DB라면 합산 점검 필요"라고 남겨둔
+캐비어트는 이걸로 해소됐다.
 
 **prod는 오늘 처음 실측됐다** — 저장소 주석(`cloudbuild.yaml:18`, `.github/workflows/cloud-build.yml:53`)은
 `max_connections=100` 가정으로 산식이 쓰여 있어 지금 낡았다(AC4에서 갱신 대상).
