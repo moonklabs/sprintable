@@ -107,6 +107,46 @@ def test_decide_pr_fail_not_auto():
     assert _d(pr="fail")[0] == ASK_HUMAN
 
 
+# ── story #1388: fallback reason 정확도(pr==fail인데 lower_bound 사유로 오분류 금지) ──────
+
+def test_decide_pr_fail_reason_names_pr_not_lower_bound():
+    # 정확 재현 시나리오: pr=="fail"이지만 outcome lower_bound는 임계 이상(정상) — reason이
+    # lower_bound 미달을 주장하면 안 되고, PR 실패를 실제 사유로 명시해야 한다.
+    dec, reason = _d(pr="fail", outcome=_OC_STRONG)  # _OC_STRONG lower_bound ≈0.83>=0.8
+    assert dec == ASK_HUMAN
+    assert "lower_bound" not in reason  # LB는 실제로 멀쩡 — 오분류 금지.
+    assert "PR" in reason and "fail" in reason  # 실제 사유(PR fail)가 명시돼야.
+
+
+def test_decide_lower_bound_below_threshold_reason_cites_lower_bound():
+    # 회귀 가드: pr/ci/gate_status 전부 정상이나 lower_bound만 미달 → reason은 여전히
+    # lower_bound를 정확히 지목해야(이전부터 맞았던 케이스 — 변경으로 깨지면 안 됨).
+    dec, reason = _d(outcome=_oc(8, 10))  # LB≈0.49<0.8
+    assert dec == ASK_HUMAN
+    assert "lower_bound" in reason
+    assert "PR" not in reason  # PR은 정상이므로 사유에 섞이면 안 됨.
+
+
+def test_decide_multiple_unmet_conditions_names_all():
+    # pr fail AND lower_bound 미달이 동시 발생 → 둘 다 사유에 명시(단일 사유로 뭉개기 금지).
+    dec, reason = _d(pr="fail", outcome=_oc(8, 10))
+    assert dec == ASK_HUMAN
+    assert "PR" in reason and "fail" in reason
+    assert "lower_bound" in reason
+
+
+def test_decide_reason_accuracy_does_not_change_decision():
+    # decision(ASK_HUMAN)은 reason 정확도 수정과 무관하게 그대로여야 — 이 스토리는 진단
+    # 메시지 품질 수정이지 decision 로직 변경이 아님.
+    for kwargs in (
+        {"pr": "fail", "outcome": _OC_STRONG},
+        {"outcome": _oc(8, 10)},
+        {"pr": "fail", "outcome": _oc(8, 10)},
+    ):
+        dec, _ = _d(**kwargs)
+        assert dec == ASK_HUMAN
+
+
 # ── helper ─────────────────────────────────────────────────────────────────────
 
 def test_normalize_result():
@@ -136,7 +176,8 @@ def test_wilson_lower_bound_sample_aware():
 
 # ── evaluate_merge_gate 오케스트레이션 (Cage 합성·AC⑥) ──────────────────────────
 
-def _patch_cage(*, gate_status="auto_passed", trust_scores=None, capture=None, participation=True):
+def _patch_cage(*, gate_status="auto_passed", trust_scores=None, capture=None, participation=True,
+                 project_id=None):
     part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4()) if participation else None
     gate = SimpleNamespace(id=uuid.uuid4(), status=gate_status)
     ctx = [
@@ -148,6 +189,10 @@ def _patch_cage(*, gate_status="auto_passed", trust_scores=None, capture=None, p
                      AsyncMock(return_value=trust_scores or {"scores": [{
                          "role_key": "implementation", "clean_pass_rate": 0.9,
                          "hit": 90, "resolved": 100, "pending": 0, "hit_rate": 0.9}]})),
+        # story #1968: evaluate_merge_gate이 story_id만 갖고 있어(Story 객체 미로드)
+        # resolve_work_item_project_id()로 project_id를 신규 조회 — 실 DB 없는 단위테스트라 mock.
+        patch.object(mod, "resolve_work_item_project_id",
+                     AsyncMock(return_value=project_id if project_id is not None else uuid.uuid4())),
         patch.object(mod, "create_gate", AsyncMock(return_value=gate)),
     ]
     return ctx, gate
@@ -252,6 +297,7 @@ async def test_trust_computed_before_capture_records():
          patch.object(mod, "_role_key", AsyncMock(return_value="implementation")), \
          patch.object(mod, "compute_member_trust_scores", side_effect=_trust), \
          patch.object(mod, "capture_pr_ci_verdict", side_effect=_capture), \
+         patch.object(mod, "resolve_work_item_project_id", AsyncMock(return_value=uuid.uuid4())), \
          patch.object(mod, "create_gate", AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4(), status="auto_passed"))):
         await evaluate_merge_gate(AsyncMock(), uuid.uuid4(), uuid.uuid4(), pr_number=1, repo="o/r", ci_result="pass")
 

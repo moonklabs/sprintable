@@ -23,6 +23,10 @@ class ListHypothesesInput(SprintableInput):
     status: HypothesisStatus | None = None
     owner_member_id: str | None = None
     limit: int | None = None
+    # story fca4723d(C1): True면 project_id를 안 실어 org 전체(모든 접근 가능 project) 조회
+    # (REST가 project_id 생략 시 org-wide+접근권 후필터를 지원 — app/routers/hypotheses.py).
+    # 기본 False = 기존 동작(client 기본/현재 project로 스코프) 무회귀.
+    all_projects: bool = False
 
 
 class GetHypothesisInput(SprintableInput):
@@ -66,6 +70,8 @@ def _compact(h: dict) -> dict:
     md = h.get("metric_definition") or {}
     return {
         "id": h.get("id"),
+        # story fca4723d(C1): all_projects=true(org-wide) 조회 시 어느 project 소속인지 식별 필요.
+        "project_id": h.get("project_id"),
         "status": h.get("status"),
         "statement": h.get("statement"),
         "metric": md.get("metric"),
@@ -78,9 +84,10 @@ def _compact(h: dict) -> dict:
 
 
 async def list_hypotheses(args: ListHypothesesInput) -> list[TextContent]:
-    """가설 목록(compact). epic_id/story_id/status/owner_member_id/limit 필터."""
+    """가설 목록(compact). epic_id/story_id/status/owner_member_id/limit 필터.
+    all_projects=true면 org 전체(접근 가능한 모든 project) 조회."""
     try:
-        params: dict = {"project_id": client.require_project_id()}
+        params: dict = {} if args.all_projects else {"project_id": client.require_project_id()}
         if args.epic_id:
             params["epic_id"] = args.epic_id
         if args.story_id:

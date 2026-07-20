@@ -1,6 +1,7 @@
 'use client';
 
 import { startTransition, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useTranslations } from 'next-intl';
 import { ArrowRight, Check, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { initials } from '@/lib/storage/format';
@@ -29,7 +30,8 @@ export interface ProofCapsuleEvidence {
 }
 
 export interface ProofCapsuleGate {
-  /** full 밀도(Human gate)만 사용 — Attention Queue의 row 밀도는 위험도 표시가 없어 생략 가능. */
+  /** full 밀도(Human gate)만 사용 — Attention Queue의 row 밀도는 위험도 표시가 없어 생략 가능.
+   * 값 자체는 canonical(비-i18n) 식별자 — 표시 시점에 `proofCapsule.risk.*` 로 번역(§RISK_KEY). */
   risk?: '낮음' | '보통' | '높음';
   action: string;
   href?: string;
@@ -145,7 +147,13 @@ export function ProofAvatar({ label, isAgent, size = 19 }: { label: string; isAg
   );
 }
 
+/** canonical(비-i18n) risk 식별자 → `proofCapsule.risk.*` 번역키. */
+const RISK_KEY: Record<NonNullable<ProofCapsuleGate['risk']>, 'low' | 'medium' | 'high'> = {
+  '낮음': 'low', '보통': 'medium', '높음': 'high',
+};
+
 function EvidenceRow({ evidence, sweep }: { evidence: ProofCapsuleEvidence; sweep: boolean }) {
+  const t = useTranslations('proofCapsule');
   return (
     <div className="relative mt-3.5 border-t border-proof-line-soft pt-3">
       {sweep ? (
@@ -155,23 +163,23 @@ function EvidenceRow({ evidence, sweep }: { evidence: ProofCapsuleEvidence; swee
         />
       ) : null}
       <div className="mb-2 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-faint">
-        Evidence · 요구 대조
+        {t('evidence.label')}
       </div>
       <div className="flex flex-wrap items-center gap-3.5 text-[13px] leading-[1.45] text-proof-ink-2">
         {evidence.acMet != null && evidence.acTotal != null ? (
           <span className="inline-flex items-center gap-1">
             <Check className="motion-safe:animate-proof-check-in size-3.5 text-proof-green" strokeWidth={3} aria-hidden="true" />
-            AC {evidence.acMet}/{evidence.acTotal} 충족
+            {t('evidence.acMet', { met: evidence.acMet, total: evidence.acTotal })}
           </span>
         ) : null}
         {evidence.autoVerify === 'passed' ? (
           <span className="inline-flex items-center gap-1">
             <Check className="motion-safe:animate-proof-check-in size-3.5 text-proof-green" strokeWidth={3} aria-hidden="true" />
-            자동검증 passed
+            {t('evidence.autoPassed')}
           </span>
         ) : null}
         {evidence.autoVerify === 'failed' ? (
-          <span className="text-proof-red">자동검증 failed</span>
+          <span className="text-proof-red">{t('evidence.autoFailed')}</span>
         ) : null}
         {evidence.diff ? (
           <span className="font-mono text-[11px] text-proof-ink-3">diff +{evidence.diff.add} / −{evidence.diff.del}</span>
@@ -180,7 +188,7 @@ function EvidenceRow({ evidence, sweep }: { evidence: ProofCapsuleEvidence; swee
       {evidence.proofCount != null ? (
         <div className="mt-2 inline-flex items-center gap-1 text-[11px] text-proof-ink-3">
           <ChevronDown className="size-3" aria-hidden="true" />
-          증거 {evidence.proofCount}건
+          {t('evidence.count', { count: evidence.proofCount })}
         </div>
       ) : null}
     </div>
@@ -188,14 +196,17 @@ function EvidenceRow({ evidence, sweep }: { evidence: ProofCapsuleEvidence; swee
 }
 
 function GateRow({ gate, human }: { gate: ProofCapsuleGate; human: ProofCapsuleHuman }) {
+  const t = useTranslations('proofCapsule');
   return (
     <div className="mt-3.5 border-t border-proof-line-soft pt-3">
       <div className="mb-2 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-faint">
-        Human gate · 인간 = 책임 주체
+        {t('gate.label')}
       </div>
       <div className="flex flex-wrap items-center gap-3.5 text-[13px] text-proof-ink-2">
-        <span>책임 <b className="text-proof-ink">{human.name}</b></span>
-        {gate.risk ? <span className="font-mono text-[10.5px]">위험도 {gate.risk}</span> : null}
+        <span>{t.rich('gate.owner', { name: human.name, b: (chunks) => <b className="text-proof-ink">{chunks}</b> })}</span>
+        {gate.risk ? (
+          <span className="font-mono text-[10.5px]">{t('gate.risk', { risk: t(`risk.${RISK_KEY[gate.risk]}`) })}</span>
+        ) : null}
         <a
           href={gate.href}
           className="ml-auto inline-flex items-center gap-1 rounded-[6px] border border-proof-blue bg-proof-blue-soft px-3 py-1 text-[11.5px] font-semibold text-proof-blue transition-colors duration-[140ms] hover:bg-proof-blue hover:text-white"
@@ -227,27 +238,34 @@ function useEvidenceSweep(evidence: ProofCapsuleEvidence | undefined) {
 function FullVariant({
   proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, className,
 }: Omit<ProofCapsuleProps, 'density'>) {
+  const t = useTranslations('proofCapsule');
   const sweep = useEvidenceSweep(evidence);
   return (
     <CutCornerShell state={proofState} cut={24} className={className}>
       <div className="min-w-0 flex-1 px-4.5 py-4">
         <StateHeader state={proofState} label={stateLabel} />
         <div className="mb-1 mt-3 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-faint">
-          Claim · 에이전트 완료 주장
+          {t('claim.label')}
         </div>
         <div className="text-[19px] font-bold leading-[1.25] tracking-[-0.012em] text-proof-ink">{claim}</div>
         <div className="mt-2.5 flex flex-wrap items-center gap-3 text-[11px] text-proof-ink-3">
           {human ? (
-            <span className="inline-flex items-center gap-1.5"><ProofAvatar label={initials(human.name)} />책임 {human.name}</span>
+            <span className="inline-flex items-center gap-1.5">
+              <ProofAvatar label={initials(human.name)} />
+              {t.rich('gate.owner', { name: human.name, b: (chunks) => <>{chunks}</> })}
+            </span>
           ) : null}
           {agent ? (
-            <span className="inline-flex items-center gap-1.5"><ProofAvatar label={agent.initial} isAgent />실행 {agent.name}</span>
+            <span className="inline-flex items-center gap-1.5">
+              <ProofAvatar label={agent.initial} isAgent />
+              {t('claim.executor', { name: agent.name })}
+            </span>
           ) : null}
-          {now ? <span className="text-proof-ink-2">지금: <b>{now}</b></span> : null}
+          {now ? <span className="text-proof-ink-2">{t.rich('claim.now', { now, b: (chunks) => <b>{chunks}</b> })}</span> : null}
           {proofState === 'blue' ? (
             <span className="inline-flex items-center gap-1.5 text-[10px] text-proof-ink-3">
               <span className="motion-safe:animate-proof-pulse size-1.5 rounded-full bg-proof-citron" aria-hidden="true" />
-              실행 중
+              {t('claim.running')}
             </span>
           ) : null}
         </div>

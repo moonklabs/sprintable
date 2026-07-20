@@ -16,7 +16,9 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("rewards", ("reward", "wallet", "leaderboard")),
     ("analytics", ("velocity", "health", "dashboard", "overview", "stats",
                    "sprint_summary", "recent_activity", "agent_stats", "blocked_stories",
-                   "unassigned_stories", "member_workload", "overdue", "epic_progress")),
+                   "unassigned_stories", "member_workload", "overdue", "epic_progress",
+                   # 계층 리네이밍 B1(story 1925): sprintable_get_goal_progress(신)도 이 그룹.
+                   "goal_progress")),
     ("agent_runs", ("agent_run", "run_status", "update_run")),
     ("audit", ("audit",)),
     ("webhooks", ("webhook",)),
@@ -28,7 +30,10 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("chat", ("chat", "message", "conversation")),
     ("sprints", ("sprint",)),
     ("hypotheses", ("hypothes",)),
-    ("epics", ("epic",)),
+    # 계층 리네이밍 B1(story 1925): "goal" 추가 — sprintable_add_goal 등 신 이름도 이 그룹으로
+    # 분류(구 이름 sprintable_add_epic과 동일 group, role_template.default_tool_groups의 "epics"
+    # literal은 유지 — 데이터 마이그 불요, 스탠드업 core-promotion 때와 동일 관례).
+    ("epics", ("epic", "goal")),
     ("tasks", ("task",)),
     ("stories", ("story", "stories", "backlog", "claim", "checkin")),
     # story b4027b2e: E-CANVAS visual_artifacts가 임계(11개 도구·전용 REST 도메인)에 도달해
@@ -220,6 +225,10 @@ _PATH_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
     ("/api/v2/sprints", "sprints"),
     ("/api/v2/hypotheses", "hypotheses"),
     ("/api/v2/epics", "epics"),
+    # 계층 리네이밍 B1(story 1925): 신 경로(/api/v2/goals)도 동일 "epics" 그룹 — main.py가 같은
+    # router를 신/구 prefix 둘 다로 include하므로 REST scope 게이트도 짝을 맞춰야 한다(안 그러면
+    # canvas 선례 b4027b2e와 동일한 "신 경로만 게이트 누락" 불일치 재발).
+    ("/api/v2/goals", "epics"),
     ("/api/v2/docs", "docs"),
     ("/api/v2/agent-runs", "agent_runs"),
     ("/api/v2/analytics", "analytics"),
@@ -275,7 +284,8 @@ def resolve_manifest(scope: list[str] | None, all_tool_names: list[str]) -> dict
 #    도구 추가/삭제 시 여기 동기화(테스트가 그룹 커버리지·core/admin 정합 검증).
 ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_ping",
-    "sprintable_activate_sprint", "sprintable_add_epic", "sprintable_add_retro_action",
+    "sprintable_activate_sprint", "sprintable_add_epic", "sprintable_add_goal",
+    "sprintable_add_retro_action",
     "sprintable_add_retro_item", "sprintable_add_story", "sprintable_add_task",
     "sprintable_assign_story_to_sprint", "sprintable_change_retro_phase",
     "sprintable_check_notifications", "sprintable_checkin_sprint", "sprintable_claim_story",
@@ -287,14 +297,17 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     # E-SECURITY SEC-S8 확장: sprintable_delete_sprint도 동일 사유로 제거.
     "sprintable_delete_webhook_config", "sprintable_emit_event", "sprintable_export_retro",
     "sprintable_get_agent_stats", "sprintable_get_blocked_stories", "sprintable_get_doc",
-    "sprintable_get_epic_progress", "sprintable_get_leaderboard_v2", "sprintable_get_meeting",
+    "sprintable_get_epic_progress", "sprintable_get_goal_progress",
+    "sprintable_get_leaderboard_v2", "sprintable_get_meeting",
     "sprintable_get_member_workload", "sprintable_get_overdue_tasks", "sprintable_get_project_health",
     "sprintable_get_project_overview", "sprintable_get_recent_activity",
     "sprintable_get_retro_session_by_sprint", "sprintable_get_sprint_velocity_history",
     "sprintable_get_standup", "sprintable_get_task", "sprintable_get_unassigned_stories",
     "sprintable_get_velocity", "sprintable_get_wallet", "sprintable_get_workflow_guide",
     "sprintable_give_reward", "sprintable_list_audit_logs", "sprintable_list_backlog",
+    "sprintable_get_chat_message",
     "sprintable_list_chat_messages", "sprintable_list_docs", "sprintable_list_epics",
+    "sprintable_list_goals",
     "sprintable_list_meetings", "sprintable_list_my_tasks", "sprintable_list_retro_sessions",
     "sprintable_list_sprints", "sprintable_list_standup_entries", "sprintable_list_stories",
     "sprintable_list_tasks", "sprintable_list_team_members", "sprintable_list_webhook_configs",
@@ -302,9 +315,16 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_mark_notification_read", "sprintable_my_dashboard", "sprintable_poll_events",
     "sprintable_save_standup", "sprintable_search_docs", "sprintable_search_stories",
     "sprintable_send_chat_message", "sprintable_sprint_summary", "sprintable_standup_history",
-    "sprintable_standup_missing", "sprintable_trigger_ai_summary",
+    "sprintable_standup_missing",
+    # story #2010: sprintable_transition_goal — 목표 lifecycle 전이 전용 신설(구 _epic 별칭
+    # 없음). tool_group()은 "goal" substring 매칭으로 "epics" 그룹에 귀속(add_goal/update_goal/
+    # list_goals와 동일 그룹) — role_template.default_tool_groups의 "epics" literal이 그대로
+    # 커버하므로 role_template 데이터 마이그 불요.
+    "sprintable_transition_goal",
+    "sprintable_trigger_ai_summary",
     "sprintable_unassign_story_from_sprint", "sprintable_unclaim_story", "sprintable_unlock_files",
-    "sprintable_update_doc", "sprintable_update_epic", "sprintable_update_meeting",
+    "sprintable_update_doc", "sprintable_update_epic", "sprintable_update_goal",
+    "sprintable_update_meeting",
     "sprintable_update_retro_action_status", "sprintable_update_run_status",
     "sprintable_update_sprint", "sprintable_update_story", "sprintable_update_story_status",
     "sprintable_update_task", "sprintable_update_task_status", "sprintable_upsert_webhook_config",
@@ -324,6 +344,14 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
     "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
     "sprintable_delete_spec_pin",
+    # story #1922: sprintable_delete_artifact — artifact soft delete(생성자 전용) 전용 신설.
+    # #2010(sprintable_transition_goal)이 이 SSOT 목록 등록을 처음 커밋에서 빠뜨려 role-template
+    # picker 카탈로그/신규 에이전트 채용 치트시트에서 누락됐던 갭(follow-up 커밋 8126465e로 정정)을
+    # 이번엔 최초 커밋부터 함께 반영. tool_group()은 "artifact" substring 매칭으로 "canvas" 그룹
+    # 귀속(create_artifact/edit_artifact/delete_spec_pin과 동일 경로) — role_template의 "canvas"
+    # literal이 그대로 커버해 데이터 마이그 불요. is_destructive()도 "sprintable_delete" 접두로
+    # True(delete_spec_pin과 동형 — canvas 그룹 + destructive scope 둘 다 필요).
+    "sprintable_delete_artifact",
     # projects (E-MCP-OPT story ff6cb90d)
     "sprintable_list_projects", "sprintable_set_default_project",
 )

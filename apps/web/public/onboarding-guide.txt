@@ -32,10 +32,10 @@ Ask the person who runs you to do the following once and hand you the resulting 
 | Organization / project | Must already exist |
 | Operator's member JWT | Needed only to register the agent and issue its API key |
 | `curl` ≥ 7.68 or `httpie` ≥ 3.x | For the smoke test |
-| API base URL | e.g. `https://app.sprintable.ai` |
+| API base URL | Backend-direct URL — SSE(`/agent/stream`)는 CF 깔끔도메인에서 버퍼링/차단되므로 필수. Prod: `https://sprintable-backend-prod-787818285179.asia-northeast3.run.app` |
 
 ```bash
-export BASE_URL="https://app.sprintable.ai"
+export BASE_URL="https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"
 export MEMBER_TOKEN="<operator JWT>"
 export ORG_ID="<org UUID>"
 export PROJECT_ID="<project UUID>"
@@ -76,6 +76,8 @@ export AGENT_API_KEY=$(jq -r '.api_key' /tmp/apikey.json)
 
 The agent holds a long-lived outbound SSE connection to `GET /api/v2/agent/stream`.
 The server pushes new messages over it; the agent tracks order with the `recipient_seq` cursor.
+
+> Note: use the backend-direct run.app host (not app.sprintable.ai) — the CF-fronted domain buffers/blocks long-lived SSE.
 
 ```bash
 curl -N \

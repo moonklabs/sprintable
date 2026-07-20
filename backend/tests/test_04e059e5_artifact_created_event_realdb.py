@@ -127,7 +127,7 @@ async def test_create_artifact_agent_creator_gets_event_self_notified():
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"], creator_id)
         client = _client_for(app)
         try:
-            resp = await client.post("/api/v2/visual-artifacts", json={"title": "Standalone"})
+            resp = await client.post("/api/v2/visual-artifacts", json={"title": "Standalone", "nodes": [{"type": "text", "props": {}}]})
             assert resp.status_code == 201, resp.text
         finally:
             await client.aclose()
@@ -174,7 +174,7 @@ async def test_create_artifact_human_creator_gets_notification_self_notified():
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"], creator_id)
         client = _client_for(app)
         try:
-            resp = await client.post("/api/v2/visual-artifacts", json={"title": "Standalone Human"})
+            resp = await client.post("/api/v2/visual-artifacts", json={"title": "Standalone Human", "nodes": [{"type": "text", "props": {}}]})
             assert resp.status_code == 201, resp.text
         finally:
             await client.aclose()
@@ -223,7 +223,8 @@ async def test_create_artifact_linked_story_different_assignee_both_notified():
         client = _client_for(app)
         try:
             resp = await client.post(
-                "/api/v2/visual-artifacts", json={"title": "Linked", "story_id": str(story_id)},
+                "/api/v2/visual-artifacts",
+                json={"title": "Linked", "story_id": str(story_id), "nodes": [{"type": "text", "props": {}}]},
             )
             assert resp.status_code == 201, resp.text
         finally:
@@ -273,7 +274,8 @@ async def test_create_artifact_linked_story_same_assignee_dedup_single_notificat
         client = _client_for(app)
         try:
             resp = await client.post(
-                "/api/v2/visual-artifacts", json={"title": "SelfAssigned", "story_id": str(story_id)},
+                "/api/v2/visual-artifacts",
+                json={"title": "SelfAssigned", "story_id": str(story_id), "nodes": [{"type": "text", "props": {}}]},
             )
             assert resp.status_code == 201, resp.text
         finally:
@@ -320,7 +322,7 @@ async def test_edit_and_comment_events_still_fire_no_regression():
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"], creator_id)
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Edit Target"})
+            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Edit Target", "nodes": [{"type": "text", "props": {}}]})
             artifact_id = create_resp.json()["data"]["id"]
         finally:
             await client.aclose()

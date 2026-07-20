@@ -110,7 +110,10 @@ async def test_create_artifact_cross_org_story_link_blocked():
         try:
             resp = await client.post(
                 "/api/v2/visual-artifacts",
-                json={"title": "Injected", "story_id": str(seeded["story_b_id"])},
+                json={
+                    "title": "Injected", "story_id": str(seeded["story_b_id"]),
+                    "nodes": [{"type": "text", "props": {}}],
+                },
             )
             assert resp.status_code == 404, resp.text
         finally:
@@ -212,9 +215,15 @@ async def test_list_artifacts_by_story_id():
         try:
             await client.post(
                 "/api/v2/visual-artifacts",
-                json={"title": "Attached", "story_id": str(seeded["story_a_id"])},
+                json={
+                    "title": "Attached", "story_id": str(seeded["story_a_id"]),
+                    "nodes": [{"type": "text", "props": {}}],
+                },
             )
-            await client.post("/api/v2/visual-artifacts", json={"title": "Unattached"})
+            await client.post(
+                "/api/v2/visual-artifacts",
+                json={"title": "Unattached", "nodes": [{"type": "text", "props": {}}]},
+            )
 
             resp = await client.get(f"/api/v2/visual-artifacts?story_id={seeded['story_a_id']}")
             assert resp.status_code == 200
@@ -243,7 +252,10 @@ async def test_delete_artifact_creator_only():
         await _setup_app(app, Session, seeded["org_a_id"], seeded["project_a_id"], user_id=creator_id)
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Mine"})
+            create_resp = await client.post(
+                "/api/v2/visual-artifacts",
+                json={"title": "Mine", "nodes": [{"type": "text", "props": {}}]},
+            )
             artifact_id = create_resp.json()["data"]["id"]
         finally:
             await client.aclose()

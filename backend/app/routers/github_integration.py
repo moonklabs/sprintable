@@ -32,7 +32,7 @@ from app.services.github_app import (
 )
 from app.services.pr_story_link import upsert_link
 
-router = APIRouter(prefix="/api/v2/integrations/github", tags=["github-integration"])
+router = APIRouter(prefix="/api/v2/integrations/github", tags=["github-integration", "Organization"])
 
 
 @router.get("/install/start")

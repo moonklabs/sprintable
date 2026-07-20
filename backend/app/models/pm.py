@@ -44,8 +44,10 @@ class Sprint(Base, OrgScopedMixin, TimestampMixin):
     stories: Mapped[list["Story"]] = relationship("Story", back_populates="sprint", lazy="select")
 
 
-class Epic(Base, OrgScopedMixin, TimestampMixin):
-    __tablename__ = "epics"
+class Goal(Base, OrgScopedMixin, TimestampMixin):
+    """계층 리네이밍 B1(story 1925): 구 Epic. 클래스/테이블명만 rename(FK 컬럼명 epic_id는
+    B4 후속 스코프 — stories.epic_id 등은 이번 변경 밖)."""
+    __tablename__ = "goals"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(
@@ -75,8 +77,8 @@ class Epic(Base, OrgScopedMixin, TimestampMixin):
     # E-GLANCE wedge #2(story 96b19bc3) — 로드맵 조타 큐레이션. Story.position과 완전 동형
     # (null=아직 큐레이션 안 됨·자동도출 순서 유지). 0175 additive nullable.
     position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    # source_loop_id: 어떤 epic이 어느 Loop 결과에서 파생 제안됐는지 계보 인터페이스(컬럼만·
-    # 배선은 P3 후속). Loop이 epic을 자동 생성하지 않음(STEER: 휴먼이 항상 약속을 얹는다).
+    # source_loop_id: 어떤 goal(구 epic)이 어느 Loop 결과에서 파생 제안됐는지 계보 인터페이스
+    # (컬럼만·배선은 P3 후속). Loop이 goal을 자동 생성하지 않음(STEER: 휴먼이 항상 약속을 얹는다).
     source_loop_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("loop_runs.id", ondelete="SET NULL"), nullable=True
     )
@@ -107,7 +109,7 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     # 충돌 없이 공존(제약 무력화 아님 — non-null 값끼리는 여전히 프로젝트 내 유일 강제).
     story_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     epic_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("epics.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("goals.id", ondelete="SET NULL"), nullable=True
     )
     sprint_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sprints.id", ondelete="SET NULL"), nullable=True
@@ -152,7 +154,7 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         JSONB, nullable=True, server_default=text("'[]'"), default=list
     )
 
-    epic: Mapped[Epic | None] = relationship("Epic", back_populates="stories")
+    epic: Mapped[Goal | None] = relationship("Goal", back_populates="stories")
     sprint: Mapped[Sprint | None] = relationship("Sprint", back_populates="stories")
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="story", lazy="select")
 

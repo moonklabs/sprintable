@@ -94,6 +94,7 @@ async def transition_doc(
             session, org_id, doc.id, DOC_GATE_WORK_ITEM_TYPE, DOC_GATE_TYPE,
             caller.id, role_id,
             neutral_facts={"requested_by_member_id": str(caller.id), "doc_title": doc.title},
+            project_id=doc.project_id,
         )
         # ⚠️재상신 RC(산티아고): uq(work_item_id,gate_type)=1 gate·terminal(approved/rejected)=immutable →
         # create_gate 멱등이 기존 **terminal gate 를 반환**해(상태필터 없음) 재상신 시 새 pending gate 0 →

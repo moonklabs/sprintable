@@ -12,7 +12,7 @@ from app.dependencies.auth import AuthContext, enforce_body_context, get_current
 from app.dependencies.database import get_db
 from app.models.deletion_audit import DeletionAuditLog
 from app.models.event import Event
-from app.models.pm import Epic, Story, StoryActivity, StoryComment
+from app.models.pm import Goal, Story, StoryActivity, StoryComment
 from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.repositories.story_assignee import StoryAssigneeRepository
@@ -47,7 +47,7 @@ from app.services.workflow_violation import (
     check_transition,
 )
 
-router = APIRouter(prefix="/api/v2/stories", tags=["stories"])
+router = APIRouter(prefix="/api/v2/stories", tags=["stories", "Work"])
 
 
 async def _resolve_actor_info(
@@ -68,7 +68,7 @@ async def _resolve_actor_info(
 async def _resolve_epic_title(db: AsyncSession, epic_id: uuid.UUID | None) -> str | None:
     if not epic_id:
         return None
-    result = await db.execute(select(Epic).where(Epic.id == epic_id).limit(1))
+    result = await db.execute(select(Goal).where(Goal.id == epic_id).limit(1))
     epic = result.scalar_one_or_none()
     return epic.title if epic else None
 
@@ -323,7 +323,7 @@ def _enforce_mcp_attachment_declared_limit(attachments: list[dict]) -> None:
         )
 
 
-_STORY_LINK_TABLES = {"epic_id": "epics", "sprint_id": "sprints", "meeting_id": "meetings"}
+_STORY_LINK_TABLES = {"epic_id": "goals", "sprint_id": "sprints", "meeting_id": "meetings"}
 
 
 async def _assert_story_link_targets_in_project(
@@ -976,6 +976,8 @@ async def update_story(
                     body=None,
                     reference_type="story",
                     reference_id=story.id,
+                    # story #1953: story.project_id NOT NULL — 신규 조회 없이 그대로 실음.
+                    source_project_id=story.project_id,
                 )
         if actor_id:
             try:

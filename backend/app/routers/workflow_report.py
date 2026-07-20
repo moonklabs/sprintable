@@ -42,7 +42,7 @@ def _fire_webhook(url: str, content: str, title: str, memo_url: str, memo_id: st
     except Exception:  # noqa: BLE001
         logger.warning("reply webhook fire failed url=%s", url, exc_info=True)
 
-router = APIRouter(prefix="/api/v2/workflow", tags=["workflow"])
+router = APIRouter(prefix="/api/v2/workflow", tags=["workflow", "Work"])
 
 # ─── 파이프라인 정의 (하드코딩) ───────────────────────────────────────────────
 

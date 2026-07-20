@@ -22,9 +22,12 @@ import type {
   StorageViewMode,
 } from '@/lib/storage/types';
 
-export function StorageView() {
+// story a539c649 S3a/b: projectId 는 이제 page.tsx(headers() 경유 resolve 결과)가 prop 으로
+// 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 URL 이 가리키는 project.
+// projectName 은 순수 표시용(폴더 트리 헤더)이라 전역 컨텍스트 그대로 유지(artifacts와 동형).
+export function StorageView({ projectId }: { projectId: string }) {
   const t = useTranslations('storage');
-  const { projectId, projectName } = useDashboardContext();
+  const { projectName } = useDashboardContext();
 
   const [folders, setFolders] = useState<Folder[]>([]);
   const [items, setItems] = useState<Asset[]>([]);
@@ -73,6 +76,34 @@ export function StorageView() {
       cancelled = true;
     };
   }, [projectId]);
+
+  // story #1939: 루트 레벨 폴더 생성. BE는 raw FastAPI 에러 바디({detail})를 그대로 통과시키므로
+  // (POST 핸들러가 !ok 응답을 apiSuccess로 감싸지 않고 원본 그대로 반환) 그 형태로 파싱한다.
+  const handleCreateFolder = useCallback(
+    async (name: string): Promise<{ ok: true } | { ok: false; errorMessage: string }> => {
+      if (!projectId) return { ok: false, errorMessage: t('newFolderGenericError') };
+      try {
+        const res = await fetch('/api/folders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, project_id: projectId }),
+        });
+        if (!res.ok) {
+          if (res.status === 409) return { ok: false, errorMessage: t('newFolderDuplicateError') };
+          return { ok: false, errorMessage: t('newFolderGenericError') };
+        }
+        const json = (await res.json()) as { data?: Folder };
+        const created = json.data;
+        if (!created) return { ok: false, errorMessage: t('newFolderGenericError') };
+        setFolders((prev) => [...prev, created]);
+        setSelectedFolderId(created.id);
+        return { ok: true };
+      } catch {
+        return { ok: false, errorMessage: t('newFolderGenericError') };
+      }
+    },
+    [projectId, t],
+  );
 
   const buildAssetsUrl = useCallback(
     (cursor?: string | null) => {
@@ -266,6 +297,7 @@ export function StorageView() {
           projectName={projectName}
           folderSearch={folderSearch}
           onFolderSearchChange={setFolderSearch}
+          onCreateFolder={handleCreateFolder}
         />
 
         <StorageAssetList

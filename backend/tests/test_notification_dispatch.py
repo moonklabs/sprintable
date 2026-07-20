@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -46,8 +46,11 @@ def _settings_result(rows: list[tuple]) -> MagicMock:
     return result
 
 
-def _members_result(rows: list[tuple]) -> MagicMock:
-    """[(id, user_id), ...] → execute mock result."""
+def _members_result(rows: list[tuple], project_id=None) -> MagicMock:
+    """[(id, user_id), ...] → execute mock result.
+
+    project_id: story #1953 — 단일 project_id를 전 행에 부여(단일-프로젝트 unambiguous 폴백
+    추론 테스트용). 기본 None(기존 거동 무회귀 — Event INSERT 스킵)."""
     result = MagicMock()
     rows_mock = []
     for mid, uid in rows:
@@ -55,7 +58,7 @@ def _members_result(rows: list[tuple]) -> MagicMock:
         row.id = mid
         row.user_id = uid
         row.type = "human"      # human → Notification INSERT
-        row.project_id = None   # None → Event INSERT 스킵 (1번 add)
+        row.project_id = project_id
         rows_mock.append(row)
     result.all.return_value = rows_mock
     return result
@@ -352,5 +355,143 @@ async def test_dispatch_agent_no_source_falls_back_first_row(mock_session, org_i
     events = [c.args[0] for c in mock_session.add.call_args_list if isinstance(c.args[0], Event)]
     assert len(events) == 1
     assert events[0].project_id == p1  # 첫 행
+
+
+# ─── story #1953(P1a-S3): org_id/project_id 전 타입 payload enrichment ────────
+
+def _ee_on():
+    """dispatch_notification 내부의 `_settings.is_ee_enabled` 를 결정적으로 True 로."""
+    from app.core.config import settings
+    return patch.object(type(settings), "is_ee_enabled", property(lambda self: True))
+
+
+def _no_webhook_configs_result() -> MagicMock:
+    """_deliver_personal_webhooks 의 WebhookConfig 조회 — 활성 개인 webhook 0건(빈 결과)."""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    return result
+
+
+@pytest.mark.anyio
+async def test_dispatch_passes_source_project_id_to_expo_push(mock_session, org_id):
+    """source_project_id가 주어지면 그대로 Expo push project_id kwarg로 전달돼야 한다."""
+    from app.services.notification_dispatch import dispatch_notification
+
+    member_id, user_id, project_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    settings_r = _settings_result([])
+    wh_result = MagicMock()
+    wh_result.scalars.return_value.all.return_value = []
+    members = _members_result([(member_id, user_id)])
+    mock_session.execute.side_effect = [settings_r, wh_result, members, _no_webhook_configs_result()]
+
+    with _ee_on(), patch(
+        "ee.services.expo_push.deliver_expo_push", new=AsyncMock()
+    ) as mock_push:
+        await dispatch_notification(
+            mock_session, org_id=org_id, event_type="story_assigned",
+            target_member_ids=[member_id], title="담당자 지정",
+            reference_type="story", reference_id=uuid.uuid4(),
+            source_project_id=project_id,
+        )
+
+    assert mock_push.await_args.kwargs["project_id"] == project_id
+
+
+@pytest.mark.anyio
+async def test_dispatch_infers_project_id_when_members_share_single_project(
+    mock_session, org_id, monkeypatch,
+):
+    """source_project_id 미지정 + 대상 member 전원이 동일 project_id → 그 값으로 폴백(신규
+    쿼리 없이 기존 members 조회 결과 재사용)."""
+    from app.services.notification_dispatch import dispatch_notification
+
+    monkeypatch.setattr(
+        "app.services.activity_stream.extract_activities_best_effort",
+        AsyncMock(return_value=None),
+    )
+
+    member_id, user_id, project_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    settings_r = _settings_result([])
+    wh_result = MagicMock()
+    wh_result.scalars.return_value.all.return_value = []
+    members = _members_result([(member_id, user_id)], project_id=project_id)
+    mock_session.execute.side_effect = [settings_r, wh_result, members, _no_webhook_configs_result()]
+
+    with _ee_on(), patch(
+        "ee.services.expo_push.deliver_expo_push", new=AsyncMock()
+    ) as mock_push:
+        await dispatch_notification(
+            mock_session, org_id=org_id, event_type="agent_joined",
+            target_member_ids=[member_id], title="새 에이전트",
+            reference_type="team_member", reference_id=uuid.uuid4(),
+        )
+
+    assert mock_push.await_args.kwargs["project_id"] == project_id
+
+
+@pytest.mark.anyio
+async def test_dispatch_project_id_none_when_members_span_multiple_projects(
+    mock_session, org_id, monkeypatch,
+):
+    """source_project_id 미지정 + 대상 member들이 서로 다른 project_id(org-wide 브로드캐스트) →
+    모호성이 있으므로 project_id=None(오라우팅 방지, 억지 폴백 금지)."""
+    from app.services.notification_dispatch import dispatch_notification
+
+    monkeypatch.setattr(
+        "app.services.activity_stream.extract_activities_best_effort",
+        AsyncMock(return_value=None),
+    )
+
+    m1, m2 = uuid.uuid4(), uuid.uuid4()
+    u1, u2 = uuid.uuid4(), uuid.uuid4()
+    p1, p2 = uuid.uuid4(), uuid.uuid4()
+    settings_r = _settings_result([])
+    wh_result = MagicMock()
+    wh_result.scalars.return_value.all.return_value = []
+    result = MagicMock()
+    row1, row2 = MagicMock(), MagicMock()
+    row1.id, row1.user_id, row1.type, row1.project_id = m1, u1, "human", p1
+    row2.id, row2.user_id, row2.type, row2.project_id = m2, u2, "human", p2
+    result.all.return_value = [row1, row2]
+    mock_session.execute.side_effect = [settings_r, wh_result, result, _no_webhook_configs_result()]
+
+    with _ee_on(), patch(
+        "ee.services.expo_push.deliver_expo_push", new=AsyncMock()
+    ) as mock_push:
+        await dispatch_notification(
+            mock_session, org_id=org_id, event_type="agent_joined",
+            target_member_ids=[m1, m2], title="새 에이전트",
+            reference_type="team_member", reference_id=uuid.uuid4(),
+        )
+
+    assert mock_push.await_args.kwargs["project_id"] is None
+
+
+@pytest.mark.anyio
+async def test_dispatch_passes_story_id_and_sprint_id_through_to_expo_push(mock_session, org_id):
+    """task_completed의 story_id·가설 관련 dispatched의 sprint_id — 호출부가 넘긴 값이
+    그대로 deliver_expo_push에 전달돼야 한다(신규 조회 0·pass-through)."""
+    from app.services.notification_dispatch import dispatch_notification
+
+    member_id, user_id = uuid.uuid4(), uuid.uuid4()
+    story_id, sprint_id = uuid.uuid4(), uuid.uuid4()
+    settings_r = _settings_result([])
+    wh_result = MagicMock()
+    wh_result.scalars.return_value.all.return_value = []
+    members = _members_result([(member_id, user_id)])
+    mock_session.execute.side_effect = [settings_r, wh_result, members, _no_webhook_configs_result()]
+
+    with _ee_on(), patch(
+        "ee.services.expo_push.deliver_expo_push", new=AsyncMock()
+    ) as mock_push:
+        await dispatch_notification(
+            mock_session, org_id=org_id, event_type="task_completed",
+            target_member_ids=[member_id], title="작업 완료",
+            reference_type="task", reference_id=uuid.uuid4(),
+            story_id=story_id, sprint_id=sprint_id,
+        )
+
+    assert mock_push.await_args.kwargs["story_id"] == story_id
+    assert mock_push.await_args.kwargs["sprint_id"] == sprint_id
 
 

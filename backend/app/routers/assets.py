@@ -18,6 +18,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -28,11 +29,12 @@ from app.models.conversation import Conversation, ConversationMessage
 from app.models.doc import Doc
 from app.models.pm import Story
 from app.models.team import TeamMember
+from app.services.member_resolver import canonicalize_member_id, resolve_member
 from app.services.project_auth import accessible_project_ids_in_org, has_project_access
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v2", tags=["assets"])
+router = APIRouter(prefix="/api/v2", tags=["assets", "Knowledge"])
 
 _SNIPPET = 80
 
@@ -80,6 +82,31 @@ class FolderResponse(BaseModel):
     name: str
     parent_id: uuid.UUID | None
     project_id: uuid.UUID | None
+
+
+class FolderCreate(BaseModel):
+    name: str
+    project_id: uuid.UUID | None = None
+    parent_id: uuid.UUID | None = None
+
+
+_MAX_FOLDER_NAME_LEN = 255
+
+
+def _normalize_folder_name(name: str) -> str:
+    """폴더명 정규화(순수 로직·DB 무관) — 앞뒤 공백 제거, 빈 값/과도한 길이는 422.
+
+    story #1939: FE 문서 작성 화면의 "새 폴더" 입력이 그대로 전달되는 첫 관문 — 공백만 입력한
+    실수를 서버가 명확히 거부(빈 이름 폴더 생성 방지).
+    """
+    stripped = name.strip()
+    if not stripped:
+        raise HTTPException(status_code=422, detail="폴더 이름은 비워둘 수 없습니다")
+    if len(stripped) > _MAX_FOLDER_NAME_LEN:
+        raise HTTPException(
+            status_code=422, detail=f"폴더 이름은 {_MAX_FOLDER_NAME_LEN}자를 초과할 수 없습니다"
+        )
+    return stripped
 
 
 _SORT_COLS = {"date": Asset.updated_at, "name": Asset.name, "size": Asset.size_bytes}
@@ -225,6 +252,89 @@ async def list_folders(
         clauses.append(or_(AssetFolder.project_id.is_(None), AssetFolder.project_id.in_(accessible)))
     rows = (await db.execute(select(AssetFolder).where(and_(*clauses)).order_by(AssetFolder.name))).scalars().all()
     return [FolderResponse.model_validate(r) for r in rows]
+
+
+async def _assert_folder_parent_in_scope(
+    db: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID | None, parent_id: uuid.UUID | None,
+) -> None:
+    """parent_id 지정 시 신규 폴더와 동일 org+project 스코프인지 검증(_assert_doc_parent_in_project와
+    동형 — docs.py). AssetFolder.parent_id는 self-FK뿐 DB CHECK로 project 정합을 강제하지 않아,
+    검증 없이 그대로 쓰면 같은 org의 접근 불가/타 project 폴더 밑에 자식을 붙여 폴더 트리를
+    오염시킬 수 있다(cross-project IDOR — [[mutation_target_resource_project_scope]] 패턴).
+    parent 없음/soft-deleted/타 org/타 project → 404(존재 비노출)."""
+    if parent_id is None:
+        return
+    parent = (await db.execute(
+        select(AssetFolder.org_id, AssetFolder.project_id).where(
+            AssetFolder.id == parent_id, AssetFolder.deleted_at.is_(None),
+        )
+    )).first()
+    if parent is None or parent.org_id != org_id or parent.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Parent folder not found")
+
+
+@router.post("/folders", response_model=FolderResponse, status_code=201)
+async def create_folder(
+    body: FolderCreate,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> FolderResponse:
+    """POST /api/v2/folders — story #1939: 문서 작성 화면 "새 폴더" 생성(FE는 이미 GET만 프록시하고
+    있었고 POST가 아예 없었다 — 버그가 아니라 기능 갭). AssetFolder는 이미 실 DB 테이블(0139/S2)이라
+    신규 마이그레이션 불요 — 이 row를 만드는 write 경로가 없었을 뿐.
+
+    authz는 _scope_filter/list_folders와 동일 SSOT(has_project_access) — project_id 지정 시 접근권
+    검증(cross-project IDOR 차단), 미지정(org-level 폴더)은 org 멤버십만(list_folders와 대칭).
+    parent_id는 _assert_folder_parent_in_scope로 동일 org+project 스코프만 허용.
+    """
+    user_id = uuid.UUID(auth.user_id)
+    name = _normalize_folder_name(body.name)
+
+    if body.project_id is not None:
+        if not await has_project_access(db, user_id, body.project_id, org_id):
+            raise HTTPException(status_code=403, detail="No access to this project")
+
+    await _assert_folder_parent_in_scope(db, org_id, body.project_id, body.parent_id)
+
+    # uq_asset_folders_parent_name은 0198(까심 QA fix)부터 UNIQUE NULLS NOT DISTINCT — NULL도 값으로
+    # 취급해 project_id/parent_id가 NULL인 조합(root/project-only/parent-only) 포함 4개 조합 전부를
+    # DB 레벨에서 강제한다. 아래 사전조회는 UX용 1차 방어(친절한 409·불필요한 flush 회피)일 뿐이고,
+    # 실질 SSOT/동시성 레이스 방어는 이 사전조회가 아니라 아래 flush의 IntegrityError catch다(TOCTOU:
+    # 동시 요청 2건이 사전조회를 동시에 통과해도 DB UNIQUE가 최종적으로 하나만 커밋을 허용).
+    dup_clauses = [
+        AssetFolder.org_id == org_id,
+        AssetFolder.name == name,
+        AssetFolder.deleted_at.is_(None),
+        AssetFolder.project_id.is_(None) if body.project_id is None else AssetFolder.project_id == body.project_id,
+        AssetFolder.parent_id.is_(None) if body.parent_id is None else AssetFolder.parent_id == body.parent_id,
+    ]
+    existing = (await db.execute(select(AssetFolder.id).where(and_(*dup_clauses)))).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="같은 위치에 동일한 이름의 폴더가 이미 있습니다")
+
+    # attribution: body가 아닌 인증 caller에서 강제(위조 차단) — create_doc과 동형 패턴.
+    resolved = await resolve_member(auth, org_id, db)
+    created_by = await canonicalize_member_id(resolved.id, db)
+
+    folder = AssetFolder(
+        org_id=org_id,
+        project_id=body.project_id,
+        parent_id=body.parent_id,
+        name=name,
+        created_by=created_by,
+    )
+    db.add(folder)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409, detail="같은 위치에 동일한 이름의 폴더가 이미 있습니다"
+        ) from None
+    await db.commit()
+    await db.refresh(folder)
+    return FolderResponse.model_validate(folder)
 
 
 async def _enrich(

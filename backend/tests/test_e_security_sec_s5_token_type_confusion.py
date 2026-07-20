@@ -22,11 +22,23 @@ def _creds(token: str) -> HTTPAuthorizationCredentials:
     return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
 
+def _mock_db_no_migration_row() -> AsyncMock:
+    """story bea25062(2026-07-16): cutover 검사가 무조건 AuthMigration을 조회한다 — bare
+    AsyncMock()의 `.get()`은 MagicMock을 반환해(None이 아님) is_before_cutover가 엉뚱한
+    비교를 하게 만든다. 이 user_id엔 실제로 AuthMigration 행이 없는 상태를 정확히
+    대표하도록 `.get()=None`을 명시한다."""
+    mock_db = AsyncMock()
+    mock_db.get = AsyncMock(return_value=None)
+    return mock_db
+
+
 @pytest.mark.anyio
 async def test_access_token_passes_get_current_user():
     user_id = str(uuid.uuid4())
     token = create_access_token(user_id, app_metadata={"org_id": str(uuid.uuid4())})
-    ctx = await get_current_user(credentials=_creds(token), x_agent_api_key=None, x_mcp_transport=None, db=AsyncMock())
+    ctx = await get_current_user(
+        credentials=_creds(token), x_agent_api_key=None, x_mcp_transport=None, db=_mock_db_no_migration_row()
+    )
     assert ctx.user_id == user_id
 
 
@@ -41,7 +53,21 @@ async def test_refresh_token_rejected_by_get_current_user():
 
 
 @pytest.mark.anyio
-async def test_access_token_passes_get_current_user_streaming():
+async def test_access_token_passes_get_current_user_streaming(monkeypatch):
+    """story bea25062: SSE 변형은 cutover 검사를 위해 자체 단명 세션을 연다
+    (`async_session_factory()`, 모듈 top-level import라 소비 모듈 쪽을 패치) — 실 DB 없이도
+    "AuthMigration 행 없음"을 대표하는 fake session으로 검증."""
+    import app.dependencies.auth as auth_module
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return _mock_db_no_migration_row()
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(auth_module, "async_session_factory", lambda: _FakeSession())
+
     user_id = str(uuid.uuid4())
     token = create_access_token(user_id, app_metadata={"org_id": str(uuid.uuid4())})
     ctx = await get_current_user_streaming(credentials=_creds(token), x_agent_api_key=None)

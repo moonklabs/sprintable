@@ -8,7 +8,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { AgentPerformancePanel } from '@/components/agents/agent-performance-panel';
 import { AgentManagementTab } from '@/components/agents/agent-management-tab';
 import { AccessMatrixTab } from '@/components/agents/access-matrix-tab';
-import { RecruiterClient } from '@/app/(authenticated)/agents/recruiter/recruiter-client';
+import { RecruiterClient } from '@/app/(authenticated)/organization/workforce/recruiter/recruiter-client';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';

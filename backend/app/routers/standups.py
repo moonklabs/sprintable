@@ -70,7 +70,7 @@ async def _entries_with_plan_stories(
         out.append(resp)
     return out
 
-router = APIRouter(prefix="/api/v2/standups", tags=["standups"])
+router = APIRouter(prefix="/api/v2/standups", tags=["standups", "Work"])
 
 
 async def _sync_org_level_links(

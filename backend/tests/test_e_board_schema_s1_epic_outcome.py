@@ -216,7 +216,7 @@ async def test_update_epic_intent_triggers_pending_transition():
     # 업데이트 후: pending으로 전이된 에픽
     updated = _base_epic_mock(outcome_status="pending")
 
-    with patch("app.repositories.epic.EpicRepository.get", new_callable=AsyncMock) as mock_get, \
+    with patch("app.repositories.goal.GoalRepository.get", new_callable=AsyncMock) as mock_get, \
          patch("app.repositories.base.BaseRepository.update", new_callable=AsyncMock) as mock_update:
         mock_get.return_value = current
         mock_update.return_value = updated
@@ -243,7 +243,7 @@ async def test_update_epic_does_not_downgrade_from_hit():
     current = _base_epic_mock(outcome_status="hit")
     updated = _base_epic_mock(outcome_status="hit")
 
-    with patch("app.repositories.epic.EpicRepository.get", new_callable=AsyncMock) as mock_get, \
+    with patch("app.repositories.goal.GoalRepository.get", new_callable=AsyncMock) as mock_get, \
          patch("app.repositories.base.BaseRepository.update", new_callable=AsyncMock) as mock_update:
         mock_get.return_value = current
         mock_update.return_value = updated

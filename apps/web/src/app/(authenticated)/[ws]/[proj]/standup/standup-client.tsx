@@ -1,0 +1,873 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { Bot, Users } from 'lucide-react';
+import { useTranslations } from 'next-intl';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-control';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { formatSeoulDate } from '@/lib/date';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { BoardBridgeModal, type BoardBridgeStory } from '@/components/standup/board-bridge-modal';
+import { StandupBoardCard } from '@/components/standup/standup-board-card';
+import { StandupFeedbackDialog } from '@/components/standup/standup-feedback-dialog';
+import { StandupHistorySection } from '@/components/standup/standup-history-section';
+import {
+  type StandupEntrySummary,
+  type StandupFeedbackSummary,
+  type StandupMemberSummary,
+  type StandupReviewType,
+  type StandupStorySummary,
+} from '@/components/standup/standup-types';
+
+interface BridgedStory {
+  id: string;
+  title: string;
+  status: string;
+  projectName: string;
+}
+
+interface StandupSprintSummary {
+  id: string;
+  title: string;
+  status: 'planning' | 'active' | 'closed';
+  start_date: string | null;
+  end_date: string | null;
+}
+
+interface StandupEntryRow extends StandupEntrySummary {
+  sprint_id: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface StandupMemberRow extends StandupMemberSummary {
+  role?: string;
+}
+
+type StandupFeedbackRow = StandupFeedbackSummary;
+
+interface StandupStoryRow {
+  id: string;
+  title: string;
+  status: string;
+  assignee_id: string | null;
+}
+
+interface StandupTaskRow {
+  id: string;
+  title: string;
+  status: 'todo' | 'in-progress' | 'done';
+}
+
+interface StandupTaskProgress {
+  taskCount: number;
+  doneTaskCount: number;
+}
+
+async function readJsonDataOrThrow<T>(response: Response, label: string): Promise<T> {
+  if (!response.ok) {
+    throw new Error(`Failed to load ${label}`);
+  }
+
+  const json = await response.json().catch(() => null);
+  if (!json || !('data' in json)) {
+    throw new Error(`Failed to load ${label}`);
+  }
+
+  return json.data as T;
+}
+
+function buildStorySummary(
+  story: StandupStoryRow,
+  progress: StandupTaskProgress,
+  memberNameById: Record<string, string>,
+): StandupStorySummary {
+  return {
+    id: story.id,
+    title: story.title,
+    status: story.status,
+    assignee_id: story.assignee_id,
+    assignee_name: story.assignee_id ? memberNameById[story.assignee_id] ?? null : null,
+    task_count: progress.taskCount,
+    done_task_count: progress.doneTaskCount,
+  };
+}
+
+function shiftDate(dateStr: string, days: number): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const d = new Date(year, month - 1, day + days);
+  return formatSeoulDate(d);
+}
+
+interface StandupClientProps {
+  projectId: string;
+}
+
+// story a539c649 S3a: projectId 는 이제 서버 layout(headers() 경유 resolve 결과)이 prop 으로
+// 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 URL 이 가리키는 project.
+export default function StandupPage({ projectId }: StandupClientProps) {
+  const t = useTranslations('standup');
+  const { currentTeamMemberId, projectMemberships } = useDashboardContext();
+
+  const [date, setDate] = useState(() => formatSeoulDate());
+  const [entries, setEntries] = useState<StandupEntryRow[]>([]);
+  const [members, setMembers] = useState<StandupMemberRow[]>([]);
+  const [feedback, setFeedback] = useState<StandupFeedbackRow[]>([]);
+  // S3(51447ca0): Missing = org 기준(get_missing projection) — 조직 1회 미작성 멤버
+  const [missingMembers, setMissingMembers] = useState<{ id: string; name: string }[]>([]);
+  const [activeSprint, setActiveSprint] = useState<StandupSprintSummary | null>(null);
+  const [stories, setStories] = useState<StandupStorySummary[]>([]);
+  const [done, setDone] = useState('');
+  const [plan, setPlan] = useState('');
+  const [blockers, setBlockers] = useState('');
+  const [planStoryIds, setPlanStoryIds] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [storiesNextCursor, setStoriesNextCursor] = useState<string | null>(null);
+  const [loadingMoreStories, setLoadingMoreStories] = useState(false);
+  const [sprintExpanded, setSprintExpanded] = useState(false);
+  const [editingSelf, setEditingSelf] = useState(false);
+  const [feedbackDialogMemberId, setFeedbackDialogMemberId] = useState<string | null>(null);
+  // A1(9f27af8f): 보드 브릿지 — 현재 프로젝트 스코프 밖 스토리를 plan_story_ids에 연결.
+  const [bridgeModalOpen, setBridgeModalOpen] = useState(false);
+  const [bridgedStories, setBridgedStories] = useState<BridgedStory[]>([]);
+
+  const memberNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const member of members) map[member.id] = member.name;
+    return map;
+  }, [members]);
+
+  const entryByAuthorId = useMemo(() => {
+    const map: Record<string, StandupEntryRow> = {};
+    for (const entry of entries) map[entry.author_id] = entry;
+    return map;
+  }, [entries]);
+
+  const feedbackByEntryId = useMemo(() => {
+    const map: Record<string, StandupFeedbackRow[]> = {};
+    for (const item of feedback) {
+      if (!map[item.standup_entry_id]) map[item.standup_entry_id] = [];
+      map[item.standup_entry_id].push(item);
+    }
+    return map;
+  }, [feedback]);
+
+  // A2(9f27af8f): 블로커 롤업 — 기존 entries에서 파생, 신규 fetch 0.
+  const blockerEntries = useMemo(() => (
+    entries
+      .filter((entry) => Boolean(entry.blockers?.trim()))
+      .map((entry) => ({
+        authorId: entry.author_id,
+        name: memberNameById[entry.author_id] ?? t('unknown'),
+        blockers: entry.blockers as string,
+      }))
+  ), [entries, memberNameById, t]);
+
+  const humanMembers = useMemo(() => members.filter((member) => member.type === 'human'), [members]);
+  const agentMembers = useMemo(() => members.filter((member) => member.type === 'agent'), [members]);
+  const totalTasks = useMemo(() => stories.reduce((sum, story) => sum + story.task_count, 0), [stories]);
+  const doneTasks = useMemo(() => stories.reduce((sum, story) => sum + story.done_task_count, 0), [stories]);
+  const currentEntry = currentTeamMemberId ? entryByAuthorId[currentTeamMemberId] : undefined;
+  // a9e67531(PO 트림): picker 후보는 scoped stories만 — cross-board plan story를 picker 후보로 늘리는 것은
+  // selection(write) 측이라 Track E v3 브릿지 모달 영역(PO AC 後 별건). #1689는 순수 read/render fix로 한정.
+  const storyPickerStories = useMemo(() => stories.slice().sort((left, right) => {
+    const leftPriority = left.assignee_id === currentTeamMemberId ? 0 : 1;
+    const rightPriority = right.assignee_id === currentTeamMemberId ? 0 : 1;
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+    return left.title.localeCompare(right.title);
+  }), [stories, currentTeamMemberId]);
+
+  const feedbackDialogMember = useMemo(
+    () => members.find((m) => m.id === feedbackDialogMemberId) ?? null,
+    [members, feedbackDialogMemberId],
+  );
+  const feedbackDialogEntry = feedbackDialogMemberId ? entryByAuthorId[feedbackDialogMemberId] : undefined;
+  const feedbackDialogFeedback = feedbackDialogEntry ? (feedbackByEntryId[feedbackDialogEntry.id] ?? []) : [];
+
+  useEffect(() => {
+    setDone(currentEntry?.done ?? '');
+    setPlan(currentEntry?.plan ?? '');
+    setBlockers(currentEntry?.blockers ?? '');
+    setPlanStoryIds(currentEntry?.plan_story_ids ?? []);
+    // A1(9f27af8f): 이전에 연결된 타 보드 스토리(scoped stories에 없는 plan_stories)를 브릿지 칩으로 복원.
+    const scopedIds = new Set(stories.map((story) => story.id));
+    const bridged = (currentEntry?.plan_stories ?? []).filter((story) => !scopedIds.has(story.id));
+    setBridgedStories(bridged.map((story) => ({
+      id: story.id,
+      title: story.title,
+      status: story.status,
+      projectName: projectMemberships.find((m) => m.projectId === story.project_id)?.projectName ?? t('unknown'),
+    })));
+  }, [currentEntry?.id, currentEntry?.updated_at, currentEntry?.done, currentEntry?.plan, currentEntry?.blockers, currentEntry?.plan_story_ids, currentEntry?.plan_stories, stories, projectMemberships, t]);
+
+  useEffect(() => {
+    setEditingSelf(false);
+  }, [date]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      if (!cancelled) {
+        setLoading(true);
+        setLoadError(null);
+        setSaveError(null);
+      }
+
+      try {
+        // d9847ef0: org-level(항상) — standup entries(project_id 생략→org_id scoped 전체)·members(org-level).
+        // standalone org write 진입(프로젝트 미선택)에서도 작성/조회 가능.
+        const [entriesRes, membersRes] = await Promise.all([
+          fetch(`/api/standup?date=${date}`),
+          fetch(`/api/team-members`),
+        ]);
+
+        const [entriesData, membersData] = await Promise.all([
+          readJsonDataOrThrow<StandupEntryRow[]>(entriesRes, 'standup entries'),
+          readJsonDataOrThrow<StandupMemberRow[]>(membersRes, 'team members'),
+        ]);
+
+        // d9847ef0: project-scoped(projectId 있을 때만) — sprints·feedback·missing·sprint stories.
+        // missing은 get_missing_standups가 project_id REQUIRED라 project context 필수(BE 무변경).
+        let feedbackData: StandupFeedbackRow[] = [];
+        let missingList: { id: string; name: string }[] = [];
+        let sprint: StandupSprintSummary | null = null;
+        let storySummaries: StandupStorySummary[] = [];
+        let nextStoriesCursor: string | null = null;
+
+        if (projectId) {
+          const [sprintsRes, feedbackRes, missingRes] = await Promise.all([
+            fetch(`/api/sprints?project_id=${projectId}&status=active`),
+            fetch(`/api/standup/feedback?project_id=${projectId}&date=${date}`),
+            fetch(`/api/standup/missing?project_id=${projectId}&date=${date}`),
+          ]);
+
+          const [sprintsData, fbData] = await Promise.all([
+            readJsonDataOrThrow<StandupSprintSummary[]>(sprintsRes, 'sprints'),
+            readJsonDataOrThrow<StandupFeedbackRow[]>(feedbackRes, 'standup feedback'),
+          ]);
+          feedbackData = fbData;
+
+          // S3: Missing = org 기준(projection get_missing). 실패해도 본 화면은 막지 않음.
+          const missingJson = await missingRes.json().catch(() => null) as { data?: { missing?: { id: string; name: string }[] } } | null;
+          missingList = missingRes.ok ? (missingJson?.data?.missing ?? []) : [];
+
+          sprint = sprintsData.find((item) => item.status === 'active') ?? sprintsData[0] ?? null;
+
+          if (sprint) {
+          const storiesRes = await fetch(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=40`);
+          if (!storiesRes.ok) throw new Error('Failed to load sprint stories');
+          const storiesJson = await storiesRes.json().catch(() => null);
+          if (!storiesJson || !('data' in storiesJson)) throw new Error('Failed to load sprint stories');
+          const storyRows = storiesJson.data as StandupStoryRow[];
+          nextStoriesCursor = storiesJson.meta?.nextCursor ?? null;
+          const taskEntries = await Promise.all(
+            storyRows.map(async (story) => {
+              const taskRes = await fetch(`/api/tasks?story_id=${story.id}&limit=1`);
+              const taskJson = await taskRes.json().catch(() => null) as { data?: StandupTaskRow[]; meta?: { totalCount?: number; doneCount?: number } } | null;
+              if (!taskRes.ok || !taskJson || !Array.isArray(taskJson.data)) {
+                throw new Error(`Failed to load task summary for story ${story.id}`);
+              }
+              return [story.id, {
+                taskCount: taskJson.meta?.totalCount ?? taskJson.data.length,
+                doneTaskCount: taskJson.meta?.doneCount ?? taskJson.data.filter((task) => task.status === 'done').length,
+              }] as const;
+            }),
+          );
+          const taskProgressByStoryId = Object.fromEntries(taskEntries);
+          const memberLookup = membersData.reduce<Record<string, string>>((acc, member) => {
+            acc[member.id] = member.name;
+            return acc;
+          }, {});
+          storySummaries = storyRows.map((story) => buildStorySummary(story, taskProgressByStoryId[story.id] ?? { taskCount: 0, doneTaskCount: 0 }, memberLookup));
+          }
+        }
+
+        if (cancelled) return;
+
+        setEntries(entriesData);
+        // team_members 뷰는 휴먼=members⋈project_access(per-project 행)이라 org-level fetch(project_id 생략·
+        // d9847ef0)는 멀티프로젝트 멤버를 같은 id로 N행 반환한다. standup은 org-level이므로 id 기준 dedup
+        // (멤버 1회만) — 중복 카드 + React key 중복 방지. (선생님 standup 중복 렌더 버그.)
+        const uniqueMembers = Array.from(new Map(membersData.map((m) => [m.id, m])).values());
+        setMembers(uniqueMembers);
+        setFeedback(feedbackData);
+        setMissingMembers(missingList);
+        setActiveSprint(sprint);
+        setStories(storySummaries);
+        setStoriesNextCursor(nextStoriesCursor);
+        setLoadError(null);
+        setSaveError(null);
+      } catch {
+        if (!cancelled) setLoadError(t('loadFailed'));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [date, projectId, refreshToken, t]);
+
+  const humanMembersSorted = useMemo(() => {
+    if (!currentTeamMemberId) return humanMembers;
+    return [
+      ...humanMembers.filter((m) => m.id === currentTeamMemberId),
+      ...humanMembers.filter((m) => m.id !== currentTeamMemberId),
+    ];
+  }, [humanMembers, currentTeamMemberId]);
+
+  const summaryBadges = [
+    activeSprint ? { label: activeSprint.title, variant: 'chip' as const } : { label: t('noActiveSprint'), variant: 'outline' as const },
+    { label: t('sprintStoryCount', { count: stories.length }), variant: 'outline' as const },
+    { label: t('taskProgress', { done: doneTasks, total: totalTasks }), variant: 'outline' as const },
+  ];
+  const headerBadges = loadError
+    ? []
+    : loading
+      ? [{ label: t('loading'), variant: 'outline' as const }]
+      : summaryBadges;
+
+  function addBridgedStory(story: BoardBridgeStory, board: { projectId: string; projectName: string }) {
+    setPlanStoryIds((current) => (current.includes(story.id) ? current : [...current, story.id]));
+    setBridgedStories((current) => (
+      current.some((item) => item.id === story.id)
+        ? current
+        : [...current, { id: story.id, title: story.title, status: story.status, projectName: board.projectName }]
+    ));
+  }
+
+  function removeBridgedStory(storyId: string) {
+    setPlanStoryIds((current) => current.filter((id) => id !== storyId));
+    setBridgedStories((current) => current.filter((item) => item.id !== storyId));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      // S2(1c2be9db): org-level write — project_id 생략 시 BE가 author 접근 프로젝트로 auto-link.
+      // 하루 한 번 작성하면 접근한 모든 프로젝트 뷰에 projection 된다(재타이핑 제거).
+      const response = await fetch('/api/standup', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date,
+          done,
+          plan,
+          blockers,
+          sprint_id: activeSprint?.id ?? null,
+          plan_story_ids: planStoryIds,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to save standup');
+      }
+      setRefreshToken((value) => value + 1);
+      setEditingSelf(false);
+    } catch {
+      setSaveError(t('saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createFeedback(input: { standup_entry_id: string; review_type: StandupReviewType; feedback_text: string }) {
+    const response = await fetch('/api/standup/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (!response.ok) throw new Error('Failed to create feedback');
+    setRefreshToken((value) => value + 1);
+  }
+
+  async function updateFeedback(feedbackId: string, input: { review_type?: StandupReviewType; feedback_text?: string }) {
+    const response = await fetch(`/api/standup/feedback/${feedbackId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (!response.ok) throw new Error('Failed to update feedback');
+    setRefreshToken((value) => value + 1);
+  }
+
+  async function deleteFeedback(feedbackId: string) {
+    const response = await fetch(`/api/standup/feedback/${feedbackId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) throw new Error('Failed to delete feedback');
+    setRefreshToken((value) => value + 1);
+  }
+
+  // d9847ef0: projectId 전체 차단 제거 — org-level standup은 프로젝트 미선택에도 진입/작성/조회 가능.
+  // project-scoped 섹션만 {projectId && ...}로 조건부 렌더(아래).
+
+  // S4: shared date-nav — desktop renders it in the header; mobile renders it as a
+  // full-width row below the header so the wide date input never crushes the fixed-height
+  // (h-12) TopBar title (the title and the shrink-0 controls competed for one row).
+  const dateNavControls = (
+    <>
+      <Button variant="ghost" size="icon" className="shrink-0" onClick={() => setDate((d) => shiftDate(d, -1))} title={t('previousDay')}>
+        ←
+      </Button>
+      <OperatorInput
+        type="date"
+        value={date}
+        onChange={(event) => setDate(event.target.value)}
+        className="w-auto shrink-0"
+      />
+      <Button variant="ghost" size="icon" className="shrink-0" onClick={() => setDate((d) => shiftDate(d, 1))} title={t('nextDay')}>
+        →
+      </Button>
+      <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setDate(formatSeoulDate())}>
+        {t('today')}
+      </Button>
+    </>
+  );
+
+  return (
+    <>
+      <TopBarSlot
+        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        actions={
+          <div className="hidden flex-wrap items-center gap-1.5 lg:flex">{dateNavControls}</div>
+        }
+      />
+
+      {/* S4: mobile date nav as its own full-width row (keeps the header title readable). */}
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-border/80 px-4 py-2 lg:hidden">
+        {dateNavControls}
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {headerBadges.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-6 py-3">
+            {headerBadges.map((badge) => (
+              <Badge key={badge.label} variant={badge.variant}>{badge.label}</Badge>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="space-y-6 p-6">
+          {loadError ? (
+            <div className="rounded-xl border border-border bg-background p-6">
+              <EmptyState
+                title={loadError}
+                description={t('loadFailedDescription')}
+                action={<Button variant="hero" onClick={() => setRefreshToken((value) => value + 1)}>{t('retry')}</Button>}
+              />
+            </div>
+          ) : null}
+
+          {!loadError ? (
+            <>
+              {/* 스프린트 섹션 — 접을 수 있는 컴팩트 카드 (d9847ef0: project-scoped — projectId 있을 때만) */}
+              {projectId ? (
+              <div className="rounded-xl border border-border bg-background">
+                <button
+                  type="button"
+                  className="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3 text-left"
+                  onClick={() => setSprintExpanded((prev) => !prev)}
+                >
+                  <div className="space-y-0.5">
+                    <h2 className="text-sm font-semibold text-foreground">{t('currentSprint')}</h2>
+                    {activeSprint ? (
+                      <p className="text-xs text-muted-foreground">{activeSprint.title} · {t('sprintStoryCount', { count: stories.length })}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">{t('noActiveSprint')}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{t('taskProgress', { done: doneTasks, total: totalTasks })}</Badge>
+                    <span className="text-xs text-muted-foreground">{sprintExpanded ? t('collapseSprintStories') : t('expandSprintStories')}</span>
+                  </div>
+                </button>
+
+                {sprintExpanded ? (
+                  <div className="border-t border-border/60 p-4">
+                    {loading ? (
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {[1, 2, 3].map((item) => (
+                          <div key={item} className="h-28 animate-pulse rounded-xl bg-muted" />
+                        ))}
+                      </div>
+                    ) : activeSprint ? (
+                      stories.length > 0 ? (
+                        <div className="space-y-3">
+                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                            {stories.map((story) => (
+                              <div key={story.id} className="rounded-xl border border-border/70 bg-background p-4 shadow-sm">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <p className="text-sm font-medium text-foreground">{story.title}</p>
+                                  <Badge variant="outline">{story.status}</Badge>
+                                </div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                  <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
+                                  <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
+                                </div>
+                                <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                                  <div
+                                    className="h-full rounded-full bg-[linear-gradient(135deg,var(--brand),var(--brand-strong))]"
+                                    style={{ width: `${story.task_count > 0 ? Math.round((story.done_task_count / story.task_count) * 100) : 0}%` }}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {storiesNextCursor ? (
+                            <div className="text-center">
+                              <Button
+                                variant="glass"
+                                size="sm"
+                                disabled={loadingMoreStories}
+                                onClick={async () => {
+                                  if (!projectId || !activeSprint || !storiesNextCursor) return;
+                                  setLoadingMoreStories(true);
+                                  const storiesRes = await fetch(`/api/stories?project_id=${projectId}&sprint_id=${activeSprint.id}&limit=40&cursor=${encodeURIComponent(storiesNextCursor)}`);
+                                  if (!storiesRes.ok) throw new Error('Failed to load sprint stories');
+                                  const storiesJson = await storiesRes.json().catch(() => null);
+                                  if (!storiesJson || !('data' in storiesJson)) throw new Error('Failed to load sprint stories');
+                                  const storyRows = storiesJson.data as StandupStoryRow[];
+                                  const taskEntries = await Promise.all(
+                                    storyRows.map(async (story) => {
+                                      const taskRes = await fetch(`/api/tasks?story_id=${story.id}&limit=1`);
+                                      const taskJson = await taskRes.json().catch(() => null) as { data?: StandupTaskRow[]; meta?: { totalCount?: number; doneCount?: number } } | null;
+                                      if (!taskRes.ok || !taskJson || !Array.isArray(taskJson.data)) {
+                                        throw new Error(`Failed to load task summary for story ${story.id}`);
+                                      }
+                                      return [story.id, {
+                                        taskCount: taskJson.meta?.totalCount ?? taskJson.data.length,
+                                        doneTaskCount: taskJson.meta?.doneCount ?? taskJson.data.filter((task) => task.status === 'done').length,
+                                      }] as const;
+                                    }),
+                                  );
+                                  const taskProgressByStoryId = Object.fromEntries(taskEntries);
+                                  setStories((prev) => [...prev, ...storyRows.map((story) => buildStorySummary(story, taskProgressByStoryId[story.id] ?? { taskCount: 0, doneTaskCount: 0 }, memberNameById))]);
+                                  setStoriesNextCursor(storiesJson?.meta?.nextCursor ?? null);
+                                  setLoadingMoreStories(false);
+                                }}
+                              >
+                                {loadingMoreStories ? t('loading') : t('loadMore')}
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <EmptyState title={t('noSprintStories')} description={t('noSprintStoriesDescription')} />
+                      )
+                    ) : (
+                      <EmptyState title={t('noActiveSprint')} description={t('noActiveSprintDescription')} />
+                    )}
+                  </div>
+                ) : null}
+              </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border bg-background p-6">
+                  <EmptyState title={t('projectScopedHint')} />
+                </div>
+              )}
+
+              {/* S3(51447ca0): 프로젝트 뷰 = 접근-기반 projection(read-only). 작성은 org-level. */}
+              {!loading && projectId ? (
+                <Alert variant="default">
+                  <AlertDescription className="text-xs">{t('projectionBanner')}</AlertDescription>
+                </Alert>
+              ) : null}
+
+              {/* A2(9f27af8f): 블로커 롤업 — 0건이면 접힘(미렌더) */}
+              {!loading && blockerEntries.length > 0 ? (
+                <div className="rounded-xl border border-destructive-border bg-destructive-bg p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-sm font-semibold text-destructive">{t('blockersRollupTitle', { count: blockerEntries.length })}</h2>
+                  </div>
+                  <div className="mt-2 space-y-1.5">
+                    {blockerEntries.map((entry) => (
+                      <p key={entry.authorId} className="text-xs text-foreground/90">
+                        <span className="font-medium text-destructive">{entry.name}</span>
+                        <span className="text-muted-foreground"> · {entry.blockers}</span>
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* 사람 섹션 */}
+              {loading ? (
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                      <Users className="h-4 w-4" aria-hidden />
+                      {t('people')}
+                    </h2>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {[1, 2, 3].map((item) => (
+                      <div key={item} className="h-48 animate-pulse rounded-xl bg-muted" />
+                    ))}
+                  </div>
+                </section>
+              ) : humanMembers.length > 0 ? (
+                <section className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                      <Users className="h-4 w-4" aria-hidden />
+                      {t('people')}
+                    </h2>
+                    <Badge variant="chip">{t('memberCount', { count: humanMembers.length })}</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {humanMembersSorted.map((member) => {
+                      const isCurrentUser = member.id === currentTeamMemberId;
+                      const entry = entryByAuthorId[member.id];
+                      const memberFeedback = feedbackByEntryId[entry?.id ?? ''] ?? [];
+
+                      if (isCurrentUser && editingSelf) {
+                        return (
+                          <div key={member.id} className="rounded-xl border border-brand/40 bg-card p-4 shadow-sm space-y-4">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="space-y-0.5">
+                                <h3 className="text-sm font-semibold text-foreground">{t('orgLevelTitle')}</h3>
+                                <p className="text-xs text-muted-foreground">{t('orgLevelDesc')}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline">{t('oncePerDay')}</Badge>
+                                <Button variant="ghost" size="sm" onClick={() => setEditingSelf(false)}>{t('cancel')}</Button>
+                              </div>
+                            </div>
+                            {/* S2(1c2be9db): org-level write 안내 — 프로젝트 선택 불요·접근 프로젝트 자동 표시 */}
+                            <Alert variant="info">
+                              <AlertDescription className="text-xs">{t('orgWriteBanner')}</AlertDescription>
+                            </Alert>
+
+                            {/* A3(9f27af8f): 카드 내부 확장 — col-span-full 전면폼 제거, 세로 스택 */}
+                            <div className="space-y-3">
+                              <div>
+                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-success">{t('done')}</label>
+                                <OperatorTextarea
+                                  value={done}
+                                  onChange={(event) => setDone(event.target.value)}
+                                  rows={3}
+                                  placeholder={t('donePlaceholder')}
+                                />
+                              </div>
+                              <div>
+                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-info">{t('plan')}</label>
+                                <OperatorTextarea
+                                  value={plan}
+                                  onChange={(event) => setPlan(event.target.value)}
+                                  rows={3}
+                                  placeholder={t('planPlaceholder')}
+                                />
+                              </div>
+                              <div>
+                                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-destructive">{t('blockers')}</label>
+                                <OperatorTextarea
+                                  value={blockers}
+                                  onChange={(event) => setBlockers(event.target.value)}
+                                  rows={3}
+                                  placeholder={t('blockersPlaceholder')}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="space-y-3 rounded-xl border border-border/70 bg-muted/10 p-3">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('planStoriesOptional')}</p>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline">{t('linkedStoryCount', { count: planStoryIds.length })}</Badge>
+                                  {projectMemberships.length > 0 ? (
+                                    <Button variant="glass" size="sm" className="h-6 px-2 text-xs" onClick={() => setBridgeModalOpen(true)}>
+                                      {t('bridgeAddButton')}
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              </div>
+                              {/* projection은 접근권 기준 자동 — plan_story_ids와 무관(디커플 명시) */}
+                              <p className="text-xs text-muted-foreground">{t('planStoriesProjectionHint')}</p>
+                              {/* A1(9f27af8f): 브릿지로 연결한 타 보드 스토리 — 현재 프로젝트 picker와 별도 표시 */}
+                              {bridgedStories.length > 0 ? (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {bridgedStories.map((story) => (
+                                    <Badge key={story.id} variant="chip" className="gap-1.5">
+                                      <span className="max-w-[10rem] truncate">{story.title}</span>
+                                      <span className="text-muted-foreground">· {story.projectName}</span>
+                                      <button type="button" onClick={() => removeBridgedStory(story.id)} className="ml-1 text-muted-foreground hover:text-foreground" aria-label={t('bridgeRemove')}>
+                                        ✕
+                                      </button>
+                                    </Badge>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {storyPickerStories.length > 0 ? (
+                                <div className="max-h-40 space-y-1.5 overflow-y-auto">
+                                  {storyPickerStories.map((story) => {
+                                    const checked = planStoryIds.includes(story.id);
+                                    return (
+                                      <label key={story.id} className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/70 bg-background p-2.5 transition hover:bg-muted/40">
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() => {
+                                            setPlanStoryIds((current) => (
+                                              current.includes(story.id)
+                                                ? current.filter((storyId) => storyId !== story.id)
+                                                : [...current, story.id]
+                                            ));
+                                          }}
+                                          className="mt-0.5 h-4 w-4 rounded border-input bg-transparent text-primary"
+                                        />
+                                        <div className="min-w-0 flex-1 space-y-0.5">
+                                          <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <p className="text-sm font-medium text-foreground">{story.title}</p>
+                                            <Badge variant="outline">{story.status}</Badge>
+                                          </div>
+                                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                            <Badge variant="chip">{story.assignee_name ?? t('unknown')}</Badge>
+                                            <span>{t('taskProgress', { done: story.done_task_count, total: story.task_count })}</span>
+                                          </div>
+                                        </div>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              ) : !projectId ? (
+                                // org write(프로젝트 미선택): 스프린트 컨텍스트 없음 — 프로젝트 선택 안내.
+                                <p className="text-sm text-muted-foreground">{t('storyPickerEmptyNoProject')}</p>
+                              ) : !activeSprint ? (
+                                // 프로젝트 있으나 활성 스프린트 0: 빈 selector가 "없음"으로 오인되던 것 — 안내 + 활성화 CTA.
+                                <div className="space-y-1.5">
+                                  <p className="text-sm text-muted-foreground">{t('storyPickerEmptyNoSprint')}</p>
+                                  <Link href="/sprints" className="inline-block text-xs font-medium text-primary hover:underline">{t('storyPickerManageSprints')}</Link>
+                                </div>
+                              ) : (
+                                <p className="text-sm text-muted-foreground">{t('noSprintStories')}</p>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-3 pt-1">
+                              <Button variant="hero" size="lg" onClick={() => void handleSave()} disabled={saving}>
+                                {saving ? t('saving') : t('save')}
+                              </Button>
+                              <Button variant="outline" onClick={() => setEditingSelf(false)}>{t('cancel')}</Button>
+                              {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <StandupBoardCard
+                          key={member.id}
+                          member={member}
+                          entry={entry}
+                          feedback={memberFeedback}
+                          isCurrentUser={isCurrentUser}
+                          activeSprintTitle={activeSprint?.title ?? null}
+                          onEdit={isCurrentUser ? () => setEditingSelf(true) : undefined}
+                          onOpenFeedback={() => setFeedbackDialogMemberId(member.id)}
+                        />
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
+
+              {/* 에이전트 섹션 */}
+              {!loading && agentMembers.length > 0 ? (
+                <section className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                      <Bot className="h-4 w-4" aria-hidden />
+                      {t('agents')}
+                    </h2>
+                    <Badge variant="chip">{t('memberCount', { count: agentMembers.length })}</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {agentMembers.map((member) => {
+                      const entry = entryByAuthorId[member.id];
+                      const memberFeedback = feedbackByEntryId[entry?.id ?? ''] ?? [];
+                      return (
+                        <StandupBoardCard
+                          key={member.id}
+                          member={member}
+                          entry={entry}
+                          feedback={memberFeedback}
+                          isCurrentUser={false}
+                          activeSprintTitle={activeSprint?.title ?? null}
+                          onOpenFeedback={() => setFeedbackDialogMemberId(member.id)}
+                        />
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
+
+              {/* S3(51447ca0): Missing — org 1회 작성 기준 미작성 멤버(프로젝트별 아님) */}
+              {!loading && missingMembers.length > 0 ? (
+                <section className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-sm font-semibold text-foreground">{t('missingOrgStandup')}</h2>
+                    <Badge variant="outline">{t('memberCount', { count: missingMembers.length })}</Badge>
+                  </div>
+                  <div className="rounded-xl border border-dashed border-border bg-muted/40 p-4">
+                    <div className="flex flex-wrap gap-1.5">
+                      {missingMembers.map((m) => (
+                        <Badge key={m.id} variant="outline">{m.name}</Badge>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">{t('missingOrgHint')}</p>
+                  </div>
+                </section>
+              ) : null}
+
+              {!loading && members.length === 0 ? (
+                <EmptyState title={t('noMembers')} description={t('noMembersDescription')} />
+              ) : null}
+
+              {projectId ? <StandupHistorySection projectId={projectId} memberNameById={memberNameById} /> : null}
+            </>
+          ) : null}
+        </div>
+      </div>
+
+      {/* 피드백 다이얼로그 */}
+      {feedbackDialogMember ? (
+        <StandupFeedbackDialog
+          open={feedbackDialogMemberId !== null}
+          onOpenChange={(next) => { if (!next) setFeedbackDialogMemberId(null); }}
+          member={feedbackDialogMember}
+          entry={feedbackDialogEntry}
+          feedback={feedbackDialogFeedback}
+          stories={stories}
+          memberNameById={memberNameById}
+          currentMemberId={currentTeamMemberId}
+          onCreateFeedback={createFeedback}
+          onUpdateFeedback={updateFeedback}
+          onDeleteFeedback={deleteFeedback}
+        />
+      ) : null}
+
+      {/* A1(9f27af8f): 보드 브릿지 모달 */}
+      <BoardBridgeModal
+        open={bridgeModalOpen}
+        onOpenChange={setBridgeModalOpen}
+        boards={projectMemberships}
+        alreadySelectedIds={planStoryIds}
+        onSelectStory={addBridgedStory}
+      />
+    </>
+  );
+}

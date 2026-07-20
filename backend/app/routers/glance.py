@@ -26,7 +26,7 @@ from app.services.evidence_service import batch_human_verified
 from app.services.project_auth import has_project_access
 from app.services.trust_pipeline import batch_unresolved_blocker, batch_verify_fail
 
-router = APIRouter(prefix="/api/v2/glance", tags=["glance"])
+router = APIRouter(prefix="/api/v2/glance", tags=["glance", "Work"])
 
 # blocked/merge_ready 판정의 "아직 open" = non-done(command_center 규율 재사용).
 _OPEN_EXCLUDED_STATUSES = ("done",)

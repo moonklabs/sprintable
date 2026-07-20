@@ -139,6 +139,8 @@ async def dispatch_notification(
     reference_id: uuid.UUID | None = None,
     source_project_id: uuid.UUID | None = None,
     context: dict | None = None,
+    story_id: uuid.UUID | None = None,
+    sprint_id: uuid.UUID | None = None,
 ) -> None:
     """notification_settings 필터 후 enabled member에게 알림 발송.
 
@@ -153,6 +155,13 @@ async def dispatch_notification(
     뷰가 멀티프로젝트 멤버를 N행(동일 id)으로 내는데, 주어지면 dedup에서 그 프로젝트 행을 우선
     선택하고 에이전트 Event를 그 프로젝트로 스코프한다 — 임의 first-project로 떨구는 오라우팅 방지.
     미지정 시 기존 거동(첫 행) 유지 → 휴먼 1-알림 dedup 무회귀(additive·하위호환).
+
+    story #1953(P1a-S3): source_project_id는 Expo push data payload의 project_id로도 그대로
+    재사용된다(딥링크 매니페스트 Layer 2 계약 — org_id/project_id 전 타입 포함). 호출부가
+    안 넘기면, 아래에서 이미 조회한 대상 member들의 project_id가 전부 동일할 때만(모호성 없을
+    때만) 그 값으로 폴백한다 — 새 쿼리 없이 기존 조회 결과를 재사용(신규 DB 왕복 0).
+    story_id(task_completed)·sprint_id(가설 관련 dispatched/handoff_stuck)는 호출부가 이미
+    알고 있는 값을 그대로 실어 보내는 통과 파라미터(신규 조회는 호출부 책임, 여기선 없음).
     """
     if not target_member_ids:
         return
@@ -240,6 +249,19 @@ async def dispatch_notification(
             elif source_project_id is not None and getattr(_m, "project_id", None) == source_project_id:
                 _picked[_m.id] = _m  # 트리거 프로젝트 행으로 교체
         members = list(_picked.values())
+
+        # story #1953: Expo push data payload용 project_id 해소. source_project_id가 명시되면
+        # 그대로 우선 사용(신뢰 가능한 트리거 프로젝트). 없으면 위에서 이미 조회한 members의
+        # project_id가 전부 동일할 때만(모호성 0) 그 값으로 폴백 — 신규 쿼리 없이 기존 조회
+        # 결과만 재사용. 여러 프로젝트가 섞여 있으면(org-wide 브로드캐스트 등) None으로 둬
+        # 오라우팅(잘못된 프로젝트로 딥링크) 방지.
+        _push_project_id = source_project_id
+        if _push_project_id is None:
+            _member_project_ids = {
+                getattr(_m, "project_id", None) for _m in members
+            } - {None}
+            if len(_member_project_ids) == 1:
+                _push_project_id = next(iter(_member_project_ids))
 
         inserted = False
         created_events: list[Event] = []  # L1 BE-3: fan-out 수렴용 event 수집
@@ -334,6 +356,19 @@ async def dispatch_notification(
             reference_type=reference_type, reference_id=reference_id, context=context,
             muted_member_ids=muted_member_ids,
         )
+
+        # E-MOBILE M0·S3: EE 푸시 채널(웹훅과 나란한 별개 채널) — 등록 push_devices 로 Expo 발송.
+        # 대상 = enabled(설정 통과) − mute 멤버(deliver_expo_push 내부 필터). 웹훅 유무와 독립.
+        # EE 게이트(비-EE 무동작·core 무영향)·best-effort(발송 실패가 파이프라인 안 되돌림).
+        from app.core.config import settings as _settings
+        if _settings.is_ee_enabled:
+            from ee.services.expo_push import deliver_expo_push
+            await deliver_expo_push(
+                db, org_id, enabled_member_ids, title=title, body=body, event_type=event_type,
+                reference_type=reference_type, reference_id=reference_id, context=context,
+                muted_member_ids=muted_member_ids,
+                project_id=_push_project_id, story_id=story_id, sprint_id=sprint_id,
+            )
 
     except Exception:
         # BUG-1 수정: 에러 삼킴 제거 → 스택 트레이스 로깅

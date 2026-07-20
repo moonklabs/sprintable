@@ -1,6 +1,5 @@
 'use client';
 
-import { SidebarTrigger } from '@/components/ui/sidebar';
 import { cn } from '@/lib/utils';
 import { NotificationBell } from './notification-bell';
 import { WhatsNewButton } from '@/components/release-notes/whats-new-button';
@@ -24,7 +23,8 @@ export function TopBar({ className }: TopBarProps) {
         className,
       )}
     >
-      <SidebarTrigger className="mr-2 md:hidden" />
+      {/* story #1958: 모바일 햄버거 트리거 제거 — 하단 탭바(MobileTabBar)가 <1024 내비게이션을
+          대신한다(blueprint §3.2 "모바일 사이드바 Sheet/햄버거 폐기" 방향, 오르테가군 확定). */}
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {title}
       </div>

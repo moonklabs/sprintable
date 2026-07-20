@@ -96,14 +96,20 @@ async def test_create_doc_201():
         doc = _mock_doc()
         # RC#1: create_doc 가 created_by 를 인증 caller(_resolve_doc_member_id)로 강제하므로 mock-session
         # 테스트에선 멤버 해소를 patch(실 DB 쿼리 우회). body.created_by 위조 차단은 별도 단위테스트서 검증.
+        # story #1993: create_doc 가 mentions write-path(reconcile_doc_mentions)도 호출하므로
+        # (실 DB select/insert) mock-session 테스트에선 patch(실 DB 쿼리 우회). 파서 자체의 동작은
+        # test_1993_mention_parser.py(순수 함수)·test_1993_mentions_realdb.py(실 PG)가 커버.
         with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
              patch("app.routers.docs._resolve_doc_member_id",
                    new_callable=AsyncMock) as mock_resolve, \
              patch("app.routers.docs.canonicalize_member_id",
-                   new_callable=AsyncMock) as mock_canon:
+                   new_callable=AsyncMock) as mock_canon, \
+             patch("app.services.mention_parser.reconcile_doc_mentions",
+                   new_callable=AsyncMock) as mock_reconcile:
             mock_create.return_value = doc
             mock_resolve.return_value = doc.created_by
             mock_canon.return_value = doc.created_by
+            mock_reconcile.return_value = None
 
             async with client as c:
                 resp = await c.post("/api/v2/docs", json={

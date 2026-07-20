@@ -34,7 +34,7 @@ from app.schemas.context_pack import ContextPackSearchResult
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v2/context-pack", tags=["context-pack"])
+router = APIRouter(prefix="/api/v2/context-pack", tags=["context-pack", "Knowledge"])
 
 
 @router.get("/search", response_model=list[ContextPackSearchResult])

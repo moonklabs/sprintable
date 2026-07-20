@@ -98,7 +98,8 @@ function isWebhookUrlAllowed(url: string): boolean {
 
 // E-SETTINGS-IA: deprecate(숨김)된 settings 탭. 컴포넌트/route는 보존(reversible) —
 // 탭 트리거·콘텐츠·딥링크(?tab=)만 차단한다. 재노출 시 이 set에서 제거만 하면 IA 위치 복원.
-const HIDDEN_SETTINGS_TABS = new Set<string>(['ai', 'workflow']);
+// story c4980e70: org-members 탭 = /organization/members로 승격(회귀 0 위해 코드는 보존, LNB에서만 숨김).
+const HIDDEN_SETTINGS_TABS = new Set<string>(['ai', 'workflow', 'org-members']);
 const DEFAULT_SETTINGS_TAB = 'profile';
 
 // ?tab= 딥링크가 숨김 탭을 가리키면 기본 탭으로 폴백 (빈 화면 방지).
@@ -364,7 +365,7 @@ export default function SettingsPage() {
   useEffect(() => {
     // 에이전트 관리 IA 통일(story d63d3f73) — Members 서브탭 흡수, /agents(관리 탭)으로 재타겟.
     if (activeTab === 'api-keys') {
-      router.push('/agents');
+      router.push('/organization/workforce');
     }
   }, [activeTab, router]);
 
@@ -721,7 +722,7 @@ export default function SettingsPage() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => router.push('/agents')}
+                    onClick={() => router.push('/organization/workforce')}
                     className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
                   >
                     에이전트 관리로 이동

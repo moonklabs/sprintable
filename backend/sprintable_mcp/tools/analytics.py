@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from mcp.types import TextContent
+from pydantic import AliasChoices, ConfigDict, Field
 
 from ..api_client import client
 from ..response import err, ok
@@ -28,8 +29,12 @@ class ActivityInput(SprintableInput):
     limit: int | None = None
 
 
-class EpicProgressInput(SprintableInput):
-    epic_id: str
+class GoalProgressInput(SprintableInput):
+    # 계층 리네이밍 B1(story 1925): REST 호출 대상(/api/v2/analytics/epic-progress)은 B1 스코프
+    # 밖(analytics 도메인 하위 엔드포인트, 별도 후속)이라 무변경 — tool/필드명만 신 용어.
+    # deprecated 별칭(sprintable_get_epic_progress)도 이 스키마 재사용 — 구 필드명 epic_id 수용.
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    goal_id: str = Field(validation_alias=AliasChoices("goal_id", "epic_id"))
 
 
 class AgentStatsInput(SprintableInput):
@@ -116,10 +121,10 @@ async def get_recent_activity(args: ActivityInput) -> list[TextContent]:
         return err(str(exc))
 
 
-async def get_epic_progress(args: EpicProgressInput) -> list[TextContent]:
-    """에픽 진행 현황 조회."""
+async def get_goal_progress(args: GoalProgressInput) -> list[TextContent]:
+    """목표 진행 현황 조회."""
     try:
-        return ok(await client.get("/api/v2/analytics/epic-progress", params={"project_id": client.require_project_id(), "epic_id": args.epic_id}))
+        return ok(await client.get("/api/v2/analytics/epic-progress", params={"project_id": client.require_project_id(), "epic_id": args.goal_id}))
     except Exception as exc:
         return err(str(exc))
 

@@ -66,18 +66,40 @@ persona 존재 시 무조건 persona.slug/config.tool_allowlist 파생 단일 sk
 당시 스냅샷이 아니라 카탈로그 갱신을 재-recruit 없이 그대로 따라간다. role_template.skills가
 비어있으면(아직 구조화 미완료) 기존 persona 파생 단일 skill로 그레이스풀 폴백 — 무회귀(오늘
 수작업으로 만든 8명의 persona는 role_template_id가 없어 이 폴백 그대로, 크래시 없음).
+
+**SendMessage 멱등키(2026-07-18, story #2004, E-A2A-PROTO Phase B P1-b)**: 클라가 네트워크
+타임아웃/수동 재시도로 동일 `message_id`를 재발송하면 기존엔 매번 새 Conversation+Task+실
+위임(webhook/Event+wake_agent)이 벌어졌다(중복 실행). `_handle_send_message`가 이제
+`(member_id, client_message_id)`를 dedup 키로 쓴다 — `pg_advisory_xact_lock`(첫 DB
+연산으로 획득)이 "존재 확인→A2ATask insert→(그 A2ATask insert를 포함하는) 첫 commit"까지의
+전 구간을 직렬화해 TOCTOU를 구조적으로 막는다(naive insert-then-catch-conflict는 이미 실
+webhook/Event 부작용이 나간 뒤에야 충돌을 잡아 AC3 위반 — 채택 안 함).
+
+⚠️설계 노트(기존 흐름과의 유일한 순서 변경): 이 함수는 `A2ATask` insert를 원래 맨 끝(webhook/
+Event 디스패치 이후)에서 **Conversation/Message insert 직후·기존 첫 commit 이전**으로
+당겼다. 이유: `deliver_conversation_message_webhook`이 별도 세션(`async_session_factory`)으로
+Conversation/Participant를 재조회하므로 그 첫 commit은 원래도 필수였다(제거 불가) — advisory
+xact lock은 commit 시 자동 해제되므로, A2ATask insert가 원래 위치(그 이후, 두 번째·세 번째
+commit 뒤)에 남아 있으면 락이 실제 dedup-마커 커밋 전에 먼저 풀려 동시 두 콜이 모두 "미존재"를
+보고 통과할 수 있었다(레이스 미봉인). A2ATask를 첫 commit **안**으로 포함시키면 락이 커버하는
+구간 = "그 dedup 마커가 durable해지는 시점"과 정확히 일치해 구조적으로 막힌다. webhook/Event
+디스패치 로직 자체(내용·순서·별도 세션)는 완전히 무변경 — fakechat 경로의
+`task_metadata["connected_at_send"]`만 이제 이미 insert된 행에 대한 후속 UPDATE로 반영한다.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import re
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory
@@ -125,12 +147,116 @@ from app.schemas.a2a import (
 )
 from app.services.conversation_webhook import deliver_conversation_message_webhook
 
-router = APIRouter(prefix="/api/v2/a2a", tags=["a2a"])
+router = APIRouter(prefix="/api/v2/a2a", tags=["a2a", "Organization"])
 
 _METHOD_NOT_FOUND = -32601
 _INVALID_PARAMS = -32602
 _TASK_NOT_FOUND = -32001  # A2A-specific error range(-32001~-32099)
 _VERSION_NOT_SUPPORTED = -32009  # 스펙 §14.2.1: A2A-Version 헤더가 지원 범위 밖일 때
+
+# story #2003(Phase B P1-a, E-A2A-PROTO 리라이어빌리티): 위 4개는 `a2a_rpc`의 자체 try/except가
+# 잡는 `_JsonRpcException`용(핸들러 body 안에서 발생 — 정상 JSON-RPC 경로). 아래는 핸들러 밖에서
+# 발생해 main.py의 글로벌 예외 핸들러(HTTPException/Exception)로 이스케이프하는 3가지 축용:
+# auth 실패(`get_verified_org_id`/`get_current_user` Depends, endpoint body 진입 前)·agent-not
+# -found(`_get_agent_member`의 `HTTPException(404)`, try/except 밖에서 호출됨)·미처리 예외.
+# 이전엔 이 3축이 전부 REST 엔벨로프(`{"data":None,"error":{...},"meta":None}`)로 렌더돼 스펙
+# 준수 A2A 클라이언트가 파싱 불가했다(root cause) — main.py가 `is_a2a_rpc_path`로 /rpc 요청만
+# 정밀 매치해 이 테이블로 JSON-RPC envelope을 대신 렌더한다(아래 `build_rpc_error_response`).
+_UNAUTHORIZED = -32010  # 401/403 — reserved server-error range(-32000~-32099), 기존 -32001/-32009와 미충돌
+_AGENT_NOT_FOUND = -32011  # 404 — `_get_agent_member`의 404 이스케이프. `get_agent_card`(REST 라우트)는 이 매핑을 타지 않는다(경로 불일치, 아래 `is_a2a_rpc_path` 참조) — REST 엔벨로프 그대로 유지.
+_INTERNAL_ERROR = -32603  # JSON-RPC 2.0 표준 코드("Internal error", 스펙 §7) — 미처리 예외 전용, 커스텀 번호 금지
+_REQUEST_TIMEOUT = -32012  # 서버 핸들러 상한 초과(reserved server-error range, 다음 free 번호 — -32001/-32009/-32010/-32011과 미충돌)
+
+# story #2005(Phase B P1-c, E-A2A-PROTO 리라이어빌리티): `/rpc`엔 오늘까지 애플리케이션 레벨
+# 타임아웃이 전혀 없었다(grep 확認 — `asyncio.wait_for`/`asyncio.timeout` 0건, 전체 파일). 유일한
+# 상한은 Cloud Run 플랫폼 자체 요청 타임아웃뿐이었고, 그마저도 `cloudbuild.yaml`의
+# `deploy-backend` 스텝에 `--timeout` 플래그가 명시된 적이 없어(grep 확認) 인프라 기본값에
+# 암묵 의존 중이었다. PO가 라이브 `gcloud`로 실측한 현재 유효값(2026-07-17 확認, 이 세션은
+# gcloud 접근 없이 그 실측을 그대로 신뢰):
+#   - backend-prod  = 300s
+#   - backend-dev   = 3600s
+#   - mcp-prod      = 300s (concurrency=80)
+# 아래 상한은 그 실측값 중 가장 빡빡한 값(prod 300s)보다 낮게 잡아(20s 여유) Cloud Run이
+# 커넥션을 강제로 끊기 전에 애플리케이션이 먼저 깔끔한 JSON-RPC 에러 envelope(story #2003의
+# `error.data.retryable` 계약 재사용, 타임아웃은 본질적으로 일시적이라 True 고정)으로 응답하게
+# 한다 — 원시 커넥션 킬은 클라가 파싱할 body가 없어 실패 원인을 알 수 없다. SendStreamingMessage
+# (SSE)의 전체-스트림 상한에도 동일 상수를 재사용한다(아래 `_stream_send_message` 참조) — dev의
+# 3600s는 이 상수보다 훨씬 커서 두 환경 모두에서 안전하게 먼저 트리거된다.
+_A2A_RPC_TIMEOUT_SECONDS = 280
+
+# HTTP status → JSON-RPC code(SSOT 단일 테이블, 감사/확장 용이하게 조건 흩뿌리지 않음). 표에
+# 없는 status(5xx 포함)는 표준 Internal error로 수렴 — unhandled_exception_handler는 항상 500만
+# 넘기므로 자동으로 이 폴백을 탄다.
+_RPC_HTTP_STATUS_TO_JSONRPC_CODE: dict[int, int] = {
+    400: _INVALID_PARAMS,
+    401: _UNAUTHORIZED,
+    403: _UNAUTHORIZED,
+    404: _AGENT_NOT_FOUND,
+    422: _INVALID_PARAMS,
+}
+
+
+def rpc_error_code_for_status(status_code: int) -> int:
+    return _RPC_HTTP_STATUS_TO_JSONRPC_CODE.get(status_code, _INTERNAL_ERROR)
+
+
+def rpc_error_is_retryable(status_code: int) -> bool:
+    """5xx/transient(연결 레벨 포함)=True, 4xx/permanent(400/401/403/404/422 등)=False —
+    `error.data.retryable` 힌트(클라가 자동 재시도해도 되는지)."""
+    return status_code >= 500
+
+
+_RPC_PATH_PATTERN = re.compile(r"^/api/v2/a2a/members/[^/]+/rpc$")
+
+
+def is_a2a_rpc_path(path: object) -> bool:
+    """main.py 글로벌 핸들러가 /rpc 요청만 정밀 매치하기 위한 헬퍼 — 토큰경계 정규식(느슨한
+    substring 아님): `/api/v2/a2a/members/{id}/rpc`만 매치하고, 이 파일의 다른 라우트
+    (`agent-card.json`(unauth·REST 계약 유지 필수)·`/members`(발견)·`link-gate`)는 매치하지
+    않는다 — REST 엔벨로프 유지가 필요한 라우트에 실수로 번지는 걸 구조적으로 차단.
+
+    실 FastAPI `Request.url.path`는 항상 str이지만, 기존 단위테스트
+    (`test_error_envelope_dict_detail.py`)가 핸들러를 `MagicMock()` request로 직접 호출하는
+    선례가 있어(`request.url.path`가 MagicMock) — 그 경로에서 TypeError로 깨지지 않도록
+    non-str은 그냥 False(REST 엔벨로프 유지)로 방어."""
+    if not isinstance(path, str):
+        return False
+    return bool(_RPC_PATH_PATTERN.match(path))
+
+
+async def _best_effort_rpc_id(request: Request) -> str | int | None:
+    """JSON-RPC 2.0 §5: id 판정 불가 시 null이 스펙 준수 폴백. Starlette가 `Request.body()`를
+    최초 read 시 캐시하므로, dependency 단계(get_verified_org_id 등)가 이미 body를 소비한
+    뒤라도 여기서 재조회하면 여전히 실 id를 스레딩할 수 있다 — 파싱 자체가 불가능한 경우
+    (빈 body·비JSON·JSON이지만 dict 아님·id 타입이 str/int가 아님)에만 null로 폴백."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001 — 파싱 불가는 id=null 폴백(과설계 회피, 스펙 허용 범위)
+        return None
+    if not isinstance(payload, dict):
+        return None
+    rpc_id = payload.get("id")
+    return rpc_id if isinstance(rpc_id, (str, int)) else None
+
+
+async def build_rpc_error_response(request: Request, status_code: int, message: str) -> JSONResponse:
+    """main.py의 `http_exception_handler`/`unhandled_exception_handler`가 `is_a2a_rpc_path`로
+    매치된 요청에서만 호출 — REST 엔벨로프 대신 JSON-RPC 2.0 error envelope을 렌더한다.
+
+    HTTP status는 200 고정 — `a2a_rpc` 자신의 기존 in-handler JSON-RPC 에러 반환(`_JsonRpcException`
+    을 잡아 `JsonRpcResponse(...)`를 정상 return — 예외가 아니라 return이라 FastAPI 기본 status는
+    200)과 동일 컨벤션(JSON-RPC-over-HTTP 관례: transport status=success, 에러는 body에)을 맞춘다
+    — 여기서 실 HTTP status(401/404/500 등)를 그대로 쓰면 같은 엔드포인트 안에 세 번째 불일치
+    (in-handler=200 vs global-handler=실status)가 새로 생긴다."""
+    response = JsonRpcResponse(
+        id=await _best_effort_rpc_id(request),
+        error=JsonRpcError(
+            code=rpc_error_code_for_status(status_code),
+            message=message,
+            data={"retryable": rpc_error_is_retryable(status_code)},
+        ),
+    )
+    return JSONResponse(status_code=200, content=response.model_dump(mode="json"))
 
 # E-A2A-PROTO P1(2026-07-06): 스펙 §14.2.1 — 클라이언트는 A2A-Version 헤더를 MUST 전송.
 # 우리는 1.0만 지원(Card의 protocol_version과 동일 소스). ⚠️tradeoff(정직 문서화): 헤더
@@ -175,9 +301,12 @@ _TERMINAL_STATES = {
 
 
 class _JsonRpcException(Exception):
-    def __init__(self, code: int, message: str) -> None:
+    def __init__(self, code: int, message: str, data: dict | None = None) -> None:
         self.code = code
         self.message = message
+        # story #2005: optional — 기존 4개 raise 지점(invalid params/task not found)은 여전히
+        # data 없이 생성돼 무회귀(`error.data`가 None으로 렌더, story #2003 이전 동작 그대로).
+        self.data = data
 
 
 def _caller_project_hint(auth: AuthContext) -> uuid.UUID | None:
@@ -411,6 +540,36 @@ def _first_text(message: Message) -> str:
     return ""
 
 
+async def _acquire_send_message_dedup_lock(
+    session: AsyncSession, member_id: uuid.UUID, client_message_id: str,
+) -> A2ATask | None:
+    """story #2004(E-A2A-PROTO Phase B P1-b): `_handle_send_message`의 첫 DB 연산 —
+    `(member_id, client_message_id)` 네임스페이스 advisory xact lock(story.py::
+    allocate_story_number/recruit_service.py::acquire_agent_mutation_lock과 동일 관례,
+    [[feedback_check_then_insert_toctou]] 교훈 재적용) 획득 직후 같은 키의 기존 task를
+    재확인한다. 반환값이 not-None이면 그게 곧 멱등 재생 대상(caller는 그걸 그대로 반환하고
+    Conversation/Message/webhook/Event/wake_agent/새 A2ATask 무엇도 만들면 안 된다) — None이면
+    신규 처리를 계속한다.
+
+    락은 트랜잭션 종료(commit/rollback) 시 자동 해제 — caller가 이 함수 반환 후 A2ATask
+    insert를 기존 첫 commit 안에 포함시켜야(모듈 docstring "설계 노트") 이 락이 "dedup
+    마커가 durable해지는 시점"까지 끊김 없이 커버한다.
+
+    순수 리팩터로 분리(동작 무변경) — mutation self-check 테스트가 이 함수만 monkeypatch해
+    (예: 항상 None 반환) dedup을 우회시켜 RED(중복 task+중복 dispatch)를 실증하고, 원복해
+    GREEN을 확인할 수 있도록."""
+    await session.execute(
+        select(func.pg_advisory_xact_lock(
+            func.hashtext(f"a2a_send_message:{member_id}:{client_message_id}")
+        ))
+    )
+    return (await session.execute(
+        select(A2ATask).where(
+            A2ATask.member_id == member_id, A2ATask.client_message_id == client_message_id,
+        )
+    )).scalar_one_or_none()
+
+
 async def _handle_send_message(
     session: AsyncSession, member: TeamMember, params: dict,
     active_extensions: frozenset[str] = frozenset(),
@@ -423,20 +582,32 @@ async def _handle_send_message(
     incoming = send_params.message
     text = _first_text(incoming)
 
+    # story #2004: client_message_id = 클라 Message.message_id — 어떤 DB write보다도 먼저
+    # 추출(멱등 락/조회 키). commit() 이후 이 세션에 로드된 모든 ORM 객체(member 포함)의
+    # 속성이 expire_on_commit 기본값으로 만료돼 greenlet 컨텍스트 밖 lazy-load
+    # (MissingGreenlet)를 유발한다 — commit 전에 필요한 member 필드를 로컬 변수로 고정해두고
+    # 이후엔 이것만 쓴다.
+    client_message_id = incoming.message_id
+    member_id = member.id
+    member_org_id = member.org_id
+    member_project_id = member.project_id
+    member_name = member.name
+
+    # story #2004: 첫 DB 연산 — advisory xact lock 획득 + 같은 키 기존 task 재확인(분리된
+    # 이유·의미론은 `_acquire_send_message_dedup_lock` 참조).
+    existing_task = await _acquire_send_message_dedup_lock(session, member_id, client_message_id)
+    if existing_task is not None:
+        # 멱등 재생 경로 — 락 보유 중 재확인해 이미 커밋된 task를 찾았으니 Conversation/Message/
+        # webhook/Event/wake_agent/새 A2ATask 그 무엇도 만들지 않고 그대로 반환한다(AC3:
+        # 중복 실행 지시 0).
+        return {"task": _task_to_dict(existing_task)}
+
     # E-A2A-EXT project-context(profile, opt-in): 클라가 A2A-Extensions 헤더로 이 URI를
     # 선언했고 Message.metadata에 그 키가 있으면 구조화 컨텍스트를 보존한다. 미선언 시
     # 이 블록 전체가 스킵돼 기존 동작과 완전히 동일(무회귀).
     project_context = None
     if PROJECT_CONTEXT_EXTENSION_URI in active_extensions and incoming.metadata:
         project_context = incoming.metadata.get(PROJECT_CONTEXT_EXTENSION_URI)
-
-    # commit() 이후 이 세션에 로드된 모든 ORM 객체(member 포함)의 속성이 expire_on_commit
-    # 기본값으로 만료돼 greenlet 컨텍스트 밖 lazy-load(MissingGreenlet)를 유발한다 —
-    # commit 전에 필요한 member 필드를 로컬 변수로 고정해두고 이후엔 이것만 쓴다.
-    member_id = member.id
-    member_org_id = member.org_id
-    member_project_id = member.project_id
-    member_name = member.name
 
     # S2(정정 2026-07-06)+P1-S3 §10(SSOT 교체): 플랫폼 기존 라우팅과 동형으로 택일 —
     # member-bound WebhookConfig 有→Discord webhook, 無→fakechat WS(_broadcast). "존재 여부"
@@ -489,13 +660,51 @@ async def _handle_send_message(
         created_at=now,
     ))
     await session.flush()
-    await session.commit()
 
     task_metadata: dict = {"delivery_channel": "webhook" if has_webhook else "fakechat_ws"}
     if active_extensions:
         task_metadata["activated_extensions"] = sorted(active_extensions)
     if project_context is not None:
         task_metadata["project_context"] = project_context
+
+    # story #2004: A2ATask(=dedup 마커) insert를 여기(원래 함수 맨 끝, webhook/Event 디스패치
+    # 이후)에서 이 지점(Conversation/Message insert 직후, 기존 첫 commit 이전)으로 당겼다 —
+    # 모듈 docstring "설계 노트" 참조. advisory xact lock이 이 commit까지 끊김 없이 커버해야
+    # dedup이 구조적으로 봉인되기 때문. task_metadata는 아직 webhook/Event 디스패치 전이라
+    # `connected_at_send`(fakechat 경로 전용)는 비어 있다 — 아래에서 후속 UPDATE로 채운다.
+    task_id = uuid.uuid4()
+    task = A2ATask(
+        id=task_id,
+        context_id=conv_id,
+        root_message_id=root_message_id,
+        member_id=member_id,
+        client_message_id=client_message_id,
+        state="TASK_STATE_WORKING",
+        task_metadata=task_metadata,
+        history=[incoming.model_dump(by_alias=True, mode="json")],
+        artifacts=[],
+        # S-A1(story 2a57dc0f): 생성 시점에 명시 기록 — cron 스위퍼가 폴링과 무관하게 판정.
+        deadline_at=now + timedelta(minutes=A2A_TASK_TIMEOUT_MINUTES),
+    )
+    session.add(task)
+    try:
+        await session.flush()
+    except IntegrityError:
+        # 방어선 2(백스톱, story #2004): 정상 동작에선 advisory lock이 이 경합을 구조적으로
+        # 막아 여기 도달하지 않아야 한다 — 그래도 락이 우회되는 경로가 생기면 UNIQUE 인덱스
+        # (마이그 0201, `uq_a2a_tasks_member_client_message_id`)가 최종 봉인. 이 미커밋
+        # 트랜잭션의 Conversation/Participant/Message도 함께 rollback하고, 승자가 이미 커밋한
+        # task를 재조회해 그대로 반환한다(크래시 대신 멱등 응답).
+        await session.rollback()
+        winner = (await session.execute(
+            select(A2ATask).where(
+                A2ATask.member_id == member_id, A2ATask.client_message_id == client_message_id,
+            )
+        )).scalar_one_or_none()
+        if winner is not None:
+            return {"task": _task_to_dict(winner)}
+        raise
+    await session.commit()
 
     if has_webhook:
         # ⚠️스코프 경계(E-A2A-EXT 첫 착수, 의도적): deliver_conversation_message_webhook은
@@ -550,24 +759,18 @@ async def _handle_send_message(
         await session.commit()
         # "미연결" 신호(P1-S2 C 유지) — 죽은 ws_chat._rooms 대신 agent_gateway의 실제 SSE 연결
         # 큐(_agent_connections)로 판정해야 "지금 CC가 진짜 붙어있나"를 뜻한다.
-        task_metadata["connected_at_send"] = str(member_id) in _agent_connections
+        #
+        # story #2004: task는 위에서 이미 insert+commit된 행이라(dedup 마커, 첫 commit 안에
+        # 포함) 여기선 새 A2ATask를 만들지 않고 그 task_metadata를 채워 후속 UPDATE로 반영한다
+        # — 전체 재대입(`task.task_metadata = {...}`)이라 SQLAlchemy dirty-tracking이 그대로
+        # 잡는다(부분 in-place mutation 아님, MutableDict 불요).
+        task.task_metadata = {
+            **(task.task_metadata or {}),
+            "connected_at_send": str(member_id) in _agent_connections,
+        }
         wake_agent(str(member_id), recipient_seq)
-
-    task_id = uuid.uuid4()
-    session.add(A2ATask(
-        id=task_id,
-        context_id=conv_id,
-        root_message_id=root_message_id,
-        member_id=member_id,
-        state="TASK_STATE_WORKING",
-        task_metadata=task_metadata,
-        history=[incoming.model_dump(by_alias=True, mode="json")],
-        artifacts=[],
-        # S-A1(story 2a57dc0f): 생성 시점에 명시 기록 — cron 스위퍼가 폴링과 무관하게 판정.
-        deadline_at=now + timedelta(minutes=A2A_TASK_TIMEOUT_MINUTES),
-    ))
-    await session.flush()
-    await session.commit()
+        await session.flush()
+        await session.commit()
 
     task = (await session.execute(
         select(A2ATask).where(A2ATask.id == task_id)
@@ -768,6 +971,18 @@ def _sse_frame(request_id: str | int | None, result: dict) -> str:
     return f"data: {json.dumps(envelope)}\n\n"
 
 
+def _sse_error_frame(request_id: str | int | None, code: int, message: str) -> str:
+    """story #2005: SSE 스트림 도중 애플리케이션 상한에 걸렸을 때 쓰는 에러 프레임 —
+    `_sse_frame`의 `result` oneof 대신 JSON-RPC 2.0 표준 `error` 필드를 실은 envelope(§7).
+    커넥션을 그냥 끊는(원시 kill) 대신 클라가 파싱 가능한 마지막 프레임을 하나 보내고
+    종료한다."""
+    envelope = {
+        "jsonrpc": "2.0", "id": request_id,
+        "error": {"code": code, "message": message, "data": {"retryable": True}},
+    }
+    return f"data: {json.dumps(envelope)}\n\n"
+
+
 async def _stream_send_message(
     request: Request, request_id: str | int | None,
     session: AsyncSession, member: TeamMember, org_id: uuid.UUID, params: dict,
@@ -789,10 +1004,29 @@ async def _stream_send_message(
     member_id = member.id
 
     async def generate():
+        # story #2005: SSE는 "사실상 무기한"이라 blanket `asyncio.wait_for`로 이 제너레이터
+        # 전체를 감싸는 건 어색하다(정상적으로 긴 스트림까지 함께 끊어버림) — 대신 여기서
+        # deadline을 직접 추적하는 **overall-ceiling** 방식을 택했다. per-chunk/idle-timeout
+        # (매 이벤트마다 리셋)도 검토했지만 기각: (1) task는 이미 DB에 영속돼 있어(GetTask로
+        # 계속 조회 가능) SSE는 그 상태를 미러링하는 부가 채널일 뿐이고, (2) 폴링 간격이
+        # `_STREAM_POLL_INTERVAL_SECONDS`(2s)로 고정이라 "활동"이 사실상 항상 있어 idle-timeout이
+        # 트리거될 일이 거의 없어 의미가 옅다, (3) Cloud Run 자신도 "한 커넥션 = 한 상한"
+        # 모델(idle 여부 무관)이라 여기서도 그 모델을 그대로 미러링하는 게 정합적이다.
+        # 상한은 non-streaming 경로와 동일한 `_A2A_RPC_TIMEOUT_SECONDS`(prod 실효값 300s보다
+        # 낮게, dev 3600s보다는 훨씬 낮게 — 두 환경 모두에서 Cloud Run이 끊기 전에 먼저
+        # 트리거됨) 재사용.
+        stream_deadline = time.monotonic() + _A2A_RPC_TIMEOUT_SECONDS
+
         yield _sse_frame(request_id, {"task": send_result["task"]})
 
         last_state: str | None = send_result["task"]["status"]["state"]
         while not await request.is_disconnected():
+            if time.monotonic() >= stream_deadline:
+                yield _sse_error_frame(
+                    request_id, _REQUEST_TIMEOUT,
+                    f"Stream exceeded server timeout ({_A2A_RPC_TIMEOUT_SECONDS}s)",
+                )
+                return
             async with async_session_factory() as db:
                 result = await db.execute(
                     select(A2ATask).where(A2ATask.id == task_id, A2ATask.member_id == member_id)
@@ -864,12 +1098,30 @@ async def a2a_rpc(
     # 응답 타입 자체가 달라(JsonRpcResponse 단일 vs SSE) 균일 _METHODS 디스패치에 안 넣고
     # 여기서 조기 분기한다.
     if body.method == "SendStreamingMessage":
+        # story #2005: 이 await는 `_stream_send_message`의 task-생성 단계(`_handle_send_message`)
+        # 까지만 감싼다 — 스트림 본문(`generate()`)은 이 함수가 반환한 `StreamingResponse`가
+        # FastAPI에 의해 나중에 소비되며 실행되므로 여기 wait_for 밖이다(그 부분의 상한은
+        # `generate()` 내부의 overall-ceiling 로직, 위 `_stream_send_message` 참조).
         try:
-            return await _stream_send_message(
-                request, body.id, session, member, org_id, body.params or {}, active_extensions,
+            return await asyncio.wait_for(
+                _stream_send_message(
+                    request, body.id, session, member, org_id, body.params or {}, active_extensions,
+                ),
+                timeout=_A2A_RPC_TIMEOUT_SECONDS,
             )
         except _JsonRpcException as exc:
-            return JsonRpcResponse(id=body.id, error=JsonRpcError(code=exc.code, message=exc.message))
+            return JsonRpcResponse(
+                id=body.id, error=JsonRpcError(code=exc.code, message=exc.message, data=exc.data),
+            )
+        except TimeoutError:
+            return JsonRpcResponse(
+                id=body.id,
+                error=JsonRpcError(
+                    code=_REQUEST_TIMEOUT,
+                    message=f"SendStreamingMessage setup exceeded server timeout ({_A2A_RPC_TIMEOUT_SECONDS}s)",
+                    data={"retryable": True},
+                ),
+            )
 
     handler = _METHODS.get(body.method)
     if handler is None:
@@ -878,10 +1130,28 @@ async def a2a_rpc(
             error=JsonRpcError(code=_METHOD_NOT_FOUND, message=f"Method not found: {body.method}"),
         )
 
+    # story #2005(Phase B P1-c): 서버 핸들러 상한 — `/rpc`엔 오늘까지 애플리케이션 레벨
+    # 타임아웃이 전혀 없었다(Cloud Run 플랫폼 타임아웃에만 암묵 의존, 위 `_A2A_RPC_TIMEOUT_SECONDS`
+    # 주석 참조). `asyncio.TimeoutError`는 3.11+부터 `TimeoutError`의 별칭이라 `except TimeoutError`
+    # 로 충분(`asyncio.wait_for`가 실제로 raise하는 타입도 이것).
     try:
-        result = await handler(session, member, body.params or {}, active_extensions)
+        result = await asyncio.wait_for(
+            handler(session, member, body.params or {}, active_extensions),
+            timeout=_A2A_RPC_TIMEOUT_SECONDS,
+        )
     except _JsonRpcException as exc:
-        return JsonRpcResponse(id=body.id, error=JsonRpcError(code=exc.code, message=exc.message))
+        return JsonRpcResponse(
+            id=body.id, error=JsonRpcError(code=exc.code, message=exc.message, data=exc.data),
+        )
+    except TimeoutError:
+        return JsonRpcResponse(
+            id=body.id,
+            error=JsonRpcError(
+                code=_REQUEST_TIMEOUT,
+                message=f"Method {body.method} exceeded server timeout ({_A2A_RPC_TIMEOUT_SECONDS}s)",
+                data={"retryable": True},
+            ),
+        )
 
     return JsonRpcResponse(id=body.id, result=result)
 

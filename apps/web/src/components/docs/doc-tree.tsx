@@ -3,10 +3,11 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, GripVertical, MoreVertical } from 'lucide-react';
-import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, closestCenter } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/utils';
+import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor';
 import { useTreeExpanded } from './use-tree-expanded';
 
 // ─── Preview Card ─────────────────────────────────────────────────────────────
@@ -345,7 +346,9 @@ function TreeNode({
 
 export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, emptyFolderLabel, projectId, visibleIds, matchedIds, searchQuery, isSearching }: DocTreeProps) {
   const rootDocs = docs.filter((entry) => !entry.parent_id).sort((a, b) => a.sort_order - b.sort_order);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // story #1988(C): 순수 PointerSensor는 모바일 터치 스크롤을 드래그로 하이재킹한다 —
+  // kanban-board.tsx 0d142311 fix와 동일하게 터치는 드래그 활성화 자체를 배제.
+  const sensors = useTouchSafePointerSensor(5);
   const { isExpanded, toggleExpanded } = useTreeExpanded(projectId);
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {

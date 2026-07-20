@@ -12,7 +12,7 @@ from app.models.team import TeamMember
 from app.repositories.agent_run import AgentRunRepository
 from app.schemas.agent_run import AgentRunResponse, CreateAgentRun, UpdateAgentRun
 
-router = APIRouter(prefix="/api/v2/agent-runs", tags=["agent-runs"])
+router = APIRouter(prefix="/api/v2/agent-runs", tags=["agent-runs", "Work"])
 
 
 def _get_repo(session: AsyncSession = Depends(get_db)) -> AgentRunRepository:

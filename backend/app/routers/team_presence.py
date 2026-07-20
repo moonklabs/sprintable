@@ -30,7 +30,7 @@ from app.routers.team_members import _inject_active_stories
 from app.schemas.team_member import ActiveStorySummary
 from app.services import chat_presence
 
-router = APIRouter(prefix="/api/v2/team-presence", tags=["team-presence"])
+router = APIRouter(prefix="/api/v2/team-presence", tags=["team-presence", "Organization"])
 
 
 class TeamPresenceItem(BaseModel):

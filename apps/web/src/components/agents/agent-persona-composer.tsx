@@ -187,7 +187,7 @@ export function AgentPersonaComposer({
       <EmptyState
         title={t('personaComposerNoAgentsTitle')}
         description={t('personaComposerNoAgentsDescription')}
-        action={<Link href="/agents/deploy" className="text-sm text-primary underline-offset-4 hover:underline">{t('backToWizard')}</Link>}
+        action={<Link href="/organization/workforce/deploy" className="text-sm text-primary underline-offset-4 hover:underline">{t('backToWizard')}</Link>}
       />
     );
   }
@@ -332,7 +332,7 @@ export function AgentPersonaComposer({
             <AlertDescription>
               <p>{t('personaComposerSuccessBody', { slug: createdPersona.slug })}</p>
               <div className="mt-3 flex flex-wrap gap-3">
-                <Link href="/agents/deploy" className="text-sm font-medium underline-offset-4 hover:underline">{t('backToWizard')}</Link>
+                <Link href="/organization/workforce/deploy" className="text-sm font-medium underline-offset-4 hover:underline">{t('backToWizard')}</Link>
                 <button type="button" onClick={() => setCreatedPersona(null)} className="text-sm font-medium underline-offset-4 hover:underline">{t('personaComposerCreateAnother')}</button>
               </div>
             </AlertDescription>

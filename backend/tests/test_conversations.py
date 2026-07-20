@@ -294,7 +294,10 @@ async def test_list_conversations():
 
         conv_ids_result = MagicMock()
         # 270c87e6: conv_ids 쿼리가 (conversation_id, muted_at) 2컬럼 반환 — Row 속성 접근 정합.
-        conv_ids_result.all.return_value = [MagicMock(conversation_id=CONV_ID, muted_at=None)]
+        # story #1976: last_read_at 3번째 컬럼 편승(같은 배치 쿼리, 신규 쿼리 아님).
+        conv_ids_result.all.return_value = [
+            MagicMock(conversation_id=CONV_ID, muted_at=None, last_read_at=None)
+        ]
 
         total_result = MagicMock()
         total_result.scalar_one.return_value = 1
@@ -305,12 +308,16 @@ async def test_list_conversations():
         p_rows_result = MagicMock()
         p_rows_result.all.return_value = []
 
+        # story #1976: unread_count 배치 쿼리(단일 JOIN+GROUP BY) — 빈 결과=전 대화 unread 0.
+        unread_result = MagicMock()
+        unread_result.all.return_value = []
+
         latest_msg_result = MagicMock()
         latest_msg_result.scalar_one_or_none.return_value = mock_msg
 
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, latest_msg_result,
         ])
 
         async with client as c:
@@ -400,11 +407,21 @@ async def test_get_conversation_200_returns_project_id():
         agents_result = MagicMock()
         agents_result.scalars.return_value.all.return_value = [agent_id]  # 전원 agent 확정
 
-        # 270c87e6: detail이 caller muted_at 조회 1건 추가 — 비참여(agent-only)면 None=미mute.
+        # 270c87e6: detail이 caller (muted_at, last_read_at) 조회 1건 추가(story #1976: last_read_at
+        # 편승) — 비참여(agent-only)면 row 자체가 None(=미mute·unread_count 계산 스킵).
         muted_result = MagicMock()
-        muted_result.scalar_one_or_none.return_value = None
+        muted_result.one_or_none.return_value = None
 
-        session.execute = AsyncMock(side_effect=[conv_result, member_result, pids_result, agents_result, muted_result])
+        # story #2009: get_conversation이 `_fetch_conversation_participants`(list_conversations와
+        # 공유하는 배치 헬퍼)를 마지막에 1회 더 호출 — participant 행 0건으로 모킹(단순화, 이
+        # 테스트의 검증 대상은 project_id이지 participants shape 자체는 아래 shape parity 테스트가
+        # 커버)하면 후속 lookup_members_by_ids/runtime_type 쿼리도 스킵된다(all_member_ids 공집합).
+        participants_result = MagicMock()
+        participants_result.all.return_value = []
+
+        session.execute = AsyncMock(side_effect=[
+            conv_result, member_result, pids_result, agents_result, muted_result, participants_result,
+        ])
 
         async with client as c:
             resp = await c.get(f"/api/v2/conversations/{CONV_ID}")
@@ -413,6 +430,7 @@ async def test_get_conversation_200_returns_project_id():
         body = resp.json()
         assert body["id"] == str(CONV_ID)
         assert body["project_id"] == str(PROJECT_ID)  # 업로드 path server-side 도출의 근거
+        assert body["participants"] == []
     finally:
         app.dependency_overrides.clear()
 

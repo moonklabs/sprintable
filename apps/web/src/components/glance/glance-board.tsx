@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Loader2 } from 'lucide-react';
+import Link from 'next/link';
+import { Loader2, Compass } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import type { RoadmapEpic } from '@/services/glance';
 import { loadGlanceData } from './load-glance-data';
 import { RoadmapFlow } from './roadmap-flow';
@@ -16,6 +19,31 @@ import {
 } from './derive-exception-signals';
 import type { HeroEnvelope } from './derive-hero-envelope';
 import type { HeroStory, HeroMember } from './hero-logic';
+
+// story 190f4c71(doc resource-view-firsttouch-identity-pattern §4 "현황판(glance)" 행 — 정체성=
+// 프로젝트 여정[시작→지금→앞으로]·visual=로드맵 waypoint·첫행동=첫 에픽): 3-waypoint **직선** 배치.
+// 실험실(1eb18bd8)의 4노드 원형 사이클과 의도적으로 differentiate — 현황판은 사이클이 아니라
+// 선형 여정(journey)이라 원 아닌 직선. 과설명 금지·아이콘 없이 라벨+점만(더 절제).
+function RoadmapWaypoints({ t }: { t: (key: 'roadmapWaypointStart' | 'roadmapWaypointNow' | 'roadmapWaypointFuture') => string }) {
+  const points: Array<{ key: 'roadmapWaypointStart' | 'roadmapWaypointNow' | 'roadmapWaypointFuture'; emphasis?: boolean }> = [
+    { key: 'roadmapWaypointStart' },
+    { key: 'roadmapWaypointNow', emphasis: true },
+    { key: 'roadmapWaypointFuture' },
+  ];
+  return (
+    <div className="flex items-center gap-2 text-muted-foreground/70" aria-hidden="true">
+      {points.map(({ key, emphasis }, i) => (
+        <span key={key} className="flex items-center gap-2">
+          {i > 0 ? <span className="h-px w-8 bg-border" /> : null}
+          <span className="flex flex-col items-center gap-1">
+            <span className={emphasis ? 'size-2 rounded-full bg-info' : 'size-1.5 rounded-full bg-muted-foreground/40'} />
+            <span className="text-[10px] leading-none">{t(key)}</span>
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 interface GlanceBoardProps {
   projectId: string;
@@ -94,7 +122,24 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
   }
 
   if (roadmap.length === 0) {
-    return <p className="py-12 text-center text-sm text-muted-foreground">{t('roadmapEmpty')}</p>;
+    return (
+      <EmptyState
+        icon={<Compass className="size-8" />}
+        title={t('roadmapEmpty')}
+        description={t('roadmapEmptyDescription')}
+        action={
+          <div className="flex flex-col items-center gap-4">
+            <RoadmapWaypoints t={t} />
+            <div className="flex flex-col items-center gap-1.5">
+              <Button size="sm" asChild>
+                <Link href="/goals">{t('roadmapEmptyCta')}</Link>
+              </Button>
+              <p className="text-xs text-muted-foreground">{t('roadmapEmptyAiHint')}</p>
+            </div>
+          </div>
+        }
+      />
+    );
   }
 
   return (

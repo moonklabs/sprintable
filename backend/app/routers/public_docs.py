@@ -14,7 +14,7 @@ from app.dependencies.database import get_db
 from app.schemas.doc import PublicDocResponse
 from app.services import doc_share
 
-router = APIRouter(prefix="/api/v2/public/docs", tags=["public-docs"])
+router = APIRouter(prefix="/api/v2/public/docs", tags=["public-docs", "Knowledge"])
 
 
 @router.get("/{token}", response_model=PublicDocResponse)

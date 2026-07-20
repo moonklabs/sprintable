@@ -63,6 +63,14 @@ export interface SseWorkingPayload {
   working: Array<{ member_id: string; state?: string }>;
 }
 
+/** story #1977: conversation.read SSE payload — #1976 mark-read 응답과 동일 shape(본인 타 커넥션 전파). */
+export interface SseConversationReadPayload {
+  conversation_id: string;
+  member_id: string;
+  last_read_at: string;
+  unread_count: number;
+}
+
 interface UseChatSseOptions {
   currentTeamMemberId?: string;
   onNewMessage?: (message: ChatMessage) => void;
@@ -70,12 +78,14 @@ interface UseChatSseOptions {
   onConversationMessage?: (payload: Record<string, unknown>) => void;
   // R2: 채팅 working/typing — 1.5s 폴(/conversations/{id}/working) 대체.
   onWorking?: (payload: SseWorkingPayload) => void;
+  // story #1977: conversation.read — 다른 탭/기기에서 읽음 처리 시 이 탭의 unread 배지(리스트+GNB) 자가정정.
+  onConversationRead?: (payload: SseConversationReadPayload) => void;
   onReconnect?: () => void;
 }
 
 const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000];
 
-export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, onConversationMessage, onWorking, onReconnect }: UseChatSseOptions) {
+export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, onConversationMessage, onWorking, onConversationRead, onReconnect }: UseChatSseOptions) {
   const [connected, setConnected] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -85,6 +95,7 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   const onReplyCreatedRef = useRef(onReplyCreated);
   const onConversationMessageRef = useRef(onConversationMessage);
   const onWorkingRef = useRef(onWorking);
+  const onConversationReadRef = useRef(onConversationRead);
   const onReconnectRef = useRef(onReconnect);
   const memberIdRef = useRef(currentTeamMemberId);
 
@@ -94,6 +105,7 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   useLayoutEffect(() => { onReplyCreatedRef.current = onReplyCreated; }, [onReplyCreated]);
   useLayoutEffect(() => { onConversationMessageRef.current = onConversationMessage; }, [onConversationMessage]);
   useLayoutEffect(() => { onWorkingRef.current = onWorking; }, [onWorking]);
+  useLayoutEffect(() => { onConversationReadRef.current = onConversationRead; }, [onConversationRead]);
   useLayoutEffect(() => { onReconnectRef.current = onReconnect; }, [onReconnect]);
   useLayoutEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
@@ -169,6 +181,16 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
         try {
           const payload = JSON.parse(e.data as string) as SseWorkingPayload;
           if (payload.conversation_id) onWorkingRef.current?.(payload);
+        } catch { /* ignore parse errors */ }
+      });
+
+      // story #1977: conversation.read — #1976이 본인 타 커넥션에만 전파(read-receipt 아님).
+      // 다른 탭/기기에서 mark-read 하면 이 탭의 리스트 배지·GNB 총합을 서버 truth로 자가정정.
+      source.addEventListener('conversation.read', (e: MessageEvent) => {
+        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
+        try {
+          const payload = JSON.parse(e.data as string) as SseConversationReadPayload;
+          if (payload.conversation_id) onConversationReadRef.current?.(payload);
         } catch { /* ignore parse errors */ }
       });
 

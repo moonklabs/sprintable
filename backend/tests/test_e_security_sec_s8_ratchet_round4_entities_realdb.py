@@ -50,7 +50,7 @@ async def _seed(session):
     "TOP SECRET B ...") + human_a(project_a에만 명시 grant, project_b 접근권 없음)."""
     from app.models.doc import Doc
     from app.models.organization import Organization
-    from app.models.pm import Epic, Story, Task
+    from app.models.pm import Goal, Story, Task
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
     from app.models.user import User
@@ -65,7 +65,7 @@ async def _seed(session):
     await session.commit()
 
     story_b = Story(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="TOP SECRET B Story")
-    epic_b = Epic(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="TOP SECRET B Epic")
+    epic_b = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="TOP SECRET B Epic")
     doc_b = Doc(
         id=uuid.uuid4(), org_id=org.id, project_id=project_b.id,
         title="TOP SECRET B Doc", slug=f"top-secret-b-{uuid.uuid4().hex[:8]}",

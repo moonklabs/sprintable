@@ -97,6 +97,7 @@ async def test_create_project_ensures_human_member():
     body = MagicMock()
     body.name = "Board"
     body.description = None
+    body.slug = None
 
     project_obj = MagicMock()
 
@@ -105,6 +106,7 @@ async def test_create_project_ensures_human_member():
 
     with patch.object(projs, "ProjectRepository", return_value=fake_repo), \
             patch.object(projs, "ensure_human_member", new=AsyncMock()) as ehm, \
+            patch.object(projs, "resolve_unique_project_slug", new=AsyncMock(return_value="board")), \
             patch.object(projs.ProjectResponse, "model_validate", return_value=MagicMock()):
         await projs.create_project(body=body, session=session, auth=auth, org_id=org_id)
 

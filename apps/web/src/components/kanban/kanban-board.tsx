@@ -4,9 +4,10 @@ import type { ComponentType } from 'react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Check, ChevronDown, LayoutGrid, LayoutList, Search } from 'lucide-react';
+import { Check, ChevronDown, LayoutGrid, LayoutList, Search, Workflow, Plus } from 'lucide-react';
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
@@ -63,6 +64,8 @@ interface Task {
 
 interface KanbanBoardProps {
   projectId?: string;
+  wsSlug: string;
+  projSlug: string;
 }
 
 // WIP limit localStorage 키
@@ -102,7 +105,7 @@ function saveWipLimit(projectId: string | undefined, status: string, limit: numb
   }
 }
 
-export function KanbanBoard({ projectId }: KanbanBoardProps) {
+export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const t = useTranslations('board');
@@ -142,8 +145,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     else params.delete(key);
     const storyId = searchParams.get('story');
     if (storyId) params.set('story', storyId);
-    router.replace(`/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
-  }, [router, searchParams]);
+    router.replace(`/${wsSlug}/${projSlug}/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+  }, [router, searchParams, wsSlug, projSlug]);
 
   // BOARD-03: done 컬럼 collapse 상태
   const [doneCollapsed, setDoneCollapsed] = useState(false);
@@ -252,7 +255,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       const [storyResults, sprintsRes, epicsRes, membersRes] = await Promise.all([
         Promise.all(statuses.map((s) => fetchStoriesByStatus(s))),
         fetch(`/api/sprints${sprintParams}`),
-        fetch(`/api/epics?${epicParams.toString()}`),
+        fetch(`/api/goals?${epicParams.toString()}`),
         fetch(`/api/members${memberParams}`),
       ]);
 
@@ -425,8 +428,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     setAutoComposeNonce((n) => n + 1);
     const params = new URLSearchParams(searchParams.toString());
     params.delete('view');
-    router.replace(`/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
-  }, [searchParams, router]);
+    router.replace(`/${wsSlug}/${projSlug}/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+  }, [searchParams, router, wsSlug, projSlug]);
 
   // URL에서 스토리 ID 읽어서 자동으로 패널 열기
   useEffect(() => {
@@ -909,7 +912,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
               </div>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => router.push('/sprints')}>
+                <DropdownMenuItem onClick={() => router.push(`/${wsSlug}/${projSlug}/sprints`)}>
                   <span className="flex-1 text-xs text-muted-foreground">{t('manageSprints')}</span>
                 </DropdownMenuItem>
               </DropdownMenuGroup>
@@ -969,7 +972,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
               </div>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => router.push('/epics')}>
+                <DropdownMenuItem onClick={() => router.push(`/${wsSlug}/${projSlug}/goals`)}>
                   <span className="flex-1 text-xs text-muted-foreground">{t('manageEpics')}</span>
                 </DropdownMenuItem>
               </DropdownMenuGroup>
@@ -1169,7 +1172,32 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       </div>
 
       {/* Content area */}
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {stories.length === 0 ? (
+          // story bb78f14b(doc resource-view-firsttouch-identity-pattern §4 "보드" 행 — ⚠️과함
+          // 주의 명시): 다른 4뷰(5요소)와 달리 여기는 3요소로 축소(아이콘+headline+CTA, explainer
+          // 1문장) — 보드 자체가 이미 레인 시각이라 별도 visual/AI hint는 중복·클러터.
+          // stories(unfiltered 원본)로 진짜 빈 프로젝트만 판정 — 필터/검색 결과 0건은 여기 안 타고
+          // 기존 per-column "스토리가 없습니다" 그대로(에픽 PR#2209에서 배운 필터빈 vs 진짜빈 구분).
+          // ⚠️컬럼 그리드를 대체하지 않고 그 위 배너로만 — CTA가 여는 백로그 인라인 컴포저
+          // (autoComposeSignal)가 KanbanColumn 내부 상태라, 컬럼 자체가 마운트돼 있어야
+          // CTA 클릭이 실제로 컴포저를 연다(대체했다면 신호를 받을 컬럼이 없어 무반응했을 것).
+          <div className="shrink-0 border-b border-border/60 px-6 py-4">
+            <EmptyState
+              icon={<Workflow className="size-8" />}
+              title={t('boardEmptyTitle')}
+              description={t('boardEmptyDescription')}
+              action={
+                <Button size="sm" onClick={() => setAutoComposeNonce((n) => n + 1)}>
+                  <Plus className="size-3.5" />
+                  {t('boardEmptyCta')}
+                </Button>
+              }
+              className="bg-transparent px-0 py-0"
+            />
+          </div>
+        ) : null}
+        <div className="min-h-0 flex-1 overflow-hidden">
         {viewMode === 'list' ? (
           <div className="h-full overflow-y-auto">
             <KanbanListView
@@ -1254,6 +1282,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
             </DragOverlayCompat>
           </DndContext>
         )}
+        </div>
       </div>
 
       {/* Load more */}
@@ -1299,7 +1328,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                 if (projectId) params.set('project_id', projectId);
                 params.set('limit', '50');
                 params.set('cursor', epicsNextCursor);
-                const res = await fetch(`/api/epics?${params.toString()}`);
+                const res = await fetch(`/api/goals?${params.toString()}`);
                 if (res.ok) {
                   const json = await res.json();
                   setEpics((prev) => [...prev, ...(json.data ?? [])]);

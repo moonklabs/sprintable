@@ -98,7 +98,7 @@ async def test_create_with_canvas_bounds_declared():
         try:
             resp = await client.post(
                 "/api/v2/visual-artifacts",
-                json={"title": "Framed", "canvas_bounds": {"w": 1200, "h": 800}},
+                json={"title": "Framed", "canvas_bounds": {"w": 1200, "h": 800}, "nodes": [{"type": "text", "props": {}}]},
             )
             assert resp.status_code == 201, resp.text
             body = resp.json()["data"]
@@ -132,7 +132,10 @@ async def test_create_without_canvas_bounds_is_null():
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            resp = await client.post("/api/v2/visual-artifacts", json={"title": "Unframed"})
+            resp = await client.post(
+                "/api/v2/visual-artifacts",
+                json={"title": "Unframed", "nodes": [{"type": "text", "props": {}}]},
+            )
             assert resp.status_code == 201, resp.text
             assert resp.json()["data"]["canvas_bounds"] is None
         finally:
@@ -157,7 +160,7 @@ async def test_edit_without_canvas_bounds_carries_forward():
         try:
             create_resp = await client.post(
                 "/api/v2/visual-artifacts",
-                json={"title": "Carry", "canvas_bounds": {"w": 640, "h": 480}},
+                json={"title": "Carry", "canvas_bounds": {"w": 640, "h": 480}, "nodes": [{"type": "text", "props": {}}]},
             )
             artifact_id = create_resp.json()["data"]["id"]
 
@@ -194,7 +197,7 @@ async def test_edit_with_explicit_canvas_bounds_redeclares_and_bumps_version():
         try:
             create_resp = await client.post(
                 "/api/v2/visual-artifacts",
-                json={"title": "Redeclare", "canvas_bounds": {"w": 640, "h": 480}},
+                json={"title": "Redeclare", "canvas_bounds": {"w": 640, "h": 480}, "nodes": [{"type": "text", "props": {}}]},
             )
             artifact_id = create_resp.json()["data"]["id"]
 
@@ -271,7 +274,10 @@ async def test_edit_with_no_operations_and_no_canvas_bounds_422():
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Empty Edit"})
+            create_resp = await client.post(
+                "/api/v2/visual-artifacts",
+                json={"title": "Empty Edit", "nodes": [{"type": "text", "props": {}}]},
+            )
             artifact_id = create_resp.json()["data"]["id"]
 
             resp = await client.post(f"/api/v2/visual-artifacts/{artifact_id}/edit", json={})
@@ -358,7 +364,7 @@ async def test_mcp_create_and_edit_canvas_bounds_roundtrip():
 
         from sprintable_mcp import api_client as api_client_mod
         from sprintable_mcp.tools.visual_artifacts import (
-            CanvasBoundsInput, CreateArtifactInput, EditArtifactInput,
+            ArtifactNodeInput, CanvasBoundsInput, CreateArtifactInput, EditArtifactInput,
             create_artifact, edit_artifact,
         )
 
@@ -376,6 +382,7 @@ async def test_mcp_create_and_edit_canvas_bounds_roundtrip():
         try:
             created = json.loads((await create_artifact(CreateArtifactInput(
                 title="MCP Framed", canvas_bounds=CanvasBoundsInput(w=1024, h=768),
+                nodes=[ArtifactNodeInput(type="text")],
             )))[0].text)
             assert created["canvas_bounds"] == {"w": 1024, "h": 768}
 

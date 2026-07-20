@@ -4,7 +4,7 @@ import { useCallback } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { buildDocPath } from './lib/doc-path';
-import type { Doc } from '@/app/(authenticated)/docs/docs-context';
+import type { Doc } from '@/app/(authenticated)/[ws]/[proj]/docs/docs-context';
 
 interface DocBreadcrumbProps {
   currentDocId: string;

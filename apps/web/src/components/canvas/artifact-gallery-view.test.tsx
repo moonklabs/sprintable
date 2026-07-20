@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // story a15cea4f — 산출물 갤러리 회귀가드. fetch를 4축 lookup + artifacts로 스텁해 실 렌더를
-// 검증(mock 컴포넌트 없음, useDashboardContext만 스텁 — 라우팅 컨텍스트 무관하게 projectId 고정).
+// 검증(mock 컴포넌트 없음, projectId는 story a539c649 S3a부터 prop으로 고정 주입).
 //
 // story 3d888ba2 — 썸네일(exports/version-detail)이 추가되며 URL 매칭 정밀도가 중요해짐:
 // `/api/visual-artifacts/{id}/versions/{n}`(단일 객체)과 `/api/visual-artifacts/{id}/versions`
@@ -17,10 +17,6 @@ import koMessagesRaw from '../../../messages/ko.json';
 
 type LooseMessages = { [key: string]: string | LooseMessages };
 const koMessages = koMessagesRaw as unknown as LooseMessages;
-
-vi.mock('@/app/dashboard/dashboard-shell', () => ({
-  useDashboardContext: () => ({ projectId: 'proj-1' }),
-}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -77,7 +73,7 @@ function stubFetch(overrides: StubOverrides = {}) {
       return jsonRes(overrides.exportsByArtifact?.[exportsMatch[1]!] ?? []);
     }
     if (url.startsWith('/api/visual-artifacts')) return jsonRes(overrides.artifacts ?? ARTIFACTS);
-    if (url.startsWith('/api/epics')) return jsonRes([{ id: 'e1', title: '온보딩 캠페인' }]);
+    if (url.startsWith('/api/goals')) return jsonRes([{ id: 'e1', title: '온보딩 캠페인' }]);
     if (url.startsWith('/api/stories')) return jsonRes(overrides.stories ?? []);
     if (url.startsWith('/api/sprints')) return jsonRes([]);
     if (url.startsWith('/api/docs')) return jsonRes([]);
@@ -108,7 +104,7 @@ async function mount() {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <ArtifactGalleryView />
+        <ArtifactGalleryView projectId="proj-1" />
       </NextIntlClientProvider>,
     );
   });
@@ -142,7 +138,7 @@ describe('ArtifactGalleryView (story a15cea4f)', () => {
     // 쪼개져 있던 #2124 이래의 배치 오류(우측 상단 탭)가 아니다.
     const desktopRail = container.querySelector('.hidden.h-fit.lg\\:block');
     expect(desktopRail).not.toBeNull();
-    const epicBtn = [...(desktopRail?.querySelectorAll('button') ?? [])].find((b) => b.textContent === '에픽');
+    const epicBtn = [...(desktopRail?.querySelectorAll('button') ?? [])].find((b) => b.textContent === '목표');
     const groupBtn = [...(desktopRail?.querySelectorAll('button') ?? [])].find((b) => b.textContent?.includes('온보딩 캠페인'));
     expect(epicBtn).toBeDefined();
     expect(groupBtn).toBeDefined();
@@ -154,7 +150,7 @@ describe('ArtifactGalleryView (story a15cea4f)', () => {
     expect(details).not.toBeNull();
     expect(details?.querySelector('summary')).not.toBeNull();
     // 접이식 셀렉터 안에도 동일한 축 세그먼트+그룹 목록이 있다(데스크톱 사본과 동일 내용).
-    const collapsibleEpicBtn = [...(details?.querySelectorAll('button') ?? [])].find((b) => b.textContent === '에픽');
+    const collapsibleEpicBtn = [...(details?.querySelectorAll('button') ?? [])].find((b) => b.textContent === '목표');
     expect(collapsibleEpicBtn).toBeDefined();
   });
 

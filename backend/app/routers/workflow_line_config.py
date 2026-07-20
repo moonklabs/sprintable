@@ -34,7 +34,7 @@ from app.services.workflow_line_config import (
 from app.services.workflow_line_engine import evaluate_line_for_transition
 from app.services.workflow_line_resolver import resolve_routing_context
 
-router = APIRouter(prefix="/api/v2/workflow-line-config", tags=["workflow-line-config"])
+router = APIRouter(prefix="/api/v2/workflow-line-config", tags=["workflow-line-config", "Work"])
 
 
 # ── schemas ───────────────────────────────────────────────────────────────────

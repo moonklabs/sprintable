@@ -15,7 +15,7 @@ from app.schemas.api_key import (
 )
 from app.services.recruit_service import acquire_agent_mutation_lock
 
-router = APIRouter(prefix="/api/v2", tags=["api-keys"])
+router = APIRouter(prefix="/api/v2", tags=["api-keys", "Organization"])
 
 
 def _get_repo(session: AsyncSession = Depends(get_db)) -> ApiKeyRepository:

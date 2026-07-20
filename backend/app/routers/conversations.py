@@ -8,8 +8,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, field_validator
-from sqlalchemy import and_, func, select, update
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import and_, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,7 +41,7 @@ from app.services.storage import get_storage_provider
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v2/conversations", tags=["conversations"])
+router = APIRouter(prefix="/api/v2/conversations", tags=["conversations", "Organization"])
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -233,6 +233,142 @@ async def _conversations_with_human_participant(conv_ids: list[uuid.UUID], db: A
         if mid not in agent_ids:  # human 참가자 발견
             result.add(cid)
     return result
+
+
+# ─── story #1976 (E-CHAT-REALTIME 트랙A): read state 서버 truth ──────────────────
+# doc: chat-realtime-track-a-read-state-design §3/§4. 순수 SQLAlchemy 쿼리/stmt 조립
+# 함수(DB 실행 없음) — 단위 테스트 가능(TDD RED→GREEN, DB 미기동 시에도 compile() 검증 가능).
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)  # last_read_at NULL(한 번도 안 읽음) 기준선
+
+
+def _mark_read_update_stmt(conversation_id: uuid.UUID, member_id: uuid.UUID, up_to: datetime):
+    """GREATEST 래칫 UPDATE — last_read_at을 단조증가만 허용(멱등·역행 방지, §4-3).
+
+    GREATEST(COALESCE(last_read_at, epoch), up_to): 이미 더 최신 read 상태면 과거 up_to로
+    덮어쓰지 않는다. WHERE가 (conversation_id, member_id) 매치 0행이면 비참여자 — 호출부가
+    RETURNING 결과 None으로 403 판단.
+    """
+    return (
+        update(ConversationParticipant)
+        .where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.member_id == member_id,
+        )
+        .values(
+            last_read_at=func.greatest(
+                func.coalesce(ConversationParticipant.last_read_at, text("'epoch'::timestamptz")),
+                up_to,
+            )
+        )
+        .returning(ConversationParticipant.last_read_at)
+    )
+
+
+def _unread_count_stmt(conversation_id: uuid.UUID, member_id: uuid.UUID, since: datetime | None):
+    """단건 unread_count — last_read_at(since) 이후 & sender IS DISTINCT FROM 나(§4-1).
+
+    IS DISTINCT FROM(NOT !=) 필수: sender_id nullable(발신자 탈퇴 시 SET NULL) 이라 `!=`는
+    SQL 3-값 논리상 NULL != x → NULL(제외) 이 돼 발신자소실 메시지가 unread에서 누락된다.
+    since=None(한 번도 안 읽음)이면 _EPOCH 기준선 사용.
+    """
+    baseline = since if since is not None else _EPOCH
+    return select(func.count(ConversationMessage.id)).where(
+        ConversationMessage.conversation_id == conversation_id,
+        ConversationMessage.created_at > baseline,
+        ConversationMessage.sender_id.is_distinct_from(member_id),
+    )
+
+
+def _list_unread_counts_stmt(member_id: uuid.UUID, conv_id_list: list[uuid.UUID] | None = None):
+    """list_conversations 배치 unread_count — 단일 JOIN+GROUP BY(N+1 방지, §4-2).
+
+    대화마다 기준 시각(last_read_at)이 다른 상관 카운트라 순수 IN 배치로는 불가 — JOIN
+    조건에 기준 시각 비교를 박아 넣어 페이지 대화 수(N)와 무관하게 쿼리 1회로 해결.
+    INNER JOIN이라 unread=0인 대화는 결과행 자체가 없음(호출부가 dict.get(id, 0)으로 처리).
+
+    conv_id_list=None이면 caller가 참여 중인 **모든** 대화를 대상(전량, 페이지네이션 무관) —
+    story #1992(GNB unread 총합)가 `_total_unread_count_stmt`로 이 "전량 모드"를 서브쿼리로
+    감싸 SUM 재사용(동일 JOIN+`IS DISTINCT FROM` 조건 SSOT, 중복 없음).
+    """
+    stmt = (
+        select(
+            ConversationParticipant.conversation_id,
+            func.count(ConversationMessage.id).label("unread_count"),
+        )
+        .join(
+            ConversationMessage,
+            and_(
+                ConversationMessage.conversation_id == ConversationParticipant.conversation_id,
+                ConversationMessage.created_at > func.coalesce(
+                    ConversationParticipant.last_read_at, text("'epoch'::timestamptz")
+                ),
+                ConversationMessage.sender_id.is_distinct_from(member_id),
+            ),
+        )
+        .where(ConversationParticipant.member_id == member_id)
+        .group_by(ConversationParticipant.conversation_id)
+    )
+    if conv_id_list is not None:
+        stmt = stmt.where(ConversationParticipant.conversation_id.in_(conv_id_list))
+    return stmt
+
+
+def _total_unread_count_stmt(member_id: uuid.UUID):
+    """story #1992: GNB 채팅 unread 총합(count-only) — caller의 전 참여 대화(페이지네이션 무관)
+    unread_count SUM.
+
+    `_list_unread_counts_stmt(member_id)`(conv_id_list=None → 전량 모드)를 서브쿼리로 감싸
+    SUM 래퍼만 추가한다 — JOIN+`IS DISTINCT FROM` 계산 로직 재구현 없음(단일 SSOT, list_conversations
+    의 per-conversation unread_count와 동일 정의). INNER JOIN 특성상 대화별 최소 1건이라도 unread가
+    있어야 그룹행이 생기므로, 참여 대화가 전무하거나 전부 unread 0이면 서브쿼리 결과가 0행 —
+    COALESCE(SUM(...), 0)으로 NULL을 0으로 정규화한다.
+    """
+    per_conv = _list_unread_counts_stmt(member_id).subquery()
+    return select(func.coalesce(func.sum(per_conv.c.unread_count), 0))
+
+
+async def _fetch_conversation_participants(
+    conv_ids: list[uuid.UUID],
+    db: AsyncSession,
+) -> dict[uuid.UUID, list[dict]]:
+    """story #2009: conversation(들)의 participants 배치 조회 — list_conversations의 기존
+    N+1 방지 배치 로직을 단건(`get_conversation`)에서도 재사용하도록 추출(로직 복제 금지, AC).
+
+    반환 dict shape는 두 엔드포인트가 항상 동일 JSON을 내려주도록 고정:
+    `{"member_id", "name", "avatar_url", "type", "runtime_type"}` (list_conversations의
+    participants 항목과 byte-identical — FE 파싱 일관성).
+    """
+    if not conv_ids:
+        return {}
+
+    p_rows = (await db.execute(
+        select(ConversationParticipant.conversation_id, ConversationParticipant.member_id)
+        .where(ConversationParticipant.conversation_id.in_(conv_ids))
+    )).all()
+
+    all_member_ids = {r.member_id for r in p_rows}
+    resolved_map = await lookup_members_by_ids(all_member_ids, db) if all_member_ids else {}
+
+    # E-CHAT-CMD S8b: participant 의 runtime_type 노출(team_members 뷰서 read — 에이전트만 값, 휴먼 NULL).
+    runtime_type_map: dict[uuid.UUID, str | None] = {}
+    if all_member_ids:
+        rt_rows = (await db.execute(
+            select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(all_member_ids))
+        )).all()
+        runtime_type_map = {r.id: r.runtime_type for r in rt_rows}
+
+    conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
+    for r in p_rows:
+        resolved = resolved_map.get(r.member_id)
+        conv_participants[r.conversation_id].append({
+            "member_id": str(r.member_id),
+            "name": resolved.name if resolved else str(r.member_id)[:8],
+            "avatar_url": getattr(resolved, "avatar_url", None) if resolved else None,
+            "type": resolved.type if resolved else "human",
+            "runtime_type": runtime_type_map.get(r.member_id),
+        })
+    return conv_participants
 
 
 _SUMMARY_PREVIEW_MAX = 80
@@ -590,6 +726,13 @@ class ConversationResponse(BaseModel):
     updated_at: datetime
     # 270c87e6: caller의 알림 mute 상태(participant muted_at 기반) — FE mute 토글 초기 상태용(#1426).
     muted: bool = False
+    # story #1976 (E-CHAT-REALTIME 트랙A): caller의 read state(participant.last_read_at) +
+    # 파생 unread_count. 비참여자(admin-bypass agent-only 대화)는 last_read_at=None·unread_count=0.
+    last_read_at: datetime | None = None
+    unread_count: int = 0
+    # story #2009: list_conversations와 동일 shape의 participants(재사용, 로직 복제 금지 — AC).
+    # dict 그대로 노출(별도 Pydantic 서브모델 미도입) — list 엔드포인트와 byte-identical JSON 보장.
+    participants: list[dict] = Field(default_factory=list)
 
 
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
@@ -695,6 +838,13 @@ class MuteRequest(BaseModel):
     muted: bool
 
 
+class MarkReadRequest(BaseModel):
+    """story #1976: up_to 지정 시 그 시각으로 SET(FE 실 렌더 마지막 메시지 timestamp — 권장 경로).
+    up_to 생략 시 서버 now() 사용 — 이는 "전체 읽음"(mark-all-read) 명시 액션 전용 의도(§3-2)."""
+
+    up_to: datetime | None = None
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("", status_code=201)
@@ -767,7 +917,11 @@ async def list_conversations(
         raise HTTPException(status_code=403, detail="Only owner/admin can view agent conversations.")
 
     conv_ids_result = await db.execute(
-        select(ConversationParticipant.conversation_id, ConversationParticipant.muted_at).where(
+        select(
+            ConversationParticipant.conversation_id,
+            ConversationParticipant.muted_at,
+            ConversationParticipant.last_read_at,
+        ).where(
             ConversationParticipant.member_id == sender.id
         )
     )
@@ -776,6 +930,9 @@ async def list_conversations(
     # 270c87e6: caller의 대화별 mute 상태(FE 토글 초기 상태·#1426). admin-bypass로 추가되는
     # agent-only 대화는 caller가 참여자 아니라 자연히 False.
     caller_muted = {r.conversation_id: r.muted_at is not None for r in _caller_rows}
+    # story #1976: caller의 대화별 read state(participant.last_read_at) — 같은 배치 쿼리에 편승
+    # (신규 쿼리 추가 아님·N+1 무영향). admin-bypass agent-only 대화는 caller 미참여라 자연히 None.
+    caller_last_read_at = {r.conversation_id: r.last_read_at for r in _caller_rows}
 
     # AC1/2 + #1262: admin-bypass는 **agent-only 대화로 한정**(사적 DM 프라이버시).
     # project 내 agent type member가 participant인 conversation 후보를 모으되,
@@ -820,35 +977,16 @@ async def list_conversations(
         .limit(limit).offset(offset)
     )).scalars().all()
 
-    # participants 배치 조회 (N+1 방지)
+    # participants 배치 조회 (N+1 방지) — story #2009: get_conversation과 공유하는 헬퍼로 추출.
     conv_id_list = [c.id for c in convs]
-    p_rows = (await db.execute(
-        select(ConversationParticipant.conversation_id, ConversationParticipant.member_id)
-        .where(ConversationParticipant.conversation_id.in_(conv_id_list))
-    )).all()
+    conv_participants = await _fetch_conversation_participants(conv_id_list, db)
 
-    all_member_ids = {r.member_id for r in p_rows}
-    resolved_map = await lookup_members_by_ids(all_member_ids, db) if all_member_ids else {}
-
-    # E-CHAT-CMD S8b: participant 의 runtime_type 노출(team_members 뷰서 read — 에이전트만 값, 휴먼 NULL).
-    # S8 composer 가 미지원 런타임 에이전트 pre-send 경고를 그리려면 participant 응답에 runtime_type 필요.
-    runtime_type_map: dict[uuid.UUID, str | None] = {}
-    if all_member_ids:
-        rt_rows = (await db.execute(
-            select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(all_member_ids))
-        )).all()
-        runtime_type_map = {r.id: r.runtime_type for r in rt_rows}
-
-    conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
-    for r in p_rows:
-        resolved = resolved_map.get(r.member_id)
-        conv_participants[r.conversation_id].append({
-            "member_id": str(r.member_id),
-            "name": resolved.name if resolved else str(r.member_id)[:8],
-            "avatar_url": getattr(resolved, "avatar_url", None) if resolved else None,
-            "type": resolved.type if resolved else "human",
-            "runtime_type": runtime_type_map.get(r.member_id),
-        })
+    # story #1976: unread_count 배치 — 단일 JOIN+GROUP BY(N+1 방지, §4-2). INNER JOIN이라
+    # unread=0 대화는 결과행 없음 → dict.get(id, 0)으로 자연 0 처리.
+    unread_rows = (await db.execute(
+        _list_unread_counts_stmt(sender.id, conv_id_list)
+    )).all() if conv_id_list else []
+    unread_map: dict[uuid.UUID, int] = {r[0]: r[1] for r in unread_rows}
 
     result = []
     for conv in convs:
@@ -868,6 +1006,12 @@ async def list_conversations(
             "resolved_at": conv.resolved_at.isoformat() if conv.resolved_at else None,
             "participants": conv_participants.get(conv.id, []),
             "muted": caller_muted.get(conv.id, False),  # 270c87e6: FE mute 토글 초기 상태
+            # story #1976: caller read state + 파생 unread_count(단일 JOIN+GROUP BY, N+1 없음).
+            "last_read_at": (
+                caller_last_read_at.get(conv.id).isoformat()
+                if caller_last_read_at.get(conv.id) else None
+            ),
+            "unread_count": unread_map.get(conv.id, 0),
             "latest_message": {
                 "content": latest_msg.content,
                 "created_at": latest_msg.created_at.isoformat(),
@@ -876,6 +1020,33 @@ async def list_conversations(
         })
 
     return {"data": result, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/unread-count")
+async def get_unread_count_total(
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """GET /api/v2/conversations/unread-count — story #1992: GNB 채팅 unread 총합(count-only).
+
+    caller(인증된 member)가 참여 중인 **전 대화**(페이지네이션 무관)의 unread_count를 SUM한
+    `{"count": int}`만 반환 — 대화 메타데이터(제목/참가자 등) 미포함. list_conversations의
+    per-conversation unread_count(story #1976, §4-2 `_list_unread_counts_stmt`)와 동일
+    SSOT 쿼리를 확장(`_total_unread_count_stmt`)해 재사용 — 계산 로직 재구현 없음.
+
+    project_id 미지정: GNB는 프로젝트 무관 org-wide 집계(다른 count-only 엔드포인트인
+    event-notifications/unread-count·notifications/count와 동일 관례로 `{"count": int}`
+    shape 통일 — PO 정정, 2026-07-18: 초안은 `{"total"}`이었으나 API 일관성 우선).
+
+    주의(기존 아키텍처 갭 · 본 story 스코프 밖): `_resolve_member`가 project_id 없이 호출되면
+    복수 project의 team_member 행을 가진 human은 `.first()`로 임의 1개 project만 해소된다
+    (event_notifications.py `_resolve_member_id`도 동일 관례). grant-only 휴먼은 canonical
+    org_member.id로 해소되어 이 갭이 없다.
+    """
+    sender = await _resolve_member(auth, org_id, db)
+    total = (await db.execute(_total_unread_count_stmt(sender.id))).scalar_one()
+    return {"count": int(total)}
 
 
 @router.get("/{conversation_id}", response_model=ConversationResponse)
@@ -915,15 +1086,187 @@ async def get_conversation(
             raise HTTPException(status_code=403, detail="Not a participant")
 
     # 270c87e6: caller의 mute 상태 노출(FE 토글 초기 상태·#1426). 비참여자(admin-bypass agent-only)는 False.
-    caller_muted_at = (await db.execute(
-        select(ConversationParticipant.muted_at).where(
+    # story #1976: 같은 단건 조회에 last_read_at도 편승(신규 쿼리 아님) — unread_count는 참여자일 때만 계산.
+    caller_row = (await db.execute(
+        select(ConversationParticipant.muted_at, ConversationParticipant.last_read_at).where(
             ConversationParticipant.conversation_id == conversation_id,
             ConversationParticipant.member_id == sender.id,
         )
-    )).scalar_one_or_none()
-    resp = ConversationResponse.model_validate(conv)
-    resp.muted = caller_muted_at is not None
+    )).one_or_none()
+    # story #2009: `ConversationResponse.model_validate(conv)`(from_attributes) 대신 필드별
+    # 명시 구성 — `Conversation.participants`는 SQLAlchemy 관계(lazy="select")라 동명의
+    # Pydantic 필드를 자동추출 시도하면 sync getattr가 비동기 세션 lazy-load를 트리거해
+    # `MissingGreenlet`으로 500(신규 필드 도입 시 실측 발견). 배치 헬퍼 결과로 아래서 명시 대입.
+    resp = ConversationResponse(
+        id=conv.id,
+        project_id=conv.project_id,
+        org_id=conv.org_id,
+        type=conv.type,
+        title=conv.title,
+        status=conv.status,
+        created_by=conv.created_by,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
+    )
+    resp.muted = caller_row is not None and caller_row.muted_at is not None
+    if caller_row is not None:
+        resp.last_read_at = caller_row.last_read_at
+        resp.unread_count = (await db.execute(
+            _unread_count_stmt(conversation_id, sender.id, caller_row.last_read_at)
+        )).scalar_one()
+    # story #2009: 단건 조회도 list_conversations와 동일 participants shape을 자체 포함 —
+    # FE가 30건 캡 있는 list 엔드포인트에 기대던 workaround(.find() miss 버그) 제거.
+    participants_map = await _fetch_conversation_participants([conversation_id], db)
+    resp.participants = participants_map.get(conversation_id, [])
     return resp
+
+
+async def _can_read_conversation(
+    conversation_id: uuid.UUID,
+    db: AsyncSession,
+    auth: AuthContext,
+    org_id: uuid.UUID,
+    *,
+    _conv_project_id: uuid.UUID | None = None,
+) -> bool:
+    """story #1994(E-KNOWLEDGE-LINK S2) 4~6회차 pass §8②: 메시지 조회 인가의 canonical bool 술어.
+
+    실제 판정 로직(participant∧project-access-valid ∨ ¬human-participant∧admin-bypass)은
+    `app.services.conversation_auth.conversation_readable_predicate`(SSOT — 문서화된 캐노니컬
+    predicate, `app/services/backlinks.py`의 벌크 쿼리도 **같은 함수**를 호출해 SAME WHERE절에
+    correlate한다)에 있다. §6회차부터 `admin_bypass_eligible` atom도 `backlinks.py`와 **같은**
+    correlated SSOT(`org_admin_valid_correlated`/`project_admin_valid_correlated`,
+    project_auth.py)를 재사용한다(재구현 0) — 예전엔 `_effective_org_role`의 사전 해소 결과를
+    bool 리터럴로 넘겼다(별개 pre-resolve TOCTOU 클래스, 아래 본문 참조). `project_access_valid`
+    atom은 여전히 `has_project_access` 단건 호출(§6회차 스코프 밖 — reviewer round-5 verdict가
+    `admin_bypass_eligible`만 잔여로 지목). 이 함수는 그 앞뒤로 project_id 조회·caller 신원
+    해소(이 hot path의 기존 pre-fetch 관례 유지 — 성능/행동 불변)를 감싸고, 존재하지
+    않는 대화/비참여자 판정 모두 raise 대신 False를 반환하는 total-boolean 계약을 지킨다.
+    백링크 API처럼 404/403 semantics(존재 비노출 오라클 회피)가 필요 없는 호출부가 "읽을 수
+    있는가"만 물을 때 쓴다. 404/403이 필요한 기존 호출부는 여전히 `_authorize_message_read`를
+    쓴다(zero duplication — 그쪽이 이 함수를 얇게 감싼다).
+
+    **계약: 이 함수는 절대 raise하지 않는다(total boolean predicate)** — story #1994 B1
+    하드닝(산티아고 sabotage-probe): `_resolve_member`가 project-scoped 해소에서 grant-loss
+    시 HTTPException(403)을 raise할 수 있었는데, 과거엔 이게 여기서 안 잡혀 백링크 API처럼
+    행 단위 판정을 기대하는 호출부까지 통째로 poison했다. 아래 본문은 try/except HTTPException
+    로 감싸 False로 정규화한다.
+
+    `_conv_project_id`: `_authorize_message_read`가 이미 조회해둔 project_id를 넘기면 동일 PK
+    SELECT를 중복 실행하지 않는다(메시지 목록/단건/리플 등 hot path 성능 보존). 직접 호출부
+    (백링크)는 생략 — 이 함수가 자체적으로 조회한다.
+    """
+    conv_project_id = _conv_project_id
+    if conv_project_id is None:
+        conv_project_id = (await db.execute(
+            select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+        )).scalar_one_or_none()
+        if conv_project_id is None:
+            return False
+
+    # story #1994 B1 하드닝(산티아고 sabotage-probe 발견): 아래(org-level 1차 해소부터
+    # project-access 재확인까지)는 `_resolve_member` → `member_resolver.resolve_member`가
+    # project_id 스코프에서 HTTPException(403 "No access to this project")을 raise할 수 있다
+    # (caller가 SOURCE project 접근을 잃은 grant-loss 케이스). 이 함수는 "raise 없는 total
+    # boolean predicate" 계약이다(백링크 API처럼 존재-비노출 오라클이 필요한 호출부가 mention
+    # 행 단위 판정에 쓴다) — raise가 새면 mention 한 행의 미인가가 전체 backlinks 응답을
+    # poison한다(B1: 한 행 제외가 아니라 엔드포인트 전체 실패). try/except로 전 구간을 봉합 —
+    # `_authorize_message_read`(아래·기존 raise-based wrapper)는 이 함수가 False를 반환하면
+    # 자신의 403을 별도로 raise하므로, 실제 메시지 엔드포인트(list/get)가 외부에 노출하는
+    # "grant-loss ⇒ 403" 동작 자체는 그대로 유지된다(상태코드 불변, 회귀 아님).
+    try:
+        # owner/admin: org-level 조회(project 소속 무관 접근), member: project-level 유지
+        sender = await _resolve_member(auth, org_id, db, project_id=None)
+
+        # §6회차(마지막 atom, 산티아고 명시 요구 — "_can_read_conversation 단건도 같은 atom"):
+        # `admin_bypass_eligible`을 더 이상 `_effective_org_role`의 사전 해소 결과(bool 리터럴)로
+        # 소싱하지 않는다. 예전엔 `_effective_org_role(...)`이 별도 SELECT(휴먼=OrgMember.role
+        # 조회, 에이전트=`get_project_role`)로 admin 여부를 **먼저** 확정한 뒤, 그 결과를 bool
+        # 리터럴로 아래 `select(predicate)` 메인 조회에 바인딩했다 — `backlinks.py`가 5회차
+        # 이전까지 갖고 있던 것과 동형인 "pre-resolve → 메인 statement 리터럴 바인딩" TOCTOU
+        # 클래스(그 SELECT와 이 메인 조회 사이에 org role/project grant가 revoke되면 메인
+        # 조회는 그 revoke를 못 본다). `backlinks.py`가 6회차에서 이 atom을
+        # `org_admin_valid_correlated`/`project_admin_valid_correlated`(project_auth.py)로
+        # 전환한 것과 정확히 같은 SSOT 함수를, 이 단건 소비자도 그대로 재사용한다(재구현 0) —
+        # human/agent 판별(`is_api_key`)만 여기서 하고, 어느 correlated 표현식을 쓸지 결정한
+        # 뒤 그 표현식 자체는 아래 `select(predicate)` 실행 시점까지 평가를 미룬다(pre-resolve
+        # 없음). `_effective_org_role`은 이 함수 밖의 다른 소비자(`list_conversations`의
+        # `include_agent_conversations` 게이트, `get_conversation`의 participant-bypass 여부
+        # 판단)에서 여전히 쓰이므로 그대로 유지 — 이 함수만 소싱 방식을 바꾼다.
+        from sqlalchemy import literal
+
+        from app.services.project_auth import (
+            has_project_access,
+            org_admin_valid_correlated,
+            project_admin_valid_correlated,
+        )
+
+        is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+
+        admin_bypass_eligible = (
+            project_admin_valid_correlated(
+                literal(conv_project_id), caller_id=sender.id, org_id=org_id,
+            )
+            if is_api_key
+            else org_admin_valid_correlated(caller_id=uuid.UUID(auth.user_id), org_id=org_id)
+        )
+
+        # project_access_valid(B1 grant-loss recheck — "참가 당시"가 아니라 "지금" 접근 가능한가):
+        # `has_project_access`(project_auth.py SSOT)를 boolean으로 직접 호출한다(재구현 아님).
+        #
+        # §5회차(산티아고 Blocker 2): 예전엔 API-key(에이전트) caller에게 `project_access_valid`를
+        # `True`로 하드코딩하고 재검증을 생략했다("기존 `_resolve_member`의 is_api_key 분기가
+        # project_id 무관하게 TeamMember.id 매치만 확인했다"는 이유로 그 동작을 "보존"한 것 — 그러나
+        # 산티아고 지적대로 이 "보존된" 동작 자체가 버그였다: grant가 회수된 에이전트도 여기선 계속
+        # `project_access_valid=True`를 받아, 같은 caller/project 쌍에 대해 `backlinks.py`(항상 live
+        # grant set을 correlate)와 이 함수(항상 True)가 서로 다른 답을 내는 "사실 하나·구현 둘" 드리프트가
+        # 있었다. `has_project_access`의 4-branch WHERE는 이미 caller type별로 내부 분기한다
+        # (`tm.type='human'` team_member 분기 vs `m.type='agent'` project_access grant 분기) —
+        # human/agent 무관하게 그냥 호출하면 두 caller 모두 정확한 답을 받는다(Python 레벨
+        # is_api_key 분기 자체가 불필요 — 재구현 0, project_auth.py가 이미 caller-type-aware SSOT).
+        #
+        # 이 atom(`project_access_valid`)은 §6회차 스코프 밖 — 여전히 요청당 1회 사전 SELECT로
+        # 소싱한다(reviewer round-5 verdict가 `admin_bypass_eligible` 하나만 잔여로 지목했다).
+        project_access_valid = await has_project_access(
+            db, uuid.UUID(auth.user_id), conv_project_id, org_id,
+        )
+
+        from app.services.conversation_auth import conversation_readable_predicate
+
+        predicate = conversation_readable_predicate(
+            literal(conversation_id),
+            caller_member_id=sender.id,
+            project_access_valid=project_access_valid,
+            # §6회차 fix: 위에서 조립한 correlated EXISTS — `_effective_org_role`의 사전
+            # 해소 bool이 아니라, 이 `select(predicate)` 실행 시점의 스냅샷으로 평가된다.
+            admin_bypass_eligible=admin_bypass_eligible,
+        )
+        result = (await db.execute(select(predicate))).scalar_one()
+        return bool(result)
+    except HTTPException:
+        return False
+
+
+async def _authorize_message_read(
+    conversation_id: uuid.UUID,
+    db: AsyncSession,
+    auth: AuthContext,
+    org_id: uuid.UUID,
+) -> uuid.UUID:
+    """메시지 조회(목록/단건/리플) 공용 인가. #1262: admin-bypass=agent-only 대화 한정 —
+    휴먼 참가 대화(=private)는 participant only. 반환: conversation.project_id.
+
+    story #1994 리팩터: 실제 판정 로직은 `_can_read_conversation`(canonical bool 술어)에 있다 —
+    이 함수는 그 위에 404(대화 없음)/403(비참여자) raise semantics만 얹는 얇은 wrapper.
+    """
+    conv_project_id = (await db.execute(
+        select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv_project_id is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if not await _can_read_conversation(conversation_id, db, auth, org_id, _conv_project_id=conv_project_id):
+        raise HTTPException(status_code=403, detail="Not a participant")
+    return conv_project_id
 
 
 @router.get("/{conversation_id}/messages")
@@ -941,32 +1284,7 @@ async def list_messages(
     thread_id 미지정: top-level 메시지만 반환 (thread_id IS NULL).
     thread_id 지정: 해당 thread의 reply 목록 반환.
     """
-    conv_project_id = (await db.execute(
-        select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
-    )).scalar_one_or_none()
-    if conv_project_id is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-
-    # #1262: admin-bypass=agent-only 대화 한정 — 휴먼 참가 대화(=private)는 participant only.
-    # owner/admin: org-level 조회(project 소속 무관 접근), member: project-level 유지
-    sender = await _resolve_member(auth, org_id, db, project_id=None)
-
-    # org-effective role(S-MBR-03·#1223↔SSOT뷰 갭 보정) — project role 낮아도 org owner/admin 상속
-    is_admin = await _effective_org_role(
-        auth, org_id, db, sender, project_id=conv_project_id,
-    ) in ("owner", "admin")
-    # admin이어도 휴먼 참가(private) 대화면 participant 체크 폴백(사적 DM 프라이버시)
-    if (not is_admin) or await _conversation_has_human_participant(conversation_id, db):
-        # project isolation 보존 — project 소속 member 재확인
-        sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
-        participant = (await db.execute(
-            select(ConversationParticipant.id).where(
-                ConversationParticipant.conversation_id == conversation_id,
-                ConversationParticipant.member_id == sender.id,
-            )
-        )).scalar_one_or_none()
-        if participant is None:
-            raise HTTPException(status_code=403, detail="Not a participant")
+    await _authorize_message_read(conversation_id, db, auth, org_id)
 
     if thread_id is None:
         thread_filter = ConversationMessage.thread_id.is_(None)
@@ -976,6 +1294,81 @@ async def list_messages(
     stmt = (
         select(ConversationMessage)
         .where(ConversationMessage.conversation_id == conversation_id, thread_filter)
+        .order_by(ConversationMessage.created_at.desc())
+        .limit(limit + 1)
+    )
+    if before:
+        try:
+            before_dt = datetime.fromisoformat(before)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor format")
+        stmt = stmt.where(ConversationMessage.created_at < before_dt)
+
+    rows = (await db.execute(stmt)).scalars().all()
+    has_more = len(rows) > limit
+    msgs = list(reversed(rows[:limit]))
+
+    sender_ids = {m.sender_id for m in msgs if m.sender_id}
+    member_map = await lookup_members_by_ids(sender_ids, db)
+
+    data = [_msg_payload(m, member_map.get(m.sender_id)) for m in msgs]
+    next_cursor = msgs[0].created_at.isoformat() if has_more and msgs else None
+
+    return {"data": data, "meta": {"next_cursor": next_cursor, "has_more": has_more}}
+
+
+@router.get("/{conversation_id}/messages/{message_id}")
+async def get_message(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """GET /api/v2/conversations/{id}/messages/{message_id} — 단건 원문 조회(최상위+리플 공용).
+
+    story 3cf50d90: 게이트/QA 리플이 웹훅 payload 잘림으로 도달하면 원문 재조회 경로가 없어
+    "잘렸다·재발신" 왕복이 반복됐다. 인가는 list_messages와 동형(참여자 전용·admin-bypass는
+    agent-only 대화 한정).
+    """
+    await _authorize_message_read(conversation_id, db, auth, org_id)
+
+    msg = (await db.execute(
+        select(ConversationMessage).where(
+            ConversationMessage.id == message_id,
+            ConversationMessage.conversation_id == conversation_id,
+        )
+    )).scalar_one_or_none()
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    sender_map = await lookup_members_by_ids({msg.sender_id} if msg.sender_id else set(), db)
+    return _msg_payload(msg, sender_map.get(msg.sender_id))
+
+
+@router.get("/{conversation_id}/messages/{message_id}/replies")
+async def list_message_replies(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    limit: int = Query(default=30, le=200),
+    before: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """GET /api/v2/conversations/{id}/messages/{message_id}/replies — 이 메시지의 리플 목록.
+
+    story 3cf50d90: list_messages의 `?thread_id=` 파라미터와 동형 필터(discoverability용 전용
+    서브리소스 — 호출자가 thread_id 쿼리파라미터의 존재를 몰라도 원문 리플 왕복이 가능하도록).
+    """
+    await _authorize_message_read(conversation_id, db, auth, org_id)
+
+    stmt = (
+        select(ConversationMessage)
+        .where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.thread_id == message_id,
+        )
         .order_by(ConversationMessage.created_at.desc())
         .limit(limit + 1)
     )
@@ -1070,6 +1463,63 @@ async def set_conversation_mute(
     participant.muted_at = datetime.now(timezone.utc) if body.muted else None
     await db.commit()
     return {"conversation_id": str(conversation_id), "muted": body.muted}
+
+
+@router.post("/{conversation_id}/read")
+async def mark_conversation_read(
+    conversation_id: uuid.UUID,
+    body: MarkReadRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """POST /api/v2/conversations/{id}/read — read state 서버 truth 갱신(멱등·GREATEST 래칫).
+
+    story #1976(E-CHAT-REALTIME 트랙A, doc chat-realtime-track-a-read-state-design §3):
+    up_to 지정 시 그 시각으로 SET(FE가 실 렌더된 마지막 메시지 timestamp 전달 — 권장 경로,
+    §4-3 레이스 방지). up_to 생략 시 서버 now() 사용 — "전체 읽음"(mark-all-read) 명시 액션
+    전용 의도(§3-2/§3-4). GREATEST(last_read_at, up_to) 원자 UPDATE로 역행 방지(여러 번
+    호출해도 안전 — 오래된 up_to가 늦게 도착해도 무해). 비참여자는 403(읽음 상태는 본인 것만
+    의미 있음 — admin-bypass 없음).
+    """
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    up_to = body.up_to or datetime.now(timezone.utc)
+
+    result = await db.execute(_mark_read_update_stmt(conversation_id, sender.id, up_to))
+    new_last_read_at = result.scalar_one_or_none()
+    if new_last_read_at is None:
+        raise HTTPException(status_code=403, detail="Not a participant")
+    await db.commit()
+
+    # 재계산(가정 아님 — up_to가 최신 메시지보다 과거인 엣지케이스에서 0이 아닐 수 있음, §3-3).
+    unread_count = (await db.execute(
+        _unread_count_stmt(conversation_id, sender.id, new_last_read_at)
+    )).scalar_one()
+
+    sse_payload = {
+        "event_type": "conversation.read",
+        "conversation_id": str(conversation_id),
+        "member_id": str(sender.id),
+        "last_read_at": new_last_read_at.isoformat(),
+        "unread_count": unread_count,
+    }
+    # 본인의 타 커넥션에만 전파(read-receipt=상대방 노출은 스코프 아웃, §5-1 PO 확定).
+    # _push_to_agent가 member_id의 모든 열린 탭/기기 큐에 자동 팬아웃(trust_pipeline.py 선례
+    # 동형 패턴, §1-3/§5-2) — Event DB row 미생성(순수 transient push, org 브로드캐스트 아님).
+    _push_to_agent(str(sender.id), sse_payload)
+
+    return {
+        "conversation_id": str(conversation_id),
+        "member_id": str(sender.id),
+        "last_read_at": new_last_read_at.isoformat(),
+        "unread_count": unread_count,
+    }
 
 
 @router.post("/{conversation_id}/participants", status_code=201)
@@ -1312,6 +1762,16 @@ async def send_message(
 
     await db.flush()
 
+    # story #1993(E-KNOWLEDGE-LINK S1): org 지식 연결 레이어 — mentions 정규화 테이블 write-path.
+    # insert-only(메시지 불변 전제 — 재조정 불필요). 기존 mentioned_ids(멤버 알림) 파이프라인과
+    # 완전 별개 병행 경로(비접촉). **같은 트랜잭션**(try/except 로 삼키지 않음) — 파싱/insert 실패 시
+    # 예외가 그대로 propagate 되어 메시지 전송 전체가 롤백된다(AC4 원자성 — 아래 best-effort 블록들과
+    # 의도적으로 다른 격리 수준).
+    from app.services.mention_parser import insert_chat_mentions
+    await insert_chat_mentions(
+        db, org_id=org_id, message_id=msg.id, content=msg.content, created_by=sender.id,
+    )
+
     # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
     # S7: 반환 url→asset_id 로 JSONB asset_id 역기입(denorm·catch#4: asset_links=SSOT·JSONB=denorm).
     if body.attachments:
@@ -1396,6 +1856,68 @@ async def send_message(
                     )
             except Exception:
                 logger.warning("mention event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
+
+        # story 1934(선생님 앱 done-gate — 대상은 human만): 멘션 대상 human에게 in-app
+        # Notification + Expo push. **agent는 명시 제외** — agent는 이미 _dispatch_mention_events
+        # (위)로 SSE/Event 전달을 별도 경로로 받고 있어, 여기서 또 dispatch_notification을 태우면
+        # 같은 메시지에 대해 Event가 이중 INSERT된다(event_type 다른 두 행 — 폴링 중복 수신).
+        # best-effort.
+        if mention_targets:
+            try:
+                human_mention_rows = (await db.execute(
+                    select(TeamMember.id).where(
+                        TeamMember.id.in_(mention_targets), TeamMember.type == "human",
+                    )
+                )).all()
+                human_mention_targets = [r[0] for r in human_mention_rows]
+                if human_mention_targets:
+                    from app.services.notification_dispatch import dispatch_notification
+                    await dispatch_notification(
+                        db, org_id=org_id, event_type="conversation.mention",
+                        target_member_ids=human_mention_targets,
+                        title=f"{sender.name}님이 회원님을 멘션했습니다",
+                        body=(msg.content or "")[:200],
+                        reference_type="conversation", reference_id=conversation_id,
+                        source_project_id=conv.project_id,
+                    )
+            except Exception:
+                logger.warning(
+                    "conversation.mention notification failed conversation_id=%s", conversation_id, exc_info=True,
+                )
+
+    # story 1934(선생님 명시 스코프 확장 — human만): 멘션 여부 무관 스레드 참여 human 전원에게
+    # 새 메시지 in-app Notification + Expo push. agent는 제외(위와 동일 이유 — agent는
+    # _dispatch_conversation_event로 이미 Event 전달받는 중, 여기서 또 태우면 이중 INSERT).
+    # 이미 conversation.mention으로 알림 받은 대상은 제외(중복 push 방지 — 멘션이 더 구체적).
+    # best-effort.
+    try:
+        participant_rows = (await db.execute(
+            select(ConversationParticipant.member_id)
+            .where(ConversationParticipant.conversation_id == conversation_id)
+        )).all()
+        candidate_targets = (
+            {r[0] for r in participant_rows}
+            - {sender.id} - discord_exclude_ids - blocked_agent_ids - set(msg.mentioned_ids or [])
+        )
+        if candidate_targets:
+            human_message_rows = (await db.execute(
+                select(TeamMember.id).where(
+                    TeamMember.id.in_(candidate_targets), TeamMember.type == "human",
+                )
+            )).all()
+            message_targets = [r[0] for r in human_message_rows]
+            if message_targets:
+                from app.services.notification_dispatch import dispatch_notification
+                await dispatch_notification(
+                    db, org_id=org_id, event_type="conversation.message",
+                    target_member_ids=message_targets,
+                    title=f"{sender.name}님의 새 메시지",
+                    body=(msg.content or "")[:200],
+                    reference_type="conversation", reference_id=conversation_id,
+                    source_project_id=conv.project_id,
+                )
+    except Exception:
+        logger.warning("conversation.message notification failed conversation_id=%s", conversation_id, exc_info=True)
 
     # conversation updated_at 갱신
     conv.updated_at = datetime.now(timezone.utc)

@@ -71,7 +71,7 @@ async def _enrich_doc_summary(doc, session: AsyncSession) -> DocSummaryResponse:
     resp.assignee, resp.revisions = await _resolve_doc_extras(doc, session)
     return resp
 
-router = APIRouter(prefix="/api/v2/docs", tags=["docs"])
+router = APIRouter(prefix="/api/v2/docs", tags=["docs", "Knowledge"])
 
 
 def _get_repo(
@@ -177,6 +177,15 @@ async def create_doc(
         doc_type=body.doc_type,
         content_format=body.content_format,
         tags=body.tags,
+    )
+    # story #1993(E-KNOWLEDGE-LINK S1): mentions write-path — 신규 doc 이라 existing=∅(순수 insert
+    # 로 귀결하는 reconcile 재사용). **같은 트랜잭션**(try/except 로 삼키지 않음) — 실패 시 예외
+    # propagate 로 doc 생성 전체가 롤백된다(AC4 원자성). created_by 는 위에서 이미 canonicalize
+    # 됐지만 reconcile_doc_mentions 는 raw id 를 받아 자체적으로 재정규화(idempotent·재사용 함수
+    # 계약 단순화 — create/update 양쪽에서 canonical 여부와 무관하게 동일하게 호출 가능).
+    from app.services.mention_parser import reconcile_doc_mentions
+    await reconcile_doc_mentions(
+        session, org_id=org_id, doc_id=doc.id, html_content=doc.content, created_by=created_by,
     )
     # 활동로그: doc 생성 이벤트 기록 (생성류 미기록 갭 — 피드 정상화)
     from app.services.activity_log import record_created_activity
@@ -435,6 +444,15 @@ async def update_doc(
             )
         )
 
+        # story #1993(E-KNOWLEDGE-LINK S1): mentions write-path — content 가 실제로 바뀐 patch 에서만
+        # diff reconcile(변경 없는 필드만 patch 하는 호출에서 불필요한 재파싱 skip). **같은 트랜잭션**
+        # (try/except 로 삼키지 않음) — 실패 시 예외 propagate 로 doc 수정 전체가 롤백된다(AC4 원자성).
+        from app.services.mention_parser import reconcile_doc_mentions
+        actor_id = await _resolve_doc_member_id(auth, repo.org_id, session)
+        await reconcile_doc_mentions(
+            session, org_id=repo.org_id, doc_id=doc.id, html_content=doc.content, created_by=actor_id,
+        )
+
     return DocResponse.model_validate(doc)
 
 
@@ -657,6 +675,48 @@ async def list_doc_revisions(
     ).order_by(DocRevision.created_at.desc()).limit(limit)
     result = await db.execute(q)
     return [DocRevisionResponse.model_validate(r) for r in result.scalars()]
+
+
+# ─── Backlinks (story #1994·E-KNOWLEDGE-LINK S2) ───────────────────────────────
+
+@router.get("/{id}/backlinks")
+async def get_doc_backlinks(
+    id: uuid.UUID,
+    limit: int = Query(default=30, ge=1, le=200),
+    before: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: DocRepository = Depends(_get_repo),
+) -> dict:
+    """GET /api/v2/docs/{id}/backlinks — 이 doc을 멘션한 chat_message/doc 목록(cursor 페이지네이션,
+    `list_messages`(conversations.py)와 동일 convention: `?limit=&before=`, 응답
+    `{"data": [...], "meta": {"next_cursor", "has_more"}}`).
+
+    근본 설계 doc design-org-knowledge-mentions-backlinks §8① 불변식: backlink 공개 =
+    can_read(target_doc) AND can_read(source_resource). target 접근은 여기서
+    `_require_doc_project_access`(docs.py의 기존 canonical 인가 — 무권한/미존재 모두 404,
+    existence 오라클 없음)로 검증한다. **source**(멘션을 발신한 chat_message/doc) 접근은
+    산티아고 4회차 pass 이후 **단일** SQL statement에 authz predicate를 correlate하는 방식으로
+    판정한다(app.services.backlinks §8②·doc은 `accessible_project_ids_in_org`, chat_message는
+    `app.services.conversation_auth.conversation_readable_predicate` — `_can_read_conversation`
+    (conversations.py)이 단건 호출부에 쓰는 것과 **같은 SSOT 함수**를 메인 쿼리의 WHERE절에
+    직접 correlate해 쓴다. 2-phase로 "readable id 집합"을 먼저 SELECT해 Python에 들고 있다가
+    다음 쿼리에 넣는 구조가 아니므로 TOCTOU 윈도우가 구조적으로 없다) — target doc의 project
+    접근을 source에 상속하지 않는다(멀티프로젝트 org에서 target/source project가 다를 수
+    있다는 게 산티아고 리뷰가 잡은 이전 draft의 버그이자 이 story의 근본 이유). count/has_more는
+    authz-embedded 단일 쿼리 결과에서만 계산된다(no pagination oracle) — 미인가 source가 있어도
+    그 존재는 어디에도 드러나지 않는다.
+
+    `before`: story #1994 B3 — opaque composite cursor(base64, `(created_at, id)` 인코드).
+    클라이언트는 이전 응답의 `meta.next_cursor` 값을 그대로 되돌려주기만 하면 된다(파싱 금지 —
+    불투명 토큰). 디코드/검증은 `app.services.backlinks.decode_cursor`가 담당(손상 시 400).
+    """
+    await _require_doc_project_access(session, id, uuid.UUID(auth.user_id), repo.org_id)
+
+    from app.services.backlinks import list_doc_backlinks
+    return await list_doc_backlinks(
+        session, org_id=repo.org_id, doc_id=id, auth=auth, limit=limit, cursor=before,
+    )
 
 
 class DocTransitionRequest(BaseModel):

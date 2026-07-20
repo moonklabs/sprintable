@@ -55,6 +55,21 @@ describe('DocContentRenderer', () => {
     expect(markup).toContain('SELECT 1;');
   });
 
+  it('story #1996: preserves pageEmbed data attributes through markdown sanitize (previously stripped, grep 0 handler)', () => {
+    const markup = renderToStaticMarkup(
+      <DocContentRenderer
+        content={'<div data-page-embed data-doc-id="doc-1" data-title="설계 문서" data-icon="📄" data-slug="design-doc"></div>'}
+        contentFormat="markdown"
+      />,
+    );
+
+    // rehype-sanitize의 기존 스키마는 이 속성들이 allowlist 밖이라 전부 걷어냈다 — 스키마
+    // 확장이 없으면 이 assertion들이 실패해 회귀를 잡는다.
+    expect(markup).toContain('data-page-embed');
+    expect(markup).toContain('data-title="설계 문서"');
+    expect(markup).toContain('data-slug="design-doc"');
+  });
+
   it('sanitizes dangerous heading attributes and inner tags', () => {
     const markup = renderToStaticMarkup(
       <DocContentRenderer

@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
-import { Bot, MessageSquare, Terminal, User } from 'lucide-react';
+import { Bot, Check, Copy, MessageSquare, Terminal, User } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
@@ -40,6 +40,60 @@ function prepareMentions(content: string): string {
   return content.replace(/(?<![[(])@([\w가-힣]+)/g, '[@$1](mention:$1)');
 }
 
+// story #2002: 원클릭 복사 — inline(단일 백틱)은 클릭 즉시 복사, 블록(펜스)은 호버 시 드러나는
+// 코너 버튼. inline/block 판별은 doc-content-renderer.tsx의 기존 검증된 휴리스틱과 동일
+// (className에 language- 없음 + 개행 없음 = inline) — 팀 컨벤션 재사용.
+function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean; className: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    void (async () => {
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(raw);
+        } else {
+          return;
+        }
+      } catch {
+        return; // 클립보드 권한거부/미지원 — 조용히 무시(피드백 미표시로 실패가 드러남)
+      }
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    })();
+  }, [raw]);
+
+  if (inline) {
+    return (
+      <code
+        role="button"
+        tabIndex={0}
+        onClick={handleCopy}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(); } }}
+        title={copied ? '복사됨' : '클릭해 복사'}
+        className={`${className} cursor-pointer transition hover:brightness-95 active:brightness-90`}
+      >
+        {raw}
+        {copied && <Check className="ml-0.5 inline size-3 align-text-top" aria-hidden />}
+      </code>
+    );
+  }
+
+  return (
+    <span className="group/code relative block">
+      <code className={className}>{raw}</code>
+      <button
+        type="button"
+        onClick={handleCopy}
+        aria-label={copied ? '복사됨' : '코드 복사'}
+        title={copied ? '복사됨' : '코드 복사'}
+        className="absolute right-1 top-1 rounded p-1 opacity-60 transition hover:bg-black/10 group-hover/code:opacity-100 dark:hover:bg-white/10"
+      >
+        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+      </button>
+    </span>
+  );
+}
+
 function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean }) {
   const text = isMine ? 'text-primary-foreground' : 'text-foreground';
   const muted = isMine ? 'text-primary-foreground/70' : 'text-muted-foreground';
@@ -69,7 +123,17 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
         p: ({ children }) => <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>,
         strong: ({ children }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
         em: ({ children }) => <em className={`italic ${text}`}>{children}</em>,
-        code: ({ children }) => <code className={`rounded px-1 py-0.5 font-mono text-xs [overflow-wrap:anywhere] ${codeBg}`}>{children}</code>,
+        code: ({ className, children }) => {
+          const raw = String(children).replace(/\n$/, '');
+          const inline = !className?.includes('language-') && !raw.includes('\n');
+          return (
+            <CopyableCode
+              raw={raw}
+              inline={inline}
+              className={`rounded px-1 py-0.5 font-mono text-xs [overflow-wrap:anywhere] ${codeBg}`}
+            />
+          );
+        },
         pre: ({ children }) => <pre className={`mb-1.5 overflow-x-auto rounded-lg p-2.5 text-xs ${codeBg}`}>{children}</pre>,
         ul: ({ children }) => <ul className={`mb-1.5 ml-4 list-disc space-y-0.5 text-sm ${text}`}>{children}</ul>,
         ol: ({ children }) => <ol className={`mb-1.5 ml-4 list-decimal space-y-0.5 text-sm ${text}`}>{children}</ol>,

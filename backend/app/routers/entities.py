@@ -9,10 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import Doc
-from app.models.pm import Epic, Story, Task
+from app.models.pm import Goal, Story, Task
 from app.services.project_auth import has_project_access
 
-router = APIRouter(prefix="/api/v2/entities", tags=["entities"])
+router = APIRouter(prefix="/api/v2/entities", tags=["entities", "Work"])
 
 VALID_TYPES = {"story", "doc", "epic", "task"}
 DEFAULT_LIMIT = 10
@@ -81,15 +81,15 @@ async def search_entities(
 
     if "epic" in requested:
         stmt = (
-            select(Epic.id, Epic.title, Epic.status, Epic.created_at)
+            select(Goal.id, Goal.title, Goal.status, Goal.created_at)
             .where(
-                Epic.org_id == org_id,
-                Epic.project_id == project_id,
+                Goal.org_id == org_id,
+                Goal.project_id == project_id,
             )
         )
         if search:
-            stmt = stmt.where(Epic.title.ilike(search))
-        stmt = stmt.order_by(Epic.created_at.desc()).limit(DEFAULT_LIMIT)
+            stmt = stmt.where(Goal.title.ilike(search))
+        stmt = stmt.order_by(Goal.created_at.desc()).limit(DEFAULT_LIMIT)
         rows = await db.execute(stmt)
         for rid, title, st, cat in rows:
             results.append(EntitySearchResult(entity_type="epic", entity_id=rid, title=title, status=st, created_at=cat))

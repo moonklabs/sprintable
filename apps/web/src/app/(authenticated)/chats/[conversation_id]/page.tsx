@@ -8,6 +8,7 @@ import { ChatView } from '@/components/chat/chat-view';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
+import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 
 interface Participant {
   member_id: string;
@@ -25,6 +26,9 @@ interface ConversationMeta {
   // per-대화 알림 mute (270c87e6). conversation list/detail 응답의 caller `muted`
   // (#1427에서 노출)로 벨 초기 상태를 그린다. 부재 시 false로 graceful(하위호환).
   muted: boolean;
+  // story #1977(트랙B): #1976 read state 계약 — caller last_read_at. ChatView의 "여기부터
+  // 안읽음" 마커 경계로 소비(진입 시점 값만 필요, 마커는 이 화면 방문 내내 동결).
+  lastReadAt: string | null;
 }
 
 function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string): string {
@@ -40,6 +44,9 @@ function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string): str
 export default function ConversationPage() {
   const { conversation_id } = useParams<{ conversation_id: string }>();
   const router = useRouter();
+  // story #1959(P2-S3): 딥링크 매니페스트(chat_thread→parentTab=chat) — 콜드 진입 시 "채팅"
+  // 탭 루트를 BACK 대상으로 선주입. 목록에서 클릭해 온 경우(history.length>1)는 no-op.
+  useSyntheticParentTabHistory('/chats');
   // Deeplink (ade2d6d5): /chats/{id}?messageId={uuid} → ChatView scrolls to + highlights it.
   // ChatView has key={conversation_id} so this is read fresh per conversation.
   const searchParams = useSearchParams();
@@ -50,16 +57,25 @@ export default function ConversationPage() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
 
+  // story #2009: 목록 통호출(`/api/conversations?project_id=`, default limit 30)+client
+  // `.find()` 우회를 폐기 — 대화 1건 메타 보려고 매번 최대30건치 쿼리(latest_message N+1
+  // 포함)를 낭비했고, org 대화가 30건 넘으면 최근 30건 밖 대화를 열 때 `.find()`가 undefined를
+  // 반환해 헤더가 영구 공백이었다(정합성 버그, BE #2286이 단독조회에 participants 추가해 해소).
   const fetchMeta = useCallback(async () => {
     if (!projectId) return;
     try {
-      const res = await fetch(`/api/conversations?project_id=${projectId}`);
+      const res = await fetch(`/api/conversations/${conversation_id}`);
       if (!res.ok) return;
-      const json = await res.json() as {
-        data: Array<{ id: string; title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean }>;
+      const conv = await res.json() as {
+        title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean; last_read_at?: string | null;
       };
-      const conv = json.data.find((c) => c.id === conversation_id);
-      if (conv) setMeta({ title: conv.title, type: conv.type, participants: conv.participants ?? [], muted: conv.muted ?? false });
+      setMeta({
+        title: conv.title,
+        type: conv.type,
+        participants: conv.participants ?? [],
+        muted: conv.muted ?? false,
+        lastReadAt: conv.last_read_at ?? null,
+      });
     } catch { /* non-critical */ }
   }, [conversation_id, projectId]);
 
@@ -159,7 +175,10 @@ export default function ConversationPage() {
           <div className="flex min-w-0 items-center gap-1">
             <button
               type="button"
-              onClick={() => router.push('/chats')}
+              // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를
+              // 쌓지 않아 브라우저 BACK 재진입 트랩을 구조적으로 없앤다(§3.2). back()류 직접
+              // 호출은 하지 않는다([[feedback-history-back-nextjs]]).
+              onClick={() => router.replace('/chats')}
               className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -231,6 +250,7 @@ export default function ConversationPage() {
           commandTargets={commandTargets}
           presenceById={presenceById}
           scrollToMessageId={scrollToMessageId}
+          initialLastReadAt={meta ? meta.lastReadAt : undefined}
         />
       </div>
 

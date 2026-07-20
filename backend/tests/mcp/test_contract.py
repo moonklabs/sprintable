@@ -27,8 +27,14 @@ EXPECTED_TOOLS = {
     # tasks (6) — E-SECURITY SEC-S1(확장): delete_task 의도적 제거(에이전트 hard-delete 차단)
     "sprintable_list_tasks", "sprintable_list_my_tasks", "sprintable_get_task",
     "sprintable_add_task", "sprintable_update_task", "sprintable_update_task_status",
-    # epics (3) — E-SECURITY SEC-S1(확장): delete_epic 의도적 제거(에이전트 hard-delete 차단)
+    # epics/goals (7) — E-SECURITY SEC-S1(확장): delete_epic 의도적 제거(에이전트 hard-delete
+    # 차단). 계층 리네이밍 B1(story 1925): sprintable_*_goal이 신(primary)·sprintable_*_epic은
+    # 같은 핸들러를 가리키는 deprecated 별칭(hierarchy-rename-alias-mechanism-design §1).
+    # story #2010: sprintable_transition_goal 신설(목표 lifecycle 전이 전용, rename 이후 신설이라
+    # 구 _epic 별칭 없음).
     "sprintable_list_epics", "sprintable_add_epic", "sprintable_update_epic",
+    "sprintable_list_goals", "sprintable_add_goal", "sprintable_update_goal",
+    "sprintable_transition_goal",
     # hypotheses (6) — E1-S5
     "sprintable_list_hypotheses", "sprintable_get_hypothesis", "sprintable_create_hypothesis",
     "sprintable_update_hypothesis", "sprintable_link_hypothesis", "sprintable_confirm_hypothesis",
@@ -44,13 +50,14 @@ EXPECTED_TOOLS = {
     "sprintable_get_sprint_velocity_history", "sprintable_search_stories",
     "sprintable_get_blocked_stories", "sprintable_get_unassigned_stories",
     "sprintable_get_overdue_tasks", "sprintable_get_recent_activity",
-    "sprintable_get_epic_progress", "sprintable_get_agent_stats",
+    "sprintable_get_epic_progress", "sprintable_get_goal_progress", "sprintable_get_agent_stats",
     "sprintable_get_project_health",
     # core (4) — E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가.
     "sprintable_list_team_members", "sprintable_my_dashboard",
     "sprintable_list_projects", "sprintable_set_default_project",
-    # chat (3)
+    # chat (4) — story 3cf50d90: get_chat_message(단건 원문 조회) 추가.
     "sprintable_send_chat_message", "sprintable_create_conversation", "sprintable_list_chat_messages",
+    "sprintable_get_chat_message",
     # meetings (6)
     "sprintable_list_meetings", "sprintable_get_meeting", "sprintable_create_meeting",
     "sprintable_update_meeting", "sprintable_delete_meeting", "sprintable_trigger_ai_summary",
@@ -86,13 +93,13 @@ EXPECTED_TOOLS = {
     "sprintable_link_gate_to_task",
     # evidence (1) — E-VERIFY V0-S1
     "sprintable_add_evidence",
-    # visual artifacts (11) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
-    # 핀 저작(story 7fe16274)
+    # visual artifacts (12) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
+    # 핀 저작(story 7fe16274) + story #1922(delete_artifact, soft delete·생성자 전용)
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
     "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
-    "sprintable_delete_spec_pin",
+    "sprintable_delete_spec_pin", "sprintable_delete_artifact",
     # smoke
     "ping",
 }
@@ -102,7 +109,13 @@ def test_total_tool_count():
     # C1-S3(e50563b4): sprintable_list_artifacts 추가로 98→99... +1=100.
     # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가 — 100→102.
     # 편집 캔버스 핀 저작(story 7fe16274): spec pin 4종 추가 — 102→106.
-    assert len(_TOOLS) == 106
+    # story 3cf50d90: get_chat_message(단건 원문 조회) 추가 — 106→107.
+    # 계층 리네이밍 B1(story 1925): sprintable_*_goal 4종 신설(add/list/update/get_progress) —
+    # 구 sprintable_*_epic 4종은 deprecated 별칭으로 유지(제거 아님) — 107→111.
+    # story #2010: sprintable_transition_goal 1종 신설(목표 lifecycle 전이, 구 _epic 별칭 없음) —
+    # 111→112. story #1922: sprintable_delete_artifact 1종 신설(artifact soft delete, 생성자
+    # 전용) — 112→113.
+    assert len(_TOOLS) == 113
 
 
 def test_all_expected_tools_registered():

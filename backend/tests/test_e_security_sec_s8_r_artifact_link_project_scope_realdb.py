@@ -49,7 +49,7 @@ async def _seed(session):
     story_b/epic_b/doc_b(project_b, 같은 org) — same-org cross-project 링크 시도용."""
     from app.models.doc import Doc
     from app.models.organization import Organization
-    from app.models.pm import Epic, Story
+    from app.models.pm import Goal, Story
     from app.models.project import Project
 
     org = Organization(id=uuid.uuid4(), name="Org", slug=f"org-{uuid.uuid4().hex[:8]}")
@@ -63,8 +63,8 @@ async def _seed(session):
 
     story_a = Story(id=uuid.uuid4(), org_id=org.id, project_id=project_a.id, title="Story A", status="backlog")
     story_b = Story(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="Story B", status="backlog")
-    epic_a = Epic(id=uuid.uuid4(), org_id=org.id, project_id=project_a.id, title="Epic A")
-    epic_b = Epic(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="Epic B")
+    epic_a = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project_a.id, title="Epic A")
+    epic_b = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="Epic B")
     doc_a = Doc(
         id=uuid.uuid4(), org_id=org.id, project_id=project_a.id, title="Doc A",
         slug=f"doc-a-{uuid.uuid4().hex[:8]}", content="",
@@ -126,7 +126,10 @@ async def test_create_artifact_same_org_cross_project_story_link_blocked():
         try:
             resp = await client.post(
                 "/api/v2/visual-artifacts",
-                json={"title": "Injected", "story_id": str(seeded["story_b_id"])},
+                json={
+                    "title": "Injected", "story_id": str(seeded["story_b_id"]),
+                    "nodes": [{"type": "text", "props": {}}],
+                },
             )
             assert resp.status_code == 404, resp.text
         finally:
@@ -150,7 +153,10 @@ async def test_create_artifact_same_org_cross_project_epic_link_blocked():
         try:
             resp = await client.post(
                 "/api/v2/visual-artifacts",
-                json={"title": "Injected", "epic_id": str(seeded["epic_b_id"])},
+                json={
+                    "title": "Injected", "epic_id": str(seeded["epic_b_id"]),
+                    "nodes": [{"type": "text", "props": {}}],
+                },
             )
             assert resp.status_code == 404, resp.text
         finally:
@@ -174,7 +180,10 @@ async def test_create_artifact_same_org_cross_project_doc_link_blocked():
         try:
             resp = await client.post(
                 "/api/v2/visual-artifacts",
-                json={"title": "Injected", "doc_id": str(seeded["doc_b_id"])},
+                json={
+                    "title": "Injected", "doc_id": str(seeded["doc_b_id"]),
+                    "nodes": [{"type": "text", "props": {}}],
+                },
             )
             assert resp.status_code == 404, resp.text
         finally:
@@ -199,7 +208,10 @@ async def test_create_artifact_same_project_story_link_still_works():
         try:
             resp = await client.post(
                 "/api/v2/visual-artifacts",
-                json={"title": "Legit", "story_id": str(seeded["story_a_id"])},
+                json={
+                    "title": "Legit", "story_id": str(seeded["story_a_id"]),
+                    "nodes": [{"type": "text", "props": {}}],
+                },
             )
             assert resp.status_code == 201, resp.text
             assert resp.json()["data"]["story_id"] == str(seeded["story_a_id"])

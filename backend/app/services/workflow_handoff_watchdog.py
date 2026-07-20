@@ -36,12 +36,27 @@ async def _fallback_notify(session: AsyncSession, sr: WorkflowLineStepRun,
         return
     try:
         from app.services.notification_dispatch import dispatch_notification
+
+        # story #1953(P1a-S3): entity_type="hypothesis"면 sprint_id를 타겟 보강 식별자로 추가
+        # (딥링크 매니페스트 Layer 2 계약 — dispatched:hypothesis와 동형). 나머지 4종
+        # 엔티티(story/epic/doc/sprint)는 sprint 링크 개념이 없어 None.
+        _sprint_id: uuid.UUID | None = None
+        if sr.entity_type == "hypothesis":
+            from app.repositories.hypothesis import HypothesisRepository
+            try:
+                _sprint_id = await HypothesisRepository(session, sr.org_id).get_sprint_id(sr.entity_id)
+            except Exception:  # noqa: BLE001 — best-effort 보강, watchdog 비중단.
+                _sprint_id = None
+
         await dispatch_notification(
             session, org_id=sr.org_id, event_type="handoff_stuck",
             target_member_ids=[recipient_id],
             title="Handoff stalled — no ACK within SLA",
             body=f"{sr.entity_type} {sr.entity_id} {sr.from_status}→{sr.to_status} handoff unacked",
             reference_type=sr.entity_type, reference_id=sr.entity_id,
+            # story #1953: sr.project_id는 함수 파라미터로 이미 갖고 있음(신규 조회 0).
+            source_project_id=sr.project_id,
+            sprint_id=_sprint_id,
         )
     except Exception:  # noqa: BLE001 — notification 실패는 watchdog 비중단(best-effort).
         sr.delivery_error = (sr.delivery_error or "") + "; notify_failed"

@@ -24,7 +24,7 @@ from app.models.team import TeamMember
 from app.routers.ws_chat import _authenticate, _broadcast, _get_or_create_conversation
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/v2/channel", tags=["channel"])
+router = APIRouter(prefix="/api/v2/channel", tags=["channel", "Organization"])
 
 _FILES_DIR = Path(os.getenv("CHANNEL_FILES_DIR", "/tmp/sprintable_files"))
 

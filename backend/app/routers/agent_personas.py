@@ -12,7 +12,7 @@ from app.repositories.agent_persona import AgentPersonaRepository
 from app.schemas.agent_persona import CreatePersonaRequest, UpdatePersonaRequest
 from app.services.project_auth import assert_target_in_caller_org
 
-router = APIRouter(prefix="/api/v2/agent-personas", tags=["agent-personas"])
+router = APIRouter(prefix="/api/v2/agent-personas", tags=["agent-personas", "Organization"])
 
 
 def _repo(session: AsyncSession = Depends(get_db)) -> AgentPersonaRepository:

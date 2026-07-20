@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 
 from app.dependencies.auth import AuthContext, get_current_user
 
-router = APIRouter(prefix="/api/v2/memos", tags=["presence"])
+router = APIRouter(prefix="/api/v2/memos", tags=["presence", "Organization"])
 
 _PRESENCE_TTL_SEC = 45
 

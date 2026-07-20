@@ -24,12 +24,12 @@ def anyio_backend():
 
 # ── FSM·matrix (unit·CI-runnable) ─────────────────────────────────────────────
 def test_epic_fsm_valid_transitions():
-    from app.schemas.epic import is_valid_epic_transition
-    assert is_valid_epic_transition("draft", "active")
-    assert is_valid_epic_transition("active", "done")
-    assert is_valid_epic_transition("active", "archived")  # native
-    assert not is_valid_epic_transition("done", "active")  # 역전이 금지
-    assert not is_valid_epic_transition("draft", "done")   # 비합법(직행 금지)
+    from app.schemas.goal import is_valid_goal_transition
+    assert is_valid_goal_transition("draft", "active")
+    assert is_valid_goal_transition("active", "done")
+    assert is_valid_goal_transition("active", "archived")  # native
+    assert not is_valid_goal_transition("done", "active")  # 역전이 금지
+    assert not is_valid_goal_transition("draft", "done")   # 비합법(직행 금지)
 
 
 def test_matrix_epic_eligible_two_overlay_transitions():
@@ -118,21 +118,21 @@ async def _session():
 @pytest.mark.anyio
 async def test_default_off_agent_activation_blocked():
     """default-off: agent draft→active → overlay plain → inline HUMAN_CONFIRM_REQUIRED(byte-동일)."""
-    from app.services.epic import transition_epic, EpicTransitionError
+    from app.services.goal import transition_goal, GoalTransitionError
     from app.services.member_resolver import ResolvedMember
-    from app.models.pm import Epic
+    from app.models.pm import Goal
     from app.models.project import Project
     engine, Session = await _session()
     async with Session() as s:
         org, proj = uuid.uuid4(), uuid.uuid4()
         s.add(Project(id=proj, org_id=org, name="p"))
         await s.flush()
-        epic = Epic(org_id=org, project_id=proj, title="e", status="draft")
+        epic = Goal(org_id=org, project_id=proj, title="e", status="draft")
         s.add(epic)
         await s.commit()
         agent = ResolvedMember(id=uuid.uuid4(), user_id=None, name="a", type="agent", role="member", org_id=org)
-        with pytest.raises(EpicTransitionError) as ei:
-            await transition_epic(s, org, agent, epic.id, "active")
+        with pytest.raises(GoalTransitionError) as ei:
+            await transition_goal(s, org, agent, epic.id, "active")
         assert ei.value.code == "HUMAN_CONFIRM_REQUIRED"
     await engine.dispose()
 
@@ -143,7 +143,7 @@ async def test_apply_active_done_wakes_assignee(monkeypatch):
     """ccbcd9da(A-1): active→done(SoD 무관) 승인 → epic.assignee_id 자동재개 wake 페이로드가
     _apply_epic_transition 반환값으로 전파(전엔 dispatch_payload_to_member 반환 자체가 없어 무음)."""
     from app.services.workflow_line_resolution import _apply_epic_transition
-    from app.models.pm import Epic
+    from app.models.pm import Goal
     from app.models.workflow_line import WorkflowLineStepRun
     from app.models.project import Project
     import app.services.agent_dispatch as ad
@@ -170,7 +170,7 @@ async def test_apply_active_done_wakes_assignee(monkeypatch):
         org, proj, assignee, approver = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         s.add(Project(id=proj, org_id=org, name="p"))
         await s.flush()
-        epic = Epic(org_id=org, project_id=proj, title="e", status="active", assignee_id=assignee)
+        epic = Goal(org_id=org, project_id=proj, title="e", status="active", assignee_id=assignee)
         s.add(epic)
         await s.flush()
         sr = WorkflowLineStepRun(
@@ -196,14 +196,14 @@ async def test_apply_active_done_wakes_assignee(monkeypatch):
 async def test_resolver_epic_aggregate_included():
     """⭐active→done routing material: resolver 가 epic 산하 story aggregate 포함(advisory)."""
     from app.services.workflow_line_resolver import resolve_routing_context
-    from app.models.pm import Epic, Story
+    from app.models.pm import Goal, Story
     from app.models.project import Project
     engine, Session = await _session()
     async with Session() as s:
         org, proj = uuid.uuid4(), uuid.uuid4()
         s.add(Project(id=proj, org_id=org, name="p"))
         await s.flush()
-        epic = Epic(org_id=org, project_id=proj, title="e", status="active")
+        epic = Goal(org_id=org, project_id=proj, title="e", status="active")
         s.add(epic)
         await s.flush()
         s.add(Story(org_id=org, project_id=proj, epic_id=epic.id, title="s1", status="done"))

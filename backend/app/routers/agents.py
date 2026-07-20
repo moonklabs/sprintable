@@ -39,7 +39,7 @@ from app.services.onboarding_funnel import emit_onboarding_event, safe_key_prefi
 from app.services.org_agent import create_org_level_agent
 from app.services.recruit_service import get_published_role_template, recruit_agent
 
-router = APIRouter(prefix="/api/v2/agents", tags=["agents"])
+router = APIRouter(prefix="/api/v2/agents", tags=["agents", "Organization"])
 
 _FAKECHAT_BASE_PORT = 8787
 # 기존 에이전트 connection-artifact: 평문 키가 없으므로(생성 시 1회만 노출) 사용자가 채울 placeholder.

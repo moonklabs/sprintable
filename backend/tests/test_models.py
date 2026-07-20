@@ -4,19 +4,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.models import Doc, Epic, Meeting, OrgMember, Project, Sprint, Story, Task, TeamMember
+from app.models import Doc, Goal, Meeting, OrgMember, Project, Sprint, Story, Task, TeamMember
 
 
 # ── AC4: import smoke ──────────────────────────────────────────────────────────
 
 def test_model_imports() -> None:
-    for cls in (Sprint, Epic, Story, Task, Doc, Meeting, Project, TeamMember, OrgMember):
+    for cls in (Sprint, Goal, Story, Task, Doc, Meeting, Project, TeamMember, OrgMember):
         assert cls.__tablename__
 
 
 def test_tablenames() -> None:
     assert Sprint.__tablename__ == "sprints"
-    assert Epic.__tablename__ == "epics"
+    assert Goal.__tablename__ == "goals"
     assert Story.__tablename__ == "stories"
     assert Task.__tablename__ == "tasks"
     assert Doc.__tablename__ == "docs"

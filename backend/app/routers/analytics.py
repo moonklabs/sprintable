@@ -21,7 +21,7 @@ from app.schemas.analytics import (
 )
 from app.services.project_auth import has_project_access
 
-router = APIRouter(prefix="/api/v2", tags=["analytics"])
+router = APIRouter(prefix="/api/v2", tags=["analytics", "Work"])
 
 
 def _get_repo(

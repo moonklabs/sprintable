@@ -1,3 +1,6 @@
+'use client';
+
+import { useEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Check } from 'lucide-react';
@@ -26,6 +29,15 @@ interface RoadmapFlowProps {
  */
 export function RoadmapFlow({ epics, totalEpicCount, className }: RoadmapFlowProps) {
   const t = useTranslations('glance');
+  const activeNodeRef = useRef<HTMLAnchorElement>(null);
+
+  // story #2001: 유나 UX 확定(overflow-x-auto) 보강② — "어디 왔나"가 이 컴포넌트의 요약 핵심이라
+  // active 노드가 마운트 시 이미 스크롤 뷰포트 안에 있어야 한다(수동 스크롤 요구 금지).
+  // kanban 스와이프(0d142311)와 동형: 네이티브 스크롤 컨테이너 그대로 두고 자식만 조정.
+  useEffect(() => {
+    activeNodeRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
+  }, []);
+
   if (epics.length === 0) return null;
 
   const activeIndex = epics.findIndex((e) => e.roadmapStatus === 'active');
@@ -33,39 +45,47 @@ export function RoadmapFlow({ epics, totalEpicCount, className }: RoadmapFlowPro
 
   return (
     <div className={className}>
-      <div className="flex items-start">
-        {epics.map((e, i) => (
-          <div key={e.id} className="flex flex-1 items-start last:flex-none">
-            <Link
-              href={`/epics/${e.id}`}
-              className="flex min-w-0 flex-col items-center rounded-md p-1 transition-opacity hover:opacity-75"
-            >
-              <span
-                className={cn(
-                  'flex size-8 shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold',
-                  e.roadmapStatus === 'done' && 'border-success bg-success/10 text-success',
-                  e.roadmapStatus === 'active' && 'border-info bg-info/10 text-info ring-4 ring-info/10',
-                  e.roadmapStatus === 'upcoming' && 'border-border bg-muted/30 text-muted-foreground',
-                )}
+      {/* story #2001: 유나 UX 확定 — 로드맵=시간/순서 은유라 wrap(연결선 끊김)·세로스택(glance
+          높이 잠식) 대신 가로스크롤. 보강③ 양끝 페이드로 "더 있음" 스크롤 발견성 신호(relative
+          wrapper + pointer-events-none 그라데이션 오버레이, from-background로 페이지 배경과 합성). */}
+      <div className="relative">
+        <div className="flex items-start overflow-x-auto">
+          {epics.map((e, i) => (
+            <div key={e.id} className="flex items-start">
+              <Link
+                ref={i === currentIndex ? activeNodeRef : undefined}
+                href={`/epics/${e.id}`}
+                className="flex min-w-[72px] shrink-0 flex-col items-center rounded-md p-1 transition-opacity hover:opacity-75"
               >
-                {e.roadmapStatus === 'done' ? <Check className="size-4" aria-hidden="true" /> : null}
-                {e.roadmapStatus === 'active' ? <span className="size-2.5 rounded-full bg-info" aria-hidden="true" /> : null}
-              </span>
-              <span
-                className={cn(
-                  'mt-2 max-w-[88px] truncate text-center text-[10.5px] font-semibold',
-                  e.roadmapStatus === 'upcoming' ? 'text-muted-foreground/70' : 'text-muted-foreground',
-                )}
-              >
-                {e.title}
-              </span>
-              {i === currentIndex ? <span className="mt-0.5 text-[9px] font-bold text-info">{t('currentMarker')}</span> : null}
-            </Link>
-            {i < epics.length - 1 ? (
-              <div className={cn('mt-4 h-0.5 flex-1', e.roadmapStatus === 'done' ? 'bg-success' : 'bg-border')} aria-hidden="true" />
-            ) : null}
-          </div>
-        ))}
+                <span
+                  className={cn(
+                    'flex size-8 shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold',
+                    e.roadmapStatus === 'done' && 'border-success bg-success/10 text-success',
+                    e.roadmapStatus === 'active' && 'border-info bg-info/10 text-info ring-4 ring-info/10',
+                    e.roadmapStatus === 'upcoming' && 'border-border bg-muted/30 text-muted-foreground',
+                  )}
+                >
+                  {e.roadmapStatus === 'done' ? <Check className="size-4" aria-hidden="true" /> : null}
+                  {e.roadmapStatus === 'active' ? <span className="size-2.5 rounded-full bg-info" aria-hidden="true" /> : null}
+                </span>
+                <span
+                  className={cn(
+                    'mt-2 max-w-[88px] truncate text-center text-[10.5px] font-semibold',
+                    e.roadmapStatus === 'upcoming' ? 'text-muted-foreground/70' : 'text-muted-foreground',
+                  )}
+                >
+                  {e.title}
+                </span>
+                {i === currentIndex ? <span className="mt-0.5 text-[9px] font-bold text-info">{t('currentMarker')}</span> : null}
+              </Link>
+              {i < epics.length - 1 ? (
+                <div className={cn('mt-4 h-0.5 w-6 shrink-0', e.roadmapStatus === 'done' ? 'bg-success' : 'bg-border')} aria-hidden="true" />
+              ) : null}
+            </div>
+          ))}
+        </div>
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-background to-transparent" aria-hidden="true" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-background to-transparent" aria-hidden="true" />
       </div>
       <p className="mt-3 text-[11.5px] text-foreground">
         {t.rich('roadmapSummary', {

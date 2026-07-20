@@ -9,7 +9,7 @@ from app.dependencies.database import get_db
 from app.repositories.meeting import MeetingRepository
 from app.schemas.meeting import MeetingCreate, MeetingResponse, MeetingUpdate
 
-router = APIRouter(prefix="/api/v2/meetings", tags=["meetings"])
+router = APIRouter(prefix="/api/v2/meetings", tags=["meetings", "Work"])
 
 
 async def _get_repo(

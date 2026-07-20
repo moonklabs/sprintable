@@ -98,7 +98,10 @@ async def test_create_coord_pin_and_list():
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Pinned"})
+            create_resp = await client.post(
+                "/api/v2/visual-artifacts",
+                json={"title": "Pinned", "nodes": [{"type": "text", "props": {}}]},
+            )
             artifact_id = create_resp.json()["data"]["id"]
 
             pin_resp = await client.post(
@@ -176,7 +179,10 @@ async def test_create_node_pin_cross_artifact_forgery_blocked():
             )
             other_node_id = other_resp.json()["data"]["nodes"][0]["id"]
 
-            target_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target"})
+            target_resp = await client.post(
+                "/api/v2/visual-artifacts",
+                json={"title": "Target", "nodes": [{"type": "text", "props": {}}]},
+            )
             target_id = target_resp.json()["data"]["id"]
 
             pin_resp = await client.post(
@@ -211,7 +217,10 @@ async def test_create_pin_malformed_anchor_422(body):
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Malformed"})
+            create_resp = await client.post(
+                "/api/v2/visual-artifacts",
+                json={"title": "Malformed", "nodes": [{"type": "text", "props": {}}]},
+            )
             artifact_id = create_resp.json()["data"]["id"]
 
             resp = await client.post(f"/api/v2/visual-artifacts/{artifact_id}/pins", json=body)
@@ -235,7 +244,10 @@ async def test_create_pin_empty_description_422():
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Empty Desc"})
+            create_resp = await client.post(
+                "/api/v2/visual-artifacts",
+                json={"title": "Empty Desc", "nodes": [{"type": "text", "props": {}}]},
+            )
             artifact_id = create_resp.json()["data"]["id"]
 
             resp = await client.post(
@@ -262,7 +274,10 @@ async def test_update_pin_description():
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Editable"})
+            create_resp = await client.post(
+                "/api/v2/visual-artifacts",
+                json={"title": "Editable", "nodes": [{"type": "text", "props": {}}]},
+            )
             artifact_id = create_resp.json()["data"]["id"]
             pin_resp = await client.post(
                 f"/api/v2/visual-artifacts/{artifact_id}/pins",
@@ -299,7 +314,10 @@ async def test_delete_pin():
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Deletable"})
+            create_resp = await client.post(
+                "/api/v2/visual-artifacts",
+                json={"title": "Deletable", "nodes": [{"type": "text", "props": {}}]},
+            )
             artifact_id = create_resp.json()["data"]["id"]
             pin_resp = await client.post(
                 f"/api/v2/visual-artifacts/{artifact_id}/pins",
@@ -332,7 +350,10 @@ async def test_edit_artifact_carries_coord_pin_forward():
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Carry"})
+            create_resp = await client.post(
+                "/api/v2/visual-artifacts",
+                json={"title": "Carry", "nodes": [{"type": "text", "props": {}}]},
+            )
             artifact_id = create_resp.json()["data"]["id"]
             await client.post(
                 f"/api/v2/visual-artifacts/{artifact_id}/pins",
@@ -458,7 +479,10 @@ async def test_previous_version_pin_immutable_and_not_editable():
         await _setup_app(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Snapshot"})
+            create_resp = await client.post(
+                "/api/v2/visual-artifacts",
+                json={"title": "Snapshot", "nodes": [{"type": "text", "props": {}}]},
+            )
             artifact_id = create_resp.json()["data"]["id"]
             pin_resp = await client.post(
                 f"/api/v2/visual-artifacts/{artifact_id}/pins",
@@ -511,7 +535,7 @@ async def test_mcp_create_and_list_spec_pin_roundtrip():
 
         from sprintable_mcp import api_client as api_client_mod
         from sprintable_mcp.tools.visual_artifacts import (
-            CreateArtifactInput, CreateSpecPinInput, ListSpecPinsInput,
+            ArtifactNodeInput, CreateArtifactInput, CreateSpecPinInput, ListSpecPinsInput,
             create_artifact, create_spec_pin, list_spec_pins,
         )
 
@@ -533,7 +557,9 @@ async def test_mcp_create_and_list_spec_pin_roundtrip():
         real_client.post = _post
         real_client.get = _get
         try:
-            created = json.loads((await create_artifact(CreateArtifactInput(title="MCP Pinned")))[0].text)
+            created = json.loads((await create_artifact(CreateArtifactInput(
+                title="MCP Pinned", nodes=[ArtifactNodeInput(type="text")],
+            )))[0].text)
 
             pin_created = json.loads((await create_spec_pin(CreateSpecPinInput(
                 artifact_id=created["id"], anchor_type="coord", anchor_x=3.0, anchor_y=4.0,

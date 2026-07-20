@@ -36,7 +36,7 @@ from app.services.member_resolver import filter_org_member_ids
 from app.services.notification_dispatch import dispatch_notification
 from app.services.project_auth import assert_target_in_caller_org
 
-router = APIRouter(prefix="/api/v2/visual-artifacts", tags=["visual-artifacts"])
+router = APIRouter(prefix="/api/v2/visual-artifacts", tags=["visual-artifacts", "Work"])
 
 
 def _ok(data: object, status: int = 200) -> JSONResponse:
@@ -56,7 +56,7 @@ def _get_org_project(auth: AuthContext) -> tuple[uuid.UUID | None, uuid.UUID | N
     return uuid.UUID(str(o)), uuid.UUID(str(p))
 
 
-_LINK_TABLES = {"story_id": "stories", "epic_id": "epics", "doc_id": "docs"}
+_LINK_TABLES = {"story_id": "stories", "epic_id": "goals", "doc_id": "docs"}
 
 
 async def _assert_link_target_in_scope(
@@ -1078,6 +1078,7 @@ async def propose_canonical_version(
             "version_number": version_number, "requested_by_member_id": str(proposer_id),
             "artifact_title": artifact.title,
         },
+        project_id=project_id,
     )
     await session.commit()
     return _ok({

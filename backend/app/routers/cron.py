@@ -340,7 +340,7 @@ async def score_ga4_outcomes(
     """
     verify_cron(request)
 
-    from app.models.pm import Epic, Sprint, Story
+    from app.models.pm import Goal, Sprint, Story
     from app.services.outcome_scorer import score_epic_outcome, score_ga4_outcome
 
     now = datetime.now(timezone.utc)
@@ -391,12 +391,12 @@ async def score_ga4_outcomes(
                 logger.warning("ga4 story scoring failed id=%s: %s", story.id, exc)
                 failed.append({"type": "story", "id": str(story.id), "error": str(exc)})
 
-        # Epic 채점 (GA4 + internal_ops)
+        # Goal(구 Epic) 채점 (GA4 + internal_ops)
         epic_result = await session.execute(
-            select(Epic).where(
-                Epic.outcome_status == "pending",
-                Epic.measure_after.isnot(None),
-                Epic.measure_after <= now,
+            select(Goal).where(
+                Goal.outcome_status == "pending",
+                Goal.measure_after.isnot(None),
+                Goal.measure_after <= now,
             )
         )
         for epic in epic_result.scalars().all():

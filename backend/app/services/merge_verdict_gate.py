@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.participation import ParticipationRole
 from app.services.gate_resolver import resolve_disposition
-from app.services.gate_service import create_gate
+from app.services.gate_service import create_gate, resolve_work_item_project_id
 from app.services.trust_score import compute_member_trust_scores
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
@@ -204,10 +204,21 @@ def _decide(
     # ask posture → 사람 보류.
     if gate_status == "pending":
         return ASK_HUMAN, "policy disposition=ask"
-    # 기본 안전 — 자동 조건 미충족(하한<임계, PR fail 등). 근거 명시.
+    # 기본 안전 — 자동 조건(gate_status==auto_passed·ci==pass·pr==pass·lower_bound>=threshold)
+    # 중 실제로 미충족된 항목만 정확히 명시(#1388: 이전엔 항상 lower_bound 미달로 표시돼 pr==fail
+    # 등 다른 실제 사유를 오분류했다). 동시에 여러 조건이 미충족일 수 있어 전부 열거한다(단일 사유로
+    # 단순화 금지 — 그러면 미달로 표시 안 된 나머지 조건에서 동일한 부정확 문제가 재발한다).
+    unmet: list[str] = []
+    if gate_status != "auto_passed":
+        unmet.append(f"policy disposition!=allow_auto (gate_status={gate_status})")
+    if ci != "pass":
+        unmet.append(f"CI!=pass (ci={ci})")
+    if pr != "pass":
+        unmet.append(f"PR!=pass (pr={pr})")
+    if outcome.lower_bound < threshold:
+        unmet.append(f"outcome lower_bound {outcome.lower_bound:.2f}<{threshold}")
     return ASK_HUMAN, (
-        f"auto-merge conditions unmet (outcome lower_bound {outcome.lower_bound:.2f}<{threshold}, "
-        f"basis={TRUST_BASIS})"
+        f"auto-merge conditions unmet ({', '.join(unmet)}, basis={TRUST_BASIS})"
     )
 
 
@@ -300,6 +311,9 @@ async def evaluate_merge_gate(
     self_report_only = bool(capture.get("skipped_reason")) or not capture.get("recorded")
 
     # 3. 정책 disposition 아티팩트 gate row(Cage·AC⑥). create_gate가 disposition→status 설정·멱등.
+    # story #1968: 이 함수는 story_id(uuid)만 갖고 Story 객체를 로드하지 않으므로(participation/
+    # verdict/trust 경로 전부 story_id만 소비) resolve_work_item_project_id()로 신규 조회.
+    project_id = await resolve_work_item_project_id(session, org_id, "story", story_id)
     gate = await create_gate(
         session,
         org_id,
@@ -308,6 +322,7 @@ async def evaluate_merge_gate(
         MERGE_GATE_TYPE,
         member_id,
         role_id,
+        project_id=project_id,
         neutral_facts={
             "ci_result": ci,
             "pr_result": pr,

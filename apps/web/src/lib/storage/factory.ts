@@ -34,7 +34,7 @@ async function getSpAt(): Promise<string> {
   }
 }
 
-export async function createEpicRepository(): Promise<IEpicRepository> {
+export async function createGoalRepository(): Promise<IEpicRepository> {
   const { ApiEpicRepository } = await import('@sprintable/storage-api');
   return new ApiEpicRepository(await getSpAt());
 }

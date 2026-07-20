@@ -9,7 +9,7 @@ from app.dependencies.database import get_db
 from app.repositories.agent_session import AgentSessionError, AgentSessionRepository
 from app.schemas.agent_session import TransitionSessionRequest
 
-router = APIRouter(prefix="/api/v2/agent-sessions", tags=["agent-sessions"])
+router = APIRouter(prefix="/api/v2/agent-sessions", tags=["agent-sessions", "Organization"])
 
 
 def _repo(session: AsyncSession = Depends(get_db)) -> AgentSessionRepository:
