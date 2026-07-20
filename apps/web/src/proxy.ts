@@ -123,6 +123,13 @@ const MIGRATED_RESOURCES: Record<string, string[]> = {
   storage: [],
   epics: [],
   board: [],
+  // story #2016: 8fc51517(B1 리네이밍)이 epics→goals 경로 리터럴을 바꾸면서 RENAMED_RESOURCES에만
+  // 반영되고 여기(MIGRATED_RESOURCES)엔 신 이름 'goals'를 안 넣었다 — bare `/epics`는 이 표를 거쳐
+  // `/{ws}/{proj}/epics`로 301된 뒤 redirectRenamedResourcePath가 2차로 `goals`로 다시 301하지만,
+  // bare `/goals`(신 이름 그대로 오는 딥링크·북마크·검색결과)는 애초에 이 표에 키가 없어 redirectLegacyResourcePath가
+  // 즉시 null 반환 → Next 자체 404. 호스트/쿠키 무관 리소스 등록 누락 실측 확認(direct Cloud Run 호스트에서
+  // /board는 301 정상·/goals만 404, 동일 JWT fallback 경로 재사용).
+  goals: [],
 };
 
 /**
