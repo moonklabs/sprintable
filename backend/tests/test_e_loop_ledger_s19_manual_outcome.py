@@ -115,8 +115,9 @@ async def test_manual_verified_transition_closes_linked_measuring_loop_without_a
             # story #2038: verified/falsified는 outcome_result.actual(수치)+reason(근거)를 서버가
             # 강제한다 — actual_revenue는 이 테스트의 관심사(loop 귀속 와이어링)를 위한 부가 필드로
             # 유지하고, 강제 요건인 actual/reason을 함께 싣는다.
+            caller = _caller()
             await transition_hypothesis(
-                s, ORG, _caller(), hyp.id,
+                s, ORG, caller, hyp.id,
                 HypothesisTransition(
                     status="verified",
                     outcome_result={"actual_revenue": 1500, "actual": 1500, "reason": "매출 목표 달성"},
@@ -128,9 +129,23 @@ async def test_manual_verified_transition_closes_linked_measuring_loop_without_a
             assert loop.status == "closed"
             assert loop.outcome_attributed_at is not None
             assert loop.outcome_snapshot["hypothesis_status"] == "verified"
-            assert loop.outcome_snapshot["outcome_result"] == {
-                "actual_revenue": 1500, "actual": 1500, "reason": "매출 목표 달성",
-            }
+            # story #2036(PO 리뷰 b4e88f34) 계약 갱신: outcome_result 저장 시 서버가 closed_by/
+            # closed_by_member_id를 caller로부터 채워 신원 위장을 차단한다(#2036 AC — 클라이언트
+            # 자칭 금지) — 그래서 == 완전일치가 이제 성립하지 않는다. 완전일치를 빼거나 in으로
+            # 눕히면 "서버가 무엇을 채웠는지"를 아무도 검증 안 하게 되므로, 대신 두 축으로
+            # 쪼개 더 강하게 검증한다: ⓐ 호출자가 보낸 필드가 손상 없이 보존되는가
+            # ⓑ 서버가 채운 신원 필드가 하드코딩 문자열이 아니라 이 테스트가 실제로 만든
+            # caller와 정확히 일치하는가. loop_outcome_attribution.attribute_loop_outcome은
+            # 서버 스탬프 완료된 hypothesis.outcome_result를 그대로 스냅샷에 복사하므로(코드
+            # 확인) — "누가 닫았는지"가 loop 감사 기록에도 같이 남는 것은 스냅샷의 기존 설계
+            # (hypothesis_status처럼 지표 아닌 필드도 이미 담고 있음)와 일관되고, "그때 무엇을
+            # 근거로 닫았나"를 되짚는 목적에 오히려 부합한다 — 별도 필터링 불요로 판단.
+            stored = loop.outcome_snapshot["outcome_result"]
+            assert stored["actual_revenue"] == 1500
+            assert stored["actual"] == 1500
+            assert stored["reason"] == "매출 목표 달성"
+            assert stored["closed_by"] == caller.type
+            assert stored["closed_by_member_id"] == str(caller.id)
     finally:
         await eng.dispose()
 
