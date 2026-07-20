@@ -15,7 +15,7 @@ from app.services.entity_slug import (
     is_project_slug_taken,
     is_valid_slug_format,
     resolve_unique_project_slug,
-    slugify,
+    slugify_ascii_or_fallback,
 )
 from app.services.project_auth import (
     accessible_project_ids_in_org,
@@ -69,7 +69,10 @@ async def create_project(
             raise HTTPException(status_code=409, detail="Slug already exists")
         slug = body.slug
     else:
-        base_slug = slugify(body.name) or "project"
+        # story #2039(P0): 이전엔 slugify()(유니코드 보존)가 한글 등 비ASCII 이름을 그대로
+        # slug에 실어 URL 라우팅이 깨졌다(app/services/entity_slug.py 상단 주석 근거 기록 참고).
+        # ASCII 산출 실패(순수 비ASCII 이름) 시 id-fallback — name 자체는 그대로 저장/표시.
+        base_slug = slugify_ascii_or_fallback(body.name)
         slug = await resolve_unique_project_slug(session, org_id, base_slug)
 
     project = await repo.create(name=body.name, description=body.description, slug=slug)
