@@ -759,6 +759,12 @@ class MessageAttachment(BaseModel):
     # E-STORAGE-SSOT S7: asset registry row id(denorm·catch#4). asset_links=SSOT·이 필드=denorm.
     # optional(legacy 첨부·미등록 호환). save 시 이 값으로 asset_link 파생(drift 0).
     asset_id: uuid.UUID | None = None
+    # story #2055 AC1/AC2/AC4: 이미지 첨부의 픽셀 크기 — 서버가 업로드 시점에 측정해 채운다
+    # (client 제공값은 위조 가능해 신뢰 안 함, image_dimensions.measure_image_dimensions).
+    # 비이미지 첨부(문서/오디오/비디오)·측정 실패·기존(이 필드 도입 전) 첨부는 None이 정상
+    # (AC4·AC3 — additive·nullable, 백필 안 함. FE는 None이면 기존 고정 프레임으로 폴백).
+    width: int | None = None
+    height: int | None = None
 
     @field_validator("url")
     @classmethod
@@ -1737,6 +1743,15 @@ async def send_message(
                 ),
             )
 
+    # story #2055 AC1: 이미지 첨부 픽셀 크기를 서버가 측정해 채운다 — client 제공 width/height는
+    # asset_id와 동일하게 위조 가능하므로 신뢰하지 않고 항상 서버 측정값으로 덮어쓴다(server
+    # authority). 저장 전 in-place로 채워서 이후 model_dump() 호출(메시지 저장·asset registry
+    # 동기화 둘 다)이 자동으로 값을 반영하게 한다. best-effort(측정 실패해도 전송을 막지 않음).
+    if body.attachments:
+        from app.services.image_dimensions import measure_image_dimensions
+        for a in body.attachments:
+            a.width, a.height = await measure_image_dimensions(a.content_type, a.url) or (None, None)
+
     msg = ConversationMessage(
         conversation_id=conversation_id,
         sender_id=sender.id,
@@ -2102,11 +2117,18 @@ async def upload_conversation_attachment(
     if not uploaded:
         raise HTTPException(status_code=502, detail="upload failed")
 
+    # story #2055 AC1: 바이트가 이미 메모리에 있으므로 재다운로드 없이 직접 측정.
+    from app.services.image_dimensions import measure_image_dimensions_from_bytes
+    dims = measure_image_dimensions_from_bytes(body.content_type, data)
+    width, height = dims if dims is not None else (None, None)
+
     return MessageAttachment(
         url=object_path,
         name=body.name,
         content_type=body.content_type,
         size=len(data),
+        width=width,
+        height=height,
     )
 
 

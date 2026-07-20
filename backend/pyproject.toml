@@ -44,6 +44,7 @@ dependencies = [
     # CBOR 엣지케이스(indefinite-length map/array 등) 오파싱 리스크가 crypto 검증 우회로
     # 이어질 수 있어 검증된 라이브러리 사용.
     "cbor2>=5.6.0",
+    "imagesize>=2.0.0",
 ]
 
 [dependency-groups]
