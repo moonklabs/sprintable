@@ -31,6 +31,20 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # 2026-07-20 승격: prod는 0183a(prod-only fork·이 파일과 byte-identical DDL)로 story_number를
+    # 이미 물리 적용했다. 이번 승격에서 0183a 파일을 제거하고 prod DB를 0183으로 되감으므로
+    # (backend/scripts/migrate.sh prod-fork precheck) 이 리비전이 prod에서 실행된다 — 컬럼이
+    # 이미 있으면 no-op이어야 DuplicateColumn으로 죽지 않는다. fresh DB/dev엔 영향 0.
+    conn = op.get_bind()
+    already = conn.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'stories' AND column_name = 'story_number'"
+        )
+    ).scalar()
+    if already:
+        return
+
     op.add_column("stories", sa.Column("story_number", sa.Integer(), nullable=True))
 
     op.execute(
