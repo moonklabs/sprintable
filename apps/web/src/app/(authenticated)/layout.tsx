@@ -4,6 +4,7 @@ import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { DashboardShell } from '../dashboard/dashboard-shell';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
+import { resolveOrgMemberName } from '@/lib/resolve-member-name';
 
 interface MemberContext {
   id: string;
@@ -76,12 +77,15 @@ export default async function AuthenticatedLayout({
   // 현재 project의 slug가 필요 — /me/memberships는 slug를 안 실어 보내(BE 스코프 밖, FE 단독
   // 수정 범위 유지 위해 이미 존재하는 단건 조회를 재사용). 실패해도 sidebar/cmd-palette는
   // bare `/docs`로 폴백해 미들웨어 리다이렉트 안전망을 타므로 무해.
-  const currentProjectSlug = me?.project_id
-    ? await fetch(`${fastapiUrl}/api/v2/projects/${me.project_id}`, { headers: authHeader, cache: 'no-store' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((json: { slug?: string | null } | null) => json?.slug ?? undefined)
-        .catch(() => undefined)
-    : undefined;
+  const [currentProjectSlug, userName] = await Promise.all([
+    me?.project_id
+      ? fetch(`${fastapiUrl}/api/v2/projects/${me.project_id}`, { headers: authHeader, cache: 'no-store' })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((json: { slug?: string | null } | null) => json?.slug ?? undefined)
+          .catch(() => undefined)
+      : undefined,
+    resolveOrgMemberName(fastapiUrl, authHeader, me?.id, me?.name),
+  ]);
 
   return (
     <DashboardShell
@@ -90,7 +94,7 @@ export default async function AuthenticatedLayout({
       projectId={me?.project_id}
       projectName={me?.project_name ?? undefined}
       currentProjectSlug={currentProjectSlug}
-      userName={me?.name}
+      userName={userName}
       role={me?.role}
       projectMemberships={projectMemberships}
       orgMemberships={orgMemberships}

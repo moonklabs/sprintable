@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getServerSession } from '@/lib/db/server';
 import { DashboardShell } from './dashboard-shell';
+import { resolveOrgMemberName } from '@/lib/resolve-member-name';
 
 interface MemberContext {
   id: string;
@@ -51,13 +52,15 @@ export default async function DashboardLayout({
     role: o.role,
   }));
 
+  const userName = await resolveOrgMemberName(fastapiUrl, authHeader, me?.id, me?.name);
+
   return (
     <DashboardShell
       currentTeamMemberId={me?.id}
       orgId={me?.org_id}
       projectId={me?.project_id}
       projectName={me?.project_name ?? undefined}
-      userName={me?.name}
+      userName={userName}
       projectMemberships={projectMemberships}
       orgMemberships={orgMemberships}
     >
