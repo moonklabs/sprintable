@@ -88,7 +88,19 @@
     "workforce": "Workforce",
     "orgRoles": "Permissions",
     "orgTrust": "Trust",
-    "orgMemory": "Memory"
+    "orgMemory": "Memory",
+    "switcherOrgSettingsAria": "Organization settings",
+    "switcherSwitchToOrg": "Switch to this organization",
+    "switcherNewProject": "New project",
+    "switcherNewOrganization": "Create new organization",
+    "switcherNewProjectDialogTitle": "Create new project",
+    "switcherProjectNameLabel": "Project name",
+    "switcherProjectNamePlaceholder": "e.g. Web renewal",
+    "switcherDescriptionLabel": "Description",
+    "switcherOptionalLabel": "(optional)",
+    "switcherProjectDescPlaceholder": "A short description of the project",
+    "switcherCreating": "Creating…",
+    "switcherCreateButton": "Create"
   },
   "storage": {
     "title": "Storage",
@@ -1847,7 +1859,14 @@
     "eventWarning": "Warning",
     "eventSystem": "System notification",
     "eventDoc": "Document update",
-    "eventFallback": "New notification"
+    "eventFallback": "New notification",
+    "panelTitle": "Notifications",
+    "unreadOnly": "Unread only",
+    "emptyAll": "No new notifications",
+    "emptyStory": "No story notifications",
+    "emptySystem": "No system notifications",
+    "daysAgo": "d ago",
+    "bellAriaLabelCount": "{count} notifications"
   },
   "invite": {
     "title": "Organization Invitation",
@@ -3253,6 +3272,7 @@
     "forkInfo": "Adding someone to a DM creates a new group chat. The existing DM is preserved.",
     "adding": "Adding…",
     "you": "You",
+    "team": "Team",
     "agent": "Agent",
     "personCount": "{count} people",
     "agentCount": "You + {count} agents"
@@ -3789,5 +3809,13 @@
     "responsivePreviewDesktop": "Desktop",
     "responsivePreviewTablet": "Tablet",
     "responsivePreviewMobile": "Mobile"
+  },
+  "releaseNotes": {
+    "whatsNew": "What's new",
+    "title": "Release notes",
+    "emptyDescription": "No news yet. We'll let you know here once an update is ready.",
+    "learnMore": "Learn more",
+    "previousNotes": "Previous notes",
+    "previousNotesListDesc": "Previous release notes"
   }
 }
