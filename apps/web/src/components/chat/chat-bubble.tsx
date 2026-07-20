@@ -135,6 +135,18 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
           );
         },
         pre: ({ children }) => <pre className={`mb-1.5 overflow-x-auto rounded-lg p-2.5 text-xs ${codeBg}`}>{children}</pre>,
+        // story #2035 AC2 — 표는 자기 컨테이너 안에서만 가로 스크롤(doc-content-renderer.tsx의
+        // 검증된 not-prose overflow-x-auto 패턴 재사용). whitespace-nowrap 없으면 브라우저가
+        // 열 텍스트를 좁은 말풍선 폭에 맞춰 줄바꿈/축약해버려 "열 삭제·축약 금지" 위반이 됨 —
+        // nowrap으로 열 폭을 원문 그대로 유지하고 넘치는 만큼 래퍼가 스크롤하게 한다.
+        table: ({ children }) => (
+          <div className={`mb-1.5 overflow-x-auto rounded-lg border ${border}`}>
+            <table className="whitespace-nowrap text-xs">{children}</table>
+          </div>
+        ),
+        thead: ({ children }) => <thead className={muted}>{children}</thead>,
+        th: ({ children }) => <th className={`border-b px-2 py-1 text-left font-semibold ${border} ${text}`}>{children}</th>,
+        td: ({ children }) => <td className={`border-b px-2 py-1 ${border} ${text}`}>{children}</td>,
         ul: ({ children }) => <ul className={`mb-1.5 ml-4 list-disc space-y-0.5 text-sm ${text}`}>{children}</ul>,
         ol: ({ children }) => <ol className={`mb-1.5 ml-4 list-decimal space-y-0.5 text-sm ${text}`}>{children}</ol>,
         li: ({ children }) => <li className={`text-sm leading-relaxed ${text}`}>{children}</li>,
@@ -280,9 +292,15 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
             </div>
           )}
 
-          {/* Content — S8: command 전용 버블(brand·mono·⌘ 태그) vs 일반(리터럴은 dequote 표시) */}
+          {/* Content — S8: command 전용 버블(brand·mono·⌘ 태그) vs 일반(리터럴은 dequote 표시).
+              story #2035: min-w-0+max-w-full — 부모 컬럼(min-w-0 max-w-[72%] items-start/end)이
+              flex-item 자식을 cross-axis에서 stretch가 아닌 shrink-to-fit으로 배치하므로, 이
+              말풍선 배경 div 자체에 상한이 없으면 표·코드블록의 min-content가 부모 max-w를
+              무시하고 새어나간다(재현·측정 확認 — 아래 근거 참고). max-w-full로 컬럼의 269px
+              상한을 이 자식에도 강제해야 안의 pre(overflow-x-auto)·표(overflow-x-auto 래퍼)가
+              비로소 자기 박스 안에서 스크롤된다. */}
           {isCmd ? (
-            <div className={`rounded-xl border border-info/30 bg-info/8 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
+            <div className={`min-w-0 max-w-full rounded-xl border border-info/30 bg-info/8 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
               <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-info">
                 <Terminal className="h-3 w-3" aria-hidden />
                 {t('commandTag')}
@@ -293,7 +311,7 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
               </code>
             </div>
           ) : (
-            <div className={`rounded-xl px-3.5 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${
+            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${
               isMine
                 ? 'rounded-tr-sm bg-primary text-primary-foreground'
                 : 'rounded-tl-sm bg-muted text-foreground'
