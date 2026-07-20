@@ -42,7 +42,9 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     monkeypatch.setattr(gm, "resolve_member", AsyncMock(return_value=caller))
     monkeypatch.setattr(gm, "transition_gate", _fake_transition)
     monkeypatch.setattr(gm.GateResponse, "model_validate", staticmethod(lambda g: g))
-    body = gm.GateTransitionRequest(status="approved", resolver_id=spoofed)
+    # story #2027: gate_type="merge"는 risk 매트릭스상 고위험(_HIGH_RISK_GATE_TYPES)이라 이 파일의
+    # 관심사(resolver_id 강제)와 무관한 사유-강제 가드를 note로 우회.
+    body = gm.GateTransitionRequest(status="approved", resolver_id=spoofed, note="테스트 사유")
     # 48f064e5: 엔드포인트가 doc-gate authz용 게이트 로드 → 비-doc 게이트 반환으로 그 분기 skip.
     _sess = AsyncMock()
     _gr = MagicMock()

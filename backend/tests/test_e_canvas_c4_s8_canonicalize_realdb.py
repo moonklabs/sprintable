@@ -247,7 +247,12 @@ async def test_approve_sets_anchor_version_and_notifies_creator():
         await _setup_transition_app(app, Session, seeded["org_id"], seeded["approver_user_id"])
         client = _client_for(app)
         try:
-            resp = await client.post(f"/api/v2/gates/{gate_id}/transition", json={"status": "approved"})
+            # story #2027: gate_type="artifact_canonicalize"는 risk 매트릭스 폴백(미분류→고위험)이라
+            # 이 파일의 관심사(anchor_version 배선)와 무관한 사유-강제 가드를 note로 우회.
+            resp = await client.post(
+                f"/api/v2/gates/{gate_id}/transition",
+                json={"status": "approved", "note": "테스트 사유"},
+            )
             assert resp.status_code == 200, resp.text
         finally:
             await client.aclose()

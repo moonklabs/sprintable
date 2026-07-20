@@ -342,7 +342,9 @@ async def transition_gate(
     gate.status = new_status
     gate.resolver_id = resolver_id
     gate.resolved_at = datetime.now(timezone.utc)
-    if new_status == "rejected" and note:
+    # story #2027: 이전엔 rejected 에만 저장 — approved 도 note 를 받을 수 있는데(override 의
+    # reason·이번 고위험 강제 사유 포함) 조용히 버려졌다(감사 추적 훼손). status 무관 note 있으면 저장.
+    if note:
         gate.resolution_note = note
 
     # H1-S7: 사람 게이트 해소(approve/reject)를 verdict로 기록 — trust로 환류.
@@ -876,8 +878,10 @@ async def override_gate(
         a.status = "overridden"
         a.resolved_at = now
 
-    # ⭐gate 행에 override 마커(FE cheap 신호·event fetch 없이 "강제 결정됨" 배지). transition_gate 는
-    # resolution_note 를 rejected 에만 세팅하므로 approved override 사유가 누락 → neutral_facts 로 보존.
+    # ⭐gate 행에 override 마커(FE cheap 신호·event fetch 없이 "강제 결정됨" 배지). story #2027 이전엔
+    # transition_gate 가 resolution_note 를 rejected 에만 세팅해 approved override 사유가 누락됐었다 —
+    # 지금은 resolution_note 에도 저장되지만(status 무관), neutral_facts 마커는 override 전용 배지·
+    # bypassed_sod 등 override 고유 메타 보존 목적으로 유지(중복 저장 무해·용도 분리).
     # 전체 audit/메타(owner·시각·bypassed_sod)는 gate_overridden 이벤트가 SSOT(S32 reassign 동형).
     gate.neutral_facts = {
         **(gate.neutral_facts or {}),
