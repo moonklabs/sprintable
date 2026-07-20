@@ -34,7 +34,7 @@ export function PropertyPanel({ node, onChangeText, onDelete, className }: Prope
         type="text"
         value={text}
         onChange={(e) => onChangeText(node.id, e.target.value)}
-        className="mb-3 w-full rounded-md border border-border bg-background px-2 py-1 text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+        className="mb-3 w-full rounded-md border border-border bg-background px-2 py-1 text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
       />
       <button
         type="button"

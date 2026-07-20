@@ -60,7 +60,7 @@ export function GateSignatureApproval({
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder={t('sigReasonPlaceholder')}
-          className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
         />
       </div>
 

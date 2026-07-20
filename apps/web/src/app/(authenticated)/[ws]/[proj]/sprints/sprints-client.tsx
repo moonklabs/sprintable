@@ -187,7 +187,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
               onChange={(e) => setTitle(e.target.value)}
               required
               placeholder={t('sprintTitlePlaceholder')}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -198,7 +198,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
                 required
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
             <div className="space-y-1">
@@ -208,7 +208,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
                 required
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
           </div>
@@ -222,7 +222,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
                 value={goal}
                 onChange={(e) => setGoal(e.target.value)}
                 placeholder={t('goalPlaceholder')}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -237,7 +237,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
                     value={capacity}
                     onChange={(e) => setCapacity(e.target.value)}
                     placeholder="0"
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2 pr-8 text-sm text-foreground tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2 pr-8 text-sm text-foreground tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                   <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">SP</span>
                 </div>
@@ -253,7 +253,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
                     value={teamSize}
                     onChange={(e) => setTeamSize(e.target.value)}
                     placeholder="0"
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2 pr-6 text-sm text-foreground tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2 pr-6 text-sm text-foreground tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                   <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">명</span>
                 </div>

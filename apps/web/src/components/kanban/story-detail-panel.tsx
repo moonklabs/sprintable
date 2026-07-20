@@ -977,7 +977,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     onChange={(e) => setDescriptionDraft(e.target.value)}
                     onPaste={handlePasteAttach}
                     placeholder="Markdown 형식으로 작성하세요..."
-                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
                   />
                   <div className="flex gap-2">
@@ -1024,7 +1024,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     value={acDraft}
                     onChange={(e) => setAcDraft(e.target.value)}
                     placeholder="Markdown 형식으로 작성하세요..."
-                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
                   />
                   <div className="flex gap-2">
@@ -1199,7 +1199,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           onChange={(e) => setNewLabelName(e.target.value)}
                           onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateLabel(); }}
                           placeholder="새 라벨 이름"
-                          className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                         <button
                           type="button"
@@ -1360,7 +1360,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     value={depQuery}
                     onChange={(e) => setDepQuery(e.target.value)}
                     placeholder={t('dep.searchPlaceholder')}
-                    className="w-full rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
+                    className="w-full rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   {depQueryResults.length > 0 && (
                     <ul className="max-h-32 overflow-y-auto rounded border border-border bg-background">
@@ -1449,7 +1449,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     placeholder="Add a comment..."
                     value={commentInput}
                     onChange={(e) => setCommentInput(e.target.value)}
-                    className="flex field-sizing-content min-h-[80px] w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex field-sizing-content min-h-[80px] w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                         void handleSubmitComment();

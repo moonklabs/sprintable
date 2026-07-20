@@ -83,7 +83,7 @@ export function WorkflowPolicySimulatorSection() {
 
   const tb = result?.trust_branch;
   const decisionMeta = tb?.decision ? DECISION_META[tb.decision] : null;
-  const inputCls = 'h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40';
+  const inputCls = 'h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary';
 
   return (
     <div className="space-y-4">

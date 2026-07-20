@@ -183,7 +183,7 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
     }
   }, [title, description, objective, successCriteria, priority, targetDate, targetSp, epic, onSaved]);
 
-  const inputCls = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
+  const inputCls = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary';
 
   return (
     <div className="space-y-4">

@@ -139,7 +139,7 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = (id) => id
             value={rejectNote}
             onChange={(e) => setRejectNote(e.target.value)}
             placeholder={t('gateRejectNotePlaceholder')}
-            className="h-7 flex-1 rounded-md border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="h-7 flex-1 rounded-md border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           />
           <Button
             size="sm"

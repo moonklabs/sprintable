@@ -195,7 +195,7 @@ export default function ConversationPage() {
                 }}
                 onBlur={() => void handleSaveTitle()}
                 aria-label="방 이름 편집"
-                className="min-w-0 rounded border border-border bg-background px-1.5 py-0.5 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="min-w-0 rounded border border-border bg-background px-1.5 py-0.5 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             ) : meta?.type === 'group' ? (
               <button
