@@ -13,7 +13,7 @@ from app.schemas.reward import BalanceResponse, GrantReward, LeaderboardEntry, R
 from app.services.member_resolver import is_caller_member, resolve_member
 from app.services.project_auth import has_project_access
 
-router = APIRouter(prefix="/api/v2/rewards", tags=["rewards"])
+router = APIRouter(prefix="/api/v2/rewards", tags=["rewards", "Organization"])
 
 
 def _get_repo(

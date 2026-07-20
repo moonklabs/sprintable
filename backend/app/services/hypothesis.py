@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hypothesis import HYPOTHESIS_STATUSES, Hypothesis, is_valid_transition
-from app.models.pm import Epic, Sprint, Story
+from app.models.pm import Goal, Sprint, Story
 
 logger = logging.getLogger(__name__)
 from app.repositories.hypothesis import HypothesisRepository
@@ -104,7 +104,7 @@ async def _assert_targets_same_project(
     """
     if epic_ids:
         rows = (await session.execute(
-            select(Epic.id, Epic.project_id).where(Epic.id.in_(epic_ids))
+            select(Goal.id, Goal.project_id).where(Goal.id.in_(epic_ids))
         )).all()
         if len(rows) != len(set(epic_ids)) or any(pid != project_id for _id, pid in rows):
             raise HypothesisServiceError(
@@ -208,7 +208,7 @@ async def get_hypothesis(
 async def list_hypotheses(
     session: AsyncSession,
     org_id: uuid.UUID,
-    project_id: uuid.UUID,
+    project_id: uuid.UUID | None,
     *,
     status: str | None = None,
     owner_member_id: uuid.UUID | None = None,

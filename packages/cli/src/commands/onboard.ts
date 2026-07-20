@@ -15,6 +15,7 @@ import input from "@inquirer/input";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_API_URL } from "../api.js";
 
 export type OnboardAgentType =
   | "claude-code"
@@ -245,7 +246,7 @@ async function onboardOther(agentLabel: string): Promise<void> {
 
   const apiUrl = await input({
     message: "Sprintable API URL",
-    default: "https://app.sprintable.ai",
+    default: DEFAULT_API_URL,
     validate: (v) => (v.startsWith("http") ? true : "http(s)://로 시작해야 합니다"),
   });
 

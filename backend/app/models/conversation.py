@@ -58,6 +58,10 @@ class ConversationParticipant(Base):
     )
     # 270c87e6: per-대화 알림 mute. set=무음·null=알림 ON. 참여자 지위·가시성·수신은 불변(알림만).
     muted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #1976 (E-CHAT-REALTIME 트랙A): read state 서버 truth. NULL=한 번도 안 읽음
+    # (과거 참가자 전원 포함 — 마이그 시점 전량 NULL, 백필 없음). unread_count 계산 기준선
+    # (last_read_at 이후 메시지 중 sender IS DISTINCT FROM 나). muted_at과 동형(수동 mark 컬럼).
+    last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="participants")
 

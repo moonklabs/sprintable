@@ -13,7 +13,7 @@ from app.models.project import OrgMember
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(prefix="/api/v2/integrations", tags=["integrations"])
+router = APIRouter(prefix="/api/v2/integrations", tags=["integrations", "Organization"])
 
 
 def _err(code: str, message: str, status: int = 400) -> JSONResponse:

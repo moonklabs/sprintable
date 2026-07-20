@@ -15,6 +15,7 @@ def _mock_project(name: str = "Sprintable") -> MagicMock:
     p.id = PROJECT_ID
     p.org_id = ORG_ID
     p.name = name
+    p.slug = "sprintable"
     p.description = None
     p.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     p.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
@@ -95,7 +96,8 @@ async def test_create_project_201():
     client, session, app = await _client()
     try:
         with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
-                patch("app.routers.projects.ensure_human_member", new_callable=AsyncMock):
+                patch("app.routers.projects.ensure_human_member", new_callable=AsyncMock), \
+                patch("app.routers.projects.resolve_unique_project_slug", new=AsyncMock(return_value="sprintable")):
             mock_create.return_value = _mock_project()
 
             async with client as c:

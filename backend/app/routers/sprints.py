@@ -18,7 +18,7 @@ from app.services import hypothesis as hypothesis_svc
 from app.services.member_resolver import resolve_member
 from app.services.notification_dispatch import dispatch_notification
 
-router = APIRouter(prefix="/api/v2/sprints", tags=["sprints"])
+router = APIRouter(prefix="/api/v2/sprints", tags=["sprints", "Work"])
 
 # story fbf1c14b: hypotheses.py 라우터의 HypothesisServiceError→HTTP 매핑과 정합(중복
 # 정의 — private 모듈 심볼 import 대신 여기서도 로컬 유지, hypotheses.py와 값 동일 확인됨).
@@ -438,6 +438,9 @@ async def close_sprint(
                 body=None,
                 reference_type="sprint",
                 reference_id=sprint.id,
+                # story #1953: 이미 `if sprint.project_id and ...`로 non-null 확인된 후라
+                # 신규 조회 없이 그대로 실음.
+                source_project_id=sprint.project_id,
             )
     return SprintResponse.model_validate(sprint)
 

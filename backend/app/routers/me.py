@@ -14,7 +14,7 @@ from app.models.team import TeamMember
 from app.models.user import User
 from app.schemas.me import MeResponse, UpdateMe
 
-router = APIRouter(prefix="/api/v2/me", tags=["me"])
+router = APIRouter(prefix="/api/v2/me", tags=["me", "Organization"])
 
 
 @router.get("", response_model=MeResponse)

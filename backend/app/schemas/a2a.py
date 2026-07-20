@@ -227,11 +227,16 @@ class JsonRpcRequest(BaseModel):
 class JsonRpcError(BaseModel):
     code: int
     message: str
-    data: list[dict] | None = None
+    # story #2003(Phase B P1-a): `data.retryable`(bool) 힌트를 싣기 위해 dict 허용 — 기존
+    # `list[dict]`는 실 생성지가 전무해(grep 확認) 하위호환 손실 없이 dict로 교체.
+    data: dict | None = None
 
 
 class JsonRpcResponse(BaseModel):
     jsonrpc: Literal["2.0"] = "2.0"
-    id: str | int
+    # story #2003: main.py 글로벌 예외 핸들러(auth 실패 등 body 파싱 前 발생)가 id를 결정 못 할
+    # 수 있다 — JSON-RPC 2.0 §5는 이 경우 id=null을 스펙 준수 폴백으로 허용. 기존 in-handler
+    # 생성지(a2a.py)는 전부 `body.id`(non-None)를 넘기므로 회귀 없음(grep 확認, 아래 참조).
+    id: str | int | None
     result: dict | None = None
     error: JsonRpcError | None = None

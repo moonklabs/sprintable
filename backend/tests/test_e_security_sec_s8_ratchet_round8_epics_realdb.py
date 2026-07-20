@@ -50,7 +50,7 @@ async def _seed(session):
     """org(project_a, project_b) + epic_b(project_b, title="TOP SECRET B EPIC") +
     human_a(project_a에만 명시 grant, project_b 접근권 없음)."""
     from app.models.organization import Organization
-    from app.models.pm import Epic
+    from app.models.pm import Goal
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
     from app.models.user import User
@@ -64,7 +64,7 @@ async def _seed(session):
     session.add_all([project_a, project_b])
     await session.commit()
 
-    epic_b = Epic(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="TOP SECRET B EPIC")
+    epic_b = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="TOP SECRET B EPIC")
     session.add(epic_b)
     await session.commit()
 

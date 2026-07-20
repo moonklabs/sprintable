@@ -18,7 +18,7 @@ from app.dependencies.database import get_db
 from app.services.gate_metrics import compute_hitl_gate_metrics
 from app.services.project_auth import is_org_owner_or_admin
 
-router = APIRouter(prefix="/api/v2/gate", tags=["hitl-gate-metrics"])
+router = APIRouter(prefix="/api/v2/gate", tags=["hitl-gate-metrics", "Trust"])
 
 
 class HitlGateMetricsResponse(BaseModel):

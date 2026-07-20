@@ -234,13 +234,15 @@ export function UnifiedSwitcher({
           render={
             <SidebarMenuButton className={cn('w-full', className)}>
               <OrgInitial name={displayOrg} />
+              {/* story c4980e70(조직 헤더 1급화): 조직명=primary(굵게)·프로젝트명=secondary로 emphasis 전도 —
+                  기존엔 조직명이 10px 보조 라벨이라 "조직명 부재"처럼 읽혔다(doc §1 ①). */}
               <span className="flex min-w-0 flex-1 flex-col truncate text-left">
-                <span className="truncate text-[10px] font-medium text-muted-foreground leading-tight">
+                <span className="truncate text-xs font-semibold text-foreground leading-tight">
                   {displayOrg}
                 </span>
                 {/* 0746: 전환 중에는 옛 org의 프로젝트명을 숨겨 "새 org + 옛 프로젝트" 깜빡임(leak처럼 보임)을 차단 */}
                 {!pending && displayProject && (
-                  <span className="truncate text-xs font-semibold text-foreground leading-tight">
+                  <span className="truncate text-[10px] font-medium text-muted-foreground leading-tight">
                     {displayProject}
                   </span>
                 )}

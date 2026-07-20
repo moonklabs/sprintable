@@ -19,7 +19,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.pm import Epic, Story
+from app.models.pm import Goal, Story
 from app.services.trust_score import compute_member_trust_scores
 from app.services.workflow_readiness_matrix import get_readiness, record_unsupported_entity_attempt
 
@@ -130,7 +130,7 @@ async def _epic_aggregate(
     session: AsyncSession, org_id: uuid.UUID, epic_id: uuid.UUID
 ) -> dict[str, Any]:
     """epic 산하 story 완료/리스크 집계(active→done routing material·advisory). get_epic_progress 재사용."""
-    epic = await session.get(Epic, epic_id)
+    epic = await session.get(Goal, epic_id)
     if epic is None:
         return {"total_stories": 0, "done_stories": 0, "completion_pct": 0, "open_stories": 0}
     from app.repositories.analytics import AnalyticsRepository

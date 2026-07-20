@@ -22,7 +22,7 @@ from app.models.conversation import Conversation, ConversationMessage, Conversat
 from app.models.team import TeamMember
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["ws-chat"])
+router = APIRouter(tags=["ws-chat", "Organization"])
 
 # agent_id(str) → 연결된 WebSocket 집합
 _rooms: dict[str, set[WebSocket]] = defaultdict(set)

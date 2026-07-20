@@ -11,7 +11,7 @@ from app.models.user import RefreshToken
 from app.repositories.org_member import OrgMemberRepository
 from app.schemas.org_member import ORG_ROLES, OrgMemberCreate, OrgMemberResponse, OrgMemberUpdate
 
-router = APIRouter(prefix="/api/v2/org-members", tags=["org-members"])
+router = APIRouter(prefix="/api/v2/org-members", tags=["org-members", "Organization"])
 
 
 def _get_repo(

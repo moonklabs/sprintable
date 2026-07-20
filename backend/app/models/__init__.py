@@ -5,9 +5,14 @@ from app.models.agent_deployment import AgentAuditLog, AgentDeployment, AgentPer
 from app.models.agent_routing_rule import AgentRoutingRule
 from app.models.agent_run import AgentRun
 from app.models.agent_session import AgentSession
+from app.models.auth_identity import AuthIdentity, AuthMigration, AuthMigrationEvent
+from app.models.auth_native_bootstrap import AuthNativeBootstrapCode
+from app.models.oauth_handoff_code import OAuthHandoffCode
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
 from app.models.deletion_audit import DeletionAuditLog
 from app.models.dependency import ItemDependency
+from app.models.device_installation import DeviceInstallation, DeviceProofChallenge
+from app.models.entity_slug_history import EntitySlugHistory
 from app.models.embedding import Embedding
 from app.models.evidence import Evidence
 from app.models.gate import Gate
@@ -22,14 +27,16 @@ from app.models.plan_tier_limit import PlanTierLimit
 from app.models.policy_document import PolicyDocument
 from app.models.audit import AuditLog
 from app.models.webhook_config import WebhookConfig
+from app.models.push_device import PushDevice
 from app.models.doc import Doc, DocShareToken, DocSlugAlias
+from app.models.mention import Mention
 from app.models.meeting import Meeting
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
 from app.models.notification import InboxItem, Notification, NotificationSetting
 from app.models.notification_preference import NotificationPreference
 from app.models.organization import Organization
-from app.models.pm import Epic, Sprint, Story, Task
+from app.models.pm import Goal, Sprint, Story, Task
 from app.models.hypothesis import (
     Hypothesis,
     HypothesisEpicLink,
@@ -54,10 +61,19 @@ from app.models.activity_event import ActivityEvent
 from app.models.asset import Asset, AssetFolder, AssetLink
 from app.models.release_note import ReleaseNote
 from app.models.role_template import RoleTemplate
+from app.models.trust_snapshot import OrgMemberTrustSnapshot
 from app.models.visual_artifact import ArtifactNode, ArtifactVersion, VisualArtifact
 
 __all__ = [
     "RoleTemplate",
+    "OrgMemberTrustSnapshot",
+    "AuthIdentity",
+    "AuthMigration",
+    "AuthMigrationEvent",
+    "AuthNativeBootstrapCode",
+    "OAuthHandoffCode",
+    "DeviceInstallation",
+    "DeviceProofChallenge",
     "ArtifactNode",
     "ArtifactVersion",
     "VisualArtifact",
@@ -85,6 +101,8 @@ __all__ = [
     "HitlPolicy",
     "HitlRequest",
     "ItemDependency",
+    "EntitySlugHistory",
+    "Mention",
     "MockupComponent",
     "MockupPage",
     "MockupScenario",
@@ -96,8 +114,9 @@ __all__ = [
     "PolicyDocument",
     "AuditLog",
     "WebhookConfig",
+    "PushDevice",
     "Doc",
-    "Epic",
+    "Goal",
     "Hypothesis",
     "HypothesisEpicLink",
     "HypothesisSprintLink",

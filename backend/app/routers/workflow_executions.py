@@ -12,7 +12,7 @@ from app.models.agent_routing_rule import AgentRoutingRule
 from app.models.team import TeamMember
 from app.models.workflow_execution_log import WorkflowExecutionLog
 
-router = APIRouter(prefix="/api/v2/workflow-executions", tags=["workflow-executions"])
+router = APIRouter(prefix="/api/v2/workflow-executions", tags=["workflow-executions", "Work"])
 
 
 class ExecutionLogItem(BaseModel):

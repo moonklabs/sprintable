@@ -324,7 +324,7 @@ class L2TriggerWorker:
         rows = (
             await db.execute(
                 text(
-                    "SELECT id, org_id, target_date, status, assignee_id FROM epics "
+                    "SELECT id, org_id, target_date, status, assignee_id FROM goals "
                     "WHERE assignee_id IS NOT NULL AND target_date IS NOT NULL "
                     "AND status NOT IN :terminal AND target_date <= :horizon"
                 ).bindparams(bindparam("terminal", expanding=True)),

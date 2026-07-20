@@ -15,10 +15,10 @@ from app.models.team import TeamMember
 from app.models.user import RefreshToken, User
 from app.schemas.subscription import AccountDeleteResponse
 
-router = APIRouter(prefix="/api/v2/account", tags=["account"])
+router = APIRouter(prefix="/api/v2/account", tags=["account", "Organization"])
 
 # FE switcher 는 복수형 `/api/v2/accounts/resolve` 를 호출(라이브 회귀: BE 미구현 404 → 전 계정 "Unknown").
-accounts_router = APIRouter(prefix="/api/v2/accounts", tags=["accounts"])
+accounts_router = APIRouter(prefix="/api/v2/accounts", tags=["accounts", "Organization"])
 
 
 class AccountResolveRequest(BaseModel):

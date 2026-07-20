@@ -22,7 +22,7 @@ from app.models.event import Event
 from app.models.team import TeamMember
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/v2/agent-inbox", tags=["agent-inbox"])
+router = APIRouter(prefix="/api/v2/agent-inbox", tags=["agent-inbox", "Organization"])
 
 
 def _verify_signature(raw_body: bytes, signature_header: str | None) -> bool:

@@ -67,6 +67,8 @@ async def fallback_notify(
             title="Stuck handoff — fallback to human",
             body=f"{sr.entity_type} {story_id} agent handoff stalled — human intervention requested",
             reference_type="story", reference_id=story_id,
+            # story #1953: sr.project_id NOT NULL — 신규 조회 없이 그대로 실음.
+            source_project_id=sr.project_id,
         )
 
     # idempotent marker(통지 0명이어도 기록 — 재통지 방지). ⭐status 변경 없음(rollback 0).

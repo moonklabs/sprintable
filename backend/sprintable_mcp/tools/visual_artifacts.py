@@ -1,6 +1,8 @@
-"""시각 산출물(visual_artifact) MCP 도구(7개) — E-CANVAS C1-S3(story 8bace49e)+
+"""시각 산출물(visual_artifact) MCP 도구(8개) — E-CANVAS C1-S3(story 8bace49e)+
 C2-S6(story 0edca31e, 코멘트 왕복)+C3-S7(story 940266db, 편집 왕복)+C4-S8(story a5118cb0,
-정본 제안 — 승인은 always-HITL이라 MCP 미제공)."""
+정본 제안 — 승인은 always-HITL이라 MCP 미제공)+story #1922(delete_artifact, soft delete·
+생성자 전용 — delete_story/delete_task/delete_epic류 hard-delete cascade 차단(SEC-S1)과
+다른 리스크 클래스. deleted_at 타임스탬프 플립일 뿐 자식 row 물리삭제 없음)."""
 from __future__ import annotations
 
 from mcp.types import TextContent
@@ -104,6 +106,10 @@ class UpdateSpecPinInput(SprintableInput):
 class DeleteSpecPinInput(SprintableInput):
     artifact_id: str
     pin_id: str
+
+
+class DeleteArtifactInput(SprintableInput):
+    artifact_id: str
 
 
 class ProposeCanonicalInput(SprintableInput):
@@ -278,6 +284,18 @@ async def delete_spec_pin(args: DeleteSpecPinInput) -> list[TextContent]:
     """스펙 핀 삭제(최신 버전 소속만 대상)."""
     try:
         result = await client.delete(f"/api/v2/visual-artifacts/{args.artifact_id}/pins/{args.pin_id}")
+        return ok(result)
+    except Exception as exc:
+        return err(str(exc))
+
+
+async def delete_artifact(args: DeleteArtifactInput) -> list[TextContent]:
+    """artifact 삭제(soft delete — deleted_at 타임스탬프만 세팅, 자식 row 물리삭제 없음).
+    **생성자만 삭제 가능**(story/task/epic/doc의 admin/owner 게이트보다 좁은 범위 — "누가
+    주어인가" Evidence 패턴 계승). 생성자가 아니면 403(생성자만 삭제할 수 있습니다). 삭제 후
+    get_artifact/list_artifacts에서 더 이상 노출되지 않는다."""
+    try:
+        result = await client.delete(f"/api/v2/visual-artifacts/{args.artifact_id}")
         return ok(result)
     except Exception as exc:
         return err(str(exc))

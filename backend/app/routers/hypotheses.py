@@ -37,7 +37,7 @@ from app.services import hypothesis as svc
 from app.services.member_resolver import ResolvedMember, resolve_member
 from app.services.project_auth import has_project_access
 
-router = APIRouter(prefix="/api/v2/hypotheses", tags=["hypotheses"])
+router = APIRouter(prefix="/api/v2/hypotheses", tags=["hypotheses", "Work"])
 
 
 async def _assert_hypothesis_project_access(
@@ -108,7 +108,8 @@ async def draft(
 @router.get("", response_model=list[HypothesisResponse])
 async def list_hypotheses(
     response: Response,
-    project_id: uuid.UUID = Query(...),
+    auth: AuthContext = Depends(get_current_user),
+    project_id: uuid.UUID | None = Query(default=None),
     epic_id: uuid.UUID | None = Query(default=None),
     story_id: uuid.UUID | None = Query(default=None),
     sprint_id: uuid.UUID | None = Query(default=None),
@@ -118,11 +119,21 @@ async def list_hypotheses(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_project_scoped_org_id),
 ) -> list[HypothesisResponse]:
+    """story fca4723d(C1): project_id 생략 시 org 전체 가설 조회 — retro list_sessions와
+    동형 패턴(app/routers/retros.py). org-wide 조회는 각 항목의 실제 project 접근권으로
+    후필터(비접근 project의 가설 비노출 — 존재 자체를 숨기는 404류 원칙과 정합)."""
     items = await svc.list_hypotheses(
         session, org_id, project_id,
         status=status_filter, owner_member_id=owner_member_id,
         epic_id=epic_id, story_id=story_id, sprint_id=sprint_id, limit=limit,
     )
+    if project_id is None:
+        user_id = uuid.UUID(auth.user_id)
+        accessible = [
+            item for item in items
+            if await has_project_access(session, user_id, item.project_id, org_id)
+        ]
+        items = accessible
     response.headers["X-Total-Count"] = str(len(items))
     return items
 

@@ -57,7 +57,7 @@ async function mount(props: Partial<React.ComponentProps<typeof CommandPalette>>
 describe('CommandPalette — existing navigate/search behavior (regression guard)', () => {
   it('still renders all 7 navigate destinations with no context (existing behavior untouched)', async () => {
     await mount();
-    expect(document.body.textContent).toContain('인박스로 이동');
+    expect(document.body.textContent).toContain('결재함으로 이동');
     expect(document.body.textContent).toContain('보드로 이동');
     expect(document.body.textContent).toContain('문서로 이동');
   });
@@ -111,7 +111,7 @@ describe('CommandPalette — action commands (story 4f991165)', () => {
     const recruitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('에이전트 모집하기'));
     expect(recruitBtn).toBeDefined();
     await act(async () => { recruitBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(pushMock).toHaveBeenCalledWith('/agents/recruiter');
+    expect(pushMock).toHaveBeenCalledWith('/organization/workforce/recruiter');
   });
 
   it('does not render any command execution history/count/recency (surveillance-reframe guard)', async () => {

@@ -8,6 +8,8 @@ import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { loginWithPassword } from '@/lib/db/client';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { safeNextPath, SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
+import { FIREBASE_AUTH_ENABLED } from '@/lib/auth/firebase-client';
+import { signInAndExchangeFirebaseSession } from '@/lib/auth/firebase-login-flow';
 
 export default function LoginPage() {
   const t = useTranslations('login');
@@ -23,6 +25,9 @@ export default function LoginPage() {
     csrf_mismatch: t('csrfMismatch'),
     oauth_no_token: t('oauthNoToken'),
     invalid_provider: t('invalidProvider'),
+    // e-mobile-oauth-native-handoff-contract — 네이티브 핸드오프 issue 실패(유나 가디언 지적,
+    // 신규 에러코드가 매핑 누락돼 로그인 페이지가 밋밋한 loginFailed로 후퇴할 뻔했음).
+    oauth_native_issue_failed: t('oauthNativeIssueFailed'),
   };
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,6 +37,29 @@ export default function LoginPage() {
     errorCode ? (oauthErrors[errorCode] ?? t('loginFailed')) : null
   );
   const [loading, setLoading] = useState(false);
+  const [firebaseLoading, setFirebaseLoading] = useState(false);
+
+  // story a0118204: 스캐폴드 — NEXT_PUBLIC_FIREBASE_AUTH_ENABLED가 꺼져있으면(기본) 버튼 자체가
+  // 안 보이니 호출 불가. 켜져 있어도 서버 플래그(FIREBASE_AUTH_ISSUE_SESSION)가 꺼져있으면
+  // BFF가 501을 반환 — 클라 플래그는 UX 노출 게이트일 뿐 실 발급 권위가 아니다.
+  const handleFirebaseLogin = async () => {
+    if (!email.trim() || !password.trim()) return;
+    setFirebaseLoading(true);
+    setError(null);
+    try {
+      const result = await signInAndExchangeFirebaseSession(email.trim(), password);
+      if (result.error) {
+        setError(result.error.message);
+        return;
+      }
+      // story #1959(P2-S3) AC: 로그인 복귀 후 /login history 잔존 0 — push 는 스택에 남아
+      // 복귀 화면에서 BACK 1회가 로그인 폼으로 돌아가 버린다(재제출 위험). replace 로 스왑.
+      router.replace(safeNextPath(nextParam));
+      router.refresh();
+    } finally {
+      setFirebaseLoading(false);
+    }
+  };
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) return;
@@ -48,7 +76,8 @@ export default function LoginPage() {
         setError(result.error.message);
         return;
       }
-      router.push(safeNextPath(nextParam));
+      // story #1959(P2-S3): 위와 동일 사유 — replace 로 /login history 잔존 방지.
+      router.replace(safeNextPath(nextParam));
       router.refresh();
     } catch {
       setError(t('loginFailed'));
@@ -119,6 +148,15 @@ export default function LoginPage() {
           >
             {loading ? t('signingIn') : t('signIn')}
           </button>
+          {FIREBASE_AUTH_ENABLED && (
+            <button
+              onClick={handleFirebaseLogin}
+              disabled={firebaseLoading || !email.trim() || !password.trim()}
+              className="flex w-full min-h-[44px] items-center justify-center rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground/80 transition hover:bg-muted/50 disabled:opacity-50"
+            >
+              {firebaseLoading ? t('signingIn') : t('firebaseSignIn')}
+            </button>
+          )}
         </div>
 
         {process.env.NEXT_PUBLIC_OAUTH_ENABLED === 'true' && (

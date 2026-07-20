@@ -19,11 +19,20 @@ _logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.core.database import engine
+    from app.routers.auth_firebase_internal import check_internal_secret_config
     from app.routers.verdict_capture import warn_if_webhook_secret_misconfigured
+    from app.services.firebase_verifier import check_mobile_app_check_config
     from app.services.pg_pubsub import check_listen_config, listen_loop
 
     warn_if_webhook_secret_misconfigured()  # Bot-M.2 P3: 웹훅 secret misconfig 를 트래픽 前 경고.
     check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
+    check_internal_secret_config()  # 산티아고 §9 finding 4: non-local + 시크릿 미설정 fail-closed.
+    check_mobile_app_check_config()  # 산티아고 §9 finding 1: mobile 발급 on + App Check 미필수 fail-closed.
+    # story bea25062: cutover 존재-캐시는 의도적으로 startup에서 warm 안 함(자체 발견 —
+    # TestClient(app)로 lifespan을 태우는 기존 SSE 테스트들이 라우트 전용으로 짜둔 유한한
+    # mock db.execute() 순서-큐를 startup 시점의 이 캐시 조회가 몰래 하나 소비해 실패시켰다).
+    # 지연 초기화(첫 실 요청에서 채워짐)만으로 충분 — check_any_cutover_epoch_exists() 자체가
+    # DB 접속 불가/미준비 시에도 fail-safe라 startup에서 먼저 확인해둘 실익이 크지 않다.
     task = asyncio.create_task(listen_loop())
     # E-L2 S5: 휴리스틱 트리거 워커는 default-off — 명시 활성화 시에만 task 생성(AC①).
     l2_task = None
@@ -57,7 +66,18 @@ async def lifespan(app: FastAPI):
             await engine.dispose()
 
 
-from app.routers import a2a, account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, context_pack, gate_config, gate_metrics, attachments, audit_logs, auth, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, loops, mcp, me, meetings, members, merge_gate, mockups, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, release_notes, retros, rewards, role_templates, runtime_capabilities, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import a2a, account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, context_pack, deeplink_manifest, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, loops, mcp, me, meetings, members, merge_gate, mockups, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+
+# 도메인 축 B(org-1st-class-surface-ia-design-b §3): OpenAPI 태그 조직-우선 위계.
+# 개별 라우터는 기존 세부 tag(예 "stories")를 그대로 유지하고 이 4축 태그를 추가로 보유(다중
+# tags·additive) — FastAPI가 이 openapi_tags 순서대로 문서를 그룹핑하고, 여기 없는 세부 tag는
+# 뒤이어 처음 등장한 순서로 노출된다. URL·오퍼레이션·세부 tag 값 불변(하위호환 100%).
+_OPENAPI_TAGS = [
+    {"name": "Organization", "description": "조직 — 구성원·역할·워크포스·신뢰 프로필·설정·통신"},
+    {"name": "Work", "description": "작업 — 스토리·에픽·스프린트·워크플로우·산출물"},
+    {"name": "Trust", "description": "신뢰 — 게이트·검증·감사 로그"},
+    {"name": "Knowledge", "description": "지식 — 문서·스토리지·조직 학습(loop)"},
+]
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -66,6 +86,7 @@ app = FastAPI(
     docs_url="/api/v2/_swagger" if settings.debug else None,
     redoc_url=None,
     lifespan=lifespan,
+    openapi_tags=_OPENAPI_TAGS,
 )
 
 _HTTP_CODE_MAP: dict[int, str] = {
@@ -81,6 +102,15 @@ _HTTP_CODE_MAP: dict[int, str] = {
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    # story #2003(Phase B P1-a, E-A2A-PROTO): /rpc는 JSON-RPC 2.0 엔드포인트라 auth 실패
+    # (get_verified_org_id/get_current_user Depends)와 agent-not-found(_get_agent_member)가
+    # 핸들러 try/except 밖(dependency 단계/조기 호출)에서 raise 돼 REST 엔벨로프 대신 JSON-RPC
+    # error envelope으로 렌더해야 한다. 경로 정밀 매치(`is_a2a_rpc_path`)라 이 파일의 다른 라우트
+    # (agent-card.json 등)는 전혀 영향받지 않는다 — 아래 mapped/REST 분기는 그대로 유지.
+    if a2a.is_a2a_rpc_path(request.url.path):
+        message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        return await a2a.build_rpc_error_response(request, exc.status_code, message)
+
     mapped = _HTTP_CODE_MAP.get(exc.status_code, f"HTTP_{exc.status_code}")
     detail = exc.detail
     # dict detail 은 구조화 에러 의도(code/message/suggestion·retry_after 등) → error 객체로 패스스루.
@@ -117,6 +147,12 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     """예상치 못한 500 에러 — 내부 정보는 로그에만, 클라이언트엔 일반 메시지."""
     _logger.exception("Unhandled exception on %s %s: %s", request.method, request.url.path, exc)
     detail = str(exc) if settings.debug else "Internal server error"
+
+    # story #2003: /rpc의 미처리 예외도 JSON-RPC envelope으로(code=-32603 표준 Internal error,
+    # retryable=True — 5xx 분류). http_exception_handler와 동일 경로-정밀 매치.
+    if a2a.is_a2a_rpc_path(request.url.path):
+        return await a2a.build_rpc_error_response(request, 500, detail)
+
     return JSONResponse(
         status_code=500,
         content={"data": None, "error": {"code": "INTERNAL_ERROR", "message": detail}, "meta": None},
@@ -152,7 +188,11 @@ app.include_router(release_notes.router)
 app.include_router(conversations.router)
 app.include_router(presence.router)
 app.include_router(sprints.router)
-app.include_router(epics.router)
+# 계층 리네이밍 B1(story 1925): 목표(구 에픽) 전면 rename — 같은 router 객체를 신(primary)+구
+# (deprecated alias) 두 prefix로 include(hierarchy-rename-alias-mechanism-design §2). FastAPI가
+# 동일 APIRouter 인스턴스의 다중 prefix include를 표준 지원 — 핸들러 완전 동일, 로직 복제 0.
+app.include_router(goals.router, prefix="/api/v2/goals", tags=["goals", "Work"])
+app.include_router(goals.router, prefix="/api/v2/epics", tags=["epics-deprecated"], deprecated=True)
 app.include_router(hypotheses.router)
 app.include_router(loops.router)
 app.include_router(context_pack.router)
@@ -190,6 +230,7 @@ app.include_router(role_templates.router)
 app.include_router(entities.router)
 app.include_router(event_notifications.router)
 app.include_router(notifications.router)
+app.include_router(deeplink_manifest.router)  # story #1951: 딥링크 계약 매니페스트 v1 서빙
 app.include_router(onboarding.router)
 app.include_router(attachments.router)
 app.include_router(notification_preferences.router)
@@ -204,6 +245,7 @@ app.include_router(runtime_capabilities.router)
 app.include_router(members.router)
 app.include_router(merge_gate.router)
 app.include_router(organizations.router)
+app.include_router(resolve.router)
 app.include_router(org_invites.router)
 app.include_router(invite_accept.router)
 app.include_router(me.router)
@@ -225,6 +267,9 @@ app.include_router(agent_routing_rules.router)
 app.include_router(agent_sessions.router)
 app.include_router(bridge.router)
 app.include_router(cron.router)
+app.include_router(auth_firebase_internal.router)
+app.include_router(auth_native_bootstrap.router)
+app.include_router(device_installations.router)
 app.include_router(hitl.router)
 app.include_router(integrations.router)
 app.include_router(workflow_versions.router)
@@ -245,3 +290,6 @@ app.include_router(ws_chat.router)
 if settings.is_ee_enabled:
     from ee.routers import billing  # type: ignore[import]
     app.include_router(billing.router, prefix="/api/v2/billing")
+
+    from ee.routers import push_devices  # type: ignore[import]
+    app.include_router(push_devices.router, prefix="/api/v2/push")

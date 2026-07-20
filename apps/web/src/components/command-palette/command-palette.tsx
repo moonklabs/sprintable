@@ -19,6 +19,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { buildActionCommands, type ActionCommand } from './command-palette-actions';
 
 interface CommandItem {
@@ -43,13 +44,15 @@ interface StoryTitleResult {
   story_number?: number | null;
 }
 
-const ITEMS: CommandItem[] = [
+// story a539c649 S2: 'go-docs' 의 href 는 컴포넌트 내부에서 실 ws/proj slug 로 override 된다
+// (없으면 이 bare '/docs' 로 폴백 — 미들웨어 리다이렉트 안전망이 받는다).
+const STATIC_ITEMS: CommandItem[] = [
   { id: 'go-inbox', group: 'navigate', icon: Inbox, labelKey: 'goInbox', href: '/inbox', shortcut: ['G', 'I'] },
   { id: 'go-dashboard', group: 'navigate', icon: LayoutDashboard, labelKey: 'goDashboard', href: '/dashboard', shortcut: ['G', 'D'] },
   { id: 'go-board', group: 'navigate', icon: FolderKanban, labelKey: 'goBoard', href: '/board', shortcut: ['G', 'B'] },
   { id: 'go-sprints', group: 'navigate', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
   { id: 'go-chats', group: 'navigate', icon: MessageSquareMore, labelKey: 'goChats', href: '/chats', shortcut: ['G', 'M'] },
-  { id: 'go-agents', group: 'navigate', icon: Bot, labelKey: 'goAgents', href: '/agents', shortcut: ['G', 'A'] },
+  { id: 'go-agents', group: 'navigate', icon: Bot, labelKey: 'goAgents', href: '/organization/workforce', shortcut: ['G', 'A'] },
   { id: 'go-docs', group: 'navigate', icon: BookOpen, labelKey: 'goDocs', href: '/docs', shortcut: ['G', 'S'] },
 ];
 
@@ -73,6 +76,21 @@ export interface CommandPaletteProps {
 export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }: CommandPaletteProps) {
   const router = useRouter();
   const t = useTranslations('commandPalette');
+  const { orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
+  const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
+  function resourceHref(resource: string): string {
+    return orgSlug && currentProjectSlug ? `/${orgSlug}/${currentProjectSlug}/${resource}` : `/${resource}`;
+  }
+  const docsHref = resourceHref('docs');
+  const boardHref = resourceHref('board');
+  const ITEMS = useMemo(
+    () => STATIC_ITEMS.map((item) => {
+      if (item.id === 'go-docs') return { ...item, href: docsHref };
+      if (item.id === 'go-board') return { ...item, href: boardHref };
+      return item;
+    }),
+    [docsHref, boardHref],
+  );
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [docResults, setDocResults] = useState<DocResult[]>([]);
@@ -96,16 +114,16 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   }, [open, contextStoryId]);
 
   const actionItems = useMemo(
-    () => buildActionCommands(t, contextStory ? { storyId: contextStory.id, storyTitle: contextStory.title } : undefined),
+    () => buildActionCommands(t, contextStory ? { storyId: contextStory.id, storyTitle: contextStory.title, boardHref } : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- t는 로케일 불변 함수
-    [contextStory],
+    [contextStory, boardHref],
   );
 
   const filteredNavigate = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return ITEMS;
     return ITEMS.filter((item) => t(item.labelKey).toLowerCase().includes(q));
-  }, [query, t]);
+  }, [query, t, ITEMS]);
 
   const filteredActions = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -178,7 +196,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   }
 
   function handleSelectDoc(doc: DocResult) {
-    router.push(`/docs/${doc.slug}`);
+    router.push(`${docsHref}/${doc.slug}`);
     handleOpenChange(false);
   }
 

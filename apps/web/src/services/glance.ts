@@ -3,7 +3,7 @@
  * 2026-07-10) §1 감시-게이트 리트머스: 주어=프로젝트/팀(개인 성적·순위·처리량 절대 노출 0).
  *
  * 데이터 소스는 전부 실 확인(grounding, 추정 0):
- * - 로드맵 순서: `GET /api/epics?project_id=`(created_at asc) — 에픽에 전용 큐 순서 컬럼 없음
+ * - 로드맵 순서: `GET /api/goals?project_id=`(created_at asc) — 에픽에 전용 큐 순서 컬럼 없음
  *   (`IEpicRepository.ts` 확인) 확인 후 fallback으로 created_at 사용(§10 "없으면 sort_order"
  *   상당 — 실제로는 sort_order 컬럼 자체가 없어 created_at이 유일한 실 정렬키).
  * - 진척(done/total/completion_pct): `GET /api/dashboard/overview`의
@@ -26,7 +26,7 @@ export interface RoadmapEpic {
   completionPct: number;
 }
 
-/** `GET /api/epics` 응답 항목(core-storage `Epic` 인터페이스 미러, 필요 필드만). */
+/** `GET /api/goals` 응답 항목(core-storage `Epic` 인터페이스 미러, 필요 필드만). */
 export interface BeEpicListItem {
   id: string;
   title: string;
@@ -40,7 +40,7 @@ export interface BeEpicListItem {
 
 /**
  * "현재 궤적"(current-arc) window — 유나 로드맵 서사 확定안 (b), 2026-07-10. 이 프로젝트는
- * 실제로 에픽 100개+(수년 백로그 히스토리)를 갖고 있어 `/api/epics`를 그대로 로드맵에 넣으면
+ * 실제로 에픽 100개+(수년 백로그 히스토리)를 갖고 있어 `/api/goals`를 그대로 로드맵에 넣으면
  * "6개 마일스톤" 서사(목업)와 완전히 어긋나고, 에픽 수만큼 `/api/stories?epic_id=`를 병렬
  * fetch하는 구조가 돼 규모가 커질수록 레이스/성능 문제까지 만든다(라이브 확認 中 발견).
  *

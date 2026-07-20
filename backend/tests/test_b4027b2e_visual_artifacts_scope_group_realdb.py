@@ -155,7 +155,7 @@ async def test_create_artifact_canvas_scope_201_no_overblock():
         await _setup_app_api_key(app, Session, seeded["org_id"], seeded["project_id"], scope=["canvas"])
         client = _client_for(app)
         try:
-            resp = await client.post("/api/v2/visual-artifacts", json={"title": "Legit"})
+            resp = await client.post("/api/v2/visual-artifacts", json={"title": "Legit", "nodes": [{"type": "text", "props": {}}]})
             assert resp.status_code == 201, resp.text
         finally:
             await client.aclose()
@@ -176,7 +176,7 @@ async def test_create_artifact_legacy_write_scope_201_no_regression():
         await _setup_app_api_key(app, Session, seeded["org_id"], seeded["project_id"], scope=["read", "write"])
         client = _client_for(app)
         try:
-            resp = await client.post("/api/v2/visual-artifacts", json={"title": "Legacy"})
+            resp = await client.post("/api/v2/visual-artifacts", json={"title": "Legacy", "nodes": [{"type": "text", "props": {}}]})
             assert resp.status_code == 201, resp.text
         finally:
             await client.aclose()
@@ -197,7 +197,7 @@ async def test_create_artifact_jwt_human_201_no_regression():
         await _setup_app_jwt(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            resp = await client.post("/api/v2/visual-artifacts", json={"title": "Human"})
+            resp = await client.post("/api/v2/visual-artifacts", json={"title": "Human", "nodes": [{"type": "text", "props": {}}]})
             assert resp.status_code == 201, resp.text
         finally:
             await client.aclose()
@@ -220,7 +220,7 @@ async def test_edit_artifact_toolgroup_scope_without_canvas_403():
         await _setup_app_jwt(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target"})
+            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target", "nodes": [{"type": "text", "props": {}}]})
             artifact_id = create_resp.json()["data"]["id"]
         finally:
             await client.aclose()
@@ -253,7 +253,7 @@ async def test_edit_artifact_canvas_scope_201_no_overblock():
         await _setup_app_jwt(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target"})
+            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target", "nodes": [{"type": "text", "props": {}}]})
             artifact_id = create_resp.json()["data"]["id"]
         finally:
             await client.aclose()
@@ -288,7 +288,7 @@ async def test_delete_artifact_toolgroup_scope_without_canvas_403():
         await _setup_app_jwt(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target"})
+            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target", "nodes": [{"type": "text", "props": {}}]})
             artifact_id = create_resp.json()["data"]["id"]
         finally:
             await client.aclose()
@@ -320,7 +320,7 @@ async def test_add_comment_toolgroup_scope_without_canvas_403():
         await _setup_app_jwt(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target"})
+            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target", "nodes": [{"type": "text", "props": {}}]})
             artifact_id = create_resp.json()["data"]["id"]
         finally:
             await client.aclose()
@@ -354,7 +354,7 @@ async def test_propose_canonical_toolgroup_scope_without_canvas_403():
         await _setup_app_jwt(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target"})
+            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target", "nodes": [{"type": "text", "props": {}}]})
             artifact_id = create_resp.json()["data"]["id"]
         finally:
             await client.aclose()
@@ -386,7 +386,7 @@ async def test_get_artifact_read_route_unaffected_by_scope():
         await _setup_app_jwt(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Readable"})
+            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Readable", "nodes": [{"type": "text", "props": {}}]})
             artifact_id = create_resp.json()["data"]["id"]
         finally:
             await client.aclose()
@@ -418,7 +418,7 @@ async def test_create_spec_pin_toolgroup_scope_without_canvas_403():
         await _setup_app_jwt(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target"})
+            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target", "nodes": [{"type": "text", "props": {}}]})
             artifact_id = create_resp.json()["data"]["id"]
         finally:
             await client.aclose()
@@ -451,7 +451,7 @@ async def test_create_spec_pin_canvas_scope_201_no_overblock():
         await _setup_app_jwt(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target"})
+            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target", "nodes": [{"type": "text", "props": {}}]})
             artifact_id = create_resp.json()["data"]["id"]
         finally:
             await client.aclose()
@@ -497,7 +497,7 @@ async def test_update_delete_spec_pin_toolgroup_scope_without_canvas_403():
         await _setup_app_jwt(app, Session, seeded["org_id"], seeded["project_id"])
         client = _client_for(app)
         try:
-            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target"})
+            create_resp = await client.post("/api/v2/visual-artifacts", json={"title": "Target", "nodes": [{"type": "text", "props": {}}]})
             artifact_id = create_resp.json()["data"]["id"]
             pin_resp = await client.post(
                 f"/api/v2/visual-artifacts/{artifact_id}/pins",

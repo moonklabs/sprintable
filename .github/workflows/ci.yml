@@ -236,7 +236,43 @@ jobs:
   backend-test:
     name: Backend pytest
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # story #1982(2026-07-17): postgres service + real-PG env 배선. 이 갭은 story #1472
+    # (2026-06-21)에서 이미 발견됐고, story 8236bbc3(#1619, 2026-07-03)이 "backend-test job
+    # 무변경(회귀0 최대보수)"으로 의도적으로 유보했던 트레이드오프다 — 그 결과 `_REAL_DB_SKIP`
+    # 마커 테스트(예: test_1974_gate_assigned_to_me.py의 realdb 3건)가 이 job에서 조용히 skip
+    # 되어 CI green이 realPG 왕복 거동을 실제로 보증하지 못했다. 여기서 alembic-fresh-db job과
+    # 동일 자격증명·동일 2단계 구조(non-destructive 공유 DB + destructive_schema 격리 순회)를
+    # 재사용해 닫는다. destructive_schema 마커 테스트를 이 postgres 위에서 격리 없이 평면
+    # `pytest`로 돌리면 파일마다 붙는 autouse 스키마-리셋 fixture(tests/conftest.py:84,
+    # DROP SCHEMA public CASCADE)가 공유 alembic-migrated 스키마를 오염시켜 story 8236bbc3가
+    # 문서화한 116건 연쇄 실패를 이 job에서도 재현하므로, 단일 평면 실행이 아니라 반드시
+    # 동일한 2단계 분리 구조가 필요하다(217초 실측 + 격리 순회 버퍼 — alembic-fresh-db와 동일
+    # timeout-minutes: 20으로 상향).
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        # pgvector image: the baseline schema declares `CREATE EXTENSION vector` (embeddings),
+        # which the stock postgres:16 image lacks. Cloud SQL (dev/prod) has pgvector available.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      PARITY_TEST_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
+      JWT_SECRET: ci-test-secret-at-least-32-chars-long
+      SECRET_KEY: ci-test-secret-at-least-32-chars-long
 
     steps:
       - name: Checkout
@@ -247,8 +283,50 @@ jobs:
         with:
           version: 'latest'
 
-      - name: Run pytest
-        run: cd backend && uv run pytest
+      # non-destructive real-PG 테스트(84개 파일, destructive_schema 마커 제외)는 alembic-migrated
+      # 스키마(view·nullable·seed 포함 baseline)에 의존한다 — alembic-fresh-db job과 동일하게
+      # fresh DB를 먼저 heads까지 올린다(그렇지 않으면 테이블 부재로 realdb 테스트가 실패한다).
+      - name: alembic upgrade heads (fresh DB → baseline)
+        working-directory: backend
+        run: uv run alembic upgrade heads
+
+      - name: Run pytest (non-destructive, real-PG auto-discovered via marker)
+        working-directory: backend
+        run: uv run pytest -q -m "not destructive_schema"
+
+      # destructive_schema 마커 파일(Base.metadata.create_all/drop_all로 자체 스키마 직접 관리)은
+      # 위 alembic-migrated 공유 DB(sprintable_test)에서 절대 실행하지 않는다 — story 8236bbc3
+      # 실측대로 drop_all()이 DB를 오염시켜 같은 세션 후속 테스트 전부를 연쇄 실패시킬 수 있다.
+      # 파일마다 독립 throwaway DB(sprintable_test_iso)로 완전 격리한다.
+      - name: Run pytest (destructive schema — isolated fresh DB per file)
+        working-directory: backend
+        run: |
+          set -uo pipefail
+          # set -e를 여기선 안 쓴다(alembic-fresh-db job과 동일 이유) — 첫 실패 파일이 스크립트를
+          # 즉시 죽이면 나머지 파일은 조용히 미실행된 것과 동일한 결과가 된다.
+          mapfile -t files < <(
+            uv run pytest -q -m destructive_schema --collect-only \
+              | grep -oE '^tests/[a-zA-Z0-9_]+\.py' | sort -u
+          )
+          echo "destructive files: ${#files[@]}"
+          failed_files=()
+          for f in "${files[@]}"; do
+            echo "::group::isolated $f"
+            PGPASSWORD=sprintable dropdb -h localhost -U sprintable --if-exists sprintable_test_iso
+            PGPASSWORD=sprintable createdb -h localhost -U sprintable sprintable_test_iso
+            PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test_iso \
+              -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+            ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+            PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+            DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
+            uv run pytest -q "$f" || failed_files+=("$f")
+            echo "::endgroup::"
+          done
+          if [ "${#failed_files[@]}" -gt 0 ]; then
+            echo "FAILED files: ${failed_files[*]}"
+            exit 1
+          fi
+          echo "OK: all ${#files[@]} isolated destructive-schema files passed"
 
   ci:
     name: Lint, Type Check, Test, Build
@@ -277,6 +355,12 @@ jobs:
 
       - name: Type Check
         run: pnpm type-check
+
+      # story #1957(P2-S1) breakpoint SSOT 회귀가드: md:(768) 신규 사용은 useIsMobile()의
+      # 1024 기준과 어긋나는 route 내 md·lg 혼재를 재도입한다. 기존 사용은 grandfather
+      # allowlist로 통과, 새 파일/allowlist 밖 파일에서만 실패.
+      - name: "Verify no new md: breakpoint (story #1957 regression guard)"
+        run: pnpm --filter web verify:no-new-md-breakpoint
 
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead

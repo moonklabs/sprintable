@@ -48,7 +48,7 @@ async def _session_factory():
 async def _seed(session):
     """org(project_a[caller grant]·project_b[무접근]) + epic_a(project_a)·epic_b(project_b)."""
     from app.models.organization import Organization
-    from app.models.pm import Epic
+    from app.models.pm import Goal
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
     from app.models.user import User
@@ -60,8 +60,8 @@ async def _seed(session):
     project_b = Project(id=uuid.uuid4(), org_id=org.id, name="Project B")
     session.add_all([project_a, project_b])
     await session.commit()
-    epic_a = Epic(id=uuid.uuid4(), org_id=org.id, project_id=project_a.id, title="Epic A")
-    epic_b = Epic(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="Epic B orig")
+    epic_a = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project_a.id, title="Epic A")
+    epic_b = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project_b.id, title="Epic B orig")
     session.add_all([epic_a, epic_b])
     await session.commit()
 
@@ -113,7 +113,7 @@ async def _epic_title(Session, epic_id):
     from sqlalchemy import text
     async with Session() as s:
         return (await s.execute(
-            text("SELECT title FROM epics WHERE id = :i"), {"i": epic_id}
+            text("SELECT title FROM goals WHERE id = :i"), {"i": epic_id}
         )).scalar_one()
 
 

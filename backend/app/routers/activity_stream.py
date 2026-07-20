@@ -10,7 +10,7 @@ from app.schemas.activity_stream import ActivityStreamItem, ActivityStreamRespon
 from app.services.activity_stream import query_activity_stream
 from app.services.project_auth import has_project_access
 
-router = APIRouter(prefix="/api/v2/activity-stream", tags=["activity-stream"])
+router = APIRouter(prefix="/api/v2/activity-stream", tags=["activity-stream", "Trust"])
 
 
 @router.get("", response_model=ActivityStreamResponse)

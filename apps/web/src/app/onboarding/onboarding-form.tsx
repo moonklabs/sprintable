@@ -67,26 +67,33 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
     setLoading(true);
     setError('');
 
-    const res = await fetch('/api/organizations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: orgName.trim(), slug: orgSlug.trim() }),
-    });
-    const json = await res.json();
+    // story #2000: 아래 fetch/json 파싱이 네트워크 단에서 throw하면(오프라인 등) try 없이는
+    // setLoading(false)가 영영 안 불려 폼이 영구 로딩으로 멈춘다(온보딩 진입 자체를 막는 심각한
+    // 케이스) — try/catch/finally로 봉합, 기존 error 상태를 그대로 재사용.
+    try {
+      const res = await fetch('/api/organizations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: orgName.trim(), slug: orgSlug.trim() }),
+      });
+      const json = await res.json();
 
-    if (!res.ok) {
-      setError(json?.error?.message ?? t('createOrgFailed'));
+      if (!res.ok) {
+        setError(json?.error?.message ?? t('createOrgFailed'));
+        return;
+      }
+
+      setOrgId(json.data.id);
+      // E-ONB S5 FINAL: org 생성 시 org_member가 최초 생성됨 → 즉시 토큰 refresh로
+      // 새 JWT에 org_id(BE auth Path4 org_member fallback) 반영. 이래야 다음 단계 project 생성의
+      // getAuthContext(/api/v2/me)가 통과한다(미refresh 시 fresh JWT엔 team_member 없어 me null → 401).
+      await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
+      setStep('project');
+    } catch {
+      setError(t('networkError'));
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setOrgId(json.data.id);
-    // E-ONB S5 FINAL: org 생성 시 org_member가 최초 생성됨 → 즉시 토큰 refresh로
-    // 새 JWT에 org_id(BE auth Path4 org_member fallback) 반영. 이래야 다음 단계 project 생성의
-    // getAuthContext(/api/v2/me)가 통과한다(미refresh 시 fresh JWT엔 team_member 없어 me null → 401).
-    await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
-    setStep('project');
-    setLoading(false);
   };
 
   // E-ONB S5: 온보딩 완료 후 /dashboard 이동 전 토큰 refresh.
@@ -102,50 +109,52 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
     setLoading(true);
     setError('');
 
-    // E-ONB S5 FINAL: org 생성 직후 refresh(handleCreateOrg)로 JWT에 org_id 반영됨 → X-Org-Id 불요(제거).
-    const res = await fetch('/api/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ org_id: orgId, name: projectName.trim(), description: projectDesc.trim() || null }),
-    });
-    const json = await res.json();
+    try {
+      // E-ONB S5 FINAL: org 생성 직후 refresh(handleCreateOrg)로 JWT에 org_id 반영됨 → X-Org-Id 불요(제거).
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ org_id: orgId, name: projectName.trim(), description: projectDesc.trim() || null }),
+      });
+      const json = await res.json();
 
-    if (!res.ok) {
-      if (json?.error?.code === 'UPGRADE_REQUIRED') {
-        setUpgradeReason(json.error.message);
-        setShowUpgrade(true);
-        setLoading(false);
+      if (!res.ok) {
+        if (json?.error?.code === 'UPGRADE_REQUIRED') {
+          setUpgradeReason(json.error.message);
+          setShowUpgrade(true);
+          return;
+        }
+        setError(json?.error?.message ?? t('createProjectFailed'));
         return;
       }
-      setError(json?.error?.message ?? t('createProjectFailed'));
+
+      const project = json.data;
+      if (!project) {
+        setError(t('createProjectFailed'));
+        return;
+      }
+
+      setProjectId(project.id);
+
+      // 휴먼 members 앵커는 BE가 org/project 생성 시 ensure_human_member로 보장한다(#1317 휴먼판).
+      // 과거 여기서 호출하던 /api/team-members(type=human) POST는 410 Gone(데드 경로)이라 제거.
+
+      await fetch('/api/current-project', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: project.id }),
+      }).catch(() => null);
+
+      if (initialStep === 'project') {
+        await finishToDashboard();
+        return;
+      }
+      setStep('agent');
+    } catch {
+      setError(t('networkError'));
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const project = json.data;
-    if (!project) {
-      setError(t('createProjectFailed'));
-      setLoading(false);
-      return;
-    }
-
-    setProjectId(project.id);
-
-    // 휴먼 members 앵커는 BE가 org/project 생성 시 ensure_human_member로 보장한다(#1317 휴먼판).
-    // 과거 여기서 호출하던 /api/team-members(type=human) POST는 410 Gone(데드 경로)이라 제거.
-
-    await fetch('/api/current-project', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: project.id }),
-    }).catch(() => null);
-
-    if (initialStep === 'project') {
-      await finishToDashboard();
-      return;
-    }
-    setStep('agent');
-    setLoading(false);
   };
 
   const handleCreateAgent = async () => {
@@ -153,40 +162,43 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
     setLoading(true);
     setError('');
 
-    const memberRes = await fetch('/api/team-members', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        org_id: orgId,
-        project_id: projectId,
-        type: 'agent',
-        name: agentName.trim(),
-        role: agentRole,
-      }),
-    });
-    const memberJson = await memberRes.json() as { data?: { id: string; api_key?: string }; error?: { message?: string } };
-    if (!memberRes.ok) {
-      setError(memberJson?.error?.message ?? 'Failed to create agent');
+    try {
+      const memberRes = await fetch('/api/team-members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          org_id: orgId,
+          project_id: projectId,
+          type: 'agent',
+          name: agentName.trim(),
+          role: agentRole,
+        }),
+      });
+      const memberJson = await memberRes.json() as { data?: { id: string; api_key?: string }; error?: { message?: string } };
+      if (!memberRes.ok) {
+        setError(memberJson?.error?.message ?? 'Failed to create agent');
+        return;
+      }
+
+      const newAgentId = memberJson.data?.id;
+      if (!newAgentId) {
+        setError('Failed to create agent');
+        return;
+      }
+      setAgentId(newAgentId);
+
+      // 에이전트 생성 응답에 이미 plaintext api_key가 포함됨(BE team_members.py: type=agent 생성 시 항상 발급).
+      // 별도 발급 호출(POST /api/agents/{id}/api-key)은 BE가 body 필수라 빈 본문 시 422 → 응답 키를 그대로 사용.
+      if (memberJson.data?.api_key) {
+        setNewApiKey(memberJson.data.api_key);
+      }
+
+      setStep('connect');
+    } catch {
+      setError(t('networkError'));
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const newAgentId = memberJson.data?.id;
-    if (!newAgentId) {
-      setError('Failed to create agent');
-      setLoading(false);
-      return;
-    }
-    setAgentId(newAgentId);
-
-    // 에이전트 생성 응답에 이미 plaintext api_key가 포함됨(BE team_members.py: type=agent 생성 시 항상 발급).
-    // 별도 발급 호출(POST /api/agents/{id}/api-key)은 BE가 body 필수라 빈 본문 시 422 → 응답 키를 그대로 사용.
-    if (memberJson.data?.api_key) {
-      setNewApiKey(memberJson.data.api_key);
-    }
-
-    setStep('connect');
-    setLoading(false);
   };
 
   const handleFinish = () => {

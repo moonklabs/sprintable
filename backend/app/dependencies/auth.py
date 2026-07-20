@@ -209,6 +209,106 @@ async def _resolve_api_key(
     )
 
 
+async def _reject_if_before_cutover(user_id: str | uuid.UUID, unix_timestamp: int | None, db: AsyncSession) -> None:
+    """story bea25062(§17d-1 cutover epoch authority): legacy iat/Firebase auth_time이
+    이 사용자의 auth_valid_after 이전(또는 동일)이거나, migration.state가 강제 재설정
+    대상(`reset_required`)이면 거부. AuthMigration 행이 없으면(Phase 1~3 cohort 미편입
+    대부분의 현재 사용자) 제약 없음 — 기존 동작 100% 무변화.
+
+    ⚠️산티아고 RED 조건 ①③(2026-07-16): 이전엔 전역 존재-캐시로 DB 조회를 생략했으나 —
+    다른 인스턴스의 캐시 지연·DB 장애 시 기본값 반환이 전부 fail-open이었다(BLOCKER 1).
+    캐시를 제거하고 **매 호출마다 무조건** `AuthMigration`을 PK 조회한다 — DB 조회가
+    실패하면 예외를 그대로 전파해(auth 요청 실패) fail-closed를 유지한다.
+
+    ⚠️조건 ②: `auth_valid_after`만 보면 `reset_required`인데 아직 epoch가 안 채워진(또는
+    부분 커밋된) 사용자가 그냥 통과한다 — state 자체도 함께 거부 조건에 넣는다.
+
+    ⚠️조건 ③: iat/auth_time이 없거나 정수가 아니면(위조/손상 클레임) 예전엔 "제약 없음"으로
+    통과시켰다 — 이제 fail-closed(401)로 뒤집는다. 정상 발급 토큰은 항상 iat/auth_time을
+    갖고 있어 무회귀.
+
+    ⚠️까심 결함 A(2026-07-16): `uuid.UUID(user_id)`가 user_id를 항상 str로 가정해 이미
+    `uuid.UUID` 객체인 호출부에서 `ValueError`. isinstance로 방어해 4 verifier 전 경로에서
+    타입 일관 처리."""
+    if not isinstance(unix_timestamp, int):
+        logger.warning("auth.cutover.reject reason=missing_or_invalid_timestamp")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication timestamp")
+
+    from app.models.auth_identity import AuthMigration
+    from app.services.auth_cutover import is_before_cutover
+
+    user_uuid = user_id if isinstance(user_id, uuid.UUID) else uuid.UUID(user_id)
+    migration = await db.get(AuthMigration, user_uuid)
+    if migration is None:
+        return
+
+    reference_time = datetime.fromtimestamp(unix_timestamp, tz=timezone.utc)
+    if migration.state == "reset_required" or is_before_cutover(migration.auth_valid_after, reference_time):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
+
+
+async def _resolve_firebase_session(token: str, db: AsyncSession) -> AuthContext:
+    """story 455e528d(doc §3.3): Firebase 세션 검증 후 resource-actual AuthContext 구성.
+
+    (issuer, sub) → auth_identities → 실 users.id 매핑. disabled/deleted/unmapped 거부.
+
+    ⚠️발견 즉시 수정: get_org_scope/require_role/require_admin이 전부 auth.claims의
+    app_metadata.role/org_id를 읽는다(legacy JWT는 로그인 시점에 이 claim을 정적으로 굽는다).
+    Firebase 세션쿠키는 이 필드를 안 실어(doc §3.3 명시 — custom claim에 org/role 안 옮김)
+    role을 안 채우면 require_role/require_admin이 전부 기본값 "member"로 평가돼 실제 admin도
+    권한 거부당한다 — **매 요청 실 DB에서 org role을 조회**해 채운다(legacy처럼 로그인 시점
+    1회 굽는 게 아니라 요청마다 live 조회라 오히려 stale 위험이 legacy보다 낮음. _build_app_
+    metadata() 전체는 재사용 안 함 — 그건 invite 자동수락 등 로그인 전용 side effect가 있어
+    매 요청 호출에 부적합, 여기선 role만 순수 조회).
+    """
+    from app.core.config import settings as _settings
+    from app.models.auth_identity import AuthIdentity
+    from app.models.project import OrgMember
+    from app.models.user import User
+    from app.services.firebase_verifier import verify_firebase_session
+
+    verified = await verify_firebase_session(token, _settings.firebase_project_id)
+    if verified is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    identity_row = (await db.execute(
+        select(AuthIdentity).where(
+            AuthIdentity.issuer == verified.issuer,
+            AuthIdentity.subject == verified.firebase_uid,
+            AuthIdentity.unlinked_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if identity_row is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unmapped Firebase identity")
+
+    user = await db.get(User, identity_row.user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    await _reject_if_before_cutover(str(user.id), verified.auth_time, db)
+
+    org_id = str(user.last_org_id) if user.last_org_id else None
+    app_metadata: dict = {}
+    if org_id:
+        app_metadata["org_id"] = org_id
+        role = (await db.execute(
+            select(OrgMember.role).where(
+                OrgMember.org_id == user.last_org_id,
+                OrgMember.user_id == user.id,
+                OrgMember.deleted_at.is_(None),
+            ).limit(1)
+        )).scalar_one_or_none()
+        if role:
+            app_metadata["role"] = role
+
+    return AuthContext(
+        user_id=str(user.id),
+        email=user.email,
+        claims={"auth_issuer": verified.issuer, "app_metadata": app_metadata},
+        org_id=org_id,
+    )
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     x_agent_api_key: str | None = Header(default=None, alias="x-agent-api-key"),
@@ -228,6 +328,15 @@ async def get_current_user(
     if token.startswith("sk_live_"):
         return await _resolve_api_key(token, db, transport=x_mcp_transport)
 
+    # story 455e528d(E-AUTH-REBUILD Phase1-S2·doc §4.2): Firebase 세션(RS256)은 alg 헤더로
+    # 정확 분기 — 순차 fallback 아님. FIREBASE_AUTH_ACCEPT_SESSION=false(기본)면 이 분기는
+    # 절대 안 타므로(alg 판정과 무관하게) 기존 동작 100% 유지 — dead code.
+    from app.core.config import settings as _settings
+    from app.services.firebase_verifier import looks_like_rs256
+
+    if _settings.firebase_auth_accept_session and looks_like_rs256(token):
+        return await _resolve_firebase_session(token, db)
+
     # JWT 경로 (기존)
     try:
         payload = decode_jwt(token)
@@ -246,6 +355,8 @@ async def get_current_user(
     user_id: str | None = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing sub claim")
+
+    await _reject_if_before_cutover(user_id, payload.get("iat"), db)
 
     org_id: str | None = payload.get("app_metadata", {}).get("org_id")
 
@@ -626,6 +737,16 @@ async def get_current_user_streaming(
         async with async_session_factory() as db:
             return await _resolve_api_key(token, db)
 
+    # story 455e528d(doc §4.3 "mirror the dual verifier in get_current_user_streaming"):
+    # get_current_user와 동일하게 alg 헤더로 정확 분기(순차 fallback 아님). 단명 세션으로
+    # 매핑만 수행 후 즉시 close(스트림 yield 구간에 커넥션 미점유, 기존 API key 경로와 동형).
+    from app.core.config import settings as _settings
+    from app.services.firebase_verifier import looks_like_rs256
+
+    if _settings.firebase_auth_accept_session and looks_like_rs256(token):
+        async with async_session_factory() as db:
+            return await _resolve_firebase_session(token, db)
+
     try:
         payload = decode_jwt(token)
     except JWTError as exc:
@@ -639,6 +760,11 @@ async def get_current_user_streaming(
     user_id: str | None = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing sub claim")
+
+    # story bea25062: legacy 경로도 cutover epoch 검사 필요 — API key/Firebase 경로와 동형으로
+    # 단명 세션(async with)만 이 검사를 위해 열고 즉시 close(스트림 yield 구간 미점유 유지).
+    async with async_session_factory() as db:
+        await _reject_if_before_cutover(user_id, payload.get("iat"), db)
 
     return AuthContext(
         user_id=user_id,

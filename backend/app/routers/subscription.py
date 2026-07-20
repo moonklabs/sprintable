@@ -9,7 +9,7 @@ from app.dependencies.database import get_db
 from app.models.org_subscription import OrgSubscription
 from app.schemas.subscription import SubscriptionStatusResponse
 
-router = APIRouter(prefix="/api/v2/subscription", tags=["subscription"])
+router = APIRouter(prefix="/api/v2/subscription", tags=["subscription", "Organization"])
 
 
 @router.get("/status", response_model=SubscriptionStatusResponse)

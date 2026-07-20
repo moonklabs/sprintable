@@ -38,6 +38,9 @@ export interface KanbanStory {
 
 export interface GateItem {
   id: string;
+  // story #1960(P2-S4): 결재함 통합 큐가 org 이름 표시에 사용(BE GateResponse엔 항상 존재하는
+  // 필드인데 이 타입에 이제껏 누락돼 있었음 — additive, 기존 소비부 무영향).
+  org_id?: string;
   work_item_id: string;
   work_item_type: string;
   gate_type: string;
@@ -53,11 +56,16 @@ export interface GateItem {
   neutral_facts: Record<string, unknown> | null;
   // doc-side 결재(24f5ea18): doc gate(work_item_type='doc' / gate_type='doc_approval')일 때 BE가
   // 대상 문서 요약을 동봉(디디 BE PR #1742·additive). non-doc/삭제된 문서 gate는 null → `?.` 가드 폴백.
-  // slug는 향후 deep-link 후속용(MVP 미사용).
-  work_item_summary?: { title: string; slug: string } | null;
+  // story #1970(P1a-S4): GET /{id} 단건 조회에서 story/task 타입까지 확장 — 그 타입들은 slug
+  // 개념 자체가 없어 항상 null(BE WorkItemSummary.slug: str | None 그대로 반영).
+  work_item_summary?: { title: string; slug: string | null } | null;
   // doc-gate in-doc 결재 자격(89484c8c): doc_approval gate 한정·per-caller·rule A(human+has_project_access+not-author).
   // BE가 gates 리스트 응답 각 gate에 동봉(additive). undefined/false → in-doc 승인/반려 버튼 미노출(fail-closed). 실 authz=BE 403.
   can_approve?: boolean;
+  // story #1972(P1a-S4): 위험도 UX 등급 파생 결과("low"|"high") — BE gate_service.derive_risk_grade()
+  // 가 OrgGatePolicy.posture+gate_type에서 순수 파생해 list/단건 조회 둘 다 동봉(additive). null/undefined는
+  // BE가 아직 못 보낸 구버전 응답 대비 방어적 폴백일 뿐 — 정상 응답은 항상 "low"|"high" 둘 중 하나.
+  risk_grade?: 'low' | 'high' | null;
   // H1-S3 머지 verdict 게이트 evidence(GateResponse·additive·하위호환 default). null≠0(AC③).
   requires_human?: boolean;
   evidence_status?: string | null; // sufficient | blocked | insufficient

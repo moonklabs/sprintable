@@ -17,7 +17,7 @@ from app.schemas.agent_routing_rule import (
     UpdateRoutingRuleRequest,
 )
 
-router = APIRouter(prefix="/api/v2/agent-routing-rules", tags=["agent-routing-rules"])
+router = APIRouter(prefix="/api/v2/agent-routing-rules", tags=["agent-routing-rules", "Organization"])
 
 
 def _repo(session: AsyncSession = Depends(get_db)) -> AgentRoutingRuleRepository:

@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo } from 'react';
-import { Archive, ChevronDown, ChevronRight, Folder as FolderIcon, Search } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Archive, ChevronDown, ChevronRight, Folder as FolderIcon, FolderPlus, Search } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { useTreeExpanded } from '@/components/docs/use-tree-expanded';
@@ -15,6 +15,9 @@ interface StorageFolderTreeProps {
   projectName: string | undefined;
   folderSearch: string;
   onFolderSearchChange: (value: string) => void;
+  // story #1939: 루트 레벨 폴더 생성(하위 폴더 생성은 후속 — BE는 parent_id 이미 지원).
+  // 성공 시 true, 실패(409 중복 등) 시 에러 메시지 문자열을 돌려줘 인라인 폼이 계속 열려있게 한다.
+  onCreateFolder: (name: string) => Promise<{ ok: true } | { ok: false; errorMessage: string }>;
 }
 
 interface FolderNodeProps {
@@ -104,9 +107,45 @@ export function StorageFolderTree({
   projectName,
   folderSearch,
   onFolderSearchChange,
+  onCreateFolder,
 }: StorageFolderTreeProps) {
   const t = useTranslations('storage');
   const { isExpanded, toggleExpanded } = useTreeExpanded(projectId);
+
+  // story #1939: 인라인 생성 폼 — 팝오버 대신 트리 패널 안에 그대로 펼쳐서(뷰포트 clamp 필요 0,
+  // #1942 결함 클래스 회피) 이름 입력 → 제출. 실패(409 등)는 폼을 닫지 않고 에러만 보여준다.
+  const [creating, setCreating] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const startCreating = () => {
+    setCreating(true);
+    setNewFolderName('');
+    setCreateError(null);
+  };
+  const cancelCreating = () => {
+    setCreating(false);
+    setNewFolderName('');
+    setCreateError(null);
+  };
+  const submitCreate = async () => {
+    const name = newFolderName.trim();
+    if (!name) {
+      setCreateError(t('newFolderEmptyError'));
+      return;
+    }
+    setSubmitting(true);
+    setCreateError(null);
+    const result = await onCreateFolder(name);
+    setSubmitting(false);
+    if (result.ok) {
+      setCreating(false);
+      setNewFolderName('');
+    } else {
+      setCreateError(result.errorMessage);
+    }
+  };
 
   const { roots, childrenByParent } = useMemo(() => {
     const byParent = new Map<string, Folder[]>();
@@ -144,16 +183,64 @@ export function StorageFolderTree({
         </button>
       </div>
 
-      {/* 폴더 검색 */}
-      <div className="mx-3 mb-1.5 flex items-center gap-[7px] rounded-[0.5rem] bg-muted/60 px-[9px] py-[7px] text-[12px] text-muted-foreground">
-        <Search className="size-3.5 shrink-0 opacity-60" />
-        <input
-          value={folderSearch}
-          onChange={(e) => onFolderSearchChange(e.target.value)}
-          placeholder={t('folderSearchPlaceholder')}
-          className="w-full min-w-0 bg-transparent text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
-        />
+      {/* 폴더 검색 + 새 폴더 */}
+      <div className="mx-3 mb-1.5 flex items-center gap-1.5">
+        <div className="flex min-w-0 flex-1 items-center gap-[7px] rounded-[0.5rem] bg-muted/60 px-[9px] py-[7px] text-[12px] text-muted-foreground">
+          <Search className="size-3.5 shrink-0 opacity-60" />
+          <input
+            value={folderSearch}
+            onChange={(e) => onFolderSearchChange(e.target.value)}
+            placeholder={t('folderSearchPlaceholder')}
+            className="w-full min-w-0 bg-transparent text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <button
+          type="button"
+          aria-label={t('newFolderAction')}
+          title={t('newFolderAction')}
+          onClick={startCreating}
+          className="grid size-[30px] shrink-0 place-items-center rounded-[0.5rem] text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <FolderPlus className="size-[15px]" />
+        </button>
       </div>
+
+      {/* 새 폴더 인라인 폼 — 팝오버 아님(뷰포트 clamp 불요), 트리 패널 내부 고정폭에 그대로 렌더 */}
+      {creating ? (
+        <div className="mx-3 mb-1.5 space-y-1.5 rounded-[0.5rem] border border-border bg-card p-2">
+          <input
+            autoFocus
+            value={newFolderName}
+            onChange={(e) => { setNewFolderName(e.target.value); if (createError) setCreateError(null); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); void submitCreate(); }
+              if (e.key === 'Escape') { e.preventDefault(); cancelCreating(); }
+            }}
+            placeholder={t('newFolderPlaceholder')}
+            disabled={submitting}
+            className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-[12px] text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+          />
+          {createError ? <p className="text-[11px] text-destructive">{createError}</p> : null}
+          <div className="flex items-center justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={cancelCreating}
+              disabled={submitting}
+              className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-60"
+            >
+              {t('newFolderCancel')}
+            </button>
+            <button
+              type="button"
+              onClick={() => void submitCreate()}
+              disabled={submitting}
+              className="rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+            >
+              {t('newFolderConfirm')}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {/* 트리 */}
       <div className="min-h-0 flex-1 overflow-auto px-2 py-1">

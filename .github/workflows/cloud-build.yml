@@ -55,6 +55,12 @@ jobs:
             # (PgBouncer 풀러 불필요 — Cloud Run raw TCP 미지원으로 중앙 PgBouncer 불가·관리형 풀링은 Enterprise Plus
             # 전용. maxScale 10 은 2×10×5+20=120>100 이라 폐기. 향후 트래픽↑ 시 tier업 동반해야 maxScale 상향.)
             echo "backend_max_instances=5" >> "$GITHUB_OUTPUT"
+            # story #2005: PO 라이브 gcloud 실측(2026-07-17) — backend-prod 현재 유효 Cloud Run
+            # 요청 타임아웃=300s. 지금까지 `cloudbuild.yaml`에 `--timeout` 플래그가 없어 이
+            # 값은 인프라 기본값이었을 뿐 어디에도 명시돼 있지 않았다 — 이제 이 워크플로우가
+            # 명시 소스가 된다(cloudbuild.yaml의 `_BACKEND_TIMEOUT` dev-safe 기본값 3600을
+            # prod에서 이 output으로 override, `backend_max_instances`와 동일 배선 패턴).
+            echo "backend_timeout=300" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=G-RYHFE7XM3X" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
@@ -67,6 +73,11 @@ jobs:
             # DB_MAX_OVERFLOW=1 은 cloudbuild.yaml --update-env-vars 로 durable(lingering env 덮어씀).
             # (⚠️ dev/prod 공유 DB라면 prod(2×5×5+admin)와 합산 점검 필요 — PO 토폴로지 확認.)
             echo "backend_max_instances=8" >> "$GITHUB_OUTPUT"
+            # story #2005: PO 라이브 gcloud 실측(2026-07-17) — backend-dev 현재 유효 Cloud Run
+            # 요청 타임아웃=3600s(Cloud Run 요청 타임아웃 상한). cloudbuild.yaml의
+            # `_BACKEND_TIMEOUT` 기본값(3600)과 동일값이라 이 output이 없어도 기본값으로
+            # 굴러가지만, `backend_max_instances`와 대칭 배선을 위해 dev도 명시.
+            echo "backend_timeout=3600" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=" >> "$GITHUB_OUTPUT"
           fi
 
@@ -75,6 +86,6 @@ jobs:
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}" \
             --suppress-logs \
             .

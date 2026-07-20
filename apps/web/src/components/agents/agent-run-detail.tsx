@@ -190,21 +190,33 @@ export function AgentRunDetail({
   const { toasts, addToast, dismissToast } = useToast();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  // story #1989: fetch 자체에 try/catch가 없어 네트워크 실패(오프라인 등) 시 fetch가 throw →
+  // setLoading(false)가 영영 안 불려 스켈레톤이 무한 행("loading은 finally에서 해소" 하우스룰
+  // 위반). loadError로 실패를 별도 상태화해 재시도 affordance를 노출한다.
+  const [loadError, setLoadError] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setLoading(true);
-      const res = await fetch(`/api/v1/agent-runs/${runId}`);
-      const json = res.ok ? await res.json() : null;
-      if (cancelled) return;
-      setRun(json?.data ?? null);
-      setLoading(false);
+      setLoadError(false);
+      try {
+        const res = await fetch(`/api/v1/agent-runs/${runId}`);
+        const json = res.ok ? await res.json() : null;
+        if (cancelled) return;
+        setRun(json?.data ?? null);
+        if (!res.ok) setLoadError(true);
+      } catch {
+        if (!cancelled) setLoadError(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
     void load();
     return () => { cancelled = true; };
-  }, [runId]);
+  }, [runId, retryKey]);
 
   const handleRetry = async () => {
     setRetrying(true);
@@ -227,6 +239,18 @@ export function AgentRunDetail({
       <div className="space-y-4">
         <div className="h-24 animate-pulse rounded-xl bg-muted" />
         <div className="h-64 animate-pulse rounded-xl bg-muted" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-20 text-center text-muted-foreground">
+        <p>{tc('error')}</p>
+        <p className="text-xs">{tc('errorDescription')}</p>
+        <Button size="sm" variant="outline" onClick={() => setRetryKey((k) => k + 1)}>
+          {tc('retry')}
+        </Button>
       </div>
     );
   }

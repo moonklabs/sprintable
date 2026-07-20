@@ -78,6 +78,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [forbidden, setForbidden] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const [actorFilter, setActorFilter] = useState(ALL);
   const [actionFilter, setActionFilter] = useState(ALL);
@@ -122,18 +123,28 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
     [buildParams],
   );
 
+  // story #2000: fetchLogs 내부 raw fetch가 네트워크 단에서 throw하면(오프라인 등) try 없이
+  // setLoading(false)가 영영 안 불려 스켈레톤이 무한행 — 세 진입점(load/loadMore/reload)
+  // 모두 try/catch/finally로 봉합, 기존 forbidden 패턴과 동형으로 loadError 상태+reload 재사용.
+
   // reset + reload on filter change
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setLoading(true);
       setForbidden(false);
+      setLoadError(false);
       setOffset(0);
-      const result = await fetchLogs(0);
-      if (cancelled) return;
-      setItems(result?.items ?? []);
-      setTotal(result?.total ?? 0);
-      setLoading(false);
+      try {
+        const result = await fetchLogs(0);
+        if (cancelled) return;
+        setItems(result?.items ?? []);
+        setTotal(result?.total ?? 0);
+      } catch {
+        if (!cancelled) setLoadError(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
     void load();
     return () => { cancelled = true; };
@@ -142,24 +153,34 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const loadMore = async () => {
     const nextOffset = offset + PAGE_SIZE;
     setLoadingMore(true);
-    const result = await fetchLogs(nextOffset);
-    if (result) {
-      setItems((prev) => [...prev, ...result.items]);
-      setOffset(nextOffset);
-      setTotal(result.total);
+    try {
+      const result = await fetchLogs(nextOffset);
+      if (result) {
+        setItems((prev) => [...prev, ...result.items]);
+        setOffset(nextOffset);
+        setTotal(result.total);
+      }
+    } catch {
+      // 더보기 실패는 조용히 두고 버튼을 그대로 남겨(재클릭으로 재시도 가능).
+    } finally {
+      setLoadingMore(false);
     }
-    setLoadingMore(false);
   };
 
-  const reload = () => {
+  const reload = async () => {
     setForbidden(false);
+    setLoadError(false);
     setLoading(true);
     setOffset(0);
-    fetchLogs(0).then((result) => {
+    try {
+      const result = await fetchLogs(0);
       setItems(result?.items ?? []);
       setTotal(result?.total ?? 0);
+    } catch {
+      setLoadError(true);
+    } finally {
       setLoading(false);
-    });
+    }
   };
 
   // ─── Dropdown options ──────────────────────────────────────────────────────
@@ -232,6 +253,19 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
           {forbidden ? (
             <div className="flex h-64 items-center justify-center">
               <EmptyState title={t('forbiddenTitle')} description={t('forbiddenDescription')} />
+            </div>
+          ) : loadError ? (
+            <div className="flex h-64 items-center justify-center">
+              <EmptyState
+                title={tc('error')}
+                description={tc('errorDescription')}
+                action={
+                  <Button variant="glass" size="sm" onClick={reload}>
+                    <RefreshCw className="mr-1.5 size-3.5" />
+                    {tc('retry')}
+                  </Button>
+                }
+              />
             </div>
           ) : loading ? (
             <div className="space-y-1.5">

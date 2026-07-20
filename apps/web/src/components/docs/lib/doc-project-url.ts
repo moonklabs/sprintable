@@ -1,24 +1,19 @@
 /**
- * prod P0(2026-07-14) — `?p=`(useProjectSsot의 탭별 SSOT)를 안 실은 채 `/docs/*`로 push하면
- * urlProjectId가 없다고 판단한 자가치유 effect가 fallback 체인(sessionStorage→serverProjectId)을
- * 다시 태운다. 그 fallback이 지금 이 탭이 실제로 쓰던 project와 항상 같다는 보장이 없어
- * (특히 org 전환 직후 — accessibleIds가 서버 prop 기반이라 새 project를 아직 못 담고 있을 수
- * 있음), 방금 만든/보던 문서와 다른 project로 재질의돼 "문서를 찾을 수 없습니다"에 빠질 수
- * 있다(dev 크로스-org 전환으로 라이브 재현 완료). 세 호출부(신규 문서 생성 이동·트리에서
- * 기존 문서 선택 이동·not-found 회복 이동) 모두 `?p=`를 명시해 이 fallback 자체가 발동하지
- * 않게 한다(PO 지시 — createDoc만 고치고 형제 경로인 handleSelectDoc을 남기면 같은 버그
- * 클래스의 부분수정=재발 씨앗). 순수 함수로 뽑아 세 지점에서 동일 규약을 강제하고 단위
- * 테스트로 직접 검증한다.
+ * story a539c649(S-route-project) S2 — docs 는 이제 `/{ws}/{proj}/docs/...` path 위계로 산다.
+ * ws/proj 가 path 세그먼트에 항상 박혀있으므로, prod P0(2026-07-14)가 고치던 문제(`?p=`
+ * 누락 시 자가치유 effect 가 잘못된 project 로 재질의)는 **이 함수들이 `?p=` 를 실을 필요
+ * 자체가 없어짐으로써 구조적으로 소거**된다 — #2154 회복 가드(a78a2b7e)를 이 슬라이스가
+ * 흡수한다(별도 fallback 로직 불요, path 자체가 유일한 project 컨텍스트 출처).
  */
-export function newDocUrl(slug: string, projectId: string): string {
-  return `/docs/${slug}?new=1&p=${projectId}`;
+export function newDocUrl(wsSlug: string, projSlug: string, slug: string): string {
+  return `/${wsSlug}/${projSlug}/docs/${slug}?new=1`;
 }
 
 /** 트리에서 기존 문서를 선택할 때 — newDocUrl과 달리 `new=1`(자동 포커스 트리거)을 안 싣는다. */
-export function docUrl(slug: string, projectId: string): string {
-  return `/docs/${slug}?p=${projectId}`;
+export function docUrl(wsSlug: string, projSlug: string, slug: string): string {
+  return `/${wsSlug}/${projSlug}/docs/${slug}`;
 }
 
-export function docsListUrl(projectId: string): string {
-  return `/docs?p=${projectId}`;
+export function docsListUrl(wsSlug: string, projSlug: string): string {
+  return `/${wsSlug}/${projSlug}/docs`;
 }

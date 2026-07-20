@@ -3,6 +3,15 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
+import {
+  fetchResolve,
+  looksLikeWorkspaceSegment,
+  resolveLegacyResourcePath,
+  RESOLVE_CACHE_TTL_SECONDS,
+  signResolveCache,
+  SP_RESOLVE_CACHE_COOKIE,
+  verifyResolveCache,
+} from '@/lib/route-resolve';
 
 const PUBLIC_EXACT = [
   '/',
@@ -32,6 +41,15 @@ const PUBLIC_PREFIX = [
   '/verify-email',
   '/auth/callback',
   '/auth/login',
+  // story 26170479: 세션을 만드는 공개 엔드포인트(호출 시점엔 세션이 없는 게 정상) — 누락
+  // 시 위 인증가드가 보호 라우트로 오인해 /login 307(민군 축c 실측으로 발견).
+  '/auth/native',
+  // e-mobile-oauth-native-handoff-contract §5/§10.1 — 격리 rail consume 착지도 동일하게 세션
+  // 생성 전 호출된다(/auth/native와 같은 이유, PR#2224 교훈 선제 적용).
+  '/auth/oauth-handoff',
+  // §10.2: App Link/Universal Link 검증파일 — OS 레벨 검증기가 인증 쿠키 없이 호출.
+  '/.well-known/',
+  '/apple-app-site-association',
   '/invite',
   '/internal-dogfood',
   '/terms',
@@ -54,6 +72,119 @@ async function verifyAccessToken(token: string): Promise<{ exp?: number } | null
   } catch {
     return null;
   }
+}
+
+// @/lib/auth-helpers.ts 의 CURRENT_PROJECT_COOKIE 와 동일 값 — 그 모듈은 next/headers(cookies())
+// 를 top-level import 해 proxy.ts(별도 번들 경계)로 끌어오면 런타임 불일치 위험이 있어 리터럴만
+// 복제(둘 다 이 문자열이 바뀔 일은 없음 — 서버-발급 세션 쿠키 이름).
+const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
+
+async function getOrgIdFromAccessToken(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, getJwtSecretBytes());
+    const orgId = (payload['app_metadata'] as Record<string, unknown> | undefined)?.['org_id'];
+    return typeof orgId === 'string' ? orgId : null;
+  } catch {
+    return null;
+  }
+}
+
+// story #1998(급, 선생님 실사용 "보드가 404") — access token의 app_metadata.project_id를
+// CURRENT_PROJECT_COOKIE 부재 시 fallback으로 쓴다. 근본원인: 이 쿠키는 onboarding-form.tsx·
+// switch-project·switch-org 명시 액션에서만 SET되고 평범한 로그인(POST /api/auth/login)에서는
+// 전혀 SET되지 않는다(grep 확認·curl 재현: 로그인 직후 쿠키잔에 sp_at/sp_rt만 있고 이 쿠키는
+// 없음) — 즉 온보딩 세션이 만료/새 기기/쿠키 삭제 후 "그냥 로그인"한 리턴 유저는 전원 이 안전망이
+// 무력화돼 bare 레거시 링크(board·loops·docs 등, MIGRATED_RESOURCES)가 즉시 404. JWT 자체엔
+// 로그인 시점 project_id가 이미 실려있으므로(app_metadata, org_id와 동일 위치) 그걸 재사용하면
+// 추가 DB조회 없이 이 갭을 메운다 — 쿠키가 있으면 쿠키 우선(명시 switch-project 결과 존중).
+async function getProjectIdFromAccessToken(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, getJwtSecretBytes());
+    const projectId = (payload['app_metadata'] as Record<string, unknown> | undefined)?.['project_id'];
+    return typeof projectId === 'string' ? projectId : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * story a539c649 S-route-project — 이관 완료된 Project-tier 리소스 목록(flat 첫 세그먼트 →
+ * 그 리소스 밑에서 project-scope 아닌 채로 존치되는 서브패스 제외 목록). 슬라이스가 리소스를
+ * `/{ws}/{proj}/{resource}`로 옮길 때마다 여기 키 하나씩 추가한다(S2=docs, S3a=standup 등).
+ */
+const MIGRATED_RESOURCES: Record<string, string[]> = {
+  docs: ['design-tokens'], // 비-project 정적 페이지, 존치
+  standup: [],
+  retro: [],
+  loops: [],
+  artifacts: [],
+  mockups: [],
+  sprints: [],
+  storage: [],
+  epics: [],
+  board: [],
+  // story #2016: 8fc51517(B1 리네이밍)이 epics→goals 경로 리터럴을 바꾸면서 RENAMED_RESOURCES에만
+  // 반영되고 여기(MIGRATED_RESOURCES)엔 신 이름 'goals'를 안 넣었다 — bare `/epics`는 이 표를 거쳐
+  // `/{ws}/{proj}/epics`로 301된 뒤 redirectRenamedResourcePath가 2차로 `goals`로 다시 301하지만,
+  // bare `/goals`(신 이름 그대로 오는 딥링크·북마크·검색결과)는 애초에 이 표에 키가 없어 redirectLegacyResourcePath가
+  // 즉시 null 반환 → Next 자체 404. 호스트/쿠키 무관 리소스 등록 누락 실측 확認(direct Cloud Run 호스트에서
+  // /board는 301 정상·/goals만 404, 동일 JWT fallback 경로 재사용).
+  goals: [],
+};
+
+/**
+ * story a539c649(S2 최초 도입·S3에서 리소스 파라미터화) — 옛 flat `/{resource}/*` 를
+ * default(현재 org+project) 로 해소해 301. 해소 불가(로그인 직후 project 미선택 등)면 null
+ * — 호출부가 개입 없이 통과시켜 Next 자체 404.
+ */
+async function redirectLegacyResourcePath(
+  request: NextRequest,
+  pathname: string,
+  accessToken: string,
+): Promise<NextResponse | null> {
+  const segments = pathname.split('/').filter(Boolean);
+  const resourceName = segments[0];
+  if (!resourceName || !(resourceName in MIGRATED_RESOURCES)) return null;
+  const excluded = MIGRATED_RESOURCES[resourceName] ?? [];
+  if (excluded.some((sub) => pathname.startsWith(`/${resourceName}/${sub}`))) return null;
+
+  const orgId = await getOrgIdFromAccessToken(accessToken);
+  // story #1998: 쿠키 우선(명시 switch-project 결과) — 없으면 JWT app_metadata.project_id로 fallback.
+  const projectId = request.cookies.get(CURRENT_PROJECT_COOKIE)?.value
+    ?? await getProjectIdFromAccessToken(accessToken);
+  if (!orgId || !projectId) return null;
+
+  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const slugs = await resolveLegacyResourcePath(fastapiUrl, orgId, projectId, accessToken);
+  if (!slugs) return null;
+
+  const rest = pathname.slice(`/${resourceName}`.length); // '' | '/{sub}' | '/{sub}/{sub2}'
+  const url = request.nextUrl.clone();
+  url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/${resourceName}${rest}`;
+  return NextResponse.redirect(url, 301);
+}
+
+/**
+ * story 8fc51517(계층 리네이밍 B1, doc hierarchy-renaming-url-implementation-design §ⓑ) —
+ * `/{ws}/{proj}/{resource}` 안의 **경로 리터럴**이 신 용어로 바뀔 때(에픽→목표 등)의 301.
+ * `redirectLegacyResourcePath`(위)와 다른 관심사 — 저건 ws/proj 세그먼트 자체가 없던 옛 flat
+ * URL을 org/project 재조회로 채워 넣는 것이고, 이건 ws/proj가 **이미 URL에 있으므로** 3번째
+ * 세그먼트(리소스명)만 신 이름으로 교체하면 된다(org/project 재조회 fetch 불요, 훨씬 가벼움).
+ */
+const RENAMED_RESOURCES: Record<string, string> = {
+  epics: 'goals',
+};
+
+function redirectRenamedResourcePath(request: NextRequest, pathname: string): NextResponse | null {
+  const segments = pathname.split('/').filter(Boolean);
+  const resourceName = segments[2]; // [ws]/[proj]/{resourceName}/...
+  if (!resourceName) return null;
+  const newName = RENAMED_RESOURCES[resourceName];
+  if (!newName) return null;
+  const url = request.nextUrl.clone();
+  segments[2] = newName;
+  url.pathname = '/' + segments.join('/');
+  return NextResponse.redirect(url, 301);
 }
 
 // bf305fa0 멀티계정 — active 포인터(switch가 set). 없으면 단일계정(back-compat).
@@ -258,7 +389,31 @@ export async function proxy(request: NextRequest) {
   const now = Math.floor(Date.now() / 1000);
   const fwdHeaders = new Headers(request.headers);
   fwdHeaders.set('x-pathname', pathname + request.nextUrl.search);
+
+  // story a539c649(S2 최초·S3 일반화) — 이관 완료된 리소스(MIGRATED_RESOURCES)의 옛 flat
+  // `/{resource}/*`(ws/proj 세그먼트 없음)는 목적지 페이지가 이제 없다. 여기서 잡아
+  // default(현재 org+project) 해소 후 301 — 안 잡으면 사이드바 밖 외부 딥링크 호출부(알림·
+  // 게이트·챗 등, 전부 bare 링크였음)가 전부 즉시 404 나던 것을 막는 안전망(PO 승인 스코프,
+  // 한계=route-resolve.ts 헤더 참고).
+  const legacyResourceRedirect = await redirectLegacyResourcePath(request, pathname, accessToken);
+  if (legacyResourceRedirect) return legacyResourceRedirect;
+
+  // story 8fc51517 — [ws]/[proj]/{resource} 경로 리터럴 rename(에픽→목표 등). org/project는
+  // 이미 URL에 있으므로 fetch 없이 순수 문자열 치환(legacyResourceRedirect보다 가벼움).
+  const renamedResourceRedirect = redirectRenamedResourcePath(request, pathname);
+  if (renamedResourceRedirect) return renamedResourceRedirect;
+
+  // story a539c649(S-route-project) S1 — path 위계 resolve. fwdHeaders 를 response 구성 *전에*
+  // 채워야 downstream RSC/route handler 가 x-resolved-* 를 실제로 읽을 수 있다(x-pathname 과
+  // 동일 관례 — response.headers.set 은 브라우저행 응답 헤더일 뿐 forwarded request 에 안 실림).
+  const resolved = await resolveWorkspaceProject(request, pathname, accessToken, fwdHeaders);
+  if (resolved.kind === 'redirect') return resolved.response;
+
   const response = NextResponse.next({ request: { headers: fwdHeaders } });
+  if (resolved.kind === 'set-cache') {
+    response.cookies.set(SP_RESOLVE_CACHE_COOKIE, resolved.token, { ...cookieBase(), maxAge: RESOLVE_CACHE_TTL_SECONDS });
+  }
+
   if (claims.exp !== undefined && claims.exp - now < 300) {
     const tokens = await singleFlightRefresh(request);
     // RC2: stale refresh(다른 계정)면 적용 안 함 — 현 active 세션 유지.
@@ -274,6 +429,65 @@ export async function proxy(request: NextRequest) {
   }
 
   return response;
+}
+
+type ResolveWiringResult =
+  | { kind: 'skip' }
+  | { kind: 'set-cache'; token: string }
+  | { kind: 'redirect'; response: NextResponse };
+
+/**
+ * story a539c649(S-route-project) S1 — `/{ws}/{proj}/...` path 위계 resolve. RESERVED_FIRST_
+ * SEGMENTS 와 안 겹치는 첫 세그먼트에만 시도해 기존 flat 라우트 전부 무회귀 통과시킨다(오르테가군
+ * 확定 스코프). flat→path 301 은 여기서 안 켠다 — 목적지 페이지가 아직 없어(S2/S3 몫) 걸면 즉시
+ * 404. S1 은 미들웨어 단(캐시 hit/miss·resolve 성공/실패·구 slug 301-chase)만 증명한다.
+ *
+ * `fwdHeaders` 를 직접 mutate 해 downstream 으로 x-resolved-* 를 실어 보낸다(캐시 hit 이어도
+ * 매 요청 동일하게 — 헤더가 fetch 왕복에 안 걸리므로 hit/miss 무관 항상 채운다).
+ */
+async function resolveWorkspaceProject(
+  request: NextRequest,
+  pathname: string,
+  accessToken: string,
+  fwdHeaders: Headers,
+): Promise<ResolveWiringResult> {
+  const segments = pathname.split('/').filter(Boolean);
+  const wsSlug = segments[0];
+  if (!looksLikeWorkspaceSegment(wsSlug)) return { kind: 'skip' };
+  const projSlug = looksLikeWorkspaceSegment(segments[1]) ? segments[1] : undefined;
+
+  const cached = request.cookies.get(SP_RESOLVE_CACHE_COOKIE)?.value;
+  if (cached) {
+    const hit = await verifyResolveCache(cached, wsSlug, projSlug);
+    if (hit) {
+      setResolvedHeaders(fwdHeaders, hit);
+      return { kind: 'skip' }; // 캐시 hit — fetch 생략, 쿠키 재설정 불요(아직 유효)
+    }
+  }
+
+  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const outcome = await fetchResolve(fastapiUrl, wsSlug, projSlug, accessToken);
+
+  if (outcome.kind === 'not_found') return { kind: 'skip' }; // resolve 실패 — 개입 없이 통과(Next 자체 404)
+
+  if (outcome.kind === 'redirect') {
+    const url = request.nextUrl.clone();
+    const nextSegments = [...segments];
+    if (outcome.workspace) nextSegments[0] = outcome.workspace;
+    if (outcome.project && nextSegments.length > 1) nextSegments[1] = outcome.project;
+    url.pathname = '/' + nextSegments.join('/');
+    return { kind: 'redirect', response: NextResponse.redirect(url, 301) };
+  }
+
+  setResolvedHeaders(fwdHeaders, outcome.context);
+  const token = await signResolveCache(wsSlug, projSlug, outcome.context);
+  return { kind: 'set-cache', token };
+}
+
+function setResolvedHeaders(fwdHeaders: Headers, context: { orgId: string; orgRole: string; projectId?: string }): void {
+  fwdHeaders.set('x-resolved-org-id', context.orgId);
+  fwdHeaders.set('x-resolved-org-role', context.orgRole);
+  if (context.projectId) fwdHeaders.set('x-resolved-project-id', context.projectId);
 }
 
 export const config = {

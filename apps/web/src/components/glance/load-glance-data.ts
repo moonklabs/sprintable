@@ -42,7 +42,7 @@ async function fetchJson(url: string): Promise<unknown> {
 }
 
 /**
- * E-GLANCE 현황판 데이터 병합 — §10 소스 4종: /api/epics(순서 SSOT) · /api/dashboard/overview
+ * E-GLANCE 현황판 데이터 병합 — §10 소스 4종: /api/goals(순서 SSOT) · /api/dashboard/overview
  * (진척) · /api/stories?epic_id=(참여) · /api/activity-logs(생동). 로드맵 blank 재발(2026-07-11)
  * 진짜 근본은 이 함수의 activity-logs 처리였다 — `GET /api/v2/activity-logs`는 flat 배열이
  * 아니라 `ActivityLogListResponse{items,total,limit,offset}`(activity_logs.py:65)를 반환하는데
@@ -55,7 +55,7 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   const [epicsJson, overviewJson, membersJson, activityJson, attentionJson] = await Promise.all([
     // wedge #2: order_by=position 옵트인 — 조타(큐레이션) 결과를 아크가 curated-first로 소비만
     // 반영(드래그 없음). position 모드는 커서 미발행이나 아크는 원래 전량로드(limit=100)라 무관.
-    fetchJson(`/api/epics?project_id=${projectId}&limit=100&order_by=position`),
+    fetchJson(`/api/goals?project_id=${projectId}&limit=100&order_by=position`),
     fetchJson('/api/dashboard/overview'),
     fetchJson('/api/team-members'),
     fetchJson(`/api/activity-logs?project_id=${projectId}&limit=20`),

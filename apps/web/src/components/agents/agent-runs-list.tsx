@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { Activity, ChevronDown, Clock3, Cpu, Hash, Zap } from 'lucide-react';
+import { Activity, ChevronDown, Clock3, Cpu, Hash, RotateCw, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -104,6 +104,8 @@ export function AgentRunsList() {
 
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   const [statusFilter, setStatusFilter] = useState(DEFAULT_RUN_STATUS_FILTER);
   const [{ fromDate: initialFromDate, toDate: initialToDate }] = useState(() => getDefaultRunDateFilters());
   const [fromDate, setFromDate] = useState(initialFromDate);
@@ -131,28 +133,42 @@ export function AgentRunsList() {
     };
   }, [statusFilter, fromDate, toDate]);
 
+  // story #2000: 원 raw fetch가 네트워크 단에서 throw하면(오프라인 등) try 없이 setLoading(false)가
+  // 영영 안 불려 스켈레톤이 무한행 — try/catch/finally + loadError/retryKey로 봉합(D #1989 패턴).
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setLoading(true);
+      setLoadError(false);
       setSelectedRunId(null);
-      const result = await fetchRuns();
-      if (cancelled) return;
-      setRuns(result.items);
-      setNextCursor(result.nextCursor);
-      setLoading(false);
+      try {
+        const result = await fetchRuns();
+        if (cancelled) return;
+        setRuns(result.items);
+        setNextCursor(result.nextCursor);
+      } catch {
+        if (!cancelled) setLoadError(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
     void load();
     return () => { cancelled = true; };
-  }, [fetchRuns]);
+  }, [fetchRuns, retryKey]);
 
   const loadMore = async () => {
     if (!nextCursor) return;
     setLoadingMore(true);
-    const result = await fetchRuns(nextCursor);
-    setRuns((prev) => [...prev, ...result.items]);
-    setNextCursor(result.nextCursor);
-    setLoadingMore(false);
+    try {
+      const result = await fetchRuns(nextCursor);
+      setRuns((prev) => [...prev, ...result.items]);
+      setNextCursor(result.nextCursor);
+    } catch {
+      // 더보기 실패는 조용히 두고 버튼을 그대로 남겨(재클릭으로 재시도 가능) — 이미 로드된
+      // runs 목록은 유지, 별도 에러 UI 없이도 재시도 affordance가 버튼 자체로 성립.
+    } finally {
+      setLoadingMore(false);
+    }
   };
 
   if (selectedRunId) {
@@ -211,6 +227,15 @@ export function AgentRunsList() {
               {[1, 2, 3, 4, 5].map((i) => (
                 <div key={i} className="h-20 animate-pulse rounded-md bg-muted" />
               ))}
+            </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center gap-3 py-12 text-center">
+              <p className="text-sm font-medium text-foreground">{tc('error')}</p>
+              <p className="text-xs text-muted-foreground">{tc('errorDescription')}</p>
+              <Button variant="glass" size="sm" onClick={() => setRetryKey((k) => k + 1)}>
+                <RotateCw className="mr-1.5 size-3.5" />
+                {tc('retry')}
+              </Button>
             </div>
           ) : runs.length === 0 ? (
             <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />

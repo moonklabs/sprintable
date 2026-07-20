@@ -19,7 +19,7 @@ from app.routers.events import publish_event
 from app.services.member_resolver import assert_caller_is_member
 from app.services.webhook_dispatch import fire_webhooks
 
-router = APIRouter(tags=["file-locks"])
+router = APIRouter(tags=["file-locks", "Work"])
 
 # S17 SHOULD(산티아고 SME): 요청당 file_paths 상한 — 무제한 배열로 인한 과대 row 생성 방지.
 _MAX_FILE_PATHS_PER_REQUEST = 200

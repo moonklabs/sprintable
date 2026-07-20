@@ -42,7 +42,9 @@ class MyOrganizationResponse(BaseModel):
 
 
 class UpdateOrganization(BaseModel):
-    name: str
+    name: str | None = None
+    # story 139d2405(S-slug-infra): workspace rename — 형식/예약어/유일성은 라우터에서(DB 조회 필요).
+    slug: str | None = None
 
 
 class OrgImpactResponse(BaseModel):

@@ -48,7 +48,7 @@ async def _seed(session):
     """org_a(project_a·epic_a1/a2) + org_b(project_x·epic_x1, cross-org 컨트롤용) +
     human_a(project_a에만 grant, org_b 및 project_x 접근권 없음)."""
     from app.models.organization import Organization
-    from app.models.pm import Epic
+    from app.models.pm import Goal
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
     from app.models.user import User
@@ -64,10 +64,10 @@ async def _seed(session):
     session.add_all([project_a, project_b, project_x])
     await session.commit()
 
-    epic_a1 = Epic(id=uuid.uuid4(), org_id=org_a.id, project_id=project_a.id, title="Epic A1")
-    epic_a2 = Epic(id=uuid.uuid4(), org_id=org_a.id, project_id=project_a.id, title="Epic A2")
-    epic_b1 = Epic(id=uuid.uuid4(), org_id=org_a.id, project_id=project_b.id, title="Epic B1(same-org other project)")
-    epic_x1 = Epic(id=uuid.uuid4(), org_id=org_b.id, project_id=project_x.id, title="Epic X1(cross-org)")
+    epic_a1 = Goal(id=uuid.uuid4(), org_id=org_a.id, project_id=project_a.id, title="Epic A1")
+    epic_a2 = Goal(id=uuid.uuid4(), org_id=org_a.id, project_id=project_a.id, title="Epic A2")
+    epic_b1 = Goal(id=uuid.uuid4(), org_id=org_a.id, project_id=project_b.id, title="Epic B1(same-org other project)")
+    epic_x1 = Goal(id=uuid.uuid4(), org_id=org_b.id, project_id=project_x.id, title="Epic X1(cross-org)")
     session.add_all([epic_a1, epic_a2, epic_b1, epic_x1])
     await session.commit()
 
@@ -178,8 +178,8 @@ async def test_bulk_reorder_cross_org_item_silently_skipped():
         # DB 레벨로도 epic_x1.position이 변조 안 됐음을 확인(응답 미포함만으론 부족).
         async with Session() as s2:
             from sqlalchemy import select
-            from app.models.pm import Epic
-            row = (await s2.execute(select(Epic.position).where(Epic.id == seeded["epic_x1_id"]))).scalar_one()
+            from app.models.pm import Goal
+            row = (await s2.execute(select(Goal.position).where(Goal.id == seeded["epic_x1_id"]))).scalar_one()
             assert row is None
     finally:
         app.dependency_overrides.clear()
@@ -217,8 +217,8 @@ async def test_bulk_reorder_same_org_cross_project_item_silently_skipped():
 
         async with Session() as s2:
             from sqlalchemy import select
-            from app.models.pm import Epic
-            row = (await s2.execute(select(Epic.position).where(Epic.id == seeded["epic_b1_id"]))).scalar_one()
+            from app.models.pm import Goal
+            row = (await s2.execute(select(Goal.position).where(Goal.id == seeded["epic_b1_id"]))).scalar_one()
             assert row is None
     finally:
         app.dependency_overrides.clear()
@@ -271,9 +271,9 @@ async def test_epic_status_changed_fires_webhook_via_transition():
         async with Session() as s:
             seeded = await _seed(s)
             from sqlalchemy import update
-            from app.models.pm import Epic
+            from app.models.pm import Goal
             # active→archived는 native 전이(overlay-gate 없음) — human caller로 바로 검증.
-            await s.execute(update(Epic).where(Epic.id == seeded["epic_a1_id"]).values(status="active"))
+            await s.execute(update(Goal).where(Goal.id == seeded["epic_a1_id"]).values(status="active"))
             await s.commit()
 
         await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])
@@ -375,9 +375,9 @@ async def test_list_epics_order_by_position_sorts_curated_first():
         async with Session() as s:
             seeded = await _seed(s)
             from sqlalchemy import update
-            from app.models.pm import Epic
+            from app.models.pm import Goal
             # epic_a2를 먼저 큐레이션(position=1)·epic_a1은 NULL(미큐레이션) 유지.
-            await s.execute(update(Epic).where(Epic.id == seeded["epic_a2_id"]).values(position=1))
+            await s.execute(update(Goal).where(Goal.id == seeded["epic_a2_id"]).values(position=1))
             await s.commit()
 
         await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])

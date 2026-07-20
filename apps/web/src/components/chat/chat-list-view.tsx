@@ -7,7 +7,7 @@ import { useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
-import { useChatSse } from '@/hooks/use-chat-sse';
+import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 interface Participant {
@@ -301,9 +301,19 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     }
   }, [fetchConversations, fetchAllConversations]);
 
+  // story #1977(트랙B): 다른 탭/기기에서 mark-read → conversation.read SSE(#1976, 본인 타
+  // 커넥션 전파)로 이 목록이 열려있는 동안에도 unread 배지가 즉시 서버 truth로 자가정정.
+  const handleConversationRead = useCallback((payload: SseConversationReadPayload) => {
+    const applyRead = (list: ConversationItem[]) =>
+      list.map((c) => (c.id === payload.conversation_id ? { ...c, unread_count: payload.unread_count } : c));
+    setConversations(applyRead);
+    if (agentLoadedRef.current) setAllConversations(applyRead);
+  }, []);
+
   useChatSse({
     currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
+    onConversationRead: handleConversationRead,
   });
 
   const handleCreated = (conversationId: string) => {

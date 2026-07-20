@@ -18,20 +18,151 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
+from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
+from app.models.hitl_config import OrgGatePolicy
+from app.models.pm import Story, Task
 from app.models.workflow_line import (
     WorkflowLineStepApproval,
     WorkflowLineStepRun,
     WorkflowLineStepRunEvent,
 )
 from app.services.gate_resolver import resolve_disposition
+from app.services.workflow_line_resolution import _OPEN_STEP_RUN_STATUSES
 
 logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# story #1972(P1a-S4): 게이트 위험도 UX 등급 파생.
+#
+# SSOT: doc `gate-risk-ux-classification-criteria` §2 판정표. ⚠️철학(models/hitl_config.py:3)
+# 준수 — "새 위험도 판정"이 아니라 **기존 신호(OrgGatePolicy.posture + Gate.gate_type) 파생**이다.
+# 새 risk_level 필드/컬럼/마이그레이션 없음. `resolve_disposition()`(gate_resolver.py)은 member/org
+# override까지 태우는 HITL **정책** 해소 함수라 이 UX 등급 파생과는 완전히 별개 축(doc §4 "경계
+# 명확화") — 절대 호출하지 않는다. `get_org_posture()`는 org_id 하나로 org_gate_policy 단일 쿼리만
+# 수행(gate_resolver.py의 3번째 폴백 단계와 같은 쿼리 형태를 참고했을 뿐, 그 함수를 호출하지는
+# 않음).
+# ─────────────────────────────────────────────────────────────────────────────
+
+RiskGrade = Literal["low", "high"]
+
+# 2차 축(doc §2.2): posture가 미확定(balanced/미설정)일 때만 참조.
+_HIGH_RISK_GATE_TYPES: frozenset[str] = frozenset({"merge", "deploy", "workflow_config_publish"})
+_LOW_RISK_GATE_TYPES: frozenset[str] = frozenset({"pr_review", "qa"})
+
+
+def derive_risk_grade(posture: str | None, gate_type: str) -> RiskGrade:
+    """doc `gate-risk-ux-classification-criteria` §2 판정표를 그대로 코드화한 순수 함수.
+
+    입력: org posture 값(``OrgGatePolicy.posture`` 또는 row 없으면 None) + gate_type 문자열.
+    출력: UX 등급("low"|"high"). DB 접근 없음(순수 함수) — posture는 호출부가 ``get_org_posture()``
+    로 미리 조회해 넘긴다.
+
+    판정 순서(doc §2 그대로):
+      1차 축(posture) — conservative→high · permissive→low · balanced/None→2차 축.
+      2차 축(gate_type, 1차가 미확定일 때만) — merge/deploy/workflow_config_publish→high ·
+        pr_review/qa→low.
+      폴백(doc §2.3) — 둘 다 미확定(신규/미분류 gate_type)이면 **보수적 고위험**(안전판).
+    """
+    if posture == "conservative":
+        return "high"
+    if posture == "permissive":
+        return "low"
+    # posture in (None, "balanced") → 2차 축(gate_type)으로.
+    if gate_type in _HIGH_RISK_GATE_TYPES:
+        return "high"
+    if gate_type in _LOW_RISK_GATE_TYPES:
+        return "low"
+    # 폴백: 신규/미분류 gate_type — 보수적 고위험(doc §2.3 안전판).
+    return "high"
+
+
+async def get_org_posture(session: AsyncSession, org_id: uuid.UUID) -> str | None:
+    """org_id 단일 값으로 ``OrgGatePolicy.posture`` 직접 조회(org당 1행). row 없으면 None(미설정).
+
+    ⚠️`resolve_disposition()`(gate_resolver.py)을 호출하지 않는다 — 그 함수는 member_gate_override →
+    org_gate_override → org_gate_policy → 시스템 기본값 순 **전체 precedence**를 태우는 HITL disposition
+    해소 함수고, 이 헬퍼는 story #1972 위험도 UX 등급 파생 전용 별개 경로(doc §4)다. 쿼리 형태만
+    gate_resolver.py의 3번째 폴백 단계(org posture 조회)를 참고했다."""
+    row = await session.execute(
+        select(OrgGatePolicy.posture).where(OrgGatePolicy.org_id == org_id).limit(1)
+    )
+    return row.scalar_one_or_none()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# story #1973(P1a-S4): ?sort=urgency ORDER BY 절 조립 — 결재함 통합 큐(#1960) 기본 정렬 근거.
+#
+# ⚠️SQL 레벨 정렬만(파이썬 후처리 정렬 금지) — 페이지네이션/필터와 조합 가능해야 하고 DB가
+# 하는 게 맞다. overdue 판정은 gate당 correlated EXISTS 서브쿼리 하나로 목록 전체를 커버한다
+# (find_active_step_run_for_gate가 gate 1건 조회하는 gate_id OR h1_gate_id·open status 패턴을
+# 재사용하되, 리스트 전체에 대해 단일 SQL statement로 — N+1 0. session.execute 호출 수는 여전히
+# 1회, DB 플래너가 correlated subquery를 gate별로 평가하는 것뿐).
+# 우선순위(스토리 AC 그대로): 1) held(향후 만료)=최하단 2) SLA overdue=최상위 3) created_at
+# ASC(오래된 것 상위 — "노화"). 3번째 키는 overdue/non-overdue 그룹 내부에도 동일 적용된다
+# (전역 ORDER BY 절이라 그룹별로 별도 지정할 필요 없음 — 상위 키가 이미 그룹을 가른 뒤 그
+# 안에서 created_at ASC가 자연히 작동).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def apply_gate_urgency_sort(query, *, now: Any | None = None):
+    """``?sort=urgency`` ORDER BY 절을 query(Select[Gate])에 덧붙여 반환한다.
+
+    ``now``는 테스트 결정성용 override(기본 ``func.now()`` — DB 시계 기준, 앱-DB 시계 차이 회피).
+    overdue 판정: gate에 연결된(``gate_id`` OR ``h1_gate_id``, 동일 org) open
+    ``WorkflowLineStepRun``(``_OPEN_STEP_RUN_STATUSES``) 중 ``sla_due_at``이 now 이전인 게 하나라도
+    있으면 그 gate는 overdue(EXISTS correlated subquery — gate 개수와 무관하게 SQL 1개).
+    """
+    now_expr = func.now() if now is None else now
+    step_run = aliased(WorkflowLineStepRun)
+    overdue_exists = (
+        select(literal(1))
+        .where(
+            or_(step_run.gate_id == Gate.id, step_run.h1_gate_id == Gate.id),
+            step_run.org_id == Gate.org_id,
+            step_run.status.in_(_OPEN_STEP_RUN_STATUSES),
+            step_run.sla_due_at.isnot(None),
+            step_run.sla_due_at < now_expr,
+        )
+        .correlate(Gate)
+        .exists()
+    )
+    # 1차: held(향후 만료)=1(최하단)·그 외=0(상위). 2차: overdue=0(최상위)·그 외=1. 3차: created_at
+    # ASC(오래된 것 상위).
+    held_rank = case(
+        (and_(Gate.held_until.isnot(None), Gate.held_until > now_expr), 1), else_=0,
+    )
+    overdue_rank = case((overdue_exists, 0), else_=1)
+    return query.order_by(held_rank.asc(), overdue_rank.asc(), Gate.created_at.asc())
+
+
+async def _resolve_gate_notification_targets(session: AsyncSession, org_id: uuid.UUID) -> list[uuid.UUID]:
+    """story 1934: gate 생성 알림 대상 = org owner/admin 전원(수신자를 org_members에서 직접
+    해소 — team_members VIEW는 grant-only 휴먼을 탈락시키므로 쓰지 않는다, feedback_team_
+    members_view_human_drop 교훈).
+
+    ⚠️휴먼은 `members.id == org_members.id`(E-MEMBER-SSOT AC2-1 앵커 백필 불변식)라 org_members.id
+    를 그대로 dispatch_notification의 target_member_ids(member_id 공간)로 쓸 수 있다 — 별도
+    JOIN/변환 불필요."""
+    from sqlalchemy import text
+
+    rows = await session.execute(
+        text(
+            """
+            SELECT id FROM org_members
+            WHERE org_id = :org_id AND deleted_at IS NULL AND role IN ('owner', 'admin')
+            """
+        ),
+        {"org_id": org_id},
+    )
+    return [row[0] for row in rows.all()]
 
 # verdict source → gate_type 매핑
 _SOURCE_TO_GATE_TYPE: dict[str, str] = {
@@ -46,6 +177,39 @@ _DISPOSITION_TO_STATUS: dict[str, str] = {
     "ask": "pending",
     "deny": "rejected",
 }
+
+async def resolve_work_item_project_id(
+    session: AsyncSession, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
+) -> uuid.UUID | None:
+    """story #1968: work_item_type/work_item_id → project_id 타입별 조회(신규 쿼리).
+
+    ⚠️호출 전 먼저 확인: 그 함수 스코프에 이미 로드된 엔티티(story/doc/task/loop/artifact 등
+    객체)가 있으면 이 헬퍼를 쓰지 말고 그 객체의 ``.project_id``를 직접 재사용할 것(신규 쿼리
+    최소 원칙 — doc.py/loop.py/visual_artifacts.py/workflow_parallel_approval.py가 이미 이렇게
+    한다). 이 헬퍼는 work_item_id(uuid)만 있고 엔티티가 아직 로드 안 된 호출부 전용
+    (routers/gates.py 제네릭 생성 엔드포인트·merge_verdict_gate.py evaluate_merge_gate)과
+    override_gate()의 sr(step_run)=None 폴백용.
+
+    Story/Doc.project_id는 NOT NULL이라 row가 있으면 항상 값이 있다. Task는 project_id 컬럼이
+    없어 story JOIN. 미지원/미인식 work_item_type(예: workflow_line_config의 org-level
+    'wf_line_version' — 실제로 project-무관일 수 있음)은 None(best-effort — silent 실패가
+    아니라 구조적으로 project-scoped가 아닐 수 있다는 정직한 신호)."""
+    if work_item_type == "story":
+        return (await session.execute(
+            select(Story.project_id).where(Story.id == work_item_id, Story.org_id == org_id)
+        )).scalar_one_or_none()
+    if work_item_type == "task":
+        return (await session.execute(
+            select(Story.project_id)
+            .join(Task, Task.story_id == Story.id)
+            .where(Task.id == work_item_id, Task.org_id == org_id)
+        )).scalar_one_or_none()
+    if work_item_type == "doc":
+        return (await session.execute(
+            select(Doc.project_id).where(Doc.id == work_item_id, Doc.org_id == org_id)
+        )).scalar_one_or_none()
+    return None
+
 
 # doc-gate v2 갭1: deliberate 인간 결재 gate — org allow_auto/deny posture 무관하게 항상 manual(pending).
 # disposition auto-pass/auto-deny 제외(인간 deliberation 이 정책 자동결정보다 우선).
@@ -66,8 +230,20 @@ async def create_gate(
     member_id: uuid.UUID,
     role_id: uuid.UUID,
     neutral_facts: dict[str, Any] | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> Gate:
-    """config 기반 게이트 생성 (멱등: 이미 있으면 기존 반환)."""
+    """config 기반 게이트 생성 (멱등: 이미 있으면 기존 반환).
+
+    project_id: story #1953(P1a-S3)이 처음 배선·story #1968(P1a-S3 잔여)이 완성 — gate.pending_
+    approval 알림 payload의 project_id 보강용(선택적). create_gate()는 gate_type/work_item_type을
+    가리지 않는 공용 chokepoint라 work_item_type별 project_id 해소 로직을 여기 내장하지 않는다 —
+    호출부가 이미 로드된 엔티티에서 알고 있으면(artifact_canonicalize·doc_approval·loop_decision·
+    parallel merge 등) 그대로 넘기고, work_item_id만 갖고 엔티티가 없는 호출부(범용 gates.py
+    직접생성·merge 게이트)는 ``resolve_work_item_project_id()``로 조회해 넘긴다(story #1968).
+    workflow_line_config(wf_line_version)처럼 진짜 org-level(project 무관)일 수 있는 work_item은
+    ``version.project_id``(nullable)를 그대로 넘겨 None이 나올 수 있다 — 이건 미해결이 아니라
+    구조적으로 project-scoped가 아니라는 정직한 값이다.
+    """
     # 멱등: 이미 존재하면 기존 반환
     existing_r = await session.execute(
         select(Gate).where(
@@ -101,6 +277,30 @@ async def create_gate(
     session.add(gate)
     await session.flush()
     await session.refresh(gate)
+
+    # story 1934(선생님 앱 done-gate: "디스코드 떼고 승인게이트 실시간 알림+즉시 액션"):
+    # pending 상태(진짜 결재 대기)일 때만 알림 — auto_passed/rejected는 즉시 확정이라 결재
+    # 액션이 없다. best-effort(알림 실패가 게이트 생성 자체를 롤백하면 안 됨 — deliver_expo_
+    # push/override 알림과 동일 관례).
+    if status == "pending":
+        try:
+            target_ids = await _resolve_gate_notification_targets(session, org_id)
+            if target_ids:
+                from app.services.notification_dispatch import dispatch_notification
+                await dispatch_notification(
+                    session, org_id=org_id, event_type="gate.pending_approval",
+                    target_member_ids=target_ids,
+                    title="결재 대기 중인 게이트가 있습니다",
+                    body=f"{gate_type} 게이트가 승인/거부를 기다리고 있습니다.",
+                    reference_type="gate", reference_id=gate.id,
+                    source_project_id=project_id,
+                )
+        except Exception:
+            logger.warning(
+                "gate.pending_approval notification failed gate_id=%s (swallowed·best-effort)",
+                gate.id, exc_info=True,
+            )
+
     return gate
 
 
@@ -717,6 +917,16 @@ async def override_gate(
                 title="게이트가 강제 결정되었습니다",
                 body=f"owner 가 게이트를 {decision} 로 강제 결정했습니다: {reason}",
                 reference_type="gate", reference_id=gate_id,
+                # story #1953: sr(라인 step_run)이 해소된 경우 project_id는 그 값 그대로(신규
+                # 쿼리 0). story #1968: sr=None(단일 gate·활성 step_run 없음) 케이스는
+                # resolve_work_item_project_id()로 gate.work_item_type/work_item_id에서
+                # 폴백 조회 — best-effort(실패해도 이 알림 전체가 try 블록 안이라 비중단).
+                source_project_id=(
+                    sr.project_id if sr is not None
+                    else await resolve_work_item_project_id(
+                        session, org_id, gate.work_item_type, gate.work_item_id,
+                    )
+                ),
             )
         except Exception:  # noqa: BLE001 — notification 실패는 비중단(override 자체는 성공).
             pass

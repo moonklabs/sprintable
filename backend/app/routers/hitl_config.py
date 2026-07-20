@@ -24,7 +24,7 @@ from app.schemas.hitl_config import (
 from app.services.disposition_advisor import DEFAULT_MIN_VERDICTS, get_disposition_recommendation
 from app.services.gate_resolver import resolve_disposition
 
-router = APIRouter(prefix="/api/v2/gate-config", tags=["gate-config"])
+router = APIRouter(prefix="/api/v2/gate-config", tags=["gate-config", "Trust"])
 
 
 # ── org posture ───────────────────────────────────────────────────────────────

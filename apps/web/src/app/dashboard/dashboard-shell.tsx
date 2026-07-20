@@ -9,15 +9,18 @@ import {
   setEffectiveProjectId,
 } from '@/lib/project-context-client';
 import { useTranslations } from 'next-intl';
+import { cn } from '@/lib/utils';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { AppSidebar } from '@/components/nav/app-sidebar';
+import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { TeamPresencePanel } from '@/components/presence/team-presence-panel';
 import { useTeamPresence } from '@/components/presence/use-team-presence';
+import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
 import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-gate';
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
@@ -33,6 +36,9 @@ interface DashboardContext {
   orgId?: string;
   projectId?: string;
   projectName?: string;
+  // story a539c649 S2: 현재 project 의 slug(사이드바/⌘K 가 /{ws}/{proj}/docs 직접 path 를
+  // 만드는 데만 사용 — /me/memberships 는 slug 를 안 실어보내 여기 단건 조회로 보강했다).
+  currentProjectSlug?: string;
   userName?: string;
   role?: string;
   projectMemberships: DashboardProjectOption[];
@@ -49,7 +55,16 @@ interface DashboardShellProps extends DashboardContext {
   children: React.ReactNode;
 }
 
-function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: React.ReactNode }) {
+// story #1958(P2-S2) 유나 노트⑶: 768~1023(태블릿, lg 미만)은 모바일 IA를 유지하되 콘텐츠만
+// 640 중앙폭으로 밀도 조정(시안 511bc035 v2 "태블릿 세로 768" 프레임 — `.tablet .content{max-width:640px}`).
+// 2단 그리드 미도입 — 4탭 루트(지금·결재함·채팅·전체)에만 적용, /board 등 기존 데스크톱 페이지는 제외.
+const TAB_ROOT_PREFIXES = ['/glance', '/inbox', '/chats', '/more'];
+
+function isTabRootPage(pathname: string): boolean {
+  return TAB_ROOT_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
+function ScrollShell({ showTopBar, tabletCentered, chatUnreadTotal, children }: { showTopBar: boolean; tabletCentered: boolean; chatUnreadTotal: number; children: React.ReactNode }) {
   const { setScrollContainer } = useTopBar();
   const setRef = useCallback((el: HTMLDivElement | null) => {
     setScrollContainer(el);
@@ -86,11 +101,18 @@ function ScrollShell({ showTopBar, children }: { showTopBar: boolean; children: 
           className="min-h-0 flex-1"
           inlineColumnsClassName="2xl:grid-cols-[minmax(0,1fr)_320px]"
           panelClassName="2xl:col-start-2 2xl:row-start-1"
-          contentClassName="flex min-h-0 min-w-0 flex-col 2xl:col-start-1 2xl:row-start-1"
+          contentClassName={cn(
+            'flex min-h-0 min-w-0 flex-col 2xl:col-start-1 2xl:row-start-1',
+            tabletCentered && 'min-[768px]:mx-auto min-[768px]:w-full min-[768px]:max-w-[640px] lg:max-w-none lg:mx-0',
+          )}
         >
           {children}
         </ContextualPanelLayout>
       </div>
+      {/* story #1958(P2-S2): <1024(lg 미만) 전용 하단 탭바 — SidebarInset의 flex-col 안에서
+          scroll 컨테이너의 형제(자식 아님)로 둬야 콘텐츠가 스크롤돼도 탭바가 자기 flex row를
+          유지한다(position:fixed 오버레이+패딩 보정 불요 — 시안 511bc035의 flex 레이아웃과 동형). */}
+      <MobileTabBar chatUnreadTotal={chatUnreadTotal} />
     </SidebarInset>
     </TeamPresenceToggleProvider>
     </ReleaseNotesProvider>
@@ -148,6 +170,7 @@ export function DashboardShell({
   orgId,
   projectId,
   projectName,
+  currentProjectSlug,
   userName,
   role,
   projectMemberships,
@@ -156,26 +179,38 @@ export function DashboardShell({
 }: DashboardShellProps) {
   const pathname = usePathname();
   const showTopBar = !pathname.startsWith('/settings');
+  const tabletCentered = isTabRootPage(pathname);
 
   // R2: URL `?p=` = 탭별 SSOT. 서버 prop 대신 effective 를 컨텍스트/사이드바에 공급.
   const effectiveProjectId = useProjectSsot(projectId, projectMemberships);
   const effectiveProjectName = projectMemberships.find((m) => m.projectId === effectiveProjectId)?.projectName ?? projectName;
+  // currentProjectSlug 는 server prop(me.project_id) 기준 — effectiveProjectId 가 탭 SSOT로
+  // 갈렸으면 살짝 stale 할 수 있으나, "문서로 가기" 바로가기 링크 용도라 무해(틀려도 미들웨어
+  // 리다이렉트 안전망이 받는다). 완전 동기화는 이 슬라이스 스코프 밖(over-engineering).
+
+  // story #2007(perf·서버부하): GNB 채팅 unread 총합을 AppSidebar+MobileTabBar가 각자
+  // useChatUnreadTotal()을 호출해 SSE(EventSource) 연결을 독립적으로 2개 열던 것을 여기 한
+  // 곳에서만 계산해 두 표면에 값만 prop으로 내려준다 — 동일 유저 event-stream 동시 연결
+  // 4개(presence·notifications·GNB×2) 중 2개를 1개로 줄인다(배지 값은 뷰포트 무관 동일해야
+  // 하므로 공유가 정확도 손실 없이 순수 절감).
+  const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
 
   return (
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId: effectiveProjectId, projectName: effectiveProjectName, userName, role, projectMemberships, orgMemberships }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, projectMemberships, orgMemberships }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
           <SidebarProvider className="h-svh">
             <AppSidebar
-              currentTeamMemberId={currentTeamMemberId}
               projectId={effectiveProjectId}
+              currentProjectSlug={currentProjectSlug}
               projectMemberships={projectMemberships}
               orgId={orgId}
               orgMemberships={orgMemberships}
               userName={userName}
+              chatUnreadTotal={chatUnreadTotal}
             />
-            <ScrollShell showTopBar={showTopBar}>
+            <ScrollShell showTopBar={showTopBar} tabletCentered={tabletCentered} chatUnreadTotal={chatUnreadTotal}>
               {children}
             </ScrollShell>
           </SidebarProvider>

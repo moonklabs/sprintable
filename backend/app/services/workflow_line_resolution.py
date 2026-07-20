@@ -215,12 +215,12 @@ async def _apply_epic_transition(
     (parallel 0). ⭐SoD(draft→active activation 만): approver ≠ epic.assignee_id(owner proxy·fail-closed).
     ⚠️epic assignee 흔히 null→enforcing 시 과차단 — enforcing 전 SoD 대상 project owner 로 정교화 필요
     (enable-prep·default-off 무해). active→done(completion)은 SoD 무관."""
-    from app.models.pm import Epic
-    from app.services.epic import transition_epic
+    from app.models.pm import Goal
+    from app.services.goal import transition_goal
     from app.services.member_resolver import ResolvedMember
 
     epic = (await session.execute(
-        select(Epic).where(Epic.id == sr.entity_id).with_for_update()
+        select(Goal).where(Goal.id == sr.entity_id).with_for_update()
     )).scalar_one_or_none()
     if epic is None:
         sr.status = "approved"
@@ -256,7 +256,7 @@ async def _apply_epic_transition(
         id=resolver_id, user_id=None, name="gate_approver", type="human", role="member",
         org_id=sr.org_id,
     )
-    await transition_epic(session, sr.org_id, approver, epic.id, sr.to_status, via_gate=True)
+    await transition_goal(session, sr.org_id, approver, epic.id, sr.to_status, via_gate=True)
     # assignee 자동재개(ccbcd9da): epic assignee 에게 dispatched(commit=False·gate 트랜잭션 합류·
     # 호출자가 commit 후 wake/webhook 스케줄).
     wake_payload = None

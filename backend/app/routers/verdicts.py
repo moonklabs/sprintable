@@ -12,7 +12,7 @@ from app.dependencies.database import get_db
 from app.schemas.verdict import VerdictResponse
 from app.services.verdict_recorder import get_verdicts_by_participation
 
-router = APIRouter(prefix="/api/v2/verdicts", tags=["verdicts"])
+router = APIRouter(prefix="/api/v2/verdicts", tags=["verdicts", "Trust"])
 
 
 @router.get("", response_model=list[VerdictResponse])

@@ -156,6 +156,50 @@ class Settings(BaseSettings):
     rate_limit_backend: str = "memory"  # "memory" | "redis"
     redis_url: str = "redis://localhost:6379/0"
 
+    # E-AUTH-REBUILD M2 Phase 1(story b07ad526·doc firebase-auth-identity-platform-migration-poc
+    # §10.1): Firebase Auth/Identity Platform 이행 플래그. 전부 default off — Phase 1 스키마+검증기
+    # 구현은 이 플래그들 뒤에서 dead code로 존재(prod 무영향). LEGACY_AUTH_ISSUE/VERIFY만 on이
+    # 기본이라 기존 self-issued JWT 로그인/세션이 그대로 SSOT.
+    firebase_auth_accept_id: bool = False        # native/direct 경로에서 Firebase ID token 수락
+    firebase_auth_accept_session: bool = False   # Firebase 세션쿠키(__Host-sp_fs) 수락
+    firebase_auth_issue_session: bool = False    # 신규 Firebase 세션쿠키 발급
+    firebase_auth_reset_cutover: bool = False    # Phase 4 coordinated forced-reset 전이 허용
+    firebase_auth_cohort_percent: int = 0        # Phase 5 점진 롤아웃 비율(0~100)
+    firebase_auth_mobile_issue: bool = False     # M2 모바일 native bootstrap 발급
+    # story 1931(OAuth 핸드오프·doc e-mobile-oauth-native-handoff-contract §4/§7.5(b)):
+    # attested native bootstrap(§7.5)과 별개인 경량 OAuth-handoff issue/consume(PKCE) 발급.
+    firebase_oauth_handoff_enabled: bool = False
+    legacy_auth_issue: bool = True               # 기존 self-issued JWT 로그인/refresh 발급
+    legacy_auth_verify: bool = True              # 기존 self-issued JWT 검증(proxy.ts·FastAPI)
+
+    firebase_project_id: str = ""  # Firebase/Identity Platform GCP 프로젝트 ID(dev/prod 분리)
+
+    # story 132e7204(Phase1-S4): Next.js BFF↔FastAPI 세션쿠키 발급 내부 호출 공유시크릿.
+    # cron.py CRON_SECRET과 동일 패턴 — 미설정(로컬 개발) 시 인증 생략.
+    firebase_bff_internal_secret: str = ""
+
+    # story 4dee942b(Phase1-S5): 네이티브 부트스트랩 — custom token→ID token 교환용 Firebase
+    # Web API key(공개 클라이언트 키, ADC와 별개). App Check 검증용 project number(project_id와
+    # 다른 값 — doc §9.3/산티아고 §9). App Check 필수 여부 게이트(기본 off — 모바일 클라이언트
+    # per-install challenge 메커니즘이 아직 없어 강제 시 발급 자체가 막힘, 별도 모바일 스토리 필요).
+    firebase_web_api_key: str = ""
+    firebase_project_number: str = ""
+    firebase_auth_mobile_app_check_required: bool = False
+    # 산티아고 §9 finding 1(2026-07-15): App Check sub(App ID) allowlist — 콤마 구분 문자열.
+    # 미승인 앱이 App Check 토큰을 정확 서명해와도 이 목록에 없으면 거부.
+    firebase_app_check_allowed_app_ids: str = ""
+
+    # story cbd578d4(C4·산티아고 §7.3): per-install register 엔드포인트가 attestation
+    # rpIdHash/AttestationApplicationId 검증에 강제하는 exact 값들. 미설정 시 register는
+    # 항상 거부(fail-closed) — dev/prod 실 앱 식별자 프로비저닝 후 채워진다.
+    ios_team_id: str = ""
+    android_signing_cert_digest_sha256_hex: str = ""
+    android_min_version_code: int = 0
+    play_integrity_project_number: str = ""
+    # §7.3: 사용자당 bounded N개 active installation — 초과 등록은 fresh re-auth(이미 강제,
+    # 5분 auth_time freshness)+MFA(user.totp_enabled 전제) 요구.
+    device_installation_max_active_per_user: int = 5
+
     @property
     def is_ee_enabled(self) -> bool:
         return self.license_consent.lower() == "agreed"

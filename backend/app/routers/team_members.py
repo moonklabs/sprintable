@@ -49,7 +49,7 @@ async def _inject_active_stories(
 
 _FAKECHAT_BASE_PORT = 8787
 
-router = APIRouter(prefix="/api/v2/team-members", tags=["team-members"])
+router = APIRouter(prefix="/api/v2/team-members", tags=["team-members", "Organization"])
 
 
 def _get_repo(
@@ -320,6 +320,9 @@ async def create_team_member(
                 body=f"{actor.name}(에이전트)이 {member.name}을 생성했습니다.",
                 reference_type="team_member",
                 reference_id=member.id,
+                # story #1953: 신규 에이전트(member) 자신의 project_id — TeamMember.project_id
+                # NOT NULL, 신규 조회 없이 그대로 실음.
+                source_project_id=member.project_id,
             )
 
     # AC3: agent 생성 시 API key 자동 생성 + response에 포함

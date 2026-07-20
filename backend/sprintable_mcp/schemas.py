@@ -27,7 +27,7 @@ class TaskStatus(str, Enum):
     done = "done"
 
 
-class EpicStatus(str, Enum):
+class GoalStatus(str, Enum):
     draft = "draft"
     active = "active"
     done = "done"
