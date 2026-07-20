@@ -35,6 +35,12 @@ const nextConfig: NextConfig = {
   // Set NEXT_DEV_ALLOWED_ORIGINS=host1,host2 in .env.local to enable
   allowedDevOrigins: process.env['NEXT_DEV_ALLOWED_ORIGINS']?.split(',').map((s) => s.trim()).filter(Boolean) ?? [],
   output: 'standalone',
+  // story #2050: 채팅 첨부 이미지가 next/image로 GCS 서명 URL을 리사이즈 요청할 수 있도록 허용.
+  // src는 항상 우리 /api/attachments/sign 응답에서만 오므로(사용자 입력 직접 미반영) 호스트
+  // 단위 허용으로 충분 — CSP img-src에도 이미 동일 호스트가 허용돼 있다.
+  images: {
+    remotePatterns: [{ protocol: 'https', hostname: 'storage.googleapis.com' }],
+  },
   // Bundle workspace packages from source (resolved via tsconfig paths) rather than
   // externalizing their built dist. The Cloud Build context uploads the host's
   // packages/*/dist (no .gcloudignore) and `next build --webpack` never rebuilds it,
