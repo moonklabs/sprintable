@@ -1,9 +1,25 @@
+import os
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
+
+
+def db_application_name(suffix: str = "") -> str:
+    """SID f2fe1c5e/#2040 AC2: `K_SERVICE:K_REVISION[:suffix]` — pg_stat_activity를 서비스·
+    리비전·연결종류(pooled session vs pg_pubsub raw LISTEN)별로 분해하기 위한 태그.
+
+    Cloud Run이 K_SERVICE/K_REVISION을 자동 주입한다(설정 불필요) — 로컬/테스트는 fallback.
+    Postgres application_name은 NAMEDATALEN=64(63자 초과 시 silent truncate)라 63자로 자른다.
+    """
+    service = os.environ.get("K_SERVICE", "local")
+    revision = os.environ.get("K_REVISION", "dev")
+    name = f"{service}:{revision}"
+    if suffix:
+        name = f"{name}:{suffix}"
+    return name[:63]
 
 # S20/E-INFRA S2 + ee7794eb: DB 풀 **rollout-safe** right-size — SSE는 대기 구간 커넥션 미점유(개별 세션).
 # ⚠️ 인스턴스당 실 커넥션 = (pool_size+max_overflow) + **pool 밖 raw 연결**(pg_pubsub.listen_loop 상시 1·
@@ -26,12 +42,14 @@ def _build_engine_kwargs() -> dict:
       localhost:6432(③ cloudbuild 리비전과 atomic).
     """
     pgb = settings.db_pgbouncer
+    connect_args: dict = {"statement_cache_size": 0} if pgb else {}
+    connect_args["server_settings"] = {"application_name": db_application_name()}
     return {
         "pool_size": settings.db_pgbouncer_pool_size if pgb else settings.db_pool_size,
         "max_overflow": settings.db_pgbouncer_max_overflow if pgb else settings.db_max_overflow,
         "pool_pre_ping": True,
         "echo": settings.debug,
-        "connect_args": {"statement_cache_size": 0} if pgb else {},
+        "connect_args": connect_args,
     }
 
 
