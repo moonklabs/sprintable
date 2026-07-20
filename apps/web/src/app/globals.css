@@ -246,7 +246,10 @@
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.58 0.17 254);
+  /* story #2057(유나 규격): 알파 50%(outline-ring/50)가 근본원인이라 값 자체보다 알파 제거가
+     핵심이지만, 표면 전수 실측(라이트 배경 1.99·다크 배경 2.51, 최소 3.0 미달)에서 --primary
+     층 값으로 옮겨야 최악 표면(다크 밝은 면)에서도 3.0을 넘는다(100%에서 3.64). */
+  --ring: oklch(0.50 0.09 255);
   --chart-1: oklch(0.871 0.006 286.286);
   --chart-2: oklch(0.552 0.016 285.938);
   --chart-3: oklch(0.442 0.017 285.786);
@@ -261,7 +264,7 @@
   --sidebar-accent: oklch(0.95 0.002 286.375);
   --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
   --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.58 0.17 254);
+  --sidebar-ring: oklch(0.50 0.09 255);
 
   /* Sprintable brand (blue) — 254/0.17 hue/chroma는 스펙 그대로, L만 0.58→0.56(AA 4.5:1 확保) */
   --brand: oklch(0.56 0.17 254);
@@ -367,7 +370,8 @@
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.68 0.15 255);
+  /* story #2057(유나 규격): --primary 층 값으로 정렬(라이트와 동일 이유). */
+  --ring: oklch(0.68 0.08 255);
   --chart-1: oklch(0.871 0.006 286.286);
   --chart-2: oklch(0.75 0.016 285.938);
   --chart-3: oklch(0.62 0.017 285.786);
@@ -381,7 +385,7 @@
   --sidebar-accent: oklch(0.274 0.006 286.033);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.68 0.15 255);
+  --sidebar-ring: oklch(0.68 0.08 255);
 
   /* Sprintable brand (blue, lighter for dark) — hue/chroma 스펙 그대로, L은 라이트와 동일 규칙 */
   --brand: oklch(0.64 0.17 254);
@@ -479,7 +483,13 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    /* story #2057(유나 규격): 알파 50%가 근본원인 — 표면 전수 실측(라이트 1.99·다크 2.51,
+       최소 3.0 미달)에서 후보 3안(현행/primary층/명도보정) 전부 50% 알파로는 최대 2.92라
+       색 교체로는 못 푼다. 알파를 걷고(outline-ring, /50 제거) 대신 두께(2px)+오프셋(2px)으로
+       "시끄러움"을 상쇄한다 — 알파로 되돌리면 대비가 다시 깎인다(두께는 대비를 안 깎는다). */
+    @apply border-border outline-ring;
+    outline-width: 2px;
+    outline-offset: 2px;
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   }
