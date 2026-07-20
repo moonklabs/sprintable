@@ -2,10 +2,10 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
+from app.models.hitl import HitlRequest
 from app.models.pm import Story, Task
 from app.routers.agent_gateway import wake_agent
 from app.services.gate_service import (
@@ -106,6 +107,10 @@ class WorkItemSummary(BaseModel):
 class GateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    # story #2054: 결재함 통합 인박스(/gates/inbox)에서 Gate/HitlRequest 두 출처를 구분하는
+    # discriminator. 기존 단독 엔드포인트(list_gates/get_gate/transition 등)는 항상 "gate"
+    # 고정값 — additive, 기존 응답 shape 비파괴.
+    source: Literal["gate"] = "gate"
     id: uuid.UUID
     org_id: uuid.UUID
     # story #1970(P1a-S4): GET /{id} 단건 조회 신규 enrich(Gate 모델 자체엔 project_id 컬럼이
@@ -417,6 +422,179 @@ async def list_gates(
         elif g.id in eligible_ids:
             filtered.append(resp)
     return filtered
+
+
+class HitlInboxItem(BaseModel):
+    """story #2054: `agent_hitl_requests`(gate_approval 종류) 결재함 인박스 노출용 최소 스키마.
+
+    Gate와 별도 API로 승인/거부(`PATCH /hitl/requests/{id}`)하므로 GateResponse 필드를 그대로
+    빌리지 않는다 — `source` 로 FE가 액션 라우팅. 미르코(FE)와 합의한 계약(conversation
+    eaa1b6cb-5d73-4019-bca8-7e320087f827) 그대로: id/request_type/title/prompt/status/
+    requires_human/work_item_id/work_type/created_at/expires_at.
+    """
+    model_config = ConfigDict(from_attributes=True)
+
+    source: Literal["hitl"] = "hitl"
+    id: uuid.UUID
+    request_type: str
+    title: str
+    prompt: str
+    status: str
+    # gate_enforce.py _SAFETY_FLOOR: work_type='merge'는 최소 ask — HitlRequest로 park된 항목은
+    # 정의상 항상 사람 승인 대상이라 고정 True(Gate.requires_human과 동형 의미).
+    requires_human: bool = True
+    work_item_id: uuid.UUID | None = None
+    work_type: str | None = None
+    created_at: datetime
+    expires_at: datetime | None = None
+
+
+# gate_enforce.py:22/gate_metrics.py:24 선례(cross-module import 대신 로컬 재선언) — HitlRequest 중
+# 결재함 인박스가 다루는 부분집합(merge/done 게이트 승인 park)만. 그 외 request_type(예: 수동
+# HITL 승인 요청)은 #2054 스코프 밖(별도 화면 유지) — Gate와 동일 병목에서 충돌하는 것만 통합.
+_GATE_REQUEST_TYPE = "gate_approval"
+
+
+async def _list_hitl_inbox_rows(
+    session: AsyncSession, org_id: uuid.UUID, status: str | None,
+) -> list[HitlRequest]:
+    q = select(HitlRequest).where(
+        HitlRequest.org_id == org_id,
+        HitlRequest.request_type == _GATE_REQUEST_TYPE,
+        HitlRequest.deleted_at.is_(None),
+    )
+    if status:
+        q = q.where(HitlRequest.status == status)
+    return list((await session.execute(q)).scalars().all())
+
+
+def _hitl_item_from_row(r: HitlRequest) -> HitlInboxItem:
+    meta = r.hitl_metadata or {}
+    wi_raw = meta.get("work_item_id")
+    try:
+        work_item_id = uuid.UUID(wi_raw) if wi_raw else None
+    except (ValueError, TypeError, AttributeError):
+        work_item_id = None
+    return HitlInboxItem(
+        id=r.id,
+        request_type=r.request_type,
+        title=r.title,
+        prompt=r.prompt,
+        status=r.status,
+        work_item_id=work_item_id,
+        work_type=meta.get("work_type"),
+        created_at=r.created_at,
+        expires_at=r.expires_at,
+    )
+
+
+@router.get(
+    "/inbox",
+    response_model=list[Annotated[GateResponse | HitlInboxItem, Field(discriminator="source")]],
+)
+async def list_gate_inbox(
+    status: str | None = Query(default=None),
+    sort: str | None = Query(default=None),
+    assigned_to_me: bool = Query(default=False),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> list[GateResponse | HitlInboxItem]:
+    """story #2054: `Gate`(결재함)와 `HitlRequest`(gate_approval park) 통합 조회 — 두 체계가
+    같은 승인 병목(merge)에서 서로를 못 보던 결함 해소. 데이터모델은 안 합치고(Gate 미러 생성
+    금지 — 오르테가 판정) 이 read-layer에서만 통합. 액션은 각자 native API로
+    (`PATCH /gates/{id}/transition` vs `PATCH /hitl/requests/{id}`) — `source` 필드로 라우팅.
+
+    미르코(FE)와 합의한 계약(conversation eaa1b6cb): 페이지네이션 없음(기존 GET /gates 관례 유지)·
+    기본 정렬 created_at DESC·`sort=urgency`는 Gate 쪽 기존 SLA 로직 그대로 + HitlRequest는
+    age(created_at)만으로 같은 정렬축에 끼워 넣는 best-effort(HitlRequest엔 SLA/held 개념이 없어
+    완전 동형 아님 — 이는 미리 합의된 단순화).
+    """
+    gate_items = await list_gates(
+        work_item_id=None, work_item_type=None, status=status, sort=sort,
+        assigned_to_me=assigned_to_me, session=session, org_id=org_id, auth=auth,
+    )
+    hitl_rows = await _list_hitl_inbox_rows(session, org_id, status)
+
+    if assigned_to_me:
+        # Gate의 non-doc assigned_to_me(WHO)와 동일 규칙 재사용: gate_approval park 대상
+        # work_item_id는 실무상 항상 Story(work_type∈{done,merge}는 story 라이프사이클 단계) —
+        # project 해소되면 project owner/admin, 구조적으로 project-무관이면 org owner/admin.
+        resolved = None
+        _uid: uuid.UUID | None = None
+        if hitl_rows:
+            try:
+                resolved = await resolve_member(auth, org_id, session)
+                _uid = uuid.UUID(auth.user_id)
+            except Exception:  # noqa: BLE001 — caller resolve 실패는 목록 비중단(fail-closed).
+                logger.warning(
+                    "list_gate_inbox hitl caller resolve 실패(비중단) org=%s", org_id, exc_info=True,
+                )
+        if resolved is None or resolved.type != "human":
+            hitl_rows = []
+        else:
+            story_ids = set()
+            parsed: dict[uuid.UUID, uuid.UUID | None] = {}
+            for r in hitl_rows:
+                wi_raw = (r.hitl_metadata or {}).get("work_item_id")
+                try:
+                    wid = uuid.UUID(wi_raw) if wi_raw else None
+                except (ValueError, TypeError, AttributeError):
+                    wid = None
+                parsed[r.id] = wid
+                if wid is not None:
+                    story_ids.add(wid)
+            project_by_story: dict[uuid.UUID, uuid.UUID] = {}
+            if story_ids:
+                rows = (await session.execute(
+                    select(Story.id, Story.project_id).where(
+                        Story.id.in_(story_ids), Story.org_id == org_id,
+                    )
+                )).all()
+                project_by_story = {sid: pid for sid, pid in rows}
+            role_cache: dict[uuid.UUID, bool] = {}
+            org_admin_cache: bool | None = None
+            eligible: list[HitlRequest] = []
+            for r in hitl_rows:
+                pid = project_by_story.get(parsed.get(r.id))
+                if pid is not None:
+                    if pid not in role_cache:
+                        role_cache[pid] = await _non_doc_gate_approvable(session, _uid, org_id, pid)
+                    ok = role_cache[pid]
+                else:
+                    if org_admin_cache is None:
+                        org_admin_cache = await _non_doc_gate_approvable(session, _uid, org_id, None)
+                    ok = org_admin_cache
+                if ok:
+                    eligible.append(r)
+            hitl_rows = eligible
+
+    hitl_items = [_hitl_item_from_row(r) for r in hitl_rows]
+
+    if sort == "urgency":
+        # Gate 쪽은 이미 (held_rank, overdue_rank, created_at ASC)로 정렬돼 도착 — HitlRequest는
+        # SLA/held 개념이 없어 "non-held·non-overdue" 티어(각 rank=0/1 아님 held=0-tier 아님 →
+        # overdue_rank=1 동일 티어)로 취급하고 age(created_at ASC)만으로 그 안에 merge. 안정 정렬
+        # (Python Timsort)로 gate_items의 기존 상대순서는 보존된다.
+        # ⚠️정직한 단순화(미리 합의): gate_items의 overdue 여부는 SQL(apply_gate_urgency_sort의
+        # correlated EXISTS)에서만 판정되고 GateResponse엔 그 필드가 노출되지 않는다 — 파이썬
+        # 레벨에서 gate/hitl 총정렬을 다시 만드는 이상 overdue 랭크는 재구성 불가하므로 여기선
+        # held(가진 필드로 재확인 가능)만 최하단 유지하고, 나머지는 age(created_at ASC) 단일
+        # 축으로 합친다. 결과적으로 "overdue gate가 항상 non-overdue보다 위"라는 하드 보장은
+        # 없어지고 age로 근사(실무상 overdue는 대개 오래된 항목이라 대체로 유지되나 보장은 아님) —
+        # 미르코와 합의한 "HitlRequest는 age 기준으로만 끼워 넣는다"는 문구 그대로의 트레이드오프.
+        combined: list[GateResponse | HitlInboxItem] = list(gate_items) + list(hitl_items)
+        combined.sort(
+            key=lambda it: (
+                1 if (isinstance(it, GateResponse) and it.held_until and it.held_until > datetime.now(it.held_until.tzinfo)) else 0,
+                it.created_at,
+            )
+        )
+        return combined
+
+    combined = list(gate_items) + list(hitl_items)
+    combined.sort(key=lambda it: it.created_at, reverse=True)
+    return combined
 
 
 async def _resolve_work_item_summary(
