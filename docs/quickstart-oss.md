@@ -29,9 +29,13 @@ POSTGRES_PASSWORD=change-me
 JWT_SECRET=change-me-in-development
 SECRET_KEY=change-me-in-development
 NEXT_PUBLIC_FASTAPI_URL=http://localhost:8000
+AUTH_AUTO_VERIFY_EMAIL=true
 ```
 
 > **Note**: Set `JWT_SECRET` and `SECRET_KEY` to strong random values before any shared or production deployment.
+> `AUTH_AUTO_VERIFY_EMAIL=true` skips email verification at signup — local stacks have no
+> outbound email, so without it you could never create an organization. Turn it off on any
+> deployment that sends real verification email.
 
 ## 3. Start
 

@@ -570,7 +570,8 @@ async def register(
         hashed_password=hash_password(body.password),
         display_name=body.display_name.strip() or body.email.split("@")[0],
         is_active=True,
-        email_verified=False,
+        # SPR-37: 로컬/OSS는 메일 발송 인프라가 없어 auto-verify opt-in(기본 False=기존 동작).
+        email_verified=settings.auth_auto_verify_email,
         tos_accepted_at=datetime.now(timezone.utc),
     )
     session.add(user)
@@ -596,6 +597,9 @@ async def register(
     # email_delivered로 노출(silent swallow 금지) — FE가 "201인데 인증메일 안 옴"을 감지·안내 가능
     # (bacefe2c: console-fallback 환경서 verify메일 안 와 stuck 되는 데모 signup 치명 경로 방어).
     delivered = False
+    if settings.auth_auto_verify_email:
+        # SPR-37: 이미 인증된 상태로 생성 — 인증 메일 발송 자체를 생략(콘솔 폴백 경고 소음도 제거).
+        return _ok({**tokens, "email_delivered": False, "email_verified": True}, 201)
     try:
         verification_token = create_email_verification_token(str(user.id))
         app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")

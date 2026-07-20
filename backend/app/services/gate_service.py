@@ -231,8 +231,17 @@ async def create_gate(
     role_id: uuid.UUID,
     neutral_facts: dict[str, Any] | None = None,
     project_id: uuid.UUID | None = None,
+    reopen_after_human_reject: bool = False,
 ) -> Gate:
     """config 기반 게이트 생성 (멱등: 이미 있으면 기존 반환).
+
+    reopen_after_human_reject(SPR-34·opt-in): 기존 게이트가 **사람이 reject**한 것(status=
+    rejected AND resolver_id 있음 = 판정 결과)이면 기존 반환 대신 **같은 행을 pending으로
+    재개방**한다 — "reject → 재작업 → 재보고 → 재판정" 루프를 닫는 재도전 경로. DB 유니크 제약
+    (uq_gate_work_item_gate_type)상 행을 새로 만들 수 없어 in-place 재개방이며, 이전 판정은
+    gate.resolved 이벤트(불변 원장) + neutral_facts.resolution_history 스냅샷으로 보존하고
+    attempt를 증가시킨다. 정책 deny 아티팩트(rejected AND resolver_id 없음)는 사람 판정이
+    아니므로 재도전 대상이 아니다(하드블록 보존). 기본 False = 기존 호출자 전부 완전 무변경.
 
     project_id: story #1953(P1a-S3)이 처음 배선·story #1968(P1a-S3 잔여)이 완성 — gate.pending_
     approval 알림 payload의 project_id 보강용(선택적). create_gate()는 gate_type/work_item_type을
@@ -244,17 +253,72 @@ async def create_gate(
     ``version.project_id``(nullable)를 그대로 넘겨 None이 나올 수 있다 — 이건 미해결이 아니라
     구조적으로 project-scoped가 아니라는 정직한 값이다.
     """
-    # 멱등: 이미 존재하면 기존 반환
+    # 멱등: 이미 존재하면 기존 반환(사람-reject 재개방 경로만 예외).
+    # with_for_update(SPR-34 리뷰): 재개방은 in-place UPDATE라 유니크 제약이 동시성을 직렬화해
+    # 주지 않는다 — 잠금 없으면 동시 재보고 2건이 같은 rejected 스냅샷을 읽고, 늦은 쪽이 그새
+    # 승인된 게이트를 pending으로 되돌릴 수 있다(승인 소실·고아 pending). transition_gate와
+    # 동일한 행잠금 규율.
     existing_r = await session.execute(
         select(Gate).where(
             Gate.org_id == org_id,
             Gate.work_item_id == work_item_id,
             Gate.work_item_type == work_item_type,
             Gate.gate_type == gate_type,
-        ).limit(1)
+        ).limit(1).with_for_update()
     )
     existing = existing_r.scalar_one_or_none()
+    human_rejected = (
+        existing is not None
+        and existing.status == "rejected"
+        and existing.resolver_id is not None
+    )
+    if existing is not None and not (reopen_after_human_reject and human_rejected):
+        return existing
     if existing is not None:
+        # SPR-34: 사람 reject 이후의 재보고 = 다음 시도. DB에 (org, work_item, work_item_type,
+        # gate_type) 유니크 제약(uq_gate_work_item_gate_type)이 있어 행을 새로 만들 수 없다 —
+        # **같은 행을 재개방**한다. 판정 원장은 gate.resolved 이벤트에 이미 불변 기록돼 있고, 행
+        # 차원에서도 이전 판정(누가·언제·왜)을 resolution_history 스냅샷으로 보존한 뒤 리셋한다.
+        disposition = await resolve_disposition(session, org_id, member_id, role_id, gate_type)
+        status = _DISPOSITION_TO_STATUS.get(disposition, "pending")
+        if gate_type in _ALWAYS_MANUAL_GATE_TYPES:
+            status = "pending"
+        if status == "rejected":
+            # 정책이 deny면 재개방해도 즉시 rejected — 재도전 의미가 없다(하드블록 보존).
+            return existing
+        prev_facts = existing.neutral_facts or {}
+        prev_attempt = prev_facts.get("attempt")
+        attempt = (prev_attempt if isinstance(prev_attempt, int) else 1) + 1
+        history = list(prev_facts.get("resolution_history") or [])
+        history.append({
+            "attempt": attempt - 1,
+            "status": existing.status,
+            "resolver_id": str(existing.resolver_id),
+            "resolved_at": existing.resolved_at.isoformat() if existing.resolved_at else None,
+            "resolution_note": existing.resolution_note,
+        })
+        # advisor_origin 캐리포워드(SPR-34 리뷰): 재보고가 새 claim 없이 오면 lock_and_stamp가
+        # 재스탬프하지 않는다 — 여기서 지워버리면 이후 사람 판정의 gate.resolved 이벤트가 발행되지
+        # 않아(발행이 advisor_origin 존재에 의존) 에이전트가 통보를 영영 못 받는다. 이전 origin을
+        # 이월하고, 새 claim이 오면 caller facts/재스탬프가 덮어쓴다.
+        carried = (
+            {"advisor_origin": prev_facts["advisor_origin"]}
+            if "advisor_origin" in prev_facts else {}
+        )
+        existing.neutral_facts = {
+            **carried,
+            **(neutral_facts or {}),
+            "attempt": attempt,
+            "resolution_history": history,
+        }
+        existing.status = status
+        existing.resolver_id = None
+        existing.resolution_note = None
+        existing.resolved_at = datetime.now(timezone.utc) if status != "pending" else None
+        await session.flush()
+        await session.refresh(existing)
+        if status == "pending":
+            await _notify_pending_gate(session, org_id, existing, gate_type, project_id)
         return existing
 
     disposition = await resolve_disposition(session, org_id, member_id, role_id, gate_type)
@@ -280,28 +344,39 @@ async def create_gate(
 
     # story 1934(선생님 앱 done-gate: "디스코드 떼고 승인게이트 실시간 알림+즉시 액션"):
     # pending 상태(진짜 결재 대기)일 때만 알림 — auto_passed/rejected는 즉시 확정이라 결재
-    # 액션이 없다. best-effort(알림 실패가 게이트 생성 자체를 롤백하면 안 됨 — deliver_expo_
-    # push/override 알림과 동일 관례).
+    # 액션이 없다.
     if status == "pending":
-        try:
-            target_ids = await _resolve_gate_notification_targets(session, org_id)
-            if target_ids:
-                from app.services.notification_dispatch import dispatch_notification
-                await dispatch_notification(
-                    session, org_id=org_id, event_type="gate.pending_approval",
-                    target_member_ids=target_ids,
-                    title="결재 대기 중인 게이트가 있습니다",
-                    body=f"{gate_type} 게이트가 승인/거부를 기다리고 있습니다.",
-                    reference_type="gate", reference_id=gate.id,
-                    source_project_id=project_id,
-                )
-        except Exception:
-            logger.warning(
-                "gate.pending_approval notification failed gate_id=%s (swallowed·best-effort)",
-                gate.id, exc_info=True,
-            )
+        await _notify_pending_gate(session, org_id, gate, gate_type, project_id)
 
     return gate
+
+
+async def _notify_pending_gate(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    gate: Gate,
+    gate_type: str,
+    project_id: uuid.UUID | None,
+) -> None:
+    """pending 게이트 결재-대기 알림. 신규 생성·SPR-34 재개방 공용. best-effort(알림 실패가
+    게이트 생성/재개방 자체를 롤백하면 안 됨 — deliver_expo_push/override 알림과 동일 관례)."""
+    try:
+        target_ids = await _resolve_gate_notification_targets(session, org_id)
+        if target_ids:
+            from app.services.notification_dispatch import dispatch_notification
+            await dispatch_notification(
+                session, org_id=org_id, event_type="gate.pending_approval",
+                target_member_ids=target_ids,
+                title="결재 대기 중인 게이트가 있습니다",
+                body=f"{gate_type} 게이트가 승인/거부를 기다리고 있습니다.",
+                reference_type="gate", reference_id=gate.id,
+                source_project_id=project_id,
+            )
+    except Exception:
+        logger.warning(
+            "gate.pending_approval notification failed gate_id=%s (swallowed·best-effort)",
+            gate.id, exc_info=True,
+        )
 
 
 async def transition_gate(
@@ -320,11 +395,24 @@ async def transition_gate(
     wake/delivery 페이로드를 append — 호출자가 자기 commit 후 wake_agent/webhook 스케줄(#1364 선례
     동형). 생략(기존 호출자 전부)은 무변경(수집 안 함·이 함수 자체는 commit 하지 않음)."""
     gate_r = await session.execute(
-        select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
+        select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id).with_for_update()
     )
     gate = gate_r.scalar_one_or_none()
     if gate is None:
         raise ValueError(f"Gate {gate_id} not found")
+
+    advisor_origin: dict[str, Any] | None = None
+    if isinstance(gate.neutral_facts, dict) and "advisor_origin" in gate.neutral_facts:
+        origin_value = gate.neutral_facts["advisor_origin"]
+        if not isinstance(origin_value, dict):
+            raise ValueError("Advisor-origin integrity error")
+        if origin_value.get("schema_version") != 1:
+            raise ValueError("Advisor-origin integrity error")
+        advisor_origin = origin_value
+    if advisor_origin is not None:
+        if new_status not in {"approved", "rejected"}:
+            raise ValueError("Advisor-origin gates only support approved/rejected resolution")
+        await _validate_advisor_resolution(session, gate, advisor_origin, resolver_id)
 
     if not is_valid_transition(gate.status, new_status):
         raise ValueError(
@@ -385,6 +473,9 @@ async def transition_gate(
 
     await create_gate_approval_evidence_if_applicable(session, gate, new_status, resolver_id)
 
+    if advisor_origin is not None:
+        await _emit_advisor_resolution_event(session, gate, advisor_origin, new_status, resolver_id, note)
+
     await session.flush()
     await session.refresh(gate)
 
@@ -396,6 +487,84 @@ async def transition_gate(
         )
 
     return gate
+
+
+async def _validate_advisor_resolution(session: AsyncSession, gate: Gate, origin: dict[str, Any], resolver_id: uuid.UUID | None) -> None:
+    """Locked service-level authority check for Advisor-origin Gates."""
+    import json
+    from app.models.evidence import Evidence
+    from app.models.member import Member
+    from app.models.pm import Story
+    from app.services.advisor_context import RESERVED_EVIDENCE_SOURCE, canonical_claim
+    from app.services.member_resolver import resolve_member_identity
+    from app.services.project_auth import has_project_access
+    if resolver_id is None:
+        raise ValueError("Advisor-origin gates require a human resolver")
+    resolver = await resolve_member_identity(resolver_id, gate.org_id, session)
+    if resolver is None or resolver.type != "human" or resolver.user_id is None:
+        raise ValueError("Advisor-origin gates require an active human resolver")
+    canonical_resolver = (await session.execute(select(Member).where(
+        Member.id == resolver.id, Member.org_id == gate.org_id, Member.type == "human",
+        Member.is_active.is_(True), Member.deleted_at.is_(None),
+    ))).scalar_one_or_none()
+    if canonical_resolver is None:
+        raise ValueError("Advisor-origin gates require an active human resolver")
+    try:
+        story_id = uuid.UUID(str(origin["story_id"])); project_id = uuid.UUID(str(origin["project_id"])); evidence_id = uuid.UUID(str(origin["evidence_id"])); recipient_id = uuid.UUID(str(origin["recipient_id"]))
+    except (KeyError, ValueError, TypeError) as exc:
+        raise ValueError("Advisor-origin integrity error") from exc
+    story = (await session.execute(select(Story).where(Story.id == story_id, Story.org_id == gate.org_id, Story.deleted_at.is_(None)))).scalar_one_or_none()
+    evidence = await session.get(Evidence, evidence_id)
+    recipient = (await session.execute(select(Member).where(
+        Member.id == recipient_id, Member.org_id == gate.org_id, Member.type == "agent",
+        Member.is_active.is_(True), Member.deleted_at.is_(None),
+    ))).scalar_one_or_none()
+    if story is None or story.project_id != project_id or gate.work_item_id != story_id or gate.work_item_type != "story":
+        raise ValueError("Advisor-origin integrity error")
+    if not await has_project_access(session, resolver.user_id, project_id, gate.org_id):
+        raise ValueError("Resolver lacks project access")
+    if recipient is None or evidence is None or evidence.org_id != gate.org_id or evidence.work_item_id != story_id or evidence.work_item_type != "story" or evidence.type != "report" or evidence.source != RESERVED_EVIDENCE_SOURCE or evidence.created_by != recipient.id:
+        raise ValueError("Advisor-origin integrity error")
+    try:
+        parsed = json.loads(evidence.note or "")
+        canonical, hash_value = canonical_claim(parsed)
+    except Exception as exc:
+        raise ValueError("Advisor-origin integrity error") from exc
+    if canonical != evidence.note or evidence.ref != f"sha256:{hash_value}" or origin.get("claim_hash") != hash_value:
+        raise ValueError("Advisor-origin integrity error")
+
+
+async def _emit_advisor_resolution_event(session: AsyncSession, gate: Gate, origin: dict[str, Any], status: str, resolver_id: uuid.UUID | None, note: str | None) -> None:
+    from app.models.event import Event, EventRecipientType, EventStatus, EventType
+    from app.services.event_seq import assign_recipient_seq
+    recipient_id = uuid.UUID(str(origin["recipient_id"]))
+    # SPR-34: 멱등 키는 (gate, recipient, **attempt**) — 재개방(in-place reopen)된 게이트는 같은
+    # gate.id로 2차 판정이 일어나므로, gate 단위 dedupe면 2차 approve/reject 이벤트가 삼켜져
+    # 에이전트가 통보를 못 받는다(도그푸드 2차 실측). 같은 시도 내 replay는 여전히 1개로 멱등.
+    # 구-이벤트(attempt 키 없음)는 attempt=1로 간주(coalesce).
+    # ⚠️불변식: neutral_facts를 다시 쓰는 모든 경로는 attempt 키를 이월해야 한다(스프레드 병합) —
+    # 유실되면 coalesce가 1로 오인해 dedupe 버킷이 어긋난다(이벤트 삼킴/이중발행).
+    facts_attempt = (gate.neutral_facts or {}).get("attempt")
+    attempt = facts_attempt if isinstance(facts_attempt, int) else 1
+    existing = (await session.execute(select(Event).where(
+        Event.org_id == gate.org_id, Event.event_type == EventType.gate_resolved.value,
+        Event.source_entity_type == "gate", Event.source_entity_id == gate.id,
+        Event.recipient_id == recipient_id,
+        func.coalesce(Event.payload["attempt"].as_integer(), 1) == attempt,
+    ).limit(1))).scalar_one_or_none()
+    if existing is not None:
+        return
+    event = Event(id=uuid.uuid4(), org_id=gate.org_id, project_id=uuid.UUID(str(origin["project_id"])),
+                  event_type=EventType.gate_resolved.value, source_entity_type="gate", source_entity_id=gate.id,
+                  sender_id=None, recipient_id=recipient_id, recipient_type=EventRecipientType.agent.value,
+                  status=EventStatus.pending.value, payload={"schema_version": 1, "gate_id": str(gate.id),
+                  "story_id": origin["story_id"], "status": status, "note": note, "attempt": attempt,
+                  "resolver_id": str(resolver_id), "resolved_at": gate.resolved_at.isoformat() if gate.resolved_at else None,
+                  "next_stage": "done" if status == "approved" else "revise"})
+    session.add(event)
+    await session.flush()
+    await assign_recipient_seq(session, event)
+    await session.flush()
 
 
 async def void_gate(

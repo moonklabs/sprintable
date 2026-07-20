@@ -227,6 +227,21 @@ async def _role_key(session: AsyncSession, role_id: uuid.UUID) -> str | None:
     return role.key if role is not None else None
 
 
+async def _no_evidence_requires_human(session: AsyncSession, org_id: uuid.UUID) -> bool:
+    """SPR-36 opt-in 조회: org가 무증거 report-done도 사람 싸인을 요구하는가.
+
+    OrgGatePolicy.require_human_without_evidence — 행이 없거나 false면 현행(no-substance
+    no-gate) 유지. posture disposition과 별개 축의 명시 플래그라 resolve_disposition의
+    '출처 미구분(explicit-ask vs default-ask)' 문제를 우회한다.
+    """
+    from app.models.hitl_config import OrgGatePolicy
+
+    policy = (await session.execute(
+        select(OrgGatePolicy).where(OrgGatePolicy.org_id == org_id).limit(1)
+    )).scalar_one_or_none()
+    return bool(policy is not None and policy.require_human_without_evidence)
+
+
 async def evaluate_merge_gate(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -270,28 +285,36 @@ async def evaluate_merge_gate(
     # 증거는 GitHub 앱(S5)이 native 당김. 3 트리거(board preflight·report-done·line-engine) 모두
     # 이 단일 chokepoint를 거쳐 일관 적용. (증거 있으면 resolve_disposition 호출조차 생략.)
     if ci is None and pr_number <= 0:
-        disposition = await resolve_disposition(session, org_id, member_id, role_id, MERGE_GATE_TYPE)
-        # follow-up(enforcing 롤아웃·GitHub앱 S5 때 재고): substance로 인정하는 정책은 현재 'deny'만.
-        # 'ask'는 SYSTEM_DEFAULT(=ask)라 그 자체론 신호가 아니므로 증거 0이면 no-gate. 다만 resolve_disposition
-        # 은 disposition 문자열만 돌려주고 **출처(시스템 기본 vs 명시 override/posture)를 구분하지 않는다** →
-        # 어떤 org가 '증거 무관 전-머지 휴먼 사인오프' 의도로 ask를 명시 설정해도 지금은 bypass된다. 그 의도를
-        # 살리려면 resolve_disposition이 explicit-ask를 default-ask와 구분(출처 노출)해야 한다. P0(즉시 sloppy
-        # 탈출)에선 빈 shell 박멸이 우선이라 deny-only로 둔다.
-        if disposition != "deny":
+        # SPR-36 opt-in: org가 "무증거 작업도 사람 싸인"을 명시하면 no-gate 우회를 건너뛰고
+        # 게이트를 실체화한다(_decide가 ci=None → ask_human). 기본 off = 아래 현행 경로 그대로.
+        if await _no_evidence_requires_human(session, org_id):
             logger.info(
-                "merge gate: no substance (ci=None pr_number=0 disposition=%s) story=%s "
-                "— gate not materialized (no-gate)",
-                disposition, story_id,
+                "merge gate: no evidence but org opted in "
+                "(require_human_without_evidence) story=%s — materializing gate", story_id,
             )
-            return MergeGateDecision(
-                decision=AUTO_MERGE,
-                reason="no-substance: no CI/PR evidence and policy is not deny — gate not materialized",
-                gate_id=None,
-                gate_status=None,
-                disposition=disposition,
-                trust=None,
-                ci_result=ci,
-            )
+        else:
+            disposition = await resolve_disposition(session, org_id, member_id, role_id, MERGE_GATE_TYPE)
+            # follow-up(enforcing 롤아웃·GitHub앱 S5 때 재고): substance로 인정하는 정책은 현재 'deny'만.
+            # 'ask'는 SYSTEM_DEFAULT(=ask)라 그 자체론 신호가 아니므로 증거 0이면 no-gate. 다만 resolve_disposition
+            # 은 disposition 문자열만 돌려주고 **출처(시스템 기본 vs 명시 override/posture)를 구분하지 않는다** →
+            # 어떤 org가 '증거 무관 전-머지 휴먼 사인오프' 의도로 ask를 명시 설정해도 지금은 bypass된다. 그 의도는
+            # SPR-36의 require_human_without_evidence opt-in(위 분기)이 살린다. 그 외엔 빈 shell 박멸 우선으로
+            # deny-only 유지.
+            if disposition != "deny":
+                logger.info(
+                    "merge gate: no substance (ci=None pr_number=0 disposition=%s) story=%s "
+                    "— gate not materialized (no-gate)",
+                    disposition, story_id,
+                )
+                return MergeGateDecision(
+                    decision=AUTO_MERGE,
+                    reason="no-substance: no CI/PR evidence and policy is not deny — gate not materialized",
+                    gate_id=None,
+                    gate_status=None,
+                    disposition=disposition,
+                    trust=None,
+                    ci_result=ci,
+                )
 
     # 1. trust(Cage) — implementation 역할 clean_pass_rate. **capture보다 먼저** 계산한다.
     #    ⚠️ capture_pr_ci_verdict는 현재 PR/CI verdict를 session에 add한다. SQLAlchemy autoflush=True
@@ -323,6 +346,10 @@ async def evaluate_merge_gate(
         member_id,
         role_id,
         project_id=project_id,
+        # SPR-34: 사람이 reject한(resolver_id 있는) 최신 게이트는 terminal이 아니라 "재작업 지시" —
+        # 재보고 시 새 pending 게이트(다음 시도)를 열어 reject→재작업→재판정 루프를 닫는다.
+        # 정책 deny 아티팩트는 재도전 대상이 아니어서 기존 하드블록(_decide rejected→BLOCK) 보존.
+        reopen_after_human_reject=True,
         neutral_facts={
             "ci_result": ci,
             "pr_result": pr,

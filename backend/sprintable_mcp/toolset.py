@@ -33,7 +33,7 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # 동기화(sprintable_add_goal 등 신 이름도 이 그룹).
     ("epics", ("epic", "goal")),
     ("tasks", ("task",)),
-    ("stories", ("story", "stories", "backlog", "claim", "checkin")),
+    ("stories", ("story", "stories", "backlog", "claim", "checkin", "advisor", "report_done")),
     # story b4027b2e(SEC): 백엔드 SSOT와 동기화 — E-CANVAS visual_artifacts가 전용 그룹으로 승격
     # (app/services/mcp_toolset.py 참고. "canonical_version"은 propose_canonical_version에
     # "artifact" substring이 없어 별도 키워드 필요, "spec_pin"은 핀 4종).

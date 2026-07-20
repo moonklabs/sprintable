@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,6 +12,8 @@ from app.models.base import OrgScopedMixin
 class ParticipationRole(Base, OrgScopedMixin):
     """조직 커스텀 역할 — enum 하드코딩 금지, 범용."""
     __tablename__ = "participation_role"
+    # 마이그레이션에만 있던 제약을 모델에도 명시(parity·SPR-35) — lazy 시드의 ON CONFLICT 대상.
+    __table_args__ = (UniqueConstraint("org_id", "key", name="uq_participation_role_org_key"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     key: Mapped[str] = mapped_column(String(50), nullable=False)

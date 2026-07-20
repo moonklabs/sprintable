@@ -18,6 +18,7 @@ class EventType(str, enum.Enum):
     memo_replied = "memo_replied"
     dispatched = "dispatched"
     status_changed = "status_changed"
+    gate_resolved = "gate.resolved"
 
 
 class EventSourceEntityType(str, enum.Enum):
@@ -26,6 +27,7 @@ class EventSourceEntityType(str, enum.Enum):
     epic = "epic"
     doc = "doc"
     sprint = "sprint"
+    gate = "gate"
 
 
 class EventRecipientType(str, enum.Enum):

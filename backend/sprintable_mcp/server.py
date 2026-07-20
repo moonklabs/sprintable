@@ -29,6 +29,7 @@ from .schemas import SprintableInput
 from .toolset import is_tool_allowed
 from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
 from .tools.evidence import AddEvidenceInput, add_evidence
+from .tools.advisor import AdvisorContextInput, ReportDoneInput, advisor_context, report_done
 from .tools.visual_artifacts import (
     AddArtifactCommentInput, CreateArtifactInput, CreateSpecPinInput, DeleteArtifactInput,
     DeleteSpecPinInput, EditArtifactInput, GetArtifactInput, ListArtifactCommentsInput,
@@ -316,6 +317,8 @@ async def ping() -> list[TextContent]:
 # ── 87개 도구 flat schema 등록 ─────────────────────────────────────────────────
 
 _TOOL_DEFS: list[tuple] = [
+    ("sprintable_advisor_context", "Fetch bounded server-owned context for a local Advisor review.", AdvisorContextInput, advisor_context),
+    ("sprintable_report_done", "Report an agent completion with an optional local Advisor claim.", ReportDoneInput, report_done),
     # Stories (8)
     ("sprintable_list_stories",
      "[일감] 프로젝트 스토리 목록 조회. project_id/org_id context 자동 주입.",

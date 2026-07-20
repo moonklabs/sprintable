@@ -102,6 +102,8 @@ EXPECTED_TOOLS = {
     "sprintable_delete_spec_pin", "sprintable_delete_artifact",
     # smoke
     "ping",
+    # harness-local Advisor P0 (stories scope; agent identity is injected by the client)
+    "sprintable_advisor_context", "sprintable_report_done",
 }
 
 
@@ -115,7 +117,9 @@ def test_total_tool_count():
     # story #2010: sprintable_transition_goal 1종 신설(목표 lifecycle 전이, 구 _epic 별칭 없음) —
     # 111→112. story #1922: sprintable_delete_artifact 1종 신설(artifact soft delete, 생성자
     # 전용) — 112→113.
-    assert len(_TOOLS) == 113
+    # harness-local Advisor P0: sprintable_advisor_context + sprintable_report_done 2종 추가
+    # (stories scope) — 113→115.
+    assert len(_TOOLS) == 115
 
 
 def test_all_expected_tools_registered():
@@ -127,6 +131,14 @@ def test_all_expected_tools_registered():
     # "등록됐는데 EXPECTED에 없는 툴"을 잡아 신규 툴이 계약 목록 누락 시 즉시 RED로 봉인.
     extra = registered - EXPECTED_TOOLS
     assert not extra, f"EXPECTED_TOOLS에 없는 등록 툴(계약 목록 갱신 필요): {extra}"
+
+
+@pytest.mark.parametrize("tool_name", ["sprintable_advisor_context", "sprintable_report_done"])
+def test_advisor_tool_schema_hides_caller_identity(tool_name: str):
+    schema = _TOOLS[tool_name].parameters
+    props = schema.get("properties", {})
+    assert "agent_id" not in props
+    assert "org_id" not in props
 
 
 @pytest.mark.parametrize("tool_name", [
