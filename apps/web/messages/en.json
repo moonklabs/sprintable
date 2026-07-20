@@ -3468,6 +3468,7 @@
     "fallbackNotifyError": "Failed to notify",
     "gateApprove": "Approve",
     "gateReject": "Reject",
+    "hitlRequestBadge": "Approval request",
     "gateTransitionError": "Couldn't process: {reason}",
     "docGateTitlePrefix": "Approval: ",
     "gateOpenInDoc": "Open in doc",

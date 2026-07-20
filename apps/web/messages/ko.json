@@ -3468,6 +3468,7 @@
     "fallbackNotifyError": "통지에 실패했습니다",
     "gateApprove": "승인",
     "gateReject": "반려",
+    "hitlRequestBadge": "승인 요청",
     "gateTransitionError": "처리하지 못했습니다: {reason}",
     "docGateTitlePrefix": "결재: ",
     "gateOpenInDoc": "문서에서 검토",

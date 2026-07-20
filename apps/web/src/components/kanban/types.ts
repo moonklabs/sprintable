@@ -73,7 +73,30 @@ export interface GateItem {
   auto_decision_reason?: string | null; // auto_merge | ask_human | block (raw decision)
   created_at: string;
   updated_at: string;
+  // story #2054: 결재함 통합 인박스(`/api/gates/inbox`)에서 Gate/HitlRequest 두 출처를 구분하는
+  // discriminator(BE GateResponse.source, additive). 단독 엔드포인트(`/api/gates` 등)는 이 필드가
+  // 응답에 없을 수 있어 optional — 그 경로 소비부는 항상 gate이므로 값이 없으면 'gate'로 취급한다.
+  source?: 'gate';
 }
+
+// story #2054: 결재함 통합 인박스에서 HitlRequest(gate_approval park) 항목 최소 스키마(BE
+// HitlInboxItem 미러) — Gate와 다른 API로 승인/거부(`PATCH /api/v1/hitl-requests/{id}`)하므로
+// GateItem을 재사용하지 않고 별도 타입으로 둔다. `source`로 FE가 렌더/액션을 분기한다.
+export interface HitlInboxItem {
+  source: 'hitl';
+  id: string;
+  request_type: string;
+  title: string;
+  prompt: string;
+  status: string;
+  requires_human: boolean;
+  work_item_id: string | null;
+  work_type: string | null;
+  created_at: string;
+  expires_at: string | null;
+}
+
+export type GateInboxItem = GateItem | HitlInboxItem;
 
 // E-DG S32: gate approver row(GateApproverResponse 미러). reassign 재지정 메타 enrich(이벤트서·null=미재지정).
 export interface GateApproverItem {
