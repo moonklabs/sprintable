@@ -2,14 +2,23 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.dependencies.project_scope import enforce_write_scope, resolve_required_project_id
+from app.models.hitl import HitlRequest
 from app.repositories.hitl import HitlRepository
 from app.schemas.hitl import PatchHitlPolicyRequest, ResolveHitlRequestBody
+from app.services.gate_service import derive_risk_grade, get_org_posture
 from app.services.member_resolver import resolve_member
+
+# story #2043 AC3: gate_approval 파킹분(#2058/#2054 스코프와 동일)만 — Gate 쪽 risk_grade
+# 파생과 동일 정책(derive_risk_grade: posture 1차축 + type 2차축 + 보수적 high 폴백)을
+# hitl_metadata.work_type에 재사용한다. "merge"는 Gate·HitlRequest 양쪽에서 문자 그대로
+# 같은 개념(코드 병합)이라 재해석 없이 재사용 가능 — 새 정책을 만들지 않는다.
+_GATE_REQUEST_TYPE = "gate_approval"
 
 router = APIRouter(prefix="/api/v2/hitl", tags=["hitl", "Trust"])
 
@@ -121,6 +130,32 @@ async def resolve_hitl_request(
     resolved = await resolve_member(auth, org_id, repo.session, project_id=project_id)
     if resolved.type != "human":
         return _err("FORBIDDEN", "HITL 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)", 403)
+
+    # story #2043 AC3: 고위험 승인은 사유 없이 통과 못 한다 — Gate 쪽(gates.py:730, story #2027)과
+    # 동일 불변식을 HitlRequest 승인 경로에도. 화면 버튼 비활성만으론 불충분(AC 원문) — 서버가
+    # 거부한다. response_text를 사유 필드로 재사용(신규 필드 0 — HitlRequestResponse에 이미 있는
+    # 사람이 읽는 텍스트 응답란).
+    if body.status == "approved":
+        _req = (await repo.session.execute(
+            select(HitlRequest).where(
+                HitlRequest.id == request_id, HitlRequest.org_id == org_id,
+                HitlRequest.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+        if (
+            _req is not None
+            and _req.request_type == _GATE_REQUEST_TYPE
+            and (_req.hitl_metadata or {}).get("work_type")
+        ):
+            _posture = await get_org_posture(repo.session, org_id)
+            _work_type = _req.hitl_metadata["work_type"]
+            if derive_risk_grade(_posture, _work_type) == "high" and not (body.response_text or "").strip():
+                return _err(
+                    "REASON_REQUIRED",
+                    "고위험 HITL 승인은 사유(response_text) 입력이 필수입니다.",
+                    422,
+                )
+
     row = await repo.resolve_request(
         request_id=request_id,
         org_id=org_id,
