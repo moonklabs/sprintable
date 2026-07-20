@@ -51,22 +51,6 @@ def _schedule_pending_deliveries(
         if delivery:
             background_tasks.add_task(deliver_injected_event_webhook, **delivery)
 
-
-def _schedule_pending_deliveries(
-    background_tasks: BackgroundTasks, pending_deliveries: list[dict],
-) -> None:
-    """ccbcd9da(A-1): transition_gate/override_gate 가 모은 wake/delivery 페이로드를 commit 후
-    발화(#1364/relay_agent_handoff 선례 동형 — recipient_seq 확정 commit 후 wake 불변식)."""
-    from app.services.conversation_webhook import deliver_injected_event_webhook
-
-    for payload in pending_deliveries:
-        agent_wake = payload.get("agent_wake")
-        if agent_wake:
-            wake_agent(agent_wake["recipient_id"], agent_wake["recipient_seq"])
-        delivery = payload.get("delivery")
-        if delivery:
-            background_tasks.add_task(deliver_injected_event_webhook, **delivery)
-
 logger = logging.getLogger(__name__)
 
 # 사람 검증 행위(approve/reject) — "human-validated" 웨지 integrity상 휴먼 member만 허용.
@@ -556,6 +540,19 @@ async def transition_gate_endpoint(
             raise HTTPException(
                 status_code=403,
                 detail="doc 결재 권한이 없습니다 (대상 프로젝트 접근 필요).",
+            )
+    # story #2027(까심 QA 적출): 고위험(risk_grade=high) 게이트의 approved 전이는 사유(note) 서버측
+    # 강제 — void_gate/override_gate 기존 관례(reason 없으면 ValueError→422, void_gate 참고)에
+    # 맞추는 작업이다(신규 규칙 아님). 이전엔 FE 버튼 disable(evidenceViewed && reason.trim())만
+    # 있고 서버는 무검증이라 POST /transition 직접 호출 시 사유 없이 통과했다. 저위험은 기존대로
+    # note 없이 통과(과도 강제 금지 — PO AC). risk_grade 는 list_gates/get_gate 와 동일 파생 경로
+    # (derive_risk_grade+get_org_posture) 재사용(DRY·N+1 0 — org당 posture 1쿼리).
+    if body.status == "approved" and _gate is not None:
+        _posture = await get_org_posture(session, org_id)
+        if derive_risk_grade(_posture, _gate.gate_type) == "high" and not (body.note or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail="고위험(risk_grade=high) 게이트 승인은 사유(note) 입력이 필수입니다.",
             )
     # ⭐S23 RC① + RC#1(방어심층): resolver_id 를 **전 status 무조건 인증 caller 로 강제**(body 무시).
     # body 조작(타인 UUID)으로 SoD(approver≠owner) 우회·confirmed_by_member_id 위조 차단.

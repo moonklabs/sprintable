@@ -88,7 +88,19 @@
     "workforce": "워크포스",
     "orgRoles": "권한",
     "orgTrust": "신뢰",
-    "orgMemory": "기억"
+    "orgMemory": "기억",
+    "switcherOrgSettingsAria": "Organization 설정",
+    "switcherSwitchToOrg": "이 조직으로 전환",
+    "switcherNewProject": "새 프로젝트",
+    "switcherNewOrganization": "새 Organization 만들기",
+    "switcherNewProjectDialogTitle": "새 프로젝트 만들기",
+    "switcherProjectNameLabel": "프로젝트 이름",
+    "switcherProjectNamePlaceholder": "예: 웹 리뉴얼",
+    "switcherDescriptionLabel": "설명",
+    "switcherOptionalLabel": "(선택)",
+    "switcherProjectDescPlaceholder": "프로젝트에 대한 간단한 설명",
+    "switcherCreating": "생성 중…",
+    "switcherCreateButton": "만들기"
   },
   "storage": {
     "title": "스토리지",
@@ -1847,7 +1859,14 @@
     "eventWarning": "경고",
     "eventSystem": "시스템 알림",
     "eventDoc": "문서 알림",
-    "eventFallback": "새 알림"
+    "eventFallback": "새 알림",
+    "panelTitle": "알림",
+    "unreadOnly": "안읽음만",
+    "emptyAll": "새 알림이 없습니다",
+    "emptyStory": "스토리 알림이 없습니다",
+    "emptySystem": "시스템 알림이 없습니다",
+    "daysAgo": "일 전",
+    "bellAriaLabelCount": "알림 {count}개"
   },
   "invite": {
     "title": "조직 초대",
@@ -3253,6 +3272,7 @@
     "forkInfo": "DM에 참여자를 추가하면 새 그룹 채팅이 생성됩니다. 기존 DM은 유지됩니다.",
     "adding": "추가 중…",
     "you": "나",
+    "team": "팀",
     "agent": "에이전트",
     "personCount": "{count}명",
     "agentCount": "나 + {count}명의 에이전트"
@@ -3789,5 +3809,13 @@
     "responsivePreviewDesktop": "데스크톱",
     "responsivePreviewTablet": "태블릿",
     "responsivePreviewMobile": "모바일"
+  },
+  "releaseNotes": {
+    "whatsNew": "What's new",
+    "title": "릴리즈 노트",
+    "emptyDescription": "아직 새로운 소식이 없어요. 업데이트가 준비되면 여기에서 알려드릴게요.",
+    "learnMore": "자세히 보기",
+    "previousNotes": "이전 노트",
+    "previousNotesListDesc": "이전 릴리즈 노트 목록"
   }
 }

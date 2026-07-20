@@ -169,8 +169,10 @@ async def test_transition_gate_endpoint_wakes_after_commit(monkeypatch):
                  patch.object(gates_mod, "wake_agent", _fake_wake_agent), \
                  patch("app.services.conversation_webhook.deliver_injected_event_webhook", _fake_deliver):
                 bg = BackgroundTasks()
+                # story #2027: gate_type="custom_review"는 risk 매트릭스 폴백(미분류→고위험)이라
+                # 이 파일의 관심사(wake 배선)와 무관한 사유-강제 가드를 note로 우회.
                 await transition_gate_endpoint(
-                    id=seeded["gate"], body=GateTransitionRequest(status="approved"),
+                    id=seeded["gate"], body=GateTransitionRequest(status="approved", note="테스트 사유"),
                     background_tasks=bg,
                     session=s2, org_id=seeded["org"],
                     auth=type("A", (), {"user_id": str(uuid.uuid4())})(),
