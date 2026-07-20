@@ -2834,7 +2834,18 @@
     "drafting": "초안 생성 중…",
     "draftReviewTitle": "AI 초안",
     "draftNote": "AI가 흐름에서 제안한 초안입니다. 확인 후 추가하세요.",
-    "draftAccept": "확인하고 추가"
+    "draftAccept": "확인하고 추가",
+    "resolveVerify": "달성으로 닫기",
+    "resolveFalsify": "반증으로 닫기",
+    "resolveTitleVerify": "가설을 달성으로 닫기",
+    "resolveTitleFalsify": "가설을 반증으로 닫기",
+    "actualInputLabel": "실제 수치",
+    "reasonInputLabel": "근거 (한 줄)",
+    "reasonInputPlaceholder": "이 판정의 근거를 적어주세요",
+    "reasonHint": "근거 없이는 닫을 수 없습니다.",
+    "resolveSubmit": "판정 저장",
+    "closedByHuman": "{name} 판정",
+    "closedByAuto": "자동 채점"
   },
   "goals": {
     "title": "목표",

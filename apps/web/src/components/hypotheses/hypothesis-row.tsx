@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { MoreHorizontal, Link2, Play, XCircle } from 'lucide-react';
+import { MoreHorizontal, Link2, Play, XCircle, CheckCircle2, CircleSlash } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
@@ -20,6 +20,8 @@ export interface HypothesisRowActions {
   onActivate: (h: Hypothesis) => void;
   onLinkStory: (h: Hypothesis) => void;
   onKill: (h: Hypothesis) => void;
+  // story #2036 — measuring 가설을 사람이 달성/반증으로 닫는 진입점(다이얼로그는 호출부가 연다).
+  onResolve: (h: Hypothesis, target: 'verified' | 'falsified') => void;
 }
 
 /** Compact in-flight / terminal row (§4.2). verified/falsified use the VerdictCard instead. */
@@ -120,8 +122,10 @@ function HypothesisActions({
   actions: HypothesisRowActions;
   t: ReturnType<typeof useTranslations>;
 }) {
-  // 활성화는 §12.2ⓑ대로 row 인라인에 노출(연속 흐름) — 메뉴엔 연결/kill만.
+  // 활성화는 §12.2ⓑ대로 row 인라인에 노출(연속 흐름) — 메뉴엔 연결/kill/달성/반증만.
   const canKill = hypothesis.status === 'proposed' || hypothesis.status === 'active' || hypothesis.status === 'measuring';
+  // story #2036 — 달성/반증은 measuring 상태에서만 열린다(BE 합법 전이가 measuring→verified|falsified뿐).
+  const canResolve = hypothesis.status === 'measuring';
 
   return (
     <DropdownMenu>
@@ -136,6 +140,18 @@ function HypothesisActions({
           <Link2 className="mr-2 size-4" />
           {t('linkStory')}
         </DropdownMenuItem>
+        {canResolve ? (
+          <>
+            <DropdownMenuItem onClick={() => actions.onResolve(hypothesis, 'verified')} className="text-success focus:text-success">
+              <CheckCircle2 className="mr-2 size-4" />
+              {t('resolveVerify')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => actions.onResolve(hypothesis, 'falsified')} className="text-info focus:text-info">
+              <CircleSlash className="mr-2 size-4" />
+              {t('resolveFalsify')}
+            </DropdownMenuItem>
+          </>
+        ) : null}
         {canKill ? (
           <DropdownMenuItem onClick={() => actions.onKill(hypothesis)} className="text-destructive focus:text-destructive">
             <XCircle className="mr-2 size-4" />
