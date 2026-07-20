@@ -25,6 +25,13 @@ _PUBLIC_PREFIX = f"https://storage.googleapis.com/{_BUCKET}/"
 # attachment_context.py/attachments.py와 동일 지원 포맷 집합(#2055 AC4: 비이미지는 대상 아님).
 _IMAGE_CONTENT_TYPE_PREFIX = "image/"
 
+# 오르테가 PO 리뷰(2026-07-20) 실측 발견: `imagesize`는 청크 타입/CRC를 검증하지 않고 시그니처
+# 직후 4바이트를 그대로 width/height로 읽는다 — 손상/잘린 바이트가 우연히 큰 양수로 해석되면
+# (예: b"...truncated-not-a-real-header" → (1953658222, 1667331173)) `width <= 0` 가드를
+# 통과해버린다. 실 이미지가 이 상한을 넘을 일은 없으므로(일반적 업로드 한도 100MB 안에서 이
+# 해상도는 비현실적) 안전판으로 상한을 둔다 — 넘으면 파싱 실패와 동일하게 취급(None).
+_MAX_PLAUSIBLE_DIMENSION = 20_000
+
 
 def _canonical_object_path(stored_url: str) -> str | None:
     """stored attachment url → canonical object path. attachments.py/attachment_context.py와
@@ -49,7 +56,7 @@ def measure_image_dimensions_from_bytes(content_type: str, data: bytes) -> tuple
         import imagesize
 
         width, height = imagesize.get(io.BytesIO(data))
-        if width <= 0 or height <= 0:
+        if width <= 0 or height <= 0 or width > _MAX_PLAUSIBLE_DIMENSION or height > _MAX_PLAUSIBLE_DIMENSION:
             return None
         return int(width), int(height)
     except Exception:  # noqa: BLE001 — best-effort(손상 파일·미지원 포맷 등).

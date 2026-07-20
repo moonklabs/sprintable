@@ -66,6 +66,17 @@ def test_measure_from_bytes_corrupt_image_best_effort_none():
     assert measure_image_dimensions_from_bytes("image/png", b"not a real png") is None
 
 
+def test_measure_from_bytes_truncated_png_garbage_header_rejected():
+    """오르테가 PO 리뷰 발견: imagesize는 청크 구조를 검증 안 해 시그니처 뒤 쓰레기 바이트를
+    그대로 큰 양수 width/height로 읽는다(예: 19억×16억) — 상한(_MAX_PLAUSIBLE_DIMENSION)으로
+    걸러내는지 실증. 이게 없으면 손상 파일이 '측정 성공'으로 오판돼 FE에 터무니없는 자리
+    예약값이 흘러간다."""
+    from app.services.image_dimensions import measure_image_dimensions_from_bytes
+
+    corrupt = b"\x89PNG\r\n\x1a\ntruncated-not-a-real-header"
+    assert measure_image_dimensions_from_bytes("image/png", corrupt) is None
+
+
 @pytest.mark.anyio
 async def test_measure_image_dimensions_downloads_and_parses(monkeypatch):
     from unittest.mock import AsyncMock, patch
@@ -229,6 +240,47 @@ async def test_send_message_non_image_attachment_no_dimensions(monkeypatch, tmp_
                 url=object_path, name="doc.pdf", content_type="application/pdf", size=len(pdf_bytes),
             )
             send_body = SendMessageRequest(content="문서 첨부", attachments=[att])
+            resp = await send_message(
+                CONV, send_body, BackgroundTasks(), db=s, auth=_auth(AGENT), org_id=ORG,
+            )
+            saved = resp["data"]["attachments"][0]
+            assert saved.get("width") is None
+            assert saved.get("height") is None
+    finally:
+        async with Session() as s:
+            await s.execute(text("DELETE FROM conversation_messages WHERE conversation_id=:c"), {"c": CONV})
+            await s.commit()
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_send_message_corrupt_image_measurement_failure_does_not_block_send(monkeypatch, tmp_path):
+    """오르테가 PO 확認 요청: 측정 실패(손상/미지원 헤더)가 전송 자체를 막으면 안 된다 — 못 재면
+    null로 두고 메시지는 정상 전송돼야 한다(#2050 고정 프레임 폴백이 그 null을 받는 전제)."""
+    monkeypatch.setenv("STORAGE_PROVIDER", "local")
+    monkeypatch.setenv("STORAGE_LOCAL_ROOT", str(tmp_path))
+    from app.routers.conversations import MessageAttachment, SendMessageRequest, send_message
+    from app.services.asset_registry import DEFAULT_CONTAINER
+    from app.services.storage import get_storage_provider
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed_chat(s)
+
+        # content_type은 image/png라고 주장하지만 실제로는 파싱 불가능한 손상/잘린 바이트.
+        object_path = f"org/{ORG}/project/{PROJ}/chat/{CONV}/broken.png"
+        corrupt_bytes = b"\x89PNG\r\n\x1a\ntruncated-not-a-real-header"
+        await get_storage_provider().put_object(
+            DEFAULT_CONTAINER, object_path, corrupt_bytes, content_type="image/png",
+        )
+
+        async with Session() as s:
+            att = MessageAttachment(
+                url=object_path, name="broken.png", content_type="image/png", size=len(corrupt_bytes),
+            )
+            send_body = SendMessageRequest(content="깨진 이미지 첨부", attachments=[att])
+            # 예외 없이 정상 전송돼야 한다 — raise 되면 이 assert 전에 테스트가 이미 실패한다.
             resp = await send_message(
                 CONV, send_body, BackgroundTasks(), db=s, auth=_auth(AGENT), org_id=ORG,
             )
