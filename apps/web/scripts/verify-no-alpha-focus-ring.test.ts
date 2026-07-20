@@ -15,6 +15,20 @@ describe('hasAlphaFocusRing (story #2057 regression guard)', () => {
     expect(hasAlphaFocusRing('<div className="sm:focus:ring-primary/40" />')).toBe(true);
   });
 
+  // 유나 리뷰 지적: lookbehind 문자 클래스에 `-`가 있으면 group-focus:/peer-focus:(Tailwind
+  // 부모-포커스 패턴)의 focus 직전 `-`가 식별자로 오인돼 매치가 막혔다 — 인접 구멍 재발 방지.
+  it('flags group-focus: (parent-focus variant)', () => {
+    expect(hasAlphaFocusRing('<div className="group-focus:ring-primary/40" />')).toBe(true);
+  });
+
+  it('flags peer-focus: (sibling-focus variant)', () => {
+    expect(hasAlphaFocusRing('<div className="peer-focus:ring-primary/40" />')).toBe(true);
+  });
+
+  it('flags a chained group-focus: (md:group-focus:ring-primary/40)', () => {
+    expect(hasAlphaFocusRing('<div className="md:group-focus:ring-primary/40" />')).toBe(true);
+  });
+
   it('flags alpha inside a template literal', () => {
     expect(hasAlphaFocusRing('className={`flex ${x ? "focus:ring-warning/40" : "flex"}`}')).toBe(true);
   });
