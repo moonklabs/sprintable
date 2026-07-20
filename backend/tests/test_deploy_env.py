@@ -207,3 +207,23 @@ def test_deploy_frontend_single_set_env_vars():
     assert src.count("--set-env-vars=") == 1, "--set-env-vars 중복 → env 유실 위험"
     for kv in ("NODE_ENV=production", "NEXT_TELEMETRY_DISABLED=1", "NEXT_PUBLIC_FASTAPI_URL="):
         assert kv in src, f"{kv} 누락"
+
+
+# ── story #2060(SID f2fe1c5e #2040 AC5 후속): uvicorn graceful shutdown 상한 ────────
+
+def test_dockerfile_uvicorn_bounds_graceful_shutdown():
+    """uvicorn 0.46.0 `timeout_graceful_shutdown` 기본값은 None(무기한) — 장수명 SSE 스트림이
+    안 끊기면 lifespan.shutdown()(pg_pubsub LISTEN 정리)이 영영 안 불리고 Cloud Run SIGKILL
+    (terminationGracePeriodSeconds 기본 10초, dev/prod 둘 다 미설정 — 오르테가군 gcloud 실측
+    2026-07-20)에 정리 없이 죽는다. `--timeout-graceful-shutdown 5`로 상한을 강제해
+    드레인 5초+정리(밀리초 단위) 5초 여유를 10초 한도 안에 확보한다."""
+    with open(_DOCKERFILE) as f:
+        src = f.read()
+    cmd_lines = [ln for ln in src.splitlines() if ln.strip().startswith("CMD")]
+    assert cmd_lines, "CMD 인스트럭션을 찾을 수 없음"
+    cmd = cmd_lines[-1]
+    assert "--timeout-graceful-shutdown" in cmd, (
+        "uvicorn CMD에 --timeout-graceful-shutdown 누락 — 기본값 None(무기한)으로 되돌아가면 "
+        "pg_pubsub LISTEN 정리가 SIGKILL에 밀려 좀비 커넥션이 재발한다."
+    )
+    assert '"5"' in cmd, "timeout 값이 5초가 아님 — Cloud Run 10초 유예 안에서의 안전 마진 확認 필요"
