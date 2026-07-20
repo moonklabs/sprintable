@@ -7,6 +7,7 @@ import { detectEmbedService } from './extensions/embed-node';
 import { renderKatex } from './extensions/math-node';
 import { renderMermaid } from './lib/mermaid-renderer';
 import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 import DOMPurify from 'dompurify';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -503,6 +504,60 @@ export function DocContentRenderer({
     return decorateHtmlContent(sanitized, headings, codeCopyLabel);
   }, [codeCopyLabel, content, contentFormat, headings]);
 
+  // story #2021 후속(PO 리뷰): 이 components 객체를 매 렌더 인라인으로 새로 만들면
+  // hast-util-to-jsx-runtime이 그 함수 참조를 그대로 React 엘리먼트 type으로 써서([[feedback:
+  // chat-bubble 근본원인과 동형]]) 소프트 내비게이션·polling으로 부모가 리렌더될 때마다
+  // img→`DocAssetImage`(로딩 state)·code→`MermaidReadonlyBlock`(svg 렌더 state)·
+  // `ShikiCodeBlock`(복사 피드백 state)가 언마운트→리마운트된다 — 이미지 깜빡임·mermaid
+  // 재렌더·복사 피드백 조기소실로 이어진다. useMemo로 이 핸들러들의 참조를 고정한다. 아래
+  // contentFormat==='html' 이른 return보다 위에 둬 훅 호출 순서를 무조건화한다(rules-of-hooks).
+  //
+  // h1/h2/h3는 여기 포함하지 않는다 — 그 자식은 plain <h1>뿐(로컬 state 없음)이라 리마운트돼도
+  // 잃을 게 없고, headingIndex가 ReactMarkdown이 AST를 훑는 매 패스(=매 렌더)마다 0부터 다시
+  // 매겨져야 하는데 메모이즈된 클로저에 넣으면 그 리셋이 깨진다 — 그래서 h1/h2/h3는 아래
+  // components 병합 시 매 렌더 새로 만드는 채로 둔다(무해 remount).
+  const stableMarkdownComponents = useMemo<Components>(() => ({
+    blockquote: ({ children }: { children?: ReactNode }) => <blockquote>{children}</blockquote>,
+    img: (props) => {
+      const { src, alt } = props as { src?: unknown; alt?: string };
+      const hasSrc = typeof src === 'string' && src.length > 0;
+      // asset-ref(data-asset-id·src 없음) — authed 에서만 서명 해석. public 모드는 절대
+      // fetch 하지 않고(401-leak 경계) NextImage(src="")로 두어 위 DOM effect 의 inert
+      // placeholder 치환에 맡긴다.
+      const assetId = !publicMode ? extractAssetId(props) : null;
+      if (assetId && !hasSrc) {
+        return <DocAssetImage assetId={assetId} alt={alt ?? ''} errorLabel={assetImageErrorLabel} />;
+      }
+      return <NextImage src={hasSrc ? (src as string) : ''} alt={alt ?? ''} width={800} height={600} style={{ maxWidth: '100%', height: 'auto' }} unoptimized />;
+    },
+    table: ({ children }: { children?: ReactNode }) => (
+      <div className="not-prose overflow-x-auto rounded-xl border border-border">
+        <table>{children}</table>
+      </div>
+    ),
+    pre: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    code: (props) => {
+      const { children, className: codeClassName } = props as { children?: ReactNode; className?: string };
+      const childText = Array.isArray(children) ? children.join('') : String(children ?? '');
+      const inline = !String(codeClassName ?? '').includes('language-') && !childText.includes('\n');
+      if (!inline) {
+        const lang = String(codeClassName ?? '').replace('language-', '') || null;
+        if (lang === 'mermaid') {
+          return <MermaidReadonlyBlock code={childText} />;
+        }
+        return (
+          <ShikiCodeBlock
+            code={childText}
+            language={lang}
+            copyLabel={codeCopyLabel}
+            copiedLabel={codeCopiedLabel}
+          />
+        );
+      }
+      return <code>{children}</code>;
+    },
+  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel]);
+
   const rootClassName = cn(
     'doc-renderer prose dark:prose-invert prose-sm max-w-none text-foreground',
     '[&_h1]:scroll-mt-24 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:tracking-tight',
@@ -536,6 +591,8 @@ export function DocContentRenderer({
     );
   }
 
+  // ReactMarkdown이 이 AST 패스에서 h1/h2/h3를 문서 순서대로 호출하는 동안 매길 인덱스 —
+  // 매 렌더(=매 패스) 0부터 다시 시작해야 하므로 스코프를 여기(렌더 본문)에 둔다.
   let headingIndex = 0;
 
   return (
@@ -556,45 +613,7 @@ export function DocContentRenderer({
             const heading = headings[headingIndex++];
             return <h3 id={heading?.id}>{children}</h3>;
           },
-          blockquote: ({ children }) => <blockquote>{children}</blockquote>,
-          img: (props) => {
-            const { src, alt } = props as { src?: unknown; alt?: string };
-            const hasSrc = typeof src === 'string' && src.length > 0;
-            // asset-ref(data-asset-id·src 없음) — authed 에서만 서명 해석. public 모드는 절대
-            // fetch 하지 않고(401-leak 경계) NextImage(src="")로 두어 위 DOM effect 의 inert
-            // placeholder 치환에 맡긴다.
-            const assetId = !publicMode ? extractAssetId(props) : null;
-            if (assetId && !hasSrc) {
-              return <DocAssetImage assetId={assetId} alt={alt ?? ''} errorLabel={assetImageErrorLabel} />;
-            }
-            return <NextImage src={hasSrc ? (src as string) : ''} alt={alt ?? ''} width={800} height={600} style={{ maxWidth: '100%', height: 'auto' }} unoptimized />;
-          },
-          table: ({ children }) => (
-            <div className="not-prose overflow-x-auto rounded-xl border border-border">
-              <table>{children}</table>
-            </div>
-          ),
-          pre: ({ children }) => <>{children}</>,
-          code: (props) => {
-            const { children, className: codeClassName } = props as { children?: ReactNode; className?: string };
-            const childText = Array.isArray(children) ? children.join('') : String(children ?? '');
-            const inline = !String(codeClassName ?? '').includes('language-') && !childText.includes('\n');
-            if (!inline) {
-              const lang = String(codeClassName ?? '').replace('language-', '') || null;
-              if (lang === 'mermaid') {
-                return <MermaidReadonlyBlock code={childText} />;
-              }
-              return (
-                <ShikiCodeBlock
-                  code={childText}
-                  language={lang}
-                  copyLabel={codeCopyLabel}
-                  copiedLabel={codeCopiedLabel}
-                />
-              );
-            }
-            return <code>{children}</code>;
-          },
+          ...stableMarkdownComponents,
         }}
       >
         {content}
