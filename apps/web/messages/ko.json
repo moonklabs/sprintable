@@ -2840,6 +2840,7 @@
     "resolveTitleVerify": "가설을 달성으로 닫기",
     "resolveTitleFalsify": "가설을 반증으로 닫기",
     "actualInputLabel": "실제 수치",
+    "resolveActualPlaceholder": "숫자 입력",
     "reasonInputLabel": "근거 (한 줄)",
     "reasonInputPlaceholder": "이 판정의 근거를 적어주세요",
     "reasonHint": "근거 없이는 닫을 수 없습니다.",
