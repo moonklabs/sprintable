@@ -413,7 +413,10 @@ async def test_resolve_hitl_request_read_key_403():
         await engine.dispose()
 
 
-async def test_resolve_hitl_request_write_key_200_no_regression():
+async def test_resolve_hitl_request_agent_write_key_403_human_only_since_2058():
+    """story #2058 AC1: write-scope 만으론 더 이상 충분치 않다 — agent 신원은 human-only 게이트에서
+    막힌다. 이 테스트는 예전엔 200(no_regression)을 주장했으나 그 200 자체가 #2058이 닫은 결함이었다
+    (agent가 write-scope만 있으면 남의 gate_approval 요청도 승인 가능했던 것) — 이제 403이 정답."""
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
@@ -431,7 +434,63 @@ async def test_resolve_hitl_request_write_key_200_no_regression():
                 auth=_auth(seeded["agent_id"], seeded["org_id"], seeded["project_id"], scope=["read", "write"]),
                 repo=HitlRepository(s),
             )
-            assert resp.status_code == 200
+            assert resp.status_code == 403
+    finally:
+        await engine.dispose()
+
+
+async def test_resolve_hitl_request_human_200_no_regression():
+    """write-scope 게이트 자체는 무회귀 — human(JWT) caller는 여전히 200(#2058 AC1 신설 human-only
+    게이트도 통과)."""
+    from app.dependencies.auth import AuthContext
+    from app.models.organization import Organization
+    from app.models.project import OrgMember, Project
+    from app.models.project_access import ProjectAccess
+    from app.models.user import User
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = Organization(id=uuid.uuid4(), name="Org", slug=f"org-{uuid.uuid4().hex[:8]}")
+            s.add(org)
+            await s.commit()
+            project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+            s.add(project)
+            await s.commit()
+            user = User(id=uuid.uuid4(), email=f"h-{uuid.uuid4().hex[:8]}@test.com", hashed_password="x")
+            s.add(user)
+            await s.commit()
+            om = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=user.id, role="member")
+            s.add(om)
+            s.add(ProjectAccess(
+                id=uuid.uuid4(), project_id=project.id, org_member_id=om.id,
+                permission="granted", role="member",
+            ))
+            await s.commit()
+            from app.models.member import Member
+            agent = Member(id=uuid.uuid4(), org_id=org.id, type="agent", name="Agent")
+            s.add(agent)
+            await s.commit()
+            req_id = await _seed_hitl_request(s, org.id, project.id, agent.id)
+
+        async with Session() as s:
+            from app.routers.hitl import resolve_hitl_request
+            from app.repositories.hitl import HitlRepository
+            from app.schemas.hitl import ResolveHitlRequestBody
+
+            human_auth = AuthContext(
+                user_id=str(user.id), email=user.email,
+                claims={"app_metadata": {"org_id": str(org.id), "project_id": str(project.id)}},
+                org_id=str(org.id),
+            )
+            resp = await resolve_hitl_request(
+                request_id=req_id,
+                body=ResolveHitlRequestBody(status="approved"),
+                request=_request("/api/v2/hitl/requests/x", "PATCH"),
+                auth=human_auth,
+                repo=HitlRepository(s),
+            )
+            assert resp.status_code == 200, resp.body
     finally:
         await engine.dispose()
 

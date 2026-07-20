@@ -1,18 +1,10 @@
-<?xml version="1.0" encoding="utf-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 100 100">
-  <defs>
-    <linearGradient id="rocket-nose" x1="50" y1="20" x2="50" y2="65" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7db0f7" />
-      <stop offset="1" stop-color="#3f83f0" />
-    </linearGradient>
-    <linearGradient id="rocket-trail" x1="50" y1="50" x2="50" y2="75" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#3d7fe6" />
-      <stop offset="1" stop-color="#2a5bb5" />
-    </linearGradient>
-  </defs>
-  <rect width="100" height="100" rx="22" fill="#0B1020" />
-  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M26 61 L50 25 L74 61" stroke="url(#rocket-nose)" stroke-width="13.5" />
-    <path d="M34 71 L50 50 L66 71" stroke="url(#rocket-trail)" stroke-width="10" />
+<!-- app/icon.svg — 브라우저가 ICO보다 SVG를 우선 소비하고 SVG는 렌더 크기를 모른다.
+     탭/북마크(16~32px)가 최소·최다 소비처이므로 2단 축약본을 정본으로 둔다.
+     3단 정본은 mark-full-3stroke.svg 및 48px 이상 PNG/ICO 엔트리가 유지한다. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 100 100" role="img" aria-label="Sprintable">
+  <rect width="100" height="100" rx="22" fill="#1274D4"/>
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M26 56 L50 24 L74 56" stroke-width="15" opacity="1"/>
+    <path d="M30 78 L50 51 L70 78" stroke-width="12" opacity="0.55"/>
   </g>
 </svg>

@@ -158,6 +158,8 @@ async def listen_loop() -> None:
     """PG LISTEN 수신 루프. lifespan startup에서 background task로 실행.
 
     - raw asyncpg 전용 커넥션 1개 (SQLAlchemy pool 미점유·DB_PGBOUNCER 시 direct Cloud SQL 우회)
+      — SID f2fe1c5e/#2040 AC2: application_name에 `:listen` suffix를 달아 pg_stat_activity에서
+      pooled session과 분리 집계되게 한다.
     - 연결 실패 시 exponential backoff 1s→2s→4s→max 30s
     - CancelledError 수신 시 커넥션 정리 후 종료
     """
@@ -171,7 +173,11 @@ async def listen_loop() -> None:
     while True:
         conn: asyncpg.Connection | None = None
         try:
-            conn = await asyncpg.connect(raw_url)
+            from app.core.database import db_application_name
+
+            conn = await asyncpg.connect(
+                raw_url, server_settings={"application_name": db_application_name("listen")}
+            )
             await conn.add_listener(_CHANNEL, _on_notification)
             delay = 1.0  # 연결 성공 시 backoff 리셋
             logger.info("pg_listen connected")

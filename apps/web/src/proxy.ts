@@ -491,7 +491,24 @@ function setResolvedHeaders(fwdHeaders: Headers, context: { orgId: string; orgRo
 }
 
 export const config = {
+  // story #2022: manifest.webmanifest(PWA manifest, story #2022 신설)가 favicon.ico와 달리
+  // 이 matcher 제외 목록에 없어 인증 미들웨어에 걸려 /login 307로 리다이렉트됐다 — PWA 설치
+  // 프롬프트·크롤러는 쿠키 없이 manifest를 fetch하므로 실사용 환경에서 매니페스트가 항상
+  // 깨진 상태였을 것(로컬 실측으로 발견).
+  // story #2026: 같은 클래스 재발 — public/fonts/*.woff2도 확장자 목록에 없어 미인증
+  // 요청이 /login 307로 리다이렉트됐다(로컬 dev로 document.fonts 상태가 전부 error인 것을
+  // 발견해 역추적). @font-face src fetch는 crossorigin 쿠키 미동봉 케이스가 있어 static
+  // 폰트 파일은 favicon.ico와 동일하게 인증 예외가 맞다.
+  //
+  // PO 지적(#2026 리뷰): 같은 형태가 두 번(매니페스트·폰트) 났으니 다음(아이콘·사운드·
+  // 비디오·소스맵)도 조용히 막힐 것 — 확장자를 하나씩 나열하는 대신 **정적 자산 확장자
+  // 전 카테고리**를 미리 열어 같은 결함 클래스를 구조로 막는다. 전체 확장자 무조건 허용
+  // (`.*\.[^/]+$`)은 하지 않는다 — 동적 세그먼트 값(문서 slug·공유 토큰 등)이 우연히
+  // 점을 포함하면 인증이 우회되는 별도 위험이 생기기 때문에, 알려진 정적 자산 카테고리로
+  // 범위를 한정한다. ⚠️ `.txt`/`.json`은 의도적으로 제외 — 다운로드·export류 인증 라우트가
+  // 이 확장자로 응답할 수 있어(PUBLIC_EXACT가 이미 알려진 공개 .txt를 개별 처리 중) 넣으면
+  // 그런 라우트의 인증을 통째로 우회시키는 자리다.
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest|woff2?|ttf|otf|eot|mp3|mp4|webm|ogg|wav|map|pdf)$).*)',
   ],
 };

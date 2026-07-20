@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.models.hitl_config import posture_to_disposition, SYSTEM_DEFAULT_DISPOSITION
-from app.services.gate_resolver import resolve_disposition
+from app.services.gate_resolver import (
+    SOURCE_MEMBER_OVERRIDE,
+    SOURCE_ORG_OVERRIDE,
+    SOURCE_ORG_POLICY,
+    SOURCE_SYSTEM_DEFAULT,
+    resolve_disposition,
+)
 
 ORG_ID = uuid.uuid4()
 MEMBER_ID = uuid.uuid4()
@@ -66,7 +72,7 @@ async def test_member_override_wins():
     session = _make_session(member_override=mo)
 
     result = await resolve_disposition(session, ORG_ID, MEMBER_ID, ROLE_ID, "pr_review")
-    assert result == "deny"
+    assert result == ("deny", SOURCE_MEMBER_OVERRIDE)
 
 
 @pytest.mark.anyio
@@ -77,7 +83,7 @@ async def test_org_override_wins_when_no_member_override():
     session = _make_session(member_override=None, org_override=oo)
 
     result = await resolve_disposition(session, ORG_ID, MEMBER_ID, ROLE_ID, "qa")
-    assert result == "allow_auto"
+    assert result == ("allow_auto", SOURCE_ORG_OVERRIDE)
 
 
 @pytest.mark.anyio
@@ -88,7 +94,7 @@ async def test_org_posture_wins_when_no_overrides():
     session = _make_session(member_override=None, org_override=None, policy=policy)
 
     result = await resolve_disposition(session, ORG_ID, MEMBER_ID, ROLE_ID, "merge")
-    assert result == "allow_auto"
+    assert result == ("allow_auto", SOURCE_ORG_POLICY)
 
 
 @pytest.mark.anyio
@@ -97,7 +103,7 @@ async def test_system_default_when_no_policy():
     session = _make_session(member_override=None, org_override=None, policy=None)
 
     result = await resolve_disposition(session, ORG_ID, MEMBER_ID, ROLE_ID, "deploy")
-    assert result == "ask"
+    assert result == ("ask", SOURCE_SYSTEM_DEFAULT)
 
 
 @pytest.mark.anyio
@@ -108,7 +114,7 @@ async def test_conservative_posture_gives_ask():
     session = _make_session(member_override=None, org_override=None, policy=policy)
 
     result = await resolve_disposition(session, ORG_ID, MEMBER_ID, ROLE_ID, "pr_review")
-    assert result == "ask"
+    assert result == ("ask", SOURCE_ORG_POLICY)
 
 
 @pytest.mark.anyio
@@ -130,7 +136,7 @@ async def test_all_gate_types_resolve():
     for gt in gate_types:
         session = _make_session()
         result = await resolve_disposition(session, ORG_ID, MEMBER_ID, ROLE_ID, gt)
-        assert result == "ask"
+        assert result == ("ask", SOURCE_SYSTEM_DEFAULT)
 
 
 # ── 엔드포인트 통합 테스트 ────────────────────────────────────────────────────
@@ -172,6 +178,7 @@ async def test_resolve_endpoint_200():
         assert resp.status_code == 200
         body = resp.json()
         assert body["disposition"] == "ask"  # 시스템 기본값
+        assert body["source"] == SOURCE_SYSTEM_DEFAULT  # SID 301ee45d/#2047 AC1: 출처도 응답에 노출
         assert body["gate_type"] == "pr_review"
     finally:
         app.dependency_overrides.clear()
@@ -223,4 +230,4 @@ async def test_org_isolation_resolve():
     session = _make_session()
     other_org = uuid.uuid4()
     result = await resolve_disposition(session, other_org, MEMBER_ID, ROLE_ID, "qa")
-    assert result == "ask"
+    assert result == ("ask", SOURCE_SYSTEM_DEFAULT)

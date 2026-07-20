@@ -8,6 +8,7 @@ import { HypothesisRow, type HypothesisRowActions } from './hypothesis-row';
 import { HypothesisVerdictCard } from './hypothesis-verdict-card';
 import { HypothesisForm, type HypothesisFormValue } from './hypothesis-form';
 import { HypothesisGateBadge } from './hypothesis-gate-badge';
+import { HypothesisResolveDialog, type HypothesisResolveResult } from './hypothesis-resolve-dialog';
 import type { GateItem } from '@/components/kanban/types';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
@@ -97,6 +98,9 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
   const [hypGatesMap, setHypGatesMap] = useState<Record<string, GateItem>>({});
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
   const { currentTeamMemberId } = useDashboardContext();
+  // story #2036 — measuring 가설을 달성/반증으로 닫는 다이얼로그 상태.
+  const [resolving, setResolving] = useState<{ hypothesis: Hypothesis; target: 'verified' | 'falsified' } | null>(null);
+  const [resolveSubmitting, setResolveSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -216,7 +220,49 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
       // Story picker는 별도 affordance(§6.5 story 패널 picker와 공유) — 후속 배선.
       void h;
     },
+    // story #2036 — 다이얼로그를 여는 것까지만. 실제 transition은 handleResolveSubmit.
+    onResolve: (h, target) => setResolving({ hypothesis: h, target }),
   };
+
+  // story #2036 AC2/AC3: outcome_result는 transition endpoint가 통째로 덮어쓰므로(병합 아님)
+  // 기존 metric_definition 값을 그대로 실어 채점 카드(target/direction) 표시를 보존하고,
+  // reason(근거)을 함께 적재한다. AC4: 서버 cron 채점기는 `status IN ('active','measuring')`인
+  // 가설만 조회하므로(hypothesis_scorer.py) 사람이 한 번 verified/falsified로 닫으면 그 즉시
+  // 채점 대상에서 빠져 자동 채점이 재덮어쓰기할 수 없다 — measure_after 도래 직후의 클릭↔cron
+  // 경합만 "먼저 전이한 쪽이 승리"로 남는다.
+  // PO 리뷰(2026-07-20): closed_by/closed_by_member_id는 "누가 닫았는가"를 결정하는 신뢰축
+  // 필드라 클라이언트가 자칭해선 안 된다 — API를 직접 호출하면 에이전트가 닫은 걸 human으로
+  // 위장할 수 있는 구멍이었다. 서버(hypotheses.py의 인증된 caller)가 채워 넣도록 넘기고,
+  // FE는 이 필드를 아예 보내지 않는다(계약을 명확히 하기 위해 값 자체를 생략).
+  const handleResolveSubmit = useCallback(async (result: HypothesisResolveResult) => {
+    if (!resolving) return;
+    setResolveSubmitting(true);
+    try {
+      const { hypothesis: h } = resolving;
+      // 유나 가디언 리뷰: 다이얼로그 내 불일치 배너로 판정을 전환할 수 있으므로 열 때의
+      // target이 아니라 결과가 실어온 target(사용자가 최종 선택한 판정)을 그대로 쓴다.
+      const target = result.target;
+      const md = h.metric_definition;
+      const res = await fetch(`/api/hypotheses/${h.id}/transition`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: target,
+          outcome_result: {
+            metric: md?.metric ?? null,
+            target: md?.target ?? null,
+            direction: md?.direction ?? null,
+            actual: result.actual,
+            scored_at: new Date().toISOString(),
+            reason: result.reason,
+          },
+        }),
+      });
+      if (res.ok) { setResolving(null); await load(); }
+    } finally {
+      setResolveSubmitting(false);
+    }
+  }, [resolving, load]);
 
   // 대표 가설(첫 primary) 상단·verdict 우선 노출.
   const sorted = items ? [...items] : [];
@@ -282,7 +328,7 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
                 onResolved={() => void load()}
               />
               {isVerdict(h) ? (
-                <HypothesisVerdictCard hypothesis={h} />
+                <HypothesisVerdictCard hypothesis={h} resolveName={(id) => memberNames[id] ?? id.slice(0, 6)} />
               ) : (
                 <HypothesisRow hypothesis={h} actions={actions} />
               )}
@@ -290,6 +336,16 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
           ))
         )}
       </div>
+
+      {resolving ? (
+        <HypothesisResolveDialog
+          hypothesis={resolving.hypothesis}
+          target={resolving.target}
+          submitting={resolveSubmitting}
+          onSubmit={(result) => void handleResolveSubmit(result)}
+          onCancel={() => setResolving(null)}
+        />
+      ) : null}
     </section>
   );
 }

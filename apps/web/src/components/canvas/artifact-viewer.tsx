@@ -104,7 +104,7 @@ export function ArtifactViewer({
           <select
             value={selectedVersion}
             onChange={(e) => setSelectedVersion(Number(e.target.value))}
-            className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           >
             {[...versions].sort((a, b) => b.version - a.version).map((v) => (
               <option key={v.id} value={v.version}>v{v.version}</option>

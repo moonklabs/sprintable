@@ -461,7 +461,7 @@ export function AgentRunDetail({
                           hasError
                             ? 'border-destructive bg-destructive/20'
                             : isLlm
-                              ? 'border-brand bg-brand/20'
+                              ? 'border-info bg-info/20' /* story #2023 AC6: LLM 호출=info(기계 축), 브랜드 블루=인간 서명 전용 */
                               : 'border-success bg-success-tint'
                         }`} />
                         <div className="min-w-0 flex-1 rounded-xl border border-white/8 bg-white/4 px-3 py-2">

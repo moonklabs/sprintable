@@ -100,7 +100,7 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
           <div className="space-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
             <p>{t('exportFailedNote')}</p>
             {errorDetail ? (
-              <p className="break-words font-mono text-[10px] text-muted-foreground/70">{errorDetail}</p>
+              <p className="break-words font-mono text-[10px] leading-[13px] text-muted-foreground/70">{errorDetail}</p>
             ) : null}
           </div>
         ) : (

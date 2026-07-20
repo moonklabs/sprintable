@@ -44,7 +44,7 @@ export function GateOverrideModal({
     }
   };
 
-  const inputCls = 'w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-destructive/40';
+  const inputCls = 'w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-destructive';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

@@ -304,7 +304,7 @@ export function DocGateSection({
                       </p>
                       <p className="mt-px text-[10.5px] text-muted-foreground">{fmtDate(ev.at)}</p>
                       {ev.note?.trim() ? (
-                        <p className="mt-1 whitespace-pre-wrap rounded border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] text-muted-foreground">{ev.note}</p>
+                        <p className="mt-1 whitespace-pre-wrap rounded border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] leading-[14px] text-muted-foreground">{ev.note}</p>
                       ) : null}
                     </div>
                   </li>
@@ -335,7 +335,7 @@ export function DocGateSection({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder={t('docGateRejectReasonPlaceholder')}
-              className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
             <div className="mt-3 flex justify-end gap-2">
               <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRejectOpen(false)}>{t('cancel')}</Button>

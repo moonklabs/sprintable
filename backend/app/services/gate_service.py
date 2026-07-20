@@ -257,7 +257,10 @@ async def create_gate(
     if existing is not None:
         return existing
 
-    disposition = await resolve_disposition(session, org_id, member_id, role_id, gate_type)
+    # SID 301ee45d/#2047: 반환값이 (disposition, source) — 이 범용 생성기는 disposition→status
+    # 매핑만 필요해 source는 버린다(explicit-ask 판정은 merge_verdict_gate.py의 no-substance
+    # 체크에서만 쓰인다).
+    disposition, _source = await resolve_disposition(session, org_id, member_id, role_id, gate_type)
     status = _DISPOSITION_TO_STATUS.get(disposition, "pending")
     # doc-gate v2 갭1(선생님 실 Web): doc_approval 류 deliberate gate 는 disposition auto-pass 무관하게
     # 항상 pending. auto_passed 면 수동 결재가 Gate inbox 에 안 떠 결재 불능(인간 결재 의도 우선).

@@ -21,7 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.participation import ParticipationRole
-from app.services.gate_resolver import resolve_disposition
+from app.services.gate_resolver import (
+    SOURCE_MEMBER_OVERRIDE,
+    SOURCE_ORG_OVERRIDE,
+    SOURCE_ORG_POLICY,
+    resolve_disposition,
+)
 from app.services.gate_service import create_gate, resolve_work_item_project_id
 from app.services.trust_score import compute_member_trust_scores
 from app.services.verdict_capture import (
@@ -46,6 +51,30 @@ BLOCK = "block"
 
 # gate status(정책 disposition 아티팩트) → 원 disposition 역추론(관측용).
 _STATUS_TO_DISPOSITION = {"auto_passed": "allow_auto", "pending": "ask", "rejected": "deny"}
+
+
+async def _is_meaningfully_explicit_ask(
+    session: AsyncSession, org_id: uuid.UUID, source: str,
+) -> bool:
+    """SID 301ee45d/#2047 PO 리뷰(2026-07-20): resolve_disposition의 ``source``는 "어느
+    precedence 단계에서 나왔나"(출처)만 말하지 "그 값을 실제로 골랐나"(값)는 말하지 않는다.
+    ``member_gate_override``/``org_gate_override``는 gate_type 단위로 콕 집어 만든 행이라
+    존재 자체가 의사표시지만, ``org_gate_policy.posture``는 ``PUT /gate-config/policy``에
+    본문을 `{}`로 보내도 pydantic 기본값 "balanced"가 그대로 저장되고(``OrgGatePolicyCreate.
+    posture: str = "balanced"``) balanced→ask로 매핑된다 — 조직이 아무 말도 안 했는데 "명시
+    ask"로 오판해 원 버그와 같은 계열의 함정에 빠진다. ``balanced``/``permissive``는 아무도
+    의도 없이도 얻는 값이라 명시로 인정하지 않고, 아무도 기본으로 얻지 않는 ``conservative``만
+    명시로 인정한다."""
+    if source in (SOURCE_MEMBER_OVERRIDE, SOURCE_ORG_OVERRIDE):
+        return True
+    if source == SOURCE_ORG_POLICY:
+        from app.models.hitl_config import OrgGatePolicy
+
+        r = await session.execute(
+            select(OrgGatePolicy.posture).where(OrgGatePolicy.org_id == org_id).limit(1)
+        )
+        return r.scalar_one_or_none() == "conservative"
+    return False
 
 
 def _evidence_status(decision: str) -> str:
@@ -264,28 +293,41 @@ async def evaluate_merge_gate(
     role_key = await _role_key(session, role_id)
 
     # P0(E-DG-REAL 1ff89d23): evidence-driven materialization — 빈 'CI unknown' shell 양산 박멸.
-    # 게이트는 **실 신호(CI 결과 · 연결 PR · 명시 deny 정책)**가 있을 때만 만든다. CI/PR 증거가
-    # 둘 다 없을 때만 정책을 확인하고, deny가 아니면(ask=시스템 기본이라 그 자체론 신호 아님) 사람이
-    # 판단할 게 없는 빈 shell이 되므로 **게이트를 만들지 않는다**(no-gate·row 0·done 통과). 실 CI
-    # 증거는 GitHub 앱(S5)이 native 당김. 3 트리거(board preflight·report-done·line-engine) 모두
-    # 이 단일 chokepoint를 거쳐 일관 적용. (증거 있으면 resolve_disposition 호출조차 생략.)
+    # 게이트는 **실 신호(CI 결과 · 연결 PR · 명시 deny 정책 · 명시 ask 정책)**가 있을 때만 만든다.
+    # CI/PR 증거가 둘 다 없을 때만 정책을 확인하고, deny도 아니고 명시 ask도 아니면(=시스템 기본
+    # ask거나 allow_auto) 사람이 판단할 게 없는 빈 shell이 되므로 **게이트를 만들지 않는다**(no-gate·
+    # row 0·done 통과). 실 CI 증거는 GitHub 앱(S5)이 native 당김. 3 트리거(board preflight·
+    # report-done·line-engine) 모두 이 단일 chokepoint를 거쳐 일관 적용. (증거 있으면
+    # resolve_disposition 호출조차 생략.)
+    #
+    # SID 301ee45d/#2047(선생님 지시 2026-07-20 — P0): resolve_disposition이 이제 (disposition,
+    # source)를 돌려준다. 과거엔 'ask'가 SYSTEM_DEFAULT든 조직이 명시 설정했든 구분 없이 여기서
+    # no-gate로 우회됐다 — "코드가 아닌 일(콘텐츠·마케팅 등, PR/CI 자체가 없는 작업)에는 조직이
+    # '반드시 사람이 서명'이라고 ask를 명시해도 사람 결재가 원리적으로 안 걸리는" 결함이었다(댄
+    # 어윈 실측 반증). ⚠️PO 리뷰: source가 SYSTEM_DEFAULT가 아니라는 것만으로는 부족하다 —
+    # org_gate_policy.posture는 PUT 본문을 비워도 pydantic 기본값("balanced")이 저장돼 "출처는
+    # org_policy(명시 행 있음)이지만 값은 아무도 안 고른 기본값"인 경우가 생긴다. 그래서
+    # `_is_meaningfully_explicit_ask()`가 출처(source)와 별개로 **값 자체가 골라졌는지**까지
+    # 판정한다 — member/org override는 gate_type 단위로 콕 집은 행이라 존재=의사표시지만,
+    # org_policy는 posture=='conservative'(아무도 기본으로 얻지 않는 값)일 때만 명시로 인정한다.
+    # **설정 안 한 조직(SYSTEM_DEFAULT) + balanced/permissive posture는 지금과 동일하게 게이트가
+    # 안 생긴다** — 빈 shell 박멸 의도는 그대로 보존.
     if ci is None and pr_number <= 0:
-        disposition = await resolve_disposition(session, org_id, member_id, role_id, MERGE_GATE_TYPE)
-        # follow-up(enforcing 롤아웃·GitHub앱 S5 때 재고): substance로 인정하는 정책은 현재 'deny'만.
-        # 'ask'는 SYSTEM_DEFAULT(=ask)라 그 자체론 신호가 아니므로 증거 0이면 no-gate. 다만 resolve_disposition
-        # 은 disposition 문자열만 돌려주고 **출처(시스템 기본 vs 명시 override/posture)를 구분하지 않는다** →
-        # 어떤 org가 '증거 무관 전-머지 휴먼 사인오프' 의도로 ask를 명시 설정해도 지금은 bypass된다. 그 의도를
-        # 살리려면 resolve_disposition이 explicit-ask를 default-ask와 구분(출처 노출)해야 한다. P0(즉시 sloppy
-        # 탈출)에선 빈 shell 박멸이 우선이라 deny-only로 둔다.
-        if disposition != "deny":
+        disposition, disposition_source = await resolve_disposition(
+            session, org_id, member_id, role_id, MERGE_GATE_TYPE
+        )
+        explicit_ask = disposition == "ask" and await _is_meaningfully_explicit_ask(
+            session, org_id, disposition_source
+        )
+        if disposition != "deny" and not explicit_ask:
             logger.info(
-                "merge gate: no substance (ci=None pr_number=0 disposition=%s) story=%s "
+                "merge gate: no substance (ci=None pr_number=0 disposition=%s source=%s) story=%s "
                 "— gate not materialized (no-gate)",
-                disposition, story_id,
+                disposition, disposition_source, story_id,
             )
             return MergeGateDecision(
                 decision=AUTO_MERGE,
-                reason="no-substance: no CI/PR evidence and policy is not deny — gate not materialized",
+                reason="no-substance: no CI/PR evidence and policy is not deny/explicit-ask — gate not materialized",
                 gate_id=None,
                 gate_status=None,
                 disposition=disposition,

@@ -165,7 +165,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
     } finally { setBusy(false); }
   };
 
-  const inputCls = 'h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40';
+  const inputCls = 'h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary';
   const diff = diffSteps(activeSteps, draftSteps);
 
   return (
@@ -228,7 +228,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
                 value={configText}
                 onChange={(e) => setConfigText(e.target.value)}
                 spellCheck={false}
-                className="w-full resize-y rounded-xl border border-border bg-background px-3 py-2 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="w-full resize-y rounded-xl border border-border bg-background px-3 py-2 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
               {lint ? (
                 <div className="space-y-1">

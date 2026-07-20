@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.database import get_db
@@ -657,4 +657,72 @@ async def storage_usage_warn(
         return _ok({"notified_orgs": notified})
     except Exception as exc:
         logger.exception("storage-usage-warn cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── GET /api/v2/internal/cron/db-connection-stats ─────────────────────────
+
+@router.get("/db-connection-stats")
+async def db_connection_stats(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """SID f2fe1c5e/#2040 AC2: pg_stat_activity를 application_name(서비스:리비전[:연결종류])·
+    state별로 집계 — "어느 서비스가 커넥션을 몇 개 쓰는지 분해할 수 없다"는 계측 부재를 없앤다.
+
+    backend가 아닌 application_name(internal-api·migration job·운영 psql 등)은 db_application_name()
+    태그가 없으므로 그대로 노출돼 "예산에 안 잡힌 소비자"를 이 표에서 바로 식별할 수 있다.
+
+    2026-07-20 오르테가군 실측(dev 100 중 78이 무태그)으로 application_name·state만으로는
+    무태그 소비자를 더 쪼갤 수 없다는 게 드러나 usename·최대 idle 시간(초)을 추가했다 —
+    다른 저장소(internal-api)를 건드리지 않고도 DB 역할(usename)로 후보를 좁히고, 오래
+    idle인지(누수 후보) 짧게 회전하는지(정상 소비)를 구분한다.
+
+    2026-07-20 후속 실측 2건 반영:
+    - `client_addr`는 Cloud SQL이 Unix socket으로 연결돼 항상 빈 값으로만 나와 폐기했다
+      (오르테가군 실측 — 발신 IP 후보 좁히기 축으로는 쓸모없음. 실패한 축을 기록해 다음
+      사람이 같은 시도를 반복하지 않게 한다).
+    - 그룹별 "최대" idle 하나만으로는 "이상치 1개+정상 68개"와 "69개 전부 방치"를 구분할 수
+      없다(오르테가군 지적 — 오늘 이 형태의 함정을 이미 다섯 번 밟았다) → idle 구간별
+      **개수 분포**(`>1h`/`10m-1h`/`1m-10m`/`<1m`)로 바꿔 실제 분포를 본다.
+    """
+    verify_cron(request)
+    try:
+        result = await session.execute(
+            text(
+                """
+                SELECT
+                    COALESCE(application_name, '') AS application_name,
+                    COALESCE(state, '') AS state,
+                    COALESCE(usename, '') AS usename,
+                    CASE
+                        WHEN state_change IS NULL THEN 'unknown'
+                        WHEN now() - state_change >= interval '1 hour' THEN '>1h'
+                        WHEN now() - state_change >= interval '10 minutes' THEN '10m-1h'
+                        WHEN now() - state_change >= interval '1 minute' THEN '1m-10m'
+                        ELSE '<1m'
+                    END AS idle_bucket,
+                    count(*) AS count,
+                    MAX(EXTRACT(EPOCH FROM (now() - state_change)))::int AS max_idle_seconds
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                GROUP BY application_name, state, usename, idle_bucket
+                ORDER BY count DESC
+                """
+            )
+        )
+        rows = [
+            {
+                "application_name": r.application_name,
+                "state": r.state,
+                "usename": r.usename,
+                "idle_bucket": r.idle_bucket,
+                "count": r.count,
+                "max_idle_seconds": r.max_idle_seconds,
+            }
+            for r in result
+        ]
+        return _ok({"rows": rows, "total": sum(r["count"] for r in rows)})
+    except Exception as exc:
+        logger.exception("db-connection-stats cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

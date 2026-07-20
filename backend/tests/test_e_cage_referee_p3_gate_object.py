@@ -62,7 +62,7 @@ async def test_create_gate_ask_gives_pending():
     session.refresh = AsyncMock()
 
     with patch("app.services.gate_service.resolve_disposition", new_callable=AsyncMock) as mock_disp:
-        mock_disp.return_value = "ask"
+        mock_disp.return_value = ("ask", "system_default")
 
         gate = MagicMock()
         gate.status = "pending"
@@ -89,7 +89,7 @@ async def test_create_gate_allow_auto_gives_auto_passed():
     session.refresh = AsyncMock()
 
     with patch("app.services.gate_service.resolve_disposition", new_callable=AsyncMock) as mock_disp:
-        mock_disp.return_value = "allow_auto"
+        mock_disp.return_value = ("allow_auto", "system_default")
 
         await create_gate(session, ORG_ID, STORY_ID, "story", "pr_review", MEMBER_ID, ROLE_ID)
 
@@ -112,7 +112,7 @@ async def test_create_gate_deny_gives_rejected():
     session.refresh = AsyncMock()
 
     with patch("app.services.gate_service.resolve_disposition", new_callable=AsyncMock) as mock_disp:
-        mock_disp.return_value = "deny"
+        mock_disp.return_value = ("deny", "system_default")
 
         await create_gate(session, ORG_ID, STORY_ID, "story", "merge", MEMBER_ID, ROLE_ID)
 

@@ -351,8 +351,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                         title={m.name}
                       >
                         {getInitials(m.name)}
+                        {/* story #2023 ⓑ: 죽은 클래스(bg-brand-strong 미매핑)이면서 L5 위반 — info로 교체해 둘 다 닫음 */}
                         {m.type === 'agent' && (
-                          <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-brand-strong ring-1 ring-background" />
+                          <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-info ring-1 ring-background" />
                         )}
                       </div>
                     ))}

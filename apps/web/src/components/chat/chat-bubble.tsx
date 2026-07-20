@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -103,6 +103,66 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
   const hasMention = /@[\w가-힣]+/.test(content);
   const hasMarkdown = /[*_`#\[\]>~]|entity:/.test(content);
 
+  // story #2021: react-markdown이 리졸브한 컴포넌트 함수 참조를 그대로 React 엘리먼트 type으로
+  // 쓴다(hast-util-to-jsx-runtime `state.components[name]`). 이 객체를 매 렌더 인라인으로 새로
+  // 만들면 `a`(엔티티 칩/미리보기 모달 포함)·`code`(CopyableCode) 서브트리가 타입 불일치로
+  // 매번 언마운트→리마운트된다 — 무관한 부모 리렌더(presence 폴링 등)마다 열려 있던 문서
+  // 미리보기 모달의 로컬 state(showModal)가 통째로 날아가 닫히던 근본 원인. isMine이 안 바뀌는
+  // 한 참조를 고정해 react-markdown이 같은 컴포넌트 인스턴스를 재사용하게 한다. hasMarkdown이
+  // false인 이른 return보다 위에 둬 훅 호출 순서를 무조건화한다(rules-of-hooks).
+  const components = useMemo(() => ({
+    p: ({ children }: { children?: React.ReactNode }) => <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>,
+    strong: ({ children }: { children?: React.ReactNode }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
+    em: ({ children }: { children?: React.ReactNode }) => <em className={`italic ${text}`}>{children}</em>,
+    code: ({ className, children }: { className?: string; children?: React.ReactNode }) => {
+      const raw = String(children).replace(/\n$/, '');
+      const inline = !className?.includes('language-') && !raw.includes('\n');
+      return (
+        <CopyableCode
+          raw={raw}
+          inline={inline}
+          className={`rounded px-1 py-0.5 font-mono text-xs [overflow-wrap:anywhere] ${codeBg}`}
+        />
+      );
+    },
+    pre: ({ children }: { children?: React.ReactNode }) => <pre className={`mb-1.5 overflow-x-auto rounded-lg p-2.5 text-xs ${codeBg}`}>{children}</pre>,
+    // story #2035 AC2 — 표는 자기 컨테이너 안에서만 가로 스크롤(doc-content-renderer.tsx의
+    // 검증된 not-prose overflow-x-auto 패턴 재사용). whitespace-nowrap 없으면 브라우저가
+    // 열 텍스트를 좁은 말풍선 폭에 맞춰 줄바꿈/축약해버려 "열 삭제·축약 금지" 위반이 됨 —
+    // nowrap으로 열 폭을 원문 그대로 유지하고 넘치는 만큼 래퍼가 스크롤하게 한다.
+    table: ({ children }: { children?: React.ReactNode }) => (
+      <div className={`mb-1.5 overflow-x-auto rounded-lg border ${border}`}>
+        <table className="whitespace-nowrap text-xs">{children}</table>
+      </div>
+    ),
+    thead: ({ children }: { children?: React.ReactNode }) => <thead className={muted}>{children}</thead>,
+    th: ({ children }: { children?: React.ReactNode }) => <th className={`border-b px-2 py-1 text-left font-semibold ${border} ${text}`}>{children}</th>,
+    td: ({ children }: { children?: React.ReactNode }) => <td className={`border-b px-2 py-1 ${border} ${text}`}>{children}</td>,
+    ul: ({ children }: { children?: React.ReactNode }) => <ul className={`mb-1.5 ml-4 list-disc space-y-0.5 text-sm ${text}`}>{children}</ul>,
+    ol: ({ children }: { children?: React.ReactNode }) => <ol className={`mb-1.5 ml-4 list-decimal space-y-0.5 text-sm ${text}`}>{children}</ol>,
+    li: ({ children }: { children?: React.ReactNode }) => <li className={`text-sm leading-relaxed ${text}`}>{children}</li>,
+    blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className={`mb-1.5 border-l-2 pl-3 ${border} ${muted}`}>{children}</blockquote>,
+    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+      if (href?.startsWith('mention:')) {
+        return (
+          <span className={`font-medium ${isMine ? 'text-primary-foreground underline decoration-primary-foreground/40' : 'text-primary'}`}>
+            {children}
+          </span>
+        );
+      }
+      // id 는 UUID 만 허용 — `dead`·`----` 등 비-UUID는 매칭 실패→평문 링크로 폴백(엔티티 칩/카드 미렌더).
+      const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+      if (m) {
+        // S6: 자산 토큰은 컴팩트 칩 대신 리치 임베드 카드(썸네일+메타+화살표).
+        if (m[1]!.toLowerCase() === 'asset') {
+          return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} />;
+        }
+        return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
+      }
+      return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
+    },
+  }), [text, muted, codeBg, border, isMine]);
+
   if (!hasMarkdown && !hasMention) {
     return (
       <span className={`whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed ${text}`}>
@@ -119,46 +179,7 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
       urlTransform={(url) =>
         url.startsWith('entity:') || url.startsWith('mention:') ? url : defaultUrlTransform(url)
       }
-      components={{
-        p: ({ children }) => <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>,
-        strong: ({ children }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
-        em: ({ children }) => <em className={`italic ${text}`}>{children}</em>,
-        code: ({ className, children }) => {
-          const raw = String(children).replace(/\n$/, '');
-          const inline = !className?.includes('language-') && !raw.includes('\n');
-          return (
-            <CopyableCode
-              raw={raw}
-              inline={inline}
-              className={`rounded px-1 py-0.5 font-mono text-xs [overflow-wrap:anywhere] ${codeBg}`}
-            />
-          );
-        },
-        pre: ({ children }) => <pre className={`mb-1.5 overflow-x-auto rounded-lg p-2.5 text-xs ${codeBg}`}>{children}</pre>,
-        ul: ({ children }) => <ul className={`mb-1.5 ml-4 list-disc space-y-0.5 text-sm ${text}`}>{children}</ul>,
-        ol: ({ children }) => <ol className={`mb-1.5 ml-4 list-decimal space-y-0.5 text-sm ${text}`}>{children}</ol>,
-        li: ({ children }) => <li className={`text-sm leading-relaxed ${text}`}>{children}</li>,
-        blockquote: ({ children }) => <blockquote className={`mb-1.5 border-l-2 pl-3 ${border} ${muted}`}>{children}</blockquote>,
-        a: ({ href, children }) => {
-          if (href?.startsWith('mention:')) {
-            return (
-              <span className={`font-medium ${isMine ? 'text-primary-foreground underline decoration-primary-foreground/40' : 'text-primary'}`}>
-                {children}
-              </span>
-            );
-          }
-          // id 는 UUID 만 허용 — `dead`·`----` 등 비-UUID는 매칭 실패→평문 링크로 폴백(엔티티 칩/카드 미렌더).
-          const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
-          if (m) {
-            // S6: 자산 토큰은 컴팩트 칩 대신 리치 임베드 카드(썸네일+메타+화살표).
-            if (m[1]!.toLowerCase() === 'asset') {
-              return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} />;
-            }
-            return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
-          }
-          return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
-        },
-      }}
+      components={components}
     >
       {prepared}
     </ReactMarkdown>
@@ -280,9 +301,15 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
             </div>
           )}
 
-          {/* Content — S8: command 전용 버블(brand·mono·⌘ 태그) vs 일반(리터럴은 dequote 표시) */}
+          {/* Content — S8: command 전용 버블(brand·mono·⌘ 태그) vs 일반(리터럴은 dequote 표시).
+              story #2035: min-w-0+max-w-full — 부모 컬럼(min-w-0 max-w-[72%] items-start/end)이
+              flex-item 자식을 cross-axis에서 stretch가 아닌 shrink-to-fit으로 배치하므로, 이
+              말풍선 배경 div 자체에 상한이 없으면 표·코드블록의 min-content가 부모 max-w를
+              무시하고 새어나간다(재현·측정 확認 — 아래 근거 참고). max-w-full로 컬럼의 269px
+              상한을 이 자식에도 강제해야 안의 pre(overflow-x-auto)·표(overflow-x-auto 래퍼)가
+              비로소 자기 박스 안에서 스크롤된다. */}
           {isCmd ? (
-            <div className={`rounded-xl border border-info/30 bg-info/8 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
+            <div className={`min-w-0 max-w-full rounded-xl border border-info/30 bg-info/8 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
               <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-info">
                 <Terminal className="h-3 w-3" aria-hidden />
                 {t('commandTag')}
@@ -293,7 +320,7 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
               </code>
             </div>
           ) : (
-            <div className={`rounded-xl px-3.5 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${
+            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${
               isMine
                 ? 'rounded-tr-sm bg-primary text-primary-foreground'
                 : 'rounded-tl-sm bg-muted text-foreground'

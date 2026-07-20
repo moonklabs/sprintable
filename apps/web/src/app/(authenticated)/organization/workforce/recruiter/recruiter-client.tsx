@@ -648,7 +648,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       value={roleQuery}
                       onChange={(e) => setRoleQuery(e.target.value)}
                       placeholder={t('roleSearchPlaceholder')}
-                      className="w-full rounded-lg border border-border bg-card py-2 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                      className="w-full rounded-lg border border-border bg-card py-2 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                   </div>
                   {/* 다음 버튼이 긴 리스트 하단에 묻히지 않도록 리스트 자체를 bounded-height 스크롤로 격리 —
@@ -814,7 +814,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       value={equipName}
                       onChange={(e) => setEquipName(e.target.value)}
                       placeholder={tSettings('agentNamePlaceholder')}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -822,7 +822,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     <select
                       value={equipRole}
                       onChange={(e) => setEquipRole(e.target.value as 'member' | 'admin')}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     >
                       <option value="member">{tSettings('agentRoleMember')}</option>
                       <option value="admin">{tSettings('agentRoleAdmin')}</option>
@@ -958,13 +958,13 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       value={newAgentName}
                       onChange={(e) => setNewAgentName(e.target.value)}
                       placeholder={suggestedAgentName || t('agentNamePlaceholder')}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                   ) : (
                     <select
                       value={selectedExistingAgentId}
                       onChange={(e) => setSelectedExistingAgentId(e.target.value)}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     >
                       <option value="">{t('agentSelectPlaceholder')}</option>
                       {(existingAgents ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
