@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -52,6 +53,21 @@ class HypothesisServiceError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+def _has_valid_outcome_evidence(outcome_result: dict | None) -> bool:
+    """story #2038 — verified/falsified 서버측 강제 판정. FE(HypothesisResolveDialog)의
+    canSubmit(`actualNum !== null && !Number.isNaN(actualNum) && reason.trim().length > 0`)와
+    동형. bool은 Python에서 int 서브클래스라 명시적으로 배제(isinstance(True, int) is True 함정)."""
+    if not isinstance(outcome_result, dict):
+        return False
+    actual = outcome_result.get("actual")
+    if isinstance(actual, bool) or not isinstance(actual, (int, float)):
+        return False
+    if isinstance(actual, float) and math.isnan(actual):
+        return False
+    reason = outcome_result.get("reason")
+    return isinstance(reason, str) and bool(reason.strip())
 
 
 def map_legacy_outcome_status(outcome_status: str | None) -> str | None:
@@ -328,6 +344,18 @@ async def transition_hypothesis(
     if target == "active" and caller.type != "human":
         raise HypothesisServiceError(
             "HUMAN_CONFIRM_REQUIRED", "active 전이는 휴먼만 가능합니다."
+        )
+
+    # story #2038(까심 QA 적출, #2027과 동일 패턴): verified/falsified는 FE(HypothesisResolveDialog)
+    # 가 "실제 수치+한 줄 근거 둘 다 없으면 제출 불가"로 막지만 서버는 이 요건을 몰랐다 — outcome_result
+    # 를 완전히 생략하고 이 endpoint를 직접 호출하면 근거 없이 200으로 닫혔다. 자동채점 cron
+    # (hypothesis_scorer.score_hypotheses)은 이 함수를 아예 거치지 않고 hyp.status/outcome_result를
+    # 직접 ORM으로 쓰므로(별개 경로 — 주석 §"E-LOOP-LEDGER S19" 참고) 이 가드와 무관하다.
+    if target in ("verified", "falsified") and not _has_valid_outcome_evidence(payload.outcome_result):
+        raise HypothesisServiceError(
+            "OUTCOME_RESULT_REQUIRED",
+            "달성/반증 처리에는 실제 수치(outcome_result.actual)와 한 줄 근거"
+            "(outcome_result.reason)가 모두 필요합니다.",
         )
 
     updates: dict = {"status": target}
