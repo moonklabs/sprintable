@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -103,6 +103,54 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
   const hasMention = /@[\w가-힣]+/.test(content);
   const hasMarkdown = /[*_`#\[\]>~]|entity:/.test(content);
 
+  // story #2021: react-markdown이 리졸브한 컴포넌트 함수 참조를 그대로 React 엘리먼트 type으로
+  // 쓴다(hast-util-to-jsx-runtime `state.components[name]`). 이 객체를 매 렌더 인라인으로 새로
+  // 만들면 `a`(엔티티 칩/미리보기 모달 포함)·`code`(CopyableCode) 서브트리가 타입 불일치로
+  // 매번 언마운트→리마운트된다 — 무관한 부모 리렌더(presence 폴링 등)마다 열려 있던 문서
+  // 미리보기 모달의 로컬 state(showModal)가 통째로 날아가 닫히던 근본 원인. isMine이 안 바뀌는
+  // 한 참조를 고정해 react-markdown이 같은 컴포넌트 인스턴스를 재사용하게 한다. hasMarkdown이
+  // false인 이른 return보다 위에 둬 훅 호출 순서를 무조건화한다(rules-of-hooks).
+  const components = useMemo(() => ({
+    p: ({ children }: { children?: React.ReactNode }) => <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>,
+    strong: ({ children }: { children?: React.ReactNode }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
+    em: ({ children }: { children?: React.ReactNode }) => <em className={`italic ${text}`}>{children}</em>,
+    code: ({ className, children }: { className?: string; children?: React.ReactNode }) => {
+      const raw = String(children).replace(/\n$/, '');
+      const inline = !className?.includes('language-') && !raw.includes('\n');
+      return (
+        <CopyableCode
+          raw={raw}
+          inline={inline}
+          className={`rounded px-1 py-0.5 font-mono text-xs [overflow-wrap:anywhere] ${codeBg}`}
+        />
+      );
+    },
+    pre: ({ children }: { children?: React.ReactNode }) => <pre className={`mb-1.5 overflow-x-auto rounded-lg p-2.5 text-xs ${codeBg}`}>{children}</pre>,
+    ul: ({ children }: { children?: React.ReactNode }) => <ul className={`mb-1.5 ml-4 list-disc space-y-0.5 text-sm ${text}`}>{children}</ul>,
+    ol: ({ children }: { children?: React.ReactNode }) => <ol className={`mb-1.5 ml-4 list-decimal space-y-0.5 text-sm ${text}`}>{children}</ol>,
+    li: ({ children }: { children?: React.ReactNode }) => <li className={`text-sm leading-relaxed ${text}`}>{children}</li>,
+    blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className={`mb-1.5 border-l-2 pl-3 ${border} ${muted}`}>{children}</blockquote>,
+    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+      if (href?.startsWith('mention:')) {
+        return (
+          <span className={`font-medium ${isMine ? 'text-primary-foreground underline decoration-primary-foreground/40' : 'text-primary'}`}>
+            {children}
+          </span>
+        );
+      }
+      // id 는 UUID 만 허용 — `dead`·`----` 등 비-UUID는 매칭 실패→평문 링크로 폴백(엔티티 칩/카드 미렌더).
+      const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+      if (m) {
+        // S6: 자산 토큰은 컴팩트 칩 대신 리치 임베드 카드(썸네일+메타+화살표).
+        if (m[1]!.toLowerCase() === 'asset') {
+          return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} />;
+        }
+        return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
+      }
+      return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
+    },
+  }), [text, muted, codeBg, border, isMine]);
+
   if (!hasMarkdown && !hasMention) {
     return (
       <span className={`whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed ${text}`}>
@@ -119,46 +167,7 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
       urlTransform={(url) =>
         url.startsWith('entity:') || url.startsWith('mention:') ? url : defaultUrlTransform(url)
       }
-      components={{
-        p: ({ children }) => <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>,
-        strong: ({ children }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
-        em: ({ children }) => <em className={`italic ${text}`}>{children}</em>,
-        code: ({ className, children }) => {
-          const raw = String(children).replace(/\n$/, '');
-          const inline = !className?.includes('language-') && !raw.includes('\n');
-          return (
-            <CopyableCode
-              raw={raw}
-              inline={inline}
-              className={`rounded px-1 py-0.5 font-mono text-xs [overflow-wrap:anywhere] ${codeBg}`}
-            />
-          );
-        },
-        pre: ({ children }) => <pre className={`mb-1.5 overflow-x-auto rounded-lg p-2.5 text-xs ${codeBg}`}>{children}</pre>,
-        ul: ({ children }) => <ul className={`mb-1.5 ml-4 list-disc space-y-0.5 text-sm ${text}`}>{children}</ul>,
-        ol: ({ children }) => <ol className={`mb-1.5 ml-4 list-decimal space-y-0.5 text-sm ${text}`}>{children}</ol>,
-        li: ({ children }) => <li className={`text-sm leading-relaxed ${text}`}>{children}</li>,
-        blockquote: ({ children }) => <blockquote className={`mb-1.5 border-l-2 pl-3 ${border} ${muted}`}>{children}</blockquote>,
-        a: ({ href, children }) => {
-          if (href?.startsWith('mention:')) {
-            return (
-              <span className={`font-medium ${isMine ? 'text-primary-foreground underline decoration-primary-foreground/40' : 'text-primary'}`}>
-                {children}
-              </span>
-            );
-          }
-          // id 는 UUID 만 허용 — `dead`·`----` 등 비-UUID는 매칭 실패→평문 링크로 폴백(엔티티 칩/카드 미렌더).
-          const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
-          if (m) {
-            // S6: 자산 토큰은 컴팩트 칩 대신 리치 임베드 카드(썸네일+메타+화살표).
-            if (m[1]!.toLowerCase() === 'asset') {
-              return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} />;
-            }
-            return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
-          }
-          return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
-        },
-      }}
+      components={components}
     >
       {prepared}
     </ReactMarkdown>
