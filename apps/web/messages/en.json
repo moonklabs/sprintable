@@ -2840,6 +2840,7 @@
     "resolveTitleVerify": "Close hypothesis as verified",
     "resolveTitleFalsify": "Close hypothesis as falsified",
     "actualInputLabel": "Actual value",
+    "resolveActualPlaceholder": "Enter a number",
     "reasonInputLabel": "Reason (one line)",
     "reasonInputPlaceholder": "State the reason for this verdict",
     "reasonHint": "A reason is required to close this hypothesis.",

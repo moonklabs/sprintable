@@ -35,7 +35,10 @@ export interface HypothesisResolveResult {
  *
  * AC8(오르테가 PO 판정, hypothesis.py `_VALID_TRANSITIONS`로 확인): measuring→verified|falsified는
  * archived로만 전진하고 active/measuring으로 역전이 불가("새 가설을 만든다") — 되돌릴 수 없는
- * 종결이라 브랜드 블루(Button 기본 variant)를 종결 버튼에 그대로 둔다(유나 리뷰 PASS 확인).
+ * 종결이라 브랜드 블루를 종결 버튼에 둔다. 유나 가디언 2차 검수(2026-07-20): 이전엔 Button
+ * 기본 variant(--primary)에 기댔는데, §4-1이 "브랜드 블루=인간이 서명한 자리"라고 색을
+ * 토큰명으로 특정하므로 `bg-brand`를 명시한다 — --primary와 --brand가 지금 같은 값이라는
+ * 우연에 기대면 둘이 갈릴 때 조용히 깨진다(그 둘이 왜 같은 값인지는 별건, 여기서 안 건드림).
  */
 export function HypothesisResolveDialog({
   hypothesis,
@@ -69,28 +72,42 @@ export function HypothesisResolveDialog({
 
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onCancel(); }}>
-      <DialogContent>
-        <DialogHeader>
+      {/* 유나 가디언 확定 규격(2026-07-20): 폭 384px(sm:max-w-sm 기본값)→480~520px(sm:max-w-lg=512px),
+          다이얼로그 전체는 max-h-[85vh]+세로 flex로 상한을 두고 overflow는 안전망으로만 남긴다.
+          "문장만 스크롤"이 핵심 — 문장 영역(아래 statement wrapper)만 자체 overflow-y-auto를
+          갖고 입력·푸터는 그 흐름 밖(shrink-0)에 남아 화면 밖으로 밀리지 않는다. */}
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-lg">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{isVerify ? t('resolveTitleVerify') : t('resolveTitleFalsify')}</DialogTitle>
         </DialogHeader>
         <form
-          className="space-y-3"
+          className="flex min-h-0 flex-1 flex-col gap-3"
           onSubmit={(e) => {
             e.preventDefault();
             if (canSubmit) onSubmit({ actual: actualNum as number, reason: reason.trim(), target: verdict });
           }}
         >
-          <p className="line-clamp-3 text-sm leading-6 text-foreground">{hypothesis.statement}</p>
+          {/* 유나 가디언 실측 지적(2026-07-20): line-clamp-3가 문장을 잘라 "무엇에 서명하는지"가
+              안 보였다(사람이 책임지고 닫는 화면인데 대상이 안 보임). 클램프를 풀되 극단적으로
+              긴 가설이 다이얼로그 전체를 밀어 입력/버튼을 화면 밖으로 내보내지 않도록, 문장
+              영역 자체에 상한(max-h-[40vh])+자체 스크롤을 둬 폼의 나머지(입력·근거·버튼)는
+              항상 고정 위치에 남는다 — "서명 못 하는 상태"가 되지 않는다. */}
+          <div className="max-h-[40vh] min-h-0 overflow-y-auto rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+            <p className="text-sm leading-6 text-foreground">{hypothesis.statement}</p>
+          </div>
 
           {md?.metric ? (
-            <p className="text-xs tabular-nums text-muted-foreground">
+            <p className="shrink-0 text-xs tabular-nums text-muted-foreground">
               📈 {md.metric} {md.direction === 'down' ? '≤' : '≥'} {fmt(md.target)}
             </p>
           ) : null}
 
-          <div className="space-y-1">
+          <div className="shrink-0 space-y-1">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="resolve-actual">
-              {t('actualInputLabel')} <span className="text-destructive">*</span>
+              {/* 유나 가디언 지적(2026-07-20): text-destructive(빨강)는 §4-3에서 "되돌릴 수 없는
+                  파괴"에 묶인 신호값 — 필수 입력 표시는 파괴가 아니라서 여기 쓰면 진짜 파괴 자리의
+                  신호가 깎인다. `*` 자체는 유지하되 중립색(muted)으로. */}
+              {t('actualInputLabel')} <span className="text-muted-foreground">*</span>
             </label>
             <input
               id="resolve-actual"
@@ -98,14 +115,18 @@ export function HypothesisResolveDialog({
               inputMode="decimal"
               value={actual}
               onChange={(e) => setActual(e.target.value)}
-              placeholder={t('targetPlaceholder')}
+              // 유나 가디언 지적(2026-07-20): targetPlaceholder("12", 목표 입력용 예시값)를
+              // 재사용해왔던 게 원인 — 대비가 진해(4.83:1) 빈 입력을 "이미 12를 입력한 화면"으로
+              // 오독시켰다(불일치 배너가 왜 안 뜨냐는 검수 질문까지 나옴). 종결 다이얼로그 전용
+              // placeholder 키를 신설.
+              placeholder={t('resolveActualPlaceholder')}
               autoFocus
               className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
             />
           </div>
 
           {mismatch ? (
-            <div className="flex items-start gap-2 rounded-lg border border-warning-border bg-warning-tint px-3 py-2 text-xs text-warning">
+            <div className="flex shrink-0 items-start gap-2 rounded-lg border border-warning-border bg-warning-tint px-3 py-2 text-xs text-warning">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
               <div className="space-y-1">
                 <p>{isVerify ? t('mismatchVerifyWarning') : t('mismatchFalsifyWarning')}</p>
@@ -120,9 +141,9 @@ export function HypothesisResolveDialog({
             </div>
           ) : null}
 
-          <div className="space-y-1">
+          <div className="shrink-0 space-y-1">
             <label className="text-xs font-medium text-muted-foreground" htmlFor="resolve-reason">
-              {t('reasonInputLabel')} <span className="text-destructive">*</span>
+              {t('reasonInputLabel')} <span className="text-muted-foreground">*</span>
             </label>
             <input
               id="resolve-reason"
@@ -132,12 +153,13 @@ export function HypothesisResolveDialog({
               placeholder={t('reasonInputPlaceholder')}
               className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
             />
+            {/* 힌트는 유지(PO 지시) — "제품이 파는 것을 직접 말해주는 자리"라 3중 반복이어도 값어치가 큼. */}
             <p className="text-[11px] text-muted-foreground">{t('reasonHint')}</p>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <DialogClose render={<Button type="button" variant="ghost" disabled={submitting} onClick={onCancel}>{t('cancel')}</Button>} />
-            <Button type="submit" disabled={!canSubmit}>
+            <Button type="submit" disabled={!canSubmit} className="bg-brand text-brand-foreground hover:bg-brand/90">
               {submitting ? t('saving') : t('resolveSubmit')}
             </Button>
           </DialogFooter>

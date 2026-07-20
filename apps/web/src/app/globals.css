@@ -194,7 +194,10 @@
   /* S-web-tokens(story 5d88e1a3): 리브랜딩 — 뉴트럴 zinc 무채색→브랜드 블루(hue255) 채색.
      brand-blue-palette-ssot §2 스펙. --brand는 4.5:1 AA(text-brand 20파일 사용처) 확保 위해
      스펙 L0.58→0.56로 미세 하향(hue/chroma는 스펙 그대로, 문서화된 의도적 편차). */
-  --primary: oklch(0.50 0.17 255);
+  /* story #2318 후속(2026-07-20, 유나 4안 B): 브랜드 색 2층 분리 — primary=일상 파랑(채도
+     0.17→0.09), brand=서명 파랑(§4-1, 변경 없음). ΔE(primary↔brand) 10.0으로 두 파랑이
+     시각적으로 구분된다(목표 8 충족). */
+  --primary: oklch(0.50 0.09 255);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.967 0.001 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
@@ -214,7 +217,8 @@
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.50 0.17 255);
+  /* story #2318: --primary와 반드시 같은 값 — 안 맞추면 사이드바만 옛 파랑으로 남아 두 파랑이 갈린다. */
+  --sidebar-primary: oklch(0.50 0.09 255);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.95 0.002 286.375);
   --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
@@ -223,7 +227,8 @@
 
   /* Sprintable brand (blue) — 254/0.17 hue/chroma는 스펙 그대로, L만 0.58→0.56(AA 4.5:1 확保) */
   --brand: oklch(0.56 0.17 254);
-  --brand-foreground: oklch(0.985 0 0);
+  /* story #2318: 4.50:1(턱걸이)→순백으로 4.69:1 확保 */
+  --brand-foreground: oklch(1 0 0);
   --primary-tint: oklch(0.97 0.02 255);
 
   /* Semantic status tokens */
@@ -307,7 +312,8 @@
      스캐폴드에서 --primary와 정렬(254/255로 통일 — 전체 브랜드 일관성이 이번 작업 목적).
      정렬로 인해 --sidebar-primary-foreground도 white→navy950 필수 변경(브랜드-400 L0.68 배경에
      white 텍스트는 2.77:1로 AA 미달 — primary-foreground와 동일 패턴 적용, 3157쪽 회귀 방지). */
-  --primary: oklch(0.68 0.15 255);
+  /* story #2318 후속: 브랜드 색 2층 분리(다크) — primary=일상 파랑(채도 0.15→0.08). */
+  --primary: oklch(0.68 0.08 255);
   --primary-foreground: oklch(0.16 0.038 262);
   --secondary: oklch(0.274 0.006 286.033);
   --secondary-foreground: oklch(0.985 0 0);
@@ -326,7 +332,8 @@
   --chart-5: oklch(0.42 0.006 286.033);
   --sidebar: oklch(0.21 0.006 285.885);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.68 0.15 255);
+  /* story #2318: --primary와 반드시 같은 값(라이트와 동일 이유). */
+  --sidebar-primary: oklch(0.68 0.08 255);
   --sidebar-primary-foreground: oklch(0.16 0.038 262);
   --sidebar-accent: oklch(0.274 0.006 286.033);
   --sidebar-accent-foreground: oklch(0.985 0 0);
@@ -335,7 +342,9 @@
 
   /* Sprintable brand (blue, lighter for dark) — hue/chroma 스펙 그대로, L은 라이트와 동일 규칙 */
   --brand: oklch(0.64 0.17 254);
-  --brand-foreground: oklch(0.985 0 0);
+  /* story #2318: 신설(라이트와 다른 값) — 다크 brand는 밝은 파랑이라 밝은 텍스트로는 3.24:1
+     미달. --primary-foreground(다크)와 동일 패턴(어두운 남색)으로 보정해 5.74:1 확保. */
+  --brand-foreground: oklch(0.16 0.038 262);
   --primary-tint: oklch(0.28 0.075 260);
 
   /* Semantic status tokens */
