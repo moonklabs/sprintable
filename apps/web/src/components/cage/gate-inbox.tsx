@@ -461,7 +461,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
               value={rejectModal.note}
               onChange={(e) => setRejectModal((prev) => prev ? { ...prev, note: e.target.value } : null)}
               placeholder={t('gateRejectNotePlaceholder')}
-              className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
             <div className="mt-3 flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setRejectModal(null)}>{t('cancel')}</Button>
@@ -499,7 +499,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
               value={voidModal.reason}
               onChange={(e) => setVoidModal((prev) => prev ? { ...prev, reason: e.target.value } : null)}
               placeholder={t('voidReasonPlaceholder')}
-              className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
             <div className="mt-3 flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setVoidModal(null)}>{t('cancel')}</Button>
@@ -538,7 +538,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
               value={holdModal.reason}
               onChange={(e) => setHoldModal((prev) => prev ? { ...prev, reason: e.target.value } : null)}
               placeholder={t('holdReasonPlaceholder')}
-              className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
             <div className="mt-3 flex items-center gap-4 text-xs text-foreground">
               <label className="flex items-center gap-1.5">
@@ -555,7 +555,7 @@ export function GateInbox({ memberId }: GateInboxProps) {
                 type="date"
                 value={holdModal.heldUntil}
                 onChange={(e) => setHoldModal((prev) => prev ? { ...prev, heldUntil: e.target.value } : null)}
-                className="mt-2 h-9 w-full rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="mt-2 h-9 w-full rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             ) : null}
             <div className="mt-3 flex justify-end gap-2">

@@ -268,7 +268,7 @@ export function LoopCreateDialog({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder={t('createLoopFormTitlePlaceholder')}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
 
@@ -279,7 +279,7 @@ export function LoopCreateDialog({
                 id="loop-create-recipe"
                 value={recipeSlug}
                 onChange={(e) => setRecipeSlug(e.target.value)}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               >
                 <option value="">{t('createLoopRecipeNone')}</option>
                 {localizedRecipes.map((r) => (
@@ -347,7 +347,7 @@ export function LoopCreateDialog({
                     onChange={(e) => { setStatement(e.target.value); setDrafted(false); }}
                     placeholder={t('createLoopStatementPlaceholder')}
                     className={cn(
-                      'w-full resize-y rounded-xl border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40',
+                      'w-full resize-y rounded-xl border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary',
                       drafted ? 'border-primary/40' : 'border-border',
                     )}
                   />
@@ -373,12 +373,12 @@ export function LoopCreateDialog({
                       value={metric.metric}
                       onChange={(e) => setMetricPatch({ metric: e.target.value })}
                       placeholder={th('metricPlaceholder')}
-                      className="rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                      className="rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                     <select
                       value={metric.source}
                       onChange={(e) => setMetricPatch({ source: e.target.value as MetricDefinition['source'] })}
-                      className="rounded-xl border border-border bg-background px-2 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                      className="rounded-xl border border-border bg-background px-2 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     >
                       {SOURCES.map((s) => (
                         <option key={s} value={s}>
@@ -407,7 +407,7 @@ export function LoopCreateDialog({
                       value={Number.isNaN(metric.target) ? '' : metric.target}
                       onChange={(e) => setMetricPatch({ target: e.target.value === '' ? 0 : Number(e.target.value) })}
                       placeholder={th('targetPlaceholder')}
-                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 sm:w-20"
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary sm:w-20"
                     />
                   </div>
 
@@ -417,12 +417,12 @@ export function LoopCreateDialog({
                         value={metric.property_id ?? ''}
                         onChange={(e) => setMetricPatch({ property_id: e.target.value })}
                         placeholder={t('createLoopGa4PropertyIdPlaceholder')}
-                        className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                       />
                       <select
                         value={metric.ga4_metric ?? ''}
                         onChange={(e) => setMetricPatch({ ga4_metric: e.target.value })}
-                        className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                       >
                         <option value="">{t('createLoopGa4MetricPlaceholder')}</option>
                         {GA4_METRICS.map((m) => (
@@ -435,7 +435,7 @@ export function LoopCreateDialog({
                         value={metric.date_range_days ?? ''}
                         onChange={(e) => setMetricPatch({ date_range_days: e.target.value === '' ? undefined : Number(e.target.value) })}
                         placeholder={t('createLoopGa4DateRangePlaceholder')}
-                        className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                       />
                     </div>
                   ) : null}
@@ -449,7 +449,7 @@ export function LoopCreateDialog({
                     type="date"
                     value={measureAfter}
                     onChange={(e) => setMeasureAfter(e.target.value)}
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                 </div>
               </>
@@ -459,7 +459,7 @@ export function LoopCreateDialog({
                   value={hypothesisSearch}
                   onChange={(e) => setHypothesisSearch(e.target.value)}
                   placeholder={t('createLoopLinkSearchPlaceholder')}
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                 />
                 {hypotheses === null ? (
                   <p className="py-2 text-center text-xs text-muted-foreground">{t('loading')}</p>
@@ -500,7 +500,7 @@ export function LoopCreateDialog({
               value={tags}
               onChange={(e) => setTags(e.target.value)}
               placeholder={t('createLoopTagsPlaceholder')}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
 

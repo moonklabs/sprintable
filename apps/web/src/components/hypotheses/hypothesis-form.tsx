@@ -60,7 +60,7 @@ export function HypothesisForm({
           value={value.statement}
           onChange={(e) => setValue((v) => ({ ...v, statement: e.target.value }))}
           placeholder={t('statementPlaceholder')}
-          className="w-full resize-y rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full resize-y rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
         />
       </div>
 
@@ -72,12 +72,12 @@ export function HypothesisForm({
             value={md.metric}
             onChange={(e) => setMd({ metric: e.target.value })}
             placeholder={t('metricPlaceholder')}
-            className="rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           />
           <select
             value={md.source}
             onChange={(e) => setMd({ source: e.target.value as MetricDefinition['source'] })}
-            className="rounded-xl border border-border bg-background px-2 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="rounded-xl border border-border bg-background px-2 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           >
             {SOURCES.map((s) => (
               <option key={s} value={s}>
@@ -106,7 +106,7 @@ export function HypothesisForm({
             value={Number.isNaN(md.target) ? '' : md.target}
             onChange={(e) => setMd({ target: e.target.value === '' ? 0 : Number(e.target.value) })}
             placeholder={t('targetPlaceholder')}
-            className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 sm:w-20"
+            className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary sm:w-20"
           />
         </div>
       </div>
@@ -118,7 +118,7 @@ export function HypothesisForm({
           type="date"
           value={value.measure_after}
           onChange={(e) => setValue((v) => ({ ...v, measure_after: e.target.value }))}
-          className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
         />
       </div>
 

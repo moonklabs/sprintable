@@ -362,6 +362,12 @@ jobs:
       - name: "Verify no new md: breakpoint (story #1957 regression guard)"
         run: pnpm --filter web verify:no-new-md-breakpoint
 
+      # story #2057(유나 규격) 회귀가드: 포커스 링에 알파를 붙이면 대비가 깎인다(40% 알파
+      # 실측 최악 1.7:1대 — AA 3.0 미달). focus:/focus-visible: 접두 ring-*/N 100건을 전부
+      # 알파 제거로 고쳤고, 재도입되면 이 스텝이 실패한다.
+      - name: "Verify no alpha on focus ring (story #2057 regression guard)"
+        run: pnpm --filter web verify:no-alpha-focus-ring
+
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
         # of being masked by tail's 0 — without it the unit-test gate was a no-op
