@@ -64,7 +64,7 @@ function SttProgressBar({ progress, label }: { progress: number; label: string }
       </div>
       <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full bg-brand transition-all duration-300"
+          className="h-full rounded-full bg-info transition-all duration-300" /* story #2023 ⓑ: 업로드 진행률=L5(측정/진행), 브랜드 아님 */
           style={{ width: `${Math.min(progress, 100)}%` }}
         />
       </div>

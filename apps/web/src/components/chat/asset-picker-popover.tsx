@@ -177,8 +177,9 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
                 on ? 'border-transparent bg-info/10 font-semibold text-info' : 'border-border text-muted-foreground hover:bg-muted'
               }`}
             >
+              {/* story #2023 ⓑ: 상태 점=L5, 브랜드 아님 */}
               {s.id === 'project' ? (
-                <span className="inline-block size-[7px] rounded-full bg-brand" aria-hidden />
+                <span className="inline-block size-[7px] rounded-full bg-info" aria-hidden />
               ) : s.id === 'folder' ? (
                 <Folder className="size-3" aria-hidden />
               ) : null}

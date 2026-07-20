@@ -231,7 +231,7 @@ export function SlackIntegrationSettingsSection() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <MessageSquareShare className="size-4 text-[color:var(--brand-soft)]" />
+                <MessageSquareShare className="size-4 text-brand-soft" />
                 <h2 className="text-base font-semibold text-foreground">{t('title')}</h2>
               </div>
               <p className="text-sm text-muted-foreground">{t('description')}</p>
@@ -333,7 +333,7 @@ export function SlackIntegrationSettingsSection() {
             </div>
           ) : data.status === 'disconnected' ? (
             <GlassPanel className="border-dashed border-white/14 bg-muted/28 p-6 text-center">
-              <MessageSquareShare className="mx-auto size-9 text-[color:var(--brand-soft)]" />
+              <MessageSquareShare className="mx-auto size-9 text-brand-soft" />
               <h3 className="mt-4 text-lg font-semibold text-foreground">{t('disconnectedTitle')}</h3>
               <p className="mx-auto mt-2 max-w-2xl text-sm text-muted-foreground">{t('disconnectedBody')}</p>
               <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
@@ -349,7 +349,7 @@ export function SlackIntegrationSettingsSection() {
             </GlassPanel>
           ) : filteredChannels.length === 0 ? (
             <GlassPanel className="border-dashed border-white/14 bg-muted/28 p-6 text-center">
-              <MessageSquareShare className="mx-auto size-9 text-[color:var(--brand-soft)]" />
+              <MessageSquareShare className="mx-auto size-9 text-brand-soft" />
               <h3 className="mt-4 text-lg font-semibold text-foreground">{t('emptyTitle')}</h3>
               <p className="mx-auto mt-2 max-w-2xl text-sm text-muted-foreground">{t('emptyBody')}</p>
             </GlassPanel>
@@ -424,7 +424,7 @@ export function SlackIntegrationSettingsSection() {
                           </Button>
                         </div>
                         {mappedElsewhere ? (
-                          <div className="xl:col-span-2 rounded-2xl border border-brand/18 bg-brand/10 px-3 py-3 text-sm text-[color:var(--brand-soft)]">
+                          <div className="xl:col-span-2 rounded-2xl border border-brand/18 bg-brand/10 px-3 py-3 text-sm text-brand-soft">
                             {t('mappedElsewhereHint', { project: currentMapping?.project_name ?? t('unknownProject') })}
                           </div>
                         ) : null}

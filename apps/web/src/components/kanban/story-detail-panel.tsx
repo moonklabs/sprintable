@@ -80,7 +80,7 @@ interface StoryDetailPanelProps {
 
 function taskTone(status: string) {
   if (status === 'done') return 'bg-success';
-  if (status === 'in-progress') return 'bg-brand';
+  if (status === 'in-progress') return 'bg-info'; // story #2023 ⓑ: 진행중=시스템 상태(L5), 브랜드 아님
   return 'bg-background/20';
 }
 
