@@ -87,27 +87,34 @@ function taskTone(status: string) {
 // BE _MAX_STORY_ATTACHMENTS 정합 (schemas/story.py)
 const STORY_ATTACHMENT_LIMIT = 10;
 
+// story #2021 후속(PO 리뷰): components 객체를 렌더 함수 안에서 인라인으로 만들면 매 렌더
+// 새 함수 참조가 되어 react-markdown이 서브트리를 리마운트한다(chat-bubble 근본원인과 동형).
+// 이 패널은 댓글/액티비티 폴링·낙관 업데이트로 자주 리렌더되는 화면이라 위험이 실재한다.
+// 다만 여기 오버라이드는 전부 stateless 순수 태그(a도 target=_blank 평문 링크, 자체 state
+// 없음)라 useMemo조차 불필요 — 모듈 스코프 상수로 끌어올려 참조를 영구 고정한다.
+const descriptionViewerComponents = {
+  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 break-words text-sm leading-6 text-muted-foreground last:mb-0">{children}</p>,
+  h1: ({ children }: { children?: React.ReactNode }) => <h1 className="mb-2 text-lg font-bold text-foreground">{children}</h1>,
+  h2: ({ children }: { children?: React.ReactNode }) => <h2 className="mb-2 text-base font-bold text-foreground">{children}</h2>,
+  h3: ({ children }: { children?: React.ReactNode }) => <h3 className="mb-1.5 text-sm font-bold text-foreground">{children}</h3>,
+  ul: ({ children }: { children?: React.ReactNode }) => <ul className="mb-2 ml-4 list-disc space-y-0.5 text-muted-foreground">{children}</ul>,
+  ol: ({ children }: { children?: React.ReactNode }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5 text-muted-foreground">{children}</ol>,
+  li: ({ children }: { children?: React.ReactNode }) => <li className="text-sm leading-6">{children}</li>,
+  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto rounded-lg bg-muted p-3 text-[13px] text-foreground">{children}</pre>,
+  code: ({ children }: { children?: React.ReactNode }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">{children}</code>,
+  blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">{children}</a>,
+  strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold text-foreground">{children}</strong>,
+  em: ({ children }: { children?: React.ReactNode }) => <em className="italic text-muted-foreground">{children}</em>,
+  hr: () => <hr className="my-2 border-border" />,
+};
+
 function DescriptionViewer({ description }: { description: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[rehypeSanitize]}
-      components={{
-        p: ({ children }) => <p className="mb-2 break-words text-sm leading-6 text-muted-foreground last:mb-0">{children}</p>,
-        h1: ({ children }) => <h1 className="mb-2 text-lg font-bold text-foreground">{children}</h1>,
-        h2: ({ children }) => <h2 className="mb-2 text-base font-bold text-foreground">{children}</h2>,
-        h3: ({ children }) => <h3 className="mb-1.5 text-sm font-bold text-foreground">{children}</h3>,
-        ul: ({ children }) => <ul className="mb-2 ml-4 list-disc space-y-0.5 text-muted-foreground">{children}</ul>,
-        ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5 text-muted-foreground">{children}</ol>,
-        li: ({ children }) => <li className="text-sm leading-6">{children}</li>,
-        pre: ({ children }) => <pre className="mb-2 overflow-x-auto rounded-lg bg-muted p-3 text-[13px] text-foreground">{children}</pre>,
-        code: ({ children }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">{children}</code>,
-        blockquote: ({ children }) => <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
-        a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">{children}</a>,
-        strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
-        em: ({ children }) => <em className="italic text-muted-foreground">{children}</em>,
-        hr: () => <hr className="my-2 border-border" />,
-      }}
+      components={descriptionViewerComponents}
     >
       {description}
     </ReactMarkdown>

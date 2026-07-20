@@ -63,24 +63,27 @@ const MdBadge = ({ label }: { label: string }) => (
   </span>
 );
 
+// story #2021 후속(PO 리뷰): components 객체를 렌더 함수 안에서 인라인으로 만들면 매 렌더
+// 새 함수 참조가 되어 react-markdown이 서브트리를 리마운트한다(chat-bubble 근본원인과 동형).
+// 이 객체는 props/상태에 의존하지 않는 순수 상수이고 자식도 전부 stateless라 useMemo조차
+// 불필요 — 모듈 스코프로 끌어올려 참조를 영구 고정한다.
+const mdBodyComponents = {
+  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 text-sm leading-6">{children}</p>,
+  h1: ({ children }: { children?: React.ReactNode }) => <h1 className="mb-2 text-lg font-bold">{children}</h1>,
+  h2: ({ children }: { children?: React.ReactNode }) => <h2 className="mb-2 text-base font-bold">{children}</h2>,
+  h3: ({ children }: { children?: React.ReactNode }) => <h3 className="mb-1.5 text-sm font-bold">{children}</h3>,
+  ul: ({ children }: { children?: React.ReactNode }) => <ul className="mb-2 ml-4 list-disc space-y-0.5">{children}</ul>,
+  ol: ({ children }: { children?: React.ReactNode }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5">{children}</ol>,
+  li: ({ children }: { children?: React.ReactNode }) => <li className="text-sm leading-6">{children}</li>,
+  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto rounded-lg p-3 text-[13px] bg-muted">{children}</pre>,
+  code: ({ children }: { children?: React.ReactNode }) => <code className="rounded px-1 py-0.5 font-mono text-[13px] bg-muted">{children}</code>,
+  blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 pl-3 border-border text-muted-foreground">{children}</blockquote>,
+  strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold">{children}</strong>,
+  em: ({ children }: { children?: React.ReactNode }) => <em className="italic">{children}</em>,
+};
+
 const MdBody = ({ content }: { content: string }) => (
-  <ReactMarkdown
-    remarkPlugins={[remarkGfm]}
-    components={{
-      p: ({ children }) => <p className="mb-2 text-sm leading-6">{children}</p>,
-      h1: ({ children }) => <h1 className="mb-2 text-lg font-bold">{children}</h1>,
-      h2: ({ children }) => <h2 className="mb-2 text-base font-bold">{children}</h2>,
-      h3: ({ children }) => <h3 className="mb-1.5 text-sm font-bold">{children}</h3>,
-      ul: ({ children }) => <ul className="mb-2 ml-4 list-disc space-y-0.5">{children}</ul>,
-      ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5">{children}</ol>,
-      li: ({ children }) => <li className="text-sm leading-6">{children}</li>,
-      pre: ({ children }) => <pre className="mb-2 overflow-x-auto rounded-lg p-3 text-[13px] bg-muted">{children}</pre>,
-      code: ({ children }) => <code className="rounded px-1 py-0.5 font-mono text-[13px] bg-muted">{children}</code>,
-      blockquote: ({ children }) => <blockquote className="mb-2 border-l-2 pl-3 border-border text-muted-foreground">{children}</blockquote>,
-      strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-      em: ({ children }) => <em className="italic">{children}</em>,
-    }}
-  >
+  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdBodyComponents}>
     {content}
   </ReactMarkdown>
 );
