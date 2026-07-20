@@ -22,6 +22,10 @@ export interface HypothesisRowActions {
   onKill: (h: Hypothesis) => void;
   // story #2036 — measuring 가설을 사람이 달성/반증으로 닫는 진입점(다이얼로그는 호출부가 연다).
   onResolve: (h: Hypothesis, target: 'verified' | 'falsified') => void;
+  // story #2053 — active→measuring 전이 동선이 화면에 아예 없어 종결 메뉴(measuring 전용)에
+  // 도달할 수 없던 결함. 서버(hypothesis.py transition_hypothesis)엔 이 전이에 measure_after/
+  // 지표정의 요건이 없다(실측 확認) — 그냥 시작되면 되므로 별도 입력 다이얼로그 없이 1스텝.
+  onStartMeasuring: (h: Hypothesis) => void;
 }
 
 /** Compact in-flight / terminal row (§4.2). verified/falsified use the VerdictCard instead. */
@@ -43,6 +47,9 @@ export function HypothesisRow({
     hypothesis.status === 'proposed' && draftMeta?.template === true && draftMeta?.confirmed !== true;
   // §12.2ⓑ: 확인 직후(또는 휴먼 proposed) 같은 자리에 [활성화]를 인라인 연속 노출.
   const canActivateInline = hypothesis.status === 'proposed' && !needsConfirm;
+  // story #2053 — active 가설에서 measuring으로 옮기는 동선. §12.2ⓑ [활성화]와 동일하게
+  // row 인라인 연속 노출(사람이 찾을 수 있는 자리, AC1) — ⋯ 메뉴에 숨기지 않는다.
+  const canStartMeasuringInline = hypothesis.status === 'active';
   const linkedCount = hypothesis.story_ids?.length ?? 0;
   const killed = hypothesis.status === 'killed';
 
@@ -107,6 +114,22 @@ export function HypothesisRow({
             <Play className="size-3" />
             {t('activate')}
           </button>
+        </div>
+      ) : canStartMeasuringInline ? (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => actions.onStartMeasuring(hypothesis)}
+            title={hypothesis.measure_after ? t('startMeasuringHintWithDate', { date: hypothesis.measure_after.slice(0, 10) }) : t('startMeasuringHint')}
+            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground transition hover:border-primary hover:text-primary"
+          >
+            <Play className="size-3" />
+            {t('startMeasuring')}
+          </button>
+          {/* AC2: 동선의 의미를 문구로 — "측정 시작"이 언제부터 재는지 사람이 알 수 있게. */}
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {hypothesis.measure_after ? t('startMeasuringHintWithDate', { date: hypothesis.measure_after.slice(0, 10) }) : t('startMeasuringHint')}
+          </p>
         </div>
       ) : null}
     </div>
