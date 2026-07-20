@@ -210,18 +210,19 @@ async def test_realdb_verified_with_valid_outcome_result_persists():
         client = _client_for(app)
         try:
             outcome = {"actual": 137, "reason": "가입 137건으로 목표 100건 초과 달성"}
+            expected = {**outcome, "closed_by": "human", "closed_by_member_id": str(seeded["caller_id"])}
             resp = await client.post(
                 f"/api/v2/hypotheses/{hyp_id}/transition",
                 json={"status": "verified", "outcome_result": outcome},
             )
             assert resp.status_code == 200, resp.text
             assert resp.json()["status"] == "verified", resp.json()
-            assert resp.json()["outcome_result"] == outcome, resp.json()
+            assert resp.json()["outcome_result"] == expected, resp.json()
 
             recheck = await client.get(f"/api/v2/hypotheses/{hyp_id}")
             body = recheck.json()
             assert body["status"] == "verified", body
-            assert body["outcome_result"] == outcome, body
+            assert body["outcome_result"] == expected, body
         finally:
             await client.aclose()
     finally:

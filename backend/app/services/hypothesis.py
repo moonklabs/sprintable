@@ -362,7 +362,14 @@ async def transition_hypothesis(
     if target == "active":
         updates["confirmed_by_member_id"] = caller.id
     if target in ("verified", "falsified") and payload.outcome_result is not None:
-        updates["outcome_result"] = payload.outcome_result
+        # story #2036/PR #2303 PO 리뷰(b4e88f34): closed_by는 "누가 닫았는가"를 결정하는
+        # 신뢰축 필드라 클라이언트 자칭을 허용하면 API 직접 호출로 agent가 닫은 걸 human으로
+        # 위장할 수 있었다. 서버(인증된 caller)가 채우고 클라이언트가 보낸 동명 필드는 버린다.
+        updates["outcome_result"] = {
+            **payload.outcome_result,
+            "closed_by": caller.type,
+            "closed_by_member_id": str(caller.id),
+        }
     if target == "killed" and payload.note:
         updates["outcome_result"] = {**(hyp.outcome_result or {}), "reason": payload.note}
     if target == "archived":
