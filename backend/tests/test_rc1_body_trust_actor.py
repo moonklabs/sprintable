@@ -69,8 +69,10 @@ async def test_transition_forces_resolver_ignoring_body():
     from fastapi import BackgroundTasks
     with patch.object(mod, "resolve_member", AsyncMock(return_value=caller)), \
          patch.object(mod, "transition_gate", _fake_transition):
+        # story #2027: _non_doc_gate_session()의 gate_type="merge"는 고위험(_HIGH_RISK_GATE_TYPES)이라
+        # 이 파일의 관심사(resolver_id 강제)와 무관한 사유-강제 가드를 note로 우회.
         await transition_gate_endpoint(
-            id=uuid.uuid4(), body=GateTransitionRequest(status="approved", resolver_id=forged),
+            id=uuid.uuid4(), body=GateTransitionRequest(status="approved", resolver_id=forged, note="테스트 사유"),
             background_tasks=BackgroundTasks(),
             session=_non_doc_gate_session(), org_id=uuid.uuid4(),
             auth=SimpleNamespace(user_id=str(uuid.uuid4())))

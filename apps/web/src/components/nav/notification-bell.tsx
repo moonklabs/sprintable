@@ -18,10 +18,10 @@ import { getEventTypeCopy } from '@/services/notification-display';
 
 type FilterTab = 'all' | 'story' | 'system';
 
-const FILTER_TABS: { value: FilterTab; label: string }[] = [
-  { value: 'all', label: '전체' },
-  { value: 'story', label: '스토리' },
-  { value: 'system', label: '시스템' },
+const FILTER_TABS: { value: FilterTab; labelKey: 'filterAll' | 'filter_story' | 'filter_system' }[] = [
+  { value: 'all', labelKey: 'filterAll' },
+  { value: 'story', labelKey: 'filter_story' },
+  { value: 'system', labelKey: 'filter_system' },
 ];
 
 function getNotificationTab(eventType: string): 'story' | 'system' {
@@ -79,15 +79,15 @@ function getEventIcon(eventType: string) {
   return <Bell className="size-4" />;
 }
 
-function timeAgo(dateStr: string): string {
+function timeAgo(dateStr: string, t: ReturnType<typeof useTranslations>): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return '방금 전';
-  if (mins < 60) return `${mins}분 전`;
+  if (mins < 1) return t('justNow');
+  if (mins < 60) return `${mins}${t('minutesAgo')}`;
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}시간 전`;
+  if (hours < 24) return `${hours}${t('hoursAgo')}`;
   const days = Math.floor(hours / 24);
-  return `${days}일 전`;
+  return `${days}${t('daysAgo')}`;
 }
 
 async function fetchNotifications(projectId?: string): Promise<EventNotification[]> {
@@ -136,6 +136,7 @@ function NotificationPanel({
   onClose,
 }: NotificationPanelProps) {
   const t = useTranslations('inbox');
+  const tCommon = useTranslations('common');
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
@@ -149,15 +150,15 @@ function NotificationPanel({
   }) ?? [];
 
   const emptyMessage =
-    filterTab === 'story' ? '스토리 알림이 없습니다' :
-    filterTab === 'system' ? '시스템 알림이 없습니다' :
-    '새 알림이 없습니다';
+    filterTab === 'story' ? t('emptyStory') :
+    filterTab === 'system' ? t('emptySystem') :
+    t('emptyAll');
 
   return (
     <div className="flex h-full flex-col">
       {/* 헤더 */}
       <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
-        <span className="text-sm font-semibold">알림</span>
+        <span className="text-sm font-semibold">{t('panelTitle')}</span>
         <div className="flex items-center gap-1">
           {hasUnread && (
             <button
@@ -166,14 +167,14 @@ function NotificationPanel({
               className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
             >
               <CheckCheck className="size-3.5" />
-              전체 읽음
+              {t('markAllRead')}
             </button>
           )}
           <button
             type="button"
             onClick={onClose}
             className="flex size-7 items-center justify-center rounded text-muted-foreground transition hover:bg-accent hover:text-foreground"
-            aria-label="닫기"
+            aria-label={tCommon('close')}
           >
             <X className="size-4" />
           </button>
@@ -194,7 +195,7 @@ function NotificationPanel({
                 : 'text-muted-foreground hover:text-foreground',
             )}
           >
-            {tab.label}
+            {t(tab.labelKey)}
           </button>
         ))}
         <div className="ml-auto flex shrink-0 items-center px-3">
@@ -208,7 +209,7 @@ function NotificationPanel({
                 : 'bg-muted text-muted-foreground hover:text-foreground',
             )}
           >
-            안읽음만
+            {t('unreadOnly')}
           </button>
         </div>
       </div>
@@ -217,7 +218,7 @@ function NotificationPanel({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-            로딩 중…
+            {tCommon('loading')}
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
@@ -261,7 +262,7 @@ function NotificationPanel({
                       </p>
                     ) : null}
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {timeAgo(n.created_at)}
+                      {timeAgo(n.created_at, t)}
                     </p>
                   </div>
                   {!n.read_at && (
@@ -409,7 +410,7 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label={unreadCount > 0 ? `알림 ${badgeLabel}개` : '알림'}
+        aria-label={unreadCount > 0 ? t('bellAriaLabelCount', { count: badgeLabel }) : t('panelTitle')}
         aria-expanded={open}
         className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground"
       >

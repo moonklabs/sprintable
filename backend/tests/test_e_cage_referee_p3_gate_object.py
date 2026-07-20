@@ -310,8 +310,14 @@ async def test_transition_rejected_saves_note():
 
 
 @pytest.mark.anyio
-async def test_transition_approved_does_not_save_note():
-    """approved 전이 시 note 전달해도 resolution_note 저장 안 함."""
+async def test_transition_approved_saves_note():
+    """approved 전이 시 note 전달하면 resolution_note로 저장(story #2027 계약 변경).
+
+    이전 계약("approved는 note를 버린다")은 고위험 게이트 승인에 사유를 **요구**하면서
+    저장은 안 하는 모순을 낳았다(요건은 지켜도 감사 추적은 비어 있었다) — void_gate/
+    override_gate가 이미 reason을 필수+영속화하는 것과도 어긋났다. `resolution_note`는
+    rejection 전용 필드가 아니라 승인·반려 양쪽의 해소 사유를 담는 필드라 이 계약 변경이
+    필드 의미와도 정합한다."""
     from app.services.gate_service import transition_gate
 
     gate = MagicMock()
@@ -326,9 +332,9 @@ async def test_transition_approved_does_not_save_note():
     session.flush = AsyncMock()
     session.refresh = AsyncMock()
 
-    await transition_gate(session, ORG_ID, GATE_ID, "approved", MEMBER_ID, "의미없는 노트")
+    await transition_gate(session, ORG_ID, GATE_ID, "approved", MEMBER_ID, "고위험 승인 사유")
     assert gate.status == "approved"
-    assert not hasattr(gate, "resolution_note") or gate.resolution_note != "의미없는 노트"
+    assert gate.resolution_note == "고위험 승인 사유"
 
 
 @pytest.mark.anyio
