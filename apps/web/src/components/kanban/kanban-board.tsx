@@ -19,6 +19,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast, ToastContainer } from '@/components/ui/toast';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { KanbanColumn } from './kanban-column';
 import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
@@ -240,6 +242,61 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const adjustColumnTotal = useCallback((status: string, delta: number) => {
     setColumnTotals((prev) => ({ ...prev, [status]: Math.max(0, (prev[status] ?? 0) + delta) }));
   }, []);
+
+  // story #2059: 보드 실시간 반영 — 새 EventSource를 여는 대신 기존 useSseNotifications의
+  // extraEventNames 확장 지점을 구독한다(AC2, 이미 이 용도로 설계된 재사용 경로 —
+  // hooks/use-sse-notifications.ts 자체 문서 참고). story.status_changed/assignee_changed는
+  // publish_event(org_id, ...)로 org 전체에 브로드캐스트되므로 project_id로 클라이언트 필터한다.
+  // 이미 로드된(페이지네이션으로 fetch된) 카드만 in-place 패치 — 전체 재fetch를 하지 않으므로
+  // 스크롤 위치·컬럼 순서가 흔들리지 않는다(AC3, #2050에서 배운 레이아웃 시프트 축과 동일 원리).
+  // 아직 로드 안 된 카드(다른 컬럼 페이지네이션 밖)의 신규 진입은 이 스토리 스코프 밖으로 둔다.
+  const { currentTeamMemberId } = useDashboardContext();
+
+  const handleBoardSseEvent = useCallback((eventName: string, data: unknown) => {
+    const payload = data as {
+      story_id?: string;
+      project_id?: string;
+      actor_id?: string;
+      actor_name?: string;
+      status?: string;
+      assignee_id?: string | null;
+    };
+    if (!payload.story_id || !payload.project_id || payload.project_id !== projectId) return;
+    // 내 액션의 echo는 무시 — 이미 낙관 갱신했으므로 중복 패치·토스트 스팸을 방지한다.
+    if (currentTeamMemberId && payload.actor_id === currentTeamMemberId) return;
+
+    const existing = stories.find((s) => s.id === payload.story_id);
+    if (!existing) return;
+
+    const titleForToast = existing.title;
+    if (eventName === 'story.status_changed' && payload.status && payload.status !== existing.status) {
+      const newStatus = payload.status;
+      setStories((prev) => prev.map((s) => (s.id === payload.story_id ? { ...s, status: newStatus } : s)));
+      adjustColumnTotal(existing.status, -1);
+      adjustColumnTotal(newStatus, +1);
+    } else if (eventName === 'story.assignee_changed') {
+      const newAssigneeId = payload.assignee_id ?? null;
+      setStories((prev) => prev.map((s) => (s.id === payload.story_id ? { ...s, assignee_id: newAssigneeId } : s)));
+    } else {
+      return;
+    }
+
+    // AC4: 카드가 그냥 이동하지 않는다 — 누가 했는지 토스트로 드러낸다(안 그러면 사람은
+    // 자기 화면이 오작동한 것으로 읽는다).
+    const actorLabel = payload.actor_name ?? t('realtimeUnknownActor');
+    addToast({
+      type: 'info',
+      title: eventName === 'story.status_changed'
+        ? t('realtimeStatusChanged', { actor: actorLabel, title: titleForToast })
+        : t('realtimeAssigneeChanged', { actor: actorLabel, title: titleForToast }),
+    });
+  }, [projectId, currentTeamMemberId, stories, adjustColumnTotal, addToast, t]);
+
+  useSseNotifications({
+    memberId: currentTeamMemberId,
+    extraEventNames: ['story.status_changed', 'story.assignee_changed'],
+    onExtraEvent: handleBoardSseEvent,
+  });
 
   const fetchData = useCallback(async () => {
     setLoading(true);

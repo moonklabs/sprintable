@@ -64,6 +64,14 @@ from app.models.release_note import ReleaseNote
 from app.models.role_template import RoleTemplate
 from app.models.trust_snapshot import OrgMemberTrustSnapshot
 from app.models.visual_artifact import ArtifactNode, ArtifactVersion, VisualArtifact
+# fix(2026-07-20, #2058 후속 CI 적출): 이 두 모듈이 여기 없어 `import app.models`만으로는
+# Base.metadata에 등록 안 됐다 — participation_role을 참조하는 FK(hitl_config.OrgGateOverride/
+# MemberGateOverride.role_id, participation.Participation.role_id)를 가진 realdb 테스트가
+# create_all() 시점에 NoReferencedTableError로 깨졌다(다른 테스트 파일과 조합 실행 시엔 그
+# 파일의 import 경로로 sys.modules에 우연히 이미 로드돼 안 드러났던 것으로 추정 — CI가 파일별로
+# 완전히 격리된 새 프로세스로 도는 조건에서 처음 노출).
+from app.models.hitl_config import MemberGateOverride, OrgGateOverride, OrgGatePolicy
+from app.models.participation import Participation, ParticipationRole
 
 __all__ = [
     "RoleTemplate",
