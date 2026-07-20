@@ -21,7 +21,10 @@ def anyio_backend() -> str:
 async def _client():
     from app.main import app
     ctx = MagicMock()
-    ctx.user_id = USER_ID
+    # story #2058: resolve_hitl_request가 resolve_member(auth.user_id)를 uuid.UUID(str)로 파싱
+    # — AuthContext.user_id는 항상 str 계약(app/dependencies/auth.py)이라 여기도 맞춘다(fixture
+    # 결함 — 이전엔 uuid.UUID(auth.user_id) 호출 자체가 없어서 안 드러났을 뿐).
+    ctx.user_id = str(USER_ID)
     ctx.email = "test@example.com"
     ctx.claims = {"app_metadata": {"org_id": str(ORG_ID), "project_id": str(PROJECT_ID)}, "sub": str(USER_ID)}
     mock_session = AsyncMock()
@@ -194,6 +197,12 @@ async def test_resolve_hitl_request_approved():
         row.id = REQUEST_ID
         row.status = "approved"
         row.responded_at = datetime(2026, 4, 30, 0, 0, 0, tzinfo=timezone.utc)
+        # story #2058: resolve_hitl_request가 이제 resolve_member(human-only 체크)로 DB를
+        # 몇 차례 더 왕복한다 — session이 순정 AsyncMock이면 .scalar_one_or_none()까지 재귀적으로
+        # AsyncMock화돼 미await 코루틴을 반환한다(mock 함정, 실 SQLAlchemy Result와 무관). 반환값을
+        # 평범한 MagicMock으로 고정해 이 체인이 동기적으로 truthy 값을 내도록 한다(JWT 휴먼 경로
+        # 통과 목적 — human 여부 자체는 auth.claims에 api_key_id가 없어 이미 human으로 하드결정됨).
+        session.execute = AsyncMock(return_value=MagicMock())
         with patch("app.repositories.hitl.HitlRepository.resolve_request", new_callable=AsyncMock) as mock_resolve:
             mock_resolve.return_value = row
             async with client as c:
@@ -210,6 +219,7 @@ async def test_resolve_hitl_request_approved():
 async def test_resolve_hitl_request_not_found_404():
     client, session, app, ctx = await _client()
     try:
+        session.execute = AsyncMock(return_value=MagicMock())  # story #2058 — 위 테스트와 동일 사유.
         with patch("app.repositories.hitl.HitlRepository.resolve_request", new_callable=AsyncMock) as mock_resolve:
             mock_resolve.return_value = None
             async with client as c:

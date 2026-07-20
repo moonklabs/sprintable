@@ -401,11 +401,19 @@ async def is_org_owner_or_admin(
     user_id: uuid.UUID,
     org_id: uuid.UUID,
 ) -> bool:
-    """user 가 해당 org 의 owner/admin 인지. 파괴적 작업(프로젝트 삭제 등) 게이트용.
+    """user 가 해당 org 의 owner/admin 인지. 파괴적 작업(프로젝트 삭제 등)·gate void/hold/unhold/
+    reassign·workflow config publish 승인 게이트용.
 
     grant(project_access)만으론 불가 — org-level 역할만 통과. has_project_access 의
     owner/admin 분기와 동일 기준(team_member 봐주기 없음).
-    """
+
+    story #2058 AC5②: 이 결과가 human-only 로 통하는 건 지금은 **org_members가 human 전용
+    테이블이라는 부산물**일 뿐이었다(agent auth는 id 공간이 달라 우연히 매치가 안 될 뿐 —
+    이 함수 자체엔 human 판정이 없었다). 아래 NOT EXISTS로 그 불변식을 **명시** 강제한다 —
+    이 user_id가 `members.type='agent'`로 존재하면(미래에 org_members에 agent 연동 user_id가
+    들어오는 경로가 생기더라도) 무조건 실패. `members` 행 자체가 없는 인간(멤버싱크 갭,
+    project_members_sync_gap 선례)은 걸러지지 않는다 — "agent로 확인됨"만 배제(positive
+    exclusion), "human으로 확인 안 됨"으로 막지 않음(fail-open 방향 아님·기존 회귀 0)."""
     row = await session.execute(
         text(
             """
@@ -414,6 +422,12 @@ async def is_org_owner_or_admin(
               AND org_id = :org_id
               AND deleted_at IS NULL
               AND role IN ('owner', 'admin')
+              AND NOT EXISTS (
+                SELECT 1 FROM members m
+                WHERE m.user_id = org_members.user_id
+                  AND m.org_id = org_members.org_id
+                  AND m.type = 'agent'
+              )
             LIMIT 1
             """
         ),
@@ -429,7 +443,7 @@ async def is_org_owner(
 ) -> bool:
     """user 가 해당 org 의 **owner** 인지(admin 제외). ⭐E-DG S33 gate override 전용 — override 는
     SoD 우회=가장 강력한 액션이라 admin(void/hold/reassign)보다 좁게 owner-only 로 게이트한다.
-    is_org_owner_or_admin 과 동일 구조·role='owner' 만."""
+    is_org_owner_or_admin 과 동일 구조·role='owner' 만(agent-exclusion NOT EXISTS 도 동형 — #2058)."""
     row = await session.execute(
         text(
             """
@@ -438,6 +452,12 @@ async def is_org_owner(
               AND org_id = :org_id
               AND deleted_at IS NULL
               AND role = 'owner'
+              AND NOT EXISTS (
+                SELECT 1 FROM members m
+                WHERE m.user_id = org_members.user_id
+                  AND m.org_id = org_members.org_id
+                  AND m.type = 'agent'
+              )
             LIMIT 1
             """
         ),
