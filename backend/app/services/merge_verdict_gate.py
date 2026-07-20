@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.participation import ParticipationRole
-from app.services.gate_resolver import resolve_disposition
+from app.services.gate_resolver import SOURCE_SYSTEM_DEFAULT, resolve_disposition
 from app.services.gate_service import create_gate, resolve_work_item_project_id
 from app.services.trust_score import compute_member_trust_scores
 from app.services.verdict_capture import (
@@ -264,28 +264,35 @@ async def evaluate_merge_gate(
     role_key = await _role_key(session, role_id)
 
     # P0(E-DG-REAL 1ff89d23): evidence-driven materialization — 빈 'CI unknown' shell 양산 박멸.
-    # 게이트는 **실 신호(CI 결과 · 연결 PR · 명시 deny 정책)**가 있을 때만 만든다. CI/PR 증거가
-    # 둘 다 없을 때만 정책을 확인하고, deny가 아니면(ask=시스템 기본이라 그 자체론 신호 아님) 사람이
-    # 판단할 게 없는 빈 shell이 되므로 **게이트를 만들지 않는다**(no-gate·row 0·done 통과). 실 CI
-    # 증거는 GitHub 앱(S5)이 native 당김. 3 트리거(board preflight·report-done·line-engine) 모두
-    # 이 단일 chokepoint를 거쳐 일관 적용. (증거 있으면 resolve_disposition 호출조차 생략.)
+    # 게이트는 **실 신호(CI 결과 · 연결 PR · 명시 deny 정책 · 명시 ask 정책)**가 있을 때만 만든다.
+    # CI/PR 증거가 둘 다 없을 때만 정책을 확인하고, deny도 아니고 명시 ask도 아니면(=시스템 기본
+    # ask거나 allow_auto) 사람이 판단할 게 없는 빈 shell이 되므로 **게이트를 만들지 않는다**(no-gate·
+    # row 0·done 통과). 실 CI 증거는 GitHub 앱(S5)이 native 당김. 3 트리거(board preflight·
+    # report-done·line-engine) 모두 이 단일 chokepoint를 거쳐 일관 적용. (증거 있으면
+    # resolve_disposition 호출조차 생략.)
+    #
+    # SID 301ee45d/#2047(선생님 지시 2026-07-20 — P0): resolve_disposition이 이제 (disposition,
+    # source)를 돌려준다. 과거엔 'ask'가 SYSTEM_DEFAULT든 조직이 명시 설정했든 구분 없이 여기서
+    # no-gate로 우회됐다 — "코드가 아닌 일(콘텐츠·마케팅 등, PR/CI 자체가 없는 작업)에는 조직이
+    # '반드시 사람이 서명'이라고 ask를 명시해도 사람 결재가 원리적으로 안 걸리는" 결함이었다(댄
+    # 어윈 실측 반증). 이제 source가 SYSTEM_DEFAULT가 아니면(member/org override든 org posture든
+    # 어떤 형태로든 조직·멤버가 명시한 값) 'ask'도 deny와 동일하게 substance로 인정해 게이트를
+    # 만든다. **설정 안 한 조직(SYSTEM_DEFAULT)은 지금과 동일하게 게이트가 안 생긴다** — 빈 shell
+    # 박멸 의도는 그대로 보존.
     if ci is None and pr_number <= 0:
-        disposition = await resolve_disposition(session, org_id, member_id, role_id, MERGE_GATE_TYPE)
-        # follow-up(enforcing 롤아웃·GitHub앱 S5 때 재고): substance로 인정하는 정책은 현재 'deny'만.
-        # 'ask'는 SYSTEM_DEFAULT(=ask)라 그 자체론 신호가 아니므로 증거 0이면 no-gate. 다만 resolve_disposition
-        # 은 disposition 문자열만 돌려주고 **출처(시스템 기본 vs 명시 override/posture)를 구분하지 않는다** →
-        # 어떤 org가 '증거 무관 전-머지 휴먼 사인오프' 의도로 ask를 명시 설정해도 지금은 bypass된다. 그 의도를
-        # 살리려면 resolve_disposition이 explicit-ask를 default-ask와 구분(출처 노출)해야 한다. P0(즉시 sloppy
-        # 탈출)에선 빈 shell 박멸이 우선이라 deny-only로 둔다.
-        if disposition != "deny":
+        disposition, disposition_source = await resolve_disposition(
+            session, org_id, member_id, role_id, MERGE_GATE_TYPE
+        )
+        explicit_ask = disposition == "ask" and disposition_source != SOURCE_SYSTEM_DEFAULT
+        if disposition != "deny" and not explicit_ask:
             logger.info(
-                "merge gate: no substance (ci=None pr_number=0 disposition=%s) story=%s "
+                "merge gate: no substance (ci=None pr_number=0 disposition=%s source=%s) story=%s "
                 "— gate not materialized (no-gate)",
-                disposition, story_id,
+                disposition, disposition_source, story_id,
             )
             return MergeGateDecision(
                 decision=AUTO_MERGE,
-                reason="no-substance: no CI/PR evidence and policy is not deny — gate not materialized",
+                reason="no-substance: no CI/PR evidence and policy is not deny/explicit-ask — gate not materialized",
                 gate_id=None,
                 gate_status=None,
                 disposition=disposition,

@@ -498,8 +498,12 @@ async def test_strong_outcome_track_record_auto_merges_real_db():
 import contextlib  # noqa: E402
 
 
-async def _run_substance(*, ci_result, pr_number, disposition):
-    """substance 가드 경로 — participation 있음, disposition 주입, create_gate spy 반환."""
+async def _run_substance(*, ci_result, pr_number, disposition, source="system_default"):
+    """substance 가드 경로 — participation 있음, (disposition, source) 주입, create_gate spy 반환.
+
+    SID 301ee45d/#2047: resolve_disposition이 (disposition, source) 튜플을 돌려준다 — source
+    기본값은 SYSTEM_DEFAULT(기존 테스트들의 암묵 전제였던 "누구도 명시 설정 안 함").
+    """
     part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4())
     gate = SimpleNamespace(id=uuid.uuid4(), status="pending")
     with contextlib.ExitStack() as stack:
@@ -507,7 +511,7 @@ async def _run_substance(*, ci_result, pr_number, disposition):
                                          AsyncMock(return_value=part)))
         stack.enter_context(patch.object(mod, "_role_key", AsyncMock(return_value="implementation")))
         stack.enter_context(patch.object(mod, "resolve_disposition",
-                                         AsyncMock(return_value=disposition)))
+                                         AsyncMock(return_value=(disposition, source))))
         stack.enter_context(patch.object(mod, "capture_pr_ci_verdict",
                                          AsyncMock(return_value={"recorded": [], "skipped_reason": "no_sid_tag"})))
         stack.enter_context(patch.object(mod, "compute_member_trust_scores",
@@ -523,8 +527,12 @@ async def _run_substance(*, ci_result, pr_number, disposition):
 
 @pytest.mark.anyio
 async def test_no_substance_no_gate_materialized():
-    """무증거(ci None·pr 0·정책 ask) → 게이트 미생성·no-gate(AUTO_MERGE)·row 0."""
-    res, create_spy = await _run_substance(ci_result=None, pr_number=0, disposition="ask")
+    """무증거(ci None·pr 0·정책 ask=SYSTEM_DEFAULT) → 게이트 미생성·no-gate(AUTO_MERGE)·row 0.
+
+    아무도 명시 설정 안 한 조직(빈 shell 박멸 의도가 지키려는 대상)의 현행 동작 보존."""
+    res, create_spy = await _run_substance(
+        ci_result=None, pr_number=0, disposition="ask", source="system_default",
+    )
     assert res.decision == AUTO_MERGE
     assert res.gate_id is None
     assert "no-substance" in res.reason
@@ -533,10 +541,38 @@ async def test_no_substance_no_gate_materialized():
 
 @pytest.mark.anyio
 async def test_no_substance_allow_auto_also_no_gate():
-    """무증거 + 정책 allow_auto → 동일하게 no-gate(done 통과·row 0)."""
-    res, create_spy = await _run_substance(ci_result=None, pr_number=0, disposition="allow_auto")
+    """무증거 + 정책 allow_auto(명시든 기본이든) → 동일하게 no-gate(done 통과·row 0).
+
+    AC2: allow_auto는 "사람이 볼 필요 없다"는 의미라 명시했어도 게이트가 서면 안 된다."""
+    res, create_spy = await _run_substance(
+        ci_result=None, pr_number=0, disposition="allow_auto", source="org_policy",
+    )
     assert res.decision == AUTO_MERGE and res.gate_id is None
     create_spy.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_no_substance_explicit_ask_materializes_gate():
+    """⭐SID 301ee45d/#2047 AC2 — 조직이 ask를 명시(org_policy)했으면 증거가 없어도 게이트가
+    서고 requires_human=true가 된다. 이게 이 스토리의 핵심 회귀 게이트: 명시 안 한 조직은
+    위 test_no_substance_no_gate_materialized처럼 여전히 no-gate라는 것과 짝을 이룬다."""
+    res, create_spy = await _run_substance(
+        ci_result=None, pr_number=0, disposition="ask", source="org_policy",
+    )
+    assert res.gate_id is not None
+    assert res.decision == ASK_HUMAN
+    create_spy.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_no_substance_member_override_ask_materializes_gate():
+    """member_gate_override로 ask를 명시한 경우도 동일하게 게이트가 선다(precedence 최상위)."""
+    res, create_spy = await _run_substance(
+        ci_result=None, pr_number=0, disposition="ask", source="member_override",
+    )
+    assert res.gate_id is not None
+    assert res.decision == ASK_HUMAN
+    create_spy.assert_awaited_once()
 
 
 @pytest.mark.anyio
@@ -558,7 +594,7 @@ async def test_connected_pr_materializes_gate():
 
 @pytest.mark.anyio
 async def test_deny_policy_materializes_even_without_evidence():
-    """명시 deny 정책 → 증거 없어도 게이트 생성(하드블록 honor)."""
+    """명시 deny 정책 → 증거 없어도 게이트 생성(하드블록 honor) — source 무관(deny는 항상 substance)."""
     res, create_spy = await _run_substance(ci_result=None, pr_number=0, disposition="deny")
     assert res.gate_id is not None
     create_spy.assert_awaited_once()

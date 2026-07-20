@@ -97,6 +97,9 @@ class ResolveRequest(BaseModel):
 
 class ResolveResponse(BaseModel):
     disposition: str
+    # SID 301ee45d/#2047 AC1: "member_override"|"org_override"|"org_policy"|"system_default" —
+    # 이 disposition이 누군가 명시 설정한 값인지 시스템 기본값인지 API 응답에서 바로 보이게 한다.
+    source: str
     member_id: uuid.UUID
     role_id: uuid.UUID
     gate_type: str

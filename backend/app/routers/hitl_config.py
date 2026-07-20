@@ -206,11 +206,12 @@ async def resolve(
     precedence: member_override > org_override > org_posture > system_default(ask).
     risk_level 입력 없음 — 플랫폼 위험도 판정 안 함.
     """
-    disposition = await resolve_disposition(
+    disposition, source = await resolve_disposition(
         session, org_id, body.member_id, body.role_id, body.gate_type
     )
     return ResolveResponse(
         disposition=disposition,
+        source=source,
         member_id=body.member_id,
         role_id=body.role_id,
         gate_type=body.gate_type,
