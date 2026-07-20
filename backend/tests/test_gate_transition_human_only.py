@@ -32,7 +32,10 @@ def _resolved(member_type: str) -> ResolvedMember:
 
 async def _call(status: str, member_type: str):
     org_id = uuid.uuid4()
-    body = GateTransitionRequest(status=status, resolver_id=uuid.uuid4())
+    # story #2027: note 동봉 — 이 테스트는 휴먼/에이전트 authz만 검증(risk_grade 무관). note 없으면
+    # gate_type="merge_approval"이 risk 매트릭스 두 세트 어디에도 없어 폴백(보수적 고위험)으로 떨어져
+    # approve 가 새 사유-강제 가드에 걸린다 — 이 파일의 관심사가 아니므로 note 로 그 분기를 우회한다.
+    body = GateTransitionRequest(status=status, resolver_id=uuid.uuid4(), note="테스트 사유")
     session = AsyncMock()
     # 48f064e5: 엔드포인트가 doc-gate authz용 게이트 로드 → 비-doc 게이트 반환(merge 등)으로 그 분기 skip.
     _gr = MagicMock()
