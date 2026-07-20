@@ -9,7 +9,7 @@
    구간에서 나중 선언이 이기는 CSS 규칙에 기댄다. 코어 안의 글자만 있는 문서는 확장
    907.8KB를 안 받는다(Chrome document.fonts 실측: 확장 unloaded 유지). */
 @font-face {
-  font-family: 'Pretendard';
+  font-family: 'Pretendard Variable';
   src: url('/fonts/pretendard-korean-ext.woff2') format('woff2');
   font-weight: 400 900;
   font-display: swap;
@@ -17,7 +17,7 @@
 }
 
 @font-face {
-  font-family: 'Pretendard';
+  font-family: 'Pretendard Variable';
   src: url('/fonts/pretendard-korean-core.woff2') format('woff2');
   font-weight: 400 900;
   font-display: swap;
@@ -25,7 +25,7 @@
 }
 
 @font-face {
-  font-family: 'Pretendard';
+  font-family: 'Pretendard Variable';
   src: url('/fonts/pretendard-latin.woff2') format('woff2');
   font-weight: 400 900;
   font-display: swap;
