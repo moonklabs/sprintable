@@ -2834,7 +2834,22 @@
     "drafting": "Drafting…",
     "draftReviewTitle": "AI draft",
     "draftNote": "AI-suggested from activity. Review before adding.",
-    "draftAccept": "Confirm & add"
+    "draftAccept": "Confirm & add",
+    "resolveVerify": "Close as verified",
+    "resolveFalsify": "Close as falsified",
+    "resolveTitleVerify": "Close hypothesis as verified",
+    "resolveTitleFalsify": "Close hypothesis as falsified",
+    "actualInputLabel": "Actual value",
+    "reasonInputLabel": "Reason (one line)",
+    "reasonInputPlaceholder": "State the reason for this verdict",
+    "reasonHint": "A reason is required to close this hypothesis.",
+    "resolveSubmit": "Save verdict",
+    "closedByHuman": "Resolved by {name}",
+    "closedByAuto": "Auto-scored",
+    "mismatchVerifyWarning": "The actual value doesn't meet the target. If you still close this as verified, note why in the reason.",
+    "mismatchFalsifyWarning": "The actual value meets the target. If you still close this as falsified, note why in the reason.",
+    "switchToFalsify": "Switch to falsified",
+    "switchToVerify": "Switch to verified"
   },
   "goals": {
     "title": "Goals",

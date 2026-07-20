@@ -15,12 +15,33 @@ import type { Hypothesis } from '@sprintable/core-storage';
  */
 const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 
-export function HypothesisVerdictCard({ hypothesis }: { hypothesis: Hypothesis }) {
+export function HypothesisVerdictCard({
+  hypothesis,
+  resolveName,
+}: {
+  hypothesis: Hypothesis;
+  /** story #2036 AC3 — closed_by_member_id → 표시 이름. 없으면 id 그대로 폴백. */
+  resolveName?: (id: string) => string;
+}) {
   const t = useTranslations('hypotheses');
   const isVerified = hypothesis.status === 'verified';
   const result = (hypothesis.outcome_result ?? null) as
-    | { metric?: string; target?: number; actual?: number; direction?: 'up' | 'down'; scored_at?: string }
+    | {
+        metric?: string;
+        target?: number;
+        actual?: number;
+        direction?: 'up' | 'down';
+        scored_at?: string;
+        reason?: string;
+        closed_by?: 'human';
+        closed_by_member_id?: string;
+      }
     | null;
+  // story #2036 AC3 — 사람이 닫았으면 closed_by='human'이 outcome_result에 실린다(BE 컬럼
+  // 없음·JSONB 자체 적재). 없으면 cron 자동 채점(hypothesis_scorer.py)이 닫은 것.
+  const closedByLabel = result?.closed_by === 'human'
+    ? t('closedByHuman', { name: result.closed_by_member_id ? (resolveName?.(result.closed_by_member_id) ?? result.closed_by_member_id) : t('owner') })
+    : result?.scored_at ? t('closedByAuto') : null;
 
   return (
     <div
@@ -55,6 +76,13 @@ export function HypothesisVerdictCard({ hypothesis }: { hypothesis: Hypothesis }
           </div>
           <DeltaTrack target={result.target} actual={result.actual} isVerified={isVerified} />
         </>
+      ) : null}
+
+      {result?.reason ? (
+        <p className="mt-3 text-xs leading-5 text-muted-foreground">&ldquo;{result.reason}&rdquo;</p>
+      ) : null}
+      {closedByLabel ? (
+        <p className="mt-1.5 text-[11px] text-muted-foreground">{closedByLabel}</p>
       ) : null}
     </div>
   );
