@@ -234,7 +234,10 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
     if (!resolving) return;
     setResolveSubmitting(true);
     try {
-      const { hypothesis: h, target } = resolving;
+      const { hypothesis: h } = resolving;
+      // 유나 가디언 리뷰: 다이얼로그 내 불일치 배너로 판정을 전환할 수 있으므로 열 때의
+      // target이 아니라 결과가 실어온 target(사용자가 최종 선택한 판정)을 그대로 쓴다.
+      const target = result.target;
       const md = h.metric_definition;
       const res = await fetch(`/api/hypotheses/${h.id}/transition`, {
         method: 'POST',

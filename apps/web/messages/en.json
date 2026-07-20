@@ -2845,7 +2845,11 @@
     "reasonHint": "A reason is required to close this hypothesis.",
     "resolveSubmit": "Save verdict",
     "closedByHuman": "Resolved by {name}",
-    "closedByAuto": "Auto-scored"
+    "closedByAuto": "Auto-scored",
+    "mismatchVerifyWarning": "The actual value doesn't meet the target. If you still close this as verified, note why in the reason.",
+    "mismatchFalsifyWarning": "The actual value meets the target. If you still close this as falsified, note why in the reason.",
+    "switchToFalsify": "Switch to falsified",
+    "switchToVerify": "Switch to verified"
   },
   "goals": {
     "title": "Goals",

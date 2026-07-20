@@ -2845,7 +2845,11 @@
     "reasonHint": "근거 없이는 닫을 수 없습니다.",
     "resolveSubmit": "판정 저장",
     "closedByHuman": "{name} 판정",
-    "closedByAuto": "자동 채점"
+    "closedByAuto": "자동 채점",
+    "mismatchVerifyWarning": "입력한 실제 수치가 목표 조건에 못 미칩니다. 그래도 달성으로 저장하려면 근거에 사유를 남기세요.",
+    "mismatchFalsifyWarning": "입력한 실제 수치가 목표 조건을 충족합니다. 그래도 반증으로 저장하려면 근거에 사유를 남기세요.",
+    "switchToFalsify": "반증으로 전환",
+    "switchToVerify": "달성으로 전환"
   },
   "goals": {
     "title": "목표",
