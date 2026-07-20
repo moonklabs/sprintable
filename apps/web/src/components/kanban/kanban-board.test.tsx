@@ -21,6 +21,11 @@ vi.mock('@/components/nav/top-bar-slot', () => ({
   ),
 }));
 
+const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => useDashboardContextMock(),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -59,11 +64,39 @@ function stubLocalStorage() {
   });
 }
 
+// story #2059 — 보드 실시간 반영용 EventSource 페이크. addEventListener로 등록된
+// story.status_changed/story.assignee_changed 리스너를 캡처해 테스트에서 직접 dispatch한다.
+type SseListener = (e: { data: string; lastEventId?: string }) => void;
+let sseListeners: Record<string, SseListener[]>;
+
+function stubEventSource() {
+  sseListeners = {};
+  class FakeEventSource {
+    onopen: (() => void) | null = null;
+    onmessage: SseListener | null = null;
+    onerror: (() => void) | null = null;
+    constructor(_url: string, _opts?: unknown) {}
+    addEventListener(name: string, cb: SseListener) {
+      (sseListeners[name] ??= []).push(cb);
+    }
+    close() {}
+  }
+  vi.stubGlobal('EventSource', FakeEventSource);
+}
+
+function dispatchSse(eventName: string, data: unknown) {
+  for (const cb of sseListeners[eventName] ?? []) {
+    cb({ data: JSON.stringify(data) });
+  }
+}
+
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   stubLocalStorage();
+  stubEventSource();
+  useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [] });
 });
 
 afterEach(async () => {
@@ -106,5 +139,75 @@ describe('KanbanBoard — 보드 first-touch 절제된 배너', () => {
     await mount();
     const html = container.innerHTML;
     expect(html).not.toContain('아직 움직이는 일이 없어요');
+  });
+});
+
+// story #2059 — 보드 실시간 반영. 새 EventSource를 여는 대신 기존 useSseNotifications의
+// extraEventNames를 구독해 story.status_changed/assignee_changed를 받는다(AC2). 이미 로드된
+// 카드만 in-place 패치하고(AC3, 전체 재fetch 없음) 누가 바꿨는지 토스트로 드러낸다(AC4).
+describe('KanbanBoard — 실시간(SSE) 반영', () => {
+  it('다른 사람이 상태를 바꾸면 토스트가 뜬다(누가 했는지 드러남, AC4)', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    await act(async () => {
+      dispatchSse('story.status_changed', {
+        story_id: 's1', project_id: 'proj-1', actor_id: 'other-1', actor_name: '댄',
+        status: 'ready-for-dev', old_status: 'backlog',
+      });
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('댄님이 S1 상태를 변경했습니다');
+  });
+
+  it('내 액션의 echo(actor_id===currentTeamMemberId)는 토스트를 안 띄운다(중복 방지)', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    await act(async () => {
+      dispatchSse('story.status_changed', {
+        story_id: 's1', project_id: 'proj-1', actor_id: 'me-1', actor_name: '나',
+        status: 'ready-for-dev', old_status: 'backlog',
+      });
+      await Promise.resolve();
+    });
+    expect(container.textContent).not.toContain('상태를 변경했습니다');
+  });
+
+  it('다른 project_id의 이벤트는 무시한다(org-wide 브로드캐스트 클라이언트 필터)', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    await act(async () => {
+      dispatchSse('story.status_changed', {
+        story_id: 's1', project_id: 'other-project', actor_id: 'other-1', actor_name: '댄',
+        status: 'ready-for-dev', old_status: 'backlog',
+      });
+      await Promise.resolve();
+    });
+    expect(container.textContent).not.toContain('상태를 변경했습니다');
+  });
+
+  it('아직 로드되지 않은 스토리 id의 이벤트는 조용히 무시한다(크래시 없음)', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    await act(async () => {
+      dispatchSse('story.status_changed', {
+        story_id: 'not-loaded', project_id: 'proj-1', actor_id: 'other-1', actor_name: '댄',
+        status: 'ready-for-dev', old_status: 'backlog',
+      });
+      await Promise.resolve();
+    });
+    expect(container.textContent).not.toContain('상태를 변경했습니다');
+  });
+
+  it('담당자 변경 이벤트도 토스트로 드러난다', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: null }]);
+    await mount();
+    await act(async () => {
+      dispatchSse('story.assignee_changed', {
+        story_id: 's1', project_id: 'proj-1', actor_id: 'other-1', actor_name: '까심',
+        assignee_id: 'agent-1', old_assignee_id: null,
+      });
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('까심님이 S1 담당자를 변경했습니다');
   });
 });
