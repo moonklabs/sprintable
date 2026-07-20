@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
+import { Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
 import { ThemeProvider } from '@/components/providers/theme-provider';
@@ -9,11 +9,6 @@ import "./globals.css";
 
 const SITE_TITLE = "Sprintable — The PM tool where agents are teammates";
 const SITE_DESCRIPTION = "AI-powered sprint management. Kanban, memos, standups, retros, MCP server — with AI agents as first-class team members.";
-
-const inter = Inter({
-  variable: "--font-sans",
-  subsets: ["latin"],
-});
 
 const geistMono = Geist_Mono({
   variable: "--font-mono",
@@ -71,9 +66,15 @@ export default async function RootLayout({
   return (
     <html
       lang={locale}
-      className={`${inter.variable} ${geistMono.variable} ${sourceSerif.variable} h-full antialiased`}
+      className={`${geistMono.variable} ${sourceSerif.variable} h-full antialiased`}
       suppressHydrationWarning
     >
+      <head>
+        {/* story #2026: 라틴+코어만 preload — 확장(907.8KB)까지 걸면 unicode-range 판정을
+            건너뛰고 항상 받아버려 §3-4의 겹침-우선권 구성 자체가 무력화된다(유나 지적). */}
+        <link rel="preload" href="/fonts/pretendard-latin.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
+        <link rel="preload" href="/fonts/pretendard-korean-core.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
+      </head>
       <body className="h-full">
         <GoogleAnalytics />
         <ThemeProvider

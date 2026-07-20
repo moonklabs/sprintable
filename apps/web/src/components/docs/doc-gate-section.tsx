@@ -304,7 +304,7 @@ export function DocGateSection({
                       </p>
                       <p className="mt-px text-[10.5px] text-muted-foreground">{fmtDate(ev.at)}</p>
                       {ev.note?.trim() ? (
-                        <p className="mt-1 whitespace-pre-wrap rounded border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] text-muted-foreground">{ev.note}</p>
+                        <p className="mt-1 whitespace-pre-wrap rounded border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] leading-[14px] text-muted-foreground">{ev.note}</p>
                       ) : null}
                     </div>
                   </li>
