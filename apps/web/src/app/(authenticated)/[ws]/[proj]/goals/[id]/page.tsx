@@ -91,6 +91,15 @@ function priorityBadgeVariant(p: EpicPriority) {
   return 'chip' as const;
 }
 
+// story #2017: 이 페이지는 next-intl 미사용(전체 하드코딩 한글) — 기존 관례 그대로 로컬 맵으로
+// 정정(신규 i18n 인프라 도입은 스코프 밖). raw epic.priority가 그대로 badge에 렌더되던 부수 발견.
+const PRIORITY_LABEL_KO: Record<EpicPriority, string> = {
+  critical: '긴급',
+  high: '높음',
+  medium: '보통',
+  low: '낮음',
+};
+
 function formatDate(d?: string | null) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' });
@@ -183,10 +192,10 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
       {/* RC#2: status select 제거 — 전용 transition(상세 헤더 컨트롤·⓶)·일반 PATCH 봉인(BE #1651). 편집=title/desc/objective/criteria/priority/target만. */}
       <div className="grid grid-cols-2 gap-3">
         <select value={priority} onChange={(e) => setPriority(e.target.value as EpicPriority)} className={inputCls}>
-          <option value="critical">Critical</option>
-          <option value="high">High</option>
-          <option value="medium">Medium</option>
-          <option value="low">Low</option>
+          <option value="critical">{PRIORITY_LABEL_KO.critical}</option>
+          <option value="high">{PRIORITY_LABEL_KO.high}</option>
+          <option value="medium">{PRIORITY_LABEL_KO.medium}</option>
+          <option value="low">{PRIORITY_LABEL_KO.low}</option>
         </select>
         <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} className={inputCls} />
         <input type="number" min="0" value={targetSp} onChange={(e) => setTargetSp(e.target.value)} className={inputCls} placeholder="목표 SP" />
@@ -305,7 +314,7 @@ export default function EpicDetailPage() {
               status={epic.status}
               onTransitioned={(s) => setEpic((prev) => (prev ? { ...prev, status: s as EpicStatus } : prev))}
             />
-            <Badge variant={priorityBadgeVariant(epic.priority)}>{epic.priority}</Badge>
+            <Badge variant={priorityBadgeVariant(epic.priority)}>{PRIORITY_LABEL_KO[epic.priority]}</Badge>
             {epic.outcome_status && epic.outcome_status !== 'n_a' ? <OutcomeStatusBadge status={epic.outcome_status} /> : null}
             {epic.target_date && <span className="text-xs text-muted-foreground">마감: {formatDate(epic.target_date)}</span>}
             {epic.target_sp != null && <span className="text-xs text-muted-foreground">목표 SP: {epic.target_sp}</span>}

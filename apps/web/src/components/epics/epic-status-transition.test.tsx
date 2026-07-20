@@ -43,12 +43,14 @@ async function mount(onTransitioned: (s: string) => void) {
 }
 
 // active → done은 GATED("active>done") 대상이자 VALID_NEXT 상 유효 전이 — 드롭다운을 열고
-// "Done" 항목을 클릭해 실제 POST /api/goals/:id/transition 왕복 경로(transition() 핸들러)를 태운다.
+// "완료" 항목을 클릭해 실제 POST /api/goals/:id/transition 왕복 경로(transition() 핸들러)를 태운다.
+// story #2017: LABEL_KEY의 statusDone이 ko.json에서 raw 'Done'으로 렌더되던 버그를 고쳐 이제
+// "완료"로 렌더 — 이 헬퍼도 그 정정에 맞춰 갱신(구 영문 텍스트는 더 이상 존재하지 않음).
 async function clickTransitionToDone() {
   const trigger = [...document.body.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '상태 변경')!;
   expect(trigger).not.toBeUndefined();
   await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-  const item = [...document.body.querySelectorAll('[role="menuitem"]')].find((el) => el.textContent?.includes('Done'))!;
+  const item = [...document.body.querySelectorAll('[role="menuitem"]')].find((el) => el.textContent?.includes('완료'))!;
   expect(item).not.toBeUndefined();
   await act(async () => {
     item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
