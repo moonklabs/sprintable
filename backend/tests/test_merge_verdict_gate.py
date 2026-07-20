@@ -498,12 +498,20 @@ async def test_strong_outcome_track_record_auto_merges_real_db():
 import contextlib  # noqa: E402
 
 
-async def _run_substance(*, ci_result, pr_number, disposition, source="system_default"):
+async def _run_substance(*, ci_result, pr_number, disposition, source="system_default", explicit=None):
     """substance 가드 경로 — participation 있음, (disposition, source) 주입, create_gate spy 반환.
 
     SID 301ee45d/#2047: resolve_disposition이 (disposition, source) 튜플을 돌려준다 — source
     기본값은 SYSTEM_DEFAULT(기존 테스트들의 암묵 전제였던 "누구도 명시 설정 안 함").
+
+    PO 리뷰(2026-07-20): source만으로는 부족하다 — org_policy는 값(posture) 수준까지 봐야
+    "진짜 명시"인지 판정된다(`_is_meaningfully_explicit_ask`, 실 DB 대조는
+    test_2047_explicit_ask_gate.py의 posture=conservative/balanced 케이스가 담당). 이 단위
+    테스트는 그 판정 함수 자체를 직접 mock해 "explicit_ask=True/False일 때 게이트 생성 배선이
+    맞는지"만 검증한다 — 판정 로직 자체는 realdb 스위트가 실증.
     """
+    if explicit is None:
+        explicit = source != "system_default"  # 기존 테스트들의 암묵 기대(하위호환 기본값)
     part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4())
     gate = SimpleNamespace(id=uuid.uuid4(), status="pending")
     with contextlib.ExitStack() as stack:
@@ -512,6 +520,8 @@ async def _run_substance(*, ci_result, pr_number, disposition, source="system_de
         stack.enter_context(patch.object(mod, "_role_key", AsyncMock(return_value="implementation")))
         stack.enter_context(patch.object(mod, "resolve_disposition",
                                          AsyncMock(return_value=(disposition, source))))
+        stack.enter_context(patch.object(mod, "_is_meaningfully_explicit_ask",
+                                         AsyncMock(return_value=explicit)))
         stack.enter_context(patch.object(mod, "capture_pr_ci_verdict",
                                          AsyncMock(return_value={"recorded": [], "skipped_reason": "no_sid_tag"})))
         stack.enter_context(patch.object(mod, "compute_member_trust_scores",
@@ -553,15 +563,31 @@ async def test_no_substance_allow_auto_also_no_gate():
 
 @pytest.mark.anyio
 async def test_no_substance_explicit_ask_materializes_gate():
-    """⭐SID 301ee45d/#2047 AC2 — 조직이 ask를 명시(org_policy)했으면 증거가 없어도 게이트가
-    서고 requires_human=true가 된다. 이게 이 스토리의 핵심 회귀 게이트: 명시 안 한 조직은
-    위 test_no_substance_no_gate_materialized처럼 여전히 no-gate라는 것과 짝을 이룬다."""
+    """⭐SID 301ee45d/#2047 AC2 — 조직이 ask를 **값까지 명시**(org_policy·posture=conservative,
+    즉 `_is_meaningfully_explicit_ask`가 True)했으면 증거가 없어도 게이트가 서고
+    requires_human=true가 된다. 이게 이 스토리의 핵심 회귀 게이트: 명시 안 한 조직은 위
+    test_no_substance_no_gate_materialized처럼 여전히 no-gate라는 것과 짝을 이룬다."""
     res, create_spy = await _run_substance(
-        ci_result=None, pr_number=0, disposition="ask", source="org_policy",
+        ci_result=None, pr_number=0, disposition="ask", source="org_policy", explicit=True,
     )
     assert res.gate_id is not None
     assert res.decision == ASK_HUMAN
     create_spy.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_no_substance_org_policy_default_posture_not_explicit_no_gate():
+    """⛔PO 리뷰(2026-07-20) 회귀 게이트 — org_gate_policy 행이 존재해도(source="org_policy")
+    posture가 기본값(balanced)이면 "출처는 명시"지만 "값은 아무도 안 고른 기본값"이라
+    `_is_meaningfully_explicit_ask`가 False를 내야 하고, 그러면 게이트가 안 서야 한다.
+    `PUT /gate-config/policy`에 본문 `{}`만 보내도 posture="balanced"가 저장되는 경로가
+    "명시 ask"로 오판되면 원 버그와 같은 계열의 함정에 다시 빠진다."""
+    res, create_spy = await _run_substance(
+        ci_result=None, pr_number=0, disposition="ask", source="org_policy", explicit=False,
+    )
+    assert res.decision == AUTO_MERGE
+    assert res.gate_id is None
+    create_spy.assert_not_awaited()
 
 
 @pytest.mark.anyio

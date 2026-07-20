@@ -21,7 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.participation import ParticipationRole
-from app.services.gate_resolver import SOURCE_SYSTEM_DEFAULT, resolve_disposition
+from app.services.gate_resolver import (
+    SOURCE_MEMBER_OVERRIDE,
+    SOURCE_ORG_OVERRIDE,
+    SOURCE_ORG_POLICY,
+    resolve_disposition,
+)
 from app.services.gate_service import create_gate, resolve_work_item_project_id
 from app.services.trust_score import compute_member_trust_scores
 from app.services.verdict_capture import (
@@ -46,6 +51,30 @@ BLOCK = "block"
 
 # gate status(정책 disposition 아티팩트) → 원 disposition 역추론(관측용).
 _STATUS_TO_DISPOSITION = {"auto_passed": "allow_auto", "pending": "ask", "rejected": "deny"}
+
+
+async def _is_meaningfully_explicit_ask(
+    session: AsyncSession, org_id: uuid.UUID, source: str,
+) -> bool:
+    """SID 301ee45d/#2047 PO 리뷰(2026-07-20): resolve_disposition의 ``source``는 "어느
+    precedence 단계에서 나왔나"(출처)만 말하지 "그 값을 실제로 골랐나"(값)는 말하지 않는다.
+    ``member_gate_override``/``org_gate_override``는 gate_type 단위로 콕 집어 만든 행이라
+    존재 자체가 의사표시지만, ``org_gate_policy.posture``는 ``PUT /gate-config/policy``에
+    본문을 `{}`로 보내도 pydantic 기본값 "balanced"가 그대로 저장되고(``OrgGatePolicyCreate.
+    posture: str = "balanced"``) balanced→ask로 매핑된다 — 조직이 아무 말도 안 했는데 "명시
+    ask"로 오판해 원 버그와 같은 계열의 함정에 빠진다. ``balanced``/``permissive``는 아무도
+    의도 없이도 얻는 값이라 명시로 인정하지 않고, 아무도 기본으로 얻지 않는 ``conservative``만
+    명시로 인정한다."""
+    if source in (SOURCE_MEMBER_OVERRIDE, SOURCE_ORG_OVERRIDE):
+        return True
+    if source == SOURCE_ORG_POLICY:
+        from app.models.hitl_config import OrgGatePolicy
+
+        r = await session.execute(
+            select(OrgGatePolicy.posture).where(OrgGatePolicy.org_id == org_id).limit(1)
+        )
+        return r.scalar_one_or_none() == "conservative"
+    return False
 
 
 def _evidence_status(decision: str) -> str:
@@ -275,15 +304,21 @@ async def evaluate_merge_gate(
     # source)를 돌려준다. 과거엔 'ask'가 SYSTEM_DEFAULT든 조직이 명시 설정했든 구분 없이 여기서
     # no-gate로 우회됐다 — "코드가 아닌 일(콘텐츠·마케팅 등, PR/CI 자체가 없는 작업)에는 조직이
     # '반드시 사람이 서명'이라고 ask를 명시해도 사람 결재가 원리적으로 안 걸리는" 결함이었다(댄
-    # 어윈 실측 반증). 이제 source가 SYSTEM_DEFAULT가 아니면(member/org override든 org posture든
-    # 어떤 형태로든 조직·멤버가 명시한 값) 'ask'도 deny와 동일하게 substance로 인정해 게이트를
-    # 만든다. **설정 안 한 조직(SYSTEM_DEFAULT)은 지금과 동일하게 게이트가 안 생긴다** — 빈 shell
-    # 박멸 의도는 그대로 보존.
+    # 어윈 실측 반증). ⚠️PO 리뷰: source가 SYSTEM_DEFAULT가 아니라는 것만으로는 부족하다 —
+    # org_gate_policy.posture는 PUT 본문을 비워도 pydantic 기본값("balanced")이 저장돼 "출처는
+    # org_policy(명시 행 있음)이지만 값은 아무도 안 고른 기본값"인 경우가 생긴다. 그래서
+    # `_is_meaningfully_explicit_ask()`가 출처(source)와 별개로 **값 자체가 골라졌는지**까지
+    # 판정한다 — member/org override는 gate_type 단위로 콕 집은 행이라 존재=의사표시지만,
+    # org_policy는 posture=='conservative'(아무도 기본으로 얻지 않는 값)일 때만 명시로 인정한다.
+    # **설정 안 한 조직(SYSTEM_DEFAULT) + balanced/permissive posture는 지금과 동일하게 게이트가
+    # 안 생긴다** — 빈 shell 박멸 의도는 그대로 보존.
     if ci is None and pr_number <= 0:
         disposition, disposition_source = await resolve_disposition(
             session, org_id, member_id, role_id, MERGE_GATE_TYPE
         )
-        explicit_ask = disposition == "ask" and disposition_source != SOURCE_SYSTEM_DEFAULT
+        explicit_ask = disposition == "ask" and await _is_meaningfully_explicit_ask(
+            session, org_id, disposition_source
+        )
         if disposition != "deny" and not explicit_ask:
             logger.info(
                 "merge gate: no substance (ci=None pr_number=0 disposition=%s source=%s) story=%s "

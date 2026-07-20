@@ -153,6 +153,56 @@ async def test_unset_org_no_gate_without_evidence():
 
 
 @pytest.mark.anyio
+async def test_org_policy_row_with_default_posture_still_no_gate():
+    """⛔PO 리뷰(2026-07-20) 회귀 게이트 — org_gate_policy **행 자체는 존재**하지만 posture를
+    지정하지 않아 pydantic/컬럼 기본값 "balanced"가 들어간 조직(=`PUT /gate-config/policy`에
+    본문 `{}`만 보낸 것과 동형)은, 증거 없이는 여전히 게이트가 서면 안 된다.
+
+    "행이 존재함"과 "값을 골랐음"은 다른 자리다 — source=org_policy라는 사실만으로 명시로
+    인정하면 원 버그와 같은 계열의 함정(명시와 기본을 못 구분)에 한 겹 안쪽에서 다시 빠진다.
+    다음 사람이 "명시니까 통과"로 판정 범위를 넓히면 이 테스트가 잡는다."""
+    from sqlalchemy import text as _text
+    from app.core.database import Base
+    from app.models.hitl_config import OrgGatePolicy
+    from app.services.merge_verdict_gate import AUTO_MERGE, evaluate_merge_gate
+
+    engine, Session = await _engine_and_session()
+    org, project, story_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    member, role_id = uuid.uuid4(), uuid.uuid4()
+    try:
+        async with Session() as s:
+            await _seed_story_with_participation(
+                s, org=org, project=project, story_id=story_id, member=member, role_id=role_id,
+            )
+            await s.execute(_text("SET session_replication_role = replica"))
+            # posture 미지정 — 컬럼 server_default("balanced")가 그대로 들어간다(모델 정의 확인:
+            # OrgGatePolicy.posture: server_default="balanced").
+            s.add(OrgGatePolicy(org_id=org))
+            await s.commit()
+
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            decision = await evaluate_merge_gate(
+                s, org, story_id, pr_number=0, repo="", ci_result=None, pr_result=None,
+            )
+            await s.commit()
+
+        assert decision.decision == AUTO_MERGE
+        assert decision.gate_id is None, "posture=balanced(기본값)는 '명시'가 아니라 게이트가 서면 안 된다"
+
+        async with Session() as s:
+            count = (await s.execute(
+                _text("SELECT count(*) FROM gate WHERE work_item_id=:sid AND gate_type='merge'"),
+                {"sid": story_id},
+            )).scalar()
+            assert count == 0
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_explicit_deny_still_materializes_gate_unchanged():
     """ⓒ 명시 deny(org_gate_override) → 증거 없어도 게이트 생성(기존 동작 무회귀).
 
