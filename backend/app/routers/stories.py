@@ -386,6 +386,12 @@ async def create_story(
         else (effective_ids[0] if effective_ids else None)
     )
     if body.attachments:
+        # story #2055 AC1: 이미지 첨부 픽셀 크기를 서버가 측정해 채운다 — client 제공 width/height는
+        # asset_id와 동일하게 위조 가능하므로 신뢰하지 않고 항상 서버 측정값으로 덮어쓴다(server
+        # authority). best-effort(측정 실패해도 저장 자체는 막지 않는다).
+        from app.services.image_dimensions import measure_image_dimensions
+        for a in body.attachments:
+            a.width, a.height = await measure_image_dimensions(a.content_type, a.url) or (None, None)
         _enforce_mcp_attachment_declared_limit([a.model_dump() for a in body.attachments])
     # S8: 서버사이드 capacity 게이트(ee seam·SaaS only·OSS no-op) — asset commit 前 per-file+총량 enforce.
     if settings.is_ee_enabled and body.attachments:
@@ -560,7 +566,15 @@ async def upload_story_attachment(
     if not uploaded:
         raise HTTPException(status_code=502, detail="upload failed")
 
-    return StoryAttachment(url=object_path, name=body.name, content_type=body.content_type, size=len(data))
+    # story #2055 AC1: 바이트가 이미 메모리에 있으므로 재다운로드 없이 직접 측정.
+    from app.services.image_dimensions import measure_image_dimensions_from_bytes
+    dims = measure_image_dimensions_from_bytes(body.content_type, data)
+    width, height = dims if dims is not None else (None, None)
+
+    return StoryAttachment(
+        url=object_path, name=body.name, content_type=body.content_type, size=len(data),
+        width=width, height=height,
+    )
 
 
 # E-DG S10(P1-4 observability): workflow-line 상태 read API — "왜 막혔나·어디로 relay 됐나"를
@@ -763,6 +777,11 @@ async def update_story(
     # S7: client 제공 asset_id strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
     if data.get("attachments"):
         data["attachments"] = [{**a, "asset_id": None} for a in data["attachments"]]
+        # story #2055 AC1: width/height도 asset_id와 동일하게 server authority — client 값
+        # 무시하고 서버가 다시 측정(best-effort).
+        from app.services.image_dimensions import measure_image_dimensions
+        for a in data["attachments"]:
+            a["width"], a["height"] = await measure_image_dimensions(a["content_type"], a["url"]) or (None, None)
         _enforce_mcp_attachment_declared_limit(data["attachments"])
         # S8: 서버사이드 capacity 게이트(ee seam·SaaS only·OSS no-op) — 첨부 교체 commit 前 enforce.
         if settings.is_ee_enabled:
