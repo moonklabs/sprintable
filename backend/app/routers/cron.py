@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.database import get_db
@@ -657,4 +657,43 @@ async def storage_usage_warn(
         return _ok({"notified_orgs": notified})
     except Exception as exc:
         logger.exception("storage-usage-warn cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── GET /api/v2/internal/cron/db-connection-stats ─────────────────────────
+
+@router.get("/db-connection-stats")
+async def db_connection_stats(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """SID f2fe1c5e/#2040 AC2: pg_stat_activity를 application_name(서비스:리비전[:연결종류])·
+    state별로 집계 — "어느 서비스가 커넥션을 몇 개 쓰는지 분해할 수 없다"는 계측 부재를 없앤다.
+
+    backend가 아닌 application_name(internal-api·migration job·운영 psql 등)은 db_application_name()
+    태그가 없으므로 그대로 노출돼 "예산에 안 잡힌 소비자"를 이 표에서 바로 식별할 수 있다.
+    """
+    verify_cron(request)
+    try:
+        result = await session.execute(
+            text(
+                """
+                SELECT
+                    COALESCE(application_name, '') AS application_name,
+                    COALESCE(state, '') AS state,
+                    count(*) AS count
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                GROUP BY application_name, state
+                ORDER BY count DESC
+                """
+            )
+        )
+        rows = [
+            {"application_name": r.application_name, "state": r.state, "count": r.count}
+            for r in result
+        ]
+        return _ok({"rows": rows, "total": sum(r["count"] for r in rows)})
+    except Exception as exc:
+        logger.exception("db-connection-stats cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
