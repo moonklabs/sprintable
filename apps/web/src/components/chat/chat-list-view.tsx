@@ -106,8 +106,9 @@ function ConversationRow({
         <span className="max-w-[80px] truncate rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">
           {others[0]?.name ?? '...'}
         </span>
+        {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
         {isAgentInConv && (
-          <span className="flex-shrink-0 rounded border border-brand/30 bg-brand/12 px-1.5 py-0.5 text-[10px] font-medium text-brand-strong">
+          <span className="flex-shrink-0 rounded border border-info/30 bg-info/12 px-1.5 py-0.5 text-[10px] font-medium text-info">
             {t('agent')}
           </span>
         )}
@@ -121,8 +122,9 @@ function ConversationRow({
               className="relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-muted-foreground ring-1 ring-background"
             >
               {p.name?.slice(0, 1) ?? '?'}
+              {/* story #2023 ⓑ: 죽은 클래스(bg-brand-strong 미매핑)이면서 L5 위반 — info로 교체해 둘 다 닫음 */}
               {p.type === 'agent' && (
-                <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-brand-strong ring-1 ring-background" />
+                <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-info ring-1 ring-background" />
               )}
             </div>
           ))}

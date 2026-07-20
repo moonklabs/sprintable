@@ -469,7 +469,8 @@ export default function InboxPage() {
                         return (
                           <div key={`group-${item.key}`}>
                             <div className="relative flex items-stretch transition hover:bg-muted/40">
-                              {item.hasUnread ? <span className="absolute left-0 top-0 h-full w-0.5 bg-brand" aria-hidden /> : null}
+                              {/* story #2023 ⓑ: 미읽음=L5(시스템 상태), 브랜드 아님 */}
+                              {item.hasUnread ? <span className="absolute left-0 top-0 h-full w-0.5 bg-info" aria-hidden /> : null}
                               <button
                                 type="button"
                                 onClick={() => toggleGroup(item.key)}
@@ -494,7 +495,8 @@ export default function InboxPage() {
                                       <p className={`min-w-0 truncate text-sm ${item.hasUnread ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
                                         {item.latest.title}
                                       </p>
-                                      <span className="shrink-0 rounded-full border border-brand/30 bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
+                                      {/* story #2023 ⓑ: 카운트 칩=L5(시스템 상태), 브랜드 아님 */}
+                                      <span className="shrink-0 rounded-full border border-info/30 bg-info/10 px-1.5 py-0.5 text-[10px] font-medium text-info">
                                         {t('statusChangeCount', { count: item.count })}
                                       </span>
                                     </div>
@@ -529,8 +531,8 @@ export default function InboxPage() {
                           onClick={() => void selectNotification(notification)}
                           className={`relative flex w-full items-start gap-3 px-3 py-2.5 text-left transition ${isSelected ? 'bg-accent' : 'hover:bg-muted/40'}`}
                         >
-                          {/* 목업 ④: unread=좌측 accent strip(박시 카드 bg 대체) */}
-                          {!notification.is_read ? <span className="absolute left-0 top-0 h-full w-0.5 bg-brand" aria-hidden /> : null}
+                          {/* 목업 ④: unread=좌측 accent strip(박시 카드 bg 대체). story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
+                          {!notification.is_read ? <span className="absolute left-0 top-0 h-full w-0.5 bg-info" aria-hidden /> : null}
                           <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/6 text-muted-foreground">
                             <NotifIcon type={notification.type} fallback={Info} className="size-4" />
                           </div>

@@ -564,7 +564,9 @@ export function DocContentRenderer({
     '[&_h2]:scroll-mt-24 [&_h2]:mt-10 [&_h2]:text-2xl [&_h2]:font-semibold',
     '[&_h3]:scroll-mt-24 [&_h3]:mt-8 [&_h3]:text-xl [&_h3]:font-semibold',
     '[&_p]:leading-7 [&_p]:text-foreground/92',
-    '[&_a]:text-[color:var(--brand-soft)] [&_a]:underline [&_a]:underline-offset-4',
+    // story #2023 ⓒ(§5-2): 유틸 부재로 인한 var() 우회 참조를 정식 토큰으로 되돌림 — 문서 본문
+    // 링크색, L1~L5 재분류 아님(콘텐츠 하이퍼링크는 서명·시스템상태 어느 축도 아님).
+    '[&_a]:text-brand-soft [&_a]:underline [&_a]:underline-offset-4',
     '[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:bg-muted/30 [&_blockquote]:px-4 [&_blockquote]:py-3 [&_blockquote]:text-muted-foreground',
     '[&_img]:max-h-[32rem] [&_img]:w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_img]:object-contain',
     '[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border [&_table]:bg-muted/20',

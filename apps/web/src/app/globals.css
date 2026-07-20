@@ -107,6 +107,12 @@
   --color-info: var(--info);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  /* story #2023(ⓐ): 값은 :root/.dark에 있었으나 @theme inline 매핑이 없어 Tailwind
+     유틸리티(bg-brand-soft 등)가 생성되지 않던 죽은 토큰 — 매핑 추가로 되살린다. */
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-contrast: var(--brand-contrast);
+  --color-info-foreground: var(--info-foreground);
   --color-primary-tint: var(--primary-tint);
   --color-priority: var(--priority);
   --color-accent-foreground: var(--accent-foreground);
@@ -230,6 +236,11 @@
   --success: oklch(0.55 0.16 145);
   --warning: oklch(0.75 0.16 85);
   --info: oklch(0.55 0.18 250);
+  /* story #2023(ⓐ): 신설 — L5(진행중·작업중·미읽음·측정·LLM 호출) 위반을 info로 교체하면서
+     배경(bg-info) 위 텍스트가 올라가는 자리가 생긴다. 라이트/다크가 반대로 필요(핸드오프
+     doc §3-3 실측: 흰 텍스트는 다크 bg-info 위에서 3.24:1 AA 미달) — --primary-foreground
+     다크값과 동일 패턴(어두운 남색)으로 보정. */
+  --info-foreground: oklch(0.985 0 0);
   --priority: oklch(0.65 0.18 50);
 
   /* Scrollbar */
@@ -342,6 +353,9 @@
   --success: oklch(0.65 0.15 145);
   --warning: oklch(0.70 0.16 85);
   --info: oklch(0.65 0.18 250);
+  /* story #2023(ⓐ): 라이트와 다른 값(어두운 남색) — 다크 bg-info는 밝은 파랑이라 밝은
+     텍스트로는 AA 미달(실측 3.24:1). --primary-foreground 다크와 동일 보정 패턴. */
+  --info-foreground: oklch(0.16 0.038 250);
   --priority: oklch(0.70 0.18 50);
 
   /* Scrollbar */

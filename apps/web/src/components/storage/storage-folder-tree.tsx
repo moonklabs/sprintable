@@ -177,7 +177,8 @@ export function StorageFolderTree({
           type="button"
           className="flex w-full items-center gap-2 rounded-[0.5rem] border border-border bg-card px-[10px] py-2 text-[12px] text-foreground"
         >
-          <span className="size-2 shrink-0 rounded-full bg-brand" />
+          {/* story #2023 ⓑ: 상태 점=L5, 브랜드 아님 */}
+          <span className="size-2 shrink-0 rounded-full bg-info" />
           <span className="truncate">{projectName ?? 'Sprintable'}</span>
           <ChevronDown className="ml-auto size-3.5 shrink-0 opacity-50" />
         </button>
