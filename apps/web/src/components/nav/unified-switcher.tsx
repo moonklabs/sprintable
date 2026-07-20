@@ -39,6 +39,33 @@ interface ProjectItem {
   projectName: string;
 }
 
+// story #2039 AC4 — 라이브 재현 확認(2026-07-20): switchProject/switchOrgAndProject가 URL 경로는
+// 그대로 두고 `?p=`만 갈아끼워서 ①목록이 안 바뀐 것처럼 보이고 ②사이드바를 누르는 순간에야 새
+// 프로젝트 slug로 이동해 그 slug가 미정규화(한글 등)면 404가 터진다(#2039 본체와 결합해 증폭).
+// `/{ws}/{proj}/...` 아래 라우트는 `[ws]` 밑에 `[proj]`만 존재(다른 org-레벨 세그먼트 없음)라
+// pathname 첫 세그먼트가 현재 org slug와 일치하면 그 경로는 반드시 project-scoped이고, 둘째
+// 세그먼트가 project slug다 — 그 둘만 교체하면 나머지(리소스+하위 경로)는 그대로 보존된다.
+// 현재 화면 유지가 컨텍스트 보존에 맞다고 판단(PO 동의) — 기본 화면으로 보내는 대안은 기각.
+export function withSwitchedSlugs(
+  pathname: string,
+  currentOrgSlug: string | undefined,
+  newOrgSlug: string,
+  newProjectSlug: string,
+): string | null {
+  const segments = pathname.split('/').filter(Boolean);
+  if (segments.length < 2 || !currentOrgSlug || segments[0] !== currentOrgSlug) return null;
+  segments[0] = newOrgSlug;
+  segments[1] = newProjectSlug;
+  return `/${segments.join('/')}`;
+}
+
+async function fetchProjectSlug(projectId: string): Promise<string | null> {
+  return fetch(`/api/projects/${projectId}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((json: { data?: { slug?: string | null } } | null) => json?.data?.slug ?? null)
+    .catch(() => null);
+}
+
 interface UnifiedSwitcherProps {
   orgs: OrgSwitcherItem[];
   currentOrgId?: string;
@@ -168,7 +195,11 @@ export function UnifiedSwitcher({
       if (typeof window !== 'undefined') window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, projectId);
       const sp = new URLSearchParams(Array.from(searchParams.entries()));
       sp.set('p', projectId);
-      router.push(`${pathname}?${sp.toString()}`);
+      // story #2039 AC4 — org+project 동시 전환도 경로 세그먼트 둘 다 갱신.
+      const newOrgSlug = orgs.find((o) => o.orgId === nextOrgId)?.orgSlug;
+      const newSlug = newOrgSlug ? await fetchProjectSlug(projectId) : null;
+      const switchedPath = newOrgSlug && newSlug ? withSwitchedSlugs(pathname, currentOrg?.orgSlug, newOrgSlug, newSlug) : null;
+      router.push(`${switchedPath ?? pathname}?${sp.toString()}`);
       router.refresh();
     } finally {
       setPending(false);
@@ -184,7 +215,13 @@ export function UnifiedSwitcher({
       if (typeof window !== 'undefined') window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, nextProjectId);
       const sp = new URLSearchParams(Array.from(searchParams.entries()));
       sp.set('p', nextProjectId);
-      router.push(`${pathname}?${sp.toString()}`);
+      // story #2039 AC4 — 경로의 프로젝트 slug 세그먼트를 즉시 새 프로젝트로 교체(같은 org라
+      // org 세그먼트는 유지). 실패(slug 조회 불가 등)하면 안전하게 기존 pathname으로 폴백 —
+      // ?p만 갈아끼우던 원래 동작과 동일하게 degrade, 새 오류를 만들지 않는다.
+      const orgSlug = currentOrg?.orgSlug;
+      const newSlug = orgSlug ? await fetchProjectSlug(nextProjectId) : null;
+      const switchedPath = orgSlug && newSlug ? withSwitchedSlugs(pathname, orgSlug, orgSlug, newSlug) : null;
+      router.push(`${switchedPath ?? pathname}?${sp.toString()}`);
       // 쿠키/JWT 동기화(이 탭 RSC·첫 렌더용). 공유 쿠키가 덮여도 per-tab 정합은 `?p=`+sessionStorage+
       // fetch X-Project-Id 헤더가 보장하므로 무해.
       await fetch('/api/switch-project', {
