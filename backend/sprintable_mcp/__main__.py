@@ -27,6 +27,11 @@ async def _setup() -> list[str] | None:
 def main() -> None:
     if not settings.sprintable_api_url:
         print("Error: SPRINTABLE_API_URL environment variable required", file=sys.stderr)
+        print("To run the Sprintable MCP server, please set the SPRINTABLE_API_URL environment variable (e.g., https://app.sprintable.ai).", file=sys.stderr)
+        print("\nExample:", file=sys.stderr)
+        print("  export SPRINTABLE_API_URL=https://app.sprintable.ai", file=sys.stderr)
+        print("  export AGENT_API_KEY=sk_live_...", file=sys.stderr)
+        print("  uvx sprintable\n", file=sys.stderr)
         sys.exit(1)
 
     # E-MCP-HTTP S1: transport 분기. http=외부/Poke(per-request bearer·startup env-key auth/filter 없음·
@@ -38,6 +43,11 @@ def main() -> None:
 
     if not settings.agent_api_key:
         print("Error: AGENT_API_KEY environment variable required", file=sys.stderr)
+        print("Please set your AGENT_API_KEY environment variable.", file=sys.stderr)
+        print("\nExample:", file=sys.stderr)
+        print("  export SPRINTABLE_API_URL=https://app.sprintable.ai", file=sys.stderr)
+        print("  export AGENT_API_KEY=sk_live_...", file=sys.stderr)
+        print("  uvx sprintable\n", file=sys.stderr)
         sys.exit(1)
 
     client.configure(settings.sprintable_api_url, settings.agent_api_key)
