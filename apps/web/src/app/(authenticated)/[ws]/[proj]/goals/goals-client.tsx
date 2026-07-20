@@ -100,6 +100,15 @@ interface Goal {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// story #2017: epic-status-transition.tsx의 LABEL_KEY와 동일 키(statusDraft 등) 재사용 —
+// 신규 i18n 키 0.
+const STATUS_FILTER_LABEL_KEY: Record<GoalStatus, string> = {
+  draft: 'statusDraft',
+  active: 'statusActive',
+  done: 'statusDone',
+  archived: 'statusArchived',
+};
+
 function statusBadgeVariant(status: GoalStatus): 'secondary' | 'info' | 'success' | 'outline' {
   switch (status) {
     case 'active':
@@ -981,7 +990,9 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   const listPanel = (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-muted/35">
 
-      {/* Status filter */}
+      {/* Status filter — story #2017: 'all' 아닌 나머지는 raw status 값을 그대로 렌더해(t() 미호출)
+          KO 로케일에서도 draft/active/done/archived 영문 그대로 보였음. 배지·드롭다운(epic-status-
+          transition.tsx)이 쓰는 기존 statusXxx 키를 그대로 재사용(신규 키 0). */}
       <div className="flex shrink-0 gap-1 px-4 pt-3 pb-1 flex-wrap">
         {(['all', 'draft', 'active', 'done', 'archived'] as const).map((s) => (
           <button
@@ -994,7 +1005,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
                 : 'border-border text-muted-foreground hover:bg-muted/50'
             }`}
           >
-            {s === 'all' ? t('filterAll') : s}
+            {s === 'all' ? t('filterAll') : t(STATUS_FILTER_LABEL_KEY[s])}
           </button>
         ))}
       </div>

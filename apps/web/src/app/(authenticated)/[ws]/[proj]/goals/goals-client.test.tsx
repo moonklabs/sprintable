@@ -79,7 +79,9 @@ describe('GoalsClient — 목표 first-touch 정체성', () => {
   it('필터로 인한 결과 0건(진짜 빈 프로젝트 아님)은 중립 카피를 쓴다 — "아직 시작 안 함" 오해 방지(no-fiction)', async () => {
     stubFetch([{ id: 'e1', title: 'E-CANVAS', status: 'active', story_count: 3, is_ai_generated: false }]);
     await mount();
-    const draftFilterButton = [...container.querySelectorAll('button')].find((b) => b.textContent === 'draft');
+    // story #2017: 필터 탭이 raw status 값('draft')을 그대로 렌더하던 버그를 고쳐 KO 로케일에선
+    // 번역된 라벨('초안')로 렌더된다 — 이 테스트도 그 정정에 맞춰 갱신.
+    const draftFilterButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '초안');
     expect(draftFilterButton).not.toBeUndefined();
     await act(async () => { draftFilterButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
