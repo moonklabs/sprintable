@@ -99,6 +99,12 @@ class Settings(BaseSettings):
     # 정책은 A(human-only enforcing)·advisory는 개발/관측용 임시 모드(미설정=enforcing 보존).
     h1_merge_gate_advisory: bool = False
 
+    # SPR-37(로컬/OSS 온보딩): true면 가입 즉시 email_verified=True + 인증 메일 발송 생략.
+    # 로컬 셀프호스트는 메일 발송 인프라가 없어 인증 메일이 영영 오지 않고, org 생성이
+    # email_verified를 요구해 SQL 개입 없이는 첫 게이트 판정에 도달 불가했다(도그푸드 실측).
+    # 기본 False = 프로덕션 무변경. .env.example(로컬 quickstart)에서만 true.
+    auth_auto_verify_email: bool = False
+
     # Harness-local Advisor P0. A non-empty finite allowlist is required so a
     # deployment cannot accidentally enable an un-preflighted namespace.
     advisor_p0_enabled: bool = False
