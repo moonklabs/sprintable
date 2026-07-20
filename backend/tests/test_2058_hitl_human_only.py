@@ -23,9 +23,12 @@ import pytest
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
+# story 8236bbc3 가드 대응 — 아래 _session_factory()가 Base.metadata.create_all을 호출하므로
+# destructive_schema 마커 필수(누락 시 collection에서 pytest.UsageError로 즉시 표면화된다).
 pytestmark = [
     pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요"),
     pytest.mark.anyio,
+    pytest.mark.destructive_schema,
 ]
 
 
@@ -44,7 +47,19 @@ def _async_url() -> str:
 
 async def _session_factory():
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    import app.models  # noqa: F401 — 전 모델 메타데이터 로드
+    from app.core.database import Base
+
+    # ⚠️fix(발견 2026-07-20, #2043 AC3 작업 중): 이 함수가 create_all을 호출하지 않고 있었다 —
+    # 자매 realdb 파일(test_2027/test_2054/test_2058_apikey 등)과 달리 스키마를 자체적으로
+    # 짓지 않는 결함. conftest.py의 destructive_schema autouse 픽스처가 대상 스키마를 DROP까지
+    # 하므로(9108cb4f), 사전에 별도로 alembic upgrade head를 돌려둔 DB를 우연히 가리킬 때만
+    # 통과하고 순수 신규 DB에서는 "relation organizations does not exist"로 실패하는 잠복
+    # 결함이었다(#2058 병합 후 처음 신규 DB로 재현하다 발견).
     engine = create_async_engine(_async_url())
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -137,10 +152,20 @@ async def _seed_hitl_request(session, org_id, project_id, requester_agent_id, *,
 
 @pytest.mark.anyio
 async def test_agent_cannot_approve_another_agents_request():
-    """이게 #2058의 headline 재현 — 자기 것이 아닌 요청도 agent가 승인 가능했던 결함."""
+    """이게 #2058의 headline 재현 — 자기 것이 아닌 요청도 agent가 승인 가능했던 결함.
+
+    ⚠️`resolve_member`(auth.user_id → identity)의 agent 분기는 레거시 경로에서 `team_members`
+    **VIEW**를 조회한다(migrated DB 전용 — `Base.metadata.create_all`은 뷰를 못 짓는다,
+    reference_realdb_seed_gotchas 선례). 이 테스트가 검증하는 대상은 `resolve_hitl_request`의
+    `resolved.type != "human"` 강제 그 자체이지 identity 해소 내부 배관이 아니므로, 이 한 지점만
+    mock으로 agent 신원을 직접 주입한다(다른 테스트들처럼 정공법 DB 시드가 안 되는 유일한 이유가
+    VIEW 의존이라 예외적으로)."""
+    from unittest.mock import AsyncMock, patch
+
     from app.repositories.hitl import HitlRepository
     from app.routers.hitl import resolve_hitl_request
     from app.schemas.hitl import ResolveHitlRequestBody
+    from app.services.member_resolver import ResolvedMember
 
     engine, Session = await _session_factory()
     try:
@@ -151,13 +176,20 @@ async def test_agent_cannot_approve_another_agents_request():
             req_id = await _seed_hitl_request(s, org_id, project_id, requester_agent_id)
 
         async with Session() as s:
-            resp = await resolve_hitl_request(
-                request_id=req_id,
-                body=ResolveHitlRequestBody(status="approved"),
-                request=_request("/api/v2/hitl/requests/x", "PATCH"),
-                auth=_agent_auth(approver_agent_id, org_id, project_id, scope=["read", "write"]),
-                repo=HitlRepository(s),
+            approver_resolved = ResolvedMember(
+                id=approver_agent_id, user_id=None, name="Approver Agent", type="agent",
+                role="member", org_id=org_id, project_id=project_id,
             )
+            with patch(
+                "app.routers.hitl.resolve_member", AsyncMock(return_value=approver_resolved),
+            ):
+                resp = await resolve_hitl_request(
+                    request_id=req_id,
+                    body=ResolveHitlRequestBody(status="approved"),
+                    request=_request("/api/v2/hitl/requests/x", "PATCH"),
+                    auth=_agent_auth(approver_agent_id, org_id, project_id, scope=["read", "write"]),
+                    repo=HitlRepository(s),
+                )
             assert resp.status_code == 403, resp.body
     finally:
         await engine.dispose()
