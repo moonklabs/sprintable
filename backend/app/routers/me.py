@@ -73,8 +73,21 @@ async def get_me(
             if org_member:
                 user_result = await session.execute(select(User).where(User.id == uid))
                 user = user_result.scalar_one_or_none()
+                # SID bb93ada4/#2056: canonical members 앵커의 name이 정본(update_me PATCH가
+                # 여기 쓴다 — line ~247). 이 GET 폴백은 그동안 users.display_name만 읽어
+                # /team-members(정본 이름 "송윤재")와 조직 브리핑 인사말(계정 핸들
+                # "sellerking")이 다른 값을 보여주는 "이름 출처 두 곳" 결함이었다. members
+                # 앵커 우선 조회, 없거나 비어있을 때만 display_name/email로 떨어진다.
+                member_anchor = (await session.execute(
+                    select(Member.name).where(
+                        Member.user_id == uid,
+                        Member.org_id == uuid.UUID(org_id_str),
+                        Member.type == "human",
+                        Member.deleted_at.is_(None),
+                    )
+                )).scalar_one_or_none()
                 # E-ONBOARDING S2: display_name 우선, 없을 때만 email (기존 무조건 email → 실명 반영)
-                name = (user.display_name or user.email) if user else str(uid)
+                name = member_anchor or ((user.display_name or user.email) if user else str(uid))
                 try:
                     proj_id = uuid.UUID(project_id_str) if project_id_str else org_member.org_id
                 except (ValueError, AttributeError):
