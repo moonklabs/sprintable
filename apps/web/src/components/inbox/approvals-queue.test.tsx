@@ -10,7 +10,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
-import type { GateItem } from '../kanban/types';
+import type { GateItem, HitlInboxItem } from '../kanban/types';
 
 const { useDashboardContextMock, pushMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
@@ -52,6 +52,25 @@ function gate(overrides: Partial<GateItem>): GateItem {
     neutral_facts: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    source: 'gate',
+    ...overrides,
+  };
+}
+
+// story #2054: HitlRequest(gate_approval park) 결재함 인박스 항목 픽스처.
+function hitl(overrides: Partial<HitlInboxItem>): HitlInboxItem {
+  return {
+    source: 'hitl',
+    id: 'h-default',
+    request_type: 'gate_approval',
+    title: '기본 승인 요청',
+    prompt: 'merge 전이는 사람 승인 대기',
+    status: 'pending',
+    requires_human: true,
+    work_item_id: null,
+    work_type: 'merge',
+    created_at: new Date().toISOString(),
+    expires_at: null,
     ...overrides,
   };
 }
@@ -74,10 +93,17 @@ afterEach(async () => {
   pushMock.mockReset();
 });
 
-function mockFetches(pending: GateItem[], held: GateItem[]) {
-  const calls: string[] = [];
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    calls.push(url);
+// story #2054: /api/gates → /api/gates/inbox로 교체(Gate+HitlRequest 통합). pending/held
+// 각각에 gate·hitl 항목을 섞어 반환할 수 있다. PATCH(hitl 승인/반려)도 같은 mock으로 기록한다.
+function mockFetches(
+  pending: (GateItem | HitlInboxItem)[],
+  held: (GateItem | HitlInboxItem)[],
+  patchOk = true,
+) {
+  const calls: { url: string; method?: string; body?: string }[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+    calls.push({ url, method: init?.method, body: init?.body });
+    if (init?.method === 'PATCH') return { ok: patchOk, json: async () => ({}) };
     if (url.includes('status=pending')) return { ok: true, json: async () => pending };
     if (url.includes('status=held')) return { ok: true, json: async () => held };
     return { ok: true, json: async () => [] };
@@ -95,8 +121,9 @@ describe('ApprovalsQueue', () => {
   it('pending·held 두 상태를 각각 sort=urgency+assigned_to_me=true로 조회한다(파라미터 조합 회귀가드)', async () => {
     const calls = mockFetches([], []);
     await mount();
-    expect(calls).toContain('/api/gates?status=pending&sort=urgency&assigned_to_me=true');
-    expect(calls).toContain('/api/gates?status=held&sort=urgency&assigned_to_me=true');
+    const urls = calls.map((c) => c.url);
+    expect(urls).toContain('/api/gates/inbox?status=pending&sort=urgency&assigned_to_me=true');
+    expect(urls).toContain('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true');
   });
 
   it('4유형(게이트·문서결재·머지게이트·보류) 모두 렌더하고 gate_type 배지를 표시한다', async () => {
@@ -162,5 +189,52 @@ describe('ApprovalsQueue', () => {
     await mount();
     expect(container.querySelectorAll('button').length).toBe(1);
     expect(container.textContent).not.toContain(koMessages.cage.gateInboxEmpty);
+  });
+
+  // story #2054 — Gate와 HitlRequest가 같은 승인 병목(merge)에서 서로를 못 보던 결함의
+  // 회귀가드. hitl 항목은 상세 페이지가 없어 큐 안에서 바로 승인/반려한다(Gate처럼 클릭
+  // 시 상세로 이동하지 않는다 — 별도 버튼).
+  it('hitl 항목을 렌더하고 승인 요청 배지·title·prompt를 보여준다', async () => {
+    mockFetches([hitl({ id: 'h1', title: 'merge 승인 대기', prompt: '사람 승인이 필요합니다' })], []);
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain(koMessages.cage.hitlRequestBadge);
+    expect(text).toContain('merge 승인 대기');
+    expect(text).toContain('사람 승인이 필요합니다');
+  });
+
+  it('hitl 항목 승인 클릭 시 PATCH /api/v1/hitl-requests/{id}를 status=approved로 호출하고 목록에서 사라진다', async () => {
+    const calls = mockFetches([hitl({ id: 'h-approve' })], []);
+    await mount();
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const patchCall = calls.find((c) => c.method === 'PATCH');
+    expect(patchCall?.url).toBe('/api/v1/hitl-requests/h-approve');
+    expect(JSON.parse(patchCall?.body ?? '{}')).toEqual({ status: 'approved' });
+    expect(container.textContent).toContain(koMessages.cage.gateInboxEmpty);
+  });
+
+  it('hitl 항목 반려 클릭 시 PATCH를 status=rejected로 호출한다', async () => {
+    const calls = mockFetches([hitl({ id: 'h-reject' })], []);
+    await mount();
+    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateReject));
+    await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const patchCall = calls.find((c) => c.method === 'PATCH');
+    expect(JSON.parse(patchCall?.body ?? '{}')).toEqual({ status: 'rejected' });
+  });
+
+  it('gate·hitl 항목이 섞인 목록에서 gate만 상세로 push하고 hitl은 push하지 않는다', async () => {
+    mockFetches(
+      [
+        gate({ id: 'g-mixed', work_item_summary: { title: '머지 게이트', slug: null } }),
+        hitl({ id: 'h-mixed', title: 'HITL 승인' }),
+      ],
+      [],
+    );
+    await mount();
+    const gateButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('머지 게이트'));
+    await act(async () => { gateButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/gates/g-mixed');
+    expect(pushMock).not.toHaveBeenCalledWith(expect.stringContaining('h-mixed'));
   });
 });
