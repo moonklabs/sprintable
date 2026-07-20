@@ -103,15 +103,19 @@ async def test_db_connection_stats_aggregates_by_application_name_and_state():
     rows = [
         SimpleNamespace(
             application_name="sprintable-backend-dev:rev-9", state="active",
-            usename="sprintable_app", client_addr="10.0.0.1", count=3, max_idle_seconds=0,
+            usename="sprintable_app", idle_bucket="unknown", count=3, max_idle_seconds=0,
         ),
         SimpleNamespace(
             application_name="sprintable-backend-dev:rev-9:listen", state="idle",
-            usename="sprintable_app", client_addr="10.0.0.1", count=1, max_idle_seconds=1800,
+            usename="sprintable_app", idle_bucket="1m-10m", count=1, max_idle_seconds=1800,
         ),
         SimpleNamespace(
-            application_name="", state="idle", usename="sprintable_app", client_addr="10.0.0.2",
-            count=12, max_idle_seconds=7200,  # internal-api 등 미태깅 소비자 — 오래 idle
+            application_name="", state="idle", usename="sprintable_app", idle_bucket="<1m",
+            count=9, max_idle_seconds=45,  # 정상 회전으로 보이는 일부
+        ),
+        SimpleNamespace(
+            application_name="", state="idle", usename="sprintable_app", idle_bucket=">1h",
+            count=3, max_idle_seconds=7200,  # 좀비 후보 — 구간 분포가 없으면 이 3개가 안 보임
         ),
     ]
     mock_session = AsyncMock()
@@ -130,9 +134,9 @@ async def test_db_connection_stats_aggregates_by_application_name_and_state():
     assert response.status_code == 200
     body = response.json()["data"]
     assert body["total"] == 16
-    untagged = next(r for r in body["rows"] if r["application_name"] == "")
-    assert untagged["count"] == 12
-    assert untagged["max_idle_seconds"] == 7200  # 오래 idle — 누수 후보 판별용
+    untagged_rows = [r for r in body["rows"] if r["application_name"] == ""]
+    # 구간 분포 — "최대 하나"로 뭉개면 9개 정상회전(<1m)과 3개 좀비(>1h)가 섞여 보이지 않는다.
+    assert {r["idle_bucket"]: r["count"] for r in untagged_rows} == {"<1m": 9, ">1h": 3}
 
 
 @pytest.mark.anyio

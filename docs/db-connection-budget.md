@@ -107,26 +107,62 @@ internal-api-dev 상한(40)을 넣어도 `78 − 40 = 38`이 여전히 남는다
 일하는 연결이 아니라 **붙잡고만 있는 연결**(오래된 internal-api 구 리비전 잔존·마이그/잡·운영 접속·진짜
 누수 후보).
 
-## 미확인 소비자 (업데이트: 남은 ~38의 정체가 AC3 이전 선결 과제)
+## 주인 없는 연결(zombie) — 확定 (2026-07-20 18:24, 오르테가군 PO)
+
+**시도했다 실패한 축**: dev DB에 prod와 동일한 TCP keepalive 플래그(`tcp_keepalives_idle/interval/count`,
+`requiresRestart: False` 확인 후 무중단 적용)를 넣어 "reload 후 무태그가 급감하는지"로 좀비 가설을
+검증하려 했으나, 이 GUC들이 Postgres `PGC_BACKEND` context라 **reload는 신규 연결에만 적용되고 기존
+연결에는 소급되지 않는다** — 실험 설계 자체가 틀렸다고 판단해 그 축은 접었다(적용 자체는 prod와 설정
+정합을 맞춘 것이라 무해·유지). `client_addr`도 Cloud SQL이 Unix socket으로 연결돼 항상 빈 값이라
+폐기했다 — **둘 다 실패를 여기 기록해 다음 사람이 같은 시도를 반복하지 않게 한다.**
+
+**대신 결정적이었던 것 — `max_idle_seconds` 직접 관측 + 산술**:
+
+```
+TOTAL 119 (rollout 중 — old/new 리비전 동시 관측됨)
+  69  idle   max_idle=7458s (2h04m)   ← 무태그
+  20  idle   max_idle= 125s   backend 01725(구 리비전) pooled
+  19  idle   max_idle=  21s   backend 01726(신 리비전) pooled
+   5  idle   max_idle=2201s   backend 01725:listen   ← LISTEN은 상시 idle이 정상
+   5  idle   max_idle= 246s   backend 01726:listen
+   1  active                  backend 01726
+```
+
+**판정 근거 둘**: ①무태그 최대 idle **2시간 4분** — 정상 회전이면 나올 수 없는 값. ②산술이 더
+결정적 — internal-api-dev 이론상 최대가 40(maxScale 10×4)인데 무태그가 **69**로 이미 그 상한을
+넘는다. **살아 있는 소비자만으로는 설명 불가 → 주인 없는 연결 실재로 판정.**
+
+**부수 수확**: 이 한 장의 스냅샷이 예산표 산식의 `2×maxScale×per_instance`(rollout 배수)가 탁상
+가정이 아니라 실물임을 보여준다 — 구 리비전(01725)이 아직 25개(풀 20+listen 5), 신 리비전(01726)이
+새로 25개를 잡은 상태가 그대로 찍혔다.
+
+**⚠️ 아직 못 닫은 것**: 위 수치는 그룹별 "최대" 하나뿐이라 69개 중 몇 개가 진짜 오래됐는지 모른다(1개만
+2시간이고 나머지 68개가 30초일 수도 있다 — "최대 하나로 전체 단정"은 오늘 반복된 함정). 이번 커밋이
+`max_idle_seconds` 대신 **idle 구간별 개수 분포**(`>1h`/`10m-1h`/`1m-10m`/`<1m`)로 바꾼 이유가 이것 —
+`>1h`가 무더기면 좀비 확定(근본=종료 시 연결 정리·shutdown drain), 대부분 `<1m`이면 정상 회전+예산
+미계상(근본=예산·상한 조정)으로 처방이 완전히 갈린다.
+
+## 미확인 소비자 (업데이트: 좀비 실재 확定 — 남은 것은 규모 확정)
 
 | 소비자 | 상태 | 비고 |
 |---|---|---|
 | `sprintable-internal-api-dev` | **상한 실측(40)·실사용은 미확인** | maxScale 10×(pool 3+1)=40(steady)/80(rollout). 별도 private repo(`sprintable-admin`) — application_name 태깅 없이는 이 40 중 실제 몇 개가 지금 떠 있는지 여전히 모른다. |
-| 무태그 잔여 ~38 | **미확인** | internal-api 상한 40을 다 채워도 안 없어지는 나머지. 후보: internal-api 구 리비전(rollout 잔존)·migration/admin job·운영 psql·leaked idle connection. `max_idle_seconds`(이번 커밋에 추가) 대사로 "오래 붙잡힌" 것부터 우선순위화할 것. |
+| 무태그 중 좀비(주인 없는 연결) | **실재 확定·정확한 개수는 다음 배포(idle 구간 분포) 대기** | max_idle 2h04m + 산술(internal-api 상한 40 < 무태그 69)로 확定. 근본은 인스턴스 종료 시 연결 정리(shutdown drain) 부재로 추정 — 조사 보고서 §"남는 취약점"의 `fire_and_forget` 태스크 drain 갭과 같은 계열(연결 자체가 아니라 Task 문제였던 그 갭과는 별개 확인 필요). |
 | migration/admin job | **미확인** | `backend/scripts/migrate.sh`(precheck 자식 프로세스)·Alembic NullPool 1개, 순차·단명으로 보고서는 추정. rollout과 배포 job이 겹치는 시간대 headroom 필요. |
-| 운영 접속(psql 등) | **미확인** | PostgreSQL reserved connection 몫 포함. `usename`(이번 커밋에 추가)으로 앱 서비스 계정과 구분 가능해질 것. |
+| 운영 접속(psql 등) | **미확인** | PostgreSQL reserved connection 몫 포함. `usename`으로 앱 서비스 계정과 구분 가능. |
 | L2 트리거 워커 advisory lock | **미확인** | `L2_TRIGGER_ENABLED`/`L2_TRIGGER_ADVISORY_LOCK` dev/prod 실값 — 켜져 있으면 pool 내부에서 최대 `maxScale-1`개가 상시 checkout(holder 1개 제외 standby도 반납 안 함, 과거 ee7794eb 조사). |
 
-### internal-api 계측 스코프 확장 — 권고
+### internal-api 계측 스코프 확장 — 권고 (여전히 보류)
 
-`sprintable-admin`(internal-api)에 같은 `db_application_name()` 패턴을 심으면 가장 빠르게 78을 분해할
-수 있지만, 이 스토리는 원래 backend 저장소 스코프였고 internal-api는 ⓐ별도 private repo ⓑdev Cloud Run
+`sprintable-admin`(internal-api)에 같은 `db_application_name()` 패턴을 심으면 무태그를 더 분해할 수
+있지만, 이 스토리는 원래 backend 저장소 스코프였고 internal-api는 ⓐ별도 private repo ⓑdev Cloud Run
 자동배포 없음(merge해도 반영 안 됨 — 수동 gcloud 필요, PO/infra lane)이라 이 PR 하나로 못 끝난다.
 
-**권고**: 이번 커밋의 `usename`/`client_addr`/`max_idle_seconds` 확장으로 **internal-api 코드를 건드리지
-않고** 먼저 얼마나 좁혀지는지 실측(다음 배포 후)한 뒤 — 그래도 안 좁혀지면 internal-api 태깅을 별건
-스토리로 분리(스코프·소유자·수동배포 조율이 필요해 이 스토리 안에 우겨넣으면 "1인 1건" 원칙과도 충돌).
-바로 우겨넣지 않는 근거는 이 판단이 원가에 안 잡힌 게 아니라 **조율 비용**이라서다 — 오르테가군 확인 요청.
+**권고(오르테가군 확인·수용됨)**: 좀비가 실재로 확定된 지금은 근본 원인이 backend/internal-api 어느
+쪽이든 "종료 시 연결 정리 부재"라는 코드 패턴 쪽일 가능성이 높아졌다 — internal-api 태깅으로 무태그를
+더 쪼개는 것보다 **idle 구간 분포로 좀비 규모를 먼저 확정**하는 게 우선순위. 그래도 안 좁혀지면
+internal-api 태깅을 별건 스토리로 분리(스코프·소유자·수동배포 조율이 필요해 이 스토리 안에 우겨넣으면
+"1인 1건" 원칙과도 충돌) — 바로 우겨넣지 않는 근거는 원가가 아니라 **조율 비용**이라서다.
 
 ## 알려진 drift (AC4에서 정리)
 
@@ -141,10 +177,12 @@ internal-api-dev 상한(40)을 넣어도 `78 − 40 = 38`이 여전히 남는다
 ## 다음 단계
 
 1. ~~AC2 dev 배포 → `db-connection-stats`로 실측~~ **완료(2026-07-20)** — backend 태깅 확인, 무태그 78/100 확정.
-2. usename/client_addr/max_idle_seconds 확장(이번 커밋) 배포 → 재실측으로 무태그 78 중 얼마나 좁혀지는지 확인.
-3. 그래도 안 좁혀지면 internal-api 태깅을 별건 스토리로 분리할지 오르테가군 확인(위 "internal-api 계측
-   스코프 확장 — 권고" 참고).
-4. 실측 후 이 문서를 갱신하고 나서 AC3(단가 인하 vs 소비자 예산 계상 vs 풀러) 택일 — 과거 시도
-   이력(`ee7794eb`)이 이미 "Cloud Run raw TCP 미지원으로 중앙 PgBouncer 불가"를 확정해 둔 상태라 그
-   벽은 다시 부딪히지 않는다. 택일 전 오르테가군 확인.
-5. AC4로 위 drift 정리(테스트 상수 + cloudbuild 주석).
+2. ~~usename/client_addr/max_idle_seconds 확장 배포 → 재실측~~ **완료(2026-07-20 18:24)** — 좀비(주인
+   없는 연결) 실재 확定(max_idle 2h04m + 산술). `client_addr`는 실패 축으로 폐기.
+3. idle 구간 분포(`>1h`/`10m-1h`/`1m-10m`/`<1m`, 이번 커밋) 배포 → 재실측으로 좀비 **규모**(69개 중
+   몇 개가 `>1h`인지) 확정 — 처방이 예산 계상 vs 근본수정(shutdown drain)으로 갈리는 분기점.
+4. internal-api 태깅 확장은 위 3번 결과를 보고 오르테가군과 재논의(현재는 보류 유지).
+5. 실측 후 이 문서를 갱신하고 나서 AC3(단가 인하 vs 소비자 예산 계상 vs 풀러 vs shutdown drain 근본수정)
+   택일 — 과거 시도 이력(`ee7794eb`)이 이미 "Cloud Run raw TCP 미지원으로 중앙 PgBouncer 불가"를
+   확정해 둔 상태라 그 벽은 다시 부딪히지 않는다. 택일 전 오르테가군 확인.
+6. AC4로 위 drift 정리(테스트 상수 + cloudbuild 주석).
