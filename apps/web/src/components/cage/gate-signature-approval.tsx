@@ -15,11 +15,17 @@ import type { GateItem } from '@/components/kanban/types';
 export function GateSignatureApproval({
   gate,
   resolving,
+  error,
   onApprove,
   onReject,
 }: {
   gate: GateItem;
   resolving: boolean;
+  // story #2043 AC3: 서버 거부 사유(예: 고위험 승인 note 필수 422)를 사람이 읽을 문구로.
+  // "버튼 비활성"만으로는 왜 막혔는지가 안 보여 AC 미충족 — 이 화면은 근거 열람+사유 입력
+  // 이후에나 버튼이 풀리므로, 서버 거부는 클라이언트 검증을 통과했는데도 막힌 경우라 더더욱
+  // 이유를 보여줘야 한다.
+  error?: string | null;
   onApprove: (reason: string) => void;
   onReject: (reason: string) => void;
 }) {
@@ -57,6 +63,12 @@ export function GateSignatureApproval({
           className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
+
+      {error ? (
+        <p className="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive">
+          {t('gateTransitionError', { reason: error })}
+        </p>
+      ) : null}
 
       <div className="flex flex-col gap-2">
         <p className="text-center text-[11px] text-muted-foreground">{t('sigConsequenceNote')}</p>

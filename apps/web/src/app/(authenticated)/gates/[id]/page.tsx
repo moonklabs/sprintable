@@ -44,6 +44,12 @@ export default function GateDetailPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [resolving, setResolving] = useState(false);
+  // story #2043 AC3: 서버가 거부(422 등)하면 그 이유를 사람이 읽을 문구로 보여준다 — 버튼
+  // disable만으로는 "왜 안 되는지"가 안 보이므로 AC 미충족.
+  const [transitionError, setTransitionError] = useState<string | null>(null);
+  // story #2043 AC4: 누가 결재했는지 화면에 남는다 — gate-inbox.tsx와 동일 패턴(팀 멤버 이름맵,
+  // resolver_id는 BE가 인증 caller로 강제하므로 신뢰 가능).
+  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
 
   const fetchGate = useCallback(async () => {
     setLoading(true);
@@ -61,6 +67,19 @@ export default function GateDetailPage() {
 
   useEffect(() => { void fetchGate(); }, [fetchGate]);
 
+  useEffect(() => {
+    if (!gate?.resolver_id || memberNames[gate.resolver_id]) return;
+    void fetch('/api/team-members')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: { data?: { id: string; name: string }[] } | null) => {
+        if (!json?.data) return;
+        const names: Record<string, string> = {};
+        for (const m of json.data) names[m.id] = m.name;
+        setMemberNames(names);
+      })
+      .catch(() => { /* non-critical — id 스니펫 폴백으로 graceful */ });
+  }, [gate?.resolver_id, memberNames]);
+
   // gate-inbox.tsx와 동형 판정(중복 빌드 봉쇄 취지상 동일 규칙 재사용) — doc/canonicalize gate는
   // requires_human 메타가 없어(BE 구조상) gateNeedsAction()만으로는 액션 필요 여부를 못 잡는다.
   // ⚠️버그 fix(라이브 실측 중 자체 발견): status===pending 가드가 없으면 이미 approved/rejected
@@ -73,6 +92,7 @@ export default function GateDetailPage() {
   const transition = useCallback(async (status: 'approved' | 'rejected', note?: string) => {
     if (!gate) return;
     setResolving(true);
+    setTransitionError(null);
     try {
       const res = await fetch(`/api/gates/${gate.id}/transition`, {
         method: 'POST',
@@ -83,7 +103,15 @@ export default function GateDetailPage() {
       // 쌓아 브라우저 BACK 1회가 이 상세를 재진입시키는 트랩을 만든다(§3.2 재진입 트랩).
       // replace()는 현재 엔트리를 그대로 교체해 스택 길이를 늘리지 않는다 — router.back()/
       // window.history.back() 직접호출([[feedback-history-back-nextjs]] 금지) 없이 동일 효과.
-      if (res.ok) router.replace('/inbox');
+      if (res.ok) {
+        router.replace('/inbox');
+        return;
+      }
+      // story #2043 AC3: 서버 거부(예: #2027 — 고위험 승인은 note 필수, 422)를 사람이 읽을
+      // 문구로 보여준다. BE HTTPException(detail=...)은 평문 문자열을 반환(gates.py:553-556).
+      const body = await res.json().catch(() => null) as { detail?: unknown } | null;
+      const reason = typeof body?.detail === 'string' ? body.detail : `HTTP ${res.status}`;
+      setTransitionError(reason);
     } finally {
       setResolving(false);
     }
@@ -135,22 +163,41 @@ export default function GateDetailPage() {
             {!needsAction ? (
               <div className="space-y-3">
                 <GateEvidence gate={gate} />
+                {/* story #2043 AC1: status·requires_human·evidence_status 조합별 단일 문장 —
+                    조합표(코드 근거):
+                    - status≠pending → 이미 해소됨(무엇으로 닫혔는지)
+                    - status=pending, decision=block → 자동 차단·읽기전용
+                    - status=pending, decision=auto_merge(requires_human 무관, 실제 BE 판정값) → 자동 통과·액션 불필요
+                    - status=pending, 그 외 전부(decision=null 또는 requires_human=false라 액션 미노출)
+                      → "판정 미거침" — gateDecision()이 이미 requires_human을 반영해 null을
+                      리턴하므로 여기서 "Auto-passed"를 함부로 말하지 않는다(진짜 판정 없이
+                      Auto로 단정하던 게 자기모순의 절반이었다). */}
                 <p className="text-[11px] text-muted-foreground">
                   {gate.status !== 'pending'
-                    ? t('gateDetailResolvedStatus', { status: gate.status })
-                    : gateDecision(gate) === 'block' ? t('gateReadonlyBlock') : t('gateReadonlyAuto')}
+                    ? (gate.resolver_id
+                        ? t('gateDetailResolvedByStatus', { name: memberNames[gate.resolver_id] ?? gate.resolver_id.slice(0, 8), status: gate.status })
+                        : t('gateDetailResolvedStatus', { status: gate.status }))
+                    : gateDecision(gate) === 'block' ? t('gateReadonlyBlock')
+                    : gateDecision(gate) === 'auto_merge' ? t('gateReadonlyAuto')
+                    : t('gateReadonlyNoVerdict')}
                 </p>
               </div>
             ) : usesSignatureFlow(deriveRiskLevel(gate)) ? (
               <GateSignatureApproval
                 gate={gate}
                 resolving={resolving}
+                error={transitionError}
                 onApprove={(reason) => void transition('approved', reason)}
                 onReject={(reason) => void transition('rejected', reason)}
               />
             ) : (
               <div className="space-y-3">
                 <GateEvidence gate={gate} />
+                {transitionError ? (
+                  <p className="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive">
+                    {t('gateTransitionError', { reason: transitionError })}
+                  </p>
+                ) : null}
                 <div className="flex gap-2">
                   <Button
                     variant="outline"

@@ -343,7 +343,11 @@ export function GateInbox({ memberId }: GateInboxProps) {
                 </>
               ) : (
                 <span className="self-center text-[11px] text-muted-foreground">
-                  {gateDecision(gate) === 'block' ? t('gateReadonlyBlock') : t('gateReadonlyAuto')}
+                  {/* story #2043: gateDecision()과 동형 3분기(gates/[id]/page.tsx와 일관) —
+                      requires_human=false·판정 미거침 게이트를 "Auto-passed"로 잘못 단정하지 않는다. */}
+                  {gateDecision(gate) === 'block' ? t('gateReadonlyBlock')
+                    : gateDecision(gate) === 'auto_merge' ? t('gateReadonlyAuto')
+                    : t('gateReadonlyNoVerdict')}
                 </span>
               )}
               {isAdmin ? (
