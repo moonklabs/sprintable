@@ -672,6 +672,11 @@ async def db_connection_stats(
 
     backend가 아닌 application_name(internal-api·migration job·운영 psql 등)은 db_application_name()
     태그가 없으므로 그대로 노출돼 "예산에 안 잡힌 소비자"를 이 표에서 바로 식별할 수 있다.
+
+    2026-07-20 오르테가군 실측(dev 100 중 78이 무태그)으로 application_name·state만으로는
+    무태그 소비자를 더 쪼갤 수 없다는 게 드러나 usename·client_addr·최대 idle 시간(초)을
+    추가했다 — 다른 저장소(internal-api)를 건드리지 않고도 DB 역할(usename)·발신 IP로 후보를
+    좁히고, 오래 idle인지(누수 후보) 짧게 회전하는지(정상 소비)를 구분한다.
     """
     verify_cron(request)
     try:
@@ -681,16 +686,26 @@ async def db_connection_stats(
                 SELECT
                     COALESCE(application_name, '') AS application_name,
                     COALESCE(state, '') AS state,
-                    count(*) AS count
+                    COALESCE(usename, '') AS usename,
+                    COALESCE(client_addr::text, '') AS client_addr,
+                    count(*) AS count,
+                    MAX(EXTRACT(EPOCH FROM (now() - state_change)))::int AS max_idle_seconds
                 FROM pg_stat_activity
                 WHERE datname = current_database()
-                GROUP BY application_name, state
+                GROUP BY application_name, state, usename, client_addr
                 ORDER BY count DESC
                 """
             )
         )
         rows = [
-            {"application_name": r.application_name, "state": r.state, "count": r.count}
+            {
+                "application_name": r.application_name,
+                "state": r.state,
+                "usename": r.usename,
+                "client_addr": r.client_addr,
+                "count": r.count,
+                "max_idle_seconds": r.max_idle_seconds,
+            }
             for r in result
         ]
         return _ok({"rows": rows, "total": sum(r["count"] for r in rows)})

@@ -101,9 +101,18 @@ async def test_db_connection_stats_aggregates_by_application_name_and_state():
     from app.main import app
 
     rows = [
-        SimpleNamespace(application_name="sprintable-backend-dev:rev-9", state="active", count=3),
-        SimpleNamespace(application_name="sprintable-backend-dev:rev-9:listen", state="idle", count=1),
-        SimpleNamespace(application_name="", state="idle", count=12),  # internal-api 등 미태깅 소비자
+        SimpleNamespace(
+            application_name="sprintable-backend-dev:rev-9", state="active",
+            usename="sprintable_app", client_addr="10.0.0.1", count=3, max_idle_seconds=0,
+        ),
+        SimpleNamespace(
+            application_name="sprintable-backend-dev:rev-9:listen", state="idle",
+            usename="sprintable_app", client_addr="10.0.0.1", count=1, max_idle_seconds=1800,
+        ),
+        SimpleNamespace(
+            application_name="", state="idle", usename="sprintable_app", client_addr="10.0.0.2",
+            count=12, max_idle_seconds=7200,  # internal-api 등 미태깅 소비자 — 오래 idle
+        ),
     ]
     mock_session = AsyncMock()
     mock_session.execute = AsyncMock(return_value=rows)
@@ -121,7 +130,9 @@ async def test_db_connection_stats_aggregates_by_application_name_and_state():
     assert response.status_code == 200
     body = response.json()["data"]
     assert body["total"] == 16
-    assert {"application_name": "", "state": "idle", "count": 12} in body["rows"]
+    untagged = next(r for r in body["rows"] if r["application_name"] == "")
+    assert untagged["count"] == 12
+    assert untagged["max_idle_seconds"] == 7200  # 오래 idle — 누수 후보 판별용
 
 
 @pytest.mark.anyio
