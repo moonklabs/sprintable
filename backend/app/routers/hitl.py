@@ -9,6 +9,7 @@ from app.dependencies.database import get_db
 from app.dependencies.project_scope import enforce_write_scope, resolve_required_project_id
 from app.repositories.hitl import HitlRepository
 from app.schemas.hitl import PatchHitlPolicyRequest, ResolveHitlRequestBody
+from app.services.member_resolver import resolve_member
 
 router = APIRouter(prefix="/api/v2/hitl", tags=["hitl", "Trust"])
 
@@ -112,6 +113,14 @@ async def resolve_hitl_request(
     org_id, project_id = _get_org_project(auth)
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
+    # story #2058 AC1: gates.py transition_gate_endpoint 와 같은 human-only 불변식.
+    # HitlRequest 승인/거부는 여기 하나뿐이던 무방비 경로 — legacy write-scope 를 쥔 agent 키가
+    # (자기 것이 아닌) 남의 gate_approval 요청까지 승인/거부할 수 있었다(GATE_SELF_APPROVAL 은
+    # self 조합만 막았다). resolve_member 로 실 신원(type)을 확인 — auth.user_id 만으론(agent는
+    # team_member id 공간이라) 사람 여부를 알 수 없다.
+    resolved = await resolve_member(auth, org_id, repo.session, project_id=project_id)
+    if resolved.type != "human":
+        return _err("FORBIDDEN", "HITL 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)", 403)
     row = await repo.resolve_request(
         request_id=request_id,
         org_id=org_id,
