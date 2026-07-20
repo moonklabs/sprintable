@@ -495,7 +495,11 @@ export const config = {
   // 이 matcher 제외 목록에 없어 인증 미들웨어에 걸려 /login 307로 리다이렉트됐다 — PWA 설치
   // 프롬프트·크롤러는 쿠키 없이 manifest를 fetch하므로 실사용 환경에서 매니페스트가 항상
   // 깨진 상태였을 것(로컬 실측으로 발견).
+  // story #2026: 같은 클래스 재발 — public/fonts/*.woff2도 확장자 목록에 없어 미인증
+  // 요청이 /login 307로 리다이렉트됐다(로컬 dev로 document.fonts 상태가 전부 error인 것을
+  // 발견해 역추적). @font-face src fetch는 crossorigin 쿠키 미동봉 케이스가 있어 static
+  // 폰트 파일은 favicon.ico와 동일하게 인증 예외가 맞다.
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff2?)$).*)',
   ],
 };

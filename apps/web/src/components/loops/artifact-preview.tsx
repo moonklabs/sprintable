@@ -73,7 +73,7 @@ function ImagePreview({ assetId, fallbackLabel }: { assetId: string; fallbackLab
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-muted px-3 text-center text-muted-foreground">
       <ImageOff className="size-5" aria-hidden />
-      <span className="line-clamp-2 text-[10px] font-medium">{fallbackLabel}</span>
+      <span className="line-clamp-2 text-[10px] leading-[13px] font-medium">{fallbackLabel}</span>
     </div>
   );
 }
@@ -159,7 +159,7 @@ function TypeChipFallback({ contentType, fallbackLabel }: { contentType: string;
   const subtype = contentType.split('/')[1] ?? contentType;
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-muted px-3 text-center text-muted-foreground">
-      <span className="line-clamp-2 text-[10px] font-medium">{fallbackLabel}</span>
+      <span className="line-clamp-2 text-[10px] leading-[13px] font-medium">{fallbackLabel}</span>
       <span className="rounded-full border border-border bg-background px-1.5 py-0.5 text-[9px] font-semibold uppercase text-muted-foreground">
         {subtype}
       </span>
