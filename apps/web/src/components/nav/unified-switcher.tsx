@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 import { Check, ChevronDown, Loader2, Plus, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -61,6 +62,8 @@ export function UnifiedSwitcher({
   currentProjectId,
   className,
 }: UnifiedSwitcherProps) {
+  const t = useTranslations('nav');
+  const tCommon = useTranslations('common');
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -265,7 +268,7 @@ export function UnifiedSwitcher({
                 type="button"
                 onClick={() => { window.location.href = '/settings?tab=organization'; }}
                 className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                aria-label="Organization 설정"
+                aria-label={t('switcherOrgSettingsAria')}
               >
                 <Settings className="h-3 w-3" />
               </button>
@@ -285,7 +288,7 @@ export function UnifiedSwitcher({
             ))}
             <DropdownMenuItem className="pl-5 text-muted-foreground" onClick={() => setCreateProjectOpen(true)}>
               <Plus className="h-3.5 w-3.5" />
-              <span className="text-sm">새 프로젝트</span>
+              <span className="text-sm">{t('switcherNewProject')}</span>
             </DropdownMenuItem>
           </DropdownMenuGroup>
 
@@ -311,7 +314,7 @@ export function UnifiedSwitcher({
                   {isLoading ? (
                     <div className="flex items-center gap-2 pl-5 py-1.5 text-xs text-muted-foreground">
                       <Loader2 className="h-3 w-3 animate-spin" />
-                      <span>로딩 중...</span>
+                      <span>{tCommon('loading')}</span>
                     </div>
                   ) : orgProjects && orgProjects.length > 0 ? (
                     orgProjects.map((project) => (
@@ -330,7 +333,7 @@ export function UnifiedSwitcher({
                       className="pl-5 text-muted-foreground"
                       onClick={() => void switchOrg(org.orgId)}
                     >
-                      <span className="text-sm">이 조직으로 전환</span>
+                      <span className="text-sm">{t('switcherSwitchToOrg')}</span>
                     </DropdownMenuItem>
                   )}
                 </DropdownMenuGroup>
@@ -341,7 +344,7 @@ export function UnifiedSwitcher({
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setCreateOrgOpen(true)}>
             <Plus className="h-3.5 w-3.5" />
-            <span className="text-sm">새 Organization 만들기</span>
+            <span className="text-sm">{t('switcherNewOrganization')}</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -355,17 +358,17 @@ export function UnifiedSwitcher({
       <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>새 프로젝트 만들기</DialogTitle>
+            <DialogTitle>{t('switcherNewProjectDialogTitle')}</DialogTitle>
           </DialogHeader>
           <form onSubmit={(e) => void createProject(e)} className="space-y-3">
             <div className="space-y-1">
               <label className="text-sm font-medium" htmlFor="unified-proj-name">
-                프로젝트 이름 <span className="text-destructive">*</span>
+                {t('switcherProjectNameLabel')} <span className="text-destructive">*</span>
               </label>
               <input
                 id="unified-proj-name"
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="예: 웹 리뉴얼"
+                placeholder={t('switcherProjectNamePlaceholder')}
                 value={newProjectName}
                 onChange={(e) => setNewProjectName(e.target.value)}
                 required
@@ -374,21 +377,21 @@ export function UnifiedSwitcher({
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium" htmlFor="unified-proj-desc">
-                설명 <span className="text-muted-foreground text-xs">(선택)</span>
+                {t('switcherDescriptionLabel')} <span className="text-muted-foreground text-xs">{t('switcherOptionalLabel')}</span>
               </label>
               <textarea
                 id="unified-proj-desc"
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="프로젝트에 대한 간단한 설명"
+                placeholder={t('switcherProjectDescPlaceholder')}
                 rows={3}
                 value={newProjectDesc}
                 onChange={(e) => setNewProjectDesc(e.target.value)}
               />
             </div>
             <DialogFooter>
-              <DialogClose render={<Button type="button" variant="ghost" disabled={creating}>취소</Button>} />
+              <DialogClose render={<Button type="button" variant="ghost" disabled={creating}>{tCommon('cancel')}</Button>} />
               <Button type="submit" disabled={!newProjectName.trim() || creating}>
-                {creating ? '생성 중…' : '만들기'}
+                {creating ? t('switcherCreating') : t('switcherCreateButton')}
               </Button>
             </DialogFooter>
           </form>
