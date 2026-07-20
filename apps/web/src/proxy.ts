@@ -491,7 +491,11 @@ function setResolvedHeaders(fwdHeaders: Headers, context: { orgId: string; orgRo
 }
 
 export const config = {
+  // story #2022: manifest.webmanifest(PWA manifest, story #2022 신설)가 favicon.ico와 달리
+  // 이 matcher 제외 목록에 없어 인증 미들웨어에 걸려 /login 307로 리다이렉트됐다 — PWA 설치
+  // 프롬프트·크롤러는 쿠키 없이 manifest를 fetch하므로 실사용 환경에서 매니페스트가 항상
+  // 깨진 상태였을 것(로컬 실측으로 발견).
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

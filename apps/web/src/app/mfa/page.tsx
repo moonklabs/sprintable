@@ -34,12 +34,12 @@ export default function MfaPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm space-y-6 rounded-2xl bg-white p-4 shadow-lg sm:p-8">
+    <div className="flex min-h-screen items-center justify-center bg-muted">
+      <div className="w-full max-w-sm space-y-6 rounded-2xl bg-background p-4 shadow-lg sm:p-8">
         <div className="flex flex-col items-center gap-3 text-center">
-          <SprintableLogo variant="stacked" className="text-gray-900" markClassName="h-14" wordmarkClassName="h-5" />
-          <h1 className="text-lg font-semibold text-gray-900">Two-Factor Authentication</h1>
-          <p className="text-sm text-gray-500">Enter the 6-digit code from your authenticator app.</p>
+          <SprintableLogo variant="stacked" className="text-foreground" markClassName="h-14" wordmarkClassName="h-5" />
+          <h1 className="text-lg font-semibold text-foreground">Two-Factor Authentication</h1>
+          <p className="text-sm text-muted-foreground">Enter the 6-digit code from your authenticator app.</p>
         </div>
         <div className="space-y-3">
           <input
@@ -47,7 +47,7 @@ export default function MfaPage() {
             inputMode="numeric"
             maxLength={6}
             placeholder="000000"
-            className="w-full rounded-lg border border-gray-300 px-4 py-3 text-center text-xl font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border px-4 py-3 text-center text-xl font-mono tracking-widest text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
             value={code}
             onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
             onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
@@ -57,7 +57,7 @@ export default function MfaPage() {
           <button
             onClick={handleVerify}
             disabled={loading || code.length !== 6}
-            className="w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
+            className="w-full rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:opacity-50"
           >
             {loading ? 'Verifying...' : 'Verify'}
           </button>
