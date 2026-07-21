@@ -184,7 +184,7 @@ function NotificationPanel({
       </div>
 
       {/* 필터 탭 */}
-      <div className="flex shrink-0 overflow-x-auto border-b">
+      <div className="focus-inset flex shrink-0 overflow-x-auto border-b">
         {FILTER_TABS.map((tab) => (
           <button
             key={tab.value}
@@ -205,7 +205,9 @@ function NotificationPanel({
             type="button"
             onClick={() => setShowUnreadOnly((v) => !v)}
             className={cn(
-              'rounded-full px-2.5 py-0.5 text-[11px] font-medium transition',
+              // story #2062: showUnreadOnly=true면 bg-primary(링색과 동일) — focus-inset 컨테이너
+              // 안에서는 inset 링이 안 보이므로 focus-outset으로 바깥 링을 되돌린다(유나 규격).
+              'focus-outset rounded-full px-2.5 py-0.5 text-[11px] font-medium transition',
               showUnreadOnly
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-muted text-muted-foreground hover:text-foreground',
@@ -217,7 +219,7 @@ function NotificationPanel({
       </div>
 
       {/* 목록 */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="focus-inset min-h-0 flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
             {tCommon('loading')}

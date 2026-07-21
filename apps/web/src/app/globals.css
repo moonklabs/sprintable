@@ -498,6 +498,19 @@
   *::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
   *::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
+  /* story #2062(유나 규격): #2057의 outline-offset:2px(바깥 4px 돌출)가 패딩 0인
+     overflow-*-auto 스크롤 컨테이너에서 클리핑된다 — 링이 컨테이너 밖으로 못 새어나가
+     잘린다. 컨테이너에 `.focus-inset`을 붙이면 그 안의 포커스 링이 요소 안쪽으로 그려져
+     클리핑을 원천 회피한다(레이아웃은 안 건드림 — #2062 AC2 대안 중 유나 실측 채택).
+     단, primary 배경 버튼은 링 색=배경색이라 inset이면 대비 1.00(안 보임) — 그런 버튼에는
+     `.focus-outset`을 같이 붙여 바깥 링으로 되돌린다. */
+  .focus-inset :focus-visible {
+    outline-offset: -2px;
+  }
+  .focus-inset .focus-outset:focus-visible {
+    outline-offset: 2px;
+  }
+
   html {
     @apply font-sans;
     text-autospace: ideograph-alpha ideograph-numeric;

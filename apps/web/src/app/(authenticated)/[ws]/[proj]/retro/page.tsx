@@ -149,7 +149,7 @@ export default function RetroPage() {
         }
       />
 
-      <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto">
+      <div className="focus-inset flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto">
         {/* Create new session — toggle via TopBar button */}
         {showCreateForm && (
           <div className="flex-shrink-0 border-b border-border/80 px-6 py-4">

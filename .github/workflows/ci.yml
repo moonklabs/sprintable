@@ -374,6 +374,11 @@ jobs:
       - name: "Verify no hand-rolled modal without accessibility (story #2061 regression guard)"
         run: pnpm --filter web verify:no-handrolled-modal
 
+      # story #2062 회귀가드: 패딩도 focus-inset(유나 규격)도 없는 overflow-*-auto|scroll
+      # 스크롤 컨테이너가 새로 들어오면 이 스텝이 실패한다(#2057 포커스 링 클리핑 재발 방지).
+      - name: "Verify focus-inset coverage on scroll containers (story #2062 regression guard)"
+        run: pnpm --filter web verify:focus-inset-coverage
+
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
         # of being masked by tail's 0 — without it the unit-test gate was a no-op

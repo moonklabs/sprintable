@@ -49,7 +49,7 @@ export function RoadmapFlow({ epics, totalEpicCount, className }: RoadmapFlowPro
           높이 잠식) 대신 가로스크롤. 보강③ 양끝 페이드로 "더 있음" 스크롤 발견성 신호(relative
           wrapper + pointer-events-none 그라데이션 오버레이, from-background로 페이지 배경과 합성). */}
       <div className="relative">
-        <div className="flex items-start overflow-x-auto">
+        <div className="focus-inset flex items-start overflow-x-auto">
           {epics.map((e, i) => (
             <div key={e.id} className="flex items-start">
               <Link

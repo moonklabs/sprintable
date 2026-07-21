@@ -164,7 +164,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
               {isEditable && <ChevronDown className="size-3" />}
             </button>
             {showLangMenu && (
-              <div className="absolute left-0 top-full z-50 mt-1 max-h-52 w-36 overflow-y-auto rounded-xl border border-border bg-popover py-1">
+              <div className="focus-inset absolute left-0 top-full z-50 mt-1 max-h-52 w-36 overflow-y-auto rounded-xl border border-border bg-popover py-1">
                 {SUPPORTED_LANGUAGES.map((lang) => (
                   <button
                     key={lang}

@@ -1376,7 +1376,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     className="w-full rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   {depQueryResults.length > 0 && (
-                    <ul className="max-h-32 overflow-y-auto rounded border border-border bg-background">
+                    <ul className="focus-inset max-h-32 overflow-y-auto rounded border border-border bg-background">
                       {depQueryResults.map((s) => (
                         <li key={s.id}>
                           <button

@@ -107,7 +107,7 @@ export function TeamPresencePanel({
         ) : null}
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto py-2">
+      <div className="focus-inset min-h-0 flex-1 overflow-y-auto py-2">
         {groups.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-muted-foreground">{t('empty')}</p>
         ) : (
