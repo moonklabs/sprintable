@@ -16,7 +16,12 @@ jobs:
     runs-on: ubuntu-latest
     # story 8236bbc3(2026-07-03): 217초 실측(전체 스위트 3391개 대다수, 비파괴 real-DB 84개
     # 파일 포함) + 파괴적 54개 파일 격리 순회 오버헤드 버퍼. 규모상 샤딩 불요(설계 §1-D).
-    timeout-minutes: 20
+    # ⚠️story #2081 응급 상향(2026-07-21): 그 217초 추정치가 스위트 성장(파일 수 계속 증가)
+    # 으로 낡았다 — 오늘만 6회+(#2339·2345·2352·2353·2364·#2372) 20m 캡에 걸려 재실행 의존.
+    # #2372(미르코군, FE only — ko/en.json+goals tsx, 마이그레이션 파일 0개)까지 20m13s에
+    # 걸려 "재시도로 넘김"이 마이그레이션 무관 PR에도 세금이 되는 게 실측됐다 — 응급으로
+    # 25분 상향(근본 스위트 분할은 #2081 AC2/AC3 후속).
+    timeout-minutes: 25
 
     services:
       postgres:
@@ -248,7 +253,9 @@ jobs:
     # 문서화한 116건 연쇄 실패를 이 job에서도 재현하므로, 단일 평면 실행이 아니라 반드시
     # 동일한 2단계 분리 구조가 필요하다(217초 실측 + 격리 순회 버퍼 — alembic-fresh-db와 동일
     # timeout-minutes: 20으로 상향).
-    timeout-minutes: 20
+    # ⚠️story #2081 응급 상향(2026-07-21): alembic-fresh-db와 동일 destructive_schema 스위트를
+    # 도는 job이라 같은 20m 캡 위험을 공유한다 — 대칭으로 25분 상향(근본은 #2081 AC2/AC3 후속).
+    timeout-minutes: 25
 
     services:
       postgres:
