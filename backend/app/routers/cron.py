@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.database import get_db
 from app.models.agent_run import AgentRun
 from app.models.agent_session import AgentSession
@@ -41,12 +42,47 @@ def _err(code: str, message: str, status: int = 400) -> JSONResponse:
     return JSONResponse({"data": None, "error": {"code": code, "message": message}, "meta": None}, status_code=status)
 
 
+_LOCAL_ENVS = {"development"}
+
+
 def verify_cron(request: Request) -> None:
+    """story #2072(high, 2026-07-21) 근본수정 — 기존엔 `if not CRON_SECRET: return`(환경
+    무관 무조건 허용)이라 `_require_internal_secret`(#2071)보다도 더 넓게 열려 있었다(둘 다
+    "시크릿 없으면 연다"는 같은 안티패턴 — agent_inbox.py `_verify_signature`가 유일한 정답
+    형태: "secret 미설정 시 open ingestion 차단"). 지금은 dev/prod 둘 다 `CRON_SECRET`이
+    secretRef로 배선돼 있어 무인증은 아니지만(오르테가군 실측), 배선이 한 번이라도 비면
+    (배포 실수·로테이션·env 누락) 전 cron이 열리는 구조적 위험이었다.
+
+    `_require_internal_secret`(#2071)과 동일 기준으로 좁힌다 — `app_env=="development"`
+    문자열만으로는 "진짜 로컬"과 "인터넷에 노출된 dev Cloud Run"을 구분 못 하므로
+    `settings.is_really_local`(K_SERVICE 부재 판정, `app/core/config.py` SSOT)도 같이
+    요구한다."""
     if not CRON_SECRET:
-        return  # CRON_SECRET 미설정 시 로컬 개발 허용
+        if settings.app_env in _LOCAL_ENVS and settings.is_really_local:
+            return  # 진짜 로컬 개발 전용 예외(Cloud Run 위가 아님)
+        logger.warning(
+            "cron.secret_missing_in_non_local_env app_env=%s on_cloud_run=%s",
+            settings.app_env, not settings.is_really_local,
+        )
+        raise HTTPException(status_code=503, detail="Service misconfigured")
     auth = request.headers.get("authorization", "")
     if auth != f"Bearer {CRON_SECRET}":
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def check_cron_secret_config(s=None) -> None:
+    """fail-closed startup 가드(story #2072) — `check_internal_secret_config`(#2071)와
+    동형(check_listen_config()와 동일 패턴, main lifespan이 호출 대상). non-local(진짜
+    로컬이 아닌)인데 `CRON_SECRET` 미설정이면 배포 자체를 막는다 — 런타임 503보다 먼저,
+    더 시끄럽게 잡는 쪽이 안전하다."""
+    if s is None:
+        from app.core.config import settings as s
+    _not_local = s.app_env not in _LOCAL_ENVS or not s.is_really_local
+    if _not_local and not CRON_SECRET:
+        raise RuntimeError(
+            f"APP_ENV={s.app_env}인데 CRON_SECRET 미설정 — 내부 cron 엔드포인트가 인증 없이 "
+            "공개된다(fail-closed·story #2072)."
+        )
 
 
 # ─── GET /api/v2/internal/cron/agent-session-recovery ─────────────────────────

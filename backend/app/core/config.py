@@ -204,5 +204,18 @@ class Settings(BaseSettings):
     def is_ee_enabled(self) -> bool:
         return self.license_consent.lower() == "agreed"
 
+    @property
+    def is_really_local(self) -> bool:
+        """story #2071(critical, 2026-07-21) 근본수정 — `app_env=="development"`만으로는
+        "개발자 랩탑"과 "인터넷에 노출된 dev Cloud Run 배포"를 구분 못 한다(둘 다 동일
+        APP_ENV=development). Cloud Run은 `K_SERVICE`를 항상 자동 주입한다(설정 불필요 —
+        `app/core/database.py`의 커넥션 태깅과 동일 SSOT, 신규 발명 아님). 이게 없으면(로컬
+        uvicorn/pytest) 진짜 로컬, 있으면(dev든 prod든) Cloud Run 위라 fail-open 대상이 아니다.
+        내부 secret 게이트(auth_firebase_internal.py·cron.py 등)가 "시크릿 미설정=로컬이니
+        허용" 판정을 내릴 때 이 프로퍼티로 좁혀야 한다 — `app_env` 문자열만 보면 노출된 dev가
+        그대로 열린다(#2071이 이 클래스의 첫 사례)."""
+        import os
+        return not os.environ.get("K_SERVICE")
+
 
 settings = Settings()
