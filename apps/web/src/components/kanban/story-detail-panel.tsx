@@ -38,6 +38,7 @@ import {
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 interface Task {
   id: string;
@@ -850,14 +851,19 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             />
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowDeleteConfirm(true)}
-              className="flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
-              aria-label={t('deleteStory')}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
+            {/* story #2104 — BE stories.py:1056이 human-only로 hard-delete를 403 거부한다(되돌릴
+                수 없는 조작). 에이전트 계정에도 트리거를 열어두면 #2091/#2103과 같은 결함이라
+                미리 숨긴다. */}
+            <HumanOnlyAction>
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+                aria-label={t('deleteStory')}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </HumanOnlyAction>
             <button type="button" onClick={onClose} className="rounded-md border border-border px-3 py-2 text-muted-foreground transition hover:text-foreground hover:bg-muted/50">✕</button>
           </div>
         </div>

@@ -24,6 +24,14 @@ vi.mock('@/components/nav/top-bar-slot', () => ({
   ),
 }));
 
+// story #2104 — HumanOnlyAction(에픽 삭제 트리거를 감싼다)이 useDashboardContext를 읽는다.
+// 기본은 human(기존 스위트가 전부 "리스트가 정상 렌더된다"만 확認하므로 무관). agent 게이팅
+// 자체를 보는 케이스만 개별 override.
+const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => useDashboardContextMock(),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -50,6 +58,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  useDashboardContextMock.mockReturnValue({ currentMemberType: 'human' });
 });
 
 afterEach(async () => {
@@ -97,5 +106,21 @@ describe('GoalsClient — 목표 first-touch 정체성', () => {
     const html = container.innerHTML;
     expect(html).toContain('E-CANVAS');
     expect(html).not.toContain('아직 목표가 없어요');
+  });
+
+  // story #2104 — BE goals.py:352(human-only 삭제 403)를 FE가 미리 안 보고 에이전트 계정에도
+  // 삭제 트리거를 무조건 열었다(#2091/#2103과 같은 결함). 양방향 고정 — human까지 잠그면
+  // 정당한 삭제가 봉쇄되는 더 큰 사고다.
+  it('human이면 에픽 삭제 트리거가 렌더된다(정당한 사용자는 막히면 안 됨)', async () => {
+    stubFetch([{ id: 'e1', title: 'E-CANVAS', status: 'active', story_count: 3, is_ai_generated: false }]);
+    await mount();
+    expect(container.querySelector('button[aria-label="목표 삭제"]')).not.toBeNull();
+  });
+
+  it('agent면 에픽 삭제 트리거가 안 뜬다', async () => {
+    useDashboardContextMock.mockReturnValue({ currentMemberType: 'agent' });
+    stubFetch([{ id: 'e1', title: 'E-CANVAS', status: 'active', story_count: 3, is_ai_generated: false }]);
+    await mount();
+    expect(container.querySelector('button[aria-label="목표 삭제"]')).toBeNull();
   });
 });
