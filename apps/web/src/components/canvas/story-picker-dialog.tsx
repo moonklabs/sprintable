@@ -73,7 +73,7 @@ export function StoryPickerDialog({ open, onOpenChange, projectId, onSelect }: S
           placeholder={t('storyPickerSearchPlaceholder')}
         />
 
-        <div className="max-h-64 space-y-1 overflow-y-auto">
+        <div className="focus-inset max-h-64 space-y-1 overflow-y-auto">
           {loading ? (
             <p className="px-1 py-2 text-xs text-muted-foreground">{t('storyPickerLoading')}</p>
           ) : stories.length === 0 ? (

@@ -452,7 +452,7 @@ export default function StandupPage({ projectId }: StandupClientProps) {
         {dateNavControls}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
         {headerBadges.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-6 py-3">
             {headerBadges.map((badge) => (
@@ -712,7 +712,7 @@ export default function StandupPage({ projectId }: StandupClientProps) {
                                 </div>
                               ) : null}
                               {storyPickerStories.length > 0 ? (
-                                <div className="max-h-40 space-y-1.5 overflow-y-auto">
+                                <div className="focus-inset max-h-40 space-y-1.5 overflow-y-auto">
                                   {storyPickerStories.map((story) => {
                                     const checked = planStoryIds.includes(story.id);
                                     return (

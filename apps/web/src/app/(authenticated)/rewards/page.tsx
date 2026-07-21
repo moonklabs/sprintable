@@ -105,7 +105,7 @@ export default function RewardsPage() {
     <>
       <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl space-y-5 p-6">
 
           {/* 리더보드 */}

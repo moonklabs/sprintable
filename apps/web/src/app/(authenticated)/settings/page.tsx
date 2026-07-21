@@ -681,7 +681,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Right content */}
-        <div className="flex-1 min-w-0 overflow-y-auto">
+        <div className="focus-inset flex-1 min-w-0 overflow-y-auto">
           {/* Mobile toggle button */}
           <div className="lg:hidden flex items-center gap-2 border-b px-4 py-2">
             <SidebarTrigger className="mr-1" />

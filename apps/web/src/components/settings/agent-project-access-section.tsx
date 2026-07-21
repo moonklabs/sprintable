@@ -163,7 +163,7 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
             접근 가능한 프로젝트가 없습니다.
           </p>
         ) : (
-          <div className="max-h-72 divide-y divide-border overflow-y-auto overflow-x-hidden rounded-md border border-border">
+          <div className="focus-inset max-h-72 divide-y divide-border overflow-y-auto overflow-x-hidden rounded-md border border-border">
             {projects.map((project) => {
               const errored = errorIds.has(project.id);
               const readDenied = readDeniedIds.has(project.id);

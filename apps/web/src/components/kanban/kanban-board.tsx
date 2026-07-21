@@ -947,7 +947,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto">
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('sprint_id', '')}>
                     <span className="flex-1">{t('allSprints')}</span>
@@ -1007,7 +1007,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto">
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('epic_id', '')}>
                     <span className="flex-1">{t('allEpics')}</span>
@@ -1067,7 +1067,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto">
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('assignee_id', '')}>
                     <span className="flex-1">{t('allAssignees')}</span>
@@ -1147,7 +1147,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   />
                 </div>
                 <DropdownMenuSeparator />
-                <div className="max-h-[50vh] overflow-y-auto">
+                <div className="focus-inset max-h-[50vh] overflow-y-auto">
                   <DropdownMenuGroup>
                     <DropdownMenuItem onClick={() => setSelectedLabelIds([])}>
                       <span className="flex-1">{t('allLabels')}</span>
@@ -1256,7 +1256,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         ) : null}
         <div className="min-h-0 flex-1 overflow-hidden">
         {viewMode === 'list' ? (
-          <div className="h-full overflow-y-auto">
+          <div className="focus-inset h-full overflow-y-auto">
             <KanbanListView
               stories={filteredStories}
               epicMap={epicMap}

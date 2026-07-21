@@ -444,7 +444,7 @@ export default function InboxPage() {
             caused a 768-1023 tablet seam where the mobile bottom-tab shell and this master-detail
             split disagreed on what "mobile" means. */}
         <div className={`flex w-full min-w-[320px] flex-col border-r border-border/80 lg:max-w-[420px] max-lg:min-w-0 ${selectedId ? 'max-lg:hidden' : ''}`}>
-          <div className="flex-1 overflow-y-auto py-2">
+          <div className="focus-inset flex-1 overflow-y-auto py-2">
             {loading ? (
               <div className="space-y-2 px-3 pt-2">
                 {[1, 2, 3, 4, 5].map((i) => (
@@ -570,7 +570,7 @@ export default function InboxPage() {
 
         {/* Right: detail panel. max-lg: hidden when nothing selected (the list owns the
             screen); full-screen with a back button when an item is tapped (efcb3840 ⓑ, #1986). */}
-        <div className={`flex min-w-0 flex-1 flex-col overflow-y-auto ${!selectedId ? 'max-lg:hidden' : ''}`}>
+        <div className={`focus-inset flex min-w-0 flex-1 flex-col overflow-y-auto ${!selectedId ? 'max-lg:hidden' : ''}`}>
           {selectedNotification ? (
             <button
               type="button"

@@ -820,7 +820,7 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
         </div>
         {/* Scrollable body — long forms (outcome 추가 등) overflow the viewport otherwise;
             internal scroll keeps every field + the submit button reachable (S5). */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+        <div className="focus-inset min-h-0 flex-1 overflow-y-auto px-6 pb-6">
           <GoalCreateForm
             projectId={projectId}
             orgId={orgId}

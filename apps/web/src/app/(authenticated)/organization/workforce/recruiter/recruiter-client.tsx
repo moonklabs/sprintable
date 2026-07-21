@@ -653,7 +653,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   </div>
                   {/* 다음 버튼이 긴 리스트 하단에 묻히지 않도록 리스트 자체를 bounded-height 스크롤로 격리 —
                       버튼은 이 영역 밖(항상 보임)에 위치. */}
-                  <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-0.5">
+                  <div className="focus-inset max-h-[55vh] space-y-4 overflow-y-auto pr-0.5">
                     {roleGroups.length === 0 ? (
                       <p className="py-6 text-center text-sm text-muted-foreground">{t('roleSearchEmpty')}</p>
                     ) : roleGroups.map((group) => (
@@ -771,7 +771,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     {[0, 1].map((i) => <Skeleton key={i} className="h-14 rounded-md" />)}
                   </div>
                 ) : scopeMode === 'projects' ? (
-                  <div className="grid max-h-56 gap-3 overflow-y-auto sm:grid-cols-2">
+                  <div className="focus-inset grid max-h-56 gap-3 overflow-y-auto sm:grid-cols-2">
                     {(orgProjects ?? []).map((project) => {
                       const selected = scopeProjectIds.includes(project.id);
                       return (

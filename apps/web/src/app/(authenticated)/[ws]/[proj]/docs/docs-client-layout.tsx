@@ -290,7 +290,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Desktop sidebar — hidden on mobile */}
         {!sidebarCollapsed && (
-          <aside className="relative hidden w-[236px] flex-shrink-0 flex-col overflow-y-auto border-r border-border/80 bg-background lg:flex">
+          <aside className="focus-inset relative hidden w-[236px] flex-shrink-0 flex-col overflow-y-auto border-r border-border/80 bg-background lg:flex">
             <button
               type="button"
               onClick={handleToggleSidebar}
@@ -364,7 +364,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             <span className="text-sm font-medium text-foreground">{t('title')}</span>
             <button type="button" onClick={closeDrawer} className="rounded p-1 text-muted-foreground hover:text-foreground" aria-label="닫기"><X className="size-4" /></button>
           </div>
-          <div className="flex-1 overflow-y-auto">{sidebarContent}</div>
+          <div className="focus-inset flex-1 overflow-y-auto">{sidebarContent}</div>
         </div>
       </div>
 
