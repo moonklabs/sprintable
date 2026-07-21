@@ -28,6 +28,7 @@ from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
 from app.models.hitl_config import OrgGatePolicy
 from app.models.pm import Story, Task
+from app.models.visual_artifact import VisualArtifact
 from app.models.workflow_line import (
     WorkflowLineStepApproval,
     WorkflowLineStepRun,
@@ -190,10 +191,16 @@ async def resolve_work_item_project_id(
     (routers/gates.py 제네릭 생성 엔드포인트·merge_verdict_gate.py evaluate_merge_gate)과
     override_gate()의 sr(step_run)=None 폴백용.
 
-    Story/Doc.project_id는 NOT NULL이라 row가 있으면 항상 값이 있다. Task는 project_id 컬럼이
-    없어 story JOIN. 미지원/미인식 work_item_type(예: workflow_line_config의 org-level
-    'wf_line_version' — 실제로 project-무관일 수 있음)은 None(best-effort — silent 실패가
-    아니라 구조적으로 project-scoped가 아닐 수 있다는 정직한 신호)."""
+    Story/Doc/VisualArtifact.project_id는 NOT NULL이라 row가 있으면 항상 값이 있다. Task는
+    project_id 컬럼이 없어 story JOIN. 미지원/미인식 work_item_type(예: workflow_line_config의
+    org-level 'wf_line_version' — 실제로 project-무관일 수 있음)은 None(best-effort — silent
+    실패가 아니라 구조적으로 project-scoped가 아닐 수 있다는 정직한 신호).
+
+    story #2082: visual_artifact 분기는 이 함수 신설 시(story #1968) 누락돼 있었다 —
+    artifact_canonicalize 게이트(work_item_type="visual_artifact")의 project_id가 항상
+    None으로 해소돼 assigned_to_me=true 인박스에서 project-level owner/admin에게 안 보이는
+    (org owner/admin에게만 노출되는) 회귀였다. VisualArtifact.project_id는 NOT NULL이라
+    Story/Doc과 동형으로 항상 해소 가능."""
     if work_item_type == "story":
         return (await session.execute(
             select(Story.project_id).where(Story.id == work_item_id, Story.org_id == org_id)
@@ -207,6 +214,12 @@ async def resolve_work_item_project_id(
     if work_item_type == "doc":
         return (await session.execute(
             select(Doc.project_id).where(Doc.id == work_item_id, Doc.org_id == org_id)
+        )).scalar_one_or_none()
+    if work_item_type == "visual_artifact":
+        return (await session.execute(
+            select(VisualArtifact.project_id).where(
+                VisualArtifact.id == work_item_id, VisualArtifact.org_id == org_id,
+            )
         )).scalar_one_or_none()
     return None
 
