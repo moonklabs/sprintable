@@ -112,7 +112,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
   if (loading) {
     return (
       <>
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} hideContextChip />
         <div className="flex h-64 items-center justify-center">
           <p className="text-sm text-muted-foreground">{t('loading')}</p>
         </div>
@@ -123,7 +123,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
   if (notFound || !loop) {
     return (
       <>
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} hideContextChip />
         <div className="flex h-64 flex-col items-center justify-center gap-3">
           <p className="text-sm text-muted-foreground">{t('notFound')}</p>
           {/* story #1990: replace — 뒤로가기 재진입 트랩 방지(§3.2). */}
@@ -155,6 +155,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
             {t('backToList')}
           </button>
         }
+        hideContextChip
       />
       <div className="mx-auto max-w-3xl space-y-5 overflow-y-auto p-5">
         {/* Header */}
