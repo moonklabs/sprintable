@@ -38,19 +38,21 @@ excluded_services:
       전수 확認 — env-var/시크릿 드리프트 가드 없음. `internal-api/app/core/drift.py`의
       "Drift-check"는 DB 스키마(vendored model contract ↔ live information_schema)
       drift로 이것과 무관. ⛔ ①②축은 어느 쪽에서도 현재 안 보는 상태 — 저쪽 repo에
-      별도 가드 신설이 후속 필요(백로그). ③축(평문 시크릿)은 이 가드가 계속 커버.
+      별도 가드 신설이 후속 필요(백로그, story #2099). ③축(평문 시크릿)은 이 가드가 계속
+      커버. 갭 경위·drift.py 오판 위험·AC5("이름이 아니라 무엇을 검사하는지로 판정")는
+      #2099 참고.
   - service: sprintable-admin-web-dev
     excluded_axes: [key_set, value_check]
     reason: 위와 동일 — sprintable-admin repo 소관.
-    watched_by: 위와 동일 — ①②축 무주공산, ③축은 이 가드가 커버.
+    watched_by: 위와 동일 — ①②축 무주공산(story #2099), ③축은 이 가드가 커버.
   - service: sprintable-internal-api
     excluded_axes: [key_set, value_check]
     reason: 위와 동일 — sprintable-admin repo 소관(E-ADMIN internal-api).
-    watched_by: 위와 동일 — ①②축 무주공산, ③축은 이 가드가 커버.
+    watched_by: 위와 동일 — ①②축 무주공산(story #2099), ③축은 이 가드가 커버.
   - service: sprintable-internal-api-dev
     excluded_axes: [key_set, value_check]
     reason: 위와 동일 — sprintable-admin repo 소관.
-    watched_by: 위와 동일 — ①②축 무주공산, ③축은 이 가드가 커버.
+    watched_by: 위와 동일 — ①②축 무주공산(story #2099), ③축은 이 가드가 커버.
 
 services:
   sprintable-backend-dev:
