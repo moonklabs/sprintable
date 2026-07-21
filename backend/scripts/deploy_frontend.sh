@@ -63,6 +63,9 @@ if [[ -z "${FASTAPI_URL}" ]]; then
     log "WARNING: FastAPI service '${FASTAPI_SERVICE}' not found. NEXT_PUBLIC_FASTAPI_URL will be empty."
 fi
 
+# ⛔story cd10e123 계열 긴급수정(2026-07-21, durable-wiring 전수 스윕 ⓐ): deploy_backend.sh와
+# 동형 결함 — --set-env-vars/--set-secrets(전체교체)로 재실행되면 cloudbuild.yaml deploy-frontend
+# 스텝이 additive로 쌓아온 REALTIME_URL 등이 소실된다. --update-*(additive)로 교정.
 gcloud run deploy "${SERVICE_NAME}" \
     --image="${IMAGE}" \
     --region="${GCP_REGION}" \
@@ -77,8 +80,8 @@ gcloud run deploy "${SERVICE_NAME}" \
     --max-instances="${MAX_INSTANCES}" \
     --concurrency=80 \
     --timeout=60 \
-    --set-env-vars="NODE_ENV=production,NEXT_TELEMETRY_DISABLED=1,NEXT_PUBLIC_FASTAPI_URL=${FASTAPI_URL}" \
-    --set-secrets="\
+    --update-env-vars="NODE_ENV=production,NEXT_TELEMETRY_DISABLED=1,NEXT_PUBLIC_FASTAPI_URL=${FASTAPI_URL}" \
+    --update-secrets="\
 NEXT_PUBLIC_SUPABASE_URL=NEXT_PUBLIC_SUPABASE_URL:latest,\
 NEXT_PUBLIC_SUPABASE_ANON_KEY=NEXT_PUBLIC_SUPABASE_ANON_KEY:latest,\
 NEXT_PUBLIC_COOKIE_DOMAIN=NEXT_PUBLIC_COOKIE_DOMAIN:latest,\

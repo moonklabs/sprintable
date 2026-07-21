@@ -188,6 +188,25 @@ def test_deploy_no_invalid_probe_flag_and_has_vpc():
     assert "--vpc-egress" in src and "--network=default" in src, "VPC 플래그 누락(결함②)"
 
 
+def test_deploy_backend_env_and_secrets_are_additive():
+    """결함⑤(story cd10e123 계열, 2026-07-21 durable-wiring 스윕 ⓐ): --set-env-vars/
+    --set-secrets(전체교체)는 이 일회성 런북이 기존 서비스 위에 실수로 재실행될 때
+    routine cloudbuild.yaml이 additive로 쌓아온 값(PG_LISTEN_ENABLED·REDIS_*·
+    GITHUB_APP_PRIVATE_KEY 등)을 조용히 지우는 landmine이었다 — --update-env-vars/
+    --update-secrets(additive)로 교정. --no-allow-unauthenticated도 현재 운영값
+    (--allow-unauthenticated, 2026-06-21 prod 403 사건 이후 명시 고정)과 충돌해 제거.
+    """
+    with open(_DEPLOY) as f:
+        lines = f.readlines()
+    # 주석 멘션(이 fix를 설명하는 텍스트 자체)은 무시하고 **실제 플래그 사용**만 검사.
+    used = lambda flag: [ln for ln in lines if ln.strip().startswith(flag)]
+    assert not used("--set-env-vars="), "--set-env-vars(전체교체) 실사용 잔존 — additive 회귀"
+    assert not used("--set-secrets="), "--set-secrets(전체교체) 실사용 잔존 — additive 회귀"
+    assert not used("--no-allow-unauthenticated"), "--no-allow-unauthenticated 실사용 잔존 — 현재 운영값과 충돌"
+    assert used("--update-env-vars=") and used("--update-secrets="), "--update-* 플래그 누락"
+    assert used("--allow-unauthenticated")
+
+
 # ── deploy_frontend.sh 결함 fix (deploy_backend.sh와 동일 패턴) ──────────────────
 
 def test_deploy_frontend_no_invalid_flags():
@@ -201,10 +220,20 @@ def test_deploy_frontend_no_invalid_flags():
 
 
 def test_deploy_frontend_single_set_env_vars():
-    """--set-env-vars 단일화(gcloud 반복 시 덮어써 NODE_ENV/NEXT_TELEMETRY 유실 위험 방지)."""
+    """--update-env-vars 단일화(gcloud 반복 시 덮어써 NODE_ENV/NEXT_TELEMETRY 유실 위험 방지).
+
+    story cd10e123 계열(2026-07-21, durable-wiring 스윕 ⓐ): --set-env-vars(전체교체)는 이
+    스크립트가 재실행될 때 cloudbuild.yaml deploy-frontend가 additive로 쌓아온 값(REALTIME_URL
+    등)을 조용히 지우는 landmine이라 --update-env-vars(additive)로 교정됐다 — 이 테스트도 새
+    플래그 이름으로 갱신(단일화라는 원래 의도는 동일하게 검증).
+    """
     with open(_DEPLOY_FE) as f:
-        src = f.read()
-    assert src.count("--set-env-vars=") == 1, "--set-env-vars 중복 → env 유실 위험"
+        lines = f.readlines()
+    src = "".join(lines)
+    # 주석 멘션(이 fix를 설명하는 텍스트 자체)은 무시하고 **실제 플래그 사용**만 검사.
+    used = lambda flag: [ln for ln in lines if ln.strip().startswith(flag)]
+    assert not used("--set-env-vars="), "--set-env-vars(전체교체) 실사용 잔존 — additive 회귀"
+    assert len(used("--update-env-vars=")) == 1, "--update-env-vars 중복 → env 유실 위험"
     for kv in ("NODE_ENV=production", "NEXT_TELEMETRY_DISABLED=1", "NEXT_PUBLIC_FASTAPI_URL="):
         assert kv in src, f"{kv} 누락"
 

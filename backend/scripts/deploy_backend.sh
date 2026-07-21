@@ -140,12 +140,23 @@ fi
 
 # 결함①: --startup-probe-path는 유효하지 않은 플래그 → 제거(Cloud Run 기본 TCP startup probe on --port).
 # 결함②: VPC 누락 → --network/--subnet/--vpc-egress 추가(Private-IP 경로·dev/prod 검증된 config 일치).
+# ⛔story cd10e123 계열 긴급수정(2026-07-21, durable-wiring 전수 스윕 ⓐ 적발): 이 스크립트는
+# E-INFRA S1(2026-06-04) prod DB-split 커트오버 전용 일회성 런북이라 사실상 휴면이지만,
+# test_deploy_env.py가 DRY_RUN 경로를 실 CI로 계속 검증 중이라(참조 0 아님) 삭제 대신 fix — 다만
+# --set-env-vars/--set-secrets(전체교체·additive 아님)로 재실행되면 routine cloudbuild.yaml이
+# 쌓아온 모든 값(PG_LISTEN_ENABLED·REDIS_*·GATE_CONFIG_ENFORCE_*·GITHUB_APP_PRIVATE_KEY 등)이
+# 조용히 소실되는 landmine이었다. --update-*(additive)로 교정 — 이 스크립트의 실제 용도(VPC/
+# Cloud-SQL-attach/서비스어카운트를 처음부터 구성하는 bootstrap)엔 어차피 아무 것도 없는
+# 상태에서 시작하므로 additive/replace 차이가 없고, 기존 서비스 위에 실수로 재실행되는
+# 최악의 경우엔 기존 설정을 보존하는 쪽이 항상 더 안전하다. --no-allow-unauthenticated도
+# 제거 — 현재 운영값(--allow-unauthenticated, 2026-06-21 prod promotion 403 사건 이후
+# cloudbuild.yaml이 명시 고정한 값)과 정면 충돌해 재실행 시 서비스가 401/403으로 막히던 것.
 gcloud run deploy "${SERVICE_NAME}" \
     --image="${IMAGE}" \
     --region="${GCP_REGION}" \
     --project="${GCP_PROJECT}" \
     --platform=managed \
-    --no-allow-unauthenticated \
+    --allow-unauthenticated \
     --service-account="${RUNTIME_SA}" \
     --port=8000 \
     --memory="${MEMORY}" \
@@ -158,8 +169,8 @@ gcloud run deploy "${SERVICE_NAME}" \
     --network=default \
     --subnet=default \
     --vpc-egress=private-ranges-only \
-    --set-env-vars="${ENV_VARS_SPEC}" \
-    --set-secrets="${SECRETS_SPEC}"
+    --update-env-vars="${ENV_VARS_SPEC}" \
+    --update-secrets="${SECRETS_SPEC}"
 
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
     --region="${GCP_REGION}" \
