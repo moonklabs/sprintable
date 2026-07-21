@@ -395,12 +395,16 @@ TARGET_ROUTE_GLOBS: dict[str, tuple[str, ...]] = {
 
 def resolve_target_route(target: str) -> tuple[str, ...] | None:
     """target(논리적 화면 식별자 또는 `/board?story=`류 리터럴 경로)을 apps/web 파일시스템
-    후보 경로들로 변환. 매핑이 없으면 None(호출자가 fail-closed 처리)."""
+    후보 경로들로 변환. 매핑이 없으면 None(호출자가 fail-closed 처리).
+
+    ⚠️2026-07-21: 이 `/`-접두 분기의 원 동기였던 `task_completed`("/board?story=")는
+    `story_detail`(순수 의미 식별자) + `target_promotion_pending=True`로 승격돼 더 이상
+    이 분기를 안 탄다(오르테가 PO 확定 — 매니페스트의 다른 29개 엔트리와 동형인 순수 의미
+    식별자로 통일). 현재 매니페스트엔 `/`-접두 target이 없다 — 이 분기는 향후 같은 패턴이
+    재도입될 경우를 위한 방어적 fallback으로 남겨둔다(죽은 코드는 아니지만 지금은 미도달)."""
     if target in TARGET_ROUTE_GLOBS:
         return TARGET_ROUTE_GLOBS[target]
     if target.startswith("/"):
-        # task_completed의 "/board?story=" 같은 팀 기존 폴백 컨벤션 — 쿼리스트링 제거 후
-        # 첫 경로 세그먼트를 프로젝트-스코프 라우트로 매핑.
         path_part = target.split("?", 1)[0].strip("/")
         segment = path_part.split("/", 1)[0] if path_part else ""
         if segment:
