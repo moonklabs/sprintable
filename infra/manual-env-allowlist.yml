@@ -355,6 +355,7 @@ services:
       - key: SUPABASE_SERVICE_ROLE_KEY
         reason: Supabase 서비스 롤 키 — 부트스트랩 스크립트 미편입, prod-only.
         owner: TBD
+        owner: TBD
 
   # sprintable-mcp-dev / sprintable-mcp-prod: 실측 결과 라이브 키 전부(MCP_TRANSPORT·
   # SPRINTABLE_API_URL·AGENT_API_KEY·[prod만]MCP_ALLOWED_HOSTS) deploy_mcp_dev.sh/
