@@ -27,6 +27,7 @@ from app.dependencies.auth import (
     get_verified_org_id,
     get_verified_org_id_streaming,
 )
+from app.core import shutdown as _shutdown_module
 from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
@@ -342,53 +343,80 @@ async def agent_event_stream(
                     await db.commit()
 
             # 신규 이벤트 리슨 — 대기 구간에서 커넥션 미점유, 이벤트마다 개별 세션
-            while not await request.is_disconnected():
-                try:
-                    event_data = await asyncio.wait_for(queue.get(), timeout=_SSE_HEARTBEAT_TIMEOUT)
-                    event_type = event_data.get("event_type", "message")
-                    # 1c22da3e fix: yield 전엔 pending 여부만 확인(skip 판정, 마킹 X),
-                    # delivered 마킹은 yield 성공 후로 미룬다 → yield 실패 시 영구 누락 방지.
-                    eid = event_data.get("event_id")
-                    if eid:
-                        try:
-                            async with async_session_factory() as db:
-                                r = await db.execute(
-                                    select(Event.status).where(
-                                        Event.id == uuid.UUID(eid),
-                                        Event.org_id == org_id,
+            # story c4c72eb1(E-ARCH GCE 이전) PR-A: 전역 shutdown_event를 queue.get()과 경합
+            # 시켜(asyncio.wait FIRST_COMPLETED) 셧다운 신호에 하트비트 주기(최대 30초)를
+            # 기다리지 않고 즉시 반응한다 — 강제 CancelledError 대신 정상 return으로 스트림을
+            # 깔끔히 끝내 EventSource가 즉시 재연결하도록 유도(GCLB 드레이닝과 결합 시 자동으로
+            # 건강한 인스턴스로 이동). shutdown 대기 태스크는 연결 생애주기 동안 단 1개만
+            # 생성한다(루프마다 재생성하면 테스트 타이밍이 흔들려 test_s20 케이스가 불안정해짐 —
+            # 뮤테이션 셀프체크로 확認됨, 매 iteration 재생성 버전은 실패).
+            shutdown_wait_task = asyncio.create_task(_shutdown_module.shutdown_event.wait())
+            try:
+                while not await request.is_disconnected():
+                    get_task = asyncio.create_task(queue.get())
+                    try:
+                        done, _pending = await asyncio.wait(
+                            {get_task, shutdown_wait_task},
+                            timeout=_SSE_HEARTBEAT_TIMEOUT,
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        if shutdown_wait_task in done:
+                            get_task.cancel()
+                            yield "event: shutdown_reconnect\ndata: {}\n\n"
+                            return
+                        if get_task not in done:
+                            # 타임아웃 — 기존 heartbeat 분기
+                            get_task.cancel()
+                            yield "event: heartbeat\ndata: {}\n\n"
+                            if await request.is_disconnected():
+                                break
+                            continue
+                        event_data = get_task.result()
+                        event_type = event_data.get("event_type", "message")
+                        # 1c22da3e fix: yield 전엔 pending 여부만 확인(skip 판정, 마킹 X),
+                        # delivered 마킹은 yield 성공 후로 미룬다 → yield 실패 시 영구 누락 방지.
+                        eid = event_data.get("event_id")
+                        if eid:
+                            try:
+                                async with async_session_factory() as db:
+                                    r = await db.execute(
+                                        select(Event.status).where(
+                                            Event.id == uuid.UUID(eid),
+                                            Event.org_id == org_id,
+                                        )
                                     )
-                                )
-                                _status = r.scalar_one_or_none()
-                                if _status is not None and _status != "pending":
-                                    # 이미 백필/타 연결에서 delivered → 중복 skip
-                                    continue
-                        except Exception:
-                            pass
-                    # event_id 없는 경로(chats direct push 등)도 id: 보장 — 재연결 추적 약화 방지
-                    # is_backfill: False 명시 + event_id 동기화 — SeenIdsCache dedup 및 relay 필터 정합성
-                    _live_id = eid or str(uuid.uuid4())
-                    _sse_data = json.dumps({**event_data, 'event_id': _live_id, 'is_backfill': False})
-                    # S-COMM-12: canonical 이벤트 시 legacy alias도 병행 yield (HTTP SSE 하위호환)
-                    if event_type == "conversation.message_created":
-                        yield f"event: conversation:message\nid: {_live_id}\ndata: {_sse_data}\n\n"
-                    yield f"event: {event_type}\nid: {_live_id}\ndata: {_sse_data}\n\n"
-                    # yield 성공 후 delivered 마킹 (1c22da3e: 손실 방지, dup은 클라 dedup)
-                    if eid:
-                        try:
-                            async with async_session_factory() as db:
-                                await db.execute(
-                                    update(Event)
-                                    .where(Event.id == uuid.UUID(eid), Event.status == "pending")
-                                    .values(status="delivered", delivered_at=datetime.now(timezone.utc))
-                                )
-                                await db.commit()
-                        except Exception:
-                            pass
-                except asyncio.TimeoutError:
-                    # S20: heartbeat 후 즉시 disconnect 체크 — dead connection 조기 정리
-                    yield "event: heartbeat\ndata: {}\n\n"
-                    if await request.is_disconnected():
-                        break
+                                    _status = r.scalar_one_or_none()
+                                    if _status is not None and _status != "pending":
+                                        # 이미 백필/타 연결에서 delivered → 중복 skip
+                                        continue
+                            except Exception:
+                                pass
+                        # event_id 없는 경로(chats direct push 등)도 id: 보장 — 재연결 추적 약화 방지
+                        # is_backfill: False 명시 + event_id 동기화 — SeenIdsCache dedup 및 relay 필터 정합성
+                        _live_id = eid or str(uuid.uuid4())
+                        _sse_data = json.dumps({**event_data, 'event_id': _live_id, 'is_backfill': False})
+                        # S-COMM-12: canonical 이벤트 시 legacy alias도 병행 yield (HTTP SSE 하위호환)
+                        if event_type == "conversation.message_created":
+                            yield f"event: conversation:message\nid: {_live_id}\ndata: {_sse_data}\n\n"
+                        yield f"event: {event_type}\nid: {_live_id}\ndata: {_sse_data}\n\n"
+                        # yield 성공 후 delivered 마킹 (1c22da3e: 손실 방지, dup은 클라 dedup)
+                        if eid:
+                            try:
+                                async with async_session_factory() as db:
+                                    await db.execute(
+                                        update(Event)
+                                        .where(Event.id == uuid.UUID(eid), Event.status == "pending")
+                                        .values(status="delivered", delivered_at=datetime.now(timezone.utc))
+                                    )
+                                    await db.commit()
+                            except Exception:
+                                pass
+                    finally:
+                        if not get_task.done():
+                            get_task.cancel()
+            finally:
+                if not shutdown_wait_task.done():
+                    shutdown_wait_task.cancel()
         except (asyncio.CancelledError, GeneratorExit):
             pass
         finally:

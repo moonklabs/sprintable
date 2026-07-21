@@ -16,10 +16,15 @@ _APP_DIR = Path(__file__).parent.parent / "app"
 # main.py: task/l2_task 변수에 참조 보관 + lifespan finally에서 cancel()+await로 명시 추적(안전).
 # pg_pubsub.py: fire_and_forget() 자체의 정석 구현(강한 참조 set 보관) + 그걸 설명하는 docstring.
 # l2_trigger_worker.py: 실 호출 없음 — docstring이 "asyncio.create_task(...)" 문자열을 언급할 뿐.
+# events.py/agent_gateway.py: story c4c72eb1 PR-A — get_task/shutdown_wait_task 모두 지역 변수에
+# 참조 보관 후 asyncio.wait()로 즉시 경합·완료 대기하고 각 finally에서 cancel() — fire-and-forget
+# 아닌 표준 "동시 대기" 패턴(#1970류 GC 조기수거 리스크 없음).
 _ALLOWED_FILES = {
     _APP_DIR / "main.py",
     _APP_DIR / "services" / "pg_pubsub.py",
     _APP_DIR / "services" / "l2_trigger_worker.py",
+    _APP_DIR / "routers" / "events.py",
+    _APP_DIR / "routers" / "agent_gateway.py",
 }
 _PATTERN = re.compile(r"\.create_task\(|\bensure_future\(")
 

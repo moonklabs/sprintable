@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_current_user_streaming
 from app.core.database import async_session_factory
+from app.core import shutdown as _shutdown_module
 from app.dependencies.database import get_db
 from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
 from app.models.event import Event
@@ -402,13 +403,31 @@ async def agent_stream(
             # heartbeat가 안 떠도(매번 wait_for가 일찍 반환) last_seen이 stale → 거짓 offline 되므로,
             # 매 iteration 경과를 체크해 _PRESENCE_TICK_INTERVAL마다 throttle write(busy/idle 무관 갱신 보장).
             last_presence_tick = datetime.now(timezone.utc)
+            # story c4c72eb1(E-ARCH GCE 이전) PR-A: events.py와 동형 shutdown-aware 종료.
             while not await request.is_disconnected():
                 _now = datetime.now(timezone.utc)
                 if (_now - last_presence_tick).total_seconds() >= _PRESENCE_TICK_INTERVAL:
                     await _mark_agent_online(agent_id, session_id)
                     last_presence_tick = _now
+                get_task = asyncio.create_task(queue.get())
+                shutdown_task = asyncio.create_task(_shutdown_module.shutdown_event.wait())
                 try:
-                    signal = await asyncio.wait_for(queue.get(), timeout=_SSE_HEARTBEAT)
+                    done, pending = await asyncio.wait(
+                        {get_task, shutdown_task},
+                        timeout=_SSE_HEARTBEAT,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for p in pending:
+                        p.cancel()
+                    if shutdown_task in done:
+                        yield "event: shutdown_reconnect\ndata: {}\n\n"
+                        return
+                    if get_task not in done:
+                        yield "event: heartbeat\ndata: {}\n\n"
+                        if await request.is_disconnected():
+                            break
+                        continue
+                    signal = get_task.result()
                     if signal.get("__wake__"):
                         # ìµì  acked_seq ì¡°í (í´ë¼ì´ì¸í¸ê° ACK ë³´ëì ì ìì)
                         async with async_session_factory() as db:
@@ -433,10 +452,10 @@ async def agent_stream(
                         _live_id = signal.get("event_id") or str(uuid.uuid4())
                         _sse = json.dumps({**signal, "is_backfill": False})
                         yield f"event: {event_type}\nid: {_live_id}\ndata: {_sse}\n\n"
-                except asyncio.TimeoutError:
-                    yield "event: heartbeat\ndata: {}\n\n"
-                    if await request.is_disconnected():
-                        break
+                finally:
+                    for t in (get_task, shutdown_task):
+                        if not t.done():
+                            t.cancel()
         except (asyncio.CancelledError, GeneratorExit):
             pass
         finally:
