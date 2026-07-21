@@ -7,6 +7,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { formatTotalSize } from '@/lib/storage/format';
 import { StorageCapacityBanner } from './storage-capacity-banner';
 import { StorageFolderTree } from './storage-folder-tree';
@@ -50,6 +51,12 @@ export function StorageView({ projectId }: { projectId: string }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const detailPanel = useContextualPanelState({ storageKey: 'storage-detail', defaultOpen: true });
+  // story #2061 — role/aria-modal은 있었지만 포커스 트랩·Esc·반환이 없던 손수구현 드로어.
+  const { setDrawerOpen: setDetailDrawerOpen } = detailPanel;
+  const detailDrawerTrapRef = useFocusTrap(
+    !detailPanel.supportsInlinePanel && detailPanel.drawerOpen,
+    useCallback(() => setDetailDrawerOpen(false), [setDetailDrawerOpen]),
+  );
   const reqIdRef = useRef(0);
 
   // 검색 디바운스
@@ -335,7 +342,14 @@ export function StorageView({ projectId }: { projectId: string }) {
 
       {/* <1536: 상세 패널 드로어 (contextual-panel storageKey 'storage-detail') */}
       {!supportsInlinePanel && detailPanel.drawerOpen ? (
-        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={t('title')}>
+        <div
+          ref={detailDrawerTrapRef}
+          tabIndex={-1}
+          className="fixed inset-0 z-50 outline-none"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('title')}
+        >
           <button
             type="button"
             aria-label={t('cancel')}

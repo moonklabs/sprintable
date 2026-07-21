@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { X, Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 
 interface Member {
   id: string;
@@ -67,14 +68,11 @@ export function AddParticipantModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div className="relative w-full max-w-md rounded-xl border border-border bg-popover shadow-xl">
+    <Dialog open onOpenChange={(open) => { if (!open && !adding) onClose(); }}>
+      <DialogContent className="max-w-md overflow-hidden rounded-xl p-0" showCloseButton={false}>
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h2 className="text-sm font-semibold text-foreground">{t('addParticipantsTitle')}</h2>
+          <DialogTitle className="text-sm font-semibold text-foreground">{t('addParticipantsTitle')}</DialogTitle>
           <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <X className="h-4 w-4" />
           </button>
@@ -131,7 +129,7 @@ export function AddParticipantModal({
             {adding ? t('adding') : t('addParticipants')}
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

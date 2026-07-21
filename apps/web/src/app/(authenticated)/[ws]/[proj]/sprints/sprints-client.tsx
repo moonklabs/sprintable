@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target, Clock, Users, Calendar, Ban } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 
@@ -169,11 +170,10 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button type="button" className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} aria-label={t('cancel')} />
-      <div className="relative z-10 max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-background p-6 shadow-xl">
+    <Dialog open onOpenChange={(open) => { if (!open && !submitting) onClose(); }}>
+      <DialogContent className="max-h-[90vh] max-w-lg" showCloseButton={false}>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-bold text-foreground">{t('newSprint')}</h2>
+          <DialogTitle className="text-base font-bold text-foreground">{t('newSprint')}</DialogTitle>
           <button type="button" onClick={onClose} className="rounded-xl p-1.5 text-muted-foreground hover:bg-muted">
             <X className="size-4" />
           </button>
@@ -291,8 +291,8 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -309,15 +309,14 @@ interface DeleteConfirmDialogProps {
 function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose }: DeleteConfirmDialogProps) {
   const t = useTranslations('sprints');
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button type="button" className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} aria-label={t('cancel')} />
-      <div role="alertdialog" aria-modal="true" className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background p-6 shadow-xl">
+    <Dialog open onOpenChange={(open) => { if (!open && !deleting) onClose(); }}>
+      <DialogContent role="alertdialog" className="max-w-sm" showCloseButton={false}>
         <div className="mb-3 flex items-start gap-3">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
             <AlertTriangle className="size-5" />
           </span>
           <div className="min-w-0">
-            <h2 className="text-base font-bold text-foreground">{t('deleteConfirmTitle')}</h2>
+            <DialogTitle className="text-base font-bold text-foreground">{t('deleteConfirmTitle')}</DialogTitle>
             <p className="mt-0.5 truncate text-sm font-medium text-muted-foreground">{sprintTitle}</p>
           </div>
         </div>
@@ -330,8 +329,8 @@ function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose 
             {deleting ? '...' : t('deleteConfirm')}
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

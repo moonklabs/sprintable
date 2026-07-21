@@ -368,6 +368,12 @@ jobs:
       - name: "Verify no alpha on focus ring (story #2057 regression guard)"
         run: pnpm --filter web verify:no-alpha-focus-ring
 
+      # story #2061 회귀가드: 손수 구현된 `fixed inset-0` 모달(role="dialog"/aria-modal/
+      # 포커스트랩 없음)이 새로 들어오면 이 스텝이 실패한다. 공용 <Dialog>/<Sheet> 또는
+      # useFocusTrap으로 배선된 것은 통과한다.
+      - name: "Verify no hand-rolled modal without accessibility (story #2061 regression guard)"
+        run: pnpm --filter web verify:no-handrolled-modal
+
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
         # of being masked by tail's 0 — without it the unit-test gate was a no-op
