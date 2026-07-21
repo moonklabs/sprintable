@@ -39,6 +39,19 @@ substitutions:
   # override는 존재하지 않음 — 확認 후 아래 GHA 워크플로우도 함께 배선함).
   _BACKEND_TIMEOUT: '3600'
 
+  # E-ARCH 1단계(story #2078·PR #2358 PG_LISTEN_ENABLED 배선): SSE/LISTEN 전용
+  # `sprintable-realtime-${_DEPLOY_ENV}` 서비스 — REST(`sprintable-backend-*`)와 같은 이미지,
+  # PG_LISTEN_ENABLED만 다르다(realtime=true·api는 FE 전환 후 PO가 별도로 false 배선 예정,
+  # 이 파일은 아직 손대지 않는다 — 순서 뒤바뀌면 FE 전환 전에 api LISTEN이 꺼져 실시간이 죽는다).
+  # 아래 기본값은 PO가 2026-07-21 dev에 손으로 생성·검증한 실측값을 그대로 옮긴 것
+  # (`gcloud run services describe sprintable-realtime-dev` 대조 완료) — "손 값은 다음
+  # 배포가 덮는다" 규율대로 이 파일에 명시해 durable화한다. 장수 SSE 연결이 콜드스타트에
+  # 끊기지 않도록 minScale 2(backend는 3) · timeout 3600(요청 타임아웃 상한).
+  _REALTIME_MIN_INSTANCES: '2'
+  _REALTIME_MAX_INSTANCES: '8'
+  _REALTIME_TIMEOUT: '3600'
+  _REALTIME_URL: https://sprintable-realtime-dev-787818285179.asia-northeast3.run.app
+
 steps:
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
   - id: build-frontend
@@ -173,6 +186,33 @@ steps:
       - --quiet
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
     # 스키마를 상대로 뜨는 걸 막는다(migrate 실패 시 이 스텝 자체가 안 돎).
+    waitFor: [run-migrate-job]
+
+  # E-ARCH 1단계(story #2078): sprintable-realtime-${_DEPLOY_ENV} — SSE/LISTEN 전용 서비스,
+  # deploy-backend와 동일 이미지·동일 시크릿 상속(--set-secrets 없는 gcloud run deploy
+  # 컨벤션 그대로 — 기존 바인딩 preserve). ⚠️ prod는 PO 검증 전이라 게이트: _DEPLOY_ENV가
+  # dev가 아니면 스킵(서비스 미존재 상태에서 이 스텝이 자동 생성해버리는 것 방지 — 프로덕션
+  # 승격 시점에 이 가드를 열고 _REALTIME_* 값을 prod로 배선).
+  - id: deploy-realtime
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY_ENV}" != "dev" ]; then
+          echo "skip deploy-realtime: prod gate pending (E-ARCH 1단계 dev 검증 후 오픈)"
+          exit 0
+        fi
+        gcloud run deploy sprintable-realtime-${_DEPLOY_ENV} \
+          --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
+          --region=${_AR_REGION} \
+          --min-instances=${_REALTIME_MIN_INSTANCES} \
+          --max-instances=${_REALTIME_MAX_INSTANCES} \
+          --timeout=${_REALTIME_TIMEOUT} \
+          --allow-unauthenticated \
+          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=true \
+          --quiet
     waitFor: [run-migrate-job]
 
 options:

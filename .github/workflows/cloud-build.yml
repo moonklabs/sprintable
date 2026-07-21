@@ -91,6 +91,14 @@ jobs:
             # 굴러가지만, `backend_max_instances`와 대칭 배선을 위해 dev도 명시.
             echo "backend_timeout=3600" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=" >> "$GITHUB_OUTPUT"
+            # story #2078(E-ARCH 1단계): sprintable-realtime-dev durable화. cloudbuild.yaml
+            # 의 dev-safe fallback 기본값과 동일값 — PO가 2026-07-21 손으로 생성·검증한 실측
+            # (minScale 2 · timeout 3600 · maxScale 8, describe 대조 완료). prod는 cloudbuild.yaml
+            # 의 deploy-realtime 스텝 자체가 _DEPLOY_ENV 가드로 스킵되니 여기서는 미배선.
+            echo "realtime_min_instances=2" >> "$GITHUB_OUTPUT"
+            echo "realtime_max_instances=8" >> "$GITHUB_OUTPUT"
+            echo "realtime_timeout=3600" >> "$GITHUB_OUTPUT"
+            echo "realtime_url=https://sprintable-realtime-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Submit Cloud Build
@@ -98,6 +106,6 @@ jobs:
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}" \
             --suppress-logs \
             .
