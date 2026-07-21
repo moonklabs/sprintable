@@ -52,6 +52,15 @@ substitutions:
   _REALTIME_TIMEOUT: '3600'
   _REALTIME_URL: https://sprintable-realtime-dev-787818285179.asia-northeast3.run.app
 
+  # E-ARCH 1단계 durable화 마지막 조각(story #2078, 2026-07-21 PO 손 플립 확認 후): api
+  # (sprintable-backend-*)의 PG_LISTEN_ENABLED. ⚠️ 기본값 'true' — prod는 아직
+  # sprintable-realtime-prod가 없다(deploy-realtime 스텝이 prod에서 스킵 중, PO 검증 전).
+  # prod api를 false로 먼저 못박으면 prod 승격 시점에 LISTEN 하는 서비스가 하나도 없어
+  # 실시간이 완전히 죽는 landmine이 된다 — 그래서 dev만 GHA에서 명시 override(false)하고
+  # prod는 이 fallback(true)을 그대로 상속해 오늘 이전과 동일 동작을 유지한다. prod가
+  # sprintable-realtime-prod 배선을 마치는 승격 시점에 GHA prod 분기에도 false를 명시할 것.
+  _BACKEND_PG_LISTEN_ENABLED: 'true'
+
 steps:
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
   - id: build-frontend
@@ -186,7 +195,9 @@ steps:
       # lingering env 가 config 기본을 덮는 것 방지). rollout 산식: 2×maxScale×(pool+overflow+pg_pubsub raw 1)
       # ≤ DB max_conn (dev maxScale 8: 2×8×5=80 · prod maxScale 5: 2×5×5=50+admin). 변경 시 cloud-build.yml
       # maxScale 와 짝으로 검토. (PO rev 01256 dev 429 right-size durable 화.)
-      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1
+      # E-ARCH 1단계(story #2078): PG_LISTEN_ENABLED durable화 — 위 _BACKEND_PG_LISTEN_ENABLED
+      # 주석 참조(dev=false·prod=true 유지, GHA per-env 배선).
+      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED}
       - --quiet
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
     # 스키마를 상대로 뜨는 걸 막는다(migrate 실패 시 이 스텝 자체가 안 돎).
