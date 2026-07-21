@@ -23,6 +23,11 @@ substitutions:
   #    폐기 이력 있음. 트래픽↑ 時 아키텍처 재검토(#2074) 필요.)
   _BACKEND_MAX_INSTANCES: '1'
   _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
+  # story #2078(E-ARCH 0단계) — SSE 멀티플렉서 롤백 플래그. dev-safe 기본값 'false'(수동
+  # `gcloud builds submit` override 없을 때 안전). GHA가 dev 브랜치에서만 'true' 주입 —
+  # prod는 develop→main 일괄승격에 검증 안 된 플래그를 얹지 않는다(오르테가군 판정,
+  # 2026-07-21 — 문제 생기면 48커밋 중 원인 격리 불가라 별도 판단으로 미룸).
+  _SSE_MULTIPLEX_ENABLED: "false"
   # story #2005(Phase B P1-c, E-A2A-PROTO 리라이어빌리티): Cloud Run 요청 타임아웃이
   # `deploy-backend` 스텝에 `--timeout` 플래그로 명시된 적이 한 번도 없어(grep 확認) 인프라
   # 기본값에 암묵 의존 중이었다(A2A `/rpc` 특히 `SendStreamingMessage` SSE가 사실상 무기한
@@ -96,6 +101,8 @@ steps:
       - NEXT_PUBLIC_OAUTH_ENABLED=true
       - --build-arg
       - NEXT_PUBLIC_GA4_MEASUREMENT_ID=${_GA4_MEASUREMENT_ID}
+      - --build-arg
+      - NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=${_SSE_MULTIPLEX_ENABLED}
       - .
     env:
       - DOCKER_BUILDKIT=1
