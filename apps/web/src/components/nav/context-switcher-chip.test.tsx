@@ -71,6 +71,20 @@ describe('ContextSwitcherChip — story #2076', () => {
     expect(trigger?.className).toContain('lg:hidden');
   });
 
+  it('긴급 fix(채팅 리스트 재현) — max-w가 뷰포트 비례(vw)가 아닌 고정 px 캡이다', async () => {
+    // max-w-[55vw]는 title+actions 있는 allowlist 화면(채팅·목표 등)에서 아이콘 클러스터와
+    // 합쳐 <1024 뷰포트를 82px 초과했다(실측, 2076 회귀 후속) — 고정 px 캡으로 되돌아가는
+    // 회귀를 막는다.
+    await act(async () => {
+      root.render(wrap(
+        <ContextSwitcherChip orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />,
+      ));
+    });
+    const trigger = container.querySelector('button');
+    expect(trigger?.className).not.toMatch(/max-w-\[\d+vw\]/);
+    expect(trigger?.className).toMatch(/max-w-\[\d+px\]/);
+  });
+
   it('칩을 탭하기 전에는 프로젝트 목록(바텀시트 내용)이 안 보인다', async () => {
     await act(async () => {
       root.render(wrap(

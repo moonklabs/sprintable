@@ -61,7 +61,13 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
           type="button"
           onClick={() => s.setOpen(true)}
           disabled={s.pending}
-          className="flex min-w-0 max-w-[55vw] shrink-0 items-center gap-1.5 rounded-full border border-border bg-muted/40 py-1 pl-1.5 pr-2 text-left transition hover:bg-muted disabled:opacity-60 lg:hidden"
+          // 긴급 fix(2076 회귀 후속, 채팅 리스트 재현) — max-w-[55vw]가 title/actions 있는
+          // allowlist 화면(채팅·목표 등)에서 여전히 과도했다. 실측(390px 기준): chip(55vw=
+          // 214px)+actions버튼(~90px)+아이콘클러스터(~110px)+padding/gap(~48px)=472px로
+          // 뷰포트를 82px 초과한다(title이 min-w-0로 0까지 줄어도 나머지가 이미 초과) —
+          // "칩이 다른 UI를 뭉갠다"는 실측 그 자체. 120px 고정 캡으로 최악 시나리오를
+          // 378px까지 낮춘다(390px 뷰포트 기준 여유 확보, iPhone SE 375px도 안전).
+          className="flex min-w-0 max-w-[120px] shrink-0 items-center gap-1.5 rounded-full border border-border bg-muted/40 py-1 pl-1.5 pr-2 text-left transition hover:bg-muted disabled:opacity-60 lg:hidden"
           aria-label={t('switcherMobileTriggerAria')}
         >
           <OrgInitial name={s.displayOrg} />
