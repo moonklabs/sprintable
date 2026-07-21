@@ -81,32 +81,30 @@ export default async function AuthenticatedLayout({
 
   // story #2093 — /me/memberships 는 JWT의 "현재 org" 클레임으로 스코프된다(BE
   // app/routers/me.py get_my_memberships). URL 경로가 계정 상태와 다른 org를 가리키면(cross-org
-  // 딥링크·계정 상태가 stale한 경우) pathProjectId가 이 목록에 없어 표시용 이름을 못 찾는다 —
-  // 단건 조회로 보강한다(전환 목록에 넣으려는 게 아니라 표시 이름 확보 목적, 실패해도 무해 —
-  // top-bar 칩이 계정 상태 이름으로 폴백할 뿐 페이지 자체는 이미 경로 기준으로 정상 렌더된다).
-  const pathProjectKnown = pathProjectId ? projectMemberships.some((m) => m.projectId === pathProjectId) : true;
-  if (pathProjectId && !pathProjectKnown) {
-    const resolvedName = await fetch(`${fastapiUrl}/api/v2/projects/${pathProjectId}`, { headers: authHeader, cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json: { name?: string } | null) => json?.name ?? undefined)
-      .catch(() => undefined);
-    if (resolvedName) {
-      projectMemberships = [...projectMemberships, { projectId: pathProjectId, projectName: resolvedName }];
-    }
-  }
-
-  // story a539c649 S2: 사이드바/⌘K "문서" 바로가기가 /{ws}/{proj}/docs 직접 path를 만들려면
-  // 현재 project의 slug가 필요 — /me/memberships는 slug를 안 실어 보내(BE 스코프 밖, FE 단독
-  // 수정 범위 유지 위해 이미 존재하는 단건 조회를 재사용). 실패해도 sidebar/cmd-palette는
-  // bare `/docs`로 폴백해 미들웨어 리다이렉트 안전망을 타므로 무해.
-  // story #2093: pathProjectId(경로 정본) 우선 — 계정 상태가 다른 project를 가리키면 이
-  // 바로가기도 화면이 실제로 보고 있는 project가 아니라 계정 상태 project로 잘못 향했다.
-  const slugTargetProjectId = pathProjectId ?? me?.project_id;
-  const currentProjectSlug = slugTargetProjectId
-    ? await fetch(`${fastapiUrl}/api/v2/projects/${slugTargetProjectId}`, { headers: authHeader, cache: 'no-store' })
+  // 딥링크·계정 상태가 stale한 경우) pathProjectId가 이 목록에 없어 표시용 이름을 못 찾는다.
+  // 단건 조회(name+slug 동시)로 보강한다 — 사이드바/⌘K "문서" 바로가기 slug(story a539c649 S2)
+  // 와 표시 이름이 같은 project를 가리키므로 PO 리뷰(§확認②) 지적대로 fetch 하나로 합쳤다.
+  // pathProjectId가 없으면(flat 라우트) 계정 상태 project 기준으로 조회한다(기존 동작 유지).
+  const projectInfoTargetId = pathProjectId ?? me?.project_id;
+  const projectInfo = projectInfoTargetId
+    ? await fetch(`${fastapiUrl}/api/v2/projects/${projectInfoTargetId}`, { headers: authHeader, cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : null))
-        .then((json: { slug?: string | null } | null) => json?.slug ?? undefined)
-        .catch(() => undefined)
+        .then((json: { name?: string; slug?: string | null } | null) => json)
+        .catch(() => null)
+    : null;
+  const currentProjectSlug = projectInfo?.slug ?? undefined;
+
+  const pathProjectKnown = pathProjectId ? projectMemberships.some((m) => m.projectId === pathProjectId) : true;
+  if (pathProjectId && !pathProjectKnown && projectInfo?.name) {
+    projectMemberships = [...projectMemberships, { projectId: pathProjectId, projectName: projectInfo.name }];
+  }
+  // PO 리뷰(§확認①) — 위 조회가 실패하면(네트워크·403 등) projectMemberships에 pathProjectId가
+  // 안 들어간다. dashboard-shell.tsx가 이 경우 계정 상태의 옛 project_name으로 조용히
+  // 폴백하지 않도록 `projectName` prop 자체를 pathProjectId 미스매치 시 넘기지 않는다 —
+  // 틀린 이름을 보여주느니 이름을 비워 칩이 org만 보여주게 한다(유나양 §1-1: 모르면
+  // 단정하지 않는다).
+  const projectNameForDisplay = (!pathProjectId || pathProjectId === me?.project_id)
+    ? (me?.project_name ?? undefined)
     : undefined;
 
   return (
@@ -114,7 +112,7 @@ export default async function AuthenticatedLayout({
       currentTeamMemberId={me?.id}
       orgId={me?.org_id}
       projectId={me?.project_id}
-      projectName={me?.project_name ?? undefined}
+      projectName={projectNameForDisplay}
       currentProjectSlug={currentProjectSlug}
       userName={me?.name}
       role={me?.role}
