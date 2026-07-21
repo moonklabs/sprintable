@@ -624,6 +624,7 @@ export default function RetroSessionPage() {
             </div>
           ) : null
         }
+        hideContextChip
       />
 
       <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
