@@ -617,10 +617,18 @@ async def project_accessible_member_ids(
     (project 고정 → 접근 가능 member_id 집합). `team_members`(VIEW, human+agent grant를 이미
     member_id 공간으로 통합)만 조회 — 단일 쿼리 배치(N+1 없음).
 
-    ⚠️ org owner/admin의 암묵 org-wide 접근 분기(has_project_access 3번째 조건)는 **의도적으로
-    제외**한다 — 이 함수는 실시간 SSE push 수신자 해소 전용이라, 명시 project 소속이 없는 admin에게
-    안 밀리는 쪽(false negative)이 잘못 밀리는 쪽(false positive·cross-project 누설)보다 안전.
-    write 인가(has_project_access)는 이 함수를 쓰지 않는다 — 그쪽은 기존 3-branch 그대로."""
+    story #2075(2026-07-21, 촬영 재현+선생님 실사용 케이스로 확定): org owner/admin의 암묵
+    org-wide 접근 분기를 "의도적으로 제외"했던 이전 판단(9ef0f914)을 뒤집는다 — 그 판단은
+    write 인가(`has_project_access`)와 read 인가(SSE push 수신)가 서로 다른 판정을 내리는
+    자기모순이었다: owner는 보드를 **볼 권한**은 있는데(`has_project_access` 3번째 조건)
+    그 화면이 실시간으로 갱신될 **권한**은 없는 상태 — "권한 완화"가 아니라 "같은 사실에
+    다른 답을 내는 두 판정을 일치"시키는 것이다(오늘 반복된 트윈 패턴과 동형).
+
+    owner/admin의 SSE 등록 키는 `org_members.id`다(`resolve_member_identity`의 TeamMember→
+    OrgMember fallback과 동형 — grant-only 휴먼은 team_members 뷰에 project_access 행이 없어
+    project-scoped 브랜치에 안 걸리고 org_member.id로 신원 해소된다). `Project.org_id ==
+    OrgMember.org_id`로 스코프를 맞춰(`_project_access_predicate.admin_branch`와 동일 기준)
+    **다른 org의 owner에게는 여전히 안 새게** 한다 — cross-project(cross-org) 누설 0."""
     rows = await session.execute(
         text(
             """
@@ -629,6 +637,12 @@ async def project_accessible_member_ids(
             WHERE tm.project_id = :project_id
               AND tm.org_id = :org_id
               AND tm.is_active = true
+            UNION
+            SELECT om.id
+            FROM org_members om
+            WHERE om.org_id = :org_id
+              AND om.role IN ('owner', 'admin')
+              AND om.deleted_at IS NULL
             """
         ),
         {"project_id": project_id, "org_id": org_id},
