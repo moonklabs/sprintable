@@ -86,7 +86,9 @@ export default function ResetPasswordPage() {
         </div>
 
         {done ? (
-          <div className="space-y-4 text-center">
+          // story #2105 1차(AC2) — 성공 결과도 결과다. error와 달리 사용자가 막힌 상태가
+          // 아니므로 흐름을 끊는 assertive가 아니라 polite로 알린다(#2096과 동일 원칙).
+          <div role="status" aria-live="polite" aria-atomic="true" className="space-y-4 text-center">
             <p className="text-sm text-muted-foreground">{t('done')}</p>
             {totpReenrollNeeded && (
               <p className="text-sm text-muted-foreground">{t('mfaReenroll')}</p>
@@ -122,7 +124,12 @@ export default function ResetPasswordPage() {
                 </li>
               </ul>
             )}
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {/* story #2105 1차 — #2096과 같은 결함클래스. setError(null)이 재시도마다 먼저
+                실행돼(위 handleSubmit) 이 단락이 매번 언마운트→리마운트되므로 동일 사유가
+                반복돼도 안정적으로 낭독된다. line 73(invalidLink)은 페이지 최초 렌더의
+                정적 콘텐츠라(사후에 나타나는 결과가 아님) 이 대상이 아니다 — 스크린리더가
+                일반 문서 읽기로 이미 커버한다. */}
+            {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{error}</p>}
             <button
               onClick={handleSubmit}
               disabled={loading || !password}
