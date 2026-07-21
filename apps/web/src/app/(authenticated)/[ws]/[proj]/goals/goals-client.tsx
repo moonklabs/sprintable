@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { ChevronLeft, GripVertical, Plus, Send, Trash2, X, Flag } from 'lucide-react';
 import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
@@ -150,9 +150,11 @@ function calcSpProgress(stories: Story[]): { done: number; total: number } {
   return { done, total };
 }
 
-function formatDate(dateStr?: string): string {
+// story #2084 근본: 'ko-KR' 하드코딩이었다 — locale=en에서도 날짜가 한국어 형식으로
+// 렌더되던 원인 중 하나(dashboard-activity-timeline.tsx와 동일하게 useLocale() 값을 받는다).
+function formatDate(dateStr: string | undefined, locale: string): string {
   if (!dateStr) return '—';
-  return new Date(dateStr).toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return new Date(dateStr).toLocaleDateString(locale, { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -263,11 +265,11 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
       await wireDeclarations(data.id);
       onCreated(data);
     } catch {
-      setError('목표 생성에 실패했습니다. 다시 시도해 주세요.');
+      setError(t('createError'));
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, targetDate, targetSp, projectId, orgId, onCreated, wireDeclarations]);
+  }, [title, description, priority, targetDate, targetSp, projectId, orgId, onCreated, wireDeclarations, t]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -400,11 +402,11 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
       const { data } = await res.json() as { data: Goal };
       onSaved({ ...data, stories: epic.stories });
     } catch {
-      setError('목표 수정에 실패했습니다. 다시 시도해 주세요.');
+      setError(t('updateError'));
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, targetDate, targetSp, epic.id, epic.stories, onSaved]);
+  }, [title, description, priority, targetDate, targetSp, epic.id, epic.stories, onSaved, t]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -495,6 +497,7 @@ interface GoalRowProps {
 
 function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalRowProps) {
   const t = useTranslations('goals');
+  const locale = useLocale();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: epic.id,
     disabled: !sortable,
@@ -598,7 +601,7 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
             가로 오버플로 잠재 → flex-wrap 헤지(가디언 라이브게이트 선제·기존 행 robustness↑). */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {epic.target_date ? (
-            <span>{t('targetDate')}: {formatDate(epic.target_date)}</span>
+            <span>{t('targetDate')}: {formatDate(epic.target_date, locale)}</span>
           ) : null}
           <span>{done}/{total} {t('stories')}</span>
           <HypothesesSummary count={epic.hypothesis_count ?? 0} riskyStatus={epic.risky_status ?? null} />
@@ -637,6 +640,7 @@ interface GoalDetailPanelProps {
 
 function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
   const t = useTranslations('goals');
+  const locale = useLocale();
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
   const [isEditing, setIsEditing] = useState(false);
@@ -718,7 +722,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-muted px-3 py-2.5">
                 <p className="text-xs font-medium text-muted-foreground">{t('targetDate')}</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{formatDate(epic.target_date)}</p>
+                <p className="mt-1 text-sm font-medium text-foreground">{formatDate(epic.target_date, locale)}</p>
               </div>
               <div className="rounded-xl bg-muted px-3 py-2.5">
                 <p className="text-xs font-medium text-muted-foreground">{t('targetSp')}</p>
@@ -1162,14 +1166,14 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       <Dialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>목표를 삭제하시겠습니까?</DialogTitle>
+            <DialogTitle>{t('deleteConfirmTitle')}</DialogTitle>
             <DialogDescription>
-              이 작업은 되돌릴 수 없습니다. 목표에 포함된 스토리는 연결이 해제됩니다.
+              {t('deleteConfirmDescription')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => setDeleteConfirmId(null)} disabled={deleting}>
-              취소
+              {t('cancel')}
             </Button>
             <Button
               variant="destructive"
@@ -1177,7 +1181,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
               onClick={() => { if (deleteConfirmId) void handleDeleteEpic(deleteConfirmId); }}
               disabled={deleting}
             >
-              {deleting ? '삭제 중…' : '영구 삭제'}
+              {deleting ? t('deleting') : t('deleteConfirmButton')}
             </Button>
           </DialogFooter>
         </DialogContent>
