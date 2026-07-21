@@ -81,10 +81,18 @@ if [[ -n "${FASTAPI_URL_OVERRIDE}" ]]; then
 else
     # FastAPI Cloud Run 서비스 URL 조회(동적 discovery — prod는 아직 CF-fronted 도메인이 없어
     # raw *.run.app 이 곧 정답값).
+    # ⚠️story #2098 정정(2026-07-22, 드리프트 가드 ②값 대조가 실측 중 발견): `status.url`은
+    # hash 포맷(`sprintable-backend-prod-57iommnikq-du.a.run.app`)을 반환하는데 라이브
+    # NEXT_PUBLIC_FASTAPI_URL은 project-number 포맷(`sprintable-backend-prod-787818285179.
+    # asia-northeast3.run.app`)이다 — 둘 다 유효한 별칭(`metadata.annotations['run.googleapis.
+    # com/urls']`에 둘 다 등재돼 있음, curl 200 각각 확認)이지만 재배포 시 표기가 바뀌는
+    # 드리프트였다. `skip`으로 눈 감는 대신 라이브와 같은 포맷(그 annotation의 첫 번째
+    # 원소)을 명시적으로 골라 스크립트가 라이브와 일치하는 값을 계산하게 고쳤다.
     FASTAPI_URL=$(gcloud run services describe "${FASTAPI_SERVICE}" \
         --region="${GCP_REGION}" \
         --project="${GCP_PROJECT}" \
-        --format="value(status.url)" 2>/dev/null || echo "")
+        --format="value(metadata.annotations['run.googleapis.com/urls'])" 2>/dev/null \
+        | sed -E 's/^\["([^"]*)".*/\1/' || echo "")
 fi
 
 if [[ -z "${FASTAPI_URL}" ]]; then
