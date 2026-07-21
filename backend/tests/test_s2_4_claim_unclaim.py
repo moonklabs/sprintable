@@ -229,11 +229,12 @@ async def test_unclaim_story_403_when_caller_is_different_member():
         app.dependency_overrides.clear()
 
 
-# ─── AC3: story 없으면 400 ────────────────────────────────────────────────────
+# ─── AC3: story 없으면 400/404 ─────────────────────────────────────────────────
 
 @pytest.mark.anyio
-async def test_claim_story_400_if_story_not_in_project():
-    """AC3: story가 project에 없으면 400."""
+async def test_claim_story_404_if_story_does_not_exist_anywhere():
+    """AC3(story #2068 갱신): 어느 project에도 없는(오타/삭제) story면 404 — "다른
+    project에 있음"(400, 아래 별도 테스트)과 구분된다."""
     client, session, app = await _client()
     try:
         member = _mock_member()
@@ -247,7 +248,7 @@ async def test_claim_story_400_if_story_not_in_project():
             if call_count == 1:
                 result.scalar_one_or_none.return_value = member
             else:
-                result.scalar_one_or_none.return_value = None  # story 없음
+                result.scalar_one_or_none.return_value = None  # story 자체가 없음
             return result
 
         session.execute = mock_execute
@@ -260,7 +261,121 @@ async def test_claim_story_400_if_story_not_in_project():
                     json={"story_id": str(uuid.uuid4())},
                 )
 
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_claim_story_400_if_story_exists_in_different_project():
+    """story #2068 AC3: story가 실재하지만 다른 project 소속이면 400 + 실제 project_id를
+    메시지에 담는다(오타/삭제와 project_id 지정 문제를 구분)."""
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        other_project_id = uuid.uuid4()
+        story_id = uuid.uuid4()
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalar_one_or_none.return_value = member
+            elif call_count == 2:
+                result.scalar_one_or_none.return_value = None  # 이 project엔 없음
+            else:
+                result.scalar_one_or_none.return_value = other_project_id  # 다른 project엔 있음
+            return result
+
+        session.execute = mock_execute
+
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/claim",
+                    json={"story_id": str(story_id)},
+                )
+
         assert resp.status_code == 400
+        assert str(other_project_id) in resp.json()["error"]["message"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_claim_story_200_with_project_id_override_targets_different_project():
+    """story #2068 AC1/AC2: project_id override 시 member.project_id(anchor) 대신 override로
+    story를 찾는다 — org-agent 멀티프로젝트 grant로 다른 project story를 claim하는 경로."""
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        other_project_id = uuid.uuid4()
+        story = _mock_story()
+        story.project_id = other_project_id
+        updated = _mock_member(active_story_id=STORY_ID)
+
+        call_count = 0
+
+        async def mock_execute(stmt, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                result.scalar_one_or_none.return_value = member
+            elif call_count == 2:
+                result.scalar_one_or_none.return_value = story
+            else:
+                result.scalar_one_or_none.return_value = updated
+            return result
+
+        session.execute = mock_execute
+        session.flush = AsyncMock()
+        session.refresh = AsyncMock()
+
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None), \
+             patch("app.routers.team_members.has_project_access", new_callable=AsyncMock,
+                   return_value=True) as mock_access:
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/claim",
+                    json={"story_id": str(STORY_ID), "project_id": str(other_project_id)},
+                )
+
+        assert resp.status_code == 200
+        mock_access.assert_awaited_once()
+        assert mock_access.await_args.args[2] == other_project_id
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_claim_story_403_when_no_access_to_override_project():
+    """story #2068: project_id override했지만 그 project에 접근권 없으면 403(무권한 project
+    story 존재 여부를 노출하지 않는다 — story 조회 자체를 안 탐)."""
+    client, session, app = await _client()
+    try:
+        member = _mock_member()
+        other_project_id = uuid.uuid4()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = member
+        session.execute = AsyncMock(return_value=result)
+
+        with patch("app.routers.team_members.assert_caller_is_member", new_callable=AsyncMock,
+                   return_value=None), \
+             patch("app.routers.team_members.has_project_access", new_callable=AsyncMock,
+                   return_value=False):
+            async with client as c:
+                resp = await c.post(
+                    f"/api/v2/team-members/{MEMBER_ID}/claim",
+                    json={"story_id": str(STORY_ID), "project_id": str(other_project_id)},
+                )
+
+        assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
 
