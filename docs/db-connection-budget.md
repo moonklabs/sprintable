@@ -12,11 +12,15 @@ per_instance = (DB_POOL_SIZE + DB_MAX_OVERFLOW) + RAW_LISTEN
              = (3 + 1) + 1
              = 5
 
-rollout_worst_case(env) = 2 × maxScale(env) × per_instance
+rollout_worst_case(env) = N × maxScale(env) × per_instance
+                          (N = 동시 생존 리비전 수, 아래 "AC6 실측" 참고 — 연속배포 시 2 넘게 관측됨)
 ```
 
-`2×`는 배포 rollout 중 old+new 리비전이 동시에 떠 있는 구간(steady-state 산식만 쓰면 배포 중
-한도 초과 — 2026-06-29 dev 인시던트가 이 blind spot에서 발생). L2 트리거 워커(`L2_TRIGGER_ENABLED`)가
+`N`(과거엔 `2`로 고정)은 배포 rollout 중 old+new 리비전이 동시에 떠 있는 구간(steady-state 산식만
+쓰면 배포 중 한도 초과 — 2026-06-29 dev 인시던트가 이 blind spot에서 발생) 개수다. 애초 "old+new
+둘"만 겹친다는 가정으로 `2`를 썼으나, 2026-07-21 AC6 실측(연속 배포 다섯 번)에서 **동시 생존
+리비전이 5개까지 관측**돼 `N=2` 가정이 연속배포 상황을 못 덮는 것으로 드러났다 — 상세는 하단
+"AC6 — 부하 중 실측" 절. L2 트리거 워커(`L2_TRIGGER_ENABLED`)가
 켜져 있으면 인스턴스당 pool 내부(라인 4 안) connection 1개를 상시 점유하지만 `per_instance` 값 자체는
 늘리지 않는다 — pool 슬롯을 나눠 쓸 뿐 추가 물리 연결이 아니다. dev/prod의 실제 flag 값은 아직
 미확인(보고서 "확인하지 못한 것" #6).
@@ -28,8 +32,9 @@ rollout_worst_case(env) = 2 × maxScale(env) × per_instance
 | DB 인스턴스 | `sprintable-dev` (db-g1-small) | `sprintable-prod` (db-custom-2-8192) |
 | `max_connections` (gcloud 실측, PO 2026-07-20) | **200**(100→200 상향, 오늘 사고 대응) | **200** |
 | GHA SSOT `backend_max_instances` (`.github/workflows/cloud-build.yml`, 이 커밋 기준) | **8**(rev 01256-w9r durable) | **5**(ee7794eb ③) |
-| backend rollout worst-case = `2×maxScale×5` | 80 | 50 |
-| worst-case가 `max_connections`에서 차지하는 비율 | 40% | 25% |
+| backend rollout worst-case(`N=2`, 구 가정) = `2×maxScale×5` | 80 | 50 |
+| `max_connections`을 넘지 않는 여유선 `N_max`(`N×40≤200` ⇒ `N≤5`, dev만) | **5** | — (prod는 연속배포 실측 없음) |
+| worst-case(`N=2`)가 `max_connections`에서 차지하는 비율 | 40% | 25% |
 
 dev/prod는 별도 Cloud SQL 인스턴스다 — 오르테가군 PO가 2026-07-20 gcloud로 직접 재확인(`sprintable-dev`
 db-g1-small / `sprintable-prod` db-custom-2-8192, 별개 인스턴스 2개)했고, Cloud Monitoring `num_backends`도
@@ -262,7 +267,37 @@ steady-state 예산(산식) = maxScale(8) × per_instance(5) = 40
 이 일치는 우연이 아니라 **좀비 축이 사라져야만 나올 수 있는 값**이다 — 좀비가 있었다면 실측이 예산을
 초과했어야 한다(어제 23:41 기준선이 그 증거: TOTAL 155 ≫ 예산 40, 5개 리비전이 동시에 연결을 붙잡고
 있었다). 즉 이 문서의 산식(`per_instance=5`, 좀비 보정항 없음)이 **탁상 공식이 아니라 지금 실환경을
-정확히 예측하는 값**임을 재확인했다 — 갱신할 항목 없음(위 다음 단계 3/5/6에 반영된 것 외 추가 drift 없음).
+정확히 예측하는 값**임을 재확인했다.
+
+## AC6 — 부하 중 실측 (2026-07-21 09:47, 오르테가군 PO — 팀 6인 실가동 + 오전 배포 5회 직후)
+
+```
+TOTAL 110 / 200
+리비전별   01750:40 · 01749:24 · 01751:23 · 01752:13 · 01753:10
+idle 구간  10m-1h 65 · <1m 36 · >1h 7 · 1m-10m 2
+```
+
+**둘이 확認됨:**
+
+**① 산식이 리비전 단위로 정확하다** — 완전히 스케일된 리비전(`01750`)이 정확히 **40**(=`maxScale(8)
+× per_instance(5)`)이다. 나머지 4개는 드레인 중이라 40보다 낮다(24/23/13/10) — **완전 스케일된
+리비전 하나의 상한**이라는 산식 전제가 실측으로 다시 확認됐다.
+
+**② `N=2` 가정이 연속배포를 못 덮는다** — 오늘 오전 배포가 다섯 번 있었고, 그만큼 리비전이 겹쳤다.
+```
+구 가정   N=2 → rollout_worst_case = 2×40 = 80
+실측      N=5(리비전 5개 동시 생존) → TOTAL 110, 만약 5개 전부 완전 스케일이면 5×40=200(한도 정확히 도달)
+```
+**⇒ 산식을 `N=동시 생존 리비전 수`로 일반화**(위 "산식"/"환경별 예산" 절 갱신 완료). `N×40≤200`이면
+`N≤5`가 dev의 여유선 — **여섯 번째 리비전이 겹치면 이론상 한도를 넘는다.**
+
+⚠️ **다만 실제로는 드레인이 겹쳐서 5개가 전부 만개하지 않는다** — 오늘 110이 그 증거(이론상 200
+가능하나 실측은 110). **최악(이론)과 실측을 나란히 두는 것이 정직하다**: N=5는 "동시 생존 리비전
+수"의 상한이지 "5개가 전부 풀스케일"을 뜻하지 않는다.
+
+**⇒ #2040 AC6 닫힘**(오르테가군 판정): "부하를 주며 최대치 실측 후 예산표와 대조"를 실사용 부하로
+수행, 결과는 **110/200·산식과 정합·다만 N 축이 새로 열림**(prod는 연속배포 시나리오 미실측이라
+`N_max` 여유선 미정 — 표에 "—"로 남김).
 
 ## story #2060 — 좀비 :listen 근본수정 검증 결과(2026-07-20, 통과)
 
