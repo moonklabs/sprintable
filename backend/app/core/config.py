@@ -224,6 +224,16 @@ class Settings(BaseSettings):
     legacy_auth_issue: bool = True               # 기존 self-issued JWT 로그인/refresh 발급
     legacy_auth_verify: bool = True              # 기존 self-issued JWT 검증(proxy.ts·FastAPI)
 
+    # ⛔P0(신 클래스, #1887과 별개) — proxy.ts singleFlightRefresh는 Cloud Run 인스턴스-로컬
+    # in-memory Map이라 멀티인스턴스(session affinity 꺼짐, gcloud 실측 dev max=3) 간 dedupe가
+    # 안 된다. 하드리프레시의 병렬 인증요청이 인스턴스 분산되면 같은 refresh_token으로 동시
+    # rotate 경합 → 진 쪽은 원자 single-use rotation에 의해 TOKEN_REVOKED 401 → FE가
+    # clearAuthCookies() 실행 → 세션은 살아있는데 강제 로그아웃. FE 그레이스 재사용 패턴
+    # (REFRESH_GRACE_MS=5000, proxy.ts)을 BE로 옮겨 인스턴스 개수/라우팅과 무관하게 만든다
+    # (오르테가·미르코 판단: Redis로 FE 상태공유는 proxy.ts가 edge 런타임이라 과한 인프라 —
+    # 배제. DB-only fork-rotation이 근본이면서 인프라 안 키우는 정공법).
+    auth_refresh_grace_seconds: int = 5
+
     firebase_project_id: str = ""  # Firebase/Identity Platform GCP 프로젝트 ID(dev/prod 분리)
 
     # story 132e7204(Phase1-S4): Next.js BFF↔FastAPI 세션쿠키 발급 내부 호출 공유시크릿.
