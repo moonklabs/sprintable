@@ -2,8 +2,18 @@
 
 산티아고 실측: SELECT→UPDATE 비원자 rotation이 Cloud Run 멀티 인스턴스 간 race를 유발해
 /auth/refresh 239건 중 230건 401(30일 sp_rt 쿠키가 실패를 무한 재생산). 이 테스트는 동일
-refresh_token으로 동시 2요청을 쏴 정확히 1건만 성공(switch_account 선례와 동형 single-use
-원자 rotation)함을 라이브 PG로 실증한다.
+refresh_token으로 동시 2요청을 쏴 원자 single-use rotation(switch_account 선례와 동형)이
+정확히 1건만 실제로 revoke함을 라이브 PG로 실증한다.
+
+⛔story cd10e123(P0, e5225c0a와 별개 신 클래스) 갱신: 원자 rotation 자체는 여전히
+single-use(위 불변식 유지)이나, "진 쪽에게 무엇을 응답하는지"가 바뀌었다 — 예전엔 하드
+401(TOKEN_REVOKED)로 FE가 clearAuthCookies() 실행해 강제 로그아웃됐다(멀티인스턴스 in-memory
+dedup 미공유 때문에 이게 진짜 race의 정상 경로로 발생). 이제는 grace window(config.py
+auth_refresh_grace_seconds, 기본 5s) 내 revoke된 토큰이면 진짜 stale/replay가 아니라 race
+패자로 판정해 독립적인 새 rotation(fork)을 발급, 200으로 응답한다 — 그래서 아래
+`test_concurrent_refresh_same_token_exactly_one_succeeds_realdb`는 [200,401]이 아니라
+[200,200](양쪽 다 독립적으로 유효한, 그러나 서로 다른 토큰)을 기대하도록 갱신됐다.
+grace window 밖(진짜 stale)은 여전히 401 — 아래 `_after_grace` 테스트가 그 경계를 증명한다.
 """
 from __future__ import annotations
 
@@ -91,7 +101,9 @@ async def _setup_app(app, Session):
 
 @pytest.mark.anyio
 async def test_concurrent_refresh_same_token_exactly_one_succeeds_realdb():
-    """까심 race 재현: 동일 refresh_token으로 동시 2요청 → 정확히 1건 200, 1건 401(TOKEN_REVOKED)."""
+    """까심 race 재현 — 갱신(story cd10e123): 동일 refresh_token 동시 2요청 → 이제 둘 다 200
+    (grace-window fork). 원자성 불변식은 "둘이 서로 다른 독립 토큰을 받는지"로 증명한다 —
+    같은 토큰을 공유해 받으면 그건 그것대로 버그(양쪽이 같은 세션을 오인)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -107,12 +119,13 @@ async def test_concurrent_refresh_same_token_exactly_one_succeeds_realdb():
                 client.post("/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]}),
             )
             statuses = sorted(r.status_code for r in results)
-            assert statuses == [200, 401], (
-                f"원자성 실패 — 동시 2요청 결과가 [200,401]이 아님: {statuses} "
-                f"(둘 다 200이면 double-spend race 재발)"
+            assert statuses == [200, 200], (
+                f"grace-window fork 실패 — 동시 2요청 결과가 [200,200]이 아님: {statuses} "
+                f"(1건이라도 401이면 멀티인스턴스 race 강제로그아웃 재발)"
             )
-            failed = next(r for r in results if r.status_code == 401)
-            assert failed.json()["error"]["code"] == "TOKEN_REVOKED"
+            rt_a = results[0].json()["data"]["refresh_token"]
+            rt_b = results[1].json()["data"]["refresh_token"]
+            assert rt_a != rt_b, "두 race 요청이 같은 refresh_token을 받음 — double-spend/세션 혼선"
         finally:
             await client.aclose()
     finally:
@@ -121,8 +134,9 @@ async def test_concurrent_refresh_same_token_exactly_one_succeeds_realdb():
 
 
 @pytest.mark.anyio
-async def test_refresh_already_revoked_token_401_realdb():
-    """회귀 0: 이미 사용된(revoked) 토큰 재사용 → 401(단발성 rotation 유지 확인)."""
+async def test_refresh_replay_within_grace_window_forks_new_session_realdb():
+    """story cd10e123: grace window(기본 5s) 내 순차 재사용 → 200(fork) — race 패자가 강제
+    로그아웃되지 않고 독립적인 새 세션을 받는다는 게 이 신 클래스 fix의 핵심 계약."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -136,6 +150,46 @@ async def test_refresh_already_revoked_token_401_realdb():
             first = await client.post("/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]})
             assert first.status_code == 200, first.text
             second = await client.post("/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]})
+            assert second.status_code == 200, second.text
+            assert first.json()["data"]["refresh_token"] != second.json()["data"]["refresh_token"]
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_refresh_replay_after_grace_window_still_401_realdb():
+    """회귀 0(갱신): grace window *밖*의 진짜 stale replay는 여전히 401 — grace가 무기한
+    재사용을 허용하는 게 아님을 경계값으로 증명(revoked_at을 grace+1s 과거로 직접 backdate)."""
+    from app.main import app
+    from app.core.config import settings
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_user_with_refresh_token(s)
+
+        await _setup_app(app, Session)
+        client = _client_for(app)
+        try:
+            first = await client.post("/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]})
+            assert first.status_code == 200, first.text
+
+            from app.core.security import hash_token
+            from app.models.user import RefreshToken
+            from sqlalchemy import update as sa_update
+            stale_at = datetime.now(timezone.utc) - timedelta(seconds=settings.auth_refresh_grace_seconds + 1)
+            async with Session() as s:
+                await s.execute(
+                    sa_update(RefreshToken)
+                    .where(RefreshToken.token_hash == hash_token(seeded["raw_refresh"]))
+                    .values(revoked_at=stale_at)
+                )
+                await s.commit()
+
+            second = await client.post("/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]})
             assert second.status_code == 401
             assert second.json()["error"]["code"] == "TOKEN_REVOKED"
         finally:
@@ -147,9 +201,11 @@ async def test_refresh_already_revoked_token_401_realdb():
 
 @pytest.mark.anyio
 async def test_refresh_failure_logs_reason_and_correlation_key_realdb(caplog):
-    """산티아고 관측성 요구(item 3): 실패 시 reason+상관키가 로그에 남는지 실증."""
+    """산티아고 관측성 요구(item 3): grace window 밖 실패 시 reason+상관키가 로그에 남는지 실증
+    (story cd10e123 갱신: grace 안쪽은 이제 성공이라 이 테스트는 grace 밖 시나리오로 검증)."""
     import logging
     from app.main import app
+    from app.core.config import settings
 
     engine, Session = await _session_factory()
     try:
@@ -161,6 +217,18 @@ async def test_refresh_failure_logs_reason_and_correlation_key_realdb(caplog):
         try:
             first = await client.post("/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]})
             assert first.status_code == 200
+
+            from app.core.security import hash_token
+            from app.models.user import RefreshToken
+            from sqlalchemy import update as sa_update
+            stale_at = datetime.now(timezone.utc) - timedelta(seconds=settings.auth_refresh_grace_seconds + 1)
+            async with Session() as s:
+                await s.execute(
+                    sa_update(RefreshToken)
+                    .where(RefreshToken.token_hash == hash_token(seeded["raw_refresh"]))
+                    .values(revoked_at=stale_at)
+                )
+                await s.commit()
 
             with caplog.at_level(logging.WARNING, logger="app.routers.auth"):
                 second = await client.post(
