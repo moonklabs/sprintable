@@ -297,6 +297,35 @@ describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
     expect(response.headers.get('location')).toBe('https://app.example.com/new-moonklabs/board');
   });
 
+  it('story #2039 AC3 — 구 한글 project slug(예: /moonklabs/장사왕/board)도 형식 탈락 없이 resolve해 canonical로 301한다', async () => {
+    // PO 실재현 경로 그대로: workspace는 이미 ASCII('moonklabs')라 문제가 없고, **project
+    // 세그먼트가 구 한글 slug('장사왕')**인 자리 — 딱 이 자리가 원 버그다.
+    //
+    // 회귀 재현 ①: SLUG_FORMAT(kebab·ASCII) 검사가 남아있던 시절엔 '장사왕'이 그 형식에서
+    // 탈락해 looksLikeWorkspaceSegment(segments[1])가 false를 반환 → projSlug가 undefined로
+    // 떨어져 resolve가 project 파라미터 없이(workspace만) 호출됐다 — 즉 project 조회 자체가
+    // 시도되지 않았다.
+    //
+    // 회귀 재현 ②(2차 발견, 형식게이트 하나만으론 안 풀림): `pathname`은 비ASCII 세그먼트를
+    // 항상 percent-encoded로 준다. 그 문자열을 디코드 없이 그대로 URLSearchParams에 넣으면
+    // `%`가 `%25`로 재인코딩돼 이중 인코딩된 쿼리스트링이 나가고, 백엔드가 한 번만 디코드하므로
+    // DB의 raw 한글 slug와 매칭되지 않는다. 아래 단언은 fetch가 **단일 인코딩**된 쿼리스트링
+    // (`project=%EC%9E%A5%EC%82%AC%EC%99%95`, decodeURIComponent 한 번으로 '장사왕' 복원)
+    // 으로 호출됐는지까지 정확히 검증한다.
+    const token = await makeAccessToken();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ org_id: 'org-1', org_slug: 'moonklabs', org_role: 'admin', project_id: 'proj-1', redirect: { project: 'project-307152f3' } }),
+    });
+    const response = await middleware(makeRequest('/moonklabs/%EC%9E%A5%EC%82%AC%EC%99%95/board', { sp_at: token }));
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:8000/api/v2/resolve?workspace=moonklabs&project=%EC%9E%A5%EC%82%AC%EC%99%95',
+      expect.any(Object),
+    );
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/project-307152f3/board');
+  });
+
   it('캐시 hit(유효 sp_resolve_cache 쿠키+동일 slug) → resolve fetch 생략', async () => {
     const token = await makeAccessToken();
     const cacheToken = await new SignJWT({

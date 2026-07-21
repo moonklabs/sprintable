@@ -451,7 +451,23 @@ async function resolveWorkspaceProject(
   accessToken: string,
   fwdHeaders: Headers,
 ): Promise<ResolveWiringResult> {
-  const segments = pathname.split('/').filter(Boolean);
+  // story #2039 AC3 (2차 발견) — `pathname`은 WHATWG URL 표준대로 비ASCII 세그먼트를 항상
+  // percent-encoded로 준다(`장사왕` → `%EC%9E%A5%EC%82%AC%EC%99%95`, 원문 유니코드로 넣어도
+  // 동일). 그 인코딩된 문자열을 그대로 fetchResolve에 넘기면 URLSearchParams가 `%`를 다시
+  // `%25`로 인코딩해 **이중 인코딩**된 쿼리스트링이 나간다 — 백엔드가 한 번만 디코드하므로
+  // 여전히 `%EC%9E%A5...` 문자열로 남아 DB의 raw 한글 slug(`장사왕`)와 매칭되지 않는다(형식
+  // 게이트를 없앤 이후에도 남아있던 두 번째 결함, resolve 자체는 불렸지만 조회가 실패했을
+  // 것 — 원 재현 로그의 "구 링크 여전히 404"가 형식게이트 하나만으로는 완전히 안 풀렸을
+  // 자리). 디코드는 세그먼트 단위로 한다(경로 구분자 `/`가 디코드로 새로 생기지 않게).
+  const decodeSegment = (segment: string | undefined): string | undefined => {
+    if (!segment) return segment;
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment; // 잘못된 percent-sequence — 원문 그대로(fail-safe, resolve가 not_found로 정직히 실패)
+    }
+  };
+  const segments = pathname.split('/').filter(Boolean).map(decodeSegment) as string[];
   const wsSlug = segments[0];
   if (!looksLikeWorkspaceSegment(wsSlug)) return { kind: 'skip' };
   const projSlug = looksLikeWorkspaceSegment(segments[1]) ? segments[1] : undefined;
