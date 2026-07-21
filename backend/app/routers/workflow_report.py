@@ -246,8 +246,26 @@ async def report_done(
 
     # 스토리 상태 업데이트 (merge에서 auto_merge가 아니면 story_status=None이라 skip)
     if story_status:
+        old_status = story.status
         story_repo = StoryRepository(session, story.org_id)
-        await story_repo.update(story.id, status=story_status)
+        updated_story = await story_repo.update(story.id, status=story_status)
+        # story #2067(발견·회귀수정): 이 경로가 status_changed side-effects(events→L1·webhook·L2·
+        # notif·activity, 41a6e294 공유 helper)를 한 번도 안 불렀다 — 이 엔드포인트가 "에이전트가
+        # 스테이지 완료를 보고"하는 가장 흔한 status 변경 경로인데도(auto-merge→done 포함) board
+        # 실시간 갱신·알림·웹훅이 조용히 안 나갔다. PATCH /{id}/status와 동일 helper로 parity 확보.
+        if updated_story is not None:
+            await session.commit()
+            agent_member = (await session.execute(
+                select(TeamMember).where(TeamMember.id == body.agent_id).limit(1)
+            )).scalar_one_or_none()
+            from app.services.story_status_events import emit_story_status_changed
+            await emit_story_status_changed(
+                session, story.org_id, updated_story, old_status,
+                actor_id=body.agent_id,
+                actor_name=agent_member.name if agent_member else None,
+                actor_role=agent_member.role if agent_member else None,
+                actor_type="agent",
+            )
 
     return ReportDoneResponse(
         story_id=body.story_id,
