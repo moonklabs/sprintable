@@ -101,7 +101,12 @@ export function EntityDispatchPanel({
         addToast({ type: 'error', title: t('dispatchFailedTitle'), body: t('dispatchFailedBody') });
         return;
       }
-      const dispatchData = await dispatchRes.json().catch(() => ({})) as { dispatched?: boolean };
+      // 까심군 QA 회귀(2026-07-21) — /api/dispatch(route.ts)가 apiSuccess()로 응답을
+      // {data:{dispatched,...}} 로 감싸는데 여기서 flat({dispatched})으로 읽고 있었다
+      // ("fastapi-proxy envelope 경계" 버그클래스). 실제로는 항상 dispatched=undefined라
+      // 서버가 200 성공을 반환해도 매번 "담당자 미지정" 토스트가 떴다(4/4 재현).
+      const dispatchJson = await dispatchRes.json().catch(() => ({})) as { data?: { dispatched?: boolean } };
+      const dispatchData = dispatchJson.data ?? {};
       if (!dispatchData.dispatched) {
         // 담당자가 지정되지 않아 전달 대상이 없는 경우 — 오류가 아니라 안내(info)로 처리한다.
         addToast({ type: 'info', title: t('assigneeNotSetTitle'), body: t('assigneeNotSetBody') });

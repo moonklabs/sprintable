@@ -954,7 +954,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   entityId={story.id}
                   projectId={projectId}
                   currentAssigneeId={localAssigneeIds.length > 1 ? undefined : (localAssigneeIds[0] ?? story.assignee_id)}
-                  onAssigneePatched={(aid) => onStoryUpdate?.({ ...story, assignee_id: aid })}
+                  // 까심군 QA 회귀(2026-07-21) — assignee_id만 갱신하면 표시 로직(L478-480)이
+                  // 우선 읽는 assignee_ids 배열이 stale로 남아 새로고침 전까지 옛 담당자가
+                  // 보였다(L505의 정상 경로는 둘 다 갱신·이 경로만 누락). dispatch는 단일
+                  // 담당자 지정이라 assignee_ids를 [aid]로 교체해 정합을 맞춘다.
+                  onAssigneePatched={(aid) => {
+                    assigneeIdsRef.current = [aid];
+                    setLocalAssigneeIds([aid]);
+                    onStoryUpdate?.({ ...story, assignee_id: aid, assignee_ids: [aid] });
+                  }}
                 />
               </div>
             )}
