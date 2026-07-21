@@ -281,12 +281,13 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   return (
     <DocsLayoutContext.Provider value={{ wsSlug, projSlug, projectId, tree, setTree, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer: openDrawer }}>
-      {/* 긴급 fix(2076 회귀) — 문서 상세(currentSlug 있음)는 유나양 규격상 상세 화면으로
-          칩 억제 대상. 리스트뷰는 title이 정적 "문서" 헤딩이라 루트 화면과 동일 취급(칩 유지). */}
+      {/* 근본 재구현(2076 회귀 후속, 유나양 규격) — currentSlug 없음(목록)=켬, 있음(문서 하나)=
+          끔. 이 shell은 단일 문서가 화면을 꽉 채우는 구조(목록+본문 동시 2단 아님)라 이 분기가
+          맞다(2단 shell이었다면 항상 켜야 함 — 유나양 규격 예외 조항). */}
       <TopBarSlot
         title={topBarTitle}
         actions={topBarActions}
-        hideContextChip={!!currentSlug}
+        showContextChip={!currentSlug}
       />
 
       {/* Unified: children rendered exactly once — sidebar responsive via breakpoint classes */}

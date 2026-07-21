@@ -967,7 +967,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   if (loading) {
     return (
       <>
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
         <div className="flex h-64 items-center justify-center">
           <p className="text-sm text-muted-foreground">{t('loading')}</p>
         </div>
@@ -1097,6 +1097,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
             {t('newGoal')}
           </Button>
         }
+        showContextChip
       />
 
       {/* Desktop layout: list + slide-in detail panel */}

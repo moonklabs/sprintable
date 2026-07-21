@@ -115,7 +115,6 @@ export default function MockupViewerPage() {
             <Badge variant="info">v{mockup.version}</Badge>
           </div>
         }
-        hideContextChip
       />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">

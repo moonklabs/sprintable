@@ -299,7 +299,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('tabTeamActivity')}</h1>} />
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('tabTeamActivity')}</h1>} showContextChip />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* 정규화됨 pill + 캡션 바 (팀활동 탭만 — 시각/의미 차별화 생명선) */}

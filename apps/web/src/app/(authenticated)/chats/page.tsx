@@ -32,6 +32,7 @@ export default function ChatsPage() {
             {t('newConversation')}
           </Button>
         }
+        showContextChip
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <ChatListView

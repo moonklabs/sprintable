@@ -445,6 +445,7 @@ export default function StandupPage({ projectId }: StandupClientProps) {
         actions={
           <div className="hidden flex-wrap items-center gap-1.5 lg:flex">{dateNavControls}</div>
         }
+        showContextChip
       />
 
       {/* S4: mobile date nav as its own full-width row (keeps the header title readable). */}

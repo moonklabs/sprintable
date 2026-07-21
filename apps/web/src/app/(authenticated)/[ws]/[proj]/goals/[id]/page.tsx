@@ -282,7 +282,6 @@ export default function EpicDetailPage() {
             <span className="text-sm font-medium truncate max-w-[200px]">{epic.title}</span>
           </div>
         }
-        hideContextChip
       />
 
       <div className="mx-auto max-w-3xl px-4 py-6 space-y-8">

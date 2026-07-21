@@ -628,6 +628,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
             <span className="hidden sm:inline">{t('newSprint')}</span>
           </Button>
         }
+        showContextChip
       />
       <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* Sprint list */}

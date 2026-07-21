@@ -126,7 +126,7 @@ export default function RetroPage() {
   if (!projectId) {
     return (
       <>
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
         <div className="flex h-64 items-center justify-center p-6">
           <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
         </div>
@@ -147,6 +147,7 @@ export default function RetroPage() {
             )}
           </Button>
         }
+        showContextChip
       />
 
       <div className="focus-inset flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto">
