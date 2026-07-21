@@ -3599,6 +3599,7 @@
     "gateReadonlyBlock": "자동 차단 · 읽기 전용",
     "gateReadonlyAuto": "자동 통과 · 액션 불필요",
     "gateReadonlyNoVerdict": "판정 미거침 · 표시할 액션 없음",
+    "gateReadonlyNotAuthorized": "본인은 이 게이트를 승인할 권한이 없습니다",
     "mergeGateTitle": "머지 게이트",
     "outcomeTrustLabel": "가설 적중",
     "outcomeSummary": "적중 {hit} · 판정 {resolved} · 최근 {days}일",
