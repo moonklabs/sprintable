@@ -95,7 +95,7 @@ class Settings(BaseSettings):
     # gateway의 shadow-consume 비교용(지연·중복률 측정)이라 유실돼도 정합성 영향 0
     # (agent_gateway.py의 acked_seq DB 재조회 패턴과 동형 근거 — 오늘 세션 교차검증 완료).
     event_broker_redis_dual_publish_enabled: bool = False
-    redis_url: str | None = None  # Memorystore 연결 문자열. flag on인데 None이면 경고 로그만(fail-safe).
+    redis_url: str | None = None  # Memorystore 연결 문자열(공유 — event_broker + RedisRateLimiter). flag on인데 None이면 경고 로그만(fail-safe).
 
     # E-L2 휴리스틱 트리거 워커. default-off — 명시 활성화 전엔 lifespan task 미생성(무동작).
     # advisory_lock=on이면 멀티인스턴스 중 pg_try_advisory_lock holder 1개만 poll/evaluate.
@@ -171,7 +171,15 @@ class Settings(BaseSettings):
 
     # Rate limiting (E-OA1:S5)
     rate_limit_backend: str = "memory"  # "memory" | "redis"
-    redis_url: str = "redis://localhost:6379/0"
+    # ⚠️ story #2078 핫픽스(2026-07-21, Memorystore 배선 직전 PO가 발견): 이 필드가 원래 여기
+    # `str = "redis://localhost:6379/0"`로 별도 선언돼 있었다 — event_broker용 `redis_url`
+    # (위 line 98, `str | None = None`)과 이름이 같아 파이썬 클래스 바디에서 나중 선언이 이겼다
+    # (Pydantic 필드 shadowing). 실제 `settings.redis_url` 기본값은 이 truthy localhost
+    # 문자열이었고, event_broker.py의 "None이면 fail-safe skip" 체크가 여기 가려져 한 번도
+    # 안 걸렸다(PR #2363에서 신설한 필드가 죽어있던 상태). 단일 필드로 통합 — event_broker와
+    # RedisRateLimiter가 같은 Memorystore 인스턴스 하나를 봐야 맞고, rate_limit_backend="redis"
+    # 인데 redis_url이 None이면 aioredis.from_url(None)이 명시적으로 실패하는 게 조용한
+    # localhost 오접속보다 낫다.
 
     # E-AUTH-REBUILD M2 Phase 1(story b07ad526·doc firebase-auth-identity-platform-migration-poc
     # §10.1): Firebase Auth/Identity Platform 이행 플래그. 전부 default off — Phase 1 스키마+검증기
