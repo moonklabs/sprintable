@@ -88,6 +88,10 @@ else
     # com/urls']`에 둘 다 등재돼 있음, curl 200 각각 확認)이지만 재배포 시 표기가 바뀌는
     # 드리프트였다. `skip`으로 눈 감는 대신 라이브와 같은 포맷(그 annotation의 첫 번째
     # 원소)을 명시적으로 골라 스크립트가 라이브와 일치하는 값을 계산하게 고쳤다.
+    # ⚠️ 전제(오르테가군 지적): 아래는 `run.googleapis.com/urls`의 첫 원소가 project-number
+    # 포맷이라는 GCP 쪽 현재 동작에 의존한다 — 이 순서 보장을 우리가 정할 수 없다. GCP가
+    # 순서를 바꾸면 이 대조가 다시 어긋난다 — 그때는 순서 의존을 걷어내고 두 포맷을 모두
+    # 허용하는 쪽으로 판단할 것(지금 당장 그렇게 만들라는 건 아님 — 전제만 기록).
     FASTAPI_URL=$(gcloud run services describe "${FASTAPI_SERVICE}" \
         --region="${GCP_REGION}" \
         --project="${GCP_PROJECT}" \
