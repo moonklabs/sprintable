@@ -165,3 +165,52 @@ async def test_lifespan_skips_check_listen_config_when_pg_listen_disabled(monkey
         await asyncio.sleep(0.05)
 
     assert called["n"] == 0, "PG_LISTEN_ENABLED=false인데 check_listen_config가 호출됨"
+
+
+@pytest.mark.anyio
+async def test_lifespan_skips_redis_shadow_task_by_default(monkeypatch):
+    """E-ARCH S2(story #2078): event_broker_redis_dual_publish_enabled default=False —
+    redis_shadow_consume_loop task 자체를 안 만든다(Memorystore 미배선 상태에서도 무해)."""
+    from app.main import lifespan
+
+    fake_engine = _patch_engine(monkeypatch)
+    monkeypatch.setattr("app.main.settings.event_broker_redis_dual_publish_enabled", False)
+
+    started = asyncio.Event()
+
+    async def fake_shadow_consume():
+        started.set()  # 호출되면 안 됨.
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("app.services.event_broker.redis_shadow_consume_loop", fake_shadow_consume)
+
+    async with lifespan(MagicMock()):
+        await asyncio.sleep(0.05)
+        assert not started.is_set(), "flag off인데 redis_shadow_consume_loop가 시작됨"
+
+    fake_engine.dispose.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_lifespan_starts_redis_shadow_task_when_enabled(monkeypatch):
+    """flag on이면 redis_shadow_consume_loop task가 뜨고, shutdown 시 정상 cancel→dispose."""
+    from app.main import lifespan
+
+    fake_engine = _patch_engine(monkeypatch)
+    monkeypatch.setattr("app.main.settings.event_broker_redis_dual_publish_enabled", True)
+
+    started = asyncio.Event()
+
+    async def fake_shadow_consume():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            return
+
+    monkeypatch.setattr("app.services.event_broker.redis_shadow_consume_loop", fake_shadow_consume)
+
+    async with lifespan(MagicMock()):
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+    fake_engine.dispose.assert_awaited_once()

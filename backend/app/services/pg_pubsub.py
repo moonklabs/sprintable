@@ -124,6 +124,18 @@ async def _dispatch_received(payload_str: str) -> None:
     event_type = str(payload.get("event_type", ""))
     data = payload.get("data") or {}
 
+    # E-ARCH S2(story #2078): shadow-consume 비교 기준점 — 이 인스턴스가 LISTEN으로 받은
+    # 이벤트(=다른 인스턴스가 발행)의 도착 시각을 기록. ⚠️ 자기 자신이 발행한 이벤트는 위
+    # instance_id 체크로 이 지점 전에 return돼 기록되지 않는다 — shadow 비교에서 항상
+    # "redis-only"로 보일 수 있는 known 비대칭(관측용 근사치라 정합성 영향 없음, 의도적 축소범위).
+    broker_event_id = data.get("_broker_event_id")
+    if broker_event_id:
+        try:
+            from app.services.event_broker import record_pg_arrival
+            record_pg_arrival(broker_event_id)
+        except Exception:
+            pass
+
     try:
         from app.routers.events import publish_event, _push_to_agent
         if target == "org":

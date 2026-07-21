@@ -68,8 +68,12 @@ def publish_event(org_id: str, event_type: str, data: dict, _from_listener: bool
         # prod 커넥션 누수 근본fix(2026-07-08): 참조 미보관 create_task는 GC가 pg_notify()의
         # async with async_session_factory() 도중 태스크를 조기수거할 수 있다(공식 문서 경고) —
         # fire_and_forget이 강한 참조를 보관해 이를 막는다.
-        from app.services.pg_pubsub import fire_and_forget, pg_notify
-        fire_and_forget(pg_notify("org", org_id, event_type, data))
+        # E-ARCH S2(story #2078): pg_notify() 직접 호출 → event_broker.publish()로 — PG NOTIFY는
+        # 그대로(내부에서 동일 호출) + event_broker_redis_dual_publish_enabled 시 Redis shadow
+        # 추가 발행(기본 off, 무회귀). fire_and_forget 감싸는 방식은 무변경.
+        from app.services.event_broker import event_broker
+        from app.services.pg_pubsub import fire_and_forget
+        fire_and_forget(event_broker.publish("org", org_id, event_type, data))
 
 
 # ─── Agent connection registry (S2/S3: 에이전트별 SSE) ───────────────────────
@@ -129,8 +133,10 @@ def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) 
             queues.discard(q)
     if not _from_listener:
         # prod 커넥션 누수 근본fix(2026-07-08) — publish_event()와 동형(fire_and_forget 참조 보관).
-        from app.services.pg_pubsub import fire_and_forget, pg_notify
-        fire_and_forget(pg_notify("agent", member_id, payload.get("event_type", ""), payload))
+        # E-ARCH S2(story #2078): pg_notify() 직접 호출 → event_broker.publish()로(publish_event()와 동형 치환).
+        from app.services.event_broker import event_broker
+        from app.services.pg_pubsub import fire_and_forget
+        fire_and_forget(event_broker.publish("agent", member_id, payload.get("event_type", ""), payload))
     return pushed
 
 
