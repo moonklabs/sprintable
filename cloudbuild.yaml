@@ -61,6 +61,12 @@ substitutions:
   # sprintable-realtime-prod 배선을 마치는 승격 시점에 GHA prod 분기에도 false를 명시할 것.
   _BACKEND_PG_LISTEN_ENABLED: 'true'
 
+  # E-ARCH S2 정리(story #2078, 2026-07-21): api는 SSE를 서빙하지 않으니(realtime으로 이관
+  # 완료) Redis 구독(consume) 자체가 불필요 — dual_publish(발행)는 여전히 필요(cross-instance
+  # relay 소스가 되어야 하므로 안 건드림). 기본값 'false'(api 전용 durable 값) — 이 값은
+  # deploy-backend에서만 쓰이고 deploy-realtime은 항상 true를 직접 명시(아래, 변수 아님).
+  _BACKEND_REDIS_CONSUME_ENABLED: 'false'
+
 steps:
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
   - id: build-frontend
@@ -197,7 +203,9 @@ steps:
       # maxScale 와 짝으로 검토. (PO rev 01256 dev 429 right-size durable 화.)
       # E-ARCH 1단계(story #2078): PG_LISTEN_ENABLED durable화 — 위 _BACKEND_PG_LISTEN_ENABLED
       # 주석 참조(dev=false·prod=true 유지, GHA per-env 배선).
-      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED}
+      # E-ARCH S2 정리(story #2078): REDIS_CONSUME_ENABLED durable화 — 위 _BACKEND_REDIS_
+      # CONSUME_ENABLED 주석 참조(api는 SSE 미서빙이라 구독 불필요, dual_publish는 유지).
+      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED}
       - --quiet
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
     # 스키마를 상대로 뜨는 걸 막는다(migrate 실패 시 이 스텝 자체가 안 돎).
@@ -219,6 +227,13 @@ steps:
           echo "skip deploy-realtime: prod gate pending (E-ARCH 1단계 dev 검증 후 오픈)"
           exit 0
         fi
+        # ⚠️story #2078 긴급수정(2026-07-21): PG_LISTEN_ENABLED가 여기 true로 하드코딩돼
+        # 있었다 — PO가 라이브에서 손으로 false로 전환(LISTEN 제거·Redis 단독 dispatch 확認
+        # 완료)했는데, 이 스텝이 명시적으로 true를 다시 밀어넣어 **다음 배포마다 LISTEN이
+        # 부활**하는 시한폭탄이었다("손 값은 배포가 덮는다" 규율의 역방향 재발 — 이번엔 배포가
+        # 고침을 지우는 쪽). realtime은 이제 LISTEN이 구조적으로 불필요(Redis가 authoritative
+        # dispatch) — false로 durable 고정. REDIS_CONSUME_ENABLED=true도 명시(이 서비스가
+        # Redis를 구독+dispatch하는 유일한 서비스라는 것을 코드에 못박음 — api는 false).
         gcloud run deploy sprintable-realtime-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
@@ -226,7 +241,7 @@ steps:
           --max-instances=${_REALTIME_MAX_INSTANCES} \
           --timeout=${_REALTIME_TIMEOUT} \
           --allow-unauthenticated \
-          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=true \
+          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=false,REDIS_CONSUME_ENABLED=true \
           --quiet
     waitFor: [run-migrate-job]
 
