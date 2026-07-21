@@ -1893,7 +1893,7 @@
     "authFailed": "Authentication failed. Please try again.",
     "backToLogin": "Go to login →",
     "joinedOrg": "You've joined {org}",
-    "joinHeadingLine2": "Join this organization",
+    "joinHeading": "Join <b>{org}</b>",
     "invitedByPerson": "{name} invited you",
     "invitedByOrgFallback": "Invited by {org}",
     "namePlaceholder": "Name",

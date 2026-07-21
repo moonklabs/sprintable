@@ -1893,7 +1893,7 @@
     "authFailed": "인증에 실패했습니다. 다시 시도해주세요.",
     "backToLogin": "로그인 페이지로 →",
     "joinedOrg": "{org}에 합류했어요",
-    "joinHeadingLine2": "에 합류하세요",
+    "joinHeading": "<b>{org}</b>에 합류하세요",
     "invitedByPerson": "{name}님이 초대했어요",
     "invitedByOrgFallback": "{org}에서 초대했어요",
     "namePlaceholder": "이름",

@@ -182,11 +182,11 @@ export default function InvitePage() {
       {preview && (
         <div className="space-y-6">
           <div className="space-y-3 text-center animate-in fade-in slide-in-from-bottom-2 duration-500 delay-100 fill-mode-backwards">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-              <span className="block">{preview.org_name}</span>
-              <span className="block text-base font-normal text-muted-foreground mt-1">
-                {t('joinHeadingLine2')}
-              </span>
+            <h1 className="text-2xl font-normal tracking-tight text-foreground sm:text-3xl">
+              {t.rich('joinHeading', {
+                org: preview.org_name,
+                b: (chunks) => <span className="font-semibold text-foreground">{chunks}</span>,
+              })}
             </h1>
           </div>
 
