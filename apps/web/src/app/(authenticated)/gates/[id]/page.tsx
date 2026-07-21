@@ -130,6 +130,7 @@ export default function GateDetailPage() {
             {t('gateDetailBackToInbox')}
           </button>
         }
+        hideContextChip
       />
       <div className="mx-auto flex min-h-full w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-5">
         {loading ? (

@@ -281,9 +281,12 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   return (
     <DocsLayoutContext.Provider value={{ wsSlug, projSlug, projectId, tree, setTree, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer: openDrawer }}>
+      {/* 긴급 fix(2076 회귀) — 문서 상세(currentSlug 있음)는 유나양 규격상 상세 화면으로
+          칩 억제 대상. 리스트뷰는 title이 정적 "문서" 헤딩이라 루트 화면과 동일 취급(칩 유지). */}
       <TopBarSlot
         title={topBarTitle}
         actions={topBarActions}
+        hideContextChip={!!currentSlug}
       />
 
       {/* Unified: children rendered exactly once — sidebar responsive via breakpoint classes */}

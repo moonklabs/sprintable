@@ -20,7 +20,7 @@ interface TopBarProps {
 }
 
 export function TopBar({ className, orgId, orgMemberships = [], projectId, projectMemberships = [] }: TopBarProps) {
-  const { title, actions, hidden } = useTopBar();
+  const { title, actions, hidden, hideContextChip } = useTopBar();
   return (
     <div
       className={cn(
@@ -36,13 +36,17 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
           대신한다(blueprint §3.2 "모바일 사이드바 Sheet/햄버거 폐기" 방향, 오르테가군 확定).
           story #2076: 그 자리에 컨텍스트 칩을 추가한다 — 탭바는 화면 이동, 칩은 컨텍스트(조직/
           프로젝트) 전환으로 관심사가 다르다. title보다 먼저 두어 "지금 어디에 있는지"가 화면
-          제목보다 앞서 보이게 한다. */}
-      <ContextSwitcherChip
-        orgs={orgMemberships}
-        currentOrgId={orgId}
-        projects={projectMemberships}
-        currentProjectId={projectId}
-      />
+          제목보다 앞서 보이게 한다.
+          긴급 fix(2076 회귀): 2뎁스+ 상세 화면(자체 뒤로가기 보유)은 hideContextChip으로
+          칩을 뺀다 — "전환은 최상위에서" 이미 맥락이 있는 화면엔 칩이 불필요·공간도 부족. */}
+      {!hideContextChip && (
+        <ContextSwitcherChip
+          orgs={orgMemberships}
+          currentOrgId={orgId}
+          projects={projectMemberships}
+          currentProjectId={projectId}
+        />
+      )}
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {title}
       </div>
