@@ -145,6 +145,34 @@ describe('KanbanBoard — 보드 first-touch 절제된 배너', () => {
   });
 });
 
+// story #2105 2차 — 스토리 생성 실패 배너(transitionError)가 role="alert" aria-live="assertive"로
+// 스크린리더에 낭독되는지. stubFetch는 GET /api/stories?... 만 매칭하고 POST(쿼리 없음)는
+// 캐치올(ok:false)로 떨어지므로 실패 경로를 그대로 재현한다.
+describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', () => {
+  it('생성 실패 시 role="alert" aria-live="assertive"로 배너가 렌더된다', async () => {
+    stubFetch([]);
+    await mount();
+    const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 스토리 만들기'));
+    await act(async () => { ctaButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const titleInput = container.querySelector('input') as HTMLInputElement;
+    expect(titleInput).not.toBeNull();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(titleInput, '새 스토리');
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      titleInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const alertEl = container.querySelector('[role="alert"]');
+    expect(alertEl).not.toBeNull();
+    expect(alertEl?.textContent).toContain('스토리 추가에 실패했습니다');
+    expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
+  });
+});
+
 // story #2059 — 보드 실시간 반영. 새 EventSource를 여는 대신 기존 useSseNotifications의
 // extraEventNames를 구독해 story.status_changed/assignee_changed를 받는다(AC2). 이미 로드된
 // 카드만 in-place 패치하고(AC3, 전체 재fetch 없음) 누가 바꿨는지 토스트로 드러낸다(AC4).

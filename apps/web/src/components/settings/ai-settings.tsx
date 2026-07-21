@@ -243,8 +243,12 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
           </div>
         </div>
 
-        {error && <p className="text-xs text-destructive">{error}</p>}
-        {saved && <p className="text-xs text-success">{t('aiSettingsSaved')}</p>}
+        {/* story #2105 2차 — handleSave가 재시도 전 setError(null)/setSaved(false)를 리셋한다.
+            단, requiresNewApiKey 검증 조기-return 경로(위 handleSave 상단)는 그 리셋 前에 바로
+            setError를 호출해 동일 사유 연속 실패 시 재낭독이 안 될 수 있다 — 별도 잠재 결함으로
+            기록(상태머신은 이 스토리에서 재구성하지 않음). */}
+        {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{error}</p>}
+        {saved && <p role="status" aria-live="polite" aria-atomic="true" className="text-xs text-success">{t('aiSettingsSaved')}</p>}
 
         <button
           onClick={handleSave}

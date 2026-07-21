@@ -1142,8 +1142,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   <Loader2 className="size-3.5 animate-spin" /> {t('loading')}
                 </div>
               )}
+              {/* story #2105 2차 — handleAttachFiles가 재시도 전 setAttachError(false)를 먼저
+                  호출해(위 정의) 매 시도마다 언마운트→리마운트된다. */}
               {attachError && (
-                <p className="mt-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
+                <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
               )}
             </div>
 

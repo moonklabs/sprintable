@@ -237,7 +237,9 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
         </div>
 
         {error && (
-          <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+          // story #2105 2차 — handleCreateOrg/handleCreateProject/handleCreateAgent 모두 재시도 전
+          // setError('')를 먼저 호출해(위 정의) 매 시도마다 언마운트→리마운트된다.
+          <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
             {error}
           </div>
         )}
