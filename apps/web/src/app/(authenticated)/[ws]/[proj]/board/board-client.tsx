@@ -18,7 +18,7 @@ export default function BoardPageClient({ projectId, wsSlug, projSlug }: BoardPa
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
       <KanbanBoard projectId={projectId} wsSlug={wsSlug} projSlug={projSlug} />
     </>
   );

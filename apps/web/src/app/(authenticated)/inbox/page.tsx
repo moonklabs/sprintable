@@ -373,6 +373,7 @@ export default function InboxPage() {
             {t('markAllRead')}
           </Button>
         }
+        showContextChip
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

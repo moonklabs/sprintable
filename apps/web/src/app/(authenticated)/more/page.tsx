@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import {
   FolderKanban,
   CalendarRange,
@@ -43,7 +44,10 @@ export default function MorePage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
-      <h1 className="mb-1 text-lg font-semibold text-foreground">{tMore('more')}</h1>
+      {/* 근본 재구현(2076 회귀 후속, 유나양 규격) — 이 4탭 루트는 TopBarSlot을 아예 안 써서
+          allowlist(showContextChip)로 켤 자리가 없었다. "슬롯 없으면 자동 켬"은 fail-open이라
+          금지(유나양) — 슬롯을 명시적으로 쓰게 해서 켠다. */}
+      <TopBarSlot title={<h1 className="text-sm font-medium">{tMore('more')}</h1>} showContextChip />
       <p className="mb-4 text-xs text-muted-foreground">{tMore('moreTempNotice')}</p>
       <ul className="divide-y divide-border rounded-xl border border-border">
         {ITEMS.map(({ href, icon: Icon, labelKey }) => (

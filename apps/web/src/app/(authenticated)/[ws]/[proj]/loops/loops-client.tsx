@@ -130,7 +130,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
   if (loading) {
     return (
       <>
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
         <div className="flex h-64 items-center justify-center">
           <p className="text-sm text-muted-foreground">{t('loading')}</p>
         </div>
@@ -148,6 +148,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
             {t('createLoopCta')}
           </Button>
         }
+        showContextChip
       />
       <LoopCreateDialog
         projectId={projectId}

@@ -73,6 +73,7 @@ export default function MockupsPage() {
             {t('newMockup')}
           </Button>
         }
+        showContextChip
       />
 
       {showCreate ? (

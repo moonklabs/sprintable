@@ -607,7 +607,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   return (
     <div className="mx-auto flex max-w-2xl flex-1 flex-col gap-4 p-4">
       {showTopBar ? (
-        <TopBarSlot title={<h1 className="flex items-center gap-2 text-sm font-medium"><IdCard className="h-4 w-4" aria-hidden />{t('title')}</h1>} />
+        <TopBarSlot title={<h1 className="flex items-center gap-2 text-sm font-medium"><IdCard className="h-4 w-4" aria-hidden />{t('title')}</h1>} showContextChip />
       ) : null}
       {onExit ? (
         <button

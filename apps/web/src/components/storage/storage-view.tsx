@@ -282,7 +282,7 @@ export function StorageView({ projectId }: { projectId: string }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <TopBarSlot title={topBarTitle} />
+      <TopBarSlot title={topBarTitle} showContextChip />
 
       <div className="px-4 pt-3 empty:hidden">
         <StorageCapacityBanner />
