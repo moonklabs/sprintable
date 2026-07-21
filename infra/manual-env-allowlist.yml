@@ -12,18 +12,40 @@
 # 2026-07-22 기준 실측(gcloud run services describe 전 서비스) 1:1 대조로 작성 — 기억이 아닌
 # 라이브 상태 그대로. 값 자체는 여기 안 옮긴다(키 이름·서비스·사유만 — 시크릿이든 아니든).
 
-# 이 guard의 스코프 밖 서비스 — 별도 이유를 명시해 "빠뜨린 게 아니라 제외했다"를 남긴다.
+# 이 guard의 스코프 밖 서비스 — "전부 제외"가 아니라 "축별 제외"(오르테가군 지적,
+# 2026-07-22: mcp-dev 사고가 정확히 "아무도 그 서비스를 안 봐서" 났다 — 제외가 감시 밖이
+# 되면 이 가드를 만든 이유 자체가 무효화된다). ①키집합·②값대조는 이 repo에 IaC가 없어
+# 대조 기준이 없으니 오탐 확定(제외 정당) — 그러나 ③평문 시크릿 형태 검출은 IaC 여부와
+# 무관하게 라이브 env value만 보면 판정되는 축이라 절대 빼지 않는다(check_env_drift.py가
+# excluded_services 여부와 무관하게 전 서비스에 ③을 적용 — 코드 참고).
+#
+# `watched_by`: "우리 소관 아니다"와 "아무도 안 본다"는 다른 것 — 저쪽에 대응 가드가
+# 있으면 그 근거를, 없으면 없다는 사실 자체를 남긴다(다음 사람이 "저쪽에서 보겠지"로
+# 잘못 안심하지 않도록).
 excluded_services:
   - service: sprintable-admin-web
+    excluded_axes: [key_set, value_check]
     reason: >-
       IaC가 별도 repo(sprintable-admin, private)에 있음 — 이 repo(sprintable)의
-      cloudbuild.yaml/deploy_*.sh가 관장하지 않는 서비스. 그 repo에 별도 가드 필요(추후).
+      cloudbuild.yaml/deploy_*.sh가 관장하지 않는 서비스라 ①②축 대조 기준이 없음.
+    watched_by: >-
+      2026-07-22 sprintable-admin repo GHA 워크플로우(internal-api-ci.yml/web-ci.yml)
+      전수 확認 — env-var/시크릿 드리프트 가드 없음. `internal-api/app/core/drift.py`의
+      "Drift-check"는 DB 스키마(vendored model contract ↔ live information_schema)
+      drift로 이것과 무관. ⛔ ①②축은 어느 쪽에서도 현재 안 보는 상태 — 저쪽 repo에
+      별도 가드 신설이 후속 필요(백로그). ③축(평문 시크릿)은 이 가드가 계속 커버.
   - service: sprintable-admin-web-dev
+    excluded_axes: [key_set, value_check]
     reason: 위와 동일 — sprintable-admin repo 소관.
+    watched_by: 위와 동일 — ①②축 무주공산, ③축은 이 가드가 커버.
   - service: sprintable-internal-api
+    excluded_axes: [key_set, value_check]
     reason: 위와 동일 — sprintable-admin repo 소관(E-ADMIN internal-api).
+    watched_by: 위와 동일 — ①②축 무주공산, ③축은 이 가드가 커버.
   - service: sprintable-internal-api-dev
+    excluded_axes: [key_set, value_check]
     reason: 위와 동일 — sprintable-admin repo 소관.
+    watched_by: 위와 동일 — ①②축 무주공산, ③축은 이 가드가 커버.
 
 services:
   sprintable-backend-dev:

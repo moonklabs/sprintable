@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""ⓒ 라이브 env 드리프트 가드 — ① 키집합 대조 (design doc env-drift-guard-design 참고).
+"""ⓒ 라이브 env 드리프트 가드 — ①키집합 대조 + ③평문 시크릿 형태 검출.
 
 라이브 Cloud Run 서비스의 env var 키 이름 전체가 (IaC 선언 키 ∪ manual-env-allowlist.yml)
-안에 있는지 확認한다. 서비스 목록은 `gcloud run services list`로 매 실행 동적 열거 —
+안에 있는지 확認한다(①). 서비스 목록은 `gcloud run services list`로 매 실행 동적 열거 —
 하드코딩하지 않는다(mcp-dev 키 유출 사건이 "아무도 안 본 서비스"에서 났다는 교훈).
+
+⛔ ③(평문 시크릿 형태 검출)은 excluded_services 여부와 무관하게 **전 서비스**에 적용한다 —
+①②축은 "이 repo의 IaC로 대조 불가"라는 이유로 뺄 수 있지만, ③은 라이브 env value만 보면
+판정되는 축이라 IaC 유무와 무관하다(오르테가군 지적, 2026-07-22: "제외"가 "감시 밖"이
+되면 이 가드를 만든 이유 자체가 무효화된다 — mcp-dev 사고가 정확히 그 구멍에서 났다).
+
+값 자체는 절대 출력/기록하지 않는다 — 매치 여부(bool)만 사용, stdout엔 키 이름·서비스만.
 
 로컬 수동 실행:
     python3 infra/check_env_drift.py
@@ -12,7 +19,6 @@ exit code: 0=드리프트 없음, 1=드리프트 발견(FAIL 상세를 stdout에
 """
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 import sys
@@ -38,19 +44,27 @@ _SERVICE_SCRIPT_MAP: dict[str, list[str]] = {
 
 _KEY_RE = re.compile(r"([A-Z][A-Z0-9_]*)=")
 
+# ③ 평문 시크릿 형태 검출 — 알려진 시크릿 프리픽스 패턴. 새 프리픽스가 생기면 여기 추가.
+_SECRET_SHAPE_RE = re.compile(r"^sk_live_[A-Za-z0-9]{15,}$")
+
 
 def _run(cmd: list[str]) -> str:
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     return result.stdout.strip()
 
 
-def _load_allowlist() -> tuple[set[str], dict[str, dict]]:
+def _load_allowlist() -> tuple[dict[str, set[str]], dict[str, dict]]:
+    """반환: {service: {제외된 축 집합}} — ③은 절대 포함되지 않는다(코드에서 강제)."""
     import yaml
 
     data = yaml.safe_load(_ALLOWLIST_PATH.read_text())
-    excluded = {e["service"] for e in data.get("excluded_services", [])}
+    excluded_axes: dict[str, set[str]] = {}
+    for entry in data.get("excluded_services", []):
+        axes = set(entry.get("excluded_axes", []))
+        axes.discard("secret_shape")  # ③은 축별 제외 대상에서 원천 배제
+        excluded_axes[entry["service"]] = axes
     services = data.get("services", {})
-    return excluded, services
+    return excluded_axes, services
 
 
 def _list_live_services() -> list[str]:
@@ -70,6 +84,33 @@ def _live_env_keys(service: str) -> set[str]:
     if not out:
         return set()
     return {k.strip() for k in out.split(";") if k.strip()}
+
+
+def _plain_secret_shaped_keys(service: str) -> list[str]:
+    """③ — plain(비-secretKeyRef) env value가 알려진 시크릿 형태와 일치하는 키 이름만 반환.
+
+    값 자체는 이 함수 밖으로 절대 나가지 않는다(정규식 매치 결과 bool만 사용) — 호출부는
+    반환된 키 이름과 서비스만 로그에 남긴다."""
+    import json as _json
+
+    out = _run([
+        "gcloud", "run", "services", "describe", service,
+        f"--region={_REGION}",
+        "--format=json(spec.template.spec.containers[0].env)",
+    ])
+    if not out:
+        return []
+    data = _json.loads(out)
+    envs = (
+        data.get("spec", {}).get("template", {}).get("spec", {})
+        .get("containers", [{}])[0].get("env", [])
+    )
+    hits = []
+    for entry in envs:
+        value = entry.get("value")
+        if value is not None and _SECRET_SHAPE_RE.match(value):
+            hits.append(entry["name"])
+    return hits
 
 
 def _extract_keys_from_text(text: str) -> set[str]:
@@ -97,16 +138,23 @@ def _iac_covered_keys() -> set[str]:
 
 
 def main() -> int:
-    excluded, allowlist_services = _load_allowlist()
+    excluded_axes, allowlist_services = _load_allowlist()
     iac_keys = _iac_covered_keys()
 
     live_services = _list_live_services()
-    failures: list[str] = []
+    key_set_failures: list[str] = []
+    secret_shape_failures: list[str] = []
     unmapped: list[str] = []
 
     checked = 0
     for service in live_services:
-        if service in excluded:
+        # ③ 평문 시크릿 형태 검출 — excluded_services 여부와 무관하게 전 서비스에 적용.
+        secret_hits = _plain_secret_shaped_keys(service)
+        if secret_hits:
+            secret_shape_failures.append(f"{service}: {', '.join(sorted(secret_hits))}")
+
+        # ①키집합 대조 — 축별 제외(key_set) 대상이면 스킵.
+        if "key_set" in excluded_axes.get(service, set()):
             continue
         if service not in _SERVICE_SCRIPT_MAP:
             unmapped.append(service)
@@ -120,26 +168,37 @@ def main() -> int:
         covered = iac_keys | allowed_keys
         missing = sorted(live_keys - covered)
         if missing:
-            failures.append(f"{service}: {', '.join(missing)}")
+            key_set_failures.append(f"{service}: {', '.join(missing)}")
 
     if unmapped:
-        failures.append(
-            "매핑 안 된 신규 서비스(⛔ _SERVICE_SCRIPT_MAP·excluded_services 어느 쪽에도 "
-            "없음 — gcloud 열거엔 잡히니 무시된 게 아니라 분류가 안 된 것): "
+        key_set_failures.append(
+            "매핑 안 된 신규 서비스(⛔ _SERVICE_SCRIPT_MAP·excluded_services(key_set축) "
+            "어느 쪽에도 없음 — gcloud 열거엔 잡히니 무시된 게 아니라 분류가 안 된 것): "
             + ", ".join(unmapped)
         )
 
-    if failures:
+    if key_set_failures or secret_shape_failures:
         print("❌ env 드리프트 발견:")
-        for line in failures:
-            print(f"  - {line}")
+        if key_set_failures:
+            print("  ①키집합 대조:")
+            for line in key_set_failures:
+                print(f"    - {line}")
+        if secret_shape_failures:
+            print("  ③평문 시크릿 형태 검출(⛔ 값은 출력하지 않음 — 키 이름만):")
+            for line in secret_shape_failures:
+                print(f"    - {line}")
         print(
-            "\n→ 파이프라인(cloudbuild.yaml/deploy_*.sh)에 편입하거나 "
-            "infra/manual-env-allowlist.yml에 사유와 함께 등재하기 바라는."
+            "\n→ ①은 파이프라인(cloudbuild.yaml/deploy_*.sh)에 편입하거나 "
+            "infra/manual-env-allowlist.yml에 사유와 함께 등재. "
+            "③은 즉시 Secret Manager secretKeyRef로 전환 바라는(평문 유지 시 재확定 시마다 재발)."
         )
         return 1
 
-    print(f"✅ 드리프트 없음 — {checked}개 서비스 확認(제외 {len(excluded)}개, 총 열거 {len(live_services)}개).")
+    print(
+        f"✅ 드리프트 없음 — ①{checked}개 서비스 키집합 확認"
+        f"(제외 {sum(1 for a in excluded_axes.values() if 'key_set' in a)}개), "
+        f"③{len(live_services)}개 서비스 전체 평문시크릿 스캔 완료(제외 없음)."
+    )
     return 0
 
 
