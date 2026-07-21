@@ -27,6 +27,73 @@ async def _epic_title(db: AsyncSession, epic_id: uuid.UUID | None) -> str | None
     return epic.title if epic else None
 
 
+async def stage_status_changed_sse_outbox(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    story,
+    old_status: str | None,
+    *,
+    actor_id: uuid.UUID | None = None,
+    actor_name: str | None = None,
+    actor_role: str | None = None,
+    actor_type: str | None = None,
+) -> None:
+    """E-ARCH S3b(story #2078, SSE 좁힘 설계 2026-07-21): status_changed SSE만 outbox에 atomic
+    적재 — **caller의 commit 전에 호출**해야 한다(그래야 caller의 commit에 outbox row가 같이
+    실려 진짜 atomic). commit은 이 함수가 안 함(caller 책임).
+
+    ⚠️webhook·L2 트리거·notification·StoryActivity는 이 함수의 스코프가 아니다 — 그것들은
+    지금처럼 `emit_story_status_changed()`가 commit **후** best-effort로 계속 처리한다(오르테가군
+    판정: "emit 누락 0" 목표는 SSE 1개만 atomic이면 달성, 5-effect 전부를 커밋 안에 넣는 건
+    과잉 수술). `event_broker_outbox_enabled`(default False)가 꺼져 있으면 완전 no-op —
+    `event_broker.publish_atomic()` 자체가 그 상태에서 아무것도 안 한다(무회귀). 켜져 있어도
+    `emit_story_status_changed()`의 기존 `_push_to_agent` 루프는 **아직 안 건드림**(둘 다 켜진
+    채 실 dispatch가 동시 활성화되면 LISTEN+Redis 공존 때와 동형 중복 위험 — 콜사이트 전원 이관
+    완료 + 그 루프 제거가 동시 cutover여야 안전, 3b 후속 단계).
+    """
+    if old_status == story.status:
+        return
+
+    from app.services.event_broker import event_broker
+    from app.services.project_auth import project_accessible_member_ids
+
+    epic_title: str | None = None
+    try:
+        epic_title = await _epic_title(db, story.epic_id)
+    except Exception:
+        pass
+
+    event_data = {
+        "story_id": str(story.id),
+        "story_title": story.title,
+        "story_priority": story.priority,
+        "epic_id": str(story.epic_id) if story.epic_id else None,
+        "epic_title": epic_title,
+        "status": story.status,
+        "new_status": story.status,
+        "old_status": old_status,
+        "project_id": str(story.project_id),
+        "org_id": str(org_id),
+        "actor_id": str(actor_id) if actor_id else None,
+        "actor_name": actor_name,
+        "actor_role": actor_role,
+        "source_agent_id": str(actor_id) if (actor_id and actor_type == "agent") else None,
+        "assignees": [str(story.assignee_id)] if story.assignee_id else [],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event_type": "story.status_changed",
+    }
+
+    try:
+        member_ids = await project_accessible_member_ids(db, org_id, story.project_id)
+        for member_id in member_ids:
+            await event_broker.publish_atomic(db, "agent", str(member_id), "story.status_changed", dict(event_data))
+    except Exception:
+        logger.warning(
+            "status_changed SSE outbox 적재 실패(story=%s project=%s) — state 커밋은 이 실패와 무관하게 진행됨",
+            story.id, story.project_id, exc_info=True,
+        )
+
+
 async def emit_story_status_changed(
     db: AsyncSession,
     org_id: uuid.UUID,
