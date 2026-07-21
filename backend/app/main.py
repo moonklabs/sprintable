@@ -48,6 +48,14 @@ async def lifespan(app: FastAPI):
         from app.services.l2_trigger_worker import L2TriggerWorker
 
         l2_task = asyncio.create_task(L2TriggerWorker().run())
+    # E-ARCH S2(story #2078): shadow-consume은 event_broker_redis_dual_publish_enabled(default
+    # False)일 때만 task 생성 — Memorystore 미배선 상태(redis_url=None)에서도 이 브랜치 자체가
+    # 안 돌아 무해(플래그가 꺼져 있으면 event_broker.py의 redis_url 가드에도 안 닿는다).
+    redis_shadow_task = None
+    if settings.event_broker_redis_dual_publish_enabled:
+        from app.services.event_broker import redis_shadow_consume_loop
+
+        redis_shadow_task = asyncio.create_task(redis_shadow_consume_loop())
     try:
         yield
     finally:
@@ -55,6 +63,8 @@ async def lifespan(app: FastAPI):
             task.cancel()
         if l2_task is not None:
             l2_task.cancel()
+        if redis_shadow_task is not None:
+            redis_shadow_task.cancel()
         try:
             if task is not None:
                 try:
@@ -64,6 +74,11 @@ async def lifespan(app: FastAPI):
             if l2_task is not None:
                 try:
                     await l2_task
+                except asyncio.CancelledError:
+                    pass
+            if redis_shadow_task is not None:
+                try:
+                    await redis_shadow_task
                 except asyncio.CancelledError:
                     pass
         finally:

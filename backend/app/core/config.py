@@ -88,6 +88,15 @@ class Settings(BaseSettings):
     # default=True(무회귀) — 명시적으로 끄지 않는 한 기존 단일서비스 배포와 동일 동작.
     pg_listen_enabled: bool = True
 
+    # E-ARCH S2(story #2078·설계 오르테가군 판정 2026-07-21): PG NOTIFY 옆에 Redis(Memorystore)
+    # dual-publish를 shadow로 추가하는 단계. default=False(무회귀) — Memorystore 인스턴스가 아직
+    # 없어도(PO lane·1단계 abort-0 실측 확認 후 배선 예정) 이 PR 자체는 아무 동작도 안 바꾼다.
+    # 켜져도 PG NOTIFY가 여전히 authoritative(dispatch는 PG 경로만 사용) — Redis는 realtime
+    # gateway의 shadow-consume 비교용(지연·중복률 측정)이라 유실돼도 정합성 영향 0
+    # (agent_gateway.py의 acked_seq DB 재조회 패턴과 동형 근거 — 오늘 세션 교차검증 완료).
+    event_broker_redis_dual_publish_enabled: bool = False
+    redis_url: str | None = None  # Memorystore 연결 문자열. flag on인데 None이면 경고 로그만(fail-safe).
+
     # E-L2 휴리스틱 트리거 워커. default-off — 명시 활성화 전엔 lifespan task 미생성(무동작).
     # advisory_lock=on이면 멀티인스턴스 중 pg_try_advisory_lock holder 1개만 poll/evaluate.
     l2_trigger_enabled: bool = False
