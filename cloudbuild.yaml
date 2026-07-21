@@ -57,6 +57,23 @@ substitutions:
   _REALTIME_TIMEOUT: '3600'
   _REALTIME_URL: https://sprintable-realtime-dev-787818285179.asia-northeast3.run.app
 
+  # story c4c72eb1 후속(2026-07-22, GCE 조사 중 발견): `deploy-frontend` 스텝에 `--timeout`
+  # 플래그가 한 번도 없었다(story #2005가 backend에서 고친 것과 동형 결함, frontend는
+  # 그 처리를 안 받았음) — 인프라 기본값이 아니라 `deploy_frontend.sh`의 옛 `--timeout=60`
+  # (일반 페이지 요청 기준값, `/api/event-stream` SSE 프록시 라우트 생긴 뒤 재검토 안 됨)이
+  # `gcloud run deploy`의 "플래그 생략 시 기존 값 preserve" 동작으로 암묵 지속되고 있었다.
+  # 라이브 실측(2026-07-22, dev/prod 둘 다 60) 그대로 여기 명시해 durable화 — **값을 올리는
+  # 것이 아니라 지금 값을 IaC에 고정하는 것**(오르테가군 판정: frontend concurrency=80·
+  # maxScale=3(상한 240·짧은 페이지 요청용 sizing) vs realtime concurrency=80·maxScale=8
+  # (상한 640·SSE용 sizing) — SSE를 frontend에 오래 붙들면 그 작은 상한을 페이지 요청과
+  # 다투게 만드는 새 병목이라, 값 인상은 브라우저→realtime 직결 설계(B) 이후로 미룸).
+  # ⚠️ 현행값 고정(2026-07-22) — 이 값이 옳다는 뜻이 아니다. 브라우저 SSE가 `/api/
+  # event-stream`(=이 컨테이너)을 타고 있어서 이 60초가 67.5초 주기 절단의 원인이다
+  # (story #2101). SSE가 realtime에 직결하도록 정리되면 이 값은 원래 목적(짧은 페이지
+  # 요청) 기준으로 재검토할 것 — "왜 60이지? 짧은데?" 하고 무심코 올리면 240 슬롯을
+  # 페이지 요청과 SSE가 다투게 만드는 방향이라 근거 없이 만지지 말 것.
+  _FRONTEND_TIMEOUT: '60'
+
   # E-ARCH 1단계 durable화 마지막 조각(story #2078, 2026-07-21 PO 손 플립 확認 후): api
   # (sprintable-backend-*)의 PG_LISTEN_ENABLED. ⚠️ 기본값 'true' — prod는 아직
   # sprintable-realtime-prod가 없다(deploy-realtime 스텝이 prod에서 스킵 중, PO 검증 전).
@@ -186,6 +203,7 @@ steps:
       - sprintable-frontend-${_DEPLOY_ENV}
       - --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:${COMMIT_SHA}
       - --region=${_AR_REGION}
+      - --timeout=${_FRONTEND_TIMEOUT}
       # E-ARCH 1단계(story #2078) — /api/event-stream 프록시 라우트가 REALTIME_URL을 읽어
       # SSE/LISTEN 전용 realtime-gateway로 향한다(REALTIME_URL 없으면 기존 FASTAPI_URL로
       # 폴백 — 이 값을 비우면 코드 변경·재배포 없이 즉시 원복). --update-env-vars(additive).
