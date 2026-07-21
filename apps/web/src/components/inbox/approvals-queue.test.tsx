@@ -79,9 +79,12 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  // story #2103 — 기본값은 human(기존 스위트 전부가 "승인/반려 버튼이 보인다"를 전제하므로).
+  // agent 게이팅 자체를 검증하는 케이스만 개별로 override한다.
   useDashboardContextMock.mockReturnValue({
     orgMemberships: [{ orgId: 'org-1', orgName: '뭉클랩' }],
     projectMemberships: [],
+    currentMemberType: 'human',
   });
 });
 
@@ -236,5 +239,42 @@ describe('ApprovalsQueue', () => {
     await act(async () => { gateButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenCalledWith('/gates/g-mixed');
     expect(pushMock).not.toHaveBeenCalledWith(expect.stringContaining('h-mixed'));
+  });
+
+  // story #2103(P0) — BE `PATCH /api/v1/hitl-requests/{id}`가 human-only 불변식(hitl.py:131,
+  // "gates.py transition_gate_endpoint와 같은"). #2091(게이트 상세)과 같은 버그클래스: 이 큐가
+  // 그 판정을 미리 안 보고 에이전트 계정에도 승인/반려 버튼을 무조건 열었다. 양방향(human→노출·
+  // agent→비노출+사유문구) 다 고정한다 — 한쪽만 보면 "항상 노출" 회귀도 통과한다.
+  it('agent 계정이면 hitl 승인/반려 버튼이 안 뜨고 권한없음 문구가 뜬다', async () => {
+    useDashboardContextMock.mockReturnValue({
+      orgMemberships: [{ orgId: 'org-1', orgName: '뭉클랩' }],
+      projectMemberships: [],
+      currentMemberType: 'agent',
+    });
+    mockFetches([hitl({ id: 'h-agent', title: 'agent가 보는 승인요청' })], []);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(false);
+    expect(container.textContent).toContain(koMessages.cage.gateReadonlyNotAuthorized);
+  });
+
+  it('currentMemberType이 응답에 없으면(구버전/누락) undefined→false로 안전하게 폴백해 버튼을 안 연다(fail-closed)', async () => {
+    useDashboardContextMock.mockReturnValue({
+      orgMemberships: [{ orgId: 'org-1', orgName: '뭉클랩' }],
+      projectMemberships: [],
+    });
+    mockFetches([hitl({ id: 'h-unknown' })], []);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+  });
+
+  it('human 계정이면 hitl 승인/반려 버튼이 뜬다(회귀 확認)', async () => {
+    mockFetches([hitl({ id: 'h-human' })], []);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(true);
   });
 });

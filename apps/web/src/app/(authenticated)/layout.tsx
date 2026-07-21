@@ -12,6 +12,12 @@ interface MemberContext {
   project_name: string;
   name: string;
   role?: string;
+  // story #2103 — BE가 여러 write action(게이트/HITL 승인·거부, 각종 삭제)을 "휴먼 멤버만
+  // 가능"으로 명시적으로 403 거부한다. FE가 이 판정을 미리 반영하지 않고 버튼을 무조건
+  // 노출한 자리(HITL 인라인 승인/반려, approvals-queue.tsx)가 #2091(게이트 상세)과 같은
+  // 버그클래스로 확인됐다 — 계정의 human/agent 여부를 앱 전역에서 재사용 가능하게
+  // DashboardContext로 흘려보낸다(신규 fetch 0, 이미 매 요청 fetch하던 /api/v2/me 재사용).
+  type?: 'human' | 'agent';
 }
 
 interface OrgMembership {
@@ -116,6 +122,7 @@ export default async function AuthenticatedLayout({
       currentProjectSlug={currentProjectSlug}
       userName={me?.name}
       role={me?.role}
+      currentMemberType={me?.type}
       projectMemberships={projectMemberships}
       orgMemberships={orgMemberships}
       pathOrgId={pathOrgId}
