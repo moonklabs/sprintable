@@ -12,11 +12,15 @@ per_instance = (DB_POOL_SIZE + DB_MAX_OVERFLOW) + RAW_LISTEN
              = (3 + 1) + 1
              = 5
 
-rollout_worst_case(env) = 2 × maxScale(env) × per_instance
+rollout_worst_case(env) = N × maxScale(env) × per_instance
+                          (N = 동시 생존 리비전 수, 아래 "AC6 실측" 참고 — 연속배포 시 2 넘게 관측됨)
 ```
 
-`2×`는 배포 rollout 중 old+new 리비전이 동시에 떠 있는 구간(steady-state 산식만 쓰면 배포 중
-한도 초과 — 2026-06-29 dev 인시던트가 이 blind spot에서 발생). L2 트리거 워커(`L2_TRIGGER_ENABLED`)가
+`N`(과거엔 `2`로 고정)은 배포 rollout 중 old+new 리비전이 동시에 떠 있는 구간(steady-state 산식만
+쓰면 배포 중 한도 초과 — 2026-06-29 dev 인시던트가 이 blind spot에서 발생) 개수다. 애초 "old+new
+둘"만 겹친다는 가정으로 `2`를 썼으나, 2026-07-21 AC6 실측(연속 배포 다섯 번)에서 **동시 생존
+리비전이 5개까지 관측**돼 `N=2` 가정이 연속배포 상황을 못 덮는 것으로 드러났다 — 상세는 하단
+"AC6 — 부하 중 실측" 절. L2 트리거 워커(`L2_TRIGGER_ENABLED`)가
 켜져 있으면 인스턴스당 pool 내부(라인 4 안) connection 1개를 상시 점유하지만 `per_instance` 값 자체는
 늘리지 않는다 — pool 슬롯을 나눠 쓸 뿐 추가 물리 연결이 아니다. dev/prod의 실제 flag 값은 아직
 미확인(보고서 "확인하지 못한 것" #6).
@@ -28,8 +32,9 @@ rollout_worst_case(env) = 2 × maxScale(env) × per_instance
 | DB 인스턴스 | `sprintable-dev` (db-g1-small) | `sprintable-prod` (db-custom-2-8192) |
 | `max_connections` (gcloud 실측, PO 2026-07-20) | **200**(100→200 상향, 오늘 사고 대응) | **200** |
 | GHA SSOT `backend_max_instances` (`.github/workflows/cloud-build.yml`, 이 커밋 기준) | **8**(rev 01256-w9r durable) | **5**(ee7794eb ③) |
-| backend rollout worst-case = `2×maxScale×5` | 80 | 50 |
-| worst-case가 `max_connections`에서 차지하는 비율 | 40% | 25% |
+| backend rollout worst-case(`N=2`, 구 가정) = `2×maxScale×5` | 80 | 50 |
+| `max_connections`을 넘지 않는 여유선 `N_max`(`N×40≤200` ⇒ `N≤5`, dev만) | **5** | — (prod는 연속배포 실측 없음) |
+| worst-case(`N=2`)가 `max_connections`에서 차지하는 비율 | 40% | 25% |
 
 dev/prod는 별도 Cloud SQL 인스턴스다 — 오르테가군 PO가 2026-07-20 gcloud로 직접 재확인(`sprintable-dev`
 db-g1-small / `sprintable-prod` db-custom-2-8192, 별개 인스턴스 2개)했고, Cloud Monitoring `num_backends`도
@@ -147,7 +152,7 @@ TOTAL 119 (rollout 중 — old/new 리비전 동시 관측됨)
 | 소비자 | 상태 | 비고 |
 |---|---|---|
 | `sprintable-internal-api-dev` | **상한 실측(40)·실사용은 미확인** | maxScale 10×(pool 3+1)=40(steady)/80(rollout). 별도 private repo(`sprintable-admin`) — application_name 태깅 없이는 이 40 중 실제 몇 개가 지금 떠 있는지 여전히 모른다. |
-| 무태그 중 좀비(주인 없는 연결) | **실재 확定·정확한 개수는 다음 배포(idle 구간 분포) 대기** | max_idle 2h04m + 산술(internal-api 상한 40 < 무태그 69)로 확定. 근본은 인스턴스 종료 시 연결 정리(shutdown drain) 부재로 추정 — 조사 보고서 §"남는 취약점"의 `fire_and_forget` 태스크 drain 갭과 같은 계열(연결 자체가 아니라 Task 문제였던 그 갭과는 별개 확인 필요). |
+| 무태그 중 좀비(주인 없는 연결) | **해소됨 — story #2060 근본수정 검증 통과** | 근본원인은 SSE 드레인이 lifespan shutdown의 pg_pubsub 정리를 막는 것(§AC5②)으로 확定, `--timeout-graceful-shutdown 5`(PR #2330)로 수정·배포. 2026-07-20 08:19 실측(3회 배포 순환 후 구 리비전 잔재 0)으로 검증 완료 — 아래 "story #2060" 절 참고. |
 | migration/admin job | **미확인** | `backend/scripts/migrate.sh`(precheck 자식 프로세스)·Alembic NullPool 1개, 순차·단명으로 보고서는 추정. rollout과 배포 job이 겹치는 시간대 headroom 필요. |
 | 운영 접속(psql 등) | **미확인** | PostgreSQL reserved connection 몫 포함. `usename`으로 앱 서비스 계정과 구분 가능. |
 | L2 트리거 워커 advisory lock | **미확인** | `L2_TRIGGER_ENABLED`/`L2_TRIGGER_ADVISORY_LOCK` dev/prod 실값 — 켜져 있으면 pool 내부에서 최대 `maxScale-1`개가 상시 checkout(holder 1개 제외 standby도 반납 안 함, 과거 ee7794eb 조사). |
@@ -239,13 +244,60 @@ Cloud Run의 SIGTERM→SIGKILL 유예시간(코드베이스 어디에도 이 유
 1. ~~AC2 dev 배포 → `db-connection-stats`로 실측~~ **완료(2026-07-20)** — backend 태깅 확인, 무태그 78/100 확정.
 2. ~~usename/client_addr/max_idle_seconds 확장 배포 → 재실측~~ **완료(2026-07-20 18:24)** — 좀비(주인
    없는 연결) 실재 확定(max_idle 2h04m + 산술). `client_addr`는 실패 축으로 폐기.
-3. idle 구간 분포(`>1h`/`10m-1h`/`1m-10m`/`<1m`, 이번 커밋) 배포 → 재실측으로 좀비 **규모**(69개 중
-   몇 개가 `>1h`인지) 확정 — 처방이 예산 계상 vs 근본수정(shutdown drain)으로 갈리는 분기점.
-4. internal-api 태깅 확장은 위 3번 결과를 보고 오르테가군과 재논의(현재는 보류 유지).
-5. 실측 후 이 문서를 갱신하고 나서 AC3(단가 인하 vs 소비자 예산 계상 vs 풀러 vs shutdown drain 근본수정)
-   택일 — 과거 시도 이력(`ee7794eb`)이 이미 "Cloud Run raw TCP 미지원으로 중앙 PgBouncer 불가"를
-   확정해 둔 상태라 그 벽은 다시 부딪히지 않는다. 택일 전 오르테가군 확인.
-6. AC4로 위 drift 정리(테스트 상수 + cloudbuild 주석).
+3. ~~idle 구간 분포 재실측으로 좀비 규모 확정~~ **불필요해짐(2026-07-21)** — 근본수정(shutdown drain,
+   PR #2330)이 먼저 배포·검증(story #2060)돼 좀비 자체가 사라졌다. "규모 확정 후 처방 분기" 질문이
+   무의미해짐 — 처방은 이미 근본수정으로 확定됐다.
+4. internal-api 태깅 확장은 보류 유지 — 좀비 축이 해소된 지금은 우선순위가 더 낮아졌다(§"internal-api
+   계측 스코프 확장" 절의 조율 비용 논거는 그대로 유효).
+5. AC3(예산 조정) — **조정 안 하는 것으로 판정 완료**(오르테가군, 2026-07-20 밤). 근거: 누적 축 소멸(③)·
+   여유 충분(max_connections 200 대비 steady 40)·PgBouncer 무관(LISTEN direct 우회, ①). 재검토 트리거는
+   "AC6 실측이 예산 상한에 근접할 때"로 못박힘.
+6. AC4로 위 drift 정리(테스트 상수 + cloudbuild 주석) — **완료(2026-07-20, PR #2338)**.
+
+## 예산 vs 실측 대조 (2026-07-21, 디디 은와추쿠 — story #2065 인접 확인)
+
+story #2060 종결 후 "예산표가 현실과 맞는지" 재대조. **steady-state dev 예산과 08:19 실측이 정확히
+일치한다**:
+
+```
+steady-state 예산(산식) = maxScale(8) × per_instance(5) = 40
+08:19 실측(TOTAL, 구 리비전 잔재 0 확認 시점)            = 40   ← 정확히 일치
+```
+
+이 일치는 우연이 아니라 **좀비 축이 사라져야만 나올 수 있는 값**이다 — 좀비가 있었다면 실측이 예산을
+초과했어야 한다(어제 23:41 기준선이 그 증거: TOTAL 155 ≫ 예산 40, 5개 리비전이 동시에 연결을 붙잡고
+있었다). 즉 이 문서의 산식(`per_instance=5`, 좀비 보정항 없음)이 **탁상 공식이 아니라 지금 실환경을
+정확히 예측하는 값**임을 재확인했다.
+
+## AC6 — 부하 중 실측 (2026-07-21 09:47, 오르테가군 PO — 팀 6인 실가동 + 오전 배포 5회 직후)
+
+```
+TOTAL 110 / 200
+리비전별   01750:40 · 01749:24 · 01751:23 · 01752:13 · 01753:10
+idle 구간  10m-1h 65 · <1m 36 · >1h 7 · 1m-10m 2
+```
+
+**둘이 확認됨:**
+
+**① 산식이 리비전 단위로 정확하다** — 완전히 스케일된 리비전(`01750`)이 정확히 **40**(=`maxScale(8)
+× per_instance(5)`)이다. 나머지 4개는 드레인 중이라 40보다 낮다(24/23/13/10) — **완전 스케일된
+리비전 하나의 상한**이라는 산식 전제가 실측으로 다시 확認됐다.
+
+**② `N=2` 가정이 연속배포를 못 덮는다** — 오늘 오전 배포가 다섯 번 있었고, 그만큼 리비전이 겹쳤다.
+```
+구 가정   N=2 → rollout_worst_case = 2×40 = 80
+실측      N=5(리비전 5개 동시 생존) → TOTAL 110, 만약 5개 전부 완전 스케일이면 5×40=200(한도 정확히 도달)
+```
+**⇒ 산식을 `N=동시 생존 리비전 수`로 일반화**(위 "산식"/"환경별 예산" 절 갱신 완료). `N×40≤200`이면
+`N≤5`가 dev의 여유선 — **여섯 번째 리비전이 겹치면 이론상 한도를 넘는다.**
+
+⚠️ **다만 실제로는 드레인이 겹쳐서 5개가 전부 만개하지 않는다** — 오늘 110이 그 증거(이론상 200
+가능하나 실측은 110). **최악(이론)과 실측을 나란히 두는 것이 정직하다**: N=5는 "동시 생존 리비전
+수"의 상한이지 "5개가 전부 풀스케일"을 뜻하지 않는다.
+
+**⇒ #2040 AC6 닫힘**(오르테가군 판정): "부하를 주며 최대치 실측 후 예산표와 대조"를 실사용 부하로
+수행, 결과는 **110/200·산식과 정합·다만 N 축이 새로 열림**(prod는 연속배포 시나리오 미실측이라
+`N_max` 여유선 미정 — 표에 "—"로 남김).
 
 ## story #2060 — 좀비 :listen 근본수정 검증 결과(2026-07-20, 통과)
 
