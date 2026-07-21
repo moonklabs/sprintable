@@ -8,6 +8,26 @@
  * (story #2090과 동일 클래스의 phantom 부작용).
  *
  * event_id가 없는 페이로드(레거시/하위호환 이벤트)는 dedup 없이 통과 — 과거 동작 무회귀.
+ *
+ * ⚠️ 설계 이력(오르테가군 지적, 2026-07-22) — HOC 형태를 두 번 시도했고 둘 다 이
+ * 코드베이스의 react-hooks/refs lint에 막혔다. **`withSseEventIdDedup(handler)`류
+ * 래퍼는 이 파일에 없다 — 의도적으로 뺐다:**
+ *   1차: `withXxx(someRef, handler)` — ref를 함수 경계 너머로 넘기는 것 자체가 막힘.
+ *   2차: tracker를 모듈 스코프 싱글턴으로 옮겨 ref 인자를 없앤 순수 HOC
+ *        `withXxx(handler)` — 그래도 막혔다. 이 lint 규칙은 "ref를 넘기는 것"이 아니라
+ *        **"ref를 내부에서 읽는 클로저를 다른 함수 호출의 인자로 넘기는 것" 자체**를
+ *        보수적으로 금지한다 — 그 함수가 인자를 렌더 중에 동기 호출할지 lint가 정적으로
+ *        증명할 수 없기 때문. use-chat-sse.ts/use-sse-notifications.ts의 모든 handler는
+ *        "최신 콜백 prop을 담아두는 ref"(`onXxxRef.current`, stale-closure 방지 관례)를
+ *        내부에서 읽으므로 이 규칙에 걸린다 — 이 파일의 dedup 로직과 무관하게, **이
+ *        코드베이스에서 handler를 HOC로 감싸는 패턴 자체가 구조적으로 막혀 있다.**
+ *
+ * ⇒ 그래서 `shouldSuppressDuplicateSseEvent(raw)`를 각 handler 본문 **첫 줄**에서 직접
+ * 호출하는 관례로 간다(현재 7곳). 이건 "구조로 막는다"가 아니라 "관례를 지킨다"에 더
+ * 가깝다 — 새 SSE handler를 추가하면서 이 첫 줄을 빠뜨려도 에러 없이 조용히 새는다(story
+ * #2100/#2090류와 같은 성격의 리스크). 진짜 구조적 강제(handler를 ref 없이 latest-callback을
+ * 얻는 다른 패턴으로 재설계하거나, 아예 다른 방식으로 dedup 지점을 강제하는 것)는 이
+ * PR 스코프를 넘는 별건 조사가 필요해 `af6c9628`류 백로그에 같은 클래스로 남겨둔다.
  */
 
 const _MAX_SEEN_IDS = 500; // 무한 증식 방지 — FIFO 경계(재연결 시나리오엔 넉넉한 여유)
@@ -46,20 +66,18 @@ export function extractSseEventId(raw: string): string | null {
   }
 }
 
+/** 앱 전역 SSE 이벤트가 공유하는 단일 seen-id 저장소 — 모듈 스코프(React ref 아님). */
+const _globalSeenIds = createSeenIdTracker();
+
 /**
- * story #2101 — 이미 본 event_id면 true(호출부는 조기 return으로 처리를 건너뛴다).
- *
- * ⚠️ 의도적으로 ref를 감싸는 HOC가 아니라 "핸들러 본문 안에서 호출하는 평범한 함수"로
- * 설계했다 — `withXxx(someRef, handler)` 형태로 ref를 함수 경계 너머로 넘기면
- * react-hooks/refs lint(ref가 렌더 중 읽힐 수 있다고 보수적으로 판단)에 걸린다. 이 함수는
- * 각 handler의 본문 안에서 `shouldSuppressDuplicateSseEvent(xRef.current, raw)`로 호출하는
- * 관례로 쓴다 — handler 본문은 렌더 시점이 아니라 이벤트 도착 시점에만 실행되므로 lint에
- * 안전한, 이 파일의 다른 `xxxRef.current?.(...)` 호출들과 동일한 패턴이다.
+ * 이미 본 event_id면 true(호출부는 조기 return으로 처리를 건너뛴다) — 전역 싱글턴 기준.
+ * 각 SSE handler 본문 **첫 줄**에서 직접 호출하는 것이 관례다(위 설계 이력 참고 — HOC로
+ * 감쌀 수 없다).
  */
-export function shouldSuppressDuplicateSseEvent(tracker: SseSeenIdTracker, raw: string): boolean {
+export function shouldSuppressDuplicateSseEvent(raw: string): boolean {
   const eventId = extractSseEventId(raw);
   if (eventId === null) return false;
-  if (tracker.hasSeen(eventId)) return true;
-  tracker.markSeen(eventId);
+  if (_globalSeenIds.hasSeen(eventId)) return true;
+  _globalSeenIds.markSeen(eventId);
   return false;
 }

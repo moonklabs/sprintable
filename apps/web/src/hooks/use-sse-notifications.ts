@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
-import { createSeenIdTracker, shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
+import { shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
 
 export interface SseEventNotification {
   id?: string;
@@ -49,13 +49,9 @@ export function useSseNotifications({
   useEffect(() => { extraEventNamesRef.current = extraEventNames; }, [extraEventNames]);
   useEffect(() => { onExtraEventRef.current = onExtraEvent; }, [onExtraEvent]);
 
-  // story #2101 — mux 경로·fallback 경로 양쪽에서 동일하게 호출되는 handler 함수 자체를
-  // 감싸므로, 멀티플렉서 on/off와 무관하게 dedup이 항상 적용된다(훅 인스턴스당 1개 tracker).
-  const seenIdTrackerRef = useRef(createSeenIdTracker());
-
   const handleData = (raw: string) => {
     if (!raw || raw.trim() === '') return;
-    if (shouldSuppressDuplicateSseEvent(seenIdTrackerRef.current, raw)) return;
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       const parsed = JSON.parse(raw) as SseEventNotification;
       callbackRef.current?.(parsed);
@@ -64,7 +60,7 @@ export function useSseNotifications({
 
   const handleExtraEvent = (eventName: string, raw: string) => {
     if (!raw || raw.trim() === '') return;
-    if (shouldSuppressDuplicateSseEvent(seenIdTrackerRef.current, raw)) return;
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       onExtraEventRef.current?.(eventName, JSON.parse(raw));
     } catch { /* malformed */ }

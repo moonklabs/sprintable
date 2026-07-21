@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
-import { createSeenIdTracker, shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
+import { shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
 
 // chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
 export interface SendAttachment {
@@ -100,9 +100,6 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   const onConversationReadRef = useRef(onConversationRead);
   const onReconnectRef = useRef(onReconnect);
   const memberIdRef = useRef(currentTeamMemberId);
-  // story #2101 — mux 경로·fallback 경로 양쪽에서 동일하게 호출되는 handler 함수 자체를
-  // 감싸므로, 멀티플렉서 on/off와 무관하게 dedup이 항상 적용된다(훅 인스턴스당 1개 tracker).
-  const seenIdTrackerRef = useRef(createSeenIdTracker());
 
   // useLayoutEffect: DOM commit 후 동기 실행 — useEffect(비동기)보다 먼저 실행되어
   // SSE 이벤트 도달 전에 ref가 항상 최신 콜백을 가리킴 (stale closure 방지)
@@ -115,34 +112,34 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   useLayoutEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
   const handleChatMessage = (raw: string) => {
-    if (shouldSuppressDuplicateSseEvent(seenIdTrackerRef.current, raw)) return;
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       const payload = JSON.parse(raw) as SseChatPayload;
       onNewMessageRef.current?.(normalizeToMessage(payload as unknown as Record<string, unknown>));
     } catch { /* ignore parse errors */ }
   };
   const handleReplyCreated = (raw: string) => {
-    if (shouldSuppressDuplicateSseEvent(seenIdTrackerRef.current, raw)) return;
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       const payload = JSON.parse(raw) as { id?: string; memo_id?: string };
       if (payload.memo_id) onReplyCreatedRef.current?.(payload.memo_id);
     } catch { /* ignore parse errors */ }
   };
   const handleConversationMessage = (raw: string) => {
-    if (shouldSuppressDuplicateSseEvent(seenIdTrackerRef.current, raw)) return;
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       onConversationMessageRef.current?.(JSON.parse(raw) as Record<string, unknown>);
     } catch { /* ignore parse errors */ }
   };
   const handleWorking = (raw: string) => {
-    if (shouldSuppressDuplicateSseEvent(seenIdTrackerRef.current, raw)) return;
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       const payload = JSON.parse(raw) as SseWorkingPayload;
       if (payload.conversation_id) onWorkingRef.current?.(payload);
     } catch { /* ignore parse errors */ }
   };
   const handleConversationRead = (raw: string) => {
-    if (shouldSuppressDuplicateSseEvent(seenIdTrackerRef.current, raw)) return;
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       const payload = JSON.parse(raw) as SseConversationReadPayload;
       if (payload.conversation_id) onConversationReadRef.current?.(payload);
