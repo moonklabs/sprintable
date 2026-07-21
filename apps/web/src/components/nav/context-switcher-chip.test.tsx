@@ -49,7 +49,15 @@ beforeEach(() => {
   root = createRoot(container);
   pushMock.mockClear();
   refreshMock.mockClear();
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+  // story #2093 후속 — 시트가 열리면 useUnifiedSwitcher가 현재 org도 X-Org-Id로 재조회한다
+  // (JWT 스코프 stale 방지). 이 스위트는 URL org(org-1)=계정 상태 org라 재조회 결과가 그대로
+  // PROJECTS와 같아야 한다 — 아니면 재조회가 목록을 빈 배열로 덮어써 이후 단언이 깨진다.
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url === '/api/projects') {
+      return { ok: true, json: async () => ({ data: PROJECTS.map((p) => ({ id: p.projectId, name: p.projectName })) }) };
+    }
+    return { ok: true, json: async () => ({ data: { ok: true } }) };
+  }));
 });
 
 afterEach(async () => {
