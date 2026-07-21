@@ -67,6 +67,11 @@ substitutions:
   # maxScale=3(상한 240·짧은 페이지 요청용 sizing) vs realtime concurrency=80·maxScale=8
   # (상한 640·SSE용 sizing) — SSE를 frontend에 오래 붙들면 그 작은 상한을 페이지 요청과
   # 다투게 만드는 새 병목이라, 값 인상은 브라우저→realtime 직결 설계(B) 이후로 미룸).
+  # ⚠️ 현행값 고정(2026-07-22) — 이 값이 옳다는 뜻이 아니다. 브라우저 SSE가 `/api/
+  # event-stream`(=이 컨테이너)을 타고 있어서 이 60초가 67.5초 주기 절단의 원인이다
+  # (story #2101). SSE가 realtime에 직결하도록 정리되면 이 값은 원래 목적(짧은 페이지
+  # 요청) 기준으로 재검토할 것 — "왜 60이지? 짧은데?" 하고 무심코 올리면 240 슬롯을
+  # 페이지 요청과 SSE가 다투게 만드는 방향이라 근거 없이 만지지 말 것.
   _FRONTEND_TIMEOUT: '60'
 
   # E-ARCH 1단계 durable화 마지막 조각(story #2078, 2026-07-21 PO 손 플립 확認 후): api
