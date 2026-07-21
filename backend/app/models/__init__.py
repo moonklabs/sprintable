@@ -15,6 +15,7 @@ from app.models.device_installation import DeviceInstallation, DeviceProofChalle
 from app.models.entity_slug_history import EntitySlugHistory
 from app.models.embedding import Embedding
 from app.models.evidence import Evidence
+from app.models.event_outbox import EventOutbox
 from app.models.gate import Gate
 from app.models.github_installation import GithubInstallation, GithubInstallNonce, GithubWebhookDelivery
 from app.models.hitl import HitlPolicy, HitlRequest
@@ -103,6 +104,7 @@ __all__ = [
     "BridgeChannelMapping",
     "BridgeUserMapping",
     "Embedding",
+    "EventOutbox",
     "Gate",
     "GithubInstallation",
     "GithubInstallNonce",

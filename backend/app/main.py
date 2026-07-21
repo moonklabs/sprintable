@@ -56,6 +56,15 @@ async def lifespan(app: FastAPI):
         from app.services.event_broker import redis_shadow_consume_loop
 
         redis_shadow_task = asyncio.create_task(redis_shadow_consume_loop())
+    # E-ARCH S3(story #2078) 3a단계: outbox dispatcher는 event_broker_outbox_enabled(default
+    # False)일 때만 task 생성 — 꺼져 있으면 event_outbox row 자체가 안 쌓이니(OutboxEventBroker
+    # 가 insert를 스킵) 폴링할 게 없다. redis_shadow_task와 별개 게이트(outbox insert가 켜졌다고
+    # 즉시 dual-publish shadow까지 켜지는 건 아니다 — 두 플래그는 독립적으로 rollout 가능).
+    outbox_dispatcher_task = None
+    if settings.event_broker_outbox_enabled:
+        from app.services.event_broker import outbox_dispatcher_loop
+
+        outbox_dispatcher_task = asyncio.create_task(outbox_dispatcher_loop())
     try:
         yield
     finally:
@@ -65,6 +74,8 @@ async def lifespan(app: FastAPI):
             l2_task.cancel()
         if redis_shadow_task is not None:
             redis_shadow_task.cancel()
+        if outbox_dispatcher_task is not None:
+            outbox_dispatcher_task.cancel()
         try:
             if task is not None:
                 try:
@@ -79,6 +90,11 @@ async def lifespan(app: FastAPI):
             if redis_shadow_task is not None:
                 try:
                     await redis_shadow_task
+                except asyncio.CancelledError:
+                    pass
+            if outbox_dispatcher_task is not None:
+                try:
+                    await outbox_dispatcher_task
                 except asyncio.CancelledError:
                     pass
         finally:
