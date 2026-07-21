@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
 export interface SseEventNotification {
   id?: string;
@@ -30,7 +31,9 @@ interface UseSseNotificationsOptions {
   onExtraEvent?: (eventName: string, data: unknown) => void;
 }
 
-// use-realtime-memos.ts와 동일한 backoff 전략
+const NOTIFICATION_EVENT_NAMES = ['event_notification', 'notification', 'new_notification'];
+
+// use-realtime-memos.ts와 동일한 backoff 전략(story #2078 이전 — 독립 연결 폴백 경로에서만 씀).
 const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000];
 
 export function useSseNotifications({
@@ -45,8 +48,45 @@ export function useSseNotifications({
   useEffect(() => { extraEventNamesRef.current = extraEventNames; }, [extraEventNames]);
   useEffect(() => { onExtraEventRef.current = onExtraEvent; }, [onExtraEvent]);
 
+  const handleData = (raw: string) => {
+    if (!raw || raw.trim() === '') return;
+    try {
+      const parsed = JSON.parse(raw) as SseEventNotification;
+      callbackRef.current?.(parsed);
+    } catch { /* heartbeat or malformed */ }
+  };
+
+  const handleExtraEvent = (eventName: string, raw: string) => {
+    if (!raw || raw.trim() === '') return;
+    try {
+      onExtraEventRef.current?.(eventName, JSON.parse(raw));
+    } catch { /* malformed */ }
+  };
+
+  // story #2078 — 멀티플렉서(RealtimeProvider, 피처플래그 ON)가 있으면 그 공유 커넥션에
+  // 이름별로만 구독한다. extraEventNames는 렌더마다 배열 identity가 달라질 수 있어(콜백
+  // 관례상 인라인 배열을 넘기는 호출부가 있다) 이름 목록 자체를 문자열로 join해 의존성을
+  // 안정화한다 — 매 렌더 재구독/해제를 반복하지 않기 위함.
+  const mux = useSseMultiplexerContext();
+  const extraEventNamesKey = (extraEventNames ?? []).join(',');
+
   useEffect(() => {
-    if (!enabled || typeof EventSource === 'undefined') return;
+    if (!mux || !enabled) return;
+    const unsubs = NOTIFICATION_EVENT_NAMES.map((name) => mux.subscribe(name, handleData));
+    const unsubMsg = mux.subscribeMessage(handleData);
+    const extraUnsubs = (extraEventNamesRef.current ?? []).map((name) =>
+      mux.subscribe(name, (raw) => handleExtraEvent(name, raw)),
+    );
+    return () => {
+      for (const u of unsubs) u();
+      unsubMsg();
+      for (const u of extraUnsubs) u();
+    };
+  }, [mux, enabled, extraEventNamesKey]);
+
+  // 독립 연결 폴백(플래그 OFF 또는 Provider 밖) — story #2078 이전과 완전히 동일한 코드.
+  useEffect(() => {
+    if (mux || !enabled || typeof EventSource === 'undefined') return;
 
     let es: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -54,21 +94,14 @@ export function useSseNotifications({
     let reconnectAttempts = 0;
     let lastEventId: string | null = null;
 
-    const handleData = (raw: string, eventId?: string) => {
+    const handleDataStandalone = (raw: string, eventId?: string) => {
       if (eventId) lastEventId = eventId;
-      if (!raw || raw.trim() === '') return;
-      try {
-        const parsed = JSON.parse(raw) as SseEventNotification;
-        callbackRef.current?.(parsed);
-      } catch { /* heartbeat or malformed */ }
+      handleData(raw);
     };
 
-    const handleExtraEvent = (eventName: string, raw: string, eventId?: string) => {
+    const handleExtraEventStandalone = (eventName: string, raw: string, eventId?: string) => {
       if (eventId) lastEventId = eventId;
-      if (!raw || raw.trim() === '') return;
-      try {
-        onExtraEventRef.current?.(eventName, JSON.parse(raw));
-      } catch { /* malformed */ }
+      handleExtraEvent(eventName, raw);
     };
 
     const connect = () => {
@@ -83,19 +116,19 @@ export function useSseNotifications({
 
       es.onopen = () => { reconnectAttempts = 0; };
 
-      es.onmessage = (e: MessageEvent<string>) => handleData(e.data, e.lastEventId || undefined);
+      es.onmessage = (e: MessageEvent<string>) => handleDataStandalone(e.data, e.lastEventId || undefined);
 
-      for (const eventName of ['event_notification', 'notification', 'new_notification']) {
+      for (const eventName of NOTIFICATION_EVENT_NAMES) {
         es.addEventListener(eventName, (e: Event) => {
           const me = e as MessageEvent<string>;
-          handleData(me.data, me.lastEventId || undefined);
+          handleDataStandalone(me.data, me.lastEventId || undefined);
         });
       }
 
       for (const eventName of extraEventNamesRef.current ?? []) {
         es.addEventListener(eventName, (e: Event) => {
           const me = e as MessageEvent<string>;
-          handleExtraEvent(eventName, me.data, me.lastEventId || undefined);
+          handleExtraEventStandalone(eventName, me.data, me.lastEventId || undefined);
         });
       }
 
@@ -120,5 +153,5 @@ export function useSseNotifications({
       if (retryTimer) clearTimeout(retryTimer);
       es?.close();
     };
-  }, [enabled]);
+  }, [mux, enabled]);
 }

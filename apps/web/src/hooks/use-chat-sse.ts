@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
 // chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
 export interface SendAttachment {
@@ -109,8 +110,55 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   useLayoutEffect(() => { onReconnectRef.current = onReconnect; }, [onReconnect]);
   useLayoutEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
+  const handleChatMessage = (raw: string) => {
+    try {
+      const payload = JSON.parse(raw) as SseChatPayload;
+      onNewMessageRef.current?.(normalizeToMessage(payload as unknown as Record<string, unknown>));
+    } catch { /* ignore parse errors */ }
+  };
+  const handleReplyCreated = (raw: string) => {
+    try {
+      const payload = JSON.parse(raw) as { id?: string; memo_id?: string };
+      if (payload.memo_id) onReplyCreatedRef.current?.(payload.memo_id);
+    } catch { /* ignore parse errors */ }
+  };
+  const handleConversationMessage = (raw: string) => {
+    try {
+      onConversationMessageRef.current?.(JSON.parse(raw) as Record<string, unknown>);
+    } catch { /* ignore parse errors */ }
+  };
+  const handleWorking = (raw: string) => {
+    try {
+      const payload = JSON.parse(raw) as SseWorkingPayload;
+      if (payload.conversation_id) onWorkingRef.current?.(payload);
+    } catch { /* ignore parse errors */ }
+  };
+  const handleConversationRead = (raw: string) => {
+    try {
+      const payload = JSON.parse(raw) as SseConversationReadPayload;
+      if (payload.conversation_id) onConversationReadRef.current?.(payload);
+    } catch { /* ignore parse errors */ }
+  };
+
+  // story #2078 — 멀티플렉서(플래그 ON)가 있으면 공유 커넥션에 이름별 구독만 얹는다.
+  const mux = useSseMultiplexerContext();
+
   useEffect(() => {
-    if (typeof EventSource === 'undefined') return;
+    if (!mux) return;
+    const unsubs = [
+      mux.subscribe('chat:message', handleChatMessage),
+      mux.subscribe('reply_created', handleReplyCreated),
+      mux.subscribe('conversation.message_created', handleConversationMessage),
+      mux.subscribe('conversation.working', handleWorking),
+      mux.subscribe('conversation.read', handleConversationRead),
+      mux.subscribeReconnect(() => onReconnectRef.current?.()),
+    ];
+    return () => { for (const u of unsubs) u(); };
+  }, [mux]);
+
+  // 독립 연결 폴백(플래그 OFF 또는 Provider 밖) — story #2078 이전과 완전히 동일한 코드.
+  useEffect(() => {
+    if (mux || typeof EventSource === 'undefined') return;
 
     function connect() {
       sourceRef.current?.close();
@@ -148,19 +196,13 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
       // chat:message — backend _to_chat_message format: { id, thread_id, sender: { id }, ... }
       source.addEventListener('chat:message', (e: MessageEvent) => {
         if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
-        try {
-          const payload = JSON.parse(e.data as string) as SseChatPayload;
-          onNewMessageRef.current?.(normalizeToMessage(payload as unknown as Record<string, unknown>));
-        } catch { /* ignore parse errors */ }
+        handleChatMessage(e.data as string);
       });
 
       // reply_created — from memos.py publish_event; use as refetch trigger
       source.addEventListener('reply_created', (e: MessageEvent) => {
         if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
-        try {
-          const payload = JSON.parse(e.data as string) as { id?: string; memo_id?: string };
-          if (payload.memo_id) onReplyCreatedRef.current?.(payload.memo_id);
-        } catch { /* ignore parse errors */ }
+        handleReplyCreated(e.data as string);
       });
 
       // conversation.message_created — realtime update for conversation list
@@ -168,32 +210,22 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
       // 외부 consumer 하위호환은 server 레벨에서 처리됨 — 프론트가 둘 다 받으면 2회 발화됨.
       source.addEventListener('conversation.message_created', (e: MessageEvent) => {
         if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
-        try {
-          const payload = JSON.parse(e.data as string) as Record<string, unknown>;
-          onConversationMessageRef.current?.(payload);
-        } catch { /* ignore parse errors */ }
+        handleConversationMessage(e.data as string);
       });
 
       // R2(da9d1781): conversation.working — typing 인디케이터 1.5s 폴(/conversations/{id}/working) 대체.
       // payload 가 working 목록을 실어 보내므로 refetch 없이 직접 갱신.
       source.addEventListener('conversation.working', (e: MessageEvent) => {
         if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
-        try {
-          const payload = JSON.parse(e.data as string) as SseWorkingPayload;
-          if (payload.conversation_id) onWorkingRef.current?.(payload);
-        } catch { /* ignore parse errors */ }
+        handleWorking(e.data as string);
       });
 
       // story #1977: conversation.read — #1976이 본인 타 커넥션에만 전파(read-receipt 아님).
       // 다른 탭/기기에서 mark-read 하면 이 탭의 리스트 배지·GNB 총합을 서버 truth로 자가정정.
       source.addEventListener('conversation.read', (e: MessageEvent) => {
         if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
-        try {
-          const payload = JSON.parse(e.data as string) as SseConversationReadPayload;
-          if (payload.conversation_id) onConversationReadRef.current?.(payload);
-        } catch { /* ignore parse errors */ }
+        handleConversationRead(e.data as string);
       });
-
     }
 
     connect();
@@ -203,7 +235,9 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
       sourceRef.current?.close();
       sourceRef.current = null;
     };
-  }, []);
+  }, [mux]);
 
-  return { connected };
+  // mux 경로에서는 로컬 connected state를 동기화하지 않고(setState-in-effect 회피) 멀티플렉서
+  // 자신의 connected를 그대로 노출한다 — 이미 반응형(context 값 변경 시 이 훅도 리렌더).
+  return { connected: mux ? mux.connected : connected };
 }
