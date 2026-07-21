@@ -110,7 +110,110 @@ class DualPublishEventBroker:
             fire_and_forget(_redis_publish(target, target_id, event_type, data, event_id))
 
 
-event_broker: EventBroker = DualPublishEventBroker()
+async def _resolve_org_id(target: Literal["org", "agent"], target_id: str, data: dict) -> uuid.UUID | None:
+    """outbox row의 org_id(NOT NULL) 확보 — 우선순위: (1) payload에 이미 있으면 그대로
+    (org-target 대부분이 여기 해당) (2) agent-target은 payload에 org_id가 없는 경우가 많아
+    member 조회 — #2075(story #2075 owner SSE parity)에서 확立된 대로 member_id 축이
+    `team_members.id`뿐 아니라 grant-only 휴먼은 `org_members.id`로도 해소되므로 UNION 조회.
+    둘 다 실패하면 None(호출부가 skip+경고 로그, outbox insert는 best-effort라 예외 전파 금지)."""
+    if target == "org":
+        try:
+            return uuid.UUID(target_id)
+        except ValueError:
+            pass
+
+    raw = data.get("org_id")
+    if raw:
+        try:
+            return uuid.UUID(str(raw))
+        except ValueError:
+            pass
+
+    try:
+        from sqlalchemy import text as _sa_text
+
+        from app.core.database import async_session_factory
+
+        async with async_session_factory() as session:
+            row = (
+                await session.execute(
+                    _sa_text(
+                        "SELECT org_id FROM team_members WHERE id = :tid "
+                        "UNION SELECT org_id FROM org_members WHERE id = :tid LIMIT 1"
+                    ),
+                    {"tid": target_id},
+                )
+            ).first()
+            return row[0] if row else None
+    except Exception as exc:
+        logger.warning("event_broker org_id resolve failed target_id=%s: %s", target_id, exc)
+        return None
+
+
+async def _insert_outbox_row(
+    target: Literal["org", "agent"], target_id: str, event_type: str, data: dict
+) -> None:
+    """event_outbox row insert — best-effort(별도 짧은 트랜잭션, caller의 commit과 atomic 아님).
+
+    3a단계 스코프: 실패해도 예외를 삼킨다(경고 로그만) — outbox가 아직 dispatch의 유일 경로가
+    아니라(PG NOTIFY가 여전히 authoritative) insert 실패가 실시간 전달 자체를 막으면 안 된다.
+    """
+    org_id = await _resolve_org_id(target, target_id, data)
+    if org_id is None:
+        logger.warning(
+            "event_broker outbox insert skipped (org_id unresolved) target=%s target_id=%s event_type=%s",
+            target, target_id, event_type,
+        )
+        return
+
+    try:
+        from app.core.database import async_session_factory
+        from app.models.event_outbox import EventOutbox
+
+        async with async_session_factory() as session:
+            session.add(
+                EventOutbox(
+                    org_id=org_id,
+                    target=target,
+                    target_id=uuid.UUID(target_id),
+                    event_type=event_type,
+                    payload=data,
+                )
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning(
+            "event_broker outbox insert failed target=%s target_id=%s: %s", target, target_id, exc
+        )
+
+
+class OutboxEventBroker:
+    """E-ARCH S3 3a단계 구현체 — `DualPublishEventBroker`(PG NOTIFY+Redis shadow) 위에
+    `event_outbox` row insert만 추가한다. 호출 타이밍은 3a에서 바뀌지 않는다(여전히 caller
+    commit 이후) — 3b에서 콜사이트가 db 세션을 넘기게 되면 이 클래스의 publish 시그니처를
+    확장해 진짜 atomic insert로 바꿀 것(지금은 조기 확장 금지).
+
+    `event_broker_outbox_enabled`(default False)로 게이트 — 꺼져 있으면 inner(2단계) 동작만
+    그대로, insert 자체가 아예 시도되지 않는다(무회귀).
+    """
+
+    def __init__(self, inner: EventBroker | None = None):
+        self._inner = inner or DualPublishEventBroker()
+
+    async def publish(
+        self, target: Literal["org", "agent"], target_id: str, event_type: str, data: dict
+    ) -> None:
+        await self._inner.publish(target, target_id, event_type, data)
+
+        from app.core.config import settings
+
+        if settings.event_broker_outbox_enabled:
+            await _insert_outbox_row(target, target_id, event_type, data)
+
+
+# events.py 콜사이트가 참조하는 싱글턴 — OutboxEventBroker가 DualPublishEventBroker(2단계)를
+# 감싸는 형태라 콜사이트 변경 없이 3a가 얹힌다(event_broker_outbox_enabled=False면 완전 무회귀).
+event_broker: EventBroker = OutboxEventBroker()
 
 
 # ─── Shadow-consume 비교 (realtime gateway 전용) ──────────────────────────────
@@ -187,3 +290,88 @@ async def redis_shadow_consume_loop() -> None:
                     await pubsub.close()
                 except Exception:
                     pass
+
+
+# ─── Outbox dispatcher (realtime gateway 전용, event_broker_outbox_enabled 게이트) ────────
+
+_OUTBOX_BATCH_SIZE = 50
+_OUTBOX_POLL_INTERVAL = 1.0
+
+
+async def outbox_dispatcher_loop() -> None:
+    """`event_outbox`의 미발행 row를 폴링해 Redis로 발행 — 3a단계 dispatcher.
+
+    `FOR UPDATE SKIP LOCKED`로 멀티인스턴스 동시 폴링 시 중복발행을 방지한다(표준 outbox
+    패턴). listen_loop()/redis_shadow_consume_loop()와 동형 에러 backoff(1s→2s→...→30s) —
+    정상 시엔 고정 폴링 간격(`_OUTBOX_POLL_INTERVAL`)으로 반복한다.
+
+    ⚠️ `event_broker_redis_dual_publish_enabled`와 `event_broker_outbox_enabled`를 동시에
+    켜면 같은 논리적 이벤트가 Redis에 두 번(즉시 shadow-publish + 나중 outbox dispatch) 발행될
+    수 있다 — 서로 다른 `_broker_event_id`를 쓰기 때문에(즉시 경로는 uuid4, outbox 경로는
+    row.id) dedup도 안 된다. 의도된 설계다: outbox는 dual-publish를 **대체**하는 것이지
+    병행하는 게 아니다(오르테가군 시퀀싱 — dual-publish→shadow-consume→outbox 전환→LISTEN
+    제거는 순차, 동시 아님). 두 플래그를 동시에 켜는 것은 3b 전환 실험 용도가 아니면 피할 것.
+    """
+    import json
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from app.core.config import settings
+    from app.core.database import async_session_factory
+    from app.models.event_outbox import EventOutbox
+
+    if not settings.redis_url:
+        logger.warning("event_broker outbox dispatcher skipped: redis_url not configured")
+        return
+
+    delay = 1.0
+    logger.info("event_broker outbox dispatcher starting")
+
+    while True:
+        try:
+            async with async_session_factory() as session:
+                rows = (
+                    await session.execute(
+                        select(EventOutbox)
+                        .where(EventOutbox.published_at.is_(None))
+                        .order_by(EventOutbox.id)
+                        .limit(_OUTBOX_BATCH_SIZE)
+                        .with_for_update(skip_locked=True)
+                    )
+                ).scalars().all()
+
+                if not rows:
+                    await session.commit()
+                    await asyncio.sleep(_OUTBOX_POLL_INTERVAL)
+                    continue
+
+                client = _get_redis_client()
+                now = datetime.now(timezone.utc)
+                for row in rows:
+                    payload = _slim_org_payload(row.payload) if row.target == "org" else dict(row.payload)
+                    payload["event_type"] = row.event_type
+                    payload["_broker_event_id"] = str(row.id)
+                    try:
+                        await client.publish(
+                            _redis_channel(row.target, str(row.target_id)),
+                            json.dumps(payload, default=str),
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "event_broker outbox dispatch publish failed id=%s: %s", row.id, exc
+                        )
+                        continue  # published_at 미갱신 — 다음 폴링에서 재시도(at-least-once)
+                    row.published_at = now
+
+                await session.commit()
+            delay = 1.0
+        except asyncio.CancelledError:
+            logger.info("event_broker outbox dispatcher cancelled — shutting down")
+            break
+        except Exception as exc:
+            logger.warning(
+                "event_broker outbox dispatcher error: %s — retrying in %.1fs", exc, delay
+            )
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 30)

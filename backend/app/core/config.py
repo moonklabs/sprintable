@@ -97,6 +97,13 @@ class Settings(BaseSettings):
     event_broker_redis_dual_publish_enabled: bool = False
     redis_url: str | None = None  # Memorystore 연결 문자열(공유 — event_broker + RedisRateLimiter). flag on인데 None이면 경고 로그만(fail-safe).
 
+    # E-ARCH S3(story #2078) 3a단계: `event_outbox` row insert를 EventBroker.publish()에 추가로
+    # 얹는다(호출 타이밍은 안 바뀜 — 여전히 caller commit 이후, 별도 짧은 트랜잭션이라 아직 진짜
+    # atomic outbox는 아님). default=False(무회귀) — 켜지기 전엔 OutboxEventBroker가 inner
+    # (DualPublishEventBroker) 동작만 그대로 위임한다. outbox_dispatcher_loop 도 이 플래그로
+    # 게이트(꺼져 있으면 realtime gateway에서 폴링 task 자체를 안 만든다).
+    event_broker_outbox_enabled: bool = False
+
     # E-L2 휴리스틱 트리거 워커. default-off — 명시 활성화 전엔 lifespan task 미생성(무동작).
     # advisory_lock=on이면 멀티인스턴스 중 pg_try_advisory_lock holder 1개만 poll/evaluate.
     l2_trigger_enabled: bool = False
