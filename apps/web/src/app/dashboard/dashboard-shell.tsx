@@ -52,6 +52,12 @@ export function useDashboardContext() {
 }
 
 interface DashboardShellProps extends DashboardContext {
+  // story #2093 — proxy.ts가 `[ws]/[proj]` 경로를 서버측에서 resolve한 결과(x-resolved-*
+  // 헤더 유래). 계정 상태(orgId/projectId, 위 DashboardContext 필드)는 "다음에 어디로 갈지"의
+  // 기본값이고, 이 둘은 "지금 이 URL이 실제로 가리키는 것"이다 — 화면 표시(top-bar 칩 등)는
+  // 이 값을 우선한다. 경로 세그먼트가 없는 flat 라우트(/glance 등)에선 undefined.
+  pathOrgId?: string;
+  pathProjectId?: string;
   children: React.ReactNode;
 }
 
@@ -143,7 +149,11 @@ function ScrollShell({
  * `useDashboardContext().projectId` 소비부가 이 값으로 자동 URL-aware 가 된다. fetch 인터셉터가
  * 같은 값을 `X-Project-Id` 헤더로 실어 mutation 을 탭의 URL 프로젝트에 바인딩(BE 가 멤버십 검증).
  */
-function useProjectSsot(serverProjectId: string | undefined, memberships: DashboardProjectOption[]): string | undefined {
+function useProjectSsot(
+  serverProjectId: string | undefined,
+  memberships: DashboardProjectOption[],
+  pathProjectId: string | undefined,
+): string | undefined {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -160,7 +170,9 @@ function useProjectSsot(serverProjectId: string | undefined, memberships: Dashbo
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => { startTransition(() => setHydrated(true)); }, []);
 
-  const effectiveProjectId = resolveEffectiveProjectId(urlProjectId, serverProjectId, accessibleIds, hydrated);
+  // story #2093 — pathProjectId(경로 `[ws]/[proj]` 서버측 resolve 결과)가 최우선. `?p=`는
+  // 경로 세그먼트가 없는 flat 라우트에서만 실질적인 SSOT로 남는다(project-context-client.ts 참고).
+  const effectiveProjectId = resolveEffectiveProjectId(urlProjectId, serverProjectId, accessibleIds, hydrated, pathProjectId);
 
   // ref 동기화 + 인터셉터 설치를 **렌더 단계**에서 — effect(자식→부모 순)에 두면 부모(DashboardShell)
   // 설치 effect 가 자식(app-sidebar·use-team-presence·kanban-board) 초기 fetch *후* 실행돼 첫 로드
@@ -193,14 +205,19 @@ export function DashboardShell({
   role,
   projectMemberships,
   orgMemberships,
+  pathOrgId,
+  pathProjectId,
   children,
 }: DashboardShellProps) {
   const pathname = usePathname();
   const showTopBar = !pathname.startsWith('/settings');
   const tabletCentered = isTabRootPage(pathname);
 
-  // R2: URL `?p=` = 탭별 SSOT. 서버 prop 대신 effective 를 컨텍스트/사이드바에 공급.
-  const effectiveProjectId = useProjectSsot(projectId, projectMemberships);
+  // story #2093 — 경로(`[ws]/[proj]`) resolve 결과가 최우선(화면이 실제로 그리는 것의 정본).
+  // 계정 상태(orgId, server prop)는 flat 라우트(경로에 org/project가 없는 화면)에서만 쓰인다.
+  const effectiveOrgId = pathOrgId ?? orgId;
+  // R2: URL `?p=` = flat 라우트의 탭별 SSOT. pathProjectId(경로 resolve)가 있으면 그게 최우선.
+  const effectiveProjectId = useProjectSsot(projectId, projectMemberships, pathProjectId);
   const effectiveProjectName = projectMemberships.find((m) => m.projectId === effectiveProjectId)?.projectName ?? projectName;
   // currentProjectSlug 는 server prop(me.project_id) 기준 — effectiveProjectId 가 탭 SSOT로
   // 갈렸으면 살짝 stale 할 수 있으나, "문서로 가기" 바로가기 링크 용도라 무해(틀려도 미들웨어
@@ -214,7 +231,7 @@ export function DashboardShell({
   const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
 
   return (
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, projectMemberships, orgMemberships }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, projectMemberships, orgMemberships }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
@@ -223,7 +240,7 @@ export function DashboardShell({
               projectId={effectiveProjectId}
               currentProjectSlug={currentProjectSlug}
               projectMemberships={projectMemberships}
-              orgId={orgId}
+              orgId={effectiveOrgId}
               orgMemberships={orgMemberships}
               userName={userName}
               chatUnreadTotal={chatUnreadTotal}
@@ -232,7 +249,7 @@ export function DashboardShell({
               showTopBar={showTopBar}
               tabletCentered={tabletCentered}
               chatUnreadTotal={chatUnreadTotal}
-              orgId={orgId}
+              orgId={effectiveOrgId}
               orgMemberships={orgMemberships}
               projectId={effectiveProjectId}
               projectMemberships={projectMemberships}

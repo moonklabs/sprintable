@@ -45,3 +45,33 @@ describe('resolveEffectiveProjectId (hydrated 게이팅 — SSR/첫 CSR 렌더 d
     expect(resolveEffectiveProjectId(null, 'server-id', accessible, true)).toBe('server-id');
   });
 });
+
+describe('resolveEffectiveProjectId — pathProjectId 최우선 (story #2093, 직접 URL 진입 시 top-bar 칩이 계정 상태의 다른 프로젝트를 그리던 회귀)', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+  afterEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it('직접 URL 진입(?p= 없음) — pathProjectId가 계정 상태(serverProjectId)보다 우선한다', () => {
+    const accessible = new Set(['server-id']); // 계정 멤버십엔 path-project가 없을 수 있다(cross-org)
+    expect(resolveEffectiveProjectId(null, 'server-id', accessible, true, 'path-id')).toBe('path-id');
+  });
+
+  it('pathProjectId는 accessibleIds 체크를 받지 않는다(proxy.ts가 이미 서버측에서 resolve로 검증한 값)', () => {
+    const accessible = new Set(['server-id']); // path-id가 이 집합에 없어도(cross-org) 채택돼야 한다
+    expect(resolveEffectiveProjectId(null, 'server-id', accessible, false, 'path-id')).toBe('path-id');
+  });
+
+  it('pathProjectId가 ?p=/sessionStorage보다도 우선한다(경로가 유일한 정본)', () => {
+    window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, 'stored-id');
+    const accessible = new Set(['stored-id', 'url-id', 'path-id']);
+    expect(resolveEffectiveProjectId('url-id', 'server-id', accessible, true, 'path-id')).toBe('path-id');
+  });
+
+  it('pathProjectId가 없는(flat 라우트) 경우엔 기존 ?p= 우선순위 체인이 그대로 동작한다', () => {
+    const accessible = new Set(['url-id', 'server-id']);
+    expect(resolveEffectiveProjectId('url-id', 'server-id', accessible, true, undefined)).toBe('url-id');
+  });
+});
