@@ -43,6 +43,17 @@ def publish_event(org_id: str, event_type: str, data: dict, _from_listener: bool
     """다른 라우터에서 이벤트를 발행할 때 호출.
 
     _from_listener=True: LISTEN 수신기에서 호출 시 pg_notify 재발행 금지 (무한 루프 차단).
+
+    ⚠️story #2059/#2067(까심군 라이브 실측 확定, 2026-07-21): 이 함수가 쓰는 `_subscribers[org_id]`
+    레지스트리에 `.add()`하는 코드가 저장소 전체 0곳이다 — 즉 **이 org-level fanout은 실제로
+    아무 브라우저/에이전트 연결에도 닿지 않는 영구 죽은 코드다**(pg_notify 크로스 인스턴스 릴레이도
+    결국 이 함수를 다시 부를 뿐이라 동일하게 죽어 있다). FE/에이전트가 실제로 붙는 경로는
+    `_agent_connections[member_id]`(`_push_to_agent()`로만 채워짐)뿐이다. 이 함수를 호출하는 것만으로
+    "실시간 전달했다"고 가정하지 마라 — 실시간 SSE 전달이 실제로 필요하면 `_push_to_agent()`를
+    직접 호출해야 한다(선례: `trust_pipeline._maybe_emit`·`story_status_events.emit_story_status_changed`
+    — `project_accessible_member_ids()`로 수신자 해소 후 개별 push). 이 함수 자체를 항상-fanout으로
+    바꾸지 않은 이유: 호출부마다 올바른 수신자 스코프가 다르다(project-scoped story/goal 이벤트 vs
+    conversation 참가자 vs org-wide presence) — 제네릭하게 못 바꾸고 호출부별 개별 판단이 필요하다.
     """
     payload = {"type": event_type, **data}
     dead: list[asyncio.Queue] = []
