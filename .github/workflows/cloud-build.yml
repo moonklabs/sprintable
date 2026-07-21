@@ -65,7 +65,14 @@ jobs:
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
-            echo "backend_min_instances=1" >> "$GITHUB_OUTPUT"
+            # ⚠️ minScale 1→3 (#2074 응급대응, 오르테가군 PO 2026-07-21): gcloud 로그 실측 —
+            # "The request was aborted because there was no available instance"(04:38 다수)가
+            # 채팅 5초 지연·목표화면 Loading·촬영 막힘의 원인이었다. minScale 1은 콜드스타트
+            # 대기를 만들어 트래픽이 몰리면 인스턴스 부족으로 요청이 abort된다. 손으로
+            # gcloud run services update한 값은 다음 자동배포(이 워크플로우)가 덮어써
+            # 원복되므로(어제 교훈 — "손 값은 배포가 덮는다") 여기 durable로 못박는다.
+            # 근본(커넥션 풀링/아키텍처 재검토)은 별도 진행 중 — 이건 0단계 응급 봉합.
+            echo "backend_min_instances=3" >> "$GITHUB_OUTPUT"
             # ⚠️ maxScale 8 (PO rev 01256-w9r right-size·durable): dev 429 근본 = Cloud Run "no available
             # instance"(maxScale 1 이 fleet 폴링 압도·3h 1345건). per-instance = pool(3/1=4·#1773) +
             # pg_pubsub raw 1 = 5. rollout(old+new 2×): 2×8×5=80 ≤ 100(PO 실측 dev DB max_conn). 이전
