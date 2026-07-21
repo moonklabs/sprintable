@@ -1,0 +1,334 @@
+# ⓒ 라이브 env 드리프트 가드 — 카테고리 C(순수 수동) 허용목록
+#
+# 설계 doc: env-drift-guard-design(26c673c2-40be-4fd7-98eb-47e562513ab9)
+#
+# 이 파일의 역할: `gcloud run services list`로 동적 열거된 라이브 Cloud Run 서비스의 env var가
+# IaC(cloudbuild.yaml/.github/workflows/cloud-build.yml)나 레거시 부트스트랩 스크립트
+# (deploy_backend.sh/deploy_frontend.sh/deploy_mcp_*.sh)의 어느 쪽에도 선언돼 있지 않을 때,
+# "누락"이 아니라 "알고 있고 승인된 수동 값"임을 명시하는 유일한 인정 경로.
+# 여기 없는 라이브 키는 가드가 FAIL로 잡는다 — 실렵된 게 아니라 "파이프라인에 편입 필요"
+# 아니면 "여기 등재 필요" 둘 중 하나로 처리한다(오탐 없음이 설계 전제).
+#
+# 2026-07-22 기준 실측(gcloud run services describe 전 서비스) 1:1 대조로 작성 — 기억이 아닌
+# 라이브 상태 그대로. 값 자체는 여기 안 옮긴다(키 이름·서비스·사유만 — 시크릿이든 아니든).
+
+# 이 guard의 스코프 밖 서비스 — 별도 이유를 명시해 "빠뜨린 게 아니라 제외했다"를 남긴다.
+excluded_services:
+  - service: sprintable-admin-web
+    reason: >-
+      IaC가 별도 repo(sprintable-admin, private)에 있음 — 이 repo(sprintable)의
+      cloudbuild.yaml/deploy_*.sh가 관장하지 않는 서비스. 그 repo에 별도 가드 필요(추후).
+  - service: sprintable-admin-web-dev
+    reason: 위와 동일 — sprintable-admin repo 소관.
+  - service: sprintable-internal-api
+    reason: 위와 동일 — sprintable-admin repo 소관(E-ADMIN internal-api).
+  - service: sprintable-internal-api-dev
+    reason: 위와 동일 — sprintable-admin repo 소관.
+
+services:
+  sprintable-backend-dev:
+    keys:
+      - key: BUILD_APP_METADATA_DEFALLBACK
+        value_check: skip
+        reason: 908075db de-fallback 단계 플래그(단계4 미착수) — 수동 토글, IaC 편입 시기 아직 아님.
+        owner: TBD
+      - key: CRON_SECRET
+        reason: cron 엔드포인트 인증 시크릿 — 부트스트랩 스크립트 미편입, 수동 시크릿.
+        owner: TBD
+      - key: DATABASE_URL_DEV
+        reason: dev DB 직결 폴백 변수로 추정 — 용도/생성 경위 미확認, owner 확인 필요.
+        owner: TBD
+      - key: DECISION_GATE_LINE_ENABLED
+        value_check: skip
+        reason: feature flag(org allowlist 게이팅류) — 수동 롤아웃 토글.
+        owner: TBD
+      - key: DECISION_GATE_LINE_MODE
+        value_check: skip
+        reason: 위 플래그 계열 — 수동 값.
+        owner: TBD
+      - key: DECISION_GATE_LINE_ORG_ALLOWLIST
+        reason: org allowlist 값 자체 — 수동 편집·PR 리뷰 아래 있지 않음.
+        owner: TBD
+      - key: FIREBASE_BFF_INTERNAL_SECRET
+        reason: Firebase BFF 내부 시크릿 — 부트스트랩 스크립트 미편입.
+        owner: TBD
+      - key: FIREBASE_OAUTH_HANDOFF_ENABLED
+        value_check: skip
+        reason: feature flag — 수동 토글.
+        owner: TBD
+      - key: GATE_CONFIG_ENFORCE_ENABLED
+        value_check: skip
+        reason: feature flag(게이트 강제) — 수동 토글.
+        owner: TBD
+      - key: GATE_CONFIG_ENFORCE_ORG_ALLOWLIST
+        reason: org allowlist 값 — 수동 편집.
+        owner: TBD
+      - key: GITHUB_APP_CLIENT_ID
+        reason: GitHub App 자격증명 — 부트스트랩 스크립트 미편입, 수동 시크릿 계열.
+        owner: TBD
+      - key: GITHUB_APP_CLIENT_SECRET
+        reason: 위와 동일.
+        owner: TBD
+      - key: GITHUB_APP_ID
+        reason: 위와 동일.
+        owner: TBD
+      - key: GITHUB_APP_PRIVATE_KEY
+        reason: >-
+          위와 동일 — github_app.py:59,63의 app_env!="production" 비교가 prod 라이브
+          APP_ENV="prod"와 불일치(별건 기존 결함, project_ci_gate_not_enforced류 트래킹 참고).
+        owner: TBD
+      - key: GITHUB_APP_SLUG
+        reason: GitHub App 메타 — 부트스트랩 스크립트 미편입.
+        owner: TBD
+      - key: GITHUB_APP_STATE_SECRET
+        reason: GitHub App OAuth state 서명 시크릿 — 부트스트랩 스크립트 미편입.
+        owner: TBD
+      - key: GITHUB_WEBHOOK_SECRET
+        reason: GitHub 웹훅 서명 검증 시크릿 — 부트스트랩 스크립트 미편입.
+        owner: TBD
+      - key: H1_MERGE_GATE_ADVISORY
+        value_check: skip
+        reason: feature flag — 수동 토글.
+        owner: TBD
+      - key: H1_MERGE_GATE_ENABLED
+        value_check: skip
+        reason: feature flag — 수동 토글.
+        owner: TBD
+      - key: H1_MERGE_GATE_ORG_ALLOWLIST
+        reason: org allowlist 값 — 수동 편집.
+        owner: TBD
+      - key: L2_TRIGGER_ADVISORY_LOCK
+        value_check: skip
+        reason: feature flag — 수동 토글.
+        owner: TBD
+      - key: L2_TRIGGER_ENABLED
+        value_check: skip
+        reason: feature flag — 수동 토글.
+        owner: TBD
+      - key: L2_TRIGGER_MAX_WAKES_PER_ORG_PER_HOUR
+        reason: 레이트리밋 수치 — 수동 튜닝값.
+        owner: TBD
+      - key: L2_TRIGGER_ORG_ALLOWLIST
+        reason: org allowlist 값 — 수동 편집.
+        owner: TBD
+      - key: LICENSE_CONSENT
+        value_check: skip
+        reason: 라이선스 동의 플래그 — 수동 1회성 값으로 추정.
+        owner: TBD
+      - key: LLM_GEMINI_LOCATION
+        reason: Gemini 리전 설정 — 부트스트랩 스크립트 미편입.
+        owner: TBD
+      - key: LLM_GEMINI_MODEL
+        reason: Gemini 모델 지정 — 부트스트랩 스크립트 미편입.
+        owner: TBD
+      - key: MCP_PUBLIC_URL
+        reason: MCP 공개 URL — 부트스트랩 스크립트 미편입, 서비스 URL 확정 후 1회성 수동 설정으로 추정.
+        owner: TBD
+      - key: OPS_RESTART_TS
+        value_check: skip
+        reason: >-
+          "값 자체가 무의미·재시작 트리거용 더미"로 추정(키 이름상) — 값 비교 자체가 무의미해
+          skip. 존재 여부만 추적.
+        owner: TBD
+      - key: STORAGE_PROVIDER
+        value_check: skip
+        reason: 스토리지 프로바이더 선택 플래그 — 수동 토글.
+        owner: TBD
+
+  sprintable-backend-prod:
+    keys:
+      - key: CRON_SECRET
+        reason: dev와 동일 — cron 엔드포인트 인증 시크릿, 부트스트랩 스크립트 미편입.
+        owner: TBD
+      - key: GITHUB_APP_CLIENT_ID
+        reason: dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_APP_CLIENT_SECRET
+        reason: dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_APP_ID
+        reason: dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_APP_PRIVATE_KEY
+        reason: dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_APP_SLUG
+        reason: dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_APP_STATE_SECRET
+        reason: dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_WEBHOOK_SECRET
+        reason: dev와 동일 사유.
+        owner: TBD
+      - key: H1_MERGE_GATE_ADVISORY
+        value_check: skip
+        reason: dev와 동일 — feature flag.
+        owner: TBD
+      - key: H1_MERGE_GATE_ENABLED
+        value_check: skip
+        reason: dev와 동일 — feature flag.
+        owner: TBD
+      - key: H1_MERGE_GATE_ORG_ALLOWLIST
+        reason: dev와 동일 — org allowlist 값.
+        owner: TBD
+      - key: LICENSE_CONSENT
+        value_check: skip
+        reason: dev와 동일.
+        owner: TBD
+      - key: MCP_PUBLIC_URL
+        reason: dev와 동일 사유.
+        owner: TBD
+      - key: STORAGE_PROVIDER
+        value_check: skip
+        reason: dev와 동일.
+        owner: TBD
+
+  sprintable-realtime-dev:
+    keys:
+      # cloudbuild.yaml deploy-realtime 스텝이 FASTAPI_URL/DB_POOL_SIZE/DB_MAX_OVERFLOW/
+      # PG_LISTEN_ENABLED/REDIS_CONSUME_ENABLED/REDIS_URL/EVENT_BROKER_REDIS_DUAL_PUBLISH_
+      # ENABLED/EVENT_BROKER_REDIS_DISPATCH_ENABLED를 명시 관리 — 그 외 전부는 backend와 동일
+      # 이미지를 쓰며 "--set-secrets 없는 gcloud run deploy 컨벤션(기존 바인딩 preserve)"으로
+      # 최초 생성 시(story #2078) 1회성 수동 바인딩된 것으로 추정 — backend-dev와 동일 키 집합.
+      - key: BUILD_APP_METADATA_DEFALLBACK
+        value_check: skip
+        reason: backend-dev와 동일 사유(같은 이미지·같은 플래그).
+        owner: TBD
+      - key: CRON_SECRET
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: DATABASE_URL_DEV
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: DECISION_GATE_LINE_ENABLED
+        value_check: skip
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: DECISION_GATE_LINE_MODE
+        value_check: skip
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: DECISION_GATE_LINE_ORG_ALLOWLIST
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: FIREBASE_BFF_INTERNAL_SECRET
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: FIREBASE_OAUTH_HANDOFF_ENABLED
+        value_check: skip
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: GATE_CONFIG_ENFORCE_ENABLED
+        value_check: skip
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: GATE_CONFIG_ENFORCE_ORG_ALLOWLIST
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_APP_CLIENT_ID
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_APP_CLIENT_SECRET
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_APP_ID
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_APP_PRIVATE_KEY
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_APP_SLUG
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_APP_STATE_SECRET
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_WEBHOOK_SECRET
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: H1_MERGE_GATE_ADVISORY
+        value_check: skip
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: H1_MERGE_GATE_ENABLED
+        value_check: skip
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: H1_MERGE_GATE_ORG_ALLOWLIST
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: L2_TRIGGER_ADVISORY_LOCK
+        value_check: skip
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: L2_TRIGGER_ENABLED
+        value_check: skip
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: L2_TRIGGER_MAX_WAKES_PER_ORG_PER_HOUR
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: L2_TRIGGER_ORG_ALLOWLIST
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: LICENSE_CONSENT
+        value_check: skip
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: LLM_GEMINI_LOCATION
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: LLM_GEMINI_MODEL
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: MCP_PUBLIC_URL
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: OPS_RESTART_TS
+        value_check: skip
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: STORAGE_PROVIDER
+        value_check: skip
+        reason: backend-dev와 동일 사유.
+        owner: TBD
+
+  sprintable-frontend-dev:
+    keys:
+      - key: NEXT_PUBLIC_APP_URL
+        reason: 부트스트랩 스크립트 미편입 — 용도/생성 경위 확인 필요.
+        owner: TBD
+      - key: FIREBASE_BFF_INTERNAL_SECRET
+        reason: BFF↔Firebase 내부 시크릿 — 부트스트랩 스크립트 미편입.
+        owner: TBD
+      - key: FIREBASE_OAUTH_HANDOFF_ENABLED
+        value_check: skip
+        reason: feature flag — 수동 토글.
+        owner: TBD
+      - key: STORAGE_PROVIDER
+        value_check: skip
+        reason: 스토리지 프로바이더 선택 플래그 — 수동 토글.
+        owner: TBD
+
+  sprintable-frontend-prod:
+    keys:
+      - key: APP_BASE_URL
+        reason: 용도/생성 경위 미확認 — owner 확인 필요(TBD로 이미 알려진 항목, memory 참고).
+        owner: TBD
+      - key: SECRET_REFRESH_1777617854
+        reason: >-
+          키 이름 자체가 타임스탬프 기반 시크릿 회전 흔적으로 추정 — 용도 미확認,
+          owner 확인 필요.
+        owner: TBD
+      - key: STORAGE_PROVIDER
+        value_check: skip
+        reason: dev와 동일 — 스토리지 프로바이더 선택 플래그.
+        owner: TBD
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        reason: Supabase 서비스 롤 키 — 부트스트랩 스크립트 미편입, prod-only.
+        owner: TBD
+
+  # sprintable-mcp-dev / sprintable-mcp-prod: 실측 결과 라이브 키 전부(MCP_TRANSPORT·
+  # SPRINTABLE_API_URL·AGENT_API_KEY·[prod만]MCP_ALLOWED_HOSTS) deploy_mcp_dev.sh/
+  # deploy_mcp_prod.sh가 전량 관리 — 카테고리 C 없음(entry 불필요, 완전 커버).
