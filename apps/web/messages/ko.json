@@ -90,6 +90,8 @@
     "orgTrust": "신뢰",
     "orgMemory": "기억",
     "switcherOrgSettingsAria": "Organization 설정",
+    "switcherMobileTriggerAria": "조직·프로젝트 전환",
+    "switcherMobileSheetTitle": "전환",
     "switcherSwitchToOrg": "이 조직으로 전환",
     "switcherNewProject": "새 프로젝트",
     "switcherNewOrganization": "새 Organization 만들기",

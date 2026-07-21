@@ -90,6 +90,8 @@
     "orgTrust": "Trust",
     "orgMemory": "Memory",
     "switcherOrgSettingsAria": "Organization settings",
+    "switcherMobileTriggerAria": "Switch organization or project",
+    "switcherMobileSheetTitle": "Switch",
     "switcherSwitchToOrg": "Switch to this organization",
     "switcherNewProject": "New project",
     "switcherNewOrganization": "Create new organization",

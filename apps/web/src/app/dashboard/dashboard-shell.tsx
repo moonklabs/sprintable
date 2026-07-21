@@ -64,7 +64,18 @@ function isTabRootPage(pathname: string): boolean {
   return TAB_ROOT_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
-function ScrollShell({ showTopBar, tabletCentered, chatUnreadTotal, children }: { showTopBar: boolean; tabletCentered: boolean; chatUnreadTotal: number; children: React.ReactNode }) {
+function ScrollShell({
+  showTopBar, tabletCentered, chatUnreadTotal, orgId, orgMemberships, projectId, projectMemberships, children,
+}: {
+  showTopBar: boolean;
+  tabletCentered: boolean;
+  chatUnreadTotal: number;
+  orgId?: string;
+  orgMemberships: OrgSwitcherItem[];
+  projectId?: string;
+  projectMemberships: DashboardProjectOption[];
+  children: React.ReactNode;
+}) {
   const { setScrollContainer } = useTopBar();
   const setRef = useCallback((el: HTMLDivElement | null) => {
     setScrollContainer(el);
@@ -82,7 +93,14 @@ function ScrollShell({ showTopBar, tabletCentered, chatUnreadTotal, children }: 
     <TeamPresenceToggleProvider value={{ toggle: panel.togglePanel, workingCount, open: panel.inlinePanelOpen || panel.drawerOpen }}>
     <SidebarInset className="relative flex flex-col overflow-hidden">
       <div ref={setRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto">
-        {showTopBar && <TopBar />}
+        {showTopBar && (
+          <TopBar
+            orgId={orgId}
+            orgMemberships={orgMemberships}
+            projectId={projectId}
+            projectMemberships={projectMemberships}
+          />
+        )}
         <ContextualPanelLayout
           renderPanel={({ mode, closePanel }) => (
             <div className={mode === 'inline' ? '2xl:sticky 2xl:top-0 2xl:h-svh 2xl:p-2' : 'h-full'}>
@@ -210,7 +228,15 @@ export function DashboardShell({
               userName={userName}
               chatUnreadTotal={chatUnreadTotal}
             />
-            <ScrollShell showTopBar={showTopBar} tabletCentered={tabletCentered} chatUnreadTotal={chatUnreadTotal}>
+            <ScrollShell
+              showTopBar={showTopBar}
+              tabletCentered={tabletCentered}
+              chatUnreadTotal={chatUnreadTotal}
+              orgId={orgId}
+              orgMemberships={orgMemberships}
+              projectId={effectiveProjectId}
+              projectMemberships={projectMemberships}
+            >
               {children}
             </ScrollShell>
           </SidebarProvider>
