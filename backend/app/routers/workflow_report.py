@@ -254,10 +254,22 @@ async def report_done(
         # 스테이지 완료를 보고"하는 가장 흔한 status 변경 경로인데도(auto-merge→done 포함) board
         # 실시간 갱신·알림·웹훅이 조용히 안 나갔다. PATCH /{id}/status와 동일 helper로 parity 확보.
         if updated_story is not None:
-            await session.commit()
             agent_member = (await session.execute(
                 select(TeamMember).where(TeamMember.id == body.agent_id).limit(1)
             )).scalar_one_or_none()
+            # E-ARCH S3b(story #2078): SSE만 outbox에 atomic 적재 — 반드시 commit 전에 호출
+            # (그래야 story status 커밋에 outbox row가 같이 실린다). event_broker_outbox_enabled
+            # 꺼진 동안은 완전 no-op(무회귀) — 아래 emit_story_status_changed()의 기존
+            # _push_to_agent 루프가 여전히 유일한 실 SSE 경로.
+            from app.services.story_status_events import stage_status_changed_sse_outbox
+            await stage_status_changed_sse_outbox(
+                session, story.org_id, updated_story, old_status,
+                actor_id=body.agent_id,
+                actor_name=agent_member.name if agent_member else None,
+                actor_role=agent_member.role if agent_member else None,
+                actor_type="agent",
+            )
+            await session.commit()
             from app.services.story_status_events import emit_story_status_changed
             await emit_story_status_changed(
                 session, story.org_id, updated_story, old_status,
