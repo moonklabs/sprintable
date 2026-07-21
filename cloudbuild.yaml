@@ -154,6 +154,10 @@ steps:
       - sprintable-frontend-${_DEPLOY_ENV}
       - --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:${COMMIT_SHA}
       - --region=${_AR_REGION}
+      # E-ARCH 1단계(story #2078) — /api/event-stream 프록시 라우트가 REALTIME_URL을 읽어
+      # SSE/LISTEN 전용 realtime-gateway로 향한다(REALTIME_URL 없으면 기존 FASTAPI_URL로
+      # 폴백 — 이 값을 비우면 코드 변경·재배포 없이 즉시 원복). --update-env-vars(additive).
+      - --update-env-vars=REALTIME_URL=${_REALTIME_URL}
       - --quiet
     waitFor: [push-frontend]
 
