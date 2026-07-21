@@ -80,15 +80,29 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   }, [currentOrgId]);
 
   const currentOrg = orgs.find((o) => o.orgId === localOrgId);
-  const currentProject = projects.find((p) => p.projectId === currentProjectId);
   const otherOrgs = orgs.filter((o) => o.orgId !== localOrgId);
 
   const displayOrg = currentOrg?.orgName ?? 'Organization';
+
+  // story #2093 후속 — `projects`(서버 `/me/memberships`, JWT "현재 org" 클레임 스코프) prop은
+  // localOrgId(=URL 경로 resolve 결과, #2093 이후)와 다른 org를 가리킬 수 있다(cross-org 진입 —
+  // 계정 상태가 stale하거나 초대/딥링크로 다른 org에 들어온 경우). 그 상태에서 `projects`를
+  // 그대로 "현재 조직 섹션"에 그리면 다른 org의 프로젝트가 마치 이 org 소속인 것처럼 보인다
+  // (라이브 재현: 계정상태=HITL Dogfood, URL=뭉클랩일 때 "뭉클랩" 헤더 아래 "Dogfood Project"가
+  // 뜸). "다른 조직"에 이미 있는 X-Org-Id lazy-fetch를 현재 조직에도 똑같이 적용해 스코프
+  // 불일치 자체를 없앤다 — 정본은 항상 방금 그 org로 헤더를 찍어 다시 조회한 응답이다.
+  const currentOrgFetched = localOrgId ? otherOrgProjects[localOrgId] : undefined;
+  const currentOrgLoading = localOrgId ? loadingOrgIds.has(localOrgId) : false;
+  // fetch 전(혹은 org 없음)엔 서버 prop을 낙관적으로 보여준다 — 대부분(같은 org)은 이 값이 곧
+  // fetch 결과와 같아 깜빡임이 없고, 다르면 fetch 완료 즉시 정본으로 교체된다.
+  const currentOrgProjects = currentOrgFetched ?? projects;
+  const currentProject = currentOrgProjects.find((p) => p.projectId === currentProjectId);
   const displayProject = currentProject?.projectName ?? '';
 
   useEffect(() => {
     if (!open) return;
-    for (const org of otherOrgs) {
+    const orgsToFetch = localOrgId ? [{ orgId: localOrgId }, ...otherOrgs] : otherOrgs;
+    for (const org of orgsToFetch) {
       if (otherOrgProjects[org.orgId] !== undefined || loadingOrgIds.has(org.orgId)) continue;
       setLoadingOrgIds((prev) => new Set([...prev, org.orgId]));
       fetch(`/api/projects`, { headers: { 'X-Org-Id': org.orgId } })
@@ -108,7 +122,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
         });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, localOrgId]);
 
   async function switchOrg(nextOrgId: string) {
     if (!nextOrgId || nextOrgId === localOrgId || pending) return;
@@ -230,6 +244,8 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     loadingOrgIds,
     currentOrg,
     currentProject,
+    currentOrgProjects,
+    currentOrgLoading: currentOrgLoading && currentOrgFetched === undefined,
     otherOrgs,
     displayOrg,
     displayProject,

@@ -96,7 +96,17 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                 <Settings className="h-3.5 w-3.5" />
               </button>
             </div>
-            {projects.map((project) => (
+            {/* story #2093 후속 — s.currentOrgProjects(X-Org-Id로 방금 조회한 정본)를 쓴다.
+                raw projects prop은 서버 /me/memberships가 JWT "현재 org" 클레임 스코프라
+                URL org와 계정 상태 org가 갈리면(cross-org 진입) 다른 org의 프로젝트를
+                이 org 소속인 것처럼 보여줄 수 있다. */}
+            {s.currentOrgLoading && (
+              <div className="flex items-center gap-2 px-4 py-2.5 text-sm text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>{tCommon('loading')}</span>
+              </div>
+            )}
+            {s.currentOrgProjects.map((project) => (
               <button
                 key={project.projectId}
                 type="button"
