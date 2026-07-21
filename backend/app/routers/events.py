@@ -95,6 +95,35 @@ _BACKFILL_MAX_EVENTS: int = int(_os.getenv("BACKFILL_MAX_EVENTS", "50"))
 # S0-1: 초기 연결(last_event_id=None) 시 backfill 상한 — 재연결과 구분하여 중복 방지
 _BACKFILL_INITIAL_EVENTS: int = int(_os.getenv("BACKFILL_INITIAL_EVENTS", "5"))
 
+# story #2101(2026-07-22, 까심군 raw curl 재현 확認): 같은 member의 동시 연결(다중 탭)이
+# 있으면 delivered가 Event 행 하나에 전역 플래그라 — 탭A가 먼저 받아 delivered로 마킹하면
+# 탭B가 재연결 시 status=="pending"만 보는 백필에서 그 이벤트가 영구 제외된다(탭B 자신은
+# 못 받았는데도). `/pending`(get_pending_events, include_recent_delivered_minutes)이 이미
+# 같은 문제를 "최근 delivered도 포함"으로 풀어놨는데 SSE 스트림 자체의 백필엔 그 처리가
+# 없었다 — 동형으로 맞춘다("최소 한 번 배달 + 수신측 dedup"이 분산시스템 표준, "정확히
+# 한 번"을 위한 connection/session 단위 추적은 스키마 변경급이라 이번 스코프 아님).
+# 값 근거(임의 아님): `apps/web/src/hooks/use-chat-sse.ts`의 RECONNECT_DELAYS_MS =
+# [5,30,60,300]초가 4번째 실패부터 300초에서 plateau(더 안 늘어남, 무한 재시도) — 즉
+# 클라가 아무리 여러 번 실패해도 "다음 재시도까지의 간격"은 300초를 절대 안 넘는다.
+# N을 이보다 작게 잡으면 백오프가 plateau에 도달한 뒤 다시 갭이 재발하는 구조적 하한이라,
+# 300초는 절충이 아니라 이 재연결 루프가 보장하는 정확한 경계값이다.
+_BACKFILL_RECENT_DELIVERED_SECONDS: int = int(
+    _os.getenv("BACKFILL_RECENT_DELIVERED_SECONDS", "300")
+)
+
+
+def _pending_or_recently_delivered_filter(now: "datetime"):
+    """story #2101 — 백필 status 필터: pending 전량 + 최근 N초 이내 delivered.
+
+    `/pending`(get_pending_events)의 include_recent_delivered_minutes와 동형 —
+    같은 member의 다른 연결이 먼저 받아 delivered로 마킹한 이벤트도 재연결한 이
+    연결이 다시 받게 한다(영구 유실 방지, 중복은 클라 dedup이 처리)."""
+    cutoff = now - timedelta(seconds=_BACKFILL_RECENT_DELIVERED_SECONDS)
+    return or_(
+        Event.status == "pending",
+        and_(Event.status == "delivered", Event.delivered_at >= cutoff),
+    )
+
 
 def _compute_backfill_mode(
     ref_ts: "datetime | None",
@@ -279,12 +308,16 @@ async def agent_event_stream(
                 # S0-1: 초기 연결(last_event_id=None, since_timestamp=None)은 INITIAL 상한 적용
                 is_initial = last_event_id is None and since_timestamp is None
                 exceed, limit = _compute_backfill_mode(_ref, now, initial=is_initial)
+                # story #2101: pending뿐 아니라 최근 delivered도 포함 — 동일 member의
+                # 다른 연결(탭)이 먼저 받아 delivered로 마킹한 이벤트를, 재연결한 이 연결도
+                # 다시 받게 한다(중복은 클라 dedup이 처리, 영구 유실 0이 목표).
+                _status_filter = _pending_or_recently_delivered_filter(now)
                 if exceed:
                     # threshold 초과: _ref 이후 최근 N건만 (최신순 → 역순 전달로 시간 순서 보존)
                     exceed_clauses: list[Any] = [
                         Event.org_id == org_id,
                         Event.recipient_id == resolved_member_id,
-                        Event.status == "pending",
+                        _status_filter,
                     ]
                     if _ref is not None:
                         if last_event_id is not None:
@@ -308,7 +341,7 @@ async def agent_event_stream(
                     where_clauses: list[Any] = [
                         Event.org_id == org_id,
                         Event.recipient_id == resolved_member_id,
-                        Event.status == "pending",
+                        _status_filter,
                     ]
                     if _ref is not None:
                         if last_event_id is not None:

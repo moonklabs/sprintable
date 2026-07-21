@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
 
 export interface SseEventNotification {
   id?: string;
@@ -50,6 +51,7 @@ export function useSseNotifications({
 
   const handleData = (raw: string) => {
     if (!raw || raw.trim() === '') return;
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       const parsed = JSON.parse(raw) as SseEventNotification;
       callbackRef.current?.(parsed);
@@ -58,6 +60,7 @@ export function useSseNotifications({
 
   const handleExtraEvent = (eventName: string, raw: string) => {
     if (!raw || raw.trim() === '') return;
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       onExtraEventRef.current?.(eventName, JSON.parse(raw));
     } catch { /* malformed */ }

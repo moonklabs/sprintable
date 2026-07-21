@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
 
 // chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
 export interface SendAttachment {
@@ -111,29 +112,34 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   useLayoutEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
   const handleChatMessage = (raw: string) => {
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       const payload = JSON.parse(raw) as SseChatPayload;
       onNewMessageRef.current?.(normalizeToMessage(payload as unknown as Record<string, unknown>));
     } catch { /* ignore parse errors */ }
   };
   const handleReplyCreated = (raw: string) => {
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       const payload = JSON.parse(raw) as { id?: string; memo_id?: string };
       if (payload.memo_id) onReplyCreatedRef.current?.(payload.memo_id);
     } catch { /* ignore parse errors */ }
   };
   const handleConversationMessage = (raw: string) => {
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       onConversationMessageRef.current?.(JSON.parse(raw) as Record<string, unknown>);
     } catch { /* ignore parse errors */ }
   };
   const handleWorking = (raw: string) => {
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       const payload = JSON.parse(raw) as SseWorkingPayload;
       if (payload.conversation_id) onWorkingRef.current?.(payload);
     } catch { /* ignore parse errors */ }
   };
   const handleConversationRead = (raw: string) => {
+    if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
       const payload = JSON.parse(raw) as SseConversationReadPayload;
       if (payload.conversation_id) onConversationReadRef.current?.(payload);
