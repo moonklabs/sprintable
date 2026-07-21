@@ -80,6 +80,14 @@ class Settings(BaseSettings):
     # E-EVENTBUS: dev=true, prod=false (기존 웹훅 병행 운영)
     eventbus_enabled: bool = False
 
+    # E-ARCH S1(2026-07-21, 선생님 "가자" 승인 — 채팅 5초 지연/#2074 근본): REST(api)와
+    # 실시간(SSE/LISTEN)이 같은 Cloud Run 서비스에 있어 인스턴스 기아(콜드스타트 경합)로
+    # 서로를 굶기던 구조를 분리하는 1단계. 이 플래그를 끄면 이 인스턴스는 pg_pubsub LISTEN을
+    # 전혀 시작 안 함(RAW_LISTEN 커넥션 소비 0) — api 서비스에 false, 신규
+    # sprintable-realtime-{env} 서비스에 true로 배선한다(같은 이미지, env만 다름).
+    # default=True(무회귀) — 명시적으로 끄지 않는 한 기존 단일서비스 배포와 동일 동작.
+    pg_listen_enabled: bool = True
+
     # E-L2 휴리스틱 트리거 워커. default-off — 명시 활성화 전엔 lifespan task 미생성(무동작).
     # advisory_lock=on이면 멀티인스턴스 중 pg_try_advisory_lock holder 1개만 poll/evaluate.
     l2_trigger_enabled: bool = False

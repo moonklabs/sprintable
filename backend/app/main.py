@@ -26,7 +26,10 @@ async def lifespan(app: FastAPI):
     from app.services.pg_pubsub import check_listen_config, listen_loop
 
     warn_if_webhook_secret_misconfigured()  # Bot-M.2 P3: 웹훅 secret misconfig 를 트래픽 前 경고.
-    check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
+    # E-ARCH S1: PG_LISTEN_ENABLED=false인 서비스(api)는 이 검증 자체가 무의미 — LISTEN을 절대
+    # 안 켜므로 DB_PGBOUNCER/DATABASE_URL_DIRECT 정합을 강제할 이유가 없다(무해·불필요 fail 방지).
+    if settings.pg_listen_enabled:
+        check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
     check_internal_secret_config()  # 산티아고 §9 finding 4: non-local + 시크릿 미설정 fail-closed.
     check_cron_secret_config()  # story #2072: non-local + CRON_SECRET 미설정 fail-closed.
     check_mobile_app_check_config()  # 산티아고 §9 finding 1: mobile 발급 on + App Check 미필수 fail-closed.
@@ -35,7 +38,10 @@ async def lifespan(app: FastAPI):
     # mock db.execute() 순서-큐를 startup 시점의 이 캐시 조회가 몰래 하나 소비해 실패시켰다).
     # 지연 초기화(첫 실 요청에서 채워짐)만으로 충분 — check_any_cutover_epoch_exists() 자체가
     # DB 접속 불가/미준비 시에도 fail-safe라 startup에서 먼저 확인해둘 실익이 크지 않다.
-    task = asyncio.create_task(listen_loop())
+    # E-ARCH S1(2026-07-21, #2074 근본 — REST/실시간 서비스 분리 1단계): default=True(무회귀) —
+    # api 서비스에 PG_LISTEN_ENABLED=false를 배선하면 이 인스턴스는 RAW_LISTEN 커넥션을 전혀
+    # 안 잡는다(커넥션 예산 산식에서 이 항이 빠짐). realtime 서비스만 true로 유지.
+    task = asyncio.create_task(listen_loop()) if settings.pg_listen_enabled else None
     # E-L2 S5: 휴리스틱 트리거 워커는 default-off — 명시 활성화 시에만 task 생성(AC①).
     l2_task = None
     if settings.l2_trigger_enabled:
@@ -45,14 +51,16 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        task.cancel()
+        if task is not None:
+            task.cancel()
         if l2_task is not None:
             l2_task.cancel()
         try:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            if task is not None:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             if l2_task is not None:
                 try:
                     await l2_task
