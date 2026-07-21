@@ -263,11 +263,11 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
       await wireDeclarations(data.id);
       onCreated(data);
     } catch {
-      setError('목표 생성에 실패했습니다. 다시 시도해 주세요.');
+      setError(t('createError'));
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, targetDate, targetSp, projectId, orgId, onCreated, wireDeclarations]);
+  }, [title, description, priority, targetDate, targetSp, projectId, orgId, onCreated, wireDeclarations, t]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -400,11 +400,11 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
       const { data } = await res.json() as { data: Goal };
       onSaved({ ...data, stories: epic.stories });
     } catch {
-      setError('목표 수정에 실패했습니다. 다시 시도해 주세요.');
+      setError(t('updateError'));
     } finally {
       setSubmitting(false);
     }
-  }, [title, description, priority, targetDate, targetSp, epic.id, epic.stories, onSaved]);
+  }, [title, description, priority, targetDate, targetSp, epic.id, epic.stories, onSaved, t]);
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
@@ -1162,9 +1162,9 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       <Dialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>목표를 삭제하시겠습니까?</DialogTitle>
+            <DialogTitle>{t('deleteConfirmTitle')}</DialogTitle>
             <DialogDescription>
-              이 작업은 되돌릴 수 없습니다. 목표에 포함된 스토리는 연결이 해제됩니다.
+              {t('deleteConfirmDescription')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
