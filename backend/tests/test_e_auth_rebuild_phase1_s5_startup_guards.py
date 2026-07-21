@@ -91,6 +91,49 @@ def test_internal_secret_config_raises_when_prod_and_empty_and_oauth_handoff_on(
         ))
 
 
+def test_internal_secret_config_raises_when_dev_appenv_but_on_cloud_run(monkeypatch):
+    """story #2071(critical, 2026-07-21): APP_ENV=development인데 실제로는 Cloud Run
+    위(K_SERVICE 존재 — 노출된 dev 배포)면 "로컬" 예외가 더 이상 적용되면 안 된다. 이게
+    민군/오르테가군이 실측 확定한 결함의 근본원인 — app_env 문자열만으로 "로컬"을 판정해서
+    노출된 dev가 fail-open을 그대로 탔다."""
+    monkeypatch.setenv("K_SERVICE", "sprintable-backend-dev")
+    from app.routers.auth_firebase_internal import check_internal_secret_config
+    with pytest.raises(RuntimeError, match="FIREBASE_BFF_INTERNAL_SECRET"):
+        check_internal_secret_config(_s(
+            app_env="development", firebase_bff_internal_secret="", firebase_auth_issue_session=True,
+        ))
+
+
+def test_internal_secret_config_ok_when_dev_appenv_and_truly_local(monkeypatch):
+    """대조군 — K_SERVICE가 없는 진짜 로컬(uvicorn/pytest)은 여전히 예외 대상."""
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    from app.routers.auth_firebase_internal import check_internal_secret_config
+    check_internal_secret_config(_s(
+        app_env="development", firebase_bff_internal_secret="", firebase_auth_issue_session=True,
+    ))
+
+
+def test_require_internal_secret_raises_503_when_dev_appenv_but_on_cloud_run(monkeypatch):
+    """story #2071: 런타임 게이트(_require_internal_secret) 쪽도 동일 — 노출된 dev에서
+    시크릿 미설정이면 인증 없이 통과(fail-open)하던 것을 503(fail-closed)으로 닫는다."""
+    monkeypatch.setenv("K_SERVICE", "sprintable-backend-dev")
+    monkeypatch.setattr("app.routers.auth_firebase_internal.settings.app_env", "development")
+    monkeypatch.setattr("app.routers.auth_firebase_internal.settings.firebase_bff_internal_secret", "")
+    from app.routers.auth_firebase_internal import _require_internal_secret
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc_info:
+        _require_internal_secret(None)
+    assert exc_info.value.status_code == 503
+
+
+def test_require_internal_secret_ok_when_truly_local(monkeypatch):
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    monkeypatch.setattr("app.routers.auth_firebase_internal.settings.app_env", "development")
+    monkeypatch.setattr("app.routers.auth_firebase_internal.settings.firebase_bff_internal_secret", "")
+    from app.routers.auth_firebase_internal import _require_internal_secret
+    _require_internal_secret(None)  # raise 없이 통과해야 함(진짜 로컬).
+
+
 def test_mobile_app_check_config_ok_when_mobile_issue_off():
     from app.services.firebase_verifier import check_mobile_app_check_config
     check_mobile_app_check_config(_s(firebase_auth_mobile_issue=False, firebase_auth_mobile_app_check_required=False))
