@@ -136,10 +136,213 @@ def test_record_pg_arrival_ignores_empty_id():
 
 
 @pytest.mark.anyio
-async def test_shadow_consume_loop_returns_immediately_without_redis_url(monkeypatch):
+async def test_redis_consume_loop_returns_immediately_without_redis_url(monkeypatch):
     """redis_url 없으면 무한루프에 안 들어가고 바로 return해야(테스트가 hang 안 함 자체가 증거)."""
     monkeypatch.setattr("app.core.config.settings.redis_url", None)
-    await eb.redis_shadow_consume_loop()  # 타임아웃 없이 즉시 끝나야
+    await eb.redis_consume_loop()  # 타임아웃 없이 즉시 끝나야
+
+
+class _FakePubSub:
+    """redis-py PubSub 최소 mock — psubscribe 무시, listen()이 고정 메시지 시퀀스를 방출.
+
+    ⚠️매 yield/재연결 사이 `asyncio.sleep(0)`으로 이벤트루프에 제어를 넘긴다 — 실 redis-py는
+    네트워크 I/O라 자연히 이벤트루프에 양보하지만, 이 mock은 순수 동기 for라 양보점이 없으면
+    redis_consume_loop의 `while True` 재연결 루프가 이 테스트 프로세스를 독점해 폴링 중인
+    테스트 코루틴이 영원히 스케줄 안 되는(= pytest-timeout 30s로 hang) 버그를 낳는다."""
+
+    def __init__(self, messages):
+        self._messages = messages
+
+    async def psubscribe(self, *patterns):
+        await asyncio.sleep(0)
+
+    async def listen(self):
+        for m in self._messages:
+            yield m
+            await asyncio.sleep(0)
+
+    async def close(self):
+        pass
+
+
+def _redis_message(payload: dict) -> dict:
+    import json
+    return {"type": "pmessage", "data": json.dumps(payload)}
+
+
+async def _run_loop_until(monkeypatch, messages, condition, timeout_s=1.0):
+    """redis_consume_loop을 백그라운드에서 돌리고 condition()이 참이 될 때까지 폴링 후 취소.
+
+    fake pubsub의 listen()이 소진되면 while True가 재연결을 시도(_get_redis_client가 같은
+    fake client를 반환하니 무해 — psubscribe도 매번 no-op) — 그래도 메시지 시퀀스는 1회만
+    방출되니 condition이 첫 순회에서 안 만족되면 이 헬퍼가 timeout으로 실패한다(의도적).
+    """
+    class _FakeClient:
+        def pubsub(self):
+            return _FakePubSub(messages)
+
+    monkeypatch.setattr(eb, "_get_redis_client", lambda: _FakeClient())
+    monkeypatch.setattr("app.core.config.settings.redis_url", "redis://fake:6379/0")
+
+    task = asyncio.create_task(eb.redis_consume_loop())
+    elapsed = 0.0
+    step = 0.01
+    while elapsed < timeout_s:
+        if condition():
+            break
+        await asyncio.sleep(step)
+        elapsed += step
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    assert condition(), "redis_consume_loop이 기대한 상태에 도달 못 함(timeout)"
+
+
+@pytest.mark.anyio
+async def test_redis_consume_loop_dispatch_disabled_only_logs_no_dispatch_call(monkeypatch):
+    """event_broker_redis_dispatch_enabled=False(default) — publish_event/_push_to_agent 안 불려야
+    (이 회귀 가드가 없으면 3단계 전 실수로 실 dispatch가 켜져도 아무도 못 잡는다)."""
+    monkeypatch.setattr("app.core.config.settings.event_broker_redis_dispatch_enabled", False)
+    monkeypatch.setattr("app.core.config.settings.redis_url", "redis://fake:6379/0")
+    dispatch_calls = []
+    monkeypatch.setattr(
+        "app.routers.events.publish_event",
+        lambda *a, **kw: dispatch_calls.append(("publish_event", a, kw)),
+    )
+    monkeypatch.setattr(
+        "app.routers.events._push_to_agent",
+        lambda *a, **kw: dispatch_calls.append(("_push_to_agent", a, kw)),
+    )
+
+    msg = _redis_message({
+        "instance_id": "other-instance", "target": "org", "target_id": "org-1",
+        "event_type": "x", "_broker_event_id": "evt-1", "data": {"foo": "bar"},
+    })
+
+    class _FakeClient:
+        def pubsub(self):
+            return _FakePubSub([msg])
+
+    monkeypatch.setattr(eb, "_get_redis_client", lambda: _FakeClient())
+
+    # 음성 결과(아무것도 dispatch 안 됨) 검증 — 긍정 condition이 없으니 고정 시간만 대기.
+    task = asyncio.create_task(eb.redis_consume_loop())
+    await asyncio.sleep(0.2)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    assert dispatch_calls == []
+    # 그래도 shadow 관측(로그 기준점)은 여전히 동작해야 — dispatch=off가 관측까지 죽이면 안 됨.
+    assert "evt-1" not in eb._pg_arrivals  # PG 도착이 없었으니 당연히 비교 기준점도 없음(정상)
+
+
+@pytest.mark.anyio
+async def test_redis_consume_loop_dispatch_enabled_calls_publish_event_for_org_target(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.event_broker_redis_dispatch_enabled", True)
+    dispatch_calls = []
+    monkeypatch.setattr(
+        "app.routers.events.publish_event",
+        lambda *a, **kw: dispatch_calls.append((a, kw)),
+    )
+    monkeypatch.setattr("app.routers.events._push_to_agent", lambda *a, **kw: None)
+
+    msg = _redis_message({
+        "instance_id": "other-instance", "target": "org", "target_id": "org-1",
+        "event_type": "story.status_changed", "_broker_event_id": "evt-2",
+        "data": {"entity_id": "s1"},
+    })
+    await _run_loop_until(monkeypatch, [msg], lambda: len(dispatch_calls) > 0)
+
+    args, kwargs = dispatch_calls[0]
+    assert args[0] == "org-1"
+    assert args[1] == "story.status_changed"
+    assert args[2] == {"entity_id": "s1"}
+    assert kwargs.get("_from_listener") is True  # 재발행 무한루프 차단 플래그 필수
+
+
+@pytest.mark.anyio
+async def test_redis_consume_loop_dispatch_enabled_calls_push_to_agent_for_agent_target(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.event_broker_redis_dispatch_enabled", True)
+    dispatch_calls = []
+    monkeypatch.setattr("app.routers.events.publish_event", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "app.routers.events._push_to_agent",
+        lambda *a, **kw: dispatch_calls.append((a, kw)),
+    )
+
+    msg = _redis_message({
+        "instance_id": "other-instance", "target": "agent", "target_id": "member-1",
+        "event_type": "task.assigned", "_broker_event_id": "evt-3",
+        "data": {"task_id": "t1"},
+    })
+    await _run_loop_until(monkeypatch, [msg], lambda: len(dispatch_calls) > 0)
+
+    args, kwargs = dispatch_calls[0]
+    assert args[0] == "member-1"
+    assert args[1] == {"task_id": "t1"}
+    assert kwargs.get("_from_listener") is True
+
+
+@pytest.mark.anyio
+async def test_redis_consume_loop_dispatch_enabled_skips_self_published_event(monkeypatch):
+    """자기 인스턴스가 발행한 이벤트(instance_id 일치)는 dispatch 안 해야 — 중복 전달 방지."""
+    from app.services.pg_pubsub import INSTANCE_ID
+
+    monkeypatch.setattr("app.core.config.settings.event_broker_redis_dispatch_enabled", True)
+    dispatch_calls = []
+    monkeypatch.setattr(
+        "app.routers.events.publish_event",
+        lambda *a, **kw: dispatch_calls.append(a),
+    )
+    monkeypatch.setattr("app.routers.events._push_to_agent", lambda *a, **kw: None)
+
+    msg = _redis_message({
+        "instance_id": INSTANCE_ID, "target": "org", "target_id": "org-1",
+        "event_type": "x", "_broker_event_id": "evt-4", "data": {},
+    })
+    # self-skip이니 dispatch_calls는 영원히 빈 채 — 고정 시간만 대기 후 확認(음성 결과 검증).
+    task = asyncio.create_task(eb.redis_consume_loop())
+    await asyncio.sleep(0.2)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    assert dispatch_calls == []
+
+
+@pytest.mark.anyio
+async def test_redis_publish_payload_includes_instance_id_and_nested_data(monkeypatch):
+    """envelope 형태가 pg_notify()와 동형(instance_id/target/target_id/event_type/data 분리)인지
+    — redis_consume_loop의 파싱 대칭성 전제."""
+    import json
+
+    from app.services.pg_pubsub import INSTANCE_ID
+
+    monkeypatch.setattr("app.core.config.settings.redis_url", "redis://fake:6379/0")
+    published = []
+
+    class _FakeClient:
+        async def publish(self, channel, message):
+            published.append((channel, json.loads(message)))
+
+    monkeypatch.setattr(eb, "_get_redis_client", lambda: _FakeClient())
+
+    await eb._redis_publish("agent", "member-1", "task.assigned", {"task_id": "t1"}, "evt-5")
+
+    assert len(published) == 1
+    channel, payload = published[0]
+    assert channel == "agent:member-1"
+    assert payload["instance_id"] == INSTANCE_ID
+    assert payload["target"] == "agent"
+    assert payload["target_id"] == "member-1"
+    assert payload["event_type"] == "task.assigned"
+    assert payload["_broker_event_id"] == "evt-5"
+    assert payload["data"] == {"task_id": "t1"}
 
 
 @pytest.mark.anyio

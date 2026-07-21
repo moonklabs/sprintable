@@ -1,15 +1,24 @@
-"""E-ARCH S2(story #2078): EventBroker — PG NOTIFY(authoritative) + Redis(shadow dual-publish).
+"""E-ARCH S2/S3(story #2078): EventBroker — PG NOTIFY(authoritative) + Redis dual-publish,
+단계적으로 Redis를 실 dispatch 경로로 승격.
 
 설계(오르테가군 판정 2026-07-21): 2단계는 dual-publish, 3단계에서 Redis-only 구현체로 교체 가능
 하도록 `EventBroker`를 인터페이스로 분리한다 — 콜사이트(events.py)는 어느 구현체가 도는지 모른다.
 
-Redis 경로는 `event_broker_redis_dual_publish_enabled`(default False)로 게이트 — 꺼져 있으면
-이 모듈은 `pg_notify()` 호출 외 아무것도 안 한다(무회귀, #2358 PG_LISTEN_ENABLED와 동일 컨벤션).
+Redis 발행 경로는 `event_broker_redis_dual_publish_enabled`(default False)로 게이트 — 꺼져
+있으면 이 모듈은 `pg_notify()` 호출 외 아무것도 안 한다(무회귀, #2358 PG_LISTEN_ENABLED와 동일
+컨벤션).
 
-Redis가 이 단계에서 100% 유실돼도 정합성 영향 0 — Redis는 realtime gateway의 shadow-consume
-비교(지연·중복률 측정)용일 뿐 dispatch에 쓰이지 않는다. dispatch는 여전히 PG LISTEN
-(pg_pubsub.listen_loop) 경로만 탄다. 근거: agent_gateway.py의 acked_seq DB 재조회 패턴과 동형
-— wake 신호 유실은 다음 재조회가 흡수한다(2026-07-21 세션 코드 교차검증 완료).
+⚠️근본 정정(2026-07-21, 착수 전 확認): 처음엔 Redis 수신이 "shadow"(관측 전용 — PG 대비 도달률/
+지연만 로그, 실제 SSE 전달은 안 함)이었다. 그 상태로 PG LISTEN을 걷으면 Redis는 발행되는데
+아무도 안 받아 실시간이 전면 정지했을 것 — "도달 확認"과 "전달 확認"은 다른 것이었다.
+`event_broker_redis_dispatch_enabled`(default False, 별개 게이트)가 켜져야 `redis_consume_loop`
+가 `publish_event()`/`_push_to_agent()`를 실제로 호출해 SSE로 전달한다(self-skip 포함,
+pg_pubsub._dispatch_received와 동형) — 이게 켜져야 비로소 PG_LISTEN_ENABLED=false(LISTEN
+제거)가 안전해진다. dual_publish만 켜진 상태(dispatch 꺼짐)는 여전히 순수 관측이라 무회귀 —
+PG LISTEN이 유일한 실 dispatch 경로. 근거(관측 유실 허용 근거는 유지): agent_gateway.py의
+acked_seq DB 재조회 패턴과 동형 — wake 신호 유실은 다음 재조회가 흡수한다(2026-07-21 세션
+코드 교차검증 완료). 단 이 근거는 "dispatch가 이미 이뤄지는데 신호만 놓쳐도 안전하다"는
+것이지 "dispatch 자체가 없어도 안전하다"는 뜻이 아니다 — 이번 정정이 그 구분을 명확히 한다.
 """
 from __future__ import annotations
 
@@ -71,18 +80,30 @@ def _get_redis_client():
 async def _redis_publish(
     target: Literal["org", "agent"], target_id: str, event_type: str, data: dict, event_id: str
 ) -> None:
-    """Redis 발행 — 실패 시 경고 로그만(pg_notify와 동형 철학: shadow 경로라 예외 전파 금지)."""
+    """Redis 발행 — 실패 시 경고 로그만(pg_notify와 동형 철학: shadow 경로라 예외 전파 금지).
+
+    payload는 pg_notify()와 동형 envelope(instance_id/target/target_id/event_type/data 분리) —
+    자기발행 self-skip(story #2078 실 dispatch 승격)과 수신측 파싱을 pg_pubsub._dispatch_received()
+    와 대칭으로 유지한다. instance_id는 pg_pubsub.INSTANCE_ID 재사용(같은 프로세스=같은 값).
+    """
     import json
 
     from app.core.config import settings
+    from app.services.pg_pubsub import INSTANCE_ID
 
     if not settings.redis_url:
         logger.warning("event_broker redis publish skipped: redis_url not configured")
         return
 
-    payload = _slim_org_payload(data) if target == "org" else dict(data)
-    payload["event_type"] = event_type
-    payload["_broker_event_id"] = event_id
+    inner = _slim_org_payload(data) if target == "org" else dict(data)
+    payload = {
+        "instance_id": INSTANCE_ID,
+        "target": target,
+        "target_id": target_id,
+        "event_type": event_type,
+        "_broker_event_id": event_id,
+        "data": inner,
+    }
 
     try:
         client = _get_redis_client()
@@ -228,22 +249,36 @@ def record_pg_arrival(event_id: str) -> None:
     _pg_arrivals[event_id] = time.monotonic()
 
 
-async def redis_shadow_consume_loop() -> None:
-    """Redis 구독 → PG 경로 도착 기록과 대조해 지연Δ·중복률을 로그.
+async def redis_consume_loop() -> None:
+    """Redis 구독 → (a) PG 경로 도착 기록과 대조해 지연Δ·중복률 로그(항상) (b)
+    `event_broker_redis_dispatch_enabled`(default False)가 켜지면 실제로
+    `publish_event()`/`_push_to_agent()`를 호출해 SSE로 전달(실 dispatch 승격).
 
-    dispatch에는 절대 안 씀(PG가 여전히 authoritative) — 비교 관측 전용.
+    ⚠️ story #2078 근본 정정(2026-07-21, 착수 전 확認): 원래 "shadow-consume"이라는 이름대로
+    관측만 했다 — Redis가 PG만큼 "도달"하는지는 쟀지만 그 도달이 실제로 SSE 큐까지 "전달"되는
+    지는 재지 않았다(publish_event/_push_to_agent 호출 자체가 코드에 없었다). 그 상태에서 PG
+    LISTEN을 걷으면 Redis 발행은 되는데 아무도 안 받아 실시간이 전면 정지했을 것 — 이 함수가
+    바로 그 갭을 닫는다. dispatch_enabled=False인 동안은 순수 관측(무회귀, 기존 이름의 "shadow"
+    의미 그대로 유지) — 켜지면 pg_pubsub._dispatch_received()와 동형으로 실 전달까지 한다.
+
+    self-skip: payload.instance_id(자기 자신이 발행한 이벤트)면 skip — PG NOTIFY의 동일 로직과
+    대칭(_dispatch_received). ⚠️outbox_dispatcher_loop 발행분은 instance_id=None이라 self-skip
+    신호가 없다 — event_broker_outbox_enabled와 dispatch_enabled를 동시에 켜면 중복 dispatch
+    위험(3b에서 해소 예정, 그 전까지 둘을 동시에 켜지 말 것).
+
     listen_loop()(pg_pubsub.py)과 동형 재연결 구조(1s→2s→4s→max 30s backoff).
     """
     import json
 
     from app.core.config import settings
+    from app.services.pg_pubsub import INSTANCE_ID
 
     if not settings.redis_url:
-        logger.warning("event_broker redis shadow consume skipped: redis_url not configured")
+        logger.warning("event_broker redis consume skipped: redis_url not configured")
         return
 
     delay = 1.0
-    logger.info("event_broker redis shadow consume starting")
+    logger.info("event_broker redis consume starting (dispatch_enabled=%s)", settings.event_broker_redis_dispatch_enabled)
 
     while True:
         pubsub = None
@@ -252,7 +287,7 @@ async def redis_shadow_consume_loop() -> None:
             pubsub = client.pubsub()
             await pubsub.psubscribe("org:*:invalidation", "agent:*")
             delay = 1.0
-            logger.info("event_broker redis shadow consume connected")
+            logger.info("event_broker redis consume connected")
             async for message in pubsub.listen():
                 if message.get("type") not in ("pmessage", "message"):
                     continue
@@ -260,27 +295,46 @@ async def redis_shadow_consume_loop() -> None:
                     payload = json.loads(message["data"])
                 except (TypeError, ValueError):
                     continue
+
                 event_id = payload.get("_broker_event_id")
-                if not event_id:
+                if event_id:
+                    received_at = time.monotonic()
+                    pg_arrived_at = _pg_arrivals.get(event_id)
+                    if pg_arrived_at is not None:
+                        logger.info(
+                            "event_broker shadow: redis+pg both delivered event_id=%s latency_delta=%.3fs",
+                            event_id, received_at - pg_arrived_at,
+                        )
+                    else:
+                        logger.info(
+                            "event_broker shadow: redis-only delivery event_id=%s (pg 미도착/유실 가능)",
+                            event_id,
+                        )
+
+                if not settings.event_broker_redis_dispatch_enabled:
                     continue
-                received_at = time.monotonic()
-                pg_arrived_at = _pg_arrivals.get(event_id)
-                if pg_arrived_at is not None:
-                    logger.info(
-                        "event_broker shadow: redis+pg both delivered event_id=%s latency_delta=%.3fs",
-                        event_id, received_at - pg_arrived_at,
-                    )
-                else:
-                    logger.info(
-                        "event_broker shadow: redis-only delivery event_id=%s (pg 미도착/유실 가능)",
-                        event_id,
-                    )
+
+                if payload.get("instance_id") == INSTANCE_ID:
+                    continue  # 자기 자신이 발행한 이벤트 skip(_dispatch_received 동형)
+
+                target = payload.get("target")
+                target_id = str(payload.get("target_id", ""))
+                event_type = str(payload.get("event_type", ""))
+                data = payload.get("data") or {}
+                try:
+                    from app.routers.events import _push_to_agent, publish_event
+                    if target == "org":
+                        publish_event(target_id, event_type, data, _from_listener=True)
+                    elif target == "agent":
+                        _push_to_agent(target_id, data, _from_listener=True)
+                except Exception as exc:
+                    logger.warning("event_broker redis dispatch failed target=%s: %s", target, exc)
         except asyncio.CancelledError:
-            logger.info("event_broker redis shadow consume cancelled — shutting down")
+            logger.info("event_broker redis consume cancelled — shutting down")
             break
         except Exception as exc:
             logger.warning(
-                "event_broker redis shadow consume error: %s — reconnecting in %.1fs", exc, delay
+                "event_broker redis consume error: %s — reconnecting in %.1fs", exc, delay
             )
             await asyncio.sleep(delay)
             delay = min(delay * 2, 30)
@@ -302,7 +356,7 @@ async def outbox_dispatcher_loop() -> None:
     """`event_outbox`의 미발행 row를 폴링해 Redis로 발행 — 3a단계 dispatcher.
 
     `FOR UPDATE SKIP LOCKED`로 멀티인스턴스 동시 폴링 시 중복발행을 방지한다(표준 outbox
-    패턴). listen_loop()/redis_shadow_consume_loop()와 동형 에러 backoff(1s→2s→...→30s) —
+    패턴). listen_loop()/redis_consume_loop()와 동형 에러 backoff(1s→2s→...→30s) —
     정상 시엔 고정 폴링 간격(`_OUTBOX_POLL_INTERVAL`)으로 반복한다.
 
     ⚠️ `event_broker_redis_dual_publish_enabled`와 `event_broker_outbox_enabled`를 동시에
@@ -349,9 +403,21 @@ async def outbox_dispatcher_loop() -> None:
                 client = _get_redis_client()
                 now = datetime.now(timezone.utc)
                 for row in rows:
-                    payload = _slim_org_payload(row.payload) if row.target == "org" else dict(row.payload)
-                    payload["event_type"] = row.event_type
-                    payload["_broker_event_id"] = str(row.id)
+                    inner = _slim_org_payload(row.payload) if row.target == "org" else dict(row.payload)
+                    # pg_notify()/_redis_publish()와 동형 envelope(파싱 대칭) — instance_id는
+                    # 의도적으로 None: outbox row는 폴링한 인스턴스가 원발행 인스턴스와 다를 수
+                    # 있어(dispatcher가 어느 인스턴스에서 돌든 같은 DB row를 픽업) 신뢰 가능한
+                    # self-skip 신호가 없다. ⚠️알려진 갭(3b에서 해소 예정) — 이 경로가 아직 실
+                    # dispatch로 승격 안 된 이유이기도 하다(event_broker_redis_dispatch_enabled
+                    # 를 outbox_enabled와 함께 켜면 self-skip 누락으로 인한 중복 dispatch 위험).
+                    payload = {
+                        "instance_id": None,
+                        "target": row.target,
+                        "target_id": str(row.target_id),
+                        "event_type": row.event_type,
+                        "_broker_event_id": str(row.id),
+                        "data": inner,
+                    }
                     try:
                         await client.publish(
                             _redis_channel(row.target, str(row.target_id)),

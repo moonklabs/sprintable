@@ -97,6 +97,16 @@ class Settings(BaseSettings):
     event_broker_redis_dual_publish_enabled: bool = False
     redis_url: str | None = None  # Memorystore 연결 문자열(공유 — event_broker + RedisRateLimiter). flag on인데 None이면 경고 로그만(fail-safe).
 
+    # E-ARCH S2 근본 정정(2026-07-21, 착수 전 확認 — shadow-consume은 "도달" 관측이지 "전달"이
+    # 아니었다): 원래 redis_consume_loop(구 redis_shadow_consume_loop)은 로그만 남기고
+    # publish_event()/_push_to_agent()를 호출 안 했다 — 그 상태에서 PG_LISTEN_ENABLED=false로
+    # LISTEN을 걷으면 Redis 발행은 되는데 아무도 안 받아 실시간이 전면 정지했을 것. 이 플래그가
+    # 켜지면 그 loop이 실제로 SSE 큐까지 전달한다(self-skip 포함, pg_pubsub._dispatch_received
+    # 와 동형). default=False — event_broker_redis_dual_publish_enabled만으로는 여전히 관측만
+    # (무회귀). ⚠️event_broker_outbox_enabled와 동시에 켜지 말 것 — outbox 발행분은
+    # instance_id가 없어 self-skip이 안 돼 중복 dispatch 위험(3b에서 해소 예정).
+    event_broker_redis_dispatch_enabled: bool = False
+
     # E-ARCH S3(story #2078) 3a단계: `event_outbox` row insert를 EventBroker.publish()에 추가로
     # 얹는다(호출 타이밍은 안 바뀜 — 여전히 caller commit 이후, 별도 짧은 트랜잭션이라 아직 진짜
     # atomic outbox는 아님). default=False(무회귀) — 켜지기 전엔 OutboxEventBroker가 inner
