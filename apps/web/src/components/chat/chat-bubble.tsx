@@ -12,6 +12,7 @@ import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { AssetEmbedCard } from '@/components/chat/asset-embed-card';
 import { getFileIcon } from '@/lib/file-icon';
 import { AttachmentImage } from './attachment-image';
+import { AttachmentMedia } from './attachment-media';
 import { AttachmentFile } from './attachment-file';
 import { MessageContextMenu } from './message-context-menu';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
@@ -330,7 +331,8 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
           )}
 
           {/* Attachments — a54ddc16: auth-gated 서명 라우트 경유(public 직링크 미사용).
-              이미지=AttachmentImage(3상태 render)·그 외=AttachmentFile(클릭 시 서명 다운로드). */}
+              이미지=AttachmentImage(3상태 render)·오디오/비디오=AttachmentMedia(story #2051,
+              [재생] 누르기 전엔 fetch 0)·그 외=AttachmentFile(클릭 시 서명 다운로드). */}
           {message.attachments && message.attachments.length > 0 && (
             <div className="flex flex-col gap-1.5">
               {message.attachments.map((att, i) => {
@@ -340,6 +342,19 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
                 const isImage = att.content_type?.startsWith('image/');
                 if (isImage) {
                   return <AttachmentImage key={href ?? i} storedUrl={href} conversationId={message.memo_id} alt={label} />;
+                }
+                const isAudio = att.content_type?.startsWith('audio/');
+                const isVideo = att.content_type?.startsWith('video/');
+                if (isAudio || isVideo) {
+                  return (
+                    <AttachmentMedia
+                      key={href ?? i}
+                      storedUrl={href}
+                      conversationId={message.memo_id}
+                      label={label}
+                      kind={isAudio ? 'audio' : 'video'}
+                    />
+                  );
                 }
                 return (
                   <AttachmentFile

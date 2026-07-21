@@ -1,10 +1,12 @@
-import { File, FileCode, FileText, Image as ImageIcon, type LucideIcon } from 'lucide-react';
+import { File, FileCode, FileText, Film, Image as ImageIcon, Music, type LucideIcon } from 'lucide-react';
 
 // chat-attach: content_type → 표시 아이콘 매핑 (chat-input pending 칩 / chat-bubble 파일 칩 공용).
-// image → ImageIcon / pdf·text·csv·md → FileText / code → FileCode / 기타 → File
+// image → ImageIcon / audio → Music / video → Film / pdf·text·csv·md → FileText / code → FileCode / 기타 → File
 export function getFileIcon(contentType?: string | null): LucideIcon {
   const ct = (contentType ?? '').toLowerCase();
   if (ct.startsWith('image/')) return ImageIcon;
+  if (ct.startsWith('audio/')) return Music;
+  if (ct.startsWith('video/')) return Film;
   if (ct === 'application/pdf' || ct.startsWith('text/')) return FileText;
   if (
     ct.includes('javascript') ||
