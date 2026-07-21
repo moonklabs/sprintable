@@ -1890,7 +1890,31 @@
     "invalidToken": "Invalid invitation link.",
     "acceptFailed": "Failed to accept invitation.",
     "accepting": "Accepting invitation...",
-    "authFailed": "Authentication failed. Please try again."
+    "authFailed": "Authentication failed. Please try again.",
+    "backToLogin": "Go to login →",
+    "joinedOrg": "You've joined {org}",
+    "joinHeadingLine2": "Join this organization",
+    "invitedByPerson": "{name} invited you",
+    "invitedByOrgFallback": "Invited by {org}",
+    "namePlaceholder": "Name",
+    "tosAgreement": "I agree to the Terms of Service and Privacy Policy",
+    "joining": "Joining…",
+    "submit": "Join",
+    "invitedByOrg": "Invited by {org}.",
+    "signupEmail": "You'll sign up with {email}.",
+    "decline": "Decline (for now)"
+  },
+  "resetPassword": {
+    "title": "Set a new password",
+    "placeholder": "New password",
+    "submit": "Change password",
+    "submitting": "Changing…",
+    "done": "Your password has been changed.",
+    "mfaReenroll": "Please set up two-factor authentication again.",
+    "invalidLink": "This link has expired or is invalid.",
+    "strengthHint": "At least 3 of: uppercase, lowercase, number, symbol ({met}/3)",
+    "lengthHint": "At least 8 characters",
+    "submitFailed": "Couldn't change the password. Please try again in a moment."
   },
   "mockup": {
     "title": "Mockups",
