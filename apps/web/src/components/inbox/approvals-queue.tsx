@@ -58,7 +58,13 @@ function formatAge(createdAt: string, t: ReturnType<typeof useTranslations>): st
 export function ApprovalsQueue() {
   const t = useTranslations('cage');
   const router = useRouter();
-  const { orgMemberships } = useDashboardContext();
+  // story #2103 — BE `PATCH /api/v1/hitl-requests/{id}`가 human-only 불변식이다(gates.py
+  // transition_gate_endpoint와 동형, resolved.type != "human" → 403). #2091(게이트 상세)과
+  // 같은 버그클래스: 이 큐는 그 판정을 미리 안 보고 에이전트 계정에도 승인/반려 버튼을
+  // 무조건 열었다. Gate와 달리 HitlInboxItem엔 per-item can_approve 필드가 없어(BE 응답
+  // shape 차이) 계정 자체의 type(human/agent, DashboardContext #2103 신규)으로 게이팅한다.
+  const { orgMemberships, currentMemberType } = useDashboardContext();
+  const canResolveHitl = currentMemberType === 'human';
   const [items, setItems] = useState<GateInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [resolving, setResolving] = useState<string | null>(null);
@@ -112,28 +118,32 @@ export function ApprovalsQueue() {
               </div>
               <p className="text-sm text-foreground">{item.title}</p>
               <p className="line-clamp-2 text-[11px] text-muted-foreground">{item.prompt}</p>
-              <div className="mt-1 flex justify-end gap-1.5">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 gap-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  disabled={resolving === item.id}
-                  onClick={() => void resolveHitl(item.id, 'rejected')}
-                >
-                  <XCircle className="size-3.5" />
-                  {t('gateReject')}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 gap-1 text-success hover:bg-success-tint hover:text-success"
-                  disabled={resolving === item.id}
-                  onClick={() => void resolveHitl(item.id, 'approved')}
-                >
-                  <CheckCircle className="size-3.5" />
-                  {t('gateApprove')}
-                </Button>
-              </div>
+              {canResolveHitl ? (
+                <div className="mt-1 flex justify-end gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 gap-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    disabled={resolving === item.id}
+                    onClick={() => void resolveHitl(item.id, 'rejected')}
+                  >
+                    <XCircle className="size-3.5" />
+                    {t('gateReject')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 gap-1 text-success hover:bg-success-tint hover:text-success"
+                    disabled={resolving === item.id}
+                    onClick={() => void resolveHitl(item.id, 'approved')}
+                  >
+                    <CheckCircle className="size-3.5" />
+                    {t('gateApprove')}
+                  </Button>
+                </div>
+              ) : (
+                <p className="mt-1 text-right text-[11px] text-muted-foreground">{t('gateReadonlyNotAuthorized')}</p>
+              )}
             </div>
           );
         }

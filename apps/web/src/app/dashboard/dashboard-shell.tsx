@@ -41,6 +41,10 @@ interface DashboardContext {
   currentProjectSlug?: string;
   userName?: string;
   role?: string;
+  // story #2103 — BE가 여러 write action을 "휴먼 멤버만 가능"으로 명시 거부한다(게이트/HITL
+  // 승인·거부, 각종 삭제 등). URL과 무관한 순수 계정 속성이라 #2093의 pathOrgId류와 달리
+  // 별도 override가 필요 없다 — 항상 서버 me.type 그대로.
+  currentMemberType?: 'human' | 'agent';
   projectMemberships: DashboardProjectOption[];
   orgMemberships: OrgSwitcherItem[];
 }
@@ -203,6 +207,7 @@ export function DashboardShell({
   currentProjectSlug,
   userName,
   role,
+  currentMemberType,
   projectMemberships,
   orgMemberships,
   pathOrgId,
@@ -231,7 +236,7 @@ export function DashboardShell({
   const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
 
   return (
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, projectMemberships, orgMemberships }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
