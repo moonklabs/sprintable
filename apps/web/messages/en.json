@@ -3599,6 +3599,7 @@
     "gateReadonlyBlock": "Auto-blocked · read-only",
     "gateReadonlyAuto": "Auto-passed · no action needed",
     "gateReadonlyNoVerdict": "No verdict recorded · nothing to review",
+    "gateReadonlyNotAuthorized": "You don't have permission to approve this gate",
     "mergeGateTitle": "Merge gate",
     "outcomeTrustLabel": "Outcome trust",
     "outcomeSummary": "{hit} hit · {resolved} resolved · last {days}d",

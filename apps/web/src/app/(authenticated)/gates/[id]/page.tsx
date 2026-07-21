@@ -88,6 +88,16 @@ export default function GateDetailPage() {
   const isDocGate = gate?.work_item_type === 'doc' || gate?.gate_type === 'doc_approval';
   const isCanonicalizeGate = gate?.gate_type === 'artifact_canonicalize';
   const needsAction = !!gate && gate.status === 'pending' && (gateNeedsAction(gate) || isDocGate || isCanonicalizeGate);
+  // story #2091(P0) — needsAction은 "이 게이트가 사람의 판단을 필요로 하는가"만 답한다(gate 자체의
+  // 속성). "이 화면을 보는 나(caller)에게 승인 권한이 있는가"는 별개 질문인데 여태 이 둘을 섞어서
+  // needsAction=true이면 무조건 버튼을 열었다 — 오르테가군이 라이브에서 직접 재현(까심군이 잡은
+  // can_approve:false ↔ 버튼 노출 불일치의 근본): 에이전트 계정이 이 화면에 들어오면 BE는
+  // `POST .../transition`을 403으로 정확히 거부하는데(휴먼 전용, rule A) 화면은 버튼을 계속
+  // 보여줬다 — "눌렀는데 실패"가 아니라 "내가 승인할 수 있다고 믿게 되는" 더 나쁜 형태(유나양
+  // §1-1). 서버가 준 gate.can_approve(BE per-caller 판정)를 근거로만 버튼을 열고 닫는다 — 화면이
+  // 독자 판정으로 서버를 덮지 않는다(AC2). needsAction=true인데 can_approve=false면(권한 없는
+  // 뷰어) 아래에서 읽기전용 사유 문구로 분기한다(무권한 상태에서 액션 버튼 자체를 렌더하지 않음).
+  const canAct = needsAction && gate?.can_approve === true;
 
   const transition = useCallback(async (status: 'approved' | 'rejected', note?: string) => {
     if (!gate) return;
@@ -181,6 +191,15 @@ export default function GateDetailPage() {
                     : gateDecision(gate) === 'auto_merge' ? t('gateReadonlyAuto')
                     : t('gateReadonlyNoVerdict')}
                 </p>
+              </div>
+            ) : !canAct ? (
+              // story #2091(P0) — needsAction=true(게이트 자체는 사람 판단이 필요)이지만
+              // gate.can_approve=false(이 caller는 승인 권한 없음, BE per-caller 판정). 액션
+              // 버튼을 렌더하지 않고 왜 못 누르는지를 정직하게 알린다 — "이미 처리됨"과는
+              // 다른 사유이므로 별개 문구(gateReadonlyNotAuthorized)를 쓴다.
+              <div className="space-y-3">
+                <GateEvidence gate={gate} />
+                <p className="text-[11px] text-muted-foreground">{t('gateReadonlyNotAuthorized')}</p>
               </div>
             ) : usesSignatureFlow(deriveRiskLevel(gate)) ? (
               <GateSignatureApproval
