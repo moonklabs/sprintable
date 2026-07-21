@@ -45,7 +45,14 @@ _SERVICE_SCRIPT_MAP: dict[str, list[str]] = {
 _KEY_RE = re.compile(r"([A-Z][A-Z0-9_]*)=")
 
 # ③ 평문 시크릿 형태 검출 — 알려진 시크릿 프리픽스 패턴. 새 프리픽스가 생기면 여기 추가.
-_SECRET_SHAPE_RE = re.compile(r"^sk_live_[A-Za-z0-9]{15,}$")
+# ⚠️ 오르테가군 지적(2026-07-22): 앵커(^...$)는 값이 정확히 그 형태일 때만 잡는다 —
+# `Bearer sk_live_...`나 URL 쿼리 파라미터·JSON 안에 박혀 있으면 통과해버린다(mcp-dev
+# 사고가 마침 단독 값이었을 뿐, 다음엔 다른 형태로 샐 수 있다). search()로 값 어디에
+# 박혀 있든 잡히게 무앵커로 바꿨다 — `sk_live_`+15자 이상 영숫자가 우연히 등장할 값은
+# 사실상 없어 오탐 위험은 낮다.
+# ⚠️ 한계(현재 스코프 밖, 기록만): `sk_live_` 프리픽스만 검출한다 — `sk_test_`·GitHub
+# 토큰·GCP 키 등 다른 시크릿 형태는 이 패턴으로 못 잡는다(스코프 확대는 후속).
+_SECRET_SHAPE_RE = re.compile(r"sk_live_[A-Za-z0-9]{15,}")
 
 
 def _run(cmd: list[str]) -> str:
@@ -108,7 +115,7 @@ def _plain_secret_shaped_keys(service: str) -> list[str]:
     hits = []
     for entry in envs:
         value = entry.get("value")
-        if value is not None and _SECRET_SHAPE_RE.match(value):
+        if value is not None and _SECRET_SHAPE_RE.search(value):
             hits.append(entry["name"])
     return hits
 
