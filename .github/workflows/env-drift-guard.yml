@@ -1,0 +1,94 @@
+name: Env Drift Guard
+
+# ⓒ 라이브 env 드리프트 가드 — 설계 doc env-drift-guard-design(26c673c2) 구현 순서 3단계.
+# 기존 ci.yml(PR 게이트)/cloud-build.yml(배포 트리거) 안에 넣지 않는다 — 독립 스케줄
+# 워크플로우로 둬야 PR/배포 예산과 안 섞인다(설계 doc "운영축" 그대로).
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 매일 00:00 UTC(=09:00 KST) 1회
+  workflow_dispatch: {}  # prod 승격 직전 등 온디맨드 수동 트리거
+
+concurrency:
+  group: env-drift-guard
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write  # Workload Identity Federation
+
+jobs:
+  drift-check:
+    name: Check live env drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 5  # 설계 doc 비용축 목표(1분 미만) + 여유
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # cloud-build.yml과 동일 WIF 패턴 재사용 — 신규 시크릿 불필요(이미 존재).
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install --quiet pyyaml
+
+      # ⚠️ 값 자체는 여기서도 절대 로그에 안 남는다(check_env_drift.py가 매치 여부만 반환) —
+      # 이 스텝 출력이 그대로 GHA 로그·아티팩트가 되니, 스크립트 쪽 보장이 이 워크플로우
+      # 전체의 보장이기도 하다(설계 doc "③" 축 요구사항).
+      - name: Run drift check
+        id: drift
+        run: python3 infra/check_env_drift.py
+
+      # FAIL 시에만 실행 — 알림 전용이 아니라 Sprintable story까지 같이 남긴다(설계 doc
+      # "운영축": 알림 전용은 시간 지나면 흘려보내진다 — 보드에 남아야 판정·종결 규율이 생긴다).
+      #
+      # ⚠️ 아래 두 시크릿(ENV_DRIFT_GUARD_DISCORD_WEBHOOK_URL·SPRINTABLE_DRIFT_GUARD_API_KEY)은
+      # 이 PR 시점 기준 리포에 아직 등록돼 있지 않다 — repo secret 추가는 PO/인프라 lane
+      # (feedback_infra_is_po_lane)이라 이 커밋만으로는 완결되지 않는다. 미등록 상태에서도
+      # drift-check 스텝 자체(핵심 감시 기능)는 정상 동작 — 알림만 조용히 스킵된다
+      # (curl -f 없이 빈 문자열 URL로는 실패하도록 explicit guard).
+      - name: Notify on drift (Discord + Sprintable story)
+        if: failure() && steps.drift.outcome == 'failure'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.ENV_DRIFT_GUARD_DISCORD_WEBHOOK_URL }}
+          SPRINTABLE_API_KEY: ${{ secrets.SPRINTABLE_DRIFT_GUARD_API_KEY }}
+          SPRINTABLE_API_BASE: ${{ secrets.SPRINTABLE_API_BASE_URL }}
+          SPRINTABLE_PROJECT_ID: ${{ secrets.SPRINTABLE_PROJECT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "⚠️ ENV_DRIFT_GUARD_DISCORD_WEBHOOK_URL 미등록 — Discord 알림 스킵(PO 시크릿 등록 필요)."
+          else
+            curl -fsS -X POST "${DISCORD_WEBHOOK_URL}" \
+              -H "Content-Type: application/json" \
+              -d "$(printf '{"content":"⛔ env 드리프트 가드 FAIL — 상세: %s"}' "${RUN_URL}")"
+          fi
+
+          if [ -z "${SPRINTABLE_API_KEY:-}" ] || [ -z "${SPRINTABLE_API_BASE:-}" ] || [ -z "${SPRINTABLE_PROJECT_ID:-}" ]; then
+            echo "⚠️ Sprintable API 시크릿 미등록 — story 자동생성 스킵(PO 시크릿 등록 필요)."
+          else
+            BODY=$(jq -n \
+              --arg project_id "${SPRINTABLE_PROJECT_ID}" \
+              --arg title "env 드리프트 가드 FAIL — 라이브 env 확認 필요" \
+              --arg description "GHA env-drift-guard 스케줄 실행에서 드리프트 발견. 상세: ${RUN_URL}" \
+              '{project_id: $project_id, title: $title, description: $description, priority: "high", status: "backlog"}')
+            curl -fsS -X POST "${SPRINTABLE_API_BASE}/api/v2/stories" \
+              -H "Authorization: Bearer ${SPRINTABLE_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "${BODY}"
+          fi
