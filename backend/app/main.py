@@ -48,14 +48,19 @@ async def lifespan(app: FastAPI):
         from app.services.l2_trigger_worker import L2TriggerWorker
 
         l2_task = asyncio.create_task(L2TriggerWorker().run())
-    # E-ARCH S2(story #2078): shadow-consume은 event_broker_redis_dual_publish_enabled(default
-    # False)일 때만 task 생성 — Memorystore 미배선 상태(redis_url=None)에서도 이 브랜치 자체가
-    # 안 돌아 무해(플래그가 꺼져 있으면 event_broker.py의 redis_url 가드에도 안 닿는다).
+    # E-ARCH S2/S3(story #2078): redis_consume_loop은 event_broker_redis_dual_publish_enabled
+    # (default False)일 때만 task 생성 — Memorystore 미배선 상태(redis_url=None)에서도 이
+    # 브랜치 자체가 안 돌아 무해. ⚠️이 loop은 두 가지 일을 한다 — (1) 항상: PG 도착 기록과
+    # 대조해 지연Δ 로그(관측) (2) event_broker_redis_dispatch_enabled(default False, 별개
+    # 게이트)도 켜지면 publish_event()/_push_to_agent()를 실제로 호출해 SSE로 전달(실
+    # dispatch). dispatch_enabled가 꺼진 동안은 (1)뿐이라 무회귀 — PG LISTEN이 여전히 유일한
+    # 실 dispatch 경로. dispatch_enabled를 켜야 비로소 PG_LISTEN_ENABLED=false(LISTEN 제거)가
+    # 안전해진다(순서 중요 — 착수 전 확認 2026-07-21).
     redis_shadow_task = None
     if settings.event_broker_redis_dual_publish_enabled:
-        from app.services.event_broker import redis_shadow_consume_loop
+        from app.services.event_broker import redis_consume_loop
 
-        redis_shadow_task = asyncio.create_task(redis_shadow_consume_loop())
+        redis_shadow_task = asyncio.create_task(redis_consume_loop())
     # E-ARCH S3(story #2078) 3a단계: outbox dispatcher는 event_broker_outbox_enabled(default
     # False)일 때만 task 생성 — 꺼져 있으면 event_outbox row 자체가 안 쌓이니(OutboxEventBroker
     # 가 insert를 스킵) 폴링할 게 없다. redis_shadow_task와 별개 게이트(outbox insert가 켜졌다고
