@@ -15,6 +15,10 @@
 #   GCP_REGION    (기본: asia-northeast3)
 #   COMMIT_SHA    [필수] 배포할 이미지 태그
 #   ENV           dev|prod (또는 첫 번째 인자)
+#   DRY_RUN       1이면 실 배포(gcloud run deploy) 없이 resolved config만 stdout 출력
+#                 (story #2098, 드리프트 가드 ②값 대조 축용 — deploy_backend.sh와 동형).
+#                 prod의 NEXT_PUBLIC_FASTAPI_URL 동적 discovery(아래) 자체는 read-only
+#                 gcloud describe라 DRY_RUN에서도 그대로 수행(실 배포만 스킵).
 
 set -euo pipefail
 
@@ -22,7 +26,13 @@ GCP_PROJECT="${GCP_PROJECT:-sprintable-494803}"
 GCP_REGION="${GCP_REGION:-asia-northeast3}"
 AR_REPO="${AR_REPO:-sprintable}"
 ENV="${1:-${ENV:-dev}}"
-COMMIT_SHA="${COMMIT_SHA:?COMMIT_SHA is required}"
+DRY_RUN="${DRY_RUN:-0}"
+# DRY_RUN(검증 전용)에서는 실제 이미지 태그가 필요 없으므로 COMMIT_SHA를 강제하지 않는다.
+if [ "${DRY_RUN}" = "1" ]; then
+    COMMIT_SHA="${COMMIT_SHA:-dry-run-placeholder}"
+else
+    COMMIT_SHA="${COMMIT_SHA:?COMMIT_SHA is required}"
+fi
 
 IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/frontend:${COMMIT_SHA}"
 
@@ -81,6 +91,23 @@ if [[ -z "${FASTAPI_URL}" ]]; then
     log "WARNING: FastAPI service '${FASTAPI_SERVICE}' not found. NEXT_PUBLIC_FASTAPI_URL will be empty."
 fi
 
+ENV_VARS_SPEC="NODE_ENV=production,NEXT_TELEMETRY_DISABLED=1,NEXT_PUBLIC_FASTAPI_URL=${FASTAPI_URL}"
+SECRETS_SPEC="NEXT_PUBLIC_SUPABASE_URL=NEXT_PUBLIC_SUPABASE_URL:latest,NEXT_PUBLIC_SUPABASE_ANON_KEY=NEXT_PUBLIC_SUPABASE_ANON_KEY:latest,JWT_SECRET=JWT_SECRET:latest${COOKIE_DOMAIN_SECRET_SPEC}"
+
+if [ "${DRY_RUN}" = "1" ]; then
+    cat <<EOF
+ENV=${ENV}
+SERVICE_NAME=${SERVICE_NAME}
+IMAGE=${IMAGE}
+RUNTIME_SA=${RUNTIME_SA}
+MIN_INSTANCES=${MIN_INSTANCES}
+MAX_INSTANCES=${MAX_INSTANCES}
+ENV_VARS_SPEC=${ENV_VARS_SPEC}
+SECRETS_SPEC=${SECRETS_SPEC}
+EOF
+    exit 0
+fi
+
 # ⛔story cd10e123 계열 긴급수정(2026-07-21, durable-wiring 전수 스윕 ⓐ): deploy_backend.sh와
 # 동형 결함 — --set-env-vars/--set-secrets(전체교체)로 재실행되면 cloudbuild.yaml deploy-frontend
 # 스텝이 additive로 쌓아온 REALTIME_URL 등이 소실된다. --update-*(additive)로 교정.
@@ -98,11 +125,8 @@ gcloud run deploy "${SERVICE_NAME}" \
     --max-instances="${MAX_INSTANCES}" \
     --concurrency=80 \
     --timeout=60 \
-    --update-env-vars="NODE_ENV=production,NEXT_TELEMETRY_DISABLED=1,NEXT_PUBLIC_FASTAPI_URL=${FASTAPI_URL}" \
-    --update-secrets="\
-NEXT_PUBLIC_SUPABASE_URL=NEXT_PUBLIC_SUPABASE_URL:latest,\
-NEXT_PUBLIC_SUPABASE_ANON_KEY=NEXT_PUBLIC_SUPABASE_ANON_KEY:latest,\
-JWT_SECRET=JWT_SECRET:latest${COOKIE_DOMAIN_SECRET_SPEC}" \
+    --update-env-vars="${ENV_VARS_SPEC}" \
+    --update-secrets="${SECRETS_SPEC}" \
     --cpu-boost
 
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \

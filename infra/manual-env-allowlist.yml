@@ -355,6 +355,18 @@ services:
       - key: SUPABASE_SERVICE_ROLE_KEY
         reason: Supabase 서비스 롤 키 — 부트스트랩 스크립트 미편입, prod-only.
         owner: TBD
+      - key: NEXT_PUBLIC_FASTAPI_URL
+        value_check: skip
+        reason: >-
+          story #2098 구현 중 실측(2026-07-22)으로 발견 — deploy_frontend.sh prod의
+          동적 discovery(`gcloud run services describe backend-prod --format=value(status.url)`)가
+          현재 hash 포맷 URL(`sprintable-backend-prod-57iommnikq-du.a.run.app`)을 반환하는데,
+          라이브 값은 project-number 포맷(`sprintable-backend-prod-787818285179.
+          asia-northeast3.run.app`)이다. 둘 다 curl 200 확認(같은 서비스의 유효한 별칭
+          URL 두 형태) — 재배포해도 기능상 무해하나 표기가 바뀌는 것뿐이라 `skip`.
+          이 키 자체가 스코프 밖인 게 아니라(①은 이미 IaC-covered라 entry 불필요),
+          ②값 대조 축에서만 의도적 예외.
+        owner: TBD
 
   # sprintable-mcp-dev / sprintable-mcp-prod: 실측 결과 라이브 키 전부(MCP_TRANSPORT·
   # SPRINTABLE_API_URL·AGENT_API_KEY·[prod만]MCP_ALLOWED_HOSTS) deploy_mcp_dev.sh/

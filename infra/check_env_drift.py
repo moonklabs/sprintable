@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""ⓒ 라이브 env 드리프트 가드 — ①키집합 대조 + ③평문 시크릿 형태 검출.
+"""ⓒ 라이브 env 드리프트 가드 — ①키집합 대조 + ②값 대조(story #2098) + ③평문 시크릿 형태 검출.
 
 라이브 Cloud Run 서비스의 env var 키 이름 전체가 (IaC 선언 키 ∪ manual-env-allowlist.yml)
 안에 있는지 확認한다(①). 서비스 목록은 `gcloud run services list`로 매 실행 동적 열거 —
 하드코딩하지 않는다(mcp-dev 키 유출 사건이 "아무도 안 본 서비스"에서 났다는 교훈).
+
+②(값 대조)는 DRY_RUN을 지원하는 deploy_backend.sh/deploy_frontend.sh 대상(backend-dev/prod,
+frontend-dev/prod)만 커버한다 — #2381이 잡은 APP_ENV/FRONTEND_URL/COOKIE_DOMAIN류 버그가
+정확히 이 두 스크립트의 계산값 클래스였다. realtime-dev(cloudbuild.yaml 단일 소스)·
+mcp-dev/prod(항상 `--set-env-vars` 전체교체라 additive-drift 리스크 자체가 낮음)는 이번
+스코프 밖 — 후속으로 넓힐 수 있음(못 잡는 것을 못 잡는다고 적어두는 것).
 
 ⛔ ③(평문 시크릿 형태 검출)은 excluded_services 여부와 무관하게 **전 서비스**에 적용한다 —
 ①②축은 "이 repo의 IaC로 대조 불가"라는 이유로 뺄 수 있지만, ③은 라이브 env value만 보면
@@ -19,6 +25,8 @@ exit code: 0=드리프트 없음, 1=드리프트 발견(FAIL 상세를 stdout에
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 import subprocess
 import sys
@@ -40,6 +48,14 @@ _SERVICE_SCRIPT_MAP: dict[str, list[str]] = {
     "sprintable-frontend-prod": ["backend/scripts/deploy_frontend.sh"],
     "sprintable-mcp-dev": ["backend/scripts/deploy_mcp_dev.sh"],
     "sprintable-mcp-prod": ["backend/scripts/deploy_mcp_prod.sh"],
+}
+
+# ② 값 대조 대상 — DRY_RUN=1로 ENV_VARS_SPEC을 stdout에 뽑아낼 수 있는 스크립트만.
+_SERVICE_DRY_RUN_MAP: dict[str, tuple[str, str]] = {
+    "sprintable-backend-dev": ("backend/scripts/deploy_backend.sh", "dev"),
+    "sprintable-backend-prod": ("backend/scripts/deploy_backend.sh", "prod"),
+    "sprintable-frontend-dev": ("backend/scripts/deploy_frontend.sh", "dev"),
+    "sprintable-frontend-prod": ("backend/scripts/deploy_frontend.sh", "prod"),
 }
 
 _KEY_RE = re.compile(r"([A-Z][A-Z0-9_]*)=")
@@ -82,24 +98,8 @@ def _list_live_services() -> list[str]:
     return [line.strip() for line in out.splitlines() if line.strip()]
 
 
-def _live_env_keys(service: str) -> set[str]:
-    out = _run([
-        "gcloud", "run", "services", "describe", service,
-        f"--region={_REGION}",
-        "--format=value(spec.template.spec.containers[0].env[].name)",
-    ])
-    if not out:
-        return set()
-    return {k.strip() for k in out.split(";") if k.strip()}
-
-
-def _plain_secret_shaped_keys(service: str) -> list[str]:
-    """③ — plain(비-secretKeyRef) env value가 알려진 시크릿 형태와 일치하는 키 이름만 반환.
-
-    값 자체는 이 함수 밖으로 절대 나가지 않는다(정규식 매치 결과 bool만 사용) — 호출부는
-    반환된 키 이름과 서비스만 로그에 남긴다."""
-    import json as _json
-
+def _live_env_entries(service: str) -> list[dict]:
+    """서비스의 raw env 리스트(name + value 또는 valueFrom) — ②③이 공유."""
     out = _run([
         "gcloud", "run", "services", "describe", service,
         f"--region={_REGION}",
@@ -107,17 +107,64 @@ def _plain_secret_shaped_keys(service: str) -> list[str]:
     ])
     if not out:
         return []
-    data = _json.loads(out)
-    envs = (
+    data = json.loads(out)
+    return (
         data.get("spec", {}).get("template", {}).get("spec", {})
         .get("containers", [{}])[0].get("env", [])
     )
+
+
+def _plain_secret_shaped_keys(envs: list[dict]) -> list[str]:
+    """③ — plain(비-secretKeyRef) env value가 알려진 시크릿 형태와 일치하는 키 이름만 반환.
+
+    값 자체는 이 함수 밖으로 절대 나가지 않는다(정규식 매치 결과 bool만 사용) — 호출부는
+    반환된 키 이름과 서비스만 로그에 남긴다."""
     hits = []
     for entry in envs:
         value = entry.get("value")
         if value is not None and _SECRET_SHAPE_RE.search(value):
             hits.append(entry["name"])
     return hits
+
+
+def _live_plain_env_values(envs: list[dict]) -> dict[str, str]:
+    """② 대조용 — plain(비-secretKeyRef) env만 key→value. secretKeyRef는 값이 안 보이니
+    비교 대상이 아니다(① 키집합 대조가 그 존재 자체는 이미 커버)."""
+    return {e["name"]: e["value"] for e in envs if e.get("value") is not None}
+
+
+def _parse_key_value_spec(spec: str) -> dict[str, str]:
+    """`KEY1=val1,KEY2=val2` 또는 `^@^KEY1=val1@KEY2=val2` 류 구분자 무관 파싱.
+
+    `_extract_keys_from_text`와 동일 전제(`[A-Z][A-Z0-9_]*=` 위치 기준) — 각 키 매치의
+    시작~다음 키 매치 시작 사이를 값으로 보고, 끝에 남은 구분자 문자(,·@·#·^)만 벗겨낸다.
+    """
+    matches = list(_KEY_RE.finditer(spec))
+    result: dict[str, str] = {}
+    for i, m in enumerate(matches):
+        key = m.group(1)
+        val_start = m.end()
+        val_end = matches[i + 1].start() if i + 1 < len(matches) else len(spec)
+        result[key] = spec[val_start:val_end].rstrip(",@#^")
+    return result
+
+
+def _dry_run_env_vars_spec(script_rel: str, env_arg: str) -> dict[str, str]:
+    """deploy_backend.sh/deploy_frontend.sh를 DRY_RUN=1로 돌려 ENV_VARS_SPEC 계산값을 얻는다.
+
+    실 배포(gcloud run deploy)는 스킵되고 resolved config만 stdout으로 나온다(스크립트
+    자체의 DRY_RUN 계약) — network 부작용 없음(단, prod frontend의 FASTAPI_URL 동적
+    discovery 자체는 read-only gcloud describe 1콜을 그대로 수행)."""
+    script_path = _REPO_ROOT / script_rel
+    result = subprocess.run(
+        ["bash", str(script_path), env_arg],
+        capture_output=True, text=True, check=True,
+        env={**os.environ, "DRY_RUN": "1", "COMMIT_SHA": "dry-run-placeholder", "ENV": env_arg},
+    )
+    for line in result.stdout.splitlines():
+        if line.startswith("ENV_VARS_SPEC="):
+            return _parse_key_value_spec(line[len("ENV_VARS_SPEC="):])
+    return {}
 
 
 def _extract_keys_from_text(text: str) -> set[str]:
@@ -150,15 +197,36 @@ def main() -> int:
 
     live_services = _list_live_services()
     key_set_failures: list[str] = []
+    value_check_failures: list[str] = []
     secret_shape_failures: list[str] = []
     unmapped: list[str] = []
 
     checked = 0
+    value_checked = 0
     for service in live_services:
+        envs = _live_env_entries(service)
+
         # ③ 평문 시크릿 형태 검출 — excluded_services 여부와 무관하게 전 서비스에 적용.
-        secret_hits = _plain_secret_shaped_keys(service)
+        secret_hits = _plain_secret_shaped_keys(envs)
         if secret_hits:
             secret_shape_failures.append(f"{service}: {', '.join(sorted(secret_hits))}")
+
+        # ② 값 대조 — DRY_RUN 지원 스크립트 매핑이 있는 서비스만.
+        if service in _SERVICE_DRY_RUN_MAP:
+            skip_keys = {
+                entry["key"] for entry in allowlist_services.get(service, {}).get("keys", [])
+                if entry.get("value_check") == "skip"
+            }
+            script_rel, env_arg = _SERVICE_DRY_RUN_MAP[service]
+            expected = _dry_run_env_vars_spec(script_rel, env_arg)
+            live_plain = _live_plain_env_values(envs)
+            value_checked += 1
+            mismatched = sorted(
+                key for key, exp_val in expected.items()
+                if key not in skip_keys and key in live_plain and live_plain[key] != exp_val
+            )
+            if mismatched:
+                value_check_failures.append(f"{service}: {', '.join(mismatched)}")
 
         # ①키집합 대조 — 축별 제외(key_set) 대상이면 스킵.
         if "key_set" in excluded_axes.get(service, set()):
@@ -168,7 +236,7 @@ def main() -> int:
             continue
 
         checked += 1
-        live_keys = _live_env_keys(service)
+        live_keys = {e["name"] for e in envs}
         allowed_keys = {
             entry["key"] for entry in allowlist_services.get(service, {}).get("keys", [])
         }
@@ -184,11 +252,15 @@ def main() -> int:
             + ", ".join(unmapped)
         )
 
-    if key_set_failures or secret_shape_failures:
+    if key_set_failures or value_check_failures or secret_shape_failures:
         print("❌ env 드리프트 발견:")
         if key_set_failures:
             print("  ①키집합 대조:")
             for line in key_set_failures:
+                print(f"    - {line}")
+        if value_check_failures:
+            print("  ②값 대조(⛔ 값은 출력하지 않음 — 키 이름만, 스크립트 계산값 ≠ 라이브):")
+            for line in value_check_failures:
                 print(f"    - {line}")
         if secret_shape_failures:
             print("  ③평문 시크릿 형태 검출(⛔ 값은 출력하지 않음 — 키 이름만):")
@@ -197,13 +269,16 @@ def main() -> int:
         print(
             "\n→ ①은 파이프라인(cloudbuild.yaml/deploy_*.sh)에 편입하거나 "
             "infra/manual-env-allowlist.yml에 사유와 함께 등재. "
+            "②는 스크립트 재실행 시 라이브 값을 되돌릴 위험 — 스크립트를 라이브에 맞게 "
+            "고치거나 의도적이면 allowlist에 `value_check: skip`+사유로 등재. "
             "③은 즉시 Secret Manager secretKeyRef로 전환 바라는(평문 유지 시 재확定 시마다 재발)."
         )
         return 1
 
     print(
-        f"✅ 드리프트 없음 — ①{checked}개 서비스 키집합 확認"
+        f"✅ 드리프트 없음 — ①{checked}개 서비스 키집합"
         f"(제외 {sum(1 for a in excluded_axes.values() if 'key_set' in a)}개), "
+        f"②{value_checked}개 서비스 값 대조, "
         f"③{len(live_services)}개 서비스 전체 평문시크릿 스캔 완료(제외 없음)."
     )
     return 0
