@@ -18,6 +18,7 @@ _logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.core import shutdown as shutdown_module
     from app.core.database import engine
     from app.routers.auth_firebase_internal import check_internal_secret_config
     from app.routers.cron import check_cron_secret_config
@@ -25,6 +26,13 @@ async def lifespan(app: FastAPI):
     from app.services.firebase_verifier import check_mobile_app_check_config
     from app.services.pg_pubsub import check_listen_config, listen_loop
 
+    # story c4c72eb1(E-ARCH GCE 이전) PR-A: asyncio.Event는 최초 .wait()/.set() 시점의 실행
+    # 루프에 바인딩된다 — 테스트가 TestClient(app)로 lifespan을 여러 번(서로 다른 루프로) 태우는
+    # 이 코드베이스 관례(story bea25062 주석 참조) 아래에서 단순 `.clear()`는 이전 루프에 바인딩된
+    # 채로 남아 다음 루프에서 RuntimeError를 낸다(뮤테이션 셀프체크로 직접 재현). startup마다
+    # 객체 자체를 재생성(shutdown.py의 reset_shutdown_event 참조 — 모듈 속성 접근으로 최신
+    # 객체를 읽어야 하므로 아래도 `shutdown_module.shutdown_event`로 접근, 정적 import 금지).
+    shutdown_module.reset_shutdown_event()
     warn_if_webhook_secret_misconfigured()  # Bot-M.2 P3: 웹훅 secret misconfig 를 트래픽 前 경고.
     # E-ARCH S1: PG_LISTEN_ENABLED=false인 서비스(api)는 이 검증 자체가 무의미 — LISTEN을 절대
     # 안 켜므로 DB_PGBOUNCER/DATABASE_URL_DIRECT 정합을 강제할 이유가 없다(무해·불필요 fail 방지).
@@ -74,6 +82,10 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        # story c4c72eb1(E-ARCH GCE 이전) PR-A: SSE 생성기(events.py/agent_gateway.py)가
+        # 이 신호를 구독해 강제 CancelledError를 기다리지 않고 스스로 정상 종료한다 — 다른
+        # 정리 작업(태스크 cancel 등)보다 먼저 set해 SSE 스트림이 최대한 빨리 반응하게 한다.
+        shutdown_module.shutdown_event.set()
         if task is not None:
             task.cancel()
         if l2_task is not None:
