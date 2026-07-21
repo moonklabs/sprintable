@@ -48,16 +48,17 @@ async def lifespan(app: FastAPI):
         from app.services.l2_trigger_worker import L2TriggerWorker
 
         l2_task = asyncio.create_task(L2TriggerWorker().run())
-    # E-ARCH S2/S3(story #2078): redis_consume_loop은 event_broker_redis_dual_publish_enabled
-    # (default False)일 때만 task 생성 — Memorystore 미배선 상태(redis_url=None)에서도 이
-    # 브랜치 자체가 안 돌아 무해. ⚠️이 loop은 두 가지 일을 한다 — (1) 항상: PG 도착 기록과
-    # 대조해 지연Δ 로그(관측) (2) event_broker_redis_dispatch_enabled(default False, 별개
-    # 게이트)도 켜지면 publish_event()/_push_to_agent()를 실제로 호출해 SSE로 전달(실
-    # dispatch). dispatch_enabled가 꺼진 동안은 (1)뿐이라 무회귀 — PG LISTEN이 여전히 유일한
-    # 실 dispatch 경로. dispatch_enabled를 켜야 비로소 PG_LISTEN_ENABLED=false(LISTEN 제거)가
-    # 안전해진다(순서 중요 — 착수 전 확認 2026-07-21).
+    # E-ARCH S2/S3(story #2078): redis_consume_loop은 dual_publish_enabled AND
+    # redis_consume_enabled 둘 다 켜져야 task 생성 — Memorystore 미배선 상태(redis_url=None)
+    # 에서도 이 브랜치 자체가 안 돌아 무해. consume_enabled는 "이 서비스가 Redis를 구독해
+    # dispatch하는 역할인가"(SSE를 실제로 서빙하는 realtime만 True — api는 발행만 하고 구독은
+    # 불필요, GHA per-env override로 false 배선) — dual_publish_enabled(발행, 모든 인스턴스
+    # 필요)와 독립적인 축이다(2026-07-21 정리, PG_LISTEN_ENABLED durable 분리와 동일 패턴).
+    # ⚠️이 loop은 두 가지 일을 한다 — (1) 항상: PG 도착 기록과 대조해 지연Δ 로그(관측)
+    # (2) event_broker_redis_dispatch_enabled(default False, 별개 게이트)도 켜지면
+    # publish_event()/_push_to_agent()를 실제로 호출해 SSE로 전달(실 dispatch).
     redis_shadow_task = None
-    if settings.event_broker_redis_dual_publish_enabled:
+    if settings.event_broker_redis_dual_publish_enabled and settings.event_broker_redis_consume_enabled:
         from app.services.event_broker import redis_consume_loop
 
         redis_shadow_task = asyncio.create_task(redis_consume_loop())

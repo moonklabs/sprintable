@@ -214,3 +214,56 @@ async def test_lifespan_starts_redis_shadow_task_when_enabled(monkeypatch):
         await asyncio.wait_for(started.wait(), timeout=1)
 
     fake_engine.dispose.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_lifespan_skips_redis_consume_task_when_consume_disabled_even_if_dual_publish_on(monkeypatch):
+    """story #2078 정리(2026-07-21): dual_publish=True인데 redis_consume_enabled=False(api용
+    durable 배선)면 task를 안 만들어야 — 발행(publish) 역할과 구독(consume) 역할을 분리하는
+    신규 게이트. api는 SSE를 안 서빙하니 구독이 불필요(로그 노이즈 + 낭비였던 것을 여기서 막는다)."""
+    from app.main import lifespan
+
+    fake_engine = _patch_engine(monkeypatch)
+    monkeypatch.setattr("app.main.settings.event_broker_redis_dual_publish_enabled", True)
+    monkeypatch.setattr("app.main.settings.event_broker_redis_consume_enabled", False)
+
+    started = asyncio.Event()
+
+    async def fake_consume():
+        started.set()  # 호출되면 안 됨.
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("app.services.event_broker.redis_consume_loop", fake_consume)
+
+    async with lifespan(MagicMock()):
+        await asyncio.sleep(0.05)
+        assert not started.is_set(), "consume_enabled=False인데 redis_consume_loop가 시작됨"
+
+    fake_engine.dispose.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_lifespan_starts_redis_consume_task_when_both_flags_on(monkeypatch):
+    """dual_publish=True AND consume_enabled=True(둘 다 필요) — realtime용 배선(default True라
+    명시 안 해도 되지만, 회귀 가드로 명시 조합을 직접 검증)."""
+    from app.main import lifespan
+
+    fake_engine = _patch_engine(monkeypatch)
+    monkeypatch.setattr("app.main.settings.event_broker_redis_dual_publish_enabled", True)
+    monkeypatch.setattr("app.main.settings.event_broker_redis_consume_enabled", True)
+
+    started = asyncio.Event()
+
+    async def fake_consume():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            return
+
+    monkeypatch.setattr("app.services.event_broker.redis_consume_loop", fake_consume)
+
+    async with lifespan(MagicMock()):
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+    fake_engine.dispose.assert_awaited_once()

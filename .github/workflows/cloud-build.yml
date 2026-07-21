@@ -69,6 +69,9 @@ jobs:
             # 중). false로 먼저 못박으면 prod에 LISTEN 하는 서비스가 0개가 돼 실시간이
             # 완전히 죽는다. prod가 realtime 배선을 마치는 승격 시점에 이 값을 false로 뒤집을 것.
             echo "backend_pg_listen_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2078(E-ARCH S2 정리): api는 SSE 미서빙 — Redis 구독(consume) 불필요.
+            # dual_publish(발행)는 안 건드림. prod도 dev와 동일 이유로 false.
+            echo "backend_redis_consume_enabled=false" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
@@ -108,6 +111,10 @@ jobs:
             # 을 realtime-dev로 넘겼다(까심군 raw SSE 검증 PASS). 손 gcloud 값은 다음 배포가
             # 덮으니(오늘 규율) 여기 durable로 못박는다 — 다음 api 배포에서도 false 유지.
             echo "backend_pg_listen_enabled=false" >> "$GITHUB_OUTPUT"
+            # story #2078(E-ARCH S2 정리): api는 SSE 미서빙(realtime-dev로 완전 이관) —
+            # Redis 구독(consume) 불필요. dual_publish(발행)는 안 건드림 — cross-instance
+            # relay 소스가 되어야 하므로.
+            echo "backend_redis_consume_enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Submit Cloud Build
@@ -115,6 +122,6 @@ jobs:
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}" \
             --suppress-logs \
             .

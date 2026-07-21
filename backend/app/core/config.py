@@ -107,6 +107,16 @@ class Settings(BaseSettings):
     # instance_id가 없어 self-skip이 안 돼 중복 dispatch 위험(3b에서 해소 예정).
     event_broker_redis_dispatch_enabled: bool = False
 
+    # E-ARCH S2 정리(2026-07-21, LISTEN 제거 완료 후 발견): redis_consume_loop task 생성이
+    # event_broker_redis_dual_publish_enabled 하나로만 게이트돼 있었다 — dual_publish(발행,
+    # 모든 인스턴스가 필요)와 consume(구독+dispatch, SSE를 실제로 서빙하는 서비스만 필요)
+    # 역할이 뒤섞여, api(SSE 미서빙)도 불필요하게 Redis 구독을 유지했다(낭비 + shadow 비교
+    # 로그 노이즈 — api는 LISTEN이 없어 PG 도착 기준점이 영원히 0이라 항상 "redis-only"로
+    # 오독될 수 있는 상태였다). default=True(무회귀) — realtime이 이미 이 loop로 실 dispatch
+    # 중이라 default를 False로 하면 재배포 시 실시간이 끊긴다. api 쪽만 GHA per-env override로
+    # false 배선(story #2078 PG_LISTEN_ENABLED durable 분리·PR #2364와 동일 패턴).
+    event_broker_redis_consume_enabled: bool = True
+
     # E-ARCH S3(story #2078) 3a단계: `event_outbox` row insert를 EventBroker.publish()에 추가로
     # 얹는다(호출 타이밍은 안 바뀜 — 여전히 caller commit 이후, 별도 짧은 트랜잭션이라 아직 진짜
     # atomic outbox는 아님). default=False(무회귀) — 켜지기 전엔 OutboxEventBroker가 inner
