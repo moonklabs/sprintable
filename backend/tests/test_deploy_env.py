@@ -177,6 +177,26 @@ def test_deploy_app_url_env_specific():
     assert _resolve(_DEPLOY, "prod")["APP_URL"] == "https://app.sprintable.ai"
 
 
+def test_deploy_app_env_matches_local_envs_semantics():
+    """story cd10e123 계열(2026-07-21, 오르테가군 SPEC-vs-라이브 1:1 대조): dev는 코드가
+    기대하는 정확한 리터럴 "development"여야 한다(cron.py/auth_firebase_internal.py의
+    `_LOCAL_ENVS = {"development"}`가 정확히 이 문자열만 매칭 — "dev"였다면 그 세이프티넷이
+    조용히 꺼졌을 것). prod는 라이브 실측(APP_ENV=prod)과 동일 유지."""
+    dev_spec = _resolve(_DEPLOY, "dev")["ENV_VARS_SPEC"]
+    assert "APP_ENV=development@" in dev_spec, "dev APP_ENV가 _LOCAL_ENVS 리터럴('development')과 불일치"
+    prod_spec = _resolve(_DEPLOY, "prod")["ENV_VARS_SPEC"]
+    assert "APP_ENV=prod@" in prod_spec, "prod APP_ENV가 라이브 실측값(prod)과 불일치"
+
+
+def test_deploy_dev_frontend_url_not_fake_placeholder():
+    """story cd10e123 계열: 예전 dev FRONTEND_URL 기본값("...placeholder.run.app")은 실존한
+    적 없는 가짜 호스트 — CORS allowlist에 실제 프론트 도메인이 안 실렸을 것. dev-app.sprintable.ai
+    (라이브 실측 APP_URL과 동일 CF-fronted 도메인)로 교정됐는지 확認."""
+    spec = _resolve(_DEPLOY, "dev")["ENV_VARS_SPEC"]
+    assert "placeholder" not in spec, "가짜 placeholder 호스트 잔존"
+    assert "dev-app.sprintable.ai" in spec
+
+
 def test_deploy_no_invalid_probe_flag_and_has_vpc():
     """결함①: 무효 --startup-probe-path 제거. 결함②: VPC 플래그(Private-IP) 추가."""
     with open(_DEPLOY) as f:
@@ -236,6 +256,27 @@ def test_deploy_frontend_single_set_env_vars():
     assert len(used("--update-env-vars=")) == 1, "--update-env-vars 중복 → env 유실 위험"
     for kv in ("NODE_ENV=production", "NEXT_TELEMETRY_DISABLED=1", "NEXT_PUBLIC_FASTAPI_URL="):
         assert kv in src, f"{kv} 누락"
+
+
+def test_deploy_frontend_cookie_domain_prod_only():
+    """story cd10e123 계열(2026-07-21, 오르테가군 SPEC-vs-라이브 1:1 대조): NEXT_PUBLIC_COOKIE_DOMAIN
+    은 story e5225c0a(3차 근본 — prod 로그인 풀림 원인 그 자체, 이 세션 초입에 재확認)가 정확히
+    이 값의 dev/prod 유무 차이 때문이었다. 예전엔 env 구분 없이 항상 바인딩 — 재실행 시 dev에
+    이 값이 새로 생겨 그 클래스 버그를 재현할 위험. env별로 분리됐는지 실증."""
+    with open(_DEPLOY_FE) as f:
+        src = f.read()
+    assert 'COOKIE_DOMAIN_SECRET_SPEC=""' in src, "dev COOKIE_DOMAIN_SECRET_SPEC 빈 값 누락"
+    assert "COOKIE_DOMAIN_SECRET_SPEC=\",NEXT_PUBLIC_COOKIE_DOMAIN=NEXT_PUBLIC_COOKIE_DOMAIN:latest\"" in src, \
+        "prod COOKIE_DOMAIN_SECRET_SPEC 누락"
+
+
+def test_deploy_frontend_dev_uses_cf_fronted_fastapi_domain():
+    """story cd10e123 계열: dev NEXT_PUBLIC_FASTAPI_URL 동적 discovery는 항상 raw *.run.app 로
+    resolve돼, 라이브 실측(CF-fronted dev-api.sprintable.ai)과 다르다 — 재실행 시 조용히
+    되돌아갈 위험. 하드코드 override 확認."""
+    with open(_DEPLOY_FE) as f:
+        src = f.read()
+    assert 'FASTAPI_URL_OVERRIDE="https://dev-api.sprintable.ai"' in src
 
 
 # ── story #2060(SID f2fe1c5e #2040 AC5 후속): uvicorn graceful shutdown 상한 ────────

@@ -49,12 +49,25 @@ case "${ENV}" in
         MAX_INSTANCES=3
         MEMORY="512Mi"
         CPU="1"
-        FRONTEND_URL="${FRONTEND_ORIGIN:-https://sprintable-frontend-dev-placeholder.run.app}"
+        # ⚠️story cd10e123 계열(2026-07-21, 오르테가군 SPEC-vs-라이브 1:1 대조 지적): 예전 fallback
+        # 값("...placeholder.run.app")은 실존한 적 없는 가짜 호스트였다 — 재실행 시 dev CORS
+        # allowlist가 실제 프론트 도메인을 못 태우는 채로 나갔을 것. dev-app.sprintable.ai(위
+        # APP_URL 기본값과 동일 CF-fronted 도메인)로 교정.
+        FRONTEND_URL="${FRONTEND_ORIGIN:-https://dev-app.sprintable.ai}"
         RUNTIME_SA="cloudrun-runtime-dev@${GCP_PROJECT}.iam.gserviceaccount.com"
         APP_URL="${APP_URL:-https://dev-app.sprintable.ai}"  # OAuth redirect/이메일 링크용 프론트 URL
         # OB-1: 에이전트 onboarding config 의 backend-direct Cloud Run URL(에이전트 SSE 직통).
         # CF-fronted 깔끔 도메인 금지(/agent/stream 버퍼·봇차단). cloudbuild _FASTAPI_URL 과 동일 값.
         FASTAPI_URL="${FASTAPI_URL:-https://sprintable-backend-dev-787818285179.asia-northeast3.run.app}"
+        # ⚠️story cd10e123 계열(2026-07-21, 오르테가군 SPEC-vs-라이브 1:1 대조 지적): dev는
+        # 현재 APP_ENV가 아예 안 박혀있어 config.py 기본값("development")을 그대로 상속 중이다.
+        # 예전엔 이 스크립트가 `${ENV}`("dev")를 그대로 썼는데, cron.py/auth_firebase_internal.py의
+        # `_LOCAL_ENVS = {"development"}`는 정확히 그 문자열만 매칭한다 — "dev"≠"development"라
+        # 재실행 시 CRON_SECRET/FIREBASE_BFF_INTERNAL_SECRET 미설정-허용(local-only fail-open)
+        # 판정이 dev에서 조용히 꺼지는 semantic 버그였다(현재는 두 시크릿 다 실제로 바인딩돼
+        # 있어 즉시 터지진 않지만, 그 안전판 자체가 무력화되는 건 동일). 코드 기대값과 정확히
+        # 맞춘다.
+        APP_ENV_VALUE="development"
         ;;
     prod)
         SERVICE_NAME="sprintable-backend-prod"
@@ -68,6 +81,10 @@ case "${ENV}" in
         APP_URL="${APP_URL:-https://app.sprintable.ai}"
         # OB-1: prod backend-direct Cloud Run URL(에이전트 SSE 직통·CF 금지).
         FASTAPI_URL="${FASTAPI_URL:-https://sprintable-backend-prod-787818285179.asia-northeast3.run.app}"
+        # prod는 라이브 실측(APP_ENV=prod)과 이미 일치 — `_LOCAL_ENVS` 체크는 배제 기반이라
+        # "prod" 문자열 자체는 기능상 안전(코드가 리터럴 "production"을 요구하는 자리는 없음,
+        # grep 확認). 현행 유지.
+        APP_ENV_VALUE="prod"
         ;;
     *)
         echo "Usage: $0 [dev|prod]" >&2; exit 1 ;;
@@ -104,7 +121,7 @@ SECRETS_SPEC="${SECRETS_SPEC},EMAIL_FROM=EMAIL_FROM:latest"
 
 # ── 결함④ fix: 평문 env. CORS_ORIGINS 값에 콤마가 있어 기본(콤마) 구분자로는 env가 쪼개진다 →
 #   gcloud 커스텀 구분자 '^@^'로 '@' 구분. NEXT_PUBLIC_APP_URL도 세팅(verify-link 환경정합·#1236 finding). ──
-ENV_VARS_SPEC="^@^APP_ENV=${ENV}"
+ENV_VARS_SPEC="^@^APP_ENV=${APP_ENV_VALUE}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@CORS_ORIGINS=${CORS_ORIGINS}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@APP_URL=${APP_URL}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@NEXT_PUBLIC_APP_URL=${APP_URL}"

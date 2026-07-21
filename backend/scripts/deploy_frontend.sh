@@ -26,6 +26,13 @@ COMMIT_SHA="${COMMIT_SHA:?COMMIT_SHA is required}"
 
 IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/frontend:${COMMIT_SHA}"
 
+# ⚠️story cd10e123 계열(2026-07-21, 오르테가군 SPEC-vs-라이브 1:1 대조 지적): dev의
+# NEXT_PUBLIC_COOKIE_DOMAIN — story e5225c0a(3차 근본, 이 세션 초입에 다룬 "prod 로그인
+# 풀림" 원인 그 자체)가 정확히 이 값의 유무 차이 때문이었다: prod FE에만 이 도메인 속성이
+# 있어야 SET/DELETE 쿠키 속성이 갈리지 않는다. 예전 SECRETS_SPEC은 dev/prod 구분 없이 항상
+# 이 시크릿을 바인딩했다 — 재실행되면 dev에 이 값이 새로 생겨 dev/prod parity가 깨지고
+# (dev가 원래 없어야 할 조건을 얻어) 그 클래스 버그를 다시 만들 위험이 있었다. env별로
+# 분리한다(dev=미포함, prod=포함).
 case "${ENV}" in
     dev)
         SERVICE_NAME="sprintable-frontend-dev"
@@ -35,6 +42,10 @@ case "${ENV}" in
         CPU="1"
         FASTAPI_SERVICE="sprintable-backend-dev"
         RUNTIME_SA="cloudrun-runtime-dev@${GCP_PROJECT}.iam.gserviceaccount.com"
+        # CF-fronted 깔끔 도메인(라이브 실측 2026-07-21 확認) — 동적 discovery(아래 fallback)는
+        # 항상 raw *.run.app 로 resolve돼 재실행 시 이 값을 조용히 되돌린다.
+        FASTAPI_URL_OVERRIDE="https://dev-api.sprintable.ai"
+        COOKIE_DOMAIN_SECRET_SPEC=""
         ;;
     prod)
         SERVICE_NAME="sprintable-frontend-prod"
@@ -44,6 +55,8 @@ case "${ENV}" in
         CPU="2"
         FASTAPI_SERVICE="sprintable-backend-prod"
         RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
+        FASTAPI_URL_OVERRIDE=""
+        COOKIE_DOMAIN_SECRET_SPEC=",NEXT_PUBLIC_COOKIE_DOMAIN=NEXT_PUBLIC_COOKIE_DOMAIN:latest"
         ;;
     *)
         echo "Usage: $0 [dev|prod]"; exit 1 ;;
@@ -53,11 +66,16 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$ENV] $*"; }
 
 log "Deploying ${SERVICE_NAME} ← ${IMAGE}"
 
-# FastAPI Cloud Run 서비스 URL 조회
-FASTAPI_URL=$(gcloud run services describe "${FASTAPI_SERVICE}" \
-    --region="${GCP_REGION}" \
-    --project="${GCP_PROJECT}" \
-    --format="value(status.url)" 2>/dev/null || echo "")
+if [[ -n "${FASTAPI_URL_OVERRIDE}" ]]; then
+    FASTAPI_URL="${FASTAPI_URL_OVERRIDE}"
+else
+    # FastAPI Cloud Run 서비스 URL 조회(동적 discovery — prod는 아직 CF-fronted 도메인이 없어
+    # raw *.run.app 이 곧 정답값).
+    FASTAPI_URL=$(gcloud run services describe "${FASTAPI_SERVICE}" \
+        --region="${GCP_REGION}" \
+        --project="${GCP_PROJECT}" \
+        --format="value(status.url)" 2>/dev/null || echo "")
+fi
 
 if [[ -z "${FASTAPI_URL}" ]]; then
     log "WARNING: FastAPI service '${FASTAPI_SERVICE}' not found. NEXT_PUBLIC_FASTAPI_URL will be empty."
@@ -84,8 +102,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --update-secrets="\
 NEXT_PUBLIC_SUPABASE_URL=NEXT_PUBLIC_SUPABASE_URL:latest,\
 NEXT_PUBLIC_SUPABASE_ANON_KEY=NEXT_PUBLIC_SUPABASE_ANON_KEY:latest,\
-NEXT_PUBLIC_COOKIE_DOMAIN=NEXT_PUBLIC_COOKIE_DOMAIN:latest,\
-JWT_SECRET=JWT_SECRET:latest" \
+JWT_SECRET=JWT_SECRET:latest${COOKIE_DOMAIN_SECRET_SPEC}" \
     --cpu-boost
 
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
