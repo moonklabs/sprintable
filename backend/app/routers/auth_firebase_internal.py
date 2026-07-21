@@ -18,7 +18,6 @@ import base64
 import binascii
 import hashlib
 import logging
-import os
 import uuid
 from datetime import datetime, timezone
 
@@ -83,27 +82,14 @@ class FirebaseSessionMintResponse(BaseModel):
 _LOCAL_ENVS = {"development"}
 
 
-def _really_local() -> bool:
-    """story #2071(critical, 2026-07-21) 근본수정 — `app_env=="development"`는 "진짜 로컬"과
-    "인터넷에 노출된 dev Cloud Run 배포"를 구분 못 한다(둘 다 APP_ENV=development로 배포됨).
-    산티아고 #2202(07-15)의 완화("Firebase 기능 default-off면 시크릿 startup 요구 면제")가
-    이 구분 부재와 겹쳐 노출된 dev를 그대로 열어버렸다 — `FIREBASE_BFF_INTERNAL_SECRET`이
-    dev에 안 배선된 채 이 fail-open이 dev에도 적용됨(민군 발견·오르테가군 실측 확定).
-
-    Cloud Run은 `K_SERVICE`를 항상 자동 주입한다(설정 불필요 — `app/core/database.py`의
-    커넥션 태깅과 동일 SSOT, 신규 발명 아님). 이게 없으면(로컬 `uvicorn`/pytest) 진짜 로컬,
-    있으면(dev든 prod든) Cloud Run 위 — 인터넷에 닿을 수 있으니 fail-open 대상이 아니다."""
-    return not os.environ.get("K_SERVICE")
-
-
 def _require_internal_secret(authorization: str | None) -> None:
     secret = settings.firebase_bff_internal_secret
     if not secret:
-        if settings.app_env in _LOCAL_ENVS and _really_local():
-            return  # 진짜 로컬 개발 전용 예외(Cloud Run 위가 아님)
+        if settings.app_env in _LOCAL_ENVS and settings.is_really_local:
+            return  # 진짜 로컬 개발 전용 예외(Cloud Run 위가 아님 — story #2071)
         logger.warning(
             "auth.firebase.internal_secret_missing_in_non_local_env app_env=%s on_cloud_run=%s",
-            settings.app_env, not _really_local(),
+            settings.app_env, not settings.is_really_local,
         )
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service misconfigured")
     if authorization != f"Bearer {secret}":
@@ -123,16 +109,17 @@ def check_internal_secret_config(s=None) -> None:
     켜져 있을 때만 시크릿을 요구한다.
 
     story #2071(critical) 근본수정: `app_env not in _LOCAL_ENVS`만으로는 노출된 dev
-    Cloud Run(APP_ENV=development)을 놓친다 — `_really_local()`(K_SERVICE 부재) 아니면
-    시크릿을 요구한다. dev에 Firebase 기능이 켜지고 이 startup 가드가 살아 있으면, 시크릿
-    없이는 이제 배포 자체가 실패한다(런타임 503 fail-closed보다 먼저 잡힘 — 배포 시점에
-    시끄럽게 실패하는 쪽이 더 안전, check_listen_config()와 동형)."""
+    Cloud Run(APP_ENV=development)을 놓친다 — `s.is_really_local`(K_SERVICE 부재 판정,
+    `app/core/config.py` SSOT) 아니면 시크릿을 요구한다. dev에 Firebase 기능이 켜지고 이
+    startup 가드가 살아 있으면, 시크릿 없이는 이제 배포 자체가 실패한다(런타임 503
+    fail-closed보다 먼저 잡힘 — 배포 시점에 시끄럽게 실패하는 쪽이 더 안전,
+    check_listen_config()와 동형)."""
     if s is None:
         from app.core.config import settings as s
     firebase_internal_enabled = (
         s.firebase_auth_issue_session or s.firebase_auth_mobile_issue or s.firebase_oauth_handoff_enabled
     )
-    _not_local = s.app_env not in _LOCAL_ENVS or not _really_local()
+    _not_local = s.app_env not in _LOCAL_ENVS or not s.is_really_local
     if firebase_internal_enabled and _not_local and not s.firebase_bff_internal_secret:
         raise RuntimeError(
             f"APP_ENV={s.app_env}인데 FIREBASE_BFF_INTERNAL_SECRET 미설정 — 내부 세션 mint/"
