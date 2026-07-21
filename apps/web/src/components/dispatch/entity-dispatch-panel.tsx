@@ -98,22 +98,22 @@ export function EntityDispatchPanel({
       });
       // 7f8066a3: 실패 사유 구분(reason 매트릭스) — 서버 오류 vs 담당자 미지정을 분리 안내한다.
       if (!dispatchRes.ok) {
-        addToast({ type: 'error', title: '전달에 실패했습니다', body: '전달 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.' });
+        addToast({ type: 'error', title: t('dispatchFailedTitle'), body: t('dispatchFailedBody') });
         return;
       }
       const dispatchData = await dispatchRes.json().catch(() => ({})) as { dispatched?: boolean };
       if (!dispatchData.dispatched) {
         // 담당자가 지정되지 않아 전달 대상이 없는 경우 — 오류가 아니라 안내(info)로 처리한다.
-        addToast({ type: 'info', title: '담당자가 지정되지 않았습니다', body: '담당자를 지정한 뒤 다시 전달해 주세요.' });
+        addToast({ type: 'info', title: t('assigneeNotSetTitle'), body: t('assigneeNotSetBody') });
         return;
       }
-      addToast({ type: 'success', title: '전달했습니다' });
+      addToast({ type: 'success', title: t('dispatchSuccessTitle') });
     } catch {
-      addToast({ type: 'error', title: '전달에 실패했습니다', body: '일시적인 문제로 전달하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
+      addToast({ type: 'error', title: t('dispatchFailedTitle'), body: t('dispatchFailedBody') });
     } finally {
       setDispatching(false);
     }
-  }, [assigneeId, dispatching, entityType, entityId, projectId, onAssigneePatched, addToast]);
+  }, [assigneeId, dispatching, entityType, entityId, projectId, onAssigneePatched, addToast, t]);
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -122,7 +122,7 @@ export function EntityDispatchPanel({
         onChange={(e) => setAssigneeId(e.target.value)}
         className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
       >
-        <option value="">담당자 선택</option>
+        <option value="">{t('assigneeSelectPlaceholder')}</option>
         {members.map((m) => (
           <option key={m.id} value={m.id}>
             {m.name}
@@ -151,7 +151,7 @@ export function EntityDispatchPanel({
             type="button"
             onClick={() => setMoreOpen((o) => !o)}
             className="flex items-center justify-center rounded-md border border-border px-2 py-1.5 text-muted-foreground transition hover:bg-muted"
-            aria-label="더보기"
+            aria-label={t('moreOptionsAria')}
           >
             <MoreHorizontal className="size-4" />
           </button>
