@@ -24,6 +24,7 @@ type PageState = 'preview-loading' | 'preview-error' | 'auth' | 'accepting' | 's
 
 export default function InvitePage() {
   const t = useTranslations('invite');
+  const t2 = useTranslations('login');
   const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get('token');
@@ -145,7 +146,7 @@ export default function InvitePage() {
           <p className="text-sm text-destructive">{errorMsg}</p>
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
           <a href="/login" className="text-sm font-medium text-brand hover:text-brand/80">
-            로그인 페이지로 →
+            {t('backToLogin')}
           </a>
         </div>
       </Frame>
@@ -164,7 +165,7 @@ export default function InvitePage() {
           {pageState === 'success' && preview ? (
             <>
               <p className="text-lg font-semibold tracking-tight text-foreground">
-                {preview.org_name}에 합류했어요
+                {t('joinedOrg', { org: preview.org_name })}
               </p>
               <p className="text-sm text-muted-foreground">{t('redirecting')}</p>
             </>
@@ -181,11 +182,11 @@ export default function InvitePage() {
       {preview && (
         <div className="space-y-6">
           <div className="space-y-3 text-center animate-in fade-in slide-in-from-bottom-2 duration-500 delay-100 fill-mode-backwards">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-              <span className="block">{preview.org_name}</span>
-              <span className="block text-base font-normal text-muted-foreground mt-1">
-                에 합류하세요
-              </span>
+            <h1 className="text-2xl font-normal tracking-tight text-foreground sm:text-3xl">
+              {t.rich('joinHeading', {
+                org: preview.org_name,
+                b: (chunks) => <span className="font-semibold text-foreground">{chunks}</span>,
+              })}
             </h1>
           </div>
 
@@ -195,7 +196,7 @@ export default function InvitePage() {
                 {preview.inviter_name ? (
                   <>
                     <div className="truncate font-medium text-foreground">
-                      {preview.inviter_name}님이 초대했어요
+                      {t('invitedByPerson', { name: preview.inviter_name })}
                     </div>
                     {preview.inviter_email && (
                       <div className="truncate text-xs text-muted-foreground">{preview.inviter_email}</div>
@@ -203,7 +204,7 @@ export default function InvitePage() {
                   </>
                 ) : (
                   <div className="truncate font-medium text-foreground">
-                    {preview.org_name}에서 초대했어요
+                    {t('invitedByOrgFallback', { org: preview.org_name })}
                   </div>
                 )}
               </div>
@@ -227,7 +228,7 @@ export default function InvitePage() {
                       : 'text-muted-foreground hover:text-foreground/80',
                   )}
                 >
-                  {mode === 'signup' ? '가입' : '로그인'}
+                  {mode === 'signup' ? t2('signUp') : t2('signIn')}
                   {authMode === mode && (
                     <span className="absolute inset-x-0 -bottom-px h-0.5 bg-foreground" />
                   )}
@@ -239,7 +240,7 @@ export default function InvitePage() {
               {authMode === 'signup' && (
                 <input
                   type="text"
-                  placeholder="이름"
+                  placeholder={t('namePlaceholder')}
                   autoComplete="name"
                   className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand"
                   value={displayName}
@@ -249,7 +250,7 @@ export default function InvitePage() {
               )}
               <input
                 type="email"
-                placeholder="이메일"
+                placeholder={t2('email')}
                 autoComplete="email"
                 className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand"
                 value={email}
@@ -258,7 +259,7 @@ export default function InvitePage() {
               />
               <input
                 type="password"
-                placeholder="비밀번호"
+                placeholder={t2('password')}
                 autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
                 className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand"
                 value={password}
@@ -276,7 +277,7 @@ export default function InvitePage() {
                     disabled={submitting}
                   />
                   <span className="text-xs text-muted-foreground">
-                    이용약관 + 개인정보처리방침에 동의합니다
+                    {t('tosAgreement')}
                   </span>
                 </label>
               )}
@@ -295,14 +296,14 @@ export default function InvitePage() {
               className="flex w-full min-h-[44px] items-center justify-center gap-2 rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:opacity-50"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {submitting ? '...' : '합류하기'}
+              {submitting ? t('joining') : t('submit')}
             </button>
           </div>
 
           <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-500 delay-400 fill-mode-backwards">
             <div className="relative flex items-center">
               <div className="flex-grow border-t border-border/50" />
-              <span className="mx-3 flex-shrink text-xs text-muted-foreground/60">또는</span>
+              <span className="mx-3 flex-shrink text-xs text-muted-foreground/60">{t2('orContinueWith')}</span>
               <div className="flex-grow border-t border-border/50" />
             </div>
             <a
@@ -310,14 +311,14 @@ export default function InvitePage() {
               className="flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground/80 transition hover:bg-muted/50"
             >
               <GoogleIcon />
-              Google로 계속
+              {t2('google')}
             </a>
             <a
               href={`/auth/login?provider=github&invite_token=${encodeURIComponent(token!)}&tos_accepted=true`}
               className="flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg border border-border bg-foreground px-4 py-3 text-sm font-medium text-background transition hover:bg-foreground/90"
             >
               <GitHubIcon />
-              GitHub로 계속
+              {t2('github')}
             </a>
           </div>
         </div>
