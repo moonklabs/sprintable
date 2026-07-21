@@ -412,6 +412,22 @@ def _msg_payload(msg: ConversationMessage, sender: "ResolvedMember | TeamMember 
     }
 
 
+def _push_conversation_message_created(
+    pending_sse_pushes: list[tuple[str, dict]], msg_payload: dict,
+) -> None:
+    """story #2086 후속(2026-07-21): `conversation.message_created`(대화 목록 갱신 신호,
+    use-chat-sse.ts)를 `pending_sse_pushes`와 동일 수신자 집합(참가자+멘션 대상, sender/discord/
+    차단 제외 — 이미 `_dispatch_conversation_event`/`_dispatch_mention_events`가 계산)에게
+    dedup 개별 push한다. `chat:message`와 다른 event_type이라 별도 payload로 보낸다."""
+    payload = {"event_type": "conversation.message_created", **msg_payload}
+    pushed: set[str] = set()
+    for pid_str, _ in pending_sse_pushes:
+        if pid_str in pushed:
+            continue
+        pushed.add(pid_str)
+        _push_to_agent(pid_str, dict(payload))
+
+
 async def _dispatch_conversation_event(
     db: AsyncSession,
     conversation: Conversation,
@@ -1965,8 +1981,14 @@ async def send_message(
     # commit 완료 후 SSE push — Event가 DB에 커밋된 상태에서 push해야 race condition 없음
     for pid_str, sse_payload in pending_sse_pushes:
         _push_to_agent(pid_str, sse_payload)
-    # 브라우저 SSE 구독자에게 1회 발행 — pending 유무와 무관하게 commit 후 항상 발행
-    publish_event(str(org_id), "conversation.message_created", _msg_payload(msg, sender))  # canonical (S-COMM-12)
+    # story #2086 후속(2026-07-21, 전수 스윕 발견): publish_event()의 org _subscribers fanout은
+    # 영구 죽은 레지스트리(story #2059/#2067과 동일 근본) — "브라우저 SSE 구독자에게 1회 발행"
+    # 의도와 달리 use-chat-sse.ts의 conversation.message_created 리스너(대화 목록 갱신용)에
+    # 실제로는 아무것도 안 갔다. pending_sse_pushes와 동일 참가자 집합(sender/discord-covered/
+    # 차단 에이전트 제외한 conversation participant + mention target — _dispatch_conversation_
+    # event·_dispatch_mention_events가 이미 계산)에게 개별 push로 복구.
+    publish_event(str(org_id), "conversation.message_created", _msg_payload(msg, sender))  # canonical (S-COMM-12) — L1 activity_events 캡처용 유지
+    _push_conversation_message_created(pending_sse_pushes, _msg_payload(msg, sender))
 
     # ws_chat WebSocket 브로드캐스트 — agent 참가자 room에 실시간 전달 (conv.type/title 무관)
     try:
