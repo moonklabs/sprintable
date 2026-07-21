@@ -72,6 +72,12 @@ jobs:
             # story #2078(E-ARCH S2 정리): api는 SSE 미서빙 — Redis 구독(consume) 불필요.
             # dual_publish(발행)는 안 건드림. prod도 dev와 동일 이유로 false.
             echo "backend_redis_consume_enabled=false" >> "$GITHUB_OUTPUT"
+            # story cd10e123 긴급수정(2026-07-21): prod는 아직 Memorystore 인스턴스/연결이
+            # 확認 안 됐다(오늘 Redis 작업은 dev 한정) — REDIS_URL 빈 문자열(config.py의
+            # "미설정 시 fail-safe" 로직이 그대로 no-op)·dual_publish도 false로 안전 기본.
+            # prod가 Redis 연결을 갖추는 승격 시점에 산티아고군이 실측값으로 override할 것.
+            echo "redis_url=" >> "$GITHUB_OUTPUT"
+            echo "backend_redis_dual_publish_enabled=false" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
@@ -115,6 +121,13 @@ jobs:
             # Redis 구독(consume) 불필요. dual_publish(발행)는 안 건드림 — cross-instance
             # relay 소스가 되어야 하므로.
             echo "backend_redis_consume_enabled=false" >> "$GITHUB_OUTPUT"
+            # story cd10e123 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
+            # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED가 여태 여기 durable화 안 됐다 — PO가
+            # 2026-07-21 손으로 생성·검증한 실측값(Memorystore VPC 내부 IP) 그대로 옮김. dev의
+            # realtime 쪽 값(EVENT_BROKER_REDIS_DISPATCH_ENABLED 포함)은 cloudbuild.yaml의
+            # deploy-realtime 스텝이 이미 dev 전용 가드 안에서 직접 명시(변수 아님).
+            echo "redis_url=redis://10.164.120.243:6379" >> "$GITHUB_OUTPUT"
+            echo "backend_redis_dual_publish_enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Submit Cloud Build
@@ -122,6 +135,6 @@ jobs:
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}" \
             --suppress-logs \
             .

@@ -67,6 +67,16 @@ substitutions:
   # deploy-backend에서만 쓰이고 deploy-realtime은 항상 true를 직접 명시(아래, 변수 아님).
   _BACKEND_REDIS_CONSUME_ENABLED: 'false'
 
+  # ⛔story cd10e123 계열 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
+  # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED가 여태 여기 어디에도 없는 순수 수동 Cloud Run env
+  # 였다 — PG_LISTEN_ENABLED는 durable화됐는데(위) 이 둘은 안 돼서, 서비스가 `--set-env-vars`로
+  # 재배포/재생성되면 dispatch 관련 플래그가 조용히 기본값(false/None)으로 되돌아가고 LISTEN은
+  # 이미 꺼져있어 **두 전송경로 동시 무효화(실시간 전면정지)** 조건이 성립한다. 기본값은
+  # dev-safe fallback(REDIS 미설정 상태와 동등 — config.py의 "fail-safe if not configured"
+  # 로직이 그대로 우아하게 no-op) — GHA가 dev/prod 실측값으로 override.
+  _REDIS_URL: ''
+  _BACKEND_REDIS_DUAL_PUBLISH_ENABLED: 'false'
+
 steps:
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
   - id: build-frontend
@@ -205,7 +215,9 @@ steps:
       # 주석 참조(dev=false·prod=true 유지, GHA per-env 배선).
       # E-ARCH S2 정리(story #2078): REDIS_CONSUME_ENABLED durable화 — 위 _BACKEND_REDIS_
       # CONSUME_ENABLED 주석 참조(api는 SSE 미서빙이라 구독 불필요, dual_publish는 유지).
-      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED}
+      # ⛔story cd10e123 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
+      # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED durable화 — 위 _REDIS_URL 주석 참조.
+      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}
       - --quiet
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
     # 스키마를 상대로 뜨는 걸 막는다(migrate 실패 시 이 스텝 자체가 안 돎).
@@ -234,6 +246,13 @@ steps:
         # 고침을 지우는 쪽). realtime은 이제 LISTEN이 구조적으로 불필요(Redis가 authoritative
         # dispatch) — false로 durable 고정. REDIS_CONSUME_ENABLED=true도 명시(이 서비스가
         # Redis를 구독+dispatch하는 유일한 서비스라는 것을 코드에 못박음 — api는 false).
+        # ⛔story cd10e123 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
+        # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED·EVENT_BROKER_REDIS_DISPATCH_ENABLED 셋 다
+        # 여태 여기 없는 순수 수동 Cloud Run env였다 — realtime은 이미 LISTEN이 꺼져있고
+        # Redis가 유일한 dispatch 경로라, 이 서비스가 재배포/재생성될 때 이 셋이 기본값
+        # (false/None)으로 되돌아가면 두 전송경로 동시 무효화(실시간 전면정지)가 된다.
+        # 이 스텝은 이미 dev 전용 가드(위) 안이라 true를 직접 명시해도 안전(PG_LISTEN_ENABLED=
+        # false와 동일 컨벤션) — REDIS_URL만 변수(연결문자열은 환경별로 다르므로).
         gcloud run deploy sprintable-realtime-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
@@ -241,7 +260,7 @@ steps:
           --max-instances=${_REALTIME_MAX_INSTANCES} \
           --timeout=${_REALTIME_TIMEOUT} \
           --allow-unauthenticated \
-          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=false,REDIS_CONSUME_ENABLED=true \
+          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=false,REDIS_CONSUME_ENABLED=true,REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true,EVENT_BROKER_REDIS_DISPATCH_ENABLED=true \
           --quiet
     waitFor: [run-migrate-job]
 
