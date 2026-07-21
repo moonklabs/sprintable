@@ -39,6 +39,7 @@ import { EpicHypothesisDeclarationSection } from '@/components/epics/hypothesis-
 import type { HypothesisDeclarationValue } from '@/services/hypothesis-declaration';
 import { toEpicHypothesisCreatePayload, toEpicHypothesisLink } from '@/services/hypothesis-declaration-epic';
 import { SteerDispatchModal } from './steer-dispatch-modal';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 // ─── Drag sensor ──────────────────────────────────────────────────────────────
 
@@ -582,14 +583,19 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
             ) : null}
             <Badge variant={statusBadgeVariant(epic.status)}>{statusLabel[epic.status]}</Badge>
             <Badge variant={priorityBadgeVariant(epic.priority)}>{priorityLabel[epic.priority]}</Badge>
-            <button
-              type="button"
-              aria-label={t('deleteGoal')}
-              onClick={(e) => { e.stopPropagation(); onDeleteRequest(epic.id); }}
-              className="hidden group-hover:flex items-center justify-center rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
+            {/* story #2104 — BE goals.py:352가 human-only로 삭제를 403 거부한다(되돌릴 수 없는
+                조작). 에이전트 계정에도 트리거를 열어두면 #2091/#2103과 같은 결함이라 미리
+                숨긴다. */}
+            <HumanOnlyAction>
+              <button
+                type="button"
+                aria-label={t('deleteGoal')}
+                onClick={(e) => { e.stopPropagation(); onDeleteRequest(epic.id); }}
+                className="hidden group-hover:flex items-center justify-center rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </HumanOnlyAction>
           </div>
         </div>
 

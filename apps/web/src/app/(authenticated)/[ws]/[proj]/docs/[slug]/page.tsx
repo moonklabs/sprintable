@@ -26,6 +26,7 @@ import { useDocsLayout } from '../docs-context';
 import { DocAssigneeControl } from '@/components/docs/doc-assignee-control';
 import { DocBreadcrumb } from '@/components/docs/doc-breadcrumb';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 interface DocDetail {
   id: string;
@@ -377,10 +378,16 @@ export default function DocSlugPage() {
                 {t('editUrl')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
-                <Trash2 className="mr-2 h-4 w-4" />
-                {t('deleteDoc')}
-              </DropdownMenuItem>
+              {/* story #2104 — BE docs.py:471이 human-only로 삭제를 403 거부한다(delete는 사람만
+                  가능, 되돌릴 수 없는 조작). 에이전트 계정에도 이 항목을 열어두면 "내가 지울 수
+                  있다"고 믿게 만드는 #2091/#2103과 같은 결함이라 미리 숨긴다(메뉴 공간 제약상
+                  사유 문구 대신 항목 자체를 생략 — edit-url 등 남은 항목은 그대로 유지). */}
+              <HumanOnlyAction>
+                <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  {t('deleteDoc')}
+                </DropdownMenuItem>
+              </HumanOnlyAction>
             </>
           )}
         </DropdownMenuContent>

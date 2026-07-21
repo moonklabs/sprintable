@@ -35,6 +35,7 @@ import {
 import { HypothesisDeclarationSection } from '@/components/sprints/hypothesis-declaration-section';
 import { OpenLoopCockpit } from '@/components/sprints/open-loop-cockpit';
 import type { RetroHypothesisResult } from '@/services/retro-session';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 // 8a2bbda2: 기간 표시는 start_date~end_date(진실)에서 계산한다. BE `duration` 필드(예 14)가
 // 날짜 범위와 불일치하는 케이스가 있어 신뢰하지 않고, inclusive 일수(end−start+1)를 직접 산출한다.
@@ -694,16 +695,21 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           <Badge variant={statusVariant(selected.status)} className="mt-1">{selected.status}</Badge>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => { setDeleteError(null); setShowDeleteConfirm(true); }}
-            aria-label={t('delete')}
-            title={t('delete')}
-            className="text-muted-foreground hover:text-destructive"
-          >
-            <Trash2 className="size-4" />
-          </Button>
+          {/* story #2104 — BE sprints.py:351이 human-only로 삭제를 403 거부한다(되돌릴 수 없는
+              조작). 에이전트 계정에도 트리거를 열어두면 #2091/#2103과 같은 결함이라 미리
+              숨긴다. */}
+          <HumanOnlyAction>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setDeleteError(null); setShowDeleteConfirm(true); }}
+              aria-label={t('delete')}
+              title={t('delete')}
+              className="text-muted-foreground hover:text-destructive"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </HumanOnlyAction>
           <Button variant="ghost" size="sm" onClick={() => setSelected(null)} aria-label={t('cancel')}>
             <X className="size-4" />
           </Button>

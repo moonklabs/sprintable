@@ -37,6 +37,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 import { isEEEnabled } from '@/lib/ee';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
 
 // TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
@@ -1036,15 +1037,23 @@ export default function SettingsPage() {
                                     >
                                       {tc('edit')}
                                     </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                      onClick={() => setDeleteProjectConfirmId(project.id)}
-                                      disabled={deletingProjectId === project.id}
-                                    >
-                                      {deletingProjectId === project.id ? '...' : t('deleteProject')}
-                                    </Button>
+                                    {/* story #2104 — BE projects.py:213이 human-only로 삭제를
+                                        403 거부한다(되돌릴 수 없는 조작). 이 버튼은 이미
+                                        isAdmin(org owner/admin)으로 감싸져 있으나, 에이전트도
+                                        구조상 owner/admin 권한을 가질 수 있어 human 여부는
+                                        별도 확認이 필요하다(#2091/#2103과 같은 결함). edit
+                                        버튼은 BE에 human-only 가드가 없어 그대로 둔다. */}
+                                    <HumanOnlyAction>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                        onClick={() => setDeleteProjectConfirmId(project.id)}
+                                        disabled={deletingProjectId === project.id}
+                                      >
+                                        {deletingProjectId === project.id ? '...' : t('deleteProject')}
+                                      </Button>
+                                    </HumanOnlyAction>
                                   </>
                                 ) : null}
                               </div>
