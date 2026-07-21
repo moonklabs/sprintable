@@ -12,12 +12,15 @@ substitutions:
   _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
   _BACKEND_MIN_INSTANCES: '1'
   # ⚠️ default '1'(아래) = _DEPLOY_ENV:dev default 와 정합한 **dev-safe fallback**(수동 `gcloud builds submit`
-  #    override 없을 때 maxScale 10 trap=2×10×5+5=105>25 재현 차단). GHA cloud-build.yml 이 per-env override(prod=5·dev=1).
+  #    override 없을 때 무리한 maxScale 재현 차단). GHA cloud-build.yml 이 per-env override(prod=5·dev=8, #2074 응급).
   #    rollout-safe 산식(ee7794eb·dev TooManyConnections 인시던트): **2 × maxScale × (pool+overflow + raw) +
   #    headroom ≤ max_conn**. per-instance = pool(3/1=4) + pg_pubsub raw(1) = 5.
-  #    prod(g1-small 100): maxScale **5** → 2×5×5+20=70 ≤ 100 ✓(선생님 right-size·여유 30). 10 은 120>100 폐기.
-  #    dev(f1-micro 25): maxScale 1 → 2×1×5+5=15 ≤ 25 ✓. (PgBouncer 풀러: Cloud Run raw TCP 미지원으로 중앙
-  #    불가·관리형 풀링 Enterprise Plus 전용 → 채택 안 함. 트래픽↑ 時 tier업 동반해야 maxScale 상향.)
+  #    ⚠️ story #2040(2026-07-20) PO gcloud 실측 갱신 — max_connections이 dev/prod 둘 다 **200**이다
+  #    (dev는 100→200 그날 사고대응으로 상향). 이 주석이 한동안 100 가정으로 낡아 있었다(codex #2074
+  #    조사가 재적발) — SSOT는 `docs/db-connection-budget.md`, 값 바뀌면 그 문서와 여기를 같이 갱신할 것.
+  #    prod: maxScale 5 → 2×5×5+20=70 ≤ 200(여유 65%). dev: maxScale 8 → 2×8×5=80 ≤ 200(여유 60%).
+  #    (PgBouncer 풀러: Cloud Run raw TCP 미지원으로 중앙 불가·관리형 풀링 Enterprise Plus 전용 → #1779
+  #    폐기 이력 있음. 트래픽↑ 時 아키텍처 재검토(#2074) 필요.)
   _BACKEND_MAX_INSTANCES: '1'
   _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
   # story #2005(Phase B P1-c, E-A2A-PROTO 리라이어빌리티): Cloud Run 요청 타임아웃이
