@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -48,6 +49,8 @@ from app.services.workflow_violation import (
 )
 
 router = APIRouter(prefix="/api/v2/stories", tags=["stories", "Work"])
+
+logger = logging.getLogger(__name__)
 
 
 async def _resolve_actor_info(
@@ -902,8 +905,25 @@ async def update_story(
         _assignee_notify_ids = {
             m for m in (story.assignee_id, old_assignee_id, actor_id) if m is not None
         }
-        # publish_event는 org-level 브라우저 UI 활동피드(_subscribers·per-agent 미전파)라 org-wide 의도 유지(AC2).
+        # story #2086(2026-07-21, 까심군 라이브 실측 확定): publish_event()의 org _subscribers
+        # fanout은 .add() 호출이 저장소 전체 0곳인 영구 죽은 레지스트리(story #2059/#2067과
+        # 동일 근본) — "org-wide 의도 유지" 주석은 실제로 아무 SSE 연결에도 안 닿는 상태였다.
+        # story.status_changed(story_status_events.py)와 동형으로 project_accessible_member_ids
+        # 로 수신자 해소 후 _push_to_agent 개별 push — 이게 실제로 SSE 큐에 들어가는 유일 경로.
         publish_event(str(org_id), "story.assignee_changed", event_data)
+        try:
+            from app.routers.events import _push_to_agent
+            from app.services.project_auth import project_accessible_member_ids
+
+            member_ids = await project_accessible_member_ids(db, org_id, story.project_id)
+            sse_payload = {"event_type": "story.assignee_changed", **event_data}
+            for member_id in member_ids:
+                _push_to_agent(str(member_id), dict(sse_payload))
+        except Exception:
+            logger.warning(
+                "assignee_changed SSE 포워딩 실패(story=%s project=%s) — org publish는 이미 발행됨",
+                story.id, story.project_id, exc_info=True,
+            )
         try:
             await fire_webhooks(
                 db, org_id, "story.assignee_changed", event_data,
