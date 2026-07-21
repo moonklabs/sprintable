@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -75,9 +76,9 @@ export default function MockupsPage() {
       />
 
       {showCreate ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-muted p-6 shadow-xl backdrop-blur-xl">
-            <h3 className="mb-4 text-lg font-semibold text-foreground">{t('createMockup')}</h3>
+        <Dialog open={showCreate} onOpenChange={(open) => { if (!open && !creating) setShowCreate(false); }}>
+          <DialogContent className="max-w-md rounded-3xl border-white/10 bg-muted shadow-xl backdrop-blur-xl">
+            <DialogTitle className="mb-4 text-lg font-semibold text-foreground">{t('createMockup')}</DialogTitle>
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{t('titlePlaceholder')}</label>
@@ -116,8 +117,8 @@ export default function MockupsPage() {
                 {creating ? t('saving') : t('createMockup')}
               </Button>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
 
       <div className="flex min-h-0 flex-1 overflow-y-auto p-6">

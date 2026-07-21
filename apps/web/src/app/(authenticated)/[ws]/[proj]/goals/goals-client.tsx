@@ -806,16 +806,10 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
   const t = useTranslations('goals');
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button
-        type="button"
-        className="absolute inset-0 bg-overlay-backdrop backdrop-blur-[2px]"
-        onClick={onClose}
-        aria-label={t('cancel')}
-      />
-      <div className="relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col rounded-2xl border border-border bg-card shadow-xl">
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] max-w-md flex-col overflow-hidden rounded-2xl p-0" showCloseButton={false}>
         <div className="flex flex-shrink-0 items-center justify-between px-6 pb-4 pt-6">
-          <h2 className="text-base font-bold text-foreground">{t('createGoal')}</h2>
+          <DialogTitle className="text-base font-bold text-foreground">{t('createGoal')}</DialogTitle>
           <button
             type="button"
             onClick={onClose}
@@ -834,8 +828,8 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
             onCancel={onClose}
           />
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

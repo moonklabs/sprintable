@@ -13,6 +13,7 @@
     "verify:build-schema-integrity": "tsx scripts/verify-build-schema-integrity.ts",
     "verify:no-new-md-breakpoint": "tsx scripts/verify-no-new-md-breakpoint.ts",
     "verify:no-alpha-focus-ring": "tsx scripts/verify-no-alpha-focus-ring.ts",
+    "verify:no-handrolled-modal": "tsx scripts/verify-no-handrolled-modal.ts",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report"

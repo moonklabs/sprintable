@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode, type SetStateAction } from 'react';
 import { cn } from '@/lib/utils';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
 
 const INLINE_PANEL_MEDIA_QUERY = '(min-width: 1536px)';
 
@@ -162,6 +163,10 @@ export function ContextualPanelLayout({
   drawerWidthClassName = 'w-[min(92vw,24rem)]',
   drawerSide = 'left',
 }: ContextualPanelLayoutProps) {
+  // story #2061 — renderPanel이 inline/drawer 두 모드를 겸해 base-ui Dialog Popup으로 감쌀 수
+  // 없다(hard). 대신 최소 포커스 트랩(Tab 순환+Esc+포커스 반환)을 직접 배선한다.
+  const trapRef = useFocusTrap(drawerOpen, useCallback(() => onDrawerOpenChange(false), [onDrawerOpenChange]));
+
   return (
     <>
       <div className={cn('grid gap-4', inlinePanelOpen ? inlineColumnsClassName : 'grid-cols-1', className)}>
@@ -174,7 +179,14 @@ export function ContextualPanelLayout({
       </div>
 
       {drawerOpen ? (
-        <div className="fixed inset-0 z-50 2xl:hidden" role="dialog" aria-modal="true" aria-label={drawerAriaLabel}>
+        <div
+          ref={trapRef}
+          tabIndex={-1}
+          className="fixed inset-0 z-50 outline-none 2xl:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label={drawerAriaLabel}
+        >
           <button
             type="button"
             aria-label={drawerAriaLabel}

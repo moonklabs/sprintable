@@ -79,8 +79,10 @@ describe('SprintsClient — 스프린트 first-touch 정체성', () => {
     const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 스프린트 시작하기'));
     expect(ctaButton).not.toBeUndefined();
     await act(async () => { ctaButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    // 생성 폼 오픈 시 노출되는 필드 라벨로 폼이 실제 열렸는지 확인.
-    expect(container.textContent).toContain('스프린트 이름');
+    // 생성 폼 오픈 시 노출되는 필드 라벨로 폼이 실제 열렸는지 확인. story #2061: CreateDialog가
+    // 공용 Dialog(base-ui)로 교체되며 document.body로 포탈 렌더되므로 container가 아닌
+    // document.body를 본다(내용/동작은 동일 — DOM 위치만 바뀜).
+    expect(document.body.textContent).toContain('스프린트 이름');
   });
 
   it('스프린트 데이터가 있으면 기존 리스트가 그대로 렌더되고 explainer는 미노출된다(회귀 0)', async () => {
