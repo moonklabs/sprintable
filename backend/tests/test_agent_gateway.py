@@ -455,7 +455,7 @@ async def test_disconnect_clears_chat_working_when_no_remaining():
     factory, db = _patch_session_factory([MagicMock(), no_remaining])
     with patch("app.routers.agent_gateway.async_session_factory", factory), \
          patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()), \
-         patch("app.services.chat_presence.clear_member") as mock_clear:
+         patch("app.services.chat_presence.clear_member", new_callable=AsyncMock) as mock_clear:
         await _mark_agent_disconnected(AGENT_ID, uuid.uuid4())
     mock_clear.assert_called_once_with(str(AGENT_ID))
 
@@ -468,7 +468,7 @@ async def test_disconnect_keeps_chat_working_when_other_session_active():
     factory, db = _patch_session_factory([MagicMock(), remaining])
     with patch("app.routers.agent_gateway.async_session_factory", factory), \
          patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()), \
-         patch("app.services.chat_presence.clear_member") as mock_clear:
+         patch("app.services.chat_presence.clear_member", new_callable=AsyncMock) as mock_clear:
         await _mark_agent_disconnected(AGENT_ID, uuid.uuid4())
     mock_clear.assert_not_called()
 
