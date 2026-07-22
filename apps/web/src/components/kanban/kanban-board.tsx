@@ -260,6 +260,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       actor_name?: string;
       status?: string;
       assignee_id?: string | null;
+      assignees?: string[];
     };
     if (!payload.story_id || !payload.project_id || payload.project_id !== projectId) return;
     // 내 액션의 echo는 무시 — 이미 낙관 갱신했으므로 중복 패치·토스트 스팸을 방지한다.
@@ -275,8 +276,16 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       adjustColumnTotal(existing.status, -1);
       adjustColumnTotal(newStatus, +1);
     } else if (eventName === 'story.assignee_changed') {
+      // story #2130 — 카드(StoryCard)는 assignees(배열, assignee_ids 유래)를 assignee(단일)보다
+      // 우선해 그린다. assignee_id만 갱신하면 assignee_ids가 stale로 남아 화면이 안 바뀐다
+      // (배열이 이미 비어있지 않으면 옛 담당자가 계속 보이고, 비어있으면 memberMap에 새
+      // 담당자가 없을 때 빈 채로 남는다 — 오늘 #2384(story-detail-panel.tsx)와 같은 클래스).
+      // 서버 payload의 assignees(ID 배열)를 그대로 반영해 화면이 읽는 필드를 전부 맞춘다.
       const newAssigneeId = payload.assignee_id ?? null;
-      setStories((prev) => prev.map((s) => (s.id === payload.story_id ? { ...s, assignee_id: newAssigneeId } : s)));
+      const newAssigneeIds = payload.assignees ?? (newAssigneeId ? [newAssigneeId] : []);
+      setStories((prev) => prev.map((s) => (
+        s.id === payload.story_id ? { ...s, assignee_id: newAssigneeId, assignee_ids: newAssigneeIds } : s
+      )));
     } else {
       return;
     }
