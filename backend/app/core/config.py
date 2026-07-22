@@ -122,6 +122,17 @@ class Settings(BaseSettings):
     # off/Redis 다운 → 기존 in-process 카운트로 폴백(fail-open·연결 거부 안 함).
     sse_lease_redis_enabled: bool = False
 
+    # #2122(E-ARCH, 2026-07-22): fanout(특히 wake_agent)을 Redis 백플레인에 태워 크로스-인스턴스 배달.
+    # 현재 wake_agent 는 pg_notify 직접(event_broker 우회)이라 GCE(PG_LISTEN=false)서 타노드 미도달 +
+    # __wake__ 마커가 event_type 에만 있어 브리지(_push_to_agent=data만 큐잉)서 유실 = 크로스노드 wake 이중 파손.
+    # fix = event_broker.publish + __wake__ 를 data 에. 독립 flag(#2120/#2121 교훈·롤백 격리). 기본 off=현 동작.
+    fanout_wake_redis_enabled: bool = False
+
+    # #2122 cutover 셀렉터: 크로스-인스턴스 dispatch 백플레인을 하나로 강제(중복배달 차단). PG listen 과
+    # Redis consume 브리지는 구조 동일 — 둘 다 dispatch 하면 같은 이벤트 2회 배달. ""(미설정)=기존 플래그서
+    # 파생(충돌 시 redis 우선+ERROR)·"pg"|"redis"=명시 강제. "잘못된 상태를 표현 불가능하게"(불린 2개 대신 enum).
+    realtime_backplane: str = ""
+
     # E-ARCH S2 정리(2026-07-21, LISTEN 제거 완료 후 발견): redis_consume_loop task 생성이
     # event_broker_redis_dual_publish_enabled 하나로만 게이트돼 있었다 — dual_publish(발행,
     # 모든 인스턴스가 필요)와 consume(구독+dispatch, SSE를 실제로 서빙하는 서비스만 필요)

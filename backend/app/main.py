@@ -36,7 +36,26 @@ async def lifespan(app: FastAPI):
     warn_if_webhook_secret_misconfigured()  # Bot-M.2 P3: 웹훅 secret misconfig 를 트래픽 前 경고.
     # E-ARCH S1: PG_LISTEN_ENABLED=false인 서비스(api)는 이 검증 자체가 무의미 — LISTEN을 절대
     # 안 켜므로 DB_PGBOUNCER/DATABASE_URL_DIRECT 정합을 강제할 이유가 없다(무해·불필요 fail 방지).
-    if settings.pg_listen_enabled:
+    # #2122 cutover: 크로스-인스턴스 dispatch 백플레인을 단일 결정(pg|redis)해 중복배달 차단. pg_listen_enabled
+    # 직접 대신 resolver 로 게이팅 — PG_LISTEN + Redis dispatch 동시 활성이면 redis 우선(+ERROR). 미설정 시
+    # 기존 플래그서 파생(무회귀). realtime=redis / api=pg 로 자연 갈림.
+    from app.services.event_broker import resolve_backplane as _resolve_backplane
+    _backplane = _resolve_backplane(log_conflict=True)  # 충돌 ERROR 는 startup 1회만
+    # #2122 정합성 가드(mirror-risk·오르테가 2026-07-22): backplane=redis 인데 consume loop 이 안 도는 조합
+    # (dual_publish/consume off 인데 dispatch on)이면 dispatcher 0 = 백플레인은 정해졌는데 **수신자 없는**
+    # "조용한 사망"(오늘 #2122 가 정확히 그 모양이었다). dispatch 와 consume 은 독립 env 라 어긋날 수 있어
+    # startup 서 감지 → loud ERROR + pg 폴백(strictly-better: redis consume loop 이 어차피 안 뜨니 중복배달
+    # 없고, pg 가 뜨면 dispatcher 확보·안 떠도 최소한 침묵 아닌 로그로 관측 가능).
+    if _backplane == "redis" and not (
+        settings.event_broker_redis_dual_publish_enabled
+        and settings.event_broker_redis_consume_enabled
+    ):
+        _logger.error(
+            "REALTIME_BACKPLANE=redis(또는 dispatch_enabled)인데 consume loop 미기동"
+            "(dual_publish/consume off) = dispatcher 0. PG listen 으로 폴백. (#2122 정합성 가드)"
+        )
+        _backplane = "pg"
+    if _backplane == "pg":
         check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
     check_internal_secret_config()  # 산티아고 §9 finding 4: non-local + 시크릿 미설정 fail-closed.
     check_cron_secret_config()  # story #2072: non-local + CRON_SECRET 미설정 fail-closed.
@@ -49,7 +68,7 @@ async def lifespan(app: FastAPI):
     # E-ARCH S1(2026-07-21, #2074 근본 — REST/실시간 서비스 분리 1단계): default=True(무회귀) —
     # api 서비스에 PG_LISTEN_ENABLED=false를 배선하면 이 인스턴스는 RAW_LISTEN 커넥션을 전혀
     # 안 잡는다(커넥션 예산 산식에서 이 항이 빠짐). realtime 서비스만 true로 유지.
-    task = asyncio.create_task(listen_loop()) if settings.pg_listen_enabled else None
+    task = asyncio.create_task(listen_loop()) if _backplane == "pg" else None  # #2122: resolver 게이팅
     # E-L2 S5: 휴리스틱 트리거 워커는 default-off — 명시 활성화 시에만 task 생성(AC①).
     l2_task = None
     if settings.l2_trigger_enabled:
