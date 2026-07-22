@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     # instance_id가 없어 self-skip이 안 돼 중복 dispatch 위험(3b에서 해소 예정).
     event_broker_redis_dispatch_enabled: bool = False
 
+    # #2120(E-ARCH 근본, 2026-07-22): chat_presence "working" 저장을 instance-local in-memory →
+    # Redis 공유로 전환하는 롤아웃 게이트. off(기본)=현 in-memory 경로 그대로(무회귀). on이라도
+    # redis_url None/Redis 다운 시 in-memory 로 fail-open(presence=non-critical UI degrade). 롤백=off.
+    presence_redis_enabled: bool = False
+
     # E-ARCH S2 정리(2026-07-21, LISTEN 제거 완료 후 발견): redis_consume_loop task 생성이
     # event_broker_redis_dual_publish_enabled 하나로만 게이트돼 있었다 — dual_publish(발행,
     # 모든 인스턴스가 필요)와 consume(구독+dispatch, SSE를 실제로 서빙하는 서비스만 필요)

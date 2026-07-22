@@ -465,7 +465,7 @@ async def _dispatch_conversation_event(
         # 그 agent 가 reply 를 보내면 send_message 에서 clear, 안 보내면 TTL 자동 소멸(ephemeral).
         # webhook-covered agent 도 webhook 으로 받아 답장하므로 working 표시는 유지한다.
         if is_agent:
-            chat_presence.set_working(str(conversation.id), str(pid))
+            await chat_presence.set_working(str(conversation.id), str(pid))
             _set_working_any = True
         # webhook-covered agent → SSE Event/seq/push 스킵(이중수신 박멸). human Event 는 무변경
         # (웹 UI SSE = events.py status 별경로·FORK2).
@@ -491,7 +491,7 @@ async def _dispatch_conversation_event(
     # R2(da9d1781): working 변경 → conversation.working + presence SSE 발행(폴링 대체·best-effort).
     if _set_working_any:
         from app.services.presence_events import emit_conversation_working, emit_presence
-        emit_conversation_working(org_id, conversation.id)
+        await emit_conversation_working(org_id, conversation.id)
         emit_presence(org_id)
     # per-recipient dense seq 발급 (agent recipient만)
     for pid_str, event in events_to_push:
@@ -1431,7 +1431,7 @@ async def list_working_members(
 
     # 본인은 제외 — 내가 typing 중인 건 내 UI에 안 띄움(memo presence.py 동형).
     items = [
-        e for e in chat_presence.list_working(str(conversation_id))
+        e for e in await chat_presence.list_working(str(conversation_id))
         if e["member_id"] != str(sender.id)
     ]
     return {"data": items}
@@ -1654,10 +1654,10 @@ async def send_message(
     # 1aeecdde P2: sender 가 이 conversation 에 메시지를 보냄 = 답장 생성 종료 → working clear.
     # fork 분기(아래) 전 **원본 conversation_id** 기준 — working 은 그 conversation 에 set 됐다.
     # 휴먼 sender 면 set 된 적 없어 no-op(무해). agent reply 면 즉시 "...typing" 해제.
-    chat_presence.clear_working(str(conversation_id), str(sender.id))
+    await chat_presence.clear_working(str(conversation_id), str(sender.id))
     # R2(da9d1781): working clear → conversation.working + presence SSE 발행(폴링 대체·best-effort).
     from app.services.presence_events import emit_conversation_working, emit_presence
-    emit_conversation_working(org_id, conversation_id)
+    await emit_conversation_working(org_id, conversation_id)
     emit_presence(org_id)
 
     # cross-org 차단: mentioned_ids를 현재 org 소속 member로 일괄 필터링 (QA B1).
