@@ -275,11 +275,16 @@ async def agent_event_stream(
         except (ValueError, AttributeError):
             pass
 
-    # S20: 전역 연결 수 제한 — 초과 시 503
+    # S20/#2121: 전역 연결 수 제한 — 503. Redis lease(공유·TTL 자가회수)가 주경로·Redis 불가 시 in-process 폴백.
     global _sse_connection_count
-    if _sse_connection_count >= _MAX_SSE_CONNECTIONS:
+    _lease_conn_id = str(uuid.uuid4())
+    from app.services import sse_lease
+    _lease = await sse_lease.acquire("events_global", _MAX_SSE_CONNECTIONS, _lease_conn_id)
+    if _lease is False:  # Redis lease: 전역 한계 초과
         raise HTTPException(status_code=503, detail="SSE connection limit reached")
-    _sse_connection_count += 1
+    if _lease is None and _sse_connection_count >= _MAX_SSE_CONNECTIONS:  # Redis 불가 → in-process 폴백
+        raise HTTPException(status_code=503, detail="SSE connection limit reached")
+    _sse_connection_count += 1  # in-process shadow(Redis 다운 시 폴백용 유지)
 
     member_id_str = str(resolved_member_id)
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
@@ -400,6 +405,8 @@ async def agent_event_stream(
                         if get_task not in done:
                             # 타임아웃 — 기존 heartbeat 분기
                             get_task.cancel()
+                            # #2121: 연결 살아있음 → lease score 재갱신(TTL 만료 방지). off/다운 no-op.
+                            await sse_lease.refresh("events_global", _lease_conn_id)
                             yield "event: heartbeat\ndata: {}\n\n"
                             if await request.is_disconnected():
                                 break
@@ -455,6 +462,8 @@ async def agent_event_stream(
         finally:
             global _sse_connection_count
             _sse_connection_count -= 1
+            # #2121: lease 명시 해제(최적화만·TTL 이 주 회수 경로). off/다운 no-op.
+            await sse_lease.release("events_global", _lease_conn_id)
             _agent_connections[member_id_str].discard(queue)
             if not _agent_connections[member_id_str]:
                 _agent_connections.pop(member_id_str, None)

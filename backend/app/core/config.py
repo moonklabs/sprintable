@@ -117,6 +117,11 @@ class Settings(BaseSettings):
     # 않게. AC2는 disconnect 판정·reachability(메시지 배달 경로)까지 건드리므로 격리 필수. 기본 off.
     presence_online_redis_enabled: bool = False
 
+    # #2121(E-ARCH, 2026-07-22): SSE 연결 카운터(429/503)를 Redis ZSET lease(TTL 자가회수)로. process-local
+    # 카운터가 멀티인스턴스서 부정확 → 429/503 오발. 독립 flag(#2120 교훈·롤백이 presence/§2 안 끔). 기본 off.
+    # off/Redis 다운 → 기존 in-process 카운트로 폴백(fail-open·연결 거부 안 함).
+    sse_lease_redis_enabled: bool = False
+
     # E-ARCH S2 정리(2026-07-21, LISTEN 제거 완료 후 발견): redis_consume_loop task 생성이
     # event_broker_redis_dual_publish_enabled 하나로만 게이트돼 있었다 — dual_publish(발행,
     # 모든 인스턴스가 필요)와 consume(구독+dispatch, SSE를 실제로 서빙하는 서비스만 필요)
