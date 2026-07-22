@@ -106,3 +106,10 @@ def test_override_online_none_preserves_db():
 
     resp = _agent_resp(datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc))
     assert _override_online(resp, None).presence_status == "offline"  # 폴백=DB 그대로
+
+
+def test_fakeredis_is_available():
+    """가드(silent-skip 문 닫기): fakeredis dev dep 가 빠지면 위 fixture 의 importorskip 이 Redis 왕복
+    테스트를 **조용히 skip** 해 CI green인데 커버리지 0(=vacuous)이 되는 문이 열린다. 이 테스트는
+    importorskip 아니라 **plain import** 라 dep 이 빠지면 여기서 FAIL → CI red 로 즉시 드러난다."""
+    import fakeredis  # noqa: F401
