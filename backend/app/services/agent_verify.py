@@ -105,7 +105,29 @@ async def start_verification(
 
 
 async def _has_fresh_session(db: AsyncSession, agent_id: uuid.UUID) -> bool:
-    """에이전트가 현재 /agent/stream 연결 중인지(= mcp_reachable). 게이트웨이의 동일 freshness TTL 사용."""
+    """에이전트가 현재 /agent/stream 연결 중인지(= mcp_reachable).
+
+    #2120 AC2: flag on 이면 30s 틱이 세션 last_seen_at 을 안 갱신하므로 freshness 가 무의미 →
+    Redis online 키(틱이 SET)로 판정. Redis 불가(None)면 세션-row **존재**로 폴백=fail-open
+    (도달성=메시지 배달 경로라 Redis 다운서도 연결중이면 reachable 유지·freshness 폴백은 fail-closed라 금지).
+    flag off 면 기존 freshness(틱 유지·무회귀).
+    """
+    from app.core.config import settings
+
+    if settings.presence_online_redis_enabled and settings.redis_url:
+        from app.services import presence_online
+
+        online = await presence_online.is_online(agent_id)
+        if online is not None:
+            return online
+        # Redis 다운 → 세션-row 존재(freshness 아님) 폴백
+        row = (await db.execute(
+            select(AgentGatewaySession.id).where(
+                AgentGatewaySession.agent_id == agent_id,
+            ).limit(1)
+        )).first()
+        return row is not None
+
     from app.routers.agent_gateway import _SESSION_FRESH_TTL  # lazy: 순환 import 회피
 
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=_SESSION_FRESH_TTL)

@@ -112,6 +112,11 @@ class Settings(BaseSettings):
     # redis_url None/Redis 다운 시 in-memory 로 fail-open(presence=non-critical UI degrade). 롤백=off.
     presence_redis_enabled: bool = False
 
+    # #2120 AC2(2026-07-22): online liveness(30s SSE-틱 hot-path DB write)를 Redis TTL 키로.
+    # §2 presence_redis_enabled 와 **독립** kill switch — AC2 롤백이 검증완료 §2(working)를 끄지
+    # 않게. AC2는 disconnect 판정·reachability(메시지 배달 경로)까지 건드리므로 격리 필수. 기본 off.
+    presence_online_redis_enabled: bool = False
+
     # E-ARCH S2 정리(2026-07-21, LISTEN 제거 완료 후 발견): redis_consume_loop task 생성이
     # event_broker_redis_dual_publish_enabled 하나로만 게이트돼 있었다 — dual_publish(발행,
     # 모든 인스턴스가 필요)와 consume(구독+dispatch, SSE를 실제로 서빙하는 서비스만 필요)

@@ -31,10 +31,33 @@ class ClaimBody(BaseModel):
     project_id: uuid.UUID | None = None
 
 
+def _override_online(resp: TeamMemberResponse, ts: "str | None") -> TeamMemberResponse:
+    """#2120 AC2: Redis online 키 ts 있으면 last_seen_at 을 그 값으로 override → computed_field
+    presence_status 가 online 을 도출(status 를 직접 주입하지 않아 3상태·AC7 로직 무변경). ts 없음/
+    파싱실패 → 원본(DB last_seen_at 폴백·flag off/Redis 다운 시 자연 폴백)."""
+    if not ts:
+        return resp
+    try:
+        return resp.model_copy(update={"last_seen_at": datetime.fromisoformat(ts)})
+    except (ValueError, TypeError):
+        return resp
+
+
+async def _inject_online_single(resp: TeamMemberResponse, member_id) -> TeamMemberResponse:
+    """단건 응답용 #2120 AC2 online 주입(목록/단건 presence 불일치 방지)."""
+    from app.services import presence_online
+
+    om = await presence_online.get_online_map([member_id])
+    return _override_online(resp, om.get(str(member_id)))
+
+
 async def _inject_active_stories(
     members: list, session: AsyncSession
 ) -> list[TeamMemberResponse]:
-    """AC6: active_story_id → stories batch 조회 후 inject."""
+    """AC6: active_story_id → stories batch 조회 후 inject.
+
+    #2120 AC2: online 키 배치조회(MGET 1회) → 있으면 last_seen_at override → computed_field online.
+    """
     ids = {m.active_story_id for m in members if m.active_story_id}
     stories: dict[uuid.UUID, Story] = {}
     if ids:
@@ -42,9 +65,13 @@ async def _inject_active_stories(
         for s in result.scalars().all():
             stories[s.id] = s
 
+    from app.services import presence_online
+    online_map = await presence_online.get_online_map([m.id for m in members])
+
     out = []
     for m in members:
         resp = TeamMemberResponse.model_validate(m)
+        resp = _override_online(resp, online_map.get(str(m.id)))
         if m.active_story_id and m.active_story_id in stories:
             s = stories[m.active_story_id]
             resp = resp.model_copy(update={
@@ -374,7 +401,7 @@ async def get_team_member(
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
-    return TeamMemberResponse.model_validate(member)
+    return await _inject_online_single(TeamMemberResponse.model_validate(member), member.id)
 
 
 _SELF_EDITABLE_HUMAN_FIELDS: frozenset[str] = frozenset({"name", "avatar_url", "color"})
@@ -436,7 +463,8 @@ async def update_team_member(
     await repo.apply_anchor_update(member, data)
     session.expire(member)
     updated = await repo.get(id)
-    return TeamMemberResponse.model_validate(updated or member)
+    _m = updated or member
+    return await _inject_online_single(TeamMemberResponse.model_validate(_m), _m.id)
 
 
 @router.patch("/{id}/heartbeat")
