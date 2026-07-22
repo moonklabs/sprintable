@@ -26,10 +26,18 @@
  * 진짜 죽어 매번 카운트가 증가)에도 누적 백오프(1+3+8+20=32초)가 정상 사이클 길이보다
  * 짧다 — 재시도 폭풍이 사이클 하나를 도는 동안 물리적으로 발생할 수 없다. 동시에 실시간
  * 공백을 기존 최악 5분에서 최악 20초로 줄인다.
+ *
+ * ⚠️ PO 리뷰(2026-07-22) — 지터(jitter) 필수: 지터 없이 상한만 낮추면 서버 재시작·순단처럼
+ * **다수 클라이언트가 동시에 끊기는** 상황에서 전부 같은 간격으로 동시 재시도해(동기화된
+ * herd) 재시도 폭풍 위험이 오히려 커진다. E-GCE-RT S6 실측(600 연결 동시 접속 시 CPU
+ * 92~97%)으로 thundering herd가 실제 문제임이 확인됐고, 상한을 15배 낮췄으니(300s→20s)
+ * 같은 herd가 15배 자주 온다 — 각 지연에 ±20% 랜덤 지터(`delay * (0.8~1.2)`)를 곱해
+ * 동시 재시도를 시간축으로 흩뿌린다.
  */
 export const RECONNECT_DELAYS_MS = [1_000, 3_000, 8_000, 20_000];
 
 const HEALTHY_CONNECTION_MS = 10_000;
+const JITTER_RATIO = 0.2; // ±20%
 
 export interface ReconnectBackoffState {
   /** EventSource가 open됐을 때 호출 — 이후 onError 판정에 쓸 시작 시각을 기록한다. */
@@ -37,11 +45,12 @@ export interface ReconnectBackoffState {
   /** 지금이 최초 연결이 아니라 재연결(과거 open 이력이 있음)인지 — backfill 트리거용.
    *  onOpen() 호출 *전에* 확인해야 정확하다(과거 이력을 묻는 질문이므로). */
   isReconnect: () => boolean;
-  /** EventSource가 error됐을 때 호출 — 다음 재시도까지 기다릴 지연(ms)을 반환한다. */
+  /** EventSource가 error됐을 때 호출 — 다음 재시도까지 기다릴 지연(ms, ±20% 지터 적용됨)을 반환한다. */
   onError: () => number;
 }
 
-export function createReconnectBackoffState(): ReconnectBackoffState {
+/** 테스트에서 결정적 값을 주입할 수 있도록 난수 소스를 분리(기본 Math.random). */
+export function createReconnectBackoffState(random: () => number = Math.random): ReconnectBackoffState {
   let attempts = 0;
   let openedAt: number | null = null;
   let hadPriorError = false;
@@ -58,9 +67,11 @@ export function createReconnectBackoffState(): ReconnectBackoffState {
       const stayedHealthy = openedAt !== null && Date.now() - openedAt >= HEALTHY_CONNECTION_MS;
       openedAt = null;
       if (stayedHealthy) attempts = 0;
-      const delay = RECONNECT_DELAYS_MS[Math.min(attempts, RECONNECT_DELAYS_MS.length - 1)]!;
+      const baseDelay = RECONNECT_DELAYS_MS[Math.min(attempts, RECONNECT_DELAYS_MS.length - 1)]!;
       attempts += 1;
-      return delay;
+      // (1-JITTER_RATIO) ~ (1+JITTER_RATIO) 범위(0.8~1.2)로 균등분포 — 동시 재시도를 흩뿌린다.
+      const jitterMultiplier = 1 - JITTER_RATIO + random() * (2 * JITTER_RATIO);
+      return Math.round(baseDelay * jitterMultiplier);
     },
   };
 }
