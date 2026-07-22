@@ -42,16 +42,24 @@ def test_resolve_pg_when_only_pg():
         assert resolve_backplane() == "pg"
 
 
-def test_resolve_conflict_redis_wins_with_error(caplog):
-    """PG_LISTEN + Redis dispatch 동시 활성(미설정) → redis 우선 + ERROR 로그(기동거부 아님)."""
+def test_resolve_conflict_redis_wins_startup_logs(caplog):
+    """PG_LISTEN + Redis dispatch 동시 활성(미설정) → redis 우선. startup(log_conflict=True)만 ERROR 로그."""
     with patch.object(_cfg_settings, "realtime_backplane", ""), \
          patch.object(_cfg_settings, "pg_listen_enabled", True), \
-         patch.object(_cfg_settings, "event_broker_redis_dual_publish_enabled", True), \
-         patch.object(_cfg_settings, "event_broker_redis_consume_enabled", True), \
+         patch.object(_cfg_settings, "event_broker_redis_dispatch_enabled", True):
+        with caplog.at_level(logging.ERROR):
+            assert resolve_backplane(log_conflict=True) == "redis"   # startup 경로 → 로그
+        assert any("REALTIME_BACKPLANE" in r.message for r in caplog.records)
+
+
+def test_resolve_conflict_loop_path_no_log_spam(caplog):
+    """dispatch 루프 경로(log_conflict 기본 False)는 redis 우선이되 매-메시지 로그 스팸 안 함."""
+    with patch.object(_cfg_settings, "realtime_backplane", ""), \
+         patch.object(_cfg_settings, "pg_listen_enabled", True), \
          patch.object(_cfg_settings, "event_broker_redis_dispatch_enabled", True):
         with caplog.at_level(logging.ERROR):
             assert resolve_backplane() == "redis"
-        assert any("REALTIME_BACKPLANE" in r.message for r in caplog.records)  # ERROR 로그 확認
+        assert not any("REALTIME_BACKPLANE" in r.message for r in caplog.records)  # 로그 억제 확認
 
 
 # ── ⭐ __wake__ 전구간(마커 보존) ─────────────────────────────────────────────

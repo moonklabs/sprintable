@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
     # 직접 대신 resolver 로 게이팅 — PG_LISTEN + Redis dispatch 동시 활성이면 redis 우선(+ERROR). 미설정 시
     # 기존 플래그서 파생(무회귀). realtime=redis / api=pg 로 자연 갈림.
     from app.services.event_broker import resolve_backplane as _resolve_backplane
-    _backplane = _resolve_backplane()
+    _backplane = _resolve_backplane(log_conflict=True)  # 충돌 ERROR 는 startup 1회만
     if _backplane == "pg":
         check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
     check_internal_secret_config()  # 산티아고 §9 finding 4: non-local + 시크릿 미설정 fail-closed.
