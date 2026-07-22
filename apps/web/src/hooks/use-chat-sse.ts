@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
+import { createReconnectBackoffState, type ReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
 
 // chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
 export interface SendAttachment {
@@ -85,13 +86,15 @@ interface UseChatSseOptions {
   onReconnect?: () => void;
 }
 
-const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000];
+// story #2095 — 재연결 backoff는 sse-reconnect-backoff.ts(공용, sse-multiplexer.ts와
+// 동일 모듈 재사용)로 뽑았다.
 
 export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, onConversationMessage, onWorking, onConversationRead, onReconnect }: UseChatSseOptions) {
   const [connected, setConnected] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reconnectAttemptsRef = useRef(0);
+  // react-hooks/refs: 렌더 중 ref.current 조건부 대입 금지라 지연초기화는 useState(초기화 함수)로.
+  const [backoff] = useState<ReconnectBackoffState>(() => createReconnectBackoffState());
   const lastEventIdRef = useRef<string | null>(null);
   const onNewMessageRef = useRef(onNewMessage);
   const onReplyCreatedRef = useRef(onReplyCreated);
@@ -178,9 +181,9 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
       sourceRef.current = source;
 
       source.onopen = () => {
-        const isReconnect = reconnectAttemptsRef.current > 0;
+        const isReconnect = backoff.isReconnect();
         setConnected(true);
-        reconnectAttemptsRef.current = 0;
+        backoff.onOpen();
         // AC4: 재연결 시 backfill 트리거
         if (isReconnect) onReconnectRef.current?.();
       };
@@ -190,8 +193,7 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
         source.close();
         sourceRef.current = null;
         if (!reconnectTimerRef.current) {
-          const delay = RECONNECT_DELAYS_MS[Math.min(reconnectAttemptsRef.current, RECONNECT_DELAYS_MS.length - 1)];
-          reconnectAttemptsRef.current += 1;
+          const delay = backoff.onError();
           reconnectTimerRef.current = setTimeout(() => {
             reconnectTimerRef.current = null;
             connect();
@@ -241,7 +243,7 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
       sourceRef.current?.close();
       sourceRef.current = null;
     };
-  }, [mux]);
+  }, [mux, backoff]);
 
   // mux 경로에서는 로컬 connected state를 동기화하지 않고(setState-in-effect 회피) 멀티플렉서
   // 자신의 connected를 그대로 노출한다 — 이미 반응형(context 값 변경 시 이 훅도 리렌더).

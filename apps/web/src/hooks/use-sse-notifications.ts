@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
+import { createReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
 
 export interface SseEventNotification {
   id?: string;
@@ -34,8 +35,8 @@ interface UseSseNotificationsOptions {
 
 const NOTIFICATION_EVENT_NAMES = ['event_notification', 'notification', 'new_notification'];
 
-// use-realtime-memos.ts와 동일한 backoff 전략(story #2078 이전 — 독립 연결 폴백 경로에서만 씀).
-const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000];
+// story #2095 — 재연결 backoff는 sse-reconnect-backoff.ts(공용)로 뽑았다(독립 연결 폴백
+// 경로에서만 씀 — story #2078 이후 mux ON이면 이 경로 자체를 안 탄다).
 
 export function useSseNotifications({
   onNotification, memberId, enabled = true, extraEventNames, onExtraEvent,
@@ -94,8 +95,8 @@ export function useSseNotifications({
     let es: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
-    let reconnectAttempts = 0;
     let lastEventId: string | null = null;
+    const backoff = createReconnectBackoffState();
 
     const handleDataStandalone = (raw: string, eventId?: string) => {
       if (eventId) lastEventId = eventId;
@@ -117,7 +118,7 @@ export function useSseNotifications({
 
       es = new EventSource(url.toString(), { withCredentials: true });
 
-      es.onopen = () => { reconnectAttempts = 0; };
+      es.onopen = () => { backoff.onOpen(); };
 
       es.onmessage = (e: MessageEvent<string>) => handleDataStandalone(e.data, e.lastEventId || undefined);
 
@@ -139,8 +140,7 @@ export function useSseNotifications({
         es?.close();
         es = null;
         if (!closed && !retryTimer) {
-          const delay = RECONNECT_DELAYS_MS[Math.min(reconnectAttempts, RECONNECT_DELAYS_MS.length - 1)];
-          reconnectAttempts += 1;
+          const delay = backoff.onError();
           retryTimer = setTimeout(() => {
             retryTimer = null;
             connect();
