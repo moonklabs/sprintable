@@ -21,11 +21,16 @@ def _flag_off():
 
 @pytest.fixture
 def _flag_on_fakeredis():
-    """flag on + redis_shared.get_client → fakeredis(공유 서버)."""
-    import fakeredis.aioredis
+    """flag on + redis_shared.get_client → fakeredis(공유 서버).
 
-    server = fakeredis.aioredis.FakeServer()
-    client = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
+    fakeredis 는 dev-only 테스트 의존이라 CI 이미지에 없을 수 있어 importorskip — 없으면 이 fixture 를
+    쓰는 Redis 왕복 테스트만 skip(무해). Redis 경로는 라이브 실측이 결정적으로 커버. flag-off·_override_online
+    테스트는 fakeredis 무관하게 항상 실행.
+    """
+    aioredis = pytest.importorskip("fakeredis.aioredis")
+
+    server = aioredis.FakeServer()
+    client = aioredis.FakeRedis(server=server, decode_responses=True)
     with patch.object(presence_online.settings, "presence_online_redis_enabled", True), \
          patch.object(presence_online.settings, "redis_url", "redis://fake"), \
          patch("app.services.redis_shared.get_client", return_value=client):
