@@ -84,31 +84,61 @@ async def _mark_agent_disconnected(
     (schema 단락). MCP heartbeat·재연결 시 online 복귀(self-heal). finally 호출이라 예외 비전파.
     """
     now = datetime.now(timezone.utc)
-    fresh_cutoff = now - timedelta(seconds=_SESSION_FRESH_TTL)
+    from app.core.config import settings as _settings
+    _ac2 = bool(_settings.presence_online_redis_enabled) and bool(_settings.redis_url)
     try:
         async with async_session_factory() as db:
-            # 이 세션 + 같은 에이전트의 좀비 세션(크래시로 finally 미실행 → last_seen stale) 정리.
-            # 멀티인스턴스서 테이블 무한증식 방지 + 아래 "잔여 활성" 판정을 신뢰 가능하게.
-            await db.execute(
-                delete(AgentGatewaySession).where(
-                    (AgentGatewaySession.id == session_id)
-                    | (
-                        (AgentGatewaySession.agent_id == agent_id)
-                        & (AgentGatewaySession.last_seen_at < fresh_cutoff)
+            if _ac2:
+                # #2120 AC2: 30s틱 제거로 session.last_seen_at freshness가 무의미해짐 → liveness를 Redis
+                # online 키로 판정(freshness 소비처 #1 좀비GC·#2 remaining 회귀 방지).
+                from app.services import presence_online
+                await db.execute(
+                    delete(AgentGatewaySession).where(AgentGatewaySession.id == session_id)
+                )
+                online = await presence_online.is_online(agent_id)  # True/False/None
+                if online is False:
+                    # Redis: 이 agent 라이브 연결 0 → 남은 세션 행은 leaked(크래시 잔재) → 정리 + 강등.
+                    await db.execute(
+                        delete(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id)
+                    )
+                    remaining = None
+                elif online is True:
+                    remaining = True  # 라이브 형제 연결(틱 중) 있음 → offline 강등/clear 안 함(#2 회귀 방지)
+                else:
+                    # Redis 다운(None) → 세션-row **존재**(freshness 아님)로 폴백=fail-open. 좀비 GC skip(row 보존).
+                    remaining = (await db.execute(
+                        select(AgentGatewaySession.id).where(
+                            AgentGatewaySession.agent_id == agent_id,
+                            AgentGatewaySession.id != session_id,
+                        ).limit(1)
+                    )).scalar_one_or_none()
+            else:
+                # 기존 freshness 경로(30s틱 유지·flag off·무회귀).
+                fresh_cutoff = now - timedelta(seconds=_SESSION_FRESH_TTL)
+                await db.execute(
+                    delete(AgentGatewaySession).where(
+                        (AgentGatewaySession.id == session_id)
+                        | (
+                            (AgentGatewaySession.agent_id == agent_id)
+                            & (AgentGatewaySession.last_seen_at < fresh_cutoff)
+                        )
                     )
                 )
-            )
-            remaining = (await db.execute(
-                select(AgentGatewaySession.id).where(
-                    AgentGatewaySession.agent_id == agent_id,
-                    AgentGatewaySession.last_seen_at >= fresh_cutoff,
-                ).limit(1)
-            )).scalar_one_or_none()
+                remaining = (await db.execute(
+                    select(AgentGatewaySession.id).where(
+                        AgentGatewaySession.agent_id == agent_id,
+                        AgentGatewaySession.last_seen_at >= fresh_cutoff,
+                    ).limit(1)
+                )).scalar_one_or_none()
             if remaining is None:
                 from app.services.agent_anchor_sync import sync_agent_profile_presence
                 await sync_agent_profile_presence(
                     db, agent_id, last_seen_at=None, agent_status="offline"
                 )
+                if _ac2:
+                    # AC2: online 키 DEL(90s 잔존 방지·즉시 offline 규약 유지). flag off면 no-op.
+                    from app.services import presence_online
+                    await presence_online.clear_online(agent_id)
                 # d5de8e08 안전망: 연결 완전 종료 → 이 에이전트의 chat working 신호도 즉시 정리
                 # (offline 인데 "...typing" 잔존 방지·TTL backstop 기다리지 않음).
                 from app.services import chat_presence
@@ -379,6 +409,10 @@ async def agent_stream(
                 )
                 await _pdb.commit()
             _presence_wired = True
+            # #2120 AC2: 연결 즉시 online 키 SET(타노드 GET서 즉시 online 가시). flag off면 no-op.
+            # connect DB write(위 세션 INSERT + profile online)는 내구/폴백용으로 유지.
+            from app.services import presence_online
+            await presence_online.mark_online(agent_id)
             # R2(da9d1781): 연결 online 진입 → presence SSE 발행(FE 3s 폴링 대체·best-effort).
             from app.services.presence_events import emit_presence
             emit_presence(org_id_str)
@@ -407,7 +441,13 @@ async def agent_stream(
             while not await request.is_disconnected():
                 _now = datetime.now(timezone.utc)
                 if (_now - last_presence_tick).total_seconds() >= _PRESENCE_TICK_INTERVAL:
-                    await _mark_agent_online(agent_id, session_id)
+                    from app.core.config import settings as _settings
+                    if _settings.presence_online_redis_enabled and _settings.redis_url:
+                        # #2120 AC2: online liveness를 Redis 키로 — hot-path DB write 0.
+                        from app.services import presence_online
+                        await presence_online.mark_online(agent_id)
+                    else:
+                        await _mark_agent_online(agent_id, session_id)  # 기존 DB 틱(flag off·무회귀)
                     last_presence_tick = _now
                 get_task = asyncio.create_task(queue.get())
                 shutdown_task = asyncio.create_task(_shutdown_module.shutdown_event.wait())
