@@ -74,6 +74,57 @@ function isTabRootPage(pathname: string): boolean {
   return TAB_ROOT_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
+// story #2078(E-ARCH 0단계) 결함수정 — AppSidebar/ScrollShell이 필요로 하는 chatUnreadTotal을
+// 예전엔 DashboardShell 함수 바디 최상단(<RealtimeProvider> JSX 인스턴스화 *이전*)에서
+// useChatUnreadTotal()로 계산했다. 그 훅이 내부에서 useChatSse → useSseMultiplexerContext()를
+// 부르는데, React Context는 실제 렌더 트리상 Provider의 자식에게만 전파된다 — 이 호출은
+// Provider의 형제/조상 위치에서 실행되므로 mux가 항상 null이 되어, 플래그 값과 무관하게
+// 이 경로만 영구히 독립 EventSource 폴백을 탔다(민군 실측: 탭당 2연결, 그중 하나가 이 경로).
+// AppSidebar·ScrollShell은 이미 <RealtimeProvider> 자식이므로, 이 래퍼를 그 안에 두고
+// 훅 호출도 함께 옮기면 mux 컨텍스트를 정상적으로 받는다(chat-list-view.tsx·chat-view.tsx의
+// useChatSse 호출과 동일한 위치 조건이 된다).
+function ShellBody({
+  currentTeamMemberId, showTopBar, tabletCentered, orgId, orgMemberships, projectId, projectMemberships,
+  currentProjectSlug, userName, children,
+}: {
+  currentTeamMemberId?: string;
+  showTopBar: boolean;
+  tabletCentered: boolean;
+  orgId?: string;
+  orgMemberships: OrgSwitcherItem[];
+  projectId?: string;
+  projectMemberships: DashboardProjectOption[];
+  currentProjectSlug?: string;
+  userName?: string;
+  children: React.ReactNode;
+}) {
+  const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
+  return (
+    <>
+      <AppSidebar
+        projectId={projectId}
+        currentProjectSlug={currentProjectSlug}
+        projectMemberships={projectMemberships}
+        orgId={orgId}
+        orgMemberships={orgMemberships}
+        userName={userName}
+        chatUnreadTotal={chatUnreadTotal}
+      />
+      <ScrollShell
+        showTopBar={showTopBar}
+        tabletCentered={tabletCentered}
+        chatUnreadTotal={chatUnreadTotal}
+        orgId={orgId}
+        orgMemberships={orgMemberships}
+        projectId={projectId}
+        projectMemberships={projectMemberships}
+      >
+        {children}
+      </ScrollShell>
+    </>
+  );
+}
+
 function ScrollShell({
   showTopBar, tabletCentered, chatUnreadTotal, orgId, orgMemberships, projectId, projectMemberships, children,
 }: {
@@ -229,11 +280,9 @@ export function DashboardShell({
   // 리다이렉트 안전망이 받는다). 완전 동기화는 이 슬라이스 스코프 밖(over-engineering).
 
   // story #2007(perf·서버부하): GNB 채팅 unread 총합을 AppSidebar+MobileTabBar가 각자
-  // useChatUnreadTotal()을 호출해 SSE(EventSource) 연결을 독립적으로 2개 열던 것을 여기 한
-  // 곳에서만 계산해 두 표면에 값만 prop으로 내려준다 — 동일 유저 event-stream 동시 연결
-  // 4개(presence·notifications·GNB×2) 중 2개를 1개로 줄인다(배지 값은 뷰포트 무관 동일해야
-  // 하므로 공유가 정확도 손실 없이 순수 절감).
-  const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
+  // useChatUnreadTotal()을 호출해 SSE(EventSource) 연결을 독립적으로 2개 열던 것을 한
+  // 곳에서만 계산해 두 표면에 값만 prop으로 내려준다. story #2078 결함수정(위 ShellBody 주석
+  // 참고) — 이 훅 호출은 <RealtimeProvider> 자식 위치(ShellBody 안)로 옮겨졌다.
 
   return (
     <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships }}>
@@ -241,26 +290,19 @@ export function DashboardShell({
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
           <SidebarProvider className="h-svh">
-            <AppSidebar
-              projectId={effectiveProjectId}
-              currentProjectSlug={currentProjectSlug}
-              projectMemberships={projectMemberships}
-              orgId={effectiveOrgId}
-              orgMemberships={orgMemberships}
-              userName={userName}
-              chatUnreadTotal={chatUnreadTotal}
-            />
-            <ScrollShell
+            <ShellBody
+              currentTeamMemberId={currentTeamMemberId}
               showTopBar={showTopBar}
               tabletCentered={tabletCentered}
-              chatUnreadTotal={chatUnreadTotal}
               orgId={effectiveOrgId}
               orgMemberships={orgMemberships}
               projectId={effectiveProjectId}
               projectMemberships={projectMemberships}
+              currentProjectSlug={currentProjectSlug}
+              userName={userName}
             >
               {children}
-            </ScrollShell>
+            </ShellBody>
           </SidebarProvider>
         </TopBarProvider>
         <SessionExpiredDialog />
