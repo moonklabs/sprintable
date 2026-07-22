@@ -363,7 +363,13 @@ async def agent_stream(
     # per-key 카운트 = _agent_connections[agent_id] (현재 동시 스트림 수). 새 연결은 아직 미등록 상태이므로
     # >= limit 이면 이번 연결이 (limit+1)번째 → 거부. global cap(503)보다 먼저 검사(키 단위 quota가 우선 신호).
     _per_key_limit = _AGENT_STREAM_TIER_LIMITS.get(org_plan, _AGENT_STREAM_DEFAULT_LIMIT)
-    if len(_agent_connections[agent_id_str]) >= _per_key_limit:
+    # #2121: per-key lease(Redis 공유·TTL 자가회수) 주경로·Redis 불가 시 in-process(_agent_connections len) 폴백.
+    from app.services import sse_lease
+    _lease_conn_id = str(uuid.uuid4())
+    _pk_lease = await sse_lease.acquire(f"perkey:{agent_id_str}", _per_key_limit, _lease_conn_id)
+    if _pk_lease is False or (
+        _pk_lease is None and len(_agent_connections[agent_id_str]) >= _per_key_limit
+    ):
         raise HTTPException(
             status_code=429,
             detail={
@@ -374,12 +380,17 @@ async def agent_stream(
             headers={"Retry-After": str(_AGENT_STREAM_RETRY_AFTER)},
         )
 
-    # E-INFRA S4: 전역 agent stream 연결 cap — 초과 시 503 (legacy events.py:234-237 미러).
+    # E-INFRA S4/#2121: 전역 agent stream 연결 cap — 503. Redis lease 주경로·Redis 불가 시 in-process 폴백.
     # 증가 직후 진입하는 generate()의 finally에서 반드시 decrement (disconnect/GeneratorExit 누수 방지).
     global _agent_sse_connection_count
-    if _agent_sse_connection_count >= _MAX_AGENT_SSE_CONNECTIONS:
+    _gl_lease = await sse_lease.acquire("agent_global", _MAX_AGENT_SSE_CONNECTIONS, _lease_conn_id)
+    if _gl_lease is False or (
+        _gl_lease is None and _agent_sse_connection_count >= _MAX_AGENT_SSE_CONNECTIONS
+    ):
+        # 전역 초과로 거부 → 이미 획득한 per-key lease 롤백(누수 방지·미획득이면 no-op).
+        await sse_lease.release(f"perkey:{agent_id_str}", _lease_conn_id)
         raise HTTPException(status_code=503, detail="Agent stream connection limit reached")
-    _agent_sse_connection_count += 1
+    _agent_sse_connection_count += 1  # in-process shadow(Redis 다운 시 폴백용 유지)
 
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
     _agent_connections[agent_id_str].add(queue)
@@ -460,6 +471,9 @@ async def agent_stream(
                         await presence_online.mark_online(agent_id)
                     else:
                         await _mark_agent_online(agent_id, session_id)  # 기존 DB 틱(flag off·무회귀)
+                    # #2121: lease score 재갱신(live 연결이 슬롯 유지·TTL 만료 방지). off/다운 no-op.
+                    await sse_lease.refresh("agent_global", _lease_conn_id)
+                    await sse_lease.refresh(f"perkey:{agent_id_str}", _lease_conn_id)
                     last_presence_tick = _now
                 get_task = asyncio.create_task(queue.get())
                 shutdown_task = asyncio.create_task(_shutdown_module.shutdown_event.wait())
@@ -514,6 +528,9 @@ async def agent_stream(
             # E-INFRA S4: 연결 cap decrement (legacy events.py:380-381 미러) — 항상 실행.
             global _agent_sse_connection_count
             _agent_sse_connection_count -= 1
+            # #2121: lease 명시 해제(최적화만·TTL 이 주 회수 경로). off/다운 no-op.
+            await sse_lease.release("agent_global", _lease_conn_id)
+            await sse_lease.release(f"perkey:{agent_id_str}", _lease_conn_id)
             _agent_connections[agent_id_str].discard(queue)
             if not _agent_connections[agent_id_str]:
                 _agent_connections.pop(agent_id_str, None)
