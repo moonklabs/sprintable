@@ -117,6 +117,13 @@ async def _mark_agent_disconnected(
                         AgentGatewaySession.connected_at >= life_cutoff,
                     ).limit(1)
                 )).scalar_one_or_none()
+                # 보강(가속 신호·**강등 방향으로만**): Redis 정상인데 online 키가 없음 = 틱 도는 연결이 0 =
+                # 남은 row 전부 좀비 → row 존재와 무관하게 즉시 강등(크래시 수렴을 3900s→~90s로 회복).
+                # Redis 다운(None)=가속 안 함(row 존재 규칙만·fail-open 유지). 살아있는 연결은 is_online=True라
+                # 절대 이 경로로 안 죽음(monotonic: 더 강등만·오강등 없음). ⑤는 remaining=None이라 이 값과 무관히 강등.
+                from app.services import presence_online
+                if await presence_online.is_online(agent_id) is False:
+                    remaining = None
             else:
                 # 기존 freshness 경로(30s틱 유지·flag off·무회귀).
                 fresh_cutoff = now - timedelta(seconds=_SESSION_FRESH_TTL)
