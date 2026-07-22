@@ -41,6 +41,20 @@ async def lifespan(app: FastAPI):
     # 기존 플래그서 파생(무회귀). realtime=redis / api=pg 로 자연 갈림.
     from app.services.event_broker import resolve_backplane as _resolve_backplane
     _backplane = _resolve_backplane(log_conflict=True)  # 충돌 ERROR 는 startup 1회만
+    # #2122 정합성 가드(mirror-risk·오르테가 2026-07-22): backplane=redis 인데 consume loop 이 안 도는 조합
+    # (dual_publish/consume off 인데 dispatch on)이면 dispatcher 0 = 백플레인은 정해졌는데 **수신자 없는**
+    # "조용한 사망"(오늘 #2122 가 정확히 그 모양이었다). dispatch 와 consume 은 독립 env 라 어긋날 수 있어
+    # startup 서 감지 → loud ERROR + pg 폴백(strictly-better: redis consume loop 이 어차피 안 뜨니 중복배달
+    # 없고, pg 가 뜨면 dispatcher 확보·안 떠도 최소한 침묵 아닌 로그로 관측 가능).
+    if _backplane == "redis" and not (
+        settings.event_broker_redis_dual_publish_enabled
+        and settings.event_broker_redis_consume_enabled
+    ):
+        _logger.error(
+            "REALTIME_BACKPLANE=redis(또는 dispatch_enabled)인데 consume loop 미기동"
+            "(dual_publish/consume off) = dispatcher 0. PG listen 으로 폴백. (#2122 정합성 가드)"
+        )
+        _backplane = "pg"
     if _backplane == "pg":
         check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
     check_internal_secret_config()  # 산티아고 §9 finding 4: non-local + 시크릿 미설정 fail-closed.
