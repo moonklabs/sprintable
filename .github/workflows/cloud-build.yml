@@ -49,7 +49,13 @@ jobs:
           if [[ "${{ github.ref_name }}" == "main" ]]; then
             echo "target=prod" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
-            echo "backend_min_instances=1" >> "$GITHUB_OUTPUT"
+            # ⚠️ minScale 1→3 (prod 콜드스타트 durable 봉합, 오르테가군 PO 2026-07-22): dev #2074 응급대응
+            # (a0738e81)이 dev 만 3으로 올리고 prod 는 1로 남았다 — 오늘 아침 prod 콜드스타트가 재발(선생님
+            # 격노)해 PO 가 `gcloud run services update` 로 prod minScale=3 을 라이브 적용(승인된 조치).
+            # 그 손 값이 다음 prod 배포에 덮여 원복되지 않도록 SSOT 에 못박는다("손 값은 배포가 덮는다" 교훈).
+            # conn-safe: min 3 × per-instance 5 = 15 ≤ 200(maxScale 5·rollout 70 예산 불변·SSOT db-connection-budget.md).
+            # 근본(커넥션 풀링/아키텍처 재검토)은 #2074 별도 — 이건 응급 봉합의 prod 반영분.
+            echo "backend_min_instances=3" >> "$GITHUB_OUTPUT"
             # ⚠️ maxScale 5 (ee7794eb ③·선생님 right-size): prod g1-small. per-instance 5(pool
             # 3/1=4 + pg_pubsub raw 1). rollout(old+new 2×): 2×5×5+20(admin)=70.
             # ⚠️ story #2040(2026-07-20) PO gcloud 실측 갱신 — max_connections=**200**(과거 100 가정 낡음,
