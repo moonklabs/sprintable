@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createReconnectBackoffState } from './sse-reconnect-backoff';
 
 /**
  * story #2078(E-ARCH 0단계) — presence·notification·chat이 각자 EventSource를 열어 탭당 장수
@@ -20,8 +21,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * dispatch 시점에 `subscribersRef`를 다시 조회하므로 attach 이후 등록된 구독자도 받는다.
  */
 
-// use-sse-notifications.ts / use-chat-sse.ts / use-team-presence.ts 전부 동일 전략 — 그대로 재사용.
-const RECONNECT_DELAYS_MS = [5_000, 30_000, 60_000, 300_000];
+// story #2095 — 재연결 backoff는 sse-reconnect-backoff.ts(공용, use-chat-sse.ts·
+// use-sse-notifications.ts 폴백 경로와 동일 모듈 재사용)로 뽑았다.
 
 type EventHandler = (data: string, eventId?: string) => void;
 
@@ -46,7 +47,6 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
 
   const esRef = useRef<EventSource | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reconnectAttemptsRef = useRef(0);
   const lastEventIdRef = useRef<string | null>(null);
   const memberIdRef = useRef(memberId);
   useEffect(() => { memberIdRef.current = memberId; }, [memberId]);
@@ -88,6 +88,7 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
     if (!enabled || typeof EventSource === 'undefined') return;
 
     let closed = false;
+    const backoff = createReconnectBackoffState();
 
     const connect = () => {
       if (closed) return;
@@ -104,8 +105,8 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
       for (const eventName of namedSubscribersRef.current.keys()) attachIfNeeded(eventName);
 
       es.onopen = () => {
-        const isReconnect = reconnectAttemptsRef.current > 0;
-        reconnectAttemptsRef.current = 0;
+        const isReconnect = backoff.isReconnect();
+        backoff.onOpen();
         setConnected(true);
         if (isReconnect) for (const handler of reconnectSubscribersRef.current) handler();
       };
@@ -120,8 +121,7 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
         es.close();
         if (esRef.current === es) esRef.current = null;
         if (!closed && !retryTimerRef.current) {
-          const delay = RECONNECT_DELAYS_MS[Math.min(reconnectAttemptsRef.current, RECONNECT_DELAYS_MS.length - 1)];
-          reconnectAttemptsRef.current += 1;
+          const delay = backoff.onError();
           retryTimerRef.current = setTimeout(() => {
             retryTimerRef.current = null;
             connect();
