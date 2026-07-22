@@ -326,6 +326,37 @@ def record_pg_arrival(event_id: str) -> None:
     _pg_arrivals[event_id] = time.monotonic()
 
 
+def resolve_backplane() -> str:
+    """#2122 cutover: 크로스-인스턴스 dispatch 백플레인을 **하나로** 결정(중복배달 차단).
+
+    pg_pubsub._dispatch_received 와 redis_consume_loop 는 구조 동일 브리지 — 둘 다 dispatch 하면
+    같은 이벤트가 2회 배달된다. 반환 "pg"|"redis"|"none" 중 하나만 dispatch 하도록 게이팅한다.
+    · REALTIME_BACKPLANE 명시("pg"|"redis") → 그대로(잘못된 상태를 표현 불가능하게).
+    · 미설정 → 기존 플래그서 파생. PG_LISTEN 과 Redis dispatch 가 **동시에 가능**하면 **redis 우선 + ERROR**
+      (기동거부 아님 — config 오타로 realtime 전체 다운 방지). 하나만 가능하면 그것.
+    """
+    sel = (settings.realtime_backplane or "").strip().lower()
+    if sel in ("pg", "redis"):
+        return sel
+    pg = settings.pg_listen_enabled
+    redis = (
+        settings.event_broker_redis_dual_publish_enabled
+        and settings.event_broker_redis_consume_enabled
+        and settings.event_broker_redis_dispatch_enabled
+    )
+    if pg and redis:
+        logger.error(
+            "REALTIME_BACKPLANE 미설정인데 PG_LISTEN + Redis dispatch 동시 활성 = 중복배달 위험. "
+            "redis 우선으로 진행 — REALTIME_BACKPLANE=redis|pg 명시 권장. (#2122 cutover)"
+        )
+        return "redis"
+    if redis:
+        return "redis"
+    if pg:
+        return "pg"
+    return "none"
+
+
 async def redis_consume_loop() -> None:
     """Redis 구독 → (a) PG 경로 도착 기록과 대조해 지연Δ·중복률 로그(항상) (b)
     `event_broker_redis_dispatch_enabled`(default False)가 켜지면 실제로
@@ -388,7 +419,8 @@ async def redis_consume_loop() -> None:
                             event_id,
                         )
 
-                if not settings.event_broker_redis_dispatch_enabled:
+                # #2122 cutover: 이 백플레인이 dispatch 담당일 때만 실제 전달(아니면 관측만). 중복배달 차단.
+                if resolve_backplane() != "redis":
                     continue
 
                 if payload.get("instance_id") == INSTANCE_ID:

@@ -207,10 +207,21 @@ def wake_agent(agent_id: str, seq: int, _from_listener: bool = False) -> None:
         for q in dead:
             queues.discard(q)
     if not _from_listener:
-        # prod 커넥션 누수 근본fix(2026-07-08) — events.py publish_event()/_push_to_agent()와
-        # 동형(fire_and_forget 참조 보관, GC 조기수거로 인한 non-checked-in connection 방지).
-        from app.services.pg_pubsub import fire_and_forget, pg_notify
-        fire_and_forget(pg_notify("agent", agent_id, "__wake__", {"seq": seq}))
+        from app.services.pg_pubsub import fire_and_forget
+        from app.core.config import settings as _settings
+        if _settings.fanout_wake_redis_enabled:
+            # #2122: wake 를 Redis 백플레인에(event_broker.publish → pg_notify + Redis dual-publish 동시).
+            # ⭐__wake__ 마커를 **data 에** 실어야 타노드 브리지(_push_to_agent 는 data 만 큐잉·event_type 무시)가
+            #   보존 → 타노드 consumer 가 signal.get("__wake__") 감지 → DB 재조회. (기존 {"seq":seq} 는 마커가
+            #   event_type 에만 있어 크로스노드서 유실 → wake 아닌 "message"로 오인 = 크로스노드 wake 파손의 근본.)
+            from app.services.event_broker import event_broker
+            fire_and_forget(
+                event_broker.publish("agent", agent_id, "__wake__", {"__wake__": True, "seq": seq})
+            )
+        else:
+            # 기존 경로(flag off·무회귀) — prod 커넥션 누수 근본fix(2026-07-08)와 동형(fire_and_forget 참조 보관).
+            from app.services.pg_pubsub import pg_notify
+            fire_and_forget(pg_notify("agent", agent_id, "__wake__", {"seq": seq}))
 
 
 
