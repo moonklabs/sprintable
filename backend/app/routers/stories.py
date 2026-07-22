@@ -910,6 +910,16 @@ async def update_story(
         # 동일 근본) — "org-wide 의도 유지" 주석은 실제로 아무 SSE 연결에도 안 닿는 상태였다.
         # story.status_changed(story_status_events.py)와 동형으로 project_accessible_member_ids
         # 로 수신자 해소 후 _push_to_agent 개별 push — 이게 실제로 SSE 큐에 들어가는 유일 경로.
+        #
+        # story #2106(2026-07-22, 까심군 #2101 QA 후속): 이 push는 의도적으로 Event row를 안
+        # 만드는 순수 transient SSE(#2101의 last_event_id 백필 대상이 아님) — "왜 여기만
+        # 영속화 안 하지"로 다시 파지 않도록 이유를 명시한다. assignee_changed는 보드/상세
+        # 화면의 "지금 담당자가 누구인지" 실시간 동기화 신호일 뿐이고, 그 값 자체는 항상
+        # story 테이블의 assignee_id가 SSOT라 재조회(새로고침·재연결)하면 그대로 복원된다.
+        # "너에게 배정됐다"는 실제 알림 책임은 몇 줄 아래 story_assigned Event(agent)/
+        # dispatch_notification(human)이 별도로 지고 있다 — 그쪽은 Event-backed(또는 동등한
+        # 영속 알림함) 라 배정받은 사람이 그 순간 연결이 끊겨 있어도 놓치지 않는다. 즉 상태축
+        # (재조회로 복원)과 알림축(영속 전달 필요)이 분리돼 있고, 이 줄은 전자만 담당한다.
         publish_event(str(org_id), "story.assignee_changed", event_data)
         try:
             from app.routers.events import _push_to_agent
