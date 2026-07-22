@@ -121,6 +121,10 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},PRESENCE_ONLINE_REDIS_ENABLED=${PRESENCE_ONLIN
 # #2121(E-ARCH 근본): SSE 연결 카운터(429/503) → Redis ZSET lease 롤아웃 게이트(presence 와 독립 flag).
 # env 로 flip(기본 false=in-process 무회귀). AC5 실측 배포=true(GCE 3노드 필수·멀티노드 합산 대조).
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},SSE_LEASE_REDIS_ENABLED=${SSE_LEASE_REDIS_ENABLED:-false}"
+# #2122(E-ARCH 근본): fanout(wake_agent) → Redis 백플레인 롤아웃 게이트(presence/lease 와 독립 flag).
+# env 로 flip(기본 false=pg_notify 직행 무회귀). #2122 라이브 재측정 배포=true(GCE PG_LISTEN=false라 wake
+# 가 Redis 백플레인 타야 타노드 도달 — 미설정 시 cross-node wake 0/2 재현). REALTIME_BACKPLANE 는 별개(cutover).
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FANOUT_WAKE_REDIS_ENABLED=${FANOUT_WAKE_REDIS_ENABLED:-false}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_MODEL=gemini-3.1-pro-preview"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_LOCATION=global"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MCP_PUBLIC_URL=https://dev-mcp.sprintable.ai/mcp"
