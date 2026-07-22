@@ -46,6 +46,10 @@ _PRESENCE_TICK_INTERVAL: float = _SSE_HEARTBEAT
 #   대비 여유(3×)를 둬 정상 연결이 잠깐 느려도 stale 오판하지 않게. 인스턴스 크래시로 finally 미실행된
 #   좀비 세션은 이 TTL 밖이 되어 disconnect cleanup의 "잔여 활성 세션" 판정에서 제외된다(멀티인스턴스 정합).
 _SESSION_FRESH_TTL: float = _SSE_HEARTBEAT * 3
+# #2120 AC2: 틱이 last_seen_at freshness를 안 만드므로, disconnect의 "잔여 활성 세션" 판정은 freshness가
+# 아니라 **세션-row 존재**로 한다. 다만 크래시로 finally 미실행된 leaked row를 "활성"으로 오판하면 안 되므로,
+# 연결 최대수명(GLCB backend timeout 3600s = SSE 단일연결 상한)을 넘긴 row는 확실히 죽은 좀비로 보고 제외/GC.
+_MAX_SSE_LIFETIME_SEC: float = 3900.0  # 3600s(GLCB) + 여유
 
 
 async def _mark_agent_online(agent_id: uuid.UUID, session_id: uuid.UUID) -> None:
@@ -89,29 +93,37 @@ async def _mark_agent_disconnected(
     try:
         async with async_session_factory() as db:
             if _ac2:
-                # #2120 AC2: 30s틱 제거로 session.last_seen_at freshness가 무의미해짐 → liveness를 Redis
-                # online 키로 판정(freshness 소비처 #1 좀비GC·#2 remaining 회귀 방지).
-                from app.services import presence_online
+                # #2120 AC2: 30s틱이 last_seen_at freshness를 안 만드므로 "잔여 활성 세션" 판정은 freshness가
+                # 아니라 **세션-row 존재**로 한다(세션 단위 질문 → 세션 단위 신호). ⚠️is_online(per-member 키)은
+                # 판정 주체가 될 수 없다 — 마지막 연결이 끊길 때 그 연결 자신의 직전 틱이 키를 방금 SET(EX90)해
+                # is_online=True로 남아 "형제 live"로 오판하기 때문(⑤ 즉시offline 버그의 근본). 순서: 이 row를
+                # 먼저 DELETE → 그 다음 다른 row 존재 확認. remaining=0(마지막)일 때만 강등+DEL키(아래 공통 블록).
+                life_cutoff = now - timedelta(seconds=_MAX_SSE_LIFETIME_SEC)
+                # 이 세션 + 확실히 죽은 좀비(연결수명 GLCB 3600s 초과 = 살아있을 수 없음) 정리.
                 await db.execute(
-                    delete(AgentGatewaySession).where(AgentGatewaySession.id == session_id)
-                )
-                online = await presence_online.is_online(agent_id)  # True/False/None
-                if online is False:
-                    # Redis: 이 agent 라이브 연결 0 → 남은 세션 행은 leaked(크래시 잔재) → 정리 + 강등.
-                    await db.execute(
-                        delete(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id)
+                    delete(AgentGatewaySession).where(
+                        (AgentGatewaySession.id == session_id)
+                        | (
+                            (AgentGatewaySession.agent_id == agent_id)
+                            & (AgentGatewaySession.connected_at < life_cutoff)
+                        )
                     )
+                )
+                # 잔여 = 이 세션 外 **수명 내 connect된 세션 row 존재**(freshness 아님·Redis 무의존). 없으면 마지막.
+                remaining = (await db.execute(
+                    select(AgentGatewaySession.id).where(
+                        AgentGatewaySession.agent_id == agent_id,
+                        AgentGatewaySession.id != session_id,
+                        AgentGatewaySession.connected_at >= life_cutoff,
+                    ).limit(1)
+                )).scalar_one_or_none()
+                # 보강(가속 신호·**강등 방향으로만**): Redis 정상인데 online 키가 없음 = 틱 도는 연결이 0 =
+                # 남은 row 전부 좀비 → row 존재와 무관하게 즉시 강등(크래시 수렴을 3900s→~90s로 회복).
+                # Redis 다운(None)=가속 안 함(row 존재 규칙만·fail-open 유지). 살아있는 연결은 is_online=True라
+                # 절대 이 경로로 안 죽음(monotonic: 더 강등만·오강등 없음). ⑤는 remaining=None이라 이 값과 무관히 강등.
+                from app.services import presence_online
+                if await presence_online.is_online(agent_id) is False:
                     remaining = None
-                elif online is True:
-                    remaining = True  # 라이브 형제 연결(틱 중) 있음 → offline 강등/clear 안 함(#2 회귀 방지)
-                else:
-                    # Redis 다운(None) → 세션-row **존재**(freshness 아님)로 폴백=fail-open. 좀비 GC skip(row 보존).
-                    remaining = (await db.execute(
-                        select(AgentGatewaySession.id).where(
-                            AgentGatewaySession.agent_id == agent_id,
-                            AgentGatewaySession.id != session_id,
-                        ).limit(1)
-                    )).scalar_one_or_none()
             else:
                 # 기존 freshness 경로(30s틱 유지·flag off·무회귀).
                 fresh_cutoff = now - timedelta(seconds=_SESSION_FRESH_TTL)
