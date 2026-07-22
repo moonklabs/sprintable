@@ -335,6 +335,7 @@ def resolve_backplane() -> str:
     · 미설정 → 기존 플래그서 파생. PG_LISTEN 과 Redis dispatch 가 **동시에 가능**하면 **redis 우선 + ERROR**
       (기동거부 아님 — config 오타로 realtime 전체 다운 방지). 하나만 가능하면 그것.
     """
+    from app.core.config import settings  # 이 모듈은 settings 를 함수-로컬 import(순환 회피)
     sel = (settings.realtime_backplane or "").strip().lower()
     if sel in ("pg", "redis"):
         return sel

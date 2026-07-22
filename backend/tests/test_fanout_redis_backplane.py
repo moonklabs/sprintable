@@ -13,41 +13,42 @@ from unittest.mock import patch
 
 import pytest
 
-from app.services import event_broker
+from app.core.config import settings as _cfg_settings  # 싱글턴 — event_broker 는 settings 를 함수-로컬 import
+from app.services import event_broker  # noqa: F401 (resolve_backplane 소속 모듈)
 from app.services.event_broker import resolve_backplane
 
 
 # ── cutover resolver (redis 우선 + 셀렉터) ──────────────────────────────────────
 def test_resolve_explicit_selector_wins():
-    with patch.object(event_broker.settings, "realtime_backplane", "redis"):
+    with patch.object(_cfg_settings, "realtime_backplane", "redis"):
         assert resolve_backplane() == "redis"
-    with patch.object(event_broker.settings, "realtime_backplane", "pg"):
+    with patch.object(_cfg_settings, "realtime_backplane", "pg"):
         assert resolve_backplane() == "pg"
 
 
 def test_resolve_derives_redis_when_only_redis():
-    with patch.object(event_broker.settings, "realtime_backplane", ""), \
-         patch.object(event_broker.settings, "pg_listen_enabled", False), \
-         patch.object(event_broker.settings, "event_broker_redis_dual_publish_enabled", True), \
-         patch.object(event_broker.settings, "event_broker_redis_consume_enabled", True), \
-         patch.object(event_broker.settings, "event_broker_redis_dispatch_enabled", True):
+    with patch.object(_cfg_settings, "realtime_backplane", ""), \
+         patch.object(_cfg_settings, "pg_listen_enabled", False), \
+         patch.object(_cfg_settings, "event_broker_redis_dual_publish_enabled", True), \
+         patch.object(_cfg_settings, "event_broker_redis_consume_enabled", True), \
+         patch.object(_cfg_settings, "event_broker_redis_dispatch_enabled", True):
         assert resolve_backplane() == "redis"
 
 
 def test_resolve_pg_when_only_pg():
-    with patch.object(event_broker.settings, "realtime_backplane", ""), \
-         patch.object(event_broker.settings, "pg_listen_enabled", True), \
-         patch.object(event_broker.settings, "event_broker_redis_dispatch_enabled", False):
+    with patch.object(_cfg_settings, "realtime_backplane", ""), \
+         patch.object(_cfg_settings, "pg_listen_enabled", True), \
+         patch.object(_cfg_settings, "event_broker_redis_dispatch_enabled", False):
         assert resolve_backplane() == "pg"
 
 
 def test_resolve_conflict_redis_wins_with_error(caplog):
     """PG_LISTEN + Redis dispatch 동시 활성(미설정) → redis 우선 + ERROR 로그(기동거부 아님)."""
-    with patch.object(event_broker.settings, "realtime_backplane", ""), \
-         patch.object(event_broker.settings, "pg_listen_enabled", True), \
-         patch.object(event_broker.settings, "event_broker_redis_dual_publish_enabled", True), \
-         patch.object(event_broker.settings, "event_broker_redis_consume_enabled", True), \
-         patch.object(event_broker.settings, "event_broker_redis_dispatch_enabled", True):
+    with patch.object(_cfg_settings, "realtime_backplane", ""), \
+         patch.object(_cfg_settings, "pg_listen_enabled", True), \
+         patch.object(_cfg_settings, "event_broker_redis_dual_publish_enabled", True), \
+         patch.object(_cfg_settings, "event_broker_redis_consume_enabled", True), \
+         patch.object(_cfg_settings, "event_broker_redis_dispatch_enabled", True):
         with caplog.at_level(logging.ERROR):
             assert resolve_backplane() == "redis"
         assert any("REALTIME_BACKPLANE" in r.message for r in caplog.records)  # ERROR 로그 확認
@@ -92,7 +93,7 @@ def test_wake_agent_flag_on_puts_marker_in_data():
         except Exception:
             pass
 
-    with patch.object(event_broker.settings, "fanout_wake_redis_enabled", True), \
+    with patch.object(_cfg_settings, "fanout_wake_redis_enabled", True), \
          patch("app.services.event_broker.event_broker.publish", new=AsyncMock()) as mock_pub, \
          patch("app.services.pg_pubsub.fire_and_forget", new=MagicMock(side_effect=_swallow)):
         agent_gateway.wake_agent(str(uuid.uuid4()), 5)
