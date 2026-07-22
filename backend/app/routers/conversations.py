@@ -1860,6 +1860,13 @@ async def send_message(
         raise HTTPException(status_code=500, detail="event dispatch failed") from _dispatch_err
 
     # AC1: 멘션 대상에게 conversation:mention SSE 발송 (participant 여부 무관)
+    #
+    # story #2127(2026-07-22, 까심군 #2090 QA 후속): "participant 여부 무관"은 group
+    # conversation 기준이다 — DM은 위 CB-S2 fork 분기(conversation_id/conv가 이미 재대입돼
+    # 있음)가 비참여자 멘션을 그룹으로 자동승격 + 참가자 편입시키므로, 이 지점에 도달할 때는
+    # DM에서 온 멘션 대상도 이미 참가자다(git log -S "CB-S2: DM" 확認, [CB-S2] PR#747, 의도된
+    # 기능·버그 아님). 즉 "진짜 비참가자에게 message_created 없이 mention만 감"이 실제로
+    # 일어나는 건 group conversation에서 기존 비참가자를 멘션하는 경우뿐이다.
     if msg.mentioned_ids:
         mention_targets = set(msg.mentioned_ids) - {sender.id} - discord_exclude_ids - blocked_agent_ids
         if mention_targets:
