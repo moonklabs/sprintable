@@ -436,6 +436,72 @@ async def test_mark_agent_disconnected_keeps_online_when_other_session_active():
     db.commit.assert_awaited_once()
 
 
+# ── #2120 AC2(flag on) disconnect 로직 유닛 검증 ────────────────────────────────
+# ⚠️ ⑤즉시offline·③멀티세션의 **라이브** 측정은 #2128(SSE 클라 disconnect 미감지·좀비) 때문에 불가.
+#    핸들러 로직(remaining=세션-row 존재 primary + is_online 가속)은 아래 유닛으로 결정적 검증한다.
+def _ac2_settings_patches():
+    from app.core.config import settings
+    return (patch.object(settings, "presence_online_redis_enabled", True),
+            patch.object(settings, "redis_url", "redis://x"))
+
+
+@pytest.mark.anyio
+async def test_ac2_disconnect_single_demotes_offline_immediate():
+    """⑤(유닛): flag on·마지막 연결 → remaining=세션-row 없음 → 즉시 offline + online 키 DEL.
+    is_online=True(끊는 연결 자신의 틱)여도 remaining None이면 강등 = 원버그 재발 0."""
+    s1, s2 = _ac2_settings_patches()
+    no_remaining = MagicMock(); no_remaining.scalar_one_or_none.return_value = None
+    factory, db = _patch_session_factory([MagicMock(), no_remaining])
+    with s1, s2, \
+         patch("app.routers.agent_gateway.async_session_factory", factory), \
+         patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()) as mock_sync, \
+         patch("app.services.presence_online.is_online", new=AsyncMock(return_value=True)), \
+         patch("app.services.presence_online.clear_online", new=AsyncMock()) as mock_clear_online, \
+         patch("app.services.chat_presence.clear_member", new=AsyncMock(return_value=[])):
+        await _mark_agent_disconnected(AGENT_ID, uuid.uuid4())
+    mock_sync.assert_awaited_once()
+    _, kw = mock_sync.await_args
+    assert kw["agent_status"] == "offline" and kw["last_seen_at"] is None
+    mock_clear_online.assert_awaited_once()  # 마지막 연결 → 키 DEL
+
+
+@pytest.mark.anyio
+async def test_ac2_disconnect_multi_keeps_online_no_false_demote():
+    """③(유닛): flag on·2연결 중 1 종료 → remaining=형제 row 존재 → 강등/DEL 안 함(오강등 0)."""
+    s1, s2 = _ac2_settings_patches()
+    remaining = MagicMock(); remaining.scalar_one_or_none.return_value = uuid.uuid4()
+    factory, db = _patch_session_factory([MagicMock(), remaining])
+    with s1, s2, \
+         patch("app.routers.agent_gateway.async_session_factory", factory), \
+         patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()) as mock_sync, \
+         patch("app.services.presence_online.is_online", new=AsyncMock(return_value=True)), \
+         patch("app.services.presence_online.clear_online", new=AsyncMock()) as mock_clear_online, \
+         patch("app.services.chat_presence.clear_member", new=AsyncMock(return_value=[])):
+        await _mark_agent_disconnected(AGENT_ID, uuid.uuid4())
+    mock_sync.assert_not_awaited()        # 형제 live → 강등 없음
+    mock_clear_online.assert_not_awaited()  # 키 DEL 없음
+
+
+@pytest.mark.anyio
+async def test_ac2_disconnect_crash_accel_demotes_via_is_online_false():
+    """크래시 가속(유닛): flag on·remaining=좀비 row 존재여도 is_online False(Redis 정상+키 없음=전부 좀비)
+    → 강등(monotonic 가속·row 규칙 위에). 크래시 수렴 3900s→~90s."""
+    s1, s2 = _ac2_settings_patches()
+    remaining = MagicMock(); remaining.scalar_one_or_none.return_value = uuid.uuid4()
+    factory, db = _patch_session_factory([MagicMock(), remaining])
+    with s1, s2, \
+         patch("app.routers.agent_gateway.async_session_factory", factory), \
+         patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()) as mock_sync, \
+         patch("app.services.presence_online.is_online", new=AsyncMock(return_value=False)), \
+         patch("app.services.presence_online.clear_online", new=AsyncMock()) as mock_clear_online, \
+         patch("app.services.chat_presence.clear_member", new=AsyncMock(return_value=[])):
+        await _mark_agent_disconnected(AGENT_ID, uuid.uuid4())
+    mock_sync.assert_awaited_once()       # is_online False → remaining 강제 None → 강등
+    _, kw = mock_sync.await_args
+    assert kw["agent_status"] == "offline"
+    mock_clear_online.assert_awaited_once()
+
+
 def test_presence_tick_interval_below_online_threshold():
     """tick 주기 < online 임계(5분) — 연결 유지 중 last_seen이 online 윈도우 안에 머무름 보장."""
     from app.schemas.team_member import _ONLINE_THRESHOLD

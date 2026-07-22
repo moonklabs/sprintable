@@ -51,6 +51,20 @@ async def test_flag_off_is_online_returns_none(_flag_off):
     assert await presence_online.is_online("m1") is None
 
 
+# ── ② Redis-down fail-open (유닛) ──────────────────────────────────────────────
+async def test_redis_down_failopen():
+    """②(유닛): flag on이나 Redis 클라이언트 None(다운) → is_online=None(호출부 세션-row 존재 폴백)·
+    get_online_map={}(라우터가 DB last_seen_at 폴백)·mark/clear no-op(예외 0). fail-open by construction.
+    (라이브 REDIS_URL 오배선 재측정은 §2 working 동반 degrade까지 보너스 관측·별도.)"""
+    with patch.object(presence_online.settings, "presence_online_redis_enabled", True), \
+         patch.object(presence_online.settings, "redis_url", "redis://x"), \
+         patch("app.services.redis_shared.get_client", return_value=None):
+        assert await presence_online.is_online("m1") is None       # 호출부 폴백 신호
+        assert await presence_online.get_online_map(["m1"]) == {}   # 라우터 DB 폴백
+        await presence_online.mark_online("m1")                     # no-op·예외 0
+        await presence_online.clear_online("m1")
+
+
 # ── flag on = Redis 왕복 ───────────────────────────────────────────────────────
 async def test_mark_then_get_and_is_online(_flag_on_fakeredis):
     m = str(uuid.uuid4())
@@ -106,6 +120,33 @@ def test_override_online_none_preserves_db():
 
     resp = _agent_resp(datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc))
     assert _override_online(resp, None).presence_status == "offline"  # 폴백=DB 그대로
+
+
+def test_three_state_idle_from_db_fallback():
+    """④(유닛): Redis 주입 없음(None)·DB last_seen_at 10분 전 → computed_field idle(3상태 보존·online 아님)."""
+    from app.routers.team_members import _override_online
+
+    ten_min = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=10)
+    resp = _agent_resp(ten_min)
+    assert resp.presence_status == "idle"                          # DB 그대로 idle
+    assert _override_online(resp, None).presence_status == "idle"  # 주입 None → 폴백 idle 보존
+
+
+def test_three_state_ac7_active_story_stays_idle():
+    """④ AC7(유닛): active_story_id 있으면 offline-time이어도 idle 유지(claim중 강등방지)·AC2 주입 後에도 보존."""
+    from app.routers.team_members import _override_online
+    from app.schemas.team_member import TeamMemberResponse
+
+    _now = datetime.datetime.now(datetime.timezone.utc)
+    old = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)  # >30분 → 원래 offline-time
+    resp = TeamMemberResponse(
+        id=uuid.uuid4(), project_id=uuid.uuid4(), org_id=uuid.uuid4(),
+        type="agent", name="a", role="member", is_active=True, color="#000000",
+        created_at=_now, updated_at=_now, last_seen_at=old,
+        active_story_id=uuid.uuid4(),  # claim 중
+    )
+    assert resp.presence_status == "idle"                          # AC7: offline 아니라 idle
+    assert _override_online(resp, None).presence_status == "idle"  # 주입 None → AC7 보존
 
 
 def test_fakeredis_is_available():
