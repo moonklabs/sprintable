@@ -40,7 +40,8 @@ interface UseSseNotificationsOptions {
 // 배열을 비워도 관측 가능한 동작 변화는 0(bell은 폴링만으로 이미 정확) — "고쳤다"는 착시가 나기
 // 쉬운 자리다. 실 알림 전달은 named 이벤트가 아니라 `subscribeMessage`/`onmessage`(기본 unnamed
 // SSE 메시지) 경로로 도는 것으로 보이며, 이 3개 이름이 실제로 쓰일 미래 BE 계약을 의도한 자리인지
-// 완전한 죽은 코드인지는 이 스토리 스코프 밖(BE 판단 필요) — 그래서 제거 대신 주석으로 박아둔다.
+// 완전한 죽은 코드인지는 FE 혼자 판단할 문제가 아니라 이 스토리 스코프 밖에 둔다.
+// ⚠️BE 확認 후 정리 대상 — BE가 이 이름들로 emit할 계획이 없다고 확定되면 그때 지운다.
 const NOTIFICATION_EVENT_NAMES = ['event_notification', 'notification', 'new_notification'];
 
 // story #2095 — 재연결 backoff는 sse-reconnect-backoff.ts(공용)로 뽑았다(독립 연결 폴백
