@@ -66,11 +66,9 @@ class Settings(BaseSettings):
     app_env: str = "development"
     debug: bool = False
 
-    # OAuth — Google / GitHub
+    # OAuth — Google (story #2155: GitHub 로그인 제거 — GitHub App/봇 연동과는 무관, :209 참조)
     google_client_id: str = ""
     google_client_secret: str = ""
-    github_client_id: str = ""
-    github_client_secret: str = ""
     # Next.js 프론트엔드 URL (OAuth redirect_uri 조합용)
     app_url: str = "http://localhost:3000"
 
