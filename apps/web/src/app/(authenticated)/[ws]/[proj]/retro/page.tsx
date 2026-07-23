@@ -177,7 +177,7 @@ export default function RetroPage() {
               </Button>
             </div>
             {createError ? (
-              <p className="mt-2 text-xs text-destructive">{createError}</p>
+              <p className="mt-2 text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{createError}</p>
             ) : null}
           </div>
         )}

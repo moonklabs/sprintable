@@ -264,7 +264,7 @@ export function StandupFeedbackDialog({
               ) : null}
             </div>
 
-            {actionError ? <p className="text-sm text-destructive">{actionError}</p> : null}
+            {actionError ? <p className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{actionError}</p> : null}
 
             {feedback.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t('noFeedback')}</p>

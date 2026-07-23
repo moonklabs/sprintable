@@ -221,7 +221,7 @@ export function StorageFolderTree({
             disabled={submitting}
             className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-[12px] text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
           />
-          {createError ? <p className="text-[11px] text-destructive">{createError}</p> : null}
+          {createError ? <p className="text-[11px] text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{createError}</p> : null}
           <div className="flex items-center justify-end gap-1.5">
             <button
               type="button"
