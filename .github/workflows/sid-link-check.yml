@@ -1,0 +1,31 @@
+name: SID Link Check
+
+# E-DG-REAL S1: advisory check that a PR is linked to its story (gate CI evidence).
+# NON-BLOCKING by design — every path exits 0; it only emits a ::warning:: annotation.
+# It must never be added to required status checks. The real linking is done by the
+# GitHub webhook (app/routers/verdict_capture.py); this just nudges contributors to tag.
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  sid-link-check:
+    name: Story link (SID) — advisory
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check for story SID tag (branch or PR body)
+        env:
+          BRANCH: ${{ github.head_ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Mirrors _SID_RE in app/services/verdict_capture.py:
+          #   [SID:<uuid>] in PR body  |  sid-<uuid> / sid/<uuid> in branch
+          UUID='[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+          if printf '%s' "$BRANCH" | grep -qiE "sid[-_/]$UUID" \
+             || printf '%s' "$PR_BODY" | grep -qiE "\[SID:$UUID\]"; then
+            echo "Story SID tag found — the approval gate will link the CI/merge verdict."
+          else
+            echo "::warning title=No story SID tag::This PR has no [SID:<full-uuid>] in its body or sid-<full-uuid> in its branch name, so its approval gate keeps 'CI unknown (self-report only)'. Tagging is optional — see AGENTS.md 'Linking PRs to story gates'. (advisory — does not block merge)"
+          fi
