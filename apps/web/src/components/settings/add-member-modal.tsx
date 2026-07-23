@@ -113,7 +113,7 @@ export function AddMemberModal({ open, onClose, orgId, projects, onAdded }: AddM
           </div>
         </div>
 
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
 
         <DialogFooter>
           <Button variant="ghost" onClick={close} disabled={submitting}>{tc('cancel')}</Button>

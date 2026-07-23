@@ -175,7 +175,14 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
         {message && (
-          <Alert variant={message.type === 'success' ? 'success' : 'destructive'}>
+          // story #2105 2차 — handleSet/handleRevert가 재시도 전 setMessage(null)을 먼저 호출해(위
+          // 정의) 매 시도마다 언마운트→리마운트된다. 에러=alert/assertive, 성공=status/polite.
+          <Alert
+            variant={message.type === 'success' ? 'success' : 'destructive'}
+            role={message.type === 'success' ? 'status' : 'alert'}
+            aria-live={message.type === 'success' ? 'polite' : 'assertive'}
+            aria-atomic="true"
+          >
             <AlertDescription>{message.text}</AlertDescription>
           </Alert>
         )}

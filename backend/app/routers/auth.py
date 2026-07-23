@@ -949,6 +949,13 @@ async def totp_verify(
 
 # ─── OAuth ────────────────────────────────────────────────────────────────────
 
+# story #2155(2026-07-23, 선생님 지시): GitHub 로그인 제거 — 첫 화면 로그인 버튼이
+# "개발자 도구" 포지셔닝을 말하지 않게 하기 위함(GitHub App/봇 연동 `github_app.py`는
+# 완전히 별개 물건이라 무관 — config.py:209 주석 참조). 제거 전 prod 실측(디디, 읽기전용
+# 1회 잡): github_id는 있으나 다른 로그인 수단이 없는 사용자 0명 — 이관 경로 불요.
+# `_OAUTH_CONFIGS`가 provider 등록 자체를 게이트하므로("google" 하나만 등록) 아래
+# `_client_id`/`_client_secret`/oauth_callback의 provider 분기는 전부 "google 하나뿐"이
+# 확정된 상태에서 남은 스캐폴딩이다 — 향후 다른 provider가 추가되면 그때 다시 분기한다.
 _OAUTH_CONFIGS: dict[str, dict] = {
     "google": {
         "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
@@ -956,14 +963,6 @@ _OAUTH_CONFIGS: dict[str, dict] = {
         "userinfo_url": "https://www.googleapis.com/oauth2/v3/userinfo",
         "scope": "openid email profile",
         "id_field": "sub",
-        "email_field": "email",
-    },
-    "github": {
-        "authorize_url": "https://github.com/login/oauth/authorize",
-        "token_url": "https://github.com/login/oauth/access_token",
-        "userinfo_url": "https://api.github.com/user",
-        "scope": "read:user user:email",
-        "id_field": "id",
         "email_field": "email",
     },
 }
@@ -974,11 +973,11 @@ def _redirect_uri(provider: str) -> str:
 
 
 def _client_id(provider: str) -> str:
-    return settings.google_client_id if provider == "google" else settings.github_client_id
+    return settings.google_client_id
 
 
 def _client_secret(provider: str) -> str:
-    return settings.google_client_secret if provider == "google" else settings.github_client_secret
+    return settings.google_client_secret
 
 
 class OAuthCallbackRequest(BaseModel):
@@ -1054,18 +1053,6 @@ async def oauth_callback(
             return _err("OAUTH_USERINFO_FAILED", "Failed to fetch user info", 400)
         userinfo = userinfo_resp.json()
 
-        # GitHub email이 null인 경우 /user/emails로 추가 조회
-        if provider == "github" and not userinfo.get("email"):
-            emails_resp = await client.get(
-                "https://api.github.com/user/emails",
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            if emails_resp.status_code == 200:
-                emails = emails_resp.json()
-                primary = next((e["email"] for e in emails if e.get("primary") and e.get("verified")), None)
-                if primary:
-                    userinfo["email"] = primary
-
     oauth_id = str(userinfo.get(cfg["id_field"], ""))
     email = (userinfo.get(cfg["email_field"]) or "").lower().strip()
 
@@ -1073,7 +1060,7 @@ async def oauth_callback(
         return _err("OAUTH_MISSING_INFO", "Missing id or email from provider", 400)
 
     # 3. 기존 유저 조회 (oauth_id 기준 → email 기준 순)
-    id_col = User.google_id if provider == "google" else User.github_id
+    id_col = User.google_id
     result = await session.execute(select(User).where(id_col == oauth_id, User.is_active.is_(True)))
     user = result.scalar_one_or_none()
 

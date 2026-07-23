@@ -899,7 +899,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     <div className="flex h-full flex-col overflow-hidden">
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {transitionError && (
-        <div className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
+        // story #2105 2차 — 이 배너는 4초 후 자동 setTransitionError(null)로만 해소되고, 재시도
+        // 직전에 명시적으로 null 리셋하지 않는다(handleDragEnd/handleChangeStatus/handleCreateStory
+        // 3곳 모두). 4초 내 동일 사유가 재발하면 텍스트가 안 바뀌어 재낭독이 안 될 수 있다 — 별도
+        // 잠재 결함으로 기록(이 스토리에서 상태머신을 재구성하지 않음).
+        <div role="alert" aria-live="assertive" aria-atomic="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
           ⚠️ {transitionError}
         </div>
       )}

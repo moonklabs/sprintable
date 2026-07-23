@@ -292,7 +292,12 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
 
       <p className="text-[10px] text-muted-foreground/70">{t('riskHint')}</p>
       {error ? (
-        <p className="inline-flex items-center gap-1 text-[11px] text-destructive">
+        <p
+          className="inline-flex items-center gap-1 text-[11px] text-destructive"
+          role="alert"
+          aria-live="assertive"
+          aria-atomic="true"
+        >
           <AlertTriangle className="size-3 shrink-0" />
           {error}
         </p>

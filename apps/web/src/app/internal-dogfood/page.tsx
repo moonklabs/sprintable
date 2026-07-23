@@ -52,7 +52,7 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
         {error ? (
           <SectionCard>
             <SectionCardBody>
-              <p className="text-sm text-rose-700">오류: {error}</p>
+              <p className="text-sm text-rose-700" role="alert" aria-live="assertive" aria-atomic="true">오류: {error}</p>
             </SectionCardBody>
           </SectionCard>
         ) : null}

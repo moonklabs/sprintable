@@ -9,7 +9,8 @@
  * 은 attested 부트스트랩과 완전히 별개다. `/auth/native`는 이 스토리 범위에서 무접촉.
  *
  * mint 대상은 Firebase `__Host-sp_fs`가 아니라 **레거시 `sp_at`/`sp_rt`**다 — 실측 그라운딩 결과
- * 웹 Google/GitHub OAuth 로그인이 Firebase를 전혀 쓰지 않고(`getServerSession()`의 비-Firebase
+ * 웹 Google OAuth 로그인(story #2155 이후 GitHub 로그인 제거 — App/봇 연동은 별개)이 Firebase를
+ * 전혀 쓰지 않고(`getServerSession()`의 비-Firebase
  * 폴백 경로가 실 인증 경로) 레거시 JWT 쌍을 발급하는 구조였기 때문(오르테가 확定, Firebase 이관은
  * 스코프 밖). 쿠키 세팅은 `/api/auth/callback/[provider]/route.ts`와 동일 규약(`cookieBase()`).
  *

@@ -632,7 +632,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               <p className="text-sm font-semibold text-foreground">{t('roleQuestion')}</p>
 
               {roleError ? (
-                <div className="flex items-center gap-2">
+                // story #2105 2차 — 로드 실패도 결과다(#2096/#2105 1차와 동일 원칙). fetchRoleTemplates가
+                // 재시도 전 setRoleError(false)를 먼저 호출해 매 시도마다 언마운트→리마운트된다.
+                <div role="alert" aria-live="assertive" aria-atomic="true" className="flex items-center gap-2">
                   <p className="text-sm text-destructive">{t('roleLoadError')}</p>
                   <Button variant="ghost" size="sm" onClick={() => void fetchRoleTemplates()}>{t('retry')}</Button>
                 </div>
@@ -828,7 +830,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       <option value="admin">{tSettings('agentRoleAdmin')}</option>
                     </select>
                   </div>
-                  {equipError && <p className="text-xs text-destructive">{equipError}</p>}
+                  {equipError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{equipError}</p>}
                 </div>
               ) : null}
 
@@ -868,7 +870,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     </div>
                   </div>
                 ) : runtimeCapabilitiesError ? (
-                  <div className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
+                  // story #2105 2차 — fetchRuntimeCapabilities가 재시도 전 setRuntimeCapabilitiesError(false)를
+                  // 먼저 호출해(위 정의) 매 시도마다 언마운트→리마운트된다.
+                  <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
                     <p className="text-sm font-medium text-foreground">{t('runtimeLoadError')}</p>
                     <p className="text-xs text-muted-foreground">{t('runtimeLoadErrorNote')}</p>
                     <Button variant="ghost" size="sm" onClick={() => void fetchRuntimeCapabilities()}>{t('retry')}</Button>
@@ -977,7 +981,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 </div>
               </div>
 
-              {recruitError && <p className="text-sm text-destructive">{recruitError}</p>}
+              {recruitError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{recruitError}</p>}
 
               <div className="flex justify-between gap-2 pt-2">
                 <Button variant="ghost" onClick={() => setStep(2)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
@@ -991,7 +995,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
           {/* ── equip-skip 결과(story d82c1092·STEP3 재사용) — AddAgentForm 2-phase 결과 UX 그대로 ── */}
           {step === 3 && equipSkip && equipResult && (
             <div className="space-y-4">
-              <div className="space-y-3 rounded-md border border-success-border bg-success-tint p-4">
+              {/* story #2105 2차 — 생성 성공도 결과다(#2096/#2105 1차와 동일 원칙). equipResult는 이
+                  가드에서 최초 1회만 non-null이 되므로 polite 낭독으로 충분(흐름 차단 아님). */}
+              <div role="status" aria-live="polite" aria-atomic="true" className="space-y-3 rounded-md border border-success-border bg-success-tint p-4">
                 <p className="text-sm font-semibold text-success">{t('equipCreatedTitle', { name: equipResult.name })}</p>
                 {equipResult.fakechat_port ? (
                   <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -1126,7 +1132,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   <div className="space-y-2 rounded-md border border-warning-border bg-warning-tint p-3">
                     <p className="text-xs font-semibold text-foreground">{t('rotateConfirmTitle')}</p>
                     <p className="text-xs leading-relaxed text-muted-foreground"><b className="text-foreground">{t('rotateConfirmBold')}</b> {t('rotateConfirmBody')}</p>
-                    {rotateError && <p className="text-xs text-destructive">{rotateError}</p>}
+                    {rotateError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{rotateError}</p>}
                     <div className="flex justify-end gap-2">
                       <Button variant="ghost" size="sm" onClick={() => setShowRotateConfirm(false)} disabled={rotating}>{t('cancel')}</Button>
                       <Button size="sm" className="bg-warning text-foreground hover:bg-warning/90" disabled={rotating} onClick={() => void handleRotateConfirmed()}>

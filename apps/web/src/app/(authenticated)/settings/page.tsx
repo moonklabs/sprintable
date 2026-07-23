@@ -909,7 +909,7 @@ export default function SettingsPage() {
                           ) : (
                             <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground">{orgInfo.name}</p>
                           )}
-                          {orgNameError && <p className="text-xs text-destructive">{orgNameError}</p>}
+                          {orgNameError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{orgNameError}</p>}
                         </div>
 
                         <div className="space-y-1.5">
@@ -1069,7 +1069,14 @@ export default function SettingsPage() {
                   </div>
 
                   {projectActionMessage ? (
-                    <Alert variant={projectActionMessage.type === 'success' ? 'success' : 'destructive'}>
+                    // story #2105 2차 — 성공/실패 결과 모두 아직 시각 전용이었다(#2096/#2105 1차와 동일
+                    // 결함클래스). 에러=alert/assertive, 성공=status/polite.
+                    <Alert
+                      variant={projectActionMessage.type === 'success' ? 'success' : 'destructive'}
+                      role={projectActionMessage.type === 'success' ? 'status' : 'alert'}
+                      aria-live={projectActionMessage.type === 'success' ? 'polite' : 'assertive'}
+                      aria-atomic="true"
+                    >
                       <AlertDescription>{projectActionMessage.text}</AlertDescription>
                     </Alert>
                   ) : null}
@@ -1162,7 +1169,7 @@ export default function SettingsPage() {
                                   {webhookSaving === member.id ? '...' : tc('save')}
                                 </Button>
                               </div>
-                              {err ? <p className="mt-1 text-xs text-destructive">{err}</p> : null}
+                              {err ? <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-1 text-xs text-destructive">{err}</p> : null}
                             </div>
                           );
                         })}

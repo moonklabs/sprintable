@@ -97,7 +97,12 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
             ) : null}
           </div>
         ) : phase === 'error' ? (
-          <div className="space-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          <div
+            className="space-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+            role="alert"
+            aria-live="assertive"
+            aria-atomic="true"
+          >
             <p>{t('exportFailedNote')}</p>
             {errorDetail ? (
               <p className="break-words font-mono text-[10px] leading-[13px] text-muted-foreground/70">{errorDetail}</p>

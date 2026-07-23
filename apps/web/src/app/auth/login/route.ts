@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const codeChallenge = searchParams.get('code_challenge');
   const origin = resolveAppUrl(null);
 
-  if (!provider || !['google', 'github'].includes(provider)) {
+  if (!provider || !['google'].includes(provider)) {
     return NextResponse.redirect(`${origin}/login`);
   }
 

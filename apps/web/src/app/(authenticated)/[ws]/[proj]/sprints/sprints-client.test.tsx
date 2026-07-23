@@ -20,6 +20,13 @@ vi.mock('@/components/nav/top-bar-slot', () => ({
   ),
 }));
 
+// story #2104 — HumanOnlyAction(스프린트 삭제 트리거를 감싼다)이 useDashboardContext를 읽는다.
+// 기본은 human(기존 first-touch 스위트는 게이팅과 무관). agent 케이스만 개별 override.
+const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => useDashboardContextMock(),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -46,6 +53,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  useDashboardContextMock.mockReturnValue({ currentMemberType: 'human' });
 });
 
 afterEach(async () => {
@@ -92,5 +100,27 @@ describe('SprintsClient — 스프린트 first-touch 정체성', () => {
     expect(html).toContain('Sprint 1');
     expect(html).not.toContain('아직 시작한 스프린트가 없어요');
     expect(html).not.toContain('첫 스프린트 시작하기');
+  });
+
+  // story #2104 — BE sprints.py:351(human-only 삭제 403)를 FE가 미리 안 보고 에이전트 계정에도
+  // 삭제 트리거를 무조건 열었다(#2091/#2103과 같은 결함). 양방향 고정 — human까지 잠그면
+  // 정당한 삭제가 봉쇄되는 더 큰 사고다(승격 위험목록의 잔여 미검증 칸 해소).
+  it('human이면 스프린트 삭제 트리거가 렌더된다(정당한 사용자는 막히면 안 됨)', async () => {
+    stubFetch([{ id: 's1', title: 'Sprint 1', status: 'planning', start_date: '2026-07-01', end_date: '2026-07-14' }]);
+    await mount();
+    const row = [...container.querySelectorAll('li')].find((li) => li.textContent?.includes('Sprint 1'));
+    expect(row).not.toBeUndefined();
+    await act(async () => { row!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.querySelector('button[aria-label="스프린트 삭제"]')).not.toBeNull();
+  });
+
+  it('agent면 스프린트 삭제 트리거가 안 뜬다', async () => {
+    useDashboardContextMock.mockReturnValue({ currentMemberType: 'agent' });
+    stubFetch([{ id: 's1', title: 'Sprint 1', status: 'planning', start_date: '2026-07-01', end_date: '2026-07-14' }]);
+    await mount();
+    const row = [...container.querySelectorAll('li')].find((li) => li.textContent?.includes('Sprint 1'));
+    expect(row).not.toBeUndefined();
+    await act(async () => { row!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.querySelector('button[aria-label="스프린트 삭제"]')).toBeNull();
   });
 });

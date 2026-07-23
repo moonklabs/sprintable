@@ -300,10 +300,14 @@ export function AudioRecorder({
 
   return (
     <div className="rounded-lg border bg-background p-4">
-      {/* 에러 표시 */}
-      {errorCode && <p className="mb-2 text-xs text-destructive">{t(ERROR_I18N_MAP[errorCode])}</p>}
-      {sttError && <p className="mb-2 text-xs text-warning">{sttError}</p>}
-      {fileError && <p className="mb-2 text-xs text-destructive">{fileError}</p>}
+      {/* 에러 표시 — story #2105 2차. sttError/fileError는 handleStart/handleFileUpload가 재시도 전
+          null 리셋을 먼저 호출해(위 정의) 매 시도마다 언마운트→리마운트된다. errorCode(useAudioRecorder
+          훅)는 성공적으로 마이크를 획득한 뒤에만 null로 리셋되고(catch 분기는 직접 세팅), 연속 동일
+          실패(예: micDenied 반복)에서는 null 경유 없이 같은 문자열이 재설정될 수 있다 — 별도 잠재
+          결함으로 기록(훅 내부 상태머신은 이 스토리에서 재구성하지 않음). */}
+      {errorCode && <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-2 text-xs text-destructive">{t(ERROR_I18N_MAP[errorCode])}</p>}
+      {sttError && <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-2 text-xs text-warning">{sttError}</p>}
+      {fileError && <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-2 text-xs text-destructive">{fileError}</p>}
 
       {/* 녹음 상태 (AC2 + AC11 모바일 반응형) */}
       <div className="mb-3 flex flex-wrap items-center gap-2 sm:gap-3">

@@ -155,7 +155,7 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
           )}
         </div>
 
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
 
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onClose} disabled={sending}>{t('cancel')}</Button>

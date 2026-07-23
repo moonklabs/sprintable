@@ -207,7 +207,7 @@ function VariantSlot({
 
       {!decided && canDecide ? (
         <div className="space-y-2 border-t border-border px-4 py-3">
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-[11px] text-muted-foreground">{t('confirmSlotHint')}</p>
             <Button size="sm" disabled={!canSubmit} onClick={() => void handleSubmit()}>
