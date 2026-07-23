@@ -112,6 +112,12 @@ jobs:
             # prod에 얹지 않는다 — develop→main 48커밋 일괄승격에 검증 안 된 롤백 플래그를
             # 섞으면 문제 발생 시 원인 격리가 안 된다. dev 실측 후 별도 판단.
             echo "sse_multiplex_enabled=false" >> "$GITHUB_OUTPUT"
+            # story #2139/#2143 후속(2026-07-23, 오르테가군 판정) — 백플레인 켜기 3종은 prod가
+            # 실시간 GCE 3노드 쪽도 함께 켜야 하는 별도 단계라 dev 게이트 통과 전엔 얹지 않는다
+            # (#2120/#2121/#2122와 동일 원칙 — 위 sse_multiplex_enabled와 나란히).
+            echo "backend_presence_redis_enabled=false" >> "$GITHUB_OUTPUT"
+            echo "backend_presence_online_redis_enabled=false" >> "$GITHUB_OUTPUT"
+            echo "backend_sse_lease_redis_enabled=false" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
@@ -182,6 +188,16 @@ jobs:
             # 전제. 3개 소비 훅(use-sse-notifications·use-chat-sse·use-team-presence)이 이
             # 값 하나로 공유 커넥션 vs 독립 커넥션을 가른다(realtime-provider.tsx).
             echo "sse_multiplex_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2139/#2143 후속(2026-07-23, 오르테가군 판정) — "백플레인 켜기" dev 1단계.
+            # PRESENCE_ONLINE_REDIS_ENABLED: DB 폴백 있음(안 깨져 있음 — 켜면 신선도 개선).
+            # PRESENCE_REDIS_ENABLED(chat_presence "working"): 프로세스-로컬 dict라 GCE
+            # 멀티노드에서 노드마다 다른 실제 결함 — 미르코의 working 판정이 여기 걸림.
+            # SSE_LEASE_REDIS_ENABLED: 인스턴스별 카운터라 전역 상한 미성립 실제 결함 —
+            # 까심의 노드편차 판정이 여기 걸림. dev만 켠다 — GCE realtime-dev 쪽도 이번 배포와
+            # 짝으로 켜야 실제로 노드 간 공유가 성립한다(scripts/deploy_realtime_gce.sh 동시 배포).
+            echo "backend_presence_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "backend_presence_online_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "backend_sse_lease_redis_enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Submit Cloud Build
@@ -189,6 +205,6 @@ jobs:
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_BACKEND_REDIS_DISPATCH_ENABLED="${{ steps.env.outputs.backend_redis_dispatch_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}",_BACKEND_FANOUT_WAKE_REDIS_ENABLED="${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}",_SSE_MULTIPLEX_ENABLED="${{ steps.env.outputs.sse_multiplex_enabled }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_BACKEND_REDIS_DISPATCH_ENABLED="${{ steps.env.outputs.backend_redis_dispatch_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}",_BACKEND_FANOUT_WAKE_REDIS_ENABLED="${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}",_SSE_MULTIPLEX_ENABLED="${{ steps.env.outputs.sse_multiplex_enabled }}",_BACKEND_PRESENCE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_redis_enabled }}",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_online_redis_enabled }}",_BACKEND_SSE_LEASE_REDIS_ENABLED="${{ steps.env.outputs.backend_sse_lease_redis_enabled }}" \
             --suppress-logs \
             .
