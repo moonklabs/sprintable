@@ -8,8 +8,10 @@
 #   - VPC/서브넷(default, asia-northeast3) 이미 존재(gcloud 실측 완료, 2026-07-22)
 #   - RUNTIME_SA(cloudrun-runtime-dev)에 cloudsql.client·secretmanager.secretAccessor 이미 부여
 #     (Cloud Run 서비스와 동일 SA 재사용 — 신규 SA 불요, 기존 정책 신뢰)
-#   - GCLB 스택(헬스체크·백엔드서비스·NEG·URL맵·포워딩규칙·방화벽)은
-#     provision_realtime_gclb.sh로 별도 1회 프로비저닝(먼저 실행 필요)
+#
+# ⛔story #2142(2026-07-23) 정정 — GCLB 스택(헬스체크·백엔드서비스·URL맵·포워딩규칙·방화벽)
+# 은 provision_realtime_gclb.sh가 만들지만, **이 스크립트(MIG 생성)가 먼저 돌아야** 한다
+# (provision의 add-backend 스텝이 실재하는 MIG를 요구 — 예전엔 순서가 반대로 적혀 있었다).
 #
 # 사용법:
 #   COMMIT_SHA=abc1234 bash backend/scripts/deploy_realtime_gce.sh dev
@@ -179,10 +181,23 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},PG_LISTEN_ENABLED=false"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},EVENT_BROKER_REDIS_CONSUME_ENABLED=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},EVENT_BROKER_REDIS_DISPATCH_ENABLED=true"
-# ⚠️REDIS_URL은 Memorystore 내부 IP(10.164.120.243) — VPC 안에서만 유효, GCE도 같은 VPC/서브넷에
-# 붙으므로 그대로 이관 가능(라이브 실측 그대로, 재실측 없이 하드코딩하지 않고 env로 override 가능하게).
-REDIS_URL_VALUE="${REDIS_URL:-redis://10.164.120.243:6379}"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},REDIS_URL=${REDIS_URL_VALUE}"
+# ⛔story #2142(2026-07-23, 오르테가 리뷰 적발 — 실행 前 발견) 정정: REDIS_URL이 여태 env
+# 분기 없이 PLAIN_ENV_SPEC(평문·인스턴스 메타데이터에 그대로 박힘)에 얹혀 있었다. 두 가지가
+# 동시에 걸리는 자리였다 — ①prod Redis는 AUTH 활성이라 URL이 비밀번호를 품는데, 그게 평문
+# 메타데이터로 가면 이 스크립트가 SECRET_PAIRS를 따로 만든 이유("디스크 미기록·메타데이터
+# 무기록") 자체를 무너뜨린다. ②기본값이 dev Memorystore IP 리터럴이라 prod 호출 시 REDIS_URL
+# 을 안 넘기면 prod GCE가 dev Redis를 무는다 — DATABASE_URL_DEV(위 SECRET_PAIRS)와 정확히
+# 같은 클래스. dev(AUTH 없는 plain Memorystore)는 시크릿 자체가 없으니 기존처럼 평문 유지,
+# prod는 Secret Manager 바인딩(REDIS_URL_PROD)으로 완전히 옮겨 평문 경로에서 뺀다.
+if [ "${ENV}" = "prod" ]; then
+    SECRET_PAIRS_REDIS="REDIS_URL_PROD:REDIS_URL"
+else
+    # dev: Memorystore가 AUTH 없는 plain 인스턴스 — VPC 내부 IP(10.164.120.243)라 평문이어도
+    # 시크릿이 아니다. env로 override 가능하게 기존 그대로 유지(재실측 없이 하드코딩 안 함).
+    REDIS_URL_VALUE="${REDIS_URL:-redis://10.164.120.243:6379}"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},REDIS_URL=${REDIS_URL_VALUE}"
+    SECRET_PAIRS_REDIS=""
+fi
 # DB_POOL_SIZE/DB_MAX_OVERFLOW는 위에서 이미 3/1로 명시(Cloud Run realtime과 동일).
 #
 # ⚠️의도적 제외(50개 라이브 실측 중 1개, 침묵 누락 아님) — OPS_RESTART_TS=1784527154:
@@ -214,6 +229,11 @@ SECRET_PAIRS="${SECRET_PAIRS} FIREBASE_BFF_INTERNAL_SECRET:FIREBASE_BFF_INTERNAL
 # DATABASE_URL_DEV 자체 이름으로도 참조되는 라이브 계약(코드가 두 이름 다 읽는 경로가
 # 있을 수 있어 원본 그대로 이관 — config.py 확認 없이 값만 옮기는 원칙, 동작 변경 없음).
 SECRET_PAIRS="${SECRET_PAIRS} ${DB_SECRET_NAME}:${DB_SECRET_NAME}"
+# story #2142: prod만 REDIS_URL을 시크릿으로 추가(위 SECRET_PAIRS_REDIS 분기 참조) — dev는
+# 이미 PLAIN_ENV_SPEC에 실렸으므로 빈 문자열이라 여기선 아무것도 안 붙는다.
+if [ -n "${SECRET_PAIRS_REDIS}" ]; then
+    SECRET_PAIRS="${SECRET_PAIRS} ${SECRET_PAIRS_REDIS}"
+fi
 
 # ── startup-script 생성 — 부팅마다: cloud-sql-proxy 컨테이너(소켓 공유볼륨) → 시크릿
 #    fetch(메모리만, 디스크 미기록) → 앱 컨테이너. 재부팅 시에도 동일하게 재실행돼 자가복구.

@@ -88,6 +88,30 @@ def test_deploy_gce_dev_secret_pairs_unchanged():
     )
 
 
+def test_deploy_gce_prod_redis_url_via_secret_not_plaintext():
+    """story #2142 후속 발견(오르테가 지시, 2026-07-23) — prod AUTH 있는 Redis URL이
+    PLAIN_ENV_SPEC 평문으로 인스턴스 메타데이터에 박히면 안 되고 SECRET_PAIRS로만 가야 한다."""
+    cfg = _resolve(_DEPLOY_GCE, "prod")
+    assert "REDIS_URL_PROD:REDIS_URL" in cfg["SECRET_PAIRS"]
+    assert "REDIS_URL=" not in cfg["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_dev_redis_url_plaintext_unchanged():
+    """dev: AUTH 없는 plain Memorystore IP 리터럴 — 이번 변경으로 한 글자도 안 바뀌어야 한다."""
+    cfg = _resolve(_DEPLOY_GCE, "dev")
+    assert "REDIS_URL=redis://10.164.120.243:6379" in cfg["PLAIN_ENV_SPEC"]
+    assert "REDIS_URL" not in cfg["SECRET_PAIRS"]
+
+
+def test_deploy_gce_prod_redis_url_env_override_ignored_for_secret_routing():
+    """prod는 REDIS_URL 환경변수를 넘겨도(과거 실수 방지 목적) 여전히 시크릿 경로로만
+    가야 한다 — 평문 우회 통로가 생기면 안 된다."""
+    cfg = _resolve(_DEPLOY_GCE, "prod", extra={"REDIS_URL": "redis://leaked:leaked@1.2.3.4:6379"})
+    assert "REDIS_URL_PROD:REDIS_URL" in cfg["SECRET_PAIRS"]
+    assert "REDIS_URL=" not in cfg["PLAIN_ENV_SPEC"]
+    assert "leaked" not in cfg["PLAIN_ENV_SPEC"]
+
+
 def test_deploy_gce_invalid_env_rejected():
     proc = subprocess.run(
         ["bash", _DEPLOY_GCE, "staging"],
