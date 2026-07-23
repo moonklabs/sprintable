@@ -340,6 +340,20 @@ steps:
           echo "skip deploy-realtime: prod gate pending (E-ARCH 1단계 dev 검증 후 오픈)"
           exit 0
         fi
+        # ⛔fail-fast (오르테가군 PO 2026-07-23): `_REALTIME_URL` 기본값을 dev URL 에서 빈
+        # 문자열로 내렸다(위 substitutions 주석 — prod 프론트가 dev realtime 을 가리킬 여지 제거).
+        # frontend 쪽은 빈 값이 곧 "FASTAPI_URL 로 폴백"이라 안전하지만, **여기서는 빈 값이
+        # 안전하지 않다** — 아래 `FASTAPI_URL=${_REALTIME_URL}` 가 빈 문자열로 나가면
+        # realtime-dev 의 self URL 이 지워진다. 조용히 깨지는 대신 여기서 멈춘다.
+        # 자동 경로(GHA dev 분기)는 항상 명시값을 넘기므로 이 가드에 걸릴 일이 없다 —
+        # 걸린다면 substitution 없이 수동 `gcloud builds submit` 한 경우이고, 그건 정말로
+        # 멈춰야 하는 상황이다.
+        if [ -z "${_REALTIME_URL}" ]; then
+          echo "FAIL: _REALTIME_URL 이 비어 있다. deploy-realtime 은 이 값을 realtime 서비스의"
+          echo "      FASTAPI_URL 로 쓰므로 빈 값으로 진행하면 self URL 이 지워진다."
+          echo "      --substitutions 에 _REALTIME_URL=<realtime 서비스 URL> 을 명시할 것."
+          exit 1
+        fi
         # ⚠️story #2078 긴급수정(2026-07-21): PG_LISTEN_ENABLED가 여기 true로 하드코딩돼
         # 있었다 — PO가 라이브에서 손으로 false로 전환(LISTEN 제거·Redis 단독 dispatch 확認
         # 완료)했는데, 이 스텝이 명시적으로 true를 다시 밀어넣어 **다음 배포마다 LISTEN이
