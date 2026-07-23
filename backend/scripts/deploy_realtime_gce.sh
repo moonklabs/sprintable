@@ -263,16 +263,13 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}DB_MAX_OVERFLOW=1"
 # backend-prod는 SSE 전용이 아니라 REST 트래픽과 캡을 공유하기 때문(다른 성격의 노드).
 # dev/prod 둘 다 이 GCE 스택에서는 500 그대로 유지 — env 분기 대상 아님.
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}MAX_SSE_CONNECTIONS=500"
-# story #2139/#2143 후속(2026-07-23, 오르테가군 판정) — "백플레인 켜기" durable화. dev만
-# true — prod는 backend(cloudbuild.yaml _BACKEND_PRESENCE_*/_BACKEND_SSE_LEASE_*)와 함께
-# 켜야 하는 별도 단계(#2120/#2121/#2122와 동일 원칙, dev 게이트 통과 전엔 얹지 않는다).
+# story #2139/#2143 후속(2026-07-23, 오르테가군 판정 — dev 게이트 GREEN 확認 後 같은 날
+# prod 승격, "절반만 고치는 것" 방지 교정): dev/prod 둘 다 true. backend(cloudbuild.yaml
+# _BACKEND_PRESENCE_*/_BACKEND_SSE_LEASE_*)와 같은 흐름에서 켠다 — 한쪽만 켜고 멈추면
+# backend는 Redis 공유·GCE는 로컬인 반쪽 상태가 prod에 남는다(오늘 #2448 인시던트와 동형).
 # 손 env override(PRESENCE_REDIS_ENABLED=true bash ... prod 식)는 여기 SSOT 기본값을 다음
 # 배포가 덮으므로 durable 값 자체를 여기 못박는다.
-if [ "${ENV}" = "dev" ]; then
-    _BACKPLANE_DEFAULT=true
-else
-    _BACKPLANE_DEFAULT=false
-fi
+_BACKPLANE_DEFAULT=true
 # #2120(E-ARCH 근본): chat_presence working → Redis 공유 롤아웃 게이트(프로세스-로컬 dict라
 # GCE 멀티노드에서 노드마다 다르게 보이는 실제 결함 — 미르코의 working 판정이 여기 걸림).
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}PRESENCE_REDIS_ENABLED=${PRESENCE_REDIS_ENABLED:-${_BACKPLANE_DEFAULT}}"

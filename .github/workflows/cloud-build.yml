@@ -112,12 +112,13 @@ jobs:
             # prod에 얹지 않는다 — develop→main 48커밋 일괄승격에 검증 안 된 롤백 플래그를
             # 섞으면 문제 발생 시 원인 격리가 안 된다. dev 실측 후 별도 판단.
             echo "sse_multiplex_enabled=false" >> "$GITHUB_OUTPUT"
-            # story #2139/#2143 후속(2026-07-23, 오르테가군 판정) — 백플레인 켜기 3종은 prod가
-            # 실시간 GCE 3노드 쪽도 함께 켜야 하는 별도 단계라 dev 게이트 통과 전엔 얹지 않는다
-            # (#2120/#2121/#2122와 동일 원칙 — 위 sse_multiplex_enabled와 나란히).
-            echo "backend_presence_redis_enabled=false" >> "$GITHUB_OUTPUT"
-            echo "backend_presence_online_redis_enabled=false" >> "$GITHUB_OUTPUT"
-            echo "backend_sse_lease_redis_enabled=false" >> "$GITHUB_OUTPUT"
+            # story #2139/#2143 후속(2026-07-23, 오르테가군 판정 — dev 게이트 GREEN 확認 後
+            # 같은 날 prod 승격, "절반만 고치는 것" 방지 교정): backend 쪽을 GCE 실시간 3노드와
+            # 같은 흐름에서 켠다(한쪽만 켜고 멈추면 오늘의 #2448 인시던트와 동형 반쪽 상태가
+            # prod에 남는다). deploy_realtime_gce.sh의 prod 분기 기본값도 이 커밋과 짝으로 true.
+            echo "backend_presence_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "backend_presence_online_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "backend_sse_lease_redis_enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
