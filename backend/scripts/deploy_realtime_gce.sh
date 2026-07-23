@@ -176,8 +176,16 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$ENV] $*" >&2; }
 # ── 라이브 실측 그대로 이관(2026-07-22, gcloud run services describe 전량 대조) ──
 # 평문 35개 + 시크릿 15개 = 50개, drift-guard(infra/manual-env-allowlist.yml)가 감시 중인
 # Cloud Run 쪽 카테고리 C와 별개로 여기서도 전량 명시(두 배포 표면이 다르므로 각자 SSOT).
+# ⛔story #2142(2026-07-23, 오르테가 지적 — 자기 지시가 만든 결함 자인) — PLAIN_ENV_SPEC을
+# 예전엔 콤마로 join하고 소비부에서 `IFS=',' read -ra`로 무조건 콤마 분해했다. 값 자체에
+# 콤마가 들어 있으면(H1_MERGE_GATE_ORG_ALLOWLIST의 2-org 콤마리스트 등) 그 값이 조각나
+# VM에는 절반만 실리는 조용한 절단이 났다 — cloudbuild.yaml이 CORS_ORIGINS로 이미 겪고
+# 커스텀 구분자('^@^')로 고쳐둔 바로 그 함정을 이 스크립트가 다시 밟은 것. 값에 절대
+# 나타나지 않는 ASCII Unit Separator(0x1F)를 join 구분자로 써서 이 클래스 전체를 원천
+# 차단한다 — 어떤 미래 값이 콤마를 포함해도 더 이상 쪼개지지 않는다.
+_PLAIN_SEP=$'\x1f'
 PLAIN_ENV_SPEC="EVENTBUS_ENABLED=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},APP_URL=${APP_URL}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}APP_URL=${APP_URL}"
 # ⛔story #2142(2026-07-23, 오르테가 전수 3방향 diff 적발 — GCE 플랜 vs 라이브 backend-prod
 # env, "prod에 있는데 GCE엔 없는" 축) — APP_ENV/CORS_ORIGINS/NEXT_PUBLIC_APP_URL 셋 다
 # backend-dev에도 backend-prod에도 이 스크립트 작성 당시엔 없었는데, backend-prod는 그 후
@@ -189,17 +197,17 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},APP_URL=${APP_URL}"
 # 코드 경로를 위해 필요 — 지금 당장 시크릿 fail-open 구멍은 아니지만(CRON_SECRET_PROD·
 # FIREBASE_BFF_INTERNAL_SECRET 둘 다 바인딩돼 있어 그 경로는 안전) 미러링 원칙 그대로 적용.
 if [ "${ENV}" = "prod" ]; then
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},APP_ENV=prod"
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},NEXT_PUBLIC_APP_URL=${APP_URL}"
-    # ⚠️CORS_ORIGINS는 여기 안 넣는다 — PLAIN_ENV_SPEC은 아래(line ~410 부근)에서
-    # `IFS=',' read -ra` 로 콤마 분해해 docker run -e 인자로 바꾸는데, CORS_ORIGINS 값
-    # 자체가 콤마 구분 origin 목록(http://localhost:3000,http://localhost:3108,
-    # https://app.sprintable.ai)이라 이 메커니즘에 실으면 조각나 깨진 -e 인자가 된다.
-    # config.py의 cors_origins 기본값이 이 prod 라이브 값과 문자열까지 완전히 동일함을
-    # 확認했으므로(2026-07-23) 안 넣어도 결과가 같다 — 안전한 쪽(생략)을 택한다.
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}APP_ENV=prod"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}NEXT_PUBLIC_APP_URL=${APP_URL}"
+    # story #2142(2026-07-23) — CORS_ORIGINS는 처음엔 콤마 분해 함정 때문에 생략했으나(옛
+    # `IFS=',' read -ra` 소비부가 이 값 자체의 콤마에서 쪼개짐), 그 소비부 자체를 _PLAIN_SEP
+    # (0x1F) 기반으로 고친 뒤(위 참조)에는 값에 콤마가 있어도 안전하다 — 이제 넣는다.
+    # config.py의 cors_origins 기본값과 문자열까지 완전히 동일(2026-07-23 확認)하므로 이
+    # 값 자체는 무회귀이며, 명시로 durable화하는 것뿐이다.
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}CORS_ORIGINS=http://localhost:3000,http://localhost:3108,https://app.sprintable.ai"
 fi
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MEMBER_SSOT_RESOLVER_SHADOW=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MEMBER_SSOT_APIKEY_CUT=true"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}MEMBER_SSOT_RESOLVER_SHADOW=true"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}MEMBER_SSOT_APIKEY_CUT=true"
 # ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 3번째 적발 — 같은 뿌리: dev 라이브에서
 # 관측한 사실을 env 분기 없이 prod에 적용) — L2_TRIGGER_*/GATE_CONFIG_ENFORCE_*/
 # DECISION_GATE_LINE_*는 backend-prod에 키 자체가 없다(그 기능이 prod에서 한 번도 켜진 적
@@ -207,42 +215,42 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MEMBER_SSOT_APIKEY_CUT=true"
 # lifespan 워커가 그대로 뜬다 — "SSE 전용이라 안 탈 것"이라는 추론 대신 backend-prod를
 # 그대로 미러링한다(오르테가 판정). prod 분기에서 이 3그룹은 아예 붙이지 않는다.
 if [ "${L2_TRIGGER_ENABLED_LINE}" = "true" ]; then
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ENABLED=true"
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ADVISORY_LOCK=true"
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_MAX_WAKES_PER_ORG_PER_HOUR=5"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}L2_TRIGGER_ENABLED=true"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}L2_TRIGGER_ADVISORY_LOCK=true"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}L2_TRIGGER_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}L2_TRIGGER_MAX_WAKES_PER_ORG_PER_HOUR=5"
 fi
 # H1_MERGE_GATE는 backend-prod에도 실재(ENABLED/ADVISORY=true/true, dev와 동일) — 허용목록만
 # env별로 다르다(H1_MERGE_GATE_ORG_ALLOWLIST_VALUE, case 분기에서 라이브 실측값으로 설정).
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ENABLED=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ORG_ALLOWLIST=${H1_MERGE_GATE_ORG_ALLOWLIST_VALUE}"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ADVISORY=true"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}H1_MERGE_GATE_ENABLED=true"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}H1_MERGE_GATE_ORG_ALLOWLIST=${H1_MERGE_GATE_ORG_ALLOWLIST_VALUE}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}H1_MERGE_GATE_ADVISORY=true"
 # ⛔story #2142(2026-07-23, 오르테가 전수 3방향 diff 적발, 4번째 묶음) — 같은 뿌리(dev
 # 라이브 리터럴이 env 분기 밖에 남음). BUILD_APP_METADATA_DEFALLBACK은 backend-prod에
 # 키 자체가 없다(describe 대조 확認) — dev 전용으로 되돌림.
 if [ "${ENV}" = "dev" ]; then
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},BUILD_APP_METADATA_DEFALLBACK=true"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}BUILD_APP_METADATA_DEFALLBACK=true"
 fi
 if [ "${GATE_CONFIG_ENFORCE_ENABLED_LINE}" = "true" ]; then
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GATE_CONFIG_ENFORCE_ENABLED=true"
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GATE_CONFIG_ENFORCE_ORG_ALLOWLIST=03970fbf-2db6-434b-a7b1-cb74f9547059"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}GATE_CONFIG_ENFORCE_ENABLED=true"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}GATE_CONFIG_ENFORCE_ORG_ALLOWLIST=03970fbf-2db6-434b-a7b1-cb74f9547059"
 fi
 if [ "${DECISION_GATE_LINE_ENABLED_LINE}" = "true" ]; then
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ENABLED=true"
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_MODE=shadow"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}DECISION_GATE_LINE_ENABLED=true"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}DECISION_GATE_LINE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}DECISION_GATE_LINE_MODE=shadow"
 fi
 # ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 적발) 정정 — 이 세 값이 env 분기 밖의
 # 리터럴(dev App 값)이라 prod 플랜에도 그대로 실려, prod 시크릿(github-app-*-prod)과 dev App의
 # ID/CLIENT_ID가 섞이는 조합이 될 뻔했다. ${GITHUB_APP_ID}/${GITHUB_APP_CLIENT_ID}/
 # ${GITHUB_APP_SLUG}(case 분기, 위 참조 — dev/prod 각각 라이브 실측값)로 정정.
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_ID=${GITHUB_APP_ID}"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_CLIENT_ID=${GITHUB_APP_CLIENT_ID}"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_SLUG=${GITHUB_APP_SLUG}"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FASTAPI_URL=${FASTAPI_URL}"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},STORAGE_PROVIDER=gcs"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DB_POOL_SIZE=3"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DB_MAX_OVERFLOW=1"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}GITHUB_APP_ID=${GITHUB_APP_ID}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}GITHUB_APP_CLIENT_ID=${GITHUB_APP_CLIENT_ID}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}GITHUB_APP_SLUG=${GITHUB_APP_SLUG}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}FASTAPI_URL=${FASTAPI_URL}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}STORAGE_PROVIDER=gcs"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}DB_POOL_SIZE=3"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}DB_MAX_OVERFLOW=1"
 # story #2115(S6): 앱 per-instance SSE 소프트캡(events.py MAX_SSE_CONNECTIONS·기본 100)을 상향.
 # GCE는 Cloud Run concurrency 제약이 없어 실질 상한은 노드 fd/mem이고, 이 캡은 그 전에 걸리는
 # 앱 자체 소프트캡이라 env로 무료 확장 가능. 500으로 올려 ceiling이 실제 확장됨을 실증(3노드=1500 이론).
@@ -253,40 +261,40 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DB_MAX_OVERFLOW=1"
 # fd/mem이 진짜 상한이 되므로 캡을 올려도 안전 — backend-prod가 이 값을 안 올린 이유는
 # backend-prod는 SSE 전용이 아니라 REST 트래픽과 캡을 공유하기 때문(다른 성격의 노드).
 # dev/prod 둘 다 이 GCE 스택에서는 500 그대로 유지 — env 분기 대상 아님.
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MAX_SSE_CONNECTIONS=500"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}MAX_SSE_CONNECTIONS=500"
 # #2120(E-ARCH 근본): chat_presence working → Redis 공유 롤아웃 게이트. 실측용으로 env 로 flip
 # (기본 false=현 in-memory 무회귀). OFF 실측=false, ON 실측=true. 라이브 실측 후 durable 값 확定.
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},PRESENCE_REDIS_ENABLED=${PRESENCE_REDIS_ENABLED:-false}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}PRESENCE_REDIS_ENABLED=${PRESENCE_REDIS_ENABLED:-false}"
 # #2120 AC2: online liveness Redis 롤아웃 게이트(§2 working 과 독립 flag). env 로 flip(기본 false).
 # AC2 실측 배포=true. Redis-down fail-open 실측 땐 REDIS_URL 오배선(공유 Memorystore 무접촉)로 시뮬.
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},PRESENCE_ONLINE_REDIS_ENABLED=${PRESENCE_ONLINE_REDIS_ENABLED:-false}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}PRESENCE_ONLINE_REDIS_ENABLED=${PRESENCE_ONLINE_REDIS_ENABLED:-false}"
 # #2121(E-ARCH 근본): SSE 연결 카운터(429/503) → Redis ZSET lease 롤아웃 게이트(presence 와 독립 flag).
 # env 로 flip(기본 false=in-process 무회귀). AC5 실측 배포=true(GCE 3노드 필수·멀티노드 합산 대조).
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},SSE_LEASE_REDIS_ENABLED=${SSE_LEASE_REDIS_ENABLED:-false}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}SSE_LEASE_REDIS_ENABLED=${SSE_LEASE_REDIS_ENABLED:-false}"
 # #2122(E-ARCH 근본): fanout(wake_agent) → Redis 백플레인 롤아웃 게이트(presence/lease 와 독립 flag).
 # env 로 flip(기본 false=pg_notify 직행 무회귀). #2122 라이브 재측정 배포=true(GCE PG_LISTEN=false라 wake
 # 가 Redis 백플레인 타야 타노드 도달 — 미설정 시 cross-node wake 0/2 재현). REALTIME_BACKPLANE 는 별개(cutover).
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FANOUT_WAKE_REDIS_ENABLED=${FANOUT_WAKE_REDIS_ENABLED:-false}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}FANOUT_WAKE_REDIS_ENABLED=${FANOUT_WAKE_REDIS_ENABLED:-false}"
 # ⛔story #2142(2026-07-23, 오르테가 전수 3방향 diff 적발, 4번째 묶음) — 같은 뿌리.
 # LLM_GEMINI_MODEL/_LOCATION·FIREBASE_OAUTH_HANDOFF_ENABLED 전부 backend-prod에 키
 # 자체가 없다(describe 대조 확認) — FIREBASE_OAUTH_HANDOFF_ENABLED=1은 특히 firebase
 # 내부 경로를 **켜는** 값이라 더 신중해야 하는 자리였다. dev 전용으로 되돌림.
 if [ "${ENV}" = "dev" ]; then
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_MODEL=gemini-3.1-pro-preview"
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_LOCATION=global"
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FIREBASE_OAUTH_HANDOFF_ENABLED=1"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}LLM_GEMINI_MODEL=gemini-3.1-pro-preview"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}LLM_GEMINI_LOCATION=global"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}FIREBASE_OAUTH_HANDOFF_ENABLED=1"
 fi
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MCP_PUBLIC_URL=${MCP_PUBLIC_URL}"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LICENSE_CONSENT=agreed"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}MCP_PUBLIC_URL=${MCP_PUBLIC_URL}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}LICENSE_CONSENT=agreed"
 # realtime 고유값(backend/api와 다름 — cloudbuild.yaml deploy-realtime 스텝과 동일 컨벤션):
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},PG_LISTEN_ENABLED=false"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}PG_LISTEN_ENABLED=false"
 # story #2135(2026-07-23, #2123 실측 적발): 키 이름이 여태 `REDIS_CONSUME_ENABLED`였다 —
 # Settings 필드(`event_broker_redis_consume_enabled`)와 안 맞아 pydantic-settings가 조용히
 # 무시했다(GCE는 필드 기본값이 우연히 True라 결과만 의도와 같았음). 실제 필드가 요구하는
 # 키로 정정.
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},EVENT_BROKER_REDIS_CONSUME_ENABLED=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},EVENT_BROKER_REDIS_DISPATCH_ENABLED=true"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}EVENT_BROKER_REDIS_CONSUME_ENABLED=true"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}EVENT_BROKER_REDIS_DISPATCH_ENABLED=true"
 # ⛔story #2142(2026-07-23, 오르테가 리뷰 적발 — 실행 前 발견) 정정: REDIS_URL이 여태 env
 # 분기 없이 PLAIN_ENV_SPEC(평문·인스턴스 메타데이터에 그대로 박힘)에 얹혀 있었다. 두 가지가
 # 동시에 걸리는 자리였다 — ①prod Redis는 AUTH 활성이라 URL이 비밀번호를 품는데, 그게 평문
@@ -301,7 +309,7 @@ else
     # dev: Memorystore가 AUTH 없는 plain 인스턴스 — VPC 내부 IP(10.164.120.243)라 평문이어도
     # 시크릿이 아니다. env로 override 가능하게 기존 그대로 유지(재실측 없이 하드코딩 안 함).
     REDIS_URL_VALUE="${REDIS_URL:-redis://10.164.120.243:6379}"
-    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},REDIS_URL=${REDIS_URL_VALUE}"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}REDIS_URL=${REDIS_URL_VALUE}"
     SECRET_PAIRS_REDIS=""
 fi
 # DB_POOL_SIZE/DB_MAX_OVERFLOW는 위에서 이미 3/1로 명시(Cloud Run realtime과 동일).
@@ -417,6 +425,20 @@ trap 'rm -f "${STARTUP_SCRIPT_FILE}"' EXIT
     echo "_AR_TOKEN=\$(docker run --rm gcr.io/google.com/cloudsdktool/cloud-sdk:slim gcloud auth print-access-token)"
     echo "echo \"\${_AR_TOKEN}\" | docker login -u oauth2accesstoken --password-stdin https://${_AR_HOST}"
     echo ''
+    # ⛔story #2142(2026-07-23, 오르테가 지적 — 자기 지시가 만든 결함 자인) — 이전엔 여기서
+    # PLAIN_ENV_SPEC을 `IFS=',' read -ra`로 무조건 콤마 분해해 개별 `-e KEY=VALUE \` 인자로
+    # 만들었다. 값 자체에 콤마가 있으면(H1_MERGE_GATE_ORG_ALLOWLIST의 2-org 리스트 등) 그
+    # 값이 조각나 VM에는 절반만 실리는 조용한 절단이 났었다 — 위 _PLAIN_SEP(0x1F join)로
+    # 그 클래스 자체는 이미 막았지만, 여기서도 `docker --env-file`로 전환해 ⭐구분자 싸움을
+    # 아예 끝낸다(오르테가 권고) — 부수 이득으로 PLAIN 값들이 더 이상 프로세스 인자
+    # (`docker run -e ...`, `ps` 등으로 노출 가능)에 안 실리고 파일로만 전달된다.
+    echo 'cat > /tmp/realtime-gateway-plain.env <<'"'"'PLAIN_ENV_EOF'"'"''
+    IFS="${_PLAIN_SEP}" read -ra _plain_pairs <<< "${PLAIN_ENV_SPEC}"
+    for kv in "${_plain_pairs[@]}"; do
+        printf '%s\n' "${kv}"
+    done
+    echo 'PLAIN_ENV_EOF'
+    echo ''
     echo 'docker rm -f realtime-gateway 2>/dev/null || true'
     echo 'docker run -d --name realtime-gateway --restart=always \'
     echo '  -p 8000:8000 \'
@@ -425,11 +447,7 @@ trap 'rm -f "${STARTUP_SCRIPT_FILE}"' EXIT
         env_name="${pair##*:}"
         echo "  -e ${env_name}=\"\${${env_name}}\" \\"
     done
-    # PLAIN_ENV_SPEC은 콤마 구분 KEY=VAL 목록 — docker run -e 인자로 한 줄씩 분해.
-    IFS=',' read -ra _plain_pairs <<< "${PLAIN_ENV_SPEC}"
-    for kv in "${_plain_pairs[@]}"; do
-        echo "  -e ${kv} \\"
-    done
+    echo '  --env-file=/tmp/realtime-gateway-plain.env \'
     echo "  ${IMAGE} \\"
     echo '  uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30'
     echo ''
@@ -457,6 +475,14 @@ log "Machine type: ${MACHINE_TYPE}, target size: ${TARGET_SIZE}"
 log "Cloud SQL: ${SQL_INSTANCE_CONN}"
 
 if [ "${DRY_RUN}" = "1" ]; then
+    # ⛔story #2142(2026-07-23, 오르테가 지적) — 이전 DRY_RUN 출력은 PLAIN_ENV_SPEC "요약
+    # 문자열"만 보여줬다. 그 요약은 join 구분자가 무엇이든 항상 올바르게 보였을 것이라
+    # (부분 문자열 검사만 하니) H1_MERGE_GATE_ORG_ALLOWLIST의 콤마-절단 결함을 회귀 테스트가
+    # 전혀 못 잡았던 근본 원인이다 — 검증 대상(요약 문자열)과 실제 배포되는 것(생성된
+    # startup-script의 env-file)이 달랐다. 실제 생성된 env-file 내용을 그대로 노출해
+    # 테스트가 "진짜 배포될 것"을 검증하게 한다(base64 — 줄바꿈을 한 줄 KEY=VALUE 출력
+    # 포맷 안에 안전하게 실어야 해서).
+    _GENERATED_PLAIN_ENV_FILE_B64="$(sed -n '/^cat > \/tmp\/realtime-gateway-plain\.env/,/^PLAIN_ENV_EOF$/p' "${STARTUP_SCRIPT_FILE}" | sed '1d;$d' | base64 | tr -d '\n')"
     cat <<EOF
 ENV=${ENV}
 MIG_NAME=${MIG_NAME}
@@ -469,6 +495,7 @@ SQL_INSTANCE_CONN=${SQL_INSTANCE_CONN}
 RUNTIME_SA=${RUNTIME_SA}
 PLAIN_ENV_SPEC=${PLAIN_ENV_SPEC}
 SECRET_PAIRS=${SECRET_PAIRS}
+GENERATED_PLAIN_ENV_FILE_B64=${_GENERATED_PLAIN_ENV_FILE_B64}
 EOF
     exit 0
 fi
