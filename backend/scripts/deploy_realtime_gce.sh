@@ -524,54 +524,118 @@ fi
 
 if gcloud compute instance-groups managed describe "${MIG_NAME}" \
         --region="${GCP_REGION}" --project="${GCP_PROJECT}" >/dev/null 2>&1; then
-    # story #2110(S1): 기존 2-zone MIG를 3-zone으로 확장·승계/정리.
+    # story #2110(S1) 이력: 그 당시 2-zone→3-zone 확장은 **zone 구성 자체를 바꾸는** 작업이었고,
+    # regional MIG의 zone 구성은 불변(immutable — gcloud `update`엔 --zones 플래그가 없고,
+    # Compute API patch로 distributionPolicy.zones를 넣으면 400 "Zone configuration is
+    # immutable"로 거절됨, 2026-07-22 실측)이라 그때는 delete+recreate가 유일 경로였다.
     #
-    # ⚠️핵심 실측(2026-07-22): **regional MIG의 zone 구성은 불변(immutable)**. gcloud `update`엔
-    # --zones 플래그 자체가 없고(GA·beta 모두), Compute API `instanceGroupManagers.patch`로
-    # distributionPolicy.zones를 넣으면 GCP가 400 "Zone configuration is immutable"로 거절한다
-    # (기존 zone 재지정도, 신규 zone 추가도 불가). ⇒ 2→3-zone은 **재생성이 유일 경로**.
-    # (오르테가군 in-place 승인은 zone 가변 전제였고, 이 실측이 그 전제를 바로잡아 재생성으로 확定.)
+    # ⛔story #2142(2026-07-23, 오르테가 지적) — 그 delete+recreate 코드가 "MIG가 존재하기만
+    # 하면" 무조건 타는 조건이었다. zone 구성은 이제(3-zone) 안정됐는데도 **매 재배포마다**
+    # 이 경로를 타면서 MIG 객체 자체가 삭제→재생성돼, backend-service 부착(멤버십)과
+    # named-ports(MIG 자체의 속성 — 인스턴스 템플릿엔 없음)가 매번 함께 사라졌다. 헬스체크는
+    # 포트를 직접(8000) 찌르므로 이 단절과 무관하게 HEALTHY로 보여 — "3대 다 HEALTHY"만
+    # 보고 트래픽을 넘겼으면 사용자만 502를 봤을 상태였다(파일 상단 §26 "rolling-update로
+    # 갱신"이라는 원래 의도 자체가 #2110에서 깨진 것 — 아래가 그 의도를 되살린 것).
     #
-    # 재생성 절차(파괴적이나 S1 범위 "기존 2-zone 승계/정리"에 포함·0트래픽 dev):
-    #   ① backend-service(S2)에서 detach — GCP는 backend로 물린 MIG 삭제를 막으므로 필수.
-    #      backend-service **설정 자체는 미변경**, MIG 멤버십만 제거(최소범위). 재attach는
-    #      provision_realtime_gclb.sh(멱등)가 담당.
-    #   ② 2-zone MIG 삭제(기존 노드 전량 제거 → "2-zone 잔재 0" 확실).
-    #   ③ 아래 create 경로로 3-zone MIG 신규 생성.
-    log "MIG ${MIG_NAME} exists but regional zones are immutable — recreating as 3-zone"
+    # 근본수정: zone 구성이 이미 3개 zone으로 안정된 지금, **기본 경로는 항상 rolling-update**
+    # (MIG 객체 보존 → backend-service 부착·named-ports 그대로 유지)다. delete+recreate는
+    # 미래에 진짜 zone 구성을 다시 바꿔야 하는 드문 경우에만, `FORCE_MIG_RECREATE=1`로 명시
+    # opt-in해야 탄다(암묵적 zone-diff 실행시점 비교보다 명시 플래그가 더 안전 — zone 문자열
+    # 포맷 파싱 실수로 조용히 잘못된 경로를 타는 것을 원천 차단).
+    if [ "${FORCE_MIG_RECREATE:-0}" = "1" ]; then
+        log "FORCE_MIG_RECREATE=1 — recreating ${MIG_NAME} (zone 구성 자체를 바꿔야 하는 드문 경우 전용)"
 
-    # ① detach: 이 MIG를 backend로 참조하는 backend-service가 있으면 remove-backend.
-    #    (없거나 이미 detach면 조용히 넘어간다 — 멱등.)
-    if gcloud compute backend-services describe "${GCLB_BACKEND_SERVICE}" --global --project="${GCP_PROJECT}" \
-            --format='value(backends[].group)' 2>/dev/null | grep -q "${MIG_NAME}"; then
-        log "Detaching ${MIG_NAME} from backend-service ${GCLB_BACKEND_SERVICE} (S2 멤버십만 제거·config 미변경)"
-        gcloud compute backend-services remove-backend "${GCLB_BACKEND_SERVICE}" \
+        # ① detach: 이 MIG를 backend로 참조하는 backend-service가 있으면 remove-backend.
+        #    (없거나 이미 detach면 조용히 넘어간다 — 멱등.)
+        if gcloud compute backend-services describe "${GCLB_BACKEND_SERVICE}" --global --project="${GCP_PROJECT}" \
+                --format='value(backends[].group)' 2>/dev/null | grep -q "${MIG_NAME}"; then
+            log "Detaching ${MIG_NAME} from backend-service ${GCLB_BACKEND_SERVICE} (S2 멤버십만 제거·config 미변경)"
+            gcloud compute backend-services remove-backend "${GCLB_BACKEND_SERVICE}" \
+                --project="${GCP_PROJECT}" \
+                --global \
+                --instance-group="${MIG_NAME}" \
+                --instance-group-region="${GCP_REGION}"
+        else
+            log "No backend-service attachment found for ${MIG_NAME} — skip detach"
+        fi
+
+        # ② delete 기존 MIG (동기 대기 — 삭제 완료 후 create가 이름 충돌 없이 진행).
+        log "Deleting ${MIG_NAME} (기존 노드 전량 제거 — FORCE_MIG_RECREATE)"
+        gcloud compute instance-groups managed delete "${MIG_NAME}" \
+            --region="${GCP_REGION}" \
             --project="${GCP_PROJECT}" \
-            --global \
-            --instance-group="${MIG_NAME}" \
-            --instance-group-region="${GCP_REGION}"
-    else
-        log "No backend-service attachment found for ${MIG_NAME} — skip detach"
-    fi
+            --quiet
 
-    # ② delete 2-zone MIG (동기 대기 — 삭제 완료 후 create가 이름 충돌 없이 진행).
-    log "Deleting 2-zone MIG ${MIG_NAME} (기존 노드 전량 제거)"
-    gcloud compute instance-groups managed delete "${MIG_NAME}" \
-        --region="${GCP_REGION}" \
+        # ③ create — 신규 MIG(재생성 경로).
+        log "Creating MIG ${MIG_NAME} (size ${TARGET_SIZE}, zones ${ZONES}, no autoscaling)"
+        gcloud compute instance-groups managed create "${MIG_NAME}" \
+            --project="${GCP_PROJECT}" \
+            --region="${GCP_REGION}" \
+            --template="${TEMPLATE_NAME}" \
+            --size="${TARGET_SIZE}" \
+            --zones="${ZONES}"
+    else
+        # 기본 경로 — MIG 객체를 그대로 두고 인스턴스 템플릿만 교체(rolling-update).
+        # backend-service 부착·named-ports는 MIG 객체 자체의 속성이라 이 경로에서 전혀 안
+        # 건드려진다 → 재배포가 트래픽을 끊지 않는다(provision_realtime_gclb.sh doc이 명시한
+        # "SSE 급단절 방지" 목표와 동일 축). --max-unavailable=1로 순차 교체(2-3대 중 1대씩).
+        log "Rolling-updating ${MIG_NAME} to template ${TEMPLATE_NAME} (MIG 객체 보존 — backend-service 부착·named-ports 무영향)"
+        gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
+            --project="${GCP_PROJECT}" \
+            --region="${GCP_REGION}" \
+            --version=template="${TEMPLATE_NAME}" \
+            --max-unavailable=1 \
+            --max-surge=0
+    fi
+else
+    log "Creating MIG ${MIG_NAME} (size ${TARGET_SIZE}, zones ${ZONES}, no autoscaling)"
+    gcloud compute instance-groups managed create "${MIG_NAME}" \
         --project="${GCP_PROJECT}" \
-        --quiet
+        --region="${GCP_REGION}" \
+        --template="${TEMPLATE_NAME}" \
+        --size="${TARGET_SIZE}" \
+        --zones="${ZONES}"
 fi
 
-# ③ create — 신규 3-zone MIG(재생성 경로 및 최초 생성 경로 공용).
-log "Creating 3-zone MIG ${MIG_NAME} (size ${TARGET_SIZE}, zones ${ZONES}, no autoscaling)"
-gcloud compute instance-groups managed create "${MIG_NAME}" \
-    --project="${GCP_PROJECT}" \
-    --region="${GCP_REGION}" \
-    --template="${TEMPLATE_NAME}" \
-    --size="${TARGET_SIZE}" \
-    --zones="${ZONES}"
+# story #2142(2026-07-23, 오르테가 적발) 근본수정 — named-ports는 MIG 객체 자체의 속성(인스턴스
+# 템플릿에는 없음)이라 신규 생성/강제재생성 경로에서는 항상 비어 있는 채로 시작한다. 그 상태로
+# 두면 backend-service는 port-name="http"을 찾다 못 찾아 **기본 포트 80**으로 폴백하는데 앱은
+# 8000에서 듣는다 — 502(헬스체크는 8000을 직접 찌르므로 이 단절과 무관하게 HEALTHY로 보이는
+# 게 제일 고약한 부분). set-named-ports는 멱등(이미 같은 값이면 no-op에 가까움)이라 매 배포마다
+# 무조건 실행 — provision_realtime_gclb.sh 스텝④와 동일 명령·동일 named-port 값 유지(SSOT 중복
+# 아님 — 그 스크립트가 "1회성 프로비저닝"이라 재배포마다 자동으로 다시 안 돌기 때문에 여기서도
+# 방어적으로 보장한다. 사람이 그 스크립트 재실행을 잊어도 이 스크립트 하나로 무결하게 닫힘).
+NAMED_PORT="http:8000"
+log "Ensuring named port ${NAMED_PORT} on ${MIG_NAME} (MIG 객체 속성 — 신규/재생성 시 비어있음)"
+gcloud compute instance-groups managed set-named-ports "${MIG_NAME}" \
+    --project="${GCP_PROJECT}" --region="${GCP_REGION}" --named-ports="${NAMED_PORT}"
+
+# story #2142 근본수정 — backend-service 부착도 같은 이유로 이 스크립트가 방어적으로 보장한다
+# (provision_realtime_gclb.sh 스텝④와 동일 멱등 로직 재사용). 이미 붙어 있으면 조용히 스킵.
+if ! gcloud compute backend-services describe "${GCLB_BACKEND_SERVICE}" --global --project="${GCP_PROJECT}" \
+        --format='value(backends[].group)' 2>/dev/null | grep -q "${MIG_NAME}"; then
+    log "Attaching ${MIG_NAME} to backend-service ${GCLB_BACKEND_SERVICE}"
+    gcloud compute backend-services add-backend "${GCLB_BACKEND_SERVICE}" \
+        --project="${GCP_PROJECT}" \
+        --global \
+        --instance-group="${MIG_NAME}" \
+        --instance-group-region="${GCP_REGION}" \
+        --balancing-mode=UTILIZATION \
+        --max-utilization=0.8
+else
+    log "${MIG_NAME} already attached to backend-service ${GCLB_BACKEND_SERVICE} — skip"
+fi
+
+# story #2142 근본수정 — "조용히 넘어가는 게 제일 나쁜 것"(오르테가). 위 attach 스텝이 어떤
+# gcloud 이유로든 조용히 실패/no-op했다면, 트래픽을 전환하기 전에 반드시 여기서 크게 실패한다.
+if ! gcloud compute backend-services describe "${GCLB_BACKEND_SERVICE}" --global --project="${GCP_PROJECT}" \
+        --format='value(backends[].group)' 2>/dev/null | grep -q "${MIG_NAME}"; then
+    log "⛔ FATAL: ${MIG_NAME} is NOT attached to backend-service ${GCLB_BACKEND_SERVICE} after deploy."
+    log "   트래픽을 이 상태로 전환하면 프로덕션이 조용히 502가 됩니다 — 전환 전 반드시 원인 확認."
+    exit 1
+fi
 
 log "=== Deployment submitted ==="
 log "Instance template: ${TEMPLATE_NAME}"
 log "MIG: ${MIG_NAME} (region ${GCP_REGION})"
-log "Health check target: /api/v2/ping (DB 미조회, GCLB 스택은 provision_realtime_gclb.sh 참조)"
+log "Health check target: /api/v2/ping (DB 미조회, GCLB 나머지 스택은 provision_realtime_gclb.sh 참조)"
