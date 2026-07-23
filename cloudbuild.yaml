@@ -284,12 +284,16 @@ steps:
         # dev는 AUTH 없는 plain Memorystore라 시크릿 바인딩 자체가 없으므로 기존처럼 plain으로 넘긴다.
         # prod는 여기서 REDIS_URL을 절대 안 넘김 — 시크릿 바인딩(별도 1회 gcloud, PO lane)이
         # --set-secrets 없는 이 스텝에 preserve된다(DATABASE_URL_PROD 등 기존 15개와 동일 컨벤션).
-        # ⛔story #2421 배포 실패 핫픽스(2026-07-23, 오르테가군 진단) — Cloud Build는 bash
-        # 스텝 안이라도 args 문자열 전체를 자기 substitution 파서로 먼저 훑는다. `ENV_VARS`는
-        # 유효한 built-in/사용자 substitution이 아니라서 `${ENV_VARS}` 참조가 build submit
-        # 자체를 INVALID_ARGUMENT로 거부시켰다(부분 배포 없이 안전하게 막힘). 셸 변수
-        # 참조는 `$$`로 이스케이프해야 Cloud Build가 문자 그대로 bash에 넘긴다 — 아래
-        # `$${ENV_VARS}`가 그것(진짜 substitution인 `${_DEPLOY_ENV}` 등은 단일 `$` 그대로 유지).
+        # ⛔story #2423 배포 실패 핫픽스(2026-07-23, 오르테가군 진단, 2차) — Cloud Build는 bash
+        # 스텝 안이라도 args 문자열 전체(주석 포함 — bash에겐 주석이지만 Cloud Build 파서는
+        # 주석/코드를 구분하지 않고 그냥 문자열로 훑는다)를 자기 substitution 파서로 먼저
+        # 훑는다. 셸 변수 ENV_VARS는 유효한 built-in/사용자 substitution이 아니라서, 달러중괄호
+        # 표기로 참조하면(이 문장처럼 예시로 적어도 마찬가지) build submit 자체가
+        # INVALID_ARGUMENT로 거부된다(부분 배포 없이 안전하게 막힘 — 1차 사고와 동일 에러,
+        # 이번엔 그 사고를 설명하던 주석 문장 자체가 같은 표기를 그대로 써서 재현했다). 이후
+        # 이 파일 어디서도 ENV_VARS를 달러중괄호로 예시조차 적지 않는다 — 셸 변수 실참조는
+        # 아래처럼 달러 두 개로 이스케이프한 표기만 쓴다(진짜 substitution인 DEPLOY_ENV 등은
+        # 달러 한 개 표기 그대로 유지 — 그건 Cloud Build가 실제로 채워야 하는 값이라 안전하다).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},REDIS_URL=${_REDIS_URL}"
         fi
