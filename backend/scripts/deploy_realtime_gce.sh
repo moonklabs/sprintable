@@ -23,7 +23,8 @@
 #   DRY_RUN       1이면 gcloud 호출 없이 resolved config만 stdout 출력(검증용)
 #
 # 동작: 새 인스턴스 템플릿 버전(커밋 SHA로 명명) 생성 → MIG가 없으면 신규 생성,
-#       있으면 rolling-update(--max-unavailable=1, 2노드 중 1개씩 순차 교체)로 갱신.
+#       있으면 rolling-update(--max-unavailable=0 --max-surge=1, 새 인스턴스 먼저 띄우고
+#       헬스체크 통과 後 옮기는 무중단 갱신 — SSE 장수명 연결 보존이 목적, story #2445 후속)로 갱신.
 #       기존 sprintable-realtime-dev(Cloud Run)는 건드리지 않는다 — 병행 배포, 트래픽
 #       0%부터 검증 후 GCLB로 전환(롤백 경로 보존, ⓔ).
 #
@@ -578,14 +579,27 @@ if gcloud compute instance-groups managed describe "${MIG_NAME}" \
         # 기본 경로 — MIG 객체를 그대로 두고 인스턴스 템플릿만 교체(rolling-update).
         # backend-service 부착·named-ports는 MIG 객체 자체의 속성이라 이 경로에서 전혀 안
         # 건드려진다 → 재배포가 트래픽을 끊지 않는다(provision_realtime_gclb.sh doc이 명시한
-        # "SSE 급단절 방지" 목표와 동일 축). --max-unavailable=1로 순차 교체(2-3대 중 1대씩).
+        # "SSE 급단절 방지" 목표와 동일 축).
+        #
+        # ⛔story #2445 후속(2026-07-23, 오르테가 실 재배포 실측 — main 체크아웃 오실행 자인
+        # 後 develop 재실행으로 재현) — `--max-unavailable=1`은 **regional MIG에선 GCP 자체가
+        # 거부**한다: "Fixed updatePolicy.maxUnavailable for regional managed instance group
+        # has to be either 0 or at least equal to the number of zones"(3). 실패 자체는
+        # 안전했다(아무 것도 건드리기 전에 멈춤 — backends/named-ports/https 200 전부 무영향,
+        # fail-fast) — 그래도 실행 없이는 코드리뷰/CI로 못 잡는 gcloud API 제약이었다.
+        #
+        # 수정: `--max-unavailable=0`(항상 유효한 값) + `--max-surge=1`. 이 스택의 존재
+        # 이유가 SSE 장수명 연결(설계 doc)이라, 기존 노드를 먼저 빼는 대신 **새 인스턴스를
+        # 먼저 띄우고** 헬스체크 통과 後 옮기는 쪽을 우선한다(오르테가 명시 선호). surge=1로
+        # 제한해 3대 e2-small이 일시 4대까지만 늘어나게(전체 3대 동시 서지=6대는 비용·쿼터
+        # 여유가 불확실해 배제).
         log "Rolling-updating ${MIG_NAME} to template ${TEMPLATE_NAME} (MIG 객체 보존 — backend-service 부착·named-ports 무영향)"
         gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
             --project="${GCP_PROJECT}" \
             --region="${GCP_REGION}" \
             --version=template="${TEMPLATE_NAME}" \
-            --max-unavailable=1 \
-            --max-surge=0
+            --max-unavailable=0 \
+            --max-surge=1
     fi
 else
     log "Creating MIG ${MIG_NAME} (size ${TARGET_SIZE}, zones ${ZONES}, no autoscaling)"
