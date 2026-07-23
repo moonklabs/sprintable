@@ -64,6 +64,83 @@ def test_deploy_gce_mcp_public_url_env_specific():
     assert "MCP_PUBLIC_URL=https://mcp.sprintable.ai/mcp" in prod["PLAIN_ENV_SPEC"]
 
 
+def test_deploy_gce_github_app_identity_matches_live_cloud_run_binding():
+    """story #2142(오르테가 DRY_RUN 검수 적발, 2026-07-23) — GITHUB_APP_ID/CLIENT_ID/SLUG가
+    env 분기 밖 리터럴(dev App 값)로 박혀 있어, prod 플랜이 dev App의 ID/CLIENT_ID와
+    prod 전용 시크릿(github-app-*-prod)을 섞은 채 배포될 뻔했다(둘 다 값의 유무와 무관하게
+    같은 App 소속이어야 인증이 성립 — 섞이면 어느 쪽으로도 인증 불가). backend-prod
+    gcloud describe 라이브 실측으로 prod 분기를 교정 — dev는 무회귀."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "GITHUB_APP_ID=4120278" in dev["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_CLIENT_ID=Iv23liRkrmyqoCZIlrgh" in dev["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_SLUG=sprintable-dev" in dev["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_ID=4244849" in prod["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_CLIENT_ID=Iv23liGdo7u9vkHjRKS0" in prod["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_SLUG=sprintable-prod" in prod["PLAIN_ENV_SPEC"]
+    # 섞임 재발 차단 — prod 플랜에 dev App 식별자가 전혀 없어야 한다.
+    assert "4120278" not in prod["PLAIN_ENV_SPEC"]
+    assert "Iv23liRkrmyqoCZIlrgh" not in prod["PLAIN_ENV_SPEC"]
+    assert "sprintable-dev" not in prod["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_dev_only_gate_features_absent_from_prod():
+    """story #2142(오르테가 DRY_RUN 검수 3번째 적발, 2026-07-23) — 같은 뿌리
+    ("dev 라이브 관측 사실을 env 분기 없이 prod에 적용"), 셋 중 가장 큰 건. L2_TRIGGER_*/
+    GATE_CONFIG_ENFORCE_*/DECISION_GATE_LINE_*는 backend-prod에 키 자체가 없다(그 기능이
+    prod에서 한 번도 켜진 적 없음, describe 대조 확認) — env 분기 밖 리터럴이라 prod 플랜에
+    dev 전용 org 허용목록을 단 채 그대로 켜질 뻔했다. 이 GCE 노드가 backend와 동일 이미지라
+    플래그가 켜지면 실제로 그 lifespan 워커가 뜬다(추론 아니라 미러링으로 처리 — 오르테가
+    판정). prod는 이 3그룹을 아예 안 붙인다."""
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    for key in ("L2_TRIGGER_ENABLED", "L2_TRIGGER_ADVISORY_LOCK", "L2_TRIGGER_ORG_ALLOWLIST",
+                "L2_TRIGGER_MAX_WAKES_PER_ORG_PER_HOUR", "GATE_CONFIG_ENFORCE_ENABLED",
+                "GATE_CONFIG_ENFORCE_ORG_ALLOWLIST", "DECISION_GATE_LINE_ENABLED",
+                "DECISION_GATE_LINE_ORG_ALLOWLIST", "DECISION_GATE_LINE_MODE"):
+        assert key not in prod["PLAIN_ENV_SPEC"], f"{key}가 prod 플랜에 실리면 안 됨"
+
+
+def test_deploy_gce_dev_gate_features_unchanged():
+    """dev는 이 4그룹(L2_TRIGGER/H1_MERGE_GATE/GATE_CONFIG_ENFORCE/DECISION_GATE_LINE) 전부
+    현행 그대로 — 무회귀."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    assert "L2_TRIGGER_ENABLED=true" in dev["PLAIN_ENV_SPEC"]
+    assert "L2_TRIGGER_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091" in dev["PLAIN_ENV_SPEC"]
+    assert "GATE_CONFIG_ENFORCE_ENABLED=true" in dev["PLAIN_ENV_SPEC"]
+    assert "DECISION_GATE_LINE_ENABLED=true" in dev["PLAIN_ENV_SPEC"]
+    assert "H1_MERGE_GATE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091" in dev["PLAIN_ENV_SPEC"]
+    # dev의 H1 허용목록은 단일 org — prod의 2-org 값이 섞여 들어가면 안 됨.
+    assert "588186bf-1558-48a3-b3a0-fe3759a925fc" not in dev["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_prod_h1_merge_gate_matches_live_two_org_allowlist():
+    """story #2142(오르테가 gcloud 실측, 2026-07-23) — H1_MERGE_GATE는 backend-prod에도
+    실재(ENABLED/ADVISORY=true/true, dev와 동일)하지만 허용목록은 dev 단일 org가 아니라
+    prod의 실제 2-org 콤마리스트다(describe 대조 확認). prod 플랜이 dev 값을 쓰면 실제
+    prod 허용 조직 중 하나(588186bf-...)가 빠지는 것과 같아 라이브과 어긋난다."""
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "H1_MERGE_GATE_ENABLED=true" in prod["PLAIN_ENV_SPEC"]
+    assert "H1_MERGE_GATE_ADVISORY=true" in prod["PLAIN_ENV_SPEC"]
+    assert (
+        "H1_MERGE_GATE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091,"
+        "588186bf-1558-48a3-b3a0-fe3759a925fc"
+    ) in prod["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_db_self_name_binding_dev_only():
+    """story #2142(오르테가 DRY_RUN 검수 적발, 2026-07-23) — GitHub App 건과 동일 클래스
+    ("dev 라이브에서 관측한 사실을 env 분기 없이 prod에 적용"). ${DB_SECRET_NAME}:
+    ${DB_SECRET_NAME} 자기이름 바인딩이 env 분기 밖이라 prod 플랜에도 DATABASE_URL_PROD:
+    DATABASE_URL_PROD로 그대로 실렸다 — 라이브 대조 결과 이 계약은 backend-dev에만
+    실재(DATABASE_URL_PROD 키는 backend-prod에 아예 없고 코드도 안 읽음). prod에 DB 접속
+    문자열(비밀번호 포함)을 이름만 추가해 한 벌 더 싣는 불필요한 자격증명 표면 확장 — dev만
+    유지, prod는 붙이지 않는다."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "DATABASE_URL_DEV:DATABASE_URL_DEV" in dev["SECRET_PAIRS"]
+    assert "DATABASE_URL_PROD:DATABASE_URL_PROD" not in prod["SECRET_PAIRS"]
+
+
 def test_deploy_gce_prod_secret_pairs_no_dev_leak():
     """story #2142 회귀 방지 — DB_SECRET_NAME 미사용으로 prod 플랜에 dev 시크릿이
     하드코딩 리터럴로 섞여 들어가던 결함(발견 즉시 수정)의 재발 차단.

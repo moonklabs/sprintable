@@ -63,6 +63,25 @@ case "${ENV}" in
         CRON_SECRET_NAME="cron-secret"
         GITHUB_SECRET_SUFFIX="DEV"
         GITHUB_APP_SECRET_ENV="dev"  # story #2142 발견: github-app-*-dev Secret Manager ID의 소문자 접미(위 GITHUB_SECRET_SUFFIX와 별개 컨벤션 — 이 시크릿 3종만 하이픈+소문자)
+        # story #2142(2026-07-23, 오르테가 DRY_RUN 검수 적발) — GITHUB_APP_ID/CLIENT_ID/SLUG가
+        # 여태 PLAIN_ENV_SPEC에 env 분기 밖 리터럴로 박혀 있었다(DATABASE_URL_DEV·MCP_PUBLIC_URL과
+        # 같은 클래스). dev는 라이브 실측 그대로 유지.
+        GITHUB_APP_ID="4120278"
+        GITHUB_APP_CLIENT_ID="Iv23liRkrmyqoCZIlrgh"
+        GITHUB_APP_SLUG="sprintable-dev"
+        # story #2142(2026-07-23, 오르테가 DRY_RUN 검수 3번째 적발, 같은 클래스) — L2_TRIGGER_*·
+        # GATE_CONFIG_ENFORCE_*·DECISION_GATE_LINE_*는 backend-dev에만 실재하는 기능(라이브
+        # 대조: backend-prod엔 이 키들 자체가 없음 = 그 기능이 prod에서 한 번도 켜진 적 없음).
+        # 이 GCE 노드는 backend와 동일 이미지를 돌리므로 플래그가 켜지면 그 lifespan 워커가
+        # 그대로 뜬다 — "SSE 전용이라 안 탈 것"이라는 추론에 기대지 않고 backend-prod를
+        # 그대로 미러링한다(오르테가 판정: 코드 경로를 추론해 안전을 주장하는 대신 prod와
+        # 같게 만드는 것이 규칙). dev는 이 3그룹을 그대로 킨다.
+        L2_TRIGGER_ENABLED_LINE=true
+        GATE_CONFIG_ENFORCE_ENABLED_LINE=true
+        DECISION_GATE_LINE_ENABLED_LINE=true
+        # H1_MERGE_GATE는 backend-prod에도 실재하지만 허용목록 값이 dev(단일 org)와 다르다
+        # (prod: 2-org 콤마리스트, describe 대조 확認) — ENABLED/ADVISORY는 dev·prod 동일(true).
+        H1_MERGE_GATE_ORG_ALLOWLIST_VALUE="54bac162-5c0d-49fa-8e49-85977063a091"
         APP_URL="https://dev-app.sprintable.ai"
         # story #2142(오르테가 라이브 실측 2026-07-23): sprintable-backend-dev/-prod MCP_PUBLIC_URL
         # 라이브 값 그대로 — 이것도 DATABASE_URL_DEV와 같은 클래스(env 분기 밖 리터럴)였던 걸 정정.
@@ -104,6 +123,28 @@ case "${ENV}" in
         # backend-prod와 갈라진다 — 그 별건 스토리가 먼저 판단을 내리기 전엔 건드리지 말 것.
         GITHUB_SECRET_SUFFIX="DEV"
         GITHUB_APP_SECRET_ENV="prod"
+        # ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 적발 — "repo에 없다"≠"존재하지 않는다",
+        # 값은 레포가 아니라 Cloud Run env에 살아 있었다) — GITHUB_APP_ID/CLIENT_ID/SLUG가
+        # PLAIN_ENV_SPEC에 dev App 리터럴(4120278/Iv23liRkrmyqoCZIlrgh/sprintable-dev)로 박혀
+        # 있어, 이 스크립트가 prod용 시크릿(github-app-*-prod, GITHUB_APP_SECRET_ENV=prod)과
+        # dev App의 ID/CLIENT_ID를 섞은 채 배포할 뻔했다 — 어느 쪽 App으로도 인증이 안 되는
+        # 조합. backend-prod 라이브 실측(gcloud describe)으로 교정.
+        GITHUB_APP_ID="4244849"
+        GITHUB_APP_CLIENT_ID="Iv23liGdo7u9vkHjRKS0"
+        GITHUB_APP_SLUG="sprintable-prod"
+        # ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 3번째 적발) — L2_TRIGGER_ENABLED=true·
+        # GATE_CONFIG_ENFORCE_ENABLED=true·DECISION_GATE_LINE_ENABLED=true가 env 분기 밖
+        # 리터럴로 박혀 있어, prod가 한 번도 가져본 적 없는 기능 3종이 dev의 org 허용목록을
+        # 달고 그대로 켜질 뻔했다(backend-prod에 이 키들 자체가 없음, describe 대조 확認).
+        # 이 GCE 노드가 backend와 동일 이미지라 플래그가 켜지면 lifespan 워커가 실제로 뜬다 —
+        # "SSE 전용 서비스니 그 코드 경로를 안 탈 것"이라는 추론에 기대지 않는다(오르테가
+        # 판정 — 그 추론이 틀리는 날 prod에서 드러난다). prod는 이 3그룹을 아예 붙이지 않는다.
+        L2_TRIGGER_ENABLED_LINE=false
+        GATE_CONFIG_ENFORCE_ENABLED_LINE=false
+        DECISION_GATE_LINE_ENABLED_LINE=false
+        # H1_MERGE_GATE_ENABLED/_ADVISORY는 backend-prod에도 true/true로 실재(dev와 동일) —
+        # 다만 허용목록은 dev 단일 org가 아니라 prod의 실제 2-org 값을 그대로 옮긴다.
+        H1_MERGE_GATE_ORG_ALLOWLIST_VALUE="54bac162-5c0d-49fa-8e49-85977063a091,588186bf-1558-48a3-b3a0-fe3759a925fc"
         APP_URL="https://app.sprintable.ai"
         # story #2142(오르테가 라이브 실측 2026-07-23, gcloud env 직접 대조): 추측 아니라
         # sprintable-backend-prod의 실측 라이브 값.
@@ -139,26 +180,40 @@ PLAIN_ENV_SPEC="EVENTBUS_ENABLED=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},APP_URL=${APP_URL}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MEMBER_SSOT_RESOLVER_SHADOW=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MEMBER_SSOT_APIKEY_CUT=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ENABLED=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ADVISORY_LOCK=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_MAX_WAKES_PER_ORG_PER_HOUR=5"
+# ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 3번째 적발 — 같은 뿌리: dev 라이브에서
+# 관측한 사실을 env 분기 없이 prod에 적용) — L2_TRIGGER_*/GATE_CONFIG_ENFORCE_*/
+# DECISION_GATE_LINE_*는 backend-prod에 키 자체가 없다(그 기능이 prod에서 한 번도 켜진 적
+# 없음, describe 대조 확認). 이 GCE 노드는 backend와 동일 이미지라 플래그가 켜지면 그
+# lifespan 워커가 그대로 뜬다 — "SSE 전용이라 안 탈 것"이라는 추론 대신 backend-prod를
+# 그대로 미러링한다(오르테가 판정). prod 분기에서 이 3그룹은 아예 붙이지 않는다.
+if [ "${L2_TRIGGER_ENABLED_LINE}" = "true" ]; then
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ENABLED=true"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ADVISORY_LOCK=true"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_MAX_WAKES_PER_ORG_PER_HOUR=5"
+fi
+# H1_MERGE_GATE는 backend-prod에도 실재(ENABLED/ADVISORY=true/true, dev와 동일) — 허용목록만
+# env별로 다르다(H1_MERGE_GATE_ORG_ALLOWLIST_VALUE, case 분기에서 라이브 실측값으로 설정).
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ENABLED=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ORG_ALLOWLIST=${H1_MERGE_GATE_ORG_ALLOWLIST_VALUE}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ADVISORY=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},BUILD_APP_METADATA_DEFALLBACK=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GATE_CONFIG_ENFORCE_ENABLED=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GATE_CONFIG_ENFORCE_ORG_ALLOWLIST=03970fbf-2db6-434b-a7b1-cb74f9547059"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ENABLED=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_MODE=shadow"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_ID=4120278"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_CLIENT_ID=Iv23liRkrmyqoCZIlrgh"
-# ⚠️story #2142 TODO(실 배포 前 확認 필요) — GITHUB_APP_ID/CLIENT_ID/SLUG는 env 분기 밖의
-# 리터럴이라 dev 값이 prod 플랜에도 그대로 실린다. repo grep 결과 prod용 GitHub App 등록/슬러그가
-# 어디에도 없어(이 App이 dev/prod 공유인지 별도 prod App이 필요한지가 이 스크립트로 답할 수
-# 없는 제품 결정) — 이 값을 건드리지 않고 그대로 두되, 오르테가 DRY_RUN 검수 시 판단 요청.
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_SLUG=sprintable-dev"
+if [ "${GATE_CONFIG_ENFORCE_ENABLED_LINE}" = "true" ]; then
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GATE_CONFIG_ENFORCE_ENABLED=true"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GATE_CONFIG_ENFORCE_ORG_ALLOWLIST=03970fbf-2db6-434b-a7b1-cb74f9547059"
+fi
+if [ "${DECISION_GATE_LINE_ENABLED_LINE}" = "true" ]; then
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ENABLED=true"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_MODE=shadow"
+fi
+# ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 적발) 정정 — 이 세 값이 env 분기 밖의
+# 리터럴(dev App 값)이라 prod 플랜에도 그대로 실려, prod 시크릿(github-app-*-prod)과 dev App의
+# ID/CLIENT_ID가 섞이는 조합이 될 뻔했다. ${GITHUB_APP_ID}/${GITHUB_APP_CLIENT_ID}/
+# ${GITHUB_APP_SLUG}(case 분기, 위 참조 — dev/prod 각각 라이브 실측값)로 정정.
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_ID=${GITHUB_APP_ID}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_CLIENT_ID=${GITHUB_APP_CLIENT_ID}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_SLUG=${GITHUB_APP_SLUG}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FASTAPI_URL=${FASTAPI_URL}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},STORAGE_PROVIDER=gcs"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DB_POOL_SIZE=3"
@@ -239,9 +294,16 @@ SECRET_PAIRS="${SECRET_PAIRS} github-app-client-secret-${GITHUB_APP_SECRET_ENV}:
 SECRET_PAIRS="${SECRET_PAIRS} github-app-private-key-${GITHUB_APP_SECRET_ENV}:GITHUB_APP_PRIVATE_KEY"
 SECRET_PAIRS="${SECRET_PAIRS} github-app-state-secret-${GITHUB_APP_SECRET_ENV}:GITHUB_APP_STATE_SECRET"
 SECRET_PAIRS="${SECRET_PAIRS} FIREBASE_BFF_INTERNAL_SECRET:FIREBASE_BFF_INTERNAL_SECRET"
-# DATABASE_URL_DEV 자체 이름으로도 참조되는 라이브 계약(코드가 두 이름 다 읽는 경로가
-# 있을 수 있어 원본 그대로 이관 — config.py 확認 없이 값만 옮기는 원칙, 동작 변경 없음).
-SECRET_PAIRS="${SECRET_PAIRS} ${DB_SECRET_NAME}:${DB_SECRET_NAME}"
+# ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 적발 — GitHub App 건과 동일 클래스:
+# "dev 라이브에서 관측한 사실을 env 분기 없이 prod에 적용") — 이 줄이 env 분기 밖이라 prod
+# 플랜에서도 DATABASE_URL_PROD:DATABASE_URL_PROD로 그대로 실렸다. 라이브 대조 결과 이
+# 자기이름 바인딩은 backend-dev에만 실재하는 계약이었다(DATABASE_URL_DEV 키가 backend-dev엔
+# 있고 backend-prod엔 DATABASE_URL_PROD 키 자체가 없음) — 코드 grep으로도 DATABASE_URL_PROD를
+# 읽는 경로 0건 확認. prod에 그 값(비밀번호 포함 DB 접속 문자열)을 이름만 추가해 한 벌 더
+# 싣는 것은 불필요한 자격증명 표면 확장이라 prod에서는 붙이지 않는다.
+if [ "${ENV}" = "dev" ]; then
+    SECRET_PAIRS="${SECRET_PAIRS} ${DB_SECRET_NAME}:${DB_SECRET_NAME}"
+fi
 # story #2142: prod만 REDIS_URL을 시크릿으로 추가(위 SECRET_PAIRS_REDIS 분기 참조) — dev는
 # 이미 PLAIN_ENV_SPEC에 실렸으므로 빈 문자열이라 여기선 아무것도 안 붙는다.
 if [ -n "${SECRET_PAIRS_REDIS}" ]; then
