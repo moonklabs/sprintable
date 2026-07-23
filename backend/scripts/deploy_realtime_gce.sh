@@ -254,9 +254,16 @@ SECRET_PAIRS="${SECRET_PAIRS} github-app-client-secret-${GITHUB_APP_SECRET_ENV}:
 SECRET_PAIRS="${SECRET_PAIRS} github-app-private-key-${GITHUB_APP_SECRET_ENV}:GITHUB_APP_PRIVATE_KEY"
 SECRET_PAIRS="${SECRET_PAIRS} github-app-state-secret-${GITHUB_APP_SECRET_ENV}:GITHUB_APP_STATE_SECRET"
 SECRET_PAIRS="${SECRET_PAIRS} FIREBASE_BFF_INTERNAL_SECRET:FIREBASE_BFF_INTERNAL_SECRET"
-# DATABASE_URL_DEV 자체 이름으로도 참조되는 라이브 계약(코드가 두 이름 다 읽는 경로가
-# 있을 수 있어 원본 그대로 이관 — config.py 확認 없이 값만 옮기는 원칙, 동작 변경 없음).
-SECRET_PAIRS="${SECRET_PAIRS} ${DB_SECRET_NAME}:${DB_SECRET_NAME}"
+# ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 적발 — GitHub App 건과 동일 클래스:
+# "dev 라이브에서 관측한 사실을 env 분기 없이 prod에 적용") — 이 줄이 env 분기 밖이라 prod
+# 플랜에서도 DATABASE_URL_PROD:DATABASE_URL_PROD로 그대로 실렸다. 라이브 대조 결과 이
+# 자기이름 바인딩은 backend-dev에만 실재하는 계약이었다(DATABASE_URL_DEV 키가 backend-dev엔
+# 있고 backend-prod엔 DATABASE_URL_PROD 키 자체가 없음) — 코드 grep으로도 DATABASE_URL_PROD를
+# 읽는 경로 0건 확認. prod에 그 값(비밀번호 포함 DB 접속 문자열)을 이름만 추가해 한 벌 더
+# 싣는 것은 불필요한 자격증명 표면 확장이라 prod에서는 붙이지 않는다.
+if [ "${ENV}" = "dev" ]; then
+    SECRET_PAIRS="${SECRET_PAIRS} ${DB_SECRET_NAME}:${DB_SECRET_NAME}"
+fi
 # story #2142: prod만 REDIS_URL을 시크릿으로 추가(위 SECRET_PAIRS_REDIS 분기 참조) — dev는
 # 이미 PLAIN_ENV_SPEC에 실렸으므로 빈 문자열이라 여기선 아무것도 안 붙는다.
 if [ -n "${SECRET_PAIRS_REDIS}" ]; then

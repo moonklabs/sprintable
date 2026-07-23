@@ -84,6 +84,20 @@ def test_deploy_gce_github_app_identity_matches_live_cloud_run_binding():
     assert "sprintable-dev" not in prod["PLAIN_ENV_SPEC"]
 
 
+def test_deploy_gce_db_self_name_binding_dev_only():
+    """story #2142(오르테가 DRY_RUN 검수 적발, 2026-07-23) — GitHub App 건과 동일 클래스
+    ("dev 라이브에서 관측한 사실을 env 분기 없이 prod에 적용"). ${DB_SECRET_NAME}:
+    ${DB_SECRET_NAME} 자기이름 바인딩이 env 분기 밖이라 prod 플랜에도 DATABASE_URL_PROD:
+    DATABASE_URL_PROD로 그대로 실렸다 — 라이브 대조 결과 이 계약은 backend-dev에만
+    실재(DATABASE_URL_PROD 키는 backend-prod에 아예 없고 코드도 안 읽음). prod에 DB 접속
+    문자열(비밀번호 포함)을 이름만 추가해 한 벌 더 싣는 불필요한 자격증명 표면 확장 — dev만
+    유지, prod는 붙이지 않는다."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "DATABASE_URL_DEV:DATABASE_URL_DEV" in dev["SECRET_PAIRS"]
+    assert "DATABASE_URL_PROD:DATABASE_URL_PROD" not in prod["SECRET_PAIRS"]
+
+
 def test_deploy_gce_prod_secret_pairs_no_dev_leak():
     """story #2142 회귀 방지 — DB_SECRET_NAME 미사용으로 prod 플랜에 dev 시크릿이
     하드코딩 리터럴로 섞여 들어가던 결함(발견 즉시 수정)의 재발 차단.
