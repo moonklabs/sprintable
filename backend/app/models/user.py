@@ -26,6 +26,11 @@ class User(Base):
     totp_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     google_id: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True, index=True)
+    # story #2155(2026-07-23): GitHub 로그인 자체를 제거했다(app/routers/auth.py — provider
+    # dispatch에서 "github" 삭제). 이 컬럼은 로그인 외 용도가 0곳(PO grep 확認 — 커밋 귀속·
+    # PR 매핑 어디에도 미사용)이라 지금 당장은 죽은 컬럼이지만, 컬럼 드롭은 되돌릴 수 없고
+    # prod 실측상 이 값이 채워진 사용자가 이미 0명이라 급하지도 않다 — 드롭은 별도 정리로
+    # 미룬다(의도적 보존, 누락 아님).
     github_id: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True, index=True)
     last_project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
