@@ -166,4 +166,32 @@ describe('useSseMultiplexer — story #2078', () => {
     // onerror 이후 재연결은 setTimeout으로 스케줄되므로, 여기서는 "최초 open=재연결 아님"만
     // 고정한다 — 실제 재연결 타이밍은 기존 3개 훅과 동일한 backoff 상수를 그대로 재사용했다.
   });
+
+  // story #2144 — 반환 핸들 객체가 connected 토글에도 참조 안정적인지 고정한다. 이게
+  // 깨지면(예: connected를 다시 useMemo deps에 넣으면) mux를 effect deps에 둔 모든
+  // 소비처(presence·chat·notifications)가 재연결마다 구독을 해지·재구독하게 된다.
+  it('connected가 false→true→false로 토글돼도 반환 핸들의 참조는 그대로다', async () => {
+    await act(async () => {
+      root.render(<Harness memberId="me-1" enabled />);
+    });
+    const initial = handle;
+    expect(initial).not.toBeNull();
+
+    act(() => { instances[0]!.onopen?.(); }); // connected: false → true
+    expect(handle).toBe(initial); // 참조 그대로
+    expect(handle!.connected).toBe(true); // 값은 최신
+
+    act(() => { instances[0]!.onerror?.(); }); // connected: true → false
+    expect(handle).toBe(initial); // 여전히 그대로
+    expect(handle!.connected).toBe(false);
+  });
+
+  it('구독 함수 자체도 connected 토글 전후로 동일 참조다(consumer useEffect deps 안정성의 실질)', async () => {
+    await act(async () => {
+      root.render(<Harness memberId="me-1" enabled />);
+    });
+    const subscribeBefore = handle!.subscribe;
+    act(() => { instances[0]!.onopen?.(); });
+    expect(handle!.subscribe).toBe(subscribeBefore);
+  });
 });
