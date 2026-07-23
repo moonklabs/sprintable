@@ -32,6 +32,9 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
     expect(data).toEqual({
       roadmap: [], totalEpicCount: 0, collaboration: [], events: [],
       activeEpicTitle: null, heroStory: null, memberMap: {}, attentionSignals: [], heroEnvelope: null,
+      // codex-silent-defect-sweep D-7 — 진짜 빈 데이터(fetch 성공, 내용 0건)는 partialErrors가
+      // 전부 false여야 한다(fetch 실패와 구분되는 것이 이 필드의 존재 이유).
+      partialErrors: { overview: false, members: false, stories: false, activity: false, attention: false },
     });
   });
 
