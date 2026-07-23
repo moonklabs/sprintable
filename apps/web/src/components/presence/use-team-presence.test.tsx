@@ -5,7 +5,7 @@
 // isReconnect() 판정이 정확히 작동하는지 고정한다 — onerror를 안 걸면 hadPriorError가 영원히
 // false라 재연결 refetch가 죽은 코드가 되는 함정이 있어(직접 확認), 그 회귀를 막는다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useTeamPresence } from './use-team-presence';
 
@@ -95,7 +95,7 @@ describe('useTeamPresence — 독립 연결 폴백의 재연결 refetch(#2139)',
     expect(fetchMock).toHaveBeenCalledTimes(2); // 재연결 refetch 발화
   });
 
-  it('presence 이벤트 자체도 여전히 refetch를 유발한다(기존 동작 무회귀)', async () => {
+  it('presence 이벤트 자체도 여전히 refetch를 유발한다(디바운스 창을 넘기면·기존 동작 무회귀)', async () => {
     await act(async () => {
       root.render(<Harness active memberId="m1" />);
       await Promise.resolve();
@@ -104,9 +104,109 @@ describe('useTeamPresence — 독립 연결 폴백의 재연결 refetch(#2139)',
     const es = FakeEventSource.instances[0]!;
     await act(async () => {
       es.emit('presence');
+      await new Promise((r) => setTimeout(r, 320)); // story #2139 — 300ms 디바운스 창을 넘긴다
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+// story #2139 — presence 이벤트가 재접속 60초 주기로 몰려 올 때(M명 접속 시 분당 최대 M건)의
+// 세 가드: ①디바운스(중복 요청 접기) ②in-flight 가드(진행 중엔 새로 안 쏘되 놓치지 않음)
+// ③레이스 가드(늦게 온 stale 응답이 최신 화면을 덮어쓰지 못함 — 셋 중 제일 중요).
+describe('useTeamPresence — presence 폭주 가드(#2139)', () => {
+  it('①짧은 창에 presence 이벤트가 여러 건 몰려도 refetch는 한 번만 나간다', async () => {
+    await act(async () => {
+      root.render(<Harness active memberId="m1" />);
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 초기 스냅샷
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => {
+      es.emit('presence');
+      es.emit('presence');
+      es.emit('presence');
+      await new Promise((r) => setTimeout(r, 320));
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2); // 초기 1 + 디바운스로 접힌 refetch 1
+  });
+
+  it('②fetch 진행 중에 새 트리거가 오면 새로 쏘지 않되, 끝난 뒤 1회 더 실행해 놓치지 않는다', async () => {
+    let resolveFirst!: (v: { ok: boolean; json: () => Promise<{ data: never[] }> }) => void;
+    fetchMock.mockImplementationOnce(() => new Promise((r) => { resolveFirst = r; }));
+
+    await act(async () => {
+      root.render(<Harness active memberId="m1" />);
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 초기 스냅샷 — 아직 in-flight(응답 대기 중)
+
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => {
+      es.emit('presence'); // in-flight 중 도착 — 디바운스 타이머는 걸리지만
+      await new Promise((r) => setTimeout(r, 320)); // 디바운스가 풀려도 in-flight라 pendingRef만 표시
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 새로 쏘지 않음(in-flight 가드)
+
+    await act(async () => {
+      resolveFirst({ ok: true, json: async () => ({ data: [] }) }); // 첫 요청 종료
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2); // 종료 직후 "한 번 더" 자동 실행 — 놓치지 않음
+  });
+
+  // ⚠️in-flight 가드(②)가 이미 동시요청 자체를 직렬화하므로(요청이 진행 중이면 새로 안 쏘고
+  // 끝난 뒤 큐잉된 한 번만 이어 쏨), "두 요청이 동시에 떠 있다가 늦은 응답이 최신을 덮어쓰는"
+  // 시나리오는 이 설계에서 실제로 재현되지 않는다 — 레이스 가드(seq 비교)는 그 전제가 깨질
+  // 미래 변경에 대비한 방어선이다. 여기서는 그 대신, in-flight 큐잉으로 이어진 "한 번 더"
+  // 요청의 결과가 최종 state로 정확히 반영되는 것(오래된 응답이 아니라 실제로 나간 마지막
+  // 요청의 값)을 확認해 같은 결론(화면은 항상 가장 최근에 나간 요청의 결과를 보여준다)을 고정한다.
+  it('③in-flight 큐잉으로 이어진 두 번째 요청의 응답이 최종 state로 정확히 반영된다', async () => {
+    const first = { data: [{ member_id: 'first' }] };
+    const second = { data: [{ member_id: 'second' }] };
+    let resolveFirst!: (v: unknown) => void;
+    let resolveSecond!: (v: unknown) => void;
+    fetchMock
+      .mockImplementationOnce(() => new Promise((r) => { resolveFirst = r; }))
+      .mockImplementationOnce(() => new Promise((r) => { resolveSecond = r; }));
+
+    const renderedItemsRef: { current: Array<{ member_id: string }> } = { current: [] };
+    function Consumer() {
+      const items = useTeamPresence(true, 'm1');
+      useEffect(() => {
+        renderedItemsRef.current = items as unknown as Array<{ member_id: string }>;
+      });
+      return null;
+    }
+
+    await act(async () => {
+      root.render(<Consumer />);
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 초기 요청 — 아직 in-flight
+
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => {
+      es.onerror?.();
+      es.onopen?.(); // 재연결 refetch — in-flight라 새로 안 쏘고 pendingRef만 표시
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveFirst({ ok: true, json: async () => first }); // 첫 요청 종료 → 큐잉된 두 번째 즉시 발사
+      await Promise.resolve();
       await Promise.resolve();
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(renderedItemsRef.current).toEqual(first.data); // 이 시점엔 첫 응답이 아직 최신(두 번째는 진행 중)
+
+    await act(async () => {
+      resolveSecond({ ok: true, json: async () => second });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(renderedItemsRef.current).toEqual(second.data); // 마지막으로 나간 요청의 응답이 최종 반영됨
   });
 });
 
