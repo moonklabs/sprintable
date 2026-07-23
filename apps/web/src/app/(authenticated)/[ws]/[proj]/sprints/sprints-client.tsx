@@ -274,7 +274,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
             />
           ) : null}
 
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
           <div className="flex items-center justify-between gap-2 pt-1">
             <span className="text-[11px] text-muted-foreground">
               {declaredCount > 0 ? (
@@ -322,7 +322,7 @@ function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose 
           </div>
         </div>
         <p className="mb-4 text-sm text-muted-foreground">{t('deleteConfirmBody')}</p>
-        {error ? <p className="mb-3 text-xs text-destructive">{error}</p> : null}
+        {error ? <p className="mb-3 text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={deleting}>{t('cancel')}</Button>
           <Button type="button" variant="destructive" size="sm" onClick={onConfirm} disabled={deleting}>
@@ -767,7 +767,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           {closing ? '...' : t('close')}
         </Button>
       ) : null}
-      {actionError ? <p className="mb-3 text-xs text-destructive">{actionError}</p> : null}
+      {actionError ? <p className="mb-3 text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{actionError}</p> : null}
 
       {/* E-SPRINT-LOOP FE(278314e9) §4④ — 활성화 게이트: planning + 생존 가설 0이면 질문 안내(마찰
           아님). 422 HYPOTHESIS_REQUIRED_FOR_ACTIVATION을 맞은 뒤에도 동일 배너로 graceful 흡수. */}

@@ -113,7 +113,7 @@ export function WorkflowPolicySimulatorSection() {
         {loading ? t('simRunning') : t('simRun')}
       </Button>
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
 
       {result ? (
         <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-3">
