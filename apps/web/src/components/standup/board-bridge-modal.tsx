@@ -101,7 +101,7 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
                   ))}
                 </div>
               ) : loadError ? (
-                <p className="text-sm text-destructive">{loadError}</p>
+                <p className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{loadError}</p>
               ) : stories.length === 0 ? (
                 <p className="text-sm text-muted-foreground">{t('bridgeNoStories')}</p>
               ) : (

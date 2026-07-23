@@ -141,6 +141,19 @@ substitutions:
   # prod로 잘못 흘러가도 무해) — GHA가 dev만 명시 override(true).
   _BACKEND_FANOUT_WAKE_REDIS_ENABLED: 'false'
 
+  # story #2139/#2143 follow-up (2026-07-23, Ortega's call) -- "turn on the backplane", 3 flags.
+  # Different in nature (recorded here per his instruction): PRESENCE_ONLINE has a DB fallback
+  # already (not broken today -- turning it on is a freshness improvement, not a bugfix).
+  # PRESENCE (chat_presence "working") is a process-local dict -- genuinely differs per GCE
+  # node today (real defect). SSE_LEASE is a per-instance counter -- the global concurrent-
+  # connection cap doesn't actually hold across nodes today (real defect). Default 'false'
+  # (dev-safe fallback) -- GHA overrides dev only (true). Prod needs the realtime GCE 3-node
+  # side turned on together (separate staged step, not this commit) -- same staging principle
+  # already used for #2120/#2121/#2122.
+  _BACKEND_PRESENCE_REDIS_ENABLED: 'false'
+  _BACKEND_PRESENCE_ONLINE_REDIS_ENABLED: 'false'
+  _BACKEND_SSE_LEASE_REDIS_ENABLED: 'false'
+
   # ⛔story cd10e123 계열 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
   # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED가 여태 여기 어디에도 없는 순수 수동 Cloud Run env
   # 였다 — PG_LISTEN_ENABLED는 durable화됐는데(위) 이 둘은 안 돼서, 서비스가 `--set-env-vars`로
@@ -289,7 +302,7 @@ steps:
         # 에서 정정(구 `REDIS_CONSUME_ENABLED`는 Settings 필드와 안 맞아 무시되던 키) — 구 키는
         # --remove-env-vars로 명시 제거(안 지우면 두 키 공존, additive 함정).
         # story #2123 S0-b: FANOUT_WAKE_REDIS_ENABLED(dev만 true, prod는 손대지 않음).
-        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED}"
+        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED}"
         # ⛔story #2141(2026-07-23, prod Redis Memorystore 전환): REDIS_URL을 여기서 이 스텝이
         # 예전엔 dev/prod 공용으로 plain env 넘겼다 — prod는 Secret Manager 바인딩(REDIS_URL_PROD,
         # AUTH 필요)으로 전환하는데, 같은 배포에 plain REDIS_URL 키까지 넘기면 Cloud Run이

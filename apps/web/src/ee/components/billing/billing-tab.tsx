@@ -85,7 +85,7 @@ export function BillingTab({ orgId }: { orgId: string }) {
   };
 
   if (loading) return <div className="p-6 text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Loading...</div>;
-  if (error) return <div className="p-6 text-sm text-destructive">{error}</div>;
+  if (error) return <div className="p-6 text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</div>;
 
   const currentPlan = [...plans, { id: 'free', name: 'Free', price: 0, billing_cycle: null, features: ['1 project', '5 members', 'Basic AI features'] }].find((p) => p.id === status?.tier);
 

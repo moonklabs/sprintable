@@ -15,7 +15,6 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.file_lock import FileLock
 from app.models.team import TeamMember
-from app.routers.events import publish_event
 from app.services.member_resolver import assert_caller_is_member
 from app.services.webhook_dispatch import fire_webhooks
 
@@ -162,10 +161,9 @@ async def _publish_conflict_event(
         "member_id": str(member_id),
         "conflicts": [c.model_dump(mode="json") for c in conflicts],
     }
-    try:
-        publish_event(str(org_id), "file_conflict", event_data)
-    except Exception:
-        pass
+    # story #2132(2026-07-23): file_conflict의 publish_event() 호출 제거 — FE 소비처 0
+    # (설계 doc §1) + 그 죽은 org-level fanout(`_subscribers`) 자체가 삭제됨. Discord
+    # 웹훅(fire_webhooks, 아래)은 별개 채널이라 무관·그대로 유지.
     try:
         await fire_webhooks(session, org_id, "file_conflict", event_data)
     except Exception:

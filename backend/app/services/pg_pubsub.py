@@ -137,9 +137,17 @@ async def _dispatch_received(payload_str: str) -> None:
             pass
 
     try:
-        from app.routers.events import publish_event, _push_to_agent
+        from app.routers.events import _push_to_agent
         if target == "org":
-            publish_event(target_id, event_type, data, _from_listener=True)
+            # story #2139/#2132 근본수정: publish_event()/_subscribers 삭제 — target="org"
+            # 발행 자체가 이제 코드 어디에도 없다(발행 측이 전부 push_to_org_members()로
+            # 개별 "agent" target push로 바뀜). 이 분기가 실제로 도달하면 어딘가 옛 발행
+            # 경로가 남아있다는 신호라 조용히 넘기지 않고 경고로 남긴다.
+            logger.warning(
+                "pg_listen dispatch: unexpected target=org event_type=%s "
+                "(publish_event was removed in #2139/#2132 — this should be unreachable)",
+                event_type,
+            )
         elif target == "agent":
             _push_to_agent(target_id, data, _from_listener=True)
     except Exception as exc:

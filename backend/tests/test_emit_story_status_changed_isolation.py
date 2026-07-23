@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from contextlib import ExitStack
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -28,7 +28,6 @@ def _story():
 
 
 def _base_patches(stack: ExitStack, *, notif=None, webhook=None, l2=None):
-    stack.enter_context(patch("app.routers.events.publish_event", MagicMock()))
     stack.enter_context(patch("app.services.webhook_dispatch.fire_webhooks",
                               webhook or AsyncMock()))
     stack.enter_context(patch("app.services.workflow_pipeline.process_event",

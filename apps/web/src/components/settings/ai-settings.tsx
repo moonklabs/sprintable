@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
+import { useRenderNonce } from '@/hooks/use-render-nonce';
 import { useTranslations } from 'next-intl';
 import {
   ANTHROPIC_MODELS,
@@ -57,6 +58,9 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // story #2154 — requiresNewApiKey 검증 조기-return 경로가 setError(null) 리셋보다 먼저
+  // return해, 연속 동일 실패 시 재낭독이 안 될 수 있던 것을 nonce-key로 구조적으로 막는다.
+  const [errorNonce, bumpErrorNonce] = useRenderNonce();
 
   const modelOptions = useMemo(
     () => (provider === 'openai-compatible' ? [] : PRESET_MODEL_OPTIONS[provider]),
@@ -93,6 +97,7 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
   const handleSave = async () => {
     if (!apiKey.trim() && !settings) return;
     if (requiresNewApiKey && !apiKey.trim()) {
+      bumpErrorNonce();
       setError(t('aiApiKeyProviderChangeRequired'));
       return;
     }
@@ -243,11 +248,7 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
           </div>
         </div>
 
-        {/* story #2105 2차 — handleSave가 재시도 전 setError(null)/setSaved(false)를 리셋한다.
-            단, requiresNewApiKey 검증 조기-return 경로(위 handleSave 상단)는 그 리셋 前에 바로
-            setError를 호출해 동일 사유 연속 실패 시 재낭독이 안 될 수 있다 — 별도 잠재 결함으로
-            기록(상태머신은 이 스토리에서 재구성하지 않음). */}
-        {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{error}</p>}
+        {error && <p key={errorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{error}</p>}
         {saved && <p role="status" aria-live="polite" aria-atomic="true" className="text-xs text-success">{t('aiSettingsSaved')}</p>}
 
         <button

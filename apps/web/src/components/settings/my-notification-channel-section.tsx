@@ -389,6 +389,9 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
                               test.status === 'fail' && 'text-destructive',
                               (test.status === 'sending' || test.status === 'unavailable') && 'text-muted-foreground',
                             )}
+                            role={test.status === 'fail' ? 'alert' : 'status'}
+                            aria-live={test.status === 'fail' ? 'assertive' : 'polite'}
+                            aria-atomic="true"
                           >
                             {test.status === 'ok' && <><Check className="h-3 w-3" />{t('testReached')}{test.ts ? ` · ${formatTs(test.ts)}` : ''}</>}
                             {test.status === 'fail' && <><X className="h-3 w-3" />{t('testFailed')}{test.reason ? ` · ${test.reason}` : ''}</>}

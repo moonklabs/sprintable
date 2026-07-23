@@ -105,17 +105,23 @@ async def emit_story_status_changed(
     actor_role: str | None = None,
     actor_type: str | None = None,
 ) -> None:
-    """story status_changed의 side-effects 5종을 발화. old==new면 no-op.
+    """story status_changed의 side-effects를 발화. old==new면 no-op.
 
     호출자가 story.status를 이미 새 값으로 설정한 뒤 호출한다. 각 side-effect는 best-effort(실패
-    격리)로 status 전이 자체를 깨지 않는다. publish_event는 eventbus→L1 activity_events 캡처의
-    진입점이므로 gate-driven done도 이걸 타야 활동그래프(=verdict 증거원)에 잡힌다.
-    """
+    격리)로 status 전이 자체를 깨지 않는다.
+
+    ⚠️story #2132(2026-07-23) 정정 — 이 docstring이 예전에 "publish_event는 eventbus→L1
+    activity_events 캡처의 진입점"이라 주장했으나 **사실이 아니었다**: L1 capture(
+    `extract_activities_best_effort`)는 전부 `Event(...)` DB row 생성 직후 명시 호출로만
+    이뤄지고(events.py/stories.py:story_assigned/conversations.py/agent_dispatch.py/
+    notification_dispatch.py), story.status_changed는 그 어디에도 안 걸려 있었다 — publish_event()
+    (org-level in-process fanout, `_subscribers` 영구 죽은 레지스트리)를 지금 삭제해도 이 사실엔
+    아무 영향이 없다(원래도 L1에 안 잡히고 있었다). status_changed를 L1에 새로 잡을지는 이
+    스토리(#2132) 스코프 밖 — 별도 판단 필요."""
     if old_status == story.status:
         return
     # lazy import — service→router/pipeline 순환 회피.
     from app.models.pm import StoryActivity
-    from app.routers.events import publish_event
     from app.services.member_resolver import canonicalize_member_id
     from app.services.notification_dispatch import dispatch_notification
     from app.services.rule_evaluator import EventContext
@@ -155,15 +161,14 @@ async def emit_story_status_changed(
     if actor_id and actor_id != story.assignee_id:
         notify_ids.add(actor_id)
 
-    publish_event(str(org_id), "story.status_changed", event_data)
-
     # story #2059/#2067(까심군 라이브 실측 확定 — 별도 액터 PATCH+브라우저 raw SSE 로깅, 25초
-    # 무수신): 위 publish_event()의 org-level fanout은 `_subscribers[org_id]`로 가는데 이 레지스트리에
-    # `.add()`하는 코드가 저장소 전체 0곳이라 영구 빈 집합 — FE가 실제로 붙는 경로는
-    # `_agent_connections[member_id]`(`_push_to_agent()`로만 채워짐)뿐이다. 선례(story
-    # 9ef0f914·trust_pipeline.py `_maybe_emit`)와 동일하게 "레지스트리 통합"이 아니라 project
-    # 인가 필터를 낀 수동 포워딩으로 그 갭을 메운다 — 순수 transient push(Event row 생성 0,
-    # 연결 안 된 멤버는 `_push_to_agent` 자체가 조용히 no-op).
+    # 무수신) + #2132(2026-07-23 근본수정): 구 `publish_event()`의 org-level fanout은
+    # `_subscribers[org_id]`로 가는데 이 레지스트리에 `.add()`하는 코드가 저장소 전체 0곳이라
+    # 영구 빈 집합이었다 — 그 함수 자체를 삭제했다. FE가 실제로 붙는 경로는
+    # `_agent_connections[member_id]`(`_push_to_agent()`로만 채워짐)뿐이라, 선례(story
+    # 9ef0f914·trust_pipeline.py `_maybe_emit`)와 동일하게 project 인가 필터를 낀 수동
+    # 포워딩만 남긴다 — 순수 transient push(Event row 생성 0, 연결 안 된 멤버는
+    # `_push_to_agent` 자체가 조용히 no-op).
     try:
         from app.routers.events import _push_to_agent
         from app.services.project_auth import project_accessible_member_ids
@@ -174,7 +179,7 @@ async def emit_story_status_changed(
             _push_to_agent(str(member_id), dict(sse_payload))
     except Exception:
         logger.warning(
-            "status_changed SSE 포워딩 실패(story=%s project=%s) — org publish는 이미 발행됨",
+            "status_changed SSE 포워딩 실패(story=%s project=%s)",
             story.id, story.project_id, exc_info=True,
         )
 

@@ -215,7 +215,6 @@ async def _maybe_emit(
     new_signals = derive_exception_signals(after)
     if old_stage == new_stage and old_signals == new_signals:
         return  # 변경 없음 — 이벤트 폭주 방지(doc §4).
-    from app.routers.events import publish_event  # lazy import — service→router 순환 회피.
 
     event_data = {
         "story_id": str(story_id),
@@ -227,11 +226,11 @@ async def _maybe_emit(
         "actor_id": str(actor_id) if actor_id else None,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    publish_event(str(org_id), "story.trust_stage_changed", event_data)
 
-    # E-UI-DAEGBYEON P0-04 후속(story 9ef0f914): org publish는 `_subscribers[org_id]`(구독
-    # 엔드포인트 없음 — 실측 확인)로만 가고 FE가 실제로 붙는 `_agent_connections[member_id]`에는
-    # 안 닿는다 — "레지스트리 통합"이 아니라 project 인가 필터를 낀 포워딩으로 그 갭을 메운다.
+    # E-UI-DAEGBYEON P0-04 후속(story 9ef0f914) + #2132(2026-07-23 근본수정): org publish(구
+    # `publish_event`)는 `_subscribers[org_id]`(구독 엔드포인트 없음 — 실측 확인)로만 가고 FE가
+    # 실제로 붙는 `_agent_connections[member_id]`에는 안 닿았다 — 그 함수 자체를 삭제하고,
+    # project 인가 필터를 낀 포워딩만 남긴다(이게 원래도 유일한 실 배달 경로였다).
     # 순수 transient push(Event row 생성 0 — 오프라인 백필 불필요·PO 가드레일)·연결 안 된 멤버는
     # _push_to_agent 자체가 조용히 no-op.
     try:
@@ -244,7 +243,7 @@ async def _maybe_emit(
             _push_to_agent(str(member_id), dict(sse_payload))
     except Exception:
         logger.warning(
-            "trust_stage_changed SSE 포워딩 실패(story=%s project=%s) — org publish는 이미 발행됨",
+            "trust_stage_changed SSE 포워딩 실패(story=%s project=%s)",
             story_id, after.project_id, exc_info=True,
         )
 

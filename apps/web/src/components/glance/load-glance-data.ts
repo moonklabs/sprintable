@@ -14,6 +14,19 @@ import { pickFocalStory, type HeroStory, type HeroMember } from './hero-logic';
 import { parseAttentionSignals, type BeAttentionSignal } from './derive-exception-signals';
 import { parseHeroEnvelope, type HeroEnvelope } from './derive-hero-envelope';
 
+// codex-silent-defect-sweep D-7 — overview/멤버/스토리/활동/예외 fetch 실패를 `?? []`/`?? 0`으로
+// 실제 빈 데이터처럼 치환하면 "데이터가 없다"와 "못 가져왔다"가 화면에서 구분이 안 된다. 폴백
+// 자체(빈 배열로 렌더 지속)는 유지하되, 어떤 조각이 실패했는지 이 플래그로 caller에 넘겨 caller가
+// 그 영역만 "재시도 가능" 표시로 구분되게 그린다 — 전면 에러 화면으로 바꾸지 않는다(부분 실패는
+// 부분만 표시).
+export interface GlanceDataPartialErrors {
+  overview: boolean;
+  members: boolean;
+  stories: boolean;
+  activity: boolean;
+  attention: boolean;
+}
+
 export interface GlanceData {
   roadmap: RoadmapEpic[];
   totalEpicCount: number;
@@ -29,6 +42,7 @@ export interface GlanceData {
   // hero ProofCapsule 리치 envelope(story 04da0281): #2099 glance/hero. 형상 붕괴/미가용은 null →
   // hero 최소 렌더 폴백(claim+state+참여자만·no-fiction). heroStory 없으면 애초에 fetch 안 함.
   heroEnvelope: HeroEnvelope | null;
+  partialErrors: GlanceDataPartialErrors;
 }
 
 function unwrap<T>(json: unknown): T | null {
@@ -84,6 +98,18 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   const stories = storyLists.flatMap((s) => unwrap<BeStoryListItem[]>(s) ?? []);
   const collaboration = deriveCollaboration(roadmap.map((e) => e.id), stories, memberNames);
 
+  // codex-silent-defect-sweep D-7 — fetchJson은 실패(네트워크 오류·!res.ok·파싱 실패) 시 항상
+  // `null`을 반환한다(catch(() => null)). 이 null 자체가 "못 가져왔다"의 유일한 신호라, unwrap
+  // 이후(형상 파싱 이후)가 아니라 여기서 원본 fetch 결과로 판정해야 진짜 실패와 형상은 맞지만
+  // 우연히 빈 배열인 정상 응답을 안 섞는다.
+  const partialErrors: GlanceDataPartialErrors = {
+    overview: overviewJson === null,
+    members: membersJson === null,
+    stories: storyLists.some((s) => s === null),
+    activity: activityJson === null,
+    attention: attentionJson === null,
+  };
+
   // 2D 재설계: hero = 현재(active) 에픽의 focal 활성 story. 위에서 이미 per-epic으로 받은
   // 스토리 목록(storyLists)을 재사용해 활성 에픽의 full 스토리에서 focal을 고른다(추가 fetch 0).
   const activeEpic = roadmap.find((e) => e.roadmapStatus === 'active') ?? null;
@@ -119,5 +145,6 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
     memberMap,
     attentionSignals,
     heroEnvelope,
+    partialErrors,
   };
 }

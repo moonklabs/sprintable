@@ -35,48 +35,6 @@ from app.services.member_resolver import assert_caller_is_member, resolve_member
 
 router = APIRouter(prefix="/api/v2/events", tags=["events", "Organization"])
 
-# ─── In-process event bus (C-S6: memo SSE) ────────────────────────────────────
-# org_id → set of queues (one per connected SSE client)
-_subscribers: dict[str, set[asyncio.Queue[dict]]] = defaultdict(set)
-
-
-def publish_event(org_id: str, event_type: str, data: dict, _from_listener: bool = False) -> None:
-    """다른 라우터에서 이벤트를 발행할 때 호출.
-
-    _from_listener=True: LISTEN 수신기에서 호출 시 pg_notify 재발행 금지 (무한 루프 차단).
-
-    ⚠️story #2059/#2067(까심군 라이브 실측 확定, 2026-07-21): 이 함수가 쓰는 `_subscribers[org_id]`
-    레지스트리에 `.add()`하는 코드가 저장소 전체 0곳이다 — 즉 **이 org-level fanout은 실제로
-    아무 브라우저/에이전트 연결에도 닿지 않는 영구 죽은 코드다**(pg_notify 크로스 인스턴스 릴레이도
-    결국 이 함수를 다시 부를 뿐이라 동일하게 죽어 있다). FE/에이전트가 실제로 붙는 경로는
-    `_agent_connections[member_id]`(`_push_to_agent()`로만 채워짐)뿐이다. 이 함수를 호출하는 것만으로
-    "실시간 전달했다"고 가정하지 마라 — 실시간 SSE 전달이 실제로 필요하면 `_push_to_agent()`를
-    직접 호출해야 한다(선례: `trust_pipeline._maybe_emit`·`story_status_events.emit_story_status_changed`
-    — `project_accessible_member_ids()`로 수신자 해소 후 개별 push). 이 함수 자체를 항상-fanout으로
-    바꾸지 않은 이유: 호출부마다 올바른 수신자 스코프가 다르다(project-scoped story/goal 이벤트 vs
-    conversation 참가자 vs org-wide presence) — 제네릭하게 못 바꾸고 호출부별 개별 판단이 필요하다.
-    """
-    payload = {"type": event_type, **data}
-    dead: list[asyncio.Queue] = []
-    for q in _subscribers.get(org_id, set()):
-        try:
-            q.put_nowait(dict(payload))  # copy per subscriber — shared dict mutation 방지
-        except asyncio.QueueFull:
-            dead.append(q)
-    for q in dead:
-        _subscribers[org_id].discard(q)
-    if not _from_listener:
-        # prod 커넥션 누수 근본fix(2026-07-08): 참조 미보관 create_task는 GC가 pg_notify()의
-        # async with async_session_factory() 도중 태스크를 조기수거할 수 있다(공식 문서 경고) —
-        # fire_and_forget이 강한 참조를 보관해 이를 막는다.
-        # E-ARCH S2(story #2078): pg_notify() 직접 호출 → event_broker.publish()로 — PG NOTIFY는
-        # 그대로(내부에서 동일 호출) + event_broker_redis_dual_publish_enabled 시 Redis shadow
-        # 추가 발행(기본 off, 무회귀). fire_and_forget 감싸는 방식은 무변경.
-        from app.services.event_broker import event_broker
-        from app.services.pg_pubsub import fire_and_forget
-        fire_and_forget(event_broker.publish("org", org_id, event_type, data))
-
-
 # ─── Agent connection registry (S2/S3: 에이전트별 SSE) ───────────────────────
 # member_id (str) → set[Queue] — 다중 연결 지원, 해제 시 해당 queue만 제거
 _agent_connections: dict[str, set[asyncio.Queue[dict]]] = defaultdict(set)
@@ -162,12 +120,68 @@ def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) 
         for q in dead:
             queues.discard(q)
     if not _from_listener:
-        # prod 커넥션 누수 근본fix(2026-07-08) — publish_event()와 동형(fire_and_forget 참조 보관).
-        # E-ARCH S2(story #2078): pg_notify() 직접 호출 → event_broker.publish()로(publish_event()와 동형 치환).
+        # prod 커넥션 누수 근본fix(2026-07-08) — 참조 미보관 create_task는 GC가 pg_notify()의
+        # async with async_session_factory() 도중 태스크를 조기수거할 수 있다(공식 문서 경고) —
+        # fire_and_forget이 강한 참조를 보관해 이를 막는다.
+        # E-ARCH S2(story #2078): pg_notify() 직접 호출 → event_broker.publish()로 — PG NOTIFY는
+        # 그대로(내부에서 동일 호출) + event_broker_redis_dual_publish_enabled 시 Redis shadow
+        # 추가 발행(기본 off, 무회귀).
         from app.services.event_broker import event_broker
         from app.services.pg_pubsub import fire_and_forget
         fire_and_forget(event_broker.publish("agent", member_id, payload.get("event_type", ""), payload))
     return pushed
+
+
+async def push_to_org_members(
+    org_id: str, event_type: str, data: dict, *, member_ids: set[str] | None = None,
+) -> None:
+    """story #2139/#2132 근본수정 — 예전 `publish_event()`의 org-level fanout은 아무도
+    구독하지 않는 영구 죽은 레지스트리였다(_subscribers.add() 호출처 저장소 전체 0곳,
+    story #2059/#2067/#2132 실측). 실제 브라우저/에이전트 배달 경로는 `_push_to_agent()`
+    (`_agent_connections[member_id]`)뿐이라, org 단위 발행도 결국 이 경로로 개별 push해야
+    실제로 도달한다.
+
+    `member_ids` 미지정(None) 시 org 전체 활성 멤버(human+agent 전부)에게 보낸다 — presence
+    전용(#2139 §3, 오르테가 확定: project로 좁히지 않는다. 호출부 4곳이 애초에 project_id를 안
+    들고 있고, 에이전트는 multi-project·DM은 project 자체가 없어 데이터가 org 단위다).
+    `member_ids` 지정 시 그 집합에게만 — conversation.working 전용(참가자만, org 전체 아님 —
+    payload가 conversation 단위라 org로 보내면 새는 것).
+
+    ⚠️story #2139(2026-07-23) 정정(오르테가 검수 재지적) — 이전엔 `org_members`만 SELECT했다.
+    그 테이블은 `user_id NOT NULL`(휴먼 전용 — 에이전트는 애초에 행이 없다) → presence가
+    에이전트에게 전혀 도달하지 않는 채로 "org 전체"라 주장하던 선언-실제 불일치였다(라이브
+    실측: 자기 자신의 agent stream에 presence 0건 도착으로 확認). `members` 테이블(org_id·
+    type·is_active·deleted_at 보유, human+agent 단일 신원)로 바꾸되 `org_members`와 UNION —
+    `project_members_sync_gap`(org-create/invite-accept가 `org_members`만 INSERT하고
+    `members` 앵커 행을 동반 생성 안 하는 알려진 갭)으로 `members`에 아직 없는 신규/미백필
+    휴먼 org_member가 존재할 수 있어, `members`만으로 바꾸면 그 스트래글러가 새로 빠진다
+    (project_accessible_member_ids가 `team_members UNION org_members`로 같은 갭을 방어하는
+    것과 동형 패턴). 휴먼은 `members.id == org_members.id`(E-MEMBER-SSOT 앵커)라 UNION해도
+    중복 id 하나로 합쳐질 뿐 이중 push 없음.
+
+    best-effort — caller가 감싼 try/except 전제(presence_events.py 관례)로 자체 예외 전파.
+    자기 세션을 열고 닫아(member_ids=None일 때만) caller의 세션 상태와 무관하게 동작."""
+    ids = member_ids
+    if ids is None:
+        from sqlalchemy import text as _text
+
+        from app.core.database import async_session_factory
+        async with async_session_factory() as session:
+            rows = await session.execute(
+                _text(
+                    """
+                    SELECT id FROM members
+                    WHERE org_id = :org_id AND is_active = true AND deleted_at IS NULL
+                    UNION
+                    SELECT id FROM org_members
+                    WHERE org_id = :org_id AND deleted_at IS NULL
+                    """
+                ),
+                {"org_id": org_id},
+            )
+            ids = {str(r[0]) for r in rows.all()}
+    for mid in ids:
+        _push_to_agent(mid, {"event_type": event_type, **data})
 
 
 def _event_to_payload(event: "Event") -> dict:

@@ -18,7 +18,6 @@ from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.repositories.story_assignee import StoryAssigneeRepository
 from app.routers.agent_gateway import wake_agent
-from app.routers.events import publish_event
 from app.services.event_seq import assign_recipient_seq
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
@@ -757,12 +756,10 @@ async def bulk_update_stories(
 
     await db.commit()
 
-    # workflow_violation 발화(commit 後·기존 이벤트 타입이라 additive·기존 컨슈머 무영향). 실패는 비차단.
+    # workflow_violation 발화(commit 後). story #2132(2026-07-23): publish_event() 호출 제거 —
+    # FE 소비처 0(설계 doc §1) + 그 죽은 org-level fanout(`_subscribers`) 자체가 삭제됨.
+    # webhook(fire_webhooks, 아래)은 별개 채널이라 무관·그대로 유지.
     for _ev, _notify in violation_dispatch:
-        try:
-            publish_event(str(repo.org_id), "workflow_violation", _ev)
-        except Exception:  # noqa: BLE001
-            pass
         try:
             await fire_webhooks(
                 db, repo.org_id, "workflow_violation", _ev, recipient_member_ids=_notify,
@@ -918,11 +915,11 @@ async def update_story(
         _assignee_notify_ids = {
             m for m in (story.assignee_id, old_assignee_id, actor_id) if m is not None
         }
-        # story #2086(2026-07-21, 까심군 라이브 실측 확定): publish_event()의 org _subscribers
-        # fanout은 .add() 호출이 저장소 전체 0곳인 영구 죽은 레지스트리(story #2059/#2067과
-        # 동일 근본) — "org-wide 의도 유지" 주석은 실제로 아무 SSE 연결에도 안 닿는 상태였다.
+        # story #2086(2026-07-21, 까심군 라이브 실측 확定) + #2132(2026-07-23 근본수정):
+        # publish_event()의 org _subscribers fanout은 .add() 호출이 저장소 전체 0곳인 영구
+        # 죽은 레지스트리였다(story #2059/#2067과 동일 근본) — 이제 그 함수 자체를 삭제했다.
         # story.status_changed(story_status_events.py)와 동형으로 project_accessible_member_ids
-        # 로 수신자 해소 후 _push_to_agent 개별 push — 이게 실제로 SSE 큐에 들어가는 유일 경로.
+        # 로 수신자 해소 후 _push_to_agent 개별 push만이 실제로 SSE 큐에 들어가는 유일 경로.
         #
         # story #2106(2026-07-22, 까심군 #2101 QA 후속): 이 push는 의도적으로 Event row를 안
         # 만드는 순수 transient SSE(#2101의 last_event_id 백필 대상이 아님) — "왜 여기만
@@ -933,7 +930,6 @@ async def update_story(
         # dispatch_notification(human)이 별도로 지고 있다 — 그쪽은 Event-backed(또는 동등한
         # 영속 알림함) 라 배정받은 사람이 그 순간 연결이 끊겨 있어도 놓치지 않는다. 즉 상태축
         # (재조회로 복원)과 알림축(영속 전달 필요)이 분리돼 있고, 이 줄은 전자만 담당한다.
-        publish_event(str(org_id), "story.assignee_changed", event_data)
         try:
             from app.routers.events import _push_to_agent
             from app.services.project_auth import project_accessible_member_ids
@@ -944,7 +940,7 @@ async def update_story(
                 _push_to_agent(str(member_id), dict(sse_payload))
         except Exception:
             logger.warning(
-                "assignee_changed SSE 포워딩 실패(story=%s project=%s) — org publish는 이미 발행됨",
+                "assignee_changed SSE 포워딩 실패(story=%s project=%s)",
                 story.id, story.project_id, exc_info=True,
             )
         try:
@@ -1042,24 +1038,6 @@ async def update_story(
                 await db.flush()
             except Exception:
                 pass
-
-    # P0-05 후속(doc scope-violation-signal-design §1 확定): declared_scope_paths 변경(설정/해제)
-    # 감사 이벤트 — 선언 주체 제한 없음(자기신고 허용)이라 도중 축소/해제의 회피 억지력.
-    if "declared_scope_paths" in data and _story_for_access.declared_scope_paths != story.declared_scope_paths:
-        publish_event(str(repo.org_id), "story.declared_scope_changed", {
-            "story_id": str(id),
-            "project_id": str(story.project_id),
-            "org_id": str(repo.org_id),
-            "old_declared_scope_paths": (
-                json.dumps(_story_for_access.declared_scope_paths)
-                if _story_for_access.declared_scope_paths else None
-            ),
-            "new_declared_scope_paths": (
-                json.dumps(story.declared_scope_paths) if story.declared_scope_paths else None
-            ),
-            "actor_id": str(actor_id) if actor_id else None,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
 
     # S-C2: story_updated — actor가 agent인 경우 기록 (AC2, AC6)
     if actor_id:
@@ -1290,14 +1268,11 @@ async def update_story_status(
                 severity="warn",
             )
             # AC4(동일 패턴): workflow_violation webhook도 관련자(행위자+담당자)만 — 동일 org-wide fan-out
-            # 박멸. publish_event(UI 활동피드)는 org-wide 유지.
+            # 박멸. story #2132(2026-07-23): publish_event() 호출 제거 — FE 소비처 0(설계 doc §1) +
+            # 그 죽은 org-level fanout(`_subscribers`) 자체가 삭제됨.
             _violation_notify_ids = {
                 m for m in (actor_id, story.assignee_id) if m is not None
             }
-            try:
-                publish_event(str(org_id), "workflow_violation", _v_event)
-            except Exception:
-                pass
             try:
                 await fire_webhooks(
                     db, org_id, "workflow_violation", _v_event,

@@ -137,7 +137,7 @@ export function AudioRecorder({
 }: AudioRecorderProps) {
   const t = useTranslations('meeting');
   const {
-    isRecording, duration, audioBlob, audioUrl, errorCode, analyser,
+    isRecording, duration, audioBlob, audioUrl, errorCode, errorNonce, analyser,
     startRecording, stopRecording,
   } = useAudioRecorder();
 
@@ -305,7 +305,7 @@ export function AudioRecorder({
           훅)는 성공적으로 마이크를 획득한 뒤에만 null로 리셋되고(catch 분기는 직접 세팅), 연속 동일
           실패(예: micDenied 반복)에서는 null 경유 없이 같은 문자열이 재설정될 수 있다 — 별도 잠재
           결함으로 기록(훅 내부 상태머신은 이 스토리에서 재구성하지 않음). */}
-      {errorCode && <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-2 text-xs text-destructive">{t(ERROR_I18N_MAP[errorCode])}</p>}
+      {errorCode && <p key={errorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="mb-2 text-xs text-destructive">{t(ERROR_I18N_MAP[errorCode])}</p>}
       {sttError && <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-2 text-xs text-warning">{sttError}</p>}
       {fileError && <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-2 text-xs text-destructive">{fileError}</p>}
 

@@ -257,8 +257,7 @@ async def test_file_lock_with_conflict_warning():
         session.flush = AsyncMock()
         session.add = MagicMock()
 
-        with patch("app.routers.file_locks.publish_event"), \
-             patch("app.routers.file_locks.fire_webhooks", new_callable=AsyncMock), \
+        with patch("app.routers.file_locks.fire_webhooks", new_callable=AsyncMock), \
              patch("app.routers.file_locks.assert_caller_is_member", new_callable=AsyncMock,
                    return_value=None):
             async with client as c:

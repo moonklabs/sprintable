@@ -10,10 +10,12 @@ PO/선생님 대조 필요 사항으로 별도 보고.
 
 Story의 5-effect(publish_event·fire_webhooks·process_event·dispatch_notification·
 StoryActivity) 전부를 복제하지 않는다 — 근거(BE design doc §2.2): 이 이벤트의 1차 소비자는
-오르테가(웹훅)이지 특정 assignee 알림이 아니다. v1 스코프 = 3-effect:
-publish_event(항상)·fire_webhooks(오르테가 구독 채널)·dispatch_notification(assignee 있을
-때만, 선택적). process_event(workflow_pipeline 에이전트 라우팅 룰 트리거)는 로드맵 이벤트가
-자동으로 에이전트 워크플로 룰을 발화해야 할 근거가 아직 없어 v1 제외(§2.2)."""
+오르테가(웹훅)이지 특정 assignee 알림이 아니다. v1 스코프 = 2-effect:
+fire_webhooks(오르테가 구독 채널)·dispatch_notification(assignee 있을 때만, 선택적).
+process_event(workflow_pipeline 에이전트 라우팅 룰 트리거)는 로드맵 이벤트가 자동으로
+에이전트 워크플로 룰을 발화해야 할 근거가 아직 없어 v1 제외(§2.2). ⚠️story #2132(2026-07-23):
+publish_event는 그 자체가 삭제됐다(org-level fanout이 영구 죽은 코드였음) — 원래 3-effect
+중 하나가 빠진 것은 이 v1 스코프 축소와 무관, #2132 근본수정의 결과다."""
 from __future__ import annotations
 
 import uuid
@@ -49,14 +51,17 @@ async def _emit(
     없음 — preserve_broadcast로 구제될 여지도 없음). notify_member_id가 None(assignee
     없음 — epic.reordered/removed는 항상 이 케이스)이면 반드시 recipient_member_ids=None
     (게이팅 미적용)으로 넘겨야 오르테가 같은 org-wide 구독 웹훅이 실제로 수신한다.
-    `{notify_member_id} if notify_member_id else set()`(빈 집합)이 이 버그의 근본이었다."""
-    from app.routers.events import publish_event
+    `{notify_member_id} if notify_member_id else set()`(빈 집합)이 이 버그의 근본이었다.
+
+    story #2132(2026-07-23): publish_event() 호출 제거 — 이 함수가 발화하는 epic.* 이벤트는
+    FE 소비처 0(설계 doc `story-2139-2132-publish-event-unification-design` §1) + 그 죽은
+    org-level fanout(`_subscribers`) 자체가 삭제됨. fire_webhooks(오르테가 구독 채널)는
+    별개 채널이라 무관·그대로 유지."""
     from app.services.notification_dispatch import dispatch_notification
     from app.services.webhook_dispatch import fire_webhooks
 
     notify_ids: set[uuid.UUID] | None = {notify_member_id} if notify_member_id else None
 
-    publish_event(str(org_id), event_type, event_data)
     try:
         await fire_webhooks(db, org_id, event_type, event_data, recipient_member_ids=notify_ids)
     except Exception:
@@ -122,7 +127,6 @@ async def emit_goal_reordered(
     """
     if not items:
         return
-    from app.routers.events import publish_event
     from app.services.webhook_dispatch import fire_webhooks
 
     representative = items[0]
@@ -138,9 +142,10 @@ async def emit_goal_reordered(
         }
         for it in items
     ]
-    # publish_event(SSE/감사·항상) + 게이팅된 webhook(지정 수신자만). recipient_member_ids가
-    # 빈 집합이면(해소된 relay-owner 없음) member-bound webhook 전부 drop = 0 배달(no-fiction).
-    publish_event(str(org_id), "epic.reordered", event_data)
+    # story #2132(2026-07-23): publish_event() 호출 제거 — FE 소비처 0(설계 doc §1) + 그 죽은
+    # org-level fanout(`_subscribers`) 자체가 삭제됨. 게이팅된 webhook(지정 수신자만)은 그대로
+    # 유지 — recipient_member_ids가 빈 집합이면(해소된 relay-owner 없음) member-bound webhook
+    # 전부 drop = 0 배달(no-fiction).
     try:
         await fire_webhooks(
             db, org_id, "epic.reordered", event_data,

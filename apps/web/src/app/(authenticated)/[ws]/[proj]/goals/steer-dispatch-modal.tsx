@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useRenderNonce } from '@/hooks/use-render-nonce';
 import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
@@ -55,6 +56,9 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // story #2154 — 클라 사전검증 실패가 setError(null) 리셋보다 먼저 return해, 연속 동일
+  // 실패 시 재낭독이 안 될 수 있던 것을 nonce-key로 구조적으로 막는다.
+  const [errorNonce, bumpErrorNonce] = useRenderNonce();
 
   useEffect(() => {
     let alive = true;
@@ -91,7 +95,7 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
   }, []);
 
   const handleSend = useCallback(async () => {
-    if (selected.size === 0) { setError(t('steerRecipientRequired')); return; } // 클라 사전검증(BE 400 前)
+    if (selected.size === 0) { bumpErrorNonce(); setError(t('steerRecipientRequired')); return; } // 클라 사전검증(BE 400 前)
     setSending(true);
     setError(null);
     try {
@@ -100,17 +104,18 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items, recipient_member_ids: [...selected] }),
       });
-      if (res.status === 409) { setError(t('steerDispatchConflict')); setSending(false); return; }
-      if (!res.ok) { setError(t('steerDispatchError')); setSending(false); return; }
+      if (res.status === 409) { bumpErrorNonce(); setError(t('steerDispatchConflict')); setSending(false); return; }
+      if (!res.ok) { bumpErrorNonce(); setError(t('steerDispatchError')); setSending(false); return; }
       try { localStorage.setItem(lastRecipientsKey(projectId), JSON.stringify([...selected])); } catch { /* localStorage 불가 무시 */ }
       const names = (agents ?? []).filter((a) => selected.has(a.id)).map((a) => a.name);
       onDispatched(names);
     } catch (err) {
       console.error('[steer] 조타 디스패치 실패', err);
+      bumpErrorNonce();
       setError(t('steerDispatchError'));
       setSending(false);
     }
-  }, [selected, items, projectId, agents, onDispatched, t]);
+  }, [selected, items, projectId, agents, onDispatched, t, bumpErrorNonce]);
 
   const noAgents = (agents?.length ?? 0) === 0;
 
@@ -155,7 +160,7 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
           )}
         </div>
 
-        {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
+        {error ? <p key={errorNonce} className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
 
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onClose} disabled={sending}>{t('cancel')}</Button>

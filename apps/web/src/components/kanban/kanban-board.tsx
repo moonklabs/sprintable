@@ -9,6 +9,7 @@ import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOve
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { useRenderNonce } from '@/hooks/use-render-nonce';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -113,6 +114,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const t = useTranslations('board');
   const { toasts, addToast, dismissToast } = useToast();
   const [transitionError, setTransitionError] = useState<string | null>(null);
+  // story #2154 — 이 배너는 4초 후 자동 setTransitionError(null)로만 해소되고, 재시도 直前에
+  // 명시적으로 null 리셋하지 않는다(#2400이 남긴 latent gap). 4초 내 동일 사유가 재발하면
+  // 텍스트가 안 바뀌어 재낭독이 안 될 수 있던 것을 nonce-key로 구조적으로 막는다.
+  const [transitionErrorNonce, bumpTransitionErrorNonce] = useRenderNonce();
   const [stories, setStories] = useState<KanbanStory[]>([]);
   const [sprints, setSprints] = useState<KanbanSprint[]>([]);
   const [epics, setEpics] = useState<KanbanEpic[]>([]);
@@ -246,7 +251,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // story #2059: 보드 실시간 반영 — 새 EventSource를 여는 대신 기존 useSseNotifications의
   // extraEventNames 확장 지점을 구독한다(AC2, 이미 이 용도로 설계된 재사용 경로 —
   // hooks/use-sse-notifications.ts 자체 문서 참고). story.status_changed/assignee_changed는
-  // publish_event(org_id, ...)로 org 전체에 브로드캐스트되므로 project_id로 클라이언트 필터한다.
+  // ⚠️(2026-07-23 정정, #2139/#2132) 실제로는 _push_to_agent(member_id) 경로로 프로젝트
+  // 접근 가능한 멤버에게 개별 전송된다 — org 전체에 브로드캐스트하던 publish_event()는
+  // 아무도 구독하지 않던 죽은 레지스트리였고 오늘 삭제됐다(과거엔 이 코멘트가 그렇게 적어뒀으나
+  // 실제 배달 경로가 아니었다). project_id 클라 필터는 여전히 그대로 필요하다(수신 대상 멤버가
+  // 여러 프로젝트에 접근 가능해 필터 없이는 다른 프로젝트 카드까지 반응할 수 있음).
   // 이미 로드된(페이지네이션으로 fetch된) 카드만 in-place 패치 — 전체 재fetch를 하지 않으므로
   // 스크롤 위치·컬럼 순서가 흔들리지 않는다(AC3, #2050에서 배운 레이아웃 시프트 축과 동일 원리).
   // 아직 로드 안 된 카드(다른 컬럼 페이지네이션 밖)의 신규 진입은 이 스토리 스코프 밖으로 둔다.
@@ -701,6 +710,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         adjustColumnTotal(story.status, +1);
         const errJson = await res.json().catch(() => null);
         if (errJson?.error?.code === 'FORBIDDEN') {
+          bumpTransitionErrorNonce();
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
         }
@@ -760,6 +770,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         adjustColumnTotal(story.status, +1);
         const errJson = await res.json().catch(() => null);
         if (errJson?.error?.code === 'FORBIDDEN') {
+          bumpTransitionErrorNonce();
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
         }
@@ -777,7 +788,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       adjustColumnTotal(newStatus, -1);
       adjustColumnTotal(story.status, +1);
     }
-  }, [stories, t, adjustColumnTotal, addToast]);
+  }, [stories, t, adjustColumnTotal, addToast, bumpTransitionErrorNonce]);
 
   const handleAssignStory = useCallback(async (storyId: string) => {
     // TODO: Implement proper member selection UI
@@ -837,6 +848,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         }),
       });
       if (!res.ok) {
+        bumpTransitionErrorNonce();
         setTransitionError(t('createStoryFailed'));
         return;
       }
@@ -846,9 +858,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       // 카드 렌더 컬럼(created.status)과 카운트를 동일 source로 정합 — BE가 status를 정규화해도 무어긋남
       adjustColumnTotal(created.status, +1);
     } catch {
+      bumpTransitionErrorNonce();
       setTransitionError(t('createStoryFailed'));
     }
-  }, [projectId, selectedSprintId, selectedEpicId, t, adjustColumnTotal]);
+  }, [projectId, selectedSprintId, selectedEpicId, t, adjustColumnTotal, bumpTransitionErrorNonce]);
 
   // AC1/AC5: WIP limit 핸들러
   const handleWipLimitEdit = useCallback((columnId: string) => {
@@ -899,11 +912,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     <div className="flex h-full flex-col overflow-hidden">
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {transitionError && (
-        // story #2105 2차 — 이 배너는 4초 후 자동 setTransitionError(null)로만 해소되고, 재시도
-        // 직전에 명시적으로 null 리셋하지 않는다(handleDragEnd/handleChangeStatus/handleCreateStory
-        // 3곳 모두). 4초 내 동일 사유가 재발하면 텍스트가 안 바뀌어 재낭독이 안 될 수 있다 — 별도
-        // 잠재 결함으로 기록(이 스토리에서 상태머신을 재구성하지 않음).
-        <div role="alert" aria-live="assertive" aria-atomic="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
+        // story #2154 — handleDragEnd/handleChangeStatus/handleCreateStory가 실패 시점마다
+        // bumpTransitionErrorNonce()를 함께 호출해, 4초 내 동일 사유가 재발해도 key가 바뀌어
+        // 항상 새 DOM 노드로 재낭독된다(#2400이 남긴 latent gap 해소).
+        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
           ⚠️ {transitionError}
         </div>
       )}

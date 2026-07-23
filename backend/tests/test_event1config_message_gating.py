@@ -70,7 +70,10 @@ def _patches():
         patch.object(conv, "assign_recipient_seq", _assign_seq),
         patch("app.services.activity_stream.extract_activities_best_effort", AsyncMock()),
         patch("app.services.presence_events.emit_conversation_working", new=AsyncMock(return_value=None)),
-        patch("app.services.presence_events.emit_presence", lambda *_a, **_k: None),
+        # story #2139(2026-07-23): emit_presence가 push_to_org_members(await 필요)를 호출하도록
+        # async로 전환됐다 — 호출부(conversations.py)도 `await emit_presence(...)`로 바뀌었으므로
+        # mock도 awaitable이어야 한다(평범한 lambda는 None을 반환해 TypeError: can't await None).
+        patch("app.services.presence_events.emit_presence", new=AsyncMock(return_value=None)),
     ]
 
 

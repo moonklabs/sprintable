@@ -1,15 +1,20 @@
 """E-GLANCE wedge #2(story 96b19bc3) — app/services/epic_events.py 단위 테스트.
 
 emit_story_status_changed 격리 테스트(test_emit_story_status_changed_isolation.py)와 동형
-패턴: publish_event/fire_webhooks/dispatch_notification을 mock해 (1) 각 이벤트타입의
-정확한 event_type+payload shape, (2) side-effect 실패가 전파되지 않음(best-effort 격리),
-(3) status_changed의 old==new no-op 가드를 검증한다."""
+패턴: fire_webhooks/dispatch_notification을 mock해 (1) 각 이벤트타입의 정확한 event_type+
+payload shape, (2) side-effect 실패가 전파되지 않음(best-effort 격리), (3) status_changed의
+old==new no-op 가드를 검증한다.
+
+story #2132(2026-07-23) 근본수정: `publish_event()` 호출이 삭제됐다(FE 소비처 0 + 죽은
+org-level fanout 자체 삭제) — payload shape 검증은 이제 fire_webhooks에 전달되는 동일
+event_data(4번째 positional arg)로 확認한다(webhook도 같은 event_data를 받으므로 shape
+검증 대상으로 동등)."""
 from __future__ import annotations
 
 import uuid
 from contextlib import ExitStack
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -33,8 +38,7 @@ def _epic(status: str = "active", assignee_id: uuid.UUID | None = None):
     )
 
 
-def _base_patches(stack: ExitStack, *, publish=None, webhook=None, notif=None):
-    stack.enter_context(patch("app.routers.events.publish_event", publish or MagicMock()))
+def _base_patches(stack: ExitStack, *, webhook=None, notif=None):
     stack.enter_context(patch(
         "app.services.webhook_dispatch.fire_webhooks", webhook or AsyncMock(),
     ))
@@ -44,23 +48,18 @@ def _base_patches(stack: ExitStack, *, publish=None, webhook=None, notif=None):
 
 
 @pytest.mark.anyio
-async def test_emit_goal_created_fires_publish_and_webhook_with_correct_shape():
+async def test_emit_goal_created_fires_webhook_with_correct_shape():
     epic = _epic()
-    publish = MagicMock()
     webhook = AsyncMock()
     with ExitStack() as stack:
-        _base_patches(stack, publish=publish, webhook=webhook)
+        _base_patches(stack, webhook=webhook)
         await emit_goal_created(AsyncMock(), uuid.uuid4(), epic, actor_id=uuid.uuid4())
-
-    publish.assert_called_once()
-    args = publish.call_args[0]
-    assert args[1] == "epic.created"
-    assert args[2]["epic_id"] == str(epic.id)
-    assert args[2]["epic_title"] == "Epic X"
 
     webhook.assert_awaited_once()
     wh_args = webhook.call_args[0]
     assert wh_args[2] == "epic.created"
+    assert wh_args[3]["epic_id"] == str(epic.id)
+    assert wh_args[3]["epic_title"] == "Epic X"
     # 까심 QA(#2076 REQUEST_CHANGES) 회귀가드: assignee 없으면 recipient_member_ids는 반드시
     # None(게이팅 미적용)이어야 한다 — 빈 집합이면 fire_webhooks가 member-bound 웹훅(오르테가
     # 포함)을 전부 drop한다(WebhookConfig.member_id nullable=False, broadcast 개념 없음).
@@ -82,29 +81,27 @@ async def test_emit_goal_created_with_assignee_gates_to_that_member_not_empty_se
 
 @pytest.mark.anyio
 async def test_emit_goal_status_changed_no_op_when_old_equals_new():
-    """old_status == epic.status면 완전 no-op(publish_event조차 호출 안 됨) —
+    """old_status == epic.status면 완전 no-op(webhook조차 호출 안 됨) —
     emit_story_status_changed와 동형 규율."""
     epic = _epic(status="active")
-    publish = MagicMock()
     webhook = AsyncMock()
     with ExitStack() as stack:
-        _base_patches(stack, publish=publish, webhook=webhook)
+        _base_patches(stack, webhook=webhook)
         await emit_goal_status_changed(AsyncMock(), uuid.uuid4(), epic, "active")
 
-    publish.assert_not_called()
     webhook.assert_not_awaited()
 
 
 @pytest.mark.anyio
 async def test_emit_goal_status_changed_fires_with_old_and_new_status():
     epic = _epic(status="done")
-    publish = MagicMock()
+    webhook = AsyncMock()
     with ExitStack() as stack:
-        _base_patches(stack, publish=publish)
+        _base_patches(stack, webhook=webhook)
         await emit_goal_status_changed(AsyncMock(), uuid.uuid4(), epic, "active")
 
-    publish.assert_called_once()
-    payload = publish.call_args[0][2]
+    webhook.assert_awaited_once()
+    payload = webhook.call_args[0][3]
     assert payload["old_status"] == "active"
     assert payload["status"] == "done"
 
@@ -112,15 +109,14 @@ async def test_emit_goal_status_changed_fires_with_old_and_new_status():
 @pytest.mark.anyio
 async def test_emit_goal_removed_uses_pre_captured_title_not_epic_object():
     """삭제 後엔 epic 객체 조회 불가 — 호출자가 넘긴 title/project_id로만 payload 구성."""
-    publish = MagicMock()
     webhook = AsyncMock()
     epic_id = uuid.uuid4()
     project_id = uuid.uuid4()
     with ExitStack() as stack:
-        _base_patches(stack, publish=publish, webhook=webhook)
+        _base_patches(stack, webhook=webhook)
         await emit_goal_removed(AsyncMock(), uuid.uuid4(), epic_id, "Deleted Epic", project_id)
 
-    payload = publish.call_args[0][2]
+    payload = webhook.call_args[0][3]
     assert payload["epic_id"] == str(epic_id)
     assert payload["epic_title"] == "Deleted Epic"
     assert payload["project_id"] == str(project_id)
@@ -139,15 +135,13 @@ async def test_emit_goal_reordered_fires_once_for_batch_gated_to_recipients():
         {"id": uuid.uuid4(), "title": "B", "project_id": uuid.uuid4(), "position": 2, "old_position": 5},
     ]
     recipients = {uuid.uuid4()}
-    publish = MagicMock()
     webhook = AsyncMock()
     with ExitStack() as stack:
-        _base_patches(stack, publish=publish, webhook=webhook)
+        _base_patches(stack, webhook=webhook)
         await emit_goal_reordered(AsyncMock(), uuid.uuid4(), items, recipients)
 
-    publish.assert_called_once()
     webhook.assert_awaited_once()
-    payload = publish.call_args[0][2]
+    payload = webhook.call_args[0][3]
     assert len(payload["items"]) == 2
     assert payload["items"][1]["old_position"] == 5
     # 커밋 모델: 지정 수신자로 게이팅(None 브로드캐스트 폐지)·activity-feed 브로드캐스트도 억제.
@@ -157,11 +151,11 @@ async def test_emit_goal_reordered_fires_once_for_batch_gated_to_recipients():
 
 @pytest.mark.anyio
 async def test_emit_goal_reordered_empty_items_is_noop():
-    publish = MagicMock()
+    webhook = AsyncMock()
     with ExitStack() as stack:
-        _base_patches(stack, publish=publish)
+        _base_patches(stack, webhook=webhook)
         await emit_goal_reordered(AsyncMock(), uuid.uuid4(), [], set())
-    publish.assert_not_called()
+    webhook.assert_not_awaited()
 
 
 @pytest.mark.anyio
