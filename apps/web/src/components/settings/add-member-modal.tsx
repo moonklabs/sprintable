@@ -7,6 +7,7 @@ import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useRenderNonce } from '@/hooks/use-render-nonce';
 
 interface AddMemberModalProps {
   open: boolean;
@@ -26,6 +27,9 @@ export function AddMemberModal({ open, onClose, orgId, projects, onAdded }: AddM
   const tc = useTranslations('common');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // story #2154 — orgId/email 빈값 사전검증이 setError(null) 리셋보다 먼저 return해,
+  // 연속 동일 실패 시 재낭독이 안 될 수 있던 것을 nonce-key로 구조적으로 막는다.
+  const [errorNonce, bumpErrorNonce] = useRenderNonce();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'admin' | 'member'>('member');
   const [projectIds, setProjectIds] = useState<string[]>([]);
@@ -47,8 +51,8 @@ export function AddMemberModal({ open, onClose, orgId, projects, onAdded }: AddM
 
   const submitHuman = async () => {
     if (submitting) return;
-    if (!orgId) { setError(t('addMemberInviteError')); return; }
-    if (!email.trim()) { setError(t('inviteEmailRequired')); return; }
+    if (!orgId) { bumpErrorNonce(); setError(t('addMemberInviteError')); return; }
+    if (!email.trim()) { bumpErrorNonce(); setError(t('inviteEmailRequired')); return; }
     setSubmitting(true);
     setError(null);
     try {
@@ -58,10 +62,11 @@ export function AddMemberModal({ open, onClose, orgId, projects, onAdded }: AddM
         body: JSON.stringify({ email: email.trim(), role, project_ids: projectIds }),
       });
       const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-      if (!res.ok) { setError(json.error?.message ?? t('addMemberInviteError')); return; }
+      if (!res.ok) { bumpErrorNonce(); setError(json.error?.message ?? t('addMemberInviteError')); return; }
       onAdded(t('addMemberInviteSuccess'));
       close();
     } catch {
+      bumpErrorNonce();
       setError(t('addMemberInviteError'));
     } finally {
       setSubmitting(false);
@@ -113,7 +118,7 @@ export function AddMemberModal({ open, onClose, orgId, projects, onAdded }: AddM
           </div>
         </div>
 
-        {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
+        {error ? <p key={errorNonce} className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
 
         <DialogFooter>
           <Button variant="ghost" onClick={close} disabled={submitting}>{tc('cancel')}</Button>

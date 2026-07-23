@@ -9,6 +9,7 @@ import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOve
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { useRenderNonce } from '@/hooks/use-render-nonce';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -113,6 +114,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const t = useTranslations('board');
   const { toasts, addToast, dismissToast } = useToast();
   const [transitionError, setTransitionError] = useState<string | null>(null);
+  // story #2154 — 이 배너는 4초 후 자동 setTransitionError(null)로만 해소되고, 재시도 直前에
+  // 명시적으로 null 리셋하지 않는다(#2400이 남긴 latent gap). 4초 내 동일 사유가 재발하면
+  // 텍스트가 안 바뀌어 재낭독이 안 될 수 있던 것을 nonce-key로 구조적으로 막는다.
+  const [transitionErrorNonce, bumpTransitionErrorNonce] = useRenderNonce();
   const [stories, setStories] = useState<KanbanStory[]>([]);
   const [sprints, setSprints] = useState<KanbanSprint[]>([]);
   const [epics, setEpics] = useState<KanbanEpic[]>([]);
@@ -701,6 +706,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         adjustColumnTotal(story.status, +1);
         const errJson = await res.json().catch(() => null);
         if (errJson?.error?.code === 'FORBIDDEN') {
+          bumpTransitionErrorNonce();
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
         }
@@ -760,6 +766,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         adjustColumnTotal(story.status, +1);
         const errJson = await res.json().catch(() => null);
         if (errJson?.error?.code === 'FORBIDDEN') {
+          bumpTransitionErrorNonce();
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
         }
@@ -777,7 +784,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       adjustColumnTotal(newStatus, -1);
       adjustColumnTotal(story.status, +1);
     }
-  }, [stories, t, adjustColumnTotal, addToast]);
+  }, [stories, t, adjustColumnTotal, addToast, bumpTransitionErrorNonce]);
 
   const handleAssignStory = useCallback(async (storyId: string) => {
     // TODO: Implement proper member selection UI
@@ -837,6 +844,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         }),
       });
       if (!res.ok) {
+        bumpTransitionErrorNonce();
         setTransitionError(t('createStoryFailed'));
         return;
       }
@@ -846,9 +854,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       // 카드 렌더 컬럼(created.status)과 카운트를 동일 source로 정합 — BE가 status를 정규화해도 무어긋남
       adjustColumnTotal(created.status, +1);
     } catch {
+      bumpTransitionErrorNonce();
       setTransitionError(t('createStoryFailed'));
     }
-  }, [projectId, selectedSprintId, selectedEpicId, t, adjustColumnTotal]);
+  }, [projectId, selectedSprintId, selectedEpicId, t, adjustColumnTotal, bumpTransitionErrorNonce]);
 
   // AC1/AC5: WIP limit 핸들러
   const handleWipLimitEdit = useCallback((columnId: string) => {
@@ -899,11 +908,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     <div className="flex h-full flex-col overflow-hidden">
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {transitionError && (
-        // story #2105 2차 — 이 배너는 4초 후 자동 setTransitionError(null)로만 해소되고, 재시도
-        // 직전에 명시적으로 null 리셋하지 않는다(handleDragEnd/handleChangeStatus/handleCreateStory
-        // 3곳 모두). 4초 내 동일 사유가 재발하면 텍스트가 안 바뀌어 재낭독이 안 될 수 있다 — 별도
-        // 잠재 결함으로 기록(이 스토리에서 상태머신을 재구성하지 않음).
-        <div role="alert" aria-live="assertive" aria-atomic="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
+        // story #2154 — handleDragEnd/handleChangeStatus/handleCreateStory가 실패 시점마다
+        // bumpTransitionErrorNonce()를 함께 호출해, 4초 내 동일 사유가 재발해도 key가 바뀌어
+        // 항상 새 DOM 노드로 재낭독된다(#2400이 남긴 latent gap 해소).
+        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
           ⚠️ {transitionError}
         </div>
       )}
