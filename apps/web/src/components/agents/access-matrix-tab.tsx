@@ -22,6 +22,24 @@ interface AccessMatrixRow {
   record_id: string;
 }
 
+export type AccessMatrixMessageState = { type: 'success' | 'error'; text: string } | null;
+
+// story #2153: 선언(type: 'success'|'error')과 렌더가 갈라져 있던 결함 — success가 들어와도
+// 항상 destructive/alert였다. 렌더 분기를 별도 컴포넌트로 빼 success 케이스를 직접 테스트한다.
+export function AccessMatrixMessage({ message }: { message: AccessMatrixMessageState }) {
+  if (!message) return null;
+  return (
+    <p
+      className={cn('mb-3 text-xs', message.type === 'success' ? 'text-success' : 'text-destructive')}
+      role={message.type === 'success' ? 'status' : 'alert'}
+      aria-live={message.type === 'success' ? 'polite' : 'assertive'}
+      aria-atomic="true"
+    >
+      {message.text}
+    </p>
+  );
+}
+
 /**
  * story da4c6b2d — org 전체 에이전트(행) × 프로젝트(열) 접근권한 매트릭스.
  * 데이터 = `agent-project-access-section.tsx`(상세 per-agent 토글)와 동일 원천
@@ -41,7 +59,7 @@ export function AccessMatrixTab() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [togglingKey, setTogglingKey] = useState<string | null>(null);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [message, setMessage] = useState<AccessMatrixMessageState>(null);
 
   const key = (agentId: string, projectId: string) => `${agentId}::${projectId}`;
 
@@ -165,7 +183,7 @@ export function AccessMatrixTab() {
           </div>
         </SectionCardHeader>
         <SectionCardBody>
-          {message ? <p className="mb-3 text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{message.text}</p> : null}
+          <AccessMatrixMessage message={message} />
 
           {agents.length === 0 || projects.length === 0 ? (
             <div className="rounded-md border border-dashed border-border px-3 py-8 text-center">
