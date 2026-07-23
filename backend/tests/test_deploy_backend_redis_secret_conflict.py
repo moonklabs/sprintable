@@ -50,13 +50,26 @@ _DECLARED_SUBSTITUTIONS = {
 }
 
 
-def _extract_deploy_backend_script() -> str:
-    """cloudbuild.yaml의 deploy-backend 스텝 bash 스크립트 본문을 그대로 추출(원문 그대로 — $$ 이스케이프 미처리)."""
+# Cloud Build의 substitution 파서가 실제로 훑는 대상 = entrypoint: bash 스텝의 args 블록
+# 스칼라 문자열뿐이다(오르테가 실측, 2026-07-23) — YAML 레벨 주석(이 스칼라 밖)은 YAML
+# 파서가 먼저 걷어내 Cloud Build가 아예 보지 못한다. 그래서 가드 스캔 스코프를 파일 전체가
+# 아니라 이 스텝들로 좁힌다 — 넓히면 순수 YAML 주석(예: 다른 스텝을 설명하는 프로즈 안의
+# `${ENV}` 언급)에 오탐이 나서 안전한 주석을 억지로 고치게 만든다. bash entrypoint 스텝이
+# 새로 생기면 이 목록에 추가할 것(오르테가 지시 — deploy-realtime도 같은 함정 자리라 포함).
+_BASH_ENTRYPOINT_STEP_IDS = ("deploy-backend", "deploy-realtime")
+
+
+def _extract_step_script(step_id: str) -> str:
+    """cloudbuild.yaml의 지정 스텝 bash 스크립트 본문을 그대로 추출(원문 그대로 — $$ 이스케이프 미처리)."""
     doc = yaml.safe_load(_CLOUDBUILD_YAML.read_text())
-    step = next(s for s in doc["steps"] if s["id"] == "deploy-backend")
-    assert step["entrypoint"] == "bash", "deploy-backend가 더 이상 bash entrypoint가 아님 — 이 테스트 갱신 필요"
+    step = next(s for s in doc["steps"] if s["id"] == step_id)
+    assert step["entrypoint"] == "bash", f"{step_id}가 더 이상 bash entrypoint가 아님 — 이 테스트 갱신 필요"
     # args: ["-c", "<script>"]
     return step["args"][1]
+
+
+def _extract_deploy_backend_script() -> str:
+    return _extract_step_script("deploy-backend")
 
 
 def _apply_cloudbuild_escaping(script: str) -> str:
@@ -112,18 +125,25 @@ def test_deploy_backend_no_unescaped_shell_vars_in_cloudbuild_substitution_synta
     스캔에서 뺐다가 "이 사고를 설명하는 주석 자신이 그 표기를 예시로 써서 사고를 재현"하는
     것을 놓쳤다 — 그 재발이 이 규칙을 없앤 이유다. 새 주석을 쓸 때도 달러중괄호로 미선언
     이름을 언급하면(설명 목적이라도) 이 테스트가 실패해야 정상이다.
+
+    스캔 범위는 파일 전체가 아니라 `_BASH_ENTRYPOINT_STEP_IDS`의 args 블록 스칼라로 한정한다
+    (오르테가 확認, 2026-07-23) — Cloud Build는 그 스칼라 문자열만 보고, YAML 레벨 주석(스텝
+    args 밖의 프로즈)은 YAML 파서가 먼저 걷어내 Cloud Build가 아예 못 본다. 파일 전체로
+    넓히면 그런 순수 YAML 주석에 오탐이 나서(실측: 다른 스텝을 설명하는 주석이 예시로
+    `${ENV}` 를 언급하는 자리) 안전한 문장을 억지로 고치게 된다.
     """
-    script = _extract_deploy_backend_script()
-    # `$$`(이스케이프)로 시작하는 자리는 실제 셸 변수 참조라 스킵 — `$$` 다음 글자부터 다시 스캔.
-    # 정규식으로 `$$` 뒤에 오는 참조는 애초에 매치 대상에서 제외(단일 `$`만 substitution 후보).
-    # 주석 포함 스크립트 원문 전체를 스캔한다(주석 제외 금지 — 위 docstring 참조).
-    unescaped = re.findall(r"(?<!\$)\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", script)
-    unknown = sorted(set(unescaped) - _DECLARED_SUBSTITUTIONS)
-    assert not unknown, (
-        f"cloudbuild.yaml deploy-backend 스텝에 이스케이프 안 된(달러 두 개 누락) 셸 변수로 "
-        f"보이는 미선언 substitution 참조 발견(주석 포함 전문 스캔): {unknown} — 셸 변수라면 "
-        f"달러 두 개로 이스케이프할 것. 설명 주석이라도 달러중괄호로 이 이름들을 언급하지 말 것."
-    )
+    for step_id in _BASH_ENTRYPOINT_STEP_IDS:
+        script = _extract_step_script(step_id)
+        # `$$`(이스케이프)로 시작하는 자리는 실제 셸 변수 참조라 스킵 — `$$` 다음 글자부터 다시 스캔.
+        # 정규식으로 `$$` 뒤에 오는 참조는 애초에 매치 대상에서 제외(단일 `$`만 substitution 후보).
+        # 주석 포함 스크립트 원문 전체를 스캔한다(주석 제외 금지 — 위 docstring 참조).
+        unescaped = re.findall(r"(?<!\$)\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", script)
+        unknown = sorted(set(unescaped) - _DECLARED_SUBSTITUTIONS)
+        assert not unknown, (
+            f"cloudbuild.yaml {step_id} 스텝에 이스케이프 안 된(달러 두 개 누락) 셸 변수로 "
+            f"보이는 미선언 substitution 참조 발견(주석 포함 전문 스캔): {unknown} — 셸 변수라면 "
+            f"달러 두 개로 이스케이프할 것. 설명 주석이라도 달러중괄호로 이 이름들을 언급하지 말 것."
+        )
 
 
 def test_deploy_backend_is_bash_entrypoint():
