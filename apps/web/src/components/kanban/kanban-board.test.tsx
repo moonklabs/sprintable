@@ -99,7 +99,7 @@ beforeEach(() => {
   root = createRoot(container);
   stubLocalStorage();
   stubEventSource();
-  useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [] });
+  useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
 });
 
 afterEach(async () => {
@@ -335,5 +335,35 @@ describe('KanbanBoard — 실시간(SSE) 상세 패널 동기화(#2137)', () => 
     // story-detail-panel.tsx: useEffect(() => setLocalStatus(story.status), [story.status]) 가
     // selectedStory prop 갱신을 따라가는지 — StatusBadge 라벨 텍스트로 확認.
     expect(dialog!.textContent).toContain('개발 대기');
+  });
+});
+
+// story #2104 — BE stories.py:1056(human-only 영구삭제 403)를 FE가 미리 안 보고 에이전트
+// 계정에도 삭제 트리거를 무조건 열었다(#2091/#2103과 같은 결함). 양방향 고정 — human까지
+// 잠그면 정당한 삭제가 봉쇄되는 더 큰 사고다(승격 위험목록의 잔여 미검증 칸 해소).
+describe('StoryDetailPanel — 영구삭제 트리거 authz(story #2104)', () => {
+  async function openPanel(title: string) {
+    const card = container.querySelector(`[title="${title}"]`) as HTMLElement | null;
+    expect(card).not.toBeNull();
+    await act(async () => {
+      card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it('human이면 스토리 영구삭제 트리거가 렌더된다(정당한 사용자는 막히면 안 됨)', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    await openPanel('S1');
+    expect(container.querySelector('[role="dialog"] button[aria-label="스토리 삭제"]')).not.toBeNull();
+  });
+
+  it('agent면 스토리 영구삭제 트리거가 안 뜬다', async () => {
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'agent' });
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    await openPanel('S1');
+    expect(container.querySelector('[role="dialog"] button[aria-label="스토리 삭제"]')).toBeNull();
   });
 });
