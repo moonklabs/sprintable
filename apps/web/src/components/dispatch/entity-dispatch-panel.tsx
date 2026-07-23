@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { MoreHorizontal, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ToastContainer, useToast } from '@/components/ui/toast';
+import { normalizeAssigneePatch } from '@/components/kanban/types';
 
 interface TeamMember {
   id: string;
@@ -77,12 +78,14 @@ export function EntityDispatchPanel({
     try {
       // 84f57f97 fix②: dispatch 前 assignee를 전 entity type 영속화(이전엔 story만 스킵→미영속→
       // BE dispatch가 담당자 못 봐 core flow 막힘). story=assignee_ids 배열·doc/epic=assignee_id.
+      // story #2133: 두 필드를 손으로 나눠 쓰지 않고 normalizeAssigneePatch에서 파생.
       const patchPath = entityType === 'doc' ? `/api/docs/${entityId}`
         : entityType === 'epic' ? `/api/goals/${entityId}`
         : `/api/stories/${entityId}`;
+      const assigneePatch = normalizeAssigneePatch({ assignee_id: assigneeId });
       const patchBody = entityType === 'story'
-        ? { assignee_ids: [assigneeId] }
-        : { assignee_id: assigneeId };
+        ? { assignee_ids: assigneePatch.assignee_ids }
+        : { assignee_id: assigneePatch.assignee_id };
       const patchRes = await fetch(patchPath, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
