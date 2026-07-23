@@ -251,7 +251,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // story #2059: 보드 실시간 반영 — 새 EventSource를 여는 대신 기존 useSseNotifications의
   // extraEventNames 확장 지점을 구독한다(AC2, 이미 이 용도로 설계된 재사용 경로 —
   // hooks/use-sse-notifications.ts 자체 문서 참고). story.status_changed/assignee_changed는
-  // publish_event(org_id, ...)로 org 전체에 브로드캐스트되므로 project_id로 클라이언트 필터한다.
+  // ⚠️(2026-07-23 정정, #2139/#2132) 실제로는 _push_to_agent(member_id) 경로로 프로젝트
+  // 접근 가능한 멤버에게 개별 전송된다 — org 전체에 브로드캐스트하던 publish_event()는
+  // 아무도 구독하지 않던 죽은 레지스트리였고 오늘 삭제됐다(과거엔 이 코멘트가 그렇게 적어뒀으나
+  // 실제 배달 경로가 아니었다). project_id 클라 필터는 여전히 그대로 필요하다(수신 대상 멤버가
+  // 여러 프로젝트에 접근 가능해 필터 없이는 다른 프로젝트 카드까지 반응할 수 있음).
   // 이미 로드된(페이지네이션으로 fetch된) 카드만 in-place 패치 — 전체 재fetch를 하지 않으므로
   // 스크롤 위치·컬럼 순서가 흔들리지 않는다(AC3, #2050에서 배운 레이아웃 시프트 축과 동일 원리).
   // 아직 로드 안 된 카드(다른 컬럼 페이지네이션 밖)의 신규 진입은 이 스토리 스코프 밖으로 둔다.
