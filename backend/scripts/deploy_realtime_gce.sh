@@ -92,12 +92,16 @@ case "${ENV}" in
         # 쓰는 값과 다른 값이 실린다 — #2135(env 이름 불일치)와 같은 클래스, 여기선 시크릿
         # 자체가 존재해 조용히 다른 값이 실리는 형태라 더 발견하기 어려움.
         CRON_SECRET_NAME="CRON_SECRET_PROD"
-        # ⛔story #2142(2026-07-23, 오르테가 gcloud 실측+정정) — GITHUB_CLIENT_ID_PROD/
-        # GITHUB_CLIENT_SECRET_PROD(유저 로그인 OAuth 앱, config.py:209 — GitHub App 봇과는
-        # 별개 물건)는 Secret Manager에 아예 없다. backend-prod Cloud Run이 실제로 물고 있는
-        # 시크릿은 GITHUB_CLIENT_ID_DEV/GITHUB_CLIENT_SECRET_DEV다(describe 대조 확認, prod가
-        # 왜 dev 시크릿을 쓰는지는 별건 — 이 스크립트 스코프는 "Cloud Run과 같은 걸 물게 한다").
-        # 새 시크릿을 만드는 게 아니라 실제 라이브 바인딩을 그대로 따라간다 — 접미를 DEV로.
+        # ⛔story #2142(2026-07-23, 오르테가 gcloud 실측+정정) — prod 분기인데 DEV 접미를
+        # 쓰는 게 **버그로 보일 자리라 명시적으로 남긴다: 이건 의도다.**
+        # backend-prod(Cloud Run)가 라이브로 GITHUB_CLIENT_ID_DEV/GITHUB_CLIENT_SECRET_DEV를
+        # 물고 있다(2026-07-23 실측, describe 대조 확認 — GITHUB_CLIENT_ID_PROD/_SECRET_PROD는
+        # Secret Manager에 아예 없음). GCE도 동일한 것을 물게 맞춘 것뿐이다.
+        # ⚠️prod가 dev OAuth 앱(유저 로그인용, config.py:209 — GitHub App 봇 시크릿과는 완전히
+        # 별개 물건, 그건 이미 -prod 접미로 정상 배선돼 있음)을 쓰는 것 자체가 적절한지는 별건
+        # (오르테가가 별도 스토리로 관측 사실만 세워둠 — 의도/누락 판단은 선생님 확認 後).
+        # ⛔"prod인데 왜 DEV?" 하고 이 줄을 고치면 GCE만 다른 OAuth 앱을 물어 로그인이
+        # backend-prod와 갈라진다 — 그 별건 스토리가 먼저 판단을 내리기 전엔 건드리지 말 것.
         GITHUB_SECRET_SUFFIX="DEV"
         GITHUB_APP_SECRET_ENV="prod"
         APP_URL="https://app.sprintable.ai"
