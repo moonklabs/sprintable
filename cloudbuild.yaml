@@ -284,8 +284,14 @@ steps:
         # dev는 AUTH 없는 plain Memorystore라 시크릿 바인딩 자체가 없으므로 기존처럼 plain으로 넘긴다.
         # prod는 여기서 REDIS_URL을 절대 안 넘김 — 시크릿 바인딩(별도 1회 gcloud, PO lane)이
         # --set-secrets 없는 이 스텝에 preserve된다(DATABASE_URL_PROD 등 기존 15개와 동일 컨벤션).
+        # ⛔story #2421 배포 실패 핫픽스(2026-07-23, 오르테가군 진단) — Cloud Build는 bash
+        # 스텝 안이라도 args 문자열 전체를 자기 substitution 파서로 먼저 훑는다. `ENV_VARS`는
+        # 유효한 built-in/사용자 substitution이 아니라서 `${ENV_VARS}` 참조가 build submit
+        # 자체를 INVALID_ARGUMENT로 거부시켰다(부분 배포 없이 안전하게 막힘). 셸 변수
+        # 참조는 `$$`로 이스케이프해야 Cloud Build가 문자 그대로 bash에 넘긴다 — 아래
+        # `$${ENV_VARS}`가 그것(진짜 substitution인 `${_DEPLOY_ENV}` 등은 단일 `$` 그대로 유지).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
-          ENV_VARS="${ENV_VARS},REDIS_URL=${_REDIS_URL}"
+          ENV_VARS="$${ENV_VARS},REDIS_URL=${_REDIS_URL}"
         fi
         gcloud run deploy sprintable-backend-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
@@ -294,7 +300,7 @@ steps:
           --max-instances=${_BACKEND_MAX_INSTANCES} \
           --timeout=${_BACKEND_TIMEOUT} \
           --allow-unauthenticated \
-          --update-env-vars="${ENV_VARS}" \
+          --update-env-vars="$${ENV_VARS}" \
           --remove-env-vars=REDIS_CONSUME_ENABLED \
           --quiet
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
