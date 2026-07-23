@@ -26,7 +26,9 @@
 #       0%부터 검증 후 GCLB로 전환(롤백 경로 보존, ⓔ).
 #
 # ⚠️이미지 분리 없음(설계 doc 스코프 확定) — backend와 완전 동일 이미지를 그대로 쓴다.
-# ⚠️dev only — realtime-prod는 서비스 자체가 없다(설계 doc 스코프 확定).
+# story #2142(2026-07-23, 선생님 GCE prod 전환 승인): prod 분기 신설 — 이 스크립트가 prod를
+# 받아들이게 하는 것만이 이 변경의 스코프. 실 리소스 생성(gcloud 실행)은 오르테가 DRY_RUN
+# 검수 통과 後 별도 승인 시점(이 PR에서 안 함).
 
 set -euo pipefail
 
@@ -57,6 +59,7 @@ case "${ENV}" in
         RUNTIME_SA="cloudrun-runtime-dev@${GCP_PROJECT}.iam.gserviceaccount.com"
         DB_SECRET_NAME="DATABASE_URL_DEV"
         GITHUB_SECRET_SUFFIX="DEV"
+        GITHUB_APP_SECRET_ENV="dev"  # story #2142 발견: github-app-*-dev Secret Manager ID의 소문자 접미(위 GITHUB_SECRET_SUFFIX와 별개 컨벤션 — 이 시크릿 3종만 하이픈+소문자)
         APP_URL="https://dev-app.sprintable.ai"
         # ⚠️FASTAPI_URL — 라이브 실측 그대로(cloudbuild.yaml routine dispatch-realtime과 동일값,
         # 2026-07-22 gcloud describe로 확認). 이 값은 이 서비스 "자기 자신"을 가리키는 self-URL로
@@ -65,8 +68,35 @@ case "${ENV}" in
         # 별도 재확認 필요(TODO — 현재는 라이브 값 그대로 이관해 드리프트 0으로 시작).
         FASTAPI_URL="https://sprintable-realtime-dev-787818285179.asia-northeast3.run.app"
         ;;
+    prod)
+        # story #2142(2026-07-23, 선생님 GCE prod 전환 승인): dev와 동일 구조, 리소스명·Cloud
+        # SQL·시크릿 접미만 prod로 전환(deploy_backend.sh의 dev/prod 분기와 동일 컨벤션 재사용).
+        MIG_NAME="sprintable-realtime-gateway-prod"
+        TEMPLATE_PREFIX="sprintable-realtime-gateway-prod"
+        TARGET_SIZE=3
+        ZONES="${GCP_REGION}-a,${GCP_REGION}-b,${GCP_REGION}-c"
+        GCLB_BACKEND_SERVICE="realtime-gateway-prod-backend"
+        MACHINE_TYPE="e2-small"
+        SQL_INSTANCE_CONN="${GCP_PROJECT}:${GCP_REGION}:sprintable-prod"
+        RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
+        DB_SECRET_NAME="DATABASE_URL_PROD"
+        GITHUB_SECRET_SUFFIX="PROD"
+        # ⚠️TODO(실 배포 前 확認 필요) — "-prod" 접미 Secret Manager 시크릿(github-app-client-secret-prod
+        # 등)이 실제로 존재하는지 미확認(repo grep 0건 — dev만 프로비저닝된 상태로 보임). 존재
+        # 안 하면 GitHub App(webhook/PR 캡처) 기능이 prod GCE에서 fail-closed(gcloud secrets
+        # access 실패)로 죽는다 — 실 배포 前 별도 확認/프로비저닝 필요.
+        GITHUB_APP_SECRET_ENV="prod"
+        APP_URL="https://app.sprintable.ai"
+        # ⚠️TODO(실 배포 前 재확認 필요, 오르테가 DRY_RUN 검수 시 판단 요청) — dev는 기존
+        # Cloud Run realtime-dev의 라이브 실측 URL을 그대로 이관했으나(cloudbuild.yaml
+        # deploy-realtime 스텝이 실제로 존재·서빙 중이었음), prod는 Cloud Run realtime 서비스
+        # 자체가 존재한 적이 없어 이관할 라이브 값이 없다. backend-prod Cloud Run URL을
+        # 잠정값으로 둔다 — provision_realtime_gclb.sh 완료 후 GCLB 프론트 IP/도메인으로
+        # 바꿔야 하는지는 별도 재확認 대상(이 PR은 스크립트가 prod를 받게만 하는 스코프).
+        FASTAPI_URL="https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"
+        ;;
     *)
-        echo "Usage: $0 [dev] — prod는 realtime 서비스 자체가 없음(설계 doc 스코프 확定)" >&2
+        echo "Usage: $0 [dev|prod]" >&2
         exit 1 ;;
 esac
 
@@ -103,6 +133,10 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ORG_ALLOWLIST=54bac162-5c0d
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_MODE=shadow"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_ID=4120278"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_CLIENT_ID=Iv23liRkrmyqoCZIlrgh"
+# ⚠️story #2142 TODO(실 배포 前 확認 필요) — GITHUB_APP_ID/CLIENT_ID/SLUG는 env 분기 밖의
+# 리터럴이라 dev 값이 prod 플랜에도 그대로 실린다. repo grep 결과 prod용 GitHub App 등록/슬러그가
+# 어디에도 없어(이 App이 dev/prod 공유인지 별도 prod App이 필요한지가 이 스크립트로 답할 수
+# 없는 제품 결정) — 이 값을 건드리지 않고 그대로 두되, 오르테가 DRY_RUN 검수 시 판단 요청.
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_SLUG=sprintable-dev"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FASTAPI_URL=${FASTAPI_URL}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},STORAGE_PROVIDER=gcs"
@@ -127,6 +161,10 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},SSE_LEASE_REDIS_ENABLED=${SSE_LEASE_REDIS_ENAB
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FANOUT_WAKE_REDIS_ENABLED=${FANOUT_WAKE_REDIS_ENABLED:-false}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_MODEL=gemini-3.1-pro-preview"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_LOCATION=global"
+# ⚠️story #2142 TODO(실 배포 前 확認 필요) — MCP_PUBLIC_URL도 env 분기 밖 리터럴(dev 도메인
+# 고정). sprintable-mcp-prod Cloud Run 서비스는 이미 존재하나(별도 배포 경로) 그 public
+# 도메인이 실제로 "mcp.sprintable.ai"인지 이 스크립트가 확認할 수단이 없어 grep 0건 상태로
+# 그대로 둔다 — 오르테가 DRY_RUN 검수 시 판단 요청.
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MCP_PUBLIC_URL=https://dev-mcp.sprintable.ai/mcp"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LICENSE_CONSENT=agreed"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FIREBASE_OAUTH_HANDOFF_ENABLED=1"
@@ -153,7 +191,11 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},REDIS_URL=${REDIS_URL_VALUE}"
 # ── 시크릿 — 부팅 시점에 VM 자신의 SA로 Secret Manager에서 직접 fetch(디스크 미기록,
 #    인스턴스 메타데이터에도 안 남음 — startup-script 안에서만 메모리 상주). ──
 # secret_name:env_var_name 페어 — 라이브 실측 15개 그대로(2026-07-22).
-SECRET_PAIRS="DATABASE_URL_DEV:DATABASE_URL"
+# ⚠️story #2142(2026-07-23) 정정: 아래 두 줄이 여태 DB_SECRET_NAME 변수를 안 쓰고
+# "DATABASE_URL_DEV"를 리터럴로 박아뒀었다(dev 전용일 땐 무해했으나, prod 분기를 그대로
+# 얹으면 prod GCE가 dev DB 시크릿을 끌어오는 사고가 났을 자리 — #2135와 같은 클래스,
+# "변수가 있는데 안 쓰인다"). ${DB_SECRET_NAME}으로 정정.
+SECRET_PAIRS="${DB_SECRET_NAME}:DATABASE_URL"
 SECRET_PAIRS="${SECRET_PAIRS} JWT_SECRET:JWT_SECRET"
 SECRET_PAIRS="${SECRET_PAIRS} GOOGLE_CLIENT_ID:GOOGLE_CLIENT_ID"
 SECRET_PAIRS="${SECRET_PAIRS} GOOGLE_CLIENT_SECRET:GOOGLE_CLIENT_SECRET"
@@ -163,13 +205,13 @@ SECRET_PAIRS="${SECRET_PAIRS} RESEND_API_KEY:RESEND_API_KEY"
 SECRET_PAIRS="${SECRET_PAIRS} EMAIL_FROM:EMAIL_FROM"
 SECRET_PAIRS="${SECRET_PAIRS} github-webhook-secret:GITHUB_WEBHOOK_SECRET"
 SECRET_PAIRS="${SECRET_PAIRS} cron-secret:CRON_SECRET"
-SECRET_PAIRS="${SECRET_PAIRS} github-app-client-secret-dev:GITHUB_APP_CLIENT_SECRET"
-SECRET_PAIRS="${SECRET_PAIRS} github-app-private-key-dev:GITHUB_APP_PRIVATE_KEY"
-SECRET_PAIRS="${SECRET_PAIRS} github-app-state-secret-dev:GITHUB_APP_STATE_SECRET"
+SECRET_PAIRS="${SECRET_PAIRS} github-app-client-secret-${GITHUB_APP_SECRET_ENV}:GITHUB_APP_CLIENT_SECRET"
+SECRET_PAIRS="${SECRET_PAIRS} github-app-private-key-${GITHUB_APP_SECRET_ENV}:GITHUB_APP_PRIVATE_KEY"
+SECRET_PAIRS="${SECRET_PAIRS} github-app-state-secret-${GITHUB_APP_SECRET_ENV}:GITHUB_APP_STATE_SECRET"
 SECRET_PAIRS="${SECRET_PAIRS} FIREBASE_BFF_INTERNAL_SECRET:FIREBASE_BFF_INTERNAL_SECRET"
 # DATABASE_URL_DEV 자체 이름으로도 참조되는 라이브 계약(코드가 두 이름 다 읽는 경로가
 # 있을 수 있어 원본 그대로 이관 — config.py 확認 없이 값만 옮기는 원칙, 동작 변경 없음).
-SECRET_PAIRS="${SECRET_PAIRS} DATABASE_URL_DEV:DATABASE_URL_DEV"
+SECRET_PAIRS="${SECRET_PAIRS} ${DB_SECRET_NAME}:${DB_SECRET_NAME}"
 
 # ── startup-script 생성 — 부팅마다: cloud-sql-proxy 컨테이너(소켓 공유볼륨) → 시크릿
 #    fetch(메모리만, 디스크 미기록) → 앱 컨테이너. 재부팅 시에도 동일하게 재실행돼 자가복구.
