@@ -84,17 +84,29 @@ jobs:
             # false 유지 — dev 게이트(consume+dispatch 동시 on) 통과 후 별도 판단.
             echo "backend_redis_consume_enabled=false" >> "$GITHUB_OUTPUT"
             echo "backend_redis_dispatch_enabled=false" >> "$GITHUB_OUTPUT"
-            # story cd10e123 긴급수정(2026-07-21): prod는 아직 Memorystore 인스턴스/연결이
-            # 확認 안 됐다(오늘 Redis 작업은 dev 한정) — REDIS_URL 빈 문자열(config.py의
-            # "미설정 시 fail-safe" 로직이 그대로 no-op)·dual_publish도 false로 안전 기본.
-            # prod가 Redis 연결을 갖추는 승격 시점에 산티아고군이 실측값으로 override할 것.
+            # story #2141 S-a(E-ARCH, 2026-07-23 오르테가군 확定 순서) — prod Redis 인스턴스
+            # READY(sprintable-redis-prod, AUTH 켬)이고, backend-prod Cloud Run에 REDIS_URL
+            # secretKeyRef=REDIS_URL_PROD 바인딩이 실제로 붙어 있는 것 확認됐다(오르테가
+            # --update-secrets 실행, 리비전 00231-lxm→00232-mmm, env 32→33·시크릿 13→14,
+            # ping 200 — 2026-07-23). ⇒ 이 커밋이 dual_publish=true를 실배포하는 첫 안전한
+            # 시점이다(바인딩 전에 켜면 REDIS_URL 없이 발행을 시도해 깨졌을 자리).
+            # redis_url output은 여기 안 둔다 — prod는 cloudbuild.yaml deploy-backend가
+            # ${_DEPLOY_ENV}==prod일 때 REDIS_URL을 ENV_VARS에 아예 안 실으므로(#2421) plain
+            # substitution 경로 자체가 없다(시크릿 바인딩만 유효 경로).
+            # ⛔S-a는 dual_publish 하나만 켠다 — consume/dispatch는 각각 별 커밋(S-b/S-c,
+            # #2141 §3)이며, PG_LISTEN_ENABLED는 이 단계에서 손대지 않는다(prod의 유일한
+            # 실시간 배차 경로라 Redis 도달 확認 前에 끄면 실시간이 전면 정지한다).
             echo "redis_url=" >> "$GITHUB_OUTPUT"
-            echo "backend_redis_dual_publish_enabled=false" >> "$GITHUB_OUTPUT"
+            echo "backend_redis_dual_publish_enabled=true" >> "$GITHUB_OUTPUT"
             # story #2123 S0-b(2026-07-23, 오르테가군 판정): wake_agent 크로스인스턴스 배달의
-            # 발행측 스위치. prod는 아직 dual_publish/redis_url 자체가 없다(위) — 이 스위치를
-            # 켜봐야 event_broker.publish() 내부에서 여전히 Redis publish는 안 나가고(직전
-            # dual_publish=false) pg_notify만 무조건 나간다(현행 유지). dev 게이트 통과 전
-            # prod에 얹지 않는다(#2120/#2121/#2122와 동일 원칙).
+            # 발행측 스위치.
+            # ⛔#2141 S-a 반영 후 정정 — 이 주석이 여태 "prod는 아직 dual_publish/redis_url
+            # 자체가 없다"를 근거로 들었으나, 위 dual_publish가 이제 true다(그 전제는 낡았다).
+            # 그래도 결론(false 유지)은 그대로 맞다 — 이유가 바뀐 것뿐: consume/dispatch가
+            # 아직 false라 event_broker가 Redis로 publish는 해도(dual_publish) 그걸 구독해서
+            # 실 전달(dispatch)하는 쪽이 꺼져 있다. dispatch 없이 이 스위치만 켜봐야 무의미하고,
+            # S-b/S-c(consume/dispatch)가 dev 게이트를 통과하기 전엔 prod에 얹지 않는다
+            # (#2120/#2121/#2122와 동일 원칙).
             echo "backend_fanout_wake_redis_enabled=false" >> "$GITHUB_OUTPUT"
             # story #2078(E-ARCH 0단계, 오르테가군 판정 2026-07-21): dev 실측 GREEN 확認 전
             # prod에 얹지 않는다 — develop→main 48커밋 일괄승격에 검증 안 된 롤백 플래그를
