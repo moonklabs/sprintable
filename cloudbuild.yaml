@@ -252,44 +252,51 @@ steps:
 
   - id: deploy-backend
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
+    entrypoint: bash
     args:
-      - run
-      - deploy
-      - sprintable-backend-${_DEPLOY_ENV}
-      - --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA}
-      - --region=${_AR_REGION}
-      - --min-instances=${_BACKEND_MIN_INSTANCES}
-      - --max-instances=${_BACKEND_MAX_INSTANCES}
-      # story #2005: 요청 타임아웃 명시화(위 `_BACKEND_TIMEOUT` 주석 참조) — 이전엔 이 플래그
-      # 자체가 없어 Cloud Run 인프라 기본값에 암묵 의존했다.
-      - --timeout=${_BACKEND_TIMEOUT}
-      # ⭐frontend 가 NEXT_PUBLIC_FASTAPI_URL 로 backend 를 직접 호출(public 필수). 플래그 없으면
-      # gcloud run deploy 가 기존 IAM 을 preserve(non-deterministic) → 신규/리셋 시 allUsers invoker
-      # 유실로 403(2026-06-21 prod promotion 사건). 명시적·멱등 설정으로 매 배포 public 보장(dev/prod 공통).
-      - --allow-unauthenticated
-      # OB-1: 에이전트 onboarding generator 가 읽는 backend-direct URL 을 런타임 env 로 주입.
-      # ⚠️ 반드시 --update-env-vars(additive·기존 backend env[DATABASE_URL 등] 보존). --set-env-vars 금지
-      # (전체 wipe). _FASTAPI_URL 은 dev/prod 각 backend-direct run.app(프론트 NEXT_PUBLIC_FASTAPI_URL 과 동일 값).
-      # DB_POOL_SIZE=3/DB_MAX_OVERFLOW=1: config.py 기본과 동일하나 **명시 주입으로 durable**(과거 수동 설정·
-      # lingering env 가 config 기본을 덮는 것 방지). rollout 산식: 2×maxScale×(pool+overflow+pg_pubsub raw 1)
-      # ≤ DB max_conn (dev maxScale 8: 2×8×5=80 · prod maxScale 5: 2×5×5=50+admin). 변경 시 cloud-build.yml
-      # maxScale 와 짝으로 검토. (PO rev 01256 dev 429 right-size durable 화.)
-      # E-ARCH 1단계(story #2078): PG_LISTEN_ENABLED durable화 — 위 _BACKEND_PG_LISTEN_ENABLED
-      # 주석 참조(dev=false·prod=true 유지, GHA per-env 배선).
-      # ⛔E-ARCH S2 정리(story #2078) 정정(#2123, 2026-07-23): EVENT_BROKER_REDIS_CONSUME_
-      # ENABLED/_DISPATCH_ENABLED durable화 — 위 _BACKEND_REDIS_CONSUME_ENABLED/_DISPATCH_
-      # ENABLED 주석 참조. "api는 SSE 미서빙" 전제가 틀렸음이 드러나 값을 true로 정정(에이전트
-      # SSE가 agent_onboarding_config.py 설계상 backend-dev를 직접 서빙). 키 이름 자체도 story
-      # #2135(2026-07-23)에서 정정(구 `REDIS_CONSUME_ENABLED`는 Settings 필드와 안 맞아 무시되던
-      # 키) — 구 키는 아래 --remove-env-vars로 명시 제거(안 지우면 두 키 공존, additive 함정).
-      # ⛔story cd10e123 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
-      # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED durable화 — 위 _REDIS_URL 주석 참조.
-      # story #2123 S0-b(2026-07-23): FANOUT_WAKE_REDIS_ENABLED — 위 _BACKEND_FANOUT_WAKE_
-      # REDIS_ENABLED 주석 참조(dev만 true, prod는 손대지 않음).
-      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED}
-      - --remove-env-vars=REDIS_CONSUME_ENABLED
-      - --quiet
+      - -c
+      - |
+        set -euo pipefail
+        # story #2005: 요청 타임아웃 명시화(_BACKEND_TIMEOUT) — 이전엔 이 플래그 자체가 없어
+        # Cloud Run 인프라 기본값에 암묵 의존했다.
+        # ⭐frontend 가 NEXT_PUBLIC_FASTAPI_URL 로 backend 를 직접 호출(public 필수). --allow-
+        # unauthenticated 없으면 gcloud run deploy 가 기존 IAM 을 preserve(non-deterministic)
+        # → 신규/리셋 시 allUsers invoker 유실로 403(2026-06-21 prod promotion 사건).
+        # OB-1: 에이전트 onboarding generator 가 읽는 backend-direct URL 을 런타임 env 로 주입.
+        # ⚠️ 반드시 --update-env-vars(additive·기존 backend env[DATABASE_URL 등] 보존).
+        # --set-env-vars 금지(전체 wipe). DB_POOL_SIZE=3/DB_MAX_OVERFLOW=1: config.py 기본과
+        # 동일하나 명시 주입으로 durable(과거 수동 설정·lingering env 가 기본을 덮는 것 방지).
+        # rollout 산식: 2×maxScale×(pool+overflow+pg_pubsub raw 1) ≤ DB max_conn (dev maxScale 8:
+        # 2×8×5=80 · prod maxScale 5: 2×5×5=50+admin). 변경 시 cloud-build.yml maxScale 와 짝으로
+        # 검토(PO rev 01256 dev 429 right-size durable 화).
+        # E-ARCH 1단계(story #2078): PG_LISTEN_ENABLED durable화(dev=false·prod=true, GHA per-env).
+        # ⛔E-ARCH S2 정리(story #2078) 정정(#2123): EVENT_BROKER_REDIS_CONSUME_ENABLED/_DISPATCH_
+        # ENABLED durable화 — "api는 SSE 미서빙" 전제가 틀렸음이 드러나 값을 true로 정정(에이전트
+        # SSE가 agent_onboarding_config.py 설계상 backend-dev를 직접 서빙). 키 이름도 story #2135
+        # 에서 정정(구 `REDIS_CONSUME_ENABLED`는 Settings 필드와 안 맞아 무시되던 키) — 구 키는
+        # --remove-env-vars로 명시 제거(안 지우면 두 키 공존, additive 함정).
+        # story #2123 S0-b: FANOUT_WAKE_REDIS_ENABLED(dev만 true, prod는 손대지 않음).
+        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED}"
+        # ⛔story #2141(2026-07-23, prod Redis Memorystore 전환): REDIS_URL을 여기서 이 스텝이
+        # 예전엔 dev/prod 공용으로 plain env 넘겼다 — prod는 Secret Manager 바인딩(REDIS_URL_PROD,
+        # AUTH 필요)으로 전환하는데, 같은 배포에 plain REDIS_URL 키까지 넘기면 Cloud Run이
+        # "env와 secret이 동명 키"로 배포 자체를 거부한다(값 유무 무관 — 키 존재 자체가 충돌).
+        # dev는 AUTH 없는 plain Memorystore라 시크릿 바인딩 자체가 없으므로 기존처럼 plain으로 넘긴다.
+        # prod는 여기서 REDIS_URL을 절대 안 넘김 — 시크릿 바인딩(별도 1회 gcloud, PO lane)이
+        # --set-secrets 없는 이 스텝에 preserve된다(DATABASE_URL_PROD 등 기존 15개와 동일 컨벤션).
+        if [ "${_DEPLOY_ENV}" != "prod" ]; then
+          ENV_VARS="${ENV_VARS},REDIS_URL=${_REDIS_URL}"
+        fi
+        gcloud run deploy sprintable-backend-${_DEPLOY_ENV} \
+          --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
+          --region=${_AR_REGION} \
+          --min-instances=${_BACKEND_MIN_INSTANCES} \
+          --max-instances=${_BACKEND_MAX_INSTANCES} \
+          --timeout=${_BACKEND_TIMEOUT} \
+          --allow-unauthenticated \
+          --update-env-vars="${ENV_VARS}" \
+          --remove-env-vars=REDIS_CONSUME_ENABLED \
+          --quiet
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
     # 스키마를 상대로 뜨는 걸 막는다(migrate 실패 시 이 스텝 자체가 안 돎).
     waitFor: [run-migrate-job]
