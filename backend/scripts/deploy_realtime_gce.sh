@@ -132,7 +132,11 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LICENSE_CONSENT=agreed"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FIREBASE_OAUTH_HANDOFF_ENABLED=1"
 # realtime 고유값(backend/api와 다름 — cloudbuild.yaml deploy-realtime 스텝과 동일 컨벤션):
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},PG_LISTEN_ENABLED=false"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},REDIS_CONSUME_ENABLED=true"
+# story #2135(2026-07-23, #2123 실측 적발): 키 이름이 여태 `REDIS_CONSUME_ENABLED`였다 —
+# Settings 필드(`event_broker_redis_consume_enabled`)와 안 맞아 pydantic-settings가 조용히
+# 무시했다(GCE는 필드 기본값이 우연히 True라 결과만 의도와 같았음). 실제 필드가 요구하는
+# 키로 정정.
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},EVENT_BROKER_REDIS_CONSUME_ENABLED=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},EVENT_BROKER_REDIS_DISPATCH_ENABLED=true"
 # ⚠️REDIS_URL은 Memorystore 내부 IP(10.164.120.243) — VPC 안에서만 유효, GCE도 같은 VPC/서브넷에
