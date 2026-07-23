@@ -4,14 +4,25 @@ Cloud Build 스텝은 DRY_RUN 모드가 없어(gcloud CLI 스크립트와 다름
 DRY_RUN 검증을 그대로 못 쓴다 — 대신 ENV_VARS 조립 로직을 cloudbuild.yaml에서 그대로 추출해
 독립 실행하고 dev/prod의 REDIS_URL 포함 여부를 검증한다(오르테가 확定 산출물).
 
-⛔story #2421 배포 실패 핫픽스(2026-07-23) — 이 파일의 첫 버전은 추출한 스크립트를 곧바로
-bash로 실행해 통과했지만, 실 Cloud Build에는 여기 없는 층이 하나 더 있다: args 문자열 전체가
-먼저 Cloud Build 자신의 substitution 파서를 거친다. `${ENV_VARS}`처럼 셸 변수를 substitution
-문법과 같은 `${...}`로 참조하면 Cloud Build가 "유효한 substitution이 아니다"로 **build submit
-자체를 거부**한다(bash가 실행되기도 전) — 셸에서 직접 돌리면 정상 동작하는 것과 완전히 다른
-실패 모드라 그 층을 건너뛴 첫 테스트는 이 결함을 못 잡았다. `_apply_cloudbuild_escaping()`이
-그 층을 재현하고, `test_deploy_backend_no_unescaped_shell_vars_in_cloudbuild_substitution_syntax`가
-회귀를 원천 차단한다(추출한 스크립트를 실행하지 않고 정적으로 스캔 — 셸 계층과 무관).
+⛔story #2421/#2423 배포 실패 핫픽스(2026-07-23, 2건 연속) — 1차: 이 파일의 첫 버전은 추출한
+스크립트를 곧바로 bash로 실행해 통과했지만, 실 Cloud Build에는 여기 없는 층이 하나 더 있다:
+args 문자열 전체가 먼저 Cloud Build 자신의 substitution 파서를 거친다. 달러중괄호로 셸 변수를
+참조하면 Cloud Build가 "유효한 substitution이 아니다"로 build submit 자체를 거부한다(bash가
+실행되기도 전) — 셸에서 직접 돌리면 정상 동작하는 것과 완전히 다른 실패 모드라 그 층을 건너뛴
+첫 테스트는 이 결함을 못 잡았다.
+
+2차(더 지독한 재발) — 1차 수정 직후 정적 가드 테스트를 추가했는데, 그 테스트가 "주석 줄은
+스캔에서 제외"라는 규칙을 넣었다(자기 자신의 설명 주석이 예시로 문제의 표기를 언급하는 것까지
+코드로 오인해 실패하는 것을 막으려던 의도). 그런데 실제 Cloud Build 파서는 args 문자열 전체를
+그냥 문자열로 훑을 뿐 bash 주석 여부를 전혀 가리지 않는다 — 그래서 그 사고를 "설명하는" 주석
+문장 자신이 예시로 그 표기를 그대로 써서 실제로 build submit을 다시 거부시켰다(계측기가 실제
+Cloud Build보다 관대했던 것 — 테스트가 모델링한 계층과 실제 계층이 어긋난 전형적인 형태).
+⇒ 주석 제외 규칙을 제거했다 — Cloud Build가 안 가리니 테스트도 안 가려야 한다.
+
+`_apply_cloudbuild_escaping()`이 `$$`→`$` 치환 층을 재현하고,
+`test_deploy_backend_no_unescaped_shell_vars_in_cloudbuild_substitution_syntax`가(주석 포함
+전문 스캔으로) 회귀를 원천 차단한다(추출한 스크립트를 실행하지 않고 정적으로 스캔 — 셸
+계층과 무관).
 """
 from __future__ import annotations
 
@@ -89,26 +100,29 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str) -> str:
 
 
 def test_deploy_backend_no_unescaped_shell_vars_in_cloudbuild_substitution_syntax():
-    """⭐story #2421 회귀 방지 핵심 AC — Cloud Build가 build submit 자체를 거부하는 층을 정적으로 잡는다.
+    """⭐story #2421/#2423 회귀 방지 핵심 AC — Cloud Build가 build submit 자체를 거부하는 층을 정적으로 잡는다.
 
-    `${...}`/`$...` 형태로 스크립트에 등장하는 이름이 cloudbuild.yaml의 substitutions: 선언
-    또는 GCP 내장 변수 목록에 없다면, 그건 이스케이프(`$$`) 안 된 셸 변수 참조 — 실 Cloud Build가
-    "key ... is not a valid built-in substitution"로 build를 거부한다(부분 배포 없이 막히지만,
-    dev 파이프라인 전체가 멈춘다 — #2421 실 사고).
+    달러중괄호 형태로 스크립트에 등장하는 이름이 cloudbuild.yaml의 substitutions: 선언 또는
+    GCP 내장 변수 목록에 없다면, 그건 이스케이프(달러 두 개) 안 된 셸 변수 참조 — 실 Cloud
+    Build가 "key ... is not a valid built-in substitution"로 build를 거부한다(부분 배포 없이
+    막히지만, dev 파이프라인 전체가 멈춘다 — #2421 실 사고).
+
+    ⛔#2423 재발 교훈 — **주석 줄을 제외하지 않는다.** Cloud Build의 substitution 파서는 args
+    문자열 전체를 그냥 문자열로 훑고 bash 주석 여부를 전혀 가리지 않는다. 이전 버전이 주석을
+    스캔에서 뺐다가 "이 사고를 설명하는 주석 자신이 그 표기를 예시로 써서 사고를 재현"하는
+    것을 놓쳤다 — 그 재발이 이 규칙을 없앤 이유다. 새 주석을 쓸 때도 달러중괄호로 미선언
+    이름을 언급하면(설명 목적이라도) 이 테스트가 실패해야 정상이다.
     """
     script = _extract_deploy_backend_script()
-    # 주석 줄은 스캔 대상에서 제외 — 이 파일 자신의 설명 주석이 예시로 `${ENV_VARS}`를
-    # 언급하는 것까지 코드로 오인해 자기 자신을 실패시키는 것 방지(실제 실행되는 코드만 검사).
-    code_only = "\n".join(
-        line for line in script.splitlines() if not line.strip().startswith("#")
-    )
     # `$$`(이스케이프)로 시작하는 자리는 실제 셸 변수 참조라 스킵 — `$$` 다음 글자부터 다시 스캔.
     # 정규식으로 `$$` 뒤에 오는 참조는 애초에 매치 대상에서 제외(단일 `$`만 substitution 후보).
-    unescaped = re.findall(r"(?<!\$)\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", code_only)
+    # 주석 포함 스크립트 원문 전체를 스캔한다(주석 제외 금지 — 위 docstring 참조).
+    unescaped = re.findall(r"(?<!\$)\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", script)
     unknown = sorted(set(unescaped) - _DECLARED_SUBSTITUTIONS)
     assert not unknown, (
-        f"cloudbuild.yaml deploy-backend 스텝에 이스케이프 안 된(`$$` 누락) 셸 변수로 보이는 "
-        f"미선언 substitution 참조 발견: {unknown} — 셸 변수라면 `$${{VAR}}`로 이스케이프할 것."
+        f"cloudbuild.yaml deploy-backend 스텝에 이스케이프 안 된(달러 두 개 누락) 셸 변수로 "
+        f"보이는 미선언 substitution 참조 발견(주석 포함 전문 스캔): {unknown} — 셸 변수라면 "
+        f"달러 두 개로 이스케이프할 것. 설명 주석이라도 달러중괄호로 이 이름들을 언급하지 말 것."
     )
 
 
