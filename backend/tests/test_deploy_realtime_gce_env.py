@@ -64,6 +64,26 @@ def test_deploy_gce_mcp_public_url_env_specific():
     assert "MCP_PUBLIC_URL=https://mcp.sprintable.ai/mcp" in prod["PLAIN_ENV_SPEC"]
 
 
+def test_deploy_gce_github_app_identity_matches_live_cloud_run_binding():
+    """story #2142(오르테가 DRY_RUN 검수 적발, 2026-07-23) — GITHUB_APP_ID/CLIENT_ID/SLUG가
+    env 분기 밖 리터럴(dev App 값)로 박혀 있어, prod 플랜이 dev App의 ID/CLIENT_ID와
+    prod 전용 시크릿(github-app-*-prod)을 섞은 채 배포될 뻔했다(둘 다 값의 유무와 무관하게
+    같은 App 소속이어야 인증이 성립 — 섞이면 어느 쪽으로도 인증 불가). backend-prod
+    gcloud describe 라이브 실측으로 prod 분기를 교정 — dev는 무회귀."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "GITHUB_APP_ID=4120278" in dev["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_CLIENT_ID=Iv23liRkrmyqoCZIlrgh" in dev["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_SLUG=sprintable-dev" in dev["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_ID=4244849" in prod["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_CLIENT_ID=Iv23liGdo7u9vkHjRKS0" in prod["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_SLUG=sprintable-prod" in prod["PLAIN_ENV_SPEC"]
+    # 섞임 재발 차단 — prod 플랜에 dev App 식별자가 전혀 없어야 한다.
+    assert "4120278" not in prod["PLAIN_ENV_SPEC"]
+    assert "Iv23liRkrmyqoCZIlrgh" not in prod["PLAIN_ENV_SPEC"]
+    assert "sprintable-dev" not in prod["PLAIN_ENV_SPEC"]
+
+
 def test_deploy_gce_prod_secret_pairs_no_dev_leak():
     """story #2142 회귀 방지 — DB_SECRET_NAME 미사용으로 prod 플랜에 dev 시크릿이
     하드코딩 리터럴로 섞여 들어가던 결함(발견 즉시 수정)의 재발 차단.

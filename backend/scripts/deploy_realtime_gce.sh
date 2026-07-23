@@ -63,6 +63,12 @@ case "${ENV}" in
         CRON_SECRET_NAME="cron-secret"
         GITHUB_SECRET_SUFFIX="DEV"
         GITHUB_APP_SECRET_ENV="dev"  # story #2142 발견: github-app-*-dev Secret Manager ID의 소문자 접미(위 GITHUB_SECRET_SUFFIX와 별개 컨벤션 — 이 시크릿 3종만 하이픈+소문자)
+        # story #2142(2026-07-23, 오르테가 DRY_RUN 검수 적발) — GITHUB_APP_ID/CLIENT_ID/SLUG가
+        # 여태 PLAIN_ENV_SPEC에 env 분기 밖 리터럴로 박혀 있었다(DATABASE_URL_DEV·MCP_PUBLIC_URL과
+        # 같은 클래스). dev는 라이브 실측 그대로 유지.
+        GITHUB_APP_ID="4120278"
+        GITHUB_APP_CLIENT_ID="Iv23liRkrmyqoCZIlrgh"
+        GITHUB_APP_SLUG="sprintable-dev"
         APP_URL="https://dev-app.sprintable.ai"
         # story #2142(오르테가 라이브 실측 2026-07-23): sprintable-backend-dev/-prod MCP_PUBLIC_URL
         # 라이브 값 그대로 — 이것도 DATABASE_URL_DEV와 같은 클래스(env 분기 밖 리터럴)였던 걸 정정.
@@ -104,6 +110,15 @@ case "${ENV}" in
         # backend-prod와 갈라진다 — 그 별건 스토리가 먼저 판단을 내리기 전엔 건드리지 말 것.
         GITHUB_SECRET_SUFFIX="DEV"
         GITHUB_APP_SECRET_ENV="prod"
+        # ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 적발 — "repo에 없다"≠"존재하지 않는다",
+        # 값은 레포가 아니라 Cloud Run env에 살아 있었다) — GITHUB_APP_ID/CLIENT_ID/SLUG가
+        # PLAIN_ENV_SPEC에 dev App 리터럴(4120278/Iv23liRkrmyqoCZIlrgh/sprintable-dev)로 박혀
+        # 있어, 이 스크립트가 prod용 시크릿(github-app-*-prod, GITHUB_APP_SECRET_ENV=prod)과
+        # dev App의 ID/CLIENT_ID를 섞은 채 배포할 뻔했다 — 어느 쪽 App으로도 인증이 안 되는
+        # 조합. backend-prod 라이브 실측(gcloud describe)으로 교정.
+        GITHUB_APP_ID="4244849"
+        GITHUB_APP_CLIENT_ID="Iv23liGdo7u9vkHjRKS0"
+        GITHUB_APP_SLUG="sprintable-prod"
         APP_URL="https://app.sprintable.ai"
         # story #2142(오르테가 라이브 실측 2026-07-23, gcloud env 직접 대조): 추측 아니라
         # sprintable-backend-prod의 실측 라이브 값.
@@ -152,13 +167,13 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GATE_CONFIG_ENFORCE_ORG_ALLOWLIST=03970fbf-2db
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ENABLED=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_MODE=shadow"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_ID=4120278"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_CLIENT_ID=Iv23liRkrmyqoCZIlrgh"
-# ⚠️story #2142 TODO(실 배포 前 확認 필요) — GITHUB_APP_ID/CLIENT_ID/SLUG는 env 분기 밖의
-# 리터럴이라 dev 값이 prod 플랜에도 그대로 실린다. repo grep 결과 prod용 GitHub App 등록/슬러그가
-# 어디에도 없어(이 App이 dev/prod 공유인지 별도 prod App이 필요한지가 이 스크립트로 답할 수
-# 없는 제품 결정) — 이 값을 건드리지 않고 그대로 두되, 오르테가 DRY_RUN 검수 시 판단 요청.
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_SLUG=sprintable-dev"
+# ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 적발) 정정 — 이 세 값이 env 분기 밖의
+# 리터럴(dev App 값)이라 prod 플랜에도 그대로 실려, prod 시크릿(github-app-*-prod)과 dev App의
+# ID/CLIENT_ID가 섞이는 조합이 될 뻔했다. ${GITHUB_APP_ID}/${GITHUB_APP_CLIENT_ID}/
+# ${GITHUB_APP_SLUG}(case 분기, 위 참조 — dev/prod 각각 라이브 실측값)로 정정.
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_ID=${GITHUB_APP_ID}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_CLIENT_ID=${GITHUB_APP_CLIENT_ID}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_SLUG=${GITHUB_APP_SLUG}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FASTAPI_URL=${FASTAPI_URL}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},STORAGE_PROVIDER=gcs"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DB_POOL_SIZE=3"
