@@ -89,6 +89,25 @@ substitutions:
   # deploy-backend에서만 쓰이고 deploy-realtime은 항상 true를 직접 명시(아래, 변수 아님).
   _BACKEND_REDIS_CONSUME_ENABLED: 'false'
 
+  # story #2135(E-ARCH 근본, 2026-07-23 #2123 실측 적발): 이 값이 실려가는 실제 env var 키가
+  # 여태 `REDIS_CONSUME_ENABLED`였다 — Settings 필드는 `event_broker_redis_consume_enabled`
+  # (config.py, env_prefix 없음)라 pydantic-settings가 이 키를 매칭 못 하고 `extra="ignore"`가
+  # 조용히 삼켜, 위 _BACKEND_REDIS_CONSUME_ENABLED='false' 의도가 api에 **한 번도 적용된 적이
+  # 없었다**(필드는 항상 코드 기본값 True로 남아 backend-dev가 불필요하게 redis_consume_loop를
+  # 기동 중이었음 — uv run 재현 + 라이브 로그 확認 완료). 아래 두 곳(deploy-backend/
+  # deploy-realtime)의 env var **키 이름**을 `EVENT_BROKER_REDIS_CONSUME_ENABLED`로 정정한다
+  # (이 substitution 변수 자체는 그대로 재사용 — 값 산출 로직 무변경, 실려가는 키만 교정).
+
+  # story #2123 S0-b(2026-07-23, 오르테가군 판정): wake_agent()의 크로스인스턴스 배달은
+  # #2122가 병합됐어도 **발행측 스위치(FANOUT_WAKE_REDIS_ENABLED)가 꺼져 있어 무효**였다
+  # (agent_gateway.py:224 — 이 플래그 off면 event_broker 완전 우회, 직접 pg_notify만 호출).
+  # wake_agent 호출부(stories.py/gates.py/agents.py/agent_dispatch.py/a2a.py)는 전부 REST
+  # 라우터라 REST 트래픽이 실제로 향하는 api(backend-dev)에서만 이 스위치가 의미 있다 —
+  # realtime-dev/GCE는 REST를 안 받아 wake_agent()를 호출하지 않으므로 배선 불필요(#2123
+  # doc §판정 종결 참조). 기본값 'false'(수동 `gcloud builds submit` dev-safe fallback,
+  # prod로 잘못 흘러가도 무해) — GHA가 dev만 명시 override(true).
+  _BACKEND_FANOUT_WAKE_REDIS_ENABLED: 'false'
+
   # ⛔story cd10e123 계열 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
   # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED가 여태 여기 어디에도 없는 순수 수동 Cloud Run env
   # 였다 — PG_LISTEN_ENABLED는 durable화됐는데(위) 이 둘은 안 돼서, 서비스가 `--set-env-vars`로
@@ -238,11 +257,15 @@ steps:
       # maxScale 와 짝으로 검토. (PO rev 01256 dev 429 right-size durable 화.)
       # E-ARCH 1단계(story #2078): PG_LISTEN_ENABLED durable화 — 위 _BACKEND_PG_LISTEN_ENABLED
       # 주석 참조(dev=false·prod=true 유지, GHA per-env 배선).
-      # E-ARCH S2 정리(story #2078): REDIS_CONSUME_ENABLED durable화 — 위 _BACKEND_REDIS_
-      # CONSUME_ENABLED 주석 참조(api는 SSE 미서빙이라 구독 불필요, dual_publish는 유지).
+      # E-ARCH S2 정리(story #2078): EVENT_BROKER_REDIS_CONSUME_ENABLED durable화 — 위
+      # _BACKEND_REDIS_CONSUME_ENABLED 주석 참조(api는 SSE 미서빙이라 구독 불필요, dual_publish는
+      # 유지). 키 이름 story #2135(2026-07-23)에서 정정(구 `REDIS_CONSUME_ENABLED`는 Settings
+      # 필드와 안 맞아 무시되던 키).
       # ⛔story cd10e123 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
       # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED durable화 — 위 _REDIS_URL 주석 참조.
-      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}
+      # story #2123 S0-b(2026-07-23): FANOUT_WAKE_REDIS_ENABLED — 위 _BACKEND_FANOUT_WAKE_
+      # REDIS_ENABLED 주석 참조(dev만 true, prod는 손대지 않음).
+      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED}
       - --quiet
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
     # 스키마를 상대로 뜨는 걸 막는다(migrate 실패 시 이 스텝 자체가 안 돎).
@@ -269,8 +292,12 @@ steps:
         # 완료)했는데, 이 스텝이 명시적으로 true를 다시 밀어넣어 **다음 배포마다 LISTEN이
         # 부활**하는 시한폭탄이었다("손 값은 배포가 덮는다" 규율의 역방향 재발 — 이번엔 배포가
         # 고침을 지우는 쪽). realtime은 이제 LISTEN이 구조적으로 불필요(Redis가 authoritative
-        # dispatch) — false로 durable 고정. REDIS_CONSUME_ENABLED=true도 명시(이 서비스가
-        # Redis를 구독+dispatch하는 유일한 서비스라는 것을 코드에 못박음 — api는 false).
+        # dispatch) — false로 durable 고정. EVENT_BROKER_REDIS_CONSUME_ENABLED=true도 명시(이
+        # 서비스가 Redis를 구독+dispatch하는 유일한 서비스라는 것을 코드에 못박음 — api는
+        # false). ⚠️story #2135(2026-07-23): 이 키 이름이 여태 `REDIS_CONSUME_ENABLED`였다 —
+        # Settings 필드(`event_broker_redis_consume_enabled`)와 안 맞아 pydantic이 조용히
+        # 무시했다(여기서는 필드 기본값이 우연히 True라 결과만 의도와 같았음). 실제 필드가
+        # 기대하는 키로 정정.
         # ⛔story cd10e123 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
         # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED·EVENT_BROKER_REDIS_DISPATCH_ENABLED 셋 다
         # 여태 여기 없는 순수 수동 Cloud Run env였다 — realtime은 이미 LISTEN이 꺼져있고
@@ -285,7 +312,7 @@ steps:
           --max-instances=${_REALTIME_MAX_INSTANCES} \
           --timeout=${_REALTIME_TIMEOUT} \
           --allow-unauthenticated \
-          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=false,REDIS_CONSUME_ENABLED=true,REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true,EVENT_BROKER_REDIS_DISPATCH_ENABLED=true \
+          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=false,EVENT_BROKER_REDIS_CONSUME_ENABLED=true,REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true,EVENT_BROKER_REDIS_DISPATCH_ENABLED=true \
           --quiet
     waitFor: [run-migrate-job]
 

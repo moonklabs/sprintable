@@ -84,6 +84,12 @@ jobs:
             # prod가 Redis 연결을 갖추는 승격 시점에 산티아고군이 실측값으로 override할 것.
             echo "redis_url=" >> "$GITHUB_OUTPUT"
             echo "backend_redis_dual_publish_enabled=false" >> "$GITHUB_OUTPUT"
+            # story #2123 S0-b(2026-07-23, 오르테가군 판정): wake_agent 크로스인스턴스 배달의
+            # 발행측 스위치. prod는 아직 dual_publish/redis_url 자체가 없다(위) — 이 스위치를
+            # 켜봐야 event_broker.publish() 내부에서 여전히 Redis publish는 안 나가고(직전
+            # dual_publish=false) pg_notify만 무조건 나간다(현행 유지). dev 게이트 통과 전
+            # prod에 얹지 않는다(#2120/#2121/#2122와 동일 원칙).
+            echo "backend_fanout_wake_redis_enabled=false" >> "$GITHUB_OUTPUT"
             # story #2078(E-ARCH 0단계, 오르테가군 판정 2026-07-21): dev 실측 GREEN 확認 전
             # prod에 얹지 않는다 — develop→main 48커밋 일괄승격에 검증 안 된 롤백 플래그를
             # 섞으면 문제 발생 시 원인 격리가 안 된다. dev 실측 후 별도 판단.
@@ -138,6 +144,12 @@ jobs:
             # deploy-realtime 스텝이 이미 dev 전용 가드 안에서 직접 명시(변수 아님).
             echo "redis_url=redis://10.164.120.243:6379" >> "$GITHUB_OUTPUT"
             echo "backend_redis_dual_publish_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2123 S0-b(2026-07-23, 오르테가군 판정): wake_agent()의 크로스인스턴스
+            # 배달이 #2122 머지 이후에도 무효였던 이유 — 이 발행측 스위치(agent_gateway.py:224
+            # 게이팅)가 꺼져 있어 event_broker를 계속 우회했다(직접 pg_notify만, Redis 미발행).
+            # wake_agent 호출부는 전부 REST 라우터라 api(backend-dev)에서만 의미 있음 —
+            # realtime-dev는 REST를 안 받아 배선 불필요(#2123 doc §판정 종결 근거).
+            echo "backend_fanout_wake_redis_enabled=true" >> "$GITHUB_OUTPUT"
             # story #2078(E-ARCH 0단계, 오르테가군 GO 2026-07-21): dev만 켠다 — 게이트(devtools
             # 탭당 EventSource 1개·정상 채널 이벤트 도착·롤백 왕복) 실측 통과가 prod 승격의
             # 전제. 3개 소비 훅(use-sse-notifications·use-chat-sse·use-team-presence)이 이
@@ -150,6 +162,6 @@ jobs:
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}",_SSE_MULTIPLEX_ENABLED="${{ steps.env.outputs.sse_multiplex_enabled }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}",_BACKEND_FANOUT_WAKE_REDIS_ENABLED="${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}",_SSE_MULTIPLEX_ENABLED="${{ steps.env.outputs.sse_multiplex_enabled }}" \
             --suppress-logs \
             .
