@@ -55,7 +55,20 @@ substitutions:
   _REALTIME_MIN_INSTANCES: '2'
   _REALTIME_MAX_INSTANCES: '8'
   _REALTIME_TIMEOUT: '3600'
-  _REALTIME_URL: https://sprintable-realtime-dev-787818285179.asia-northeast3.run.app
+  # ⛔기본값을 dev URL 에서 빈 문자열로 내린다(오르테가군 PO, 2026-07-23 prod 승격 preflight
+  # 에서 적발). 이 값은 `deploy-frontend` 의 `--update-env-vars=REALTIME_URL=${_REALTIME_URL}`
+  # 로 흘러 FE 의 `/api/event-stream` 프록시 목적지가 된다. 그런데 GHA 워크플로우의 prod 분기는
+  # `realtime_url` output 을 아예 내보내지 않아 `_REALTIME_URL=` (빈 값)이 전달된다 —
+  # **"빈 값으로 전달"이 "기본값으로 폴백"이 되는 순간 prod 프론트가 dev realtime 을 가리킨다.**
+  # 그 동작에 의존해 안전을 주장할 근거가 이 저장소에 없었다(빈 값 override 를 실측한 전례 0건:
+  # `_GA4_MEASUREMENT_ID` 는 기본값도 빈 문자열이라 대조가 안 되고, 나머지는 전부 비어있지 않은
+  # 값을 넘긴다). ⇒ 폴백 자체를 안전한 쪽으로 뒤집는다 — 빈 값이면 FE 가 FASTAPI_URL 로 폴백하는
+  # 것이 이미 설계된 동작이고(deploy-frontend 주석 "이 값을 비우면 즉시 원복"), 그것이 현행 prod
+  # 동작과 정확히 같다. dev 는 워크플로우가 항상 명시값을 넘기므로 무영향(라이브 대조 확認:
+  # sprintable-frontend-dev REALTIME_URL=…realtime-dev…run.app).
+  # ⚠️이 한 줄은 develop 에도 같이 들어가야 한다 — 승격 브랜치에만 남으면 main/develop 이
+  # 또 갈라진다(오늘 0163 에서 겪은 그 부채와 같은 종류). 별 PR 로 동반 반영할 것.
+  _REALTIME_URL: ""
 
   # story c4c72eb1 후속(2026-07-22, GCE 조사 중 발견): `deploy-frontend` 스텝에 `--timeout`
   # 플래그가 한 번도 없었다(story #2005가 backend에서 고친 것과 동형 결함, frontend는
