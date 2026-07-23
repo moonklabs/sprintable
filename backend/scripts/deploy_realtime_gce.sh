@@ -178,6 +178,26 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$ENV] $*" >&2; }
 # Cloud Run 쪽 카테고리 C와 별개로 여기서도 전량 명시(두 배포 표면이 다르므로 각자 SSOT).
 PLAIN_ENV_SPEC="EVENTBUS_ENABLED=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},APP_URL=${APP_URL}"
+# ⛔story #2142(2026-07-23, 오르테가 전수 3방향 diff 적발 — GCE 플랜 vs 라이브 backend-prod
+# env, "prod에 있는데 GCE엔 없는" 축) — APP_ENV/CORS_ORIGINS/NEXT_PUBLIC_APP_URL 셋 다
+# backend-dev에도 backend-prod에도 이 스크립트 작성 당시엔 없었는데, backend-prod는 그 후
+# 별도로 이 값들을 받았다(describe 대조 확認) — dev는 지금도 없음. 즉 이번 건은 "dev값이
+# 분기 밖에 남은" 이전 3건과 반대 방향: **prod가 나중에 추가로 받은 값을 이 스크립트가
+# 못 따라간 것**. 특히 APP_ENV는 `config.py::is_really_local`(story #2071 — `K_SERVICE`
+# 부재로 로컬 판정, GCE엔 K_SERVICE가 원천적으로 없어 그 프로퍼티 자체는 이 값과 무관하게
+# 계속 True로 나옴, 이건 별도 코드 결함으로 등재)와는 별개로 `app_env` 문자열을 직접 보는
+# 코드 경로를 위해 필요 — 지금 당장 시크릿 fail-open 구멍은 아니지만(CRON_SECRET_PROD·
+# FIREBASE_BFF_INTERNAL_SECRET 둘 다 바인딩돼 있어 그 경로는 안전) 미러링 원칙 그대로 적용.
+if [ "${ENV}" = "prod" ]; then
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},APP_ENV=prod"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},NEXT_PUBLIC_APP_URL=${APP_URL}"
+    # ⚠️CORS_ORIGINS는 여기 안 넣는다 — PLAIN_ENV_SPEC은 아래(line ~410 부근)에서
+    # `IFS=',' read -ra` 로 콤마 분해해 docker run -e 인자로 바꾸는데, CORS_ORIGINS 값
+    # 자체가 콤마 구분 origin 목록(http://localhost:3000,http://localhost:3108,
+    # https://app.sprintable.ai)이라 이 메커니즘에 실으면 조각나 깨진 -e 인자가 된다.
+    # config.py의 cors_origins 기본값이 이 prod 라이브 값과 문자열까지 완전히 동일함을
+    # 확認했으므로(2026-07-23) 안 넣어도 결과가 같다 — 안전한 쪽(생략)을 택한다.
+fi
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MEMBER_SSOT_RESOLVER_SHADOW=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MEMBER_SSOT_APIKEY_CUT=true"
 # ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 3번째 적발 — 같은 뿌리: dev 라이브에서
@@ -197,7 +217,12 @@ fi
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ENABLED=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ORG_ALLOWLIST=${H1_MERGE_GATE_ORG_ALLOWLIST_VALUE}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ADVISORY=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},BUILD_APP_METADATA_DEFALLBACK=true"
+# ⛔story #2142(2026-07-23, 오르테가 전수 3방향 diff 적발, 4번째 묶음) — 같은 뿌리(dev
+# 라이브 리터럴이 env 분기 밖에 남음). BUILD_APP_METADATA_DEFALLBACK은 backend-prod에
+# 키 자체가 없다(describe 대조 확認) — dev 전용으로 되돌림.
+if [ "${ENV}" = "dev" ]; then
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},BUILD_APP_METADATA_DEFALLBACK=true"
+fi
 if [ "${GATE_CONFIG_ENFORCE_ENABLED_LINE}" = "true" ]; then
     PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GATE_CONFIG_ENFORCE_ENABLED=true"
     PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GATE_CONFIG_ENFORCE_ORG_ALLOWLIST=03970fbf-2db6-434b-a7b1-cb74f9547059"
@@ -221,6 +246,13 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DB_MAX_OVERFLOW=1"
 # story #2115(S6): 앱 per-instance SSE 소프트캡(events.py MAX_SSE_CONNECTIONS·기본 100)을 상향.
 # GCE는 Cloud Run concurrency 제약이 없어 실질 상한은 노드 fd/mem이고, 이 캡은 그 전에 걸리는
 # 앱 자체 소프트캡이라 env로 무료 확장 가능. 500으로 올려 ceiling이 실제 확장됨을 실증(3노드=1500 이론).
+# ⛔story #2142(2026-07-23, 오르테가 전수 3방향 diff 검수 시 확認 요청) — backend-prod는
+# 이 값이 코드 기본값(100)인데, 이 GCE 노드가 그보다 높은 500을 쓰는 건 **dev값이 새어든
+# 것이 아니라 이 스택 자체의 설계 의도**다: realtime-gateway는 SSE 전용 노드라 요청당
+# 다른 부하(REST·DB write 등)와 경쟁하지 않고, Cloud Run concurrency 상한도 없어 노드
+# fd/mem이 진짜 상한이 되므로 캡을 올려도 안전 — backend-prod가 이 값을 안 올린 이유는
+# backend-prod는 SSE 전용이 아니라 REST 트래픽과 캡을 공유하기 때문(다른 성격의 노드).
+# dev/prod 둘 다 이 GCE 스택에서는 500 그대로 유지 — env 분기 대상 아님.
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MAX_SSE_CONNECTIONS=500"
 # #2120(E-ARCH 근본): chat_presence working → Redis 공유 롤아웃 게이트. 실측용으로 env 로 flip
 # (기본 false=현 in-memory 무회귀). OFF 실측=false, ON 실측=true. 라이브 실측 후 durable 값 확定.
@@ -235,11 +267,17 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},SSE_LEASE_REDIS_ENABLED=${SSE_LEASE_REDIS_ENAB
 # env 로 flip(기본 false=pg_notify 직행 무회귀). #2122 라이브 재측정 배포=true(GCE PG_LISTEN=false라 wake
 # 가 Redis 백플레인 타야 타노드 도달 — 미설정 시 cross-node wake 0/2 재현). REALTIME_BACKPLANE 는 별개(cutover).
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FANOUT_WAKE_REDIS_ENABLED=${FANOUT_WAKE_REDIS_ENABLED:-false}"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_MODEL=gemini-3.1-pro-preview"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_LOCATION=global"
+# ⛔story #2142(2026-07-23, 오르테가 전수 3방향 diff 적발, 4번째 묶음) — 같은 뿌리.
+# LLM_GEMINI_MODEL/_LOCATION·FIREBASE_OAUTH_HANDOFF_ENABLED 전부 backend-prod에 키
+# 자체가 없다(describe 대조 확認) — FIREBASE_OAUTH_HANDOFF_ENABLED=1은 특히 firebase
+# 내부 경로를 **켜는** 값이라 더 신중해야 하는 자리였다. dev 전용으로 되돌림.
+if [ "${ENV}" = "dev" ]; then
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_MODEL=gemini-3.1-pro-preview"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_LOCATION=global"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FIREBASE_OAUTH_HANDOFF_ENABLED=1"
+fi
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MCP_PUBLIC_URL=${MCP_PUBLIC_URL}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LICENSE_CONSENT=agreed"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FIREBASE_OAUTH_HANDOFF_ENABLED=1"
 # realtime 고유값(backend/api와 다름 — cloudbuild.yaml deploy-realtime 스텝과 동일 컨벤션):
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},PG_LISTEN_ENABLED=false"
 # story #2135(2026-07-23, #2123 실측 적발): 키 이름이 여태 `REDIS_CONSUME_ENABLED`였다 —

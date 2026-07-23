@@ -217,6 +217,66 @@ def test_deploy_gce_prod_redis_url_env_override_ignored_for_secret_routing():
     assert "leaked" not in cfg["PLAIN_ENV_SPEC"]
 
 
+def test_deploy_gce_prod_app_env_and_next_public_app_url_match_live_binding():
+    """story #2142(오르테가 전수 3방향 diff 적발, 2026-07-23) — GCE 플랜과 라이브
+    backend-prod env를 3방향 diff("GCE에만 있음"/"값 다름"/"prod에만 있음")했을 때
+    세 번째 축("prod에 있는데 GCE엔 없음")에서 나온 것. APP_ENV/NEXT_PUBLIC_APP_URL은
+    backend-prod엔 실재하지만 이 스크립트 작성 당시 dev에도 없어 분기 자체가 없었다 —
+    이전 3건(dev값이 분기 밖에 남음)과 반대 방향(prod가 나중에 받은 값을 못 따라감).
+    NEXT_PUBLIC_APP_URL은 auth.py/docs.py/discord_webhook.py 등 실제 backend 런타임
+    코드 경로가 읽는다(repo grep 확認) — 장식이 아니다."""
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "APP_ENV=prod" in prod["PLAIN_ENV_SPEC"]
+    assert "NEXT_PUBLIC_APP_URL=https://app.sprintable.ai" in prod["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_dev_has_no_app_env_or_next_public_app_url():
+    """dev는 지금도 이 두 값이 라이브에 없다(describe 대조 확認) — 무회귀."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    assert "APP_ENV=" not in dev["PLAIN_ENV_SPEC"]
+    assert "NEXT_PUBLIC_APP_URL=" not in dev["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_prod_excludes_cors_origins():
+    """CORS_ORIGINS는 의도적으로 prod 플랜에서도 생략한다 — PLAIN_ENV_SPEC은 스크립트
+    자신이 `IFS=','`로 콤마 분해해 docker run -e 인자로 바꾸는데, CORS_ORIGINS 값 자체가
+    콤마 구분 origin 목록이라 이 메커니즘에 실으면 깨진다. config.py 기본값이 prod
+    라이브 값과 문자열까지 동일해 생략해도 결과가 같다."""
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "CORS_ORIGINS" not in prod["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_prod_dev_only_flags_absent():
+    """story #2142(오르테가 전수 3방향 diff 적발, 2026-07-23, 4번째 묶음) — 같은 뿌리
+    (dev 라이브 리터럴이 env 분기 밖에 남음). BUILD_APP_METADATA_DEFALLBACK·
+    LLM_GEMINI_MODEL/_LOCATION·FIREBASE_OAUTH_HANDOFF_ENABLED 전부 backend-prod에
+    키 자체가 없다(describe 대조 확認) — FIREBASE_OAUTH_HANDOFF_ENABLED=1은 firebase
+    내부 경로를 켜는 값이라 더 위험한 자리였다."""
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    for key in ("BUILD_APP_METADATA_DEFALLBACK", "LLM_GEMINI_MODEL", "LLM_GEMINI_LOCATION",
+                "FIREBASE_OAUTH_HANDOFF_ENABLED"):
+        assert key not in prod["PLAIN_ENV_SPEC"], f"{key}가 prod 플랜에 실리면 안 됨"
+
+
+def test_deploy_gce_dev_only_flags_unchanged():
+    """dev는 이 4개 값 전부 현행 유지 — 무회귀(순서는 바뀔 수 있으나 값 자체는 그대로)."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    assert "BUILD_APP_METADATA_DEFALLBACK=true" in dev["PLAIN_ENV_SPEC"]
+    assert "LLM_GEMINI_MODEL=gemini-3.1-pro-preview" in dev["PLAIN_ENV_SPEC"]
+    assert "LLM_GEMINI_LOCATION=global" in dev["PLAIN_ENV_SPEC"]
+    assert "FIREBASE_OAUTH_HANDOFF_ENABLED=1" in dev["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_max_sse_connections_intentional_both_envs():
+    """MAX_SSE_CONNECTIONS=500는 dev/prod 둘 다 동일 — dev값이 새어든 것이 아니라 이
+    SSE 전용 GCE 스택 자체의 설계 의도(backend-prod는 REST와 캡을 공유하는 다른 성격의
+    노드라 코드 기본값 100을 그대로 씀 — 그건 정상이고, 이 GCE 스택이 다른 것)."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "MAX_SSE_CONNECTIONS=500" in dev["PLAIN_ENV_SPEC"]
+    assert "MAX_SSE_CONNECTIONS=500" in prod["PLAIN_ENV_SPEC"]
+
+
 def test_deploy_gce_invalid_env_rejected():
     proc = subprocess.run(
         ["bash", _DEPLOY_GCE, "staging"],
