@@ -605,7 +605,7 @@ export default function RetroSessionPage() {
         actions={
           session ? (
             <div className="flex items-center gap-2">
-              {advanceError ? <span className="text-xs text-destructive">{advanceError}</span> : null}
+              {advanceError ? <span className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{advanceError}</span> : null}
               {prevStage ? (
                 <Button variant="outline" size="sm" onClick={() => void goToStage(prevStage)} disabled={advancing}>
                   {t('previousPhase')}
@@ -713,7 +713,7 @@ export default function RetroSessionPage() {
               {showItems ? (
                 <div className="space-y-2">
                   {canMerge ? <p className="text-xs text-muted-foreground">{t('mergeHint')}</p> : null}
-                  {groupError ? <p className="text-xs text-destructive">{groupError}</p> : null}
+                  {groupError ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{groupError}</p> : null}
                   <DndContext sensors={dndSensors} onDragEnd={handleItemDragEnd}>
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                       {CATEGORIES.map((category) => {
@@ -748,7 +748,7 @@ export default function RetroSessionPage() {
 
                             {canAddItems ? (
                               <div className="space-y-2 border-t border-border/60 pt-3">
-                                {addItemError ? <p className="text-xs text-destructive">{addItemError}</p> : null}
+                                {addItemError ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{addItemError}</p> : null}
                                 <OperatorTextarea
                                   value={newItemText[category]}
                                   onChange={(e) => setNewItemText((prev) => ({ ...prev, [category]: e.target.value }))}
@@ -837,7 +837,7 @@ export default function RetroSessionPage() {
 
                   {canAddActions ? (
                     <div className="space-y-2 border-t border-border/60 pt-3">
-                      {addActionError ? <p className="text-xs text-destructive">{addActionError}</p> : null}
+                      {addActionError ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{addActionError}</p> : null}
                       <div className="flex flex-wrap gap-2">
                         <OperatorInput
                           type="text"

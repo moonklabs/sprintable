@@ -186,7 +186,12 @@ function ImageView({ node, updateAttributes, selected }: ReactNodeViewProps) {
     return (
       <NodeViewWrapper as="div" className="relative my-4 inline-block max-w-full not-prose">
         <StateBox tone="error">
-          <div className="flex flex-col items-center gap-2 text-xs text-destructive">
+          <div
+            className="flex flex-col items-center gap-2 text-xs text-destructive"
+            role="alert"
+            aria-live="assertive"
+            aria-atomic="true"
+          >
             <ImageOff className="size-[22px]" aria-hidden />
             <span>{t('attachImageUnavailable')}</span>
             {isRef || (uploadError && uploadId) ? (

@@ -418,7 +418,7 @@ export function SprintCloseCockpit({
         <div className="flex flex-col items-center gap-2.5 rounded-xl border border-dashed border-border bg-muted/20 p-5 text-center">
           <Sparkles className="size-4 text-info" aria-hidden />
           <p className="text-xs text-muted-foreground">{t('synthesisGenerateHint')}</p>
-          {generateError ? <p className="text-xs text-destructive">{t('synthesisGenerateFailed')}</p> : null}
+          {generateError ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{t('synthesisGenerateFailed')}</p> : null}
           <Button variant="outline" size="sm" onClick={() => void handleGenerate()}>
             {t('synthesisGenerateCta')}
           </Button>
@@ -443,7 +443,7 @@ export function SprintCloseCockpit({
                   onAdopt={(statement) => void handleAdopt(i, rec, statement)}
                   onIgnore={() => setIgnoredIndexes((prev) => new Set([...prev, i]))}
                 />
-                {adoptError === i ? <p className="text-xs text-destructive">{t('recAdoptFailed')}</p> : null}
+                {adoptError === i ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{t('recAdoptFailed')}</p> : null}
               </div>
             ))}
           </div>
