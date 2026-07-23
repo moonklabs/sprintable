@@ -109,3 +109,73 @@ describe('useTeamPresence — 독립 연결 폴백의 재연결 refetch(#2139)',
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
+
+// story #2144 — mux 공유 커넥션 경로(RealtimeProvider 자식)에서 connected 토글이 더 이상
+// 구독 재생성(=중복 fetchPresence)을 유발하지 않는 것을 실제 Provider로 고정한다.
+// use-chat-unread-total.test.tsx와 동일한 vi.stubEnv+resetModules+동적 import 패턴 재사용.
+describe('useTeamPresence — mux 공유 커넥션 경로의 connected 참조 안정성(#2144)', () => {
+  afterEach(() => { vi.resetModules(); });
+
+  it('최초 connected flip(false→true)은 추가 fetchPresence를 유발하지 않는다', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED', 'true');
+    const { RealtimeProvider } = await import('@/components/realtime-provider');
+    const { useTeamPresence: useTeamPresenceFresh } = await import('./use-team-presence');
+
+    function Consumer() {
+      useTeamPresenceFresh(true, 'member-1');
+      return null;
+    }
+
+    await act(async () => {
+      root.render(
+        <RealtimeProvider currentTeamMemberId="member-1">
+          <Consumer />
+        </RealtimeProvider>,
+      );
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 초기 스냅샷만
+
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => {
+      es.onopen?.(); // mux 커넥션의 최초 open — connected: false → true
+      await Promise.resolve();
+    });
+    // #2144 이전엔 mux 참조가 바뀌어 useTeamPresence effect가 재실행 → fetchPresence 2회.
+    // 고친 뒤엔 핸들 참조가 안정적이라 재실행 자체가 없다.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('실제 재연결(error→open)에서는 #2139의 subscribeReconnect refetch가 정확히 1회만 더 붙는다', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED', 'true');
+    const { RealtimeProvider } = await import('@/components/realtime-provider');
+    const { useTeamPresence: useTeamPresenceFresh } = await import('./use-team-presence');
+
+    function Consumer() {
+      useTeamPresenceFresh(true, 'member-1');
+      return null;
+    }
+
+    await act(async () => {
+      root.render(
+        <RealtimeProvider currentTeamMemberId="member-1">
+          <Consumer />
+        </RealtimeProvider>,
+      );
+      await Promise.resolve();
+    });
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => { es.onopen?.(); await Promise.resolve(); }); // 최초 open
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => { es.onerror?.(); await Promise.resolve(); }); // 끊김
+    expect(fetchMock).toHaveBeenCalledTimes(1); // error 자체는 fetch 유발 안 함
+
+    await act(async () => { es.onopen?.(); await Promise.resolve(); }); // 재연결
+    // mux의 subscribeReconnect 경로로 정확히 1회만 늘어난다 — 구독 재생성으로 인한
+    // 중복(effect 재실행발 fetchPresence)이 얹혀 2회 이상이 되면 이 테스트가 잡는다.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});

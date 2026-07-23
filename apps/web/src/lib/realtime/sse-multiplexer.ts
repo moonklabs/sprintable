@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createReconnectBackoffState } from './sse-reconnect-backoff';
 
 /**
@@ -34,6 +34,15 @@ export interface SseMultiplexerHandle {
   subscribeMessage: (handler: EventHandler) => () => void;
   /** 재연결(open이 처음이 아닐 때)마다 호출 — use-chat-sse의 backfill 트리거용. */
   subscribeReconnect: (handler: () => void) => () => void;
+  /** story #2144 — 접근자(getter)로 노출한다. `connected`가 평범한 boolean 필드면 그 값이
+   * 바뀔 때마다(재연결 사이클마다) 이 핸들 객체 자체가 새로 만들어져야 하고, 그러면 이
+   * 핸들을 effect deps에 둔 모든 소비처(presence·chat·notifications)가 재연결 때마다
+   * 구독을 해지→재구독한다 — 그 사이 창에 도착한 이벤트가 유실될 수 있다(#2144 근본).
+   * getter는 핸들 자체의 참조를 subscribe 함수들처럼 영구 안정적으로 유지하면서도 `.connected`
+   * 접근 시점의 최신값은 그대로 읽게 한다 — 소비처 코드(`mux.connected`)는 무변경. 단
+   * getter는 리액티브하지 않다(값이 바뀌어도 리렌더를 유발하지 않음) — 연결 상태 변화에
+   * 반응해야 하는 소비처는 이 필드를 폴링하지 말고 `subscribeReconnect`를 쓴다.
+   */
   connected: boolean;
 }
 
@@ -142,5 +151,20 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
-  return { subscribe, subscribeMessage, subscribeReconnect, connected };
+  // story #2144 — connectedRef는 매 렌더 최신 connected를 반영(렌더 중 ref 대입은 다음
+  // 커밋 전에 끝나 안전 — React 규칙상 자기 자신이 렌더링 중인 컴포넌트의 ref를 렌더 중
+  // 쓰는 것만 문제고, 이건 그냥 최신값 미러링).
+  const connectedRef = useRef(connected);
+  connectedRef.current = connected;
+
+  // 핸들 자체의 참조는 subscribe/subscribeMessage/subscribeReconnect가 이미 영구
+  // 안정적이므로(useCallback, 의존성 불변) 이 useMemo도 최초 1회 이후 재계산되지 않는다 —
+  // `connected`가 몇 번을 토글해도 핸들 참조는 그대로라, 이 핸들을 effect deps에 둔
+  // 소비처가 재연결마다 구독을 해지·재구독하는 일이 없다.
+  return useMemo(() => ({
+    subscribe,
+    subscribeMessage,
+    subscribeReconnect,
+    get connected() { return connectedRef.current; },
+  }), [subscribe, subscribeMessage, subscribeReconnect]);
 }
