@@ -20,6 +20,12 @@ def _s(**overrides):
         "is_really_local": True,
     }
     base.update(overrides)
+    # story #2152: check_internal_secret_config은 이제 is_internal_secret_gate_exempt 단일
+    # 프로퍼티만 본다 — 목(mock)도 실제 Settings와 동일하게 app_env+is_really_local의 AND로
+    # 계산해서 넣어준다(SimpleNamespace엔 @property가 없어 직접 계산 필요).
+    base["is_internal_secret_gate_exempt"] = (
+        base["app_env"] == "development" and base["is_really_local"]
+    )
     return SimpleNamespace(**base)
 
 

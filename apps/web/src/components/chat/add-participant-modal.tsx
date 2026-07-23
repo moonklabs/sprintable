@@ -117,7 +117,9 @@ export function AddParticipantModal({
             </ul>
           )}
 
-          {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+          {/* story #2105 2차 — handleAdd이 재시도 전 setError(null)을 먼저 호출해(위 정의) 매
+              시도마다 언마운트→리마운트된다. */}
+          {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-2 text-xs text-destructive">{error}</p>}
         </div>
 
         {/* Footer */}

@@ -2,9 +2,19 @@
 
 test_deploy_env.py(deploy_backend.sh 등)와 동일 패턴 — DRY_RUN=1 resolved config를
 파싱해 dev/prod 경로를 검증한다.
+
+⛔story #2142 배포 함정 핫픽스(2026-07-23, 오르테가 자인) — 이 파일의 기존 테스트는 전부
+`PLAIN_ENV_SPEC` "요약 문자열"의 부분 문자열만 검사했다. 그 요약은 실제 배포되는 것과 다른
+층이라(요약은 파이썬 쪽에서 그냥 이어붙인 문자열, 실제 배포는 스크립트 자신의 셸 소비
+로직을 거친 결과), `H1_MERGE_GATE_ORG_ALLOWLIST`의 2-org 콤마 값이 옛 `IFS=',' read -ra`
+소비부에서 조각나 VM에는 절반만 실리는 결함을 전혀 못 잡았다 — 요약 문자열엔 원본 그대로
+있었으니 부분 문자열 검사는 항상 통과했을 것이다. `test_deploy_gce_*_no_comma_value_truncation`
+이 그 갭을 닫는다 — 요약이 아니라 스크립트가 실제로 생성하는 env-file 내용(`GENERATED_
+PLAIN_ENV_FILE_B64`)을 디코드해 검증한다.
 """
 from __future__ import annotations
 
+import base64
 import os
 import subprocess
 
@@ -28,6 +38,14 @@ def _resolve(script: str, env: str, extra: dict | None = None) -> dict[str, str]
             k, _, v = line.partition("=")
             cfg[k.strip()] = v.strip()
     return cfg
+
+
+def _resolve_generated_env_lines(env: str) -> list[str]:
+    """실제 VM에 실릴 env-file 내용을 그대로 디코드해 줄 목록으로 반환 — `_resolve()`의
+    요약 문자열이 아니라 스크립트가 진짜로 생성하는 산출물을 검증 대상으로 삼는다."""
+    cfg = _resolve(_DEPLOY_GCE, env)
+    b64 = cfg["GENERATED_PLAIN_ENV_FILE_B64"]
+    return base64.b64decode(b64).decode().splitlines()
 
 
 # ── deploy_realtime_gce.sh ───────────────────────────────────────────────────
@@ -62,6 +80,83 @@ def test_deploy_gce_mcp_public_url_env_specific():
     prod = _resolve(_DEPLOY_GCE, "prod")
     assert "MCP_PUBLIC_URL=https://dev-mcp.sprintable.ai/mcp" in dev["PLAIN_ENV_SPEC"]
     assert "MCP_PUBLIC_URL=https://mcp.sprintable.ai/mcp" in prod["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_github_app_identity_matches_live_cloud_run_binding():
+    """story #2142(오르테가 DRY_RUN 검수 적발, 2026-07-23) — GITHUB_APP_ID/CLIENT_ID/SLUG가
+    env 분기 밖 리터럴(dev App 값)로 박혀 있어, prod 플랜이 dev App의 ID/CLIENT_ID와
+    prod 전용 시크릿(github-app-*-prod)을 섞은 채 배포될 뻔했다(둘 다 값의 유무와 무관하게
+    같은 App 소속이어야 인증이 성립 — 섞이면 어느 쪽으로도 인증 불가). backend-prod
+    gcloud describe 라이브 실측으로 prod 분기를 교정 — dev는 무회귀."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "GITHUB_APP_ID=4120278" in dev["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_CLIENT_ID=Iv23liRkrmyqoCZIlrgh" in dev["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_SLUG=sprintable-dev" in dev["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_ID=4244849" in prod["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_CLIENT_ID=Iv23liGdo7u9vkHjRKS0" in prod["PLAIN_ENV_SPEC"]
+    assert "GITHUB_APP_SLUG=sprintable-prod" in prod["PLAIN_ENV_SPEC"]
+    # 섞임 재발 차단 — prod 플랜에 dev App 식별자가 전혀 없어야 한다.
+    assert "4120278" not in prod["PLAIN_ENV_SPEC"]
+    assert "Iv23liRkrmyqoCZIlrgh" not in prod["PLAIN_ENV_SPEC"]
+    assert "sprintable-dev" not in prod["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_dev_only_gate_features_absent_from_prod():
+    """story #2142(오르테가 DRY_RUN 검수 3번째 적발, 2026-07-23) — 같은 뿌리
+    ("dev 라이브 관측 사실을 env 분기 없이 prod에 적용"), 셋 중 가장 큰 건. L2_TRIGGER_*/
+    GATE_CONFIG_ENFORCE_*/DECISION_GATE_LINE_*는 backend-prod에 키 자체가 없다(그 기능이
+    prod에서 한 번도 켜진 적 없음, describe 대조 확認) — env 분기 밖 리터럴이라 prod 플랜에
+    dev 전용 org 허용목록을 단 채 그대로 켜질 뻔했다. 이 GCE 노드가 backend와 동일 이미지라
+    플래그가 켜지면 실제로 그 lifespan 워커가 뜬다(추론 아니라 미러링으로 처리 — 오르테가
+    판정). prod는 이 3그룹을 아예 안 붙인다."""
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    for key in ("L2_TRIGGER_ENABLED", "L2_TRIGGER_ADVISORY_LOCK", "L2_TRIGGER_ORG_ALLOWLIST",
+                "L2_TRIGGER_MAX_WAKES_PER_ORG_PER_HOUR", "GATE_CONFIG_ENFORCE_ENABLED",
+                "GATE_CONFIG_ENFORCE_ORG_ALLOWLIST", "DECISION_GATE_LINE_ENABLED",
+                "DECISION_GATE_LINE_ORG_ALLOWLIST", "DECISION_GATE_LINE_MODE"):
+        assert key not in prod["PLAIN_ENV_SPEC"], f"{key}가 prod 플랜에 실리면 안 됨"
+
+
+def test_deploy_gce_dev_gate_features_unchanged():
+    """dev는 이 4그룹(L2_TRIGGER/H1_MERGE_GATE/GATE_CONFIG_ENFORCE/DECISION_GATE_LINE) 전부
+    현행 그대로 — 무회귀."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    assert "L2_TRIGGER_ENABLED=true" in dev["PLAIN_ENV_SPEC"]
+    assert "L2_TRIGGER_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091" in dev["PLAIN_ENV_SPEC"]
+    assert "GATE_CONFIG_ENFORCE_ENABLED=true" in dev["PLAIN_ENV_SPEC"]
+    assert "DECISION_GATE_LINE_ENABLED=true" in dev["PLAIN_ENV_SPEC"]
+    assert "H1_MERGE_GATE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091" in dev["PLAIN_ENV_SPEC"]
+    # dev의 H1 허용목록은 단일 org — prod의 2-org 값이 섞여 들어가면 안 됨.
+    assert "588186bf-1558-48a3-b3a0-fe3759a925fc" not in dev["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_prod_h1_merge_gate_matches_live_two_org_allowlist():
+    """story #2142(오르테가 gcloud 실측, 2026-07-23) — H1_MERGE_GATE는 backend-prod에도
+    실재(ENABLED/ADVISORY=true/true, dev와 동일)하지만 허용목록은 dev 단일 org가 아니라
+    prod의 실제 2-org 콤마리스트다(describe 대조 확認). prod 플랜이 dev 값을 쓰면 실제
+    prod 허용 조직 중 하나(588186bf-...)가 빠지는 것과 같아 라이브과 어긋난다."""
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "H1_MERGE_GATE_ENABLED=true" in prod["PLAIN_ENV_SPEC"]
+    assert "H1_MERGE_GATE_ADVISORY=true" in prod["PLAIN_ENV_SPEC"]
+    assert (
+        "H1_MERGE_GATE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091,"
+        "588186bf-1558-48a3-b3a0-fe3759a925fc"
+    ) in prod["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_db_self_name_binding_dev_only():
+    """story #2142(오르테가 DRY_RUN 검수 적발, 2026-07-23) — GitHub App 건과 동일 클래스
+    ("dev 라이브에서 관측한 사실을 env 분기 없이 prod에 적용"). ${DB_SECRET_NAME}:
+    ${DB_SECRET_NAME} 자기이름 바인딩이 env 분기 밖이라 prod 플랜에도 DATABASE_URL_PROD:
+    DATABASE_URL_PROD로 그대로 실렸다 — 라이브 대조 결과 이 계약은 backend-dev에만
+    실재(DATABASE_URL_PROD 키는 backend-prod에 아예 없고 코드도 안 읽음). prod에 DB 접속
+    문자열(비밀번호 포함)을 이름만 추가해 한 벌 더 싣는 불필요한 자격증명 표면 확장 — dev만
+    유지, prod는 붙이지 않는다."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "DATABASE_URL_DEV:DATABASE_URL_DEV" in dev["SECRET_PAIRS"]
+    assert "DATABASE_URL_PROD:DATABASE_URL_PROD" not in prod["SECRET_PAIRS"]
 
 
 def test_deploy_gce_prod_secret_pairs_no_dev_leak():
@@ -138,6 +233,111 @@ def test_deploy_gce_prod_redis_url_env_override_ignored_for_secret_routing():
     assert "REDIS_URL_PROD:REDIS_URL" in cfg["SECRET_PAIRS"]
     assert "REDIS_URL=" not in cfg["PLAIN_ENV_SPEC"]
     assert "leaked" not in cfg["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_prod_app_env_and_next_public_app_url_match_live_binding():
+    """story #2142(오르테가 전수 3방향 diff 적발, 2026-07-23) — GCE 플랜과 라이브
+    backend-prod env를 3방향 diff("GCE에만 있음"/"값 다름"/"prod에만 있음")했을 때
+    세 번째 축("prod에 있는데 GCE엔 없음")에서 나온 것. APP_ENV/NEXT_PUBLIC_APP_URL은
+    backend-prod엔 실재하지만 이 스크립트 작성 당시 dev에도 없어 분기 자체가 없었다 —
+    이전 3건(dev값이 분기 밖에 남음)과 반대 방향(prod가 나중에 받은 값을 못 따라감).
+    NEXT_PUBLIC_APP_URL은 auth.py/docs.py/discord_webhook.py 등 실제 backend 런타임
+    코드 경로가 읽는다(repo grep 확認) — 장식이 아니다."""
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "APP_ENV=prod" in prod["PLAIN_ENV_SPEC"]
+    assert "NEXT_PUBLIC_APP_URL=https://app.sprintable.ai" in prod["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_dev_has_no_app_env_or_next_public_app_url():
+    """dev는 지금도 이 두 값이 라이브에 없다(describe 대조 확認) — 무회귀."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    assert "APP_ENV=" not in dev["PLAIN_ENV_SPEC"]
+    assert "NEXT_PUBLIC_APP_URL=" not in dev["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_prod_includes_cors_origins_intact():
+    """story #2142 핫픽스(2026-07-23) — CORS_ORIGINS는 최초엔 콤마 분해 함정 때문에
+    생략했으나, 그 소비부 자체를 _PLAIN_SEP(0x1F join) 기반 + `docker --env-file`로
+    고친 뒤에는 값에 콤마가 있어도 안전하다. 요약 문자열이 아니라 **실제 생성되는
+    env-file**에서 이 값이 하나의 온전한 줄로 나가는지 확認한다(부분 문자열 검사는
+    콤마 절단 여부를 구분 못 함 — 원본이 3조각으로 쪼개져도 이어붙이면 부분 문자열
+    검사는 통과해버린다)."""
+    lines = _resolve_generated_env_lines("prod")
+    assert (
+        "CORS_ORIGINS=http://localhost:3000,http://localhost:3108,https://app.sprintable.ai"
+        in lines
+    ), "CORS_ORIGINS가 온전한 한 줄로 안 나갔음(콤마에서 쪼개졌을 가능성)"
+    # 콤마 절단이 났다면 이런 조각난 줄들이 별도로 나타난다 — 존재하면 안 됨.
+    assert "http://localhost:3108" not in lines
+    assert "https://app.sprintable.ai" not in lines
+
+
+def test_deploy_gce_prod_h1_merge_gate_allowlist_survives_env_file_generation():
+    """story #2142 배포 함정 핫픽스(2026-07-23, 오르테가 자인) — 이 저장소가 실제로
+    겪은 사고의 재발 방지 테스트. H1_MERGE_GATE_ORG_ALLOWLIST의 2-org 콤마 값이 옛
+    `IFS=',' read -ra` 소비부에서 조각나 VM에는 `54bac162-...`(org 하나)만 실리고
+    `588186bf-...`는 `=` 없는 쓰레기 인자가 되는 결함이 실제로 있었다(#2431 머지 後
+    발견). PLAIN_ENV_SPEC 요약 문자열 검사(`test_deploy_gce_prod_h1_merge_gate_
+    matches_live_two_org_allowlist`)는 이 결함을 못 잡았다 — 요약은 원본을 그대로
+    이어붙인 것이라 부분 문자열은 항상 있었기 때문. 이 테스트는 **실제 생성된
+    env-file**을 검증해 그 갭을 닫는다."""
+    lines = _resolve_generated_env_lines("prod")
+    assert (
+        "H1_MERGE_GATE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091,"
+        "588186bf-1558-48a3-b3a0-fe3759a925fc"
+    ) in lines, "2-org 허용목록이 온전한 한 줄로 안 나갔음(콤마 절단 재발)"
+    # 절단됐다면 두 번째 org가 "=" 없는 독립 줄(쓰레기 -e 인자)로 나타난다.
+    assert "588186bf-1558-48a3-b3a0-fe3759a925fc" not in lines
+    # 절단됐다면 첫 org만 있는 반쪽짜리 줄도 별도로 존재하게 된다.
+    assert "H1_MERGE_GATE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091" not in lines
+
+
+def test_deploy_gce_dev_env_file_generation_no_truncation():
+    """dev도 같은 소비부를 타므로 무회귀 확認 — dev는 콤마 든 값이 없지만(현재), 생성된
+    env-file의 줄 수가 PLAIN_ENV_SPEC의 엔트리 수와 정확히 일치해야 한다(하나라도
+    쪼개지거나 합쳐지면 줄 수가 달라짐)."""
+    lines = _resolve_generated_env_lines("dev")
+    cfg = _resolve(_DEPLOY_GCE, "dev")
+    expected_count = cfg["PLAIN_ENV_SPEC"].count("\x1f") + 1 if "\x1f" in cfg["PLAIN_ENV_SPEC"] else None
+    # DRY_RUN 요약 출력 자체가 \x1f를 그대로 담고 있으므로(줄바꿈이 아니라 필드 값 문자로
+    # 실림) 그 문자로 직접 개수를 셀 수 있다 — 있으면 그걸로, 없으면(구분자 표시가 안
+    # 보이는 환경) 최소 27개 이상만 느슨히 확認.
+    if expected_count is not None:
+        assert len(lines) == expected_count
+    else:
+        assert len(lines) >= 27
+    assert all("=" in line for line in lines), "쓰레기(= 없는) 줄이 섞여 있음 — 절단 의심"
+
+
+def test_deploy_gce_prod_dev_only_flags_absent():
+    """story #2142(오르테가 전수 3방향 diff 적발, 2026-07-23, 4번째 묶음) — 같은 뿌리
+    (dev 라이브 리터럴이 env 분기 밖에 남음). BUILD_APP_METADATA_DEFALLBACK·
+    LLM_GEMINI_MODEL/_LOCATION·FIREBASE_OAUTH_HANDOFF_ENABLED 전부 backend-prod에
+    키 자체가 없다(describe 대조 확認) — FIREBASE_OAUTH_HANDOFF_ENABLED=1은 firebase
+    내부 경로를 켜는 값이라 더 위험한 자리였다."""
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    for key in ("BUILD_APP_METADATA_DEFALLBACK", "LLM_GEMINI_MODEL", "LLM_GEMINI_LOCATION",
+                "FIREBASE_OAUTH_HANDOFF_ENABLED"):
+        assert key not in prod["PLAIN_ENV_SPEC"], f"{key}가 prod 플랜에 실리면 안 됨"
+
+
+def test_deploy_gce_dev_only_flags_unchanged():
+    """dev는 이 4개 값 전부 현행 유지 — 무회귀(순서는 바뀔 수 있으나 값 자체는 그대로)."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    assert "BUILD_APP_METADATA_DEFALLBACK=true" in dev["PLAIN_ENV_SPEC"]
+    assert "LLM_GEMINI_MODEL=gemini-3.1-pro-preview" in dev["PLAIN_ENV_SPEC"]
+    assert "LLM_GEMINI_LOCATION=global" in dev["PLAIN_ENV_SPEC"]
+    assert "FIREBASE_OAUTH_HANDOFF_ENABLED=1" in dev["PLAIN_ENV_SPEC"]
+
+
+def test_deploy_gce_max_sse_connections_intentional_both_envs():
+    """MAX_SSE_CONNECTIONS=500는 dev/prod 둘 다 동일 — dev값이 새어든 것이 아니라 이
+    SSE 전용 GCE 스택 자체의 설계 의도(backend-prod는 REST와 캡을 공유하는 다른 성격의
+    노드라 코드 기본값 100을 그대로 씀 — 그건 정상이고, 이 GCE 스택이 다른 것)."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "MAX_SSE_CONNECTIONS=500" in dev["PLAIN_ENV_SPEC"]
+    assert "MAX_SSE_CONNECTIONS=500" in prod["PLAIN_ENV_SPEC"]
 
 
 def test_deploy_gce_invalid_env_rejected():

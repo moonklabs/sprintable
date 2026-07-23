@@ -38,7 +38,7 @@ export async function GET(request: Request, { params }: RouteParams) {
   const state = searchParams.get('state');
   const origin = resolveAppUrl(null);
 
-  if (!['google', 'github'].includes(provider)) {
+  if (!['google'].includes(provider)) {
     return NextResponse.redirect(`${origin}/login?error=invalid_provider`);
   }
 

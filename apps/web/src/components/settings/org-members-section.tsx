@@ -264,7 +264,14 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
             </div>
 
             {inviteResult && (
-              <Alert variant={inviteResult.type === 'success' ? 'success' : 'destructive'}>
+              // story #2105 2차 — handleInvite가 재시도 전 setInviteResult(null)을 먼저 호출해(위
+              // 정의) 매 시도마다 언마운트→리마운트된다. 에러=alert/assertive, 성공=status/polite.
+              <Alert
+                variant={inviteResult.type === 'success' ? 'success' : 'destructive'}
+                role={inviteResult.type === 'success' ? 'status' : 'alert'}
+                aria-live={inviteResult.type === 'success' ? 'polite' : 'assertive'}
+                aria-atomic="true"
+              >
                 <AlertDescription className="break-all">{inviteResult.text}</AlertDescription>
               </Alert>
             )}
@@ -272,9 +279,18 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         </SectionCard>
       )}
 
-      {/* 액션 메시지 */}
+      {/* 액션 메시지 — story #2105 2차. handleChangeRole/handleRemove는 재시도 전
+          setActionMessage(null)을 리셋하지만, handleCopyInviteLink의 catch 경로는 리셋 없이 바로
+          세팅한다 — 연속 동일 실패(예: 클립보드 반복 실패) 시 재낭독이 안 될 수 있다. 별도 잠재
+          결함으로 기록(상태머신은 이 스토리에서 재구성하지 않음). 에러=alert/assertive,
+          성공=status/polite. */}
       {actionMessage && (
-        <Alert variant={actionMessage.type === 'success' ? 'success' : 'destructive'}>
+        <Alert
+          variant={actionMessage.type === 'success' ? 'success' : 'destructive'}
+          role={actionMessage.type === 'success' ? 'status' : 'alert'}
+          aria-live={actionMessage.type === 'success' ? 'polite' : 'assertive'}
+          aria-atomic="true"
+        >
           <AlertDescription>{actionMessage.text}</AlertDescription>
         </Alert>
       )}

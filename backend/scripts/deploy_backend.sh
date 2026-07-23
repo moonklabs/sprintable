@@ -118,6 +118,13 @@ SECRETS_SPEC="${SECRETS_SPEC},GITHUB_CLIENT_ID=GITHUB_CLIENT_ID_${GITHUB_SECRET_
 SECRETS_SPEC="${SECRETS_SPEC},GITHUB_CLIENT_SECRET=GITHUB_CLIENT_SECRET_${GITHUB_SECRET_SUFFIX}:latest"
 SECRETS_SPEC="${SECRETS_SPEC},RESEND_API_KEY=RESEND_API_KEY:latest"
 SECRETS_SPEC="${SECRETS_SPEC},EMAIL_FROM=EMAIL_FROM:latest"
+# story #2071/#2072(critical, 2026-07-21): 이 시크릿이 dev/prod 어디에도 배선 안 돼 있어
+# _require_internal_secret의 fail-open이 노출된 dev에 그대로 적용되던 결함의 근본원인이었다
+# (K_SERVICE 기반 판정으로 좁힌 #2347이 배포될 때 이 시크릿 부재로 startup에서 죽었다 — 그
+# revert PR #2350 참고). Secret Manager에 값 생성 후(setup_secret_manager.sh D-S3와 동형
+# create_secret 패턴) 이 줄로 배선한다. FE(apps/web, sprintable-frontend-{dev,prod})에도
+# 반드시 같은 값을 넣어야 한다 — BE만 넣으면 FE가 헤더를 못 보내 handoff가 401로 막힌다.
+SECRETS_SPEC="${SECRETS_SPEC},FIREBASE_BFF_INTERNAL_SECRET=FIREBASE_BFF_INTERNAL_SECRET:latest"
 
 # ── 결함④ fix: 평문 env. CORS_ORIGINS 값에 콤마가 있어 기본(콤마) 구분자로는 env가 쪼개진다 →
 #   gcloud 커스텀 구분자 '^@^'로 '@' 구분. NEXT_PUBLIC_APP_URL도 세팅(verify-link 환경정합·#1236 finding). ──

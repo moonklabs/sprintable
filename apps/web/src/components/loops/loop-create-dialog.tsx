@@ -504,7 +504,7 @@ export function LoopCreateDialog({
             />
           </div>
 
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
         </div>
 
         <DialogFooter className="items-center justify-between sm:justify-between">

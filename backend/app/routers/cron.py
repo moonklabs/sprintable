@@ -42,9 +42,6 @@ def _err(code: str, message: str, status: int = 400) -> JSONResponse:
     return JSONResponse({"data": None, "error": {"code": code, "message": message}, "meta": None}, status_code=status)
 
 
-_LOCAL_ENVS = {"development"}
-
-
 def verify_cron(request: Request) -> None:
     """story #2072(high, 2026-07-21) 근본수정 — 기존엔 `if not CRON_SECRET: return`(환경
     무관 무조건 허용)이라 `_require_internal_secret`(#2071)보다도 더 넓게 열려 있었다(둘 다
@@ -53,13 +50,13 @@ def verify_cron(request: Request) -> None:
     secretRef로 배선돼 있어 무인증은 아니지만(오르테가군 실측), 배선이 한 번이라도 비면
     (배포 실수·로테이션·env 누락) 전 cron이 열리는 구조적 위험이었다.
 
-    `_require_internal_secret`(#2071)과 동일 기준으로 좁힌다 — `app_env=="development"`
-    문자열만으로는 "진짜 로컬"과 "인터넷에 노출된 dev Cloud Run"을 구분 못 하므로
-    `settings.is_really_local`(K_SERVICE 부재 판정, `app/core/config.py` SSOT)도 같이
-    요구한다."""
+    `_require_internal_secret`(#2071)과 동일 기준으로 좁힌다 — story #2152 이후로는
+    `settings.is_internal_secret_gate_exempt`(`app/core/config.py` SSOT) 단일 프로퍼티만
+    본다 — app_env 체크를 이 파일에서 직접 반복하지 않는다(#2152 AC4: is_really_local을
+    app_env와 따로 떼어 쓸 여지 자체를 구조로 없앤다)."""
     if not CRON_SECRET:
-        if settings.app_env in _LOCAL_ENVS and settings.is_really_local:
-            return  # 진짜 로컬 개발 전용 예외(Cloud Run 위가 아님)
+        if settings.is_internal_secret_gate_exempt:
+            return  # 진짜 로컬 개발 전용 예외(Cloud Run/GCE 위가 아님)
         logger.warning(
             "cron.secret_missing_in_non_local_env app_env=%s on_cloud_run=%s",
             settings.app_env, not settings.is_really_local,
@@ -77,7 +74,7 @@ def check_cron_secret_config(s=None) -> None:
     더 시끄럽게 잡는 쪽이 안전하다."""
     if s is None:
         from app.core.config import settings as s
-    _not_local = s.app_env not in _LOCAL_ENVS or not s.is_really_local
+    _not_local = not s.is_internal_secret_gate_exempt
     if _not_local and not CRON_SECRET:
         raise RuntimeError(
             f"APP_ENV={s.app_env}인데 CRON_SECRET 미설정 — 내부 cron 엔드포인트가 인증 없이 "

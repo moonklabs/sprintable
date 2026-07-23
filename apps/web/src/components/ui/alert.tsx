@@ -24,13 +24,28 @@ const alertVariants = cva(
   }
 );
 
+// story #2149: role/aria-live는 variant에서 유도한다. 오직 success/info만 명시적으로
+// polite — 그 외(default/warning/destructive, 그리고 매핑에 없는 미지의 variant)는
+// 전부 assertive로 떨어진다. 에러가 조용해지는 것이 성공이 시끄러운 것보다 나쁘다.
+const POLITE_ALERT_VARIANTS = new Set(['success', 'info']);
+
+function getAlertRole(variant?: string | null): 'alert' | 'status' {
+  return variant && POLITE_ALERT_VARIANTS.has(variant) ? 'status' : 'alert';
+}
+
+function getAlertAriaLive(variant?: string | null): 'assertive' | 'polite' {
+  return variant && POLITE_ALERT_VARIANTS.has(variant) ? 'polite' : 'assertive';
+}
+
 const Alert = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants>
->(({ className, variant, ...props }, ref) => (
+>(({ className, variant, role, 'aria-live': ariaLive, 'aria-atomic': ariaAtomic, ...props }, ref) => (
   <div
     ref={ref}
-    role="alert"
+    role={role ?? getAlertRole(variant)}
+    aria-live={ariaLive ?? getAlertAriaLive(variant)}
+    aria-atomic={ariaAtomic ?? 'true'}
     className={cn(alertVariants({ variant }), className)}
     {...props}
   />
