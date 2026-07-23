@@ -258,3 +258,82 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
     expect(container.textContent).toContain('오르테가님이 S1 담당자를 변경했습니다');
   });
 });
+
+// story #2137 — 카드는 갱신되는데 상세 패널만 옛값에 고정되던 결함(#2384·#2130과 같은 클래스의
+// 3번째 재발). 카드(stories 배열)와 패널(selectedStory)이 별도 state라 SSE 패치가 stories에만
+// 적용되던 게 근본 — patchStoryFromSse가 둘을 같이 갱신하는지 패널 스코프(role=dialog)로 고정한다.
+describe('KanbanBoard — 실시간(SSE) 상세 패널 동기화(#2137)', () => {
+  async function openPanel(title: string) {
+    const card = container.querySelector(`[title="${title}"]`) as HTMLElement | null;
+    expect(card).not.toBeNull();
+    await act(async () => {
+      card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it('패널이 열려 있을 때 다른 사람이 담당자를 바꾸면 패널도 새 담당자로 갱신된다', async () => {
+    stubFetch(
+      [{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: 'old-1', assignee_ids: ['old-1'] }],
+      [{ id: 'old-1', name: '올드멤버', type: 'human' }, { id: 'new-1', name: '뉴멤버', type: 'agent' }],
+    );
+    await mount();
+    await openPanel('S1');
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog!.textContent).toContain('올드멤버');
+
+    await act(async () => {
+      dispatchSse('story.assignee_changed', {
+        story_id: 's1', project_id: 'proj-1', actor_id: 'other-1', actor_name: '까심',
+        assignee_id: 'new-1', old_assignee_id: 'old-1', assignees: ['new-1'],
+      });
+      await Promise.resolve();
+    });
+
+    expect(dialog!.textContent).toContain('뉴멤버');
+    expect(dialog!.textContent).not.toContain('올드멤버');
+  });
+
+  it('패널이 열려 있을 때 다른 사람이 담당자를 해제하면 패널도 미배정으로 갱신된다', async () => {
+    stubFetch(
+      [{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', assignee_id: 'old-1', assignee_ids: ['old-1'] }],
+      [{ id: 'old-1', name: '올드멤버', type: 'human' }],
+    );
+    await mount();
+    await openPanel('S1');
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog!.textContent).toContain('올드멤버');
+
+    await act(async () => {
+      dispatchSse('story.assignee_changed', {
+        story_id: 's1', project_id: 'proj-1', actor_id: 'other-1', actor_name: '까심',
+        assignee_id: null, old_assignee_id: 'old-1', assignees: [],
+      });
+      await Promise.resolve();
+    });
+
+    expect(dialog!.textContent).not.toContain('올드멤버');
+  });
+
+  it('패널이 열려 있을 때 다른 사람이 상태를 바꾸면 패널도 새 상태로 갱신된다', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    await openPanel('S1');
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+
+    await act(async () => {
+      dispatchSse('story.status_changed', {
+        story_id: 's1', project_id: 'proj-1', actor_id: 'other-1', actor_name: '댄',
+        status: 'ready-for-dev', old_status: 'backlog',
+      });
+      await Promise.resolve();
+    });
+
+    // story-detail-panel.tsx: useEffect(() => setLocalStatus(story.status), [story.status]) 가
+    // selectedStory prop 갱신을 따라가는지 — StatusBadge 라벨 텍스트로 확認.
+    expect(dialog!.textContent).toContain('개발 대기');
+  });
+});
