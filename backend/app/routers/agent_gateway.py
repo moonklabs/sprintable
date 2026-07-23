@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_current_user_streaming
 from app.core.database import async_session_factory
+from app.core import shutdown as _shutdown_module
 from app.dependencies.database import get_db
 from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
 from app.models.event import Event
@@ -45,6 +46,10 @@ _PRESENCE_TICK_INTERVAL: float = _SSE_HEARTBEAT
 #   대비 여유(3×)를 둬 정상 연결이 잠깐 느려도 stale 오판하지 않게. 인스턴스 크래시로 finally 미실행된
 #   좀비 세션은 이 TTL 밖이 되어 disconnect cleanup의 "잔여 활성 세션" 판정에서 제외된다(멀티인스턴스 정합).
 _SESSION_FRESH_TTL: float = _SSE_HEARTBEAT * 3
+# #2120 AC2: 틱이 last_seen_at freshness를 안 만드므로, disconnect의 "잔여 활성 세션" 판정은 freshness가
+# 아니라 **세션-row 존재**로 한다. 다만 크래시로 finally 미실행된 leaked row를 "활성"으로 오판하면 안 되므로,
+# 연결 최대수명(GLCB backend timeout 3600s = SSE 단일연결 상한)을 넘긴 row는 확실히 죽은 좀비로 보고 제외/GC.
+_MAX_SSE_LIFETIME_SEC: float = 3900.0  # 3600s(GLCB) + 여유
 
 
 async def _mark_agent_online(agent_id: uuid.UUID, session_id: uuid.UUID) -> None:
@@ -83,35 +88,73 @@ async def _mark_agent_disconnected(
     (schema 단락). MCP heartbeat·재연결 시 online 복귀(self-heal). finally 호출이라 예외 비전파.
     """
     now = datetime.now(timezone.utc)
-    fresh_cutoff = now - timedelta(seconds=_SESSION_FRESH_TTL)
+    from app.core.config import settings as _settings
+    _ac2 = bool(_settings.presence_online_redis_enabled) and bool(_settings.redis_url)
     try:
         async with async_session_factory() as db:
-            # 이 세션 + 같은 에이전트의 좀비 세션(크래시로 finally 미실행 → last_seen stale) 정리.
-            # 멀티인스턴스서 테이블 무한증식 방지 + 아래 "잔여 활성" 판정을 신뢰 가능하게.
-            await db.execute(
-                delete(AgentGatewaySession).where(
-                    (AgentGatewaySession.id == session_id)
-                    | (
-                        (AgentGatewaySession.agent_id == agent_id)
-                        & (AgentGatewaySession.last_seen_at < fresh_cutoff)
+            if _ac2:
+                # #2120 AC2: 30s틱이 last_seen_at freshness를 안 만드므로 "잔여 활성 세션" 판정은 freshness가
+                # 아니라 **세션-row 존재**로 한다(세션 단위 질문 → 세션 단위 신호). ⚠️is_online(per-member 키)은
+                # 판정 주체가 될 수 없다 — 마지막 연결이 끊길 때 그 연결 자신의 직전 틱이 키를 방금 SET(EX90)해
+                # is_online=True로 남아 "형제 live"로 오판하기 때문(⑤ 즉시offline 버그의 근본). 순서: 이 row를
+                # 먼저 DELETE → 그 다음 다른 row 존재 확認. remaining=0(마지막)일 때만 강등+DEL키(아래 공통 블록).
+                life_cutoff = now - timedelta(seconds=_MAX_SSE_LIFETIME_SEC)
+                # 이 세션 + 확실히 죽은 좀비(연결수명 GLCB 3600s 초과 = 살아있을 수 없음) 정리.
+                await db.execute(
+                    delete(AgentGatewaySession).where(
+                        (AgentGatewaySession.id == session_id)
+                        | (
+                            (AgentGatewaySession.agent_id == agent_id)
+                            & (AgentGatewaySession.connected_at < life_cutoff)
+                        )
                     )
                 )
-            )
-            remaining = (await db.execute(
-                select(AgentGatewaySession.id).where(
-                    AgentGatewaySession.agent_id == agent_id,
-                    AgentGatewaySession.last_seen_at >= fresh_cutoff,
-                ).limit(1)
-            )).scalar_one_or_none()
+                # 잔여 = 이 세션 外 **수명 내 connect된 세션 row 존재**(freshness 아님·Redis 무의존). 없으면 마지막.
+                remaining = (await db.execute(
+                    select(AgentGatewaySession.id).where(
+                        AgentGatewaySession.agent_id == agent_id,
+                        AgentGatewaySession.id != session_id,
+                        AgentGatewaySession.connected_at >= life_cutoff,
+                    ).limit(1)
+                )).scalar_one_or_none()
+                # 보강(가속 신호·**강등 방향으로만**): Redis 정상인데 online 키가 없음 = 틱 도는 연결이 0 =
+                # 남은 row 전부 좀비 → row 존재와 무관하게 즉시 강등(크래시 수렴을 3900s→~90s로 회복).
+                # Redis 다운(None)=가속 안 함(row 존재 규칙만·fail-open 유지). 살아있는 연결은 is_online=True라
+                # 절대 이 경로로 안 죽음(monotonic: 더 강등만·오강등 없음). ⑤는 remaining=None이라 이 값과 무관히 강등.
+                from app.services import presence_online
+                if await presence_online.is_online(agent_id) is False:
+                    remaining = None
+            else:
+                # 기존 freshness 경로(30s틱 유지·flag off·무회귀).
+                fresh_cutoff = now - timedelta(seconds=_SESSION_FRESH_TTL)
+                await db.execute(
+                    delete(AgentGatewaySession).where(
+                        (AgentGatewaySession.id == session_id)
+                        | (
+                            (AgentGatewaySession.agent_id == agent_id)
+                            & (AgentGatewaySession.last_seen_at < fresh_cutoff)
+                        )
+                    )
+                )
+                remaining = (await db.execute(
+                    select(AgentGatewaySession.id).where(
+                        AgentGatewaySession.agent_id == agent_id,
+                        AgentGatewaySession.last_seen_at >= fresh_cutoff,
+                    ).limit(1)
+                )).scalar_one_or_none()
             if remaining is None:
                 from app.services.agent_anchor_sync import sync_agent_profile_presence
                 await sync_agent_profile_presence(
                     db, agent_id, last_seen_at=None, agent_status="offline"
                 )
+                if _ac2:
+                    # AC2: online 키 DEL(90s 잔존 방지·즉시 offline 규약 유지). flag off면 no-op.
+                    from app.services import presence_online
+                    await presence_online.clear_online(agent_id)
                 # d5de8e08 안전망: 연결 완전 종료 → 이 에이전트의 chat working 신호도 즉시 정리
                 # (offline 인데 "...typing" 잔존 방지·TTL backstop 기다리지 않음).
                 from app.services import chat_presence
-                _cleared_convs = chat_presence.clear_member(str(agent_id))
+                _cleared_convs = await chat_presence.clear_member(str(agent_id))
             await db.commit()
             # R2(da9d1781): 마지막 연결 종료=offline 강등 시 presence + 영향받은 대화의 conversation.working
             # SSE 발행(FE 폴링 대체·best-effort). working 비운 대화에 push 안 하면 "...typing" 영구 stale(QA HIGH).
@@ -119,7 +162,7 @@ async def _mark_agent_disconnected(
                 from app.services.presence_events import emit_conversation_working, emit_presence
                 emit_presence(org_id)
                 for _conv in _cleared_convs:
-                    emit_conversation_working(org_id, _conv)
+                    await emit_conversation_working(org_id, _conv)
     except Exception:
         logger.warning("presence disconnect cleanup failed agent=%s", agent_id, exc_info=True)
 
@@ -164,10 +207,21 @@ def wake_agent(agent_id: str, seq: int, _from_listener: bool = False) -> None:
         for q in dead:
             queues.discard(q)
     if not _from_listener:
-        # prod 커넥션 누수 근본fix(2026-07-08) — events.py publish_event()/_push_to_agent()와
-        # 동형(fire_and_forget 참조 보관, GC 조기수거로 인한 non-checked-in connection 방지).
-        from app.services.pg_pubsub import fire_and_forget, pg_notify
-        fire_and_forget(pg_notify("agent", agent_id, "__wake__", {"seq": seq}))
+        from app.services.pg_pubsub import fire_and_forget
+        from app.core.config import settings as _settings
+        if _settings.fanout_wake_redis_enabled:
+            # #2122: wake 를 Redis 백플레인에(event_broker.publish → pg_notify + Redis dual-publish 동시).
+            # ⭐__wake__ 마커를 **data 에** 실어야 타노드 브리지(_push_to_agent 는 data 만 큐잉·event_type 무시)가
+            #   보존 → 타노드 consumer 가 signal.get("__wake__") 감지 → DB 재조회. (기존 {"seq":seq} 는 마커가
+            #   event_type 에만 있어 크로스노드서 유실 → wake 아닌 "message"로 오인 = 크로스노드 wake 파손의 근본.)
+            from app.services.event_broker import event_broker
+            fire_and_forget(
+                event_broker.publish("agent", agent_id, "__wake__", {"__wake__": True, "seq": seq})
+            )
+        else:
+            # 기존 경로(flag off·무회귀) — prod 커넥션 누수 근본fix(2026-07-08)와 동형(fire_and_forget 참조 보관).
+            from app.services.pg_pubsub import pg_notify
+            fire_and_forget(pg_notify("agent", agent_id, "__wake__", {"seq": seq}))
 
 
 
@@ -320,7 +374,13 @@ async def agent_stream(
     # per-key 카운트 = _agent_connections[agent_id] (현재 동시 스트림 수). 새 연결은 아직 미등록 상태이므로
     # >= limit 이면 이번 연결이 (limit+1)번째 → 거부. global cap(503)보다 먼저 검사(키 단위 quota가 우선 신호).
     _per_key_limit = _AGENT_STREAM_TIER_LIMITS.get(org_plan, _AGENT_STREAM_DEFAULT_LIMIT)
-    if len(_agent_connections[agent_id_str]) >= _per_key_limit:
+    # #2121: per-key lease(Redis 공유·TTL 자가회수) 주경로·Redis 불가 시 in-process(_agent_connections len) 폴백.
+    from app.services import sse_lease
+    _lease_conn_id = str(uuid.uuid4())
+    _pk_lease = await sse_lease.acquire(f"perkey:{agent_id_str}", _per_key_limit, _lease_conn_id)
+    if _pk_lease is False or (
+        _pk_lease is None and len(_agent_connections[agent_id_str]) >= _per_key_limit
+    ):
         raise HTTPException(
             status_code=429,
             detail={
@@ -331,12 +391,17 @@ async def agent_stream(
             headers={"Retry-After": str(_AGENT_STREAM_RETRY_AFTER)},
         )
 
-    # E-INFRA S4: 전역 agent stream 연결 cap — 초과 시 503 (legacy events.py:234-237 미러).
+    # E-INFRA S4/#2121: 전역 agent stream 연결 cap — 503. Redis lease 주경로·Redis 불가 시 in-process 폴백.
     # 증가 직후 진입하는 generate()의 finally에서 반드시 decrement (disconnect/GeneratorExit 누수 방지).
     global _agent_sse_connection_count
-    if _agent_sse_connection_count >= _MAX_AGENT_SSE_CONNECTIONS:
+    _gl_lease = await sse_lease.acquire("agent_global", _MAX_AGENT_SSE_CONNECTIONS, _lease_conn_id)
+    if _gl_lease is False or (
+        _gl_lease is None and _agent_sse_connection_count >= _MAX_AGENT_SSE_CONNECTIONS
+    ):
+        # 전역 초과로 거부 → 이미 획득한 per-key lease 롤백(누수 방지·미획득이면 no-op).
+        await sse_lease.release(f"perkey:{agent_id_str}", _lease_conn_id)
         raise HTTPException(status_code=503, detail="Agent stream connection limit reached")
-    _agent_sse_connection_count += 1
+    _agent_sse_connection_count += 1  # in-process shadow(Redis 다운 시 폴백용 유지)
 
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
     _agent_connections[agent_id_str].add(queue)
@@ -378,6 +443,10 @@ async def agent_stream(
                 )
                 await _pdb.commit()
             _presence_wired = True
+            # #2120 AC2: 연결 즉시 online 키 SET(타노드 GET서 즉시 online 가시). flag off면 no-op.
+            # connect DB write(위 세션 INSERT + profile online)는 내구/폴백용으로 유지.
+            from app.services import presence_online
+            await presence_online.mark_online(agent_id)
             # R2(da9d1781): 연결 online 진입 → presence SSE 발행(FE 3s 폴링 대체·best-effort).
             from app.services.presence_events import emit_presence
             emit_presence(org_id_str)
@@ -402,13 +471,40 @@ async def agent_stream(
             # heartbeat가 안 떠도(매번 wait_for가 일찍 반환) last_seen이 stale → 거짓 offline 되므로,
             # 매 iteration 경과를 체크해 _PRESENCE_TICK_INTERVAL마다 throttle write(busy/idle 무관 갱신 보장).
             last_presence_tick = datetime.now(timezone.utc)
+            # story c4c72eb1(E-ARCH GCE 이전) PR-A: events.py와 동형 shutdown-aware 종료.
             while not await request.is_disconnected():
                 _now = datetime.now(timezone.utc)
                 if (_now - last_presence_tick).total_seconds() >= _PRESENCE_TICK_INTERVAL:
-                    await _mark_agent_online(agent_id, session_id)
+                    from app.core.config import settings as _settings
+                    if _settings.presence_online_redis_enabled and _settings.redis_url:
+                        # #2120 AC2: online liveness를 Redis 키로 — hot-path DB write 0.
+                        from app.services import presence_online
+                        await presence_online.mark_online(agent_id)
+                    else:
+                        await _mark_agent_online(agent_id, session_id)  # 기존 DB 틱(flag off·무회귀)
+                    # #2121: lease score 재갱신(live 연결이 슬롯 유지·TTL 만료 방지). off/다운 no-op.
+                    await sse_lease.refresh("agent_global", _lease_conn_id)
+                    await sse_lease.refresh(f"perkey:{agent_id_str}", _lease_conn_id)
                     last_presence_tick = _now
+                get_task = asyncio.create_task(queue.get())
+                shutdown_task = asyncio.create_task(_shutdown_module.shutdown_event.wait())
                 try:
-                    signal = await asyncio.wait_for(queue.get(), timeout=_SSE_HEARTBEAT)
+                    done, pending = await asyncio.wait(
+                        {get_task, shutdown_task},
+                        timeout=_SSE_HEARTBEAT,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for p in pending:
+                        p.cancel()
+                    if shutdown_task in done:
+                        yield "event: shutdown_reconnect\ndata: {}\n\n"
+                        return
+                    if get_task not in done:
+                        yield "event: heartbeat\ndata: {}\n\n"
+                        if await request.is_disconnected():
+                            break
+                        continue
+                    signal = get_task.result()
                     if signal.get("__wake__"):
                         # ìµì  acked_seq ì¡°í (í´ë¼ì´ì¸í¸ê° ACK ë³´ëì ì ìì)
                         async with async_session_factory() as db:
@@ -433,16 +529,19 @@ async def agent_stream(
                         _live_id = signal.get("event_id") or str(uuid.uuid4())
                         _sse = json.dumps({**signal, "is_backfill": False})
                         yield f"event: {event_type}\nid: {_live_id}\ndata: {_sse}\n\n"
-                except asyncio.TimeoutError:
-                    yield "event: heartbeat\ndata: {}\n\n"
-                    if await request.is_disconnected():
-                        break
+                finally:
+                    for t in (get_task, shutdown_task):
+                        if not t.done():
+                            t.cancel()
         except (asyncio.CancelledError, GeneratorExit):
             pass
         finally:
             # E-INFRA S4: 연결 cap decrement (legacy events.py:380-381 미러) — 항상 실행.
             global _agent_sse_connection_count
             _agent_sse_connection_count -= 1
+            # #2121: lease 명시 해제(최적화만·TTL 이 주 회수 경로). off/다운 no-op.
+            await sse_lease.release("agent_global", _lease_conn_id)
+            await sse_lease.release(f"perkey:{agent_id_str}", _lease_conn_id)
             _agent_connections[agent_id_str].discard(queue)
             if not _agent_connections[agent_id_str]:
                 _agent_connections.pop(agent_id_str, None)

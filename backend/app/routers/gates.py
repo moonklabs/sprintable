@@ -15,6 +15,7 @@ from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
 from app.models.hitl import HitlRequest
 from app.models.pm import Story, Task
+from app.models.visual_artifact import VisualArtifact
 from app.routers.agent_gateway import wake_agent
 from app.services.gate_service import (
     RiskGrade,
@@ -373,6 +374,12 @@ async def list_gates(
     project_id_by_work_item: dict[uuid.UUID, uuid.UUID | None] = dict(doc_proj)
     story_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "story"}
     task_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "task"}
+    # story #2082: artifact_canonicalize 게이트(work_item_type="visual_artifact")가 이 배치에서
+    # 빠져 있어 project_id_by_work_item 조회가 항상 None으로 떨어졌다 — _non_doc_gate_approvable
+    # 이 그걸 "구조적으로 project-무관"으로 오판해 org owner/admin에게만 노출되고, project-level
+    # owner/admin(정본 담당자)에겐 assigned_to_me=true 인박스에서 사라졌다(회귀). VisualArtifact.
+    # project_id는 NOT NULL이라 story/task와 동형으로 항상 배치 해소 가능.
+    artifact_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "visual_artifact"}
     if story_ids:
         rows = (await session.execute(
             select(Story.id, Story.project_id).where(
@@ -387,6 +394,13 @@ async def list_gates(
             .where(Task.id.in_(task_ids), Task.org_id == org_id)
         )).all()
         project_id_by_work_item.update({tid: pid for tid, pid in rows})
+    if artifact_ids:
+        rows = (await session.execute(
+            select(VisualArtifact.id, VisualArtifact.project_id).where(
+                VisualArtifact.id.in_(artifact_ids), VisualArtifact.org_id == org_id,
+            )
+        )).all()
+        project_id_by_work_item.update({aid: pid for aid, pid in rows})
 
     # N+1 방지: gate 여러 건이 같은 project 를 가리켜도 get_project_role/is_org_owner_or_admin 은
     # **고유 project_id(및 org-fallback 1회)당 1회**만 호출(캐시) — gate 개수와 무관.

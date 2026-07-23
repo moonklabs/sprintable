@@ -172,7 +172,7 @@ export function AccessMatrixTab() {
               <p className="text-sm text-muted-foreground">{ta('matrixEmpty')}</p>
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-md border border-border">
+            <div className="focus-inset overflow-x-auto rounded-md border border-border">
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/30">

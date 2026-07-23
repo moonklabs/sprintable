@@ -14,6 +14,8 @@ import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { useMediaQuery } from '@/lib/use-media-query';
 import { getEventTypeCopy } from '@/services/notification-display';
 
 type FilterTab = 'all' | 'story' | 'system';
@@ -182,7 +184,7 @@ function NotificationPanel({
       </div>
 
       {/* 필터 탭 */}
-      <div className="flex shrink-0 overflow-x-auto border-b">
+      <div className="focus-inset flex shrink-0 overflow-x-auto border-b">
         {FILTER_TABS.map((tab) => (
           <button
             key={tab.value}
@@ -203,7 +205,9 @@ function NotificationPanel({
             type="button"
             onClick={() => setShowUnreadOnly((v) => !v)}
             className={cn(
-              'rounded-full px-2.5 py-0.5 text-[11px] font-medium transition',
+              // story #2062: showUnreadOnly=true면 bg-primary(링색과 동일) — focus-inset 컨테이너
+              // 안에서는 inset 링이 안 보이므로 focus-outset으로 바깥 링을 되돌린다(유나 규격).
+              'focus-outset rounded-full px-2.5 py-0.5 text-[11px] font-medium transition',
               showUnreadOnly
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-muted text-muted-foreground hover:text-foreground',
@@ -215,7 +219,7 @@ function NotificationPanel({
       </div>
 
       {/* 목록 */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="focus-inset min-h-0 flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
             {tCommon('loading')}
@@ -288,6 +292,12 @@ export function NotificationBell() {
   const [notifications, setNotifications] = useState<EventNotification[] | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // story #2061 — 모바일 풀스크린 오버레이(< lg)만 손수구현 모달이라 포커스 트랩 배선.
+  // 데스크톱 드롭다운(lg+)은 풀스크린이 아니라 대상 밖(범위 밖 판정, AC1 ⓑ). 데스크톱에서는
+  // open이어도 모바일 오버레이가 CSS로만 숨겨질 뿐 DOM엔 남아있어(lg:hidden), 뷰포트 체크
+  // 없이 트랩을 걸면 desktop 드롭다운의 Tab/Esc까지 삼킨다 — GNB와 동일 lg(1024px) 기준.
+  const isDesktopViewport = useMediaQuery('(min-width: 1024px)');
+  const mobileOverlayRef = useFocusTrap(open && !isDesktopViewport, useCallback(() => setOpen(false), []));
 
   // SSE 실시간 알림 수신
   const handleSseNotification = useCallback((incoming: SseEventNotification) => {
@@ -436,7 +446,14 @@ export function NotificationBell() {
 
       {/* 모바일 풀스크린 오버레이 (< lg) */}
       {open && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-background lg:hidden">
+        <div
+          ref={mobileOverlayRef}
+          tabIndex={-1}
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('panelTitle')}
+          className="fixed inset-0 z-50 flex flex-col bg-background outline-none lg:hidden"
+        >
           <NotificationPanel
             notifications={notifications}
             onMarkAllRead={handleMarkAllRead}

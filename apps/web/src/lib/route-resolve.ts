@@ -32,13 +32,18 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   'verify-email',
 ]);
 
-/** BE entity_slug 규칙과 동형(kebab·lowercase·영숫자+하이픈) — 형식부터 안 맞으면 fetch 자체 생략. */
-const SLUG_FORMAT = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-
+/**
+ * story #2039 AC3 — 예전엔 여기서 kebab·ASCII 형식(SLUG_FORMAT)까지 검사해 형식이 안 맞으면
+ * resolve fetch 자체를 생략했다. 그런데 **구 한글 slug(예: `장사왕`)가 정확히 그 형식에서
+ * 탈락**한다 — resolve의 목적이 "이 세그먼트가 구 slug일 수 있으니 canonical로 안내"인데,
+ * 형식 검사가 그 대상을 fetch 이전에 걸러버려 정작 필요한 자리에서 무력했다(원 결함 —
+ * "주소는 영문일 것"이라는 가정 — 이 호환 경로에 그대로 남아있던 것). RESERVED_FIRST_SEGMENTS
+ * 회피 목적(flat 라우트 오인 방지)만 남기고 형식 검사는 제거한다 — 형식이 이상해도 resolve가
+ * 최종 판정한다(not_found면 그대로 통과, Next 자체 404로 정직하게 실패).
+ */
 export function looksLikeWorkspaceSegment(segment: string | undefined | null): segment is string {
   if (!segment) return false;
-  if (RESERVED_FIRST_SEGMENTS.has(segment)) return false;
-  return SLUG_FORMAT.test(segment);
+  return !RESERVED_FIRST_SEGMENTS.has(segment);
 }
 
 export interface ResolvedContext {

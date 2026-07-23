@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useTranslations, useLocale } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Pencil, Trash2, X } from 'lucide-react';
@@ -91,18 +92,21 @@ function priorityBadgeVariant(p: EpicPriority) {
   return 'chip' as const;
 }
 
-// story #2017: 이 페이지는 next-intl 미사용(전체 하드코딩 한글) — 기존 관례 그대로 로컬 맵으로
-// 정정(신규 i18n 인프라 도입은 스코프 밖). raw epic.priority가 그대로 badge에 렌더되던 부수 발견.
-const PRIORITY_LABEL_KO: Record<EpicPriority, string> = {
-  critical: '긴급',
-  high: '높음',
-  medium: '보통',
-  low: '낮음',
-};
+// story #2084 근본(유나양 규격): story #2017이 "신규 i18n 인프라 도입은 스코프 밖"이라며 이
+// 화면을 로컬 한글 맵으로 정정했던 것 자체가 회귀 원인이었다 — 이번에 next-intl(goals
+// 네임스페이스, 이미 존재하는 priorityCritical 등 키)로 정식 배선한다.
+function priorityLabelKey(p: EpicPriority): 'priorityCritical' | 'priorityHigh' | 'priorityMedium' | 'priorityLow' {
+  if (p === 'critical') return 'priorityCritical';
+  if (p === 'high') return 'priorityHigh';
+  if (p === 'medium') return 'priorityMedium';
+  return 'priorityLow';
+}
 
-function formatDate(d?: string | null) {
+// story #2084 근본: 'ko-KR' 하드코딩이었다 — locale=en에서도 날짜가 한국어 형식으로
+// 렌더되던 원인 중 하나(dashboard-activity-timeline.tsx와 동일하게 useLocale() 값을 받는다).
+function formatDate(d: string | null | undefined, locale: string) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return new Date(d).toLocaleDateString(locale, { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
 
 // ─── UI components ────────────────────────────────────────────────────────────
@@ -149,6 +153,7 @@ function MdBody({ content }: { content: string }) {
 // ─── Inline edit form ─────────────────────────────────────────────────────────
 
 function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: Epic) => void; onCancel: () => void }) {
+  const t = useTranslations('goals');
   const [title, setTitle] = useState(epic.title);
   const [description, setDescription] = useState(epic.description ?? '');
   const [objective, setObjective] = useState(epic.objective ?? '');
@@ -187,25 +192,25 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
 
   return (
     <div className="space-y-4">
-      <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} placeholder="제목" />
-      <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} className={`${inputCls} resize-none`} placeholder="설명 (마크다운)" />
-      <textarea value={objective} onChange={(e) => setObjective(e.target.value)} rows={3} className={`${inputCls} resize-none`} placeholder="목표 (Objective)" />
-      <textarea value={successCriteria} onChange={(e) => setSuccessCriteria(e.target.value)} rows={3} className={`${inputCls} resize-none`} placeholder="성공 기준 (Success Criteria)" />
+      <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} placeholder={t('fieldTitlePlaceholder')} />
+      <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} className={`${inputCls} resize-none`} placeholder={t('fieldDescriptionPlaceholder')} />
+      <textarea value={objective} onChange={(e) => setObjective(e.target.value)} rows={3} className={`${inputCls} resize-none`} placeholder={t('fieldObjectivePlaceholder')} />
+      <textarea value={successCriteria} onChange={(e) => setSuccessCriteria(e.target.value)} rows={3} className={`${inputCls} resize-none`} placeholder={t('fieldSuccessCriteriaPlaceholder')} />
       {/* RC#2: status select 제거 — 전용 transition(상세 헤더 컨트롤·⓶)·일반 PATCH 봉인(BE #1651). 편집=title/desc/objective/criteria/priority/target만. */}
       <div className="grid grid-cols-2 gap-3">
         <select value={priority} onChange={(e) => setPriority(e.target.value as EpicPriority)} className={inputCls}>
-          <option value="critical">{PRIORITY_LABEL_KO.critical}</option>
-          <option value="high">{PRIORITY_LABEL_KO.high}</option>
-          <option value="medium">{PRIORITY_LABEL_KO.medium}</option>
-          <option value="low">{PRIORITY_LABEL_KO.low}</option>
+          <option value="critical">{t('priorityCritical')}</option>
+          <option value="high">{t('priorityHigh')}</option>
+          <option value="medium">{t('priorityMedium')}</option>
+          <option value="low">{t('priorityLow')}</option>
         </select>
         <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} className={inputCls} />
-        <input type="number" min="0" value={targetSp} onChange={(e) => setTargetSp(e.target.value)} className={inputCls} placeholder="목표 SP" />
+        <input type="number" min="0" value={targetSp} onChange={(e) => setTargetSp(e.target.value)} className={inputCls} placeholder={t('fieldTargetSp')} />
       </div>
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel}>취소</Button>
+        <Button variant="ghost" size="sm" onClick={onCancel}>{t('cancel')}</Button>
         <Button size="sm" disabled={saving || !title.trim()} onClick={() => void handleSave()}>
-          {saving ? '저장 중…' : '저장'}
+          {saving ? t('saving') : t('saveChanges')}
         </Button>
       </div>
     </div>
@@ -215,6 +220,8 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function EpicDetailPage() {
+  const t = useTranslations('goals');
+  const locale = useLocale();
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
@@ -233,17 +240,17 @@ export default function EpicDetailPage() {
       const res = await fetch(`/api/goals/${epic.id}`, { method: 'DELETE' });
       if (!res.ok) {
         const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? '목표 삭제에 실패했습니다.' });
+        addToast({ type: 'error', title: json?.error?.message ?? t('saveFailed') });
         return;
       }
       router.replace(`/${wsSlug}/${projSlug}/goals`);
     } catch {
-      addToast({ type: 'error', title: '목표 삭제에 실패했습니다.' });
+      addToast({ type: 'error', title: t('saveFailed') });
     } finally {
       setDeleting(false);
       setShowDeleteConfirm(false);
     }
-  }, [epic, router, addToast, wsSlug, projSlug]);
+  }, [epic, router, addToast, wsSlug, projSlug, t]);
 
   useEffect(() => {
     fetch(`/api/goals/${id}`)
@@ -258,7 +265,7 @@ export default function EpicDetailPage() {
   }, [id, router, wsSlug, projSlug]);
 
   if (loading) {
-    return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">불러오는 중…</div>;
+    return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{t('loading')}</div>;
   }
   if (!epic) return null;
 
@@ -276,7 +283,7 @@ export default function EpicDetailPage() {
             {/* story #1990: replace, 기본 push 아님 — 뒤로가기 재진입 트랩 방지(gates/chats와 동일 원칙, §3.2). */}
             <Link href={`/${wsSlug}/${projSlug}/goals`} replace className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
               <ArrowLeft className="h-3.5 w-3.5" />
-              목표 목록
+              {t('backToList')}
             </Link>
             <span className="text-muted-foreground">/</span>
             <span className="text-sm font-medium truncate max-w-[200px]">{epic.title}</span>
@@ -296,16 +303,16 @@ export default function EpicDetailPage() {
                 className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
               >
                 {isEditing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
-                {isEditing ? '취소' : '편집'}
+                {isEditing ? t('cancel') : t('edit')}
               </button>
               <button
                 type="button"
                 onClick={() => setShowDeleteConfirm(true)}
                 className="flex items-center gap-1.5 rounded-lg border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
-                aria-label="목표 삭제"
+                aria-label={t('deleteGoal')}
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                삭제
+                {t('deleteGoal')}
               </button>
             </div>
           </div>
@@ -316,10 +323,10 @@ export default function EpicDetailPage() {
               status={epic.status}
               onTransitioned={(s) => setEpic((prev) => (prev ? { ...prev, status: s as EpicStatus } : prev))}
             />
-            <Badge variant={priorityBadgeVariant(epic.priority)}>{PRIORITY_LABEL_KO[epic.priority]}</Badge>
+            <Badge variant={priorityBadgeVariant(epic.priority)}>{t(priorityLabelKey(epic.priority))}</Badge>
             {epic.outcome_status && epic.outcome_status !== 'n_a' ? <OutcomeStatusBadge status={epic.outcome_status} /> : null}
-            {epic.target_date && <span className="text-xs text-muted-foreground">마감: {formatDate(epic.target_date)}</span>}
-            {epic.target_sp != null && <span className="text-xs text-muted-foreground">목표 SP: {epic.target_sp}</span>}
+            {epic.target_date && <span className="text-xs text-muted-foreground">{t('targetDate')}: {formatDate(epic.target_date, locale)}</span>}
+            {epic.target_sp != null && <span className="text-xs text-muted-foreground">{t('targetSp')}: {epic.target_sp}</span>}
           </div>
         </div>
 
@@ -356,18 +363,18 @@ export default function EpicDetailPage() {
 
             {/* Description */}
             <section className="space-y-2">
-              <h2 className="text-xs font-medium text-muted-foreground">설명</h2>
+              <h2 className="text-xs font-medium text-muted-foreground">{t('description')}</h2>
               {epic.description?.trim() ? (
                 <MdBody content={epic.description} />
               ) : (
-                <p className="text-sm italic text-muted-foreground">설명이 없습니다.</p>
+                <p className="text-sm italic text-muted-foreground">{t('noDescription')}</p>
               )}
             </section>
 
             {/* Objective */}
             {epic.objective?.trim() && (
               <section className="space-y-2">
-                <h2 className="text-xs font-medium text-muted-foreground">목표 (Objective)</h2>
+                <h2 className="text-xs font-medium text-muted-foreground">{t('fieldObjective')}</h2>
                 <MdBody content={epic.objective} />
               </section>
             )}
@@ -375,7 +382,7 @@ export default function EpicDetailPage() {
             {/* Success criteria */}
             {epic.success_criteria?.trim() && (
               <section className="space-y-2">
-                <h2 className="text-xs font-medium text-muted-foreground">성공 기준</h2>
+                <h2 className="text-xs font-medium text-muted-foreground">{t('fieldSuccessCriteria')}</h2>
                 <MdBody content={epic.success_criteria} />
               </section>
             )}
@@ -384,14 +391,14 @@ export default function EpicDetailPage() {
 
         {/* Progress */}
         <section className="space-y-4">
-          <h2 className="text-xs font-medium text-muted-foreground">진행 상황</h2>
+          <h2 className="text-xs font-medium text-muted-foreground">{t('progress')}</h2>
           <div>
-            <p className="mb-1 text-xs text-muted-foreground">스토리 완료</p>
+            <p className="mb-1 text-xs text-muted-foreground">{t('storiesProgress')}</p>
             <ProgressBar done={done} total={stories.length} />
           </div>
           {spTotal > 0 && (
             <div>
-              <p className="mb-1 text-xs text-muted-foreground">SP 진행</p>
+              <p className="mb-1 text-xs text-muted-foreground">{t('spProgress')}</p>
               <ProgressBar done={spDone} total={spTotal} />
             </div>
           )}
@@ -400,10 +407,10 @@ export default function EpicDetailPage() {
         {/* Stories — grouped by status */}
         <section className="space-y-4">
           <h2 className="text-xs font-medium text-muted-foreground">
-            스토리 ({stories.length})
+            {t('stories')} ({stories.length})
           </h2>
           {stories.length === 0 ? (
-            <p className="text-sm italic text-muted-foreground">스토리가 없습니다.</p>
+            <p className="text-sm italic text-muted-foreground">{t('noStories')}</p>
           ) : (
             <div className="space-y-4">
               {storyGroups.map(({ status: groupStatus, items }) => (
@@ -412,7 +419,7 @@ export default function EpicDetailPage() {
                     <Badge variant={storyStatusVariant(groupStatus)} className="text-[10px]">
                       {groupStatus}
                     </Badge>
-                    <span className="text-xs text-muted-foreground">{items.length}건</span>
+                    <span className="text-xs text-muted-foreground">{t('itemCount', { count: items.length })}</span>
                   </div>
                   <div className="divide-y divide-border rounded-xl border border-border overflow-hidden">
                     {items.map((story) => (
@@ -445,14 +452,14 @@ export default function EpicDetailPage() {
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>목표를 삭제하시겠습니까?</DialogTitle>
+            <DialogTitle>{t('deleteConfirmTitle')}</DialogTitle>
             <DialogDescription>
-              이 작업은 되돌릴 수 없습니다. 목표에 포함된 스토리는 연결이 해제됩니다.
+              {t('deleteConfirmDescription')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
-              취소
+              {t('cancel')}
             </Button>
             <Button
               variant="destructive"
@@ -460,7 +467,7 @@ export default function EpicDetailPage() {
               onClick={() => void handleDelete()}
               disabled={deleting}
             >
-              {deleting ? '삭제 중…' : '영구 삭제'}
+              {deleting ? t('deleting') : t('deleteConfirmButton')}
             </Button>
           </DialogFooter>
         </DialogContent>

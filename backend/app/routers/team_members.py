@@ -2,7 +2,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,12 +23,41 @@ from app.services.project_auth import has_project_access
 
 class ClaimBody(BaseModel):
     story_id: uuid.UUID
+    # story #2068: MCP SprintableClient가 멀티프로젝트 override 시 이 필드로 project_id를 자동
+    # 주입한다(api_client.py request()). 지금까지 이 필드가 없어 body에 실려 와도 FastAPI가
+    # 조용히 버렸고, 아래 로직은 member.project_id(anchor) 하나로만 story를 찾아 org-agent가
+    # 멀티프로젝트 grant로 다른 프로젝트 스토리를 claim하면 "Story not found in this project"가
+    # 났다(스토리는 실재했다 — 찾은 project가 틀렸을 뿐).
+    project_id: uuid.UUID | None = None
+
+
+def _override_online(resp: TeamMemberResponse, ts: "str | None") -> TeamMemberResponse:
+    """#2120 AC2: Redis online 키 ts 있으면 last_seen_at 을 그 값으로 override → computed_field
+    presence_status 가 online 을 도출(status 를 직접 주입하지 않아 3상태·AC7 로직 무변경). ts 없음/
+    파싱실패 → 원본(DB last_seen_at 폴백·flag off/Redis 다운 시 자연 폴백)."""
+    if not ts:
+        return resp
+    try:
+        return resp.model_copy(update={"last_seen_at": datetime.fromisoformat(ts)})
+    except (ValueError, TypeError):
+        return resp
+
+
+async def _inject_online_single(resp: TeamMemberResponse, member_id) -> TeamMemberResponse:
+    """단건 응답용 #2120 AC2 online 주입(목록/단건 presence 불일치 방지)."""
+    from app.services import presence_online
+
+    om = await presence_online.get_online_map([member_id])
+    return _override_online(resp, om.get(str(member_id)))
 
 
 async def _inject_active_stories(
     members: list, session: AsyncSession
 ) -> list[TeamMemberResponse]:
-    """AC6: active_story_id → stories batch 조회 후 inject."""
+    """AC6: active_story_id → stories batch 조회 후 inject.
+
+    #2120 AC2: online 키 배치조회(MGET 1회) → 있으면 last_seen_at override → computed_field online.
+    """
     ids = {m.active_story_id for m in members if m.active_story_id}
     stories: dict[uuid.UUID, Story] = {}
     if ids:
@@ -36,9 +65,13 @@ async def _inject_active_stories(
         for s in result.scalars().all():
             stories[s.id] = s
 
+    from app.services import presence_online
+    online_map = await presence_online.get_online_map([m.id for m in members])
+
     out = []
     for m in members:
         resp = TeamMemberResponse.model_validate(m)
+        resp = _override_online(resp, online_map.get(str(m.id)))
         if m.active_story_id and m.active_story_id in stories:
             s = stories[m.active_story_id]
             resp = resp.model_copy(update={
@@ -368,7 +401,7 @@ async def get_team_member(
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
-    return TeamMemberResponse.model_validate(member)
+    return await _inject_online_single(TeamMemberResponse.model_validate(member), member.id)
 
 
 _SELF_EDITABLE_HUMAN_FIELDS: frozenset[str] = frozenset({"name", "avatar_url", "color"})
@@ -430,7 +463,8 @@ async def update_team_member(
     await repo.apply_anchor_update(member, data)
     session.expire(member)
     updated = await repo.get(id)
-    return TeamMemberResponse.model_validate(updated or member)
+    _m = updated or member
+    return await _inject_online_single(TeamMemberResponse.model_validate(_m), _m.id)
 
 
 @router.patch("/{id}/heartbeat")
@@ -468,6 +502,7 @@ async def heartbeat(
 async def claim_story(
     id: uuid.UUID,
     body: ClaimBody,
+    request: Request,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -480,6 +515,19 @@ async def claim_story(
 
     S19(발견·회귀수정): resolve_member()/.id 직접비교는 휴먼 JWT caller의 axis(OrgMember.id)가
     이 path의 team_members뷰 id와 달라 본인 claim도 403났다 — assert_caller_is_member로 교체.
+
+    story #2068(발견·회귀수정): story 존재 검증이 `member.project_id`(claim 대상 team_members
+    행의 anchor project) 하나로만 스코프됐다 — org-agent 멀티프로젝트 grant(85429ee0)로 다른
+    프로젝트 story를 claim하려 하면 project_id override(body/X-Project-Id)가 통째로 무시되고
+    항상 "Story not found in this project"가 났다. 명시(body) > 헤더(has_project_access 검증)
+    > `member.project_id`(이 claim 대상 행 자체의 anchor) 순으로 해소한다.
+
+    ⚠️ `app.dependencies.project_scope.resolve_required_project_id`(SSOT)를 쓰지 않는다 — 그건
+    "기본값 없으면 **caller**의 default project"로 폴백하는데, 여기서는 `id`(claim 대상
+    team_members 행)가 이미 자기 project로 결정론적으로 고정돼 있다. caller 기본 프로젝트로
+    폴백하면 override 없는 통상 케이스(caller==member, 프로젝트 1개)에서도 값이 갈릴 수 있는
+    축을 새로 여는 것이라, override가 없을 때는 기존 그대로 `member.project_id`를 쓴다(무회귀 —
+    override 있을 때만 새 분기를 탄다).
     """
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
@@ -488,13 +536,45 @@ async def claim_story(
 
     await assert_caller_is_member(id, auth, session, org_id, detail="Cannot claim as another member")
 
+    override_project_id = body.project_id
+    if override_project_id is None:
+        header = request.headers.get("X-Project-Id")
+        if header:
+            try:
+                override_project_id = uuid.UUID(header)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid X-Project-Id format")
+    if override_project_id is not None:
+        if not await has_project_access(session, uuid.UUID(str(auth.user_id)), override_project_id, org_id):
+            raise HTTPException(status_code=403, detail="No access to the specified project")
+        effective_project_id = override_project_id
+    else:
+        effective_project_id = member.project_id
+
     # AC3: story가 해당 project에 존재하는지 검증
     story_result = await session.execute(
-        select(Story).where(Story.id == body.story_id, Story.project_id == member.project_id)
+        select(Story).where(Story.id == body.story_id, Story.project_id == effective_project_id)
     )
     story = story_result.scalar_one_or_none()
     if story is None:
-        raise HTTPException(status_code=400, detail="Story not found in this project")
+        # story #2068 AC3: 존재하지 않는 것과 "다른 project에 있는 것"을 구분해서 알려준다 —
+        # 전자는 오타/삭제, 후자는 project_id 지정 문제(둘 다 "not found"로만 뭉치면 사람이
+        # 원인을 못 좁힌다). org 필터는 유지(타 org story 존재 여부는 노출하지 않는다).
+        elsewhere = await session.execute(
+            select(Story.project_id).where(Story.id == body.story_id, Story.org_id == org_id)
+        )
+        actual_project_id = elsewhere.scalar_one_or_none()
+        if actual_project_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Story {body.story_id} exists in project {actual_project_id}, not in "
+                    f"project {effective_project_id} (resolved from "
+                    f"{'the specified project_id' if override_project_id is not None else 'this team member\'s assigned project'}"
+                    "). Pass the correct project_id explicitly if you have access to it."
+                ),
+            )
+        raise HTTPException(status_code=404, detail="Story not found")
 
     now = datetime.now(timezone.utc)
     # AC3-4 2-2: anchor-only — agent_project_profiles가 presence 유일 소스.

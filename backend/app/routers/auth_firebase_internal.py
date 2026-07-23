@@ -85,9 +85,12 @@ _LOCAL_ENVS = {"development"}
 def _require_internal_secret(authorization: str | None) -> None:
     secret = settings.firebase_bff_internal_secret
     if not secret:
-        if settings.app_env in _LOCAL_ENVS:
-            return  # 로컬 개발 전용 예외
-        logger.warning("auth.firebase.internal_secret_missing_in_non_local_env app_env=%s", settings.app_env)
+        if settings.app_env in _LOCAL_ENVS and settings.is_really_local:
+            return  # 진짜 로컬 개발 전용 예외(Cloud Run 위가 아님 — story #2071)
+        logger.warning(
+            "auth.firebase.internal_secret_missing_in_non_local_env app_env=%s on_cloud_run=%s",
+            settings.app_env, not settings.is_really_local,
+        )
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service misconfigured")
     if authorization != f"Bearer {secret}":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal credential")
@@ -103,16 +106,25 @@ def check_internal_secret_config(s=None) -> None:
     `FIREBASE_BFF_INTERNAL_SECRET`을 SECRETS_SPEC에 배선하지 않음) backend 전체가
     startup에서 죽는 회귀였다(직접 probe: prod_features_off_missing_secret_startup_
     allowed=False). 이 내부 엔드포인트를 실제로 쓰는 기능(세션 발급/모바일 부트스트랩)이
-    켜져 있을 때만 시크릿을 요구한다."""
+    켜져 있을 때만 시크릿을 요구한다.
+
+    story #2071(critical) 근본수정: `app_env not in _LOCAL_ENVS`만으로는 노출된 dev
+    Cloud Run(APP_ENV=development)을 놓친다 — `s.is_really_local`(K_SERVICE 부재 판정,
+    `app/core/config.py` SSOT) 아니면 시크릿을 요구한다. dev에 Firebase 기능이 켜지고 이
+    startup 가드가 살아 있으면, 시크릿 없이는 이제 배포 자체가 실패한다(런타임 503
+    fail-closed보다 먼저 잡힘 — 배포 시점에 시끄럽게 실패하는 쪽이 더 안전,
+    check_listen_config()와 동형)."""
     if s is None:
         from app.core.config import settings as s
     firebase_internal_enabled = (
         s.firebase_auth_issue_session or s.firebase_auth_mobile_issue or s.firebase_oauth_handoff_enabled
     )
-    if firebase_internal_enabled and s.app_env not in _LOCAL_ENVS and not s.firebase_bff_internal_secret:
+    _not_local = s.app_env not in _LOCAL_ENVS or not s.is_really_local
+    if firebase_internal_enabled and _not_local and not s.firebase_bff_internal_secret:
         raise RuntimeError(
             f"APP_ENV={s.app_env}인데 FIREBASE_BFF_INTERNAL_SECRET 미설정 — 내부 세션 mint/"
-            "consume 엔드포인트가 인증 없이 공개된다(fail-closed·산티아고 §9 finding 4)."
+            "consume 엔드포인트가 인증 없이 공개된다(fail-closed·산티아고 §9 finding 4·"
+            "story #2071 K_SERVICE 판정 포함)."
         )
 
 

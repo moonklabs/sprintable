@@ -61,6 +61,12 @@ class StoryAttachment(BaseModel):
     size: int          # 바이트
     # E-STORAGE-SSOT S7: asset registry row id(denorm·catch#4). asset_links=SSOT·이 필드=denorm.
     asset_id: uuid.UUID | None = None
+    # story #2055 AC1/AC2/AC4: 이미지 첨부의 픽셀 크기 — 서버가 업로드 시점에 측정해 채운다
+    # (client 제공값은 위조 가능해 신뢰 안 함, image_dimensions.measure_image_dimensions).
+    # 비이미지 첨부(문서/오디오/비디오)·측정 실패·기존(이 필드 도입 전) 첨부는 None이 정상
+    # (AC4·AC3 — additive·nullable, 백필 안 함. FE는 None이면 기존 고정 프레임으로 폴백).
+    width: int | None = None
+    height: int | None = None
 
     @field_validator("url")
     @classmethod

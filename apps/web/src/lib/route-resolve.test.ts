@@ -36,14 +36,21 @@ describe('looksLikeWorkspaceSegment', () => {
     expect(looksLikeWorkspaceSegment('acme-corp')).toBe(true);
   });
 
-  it('rejects empty/undefined/malformed segments', () => {
+  it('rejects only empty/undefined segments — no segment at all', () => {
     expect(looksLikeWorkspaceSegment(undefined)).toBe(false);
     expect(looksLikeWorkspaceSegment(null)).toBe(false);
     expect(looksLikeWorkspaceSegment('')).toBe(false);
-    expect(looksLikeWorkspaceSegment('Has-Upper')).toBe(false);
-    expect(looksLikeWorkspaceSegment('snake_case')).toBe(false);
-    expect(looksLikeWorkspaceSegment('-leading-hyphen')).toBe(false);
-    expect(looksLikeWorkspaceSegment('trailing-hyphen-')).toBe(false);
+  });
+
+  // story #2039 AC3 — 예전엔 여기서 kebab·ASCII 형식까지 걸러 구 한글 slug(`장사왕`)가
+  // resolve fetch 이전에 탈락했다(레거시 링크가 canonical로 안내받지 못하고 그냥 404).
+  // RESERVED_FIRST_SEGMENTS만 가드로 남기고, 형식이 이상해도 resolve가 최종 판정하게 한다.
+  it('더 이상 형식(kebab/ASCII)으로 거르지 않는다 — 구 slug 후보는 resolve가 판정한다', () => {
+    expect(looksLikeWorkspaceSegment('장사왕')).toBe(true);
+    expect(looksLikeWorkspaceSegment('Has-Upper')).toBe(true);
+    expect(looksLikeWorkspaceSegment('snake_case')).toBe(true);
+    expect(looksLikeWorkspaceSegment('-leading-hyphen')).toBe(true);
+    expect(looksLikeWorkspaceSegment('trailing-hyphen-')).toBe(true);
   });
 });
 

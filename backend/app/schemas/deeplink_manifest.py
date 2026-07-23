@@ -551,19 +551,28 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
 
         # --- task — 열린 질문 8번 답변(유나+미르코, 3자 검토): task_completed payload에
         # story_id가 없다(reference_type="task"·reference_id=task.id뿐) — 전용 task 상세
-        # 화면도 신설하지 않는다(신규 라우트 불필요, 미르코 point ⑤와 동일 원칙). target을
-        # 조건부 로직을 암시하는 이름("task_detail_or_story_fallback" — "FE가 조건 분기해야
-        # 하나?"라는 오해 유발, SSOT 위반) 대신 팀이 이미 쓰는 고정 폴백 컨벤션인
-        # "/board?story="로 확정한다(apps/web goals-client.tsx·embed-card.tsx·
-        # derive-attention-queue.ts에서 이미 쓰는 패턴 — story_id 없이도 보드로 착지).
+        # 화면도 신설하지 않는다(신규 라우트 불필요, 미르코 point ⑤와 동일 원칙).
+        #
+        # 승격(2026-07-21, 오르테가 PO 확定): 원래 target을 팀이 이미 쓰는 웹 전용 URL 조립
+        # 컨벤션 "/board?story="로 뒀었으나, 이 매니페스트의 다른 29개 엔트리가 전부 순수
+        # 의미 식별자(클라이언트 룩업 테이블 조회용, 문자열 조립 불요)인데 이 엔트리만 웹
+        # 라우팅 문법을 계약에 흘려보내고 있었다(미르코 관측 — 모바일이 의미 이름으로 못
+        # 해석해 "지금" 탭 폴백으로 떨어짐) + target_promotion_pending 플래그도 누락돼
+        # "이미 유효한 목적지"로 오인될 수 있었다. story #1953이 이미 예고해둔 값
+        # "story_detail"(task는 항상 story 소속이라 의미상 정확 — 없는 화면 이름을 지어내는
+        # 대신 실제로 존재하는 상위 화면으로 보낸다)로 승격 + target_promotion_pending=True
+        # (gate_detail/artifact_detail과 동일 패턴 — 전용 모바일 라우트 신설 전까지 안전
+        # 폴백). 웹 4곳(goals-client.tsx·embed-card.tsx·derive-attention-queue.ts 등)은
+        # story_id로 이미 "/board?story=" 클라이언트측 조립을 하고 있어 무변경.
         # 등급은 B(정보성) — #1956 채널 등급 확정 시 참고.
         DeepLinkManifestEntry(
-            # story #1953(P1a-S3): story_id를 payload에 추가(발판 — 향후 story_detail 폴백
-            # 승격 시 이 필드로 "/board?story=" 조립 없이 직접 착지 가능해진다). task.story_id
-            # FK는 tasks.py 호출부가 이미 story_row.id로 알고 있어(task는 항상 story 소속)
-            # 신규 조회 없이 그대로 흘려보낸다 — 항상 존재(Task는 story 없이 존재 불가).
+            # story #1953(P1a-S3): story_id를 payload에 추가(이 승격이 바로 그 발판을 쓰는
+            # 자리다 — 조립 없이 story_id로 직접 착지). task.story_id FK는 tasks.py 호출부가
+            # 이미 story_row.id로 알고 있어(task는 항상 story 소속) 신규 조회 없이 그대로
+            # 흘려보낸다 — 항상 존재(Task는 story 없이 존재 불가).
             app=DeepLinkAppFields(
-                type="task_completed", target="/board?story=", parent_tab=ParentTab.all,
+                type="task_completed", target="story_detail", parent_tab=ParentTab.all,
+                target_promotion_pending=True,
             ),
             payload=DeepLinkPayloadFields(
                 org_id_included=True, project_id_included=True,

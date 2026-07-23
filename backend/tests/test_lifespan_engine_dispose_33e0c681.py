@@ -113,3 +113,157 @@ async def test_lifespan_disposes_even_if_pubsub_task_raises(monkeypatch):
             await asyncio.sleep(0)  # task 가 예외로 완전히 종료되게 양보
 
     fake_engine.dispose.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_lifespan_skips_pubsub_task_when_pg_listen_disabled(monkeypatch):
+    """E-ARCH S1(story #2074/#2077): PG_LISTEN_ENABLED=false(api 서비스)면 listen_loop
+    task 자체를 안 만든다 — RAW_LISTEN 커넥션 소비 0. dispose는 여전히 정상 실행(무회귀)."""
+    from app.main import lifespan
+
+    fake_engine = _patch_engine(monkeypatch)
+    monkeypatch.setattr("app.main.settings.pg_listen_enabled", False)
+
+    started = asyncio.Event()
+
+    async def fake_listen():
+        started.set()  # 호출되면 안 됨 — 아래서 미호출 확認.
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("app.services.pg_pubsub.listen_loop", fake_listen)
+
+    async with lifespan(MagicMock()):
+        await asyncio.sleep(0.05)
+        assert not started.is_set(), "PG_LISTEN_ENABLED=false인데 listen_loop가 시작됨"
+
+    fake_engine.dispose.assert_awaited_once()  # task가 없어도 dispose는 정상 실행.
+
+
+@pytest.mark.anyio
+async def test_lifespan_skips_check_listen_config_when_pg_listen_disabled(monkeypatch):
+    """PG_LISTEN_ENABLED=false면 check_listen_config()(DB_PGBOUNCER/DATABASE_URL_DIRECT
+    정합 fail-closed 가드)도 안 부른다 — LISTEN을 아예 안 켜는 서비스엔 무의미한 강제라
+    불필요한 startup 실패를 막는다."""
+    from app.main import lifespan
+
+    _patch_engine(monkeypatch)
+    monkeypatch.setattr("app.main.settings.pg_listen_enabled", False)
+
+    called = {"n": 0}
+
+    def fake_check():
+        called["n"] += 1
+
+    monkeypatch.setattr("app.services.pg_pubsub.check_listen_config", fake_check)
+
+    async def fake_listen():
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("app.services.pg_pubsub.listen_loop", fake_listen)
+
+    async with lifespan(MagicMock()):
+        await asyncio.sleep(0.05)
+
+    assert called["n"] == 0, "PG_LISTEN_ENABLED=false인데 check_listen_config가 호출됨"
+
+
+@pytest.mark.anyio
+async def test_lifespan_skips_redis_shadow_task_by_default(monkeypatch):
+    """E-ARCH S2(story #2078): event_broker_redis_dual_publish_enabled default=False —
+    redis_consume_loop task 자체를 안 만든다(Memorystore 미배선 상태에서도 무해)."""
+    from app.main import lifespan
+
+    fake_engine = _patch_engine(monkeypatch)
+    monkeypatch.setattr("app.main.settings.event_broker_redis_dual_publish_enabled", False)
+
+    started = asyncio.Event()
+
+    async def fake_shadow_consume():
+        started.set()  # 호출되면 안 됨.
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("app.services.event_broker.redis_consume_loop", fake_shadow_consume)
+
+    async with lifespan(MagicMock()):
+        await asyncio.sleep(0.05)
+        assert not started.is_set(), "flag off인데 redis_consume_loop가 시작됨"
+
+    fake_engine.dispose.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_lifespan_starts_redis_shadow_task_when_enabled(monkeypatch):
+    """flag on이면 redis_consume_loop task가 뜨고, shutdown 시 정상 cancel→dispose."""
+    from app.main import lifespan
+
+    fake_engine = _patch_engine(monkeypatch)
+    monkeypatch.setattr("app.main.settings.event_broker_redis_dual_publish_enabled", True)
+
+    started = asyncio.Event()
+
+    async def fake_shadow_consume():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            return
+
+    monkeypatch.setattr("app.services.event_broker.redis_consume_loop", fake_shadow_consume)
+
+    async with lifespan(MagicMock()):
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+    fake_engine.dispose.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_lifespan_skips_redis_consume_task_when_consume_disabled_even_if_dual_publish_on(monkeypatch):
+    """story #2078 정리(2026-07-21): dual_publish=True인데 redis_consume_enabled=False(api용
+    durable 배선)면 task를 안 만들어야 — 발행(publish) 역할과 구독(consume) 역할을 분리하는
+    신규 게이트. api는 SSE를 안 서빙하니 구독이 불필요(로그 노이즈 + 낭비였던 것을 여기서 막는다)."""
+    from app.main import lifespan
+
+    fake_engine = _patch_engine(monkeypatch)
+    monkeypatch.setattr("app.main.settings.event_broker_redis_dual_publish_enabled", True)
+    monkeypatch.setattr("app.main.settings.event_broker_redis_consume_enabled", False)
+
+    started = asyncio.Event()
+
+    async def fake_consume():
+        started.set()  # 호출되면 안 됨.
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("app.services.event_broker.redis_consume_loop", fake_consume)
+
+    async with lifespan(MagicMock()):
+        await asyncio.sleep(0.05)
+        assert not started.is_set(), "consume_enabled=False인데 redis_consume_loop가 시작됨"
+
+    fake_engine.dispose.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_lifespan_starts_redis_consume_task_when_both_flags_on(monkeypatch):
+    """dual_publish=True AND consume_enabled=True(둘 다 필요) — realtime용 배선(default True라
+    명시 안 해도 되지만, 회귀 가드로 명시 조합을 직접 검증)."""
+    from app.main import lifespan
+
+    fake_engine = _patch_engine(monkeypatch)
+    monkeypatch.setattr("app.main.settings.event_broker_redis_dual_publish_enabled", True)
+    monkeypatch.setattr("app.main.settings.event_broker_redis_consume_enabled", True)
+
+    started = asyncio.Event()
+
+    async def fake_consume():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            return
+
+    monkeypatch.setattr("app.services.event_broker.redis_consume_loop", fake_consume)
+
+    async with lifespan(MagicMock()):
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+    fake_engine.dispose.assert_awaited_once()

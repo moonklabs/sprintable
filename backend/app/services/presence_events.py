@@ -14,8 +14,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def emit_conversation_working(org_id, conversation_id) -> None:
-    """해당 conversation 의 현재 working member 목록을 push(채팅 typing). FE 가 폴링 없이 이벤트로 갱신."""
+async def emit_conversation_working(org_id, conversation_id) -> None:
+    """해당 conversation 의 현재 working member 목록을 push(채팅 typing). FE 가 폴링 없이 이벤트로 갱신.
+
+    #2120: chat_presence.list_working 이 async(Redis 공유)로 전환돼 이 함수도 async — 호출부는 await.
+    """
     try:
         from app.routers.events import publish_event
         from app.services import chat_presence
@@ -25,7 +28,7 @@ def emit_conversation_working(org_id, conversation_id) -> None:
             "conversation.working",
             {
                 "conversation_id": str(conversation_id),
-                "working": chat_presence.list_working(str(conversation_id)),
+                "working": await chat_presence.list_working(str(conversation_id)),
             },
         )
     except Exception:

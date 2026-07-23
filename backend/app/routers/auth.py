@@ -773,10 +773,32 @@ async def refresh_token(
         .returning(RefreshToken.user_id)
     )).scalar_one_or_none()
     if revoked_user_id is None:
-        logger.warning(
-            "auth.refresh 실패 reason=token_not_found_or_revoked_or_expired key=%s", correlation_key,
+        # ⛔P0 신 클래스(#1887 쿠키-Domain no-op과 별개 — config.py auth_refresh_grace_seconds
+        # 주석 참조): proxy.ts 의 FE 인스턴스-로컬 single-flight dedupe 는 Cloud Run 멀티인스턴스
+        # 간 공유가 안 돼, 하드리프레시의 병렬 인증요청이 인스턴스 분산되면 같은 RT 로 동시
+        # rotate 경합이 남는다 — 진 쪽은 방금(grace window 내) 이미 소비된 RT 를 만난 것뿐,
+        # 진짜 stale/탈취 replay 가 아니다. grace window 내 revoke 된 토큰이면 하드 401 로 FE
+        # clearAuthCookies()(강제 로그아웃)를 유발하는 대신 독립적인 새 rotation 을 한 번 더
+        # 발급(fork)한다 — 이미 소비된 old RT 를 재사용하는 게 아니라 그 자신만의 새 RT 를
+        # 새로 발급받을 뿐이라 원자 single-use 불변식 자체는 안 깨진다.
+        grace_cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.auth_refresh_grace_seconds)
+        revoked_user_id = (await session.execute(
+            select(RefreshToken.user_id).where(
+                RefreshToken.token_hash == token_hash,
+                RefreshToken.revoked_at.is_not(None),
+                RefreshToken.revoked_at > grace_cutoff,
+                RefreshToken.expires_at > datetime.now(timezone.utc),
+            )
+        )).scalar_one_or_none()
+        if revoked_user_id is None:
+            logger.warning(
+                "auth.refresh 실패 reason=token_not_found_or_revoked_or_expired key=%s", correlation_key,
+            )
+            return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
+        logger.info(
+            "auth.refresh grace_reuse key=%s user_id=%s reason=multi_instance_race_loser_fork_rotation",
+            correlation_key, revoked_user_id,
         )
-        return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
 
     user = await _get_user_by_id(session, revoked_user_id)
     if not user:

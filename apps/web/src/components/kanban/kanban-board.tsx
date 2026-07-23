@@ -19,12 +19,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast, ToastContainer } from '@/components/ui/toast';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { KanbanColumn } from './kanban-column';
 import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
-import { COLUMNS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
+import { COLUMNS, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
 
 /**
@@ -240,6 +242,74 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const adjustColumnTotal = useCallback((status: string, delta: number) => {
     setColumnTotals((prev) => ({ ...prev, [status]: Math.max(0, (prev[status] ?? 0) + delta) }));
   }, []);
+
+  // story #2059: 보드 실시간 반영 — 새 EventSource를 여는 대신 기존 useSseNotifications의
+  // extraEventNames 확장 지점을 구독한다(AC2, 이미 이 용도로 설계된 재사용 경로 —
+  // hooks/use-sse-notifications.ts 자체 문서 참고). story.status_changed/assignee_changed는
+  // publish_event(org_id, ...)로 org 전체에 브로드캐스트되므로 project_id로 클라이언트 필터한다.
+  // 이미 로드된(페이지네이션으로 fetch된) 카드만 in-place 패치 — 전체 재fetch를 하지 않으므로
+  // 스크롤 위치·컬럼 순서가 흔들리지 않는다(AC3, #2050에서 배운 레이아웃 시프트 축과 동일 원리).
+  // 아직 로드 안 된 카드(다른 컬럼 페이지네이션 밖)의 신규 진입은 이 스토리 스코프 밖으로 둔다.
+  const { currentTeamMemberId } = useDashboardContext();
+
+  // story #2137 — 카드(stories 배열)와 상세 패널(selectedStory)이 별도 state라, SSE 패치를
+  // stories에만 적용하면 패널만 옛값에 고정된다(#2384·#2130과 같은 클래스의 3번째 재발 — 이번엔
+  // "갱신 신호를 아예 안 듣는 표면"). patchStory 하나로 묶어 두 state를 항상 같이 갱신해
+  // "한쪽만 패치" 자체를 구조적으로 불가능하게 만든다 — 이 handler에 새 이벤트 분기가 추가돼도
+  // 자동으로 이 보장을 물려받는다.
+  const patchStoryFromSse = useCallback((storyId: string, patch: Partial<KanbanStory>) => {
+    setStories((prev) => prev.map((s) => (s.id === storyId ? { ...s, ...patch } : s)));
+    setSelectedStory((prev) => (prev && prev.id === storyId ? { ...prev, ...patch } : prev));
+  }, []);
+
+  const handleBoardSseEvent = useCallback((eventName: string, data: unknown) => {
+    const payload = data as {
+      story_id?: string;
+      project_id?: string;
+      actor_id?: string;
+      actor_name?: string;
+      status?: string;
+      assignee_id?: string | null;
+      assignees?: string[];
+    };
+    if (!payload.story_id || !payload.project_id || payload.project_id !== projectId) return;
+    // 내 액션의 echo는 무시 — 이미 낙관 갱신했으므로 중복 패치·토스트 스팸을 방지한다.
+    if (currentTeamMemberId && payload.actor_id === currentTeamMemberId) return;
+
+    const existing = stories.find((s) => s.id === payload.story_id);
+    if (!existing) return;
+
+    const titleForToast = existing.title;
+    if (eventName === 'story.status_changed' && payload.status && payload.status !== existing.status) {
+      const newStatus = payload.status;
+      patchStoryFromSse(payload.story_id, { status: newStatus });
+      adjustColumnTotal(existing.status, -1);
+      adjustColumnTotal(newStatus, +1);
+    } else if (eventName === 'story.assignee_changed') {
+      // story #2133 — normalizeAssigneePatch가 assignee_id/assignee_ids 정합을 강제한다.
+      // 손으로 두 필드를 따로 계산하던 자리(#2130 근본)를 구조로 제거.
+      const assigneePatch = normalizeAssigneePatch({ assignee_id: payload.assignee_id, assignee_ids: payload.assignees });
+      patchStoryFromSse(payload.story_id, assigneePatch);
+    } else {
+      return;
+    }
+
+    // AC4: 카드가 그냥 이동하지 않는다 — 누가 했는지 토스트로 드러낸다(안 그러면 사람은
+    // 자기 화면이 오작동한 것으로 읽는다).
+    const actorLabel = payload.actor_name ?? t('realtimeUnknownActor');
+    addToast({
+      type: 'info',
+      title: eventName === 'story.status_changed'
+        ? t('realtimeStatusChanged', { actor: actorLabel, title: titleForToast })
+        : t('realtimeAssigneeChanged', { actor: actorLabel, title: titleForToast }),
+    });
+  }, [projectId, currentTeamMemberId, stories, adjustColumnTotal, addToast, t, patchStoryFromSse]);
+
+  useSseNotifications({
+    memberId: currentTeamMemberId,
+    extraEventNames: ['story.status_changed', 'story.assignee_changed'],
+    onExtraEvent: handleBoardSseEvent,
+  });
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -890,7 +960,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto">
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('sprint_id', '')}>
                     <span className="flex-1">{t('allSprints')}</span>
@@ -950,7 +1020,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto">
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('epic_id', '')}>
                     <span className="flex-1">{t('allEpics')}</span>
@@ -1010,7 +1080,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto">
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('assignee_id', '')}>
                     <span className="flex-1">{t('allAssignees')}</span>
@@ -1090,7 +1160,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   />
                 </div>
                 <DropdownMenuSeparator />
-                <div className="max-h-[50vh] overflow-y-auto">
+                <div className="focus-inset max-h-[50vh] overflow-y-auto">
                   <DropdownMenuGroup>
                     <DropdownMenuItem onClick={() => setSelectedLabelIds([])}>
                       <span className="flex-1">{t('allLabels')}</span>
@@ -1199,7 +1269,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         ) : null}
         <div className="min-h-0 flex-1 overflow-hidden">
         {viewMode === 'list' ? (
-          <div className="h-full overflow-y-auto">
+          <div className="focus-inset h-full overflow-y-auto">
             <KanbanListView
               stories={filteredStories}
               epicMap={epicMap}

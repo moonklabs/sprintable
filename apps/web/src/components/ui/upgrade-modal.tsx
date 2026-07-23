@@ -1,6 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 
 interface UpgradeModalProps {
   message: string;
@@ -11,11 +12,11 @@ export function UpgradeModal({ message, onClose }: UpgradeModalProps) {
   const t = useTranslations('common');
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay-backdrop">
-      <div className="w-full max-w-[calc(100%-2rem)] rounded-2xl bg-background p-6 shadow-xl sm:max-w-sm">
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-sm" showCloseButton={false}>
         <div className="text-center">
           <div className="mb-3 text-4xl">🚀</div>
-          <h3 className="text-lg font-semibold text-foreground">{t('upgradeRequired')}</h3>
+          <DialogTitle className="text-lg font-semibold text-foreground">{t('upgradeRequired')}</DialogTitle>
           <p className="mt-2 text-sm text-muted-foreground">{message}</p>
         </div>
         <div className="mt-6 flex gap-3">
@@ -33,7 +34,7 @@ export function UpgradeModal({ message, onClose }: UpgradeModalProps) {
             {t('upgradePlan')}
           </a>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

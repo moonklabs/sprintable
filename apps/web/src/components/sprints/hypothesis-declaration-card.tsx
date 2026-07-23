@@ -281,7 +281,7 @@ export function HypothesisDeclarationCard({
           ) : filteredLinkable.length === 0 ? (
             <p className="py-2 text-center text-xs text-muted-foreground">{th('pickerEmpty')}</p>
           ) : (
-            <div className="max-h-32 space-y-1 overflow-y-auto">
+            <div className="focus-inset max-h-32 space-y-1 overflow-y-auto">
               {filteredLinkable.map((h) => (
                 <button
                   key={h.id}

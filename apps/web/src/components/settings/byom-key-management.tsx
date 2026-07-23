@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
@@ -342,9 +343,9 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
 
       {/* Delete confirmation dialog */}
       {showDeleteConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-muted p-6 shadow-xl backdrop-blur-xl">
-            <h3 className="text-lg font-semibold text-destructive">{t('deleteConfirmTitle')}</h3>
+        <Dialog open={showDeleteConfirm} onOpenChange={(open) => { if (!open && !deleting) setShowDeleteConfirm(false); }}>
+          <DialogContent className="max-w-sm rounded-2xl border-white/10 bg-muted shadow-xl backdrop-blur-xl" showCloseButton={false}>
+            <DialogTitle className="text-lg font-semibold text-destructive">{t('deleteConfirmTitle')}</DialogTitle>
             <p className="mt-2 text-sm text-muted-foreground">{t('deleteConfirmDesc')}</p>
             <div className="mt-6 flex gap-3">
               <Button variant="glass" className="flex-1" onClick={() => setShowDeleteConfirm(false)}>
@@ -359,8 +360,8 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
                 {deleting ? '...' : t('confirmDelete')}
               </Button>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
     </>
   );

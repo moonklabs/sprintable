@@ -199,7 +199,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* Filters */}

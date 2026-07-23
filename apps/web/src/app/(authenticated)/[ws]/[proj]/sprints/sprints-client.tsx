@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target, Clock, Users, Calendar, Ban } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 
@@ -34,6 +35,7 @@ import {
 import { HypothesisDeclarationSection } from '@/components/sprints/hypothesis-declaration-section';
 import { OpenLoopCockpit } from '@/components/sprints/open-loop-cockpit';
 import type { RetroHypothesisResult } from '@/services/retro-session';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 // 8a2bbda2: 기간 표시는 start_date~end_date(진실)에서 계산한다. BE `duration` 필드(예 14)가
 // 날짜 범위와 불일치하는 케이스가 있어 신뢰하지 않고, inclusive 일수(end−start+1)를 직접 산출한다.
@@ -169,11 +171,10 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button type="button" className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} aria-label={t('cancel')} />
-      <div className="relative z-10 max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-background p-6 shadow-xl">
+    <Dialog open onOpenChange={(open) => { if (!open && !submitting) onClose(); }}>
+      <DialogContent className="max-h-[90vh] max-w-lg" showCloseButton={false}>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-bold text-foreground">{t('newSprint')}</h2>
+          <DialogTitle className="text-base font-bold text-foreground">{t('newSprint')}</DialogTitle>
           <button type="button" onClick={onClose} className="rounded-xl p-1.5 text-muted-foreground hover:bg-muted">
             <X className="size-4" />
           </button>
@@ -291,8 +292,8 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -309,15 +310,14 @@ interface DeleteConfirmDialogProps {
 function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose }: DeleteConfirmDialogProps) {
   const t = useTranslations('sprints');
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button type="button" className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} aria-label={t('cancel')} />
-      <div role="alertdialog" aria-modal="true" className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background p-6 shadow-xl">
+    <Dialog open onOpenChange={(open) => { if (!open && !deleting) onClose(); }}>
+      <DialogContent role="alertdialog" className="max-w-sm" showCloseButton={false}>
         <div className="mb-3 flex items-start gap-3">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
             <AlertTriangle className="size-5" />
           </span>
           <div className="min-w-0">
-            <h2 className="text-base font-bold text-foreground">{t('deleteConfirmTitle')}</h2>
+            <DialogTitle className="text-base font-bold text-foreground">{t('deleteConfirmTitle')}</DialogTitle>
             <p className="mt-0.5 truncate text-sm font-medium text-muted-foreground">{sprintTitle}</p>
           </div>
         </div>
@@ -330,8 +330,8 @@ function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose 
             {deleting ? '...' : t('deleteConfirm')}
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -629,6 +629,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
             <span className="hidden sm:inline">{t('newSprint')}</span>
           </Button>
         }
+        showContextChip
       />
       <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* Sprint list */}
@@ -694,16 +695,21 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           <Badge variant={statusVariant(selected.status)} className="mt-1">{selected.status}</Badge>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => { setDeleteError(null); setShowDeleteConfirm(true); }}
-            aria-label={t('delete')}
-            title={t('delete')}
-            className="text-muted-foreground hover:text-destructive"
-          >
-            <Trash2 className="size-4" />
-          </Button>
+          {/* story #2104 — BE sprints.py:351이 human-only로 삭제를 403 거부한다(되돌릴 수 없는
+              조작). 에이전트 계정에도 트리거를 열어두면 #2091/#2103과 같은 결함이라 미리
+              숨긴다. */}
+          <HumanOnlyAction>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setDeleteError(null); setShowDeleteConfirm(true); }}
+              aria-label={t('delete')}
+              title={t('delete')}
+              className="text-muted-foreground hover:text-destructive"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </HumanOnlyAction>
           <Button variant="ghost" size="sm" onClick={() => setSelected(null)} aria-label={t('cancel')}>
             <X className="size-4" />
           </Button>

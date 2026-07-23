@@ -246,8 +246,38 @@ async def report_done(
 
     # 스토리 상태 업데이트 (merge에서 auto_merge가 아니면 story_status=None이라 skip)
     if story_status:
+        old_status = story.status
         story_repo = StoryRepository(session, story.org_id)
-        await story_repo.update(story.id, status=story_status)
+        updated_story = await story_repo.update(story.id, status=story_status)
+        # story #2067(발견·회귀수정): 이 경로가 status_changed side-effects(events→L1·webhook·L2·
+        # notif·activity, 41a6e294 공유 helper)를 한 번도 안 불렀다 — 이 엔드포인트가 "에이전트가
+        # 스테이지 완료를 보고"하는 가장 흔한 status 변경 경로인데도(auto-merge→done 포함) board
+        # 실시간 갱신·알림·웹훅이 조용히 안 나갔다. PATCH /{id}/status와 동일 helper로 parity 확보.
+        if updated_story is not None:
+            agent_member = (await session.execute(
+                select(TeamMember).where(TeamMember.id == body.agent_id).limit(1)
+            )).scalar_one_or_none()
+            # E-ARCH S3b(story #2078): SSE만 outbox에 atomic 적재 — 반드시 commit 전에 호출
+            # (그래야 story status 커밋에 outbox row가 같이 실린다). event_broker_outbox_enabled
+            # 꺼진 동안은 완전 no-op(무회귀) — 아래 emit_story_status_changed()의 기존
+            # _push_to_agent 루프가 여전히 유일한 실 SSE 경로.
+            from app.services.story_status_events import stage_status_changed_sse_outbox
+            await stage_status_changed_sse_outbox(
+                session, story.org_id, updated_story, old_status,
+                actor_id=body.agent_id,
+                actor_name=agent_member.name if agent_member else None,
+                actor_role=agent_member.role if agent_member else None,
+                actor_type="agent",
+            )
+            await session.commit()
+            from app.services.story_status_events import emit_story_status_changed
+            await emit_story_status_changed(
+                session, story.org_id, updated_story, old_status,
+                actor_id=body.agent_id,
+                actor_name=agent_member.name if agent_member else None,
+                actor_role=agent_member.role if agent_member else None,
+                actor_type="agent",
+            )
 
     return ReportDoneResponse(
         story_id=body.story_id,

@@ -105,7 +105,7 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
               ) : stories.length === 0 ? (
                 <p className="text-sm text-muted-foreground">{t('bridgeNoStories')}</p>
               ) : (
-                <div className="max-h-64 space-y-1.5 overflow-y-auto">
+                <div className="focus-inset max-h-64 space-y-1.5 overflow-y-auto">
                   {stories.map((story) => {
                     const alreadyAdded = alreadySelectedIds.includes(story.id);
                     return (

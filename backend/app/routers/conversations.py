@@ -465,7 +465,7 @@ async def _dispatch_conversation_event(
         # 그 agent 가 reply 를 보내면 send_message 에서 clear, 안 보내면 TTL 자동 소멸(ephemeral).
         # webhook-covered agent 도 webhook 으로 받아 답장하므로 working 표시는 유지한다.
         if is_agent:
-            chat_presence.set_working(str(conversation.id), str(pid))
+            await chat_presence.set_working(str(conversation.id), str(pid))
             _set_working_any = True
         # webhook-covered agent → SSE Event/seq/push 스킵(이중수신 박멸). human Event 는 무변경
         # (웹 UI SSE = events.py status 별경로·FORK2).
@@ -491,7 +491,7 @@ async def _dispatch_conversation_event(
     # R2(da9d1781): working 변경 → conversation.working + presence SSE 발행(폴링 대체·best-effort).
     if _set_working_any:
         from app.services.presence_events import emit_conversation_working, emit_presence
-        emit_conversation_working(org_id, conversation.id)
+        await emit_conversation_working(org_id, conversation.id)
         emit_presence(org_id)
     # per-recipient dense seq 발급 (agent recipient만)
     for pid_str, event in events_to_push:
@@ -759,6 +759,12 @@ class MessageAttachment(BaseModel):
     # E-STORAGE-SSOT S7: asset registry row id(denorm·catch#4). asset_links=SSOT·이 필드=denorm.
     # optional(legacy 첨부·미등록 호환). save 시 이 값으로 asset_link 파생(drift 0).
     asset_id: uuid.UUID | None = None
+    # story #2055 AC1/AC2/AC4: 이미지 첨부의 픽셀 크기 — 서버가 업로드 시점에 측정해 채운다
+    # (client 제공값은 위조 가능해 신뢰 안 함, image_dimensions.measure_image_dimensions).
+    # 비이미지 첨부(문서/오디오/비디오)·측정 실패·기존(이 필드 도입 전) 첨부는 None이 정상
+    # (AC4·AC3 — additive·nullable, 백필 안 함. FE는 None이면 기존 고정 프레임으로 폴백).
+    width: int | None = None
+    height: int | None = None
 
     @field_validator("url")
     @classmethod
@@ -1425,7 +1431,7 @@ async def list_working_members(
 
     # 본인은 제외 — 내가 typing 중인 건 내 UI에 안 띄움(memo presence.py 동형).
     items = [
-        e for e in chat_presence.list_working(str(conversation_id))
+        e for e in await chat_presence.list_working(str(conversation_id))
         if e["member_id"] != str(sender.id)
     ]
     return {"data": items}
@@ -1648,10 +1654,10 @@ async def send_message(
     # 1aeecdde P2: sender 가 이 conversation 에 메시지를 보냄 = 답장 생성 종료 → working clear.
     # fork 분기(아래) 전 **원본 conversation_id** 기준 — working 은 그 conversation 에 set 됐다.
     # 휴먼 sender 면 set 된 적 없어 no-op(무해). agent reply 면 즉시 "...typing" 해제.
-    chat_presence.clear_working(str(conversation_id), str(sender.id))
+    await chat_presence.clear_working(str(conversation_id), str(sender.id))
     # R2(da9d1781): working clear → conversation.working + presence SSE 발행(폴링 대체·best-effort).
     from app.services.presence_events import emit_conversation_working, emit_presence
-    emit_conversation_working(org_id, conversation_id)
+    await emit_conversation_working(org_id, conversation_id)
     emit_presence(org_id)
 
     # cross-org 차단: mentioned_ids를 현재 org 소속 member로 일괄 필터링 (QA B1).
@@ -1736,6 +1742,15 @@ async def send_message(
                     f"(max {_MCP_MAX_ATTACHMENTS} files / {_MCP_MAX_TOTAL_ATTACHMENT_BYTES} bytes total)"
                 ),
             )
+
+    # story #2055 AC1: 이미지 첨부 픽셀 크기를 서버가 측정해 채운다 — client 제공 width/height는
+    # asset_id와 동일하게 위조 가능하므로 신뢰하지 않고 항상 서버 측정값으로 덮어쓴다(server
+    # authority). 저장 전 in-place로 채워서 이후 model_dump() 호출(메시지 저장·asset registry
+    # 동기화 둘 다)이 자동으로 값을 반영하게 한다. best-effort(측정 실패해도 전송을 막지 않음).
+    if body.attachments:
+        from app.services.image_dimensions import measure_image_dimensions
+        for a in body.attachments:
+            a.width, a.height = await measure_image_dimensions(a.content_type, a.url) or (None, None)
 
     msg = ConversationMessage(
         conversation_id=conversation_id,
@@ -1845,6 +1860,13 @@ async def send_message(
         raise HTTPException(status_code=500, detail="event dispatch failed") from _dispatch_err
 
     # AC1: 멘션 대상에게 conversation:mention SSE 발송 (participant 여부 무관)
+    #
+    # story #2127(2026-07-22, 까심군 #2090 QA 후속): "participant 여부 무관"은 group
+    # conversation 기준이다 — DM은 위 CB-S2 fork 분기(conversation_id/conv가 이미 재대입돼
+    # 있음)가 비참여자 멘션을 그룹으로 자동승격 + 참가자 편입시키므로, 이 지점에 도달할 때는
+    # DM에서 온 멘션 대상도 이미 참가자다(git log -S "CB-S2: DM" 확認, [CB-S2] PR#747, 의도된
+    # 기능·버그 아님). 즉 "진짜 비참가자에게 message_created 없이 mention만 감"이 실제로
+    # 일어나는 건 group conversation에서 기존 비참가자를 멘션하는 경우뿐이다.
     if msg.mentioned_ids:
         mention_targets = set(msg.mentioned_ids) - {sender.id} - discord_exclude_ids - blocked_agent_ids
         if mention_targets:
@@ -1950,8 +1972,19 @@ async def send_message(
     # commit 완료 후 SSE push — Event가 DB에 커밋된 상태에서 push해야 race condition 없음
     for pid_str, sse_payload in pending_sse_pushes:
         _push_to_agent(pid_str, sse_payload)
-    # 브라우저 SSE 구독자에게 1회 발행 — pending 유무와 무관하게 commit 후 항상 발행
-    publish_event(str(org_id), "conversation.message_created", _msg_payload(msg, sender))  # canonical (S-COMM-12)
+    # story #2090 정정(2026-07-22, 까심 발견 — 2026-07-21 PR #2375의 착오 정정): publish_event()의
+    # org _subscribers fanout은 영구 죽은 레지스트리(story #2059/#2067과 동일 근본)라 실제
+    # SSE 전달 경로가 아니다 — canonical event_type 기록용(L1 activity_events 캡처)으로만 유지.
+    # 실 전달은 위 pending_sse_pushes push 루프(commit 후, 1982행 부근)가 이미 담당한다:
+    # `_dispatch_conversation_event`가 conversation participant 전원에게, `_dispatch_mention_
+    # events`가 멘션 대상(참가자 여부 무관) 전원에게 각각 event_type을 정확히 나눠(message_created
+    # vs conversation:mention) push하므로 별도 함수로 다시 push할 필요가 없다 — PR #2375가 이
+    # 사실을 놓치고 `_push_conversation_message_created()`로 동일 pid에 conversation.message_created를
+    # 중복 발송했고(참가자 기준 순수 중복), 게다가 pending_sse_pushes 전체를 pid 기준 dedup하면서
+    # 멘션-only 비참가자에게도 message_created를 함께 보내 use-chat-unread-total.ts의 "SSE는 실
+    # 참여자에게만 전달되므로 +1 정확" 전제를 깨는 phantom unread 증분 부작용까지 냈다(비참가자는
+    # /api/conversations/unread-count 서버 truth엔 안 잡히므로 배지만 어긋남). 그 함수 자체를 삭제.
+    publish_event(str(org_id), "conversation.message_created", _msg_payload(msg, sender))  # canonical (S-COMM-12) — L1 activity_events 캡처용 유지
 
     # ws_chat WebSocket 브로드캐스트 — agent 참가자 room에 실시간 전달 (conv.type/title 무관)
     try:
@@ -2102,11 +2135,18 @@ async def upload_conversation_attachment(
     if not uploaded:
         raise HTTPException(status_code=502, detail="upload failed")
 
+    # story #2055 AC1: 바이트가 이미 메모리에 있으므로 재다운로드 없이 직접 측정.
+    from app.services.image_dimensions import measure_image_dimensions_from_bytes
+    dims = measure_image_dimensions_from_bytes(body.content_type, data)
+    width, height = dims if dims is not None else (None, None)
+
     return MessageAttachment(
         url=object_path,
         name=body.name,
         content_type=body.content_type,
         size=len(data),
+        width=width,
+        height=height,
     )
 
 

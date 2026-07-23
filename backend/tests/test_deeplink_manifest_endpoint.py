@@ -70,3 +70,42 @@ async def test_deeplink_manifest_endpoint_requires_auth():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get("/api/v2/deeplink-manifest")
     assert resp.status_code in (401, 403)
+
+
+@pytest.mark.anyio
+async def test_target_promotion_pending_policy_explained_in_response():
+    """2026-07-21(오르테가 PO 확認 요청): target_promotion_pending 뜻이 BE 소스 코드
+    (Pydantic Field description)에만 있고 실제 응답 payload엔 없던 갭 — 소비자가 raw JSON만
+    보고도 플래그 의미를 알 수 있어야 한다."""
+    app.dependency_overrides[get_current_user] = _override_auth
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/v2/deeplink-manifest")
+    finally:
+        app.dependency_overrides.clear()
+
+    body = resp.json()
+    assert isinstance(body["target_promotion_pending_policy"], str)
+    assert body["target_promotion_pending_policy"]
+
+
+@pytest.mark.anyio
+async def test_task_completed_promoted_to_story_detail_semantic_target():
+    """2026-07-21(오르테가 PO 확定): task_completed의 target이 웹 전용 URL 조립 컨벤션
+    ("/board?story=")에서 다른 29개 엔트리와 동형인 순수 의미 식별자("story_detail")로
+    승격됐다 — story #1953이 이미 payload에 실어둔 story_id를 그 발판으로 쓴다.
+    target_promotion_pending=True(전용 모바일 라우트 신설 전까지 안전 폴백,
+    gate_detail/artifact_detail과 동일 패턴)."""
+    app.dependency_overrides[get_current_user] = _override_auth
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/v2/deeplink-manifest")
+    finally:
+        app.dependency_overrides.clear()
+
+    body = resp.json()
+    task_entry = next(e for e in body["entries"] if e["app"]["type"] == "task_completed")
+    assert task_entry["app"]["target"] == "story_detail"
+    assert not task_entry["app"]["target"].startswith("/")
+    assert task_entry["app"]["target_promotion_pending"] is True
+    assert "story_id" in task_entry["payload"]["required_payload"]

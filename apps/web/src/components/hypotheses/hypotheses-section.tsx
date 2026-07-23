@@ -206,6 +206,17 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
       });
       await load();
     },
+    // story #2053 — active→measuring. 서버 실측: 이 전이엔 measure_after/지표정의 요건이
+    // 없다(transition_hypothesis에 active→measuring 전용 가드 없음, is_valid_transition
+    // 통과 후 바로 status만 갱신) — 그냥 시작되면 되므로 확인 다이얼로그 없이 1스텝.
+    onStartMeasuring: async (h) => {
+      await fetch(`/api/hypotheses/${h.id}/transition`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'measuring' }),
+      });
+      await load();
+    },
     // kill = destructive·확정 1스텝.
     onKill: async (h) => {
       if (!window.confirm(t('killConfirm'))) return;

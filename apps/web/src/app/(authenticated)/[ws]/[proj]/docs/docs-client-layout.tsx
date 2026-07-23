@@ -20,6 +20,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChevronDown, ChevronLeft, ChevronRight, FileText, Plus, X } from 'lucide-react';
 import { DocsLayoutContext, type Doc, type DocUpdate } from './docs-context';
 import { useSwipeDrawer } from '@/lib/use-swipe-drawer';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 
 interface DocsClientLayoutProps {
@@ -187,6 +188,10 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   const openDrawer = useCallback(() => setTreeDrawerOpen(true), []);
   const closeDrawer = useCallback(() => setTreeDrawerOpen(false), []);
   const { progress: drawerProgress, dragging: drawerDragging } = useSwipeDrawer(treeDrawerOpen, openDrawer, closeDrawer);
+  // story #2061 — 처음엔 제스처 물리(drawerProgress/drawerDragging) 때문에 Dialog 전면교체가
+  // hard라 판단했으나, 트랩만 별도로 붙이는 건 제스처와 무관하다(터치 드래그 중엔 treeDrawerOpen
+  // 자체가 안 바뀌고 release 시점에만 커밋되므로 — useSwipeDrawer 참고). Tab 트랩+Esc+반환만.
+  const drawerTrapRef = useFocusTrap(treeDrawerOpen, closeDrawer);
 
   const topBarTitle = useMemo(
     () => <h1 className="text-sm font-medium">{t('title')}</h1>,
@@ -276,16 +281,20 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   return (
     <DocsLayoutContext.Provider value={{ wsSlug, projSlug, projectId, tree, setTree, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer: openDrawer }}>
+      {/* 근본 재구현(2076 회귀 후속, 유나양 규격) — currentSlug 없음(목록)=켬, 있음(문서 하나)=
+          끔. 이 shell은 단일 문서가 화면을 꽉 채우는 구조(목록+본문 동시 2단 아님)라 이 분기가
+          맞다(2단 shell이었다면 항상 켜야 함 — 유나양 규격 예외 조항). */}
       <TopBarSlot
         title={topBarTitle}
         actions={topBarActions}
+        showContextChip={!currentSlug}
       />
 
       {/* Unified: children rendered exactly once — sidebar responsive via breakpoint classes */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Desktop sidebar — hidden on mobile */}
         {!sidebarCollapsed && (
-          <aside className="relative hidden w-[236px] flex-shrink-0 flex-col overflow-y-auto border-r border-border/80 bg-background lg:flex">
+          <aside className="focus-inset relative hidden w-[236px] flex-shrink-0 flex-col overflow-y-auto border-r border-border/80 bg-background lg:flex">
             <button
               type="button"
               onClick={handleToggleSidebar}
@@ -343,7 +352,12 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         />
         {/* Mobile swipe drawer panel */}
         <div
-          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-border bg-background shadow-lg lg:hidden"
+          ref={drawerTrapRef}
+          tabIndex={-1}
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('title')}
+          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-border bg-background shadow-lg outline-none lg:hidden"
           style={{
             transform: `translateX(${(drawerProgress - 1) * 100}%)`,
             transition: drawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
@@ -354,7 +368,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             <span className="text-sm font-medium text-foreground">{t('title')}</span>
             <button type="button" onClick={closeDrawer} className="rounded p-1 text-muted-foreground hover:text-foreground" aria-label="닫기"><X className="size-4" /></button>
           </div>
-          <div className="flex-1 overflow-y-auto">{sidebarContent}</div>
+          <div className="focus-inset flex-1 overflow-y-auto">{sidebarContent}</div>
         </div>
       </div>
 
