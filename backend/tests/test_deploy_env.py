@@ -158,11 +158,17 @@ def test_dockerfile_uv_sync_uses_frozen():
 # ── deploy_backend.sh 4결함 fix (cutover 첫 prod 실행서 노출) ────────────────────
 
 def test_deploy_full_env_secrets():
-    """결함③: full env — DATABASE_URL/JWT 외 GOOGLE/GITHUB/RESEND/EMAIL 시크릿 포함."""
+    """결함③: full env — DATABASE_URL/JWT 외 GOOGLE/RESEND/EMAIL 시크릿 포함.
+
+    story #2155(2026-07-23): GitHub 로그인 제거로 GITHUB_CLIENT_ID/_SECRET 배선도 함께
+    삭제됐다(settings.github_client_id/github_client_secret 자체가 코드에 없음, #2436) —
+    더 이상 이 목록에 있으면 안 된다(회귀가드로 부재를 고정)."""
     s = _resolve(_DEPLOY, "dev")["SECRETS_SPEC"]
     for name in ("DATABASE_URL=", "JWT_SECRET=", "GOOGLE_CLIENT_ID=", "GOOGLE_CLIENT_SECRET=",
-                 "GITHUB_CLIENT_ID=", "RESEND_API_KEY=", "EMAIL_FROM="):
+                 "RESEND_API_KEY=", "EMAIL_FROM="):
         assert name in s, f"{name} 누락 (결함③ full env 미충족)"
+    assert "GITHUB_CLIENT_ID=" not in s, "GitHub 로그인 제거(#2155) 후에도 배선이 남아있음"
+    assert "GITHUB_CLIENT_SECRET=" not in s, "GitHub 로그인 제거(#2155) 후에도 배선이 남아있음"
 
 
 def test_deploy_cors_custom_delimiter_preserves_commas():

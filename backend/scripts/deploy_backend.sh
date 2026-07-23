@@ -104,9 +104,6 @@ CORS_ORIGINS="http://localhost:3000,http://localhost:3108,${FRONTEND_URL}"
 EVENTBUS_ENABLED="${EVENTBUS_ENABLED:-true}"
 MEMBER_SSOT_RESOLVER_SHADOW="${MEMBER_SSOT_RESOLVER_SHADOW:-true}"
 MEMBER_SSOT_APIKEY_CUT="${MEMBER_SSOT_APIKEY_CUT:-true}"
-# ⚠️ GitHub OAuth는 현재 _DEV 앱만 존재(prod 앱 미생성) → dev/prod 모두 _DEV 시크릿 참조.
-#   prod GitHub 앱 생성 시 GITHUB_SECRET_SUFFIX=PROD로 override.
-GITHUB_SECRET_SUFFIX="${GITHUB_SECRET_SUFFIX:-DEV}"
 
 # ── 결함③ fix: full env. Secret Manager 시크릿 (값에 콤마 없어 콤마 구분 OK). ──
 SECRETS_SPEC="DATABASE_URL=${DB_SECRET_NAME}:latest"
@@ -114,8 +111,9 @@ SECRETS_SPEC="${SECRETS_SPEC},JWT_SECRET=JWT_SECRET:latest"
 # ⚠️ SUPABASE 시크릿은 dead(backend/app 0 functional refs·JWT_SECRET 우선) → 미주입(S1 결정 유지).
 SECRETS_SPEC="${SECRETS_SPEC},GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest"
 SECRETS_SPEC="${SECRETS_SPEC},GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest"
-SECRETS_SPEC="${SECRETS_SPEC},GITHUB_CLIENT_ID=GITHUB_CLIENT_ID_${GITHUB_SECRET_SUFFIX}:latest"
-SECRETS_SPEC="${SECRETS_SPEC},GITHUB_CLIENT_SECRET=GITHUB_CLIENT_SECRET_${GITHUB_SECRET_SUFFIX}:latest"
+# story #2155(2026-07-23): GitHub 로그인 제거로 GITHUB_CLIENT_ID/_SECRET(+GITHUB_SECRET_SUFFIX)
+# 배선 삭제 — settings.github_client_id/github_client_secret 자체가 코드에 더 이상 없다(#2436).
+# 라이브 바인딩 제거는 이 스크립트 편집과 무관하게 별도 gcloud --remove-secrets 필요(#2145).
 SECRETS_SPEC="${SECRETS_SPEC},RESEND_API_KEY=RESEND_API_KEY:latest"
 SECRETS_SPEC="${SECRETS_SPEC},EMAIL_FROM=EMAIL_FROM:latest"
 # story #2071/#2072(critical, 2026-07-21): 이 시크릿이 dev/prod 어디에도 배선 안 돼 있어
