@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ExternalLink, X, FileText, File, Layers, CheckSquare, Hash, Eye, type LucideIcon } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 
 // 글리프(📋📄🎯✅) → lucide. 타입 식별=아이콘·색은 신호 토큰만(다크 무파손).
 export const ENTITY_ICONS: Record<string, LucideIcon> = {
@@ -148,18 +149,14 @@ function EntityPreviewModal({
   href: string | null;
   onClose: () => void;
 }) {
-  const overlayRef = useRef<HTMLDivElement>(null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(entityType !== 'task');
   // story #1996: doc 본문 조회는 project_id+slug 조합 엔드포인트(getDoc)라 project_id가
   // 필요 — doc 뷰 페이지([slug]/view/page.tsx)와 동일 소스(useDashboardContext).
   const { projectId } = useDashboardContext();
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
+  // story #2061: 손수 구현 Escape 핸들러 제거 — 공용 Dialog(base-ui)가 Escape/backdrop-click/
+  // 포커스 트랩/반환을 전부 내장한다(중복 핸들러 방지).
 
   useEffect(() => {
     let cancelled = false;
@@ -199,10 +196,6 @@ function EntityPreviewModal({
     return () => { cancelled = true; };
   }, [entityType, entityId, projectId]);
 
-  const handleOverlayClick = useCallback((e: React.MouseEvent) => {
-    if (e.target === overlayRef.current) onClose();
-  }, [onClose]);
-
   const Icon = ENTITY_ICONS[entityType] ?? Hash;
   const colorClass = ENTITY_COLORS[entityType] ?? 'border-border bg-muted text-foreground';
   const label = title ?? entityId;
@@ -214,17 +207,13 @@ function EntityPreviewModal({
   const resolvedHref = entityType === 'doc' ? (docSlug ? `/docs/${docSlug}/view` : null) : href;
 
   return (
-    <div
-      ref={overlayRef}
-      onClick={handleOverlayClick}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-    >
-      <div className="relative w-full max-w-3xl max-h-[80vh] flex flex-col rounded-xl border border-border bg-popover text-popover-foreground shadow-xl">
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="flex max-h-[80vh] max-w-3xl flex-col overflow-hidden rounded-xl p-0" showCloseButton={false}>
         {/* Header */}
         <div className="flex-shrink-0 flex items-start gap-3 px-6 pt-5 pb-3 border-b border-border">
           <div className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm ${colorClass} flex-1 min-w-0`}>
             <Icon className="size-4 shrink-0" />
-            <span className="font-semibold truncate">{label}</span>
+            <DialogTitle className="font-semibold truncate text-sm">{label}</DialogTitle>
             {status ? (
               <span className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{status}</span>
             ) : null}
@@ -264,8 +253,8 @@ function EntityPreviewModal({
             </Link>
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

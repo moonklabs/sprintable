@@ -27,6 +27,7 @@ from app.dependencies.auth import (
     get_verified_org_id,
     get_verified_org_id_streaming,
 )
+from app.core import shutdown as _shutdown_module
 from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
@@ -43,6 +44,17 @@ def publish_event(org_id: str, event_type: str, data: dict, _from_listener: bool
     """다른 라우터에서 이벤트를 발행할 때 호출.
 
     _from_listener=True: LISTEN 수신기에서 호출 시 pg_notify 재발행 금지 (무한 루프 차단).
+
+    ⚠️story #2059/#2067(까심군 라이브 실측 확定, 2026-07-21): 이 함수가 쓰는 `_subscribers[org_id]`
+    레지스트리에 `.add()`하는 코드가 저장소 전체 0곳이다 — 즉 **이 org-level fanout은 실제로
+    아무 브라우저/에이전트 연결에도 닿지 않는 영구 죽은 코드다**(pg_notify 크로스 인스턴스 릴레이도
+    결국 이 함수를 다시 부를 뿐이라 동일하게 죽어 있다). FE/에이전트가 실제로 붙는 경로는
+    `_agent_connections[member_id]`(`_push_to_agent()`로만 채워짐)뿐이다. 이 함수를 호출하는 것만으로
+    "실시간 전달했다"고 가정하지 마라 — 실시간 SSE 전달이 실제로 필요하면 `_push_to_agent()`를
+    직접 호출해야 한다(선례: `trust_pipeline._maybe_emit`·`story_status_events.emit_story_status_changed`
+    — `project_accessible_member_ids()`로 수신자 해소 후 개별 push). 이 함수 자체를 항상-fanout으로
+    바꾸지 않은 이유: 호출부마다 올바른 수신자 스코프가 다르다(project-scoped story/goal 이벤트 vs
+    conversation 참가자 vs org-wide presence) — 제네릭하게 못 바꾸고 호출부별 개별 판단이 필요하다.
     """
     payload = {"type": event_type, **data}
     dead: list[asyncio.Queue] = []
@@ -57,8 +69,12 @@ def publish_event(org_id: str, event_type: str, data: dict, _from_listener: bool
         # prod 커넥션 누수 근본fix(2026-07-08): 참조 미보관 create_task는 GC가 pg_notify()의
         # async with async_session_factory() 도중 태스크를 조기수거할 수 있다(공식 문서 경고) —
         # fire_and_forget이 강한 참조를 보관해 이를 막는다.
-        from app.services.pg_pubsub import fire_and_forget, pg_notify
-        fire_and_forget(pg_notify("org", org_id, event_type, data))
+        # E-ARCH S2(story #2078): pg_notify() 직접 호출 → event_broker.publish()로 — PG NOTIFY는
+        # 그대로(내부에서 동일 호출) + event_broker_redis_dual_publish_enabled 시 Redis shadow
+        # 추가 발행(기본 off, 무회귀). fire_and_forget 감싸는 방식은 무변경.
+        from app.services.event_broker import event_broker
+        from app.services.pg_pubsub import fire_and_forget
+        fire_and_forget(event_broker.publish("org", org_id, event_type, data))
 
 
 # ─── Agent connection registry (S2/S3: 에이전트별 SSE) ───────────────────────
@@ -78,6 +94,35 @@ _BACKFILL_THRESHOLD_SECONDS: int = int(_os.getenv("BACKFILL_THRESHOLD_SECONDS", 
 _BACKFILL_MAX_EVENTS: int = int(_os.getenv("BACKFILL_MAX_EVENTS", "50"))
 # S0-1: 초기 연결(last_event_id=None) 시 backfill 상한 — 재연결과 구분하여 중복 방지
 _BACKFILL_INITIAL_EVENTS: int = int(_os.getenv("BACKFILL_INITIAL_EVENTS", "5"))
+
+# story #2101(2026-07-22, 까심군 raw curl 재현 확認): 같은 member의 동시 연결(다중 탭)이
+# 있으면 delivered가 Event 행 하나에 전역 플래그라 — 탭A가 먼저 받아 delivered로 마킹하면
+# 탭B가 재연결 시 status=="pending"만 보는 백필에서 그 이벤트가 영구 제외된다(탭B 자신은
+# 못 받았는데도). `/pending`(get_pending_events, include_recent_delivered_minutes)이 이미
+# 같은 문제를 "최근 delivered도 포함"으로 풀어놨는데 SSE 스트림 자체의 백필엔 그 처리가
+# 없었다 — 동형으로 맞춘다("최소 한 번 배달 + 수신측 dedup"이 분산시스템 표준, "정확히
+# 한 번"을 위한 connection/session 단위 추적은 스키마 변경급이라 이번 스코프 아님).
+# 값 근거(임의 아님): `apps/web/src/hooks/use-chat-sse.ts`의 RECONNECT_DELAYS_MS =
+# [5,30,60,300]초가 4번째 실패부터 300초에서 plateau(더 안 늘어남, 무한 재시도) — 즉
+# 클라가 아무리 여러 번 실패해도 "다음 재시도까지의 간격"은 300초를 절대 안 넘는다.
+# N을 이보다 작게 잡으면 백오프가 plateau에 도달한 뒤 다시 갭이 재발하는 구조적 하한이라,
+# 300초는 절충이 아니라 이 재연결 루프가 보장하는 정확한 경계값이다.
+_BACKFILL_RECENT_DELIVERED_SECONDS: int = int(
+    _os.getenv("BACKFILL_RECENT_DELIVERED_SECONDS", "300")
+)
+
+
+def _pending_or_recently_delivered_filter(now: "datetime"):
+    """story #2101 — 백필 status 필터: pending 전량 + 최근 N초 이내 delivered.
+
+    `/pending`(get_pending_events)의 include_recent_delivered_minutes와 동형 —
+    같은 member의 다른 연결이 먼저 받아 delivered로 마킹한 이벤트도 재연결한 이
+    연결이 다시 받게 한다(영구 유실 방지, 중복은 클라 dedup이 처리)."""
+    cutoff = now - timedelta(seconds=_BACKFILL_RECENT_DELIVERED_SECONDS)
+    return or_(
+        Event.status == "pending",
+        and_(Event.status == "delivered", Event.delivered_at >= cutoff),
+    )
 
 
 def _compute_backfill_mode(
@@ -118,8 +163,10 @@ def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) 
             queues.discard(q)
     if not _from_listener:
         # prod 커넥션 누수 근본fix(2026-07-08) — publish_event()와 동형(fire_and_forget 참조 보관).
-        from app.services.pg_pubsub import fire_and_forget, pg_notify
-        fire_and_forget(pg_notify("agent", member_id, payload.get("event_type", ""), payload))
+        # E-ARCH S2(story #2078): pg_notify() 직접 호출 → event_broker.publish()로(publish_event()와 동형 치환).
+        from app.services.event_broker import event_broker
+        from app.services.pg_pubsub import fire_and_forget
+        fire_and_forget(event_broker.publish("agent", member_id, payload.get("event_type", ""), payload))
     return pushed
 
 
@@ -228,11 +275,16 @@ async def agent_event_stream(
         except (ValueError, AttributeError):
             pass
 
-    # S20: 전역 연결 수 제한 — 초과 시 503
+    # S20/#2121: 전역 연결 수 제한 — 503. Redis lease(공유·TTL 자가회수)가 주경로·Redis 불가 시 in-process 폴백.
     global _sse_connection_count
-    if _sse_connection_count >= _MAX_SSE_CONNECTIONS:
+    _lease_conn_id = str(uuid.uuid4())
+    from app.services import sse_lease
+    _lease = await sse_lease.acquire("events_global", _MAX_SSE_CONNECTIONS, _lease_conn_id)
+    if _lease is False:  # Redis lease: 전역 한계 초과
         raise HTTPException(status_code=503, detail="SSE connection limit reached")
-    _sse_connection_count += 1
+    if _lease is None and _sse_connection_count >= _MAX_SSE_CONNECTIONS:  # Redis 불가 → in-process 폴백
+        raise HTTPException(status_code=503, detail="SSE connection limit reached")
+    _sse_connection_count += 1  # in-process shadow(Redis 다운 시 폴백용 유지)
 
     member_id_str = str(resolved_member_id)
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
@@ -261,12 +313,16 @@ async def agent_event_stream(
                 # S0-1: 초기 연결(last_event_id=None, since_timestamp=None)은 INITIAL 상한 적용
                 is_initial = last_event_id is None and since_timestamp is None
                 exceed, limit = _compute_backfill_mode(_ref, now, initial=is_initial)
+                # story #2101: pending뿐 아니라 최근 delivered도 포함 — 동일 member의
+                # 다른 연결(탭)이 먼저 받아 delivered로 마킹한 이벤트를, 재연결한 이 연결도
+                # 다시 받게 한다(중복은 클라 dedup이 처리, 영구 유실 0이 목표).
+                _status_filter = _pending_or_recently_delivered_filter(now)
                 if exceed:
                     # threshold 초과: _ref 이후 최근 N건만 (최신순 → 역순 전달로 시간 순서 보존)
                     exceed_clauses: list[Any] = [
                         Event.org_id == org_id,
                         Event.recipient_id == resolved_member_id,
-                        Event.status == "pending",
+                        _status_filter,
                     ]
                     if _ref is not None:
                         if last_event_id is not None:
@@ -290,7 +346,7 @@ async def agent_event_stream(
                     where_clauses: list[Any] = [
                         Event.org_id == org_id,
                         Event.recipient_id == resolved_member_id,
-                        Event.status == "pending",
+                        _status_filter,
                     ]
                     if _ref is not None:
                         if last_event_id is not None:
@@ -325,58 +381,89 @@ async def agent_event_stream(
                     await db.commit()
 
             # 신규 이벤트 리슨 — 대기 구간에서 커넥션 미점유, 이벤트마다 개별 세션
-            while not await request.is_disconnected():
-                try:
-                    event_data = await asyncio.wait_for(queue.get(), timeout=_SSE_HEARTBEAT_TIMEOUT)
-                    event_type = event_data.get("event_type", "message")
-                    # 1c22da3e fix: yield 전엔 pending 여부만 확인(skip 판정, 마킹 X),
-                    # delivered 마킹은 yield 성공 후로 미룬다 → yield 실패 시 영구 누락 방지.
-                    eid = event_data.get("event_id")
-                    if eid:
-                        try:
-                            async with async_session_factory() as db:
-                                r = await db.execute(
-                                    select(Event.status).where(
-                                        Event.id == uuid.UUID(eid),
-                                        Event.org_id == org_id,
+            # story c4c72eb1(E-ARCH GCE 이전) PR-A: 전역 shutdown_event를 queue.get()과 경합
+            # 시켜(asyncio.wait FIRST_COMPLETED) 셧다운 신호에 하트비트 주기(최대 30초)를
+            # 기다리지 않고 즉시 반응한다 — 강제 CancelledError 대신 정상 return으로 스트림을
+            # 깔끔히 끝내 EventSource가 즉시 재연결하도록 유도(GCLB 드레이닝과 결합 시 자동으로
+            # 건강한 인스턴스로 이동). shutdown 대기 태스크는 연결 생애주기 동안 단 1개만
+            # 생성한다(루프마다 재생성하면 테스트 타이밍이 흔들려 test_s20 케이스가 불안정해짐 —
+            # 뮤테이션 셀프체크로 확認됨, 매 iteration 재생성 버전은 실패).
+            shutdown_wait_task = asyncio.create_task(_shutdown_module.shutdown_event.wait())
+            try:
+                while not await request.is_disconnected():
+                    get_task = asyncio.create_task(queue.get())
+                    try:
+                        done, _pending = await asyncio.wait(
+                            {get_task, shutdown_wait_task},
+                            timeout=_SSE_HEARTBEAT_TIMEOUT,
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        if shutdown_wait_task in done:
+                            get_task.cancel()
+                            yield "event: shutdown_reconnect\ndata: {}\n\n"
+                            return
+                        if get_task not in done:
+                            # 타임아웃 — 기존 heartbeat 분기
+                            get_task.cancel()
+                            # #2121: 연결 살아있음 → lease score 재갱신(TTL 만료 방지). off/다운 no-op.
+                            await sse_lease.refresh("events_global", _lease_conn_id)
+                            yield "event: heartbeat\ndata: {}\n\n"
+                            if await request.is_disconnected():
+                                break
+                            continue
+                        event_data = get_task.result()
+                        event_type = event_data.get("event_type", "message")
+                        # 1c22da3e fix: yield 전엔 pending 여부만 확인(skip 판정, 마킹 X),
+                        # delivered 마킹은 yield 성공 후로 미룬다 → yield 실패 시 영구 누락 방지.
+                        eid = event_data.get("event_id")
+                        if eid:
+                            try:
+                                async with async_session_factory() as db:
+                                    r = await db.execute(
+                                        select(Event.status).where(
+                                            Event.id == uuid.UUID(eid),
+                                            Event.org_id == org_id,
+                                        )
                                     )
-                                )
-                                _status = r.scalar_one_or_none()
-                                if _status is not None and _status != "pending":
-                                    # 이미 백필/타 연결에서 delivered → 중복 skip
-                                    continue
-                        except Exception:
-                            pass
-                    # event_id 없는 경로(chats direct push 등)도 id: 보장 — 재연결 추적 약화 방지
-                    # is_backfill: False 명시 + event_id 동기화 — SeenIdsCache dedup 및 relay 필터 정합성
-                    _live_id = eid or str(uuid.uuid4())
-                    _sse_data = json.dumps({**event_data, 'event_id': _live_id, 'is_backfill': False})
-                    # S-COMM-12: canonical 이벤트 시 legacy alias도 병행 yield (HTTP SSE 하위호환)
-                    if event_type == "conversation.message_created":
-                        yield f"event: conversation:message\nid: {_live_id}\ndata: {_sse_data}\n\n"
-                    yield f"event: {event_type}\nid: {_live_id}\ndata: {_sse_data}\n\n"
-                    # yield 성공 후 delivered 마킹 (1c22da3e: 손실 방지, dup은 클라 dedup)
-                    if eid:
-                        try:
-                            async with async_session_factory() as db:
-                                await db.execute(
-                                    update(Event)
-                                    .where(Event.id == uuid.UUID(eid), Event.status == "pending")
-                                    .values(status="delivered", delivered_at=datetime.now(timezone.utc))
-                                )
-                                await db.commit()
-                        except Exception:
-                            pass
-                except asyncio.TimeoutError:
-                    # S20: heartbeat 후 즉시 disconnect 체크 — dead connection 조기 정리
-                    yield "event: heartbeat\ndata: {}\n\n"
-                    if await request.is_disconnected():
-                        break
+                                    _status = r.scalar_one_or_none()
+                                    if _status is not None and _status != "pending":
+                                        # 이미 백필/타 연결에서 delivered → 중복 skip
+                                        continue
+                            except Exception:
+                                pass
+                        # event_id 없는 경로(chats direct push 등)도 id: 보장 — 재연결 추적 약화 방지
+                        # is_backfill: False 명시 + event_id 동기화 — SeenIdsCache dedup 및 relay 필터 정합성
+                        _live_id = eid or str(uuid.uuid4())
+                        _sse_data = json.dumps({**event_data, 'event_id': _live_id, 'is_backfill': False})
+                        # S-COMM-12: canonical 이벤트 시 legacy alias도 병행 yield (HTTP SSE 하위호환)
+                        if event_type == "conversation.message_created":
+                            yield f"event: conversation:message\nid: {_live_id}\ndata: {_sse_data}\n\n"
+                        yield f"event: {event_type}\nid: {_live_id}\ndata: {_sse_data}\n\n"
+                        # yield 성공 후 delivered 마킹 (1c22da3e: 손실 방지, dup은 클라 dedup)
+                        if eid:
+                            try:
+                                async with async_session_factory() as db:
+                                    await db.execute(
+                                        update(Event)
+                                        .where(Event.id == uuid.UUID(eid), Event.status == "pending")
+                                        .values(status="delivered", delivered_at=datetime.now(timezone.utc))
+                                    )
+                                    await db.commit()
+                            except Exception:
+                                pass
+                    finally:
+                        if not get_task.done():
+                            get_task.cancel()
+            finally:
+                if not shutdown_wait_task.done():
+                    shutdown_wait_task.cancel()
         except (asyncio.CancelledError, GeneratorExit):
             pass
         finally:
             global _sse_connection_count
             _sse_connection_count -= 1
+            # #2121: lease 명시 해제(최적화만·TTL 이 주 회수 경로). off/다운 no-op.
+            await sse_lease.release("events_global", _lease_conn_id)
             _agent_connections[member_id_str].discard(queue)
             if not _agent_connections[member_id_str]:
                 _agent_connections.pop(member_id_str, None)

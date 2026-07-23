@@ -18,42 +18,120 @@ _logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.core import shutdown as shutdown_module
     from app.core.database import engine
     from app.routers.auth_firebase_internal import check_internal_secret_config
+    from app.routers.cron import check_cron_secret_config
     from app.routers.verdict_capture import warn_if_webhook_secret_misconfigured
     from app.services.firebase_verifier import check_mobile_app_check_config
     from app.services.pg_pubsub import check_listen_config, listen_loop
 
+    # story c4c72eb1(E-ARCH GCE 이전) PR-A: asyncio.Event는 최초 .wait()/.set() 시점의 실행
+    # 루프에 바인딩된다 — 테스트가 TestClient(app)로 lifespan을 여러 번(서로 다른 루프로) 태우는
+    # 이 코드베이스 관례(story bea25062 주석 참조) 아래에서 단순 `.clear()`는 이전 루프에 바인딩된
+    # 채로 남아 다음 루프에서 RuntimeError를 낸다(뮤테이션 셀프체크로 직접 재현). startup마다
+    # 객체 자체를 재생성(shutdown.py의 reset_shutdown_event 참조 — 모듈 속성 접근으로 최신
+    # 객체를 읽어야 하므로 아래도 `shutdown_module.shutdown_event`로 접근, 정적 import 금지).
+    shutdown_module.reset_shutdown_event()
     warn_if_webhook_secret_misconfigured()  # Bot-M.2 P3: 웹훅 secret misconfig 를 트래픽 前 경고.
-    check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
+    # E-ARCH S1: PG_LISTEN_ENABLED=false인 서비스(api)는 이 검증 자체가 무의미 — LISTEN을 절대
+    # 안 켜므로 DB_PGBOUNCER/DATABASE_URL_DIRECT 정합을 강제할 이유가 없다(무해·불필요 fail 방지).
+    # #2122 cutover: 크로스-인스턴스 dispatch 백플레인을 단일 결정(pg|redis)해 중복배달 차단. pg_listen_enabled
+    # 직접 대신 resolver 로 게이팅 — PG_LISTEN + Redis dispatch 동시 활성이면 redis 우선(+ERROR). 미설정 시
+    # 기존 플래그서 파생(무회귀). realtime=redis / api=pg 로 자연 갈림.
+    from app.services.event_broker import resolve_backplane as _resolve_backplane
+    _backplane = _resolve_backplane(log_conflict=True)  # 충돌 ERROR 는 startup 1회만
+    # #2122 정합성 가드(mirror-risk·오르테가 2026-07-22): backplane=redis 인데 consume loop 이 안 도는 조합
+    # (dual_publish/consume off 인데 dispatch on)이면 dispatcher 0 = 백플레인은 정해졌는데 **수신자 없는**
+    # "조용한 사망"(오늘 #2122 가 정확히 그 모양이었다). dispatch 와 consume 은 독립 env 라 어긋날 수 있어
+    # startup 서 감지 → loud ERROR + pg 폴백(strictly-better: redis consume loop 이 어차피 안 뜨니 중복배달
+    # 없고, pg 가 뜨면 dispatcher 확보·안 떠도 최소한 침묵 아닌 로그로 관측 가능).
+    if _backplane == "redis" and not (
+        settings.event_broker_redis_dual_publish_enabled
+        and settings.event_broker_redis_consume_enabled
+    ):
+        _logger.error(
+            "REALTIME_BACKPLANE=redis(또는 dispatch_enabled)인데 consume loop 미기동"
+            "(dual_publish/consume off) = dispatcher 0. PG listen 으로 폴백. (#2122 정합성 가드)"
+        )
+        _backplane = "pg"
+    if _backplane == "pg":
+        check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
     check_internal_secret_config()  # 산티아고 §9 finding 4: non-local + 시크릿 미설정 fail-closed.
+    check_cron_secret_config()  # story #2072: non-local + CRON_SECRET 미설정 fail-closed.
     check_mobile_app_check_config()  # 산티아고 §9 finding 1: mobile 발급 on + App Check 미필수 fail-closed.
     # story bea25062: cutover 존재-캐시는 의도적으로 startup에서 warm 안 함(자체 발견 —
     # TestClient(app)로 lifespan을 태우는 기존 SSE 테스트들이 라우트 전용으로 짜둔 유한한
     # mock db.execute() 순서-큐를 startup 시점의 이 캐시 조회가 몰래 하나 소비해 실패시켰다).
     # 지연 초기화(첫 실 요청에서 채워짐)만으로 충분 — check_any_cutover_epoch_exists() 자체가
     # DB 접속 불가/미준비 시에도 fail-safe라 startup에서 먼저 확인해둘 실익이 크지 않다.
-    task = asyncio.create_task(listen_loop())
+    # E-ARCH S1(2026-07-21, #2074 근본 — REST/실시간 서비스 분리 1단계): default=True(무회귀) —
+    # api 서비스에 PG_LISTEN_ENABLED=false를 배선하면 이 인스턴스는 RAW_LISTEN 커넥션을 전혀
+    # 안 잡는다(커넥션 예산 산식에서 이 항이 빠짐). realtime 서비스만 true로 유지.
+    task = asyncio.create_task(listen_loop()) if _backplane == "pg" else None  # #2122: resolver 게이팅
     # E-L2 S5: 휴리스틱 트리거 워커는 default-off — 명시 활성화 시에만 task 생성(AC①).
     l2_task = None
     if settings.l2_trigger_enabled:
         from app.services.l2_trigger_worker import L2TriggerWorker
 
         l2_task = asyncio.create_task(L2TriggerWorker().run())
+    # E-ARCH S2/S3(story #2078): redis_consume_loop은 dual_publish_enabled AND
+    # redis_consume_enabled 둘 다 켜져야 task 생성 — Memorystore 미배선 상태(redis_url=None)
+    # 에서도 이 브랜치 자체가 안 돌아 무해. consume_enabled는 "이 서비스가 Redis를 구독해
+    # dispatch하는 역할인가"(SSE를 실제로 서빙하는 realtime만 True — api는 발행만 하고 구독은
+    # 불필요, GHA per-env override로 false 배선) — dual_publish_enabled(발행, 모든 인스턴스
+    # 필요)와 독립적인 축이다(2026-07-21 정리, PG_LISTEN_ENABLED durable 분리와 동일 패턴).
+    # ⚠️이 loop은 두 가지 일을 한다 — (1) 항상: PG 도착 기록과 대조해 지연Δ 로그(관측)
+    # (2) event_broker_redis_dispatch_enabled(default False, 별개 게이트)도 켜지면
+    # publish_event()/_push_to_agent()를 실제로 호출해 SSE로 전달(실 dispatch).
+    redis_shadow_task = None
+    if settings.event_broker_redis_dual_publish_enabled and settings.event_broker_redis_consume_enabled:
+        from app.services.event_broker import redis_consume_loop
+
+        redis_shadow_task = asyncio.create_task(redis_consume_loop())
+    # E-ARCH S3(story #2078) 3a단계: outbox dispatcher는 event_broker_outbox_enabled(default
+    # False)일 때만 task 생성 — 꺼져 있으면 event_outbox row 자체가 안 쌓이니(OutboxEventBroker
+    # 가 insert를 스킵) 폴링할 게 없다. redis_shadow_task와 별개 게이트(outbox insert가 켜졌다고
+    # 즉시 dual-publish shadow까지 켜지는 건 아니다 — 두 플래그는 독립적으로 rollout 가능).
+    outbox_dispatcher_task = None
+    if settings.event_broker_outbox_enabled:
+        from app.services.event_broker import outbox_dispatcher_loop
+
+        outbox_dispatcher_task = asyncio.create_task(outbox_dispatcher_loop())
     try:
         yield
     finally:
-        task.cancel()
+        # story c4c72eb1(E-ARCH GCE 이전) PR-A: SSE 생성기(events.py/agent_gateway.py)가
+        # 이 신호를 구독해 강제 CancelledError를 기다리지 않고 스스로 정상 종료한다 — 다른
+        # 정리 작업(태스크 cancel 등)보다 먼저 set해 SSE 스트림이 최대한 빨리 반응하게 한다.
+        shutdown_module.shutdown_event.set()
+        if task is not None:
+            task.cancel()
         if l2_task is not None:
             l2_task.cancel()
+        if redis_shadow_task is not None:
+            redis_shadow_task.cancel()
+        if outbox_dispatcher_task is not None:
+            outbox_dispatcher_task.cancel()
         try:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            if task is not None:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             if l2_task is not None:
                 try:
                     await l2_task
+                except asyncio.CancelledError:
+                    pass
+            if redis_shadow_task is not None:
+                try:
+                    await redis_shadow_task
+                except asyncio.CancelledError:
+                    pass
+            if outbox_dispatcher_task is not None:
+                try:
+                    await outbox_dispatcher_task
                 except asyncio.CancelledError:
                     pass
         finally:

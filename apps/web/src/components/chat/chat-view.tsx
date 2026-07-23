@@ -221,17 +221,6 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     }
   }, [isNearBottom, clearTyping, markRead]);
 
-  const handleNewMessage = useCallback((msg: ChatMessage) => {
-    if (msg.memo_id !== threadId) return;
-    addMessage(msg);
-  }, [threadId, addMessage]);
-
-  const handleReplyCreated = useCallback((memoId: string) => {
-    if (memoId !== threadId) return;
-    // reply_created SSE: refetch to pick up messages not delivered via chat:message
-    fetchMessages();
-  }, [threadId, fetchMessages]);
-
   // HIGH-2: conversation:message SSE — payload uses conversation_id (normalizeToMessage maps it to memo_id)
   const handleConversationMessage = useCallback((payload: Record<string, unknown>) => {
     const conversationId = (payload.conversation_id ?? payload.id) as string | undefined;
@@ -286,8 +275,6 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   useChatSse({
     currentTeamMemberId,
-    onNewMessage: handleNewMessage,
-    onReplyCreated: handleReplyCreated,
     onConversationMessage: handleConversationMessage,
     onWorking: handleWorking,
     onReconnect: handleReconnect,

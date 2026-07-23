@@ -741,7 +741,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                   <X className="size-4" />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto">
+              <div className="focus-inset flex-1 overflow-y-auto">
                 {sidebarContent}
               </div>
             </div>

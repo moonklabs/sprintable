@@ -241,3 +241,25 @@ export const COLUMNS = [
 ] as const;
 
 export type ColumnId = (typeof COLUMNS)[number]['id'];
+
+// story #2133: assignee_id(단일)/assignee_ids(배열) 이중표현이 생산처마다 손으로
+// 맞춰지다 하루 2회(#2384·#2130) 동일 클래스로 어긋났다. assignee_ids를 단일 SSOT로 두고
+// assignee_id는 항상 그 파생값으로만 존재하게 해 "한쪽만 갱신" 자체를 불가능하게 만든다.
+export interface AssigneePatchInput {
+  assignee_id?: string | null;
+  assignee_ids?: string[] | null;
+}
+
+export interface AssigneePatch {
+  assignee_id: string | null;
+  assignee_ids: string[];
+}
+
+export function normalizeAssigneePatch(payload: AssigneePatchInput): AssigneePatch {
+  if (payload.assignee_ids !== undefined && payload.assignee_ids !== null) {
+    const ids = payload.assignee_ids.filter((id): id is string => Boolean(id));
+    return { assignee_ids: ids, assignee_id: ids[0] ?? null };
+  }
+  const id = payload.assignee_id ?? null;
+  return { assignee_id: id, assignee_ids: id ? [id] : [] };
+}

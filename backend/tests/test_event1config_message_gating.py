@@ -69,7 +69,7 @@ def _patches():
     return [
         patch.object(conv, "assign_recipient_seq", _assign_seq),
         patch("app.services.activity_stream.extract_activities_best_effort", AsyncMock()),
-        patch("app.services.presence_events.emit_conversation_working", lambda *_a, **_k: None),
+        patch("app.services.presence_events.emit_conversation_working", new=AsyncMock(return_value=None)),
         patch("app.services.presence_events.emit_presence", lambda *_a, **_k: None),
     ]
 

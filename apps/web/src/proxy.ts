@@ -234,36 +234,15 @@ async function tryRefreshViaFastapi(request: NextRequest): Promise<{ accessToken
   }
 }
 
-// AC1(551bbbee): single-flight refresh. refresh 는 single-use rotation(첫 건이 RT revoke)이라, 대시보드
-// 동시요청이 같은 RT 로 각자 refresh 하면 첫 건만 통과·나머지 401 → 강제 로그아웃("세션 너무 짧음")이던
-// 레이스를 제거. RT 기준 in-flight 1개로 dedupe(나머지는 그 promise 를 await/재사용) — 실제 refresh 호출은
-// 1회라 single-use 보안 유지.
-//   - **pending 동안은 시간 무관하게 그 promise 재사용**(refresh 가 10s 걸려도 1개만 — 시작-기준 grace 면
-//     느린 refresh 가 grace 넘겨 pending 중 신규 refresh 시작=레이스 재발, RC HIGH 봉합).
-//   - 해소(settled) 후엔 **해소 시각 기준 grace** 동안만 결과 재사용 — cookie 갱신 전 도착한 burst 꼬리
-//     요청도 옛 RT 로 새 refresh 안 함.
-// setTimeout 미사용(edge 런타임 post-response 실행 불확실)·size-cap lazy prune(무한증가 방지).
-const REFRESH_GRACE_MS = 5_000;
-type RefreshEntry = { p: Promise<{ accessToken: string; refreshToken: string } | null>; settledAt: number | null };
-const inflightRefresh = new Map<string, RefreshEntry>();
-
-function singleFlightRefresh(request: NextRequest): Promise<{ accessToken: string; refreshToken: string } | null> {
-  const rt = request.cookies.get(SP_RT_COOKIE)?.value;
-  if (!rt) return Promise.resolve(null);
-  const now = Date.now();
-  const existing = inflightRefresh.get(rt);
-  // pending(settledAt===null) → 시간 무관 재사용 / settled → 해소 시각 + grace 내에서만 재사용.
-  if (existing && (existing.settledAt === null || existing.settledAt + REFRESH_GRACE_MS > now)) {
-    return existing.p;
-  }
-  const entry: RefreshEntry = { p: tryRefreshViaFastapi(request), settledAt: null };
-  inflightRefresh.set(rt, entry);
-  void entry.p.finally(() => { entry.settledAt = Date.now(); }); // 해소 시각 기록 → grace 시작점
-  if (inflightRefresh.size > 64) { // settled + grace 지난 항목 lazy prune(pending 은 유지)
-    for (const [k, v] of inflightRefresh) if (v.settledAt !== null && v.settledAt + REFRESH_GRACE_MS <= now) inflightRefresh.delete(k);
-  }
-  return entry.p;
-}
+// story cd10e123(P0) 근본 수정 — AC1(551bbbee)이 만든 single-flight in-memory dedupe(아래 옛
+// singleFlightRefresh)는 Cloud Run 멀티인스턴스(prod maxScale=10)에서 인스턴스 간 공유가 안 돼
+// 무의미했다: 하드리프레시의 병렬 인증요청이 다른 인스턴스로 라우팅되면 각자 독립 Map으로
+// 같은 refresh_token을 rotate 시도 → 원자적 single-use rotation(e5225c0a)에 의해 두 번째
+// 인스턴스는 TOKEN_REVOKED 401 → clearAuthCookies() → 세션 살아있는데 강제 로그아웃.
+//
+// 근본 fix는 BE로 옮겼다 — `/api/v2/auth/refresh`가 이제 grace-window(기본 5s) 내 재사용된
+// 토큰에 한해 하드 401 대신 독립적인 새 rotation을 fork 발급한다(PR #2377). dedupe가 인스턴스
+// 경계와 무관하게 필요 없어진 것 — FE는 그냥 매 요청마다 직접 refresh를 호출하면 된다(아래).
 
 function applyTokenCookies(
   response: NextResponse,
@@ -320,7 +299,7 @@ function loginRedirect(request: NextRequest): NextResponse {
 }
 
 // story e5225c0a(P0): refresh 시도 후 세션을 못 살렸을 때의 공통 응답. `refreshFailed`=true
-// (singleFlightRefresh 자체가 null — BE 401/rotation 실패)일 때만 clearAuthCookies 호출.
+// (tryRefreshViaFastapi 자체가 null — BE 401/rotation 실패)일 때만 clearAuthCookies 호출.
 // refreshMatchesActive=false(RC2, superseded 계정의 늦은 refresh)는 refresh 자체는 성공이므로
 // 쿠키를 그대로 둔다 — 두 실패 사유를 여기서 한 번만 구분해 양쪽 호출부의 분기를 통일한다.
 function handleUnauthenticated(request: NextRequest, isApiPath: boolean, refreshFailed: boolean): NextResponse {
@@ -355,7 +334,7 @@ export async function proxy(request: NextRequest) {
   const accessToken = request.cookies.get(SP_AT_COOKIE)?.value;
 
   if (!accessToken) {
-    const tokens = await singleFlightRefresh(request);
+    const tokens = await tryRefreshViaFastapi(request);
     if (!tokens) return handleUnauthenticated(request, isApiPath, true);
     // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
     if (!(await refreshMatchesActive(request, tokens.accessToken))) {
@@ -371,7 +350,7 @@ export async function proxy(request: NextRequest) {
 
   if (!claims) {
     // access token invalid/expired — try refresh
-    const tokens = await singleFlightRefresh(request);
+    const tokens = await tryRefreshViaFastapi(request);
     if (!tokens) return handleUnauthenticated(request, isApiPath, true);
     // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
     if (!(await refreshMatchesActive(request, tokens.accessToken))) {
@@ -415,7 +394,7 @@ export async function proxy(request: NextRequest) {
   }
 
   if (claims.exp !== undefined && claims.exp - now < 300) {
-    const tokens = await singleFlightRefresh(request);
+    const tokens = await tryRefreshViaFastapi(request);
     // RC2: stale refresh(다른 계정)면 적용 안 함 — 현 active 세션 유지.
     if (tokens && (await refreshMatchesActive(request, tokens.accessToken))) {
       applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
@@ -451,7 +430,23 @@ async function resolveWorkspaceProject(
   accessToken: string,
   fwdHeaders: Headers,
 ): Promise<ResolveWiringResult> {
-  const segments = pathname.split('/').filter(Boolean);
+  // story #2039 AC3 (2차 발견) — `pathname`은 WHATWG URL 표준대로 비ASCII 세그먼트를 항상
+  // percent-encoded로 준다(`장사왕` → `%EC%9E%A5%EC%82%AC%EC%99%95`, 원문 유니코드로 넣어도
+  // 동일). 그 인코딩된 문자열을 그대로 fetchResolve에 넘기면 URLSearchParams가 `%`를 다시
+  // `%25`로 인코딩해 **이중 인코딩**된 쿼리스트링이 나간다 — 백엔드가 한 번만 디코드하므로
+  // 여전히 `%EC%9E%A5...` 문자열로 남아 DB의 raw 한글 slug(`장사왕`)와 매칭되지 않는다(형식
+  // 게이트를 없앤 이후에도 남아있던 두 번째 결함, resolve 자체는 불렸지만 조회가 실패했을
+  // 것 — 원 재현 로그의 "구 링크 여전히 404"가 형식게이트 하나만으로는 완전히 안 풀렸을
+  // 자리). 디코드는 세그먼트 단위로 한다(경로 구분자 `/`가 디코드로 새로 생기지 않게).
+  const decodeSegment = (segment: string | undefined): string | undefined => {
+    if (!segment) return segment;
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment; // 잘못된 percent-sequence — 원문 그대로(fail-safe, resolve가 not_found로 정직히 실패)
+    }
+  };
+  const segments = pathname.split('/').filter(Boolean).map(decodeSegment) as string[];
   const wsSlug = segments[0];
   if (!looksLikeWorkspaceSegment(wsSlug)) return { kind: 'skip' };
   const projSlug = looksLikeWorkspaceSegment(segments[1]) ? segments[1] : undefined;

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 
@@ -315,19 +316,13 @@ export function DocGateSection({
         </div>
       ) : null}
 
-      {/* 반려 사유 모달(in-doc·hand-rolled — Dialog primitive 아님·cage/doc-gate 컨벤션 미러). */}
+      {/* 반려 사유 모달 — story #2061: 공용 Dialog(base-ui, 포커스트랩+Esc+반환 내장)로 교체. */}
       {rejectOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
-            onClick={() => { if (!busy) setRejectOpen(false); }}
-            aria-label={t('cancel')}
-          />
-          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-background p-5 shadow-xl">
+        <Dialog open={rejectOpen} onOpenChange={(open) => { if (!open && !busy) setRejectOpen(false); }}>
+          <DialogContent className="max-w-sm" showCloseButton={false}>
             <div className="mb-3 flex items-center gap-2">
               <ShieldX className="size-4 shrink-0 text-destructive" />
-              <h3 className="text-sm font-semibold">{t('docGateRejectModalTitle')}</h3>
+              <DialogTitle className="text-sm font-semibold">{t('docGateRejectModalTitle')}</DialogTitle>
             </div>
             <label className="mb-1.5 block text-[11.5px] text-muted-foreground">{t('docGateRejectReasonLabel')}</label>
             <textarea
@@ -350,8 +345,8 @@ export function DocGateSection({
                 {busy ? '...' : t('docGateRejectConfirm')}
               </Button>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
     </section>
   );

@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import { AlertTriangle, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
+import { normalizeAssigneePatch } from './types';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 import { getFileIcon } from '@/lib/file-icon';
 import { imageFilesFromClipboard } from '@/lib/clipboard-image';
@@ -37,6 +38,8 @@ import {
 } from '@/components/ui/dialog';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 interface Task {
   id: string;
@@ -126,6 +129,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
   // 탭 루트를 BACK 대상으로 선주입. 카드 클릭으로 연 경우(history.length>1)는 no-op.
   useSyntheticParentTabHistory('/more');
+  // story #2061 — 이 컴포넌트의 마운트 자체가 "열림"이라 active는 상수 true. Esc는 이미
+  // 위(편집모드 우선 취소) 자체 핸들러가 있어 여기선 Tab 트랩+포커스 반환만 담당한다
+  // (handleEscape:false — 이중 핸들러로 편집모드 취소 로직을 건너뛰지 않도록).
+  const panelTrapRef = useFocusTrap(true, onClose, { handleEscape: false });
   const { toasts, addToast, dismissToast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -493,11 +500,12 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     // assignee_ids 전체 배열 교체(서버 last-write-wins) → 연타 시 마지막 로컬과 정합.
     const updated = await patchStory({ assignee_ids: next });
     if (updated) {
-      // BE가 assignee_id(주담당)를 assignee_ids[0]로 동기화 → 응답 우선, 없으면 로컬 계산.
-      const resolved = updated.assignee_ids ?? next;
-      assigneeIdsRef.current = resolved;
-      setLocalAssigneeIds(resolved);
-      onStoryUpdate?.({ ...story, assignee_ids: resolved, assignee_id: updated.assignee_id ?? resolved[0] ?? null });
+      // story #2133 — BE 응답(assignee_ids 우선, 없으면 로컬 next)을 normalizeAssigneePatch로
+      // 통과시켜 assignee_id를 손으로 다시 계산하지 않는다.
+      const assigneePatch = normalizeAssigneePatch({ assignee_ids: updated.assignee_ids ?? next });
+      assigneeIdsRef.current = assigneePatch.assignee_ids;
+      setLocalAssigneeIds(assigneePatch.assignee_ids);
+      onStoryUpdate?.({ ...story, ...assigneePatch });
     } else {
       assigneeIdsRef.current = prev; // PATCH 실패 → 직전 값 롤백
       setLocalAssigneeIds(prev);
@@ -512,7 +520,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     setEditingAssignee(false);
     const updated = await patchStory({ assignee_ids: [] });
     if (updated) {
-      onStoryUpdate?.({ ...story, assignee_ids: [], assignee_id: null });
+      onStoryUpdate?.({ ...story, ...normalizeAssigneePatch({ assignee_ids: [] }) });
     } else {
       assigneeIdsRef.current = prev; // 롤백
       setLocalAssigneeIds(prev);
@@ -740,10 +748,18 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       <div
         className="fixed inset-0 z-40 bg-overlay-backdrop backdrop-blur-sm lg:bg-transparent"
         onClick={onClose}
+        aria-hidden="true"
       />
 
       {/* Panel */}
-      <div className="fixed inset-0 z-50 bg-background shadow-xl backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border">
+      <div
+        ref={panelTrapRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={story.title}
+        className="fixed inset-0 z-50 bg-background shadow-xl outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border"
+      >
       <div className="flex h-full flex-col">
         <div className="flex items-start justify-between border-b border-border p-5">
           <div className="flex-1 space-y-2 pr-3">
@@ -837,14 +853,19 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             />
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowDeleteConfirm(true)}
-              className="flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
-              aria-label={t('deleteStory')}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
+            {/* story #2104 — BE stories.py:1056이 human-only로 hard-delete를 403 거부한다(되돌릴
+                수 없는 조작). 에이전트 계정에도 트리거를 열어두면 #2091/#2103과 같은 결함이라
+                미리 숨긴다. */}
+            <HumanOnlyAction>
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+                aria-label={t('deleteStory')}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </HumanOnlyAction>
             <button type="button" onClick={onClose} className="rounded-md border border-border px-3 py-2 text-muted-foreground transition hover:text-foreground hover:bg-muted/50">✕</button>
           </div>
         </div>
@@ -941,7 +962,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   entityId={story.id}
                   projectId={projectId}
                   currentAssigneeId={localAssigneeIds.length > 1 ? undefined : (localAssigneeIds[0] ?? story.assignee_id)}
-                  onAssigneePatched={(aid) => onStoryUpdate?.({ ...story, assignee_id: aid })}
+                  // story #2133 — normalizeAssigneePatch가 assignee_id/assignee_ids 정합을
+                  // 강제해, 이 경로만 한쪽을 빠뜨리는 실수(#2384 근본)가 구조적으로 불가능해진다.
+                  onAssigneePatched={(aid) => {
+                    const assigneePatch = normalizeAssigneePatch({ assignee_id: aid });
+                    assigneeIdsRef.current = assigneePatch.assignee_ids;
+                    setLocalAssigneeIds(assigneePatch.assignee_ids);
+                    onStoryUpdate?.({ ...story, ...assigneePatch });
+                  }}
                 />
               </div>
             )}
@@ -1363,7 +1391,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     className="w-full rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   {depQueryResults.length > 0 && (
-                    <ul className="max-h-32 overflow-y-auto rounded border border-border bg-background">
+                    <ul className="focus-inset max-h-32 overflow-y-auto rounded border border-border bg-background">
                       {depQueryResults.map((s) => (
                         <li key={s.id}>
                           <button

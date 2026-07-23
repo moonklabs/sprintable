@@ -29,6 +29,7 @@ import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -36,6 +37,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 import { isEEEnabled } from '@/lib/ee';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
 
 // TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
@@ -680,7 +682,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Right content */}
-        <div className="flex-1 min-w-0 overflow-y-auto">
+        <div className="focus-inset flex-1 min-w-0 overflow-y-auto">
           {/* Mobile toggle button */}
           <div className="lg:hidden flex items-center gap-2 border-b px-4 py-2">
             <SidebarTrigger className="mr-1" />
@@ -1035,15 +1037,23 @@ export default function SettingsPage() {
                                     >
                                       {tc('edit')}
                                     </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                      onClick={() => setDeleteProjectConfirmId(project.id)}
-                                      disabled={deletingProjectId === project.id}
-                                    >
-                                      {deletingProjectId === project.id ? '...' : t('deleteProject')}
-                                    </Button>
+                                    {/* story #2104 — BE projects.py:213이 human-only로 삭제를
+                                        403 거부한다(되돌릴 수 없는 조작). 이 버튼은 이미
+                                        isAdmin(org owner/admin)으로 감싸져 있으나, 에이전트도
+                                        구조상 owner/admin 권한을 가질 수 있어 human 여부는
+                                        별도 확認이 필요하다(#2091/#2103과 같은 결함). edit
+                                        버튼은 BE에 human-only 가드가 없어 그대로 둔다. */}
+                                    <HumanOnlyAction>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                        onClick={() => setDeleteProjectConfirmId(project.id)}
+                                        disabled={deletingProjectId === project.id}
+                                      >
+                                        {deletingProjectId === project.id ? '...' : t('deleteProject')}
+                                      </Button>
+                                    </HumanOnlyAction>
                                   </>
                                 ) : null}
                               </div>
@@ -1274,9 +1284,14 @@ export default function SettingsPage() {
       </Tabs>
 
       {showDeleteOrgConfirm && orgInfo ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-xl border border-destructive/30 bg-card p-6 shadow-md space-y-4">
-            <h3 className="text-lg font-semibold text-destructive">Organization 삭제</h3>
+        <Dialog
+          open={showDeleteOrgConfirm}
+          onOpenChange={(open) => {
+            if (!open && !deletingOrg) { setShowDeleteOrgConfirm(false); setDeleteOrgConfirmName(''); }
+          }}
+        >
+          <DialogContent className="max-w-md space-y-4 border-destructive/30" showCloseButton={false}>
+            <DialogTitle className="text-lg font-semibold text-destructive">Organization 삭제</DialogTitle>
 
             {/* 영향도 */}
             {orgImpactLoading ? (
@@ -1329,14 +1344,14 @@ export default function SettingsPage() {
                 {deletingOrg ? '삭제 중…' : '영구 삭제'}
               </Button>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
 
       {showDeleteConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-md">
-            <h3 className="text-lg font-semibold text-destructive">{t('deleteConfirmTitle')}</h3>
+        <Dialog open={showDeleteConfirm} onOpenChange={(open) => { if (!open && !deleting) setShowDeleteConfirm(false); }}>
+          <DialogContent className="max-w-sm" showCloseButton={false}>
+            <DialogTitle className="text-lg font-semibold text-destructive">{t('deleteConfirmTitle')}</DialogTitle>
             <p className="mt-2 text-sm text-muted-foreground">{t('deleteConfirmDesc')}</p>
             <div className="mt-6 flex gap-3">
               <Button variant="glass" className="flex-1" onClick={() => setShowDeleteConfirm(false)}>
@@ -1364,14 +1379,17 @@ export default function SettingsPage() {
                 {deleting ? '...' : t('confirmDelete')}
               </Button>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
 
       {deleteProjectConfirmId ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-md">
-            <h3 className="text-lg font-semibold text-destructive">{t('projectDeleteConfirmTitle')}</h3>
+        <Dialog
+          open={!!deleteProjectConfirmId}
+          onOpenChange={(open) => { if (!open && deletingProjectId !== deleteProjectConfirmId) setDeleteProjectConfirmId(null); }}
+        >
+          <DialogContent className="max-w-sm" showCloseButton={false}>
+            <DialogTitle className="text-lg font-semibold text-destructive">{t('projectDeleteConfirmTitle')}</DialogTitle>
             <p className="mt-2 text-sm text-muted-foreground">{t('projectDeleteConfirmDesc')}</p>
             <div className="mt-6 flex gap-3">
               <Button variant="glass" className="flex-1" onClick={() => setDeleteProjectConfirmId(null)}>
@@ -1386,8 +1404,8 @@ export default function SettingsPage() {
                 {deletingProjectId === deleteProjectConfirmId ? '...' : t('deleteProject')}
               </Button>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
       {orgId ? (
         <AddMemberModal

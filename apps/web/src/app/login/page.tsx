@@ -140,7 +140,12 @@ export default function LoginPage() {
               disabled={loading}
             />
           )}
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {/* story #2105 1차 — 계정 없는 사람이 제품에서 처음 만나는 화면(들어오는 경로)인데
+              role·aria-live가 없어 스크린리더가 실패 사유를 안 읽었다(#2096과 같은 결함클래스).
+              handleLogin/handleFirebaseLogin이 재시도 시 setError(null)을 먼저 호출해 이
+              단락이 매 시도마다 언마운트→리마운트되므로(토스트의 "나타남"과 동형), 동일한
+              실패 사유가 연속으로 떠도 매번 새 DOM 노드로 안착해 안정적으로 낭독된다. */}
+          {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{error}</p>}
           <button
             onClick={handleLogin}
             disabled={loading || !email.trim() || !password.trim()}

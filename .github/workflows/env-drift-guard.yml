@@ -1,0 +1,80 @@
+name: Env Drift Guard
+
+# ⓒ 라이브 env 드리프트 가드 — 설계 doc env-drift-guard-design(26c673c2) 구현 순서 3단계.
+# 기존 ci.yml(PR 게이트)/cloud-build.yml(배포 트리거) 안에 넣지 않는다 — 독립 스케줄
+# 워크플로우로 둬야 PR/배포 예산과 안 섞인다(설계 doc "운영축" 그대로).
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 매일 00:00 UTC(=09:00 KST) 1회
+  workflow_dispatch: {}  # prod 승격 직전 등 온디맨드 수동 트리거
+
+concurrency:
+  group: env-drift-guard
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write  # Workload Identity Federation
+
+jobs:
+  drift-check:
+    name: Check live env drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 5  # 설계 doc 비용축 목표(1분 미만) + 여유
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # cloud-build.yml과 동일 WIF 패턴 재사용 — 신규 시크릿 불필요(이미 존재).
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install --quiet pyyaml
+
+      # ⚠️ 값 자체는 여기서도 절대 로그에 안 남는다(check_env_drift.py가 매치 여부만 반환) —
+      # 이 스텝 출력이 그대로 GHA 로그·아티팩트가 되니, 스크립트 쪽 보장이 이 워크플로우
+      # 전체의 보장이기도 하다(설계 doc "③" 축 요구사항).
+      - name: Run drift check
+        id: drift
+        run: python3 infra/check_env_drift.py
+
+      # FAIL 시에만 실행. 오르테가군 정정(2026-07-22): Sprintable story 자동생성은 뺀다 —
+      # API 키를 GitHub secret에 하나 더 뿌리는 대가(오늘 하루 겪은 키 유출 사고 직후라
+      # 표면을 늘리지 않는 쪽으로 판단). Discord 웹훅 하나만 유지 — 이건 시크릿 성격이
+      # 다르고(호출 방향이 반대: 우리가 보내는 쪽), 새 시크릿 표면 증가가 상대적으로 작다.
+      #
+      # ⛔ "알림 불가 → 조용히 스킵"은 절대 금지(오르테가군 지적) — 그러면 감시가 꺼졌는데
+      # 켜진 것처럼(워크플로우 초록) 보인다. drift-check 스텝이 이미 exit 1이라 잡은 job은
+      # 이미 실패 상태지만, 그것만으로는 "누가 보는지"가 보장 안 되니 이 스텝도 명시적으로
+      # 실패시켜 GHA 자체의 실패-워크플로우 알림(스케줄 워크플로우 실패 시 GitHub가 마지막
+      # 수정자에게 기본 통지)을 최소 폴백 신호로 강제한다 — `::error::` 어노테이션으로 런
+      # 요약 최상단에 뜨게(echo 한 줄로 로그에 묻히는 것과 다름).
+      - name: Notify on drift (Discord)
+        if: failure() && steps.drift.outcome == 'failure'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.ENV_DRIFT_GUARD_DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "::error::ENV_DRIFT_GUARD_DISCORD_WEBHOOK_URL 미등록 — drift를 감지했는데 알릴 방법이 없다. 이 자체가 실패여야 하는(PO 시크릿 등록 필요) — GHA 스케줄 워크플로우 실패 통지가 최소 폴백."
+            exit 1
+          fi
+          curl -fsS -X POST "${DISCORD_WEBHOOK_URL}" \
+            -H "Content-Type: application/json" \
+            -d "$(printf '{"content":"⛔ env 드리프트 가드 FAIL — 상세: %s"}' "${RUN_URL}")"

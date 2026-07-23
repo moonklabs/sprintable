@@ -57,7 +57,7 @@ export function AgentsPageTabs() {
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
       <Tabs value={effectiveTab} onValueChange={(v) => setActiveTab(v as AgentsTab)}>
         <div className="border-b border-border px-6">
           <TabsList variant="line">

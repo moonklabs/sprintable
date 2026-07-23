@@ -12,14 +12,22 @@ substitutions:
   _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
   _BACKEND_MIN_INSTANCES: '1'
   # ⚠️ default '1'(아래) = _DEPLOY_ENV:dev default 와 정합한 **dev-safe fallback**(수동 `gcloud builds submit`
-  #    override 없을 때 maxScale 10 trap=2×10×5+5=105>25 재현 차단). GHA cloud-build.yml 이 per-env override(prod=5·dev=1).
+  #    override 없을 때 무리한 maxScale 재현 차단). GHA cloud-build.yml 이 per-env override(prod=5·dev=8, #2074 응급).
   #    rollout-safe 산식(ee7794eb·dev TooManyConnections 인시던트): **2 × maxScale × (pool+overflow + raw) +
   #    headroom ≤ max_conn**. per-instance = pool(3/1=4) + pg_pubsub raw(1) = 5.
-  #    prod(g1-small 100): maxScale **5** → 2×5×5+20=70 ≤ 100 ✓(선생님 right-size·여유 30). 10 은 120>100 폐기.
-  #    dev(f1-micro 25): maxScale 1 → 2×1×5+5=15 ≤ 25 ✓. (PgBouncer 풀러: Cloud Run raw TCP 미지원으로 중앙
-  #    불가·관리형 풀링 Enterprise Plus 전용 → 채택 안 함. 트래픽↑ 時 tier업 동반해야 maxScale 상향.)
+  #    ⚠️ story #2040(2026-07-20) PO gcloud 실측 갱신 — max_connections이 dev/prod 둘 다 **200**이다
+  #    (dev는 100→200 그날 사고대응으로 상향). 이 주석이 한동안 100 가정으로 낡아 있었다(codex #2074
+  #    조사가 재적발) — SSOT는 `docs/db-connection-budget.md`, 값 바뀌면 그 문서와 여기를 같이 갱신할 것.
+  #    prod: maxScale 5 → 2×5×5+20=70 ≤ 200(여유 65%). dev: maxScale 8 → 2×8×5=80 ≤ 200(여유 60%).
+  #    (PgBouncer 풀러: Cloud Run raw TCP 미지원으로 중앙 불가·관리형 풀링 Enterprise Plus 전용 → #1779
+  #    폐기 이력 있음. 트래픽↑ 時 아키텍처 재검토(#2074) 필요.)
   _BACKEND_MAX_INSTANCES: '1'
   _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
+  # story #2078(E-ARCH 0단계) — SSE 멀티플렉서 롤백 플래그. dev-safe 기본값 'false'(수동
+  # `gcloud builds submit` override 없을 때 안전). GHA가 dev 브랜치에서만 'true' 주입 —
+  # prod는 develop→main 일괄승격에 검증 안 된 플래그를 얹지 않는다(오르테가군 판정,
+  # 2026-07-21 — 문제 생기면 48커밋 중 원인 격리 불가라 별도 판단으로 미룸).
+  _SSE_MULTIPLEX_ENABLED: "false"
   # story #2005(Phase B P1-c, E-A2A-PROTO 리라이어빌리티): Cloud Run 요청 타임아웃이
   # `deploy-backend` 스텝에 `--timeout` 플래그로 명시된 적이 한 번도 없어(grep 확認) 인프라
   # 기본값에 암묵 의존 중이었다(A2A `/rpc` 특히 `SendStreamingMessage` SSE가 사실상 무기한
@@ -35,6 +43,113 @@ substitutions:
   # 도 이 레포 안에서 완결된다(PO/infra-lane이 GCP 콘솔에서 별도로 설정할 트리거-레벨
   # override는 존재하지 않음 — 확認 후 아래 GHA 워크플로우도 함께 배선함).
   _BACKEND_TIMEOUT: '3600'
+
+  # E-ARCH 1단계(story #2078·PR #2358 PG_LISTEN_ENABLED 배선): SSE/LISTEN 전용
+  # `sprintable-realtime-${_DEPLOY_ENV}` 서비스 — REST(`sprintable-backend-*`)와 같은 이미지,
+  # PG_LISTEN_ENABLED만 다르다(realtime=true·api는 FE 전환 후 PO가 별도로 false 배선 예정,
+  # 이 파일은 아직 손대지 않는다 — 순서 뒤바뀌면 FE 전환 전에 api LISTEN이 꺼져 실시간이 죽는다).
+  # 아래 기본값은 PO가 2026-07-21 dev에 손으로 생성·검증한 실측값을 그대로 옮긴 것
+  # (`gcloud run services describe sprintable-realtime-dev` 대조 완료) — "손 값은 다음
+  # 배포가 덮는다" 규율대로 이 파일에 명시해 durable화한다. 장수 SSE 연결이 콜드스타트에
+  # 끊기지 않도록 minScale 2(backend는 3) · timeout 3600(요청 타임아웃 상한).
+  _REALTIME_MIN_INSTANCES: '2'
+  _REALTIME_MAX_INSTANCES: '8'
+  _REALTIME_TIMEOUT: '3600'
+  # ⛔기본값을 dev URL 에서 빈 문자열로 내린다(오르테가군 PO, 2026-07-23 prod 승격 preflight
+  # 에서 적발). 이 값은 `deploy-frontend` 의 `--update-env-vars=REALTIME_URL=${_REALTIME_URL}`
+  # 로 흘러 FE 의 `/api/event-stream` 프록시 목적지가 된다. 그런데 GHA 워크플로우의 prod 분기는
+  # `realtime_url` output 을 아예 내보내지 않아 `_REALTIME_URL=` (빈 값)이 전달된다 —
+  # **"빈 값으로 전달"이 "기본값으로 폴백"이 되는 순간 prod 프론트가 dev realtime 을 가리킨다.**
+  # 그 동작에 의존해 안전을 주장할 근거가 이 저장소에 없었다(빈 값 override 를 실측한 전례 0건:
+  # `_GA4_MEASUREMENT_ID` 는 기본값도 빈 문자열이라 대조가 안 되고, 나머지는 전부 비어있지 않은
+  # 값을 넘긴다). ⇒ 폴백 자체를 안전한 쪽으로 뒤집는다 — 빈 값이면 FE 가 FASTAPI_URL 로 폴백하는
+  # 것이 이미 설계된 동작이고(deploy-frontend 주석 "이 값을 비우면 즉시 원복"), 그것이 현행 prod
+  # 동작과 정확히 같다. dev 는 워크플로우가 항상 명시값을 넘기므로 무영향(라이브 대조 확認:
+  # sprintable-frontend-dev REALTIME_URL=…realtime-dev…run.app).
+  # ⚠️이 한 줄은 develop 에도 같이 들어가야 한다 — 승격 브랜치에만 남으면 main/develop 이
+  # 또 갈라진다(오늘 0163 에서 겪은 그 부채와 같은 종류). 별 PR 로 동반 반영할 것.
+  _REALTIME_URL: ""
+
+  # story c4c72eb1 후속(2026-07-22, GCE 조사 중 발견): `deploy-frontend` 스텝에 `--timeout`
+  # 플래그가 한 번도 없었다(story #2005가 backend에서 고친 것과 동형 결함, frontend는
+  # 그 처리를 안 받았음) — 인프라 기본값이 아니라 `deploy_frontend.sh`의 옛 `--timeout=60`
+  # (일반 페이지 요청 기준값, `/api/event-stream` SSE 프록시 라우트 생긴 뒤 재검토 안 됨)이
+  # `gcloud run deploy`의 "플래그 생략 시 기존 값 preserve" 동작으로 암묵 지속되고 있었다.
+  # 라이브 실측(2026-07-22, dev/prod 둘 다 60) 그대로 여기 명시해 durable화 — **값을 올리는
+  # 것이 아니라 지금 값을 IaC에 고정하는 것**(오르테가군 판정: frontend concurrency=80·
+  # maxScale=3(상한 240·짧은 페이지 요청용 sizing) vs realtime concurrency=80·maxScale=8
+  # (상한 640·SSE용 sizing) — SSE를 frontend에 오래 붙들면 그 작은 상한을 페이지 요청과
+  # 다투게 만드는 새 병목이라, 값 인상은 브라우저→realtime 직결 설계(B) 이후로 미룸).
+  # ⚠️ 현행값 고정(2026-07-22) — 이 값이 옳다는 뜻이 아니다. 브라우저 SSE가 `/api/
+  # event-stream`(=이 컨테이너)을 타고 있어서 이 60초가 67.5초 주기 절단의 원인이다
+  # (story #2101). SSE가 realtime에 직결하도록 정리되면 이 값은 원래 목적(짧은 페이지
+  # 요청) 기준으로 재검토할 것 — "왜 60이지? 짧은데?" 하고 무심코 올리면 240 슬롯을
+  # 페이지 요청과 SSE가 다투게 만드는 방향이라 근거 없이 만지지 말 것.
+  _FRONTEND_TIMEOUT: '60'
+
+  # E-ARCH 1단계 durable화 마지막 조각(story #2078, 2026-07-21 PO 손 플립 확認 후): api
+  # (sprintable-backend-*)의 PG_LISTEN_ENABLED. ⚠️ 기본값 'true' — prod는 아직
+  # sprintable-realtime-prod가 없다(deploy-realtime 스텝이 prod에서 스킵 중, PO 검증 전).
+  # prod api를 false로 먼저 못박으면 prod 승격 시점에 LISTEN 하는 서비스가 하나도 없어
+  # 실시간이 완전히 죽는 landmine이 된다 — 그래서 dev만 GHA에서 명시 override(false)하고
+  # prod는 이 fallback(true)을 그대로 상속해 오늘 이전과 동일 동작을 유지한다. prod가
+  # sprintable-realtime-prod 배선을 마치는 승격 시점에 GHA prod 분기에도 false를 명시할 것.
+  _BACKEND_PG_LISTEN_ENABLED: 'true'
+
+  # ⛔E-ARCH S2 정리(story #2078, 2026-07-21) — **전제가 틀렸음이 #2123에서 드러남(아래 정정
+  # 참조)**: 당시 "api는 SSE를 서빙하지 않는다"고 판단해 Redis 구독(consume)을 껐다. 그런데
+  # `agent_onboarding_config.py::resolve_backend_direct_url()`이 에이전트에게 `/agent/stream`
+  # 접속 host로 **FASTAPI_URL(=backend-dev 자신)**을 명시 배포한다(CF-fronted 도메인 금지·
+  # backend-direct 강제, SSE 버퍼링 회피 목적) — REALTIME_URL로 옮겨간 적이 없다. 즉 **에이전트
+  # SSE 연결은 지금도 backend-dev가 서빙 중**(라이브 실측 2026-07-23: agent/stream 요청
+  # backend-dev 95건 vs realtime-dev 2건, 24h 표본). dual_publish(발행)는 그대로 필요.
+  # 기본값 'true'로 정정(과거 'false' fallback 폐기) — deploy-backend에서만 쓰이고
+  # deploy-realtime은 항상 true를 직접 명시(아래, 변수 아님).
+  _BACKEND_REDIS_CONSUME_ENABLED: 'true'
+
+  # story #2123 S0-b 후속(2026-07-23, 오르테가군 PR #2416 리뷰 적발): consume만으로는
+  # 부족하다 — `resolve_backplane()`이 `event_broker_redis_dispatch_enabled`도 함께 봐서
+  # off면 구독은 해도 실 dispatch(=publish_event/_push_to_agent 호출)를 안 한다(순수 shadow
+  # observe). 위와 같은 이유(에이전트 연결이 backend-dev에 있음)로 dispatch도 필요.
+  # ⚠️중복배달 검토: dispatch는 각 서비스 **자기 프로세스의 로컬 큐/구독자**에만 push한다
+  # (`_agent_connections`/`_subscribers`는 프로세스-로컬 dict, 크로스서비스 공유 없음) — 에이전트는
+  # backend-dev에만 연결되고 브라우저는 realtime-dev(프론트 REALTIME_URL 프록시)에만 연결되므로,
+  # 두 서비스가 동시에 dispatch=true여도 서로 다른 로컬 큐를 보는 것이라 같은 클라이언트에 2회
+  # 배달되는 경로가 없다(전제: 에이전트/브라우저 연결이 겹치지 않음 — 위 라이브 카운트로 확認).
+  # 기본값 'false'(dev-safe fallback) — GHA가 dev만 명시 override(true), prod는 Redis 요소
+  # 자체가 없어 무의미(false 유지).
+  _BACKEND_REDIS_DISPATCH_ENABLED: 'false'
+
+  # story #2135(E-ARCH 근본, 2026-07-23 #2123 실측 적발): 이 값이 실려가는 실제 env var 키가
+  # 여태 `REDIS_CONSUME_ENABLED`였다 — Settings 필드는 `event_broker_redis_consume_enabled`
+  # (config.py, env_prefix 없음)라 pydantic-settings가 이 키를 매칭 못 하고 `extra="ignore"`가
+  # 조용히 삼켜, 위 _BACKEND_REDIS_CONSUME_ENABLED 의도가 api에 **한 번도 적용된 적이 없었다**
+  # (필드는 항상 코드 기본값 True로 남았음 — uv run 재현 + 라이브 로그 확認 완료. 결과적으로
+  # "의도 false"였던 구간에도 필드는 이미 True였다는 뜻 — 아래 값 정정과 별개로 이 키 이름
+  # 버그 자체는 그대로 고친다). 아래 두 곳(deploy-backend/deploy-realtime)의 env var **키
+  # 이름**을 `EVENT_BROKER_REDIS_CONSUME_ENABLED`로 정정하고, **구 키(`REDIS_CONSUME_ENABLED`)
+  # 는 `--remove-env-vars`로 명시 제거**한다(`--update-env-vars`는 additive라 안 지우면 두 키가
+  # 라이브에 공존 — "설정돼 있네"로 오독하게 만드는 바로 그 함정, 오르테가군 PR #2416 리뷰 적발).
+
+  # story #2123 S0-b(2026-07-23, 오르테가군 판정): wake_agent()의 크로스인스턴스 배달은
+  # #2122가 병합됐어도 **발행측 스위치(FANOUT_WAKE_REDIS_ENABLED)가 꺼져 있어 무효**였다
+  # (agent_gateway.py:224 — 이 플래그 off면 event_broker 완전 우회, 직접 pg_notify만 호출).
+  # wake_agent 호출부(stories.py/gates.py/agents.py/agent_dispatch.py/a2a.py)는 전부 REST
+  # 라우터라 REST 트래픽이 실제로 향하는 api(backend-dev)에서만 이 스위치가 의미 있다 —
+  # realtime-dev/GCE는 REST를 안 받아 wake_agent()를 호출하지 않으므로 배선 불필요(#2123
+  # doc §판정 종결 참조). 기본값 'false'(수동 `gcloud builds submit` dev-safe fallback,
+  # prod로 잘못 흘러가도 무해) — GHA가 dev만 명시 override(true).
+  _BACKEND_FANOUT_WAKE_REDIS_ENABLED: 'false'
+
+  # ⛔story cd10e123 계열 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
+  # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED가 여태 여기 어디에도 없는 순수 수동 Cloud Run env
+  # 였다 — PG_LISTEN_ENABLED는 durable화됐는데(위) 이 둘은 안 돼서, 서비스가 `--set-env-vars`로
+  # 재배포/재생성되면 dispatch 관련 플래그가 조용히 기본값(false/None)으로 되돌아가고 LISTEN은
+  # 이미 꺼져있어 **두 전송경로 동시 무효화(실시간 전면정지)** 조건이 성립한다. 기본값은
+  # dev-safe fallback(REDIS 미설정 상태와 동등 — config.py의 "fail-safe if not configured"
+  # 로직이 그대로 우아하게 no-op) — GHA가 dev/prod 실측값으로 override.
+  _REDIS_URL: ''
+  _BACKEND_REDIS_DUAL_PUBLISH_ENABLED: 'false'
 
 steps:
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
@@ -55,6 +170,8 @@ steps:
       - NEXT_PUBLIC_OAUTH_ENABLED=true
       - --build-arg
       - NEXT_PUBLIC_GA4_MEASUREMENT_ID=${_GA4_MEASUREMENT_ID}
+      - --build-arg
+      - NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=${_SSE_MULTIPLEX_ENABLED}
       - .
     env:
       - DOCKER_BUILDKIT=1
@@ -138,38 +255,136 @@ steps:
       - sprintable-frontend-${_DEPLOY_ENV}
       - --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:${COMMIT_SHA}
       - --region=${_AR_REGION}
+      - --timeout=${_FRONTEND_TIMEOUT}
+      # E-ARCH 1단계(story #2078) — /api/event-stream 프록시 라우트가 REALTIME_URL을 읽어
+      # SSE/LISTEN 전용 realtime-gateway로 향한다(REALTIME_URL 없으면 기존 FASTAPI_URL로
+      # 폴백 — 이 값을 비우면 코드 변경·재배포 없이 즉시 원복). --update-env-vars(additive).
+      - --update-env-vars=REALTIME_URL=${_REALTIME_URL}
       - --quiet
     waitFor: [push-frontend]
 
   - id: deploy-backend
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
+    entrypoint: bash
     args:
-      - run
-      - deploy
-      - sprintable-backend-${_DEPLOY_ENV}
-      - --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA}
-      - --region=${_AR_REGION}
-      - --min-instances=${_BACKEND_MIN_INSTANCES}
-      - --max-instances=${_BACKEND_MAX_INSTANCES}
-      # story #2005: 요청 타임아웃 명시화(위 `_BACKEND_TIMEOUT` 주석 참조) — 이전엔 이 플래그
-      # 자체가 없어 Cloud Run 인프라 기본값에 암묵 의존했다.
-      - --timeout=${_BACKEND_TIMEOUT}
-      # ⭐frontend 가 NEXT_PUBLIC_FASTAPI_URL 로 backend 를 직접 호출(public 필수). 플래그 없으면
-      # gcloud run deploy 가 기존 IAM 을 preserve(non-deterministic) → 신규/리셋 시 allUsers invoker
-      # 유실로 403(2026-06-21 prod promotion 사건). 명시적·멱등 설정으로 매 배포 public 보장(dev/prod 공통).
-      - --allow-unauthenticated
-      # OB-1: 에이전트 onboarding generator 가 읽는 backend-direct URL 을 런타임 env 로 주입.
-      # ⚠️ 반드시 --update-env-vars(additive·기존 backend env[DATABASE_URL 등] 보존). --set-env-vars 금지
-      # (전체 wipe). _FASTAPI_URL 은 dev/prod 각 backend-direct run.app(프론트 NEXT_PUBLIC_FASTAPI_URL 과 동일 값).
-      # DB_POOL_SIZE=3/DB_MAX_OVERFLOW=1: config.py 기본과 동일하나 **명시 주입으로 durable**(과거 수동 설정·
-      # lingering env 가 config 기본을 덮는 것 방지). rollout 산식: 2×maxScale×(pool+overflow+pg_pubsub raw 1)
-      # ≤ DB max_conn (dev maxScale 8: 2×8×5=80 · prod maxScale 5: 2×5×5=50+admin). 변경 시 cloud-build.yml
-      # maxScale 와 짝으로 검토. (PO rev 01256 dev 429 right-size durable 화.)
-      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1
-      - --quiet
+      - -c
+      - |
+        set -euo pipefail
+        # story #2005: 요청 타임아웃 명시화(_BACKEND_TIMEOUT) — 이전엔 이 플래그 자체가 없어
+        # Cloud Run 인프라 기본값에 암묵 의존했다.
+        # ⭐frontend 가 NEXT_PUBLIC_FASTAPI_URL 로 backend 를 직접 호출(public 필수). --allow-
+        # unauthenticated 없으면 gcloud run deploy 가 기존 IAM 을 preserve(non-deterministic)
+        # → 신규/리셋 시 allUsers invoker 유실로 403(2026-06-21 prod promotion 사건).
+        # OB-1: 에이전트 onboarding generator 가 읽는 backend-direct URL 을 런타임 env 로 주입.
+        # ⚠️ 반드시 --update-env-vars(additive·기존 backend env[DATABASE_URL 등] 보존).
+        # --set-env-vars 금지(전체 wipe). DB_POOL_SIZE=3/DB_MAX_OVERFLOW=1: config.py 기본과
+        # 동일하나 명시 주입으로 durable(과거 수동 설정·lingering env 가 기본을 덮는 것 방지).
+        # rollout 산식: 2×maxScale×(pool+overflow+pg_pubsub raw 1) ≤ DB max_conn (dev maxScale 8:
+        # 2×8×5=80 · prod maxScale 5: 2×5×5=50+admin). 변경 시 cloud-build.yml maxScale 와 짝으로
+        # 검토(PO rev 01256 dev 429 right-size durable 화).
+        # E-ARCH 1단계(story #2078): PG_LISTEN_ENABLED durable화(dev=false·prod=true, GHA per-env).
+        # ⛔E-ARCH S2 정리(story #2078) 정정(#2123): EVENT_BROKER_REDIS_CONSUME_ENABLED/_DISPATCH_
+        # ENABLED durable화 — "api는 SSE 미서빙" 전제가 틀렸음이 드러나 값을 true로 정정(에이전트
+        # SSE가 agent_onboarding_config.py 설계상 backend-dev를 직접 서빙). 키 이름도 story #2135
+        # 에서 정정(구 `REDIS_CONSUME_ENABLED`는 Settings 필드와 안 맞아 무시되던 키) — 구 키는
+        # --remove-env-vars로 명시 제거(안 지우면 두 키 공존, additive 함정).
+        # story #2123 S0-b: FANOUT_WAKE_REDIS_ENABLED(dev만 true, prod는 손대지 않음).
+        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED}"
+        # ⛔story #2141(2026-07-23, prod Redis Memorystore 전환): REDIS_URL을 여기서 이 스텝이
+        # 예전엔 dev/prod 공용으로 plain env 넘겼다 — prod는 Secret Manager 바인딩(REDIS_URL_PROD,
+        # AUTH 필요)으로 전환하는데, 같은 배포에 plain REDIS_URL 키까지 넘기면 Cloud Run이
+        # "env와 secret이 동명 키"로 배포 자체를 거부한다(값 유무 무관 — 키 존재 자체가 충돌).
+        # dev는 AUTH 없는 plain Memorystore라 시크릿 바인딩 자체가 없으므로 기존처럼 plain으로 넘긴다.
+        # prod는 여기서 REDIS_URL을 절대 안 넘김 — 시크릿 바인딩(별도 1회 gcloud, PO lane)이
+        # --set-secrets 없는 이 스텝에 preserve된다(DATABASE_URL_PROD 등 기존 15개와 동일 컨벤션).
+        # ⛔story #2423 배포 실패 핫픽스(2026-07-23, 오르테가군 진단, 2차) — Cloud Build는 bash
+        # 스텝 안이라도 args 문자열 전체(주석 포함 — bash에겐 주석이지만 Cloud Build 파서는
+        # 주석/코드를 구분하지 않고 그냥 문자열로 훑는다)를 자기 substitution 파서로 먼저
+        # 훑는다. 셸 변수 ENV_VARS는 유효한 built-in/사용자 substitution이 아니라서, 달러중괄호
+        # 표기로 참조하면(이 문장처럼 예시로 적어도 마찬가지) build submit 자체가
+        # INVALID_ARGUMENT로 거부된다(부분 배포 없이 안전하게 막힘 — 1차 사고와 동일 에러,
+        # 이번엔 그 사고를 설명하던 주석 문장 자체가 같은 표기를 그대로 써서 재현했다). 이후
+        # 이 파일 어디서도 ENV_VARS를 달러중괄호로 예시조차 적지 않는다 — 셸 변수 실참조는
+        # 아래처럼 달러 두 개로 이스케이프한 표기만 쓴다(진짜 substitution인 DEPLOY_ENV 등은
+        # 달러 한 개 표기 그대로 유지 — 그건 Cloud Build가 실제로 채워야 하는 값이라 안전하다).
+        if [ "${_DEPLOY_ENV}" != "prod" ]; then
+          ENV_VARS="$${ENV_VARS},REDIS_URL=${_REDIS_URL}"
+        fi
+        gcloud run deploy sprintable-backend-${_DEPLOY_ENV} \
+          --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
+          --region=${_AR_REGION} \
+          --min-instances=${_BACKEND_MIN_INSTANCES} \
+          --max-instances=${_BACKEND_MAX_INSTANCES} \
+          --timeout=${_BACKEND_TIMEOUT} \
+          --allow-unauthenticated \
+          --update-env-vars="$${ENV_VARS}" \
+          --remove-env-vars=REDIS_CONSUME_ENABLED \
+          --quiet
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
     # 스키마를 상대로 뜨는 걸 막는다(migrate 실패 시 이 스텝 자체가 안 돎).
+    waitFor: [run-migrate-job]
+
+  # E-ARCH 1단계(story #2078): sprintable-realtime-${_DEPLOY_ENV} — SSE/LISTEN 전용 서비스,
+  # deploy-backend와 동일 이미지·동일 시크릿 상속(--set-secrets 없는 gcloud run deploy
+  # 컨벤션 그대로 — 기존 바인딩 preserve). ⚠️ prod는 PO 검증 전이라 게이트: _DEPLOY_ENV가
+  # dev가 아니면 스킵(서비스 미존재 상태에서 이 스텝이 자동 생성해버리는 것 방지 — 프로덕션
+  # 승격 시점에 이 가드를 열고 _REALTIME_* 값을 prod로 배선).
+  - id: deploy-realtime
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY_ENV}" != "dev" ]; then
+          echo "skip deploy-realtime: prod gate pending (E-ARCH 1단계 dev 검증 후 오픈)"
+          exit 0
+        fi
+        # ⛔fail-fast (오르테가군 PO 2026-07-23): `_REALTIME_URL` 기본값을 dev URL 에서 빈
+        # 문자열로 내렸다(위 substitutions 주석 — prod 프론트가 dev realtime 을 가리킬 여지 제거).
+        # frontend 쪽은 빈 값이 곧 "FASTAPI_URL 로 폴백"이라 안전하지만, **여기서는 빈 값이
+        # 안전하지 않다** — 아래 `FASTAPI_URL=${_REALTIME_URL}` 가 빈 문자열로 나가면
+        # realtime-dev 의 self URL 이 지워진다. 조용히 깨지는 대신 여기서 멈춘다.
+        # 자동 경로(GHA dev 분기)는 항상 명시값을 넘기므로 이 가드에 걸릴 일이 없다 —
+        # 걸린다면 substitution 없이 수동 `gcloud builds submit` 한 경우이고, 그건 정말로
+        # 멈춰야 하는 상황이다.
+        if [ -z "${_REALTIME_URL}" ]; then
+          echo "FAIL: _REALTIME_URL 이 비어 있다. deploy-realtime 은 이 값을 realtime 서비스의"
+          echo "      FASTAPI_URL 로 쓰므로 빈 값으로 진행하면 self URL 이 지워진다."
+          echo "      --substitutions 에 _REALTIME_URL=<realtime 서비스 URL> 을 명시할 것."
+          exit 1
+        fi
+        # ⚠️story #2078 긴급수정(2026-07-21): PG_LISTEN_ENABLED가 여기 true로 하드코딩돼
+        # 있었다 — PO가 라이브에서 손으로 false로 전환(LISTEN 제거·Redis 단독 dispatch 확認
+        # 완료)했는데, 이 스텝이 명시적으로 true를 다시 밀어넣어 **다음 배포마다 LISTEN이
+        # 부활**하는 시한폭탄이었다("손 값은 배포가 덮는다" 규율의 역방향 재발 — 이번엔 배포가
+        # 고침을 지우는 쪽). realtime은 이제 LISTEN이 구조적으로 불필요(Redis가 authoritative
+        # dispatch) — false로 durable 고정. EVENT_BROKER_REDIS_CONSUME_ENABLED=true도 명시.
+        # ⚠️#2123 정정(2026-07-23): "api는 구독 불필요"라 여기 적었었으나 틀렸다 — 에이전트
+        # SSE가 backend-dev를 직접 서빙해(agent_onboarding_config.py 설계) api도 이제
+        # consume+dispatch=true다(위 deploy-backend 스텝 참조). 브라우저(여기, realtime-dev)와
+        # 에이전트(backend-dev)가 서로 다른 프로세스-로컬 큐만 보므로 중복배달은 없다.
+        # ⚠️story #2135(2026-07-23): 이 키 이름이 여태 `REDIS_CONSUME_ENABLED`였다 —
+        # Settings 필드(`event_broker_redis_consume_enabled`)와 안 맞아 pydantic이 조용히
+        # 무시했다(여기서는 필드 기본값이 우연히 True라 결과만 의도와 같았음). 실제 필드가
+        # 기대하는 키로 정정 — 구 키는 아래 --remove-env-vars로 명시 제거.
+        # ⛔story cd10e123 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
+        # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED·EVENT_BROKER_REDIS_DISPATCH_ENABLED 셋 다
+        # 여태 여기 없는 순수 수동 Cloud Run env였다 — realtime은 이미 LISTEN이 꺼져있고
+        # Redis가 유일한 dispatch 경로라, 이 서비스가 재배포/재생성될 때 이 셋이 기본값
+        # (false/None)으로 되돌아가면 두 전송경로 동시 무효화(실시간 전면정지)가 된다.
+        # 이 스텝은 이미 dev 전용 가드(위) 안이라 true를 직접 명시해도 안전(PG_LISTEN_ENABLED=
+        # false와 동일 컨벤션) — REDIS_URL만 변수(연결문자열은 환경별로 다르므로).
+        gcloud run deploy sprintable-realtime-${_DEPLOY_ENV} \
+          --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
+          --region=${_AR_REGION} \
+          --min-instances=${_REALTIME_MIN_INSTANCES} \
+          --max-instances=${_REALTIME_MAX_INSTANCES} \
+          --timeout=${_REALTIME_TIMEOUT} \
+          --allow-unauthenticated \
+          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=false,EVENT_BROKER_REDIS_CONSUME_ENABLED=true,REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true,EVENT_BROKER_REDIS_DISPATCH_ENABLED=true \
+          --remove-env-vars=REDIS_CONSUME_ENABLED \
+          --quiet
     waitFor: [run-migrate-job]
 
 options:

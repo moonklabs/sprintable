@@ -142,7 +142,11 @@ export default function RegisterPage() {
             </span>
           </label>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {/* story #2105 1차 — #2096과 같은 결함클래스(계정 없는 사람이 처음 만나는 화면인데
+              실패 사유가 스크린리더에 안 읽힘). setError(null)이 재시도마다 먼저 실행돼(위
+              handleRegister) 이 단락이 매번 언마운트→리마운트되므로 동일 사유가 반복돼도
+              안정적으로 낭독된다. */}
+          {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{error}</p>}
           <button
             onClick={handleRegister}
             disabled={loading || !displayName.trim() || !email.trim() || !password.trim() || !tosAccepted}

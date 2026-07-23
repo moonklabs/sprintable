@@ -502,7 +502,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       <div className="relative flex items-end gap-2">
         {/* Command dropdown (선생님 B·mockup #3) — mention/entity 셸·키보드 nav 동일·command 활성=info 신호 토큰 */}
         {commandCandidates.length > 0 && (
-          <ul role="listbox" aria-label="커맨드 후보" className="absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+          <ul role="listbox" aria-label="커맨드 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
             {commandCandidates.map((cmd, idx) => (
               <li key={cmd.name}>
                 <button
@@ -524,7 +524,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
         {/* Mention dropdown */}
         {mentionMembers.length > 0 && (
-          <ul role="listbox" aria-label="멘션 후보" className="absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+          <ul role="listbox" aria-label="멘션 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
             {mentionMembers.map((member, idx) => (
               <li key={member.id}>
                 <button
@@ -545,7 +545,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
         {/* Entity dropdown */}
         {entityResults.length > 0 && (
-          <ul role="listbox" aria-label="엔티티 후보" className="absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+          <ul role="listbox" aria-label="엔티티 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
             {entityResults.map((entity, idx) => {
               const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
               return (

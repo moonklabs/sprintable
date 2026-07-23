@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -48,6 +49,8 @@ from app.services.workflow_violation import (
 )
 
 router = APIRouter(prefix="/api/v2/stories", tags=["stories", "Work"])
+
+logger = logging.getLogger(__name__)
 
 
 async def _resolve_actor_info(
@@ -399,6 +402,12 @@ async def create_story(
         else (effective_ids[0] if effective_ids else None)
     )
     if body.attachments:
+        # story #2055 AC1: 이미지 첨부 픽셀 크기를 서버가 측정해 채운다 — client 제공 width/height는
+        # asset_id와 동일하게 위조 가능하므로 신뢰하지 않고 항상 서버 측정값으로 덮어쓴다(server
+        # authority). best-effort(측정 실패해도 저장 자체는 막지 않는다).
+        from app.services.image_dimensions import measure_image_dimensions
+        for a in body.attachments:
+            a.width, a.height = await measure_image_dimensions(a.content_type, a.url) or (None, None)
         _enforce_mcp_attachment_declared_limit([a.model_dump() for a in body.attachments])
     # S8: 서버사이드 capacity 게이트(ee seam·SaaS only·OSS no-op) — asset commit 前 per-file+총량 enforce.
     if settings.is_ee_enabled and body.attachments:
@@ -573,7 +582,15 @@ async def upload_story_attachment(
     if not uploaded:
         raise HTTPException(status_code=502, detail="upload failed")
 
-    return StoryAttachment(url=object_path, name=body.name, content_type=body.content_type, size=len(data))
+    # story #2055 AC1: 바이트가 이미 메모리에 있으므로 재다운로드 없이 직접 측정.
+    from app.services.image_dimensions import measure_image_dimensions_from_bytes
+    dims = measure_image_dimensions_from_bytes(body.content_type, data)
+    width, height = dims if dims is not None else (None, None)
+
+    return StoryAttachment(
+        url=object_path, name=body.name, content_type=body.content_type, size=len(data),
+        width=width, height=height,
+    )
 
 
 # E-DG S10(P1-4 observability): workflow-line 상태 read API — "왜 막혔나·어디로 relay 됐나"를
@@ -776,6 +793,11 @@ async def update_story(
     # S7: client 제공 asset_id strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
     if data.get("attachments"):
         data["attachments"] = [{**a, "asset_id": None} for a in data["attachments"]]
+        # story #2055 AC1: width/height도 asset_id와 동일하게 server authority — client 값
+        # 무시하고 서버가 다시 측정(best-effort).
+        from app.services.image_dimensions import measure_image_dimensions
+        for a in data["attachments"]:
+            a["width"], a["height"] = await measure_image_dimensions(a["content_type"], a["url"]) or (None, None)
         _enforce_mcp_attachment_declared_limit(data["attachments"])
         # S8: 서버사이드 capacity 게이트(ee seam·SaaS only·OSS no-op) — 첨부 교체 commit 前 enforce.
         if settings.is_ee_enabled:
@@ -896,8 +918,35 @@ async def update_story(
         _assignee_notify_ids = {
             m for m in (story.assignee_id, old_assignee_id, actor_id) if m is not None
         }
-        # publish_event는 org-level 브라우저 UI 활동피드(_subscribers·per-agent 미전파)라 org-wide 의도 유지(AC2).
+        # story #2086(2026-07-21, 까심군 라이브 실측 확定): publish_event()의 org _subscribers
+        # fanout은 .add() 호출이 저장소 전체 0곳인 영구 죽은 레지스트리(story #2059/#2067과
+        # 동일 근본) — "org-wide 의도 유지" 주석은 실제로 아무 SSE 연결에도 안 닿는 상태였다.
+        # story.status_changed(story_status_events.py)와 동형으로 project_accessible_member_ids
+        # 로 수신자 해소 후 _push_to_agent 개별 push — 이게 실제로 SSE 큐에 들어가는 유일 경로.
+        #
+        # story #2106(2026-07-22, 까심군 #2101 QA 후속): 이 push는 의도적으로 Event row를 안
+        # 만드는 순수 transient SSE(#2101의 last_event_id 백필 대상이 아님) — "왜 여기만
+        # 영속화 안 하지"로 다시 파지 않도록 이유를 명시한다. assignee_changed는 보드/상세
+        # 화면의 "지금 담당자가 누구인지" 실시간 동기화 신호일 뿐이고, 그 값 자체는 항상
+        # story 테이블의 assignee_id가 SSOT라 재조회(새로고침·재연결)하면 그대로 복원된다.
+        # "너에게 배정됐다"는 실제 알림 책임은 몇 줄 아래 story_assigned Event(agent)/
+        # dispatch_notification(human)이 별도로 지고 있다 — 그쪽은 Event-backed(또는 동등한
+        # 영속 알림함) 라 배정받은 사람이 그 순간 연결이 끊겨 있어도 놓치지 않는다. 즉 상태축
+        # (재조회로 복원)과 알림축(영속 전달 필요)이 분리돼 있고, 이 줄은 전자만 담당한다.
         publish_event(str(org_id), "story.assignee_changed", event_data)
+        try:
+            from app.routers.events import _push_to_agent
+            from app.services.project_auth import project_accessible_member_ids
+
+            member_ids = await project_accessible_member_ids(db, org_id, story.project_id)
+            sse_payload = {"event_type": "story.assignee_changed", **event_data}
+            for member_id in member_ids:
+                _push_to_agent(str(member_id), dict(sse_payload))
+        except Exception:
+            logger.warning(
+                "assignee_changed SSE 포워딩 실패(story=%s project=%s) — org publish는 이미 발행됨",
+                story.id, story.project_id, exc_info=True,
+            )
         try:
             await fire_webhooks(
                 db, org_id, "story.assignee_changed", event_data,

@@ -14,6 +14,7 @@ interface InviteAcceptClientProps {
 
 export function InviteAcceptClient({ token, orgName, role, email, projects }: InviteAcceptClientProps) {
   const t = useTranslations('settings');
+  const tInvite = useTranslations('invite');
   const [accepting, setAccepting] = useState(false);
   const [result, setResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -32,9 +33,9 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
       const res = await fetch(`/api/invites/${token}/accept`, { method: 'POST' });
       const json = await res.json() as { error?: { message?: string } };
       if (!res.ok) {
-        setResult({ type: 'error', text: json.error?.message ?? '초대 수락에 실패했습니다.' });
+        setResult({ type: 'error', text: json.error?.message ?? tInvite('acceptFailed') });
       } else {
-        setResult({ type: 'success', text: '초대를 수락했습니다. Dashboard로 이동합니다.' });
+        setResult({ type: 'success', text: `${tInvite('success')} ${tInvite('redirecting')}` });
         setTimeout(() => { window.location.href = '/dashboard'; }, 1500);
       }
     } finally {
@@ -46,11 +47,11 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
     <div className="flex min-h-screen items-center justify-center bg-muted">
       <div className="w-full max-w-sm rounded-2xl bg-background p-8 shadow-lg space-y-6">
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold text-foreground">Organization 초대</h1>
+          <h1 className="text-2xl font-bold text-foreground">{tInvite('title')}</h1>
           <p className="text-sm text-muted-foreground">
-            <span className="font-semibold text-foreground/85">{orgName}</span>에서 초대했습니다.
+            {tInvite('invitedByOrg', { org: orgName })}
           </p>
-          {email && <p className="text-xs text-muted-foreground/60">{email} 계정으로 가입됩니다.</p>}
+          {email && <p className="text-xs text-muted-foreground/60">{tInvite('signupEmail', { email })}</p>}
         </div>
 
         <div className="rounded-lg border border-border bg-muted px-4 py-3">
@@ -59,7 +60,7 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
             <span className="font-medium text-foreground/85">{orgName}</span>
           </div>
           <div className="mt-2 flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">역할</span>
+            <span className="text-muted-foreground">{t('profileRole')}</span>
             <span className="font-medium text-foreground/85 capitalize">{role}</span>
           </div>
           <div className="mt-2 flex items-center justify-between gap-4 text-sm">
@@ -88,7 +89,7 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
               onClick={() => void handleAccept()}
               disabled={accepting}
             >
-              {accepting ? '수락 중…' : '초대 수락'}
+              {accepting ? tInvite('accepting') : tInvite('accept')}
             </Button>
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2:
                 app/(authenticated)/[ws]/[proj]/ 도입 후 이 규칙이 무관 파일에 오탐(2단 중첩
@@ -98,7 +99,7 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
               href="/dashboard"
               className="block text-center text-sm text-muted-foreground hover:text-foreground/70"
             >
-              거절 (나중에)
+              {tInvite('decline')}
             </a>
           </div>
         )}

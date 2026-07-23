@@ -122,7 +122,7 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
           <DialogDescription>{t('steerCommitDesc')}</DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-64 overflow-y-auto py-1">
+        <div className="focus-inset max-h-64 overflow-y-auto py-1">
           {agents === null ? (
             <p className="py-4 text-center text-sm text-muted-foreground">{t('loading')}</p>
           ) : agents.length === 0 ? (

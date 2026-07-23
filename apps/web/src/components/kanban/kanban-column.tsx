@@ -290,7 +290,11 @@ export function KanbanColumn({
       {!collapsed && (
         <>
           <SortableContextCompat items={stories.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto [&>*]:shrink-0">
+            {/* story #2062: overflow-y-auto가 패딩 0이면 #2057 포커스 링(outline-offset 2px+
+                width 2px=4px 돌출)이 이 스크롤 클리핑 박스에 위·좌·우 3면이 잘린다(CSS 스펙상
+                overflow-y만 지정해도 overflow-x가 auto로 계산돼 좌우도 클리핑 박스가 된다).
+                p-1.5(6px)로 4px 돌출분보다 넉넉한 여백을 준다. */}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto p-1.5 [&>*]:shrink-0">
               {stories.length === 0 && !composing ? (
                 <div className="flex min-h-[100px] items-center justify-center px-4 text-center">
                   <p className="text-xs text-muted-foreground/60">{t('noStories')}</p>

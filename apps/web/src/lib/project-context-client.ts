@@ -61,21 +61,38 @@ export function installProjectHeaderInterceptor(): void {
 }
 
 /**
- * 탭 effective project 해소 — 우선순위: URL `?p=` → sessionStorage backstop → 서버 prop(쿠키 유래).
- * 후보가 accessible(`accessibleIds`)일 때만 채택(UX/intent 필터, 보안 아님). 무효면 다음 우선순위.
+ * 탭 effective project 해소 — 우선순위: **경로(`[ws]/[proj]`) resolve 결과** → URL `?p=` →
+ * sessionStorage backstop → 서버 prop(쿠키 유래). 후보가 accessible(`accessibleIds`)일 때만
+ * 채택(UX/intent 필터, 보안 아님) — 단 `pathProjectId`는 예외(아래 참고). 무효면 다음 우선순위.
+ *
+ * story #2093 — `?p=`는 원래 "탭별 SSOT"였으나 `/{ws}/{proj}/...` 경로 세그먼트도 탭마다
+ * 다른 값이라 같은 일을 하는 두 번째 축이었다. 두 축이 갈리는 자리(북마크·딥링크 등 `?p=` 없이
+ * 경로로 직접 진입)에서 화면 본문은 경로를 따르는데 이 함수는 계정 상태로 폴백해 top-bar 칩이
+ * 다른 프로젝트를 그렸다(라이브 재현). `pathProjectId`(proxy.ts가 URL 경로를 서버측에서 resolve해
+ * `x-resolved-project-id` 헤더로 실어보낸 값)를 최우선으로 승격해 두 축을 하나로 합친다.
+ * `?p=`는 경로 세그먼트가 없는 flat 라우트(`/glance`·`/inbox` 등, TAB_ROOT_PREFIXES)에서 여전히
+ * 유일한 탭별 SSOT라 유지한다 — 그 라우트들은 애초에 `pathProjectId`가 없다(resolve 미대상).
+ *
+ * `pathProjectId`는 accessibleIds 체크를 안 받는다 — `?p=`/sessionStorage는 클라이언트가 임의로
+ * 들고 있을 수 있는 값이라 멤버십 재확인이 필요하지만, `pathProjectId`는 proxy.ts가 같은
+ * accessToken으로 BE resolve(`/api/v2/resolve`)를 이미 통과시킨 서버측 검증 결과라 재검증이
+ * 중복이다(그리고 cross-org 진입 시 `accessibleIds`가 계정의 "현재 org" 멤버십에만 스코프돼
+ * 있어 오탈락할 수 있다 — 그 경우 이 우선순위가 없으면 정확한 값도 걸러진다).
  *
  * `hydrated`(기본 true, 명시적으로 false를 넘길 때만 sessionStorage 무시) — 라이브 재현(2026-07-11)
  * 대응: sessionStorage는 브라우저 전용이라 SSR(`window` 없음)에선 원천적으로 못 읽는다. 이 함수
  * 호출부(`useProjectSsot`)가 하이드레이션 완료 전엔 `hydrated=false`를 넘겨, 첫 클라이언트 렌더가
- * 서버 렌더와 동일한 값(URL/serverProjectId 기준)을 내도록 강제한다 — 안 그러면 SSR과 첫 CSR
- * 사이에 값이 갈려 하이드레이션 직후 예상 밖 URL 정규화(router.replace)가 발동할 수 있다.
+ * 서버 렌더와 동일한 값(경로/URL/serverProjectId 기준)을 내도록 강제한다 — 안 그러면 SSR과 첫
+ * CSR 사이에 값이 갈려 하이드레이션 직후 예상 밖 URL 정규화(router.replace)가 발동할 수 있다.
  */
 export function resolveEffectiveProjectId(
   urlProjectId: string | null,
   serverProjectId: string | undefined,
   accessibleIds: ReadonlySet<string>,
   hydrated = true,
+  pathProjectId?: string,
 ): string | undefined {
+  if (pathProjectId) return pathProjectId;
   if (urlProjectId && accessibleIds.has(urlProjectId)) return urlProjectId;
   if (hydrated && typeof window !== 'undefined') {
     const stored = window.sessionStorage.getItem(TAB_PROJECT_STORAGE_KEY);

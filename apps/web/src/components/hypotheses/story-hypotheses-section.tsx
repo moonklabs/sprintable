@@ -213,7 +213,7 @@ export function StoryHypothesesSection({
           ) : filteredCandidates.length === 0 ? (
             <p className="px-1 py-2 text-xs text-muted-foreground">{t('pickerEmpty')}</p>
           ) : (
-            <ul className="max-h-48 space-y-1 overflow-y-auto">
+            <ul className="focus-inset max-h-48 space-y-1 overflow-y-auto">
               {filteredCandidates.map((h) => (
                 <li key={h.id}>
                   <button

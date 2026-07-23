@@ -130,7 +130,7 @@ export function StorageAssetList({
       </div>
 
       {/* body */}
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="focus-inset min-h-0 flex-1 overflow-auto">
         {loading ? (
           <div className="space-y-0">
             {Array.from({ length: 8 }).map((_, i) => (
