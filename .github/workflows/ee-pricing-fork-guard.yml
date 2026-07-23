@@ -1,0 +1,46 @@
+name: ee_pricing Fork Guard
+
+# story #2146: main/develop이 4개 파일(0146/0147/0162/0163)에서 이미 안정적으로 분기해
+# 있다(git 실측 — merge-base 이후 develop 쪽 diff 0, main만 삭제/재부모) — 매 승격마다
+# "수술"이 필요한 부채가 아니라, 이미 해소된 상태다. 이 워크플로우는 그 상태를 "유지"만
+# 감시한다: develop 쪽 PR이 이 4개 파일 중 하나라도 건드리면, 다음 develop→main 승격이
+# 더 이상 clean하게 자동 해소되지 않을 수 있다는 것을 **PR 시점에** 알린다.
+#
+# ADVISORY by design(sid-link-check.yml과 동형) — 모든 경로가 exit 0. required check로
+# 절대 추가하지 않는다. ⛔ 이 가드가 못 잡는 것: develop이 이 4개 파일과 무관한 새 ee_pricing
+# 리비전을 추가하는 경우(그 신규 파일 개별로는 "main엔 없음"이 반복될 뿐 이 가드로 안 잡힘) —
+# backend/scripts/check_ee_pricing_promotion_fork.sh로 승격 착수 시 전체를 별도 확認할 것.
+
+on:
+  pull_request:
+    branches: [develop]
+
+jobs:
+  ee-pricing-fork-guard:
+    name: ee_pricing fork stability — advisory
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for edits to the fork-sensitive files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          WATCHED_FILES=(
+            "backend/alembic/versions/0146_pricing_versions.py"
+            "backend/alembic/versions/0147_pricing_versions_live_seed.py"
+            "backend/alembic/versions/0162_merge_ee_pricing_core_heads.py"
+            "backend/alembic/versions/0163_strip_stale_runtime_note_from_role_behaviors.py"
+          )
+          CHANGED="$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" -- "${WATCHED_FILES[@]}")"
+          if [ -n "${CHANGED}" ]; then
+            echo "::warning title=ee_pricing fork-sensitive file changed::This PR edits a file that main and develop currently keep in a stable, auto-resolving fork (story #2146): $(echo "${CHANGED}" | tr '\n' ' '). Until now, develop->main promotions merge these files cleanly ONLY because develop never touches them since their last resolution — editing one breaks that and the next promotion will likely need manual reconciliation. Run backend/scripts/check_ee_pricing_promotion_fork.sh before the next promotion. (advisory — does not block merge)"
+          else
+            echo "No changes to the ee_pricing fork-sensitive files — promotion fork stability unaffected."
+          fi
