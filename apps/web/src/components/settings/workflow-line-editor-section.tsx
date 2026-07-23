@@ -190,7 +190,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
         </select>
       </div>
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
 
       {/* VIEW: S29 active + simulator 재사용 */}
       {mode === 'view' ? (

@@ -165,7 +165,7 @@ export function AccessMatrixTab() {
           </div>
         </SectionCardHeader>
         <SectionCardBody>
-          {message ? <p className="mb-3 text-xs text-destructive">{message.text}</p> : null}
+          {message ? <p className="mb-3 text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{message.text}</p> : null}
 
           {agents.length === 0 || projects.length === 0 ? (
             <div className="rounded-md border border-dashed border-border px-3 py-8 text-center">

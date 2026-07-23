@@ -68,7 +68,12 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
             style={{ cursor: isEditable ? 'pointer' : 'default' }}
           >
             {error ? (
-              <div className="rounded-xl border border-destructive-border bg-destructive-tint p-3 text-xs text-destructive">
+              <div
+                className="rounded-xl border border-destructive-border bg-destructive-tint p-3 text-xs text-destructive"
+                role="alert"
+                aria-live="assertive"
+                aria-atomic="true"
+              >
                 {error}
               </div>
             ) : svg ? (
