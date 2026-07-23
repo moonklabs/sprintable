@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { WorkflowActiveLineView } from './workflow-active-line-view';
 import { WorkflowPolicySimulatorSection } from './workflow-policy-simulator-section';
+import { useRenderNonce } from '@/hooks/use-render-nonce';
 
 /**
  * E-DG S34 — workflow line admin editor(workflow-policies 탭 4모드 확장). org admin이 라인 config를
@@ -80,6 +81,10 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
   const [activeSteps, setActiveSteps] = useState<Step[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // story #2154 — saveDraft의 JSON 파싱 실패 catch가 그 함수 자신의 setError(null)
+  // 리셋보다 먼저 return해, 연속 동일 실패 시 재낭독이 안 될 수 있던 것을 nonce-key로
+  // 구조적으로 막는다(같은 error state를 쓰는 다른 핸들러도 함께 통일).
+  const [errorNonce, bumpErrorNonce] = useRenderNonce();
 
   const loadVersions = useCallback(async () => {
     const q = new URLSearchParams({ entity_type: entityType });
@@ -106,7 +111,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
     setBusy(true); setError(null);
     try {
       const r = await fetch(`/api/workflow-line-config/versions/${id}`);
-      if (!r.ok) { setError(t('lineEditorLoadError')); return; }
+      if (!r.ok) { bumpErrorNonce(); setError(t('lineEditorLoadError')); return; }
       const v = (await r.json()) as VersionItem;
       setDraftId(id);
       setConfigText(JSON.stringify(v.config ?? { steps: [] }, null, 2));
@@ -123,7 +128,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entity_type: entityType, project_id: projectId ?? null, config: { steps: activeSteps } }),
       });
-      if (!r.ok) { setError(t('lineEditorCreateError')); return; }
+      if (!r.ok) { bumpErrorNonce(); setError(t('lineEditorCreateError')); return; }
       const v = (await r.json()) as VersionItem;
       await loadVersions();
       await openVersion(v.id);
@@ -133,7 +138,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
   const saveDraft = async () => {
     if (!draftId) return;
     let config: unknown;
-    try { config = JSON.parse(configText); } catch { setError(t('lineEditorJsonError')); return; }
+    try { config = JSON.parse(configText); } catch { bumpErrorNonce(); setError(t('lineEditorJsonError')); return; }
     setBusy(true); setError(null);
     try {
       const r = await fetch(`/api/workflow-line-config/versions/${draftId}`, {
@@ -141,7 +146,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config }),
       });
-      if (!r.ok) { setError(t('lineEditorSaveError')); return; }
+      if (!r.ok) { bumpErrorNonce(); setError(t('lineEditorSaveError')); return; }
       await loadVersions();
     } finally { setBusy(false); }
   };
@@ -160,7 +165,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
     setBusy(true); setError(null);
     try {
       const r = await fetch(`/api/workflow-line-config/versions/${draftId}/request-publish`, { method: 'POST' });
-      if (!r.ok) { setError(t('lineEditorPublishError')); return; }
+      if (!r.ok) { bumpErrorNonce(); setError(t('lineEditorPublishError')); return; }
       await loadVersions();
     } finally { setBusy(false); }
   };
@@ -190,7 +195,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
         </select>
       </div>
 
-      {error ? <p className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
+      {error ? <p key={errorNonce} className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
 
       {/* VIEW: S29 active + simulator 재사용 */}
       {mode === 'view' ? (

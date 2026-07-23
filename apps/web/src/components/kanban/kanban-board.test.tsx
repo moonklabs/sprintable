@@ -165,6 +165,17 @@ async function waitForAlert(): Promise<Element | null> {
   return null;
 }
 
+// story #2154 — 두 번째 실패가 "첫 번째와 다른 DOM 노드"로 새로 안착하는 것까지 폴링한다.
+// 단순히 "alert가 있다"만 보면 아직 언마운트되지 않은 1차 알림을 그대로 재포착해 오탐할 수 있다.
+async function waitForFreshAlert(excludeNode: Element): Promise<Element | null> {
+  for (let i = 0; i < 20; i++) {
+    const el = container.querySelector('[role="alert"]');
+    if (el && el !== excludeNode) return el;
+    await act(async () => { await Promise.resolve(); });
+  }
+  return null;
+}
+
 describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', () => {
   it('생성 실패 시 role="alert" aria-live="assertive"로 배너가 렌더된다', async () => {
     stubFetch([]);
@@ -185,6 +196,43 @@ describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', 
     expect(alertEl).not.toBeNull();
     expect(alertEl?.textContent).toContain('스토리 추가에 실패했습니다');
     expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
+  });
+
+  // story #2154 — transitionError는 4초 후 자동 setTransitionError(null)로만 해소되고, 재시도
+  // 直前에 명시적으로 null 리셋하지 않는다. 4초 내 동일 사유가 재발하면 같은 DOM 노드가 재사용돼
+  // 재낭독이 안 될 수 있던 것을 bumpTransitionErrorNonce()+key로 구조적으로 막았다 — 연속 두 번
+  // 동일 실패 시 서로 다른 DOM 노드임을 고정한다.
+  //
+  // ⚠️테스트 작성 중 발견(별건 — 이 스토리 스코프 아님, 그대로 기록): handleCreateStory의 실패
+  // 분기는 throw 없이 return만 해 submitCompose가 실패를 성공으로 오인, 컴포저를 닫아버린다
+  // (입력했던 제목이 실패해도 사라짐 — 화면에 보이는 사용자도 잃는 정보다). 그래서 "같은 컴포저에
+  // 연속 제출"이 UI상 불가능해 매 시도 前 CTA를 다시 클릭해 컴포저를 재오픈한다.
+  it('생성 실패가 연속으로 나도(4초 내 동일 사유) 매번 새 DOM 노드로 안착한다', async () => {
+    stubFetch([]);
+    await mount();
+
+    async function openComposeAndSubmit(title: string) {
+      const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 스토리 만들기'));
+      await act(async () => { ctaButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      const titleInput = container.querySelector('input') as HTMLInputElement;
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+        setter.call(titleInput, title);
+        titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => {
+        titleInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      });
+    }
+
+    await openComposeAndSubmit('첫 시도');
+    const first = await waitForAlert();
+    expect(first).not.toBeNull();
+
+    await openComposeAndSubmit('첫 시도');
+    const second = await waitForFreshAlert(first!);
+    expect(second).not.toBeNull();
+    expect(second).not.toBe(first);
   });
 });
 
