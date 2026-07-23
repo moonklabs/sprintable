@@ -75,9 +75,15 @@ jobs:
             # 중). false로 먼저 못박으면 prod에 LISTEN 하는 서비스가 0개가 돼 실시간이
             # 완전히 죽는다. prod가 realtime 배선을 마치는 승격 시점에 이 값을 false로 뒤집을 것.
             echo "backend_pg_listen_enabled=true" >> "$GITHUB_OUTPUT"
-            # story #2078(E-ARCH S2 정리): api는 SSE 미서빙 — Redis 구독(consume) 불필요.
-            # dual_publish(발행)는 안 건드림. prod도 dev와 동일 이유로 false.
+            # ⛔story #2078(E-ARCH S2 정리) 정정(#2123, 2026-07-23): "api는 SSE 미서빙"이라
+            # false로 뒀었으나 틀린 전제였다(에이전트 SSE는 backend-dev가 직접 서빙 —
+            # agent_onboarding_config.py 설계, 라이브 실측 확認). 다만 **prod는 아직 Redis
+            # 요소 자체가 없다**(redis_url 빈 값, 아래) — consume/dispatch를 true로 켜도
+            # event_broker가 no-op(fail-safe skip)이라 값 자체는 false로 둬도 무해하지만,
+            # "prod는 아직 dev 게이트 전"이라는 원칙(#2120/#2121/#2122 동일)에 맞춰 명시적으로
+            # false 유지 — dev 게이트(consume+dispatch 동시 on) 통과 후 별도 판단.
             echo "backend_redis_consume_enabled=false" >> "$GITHUB_OUTPUT"
+            echo "backend_redis_dispatch_enabled=false" >> "$GITHUB_OUTPUT"
             # story cd10e123 긴급수정(2026-07-21): prod는 아직 Memorystore 인스턴스/연결이
             # 확認 안 됐다(오늘 Redis 작업은 dev 한정) — REDIS_URL 빈 문자열(config.py의
             # "미설정 시 fail-safe" 로직이 그대로 no-op)·dual_publish도 false로 안전 기본.
@@ -133,10 +139,19 @@ jobs:
             # 을 realtime-dev로 넘겼다(까심군 raw SSE 검증 PASS). 손 gcloud 값은 다음 배포가
             # 덮으니(오늘 규율) 여기 durable로 못박는다 — 다음 api 배포에서도 false 유지.
             echo "backend_pg_listen_enabled=false" >> "$GITHUB_OUTPUT"
-            # story #2078(E-ARCH S2 정리): api는 SSE 미서빙(realtime-dev로 완전 이관) —
-            # Redis 구독(consume) 불필요. dual_publish(발행)는 안 건드림 — cross-instance
-            # relay 소스가 되어야 하므로.
-            echo "backend_redis_consume_enabled=false" >> "$GITHUB_OUTPUT"
+            # ⛔story #2078(E-ARCH S2 정리) 정정(#2123, 2026-07-23, 오르테가군 PR #2416 리뷰
+            # 적발): "api는 SSE 미서빙(realtime-dev로 완전 이관)"이 전제였으나 틀렸다 —
+            # `agent_onboarding_config.py::resolve_backend_direct_url()`이 에이전트에게
+            # `/agent/stream` host로 FASTAPI_URL(=backend-dev)을 명시 배포한다(REALTIME_URL로
+            # 옮긴 적 없음). 라이브 실측(2026-07-23, 24h): agent/stream 요청 backend-dev 95건 vs
+            # realtime-dev 2건 — 에이전트 연결은 지금도 backend-dev에 있다. consume+dispatch를
+            # true로 켜 wake_agent()의 크로스인스턴스 배달을 완성한다(아래 dispatch 참조).
+            echo "backend_redis_consume_enabled=true" >> "$GITHUB_OUTPUT"
+            # dispatch가 없으면 resolve_backplane()이 구독은 해도 실 전달을 안 한다(순수
+            # shadow observe). 중복배달 검토: 에이전트(backend-dev)/브라우저(realtime-dev)
+            # 연결이 서로 다른 프로세스-로컬 큐에만 있어 두 서비스가 동시에 dispatch=true여도
+            # 같은 클라이언트에 2회 배달되지 않는다(위 실측 카운트가 그 분리를 뒷받침).
+            echo "backend_redis_dispatch_enabled=true" >> "$GITHUB_OUTPUT"
             # story cd10e123 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
             # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED가 여태 여기 durable화 안 됐다 — PO가
             # 2026-07-21 손으로 생성·검증한 실측값(Memorystore VPC 내부 IP) 그대로 옮김. dev의
@@ -162,6 +177,6 @@ jobs:
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}",_BACKEND_FANOUT_WAKE_REDIS_ENABLED="${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}",_SSE_MULTIPLEX_ENABLED="${{ steps.env.outputs.sse_multiplex_enabled }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_BACKEND_REDIS_DISPATCH_ENABLED="${{ steps.env.outputs.backend_redis_dispatch_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}",_BACKEND_FANOUT_WAKE_REDIS_ENABLED="${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}",_SSE_MULTIPLEX_ENABLED="${{ steps.env.outputs.sse_multiplex_enabled }}" \
             --suppress-logs \
             .

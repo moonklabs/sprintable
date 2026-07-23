@@ -83,20 +83,40 @@ substitutions:
   # sprintable-realtime-prod 배선을 마치는 승격 시점에 GHA prod 분기에도 false를 명시할 것.
   _BACKEND_PG_LISTEN_ENABLED: 'true'
 
-  # E-ARCH S2 정리(story #2078, 2026-07-21): api는 SSE를 서빙하지 않으니(realtime으로 이관
-  # 완료) Redis 구독(consume) 자체가 불필요 — dual_publish(발행)는 여전히 필요(cross-instance
-  # relay 소스가 되어야 하므로 안 건드림). 기본값 'false'(api 전용 durable 값) — 이 값은
-  # deploy-backend에서만 쓰이고 deploy-realtime은 항상 true를 직접 명시(아래, 변수 아님).
-  _BACKEND_REDIS_CONSUME_ENABLED: 'false'
+  # ⛔E-ARCH S2 정리(story #2078, 2026-07-21) — **전제가 틀렸음이 #2123에서 드러남(아래 정정
+  # 참조)**: 당시 "api는 SSE를 서빙하지 않는다"고 판단해 Redis 구독(consume)을 껐다. 그런데
+  # `agent_onboarding_config.py::resolve_backend_direct_url()`이 에이전트에게 `/agent/stream`
+  # 접속 host로 **FASTAPI_URL(=backend-dev 자신)**을 명시 배포한다(CF-fronted 도메인 금지·
+  # backend-direct 강제, SSE 버퍼링 회피 목적) — REALTIME_URL로 옮겨간 적이 없다. 즉 **에이전트
+  # SSE 연결은 지금도 backend-dev가 서빙 중**(라이브 실측 2026-07-23: agent/stream 요청
+  # backend-dev 95건 vs realtime-dev 2건, 24h 표본). dual_publish(발행)는 그대로 필요.
+  # 기본값 'true'로 정정(과거 'false' fallback 폐기) — deploy-backend에서만 쓰이고
+  # deploy-realtime은 항상 true를 직접 명시(아래, 변수 아님).
+  _BACKEND_REDIS_CONSUME_ENABLED: 'true'
+
+  # story #2123 S0-b 후속(2026-07-23, 오르테가군 PR #2416 리뷰 적발): consume만으로는
+  # 부족하다 — `resolve_backplane()`이 `event_broker_redis_dispatch_enabled`도 함께 봐서
+  # off면 구독은 해도 실 dispatch(=publish_event/_push_to_agent 호출)를 안 한다(순수 shadow
+  # observe). 위와 같은 이유(에이전트 연결이 backend-dev에 있음)로 dispatch도 필요.
+  # ⚠️중복배달 검토: dispatch는 각 서비스 **자기 프로세스의 로컬 큐/구독자**에만 push한다
+  # (`_agent_connections`/`_subscribers`는 프로세스-로컬 dict, 크로스서비스 공유 없음) — 에이전트는
+  # backend-dev에만 연결되고 브라우저는 realtime-dev(프론트 REALTIME_URL 프록시)에만 연결되므로,
+  # 두 서비스가 동시에 dispatch=true여도 서로 다른 로컬 큐를 보는 것이라 같은 클라이언트에 2회
+  # 배달되는 경로가 없다(전제: 에이전트/브라우저 연결이 겹치지 않음 — 위 라이브 카운트로 확認).
+  # 기본값 'false'(dev-safe fallback) — GHA가 dev만 명시 override(true), prod는 Redis 요소
+  # 자체가 없어 무의미(false 유지).
+  _BACKEND_REDIS_DISPATCH_ENABLED: 'false'
 
   # story #2135(E-ARCH 근본, 2026-07-23 #2123 실측 적발): 이 값이 실려가는 실제 env var 키가
   # 여태 `REDIS_CONSUME_ENABLED`였다 — Settings 필드는 `event_broker_redis_consume_enabled`
   # (config.py, env_prefix 없음)라 pydantic-settings가 이 키를 매칭 못 하고 `extra="ignore"`가
-  # 조용히 삼켜, 위 _BACKEND_REDIS_CONSUME_ENABLED='false' 의도가 api에 **한 번도 적용된 적이
-  # 없었다**(필드는 항상 코드 기본값 True로 남아 backend-dev가 불필요하게 redis_consume_loop를
-  # 기동 중이었음 — uv run 재현 + 라이브 로그 확認 완료). 아래 두 곳(deploy-backend/
-  # deploy-realtime)의 env var **키 이름**을 `EVENT_BROKER_REDIS_CONSUME_ENABLED`로 정정한다
-  # (이 substitution 변수 자체는 그대로 재사용 — 값 산출 로직 무변경, 실려가는 키만 교정).
+  # 조용히 삼켜, 위 _BACKEND_REDIS_CONSUME_ENABLED 의도가 api에 **한 번도 적용된 적이 없었다**
+  # (필드는 항상 코드 기본값 True로 남았음 — uv run 재현 + 라이브 로그 확認 완료. 결과적으로
+  # "의도 false"였던 구간에도 필드는 이미 True였다는 뜻 — 아래 값 정정과 별개로 이 키 이름
+  # 버그 자체는 그대로 고친다). 아래 두 곳(deploy-backend/deploy-realtime)의 env var **키
+  # 이름**을 `EVENT_BROKER_REDIS_CONSUME_ENABLED`로 정정하고, **구 키(`REDIS_CONSUME_ENABLED`)
+  # 는 `--remove-env-vars`로 명시 제거**한다(`--update-env-vars`는 additive라 안 지우면 두 키가
+  # 라이브에 공존 — "설정돼 있네"로 오독하게 만드는 바로 그 함정, 오르테가군 PR #2416 리뷰 적발).
 
   # story #2123 S0-b(2026-07-23, 오르테가군 판정): wake_agent()의 크로스인스턴스 배달은
   # #2122가 병합됐어도 **발행측 스위치(FANOUT_WAKE_REDIS_ENABLED)가 꺼져 있어 무효**였다
@@ -257,15 +277,18 @@ steps:
       # maxScale 와 짝으로 검토. (PO rev 01256 dev 429 right-size durable 화.)
       # E-ARCH 1단계(story #2078): PG_LISTEN_ENABLED durable화 — 위 _BACKEND_PG_LISTEN_ENABLED
       # 주석 참조(dev=false·prod=true 유지, GHA per-env 배선).
-      # E-ARCH S2 정리(story #2078): EVENT_BROKER_REDIS_CONSUME_ENABLED durable화 — 위
-      # _BACKEND_REDIS_CONSUME_ENABLED 주석 참조(api는 SSE 미서빙이라 구독 불필요, dual_publish는
-      # 유지). 키 이름 story #2135(2026-07-23)에서 정정(구 `REDIS_CONSUME_ENABLED`는 Settings
-      # 필드와 안 맞아 무시되던 키).
+      # ⛔E-ARCH S2 정리(story #2078) 정정(#2123, 2026-07-23): EVENT_BROKER_REDIS_CONSUME_
+      # ENABLED/_DISPATCH_ENABLED durable화 — 위 _BACKEND_REDIS_CONSUME_ENABLED/_DISPATCH_
+      # ENABLED 주석 참조. "api는 SSE 미서빙" 전제가 틀렸음이 드러나 값을 true로 정정(에이전트
+      # SSE가 agent_onboarding_config.py 설계상 backend-dev를 직접 서빙). 키 이름 자체도 story
+      # #2135(2026-07-23)에서 정정(구 `REDIS_CONSUME_ENABLED`는 Settings 필드와 안 맞아 무시되던
+      # 키) — 구 키는 아래 --remove-env-vars로 명시 제거(안 지우면 두 키 공존, additive 함정).
       # ⛔story cd10e123 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
       # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED durable화 — 위 _REDIS_URL 주석 참조.
       # story #2123 S0-b(2026-07-23): FANOUT_WAKE_REDIS_ENABLED — 위 _BACKEND_FANOUT_WAKE_
       # REDIS_ENABLED 주석 참조(dev만 true, prod는 손대지 않음).
-      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED}
+      - --update-env-vars=FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED}
+      - --remove-env-vars=REDIS_CONSUME_ENABLED
       - --quiet
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
     # 스키마를 상대로 뜨는 걸 막는다(migrate 실패 시 이 스텝 자체가 안 돎).
@@ -292,12 +315,15 @@ steps:
         # 완료)했는데, 이 스텝이 명시적으로 true를 다시 밀어넣어 **다음 배포마다 LISTEN이
         # 부활**하는 시한폭탄이었다("손 값은 배포가 덮는다" 규율의 역방향 재발 — 이번엔 배포가
         # 고침을 지우는 쪽). realtime은 이제 LISTEN이 구조적으로 불필요(Redis가 authoritative
-        # dispatch) — false로 durable 고정. EVENT_BROKER_REDIS_CONSUME_ENABLED=true도 명시(이
-        # 서비스가 Redis를 구독+dispatch하는 유일한 서비스라는 것을 코드에 못박음 — api는
-        # false). ⚠️story #2135(2026-07-23): 이 키 이름이 여태 `REDIS_CONSUME_ENABLED`였다 —
+        # dispatch) — false로 durable 고정. EVENT_BROKER_REDIS_CONSUME_ENABLED=true도 명시.
+        # ⚠️#2123 정정(2026-07-23): "api는 구독 불필요"라 여기 적었었으나 틀렸다 — 에이전트
+        # SSE가 backend-dev를 직접 서빙해(agent_onboarding_config.py 설계) api도 이제
+        # consume+dispatch=true다(위 deploy-backend 스텝 참조). 브라우저(여기, realtime-dev)와
+        # 에이전트(backend-dev)가 서로 다른 프로세스-로컬 큐만 보므로 중복배달은 없다.
+        # ⚠️story #2135(2026-07-23): 이 키 이름이 여태 `REDIS_CONSUME_ENABLED`였다 —
         # Settings 필드(`event_broker_redis_consume_enabled`)와 안 맞아 pydantic이 조용히
         # 무시했다(여기서는 필드 기본값이 우연히 True라 결과만 의도와 같았음). 실제 필드가
-        # 기대하는 키로 정정.
+        # 기대하는 키로 정정 — 구 키는 아래 --remove-env-vars로 명시 제거.
         # ⛔story cd10e123 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
         # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED·EVENT_BROKER_REDIS_DISPATCH_ENABLED 셋 다
         # 여태 여기 없는 순수 수동 Cloud Run env였다 — realtime은 이미 LISTEN이 꺼져있고
@@ -313,6 +339,7 @@ steps:
           --timeout=${_REALTIME_TIMEOUT} \
           --allow-unauthenticated \
           --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=false,EVENT_BROKER_REDIS_CONSUME_ENABLED=true,REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true,EVENT_BROKER_REDIS_DISPATCH_ENABLED=true \
+          --remove-env-vars=REDIS_CONSUME_ENABLED \
           --quiet
     waitFor: [run-migrate-job]
 
