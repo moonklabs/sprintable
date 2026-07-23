@@ -69,6 +69,19 @@ case "${ENV}" in
         GITHUB_APP_ID="4120278"
         GITHUB_APP_CLIENT_ID="Iv23liRkrmyqoCZIlrgh"
         GITHUB_APP_SLUG="sprintable-dev"
+        # story #2142(2026-07-23, 오르테가 DRY_RUN 검수 3번째 적발, 같은 클래스) — L2_TRIGGER_*·
+        # GATE_CONFIG_ENFORCE_*·DECISION_GATE_LINE_*는 backend-dev에만 실재하는 기능(라이브
+        # 대조: backend-prod엔 이 키들 자체가 없음 = 그 기능이 prod에서 한 번도 켜진 적 없음).
+        # 이 GCE 노드는 backend와 동일 이미지를 돌리므로 플래그가 켜지면 그 lifespan 워커가
+        # 그대로 뜬다 — "SSE 전용이라 안 탈 것"이라는 추론에 기대지 않고 backend-prod를
+        # 그대로 미러링한다(오르테가 판정: 코드 경로를 추론해 안전을 주장하는 대신 prod와
+        # 같게 만드는 것이 규칙). dev는 이 3그룹을 그대로 킨다.
+        L2_TRIGGER_ENABLED_LINE=true
+        GATE_CONFIG_ENFORCE_ENABLED_LINE=true
+        DECISION_GATE_LINE_ENABLED_LINE=true
+        # H1_MERGE_GATE는 backend-prod에도 실재하지만 허용목록 값이 dev(단일 org)와 다르다
+        # (prod: 2-org 콤마리스트, describe 대조 확認) — ENABLED/ADVISORY는 dev·prod 동일(true).
+        H1_MERGE_GATE_ORG_ALLOWLIST_VALUE="54bac162-5c0d-49fa-8e49-85977063a091"
         APP_URL="https://dev-app.sprintable.ai"
         # story #2142(오르테가 라이브 실측 2026-07-23): sprintable-backend-dev/-prod MCP_PUBLIC_URL
         # 라이브 값 그대로 — 이것도 DATABASE_URL_DEV와 같은 클래스(env 분기 밖 리터럴)였던 걸 정정.
@@ -119,6 +132,19 @@ case "${ENV}" in
         GITHUB_APP_ID="4244849"
         GITHUB_APP_CLIENT_ID="Iv23liGdo7u9vkHjRKS0"
         GITHUB_APP_SLUG="sprintable-prod"
+        # ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 3번째 적발) — L2_TRIGGER_ENABLED=true·
+        # GATE_CONFIG_ENFORCE_ENABLED=true·DECISION_GATE_LINE_ENABLED=true가 env 분기 밖
+        # 리터럴로 박혀 있어, prod가 한 번도 가져본 적 없는 기능 3종이 dev의 org 허용목록을
+        # 달고 그대로 켜질 뻔했다(backend-prod에 이 키들 자체가 없음, describe 대조 확認).
+        # 이 GCE 노드가 backend와 동일 이미지라 플래그가 켜지면 lifespan 워커가 실제로 뜬다 —
+        # "SSE 전용 서비스니 그 코드 경로를 안 탈 것"이라는 추론에 기대지 않는다(오르테가
+        # 판정 — 그 추론이 틀리는 날 prod에서 드러난다). prod는 이 3그룹을 아예 붙이지 않는다.
+        L2_TRIGGER_ENABLED_LINE=false
+        GATE_CONFIG_ENFORCE_ENABLED_LINE=false
+        DECISION_GATE_LINE_ENABLED_LINE=false
+        # H1_MERGE_GATE_ENABLED/_ADVISORY는 backend-prod에도 true/true로 실재(dev와 동일) —
+        # 다만 허용목록은 dev 단일 org가 아니라 prod의 실제 2-org 값을 그대로 옮긴다.
+        H1_MERGE_GATE_ORG_ALLOWLIST_VALUE="54bac162-5c0d-49fa-8e49-85977063a091,588186bf-1558-48a3-b3a0-fe3759a925fc"
         APP_URL="https://app.sprintable.ai"
         # story #2142(오르테가 라이브 실측 2026-07-23, gcloud env 직접 대조): 추측 아니라
         # sprintable-backend-prod의 실측 라이브 값.
@@ -154,19 +180,33 @@ PLAIN_ENV_SPEC="EVENTBUS_ENABLED=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},APP_URL=${APP_URL}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MEMBER_SSOT_RESOLVER_SHADOW=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MEMBER_SSOT_APIKEY_CUT=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ENABLED=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ADVISORY_LOCK=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_MAX_WAKES_PER_ORG_PER_HOUR=5"
+# ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 3번째 적발 — 같은 뿌리: dev 라이브에서
+# 관측한 사실을 env 분기 없이 prod에 적용) — L2_TRIGGER_*/GATE_CONFIG_ENFORCE_*/
+# DECISION_GATE_LINE_*는 backend-prod에 키 자체가 없다(그 기능이 prod에서 한 번도 켜진 적
+# 없음, describe 대조 확認). 이 GCE 노드는 backend와 동일 이미지라 플래그가 켜지면 그
+# lifespan 워커가 그대로 뜬다 — "SSE 전용이라 안 탈 것"이라는 추론 대신 backend-prod를
+# 그대로 미러링한다(오르테가 판정). prod 분기에서 이 3그룹은 아예 붙이지 않는다.
+if [ "${L2_TRIGGER_ENABLED_LINE}" = "true" ]; then
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ENABLED=true"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ADVISORY_LOCK=true"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},L2_TRIGGER_MAX_WAKES_PER_ORG_PER_HOUR=5"
+fi
+# H1_MERGE_GATE는 backend-prod에도 실재(ENABLED/ADVISORY=true/true, dev와 동일) — 허용목록만
+# env별로 다르다(H1_MERGE_GATE_ORG_ALLOWLIST_VALUE, case 분기에서 라이브 실측값으로 설정).
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ENABLED=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ORG_ALLOWLIST=${H1_MERGE_GATE_ORG_ALLOWLIST_VALUE}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},H1_MERGE_GATE_ADVISORY=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},BUILD_APP_METADATA_DEFALLBACK=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GATE_CONFIG_ENFORCE_ENABLED=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GATE_CONFIG_ENFORCE_ORG_ALLOWLIST=03970fbf-2db6-434b-a7b1-cb74f9547059"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ENABLED=true"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_MODE=shadow"
+if [ "${GATE_CONFIG_ENFORCE_ENABLED_LINE}" = "true" ]; then
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GATE_CONFIG_ENFORCE_ENABLED=true"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GATE_CONFIG_ENFORCE_ORG_ALLOWLIST=03970fbf-2db6-434b-a7b1-cb74f9547059"
+fi
+if [ "${DECISION_GATE_LINE_ENABLED_LINE}" = "true" ]; then
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ENABLED=true"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ORG_ALLOWLIST=54bac162-5c0d-49fa-8e49-85977063a091"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_MODE=shadow"
+fi
 # ⛔story #2142(2026-07-23, 오르테가 DRY_RUN 검수 적발) 정정 — 이 세 값이 env 분기 밖의
 # 리터럴(dev App 값)이라 prod 플랜에도 그대로 실려, prod 시크릿(github-app-*-prod)과 dev App의
 # ID/CLIENT_ID가 섞이는 조합이 될 뻔했다. ${GITHUB_APP_ID}/${GITHUB_APP_CLIENT_ID}/
