@@ -263,15 +263,26 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}DB_MAX_OVERFLOW=1"
 # backend-prod는 SSE 전용이 아니라 REST 트래픽과 캡을 공유하기 때문(다른 성격의 노드).
 # dev/prod 둘 다 이 GCE 스택에서는 500 그대로 유지 — env 분기 대상 아님.
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}MAX_SSE_CONNECTIONS=500"
-# #2120(E-ARCH 근본): chat_presence working → Redis 공유 롤아웃 게이트. 실측용으로 env 로 flip
-# (기본 false=현 in-memory 무회귀). OFF 실측=false, ON 실측=true. 라이브 실측 후 durable 값 확定.
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}PRESENCE_REDIS_ENABLED=${PRESENCE_REDIS_ENABLED:-false}"
-# #2120 AC2: online liveness Redis 롤아웃 게이트(§2 working 과 독립 flag). env 로 flip(기본 false).
-# AC2 실측 배포=true. Redis-down fail-open 실측 땐 REDIS_URL 오배선(공유 Memorystore 무접촉)로 시뮬.
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}PRESENCE_ONLINE_REDIS_ENABLED=${PRESENCE_ONLINE_REDIS_ENABLED:-false}"
-# #2121(E-ARCH 근본): SSE 연결 카운터(429/503) → Redis ZSET lease 롤아웃 게이트(presence 와 독립 flag).
-# env 로 flip(기본 false=in-process 무회귀). AC5 실측 배포=true(GCE 3노드 필수·멀티노드 합산 대조).
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}SSE_LEASE_REDIS_ENABLED=${SSE_LEASE_REDIS_ENABLED:-false}"
+# story #2139/#2143 후속(2026-07-23, 오르테가군 판정) — "백플레인 켜기" durable화. dev만
+# true — prod는 backend(cloudbuild.yaml _BACKEND_PRESENCE_*/_BACKEND_SSE_LEASE_*)와 함께
+# 켜야 하는 별도 단계(#2120/#2121/#2122와 동일 원칙, dev 게이트 통과 전엔 얹지 않는다).
+# 손 env override(PRESENCE_REDIS_ENABLED=true bash ... prod 식)는 여기 SSOT 기본값을 다음
+# 배포가 덮으므로 durable 값 자체를 여기 못박는다.
+if [ "${ENV}" = "dev" ]; then
+    _BACKPLANE_DEFAULT=true
+else
+    _BACKPLANE_DEFAULT=false
+fi
+# #2120(E-ARCH 근본): chat_presence working → Redis 공유 롤아웃 게이트(프로세스-로컬 dict라
+# GCE 멀티노드에서 노드마다 다르게 보이는 실제 결함 — 미르코의 working 판정이 여기 걸림).
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}PRESENCE_REDIS_ENABLED=${PRESENCE_REDIS_ENABLED:-${_BACKPLANE_DEFAULT}}"
+# #2120 AC2: online liveness Redis 롤아웃 게이트(§2 working 과 독립 flag). DB 폴백이 있어
+# 지금도 안 깨져 있음 — 켜면 신선도 개선이지 결함 수정은 아니다(성격 구분, 오르테가군 지적).
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}PRESENCE_ONLINE_REDIS_ENABLED=${PRESENCE_ONLINE_REDIS_ENABLED:-${_BACKPLANE_DEFAULT}}"
+# #2121(E-ARCH 근본): SSE 연결 카운터(429/503) → Redis ZSET lease 롤아웃 게이트(인스턴스별
+# 카운터라 전역 동시연결 상한이 실제로 성립하지 않는 실제 결함 — 까심의 노드편차 판정이
+# 여기 걸림, GCE 3노드 필수·멀티노드 합산 대조).
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}SSE_LEASE_REDIS_ENABLED=${SSE_LEASE_REDIS_ENABLED:-${_BACKPLANE_DEFAULT}}"
 # #2122(E-ARCH 근본): fanout(wake_agent) → Redis 백플레인 롤아웃 게이트(presence/lease 와 독립 flag).
 # env 로 flip(기본 false=pg_notify 직행 무회귀). #2122 라이브 재측정 배포=true(GCE PG_LISTEN=false라 wake
 # 가 Redis 백플레인 타야 타노드 도달 — 미설정 시 cross-node wake 0/2 재현). REALTIME_BACKPLANE 는 별개(cutover).
