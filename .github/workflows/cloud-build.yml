@@ -99,10 +99,14 @@ jobs:
             echo "redis_url=" >> "$GITHUB_OUTPUT"
             echo "backend_redis_dual_publish_enabled=true" >> "$GITHUB_OUTPUT"
             # story #2123 S0-b(2026-07-23, 오르테가군 판정): wake_agent 크로스인스턴스 배달의
-            # 발행측 스위치. prod는 아직 dual_publish/redis_url 자체가 없다(위) — 이 스위치를
-            # 켜봐야 event_broker.publish() 내부에서 여전히 Redis publish는 안 나가고(직전
-            # dual_publish=false) pg_notify만 무조건 나간다(현행 유지). dev 게이트 통과 전
-            # prod에 얹지 않는다(#2120/#2121/#2122와 동일 원칙).
+            # 발행측 스위치.
+            # ⛔#2141 S-a 반영 후 정정 — 이 주석이 여태 "prod는 아직 dual_publish/redis_url
+            # 자체가 없다"를 근거로 들었으나, 위 dual_publish가 이제 true다(그 전제는 낡았다).
+            # 그래도 결론(false 유지)은 그대로 맞다 — 이유가 바뀐 것뿐: consume/dispatch가
+            # 아직 false라 event_broker가 Redis로 publish는 해도(dual_publish) 그걸 구독해서
+            # 실 전달(dispatch)하는 쪽이 꺼져 있다. dispatch 없이 이 스위치만 켜봐야 무의미하고,
+            # S-b/S-c(consume/dispatch)가 dev 게이트를 통과하기 전엔 prod에 얹지 않는다
+            # (#2120/#2121/#2122와 동일 원칙).
             echo "backend_fanout_wake_redis_enabled=false" >> "$GITHUB_OUTPUT"
             # story #2078(E-ARCH 0단계, 오르테가군 판정 2026-07-21): dev 실측 GREEN 확認 전
             # prod에 얹지 않는다 — develop→main 48커밋 일괄승격에 검증 안 된 롤백 플래그를
