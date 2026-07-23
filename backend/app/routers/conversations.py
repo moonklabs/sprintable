@@ -22,7 +22,7 @@ from app.models.project import OrgMember
 from app.models.team import AgentMessageAllowlist, TeamMember
 from app.models.agent_deployment import AgentAuditLog
 from app.models.webhook_config import WebhookConfig
-from app.routers.events import _push_to_agent, publish_event
+from app.routers.events import _push_to_agent
 from app.schemas.attachment import validate_attachment_url
 from app.services import chat_presence
 from app.services.agent_runtime import supports_deterministic_command
@@ -492,7 +492,7 @@ async def _dispatch_conversation_event(
     if _set_working_any:
         from app.services.presence_events import emit_conversation_working, emit_presence
         await emit_conversation_working(org_id, conversation.id)
-        emit_presence(org_id)
+        await emit_presence(org_id)
     # per-recipient dense seq 발급 (agent recipient만)
     for pid_str, event in events_to_push:
         if member_type_map.get(event.recipient_id, "human") == "agent":
@@ -1658,7 +1658,7 @@ async def send_message(
     # R2(da9d1781): working clear → conversation.working + presence SSE 발행(폴링 대체·best-effort).
     from app.services.presence_events import emit_conversation_working, emit_presence
     await emit_conversation_working(org_id, conversation_id)
-    emit_presence(org_id)
+    await emit_presence(org_id)
 
     # cross-org 차단: mentioned_ids를 현재 org 소속 member로 일괄 필터링 (QA B1).
     # E-MEMBER-SSOT Phase 0: 저장·DM포크·group 멘션 발송 모든 경로에 org 필터를 한 번 적용.
@@ -1972,19 +1972,20 @@ async def send_message(
     # commit 완료 후 SSE push — Event가 DB에 커밋된 상태에서 push해야 race condition 없음
     for pid_str, sse_payload in pending_sse_pushes:
         _push_to_agent(pid_str, sse_payload)
-    # story #2090 정정(2026-07-22, 까심 발견 — 2026-07-21 PR #2375의 착오 정정): publish_event()의
-    # org _subscribers fanout은 영구 죽은 레지스트리(story #2059/#2067과 동일 근본)라 실제
-    # SSE 전달 경로가 아니다 — canonical event_type 기록용(L1 activity_events 캡처)으로만 유지.
-    # 실 전달은 위 pending_sse_pushes push 루프(commit 후, 1982행 부근)가 이미 담당한다:
-    # `_dispatch_conversation_event`가 conversation participant 전원에게, `_dispatch_mention_
-    # events`가 멘션 대상(참가자 여부 무관) 전원에게 각각 event_type을 정확히 나눠(message_created
-    # vs conversation:mention) push하므로 별도 함수로 다시 push할 필요가 없다 — PR #2375가 이
-    # 사실을 놓치고 `_push_conversation_message_created()`로 동일 pid에 conversation.message_created를
+    # story #2090 정정(2026-07-22, 까심 발견 — 2026-07-21 PR #2375의 착오 정정) + #2132(2026-07-23
+    # 근본수정): publish_event()의 org _subscribers fanout은 영구 죽은 레지스트리(story #2059/
+    # #2067과 동일 근본)라 실제 SSE 전달 경로가 아니었다 — 그 함수 자체를 삭제했다. L1
+    # activity_events 캡처는 이 함수 호출과 무관하게 위쪽 `Event(...)` DB row 생성(:474/:477,
+    # event_type="conversation.message_created")으로 이미 이뤄지므로 무영향. 실 전달은 위
+    # pending_sse_pushes push 루프(commit 후)가 담당한다: `_dispatch_conversation_event`가
+    # conversation participant 전원에게, `_dispatch_mention_events`가 멘션 대상(참가자 여부
+    # 무관) 전원에게 각각 event_type을 정확히 나눠(message_created vs conversation:mention)
+    # push하므로 별도 함수로 다시 push할 필요가 없다 — PR #2375가 이 사실을 놓치고
+    # `_push_conversation_message_created()`로 동일 pid에 conversation.message_created를
     # 중복 발송했고(참가자 기준 순수 중복), 게다가 pending_sse_pushes 전체를 pid 기준 dedup하면서
     # 멘션-only 비참가자에게도 message_created를 함께 보내 use-chat-unread-total.ts의 "SSE는 실
     # 참여자에게만 전달되므로 +1 정확" 전제를 깨는 phantom unread 증분 부작용까지 냈다(비참가자는
     # /api/conversations/unread-count 서버 truth엔 안 잡히므로 배지만 어긋남). 그 함수 자체를 삭제.
-    publish_event(str(org_id), "conversation.message_created", _msg_payload(msg, sender))  # canonical (S-COMM-12) — L1 activity_events 캡처용 유지
 
     # ws_chat WebSocket 브로드캐스트 — agent 참가자 room에 실시간 전달 (conv.type/title 무관)
     try:

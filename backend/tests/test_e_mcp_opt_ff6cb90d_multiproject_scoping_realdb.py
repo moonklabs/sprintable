@@ -264,10 +264,14 @@ async def test_set_default_project_rejects_inaccessible_project_403():
 
 
 @pytest.mark.anyio
-async def test_default_project_changed_event_emitted():
-    """set_default_project 성공 시 member.default_project_changed(old/new) emit — 감사 가능성 실증."""
-    from unittest.mock import MagicMock, patch as mock_patch
+async def test_default_project_changed_succeeds_without_dead_publish_event():
+    """set_default_project 성공 시 실제로 default_project_id가 바뀐다.
 
+    story #2132(2026-07-23) 근본수정: 이 엔드포인트가 발행하던 `member.default_project_changed`
+    `publish_event()` 호출은 FE 소비처 0(설계 doc §1 실측)이라 삭제됐다 — 그 org-level fanout
+    자체가 아무도 구독 안 하는 영구 죽은 코드였다. 이 테스트는 원래 "emit 여부"를 검증했으나,
+    이제는 그 반대(호출 제거 後에도 실제 기능 — default project 변경 자체 — 는 무회귀임)를
+    검증한다."""
     from app.main import app
     from app.dependencies.database import get_db
 
@@ -288,19 +292,11 @@ async def test_default_project_changed_event_emitted():
         app.dependency_overrides[get_db] = _db
         client = _client_with_key(app, seeded["raw_key"])
         try:
-            publish = MagicMock()
-            with mock_patch("app.routers.events.publish_event", publish):
-                resp = await client.patch(
-                    "/api/v2/auth/me/default-project", json={"project_id": str(target)},
-                )
-                assert resp.status_code == 200, resp.text
-            publish.assert_called_once()
-            args, _ = publish.call_args
-            assert args[1] == "member.default_project_changed"
-            payload = args[2]
-            assert payload["member_id"] == str(seeded["member_id"])
-            assert payload["old_default_project_id"] is None
-            assert payload["new_default_project_id"] == str(target)
+            resp = await client.patch(
+                "/api/v2/auth/me/default-project", json={"project_id": str(target)},
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["resolved_default_project_id"] == str(target)
         finally:
             await client.aclose()
     finally:

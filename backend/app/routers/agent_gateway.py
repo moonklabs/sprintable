@@ -160,7 +160,7 @@ async def _mark_agent_disconnected(
             # SSE 발행(FE 폴링 대체·best-effort). working 비운 대화에 push 안 하면 "...typing" 영구 stale(QA HIGH).
             if remaining is None and org_id:
                 from app.services.presence_events import emit_conversation_working, emit_presence
-                emit_presence(org_id)
+                await emit_presence(org_id)
                 for _conv in _cleared_convs:
                     await emit_conversation_working(org_id, _conv)
     except Exception:
@@ -449,7 +449,7 @@ async def agent_stream(
             await presence_online.mark_online(agent_id)
             # R2(da9d1781): 연결 online 진입 → presence SSE 발행(FE 3s 폴링 대체·best-effort).
             from app.services.presence_events import emit_presence
-            emit_presence(org_id_str)
+            await emit_presence(org_id_str)
 
             yield "event: heartbeat\ndata: {}\n\n"
 

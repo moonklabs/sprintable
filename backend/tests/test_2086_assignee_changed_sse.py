@@ -171,11 +171,10 @@ async def test_realdb_assignee_changed_pushes_sse_to_accessible_members():
 
 @pytest.mark.anyio
 async def test_assignee_changed_sse_forward_failure_does_not_break_response(monkeypatch):
-    """project_accessible_member_ids가 raise해도 publish_event는 이미 나갔고 응답은 안 깨져야
-    (기존 emit_story_status_changed의 격리 패턴과 동형 — best-effort)."""
+    """project_accessible_member_ids가 raise해도 응답은 안 깨져야(기존 emit_story_status_changed의
+    격리 패턴과 동형 — best-effort). story #2132(2026-07-23): publish_event() 자체가 삭제됐다 —
+    "이미 나갔다"고 기댈 별도 발행 경로가 더 이상 없다, _push_to_agent 포워딩이 유일 경로다."""
     from types import SimpleNamespace
-
-    from app.routers import stories as stories_mod
 
     story = SimpleNamespace(
         id=uuid.uuid4(), title="S", priority="low", epic_id=None,
@@ -185,8 +184,7 @@ async def test_assignee_changed_sse_forward_failure_does_not_break_response(monk
     old_assignee_id = None
     actor_id = uuid.uuid4()
 
-    with patch.object(stories_mod, "publish_event", lambda *a, **kw: None), \
-         patch(
+    with patch(
              "app.services.project_auth.project_accessible_member_ids",
              AsyncMock(side_effect=RuntimeError("boom")),
          ):
