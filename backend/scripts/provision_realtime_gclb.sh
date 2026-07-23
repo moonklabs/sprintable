@@ -8,15 +8,22 @@
 # **더 나빠진다**(콜드스타트 제거하러 왔다가 SSE 수명을 30초로 깎는 퇴보). 아래
 # --timeout=3600 이 이 스크립트에서 가장 중요한 한 줄이다 — 절대 빠뜨리지 말 것.
 #
-# 1회성 프로비저닝(멱등 — 이미 있으면 스킵) — deploy_realtime_gce.sh(MIG 배포)보다
-# 먼저 실행돼야 한다(백엔드서비스가 MIG를 참조하므로 MIG가 먼저 있어야 add-backend 가능).
+# 1회성 프로비저닝(멱등 — 이미 있으면 스킵).
+# ⛔story #2142(2026-07-23) 정정 — 이 줄이 예전에 "deploy_realtime_gce.sh보다 먼저"라
+# 적혀 있었으나 그 문장 자신의 괄호 근거("MIG가 먼저 있어야 add-backend 가능")와 정반대였다.
+# 스텝④의 add-backend는 실재하는 instance-group을 요구하므로 **deploy_realtime_gce.sh
+# (MIG 생성)가 먼저, 이 스크립트(GCLB 프로비저닝)가 그 다음**이 맞다.
 #
 # 실행 순서: ① 방화벽(GCLB 헬스체크 프로브 대역 허용) → ② 헬스체크(/api/v2/ping)
 #           → ③ 백엔드서비스(timeout=3600!) → ④ MIG를 백엔드로 부착
 #           → ⑤ URL맵 → ⑥ 타겟프록시 → ⑦ 전역 고정IP → ⑧ 포워딩규칙
 #
-# 사용법: bash backend/scripts/provision_realtime_gclb.sh dev
+# 사용법: bash backend/scripts/provision_realtime_gclb.sh [dev|prod]
 # 환경변수: GCP_PROJECT, GCP_REGION, DRY_RUN=1(gcloud 호출 없이 계획만 출력)
+#
+# story #2142(2026-07-23, 선생님 GCE prod 전환 승인): prod 분기 신설. 이 스크립트 자체가
+# prod를 받아들이게 하는 것만이 스코프 — 실행(실 리소스 생성)은 오르테가 DRY_RUN 검수 통과
+# 後 별도 승인 시점.
 
 set -euo pipefail
 
@@ -37,8 +44,22 @@ case "${ENV}" in
         FORWARDING_RULE_NAME="realtime-gateway-dev-fwd-rule"
         NAMED_PORT="http:8000"
         ;;
+    prod)
+        # story #2142(2026-07-23, 선생님 GCE prod 전환 승인): dev 스택과 동일 구조, 리소스명만
+        # -prod 접미. BACKEND_TIMEOUT_SEC/DRAINING_TIMEOUT_SEC은 case 밖 공용 상수라 자동으로
+        # prod에도 그대로 적용된다(env별 분기 대상 아님 — 이 스크립트의 존재 이유 그 자체).
+        MIG_NAME="sprintable-realtime-gateway-prod"
+        FW_RULE_NAME="allow-gclb-health-check-realtime-prod"
+        HEALTH_CHECK_NAME="realtime-gateway-prod-health-check"
+        BACKEND_SERVICE_NAME="realtime-gateway-prod-backend"
+        URL_MAP_NAME="realtime-gateway-prod-urlmap"
+        HTTP_PROXY_NAME="realtime-gateway-prod-http-proxy"
+        IP_NAME="realtime-gateway-prod-ip"
+        FORWARDING_RULE_NAME="realtime-gateway-prod-fwd-rule"
+        NAMED_PORT="http:8000"
+        ;;
     *)
-        echo "Usage: $0 [dev] — prod는 realtime 서비스 자체가 없음(설계 doc 스코프 확定)" >&2
+        echo "Usage: $0 [dev|prod]" >&2
         exit 1 ;;
 esac
 

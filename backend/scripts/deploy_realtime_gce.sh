@@ -8,8 +8,10 @@
 #   - VPC/서브넷(default, asia-northeast3) 이미 존재(gcloud 실측 완료, 2026-07-22)
 #   - RUNTIME_SA(cloudrun-runtime-dev)에 cloudsql.client·secretmanager.secretAccessor 이미 부여
 #     (Cloud Run 서비스와 동일 SA 재사용 — 신규 SA 불요, 기존 정책 신뢰)
-#   - GCLB 스택(헬스체크·백엔드서비스·NEG·URL맵·포워딩규칙·방화벽)은
-#     provision_realtime_gclb.sh로 별도 1회 프로비저닝(먼저 실행 필요)
+#
+# ⛔story #2142(2026-07-23) 정정 — GCLB 스택(헬스체크·백엔드서비스·URL맵·포워딩규칙·방화벽)
+# 은 provision_realtime_gclb.sh가 만들지만, **이 스크립트(MIG 생성)가 먼저 돌아야** 한다
+# (provision의 add-backend 스텝이 실재하는 MIG를 요구 — 예전엔 순서가 반대로 적혀 있었다).
 #
 # 사용법:
 #   COMMIT_SHA=abc1234 bash backend/scripts/deploy_realtime_gce.sh dev
@@ -26,7 +28,9 @@
 #       0%부터 검증 후 GCLB로 전환(롤백 경로 보존, ⓔ).
 #
 # ⚠️이미지 분리 없음(설계 doc 스코프 확定) — backend와 완전 동일 이미지를 그대로 쓴다.
-# ⚠️dev only — realtime-prod는 서비스 자체가 없다(설계 doc 스코프 확定).
+# story #2142(2026-07-23, 선생님 GCE prod 전환 승인): prod 분기 신설 — 이 스크립트가 prod를
+# 받아들이게 하는 것만이 이 변경의 스코프. 실 리소스 생성(gcloud 실행)은 오르테가 DRY_RUN
+# 검수 통과 後 별도 승인 시점(이 PR에서 안 함).
 
 set -euo pipefail
 
@@ -56,8 +60,13 @@ case "${ENV}" in
         SQL_INSTANCE_CONN="${GCP_PROJECT}:${GCP_REGION}:sprintable-dev"
         RUNTIME_SA="cloudrun-runtime-dev@${GCP_PROJECT}.iam.gserviceaccount.com"
         DB_SECRET_NAME="DATABASE_URL_DEV"
+        CRON_SECRET_NAME="cron-secret"
         GITHUB_SECRET_SUFFIX="DEV"
+        GITHUB_APP_SECRET_ENV="dev"  # story #2142 발견: github-app-*-dev Secret Manager ID의 소문자 접미(위 GITHUB_SECRET_SUFFIX와 별개 컨벤션 — 이 시크릿 3종만 하이픈+소문자)
         APP_URL="https://dev-app.sprintable.ai"
+        # story #2142(오르테가 라이브 실측 2026-07-23): sprintable-backend-dev/-prod MCP_PUBLIC_URL
+        # 라이브 값 그대로 — 이것도 DATABASE_URL_DEV와 같은 클래스(env 분기 밖 리터럴)였던 걸 정정.
+        MCP_PUBLIC_URL="https://dev-mcp.sprintable.ai/mcp"
         # ⚠️FASTAPI_URL — 라이브 실측 그대로(cloudbuild.yaml routine dispatch-realtime과 동일값,
         # 2026-07-22 gcloud describe로 확認). 이 값은 이 서비스 "자기 자신"을 가리키는 self-URL로
         # 쓰이는 것으로 보이며(agent onboarding SPRINTABLE_API_URL 등), GCE 이전 후 이 값이
@@ -65,8 +74,50 @@ case "${ENV}" in
         # 별도 재확認 필요(TODO — 현재는 라이브 값 그대로 이관해 드리프트 0으로 시작).
         FASTAPI_URL="https://sprintable-realtime-dev-787818285179.asia-northeast3.run.app"
         ;;
+    prod)
+        # story #2142(2026-07-23, 선생님 GCE prod 전환 승인): dev와 동일 구조, 리소스명·Cloud
+        # SQL·시크릿 접미만 prod로 전환(deploy_backend.sh의 dev/prod 분기와 동일 컨벤션 재사용).
+        MIG_NAME="sprintable-realtime-gateway-prod"
+        TEMPLATE_PREFIX="sprintable-realtime-gateway-prod"
+        TARGET_SIZE=3
+        ZONES="${GCP_REGION}-a,${GCP_REGION}-b,${GCP_REGION}-c"
+        GCLB_BACKEND_SERVICE="realtime-gateway-prod-backend"
+        MACHINE_TYPE="e2-small"
+        SQL_INSTANCE_CONN="${GCP_PROJECT}:${GCP_REGION}:sprintable-prod"
+        RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
+        DB_SECRET_NAME="DATABASE_URL_PROD"
+        # ⛔story #2142(2026-07-23, 오르테가 gcloud 실측+정정) — CRON_SECRET_PROD가 실재하고
+        # backend-prod Cloud Run이 실제로 그걸 쓴다(describe 대조 확認). "cron-secret"(dev가
+        # 쓰는 이름)을 prod에 그대로 쓰면 존재는 해서 fetch는 성공하지만 backend-prod가 실제
+        # 쓰는 값과 다른 값이 실린다 — #2135(env 이름 불일치)와 같은 클래스, 여기선 시크릿
+        # 자체가 존재해 조용히 다른 값이 실리는 형태라 더 발견하기 어려움.
+        CRON_SECRET_NAME="CRON_SECRET_PROD"
+        # ⛔story #2142(2026-07-23, 오르테가 gcloud 실측+정정) — prod 분기인데 DEV 접미를
+        # 쓰는 게 **버그로 보일 자리라 명시적으로 남긴다: 이건 의도다.**
+        # backend-prod(Cloud Run)가 라이브로 GITHUB_CLIENT_ID_DEV/GITHUB_CLIENT_SECRET_DEV를
+        # 물고 있다(2026-07-23 실측, describe 대조 확認 — GITHUB_CLIENT_ID_PROD/_SECRET_PROD는
+        # Secret Manager에 아예 없음). GCE도 동일한 것을 물게 맞춘 것뿐이다.
+        # ⚠️prod가 dev OAuth 앱(유저 로그인용, config.py:209 — GitHub App 봇 시크릿과는 완전히
+        # 별개 물건, 그건 이미 -prod 접미로 정상 배선돼 있음)을 쓰는 것 자체가 적절한지는 별건
+        # (오르테가가 별도 스토리로 관측 사실만 세워둠 — 의도/누락 판단은 선생님 확認 後).
+        # ⛔"prod인데 왜 DEV?" 하고 이 줄을 고치면 GCE만 다른 OAuth 앱을 물어 로그인이
+        # backend-prod와 갈라진다 — 그 별건 스토리가 먼저 판단을 내리기 전엔 건드리지 말 것.
+        GITHUB_SECRET_SUFFIX="DEV"
+        GITHUB_APP_SECRET_ENV="prod"
+        APP_URL="https://app.sprintable.ai"
+        # story #2142(오르테가 라이브 실측 2026-07-23, gcloud env 직접 대조): 추측 아니라
+        # sprintable-backend-prod의 실측 라이브 값.
+        MCP_PUBLIC_URL="https://mcp.sprintable.ai/mcp"
+        # ⚠️TODO(실 배포 前 재확認 필요, 오르테가 DRY_RUN 검수 시 판단 요청) — dev는 기존
+        # Cloud Run realtime-dev의 라이브 실측 URL을 그대로 이관했으나(cloudbuild.yaml
+        # deploy-realtime 스텝이 실제로 존재·서빙 중이었음), prod는 Cloud Run realtime 서비스
+        # 자체가 존재한 적이 없어 이관할 라이브 값이 없다. backend-prod Cloud Run URL을
+        # 잠정값으로 둔다 — provision_realtime_gclb.sh 완료 후 GCLB 프론트 IP/도메인으로
+        # 바꿔야 하는지는 별도 재확認 대상(이 PR은 스크립트가 prod를 받게만 하는 스코프).
+        FASTAPI_URL="https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"
+        ;;
     *)
-        echo "Usage: $0 [dev] — prod는 realtime 서비스 자체가 없음(설계 doc 스코프 확定)" >&2
+        echo "Usage: $0 [dev|prod]" >&2
         exit 1 ;;
 esac
 
@@ -103,6 +154,10 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_ORG_ALLOWLIST=54bac162-5c0d
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},DECISION_GATE_LINE_MODE=shadow"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_ID=4120278"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_CLIENT_ID=Iv23liRkrmyqoCZIlrgh"
+# ⚠️story #2142 TODO(실 배포 前 확認 필요) — GITHUB_APP_ID/CLIENT_ID/SLUG는 env 분기 밖의
+# 리터럴이라 dev 값이 prod 플랜에도 그대로 실린다. repo grep 결과 prod용 GitHub App 등록/슬러그가
+# 어디에도 없어(이 App이 dev/prod 공유인지 별도 prod App이 필요한지가 이 스크립트로 답할 수
+# 없는 제품 결정) — 이 값을 건드리지 않고 그대로 두되, 오르테가 DRY_RUN 검수 시 판단 요청.
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},GITHUB_APP_SLUG=sprintable-dev"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FASTAPI_URL=${FASTAPI_URL}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},STORAGE_PROVIDER=gcs"
@@ -127,7 +182,7 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},SSE_LEASE_REDIS_ENABLED=${SSE_LEASE_REDIS_ENAB
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FANOUT_WAKE_REDIS_ENABLED=${FANOUT_WAKE_REDIS_ENABLED:-false}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_MODEL=gemini-3.1-pro-preview"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_LOCATION=global"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MCP_PUBLIC_URL=https://dev-mcp.sprintable.ai/mcp"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MCP_PUBLIC_URL=${MCP_PUBLIC_URL}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LICENSE_CONSENT=agreed"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FIREBASE_OAUTH_HANDOFF_ENABLED=1"
 # realtime 고유값(backend/api와 다름 — cloudbuild.yaml deploy-realtime 스텝과 동일 컨벤션):
@@ -139,10 +194,23 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},PG_LISTEN_ENABLED=false"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},EVENT_BROKER_REDIS_CONSUME_ENABLED=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},EVENT_BROKER_REDIS_DISPATCH_ENABLED=true"
-# ⚠️REDIS_URL은 Memorystore 내부 IP(10.164.120.243) — VPC 안에서만 유효, GCE도 같은 VPC/서브넷에
-# 붙으므로 그대로 이관 가능(라이브 실측 그대로, 재실측 없이 하드코딩하지 않고 env로 override 가능하게).
-REDIS_URL_VALUE="${REDIS_URL:-redis://10.164.120.243:6379}"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},REDIS_URL=${REDIS_URL_VALUE}"
+# ⛔story #2142(2026-07-23, 오르테가 리뷰 적발 — 실행 前 발견) 정정: REDIS_URL이 여태 env
+# 분기 없이 PLAIN_ENV_SPEC(평문·인스턴스 메타데이터에 그대로 박힘)에 얹혀 있었다. 두 가지가
+# 동시에 걸리는 자리였다 — ①prod Redis는 AUTH 활성이라 URL이 비밀번호를 품는데, 그게 평문
+# 메타데이터로 가면 이 스크립트가 SECRET_PAIRS를 따로 만든 이유("디스크 미기록·메타데이터
+# 무기록") 자체를 무너뜨린다. ②기본값이 dev Memorystore IP 리터럴이라 prod 호출 시 REDIS_URL
+# 을 안 넘기면 prod GCE가 dev Redis를 무는다 — DATABASE_URL_DEV(위 SECRET_PAIRS)와 정확히
+# 같은 클래스. dev(AUTH 없는 plain Memorystore)는 시크릿 자체가 없으니 기존처럼 평문 유지,
+# prod는 Secret Manager 바인딩(REDIS_URL_PROD)으로 완전히 옮겨 평문 경로에서 뺀다.
+if [ "${ENV}" = "prod" ]; then
+    SECRET_PAIRS_REDIS="REDIS_URL_PROD:REDIS_URL"
+else
+    # dev: Memorystore가 AUTH 없는 plain 인스턴스 — VPC 내부 IP(10.164.120.243)라 평문이어도
+    # 시크릿이 아니다. env로 override 가능하게 기존 그대로 유지(재실측 없이 하드코딩 안 함).
+    REDIS_URL_VALUE="${REDIS_URL:-redis://10.164.120.243:6379}"
+    PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},REDIS_URL=${REDIS_URL_VALUE}"
+    SECRET_PAIRS_REDIS=""
+fi
 # DB_POOL_SIZE/DB_MAX_OVERFLOW는 위에서 이미 3/1로 명시(Cloud Run realtime과 동일).
 #
 # ⚠️의도적 제외(50개 라이브 실측 중 1개, 침묵 누락 아님) — OPS_RESTART_TS=1784527154:
@@ -153,7 +221,11 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},REDIS_URL=${REDIS_URL_VALUE}"
 # ── 시크릿 — 부팅 시점에 VM 자신의 SA로 Secret Manager에서 직접 fetch(디스크 미기록,
 #    인스턴스 메타데이터에도 안 남음 — startup-script 안에서만 메모리 상주). ──
 # secret_name:env_var_name 페어 — 라이브 실측 15개 그대로(2026-07-22).
-SECRET_PAIRS="DATABASE_URL_DEV:DATABASE_URL"
+# ⚠️story #2142(2026-07-23) 정정: 아래 두 줄이 여태 DB_SECRET_NAME 변수를 안 쓰고
+# "DATABASE_URL_DEV"를 리터럴로 박아뒀었다(dev 전용일 땐 무해했으나, prod 분기를 그대로
+# 얹으면 prod GCE가 dev DB 시크릿을 끌어오는 사고가 났을 자리 — #2135와 같은 클래스,
+# "변수가 있는데 안 쓰인다"). ${DB_SECRET_NAME}으로 정정.
+SECRET_PAIRS="${DB_SECRET_NAME}:DATABASE_URL"
 SECRET_PAIRS="${SECRET_PAIRS} JWT_SECRET:JWT_SECRET"
 SECRET_PAIRS="${SECRET_PAIRS} GOOGLE_CLIENT_ID:GOOGLE_CLIENT_ID"
 SECRET_PAIRS="${SECRET_PAIRS} GOOGLE_CLIENT_SECRET:GOOGLE_CLIENT_SECRET"
@@ -162,14 +234,19 @@ SECRET_PAIRS="${SECRET_PAIRS} GITHUB_CLIENT_SECRET_${GITHUB_SECRET_SUFFIX}:GITHU
 SECRET_PAIRS="${SECRET_PAIRS} RESEND_API_KEY:RESEND_API_KEY"
 SECRET_PAIRS="${SECRET_PAIRS} EMAIL_FROM:EMAIL_FROM"
 SECRET_PAIRS="${SECRET_PAIRS} github-webhook-secret:GITHUB_WEBHOOK_SECRET"
-SECRET_PAIRS="${SECRET_PAIRS} cron-secret:CRON_SECRET"
-SECRET_PAIRS="${SECRET_PAIRS} github-app-client-secret-dev:GITHUB_APP_CLIENT_SECRET"
-SECRET_PAIRS="${SECRET_PAIRS} github-app-private-key-dev:GITHUB_APP_PRIVATE_KEY"
-SECRET_PAIRS="${SECRET_PAIRS} github-app-state-secret-dev:GITHUB_APP_STATE_SECRET"
+SECRET_PAIRS="${SECRET_PAIRS} ${CRON_SECRET_NAME}:CRON_SECRET"
+SECRET_PAIRS="${SECRET_PAIRS} github-app-client-secret-${GITHUB_APP_SECRET_ENV}:GITHUB_APP_CLIENT_SECRET"
+SECRET_PAIRS="${SECRET_PAIRS} github-app-private-key-${GITHUB_APP_SECRET_ENV}:GITHUB_APP_PRIVATE_KEY"
+SECRET_PAIRS="${SECRET_PAIRS} github-app-state-secret-${GITHUB_APP_SECRET_ENV}:GITHUB_APP_STATE_SECRET"
 SECRET_PAIRS="${SECRET_PAIRS} FIREBASE_BFF_INTERNAL_SECRET:FIREBASE_BFF_INTERNAL_SECRET"
 # DATABASE_URL_DEV 자체 이름으로도 참조되는 라이브 계약(코드가 두 이름 다 읽는 경로가
 # 있을 수 있어 원본 그대로 이관 — config.py 확認 없이 값만 옮기는 원칙, 동작 변경 없음).
-SECRET_PAIRS="${SECRET_PAIRS} DATABASE_URL_DEV:DATABASE_URL_DEV"
+SECRET_PAIRS="${SECRET_PAIRS} ${DB_SECRET_NAME}:${DB_SECRET_NAME}"
+# story #2142: prod만 REDIS_URL을 시크릿으로 추가(위 SECRET_PAIRS_REDIS 분기 참조) — dev는
+# 이미 PLAIN_ENV_SPEC에 실렸으므로 빈 문자열이라 여기선 아무것도 안 붙는다.
+if [ -n "${SECRET_PAIRS_REDIS}" ]; then
+    SECRET_PAIRS="${SECRET_PAIRS} ${SECRET_PAIRS_REDIS}"
+fi
 
 # ── startup-script 생성 — 부팅마다: cloud-sql-proxy 컨테이너(소켓 공유볼륨) → 시크릿
 #    fetch(메모리만, 디스크 미기록) → 앱 컨테이너. 재부팅 시에도 동일하게 재실행돼 자가복구.
