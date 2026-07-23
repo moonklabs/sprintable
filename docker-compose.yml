@@ -44,6 +44,13 @@ services:
       # story has real evidence (linked PR / CI result). Code default is off (staged prod
       # rollout) — self-hosted compose turns it on.
       H1_MERGE_GATE_ENABLED: "True"
+      # Self-hosted installs usually have no email provider configured, so verification
+      # emails never arrive and org creation would 403 forever. Code default stays True
+      # (hosted behavior preserved) — compose relaxes it for the local stack.
+      REQUIRE_VERIFIED_EMAIL_FOR_ORG_CREATE: "False"
+      # Backend builds verification links from NEXT_PUBLIC_APP_URL (defaults to the hosted
+      # domain) — point it at this instance so console-fallback links actually work here.
+      NEXT_PUBLIC_APP_URL: ${APP_BASE_URL:-http://localhost:3108}
       # Agent chat file uploads (POST /api/v2/channel/upload)
       CHANNEL_FILES_DIR: /app/data/channel_files
     volumes:
