@@ -443,11 +443,13 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           })}
         </div>
       )}
+      {/* story #2105 2차 — handleSend가 재시도 전 두 상태 모두 false로 리셋해(위 정의) 매
+          시도마다 언마운트→리마운트된다. */}
       {uploadFailed && (
-        <p className="mb-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
+        <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
       )}
       {sendFailed && (
-        <p className="mb-1 text-xs text-destructive">{t('sendFailed')}</p>
+        <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{t('sendFailed')}</p>
       )}
       {atMaxAttachments && (
         <p className="mb-1 text-xs text-muted-foreground">첨부는 최대 {MAX_ATTACHMENTS}개까지 가능합니다.</p>

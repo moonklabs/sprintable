@@ -145,6 +145,49 @@ describe('KanbanBoard — 보드 first-touch 절제된 배너', () => {
   });
 });
 
+// story #2105 2차 — 스토리 생성 실패 배너(transitionError)가 role="alert" aria-live="assertive"로
+// 스크린리더에 낭독되는지. stubFetch는 GET /api/stories?... 만 매칭하고 POST(쿼리 없음)는
+// 캐치올(ok:false)로 떨어지므로 실패 경로를 그대로 재현한다.
+//
+// ⚠️리베이스 후 전수 검증(story #2105 2차) 중 발견: 원래 이 테스트는 Enter 디스패치 뒤
+// `await Promise.resolve()` 2회로 고정 대기했다 — 실제 체인(onKeyDown→submitCompose
+// [fire-and-forget]→await onCreateStory→await fetch(mock)→!res.ok 분기→submitCompose의
+// await 재개→setDraftTitle/setComposing)은 마이크로태스크 홉이 2회보다 많을 수 있어, 파일
+// 단독 실행(부하 적음)에서는 우연히 통과하고 287파일 전체 스위트(부하 큼·이벤트루프 지터
+// 증가)에서만 간헐적으로 실패하는 결과 불안정을 냈다(직접 확認 — 전체 스위트 3회 중 2회
+// 실패, 파일 단독은 항상 통과). 고정 틱 대신 실제 DOM 조건이 나타날 때까지 짧게 폴링한다.
+async function waitForAlert(): Promise<Element | null> {
+  for (let i = 0; i < 20; i++) {
+    const el = container.querySelector('[role="alert"]');
+    if (el) return el;
+    await act(async () => { await Promise.resolve(); });
+  }
+  return null;
+}
+
+describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', () => {
+  it('생성 실패 시 role="alert" aria-live="assertive"로 배너가 렌더된다', async () => {
+    stubFetch([]);
+    await mount();
+    const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 스토리 만들기'));
+    await act(async () => { ctaButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const titleInput = container.querySelector('input') as HTMLInputElement;
+    expect(titleInput).not.toBeNull();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(titleInput, '새 스토리');
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      titleInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    const alertEl = await waitForAlert();
+    expect(alertEl).not.toBeNull();
+    expect(alertEl?.textContent).toContain('스토리 추가에 실패했습니다');
+    expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
+  });
+});
+
 // story #2059 — 보드 실시간 반영. 새 EventSource를 여는 대신 기존 useSseNotifications의
 // extraEventNames를 구독해 story.status_changed/assignee_changed를 받는다(AC2). 이미 로드된
 // 카드만 in-place 패치하고(AC3, 전체 재fetch 없음) 누가 바꿨는지 토스트로 드러낸다(AC4).

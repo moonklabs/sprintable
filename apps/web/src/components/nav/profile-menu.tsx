@@ -196,7 +196,9 @@ export function ProfileMenu({ name, avatarUrl }: ProfileMenuProps) {
             );
           })}
         </DropdownMenuGroup>
-        {error && <p className="px-2 py-1 text-xs text-destructive">{error}</p>}
+        {/* story #2105 2차 — handleSwitch/handleAdd이 재시도 전 setError(null)을 먼저 호출해(위
+            정의) 매 시도마다 언마운트→리마운트된다. */}
+        {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="px-2 py-1 text-xs text-destructive">{error}</p>}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           disabled={atCap || busy !== null}

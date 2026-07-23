@@ -141,7 +141,9 @@ export default function InvitePage() {
   if (pageState === 'preview-error') {
     return (
       <Frame>
-        <div className="space-y-3 py-8 text-center">
+        {/* story #2105 2차 — 'preview-loading'에서 비동기로 전이되는 결과다(reset-password의
+            정적 초기렌더 invalidLink와 달리 마운트 후 상태변화라 aria-live 대상). */}
+        <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-3 py-8 text-center">
           <div className="text-3xl">✕</div>
           <p className="text-sm text-destructive">{errorMsg}</p>
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
@@ -163,12 +165,13 @@ export default function InvitePage() {
             pageState === 'success' && 'text-success',
           )} />
           {pageState === 'success' && preview ? (
-            <>
+            // story #2105 2차 — 성공 결과(가입 완료)도 polite로 낭독(#2096/#2105 1차와 동일 원칙).
+            <div role="status" aria-live="polite" aria-atomic="true">
               <p className="text-lg font-semibold tracking-tight text-foreground">
                 {t('joinedOrg', { org: preview.org_name })}
               </p>
               <p className="text-sm text-muted-foreground">{t('redirecting')}</p>
-            </>
+            </div>
           ) : (
             <p className="text-sm text-muted-foreground">{t('accepting')}</p>
           )}
@@ -284,7 +287,9 @@ export default function InvitePage() {
             </div>
 
             {errorMsg && (
-              <p className="text-sm text-destructive">{errorMsg}</p>
+              // story #2105 2차 — handleSubmit이 재시도 전 setErrorMsg('')를 먼저 호출해(위 정의)
+              // 매 시도마다 언마운트→리마운트된다.
+              <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{errorMsg}</p>
             )}
 
             <button

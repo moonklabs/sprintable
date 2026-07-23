@@ -109,7 +109,10 @@ export function CreateOrganizationDialog({
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           {planLimitHit && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm space-y-1">
+            // story #2105 2차 — handleSubmit이 재시도 전 setPlanLimitHit(false)를 리셋하지 않는다
+            // (setError만 리셋). 같은 402 사유로 재시도해도 텍스트가 안 바뀌어 재낭독이 안 될 수
+            // 있다 — 별도 잠재 결함으로 기록(상태머신은 이 스토리에서 재구성하지 않음).
+            <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm space-y-1">
               <p className="font-medium text-amber-800">Free 플랜 Organization 한도 초과</p>
               <p className="text-amber-700">Free 플랜은 Organization 1개까지만 생성할 수 있습니다.</p>
               {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
@@ -122,7 +125,9 @@ export function CreateOrganizationDialog({
             </div>
           )}
           {error && (
-            <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            // story #2105 2차 — handleSubmit이 재시도 전 setError('')를 먼저 호출해(위 정의) 매
+            // 시도마다 언마운트→리마운트된다.
+            <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}
             </div>
           )}

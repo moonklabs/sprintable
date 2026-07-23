@@ -245,7 +245,9 @@ export function AgentRunDetail({
 
   if (loadError) {
     return (
-      <div className="flex flex-col items-center gap-3 py-20 text-center text-muted-foreground">
+      // story #2105 2차 — load()가 재시도 전 setLoadError(false)를 먼저 호출해(위 정의) 매
+      // retryKey 변경마다 언마운트→리마운트된다.
+      <div role="alert" aria-live="assertive" aria-atomic="true" className="flex flex-col items-center gap-3 py-20 text-center text-muted-foreground">
         <p>{tc('error')}</p>
         <p className="text-xs">{tc('errorDescription')}</p>
         <Button size="sm" variant="outline" onClick={() => setRetryKey((k) => k + 1)}>
