@@ -128,10 +128,24 @@ def test_scope_violation_true_passthrough():
 
 
 # ── _maybe_emit: 변경시에만 emit(이벤트 폭주 방지·doc §4) ───────────────────
+#
+# story #2132(2026-07-23) 근본수정: publish_event()가 삭제됐다(org-level fanout이 영구 죽은
+# 코드였음) — 실 배달은 project_accessible_member_ids로 수신자 해소 後 _push_to_agent 개별
+# push뿐이라, 이제 이 두 지점을 mock해 검증한다.
 
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+def _patch_forward(member_ids=None):
+    return [
+        patch(
+            "app.services.project_auth.project_accessible_member_ids",
+            AsyncMock(return_value=member_ids if member_ids is not None else set()),
+        ),
+        patch("app.routers.events._push_to_agent", MagicMock()),
+    ]
 
 
 @pytest.mark.anyio
@@ -139,10 +153,13 @@ async def test_maybe_emit_noop_when_stage_and_signals_unchanged():
     story_id = uuid.uuid4()
     org_id = uuid.uuid4()
     facts = _facts("in-review", human_verified=True)
-    publish = MagicMock()
-    with patch("app.routers.events.publish_event", publish):
+    import contextlib
+    with contextlib.ExitStack() as stack:
+        member_patch, push_patch = _patch_forward()
+        stack.enter_context(member_patch)
+        push_mock = stack.enter_context(push_patch)
         await _maybe_emit(AsyncMock(), org_id, story_id, facts, facts)
-    publish.assert_not_called()
+    push_mock.assert_not_called()
 
 
 @pytest.mark.anyio
@@ -152,14 +169,18 @@ async def test_maybe_emit_fires_on_stage_change():
     project_id = uuid.uuid4()
     before = _facts("in-progress", project_id=project_id)
     after = _facts("in-review", human_verified=False, project_id=project_id)
-    publish = MagicMock()
-    with patch("app.routers.events.publish_event", publish):
+    member_id = uuid.uuid4()
+    import contextlib
+    with contextlib.ExitStack() as stack:
+        member_patch, push_patch = _patch_forward({member_id})
+        stack.enter_context(member_patch)
+        push_mock = stack.enter_context(push_patch)
         await _maybe_emit(AsyncMock(), org_id, story_id, before, after)
-    publish.assert_called_once()
-    args, _ = publish.call_args
-    assert args[0] == str(org_id)
-    assert args[1] == "story.trust_stage_changed"
-    payload = args[2]
+    push_mock.assert_called_once()
+    args, _ = push_mock.call_args
+    assert args[0] == str(member_id)
+    payload = args[1]
+    assert payload["event_type"] == "story.trust_stage_changed"
     assert payload["story_id"] == str(story_id)
     assert payload["project_id"] == str(project_id)
     assert payload["old_stage"] == "running"
@@ -175,10 +196,13 @@ async def test_maybe_emit_fires_on_signal_change_without_stage_change():
     after = _facts("in-progress", has_pending_human_gate=True)
     assert derive_trust_stage(before) == "running"
     assert derive_trust_stage(after) == "needs_input"  # (참고: 이 케이스는 실제로 stage도 바뀜)
-    publish = MagicMock()
-    with patch("app.routers.events.publish_event", publish):
+    import contextlib
+    with contextlib.ExitStack() as stack:
+        member_patch, push_patch = _patch_forward({uuid.uuid4()})
+        stack.enter_context(member_patch)
+        push_mock = stack.enter_context(push_patch)
         await _maybe_emit(AsyncMock(), org_id, story_id, before, after)
-    publish.assert_called_once()
+    push_mock.assert_called_once()
 
 
 @pytest.mark.anyio
@@ -189,7 +213,10 @@ async def test_maybe_emit_noop_when_both_outside_pipeline_scope():
     org_id = uuid.uuid4()
     before = _facts("done", human_verified=True)
     after = _facts("done", human_verified=True)
-    publish = MagicMock()
-    with patch("app.routers.events.publish_event", publish):
+    import contextlib
+    with contextlib.ExitStack() as stack:
+        member_patch, push_patch = _patch_forward()
+        stack.enter_context(member_patch)
+        push_mock = stack.enter_context(push_patch)
         await _maybe_emit(AsyncMock(), org_id, story_id, before, after)
-    publish.assert_not_called()
+    push_mock.assert_not_called()

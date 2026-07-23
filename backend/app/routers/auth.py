@@ -1501,18 +1501,11 @@ async def set_default_project(
     if member is None:
         raise HTTPException(status_code=404, detail="Member not found")
 
-    old_default = member.default_project_id
     member.default_project_id = body.project_id
     await db.flush()
-
-    from app.routers.events import publish_event
-    publish_event(str(org_id), "member.default_project_changed", {
-        "member_id": str(member_id),
-        "org_id": str(org_id),
-        "old_default_project_id": str(old_default) if old_default else None,
-        "new_default_project_id": str(body.project_id),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
+    # story #2132(2026-07-23): member.default_project_changed의 publish_event() 호출 제거 —
+    # FE 소비처 0(설계 doc `story-2139-2132-publish-event-unification-design` §1) + 그
+    # 죽은 org-level fanout(`_subscribers`) 자체가 삭제됨. 복구 대상 아님(신기능 스코프 밖).
     await db.commit()
 
     resolved, ambiguous, accessible_ids = await _resolve_project_default(db, member_id, org_id)

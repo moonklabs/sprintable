@@ -208,10 +208,6 @@ async def test_redis_consume_loop_dispatch_disabled_only_logs_no_dispatch_call(m
     monkeypatch.setattr("app.core.config.settings.redis_url", "redis://fake:6379/0")
     dispatch_calls = []
     monkeypatch.setattr(
-        "app.routers.events.publish_event",
-        lambda *a, **kw: dispatch_calls.append(("publish_event", a, kw)),
-    )
-    monkeypatch.setattr(
         "app.routers.events._push_to_agent",
         lambda *a, **kw: dispatch_calls.append(("_push_to_agent", a, kw)),
     )
@@ -241,34 +237,46 @@ async def test_redis_consume_loop_dispatch_disabled_only_logs_no_dispatch_call(m
 
 
 @pytest.mark.anyio
-async def test_redis_consume_loop_dispatch_enabled_calls_publish_event_for_org_target(monkeypatch):
+async def test_redis_consume_loop_dispatch_enabled_org_target_logs_warning_not_dispatched(monkeypatch, caplog):
+    """story #2139/#2132(2026-07-23) 근본수정: publish_event()가 삭제돼 target="org" 메시지는
+    이제 아무 곳으로도 배달되지 않는다(발행 측이 전부 push_to_org_members로 바뀌어 target="org"
+    자체가 다시는 발행되지 않을 것이므로 구조적으로 도달 불가능해야 정상) — 도달하면 경고만
+    남기고 조용히 넘어간다(연다 대신 "왜 여기 도달했나"를 로그로 남겨 재발견 가능하게)."""
     monkeypatch.setattr("app.core.config.settings.event_broker_redis_dispatch_enabled", True)
-    dispatch_calls = []
-    monkeypatch.setattr(
-        "app.routers.events.publish_event",
-        lambda *a, **kw: dispatch_calls.append((a, kw)),
-    )
-    monkeypatch.setattr("app.routers.events._push_to_agent", lambda *a, **kw: None)
+    monkeypatch.setattr("app.core.config.settings.redis_url", "redis://fake:6379/0")
+    push_calls = []
+    monkeypatch.setattr("app.routers.events._push_to_agent", lambda *a, **kw: push_calls.append((a, kw)))
 
     msg = _redis_message({
         "instance_id": "other-instance", "target": "org", "target_id": "org-1",
         "event_type": "story.status_changed", "_broker_event_id": "evt-2",
         "data": {"entity_id": "s1"},
     })
-    await _run_loop_until(monkeypatch, [msg], lambda: len(dispatch_calls) > 0)
 
-    args, kwargs = dispatch_calls[0]
-    assert args[0] == "org-1"
-    assert args[1] == "story.status_changed"
-    assert args[2] == {"entity_id": "s1"}
-    assert kwargs.get("_from_listener") is True  # 재발행 무한루프 차단 플래그 필수
+    class _FakeClient:
+        def pubsub(self):
+            return _FakePubSub([msg])
+
+    monkeypatch.setattr(eb, "_get_redis_client", lambda: _FakeClient())
+
+    import logging
+    with caplog.at_level(logging.WARNING):
+        task = asyncio.create_task(eb.redis_consume_loop())
+        await asyncio.sleep(0.2)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert push_calls == []  # org target은 _push_to_agent를 절대 안 부른다
+    assert any("unexpected target=org" in r.message for r in caplog.records)
 
 
 @pytest.mark.anyio
 async def test_redis_consume_loop_dispatch_enabled_calls_push_to_agent_for_agent_target(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.event_broker_redis_dispatch_enabled", True)
     dispatch_calls = []
-    monkeypatch.setattr("app.routers.events.publish_event", lambda *a, **kw: None)
     monkeypatch.setattr(
         "app.routers.events._push_to_agent",
         lambda *a, **kw: dispatch_calls.append((a, kw)),
@@ -295,10 +303,9 @@ async def test_redis_consume_loop_dispatch_enabled_skips_self_published_event(mo
     monkeypatch.setattr("app.core.config.settings.event_broker_redis_dispatch_enabled", True)
     dispatch_calls = []
     monkeypatch.setattr(
-        "app.routers.events.publish_event",
+        "app.routers.events._push_to_agent",
         lambda *a, **kw: dispatch_calls.append(a),
     )
-    monkeypatch.setattr("app.routers.events._push_to_agent", lambda *a, **kw: None)
 
     msg = _redis_message({
         "instance_id": INSTANCE_ID, "target": "org", "target_id": "org-1",
@@ -353,12 +360,8 @@ async def test_dispatch_received_records_pg_arrival_for_broker_event(monkeypatch
     recorded = []
     monkeypatch.setattr(eb, "record_pg_arrival", lambda eid: recorded.append(eid))
 
-    async def _noop_publish_event(*a, **kw):
-        pass
-
     import json
 
-    monkeypatch.setattr("app.routers.events.publish_event", lambda *a, **kw: None)
     monkeypatch.setattr("app.routers.events._push_to_agent", lambda *a, **kw: True)
 
     payload = {
