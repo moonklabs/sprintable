@@ -184,6 +184,9 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
                       type="button"
                       onClick={() => void loadGrants()}
                       className="inline-flex shrink-0 items-center gap-1 text-xs text-destructive hover:underline"
+                      role="alert"
+                      aria-live="assertive"
+                      aria-atomic="true"
                     >
                       로드 실패 · 재시도
                     </button>
