@@ -61,6 +61,9 @@ case "${ENV}" in
         GITHUB_SECRET_SUFFIX="DEV"
         GITHUB_APP_SECRET_ENV="dev"  # story #2142 발견: github-app-*-dev Secret Manager ID의 소문자 접미(위 GITHUB_SECRET_SUFFIX와 별개 컨벤션 — 이 시크릿 3종만 하이픈+소문자)
         APP_URL="https://dev-app.sprintable.ai"
+        # story #2142(오르테가 라이브 실측 2026-07-23): sprintable-backend-dev/-prod MCP_PUBLIC_URL
+        # 라이브 값 그대로 — 이것도 DATABASE_URL_DEV와 같은 클래스(env 분기 밖 리터럴)였던 걸 정정.
+        MCP_PUBLIC_URL="https://dev-mcp.sprintable.ai/mcp"
         # ⚠️FASTAPI_URL — 라이브 실측 그대로(cloudbuild.yaml routine dispatch-realtime과 동일값,
         # 2026-07-22 gcloud describe로 확認). 이 값은 이 서비스 "자기 자신"을 가리키는 self-URL로
         # 쓰이는 것으로 보이며(agent onboarding SPRINTABLE_API_URL 등), GCE 이전 후 이 값이
@@ -87,6 +90,9 @@ case "${ENV}" in
         # access 실패)로 죽는다 — 실 배포 前 별도 확認/프로비저닝 필요.
         GITHUB_APP_SECRET_ENV="prod"
         APP_URL="https://app.sprintable.ai"
+        # story #2142(오르테가 라이브 실측 2026-07-23, gcloud env 직접 대조): 추측 아니라
+        # sprintable-backend-prod의 실측 라이브 값.
+        MCP_PUBLIC_URL="https://mcp.sprintable.ai/mcp"
         # ⚠️TODO(실 배포 前 재확認 필요, 오르테가 DRY_RUN 검수 시 판단 요청) — dev는 기존
         # Cloud Run realtime-dev의 라이브 실측 URL을 그대로 이관했으나(cloudbuild.yaml
         # deploy-realtime 스텝이 실제로 존재·서빙 중이었음), prod는 Cloud Run realtime 서비스
@@ -161,11 +167,7 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},SSE_LEASE_REDIS_ENABLED=${SSE_LEASE_REDIS_ENAB
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FANOUT_WAKE_REDIS_ENABLED=${FANOUT_WAKE_REDIS_ENABLED:-false}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_MODEL=gemini-3.1-pro-preview"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LLM_GEMINI_LOCATION=global"
-# ⚠️story #2142 TODO(실 배포 前 확認 필요) — MCP_PUBLIC_URL도 env 분기 밖 리터럴(dev 도메인
-# 고정). sprintable-mcp-prod Cloud Run 서비스는 이미 존재하나(별도 배포 경로) 그 public
-# 도메인이 실제로 "mcp.sprintable.ai"인지 이 스크립트가 확認할 수단이 없어 grep 0건 상태로
-# 그대로 둔다 — 오르테가 DRY_RUN 검수 시 판단 요청.
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MCP_PUBLIC_URL=https://dev-mcp.sprintable.ai/mcp"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},MCP_PUBLIC_URL=${MCP_PUBLIC_URL}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},LICENSE_CONSENT=agreed"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC},FIREBASE_OAUTH_HANDOFF_ENABLED=1"
 # realtime 고유값(backend/api와 다름 — cloudbuild.yaml deploy-realtime 스텝과 동일 컨벤션):

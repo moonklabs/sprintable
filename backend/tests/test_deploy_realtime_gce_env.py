@@ -55,6 +55,15 @@ def test_deploy_gce_dev_and_prod_are_separated():
     assert dev["SECRET_PAIRS"] != prod["SECRET_PAIRS"]
 
 
+def test_deploy_gce_mcp_public_url_env_specific():
+    """story #2142(오르테가 라이브 실측 2026-07-23) — DATABASE_URL_DEV와 같은 클래스로
+    발견된 env 분기 밖 리터럴 재발 방지."""
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert "MCP_PUBLIC_URL=https://dev-mcp.sprintable.ai/mcp" in dev["PLAIN_ENV_SPEC"]
+    assert "MCP_PUBLIC_URL=https://mcp.sprintable.ai/mcp" in prod["PLAIN_ENV_SPEC"]
+
+
 def test_deploy_gce_prod_secret_pairs_no_dev_leak():
     """story #2142 회귀 방지 — DB_SECRET_NAME 미사용으로 prod 플랜에 dev 시크릿이
     하드코딩 리터럴로 섞여 들어가던 결함(발견 즉시 수정)의 재발 차단."""
