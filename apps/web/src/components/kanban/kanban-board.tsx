@@ -252,6 +252,16 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // 아직 로드 안 된 카드(다른 컬럼 페이지네이션 밖)의 신규 진입은 이 스토리 스코프 밖으로 둔다.
   const { currentTeamMemberId } = useDashboardContext();
 
+  // story #2137 — 카드(stories 배열)와 상세 패널(selectedStory)이 별도 state라, SSE 패치를
+  // stories에만 적용하면 패널만 옛값에 고정된다(#2384·#2130과 같은 클래스의 3번째 재발 — 이번엔
+  // "갱신 신호를 아예 안 듣는 표면"). patchStory 하나로 묶어 두 state를 항상 같이 갱신해
+  // "한쪽만 패치" 자체를 구조적으로 불가능하게 만든다 — 이 handler에 새 이벤트 분기가 추가돼도
+  // 자동으로 이 보장을 물려받는다.
+  const patchStoryFromSse = useCallback((storyId: string, patch: Partial<KanbanStory>) => {
+    setStories((prev) => prev.map((s) => (s.id === storyId ? { ...s, ...patch } : s)));
+    setSelectedStory((prev) => (prev && prev.id === storyId ? { ...prev, ...patch } : prev));
+  }, []);
+
   const handleBoardSseEvent = useCallback((eventName: string, data: unknown) => {
     const payload = data as {
       story_id?: string;
@@ -272,16 +282,14 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     const titleForToast = existing.title;
     if (eventName === 'story.status_changed' && payload.status && payload.status !== existing.status) {
       const newStatus = payload.status;
-      setStories((prev) => prev.map((s) => (s.id === payload.story_id ? { ...s, status: newStatus } : s)));
+      patchStoryFromSse(payload.story_id, { status: newStatus });
       adjustColumnTotal(existing.status, -1);
       adjustColumnTotal(newStatus, +1);
     } else if (eventName === 'story.assignee_changed') {
       // story #2133 — normalizeAssigneePatch가 assignee_id/assignee_ids 정합을 강제한다.
       // 손으로 두 필드를 따로 계산하던 자리(#2130 근본)를 구조로 제거.
       const assigneePatch = normalizeAssigneePatch({ assignee_id: payload.assignee_id, assignee_ids: payload.assignees });
-      setStories((prev) => prev.map((s) => (
-        s.id === payload.story_id ? { ...s, ...assigneePatch } : s
-      )));
+      patchStoryFromSse(payload.story_id, assigneePatch);
     } else {
       return;
     }
@@ -295,7 +303,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         ? t('realtimeStatusChanged', { actor: actorLabel, title: titleForToast })
         : t('realtimeAssigneeChanged', { actor: actorLabel, title: titleForToast }),
     });
-  }, [projectId, currentTeamMemberId, stories, adjustColumnTotal, addToast, t]);
+  }, [projectId, currentTeamMemberId, stories, adjustColumnTotal, addToast, t, patchStoryFromSse]);
 
   useSseNotifications({
     memberId: currentTeamMemberId,
