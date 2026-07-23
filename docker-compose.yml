@@ -46,6 +46,11 @@ services:
       H1_MERGE_GATE_ENABLED: "True"
       # Agent chat file uploads (POST /api/v2/channel/upload)
       CHANNEL_FILES_DIR: /app/data/channel_files
+      # story #2152: 자체호스팅 docker-compose는 K_SERVICE가 없으므로(Cloud Run 전용) 이걸
+      # 명시하지 않으면 내부 cron/firebase-internal 시크릿 게이트가 startup에서 fail-closed
+      # 된다(CRON_SECRET 등이 이 compose엔 안 배선돼 있음). 인터넷에 노출해 운영한다면 이
+      # 값을 지우고 해당 시크릿들을 직접 설정할 것.
+      SPRINTABLE_LOCAL_DEV: "1"
     volumes:
       - ./data/channel_files:/app/data/channel_files
     command: >

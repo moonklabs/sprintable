@@ -292,16 +292,45 @@ class Settings(BaseSettings):
 
     @property
     def is_really_local(self) -> bool:
-        """story #2071(critical, 2026-07-21) 근본수정 — `app_env=="development"`만으로는
-        "개발자 랩탑"과 "인터넷에 노출된 dev Cloud Run 배포"를 구분 못 한다(둘 다 동일
-        APP_ENV=development). Cloud Run은 `K_SERVICE`를 항상 자동 주입한다(설정 불필요 —
-        `app/core/database.py`의 커넥션 태깅과 동일 SSOT, 신규 발명 아님). 이게 없으면(로컬
-        uvicorn/pytest) 진짜 로컬, 있으면(dev든 prod든) Cloud Run 위라 fail-open 대상이 아니다.
-        내부 secret 게이트(auth_firebase_internal.py·cron.py 등)가 "시크릿 미설정=로컬이니
-        허용" 판정을 내릴 때 이 프로퍼티로 좁혀야 한다 — `app_env` 문자열만 보면 노출된 dev가
-        그대로 열린다(#2071이 이 클래스의 첫 사례)."""
+        """story #2152(high, 2026-07-23) 근본수정 — story #2071이 도입한 `not K_SERVICE`
+        판정은 "우리는 Cloud Run 위에 있다"는 깨진 전제를 깔고 있었다: GCE(story #2142
+        realtime-gateway)도 `K_SERVICE`가 없으므로 이 판정에선 GCE prod 노드조차 "진짜
+        로컬"이 되어버렸다 — #2071이 막은 구멍이 새 런타임에서 그대로 재현된 것.
+
+        AC2(안전한 실패 방향) 근본수정: "특정 클라우드의 부재 신호"만으로 "로컬"을 추론하는
+        방식(K_SERVICE 없음 = 로컬)은 구조적으로 계속 깨진다 — 모르는 런타임이 새로 생길
+        때마다 그 런타임의 부재 신호를 목록에 추가해야 하고, 빠뜨리면 다시 열린다. `K_SERVICE`
+        존재는 여전히 "Cloud Run 위"라는 확실한 긍정 신호라 그대로 두지만(빠른 경로, 여전히
+        유효 — 틀린 적 없다), **그게 없다고 곧장 "로컬"로 넘어가지 않는다** — 그 경우엔
+        "로컬이다"를 별도로 긍정 확인할 수 있을 때만 True고, 그 외(GCE 포함, 모르는 런타임
+        포함 전부)는 False(로컬 아님 = 게이트 적용)로 떨어뜨린다.
+
+        "로컬이다"의 긍정 신호 둘만 인정한다:
+        ①pytest 실행 중(`PYTEST_CURRENT_TEST`, pytest가 매 테스트마다 자동 주입 — 신규 발명
+          아님) ②`SPRINTABLE_LOCAL_DEV`가 명시적으로 세팅됨(로컬 uvicorn/자체호스팅
+          docker-compose용 — `.env.example`·`docker-compose.yml`에 채워둠, 신규 개발자가
+          별도 조치 없이 그대로 동작).
+
+        ⛔이 판정이 못 잡는 것(AC1 명시): `SPRINTABLE_LOCAL_DEV`를 실수로 세팅한 채 배포된
+        노드는 여전히 "로컬"로 열린다 — 이건 판정 로직이 아니라 배포 설정 리뷰의 몫이다.
+        마찬가지로 자체호스팅 docker-compose를 운영자가 인터넷에 노출하면서도
+        `SPRINTABLE_LOCAL_DEV`를 지우지 않으면 그 인스턴스도 "로컬"로 판정된다 — 이건 #2152
+        도입 이전에도 동일하게 뚫려 있던(K_SERVICE 부재로) 자체호스팅 한정 기존 한계이지,
+        이번 수정이 새로 만든 구멍이 아니다."""
         import os
-        return not os.environ.get("K_SERVICE")
+        if os.environ.get("K_SERVICE"):
+            return False
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return True
+        return os.environ.get("SPRINTABLE_LOCAL_DEV", "").strip().lower() in {"1", "true", "yes"}
+
+    @property
+    def is_internal_secret_gate_exempt(self) -> bool:
+        """cron.py/auth_firebase_internal.py의 내부 시크릿 fail-open 게이트가 참조하는
+        단일 진입점(story #2152 AC4) — `is_really_local`을 app_env 체크 없이 단독으로 쓰는
+        호출부가 생기는 것을 코드 구조로 막는다(둘 다 이 프로퍼티 하나만 부르면 되게 만들어,
+        "app_env와 AND로 묶는 것"이 관례가 아니라 강제가 되게 한다)."""
+        return self.app_env == "development" and self.is_really_local
 
 
 settings = Settings()

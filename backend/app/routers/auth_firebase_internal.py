@@ -78,15 +78,15 @@ class FirebaseSessionMintResponse(BaseModel):
 # 따라 "시크릿 미설정=허용"이었는데, cron과 달리 이 엔드포인트는 세션쿠키 mint 능력 자체라
 # 환경 무관 fail-open이 위험하다 — 직접 probe로 `app_env=production`+시크릿 미설정 시
 # 내부 consume/mint 엔드포인트가 공개됨을 실증. non-local 환경은 fail-closed(503), 로컬
-# 개발(APP_ENV=development)만 예외 허용.
-_LOCAL_ENVS = {"development"}
+# 개발(APP_ENV=development)만 예외 허용. story #2152 이후로는 `settings.
+# is_internal_secret_gate_exempt`(app/core/config.py SSOT) 단일 프로퍼티로 판정한다.
 
 
 def _require_internal_secret(authorization: str | None) -> None:
     secret = settings.firebase_bff_internal_secret
     if not secret:
-        if settings.app_env in _LOCAL_ENVS and settings.is_really_local:
-            return  # 진짜 로컬 개발 전용 예외(Cloud Run 위가 아님 — story #2071)
+        if settings.is_internal_secret_gate_exempt:
+            return  # 진짜 로컬 개발 전용 예외(Cloud Run/GCE 위가 아님 — story #2071/#2152)
         logger.warning(
             "auth.firebase.internal_secret_missing_in_non_local_env app_env=%s on_cloud_run=%s",
             settings.app_env, not settings.is_really_local,
@@ -108,18 +108,17 @@ def check_internal_secret_config(s=None) -> None:
     allowed=False). 이 내부 엔드포인트를 실제로 쓰는 기능(세션 발급/모바일 부트스트랩)이
     켜져 있을 때만 시크릿을 요구한다.
 
-    story #2071(critical) 근본수정: `app_env not in _LOCAL_ENVS`만으로는 노출된 dev
-    Cloud Run(APP_ENV=development)을 놓친다 — `s.is_really_local`(K_SERVICE 부재 판정,
-    `app/core/config.py` SSOT) 아니면 시크릿을 요구한다. dev에 Firebase 기능이 켜지고 이
-    startup 가드가 살아 있으면, 시크릿 없이는 이제 배포 자체가 실패한다(런타임 503
-    fail-closed보다 먼저 잡힘 — 배포 시점에 시끄럽게 실패하는 쪽이 더 안전,
-    check_listen_config()와 동형)."""
+    story #2071(critical) 근본수정, #2152로 판정 SSOT 통합: `s.is_internal_secret_gate_exempt`
+    (`app/core/config.py`, app_env+is_really_local을 이미 AND로 묶은 단일 프로퍼티) 아니면
+    시크릿을 요구한다. dev에 Firebase 기능이 켜지고 이 startup 가드가 살아 있으면, 시크릿
+    없이는 이제 배포 자체가 실패한다(런타임 503 fail-closed보다 먼저 잡힘 — 배포 시점에
+    시끄럽게 실패하는 쪽이 더 안전, check_listen_config()와 동형)."""
     if s is None:
         from app.core.config import settings as s
     firebase_internal_enabled = (
         s.firebase_auth_issue_session or s.firebase_auth_mobile_issue or s.firebase_oauth_handoff_enabled
     )
-    _not_local = s.app_env not in _LOCAL_ENVS or not s.is_really_local
+    _not_local = not s.is_internal_secret_gate_exempt
     if firebase_internal_enabled and _not_local and not s.firebase_bff_internal_secret:
         raise RuntimeError(
             f"APP_ENV={s.app_env}인데 FIREBASE_BFF_INTERNAL_SECRET 미설정 — 내부 세션 mint/"
