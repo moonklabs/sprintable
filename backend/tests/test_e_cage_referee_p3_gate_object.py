@@ -138,6 +138,210 @@ async def test_create_gate_idempotent():
     session.add.assert_not_called()
 
 
+# ── story #2150: rejected 게이트 재제출 재오픈 ────────────────────────────────
+# AC2: 재현부터(reject→재제출→BLOCK 고정) — 아래 test_create_gate_rejected_*_reopens_*가
+# 그 재현이자 회귀가드다(수정 전 코드로 돌리면 old_resolver_id가 그대로 남고 status도 그대로
+# "rejected"라 실패한다 — fix 적용 전 실제로 RED임을 로컬에서 확認했다).
+
+def _rejected_gate(**overrides):
+    gate = MagicMock()
+    gate.id = GATE_ID
+    gate.status = "rejected"
+    gate.resolver_id = uuid.uuid4()
+    gate.resolution_note = "요구사항 불충분 — 다시 정리해서 올려주세요"
+    gate.resolved_at = datetime(2026, 7, 20, tzinfo=timezone.utc)
+    gate.neutral_facts = {"ci_result": "fail", "pr_result": "pass"}
+    gate.work_item_type = "story"
+    gate.work_item_id = STORY_ID
+    for k, v in overrides.items():
+        setattr(gate, k, v)
+    return gate
+
+
+async def _create_gate_against_rejected(existing_gate, disposition, gate_type="merge",
+                                          neutral_facts=None):
+    from app.services.gate_service import create_gate
+
+    session = AsyncMock()
+    existing_r = MagicMock()
+    existing_r.scalar_one_or_none.return_value = existing_gate
+    session.execute = AsyncMock(return_value=existing_r)
+    session.flush = AsyncMock()
+    session.refresh = AsyncMock()
+
+    with patch("app.services.gate_service.resolve_disposition", new_callable=AsyncMock) as mock_disp, \
+         patch("app.services.gate_service._resolve_gate_notification_targets",
+               new_callable=AsyncMock) as mock_targets:
+        mock_disp.return_value = (disposition, "system_default")
+        mock_targets.return_value = []  # 알림 대상 조회는 스텁(별도 테스트에서 검증)
+        result = await create_gate(
+            session, ORG_ID, STORY_ID, "story", gate_type, MEMBER_ID, ROLE_ID,
+            neutral_facts=neutral_facts,
+        )
+    return result, session
+
+
+@pytest.mark.anyio
+async def test_create_gate_rejected_reopens_to_pending_on_ask_policy():
+    """AC②③ 핵심 재현+수정 확認 — reject된 게이트가 재제출(create_gate 재호출) 시 현재
+    정책이 ask면 pending으로 새 사이클이 열린다(전엔 rejected 그대로 반환→영구 BLOCK)."""
+    gate = _rejected_gate()
+    result, _ = await _create_gate_against_rejected(gate, "ask")
+
+    assert result is gate  # 신규 row 생성 아님(기존 row 재사용 — void/hold와 동일 관례)
+    assert result.status == "pending"
+    assert result.resolver_id is None  # 이전 반려자 정보 클리어(AC③ 새 사이클)
+    assert result.resolution_note is None
+    assert result.resolved_at is None
+
+
+@pytest.mark.anyio
+async def test_create_gate_rejected_reopen_still_rejected_if_policy_still_deny():
+    """조직 정책이 여전히 deny면 재오픈해도 다시 rejected — 이건 결함이 아니라 정확한
+    동작이다(사람이 반려한 게 아니라 정책이 여전히 막고 있는 것). 결정 이력은 그래도 남는다."""
+    gate = _rejected_gate()
+    result, _ = await _create_gate_against_rejected(gate, "deny")
+
+    assert result.status == "rejected"
+    assert result.neutral_facts["decision_history"]  # 재평가 사이클 자체는 열렸다(이력 추가)
+
+
+@pytest.mark.anyio
+async def test_create_gate_rejected_reopen_preserves_decision_history():
+    """AC④ — 이전 반려(누가·언제·왜)가 재오픈 후에도 사라지지 않는다."""
+    gate = _rejected_gate()
+    result, _ = await _create_gate_against_rejected(gate, "ask", neutral_facts={"ci_result": "pass"})
+
+    history = result.neutral_facts["decision_history"]
+    assert len(history) == 1
+    entry = history[0]
+    assert entry["status"] == "rejected"
+    assert entry["resolver_id"] == str(gate.resolver_id) or entry["resolver_id"] is not None
+    assert entry["resolution_note"] == "요구사항 불충분 — 다시 정리해서 올려주세요"
+    assert entry["neutral_facts"] == {"ci_result": "fail", "pr_result": "pass"}
+    # 새 평가 facts도 남아있다(이력에 밀려 사라지지 않음).
+    assert result.neutral_facts["ci_result"] == "pass"
+
+
+@pytest.mark.anyio
+async def test_create_gate_rejected_reopen_appends_to_existing_history():
+    """반려가 두 번째 이상이어도(이미 decision_history가 있는 상태) 이전 이력을 덮어쓰지
+    않고 append한다."""
+    gate = _rejected_gate(neutral_facts={
+        "ci_result": "fail",
+        "decision_history": [{"status": "rejected", "resolver_id": None, "resolved_at": None,
+                               "resolution_note": "1차 반려", "neutral_facts": {}}],
+    })
+    result, _ = await _create_gate_against_rejected(gate, "ask")
+
+    history = result.neutral_facts["decision_history"]
+    assert len(history) == 2
+    assert history[0]["resolution_note"] == "1차 반려"
+    assert history[1]["resolution_note"] == "요구사항 불충분 — 다시 정리해서 올려주세요"
+
+
+@pytest.mark.anyio
+async def test_create_gate_rejected_reopen_notifies_when_pending():
+    """AC③ — 재오픈이 pending이면 사람 인박스에 다시 뜨도록 알림이 나간다."""
+    from app.services.gate_service import create_gate
+
+    gate = _rejected_gate()
+    session = AsyncMock()
+    existing_r = MagicMock()
+    existing_r.scalar_one_or_none.return_value = gate
+    session.execute = AsyncMock(return_value=existing_r)
+    session.flush = AsyncMock()
+    session.refresh = AsyncMock()
+
+    with patch("app.services.gate_service.resolve_disposition", new_callable=AsyncMock) as mock_disp, \
+         patch("app.services.gate_service._resolve_gate_notification_targets",
+               new_callable=AsyncMock) as mock_targets, \
+         patch("app.services.notification_dispatch.dispatch_notification",
+               new_callable=AsyncMock) as mock_dispatch:
+        mock_disp.return_value = ("ask", "system_default")
+        mock_targets.return_value = [uuid.uuid4()]
+        await create_gate(session, ORG_ID, STORY_ID, "story", "merge", MEMBER_ID, ROLE_ID)
+        mock_dispatch.assert_awaited_once()
+        assert mock_dispatch.call_args.kwargs["event_type"] == "gate.pending_approval"
+
+
+@pytest.mark.anyio
+async def test_create_gate_approved_does_not_reopen():
+    """AC⑤⑥ — approved는 재오픈 대상이 아니다(이미 landed 작업의 재보고는 무해·불변 유지).
+    되면 안 되는 경우를 명시적으로 고정 — 한쪽만 보면 '항상 재오픈'도 통과하는 회귀를 막는다."""
+    from app.services.gate_service import create_gate
+
+    gate = _rejected_gate(status="approved")
+    session = AsyncMock()
+    existing_r = MagicMock()
+    existing_r.scalar_one_or_none.return_value = gate
+    session.execute = AsyncMock(return_value=existing_r)
+
+    with patch("app.services.gate_service.resolve_disposition", new_callable=AsyncMock) as mock_disp:
+        result = await create_gate(session, ORG_ID, STORY_ID, "story", "merge", MEMBER_ID, ROLE_ID)
+        mock_disp.assert_not_called()  # 재평가 자체가 안 일어난다 — approved는 그대로.
+
+    assert result is gate
+    assert result.status == "approved"
+    assert "decision_history" not in (gate.neutral_facts or {})
+
+
+@pytest.mark.anyio
+async def test_create_gate_voided_does_not_reopen():
+    """AC⑤⑥ — voided도 재오픈 대상이 아니다(void=admin이 "잘못 생성됐다"고 무효화한 것이라
+    reject와 의미가 다르다 — 이 스토리 스코프에서는 자동 재오픈 대상에서 제외)."""
+    from app.services.gate_service import create_gate
+
+    gate = _rejected_gate(status="voided")
+    session = AsyncMock()
+    existing_r = MagicMock()
+    existing_r.scalar_one_or_none.return_value = gate
+    session.execute = AsyncMock(return_value=existing_r)
+
+    with patch("app.services.gate_service.resolve_disposition", new_callable=AsyncMock) as mock_disp:
+        result = await create_gate(session, ORG_ID, STORY_ID, "story", "merge", MEMBER_ID, ROLE_ID)
+        mock_disp.assert_not_called()
+
+    assert result is gate
+    assert result.status == "voided"
+
+
+@pytest.mark.anyio
+async def test_create_gate_pending_still_returns_as_is():
+    """무회귀 — pending(터미널 아님)은 원래 관례 그대로 그냥 반환(재오픈 로직 무접촉)."""
+    from app.services.gate_service import create_gate
+
+    gate = _rejected_gate(status="pending")
+    session = AsyncMock()
+    existing_r = MagicMock()
+    existing_r.scalar_one_or_none.return_value = gate
+    session.execute = AsyncMock(return_value=existing_r)
+
+    with patch("app.services.gate_service.resolve_disposition", new_callable=AsyncMock) as mock_disp:
+        result = await create_gate(session, ORG_ID, STORY_ID, "story", "merge", MEMBER_ID, ROLE_ID)
+        mock_disp.assert_not_called()
+
+    assert result is gate
+
+
+@pytest.mark.anyio
+async def test_create_gate_auto_passed_still_returns_as_is():
+    """무회귀 — auto_passed(모델 docstring상 불변)도 재오픈 로직 무접촉."""
+    from app.services.gate_service import create_gate
+
+    gate = _rejected_gate(status="auto_passed")
+    session = AsyncMock()
+    existing_r = MagicMock()
+    existing_r.scalar_one_or_none.return_value = gate
+    session.execute = AsyncMock(return_value=existing_r)
+
+    with patch("app.services.gate_service.resolve_disposition", new_callable=AsyncMock) as mock_disp:
+        result = await create_gate(session, ORG_ID, STORY_ID, "story", "merge", MEMBER_ID, ROLE_ID)
+        mock_disp.assert_not_called()
+
+    assert result is gate
+
+
 # ── transition_gate 상태기계 테스트 ───────────────────────────────────────────
 
 @pytest.mark.anyio

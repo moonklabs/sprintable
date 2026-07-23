@@ -234,6 +234,90 @@ _ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset(
 )
 
 
+async def _reopen_rejected_gate(
+    session: AsyncSession,
+    gate: Gate,
+    *,
+    org_id: uuid.UUID,
+    member_id: uuid.UUID,
+    role_id: uuid.UUID,
+    gate_type: str,
+    neutral_facts: dict[str, Any] | None,
+    project_id: uuid.UUID | None,
+) -> Gate:
+    """story #2150(P1) 근본수정 — create_gate()의 멱등 조회에 status 필터가 없어 rejected
+    게이트를 그대로 반환했다(merge_verdict_gate.py의 ``gate_status=="rejected"`` 체크와
+    합쳐져, 한 번 반려되면 그 작업 항목은 재제출해도 영구 BLOCK — 반려는 결재 게이트의
+    정상 경로인데 "한 번 쓰고 버리는 스위치"가 되는 결함이었다).
+
+    ⚠️approved/voided는 이 함수에 오지 않는다(호출부에서 status=="rejected"일 때만 호출) —
+    각각 판단 근거(#2150 AC5):
+      · approved — 이미 landed 작업의 재보고는 무해하므로 불변 유지(재오픈하면 이미 확정된
+        승인이 최신 CI/PR 이벤트만으로 흔들리는 쪽이 오히려 위험).
+      · voided   — void는 "이 게이트가 애초에 잘못 생성됐다"는 admin의 명시 무효화(S30)다.
+        reject처럼 "평가했고 아니라고 했다"가 아니라 "이 평가 자체가 없었던 일"이라는
+        선언이라, 자동 재오픈 대상이 아니다(admin이 다시 판단할 문제 — 이 스토리 스코프 밖).
+
+    감사축 보존(AC④): 이전 결재(누가·언제·왜 반려했는지)를 지우지 않고 neutral_facts.
+    decision_history에 append한다 — 게이트 row는 재사용(신규 row 생성 안 함, void/hold와
+    동일하게 기존 row를 상태기계로 계속 쓰는 관례를 따른다).
+
+    새 disposition은 **현재** org/member/role 정책을 다시 조회해 결정한다(과거에 사람이
+    무슨 이유로 반려했는지가 아니라) — 그래서 정책이 여전히 deny면 재오픈해도 다시
+    rejected로 떨어지고(정책이 안 바뀌었으니 정확한 동작), ask/allow_auto로 바뀌었으면
+    pending/auto_passed로 새 사이클이 열린다(AC③)."""
+    history_entry = {
+        "status": gate.status,
+        "resolver_id": str(gate.resolver_id) if gate.resolver_id else None,
+        "resolved_at": gate.resolved_at.isoformat() if gate.resolved_at else None,
+        "resolution_note": gate.resolution_note,
+        "neutral_facts": gate.neutral_facts,
+    }
+    prior_history = list((gate.neutral_facts or {}).get("decision_history") or [])
+    prior_history.append(history_entry)
+
+    disposition, _source = await resolve_disposition(session, org_id, member_id, role_id, gate_type)
+    new_status = _DISPOSITION_TO_STATUS.get(disposition, "pending")
+    if gate_type in _ALWAYS_MANUAL_GATE_TYPES:
+        new_status = "pending"
+
+    gate.status = new_status
+    gate.resolver_id = None
+    gate.resolution_note = None
+    gate.resolved_at = datetime.now(timezone.utc) if new_status != "pending" else None
+    merged_facts = dict(neutral_facts or {})
+    merged_facts["decision_history"] = prior_history
+    gate.neutral_facts = merged_facts
+
+    logger.info(
+        "gate_reopened_from_rejected org=%s gate=%s new_status=%s work=%s/%s",
+        org_id, gate.id, new_status, gate.work_item_type, gate.work_item_id,
+    )
+
+    await session.flush()
+    await session.refresh(gate)
+
+    if new_status == "pending":
+        try:
+            target_ids = await _resolve_gate_notification_targets(session, org_id)
+            if target_ids:
+                from app.services.notification_dispatch import dispatch_notification
+                await dispatch_notification(
+                    session, org_id=org_id, event_type="gate.pending_approval",
+                    target_member_ids=target_ids,
+                    title="결재 대기 중인 게이트가 있습니다",
+                    body=f"{gate_type} 게이트가 재제출되어 다시 승인/거부를 기다리고 있습니다.",
+                    reference_type="gate", reference_id=gate.id,
+                    source_project_id=project_id,
+                )
+        except Exception:
+            logger.warning(
+                "gate.pending_approval(reopen) notification failed gate_id=%s (swallowed·best-effort)",
+                gate.id, exc_info=True,
+            )
+    return gate
+
+
 async def create_gate(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -268,7 +352,14 @@ async def create_gate(
     )
     existing = existing_r.scalar_one_or_none()
     if existing is not None:
-        return existing
+        # story #2150 근본수정: rejected는 재제출 시 새 결재 사이클을 연다(그 외 terminal
+        # status는 기존 그대로 불변 반환 — 판단 근거는 _reopen_rejected_gate 참조).
+        if existing.status != "rejected":
+            return existing
+        return await _reopen_rejected_gate(
+            session, existing, org_id=org_id, member_id=member_id, role_id=role_id,
+            gate_type=gate_type, neutral_facts=neutral_facts, project_id=project_id,
+        )
 
     # SID 301ee45d/#2047: 반환값이 (disposition, source) — 이 범용 생성기는 disposition→status
     # 매핑만 필요해 source는 버린다(explicit-ask 판정은 merge_verdict_gate.py의 no-substance
