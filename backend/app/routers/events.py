@@ -141,11 +141,23 @@ async def push_to_org_members(
     (`_agent_connections[member_id]`)뿐이라, org 단위 발행도 결국 이 경로로 개별 push해야
     실제로 도달한다.
 
-    `member_ids` 미지정(None) 시 org 전체 활성 멤버(`org_members`, human+agent 전부)에게
-    보낸다 — presence 전용(#2139 §3, 오르테가 확定: project로 좁히지 않는다. 호출부 4곳이
-    애초에 project_id를 안 들고 있고, 에이전트는 multi-project·DM은 project 자체가 없어
-    데이터가 org 단위다). `member_ids` 지정 시 그 집합에게만 — conversation.working 전용
-    (참가자만, org 전체 아님 — payload가 conversation 단위라 org로 보내면 새는 것).
+    `member_ids` 미지정(None) 시 org 전체 활성 멤버(human+agent 전부)에게 보낸다 — presence
+    전용(#2139 §3, 오르테가 확定: project로 좁히지 않는다. 호출부 4곳이 애초에 project_id를 안
+    들고 있고, 에이전트는 multi-project·DM은 project 자체가 없어 데이터가 org 단위다).
+    `member_ids` 지정 시 그 집합에게만 — conversation.working 전용(참가자만, org 전체 아님 —
+    payload가 conversation 단위라 org로 보내면 새는 것).
+
+    ⚠️story #2139(2026-07-23) 정정(오르테가 검수 재지적) — 이전엔 `org_members`만 SELECT했다.
+    그 테이블은 `user_id NOT NULL`(휴먼 전용 — 에이전트는 애초에 행이 없다) → presence가
+    에이전트에게 전혀 도달하지 않는 채로 "org 전체"라 주장하던 선언-실제 불일치였다(라이브
+    실측: 자기 자신의 agent stream에 presence 0건 도착으로 확認). `members` 테이블(org_id·
+    type·is_active·deleted_at 보유, human+agent 단일 신원)로 바꾸되 `org_members`와 UNION —
+    `project_members_sync_gap`(org-create/invite-accept가 `org_members`만 INSERT하고
+    `members` 앵커 행을 동반 생성 안 하는 알려진 갭)으로 `members`에 아직 없는 신규/미백필
+    휴먼 org_member가 존재할 수 있어, `members`만으로 바꾸면 그 스트래글러가 새로 빠진다
+    (project_accessible_member_ids가 `team_members UNION org_members`로 같은 갭을 방어하는
+    것과 동형 패턴). 휴먼은 `members.id == org_members.id`(E-MEMBER-SSOT 앵커)라 UNION해도
+    중복 id 하나로 합쳐질 뿐 이중 push 없음.
 
     best-effort — caller가 감싼 try/except 전제(presence_events.py 관례)로 자체 예외 전파.
     자기 세션을 열고 닫아(member_ids=None일 때만) caller의 세션 상태와 무관하게 동작."""
@@ -156,7 +168,15 @@ async def push_to_org_members(
         from app.core.database import async_session_factory
         async with async_session_factory() as session:
             rows = await session.execute(
-                _text("SELECT id FROM org_members WHERE org_id = :org_id AND deleted_at IS NULL"),
+                _text(
+                    """
+                    SELECT id FROM members
+                    WHERE org_id = :org_id AND is_active = true AND deleted_at IS NULL
+                    UNION
+                    SELECT id FROM org_members
+                    WHERE org_id = :org_id AND deleted_at IS NULL
+                    """
+                ),
                 {"org_id": org_id},
             )
             ids = {str(r[0]) for r in rows.all()}
