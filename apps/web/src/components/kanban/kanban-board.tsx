@@ -26,7 +26,7 @@ import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
-import { COLUMNS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
+import { COLUMNS, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
 
 /**
@@ -276,15 +276,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       adjustColumnTotal(existing.status, -1);
       adjustColumnTotal(newStatus, +1);
     } else if (eventName === 'story.assignee_changed') {
-      // story #2130 — 카드(StoryCard)는 assignees(배열, assignee_ids 유래)를 assignee(단일)보다
-      // 우선해 그린다. assignee_id만 갱신하면 assignee_ids가 stale로 남아 화면이 안 바뀐다
-      // (배열이 이미 비어있지 않으면 옛 담당자가 계속 보이고, 비어있으면 memberMap에 새
-      // 담당자가 없을 때 빈 채로 남는다 — 오늘 #2384(story-detail-panel.tsx)와 같은 클래스).
-      // 서버 payload의 assignees(ID 배열)를 그대로 반영해 화면이 읽는 필드를 전부 맞춘다.
-      const newAssigneeId = payload.assignee_id ?? null;
-      const newAssigneeIds = payload.assignees ?? (newAssigneeId ? [newAssigneeId] : []);
+      // story #2133 — normalizeAssigneePatch가 assignee_id/assignee_ids 정합을 강제한다.
+      // 손으로 두 필드를 따로 계산하던 자리(#2130 근본)를 구조로 제거.
+      const assigneePatch = normalizeAssigneePatch({ assignee_id: payload.assignee_id, assignee_ids: payload.assignees });
       setStories((prev) => prev.map((s) => (
-        s.id === payload.story_id ? { ...s, assignee_id: newAssigneeId, assignee_ids: newAssigneeIds } : s
+        s.id === payload.story_id ? { ...s, ...assigneePatch } : s
       )));
     } else {
       return;

@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import { AlertTriangle, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
+import { normalizeAssigneePatch } from './types';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 import { getFileIcon } from '@/lib/file-icon';
 import { imageFilesFromClipboard } from '@/lib/clipboard-image';
@@ -499,11 +500,12 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     // assignee_ids 전체 배열 교체(서버 last-write-wins) → 연타 시 마지막 로컬과 정합.
     const updated = await patchStory({ assignee_ids: next });
     if (updated) {
-      // BE가 assignee_id(주담당)를 assignee_ids[0]로 동기화 → 응답 우선, 없으면 로컬 계산.
-      const resolved = updated.assignee_ids ?? next;
-      assigneeIdsRef.current = resolved;
-      setLocalAssigneeIds(resolved);
-      onStoryUpdate?.({ ...story, assignee_ids: resolved, assignee_id: updated.assignee_id ?? resolved[0] ?? null });
+      // story #2133 — BE 응답(assignee_ids 우선, 없으면 로컬 next)을 normalizeAssigneePatch로
+      // 통과시켜 assignee_id를 손으로 다시 계산하지 않는다.
+      const assigneePatch = normalizeAssigneePatch({ assignee_ids: updated.assignee_ids ?? next });
+      assigneeIdsRef.current = assigneePatch.assignee_ids;
+      setLocalAssigneeIds(assigneePatch.assignee_ids);
+      onStoryUpdate?.({ ...story, ...assigneePatch });
     } else {
       assigneeIdsRef.current = prev; // PATCH 실패 → 직전 값 롤백
       setLocalAssigneeIds(prev);
@@ -518,7 +520,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     setEditingAssignee(false);
     const updated = await patchStory({ assignee_ids: [] });
     if (updated) {
-      onStoryUpdate?.({ ...story, assignee_ids: [], assignee_id: null });
+      onStoryUpdate?.({ ...story, ...normalizeAssigneePatch({ assignee_ids: [] }) });
     } else {
       assigneeIdsRef.current = prev; // 롤백
       setLocalAssigneeIds(prev);
@@ -960,14 +962,13 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   entityId={story.id}
                   projectId={projectId}
                   currentAssigneeId={localAssigneeIds.length > 1 ? undefined : (localAssigneeIds[0] ?? story.assignee_id)}
-                  // 까심군 QA 회귀(2026-07-21) — assignee_id만 갱신하면 표시 로직(L478-480)이
-                  // 우선 읽는 assignee_ids 배열이 stale로 남아 새로고침 전까지 옛 담당자가
-                  // 보였다(L505의 정상 경로는 둘 다 갱신·이 경로만 누락). dispatch는 단일
-                  // 담당자 지정이라 assignee_ids를 [aid]로 교체해 정합을 맞춘다.
+                  // story #2133 — normalizeAssigneePatch가 assignee_id/assignee_ids 정합을
+                  // 강제해, 이 경로만 한쪽을 빠뜨리는 실수(#2384 근본)가 구조적으로 불가능해진다.
                   onAssigneePatched={(aid) => {
-                    assigneeIdsRef.current = [aid];
-                    setLocalAssigneeIds([aid]);
-                    onStoryUpdate?.({ ...story, assignee_id: aid, assignee_ids: [aid] });
+                    const assigneePatch = normalizeAssigneePatch({ assignee_id: aid });
+                    assigneeIdsRef.current = assigneePatch.assignee_ids;
+                    setLocalAssigneeIds(assigneePatch.assignee_ids);
+                    onStoryUpdate?.({ ...story, ...assigneePatch });
                   }}
                 />
               </div>
