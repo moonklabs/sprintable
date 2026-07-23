@@ -50,16 +50,6 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
   };
 }
 
-// Backend SSE chat:message payload format (_to_chat_message)
-interface SseChatPayload {
-  id: string;
-  thread_id: string;
-  content: string;
-  sender: { id: string; name?: string; type?: string };
-  attachments: unknown[];
-  created_at: string;
-}
-
 /** R2(da9d1781): conversation.working SSE payload — `chat_presence.list_working` 목록. */
 export interface SseWorkingPayload {
   conversation_id: string;
@@ -76,8 +66,6 @@ export interface SseConversationReadPayload {
 
 interface UseChatSseOptions {
   currentTeamMemberId?: string;
-  onNewMessage?: (message: ChatMessage) => void;
-  onReplyCreated?: (memoId: string) => void;
   onConversationMessage?: (payload: Record<string, unknown>) => void;
   // R2: 채팅 working/typing — 1.5s 폴(/conversations/{id}/working) 대체.
   onWorking?: (payload: SseWorkingPayload) => void;
@@ -89,15 +77,13 @@ interface UseChatSseOptions {
 // story #2095 — 재연결 backoff는 sse-reconnect-backoff.ts(공용, sse-multiplexer.ts와
 // 동일 모듈 재사용)로 뽑았다.
 
-export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, onConversationMessage, onWorking, onConversationRead, onReconnect }: UseChatSseOptions) {
+export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorking, onConversationRead, onReconnect }: UseChatSseOptions) {
   const [connected, setConnected] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // react-hooks/refs: 렌더 중 ref.current 조건부 대입 금지라 지연초기화는 useState(초기화 함수)로.
   const [backoff] = useState<ReconnectBackoffState>(() => createReconnectBackoffState());
   const lastEventIdRef = useRef<string | null>(null);
-  const onNewMessageRef = useRef(onNewMessage);
-  const onReplyCreatedRef = useRef(onReplyCreated);
   const onConversationMessageRef = useRef(onConversationMessage);
   const onWorkingRef = useRef(onWorking);
   const onConversationReadRef = useRef(onConversationRead);
@@ -106,28 +92,12 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
 
   // useLayoutEffect: DOM commit 후 동기 실행 — useEffect(비동기)보다 먼저 실행되어
   // SSE 이벤트 도달 전에 ref가 항상 최신 콜백을 가리킴 (stale closure 방지)
-  useLayoutEffect(() => { onNewMessageRef.current = onNewMessage; }, [onNewMessage]);
-  useLayoutEffect(() => { onReplyCreatedRef.current = onReplyCreated; }, [onReplyCreated]);
   useLayoutEffect(() => { onConversationMessageRef.current = onConversationMessage; }, [onConversationMessage]);
   useLayoutEffect(() => { onWorkingRef.current = onWorking; }, [onWorking]);
   useLayoutEffect(() => { onConversationReadRef.current = onConversationRead; }, [onConversationRead]);
   useLayoutEffect(() => { onReconnectRef.current = onReconnect; }, [onReconnect]);
   useLayoutEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
-  const handleChatMessage = (raw: string) => {
-    if (shouldSuppressDuplicateSseEvent(raw)) return;
-    try {
-      const payload = JSON.parse(raw) as SseChatPayload;
-      onNewMessageRef.current?.(normalizeToMessage(payload as unknown as Record<string, unknown>));
-    } catch { /* ignore parse errors */ }
-  };
-  const handleReplyCreated = (raw: string) => {
-    if (shouldSuppressDuplicateSseEvent(raw)) return;
-    try {
-      const payload = JSON.parse(raw) as { id?: string; memo_id?: string };
-      if (payload.memo_id) onReplyCreatedRef.current?.(payload.memo_id);
-    } catch { /* ignore parse errors */ }
-  };
   const handleConversationMessage = (raw: string) => {
     if (shouldSuppressDuplicateSseEvent(raw)) return;
     try {
@@ -150,13 +120,17 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
   };
 
   // story #2078 — 멀티플렉서(플래그 ON)가 있으면 공유 커넥션에 이름별 구독만 얹는다.
+  //
+  // story #2136 — `chat:message`·`reply_created` 구독을 제거했다. 둘 다 BE emit 문자열과
+  // 매치가 0(grep 확認, `reply_created`가 참조하던 `memos.py`는 backend에 아예 없음)이라
+  // 실제로는 한 번도 fire된 적 없는 죽은 자리였고, 두 이벤트가 하려던 일(신규 메시지 반영)은
+  // 이미 살아있는 canonical 경로 `conversation.message_created`(S-COMM-12, 아래
+  // handleConversationMessage)가 전부 커버한다 — 별도 기능 손실 없이 제거.
   const mux = useSseMultiplexerContext();
 
   useEffect(() => {
     if (!mux) return;
     const unsubs = [
-      mux.subscribe('chat:message', handleChatMessage),
-      mux.subscribe('reply_created', handleReplyCreated),
       mux.subscribe('conversation.message_created', handleConversationMessage),
       mux.subscribe('conversation.working', handleWorking),
       mux.subscribe('conversation.read', handleConversationRead),
@@ -200,18 +174,6 @@ export function useChatSse({ currentTeamMemberId, onNewMessage, onReplyCreated, 
           }, delay);
         }
       };
-
-      // chat:message — backend _to_chat_message format: { id, thread_id, sender: { id }, ... }
-      source.addEventListener('chat:message', (e: MessageEvent) => {
-        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
-        handleChatMessage(e.data as string);
-      });
-
-      // reply_created — from memos.py publish_event; use as refetch trigger
-      source.addEventListener('reply_created', (e: MessageEvent) => {
-        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
-        handleReplyCreated(e.data as string);
-      });
 
       // conversation.message_created — realtime update for conversation list
       // S-COMM-12: canonical 이름만 리슨. server가 legacy(conversation:message)도 병행 emit하므로
