@@ -49,7 +49,15 @@ jobs:
           if [[ "${{ github.ref_name }}" == "main" ]]; then
             echo "target=prod" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
-            echo "backend_min_instances=1" >> "$GITHUB_OUTPUT"
+            # ⚠️ minScale 1→3 (story #2077·prod 콜드스타트 durable, 오르테가군 PO 2026-07-23 cherry-pick):
+            # dev #2074 응급대응이 dev 만 3으로 올리고 prod 는 1로 남아 2026-07-22 아침 prod 콜드스타트가
+            # 재발했다. 그때 PO 가 `gcloud run services update` 로 prod minScale=3 을 라이브 적용(승인된
+            # 조치)했고, 그 값은 지금도 라이브다(07-23 PO 실측 확認). 그러나 이 SSOT 는 1 로 남아 있어
+            # **다음 main push 가 prod 를 1 로 되돌리는** 상태였다 — "손 값은 다음 배포가 덮는다" 교훈이
+            # 정작 prod 쪽에 반영되지 않았던 것. develop 에는 #2409 로 이미 들어가 있으나 승격이 80커밋
+            # 규모라, 라이브와 SSOT 를 일치시키는 이 한 줄만 먼저 main 에 못박는다(동작 변화 0).
+            # conn-safe: min 3 × per-instance 5 = 15 ≤ 200(maxScale 5·rollout 70 예산 불변).
+            echo "backend_min_instances=3" >> "$GITHUB_OUTPUT"
             # ⚠️ maxScale 5 (ee7794eb ③·선생님 right-size): prod g1-small max_conn 100. per-instance 5(pool
             # 3/1=4 + pg_pubsub raw 1). rollout(old+new 2×): 2×5×5+20(admin)=70 ≤ 100 ✓ (여유 30).
             # (PgBouncer 풀러 불필요 — Cloud Run raw TCP 미지원으로 중앙 PgBouncer 불가·관리형 풀링은 Enterprise Plus
