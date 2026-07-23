@@ -60,6 +60,7 @@ case "${ENV}" in
         SQL_INSTANCE_CONN="${GCP_PROJECT}:${GCP_REGION}:sprintable-dev"
         RUNTIME_SA="cloudrun-runtime-dev@${GCP_PROJECT}.iam.gserviceaccount.com"
         DB_SECRET_NAME="DATABASE_URL_DEV"
+        CRON_SECRET_NAME="cron-secret"
         GITHUB_SECRET_SUFFIX="DEV"
         GITHUB_APP_SECRET_ENV="dev"  # story #2142 발견: github-app-*-dev Secret Manager ID의 소문자 접미(위 GITHUB_SECRET_SUFFIX와 별개 컨벤션 — 이 시크릿 3종만 하이픈+소문자)
         APP_URL="https://dev-app.sprintable.ai"
@@ -85,11 +86,19 @@ case "${ENV}" in
         SQL_INSTANCE_CONN="${GCP_PROJECT}:${GCP_REGION}:sprintable-prod"
         RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
         DB_SECRET_NAME="DATABASE_URL_PROD"
-        GITHUB_SECRET_SUFFIX="PROD"
-        # ⚠️TODO(실 배포 前 확認 필요) — "-prod" 접미 Secret Manager 시크릿(github-app-client-secret-prod
-        # 등)이 실제로 존재하는지 미확認(repo grep 0건 — dev만 프로비저닝된 상태로 보임). 존재
-        # 안 하면 GitHub App(webhook/PR 캡처) 기능이 prod GCE에서 fail-closed(gcloud secrets
-        # access 실패)로 죽는다 — 실 배포 前 별도 확認/프로비저닝 필요.
+        # ⛔story #2142(2026-07-23, 오르테가 gcloud 실측+정정) — CRON_SECRET_PROD가 실재하고
+        # backend-prod Cloud Run이 실제로 그걸 쓴다(describe 대조 확認). "cron-secret"(dev가
+        # 쓰는 이름)을 prod에 그대로 쓰면 존재는 해서 fetch는 성공하지만 backend-prod가 실제
+        # 쓰는 값과 다른 값이 실린다 — #2135(env 이름 불일치)와 같은 클래스, 여기선 시크릿
+        # 자체가 존재해 조용히 다른 값이 실리는 형태라 더 발견하기 어려움.
+        CRON_SECRET_NAME="CRON_SECRET_PROD"
+        # ⛔story #2142(2026-07-23, 오르테가 gcloud 실측+정정) — GITHUB_CLIENT_ID_PROD/
+        # GITHUB_CLIENT_SECRET_PROD(유저 로그인 OAuth 앱, config.py:209 — GitHub App 봇과는
+        # 별개 물건)는 Secret Manager에 아예 없다. backend-prod Cloud Run이 실제로 물고 있는
+        # 시크릿은 GITHUB_CLIENT_ID_DEV/GITHUB_CLIENT_SECRET_DEV다(describe 대조 확認, prod가
+        # 왜 dev 시크릿을 쓰는지는 별건 — 이 스크립트 스코프는 "Cloud Run과 같은 걸 물게 한다").
+        # 새 시크릿을 만드는 게 아니라 실제 라이브 바인딩을 그대로 따라간다 — 접미를 DEV로.
+        GITHUB_SECRET_SUFFIX="DEV"
         GITHUB_APP_SECRET_ENV="prod"
         APP_URL="https://app.sprintable.ai"
         # story #2142(오르테가 라이브 실측 2026-07-23, gcloud env 직접 대조): 추측 아니라
@@ -221,7 +230,7 @@ SECRET_PAIRS="${SECRET_PAIRS} GITHUB_CLIENT_SECRET_${GITHUB_SECRET_SUFFIX}:GITHU
 SECRET_PAIRS="${SECRET_PAIRS} RESEND_API_KEY:RESEND_API_KEY"
 SECRET_PAIRS="${SECRET_PAIRS} EMAIL_FROM:EMAIL_FROM"
 SECRET_PAIRS="${SECRET_PAIRS} github-webhook-secret:GITHUB_WEBHOOK_SECRET"
-SECRET_PAIRS="${SECRET_PAIRS} cron-secret:CRON_SECRET"
+SECRET_PAIRS="${SECRET_PAIRS} ${CRON_SECRET_NAME}:CRON_SECRET"
 SECRET_PAIRS="${SECRET_PAIRS} github-app-client-secret-${GITHUB_APP_SECRET_ENV}:GITHUB_APP_CLIENT_SECRET"
 SECRET_PAIRS="${SECRET_PAIRS} github-app-private-key-${GITHUB_APP_SECRET_ENV}:GITHUB_APP_PRIVATE_KEY"
 SECRET_PAIRS="${SECRET_PAIRS} github-app-state-secret-${GITHUB_APP_SECRET_ENV}:GITHUB_APP_STATE_SECRET"

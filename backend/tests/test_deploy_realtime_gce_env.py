@@ -66,10 +66,38 @@ def test_deploy_gce_mcp_public_url_env_specific():
 
 def test_deploy_gce_prod_secret_pairs_no_dev_leak():
     """story #2142 회귀 방지 — DB_SECRET_NAME 미사용으로 prod 플랜에 dev 시크릿이
-    하드코딩 리터럴로 섞여 들어가던 결함(발견 즉시 수정)의 재발 차단."""
+    하드코딩 리터럴로 섞여 들어가던 결함(발견 즉시 수정)의 재발 차단.
+
+    ⚠️GITHUB_CLIENT_ID_DEV/GITHUB_CLIENT_SECRET_DEV는 예외 — backend-prod Cloud Run이
+    실제로 그 시크릿을 쓰는 것을 오르테가 gcloud 실측으로 확認(2026-07-23, 유저 로그인
+    OAuth 앱이 아직 prod 전용이 아님, GitHub App 봇과는 별개 물건). 아래
+    `test_deploy_gce_prod_github_oauth_client_matches_live_cloud_run_binding`가 그 의도적
+    매핑을 별도로 고정한다 — 여기선 DATABASE_URL_DEV(진짜 리크였던 것)만 확인."""
     cfg = _resolve(_DEPLOY_GCE, "prod")
-    assert "DEV" not in cfg["SECRET_PAIRS"]
-    assert "-dev" not in cfg["SECRET_PAIRS"]
+    assert "DATABASE_URL_DEV" not in cfg["SECRET_PAIRS"]
+    assert "GITHUB_CLIENT_ID_DEV:GITHUB_CLIENT_ID" in cfg["SECRET_PAIRS"]
+    assert "GITHUB_CLIENT_SECRET_DEV:GITHUB_CLIENT_SECRET" in cfg["SECRET_PAIRS"]
+
+
+def test_deploy_gce_prod_github_oauth_client_matches_live_cloud_run_binding():
+    """story #2142(오르테가 gcloud 실측, 2026-07-23) — GITHUB_CLIENT_ID_PROD/
+    GITHUB_CLIENT_SECRET_PROD는 Secret Manager에 존재하지 않는다. backend-prod Cloud Run이
+    실제로 물고 있는 시크릿은 GITHUB_CLIENT_ID_DEV/GITHUB_CLIENT_SECRET_DEV(describe로 대조
+    확認) — 새 시크릿을 만드는 게 아니라 GCE도 Cloud Run과 같은 것을 물게 한다(스코프 확定,
+    적절성 판단은 별건)."""
+    cfg = _resolve(_DEPLOY_GCE, "prod")
+    assert "GITHUB_CLIENT_ID_PROD" not in cfg["SECRET_PAIRS"]
+    assert "GITHUB_CLIENT_SECRET_PROD" not in cfg["SECRET_PAIRS"]
+
+
+def test_deploy_gce_prod_cron_secret_matches_live_cloud_run_binding():
+    """story #2142(오르테가 gcloud 실측, 2026-07-23) — backend-prod Cloud Run은 CRON_SECRET을
+    `cron-secret`(dev가 쓰는 이름)이 아니라 `CRON_SECRET_PROD`에서 fetch한다. 이전엔 env
+    분기 없이 `cron-secret:CRON_SECRET`이 dev/prod 공용이라 존재는 해도 다른 값이 실렸다."""
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    assert "CRON_SECRET_PROD:CRON_SECRET" in prod["SECRET_PAIRS"]
+    assert "cron-secret:CRON_SECRET" in dev["SECRET_PAIRS"]
 
 
 def test_deploy_gce_dev_secret_pairs_unchanged():
