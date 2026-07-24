@@ -40,17 +40,29 @@
 
 ```
 1. GCE MIG 는 안 본다. Cloud Run 만 열거한다. realtime-gateway-{dev,prod} 는 별도 축이며,
-   실제로 dev MIG 는 2일+ 옛 이미지로 돌고 있는 것이 별도 관측됐다(2026-07-25).
+   실제로 dev MIG 는 2일+ 옛 이미지로 돌고 있는 것이 별도 관측됐다(2026-07-25 · story #2185).
 2. "지금 서빙되는 것이 **최신 머지**인가"는 안 본다. 주기 실행이라 "기대 리비전"을 모른다.
    ⇒ 이 가드는 **구조적 건강**(고정·정체)만 본다. 특정 배포의 실효 확認은 배포 시점에
      별도로 해야 한다(축① 빌드 conclusion + 축② 기대 리비전 대조).
-3. 트래픽 분할(카나리)에서 latestRevision=true 인 항목의 percent 가 100 미만인 경우는
-   축A 로 잡히지 않는다 — 고정은 아니기 때문. 분할 자체의 적정성은 이 가드 밖이다.
-4. asia-northeast3 밖 리전의 서비스는 안 본다.
-5. 리비전이 Ready 인 것과 **실제로 요청을 정상 처리하는 것**은 다르다 — 헬스체크는 이 가드 밖.
-6. 고정을 **누가** 했는지는 안 본다(공용 자격증명이라 감사로그로도 못 가른다 — 표본 A 에서
+3. asia-northeast3 밖 리전의 서비스는 안 본다.
+4. 리비전이 Ready 인 것과 **실제로 요청을 정상 처리하는 것**은 다르다 — 헬스체크는 이 가드 밖.
+5. 고정을 **누가** 했는지는 안 본다(공용 자격증명이라 감사로그로도 못 가른다 — 표본 A 에서
    실제로 못 갈랐다). 이 가드는 "누가"가 아니라 "선언됐는가"만 묻는다.
+6. 정상 배포 중 몇 초간 나타나는 `latestReady != latestCreated` **과도기**가 하필 크론
+   타이밍과 겹치면 오탐이 난다(확률은 낮다 — 6시간 주기 × 수십초 창). 오탐 시 다음
+   사이클에서 자연히 사라지므로 선언하지 말고 다음 실행을 볼 것.
+7. **같은 문제를 몇 번 알렸는지 세지 않는다** — 아래 "알림 반복" 참조.
 ```
+
+## ⚠️ 알림 반복은 **설계된 압력**이다(까심군 적대적 리뷰 ④에 대한 판정)
+
+미선언 상태가 며칠 지속되면 6시간마다 같은 알림이 온다. de-dup/backoff 를 넣지 않은 것은
+의도다 — **진정시키는 방법이 이미 있고(허용목록 2줄), 그게 정확히 우리가 원하는 행동**이기
+때문이다. 알림을 조용히 만드는 다른 길을 주면 "알림은 껐는데 문제는 남은" 상태가 생기고,
+그건 이 가드가 잡으려는 결함 그 자체다.
+⚠️다만 **알림 문구가 진정 방법을 명시**해야 한다(모르면 그냥 무시하게 된다) — 워크플로우
+메시지와 아래 FAIL 출력 둘 다에 그 문장을 넣는다.
+📌de-dup 상태를 만들면 그 상태 자체가 또 회수돼야 할 상태가 된다 — 이 가드의 주제와 정면 충돌.
 
 로컬 수동 실행:
     python3 infra/check_serving_reality.py
@@ -129,24 +141,48 @@ def _load_allowlist() -> tuple[dict[str, dict], dict[str, dict]]:
     return pinned, stalled
 
 
+def _latest_percent(traffic: list[dict]) -> int:
+    """자동최신(latestRevision) 쪽으로 가는 트래픽 비율(%)."""
+    return sum(
+        int(e.get("percent") or 0) for e in traffic if e.get("latestRevision") is True
+    )
+
+
 def _is_pinned(traffic: list[dict]) -> bool:
-    """트래픽이 특정 리비전에 고정돼 있는가.
+    """새 리비전이 **사용자 전부에게** 닿고 있는가 — 아니면 True(잡는다).
 
     Cloud Run 은 자동 최신 추적일 때 `latestRevision: true` 인 항목을 둔다. 고정하면 그
     항목이 사라지고 `revisionName` 만 있는 항목이 된다(표본 A 의 실제 모양).
+
+    ⛔**«latestRevision 항목이 하나라도 있으면 통과»로 만들면 안 된다**(까심군 적대적 리뷰 ①):
+    ```
+    99% → 옛 리비전 고정 · 1% → latestRevision:true   ← 이 조합이 «고정 아님»으로 빠져나간다
+    그런데 사용자의 99% 는 옛 코드를 받는다 = **표본 A 와 사실상 동급으로 아픈 상태**
+    ```
+    그래서 «항목의 존재»가 아니라 **«자동최신으로 가는 비율이 100인가»**를 묻는다. 진짜
+    카나리는 정당한 운영 행위이지만 **의도적 행위이므로 선언 대상**이다 — 허용목록에
+    사유·만료와 함께 넣으면 통과한다(가드가 방해가 되지 않게 하는 방법은 «안 보는 것»이
+    아니라 «선언하게 하는 것»이다).
 
     ⚠️traffic 항목 자체가 없으면 **고정으로 취급**한다 — 판정 불가를 조용히 통과시키면
     이 가드가 가장 이상한 상태를 못 보게 된다."""
     if not traffic:
         return True
-    return not any(entry.get("latestRevision") is True for entry in traffic)
+    return _latest_percent(traffic) < 100
+
+
+# 선언의 최대 유효기간. ⛔상한이 없으면 `until: 2099-12-31` 한 줄로 **영구 예외**를 만들 수
+# 있다(까심군 적대적 리뷰 ③ — 실제로 코드 레벨로 열려 있던 우회로다). 상한을 두면 «영구»가
+# 구조적으로 불가능해지고, 길게 두고 싶으면 그 주기마다 사람이 다시 판단하게 된다.
+# 30일: 스프린트 두 번 정도 — 롤백·카나리·추적 중인 결함 어느 쪽이든 그 안에 결론이 난다.
+_MAX_DECLARATION_HORIZON_DAYS = 30
 
 
 def _expired(entry: dict, today: date) -> str | None:
     """만료·형식 위반이면 사유 문자열, 아니면 None.
 
-    `until` 을 **필수**로 요구한다 — 없는 선언은 영원히 사는 선언이라 이 가드가 막으려는
-    바로 그것이 된다."""
+    `until` 을 **필수**로 요구하고 **상한도 둔다** — 없거나 너무 멀면 영원히 사는 선언이라
+    이 가드가 막으려는 바로 그것이 된다."""
     until_raw = entry.get("until")
     if not until_raw:
         return "`until`(만료일) 이 없다 — 영원히 사는 선언은 허용하지 않는다"
@@ -156,6 +192,13 @@ def _expired(entry: dict, today: date) -> str | None:
         return f"`until` 형식이 YYYY-MM-DD 가 아니다: {until_raw!r}"
     if until < today:
         return f"선언이 만료됐다(until={until}) — 재확認 후 갱신하거나 상태를 고칠 것"
+    horizon = (until - today).days
+    if horizon > _MAX_DECLARATION_HORIZON_DAYS:
+        return (
+            f"`until` 이 너무 멀다({until} · {horizon}일 뒤) — 최대 "
+            f"{_MAX_DECLARATION_HORIZON_DAYS}일. 먼 만료일은 사실상 영구 예외이고, "
+            "그러면 이 가드가 막으려던 것을 허용목록이 그대로 재현한다"
+        )
     if not entry.get("reason"):
         return "`reason`(사유) 이 없다 — 사유 없는 선언은 다음 사람이 판단할 수 없다"
     return None
@@ -169,21 +212,35 @@ def main() -> int:
     undeclared_pins: list[str] = []
     undeclared_stalls: list[str] = []
     bad_declarations: list[str] = []
+    unreadable: list[str] = []
     live_pinned: set[str] = set()
     live_stalled: set[str] = set()
 
     for service in services:
-        st = _serving_status(service)
+        # ⛔서비스 하나의 조회 실패가 배치 전체를 죽이면 안 된다(까심군 적대적 리뷰 ② —
+        # 6개 «못 잡는 것» 어디에도 없던, 실전 영향이 가장 큰 구멍이었다). 예전 구조에선
+        # 11개 중 1개에서 gcloud 일시 오류(rate limit·network blip·API 타임아웃)가 나면
+        # **나머지 10개를 그 사이클에 아예 안 본 채** 스크립트가 uncaught 로 죽었다 —
+        # 6시간 주기라 다음 사이클까지 10개가 무방비였다.
+        # ⛔"읽기 실패 → 조용히 스킵"도 금지다. 그러면 감시가 꺼졌는데 초록으로 보인다.
+        # 읽은 것은 판정하고, 못 읽은 것은 **못 읽었다고 실패로 보고**한다.
+        try:
+            st = _serving_status(service)
+        except Exception as exc:  # noqa: BLE001 — 어떤 실패든 배치를 계속 돌려야 한다
+            unreadable.append(f"{service}: 상태를 못 읽었다 — {type(exc).__name__}: {exc}")
+            continue
 
         if _is_pinned(st["traffic"]):
             live_pinned.add(service)
             if service not in declared_pins:
                 serving = ", ".join(
-                    e.get("revisionName", "?") for e in st["traffic"]
+                    f"{e.get('revisionName', '?')}({e.get('percent', 0)}%)"
+                    for e in st["traffic"]
                 ) or "(traffic 항목 없음)"
                 undeclared_pins.append(
-                    f"{service}: traffic 이 자동최신이 아니다 — 서빙 {serving} · "
-                    f"latestReady={st['latest_ready']}"
+                    f"{service}: 자동최신으로 가는 트래픽이 "
+                    f"{_latest_percent(st['traffic'])}% 뿐이다(100 이어야 한다) — "
+                    f"서빙 {serving} · latestReady={st['latest_ready']}"
                 )
 
         if st["latest_ready"] != st["latest_created"]:
@@ -210,10 +267,10 @@ def main() -> int:
                     "(사실보다 오래 사는 선언은 다음 진짜 건을 가린다)"
                 )
 
-    if undeclared_pins or undeclared_stalls or bad_declarations:
+    if undeclared_pins or undeclared_stalls or bad_declarations or unreadable:
         print("⛔ 배포 실효 가드 FAIL — 배포가 성공했어도 사용자에게 안 닿고 있을 수 있다.\n")
         if undeclared_pins:
-            print("  축A 선언 없는 트래픽 고정(새 리비전이 사용자에 안 닿는다):")
+            print("  축A 선언 없는 트래픽 고정/분할(새 리비전이 사용자 전부에게 안 닿는다):")
             for line in undeclared_pins:
                 print(f"    - {line}")
         if undeclared_stalls:
@@ -221,21 +278,29 @@ def main() -> int:
             for line in undeclared_stalls:
                 print(f"    - {line}")
         if bad_declarations:
-            print("  선언 자체의 문제(만료·사유누락·사실과 어긋남):")
+            print("  선언 자체의 문제(만료·기간초과·사유누락·사실과 어긋남):")
             for line in bad_declarations:
                 print(f"    - {line}")
+        if unreadable:
+            print("  ⚠️상태를 못 읽은 서비스(감시 공백 — 조용히 넘기지 않는다):")
+            for line in unreadable:
+                print(f"    - {line}")
         print(
-            "\n→ 의도적 고정(롤백·카나리)이면 infra/serving-reality-allowlist.yml 에 "
-            "**reason·declared_by·until** 과 함께 등재. 의도가 아니면 원인을 고칠 것 — "
-            "축A 는 `gcloud run services update-traffic --to-latest`, "
+            f"\n검사한 서비스 {len(services) - len(unreadable)}/{len(services)}개.\n"
+            "→ **이 알림을 멈추는 방법은 둘뿐이다: 상태를 고치거나, 선언하거나.** "
+            "의도적 고정·카나리면 infra/serving-reality-allowlist.yml 에 "
+            f"**reason·declared_by·until**(최대 {_MAX_DECLARATION_HORIZON_DAYS}일) 과 함께 등재하면 "
+            "다음 실행부터 조용해진다. 등재 전까지는 6시간마다 다시 알린다 — "
+            "de-dup 을 안 넣은 것은 의도다(알림만 조용해지고 문제는 남는 상태를 만들지 않는다).\n"
+            "→ 의도가 아니면 원인을 고칠 것 — 축A 는 `gcloud run services update-traffic --to-latest`, "
             "축B 는 실패한 리비전의 conditions 에 기동 실패 사유가 남는다. "
             "⛔고정 해제는 그 자체가 배포 행위다 — 의도를 확認하고 할 것."
         )
         return 1
 
     print(
-        f"✅ 배포 실효 이상 없음 — {len(services)}개 Cloud Run 서비스 "
-        f"(축A 트래픽 고정 0건·축B 롤아웃 정체 0건·선언 문제 0건). "
+        f"✅ 배포 실효 이상 없음 — {len(services)}개 Cloud Run 서비스 전부 검사 "
+        f"(축A 트래픽 고정/분할 0건·축B 롤아웃 정체 0건·선언 문제 0건·조회 실패 0건). "
         f"⚠️GCE MIG·'최신 머지가 서빙되는가'는 이 가드 밖(모듈 docstring 참조)."
     )
     return 0

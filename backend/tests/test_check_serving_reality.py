@@ -199,6 +199,107 @@ def test_repo_allowlist_entries_are_wellformed():
     ([{"revisionName": "r", "percent": 100, "latestRevision": True}], False),
     ([{"revisionName": "r", "percent": 100}], True),
     ([], True),
+    # ⭐까심군 적대적 리뷰 ① — 99% 고정 + 1% 자동최신 카나리. 예전 구현은 "latestRevision
+    # 항목이 하나라도 있으면 통과"라 이걸 놓쳤다. 사용자의 99% 가 옛 코드를 받는 상태이므로
+    # 표본 A 와 사실상 동급이다.
+    ([{"revisionName": "old", "percent": 99},
+      {"revisionName": "new", "percent": 1, "latestRevision": True}], True),
+    # 정상 100% 자동최신은 통과해야 한다(오탐 0).
+    ([{"revisionName": "new", "percent": 100, "latestRevision": True}], False),
 ])
 def test_is_pinned_shapes(traffic, expected):
     assert _load()._is_pinned(traffic) is expected
+
+
+# ── 까심군 적대적 리뷰(2026-07-25)에서 나온 구멍들의 회귀가드 ─────────────────
+
+def test_canary_split_is_caught_live_shape(monkeypatch, capsys):
+    """리뷰 ① — 99%/1% 분할이 축A 로 잡히는지 end-to-end 로."""
+    mod = _load()
+    _stub(monkeypatch, mod, {"svc-canary": {
+        "traffic": [
+            {"revisionName": "svc-00010-old", "percent": 99},
+            {"revisionName": "svc-00011-new", "percent": 1, "latestRevision": True},
+        ],
+        "latest_ready": "svc-00011-new", "latest_created": "svc-00011-new",
+    }})
+    assert mod.main() == 1
+    out = capsys.readouterr().out
+    assert "축A" in out and "1%" in out
+
+
+def test_until_far_in_future_is_rejected(monkeypatch, capsys):
+    """⭐리뷰 ③ — `until: 2099-12-31` 로 사실상 영구 예외를 만드는 우회로가 실제로
+    열려 있었다. 상한을 두지 않으면 허용목록이 이 가드가 막으려던 것을 그대로 재현한다."""
+    mod = _load()
+    _stub(
+        monkeypatch, mod,
+        {"svc-x": {
+            "traffic": [{"revisionName": "x-1", "percent": 100, "latestRevision": True}],
+            "latest_ready": "x-1", "latest_created": "x-2",
+        }},
+        stalls={"svc-x": {"reason": "r", "declared_by": "PO", "until": "2099-12-31"}},
+    )
+    assert mod.main() == 1
+    assert "너무 멀다" in capsys.readouterr().out
+
+
+def test_one_unreadable_service_does_not_stop_the_batch(monkeypatch, capsys):
+    """⭐리뷰 ② — 실전 영향이 가장 컸던 구멍. 서비스 하나의 조회 실패가 배치를 죽이면
+    나머지는 그 사이클에 **아예 안 보이고**(6시간 무방비), 게다가 실패가 스택트레이스로만
+    나가 "배포 실효 FAIL" 로도 안 읽힌다.
+
+    ⛔"읽기 실패 → 조용히 스킵"도 아니어야 한다 — 그러면 감시가 꺼졌는데 초록으로 보인다.
+    못 읽은 것은 **못 읽었다고 실패로 보고**되어야 한다."""
+    mod = _load()
+    statuses = {
+        "svc-ok": _healthy("ok-1"),
+        "svc-broken": None,   # 조회 시 예외
+        "svc-stalled": {
+            "traffic": [{"revisionName": "s-1", "percent": 100, "latestRevision": True}],
+            "latest_ready": "s-1", "latest_created": "s-2",
+        },
+    }
+
+    def _status(name):
+        if statuses[name] is None:
+            raise RuntimeError("gcloud rate limit")
+        return statuses[name]
+
+    monkeypatch.setattr(mod, "_list_live_services", lambda: list(statuses))
+    monkeypatch.setattr(mod, "_serving_status", _status)
+    monkeypatch.setattr(mod, "_load_allowlist", lambda: ({}, {}))
+    monkeypatch.setenv("SERVING_REALITY_TODAY", "2026-07-25")
+
+    assert mod.main() == 1
+    out = capsys.readouterr().out
+    # 못 읽은 것은 실패로 보고된다
+    assert "svc-broken" in out and "못 읽었다" in out
+    # ⭐그리고 나머지 서비스 판정은 **계속 돌았다** — 이게 이 테스트의 본체다
+    assert "svc-stalled" in out and "축B" in out
+    assert "2/3" in out  # 검사한 서비스 수를 정직하게 밝힌다
+
+
+def test_declared_pins_expiry_and_staleness_are_checked_too(monkeypatch, capsys):
+    """⭐리뷰 ① 부수 — 만료/낡음 테스트가 전부 축B(`declared_stalls`)로만 돌아서, 축A
+    (`declared_pins`) 쪽에만 있는 비대칭 버그가 있어도 유닛이 못 잡았다. 대칭으로 고정한다."""
+    mod = _load()
+    # (a) 만료된 pin 선언
+    _stub(
+        monkeypatch, mod,
+        {"svc-p": {
+            "traffic": [{"revisionName": "p-1", "percent": 100}],  # 고정 상태
+            "latest_ready": "p-2", "latest_created": "p-2",
+        }},
+        pins={"svc-p": {"reason": "r", "declared_by": "PO", "until": "2026-07-24"}},
+    )
+    assert mod.main() == 1
+    assert "만료" in capsys.readouterr().out
+
+    # (b) 라이브는 이미 정상인데 pin 선언이 남아 있음
+    _stub(
+        monkeypatch, mod, {"svc-p": _healthy("p-1")},
+        pins={"svc-p": {"reason": "r", "declared_by": "PO", "until": "2026-08-01"}},
+    )
+    assert mod.main() == 1
+    assert "이미 정상" in capsys.readouterr().out
