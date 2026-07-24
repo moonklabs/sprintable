@@ -72,7 +72,7 @@ async def test_bulk_status_change_calls_emit_story_status_changed(monkeypatch):
     monkeypatch.setattr(stories_mod, "emit_story_status_changed", spy)
 
     payload = BulkUpdateRequest(items=[{"id": str(story.id), "status": "in-progress"}])
-    await bulk_update_stories(payload, db, repo, auth=MagicMock(user_id=str(uuid.uuid4())))
+    await bulk_update_stories(payload, MagicMock(), db, repo, auth=MagicMock(user_id=str(uuid.uuid4())))
 
     spy.assert_awaited_once()
     args, kwargs = spy.call_args
@@ -98,7 +98,7 @@ async def test_bulk_no_status_change_does_not_call_emit(monkeypatch):
     monkeypatch.setattr(stories_mod, "emit_story_status_changed", spy)
 
     payload = BulkUpdateRequest(items=[{"id": str(story.id), "priority": "high"}])
-    await bulk_update_stories(payload, db, repo, auth=MagicMock(user_id=str(uuid.uuid4())))
+    await bulk_update_stories(payload, MagicMock(), db, repo, auth=MagicMock(user_id=str(uuid.uuid4())))
 
     spy.assert_not_awaited()
 
@@ -120,7 +120,7 @@ async def test_bulk_status_unchanged_value_does_not_call_emit(monkeypatch):
     monkeypatch.setattr(stories_mod, "emit_story_status_changed", spy)
 
     payload = BulkUpdateRequest(items=[{"id": str(story.id), "status": "todo"}])
-    await bulk_update_stories(payload, db, repo, auth=MagicMock(user_id=str(uuid.uuid4())))
+    await bulk_update_stories(payload, MagicMock(), db, repo, auth=MagicMock(user_id=str(uuid.uuid4())))
 
     spy.assert_not_awaited()
 
@@ -143,7 +143,7 @@ async def test_bulk_emit_failure_isolated_per_item(monkeypatch):
     )
 
     payload = BulkUpdateRequest(items=[{"id": str(story.id), "status": "in-progress"}])
-    result = await bulk_update_stories(payload, db, repo, auth=MagicMock(user_id=str(uuid.uuid4())))
+    result = await bulk_update_stories(payload, MagicMock(), db, repo, auth=MagicMock(user_id=str(uuid.uuid4())))
 
     assert len(result) == 1 and result[0].status == "in-progress"
 

@@ -13,13 +13,11 @@ from app.core.config import settings
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.deletion_audit import DeletionAuditLog
-from app.models.event import Event
 from app.models.pm import Goal, Story, StoryActivity, StoryComment
 from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.repositories.story_assignee import StoryAssigneeRepository
 from app.routers.agent_gateway import wake_agent
-from app.services.event_seq import assign_recipient_seq
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.schemas.story import StoryAttachment, StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
@@ -32,6 +30,7 @@ from app.services.merge_verdict_gate import (
 )
 from app.services.verdict_capture import resolve_implementation_participation
 from app.services.notification_dispatch import dispatch_notification
+from app.services.story_assignee_events import emit_story_assignee_changed
 from app.services.story_status_events import emit_story_status_changed
 from app.services.webhook_dispatch import fire_webhooks
 from app.services.workflow_line_status import (
@@ -40,8 +39,6 @@ from app.services.workflow_line_status import (
     build_workflow_line_status,
     build_workflow_line_status_batch,
 )
-from app.services.workflow_pipeline import process_event
-from app.services.rule_evaluator import EventContext
 from app.services.workflow_violation import (
     build_violation_event,
     build_violation_flag,
@@ -668,6 +665,7 @@ class BulkUpdateRequest(BaseModel):
 @router.patch("/bulk", response_model=list[StoryResponse])
 async def bulk_update_stories(
     payload: BulkUpdateRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
@@ -689,6 +687,10 @@ async def bulk_update_stories(
 
     updated: list[Story] = []
     old_status_by_id: dict[uuid.UUID, str] = {}
+    # story #2172 AC1: assignee_id도 status와 동형으로 전이 前 old값 포착(setattr 前). None은
+    # "미배정→배정"의 유효한 old값이라 .get() 대신 멤버십(`in`)으로 "실제 변경 있었음"을 판정한다
+    # (status_by_id는 status가 None일 수 없어 .get()만으로 충분했던 것과 다른 지점).
+    old_assignee_by_id: dict[uuid.UUID, uuid.UUID | None] = {}
     for item in payload.items:
         # E-SECURITY SEC-S8(story 83ea3d6a) W(까심 QA, CRITICAL·실HTTP 확定): 이 raw 쿼리가
         # org_id 필터 자체가 없어(정상 repo.get()은 self._org_filter() 명시·RLS도 0002서 off)
@@ -710,6 +712,8 @@ async def bulk_update_stories(
         # status 변경이면 전이 前 old_status 포착(violation 판정용·setattr 前).
         if "status" in update_data and update_data["status"] != story.status:
             old_status_by_id[story.id] = story.status
+        if "assignee_id" in update_data and update_data["assignee_id"] != story.assignee_id:
+            old_assignee_by_id[story.id] = story.assignee_id
         for k, v in update_data.items():
             setattr(story, k, v)
         # E-BOARD S5: 단일 assignee_id 변경 시 join 미러(단일↔복수 공존 정합)
@@ -765,8 +769,11 @@ async def bulk_update_stories(
     # 그대로 재사용 — 발행 지점을 갈라놓지 않는다(AC3, #2122/#2132와 동일 성질: 두 경로가
     # 갈라지면 다음 결함이 또 한쪽에서만 재발). old_status_by_id는 위에서 이미 "실제로 바뀐
     # item만" 채워둔 것을 그대로 재사용(중복 판정 없음).
-    if old_status_by_id:
+    actor_name = actor_role = actor_type = None
+    if old_status_by_id or old_assignee_by_id:
         actor_name, actor_role, actor_type = await _resolve_actor_info(db, actor_id)
+
+    if old_status_by_id:
         for s in updated:
             old = old_status_by_id.get(s.id)
             if old is None:
@@ -783,6 +790,27 @@ async def bulk_update_stories(
                 # 것 자체가 이 스토리가 고치는 병이라 ERROR로 올린다.
                 logger.error(
                     "bulk status_changed emit 실패(story=%s)", s.id, exc_info=True,
+                )
+
+    # story #2172 AC1: assignee_id도 status와 동형 — bulk가 assignee_id를 실제로 바꾸면서도
+    # 이 helper를 호출하지 않아 PATCH /{id}는 story.assignee_changed를 내는데 /bulk은 안 내는
+    # 계약 불일치가 있었다(현재 FE 라이브 콜러 0 — kanban-board.tsx는 assignee_id를 bulk로 안
+    # 보낸다. "지금 아무도 안 밟지만 계약은 깨져 있는" 자리를 여기서 닫는다). old_assignee_by_id는
+    # 멤버십으로 "실제 변경"만 담아뒀으므로 그대로 재사용(중복 판정 없음, status와 동형).
+    if old_assignee_by_id:
+        for s in updated:
+            if s.id not in old_assignee_by_id:
+                continue
+            old = old_assignee_by_id[s.id]
+            try:
+                await emit_story_assignee_changed(
+                    db, repo.org_id, s, old,
+                    background_tasks=background_tasks,
+                    actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
+                )
+            except Exception:  # noqa: BLE001 — 한 item의 emit 실패가 나머지 item을 막지 않음.
+                logger.error(
+                    "bulk assignee_changed emit 실패(story=%s)", s.id, exc_info=True,
                 )
     return results
 
@@ -824,11 +852,14 @@ async def update_story(
     if assignee_ids_in is not None and "assignee_id" not in data:
         data["assignee_id"] = assignee_ids_in[0] if assignee_ids_in else None
     old_assignee_id: uuid.UUID | None = None
+    old_position: int | None = None
     story_before = None
-    if "assignee_id" in data:
+    # story #2172 AC2: position 변경도 old-value 대조가 필요해 assignee_id와 같은 사전조회를 공유.
+    if "assignee_id" in data or "position" in data:
         story_before = await repo.get(id)
         if story_before:
             old_assignee_id = story_before.assignee_id
+            old_position = story_before.position
     # H1-S5: PATCH /{id} 로 status=done 전이 시도도 board 경로와 동일하게 preflight 게이트(AC②).
     if data.get("status") == "done":
         gate_story = story_before or await repo.get(id)
@@ -905,157 +936,53 @@ async def update_story(
         pass
 
     if "assignee_id" in data and old_assignee_id != story.assignee_id:
-        org_id = repo.org_id
-        epic_title: str | None = None
-        try:
-            epic_title = await _resolve_epic_title(db, story.epic_id)
-        except Exception:
-            pass
-        event_data = {
-            "story_id": str(id),
-            "story_title": story.title,
-            "story_priority": story.priority,
-            "epic_id": str(story.epic_id) if story.epic_id else None,
-            "epic_title": epic_title,
-            "assignee_id": str(story.assignee_id) if story.assignee_id else None,
-            "old_assignee_id": str(old_assignee_id) if old_assignee_id else None,
-            "project_id": str(story.project_id),
-            "org_id": str(org_id),
-            "actor_id": str(actor_id) if actor_id else None,
-            "actor_name": actor_name,
-            "actor_role": actor_role,
-            "source_agent_id": str(actor_id) if (actor_id and actor_type == "agent") else None,
-            "assignees": [str(story.assignee_id)] if story.assignee_id else [],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        # AC1(c60dd33c 미러): assignee_changed webhook은 관련자만 — 담당자(신/구)+행위자. member-bound
-        # webhook이 무관 에이전트에 fan-out되던 갭 차단. member_id=null 브로드캐스트는 보존(preserve_broadcast).
-        _assignee_notify_ids = {
-            m for m in (story.assignee_id, old_assignee_id, actor_id) if m is not None
-        }
-        # story #2086(2026-07-21, 까심군 라이브 실측 확定) + #2132(2026-07-23 근본수정):
-        # publish_event()의 org _subscribers fanout은 .add() 호출이 저장소 전체 0곳인 영구
-        # 죽은 레지스트리였다(story #2059/#2067과 동일 근본) — 이제 그 함수 자체를 삭제했다.
-        # story.status_changed(story_status_events.py)와 동형으로 project_accessible_member_ids
-        # 로 수신자 해소 후 _push_to_agent 개별 push만이 실제로 SSE 큐에 들어가는 유일 경로.
-        #
-        # story #2106(2026-07-22, 까심군 #2101 QA 후속): 이 push는 의도적으로 Event row를 안
-        # 만드는 순수 transient SSE(#2101의 last_event_id 백필 대상이 아님) — "왜 여기만
-        # 영속화 안 하지"로 다시 파지 않도록 이유를 명시한다. assignee_changed는 보드/상세
-        # 화면의 "지금 담당자가 누구인지" 실시간 동기화 신호일 뿐이고, 그 값 자체는 항상
-        # story 테이블의 assignee_id가 SSOT라 재조회(새로고침·재연결)하면 그대로 복원된다.
-        # "너에게 배정됐다"는 실제 알림 책임은 몇 줄 아래 story_assigned Event(agent)/
-        # dispatch_notification(human)이 별도로 지고 있다 — 그쪽은 Event-backed(또는 동등한
-        # 영속 알림함) 라 배정받은 사람이 그 순간 연결이 끊겨 있어도 놓치지 않는다. 즉 상태축
-        # (재조회로 복원)과 알림축(영속 전달 필요)이 분리돼 있고, 이 줄은 전자만 담당한다.
+        # story #2172 근본수정(AC1): 이 side-effects를 PATCH /bulk과 공유하는 단일 helper로
+        # 추출 — 두 라우트가 발행 지점을 갈라 갖던 #2131류 결함 재발을 막는다.
+        await emit_story_assignee_changed(
+            db, repo.org_id, story, old_assignee_id,
+            background_tasks=background_tasks,
+            actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
+        )
+
+    # story #2172 AC2 판정(오르테가군 지시 — "재정렬 전용 이벤트가 필요한지, 기존 것으로
+    # 되는지 판단하고 근거 남길 것"): 신규 전용 event_type(`story.position_changed`)을 쓰되,
+    # 발행 메커니즘 자체는 assignee_changed와 동일한 기존 패턴(project_accessible_member_ids
+    # + _push_to_agent 개별 push, Event row 미생성)을 그대로 재사용한다. `story.status_changed`나
+    # `story.assignee_changed`를 재사용하지 않은 이유: FE 컨슈머가 event_type으로 분기하는데
+    # (kanban-board.tsx의 `payload.status`/`assignee_id` 필드 체크), 의미가 다른 필드 변경을
+    # 기존 타입에 얹으면 다음에 그 타입 소비처가 무관 필드를 오인 처리할 여지가 생긴다(오늘
+    # 세운 "동작은 한 곳에서만 선언" 원칙과 동형 — event_type과 payload 의미의 1:1을 지킨다).
+    # webhook/notification/StoryActivity를 안 붙인 이유: assignee_changed helper(story_assignee_events.py)
+    # 주석과 동일 논리 — position 값 자체는 story.position이 SSOT라 재조회로 복원되는 순수
+    # 상태축 신호일 뿐, "누가 언제 재배치했는지" 감사가 필요해지면(현재 AC엔 없음) StoryActivity를
+    # 추가해야 한다는 것이 이 판정이 무너지는 조건이다. FE 리스너는 story #2172 시점엔 아직
+    # 없다(kanban-board.tsx가 position PATCH 응답만 낙관적 반영·SSE 구독 X) — 이 이벤트는
+    # 계약(서버가 실제로 emit함)을 갖추는 것이 목적이고 FE 소비는 별도 스코프.
+    if "position" in data and old_position != story.position:
         try:
             from app.routers.events import _push_to_agent
             from app.services.project_auth import project_accessible_member_ids
 
-            member_ids = await project_accessible_member_ids(db, org_id, story.project_id)
-            sse_payload = {"event_type": "story.assignee_changed", **event_data}
-            for member_id in member_ids:
-                _push_to_agent(str(member_id), dict(sse_payload))
+            _pos_member_ids = await project_accessible_member_ids(db, repo.org_id, story.project_id)
+            _pos_payload = {
+                "event_type": "story.position_changed",
+                "story_id": str(id),
+                "story_title": story.title,
+                "position": story.position,
+                "old_position": old_position,
+                "status": story.status,
+                "project_id": str(story.project_id),
+                "org_id": str(repo.org_id),
+                "actor_id": str(actor_id) if actor_id else None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            for member_id in _pos_member_ids:
+                _push_to_agent(str(member_id), dict(_pos_payload))
         except Exception:
             logger.warning(
-                "assignee_changed SSE 포워딩 실패(story=%s project=%s)",
+                "position_changed SSE 포워딩 실패(story=%s project=%s)",
                 story.id, story.project_id, exc_info=True,
             )
-        try:
-            await fire_webhooks(
-                db, org_id, "story.assignee_changed", event_data,
-                recipient_member_ids=_assignee_notify_ids,
-            )
-        except Exception:
-            pass
-        try:
-            await process_event(db, org_id, story.project_id, EventContext(
-                event_type="story.assignee_changed",
-                trigger_type_slug="assignee_changed",
-                actor_id=str(actor_id) if actor_id else None,
-                metadata=event_data,
-            ))
-        except Exception:
-            pass
-        # E-EVENTBUS P3 S9 / E-EVENT-INJECT S3: story_assigned 알림 + agent assignment-wake
-        if story.assignee_id and story.assignee_id != old_assignee_id:
-            # assignee 멤버 타입 resolve (agent vs human)
-            assignee_type = (await db.execute(
-                select(TeamMember.type).where(TeamMember.id == story.assignee_id).limit(1)
-            )).scalar_one_or_none()
-
-            if assignee_type == "agent":
-                # E-EVENT-INJECT S3: agent에 배정만 해도 work-turn 시작.
-                # dispatch.py 미러 — content 실린 story_assigned Event + seq + commit BEFORE wake.
-                # (기존 dispatch_notification은 content 없는 dispatched라 connector가 드롭 → 깨우지 못함)
-                _detail = (story.description or "").strip()
-                _content = f"[story] {story.title}" + (f" — {_detail[:200]}" if _detail else "")
-                sa_event = Event(
-                    project_id=story.project_id,
-                    org_id=org_id,
-                    event_type="story_assigned",  # EventType enum 미존재 → literal (connector allow-list 포함)
-                    source_entity_type="story",
-                    source_entity_id=story.id,
-                    sender_id=actor_id,
-                    recipient_id=story.assignee_id,
-                    recipient_type="agent",
-                    payload={
-                        "story_id": str(story.id),
-                        "story_title": story.title,
-                        "content": _content,
-                        "event_type": "story_assigned",
-                    },
-                    status="pending",
-                )
-                db.add(sa_event)
-                await db.flush()
-                await assign_recipient_seq(db, sa_event)  # per-recipient dense seq
-                # L1 BE-3: story assignment → activity_events 1행(best-effort·commit 前·순서 불변).
-                from app.services.activity_stream import extract_activities_best_effort
-                await extract_activities_best_effort(db, [sa_event.id])
-                await db.commit()  # commit BEFORE wake — seq 확정, 이중전달 방지
-                if sa_event.recipient_seq is not None:
-                    wake_agent(str(story.assignee_id), sa_event.recipient_seq)
-                # 1f01c1ad: wake_agent(SSE)는 CC 세션 미도달 → member webhook(CC 릴레이)으로도 주입.
-                # dispatch.py 동형 — INJECTABLE 이벤트의 단일 CC 주입 경로(member webhook)로 일관 전달.
-                from app.services.conversation_webhook import deliver_injected_event_webhook
-                background_tasks.add_task(
-                    deliver_injected_event_webhook,
-                    org_id=org_id,
-                    recipient_id=story.assignee_id,
-                    content=_content,
-                    event_type="story_assigned",
-                    source_entity_type="story",
-                    source_entity_id=story.id,
-                )
-            else:
-                # human: 기존 dispatch_notification 유지 (변경 0)
-                await dispatch_notification(
-                    db,
-                    org_id=org_id,
-                    event_type="story_assigned",
-                    target_member_ids=[story.assignee_id],
-                    title=f"스토리 담당자로 지정됨: {story.title}",
-                    body=None,
-                    reference_type="story",
-                    reference_id=story.id,
-                    # story #1953: story.project_id NOT NULL — 신규 조회 없이 그대로 실음.
-                    source_project_id=story.project_id,
-                )
-        if actor_id:
-            try:
-                db.add(StoryActivity(
-                    story_id=id,
-                    org_id=org_id,
-                    project_id=story.project_id,
-                    activity_type="assignee_changed",
-                    old_value=str(old_assignee_id) if old_assignee_id else None,
-                    new_value=str(story.assignee_id) if story.assignee_id else None,
-                    created_by=(await canonicalize_member_id(actor_id, db)),  # AC3-2d(1b) canonical
-                ))
-                await db.flush()
-            except Exception:
-                pass
 
     # S-C2: story_updated — actor가 agent인 경우 기록 (AC2, AC6)
     if actor_id:
