@@ -43,10 +43,20 @@ IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/frontend:${COMMIT_
 # 이 시크릿을 바인딩했다 — 재실행되면 dev에 이 값이 새로 생겨 dev/prod parity가 깨지고
 # (dev가 원래 없어야 할 조건을 얻어) 그 클래스 버그를 다시 만들 위험이 있었다. env별로
 # 분리한다(dev=미포함, prod=포함).
+# story #2077(2026-07-24, 오르테가군 PR 리뷰 적발): MIN_INSTANCES가 dev=0·prod=1로 라이브
+# 실측(dev=1·prod=3, `cloudbuild.yaml`의 `_FRONTEND_MIN_INSTANCES`/GHA `frontend_min_instances`
+# 참조 — 그쪽이 SSOT)과 어긋나 있었다. 이 스크립트는 GHA cloud-build.yml이 유일한 실 배포
+# 경로라 트리거되지 않는 한 무해했지만, "값이 코드 밖에 떠 있는" #2077 원 결함보다 "틀린 값이
+# 코드 안에 있는" 이쪽이 더 위험하다 — 이 스크립트를 맞는 값으로 믿고 수동 실행하면 prod
+# minScale이 3→1로 떨어져 #2074(콜드스타트 5~8초)가 그대로 재발한다. 라이브 값으로 정정.
+# ⚠️SSOT는 `cloudbuild.yaml`/`.github/workflows/cloud-build.yml`이다 — 이 스크립트는 수동
+# 실행 전용 보조 경로라 값이 바뀌면 두 곳을 손으로 맞출 수밖에 없다(자동 동기화 없음). 다음에
+# min/max-instances를 바꿀 땐 반드시 이 파일도 같이 검토할 것 — 안 그러면 오늘과 같은 드리프트가
+# 재발한다.
 case "${ENV}" in
     dev)
         SERVICE_NAME="sprintable-frontend-dev"
-        MIN_INSTANCES=0
+        MIN_INSTANCES=1
         MAX_INSTANCES=3
         MEMORY="512Mi"
         CPU="1"
@@ -59,7 +69,7 @@ case "${ENV}" in
         ;;
     prod)
         SERVICE_NAME="sprintable-frontend-prod"
-        MIN_INSTANCES=1
+        MIN_INSTANCES=3
         MAX_INSTANCES=10
         MEMORY="1Gi"
         CPU="2"
