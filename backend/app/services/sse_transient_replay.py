@@ -61,6 +61,10 @@ _DOMAIN = "sse_replay"
 # 근거는 모듈 docstring 참조 — #2408 재연결 backoff 상한(20s)+jitter(±20%⇒최대 24s)를
 # 한 사이클 여유 있게 넘기는 값. 실측 갭(359~427ms)보다 훨씬 크지만, "가끔 20초짜리 재시도가
 # 한 번 껴도 살아남는다"까지가 목표(그 이상은 별도 영속화 문제 — 스코프 아님).
+# ⚠️의도적으로 Settings 필드가 아니라 os.getenv 직독(_BACKFILL_THRESHOLD_SECONDS 등 events.py
+# 튜닝 상수와 동형 컨벤션 — 그쪽도 Settings를 안 탄다). 오르테가군 PR 리뷰(2026-07-24): 이 값을
+# 배포 env로 세팅하는 순간 #2135 드리프트 가드(축④ Settings 커버리지)가 "Settings 필드에 없는
+# env var"로 오탐할 수 있다 — Settings로 올리는 대신 이 사실을 여기 명시해둔다.
 TTL_SECONDS: int = int(os.getenv("SSE_TRANSIENT_REPLAY_TTL_SECONDS", "30"))
 _MAX_ENTRIES: int = int(os.getenv("SSE_TRANSIENT_REPLAY_MAX_ENTRIES", "50"))
 
