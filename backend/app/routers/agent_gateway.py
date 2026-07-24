@@ -10,6 +10,8 @@ import asyncio
 import json
 import logging
 import os
+import random
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -50,6 +52,23 @@ _SESSION_FRESH_TTL: float = _SSE_HEARTBEAT * 3
 # 아니라 **세션-row 존재**로 한다. 다만 크래시로 finally 미실행된 leaked row를 "활성"으로 오판하면 안 되므로,
 # 연결 최대수명(GLCB backend timeout 3600s = SSE 단일연결 상한)을 넘긴 row는 확실히 죽은 좀비로 보고 제외/GC.
 _MAX_SSE_LIFETIME_SEC: float = 3900.0  # 3600s(GLCB) + 여유
+
+# story #2128(2026-07-24, critical) — wall-clock 수명 상한(v2 설계 ①본체, events.py와 동형
+# 원리). 위 _MAX_SSE_LIFETIME_SEC은 "이미 죽었다고 확信할 수 있는" 사후 GC 기준(3600s+여유)
+# 일 뿐, 스트림 자체를 능동 종료하지 않는다 — Cloud Run 타임아웃이 결국 끊어줄 때까지
+# 수동으로 기다리기만 했다(그게 이 병의 본질). 이 상수는 그 수동 대기를 능동 종료로 바꾼다.
+#
+# N=1800s(30분) 근거 — browser(events.py)와 다른 판단이 필요한 이유: 에이전트는 프론트
+# 프록시를 안 거치고 backend-dev에 직결이라(#2095의 60s 강제 재연결 없음) MCP 세션의 idle
+# 대기가 정당하게 길 수 있다 — browser와 같은 "자연주기" 논증을 못 쓴다.
+# · 3600s의 절반 — 오탐지 리스크를 browser보다 크게 두되(margin 우선), 최대 점유는 2배 줄인다.
+# · #2161(AGENT_RUN_TIMEOUT_HOURS=24h)과 동형 판단 — 첫 판은 "정확"이 아니라 "안전"이 목적.
+#   idle-but-legit한 agent 세션 길이를 실측한 적이 없어 보수적으로 넉넉히 잡았다.
+#
+# 무너지는 조건(pinning 테스트 — tests/test_2128_sse_lifespan_cap.py 참조): "30분보다 오래
+# idle-but-legit한 agent 세션이 실제로 관측되면" 이 값을 올려야 한다 — 지금은 그런 관측 없음.
+_AGENT_SSE_LIFESPAN_SEC: float = 1800.0
+_AGENT_SSE_LIFESPAN_JITTER_SEC: float = 60.0  # herd 방지(#2095 지터와 동일 목적)
 
 
 async def _mark_agent_online(agent_id: uuid.UUID, session_id: uuid.UUID) -> None:
@@ -414,6 +433,10 @@ async def agent_stream(
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
     _agent_connections[agent_id_str].add(queue)
 
+    # story #2128: 연결 시작 시점에 이미 종료 예정 시각을 갖고 태어난다(#2161과 동일 원리).
+    # monotonic — 벽시계 조정에 영향 안 받음.
+    _lifespan_deadline = time.monotonic() + _AGENT_SSE_LIFESPAN_SEC + random.uniform(0, _AGENT_SSE_LIFESPAN_JITTER_SEC)
+
     async def generate():
         """gap-free ordered-at-least-once SSE ì¤í¸ë¦¼.
 
@@ -481,6 +504,13 @@ async def agent_stream(
             last_presence_tick = datetime.now(timezone.utc)
             # story c4c72eb1(E-ARCH GCE 이전) PR-A: events.py와 동형 shutdown-aware 종료.
             while not await request.is_disconnected():
+                # story #2128 ①본체: 좀비가 스스로 늘릴 수 없는 유일한 축 — disconnect 감지
+                # 여부와 완전히 무관하게 발동. "완료로 위장" 안 함 — 특별취급 없이 기존
+                # finally: 하나로 그대로 흘러간다(정상종료·이상종료·수명초과 전부 같은 정리
+                # 경로 — presence offline 강등·세션row 삭제 포함, #2161 CAS 원칙의 적용).
+                if time.monotonic() >= _lifespan_deadline:
+                    yield "event: lifespan_reconnect\ndata: {}\n\n"
+                    return
                 _now = datetime.now(timezone.utc)
                 if (_now - last_presence_tick).total_seconds() >= _PRESENCE_TICK_INTERVAL:
                     from app.core.config import settings as _settings
