@@ -216,10 +216,17 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}APP_URL=${APP_URL}"
 # 별도로 이 값들을 받았다(describe 대조 확認) — dev는 지금도 없음. 즉 이번 건은 "dev값이
 # 분기 밖에 남은" 이전 3건과 반대 방향: **prod가 나중에 추가로 받은 값을 이 스크립트가
 # 못 따라간 것**. 특히 APP_ENV는 `config.py::is_really_local`(story #2071 — `K_SERVICE`
-# 부재로 로컬 판정, GCE엔 K_SERVICE가 원천적으로 없어 그 프로퍼티 자체는 이 값과 무관하게
-# 계속 True로 나옴, 이건 별도 코드 결함으로 등재)와는 별개로 `app_env` 문자열을 직접 보는
-# 코드 경로를 위해 필요 — 지금 당장 시크릿 fail-open 구멍은 아니지만(CRON_SECRET_PROD·
-# FIREBASE_BFF_INTERNAL_SECRET 둘 다 바인딩돼 있어 그 경로는 안전) 미러링 원칙 그대로 적용.
+# 부재로 로컬 판정)와는 별개로 `app_env` 문자열을 직접 보는 코드 경로를 위해 필요 — 지금
+# 당장 시크릿 fail-open 구멍은 아니지만(CRON_SECRET_PROD·FIREBASE_BFF_INTERNAL_SECRET 둘 다
+# 바인딩돼 있어 그 경로는 안전) 미러링 원칙 그대로 적용.
+# ⚠️정정(story #2179, 2026-07-24) — 위 "GCE엔 K_SERVICE가 없어 is_really_local이 계속
+# True로 나온다"는 서술은 **#2152(2026-07-23) 이전** 상태를 가리키던 것이라 지금은 사실이
+# 아니다. #2152가 `is_really_local`을 "K_SERVICE 부재=로컬"에서 "긍정 신호(PYTEST_CURRENT_
+# TEST 또는 SPRINTABLE_LOCAL_DEV) 없으면 로컬 아님"으로 근본수정했고, GCE 배포 경로(이
+# 스크립트·Dockerfile) 어디에도 `SPRINTABLE_LOCAL_DEV`가 없어 GCE는 지금 정확히 False(로컬
+# 아님)로 떨어진다 — `test_2152_runtime_local_detection.py::test_gce_is_not_local`이 이 값을
+# 고정해두고 있다. 이 정정 자체가 story #2179의 근거였다(json_logs 판정 축을 APP_ENV 문자열
+# 대신 `is_really_local`로 교체해도 GCE가 반쪽으로 남지 않는다는 확認).
 if [ "${ENV}" = "prod" ]; then
     PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}APP_ENV=prod"
     PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}NEXT_PUBLIC_APP_URL=${APP_URL}"
