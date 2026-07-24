@@ -348,6 +348,76 @@ describe('KanbanBoard — 실시간(SSE) 반영', () => {
     // 의존이라 이 테스트 범위 밖(멤버 목록 자체가 별건).
     expect(container.textContent).toContain('오르테가님이 S1 담당자를 변경했습니다');
   });
+
+  // story #2172 AC5 — BE(#2476)는 이미 story.position_changed를 발행하고 있었으나 FE 구독이
+  // 없어 "프레임은 나가는데 아무도 안 받는" 죽은 경로였다(라이브 실측으로 확認, dev). 컬럼 렌더가
+  // position으로 정렬하므로(storiesByColumn) position만 patch하면 재정렬은 그 정렬 로직이
+  // 그대로 이어받는다 — 이 테스트는 그 재정렬이 실제로 일어나는지 카드 DOM 순서로 고정한다.
+  it('순서 변경 이벤트도 토스트로 드러난다', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', position: 1000 }]);
+    await mount();
+    await act(async () => {
+      dispatchSse('story.position_changed', {
+        story_id: 's1', project_id: 'proj-1', actor_id: 'other-1', actor_name: '유나',
+        position: 500, old_position: 1000,
+      });
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('유나님이 S1 순서를 변경했습니다');
+  });
+
+  it('순서 변경 시 카드가 같은 컬럼 안에서 실제로 재배치된다(#2172 AC5②)', async () => {
+    // S1이 S2보다 뒤(position 큰 값)로 시작 — 이벤트로 S1이 S2보다 앞서게 만든다.
+    stubFetch([
+      { id: 's1', title: 'S1', status: 'backlog', priority: 'medium', position: 2000 },
+      { id: 's2', title: 'S2', status: 'backlog', priority: 'medium', position: 1000 },
+    ]);
+    await mount();
+    // ⚠️컨테이너 전체 textContent로 순서를 재면 ToastContainer가 담는 토스트 문구(스토리 제목을
+    // 그대로 포함)에 오염된다 — 오늘 라이브 계측에서 한 번 걸린 그 함정과 동형이라, 카드
+    // 자체만(dnd-kit useSortable이 부여하는 aria-roledescription="sortable") 스코프를 좁힌다.
+    function cardOrder(): string[] {
+      return Array.from(container.querySelectorAll('[aria-roledescription="sortable"]'))
+        .map((el) => (el.textContent!.includes('S1') ? 'S1' : el.textContent!.includes('S2') ? 'S2' : '?'));
+    }
+    expect(cardOrder()).toEqual(['S2', 'S1']); // 시작 상태: S2(1000)가 S1(2000)보다 먼저
+
+    await act(async () => {
+      dispatchSse('story.position_changed', {
+        story_id: 's1', project_id: 'proj-1', actor_id: 'other-1', actor_name: '유나',
+        position: 500, old_position: 2000,
+      });
+      await Promise.resolve();
+    });
+
+    expect(cardOrder()).toEqual(['S1', 'S2']); // S1이 500으로 내려와 S2(1000)보다 앞으로 옴
+  });
+
+  it('position 값이 실제로 안 바뀐 순서 이벤트는 무시한다(음성대조 — 과다 patch/토스트 방지)', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', position: 1000 }]);
+    await mount();
+    await act(async () => {
+      dispatchSse('story.position_changed', {
+        story_id: 's1', project_id: 'proj-1', actor_id: 'other-1', actor_name: '유나',
+        position: 1000, old_position: 1000, // 동일값 — 실질 변경 없음
+      });
+      await Promise.resolve();
+    });
+    expect(container.textContent).not.toContain('순서를 변경했습니다');
+  });
+
+  it('내 액션의 echo(actor_id===currentTeamMemberId)는 순서 변경 토스트도 안 띄운다', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', position: 1000 }]);
+    await mount();
+    await act(async () => {
+      dispatchSse('story.position_changed', {
+        story_id: 's1', project_id: 'proj-1', actor_id: 'me-1', actor_name: '나',
+        position: 500, old_position: 1000,
+      });
+      await Promise.resolve();
+    });
+    expect(container.textContent).not.toContain('순서를 변경했습니다');
+  });
 });
 
 // story #2137 — 카드는 갱신되는데 상세 패널만 옛값에 고정되던 결함(#2384·#2130과 같은 클래스의

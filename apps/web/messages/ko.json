@@ -451,6 +451,7 @@
     "loadMore": "더 보기",
     "realtimeStatusChanged": "{actor}님이 {title} 상태를 변경했습니다",
     "realtimeAssigneeChanged": "{actor}님이 {title} 담당자를 변경했습니다",
+    "realtimePositionChanged": "{actor}님이 {title} 순서를 변경했습니다",
     "realtimeUnknownActor": "누군가",
     "editStory": "스토리 수정",
     "changeStatus": "상태 변경",

@@ -451,6 +451,7 @@
     "loadMore": "Load more",
     "realtimeStatusChanged": "{actor} changed the status of {title}",
     "realtimeAssigneeChanged": "{actor} changed the assignee of {title}",
+    "realtimePositionChanged": "{actor} changed the order of {title}",
     "realtimeUnknownActor": "Someone",
     "editStory": "Edit Story",
     "changeStatus": "Change Status",
