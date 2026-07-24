@@ -323,6 +323,14 @@ def main() -> int:
             )
             for line in settings_coverage_report:
                 print(f"    - {line}")
+        else:
+            # story #2135 후속(2026-07-24, 오르테가 지적) — 다른 축이 FAIL이어도 ④ 자체는
+            # "돌았고 통과했다"를 눈에 보이게 남긴다. 안 그러면 "④가 실행은 됐나"를 출력만
+            # 보고는 알 수 없다 — 오늘 반복된 그 계열(성공이 관측 안 되면 성공했는지 모른다).
+            print(
+                f"  ④Settings 커버리지 — 이상 없음"
+                f"({len(_SETTINGS_CONSUMING_SERVICES)}개 서비스 검사·미커버 0건)."
+            )
         print(
             "\n→ ①은 파이프라인(cloudbuild.yaml/deploy_*.sh)에 편입하거나 "
             "infra/manual-env-allowlist.yml에 사유와 함께 등재. "

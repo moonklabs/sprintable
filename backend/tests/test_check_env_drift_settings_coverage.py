@@ -93,3 +93,32 @@ def test_backend_dev_live_key_set_flags_only_database_url_dev():
         f"기대: {{'DATABASE_URL_DEV'}}만 무효 — 실제: {unrecognized} "
         f"(exempt 목록이 어긋났거나 DATABASE_URL_DEV가 이미 정리됐을 수 있음)"
     )
+
+
+def test_axis4_pass_is_visible_even_when_another_axis_fails(monkeypatch, capsys):
+    """⭐라이브 실증(2026-07-24, 오르테가 지적)이 드러낸 갭 — 축①이 FAIL이면 축④가
+    통과해도(=settings_coverage_report 비어있음) 그 사실이 출력에 전혀 안 보였다("돌긴
+    했나"를 알 수 없는 상태). main()을 실행해 FAIL 종료(축①) 안에서도 "④...이상 없음"
+    한 줄이 반드시 찍히는지 고정한다 — 오늘 반복된 "성공이 관측 안 되면 성공했는지
+    모른다" 계열의 회귀가드."""
+    mod = _load_check_env_drift()
+
+    monkeypatch.setattr(mod, "_list_live_services", lambda: ["sprintable-realtime-dev"])
+    monkeypatch.setattr(
+        mod, "_live_env_entries",
+        lambda service: [{"name": "DEBUG", "value": "false"}],
+    )
+    monkeypatch.setattr(mod, "_load_allowlist", lambda: ({}, {}))
+    # iac_keys를 빈 집합으로 고정 — DEBUG가 어느 IaC에도 선언 안 된 것처럼 만들어 축①만
+    # 강제로 FAIL시킨다(DEBUG는 실 Settings 필드라 축④는 그대로 통과해야 정상).
+    monkeypatch.setattr(mod, "_iac_covered_keys", lambda: set())
+
+    exit_code = mod.main()
+
+    assert exit_code == 1, "축①이 FAIL해야 하는 시나리오인데 통과함 — 테스트 전제 자체가 깨짐"
+    out = capsys.readouterr().out
+    assert "①키집합 대조" in out
+    assert "sprintable-realtime-dev" in out and "DEBUG" in out
+    assert "④Settings 커버리지" in out and "이상 없음" in out, (
+        f"축①만 FAIL이고 축④는 통과인데 그 통과가 출력에 안 보임 — stdout:\n{out}"
+    )
