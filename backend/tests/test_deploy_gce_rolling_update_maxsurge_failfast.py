@@ -65,7 +65,7 @@ def _mock_gcloud_script(*, rolling_action_exit: int, zone_count: int) -> str:
         """)
 
 
-def _run_script(tmp_path, *, rolling_action_exit: int, zone_count: int):
+def _run_script(tmp_path, *, rolling_action_exit: int, zone_count: int, commit_sha: str = "deadbeef"):
     mock_bin_dir = tmp_path / "mockbin"
     mock_bin_dir.mkdir()
     gcloud_path = mock_bin_dir / "gcloud"
@@ -83,7 +83,7 @@ def _run_script(tmp_path, *, rolling_action_exit: int, zone_count: int):
         **os.environ,
         "PATH": f"{mock_bin_dir}:{os.environ['PATH']}",
         "DRY_RUN": "0",
-        "COMMIT_SHA": "deadbeef",
+        "COMMIT_SHA": commit_sha,
         # dev 분기의 하드코딩 MIG_NAME(스크립트 내부 변수) — mock gcloud는 별도 프로세스라
         # 스크립트 내부 변수를 못 보므로, backend-services describe mock 응답에 같은 이름을
         # 실어주기 위해 여기서도 명시(스크립트 값과 반드시 동일해야 함).
@@ -134,3 +134,26 @@ def test_rolling_action_success_reaches_end_of_script(tmp_path):
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     # log()는 stderr로 쓴다(이 스크립트 전체 컨벤션 — DRY_RUN의 stdout KEY=VALUE 출력과 분리).
     assert "Deployment submitted" in proc.stderr
+
+
+# ── 로컬 체크아웃 버전 가드(2026-07-24, 오르테가 실 사고 — stale d0acf749 체크아웃으로 첫
+# prod 배포가 백플레인 false 템플릿을 조용히 만들어냈다) ─────────────────────────────────
+
+def _real_repo_head() -> str:
+    import subprocess as _sp
+    return _sp.run(
+        ["git", "rev-parse", "HEAD"], cwd=os.path.dirname(_SCRIPT), capture_output=True, text=True,
+    ).stdout.strip()
+
+
+def test_version_guard_warns_when_commit_sha_does_not_match_local_checkout(tmp_path):
+    """⭐로컬 체크아웃(스크립트 파일 자체)이 COMMIT_SHA와 다른 커밋에 멈춰 있으면 경고 —
+    오늘 사고(옛 스크립트가 실행돼 백플레인 false 템플릿을 조용히 생성)의 재발 방지."""
+    proc, _ = _run_script(tmp_path, rolling_action_exit=0, zone_count=3, commit_sha="not-the-real-sha")
+    assert "WARNING" in proc.stderr and "local checkout" in proc.stderr, f"stderr={proc.stderr!r}"
+
+
+def test_version_guard_silent_when_commit_sha_matches_local_checkout(tmp_path):
+    """무회귀 대조군 — 정상 케이스(로컬 체크아웃 = 배포 대상 커밋)에서는 경고가 안 뜬다."""
+    proc, _ = _run_script(tmp_path, rolling_action_exit=0, zone_count=3, commit_sha=_real_repo_head())
+    assert "WARNING" not in proc.stderr, f"stderr={proc.stderr!r}"

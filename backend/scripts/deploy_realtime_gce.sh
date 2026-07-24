@@ -46,6 +46,29 @@ else
     COMMIT_SHA="${COMMIT_SHA:?COMMIT_SHA is required}"
 fi
 
+# ⛔prod GCE 재배포 사고(2026-07-24, 오르테가 자인) — 실행자의 로컬 체크아웃이 낮의
+# codex-스캔용 오래된 커밋(d0acf749)에 멈춰 있는 채로 이 스크립트를 돌렸다. COMMIT_SHA는
+# 도커 이미지 태그만 바꿨을 뿐 **스크립트 파일 자체**는 그 stale 체크아웃 그대로 실행돼,
+# `_BACKPLANE_DEFAULT` 도입 이전 버전(백플레인 항상 false)으로 첫 prod 배포가 조용히
+# 나갔다 — 오늘 rc=0 삼킴과 같은 계열(스크립트가 옳아도 옛 버전을 돌리면 무의미). 이 스크립트
+# 자신이 실행 중인 로컬 git checkout의 HEAD를 못박아 눈에 띄게 만든다(git 정보 없으면
+# "unknown"으로 표시만 하고 계속 진행 — 이 가드가 배포 자체를 막을 만큼 확실하진 않다).
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_LOCAL_HEAD="$(git -C "${_SCRIPT_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")"
+# log()는 이 시점에 아직 정의 전(스크립트 뒤쪽에서 정의)이라 echo로 직접 씀.
+echo "Running from local checkout HEAD=${_LOCAL_HEAD} (deploying COMMIT_SHA=${COMMIT_SHA} image tag)" >&2
+if [ "${_LOCAL_HEAD}" != "unknown" ] && [ "${DRY_RUN}" != "1" ]; then
+    case "${_LOCAL_HEAD}" in
+        "${COMMIT_SHA}"*) : ;;  # 접두 일치 — 정상(로컬 체크아웃 = 배포 대상 커밋).
+        *)
+            echo "⚠️  WARNING: local checkout HEAD(${_LOCAL_HEAD})가 COMMIT_SHA(${COMMIT_SHA})와" >&2
+            echo "   다르다 — 이 스크립트 파일 자체가 오래된 체크아웃에서 실행 중일 수 있다." >&2
+            echo "   (오늘 실측 사고: d0acf749 stale checkout으로 백플레인 false 템플릿이 나감)" >&2
+            echo "   'git pull'/'git checkout develop' 후 재실행을 확인할 것." >&2
+            ;;
+    esac
+fi
+
 case "${ENV}" in
     dev)
         MIG_NAME="sprintable-realtime-gateway-dev"
