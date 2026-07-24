@@ -425,6 +425,32 @@ steps:
         # (false/None)으로 되돌아가면 두 전송경로 동시 무효화(실시간 전면정지)가 된다.
         # 이 스텝은 이미 dev 전용 가드(위) 안이라 true를 직접 명시해도 안전(PG_LISTEN_ENABLED=
         # false와 동일 컨벤션) — REDIS_URL만 변수(연결문자열은 환경별로 다르므로).
+        #
+        # story #2178(2026-07-24, 까심 #2158 회귀검증에서 적발 → PO가 전수로 넓힘): deploy-backend
+        # 는 12키를 넘기는데 이 스텝은 8키뿐이라 backend·realtime 두 서비스가 다른 플래그 세트로
+        # 돌고 있었다 — 그 차이 자체가 어디에도 선언된 적이 없어 "켰다"고 믿는 사고가 반복됐다
+        # (#2158 SSE_TRANSIENT_REPLAY_ENABLED가 정확히 그 사고: record()는 backend-dev에서 돌아
+        # 정상이었는데, 실제 브라우저 SSE를 서빙하는 건 이 realtime-dev라 replay()가 이 서비스
+        # 에서 한 번도 안 돌고 있었다). 5종 전수 판정(코드 경로 실증, 값보다 "왜 다른지" 선언이
+        # 본체):
+        #   ⭐SSE_TRANSIENT_REPLAY_ENABLED  진짜 누락 — replay 대상 연결이 실제로 여기(realtime-
+        #     dev의 agent_event_stream)에 있다. 즉시 배선(아래).
+        #   ⭐SSE_LEASE_REDIS_ENABLED       진짜 누락 — events.py의 sse_lease.acquire/refresh/
+        #     release가 바로 이 파일의 agent_event_stream 안에서 직접 호출된다(연결 시점·30초
+        #     하트비트마다·해제 시). realtime-dev가 다인스턴스(_REALTIME_MIN/MAX_INSTANCES=2~8)
+        #     라 이게 꺼져 있으면 #2121이 고치려던 전역 429/503 캡이 인스턴스별로 쪼개져 그 결함이
+        #     이 서비스에서 그대로 재현된다. 즉시 배선(아래).
+        #   PRESENCE_REDIS_ENABLED         의도적 off(무해) — chat_presence는 이 파일(events.py)
+        #     어디에도 import/호출이 없다. 쓰기·읽기 전부 conversations.py/team_presence.py(REST
+        #     라우트)에만 있어 backend-dev에서만 실행된다.
+        #   PRESENCE_ONLINE_REDIS_ENABLED  의도적 off(무해) — 30초 SSE-틱 hot-path 기록은
+        #     agent_gateway.py의 /agent/stream(에이전트 전용, backend-dev가 직접 서빙)에만 있다.
+        #     이 파일의 agent_event_stream(브라우저 전용)엔 presence_online 참조가 전혀 없다.
+        #   FANOUT_WAKE_REDIS_ENABLED      의도적 off(무해) — wake_agent()는 REST 뮤테이션
+        #     라우트에서만 호출되고, 대상 큐(_agent_connections)도 에이전트 키인데 에이전트는
+        #     backend-dev에만 붙는다 — realtime-dev엔 그 큐 자체가 존재한 적이 없다.
+        # 위 두 건(누락)만 배선하고 나머지 셋은 의도적으로 그대로 둔다 — 한 덩어리로 "다 켜자"
+        # 하지 않는다(PO 지시).
         gcloud run deploy sprintable-realtime-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
@@ -432,7 +458,7 @@ steps:
           --max-instances=${_REALTIME_MAX_INSTANCES} \
           --timeout=${_REALTIME_TIMEOUT} \
           --allow-unauthenticated \
-          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=false,EVENT_BROKER_REDIS_CONSUME_ENABLED=true,REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true,EVENT_BROKER_REDIS_DISPATCH_ENABLED=true \
+          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=false,EVENT_BROKER_REDIS_CONSUME_ENABLED=true,REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true,EVENT_BROKER_REDIS_DISPATCH_ENABLED=true,SSE_TRANSIENT_REPLAY_ENABLED=true,SSE_LEASE_REDIS_ENABLED=true \
           --remove-env-vars=REDIS_CONSUME_ENABLED \
           --quiet
     waitFor: [run-migrate-job]
