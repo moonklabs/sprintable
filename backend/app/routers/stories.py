@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -671,6 +672,10 @@ async def bulk_update_stories(
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[StoryResponse]:
+    # #2176 AC1: 요청 수신 시각 — emit_story_status_changed에 그대로 넘겨 "요청 수신→emit 착수"
+    # 구간을 잰다(칸반 드래그/컬럼메뉴가 이 라우트를 타므로 미르코 실측 4,754ms의 서버측 성분을
+    # 여기서 갈라낸다). 순수 time.time() 캡처라 무부하.
+    _request_received_at = time.time()
     # 정공법 A(c1cd484b): /bulk 도 /status 와 동일 — status 변경을 항상 allow 하되 비순차 전진 점프는
     # violation flag(응답)+workflow_violation 이벤트로 가시화(차단 X). dnd 양경로(드래그·메뉴) 공통 SSOT.
     # violation 웹훅 수신자 필터용 actor 1회 해소(org-wide fan-out 박멸·/status 와 동형).
@@ -770,6 +775,7 @@ async def bulk_update_stories(
                 await emit_story_status_changed(
                     db, repo.org_id, s, old,
                     actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
+                    request_received_at=_request_received_at,
                 )
             except Exception:  # noqa: BLE001 — 한 item의 emit 실패가 나머지 item을 막지 않음.
                 # 오르테가군 PR 리뷰(2026-07-24): warning은 찾을 때 안 보이는 자리 — 오늘
@@ -1129,6 +1135,9 @@ async def update_story_status(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
+    # #2176 AC1: 요청 수신 시각(다른 어떤 DB/인가 작업보다도 먼저) — emit_story_status_changed에
+    # 그대로 넘겨 "요청 수신→emit 착수" 구간을 잰다. 순수 time.time() 캡처라 무부하.
+    _request_received_at = time.time()
     story_before = await repo.get(id)
     if story_before is not None:
         await _assert_story_project_access(db, auth, repo.org_id, story_before.project_id)
@@ -1297,6 +1306,7 @@ async def update_story_status(
         await emit_story_status_changed(
             db, org_id, story, old_status,
             actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
+            request_received_at=_request_received_at,
         )
 
     # S-C2: story_updated — actor가 agent인 경우 기록 (AC2, AC6)
