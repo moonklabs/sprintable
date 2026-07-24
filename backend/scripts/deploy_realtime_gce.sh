@@ -596,18 +596,39 @@ if gcloud compute instance-groups managed describe "${MIG_NAME}" \
         # 안전했다(아무 것도 건드리기 전에 멈춤 — backends/named-ports/https 200 전부 무영향,
         # fail-fast) — 그래도 실행 없이는 코드리뷰/CI로 못 잡는 gcloud API 제약이었다.
         #
-        # 수정: `--max-unavailable=0`(항상 유효한 값) + `--max-surge=1`. 이 스택의 존재
-        # 이유가 SSE 장수명 연결(설계 doc)이라, 기존 노드를 먼저 빼는 대신 **새 인스턴스를
-        # 먼저 띄우고** 헬스체크 통과 後 옮기는 쪽을 우선한다(오르테가 명시 선호). surge=1로
-        # 제한해 3대 e2-small이 일시 4대까지만 늘어나게(전체 3대 동시 서지=6대는 비용·쿼터
-        # 여유가 불확실해 배제).
-        log "Rolling-updating ${MIG_NAME} to template ${TEMPLATE_NAME} (MIG 객체 보존 — backend-service 부착·named-ports 무영향)"
-        gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
+        # ⛔prod 재배포 핫픽스(2026-07-24, 오르테가 실 재배포 실측 — 오늘 이 파일 세 번째 같은
+        # 결함류: delete+recreate·maxUnavailable·이번 maxSurge, 전부 "실행은 됐는데 실효는
+        # 없는" 형태) — `--max-surge=1`도 같은 regional MIG 제약에 걸린다: "Fixed
+        # updatePolicy.maxSurge for regional managed instance group has to be either 0 or at
+        # least equal to the number of zones". dev(당시 실측 zone 구성)에선 우연히 통과했지만
+        # prod(3존)에선 거부됐다 — "1"을 하드코딩하지 않고 **이 MIG가 실제로 걸쳐 있는 존
+        # 개수를 조회**해 그 값을 쓴다(하드코딩 "3"도 안 쓴다 — 스크립트가 아는 값과 라이브
+        # 존 구성이 어긋나면 오늘 반복된 "코드는 맞는데 실측과 다르다" 함정이 그대로 재현된다).
+        # max-unavailable=0 유지(항상 유효값·SSE 무중단 우선 — 새 인스턴스 먼저 띄우고
+        # 헬스체크 통과 後 옮기는 설계 의도는 그대로).
+        # json(...) 서브셋으로 좁혀 zones 리스트만 뽑은 뒤 "zone" 키 등장 횟수로 카운트 —
+        # gcloud value()의 리스트 join 구분자를 가정하지 않는 가장 안전한 방식. ⚠️grep -c는
+        # "매치된 줄 수"를 세지 총 매치 횟수가 아니다 — gcloud json 출력이 한 줄로 나오면
+        # (pretty-print 보장 없음) zone이 몇 개든 항상 1로 잡히는 실측 버그를 mock-gcloud
+        # 테스트로 직접 재현·확認했다. grep -o | wc -l로 줄 구조와 무관하게 총 출현 횟수를 센다.
+        _ZONE_COUNT=$(gcloud compute instance-groups managed describe "${MIG_NAME}" \
+            --project="${GCP_PROJECT}" --region="${GCP_REGION}" \
+            --format='json(distributionPolicy.zones)' | grep -o '"zone":' | wc -l | tr -d ' ')
+        log "Rolling-updating ${MIG_NAME} to template ${TEMPLATE_NAME} (MIG 객체 보존 — backend-service 부착·named-ports 무영향, max-surge=${_ZONE_COUNT} zone 수 실측)"
+        # ⛔같은 실측(2026-07-24) — rolling-action 실패가 파이프라인/래퍼를 거치면 rc=0으로
+        # 보일 수 있다(캡처 방식에 따라 exit code가 가려짐). `if ! CMD; then`로 이 명령
+        # **자체의** 종료코드를 명시 확인해 실패를 실패로 드러낸다(암묵적 set -e 전파에만
+        # 의존하지 않는다 — 이 파일 상단 `_REALTIME_URL` 빈값 가드와 동일한 명시-실패 컨벤션).
+        if ! gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
             --project="${GCP_PROJECT}" \
             --region="${GCP_REGION}" \
             --version=template="${TEMPLATE_NAME}" \
             --max-unavailable=0 \
-            --max-surge=1
+            --max-surge="${_ZONE_COUNT}"; then
+            echo "FAIL: rolling-action start-update 실패(${MIG_NAME}) — MIG는 이전 템플릿에 그대로 남아있다."
+            echo "      위 gcloud 에러 메시지를 확인할 것(예: maxSurge/maxUnavailable 제약)."
+            exit 1
+        fi
     fi
 else
     log "Creating MIG ${MIG_NAME} (size ${TARGET_SIZE}, zones ${ZONES}, no autoscaling)"
