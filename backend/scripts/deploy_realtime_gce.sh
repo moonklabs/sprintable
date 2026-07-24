@@ -311,9 +311,32 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}PRESENCE_ONLINE_REDIS_ENABLED=${PR
 # 여기 걸림, GCE 3노드 필수·멀티노드 합산 대조).
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}SSE_LEASE_REDIS_ENABLED=${SSE_LEASE_REDIS_ENABLED:-${_BACKPLANE_DEFAULT}}"
 # #2122(E-ARCH 근본): fanout(wake_agent) → Redis 백플레인 롤아웃 게이트(presence/lease 와 독립 flag).
-# env 로 flip(기본 false=pg_notify 직행 무회귀). #2122 라이브 재측정 배포=true(GCE PG_LISTEN=false라 wake
-# 가 Redis 백플레인 타야 타노드 도달 — 미설정 시 cross-node wake 0/2 재현). REALTIME_BACKPLANE 는 별개(cutover).
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}FANOUT_WAKE_REDIS_ENABLED=${FANOUT_WAKE_REDIS_ENABLED:-false}"
+# REALTIME_BACKPLANE 는 별개(cutover).
+#
+# story #2180(2026-07-25, 오르테가군 판정 — 기본값을 false 에서 durable true 로 승격):
+# 여태 `:-false` 라서 dev 라이브의 true 는 **SSOT 밖의 손 값**이었다(#2122 라이브 재측정 때
+# 손으로 넣은 것). 즉 다음 배포가 조용히 false 로 덮는 지뢰였다 — #2077(프론트 minScale 이
+# 코드 밖에 떠 있던 것)과 동형. 위 세 형제(presence/online/lease)는 이미 _BACKPLANE_DEFAULT
+# 로 못박혀 있는데 이것만 남아 있었다.
+#
+# 왜 true 가 맞는가:
+#   이 스택은 PG_LISTEN_ENABLED=false 다(아래 참조). ⇒ false 로 두면 wake 가 pg_notify 로만
+#   나가는데 **듣는 프로세스가 전 층에 0개**라 크로스노드 wake 가 조용히 사라진다
+#   (#2122 라이브에서 cross-node wake 0/2 재현됨). true 여야 Redis 백플레인을 타 타노드에 닿는다.
+#
+# 왜 «지금 아프지 않은데» 고치는가 (까심군 측정, 2026-07-25 · #2157 갈림길):
+#   GCLB access log 전수(관측 07-23 13:53Z~) — GCE 3노드에 wake_agent 콜사이트 라우트군
+#   (/api/v2/stories PATCH · /api/v2/gates POST · /api/v2/agents · /api/v2/a2a) 도달 **0건**.
+#   양성대조로 backend-prod 에서는 같은 쿼리에 다건 잡힘 ⇒ 계측기는 커밋을 볼 수 있다.
+#   ⇒ 현재 GCE 는 이벤트를 커밋하지 않는다 = **지금 켜도 라이브 동작 변화 0**(그래서 안전)
+#   ⇒ 동시에 «안 아픈 이유»가 구조적 보장이 아니라 **현 라우팅의 우연**이다 = 방치하면 라우팅이
+#      바뀌는 순간 조용히 깨진다. 안전하게 고칠 수 있는 지금 못박는다.
+#
+# 무너지는 조건: GCE 노드가 이벤트를 커밋하기 시작하는데 Redis 백플레인이 죽어 있으면, 이제는
+#   pg_notify 폴백조차 안 타므로 wake 가 통째로 유실된다(false 였을 때와 같은 결과). Redis
+#   가용성이 이 값의 전제다 — 위 형제 플래그 셋과 같은 전제라 새로 생기는 의존은 아니다.
+# ⚠️손 override 는 계속 가능하나(위 형제와 동일 규약), durable 값은 여기 한 곳이다.
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}FANOUT_WAKE_REDIS_ENABLED=${FANOUT_WAKE_REDIS_ENABLED:-${_BACKPLANE_DEFAULT}}"
 # ⛔story #2142(2026-07-23, 오르테가 전수 3방향 diff 적발, 4번째 묶음) — 같은 뿌리.
 # LLM_GEMINI_MODEL/_LOCATION·FIREBASE_OAUTH_HANDOFF_ENABLED 전부 backend-prod에 키
 # 자체가 없다(describe 대조 확認) — FIREBASE_OAUTH_HANDOFF_ENABLED=1은 특히 firebase

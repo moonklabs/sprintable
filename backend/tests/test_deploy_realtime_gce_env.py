@@ -40,12 +40,34 @@ def _resolve(script: str, env: str, extra: dict | None = None) -> dict[str, str]
     return cfg
 
 
-def _resolve_generated_env_lines(env: str) -> list[str]:
+def _resolve_generated_env_lines(env: str, extra: dict | None = None) -> list[str]:
     """실제 VM에 실릴 env-file 내용을 그대로 디코드해 줄 목록으로 반환 — `_resolve()`의
     요약 문자열이 아니라 스크립트가 진짜로 생성하는 산출물을 검증 대상으로 삼는다."""
-    cfg = _resolve(_DEPLOY_GCE, env)
+    cfg = _resolve(_DEPLOY_GCE, env, extra)
     b64 = cfg["GENERATED_PLAIN_ENV_FILE_B64"]
     return base64.b64decode(b64).decode().splitlines()
+
+
+def _resolve_generated_env_lines_without(env: str, *unset_keys: str) -> list[str]:
+    """story #2180 — **caller env 를 비운 상태**의 산출물을 반환한다.
+
+    `_resolve()` 는 `os.environ` 을 상속하므로, `${FOO:-기본값}` 형태의 «기본값»을 재려면
+    그 키를 명시적으로 지워야 한다. 안 지우면 실행 환경에 우연히 그 변수가 있을 때 통과해
+    버려 «SSOT 밖 손 값» 결함을 그대로 놓친다 — 이 스토리가 잡으려는 것이 정확히 그것이다.
+    """
+    environ = {**os.environ, "DRY_RUN": "1"}
+    for k in unset_keys:
+        environ.pop(k, None)
+    proc = subprocess.run(
+        ["bash", _DEPLOY_GCE, env],
+        capture_output=True, text=True, env=environ, check=True,
+    )
+    cfg: dict[str, str] = {}
+    for line in proc.stdout.strip().splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            cfg[k.strip()] = v.strip()
+    return base64.b64decode(cfg["GENERATED_PLAIN_ENV_FILE_B64"]).decode().splitlines()
 
 
 # ── deploy_realtime_gce.sh ───────────────────────────────────────────────────
@@ -347,6 +369,55 @@ def test_deploy_gce_invalid_env_rejected():
     )
     assert proc.returncode != 0
     assert "[dev|prod]" in proc.stderr
+
+
+# ── story #2180: FANOUT_WAKE_REDIS_ENABLED 가 SSOT 밖 손 값이 아니어야 한다 ──────
+
+def test_deploy_gce_fanout_wake_redis_is_durable_true_without_caller_env():
+    """story #2180(2026-07-25) — 이 저장소가 실제로 겪은 함정의 재발 방지.
+
+    여태 `${FANOUT_WAKE_REDIS_ENABLED:-false}` 라서, dev 라이브의 `true` 는 #2122 라이브
+    재측정 때 손으로 넣은 **caller env 값**이었다. 즉 스크립트를 그냥 돌리면 `false` 가
+    나가므로 **다음 배포가 조용히 원복시키는** 상태였다(#2077 프론트 minScale 과 동형 —
+    「라이브에 있는데 코드엔 없다」).
+
+    이 테스트는 **caller env 를 비운 상태**로 스크립트를 돌려 durable 기본값을 검증한다 —
+    `_resolve()` 가 `os.environ` 을 상속하므로, 명시적으로 지워야 「기본값」을 재는 것이 된다.
+    (안 지우면 실행 환경에 그 변수가 우연히 있을 때 통과해버려 판별력이 0이 된다.)
+    """
+    for env_name in ("dev", "prod"):
+        lines = _resolve_generated_env_lines_without(env_name, "FANOUT_WAKE_REDIS_ENABLED")
+        assert "FANOUT_WAKE_REDIS_ENABLED=true" in lines, (
+            f"[{env_name}] durable 기본값이 true 가 아니다 — caller env 없이 배포하면 "
+            "크로스노드 wake 가 pg_notify 로만 나가는데 이 스택은 PG_LISTEN_ENABLED=false 라 "
+            "듣는 프로세스가 0개다(#2122 에서 cross-node wake 0/2 재현)."
+        )
+        assert "FANOUT_WAKE_REDIS_ENABLED=false" not in lines
+
+
+def test_deploy_gce_fanout_wake_assumption_pg_listen_is_still_false():
+    """⚠️#2180 판단이 무너지는 조건을 고정한다.
+
+    「true 여야 한다」는 근거는 **이 스택에서 PG LISTEN 을 아무도 안 듣는다**는 사실 하나에
+    걸려 있다. PG_LISTEN_ENABLED 가 true 로 바뀌면 pg_notify 경로가 되살아나므로 그 근거가
+    사라지고 #2180 을 **재판정**해야 한다. 그때 이 테스트가 실패해서 알려주는 것이 목적이다
+    (#2178 에서 세운 「전제를 소스에 박고 pinning 으로 지킨다」와 같은 형태).
+    """
+    for env_name in ("dev", "prod"):
+        lines = _resolve_generated_env_lines(env_name)
+        assert "PG_LISTEN_ENABLED=false" in lines, (
+            f"[{env_name}] PG_LISTEN_ENABLED 전제가 바뀌었다 — story #2180 의 "
+            "FANOUT_WAKE_REDIS_ENABLED=true 판단을 재판정할 것."
+        )
+
+
+def test_deploy_gce_fanout_wake_caller_override_still_works():
+    """durable 기본값을 못박되 **손 override 통로는 막지 않는다** — 위 형제 플래그
+    (PRESENCE_*/SSE_LEASE_*)와 동일 규약. 롤백·실험 때 이 통로가 필요하다."""
+    lines = _resolve_generated_env_lines(
+        "dev", extra={"FANOUT_WAKE_REDIS_ENABLED": "false"}
+    )
+    assert "FANOUT_WAKE_REDIS_ENABLED=false" in lines
 
 
 # ── provision_realtime_gclb.sh ───────────────────────────────────────────────
