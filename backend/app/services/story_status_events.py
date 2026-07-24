@@ -112,6 +112,15 @@ async def emit_story_status_changed(
     호출자가 story.status를 이미 새 값으로 설정한 뒤 호출한다. 각 side-effect는 best-effort(실패
     격리)로 status 전이 자체를 깨지 않는다.
 
+    ⚠️계약(story #2173, 2026-07-24 — «결함인지 아닌지 가르기» 판정): 이 함수는 **호출자에게
+    예외를 전파하지 않는다** — SSE·webhook·L2·notification·StoryActivity·trust_pipeline 전부
+    개별 try/except로 감싸져 있다(tests/test_emit_story_status_changed_isolation.py로 고정).
+    이 계약 덕에 `update_story_status`(단건 PATCH)는 이 호출을 try/except로 안 감싸도 안전하고,
+    `bulk_update_stories`의 item별 try/except는 emit 신뢰성이 아니라 순수 다건성(한 item 실패가
+    나머지를 막으면 안 됨) 때문이다 — 두 콜사이트의 차이는 우연이 아니라 이 계약에서 파생된다.
+    무너지는 조건: 나중에 이 함수에 개별 try/except 없는 새 side-effect가 추가되면 이 계약이
+    깨진다 — 추가하는 사람이 그 자리도 감싸야 한다(또는 두 콜사이트 재검토).
+
     `request_received_at`(#2176 AC1, 2026-07-24): 미르코 실측 — 칸반 상태변경이 액터 호출부터
     화면 도착까지 10초(전달 4.7초+렌더 5.0초)였는데, "액터 호출 시작"이 MCP 발신 시각이라 그
     안에 BE 처리·발행이 전부 섞여 있어 #2158의 순수 SSE 전송 400ms대와 기준선이 다르다는
