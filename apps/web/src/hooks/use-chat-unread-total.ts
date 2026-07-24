@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useChatSse } from './use-chat-sse';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * story #1977(트랙B) — GNB 채팅 unread 총합(3번째 표면: 데스크톱 사이드바 채팅 항목 +
@@ -23,7 +24,8 @@ export function useChatUnreadTotal(currentTeamMemberId?: string): number {
     let cancelled = false;
     async function fetchTotal() {
       try {
-        const res = await fetch('/api/conversations/unread-count');
+        // story #2160 — 401을 조용히 삼키던 자리(fetchWithAuth로 전환).
+        const res = await fetchWithAuth('/api/conversations/unread-count');
         if (!res.ok || cancelled) return;
         const json = (await res.json()) as { count?: number };
         if (!cancelled) setTotal(json.count ?? 0);

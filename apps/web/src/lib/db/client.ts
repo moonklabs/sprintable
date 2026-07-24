@@ -1,6 +1,6 @@
 'use client';
 
-import { signalSessionExpired } from '@/lib/auth/session-expired-signal';
+import { isSessionExpiredSignaled, signalSessionExpired } from '@/lib/auth/session-expired-signal';
 
 // ─── FastAPI Auth Utilities ───────────────────────────────────────────────────
 
@@ -57,6 +57,12 @@ export async function refreshAuthTokens(): Promise<AuthResult> {
 let _refreshing: Promise<AuthResult> | null = null;
 
 export async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  // story #2160 — 세션이 이미 죽었다고 확定된 뒤(SessionExpiredDialog 노출 중)엔 네트워크를
+  // 아예 타지 않는다. 안 그러면 401 폴링/재연결 루프가 매 tick마다 refresh를 다시 시도해
+  // "401에는 재시도하지 않는다"는 처방이 무력화된다.
+  if (typeof window !== 'undefined' && isSessionExpiredSignaled()) {
+    return new Response(null, { status: 401 });
+  }
   const res = await fetch(input, init);
   if (res.status !== 401) return res;
 

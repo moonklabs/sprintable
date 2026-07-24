@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
 import { createReconnectBackoffState, type ReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
+import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
 
 // chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
 export interface SendAttachment {
@@ -164,15 +165,23 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
 
       source.onerror = () => {
         setConnected(false);
+        // story #2160 — CLOSED는 브라우저가 이미 "복구 불가"로 판정한 것(자동재연결 없음).
+        const wasFatal = source.readyState === EventSource.CLOSED;
         source.close();
         sourceRef.current = null;
-        if (!reconnectTimerRef.current) {
+        const scheduleRetry = () => {
+          if (reconnectTimerRef.current) return;
           const delay = backoff.onError();
           reconnectTimerRef.current = setTimeout(() => {
             reconnectTimerRef.current = null;
             connect();
           }, delay);
+        };
+        if (wasFatal) {
+          void isSessionAlive().then((alive) => { if (alive) scheduleRetry(); });
+          return;
         }
+        scheduleRetry();
       };
 
       // conversation.message_created — realtime update for conversation list

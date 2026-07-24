@@ -13,6 +13,7 @@ import {
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useMediaQuery } from '@/lib/use-media-query';
@@ -95,7 +96,8 @@ function timeAgo(dateStr: string, t: ReturnType<typeof useTranslations>): string
 async function fetchNotifications(projectId?: string): Promise<EventNotification[]> {
   const params = new URLSearchParams({ limit: '30' });
   if (projectId) params.set('project_id', projectId);
-  const res = await fetch(`/api/event-notifications?${params.toString()}`);
+  // story #2160 — 401을 조용히 삼키던 폴링을 fetchWithAuth로 전환(세션만료 인지+재로그인 유도).
+  const res = await fetchWithAuth(`/api/event-notifications?${params.toString()}`);
   if (!res.ok) return [];
   const json = (await res.json()) as unknown;
   if (Array.isArray(json)) return json as EventNotification[];
@@ -109,7 +111,8 @@ async function fetchNotifications(projectId?: string): Promise<EventNotification
 
 async function fetchUnreadCount(projectId?: string): Promise<number> {
   const params = projectId ? `?project_id=${projectId}` : '';
-  const res = await fetch(`/api/event-notifications/unread-count${params}`);
+  // story #2160 — 30초 폴링이 401을 조용히 삼키던 자리(fetchWithAuth로 전환).
+  const res = await fetchWithAuth(`/api/event-notifications/unread-count${params}`);
   if (!res.ok) return 0;
   const json = (await res.json()) as unknown;
   if (json && typeof json === 'object') {

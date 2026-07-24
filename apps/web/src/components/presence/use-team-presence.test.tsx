@@ -11,10 +11,17 @@ import { useTeamPresence } from './use-team-presence';
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
+  // story #2160 — 실 EventSource의 readyState 상수. 이 테스트가 시뮬레이션하는 error→open은
+  // "native auto-reconnect가 다시 연 것"(정상 순단, docstring 참고)이라 CONNECTING이 맞는 기본값
+  // — CLOSED(fatal)였다면 #2160의 세션-확認 분기를 타 fetchMock 호출수가 달라진다.
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
   listeners: Record<string, Array<() => void>> = {};
   onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
   closed = false;
+  readyState = 0;
   constructor(public url: string, _opts?: unknown) {
     FakeEventSource.instances.push(this);
   }
