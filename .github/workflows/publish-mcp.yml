@@ -1,0 +1,51 @@
+name: Publish sprintable-mcp to PyPI
+
+# OB-PUBLISH(f5e1742d): uvx sprintable-mcp is currently PyPI 404 — this workflow is the
+# prerequisite. Filename/environment name below must match PyPI's registered pending
+# publisher exactly (repo: moonklabs/sprintable, workflow: publish-mcp.yml, environment: pypi).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: Build and publish sprintable-mcp
+    runs-on: ubuntu-latest
+    # First publish creates the PyPI project from the pending publisher — no API token needed,
+    # OIDC only (id-token: write below). Never add a token/twine step here.
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    # Defense-in-depth: this is a monorepo, `release: published` could in principle fire for a
+    # release unrelated to sprintable-mcp. Require an explicit sprintable-mcp-v* tag (manual
+    # workflow_dispatch runs skip this guard — those are always intentional).
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'sprintable-mcp-v')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sanity-check release tag matches package version
+        if: github.event_name == 'release'
+        working-directory: backend/sprintable_mcp
+        run: |
+          pkg_version=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          tag_version="${GITHUB_REF_NAME#sprintable-mcp-v}"
+          if [ "$pkg_version" != "$tag_version" ]; then
+            echo "::error::release tag sprintable-mcp-v$tag_version does not match pyproject.toml version $pkg_version — bump pyproject.toml before tagging"
+            exit 1
+          fi
+
+      - name: Build sdist and wheel
+        working-directory: backend/sprintable_mcp
+        run: uv build --out-dir dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: backend/sprintable_mcp/dist
