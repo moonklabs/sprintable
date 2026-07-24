@@ -179,6 +179,11 @@ async def emit_story_status_changed(
     # 9ef0f914·trust_pipeline.py `_maybe_emit`)와 동일하게 project 인가 필터를 낀 수동
     # 포워딩만 남긴다 — 순수 transient push(Event row 생성 0, 연결 안 된 멤버는
     # `_push_to_agent` 자체가 조용히 no-op).
+    # #2176 AC1(오르테가군 PR 리뷰 지적): 여기 `time.monotonic()`이 아니라 `time.time()`이
+    # 맞는 선택이다 — 이 값은 duration 계산에만 쓰이는 게 아니라 **절대 시각으로 로그에
+    # 찍혀** 미르코군의 클라측 `Date.now()` 타임스탬프와 맞대볼 수 있어야 한다.
+    # monotonic은 프로세스-로컬 기준점이라 절대 의미가 없어 그 크로스-프로세스 대조가
+    # 안 된다 — "정석은 monotonic 아닌가"로 나중에 고치면 이 대조 능력이 깨진다.
     _emit_started_at = time.time()
     try:
         from app.routers.events import _push_to_agent
