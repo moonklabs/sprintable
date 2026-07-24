@@ -772,7 +772,10 @@ async def bulk_update_stories(
                     actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
                 )
             except Exception:  # noqa: BLE001 — 한 item의 emit 실패가 나머지 item을 막지 않음.
-                logger.warning(
+                # 오르테가군 PR 리뷰(2026-07-24): warning은 찾을 때 안 보이는 자리 — 오늘
+                # #2128/#2160/#2161 전부 "조용한 실패"였다. 나가야 할 실시간 프레임이 안 나간
+                # 것 자체가 이 스토리가 고치는 병이라 ERROR로 올린다.
+                logger.error(
                     "bulk status_changed emit 실패(story=%s)", s.id, exc_info=True,
                 )
     return results
