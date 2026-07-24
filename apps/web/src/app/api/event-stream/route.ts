@@ -28,7 +28,21 @@ export async function GET(request: NextRequest): Promise<Response> {
   const upstreamHeaders: Record<string, string> = { Authorization: `Bearer ${session.access_token}` };
   if (lastEventId) upstreamHeaders['Last-Event-ID'] = lastEventId;
 
-  const upstream = await fetch(upstreamUrl.toString(), { headers: upstreamHeaders });
+  // story #2183 — signal이 없으면 이 요청(클라 연결 종료·프론트 자신의 Cloud Run 요청이 60초로
+  // 잘리는 것 포함)이 끝나도 upstream(realtime-gateway) 커넥션은 안 끊긴다. 프론트가 60초마다
+  // 클라 쪽만 끊고 재연결하는 사이클이라, 재연결 1회마다 좀비 upstream 커넥션이 하나씩 쌓여
+  // realtime 타임아웃(3600s) 상한까지 살아있는다 — 탭 1개당 누적 최대 ~60개. request.signal을
+  // 넘겨 다운스트림이 끝나면 upstream fetch도 즉시 abort되게 한다.
+  let upstream: Response;
+  try {
+    upstream = await fetch(upstreamUrl.toString(), { headers: upstreamHeaders, signal: request.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      // 클라가 이미 연결을 끊은 뒤라 응답을 볼 대상이 없다 — 조용히 빈 응답으로 정리.
+      return new Response(null, { status: 499 });
+    }
+    throw err;
+  }
 
   if (!upstream.ok) {
     return NextResponse.json(
