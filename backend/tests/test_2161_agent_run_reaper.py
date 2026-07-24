@@ -107,6 +107,50 @@ async def test_sweeper_abandons_expired_running_run_with_explicit_deadline():
 
 
 @pytest.mark.anyio
+async def test_sweeper_abandons_genuinely_old_run_without_int32_overflow():
+    """오르테가군 라이브 발견(migration 0210) 회귀가드 — 스케줄 등록 前 실호출로 잡힌 버그:
+    90일 전에 시작된 run(0208 백필 시나리오처럼 매우 오래된 stuck run)을 리퍼가 abandoned로
+    전이하며 finished_at을 쓰면 duration_ms(GENERATED)가 계산되는데, 그 값이 32bit integer
+    상한(~24.83일)을 넘어 `asyncpg.NumericValueOutOfRangeError: integer out of range`로 UPDATE
+    자체가 실패했다 — CI는 짧은 시간차 데이터만 써서 통과했고 라이브에서만 터졌다("단순
+    유닛으로 안 닫힘", 오르테가군 지적). bigint 확장(0210) 후 실제로 90일치 run이 정상
+    abandoned 전이되고 duration_ms가 정확한 값(~90일 in ms, INT32_MAX 훨씬 초과)을 갖는지
+    실PG로 직접 검증 — 반드시 짧은 시간차가 아닌 진짜 오래된 값으로."""
+    from app.services.agent_run_lifecycle import sweep_expired_agent_runs
+    from app.models.agent_run import AgentRun
+    from sqlalchemy import select
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            very_old_started_at = datetime.now(timezone.utc) - timedelta(days=90)
+            run = await _make_run(
+                s, org_id, project_id, deadline_at=None, started_at=very_old_started_at,
+            )
+
+            result = await sweep_expired_agent_runs(s)
+            assert result["swept_count"] == 1
+            assert str(run.id) in result["run_ids"]
+
+            reloaded = (await s.execute(select(AgentRun).where(AgentRun.id == run.id))).scalar_one()
+            assert reloaded.status == "abandoned"
+            assert reloaded.finished_at is not None
+            # INT32_MAX(2,147,483,647ms ≈ 24.83일)를 훨씬 초과하는 실제 값 — bigint 확장이
+            # 실제로 먹혔는지의 직접 증거(단순히 에러 없음만으론 부족, 값 자체를 확認).
+            assert reloaded.duration_ms is not None
+            assert reloaded.duration_ms > 2_147_483_647, (
+                f"duration_ms가 INT32_MAX를 안 넘음 — 90일치 run인데 값이 이상함: {reloaded.duration_ms}"
+            )
+            expected_ms = 90 * 24 * 3600 * 1000
+            assert abs(reloaded.duration_ms - expected_ms) < 60_000, (
+                f"90일 근방이어야 — 실제 {reloaded.duration_ms}ms"
+            )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_sweeper_leaves_not_yet_expired_run_running():
     from app.services.agent_run_lifecycle import sweep_expired_agent_runs
     from app.models.agent_run import AgentRun

@@ -17,7 +17,9 @@ class MockupPage(Base):
     slug: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    viewport: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #2181(모델↔DB drift 감사): 실 DB는 NOT NULL(모델은 nullable=True로 잘못 선언돼 있었음
+    # — router가 body.viewport 그대로 넘기면 생략 호출 시 NotNullViolation 500이던 자리, 같이 fix).
+    viewport: Mapped[str] = mapped_column(Text, nullable=False, server_default="desktop")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -30,7 +32,13 @@ class MockupComponent(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     page_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    type: Mapped[str] = mapped_column(Text, nullable=False)
+    # story #2181(모델↔DB drift 감사, 2026-07-24): 실 DB 컬럼명은 `component_type`(모델은
+    # `type`이라 선언 — 처음부터 한 번도 일치한 적 없었던 자리, mockup_components를 건드리는
+    # 모든 select(MockupComponent)가 실 migrated DB에서 UndefinedColumnError였을 것). API
+    # 계약(MockupComponentOut.type)·라우터 kwarg(`type=`)는 그대로 두고 DB 컬럼명만 명시
+    # 매핑(app/models/agent_run.py의 run_metadata↔"metadata"와 동형 패턴) — 파이썬 쪽 이름은
+    # 안 건드려 회귀 0.
+    type: Mapped[str] = mapped_column("component_type", Text, nullable=False)
     props: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     parent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
