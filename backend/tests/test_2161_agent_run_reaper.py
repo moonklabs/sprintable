@@ -421,6 +421,107 @@ async def test_realdb_patch_respects_client_provided_finished_at():
         await engine.dispose()
 
 
+def test_migration_0208_backfills_legacy_null_started_at_and_enforces_not_null():
+    """CI real-PG 리뷰(#2478, 2026-07-24) 회귀 재발 방지 — `app/models/agent_run.py`의
+    `started_at`은 원래도 `nullable=False, server_default=func.now()`라고 선언돼 있었지만
+    실 DB(baseline schema.sql)엔 DEFAULT도 NOT NULL도 없었다. 그래서 `POST /agent-runs`로
+    생성되는 모든 run(레거시뿐 아니라)이 started_at=NULL이었고, `AgentRunResponse`가 그
+    필드를 노출하자(story #2161) pydantic ValidationError로 실 CI에서 터졌다.
+
+    [[reference_local_migration_verify]] 패턴(env.py 우회·Operations API로 마이그 함수 직구동,
+    동기 psycopg2) — create_all로 테이블을 만든 뒤 started_at을 raw SQL로 "0208 이전 상태"
+    (NOT NULL/DEFAULT 없음)로 되돌려 레거시 NULL 행을 재현하고, 0208.upgrade()를 실제로
+    호출해 ⓐ 백필 ⓑ NOT NULL 강제 ⓒ DEFAULT 동작을 직접 검증한다."""
+    import importlib.util
+    import sqlalchemy as sa
+    from alembic.runtime.migration import MigrationContext
+    from alembic.operations import Operations
+    from pathlib import Path
+    from sqlalchemy.orm import sessionmaker
+
+    sync_url = _REAL_DB_URL
+    for prefix in ("postgresql+asyncpg://",):
+        if sync_url.startswith(prefix):
+            sync_url = "postgresql+psycopg2://" + sync_url[len(prefix):]
+            break
+    if sync_url.startswith("postgresql://"):
+        sync_url = sync_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+
+    from app.core.database import Base
+    from app.models.agent_run import AgentRun
+    from app.models.organization import Organization
+    from app.models.project import Project
+    import app.models  # noqa: F401
+
+    engine = sa.create_engine(sync_url)
+    Session = sessionmaker(bind=engine)
+    try:
+        Base.metadata.create_all(engine)
+        # 모델은 이미 nullable=False/server_default=func.now()라 create_all이 NOT NULL로 만든다
+        # — 0208 "이전" 상태(레거시)를 재현하려면 그 제약을 되돌려야 한다.
+        with engine.begin() as conn:
+            conn.execute(sa.text("ALTER TABLE agent_runs ALTER COLUMN started_at DROP NOT NULL"))
+            conn.execute(sa.text("ALTER TABLE agent_runs ALTER COLUMN started_at DROP DEFAULT"))
+
+        with Session() as s:
+            org = Organization(name="T", slug=f"org-2161-mig-{uuid.uuid4().hex[:8]}")
+            s.add(org)
+            s.flush()
+            project = Project(org_id=org.id, name="P")
+            s.add(project)
+            s.flush()
+            # ORM은 Python-level에서 nullable을 검증하지 않는다(DB만 강제) — started_at=None을
+            # 명시해 "0208 이전에 만들어진 레거시 run"을 그대로 재현.
+            legacy_run = AgentRun(
+                org_id=org.id, project_id=project.id, agent_id=uuid.uuid4(), status="completed",
+                started_at=None,
+            )
+            s.add(legacy_run)
+            s.commit()
+            legacy_run_id, org_id, project_id = legacy_run.id, org.id, project.id
+
+        spec = importlib.util.spec_from_file_location(
+            "m0208",
+            Path(__file__).resolve().parents[1] / "alembic" / "versions"
+            / "0208_agent_runs_started_at_default_backfill.py",
+        )
+        m0208 = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m0208)
+
+        with engine.begin() as conn:
+            ctx = MigrationContext.configure(conn)
+            with Operations.context(ctx):
+                m0208.upgrade()
+
+        with Session() as s:
+            reloaded = s.get(AgentRun, legacy_run_id)
+            assert reloaded.started_at is not None, "레거시 NULL 행이 백필 안 됨 — 회귀"
+            assert reloaded.started_at == reloaded.created_at, "백필값이 created_at과 달라야 할 이유가 없음"
+
+            # DEFAULT 확認 — started_at 생략(ORM도 이제 Python default로 채우지만, 여기선
+            # DB DEFAULT 자체가 살아있는지가 검증 대상이라 raw INSERT로 컬럼째 생략).
+            new_started_at = s.execute(sa.text(
+                "INSERT INTO agent_runs (id, org_id, project_id, agent_id, trigger, status, "
+                "retry_count, max_retries, llm_call_count, metadata) "
+                "VALUES (gen_random_uuid(), :org_id, :project_id, gen_random_uuid(), 'manual', "
+                "'running', 0, 3, 0, '{}'::jsonb) RETURNING started_at"
+            ), {"org_id": org_id, "project_id": project_id}).scalar_one()
+            assert new_started_at is not None, "DEFAULT가 새 INSERT에 안 먹음 — 회귀"
+            s.commit()
+
+            with pytest.raises(Exception):
+                s.execute(sa.text(
+                    "INSERT INTO agent_runs (id, org_id, project_id, agent_id, trigger, status, "
+                    "retry_count, max_retries, llm_call_count, metadata, started_at) "
+                    "VALUES (gen_random_uuid(), :org_id, :project_id, gen_random_uuid(), 'manual', "
+                    "'running', 0, 3, 0, '{}'::jsonb, NULL)"
+                ), {"org_id": org_id, "project_id": project_id})
+                s.commit()
+    finally:
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
 # ── 소스 고정 — pinning 테스트(오늘 팀 관례로 채택, 오르테가군 명시 요청) ──────────────
 def test_breaking_condition_declared_and_pinned():
     """오르테가군 지시 — "타임아웃보다 오래 걸리는 정상 실행이 실제로 관측되면 하트비트로
