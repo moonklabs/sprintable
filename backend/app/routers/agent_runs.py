@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -11,8 +11,13 @@ from app.models.project import Project
 from app.models.team import TeamMember
 from app.repositories.agent_run import AgentRunRepository
 from app.schemas.agent_run import AgentRunResponse, CreateAgentRun, UpdateAgentRun
+from app.services.agent_run_lifecycle import AGENT_RUN_TIMEOUT_HOURS
 
 router = APIRouter(prefix="/api/v2/agent-runs", tags=["agent-runs", "Work"])
+
+# story #2161: PATCH가 이 세 상태로 전이시키는데 클라가 finished_at을 안 보내면 서버가 채운다
+# (server-authority — MCP는 이미 finished_at을 보낼 수 있지만 항상 보낸다고 신뢰하지 않는다).
+_TERMINAL_STATUSES = {"completed", "failed", "abandoned"}
 
 
 def _get_repo(session: AsyncSession = Depends(get_db)) -> AgentRunRepository:
@@ -102,6 +107,8 @@ async def create_agent_run(
     if member_r.scalar_one_or_none() is None:
         raise HTTPException(status_code=400, detail="agent_id not found or not an agent")
 
+    # story #2161: "시작할 때 이미 끝날 시각을 갖고 태어나게" — deadline_at은 클라 미제공(항상
+    # 서버 계산, A2ATask.deadline_at 선례와 동형·클라가 자기 기한을 임의 연장 못 하게).
     run = await repo.create(
         org_id=org_id,
         agent_id=body.agent_id,
@@ -115,6 +122,7 @@ async def create_agent_run(
         input_tokens=body.input_tokens,
         output_tokens=body.output_tokens,
         cost_usd=body.cost_usd,
+        deadline_at=datetime.now(timezone.utc) + timedelta(hours=AGENT_RUN_TIMEOUT_HOURS),
     )
     return AgentRunResponse.model_validate(run)
 
@@ -139,6 +147,12 @@ async def update_agent_run(
     # 덮어쓸 수 있었다(형제 list/create는 이미 has_project_access 有·불일치 시그널이 지목). 404·body-claimed 금지.
     if not await has_project_access(repo.session, uuid.UUID(auth.user_id), existing.project_id, org_id):
         raise HTTPException(status_code=404, detail="Agent run not found")
+    # story #2161: finished_at 갭 — MCP는 이미 보낼 수 있으나(sprintable_mcp update_run_status)
+    # 항상 보낸다고 신뢰하지 않는다. 종단 상태로 전이인데 클라 미제공이면 서버가 now()로 채운다
+    # (duration_ms GENERATED가 살아나는 유일한 경로 — 안 채우면 정상 종료도 영구 NULL).
+    _finished_at = body.finished_at
+    if _finished_at is None and body.status in _TERMINAL_STATUSES:
+        _finished_at = datetime.now(timezone.utc)
     run = await repo.update(
         id,
         status=body.status,
@@ -147,6 +161,7 @@ async def update_agent_run(
         output_tokens=body.output_tokens,
         cost_usd=body.cost_usd,
         last_error_code=body.last_error_code,
+        finished_at=_finished_at,
     )
     if run is None:
         raise HTTPException(status_code=404, detail="Agent run not found")
