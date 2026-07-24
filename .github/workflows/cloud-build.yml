@@ -127,6 +127,15 @@ jobs:
             echo "backend_presence_redis_enabled=true" >> "$GITHUB_OUTPUT"
             echo "backend_presence_online_redis_enabled=true" >> "$GITHUB_OUTPUT"
             echo "backend_sse_lease_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            # ⭐story #2142(2026-07-23) — prod 실시간 트래픽을 GCE 스택으로 전환한다.
+            # 이 한 줄이 prod 프론트의 REALTIME_URL 이 되고, `/api/event-stream` 프록시가
+            # 그 주소로 향한다(비우면 FASTAPI_URL 로 폴백 = 즉시 원복, 코드 변경 불요).
+            # 전환 근거(값 보기 前 선언한 기준으로 실측): GCE 3노드 전부 HEALTHY ·
+            # backendService timeout=3600 · 관리형 인증서 ACTIVE · 평문 80 차단 ·
+            # 단일세션 60분 무절단 + heartbeat 규칙성(dev 대조군 동시 측정).
+            # ⚠️승격 병합(promo/backplane-20260723): 위 백플레인 3플래그(develop)와 이 REALTIME_URL
+            # 전환(main #2439)은 서로 무관한 prod env 출력이라 둘 다 보존한다.
+            echo "realtime_url=https://realtime.sprintable.ai" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
