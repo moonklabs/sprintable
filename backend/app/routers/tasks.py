@@ -57,6 +57,22 @@ async def _assert_task_project_access(
         raise HTTPException(status_code=403, detail="No access to this project")
 
 
+async def _assert_task_project_access(
+    session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, story_id: uuid.UUID
+) -> None:
+    """E-SECURITY SEC-S8(story 83ea3d6a) G: Task는 project_id가 없어 story_id→project_id로
+    해소(org-scope만 있고 project 접근권 미검증이던 갭 — 같은 org 다른 project 멤버가 개별
+    task id만 알면 조회/수정 가능했다). upload_story_attachment와 동형으로 has_project_access
+    재사용(휴먼 team_member·에이전트 project_access grant 양쪽 처리)."""
+    from app.services.project_auth import has_project_access
+
+    project_id = (
+        await session.execute(select(Story.project_id).where(Story.id == story_id))
+    ).scalar_one_or_none()
+    if project_id is None or not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
+
 @router.get("", response_model=list[TaskResponse])
 async def list_tasks(
     story_id: uuid.UUID | None = Query(default=None),
