@@ -145,44 +145,43 @@ def test_deploy_gce_prod_h1_merge_gate_matches_live_two_org_allowlist():
     ) in prod["PLAIN_ENV_SPEC"]
 
 
-def test_deploy_gce_db_self_name_binding_dev_only():
-    """story #2142(오르테가 DRY_RUN 검수 적발, 2026-07-23) — GitHub App 건과 동일 클래스
-    ("dev 라이브에서 관측한 사실을 env 분기 없이 prod에 적용"). ${DB_SECRET_NAME}:
-    ${DB_SECRET_NAME} 자기이름 바인딩이 env 분기 밖이라 prod 플랜에도 DATABASE_URL_PROD:
-    DATABASE_URL_PROD로 그대로 실렸다 — 라이브 대조 결과 이 계약은 backend-dev에만
-    실재(DATABASE_URL_PROD 키는 backend-prod에 아예 없고 코드도 안 읽음). prod에 DB 접속
-    문자열(비밀번호 포함)을 이름만 추가해 한 벌 더 싣는 불필요한 자격증명 표면 확장 — dev만
-    유지, prod는 붙이지 않는다."""
+def test_deploy_gce_db_self_name_binding_removed():
+    """story #2145(2026-07-24) — DATABASE_URL_DEV 자기이름 바인딩은 앱이 안 읽는 죽은 배선이었다
+    (codex C-4·env-drift-guard 축④가 realtime-dev 라이브에서 실측 검출). 실 DB 접속은
+    ${DB_SECRET_NAME}:DATABASE_URL(=DATABASE_URL env)로만 이뤄진다. 자기이름 키는 잉여 자격증명
+    표면이라 dev·prod 모두 제거했다. 회귀가드: 어느 env 플랜에도 자기이름 바인딩이 없어야 한다."""
     dev = _resolve(_DEPLOY_GCE, "dev")
     prod = _resolve(_DEPLOY_GCE, "prod")
-    assert "DATABASE_URL_DEV:DATABASE_URL_DEV" in dev["SECRET_PAIRS"]
+    assert "DATABASE_URL_DEV:DATABASE_URL_DEV" not in dev["SECRET_PAIRS"]
     assert "DATABASE_URL_PROD:DATABASE_URL_PROD" not in prod["SECRET_PAIRS"]
+    # 정상 시크릿→env 바인딩(DATABASE_URL)은 보존
+    assert "DATABASE_URL_DEV:DATABASE_URL " in dev["SECRET_PAIRS"] or dev["SECRET_PAIRS"].endswith("DATABASE_URL_DEV:DATABASE_URL")
 
 
-def test_deploy_gce_prod_secret_pairs_no_dev_leak():
-    """story #2142 회귀 방지 — DB_SECRET_NAME 미사용으로 prod 플랜에 dev 시크릿이
-    하드코딩 리터럴로 섞여 들어가던 결함(발견 즉시 수정)의 재발 차단.
+def test_deploy_gce_github_oauth_client_wiring_removed():
+    """story #2145(2026-07-24) — GitHub user-login OAuth(GITHUB_CLIENT_ID/SECRET)는 #2155에서
+    제거됐다(prod users github_linked=0 실측 → 이관경로 불요). app.core.config.Settings에
+    github_client_id/secret 필드가 없고 앱 코드 참조 0건 — deploy_realtime_gce.sh만 미완분으로
+    이 배선을 잔존시키고 있었고 env-drift-guard 축④가 realtime-dev 라이브에서 검출했다.
+    회귀가드: dev·prod 어느 플랜에도 GITHUB_CLIENT_ID/SECRET 배선이 없어야 한다."""
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    for cfg in (prod, dev):
+        assert "GITHUB_CLIENT_ID" not in cfg["SECRET_PAIRS"]
+        assert "GITHUB_CLIENT_SECRET" not in cfg["SECRET_PAIRS"]
+    # prod에 dev DB 시크릿 리터럴이 새지 않는 것(#2142 원 회귀가드)은 유지
+    assert "DATABASE_URL_DEV" not in prod["SECRET_PAIRS"]
 
-    ⚠️GITHUB_CLIENT_ID_DEV/GITHUB_CLIENT_SECRET_DEV는 예외 — backend-prod Cloud Run이
-    실제로 그 시크릿을 쓰는 것을 오르테가 gcloud 실측으로 확認(2026-07-23, 유저 로그인
-    OAuth 앱이 아직 prod 전용이 아님, GitHub App 봇과는 별개 물건). 아래
-    `test_deploy_gce_prod_github_oauth_client_matches_live_cloud_run_binding`가 그 의도적
-    매핑을 별도로 고정한다 — 여기선 DATABASE_URL_DEV(진짜 리크였던 것)만 확인."""
-    cfg = _resolve(_DEPLOY_GCE, "prod")
-    assert "DATABASE_URL_DEV" not in cfg["SECRET_PAIRS"]
-    assert "GITHUB_CLIENT_ID_DEV:GITHUB_CLIENT_ID" in cfg["SECRET_PAIRS"]
-    assert "GITHUB_CLIENT_SECRET_DEV:GITHUB_CLIENT_SECRET" in cfg["SECRET_PAIRS"]
 
-
-def test_deploy_gce_prod_github_oauth_client_matches_live_cloud_run_binding():
-    """story #2142(오르테가 gcloud 실측, 2026-07-23) — GITHUB_CLIENT_ID_PROD/
-    GITHUB_CLIENT_SECRET_PROD는 Secret Manager에 존재하지 않는다. backend-prod Cloud Run이
-    실제로 물고 있는 시크릿은 GITHUB_CLIENT_ID_DEV/GITHUB_CLIENT_SECRET_DEV(describe로 대조
-    확認) — 새 시크릿을 만드는 게 아니라 GCE도 Cloud Run과 같은 것을 물게 한다(스코프 확定,
-    적절성 판단은 별건)."""
+def test_deploy_gce_prod_no_github_oauth_client_of_any_suffix():
+    """story #2145(2026-07-24, #2142 후속 정정) — GitHub user-login OAuth 자체가 #2155에서
+    제거됐으므로 _PROD/_DEV 어느 접미의 GITHUB_CLIENT 배선도 prod 플랜에 없어야 한다
+    (구 #2142 테스트는 _DEV 매핑을 '의도적'으로 고정했으나 로그인 제거로 무효)."""
     cfg = _resolve(_DEPLOY_GCE, "prod")
     assert "GITHUB_CLIENT_ID_PROD" not in cfg["SECRET_PAIRS"]
     assert "GITHUB_CLIENT_SECRET_PROD" not in cfg["SECRET_PAIRS"]
+    assert "GITHUB_CLIENT_ID_DEV" not in cfg["SECRET_PAIRS"]
+    assert "GITHUB_CLIENT_SECRET_DEV" not in cfg["SECRET_PAIRS"]
 
 
 def test_deploy_gce_prod_cron_secret_matches_live_cloud_run_binding():
@@ -195,19 +194,19 @@ def test_deploy_gce_prod_cron_secret_matches_live_cloud_run_binding():
     assert "cron-secret:CRON_SECRET" in dev["SECRET_PAIRS"]
 
 
-def test_deploy_gce_dev_secret_pairs_unchanged():
-    """dev 경로는 이번 변경으로 한 글자도 안 바뀌어야 한다(오르테가 명시 AC)."""
+def test_deploy_gce_dev_secret_pairs_exact():
+    """story #2145(2026-07-24) — dev SECRET_PAIRS 전체 고정(죽은 배선 3종 제거 반영):
+    GITHUB_CLIENT_ID_DEV/SECRET_DEV(#2155 미완분)·DATABASE_URL_DEV 자기이름(codex C-4)이 빠진
+    새 계약. 정상 시크릿→env 바인딩은 전부 보존."""
     cfg = _resolve(_DEPLOY_GCE, "dev")
     assert cfg["SECRET_PAIRS"] == (
         "DATABASE_URL_DEV:DATABASE_URL JWT_SECRET:JWT_SECRET GOOGLE_CLIENT_ID:GOOGLE_CLIENT_ID "
-        "GOOGLE_CLIENT_SECRET:GOOGLE_CLIENT_SECRET GITHUB_CLIENT_ID_DEV:GITHUB_CLIENT_ID "
-        "GITHUB_CLIENT_SECRET_DEV:GITHUB_CLIENT_SECRET RESEND_API_KEY:RESEND_API_KEY "
+        "GOOGLE_CLIENT_SECRET:GOOGLE_CLIENT_SECRET RESEND_API_KEY:RESEND_API_KEY "
         "EMAIL_FROM:EMAIL_FROM github-webhook-secret:GITHUB_WEBHOOK_SECRET "
         "cron-secret:CRON_SECRET github-app-client-secret-dev:GITHUB_APP_CLIENT_SECRET "
         "github-app-private-key-dev:GITHUB_APP_PRIVATE_KEY "
         "github-app-state-secret-dev:GITHUB_APP_STATE_SECRET "
-        "FIREBASE_BFF_INTERNAL_SECRET:FIREBASE_BFF_INTERNAL_SECRET "
-        "DATABASE_URL_DEV:DATABASE_URL_DEV"
+        "FIREBASE_BFF_INTERNAL_SECRET:FIREBASE_BFF_INTERNAL_SECRET"
     )
 
 
