@@ -122,3 +122,24 @@ def test_axis4_pass_is_visible_even_when_another_axis_fails(monkeypatch, capsys)
     assert "④Settings 커버리지" in out and "이상 없음" in out, (
         f"축①만 FAIL이고 축④는 통과인데 그 통과가 출력에 안 보임 — stdout:\n{out}"
     )
+
+
+def test_settings_field_env_keys_works_without_pydantic_settings_importable(monkeypatch):
+    """⭐라이브 실증(2026-07-24) 재현 — env-drift-guard.yml 워크플로는 backend 의존성
+    (pydantic_settings 등)을 설치하지 않는다. `import app.core.config`를 실제로 태우면
+    `ModuleNotFoundError`로 매일 00:00 크래시하는 가드가 나간다(실측된 그대로). static
+    파싱은 이 import 자체를 안 하므로, `pydantic_settings`가 애초에 설치 안 돼 있어도
+    (sys.modules에서 강제로 못 찾게 만들어 재현) 정상 동작해야 한다."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _blocking_import(name, *args, **kwargs):
+        if name == "pydantic_settings" or name.startswith("pydantic_settings."):
+            raise ModuleNotFoundError(f"No module named '{name}'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _blocking_import)
+    mod = _load_check_env_drift()  # 모듈 자체 로드도 이 차단 안에서(위 실측과 동일 조건).
+    keys = mod._settings_field_env_keys()
+    assert "PRESENCE_REDIS_ENABLED" in keys and len(keys) == 82

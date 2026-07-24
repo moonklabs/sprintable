@@ -54,13 +54,27 @@ _SETTINGS_CONSUMING_SERVICES = {
 }
 
 
+_SETTINGS_CONFIG_PATH = _REPO_ROOT / "backend" / "app" / "core" / "config.py"
+# `    field_name: type = default` 형태의 클래스 필드 선언만 잡는다(4칸 들여쓰기 — Settings
+# 클래스 본문 레벨). config.py가 오늘 순수 선언형(82필드 전부 이 형태)이라 정확히 맞는다.
+_SETTINGS_FIELD_RE = re.compile(r"^    ([a-z_][a-zA-Z0-9_]*)\s*:\s*[^=\n]+=", re.MULTILINE)
+
+
 def _settings_field_env_keys() -> set[str]:
-    """app.core.config.Settings의 필드명을 env var 키 이름으로 변환(env_prefix 없음 ⇒
-    필드명 대문자 == env 키, 이 클래스에 alias가 하나도 없음을 전제로 한다 — 전제가 깨지면
-    이 함수도 갱신 필요)."""
-    sys.path.insert(0, str(_REPO_ROOT / "backend"))
-    from app.core.config import Settings
-    return {name.upper() for name in Settings.model_fields}
+    """app/core/config.py를 **static 파싱**해 Settings 필드명을 env var 키로 변환(env_prefix
+    없음 ⇒ 필드명 대문자 == env 키, alias 0개 전제 — 전제가 깨지면 이 함수도 갱신 필요).
+
+    ⛔story #2135 라이브 실증(2026-07-24, 오르테가 재트리거) — 원래는 `from app.core.config
+    import Settings`로 실제 import했으나, env-drift-guard.yml 워크플로는 gcloud+파싱만
+    하는 가벼운 CI라 backend 의존성(pydantic_settings 등)이 설치돼 있지 않다.
+    `ModuleNotFoundError: No module named 'pydantic_settings'`로 매일 00:00 크래시하는
+    가드를 배포할 뻔했다 — fixture(pytest, backend 의존성 있는 환경) 통과가 라이브 동작을
+    보증하지 않는다는 것을 이 사건 자체가 실증한다. **infra 도구가 앱 런타임을 import하면
+    안 된다**가 근본 — static 파싱으로 층을 분리한다(import 0·의존성 0).
+    ⚠️한계: config.py가 동적으로 필드를 생성하면(현재는 순수 선언형 82필드 전부 이 형태라
+    해당 없음) 이 파싱이 놓친다."""
+    text = _SETTINGS_CONFIG_PATH.read_text()
+    return {name.upper() for name in _SETTINGS_FIELD_RE.findall(text)}
 
 
 def _load_settings_exempt() -> dict[str, str]:
