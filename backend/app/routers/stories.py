@@ -753,6 +753,28 @@ async def bulk_update_stories(
             )
         except Exception:  # noqa: BLE001
             pass
+
+    # #2131 근본수정: bulk가 status를 실제로 바꾸면서도 emit_story_status_changed()를 아예
+    # 호출하지 않아 SSE 프레임이 서버에서 출발조차 안 했다(칸반 드래그·컬럼메뉴 둘 다 이 라우트라
+    # 남의 화면에 영원히 안 보이던 근본). PATCH /{id}/status(:1272)와 **같은 공유 helper**를
+    # 그대로 재사용 — 발행 지점을 갈라놓지 않는다(AC3, #2122/#2132와 동일 성질: 두 경로가
+    # 갈라지면 다음 결함이 또 한쪽에서만 재발). old_status_by_id는 위에서 이미 "실제로 바뀐
+    # item만" 채워둔 것을 그대로 재사용(중복 판정 없음).
+    if old_status_by_id:
+        actor_name, actor_role, actor_type = await _resolve_actor_info(db, actor_id)
+        for s in updated:
+            old = old_status_by_id.get(s.id)
+            if old is None:
+                continue
+            try:
+                await emit_story_status_changed(
+                    db, repo.org_id, s, old,
+                    actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
+                )
+            except Exception:  # noqa: BLE001 — 한 item의 emit 실패가 나머지 item을 막지 않음.
+                logger.warning(
+                    "bulk status_changed emit 실패(story=%s)", s.id, exc_info=True,
+                )
     return results
 
 
