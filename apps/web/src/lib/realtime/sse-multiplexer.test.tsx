@@ -8,6 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useSseMultiplexer, type SseMultiplexerHandle } from './sse-multiplexer';
+import { fetchWithAuth } from '@/lib/db/client';
+
+vi.mock('@/lib/db/client', () => ({ fetchWithAuth: vi.fn() }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -20,15 +23,21 @@ interface FakeInstance {
   onmessage: SseListener | null;
   onerror: (() => void) | null;
   closed: boolean;
+  readyState: number;
 }
 
 let instances: FakeInstance[] = [];
 
 function stubEventSource() {
   class FakeEventSource {
+    // story #2160 — 실 EventSource readyState 상수. onerror 발생 시점의 readyState로
+    // "fatal(CLOSED, 자동재연결 없음)"과 "transient(그 외)"를 가른다.
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSED = 2;
     handle: FakeInstance;
     constructor(url: string) {
-      this.handle = { url, listeners: {}, onopen: null, onmessage: null, onerror: null, closed: false };
+      this.handle = { url, listeners: {}, onopen: null, onmessage: null, onerror: null, closed: false, readyState: 0 };
       instances.push(this.handle);
     }
     set onopen(cb: (() => void) | null) { this.handle.onopen = cb; }
@@ -37,6 +46,8 @@ function stubEventSource() {
     get onmessage() { return this.handle.onmessage; }
     set onerror(cb: (() => void) | null) { this.handle.onerror = cb; }
     get onerror() { return this.handle.onerror; }
+    get readyState() { return this.handle.readyState; }
+    set readyState(v: number) { this.handle.readyState = v; }
     addEventListener(name: string, cb: SseListener) {
       (this.handle.listeners[name] ??= []).push(cb);
     }
@@ -66,6 +77,7 @@ beforeEach(() => {
   instances = [];
   handle = null;
   stubEventSource();
+  vi.mocked(fetchWithAuth).mockReset();
 });
 
 afterEach(async () => {
@@ -193,5 +205,58 @@ describe('useSseMultiplexer — story #2078', () => {
     const subscribeBefore = handle!.subscribe;
     act(() => { instances[0]!.onopen?.(); });
     expect(handle!.subscribe).toBe(subscribeBefore);
+  });
+
+  // story #2160 — 세션이 죽었는데 탭이 401을 영원히 재폴링하던 결함의 회귀가드.
+  describe('CLOSED(fatal) onerror — 세션 확認 후에만 재연결한다(#2160)', () => {
+    it('세션이 죽었으면(fetchWithAuth 401) 재연결하지 않는다', async () => {
+      vi.useFakeTimers();
+      vi.mocked(fetchWithAuth).mockResolvedValue({ ok: false } as Response);
+      await act(async () => {
+        root.render(<Harness memberId="me-1" enabled />);
+      });
+      expect(instances).toHaveLength(1);
+      await act(async () => {
+        instances[0]!.readyState = 2; // EventSource.CLOSED
+        instances[0]!.onerror?.();
+        await Promise.resolve(); // isSessionAlive() 마이크로태스크 해소
+      });
+      expect(fetchWithAuth).toHaveBeenCalledWith('/api/me');
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(instances).toHaveLength(1); // 새 EventSource 없음 — 재시도 안 함
+      vi.useRealTimers();
+    });
+
+    it('세션이 살아있으면(fetchWithAuth 200) 재연결한다', async () => {
+      vi.useFakeTimers();
+      vi.mocked(fetchWithAuth).mockResolvedValue({ ok: true } as Response);
+      await act(async () => {
+        root.render(<Harness memberId="me-1" enabled />);
+      });
+      await act(async () => {
+        instances[0]!.readyState = 2; // EventSource.CLOSED
+        instances[0]!.onerror?.();
+        await Promise.resolve();
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(instances.length).toBeGreaterThan(1); // 백오프 지연 후 재연결됨
+      vi.useRealTimers();
+    });
+
+    it('CONNECTING(transient) onerror는 세션 확認 없이 곧장 백오프 재시도한다', async () => {
+      vi.useFakeTimers();
+      await act(async () => {
+        root.render(<Harness memberId="me-1" enabled />);
+      });
+      await act(async () => {
+        instances[0]!.readyState = 0; // EventSource.CONNECTING — 정상 순단
+        instances[0]!.onerror?.();
+        await Promise.resolve();
+      });
+      expect(fetchWithAuth).not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(instances.length).toBeGreaterThan(1);
+      vi.useRealTimers();
+    });
   });
 });

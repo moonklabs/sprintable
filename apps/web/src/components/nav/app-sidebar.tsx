@@ -34,6 +34,7 @@ import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
 import { ProfileMenu } from '@/components/nav/profile-menu';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
+import { fetchWithAuth } from '@/lib/db/client';
 import {
   Sidebar,
   SidebarContent,
@@ -140,7 +141,8 @@ export function AppSidebar({
     let cancelled = false;
     const fetchUnread = async () => {
       try {
-        const res = await fetch('/api/notifications/count');
+        // story #2160 — 30초 폴링이 401을 조용히 삼키던 자리(fetchWithAuth로 전환).
+        const res = await fetchWithAuth('/api/notifications/count');
         if (!res.ok || cancelled) return;
         const json = await res.json() as { data?: { memoUnreadCount?: number; inboxUnreadCount?: number } };
         if (!cancelled) {

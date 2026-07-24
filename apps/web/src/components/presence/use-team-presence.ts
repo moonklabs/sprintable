@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { createReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
+import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // 2505d27d: #1356 `GET /api/v2/team-presence` 응답 계약(검증 완료·mismatch 0).
 export interface TeamPresenceItem {
@@ -69,7 +71,7 @@ export function useTeamPresence(active: boolean, memberId?: string): TeamPresenc
     inFlightRef.current = true;
     const mySeq = ++seqRef.current;
     try {
-      const res = await fetch('/api/team-presence');
+      const res = await fetchWithAuth('/api/team-presence');
       if (!res.ok) return;
       const json = (await res.json()) as TeamPresenceItem[] | { data?: TeamPresenceItem[] };
       // 이 응답을 보낸 뒤에 더 최신 요청이 나갔다면(seqRef가 더 커졌다면) stale이므로 버린다.
@@ -133,7 +135,12 @@ export function useTeamPresence(active: boolean, memberId?: string): TeamPresenc
     // 재연결 여부는 hadPriorError(직전 error 발생 이력)로 판정된다 — 이 훅은 수동 재시도를
     // 걸지 않고 브라우저 native auto-reconnect에 맡기지만, onError를 호출해두지 않으면
     // isReconnect()가 영원히 false로 남아 위 onopen의 refetch가 절대 안 켜진다.
-    es.onerror = () => { backoff.onError(); };
+    es.onerror = () => {
+      backoff.onError();
+      // story #2160 — CLOSED면 브라우저가 자동재연결을 이미 포기한 것(non-2xx 등). 조용히
+      // 방치하지 않고 세션 상태를 확認해, 죽었으면 SessionExpiredDialog로 사용자에게 알린다.
+      if (es.readyState === EventSource.CLOSED) void isSessionAlive();
+    };
     es.addEventListener('presence', () => { scheduleFetchPresence(); }); // 변경 시 push → 디바운스 후 refetch
     return () => {
       es.close();

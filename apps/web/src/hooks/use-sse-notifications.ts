@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
 import { createReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
+import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
 
 export interface SseEventNotification {
   id?: string;
@@ -146,15 +147,23 @@ export function useSseNotifications({
       }
 
       es.onerror = () => {
+        // story #2160 — CLOSED는 브라우저가 이미 "복구 불가"로 판정한 것(자동재연결 없음).
+        const wasFatal = es?.readyState === EventSource.CLOSED;
         es?.close();
         es = null;
-        if (!closed && !retryTimer) {
+        const scheduleRetry = () => {
+          if (closed || retryTimer) return;
           const delay = backoff.onError();
           retryTimer = setTimeout(() => {
             retryTimer = null;
             connect();
           }, delay);
+        };
+        if (wasFatal) {
+          void isSessionAlive().then((alive) => { if (alive) scheduleRetry(); });
+          return;
         }
+        scheduleRetry();
       };
     };
 
