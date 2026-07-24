@@ -362,3 +362,47 @@ services:
   # sprintable-mcp-dev / sprintable-mcp-prod: 실측 결과 라이브 키 전부(MCP_TRANSPORT·
   # SPRINTABLE_API_URL·AGENT_API_KEY·[prod만]MCP_ALLOWED_HOSTS) deploy_mcp_dev.sh/
   # deploy_mcp_prod.sh가 전량 관리 — 카테고리 C 없음(entry 불필요, 완전 커버).
+
+# story #2135(2026-07-24) 축④ "Settings 커버리지" 전용 — app.core.config.Settings가 이
+# 키를 모르는 게 정상인 경우(다른 메커니즘으로 읽거나 의도적으로 안 읽음). 위 services.*.keys
+# (①②축, "IaC에 선언 안 됨"의 사유)와는 다른 질문("Settings 필드명과 안 맞음"의 사유)이라
+# 별도 섹션 — 오르테가 라이브 실측(backend-dev/prod, Cloud Run describe spec, 2026-07-24)
+# 기준 전수 triage. ⚠️사유는 "os.getenv 직접"으로 뭉뚱그리지 않고 실제로 읽는 파일을 명시한다
+# — 그 파일이 나중에 지워지는데 이 entry만 남으면 다시 조용해지는 문제를 막기 위함(오르테가
+# 지적). 이 목록에 없고 Settings 필드도 아닌 라이브 키는 축④가 FAIL로 잡는다.
+settings_exempt:
+  - key: CRON_SECRET
+    reason: >-
+      app/routers/cron.py:34 `os.environ.get("CRON_SECRET")` — Settings 필드가 아니라
+      라우터가 직접 읽음(cron 엔드포인트 인증).
+  - key: EMAIL_FROM
+    reason: app/services/email.py:37,47 `os.getenv("EMAIL_FROM", ...)` 직접 읽음.
+  - key: RESEND_API_KEY
+    reason: app/services/email.py:19 `os.getenv("RESEND_API_KEY", "")` 직접 읽음.
+  - key: STORAGE_PROVIDER
+    reason: app/services/storage/factory.py:17 `os.environ.get("STORAGE_PROVIDER", ...)` 직접 읽음.
+  - key: NEXT_PUBLIC_APP_URL
+    reason: >-
+      app/routers/docs.py:538·app/routers/auth.py:601,1134 등 `os.environ.get(
+      "NEXT_PUBLIC_APP_URL", ...)` 직접 읽음(프론트 관례 이름을 백엔드도 공유).
+  - key: LLM_GEMINI_LOCATION
+    reason: >-
+      app/services/llm_client.py:48 `os.environ.get("LLM_GEMINI_LOCATION") or
+      settings.vertex_ai_location` — dev 전용 override, os.environ 직접 우선 읽음.
+  - key: LLM_GEMINI_MODEL
+    reason: >-
+      app/services/llm_client.py:43 `os.environ.get("LLM_GEMINI_MODEL", "gemini-2.5-flash")`
+      직접 읽음 — dev 전용 override.
+  - key: FASTAPI_URL
+    reason: >-
+      app/services/agent_onboarding_config.py:236,248 `_BACKEND_URL_ENV_KEY="FASTAPI_URL"` →
+      `os.environ.get(_BACKEND_URL_ENV_KEY, ...)` 간접 참조(상수를 거쳐 읽음 — 리터럴
+      grep으로는 안 잡힘, 이 사유를 지우려면 그 상수 정의도 같이 사라져야 함).
+  - key: MCP_PUBLIC_URL
+    reason: >-
+      app/services/agent_onboarding_config.py:258 `os.environ.get(_MCP_PUBLIC_URL_ENV_KEY,
+      "")` — backend app Settings 대상 아님(sprintable_mcp는 별도 런타임/이미지).
+  - key: OPS_RESTART_TS
+    reason: >-
+      backend/scripts/deploy_realtime_gce.sh:349 "의도적 제외" — 재시작 트리거용 타임스탬프
+      마커, 코드가 읽는 값이 아니라 애초에 no-read by design.

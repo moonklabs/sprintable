@@ -46,6 +46,29 @@ else
     COMMIT_SHA="${COMMIT_SHA:?COMMIT_SHA is required}"
 fi
 
+# ⛔prod GCE 재배포 사고(2026-07-24, 오르테가 자인) — 실행자의 로컬 체크아웃이 낮의
+# codex-스캔용 오래된 커밋(d0acf749)에 멈춰 있는 채로 이 스크립트를 돌렸다. COMMIT_SHA는
+# 도커 이미지 태그만 바꿨을 뿐 **스크립트 파일 자체**는 그 stale 체크아웃 그대로 실행돼,
+# `_BACKPLANE_DEFAULT` 도입 이전 버전(백플레인 항상 false)으로 첫 prod 배포가 조용히
+# 나갔다 — 오늘 rc=0 삼킴과 같은 계열(스크립트가 옳아도 옛 버전을 돌리면 무의미). 이 스크립트
+# 자신이 실행 중인 로컬 git checkout의 HEAD를 못박아 눈에 띄게 만든다(git 정보 없으면
+# "unknown"으로 표시만 하고 계속 진행 — 이 가드가 배포 자체를 막을 만큼 확실하진 않다).
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_LOCAL_HEAD="$(git -C "${_SCRIPT_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")"
+# log()는 이 시점에 아직 정의 전(스크립트 뒤쪽에서 정의)이라 echo로 직접 씀.
+echo "Running from local checkout HEAD=${_LOCAL_HEAD} (deploying COMMIT_SHA=${COMMIT_SHA} image tag)" >&2
+if [ "${_LOCAL_HEAD}" != "unknown" ] && [ "${DRY_RUN}" != "1" ]; then
+    case "${_LOCAL_HEAD}" in
+        "${COMMIT_SHA}"*) : ;;  # 접두 일치 — 정상(로컬 체크아웃 = 배포 대상 커밋).
+        *)
+            echo "⚠️  WARNING: local checkout HEAD(${_LOCAL_HEAD})가 COMMIT_SHA(${COMMIT_SHA})와" >&2
+            echo "   다르다 — 이 스크립트 파일 자체가 오래된 체크아웃에서 실행 중일 수 있다." >&2
+            echo "   (오늘 실측 사고: d0acf749 stale checkout으로 백플레인 false 템플릿이 나감)" >&2
+            echo "   'git pull'/'git checkout develop' 후 재실행을 확인할 것." >&2
+            ;;
+    esac
+fi
+
 case "${ENV}" in
     dev)
         MIG_NAME="sprintable-realtime-gateway-dev"
@@ -339,8 +362,11 @@ SECRET_PAIRS="${DB_SECRET_NAME}:DATABASE_URL"
 SECRET_PAIRS="${SECRET_PAIRS} JWT_SECRET:JWT_SECRET"
 SECRET_PAIRS="${SECRET_PAIRS} GOOGLE_CLIENT_ID:GOOGLE_CLIENT_ID"
 SECRET_PAIRS="${SECRET_PAIRS} GOOGLE_CLIENT_SECRET:GOOGLE_CLIENT_SECRET"
-SECRET_PAIRS="${SECRET_PAIRS} GITHUB_CLIENT_ID_${GITHUB_SECRET_SUFFIX}:GITHUB_CLIENT_ID"
-SECRET_PAIRS="${SECRET_PAIRS} GITHUB_CLIENT_SECRET_${GITHUB_SECRET_SUFFIX}:GITHUB_CLIENT_SECRET"
+# story #2145(2026-07-24): GitHub user-login OAuth(GITHUB_CLIENT_ID/SECRET)는 #2155에서 제거됐다
+# (prod users github_linked=0 실측 → 이관경로 불요 판정). app.core.config.Settings에 github_client_id/
+# secret 필드가 없고(207행은 주석뿐) 앱 코드가 이 env를 읽는 경로 0건(git grep 확認). env-drift-guard
+# 축④(Settings 커버리지)가 realtime-dev 라이브에서 이 두 키를 "죽은 배선"으로 실측 검출 → 여기서 제거.
+# (deploy_backend.sh는 #2155에서 이미 제거됨 — 이 파일이 미완분이었다.)
 SECRET_PAIRS="${SECRET_PAIRS} RESEND_API_KEY:RESEND_API_KEY"
 SECRET_PAIRS="${SECRET_PAIRS} EMAIL_FROM:EMAIL_FROM"
 SECRET_PAIRS="${SECRET_PAIRS} github-webhook-secret:GITHUB_WEBHOOK_SECRET"
@@ -356,9 +382,10 @@ SECRET_PAIRS="${SECRET_PAIRS} FIREBASE_BFF_INTERNAL_SECRET:FIREBASE_BFF_INTERNAL
 # 있고 backend-prod엔 DATABASE_URL_PROD 키 자체가 없음) — 코드 grep으로도 DATABASE_URL_PROD를
 # 읽는 경로 0건 확認. prod에 그 값(비밀번호 포함 DB 접속 문자열)을 이름만 추가해 한 벌 더
 # 싣는 것은 불필요한 자격증명 표면 확장이라 prod에서는 붙이지 않는다.
-if [ "${ENV}" = "dev" ]; then
-    SECRET_PAIRS="${SECRET_PAIRS} ${DB_SECRET_NAME}:${DB_SECRET_NAME}"
-fi
+# story #2145(2026-07-24) 제거: dev 자기이름 바인딩(DATABASE_URL_DEV:DATABASE_URL_DEV)은
+# app이 안 읽는 죽은 배선이었다(codex C-4·env-drift-guard 축④ realtime-dev 실측 검출). 실 DB 접속은
+# 위 `${DB_SECRET_NAME}:DATABASE_URL`(=DATABASE_URL env)로만 이뤄진다. 자기이름 키는 잉여 자격증명
+# 표면이라 삭제. backend-dev 라이브 잔존분은 2026-07-24 `--remove-secrets`로 이미 정리됨.
 # story #2142: prod만 REDIS_URL을 시크릿으로 추가(위 SECRET_PAIRS_REDIS 분기 참조) — dev는
 # 이미 PLAIN_ENV_SPEC에 실렸으므로 빈 문자열이라 여기선 아무것도 안 붙는다.
 if [ -n "${SECRET_PAIRS_REDIS}" ]; then
@@ -596,18 +623,39 @@ if gcloud compute instance-groups managed describe "${MIG_NAME}" \
         # 안전했다(아무 것도 건드리기 전에 멈춤 — backends/named-ports/https 200 전부 무영향,
         # fail-fast) — 그래도 실행 없이는 코드리뷰/CI로 못 잡는 gcloud API 제약이었다.
         #
-        # 수정: `--max-unavailable=0`(항상 유효한 값) + `--max-surge=1`. 이 스택의 존재
-        # 이유가 SSE 장수명 연결(설계 doc)이라, 기존 노드를 먼저 빼는 대신 **새 인스턴스를
-        # 먼저 띄우고** 헬스체크 통과 後 옮기는 쪽을 우선한다(오르테가 명시 선호). surge=1로
-        # 제한해 3대 e2-small이 일시 4대까지만 늘어나게(전체 3대 동시 서지=6대는 비용·쿼터
-        # 여유가 불확실해 배제).
-        log "Rolling-updating ${MIG_NAME} to template ${TEMPLATE_NAME} (MIG 객체 보존 — backend-service 부착·named-ports 무영향)"
-        gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
+        # ⛔prod 재배포 핫픽스(2026-07-24, 오르테가 실 재배포 실측 — 오늘 이 파일 세 번째 같은
+        # 결함류: delete+recreate·maxUnavailable·이번 maxSurge, 전부 "실행은 됐는데 실효는
+        # 없는" 형태) — `--max-surge=1`도 같은 regional MIG 제약에 걸린다: "Fixed
+        # updatePolicy.maxSurge for regional managed instance group has to be either 0 or at
+        # least equal to the number of zones". dev(당시 실측 zone 구성)에선 우연히 통과했지만
+        # prod(3존)에선 거부됐다 — "1"을 하드코딩하지 않고 **이 MIG가 실제로 걸쳐 있는 존
+        # 개수를 조회**해 그 값을 쓴다(하드코딩 "3"도 안 쓴다 — 스크립트가 아는 값과 라이브
+        # 존 구성이 어긋나면 오늘 반복된 "코드는 맞는데 실측과 다르다" 함정이 그대로 재현된다).
+        # max-unavailable=0 유지(항상 유효값·SSE 무중단 우선 — 새 인스턴스 먼저 띄우고
+        # 헬스체크 통과 後 옮기는 설계 의도는 그대로).
+        # json(...) 서브셋으로 좁혀 zones 리스트만 뽑은 뒤 "zone" 키 등장 횟수로 카운트 —
+        # gcloud value()의 리스트 join 구분자를 가정하지 않는 가장 안전한 방식. ⚠️grep -c는
+        # "매치된 줄 수"를 세지 총 매치 횟수가 아니다 — gcloud json 출력이 한 줄로 나오면
+        # (pretty-print 보장 없음) zone이 몇 개든 항상 1로 잡히는 실측 버그를 mock-gcloud
+        # 테스트로 직접 재현·확認했다. grep -o | wc -l로 줄 구조와 무관하게 총 출현 횟수를 센다.
+        _ZONE_COUNT=$(gcloud compute instance-groups managed describe "${MIG_NAME}" \
+            --project="${GCP_PROJECT}" --region="${GCP_REGION}" \
+            --format='json(distributionPolicy.zones)' | grep -o '"zone":' | wc -l | tr -d ' ')
+        log "Rolling-updating ${MIG_NAME} to template ${TEMPLATE_NAME} (MIG 객체 보존 — backend-service 부착·named-ports 무영향, max-surge=${_ZONE_COUNT} zone 수 실측)"
+        # ⛔같은 실측(2026-07-24) — rolling-action 실패가 파이프라인/래퍼를 거치면 rc=0으로
+        # 보일 수 있다(캡처 방식에 따라 exit code가 가려짐). `if ! CMD; then`로 이 명령
+        # **자체의** 종료코드를 명시 확인해 실패를 실패로 드러낸다(암묵적 set -e 전파에만
+        # 의존하지 않는다 — 이 파일 상단 `_REALTIME_URL` 빈값 가드와 동일한 명시-실패 컨벤션).
+        if ! gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
             --project="${GCP_PROJECT}" \
             --region="${GCP_REGION}" \
             --version=template="${TEMPLATE_NAME}" \
             --max-unavailable=0 \
-            --max-surge=1
+            --max-surge="${_ZONE_COUNT}"; then
+            echo "FAIL: rolling-action start-update 실패(${MIG_NAME}) — MIG는 이전 템플릿에 그대로 남아있다."
+            echo "      위 gcloud 에러 메시지를 확인할 것(예: maxSurge/maxUnavailable 제약)."
+            exit 1
+        fi
     fi
 else
     log "Creating MIG ${MIG_NAME} (size ${TARGET_SIZE}, zones ${ZONES}, no autoscaling)"
