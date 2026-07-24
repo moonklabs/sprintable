@@ -5,6 +5,7 @@ import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
 import { createReconnectBackoffState, type ReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
 import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
+import { isCursorEligibleEventName } from '@/lib/realtime/sse-cursor-eligibility';
 
 // chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
 export interface SendAttachment {
@@ -188,21 +189,24 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
       // S-COMM-12: canonical 이름만 리슨. server가 legacy(conversation:message)도 병행 emit하므로
       // 외부 consumer 하위호환은 server 레벨에서 처리됨 — 프론트가 둘 다 받으면 2회 발화됨.
       source.addEventListener('conversation.message_created', (e: MessageEvent) => {
-        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
+        // story #2162 — B계열(presence·conversation.working)만 커서 승격 금지, 이 이벤트는 대상 아님.
+        if (e.lastEventId && isCursorEligibleEventName('conversation.message_created')) lastEventIdRef.current = e.lastEventId;
         handleConversationMessage(e.data as string);
       });
 
       // R2(da9d1781): conversation.working — typing 인디케이터 1.5s 폴(/conversations/{id}/working) 대체.
       // payload 가 working 목록을 실어 보내므로 refetch 없이 직접 갱신.
       source.addEventListener('conversation.working', (e: MessageEvent) => {
-        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
+        // story #2162 — DB Event 행이 없는 B계열이라 재개 커서로 승격하지 않는다(근본 원인 자리).
+        if (e.lastEventId && isCursorEligibleEventName('conversation.working')) lastEventIdRef.current = e.lastEventId;
         handleWorking(e.data as string);
       });
 
       // story #1977: conversation.read — #1976이 본인 타 커넥션에만 전파(read-receipt 아님).
       // 다른 탭/기기에서 mark-read 하면 이 탭의 리스트 배지·GNB 총합을 서버 truth로 자가정정.
       source.addEventListener('conversation.read', (e: MessageEvent) => {
-        if (e.lastEventId) lastEventIdRef.current = e.lastEventId;
+        // story #2162 — B계열만 커서 승격 금지, 이 이벤트는 대상 아님.
+        if (e.lastEventId && isCursorEligibleEventName('conversation.read')) lastEventIdRef.current = e.lastEventId;
         handleConversationRead(e.data as string);
       });
     }

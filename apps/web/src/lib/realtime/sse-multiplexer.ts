@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createReconnectBackoffState } from './sse-reconnect-backoff';
 import { isSessionAlive } from './sse-session-guard';
+import { isCursorEligibleEventName } from './sse-cursor-eligibility';
 
 /**
  * story #2078(E-ARCH 0단계) — presence·notification·chat이 각자 EventSource를 열어 탭당 장수
@@ -62,7 +63,9 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
   useEffect(() => { memberIdRef.current = memberId; }, [memberId]);
 
   const dispatchNamed = useCallback((eventName: string, data: string, eventId?: string) => {
-    if (eventId) lastEventIdRef.current = eventId;
+    // story #2162 — presence·conversation.working처럼 DB Event 행이 없는 B계열은 재개 커서로
+    // 승격하지 않는다(안 그러면 재연결마다 서버가 시간기준점을 못 잡아 최근 50건을 통째로 재전송).
+    if (eventId && isCursorEligibleEventName(eventName)) lastEventIdRef.current = eventId;
     for (const handler of namedSubscribersRef.current.get(eventName) ?? []) handler(data, eventId);
   }, []);
 
