@@ -136,6 +136,15 @@ jobs:
             echo "backend_presence_redis_enabled=true" >> "$GITHUB_OUTPUT"
             echo "backend_presence_online_redis_enabled=true" >> "$GITHUB_OUTPUT"
             echo "backend_sse_lease_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2077(2026-07-24) — frontend min/max-instances가 배포 SSOT 어디에도 없었다
+            # (#2074 응급조치가 코드 밖에 떠 있던 상태). 라이브 실측(PO, 2026-07-24) 그대로
+            # 명시 — 값을 바꾸는 게 아니라 지금 값을 IaC로 옮기는 것.
+            echo "frontend_min_instances=3" >> "$GITHUB_OUTPUT"
+            echo "frontend_max_instances=10" >> "$GITHUB_OUTPUT"
+            # story #2158 후속(#2077에서 동반 배선) — prod는 아직 사용자 경로 검증 전이라
+            # 손대지 않는다(#2120/#2121/#2122와 동일 단계적 승격 원칙). 명시 false로 다른
+            # 플래그들과 동일 컨벤션 유지(암묵 fallback 대신 의도 명시).
+            echo "backend_sse_transient_replay_enabled=false" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
@@ -216,6 +225,17 @@ jobs:
             echo "backend_presence_redis_enabled=true" >> "$GITHUB_OUTPUT"
             echo "backend_presence_online_redis_enabled=true" >> "$GITHUB_OUTPUT"
             echo "backend_sse_lease_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2077(2026-07-24) — frontend min/max-instances가 배포 SSOT 어디에도 없었다.
+            # 라이브 실측(2026-07-24, `gcloud run services describe sprintable-frontend-dev` —
+            # 서빙 리비전 자체 대조·latestReady==latestCreated·traffic 100% 확認, template spec만
+            # 본 것 아님): minScale=1·maxScale=3. cloudbuild.yaml dev-safe 기본값과 동일값이라
+            # 이 output 없어도 굴러가지만, 대칭 배선을 위해 dev도 명시(backend_timeout 관례와 동형).
+            echo "frontend_min_instances=1" >> "$GITHUB_OUTPUT"
+            echo "frontend_max_instances=3" >> "$GITHUB_OUTPUT"
+            # story #2158 후속(#2077에서 동반 배선) — 재생 버퍼(PR #2468)는 머지됐으나 켤 배선이
+            # 없어 까심군이 사용자 경로 재측정을 못 하고 있었다. dev만 켠다(#2158 취지 자체가
+            # "손 gcloud로 안 켠다"라 SSOT 경유 필수).
+            echo "backend_sse_transient_replay_enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Submit Cloud Build
@@ -223,6 +243,6 @@ jobs:
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_BACKEND_REDIS_DISPATCH_ENABLED="${{ steps.env.outputs.backend_redis_dispatch_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}",_BACKEND_FANOUT_WAKE_REDIS_ENABLED="${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}",_SSE_MULTIPLEX_ENABLED="${{ steps.env.outputs.sse_multiplex_enabled }}",_BACKEND_PRESENCE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_redis_enabled }}",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_online_redis_enabled }}",_BACKEND_SSE_LEASE_REDIS_ENABLED="${{ steps.env.outputs.backend_sse_lease_redis_enabled }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_BACKEND_REDIS_DISPATCH_ENABLED="${{ steps.env.outputs.backend_redis_dispatch_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}",_BACKEND_FANOUT_WAKE_REDIS_ENABLED="${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}",_SSE_MULTIPLEX_ENABLED="${{ steps.env.outputs.sse_multiplex_enabled }}",_BACKEND_PRESENCE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_redis_enabled }}",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_online_redis_enabled }}",_BACKEND_SSE_LEASE_REDIS_ENABLED="${{ steps.env.outputs.backend_sse_lease_redis_enabled }}",_FRONTEND_MIN_INSTANCES="${{ steps.env.outputs.frontend_min_instances }}",_FRONTEND_MAX_INSTANCES="${{ steps.env.outputs.frontend_max_instances }}",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED="${{ steps.env.outputs.backend_sse_transient_replay_enabled }}" \
             --suppress-logs \
             .
