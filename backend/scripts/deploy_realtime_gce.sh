@@ -362,8 +362,11 @@ SECRET_PAIRS="${DB_SECRET_NAME}:DATABASE_URL"
 SECRET_PAIRS="${SECRET_PAIRS} JWT_SECRET:JWT_SECRET"
 SECRET_PAIRS="${SECRET_PAIRS} GOOGLE_CLIENT_ID:GOOGLE_CLIENT_ID"
 SECRET_PAIRS="${SECRET_PAIRS} GOOGLE_CLIENT_SECRET:GOOGLE_CLIENT_SECRET"
-SECRET_PAIRS="${SECRET_PAIRS} GITHUB_CLIENT_ID_${GITHUB_SECRET_SUFFIX}:GITHUB_CLIENT_ID"
-SECRET_PAIRS="${SECRET_PAIRS} GITHUB_CLIENT_SECRET_${GITHUB_SECRET_SUFFIX}:GITHUB_CLIENT_SECRET"
+# story #2145(2026-07-24): GitHub user-login OAuth(GITHUB_CLIENT_ID/SECRET)는 #2155에서 제거됐다
+# (prod users github_linked=0 실측 → 이관경로 불요 판정). app.core.config.Settings에 github_client_id/
+# secret 필드가 없고(207행은 주석뿐) 앱 코드가 이 env를 읽는 경로 0건(git grep 확認). env-drift-guard
+# 축④(Settings 커버리지)가 realtime-dev 라이브에서 이 두 키를 "죽은 배선"으로 실측 검출 → 여기서 제거.
+# (deploy_backend.sh는 #2155에서 이미 제거됨 — 이 파일이 미완분이었다.)
 SECRET_PAIRS="${SECRET_PAIRS} RESEND_API_KEY:RESEND_API_KEY"
 SECRET_PAIRS="${SECRET_PAIRS} EMAIL_FROM:EMAIL_FROM"
 SECRET_PAIRS="${SECRET_PAIRS} github-webhook-secret:GITHUB_WEBHOOK_SECRET"
@@ -379,9 +382,10 @@ SECRET_PAIRS="${SECRET_PAIRS} FIREBASE_BFF_INTERNAL_SECRET:FIREBASE_BFF_INTERNAL
 # 있고 backend-prod엔 DATABASE_URL_PROD 키 자체가 없음) — 코드 grep으로도 DATABASE_URL_PROD를
 # 읽는 경로 0건 확認. prod에 그 값(비밀번호 포함 DB 접속 문자열)을 이름만 추가해 한 벌 더
 # 싣는 것은 불필요한 자격증명 표면 확장이라 prod에서는 붙이지 않는다.
-if [ "${ENV}" = "dev" ]; then
-    SECRET_PAIRS="${SECRET_PAIRS} ${DB_SECRET_NAME}:${DB_SECRET_NAME}"
-fi
+# story #2145(2026-07-24) 제거: dev 자기이름 바인딩(DATABASE_URL_DEV:DATABASE_URL_DEV)은
+# app이 안 읽는 죽은 배선이었다(codex C-4·env-drift-guard 축④ realtime-dev 실측 검출). 실 DB 접속은
+# 위 `${DB_SECRET_NAME}:DATABASE_URL`(=DATABASE_URL env)로만 이뤄진다. 자기이름 키는 잉여 자격증명
+# 표면이라 삭제. backend-dev 라이브 잔존분은 2026-07-24 `--remove-secrets`로 이미 정리됨.
 # story #2142: prod만 REDIS_URL을 시크릿으로 추가(위 SECRET_PAIRS_REDIS 분기 참조) — dev는
 # 이미 PLAIN_ENV_SPEC에 실렸으므로 빈 문자열이라 여기선 아무것도 안 붙는다.
 if [ -n "${SECRET_PAIRS_REDIS}" ]; then
