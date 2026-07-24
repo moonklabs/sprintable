@@ -8,6 +8,7 @@ done이 게이트 증거에 안 잡힘)을 닫고, 정상 경로와 parity(드�
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -104,11 +105,20 @@ async def emit_story_status_changed(
     actor_name: str | None = None,
     actor_role: str | None = None,
     actor_type: str | None = None,
+    request_received_at: float | None = None,
 ) -> None:
     """story status_changed의 side-effects를 발화. old==new면 no-op.
 
     호출자가 story.status를 이미 새 값으로 설정한 뒤 호출한다. 각 side-effect는 best-effort(실패
     격리)로 status 전이 자체를 깨지 않는다.
+
+    `request_received_at`(#2176 AC1, 2026-07-24): 미르코 실측 — 칸반 상태변경이 액터 호출부터
+    화면 도착까지 10초(전달 4.7초+렌더 5.0초)였는데, "액터 호출 시작"이 MCP 발신 시각이라 그
+    안에 BE 처리·발행이 전부 섞여 있어 #2158의 순수 SSE 전송 400ms대와 기준선이 다르다는
+    caveat이 있었다 — 쪼개지 않고 "전달이 느리다"로 가면 엉뚱한 곳을 파게 된다. 호출자(route
+    handler)가 요청 수신 직후 `time.time()`을 넘기면, 이 함수가 "요청 수신→emit 착수" 구간과
+    "emit 착수→fan-out 완료"(recipient 수·#2157 팬아웃 겹침 여부 판단용) 구간을 로그 한 줄로
+    가른다. 순수 logging(DB/Redis 호출 0)이라 #2123이 비운 hot-path에 부하를 다시 안 얹는다.
 
     ⚠️story #2132(2026-07-23) 정정 — 이 docstring이 예전에 "publish_event는 eventbus→L1
     activity_events 캡처의 진입점"이라 주장했으나 **사실이 아니었다**: L1 capture(
@@ -169,6 +179,7 @@ async def emit_story_status_changed(
     # 9ef0f914·trust_pipeline.py `_maybe_emit`)와 동일하게 project 인가 필터를 낀 수동
     # 포워딩만 남긴다 — 순수 transient push(Event row 생성 0, 연결 안 된 멤버는
     # `_push_to_agent` 자체가 조용히 no-op).
+    _emit_started_at = time.time()
     try:
         from app.routers.events import _push_to_agent
         from app.services.project_auth import project_accessible_member_ids
@@ -182,6 +193,34 @@ async def emit_story_status_changed(
             "status_changed SSE 포워딩 실패(story=%s project=%s)",
             story.id, story.project_id, exc_info=True,
         )
+    finally:
+        # #2176 AC1: 구간 계측 로그(순수 logging, DB/Redis 호출 0 — hot-path 무부하).
+        # request_received_at 미전달 콜사이트(advance_story_to_done 등)는 그 구간을 None으로
+        # 남긴다 — 이 함수 자체는 그 값의 유무를 몰라도 되게 설계(호출자 계약 확장 없음).
+        try:
+            _emit_completed_at = time.time()
+            _server_processing_ms = (
+                round((_emit_started_at - request_received_at) * 1000, 1)
+                if request_received_at is not None else None
+            )
+            logger.info(
+                "story status_changed emit timing",
+                extra={"structured": {
+                    "story_id": str(story.id),
+                    "old_status": old_status,
+                    "new_status": story.status,
+                    "request_received_at": request_received_at,
+                    "emit_started_at": _emit_started_at,
+                    "emit_completed_at": _emit_completed_at,
+                    "recipient_count": len(member_ids) if "member_ids" in locals() else None,
+                    # 요청 수신 → emit 착수(처리+commit 구간, AC1 핵심)
+                    "server_processing_ms": _server_processing_ms,
+                    # emit 착수 → fan-out 완료(recipient 순회 자체가 느린지, #2157 팬아웃 겹침 여부용, AC5)
+                    "emit_fanout_ms": round((_emit_completed_at - _emit_started_at) * 1000, 2),
+                }},
+            )
+        except Exception:  # noqa: BLE001 — 계측 실패가 이미 발화된 side-effect를 되돌리면 안 됨.
+            pass
 
     try:
         # AC2: story.status_changed 의 member-bound webhook 은 관련자(notify_ids)만 수신 → org-wide
