@@ -77,3 +77,14 @@ def test_realtime_step_source_declares_why_flags_differ():
         "PRESENCE_REDIS_ENABLED", "PRESENCE_ONLINE_REDIS_ENABLED", "FANOUT_WAKE_REDIS_ENABLED",
     ):
         assert flag in script, f"{flag}의 '의도적 off' 판정 근거가 스텝 주석에서 사라졌다"
+
+
+def test_realtime_step_declares_the_assumption_the_judgment_rests_on():
+    """오르테가군 PR 리뷰(2026-07-24): "의도적 off" 판정 근거뿐 아니라 그 판정이 **무너지는
+    조건**까지 선언돼야 한다 — 오늘 #2178 사달의 근본원인이 정확히 "전제가 어디에도 안
+    적혀 있던 것"이었다. realtime-dev가 backend와 같은 풀 이미지를 돌려 /agent/stream
+    라우트 자체는 살아있으므로, "브라우저만 붙는다"는 전제가 라우팅 변경으로 깨지면 이
+    판정 전체가 재검토 대상이 된다는 것을 명시해야 한다."""
+    script = _deploy_realtime_step_script()
+    assert "브라우저만 붙는다" in script
+    assert "재검토" in script or "재판정" in script

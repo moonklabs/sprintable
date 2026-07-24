@@ -451,6 +451,14 @@ steps:
         #     backend-dev에만 붙는다 — realtime-dev엔 그 큐 자체가 존재한 적이 없다.
         # 위 두 건(누락)만 배선하고 나머지 셋은 의도적으로 그대로 둔다 — 한 덩어리로 "다 켜자"
         # 하지 않는다(PO 지시).
+        # ⚠️이 판정이 딛고 선 전제(오르테가군 PR 리뷰 지적, 2026-07-24) — 위 세 건의 "의도적
+        # off" 판정은 **"realtime-dev에는 브라우저만 붙는다"**는 현재 라우팅 전제 위에 서 있다.
+        # 이 서비스는 backend와 **같은 풀 이미지**를 돌리므로 `/agent/stream`(agent_gateway.py)
+        # 라우트 자체는 살아 있다 — 지금은 에이전트가 항상 backend-dev로 붙도록 배선돼 있어(
+        # agent_onboarding_config.py::resolve_backend_direct_url) 무해할 뿐이다. **그 라우팅이
+        # 바뀌어 에이전트가 realtime-dev에도 붙게 되면 이 판정 전체를 재검토할 것** — 오늘 이
+        # 사달(#2178)의 근본원인이 정확히 "전제가 어디에도 안 적혀 있었던 것"이라, 판정 근거뿐
+        # 아니라 판정이 무너지는 조건까지 여기 남긴다.
         gcloud run deploy sprintable-realtime-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
