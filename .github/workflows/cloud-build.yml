@@ -70,11 +70,20 @@ jobs:
             # prod에서 이 output으로 override, `backend_max_instances`와 동일 배선 패턴).
             echo "backend_timeout=300" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=G-RYHFE7XM3X" >> "$GITHUB_OUTPUT"
-            # story #2078(E-ARCH 1단계 durable화): prod api는 아직 true 유지 — prod는
-            # sprintable-realtime-prod가 없다(deploy-realtime 스텝이 prod에서 여전히 스킵
-            # 중). false로 먼저 못박으면 prod에 LISTEN 하는 서비스가 0개가 돼 실시간이
-            # 완전히 죽는다. prod가 realtime 배선을 마치는 승격 시점에 이 값을 false로 뒤집을 것.
-            echo "backend_pg_listen_enabled=true" >> "$GITHUB_OUTPUT"
+            # ⭐story #2123 최종(2026-07-24) — 위 주석이 예고한 "realtime 배선을 마치는 승격 시점"이
+            # 왔다. #2123 cutover(consume/dispatch/fanout_wake=true, 이전 커밋)가 배포돼 prod 배차
+            # 통로가 Redis로 확定된 것을 라이브 3축으로 실측했다:
+            #   ①resolve_backplane 3인스턴스 전부 "redis 우선으로 진행" ②event_broker redis-only
+            #   delivery 다수 ③prod agent stream 끝단에 실제 프레임 도착. 오류 3건(전부 안내 로그)뿐.
+            # ⇒ PG LISTEN은 이제 중복 경로다. 끄면 인스턴스당 pg_pubsub raw 커넥션 1개가 회수되고
+            #   SSE hot-path에서 DB가 빠진다(= 에픽 "PG를 브로커서 해방"의 완결 지점).
+            # ⛔되돌리기: 이 값을 true로 되돌리는 것만으로는 부족하다 — Redis dispatch가 켜져 있는 한
+            #   resolve_backplane이 계속 redis를 고른다. 롤백은 consume/dispatch를 false로 되돌리는 것.
+            # ⭐부수효과: cutover 배포에서 인스턴스마다 1회씩 찍히던 안내 ERROR("REALTIME_BACKPLANE
+            # 미설정인데 PG_LISTEN + Redis dispatch 동시 활성")가 이 값으로 **자연 소멸**한다 —
+            # resolve_backplane의 그 경고는 "둘 다 켜짐" 조건에서만 나오고, 이제 redis 하나만
+            # 켜져 있어 조건 자체가 성립하지 않는다(별도 REALTIME_BACKPLANE 배선 불요).
+            echo "backend_pg_listen_enabled=false" >> "$GITHUB_OUTPUT"
             # ⛔story #2078(E-ARCH S2 정리) 정정(#2123, 2026-07-23): "api는 SSE 미서빙"이라
             # false로 뒀었으나 틀린 전제였다(에이전트 SSE는 backend-dev가 직접 서빙 —
             # agent_onboarding_config.py 설계, 라이브 실측 확認). 다만 **prod는 아직 Redis
