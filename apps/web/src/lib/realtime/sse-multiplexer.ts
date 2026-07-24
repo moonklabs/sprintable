@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createReconnectBackoffState } from './sse-reconnect-backoff';
+import { isSessionAlive } from './sse-session-guard';
 
 /**
  * story #2078(E-ARCH 0단계) — presence·notification·chat이 각자 EventSource를 열어 탭당 장수
@@ -127,15 +128,26 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
 
       es.onerror = () => {
         setConnected(false);
+        // story #2160 — CLOSED는 브라우저가 이미 "복구 불가"로 판정한 것(non-2xx 등, 자동재연결
+        // 없음). 세션이 죽은 것인지 업스트림 일시 오류인지 여기선 못 가르므로 세션부터 확認한다.
+        const wasFatal = es.readyState === EventSource.CLOSED;
         es.close();
         if (esRef.current === es) esRef.current = null;
-        if (!closed && !retryTimerRef.current) {
+        if (closed) return;
+        const scheduleRetry = () => {
+          if (retryTimerRef.current) return;
           const delay = backoff.onError();
           retryTimerRef.current = setTimeout(() => {
             retryTimerRef.current = null;
             connect();
           }, delay);
+        };
+        if (wasFatal) {
+          // 세션이 죽었으면 재시도하지 않는다(fetchWithAuth가 SessionExpiredDialog를 이미 띄웠다).
+          void isSessionAlive().then((alive) => { if (alive) scheduleRetry(); });
+          return;
         }
+        scheduleRetry();
       };
     };
 
