@@ -105,7 +105,7 @@ def test_live_sse_always_emits_id_field():
     import inspect
     from app.routers import events as ev
     source = inspect.getsource(ev.agent_event_stream)
-    assert "_live_id = eid or str(uuid.uuid4())" in source
+    assert "_live_id = eid or _transient_id or str(uuid.uuid4())" in source  # #2158: _sse_transient_id 우선 재사용(id: 필드는 여전히 항상 보장)
 
 
 # ─── AC4: seen_ids eviction 동작 확인 ────────────────────────────────────────
