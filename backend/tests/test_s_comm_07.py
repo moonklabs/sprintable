@@ -244,7 +244,11 @@ async def test_receive_inbox_webhook_calls_push_to_agent():
                     db=mock_db,
                     x_sprintable_signature=sig,
                 )
-                mock_push.assert_called_once_with(str(agent_id), {"event_type": "inbox_webhook"})
+                # #2158 부수 정정: push payload에 event_id 동봉 — Event row가 실재하는 A계열임을
+                # 명시해 재연결 시 재생 버퍼(B계열 전용)와의 이중배달을 막는다.
+                mock_push.assert_called_once_with(
+                    str(agent_id), {"event_type": "inbox_webhook", "event_id": str(mock_event.id)}
+                )
 
 
 def test_agent_inbox_webhook_secret_in_config():

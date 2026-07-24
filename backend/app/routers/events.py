@@ -107,6 +107,22 @@ def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) 
 
     _from_listener=True: LISTEN 수신기에서 호출 시 pg_notify 재발행 금지 (무한 루프 차단).
     """
+    is_db_backed = bool(payload.get("event_id"))
+    # #2158 리뷰 반영(오르테가군 ①, 2026-07-24 — PR 전 지적): DB event_id가 없는 B계열은
+    # 발행 시점에 안정적 id를 **한 번만** 부여한다. 이전엔 generate()의 라이브 루프가 yield
+    # 시점마다 `uuid.uuid4()`를 새로 만들었는데(eid=None이라), 같은 논리적 이벤트가 배달
+    # 경로(라이브 vs 재생, 또는 다중 탭)마다 다른 id를 얻어 클라 SeenIdsCache dedup이
+    # 구조적으로 무력했다 — "같은 걸 다시 받아도 다른 id라 못 잡는" 상태. 여기서 한 번
+    # 정해두면 라이브 전달·Redis 재생 버퍼·다중 탭이 전부 같은 id를 쓴다.
+    # 필드명이 `event_id`가 아니라 `_sse_transient_id`인 이유: 이 값이 `event_id`였다면
+    # 아래 generate() 라이브 루프의 "eid 있으면 DB Event.status 조회" 분기가 이 가짜
+    # id로도 매 배달마다 DB를 때려(존재하지 않는 id라 매번 miss) AC3(hot-path DB 0)를
+    # 스스로 깬다 — A/B 판별 신호(`event_id`)와 상관관계 신호(id: 필드)를 분리한다.
+    # `_from_listener=True`(크로스인스턴스 리스너 콜백) 경로는 원발행 인스턴스가 이미 실어
+    # 보낸 값을 그대로 쓴다(`"_sse_transient_id" not in payload`) — 재할당하면 인스턴스마다
+    # 다른 id가 생겨 위 목적이 무효화된다.
+    if not is_db_backed and "_sse_transient_id" not in payload:
+        payload = {**payload, "_sse_transient_id": str(uuid.uuid4())}
     queues = _agent_connections.get(member_id)
     pushed = False
     if queues:
@@ -129,6 +145,15 @@ def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) 
         from app.services.event_broker import event_broker
         from app.services.pg_pubsub import fire_and_forget
         fire_and_forget(event_broker.publish("agent", member_id, payload.get("event_type", ""), payload))
+        # #2158: DB event_id가 없는 B계열(transient push — conversation.read·presence·
+        # conversation.working 등)만 재생 버퍼에 기록한다. A계열(event_id 有)은 DB backfill이
+        # 이미 커버하므로 여기서도 기록하면 재연결 시 이중배달(구조적으로 막아야 하는 것,
+        # AC2). `not _from_listener` 가드와 같은 자리에 둔 이유: 멀티인스턴스에서 원발행
+        # 인스턴스 1곳에서만 1회 기록해야(리스너 콜백마다 기록하면 인스턴스 수만큼 중복
+        # 기록) — event_broker.publish 호출과 동일하게 "원발행 1회"에만 태운다.
+        if not is_db_backed:
+            from app.services import sse_transient_replay
+            fire_and_forget(sse_transient_replay.record(member_id, payload))
     return pushed
 
 
@@ -394,6 +419,25 @@ async def agent_event_stream(
                         evt.delivered_at = now
                     await db.commit()
 
+            # #2158: B계열(DB event_id 없는 transient push) 재연결 갭 재생. 위 A계열 DB
+            # backfill과 같은 커서(`_ref`)를 재사용 — last_event_id가 A계열 Event를 가리키면
+            # 그 created_at, since_timestamp만 있으면 그 값, 둘 다 없으면(초기 연결 또는
+            # last_event_id가 B계열 id라 DB에 없어 못 구한 경우) replay()가 자체 TTL
+            # 윈도우로 하한을 잡는다(무한 재생 방지). A/B가 저장소로 분리돼 있어(Event 테이블
+            # vs Redis ZSET) 이 replay가 위 backfill과 겹쳐 중복 배달할 일은 구조적으로 없다.
+            from app.services import sse_transient_replay
+            _replay_cutoff = _ref.timestamp() if _ref is not None else None
+            for _r_payload in await sse_transient_replay.replay(member_id_str, since=_replay_cutoff):
+                _r_event_type = _r_payload.get("event_type", "message")
+                # #2158 리뷰 반영(오르테가군 ①): 원 push가 부여한 id를 그대로 재사용 —
+                # 여기서 새 uuid4를 만들면 이미 라이브로 받은 탭(또는 다른 재연결)이 받은
+                # id와 달라져 클라 SeenIdsCache dedup이 같은 이벤트를 다른 걸로 오판한다.
+                _r_id = _r_payload.pop("_sse_transient_id", None) or str(uuid.uuid4())
+                yield (
+                    f"event: {_r_event_type}\nid: {_r_id}\n"
+                    f"data: {json.dumps({**_r_payload, 'event_id': _r_id, 'is_backfill': True})}\n\n"
+                )
+
             # 신규 이벤트 리슨 — 대기 구간에서 커넥션 미점유, 이벤트마다 개별 세션
             # story c4c72eb1(E-ARCH GCE 이전) PR-A: 전역 shutdown_event를 queue.get()과 경합
             # 시켜(asyncio.wait FIRST_COMPLETED) 셧다운 신호에 하트비트 주기(최대 30초)를
@@ -447,7 +491,13 @@ async def agent_event_stream(
                                 pass
                         # event_id 없는 경로(chats direct push 등)도 id: 보장 — 재연결 추적 약화 방지
                         # is_backfill: False 명시 + event_id 동기화 — SeenIdsCache dedup 및 relay 필터 정합성
-                        _live_id = eid or str(uuid.uuid4())
+                        # #2158: B계열은 `_push_to_agent`가 발행 시점에 부여한 `_sse_transient_id`를
+                        # 우선 사용(eid가 없을 때) — 여기서 매번 새 uuid4를 만들면 같은 논리적
+                        # 이벤트가 라이브 배달마다·재생 버퍼 배달과 서로 다른 id를 얻어 클라
+                        # dedup이 무력화된다(오르테가군 PR 전 리뷰 ①). 내부 필드는 event_id로
+                        # 대체돼 나가므로 원본 dict에서 제거(클라에 내부 키 노출 방지).
+                        _transient_id = event_data.pop("_sse_transient_id", None)
+                        _live_id = eid or _transient_id or str(uuid.uuid4())
                         _sse_data = json.dumps({**event_data, 'event_id': _live_id, 'is_backfill': False})
                         # S-COMM-12: canonical 이벤트 시 legacy alias도 병행 yield (HTTP SSE 하위호환)
                         if event_type == "conversation.message_created":
