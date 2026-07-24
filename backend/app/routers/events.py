@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
+import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -46,6 +48,38 @@ import os as _os
 _MAX_SSE_CONNECTIONS: int = int(_os.getenv("MAX_SSE_CONNECTIONS", "100"))
 _sse_connection_count: int = 0
 _SSE_HEARTBEAT_TIMEOUT: float = float(_os.getenv("SSE_HEARTBEAT_TIMEOUT", "30"))
+
+# story #2128(2026-07-24, critical) — wall-clock 수명 상한(v2 설계 ①본체). realtime-dev가
+# 이 병으로 죽어 있었다: GCLB 뒤에서 클라 disconnect가 백엔드로 전파 안 되고(코드는 정상 —
+# request.is_disconnected() 체크·finally discard 둘 다 있음), 연결이 Cloud Run 타임아웃
+# (3600s)까지 자연 종료 없이 슬롯을 점유해 640슬롯(concurrency 80×maxInstances 8)이
+# 누적 고갈됐다(관측: 200 SSE 슬롯 점유 중앙값 3601초). 처방 제1원리(오르테가군 판정) —
+# 생명 판정 신호는 "판정 대상이 스스로 갱신할 수 없는 것"이어야 한다: heartbeat/ACK
+# staleness는 신호가 없는 정상 idle 연결(브라우저 EventSource는 out-of-band 신호 자체가
+# 0)을 오살하므로 "가속"으로만 쓰고, wall-clock 상한을 유일한 본체로 둔다. 좀비는 이 축을
+# 스스로 늘릴 수 없다 — 정상 연결도 이 상한에 걸려 재연결되지만 #2101 backfill+Last-Event-ID
+# 재개로 데이터 손실 0.
+#
+# N=600s(10분) 근거:
+# · #2183(2026-07-24, 등재) 고쳐지기 前: apps/web `/api/event-stream` 프록시(route.ts)의
+#   upstream fetch()가 incoming request.signal을 안 넘겨받아, 프론트 자체 요청이 #2095의
+#   60s 타임아웃으로 끊겨도 realtime-dev로의 upstream 연결은 안 끊긴다 — 이 상태에선
+#   600s가 **실질 상한**이고 healthy 연결에도 발동한다(무해 — 위 데이터손실 0 근거 그대로).
+# · #2183 고쳐진 後: 프론트 60s 컷이 먼저 걸려(자연주기 ~60~68s, story #2101 실측) 이
+#   600s는 거의 발동 안 하는 순수 백스톱으로 물러난다. 600s는 그 자연주기의 ~9배라
+#   AC4(정상연결 오살 금지)를 여유있게 만족.
+# · 3600s의 1/6 — 좀비 최대 점유시간이 6배 줄어든다.
+# · #2095(재연결 backoff 상한 20s)와 동형 근거화 방식: "자연주기보다 충분히 길어 정상
+#   트래픽엔 사실상 발동 안 하면서, 발동하면 확실히 좀비를 잘라낸다."
+#
+# 무너지는 조건(pinning 테스트 — tests/test_2128_sse_lifespan_cap.py 참조): "600s 미만에
+# 정상 완료되는 게 드문 무거운 초기 핸드셰이크/backfill이 실제로 관측되면"(예: 매우 큰
+# backfill이 600s 근처를 자주 침범) 이 값을 올려야 한다 — 지금은 그런 관측 없음.
+#
+# 배포 env가 아니라 코드 상수 — #2161 AGENT_RUN_TIMEOUT_HOURS와 동형(값이 두 곳에 살면
+# 오늘 하루 종일 데인 그 모양이 된다는 오르테가군 지적).
+_SSE_LIFESPAN_SEC: float = 600.0
+_SSE_LIFESPAN_JITTER_SEC: float = 60.0  # herd 방지(#2095 지터와 동일 목적)
 
 # ─── S6-1: Backfill 볼륨 제어 ─────────────────────────────────────────────────
 _BACKFILL_THRESHOLD_SECONDS: int = int(_os.getenv("BACKFILL_THRESHOLD_SECONDS", "300"))
@@ -329,6 +363,10 @@ async def agent_event_stream(
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
     _agent_connections[member_id_str].add(queue)
 
+    # story #2128: 연결 시작 시점에 이미 종료 예정 시각을 갖고 태어난다(#2161과 동일 원리 —
+    # "시작할 때 이미 끝날 시각을 갖고 태어나게"). monotonic — 벽시계 조정에 영향 안 받음.
+    _lifespan_deadline = time.monotonic() + _SSE_LIFESPAN_SEC + random.uniform(0, _SSE_LIFESPAN_JITTER_SEC)
+
     async def generate():
         try:
             # 즉시 heartbeat → HTTP 응답 헤더 즉시 반환 (대량 백필 전 hang 방지)
@@ -449,6 +487,13 @@ async def agent_event_stream(
             shutdown_wait_task = asyncio.create_task(_shutdown_module.shutdown_event.wait())
             try:
                 while not await request.is_disconnected():
+                    # story #2128 ①본체: 좀비가 스스로 늘릴 수 없는 유일한 축 — disconnect
+                    # 감지 여부와 완전히 무관하게 발동(그게 이 방어선의 존재 이유). "완료로
+                    # 위장" 안 함 — 아래에서 특별취급 없이 기존 finally: 하나로 그대로 흘러간다
+                    # (정상종료·이상종료·수명초과 전부 같은 정리 경로, #2161 CAS 원칙의 적용).
+                    if time.monotonic() >= _lifespan_deadline:
+                        yield "event: lifespan_reconnect\ndata: {}\n\n"
+                        return
                     get_task = asyncio.create_task(queue.get())
                     try:
                         done, _pending = await asyncio.wait(
