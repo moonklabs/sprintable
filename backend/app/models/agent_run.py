@@ -78,3 +78,6 @@ class AgentRun(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # story #2161(0206): 생성 시점에 기록되는 종료 예정 시각 — app/services/agent_run_lifecycle.py
+    # 의 cron 스위퍼가 이 값을 넘긴 'running' run을 능동적으로 'abandoned' 전이한다.
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -612,6 +612,26 @@ async def a2a_task_deadline_sweep(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── GET /api/v2/internal/cron/agent-run-timeout-sweep ────────────────────────
+# story #2161(2026-07-24, 오르테가군 판정): agent_runs 'running' 영구정체 방지 —
+# a2a-task-deadline-sweep(위)과 동일 근본·동일 처방(폴링 무관 능동 CAS 전이). deadline_at
+# 폴백(NULL이면 started_at + AGENT_RUN_TIMEOUT_HOURS)이 기존 stuck row도 사정권에 넣는다.
+
+@router.get("/agent-run-timeout-sweep")
+async def agent_run_timeout_sweep(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.agent_run_lifecycle import sweep_expired_agent_runs
+        result = await sweep_expired_agent_runs(session)
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("cron error (agent-run-timeout-sweep): %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 @router.get("/storage-usage-warn")
 async def storage_usage_warn(
     request: Request,
