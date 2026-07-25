@@ -163,7 +163,11 @@ async def list_stories(
         filters["status"] = status_filter
     if story_number is not None:
         filters["story_number"] = story_number
-    stories = await repo.list(limit=limit, q=q, **filters)
+    # story #2189: 이 분기도 board 분기(:131)와 동형으로 cursor를 파싱해 넘긴다 — 안 넘기면
+    # FE(buildCursorPageMeta)가 계산한 nextCursor가 다음 요청에서 조용히 무시돼 같은 페이지가
+    # 반복된다(sprints/standup "더 보기" 중복 누적의 원인).
+    cursor_dt = datetime.fromisoformat(cursor) if cursor else None
+    stories = await repo.list(limit=limit, q=q, cursor=cursor_dt, **filters)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
     await _attach_has_evidence(repo.session, stories)
     return [StoryResponse.model_validate(s) for s in stories]

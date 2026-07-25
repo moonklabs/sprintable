@@ -47,18 +47,46 @@ class StoryRepository(BaseRepository[Story]):
         story_number = await allocate_story_number(self.session, data["project_id"])
         return await super().create(story_number=story_number, **data)
 
-    async def list(self, limit: int = 1000, *, q: str | None = None, **filters) -> list[Story]:
+    async def list(
+        self, limit: int = 1000, *, q: str | None = None, cursor: datetime | None = None, **filters,
+    ) -> list[Story]:
         """story 083176e8(까심 #2148 QA 적출): 갤러리 피커 실검색 — `q`는 title ILIKE 부분일치로
         기존 동등비교 필터(**filters, base.list() 상속)와 AND 결합. BaseRepository.list()는
         범용(모든 리포지토리 공유)이라 q ILIKE 개념을 거기 얹지 않고 story 전용으로 오버라이드
         (list_board/list_by_ids와 동일하게 자체 쿼리 구성 — 기존 관례).
+
+        story #2189(2026-07-25): ORDER BY도 cursor도 없었다 — FE(`buildCursorPageMeta`)의
+        over-fetch(limit+1) 페이지네이션은 **결정적 정렬 + cursor가 WHERE로 실제 적용**되는
+        전제 위에서만 동작하는데(board 분기·현재 `/api/goals`가 이미 그 전제로 동작 중), 이
+        분기만 둘 다 없어 "커서를 바꿔도 같은 페이지가 반복"됐다(sprints/standup "더 보기"가
+        dedup 없이 중복 누적). board 분기와 동형으로 `created_at DESC` + `cursor` WHERE를
+        추가한다 — board처럼 별도 전용 정렬 우선순위(priority)를 얹지 않는 이유는 이 분기의
+        전 콜러(`buildCursorPageMeta`)가 `created_at`만 cursorField로 쓰기 때문(다른 정렬
+        기준을 얹으면 FE가 계산하는 nextCursor와 실제 정렬 순서가 어긋난다).
+
+        까심군 QA 지적(2026-07-25, #2490 머지 前): `created_at`만으로는 같은 트랜잭션 배치
+        insert 시 server_default=func.now()가 여러 행에 동일 값을 줄 수 있어(테스트가 이 경계를
+        1초씩 벌려 피해갔던 것 자체가 "이 경로가 시험된 적 없다"는 증거였다) ORDER BY가
+        비결정적이었다 — 같은 쿼리를 다시 실행해도 동률 구간의 순서가 달라질 수 있어 페이지
+        재요청 시 skip/dup 위험. `id`를 안정적 2차 키로 얹어 정렬 자체를 결정적으로 만든다
+        (board의 `_PRIORITY_ORDER`를 그대로 베끼지 않는 이유: 여기 필요한 건 "board와 같은
+        정렬 결과"가 아니라 "커서 전진이 결정적인 것" — 목적에 맞는 최소 키면 충분하다).
+
+        ⚠️ 남는 한계(무너지는 조건): cursor 자체는 여전히 `created_at` 단일값이라(FE
+        `buildCursorPageMeta`가 그 값만 보내는 계약 — 서버 혼자 바꿀 수 없다), 동률 경계에
+        걸친 행은 이론상 다음 페이지에서 스킵될 수 있다(중복 전달보다는 덜 나쁜 실패 모드로
+        의도적으로 선택). board 분기도 동일한 구조적 한계를 이미 갖고 있다 — 실제로 skip이
+        관측되면 그때 복합 커서(`created_at`+`id`)로 승격한다.
         """
         query = select(Story).where(self._org_filter(), Story.deleted_at.is_(None))
         for attr, val in filters.items():
             query = query.where(getattr(Story, attr) == val)
         if q:
             query = query.where(Story.title.ilike(f"%{q}%"))
-        result = await self.session.execute(query.limit(limit))
+        if cursor:
+            query = query.where(Story.created_at < cursor)
+        query = query.order_by(Story.created_at.desc(), Story.id.desc()).limit(limit)
+        result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def list_by_ids(self, ids: list[uuid.UUID]) -> list[Story]:
