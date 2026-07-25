@@ -76,7 +76,8 @@ const mdBodyComponents = {
   ul: ({ children }: { children?: React.ReactNode }) => <ul className="mb-2 ml-4 list-disc space-y-0.5">{children}</ul>,
   ol: ({ children }: { children?: React.ReactNode }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5">{children}</ol>,
   li: ({ children }: { children?: React.ReactNode }) => <li className="text-sm leading-6">{children}</li>,
-  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto rounded-lg p-3 text-[13px] bg-muted">{children}</pre>,
+  // story #2165: 코드블럭은 전역 스크롤바 숨김 예외.
+  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg p-3 text-[13px] bg-muted">{children}</pre>,
   code: ({ children }: { children?: React.ReactNode }) => <code className="rounded px-1 py-0.5 font-mono text-[13px] bg-muted">{children}</code>,
   blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 pl-3 border-border text-muted-foreground">{children}</blockquote>,
   strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold">{children}</strong>,

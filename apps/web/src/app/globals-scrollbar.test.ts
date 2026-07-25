@@ -1,0 +1,50 @@
+import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+
+// story #2165(2026-07-25, 까심 QA): 제품 전역 스크롤바 숨김 + 코드블럭/표 예외. CSS는 jsdom으로
+// 렌더 검증이 안 돼(실제 스크롤바 렌더는 브라우저 전용) 소스 문자열 불변식으로 고정한다:
+// ① 전역 숨김 규칙이 존재 ② .scrollbar-visible 예외 클래스가 그것을 되살림 ③ 스크롤 "기능"
+// 자체를 막는 overflow:hidden으로 되어있지 않음(숨기는 것과 못 굴리게 하는 것은 다르다).
+describe('전역 스크롤바 숨김 CSS 불변식 (#2165)', () => {
+  const css = fs.readFileSync(
+    path.resolve(__dirname, 'globals.css'),
+    'utf8',
+  );
+
+  it('전역 * 규칙이 scrollbar-width:none + webkit scrollbar display:none 이다', () => {
+    expect(css).toMatch(/\*\s*\{\s*scrollbar-width:\s*none;\s*\}/);
+    expect(css).toContain('*::-webkit-scrollbar { display: none; }');
+  });
+
+  it('.scrollbar-visible 이 scrollbar-width:thin으로 되살리고 overflow는 건드리지 않는다', () => {
+    expect(css).toMatch(/\.scrollbar-visible[^{]*\{[^}]*scrollbar-width:\s*thin/);
+    expect(css).not.toMatch(/\.scrollbar-visible[^{]*\{[^}]*overflow:\s*hidden/);
+  });
+
+  it('.doc-renderer pre 후손 선택자도 같은 예외를 받는다(raw HTML 주입 경로라 클래스 직접 부착 불가)', () => {
+    expect(css).toMatch(/\.doc-renderer pre[^{]*\{[^}]*scrollbar-width:\s*thin|\.scrollbar-visible,\s*\n?\s*\.doc-renderer pre/);
+  });
+});
+
+describe('코드블럭/표 wrapper가 scrollbar-visible을 잃지 않았다 (#2165)', () => {
+  const files = [
+    'docs/extensions/code-block-copy.tsx',
+    'docs/doc-content-renderer.tsx',
+    'chat/chat-bubble.tsx',
+    'chat/embed-card.tsx',
+    'kanban/story-detail-panel.tsx',
+    'agents/access-matrix-tab.tsx',
+    'settings/workflow-execution-history-section.tsx',
+  ];
+
+  for (const file of files) {
+    it(`components/${file} 안에 scrollbar-visible 클래스가 존재한다`, () => {
+      const content = fs.readFileSync(
+        path.resolve(__dirname, '../components', file),
+        'utf8',
+      );
+      expect(content).toContain('scrollbar-visible');
+    });
+  }
+});

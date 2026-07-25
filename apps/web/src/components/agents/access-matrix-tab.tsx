@@ -190,7 +190,8 @@ export function AccessMatrixTab() {
               <p className="text-sm text-muted-foreground">{ta('matrixEmpty')}</p>
             </div>
           ) : (
-            <div className="focus-inset overflow-x-auto rounded-md border border-border">
+            // story #2165: 표는 전역 스크롤바 숨김 예외 — 가로로 잘린 열이 있다는 것을 알려야 한다.
+            <div className="focus-inset overflow-x-auto scrollbar-visible rounded-md border border-border">
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/30">

@@ -84,7 +84,8 @@ export function WorkflowExecutionHistorySection({ projectId }: { projectId: stri
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            {/* story #2165: 표는 전역 스크롤바 숨김 예외. */}
+            <div className="overflow-x-auto scrollbar-visible">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border text-left text-muted-foreground">

@@ -126,13 +126,15 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
         />
       );
     },
-    pre: ({ children }: { children?: React.ReactNode }) => <pre className={`mb-1.5 overflow-x-auto rounded-lg p-2.5 text-xs ${codeBg}`}>{children}</pre>,
+    // story #2165: 코드블럭은 전역 스크롤바 숨김 예외 — 가로로 잘린 줄이 있다는 것을 알려야 한다.
+    pre: ({ children }: { children?: React.ReactNode }) => <pre className={`mb-1.5 overflow-x-auto scrollbar-visible rounded-lg p-2.5 text-xs ${codeBg}`}>{children}</pre>,
     // story #2035 AC2 — 표는 자기 컨테이너 안에서만 가로 스크롤(doc-content-renderer.tsx의
     // 검증된 not-prose overflow-x-auto 패턴 재사용). whitespace-nowrap 없으면 브라우저가
     // 열 텍스트를 좁은 말풍선 폭에 맞춰 줄바꿈/축약해버려 "열 삭제·축약 금지" 위반이 됨 —
     // nowrap으로 열 폭을 원문 그대로 유지하고 넘치는 만큼 래퍼가 스크롤하게 한다.
+    // story #2165: 표도 코드블럭과 같은 성격 — 스크롤바 숨김 예외.
     table: ({ children }: { children?: React.ReactNode }) => (
-      <div className={`mb-1.5 overflow-x-auto rounded-lg border ${border}`}>
+      <div className={`mb-1.5 overflow-x-auto scrollbar-visible rounded-lg border ${border}`}>
         <table className="whitespace-nowrap text-xs">{children}</table>
       </div>
     ),

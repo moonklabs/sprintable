@@ -490,13 +490,33 @@
     @apply border-border outline-ring;
     outline-width: 2px;
     outline-offset: 2px;
+  }
+
+  /* story #2165(2026-07-25, 까심 규격): 제품 전역 스크롤바 숨김(가로·세로 모두) — 스크롤
+     "기능"은 유지, 시각적 바만 없앤다. 대부분의 표면에서 스크롤바는 잡음이지만, 콘텐츠가
+     가로로 잘려 있다는 사실 자체를 알려야 하는 표면(코드블럭·표 — 잘린 열/줄이 안 보이면
+     사용자가 존재를 모른다)은 `.scrollbar-visible`로 개별 옵트인한다. */
+  * {
+    scrollbar-width: none;
+  }
+  *::-webkit-scrollbar { display: none; }
+
+  /* .doc-renderer pre: doc-content-renderer.tsx의 legacy html-format 경로가 raw HTML 문자열을
+     그대로 주입해(dangerouslySetInnerHTML) 내부 <pre>에 클래스를 직접 못 붙인다 — 조상
+     .doc-renderer(항상 존재하는 컨테이너 클래스)를 거쳐 후손 선택자로 동일 예외를 적용한다. */
+  .scrollbar-visible,
+  .doc-renderer pre {
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   }
-  *::-webkit-scrollbar { width: 6px; height: 6px; }
-  *::-webkit-scrollbar-track { background: var(--scrollbar-track); }
-  *::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
-  *::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+  .scrollbar-visible::-webkit-scrollbar,
+  .doc-renderer pre::-webkit-scrollbar { display: block; width: 6px; height: 6px; }
+  .scrollbar-visible::-webkit-scrollbar-track,
+  .doc-renderer pre::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+  .scrollbar-visible::-webkit-scrollbar-thumb,
+  .doc-renderer pre::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+  .scrollbar-visible::-webkit-scrollbar-thumb:hover,
+  .doc-renderer pre::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
   /* story #2062(유나 규격): #2057의 outline-offset:2px(바깥 4px 돌출)가 패딩 0인
      overflow-*-auto 스크롤 컨테이너에서 클리핑된다 — 링이 컨테이너 밖으로 못 새어나가
