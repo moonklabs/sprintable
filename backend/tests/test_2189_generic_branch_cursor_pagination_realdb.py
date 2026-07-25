@@ -146,6 +146,18 @@ async def test_cursor_advances_to_next_page_no_overlap():
         assert page1_ids.isdisjoint(page2_ids), (
             f"페이지 간 겹침 — cursor가 무시됐을 때의 그 증상. 겹친 것={page1_ids & page2_ids}"
         )
+
+        # AC3(오르테가군 지적, 2026-07-25) — 음성대조를 "구조상 될 것"으로 말로만 두지 않고
+        # buildCursorPageMeta(pagination.ts)의 hasMore 계산을 그대로 재현해 명시 확認한다:
+        # hasMore = items.length > limit(FE 원 limit=20, over-fetch용 +1 아님). 2차 응답이
+        # 5건(<20)이면 hasMore=false → nextCursor=null → "더 보기" 버튼이 사라져야 한다.
+        # 이게 없으면 "중복은 없어졌는데 버튼은 계속 있는" 반쪽짜리 fix로 닫힐 수 있다.
+        fe_original_limit = 20
+        has_more = len(page2) > fe_original_limit
+        assert has_more is False, (
+            f"2차 응답 {len(page2)}건은 FE 원 limit({fe_original_limit})보다 적어야 hasMore=false로 "
+            "«더 보기» 버튼이 사라지는데, 그 전제가 깨짐"
+        )
     finally:
         await engine.dispose()
 
