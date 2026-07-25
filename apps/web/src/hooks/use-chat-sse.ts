@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
-import { shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
+import { shouldSuppressDuplicateSseEvent, createSeenIdTracker } from '@/lib/realtime/sse-event-dedup';
 import { createReconnectBackoffState, type ReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
 import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
 import { isCursorEligibleEventName } from '@/lib/realtime/sse-cursor-eligibility';
@@ -85,6 +85,9 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // react-hooks/refs: 렌더 중 ref.current 조건부 대입 금지라 지연초기화는 useState(초기화 함수)로.
   const [backoff] = useState<ReconnectBackoffState>(() => createReconnectBackoffState());
+  // story #2163 — 이 훅 인스턴스 전용 dedup tracker(모듈 전역 아님). 이 컴포넌트가 언마운트되면
+  // 같이 사라진다 — 다른 useChatSse 인스턴스(예: GNB 뱃지의 useChatUnreadTotal)를 굶기지 않는다.
+  const seenIdsRef = useRef(createSeenIdTracker());
   const lastEventIdRef = useRef<string | null>(null);
   const onConversationMessageRef = useRef(onConversationMessage);
   const onWorkingRef = useRef(onWorking);
@@ -101,20 +104,20 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   useLayoutEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
   const handleConversationMessage = (raw: string) => {
-    if (shouldSuppressDuplicateSseEvent(raw)) return;
+    if (shouldSuppressDuplicateSseEvent(raw, seenIdsRef.current)) return;
     try {
       onConversationMessageRef.current?.(JSON.parse(raw) as Record<string, unknown>);
     } catch { /* ignore parse errors */ }
   };
   const handleWorking = (raw: string) => {
-    if (shouldSuppressDuplicateSseEvent(raw)) return;
+    if (shouldSuppressDuplicateSseEvent(raw, seenIdsRef.current)) return;
     try {
       const payload = JSON.parse(raw) as SseWorkingPayload;
       if (payload.conversation_id) onWorkingRef.current?.(payload);
     } catch { /* ignore parse errors */ }
   };
   const handleConversationRead = (raw: string) => {
-    if (shouldSuppressDuplicateSseEvent(raw)) return;
+    if (shouldSuppressDuplicateSseEvent(raw, seenIdsRef.current)) return;
     try {
       const payload = JSON.parse(raw) as SseConversationReadPayload;
       if (payload.conversation_id) onConversationReadRef.current?.(payload);

@@ -114,3 +114,30 @@ describe('useChatSse — 재개 커서 B계열 오염 방지(#2162, standalone-f
     expect(lastReconnectUrl().searchParams.get('last_event_id')).toBe('a-series-id');
   });
 });
+
+// story #2163 — 「알림은 오는데 화면은 안 바뀐다」 정신병의 근본이었던 그 시나리오를 실 훅
+// 두 인스턴스로 직접 재현한다. dedup tracker가 모듈 전역 싱글턴이던 시절엔 두 번째 인스턴스가
+// 굶었다(먼저 처리한 쪽이 event_id를 "이미 봤다"로 마킹) — ChatView와 GNB 뱃지(useChatUnreadTotal)
+// 가 같은 탭에서 동시에 useChatSse를 부르는 실제 배치와 동형이다.
+describe('useChatSse — 동시 마운트된 두 인스턴스가 같은 이벤트를 각자 받는다(story #2163)', () => {
+  it('ChatView·GNB 뱃지 흉내 — 같은 event_id의 conversation.message_created를 둘 다 받는다', async () => {
+    const onMessageA = vi.fn(); // ChatView 흉내
+    const onMessageB = vi.fn(); // useChatUnreadTotal(GNB 뱃지) 흉내
+    await act(async () => {
+      root.render(
+        <>
+          <Harness currentTeamMemberId="m1" onConversationMessage={onMessageA} />
+          <Harness currentTeamMemberId="m1" onConversationMessage={onMessageB} />
+        </>,
+      );
+    });
+    // mux OFF(Provider 밖)라 인스턴스마다 독립 EventSource — 서버가 둘 다에 같은 프레임을 민다.
+    expect(FakeEventSource.instances).toHaveLength(2);
+    const payload = { id: 'msg-1', event_id: 'shared-event-1' };
+    act(() => { FakeEventSource.instances[0]!.emit('conversation.message_created', payload); });
+    act(() => { FakeEventSource.instances[1]!.emit('conversation.message_created', payload); });
+
+    expect(onMessageA).toHaveBeenCalledTimes(1); // 전역 싱글턴이면 여기가 0이었다(둘 중 하나가 굶음)
+    expect(onMessageB).toHaveBeenCalledTimes(1);
+  });
+});

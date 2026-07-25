@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
-import { shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
+import { shouldSuppressDuplicateSseEvent, createSeenIdTracker } from '@/lib/realtime/sse-event-dedup';
 import { createReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
 import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
 import { isCursorEligibleEventName } from '@/lib/realtime/sse-cursor-eligibility';
@@ -56,6 +56,8 @@ export function useSseNotifications({
   const memberIdRef = useRef(memberId);
   const extraEventNamesRef = useRef(extraEventNames);
   const onExtraEventRef = useRef(onExtraEvent);
+  // story #2163 — 이 훅 인스턴스 전용 dedup tracker(모듈 전역 아님, use-chat-sse.ts와 동형).
+  const seenIdsRef = useRef(createSeenIdTracker());
   useEffect(() => { callbackRef.current = onNotification; }, [onNotification]);
   useEffect(() => { memberIdRef.current = memberId; }, [memberId]);
   useEffect(() => { extraEventNamesRef.current = extraEventNames; }, [extraEventNames]);
@@ -63,7 +65,7 @@ export function useSseNotifications({
 
   const handleData = (raw: string) => {
     if (!raw || raw.trim() === '') return;
-    if (shouldSuppressDuplicateSseEvent(raw)) return;
+    if (shouldSuppressDuplicateSseEvent(raw, seenIdsRef.current)) return;
     try {
       const parsed = JSON.parse(raw) as SseEventNotification;
       callbackRef.current?.(parsed);
@@ -72,7 +74,7 @@ export function useSseNotifications({
 
   const handleExtraEvent = (eventName: string, raw: string) => {
     if (!raw || raw.trim() === '') return;
-    if (shouldSuppressDuplicateSseEvent(raw)) return;
+    if (shouldSuppressDuplicateSseEvent(raw, seenIdsRef.current)) return;
     try {
       onExtraEventRef.current?.(eventName, JSON.parse(raw));
     } catch { /* malformed */ }
