@@ -10,7 +10,15 @@ export interface Doc {
   icon: string | null;
   sort_order: number;
   is_folder?: boolean;
+  // story #2167: 트리 정렬 토글("수정일순")용 — BE DocSummaryResponse는 이미 내려주지만
+  // 이 FE Doc 타입엔 없었다.
+  updated_at?: string;
 }
+
+// story #2167: 트리 표시 정렬 모드. 'manual' = sort_order(드래그로 바뀌는 기존 기본값·
+// 저장됨). 'title'/'updated_at' = 표시 전용 재정렬 — sort_order는 안 건드린다(수동 순서를
+// 유지해뒀다가 다시 '수동'으로 돌아오면 그대로 남아있게).
+export type DocSortMode = 'manual' | 'title' | 'updated_at';
 
 export interface DocUpdate {
   id: string;
