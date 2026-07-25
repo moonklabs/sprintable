@@ -179,7 +179,21 @@ jobs:
             echo "realtime_min_instances=2" >> "$GITHUB_OUTPUT"
             echo "realtime_max_instances=8" >> "$GITHUB_OUTPUT"
             echo "realtime_timeout=3600" >> "$GITHUB_OUTPUT"
-            echo "realtime_url=https://sprintable-realtime-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
+            # ⭐story #2185(2026-07-25) — dev 를 prod 와 같은 스택으로 맞춘다.
+            # prod 프론트는 이미 GCE 로드밸런서(realtime.sprintable.ai)를 보고 있고 실 트래픽
+            # 353건/48h 을 받는데, dev 만 옛 Cloud Run 을 보고 있었다 ⇒ **GCE 축을 dev 에서
+            # 검증할 수 없었다**(#2180 을 GCLB 로그로 우회 측정해야 했던 것이 그 비용).
+            # ⛔PO 가 2026-07-25 `gcloud run services update` 로 손 플립했다가 **다음 배포가
+            #   그대로 덮었다**(리비전 01836→01838 에서 옛 URL 복귀) — 바로 아래 줄에 적힌
+            #   「손 gcloud 값은 다음 배포가 덮으니 여기 durable 로 못박는다」를 PO 가 어긴 것이다.
+            #   그래서 값을 여기(배포 SSOT)로 옮긴다.
+            # 전환 前 확認(실측): dev GCE LB /api/v2/ping·health 200 · 백엔드 3대 전부 HEALTHY.
+            # 전환 後 확認(실측): GCLB 에 /api/v2/events/stream 200 다건 · 점유 55~87초(p50 60)
+            #   ⇒ Cloud Run 시절 112~121초(전부 서버 캡에 걸림)와 달리 **캡 前에 스스로 종료**.
+            # ⚠️무너지는 조건: dev GCE 스택(realtime-gateway-dev MIG·GCLB)이 내려가면 이 값도
+            #   되돌려야 한다. 롤백은 이 줄을 옛 Cloud Run URL 로 되돌리고 재배포하면 즉시 복귀
+            #   (route.ts 는 REALTIME_URL 이 비면 FASTAPI_URL 로 폴백하는 설계 그대로).
+            echo "realtime_url=https://dev-realtime.sprintable.ai" >> "$GITHUB_OUTPUT"
             # story #2078(E-ARCH 1단계 durable화, 2026-07-21 PO 손 플립 확認 후): api는 SSE/LISTEN
             # 을 realtime-dev로 넘겼다(까심군 raw SSE 검증 PASS). 손 gcloud 값은 다음 배포가
             # 덮으니(오늘 규율) 여기 durable로 못박는다 — 다음 api 배포에서도 false 유지.
