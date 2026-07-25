@@ -84,10 +84,19 @@ class StoryRepository(BaseRepository[Story]):
         cursor: datetime | None = None,
         sprint_id: uuid.UUID | None = None,
         assignee_id: uuid.UUID | None = None,
+        epic_id: uuid.UUID | None = None,
+        story_number: int | None = None,
+        q_text: str | None = None,
     ) -> tuple[list[Story], int]:
         """CB-S4: 보드 상태별 쿼리 — created_at DESC + priority 보조 정렬 + cursor 페이징.
 
         done: 최근 7일 + limit 10 고정.
+
+        story #2188(2026-07-25, 오르테가군 도그푸딩 적발): epic_id/story_number/q_text는
+        list_stories()의 제네릭 필터 블록(:148 이하)에만 있고 이 board 분기엔 없었다 — status+
+        project_id 조합이면 이 분기로 빠지면서 나머지 필터가 조용히 무시돼 "필터를 추가했는데
+        결과가 늘어나는"(계약 위반) 결과를 냈다. 필터는 좁히기만 해야 한다는 불변식을
+        test_2188_list_stories_filter_monotonicity.py로 고정한다.
         """
         q = select(Story).where(
             self._org_filter(),
@@ -99,6 +108,12 @@ class StoryRepository(BaseRepository[Story]):
             q = q.where(Story.sprint_id == sprint_id)
         if assignee_id:
             q = q.where(Story.assignee_id == assignee_id)
+        if epic_id:
+            q = q.where(Story.epic_id == epic_id)
+        if story_number is not None:
+            q = q.where(Story.story_number == story_number)
+        if q_text:
+            q = q.where(Story.title.ilike(f"%{q_text}%"))
 
         # done: 최근 7일 제한
         if status == "done":
