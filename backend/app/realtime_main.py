@@ -11,12 +11,10 @@
 include_router)는 아예 옮기지 않는다 — realtime은 그 라우트를 서빙할 이유가 없으므로
 "빼는" 게 아니라 "처음부터 안 부르는" 것(오르테가군 판단 그대로).
 
-⚠️ 미해결 — a2a.router(JSON-RPC SendStreamingMessage, 자체 SSE형 무기한 스트림)를 여기
-포함해야 하는지 판단 보류. 이 세션에서 "SSE router"로 계속 지칭해 온 것은 events.py/
-agent_gateway.py 둘뿐이라(오늘 _SSE_LIFESPAN_SEC/_AGENT_SSE_LIFESPAN_SEC로 다룬 그 둘) 이
-둘만 마운트했다 — a2a는 별도 판단이 필요하면 그때 추가.
-
-a2a.router 판단 확定(2026-07-25, 오르테가군 실측) — 제외:
+a2a.router 판단 확定(2026-07-25, 오르테가군 실측) — 제외. 이 세션에서 "SSE router"로
+계속 지칭해 온 것은 events.py/agent_gateway.py 둘뿐이라(오늘 _SSE_LIFESPAN_SEC/
+_AGENT_SSE_LIFESPAN_SEC로 다룬 그 둘) a2a는 처음부터 별도 판단 대상으로 비워 뒀었고,
+아래 실측으로 그 판단이 내려졌다:
   ① 24시간 a2a 트래픽 실측: 50건 전부 backend-dev · realtime-dev 0건 — a2a는 지금
      backend에서만 서빙되고 realtime으로 라우팅되지 않는다.
   ② a2a는 이미 자체 _A2A_RPC_TIMEOUT_SECONDS=280s 상한을 갖고 있다 — 오늘 고친 SSE
