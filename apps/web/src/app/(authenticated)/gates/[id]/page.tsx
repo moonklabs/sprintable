@@ -113,8 +113,11 @@ export default function GateDetailPage() {
       // 쌓아 브라우저 BACK 1회가 이 상세를 재진입시키는 트랩을 만든다(§3.2 재진입 트랩).
       // replace()는 현재 엔트리를 그대로 교체해 스택 길이를 늘리지 않는다 — router.back()/
       // window.history.back() 직접호출([[feedback-history-back-nextjs]] 금지) 없이 동일 효과.
+      // story #2164(2026-07-25, 까심): 예전엔 '/inbox'(기본=알림 탭)로 갔다 — 방금 게이트를
+      // 승인/거부한 사람은 다음 게이트를 마저 처리하러 온 것이지 알림을 보러 온 게 아니다.
+      // '?tab=gates'로 명시해 실제 결재함(게이트 탭)으로 돌아간다.
       if (res.ok) {
-        router.replace('/inbox');
+        router.replace('/inbox?tab=gates');
         return;
       }
       // story #2043 AC3: 서버 거부(예: #2027 — 고위험 승인은 note 필수, 422)를 사람이 읽을
@@ -133,7 +136,7 @@ export default function GateDetailPage() {
         title={
           <button
             type="button"
-            onClick={() => router.replace('/inbox')}
+            onClick={() => router.replace('/inbox?tab=gates')}
             className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <ChevronLeft className="h-4 w-4" />
