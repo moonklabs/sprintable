@@ -41,6 +41,19 @@
  * 파일 단위 판정이라 완벽하지 않다(sse-dedup-enforcement.ts 상단 주석의 한계 선언 참고).
  * 게이트 이전에는 컴파일도 테스트도 안 걸리고 unread 뱃지가 조용히 이중 증가하거나 알림
  * 리스트에 중복이 쌓이는 형태로만 드러났다(원인 파악이 어려운 클래스의 버그였다).
+ *
+ * ⚠️ 2026-07-25 정정(story #2163) — seen-id 저장소가 모듈 스코프 **전역 싱글턴**이었던 것이
+ * 새로운 버그 클래스를 낳았다: "이 이벤트를 내가 이미 처리했나"는 **소비자별** 질문인데,
+ * 그 답을 탭 전체가 공유하는 Set 하나가 대신하고 있었다. 같은 탭 안에 `useChatSse`를 각자
+ * 부르는 서로 다른 컨슈머(ChatView 자신 · GNB unread 뱃지의 `useChatUnreadTotal`)가 동시에
+ * 마운트돼 있으면, 같은 `event_id`가 둘 다에 도착했을 때 **먼저 처리한 쪽이 "이미 봤다"로
+ * 마킹**해 버려 **나중 컨슈머는 자기 입장에서는 처음 보는 이벤트인데도 조용히 굶는다** —
+ * 뱃지는 +1 되는데 채팅창은 안 바뀌는 증상(정신병 리스트 #2163)이 이것이었다.
+ * ⇒ seen-id 저장소를 **호출부(각 `useChatSse`/`useSseNotifications` 인스턴스)가 직접
+ * 만들어 들고 있다가 이 함수에 넘기는 방식**으로 바꿨다 — 인스턴스가 언마운트되면 그
+ * Set도 같이 사라진다(전역 수명 잔존 없음). #2101의 원 목적(같은 컨슈머가 재연결 백필로
+ * 같은 이벤트를 두 번 받는 것 억제)은 **그 컨슈머 자신의 tracker 안에서 그대로 유지**된다
+ * — 애초에 그 중복도 "같은 컨슈머가 같은 걸 두 번" 문제였으므로 인스턴스 스코프로 충분하다.
  */
 
 const _MAX_SEEN_IDS = 500; // 무한 증식 방지 — FIFO 경계(재연결 시나리오엔 넉넉한 여유)
@@ -79,18 +92,16 @@ export function extractSseEventId(raw: string): string | null {
   }
 }
 
-/** 앱 전역 SSE 이벤트가 공유하는 단일 seen-id 저장소 — 모듈 스코프(React ref 아님). */
-const _globalSeenIds = createSeenIdTracker();
-
 /**
- * 이미 본 event_id면 true(호출부는 조기 return으로 처리를 건너뛴다) — 전역 싱글턴 기준.
- * 각 SSE handler 본문 **첫 줄**에서 직접 호출하는 것이 관례다(위 설계 이력 참고 — HOC로
- * 감쌀 수 없다).
+ * 이미 본 event_id면 true(호출부는 조기 return으로 처리를 건너뛴다) — `tracker` 기준(story
+ * #2163 — 전역 싱글턴 아님, 호출부가 자기 인스턴스 수명에 맞는 tracker를 직접 들고 있다가
+ * 넘긴다). 각 SSE handler 본문 **첫 줄**에서 직접 호출하는 것이 관례다(위 설계 이력 참고 —
+ * HOC로 감쌀 수 없다).
  */
-export function shouldSuppressDuplicateSseEvent(raw: string): boolean {
+export function shouldSuppressDuplicateSseEvent(raw: string, tracker: SseSeenIdTracker): boolean {
   const eventId = extractSseEventId(raw);
   if (eventId === null) return false;
-  if (_globalSeenIds.hasSeen(eventId)) return true;
-  _globalSeenIds.markSeen(eventId);
+  if (tracker.hasSeen(eventId)) return true;
+  tracker.markSeen(eventId);
   return false;
 }
