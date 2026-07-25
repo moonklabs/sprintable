@@ -420,6 +420,28 @@ def test_deploy_gce_fanout_wake_caller_override_still_works():
     assert "FANOUT_WAKE_REDIS_ENABLED=false" in lines
 
 
+# ── story #2185: dev 스택이 «패리티 surface 아님»이라는 선언이 소스에 살아 있어야 한다 ──
+
+def test_deploy_gce_declares_dev_is_not_a_parity_surface():
+    """story #2185(2026-07-25) — 이 스크립트의 dev 스택은 지금 «prod 패리티 검증용»이
+    아니다(경로에 없음·트래픽 0·이미지 3일 정체). 그 사실이 **소스에 적혀 있지 않으면**
+    다음 사람이 "GCE 에서 확認했다"를 이 dev 스택 결과로 말하게 되고, 그건 거짓 안심이다.
+
+    #2178 에서 세운 형태 그대로 — 판정이 기대는 전제를 소스에 박고 pinning 으로 지킨다.
+    ⚠️이 테스트가 실패한다면 둘 중 하나다:
+      (a) 선언을 지웠는데 사실은 그대로다  → 되돌릴 것
+      (b) dev MIG 가 자동 유지되기 시작해 정말 패리티 surface 가 됐다 → 그러면 이 테스트도
+          함께 지우는 것이 맞다(선언을 지우는 것까지가 그 작업의 일부).
+    """
+    source = open(_DEPLOY_GCE, encoding="utf-8").read()
+    assert "패리티" in source, (
+        "dev 스택이 패리티 surface 가 아니라는 선언이 사라졌다 — story #2185 참조"
+    )
+    assert "#2185" in source
+    # 무너지는 조건까지 적혀 있어야 한다(선언만 있고 해제 조건이 없으면 영원히 산다).
+    assert "무너지는 조건" in source
+
+
 # ── provision_realtime_gclb.sh ───────────────────────────────────────────────
 
 def test_provision_gclb_dev_targets_dev_resources():
