@@ -5,6 +5,7 @@ import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { shouldSuppressDuplicateSseEvent } from '@/lib/realtime/sse-event-dedup';
 import { createReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
 import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
+import { isCursorEligibleEventName } from '@/lib/realtime/sse-cursor-eligibility';
 
 export interface SseEventNotification {
   id?: string;
@@ -114,7 +115,8 @@ export function useSseNotifications({
     };
 
     const handleExtraEventStandalone = (eventName: string, raw: string, eventId?: string) => {
-      if (eventId) lastEventId = eventId;
+      // story #2162 — B계열(presence·conversation.working)만 커서 승격 금지.
+      if (eventId && isCursorEligibleEventName(eventName)) lastEventId = eventId;
       handleExtraEvent(eventName, raw);
     };
 
