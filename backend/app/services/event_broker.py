@@ -465,6 +465,51 @@ async def redis_consume_loop() -> None:
                     pass
 
 
+def check_outbox_dual_publish_config(s=None) -> None:
+    """fail-closed startup 가드(story #2138, 까심 전수 확認) — `check_cron_secret_config`
+    (#2072)·`check_listen_config`(ee7794eb)와 동형(main lifespan이 호출 대상). 이전엔 이
+    위험 조합을 막는 게 `outbox_dispatcher_loop()`의 docstring 경고문 한 줄뿐이었다
+    (model_validator·startup assertion·런타임 체크 전부 0건 — 까심 전수 확認) — 설정
+    실수가 배포를 통과해 런타임에야 중복배달로 드러나는 구조였다. 런타임 증상보다 먼저,
+    더 시끄럽게 막는 쪽이 안전하다.
+
+    두 위험 조합을 각각 막는다:
+    ① `event_broker_redis_dual_publish_enabled` + `event_broker_outbox_enabled`:
+       같은 논리적 이벤트가 Redis에 두 번(즉시 shadow-publish + 나중 outbox dispatch)
+       발행된다 — 서로 다른 `_broker_event_id`(즉시 경로는 uuid4, outbox 경로는 row.id)를
+       써서 dedup도 안 걸린다(outbox_dispatcher_loop() docstring 참조).
+    ② `event_broker_redis_dispatch_enabled` + `event_broker_outbox_enabled`:
+       outbox로 발행된 이벤트는 `instance_id`가 없어 self-skip이 안 돼 중복 dispatch(실제
+       전달) 위험이 있다(app/core/config.py의 event_broker_redis_dispatch_enabled 주석 참조).
+
+    outbox는 dual-publish/dispatch를 **대체**하는 것이지 병행하는 게 아니다(오르테가군
+    시퀀싱 — dual-publish→shadow-consume→outbox 전환→LISTEN 제거는 순차, 동시 아님).
+
+    ⚠️ 이 어서션은 현재 아무것도 안 막는 상태로 들어간다(까심 전수 확認 — 라이브 어디에도
+    outbox가 켜져 있지 않고, 코드 기본값도 전부 False) = 배포 리스크 0. 그게 지금 넣기 좋은
+    이유이기도 하다 — 나중에 실제로 outbox 전환이 시작될 때는 이미 가드가 있는 채로 시작한다.
+    """
+    if s is None:
+        from app.core.config import settings as s
+    if not s.event_broker_outbox_enabled:
+        return
+    if s.event_broker_redis_dual_publish_enabled:
+        raise RuntimeError(
+            "event_broker_outbox_enabled=true인데 event_broker_redis_dual_publish_enabled도"
+            "=true — 같은 이벤트가 Redis에 두 번(즉시 shadow-publish + 나중 outbox dispatch)"
+            " 발행되고 서로 다른 broker_event_id를 써서 dedup도 안 걸린다(중복배달, story"
+            " #2138). outbox는 dual-publish를 대체하는 것이지 병행하는 게 아니다 — 전환 중이면"
+            " dual_publish를 먼저 끄고 outbox를 켤 것."
+        )
+    if s.event_broker_redis_dispatch_enabled:
+        raise RuntimeError(
+            "event_broker_outbox_enabled=true인데 event_broker_redis_dispatch_enabled도"
+            "=true — outbox로 발행된 이벤트는 instance_id가 없어 self-skip이 안 돼 중복"
+            " dispatch(실 전달) 위험이 있다(story #2138). outbox는 dispatch 경로를 대체하는"
+            " 것이지 병행하는 게 아니다 — 전환 중이면 dispatch를 먼저 끄고 outbox를 켤 것."
+        )
+
+
 # ─── Outbox dispatcher (realtime gateway 전용, event_broker_outbox_enabled 게이트) ────────
 
 _OUTBOX_BATCH_SIZE = 50
