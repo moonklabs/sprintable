@@ -63,6 +63,20 @@ class StoryRepository(BaseRepository[Story]):
         추가한다 — board처럼 별도 전용 정렬 우선순위(priority)를 얹지 않는 이유는 이 분기의
         전 콜러(`buildCursorPageMeta`)가 `created_at`만 cursorField로 쓰기 때문(다른 정렬
         기준을 얹으면 FE가 계산하는 nextCursor와 실제 정렬 순서가 어긋난다).
+
+        까심군 QA 지적(2026-07-25, #2490 머지 前): `created_at`만으로는 같은 트랜잭션 배치
+        insert 시 server_default=func.now()가 여러 행에 동일 값을 줄 수 있어(테스트가 이 경계를
+        1초씩 벌려 피해갔던 것 자체가 "이 경로가 시험된 적 없다"는 증거였다) ORDER BY가
+        비결정적이었다 — 같은 쿼리를 다시 실행해도 동률 구간의 순서가 달라질 수 있어 페이지
+        재요청 시 skip/dup 위험. `id`를 안정적 2차 키로 얹어 정렬 자체를 결정적으로 만든다
+        (board의 `_PRIORITY_ORDER`를 그대로 베끼지 않는 이유: 여기 필요한 건 "board와 같은
+        정렬 결과"가 아니라 "커서 전진이 결정적인 것" — 목적에 맞는 최소 키면 충분하다).
+
+        ⚠️ 남는 한계(무너지는 조건): cursor 자체는 여전히 `created_at` 단일값이라(FE
+        `buildCursorPageMeta`가 그 값만 보내는 계약 — 서버 혼자 바꿀 수 없다), 동률 경계에
+        걸친 행은 이론상 다음 페이지에서 스킵될 수 있다(중복 전달보다는 덜 나쁜 실패 모드로
+        의도적으로 선택). board 분기도 동일한 구조적 한계를 이미 갖고 있다 — 실제로 skip이
+        관측되면 그때 복합 커서(`created_at`+`id`)로 승격한다.
         """
         query = select(Story).where(self._org_filter(), Story.deleted_at.is_(None))
         for attr, val in filters.items():
@@ -71,7 +85,7 @@ class StoryRepository(BaseRepository[Story]):
             query = query.where(Story.title.ilike(f"%{q}%"))
         if cursor:
             query = query.where(Story.created_at < cursor)
-        query = query.order_by(Story.created_at.desc()).limit(limit)
+        query = query.order_by(Story.created_at.desc(), Story.id.desc()).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
 

@@ -216,3 +216,122 @@ async def test_no_cursor_unspecified_no_regression():
         assert [r.id for r in result] == list(reversed(seeded["story_ids_oldest_first"]))[:10]
     finally:
         await engine.dispose()
+
+
+async def _seed_with_tied_created_at(session, n_tied: int):
+    """까심군 QA 지적(2026-07-25, #2490 머지 前) — 기존 시드는 created_at을 1초씩 벌려
+    동률 경계를 피해갔다("이 경로가 시험된 적 없다"는 것 자체가 결함이었다). 이 헬퍼는
+    반대로 **의도적으로 동일 created_at**을 여러 행에 준다(같은 트랜잭션 배치 insert가
+    server_default=func.now()로 실제 만들어내는 조건)."""
+    from app.models.member import Member
+    from app.models.organization import Organization
+    from app.models.pm import Sprint, Story
+    from app.models.project import Project
+    from app.models.project_access import ProjectAccess
+
+    org = Organization(id=uuid.uuid4(), name="Org", slug=f"org-{uuid.uuid4().hex[:8]}")
+    session.add(org)
+    await session.commit()
+    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+    session.add(project)
+    await session.commit()
+    agent = Member(id=uuid.uuid4(), org_id=org.id, type="agent", name="Agent")
+    session.add(agent)
+    await session.commit()
+    session.add(ProjectAccess(id=uuid.uuid4(), project_id=project.id, member_id=agent.id, permission="granted"))
+    await session.commit()
+    sprint = Sprint(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="Sprint")
+    session.add(sprint)
+    await session.commit()
+
+    tied_ts = datetime.now(timezone.utc)
+    story_ids: list[uuid.UUID] = []
+    for i in range(n_tied):
+        s = Story(
+            id=uuid.uuid4(), org_id=org.id, project_id=project.id, sprint_id=sprint.id,
+            title=f"T{i:02d}", status="in-progress", story_number=i + 1, created_at=tied_ts,
+        )
+        session.add(s)
+        story_ids.append(s.id)
+    await session.commit()
+
+    return {
+        "org_id": org.id, "project_id": project.id, "agent_id": agent.id, "sprint_id": sprint.id,
+        "story_ids": story_ids,
+    }
+
+
+async def test_tied_created_at_order_is_deterministic_across_repeated_queries():
+    """동률(같은 created_at) 구간에서 id 보조키가 없으면 같은 쿼리를 반복 실행해도 순서가
+    바뀔 수 있다(Postgres가 정렬 안정성을 보장 안 함) — id DESC를 2차 키로 얹었으니 반복
+    실행해도 항상 같은 순서여야 한다."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_with_tied_created_at(s, n_tied=10)
+
+        orders: list[list[uuid.UUID]] = []
+        for _ in range(5):
+            async with Session() as s:
+                result = await _call_list_stories(
+                    s, seeded["org_id"], seeded["agent_id"],
+                    project_id=seeded["project_id"], sprint_id=seeded["sprint_id"], limit=100,
+                )
+            orders.append([r.id for r in result])
+
+        assert all(o == orders[0] for o in orders), (
+            f"동률 구간 정렬이 반복 실행마다 달라짐(비결정적) — {orders}"
+        )
+        # id DESC가 실제로 tiebreak으로 적용됐는지도 직접 확認.
+        assert orders[0] == sorted(seeded["story_ids"], reverse=True)
+    finally:
+        await engine.dispose()
+
+
+async def test_tied_created_at_cursor_pagination_no_duplicate_across_pages():
+    """⚠️ 이 테스트가 증명하는 것은 "스킵 없음"이 아니라 "중복 없음"이다(무너지는 조건
+    주석 참조 — cursor가 created_at 단일값이라 동률 경계 행은 이론상 다음 페이지에서
+    스킵될 수 있고, 이 테스트는 그 한계를 승인한 채로 **더 나쁜 실패 모드인 중복 전달**만
+    확実히 배제한다)."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_with_tied_created_at(s, n_tied=10)
+        async with Session() as s:
+            page1 = await _call_list_stories(
+                s, seeded["org_id"], seeded["agent_id"],
+                project_id=seeded["project_id"], sprint_id=seeded["sprint_id"], limit=6,
+            )
+        assert len(page1) == 6
+        page1_ids = {r.id for r in page1}
+        next_cursor = page1[-1].created_at.isoformat()
+
+        async with Session() as s:
+            page2 = await _call_list_stories(
+                s, seeded["org_id"], seeded["agent_id"],
+                project_id=seeded["project_id"], sprint_id=seeded["sprint_id"], limit=6,
+                cursor=next_cursor,
+            )
+        page2_ids = {r.id for r in page2}
+
+        assert page1_ids.isdisjoint(page2_ids), (
+            f"동률 경계에서 페이지 간 중복 전달 — 겹친 것={page1_ids & page2_ids}"
+        )
+    finally:
+        await engine.dispose()
+
+
+# ── 이 방법으로 안 닿는 것(오르테가군 요청, 2026-07-25) — 말로만 두지 않고 명시 ──
+#
+# 1. 렌더 층(사용자 눈에 카드가 실제로 중복돼 보이는지)은 이 테스트들이 검증 못 한다 —
+#    backend가 올바른 데이터를 주는 것과 FE가 그것을 올바르게 렌더하는 것은 다른 층이다.
+#    kanban-board.tsx/sprints-client.tsx/standup-client.tsx의 실제 append 로직은 코드
+#    대조로만 확認했다(dedup 없음 관측) — 브라우저로 픽셀을 본 적은 없다.
+# 2. 로컬 pg16 단일 인스턴스·소규모(<30건) 시드 기준이라, prod/dev 규모(수백~수천 건)나
+#    실 limit 기본값 조합에서만 드러나는 성능/정확성 차이는 이 테스트로 안 보인다.
+# 3. `test_cursor_advances_to_next_page_no_overlap`의 hasMore 계산은
+#    `apps/web/src/lib/pagination.ts`의 `buildCursorPageMeta` **공식을 Python으로 복제**한
+#    것이지 실제 TS 함수를 호출한 게 아니다 — FE 쪽 공식이 나중에 바뀌면 이 백엔드 테스트는
+#    조용히 낡아 더 이상 실제 계약을 대표하지 않게 된다(까심군 지적). FE 쪽 pagination.test.ts
+#    가 그 함수 자체의 계약을 지키는 축이고, 이 파일은 어디까지나 백엔드가 그 함수의 전제
+#    (결정적 정렬 + cursor WHERE 적용)를 충족하는지만 본다.
