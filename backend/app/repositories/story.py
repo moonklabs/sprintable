@@ -141,7 +141,6 @@ class StoryRepository(BaseRepository[Story]):
         status: str | None = None,
         story_number: int | None = None,
         q: str | None = None,
-        cursor: datetime | None = None,
     ) -> list[Story]:
         """sprint 미배정 + 삭제되지 않은 스토리만 서버사이드 필터.
 
@@ -152,17 +151,13 @@ class StoryRepository(BaseRepository[Story]):
         파라미터를 애초에 못 보냄) — 다만 REST를 직접 부르는 임시 조회(디디군이 #2188 조사
         중 실제로 걸린 자리)는 그대로 노출돼 판단 근거를 오염시킬 수 있어 medium으로 고친다.
 
-        story #2190(2026-07-25, 까심군 QA 적발 — #2188에서 「cursor는 콜러 0」이라 스코프
-        밖으로 뺐던 판정이 틀렸음이 드러남): `sprints-client.tsx:460`의 "백로그 더 보기"가
-        `/api/stories/backlog?...&cursor=`로 이 분기를 실제로 타는데(dedup 없는 append),
-        cursor를 받지 않고 ORDER BY도 없어 #2189(제네릭 분기)와 동일한 "커서를 바꿔도 같은
-        페이지가 반복" 증상이 났다. #2189/#2490과 완전 동형 처방: `created_at DESC` + `id
-        DESC`(2차 정렬키 — board의 `_PRIORITY_ORDER`를 베끼지 않는 이유도 동일: 필요한 건
-        "커서 전진이 결정적인 것") + `cursor` WHERE.
-
-        ⚠️ 남는 한계(#2189와 동형): cursor는 FE `buildCursorPageMeta` 계약상 `created_at`
-        단일값이라, 동률 경계 행은 이론상 다음 페이지에서 스킵될 수 있다(중복 전달보다 덜
-        나쁜 실패 모드로 의도적 선택). 실제 skip이 관측되면 복합 커서로 승격한다.
+        ⚠️ cursor는 여기 없다 — 2026-07-25 초안에서 #2190(까심군 QA)을 근거로 cursor+id
+        tiebreak을 여기 얹었었으나, 오르테가군이 프록시 코드(`apps/web/src/app/api/stories/
+        backlog/route.ts`)를 직접 읽고 정정: 그 프록시가 `status=backlog`를 강제 부착해
+        FastAPI로 보내므로 백엔드에서는 실제로 **board 분기**(`list_board`, cursor 이미 지원)
+        를 타지 이 분기로 안 온다. "URL이 `/stories/backlog`니까 이 분기겠지"로 단정한 게
+        오판 원인이었다 — #2190의 진짜 원인은 그 프록시가 `apiSuccess()`에 meta를 안 넘겨
+        `hasMore`가 구조적으로 항상 false인 것(다른 층의 결함)이라 이 메서드와 무관하다.
         """
         query = select(Story).where(
             self._org_filter(),
@@ -180,10 +175,7 @@ class StoryRepository(BaseRepository[Story]):
             query = query.where(Story.story_number == story_number)
         if q:
             query = query.where(Story.title.ilike(f"%{q}%"))
-        if cursor:
-            query = query.where(Story.created_at < cursor)
-        query = query.order_by(Story.created_at.desc(), Story.id.desc()).limit(limit)
-        result = await self.session.execute(query)
+        result = await self.session.execute(query.limit(limit))
         return list(result.scalars().all())
 
     async def transition_status(self, id: uuid.UUID) -> Story:

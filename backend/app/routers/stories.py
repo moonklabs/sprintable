@@ -130,12 +130,12 @@ async def list_stories(
     # 검증 비용만 느는지라 주석+pinning 테스트로 계약을 선언하고 닫는다.
     if no_sprint and project_id:
         # story #2188 형제(#2489와 동형): 필터 전부 넘긴다.
-        # story #2190(까심군 QA 적발): sprints-client.tsx "백로그 더 보기"가 이 분기로
-        # cursor를 실제로 보내는 라이브 콜러다 — #2189/#2490과 동형으로 cursor도 넘긴다.
-        backlog_cursor_dt = datetime.fromisoformat(cursor) if cursor else None
+        # ⚠️ cursor는 안 넘긴다 — #2190은 이 분기와 무관함이 밝혀졌다(list_backlog
+        # docstring 참조: /api/stories/backlog 프록시가 status를 강제 부착해 실제로는
+        # board 분기로 감).
         stories = await repo.list_backlog(
             project_id, limit=limit, epic_id=epic_id, assignee_id=assignee_id,
-            status=status_filter, story_number=story_number, q=q, cursor=backlog_cursor_dt,
+            status=status_filter, story_number=story_number, q=q,
         )
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
