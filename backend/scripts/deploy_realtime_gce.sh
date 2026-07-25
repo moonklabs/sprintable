@@ -135,6 +135,12 @@ case "${ENV}" in
         # 최종적으로 GCLB 프론트 URL로 바뀌어야 하는지는 provision_realtime_gclb.sh 완료 후
         # 별도 재확認 필요(TODO — 현재는 라이브 값 그대로 이관해 드리프트 0으로 시작).
         FASTAPI_URL="https://sprintable-realtime-dev-787818285179.asia-northeast3.run.app"
+        # story #2089 stage 3-a(2026-07-25, 오르테가군 지시) — «변수를 하나씩 움직인다»:
+        # 이미지는 그대로 두고 entrypoint만 app.realtime_main:app(SSE router 둘만 마운트,
+        # main.py:147의 90+ 라우터 일괄 import·ee 게이트를 안 거침)으로 교체해 dev GCE에서만
+        # 먼저 검증한다. prod는 이번 단계에서 손대지 않는다(아래 prod 분기가 기존
+        # app.main:app을 그대로 유지 — 이 값이 바로 그 분리 지점).
+        UVICORN_APP_MODULE="app.realtime_main:app"
         ;;
     prod)
         # story #2142(2026-07-23, 선생님 GCE prod 전환 승인): dev와 동일 구조, 리소스명·Cloud
@@ -199,6 +205,9 @@ case "${ENV}" in
         # 잠정값으로 둔다 — provision_realtime_gclb.sh 완료 후 GCLB 프론트 IP/도메인으로
         # 바꿔야 하는지는 별도 재확認 대상(이 PR은 스크립트가 prod를 받게만 하는 스코프).
         FASTAPI_URL="https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"
+        # story #2089 stage 3-a — prod는 이번 단계에서 안 건드린다. 기존 app.main:app 그대로
+        # (dev만 app.realtime_main:app으로 바뀌는 것과 대비되는 지점 — 위 dev 분기 주석 참조).
+        UVICORN_APP_MODULE="app.main:app"
         ;;
     *)
         echo "Usage: $0 [dev|prod]" >&2
@@ -534,7 +543,7 @@ trap 'rm -f "${STARTUP_SCRIPT_FILE}"' EXIT
     done
     echo '  --env-file=/tmp/realtime-gateway-plain.env \'
     echo "  ${IMAGE} \\"
-    echo '  uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30'
+    echo "  uvicorn ${UVICORN_APP_MODULE} --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30"
     echo ''
     echo '# ── 부팅 진단(시리얼 콘솔로) — COS는 SSH/Cloud Logging 접근이 제한적이라, 컨테이너'
     echo '#    상태·소켓·프록시/앱 로그를 startup-script stdout(=시리얼)로 남겨 원격 진단 가능케 한다.'
@@ -568,6 +577,10 @@ if [ "${DRY_RUN}" = "1" ]; then
     # 테스트가 "진짜 배포될 것"을 검증하게 한다(base64 — 줄바꿈을 한 줄 KEY=VALUE 출력
     # 포맷 안에 안전하게 실어야 해서).
     _GENERATED_PLAIN_ENV_FILE_B64="$(sed -n '/^cat > \/tmp\/realtime-gateway-plain\.env/,/^PLAIN_ENV_EOF$/p' "${STARTUP_SCRIPT_FILE}" | sed '1d;$d' | base64 | tr -d '\n')"
+    # story #2089 stage 3-a — #2142와 동일 관례: 요약 변수(UVICORN_APP_MODULE)가 아니라
+    # startup-script에 실제로 적힌 uvicorn 커맨드 그 줄 자체를 노출해, 변수→실제 산출물
+    # 배선이 끊기지 않았는지 테스트가 직접 대조할 수 있게 한다.
+    _GENERATED_UVICORN_CMD_LINE="$(grep '^  uvicorn ' "${STARTUP_SCRIPT_FILE}")"
     cat <<EOF
 ENV=${ENV}
 MIG_NAME=${MIG_NAME}
@@ -581,6 +594,8 @@ RUNTIME_SA=${RUNTIME_SA}
 PLAIN_ENV_SPEC=${PLAIN_ENV_SPEC}
 SECRET_PAIRS=${SECRET_PAIRS}
 GENERATED_PLAIN_ENV_FILE_B64=${_GENERATED_PLAIN_ENV_FILE_B64}
+UVICORN_APP_MODULE=${UVICORN_APP_MODULE}
+GENERATED_UVICORN_CMD_LINE=${_GENERATED_UVICORN_CMD_LINE}
 EOF
     exit 0
 fi
