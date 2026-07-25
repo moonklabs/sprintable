@@ -120,6 +120,33 @@ interface EntityResult {
   status: string | null;
 }
 
+// story #2032 — 대화별 임시저장(localStorage). 대화 전환은 ChatView가 key={conversation_id}로
+// ChatInput을 통째로 리마운트시키므로(page.tsx), threadId가 이 컴포넌트 수명 중에 바뀌는
+// 경우 자체가 없다 — 마운트 시 lazy initializer로 그 대화의 초안을 1회 읽으면 AC3(대화별
+// 분리)가 별도 분기 없이 성립한다.
+function draftStorageKey(threadId: string): string {
+  return `sprintable:chat-draft:${threadId}`;
+}
+
+function loadDraft(threadId: string): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return window.localStorage.getItem(draftStorageKey(threadId)) ?? '';
+  } catch {
+    return ''; // localStorage 접근 불가(프라이빗 모드 등) — 초안 없이 시작(무해 폴백).
+  }
+}
+
+function saveDraft(threadId: string, text: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (text) window.localStorage.setItem(draftStorageKey(threadId), text);
+    else window.localStorage.removeItem(draftStorageKey(threadId)); // AC6: 빈 초안을 남기지 않음
+  } catch {
+    // 쓰기 실패(용량 초과 등) — 조용히 무시, 전송 자체는 막지 않는다.
+  }
+}
+
 interface ChatInputProps {
   onSend: (content: string, mentionedIds?: string[], attachments?: SendAttachment[]) => Promise<void>;
   onUploadFile?: (file: File) => Promise<SendAttachment>;
@@ -128,16 +155,22 @@ interface ChatInputProps {
   projectId?: string;
   onMentionIdsChange?: (ids: string[]) => void;
   commandTargets?: CommandTarget[];
+  // story #2032: 대화별 초안 스코프 키 + ESC 뒤로가기 위임(모달/팝오버/커맨드팔레트가 없을 때만
+  // — 이 컴포넌트 내부 mention/entity/command picker 자체의 Escape가 이미 우선 처리되므로,
+  // 그 셋 중 아무것도 안 열려 있을 때만 이 콜백까지 내려온다).
+  threadId: string;
+  onEscape?: () => void;
 }
 
-export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets }: ChatInputProps) {
+export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape }: ChatInputProps) {
   const t = useTranslations('chats');
   // story 1946(PO 실기기 발견): 터치(가상 키보드)엔 Cmd/Shift 조합이 없어 Enter=발송이면 장문
   // 지시 중 오발송이 잦다. 뷰포트가 아니라 입력 capability로 분기(물리 키보드 연결 태블릿은
   // 데스크톱 거동이 자연스러움) — artifact-stage.tsx와 동형 패턴(`(pointer: coarse)` 1회 판정,
   // SSR 안전 lazy initializer, 하이브리드 기기 중간 전환은 희귀 엣지케이스라 리스너 미부착).
   const [isTouchDevice] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches);
-  const [text, setText] = useState('');
+  // story #2032 AC2/AC3: 대화별 초안 복원(lazy initializer — 마운트 시 1회, 리마운트당 재평가).
+  const [text, setText] = useState(() => loadDraft(threadId));
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [uploadFailed, setUploadFailed] = useState(false);
   const [sendFailed, setSendFailed] = useState(false);
@@ -206,6 +239,30 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   };
+
+  // story #2032 AC1: 진입 시 자동 포커스 — 터치 기기는 제외한다(소프트 키보드가 화면 절반을
+  // 덮는 것을 막기 위해, chat-view.tsx 진입 직후 클릭 없이 타이핑 가능해야 한다는 요구는
+  // 데스크톱(포인터 정밀)에만 적용). isTouchDevice는 위에서 이미 판정된 값(#2242와 동일 근거)을
+  // 그대로 재사용 — 새 판정축을 만들지 않는다. 마운트 1회만(대화 전환은 리마운트라 자동으로 재실행).
+  useEffect(() => {
+    if (isTouchDevice) return;
+    textareaRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // story #2032 AC2: 초안을 복원한 첫 렌더 直後 textarea 높이를 내용에 맞게 1회 보정한다 —
+  // adjustHeight는 지금까지 onChange에서만 불렸는데, lazy initializer로 값이 들어온 이번
+  // 마운트에는 onChange가 안 일어나 여러 줄 초안이 1줄 높이로 잘려 보이는 것을 막는다.
+  useEffect(() => {
+    adjustHeight();
+  }, []);
+
+  // story #2032 AC2/AC6: 대화별 초안 자동저장 — text가 바뀔 때마다 그 대화의 슬롯에 쓴다.
+  // 전송 성공 시 handleSend가 setText('')를 부르면 이 effect가 뒤이어 빈 문자열을 써서
+  // saveDraft 내부 분기가 자동으로 항목을 지운다(AC6, 별도 clearDraft 호출 불요).
+  useEffect(() => {
+    saveDraft(threadId, text);
+  }, [threadId, text]);
 
   const handleTextChange = (nextValue: string, cursorPos: number) => {
     setText(nextValue);
@@ -362,6 +419,14 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice) {
       e.preventDefault();
       void handleSend();
+    }
+    // story #2032 AC4/AC5: ESC 뒤로가기 — 위 세 분기(command/entity/mention picker) 중 아무것도
+    // 안 열려 있을 때만 여기 도달한다. 그 셋은 이미 각자 Escape에서 return 하므로, 이 지점은
+    // "이 컴포넌트 안에는 닫을 오버레이가 없다"는 뜻이라 우선순위가 구조적으로 보장된다(별도
+    // z-index/포커스트랩 조율 불필요). 텍스트는 지우지 않는다 — 초안 자동저장 effect가 이미
+    // 최신 text를 들고 있으므로 나가기 前 별도 저장 호출도 불요.
+    if (e.key === 'Escape' && onEscape) {
+      onEscape();
     }
   };
 
