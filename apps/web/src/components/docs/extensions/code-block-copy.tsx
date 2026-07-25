@@ -198,7 +198,9 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
         </div>
 
         {/* Code area */}
-        <div className="overflow-x-auto px-4 pb-4">
+        {/* story #2165: 코드블럭은 전역 스크롤바 숨김의 예외 — 가로로 잘린 줄이 있다는 것을
+            스크롤바로 알려야 한다. */}
+        <div className="scrollbar-visible overflow-x-auto px-4 pb-4">
           {/* Editing mode: show plain NodeViewContent */}
           <pre
             className={`text-xs leading-6 text-foreground ${isEditing || !highlightedHtml ? '' : 'hidden'}`}

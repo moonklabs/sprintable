@@ -411,7 +411,7 @@ function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
       className={cn(
         // story #2062: 앱 전역 사이드바 nav — 포커스 링(#2057) 클리핑 회귀 방지, 유나 규격
         // focus-inset(inset 링, 레이아웃 불변). primary 배경 요소 없음(grep 확認) — 예외 불요.
-        "focus-inset no-scrollbar flex min-h-0 flex-1 flex-col gap-0 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
+        "focus-inset flex min-h-0 flex-1 flex-col gap-0 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
         className
       )}
       {...props}

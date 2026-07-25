@@ -204,7 +204,8 @@ export function DocContentRenderer({
           });
           const wrapper = document.createElement('div');
           wrapper.innerHTML = highlighted;
-          wrapper.className = '[&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6 [&_code]:!bg-transparent overflow-x-auto';
+          // story #2165: 코드블럭은 전역 스크롤바 숨김 예외 — 가로로 잘린 줄을 알려야 한다.
+          wrapper.className = '[&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6 [&_code]:!bg-transparent overflow-x-auto scrollbar-visible';
           if (pre.parentElement) pre.replaceWith(wrapper);
         }).catch(() => { /* fallback: keep original pre */ });
       });
@@ -295,7 +296,8 @@ export function DocContentRenderer({
         if (error) {
           block.innerHTML = `<div class="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive font-mono">${escapeHtmlText(error)}</div>`;
         } else {
-          block.innerHTML = `<div class="flex justify-center overflow-x-auto py-3 [&_.katex]:text-foreground">${katexHtml}</div>`;
+          // story #2165: 긴 수식도 코드와 같은 성격(가로로 잘리면 사용자가 잘린 줄 모름) — 예외.
+          block.innerHTML = `<div class="flex justify-center overflow-x-auto scrollbar-visible py-3 [&_.katex]:text-foreground">${katexHtml}</div>`;
         }
       });
     });
@@ -531,7 +533,8 @@ export function DocContentRenderer({
       return <NextImage src={hasSrc ? (src as string) : ''} alt={alt ?? ''} width={800} height={600} style={{ maxWidth: '100%', height: 'auto' }} unoptimized />;
     },
     table: ({ children }: { children?: ReactNode }) => (
-      <div className="not-prose overflow-x-auto rounded-xl border border-border">
+      // story #2165: 표도 코드블럭과 같은 성격 — 가로로 잘린 열이 있다는 것을 알려야 한다.
+      <div className="not-prose overflow-x-auto scrollbar-visible rounded-xl border border-border">
         <table>{children}</table>
       </div>
     ),
@@ -702,10 +705,10 @@ function ShikiCodeBlock({
       {html ? (
         <div
           dangerouslySetInnerHTML={{ __html: html }}
-          className="overflow-x-auto [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6 [&_code]:!bg-transparent"
+          className="overflow-x-auto scrollbar-visible [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6 [&_code]:!bg-transparent"
         />
       ) : (
-        <pre className="overflow-x-auto p-4 text-xs leading-6 text-foreground">
+        <pre className="overflow-x-auto scrollbar-visible p-4 text-xs leading-6 text-foreground">
           <code>{code}</code>
         </pre>
       )}
@@ -734,7 +737,7 @@ function decorateHtmlContent(content: string, headings: ReturnType<typeof extrac
   });
 
   const withTableShells = withHeadingIds.replace(/<table\b[\s\S]*?<\/table>/gi, (tableMarkup) => {
-    return `<div class="not-prose overflow-x-auto rounded-xl border border-border">${tableMarkup}</div>`;
+    return `<div class="not-prose overflow-x-auto scrollbar-visible rounded-xl border border-border">${tableMarkup}</div>`;
   });
 
   return withTableShells.replace(/<pre>([\s\S]*?)<\/pre>/gi, (_match, inner) => {
