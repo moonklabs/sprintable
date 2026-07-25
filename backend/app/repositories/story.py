@@ -47,18 +47,32 @@ class StoryRepository(BaseRepository[Story]):
         story_number = await allocate_story_number(self.session, data["project_id"])
         return await super().create(story_number=story_number, **data)
 
-    async def list(self, limit: int = 1000, *, q: str | None = None, **filters) -> list[Story]:
+    async def list(
+        self, limit: int = 1000, *, q: str | None = None, cursor: datetime | None = None, **filters,
+    ) -> list[Story]:
         """story 083176e8(까심 #2148 QA 적출): 갤러리 피커 실검색 — `q`는 title ILIKE 부분일치로
         기존 동등비교 필터(**filters, base.list() 상속)와 AND 결합. BaseRepository.list()는
         범용(모든 리포지토리 공유)이라 q ILIKE 개념을 거기 얹지 않고 story 전용으로 오버라이드
         (list_board/list_by_ids와 동일하게 자체 쿼리 구성 — 기존 관례).
+
+        story #2189(2026-07-25): ORDER BY도 cursor도 없었다 — FE(`buildCursorPageMeta`)의
+        over-fetch(limit+1) 페이지네이션은 **결정적 정렬 + cursor가 WHERE로 실제 적용**되는
+        전제 위에서만 동작하는데(board 분기·현재 `/api/goals`가 이미 그 전제로 동작 중), 이
+        분기만 둘 다 없어 "커서를 바꿔도 같은 페이지가 반복"됐다(sprints/standup "더 보기"가
+        dedup 없이 중복 누적). board 분기와 동형으로 `created_at DESC` + `cursor` WHERE를
+        추가한다 — board처럼 별도 전용 정렬 우선순위(priority)를 얹지 않는 이유는 이 분기의
+        전 콜러(`buildCursorPageMeta`)가 `created_at`만 cursorField로 쓰기 때문(다른 정렬
+        기준을 얹으면 FE가 계산하는 nextCursor와 실제 정렬 순서가 어긋난다).
         """
         query = select(Story).where(self._org_filter(), Story.deleted_at.is_(None))
         for attr, val in filters.items():
             query = query.where(getattr(Story, attr) == val)
         if q:
             query = query.where(Story.title.ilike(f"%{q}%"))
-        result = await self.session.execute(query.limit(limit))
+        if cursor:
+            query = query.where(Story.created_at < cursor)
+        query = query.order_by(Story.created_at.desc()).limit(limit)
+        result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def list_by_ids(self, ids: list[uuid.UUID]) -> list[Story]:
