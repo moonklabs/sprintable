@@ -280,6 +280,37 @@ def test_one_unreadable_service_does_not_stop_the_batch(monkeypatch, capsys):
     assert "2/3" in out  # 검사한 서비스 수를 정직하게 밝힌다
 
 
+def test_malformed_traffic_payload_does_not_stop_the_batch(monkeypatch, capsys):
+    """⭐까심군 2차 리뷰 — 1차 수정이 만든 **새 구멍**의 회귀가드.
+
+    1차에선 `_serving_status()` 호출만 try 로 감쌌더니, 그 결과를 쓰는 `_is_pinned` →
+    `_latest_percent` 의 `int(...)` 가 try 밖에 남아 **같은 구멍이 새 코드 경로로 그대로
+    재현**됐다. gcloud 가 percent 를 숫자 아닌 값으로 주면(스키마 변경·이상 응답)
+    `ValueError` 로 배치가 다시 죽는다 — 까심군이 `percent="abc"` 로 실제 재현해 확認.
+
+    ⇒ 경계는 «호출» 이 아니라 «서비스 단위 판정 전체» 여야 한다."""
+    mod = _load()
+    statuses = {
+        "svc-ok": _healthy("ok-1"),
+        "svc-weird": {
+            "traffic": [{"revisionName": "w-1", "percent": "abc", "latestRevision": True}],
+            "latest_ready": "w-1", "latest_created": "w-1",
+        },
+        "svc-stalled": {
+            "traffic": [{"revisionName": "s-1", "percent": 100, "latestRevision": True}],
+            "latest_ready": "s-1", "latest_created": "s-2",
+        },
+    }
+    _stub(monkeypatch, mod, statuses)
+
+    assert mod.main() == 1
+    out = capsys.readouterr().out
+    assert "svc-weird" in out and "못 읽었다" in out and "ValueError" in out
+    # ⭐본체 — 이상한 응답 하나가 나머지 판정을 막지 않는다
+    assert "svc-stalled" in out and "축B" in out
+    assert "2/3" in out
+
+
 def test_declared_pins_expiry_and_staleness_are_checked_too(monkeypatch, capsys):
     """⭐리뷰 ① 부수 — 만료/낡음 테스트가 전부 축B(`declared_stalls`)로만 돌아서, 축A
     (`declared_pins`) 쪽에만 있는 비대칭 버그가 있어도 유닛이 못 잡았다. 대칭으로 고정한다."""

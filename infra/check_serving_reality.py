@@ -224,26 +224,36 @@ def main() -> int:
         # 6시간 주기라 다음 사이클까지 10개가 무방비였다.
         # ⛔"읽기 실패 → 조용히 스킵"도 금지다. 그러면 감시가 꺼졌는데 초록으로 보인다.
         # 읽은 것은 판정하고, 못 읽은 것은 **못 읽었다고 실패로 보고**한다.
+        # ⚠️조회뿐 아니라 **그 응답으로 하는 판정까지** 한 블록에 넣는다(까심군 2차 리뷰).
+        # 1차 수정에서 `_serving_status()` 호출만 감쌌더니, 그 결과를 쓰는 `_is_pinned`
+        # → `_latest_percent` 의 `int(...)` 가 try 밖에 남아 **같은 구멍이 새 코드 경로로
+        # 그대로 재현**됐다(gcloud 가 percent 를 숫자 아닌 값으로 주면 ValueError 로 배치가
+        # 다시 죽는다 — 까심군이 `percent="abc"` 로 로컬 재현해 확認). 판정 로직 자체가 그
+        # 서비스의 응답 형태에 의존하므로 경계는 «서비스 단위» 여야 한다.
         try:
             st = _serving_status(service)
+
+            pinned = _is_pinned(st["traffic"])
+            stalled = st["latest_ready"] != st["latest_created"]
+            serving_desc = ", ".join(
+                f"{e.get('revisionName', '?')}({e.get('percent', 0)}%)"
+                for e in st["traffic"]
+            ) or "(traffic 항목 없음)"
+            latest_pct = _latest_percent(st["traffic"])
         except Exception as exc:  # noqa: BLE001 — 어떤 실패든 배치를 계속 돌려야 한다
             unreadable.append(f"{service}: 상태를 못 읽었다 — {type(exc).__name__}: {exc}")
             continue
 
-        if _is_pinned(st["traffic"]):
+        if pinned:
             live_pinned.add(service)
             if service not in declared_pins:
-                serving = ", ".join(
-                    f"{e.get('revisionName', '?')}({e.get('percent', 0)}%)"
-                    for e in st["traffic"]
-                ) or "(traffic 항목 없음)"
                 undeclared_pins.append(
-                    f"{service}: 자동최신으로 가는 트래픽이 "
-                    f"{_latest_percent(st['traffic'])}% 뿐이다(100 이어야 한다) — "
-                    f"서빙 {serving} · latestReady={st['latest_ready']}"
+                    f"{service}: 자동최신으로 가는 트래픽이 {latest_pct}% 뿐이다"
+                    f"(100 이어야 한다) — 서빙 {serving_desc} · "
+                    f"latestReady={st['latest_ready']}"
                 )
 
-        if st["latest_ready"] != st["latest_created"]:
+        if stalled:
             live_stalled.add(service)
             if service not in declared_stalls:
                 undeclared_stalls.append(
