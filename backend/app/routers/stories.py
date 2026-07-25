@@ -120,8 +120,23 @@ async def list_stories(
         await _attach_has_evidence(repo.session, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
+    # story #2188 ④-b(2026-07-25, 오르테가군 판정 — 의도된 제약, 코드 고칠 이유 없음):
+    # `no_sprint=True`를 `project_id` 없이 보내면 이 분기 자체가 안 걸려 제네릭 분기(:148
+    # 이하)로 떨어지고, 거기엔 sprint_id IS NULL을 적용하는 로직이 없어 no_sprint가 통째로
+    # 무시된다 — 결함은 결함이나 도달 경로가 구조적으로 없다: FE `ApiStoryRepository.backlog()`
+    # 는 `projectId: string`(non-optional) 타입이라 컴파일 타임에 이 조합을 못 만들고, MCP
+    # `sprintable_list_backlog` 툴도 `client.require_project_id()`로 런타임 강제한다(양쪽 다
+    # test_2188_no_sprint_alone_contract_pin.py로 고정). 코드를 고치면 "밟히지도 않는 자리"에
+    # 검증 비용만 느는지라 주석+pinning 테스트로 계약을 선언하고 닫는다.
     if no_sprint and project_id:
-        stories = await repo.list_backlog(project_id, limit=limit)
+        # story #2188 형제(#2489와 동형): 필터 전부 넘긴다.
+        # ⚠️ cursor는 안 넘긴다 — #2190은 이 분기와 무관함이 밝혀졌다(list_backlog
+        # docstring 참조: /api/stories/backlog 프록시가 status를 강제 부착해 실제로는
+        # board 분기로 감).
+        stories = await repo.list_backlog(
+            project_id, limit=limit, epic_id=epic_id, assignee_id=assignee_id,
+            status=status_filter, story_number=story_number, q=q,
+        )
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
         return [StoryResponse.model_validate(s) for s in stories]

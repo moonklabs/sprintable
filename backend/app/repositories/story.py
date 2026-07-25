@@ -160,16 +160,50 @@ class StoryRepository(BaseRepository[Story]):
         stories = list((await self.session.execute(q)).scalars().all())
         return stories, total
 
-    async def list_backlog(self, project_id: uuid.UUID, limit: int = 1000) -> list[Story]:
-        """sprint 미배정 + 삭제되지 않은 스토리만 서버사이드 필터."""
-        result = await self.session.execute(
-            select(Story).where(
-                self._org_filter(),
-                Story.project_id == project_id,
-                Story.sprint_id.is_(None),
-                Story.deleted_at.is_(None),
-            ).limit(limit)
+    async def list_backlog(
+        self,
+        project_id: uuid.UUID,
+        limit: int = 1000,
+        epic_id: uuid.UUID | None = None,
+        assignee_id: uuid.UUID | None = None,
+        status: str | None = None,
+        story_number: int | None = None,
+        q: str | None = None,
+    ) -> list[Story]:
+        """sprint 미배정 + 삭제되지 않은 스토리만 서버사이드 필터.
+
+        story #2188 형제(2026-07-25, 오르테가군 판정) — board 분기(#2489)와 같은 결함 클래스:
+        이 분기도 epic_id/assignee_id/status/story_number/q를 받기만 하고 무시했다. 필터
+        드롭 자체는 라이브 콜러 확認 결과 사용자 피해 0(FE `ApiStoryRepository.backlog()`는
+        콜러 0인 죽은 코드, MCP `sprintable_list_backlog` 툴 스키마는 project_id만 받아 문제
+        파라미터를 애초에 못 보냄) — 다만 REST를 직접 부르는 임시 조회(디디군이 #2188 조사
+        중 실제로 걸린 자리)는 그대로 노출돼 판단 근거를 오염시킬 수 있어 medium으로 고친다.
+
+        ⚠️ cursor는 여기 없다 — 2026-07-25 초안에서 #2190(까심군 QA)을 근거로 cursor+id
+        tiebreak을 여기 얹었었으나, 오르테가군이 프록시 코드(`apps/web/src/app/api/stories/
+        backlog/route.ts`)를 직접 읽고 정정: 그 프록시가 `status=backlog`를 강제 부착해
+        FastAPI로 보내므로 백엔드에서는 실제로 **board 분기**(`list_board`, cursor 이미 지원)
+        를 타지 이 분기로 안 온다. "URL이 `/stories/backlog`니까 이 분기겠지"로 단정한 게
+        오판 원인이었다 — #2190의 진짜 원인은 그 프록시가 `apiSuccess()`에 meta를 안 넘겨
+        `hasMore`가 구조적으로 항상 false인 것(다른 층의 결함)이라 이 메서드와 무관하다.
+        """
+        query = select(Story).where(
+            self._org_filter(),
+            Story.project_id == project_id,
+            Story.sprint_id.is_(None),
+            Story.deleted_at.is_(None),
         )
+        if epic_id:
+            query = query.where(Story.epic_id == epic_id)
+        if assignee_id:
+            query = query.where(Story.assignee_id == assignee_id)
+        if status:
+            query = query.where(Story.status == status)
+        if story_number is not None:
+            query = query.where(Story.story_number == story_number)
+        if q:
+            query = query.where(Story.title.ilike(f"%{q}%"))
+        result = await self.session.execute(query.limit(limit))
         return list(result.scalars().all())
 
     async def transition_status(self, id: uuid.UUID) -> Story:
