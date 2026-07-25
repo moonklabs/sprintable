@@ -137,3 +137,64 @@ describe('/api/event-stream — request.signal 전파(story #2183, 좀비 upstre
     expect(text).toBe('data: hello\n\n'); // 스트림이 잘리지 않고 끝까지 통과함
   });
 });
+
+// story #2183 후속(2026-07-25) — request.signal 단독으로는 Cloud Run의 강제 종료를 못 잡는다는
+// 것이 라이브 실측으로 확認됐다(착지 前 n=300 전부 3601.0s → 착지 後에도 617~658s, ~60s가
+// 나왔어야 했다). wall-clock 캡을 본체로 얹은 회귀가드 — AbortSignal.timeout은 vitest fake
+// timer로 제어가 안 되므로(Node 내부 타이머라 실측 확認됨) AbortSignal.timeout 자체를 스파이/
+// 교체해 "캡이 걸렸을 때"의 배선과 거동을 실시간 대기 없이 검증한다.
+describe('/api/event-stream — wall-clock 상한(story #2183 후속, signal 단독 실패의 회귀가드)', () => {
+  beforeEach(() => {
+    h.getServerSession.mockReset();
+    h.getServerSession.mockResolvedValue({ access_token: 'tok' });
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('AbortSignal.timeout(55000)으로 wall-clock 캡을 건다 — 상수값 고정', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })));
+
+    await GET(new Request('http://localhost/api/event-stream') as unknown as Parameters<typeof GET>[0]);
+
+    expect(timeoutSpy).toHaveBeenCalledWith(55_000);
+  });
+
+  it('wall-clock 캡이 fire되면(request.signal은 안 fire된 채로도) 499로 조용히 정리한다', async () => {
+    // AbortSignal.timeout을 이미 abort된 신호로 교체 — "캡 도달" 시점을 실시간 대기 없이 재현.
+    const timeoutController = new AbortController();
+    const timeoutError = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    timeoutController.abort(timeoutError);
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
+
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw init.signal.reason;
+      return new Response('', { status: 200 });
+    }));
+    const controller = new AbortController(); // request.signal 자체는 살아있음(클라 안 끊음)
+    const req = new Request('http://localhost/api/event-stream', { signal: controller.signal });
+
+    const res = await GET(req as unknown as Parameters<typeof GET>[0]);
+
+    expect(res.status).toBe(499);
+    expect(controller.signal.aborted).toBe(false); // 클라는 안 끊었다 — 캡이 본체로 작동한 것
+  });
+
+  it('request.signal 배선도 여전히 살아있다(캡과 별개 경로) — #2183 원래 회귀가드 유지', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    const req = new Request('http://localhost/api/event-stream', { signal: controller.signal });
+
+    await GET(req as unknown as Parameters<typeof GET>[0]);
+
+    const passedSignal = fetchMock.mock.calls[0]?.[1]?.signal;
+    expect(passedSignal?.aborted).toBe(false);
+    controller.abort();
+    expect(passedSignal?.aborted).toBe(true);
+  });
+});
