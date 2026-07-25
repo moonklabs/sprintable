@@ -291,7 +291,7 @@ def test_agent_breaking_condition_declared():
     import app.routers.agent_gateway as gw_module
 
     source = inspect.getsource(gw_module)
-    assert "idle-but-legit한 agent 세션이 실제로 관측되면" in source
+    assert "한 자릿수 이상 늘어나" in source
     assert "무너지는 조건" in source
 
 
