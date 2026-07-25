@@ -58,17 +58,36 @@ _MAX_SSE_LIFETIME_SEC: float = 3900.0  # 3600s(GLCB) + 여유
 # 일 뿐, 스트림 자체를 능동 종료하지 않는다 — Cloud Run 타임아웃이 결국 끊어줄 때까지
 # 수동으로 기다리기만 했다(그게 이 병의 본질). 이 상수는 그 수동 대기를 능동 종료로 바꾼다.
 #
-# N=1800s(30분) 근거 — browser(events.py)와 다른 판단이 필요한 이유: 에이전트는 프론트
-# 프록시를 안 거치고 backend-dev에 직결이라(#2095의 60s 강제 재연결 없음) MCP 세션의 idle
-# 대기가 정당하게 길 수 있다 — browser와 같은 "자연주기" 논증을 못 쓴다.
-# · 3600s의 절반 — 오탐지 리스크를 browser보다 크게 두되(margin 우선), 최대 점유는 2배 줄인다.
-# · #2161(AGENT_RUN_TIMEOUT_HOURS=24h)과 동형 판단 — 첫 판은 "정확"이 아니라 "안전"이 목적.
-#   idle-but-legit한 agent 세션 길이를 실측한 적이 없어 보수적으로 넉넉히 잡았다.
+# N=300s(5분) 근거 — 2026-07-25 정정(최초 1800s 판단은 폐기, 근거는 아래):
 #
-# 무너지는 조건(pinning 테스트 — tests/test_2128_sse_lifespan_cap.py 참조): "30분보다 오래
-# idle-but-legit한 agent 세션이 실제로 관측되면" 이 값을 올려야 한다 — 지금은 그런 관측 없음.
-_AGENT_SSE_LIFESPAN_SEC: float = 1800.0
-_AGENT_SSE_LIFESPAN_JITTER_SEC: float = 60.0  # herd 방지(#2095 지터와 동일 목적)
+# 최초(1800s) 판단은 "idle-but-legit한 MCP 세션이 정당하게 길 수 있다"는 추정이었다. 그런데
+# 실측(2026-07-25, backend-dev /agent/stream, 최근 3시간·n=48)이 그 추정을 무너뜨렸다:
+#   min 1807s · p25 1832 · p50 1853 · p75 1864 · max 1875s — **1700s 미만 0건**.
+# 즉 48/48 이 자연 종료 없이 캡에 의해서만 끊겼다 — 오늘 새벽 realtime 이 "3601s 전량"으로
+# 죽어있던 것과 같은 서명이다. presence는 AgentGatewaySession row 존재로만 판정되므로(위
+# #2120 AC2 주석), 이 캡이 곧 "에이전트가 죽었는데도 최대 N초간 online으로 보이는" 그 상한
+# 이다 — 1800s에선 최대 31분, 실사용자가 체감하는 오검출 창이었다.
+#
+# 왜 더 내려도 안전한가(가속층 대신 캡을 내리는 쪽을 택한 이유):
+#   ① 재연결이 저렴하다 — 에이전트 SDK는 무한루프 재연결(오늘 코드로 확認)이고, backfill은
+#      Last-Event-ID 이후 seq만 조회하는 라이브테일 쿼리라 idle 상태에서는 사실상 빈 결과 —
+#      재연결 자체가 작업을 유실시키지 않는다(browser의 #2101 백필과 동형 보장).
+#   ② 신호 기반 가속(②, 원 설계가 미뤄둔 레이어)을 먼저 시도하지 않은 이유 — 오늘 신호 기반
+#      감지가 이미 두 번 실패로 관측됐다(#2183의 request.signal 미전파 40%만 발동 · 까심군
+#      AC6의 request.is_disconnected() 36초 폴링 미검출). 같은 스택에서 에이전트 경로만
+#      신호가 신뢰될 것이라 가정할 근거가 없다 — "서버측 wall-clock은 안 새고 신호는 샌다"는
+#      오늘 반복 확認된 원리를 그대로 적용한다.
+#   ③ 재연결 부하 — 300s면 시간당 12회(1800s의 2회 대비 6배)지만, 오늘 관측된 동시 접속
+#      규모(3~5개)에서는 절대량이 작다.
+#
+# 무너지는 조건(pinning 테스트 — tests/test_2128_sse_lifespan_cap.py 참조) — 관측 불가능한
+# 형태("idle 세션이 30분 넘게 관측되면")였던 것을 관측 가능한 형태로 다시 쓴다: "동시 접속
+# 에이전트 수가 오늘 규모(3~5개)에서 한 자릿수 이상 늘어나 재연결 트래픽/부하가 유의미해지면,
+# 또는 재연결마다의 backfill 비용이 idle 상태에서도 실측으로 유의미하면" 이 값을 올려야 한다
+# — 지금은 그런 관측 없음.
+_AGENT_SSE_LIFESPAN_SEC: float = 300.0
+_AGENT_SSE_LIFESPAN_JITTER_SEC: float = 30.0  # herd 방지(#2095 지터와 동일 목적) — base 축소에
+# 비례해 60s → 30s(그대로 두면 300s 기준 최대 +20% 변동, browser #2128 정정과 동일 원칙).
 
 
 async def _mark_agent_online(agent_id: uuid.UUID, session_id: uuid.UUID) -> None:
