@@ -127,6 +127,8 @@ async def list_stories(
         return [StoryResponse.model_validate(s) for s in stories]
 
     # CB-S4: status + project_id 조합 시 board 쿼리 (order_by + cursor + done 7일 제한)
+    # story #2188: sprint_id/assignee_id만 넘기고 epic_id/story_number/q는 조용히 빠뜨리던
+    # 자리 — 이 분기로 빠지는 조합에서도 제네릭 블록(:148 이하)과 동일하게 전 필터를 넘긴다.
     if status_filter and project_id:
         cursor_dt = datetime.fromisoformat(cursor) if cursor else None
         stories, total = await repo.list_board(
@@ -136,6 +138,9 @@ async def list_stories(
             cursor=cursor_dt,
             sprint_id=sprint_id,
             assignee_id=assignee_id,
+            epic_id=epic_id,
+            story_number=story_number,
+            q_text=q,
         )
         if response is not None:
             response.headers["X-Total-Count"] = str(total)
