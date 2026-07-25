@@ -481,3 +481,40 @@ def test_provision_gclb_invalid_env_rejected():
     )
     assert proc.returncode != 0
     assert "[dev|prod]" in proc.stderr
+
+
+# ── story #2089 stage 3-a(2026-07-25, 오르테가군 지시): dev만 entrypoint 교체 ────────
+
+def test_deploy_gce_dev_uses_realtime_main_entrypoint():
+    """dev는 app.realtime_main:app(SSE router 둘만 마운트)으로 뜬다."""
+    cfg = _resolve(_DEPLOY_GCE, "dev")
+    assert cfg["UVICORN_APP_MODULE"] == "app.realtime_main:app"
+
+
+def test_deploy_gce_prod_entrypoint_unchanged():
+    """⭐핵심 AC — prod는 이번 단계에서 손대지 않는다. 기존 app.main:app 그대로인지
+    명시 검증(변수 분리 리팩터 자체가 prod 값을 조용히 바꾸지 않았는지가 이 테스트의 목적)."""
+    cfg = _resolve(_DEPLOY_GCE, "prod")
+    assert cfg["UVICORN_APP_MODULE"] == "app.main:app"
+
+
+def test_deploy_gce_dev_and_prod_entrypoints_differ():
+    dev = _resolve(_DEPLOY_GCE, "dev")
+    prod = _resolve(_DEPLOY_GCE, "prod")
+    assert dev["UVICORN_APP_MODULE"] != prod["UVICORN_APP_MODULE"]
+
+
+def test_deploy_gce_dev_startup_script_actually_invokes_realtime_main():
+    """요약 변수(UVICORN_APP_MODULE)뿐 아니라 실제 생성되는 startup-script의 docker run
+    커맨드 라인 자체에 반영되는지 — #2142가 세운 관례(요약 문자열과 실제 산출물이 다를 수
+    있다는 것)를 따라 startup-script 원문(GENERATED_UVICORN_CMD_LINE)에서 직접 확認한다."""
+    cfg = _resolve(_DEPLOY_GCE, "dev")
+    assert "uvicorn app.realtime_main:app" in cfg["GENERATED_UVICORN_CMD_LINE"]
+    assert "--host 0.0.0.0" in cfg["GENERATED_UVICORN_CMD_LINE"]
+
+
+def test_deploy_gce_prod_startup_script_still_invokes_main():
+    """prod의 실제 startup-script 산출물도 기존 app.main:app 그대로인지 원문으로 확認."""
+    cfg = _resolve(_DEPLOY_GCE, "prod")
+    assert "uvicorn app.main:app" in cfg["GENERATED_UVICORN_CMD_LINE"]
+    assert "realtime_main" not in cfg["GENERATED_UVICORN_CMD_LINE"]
