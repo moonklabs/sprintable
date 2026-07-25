@@ -283,7 +283,7 @@ def test_browser_breaking_condition_declared():
     import app.routers.events as ev_module
 
     source = inspect.getsource(ev_module)
-    assert "600s 미만에" in source and "무너지는 조건" in source
+    assert "90s를 넘겨야 하는 정당한 경로" in source and "무너지는 조건" in source
 
 
 def test_agent_breaking_condition_declared():
