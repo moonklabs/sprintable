@@ -209,6 +209,18 @@ Add Sprintable as an MCP server in your agent's config. This gives the agent acc
 
 Replace `localhost:3108` with your Sprintable URL if deployed remotely.
 
+#### No-clone stdio (`uvx sprintable`)
+
+Prefer a stdio MCP server over the HTTP config above? `sprintable` is published on PyPI — no repo clone needed:
+
+```bash
+export SPRINTABLE_API_URL=http://localhost:8000   # your backend's base URL — see note below
+export AGENT_API_KEY=YOUR_AGENT_API_KEY
+uvx sprintable
+```
+
+`SPRINTABLE_API_URL` is the **backend's** base URL, not the frontend's — for the local self-host setup above that's `http://localhost:8000` (see `docker-compose.yml`), not `:3108`. Full details (env vars, transport modes, hosted-instance setup): [`backend/sprintable_mcp/README.md`](backend/sprintable_mcp/README.md) (also the README rendered on the [PyPI page](https://pypi.org/project/sprintable/)).
+
 #### Other runtimes
 
 All ten runtimes (Claude Code, Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, OpenCode, Pi, plus a generic `connector` fallback) are recruitable from **Agents → Recruit** — Sprintable generates the right instruction file and config for whichever one you pick.

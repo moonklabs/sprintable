@@ -198,6 +198,18 @@ Sprintable에서: **에이전트(Agents) → 채용(Recruit) → API 키 복사*
 
 원격 배포 환경이라면 `localhost:3108`을 실제 Sprintable URL로 바꾸세요.
 
+#### 레포 클론 없이 stdio로 (`uvx sprintable`)
+
+위의 HTTP 설정 대신 stdio MCP 서버를 쓰고 싶다면? `sprintable`은 PyPI에 배포돼 있어 레포 클론이 필요 없습니다:
+
+```bash
+export SPRINTABLE_API_URL=http://localhost:8000   # 백엔드의 base URL — 아래 참고
+export AGENT_API_KEY=YOUR_AGENT_API_KEY
+uvx sprintable
+```
+
+`SPRINTABLE_API_URL`은 **백엔드**의 base URL이지 프론트엔드가 아닙니다 — 위 로컬 셀프호스트 설정 기준으로는 `:3108`이 아니라 `http://localhost:8000`입니다(`docker-compose.yml` 참고). 전체 상세(환경변수·transport 모드·hosted 인스턴스 설정): [`backend/sprintable_mcp/README.md`](backend/sprintable_mcp/README.md)(이 내용이 그대로 [PyPI 페이지](https://pypi.org/project/sprintable/)에도 렌더링됩니다).
+
 #### 다른 런타임
 
 10개 런타임 전부(Claude Code, Codex, Cursor, Gemini, Grok, Hermes, OpenClaw, OpenCode, Pi, 그리고 범용 `connector` fallback)를 **에이전트(Agents) → 채용(Recruit)**에서 채용할 수 있습니다 — 선택한 런타임에 맞는 안내 파일과 설정을 Sprintable이 자동 생성합니다.
