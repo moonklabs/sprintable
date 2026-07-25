@@ -114,10 +114,18 @@ async def realtime_lifespan(app: FastAPI):
         await engine.dispose()
 
 
-# story #2089 핵심 — 여기서 딱 두 라우터만 import한다. app.main.py:147의 90+ 모듈
+# story #2089 핵심 — SSE router 둘 + health 하나만 import한다. app.main.py:147의 90+ 모듈
 # 일괄 import(alembic·ee·mcp 게이트를 함께 끌고 오는 그 배선)를 반복하지 않는 것이
 # 이 entrypoint의 전체 목적이다.
-from app.routers import agent_gateway, events  # noqa: E402
+#
+# ⚠️ health.router는 REST를 안 서빙하는 이 서비스가 왜 예외로 갖고 있는지 이유를 남긴다
+# (2026-07-25, 오르테가군 3-a 라이브 배포 실패 후 발견 — 지우면 안 됨): GCLB 백엔드
+# 헬스체크(provision_realtime_gclb.sh) 대상이 `/api/v2/ping`이다. 이 라우트가 없으면
+# GCLB가 이 서비스를 영구 UNHEALTHY로 보고 502를 낸다 — "REST를 안 서빙한다"는 이유로
+# 이 라우터까지 빼면 부팅은 되지만 로드밸런서 뒤에서 트래픽을 못 받는다. `/api/v2/health`
+# (DB 조회 포함)도 같은 라우터에 있지만 GCLB는 `/ping`(DB 미조회)만 쓴다 — 그래도 분리해서
+# 뺄 이유가 없어(같은 파일·같은 위험 0) 함께 마운트한다.
+from app.routers import agent_gateway, events, health  # noqa: E402
 
 app = FastAPI(
     title="Sprintable Realtime Gateway (stage2 측정용 시제품)",
@@ -172,3 +180,4 @@ app.add_middleware(
 
 app.include_router(events.router)
 app.include_router(agent_gateway.router)
+app.include_router(health.router)
