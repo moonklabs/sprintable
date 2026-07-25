@@ -60,3 +60,60 @@ describe('fastapi-proxy — X-Project-Id override passthrough (story 7d6b770b �
     expect(headers['x-project-id']).toBeUndefined();
   });
 });
+
+// story #2190 — proxyToFastapi가 응답 헤더를 Content-Type 하나만 남기고 전부 버려서, board
+// 분기(list_stories)가 X-Total-Count/X-Next-Cursor로만 내보내는 커서 페이지네이션 신호가
+// 호출부(stories/backlog route)에 도달하기 前에 사라지던 결함의 회귀가드. 허용목록만 옮기고
+// 절대 통째로 복사하지 않는다(Content-Length/Content-Encoding/Set-Cookie/Transfer-Encoding이
+// 재구성된 응답과 어긋나거나 보안 표면이 되는 자리라 — 그래서 이 테스트가 "밖은 안 나간다"도 함께 고정한다).
+describe('fastapi-proxy — 응답 헤더 allowlist forward(story #2190)', () => {
+  beforeEach(() => {
+    getServerSessionMock.mockReset();
+    getServerSessionMock.mockResolvedValue({ access_token: 'token-1', org_id: 'org-1', project_id: 'proj-1' });
+  });
+
+  it('X-Total-Count·X-Next-Cursor는 응답에 그대로 실려 나온다', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'x-total-count': '278', 'x-next-cursor': '2026-07-23T07:20:58.962535+00:00' },
+    }));
+    const request = new Request('http://localhost/api/stories/backlog?project_id=p1&status=backlog&limit=20');
+
+    const res = await proxyToFastapi(request, '/api/v2/stories');
+
+    expect(res.headers.get('x-total-count')).toBe('278');
+    expect(res.headers.get('x-next-cursor')).toBe('2026-07-23T07:20:58.962535+00:00');
+  });
+
+  it('허용목록 밖 헤더(Set-Cookie 등)는 절대 안 나간다 — 통째로 복사가 아님을 고정', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify([]), {
+      status: 200,
+      headers: {
+        'set-cookie': 'session=leaked; HttpOnly',
+        'content-encoding': 'gzip',
+        'x-internal-debug': 'should-not-leak',
+      },
+    }));
+    const request = new Request('http://localhost/api/stories/backlog?project_id=p1');
+
+    const res = await proxyToFastapi(request, '/api/v2/stories');
+
+    expect(res.headers.get('set-cookie')).toBeNull();
+    expect(res.headers.get('content-encoding')).toBeNull();
+    expect(res.headers.get('x-internal-debug')).toBeNull();
+  });
+
+  it('두 헤더 다 없으면 응답 헤더도 Content-Type뿐(무회귀 — 기존 130+ 라우트 전제)', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    const request = new Request('http://localhost/api/me');
+
+    const res = await proxyToFastapi(request, '/api/v2/me');
+
+    expect(res.headers.get('x-total-count')).toBeNull();
+    expect(res.headers.get('x-next-cursor')).toBeNull();
+    expect(res.headers.get('content-type')).toBe('application/json');
+  });
+});
