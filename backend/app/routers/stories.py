@@ -788,6 +788,11 @@ async def bulk_update_stories(
                 # 오르테가군 PR 리뷰(2026-07-24): warning은 찾을 때 안 보이는 자리 — 오늘
                 # #2128/#2160/#2161 전부 "조용한 실패"였다. 나가야 할 실시간 프레임이 안 나간
                 # 것 자체가 이 스토리가 고치는 병이라 ERROR로 올린다.
+                #
+                # story #2173: 이 try/except는 emit_story_status_changed 자체의 신뢰성을 못
+                # 믿어서가 아니다(그쪽은 이미 완전 내부 격리 — update_story_status의 단건
+                # 콜사이트 주석 참조) — **다건성**(이 item이 실패해도 for 루프의 나머지 item은
+                # 계속 처리돼야 함) 때문. 단건 경로엔 "나머지 item"이 없어 이 이유가 적용 안 된다.
                 logger.error(
                     "bulk status_changed emit 실패(story=%s)", s.id, exc_info=True,
                 )
@@ -1230,6 +1235,17 @@ async def update_story_status(
                 pass
         # 41a6e294: status_changed side-effects(events→L1·webhook·L2·notif·activity)는 공유 helper로
         # 발화 — gate-driven done(gate_service)과 동일 경로(parity·드리프트 0).
+        #
+        # story #2173(2026-07-24, 오르테가군 판정 — «결함인지 아닌지 가르기») 판정: 여기 try/except가
+        # 없는 것과 아래 bulk_update_stories의 item별 try/except는 **우연히 갈린 게 아니라 이제는
+        # 근거가 붙은 의도적 차이**다 — emit_story_status_changed() 자체가 이미 모든 side-effect를
+        # 개별 try/except로 감싸 내부적으로 완전 격리돼 있어(SSE·webhook·L2·notification·
+        # StoryActivity·trust_pipeline 전부, tests/test_emit_story_status_changed_isolation.py로
+        # 고정) 이 콜사이트에서 밖으로 던질 경로가 구조적으로 없다(라이브 로그 근거도 0건).
+        # bulk의 try/except는 emit 자체의 신뢰성 문제가 아니라 **다건성**(한 item의 실패가 나머지
+        # item을 막으면 안 됨) 때문 — 단건은 애초에 "나머지 item"이 없어 그 이유가 적용 안 된다.
+        # 무너지는 조건: emit_story_status_changed에 나중에 개별 try/except 없는 새 side-effect가
+        # 추가되면 이 판정이 깨진다 — 그 경우 추가하는 사람이 여기도 다시 감쌀지 판단해야 한다.
         await emit_story_status_changed(
             db, org_id, story, old_status,
             actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
