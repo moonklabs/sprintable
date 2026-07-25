@@ -177,6 +177,18 @@ export default function InboxPage() {
   const tCage = useTranslations('cage');
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const activeTab = searchParams.get('tab') ?? 'notifications';
+  // story #2164(2026-07-25, 까심): 예전엔 이 세 탭 중 notifications 탭 라벨과 페이지 헤더가
+  // t('title')("결재함") 하나를 재사용했다 — 헤더가 항상 "결재함"이라 찍히는데 기본 진입 시
+  // 보이는 건 무필터 알림 피드라 이름이 내용과 어긋났다(선생님 정신병 리스트 결재함1/결재함2
+  // 둘 다 이 어긋남에서 발생). 탭마다 전용 키로 갈라(notificationsTabLabel/attentionTabLabel/
+  // cage.gateTabLabel="결재함"으로 개명) 헤더가 항상 **현재 활성 탭의 진짜 이름**을 보여주게
+  // 한다 — 탭을 이동해도 헤더가 거짓말하지 않는다.
+  const INBOX_TABS = [
+    { key: 'attention', label: t('attentionTabLabel') },
+    { key: 'notifications', label: t('notificationsTabLabel') },
+    { key: 'gates', label: tCage('gateTabLabel') },
+  ] as const;
+  const activeTabLabel = INBOX_TABS.find((tab) => tab.key === activeTab)?.label ?? t('notificationsTabLabel');
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -362,7 +374,7 @@ export default function InboxPage() {
       <TopBarSlot
         title={
           <div className="flex items-center gap-2">
-            <h1 className="text-sm font-medium">{t('title')}</h1>
+            <h1 className="text-sm font-medium">{activeTabLabel}</h1>
             {unreadCount > 0 ? (
               <span className="text-sm tabular-nums text-muted-foreground">{unreadCount}</span>
             ) : null}
@@ -377,13 +389,9 @@ export default function InboxPage() {
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {/* 탭 — 오늘(Attention Queue) / 알림 / 게이트. AQ는 전용 뷰로 병행 추가(기존 탭 대체 아님). */}
+        {/* 탭 — 오늘(Attention Queue) / 알림 / 결재함(게이트). AQ는 전용 뷰로 병행 추가(기존 탭 대체 아님). */}
         <div className="flex shrink-0 border-b border-border/80 px-4">
-          {([
-            { key: 'attention', label: t('attentionTabLabel') },
-            { key: 'notifications', label: t('title') },
-            { key: 'gates', label: tCage('gateTabLabel') },
-          ] as { key: string; label: string }[]).map(({ key, label }) => (
+          {INBOX_TABS.map(({ key, label }) => (
             <button
               key={key}
               type="button"

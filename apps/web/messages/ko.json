@@ -1806,8 +1806,8 @@
     "actionCoordinate": "조율"
   },
   "inbox": {
-    "title": "결재함",
     "attentionTabLabel": "오늘",
+    "notificationsTabLabel": "알림",
     "surfaceDescription": "스토리, 메모, 리워드, 시스템 알림을 하나의 운영 표면으로 확인합니다.",
     "markAllRead": "전체 읽음",
     "markRead": "읽음",
@@ -3590,7 +3590,7 @@
     "corrections": "정정",
     "correctionRounds": "정정 {count}회",
     "byRole": "역할별",
-    "gateTabLabel": "게이트",
+    "gateTabLabel": "결재함",
     "decisionAutoMerge": "자동 통과",
     "decisionAskHuman": "확인 필요",
     "decisionBlock": "차단됨",
