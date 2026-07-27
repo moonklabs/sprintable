@@ -9,6 +9,7 @@ export interface GroupableDoc {
   parent_id: string | null;
   slug: string;
   title: string;
+  created_at?: string;
 }
 
 export interface DocGroup {
@@ -22,8 +23,7 @@ export interface DocGroup {
 
 export interface DocGroupingResult {
   groups: DocGroup[];
-  /** 접두어 규칙이 약해 어떤 그룹에도 못 들어간 문서 — 시간 그릇의 재료(#2193 AC2, created_at
-   * 필드 부재로 현재는 세분화하지 않고 하나로 묶는다. backend 확장 뒤 시간별로 나눌 슬롯). */
+  /** 접두어 규칙이 약해 어떤 그룹에도 못 들어간 문서 — 시간 그릇(bucketDocsByTime)의 재료. */
   ungrouped: GroupableDoc[];
 }
 
@@ -109,4 +109,47 @@ export function computeDocGroups(docs: GroupableDoc[]): DocGroupingResult {
 
   const ungrouped = docs.filter((d) => !assigned.has(d.id));
   return { groups, ungrouped };
+}
+
+// story #2193 후속 — 시간 그릇(#2505에서 BE DocSummaryResponse에 created_at이 추가돼 블로커
+// 해소). 생성일 기준(수정일 아님)이어야 하는 이유 셋(유나양 판정):
+//  ① 에이전트 오염 회피 — 수정일 기준이면 에이전트가 방금 건드린 문서가 위로 온다.
+//     사람이 안 봤는데 상단에 서는 "거짓 최신성"이 된다.
+//  ② 훑기의 안정적 척추 — 버킷이 매번 바뀌면 "어디 있더라"가 안 된다. 생성일은 고정된다.
+//  ③ 역할 분리 — "최근 본 것"(RecentsSection)이 이미 사람의 열람 최신성 축을 담당한다.
+//     시간 버킷까지 수정일이면 그 축이 두 번 겹친다.
+export interface TimeBuckets {
+  thisMonth: GroupableDoc[];
+  lastMonth: GroupableDoc[];
+  older: GroupableDoc[];
+  /** created_at이 없거나 파싱 불가능한 문서 — 조용히 "이전"에 묻히거나 사라지지 않도록
+   * 명시적으로 분리한다(오르테가군 지적: 필드가 있다≠그 값으로 그릇이 갈린다). */
+  unknownDate: GroupableDoc[];
+}
+
+function monthKey(date: Date): number {
+  return date.getUTCFullYear() * 12 + date.getUTCMonth();
+}
+
+/** `now`는 호출부에서 주입 — 순수함수로 유지해 테스트를 결정적으로 만든다. */
+export function bucketDocsByTime(docs: GroupableDoc[], now: Date): TimeBuckets {
+  const thisMonth: GroupableDoc[] = [];
+  const lastMonth: GroupableDoc[] = [];
+  const older: GroupableDoc[] = [];
+  const unknownDate: GroupableDoc[] = [];
+  const nowKey = monthKey(now);
+
+  for (const doc of docs) {
+    const parsed = doc.created_at ? new Date(doc.created_at) : null;
+    if (!parsed || Number.isNaN(parsed.getTime())) {
+      unknownDate.push(doc);
+      continue;
+    }
+    const diff = nowKey - monthKey(parsed);
+    if (diff <= 0) thisMonth.push(doc);
+    else if (diff === 1) lastMonth.push(doc);
+    else older.push(doc);
+  }
+
+  return { thisMonth, lastMonth, older, unknownDate };
 }

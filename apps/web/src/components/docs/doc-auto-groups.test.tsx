@@ -14,12 +14,18 @@ import { DocAutoGroups } from './doc-auto-groups';
 const LABELS = {
   inFolderLabel: '폴더에 담김',
   looseAtRootLabel: '폴더 밖',
-  restLabel: '그 외',
+  thisMonthLabel: '이번 달',
+  lastMonthLabel: '지난 달',
+  olderLabel: '이전',
+  unknownDateLabel: '날짜 없음',
   moreLabel: (count: number) => `${count}개 더`,
 };
 
-function doc(id: string, slug: string, parent_id: string | null = null) {
-  return { id, slug, parent_id, title: `제목-${id}` };
+// 월 경계에 걸쳐 테스트가 흔들리지 않도록 고정 — bucketDocsByTime과 동일하게 now를 주입.
+const FIXED_NOW = new Date('2026-07-27T00:00:00Z');
+
+function doc(id: string, slug: string, parent_id: string | null = null, created_at?: string) {
+  return { id, slug, parent_id, title: `제목-${id}`, created_at };
 }
 
 let container: HTMLDivElement;
@@ -104,10 +110,25 @@ describe('DocAutoGroups', () => {
     expect(selected).toEqual(['policy-a']);
   });
 
-  it('접두어가 약해(최소크기 미달) 어떤 그룹도 못 만들면 「그 외」 하나로 묶인다', async () => {
-    const docs = [doc('1', 'onlyone-a'), doc('2', 'onlyone-b')];
-    await act(async () => { root.render(<DocAutoGroups docs={docs} selectedSlug={null} onSelect={() => {}} {...LABELS} />); });
+  it('접두어가 약해(최소크기 미달) 어떤 그룹도 못 만들면 시간 그릇(created_at 있으면 이번 달 등)으로 떨어진다', async () => {
+    const docs = [doc('1', 'onlyone-a', null, '2026-07-01T00:00:00Z'), doc('2', 'onlyone-b', null, '2026-07-02T00:00:00Z')];
+    await act(async () => { root.render(<DocAutoGroups docs={docs} selectedSlug={null} onSelect={() => {}} now={FIXED_NOW} {...LABELS} />); });
 
-    expect(container.textContent).toContain('그 외');
+    expect(container.textContent).toContain('이번 달');
+  });
+
+  it('AC2/AC6 — created_at이 없는 문서는 "날짜 없음"으로 명시적으로 분리되고, 값이 있으면 "이번 달"/"지난 달"/"이전"으로 갈린다', async () => {
+    const docs = [
+      doc('1', 'onlyone-a', null, undefined), // created_at 없음
+      doc('2', 'onlyone-b', null, '2026-01-01T00:00:00Z'), // 오래 전
+    ];
+    await act(async () => { root.render(<DocAutoGroups docs={docs} selectedSlug={null} onSelect={() => {}} now={FIXED_NOW} {...LABELS} />); });
+
+    expect(container.textContent).toContain('날짜 없음');
+    expect(container.textContent).toContain('이전');
+
+    const unknownHeader = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('날짜 없음'))!;
+    await act(async () => { unknownHeader.click(); });
+    expect(container.textContent).toContain('제목-1');
   });
 });
