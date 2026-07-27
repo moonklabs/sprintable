@@ -213,6 +213,13 @@ async def create_gate_endpoint(
     project_id = await resolve_work_item_project_id(
         session, org_id, body.work_item_type, body.work_item_id,
     )
+    # #2237: resolve_work_item_project_id는 조회 전용(gate_service.py) — caller 접근권은 여기서
+    # 별도 강제해야 한다(형제 get_gate_endpoint와 동일 SSOT·동일 404 관례로 존재 비노출).
+    # project_id가 None이면(project-무관 work_item) 경계가 없으므로 org 멤버십만으로 충분.
+    if project_id is not None and not await has_project_access(
+        session, uuid.UUID(_auth.user_id), project_id, org_id
+    ):
+        raise HTTPException(status_code=404, detail="Project not found")
     gate = await create_gate(
         session=session,
         org_id=org_id,
