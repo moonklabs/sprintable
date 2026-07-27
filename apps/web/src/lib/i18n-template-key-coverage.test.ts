@@ -36,6 +36,10 @@ function hasKey(messages: unknown, dotted: string): boolean {
 
 // [prefix, values[], sourceOfTruth] — sourceOfTruth는 그 값 집합을 어디서 실제로 확인했는지
 // (다음 사람이 재검증할 때 다시 읽을 자리).
+// ⛔이 표는 손으로 갱신해야 한다(PO 리뷰, 2026-07-27) — 정적 스캔이 아니라 하드코딩이라,
+// 새 템플릿 조합 키(`t(\`prefix_${var}\`)` 형태)를 만들면 이 표가 조용히 낡는다. 그 상태로는
+// 가드가 계속 초록인데 새 키만 화면에 그대로 뜬다 — 새 조합 키를 추가할 때 반드시 여기 항목을
+// 같이 추가할 것.
 const TEMPLATE_KEY_TABLE: Array<[string, string[], string]> = [
   ['proofCapsule.risk.', ['low', 'medium', 'high'], 'proof-capsule.tsx RISK_KEY 값 타입'],
   ['settings.mcpConnections.status.', ['active', 'error', 'pending_oauth', 'disconnected'], 'mcp-connection-settings.tsx McpConnectionSummary.status'],

@@ -75,6 +75,7 @@ export type {
   Notification,
   CreateNotificationInput,
   NotificationListFilters,
+  NotificationListResult,
 } from './interfaces/INotificationRepository';
 
 export type {
