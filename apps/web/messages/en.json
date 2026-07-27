@@ -1881,6 +1881,7 @@
     "eventFallback": "New notification",
     "panelTitle": "Notifications",
     "unreadOnly": "Unread only",
+    "loadMore": "Load more",
     "emptyAll": "No new notifications",
     "emptyStory": "No story notifications",
     "emptySystem": "No system notifications",

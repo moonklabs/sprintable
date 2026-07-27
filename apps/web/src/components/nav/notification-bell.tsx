@@ -93,20 +93,34 @@ function timeAgo(dateStr: string, t: ReturnType<typeof useTranslations>): string
   return `${days}${t('daysAgo')}`;
 }
 
-async function fetchNotifications(projectId?: string): Promise<EventNotification[]> {
-  const params = new URLSearchParams({ limit: '30' });
+// story #2192 — 30건에서 조용히 잘리던 결함의 회귀가드. NOTIFICATIONS_PAGE_SIZE만큼 요청해
+// 정확히 그 개수가 돌아오면(BE는 limit을 초과해 주지 않는다 — over-fetch 없음) 다음 페이지가
+// 있을 수 있다고 본다(프록시가 계산한 meta.hasMore를 그대로 신뢰). offset을 넘기면 그 뒤
+// 페이지를 이어서 받는다.
+const NOTIFICATIONS_PAGE_SIZE = 30;
+
+interface NotificationsPage {
+  items: EventNotification[];
+  hasMore: boolean;
+}
+
+async function fetchNotifications(projectId?: string, offset = 0): Promise<NotificationsPage> {
+  const params = new URLSearchParams({ limit: String(NOTIFICATIONS_PAGE_SIZE), offset: String(offset) });
   if (projectId) params.set('project_id', projectId);
   // story #2160 — 401을 조용히 삼키던 폴링을 fetchWithAuth로 전환(세션만료 인지+재로그인 유도).
   const res = await fetchWithAuth(`/api/event-notifications?${params.toString()}`);
-  if (!res.ok) return [];
+  if (!res.ok) return { items: [], hasMore: false };
   const json = (await res.json()) as unknown;
-  if (Array.isArray(json)) return json as EventNotification[];
+  if (Array.isArray(json)) return { items: json as EventNotification[], hasMore: false }; // 옛 raw-array 응답 하위호환
   if (json && typeof json === 'object') {
     const obj = json as Record<string, unknown>;
-    if (Array.isArray(obj['data'])) return obj['data'] as EventNotification[];
-    if (obj['items'] && Array.isArray(obj['items'])) return obj['items'] as EventNotification[];
+    const items = Array.isArray(obj['data'])
+      ? obj['data'] as EventNotification[]
+      : (obj['items'] && Array.isArray(obj['items']) ? obj['items'] as EventNotification[] : []);
+    const meta = obj['meta'] as { hasMore?: boolean } | null | undefined;
+    return { items, hasMore: meta?.hasMore ?? false };
   }
-  return [];
+  return { items: [], hasMore: false };
 }
 
 async function fetchUnreadCount(projectId?: string): Promise<number> {
@@ -132,6 +146,10 @@ interface NotificationPanelProps {
   onMarkAllRead: () => void;
   onNavigate: (notification: EventNotification) => void;
   onClose: () => void;
+  // story #2192 AC3/AC4 — hasMore가 false면 버튼 자체를 안 그린다(음성대조).
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore: () => void;
 }
 
 function NotificationPanel({
@@ -139,6 +157,9 @@ function NotificationPanel({
   onMarkAllRead,
   onNavigate,
   onClose,
+  hasMore,
+  loadingMore,
+  onLoadMore,
 }: NotificationPanelProps) {
   const t = useTranslations('inbox');
   const tCommon = useTranslations('common');
@@ -233,6 +254,7 @@ function NotificationPanel({
             <span>{emptyMessage}</span>
           </div>
         ) : (
+          <>
           <ul>
             {filtered.map((n) => (
               <li key={n.id}>
@@ -279,6 +301,20 @@ function NotificationPanel({
               </li>
             ))}
           </ul>
+          {/* story #2192 AC3/AC4 — hasMore일 때만 렌더(음성대조: 30건 이하 계정은 버튼 자체가 없음). */}
+          {hasMore && (
+            <div className="flex justify-center py-3">
+              <button
+                type="button"
+                onClick={onLoadMore}
+                disabled={loadingMore}
+                className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                {loadingMore ? tCommon('loading') : t('loadMore')}
+              </button>
+            </div>
+          )}
+          </>
         )}
       </div>
     </div>
@@ -293,6 +329,12 @@ export function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0);
   // null = 로딩 중, array = 로드 완료
   const [notifications, setNotifications] = useState<EventNotification[] | null>(null);
+  // story #2192 — "더 보기" 상태. offsetRef는 API로 실제 가져온 건수만 누적한다(SSE로 앞에
+  // 끼워 넣은 실시간 알림은 offset 계산에서 제외 — notifications.length를 그대로 쓰면 SSE
+  // prepend가 "더 보기" 다음 페이지 경계를 밀려나게 만들어 중복/누락이 생긴다).
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const offsetRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // story #2061 — 모바일 풀스크린 오버레이(< lg)만 손수구현 모달이라 포커스 트랩 배선.
@@ -353,8 +395,11 @@ export function NotificationBell() {
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void fetchNotifications(projectId ?? undefined).then((data) => {
-      if (!cancelled) setNotifications(data);
+    void fetchNotifications(projectId ?? undefined, 0).then(({ items, hasMore: more }) => {
+      if (cancelled) return;
+      setNotifications(items);
+      setHasMore(more);
+      offsetRef.current = items.length;
     });
     // 브라우저 Notification 권한 — 최초 패널 오픈 시 요청
     if ('Notification' in window && Notification.permission === 'default') {
@@ -362,6 +407,21 @@ export function NotificationBell() {
     }
     return () => { cancelled = true; };
   }, [open, projectId]);
+
+  // story #2192 AC3 — "더 보기": offsetRef(SSE prepend와 무관하게 API로 실제 가져온 건수)부터
+  // 이어서 받아 뒤에 붙인다.
+  const handleLoadMore = useCallback(async () => {
+    if (!hasMore || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const { items, hasMore: more } = await fetchNotifications(projectId ?? undefined, offsetRef.current);
+      setNotifications((prev) => (prev ? [...prev, ...items] : items));
+      setHasMore(more);
+      offsetRef.current += items.length;
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [hasMore, loadingMore, projectId]);
 
   // 외부 클릭으로 패널 닫기 (데스크톱)
   useEffect(() => {
@@ -443,6 +503,9 @@ export function NotificationBell() {
             onMarkAllRead={handleMarkAllRead}
             onNavigate={handleNavigate}
             onClose={() => setOpen(false)}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={() => void handleLoadMore()}
           />
         </div>
       )}
@@ -462,6 +525,9 @@ export function NotificationBell() {
             onMarkAllRead={handleMarkAllRead}
             onNavigate={handleNavigate}
             onClose={() => setOpen(false)}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={() => void handleLoadMore()}
           />
         </div>
       )}

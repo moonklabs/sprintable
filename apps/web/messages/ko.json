@@ -1881,6 +1881,7 @@
     "eventFallback": "새 알림",
     "panelTitle": "알림",
     "unreadOnly": "안읽음만",
+    "loadMore": "더 보기",
     "emptyAll": "새 알림이 없습니다",
     "emptyStory": "스토리 알림이 없습니다",
     "emptySystem": "시스템 알림이 없습니다",
