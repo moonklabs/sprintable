@@ -12,10 +12,17 @@ import { useUnifiedSwitcher, type OrgSwitcherItem, type ProjectSwitcherItem } fr
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// story #2212 — routerPushMock/searchParamsValue를 테스트별로 갈아끼워 next-복귀·open-redirect
+// 가드를 검증한다(기존 테스트는 빈 URLSearchParams로 그대로 동작 — 회귀 없음).
+const { routerPushMock, searchParamsValueRef } = vi.hoisted(() => ({
+  routerPushMock: vi.fn(),
+  searchParamsValueRef: { current: '' as string },
+}));
+
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ push: routerPushMock, refresh: vi.fn() }),
   usePathname: () => '/moonklabs/sprintable/board',
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(searchParamsValueRef.current),
 }));
 
 let container: HTMLDivElement;
@@ -43,6 +50,8 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   result = null;
+  routerPushMock.mockClear();
+  searchParamsValueRef.current = '';
 });
 
 afterEach(async () => {
@@ -88,5 +97,35 @@ describe('useUnifiedSwitcher — currentOrgProjects (story #2093 후속)', () =>
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     expect(result?.currentOrgProjects).toEqual([]);
+  });
+});
+
+describe('useUnifiedSwitcher — switchProject의 ?next= 복귀 (story #2212)', () => {
+  it('?next=이 안전한 내부경로면 프로젝트 선택 직후 그리로 router.push한다(원 목적지로 복귀)', async () => {
+    searchParamsValueRef.current = 'next=%2Fboard';
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result?.switchProject('proj-sprintable'); });
+    expect(routerPushMock).toHaveBeenCalledWith('/board');
+    expect(routerPushMock).toHaveBeenCalledTimes(1); // switchedPath 계산 등 다른 push 없이 next로 한 번만
+  });
+
+  it.each([
+    ['//evil.com', 'protocol-relative'],
+    ['https://evil.com', '절대 URL'],
+    ['/\\evil.com', '백슬래시 트릭'],
+  ])('?next=%s(%s)는 신뢰하지 않고 무시한다(open-redirect 방지, story #2212)', async (malicious) => {
+    searchParamsValueRef.current = `next=${encodeURIComponent(malicious)}`;
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result?.switchProject('proj-sprintable'); });
+    // next를 안 믿으면 기존 경로(pathname 유지 + ?p= 갱신)로 떨어진다 — 외부 도메인으로 직접
+    // 이동(router.push의 목적지 자체가 malicious)하는 일은 절대 없어야 한다. malicious 값이
+    // 그 fallback URL의 ?next= 쿼리 "값"으로 그대로 남는 것 자체는 안전(어디로도 이동 안 시킴).
+    expect(routerPushMock).not.toHaveBeenCalledWith(malicious);
+    for (const call of routerPushMock.mock.calls) {
+      const dest = String(call[0]);
+      expect(dest.startsWith('/moonklabs/sprintable/board')).toBe(true); // 목적지 자체는 항상 내부 경로
+    }
   });
 });

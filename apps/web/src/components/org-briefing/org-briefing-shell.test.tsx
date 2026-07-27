@@ -17,6 +17,12 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
 }));
 
+// story #2212 — OrgBriefingShell이 이제 useSearchParams(?next= 배너용)를 쓴다. 이 테스트는
+// Next 라우터 컨텍스트 밖(createRoot 직접 렌더)이라 목이 없으면 null이 되어 크래시한다.
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;

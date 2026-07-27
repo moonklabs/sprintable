@@ -1,6 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { useSearchParams } from 'next/navigation';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { NowFace } from './now-face';
 import { LoopFace } from './loop-face';
@@ -39,9 +40,19 @@ function FaceSkeletonPanel({ title, subject }: { title: string; subject: string 
 export function OrgBriefingShell() {
   const t = useTranslations('orgBriefing');
   const { projectId, userName } = useDashboardContext();
+  // story #2212 — proxy.ts가 "프로젝트 미확定" 404 대신 여기로 next=<원 목적지>를 들고 보낸
+  // 경우, 위 프로젝트 스위처(사이드바/탑바 칩)로 프로젝트를 고르라는 안내를 보여준다. 실제
+  // 복귀는 use-unified-switcher.ts의 switchProject/switchOrgAndProject가 이 next를 읽어 처리.
+  const searchParams = useSearchParams();
+  const nextTarget = searchParams.get('next');
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 lg:p-6">
+      {nextTarget && (
+        <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-foreground" role="status">
+          {t('projectRequiredBanner')}
+        </div>
+      )}
       <div>
         <h1 className="text-lg font-semibold tracking-tight text-foreground">
           {userName ? t('greeting', { name: userName }) : t('title')}
