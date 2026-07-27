@@ -46,6 +46,10 @@ async def _client():
     session = AsyncMock()
     result = MagicMock()
     result.scalar_one_or_none.return_value = _mock_story()
+    # #2215: agent_id 검증이 filter_org_member_ids(TeamMember ∪ OrgMember)로 바뀌어
+    # session.execute(...).scalars().all() 경로도 탄다 — 기존 단일 result 캐스케이드가
+    # 그 축도 만족하도록 AGENT_ID를 포함시킨다(story 조회용 scalar_one_or_none과 공존).
+    result.scalars.return_value.all.return_value = [AGENT_ID]
     session.execute = AsyncMock(return_value=result)
 
     async def override_db():
