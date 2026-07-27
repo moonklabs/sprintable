@@ -12,6 +12,7 @@ class CheckNotificationsInput(SprintableInput):
     unread: bool | None = None
     type: str | None = None
     limit: int | None = None
+    before: str | None = None  # #2195: 이전 호출의 meta.next_cursor 값을 그대로 넘기면 다음 페이지
 
 
 class MarkNotificationReadInput(SprintableInput):
@@ -24,7 +25,7 @@ class MarkAllNotificationsReadInput(SprintableInput):
 
 
 async def check_notifications(args: CheckNotificationsInput) -> list[TextContent]:
-    """알림 목록 조회."""
+    """알림 목록 조회. 더 있으면(has_more) 다음 페이지 안내가 별도 텍스트 블록으로 붙는다."""
     params: dict = {}
     if args.unread:
         params["unread"] = "true"
@@ -32,12 +33,31 @@ async def check_notifications(args: CheckNotificationsInput) -> list[TextContent
         params["type"] = args.type
     if args.limit:
         params["limit"] = str(args.limit)
+    if args.before:
+        params["before"] = args.before
     try:
         result = await client.get("/api/v2/notifications", params=params)
-        # story #2195: BE 응답이 bare array → {data, meta}(#2231 정본 규약 A)로 바뀜.
-        # 이 MCP 툴의 계약(호출 에이전트가 보는 모양)은 유지한다 — data만 꺼내 돌려준다.
-        items = result.get("data", result) if isinstance(result, dict) else result
-        return ok(items)
+        # story #2195 후속(오르테가군 지적): BE 응답이 bare array → {data,meta}(#2231 규약 A)로
+        # 바뀐 뒤 그냥 배열만 언랩해 돌려주면, 사람 화면에서 고친 "목록이 조용히 끝난 척한다"
+        # 병을 에이전트 표면에 그대로 남기게 된다. 1차 블록(배열)은 기존 툴 계약대로 유지하되,
+        # has_more일 때 다음 페이지 안내를 2차 텍스트 블록으로 덧붙여 에이전트가 "전량을 못
+        # 봤다"를 알고 before 커서로 이어 받을 수 있게 한다.
+        if isinstance(result, dict) and "data" in result:
+            items = result["data"]
+            meta = result.get("meta") or {}
+        else:
+            items = result
+            meta = {}
+        blocks = ok(items)
+        if meta.get("has_more"):
+            blocks.append(TextContent(
+                type="text",
+                text=(
+                    f"※ 더 있음 — 이 응답은 {len(items)}건까지만 포함(전량 아님). "
+                    f'다음 페이지: check_notifications를 before="{meta.get("next_cursor")}"로 다시 호출.'
+                ),
+            ))
+        return blocks
     except Exception as exc:
         return err(str(exc))
 
