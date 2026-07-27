@@ -155,3 +155,34 @@ async def test_no_cursor_first_page_unaffected_when_under_limit_realdb():
         assert page["meta"]["next_cursor"] is None
     finally:
         await eng.dispose()
+
+
+class _FakeQuerySentinel:
+    """#2540 CI 재현(오르테가군, 2026-07-27) — FastAPI Query(...) 객체처럼 str이 아니면서
+    truthy인 것을 흉내낸다. list_notifications를 FastAPI DI 없이 직접 호출하며 before= 를
+    누락하면 실제로 이런 모양의 객체(파이썬 함수 기본값)가 들어온다."""
+    default = None
+
+
+@pytest.mark.anyio
+async def test_non_string_truthy_before_treated_as_no_cursor_not_crash_realdb():
+    from app.routers.notifications import list_notifications
+    from app.repositories.notification import NotificationRepository
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s, n=3)
+
+        fake_sentinel = _FakeQuerySentinel()
+        assert bool(fake_sentinel) is True  # 전제 확인 — truthy임
+
+        async with Session() as s:
+            repo = NotificationRepository(s, ORG)
+            page = await list_notifications(
+                unread=None, is_read=None, limit=50, before=fake_sentinel,
+                db=s, auth=_auth(), repo=repo,
+            )
+        assert [n.id for n in page["data"]] == seeded, "커서 없음으로 취급돼 전체가 나와야 한다(크래시 아님)"
+    finally:
+        await eng.dispose()

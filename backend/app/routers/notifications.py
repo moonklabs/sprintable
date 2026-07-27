@@ -95,7 +95,10 @@ async def list_notifications(
     user_id = await _resolve_notification_user_id(auth, db)
     resolved_is_read = (not unread) if unread is not None else is_read
     before_dt: datetime | None = None
-    if before:
+    # #2540 CI 교훈(오르테가군, 2026-07-27): "값이 있는지"만 보면 안 되고 "그 값이
+    # 문자열인지"까지 봐야 한다 — 이 함수를 FastAPI DI 없이 직접 호출하며 before= 를
+    # 누락하면 파이썬 기본값인 Query(...) 센티넬 객체(truthy)가 그대로 들어온다.
+    if isinstance(before, str) and before:
         try:
             before_dt = datetime.fromisoformat(before)
         except ValueError:
