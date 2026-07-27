@@ -81,12 +81,16 @@ async def test_doc_summary_response_exposes_created_at_distinct_from_updated_at(
             from app.routers.docs import list_docs
 
             repo = DocRepository(s, seeded["org_id"])
+            # story #2191: cursor 는 라우터에서 Query(...)로 선언돼 있어, 직접 함수호출 시
+            # 명시로 안 넘기면 FastAPI 가 주입한 값이 아니라 Query 객체 그 자체가 넘어가
+            # parse_doc_cursor 가 그걸 문자열로 착각해 터진다 — 반드시 명시로 넘긴다.
             result = await list_docs(
                 project_id=seeded["project_id"], parent_id=None, doc_type=None,
-                tags=None, slug=None, q=None, limit=500, repo=repo,
+                tags=None, slug=None, q=None, limit=500, cursor=None, repo=repo,
             )
-        assert len(result) == 1
-        summary = result[0]
+        # story #2191: 응답이 bare list → {data,meta}(#2231 규약 A)로 바뀜.
+        assert len(result["data"]) == 1
+        summary = result["data"][0]
         assert hasattr(summary, "created_at"), "DocSummaryResponse에 created_at 필드가 없음"
         assert summary.created_at is not None
         assert summary.created_at != summary.updated_at, (
