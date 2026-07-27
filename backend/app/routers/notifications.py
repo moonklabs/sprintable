@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -74,23 +75,39 @@ def _inbox_repo(
     return InboxRepository(session, org_id)
 
 
-@router.get("/notifications", response_model=list[NotificationResponse])
+@router.get("/notifications")
 async def list_notifications(
     unread: bool | None = Query(default=None, description="True=읽지 않은 것만, False=읽은 것만"),
     is_read: bool | None = Query(default=None, description="직접 is_read 지정 (unread 우선)"),
     limit: int = Query(default=200, le=200),
+    before: str | None = Query(default=None, description="ISO datetime cursor — 이 시각 이전 항목(내림차순 다음 페이지)"),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     repo: NotificationRepository = Depends(_notif_repo),
-) -> list[NotificationResponse]:
+) -> dict:
     """GET /api/v2/notifications — auth context에서 user_id 자동 파생.
 
+    story #2195: #2231 정본 규약 A(limit+1 오버페치 + has_more/next_cursor body meta) 적용.
+    인박스 페이지 기본 탭이 FE 고정 limit=50·커서 없음이라 51번째부터 조용히 잘렸었다
+    (참조 구현: conversations.py::list_messages — 동일 오버페치+cursor 패턴).
     MCP check_notifications 호환: unread=true → is_read=False 변환.
     """
     user_id = await _resolve_notification_user_id(auth, db)
     resolved_is_read = (not unread) if unread is not None else is_read
-    items = await repo.list(user_id=user_id, is_read=resolved_is_read, limit=limit)
-    return [NotificationResponse.model_validate(n) for n in items]
+    before_dt: datetime | None = None
+    if before:
+        try:
+            before_dt = datetime.fromisoformat(before)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor format")
+    rows = await repo.list(user_id=user_id, is_read=resolved_is_read, limit=limit + 1, before=before_dt)
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    next_cursor = page[-1].created_at.isoformat() if has_more and page else None
+    return {
+        "data": [NotificationResponse.model_validate(n) for n in page],
+        "meta": {"has_more": has_more, "next_cursor": next_cursor},
+    }
 
 
 @router.get("/notifications/count")

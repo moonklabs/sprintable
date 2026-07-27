@@ -176,7 +176,7 @@ async def test_notifications_list_via_conftest(test_client, mock_session):
 
     resp = await test_client.get(f"/api/v2/notifications?user_id={member_id}")
     assert resp.status_code == 200
-    assert resp.json() == []
+    assert resp.json()["data"] == []
 
 
 @pytest.mark.anyio
