@@ -6,7 +6,10 @@ build-backend = "hatchling.build"
 # OB-PUBLISH(f5e1742d): distribution name = "sprintable" (선생님 PyPI project 등록값·uvx sprintable
 # 한 줄 정합). 내부 모듈명은 sprintable_mcp 그대로(dist명≠모듈명 — hatch sources remap 아래 유지).
 name = "sprintable"
-version = "0.1.0"
+# 0.1.1 (2026-07-27): story #2166 픽스가 PyPI 에 안 나가 사용자는 계속 옛 에러를 보고 있었다.
+# main 에서 릴리즈(sprintable-mcp-v0.1.1 · PyPI 05:55:20)했으므로 develop 도 같은 값으로 맞춘다
+# — 브랜치별로 버전이 갈리면 다음 사람이 "지금 나간 게 무엇인지"를 못 읽는다.
+version = "0.1.1"
 description = "Sprintable MCP server — BYO agent toolset over the Sprintable API (stdio). No repo clone required."
 readme = "README.md"
 requires-python = ">=3.11"
