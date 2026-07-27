@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id, require_admin
 from app.dependencies.database import get_db
 from app.models.agent_routing_rule import AgentRoutingRule
+from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.models.workflow_execution_log import WorkflowExecutionLog
 
@@ -136,7 +137,24 @@ async def list_executions(
                 or_(TeamMember.user_id == user_uuid, TeamMember.id == user_uuid),
             ).limit(1)
         )
-        if not member_check.scalar_one_or_none():
+        is_self = member_check.scalar_one_or_none() is not None
+        if not is_self:
+            # #2216: team_members뷰(members ⋈ project_access INNER JOIN)는 grant-only/
+            # owner-floor 휴먼(명시 project_access grant를 org_member_id 경유로만 가진
+            # non-admin/owner 멤버 포함)을 이 뷰에 행이 없다는 이유로 못 찾는다 — 자기
+            # 자신의 실행 이력을 조회하려 해도 "본인 아님"으로 오판됐다. org_members
+            # SSOT(filter_org_member_ids와 동일 축)로 폴백 — member_id가 caller 본인의
+            # org_member.id이고 그 user_id가 caller와 일치하는지 확認.
+            om_check = await db.execute(
+                select(OrgMember.id).where(
+                    OrgMember.id == member_id,
+                    OrgMember.org_id == org_id,
+                    OrgMember.user_id == user_uuid,
+                    OrgMember.deleted_at.is_(None),
+                ).limit(1)
+            )
+            is_self = om_check.scalar_one_or_none() is not None
+        if not is_self:
             raise HTTPException(status_code=403, detail="Can only query own executions")
 
     base = (

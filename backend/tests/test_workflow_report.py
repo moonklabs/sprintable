@@ -100,6 +100,10 @@ async def test_kickoff_to_dev():
         story = _mock_story(status="ready-for-dev")
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = story
+        # #2215: agent_id 검증이 filter_org_member_ids(TeamMember ∪ OrgMember)로 바뀌어
+        # session.execute(...).scalars().all() 경로도 탄다 — 기존 단일 mock_result 캐스케이드가
+        # 그 축도 만족하도록 AGENT_ID를 포함시킨다(story 조회용 scalar_one_or_none과 공존).
+        mock_result.scalars.return_value.all.return_value = [AGENT_ID]
         session.execute = AsyncMock(return_value=mock_result)
 
         with patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock) as mock_update:
@@ -133,6 +137,10 @@ async def test_s20_line_active_blocks_non_merge_transition():
         story = _mock_story(status="ready-for-dev")
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = story
+        # #2215: agent_id 검증이 filter_org_member_ids(TeamMember ∪ OrgMember)로 바뀌어
+        # session.execute(...).scalars().all() 경로도 탄다 — 기존 단일 mock_result 캐스케이드가
+        # 그 축도 만족하도록 AGENT_ID를 포함시킨다(story 조회용 scalar_one_or_none과 공존).
+        mock_result.scalars.return_value.all.return_value = [AGENT_ID]
         session.execute = AsyncMock(return_value=mock_result)
         blocked = LineDecision(mode="blocked_by_policy", status_to_apply=None,
                                blocking_reason="workflow line blocks", http_status=409)
@@ -155,6 +163,10 @@ async def test_dev_to_review():
         story = _mock_story(status="in-progress")
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = story
+        # #2215: agent_id 검증이 filter_org_member_ids(TeamMember ∪ OrgMember)로 바뀌어
+        # session.execute(...).scalars().all() 경로도 탄다 — 기존 단일 mock_result 캐스케이드가
+        # 그 축도 만족하도록 AGENT_ID를 포함시킨다(story 조회용 scalar_one_or_none과 공존).
+        mock_result.scalars.return_value.all.return_value = [AGENT_ID]
         session.execute = AsyncMock(return_value=mock_result)
 
         with patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock) as mock_update:
@@ -187,6 +199,10 @@ async def test_merge_to_done():
         story = _mock_story(status="in-review")
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = story
+        # #2215: agent_id 검증이 filter_org_member_ids(TeamMember ∪ OrgMember)로 바뀌어
+        # session.execute(...).scalars().all() 경로도 탄다 — 기존 단일 mock_result 캐스케이드가
+        # 그 축도 만족하도록 AGENT_ID를 포함시킨다(story 조회용 scalar_one_or_none과 공존).
+        mock_result.scalars.return_value.all.return_value = [AGENT_ID]
         session.execute = AsyncMock(return_value=mock_result)
 
         auto = MergeGateDecision(
@@ -223,6 +239,10 @@ async def test_context_field_accepted():
         story = _mock_story()
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = story
+        # #2215: agent_id 검증이 filter_org_member_ids(TeamMember ∪ OrgMember)로 바뀌어
+        # session.execute(...).scalars().all() 경로도 탄다 — 기존 단일 mock_result 캐스케이드가
+        # 그 축도 만족하도록 AGENT_ID를 포함시킨다(story 조회용 scalar_one_or_none과 공존).
+        mock_result.scalars.return_value.all.return_value = [AGENT_ID]
         session.execute = AsyncMock(return_value=mock_result)
 
         with patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock, return_value=story):
@@ -255,6 +275,10 @@ async def test_all_valid_stages():
             story = _mock_story()
             mock_result = MagicMock()
             mock_result.scalar_one_or_none.return_value = story
+            # #2215: agent_id 검증이 filter_org_member_ids(TeamMember ∪ OrgMember)로 바뀌어
+            # session.execute(...).scalars().all() 경로도 탄다 — 기존 단일 mock_result 캐스케이드가
+            # 그 축도 만족하도록 AGENT_ID를 포함시킨다(story 조회용 scalar_one_or_none과 공존).
+            mock_result.scalars.return_value.all.return_value = [AGENT_ID]
             session.execute = AsyncMock(return_value=mock_result)
 
             with patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock, return_value=story), \

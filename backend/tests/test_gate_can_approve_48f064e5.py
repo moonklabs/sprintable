@@ -205,10 +205,21 @@ async def test_generic_endpoint_rejects_doc_approval_defense_in_depth():
 # ── 비-doc 게이트(merge 등)는 새 authz 무적용(기존 경로 무변경) ──
 @pytest.mark.anyio
 async def test_non_doc_gate_skips_doc_authz():
-    merge_gate = SimpleNamespace(gate_type="merge_approval", neutral_facts={}, work_item_id=uuid.uuid4())
-    # doc-gate 분기 미진입 → has_project_access 미호출·doc 미로드. transition 정상.
-    result, transition = await _call(
-        _human(uuid.uuid4()), execute_results=[_result(merge_gate)], has_access=None
+    # #2198: non-doc 분기가 이제 work_item_type/work_item_id 로 project 인가(rule B)를 강제하므로
+    # 명시(누락 시 AttributeError) — 이 테스트의 관심사는 "doc authz 분기를 안 타는가"이지 rule B
+    # 자체의 project-role 판정이 아니므로 _non_doc_gate_approvable 을 직접 patch 해 True 로 고정
+    # (그 판정 자체는 test_1974_gate_assigned_to_me.py/test_2198_*_realdb.py 가 커버).
+    merge_gate = SimpleNamespace(
+        gate_type="merge_approval", neutral_facts={}, work_item_id=uuid.uuid4(),
+        work_item_type="story",
     )
+    with patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)):
+        # doc-gate 분기 미진입 → has_project_access 미호출·doc 미로드. transition 정상.
+        # execute_results 2번째 = resolve_work_item_project_id(work_item_type="story")의 조회.
+        result, transition = await _call(
+            _human(uuid.uuid4()),
+            execute_results=[_result(merge_gate), _result(uuid.uuid4())],
+            has_access=None,
+        )
     assert result == "OK"
     transition.assert_awaited_once()

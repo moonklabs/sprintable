@@ -10,6 +10,7 @@ from app.models.project import Project
 from app.models.team import TeamMember
 from app.schemas.current_project import CurrentProjectResponse, SetCurrentProject
 from app.services.member_resolver import assert_caller_is_member
+from app.services.project_auth import has_project_access
 
 router = APIRouter(prefix="/api/v2/current-project", tags=["current-project", "Organization"])
 
@@ -56,17 +57,17 @@ async def set_current_project(
 ) -> CurrentProjectResponse:
     """S20(산티아고 재확인 대상 — S19 Phase C서 no-op으로 skip 판단했던 그 오라클을 authz-coverage
     스캐너가 재발견): member_id가 caller 본인인지 검증 없이 임의 member의 project 전환 결과
-    (project_name/org_id)를 열람할 수 있었다. self-scope 추가."""
+    (project_name/org_id)를 열람할 수 있었다. self-scope 추가.
+
+    #2216: 프로젝트 접근권 체크를 TeamMember(=team_members뷰, members ⋈ project_access
+    INNER JOIN) 단독 조회로 했더니 owner-floor 휴먼(명시 grant 없이 has_project_access의
+    admin_branch로만 접근하는 org owner/admin)이 자기 프로젝트를 "고르는" 이 엔드포인트에서
+    영구히 403을 맞았다 — #2212가 "프로젝트 못 정하면 org-briefing으로 보내 고르게 한다"고
+    고친 그 「고르는」 동작 자체가 벽이었다. has_project_access(project_auth.py, admin_branch
+    포함 4-branch SSOT)로 교체 — 새 규칙 발명 0, project_access.py/analytics.py 등 기존
+    project-scope 가드와 동일 판정."""
     await assert_caller_is_member(member_id, auth, session, org_id)
-    tm_r = await session.execute(
-        select(TeamMember.org_id).where(
-            TeamMember.id == member_id,
-            TeamMember.project_id == body.project_id,
-            TeamMember.is_active.is_(True),
-        )
-    )
-    org_id = tm_r.scalar_one_or_none()
-    if org_id is None:
+    if not await has_project_access(session, uuid.UUID(auth.user_id), body.project_id, org_id):
         raise HTTPException(status_code=403, detail="Project membership not found")
 
     proj_r = await session.execute(

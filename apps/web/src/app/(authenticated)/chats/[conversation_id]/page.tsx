@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { Bell, BellOff, ChevronLeft, UserPlus, Pencil } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChatView } from '@/components/chat/chat-view';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
+import { EmptyState } from '@/components/ui/empty-state';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 
@@ -31,6 +33,14 @@ interface ConversationMeta {
   lastReadAt: string | null;
 }
 
+// story #2168 PR-②(오르테가 지적) — `?from=`은 사용자가 URL을 통해 조작 가능한 값이다.
+// 형식이 project id(UUID)가 아니면 그대로 뒤로가기 URL에 실어 보내지 않는다(임의 값이
+// URL을 타고 계속 돌지 않게) — docs.ts의 기존 UUID 판별 정규식과 동형.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidProjectId(value: string | null): value is string {
+  return !!value && UUID_RE.test(value);
+}
+
 function formatHeaderTitle(meta: ConversationMeta, currentMemberId: string): string {
   if (meta.title) return meta.title;
   const others = meta.participants.filter((p) => p.member_id !== currentMemberId);
@@ -51,11 +61,22 @@ export default function ConversationPage() {
   // ChatView has key={conversation_id} so this is read fresh per conversation.
   const searchParams = useSearchParams();
   const scrollToMessageId = searchParams.get('messageId') ?? undefined;
+  const t = useTranslations('chats');
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const [meta, setMeta] = useState<ConversationMeta | null>(null);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
+
+  // story #2168 PR-② — chat-list-view.tsx의 "다른 프로젝트" 항목 클릭이 실어 보내는 복귀 정보.
+  // `from` = 원래 있던 프로젝트(뒤로가기 시 복귀 대상) · `pn` = 이 대화가 속한 프로젝트명(권한
+  // 회수 등으로 조회 자체가 403이면 그 응답에서 이름을 못 얻으므로 클릭 시점 값을 폴백으로 씀).
+  const fromProjectIdRaw = searchParams.get('from');
+  const fromProjectId = isValidProjectId(fromProjectIdRaw) ? fromProjectIdRaw : null;
+  const conversationProjectName = searchParams.get('pn');
+  // ⛔실패 자리(스펙 확定) — 능동으로 눌러 들어왔는데(다른 프로젝트 섹션 경유) 그 사이 권한이
+  // 회수돼 403이면, 조용히 빠지는 게 아니라 그때만 안내한다(중립 톤·다음 발 포함·빨강 금지).
+  const [blocked, setBlocked] = useState(false);
 
   // story #2009: 목록 통호출(`/api/conversations?project_id=`, default limit 30)+client
   // `.find()` 우회를 폐기 — 대화 1건 메타 보려고 매번 최대30건치 쿼리(latest_message N+1
@@ -65,6 +86,7 @@ export default function ConversationPage() {
     if (!projectId) return;
     try {
       const res = await fetch(`/api/conversations/${conversation_id}`);
+      if (res.status === 403) { setBlocked(true); return; }
       if (!res.ok) return;
       const conv = await res.json() as {
         title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean; last_read_at?: string | null;
@@ -178,7 +200,11 @@ export default function ConversationPage() {
               // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를
               // 쌓지 않아 브라우저 BACK 재진입 트랩을 구조적으로 없앤다(§3.2). back()류 직접
               // 호출은 하지 않는다([[feedback-history-back-nextjs]]).
-              onClick={() => router.replace('/chats')}
+              // story #2168 PR-② AC④ — "다른 프로젝트" 경유로 왔으면(`from` 존재) 원래
+              // 프로젝트로 `?p=`를 실어 복귀시킨다(R2 SSOT가 그대로 헤더·스위처를 되돌린다 —
+              // "전환이 일방통행이 아니다"). 새 되돌리기 UI를 만들지 않고 기존 뒤로가기 버튼이
+              // 그 역할을 겸한다.
+              onClick={() => router.replace(fromProjectId ? `/chats?p=${fromProjectId}` : '/chats')}
               className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -241,17 +267,31 @@ export default function ConversationPage() {
         }
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-        <ChatView
-          key={conversation_id}
-          threadId={conversation_id}
-          currentTeamMemberId={currentTeamMemberId}
-          projectId={projectId}
-          apiPrefix="/api/conversations"
-          commandTargets={commandTargets}
-          presenceById={presenceById}
-          scrollToMessageId={scrollToMessageId}
-          initialLastReadAt={meta ? meta.lastReadAt : undefined}
-        />
+        {blocked ? (
+          // story #2168 PR-② — 능동 클릭 후 접근 불가(권한 회수 등, BE 403 — 인가는 이미
+          // 쿼리 자체가 막는다·여기선 신규 인가 로직 0). ⛔중립 톤(destructive/빨강 금지) —
+          // 사용자가 실패한 게 아니라 접근 범위 밖인 상태(#2198 403 문구와 같은 규율).
+          // 관리자 "이름"은 이번 스코프 밖(그 자체로 새 인가 표면) — "요청하세요"까지만.
+          <div className="flex h-full items-center justify-center p-4">
+            <EmptyState
+              title={t('conversationBlockedTitle')}
+              description={`${t('conversationBlockedBody', { project: conversationProjectName ?? t('conversationBlockedProjectFallback') })} ${t('conversationBlockedNext', { project: conversationProjectName ?? t('conversationBlockedProjectFallback') })}`}
+              className="w-full max-w-sm"
+            />
+          </div>
+        ) : (
+          <ChatView
+            key={conversation_id}
+            threadId={conversation_id}
+            currentTeamMemberId={currentTeamMemberId}
+            projectId={projectId}
+            apiPrefix="/api/conversations"
+            commandTargets={commandTargets}
+            presenceById={presenceById}
+            scrollToMessageId={scrollToMessageId}
+            initialLastReadAt={meta ? meta.lastReadAt : undefined}
+          />
+        )}
       </div>
 
       {showAddParticipant && meta && projectId && (

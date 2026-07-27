@@ -169,7 +169,7 @@ def _org_level_gate(*, gate_id=None, status="pending"):
 
 async def _call_list_gates(
     gates, *, resolved=None, resolve_raises=False, has_access=True, project_role=None,
-    org_admin=False, story_rows=None,
+    org_admin=False, story_rows=None, assigned_to_me=True,
 ):
     org = uuid.uuid4()
     gates_result = MagicMock()
@@ -204,7 +204,7 @@ async def _call_list_gates(
          patch.object(gates_mod, "get_project_role", AsyncMock(return_value=project_role)), \
          patch.object(gates_mod, "is_org_owner_or_admin", AsyncMock(return_value=org_admin)):
         return await gates_mod.list_gates(
-            work_item_id=None, work_item_type=None, status=None, assigned_to_me=True,
+            work_item_id=None, work_item_type=None, status=None, assigned_to_me=assigned_to_me,
             session=session, org_id=org, auth=auth,
         )
 
@@ -330,32 +330,23 @@ async def test_assigned_to_me_mixed_gates_only_eligible_returned():
 
 
 @pytest.mark.anyio
-async def test_default_assigned_to_me_false_returns_all_no_extra_queries():
-    """assigned_to_me 미지정(기본 False) — resolve_member 는 doc_approval 게이트가 있을 때만 호출되고
-    (기존 89484c8c 동작 그대로), non-doc 게이트만 있으면 전혀 호출 안 됨(회귀 0)."""
+async def test_default_assigned_to_me_false_returns_all_unfiltered_but_can_approve_still_enriched():
+    """story #2198(까심 QA 적출·오르테가 확定): assigned_to_me 미지정(기본 False)이어도 non-doc
+    게이트의 can_approve 는 이제 계산된다(전에는 doc_approval 게이트가 있을 때만 resolve_member
+    를 호출했고 non-doc 게이트는 can_approve 가 Pydantic 기본값 False 로 방치됐다 — 자격자에게
+    버튼이 안 뜨는 원 결함). assigned_to_me=False 는 여전히 **필터링을 안 한다**(목록이 그대로
+    전부 나옴) — can_approve 필드 값만 정확해진다. (이 파일의 원래 이름 "no_extra_queries" 는
+    이제 거짓 전제다 — resolve_member 호출은 의도된 변화다.)"""
     from app.routers import gates as gates_mod
 
     g = _story_gate(gate_type="merge")
-    org = uuid.uuid4()
-    gates_result = MagicMock()
-    gates_result.scalars.return_value.all.return_value = [g]
-    session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[gates_result])
-    auth = SimpleNamespace(user_id=str(uuid.uuid4()))
-    rm = AsyncMock(return_value=_human(uuid.uuid4()))
-    with patch.object(gates_mod.GateResponse, "model_validate", _resp), \
-         patch.object(gates_mod, "resolve_member", rm), \
-         patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
-        # ⚠️직접 함수 호출(ASGI 미경유)이라 FastAPI Query(default=False) sentinel 이 아닌 실 bool 을
-        # 명시 전달해야 한다(work_item_id/work_item_type/status 등 기존 파라미터도 이 파일 전역에서
-        # 항상 명시 전달하는 동일 관례 — 실제 HTTP 경로에서의 기본값 회귀는 realdb 테스트가 커버).
-        out = await gates_mod.list_gates(
-            work_item_id=None, work_item_type=None, status=None, assigned_to_me=False,
-            session=session, org_id=org, auth=auth,
-        )
+    out = await _call_list_gates(
+        [g], project_role="owner", assigned_to_me=False,
+        story_rows=[(g.work_item_id, uuid.uuid4())],
+    )
     assert len(out) == 1
     assert out[0].id == g.id
-    rm.assert_not_awaited()  # 비-doc 게이트만 + assigned_to_me=False → resolve_member 미호출
+    assert out[0].can_approve is True  # project owner → 승인 자격 있음이 목록에도 반영
 
 
 @pytest.mark.anyio
