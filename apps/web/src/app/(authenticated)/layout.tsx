@@ -4,6 +4,7 @@ import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { DashboardShell } from '../dashboard/dashboard-shell';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
+import { CrossProjectToastProvider } from '@/components/chat/cross-project-toast-provider';
 
 interface MemberContext {
   id: string;
@@ -128,7 +129,9 @@ export default async function AuthenticatedLayout({
       pathOrgId={pathOrgId}
       pathProjectId={pathProjectId}
     >
-      <StorageCapacityToastProvider>{children}</StorageCapacityToastProvider>
+      <StorageCapacityToastProvider>
+        <CrossProjectToastProvider>{children}</CrossProjectToastProvider>
+      </StorageCapacityToastProvider>
     </DashboardShell>
   );
 }

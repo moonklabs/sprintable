@@ -113,4 +113,17 @@ describe('ChatListView — 다른 프로젝트 섹션 (story #2168 PR-②)', () 
     expect(params.get('from')).toBe('proj-current');
     expect(params.get('pn')).toBe('sprintable-content');
   });
+
+  // 라이브 실측으로 발견(2026-07-27) — 클릭 직후 router.push가 이 컴포넌트 자체를 언마운트시켜,
+  // 로컬 useToast()로 띄운 토스트가 화면에 페인트될 새도 없이 사라졌었다. queuePendingToast로
+  // sessionStorage에 넘겨 네비게이션을 넘어 살아남게 한다(cross-project-toast-provider.tsx가 소비).
+  it('클릭 시 로컬 토스트가 아니라 sessionStorage 경유 queuePendingToast로 메시지를 넘긴다(네비게이션 생존)', async () => {
+    stubFetch([OUTSIDE_CONV]);
+    sessionStorage.clear();
+    await mount();
+    const row = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('댄군과의 대화'));
+    await act(async () => { row!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(sessionStorage.getItem('sprintable_pending_toast')).toBe('sprintable-content 프로젝트로 이동');
+  });
 });

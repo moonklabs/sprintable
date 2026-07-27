@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
 import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { useToast, ToastContainer } from '@/components/ui/toast';
+import { queuePendingToast } from './cross-project-toast-provider';
 
 interface Participant {
   member_id: string;
@@ -279,11 +279,8 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const showModal = open !== undefined ? open : internalShowModal;
   const setShowModal = onOpenChange ?? setInternalShowModal;
 
-  // story #2168 PR-② — 프로젝트 밖 최근 대화(최대 5개). 토스트는 이 목록 화면에서만 발생하는
-  // 신호라 여기서 자체 useToast 인스턴스를 든다(전역 토스트 provider 없음 — 이 컴포넌트가
-  // ToastContainer도 직접 렌더).
+  // story #2168 PR-② — 프로젝트 밖 최근 대화(최대 5개).
   const [outsideProjectConvs, setOutsideProjectConvs] = useState<OutsideProjectConversation[]>([]);
-  const { toasts, addToast, dismissToast } = useToast();
 
   const convsRef = useRef(conversations);
   useEffect(() => { convsRef.current = conversations; }, [conversations]);
@@ -344,13 +341,18 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 명시 project_id를 이미 실은 URL이라 R2 우선순위상 accessible 검증만 통과하면 채택된다).
   // `from`(원 프로젝트)은 대화 상세 페이지의 기존 "← 채팅" 뒤로가기 버튼이 그대로 소비해
   // "고르면 여기로 돌아온다"를 완성한다(새 뒤로가기 UI를 만들지 않는다).
+  //
+  // ⚠️토스트는 queuePendingToast로 넘긴다(직접 addToast 아님) — 라이브 실측으로 발견: 이 클릭
+  // 직후 곧장 router.push하면 이 컴포넌트(ChatListView) 자체가 언마운트되며 로컬 토스트도 화면에
+  // 페인트될 새 없이 함께 사라졌다. cross-project-toast-provider.tsx(layout 레벨 상주)가 도착한
+  // 페이지에서 대신 띄운다.
   const handleOutsideProjectClick = useCallback((conv: OutsideProjectConversation) => {
-    addToast({ title: t('movedToProjectToast', { name: conv.project_name }), type: 'info' });
+    queuePendingToast(t('movedToProjectToast', { name: conv.project_name }));
     // `pn`(대상 프로젝트명)은 실패 화면(권한 회수 등)에서 dashboardContext.projectMemberships가
     // 이미 그 프로젝트를 못 가진 상태일 수 있어(바로 그게 실패 사유) 클릭 시점 값을 실어 보낸다.
     const params = new URLSearchParams({ p: conv.project_id, from: projectId, pn: conv.project_name });
     router.push(`/chats/${conv.id}?${params.toString()}`);
-  }, [addToast, t, router, projectId]);
+  }, [t, router, projectId]);
 
   useEffect(() => { void fetchConversations(0, false); }, [fetchConversations]);
 
@@ -524,7 +526,6 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           onCreated={handleCreated}
         />
       )}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
