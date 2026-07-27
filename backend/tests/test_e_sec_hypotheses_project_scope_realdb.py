@@ -131,6 +131,52 @@ async def _hyp_col(Session, hyp_id, col):
         )).scalar_one()
 
 
+# ── #2237 READ — GET /{hypothesis_id} (get_hypothesis) ─────────────────────────
+# 착수 前: auth 파라미터 자체가 없었고 project 접근권 검사도 없었다(org-scope repo.get()뿐).
+# 형제 update_hypothesis와 동일한 _assert_hypothesis_project_access로 봉인.
+
+@pytest.mark.anyio
+async def test_get_hypothesis_own_project_200():
+    """회귀0: project_a grant caller가 project_a hyp 조회 → 200."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/hypotheses/{seeded['hyp_a_id']}")
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["statement"] == "Hyp A"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_hypothesis_cross_project_blocked_404():
+    """봉인: 접근권 없는 project_b hyp 조회 시도 → 404(수정 前엔 200으로 통과해 statement 노출)."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/hypotheses/{seeded['hyp_b_id']}")
+            assert resp.status_code == 404, resp.text
+            assert "Hyp B orig" not in resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_update_hypothesis_own_project_200():
     """회귀0: project_a grant caller가 project_a hyp statement 수정 → 200 + 반영."""

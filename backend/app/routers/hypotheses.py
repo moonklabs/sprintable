@@ -160,8 +160,12 @@ async def create_hypothesis(
 async def get_hypothesis(
     hypothesis_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> HypothesisResponse:
+    # #2237: 형제(update_hypothesis)와 동일한 project 접근권 가드 추가(기존엔 org-scope만 봤다·
+    # auth 파라미터 자체가 없었다).
+    await _assert_hypothesis_project_access(session, uuid.UUID(auth.user_id), org_id, hypothesis_id)
     try:
         return await svc.get_hypothesis(session, org_id, hypothesis_id)
     except svc.HypothesisServiceError as err:
