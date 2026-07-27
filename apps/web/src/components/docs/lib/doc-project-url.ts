@@ -17,3 +17,9 @@ export function docUrl(wsSlug: string, projSlug: string, slug: string): string {
 export function docsListUrl(wsSlug: string, projSlug: string): string {
   return `/${wsSlug}/${projSlug}/docs`;
 }
+
+/** #2168 PR-①: 읽기전용 뷰 라우트(`[slug]/view`) — 편집기(docUrl)와 다른 목적지. 채팅 임베드
+ * 미리보기(embed-card.tsx)가 doc 자신의 실제 project 로 직행할 때 쓴다. */
+export function docViewUrl(wsSlug: string, projSlug: string, slug: string): string {
+  return `/${wsSlug}/${projSlug}/docs/${slug}/view`;
+}

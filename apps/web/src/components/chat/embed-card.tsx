@@ -6,8 +6,8 @@ import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ExternalLink, X, FileText, File, Layers, CheckSquare, Hash, Eye, type LucideIcon } from 'lucide-react';
-import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { docViewUrl } from '@/components/docs/lib/doc-project-url';
 
 // 글리프(📋📄🎯✅) → lucide. 타입 식별=아이콘·색은 신호 토큰만(다크 무파손).
 export const ENTITY_ICONS: Record<string, LucideIcon> = {
@@ -152,9 +152,14 @@ function EntityPreviewModal({
 }) {
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(entityType !== 'task');
-  // story #1996: doc 본문 조회는 project_id+slug 조합 엔드포인트(getDoc)라 project_id가
-  // 필요 — doc 뷰 페이지([slug]/view/page.tsx)와 동일 소스(useDashboardContext).
-  const { projectId } = useDashboardContext();
+  // #2168 PR-①: docPreview 가 이 doc이 실제로 속한 project(project_id)+경로 세그먼트
+  // (org_slug/project_slug)를 함께 내려준다 — "현재 프로젝트"(useDashboardContext)를 더는
+  // 추측에 쓰지 않는다. 크로스프로젝트 임베드(다른 project 문서가 채팅에 임베드된 경우)는
+  // 현재 프로젝트로 조회하면 project_id AND 필터에 안 걸려 항상 실패했던 것이 원 결함
+  // (조사 로그: story #2168 참조) — 링크가 스스로 자기 project 를 실어 나르는 것이 처방.
+  const [docPreview, setDocPreview] = useState<{
+    slug: string; projectId: string; orgSlug: string; projectSlug: string | null;
+  } | null>(null);
 
   // story #2061: 손수 구현 Escape 핸들러 제거 — 공용 Dialog(base-ui)가 Escape/backdrop-click/
   // 포커스 트랩/반환을 전부 내장한다(중복 핸들러 방지).
@@ -163,18 +168,28 @@ function EntityPreviewModal({
     let cancelled = false;
 
     if (entityType === 'doc') {
-      // story #1996: doc은 2단계 — ①/api/docs/preview?q=(slug-or-uuid)로 entityId(uuid)를
-      // slug로 해소 ②project_id+slug로 본문 조회(getDoc, 다른 doc 뷰 표면과 동일 SSOT 패턴).
-      // /api/docs/{id}(lightweight timestamp-only)를 "풀 doc 조회"로 오인했던 게 원 결함.
-      if (!projectId) { setLoading(false); return; }
+      // #2168 PR-①: doc은 2단계 — ①/api/docs/preview?q=(slug-or-uuid)로 entityId(uuid)를
+      // slug+**실제 project_id/org_slug/project_slug**로 해소 ②그 project_id(현재 프로젝트가
+      // 아니라 doc 자신의 project)로 본문 조회(getDoc, 다른 doc 뷰 표면과 동일 SSOT 패턴).
+      // /api/docs/{id}(lightweight timestamp-only)를 "풀 doc 조회"로 오인했던 게 원 결함(#1996).
       void (async () => {
         try {
           const previewRes = await fetch(`/api/docs/preview?q=${encodeURIComponent(entityId)}`);
           if (!previewRes.ok) throw new Error();
-          const previewJson = (await previewRes.json()) as { data?: { slug?: string } };
+          const previewJson = (await previewRes.json()) as {
+            data?: { slug?: string; projectId?: string; orgSlug?: string; projectSlug?: string | null };
+          };
           const slug = previewJson.data?.slug;
-          if (!slug) throw new Error();
-          const docRes = await fetch(`/api/docs?project_id=${projectId}&slug=${encodeURIComponent(slug)}`);
+          const docProjectId = previewJson.data?.projectId;
+          if (!slug || !docProjectId) throw new Error();
+          if (!cancelled) {
+            setDocPreview({
+              slug, projectId: docProjectId,
+              orgSlug: previewJson.data?.orgSlug ?? '',
+              projectSlug: previewJson.data?.projectSlug ?? null,
+            });
+          }
+          const docRes = await fetch(`/api/docs?project_id=${docProjectId}&slug=${encodeURIComponent(slug)}`);
           if (!docRes.ok) throw new Error();
           const docJson = (await docRes.json()) as { data?: Record<string, unknown> };
           if (!cancelled) setDetail(docJson.data ?? null);
@@ -195,17 +210,23 @@ function EntityPreviewModal({
       .catch(() => { /* fetch 실패 시 fallback만 표시 */ })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [entityType, entityId, projectId]);
+  }, [entityType, entityId]);
 
   const Icon = ENTITY_ICONS[entityType] ?? Hash;
   const colorClass = ENTITY_COLORS[entityType] ?? 'border-border bg-muted text-foreground';
   const label = title ?? entityId;
-  // story #1996: getEntityHref('doc', id)의 `/docs?id=` 는 어느 라우트도 소비하지 않는 죽은
-  // 패턴(grep 0건) — 실 라우트는 slug 기반(`/docs/{slug}/view`, embed-card의 handleDocClick과
-  // 동형). doc 상세 fetch(위 useEffect)가 이미 slug를 포함해 내려주므로 로드 후 그걸로 override —
-  // "미리보기 살리기"가 이 죽은 링크를 처음으로 실사용 도달 가능하게 만드는 지점이라 같이 고친다.
-  const docSlug = entityType === 'doc' ? (detail as { slug?: string } | null)?.slug : undefined;
-  const resolvedHref = entityType === 'doc' ? (docSlug ? `/docs/${docSlug}/view` : null) : href;
+  // #2168 PR-①: org_slug+project_slug 가 있으면 `/{ws}/{proj}/docs/{slug}/view`로 직행 —
+  // CURRENT_PROJECT_COOKIE 기반 middleware 추측(proxy.ts redirectLegacyResourcePath, "현재
+  // 프로젝트"만 봄)을 거치지 않아 크로스프로젝트에서도 항상 맞는 project 로 착지한다.
+  // project_slug 가 없으면(옛 미백필 프로젝트, Project.slug nullable) 예전 bare 링크로 우아하게
+  // 폴백 — 그 경우는 기존과 동일하게 middleware 추측에 의존(회귀 아님, 기존 동작 유지).
+  const resolvedHref = entityType === 'doc'
+    ? (docPreview
+        ? (docPreview.orgSlug && docPreview.projectSlug
+            ? docViewUrl(docPreview.orgSlug, docPreview.projectSlug, docPreview.slug)
+            : `/docs/${docPreview.slug}/view`)
+        : null)
+    : href;
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -274,10 +295,21 @@ export function EmbedCard({ entity_type, entity_id, title, status }: EmbedCardDa
       // story #1996: /api/docs/{id}는 lightweight timestamp-only 엔드포인트(`{updated_at}`만
       // 반환) — 이 컴포넌트가 실측 이전엔 `data.slug`를 기대해왔으나 실제로 항상 undefined였다
       // (`/docs/undefined/view`로 404). /api/docs/preview?q=가 id→slug 해소 전용 엔드포인트.
+      //
+      // #2168 PR-①: 이 카드가 채팅에 임베드된 doc이 "현재 프로젝트"와 다를 때(크로스프로젝트
+      // 링크)의 바로 그 원 결함 지점 — bare `/docs/{slug}/view`는 middleware(proxy.ts)가
+      // CURRENT_PROJECT_COOKIE로 project를 추측해 다른 project의 doc이면 못 찾았다(조사 로그:
+      // story #2168 참조). preview 응답의 org_slug/project_slug(doc 자신의 실제 project)로
+      // 직행하면 이 추측 자체가 필요 없어진다 — project_slug 없으면(옛 미백필) bare 링크로 폴백.
       const res = await fetch(`/api/docs/preview?q=${encodeURIComponent(entity_id)}`);
       if (!res.ok) throw new Error();
-      const { data } = await res.json() as { data: { slug: string } };
-      router.push(`/docs/${data.slug}/view`);
+      const { data } = await res.json() as {
+        data: { slug: string; orgSlug?: string; projectSlug?: string | null };
+      };
+      const target = (data.orgSlug && data.projectSlug)
+        ? docViewUrl(data.orgSlug, data.projectSlug, data.slug)
+        : `/docs/${data.slug}/view`;
+      router.push(target);
     } catch {
       setNavigating(false);
     }
