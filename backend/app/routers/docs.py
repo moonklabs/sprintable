@@ -280,15 +280,19 @@ async def get_doc_preview(
         doc = fallback.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
-        uid = uuid.UUID(auth.user_id)
-        member = await db.execute(
-            select(TeamMember.id).where(
-                or_(TeamMember.user_id == uid, TeamMember.id == uid),
-                TeamMember.project_id == doc.project_id,
-                TeamMember.is_active.is_(True),
-            ).limit(1)
-        )
-        if member.scalar_one_or_none() is None:
+        # #2216: TeamMember(=team_members뷰, members ⋈ project_access INNER JOIN) 단독
+        # 조회는 owner-floor 휴먼(명시 grant 없이 has_project_access의 admin_branch로만
+        # 접근하는 org owner/admin)을 이 뷰에 행이 없다는 이유로 "멤버 아님"으로 오판한다
+        # — #2168 PR-①에서 primary path(위 has_project_access 호출)와 통일했던 그 canonical
+        # 가드를 이 fallback 경로에도 동일 적용(#2215 계열, 새 규칙 발명 0).
+        # ⚠️org_id=None(cross-org 허용) — repo.org_id를 넘기면 안 된다. 이 분기는 애초에
+        # repo.get(id)가 None(=doc이 repo.org_id 소속이 아님)일 때만 도달하므로, 그 시점의
+        # doc은 구조적으로 repo.org_id와 다른 org에 속한다. repo.org_id로 스코프하면
+        # has_project_access의 org_scope_project 필터(Project.org_id==org_id)가 항상
+        # 거짓이 돼 owner-floor뿐 아니라 정상 team_member까지 전원 403 — 실측으로 발견
+        # (owner-floor 테스트뿐 아니라 기존 team_member 회귀 테스트도 함께 RED였음).
+        from app.services.project_auth import has_project_access
+        if not await has_project_access(db, uuid.UUID(auth.user_id), doc.project_id, org_id=None):
             raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
 
     org_slug = (await db.execute(
@@ -337,15 +341,14 @@ async def get_doc(
         doc = result.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Doc not found")
-        uid = uuid.UUID(auth.user_id)
-        member = await session.execute(
-            select(TeamMember.id).where(
-                or_(TeamMember.user_id == uid, TeamMember.id == uid),
-                TeamMember.project_id == doc.project_id,
-                TeamMember.is_active.is_(True),
-            ).limit(1)
-        )
-        if member.scalar_one_or_none() is None:
+        # #2216: 위 primary path(line 327)와 동일 이유 — TeamMember 단독 조회는 owner-floor
+        # 휴먼(명시 grant 없이 admin_branch로만 접근하는 org owner/admin)을 이 뷰에 행이
+        # 없다는 이유로 "멤버 아님"으로 오판한다. 이 fallback도 canonical 가드로 통일.
+        # ⚠️org_id=None(cross-org 허용) — 이 분기는 repo.get(id)가 None일 때만 도달하므로
+        # doc이 구조적으로 repo.org_id 밖이다. repo.org_id로 스코프하면 org_scope_project
+        # 필터가 항상 거짓이 돼 owner-floor뿐 아니라 정상 team_member까지 전원 403(실측 발견).
+        from app.services.project_auth import has_project_access
+        if not await has_project_access(session, uuid.UUID(auth.user_id), doc.project_id, org_id=None):
             raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
     # doc 상세(detail view)만 enrich: 담당자 member 요약 + 수정이력 요약 동봉(FE 이중 fetch 제거).
     # create/update/transition 은 write-path 라 plain(추가 쿼리 0·기존 테스트 broad-mock 무파손).
