@@ -9,6 +9,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
 import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useToast, ToastContainer } from '@/components/ui/toast';
 
 interface Participant {
   member_id: string;
@@ -32,6 +33,17 @@ interface ChatListViewProps {
   currentTeamMemberId: string;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
+}
+
+// story #2168 PR-② — 현재 프로젝트 밖에서 caller가 참여 중인 최근 대화(BE
+// GET /conversations/recent-outside-project, caller last_read_at DESC·최대 5개).
+interface OutsideProjectConversation {
+  id: string;
+  type: 'dm' | 'group';
+  title: string | null;
+  project_id: string;
+  project_name: string;
+  project_slug: string;
 }
 
 function formatTime(iso: string): string {
@@ -187,6 +199,40 @@ function ConversationRow({
   );
 }
 
+// story #2168 PR-② — "다른 프로젝트" 섹션의 항목. ConversationRow(현재 프로젝트 목록)와 다른
+// 컴포넌트로 둔다 — BE가 unread_count/latest_message/participants를 안 주고(스펙: 정렬축=내
+// last_read_at, 목록 자체가 참여 확인용이지 미리보기용이 아님), 유일한 필수 표기(③ 프로젝트명
+// 병기)도 이쪽에만 있다. onClick은 부모가 준다(project 전환+토스트는 목록 상태를 알아야 함).
+function OutsideProjectRow({
+  conv,
+  onClick,
+}: {
+  conv: OutsideProjectConversation;
+  onClick: () => void;
+}) {
+  const t = useTranslations('chats');
+  const displayName = conv.title ?? (conv.type === 'dm' ? t('dmWith') : t('groupSection'));
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-muted/60 active:bg-muted"
+    >
+      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium ${
+        conv.type === 'dm' ? 'bg-primary/15 text-primary' : 'bg-info/15 text-info'
+      }`}>
+        {conv.type === 'dm' ? <MessageSquare className="h-4 w-4" /> : <Users className="h-4 w-4" />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
+        {/* ⭐AC③ — 프로젝트명 병기("왜 여기 있지"를 그 자리서 답한다) */}
+        <p className="truncate text-xs text-muted-foreground">{conv.project_name}</p>
+      </div>
+    </button>
+  );
+}
+
 function applyConversationMessageUpdate(
   prev: ConversationItem[],
   payload: { conversation_id?: string; content?: string; created_at?: string },
@@ -233,6 +279,12 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const showModal = open !== undefined ? open : internalShowModal;
   const setShowModal = onOpenChange ?? setInternalShowModal;
 
+  // story #2168 PR-② — 프로젝트 밖 최근 대화(최대 5개). 토스트는 이 목록 화면에서만 발생하는
+  // 신호라 여기서 자체 useToast 인스턴스를 든다(전역 토스트 provider 없음 — 이 컴포넌트가
+  // ToastContainer도 직접 렌더).
+  const [outsideProjectConvs, setOutsideProjectConvs] = useState<OutsideProjectConversation[]>([]);
+  const { toasts, addToast, dismissToast } = useToast();
+
   const convsRef = useRef(conversations);
   useEffect(() => { convsRef.current = conversations; }, [conversations]);
 
@@ -271,6 +323,34 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     setAgentOffset(nextOffset + items.length);
     setAgentTotal(json.total ?? 0);
   }, [projectId]);
+
+  // story #2168 PR-② — 프로젝트 밖 최근 대화. BE가 이미 인가로 거른 5개만 주므로 페이지네이션
+  // 불요. 전환 in-flight 가드는 위 fetchConversations와 동형(stale 응답 drop).
+  const fetchOutsideProjectConversations = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/conversations/recent-outside-project?project_id=${projectId}&limit=5`);
+      if (!res.ok) return;
+      const json = await res.json() as { data?: OutsideProjectConversation[] };
+      if (projectId !== projectIdRef.current) return;
+      setOutsideProjectConvs(json.data ?? []);
+    } catch { /* non-critical — 섹션이 비어도 현재 프로젝트 목록엔 영향 없음 */ }
+  }, [projectId]);
+
+  useEffect(() => { void fetchOutsideProjectConversations(); }, [fetchOutsideProjectConversations]);
+
+  // ④ 누르면 프로젝트가 바뀌되 눈에 보이게 — R2 프로젝트 SSOT(project-context-client.ts)가
+  // 이미 `?p=`를 탭별 effective project로 승격하므로, 목적지 URL에 `?p={target}`을 실어 보내는
+  // 것만으로 헤더·스위처가 그 프로젝트로 실제 전환된다(별도 switch-project 호출 불요 — 이 경로는
+  // 명시 project_id를 이미 실은 URL이라 R2 우선순위상 accessible 검증만 통과하면 채택된다).
+  // `from`(원 프로젝트)은 대화 상세 페이지의 기존 "← 채팅" 뒤로가기 버튼이 그대로 소비해
+  // "고르면 여기로 돌아온다"를 완성한다(새 뒤로가기 UI를 만들지 않는다).
+  const handleOutsideProjectClick = useCallback((conv: OutsideProjectConversation) => {
+    addToast({ title: t('movedToProjectToast', { name: conv.project_name }), type: 'info' });
+    // `pn`(대상 프로젝트명)은 실패 화면(권한 회수 등)에서 dashboardContext.projectMemberships가
+    // 이미 그 프로젝트를 못 가진 상태일 수 있어(바로 그게 실패 사유) 클릭 시점 값을 실어 보낸다.
+    const params = new URLSearchParams({ p: conv.project_id, from: projectId, pn: conv.project_name });
+    router.push(`/chats/${conv.id}?${params.toString()}`);
+  }, [addToast, t, router, projectId]);
 
   useEffect(() => { void fetchConversations(0, false); }, [fetchConversations]);
 
@@ -329,7 +409,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const myConvIds = new Set(conversations.map((c) => c.id));
   const agentOnlyConvs = allConversations.filter((c) => !myConvIds.has(c.id));
 
-  const myConversationList = loading ? (
+  const myListContent = loading ? (
     <div className="flex h-full items-center justify-center">
       <p className="text-sm text-muted-foreground">불러오는 중…</p>
     </div>
@@ -370,6 +450,26 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         </button>
       )}
     </div>
+  );
+
+  // story #2168 PR-② AC② — 현재 목록 **아래** 구분 섹션(현재 목록 골격은 안 건드림). 비어 있으면
+  // 조용히 안 보인다 — "몰랐다"(완전 분리)도 "경계 흐림"(섞음)도 아닌 세 번째 선택.
+  const outsideProjectSection = outsideProjectConvs.length > 0 && (
+    <div className="mt-4 border-t border-border pt-4">
+      <p className="mb-1 px-3 text-[11px] font-medium text-muted-foreground">
+        {t('otherProjectsSection')}
+      </p>
+      {outsideProjectConvs.map((conv) => (
+        <OutsideProjectRow key={conv.id} conv={conv} onClick={() => handleOutsideProjectClick(conv)} />
+      ))}
+    </div>
+  );
+
+  const myConversationList = (
+    <>
+      {myListContent}
+      {outsideProjectSection}
+    </>
   );
 
   const agentConversationList = agentOnlyConvs.length === 0 ? (
@@ -424,6 +524,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           onCreated={handleCreated}
         />
       )}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
