@@ -60,7 +60,6 @@ async def _clean(s):
         f"DELETE FROM conversation_participants WHERE conversation_id IN "
         f"(SELECT id FROM conversations WHERE org_id='{ORG}')",
         f"DELETE FROM conversations WHERE org_id='{ORG}'",
-        f"DELETE FROM team_members WHERE org_id='{ORG}'",
         f"DELETE FROM project_access WHERE project_id IN "
         f"(SELECT id FROM projects WHERE org_id='{ORG}')",
         f"DELETE FROM projects WHERE org_id='{ORG}'",
@@ -100,16 +99,14 @@ async def _seed_base(s) -> uuid.UUID:
         f"(gen_random_uuid(),'{PROJ_B}','{caller_om_id}','granted')"
     ))
     # PROJ_REVOKED: grant row 자체가 없다 — "회수"를 project_access 부재로 표현(grant 모델).
-    # ⚠️ 실 배포 스키마는 team_members가 VIEW라 conversation_participants.member_id에
-    # FK 강제가 없다(baseline schema.sql 확인됨) — 그러나 이 테스트는 `Base.metadata.create_all()`
-    # 로 세운 throwaway DB라 TeamMember 모델이 진짜 테이블로 만들어져 FK가 걸린다. id만
-    # caller_om_id와 맞춰 1행 심어 이 테스트 DB의 제약을 만족시킨다(project_id는 FK 만족용
-    # placeholder — conversation_participants 조회는 member_id만 본다).
-    from app.models.team import TeamMember
-    s.add(TeamMember(
-        id=caller_om_id, org_id=ORG, project_id=PROJ_A, type="human", name="Caller",
-    ))
-    await s.flush()
+    # ⚠️ team_members는 실 배포 스키마에서 VIEW(members ⋈ project_access UNION)라 여기서
+    # 행을 만들지 않는다 — conversation_participants.member_id에는 FK 강제가 없다(baseline
+    # schema.sql 확인됨: conversation_id FK만 존재). 로컬에서 `Base.metadata.create_all()`로
+    # 세운 throwaway DB는 TeamMember 모델을 진짜 테이블로 만들어 이 자리에 FK가 생기지만,
+    # 그건 create_all과 실 배포 스키마(뷰) 사이의 알려진 드리프트일 뿐(#2513 CI가 UNION
+    # 뷰에 대한 DELETE로 실패한 것도 동일 원인) — 이 파일은 CI(실 baseline 스키마) 기준으로
+    # 짜여 있으므로 team_members에 손대지 않는다. 로컬 재현은 create_all 대신 실 baseline
+    # 스키마로 세운 DB가 필요하다.
     await s.commit()
     return caller_om_id
 
