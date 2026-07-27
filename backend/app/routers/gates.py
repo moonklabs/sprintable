@@ -828,9 +828,16 @@ async def transition_gate_endpoint(
         # doc_approval SoD 비교 전용 축이라 여기 쓰면 다른 사람으로 조회돼 fail-closed 오탐
         # (정당한 owner/admin 이 403)이 난다 — 실제로 이 갭을 realdb 테스트가 잡았다.
         if not await _non_doc_can_approve(session, _gate.gate_type, uuid.UUID(auth.user_id), org_id, _project_id):
+            # #2198(오르테가 PO, 라이브 측정 후 지시): 없던 바를 새로 세우는 변경이라 막히는
+            # 사람이 "무엇을 해야 하는지" 다음 발을 못 받으면 그 자리서 막막해진다(오늘 아침
+            # #2166 과 같은 자리 — 막는 것과 "다음 발을 주는 것"은 다른 일). 자격 기준(project
+            # owner/admin)과 다음 행동(관리자에게 권한 요청)까지 메시지에 명시.
             raise HTTPException(
                 status_code=403,
-                detail="이 게이트를 승인/거부할 권한이 없습니다.",
+                detail=(
+                    "이 게이트를 승인/거부할 권한이 없습니다 (해당 프로젝트의 owner/admin이어야 "
+                    "합니다). 프로젝트 관리자에게 권한을 요청하세요."
+                ),
             )
     # story #2027(까심 QA 적출): 고위험(risk_grade=high) 게이트의 approved 전이는 사유(note) 서버측
     # 강제 — void_gate/override_gate 기존 관례(reason 없으면 ValueError→422, void_gate 참고)에

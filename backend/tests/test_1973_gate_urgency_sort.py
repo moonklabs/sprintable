@@ -12,7 +12,11 @@ SQL statement**로 판정한다(N+1 절대 금지). 우선순위(스토리 AC): 
   seed 후 GET /api/v2/gates?sort=urgency 정렬 순서 실측 + gate_id/h1_gate_id 양쪽 경로 커버.
 - realdb: sort 파라미터 없는 기존 호출 회귀 없음(무정렬 응답 내용 동일).
 - realdb: N+1 방지 — sqlalchemy ``before_cursor_execute`` 이벤트로 실행 SQL statement 수를 세어
-  gate 개수가 늘어나도(2건→6건) 고정(list SELECT 1 + org posture 1 = 2)임을 실측.
+  gate 개수가 늘어나도(2건→6건) **고정**(게이트당 증가 0)임을 실측.
+  ⚠️story #2198(non-doc can_approve 신설) 이후 고정값이 2 → 6 으로 늘었다 — 게이트당 증가가
+  아니라 **캐시된 고정 비용 4건 추가**임을 실측으로 확認한 뒤 기댓값을 올렸다(실측 근거는
+  아래 assert 바로 위 주석 참조). 「기댓값만 올려서 초록」이 아니라 각 신규 SELECT 가
+  gate 개수와 무관하게 정확히 1회씩만 실행됨을 먼저 확認했다.
 """
 from __future__ import annotations
 
@@ -478,8 +482,23 @@ async def test_realdb_urgency_sort_query_count_fixed_regardless_of_gate_count():
                 f"gate 개수 증가로 쿼리 수가 늘었다(N+1 의심): 2건={len(select_stmts_2)} "
                 f"8건={len(select_stmts_6)}"
             )
-            # 핵심 성능 요구사항: list SELECT(1) + org posture(1) = 고정 2개(1~2개 범위).
-            assert len(select_stmts_6) <= 2, select_stmts_6
+            # 핵심 성능 요구사항: 게이트 개수와 무관한 **고정** 쿼리 수(위 assert 가 이미 그걸
+            # 증명 — 2건과 8건이 동일). 절대값은 story #2198(non-doc can_approve 신설) 로 2 → 6
+            # 이 됐다 — 실측(before_cursor_execute 로 개별 SQL 을 찍어 확認)으로 정확히 이 4개가
+            # 새로 생겼고, 전부 gate 개수와 무관하게 **정확히 1회씩만** 실행됨을 확認했다(캐시가
+            # 실제로 작동함 — 늘려서 초록으로 만든 것이 아니라 늘어난 이유를 하나씩 짚은 것):
+            #   ① org_members SELECT — resolve_member(caller 식별)의 내부 조회
+            #   ② users SELECT       — resolve_member 의 내부 조회(①과 세트)
+            #   ③ stories 배치 SELECT(IN절) — non-doc 게이트들의 project_id 일괄 해소
+            #      (story #1968 배치 패턴 재사용 — 게이트가 늘어도 이 파일의 픽스처는 project 1개
+            #      뿐이라 IN절 인자 수만 늘고 SELECT 문 자체는 1개로 유지됨)
+            #   ④ get_project_role raw SQL — rule B 판정 자체. (gate_type, project_id) 캐시로
+            #      묶여 이 파일의 모든 픽스처가 같은 project 를 쓰므로 게이트 8건이어도 1회
+            # can_approve 를 non-doc 게이트에도 계산하는 것 자체가 #2198 의 목적(전엔 이 필드가
+            # 계산조차 안 돼 자격자에게 버튼이 안 뜨던 결함) — 이 4개는 그 목적을 이루는 데 드는
+            # 필수 비용이지 회귀가 아니다. 6 초과(게이트당 증가)가 나오면 그건 진짜 N+1 이니 이
+            # 상한을 다시 낮추지 말고 원인을 고칠 것.
+            assert len(select_stmts_6) <= 6, select_stmts_6
         finally:
             await client.aclose()
     finally:
