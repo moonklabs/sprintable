@@ -339,7 +339,8 @@
   "orgBriefing": {
     "title": "조직 브리핑",
     "subtitle": "내게 온 요청, 우리가 배우는 것, 누가 무엇을 맡고 있는지 — 한눈에.",
-    "projectRequiredBanner": "이동하려던 페이지에 프로젝트가 필요해요. 위에서 프로젝트를 선택하면 그 페이지로 이동합니다.",
+    "projectRequiredBannerNext": "프로젝트를 선택하면 원래 보려던 화면으로 이동합니다.",
+    "projectRequiredBannerEmpty": "프로젝트를 선택하면 여기에 현황이 표시됩니다.",
     "greeting": "{name}님, 오늘 조직의 지금이에요",
     "nowHeroBadge": "지금",
     "nowTitle": "받은 요청",
