@@ -52,6 +52,7 @@ export type {
   CreateDocInput,
   UpdateDocInput,
   DocListFilters,
+  DocPageResult,
 } from './interfaces/IDocRepository';
 
 export type {
