@@ -6,12 +6,12 @@ import path from 'node:path';
 // 렌더 검증이 안 돼(실제 스크롤바 렌더는 브라우저 전용) 소스 문자열 불변식으로 고정한다:
 // ① 전역 숨김 규칙이 존재 ② .scrollbar-visible 예외 클래스가 그것을 되살림 ③ 스크롤 "기능"
 // 자체를 막는 overflow:hidden으로 되어있지 않음(숨기는 것과 못 굴리게 하는 것은 다르다).
-describe('전역 스크롤바 숨김 CSS 불변식 (#2165)', () => {
-  const css = fs.readFileSync(
-    path.resolve(__dirname, 'globals.css'),
-    'utf8',
-  );
+const css = fs.readFileSync(
+  path.resolve(__dirname, 'globals.css'),
+  'utf8',
+);
 
+describe('전역 스크롤바 숨김 CSS 불변식 (#2165)', () => {
   it('전역 * 규칙이 scrollbar-width:none + webkit scrollbar display:none 이다', () => {
     expect(css).toMatch(/\*\s*\{\s*scrollbar-width:\s*none;\s*\}/);
     expect(css).toContain('*::-webkit-scrollbar { display: none; }');
@@ -24,6 +24,20 @@ describe('전역 스크롤바 숨김 CSS 불변식 (#2165)', () => {
 
   it('.doc-renderer pre 후손 선택자도 같은 예외를 받는다(raw HTML 주입 경로라 클래스 직접 부착 불가)', () => {
     expect(css).toMatch(/\.doc-renderer pre[^{]*\{[^}]*scrollbar-width:\s*thin|\.scrollbar-visible,\s*\n?\s*\.doc-renderer pre/);
+  });
+});
+
+describe('.tableWrapper(TipTap 테이블 노드뷰 기본 클래스)가 실제로 가로 스크롤 가능하다 (#2203)', () => {
+  it('overflow-x:auto가 있다 — 이게 본체(스크롤바 노출만으로는 여전히 안 굴러간다)', () => {
+    expect(css).toMatch(/\.tableWrapper\s*\{[^}]*overflow-x:\s*auto/);
+  });
+
+  it('overflow-x:visible이나 overflow-x:hidden으로 되어있지 않다(#2203 원 결함 재발 방지)', () => {
+    expect(css).not.toMatch(/\.tableWrapper\s*\{[^}]*overflow-x:\s*(visible|hidden)/);
+  });
+
+  it('scrollbar-visible과 같은 예외(scrollbar-width:thin)를 받는다', () => {
+    expect(css).toMatch(/\.tableWrapper[^{]*\{[^}]*scrollbar-width:\s*thin|\.scrollbar-visible,[\s\S]*?\.tableWrapper\s*\{/);
   });
 });
 
