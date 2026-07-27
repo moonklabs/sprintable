@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { parseCursorMeta } from '@/lib/pagination';
 import {
   ALL_RUN_STATUS_FILTER,
   DEFAULT_RUN_STATUS_FILTER,
@@ -127,9 +128,13 @@ export function AgentRunsList() {
     const res = await fetch(`/api/v1/agent-runs?${params}`);
     if (!res.ok) return { items: [], nextCursor: null };
     const json = await res.json();
+    // story #2231 AC4: 이 프록시는 apiSuccess(await _r.json())로 BE의 {data,meta} 전체를
+    // 다시 자기 data 필드에 얹는다(comments가 #2230 전에 그랬던 것과 동형 이중포장) — 바깥
+    // meta는 항상 null이라 「더 보기」가 지금 구조적으로 죽어 있다. 공용 파서로 그 사실을
+    // 조용히 삼키지 않고 드러낸다(프록시 자체 fix는 #2231 AC2 스코프, 별도 처리).
     return {
       items: (json.data ?? []) as AgentRun[],
-      nextCursor: json.meta?.nextCursor ?? null,
+      nextCursor: parseCursorMeta(json.meta, 'agent-runs-list').nextCursor,
     };
   }, [statusFilter, fromDate, toDate]);
 
