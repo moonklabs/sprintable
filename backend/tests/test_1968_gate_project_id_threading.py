@@ -124,12 +124,16 @@ async def test_generic_gate_endpoint_threads_resolved_project_id():
         work_item_id=work_item_id, work_item_type="story", gate_type="merge",
         member_id=uuid.uuid4(), role_id=uuid.uuid4(),
     )
+    # #2237: create_gate_endpoint가 project_id 해소 後 caller 접근권을 강제하게 됐다 — 이 테스트는
+    # threading(①resolve→②create로 넘김) 자체만 검증하므로 has_project_access는 True로 통과시킨다.
+    auth = SimpleNamespace(user_id=str(uuid.uuid4()))
 
     with patch.object(gates_mod, "resolve_work_item_project_id",
                        AsyncMock(return_value=project_id)) as resolve_spy, \
+         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "create_gate", AsyncMock(return_value=gate)) as create_spy, \
          patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
-        await create_gate_endpoint(body=body, session=session, org_id=org_id, _auth=SimpleNamespace())
+        await create_gate_endpoint(body=body, session=session, org_id=org_id, _auth=auth)
 
     resolve_spy.assert_awaited_once_with(session, org_id, "story", work_item_id)
     assert create_spy.await_args.kwargs["project_id"] == project_id

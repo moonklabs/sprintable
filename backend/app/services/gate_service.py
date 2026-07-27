@@ -179,6 +179,21 @@ _DISPOSITION_TO_STATUS: dict[str, str] = {
     "deny": "rejected",
 }
 
+# #2237: resolve_work_item_project_id가 다루는 4개 타입은 전부 project_id NOT NULL(위 docstring)
+# — 즉 구조적으로 project-scoped다. 이 집합에 없는 work_item_type(workflow_line_config의
+# wf_line_version 등)만 진짜 project-무관이다. 호출부가 None 하나로 뭉뚱그려 받으면 "project-무관
+# 타입이라 None"과 "project-scoped 타입인데 해소 실패(타 org·부재)"를 구분 못 해 후자가 검사를
+# 그냥 skip해 버린다(create_gate_endpoint가 실제로 겪었다 — 타 org story로 gate가 생성됨).
+PROJECT_SCOPED_WORK_ITEM_TYPES: frozenset[str] = frozenset({"story", "task", "doc", "visual_artifact"})
+
+
+def is_project_scoped_work_item_type(work_item_type: str) -> bool:
+    """호출부가 resolve_work_item_project_id()의 None을 «project-무관 타입이라 통과»와
+    «project-scoped 타입인데 해소 실패라 거부» 로 갈라 판단할 때 쓴다. 새 타입 발명이 아니라
+    resolve_work_item_project_id가 이미 아는 분기를 그대로 드러낸 것(SSOT 재사용)."""
+    return work_item_type in PROJECT_SCOPED_WORK_ITEM_TYPES
+
+
 async def resolve_work_item_project_id(
     session: AsyncSession, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
 ) -> uuid.UUID | None:
