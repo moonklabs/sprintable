@@ -31,13 +31,41 @@ describe('/api/notifications (직접 repo)', () => {
     expect((await GET(new Request('http://localhost/api/notifications'))).status).toBe(401);
   });
   it('GET: lists via repo + attachHrefs + unreadCount meta', async () => {
-    h.list.mockResolvedValue([{ id: 'n1', is_read: false, type: 'x' }, { id: 'n2', is_read: true, type: 'x' }]);
+    h.list.mockResolvedValue({
+      items: [{ id: 'n1', is_read: false, type: 'x' }, { id: 'n2', is_read: true, type: 'x' }],
+      hasMore: false,
+      nextCursor: null,
+    });
     const res = await GET(new Request('http://localhost/api/notifications'));
     expect(res.status).toBe(200);
     expect(h.list).toHaveBeenCalledWith(expect.objectContaining({ user_id: 'mem-1' }));
     const body = await res.json();
     expect(body.data).toHaveLength(2);
     expect(body.meta.unreadCount).toBe(1);
+  });
+
+  // story #2195 — 규약 A: cursor를 받아 repo.list에 그대로 실어 보내고, hasMore/nextCursor를
+  // meta로 그대로 전달한다(서버가 못 줄 때 "더 보기"가 서 있으면 안 된다 — 그 판단은 hasMore).
+  it('GET: cursor 쿼리를 repo.list로 전달하고 hasMore/nextCursor를 meta로 반환한다', async () => {
+    h.list.mockResolvedValue({
+      items: [{ id: 'n3', is_read: false, type: 'x' }],
+      hasMore: true,
+      nextCursor: '2026-01-01T00:00:00+00:00',
+    });
+    const res = await GET(new Request('http://localhost/api/notifications?cursor=2025-12-31T00:00:00%2B00:00'));
+    expect(res.status).toBe(200);
+    expect(h.list).toHaveBeenCalledWith(expect.objectContaining({ cursor: '2025-12-31T00:00:00+00:00' }));
+    const body = await res.json();
+    expect(body.meta.hasMore).toBe(true);
+    expect(body.meta.nextCursor).toBe('2026-01-01T00:00:00+00:00');
+  });
+
+  it('GET: hasMore=false면 nextCursor도 null로 전달된다("더 보기"가 서 있지 않게)', async () => {
+    h.list.mockResolvedValue({ items: [], hasMore: false, nextCursor: null });
+    const res = await GET(new Request('http://localhost/api/notifications'));
+    const body = await res.json();
+    expect(body.meta.hasMore).toBe(false);
+    expect(body.meta.nextCursor).toBeNull();
   });
 
   it('PATCH: invalid body → parseBody 400', async () => {
