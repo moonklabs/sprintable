@@ -15,10 +15,13 @@ from sqlalchemy import and_, select
 
 from sqlalchemy.exc import IntegrityError
 
+from dataclasses import dataclass
+
 from app.core.database import async_session_factory
 from app.core.security import JWTError, decode_jwt, hash_token
 from app.models.api_key import ApiKey
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+from app.models.project import OrgMember
 from app.models.team import TeamMember
 
 logger = logging.getLogger(__name__)
@@ -28,7 +31,16 @@ router = APIRouter(tags=["ws-chat", "Organization"])
 _rooms: dict[str, set[WebSocket]] = defaultdict(set)
 
 
-async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | None:
+@dataclass(frozen=True)
+class _CallerIdentity:
+    """#2216: owner-floor 휴먼(team_members뷰에 행 없음)용 최소 caller 신원 — 이 라우터가
+    실제로 쓰는 필드(.id/.org_id)만 담는다. TeamMember와 duck-type 호환(caller.id/caller.org_id
+    로만 소비됨, 아래 ws_chat_hub 참조)."""
+    id: uuid.UUID
+    org_id: uuid.UUID
+
+
+async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | _CallerIdentity | None:
     """Query param API Key 또는 JWT로 TeamMember 반환. 실패 시 None."""
     now = datetime.now(timezone.utc)
     async with async_session_factory() as db:
@@ -67,11 +79,26 @@ async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | 
                 uid = uuid.UUID(user_id)
             except ValueError:
                 return None
-            return (await db.execute(
+            tm = (await db.execute(
                 select(TeamMember)
                 .where(TeamMember.user_id == uid)
                 .where(TeamMember.is_active.is_(True))
             )).scalars().first()
+            if tm is not None:
+                return tm
+            # #2216: team_members뷰(members ⋈ project_access INNER JOIN)는 owner-floor
+            # 휴먼(명시 project_access grant 없이 has_project_access의 admin_branch로만
+            # 접근하는 org owner/admin)을 이 뷰에 행이 없다는 이유로 못 찾는다 — 그 결과
+            # owner-floor는 WS 채팅에 아예 접속하지 못했다(Unauthorized). org_members
+            # SSOT(filter_org_member_ids와 동일 축)로 폴백 — 이 라우터가 caller에서 실제로
+            # 쓰는 필드(.id/.org_id)만 있으면 되므로 최소 dataclass로 충분(TeamMember 전체
+            # 필드 불필요).
+            om = (await db.execute(
+                select(OrgMember.id, OrgMember.org_id).where(
+                    OrgMember.user_id == uid, OrgMember.deleted_at.is_(None),
+                )
+            )).first()
+            return _CallerIdentity(id=om.id, org_id=om.org_id) if om is not None else None
 
     return None
 
