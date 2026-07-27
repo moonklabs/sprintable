@@ -11,6 +11,11 @@
 // agent-hitl-policy-editor.tsx의 타임아웃 클래스 에스컬레이션 모드 드롭다운, 지금 채움).
 // 나머지는 전부 존재 확인됨.
 //
+// 2026-07-27 후속(story #2235, managed agent 앞단 전량 삭제) — 위 53곳 중 agent-deployment-wizard.tsx·
+// agent-hitl-policy.ts·agent-deployment-console.ts 출처였던 항목(steps.*, agentHitl.*,
+// healthStateLabel_*/healthStateBody_*/recoveryCueTitle_*/recoveryCueBody_*)은 그 소스 파일 자체가
+// 삭제되며 표에서 함께 제거— 번역 키도 동일하게 삭제됨(전용 확인 후, 다른 화면 미사용).
+//
 // ⛔이 가드도 못 잡는 것 2곳(고의로 남김, "0~2곳이면 바늘구멍" 판정 — #2228 AC6):
 //   ① outcome-result-card.tsx의 `metric_${result.metric}` — `MetricDefinition.metric`이
 //      `string`(무제한)이고 `source`가 'ga4'|'manual'일 때 실제 GA4/수동 메트릭 이름은
@@ -51,28 +56,7 @@ const TEMPLATE_KEY_TABLE: Array<[string, string[], string]> = [
   ['agentRuns.status_', ['queued', 'held', 'running', 'hitl_pending', 'completed', 'failed'], 'agent-runs-list.tsx AgentRun.status'],
   ['agentRuns.failureDisposition_', ['retry_scheduled', 'retry_launched', 'retry_exhausted', 'non_retryable'], 'agent-runs-list.tsx AgentRun.failure_disposition'],
   ['agentRuns.toolAuditSource_', ['builtin', 'external'], 'agent-run-detail.tsx:19 toolSource 타입(런타임 추출값은 unconstrained string — 알려진 2값만 커버, ①로 별도 명시)'],
-  ['agents.steps.persona.', ['eyebrow', 'title'], 'agent-deployment-wizard.tsx STEP_KEYS'],
-  ['agents.steps.model.', ['eyebrow', 'title'], 'agent-deployment-wizard.tsx STEP_KEYS'],
-  ['agents.steps.scope.', ['eyebrow', 'title'], 'agent-deployment-wizard.tsx STEP_KEYS'],
-  ['agents.steps.review.', ['eyebrow', 'title'], 'agent-deployment-wizard.tsx STEP_KEYS'],
-  ['agents.steps.verify.', ['eyebrow', 'title'], 'agent-deployment-wizard.tsx STEP_KEYS'],
-  ['agentHitl.catalogSeverity_', ['high', 'critical'], 'agent-hitl-policy.ts HitlHighRiskActionCatalogItem.severity'],
-  ['agentHitl.requestType_', ['approval'], 'agent-hitl-policy.ts HITL_REQUEST_TYPES'],
-  ['agentHitl.timeoutClass_', ['fast', 'standard', 'extended'], 'agent-hitl-policy.ts HITL_TIMEOUT_CLASS_KEYS'],
-  ['agentHitl.escalationMode_', ['timeout_memo', 'timeout_memo_and_escalate'], 'agent-hitl-policy.ts HITL_ESCALATION_MODES (#2228 실측으로 누락 발견·채움)'],
-  ['agentHitl.catalog_destructive_change_', ['title', 'body'], 'agent-hitl-policy.ts HITL_HIGH_RISK_ACTION_KEYS'],
-  ['agentHitl.catalog_external_side_effect_', ['title', 'body'], 'agent-hitl-policy.ts HITL_HIGH_RISK_ACTION_KEYS'],
-  ['agentHitl.catalog_credential_or_billing_change_', ['title', 'body'], 'agent-hitl-policy.ts HITL_HIGH_RISK_ACTION_KEYS'],
-  ['agentHitl.approval_manual_hitl_request_', ['title', 'body', 'short'], 'agent-hitl-policy.ts HITL_APPROVAL_RULE_KEYS'],
-  ['agentHitl.approval_billing_cap_exceeded_', ['title', 'body', 'short'], 'agent-hitl-policy.ts HITL_APPROVAL_RULE_KEYS'],
-  ['agentHitl.timeout_fast_', ['title', 'body'], 'agent-hitl-policy.ts HITL_TIMEOUT_CLASS_KEYS'],
-  ['agentHitl.timeout_standard_', ['title', 'body'], 'agent-hitl-policy.ts HITL_TIMEOUT_CLASS_KEYS'],
-  ['agentHitl.timeout_extended_', ['title', 'body'], 'agent-hitl-policy.ts HITL_TIMEOUT_CLASS_KEYS'],
   ['agents.toolPermissions.groups.', ['core', 'stories', 'tasks', 'sprints', 'epics', 'chat', 'docs', 'analytics', 'retro', 'standup', 'meetings', 'notifications', 'webhooks', 'rewards', 'audit', 'agent_runs', 'admin'], 'toolset-catalog.ts 폴백 그룹(BE가 SSOT — ②로 별도 명시)'],
-  ['agents.healthStateLabel_', ['healthy', 'recovering', 'attention', 'paused', 'deploying'], 'agent-deployment-console.ts DeploymentHealthState'],
-  ['agents.healthStateBody_', ['healthy', 'recovering', 'attention', 'paused', 'deploying'], 'agent-deployment-console.ts DeploymentHealthState'],
-  ['agents.recoveryCueTitle_', ['hitl', 'deploy_failed', 'resume_deployment', 'retrying', 'manual_retry', 'inspect_failure'], 'agent-deployment-console.ts DeploymentRecoveryCueKey'],
-  ['agents.recoveryCueBody_', ['hitl', 'deploy_failed', 'resume_deployment', 'retrying', 'manual_retry', 'inspect_failure'], 'agent-deployment-console.ts DeploymentRecoveryCueKey'],
   ['loops.entityType', ['Loop', 'Hypothesis', 'Decision'], 'context-pack-panel.tsx entity_type 타입'],
   ['loops.aiConfidenceLevel_', ['high', 'medium', 'low'], 'ai-attribution.tsx AiConfidence'],
   ['canvas.responsivePreview', ['Desktop', 'Tablet', 'Mobile'], 'artifact-expand-dialog.tsx PreviewBreakpoint'],
