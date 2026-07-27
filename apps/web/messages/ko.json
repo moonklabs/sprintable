@@ -2845,6 +2845,8 @@
     "timeoutClass_fast": "Fast",
     "timeoutClass_standard": "Standard",
     "timeoutClass_extended": "Extended",
+    "escalationMode_timeout_memo": "메모만 남기기",
+    "escalationMode_timeout_memo_and_escalate": "메모 남기고 에스컬레이션",
     "timeout_fast_title": "Fast 클래스",
     "timeout_fast_body": "긴급 승인이나 비용/권한성 이벤트처럼 빠른 판단이 필요한 요청에 사용합니다.",
     "timeout_standard_title": "Standard 클래스",

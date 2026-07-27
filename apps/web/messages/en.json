@@ -2845,6 +2845,8 @@
     "timeoutClass_fast": "Fast",
     "timeoutClass_standard": "Standard",
     "timeoutClass_extended": "Extended",
+    "escalationMode_timeout_memo": "Leave a memo only",
+    "escalationMode_timeout_memo_and_escalate": "Leave a memo and escalate",
     "timeout_fast_title": "Fast class",
     "timeout_fast_body": "For urgent approvals and time-sensitive cost or permission decisions.",
     "timeout_standard_title": "Standard class",
