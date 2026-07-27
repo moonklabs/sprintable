@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.pm import Story
+from app.models.project import OrgMember
+from app.models.project_access import ProjectAccess
 from app.models.team import TeamMember
 from app.repositories.sprint import SprintRepository
 from app.schemas.hypothesis import HypothesisCreate, HypothesisLinkRequest, HypothesisResponse
@@ -427,7 +429,35 @@ async def close_sprint(
                 TeamMember.type == "human",
             )
         )
-        member_ids = [row[0] for row in members_result.all()]
+        member_ids = {row[0] for row in members_result.all()}
+        # #2216(전달누락 계열): team_members뷰(members ⋈ project_access INNER JOIN) 단독으론
+        # grant-only 휴먼(project_access를 org_member_id 경유로만 가진 멤버)과 owner-floor
+        # org owner/admin(명시 project_access grant 없이 has_project_access의 admin_branch
+        # org-wide floor로만 이 프로젝트에 접근하는 멤버)이 조용히 빠졌다 — 403이 아니라
+        # sprint_closed 알림 자체가 안 갔다. has_project_access(project_auth.py)의 human_grant/
+        # org owner-admin-floor 두 분기를 동일 기준으로 재현해 OrgMember.id로 보강한다 —
+        # dispatch_notification은 이미 org_member.id 축 grant-only 해소를 지원한다
+        # (E-MEMBER-SSOT AC2-2, notification_dispatch.py 기존 주석).
+        grant_only_result = await db.execute(
+            select(OrgMember.id)
+            .select_from(ProjectAccess)
+            .join(OrgMember, ProjectAccess.org_member_id == OrgMember.id)
+            .where(
+                ProjectAccess.project_id == sprint.project_id,
+                ProjectAccess.permission == "granted",
+                OrgMember.deleted_at.is_(None),
+            )
+        )
+        member_ids |= {row[0] for row in grant_only_result.all()}
+        owner_floor_result = await db.execute(
+            select(OrgMember.id).where(
+                OrgMember.org_id == org_id,
+                OrgMember.role.in_(["owner", "admin"]),
+                OrgMember.deleted_at.is_(None),
+            )
+        )
+        member_ids |= {row[0] for row in owner_floor_result.all()}
+        member_ids = list(member_ids)
         if member_ids:
             await dispatch_notification(
                 db,
