@@ -233,7 +233,10 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     }
   }, [fetchTree]);
 
-  const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission') => {
+  // story #2167: DocTree.onMoveDenied 시그니처에 'sort-mode-active'가 추가돼(doc-tree.tsx)
+  // 타입만 맞춰준다 — 이 파일은 어떤 라우트에도 안 물려있는 죽은 코드로 보인다(파울로가 별건
+  // 접수·이 PR 스코프 밖). 그 판단이 나기 전까지 컴파일만 안 깨지게 유지.
+  const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission' | 'sort-mode-active') => {
     if (reason === 'circular') {
       addToast({ title: t('moveCircularError'), type: 'error' });
     } else {

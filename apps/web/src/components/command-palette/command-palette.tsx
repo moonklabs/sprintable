@@ -459,7 +459,11 @@ function DocGroup({ label, docs, activeIndexOffset, activeIndex, onSelect }: Doc
                 data-active={active || undefined}
               >
                 <BookOpen className="size-4 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">{doc.icon ? `${doc.icon} ` : ''}{doc.title}</span>
+                <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                  <span className="truncate">{doc.icon ? `${doc.icon} ` : ''}{doc.title}</span>
+                  {/* story #2167 AC2 — slug로 찾은 결과가 어떤 slug인지 화면에 보여야 한다. */}
+                  <span className="shrink-0 truncate font-mono text-[10px] text-muted-foreground">{doc.slug}</span>
+                </span>
               </button>
             </li>
           );

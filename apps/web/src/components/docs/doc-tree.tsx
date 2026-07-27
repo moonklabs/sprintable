@@ -55,19 +55,22 @@ interface Doc {
   icon: string | null;
   sort_order: number;
   is_folder?: boolean;
+  updated_at?: string;
 }
 
-function HighlightedText({ text, query }: { text: string; query: string }) {
-  if (!query) return <>{text}</>;
-  const idx = text.toLowerCase().indexOf(query.toLowerCase());
-  if (idx === -1) return <>{text}</>;
-  return (
-    <>
-      {text.slice(0, idx)}
-      <mark className="bg-highlight-search-bg text-inherit">{text.slice(idx, idx + query.length)}</mark>
-      {text.slice(idx + query.length)}
-    </>
-  );
+export type DocSortMode = 'manual' | 'title' | 'updated_at';
+
+// story #2167: 트리 렌더 정렬만 갈아끼운다 — sort_order 값 자체는 안 건드린다(수동 순서는
+// 'manual'로 돌아오면 그대로 남아있다). 'updated_at' 결측(구 데이터 등)은 정렬 끝으로 밀어
+// undefined 비교로 순서가 흔들리는 것을 막는다.
+export function compareDocsForSort(a: Doc, b: Doc, mode: DocSortMode): number {
+  if (mode === 'title') return a.title.localeCompare(b.title, 'ko');
+  if (mode === 'updated_at') {
+    const at = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+    const bt = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+    return bt - at; // 최근 수정 먼저
+  }
+  return a.sort_order - b.sort_order;
 }
 
 /**
@@ -94,16 +97,18 @@ interface DocTreeProps {
   onSelect: (slug: string) => void;
   onReorder?: (docId: string, newSortOrder: number, siblings: Doc[]) => Promise<void>;
   onMove?: (docId: string, newParentId: string | null, newSortOrder: number) => Promise<void>;
-  onMoveDenied?: (reason: 'circular' | 'no-permission') => void;
+  onMoveDenied?: (reason: 'circular' | 'no-permission' | 'sort-mode-active') => void;
   onRename?: (docId: string, newTitle: string) => Promise<void>;
   onDelete?: (docId: string) => Promise<void>;
   onAddChild?: (parentId: string) => Promise<void>;
   emptyFolderLabel?: string;
   projectId?: string;
-  visibleIds?: Set<string>;
-  matchedIds?: Set<string>;
-  searchQuery?: string;
-  isSearching?: boolean;
+  // story #2167: 검색-중 트리 하이라이트/필터(visibleIds·matchedIds·searchQuery·isSearching)는
+  // 제거했다 — PO 판정(나): 검색어가 있을 때 "이 문서가 있는가"의 답은 서버 전문검색만이 낸다
+  // (로컬 트리는 사본이라 진실이 아님). 검색 UI는 별도 플랫 리스트(docs-client-layout.tsx의
+  // 서버검색 결과 렌더)로 분리됐고, DocTree는 다시 순수 "검색어 없을 때의 트리 브라우징"
+  // 전용으로 돌아간다. sortMode만 추가 — 수동/이름순/수정일순 표시 정렬(sort_order 비파괴).
+  sortMode?: DocSortMode;
 }
 
 function TreeNode({
@@ -120,10 +125,7 @@ function TreeNode({
   projectId,
   isExpanded,
   onToggleExpanded,
-  visibleIds,
-  matchedIds,
-  searchQuery = '',
-  isSearching = false,
+  sortMode = 'manual',
 }: {
   doc: Doc;
   allDocs: Doc[];
@@ -138,15 +140,12 @@ function TreeNode({
   projectId?: string;
   isExpanded: (id: string, defaultValue?: boolean) => boolean;
   onToggleExpanded: (id: string) => void;
-  visibleIds?: Set<string>;
-  matchedIds?: Set<string>;
-  searchQuery?: string;
-  isSearching?: boolean;
+  sortMode?: DocSortMode;
 }) {
-  const childDocs = allDocs.filter((entry) => entry.parent_id === doc.id).sort((a, b) => a.sort_order - b.sort_order);
+  const childDocs = allDocs.filter((entry) => entry.parent_id === doc.id).sort((a, b) => compareDocsForSort(a, b, sortMode));
   const hasChildren = childDocs.length > 0;
   const isFolder = Boolean(doc.is_folder || hasChildren);
-  const expanded = isSearching ? true : isExpanded(doc.id);
+  const expanded = isExpanded(doc.id);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const isSelected = selectedSlug === doc.slug;
   const menuRef = useRef<HTMLDivElement>(null);
@@ -233,8 +232,6 @@ function TreeNode({
     setContextMenuOpen(false);
   }, [doc.id, onAddChild]);
 
-  if (isSearching && !visibleIds?.has(doc.id)) return null;
-
   return (
     <div ref={setNodeRef} style={style}>
       <div className="group relative">
@@ -275,7 +272,7 @@ function TreeNode({
             <FileText className="size-4 shrink-0 text-muted-foreground" />
           )}
           <span className="flex-1 truncate">
-            <HighlightedText text={doc.title} query={isSearching ? searchQuery : ''} />
+            {doc.title}
           </span>
         </button>
         <div
@@ -323,10 +320,7 @@ function TreeNode({
                   projectId={projectId}
                   isExpanded={isExpanded}
                   onToggleExpanded={onToggleExpanded}
-                  visibleIds={visibleIds}
-                  matchedIds={matchedIds}
-                  searchQuery={searchQuery}
-                  isSearching={isSearching}
+                  sortMode={sortMode}
                 />
               ))}
             </SortableContext>
@@ -344,8 +338,12 @@ function TreeNode({
   );
 }
 
-export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, emptyFolderLabel, projectId, visibleIds, matchedIds, searchQuery, isSearching }: DocTreeProps) {
-  const rootDocs = docs.filter((entry) => !entry.parent_id).sort((a, b) => a.sort_order - b.sort_order);
+export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, emptyFolderLabel, projectId, sortMode = 'manual' }: DocTreeProps) {
+  const rootDocs = docs.filter((entry) => !entry.parent_id).sort((a, b) => compareDocsForSort(a, b, sortMode));
+  // story #2167: 이름순/수정일순 보기에서는 드래그 재정렬을 막는다 — sort_order 기반 드롭
+  // 위치 계산이 화면 순서와 안 맞아 엉뚱한 곳에 꽂히는 것을 막기 위함(수동 순서 자체는
+  // 안전하게 보존되지만, 사용자가 보는 순서와 실제 재정렬 결과가 어긋나는 혼란을 원천 차단).
+  const dragEnabled = sortMode === 'manual';
   // story #1988(C): 순수 PointerSensor는 모바일 터치 스크롤을 드래그로 하이재킹한다 —
   // kanban-board.tsx 0d142311 fix와 동일하게 터치는 드래그 활성화 자체를 배제.
   const sensors = useTouchSafePointerSensor(5);
@@ -354,6 +352,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
+    if (!dragEnabled) { onMoveDenied?.('sort-mode-active'); return; }
 
     const activeDoc = docs.find((d) => d.id === active.id);
     const overDoc = docs.find((d) => d.id === over.id);
@@ -409,14 +408,14 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
 
     const newSortOrder = siblings[newIndex]!.sort_order;
     await onReorder(activeDoc.id, newSortOrder, siblings);
-  }, [docs, onReorder, onMove, onMoveDenied]);
+  }, [docs, onReorder, onMove, onMoveDenied, dragEnabled]);
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <SortableContext items={rootDocs.map((d) => d.id)} strategy={verticalListSortingStrategy}>
         <nav className="space-y-1">
           {rootDocs.map((doc) => (
-            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} isExpanded={isExpanded} onToggleExpanded={toggleExpanded} visibleIds={visibleIds} matchedIds={matchedIds} searchQuery={searchQuery} isSearching={isSearching} />
+            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} isExpanded={isExpanded} onToggleExpanded={toggleExpanded} sortMode={sortMode} />
           ))}
         </nav>
       </SortableContext>
