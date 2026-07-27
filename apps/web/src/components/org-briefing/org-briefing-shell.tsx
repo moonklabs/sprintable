@@ -43,14 +43,23 @@ export function OrgBriefingShell() {
   // story #2212 — proxy.ts가 "프로젝트 미확定" 404 대신 여기로 next=<원 목적지>를 들고 보낸
   // 경우, 위 프로젝트 스위처(사이드바/탑바 칩)로 프로젝트를 고르라는 안내를 보여준다. 실제
   // 복귀는 use-unified-switcher.ts의 switchProject/switchOrgAndProject가 이 next를 읽어 처리.
+  //
+  // 유나양 카피 판정(2026-07-27) — 배너 문구는 상황이 둘이라 조건부다. "이 화면이
+  // 활성화됩니다"류 시스템어는 둘 다 안 쓴다:
+  //   next 있음(#2212 리다이렉트로 옴)  → 원래 가려던 화면이 있었음을 인정하고 그리로
+  //                                       돌려보낸다는 문장("왜 갑자기 여기 왔지"에 답함)
+  //   next 없음(그냥 방문·프로젝트 아예 없음) → 여기(org-briefing) 자체에 현황이 뜬다는 문장
+  //   둘 다 아님(next 없음 + 프로젝트 있음) → 평범한 방문이라 배너 자체가 불필요(소음)
   const searchParams = useSearchParams();
   const nextTarget = searchParams.get('next');
+  const showProjectBanner = !!nextTarget || !projectId;
+  const projectBannerText = nextTarget ? t('projectRequiredBannerNext') : t('projectRequiredBannerEmpty');
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 lg:p-6">
-      {nextTarget && (
+      {showProjectBanner && (
         <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-foreground" role="status">
-          {t('projectRequiredBanner')}
+          {projectBannerText}
         </div>
       )}
       <div>

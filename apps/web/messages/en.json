@@ -339,7 +339,8 @@
   "orgBriefing": {
     "title": "Org Briefing",
     "subtitle": "What's come to you, what we're learning, and who's on what — at a glance.",
-    "projectRequiredBanner": "The page you were headed to needs a project. Pick one above and you'll be taken there.",
+    "projectRequiredBannerNext": "Pick a project and you'll be taken to the screen you were headed to.",
+    "projectRequiredBannerEmpty": "Pick a project and its status will show up here.",
     "greeting": "Hi {name}, here's your org today",
     "nowHeroBadge": "Now",
     "nowTitle": "Requests",
