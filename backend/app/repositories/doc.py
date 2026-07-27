@@ -17,13 +17,20 @@ def encode_doc_cursor(doc: Doc) -> str:
     return f"{doc.sort_order}:{doc.id}"
 
 
-def parse_doc_cursor(cursor: str | None) -> tuple[int, uuid.UUID] | None:
-    if not cursor:
+def parse_doc_cursor(cursor: object) -> tuple[int, uuid.UUID] | None:
+    """오르테가군 지적(2026-07-27, #2540 CI): 이 함수는 HTTP(FastAPI 가 Query(...)를
+    리졸브해 진짜 str|None 을 줌)와 직접호출(테스트·내부 — 인자를 명시로 안 넘기면
+    파이썬 기본값인 Query(...) 센티넬 객체 그 자체가 들어옴) 두 경로로 불린다.
+    예전엔 `if not cursor:` 가 "값이 있는지"만 보고 "그 값이 문자열인지"는 안 봐서,
+    Query 객체(truthy)가 그대로 통과해 .split() 에서 터졌다(또는 AttributeError→400
+    으로 변질돼 정상 "커서 없음" 요청을 거절하는 쪽으로 오동작). 문자열이 아니면
+    타입 단계에서 즉시 None(커서 없음) 취급 — 값의 존재가 아니라 값의 종류를 본다."""
+    if not isinstance(cursor, str) or not cursor:
         return None
     try:
         sort_order_str, id_str = cursor.split(":", 1)
         return int(sort_order_str), uuid.UUID(id_str)
-    except (ValueError, AttributeError) as exc:
+    except ValueError as exc:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Invalid cursor format") from exc
 
