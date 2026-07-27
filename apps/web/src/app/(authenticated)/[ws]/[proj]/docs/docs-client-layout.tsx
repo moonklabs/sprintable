@@ -120,8 +120,10 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   }, [projectId]);
 
   // story #2193 — "자동 묶음"(slug 접두어로 그룹, 폴더 소속과 무관) / "내 폴더"(기존 DocTree,
-  // 변경 없음) 전환. 619건 중 539건이 폴더 밖에 평면으로 쌓여 못 찾던 문제의 처방이라
-  // 기본값을 grouped로 둔다 — 폴더는 그대로 남아 원하는 사람은 "내 폴더"로 전환해 쓴다.
+  // 변경 없음) 전환. 기본값을 반드시 grouped로 둔다 — "내 폴더"를 기본으로 두면 폴더에 실제
+  // 담긴 13%(80/619)만 먼저 보여주고 나머지 87%는 한 번 더 탭을 눌러야 보이는 것이 되어,
+  // 이 스토리가 없애려는 문제(폴더 담김 여부에 발견 가능성이 좌우되는 것) 자체를 탭 순서로
+  // 재현하게 된다. 폴더는 그대로 남아 원하는 사람은 "내 폴더"로 전환해 쓴다.
   const [viewMode, setViewModeState] = useState<'grouped' | 'folders'>('grouped');
   useEffect(() => {
     if (!projectId) return;

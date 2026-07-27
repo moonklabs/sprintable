@@ -127,8 +127,17 @@ export function DocAutoGroups({ docs, selectedSlug, onSelect, inFolderLabel, loo
       {ungrouped.length > 0 && (
         // story #2193 AC2/AC6 — 원래는 여기가 시간 버킷(이번 달/지난 달/이전)으로 세분화될
         // 자리다. backend DocSummaryResponse에 created_at이 아직 없어(스키마 확인 완료,
-        // updated_at만 있음) 지금은 하나로 묶어 두고, 필드가 오면 이 슬롯 안에서만
-        // 세분화하면 된다 — 그룹 배치 구조 자체는 이미 맞춰져 있다.
+        // updated_at만 있음, 후속 PR #2505에서 추가 중) 지금은 하나로 묶어 두고, 필드가
+        // 오면 이 슬롯 안에서만 세분화하면 된다 — 그룹 배치 구조 자체는 이미 맞춰져 있다.
+        //
+        // ⚠️ 다음 사람에게: 그때 반드시 created_at 기준으로 나눌 것 — updated_at이 아니다.
+        // 이유 셋(유나양 판정):
+        //  ① 에이전트 오염 회피 — updated_at 기준이면 에이전트가 방금 건드린 문서가 위로
+        //     온다. 사람이 안 봤는데 상단에 서는 "거짓 최신성"이 된다.
+        //  ② 훑기의 안정적 척추 — 버킷이 매번 바뀌면 "어디 있더라"가 안 된다. created_at은
+        //     한번 정해지면 안 변해 고정된 기준이 된다.
+        //  ③ 역할 분리 — 위쪽 "최근 본 것"(RecentsSection)이 이미 사람의 열람 최신성 축을
+        //     담당한다. 시간 버킷까지 updated_at이면 그 축이 두 번 겹친다.
         <GroupHeader
           group={{ key: 'ungrouped', label: restLabel, inFolder: [], looseAtRoot: ungrouped }}
           inFolderLabel={inFolderLabel}
