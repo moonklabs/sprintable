@@ -30,6 +30,16 @@ async function fetchProjectSlug(projectId: string): Promise<string | null> {
     .catch(() => null);
 }
 
+// story #2212(오르테가 지적, open-redirect 방어) — `?next=`는 사용자가 URL로 조작 가능한
+// 값이다(예: 남이 보낸 링크의 쿼리스트링). 여기가 실제 소비·router.push 지점이라 이 가드가
+// 없으면 로그인 상태로 외부 사이트로 튕겨 보내는 open-redirect가 된다(`//evil.com`,
+// `https://evil.com`, `/\evil.com` 등). proxy.ts의 redirectToProjectPicker에도 같은 형태의
+// 가드가 있지만(생성 쪽 방어는 originalPathname이 항상 안전해 이론상 불필요에 가깝다), 진짜
+// 열린 문은 여기다 — 방어는 양쪽 다.
+function isSafeInternalNext(value: string | null): value is string {
+  return !!value && value.startsWith('/') && !value.startsWith('//') && !value.includes('\\');
+}
+
 // story #2039 AC4 — 라이브 재현 확認(2026-07-20): switchProject/switchOrgAndProject가 URL 경로는
 // 그대로 두고 `?p=`만 갈아끼워서 ①목록이 안 바뀐 것처럼 보이고 ②사이드바를 누르는 순간에야 새
 // 프로젝트 slug로 이동해 그 slug가 미정규화(한글 등)면 404가 터진다(#2039 본체와 결합해 증폭).
@@ -167,6 +177,16 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
         body: JSON.stringify({ project_id: projectId }),
       }).catch(() => null);
       if (typeof window !== 'undefined') window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, projectId);
+      // story #2212 — proxy.ts가 "프로젝트 미확定" 404 대신 /org-briefing?next=<원 목적지>로
+      // 보낸 경우, 여기서 그 next를 읽어 프로젝트 선택 "직후" 원래 가려던 곳으로 돌려보낸다
+      // ("고르면 여기로 돌아온다"). CURRENT_PROJECT_COOKIE는 위 switch-project 응답이 이미
+      // Set-Cookie로 반영했으므로 이 시점에 next로 이동하면 그 목적지는 정상 해소된다.
+      const nextRaw = searchParams.get('next');
+      const nextTarget = isSafeInternalNext(nextRaw) ? nextRaw : null;
+      if (nextTarget) {
+        router.push(nextTarget);
+        return;
+      }
       const sp = new URLSearchParams(Array.from(searchParams.entries()));
       sp.set('p', projectId);
       const newOrgSlug = orgs.find((o) => o.orgId === nextOrgId)?.orgSlug;
@@ -184,6 +204,20 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     setPending(true);
     try {
       if (typeof window !== 'undefined') window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, nextProjectId);
+      // story #2212 — next 목적지는 middleware가 CURRENT_PROJECT_COOKIE를 보고 판정하므로,
+      // 기존 경로(낙관적 push 먼저·fetch 나중)와 달리 여기선 push 전에 반드시 fetch가 반영돼야
+      // 한다(안 그러면 next로 이동해도 쿠키가 아직 안 실려 다시 같은 처방으로 튕긴다).
+      const nextRaw = searchParams.get('next');
+      const nextTarget = isSafeInternalNext(nextRaw) ? nextRaw : null;
+      if (nextTarget) {
+        await fetch('/api/switch-project', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_id: nextProjectId }),
+        }).catch(() => null);
+        router.push(nextTarget);
+        return;
+      }
       const sp = new URLSearchParams(Array.from(searchParams.entries()));
       sp.set('p', nextProjectId);
       const orgSlug = currentOrg?.orgSlug;

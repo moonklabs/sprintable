@@ -264,19 +264,6 @@ async def _assert_story_project_access(
         raise HTTPException(status_code=403, detail="No access to this project")
 
 
-async def _assert_story_project_access(
-    session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, project_id: uuid.UUID
-) -> None:
-    """E-SECURITY SEC-S8(story 83ea3d6a) G: 개별-ID story 접근(get/update/status)이 org-scope만
-    있고 project 접근권 미검증이던 갭 — 같은 org 다른 project 멤버가 story id만 알면 조회/수정
-    가능했다. upload_story_attachment와 동형으로 has_project_access 재사용(휴먼 team_member·
-    에이전트 project_access grant 양쪽 처리). delete_story는 SEC-S3(#2014)가 별도 처리."""
-    from app.services.project_auth import has_project_access
-
-    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
-        raise HTTPException(status_code=403, detail="No access to this project")
-
-
 async def _upsert_assignee_participation(
     session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID, assignee_id: uuid.UUID
 ) -> None:
@@ -1347,8 +1334,18 @@ async def list_comments(
     limit: int = Query(default=20, le=100),
     cursor: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
-    _repo: StoryRepository = Depends(_get_repo),
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[CommentResponse]:
+    # SEC(story #2206, 까심 인가 전수 스윕 A급): 쿼리 술어가 StoryComment.story_id == id 뿐이라
+    # org_id 조건 자체가 없었다(project-only 누락이 아니라 org 조건 부재 — 같은 파일 다른
+    # 엔드포인트들의 project-only 누락 갭과 다른 형태). 어느 org 멤버든 story UUID만 알면 다른
+    # org 의 댓글을 읽을 수 있었다. GET /{id}(524) 의 형제 가드(_assert_story_project_access)
+    # 를 그대로 재사용 — 새 규칙 발명 0.
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     q = select(StoryComment).where(
         StoryComment.story_id == id,
     ).order_by(StoryComment.created_at.desc()).limit(limit)
@@ -1443,8 +1440,14 @@ async def list_activities(
     id: uuid.UUID,
     limit: int = Query(default=20, le=100),
     db: AsyncSession = Depends(get_db),
-    _repo: StoryRepository = Depends(_get_repo),
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[ActivityResponse]:
+    # SEC(story #2206) — list_comments(1339)와 동형 갭·동형 처방. 자세한 사유는 그쪽 주석 참조.
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     q = select(StoryActivity).where(
         StoryActivity.story_id == id,
     ).order_by(StoryActivity.created_at.desc()).limit(limit)

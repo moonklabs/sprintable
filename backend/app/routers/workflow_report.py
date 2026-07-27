@@ -15,6 +15,7 @@ from app.models.gate import Gate
 from app.models.pm import Story
 from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
+from app.services.member_resolver import filter_org_member_ids
 from app.services.merge_verdict_gate import (
     AUTO_MERGE,
     BLOCK,
@@ -158,12 +159,18 @@ async def report_done(
 
     # S20 finding #12(sibling): body.agent_id도 검증 없이 gate/line 평가의 actor로 그대로
     # 쓰였다 — 임의 agent_id로 actor 스푸핑 가능했던 갭. caller org 소속 member인지 확인.
-    agent_check = await session.execute(
-        select(TeamMember.id).where(
-            TeamMember.id == body.agent_id, TeamMember.org_id == org_id,
-        ).limit(1)
-    )
-    if agent_check.scalar_one_or_none() is None:
+    # #2215: TeamMember 단독 조회였을 때는 team_members 뷰(members ⋈ project_access INNER
+    # JOIN)에 명시 grant가 없는 owner-floor 휴먼(org owner/admin — has_project_access의
+    # admin_branch로 접근권을 얻지 project_access 행을 갖지 않음)이 이 뷰에 원천적으로
+    # 안 잡혀 "agent_id not found"로 오탐 차단됐다 — 1인 창업자가 자기 스토리를
+    # report-done으로 보고하면 자기 조직 팀원이 아니라고 거절당하는 유입 손실이었다.
+    # 처방: 뷰 자체는 안 건드리고(공용 자산·폭발 반경 큼) **검증 쪽의 판정을 넓힌다** —
+    # filter_org_member_ids(member_resolver.py)가 이미 TeamMember ∪ OrgMember(grant-only
+    # 포함)로 "org 소속인가"를 판정하는 SSOT다(멘션/포크 cross-org 차단에 기존 사용 중,
+    # 재구현 0). 스푸핑 방지라는 이 체크의 원래 목적은 그대로 — org 밖/미소속 agent_id는
+    # 여전히 차단(TeamMember도 OrgMember도 없으면 교집합 0).
+    valid_ids = await filter_org_member_ids({body.agent_id}, org_id, session)
+    if body.agent_id not in valid_ids:
         raise HTTPException(status_code=400, detail="agent_id not found in this organization")
 
     transition = _TRANSITIONS[body.stage]

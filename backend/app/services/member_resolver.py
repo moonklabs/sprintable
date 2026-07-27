@@ -413,7 +413,23 @@ async def is_caller_member(
         ).limit(1)
     )
     row = result.first()
-    return row is not None and row[0] == caller_id
+    if row is not None:
+        return row[0] == caller_id
+    # #2216: team_members뷰(members ⋈ project_access INNER JOIN)는 owner-floor 휴먼
+    # (project_access grant 없이 has_project_access의 admin_branch로만 접근하는 org
+    # owner/admin)을 원천적으로 못 담는다 — 그 축은 TeamMember 조회가 항상 빈 채로
+    # 오는데, 그걸 곧장 "본인 아님"으로 오판하면 owner-floor 본인이 자기 자신을 대상으로
+    # 한 self-scope 호출(예: current-project 전환)에서 영구히 403을 맞는다. org_members
+    # SSOT(filter_org_member_ids와 동일 축 — member_id.py:508의 폴백과 동형)로 마지막
+    # 확인한다: member_id가 org_member.id이고 그 user_id가 caller 본인인가.
+    om_result = await session.execute(
+        select(OrgMember.user_id).where(
+            OrgMember.id == member_id, OrgMember.org_id == org_id,
+            OrgMember.deleted_at.is_(None),
+        ).limit(1)
+    )
+    om_row = om_result.first()
+    return om_row is not None and om_row[0] == caller_id
 
 
 async def assert_caller_is_member(

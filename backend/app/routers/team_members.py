@@ -11,6 +11,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin, assert_agent_owner
 from app.models.pm import Story
+from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.repositories.team_member import TeamMemberRepository
 from app.schemas.team_member import (
@@ -238,7 +239,9 @@ async def create_team_member(
 
     # S-MBR-02: user_id 있으면 org_members 선행 검증
     if body.user_id is not None:
-        from app.models.project import OrgMember
+        # OrgMember는 이제 모듈 상단에서 import(#2216 admin_ids 보강용) — 로컬 재-import 제거
+        # (로컬 import가 있으면 그 이름이 함수 전체에서 local로 취급돼 이 if 밖 다른 자리의
+        # 참조가 UnboundLocalError를 낸다 — 이 fix를 넣다가 실측으로 발견).
         _org_check = await session.execute(
             select(OrgMember).where(
                 OrgMember.org_id == org_id,
@@ -342,7 +345,25 @@ async def create_team_member(
                 TeamMember.is_active.is_(True),
             )
         )
-        admin_ids = [row[0] for row in admin_result.all()]
+        admin_ids = {row[0] for row in admin_result.all()}
+        # #2216(전달누락 계열): team_members뷰(members ⋈ project_access INNER JOIN)는
+        # owner-floor admin/owner(명시 project_access grant 없이 has_project_access의
+        # admin_branch로만 접근)를 이 뷰에 행이 없다는 이유로 못 담는다 — 위 쿼리만 쓰면
+        # 그 admin/owner는 "새 에이전트 합류" 알림을 조용히 못 받는다(403 같은 눈에 보이는
+        # 실패가 아니라 그냥 아무 일도 안 일어남). org_members SSOT로 보강 — set 합집합이라
+        # 이미 team_members에 잡힌 사람과 겹쳐도 중복 알림 없음(0075 ID 보존으로 동일 id).
+        # dispatch_notification 자신이 이미 org_member.id 축 grant-only 휴먼 해소를
+        # 지원한다(E-MEMBER-SSOT AC2-2 주석 참조) — 여기 admin_ids에 org_member.id를
+        # 실어 보내는 것 자체는 새 규칙이 아니라 이미 있는 하위 지원을 실제로 쓰는 것.
+        om_admin_result = await session.execute(
+            select(OrgMember.id).where(
+                OrgMember.org_id == org_id,
+                OrgMember.role.in_(["owner", "admin"]),
+                OrgMember.deleted_at.is_(None),
+            )
+        )
+        admin_ids |= {row[0] for row in om_admin_result.all()}
+        admin_ids = list(admin_ids)
         if admin_ids:
             await dispatch_notification(
                 session,

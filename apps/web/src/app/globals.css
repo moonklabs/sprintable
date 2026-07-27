@@ -503,20 +503,76 @@
 
   /* .doc-renderer pre: doc-content-renderer.tsx의 legacy html-format 경로가 raw HTML 문자열을
      그대로 주입해(dangerouslySetInnerHTML) 내부 <pre>에 클래스를 직접 못 붙인다 — 조상
-     .doc-renderer(항상 존재하는 컨테이너 클래스)를 거쳐 후손 선택자로 동일 예외를 적용한다. */
+     .doc-renderer(항상 존재하는 컨테이너 클래스)를 거쳐 후손 선택자로 동일 예외를 적용한다.
+
+     story #2203 — .tableWrapper는 @tiptap/extension-table(doc-editor.tsx의 Table.configure)이
+     테이블을 감쌀 때 항상 붙이는 자체 클래스다(이 프로젝트 코드가 아니라 라이브러리 기본
+     node view라 className prop을 못 건다 — .doc-renderer pre와 같은 이유로 후손 선택자를
+     못 쓰고 클래스명 자체로 잡는다). 이 클래스에 애초에 overflow-x 규칙이 하나도 없어서
+     scrollbar-width:none(위 전역 숨김)만 먹고 스크롤 자체가 안 되고 있었다(#2165가 스크롤바
+     "숨김"만 예외 처리했지, 이 컨테이너는 애초에 스크롤 "가능"조차 아니었다 — 별개 결함).
+     overflow-x:auto가 본체이고, scrollbar-visible 예외는 그 다음이다(순서가 바뀌면 막대만
+     생기고 여전히 안 굴러간다). */
+  .tableWrapper {
+    overflow-x: auto;
+  }
+
+  /* story #2214(유나 판정, 2026-07-27) — "굴린다. 코드블럭만." TipTap/ProseMirror base CSS
+     (.ProseMirror { overflow-wrap: break-word } · .ProseMirror pre { white-space: pre-wrap })가
+     모든 <pre>를 강제로 접어, #2165가 코드블럭에 준 .scrollbar-visible 예외가 애초에 발동할
+     조건(가로 오버플로) 자체를 못 만들고 있었다(#2214 조사 — "스크롤바가 안 보인다"가 아니라
+     "스크롤할 일이 생길 수 없다"). code-block-copy.tsx가 코드블럭에만 부착하는
+     `.scrollbar-visible` 래퍼를 `.ProseMirror` 조상과 함께 잡아 특이도를 올려 라이브러리 base
+     규칙을 덮는다 — 산문·인용·inline code·표(#2203에서 이미 별도 처리)는 이 selector에
+     걸리지 않아 무접촉.
+     ⛔순서 필수: max-width:100%+min-width:0(레이아웃 안전장치, #2035류 body 밀림 방지)을
+     white-space:pre(본체, 실제로 굴러가게 하는 것)보다 먼저 건다 — 안 그러면 굴러가긴 하는데
+     컨테이너를 못 벗어나는 게 아니라 body 전체를 밀어내는 상태를 한 번 만들고 고치게 된다. */
+  .ProseMirror .scrollbar-visible {
+    max-width: 100%;
+    min-width: 0;
+  }
+  .ProseMirror .scrollbar-visible pre {
+    white-space: pre;
+    overflow-wrap: normal;
+  }
+
+  /* story #2214 후속(라이브 실측으로 발견, 2026-07-27) — 실제로 스크롤되는 요소는
+     `.scrollbar-visible` 래퍼 div가 아니라 그 안의 `<pre class="shiki ...">` 그 자신이었다.
+     shiki가 생성하는 pre 자체에 이미 `overflow-x: auto`가 붙어 있어(라이브러리 산출물), 내용이
+     그 pre 안에서 스스로 스크롤되며 바깥 wrapper의 scrollWidth에는 반영되지 않는다(wrapper는
+     scrollWidth===clientWidth로 남는다 — 실측 확認). 그런데 위 `.scrollbar-visible,
+     .doc-renderer pre, .tableWrapper` 예외 목록은 그 **바깥 wrapper**에만 scrollbar-width:thin을
+     주고 있어서, 실제로 스크롤되는 이 pre 자신은 여전히 전역 `* { scrollbar-width: none }`을
+     그대로 물려받는다 — scrollLeft는 실제로 움직이는데(굴러가는 것 자체는 성립) 스크롤바만
+     안 보이는 반쪽 상태였다. `.ProseMirror .scrollbar-visible pre`에도 같은 예외를 준다. */
+  .ProseMirror .scrollbar-visible pre {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+  .ProseMirror .scrollbar-visible pre::-webkit-scrollbar { display: block; width: 6px; height: 6px; }
+  .ProseMirror .scrollbar-visible pre::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+  .ProseMirror .scrollbar-visible pre::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+  .ProseMirror .scrollbar-visible pre::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
   .scrollbar-visible,
-  .doc-renderer pre {
+  .doc-renderer pre,
+  .tableWrapper {
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   }
   .scrollbar-visible::-webkit-scrollbar,
-  .doc-renderer pre::-webkit-scrollbar { display: block; width: 6px; height: 6px; }
+  .doc-renderer pre::-webkit-scrollbar,
+  .tableWrapper::-webkit-scrollbar { display: block; width: 6px; height: 6px; }
   .scrollbar-visible::-webkit-scrollbar-track,
-  .doc-renderer pre::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+  .doc-renderer pre::-webkit-scrollbar-track,
+  .tableWrapper::-webkit-scrollbar-track { background: var(--scrollbar-track); }
   .scrollbar-visible::-webkit-scrollbar-thumb,
-  .doc-renderer pre::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+  .doc-renderer pre::-webkit-scrollbar-thumb,
+  .tableWrapper::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
   .scrollbar-visible::-webkit-scrollbar-thumb:hover,
-  .doc-renderer pre::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+  .doc-renderer pre::-webkit-scrollbar-thumb:hover,
+  .tableWrapper::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
   /* story #2062(유나 규격): #2057의 outline-offset:2px(바깥 4px 돌출)가 패딩 0인
      overflow-*-auto 스크롤 컨테이너에서 클리핑된다 — 링이 컨테이너 밖으로 못 새어나가

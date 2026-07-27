@@ -89,7 +89,12 @@ async def _setup_app(app, Session, org_id, user_id):
 
 
 async def _seed_common(session):
-    """org + project + caller(project grant, has_project_access True 경로)."""
+    """org + project + caller(project owner grant).
+
+    #2198(PO 판정 (a)): rule B(_non_doc_gate_approvable)가 이제 transition 엔드포인트 인가로도
+    쓰이므로, 이 파일의 관심사(#2027 사유 강제)와 무관하게 caller 가 실제로 merge 게이트를
+    승인할 자격(project owner/admin)을 가져야 한다 — role="member"(과거 인가 자체가 없던
+    시절의 임의값)로는 이제 403 이 먼저 나 이 파일의 진짜 관심사에 도달 못 한다."""
     from app.models.organization import Organization
     from app.models.project import OrgMember, Project
     from app.models.project_access import ProjectAccess
@@ -111,7 +116,7 @@ async def _seed_common(session):
     await session.commit()
     session.add(ProjectAccess(
         id=uuid.uuid4(), project_id=project.id, org_member_id=caller_om.id,
-        permission="granted", role="member",
+        permission="granted", role="owner",
     ))
     await session.commit()
 

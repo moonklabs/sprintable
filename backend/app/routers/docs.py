@@ -229,6 +229,14 @@ class DocPreviewResponse(BaseModel):
     icon: str | None = None
     slug: str
     embed_chain: list[str] = []
+    # #2168 PR-①: 크로스프로젝트 doc 링크가 "링크 자신이 속한 project 를 실어 나르는" 처방이라
+    # 받는 쪽(FE embed-card)이 "현재 프로젝트"를 추측하지 않고 이 doc 의 실제 project 로 직행할
+    # 수 있어야 한다 — project_id(2차 조회 스코프용) + org_slug/project_slug(경로 세그먼트,
+    # `/{ws}/{proj}/docs/{slug}/view` 조립용). additive·project_slug 는 nullable(Project.slug
+    # 가 nullable — 옛 미백필 프로젝트는 None, FE 가 bare 링크로 우아하게 폴백).
+    project_id: uuid.UUID
+    org_slug: str
+    project_slug: str | None = None
 
 
 # ─── Preview (must be before /{id} to avoid routing conflict) ─────────────────
@@ -241,6 +249,8 @@ async def get_doc_preview(
     repo: DocRepository = Depends(_get_repo),
 ) -> DocPreviewResponse:
     from app.models.doc import Doc
+    from app.models.organization import Organization
+    from app.models.project import Project
 
     try:
         doc_uuid = uuid.UUID(q)
@@ -251,8 +261,16 @@ async def get_doc_preview(
     result = await db.execute(stmt.limit(1))
     doc = result.scalar_one_or_none()
 
+    if doc is not None:
+        # #2168 PR-①: get_doc 과 동형 갭 — org-scope happy path 가 project 인가 없이 즉시
+        # 반환하던 것을 canonical 가드로 통일(같은 이유: 링크가 project 를 실어 나르기 시작하며
+        # 이 경로의 실사용 빈도가 올라간다).
+        from app.services.project_auth import has_project_access
+        if not await has_project_access(db, uuid.UUID(auth.user_id), doc.project_id, repo.org_id):
+            raise HTTPException(status_code=403, detail="해당 문서의 프로젝트 접근 권한이 없습니다")
+
     if doc is None:
-        # cross-org fallback: slug/uuid 기반 전체 org 조회 후 membership 검증
+        # cross-org fallback: slug/uuid 기반 전체 org 조회 후 membership 검증 (기존, 무변경)
         try:
             doc_uuid2 = uuid.UUID(q)
             fallback_stmt = select(Doc).where(Doc.id == doc_uuid2, Doc.deleted_at.is_(None))
@@ -262,16 +280,34 @@ async def get_doc_preview(
         doc = fallback.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Document not found")
-        uid = uuid.UUID(auth.user_id)
-        member = await db.execute(
-            select(TeamMember.id).where(
-                or_(TeamMember.user_id == uid, TeamMember.id == uid),
-                TeamMember.project_id == doc.project_id,
-                TeamMember.is_active.is_(True),
-            ).limit(1)
-        )
-        if member.scalar_one_or_none() is None:
+        # #2216: TeamMember(=team_members뷰, members ⋈ project_access INNER JOIN) 단독
+        # 조회는 owner-floor 휴먼(명시 grant 없이 has_project_access의 admin_branch로만
+        # 접근하는 org owner/admin)을 이 뷰에 행이 없다는 이유로 "멤버 아님"으로 오판한다
+        # — #2168 PR-①에서 primary path(위 has_project_access 호출)와 통일했던 그 canonical
+        # 가드를 이 fallback 경로에도 동일 적용(#2215 계열, 새 규칙 발명 0).
+        # ⚠️org_id=doc.org_id(repo.org_id 아님, None도 아님) — 이 분기는 애초에 repo.get(id)가
+        # None(=doc이 repo.org_id 소속이 아님)일 때만 도달하므로, 그 시점의 doc은 구조적으로
+        # repo.org_id와 다른 org에 속한다. repo.org_id로 스코프하면 org_scope_project 필터가
+        # 항상 거짓이 돼 owner-floor뿐 아니라 정상 team_member까지 전원 403(실측 발견).
+        # ⛔org_id=None(org 필터 완전 해제)도 안 쓴다 — human_grant_branch/admin_branch가
+        # org_scope 없이 project_access/OrgMember 존재만으로 통과시키면, "project_access
+        # 행은 남았지만 그 org 멤버는 아닌" 상태가 이론상 있을 때 탈퇴자에게 문을 열 수
+        # 있다(오르테가군 지적, 2026-07-27 — #2206과 동형 클래스 우려). 실측(org_members.py
+        # delete_org_member, S-MBR-10 AC5)으로 그 상태가 현재 코드베이스에선 안 만들어짐을
+        # 확認했지만(멤버 제거 시 project_access를 명시 DELETE), 그 불변식에 기대지 않는
+        # 좁은 형태가 더 안전 — doc.org_id를 쓰면 human_grant_branch/admin_branch가 "그
+        # doc의 org에 caller가 실제로 소속돼 있는가"까지 강제해 원래 fallback의 의미
+        # (caller의 주 org와 달라도 실 멤버십이면 통과)를 org 필터 없이 손댈 필요 없이 보존한다.
+        from app.services.project_auth import has_project_access
+        if not await has_project_access(db, uuid.UUID(auth.user_id), doc.project_id, doc.org_id):
             raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
+
+    org_slug = (await db.execute(
+        select(Organization.slug).where(Organization.id == doc.org_id)
+    )).scalar_one()
+    project_slug = (await db.execute(
+        select(Project.slug).where(Project.id == doc.project_id)
+    )).scalar_one_or_none()
 
     return DocPreviewResponse(
         id=doc.id,
@@ -279,6 +315,9 @@ async def get_doc_preview(
         icon=doc.icon,
         slug=doc.slug,
         embed_chain=[],
+        project_id=doc.project_id,
+        org_slug=org_slug,
+        project_slug=project_slug,
     )
 
 
@@ -292,8 +331,16 @@ async def get_doc(
     repo: DocRepository = Depends(_get_repo),
 ) -> DocResponse:
     doc = await repo.get(id)
+    if doc is not None:
+        # #2168 PR-①: 크로스프로젝트 doc 링크가 정상 동선이 되며 이 org-scope happy path의
+        # project 인가 누락(patch/delete 는 f69fcd91 로 이미 고쳐졌으나 GET 은 방치돼 있었음 —
+        # 同org 비-project caller 가 id만 알면 무제한 열람 가능하던 갭)이 실사용 IDOR 표면으로
+        # 커진다. canonical 가드(has_project_access)로 patch/delete 와 통일.
+        from app.services.project_auth import has_project_access
+        if not await has_project_access(session, uuid.UUID(auth.user_id), doc.project_id, repo.org_id):
+            raise HTTPException(status_code=403, detail="해당 문서의 프로젝트 접근 권한이 없습니다")
     if doc is None:
-        # cross-org fallback: project_id query param 없이 단일 id로 접근한 경우
+        # cross-org fallback: project_id query param 없이 단일 id로 접근한 경우 (기존, 무변경)
         from app.models.doc import Doc
         result = await session.execute(
             select(Doc).where(Doc.id == id, Doc.deleted_at.is_(None))
@@ -301,15 +348,17 @@ async def get_doc(
         doc = result.scalar_one_or_none()
         if doc is None:
             raise HTTPException(status_code=404, detail="Doc not found")
-        uid = uuid.UUID(auth.user_id)
-        member = await session.execute(
-            select(TeamMember.id).where(
-                or_(TeamMember.user_id == uid, TeamMember.id == uid),
-                TeamMember.project_id == doc.project_id,
-                TeamMember.is_active.is_(True),
-            ).limit(1)
-        )
-        if member.scalar_one_or_none() is None:
+        # #2216: 위 primary path(line 327)와 동일 이유 — TeamMember 단독 조회는 owner-floor
+        # 휴먼(명시 grant 없이 admin_branch로만 접근하는 org owner/admin)을 이 뷰에 행이
+        # 없다는 이유로 "멤버 아님"으로 오판한다. 이 fallback도 canonical 가드로 통일.
+        # ⚠️org_id=doc.org_id(repo.org_id·None 둘 다 아님) — repo.org_id는 이 분기가 구조적으로
+        # cross-org라 항상 거짓이 되고(실측 발견), org_id=None(필터 완전 해제)은 human_grant_
+        # branch/admin_branch가 org 소속 확認 없이 project_access/OrgMember 존재만으로
+        # 통과시켜 "탈퇴자에게 문을 여는" 이론적 폭을 만든다(오르테가군 지적 — #2206과 동형
+        # 우려). doc.org_id를 쓰면 "그 doc의 org에 caller가 실제로 소속돼 있는가"까지
+        # 강제하면서 원래 fallback 의미(caller 주 org와 달라도 실 멤버십이면 통과)도 보존.
+        from app.services.project_auth import has_project_access
+        if not await has_project_access(session, uuid.UUID(auth.user_id), doc.project_id, doc.org_id):
             raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
     # doc 상세(detail view)만 enrich: 담당자 member 요약 + 수정이력 요약 동봉(FE 이중 fetch 제거).
     # create/update/transition 은 write-path 라 plain(추가 쿼리 0·기존 테스트 broad-mock 무파손).

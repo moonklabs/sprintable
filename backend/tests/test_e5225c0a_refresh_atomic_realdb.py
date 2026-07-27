@@ -30,6 +30,14 @@ pytestmark = [
     pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요"),
 ]
 
+# #2124: app.main import(모듈 최초 1회)이 app.core.logging_config.configure_logging()을 태워
+# root.handlers.clear()를 실행한다 — 이 파일을 단독 실행(다른 파일이 먼저 app.main을 안 당겨온
+# 상태)하면 그 clear가 caplog의 propagate 핸들러까지 지워 이 파일의 caplog 기반 관측성 테스트가
+# 거짓양성(assert 대상이 빈 리스트인데도 다른 이유로 통과)/거짓음성을 낼 수 있다. 모듈 최상단에서
+# 미리 당겨와 "이 파일 안에서" clear가 일어나는 시점을 각 테스트의 caplog fixture 설정 前으로
+# 고정 — 전체 스위트에서 이미 우연히 성립하던 순서를 이 파일 단독 실행에서도 보장한다.
+import app.main  # noqa: E402,F401
+
 
 @pytest.fixture
 def anyio_backend():
@@ -234,11 +242,53 @@ async def test_refresh_failure_logs_reason_and_correlation_key_realdb(caplog):
                 second = await client.post(
                     "/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]},
                 )
-            assert second.status_code == 401
+                assert second.status_code == 401
+                failure_records = [
+                    r for r in caplog.records
+                    if "reason=token_not_found_or_revoked_or_expired" in r.message
+                ]
+                assert failure_records, f"관측성 로그 누락: {[r.message for r in caplog.records]}"
+                assert all("key=" in r.message for r in failure_records)
+                # #2124(오르테가군 요청 2026-07-27): 하드 401 loop 실측(prod 259건, 동일 key 반복)에서
+                # "누가 겪는지" 계정 상관이 0이라 못 쫓았다 — user_id가 **바로 이 실패 로그 레코드
+                # 자체**에 실렸는지 실증(다른 레코드(예: 이전 성공 rotation의 INFO 로그)에 우연히
+                # user_id가 있어 통과하는 거짓양성을 피하려 failure_records만 검사).
+                assert all(
+                    f"user_id={seeded['user_id']}" in r.message for r in failure_records
+                ), f"user_id 관측성 로그 누락: {[r.message for r in failure_records]}"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_refresh_success_logs_rotation_old_new_key_realdb(caplog):
+    """#2124(오르테가군 요청 2026-07-27): 성공 rotation에도 로그가 없어(침묵) old_key의 훗날
+    하드 401과 new_key의 미사용 여부를 대조할 방법이 없었다 — old_key→new_key→user_id 로깅 실증."""
+    import logging
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_user_with_refresh_token(s)
+
+        await _setup_app(app, Session)
+        client = _client_for(app)
+        try:
+            with caplog.at_level(logging.INFO, logger="app.routers.auth"):
+                resp = await client.post(
+                    "/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]},
+                )
+            assert resp.status_code == 200
             assert any(
-                "reason=token_not_found_or_revoked_or_expired" in r.message and "key=" in r.message
+                "auth.refresh rotated old_key=" in r.message
+                and "new_key=" in r.message
+                and f"user_id={seeded['user_id']}" in r.message
                 for r in caplog.records
-            ), f"관측성 로그 누락: {[r.message for r in caplog.records]}"
+            ), f"rotation 관측성 로그 누락: {[r.message for r in caplog.records]}"
         finally:
             await client.aclose()
     finally:

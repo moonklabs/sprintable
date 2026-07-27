@@ -64,6 +64,20 @@ PROJECT_GUARD_FUNCTIONS: frozenset[str] = frozenset({
     "_assert_item_project_access",
     "_require_doc_project_access",
     "_require_retro_project_access",
+    # story #1994(E-KNOWLEDGE-LINK S2) 5회차 SSOT — has_project_access와 동일한
+    # _project_access_predicate를 렌더하는 correlated-EXISTS 빌더(project_auth.py). 별도
+    # SELECT로 "접근 가능 project 집합"을 먼저 만들어 .in_() 거르는 2-phase가 아니라 메인
+    # statement의 WHERE절에 직접 correlate돼 같은 스냅샷에서 평가된다 — has_project_access
+    # 호출보다 약한 것이 아니라 TOCTOU 윈도우가 구조적으로 없는 더 강한 형태(#2168 PR-②
+    # conversations.py:list_recent_conversations_outside_project 최초 콜사이트).
+    #
+    # ⚠️이 가드로도 못 잡는 것(선언 — 까심 i18n 가드와 동일 규율): AST 바디 스캔은 "이 이름의
+    # 호출이 body 안에 있는가"만 본다. project_access_valid_correlated를 **import만 하고
+    # 실제로 메인 쿼리의 WHERE/필터에 물리지 않은 채 다른 데(로그·주석성 변수 등)에 호출만
+    # 남겨도 이 스캐너는 guarded로 오인식한다 — "호출됐다"와 "그 결과가 실제로 응답을 좁힌다"
+    # 사이는 정적 AST로 못 가른다. 이 콜사이트류를 건드리는 PR은 realdb 회귀 테스트로
+    # "무권한 caller가 실제로 빈 결과/403을 받는가"까지 실증해야 한다(단순 호출 존재로 안심 금지).
+    "project_access_valid_correlated",
 })
 
 # ── PATH_ID 뮤테이션 축(story 5285888c): `DELETE|PATCH|PUT /resource/{id}` 처럼 리소스 자기
