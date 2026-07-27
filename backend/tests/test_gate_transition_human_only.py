@@ -38,16 +38,23 @@ async def _call(status: str, member_type: str):
     body = GateTransitionRequest(status=status, resolver_id=uuid.uuid4(), note="테스트 사유")
     session = AsyncMock()
     # 48f064e5: 엔드포인트가 doc-gate authz용 게이트 로드 → 비-doc 게이트 반환(merge 등)으로 그 분기 skip.
+    # #2198: non-doc 분기가 work_item_type/work_item_id 를 읽으므로 SimpleNamespace 에 명시(누락
+    # 시 AttributeError) — 이 테스트는 human-vs-agent authz만 검증하므로 project-role 판정
+    # (_non_doc_gate_approvable) 은 아래에서 직접 patch 해 True 로 고정(그 판정 자체는 이 파일의
+    # 관심사가 아님 — project-role 축은 test_2198_*_realdb.py 가 별도로 커버).
     _gr = MagicMock()
-    _gr.scalar_one_or_none.return_value = SimpleNamespace(gate_type="merge_approval")
+    _gr.scalar_one_or_none.return_value = SimpleNamespace(
+        gate_type="merge_approval", work_item_type="story", work_item_id=uuid.uuid4(),
+    )
     session.execute = AsyncMock(return_value=_gr)
     transition = AsyncMock(return_value=SimpleNamespace())
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved(member_type))), \
          patch.object(gates_mod, "transition_gate", transition), \
+         patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)), \
          patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
         result = await transition_gate_endpoint(
             id=uuid.uuid4(), body=body, background_tasks=BackgroundTasks(),
-            session=session, org_id=org_id, auth=SimpleNamespace(),
+            session=session, org_id=org_id, auth=SimpleNamespace(user_id=str(uuid.uuid4())),
         )
     return result, transition
 
