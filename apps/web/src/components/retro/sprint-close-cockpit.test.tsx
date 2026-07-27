@@ -6,6 +6,14 @@ import { createHeuristicStepSchedule, SprintCloseCockpit } from './sprint-close-
 import { EvidenceStrip } from './evidence-strip';
 import type { RetroHypothesisResult, RetroNextHypothesis, RetroSynthesis } from '@/services/retro-session';
 
+// story #2104 — HumanOnlyAction(다음가설 채택 버튼을 감싼다)이 useDashboardContext를 읽는다.
+// 기본은 human(기존 스위트가 전부 "채택 버튼이 보인다"를 전제하므로). agent 게이팅 자체를
+// 보는 케이스만 개별 override.
+const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn(() => ({ currentMemberType: 'human' })) }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => useDashboardContextMock(),
+}));
+
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -132,6 +140,32 @@ describe('SprintCloseCockpit (E-SPRINT-LOOP 1b9f4ecb)', () => {
     expect(markup).toContain('채택');
     expect(markup).toContain('추천일 뿐이다');
     expect(markup).toContain('중'); // 0.55 → mid bucket
+  });
+
+  // story #2104 — BE retros.py:373(ADOPTION_REQUIRES_HUMAN, "채택=인간 게이트")를 FE가 미리
+  // 안 보고 에이전트 계정에도 채택 버튼을 무조건 열었다(#2091/#2103과 같은 결함). 양방향
+  // 고정 — human까지 잠그면 정당한 채택이 봉쇄되는 더 큰 사고다.
+  it('agent 계정이면 채택 버튼이 안 뜬다(위 human 케이스와 대구 — story #2104)', () => {
+    useDashboardContextMock.mockReturnValue({ currentMemberType: 'agent' });
+    const synthesis: RetroSynthesis = { learned: [{ text: '학습' }], generated_at: '2026-07-02T00:00:00Z', source: 'ai_draft' };
+    const rec: RetroNextHypothesis = {
+      statement: '온보딩 첫 화면에 가이드를 넣으면 리텐션이 오를 것이다',
+      metric_definition: { metric: 'D1 리텐션', target: 32, direction: 'up' },
+      measure_after: '2026-07-16T00:00:00Z',
+      confidence: 0.55,
+      rationale: '가설 2 반증에서 — 레버는 첫 경험',
+      requires_confirmation: true,
+    };
+    const markup = renderToStaticMarkup(wrap(
+      <SprintCloseCockpit hypotheses={[VERIFIED]} synthesis={synthesis} nextHypotheses={[rec]} onGenerateSynthesis={noop} onAdoptRecommendation={noop} />,
+    ));
+    // 추천 카드 자체(문구·근거)는 그대로 보여야 한다 — 숨겨지는 건 액션 버튼뿐. 하단 안내문
+    // "채택하면 다음 스프린트..."는 "채택" 부분 문자열을 포함하므로(무관한 문구) 버튼
+    // 정확 경계(>채택</button>)로만 단언한다.
+    expect(markup).toContain('온보딩 첫 화면에 가이드를 넣으면 리텐션이 오를 것이다');
+    expect(markup).not.toContain('>채택</button>');
+    expect(markup).toContain('추천일 뿐이다'); // 안내문 자체는 그대로 남아있어야 함(무관 텍스트 보존 확認)
+    useDashboardContextMock.mockReturnValue({ currentMemberType: 'human' });
   });
 
   it('does not crash when a recommendation is missing metric_definition (까심 QA 적출 회귀 가드)', () => {

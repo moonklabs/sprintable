@@ -98,7 +98,7 @@ def test_live_sse_always_yields_id_field():
     """live SSE yield에 event_id 없어도 uuid4()로 id: 보장."""
     from app.routers.events import agent_event_stream
     source = inspect.getsource(agent_event_stream)
-    assert "_live_id = eid or str(uuid.uuid4())" in source
+    assert "_live_id = eid or _transient_id or str(uuid.uuid4())" in source  # #2158: _sse_transient_id 우선 재사용(id: 필드는 여전히 항상 보장)
 
 
 # ─── AC3: conversations webhook BackgroundTask 검증 ──────────────────────────

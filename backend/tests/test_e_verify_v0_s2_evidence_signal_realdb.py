@@ -71,6 +71,21 @@ async def _seed(session):
     return org.id, project.id, agent.id, story.id, task.id
 
 
+async def _seed_human_approver(session, org_id: uuid.UUID) -> uuid.UUID:
+    """org owner 휴먼을 시드하고 그 org_member.id를 반환 — resolve_member_identity가 OrgMember
+    분기에서 type=human으로 해소하는 값(= 라우터가 resolver_id로 강제하는 resolved.id와 동형)."""
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    user_id = uuid.uuid4()
+    session.add(User(id=user_id, email=f"approver-{user_id.hex[:8]}@test.com", hashed_password="x"))
+    await session.commit()
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user_id, role="owner")
+    session.add(om)
+    await session.commit()
+    return om.id
+
+
 def _client_for(app):
     from httpx import AsyncClient, ASGITransport
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
@@ -174,14 +189,14 @@ async def test_task_has_evidence_none_by_default_true_after_attach():
 @pytest.mark.anyio
 async def test_gate_approval_auto_creates_evidence_and_flips_signal():
     """HITL gate 승인 → gate_approval evidence 자동 편입 → story.has_evidence=True."""
-    from app.models.gate import Gate
     from app.services.gate_service import create_gate, transition_gate
 
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             org_id, project_id, agent_id, story_id, _task_id = await _seed(s)
-            approver_id = uuid.uuid4()
+            # e1063967 SOUL-LOCK: resolver는 실제 휴먼이어야 gate_approval evidence가 생성된다.
+            approver_id = await _seed_human_approver(s, org_id)
             role_id = uuid.uuid4()
 
             gate = await create_gate(
@@ -277,6 +292,95 @@ async def test_gate_approval_for_non_story_task_work_item_type_is_noop():
             from app.models.evidence import Evidence
             rows = (await s.execute(
                 select(Evidence).where(Evidence.work_item_id == fake_gate.work_item_id)
+            )).scalars().all()
+            assert rows == []
+    finally:
+        await engine.dispose()
+
+
+# ── e1063967 human_verified SOUL-LOCK choke-point 가드 ─────────────────────────
+# gate_approval evidence = human_verified 신호의 유일 신호원. choke-point가 resolver의
+# 휴먼성을 검증하지 않으면(현재는 라우터 강제에만 의존), parallel-approval 등 새 라우터가
+# 배선되는 순간 에이전트가 인간 검증 신호를 위조할 수 있다. 아래 3종으로 choke-point 자체가
+# 게이팅함을 실증(비-동어반복: 휴먼=생성 / 에이전트·미해소=차단).
+
+def _story_gate(org_id: uuid.UUID, story_id: uuid.UUID):
+    from app.models.gate import Gate
+    return Gate(
+        id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
+        gate_type="pr_review", status="approved",
+    )
+
+
+@pytest.mark.anyio
+async def test_chokepoint_human_resolver_creates_evidence():
+    """positive: resolver가 실제 휴먼이면 choke-point가 gate_approval evidence를 생성한다."""
+    from app.services.evidence_service import create_gate_approval_evidence_if_applicable
+    from sqlalchemy import select
+    from app.models.evidence import Evidence
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _project_id, _agent_id, story_id, _task_id = await _seed(s)
+            human_id = await _seed_human_approver(s, org_id)
+            await create_gate_approval_evidence_if_applicable(
+                s, _story_gate(org_id, story_id), "approved", human_id
+            )
+            await s.commit()
+            rows = (await s.execute(
+                select(Evidence).where(Evidence.work_item_id == story_id, Evidence.type == "gate_approval")
+            )).scalars().all()
+            assert len(rows) == 1
+            assert rows[0].created_by == human_id
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_chokepoint_agent_resolver_creates_no_evidence_soul_lock():
+    """SOUL-LOCK: resolver가 에이전트(team_members type=agent)면 choke-point가 인간 검증 신호
+    위조를 차단 — gate_approval evidence 0건(fail-closed). 위 positive와 동일 shape·resolver만
+    에이전트로 바꿔 비-동어반복 실증."""
+    from app.services.evidence_service import create_gate_approval_evidence_if_applicable
+    from sqlalchemy import select
+    from app.models.evidence import Evidence
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _project_id, agent_id, story_id, _task_id = await _seed(s)
+            # agent_id = _seed가 만든 Member(type=agent)+grant → team_members 뷰서 type=agent로 해소.
+            await create_gate_approval_evidence_if_applicable(
+                s, _story_gate(org_id, story_id), "approved", agent_id
+            )
+            await s.commit()
+            rows = (await s.execute(
+                select(Evidence).where(Evidence.work_item_id == story_id, Evidence.type == "gate_approval")
+            )).scalars().all()
+            assert rows == [], "에이전트 resolver가 human_verified 신호를 위조했다(SOUL-LOCK 파손)"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_chokepoint_unresolvable_resolver_creates_no_evidence_soul_lock():
+    """SOUL-LOCK: resolver_id가 org 범위서 해소 불가(무존재 member)면 fail-closed로 evidence
+    생성 skip — 이전엔 임의 uuid resolver로도 evidence가 생겼다(이 가드가 그 구멍을 봉인)."""
+    from app.services.evidence_service import create_gate_approval_evidence_if_applicable
+    from sqlalchemy import select
+    from app.models.evidence import Evidence
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, _project_id, _agent_id, story_id, _task_id = await _seed(s)
+            await create_gate_approval_evidence_if_applicable(
+                s, _story_gate(org_id, story_id), "approved", uuid.uuid4()
+            )
+            await s.commit()
+            rows = (await s.execute(
+                select(Evidence).where(Evidence.work_item_id == story_id, Evidence.type == "gate_approval")
             )).scalars().all()
             assert rows == []
     finally:

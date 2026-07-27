@@ -115,6 +115,11 @@ def _base_epic_mock(outcome_status: str = "n_a") -> MagicMock:
     # E1 S8b: EpicResponse 신규 집계 필드 — MagicMock auto-attr ValidationError 방지.
     e.hypothesis_count = 0
     e.risky_status = None
+    e.total_stories = 0
+    e.done_stories = 0
+    # E-GLANCE wedge #2(story 96b19bc3): 신규 필드 — 동일 사유.
+    e.position = None
+    e.source_loop_id = None
     e.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     e.updated_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
     return e
@@ -211,7 +216,7 @@ async def test_update_epic_intent_triggers_pending_transition():
     # 업데이트 후: pending으로 전이된 에픽
     updated = _base_epic_mock(outcome_status="pending")
 
-    with patch("app.repositories.epic.EpicRepository.get", new_callable=AsyncMock) as mock_get, \
+    with patch("app.repositories.goal.GoalRepository.get", new_callable=AsyncMock) as mock_get, \
          patch("app.repositories.base.BaseRepository.update", new_callable=AsyncMock) as mock_update:
         mock_get.return_value = current
         mock_update.return_value = updated
@@ -238,7 +243,7 @@ async def test_update_epic_does_not_downgrade_from_hit():
     current = _base_epic_mock(outcome_status="hit")
     updated = _base_epic_mock(outcome_status="hit")
 
-    with patch("app.repositories.epic.EpicRepository.get", new_callable=AsyncMock) as mock_get, \
+    with patch("app.repositories.goal.GoalRepository.get", new_callable=AsyncMock) as mock_get, \
          patch("app.repositories.base.BaseRepository.update", new_callable=AsyncMock) as mock_update:
         mock_get.return_value = current
         mock_update.return_value = updated

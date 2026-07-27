@@ -53,6 +53,11 @@ class Member(Base):
     # registry(app.services.agent_runtime) lookup 키. 휴먼/미설정은 NULL(= 커맨드 미지원).
     # 9 enum 은 앱 레이어에서 강제(네이티브 PG enum 미사용 — 신규 런타임 확장 용이).
     runtime_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # E-MCP-OPT(story ff6cb90d·doc mcp-multiproject-scoping-design §3): 멀티프로젝트 MCP 키의
+    # 명시 기본 프로젝트(0177 additive). 미설정=암묵 선택 금지(무인자 콜은 명시 에러로 가이드).
+    default_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

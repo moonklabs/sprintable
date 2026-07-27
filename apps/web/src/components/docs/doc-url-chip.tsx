@@ -27,7 +27,7 @@ export function DocUrlChip({ slug, onEdit, onDeriveFromTitle, labels }: DocUrlCh
       <button
         type="button"
         onClick={onDeriveFromTitle}
-        className="inline-flex items-center gap-1.5 text-xs text-warning transition-colors hover:text-warning/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-warning/40 rounded"
+        className="inline-flex items-center gap-1.5 text-xs text-warning transition-colors hover:text-warning/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-warning rounded"
       >
         <span className="max-w-[60vw] truncate font-mono md:max-w-md">/docs/{slug}</span>
         <span className="inline-flex items-center gap-1">

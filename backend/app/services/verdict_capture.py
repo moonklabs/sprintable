@@ -6,6 +6,7 @@ SID/participation 없으면 skip(거짓기록 금지). garbage-in 차단.
 """
 from __future__ import annotations
 
+import fnmatch
 import logging
 import os
 import re
@@ -145,6 +146,70 @@ async def fetch_status_check_rollup(repo: str, head_sha: str, token: str) -> tup
     except Exception as exc:  # noqa: BLE001
         logger.warning("statusCheckRollup fetch failed repo=%s sha=%s: %s", repo, head_sha, exc)
         return None, "api_error"
+
+
+_PR_FILES_PAGE_SIZE = 100
+_PR_FILES_MAX_PAGES = 3  # 상한 300개 변경파일 — 그 이상은 판정 포기(무신호, 비용 상한).
+
+
+async def fetch_pr_changed_files(repo: str, pr_number: int, token: str) -> list[str] | None:
+    """E-UI-DAEGBYEON P0-05 후속(doc scope-violation-signal-design §2·§3) — PR 변경 파일 목록 조회.
+
+    GitHub REST `GET /repos/{repo}/pulls/{pr_number}/files`(**신규 GitHub API 호출 — fetch_status_
+    check_rollup과 같은 installation-token+httpx 패턴 재사용이나 새 능력**). 실패/토큰없음/입력오류는
+    **None**(빈 리스트 아님 — "변경 파일 0건"과 "조회 실패"를 구분해야 §2의 3중 침묵 조건①이 성립).
+    페이지 상한(300개)을 넘는 PR은 판정 포기(None) — 완벽한 커버리지보다 정직한 미가용이 우선.
+    """
+    if not token:
+        return None
+    if not repo or "/" not in repo or not pr_number:
+        return None
+    files: list[str] = []
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for page in range(1, _PR_FILES_MAX_PAGES + 1):
+                resp = await client.get(
+                    f"https://api.github.com/repos/{repo}/pulls/{pr_number}/files",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/vnd.github+json",
+                    },
+                    params={"per_page": _PR_FILES_PAGE_SIZE, "page": page},
+                )
+                if resp.status_code != 200:
+                    return None
+                batch = resp.json()
+                if not isinstance(batch, list):
+                    return None
+                files.extend(f.get("filename") for f in batch if isinstance(f, dict) and f.get("filename"))
+                if len(batch) < _PR_FILES_PAGE_SIZE:
+                    return files  # 마지막 페이지 도달.
+        # 상한 페이지까지 꽉 찼다 — 완전한 목록이 아님(부분 목록으로 오탐 방지 위해 포기).
+        logger.warning("PR changed-files 상한 초과(> %d) repo=%s pr=%d — 판정 포기", _PR_FILES_MAX_PAGES * _PR_FILES_PAGE_SIZE, repo, pr_number)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("PR changed-files fetch failed repo=%s pr=%d: %s", repo, pr_number, exc)
+        return None
+
+
+def check_scope_violation(declared_paths: list[str], changed_files: list[str]) -> tuple[bool, list[str]]:
+    """E-UI-DAEGBYEON P0-05 후속(doc scope-violation-signal-design §2·§3) — 순수 함수 글롭 판정.
+
+    ⭐`dir/**` 계약: 하위 디렉토리 전체(임의 depth)를 커버하는 것이 이 함수의 **명시 계약**이다
+    (fnmatch 원생 동작에 우연히 의존하지 않음 — `*`가 `/`를 매칭하는 현재 fnmatch 동작이 바뀌어도
+    이 계약은 테스트로 고정돼 회귀를 잡는다). 매칭 안 되는 파일 = out-of-scope.
+
+    반환 (violated, out_of_scope_files) — declared_paths/changed_files 둘 중 하나라도 비면
+    (False, [])(호출자가 §2 3중 침묵 조건을 먼저 걸러야 하나, 순수함수 자체도 안전하게 무신호).
+    """
+    if not declared_paths or not changed_files:
+        return False, []
+    out_of_scope = [
+        f for f in changed_files
+        if not any(fnmatch.fnmatch(f, pattern) for pattern in declared_paths)
+    ]
+    return bool(out_of_scope), out_of_scope
 
 
 async def capture_pr_ci_verdict(

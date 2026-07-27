@@ -30,7 +30,9 @@ def test_catalog_structure_and_contract_fields():
     cat = build_toolset_catalog()
     assert set(cat.keys()) == {"groups"}
     groups = cat["groups"]
-    # core + 16 비파괴 + admin = 18 (E1-S5 hypotheses 그룹 추가)
+    # core + 16 비파괴(story b4027b2e: canvas 그룹 추가·story 205e6831: standup이 core로 전량
+    # 흡수돼 카탈로그 그룹 목록에서 제거 — _GROUP_KEYWORDS/ALL_GROUPS엔 여전히 존재, 여긴 picker
+    # 표시 목록만) + admin = 18
     assert len(groups) == 18
     for g in groups:
         assert set(g.keys()) == _CONTRACT_FIELDS, f"{g['key']} 필드 계약 불일치"
@@ -54,10 +56,13 @@ def test_core_first_admin_last_flags():
 
 def test_group_keys_match_mcp_toolset_ssot():
     keys = [g["key"] for g in build_toolset_catalog()["groups"]]
-    # core + admin + ALL_GROUPS 비-core = 전체
+    # core + admin + ALL_GROUPS 비-core = 전체 — story 205e6831 예외: "standup"은 ALL_GROUPS엔
+    # 남아있지만(pm/scrum-master role_template.default_tool_groups 하위호환용 literal 토큰,
+    # validate_tool_groups unknown-group 방지) 스탠드업 5종 전부가 core로 흡수돼 카탈로그엔
+    # 빈 그룹으로 안 나타난다("standup" != core 그러나 catalog엔 미표시).
     assert "core" in keys and "admin" in keys
     non_core_admin = {k for k in keys if k not in ("core", "admin")}
-    assert non_core_admin == {g for g in ALL_GROUPS if g != "core"}  # 16 비파괴 그룹
+    assert non_core_admin == {g for g in ALL_GROUPS if g not in ("core", "standup")}
 
 
 def test_every_tool_covered_exactly_once():
@@ -72,9 +77,11 @@ def test_every_tool_covered_exactly_once():
 def test_tool_group_mapping_examples():
     by_tool = {t: g["key"] for g in build_toolset_catalog()["groups"] for t in g["tools"]}
     # 도메인 destructive 는 도메인 그룹(admin 아님)
-    assert by_tool["sprintable_delete_story"] == "stories"
+    # E-SECURITY SEC-S1(확장): sprintable_delete_story/task/epic/doc 제거(에이전트 hard-delete
+    # 차단) — delete_meeting으로 대체 예시(에이전트 MCP 표면에 남는 도메인 destructive 도구)
+    # E-SECURITY SEC-S8 확장: sprintable_delete_sprint도 동일 사유로 제거.
+    assert by_tool["sprintable_delete_meeting"] == "meetings"
     assert by_tool["sprintable_give_reward"] == "rewards"
-    assert by_tool["sprintable_delete_sprint"] == "sprints"
     # admin 그룹 = emit_event/trigger_ai/activate_sprint/close_sprint 등 진짜 파괴 작업만
     assert by_tool["sprintable_emit_event"] == "admin"
     # always-allowed(+orphan)는 core 로 통합(키워드 그룹서 제외)
@@ -89,6 +96,15 @@ def test_tool_group_mapping_examples():
     # 정상 그룹 매핑 sanity
     assert by_tool["sprintable_add_story"] == "stories"
     assert by_tool["sprintable_get_velocity"] == "analytics"
+    # story #2010: sprintable_transition_goal — ALL_TOOL_NAMES 누락 시 KeyError로 실패(당초
+    # 이 도구가 SSOT 목록에서 빠져 role-template picker/치트시트에 노출되지 않던 회귀 가드).
+    # "goal" substring 매칭으로 add_goal/update_goal/list_goals와 동일 "epics" 그룹.
+    assert by_tool["sprintable_transition_goal"] == "epics"
+    # story #1922: sprintable_delete_artifact — ALL_TOOL_NAMES 누락 시 KeyError(#2010과 동일
+    # 회귀 클래스, 이번엔 최초 커밋부터 등록해 애초에 발생하지 않게 함 — 이 assert는 그 보장의
+    # 회귀 가드). "artifact" substring 매칭으로 create_artifact/edit_artifact/delete_spec_pin과
+    # 동일 "canvas" 그룹.
+    assert by_tool["sprintable_delete_artifact"] == "canvas"
 
 
 # ── 엔드포인트 admin 게이트 ────────────────────────────────────────────────────

@@ -67,7 +67,9 @@ async def _seed(s, *, legacy_team_member: bool = False):
         f"DELETE FROM projects WHERE org_id='{ORG}'",
         f"DELETE FROM users WHERE id='{HUMAN_OWNER}'",
         f"DELETE FROM organizations WHERE id='{ORG}'",
-        f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','C1D','c1dorg','free')",
+        # story 139d2405: slug 전역 유일 제약 신설 — test_e_loop_ledger_p1_s12_context_pack_router_
+        # idor_realdb.py가 우연히 동일 slug 'c1dorg'를 다른 org id로 써서 충돌했다(발견 즉시 수정).
+        f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','C1D','c1dorg-rm','free')",
         f"INSERT INTO projects (id,org_id,name) VALUES ('{PROJ_A}','{ORG}','A')",
         f"INSERT INTO projects (id,org_id,name) VALUES ('{PROJ_B}','{ORG}','B')",
         f"INSERT INTO members (id,org_id,type,name,is_active) VALUES ('{AGENT}','{ORG}','agent','Ag',true)",

@@ -20,11 +20,14 @@ const TYPE_ICON: Record<AssetSourceLinkType, LucideIcon> = {
   manual: Paperclip,
 };
 
-// 목업 `.uic.*` 토큰 매핑. conversation: --brand-soft 유틸리티 부재 → bg-brand/15 로 근사(NOTE).
+// story #2023 ⓒ(핸드오프 §5-1): conversation은 원래 --brand-soft 유틸리티 부재로 bg-brand/15
+// 근사였다 — 브랜드 블루는 인간 서명 축인데 이 자리는 첨부파일 "출처 분류"(story/doc/
+// conversation/manual) 축이라 서명과 무관하다. 브랜드 계열을 아예 안 쓰고 중립 계열(secondary)
+// 로 간다 — manual(muted)과는 다른 톤이라 4분류 시각 구분은 유지된다.
 const TYPE_TINT: Record<AssetSourceLinkType, string> = {
   story: 'bg-info/15 text-info',
   doc: 'bg-success/15 text-success',
-  conversation_message: 'bg-brand/15 text-brand',
+  conversation_message: 'bg-secondary text-secondary-foreground',
   manual: 'bg-muted text-muted-foreground',
 };
 

@@ -7,14 +7,40 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import text
+from fastapi import HTTPException
+from sqlalchemy import or_, select, text, true
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
+
+from app.models.member import Member
+from app.models.project import OrgMember, Project
+from app.models.project_access import ProjectAccess
+from app.models.team import TeamMember
 
 # E-MEMBER-POLICY S1: 프로젝트 역할 1급 enum(owner/admin/member). org 역할의 'manager'는 project
 # 레벨엔 없음(§9-2 결정). project_access.role 은 0122 CHECK 로 이 집합만 허용 → 모든 write 경로가
 # 이 집합으로 clamp 돼야 CHECK 위반(500)이 없다. 랭크: owner > admin > member.
 PROJECT_ROLES: tuple[str, ...] = ("owner", "admin", "member")
 PROJECT_ROLE_RANK: dict[str, int] = {"owner": 3, "admin": 2, "member": 1}
+
+
+def assert_target_in_caller_org(
+    caller_org_id: uuid.UUID,
+    target_org_id: uuid.UUID | None,
+    *,
+    not_found_detail: str = "Not found",
+) -> None:
+    """E-SECURITY SEC-S6/S7 계열 cross-org IDOR 공통 가드.
+
+    까심 QA 부수발견 D(roster: project_id)·E(persona: agent_id) 공통 근본 — 호출자 org를 body/
+    query param으로 받은 target(project·agent 등 어떤 org-scoped 엔티티든)의 **실제** org와 대조한
+    적이 없어, target_id만 알면 어느 org 소속이든 caller org와 무관하게 통과됐다. 호출부가
+    target의 실 org_id를 먼저 조회(엔티티마다 다른 쿼리)해 이 단일 비교 지점으로 넘기면 된다.
+    미존재(target_org_id=None)도 불일치와 동일하게 404 — 존재 비노출(타 org에 그 리소스가 있는지
+    자체가 정보 누수).
+    """
+    if target_org_id is None or target_org_id != caller_org_id:
+        raise HTTPException(status_code=404, detail=not_found_detail)
 
 
 def clamp_project_role(role: str | None) -> str:
@@ -157,6 +183,194 @@ async def has_project_role(
     return PROJECT_ROLE_RANK.get(role, 0) >= PROJECT_ROLE_RANK.get(min_role, 99)
 
 
+def _project_access_predicate(
+    project_id_col: "ColumnElement | uuid.UUID",
+    *,
+    user_id: "ColumnElement | uuid.UUID",
+    org_id: uuid.UUID | None,
+) -> ColumnElement:
+    """story #1994(E-KNOWLEDGE-LINK S2) 5회차 pass: `has_project_access`의 4-branch WHERE-로직을
+    atom-level SSOT로 뽑아낸 SQLAlchemy Core 불리언 표현식. 이 **한 함수**가 두 가지로 렌더된다:
+
+      1. `has_project_access` — `project_id_col`에 리터럴 `project_id` UUID를 넘긴다(기존
+         `has_project_access`의 동작과 byte-identical — 아래 코멘트에 원본 raw-SQL 대응 분기를
+         1:1로 남겨둠).
+      2. `project_access_valid_correlated` — `project_id_col`에 outer 쿼리의 correlated 컬럼
+         (예: `Doc.project_id`/`Conversation.project_id`)을 넘긴다. SQLAlchemy Core의 `exists()`는
+         컬럼 참조가 리터럴이든 이미 outer FROM에 있는 테이블의 컬럼이든 동일하게 컴파일하므로,
+         "문자열 SQL 템플릿을 두 번 타이핑"하는 방식보다 이쪽이 더 견고하다고 판단해 채택함
+         (산티아고 5회차 스펙의 "동등하게 수용 가능한 대안" 중 Core 방식 — 중복 타이핑 리스크가
+         구조적으로 0). `has_project_access`의 기존 호출부(코드베이스 전역 70+ 콜사이트)는 이
+         리팩터 후에도 동일 시그니처·동일 반환값을 유지한다(아래 재작성된 `has_project_access`
+         참조).
+
+    `org_id=None`이면 기존 cross-org-허용 의미(모든 org 스코프 필터 생략)를 그대로 보존한다.
+
+    branch별 원본 raw-SQL 대응(변경 없음 — 그대로 이식):
+      · team_member(human, org-가드 없음 — 상위 project org-스코프가 이미 봉합, QA RC HIGH①)
+      · project_access(human, org_member 경유) — org_id 지정 시 om.org_id 필터
+      · project_access(agent, member 경유, 18073a52) — org_id 지정 시 m.org_id 필터
+      · org owner/admin(org-wide, p.org_id = om.org_id 상시 correlate) — org_id 지정 시 om.org_id 추가 필터
+    """
+    org_scope_project = true() if org_id is None else (Project.org_id == org_id)
+    org_scope_human_grant = true() if org_id is None else (OrgMember.org_id == org_id)
+    org_scope_agent_grant = true() if org_id is None else (Member.org_id == org_id)
+    org_scope_admin = true() if org_id is None else (OrgMember.org_id == org_id)
+
+    team_member_branch = (
+        select(1)
+        .where(
+            TeamMember.project_id == Project.id,
+            or_(TeamMember.id == user_id, TeamMember.user_id == user_id),
+            TeamMember.is_active.is_(True),
+            TeamMember.type == "human",
+        )
+        .exists()
+    )
+    human_grant_branch = (
+        select(1)
+        .select_from(ProjectAccess)
+        .join(OrgMember, ProjectAccess.org_member_id == OrgMember.id)
+        .where(
+            ProjectAccess.project_id == Project.id,
+            OrgMember.user_id == user_id,
+            OrgMember.deleted_at.is_(None),
+            ProjectAccess.permission == "granted",
+            org_scope_human_grant,
+        )
+        .exists()
+    )
+    agent_grant_branch = (
+        select(1)
+        .select_from(ProjectAccess)
+        .join(Member, ProjectAccess.member_id == Member.id)
+        .where(
+            ProjectAccess.project_id == Project.id,
+            Member.id == user_id,
+            Member.type == "agent",
+            Member.deleted_at.is_(None),
+            ProjectAccess.permission == "granted",
+            org_scope_agent_grant,
+        )
+        .exists()
+    )
+    admin_branch = (
+        select(1)
+        .select_from(OrgMember)
+        .where(
+            OrgMember.user_id == user_id,
+            OrgMember.deleted_at.is_(None),
+            OrgMember.role.in_(("owner", "admin")),
+            Project.org_id == OrgMember.org_id,
+            org_scope_admin,
+        )
+        .exists()
+    )
+
+    return (
+        select(1)
+        .where(
+            Project.id == project_id_col,
+            Project.deleted_at.is_(None),
+            org_scope_project,
+            or_(team_member_branch, human_grant_branch, agent_grant_branch, admin_branch),
+        )
+        .exists()
+    )
+
+
+def project_access_valid_correlated(
+    project_id_col: ColumnElement,
+    *,
+    caller_id: uuid.UUID,
+    org_id: uuid.UUID,
+) -> ColumnElement:
+    """story #1994 5회차 Blocker 1 fix: `project_access_valid` atom을 벌크/per-row 쿼리에 **직접
+    correlate**해 심을 수 있는 형태로 노출한다 — `has_project_access`와 정확히 같은
+    `_project_access_predicate`를 재사용(재구현 0). `project_id_col`은 outer 쿼리의 컬럼 참조
+    (예: `Doc.project_id`/`Conversation.project_id`)여야 한다 — 리터럴을 넘기면 `has_project_access`와
+    동치가 되지만 그럴 거면 `has_project_access`를 직접 쓰면 된다.
+
+    호출부는 이 결과를 메인 SELECT의 WHERE절/predicate 조합에 직접 embed해야 한다 — 별도
+    SELECT로 먼저 "접근 가능 project id 집합"을 Python set으로 materialize한 뒤 `.in_()`으로
+    쓰는 2-phase 패턴(TOCTOU 윈도우 재도입)은 금지. `backlinks.py::list_doc_backlinks`가 이
+    함수를 doc-source(`Doc.project_id`)·chat-source(`Conversation.project_id`, `conversation_
+    readable_predicate`의 `project_access_valid` 파라미터) 양쪽에 쓴다.
+    """
+    return _project_access_predicate(project_id_col, user_id=caller_id, org_id=org_id)
+
+
+def org_admin_valid_correlated(
+    caller_id: "ColumnElement | uuid.UUID",
+    org_id: uuid.UUID,
+) -> ColumnElement:
+    """story #1994(E-KNOWLEDGE-LINK S2) 6회차(마지막 atom) pass: `admin_bypass_eligible`의
+    **휴먼** 분기 — `is_org_owner_or_admin`과 정확히 같은 판정(org_members.role IN owner/admin,
+    deleted_at IS NULL, org_id 일치)을 요청 시작 시 별도 SELECT로 사전 계산해 bool 리터럴로
+    박아넣는 대신, 메인 statement의 WHERE절에 직접 correlate할 수 있는 `exists()` 표현식으로
+    노출한다. 5회차가 `project_access_valid` atom에 적용했던 "pre-resolve 사전 SELECT → 메인
+    statement 안 correlated EXISTS" 전환을, 이번엔 `admin_bypass_eligible` atom에도 동형으로
+    적용한다(같은 버그 클래스, 마지막 atom).
+
+    `is_org_owner_or_admin`(SELECT 1 ... LIMIT 1 스칼라 호출부)은 이 함수와 별개로 그대로
+    유지한다 — 코드베이스 전역 15+ 콜사이트(gates.py/projects.py/agents.py 등)가 "즉시 awaited
+    bool"을 기대하는 destructive-action 게이트라 correlated 표현식으로 바꿀 이유가 없다(그
+    콜사이트들은 애초에 벌크/per-row 쿼리에 embed되지 않는다 — staleness 문제 자체가 없음).
+    이 함수는 오직 `conversation_readable_predicate`/`backlinks.py` 메인 statement처럼 "다른
+    쿼리의 WHERE절 안에서 같은 스냅샷으로 평가돼야 하는" 소비자를 위한 것이다.
+    """
+    return (
+        select(1)
+        .select_from(OrgMember)
+        .where(
+            OrgMember.user_id == caller_id,
+            OrgMember.role.in_(("owner", "admin")),
+            OrgMember.deleted_at.is_(None),
+            OrgMember.org_id == org_id,
+        )
+        .exists()
+    )
+
+
+def project_admin_valid_correlated(
+    project_id_col: ColumnElement,
+    *,
+    caller_id: "ColumnElement | uuid.UUID",
+    org_id: uuid.UUID,
+) -> ColumnElement:
+    """story #1994 6회차(마지막 atom) pass: `admin_bypass_eligible`의 **에이전트** 분기 — caller가
+    `project_id_col`(outer 쿼리의 correlated 컬럼, 예: `Conversation.project_id`)에 대해
+    owner/admin `project_access` grant를 갖고 있는지를 correlated `exists()`로 표현한다.
+
+    이전엔 `backlinks.py`가 이 사실을 요청당 1회 별도 bulk SELECT(`ProjectAccess.project_id
+    ... role IN (owner,admin) ... permission='granted' ...`)로 Python `set[UUID]`에
+    materialize한 뒤 `Conversation.project_id.in_(admin_project_ids)`로 메인 statement에 리터럴
+    바인딩했다 — 그 사전 SELECT와 메인 statement 사이에 grant가 revoke되면 메인 statement는
+    그 revoke를 못 본다(5회차가 `project_access_valid` atom에서 이미 근절한 것과 정확히 같은
+    TOCTOU 클래스가 `admin_bypass_eligible` atom에 남아 있었다). 이 함수는 그 사전 SELECT를
+    아예 없애고, 같은 판정 로직을 메인 statement의 WHERE절에 직접 correlate되는 EXISTS로
+    렌더한다 — `project_access_valid_correlated`와 구조적으로 동일한 패턴(다만 role 필터가
+    "granted 아무 역할"이 아니라 `owner`/`admin`으로 좁혀짐).
+
+    `org_id` 스코프(`Project.org_id == org_id`)는 원본 bulk SELECT가 이미 명시했던 것과 동일 —
+    write-path 불변식만 믿지 않고 read-time에도 grant가 caller org 소속 project를 가리키는지
+    재검증한다(이 story 반복 교훈, `_project_access_predicate`의 org-scope 원칙과 동형).
+    """
+    return (
+        select(1)
+        .select_from(ProjectAccess)
+        .join(Project, Project.id == ProjectAccess.project_id)
+        .where(
+            ProjectAccess.project_id == project_id_col,
+            ProjectAccess.member_id == caller_id,
+            ProjectAccess.role.in_(("owner", "admin")),
+            ProjectAccess.permission == "granted",
+            Project.org_id == org_id,
+        )
+        .exists()
+    )
+
+
 async def has_project_access(
     session: AsyncSession,
     user_id: uuid.UUID,
@@ -167,66 +381,19 @@ async def has_project_access(
 
     team_member(active) ∪ project_access(granted) ∪ owner/admin org-wide.
     org_id 지정 시 해당 org로 스코프; None이면 cross-org 허용.
-    """
-    row = await session.execute(
-        text(
-            """
-            SELECT 1
-            FROM projects p
-            WHERE p.id = :project_id
-              AND p.deleted_at IS NULL
-              -- QA RC HIGH①(#1549): team_members 분기엔 org 가드가 없어(grant/agent/owner-admin엔 있음)
-              -- 양-org 멤버 유저가 JWT=org_B로 org_A 프로젝트를 X-Project-Id로 주입하면 cross-org 통과.
-              -- 최상위 p.org_id 스코프로 전 분기 일괄 봉합(org_id=None이면 cross-org 허용=기존 의미 보존).
-              AND (CAST(:org_id AS uuid) IS NULL OR p.org_id = :org_id)
-              AND (
-                EXISTS (
-                    SELECT 1 FROM team_members tm
-                    WHERE tm.project_id = p.id
-                      AND (tm.id = :user_id OR tm.user_id = :user_id)
-                      AND tm.is_active = true
-                      -- 35a0691e: me/memberships(me.py)와 동일 기준 — team_member 분기는 휴먼만.
-                      -- 에이전트는 아래 project_access grant 분기(member_id)로 인가(SSOT 정합·드리프트
-                      -- 방지). 온보딩이 agent grant를 생성하므로 휴먼-필터가 에이전트 access 무영향. #1125 후속.
-                      AND tm.type = 'human'
-                )
-                OR EXISTS (
-                    SELECT 1 FROM project_access pa
-                    JOIN org_members om ON pa.org_member_id = om.id
-                    WHERE pa.project_id = p.id
-                      AND om.user_id = :user_id
-                      AND om.deleted_at IS NULL
-                      AND pa.permission = 'granted'
-                      AND (CAST(:org_id AS uuid) IS NULL OR om.org_id = :org_id)
-                )
-                OR EXISTS (
-                    -- 18073a52: 에이전트 grant 분기. 에이전트는 org_member/user_id가 없고
-                    -- auth.user_id=members.id 이므로 project_access를 member_id(=에이전트 member id)로
-                    -- 직접 매칭. 단일 에이전트(단일 API key)가 grant로 복수 프로젝트 접근(키 증식 0).
-                    SELECT 1 FROM project_access pa
-                    JOIN members m ON pa.member_id = m.id
-                    WHERE pa.project_id = p.id
-                      AND m.id = :user_id
-                      AND m.type = 'agent'
-                      AND m.deleted_at IS NULL
-                      AND pa.permission = 'granted'
-                      AND (CAST(:org_id AS uuid) IS NULL OR m.org_id = :org_id)
-                )
-                OR EXISTS (
-                    SELECT 1 FROM org_members om
-                    WHERE om.user_id = :user_id
-                      AND om.deleted_at IS NULL
-                      AND om.role IN ('owner', 'admin')
-                      AND p.org_id = om.org_id
-                      AND (CAST(:org_id AS uuid) IS NULL OR om.org_id = :org_id)
-                )
-              )
-            LIMIT 1
-            """
-        ),
-        {"user_id": user_id, "project_id": project_id, "org_id": org_id},
-    )
-    return row.scalar_one_or_none() is not None
+
+    story #1994 5회차: 구현이 `_project_access_predicate`(SSOT, 위 참조)로 교체됐다 — raw
+    text() SQL을 SQLAlchemy Core `exists()`로 이식(4개 EXISTS 분기·org-scope 조건 전부 1:1
+    보존, 동작 byte-identical). 이 함수의 수십 개 기존 콜사이트(auth.py/standups.py/sprints.py/
+    docs.py/gates.py/conversations.py 등)는 무변경."""
+    predicate = _project_access_predicate(project_id, user_id=user_id, org_id=org_id)
+    result = await session.execute(select(predicate))
+    # `scalar_one_or_none()`(구 raw-SQL 관례 `SELECT 1 ... LIMIT 1`과 동일 메서드) 사용 — 실
+    # DB에서는 `SELECT EXISTS(...)`가 항상 정확히 1행(True/False, NULL 아님)을 내므로
+    # `scalar_one()`과 결과가 동일하지만, 이 메서드를 쓰면 기존 mock 기반 단위테스트(수십 개
+    # 콜사이트의 `result.scalar_one_or_none.return_value = None|1` 관례)가 재구현 없이 그대로
+    # 호환된다 — 외부 계약(bool 반환) byte-identical 유지의 일부.
+    return bool(result.scalar_one_or_none())
 
 
 async def is_org_owner_or_admin(
@@ -234,11 +401,19 @@ async def is_org_owner_or_admin(
     user_id: uuid.UUID,
     org_id: uuid.UUID,
 ) -> bool:
-    """user 가 해당 org 의 owner/admin 인지. 파괴적 작업(프로젝트 삭제 등) 게이트용.
+    """user 가 해당 org 의 owner/admin 인지. 파괴적 작업(프로젝트 삭제 등)·gate void/hold/unhold/
+    reassign·workflow config publish 승인 게이트용.
 
     grant(project_access)만으론 불가 — org-level 역할만 통과. has_project_access 의
     owner/admin 분기와 동일 기준(team_member 봐주기 없음).
-    """
+
+    story #2058 AC5②: 이 결과가 human-only 로 통하는 건 지금은 **org_members가 human 전용
+    테이블이라는 부산물**일 뿐이었다(agent auth는 id 공간이 달라 우연히 매치가 안 될 뿐 —
+    이 함수 자체엔 human 판정이 없었다). 아래 NOT EXISTS로 그 불변식을 **명시** 강제한다 —
+    이 user_id가 `members.type='agent'`로 존재하면(미래에 org_members에 agent 연동 user_id가
+    들어오는 경로가 생기더라도) 무조건 실패. `members` 행 자체가 없는 인간(멤버싱크 갭,
+    project_members_sync_gap 선례)은 걸러지지 않는다 — "agent로 확인됨"만 배제(positive
+    exclusion), "human으로 확인 안 됨"으로 막지 않음(fail-open 방향 아님·기존 회귀 0)."""
     row = await session.execute(
         text(
             """
@@ -247,6 +422,12 @@ async def is_org_owner_or_admin(
               AND org_id = :org_id
               AND deleted_at IS NULL
               AND role IN ('owner', 'admin')
+              AND NOT EXISTS (
+                SELECT 1 FROM members m
+                WHERE m.user_id = org_members.user_id
+                  AND m.org_id = org_members.org_id
+                  AND m.type = 'agent'
+              )
             LIMIT 1
             """
         ),
@@ -262,7 +443,7 @@ async def is_org_owner(
 ) -> bool:
     """user 가 해당 org 의 **owner** 인지(admin 제외). ⭐E-DG S33 gate override 전용 — override 는
     SoD 우회=가장 강력한 액션이라 admin(void/hold/reassign)보다 좁게 owner-only 로 게이트한다.
-    is_org_owner_or_admin 과 동일 구조·role='owner' 만."""
+    is_org_owner_or_admin 과 동일 구조·role='owner' 만(agent-exclusion NOT EXISTS 도 동형 — #2058)."""
     row = await session.execute(
         text(
             """
@@ -271,6 +452,12 @@ async def is_org_owner(
               AND org_id = :org_id
               AND deleted_at IS NULL
               AND role = 'owner'
+              AND NOT EXISTS (
+                SELECT 1 FROM members m
+                WHERE m.user_id = org_members.user_id
+                  AND m.org_id = org_members.org_id
+                  AND m.type = 'agent'
+              )
             LIMIT 1
             """
         ),
@@ -421,3 +608,43 @@ async def accessible_project_ids_in_org(
         {"user_id": user_id, "org_id": org_id},
     )
     return [uuid.UUID(str(r[0])) for r in rows.all()]
+
+
+async def project_accessible_member_ids(
+    session: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID,
+) -> set[uuid.UUID]:
+    """E-UI-DAEGBYEON P0-04 후속(story 9ef0f914) — `accessible_project_ids_in_org`의 역방향
+    (project 고정 → 접근 가능 member_id 집합). `team_members`(VIEW, human+agent grant를 이미
+    member_id 공간으로 통합)만 조회 — 단일 쿼리 배치(N+1 없음).
+
+    story #2075(2026-07-21, 촬영 재현+선생님 실사용 케이스로 확定): org owner/admin의 암묵
+    org-wide 접근 분기를 "의도적으로 제외"했던 이전 판단(9ef0f914)을 뒤집는다 — 그 판단은
+    write 인가(`has_project_access`)와 read 인가(SSE push 수신)가 서로 다른 판정을 내리는
+    자기모순이었다: owner는 보드를 **볼 권한**은 있는데(`has_project_access` 3번째 조건)
+    그 화면이 실시간으로 갱신될 **권한**은 없는 상태 — "권한 완화"가 아니라 "같은 사실에
+    다른 답을 내는 두 판정을 일치"시키는 것이다(오늘 반복된 트윈 패턴과 동형).
+
+    owner/admin의 SSE 등록 키는 `org_members.id`다(`resolve_member_identity`의 TeamMember→
+    OrgMember fallback과 동형 — grant-only 휴먼은 team_members 뷰에 project_access 행이 없어
+    project-scoped 브랜치에 안 걸리고 org_member.id로 신원 해소된다). `Project.org_id ==
+    OrgMember.org_id`로 스코프를 맞춰(`_project_access_predicate.admin_branch`와 동일 기준)
+    **다른 org의 owner에게는 여전히 안 새게** 한다 — cross-project(cross-org) 누설 0."""
+    rows = await session.execute(
+        text(
+            """
+            SELECT tm.id
+            FROM team_members tm
+            WHERE tm.project_id = :project_id
+              AND tm.org_id = :org_id
+              AND tm.is_active = true
+            UNION
+            SELECT om.id
+            FROM org_members om
+            WHERE om.org_id = :org_id
+              AND om.role IN ('owner', 'admin')
+              AND om.deleted_at IS NULL
+            """
+        ),
+        {"project_id": project_id, "org_id": org_id},
+    )
+    return {uuid.UUID(str(r[0])) for r in rows.all()}

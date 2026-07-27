@@ -18,7 +18,7 @@ from app.schemas.mockup import (
     UpdateMockupRequest, UpdateScenarioRequest, UsageMeterOut,
 )
 
-router = APIRouter(prefix="/api/v2", tags=["mockups"])
+router = APIRouter(prefix="/api/v2", tags=["mockups", "Work"])
 
 
 def _ok(data: object, status: int = 200) -> JSONResponse:
@@ -92,7 +92,10 @@ async def create_mockup(
     page = MockupPage(
         org_id=org_id, project_id=project_id,
         slug=body.slug, title=body.title,
-        category=body.category, viewport=body.viewport,
+        category=body.category,
+        # story #2181: 실 DB viewport는 NOT NULL(FE 자체 기본값 'desktop'과 통일) — body.viewport
+        # 생략(None) 호출부(MCP 등, FE는 항상 명시)가 NotNullViolation 500이던 자리.
+        viewport=body.viewport or "desktop",
         created_by=auth.user_id, created_at=now, updated_at=now,
     )
     session.add(page)

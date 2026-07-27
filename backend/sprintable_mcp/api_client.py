@@ -159,6 +159,11 @@ class SprintableClient:
         self._member_id: str = ""
         self._org_id: str = ""
         self._project_id: str = ""
+        # E-MCP-OPT(story ff6cb90d): auth/me의 근본 판정(resolved_default_project_id 계열) 미러 —
+        # self._project_id 는 그 판정의 project_id(단일/명시 default)를 그대로 담고(ambiguous면 빈
+        # 문자열), 아래 두 필드는 ambiguous일 때 require_project_id()가 가이드 메시지를 만드는 재료.
+        self._project_id_ambiguous: bool = False
+        self._accessible_project_ids: list[str] = []
 
     def configure(self, api_url: str, api_key: str) -> None:
         if not api_url:
@@ -169,14 +174,21 @@ class SprintableClient:
         self._api_key = api_key
 
     async def resolve_auth_context(self) -> dict[str, str]:
-        """GET /api/v2/auth/me → org_id/project_id/member_id 캐시(stdio 부팅 시 1회)."""
+        """GET /api/v2/auth/me → org_id/project_id/member_id 캐시(stdio 부팅 시 1회).
+
+        E-MCP-OPT(story ff6cb90d §1): project_id 는 이제 근본 판정 필드
+        (resolved_default_project_id)에서 채운다 — 단일 접근가능 프로젝트 또는 명시
+        default_project_id 일 때만 값이 있고, 멀티프로젝트+미설정(ambiguous)이면 빈 문자열(추측
+        0). require_project_id() 가 이 ambiguous 상태를 감지해 가이드 에러를 낸다."""
         data = await self.get("/api/v2/auth/me")
         self._member_id = data.get("member_id") or ""
         self._org_id = data.get("org_id") or ""
-        self._project_id = data.get("project_id") or ""
+        self._project_id = data.get("resolved_default_project_id") or ""
+        self._project_id_ambiguous = bool(data.get("is_project_ambiguous"))
+        self._accessible_project_ids = data.get("accessible_project_ids") or []
         logger.info(
-            "auth context resolved member_id=%s org_id=%s project_id=%s",
-            self._member_id, self._org_id, self._project_id,
+            "auth context resolved member_id=%s org_id=%s project_id=%s ambiguous=%s",
+            self._member_id, self._org_id, self._project_id, self._project_id_ambiguous,
         )
         return {
             "member_id": self._member_id,
@@ -189,11 +201,13 @@ class SprintableClient:
         1회 해소·캐시. http 미들웨어가 요청경계서 호출 → 명시 project_id 없는 툴 호출도 그 키의 default 로
         해소(stdio resolve_auth_context 와 parity·422 제거). 싱글톤 self._* 는 건드리지 않아 테넌트 격리.
 
-        멀티프로젝트 키: /api/v2/auth/me 가 주는 server-canonical default project_id 를 그대로 사용
-        (클라 임의선택 0). default 가 비면 빈 채로 둬 호출자가 project_id 를 명시하게 한다(추측 금지).
+        멀티프로젝트 키: /api/v2/auth/me 가 주는 server-canonical **근본 판정**(resolved_default_
+        project_id, ff6cb90d §1)을 그대로 사용(클라 임의선택 0). ambiguous 면 project_id 빈 채로
+        둬 호출자가 명시하게 한다(require_project_id() 가 이 상태를 감지해 가이드 에러).
 
         캐시 수명 = 프로세스. 키의 default project 가 런타임 중 바뀌면 stale 할 수 있으나(재기동 시 해소),
-        parity 가 목표라 TTL 은 의도적으로 두지 않는다(over-engineer 회피).
+        parity 가 목표라 TTL 은 의도적으로 두지 않는다(over-engineer 회피). set_default_project 툴이
+        성공 시 이 캐시를 직접 갱신해 재기동 없이도 반영한다.
         """
         if not api_key:
             return {}
@@ -204,7 +218,9 @@ class SprintableClient:
         ctx = {
             "member_id": data.get("member_id") or "",
             "org_id": data.get("org_id") or "",
-            "project_id": data.get("project_id") or "",
+            "project_id": data.get("resolved_default_project_id") or "",
+            "is_project_ambiguous": bool(data.get("is_project_ambiguous")),
+            "accessible_project_ids": data.get("accessible_project_ids") or [],
         }
         _auth_ctx_cache[api_key] = ctx
         return ctx
@@ -235,6 +251,24 @@ class SprintableClient:
             _project_override.get()
             or self._project_id
             or self._effective_ctx().get("project_id", "")
+        )
+
+    def require_project_id(self) -> str:
+        """E-MCP-OPT(story ff6cb90d §1) — **무인자 콜 + 기본값 미설정 = 명시 에러**가 실제로 나가는
+        지점. project_id 가 필요한 대다수 툴은 이 메서드를 쓴다(org-level 이 의도인 chat/일부
+        standup 툴만 project_id 프로퍼티를 직접 써 무회귀). override/single-project/명시 default
+        중 하나로 해소되면 그 값을 반환·전부 없으면(ambiguous) 접근 가능 프로젝트 목록을 담아
+        SprintableApiError 를 던진다 — 툴 함수의 기존 try/except 가 그대로 잡아 err() 로 노출."""
+        pid = self.project_id
+        if pid:
+            return pid
+        ctx = self._effective_ctx()
+        accessible = ctx.get("accessible_project_ids") or self._accessible_project_ids
+        raise SprintableApiError(
+            400,
+            "여러 프로젝트에 접근 가능한 키입니다. project_id를 지정하거나 "
+            "sprintable_set_default_project로 기본 프로젝트를 설정하세요.",
+            body={"accessible_project_ids": accessible},
         )
 
     async def request(

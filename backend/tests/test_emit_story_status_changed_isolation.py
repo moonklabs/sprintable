@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from contextlib import ExitStack
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -28,7 +28,6 @@ def _story():
 
 
 def _base_patches(stack: ExitStack, *, notif=None, webhook=None, l2=None):
-    stack.enter_context(patch("app.routers.events.publish_event", MagicMock()))
     stack.enter_context(patch("app.services.webhook_dispatch.fire_webhooks",
                               webhook or AsyncMock()))
     stack.enter_context(patch("app.services.workflow_pipeline.process_event",
@@ -77,3 +76,48 @@ async def test_noop_when_status_unchanged():
             AsyncMock(), uuid.uuid4(), story, story.status, actor_id=uuid.uuid4(),
         )
     notif.assert_not_awaited()
+
+
+# ── story #2173(2026-07-24) — 나머지 두 side-effect(SSE push·trust_pipeline)도 격리되는지
+#    커버리지 보강. 이 파일 전체가 story_status_events.py 상단 docstring이 선언한 "예외
+#    전파 0" 계약의 pin — update_story_status(단건)가 emit을 try/except 없이 부르는 것과
+#    bulk_update_stories의 item별 try/except가 (emit 신뢰성이 아니라 다건성 때문에) 우연이
+#    아니라는 근거가 이 계약이다(app/routers/stories.py 두 콜사이트 주석 참조). ──────────
+@pytest.mark.anyio
+async def test_sse_push_raise_does_not_propagate():
+    with ExitStack() as stack:
+        _base_patches(stack)
+        stack.enter_context(patch(
+            "app.services.project_auth.project_accessible_member_ids",
+            AsyncMock(side_effect=RuntimeError("sse down")),
+        ))
+        await emit_story_status_changed(
+            AsyncMock(), uuid.uuid4(), _story(), "in-review",
+            actor_id=uuid.uuid4(), actor_type="human",
+        )  # 예외 없이 반환.
+
+
+@pytest.mark.anyio
+async def test_trust_pipeline_raise_does_not_propagate():
+    with ExitStack() as stack:
+        _base_patches(stack)
+        stack.enter_context(patch(
+            "app.services.trust_pipeline.emit_on_story_status_change",
+            AsyncMock(side_effect=RuntimeError("trust pipeline down")),
+        ))
+        await emit_story_status_changed(
+            AsyncMock(), uuid.uuid4(), _story(), "in-review",
+            actor_id=uuid.uuid4(), actor_type="human",
+        )  # 예외 없이 반환.
+
+
+def test_single_item_callsite_intentionally_unwrapped_source_pin():
+    """단건 콜사이트(update_story_status)가 emit_story_status_changed를 try/except 없이
+    부르는 것이 실수로 안 감싸진 게 아니라 #2173 판정에 근거한 의도적 상태임을 소스에 고정
+    — 다음에 누가 "왜 여기만 안 감쌌지"로 다시 파지 않도록."""
+    import inspect
+    from app.routers import stories as stories_mod
+
+    source = inspect.getsource(stories_mod.update_story_status)
+    assert "#2173" in source
+    assert "await emit_story_status_changed(" in source

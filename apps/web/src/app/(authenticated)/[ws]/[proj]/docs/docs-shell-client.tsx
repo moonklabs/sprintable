@@ -1,0 +1,758 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
+import { DocTree } from '@/components/docs/doc-tree';
+import { DocEditor } from '@/components/docs/doc-editor';
+import { useRecentDocs } from '@/components/docs/use-recent-docs';
+import { RecentsSection } from '@/components/docs/recents-section';
+import { useDocSync, type SaveStatus } from '@/components/docs/use-doc-sync';
+import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Input } from '@/components/ui/input';
+import { ToastContainer, useToast } from '@/components/ui/toast';
+import { ChevronDown, ChevronRight, Plus, X, Menu, Search, FileText } from 'lucide-react';
+import { DocsShell } from '@/components/docs/docs-shell';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
+
+interface Doc {
+  id: string;
+  parent_id: string | null;
+  title: string;
+  slug: string;
+  icon: string | null;
+  sort_order: number;
+  is_folder?: boolean;
+}
+
+interface DocDetail {
+  id: string;
+  title: string;
+  slug: string;
+  content: string;
+  content_format?: 'markdown' | 'html';
+  updated_at: string;
+  parent_id?: string | null;
+  icon?: string | null;
+  is_folder?: boolean;
+  doc_type?: string;
+  org_id?: string;
+}
+
+interface DocsShellClientProps {
+  projectId?: string;
+}
+
+/** Pure helper — exported for unit tests */
+export function getDocSaveStatusText(status: SaveStatus, t: (key: string) => string): string | null {
+  const map: Partial<Record<SaveStatus, string>> = {
+    saving: t('statusSaving'),
+    saved: t('statusSaved'),
+    unsaved: t('statusUnsaved'),
+    error: t('statusError'),
+    conflict: t('statusConflict'),
+    'remote-changed': t('statusRemoteChanged'),
+  };
+  return map[status] ?? null;
+}
+
+
+/**
+ * Docs shell with 2-panel layout (tree + content).
+ * Notion-style: always-editable tiptap, autosave via useDocSync.
+ */
+export function DocsShellClient({ projectId }: DocsShellClientProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const t = useTranslations('docs');
+  const tc = useTranslations('common');
+  const { toasts, addToast, dismissToast } = useToast();
+
+  const [tree, setTree] = useState<Doc[]>([]);
+  const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [treeDrawerOpen, setTreeDrawerOpen] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [docsHasMore, setDocsHasMore] = useState(false);
+  const [docsNextCursor, setDocsNextCursor] = useState<string | null>(null);
+  const [docsLoadingMore, setDocsLoadingMore] = useState(false);
+  const [tagsCollapsed, setTagsCollapsed] = useState(true);
+  const { recentSlugs, pushRecent } = useRecentDocs(projectId);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Array<{ id: string; title: string; slug: string; snippet?: string }>>([]);
+  const sanitizeSnippet = (html: string) =>
+    html.replace(/<(?!\/?(?:b|mark)\b)[^>]+>/gi, '');
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Always-editable content states
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
+  const [autosave, setAutosave] = useState(true);
+
+  // Create form states
+  const [showCreate, setShowCreate] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newContent, setNewContent] = useState('');
+  const [newSlug, setNewSlug] = useState('');
+  const [newParentId, setNewParentId] = useState<string | null>(null);
+  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+
+  const handleDocSaved = useCallback((doc: DocDetail) => {
+    setSelectedDoc(doc);
+    setTree((prev) =>
+      prev.map((d) => (d.id === doc.id ? { ...d, title: doc.title } : d))
+    );
+  }, []);
+
+  const { status: _saveStatus, isDirty, save } = useDocSync<DocDetail>({
+    docId: selectedDoc?.id ?? null,
+    savePayload: { title, content, content_format: contentFormat },
+    serverUpdatedAt: selectedDoc?.updated_at ?? null,
+    editing: selectedDoc !== null,
+    autosave,
+    onSaved: handleDocSaved,
+  });
+
+  const fetchTree = useCallback(async (tags?: string[], cursor?: string | null) => {
+    if (!projectId) return;
+
+    try {
+      const params = new URLSearchParams({ project_id: projectId, limit: '20' });
+      if (tags?.length) params.set('tags', tags.join(','));
+      else params.set('view', 'tree');
+      if (cursor) params.set('cursor', cursor);
+      const res = await fetch(`/api/docs?${params.toString()}`);
+      if (!res.ok) throw new Error('Failed to fetch tree');
+
+      const { data, meta } = await res.json() as { data: Doc[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
+      if (cursor) {
+        setTree((prev) => [...prev, ...(data || [])]);
+      } else {
+        setTree(data || []);
+      }
+      setDocsHasMore(meta?.hasMore ?? false);
+      setDocsNextCursor(meta?.nextCursor ?? null);
+    } catch (error) {
+      console.error('Failed to fetch docs tree:', error);
+    } finally {
+      setLoading(false);
+      setDocsLoadingMore(false);
+    }
+  }, [projectId]);
+
+  // Full-text search with debounce
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (!searchQuery.trim() || !projectId) { setSearchResults([]); setSearchLoading(false); return; }
+
+    setSearchLoading(true);
+    searchTimerRef.current = setTimeout(() => {
+      void fetch(`/api/docs?project_id=${projectId}&q=${encodeURIComponent(searchQuery.trim())}&limit=20`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data: { data?: Array<{ id: string; title: string; slug: string; snippet?: string }> } | null) => {
+          setSearchResults(data?.data ?? []);
+        })
+        .catch((err) => { console.error('문서 검색 실패', err); setSearchResults([]); })
+        .finally(() => { setSearchLoading(false); });
+    }, 300);
+
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [searchQuery, projectId]);
+
+  const fetchDoc = useCallback(async (slug: string) => {
+    if (!projectId) return;
+
+    try {
+      const res = await fetch(`/api/docs?project_id=${projectId}&slug=${slug}`);
+      if (!res.ok) throw new Error('Failed to fetch doc');
+
+      const { data } = await res.json();
+      setSelectedDoc(data);
+      setTitle(data.title);
+      setContent(data.content);
+      setContentFormat(data.content_format || 'markdown');
+    } catch (error) {
+      console.error('Failed to fetch doc:', error);
+      setSelectedDoc(null);
+    }
+  }, [projectId]);
+
+  const handleSelectDoc = useCallback((slug: string) => {
+    void fetchDoc(slug);
+    const params = new URLSearchParams(searchParams);
+    params.set('slug', slug);
+    router.push(`?${params.toString()}`);
+    setTreeDrawerOpen(false);
+    pushRecent(slug);
+  }, [fetchDoc, router, searchParams, pushRecent]);
+
+  const handleReorder = useCallback(async (docId: string, newSortOrder: number) => {
+    setTree((prev) =>
+      prev.map((doc) => (doc.id === docId ? { ...doc, sort_order: newSortOrder } : doc))
+    );
+
+    try {
+      const res = await fetch(`/api/docs/${docId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sort_order: newSortOrder }),
+      });
+
+      if (!res.ok) await fetchTree();
+    } catch (error) {
+      console.error('Failed to reorder doc:', error);
+      await fetchTree();
+    }
+  }, [fetchTree]);
+
+  const handleMove = useCallback(async (docId: string, newParentId: string | null, newSortOrder: number) => {
+    // Optimistic update
+    setTree((prev) =>
+      prev.map((doc) =>
+        doc.id === docId ? { ...doc, parent_id: newParentId, sort_order: newSortOrder } : doc
+      )
+    );
+
+    try {
+      const res = await fetch(`/api/docs/${docId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent_id: newParentId, sort_order: newSortOrder }),
+      });
+
+      if (!res.ok) {
+        await fetchTree();
+      }
+    } catch (error) {
+      console.error('Failed to move doc:', error);
+      await fetchTree();
+    }
+  }, [fetchTree]);
+
+  // story #2167: DocTree.onMoveDenied 시그니처에 'sort-mode-active'가 추가돼(doc-tree.tsx)
+  // 타입만 맞춰준다 — 이 파일은 어떤 라우트에도 안 물려있는 죽은 코드로 보인다(파울로가 별건
+  // 접수·이 PR 스코프 밖). 그 판단이 나기 전까지 컴파일만 안 깨지게 유지.
+  const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission' | 'sort-mode-active') => {
+    if (reason === 'circular') {
+      addToast({ title: t('moveCircularError'), type: 'error' });
+    } else {
+      addToast({ title: t('movePermissionError'), type: 'warning' });
+    }
+  }, [addToast, t]);
+
+  const handleRename = useCallback(async (docId: string, newName: string) => {
+    setTree((prev) =>
+      prev.map((doc) => (doc.id === docId ? { ...doc, title: newName } : doc))
+    );
+
+    try {
+      const res = await fetch(`/api/docs/${docId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newName }),
+      });
+
+      if (!res.ok) {
+        await fetchTree();
+      } else if (selectedDoc?.id === docId) {
+        // Parse full response so updated_at propagates to useDocSync → resets lastSavedSnapshot
+        // preventing a spurious autosave PATCH after handleRename's own PATCH.
+        const { data } = (await res.json()) as { data: DocDetail };
+        setSelectedDoc(data);
+        setTitle(data.title);
+      }
+    } catch (error) {
+      console.error('Failed to rename doc:', error);
+      await fetchTree();
+    }
+  }, [selectedDoc, fetchTree]);
+
+  const handleDeleteDoc = useCallback(async (docId: string) => {
+    setTree((prev) => prev.filter((doc) => doc.id !== docId));
+
+    try {
+      const res = await fetch(`/api/docs/${docId}`, { method: 'DELETE' });
+
+      if (!res.ok) {
+        await fetchTree();
+      } else if (selectedDoc?.id === docId) {
+        setSelectedDoc(null);
+      }
+    } catch (error) {
+      console.error('Failed to delete doc:', error);
+      await fetchTree();
+    }
+  }, [selectedDoc, fetchTree]);
+
+  const generateSlug = useCallback((s: string): string => {
+    return s
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/[^\w\u3131-\uD79D-]/g, '')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+  }, []);
+
+  const handleNewTitleChange = useCallback((t: string) => {
+    setNewTitle(t);
+    if (!slugManuallyEdited) setNewSlug(generateSlug(t));
+  }, [slugManuallyEdited, generateSlug]);
+
+  const handleSlugChange = useCallback((slug: string) => {
+    setNewSlug(slug);
+    setSlugManuallyEdited(true);
+  }, []);
+
+  const handleAddChild = useCallback(async (parentId: string) => {
+    setNewParentId(parentId);
+    setShowCreate(true);
+    setNewTitle('');
+    setNewContent('');
+    setNewSlug('');
+    setSlugManuallyEdited(false);
+  }, []);
+
+  const handleCreate = useCallback(async () => {
+    if (!projectId || !newTitle.trim() || !newSlug.trim()) return;
+
+    try {
+      const res = await fetch('/api/docs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          title: newTitle,
+          slug: newSlug,
+          content: newContent,
+          content_format: 'markdown',
+          parent_id: newParentId,
+        }),
+      });
+
+      if (!res.ok) throw new Error('Failed to create doc');
+
+      const { data } = await res.json();
+
+      setTree((prev) => [
+        {
+          id: data.id,
+          parent_id: data.parent_id || null,
+          title: data.title,
+          slug: data.slug,
+          icon: data.icon || null,
+          sort_order: data.sort_order || 0,
+          is_folder: data.is_folder || false,
+        },
+        ...prev,
+      ]);
+
+      setSelectedDoc(data);
+      setTitle(data.title);
+      setContent(data.content);
+      setContentFormat(data.content_format || 'markdown');
+      setShowCreate(false);
+      setShowAdvancedOptions(false);
+      setNewTitle('');
+      setNewSlug('');
+      setNewContent('');
+      setNewParentId(null);
+      setSlugManuallyEdited(false);
+
+      const params = new URLSearchParams(searchParams);
+      params.set('slug', data.slug);
+      router.push(`?${params.toString()}`);
+    } catch (error) {
+      console.error('Failed to create doc:', error);
+    }
+  }, [projectId, newTitle, newSlug, newContent, newParentId, router, searchParams]);
+
+
+  useEffect(() => {
+    void fetchTree(selectedTags.length ? selectedTags : undefined);
+  }, [fetchTree, selectedTags]);
+
+  useEffect(() => {
+    const slug = searchParams.get('slug');
+    if (slug) void fetchDoc(slug);
+  }, [searchParams, fetchDoc]);
+
+  const handleNewDoc = useCallback(() => {
+    setShowCreate(true);
+    setNewTitle('');
+    setNewSlug('');
+    setNewContent('');
+    setNewParentId(null);
+    setSlugManuallyEdited(false);
+  }, []);
+
+  if (loading) {
+    return (
+      <>
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+        <div className="flex h-64 items-center justify-center">
+          <p className="text-sm text-muted-foreground">{t('loading')}</p>
+        </div>
+      </>
+    );
+  }
+
+  const sidebarContent = (
+    <>
+      {/* Full-text search input */}
+      <div className="border-b border-border/60 px-3 py-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="문서 검색..."
+            className="w-full rounded-lg border border-border/60 bg-muted/30 py-1.5 pl-8 pr-7 text-xs outline-none placeholder:text-muted-foreground focus:border-brand/40 focus:bg-muted/50"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Tag filter — AC1 접기/펼치기 */}
+      {(() => {
+        const allTags = [...new Set(tree.flatMap((d) => (d as unknown as { tags?: string[] | null }).tags ?? []))];
+        if (allTags.length === 0) return null;
+        return (
+          <div className="border-b border-border">
+            {/* AC1: 토글 헤더 + AC3: 활성 태그 뱃지 */}
+            <button
+              type="button"
+              onClick={() => setTagsCollapsed((v) => !v)}
+              className="flex w-full items-center justify-between px-4 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              <span className="flex items-center gap-1.5">
+                {tagsCollapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
+                {t('tagFilter')}
+                {/* AC3: 접힌 상태에서 활성 태그 수 뱃지 */}
+                {tagsCollapsed && selectedTags.length > 0 && (
+                  <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
+                    {selectedTags.length}
+                  </span>
+                )}
+              </span>
+            </button>
+
+            {/* AC1: 펼친 상태에서만 태그 칩 표시 + AC2: 공간 축소 */}
+            {!tagsCollapsed && (
+              <div className="flex max-h-[120px] flex-wrap gap-1 overflow-y-auto px-4 py-1">
+                {allTags.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag])}
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition ${selectedTags.includes(tag) ? 'bg-primary text-primary-foreground' : 'bg-muted/60 text-muted-foreground hover:bg-muted'}`}
+                  >
+                    #{tag}
+                  </button>
+                ))}
+                {selectedTags.length > 0 && (
+                  <button type="button" onClick={() => setSelectedTags([])} className="text-[11px] text-muted-foreground underline hover:text-foreground">
+                    {t('clearFilter')}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+      <div className="flex-1 overflow-y-auto p-2">
+        {/* Search results */}
+        {searchQuery.trim() ? (
+          searchLoading ? (
+            <p className="py-4 text-center text-xs text-muted-foreground">검색 중...</p>
+          ) : searchResults.length === 0 ? (
+            <p className="py-4 text-center text-xs text-muted-foreground">검색 결과 없음</p>
+          ) : (
+            <ul className="space-y-1">
+              {searchResults.map((result) => (
+                <li key={result.id}>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectDoc(result.slug)}
+                    className="flex w-full flex-col items-start gap-1 rounded-xl px-3 py-2 text-left transition-colors hover:bg-muted/60"
+                  >
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                      <FileText className="size-3.5 flex-shrink-0 text-muted-foreground" />
+                      {result.title}
+                    </span>
+                    {result.snippet && (
+                      <span
+                        className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground [&_mark]:rounded [&_mark]:bg-highlight-search-bg [&_mark]:text-foreground [&_mark]:px-0.5 [&_b]:rounded [&_b]:bg-highlight-search-bg [&_b]:font-normal [&_b]:text-foreground [&_b]:px-0.5"
+                        dangerouslySetInnerHTML={{ __html: sanitizeSnippet(result.snippet) }}
+                      />
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : tree.length === 0 ? (
+          <EmptyState
+            title={t('title')}
+            description={t('selectDoc')}
+            className="mt-2 bg-background/70"
+            action={
+              <Button size="sm" onClick={handleNewDoc}>
+                <Plus className="mr-1 h-4 w-4" />
+                {t('newDoc')}
+              </Button>
+            }
+          />
+        ) : (
+          <>
+            <RecentsSection
+              recentSlugs={recentSlugs}
+              docs={tree}
+              selectedSlug={selectedDoc?.slug || null}
+              onSelect={handleSelectDoc}
+              label={t('recentDocs')}
+              emptyLabel={t('noRecentDocs')}
+            />
+            <DocTree
+              docs={tree}
+              selectedSlug={selectedDoc?.slug || null}
+              onSelect={(doc) => { handleSelectDoc(doc); }}
+              onReorder={handleReorder}
+              onMove={handleMove}
+              onMoveDenied={handleMoveDenied}
+              onRename={handleRename}
+              onDelete={handleDeleteDoc}
+              onAddChild={handleAddChild}
+              projectId={projectId}
+            />
+            {docsHasMore && (
+              <div className="px-2 py-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full text-xs text-muted-foreground"
+                  disabled={docsLoadingMore}
+                  onClick={() => {
+                    if (!docsNextCursor || docsLoadingMore) return;
+                    setDocsLoadingMore(true);
+                    void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor);
+                  }}
+                >
+                  {docsLoadingMore ? tc('loading') : tc('loadMore')}
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </>
+  );
+
+  const editorContent = showCreate ? (
+          <div className="flex h-full flex-col">
+            <div className="flex-shrink-0 border-b border-border px-4 py-3 lg:px-6 lg:py-5">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Draft</p>
+                  <h2 className="text-2xl font-semibold">{t('newDoc')}</h2>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => {
+                  setShowCreate(false);
+                  setNewParentId(null);
+                }}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-4 py-4 lg:px-6 lg:py-6">
+              <div className="max-w-3xl space-y-5">
+                <div>
+                  <label className="text-sm font-medium mb-2 block">{t('titleLabel')}</label>
+                  <Input
+                    value={newTitle}
+                    onChange={(e) => handleNewTitleChange(e.target.value)}
+                    placeholder={t('titlePlaceholder')}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-2 block">{t('contentLabel')}</label>
+                  <textarea
+                    value={newContent}
+                    onChange={(e) => setNewContent(e.target.value)}
+                    placeholder={t('editorPlaceholder')}
+                    className="w-full min-h-[220px] rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-foreground resize-none placeholder:text-muted-foreground"
+                  />
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedOptions((prev) => !prev)}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <span>{showAdvancedOptions ? '▾' : '▸'}</span>
+                    <span>{t('advancedOptions')}</span>
+                  </button>
+                  {showAdvancedOptions && (
+                    <div className="mt-3">
+                      <label className="text-sm font-medium mb-2 block">{t('slugLabel')}</label>
+                      <Input
+                        value={newSlug}
+                        onChange={(e) => handleSlugChange(e.target.value)}
+                        placeholder={t('slugPlaceholder')}
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={handleCreate} disabled={!newTitle.trim() || !newSlug.trim()}>
+                    {tc('create')}
+                  </Button>
+                  <Button variant="ghost" onClick={() => {
+                    setShowCreate(false);
+                    setNewParentId(null);
+                  }}>
+                    {tc('cancel')}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : selectedDoc ? (
+          <div className="flex h-full flex-col overflow-hidden">
+            {/* Content — fills remaining height */}
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 lg:px-6 lg:py-6">
+              <DocEditor
+                value={content}
+                contentFormat={contentFormat}
+                editable={selectedDoc.doc_type !== 'sprint_report'}
+                currentDocId={selectedDoc.id}
+                onNavigate={handleSelectDoc}
+                onFileError={(msg) => addToast({ title: msg, type: 'error' })}
+                projectId={projectId}
+                onChange={setContent}
+                onContentFormatChange={setContentFormat}
+                isDirty={isDirty}
+                onSave={save}
+                autosave={autosave}
+                onAutosaveToggle={setAutosave}
+                title={title}
+                onTitleChange={(v) => {
+                  setTitle(v);
+                  setTree((prev) => prev.map((d) => (d.id === selectedDoc.id ? { ...d, title: v } : d)));
+                }}
+                titlePlaceholder={t('titlePlaceholder')}
+                labels={{
+                  contentFormat: t('contentFormat'),
+                  markdown: t('formatMarkdown'),
+                  preview: t('formatPreview'),
+                  save: t('save'),
+                  toolbar: t('toolbar'),
+                  placeholder: t('editorPlaceholder'),
+                  h1: t('toolbarH1'),
+                  h2: t('toolbarH2'),
+                  bold: t('toolbarBold'),
+                  italic: t('toolbarItalic'),
+                  bullet: t('toolbarBullet'),
+                  quote: t('toolbarQuote'),
+                  code: t('toolbarCode'),
+                  link: t('toolbarLink'),
+                  autosave: t('autosave'),
+                  undo: t('toolbarUndo'),
+                  redo: t('toolbarRedo'),
+                }}
+              />
+            </div>
+          </div>
+  ) : (
+    <div className="flex h-full items-center justify-center p-4 lg:p-6">
+      <EmptyState
+        title={t('selectDoc')}
+        className="w-full max-w-lg bg-background/70"
+        action={
+          <Button size="sm" onClick={handleNewDoc}>
+            <Plus className="mr-1 h-4 w-4" />
+            {t('newDoc')}
+          </Button>
+        }
+      />
+    </div>
+  );
+
+  return (
+    <>
+      <TopBarSlot
+        title={<h1 className="text-sm font-medium">{t('title')}</h1>}
+        actions={
+          <Button size="sm" variant="outline" onClick={handleNewDoc}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            {t('newDoc')}
+          </Button>
+        }
+      />
+
+      {/* Desktop: flat 2-panel (lg+) */}
+      <DocsShell sidebar={sidebarContent} className="hidden min-h-0 flex-1 lg:flex">
+        {editorContent}
+      </DocsShell>
+
+      {/* Mobile: content + tree drawer overlay (< lg) */}
+      <div className="flex flex-1 flex-col overflow-hidden lg:hidden">
+        {/* Mobile top bar: tree toggle button */}
+        <div className="flex-shrink-0 flex items-center gap-2 border-b border-border/80 bg-background px-4 py-2">
+          <button
+            type="button"
+            onClick={() => setTreeDrawerOpen(true)}
+            className="flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+            aria-label="문서 트리 열기"
+          >
+            <Menu className="size-4" />
+          </button>
+        </div>
+        {/* Content area — always visible on mobile */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+          {editorContent}
+        </div>
+        {/* Tree drawer overlay */}
+        {treeDrawerOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-40 bg-overlay-backdrop"
+              onClick={() => setTreeDrawerOpen(false)}
+              aria-hidden="true"
+            />
+            <div className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden bg-background shadow-xl">
+              <div className="flex flex-shrink-0 items-center justify-end border-b border-border/80 px-4 py-3">
+                <button
+                  type="button"
+                  onClick={() => setTreeDrawerOpen(false)}
+                  className="rounded p-1 text-muted-foreground hover:text-foreground"
+                  aria-label="닫기"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+              <div className="focus-inset flex-1 overflow-y-auto">
+                {sidebarContent}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+    </>
+  );
+}

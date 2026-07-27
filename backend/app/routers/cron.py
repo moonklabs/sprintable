@@ -11,9 +11,10 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.database import get_db
 from app.models.agent_run import AgentRun
 from app.models.agent_session import AgentSession
@@ -42,11 +43,43 @@ def _err(code: str, message: str, status: int = 400) -> JSONResponse:
 
 
 def verify_cron(request: Request) -> None:
+    """story #2072(high, 2026-07-21) 근본수정 — 기존엔 `if not CRON_SECRET: return`(환경
+    무관 무조건 허용)이라 `_require_internal_secret`(#2071)보다도 더 넓게 열려 있었다(둘 다
+    "시크릿 없으면 연다"는 같은 안티패턴 — agent_inbox.py `_verify_signature`가 유일한 정답
+    형태: "secret 미설정 시 open ingestion 차단"). 지금은 dev/prod 둘 다 `CRON_SECRET`이
+    secretRef로 배선돼 있어 무인증은 아니지만(오르테가군 실측), 배선이 한 번이라도 비면
+    (배포 실수·로테이션·env 누락) 전 cron이 열리는 구조적 위험이었다.
+
+    `_require_internal_secret`(#2071)과 동일 기준으로 좁힌다 — story #2152 이후로는
+    `settings.is_internal_secret_gate_exempt`(`app/core/config.py` SSOT) 단일 프로퍼티만
+    본다 — app_env 체크를 이 파일에서 직접 반복하지 않는다(#2152 AC4: is_really_local을
+    app_env와 따로 떼어 쓸 여지 자체를 구조로 없앤다)."""
     if not CRON_SECRET:
-        return  # CRON_SECRET 미설정 시 로컬 개발 허용
+        if settings.is_internal_secret_gate_exempt:
+            return  # 진짜 로컬 개발 전용 예외(Cloud Run/GCE 위가 아님)
+        logger.warning(
+            "cron.secret_missing_in_non_local_env app_env=%s on_cloud_run=%s",
+            settings.app_env, not settings.is_really_local,
+        )
+        raise HTTPException(status_code=503, detail="Service misconfigured")
     auth = request.headers.get("authorization", "")
     if auth != f"Bearer {CRON_SECRET}":
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def check_cron_secret_config(s=None) -> None:
+    """fail-closed startup 가드(story #2072) — `check_internal_secret_config`(#2071)와
+    동형(check_listen_config()와 동일 패턴, main lifespan이 호출 대상). non-local(진짜
+    로컬이 아닌)인데 `CRON_SECRET` 미설정이면 배포 자체를 막는다 — 런타임 503보다 먼저,
+    더 시끄럽게 잡는 쪽이 안전하다."""
+    if s is None:
+        from app.core.config import settings as s
+    _not_local = not s.is_internal_secret_gate_exempt
+    if _not_local and not CRON_SECRET:
+        raise RuntimeError(
+            f"APP_ENV={s.app_env}인데 CRON_SECRET 미설정 — 내부 cron 엔드포인트가 인증 없이 "
+            "공개된다(fail-closed·story #2072)."
+        )
 
 
 # ─── GET /api/v2/internal/cron/agent-session-recovery ─────────────────────────
@@ -340,7 +373,7 @@ async def score_ga4_outcomes(
     """
     verify_cron(request)
 
-    from app.models.pm import Epic, Sprint, Story
+    from app.models.pm import Goal, Sprint, Story
     from app.services.outcome_scorer import score_epic_outcome, score_ga4_outcome
 
     now = datetime.now(timezone.utc)
@@ -391,12 +424,12 @@ async def score_ga4_outcomes(
                 logger.warning("ga4 story scoring failed id=%s: %s", story.id, exc)
                 failed.append({"type": "story", "id": str(story.id), "error": str(exc)})
 
-        # Epic 채점 (GA4 + internal_ops)
+        # Goal(구 Epic) 채점 (GA4 + internal_ops)
         epic_result = await session.execute(
-            select(Epic).where(
-                Epic.outcome_status == "pending",
-                Epic.measure_after.isnot(None),
-                Epic.measure_after <= now,
+            select(Goal).where(
+                Goal.outcome_status == "pending",
+                Goal.measure_after.isnot(None),
+                Goal.measure_after <= now,
             )
         )
         for epic in epic_result.scalars().all():
@@ -579,6 +612,26 @@ async def a2a_task_deadline_sweep(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── GET /api/v2/internal/cron/agent-run-timeout-sweep ────────────────────────
+# story #2161(2026-07-24, 오르테가군 판정): agent_runs 'running' 영구정체 방지 —
+# a2a-task-deadline-sweep(위)과 동일 근본·동일 처방(폴링 무관 능동 CAS 전이). deadline_at
+# 폴백(NULL이면 started_at + AGENT_RUN_TIMEOUT_HOURS)이 기존 stuck row도 사정권에 넣는다.
+
+@router.get("/agent-run-timeout-sweep")
+async def agent_run_timeout_sweep(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.agent_run_lifecycle import sweep_expired_agent_runs
+        result = await sweep_expired_agent_runs(session)
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("cron error (agent-run-timeout-sweep): %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 @router.get("/storage-usage-warn")
 async def storage_usage_warn(
     request: Request,
@@ -657,4 +710,72 @@ async def storage_usage_warn(
         return _ok({"notified_orgs": notified})
     except Exception as exc:
         logger.exception("storage-usage-warn cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── GET /api/v2/internal/cron/db-connection-stats ─────────────────────────
+
+@router.get("/db-connection-stats")
+async def db_connection_stats(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """SID f2fe1c5e/#2040 AC2: pg_stat_activity를 application_name(서비스:리비전[:연결종류])·
+    state별로 집계 — "어느 서비스가 커넥션을 몇 개 쓰는지 분해할 수 없다"는 계측 부재를 없앤다.
+
+    backend가 아닌 application_name(internal-api·migration job·운영 psql 등)은 db_application_name()
+    태그가 없으므로 그대로 노출돼 "예산에 안 잡힌 소비자"를 이 표에서 바로 식별할 수 있다.
+
+    2026-07-20 오르테가군 실측(dev 100 중 78이 무태그)으로 application_name·state만으로는
+    무태그 소비자를 더 쪼갤 수 없다는 게 드러나 usename·최대 idle 시간(초)을 추가했다 —
+    다른 저장소(internal-api)를 건드리지 않고도 DB 역할(usename)로 후보를 좁히고, 오래
+    idle인지(누수 후보) 짧게 회전하는지(정상 소비)를 구분한다.
+
+    2026-07-20 후속 실측 2건 반영:
+    - `client_addr`는 Cloud SQL이 Unix socket으로 연결돼 항상 빈 값으로만 나와 폐기했다
+      (오르테가군 실측 — 발신 IP 후보 좁히기 축으로는 쓸모없음. 실패한 축을 기록해 다음
+      사람이 같은 시도를 반복하지 않게 한다).
+    - 그룹별 "최대" idle 하나만으로는 "이상치 1개+정상 68개"와 "69개 전부 방치"를 구분할 수
+      없다(오르테가군 지적 — 오늘 이 형태의 함정을 이미 다섯 번 밟았다) → idle 구간별
+      **개수 분포**(`>1h`/`10m-1h`/`1m-10m`/`<1m`)로 바꿔 실제 분포를 본다.
+    """
+    verify_cron(request)
+    try:
+        result = await session.execute(
+            text(
+                """
+                SELECT
+                    COALESCE(application_name, '') AS application_name,
+                    COALESCE(state, '') AS state,
+                    COALESCE(usename, '') AS usename,
+                    CASE
+                        WHEN state_change IS NULL THEN 'unknown'
+                        WHEN now() - state_change >= interval '1 hour' THEN '>1h'
+                        WHEN now() - state_change >= interval '10 minutes' THEN '10m-1h'
+                        WHEN now() - state_change >= interval '1 minute' THEN '1m-10m'
+                        ELSE '<1m'
+                    END AS idle_bucket,
+                    count(*) AS count,
+                    MAX(EXTRACT(EPOCH FROM (now() - state_change)))::int AS max_idle_seconds
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                GROUP BY application_name, state, usename, idle_bucket
+                ORDER BY count DESC
+                """
+            )
+        )
+        rows = [
+            {
+                "application_name": r.application_name,
+                "state": r.state,
+                "usename": r.usename,
+                "idle_bucket": r.idle_bucket,
+                "count": r.count,
+                "max_idle_seconds": r.max_idle_seconds,
+            }
+            for r in result
+        ]
+        return _ok({"rows": rows, "total": sum(r["count"] for r in rows)})
+    except Exception as exc:
+        logger.exception("db-connection-stats cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

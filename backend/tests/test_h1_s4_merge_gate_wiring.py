@@ -81,11 +81,15 @@ def _body(stage="merge", ctx=None):
 async def test_auto_merge_sets_done():
     client, _, app = await _client()
     try:
+        updated_story = _mock_story(status="done")
         with patch("app.routers.workflow_report.evaluate_merge_gate",
                    new=AsyncMock(return_value=_decision(AUTO_MERGE))) as gate, \
              patch("app.routers.workflow_report._record_gate_evidence", new=AsyncMock()), \
              patch("app.routers.workflow_report.merge_gate_active", return_value=True), \
-             patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock) as upd:
+             patch("app.repositories.story.StoryRepository.update", new_callable=AsyncMock,
+                   return_value=updated_story) as upd, \
+             patch("app.services.story_status_events.emit_story_status_changed",
+                   new=AsyncMock()) as emit:
             async with client as c:
                 resp = await c.post("/api/v2/workflow/report-done",
                                     json=_body(ctx={"pr_number": 9, "repo": "o/r", "ci_result": "pass", "pr_result": "pass"}))
@@ -95,6 +99,16 @@ async def test_auto_merge_sets_done():
         assert data["requires_human"] is False
         upd.assert_called_once()  # done 전이 발생.
         gate.assert_awaited_once()  # AC⑤: 게이트 1회.
+        # story #2067(발견·회귀수정): report-done의 done 전이도 PATCH /{id}/status와 동일하게
+        # status_changed side-effects(events→L1·webhook·L2·notif·activity)를 태워야 한다 — 이전엔
+        # 이 경로가 emit_story_status_changed를 아예 안 불러 board/알림/웹훅이 조용히 안 나갔다.
+        emit.assert_awaited_once()
+        _, call_kwargs = emit.await_args
+        assert emit.await_args.args[1] == ORG_ID
+        assert emit.await_args.args[2] is updated_story
+        assert emit.await_args.args[3] == "in-review"  # old_status(_mock_story 기본값)
+        assert call_kwargs["actor_id"] == AGENT_ID
+        assert call_kwargs["actor_type"] == "agent"
     finally:
         app.dependency_overrides.clear()
 

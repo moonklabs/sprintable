@@ -63,7 +63,14 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
         {!showEdit && (
           <div className="px-4 pb-4" contentEditable={false}>
             {error ? (
-              <div className="rounded-lg border border-destructive-border bg-destructive-tint p-3 text-xs text-destructive font-mono">{error}</div>
+              <div
+                className="rounded-lg border border-destructive-border bg-destructive-tint p-3 text-xs text-destructive font-mono"
+                role="alert"
+                aria-live="assertive"
+                aria-atomic="true"
+              >
+                {error}
+              </div>
             ) : html ? (
               <div
                 dangerouslySetInnerHTML={{ __html: html }}

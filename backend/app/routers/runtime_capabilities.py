@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from app.dependencies.auth import AuthContext, get_current_user
 from app.services.agent_onboarding_config import list_runtime_capabilities
 
-router = APIRouter(prefix="/api/v2/runtime-capabilities", tags=["runtime-capabilities"])
+router = APIRouter(prefix="/api/v2/runtime-capabilities", tags=["runtime-capabilities", "Organization"])
 
 
 class RuntimeCapability(BaseModel):

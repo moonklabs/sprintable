@@ -29,6 +29,7 @@ import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -36,6 +37,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 import { isEEEnabled } from '@/lib/ee';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
 
 // TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
@@ -98,7 +100,8 @@ function isWebhookUrlAllowed(url: string): boolean {
 
 // E-SETTINGS-IA: deprecate(숨김)된 settings 탭. 컴포넌트/route는 보존(reversible) —
 // 탭 트리거·콘텐츠·딥링크(?tab=)만 차단한다. 재노출 시 이 set에서 제거만 하면 IA 위치 복원.
-const HIDDEN_SETTINGS_TABS = new Set<string>(['ai', 'workflow']);
+// story c4980e70: org-members 탭 = /organization/members로 승격(회귀 0 위해 코드는 보존, LNB에서만 숨김).
+const HIDDEN_SETTINGS_TABS = new Set<string>(['ai', 'workflow', 'org-members']);
 const DEFAULT_SETTINGS_TAB = 'profile';
 
 // ?tab= 딥링크가 숨김 탭을 가리키면 기본 탭으로 폴백 (빈 화면 방지).
@@ -364,7 +367,7 @@ export default function SettingsPage() {
   useEffect(() => {
     // 에이전트 관리 IA 통일(story d63d3f73) — Members 서브탭 흡수, /agents(관리 탭)으로 재타겟.
     if (activeTab === 'api-keys') {
-      router.push('/agents');
+      router.push('/organization/workforce');
     }
   }, [activeTab, router]);
 
@@ -679,7 +682,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Right content */}
-        <div className="flex-1 min-w-0 overflow-y-auto">
+        <div className="focus-inset flex-1 min-w-0 overflow-y-auto">
           {/* Mobile toggle button */}
           <div className="lg:hidden flex items-center gap-2 border-b px-4 py-2">
             <SidebarTrigger className="mr-1" />
@@ -721,7 +724,7 @@ export default function SettingsPage() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => router.push('/agents')}
+                    onClick={() => router.push('/organization/workforce')}
                     className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
                   >
                     에이전트 관리로 이동
@@ -906,7 +909,7 @@ export default function SettingsPage() {
                           ) : (
                             <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground">{orgInfo.name}</p>
                           )}
-                          {orgNameError && <p className="text-xs text-destructive">{orgNameError}</p>}
+                          {orgNameError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{orgNameError}</p>}
                         </div>
 
                         <div className="space-y-1.5">
@@ -1034,15 +1037,23 @@ export default function SettingsPage() {
                                     >
                                       {tc('edit')}
                                     </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                      onClick={() => setDeleteProjectConfirmId(project.id)}
-                                      disabled={deletingProjectId === project.id}
-                                    >
-                                      {deletingProjectId === project.id ? '...' : t('deleteProject')}
-                                    </Button>
+                                    {/* story #2104 — BE projects.py:213이 human-only로 삭제를
+                                        403 거부한다(되돌릴 수 없는 조작). 이 버튼은 이미
+                                        isAdmin(org owner/admin)으로 감싸져 있으나, 에이전트도
+                                        구조상 owner/admin 권한을 가질 수 있어 human 여부는
+                                        별도 확認이 필요하다(#2091/#2103과 같은 결함). edit
+                                        버튼은 BE에 human-only 가드가 없어 그대로 둔다. */}
+                                    <HumanOnlyAction>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                        onClick={() => setDeleteProjectConfirmId(project.id)}
+                                        disabled={deletingProjectId === project.id}
+                                      >
+                                        {deletingProjectId === project.id ? '...' : t('deleteProject')}
+                                      </Button>
+                                    </HumanOnlyAction>
                                   </>
                                 ) : null}
                               </div>
@@ -1058,7 +1069,14 @@ export default function SettingsPage() {
                   </div>
 
                   {projectActionMessage ? (
-                    <Alert variant={projectActionMessage.type === 'success' ? 'success' : 'destructive'}>
+                    // story #2105 2차 — 성공/실패 결과 모두 아직 시각 전용이었다(#2096/#2105 1차와 동일
+                    // 결함클래스). 에러=alert/assertive, 성공=status/polite.
+                    <Alert
+                      variant={projectActionMessage.type === 'success' ? 'success' : 'destructive'}
+                      role={projectActionMessage.type === 'success' ? 'status' : 'alert'}
+                      aria-live={projectActionMessage.type === 'success' ? 'polite' : 'assertive'}
+                      aria-atomic="true"
+                    >
                       <AlertDescription>{projectActionMessage.text}</AlertDescription>
                     </Alert>
                   ) : null}
@@ -1151,7 +1169,7 @@ export default function SettingsPage() {
                                   {webhookSaving === member.id ? '...' : tc('save')}
                                 </Button>
                               </div>
-                              {err ? <p className="mt-1 text-xs text-destructive">{err}</p> : null}
+                              {err ? <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-1 text-xs text-destructive">{err}</p> : null}
                             </div>
                           );
                         })}
@@ -1273,9 +1291,14 @@ export default function SettingsPage() {
       </Tabs>
 
       {showDeleteOrgConfirm && orgInfo ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-xl border border-destructive/30 bg-card p-6 shadow-md space-y-4">
-            <h3 className="text-lg font-semibold text-destructive">Organization 삭제</h3>
+        <Dialog
+          open={showDeleteOrgConfirm}
+          onOpenChange={(open) => {
+            if (!open && !deletingOrg) { setShowDeleteOrgConfirm(false); setDeleteOrgConfirmName(''); }
+          }}
+        >
+          <DialogContent className="max-w-md space-y-4 border-destructive/30" showCloseButton={false}>
+            <DialogTitle className="text-lg font-semibold text-destructive">Organization 삭제</DialogTitle>
 
             {/* 영향도 */}
             {orgImpactLoading ? (
@@ -1328,14 +1351,14 @@ export default function SettingsPage() {
                 {deletingOrg ? '삭제 중…' : '영구 삭제'}
               </Button>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
 
       {showDeleteConfirm ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-md">
-            <h3 className="text-lg font-semibold text-destructive">{t('deleteConfirmTitle')}</h3>
+        <Dialog open={showDeleteConfirm} onOpenChange={(open) => { if (!open && !deleting) setShowDeleteConfirm(false); }}>
+          <DialogContent className="max-w-sm" showCloseButton={false}>
+            <DialogTitle className="text-lg font-semibold text-destructive">{t('deleteConfirmTitle')}</DialogTitle>
             <p className="mt-2 text-sm text-muted-foreground">{t('deleteConfirmDesc')}</p>
             <div className="mt-6 flex gap-3">
               <Button variant="glass" className="flex-1" onClick={() => setShowDeleteConfirm(false)}>
@@ -1363,14 +1386,17 @@ export default function SettingsPage() {
                 {deleting ? '...' : t('confirmDelete')}
               </Button>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
 
       {deleteProjectConfirmId ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-md">
-            <h3 className="text-lg font-semibold text-destructive">{t('projectDeleteConfirmTitle')}</h3>
+        <Dialog
+          open={!!deleteProjectConfirmId}
+          onOpenChange={(open) => { if (!open && deletingProjectId !== deleteProjectConfirmId) setDeleteProjectConfirmId(null); }}
+        >
+          <DialogContent className="max-w-sm" showCloseButton={false}>
+            <DialogTitle className="text-lg font-semibold text-destructive">{t('projectDeleteConfirmTitle')}</DialogTitle>
             <p className="mt-2 text-sm text-muted-foreground">{t('projectDeleteConfirmDesc')}</p>
             <div className="mt-6 flex gap-3">
               <Button variant="glass" className="flex-1" onClick={() => setDeleteProjectConfirmId(null)}>
@@ -1385,8 +1411,8 @@ export default function SettingsPage() {
                 {deletingProjectId === deleteProjectConfirmId ? '...' : t('deleteProject')}
               </Button>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
       {orgId ? (
         <AddMemberModal

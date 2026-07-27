@@ -41,9 +41,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.participation import Participation, ParticipationRole
 from app.models.pm import Story
+from app.models.trust_snapshot import OrgMemberTrustSnapshot
 from app.models.verdict import Verdict
 
 DEFAULT_WINDOW_DAYS = 90
+SNAPSHOT_DEDUP_HOURS = 24
 
 # HO-S5: 신뢰의 1차(primary) source = 가설 outcome verdict(가설 적중 이력=substance).
 # 기본 집계는 이 source들만 trust로 환산하고 CI/pr/qa/design은 제외(legacy clean_pass는
@@ -230,3 +232,39 @@ async def compute_member_trust_scores(
         "pending": total_pending,
         "source_breakdown": source_breakdown,
     }
+
+
+async def compute_and_snapshot(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    member_id: uuid.UUID,
+    role_key: str | None = None,
+    window_days: int = DEFAULT_WINDOW_DAYS,
+    *,
+    include_legacy: bool = False,
+) -> dict[str, Any]:
+    """story 91404248(C2a): compute_member_trust_scores()의 lazy write-through wrapper.
+
+    org-c2-trust-persistence-design §2 — 산식은 완전 불변(compute_member_trust_scores 그대로
+    호출), role별 score dict를 metrics JSONB로 verbatim 저장만 추가한다. 동일 (org_id,
+    member_id, role_key)의 최신 스냅샷이 SNAPSHOT_DEDUP_HOURS 이내면 skip(write 증폭 방지).
+    """
+    result = await compute_member_trust_scores(
+        session, org_id, member_id, role_key, window_days, include_legacy=include_legacy,
+    )
+    dedup_cutoff = datetime.now(timezone.utc) - timedelta(hours=SNAPSHOT_DEDUP_HOURS)
+    for score in result["scores"]:
+        recent = await session.execute(
+            select(OrgMemberTrustSnapshot.id).where(
+                OrgMemberTrustSnapshot.org_id == org_id,
+                OrgMemberTrustSnapshot.member_id == member_id,
+                OrgMemberTrustSnapshot.role_key == score["role_key"],
+                OrgMemberTrustSnapshot.computed_at >= dedup_cutoff,
+            ).limit(1)
+        )
+        if recent.scalar_one_or_none() is None:
+            session.add(OrgMemberTrustSnapshot(
+                org_id=org_id, member_id=member_id, role_key=score["role_key"],
+                window_days=window_days, metrics=score,
+            ))
+    return result

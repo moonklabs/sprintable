@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,11 +15,10 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.file_lock import FileLock
 from app.models.team import TeamMember
-from app.routers.events import publish_event
 from app.services.member_resolver import assert_caller_is_member
 from app.services.webhook_dispatch import fire_webhooks
 
-router = APIRouter(tags=["file-locks"])
+router = APIRouter(tags=["file-locks", "Work"])
 
 # S17 SHOULD(산티아고 SME): 요청당 file_paths 상한 — 무제한 배열로 인한 과대 row 생성 방지.
 _MAX_FILE_PATHS_PER_REQUEST = 200
@@ -162,10 +161,9 @@ async def _publish_conflict_event(
         "member_id": str(member_id),
         "conflicts": [c.model_dump(mode="json") for c in conflicts],
     }
-    try:
-        publish_event(str(org_id), "file_conflict", event_data)
-    except Exception:
-        pass
+    # story #2132(2026-07-23): file_conflict의 publish_event() 호출 제거 — FE 소비처 0
+    # (설계 doc §1) + 그 죽은 org-level fanout(`_subscribers`) 자체가 삭제됨. Discord
+    # 웹훅(fire_webhooks, 아래)은 별개 채널이라 무관·그대로 유지.
     try:
         await fire_webhooks(session, org_id, "file_conflict", event_data)
     except Exception:
@@ -281,14 +279,26 @@ async def unlock_files(
 
 @router.get("/api/v2/file-locks")
 async def list_file_locks(
+    project_id: uuid.UUID = Query(...),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth=Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[dict]:
-    """AC6: 현재 프로젝트 내 활성 file lock 목록."""
+    """AC6: 현재 프로젝트 내 활성 file lock 목록.
+
+    E-SECURITY SEC-S8(story 83ea3d6a) Y(까심 전수스윕): 독스트링은 "현재 프로젝트 내"지만
+    실제 쿼리는 FileLock.org_id만 필터하고 project_id 필터 자체가 없어 org 전체 lock이
+    노출됐다(같은 org 다른 project 멤버도 전 project의 활성 lock을 열람 가능). project_id를
+    필수 쿼리 파라미터로 받아 has_project_access로 caller의 실제 접근권도 검증한다."""
+    from app.services.project_auth import has_project_access
+
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
     result = await session.execute(
         select(FileLock).where(
             FileLock.org_id == org_id,
+            FileLock.project_id == project_id,
             FileLock.released_at.is_(None),
         )
     )

@@ -16,8 +16,14 @@ PROJECT="sprintable-494803"
 AR="${REGION}-docker.pkg.dev/${PROJECT}/sprintable/backend"
 SHA="${COMMIT_SHA:-latest-dev}"
 DEV_BACKEND_URL="https://sprintable-backend-dev-787818285179.${REGION}.run.app"
-# AGENT_API_KEY 는 http 모드 never-hit fallback(per-request bearer 가 실키)·placeholder 안전.
-ENV_KEY="${AGENT_API_KEY:-_http_per_request_bearer_only_}"
+# ⛔story cd10e123 계열 긴급수정(2026-07-21, 오르테가군 발견+디디 독립재현): AGENT_API_KEY 는
+# http 모드 never-hit fallback(per-request bearer 가 실키)이라 원래도 어떤 실값도 필요 없다 —
+# 그런데 예전엔 이 값을 호출자 쉘의 ambient `AGENT_API_KEY`에서 상속받았다. oscar 런처가 모든
+# 에이전트 런타임 쉘에 자신의 실 `AGENT_API_KEY`를 상시 export하므로, 에이전트가 이 스크립트를
+# 자기 쉘에서 실행하면 그 실 키가 그대로 Cloud Run 평문 env로 구워지는 게 구조적으로 100%
+# 재현됐다(실제 사건 발생·17일간 노출 확認). override가 필요한 시나리오 자체가 없으므로(실인증은
+# per-request Bearer) 호출자 env를 아예 참조하지 않는다 — 리터럴 고정.
+readonly MCP_DEV_PLACEHOLDER_AGENT_KEY="_http_per_request_bearer_only_"
 
 echo ">>> deploy sprintable-mcp-dev (image=backend:${SHA})"
 gcloud run deploy sprintable-mcp-dev \
@@ -25,7 +31,7 @@ gcloud run deploy sprintable-mcp-dev \
   --region="${REGION}" \
   --command="python" \
   --args="-m,sprintable_mcp" \
-  --set-env-vars="MCP_TRANSPORT=http,SPRINTABLE_API_URL=${DEV_BACKEND_URL},AGENT_API_KEY=${ENV_KEY}" \
+  --set-env-vars="MCP_TRANSPORT=http,SPRINTABLE_API_URL=${DEV_BACKEND_URL},AGENT_API_KEY=${MCP_DEV_PLACEHOLDER_AGENT_KEY}" \
   --allow-unauthenticated \
   --min-instances=0 \
   --max-instances=2 \

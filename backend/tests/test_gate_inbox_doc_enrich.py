@@ -46,9 +46,10 @@ async def test_doc_gate_enriched_with_title_slug():
     )
     # doc_approval gate → can_approve enrich 가 resolve_member 호출(여기선 summary 만 검증·patch 로 무crash).
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=resolved)), \
-         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)):
+         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
+         patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(work_item_id=None, work_item_type="doc", status="pending",
-                               session=session, org_id=org, auth=auth)
+                               assigned_to_me=False, session=session, org_id=org, auth=auth)
     assert out[0].work_item_summary is not None
     assert out[0].work_item_summary.title == "설계 문서"
     assert out[0].work_item_summary.slug == "design-doc"
@@ -62,7 +63,8 @@ async def test_non_doc_gate_no_enrich_no_extra_query():
     gates_res.scalars.return_value.all.return_value = [_gate(org, uuid.uuid4(), "story")]
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[gates_res])
-    out = await list_gates(work_item_id=None, work_item_type=None, status=None,
-                           session=session, org_id=org, auth=None)
+    with patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
+        out = await list_gates(work_item_id=None, work_item_type=None, status=None,
+                               assigned_to_me=False, session=session, org_id=org, auth=None)
     assert out[0].work_item_summary is None
-    assert session.execute.await_count == 1  # gates 쿼리만(doc/can_approve enrich 쿼리 0)
+    assert session.execute.await_count == 1  # gates 쿼리만(doc/can_approve enrich 쿼리 0·posture는 mocked)

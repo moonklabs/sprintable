@@ -43,4 +43,12 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# story #2060(SID f2fe1c5e #2040 AC5 후속): timeout_graceful_shutdown 기본값이 uvicorn 0.46.0에서
+# None(무기한)이다(server.py:271-300 — 활성 커넥션이 다 끝나야 lifespan.shutdown()을 부른다). 이
+# 서비스는 장수명 SSE 스트림(text/event-stream)을 서빙하므로 클라이언트가 SIGTERM 시점에 안
+# 끊겨 있으면 pg_pubsub LISTEN 정리(main.py lifespan finally)가 영영 안 불리고 Cloud Run의
+# SIGKILL(terminationGracePeriodSeconds 기본 10초, dev/prod 둘 다 미설정=기본값 — 오르테가군
+# gcloud 실측 2026-07-20)에 그대로 죽는다 — 오늘 실측된 67분짜리 좀비 LISTEN 연결의 근본원인.
+# 5초: 드레인 5초 + 정리(밀리초 단위) 5초 여유 — 10초 한도 안에서 안전 마진(8초는 정리에 2초만
+# 남아 아슬아슬해 기각).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "5"]

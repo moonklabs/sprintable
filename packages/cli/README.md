@@ -41,7 +41,7 @@ npx sprintable connect --agent windsurf
 
 ## How It Works
 
-1. Enter your **API URL** (default: `https://app.sprintable.ai`)
+1. Enter your **API URL** (default: `https://sprintable-backend-prod-787818285179.asia-northeast3.run.app` — backend-direct)
 2. Enter your **Admin API Key** (Sprintable → Settings → API Keys)
 3. Connection is verified automatically
 4. Select your **project**

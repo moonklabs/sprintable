@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { DecisionsWaiting } from '@/components/inbox/decisions-waiting';
-import { GateInbox } from '@/components/cage/gate-inbox';
+import { ApprovalsQueue } from '@/components/inbox/approvals-queue';
+import { AttentionQueueView } from '@/components/attention-queue/attention-queue-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast, ToastContainer } from '@/components/ui/toast';
 import {
@@ -176,6 +177,18 @@ export default function InboxPage() {
   const tCage = useTranslations('cage');
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const activeTab = searchParams.get('tab') ?? 'notifications';
+  // story #2164(2026-07-25, 까심): 예전엔 이 세 탭 중 notifications 탭 라벨과 페이지 헤더가
+  // t('title')("결재함") 하나를 재사용했다 — 헤더가 항상 "결재함"이라 찍히는데 기본 진입 시
+  // 보이는 건 무필터 알림 피드라 이름이 내용과 어긋났다(선생님 정신병 리스트 결재함1/결재함2
+  // 둘 다 이 어긋남에서 발생). 탭마다 전용 키로 갈라(notificationsTabLabel/attentionTabLabel/
+  // cage.gateTabLabel="결재함"으로 개명) 헤더가 항상 **현재 활성 탭의 진짜 이름**을 보여주게
+  // 한다 — 탭을 이동해도 헤더가 거짓말하지 않는다.
+  const INBOX_TABS = [
+    { key: 'attention', label: t('attentionTabLabel') },
+    { key: 'notifications', label: t('notificationsTabLabel') },
+    { key: 'gates', label: tCage('gateTabLabel') },
+  ] as const;
+  const activeTabLabel = INBOX_TABS.find((tab) => tab.key === activeTab)?.label ?? t('notificationsTabLabel');
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -361,7 +374,7 @@ export default function InboxPage() {
       <TopBarSlot
         title={
           <div className="flex items-center gap-2">
-            <h1 className="text-sm font-medium">{t('title')}</h1>
+            <h1 className="text-sm font-medium">{activeTabLabel}</h1>
             {unreadCount > 0 ? (
               <span className="text-sm tabular-nums text-muted-foreground">{unreadCount}</span>
             ) : null}
@@ -372,15 +385,13 @@ export default function InboxPage() {
             {t('markAllRead')}
           </Button>
         }
+        showContextChip
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {/* 탭 — 알림 / 게이트 */}
+        {/* 탭 — 오늘(Attention Queue) / 알림 / 결재함(게이트). AQ는 전용 뷰로 병행 추가(기존 탭 대체 아님). */}
         <div className="flex shrink-0 border-b border-border/80 px-4">
-          {([
-            { key: 'notifications', label: t('title') },
-            { key: 'gates', label: tCage('gateTabLabel') },
-          ] as { key: string; label: string }[]).map(({ key, label }) => (
+          {INBOX_TABS.map(({ key, label }) => (
             <button
               key={key}
               type="button"
@@ -396,13 +407,17 @@ export default function InboxPage() {
           ))}
         </div>
 
-        {activeTab === 'gates' ? (
+        {activeTab === 'attention' ? (
           <div className="flex-1 overflow-y-auto p-4">
-            {currentTeamMemberId ? (
-              <GateInbox memberId={currentTeamMemberId} />
+            {projectId ? (
+              <AttentionQueueView projectId={projectId} memberId={currentTeamMemberId} />
             ) : (
               <p className="text-xs text-muted-foreground">{t('loading')}</p>
             )}
+          </div>
+        ) : activeTab === 'gates' ? (
+          <div className="flex-1 overflow-y-auto p-4">
+            <ApprovalsQueue />
           </div>
         ) : (
         <>
@@ -432,10 +447,13 @@ export default function InboxPage() {
         )}
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Left: notification list. max-md master-detail (efcb3840 ⓑ): full-width list,
-            hidden once a detail is open so the detail can take the screen (md+ unchanged). */}
-        <div className={`flex w-full min-w-[320px] flex-col border-r border-border/80 md:max-w-[420px] max-md:min-w-0 ${selectedId ? 'max-md:hidden' : ''}`}>
-          <div className="flex-1 overflow-y-auto py-2">
+        {/* Left: notification list. max-lg master-detail (efcb3840 ⓑ, story #1986 breakpoint fix):
+            full-width list, hidden once a detail is open so the detail can take the screen
+            (lg+ unchanged). lg(1024px) matches MOBILE_BREAKPOINT/GNB lg:hidden SSOT — md(768px)
+            caused a 768-1023 tablet seam where the mobile bottom-tab shell and this master-detail
+            split disagreed on what "mobile" means. */}
+        <div className={`flex w-full min-w-[320px] flex-col border-r border-border/80 lg:max-w-[420px] max-lg:min-w-0 ${selectedId ? 'max-lg:hidden' : ''}`}>
+          <div className="focus-inset flex-1 overflow-y-auto py-2">
             {loading ? (
               <div className="space-y-2 px-3 pt-2">
                 {[1, 2, 3, 4, 5].map((i) => (
@@ -460,7 +478,8 @@ export default function InboxPage() {
                         return (
                           <div key={`group-${item.key}`}>
                             <div className="relative flex items-stretch transition hover:bg-muted/40">
-                              {item.hasUnread ? <span className="absolute left-0 top-0 h-full w-0.5 bg-brand" aria-hidden /> : null}
+                              {/* story #2023 ⓑ: 미읽음=L5(시스템 상태), 브랜드 아님 */}
+                              {item.hasUnread ? <span className="absolute left-0 top-0 h-full w-0.5 bg-info" aria-hidden /> : null}
                               <button
                                 type="button"
                                 onClick={() => toggleGroup(item.key)}
@@ -485,7 +504,8 @@ export default function InboxPage() {
                                       <p className={`min-w-0 truncate text-sm ${item.hasUnread ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
                                         {item.latest.title}
                                       </p>
-                                      <span className="shrink-0 rounded-full border border-brand/30 bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
+                                      {/* story #2023 ⓑ: 카운트 칩=L5(시스템 상태), 브랜드 아님 */}
+                                      <span className="shrink-0 rounded-full border border-info/30 bg-info/10 px-1.5 py-0.5 text-[10px] font-medium text-info">
                                         {t('statusChangeCount', { count: item.count })}
                                       </span>
                                     </div>
@@ -520,8 +540,8 @@ export default function InboxPage() {
                           onClick={() => void selectNotification(notification)}
                           className={`relative flex w-full items-start gap-3 px-3 py-2.5 text-left transition ${isSelected ? 'bg-accent' : 'hover:bg-muted/40'}`}
                         >
-                          {/* 목업 ④: unread=좌측 accent strip(박시 카드 bg 대체) */}
-                          {!notification.is_read ? <span className="absolute left-0 top-0 h-full w-0.5 bg-brand" aria-hidden /> : null}
+                          {/* 목업 ④: unread=좌측 accent strip(박시 카드 bg 대체). story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
+                          {!notification.is_read ? <span className="absolute left-0 top-0 h-full w-0.5 bg-info" aria-hidden /> : null}
                           <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/6 text-muted-foreground">
                             <NotifIcon type={notification.type} fallback={Info} className="size-4" />
                           </div>
@@ -557,14 +577,14 @@ export default function InboxPage() {
           </div>
         </div>
 
-        {/* Right: detail panel. max-md: hidden when nothing selected (the list owns the
-            screen); full-screen with a back button when an item is tapped (efcb3840 ⓑ). */}
-        <div className={`flex min-w-0 flex-1 flex-col overflow-y-auto ${!selectedId ? 'max-md:hidden' : ''}`}>
+        {/* Right: detail panel. max-lg: hidden when nothing selected (the list owns the
+            screen); full-screen with a back button when an item is tapped (efcb3840 ⓑ, #1986). */}
+        <div className={`focus-inset flex min-w-0 flex-1 flex-col overflow-y-auto ${!selectedId ? 'max-lg:hidden' : ''}`}>
           {selectedNotification ? (
             <button
               type="button"
               onClick={() => setSelectedId(null)}
-              className="flex shrink-0 items-center gap-1.5 border-b border-border/80 px-4 py-2.5 text-sm font-medium text-muted-foreground transition hover:text-foreground md:hidden"
+              className="flex shrink-0 items-center gap-1.5 border-b border-border/80 px-4 py-2.5 text-sm font-medium text-muted-foreground transition hover:text-foreground lg:hidden"
             >
               <ArrowLeft className="size-4" />
               {t('backToList')}

@@ -3,7 +3,7 @@ import password from "@inquirer/password";
 import confirm from "@inquirer/confirm";
 import select from "@inquirer/select";
 import { getAdapter, SUPPORTED_AGENTS } from "../adapters/registry.js";
-import { ping, getMe, getProjects, listTeamMembers, createTeamMember } from "../api.js";
+import { ping, getMe, getProjects, listTeamMembers, createTeamMember, DEFAULT_API_URL } from "../api.js";
 
 export type AgentType = "claude-code" | "cursor" | "windsurf" | "vscode";
 
@@ -21,7 +21,7 @@ export async function connectCommand(opts: ConnectOptions = {}): Promise<void> {
   // ── 1. API URL + Admin API Key 입력 ─────────────────────────────────────
   const apiUrl = await input({
     message: "Sprintable API URL",
-    default: "https://app.sprintable.ai",
+    default: DEFAULT_API_URL,
     validate: (v: string) => (v.startsWith("http") ? true : "http(s):// 로 시작해야 합니다"),
   });
 

@@ -2,9 +2,9 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -18,16 +18,46 @@ from app.schemas.team_member import (
 )
 from app.services.agent_onboarding_config import build_agent_mcp_config_bundle
 from app.services.member_resolver import assert_caller_is_member, is_caller_member
+from app.services.project_auth import has_project_access
 
 
 class ClaimBody(BaseModel):
     story_id: uuid.UUID
+    # story #2068: MCP SprintableClient가 멀티프로젝트 override 시 이 필드로 project_id를 자동
+    # 주입한다(api_client.py request()). 지금까지 이 필드가 없어 body에 실려 와도 FastAPI가
+    # 조용히 버렸고, 아래 로직은 member.project_id(anchor) 하나로만 story를 찾아 org-agent가
+    # 멀티프로젝트 grant로 다른 프로젝트 스토리를 claim하면 "Story not found in this project"가
+    # 났다(스토리는 실재했다 — 찾은 project가 틀렸을 뿐).
+    project_id: uuid.UUID | None = None
+
+
+def _override_online(resp: TeamMemberResponse, ts: "str | None") -> TeamMemberResponse:
+    """#2120 AC2: Redis online 키 ts 있으면 last_seen_at 을 그 값으로 override → computed_field
+    presence_status 가 online 을 도출(status 를 직접 주입하지 않아 3상태·AC7 로직 무변경). ts 없음/
+    파싱실패 → 원본(DB last_seen_at 폴백·flag off/Redis 다운 시 자연 폴백)."""
+    if not ts:
+        return resp
+    try:
+        return resp.model_copy(update={"last_seen_at": datetime.fromisoformat(ts)})
+    except (ValueError, TypeError):
+        return resp
+
+
+async def _inject_online_single(resp: TeamMemberResponse, member_id) -> TeamMemberResponse:
+    """단건 응답용 #2120 AC2 online 주입(목록/단건 presence 불일치 방지)."""
+    from app.services import presence_online
+
+    om = await presence_online.get_online_map([member_id])
+    return _override_online(resp, om.get(str(member_id)))
 
 
 async def _inject_active_stories(
     members: list, session: AsyncSession
 ) -> list[TeamMemberResponse]:
-    """AC6: active_story_id → stories batch 조회 후 inject."""
+    """AC6: active_story_id → stories batch 조회 후 inject.
+
+    #2120 AC2: online 키 배치조회(MGET 1회) → 있으면 last_seen_at override → computed_field online.
+    """
     ids = {m.active_story_id for m in members if m.active_story_id}
     stories: dict[uuid.UUID, Story] = {}
     if ids:
@@ -35,9 +65,13 @@ async def _inject_active_stories(
         for s in result.scalars().all():
             stories[s.id] = s
 
+    from app.services import presence_online
+    online_map = await presence_online.get_online_map([m.id for m in members])
+
     out = []
     for m in members:
         resp = TeamMemberResponse.model_validate(m)
+        resp = _override_online(resp, online_map.get(str(m.id)))
         if m.active_story_id and m.active_story_id in stories:
             s = stories[m.active_story_id]
             resp = resp.model_copy(update={
@@ -48,7 +82,7 @@ async def _inject_active_stories(
 
 _FAKECHAT_BASE_PORT = 8787
 
-router = APIRouter(prefix="/api/v2/team-members", tags=["team-members"])
+router = APIRouter(prefix="/api/v2/team-members", tags=["team-members", "Organization"])
 
 
 def _get_repo(
@@ -95,6 +129,7 @@ async def list_team_members(
     repo: TeamMemberRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[TeamMemberResponse]:
     # S:166051f0 — org-level(project_id 없음): 휴먼 = org_members SSOT **직접** 해소
     # (team_members 뷰=members⋈project_access 비의존 → project_access.member_id NULL 인
@@ -114,6 +149,12 @@ async def list_team_members(
             agents = await repo.list(**agent_filters)
             result.extend(await _inject_active_stories(agents, session))
         return result
+
+    # ratchet round2(story 8aec83b3): project_id 지정 분기가 접근권 검증 없이 repo.list로
+    # 직행해 same-org cross-project roster(이름/역할)가 노출됐다 — resource-actual project_id
+    # (쿼리파라미터 자체가 조회대상) 직접 검증.
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
 
     filters: dict = {"project_id": project_id}
     if type_filter:
@@ -153,19 +194,42 @@ async def create_team_member(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
-    # AC1/AC2: agent actor의 멤버 관리 권한 체크.
+    # AC1/AC2: 멤버 관리 권한 체크.
     # E-MEMBER-POLICY S4: can_manage_members 플래그 직접 읽기 → effective 프로젝트 역할(has_project_role)
     # 단일 경로로 전환(블루프린트 §6). can_manage_members 는 role 에서 derived(0122 백필 can_manage=
     # true→role admin). owner/admin 이 멤버 관리. 기존 통과자(can_manage=true→admin) 무회귀 +
     # owner/admin 추가 통과(additive).
+    #
+    # E-SECURITY SEC-S8(story 83ea3d6a) L — 까심 전수스윕 CRITICAL(누구나·라이브 확定): 이 게이트가
+    # `if actor is not None and actor.type == "agent":`에 갇혀 있어 **휴먼 caller(또는 actor 미해소)
+    # 면 인가가 통째로 스킵**됐다 — 아무 권한 없는 멤버가 role=admin 에이전트 + 작동 sk_live_
+    # API키(전체 스코프)를 임의 project_id(타 org 포함)로 찍어낼 수 있었음(201 실측). 게이트를
+    # actor 종류와 무관하게 무조건 실행하도록 승격 + target(body.project_id)의 실 org를 caller
+    # org와 대조(SEC-S6/S7 헬퍼 재사용) — 기존 agent 분기가 `actor.project_id`(actor 자신의
+    # project)로 역할을 검사하던 것도 `body.project_id`(실제 target)로 정정(잠재적 자기-분기
+    # target 불일치도 함께 봉합). auth.user_id는 API키(에이전트)=member.id·JWT(휴먼)=users.id라
+    # has_project_role이 이미 양쪽을 다 매칭하는 단일 호출로 충분(신규 분기 불요).
+    from app.services.project_auth import assert_target_in_caller_org, get_project_role, has_project_role
+
+    target_project_org_id = (await session.execute(
+        text("SELECT org_id FROM projects WHERE id = :pid"), {"pid": str(body.project_id)},
+    )).scalar_one_or_none()
+    assert_target_in_caller_org(org_id, target_project_org_id, not_found_detail="Project not found")
+
     actor = await _resolve_actor(auth, session, org_id)
+    if not await has_project_role(session, uuid.UUID(auth.user_id), body.project_id, min_role="admin"):
+        raise HTTPException(status_code=403, detail="project admin/owner role required to manage members")
+
     if actor is not None and actor.type == "agent":
-        from app.services.project_auth import has_project_role
-        if not await has_project_role(session, actor.id, actor.project_id, min_role="admin"):
-            raise HTTPException(status_code=403, detail="project admin/owner role required to manage members")
-        # AC3: target.role > actor.role → 403 (격상 차단)
+        # E-SECURITY SEC-S8(story 83ea3d6a) P — 까심 전수스윕: `_resolve_actor`가 team_members
+        # 뷰(멀티프로젝트 grant 시 member당 N행)에서 `.first()`로 임의 1행을 뽑아, actor.role이
+        # body.project_id와 무관한 다른 project의 role일 수 있었다(비결정). mixed-role 에이전트가
+        # role 낮은 target project에서도 다른 project의 높은 role을 빌려와 AC3를 우회 격상.
+        # fix=target project(body.project_id) 전용 effective role을 조회(위 has_project_role
+        # 게이트와 동일 project·SSOT)해 actor.role 대신 사용.
         target_rank = _ROLE_RANK.get(body.role, 1)
-        actor_rank = _ROLE_RANK.get(actor.role, 1)
+        actor_project_role = await get_project_role(session, uuid.UUID(auth.user_id), body.project_id)
+        actor_rank = _ROLE_RANK.get(actor_project_role, 1)
         if target_rank > actor_rank:
             raise HTTPException(status_code=403, detail="Cannot assign role higher than your own")
         # AC4: target.alias(name) == actor.name → 400 (self-replication 차단)
@@ -289,6 +353,9 @@ async def create_team_member(
                 body=f"{actor.name}(에이전트)이 {member.name}을 생성했습니다.",
                 reference_type="team_member",
                 reference_id=member.id,
+                # story #1953: 신규 에이전트(member) 자신의 project_id — TeamMember.project_id
+                # NOT NULL, 신규 조회 없이 그대로 실음.
+                source_project_id=member.project_id,
             )
 
     # AC3: agent 생성 시 API key 자동 생성 + response에 포함
@@ -334,7 +401,7 @@ async def get_team_member(
     member = await repo.get(id)
     if member is None:
         raise HTTPException(status_code=404, detail="Team member not found")
-    return TeamMemberResponse.model_validate(member)
+    return await _inject_online_single(TeamMemberResponse.model_validate(member), member.id)
 
 
 _SELF_EDITABLE_HUMAN_FIELDS: frozenset[str] = frozenset({"name", "avatar_url", "color"})
@@ -396,7 +463,8 @@ async def update_team_member(
     await repo.apply_anchor_update(member, data)
     session.expire(member)
     updated = await repo.get(id)
-    return TeamMemberResponse.model_validate(updated or member)
+    _m = updated or member
+    return await _inject_online_single(TeamMemberResponse.model_validate(_m), _m.id)
 
 
 @router.patch("/{id}/heartbeat")
@@ -434,6 +502,7 @@ async def heartbeat(
 async def claim_story(
     id: uuid.UUID,
     body: ClaimBody,
+    request: Request,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -446,6 +515,19 @@ async def claim_story(
 
     S19(발견·회귀수정): resolve_member()/.id 직접비교는 휴먼 JWT caller의 axis(OrgMember.id)가
     이 path의 team_members뷰 id와 달라 본인 claim도 403났다 — assert_caller_is_member로 교체.
+
+    story #2068(발견·회귀수정): story 존재 검증이 `member.project_id`(claim 대상 team_members
+    행의 anchor project) 하나로만 스코프됐다 — org-agent 멀티프로젝트 grant(85429ee0)로 다른
+    프로젝트 story를 claim하려 하면 project_id override(body/X-Project-Id)가 통째로 무시되고
+    항상 "Story not found in this project"가 났다. 명시(body) > 헤더(has_project_access 검증)
+    > `member.project_id`(이 claim 대상 행 자체의 anchor) 순으로 해소한다.
+
+    ⚠️ `app.dependencies.project_scope.resolve_required_project_id`(SSOT)를 쓰지 않는다 — 그건
+    "기본값 없으면 **caller**의 default project"로 폴백하는데, 여기서는 `id`(claim 대상
+    team_members 행)가 이미 자기 project로 결정론적으로 고정돼 있다. caller 기본 프로젝트로
+    폴백하면 override 없는 통상 케이스(caller==member, 프로젝트 1개)에서도 값이 갈릴 수 있는
+    축을 새로 여는 것이라, override가 없을 때는 기존 그대로 `member.project_id`를 쓴다(무회귀 —
+    override 있을 때만 새 분기를 탄다).
     """
     repo = TeamMemberRepository(session, org_id)
     member = await repo.get(id)
@@ -454,13 +536,45 @@ async def claim_story(
 
     await assert_caller_is_member(id, auth, session, org_id, detail="Cannot claim as another member")
 
+    override_project_id = body.project_id
+    if override_project_id is None:
+        header = request.headers.get("X-Project-Id")
+        if header:
+            try:
+                override_project_id = uuid.UUID(header)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid X-Project-Id format")
+    if override_project_id is not None:
+        if not await has_project_access(session, uuid.UUID(str(auth.user_id)), override_project_id, org_id):
+            raise HTTPException(status_code=403, detail="No access to the specified project")
+        effective_project_id = override_project_id
+    else:
+        effective_project_id = member.project_id
+
     # AC3: story가 해당 project에 존재하는지 검증
     story_result = await session.execute(
-        select(Story).where(Story.id == body.story_id, Story.project_id == member.project_id)
+        select(Story).where(Story.id == body.story_id, Story.project_id == effective_project_id)
     )
     story = story_result.scalar_one_or_none()
     if story is None:
-        raise HTTPException(status_code=400, detail="Story not found in this project")
+        # story #2068 AC3: 존재하지 않는 것과 "다른 project에 있는 것"을 구분해서 알려준다 —
+        # 전자는 오타/삭제, 후자는 project_id 지정 문제(둘 다 "not found"로만 뭉치면 사람이
+        # 원인을 못 좁힌다). org 필터는 유지(타 org story 존재 여부는 노출하지 않는다).
+        elsewhere = await session.execute(
+            select(Story.project_id).where(Story.id == body.story_id, Story.org_id == org_id)
+        )
+        actual_project_id = elsewhere.scalar_one_or_none()
+        if actual_project_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Story {body.story_id} exists in project {actual_project_id}, not in "
+                    f"project {effective_project_id} (resolved from "
+                    f"{'the specified project_id' if override_project_id is not None else 'this team member\'s assigned project'}"
+                    "). Pass the correct project_id explicitly if you have access to it."
+                ),
+            )
+        raise HTTPException(status_code=404, detail="Story not found")
 
     now = datetime.now(timezone.utc)
     # AC3-4 2-2: anchor-only — agent_project_profiles가 presence 유일 소스.

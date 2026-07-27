@@ -44,7 +44,9 @@ async def _seed_org_project(s):
         f"DELETE FROM projects WHERE org_id='{ORG}'",
         f"DELETE FROM organizations WHERE id='{ORG}'",
         f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','C22','c22org','free')",
-        f"INSERT INTO projects (id,org_id,name) VALUES ('{PROJ}','{ORG}','P')",
+        # violation_level: Project 모델의 default="warn"은 ORM-level(raw SQL은 미경유) — 스키마에
+        # NOT NULL 컬럼으로 추가된 뒤 이 raw INSERT가 갱신 안 돼 있었다(발견 즉시 수정, #2038과 무관).
+        f"INSERT INTO projects (id,org_id,name,violation_level) VALUES ('{PROJ}','{ORG}','P','warn')",
     ]:
         await s.execute(text(sql))
     await s.commit()
@@ -110,9 +112,16 @@ async def test_manual_verified_transition_closes_linked_measuring_loop_without_a
             hyp = await _seed_manual_hypothesis(s)
             loop_id = await _seed_loop(s, hyp.id)
 
+            # story #2038: verified/falsified는 outcome_result.actual(수치)+reason(근거)를 서버가
+            # 강제한다 — actual_revenue는 이 테스트의 관심사(loop 귀속 와이어링)를 위한 부가 필드로
+            # 유지하고, 강제 요건인 actual/reason을 함께 싣는다.
+            caller = _caller()
             await transition_hypothesis(
-                s, ORG, _caller(), hyp.id,
-                HypothesisTransition(status="verified", outcome_result={"actual_revenue": 1500}),
+                s, ORG, caller, hyp.id,
+                HypothesisTransition(
+                    status="verified",
+                    outcome_result={"actual_revenue": 1500, "actual": 1500, "reason": "매출 목표 달성"},
+                ),
             )
             await s.commit()
 
@@ -120,7 +129,23 @@ async def test_manual_verified_transition_closes_linked_measuring_loop_without_a
             assert loop.status == "closed"
             assert loop.outcome_attributed_at is not None
             assert loop.outcome_snapshot["hypothesis_status"] == "verified"
-            assert loop.outcome_snapshot["outcome_result"] == {"actual_revenue": 1500}
+            # story #2036(PO 리뷰 b4e88f34) 계약 갱신: outcome_result 저장 시 서버가 closed_by/
+            # closed_by_member_id를 caller로부터 채워 신원 위장을 차단한다(#2036 AC — 클라이언트
+            # 자칭 금지) — 그래서 == 완전일치가 이제 성립하지 않는다. 완전일치를 빼거나 in으로
+            # 눕히면 "서버가 무엇을 채웠는지"를 아무도 검증 안 하게 되므로, 대신 두 축으로
+            # 쪼개 더 강하게 검증한다: ⓐ 호출자가 보낸 필드가 손상 없이 보존되는가
+            # ⓑ 서버가 채운 신원 필드가 하드코딩 문자열이 아니라 이 테스트가 실제로 만든
+            # caller와 정확히 일치하는가. loop_outcome_attribution.attribute_loop_outcome은
+            # 서버 스탬프 완료된 hypothesis.outcome_result를 그대로 스냅샷에 복사하므로(코드
+            # 확인) — "누가 닫았는지"가 loop 감사 기록에도 같이 남는 것은 스냅샷의 기존 설계
+            # (hypothesis_status처럼 지표 아닌 필드도 이미 담고 있음)와 일관되고, "그때 무엇을
+            # 근거로 닫았나"를 되짚는 목적에 오히려 부합한다 — 별도 필터링 불요로 판단.
+            stored = loop.outcome_snapshot["outcome_result"]
+            assert stored["actual_revenue"] == 1500
+            assert stored["actual"] == 1500
+            assert stored["reason"] == "매출 목표 달성"
+            assert stored["closed_by"] == caller.type
+            assert stored["closed_by_member_id"] == str(caller.id)
     finally:
         await eng.dispose()
 
@@ -138,9 +163,13 @@ async def test_manual_falsified_transition_closes_linked_measuring_loop():
             hyp = await _seed_manual_hypothesis(s)
             loop_id = await _seed_loop(s, hyp.id)
 
+            # story #2038: actual/reason 필수(위 verified 테스트와 동일 사유).
             await transition_hypothesis(
                 s, ORG, _caller(), hyp.id,
-                HypothesisTransition(status="falsified", outcome_result={"actual_revenue": 100}),
+                HypothesisTransition(
+                    status="falsified",
+                    outcome_result={"actual_revenue": 100, "actual": 100, "reason": "매출 목표 미달"},
+                ),
             )
             await s.commit()
 
@@ -194,9 +223,10 @@ async def test_manual_verified_transition_with_no_linked_loop_still_succeeds():
             await _cleanup(s)
             hyp = await _seed_manual_hypothesis(s)
 
+            # story #2038: reason 필수 추가(actual은 이미 있었음).
             out = await transition_hypothesis(
                 s, ORG, _caller(), hyp.id,
-                HypothesisTransition(status="verified", outcome_result={"actual": 1}),
+                HypothesisTransition(status="verified", outcome_result={"actual": 1, "reason": "테스트 근거"}),
             )
             await s.commit()
             assert out.status == "verified"

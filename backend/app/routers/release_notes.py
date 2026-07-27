@@ -25,7 +25,7 @@ from app.dependencies.database import get_db
 from app.models.release_note import ReleaseNote
 from app.services.agent_onboarding_config import resolve_locale_from_request
 
-router = APIRouter(prefix="/api/v2/release-notes", tags=["release-notes"])
+router = APIRouter(prefix="/api/v2/release-notes", tags=["release-notes", "Knowledge"])
 
 
 class ReleaseNoteItemModel(BaseModel):

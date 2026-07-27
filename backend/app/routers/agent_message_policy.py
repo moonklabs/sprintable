@@ -20,7 +20,7 @@ from app.models.member import Member
 from app.models.team import AgentMessageAllowlist
 from app.services.member_resolver import resolve_member_identity
 
-router = APIRouter(prefix="/api/v2", tags=["agent-message-policy"])
+router = APIRouter(prefix="/api/v2", tags=["agent-message-policy", "Organization"])
 
 _VALID_MODES = ("creator_only", "org_wide", "list")
 

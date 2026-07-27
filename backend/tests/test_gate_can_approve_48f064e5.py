@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from app.routers import gates as gates_mod
 from app.routers.gates import (
@@ -50,7 +50,10 @@ def _doc_gate(requester_id: uuid.UUID):
 
 async def _call(resolved, *, execute_results, has_access=None, status="approved"):
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=execute_results)
+    # story #2027: status="approved" 경로는 이 authz 체크들 뒤에 get_org_posture()로 session.execute
+    # 를 1회 더 호출한다(risk_grade 사유-강제 가드) — side_effect 리스트 끝에 그 몫을 추가. 이 파일의
+    # 관심사(project-access/self-approval authz)와 무관하므로 결과값은 무의미(None으로 충분).
+    session.execute = AsyncMock(side_effect=[*execute_results, _result(None)])
     transition = AsyncMock(return_value=SimpleNamespace())
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     patches = [
@@ -65,7 +68,10 @@ async def _call(resolved, *, execute_results, has_access=None, status="approved"
         for p in patches:
             stack.enter_context(p)
         result = await transition_gate_endpoint(
-            id=uuid.uuid4(), body=GateTransitionRequest(status=status),
+            # note 동봉: risk_grade 폴백(미분류 gate_type→고위험)이 이 authz 테스트의 관심사가
+            # 아닌 사유-강제 가드에 걸리지 않도록.
+            id=uuid.uuid4(), body=GateTransitionRequest(status=status, note="테스트 사유"),
+            background_tasks=BackgroundTasks(),
             session=session, org_id=uuid.uuid4(), auth=auth,
         )
     return result, transition
@@ -85,6 +91,7 @@ async def test_doc_gate_self_approval_forbidden():
         with pytest.raises(HTTPException) as ei:
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
             )
     assert ei.value.status_code == 403
@@ -104,6 +111,7 @@ async def test_doc_gate_missing_requester_fail_closed():
         with pytest.raises(HTTPException) as ei:
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
             )
     assert ei.value.status_code == 403
@@ -125,6 +133,7 @@ async def test_doc_gate_no_project_access_forbidden():
         with pytest.raises(HTTPException) as ei:
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
             )
     assert ei.value.status_code == 403
@@ -145,6 +154,7 @@ async def test_doc_gate_deleted_doc_forbidden():
         with pytest.raises(HTTPException) as ei:
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
             )
     assert ei.value.status_code == 403

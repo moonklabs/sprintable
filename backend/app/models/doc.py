@@ -66,10 +66,12 @@ class Doc(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     doc_type: Mapped[str] = mapped_column(Text, nullable=False, default="page")
     content_format: Mapped[str] = mapped_column(Text, nullable=False, default="markdown")
     tags: Mapped[List[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    # story #2167(2026-07-25, 까심): slug 추가 — migration 0206. slug는 실제 식별자로 사람이
+    # 손으로 복사/입력하는데(정신병 리스트 실사용 인용) 검색은 못 찾았던 것이 근본원인이었다.
     search_vector: Mapped[Any] = mapped_column(
         TSVECTOR,
         Computed(
-            "to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, ''))",
+            "to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(slug, '') || ' ' || coalesce(content, ''))",
             persisted=True,
         ),
         nullable=True,

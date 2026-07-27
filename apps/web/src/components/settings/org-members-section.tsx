@@ -11,6 +11,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { Badge } from '@/components/ui/badge';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
+import { useRenderNonce } from '@/hooks/use-render-nonce';
 
 interface OrgMember {
   id: string;
@@ -59,6 +60,10 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const [removeDialogMemberId, setRemoveDialogMemberId] = useState<string | null>(null);
   const [changingRoleId, setChangingRoleId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // story #2154 — handleCopyInviteLink의 catch 경로가 setActionMessage(null) 리셋 없이 바로
+  // 세팅해, 연속 동일 실패(예: 클립보드 반복 실패) 시 재낭독이 안 될 수 있던 것을 nonce-key로
+  // 구조적으로 막는다.
+  const [actionMessageNonce, bumpActionMessageNonce] = useRenderNonce();
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
@@ -180,6 +185,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       setCopiedInviteId(inviteId);
       setTimeout(() => setCopiedInviteId(null), 1500);
     } catch {
+      bumpActionMessageNonce();
       setActionMessage({ type: 'error', text: '클립보드 복사에 실패했습니다.' });
     }
   };
@@ -264,7 +270,14 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
             </div>
 
             {inviteResult && (
-              <Alert variant={inviteResult.type === 'success' ? 'success' : 'destructive'}>
+              // story #2105 2차 — handleInvite가 재시도 전 setInviteResult(null)을 먼저 호출해(위
+              // 정의) 매 시도마다 언마운트→리마운트된다. 에러=alert/assertive, 성공=status/polite.
+              <Alert
+                variant={inviteResult.type === 'success' ? 'success' : 'destructive'}
+                role={inviteResult.type === 'success' ? 'status' : 'alert'}
+                aria-live={inviteResult.type === 'success' ? 'polite' : 'assertive'}
+                aria-atomic="true"
+              >
                 <AlertDescription className="break-all">{inviteResult.text}</AlertDescription>
               </Alert>
             )}
@@ -272,9 +285,11 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
         </SectionCard>
       )}
 
-      {/* 액션 메시지 */}
       {actionMessage && (
-        <Alert variant={actionMessage.type === 'success' ? 'success' : 'destructive'}>
+        <Alert
+          key={actionMessageNonce}
+          variant={actionMessage.type === 'success' ? 'success' : 'destructive'}
+        >
           <AlertDescription>{actionMessage.text}</AlertDescription>
         </Alert>
       )}

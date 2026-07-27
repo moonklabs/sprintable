@@ -68,7 +68,12 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
             style={{ cursor: isEditable ? 'pointer' : 'default' }}
           >
             {error ? (
-              <div className="rounded-xl border border-destructive-border bg-destructive-tint p-3 text-xs text-destructive">
+              <div
+                className="rounded-xl border border-destructive-border bg-destructive-tint p-3 text-xs text-destructive"
+                role="alert"
+                aria-live="assertive"
+                aria-atomic="true"
+              >
                 {error}
               </div>
             ) : svg ? (
@@ -164,7 +169,7 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
               {isEditable && <ChevronDown className="size-3" />}
             </button>
             {showLangMenu && (
-              <div className="absolute left-0 top-full z-50 mt-1 max-h-52 w-36 overflow-y-auto rounded-xl border border-border bg-popover py-1">
+              <div className="focus-inset absolute left-0 top-full z-50 mt-1 max-h-52 w-36 overflow-y-auto rounded-xl border border-border bg-popover py-1">
                 {SUPPORTED_LANGUAGES.map((lang) => (
                   <button
                     key={lang}
@@ -193,7 +198,9 @@ function ShikiBlockView({ node, editor, selected }: ReactNodeViewProps) {
         </div>
 
         {/* Code area */}
-        <div className="overflow-x-auto px-4 pb-4">
+        {/* story #2165: 코드블럭은 전역 스크롤바 숨김의 예외 — 가로로 잘린 줄이 있다는 것을
+            스크롤바로 알려야 한다. */}
+        <div className="scrollbar-visible overflow-x-auto px-4 pb-4">
           {/* Editing mode: show plain NodeViewContent */}
           <pre
             className={`text-xs leading-6 text-foreground ${isEditing || !highlightedHtml ? '' : 'hidden'}`}

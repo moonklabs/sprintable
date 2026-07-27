@@ -30,7 +30,7 @@ export default function IntegrationsPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl p-6">
-      <Link href="/settings" className="inline-flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground">
+      <Link href="/settings" replace className="inline-flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground">
         <ArrowLeft className="size-3.5" />{t('title')}
       </Link>
       <h1 className="mt-3 text-sm font-semibold text-foreground">{t('tabIntegrations')}</h1>

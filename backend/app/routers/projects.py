@@ -11,13 +11,19 @@ from app.models.project import Project
 from app.repositories.project import ProjectRepository
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.services.agent_anchor_sync import ensure_human_member
+from app.services.entity_slug import (
+    is_project_slug_taken,
+    is_valid_slug_format,
+    resolve_unique_project_slug,
+    slugify_ascii_or_fallback,
+)
 from app.services.project_auth import (
     accessible_project_ids_in_org,
     has_project_access,
     is_org_owner_or_admin,
 )
 
-router = APIRouter(prefix="/api/v2/projects", tags=["projects"])
+router = APIRouter(prefix="/api/v2/projects", tags=["projects", "Organization"])
 
 
 @router.get("", response_model=list[ProjectResponse])
@@ -53,7 +59,23 @@ async def create_project(
         from ee.plan_limits import check_project_create_limit  # type: ignore[import]
         await check_project_create_limit(session, org_id)
 
-    project = await repo.create(name=body.name, description=body.description)
+    # story 139d2405(S-slug-infra): 명시 지정 시 형식 검증 + org 내 유일성(충돌 시 409 — organizations
+    # create와 동형: 사용자가 명시한 값은 조용히 안 바꾼다). 미지정 시 name→kebab 파생 후 자동 유일화
+    # (충돌 -n suffix — 시스템 파생값이라 조용히 바꿔도 됨).
+    if body.slug is not None:
+        if not is_valid_slug_format(body.slug):
+            raise HTTPException(status_code=400, detail="Invalid slug format")
+        if await is_project_slug_taken(session, org_id, body.slug):
+            raise HTTPException(status_code=409, detail="Slug already exists")
+        slug = body.slug
+    else:
+        # story #2039(P0): 이전엔 slugify()(유니코드 보존)가 한글 등 비ASCII 이름을 그대로
+        # slug에 실어 URL 라우팅이 깨졌다(app/services/entity_slug.py 상단 주석 근거 기록 참고).
+        # ASCII 산출 실패(순수 비ASCII 이름) 시 id-fallback — name 자체는 그대로 저장/표시.
+        base_slug = slugify_ascii_or_fallback(body.name)
+        slug = await resolve_unique_project_slug(session, org_id, base_slug)
+
+    project = await repo.create(name=body.name, description=body.description, slug=slug)
 
     # project_memberships 테이블 미존재 — agent 자동 첨부는 agent 생성 시 project_id로 직접 연결.
     # Ensure the creating user is in org_members (S5: human type team_member 신규 생성 제거).
@@ -86,6 +108,27 @@ async def create_project(
     return ProjectResponse.model_validate(project)
 
 
+@router.get("/resolve", response_model=ProjectResponse)
+async def resolve_project_by_slug(
+    slug: str,
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    session: AsyncSession = Depends(get_db),
+) -> ProjectResponse:
+    """story 139d2405(S-slug-infra): project slug(workspace 내 유일) → project 해소(S-route-project
+    FE middleware가 소비 예정). org_id는 호출자 workspace 컨텍스트(get_verified_org_id)로 자동 스코프.
+    ⚠️`/{id}` 라우트보다 먼저 등록해야 "resolve"가 UUID 파싱으로 새지 않는다."""
+    row = await session.execute(
+        select(Project).where(
+            Project.org_id == org_id, Project.slug == slug, Project.deleted_at.is_(None),
+        )
+    )
+    project = row.scalar_one_or_none()
+    if project is None or not await has_project_access(session, uuid.UUID(auth.user_id), project.id, org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return ProjectResponse.model_validate(project)
+
+
 @router.get("/{id}", response_model=ProjectResponse)
 async def get_project(
     id: uuid.UUID,
@@ -111,11 +154,29 @@ async def update_project(
 ) -> ProjectResponse:
     repo = ProjectRepository(session, org_id)
     # 편집은 부여 멤버 ∪ owner/admin 만. 미접근은 404(비노출).
-    if await repo.get(id) is None or not await has_project_access(
+    existing = await repo.get(id)
+    if existing is None or not await has_project_access(
         session, uuid.UUID(auth.user_id), id, org_id
     ):
         raise HTTPException(status_code=404, detail="Project not found")
     data = body.model_dump(exclude_unset=True)
+
+    # story 139d2405(S-slug-infra): slug rename — 형식/org 내 유일성(자기 제외, 충돌 시 409 —
+    # organizations rename과 동형) 검증 + 이력 기록(향후 S-route-project의 301 해소용).
+    # old==new(무변경 재전송)면 이력 skip.
+    if "slug" in data and data["slug"] is not None and data["slug"] != existing.slug:
+        if not is_valid_slug_format(data["slug"]):
+            raise HTTPException(status_code=400, detail="Invalid slug format")
+        if await is_project_slug_taken(session, org_id, data["slug"], exclude_project_id=id):
+            raise HTTPException(status_code=409, detail="Slug already exists")
+        from app.models.entity_slug_history import EntitySlugHistory
+        session.add(EntitySlugHistory(
+            org_id=org_id, entity_type="project", entity_id=id,
+            old_slug=existing.slug, new_slug=data["slug"],
+        ))
+    elif "slug" in data and data["slug"] == existing.slug:
+        data.pop("slug")
+
     project = await repo.update(id, **data)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -129,9 +190,13 @@ async def delete_project(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
+    from app.models.deletion_audit import DeletionAuditLog
+    from app.services.member_resolver import resolve_member
+
     repo = ProjectRepository(session, org_id)
+    project = await repo.get(id)
     # 미접근 멤버에겐 존재 비노출(404).
-    if await repo.get(id) is None or not await has_project_access(
+    if project is None or not await has_project_access(
         session, uuid.UUID(auth.user_id), id, org_id
     ):
         raise HTTPException(status_code=404, detail="Project not found")
@@ -141,6 +206,16 @@ async def delete_project(
             status_code=403,
             detail="프로젝트 삭제는 조직 owner/admin 권한이 필요합니다",
         )
+    # E-SECURITY SEC-S1 확장(까심 적대적 QA 발견): is_org_owner_or_admin은 org_members(휴먼 전용)만
+    # 조회해 에이전트가 구조적으로 통과 불가하나 암묵적 부산물일 뿐 — story·epic과 동형으로 명시적
+    # human-only 체크 + 삭제 감사를 추가한다(cascade 파괴력 고려).
+    resolved = await resolve_member(auth, org_id, session)
+    if resolved.type != "human":
+        raise HTTPException(status_code=403, detail="Project 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+    session.add(DeletionAuditLog(
+        id=uuid.uuid4(), org_id=org_id, actor_id=resolved.id,
+        entity_type="project", entity_id=id, entity_title=project.name,
+    ))
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Project not found")

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useRenderNonce } from './use-render-nonce';
 
 /** Error codes for i18n mapping in the component layer */
 export type RecorderErrorCode = 'micDenied' | 'recordingFailed';
@@ -18,6 +19,10 @@ export function useAudioRecorder() {
   const [state, setState] = useState<AudioRecorderState>({
     isRecording: false, duration: 0, audioBlob: null, audioUrl: null, errorCode: null, analyser: null,
   });
+  // story #2154 — getUserMedia 실패 분기가 errorCode를 직접 세팅하며 null 리셋을 거치지
+  // 않는다(#2400이 남긴 latent gap). 연속 동일 실패 시 재낭독이 안 될 수 있던 것을
+  // nonce-key로 구조적으로 막는다 — 소비 측이 key={errorNonce}로 쓴다.
+  const [errorNonce, bumpErrorNonce] = useRenderNonce();
 
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
@@ -49,6 +54,7 @@ export function useAudioRecorder() {
         audioCtx.current?.close();
       };
       recorder.onerror = () => {
+        bumpErrorNonce();
         setState(prev => ({ ...prev, isRecording: false, errorCode: 'recordingFailed', analyser: null }));
         stream.getTracks().forEach(t => t.stop());
         audioCtx.current?.close();
@@ -64,9 +70,10 @@ export function useAudioRecorder() {
 
       setState({ isRecording: true, duration: 0, audioBlob: null, audioUrl: null, errorCode: null, analyser });
     } catch {
+      bumpErrorNonce();
       setState(prev => ({ ...prev, errorCode: 'micDenied' }));
     }
-  }, []);
+  }, [bumpErrorNonce]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorder.current?.state === 'recording') {
@@ -83,5 +90,5 @@ export function useAudioRecorder() {
     };
   }, []);
 
-  return { ...state, startRecording, stopRecording };
+  return { ...state, errorNonce, startRecording, stopRecording };
 }

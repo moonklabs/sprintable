@@ -305,6 +305,62 @@ async def test_transition_killed_records_note():
     assert repo.update.call_args.kwargs["outcome_result"]["reason"] == "not worth it"
 
 
+def _patch_verified_downstream():
+    """target=verified/falsified가 부르는 다운스트림(S19 배선) — 전이 로직만 검증하는 이
+    mock-session 테스트에서는 embedding_enqueue와 동일 이유로 격리한다."""
+    return (
+        patch(
+            "app.services.hypothesis_outcome_verdict.record_outcome_verdicts",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.services.loop_outcome_attribution.attribute_loop_outcome",
+            new=AsyncMock(return_value=None),
+        ),
+    )
+
+
+async def test_transition_verified_server_stamps_closed_by_from_human_caller():
+    """story #2036 PO 리뷰(PR #2303 b4e88f34): closed_by/closed_by_member_id는 서버(caller)가
+    채운다 — human이 닫으면 human으로 정확히 기록되는지(정상 경로)."""
+    repo = _repo_mock(_hyp_stub(status="measuring"))
+    p_repo, p_lookup = _patch(repo, "human")
+    p_verdict, p_loop = _patch_verified_downstream()
+    with p_repo, p_lookup, p_verdict, p_loop:
+        await svc.transition_hypothesis(
+            MagicMock(), ORG_ID, _caller("human"), HYP_ID,
+            HypothesisTransition(
+                status="verified", outcome_result={"actual": 137, "reason": "목표 초과 달성"},
+            ),
+        )
+    outcome = repo.update.call_args.kwargs["outcome_result"]
+    assert outcome["closed_by"] == "human"
+    assert outcome["closed_by_member_id"] == str(CALLER_HUMAN_ID)
+    assert outcome["actual"] == 137  # 클라이언트 필드는 보존
+
+
+async def test_transition_verified_ignores_client_declared_closed_by():
+    """⛔ gate 1(오르테가군): agent 자격증명으로 직접 호출해 outcome_result에 closed_by="human"을
+    실어 보내도 저장된 값은 human이 아니어야 한다 — 클라이언트 자칭 위장 차단."""
+    repo = _repo_mock(_hyp_stub(status="measuring"))
+    p_repo, p_lookup = _patch(repo, "human")
+    p_verdict, p_loop = _patch_verified_downstream()
+    with p_repo, p_lookup, p_verdict, p_loop:
+        await svc.transition_hypothesis(
+            MagicMock(), ORG_ID, _caller("agent"), HYP_ID,
+            HypothesisTransition(
+                status="verified",
+                outcome_result={
+                    "actual": 137, "reason": "목표 초과 달성",
+                    "closed_by": "human", "closed_by_member_id": str(uuid.uuid4()),
+                },
+            ),
+        )
+    outcome = repo.update.call_args.kwargs["outcome_result"]
+    assert outcome["closed_by"] == "agent"  # 실 caller.type — 클라이언트 자칭("human") 무시
+    assert outcome["closed_by_member_id"] == str(CALLER_AGENT_ID)
+
+
 # ── update: allowlist / NO_VALID_FIELDS / owner=human ─────────────────────────
 
 async def test_update_empty_raises():

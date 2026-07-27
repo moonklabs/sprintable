@@ -24,6 +24,7 @@ type PageState = 'preview-loading' | 'preview-error' | 'auth' | 'accepting' | 's
 
 export default function InvitePage() {
   const t = useTranslations('invite');
+  const t2 = useTranslations('login');
   const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get('token');
@@ -140,11 +141,14 @@ export default function InvitePage() {
   if (pageState === 'preview-error') {
     return (
       <Frame>
-        <div className="space-y-3 py-8 text-center">
+        {/* story #2105 2차 — 'preview-loading'에서 비동기로 전이되는 결과다(reset-password의
+            정적 초기렌더 invalidLink와 달리 마운트 후 상태변화라 aria-live 대상). */}
+        <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-3 py-8 text-center">
           <div className="text-3xl">✕</div>
           <p className="text-sm text-destructive">{errorMsg}</p>
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
           <a href="/login" className="text-sm font-medium text-brand hover:text-brand/80">
-            로그인 페이지로 →
+            {t('backToLogin')}
           </a>
         </div>
       </Frame>
@@ -161,12 +165,13 @@ export default function InvitePage() {
             pageState === 'success' && 'text-success',
           )} />
           {pageState === 'success' && preview ? (
-            <>
+            // story #2105 2차 — 성공 결과(가입 완료)도 polite로 낭독(#2096/#2105 1차와 동일 원칙).
+            <div role="status" aria-live="polite" aria-atomic="true">
               <p className="text-lg font-semibold tracking-tight text-foreground">
-                {preview.org_name}에 합류했어요
+                {t('joinedOrg', { org: preview.org_name })}
               </p>
               <p className="text-sm text-muted-foreground">{t('redirecting')}</p>
-            </>
+            </div>
           ) : (
             <p className="text-sm text-muted-foreground">{t('accepting')}</p>
           )}
@@ -180,11 +185,11 @@ export default function InvitePage() {
       {preview && (
         <div className="space-y-6">
           <div className="space-y-3 text-center animate-in fade-in slide-in-from-bottom-2 duration-500 delay-100 fill-mode-backwards">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-              <span className="block">{preview.org_name}</span>
-              <span className="block text-base font-normal text-muted-foreground mt-1">
-                에 합류하세요
-              </span>
+            <h1 className="text-2xl font-normal tracking-tight text-foreground sm:text-3xl">
+              {t.rich('joinHeading', {
+                org: preview.org_name,
+                b: (chunks) => <span className="font-semibold text-foreground">{chunks}</span>,
+              })}
             </h1>
           </div>
 
@@ -194,7 +199,7 @@ export default function InvitePage() {
                 {preview.inviter_name ? (
                   <>
                     <div className="truncate font-medium text-foreground">
-                      {preview.inviter_name}님이 초대했어요
+                      {t('invitedByPerson', { name: preview.inviter_name })}
                     </div>
                     {preview.inviter_email && (
                       <div className="truncate text-xs text-muted-foreground">{preview.inviter_email}</div>
@@ -202,7 +207,7 @@ export default function InvitePage() {
                   </>
                 ) : (
                   <div className="truncate font-medium text-foreground">
-                    {preview.org_name}에서 초대했어요
+                    {t('invitedByOrgFallback', { org: preview.org_name })}
                   </div>
                 )}
               </div>
@@ -226,7 +231,7 @@ export default function InvitePage() {
                       : 'text-muted-foreground hover:text-foreground/80',
                   )}
                 >
-                  {mode === 'signup' ? '가입' : '로그인'}
+                  {mode === 'signup' ? t2('signUp') : t2('signIn')}
                   {authMode === mode && (
                     <span className="absolute inset-x-0 -bottom-px h-0.5 bg-foreground" />
                   )}
@@ -238,7 +243,7 @@ export default function InvitePage() {
               {authMode === 'signup' && (
                 <input
                   type="text"
-                  placeholder="이름"
+                  placeholder={t('namePlaceholder')}
                   autoComplete="name"
                   className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand"
                   value={displayName}
@@ -248,7 +253,7 @@ export default function InvitePage() {
               )}
               <input
                 type="email"
-                placeholder="이메일"
+                placeholder={t2('email')}
                 autoComplete="email"
                 className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand"
                 value={email}
@@ -257,7 +262,7 @@ export default function InvitePage() {
               />
               <input
                 type="password"
-                placeholder="비밀번호"
+                placeholder={t2('password')}
                 autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
                 className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand"
                 value={password}
@@ -275,14 +280,16 @@ export default function InvitePage() {
                     disabled={submitting}
                   />
                   <span className="text-xs text-muted-foreground">
-                    이용약관 + 개인정보처리방침에 동의합니다
+                    {t('tosAgreement')}
                   </span>
                 </label>
               )}
             </div>
 
             {errorMsg && (
-              <p className="text-sm text-destructive">{errorMsg}</p>
+              // story #2105 2차 — handleSubmit이 재시도 전 setErrorMsg('')를 먼저 호출해(위 정의)
+              // 매 시도마다 언마운트→리마운트된다.
+              <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{errorMsg}</p>
             )}
 
             <button
@@ -294,14 +301,14 @@ export default function InvitePage() {
               className="flex w-full min-h-[44px] items-center justify-center gap-2 rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:opacity-50"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {submitting ? '...' : '합류하기'}
+              {submitting ? t('joining') : t('submit')}
             </button>
           </div>
 
           <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-500 delay-400 fill-mode-backwards">
             <div className="relative flex items-center">
               <div className="flex-grow border-t border-border/50" />
-              <span className="mx-3 flex-shrink text-xs text-muted-foreground/60">또는</span>
+              <span className="mx-3 flex-shrink text-xs text-muted-foreground/60">{t2('orContinueWith')}</span>
               <div className="flex-grow border-t border-border/50" />
             </div>
             <a
@@ -309,14 +316,7 @@ export default function InvitePage() {
               className="flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground/80 transition hover:bg-muted/50"
             >
               <GoogleIcon />
-              Google로 계속
-            </a>
-            <a
-              href={`/auth/login?provider=github&invite_token=${encodeURIComponent(token!)}&tos_accepted=true`}
-              className="flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg border border-border bg-foreground px-4 py-3 text-sm font-medium text-background transition hover:bg-foreground/90"
-            >
-              <GitHubIcon />
-              GitHub로 계속
+              {t2('google')}
             </a>
           </div>
         </div>
@@ -349,14 +349,6 @@ function GoogleIcon() {
       <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
       <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
       <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-    </svg>
-  );
-}
-
-function GitHubIcon() {
-  return (
-    <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
     </svg>
   );
 }

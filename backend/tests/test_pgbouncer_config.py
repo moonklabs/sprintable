@@ -35,8 +35,9 @@ def test_build_engine_kwargs_flag_off(monkeypatch):
     assert kw["max_overflow"] == database.settings.db_max_overflow
     assert kw["pool_pre_ping"] is True
     # off: 캐시 on(#1330 revert) — statement_cache_size 미지정
-    assert kw["connect_args"] == {}
     assert "statement_cache_size" not in kw["connect_args"]
+    # SID f2fe1c5e/#2040 AC2: application_name 태그는 flag 무관 항상 부여
+    assert "application_name" in kw["connect_args"]["server_settings"]
 
 
 def test_build_engine_kwargs_flag_on(monkeypatch):
@@ -46,7 +47,9 @@ def test_build_engine_kwargs_flag_on(monkeypatch):
     assert kw["max_overflow"] == database.settings.db_pgbouncer_max_overflow
     assert kw["pool_pre_ping"] is True
     # on: transaction-mode 호환 — prepared statement 캐시 비활성(#1314 재적용)
-    assert kw["connect_args"] == {"statement_cache_size": 0}
+    assert kw["connect_args"]["statement_cache_size"] == 0
+    # SID f2fe1c5e/#2040 AC2: application_name 태그는 flag 무관 항상 부여
+    assert "application_name" in kw["connect_args"]["server_settings"]
 
 
 def test_imported_engine_uses_default_off():

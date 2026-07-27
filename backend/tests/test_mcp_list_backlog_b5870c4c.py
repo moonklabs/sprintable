@@ -17,6 +17,9 @@ async def test_list_backlog_targets_existing_endpoint_with_no_sprint(monkeypatch
         project_id = "proj-1"
         org_id = None
 
+        def require_project_id(self):  # E-MCP-OPT ff6cb90d: 툴이 이제 이 메서드를 씀.
+            return self.project_id
+
         async def get(self, path, params=None):
             captured["path"] = path
             captured["params"] = params or {}

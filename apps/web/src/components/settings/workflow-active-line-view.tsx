@@ -51,7 +51,7 @@ export function WorkflowActiveLineView({ projectId }: { projectId?: string | nul
         <select
           value={entityType}
           onChange={(e) => setEntityType(e.target.value)}
-          className="ml-auto h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="ml-auto h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
         >
           {ENTITY_TYPES.map((et) => <option key={et} value={et}>{et}</option>)}
         </select>

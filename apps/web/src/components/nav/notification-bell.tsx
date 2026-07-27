@@ -13,15 +13,18 @@ import {
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { useMediaQuery } from '@/lib/use-media-query';
 import { getEventTypeCopy } from '@/services/notification-display';
 
 type FilterTab = 'all' | 'story' | 'system';
 
-const FILTER_TABS: { value: FilterTab; label: string }[] = [
-  { value: 'all', label: '전체' },
-  { value: 'story', label: '스토리' },
-  { value: 'system', label: '시스템' },
+const FILTER_TABS: { value: FilterTab; labelKey: 'filterAll' | 'filter_story' | 'filter_system' }[] = [
+  { value: 'all', labelKey: 'filterAll' },
+  { value: 'story', labelKey: 'filter_story' },
+  { value: 'system', labelKey: 'filter_system' },
 ];
 
 function getNotificationTab(eventType: string): 'story' | 'system' {
@@ -79,35 +82,51 @@ function getEventIcon(eventType: string) {
   return <Bell className="size-4" />;
 }
 
-function timeAgo(dateStr: string): string {
+function timeAgo(dateStr: string, t: ReturnType<typeof useTranslations>): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return '방금 전';
-  if (mins < 60) return `${mins}분 전`;
+  if (mins < 1) return t('justNow');
+  if (mins < 60) return `${mins}${t('minutesAgo')}`;
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}시간 전`;
+  if (hours < 24) return `${hours}${t('hoursAgo')}`;
   const days = Math.floor(hours / 24);
-  return `${days}일 전`;
+  return `${days}${t('daysAgo')}`;
 }
 
-async function fetchNotifications(projectId?: string): Promise<EventNotification[]> {
-  const params = new URLSearchParams({ limit: '30' });
+// story #2192 — 30건에서 조용히 잘리던 결함의 회귀가드. NOTIFICATIONS_PAGE_SIZE만큼 요청해
+// 정확히 그 개수가 돌아오면(BE는 limit을 초과해 주지 않는다 — over-fetch 없음) 다음 페이지가
+// 있을 수 있다고 본다(프록시가 계산한 meta.hasMore를 그대로 신뢰). offset을 넘기면 그 뒤
+// 페이지를 이어서 받는다.
+const NOTIFICATIONS_PAGE_SIZE = 30;
+
+interface NotificationsPage {
+  items: EventNotification[];
+  hasMore: boolean;
+}
+
+async function fetchNotifications(projectId?: string, offset = 0): Promise<NotificationsPage> {
+  const params = new URLSearchParams({ limit: String(NOTIFICATIONS_PAGE_SIZE), offset: String(offset) });
   if (projectId) params.set('project_id', projectId);
-  const res = await fetch(`/api/event-notifications?${params.toString()}`);
-  if (!res.ok) return [];
+  // story #2160 — 401을 조용히 삼키던 폴링을 fetchWithAuth로 전환(세션만료 인지+재로그인 유도).
+  const res = await fetchWithAuth(`/api/event-notifications?${params.toString()}`);
+  if (!res.ok) return { items: [], hasMore: false };
   const json = (await res.json()) as unknown;
-  if (Array.isArray(json)) return json as EventNotification[];
+  if (Array.isArray(json)) return { items: json as EventNotification[], hasMore: false }; // 옛 raw-array 응답 하위호환
   if (json && typeof json === 'object') {
     const obj = json as Record<string, unknown>;
-    if (Array.isArray(obj['data'])) return obj['data'] as EventNotification[];
-    if (obj['items'] && Array.isArray(obj['items'])) return obj['items'] as EventNotification[];
+    const items = Array.isArray(obj['data'])
+      ? obj['data'] as EventNotification[]
+      : (obj['items'] && Array.isArray(obj['items']) ? obj['items'] as EventNotification[] : []);
+    const meta = obj['meta'] as { hasMore?: boolean } | null | undefined;
+    return { items, hasMore: meta?.hasMore ?? false };
   }
-  return [];
+  return { items: [], hasMore: false };
 }
 
 async function fetchUnreadCount(projectId?: string): Promise<number> {
   const params = projectId ? `?project_id=${projectId}` : '';
-  const res = await fetch(`/api/event-notifications/unread-count${params}`);
+  // story #2160 — 30초 폴링이 401을 조용히 삼키던 자리(fetchWithAuth로 전환).
+  const res = await fetchWithAuth(`/api/event-notifications/unread-count${params}`);
   if (!res.ok) return 0;
   const json = (await res.json()) as unknown;
   if (json && typeof json === 'object') {
@@ -127,6 +146,10 @@ interface NotificationPanelProps {
   onMarkAllRead: () => void;
   onNavigate: (notification: EventNotification) => void;
   onClose: () => void;
+  // story #2192 AC3/AC4 — hasMore가 false면 버튼 자체를 안 그린다(음성대조).
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore: () => void;
 }
 
 function NotificationPanel({
@@ -134,8 +157,12 @@ function NotificationPanel({
   onMarkAllRead,
   onNavigate,
   onClose,
+  hasMore,
+  loadingMore,
+  onLoadMore,
 }: NotificationPanelProps) {
   const t = useTranslations('inbox');
+  const tCommon = useTranslations('common');
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
@@ -149,15 +176,15 @@ function NotificationPanel({
   }) ?? [];
 
   const emptyMessage =
-    filterTab === 'story' ? '스토리 알림이 없습니다' :
-    filterTab === 'system' ? '시스템 알림이 없습니다' :
-    '새 알림이 없습니다';
+    filterTab === 'story' ? t('emptyStory') :
+    filterTab === 'system' ? t('emptySystem') :
+    t('emptyAll');
 
   return (
     <div className="flex h-full flex-col">
       {/* 헤더 */}
       <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
-        <span className="text-sm font-semibold">알림</span>
+        <span className="text-sm font-semibold">{t('panelTitle')}</span>
         <div className="flex items-center gap-1">
           {hasUnread && (
             <button
@@ -166,14 +193,14 @@ function NotificationPanel({
               className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
             >
               <CheckCheck className="size-3.5" />
-              전체 읽음
+              {t('markAllRead')}
             </button>
           )}
           <button
             type="button"
             onClick={onClose}
             className="flex size-7 items-center justify-center rounded text-muted-foreground transition hover:bg-accent hover:text-foreground"
-            aria-label="닫기"
+            aria-label={tCommon('close')}
           >
             <X className="size-4" />
           </button>
@@ -181,7 +208,7 @@ function NotificationPanel({
       </div>
 
       {/* 필터 탭 */}
-      <div className="flex shrink-0 overflow-x-auto border-b">
+      <div className="focus-inset flex shrink-0 overflow-x-auto border-b">
         {FILTER_TABS.map((tab) => (
           <button
             key={tab.value}
@@ -194,7 +221,7 @@ function NotificationPanel({
                 : 'text-muted-foreground hover:text-foreground',
             )}
           >
-            {tab.label}
+            {t(tab.labelKey)}
           </button>
         ))}
         <div className="ml-auto flex shrink-0 items-center px-3">
@@ -202,22 +229,24 @@ function NotificationPanel({
             type="button"
             onClick={() => setShowUnreadOnly((v) => !v)}
             className={cn(
-              'rounded-full px-2.5 py-0.5 text-[11px] font-medium transition',
+              // story #2062: showUnreadOnly=true면 bg-primary(링색과 동일) — focus-inset 컨테이너
+              // 안에서는 inset 링이 안 보이므로 focus-outset으로 바깥 링을 되돌린다(유나 규격).
+              'focus-outset rounded-full px-2.5 py-0.5 text-[11px] font-medium transition',
               showUnreadOnly
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-muted text-muted-foreground hover:text-foreground',
             )}
           >
-            안읽음만
+            {t('unreadOnly')}
           </button>
         </div>
       </div>
 
       {/* 목록 */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="focus-inset min-h-0 flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-            로딩 중…
+            {tCommon('loading')}
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
@@ -225,6 +254,7 @@ function NotificationPanel({
             <span>{emptyMessage}</span>
           </div>
         ) : (
+          <>
           <ul>
             {filtered.map((n) => (
               <li key={n.id}>
@@ -261,7 +291,7 @@ function NotificationPanel({
                       </p>
                     ) : null}
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {timeAgo(n.created_at)}
+                      {timeAgo(n.created_at, t)}
                     </p>
                   </div>
                   {!n.read_at && (
@@ -271,6 +301,20 @@ function NotificationPanel({
               </li>
             ))}
           </ul>
+          {/* story #2192 AC3/AC4 — hasMore일 때만 렌더(음성대조: 30건 이하 계정은 버튼 자체가 없음). */}
+          {hasMore && (
+            <div className="flex justify-center py-3">
+              <button
+                type="button"
+                onClick={onLoadMore}
+                disabled={loadingMore}
+                className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                {loadingMore ? tCommon('loading') : t('loadMore')}
+              </button>
+            </div>
+          )}
+          </>
         )}
       </div>
     </div>
@@ -285,8 +329,20 @@ export function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0);
   // null = 로딩 중, array = 로드 완료
   const [notifications, setNotifications] = useState<EventNotification[] | null>(null);
+  // story #2192 — "더 보기" 상태. offsetRef는 API로 실제 가져온 건수만 누적한다(SSE로 앞에
+  // 끼워 넣은 실시간 알림은 offset 계산에서 제외 — notifications.length를 그대로 쓰면 SSE
+  // prepend가 "더 보기" 다음 페이지 경계를 밀려나게 만들어 중복/누락이 생긴다).
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const offsetRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // story #2061 — 모바일 풀스크린 오버레이(< lg)만 손수구현 모달이라 포커스 트랩 배선.
+  // 데스크톱 드롭다운(lg+)은 풀스크린이 아니라 대상 밖(범위 밖 판정, AC1 ⓑ). 데스크톱에서는
+  // open이어도 모바일 오버레이가 CSS로만 숨겨질 뿐 DOM엔 남아있어(lg:hidden), 뷰포트 체크
+  // 없이 트랩을 걸면 desktop 드롭다운의 Tab/Esc까지 삼킨다 — GNB와 동일 lg(1024px) 기준.
+  const isDesktopViewport = useMediaQuery('(min-width: 1024px)');
+  const mobileOverlayRef = useFocusTrap(open && !isDesktopViewport, useCallback(() => setOpen(false), []));
 
   // SSE 실시간 알림 수신
   const handleSseNotification = useCallback((incoming: SseEventNotification) => {
@@ -339,8 +395,11 @@ export function NotificationBell() {
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void fetchNotifications(projectId ?? undefined).then((data) => {
-      if (!cancelled) setNotifications(data);
+    void fetchNotifications(projectId ?? undefined, 0).then(({ items, hasMore: more }) => {
+      if (cancelled) return;
+      setNotifications(items);
+      setHasMore(more);
+      offsetRef.current = items.length;
     });
     // 브라우저 Notification 권한 — 최초 패널 오픈 시 요청
     if ('Notification' in window && Notification.permission === 'default') {
@@ -348,6 +407,27 @@ export function NotificationBell() {
     }
     return () => { cancelled = true; };
   }, [open, projectId]);
+
+  // story #2192 AC3 — "더 보기": offsetRef(SSE prepend와 무관하게 API로 실제 가져온 건수)부터
+  // 이어서 받아 뒤에 붙인다. 이 콜백은 notifications를 deps에 안 갖는다(의도) — offsetRef로
+  // 추적하므로 불필요하다.
+  // ⚠️여기서 offsetRef.current를 notifications.length(또는 notifications?.length)로 바꾸면
+  // 두 가지가 동시에 깨진다: ① SSE prepend가 offset을 오염시키는 원래 버그가 되돌아오고,
+  // ② 이 콜백이 useCallback으로 메모이즈돼 notifications가 deps에 없어 stale closure로
+  // 조용히 옛 값을 읽는다(뮤테이션 셀프체크 중 실측 — 그 상태로는 회귀테스트도 우연히
+  // 통과해버려서 "테스트가 초록"과 "테스트가 이 결함을 잡는다"가 갈리는 걸 직접 봤다).
+  const handleLoadMore = useCallback(async () => {
+    if (!hasMore || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const { items, hasMore: more } = await fetchNotifications(projectId ?? undefined, offsetRef.current);
+      setNotifications((prev) => (prev ? [...prev, ...items] : items));
+      setHasMore(more);
+      offsetRef.current += items.length;
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [hasMore, loadingMore, projectId]);
 
   // 외부 클릭으로 패널 닫기 (데스크톱)
   useEffect(() => {
@@ -409,7 +489,7 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label={unreadCount > 0 ? `알림 ${badgeLabel}개` : '알림'}
+        aria-label={unreadCount > 0 ? t('bellAriaLabelCount', { count: badgeLabel }) : t('panelTitle')}
         aria-expanded={open}
         className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground"
       >
@@ -429,18 +509,31 @@ export function NotificationBell() {
             onMarkAllRead={handleMarkAllRead}
             onNavigate={handleNavigate}
             onClose={() => setOpen(false)}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={() => void handleLoadMore()}
           />
         </div>
       )}
 
       {/* 모바일 풀스크린 오버레이 (< lg) */}
       {open && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-background lg:hidden">
+        <div
+          ref={mobileOverlayRef}
+          tabIndex={-1}
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('panelTitle')}
+          className="fixed inset-0 z-50 flex flex-col bg-background outline-none lg:hidden"
+        >
           <NotificationPanel
             notifications={notifications}
             onMarkAllRead={handleMarkAllRead}
             onNavigate={handleNavigate}
             onClose={() => setOpen(false)}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={() => void handleLoadMore()}
           />
         </div>
       )}

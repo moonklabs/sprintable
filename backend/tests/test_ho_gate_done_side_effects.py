@@ -1,15 +1,20 @@
 """41a6e294: gate-driven done이 정상 status-change side-effects를 발화.
 
 merge approve→done이 status만 직접 set하던 갭을 닫고, 정상 board 경로와 동일 helper
-(emit_story_status_changed)로 events(story.status_changed→L1 진입점)·StoryActivity를 발화하는지
-실DB로 검증. publish_event는 eventbus→L1 activity_events 캡처의 진입점이다.
+(emit_story_status_changed)로 events(story.status_changed)·StoryActivity를 발화하는지
+실DB로 검증.
+
+⚠️story #2132(2026-07-23) 정정 — 이 파일이 검증하던 `publish_event("story.status_changed")`는
+삭제됐다(org-level fanout, `_subscribers` 영구 죽은 레지스트리·구독자 0). 실 배달은
+`project_accessible_member_ids`로 프로젝트 인가 필터를 거친 뒤 `_push_to_agent` 개별 push뿐이라
+(story_status_events.py 참고), 이 테스트도 그 실 경로로 재조준한다.
 """
 from __future__ import annotations
 
 import os
 import uuid
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -63,8 +68,10 @@ async def test_gate_driven_done_emits_status_changed_side_effects():
             gate_type="merge", work_item_type="story", work_item_id=story_id,
             org_id=org, resolver_id=resolver,
         )
-        spy = MagicMock()
-        with patch("app.routers.events.publish_event", spy):
+        push_spy = MagicMock()
+        with patch("app.services.project_auth.project_accessible_member_ids",
+                   AsyncMock(return_value={resolver})), \
+             patch("app.routers.events._push_to_agent", push_spy):
             async with Session() as s:
                 await s.execute(_text("SET session_replication_role = replica"))
                 await _advance_story_on_merge_approve(s, gate, "approved")
@@ -80,9 +87,9 @@ async def test_gate_driven_done_emits_status_changed_side_effects():
                       "WHERE story_id=:i"), {"i": story_id}
             )).all()
         assert status == "done"
-        # ② publish_event("story.status_changed") 발화 = L1 activity_events 캡처 진입점.
-        assert spy.called
-        evt_types = [c.args[1] for c in spy.call_args_list if len(c.args) >= 2]
+        # ② _push_to_agent("story.status_changed") 발화 = 실 SSE 배달 경로(story #2132 이후).
+        assert push_spy.called
+        evt_types = [c.args[1].get("event_type") for c in push_spy.call_args_list if len(c.args) >= 2]
         assert "story.status_changed" in evt_types
         # ③ StoryActivity status_changed 행(in-review→done) — 정상 경로와 parity.
         assert any(a.activity_type == "status_changed" and a.old_value == "in-review"

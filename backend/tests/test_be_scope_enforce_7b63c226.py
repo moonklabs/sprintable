@@ -15,8 +15,6 @@ from app.services.mcp_toolset import path_allowed_for_scope, path_to_tool_group
 
 
 def test_path_to_tool_group_resource_prefixes():
-    assert path_to_tool_group("/api/v2/standups") == "standup"
-    assert path_to_tool_group("/api/v2/standups/missing") == "standup"
     assert path_to_tool_group("/api/v2/rewards/give") == "rewards"
     assert path_to_tool_group("/api/v2/wallet") == "rewards"
     assert path_to_tool_group("/api/v2/audit-logs") == "audit"
@@ -30,15 +28,27 @@ def test_path_to_tool_group_always_allowed_and_unmapped_none():
     assert path_to_tool_group("/api/v2/dashboard") is None
     assert path_to_tool_group("/api/v2/team-members") is None
     assert path_to_tool_group("/api/v2/events/pending") is None
+    # story 205e6831: 스탠드업이 core 편입(MCP _ALWAYS_ALLOWED와 짝) — group-scoped 키도
+    # "standup" 그룹 보유 여부와 무관하게 항상 통과해야 하므로 이제 always-allowed(None).
+    assert path_to_tool_group("/api/v2/standups") is None
+    assert path_to_tool_group("/api/v2/standups/missing") is None
     # 미매핑 → None(core)
     assert path_to_tool_group("/api/v2/projects") is None
 
 
 def test_path_allowed_group_key():
     scope = ["read", "write", "standup"]
-    assert path_allowed_for_scope("/api/v2/standups", scope) is True       # 자기 그룹
+    assert path_allowed_for_scope("/api/v2/standups", scope) is True       # always-allowed(core)
     assert path_allowed_for_scope("/api/v2/rewards/give", scope) is False   # 타 그룹 차단
     assert path_allowed_for_scope("/api/v2/notifications", scope) is True   # always-allowed
+
+
+def test_path_allowed_standup_group_absent_still_allowed():
+    """story 205e6831: "standup" 그룹이 scope에 아예 없는 좁은 키도 core 편입 후에는 통과해야
+    한다 — 대표 에이전트처럼 role이 불명확해 default_tool_groups에 standup이 없을 수 있는
+    상황을 정확히 커버."""
+    assert path_allowed_for_scope("/api/v2/standups", ["stories", "tasks"]) is True
+    assert path_allowed_for_scope("/api/v2/standups", []) is True
 
 
 def test_path_allowed_full_key_no_regression():
@@ -62,7 +72,8 @@ def test_check_scope_group_key_blocks_other_group():
 
 
 def test_check_scope_group_key_allows_own_group():
-    # standup 그룹키 → standup 엔드포인트 → 통과(예외 없음)
+    # standup 그룹키(또는 story 205e6831 이후로는 어떤 그룹키든) → standup 엔드포인트 always-allowed
+    # 통과(예외 없음)
     _check_api_key_scope(_api_auth(["read", "write", "standup"]), "GET", "/api/v2/standups")
 
 

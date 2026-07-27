@@ -66,11 +66,9 @@ class Settings(BaseSettings):
     app_env: str = "development"
     debug: bool = False
 
-    # OAuth — Google / GitHub
+    # OAuth — Google (story #2155: GitHub 로그인 제거 — GitHub App/봇 연동과는 무관, :209 참조)
     google_client_id: str = ""
     google_client_secret: str = ""
-    github_client_id: str = ""
-    github_client_secret: str = ""
     # Next.js 프론트엔드 URL (OAuth redirect_uri 조합용)
     app_url: str = "http://localhost:3000"
 
@@ -79,6 +77,85 @@ class Settings(BaseSettings):
 
     # E-EVENTBUS: dev=true, prod=false (기존 웹훅 병행 운영)
     eventbus_enabled: bool = False
+
+    # E-ARCH S1(2026-07-21, 선생님 "가자" 승인 — 채팅 5초 지연/#2074 근본): REST(api)와
+    # 실시간(SSE/LISTEN)이 같은 Cloud Run 서비스에 있어 인스턴스 기아(콜드스타트 경합)로
+    # 서로를 굶기던 구조를 분리하는 1단계. 이 플래그를 끄면 이 인스턴스는 pg_pubsub LISTEN을
+    # 전혀 시작 안 함(RAW_LISTEN 커넥션 소비 0) — api 서비스에 false, 신규
+    # sprintable-realtime-{env} 서비스에 true로 배선한다(같은 이미지, env만 다름).
+    # default=True(무회귀) — 명시적으로 끄지 않는 한 기존 단일서비스 배포와 동일 동작.
+    pg_listen_enabled: bool = True
+
+    # E-ARCH S2(story #2078·설계 오르테가군 판정 2026-07-21): PG NOTIFY 옆에 Redis(Memorystore)
+    # dual-publish를 shadow로 추가하는 단계. default=False(무회귀) — Memorystore 인스턴스가 아직
+    # 없어도(PO lane·1단계 abort-0 실측 확認 후 배선 예정) 이 PR 자체는 아무 동작도 안 바꾼다.
+    # 켜져도 PG NOTIFY가 여전히 authoritative(dispatch는 PG 경로만 사용) — Redis는 realtime
+    # gateway의 shadow-consume 비교용(지연·중복률 측정)이라 유실돼도 정합성 영향 0
+    # (agent_gateway.py의 acked_seq DB 재조회 패턴과 동형 근거 — 오늘 세션 교차검증 완료).
+    event_broker_redis_dual_publish_enabled: bool = False
+    redis_url: str | None = None  # Memorystore 연결 문자열(공유 — event_broker + RedisRateLimiter). flag on인데 None이면 경고 로그만(fail-safe).
+
+    # E-ARCH S2 근본 정정(2026-07-21, 착수 전 확認 — shadow-consume은 "도달" 관측이지 "전달"이
+    # 아니었다): 원래 redis_consume_loop(구 redis_shadow_consume_loop)은 로그만 남기고
+    # publish_event()/_push_to_agent()를 호출 안 했다 — 그 상태에서 PG_LISTEN_ENABLED=false로
+    # LISTEN을 걷으면 Redis 발행은 되는데 아무도 안 받아 실시간이 전면 정지했을 것. 이 플래그가
+    # 켜지면 그 loop이 실제로 SSE 큐까지 전달한다(self-skip 포함, pg_pubsub._dispatch_received
+    # 와 동형). default=False — event_broker_redis_dual_publish_enabled만으로는 여전히 관측만
+    # (무회귀). ⚠️event_broker_outbox_enabled와 동시에 켜지 말 것 — outbox 발행분은
+    # instance_id가 없어 self-skip이 안 돼 중복 dispatch 위험(3b에서 해소 예정).
+    event_broker_redis_dispatch_enabled: bool = False
+
+    # #2120(E-ARCH 근본, 2026-07-22): chat_presence "working" 저장을 instance-local in-memory →
+    # Redis 공유로 전환하는 롤아웃 게이트. off(기본)=현 in-memory 경로 그대로(무회귀). on이라도
+    # redis_url None/Redis 다운 시 in-memory 로 fail-open(presence=non-critical UI degrade). 롤백=off.
+    presence_redis_enabled: bool = False
+
+    # #2120 AC2(2026-07-22): online liveness(30s SSE-틱 hot-path DB write)를 Redis TTL 키로.
+    # §2 presence_redis_enabled 와 **독립** kill switch — AC2 롤백이 검증완료 §2(working)를 끄지
+    # 않게. AC2는 disconnect 판정·reachability(메시지 배달 경로)까지 건드리므로 격리 필수. 기본 off.
+    presence_online_redis_enabled: bool = False
+
+    # #2121(E-ARCH, 2026-07-22): SSE 연결 카운터(429/503)를 Redis ZSET lease(TTL 자가회수)로. process-local
+    # 카운터가 멀티인스턴스서 부정확 → 429/503 오발. 독립 flag(#2120 교훈·롤백이 presence/§2 안 끔). 기본 off.
+    # off/Redis 다운 → 기존 in-process 카운트로 폴백(fail-open·연결 거부 안 함).
+    sse_lease_redis_enabled: bool = False
+
+    # #2122(E-ARCH, 2026-07-22): fanout(특히 wake_agent)을 Redis 백플레인에 태워 크로스-인스턴스 배달.
+    # 현재 wake_agent 는 pg_notify 직접(event_broker 우회)이라 GCE(PG_LISTEN=false)서 타노드 미도달 +
+    # __wake__ 마커가 event_type 에만 있어 브리지(_push_to_agent=data만 큐잉)서 유실 = 크로스노드 wake 이중 파손.
+    # fix = event_broker.publish + __wake__ 를 data 에. 독립 flag(#2120/#2121 교훈·롤백 격리). 기본 off=현 동작.
+    fanout_wake_redis_enabled: bool = False
+
+    # #2122 cutover 셀렉터: 크로스-인스턴스 dispatch 백플레인을 하나로 강제(중복배달 차단). PG listen 과
+    # Redis consume 브리지는 구조 동일 — 둘 다 dispatch 하면 같은 이벤트 2회 배달. ""(미설정)=기존 플래그서
+    # 파생(충돌 시 redis 우선+ERROR)·"pg"|"redis"=명시 강제. "잘못된 상태를 표현 불가능하게"(불린 2개 대신 enum).
+    realtime_backplane: str = ""
+
+    # E-ARCH S2 정리(2026-07-21, LISTEN 제거 완료 후 발견): redis_consume_loop task 생성이
+    # event_broker_redis_dual_publish_enabled 하나로만 게이트돼 있었다 — dual_publish(발행,
+    # 모든 인스턴스가 필요)와 consume(구독+dispatch, SSE를 실제로 서빙하는 서비스만 필요)
+    # 역할이 뒤섞여, api(SSE 미서빙)도 불필요하게 Redis 구독을 유지했다(낭비 + shadow 비교
+    # 로그 노이즈 — api는 LISTEN이 없어 PG 도착 기준점이 영원히 0이라 항상 "redis-only"로
+    # 오독될 수 있는 상태였다). default=True(무회귀) — realtime이 이미 이 loop로 실 dispatch
+    # 중이라 default를 False로 하면 재배포 시 실시간이 끊긴다. api 쪽만 GHA per-env override로
+    # false 배선(story #2078 PG_LISTEN_ENABLED durable 분리·PR #2364와 동일 패턴).
+    event_broker_redis_consume_enabled: bool = True
+
+    # #2158(E-ARCH, 2026-07-24): DB row 없는 transient push(conversation.read·presence·
+    # conversation.working 등 `_push_to_agent()` 직접호출 B계열)가 SSE 재연결 공백(실측
+    # 359~427ms)에 `_agent_connections` 큐 부재로 조용히 영구유실(pushed=False, 재시도/DB잔존
+    # 없음) — 까심 2회 독립 라이브 재현. DB row화 대신(hot-path 부하 재적재 회피, #2123 유지)
+    # Redis ZSET에 짧은 TTL(기본 30s — sse_transient_replay.py 참조) 재생 버퍼를 둔다.
+    # default=False(무회귀) — off/redis_url 미설정/다운이면 기존 동작(유실)과 동일, 새 실패
+    # 모드 0(presence/lease와 동형 fail-open 철학).
+    sse_transient_replay_enabled: bool = False
+
+    # E-ARCH S3(story #2078) 3a단계: `event_outbox` row insert를 EventBroker.publish()에 추가로
+    # 얹는다(호출 타이밍은 안 바뀜 — 여전히 caller commit 이후, 별도 짧은 트랜잭션이라 아직 진짜
+    # atomic outbox는 아님). default=False(무회귀) — 켜지기 전엔 OutboxEventBroker가 inner
+    # (DualPublishEventBroker) 동작만 그대로 위임한다. outbox_dispatcher_loop 도 이 플래그로
+    # 게이트(꺼져 있으면 realtime gateway에서 폴링 task 자체를 안 만든다).
+    event_broker_outbox_enabled: bool = False
 
     # E-L2 휴리스틱 트리거 워커. default-off — 명시 활성화 전엔 lifespan task 미생성(무동작).
     # advisory_lock=on이면 멀티인스턴스 중 pg_try_advisory_lock holder 1개만 poll/evaluate.
@@ -159,11 +236,115 @@ class Settings(BaseSettings):
 
     # Rate limiting (E-OA1:S5)
     rate_limit_backend: str = "memory"  # "memory" | "redis"
-    redis_url: str = "redis://localhost:6379/0"
+    # ⚠️ story #2078 핫픽스(2026-07-21, Memorystore 배선 직전 PO가 발견): 이 필드가 원래 여기
+    # `str = "redis://localhost:6379/0"`로 별도 선언돼 있었다 — event_broker용 `redis_url`
+    # (위 line 98, `str | None = None`)과 이름이 같아 파이썬 클래스 바디에서 나중 선언이 이겼다
+    # (Pydantic 필드 shadowing). 실제 `settings.redis_url` 기본값은 이 truthy localhost
+    # 문자열이었고, event_broker.py의 "None이면 fail-safe skip" 체크가 여기 가려져 한 번도
+    # 안 걸렸다(PR #2363에서 신설한 필드가 죽어있던 상태). 단일 필드로 통합 — event_broker와
+    # RedisRateLimiter가 같은 Memorystore 인스턴스 하나를 봐야 맞고, rate_limit_backend="redis"
+    # 인데 redis_url이 None이면 aioredis.from_url(None)이 명시적으로 실패하는 게 조용한
+    # localhost 오접속보다 낫다.
+
+    # E-AUTH-REBUILD M2 Phase 1(story b07ad526·doc firebase-auth-identity-platform-migration-poc
+    # §10.1): Firebase Auth/Identity Platform 이행 플래그. 전부 default off — Phase 1 스키마+검증기
+    # 구현은 이 플래그들 뒤에서 dead code로 존재(prod 무영향). LEGACY_AUTH_ISSUE/VERIFY만 on이
+    # 기본이라 기존 self-issued JWT 로그인/세션이 그대로 SSOT.
+    firebase_auth_accept_id: bool = False        # native/direct 경로에서 Firebase ID token 수락
+    firebase_auth_accept_session: bool = False   # Firebase 세션쿠키(__Host-sp_fs) 수락
+    firebase_auth_issue_session: bool = False    # 신규 Firebase 세션쿠키 발급
+    firebase_auth_reset_cutover: bool = False    # Phase 4 coordinated forced-reset 전이 허용
+    firebase_auth_cohort_percent: int = 0        # Phase 5 점진 롤아웃 비율(0~100)
+    firebase_auth_mobile_issue: bool = False     # M2 모바일 native bootstrap 발급
+    # story 1931(OAuth 핸드오프·doc e-mobile-oauth-native-handoff-contract §4/§7.5(b)):
+    # attested native bootstrap(§7.5)과 별개인 경량 OAuth-handoff issue/consume(PKCE) 발급.
+    firebase_oauth_handoff_enabled: bool = False
+    legacy_auth_issue: bool = True               # 기존 self-issued JWT 로그인/refresh 발급
+    legacy_auth_verify: bool = True              # 기존 self-issued JWT 검증(proxy.ts·FastAPI)
+
+    # ⛔P0(신 클래스, #1887과 별개) — proxy.ts singleFlightRefresh는 Cloud Run 인스턴스-로컬
+    # in-memory Map이라 멀티인스턴스(session affinity 꺼짐, gcloud 실측 dev max=3) 간 dedupe가
+    # 안 된다. 하드리프레시의 병렬 인증요청이 인스턴스 분산되면 같은 refresh_token으로 동시
+    # rotate 경합 → 진 쪽은 원자 single-use rotation에 의해 TOKEN_REVOKED 401 → FE가
+    # clearAuthCookies() 실행 → 세션은 살아있는데 강제 로그아웃. FE 그레이스 재사용 패턴
+    # (REFRESH_GRACE_MS=5000, proxy.ts)을 BE로 옮겨 인스턴스 개수/라우팅과 무관하게 만든다
+    # (오르테가·미르코 판단: Redis로 FE 상태공유는 proxy.ts가 edge 런타임이라 과한 인프라 —
+    # 배제. DB-only fork-rotation이 근본이면서 인프라 안 키우는 정공법).
+    auth_refresh_grace_seconds: int = 5
+
+    firebase_project_id: str = ""  # Firebase/Identity Platform GCP 프로젝트 ID(dev/prod 분리)
+
+    # story 132e7204(Phase1-S4): Next.js BFF↔FastAPI 세션쿠키 발급 내부 호출 공유시크릿.
+    # cron.py CRON_SECRET과 동일 패턴 — 미설정(로컬 개발) 시 인증 생략.
+    firebase_bff_internal_secret: str = ""
+
+    # story 4dee942b(Phase1-S5): 네이티브 부트스트랩 — custom token→ID token 교환용 Firebase
+    # Web API key(공개 클라이언트 키, ADC와 별개). App Check 검증용 project number(project_id와
+    # 다른 값 — doc §9.3/산티아고 §9). App Check 필수 여부 게이트(기본 off — 모바일 클라이언트
+    # per-install challenge 메커니즘이 아직 없어 강제 시 발급 자체가 막힘, 별도 모바일 스토리 필요).
+    firebase_web_api_key: str = ""
+    firebase_project_number: str = ""
+    firebase_auth_mobile_app_check_required: bool = False
+    # 산티아고 §9 finding 1(2026-07-15): App Check sub(App ID) allowlist — 콤마 구분 문자열.
+    # 미승인 앱이 App Check 토큰을 정확 서명해와도 이 목록에 없으면 거부.
+    firebase_app_check_allowed_app_ids: str = ""
+
+    # story cbd578d4(C4·산티아고 §7.3): per-install register 엔드포인트가 attestation
+    # rpIdHash/AttestationApplicationId 검증에 강제하는 exact 값들. 미설정 시 register는
+    # 항상 거부(fail-closed) — dev/prod 실 앱 식별자 프로비저닝 후 채워진다.
+    ios_team_id: str = ""
+    android_signing_cert_digest_sha256_hex: str = ""
+    android_min_version_code: int = 0
+    play_integrity_project_number: str = ""
+    # §7.3: 사용자당 bounded N개 active installation — 초과 등록은 fresh re-auth(이미 강제,
+    # 5분 auth_time freshness)+MFA(user.totp_enabled 전제) 요구.
+    device_installation_max_active_per_user: int = 5
 
     @property
     def is_ee_enabled(self) -> bool:
         return self.license_consent.lower() == "agreed"
+
+    @property
+    def is_really_local(self) -> bool:
+        """story #2152(high, 2026-07-23) 근본수정 — story #2071이 도입한 `not K_SERVICE`
+        판정은 "우리는 Cloud Run 위에 있다"는 깨진 전제를 깔고 있었다: GCE(story #2142
+        realtime-gateway)도 `K_SERVICE`가 없으므로 이 판정에선 GCE prod 노드조차 "진짜
+        로컬"이 되어버렸다 — #2071이 막은 구멍이 새 런타임에서 그대로 재현된 것.
+
+        AC2(안전한 실패 방향) 근본수정: "특정 클라우드의 부재 신호"만으로 "로컬"을 추론하는
+        방식(K_SERVICE 없음 = 로컬)은 구조적으로 계속 깨진다 — 모르는 런타임이 새로 생길
+        때마다 그 런타임의 부재 신호를 목록에 추가해야 하고, 빠뜨리면 다시 열린다. `K_SERVICE`
+        존재는 여전히 "Cloud Run 위"라는 확실한 긍정 신호라 그대로 두지만(빠른 경로, 여전히
+        유효 — 틀린 적 없다), **그게 없다고 곧장 "로컬"로 넘어가지 않는다** — 그 경우엔
+        "로컬이다"를 별도로 긍정 확인할 수 있을 때만 True고, 그 외(GCE 포함, 모르는 런타임
+        포함 전부)는 False(로컬 아님 = 게이트 적용)로 떨어뜨린다.
+
+        "로컬이다"의 긍정 신호 둘만 인정한다:
+        ①pytest 실행 중(`PYTEST_CURRENT_TEST`, pytest가 매 테스트마다 자동 주입 — 신규 발명
+          아님) ②`SPRINTABLE_LOCAL_DEV`가 명시적으로 세팅됨(로컬 uvicorn/자체호스팅
+          docker-compose용 — `.env.example`·`docker-compose.yml`에 채워둠, 신규 개발자가
+          별도 조치 없이 그대로 동작).
+
+        ⛔이 판정이 못 잡는 것(AC1 명시): `SPRINTABLE_LOCAL_DEV`를 실수로 세팅한 채 배포된
+        노드는 여전히 "로컬"로 열린다 — 이건 판정 로직이 아니라 배포 설정 리뷰의 몫이다.
+        마찬가지로 자체호스팅 docker-compose를 운영자가 인터넷에 노출하면서도
+        `SPRINTABLE_LOCAL_DEV`를 지우지 않으면 그 인스턴스도 "로컬"로 판정된다 — 이건 #2152
+        도입 이전에도 동일하게 뚫려 있던(K_SERVICE 부재로) 자체호스팅 한정 기존 한계이지,
+        이번 수정이 새로 만든 구멍이 아니다."""
+        import os
+        if os.environ.get("K_SERVICE"):
+            return False
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return True
+        return os.environ.get("SPRINTABLE_LOCAL_DEV", "").strip().lower() in {"1", "true", "yes"}
+
+    @property
+    def is_internal_secret_gate_exempt(self) -> bool:
+        """cron.py/auth_firebase_internal.py의 내부 시크릿 fail-open 게이트가 참조하는
+        단일 진입점(story #2152 AC4) — `is_really_local`을 app_env 체크 없이 단독으로 쓰는
+        호출부가 생기는 것을 코드 구조로 막는다(둘 다 이 프로퍼티 하나만 부르면 되게 만들어,
+        "app_env와 AND로 묶는 것"이 관례가 아니라 강제가 되게 한다)."""
+        return self.app_env == "development" and self.is_really_local
 
 
 settings = Settings()

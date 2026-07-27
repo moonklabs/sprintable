@@ -128,7 +128,11 @@ async def test_apply_sod_blocks_author_self_confirm():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_apply_different_approver_confirms_and_wakes_author(monkeypatch):
-    """approver ≠ author → confirmed + author(created_by) 자동재개 wake 호출(member_id=author)."""
+    """approver ≠ author → confirmed + author(created_by) 자동재개 wake 호출(member_id=author).
+
+    ccbcd9da(A-1): dispatch_payload_to_member 는 이제 (DispatchResponse, delivery) 튜플 반환·
+    _apply_doc_confirmed 도 그 delivery/agent_wake 를 **반환**해야 gates.py 가 commit 후 wake 스케줄
+    가능(전엔 반환 자체가 없어 무음이었음) — 이 반환값 자체를 검증한다."""
     from app.services.workflow_line_resolution import _apply_doc_confirmed
     from app.models.project import Project
     from sqlalchemy import text as sa_text
@@ -139,7 +143,16 @@ async def test_apply_different_approver_confirms_and_wakes_author(monkeypatch):
         captured["member_id"] = member_id
         captured["commit"] = kw.get("commit")
         from app.services.agent_dispatch import DispatchResponse
-        return DispatchResponse(dispatched=True, reason="ok")
+        resp = DispatchResponse(
+            dispatched=True, assignee_id=member_id, assignee_type="agent",
+            recipient_seq=7, reason="ok",
+        )
+        delivery = {
+            "org_id": org_id, "recipient_id": member_id, "content": kw.get("content"),
+            "event_type": "dispatched", "source_entity_type": kw.get("source_entity_type"),
+            "source_entity_id": kw.get("source_entity_id"),
+        }
+        return resp, delivery
 
     monkeypatch.setattr(ad, "dispatch_payload_to_member", _fake_wake)
     engine, Session = await _session()
@@ -149,12 +162,16 @@ async def test_apply_different_approver_confirms_and_wakes_author(monkeypatch):
         await s.flush()
         doc = await _seed_doc(s, org, proj, author)
         sr = await _seed_sr(s, org, proj, doc.id)
-        await _apply_doc_confirmed(s, sr, resolver_id=approver)
+        wake_payload = await _apply_doc_confirmed(s, sr, resolver_id=approver)
         await s.commit()
         st = (await s.execute(sa_text("SELECT status FROM docs WHERE id=:i"), {"i": doc.id})).scalar()
         assert st == "confirmed" and sr.status == "applied"
         # ⭐author 자동재개: created_by 대상 wake·commit=False(gate 트랜잭션 합류·§6).
         assert captured["member_id"] == author and captured["commit"] is False
+        # ⭐A-1 핵심: 호출자(gates.py)가 commit 후 wake_agent/webhook 스케줄할 수 있게 페이로드 반환.
+        assert wake_payload is not None
+        assert wake_payload["agent_wake"] == {"recipient_id": str(author), "recipient_seq": 7}
+        assert wake_payload["delivery"]["recipient_id"] == author
     await engine.dispose()
 
 

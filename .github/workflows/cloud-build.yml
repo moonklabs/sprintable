@@ -49,25 +49,207 @@ jobs:
           if [[ "${{ github.ref_name }}" == "main" ]]; then
             echo "target=prod" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
-            echo "backend_min_instances=1" >> "$GITHUB_OUTPUT"
-            # ⚠️ maxScale 5 (ee7794eb ③·선생님 right-size): prod g1-small max_conn 100. per-instance 5(pool
-            # 3/1=4 + pg_pubsub raw 1). rollout(old+new 2×): 2×5×5+20(admin)=70 ≤ 100 ✓ (여유 30).
-            # (PgBouncer 풀러 불필요 — Cloud Run raw TCP 미지원으로 중앙 PgBouncer 불가·관리형 풀링은 Enterprise Plus
-            # 전용. maxScale 10 은 2×10×5+20=120>100 이라 폐기. 향후 트래픽↑ 시 tier업 동반해야 maxScale 상향.)
+            # ⚠️ minScale 1→3 (prod 콜드스타트 durable 봉합, 오르테가군 PO 2026-07-22): dev #2074 응급대응
+            # (a0738e81)이 dev 만 3으로 올리고 prod 는 1로 남았다 — 오늘 아침 prod 콜드스타트가 재발(선생님
+            # 격노)해 PO 가 `gcloud run services update` 로 prod minScale=3 을 라이브 적용(승인된 조치).
+            # 그 손 값이 다음 prod 배포에 덮여 원복되지 않도록 SSOT 에 못박는다("손 값은 배포가 덮는다" 교훈).
+            # conn-safe: min 3 × per-instance 5 = 15 ≤ 200(maxScale 5·rollout 70 예산 불변·SSOT db-connection-budget.md).
+            # 근본(커넥션 풀링/아키텍처 재검토)은 #2074 별도 — 이건 응급 봉합의 prod 반영분.
+            echo "backend_min_instances=3" >> "$GITHUB_OUTPUT"
+            # ⚠️ maxScale 5 (ee7794eb ③·선생님 right-size): prod g1-small. per-instance 5(pool
+            # 3/1=4 + pg_pubsub raw 1). rollout(old+new 2×): 2×5×5+20(admin)=70.
+            # ⚠️ story #2040(2026-07-20) PO gcloud 실측 갱신 — max_connections=**200**(과거 100 가정 낡음,
+            # codex #2074 조사가 재적발). 70 ≤ 200(여유 65%). SSOT는 `docs/db-connection-budget.md`.
+            # (PgBouncer 풀러 불필요/불가 — Cloud Run raw TCP 미지원으로 중앙 PgBouncer 불가·관리형 풀링은
+            # Enterprise Plus 전용(#1779 폐기 이력). 트래픽↑ 시 아키텍처 재검토(#2074) 필요.)
             echo "backend_max_instances=5" >> "$GITHUB_OUTPUT"
+            # story #2005: PO 라이브 gcloud 실측(2026-07-17) — backend-prod 현재 유효 Cloud Run
+            # 요청 타임아웃=300s. 지금까지 `cloudbuild.yaml`에 `--timeout` 플래그가 없어 이
+            # 값은 인프라 기본값이었을 뿐 어디에도 명시돼 있지 않았다 — 이제 이 워크플로우가
+            # 명시 소스가 된다(cloudbuild.yaml의 `_BACKEND_TIMEOUT` dev-safe 기본값 3600을
+            # prod에서 이 output으로 override, `backend_max_instances`와 동일 배선 패턴).
+            echo "backend_timeout=300" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=G-RYHFE7XM3X" >> "$GITHUB_OUTPUT"
+            # ⭐story #2123 최종(2026-07-24) — 위 주석이 예고한 "realtime 배선을 마치는 승격 시점"이
+            # 왔다. #2123 cutover(consume/dispatch/fanout_wake=true, 이전 커밋)가 배포돼 prod 배차
+            # 통로가 Redis로 확定된 것을 라이브 3축으로 실측했다:
+            #   ①resolve_backplane 3인스턴스 전부 "redis 우선으로 진행" ②event_broker redis-only
+            #   delivery 다수 ③prod agent stream 끝단에 실제 프레임 도착. 오류 3건(전부 안내 로그)뿐.
+            # ⇒ PG LISTEN은 이제 중복 경로다. 끄면 인스턴스당 pg_pubsub raw 커넥션 1개가 회수되고
+            #   SSE hot-path에서 DB가 빠진다(= 에픽 "PG를 브로커서 해방"의 완결 지점).
+            # ⛔되돌리기: 이 값을 true로 되돌리는 것만으로는 부족하다 — Redis dispatch가 켜져 있는 한
+            #   resolve_backplane이 계속 redis를 고른다. 롤백은 consume/dispatch를 false로 되돌리는 것.
+            # ⭐부수효과: cutover 배포에서 인스턴스마다 1회씩 찍히던 안내 ERROR("REALTIME_BACKPLANE
+            # 미설정인데 PG_LISTEN + Redis dispatch 동시 활성")가 이 값으로 **자연 소멸**한다 —
+            # resolve_backplane의 그 경고는 "둘 다 켜짐" 조건에서만 나오고, 이제 redis 하나만
+            # 켜져 있어 조건 자체가 성립하지 않는다(별도 REALTIME_BACKPLANE 배선 불요).
+            echo "backend_pg_listen_enabled=false" >> "$GITHUB_OUTPUT"
+            # ⛔story #2078(E-ARCH S2 정리) 정정(#2123, 2026-07-23): "api는 SSE 미서빙"이라
+            # false로 뒀었으나 틀린 전제였다(에이전트 SSE는 backend-dev가 직접 서빙 —
+            # agent_onboarding_config.py 설계, 라이브 실측 확認). 다만 **prod는 아직 Redis
+            # 요소 자체가 없다**(redis_url 빈 값, 아래) — consume/dispatch를 true로 켜도
+            # event_broker가 no-op(fail-safe skip)이라 값 자체는 false로 둬도 무해하지만,
+            # story #2123 S-b/S-c(2026-07-24, 오르테가 판정 — dev 게이트 통과 확認 後 prod cutover):
+            # backend-dev가 consume+dispatch=true로 완전전환·검증 완료. prod Redis 요소(sprintable-
+            # redis-prod·REDIS_URL secretKeyRef·GCE realtime 소비자)가 오늘 백플레인 작업으로 전부 서
+            # 있고, 백플레인 착지 검증에서 prod redis-only delivery 707건 실동작 확認됨 — Redis를 prod
+            # 주 배차 통로로 승격.
+            # ⛔중복배달 안전: resolve_backplane(event_broker.py:329)이 PG/Redis 중 하나만 dispatch —
+            # redis dispatch=true면 redis 우선(PG는 fallback 발행만·미배차). EVENT_BROKER_OUTBOX_ENABLED
+            # =false(코드기본)라 #2138(outbox+dispatch dup) 미발동. PG_LISTEN은 이 커밋에서 유지(Redis
+            # 실배차 prod 실측 確認 後 별 커밋에서 false). ⚠️startup에 resolve_backplane이 "REALTIME_
+            # BACKPLANE 미설정" 안내 로그 1회 — 동작은 redis 확정(안전)이라 무해, 명시는 후속 정리.
+            echo "backend_redis_consume_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "backend_redis_dispatch_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2141 S-a(E-ARCH, 2026-07-23 오르테가군 확定 순서) — prod Redis 인스턴스
+            # READY(sprintable-redis-prod, AUTH 켬)이고, backend-prod Cloud Run에 REDIS_URL
+            # secretKeyRef=REDIS_URL_PROD 바인딩이 실제로 붙어 있는 것 확認됐다(오르테가
+            # --update-secrets 실행, 리비전 00231-lxm→00232-mmm, env 32→33·시크릿 13→14,
+            # ping 200 — 2026-07-23). ⇒ 이 커밋이 dual_publish=true를 실배포하는 첫 안전한
+            # 시점이다(바인딩 전에 켜면 REDIS_URL 없이 발행을 시도해 깨졌을 자리).
+            # redis_url output은 여기 안 둔다 — prod는 cloudbuild.yaml deploy-backend가
+            # ${_DEPLOY_ENV}==prod일 때 REDIS_URL을 ENV_VARS에 아예 안 실으므로(#2421) plain
+            # substitution 경로 자체가 없다(시크릿 바인딩만 유효 경로).
+            # ⛔S-a는 dual_publish 하나만 켠다 — consume/dispatch는 각각 별 커밋(S-b/S-c,
+            # #2141 §3)이며, PG_LISTEN_ENABLED는 이 단계에서 손대지 않는다(prod의 유일한
+            # 실시간 배차 경로라 Redis 도달 확認 前에 끄면 실시간이 전면 정지한다).
+            echo "redis_url=" >> "$GITHUB_OUTPUT"
+            echo "backend_redis_dual_publish_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2123 S0-b(2026-07-23, 오르테가군 판정): wake_agent 크로스인스턴스 배달의
+            # 발행측 스위치.
+            # ⛔#2141 S-a 반영 후 정정 — 이 주석이 여태 "prod는 아직 dual_publish/redis_url
+            # 자체가 없다"를 근거로 들었으나, 위 dual_publish가 이제 true다(그 전제는 낡았다).
+            # 그래도 결론(false 유지)은 그대로 맞다 — 이유가 바뀐 것뿐: consume/dispatch가
+            # 아직 false라 event_broker가 Redis로 publish는 해도(dual_publish) 그걸 구독해서
+            # 실 전달(dispatch)하는 쪽이 꺼져 있다. dispatch 없이 이 스위치만 켜봐야 무의미하고,
+            # story #2123 S-b/S-c(2026-07-24): consume/dispatch를 위에서 켰으므로 wake_agent 발행측도
+            # Redis로 승격(대칭). dev 완전전환·검증됨.
+            echo "backend_fanout_wake_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2078(E-ARCH 0단계, 오르테가군 판정 2026-07-21): dev 실측 GREEN 확認 전
+            # prod에 얹지 않는다 — develop→main 48커밋 일괄승격에 검증 안 된 롤백 플래그를
+            # 섞으면 문제 발생 시 원인 격리가 안 된다. dev 실측 후 별도 판단.
+            echo "sse_multiplex_enabled=false" >> "$GITHUB_OUTPUT"
+            # story #2139/#2143 후속(2026-07-23, 오르테가군 판정 — dev 게이트 GREEN 확認 後
+            # 같은 날 prod 승격, "절반만 고치는 것" 방지 교정): backend 쪽을 GCE 실시간 3노드와
+            # 같은 흐름에서 켠다(한쪽만 켜고 멈추면 오늘의 #2448 인시던트와 동형 반쪽 상태가
+            # prod에 남는다). deploy_realtime_gce.sh의 prod 분기 기본값도 이 커밋과 짝으로 true.
+            echo "backend_presence_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "backend_presence_online_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "backend_sse_lease_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2077(2026-07-24) — frontend min/max-instances가 배포 SSOT 어디에도 없었다
+            # (#2074 응급조치가 코드 밖에 떠 있던 상태). 라이브 실측(PO, 2026-07-24) 그대로
+            # 명시 — 값을 바꾸는 게 아니라 지금 값을 IaC로 옮기는 것.
+            echo "frontend_min_instances=3" >> "$GITHUB_OUTPUT"
+            echo "frontend_max_instances=10" >> "$GITHUB_OUTPUT"
+            # story #2158 후속(#2077에서 동반 배선) — prod는 아직 사용자 경로 검증 전이라
+            # 손대지 않는다(#2120/#2121/#2122와 동일 단계적 승격 원칙). 명시 false로 다른
+            # 플래그들과 동일 컨벤션 유지(암묵 fallback 대신 의도 명시).
+            echo "backend_sse_transient_replay_enabled=false" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
-            echo "backend_min_instances=1" >> "$GITHUB_OUTPUT"
+            # ⚠️ minScale 1→3 (#2074 응급대응, 오르테가군 PO 2026-07-21): gcloud 로그 실측 —
+            # "The request was aborted because there was no available instance"(04:38 다수)가
+            # 채팅 5초 지연·목표화면 Loading·촬영 막힘의 원인이었다. minScale 1은 콜드스타트
+            # 대기를 만들어 트래픽이 몰리면 인스턴스 부족으로 요청이 abort된다. 손으로
+            # gcloud run services update한 값은 다음 자동배포(이 워크플로우)가 덮어써
+            # 원복되므로(어제 교훈 — "손 값은 배포가 덮는다") 여기 durable로 못박는다.
+            # 근본(커넥션 풀링/아키텍처 재검토)은 별도 진행 중 — 이건 0단계 응급 봉합.
+            echo "backend_min_instances=3" >> "$GITHUB_OUTPUT"
             # ⚠️ maxScale 8 (PO rev 01256-w9r right-size·durable): dev 429 근본 = Cloud Run "no available
             # instance"(maxScale 1 이 fleet 폴링 압도·3h 1345건). per-instance = pool(3/1=4·#1773) +
-            # pg_pubsub raw 1 = 5. rollout(old+new 2×): 2×8×5=80 ≤ 100(PO 실측 dev DB max_conn). 이전
-            # maxScale 1 은 conn-safe였으나 인스턴스 기아로 429 → load+conn 양립값. DB_POOL_SIZE=3/
-            # DB_MAX_OVERFLOW=1 은 cloudbuild.yaml --update-env-vars 로 durable(lingering env 덮어씀).
-            # (⚠️ dev/prod 공유 DB라면 prod(2×5×5+admin)와 합산 점검 필요 — PO 토폴로지 확認.)
+            # pg_pubsub raw 1 = 5. rollout(old+new 2×): 2×8×5=80.
+            # ⚠️ story #2040(2026-07-20) PO gcloud 실측 갱신 — max_connections=**200**(100→200 그날
+            # 사고대응 상향, 과거 100 가정 낡음 — codex #2074 조사가 재적발). 80 ≤ 200(여유 60%). SSOT는
+            # `docs/db-connection-budget.md`. 이전 maxScale 1 은 conn-safe였으나 인스턴스 기아로 429 →
+            # load+conn 양립값. DB_POOL_SIZE=3/DB_MAX_OVERFLOW=1 은 cloudbuild.yaml --update-env-vars
+            # 로 durable(lingering env 덮어씀).
+            # (dev/prod는 별도 Cloud SQL 인스턴스로 확認됨(story #2040 PO gcloud 재확認) — 합산 불필요.)
             echo "backend_max_instances=8" >> "$GITHUB_OUTPUT"
+            # story #2005: PO 라이브 gcloud 실측(2026-07-17) — backend-dev 현재 유효 Cloud Run
+            # 요청 타임아웃=3600s(Cloud Run 요청 타임아웃 상한). cloudbuild.yaml의
+            # `_BACKEND_TIMEOUT` 기본값(3600)과 동일값이라 이 output이 없어도 기본값으로
+            # 굴러가지만, `backend_max_instances`와 대칭 배선을 위해 dev도 명시.
+            echo "backend_timeout=3600" >> "$GITHUB_OUTPUT"
             echo "ga4_measurement_id=" >> "$GITHUB_OUTPUT"
+            # story #2078(E-ARCH 1단계): sprintable-realtime-dev durable화. cloudbuild.yaml
+            # 의 dev-safe fallback 기본값과 동일값 — PO가 2026-07-21 손으로 생성·검증한 실측
+            # (minScale 2 · timeout 3600 · maxScale 8, describe 대조 완료). prod는 cloudbuild.yaml
+            # 의 deploy-realtime 스텝 자체가 _DEPLOY_ENV 가드로 스킵되니 여기서는 미배선.
+            echo "realtime_min_instances=2" >> "$GITHUB_OUTPUT"
+            echo "realtime_max_instances=8" >> "$GITHUB_OUTPUT"
+            echo "realtime_timeout=3600" >> "$GITHUB_OUTPUT"
+            # ⭐story #2185(2026-07-25) — dev 를 prod 와 같은 스택으로 맞춘다.
+            # prod 프론트는 이미 GCE 로드밸런서(realtime.sprintable.ai)를 보고 있고 실 트래픽
+            # 353건/48h 을 받는데, dev 만 옛 Cloud Run 을 보고 있었다 ⇒ **GCE 축을 dev 에서
+            # 검증할 수 없었다**(#2180 을 GCLB 로그로 우회 측정해야 했던 것이 그 비용).
+            # ⛔PO 가 2026-07-25 `gcloud run services update` 로 손 플립했다가 **다음 배포가
+            #   그대로 덮었다**(리비전 01836→01838 에서 옛 URL 복귀) — 바로 아래 줄에 적힌
+            #   「손 gcloud 값은 다음 배포가 덮으니 여기 durable 로 못박는다」를 PO 가 어긴 것이다.
+            #   그래서 값을 여기(배포 SSOT)로 옮긴다.
+            # 전환 前 확認(실측): dev GCE LB /api/v2/ping·health 200 · 백엔드 3대 전부 HEALTHY.
+            # 전환 後 확認(실측): GCLB 에 /api/v2/events/stream 200 다건 · 점유 55~87초(p50 60)
+            #   ⇒ Cloud Run 시절 112~121초(전부 서버 캡에 걸림)와 달리 **캡 前에 스스로 종료**.
+            # ⚠️무너지는 조건: dev GCE 스택(realtime-gateway-dev MIG·GCLB)이 내려가면 이 값도
+            #   되돌려야 한다. 롤백은 이 줄을 옛 Cloud Run URL 로 되돌리고 재배포하면 즉시 복귀
+            #   (route.ts 는 REALTIME_URL 이 비면 FASTAPI_URL 로 폴백하는 설계 그대로).
+            echo "realtime_url=https://dev-realtime.sprintable.ai" >> "$GITHUB_OUTPUT"
+            # story #2078(E-ARCH 1단계 durable화, 2026-07-21 PO 손 플립 확認 후): api는 SSE/LISTEN
+            # 을 realtime-dev로 넘겼다(까심군 raw SSE 검증 PASS). 손 gcloud 값은 다음 배포가
+            # 덮으니(오늘 규율) 여기 durable로 못박는다 — 다음 api 배포에서도 false 유지.
+            echo "backend_pg_listen_enabled=false" >> "$GITHUB_OUTPUT"
+            # ⛔story #2078(E-ARCH S2 정리) 정정(#2123, 2026-07-23, 오르테가군 PR #2416 리뷰
+            # 적발): "api는 SSE 미서빙(realtime-dev로 완전 이관)"이 전제였으나 틀렸다 —
+            # `agent_onboarding_config.py::resolve_backend_direct_url()`이 에이전트에게
+            # `/agent/stream` host로 FASTAPI_URL(=backend-dev)을 명시 배포한다(REALTIME_URL로
+            # 옮긴 적 없음). 라이브 실측(2026-07-23, 24h): agent/stream 요청 backend-dev 95건 vs
+            # realtime-dev 2건 — 에이전트 연결은 지금도 backend-dev에 있다. consume+dispatch를
+            # true로 켜 wake_agent()의 크로스인스턴스 배달을 완성한다(아래 dispatch 참조).
+            echo "backend_redis_consume_enabled=true" >> "$GITHUB_OUTPUT"
+            # dispatch가 없으면 resolve_backplane()이 구독은 해도 실 전달을 안 한다(순수
+            # shadow observe). 중복배달 검토: 에이전트(backend-dev)/브라우저(realtime-dev)
+            # 연결이 서로 다른 프로세스-로컬 큐에만 있어 두 서비스가 동시에 dispatch=true여도
+            # 같은 클라이언트에 2회 배달되지 않는다(위 실측 카운트가 그 분리를 뒷받침).
+            echo "backend_redis_dispatch_enabled=true" >> "$GITHUB_OUTPUT"
+            # story cd10e123 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
+            # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED가 여태 여기 durable화 안 됐다 — PO가
+            # 2026-07-21 손으로 생성·검증한 실측값(Memorystore VPC 내부 IP) 그대로 옮김. dev의
+            # realtime 쪽 값(EVENT_BROKER_REDIS_DISPATCH_ENABLED 포함)은 cloudbuild.yaml의
+            # deploy-realtime 스텝이 이미 dev 전용 가드 안에서 직접 명시(변수 아님).
+            echo "redis_url=redis://10.164.120.243:6379" >> "$GITHUB_OUTPUT"
+            echo "backend_redis_dual_publish_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2123 S0-b(2026-07-23, 오르테가군 판정): wake_agent()의 크로스인스턴스
+            # 배달이 #2122 머지 이후에도 무효였던 이유 — 이 발행측 스위치(agent_gateway.py:224
+            # 게이팅)가 꺼져 있어 event_broker를 계속 우회했다(직접 pg_notify만, Redis 미발행).
+            # wake_agent 호출부는 전부 REST 라우터라 api(backend-dev)에서만 의미 있음 —
+            # realtime-dev는 REST를 안 받아 배선 불필요(#2123 doc §판정 종결 근거).
+            echo "backend_fanout_wake_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2078(E-ARCH 0단계, 오르테가군 GO 2026-07-21): dev만 켠다 — 게이트(devtools
+            # 탭당 EventSource 1개·정상 채널 이벤트 도착·롤백 왕복) 실측 통과가 prod 승격의
+            # 전제. 3개 소비 훅(use-sse-notifications·use-chat-sse·use-team-presence)이 이
+            # 값 하나로 공유 커넥션 vs 독립 커넥션을 가른다(realtime-provider.tsx).
+            echo "sse_multiplex_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2139/#2143 후속(2026-07-23, 오르테가군 판정) — "백플레인 켜기" dev 1단계.
+            # PRESENCE_ONLINE_REDIS_ENABLED: DB 폴백 있음(안 깨져 있음 — 켜면 신선도 개선).
+            # PRESENCE_REDIS_ENABLED(chat_presence "working"): 프로세스-로컬 dict라 GCE
+            # 멀티노드에서 노드마다 다른 실제 결함 — 미르코의 working 판정이 여기 걸림.
+            # SSE_LEASE_REDIS_ENABLED: 인스턴스별 카운터라 전역 상한 미성립 실제 결함 —
+            # 까심의 노드편차 판정이 여기 걸림. dev만 켠다 — GCE realtime-dev 쪽도 이번 배포와
+            # 짝으로 켜야 실제로 노드 간 공유가 성립한다(scripts/deploy_realtime_gce.sh 동시 배포).
+            echo "backend_presence_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "backend_presence_online_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "backend_sse_lease_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2077(2026-07-24) — frontend min/max-instances가 배포 SSOT 어디에도 없었다.
+            # 라이브 실측(2026-07-24, `gcloud run services describe sprintable-frontend-dev` —
+            # 서빙 리비전 자체 대조·latestReady==latestCreated·traffic 100% 확認, template spec만
+            # 본 것 아님): minScale=1·maxScale=3. cloudbuild.yaml dev-safe 기본값과 동일값이라
+            # 이 output 없어도 굴러가지만, 대칭 배선을 위해 dev도 명시(backend_timeout 관례와 동형).
+            echo "frontend_min_instances=1" >> "$GITHUB_OUTPUT"
+            echo "frontend_max_instances=3" >> "$GITHUB_OUTPUT"
+            # story #2158 후속(#2077에서 동반 배선) — 재생 버퍼(PR #2468)는 머지됐으나 켤 배선이
+            # 없어 까심군이 사용자 경로 재측정을 못 하고 있었다. dev만 켠다(#2158 취지 자체가
+            # "손 gcloud로 안 켠다"라 SSOT 경유 필수).
+            echo "backend_sse_transient_replay_enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Submit Cloud Build
@@ -75,6 +257,6 @@ jobs:
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_BACKEND_REDIS_DISPATCH_ENABLED="${{ steps.env.outputs.backend_redis_dispatch_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}",_BACKEND_FANOUT_WAKE_REDIS_ENABLED="${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}",_SSE_MULTIPLEX_ENABLED="${{ steps.env.outputs.sse_multiplex_enabled }}",_BACKEND_PRESENCE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_redis_enabled }}",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_online_redis_enabled }}",_BACKEND_SSE_LEASE_REDIS_ENABLED="${{ steps.env.outputs.backend_sse_lease_redis_enabled }}",_FRONTEND_MIN_INSTANCES="${{ steps.env.outputs.frontend_min_instances }}",_FRONTEND_MAX_INSTANCES="${{ steps.env.outputs.frontend_max_instances }}",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED="${{ steps.env.outputs.backend_sse_transient_replay_enabled }}" \
             --suppress-logs \
             .

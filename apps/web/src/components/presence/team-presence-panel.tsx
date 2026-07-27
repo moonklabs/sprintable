@@ -8,8 +8,9 @@ import { cn } from '@/lib/utils';
 import type { TeamPresenceItem } from './use-team-presence';
 
 type GroupKey = 'working' | 'online' | 'offline';
+// story #2023(ⓑ): working=시스템 활동 신호(L5) — brand(인간 서명)가 아니라 info.
 const GROUP_DOT: Record<GroupKey, string> = {
-  working: 'bg-brand',
+  working: 'bg-info',
   online: 'bg-success',
   offline: 'bg-muted-foreground/40',
 };
@@ -53,12 +54,12 @@ function PresenceRow({ item }: { item: TeamPresenceItem }) {
         </p>
         <div className="truncate text-xs text-muted-foreground">
           {item.working ? (
-            <span className="inline-flex max-w-full items-center gap-1 text-brand">
+            <span className="inline-flex max-w-full items-center gap-1 text-info">
               <span className="shrink-0">{t('working')}</span>
               <span className="inline-flex shrink-0 gap-0.5" aria-hidden>
-                <span className="size-1 rounded-full bg-brand motion-safe:animate-bounce" />
-                <span className="size-1 rounded-full bg-brand motion-safe:animate-bounce [animation-delay:150ms]" />
-                <span className="size-1 rounded-full bg-brand motion-safe:animate-bounce [animation-delay:300ms]" />
+                <span className="size-1 rounded-full bg-info motion-safe:animate-bounce" />
+                <span className="size-1 rounded-full bg-info motion-safe:animate-bounce [animation-delay:150ms]" />
+                <span className="size-1 rounded-full bg-info motion-safe:animate-bounce [animation-delay:300ms]" />
               </span>
               {item.active_story ? (
                 <span className="truncate text-muted-foreground">· {t('assignedStory', { title: item.active_story.title })}</span>
@@ -106,7 +107,7 @@ export function TeamPresencePanel({
         ) : null}
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto py-2">
+      <div className="focus-inset min-h-0 flex-1 overflow-y-auto py-2">
         {groups.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-muted-foreground">{t('empty')}</p>
         ) : (

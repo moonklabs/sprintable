@@ -33,7 +33,7 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     caller_id, spoofed = uuid.uuid4(), uuid.uuid4()
     captured = {}
 
-    async def _fake_transition(session, org_id, gid, status, resolver_id, note):
+    async def _fake_transition(session, org_id, gid, status, resolver_id, note, *, pending_deliveries=None):
         captured["resolver_id"] = resolver_id
         return MagicMock()
 
@@ -42,7 +42,9 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     monkeypatch.setattr(gm, "resolve_member", AsyncMock(return_value=caller))
     monkeypatch.setattr(gm, "transition_gate", _fake_transition)
     monkeypatch.setattr(gm.GateResponse, "model_validate", staticmethod(lambda g: g))
-    body = gm.GateTransitionRequest(status="approved", resolver_id=spoofed)
+    # story #2027: gate_type="merge"는 risk 매트릭스상 고위험(_HIGH_RISK_GATE_TYPES)이라 이 파일의
+    # 관심사(resolver_id 강제)와 무관한 사유-강제 가드를 note로 우회.
+    body = gm.GateTransitionRequest(status="approved", resolver_id=spoofed, note="테스트 사유")
     # 48f064e5: 엔드포인트가 doc-gate authz용 게이트 로드 → 비-doc 게이트 반환으로 그 분기 skip.
     _sess = AsyncMock()
     _gr = MagicMock()
@@ -50,8 +52,10 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     _g.gate_type = "merge"
     _gr.scalar_one_or_none.return_value = _g
     _sess.execute = AsyncMock(return_value=_gr)
+    from fastapi import BackgroundTasks
     await gm.transition_gate_endpoint(
-        uuid.uuid4(), body, session=_sess, org_id=uuid.uuid4(), auth=MagicMock())
+        uuid.uuid4(), body, background_tasks=BackgroundTasks(),
+        session=_sess, org_id=uuid.uuid4(), auth=MagicMock())
     assert captured["resolver_id"] == caller_id  # ⭐조작된 spoofed 가 아니라 인증 caller
     assert captured["resolver_id"] != spoofed
 

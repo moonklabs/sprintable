@@ -8,6 +8,8 @@ import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { loginWithPassword } from '@/lib/db/client';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { safeNextPath, SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
+import { FIREBASE_AUTH_ENABLED } from '@/lib/auth/firebase-client';
+import { signInAndExchangeFirebaseSession } from '@/lib/auth/firebase-login-flow';
 
 export default function LoginPage() {
   const t = useTranslations('login');
@@ -23,6 +25,9 @@ export default function LoginPage() {
     csrf_mismatch: t('csrfMismatch'),
     oauth_no_token: t('oauthNoToken'),
     invalid_provider: t('invalidProvider'),
+    // e-mobile-oauth-native-handoff-contract — 네이티브 핸드오프 issue 실패(유나 가디언 지적,
+    // 신규 에러코드가 매핑 누락돼 로그인 페이지가 밋밋한 loginFailed로 후퇴할 뻔했음).
+    oauth_native_issue_failed: t('oauthNativeIssueFailed'),
   };
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,6 +37,29 @@ export default function LoginPage() {
     errorCode ? (oauthErrors[errorCode] ?? t('loginFailed')) : null
   );
   const [loading, setLoading] = useState(false);
+  const [firebaseLoading, setFirebaseLoading] = useState(false);
+
+  // story a0118204: 스캐폴드 — NEXT_PUBLIC_FIREBASE_AUTH_ENABLED가 꺼져있으면(기본) 버튼 자체가
+  // 안 보이니 호출 불가. 켜져 있어도 서버 플래그(FIREBASE_AUTH_ISSUE_SESSION)가 꺼져있으면
+  // BFF가 501을 반환 — 클라 플래그는 UX 노출 게이트일 뿐 실 발급 권위가 아니다.
+  const handleFirebaseLogin = async () => {
+    if (!email.trim() || !password.trim()) return;
+    setFirebaseLoading(true);
+    setError(null);
+    try {
+      const result = await signInAndExchangeFirebaseSession(email.trim(), password);
+      if (result.error) {
+        setError(result.error.message);
+        return;
+      }
+      // story #1959(P2-S3) AC: 로그인 복귀 후 /login history 잔존 0 — push 는 스택에 남아
+      // 복귀 화면에서 BACK 1회가 로그인 폼으로 돌아가 버린다(재제출 위험). replace 로 스왑.
+      router.replace(safeNextPath(nextParam));
+      router.refresh();
+    } finally {
+      setFirebaseLoading(false);
+    }
+  };
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) return;
@@ -48,7 +76,8 @@ export default function LoginPage() {
         setError(result.error.message);
         return;
       }
-      router.push(safeNextPath(nextParam));
+      // story #1959(P2-S3): 위와 동일 사유 — replace 로 /login history 잔존 방지.
+      router.replace(safeNextPath(nextParam));
       router.refresh();
     } catch {
       setError(t('loginFailed'));
@@ -111,7 +140,12 @@ export default function LoginPage() {
               disabled={loading}
             />
           )}
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {/* story #2105 1차 — 계정 없는 사람이 제품에서 처음 만나는 화면(들어오는 경로)인데
+              role·aria-live가 없어 스크린리더가 실패 사유를 안 읽었다(#2096과 같은 결함클래스).
+              handleLogin/handleFirebaseLogin이 재시도 시 setError(null)을 먼저 호출해 이
+              단락이 매 시도마다 언마운트→리마운트되므로(토스트의 "나타남"과 동형), 동일한
+              실패 사유가 연속으로 떠도 매번 새 DOM 노드로 안착해 안정적으로 낭독된다. */}
+          {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{error}</p>}
           <button
             onClick={handleLogin}
             disabled={loading || !email.trim() || !password.trim()}
@@ -119,6 +153,15 @@ export default function LoginPage() {
           >
             {loading ? t('signingIn') : t('signIn')}
           </button>
+          {FIREBASE_AUTH_ENABLED && (
+            <button
+              onClick={handleFirebaseLogin}
+              disabled={firebaseLoading || !email.trim() || !password.trim()}
+              className="flex w-full min-h-[44px] items-center justify-center rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground/80 transition hover:bg-muted/50 disabled:opacity-50"
+            >
+              {firebaseLoading ? t('signingIn') : t('firebaseSignIn')}
+            </button>
+          )}
         </div>
 
         {process.env.NEXT_PUBLIC_OAUTH_ENABLED === 'true' && (
@@ -137,13 +180,6 @@ export default function LoginPage() {
                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
               </svg>
               {t('google')}
-            </a>
-
-            <a href={`/auth/login?provider=github&tos_accepted=true${nextParam ? `&next=${encodeURIComponent(nextParam)}` : ''}`} className="flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg border border-border bg-foreground px-4 py-3 text-sm font-medium text-background transition hover:bg-foreground/90">
-              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
-              </svg>
-              {t('github')}
             </a>
 
             <p className="text-center text-xs text-muted-foreground/60">

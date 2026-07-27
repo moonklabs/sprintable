@@ -169,6 +169,7 @@ export default function ChannelPage() {
             <span className={`h-2 w-2 rounded-full ${statusDot}`} title={wsStatus} />
           </div>
         }
+        showContextChip
       />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">

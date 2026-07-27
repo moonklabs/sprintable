@@ -11,7 +11,7 @@ from app.models.team import TeamMember
 from app.schemas.current_project import CurrentProjectResponse, SetCurrentProject
 from app.services.member_resolver import assert_caller_is_member
 
-router = APIRouter(prefix="/api/v2/current-project", tags=["current-project"])
+router = APIRouter(prefix="/api/v2/current-project", tags=["current-project", "Organization"])
 
 
 @router.get("", response_model=CurrentProjectResponse)

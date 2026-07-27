@@ -1,8 +1,17 @@
 """E-CAGE-REFEREE P3: HITL Gate 1급 객체.
 
-상태기계: pending → approved | rejected (human 해소)
+상태기계(``is_valid_transition``/``transition_gate``/``void_gate``/``hold_gate`` — 사람·admin이
+주체인 명시적 액션 축): pending → approved | rejected (human 해소)
          auto_passed → (불변, config allow_auto 시 즉시)
-         approved | rejected → (불변)
+         approved | rejected → (이 축에서는 불변 — is_valid_transition에 rejected/approved발
+         전이가 없다. void/override/hold 전부 ``status=="pending"`` 강제)
+
+⚠️story #2150: 위 축과 **별개로**, ``gate_service.create_gate()``의 멱등 조회는 rejected 게이트를
+재제출(work_item 동일 키로 재호출) 시 **같은 row를 재사용해 새 평가 사이클로 리셋**한다(사람의
+명시적 전이가 아니라 시스템의 재평가 — is_valid_transition을 거치지 않는다. approved/voided는
+이 리셋 대상이 아니다 — 근거는 gate_service._reopen_rejected_gate 참조). 즉 "rejected는 절대
+안 바뀐다"는 이 파일의 서술은 **resolver 액션 축**에서만 참이고, 재제출 축에서는 참이 아니다 —
+둘을 혼동하지 않을 것.
 
 neutral_facts: 관찰 사실만 (touches_migration, diff_size 등).
                판정 아님 — 플랫폼은 위험도 판단 안 함.

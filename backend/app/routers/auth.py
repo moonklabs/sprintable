@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 import re
 
@@ -50,7 +50,9 @@ from app.core.security import (
 )
 from app.core.rate_limit import limiter
 from app.dependencies.auth import AuthContext, get_current_user
-from app.services.project_auth import has_project_access, first_accessible_project_id
+from app.services.project_auth import (
+    accessible_project_ids_in_org, first_accessible_project_id, has_project_access,
+)
 from app.dependencies.database import get_db
 from app.models.member import Member
 from app.models.org_invite import OrgInvite
@@ -59,7 +61,7 @@ from app.models.team import TeamMember
 from app.models.login_audit_log import LoginAuditLog
 from app.models.user import RefreshToken, User
 
-router = APIRouter(prefix="/api/v2/auth", tags=["auth"])
+router = APIRouter(prefix="/api/v2/auth", tags=["auth", "Organization"])
 logger = logging.getLogger(__name__)
 
 
@@ -748,34 +750,64 @@ async def refresh_token(
     try:
         payload = decode_jwt(body.refresh_token)
     except JWTError:
+        logger.warning("auth.refresh 실패 reason=invalid_jwt")
         return _err("INVALID_TOKEN", "Invalid refresh token", 401)
 
     if payload.get("type") != "refresh":
+        logger.warning("auth.refresh 실패 reason=not_refresh_type sub=%s", payload.get("sub"))
         return _err("INVALID_TOKEN", "Not a refresh token", 401)
 
     token_hash = hash_token(body.refresh_token)
-    result = await session.execute(
-        select(RefreshToken).where(
+    correlation_key = token_hash[:12]  # story e5225c0a: 산티아고 관측성 요구 — 로그 상관키(PII 아님)
+
+    # ⚠️story e5225c0a(P0): switch_account(위)와 동형의 원자 rotation. 기존 SELECT→별도 UPDATE는
+    # 비원자라 Cloud Run 멀티 인스턴스 간 동시 refresh가 둘 다 "아직 안 revoke"로 통과하는 race의
+    # 근본 원인이었다(산티아고 prod 로그 실측: /auth/refresh 239건 중 230건 401). 검증+revoke를
+    # 단일 UPDATE...WHERE revoked_at IS NULL...RETURNING으로 묶어 동시 요청 중 정확히 1건만 매치.
+    revoked_user_id = (await session.execute(
+        update(RefreshToken)
+        .where(
             RefreshToken.token_hash == token_hash,
             RefreshToken.revoked_at.is_(None),
             RefreshToken.expires_at > datetime.now(timezone.utc),
         )
-    )
-    stored = result.scalar_one_or_none()
-    if not stored:
-        return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
-
-    user_id = uuid.UUID(payload["sub"])
-    user = await _get_user_by_id(session, user_id)
-    if not user:
-        return _err("USER_NOT_FOUND", "User not found", 401)
-
-    # 기존 토큰 무효화 (rotation)
-    await session.execute(
-        update(RefreshToken)
-        .where(RefreshToken.token_hash == token_hash)
         .values(revoked_at=datetime.now(timezone.utc))
-    )
+        .returning(RefreshToken.user_id)
+    )).scalar_one_or_none()
+    if revoked_user_id is None:
+        # ⛔P0 신 클래스(#1887 쿠키-Domain no-op과 별개 — config.py auth_refresh_grace_seconds
+        # 주석 참조): proxy.ts 의 FE 인스턴스-로컬 single-flight dedupe 는 Cloud Run 멀티인스턴스
+        # 간 공유가 안 돼, 하드리프레시의 병렬 인증요청이 인스턴스 분산되면 같은 RT 로 동시
+        # rotate 경합이 남는다 — 진 쪽은 방금(grace window 내) 이미 소비된 RT 를 만난 것뿐,
+        # 진짜 stale/탈취 replay 가 아니다. grace window 내 revoke 된 토큰이면 하드 401 로 FE
+        # clearAuthCookies()(강제 로그아웃)를 유발하는 대신 독립적인 새 rotation 을 한 번 더
+        # 발급(fork)한다 — 이미 소비된 old RT 를 재사용하는 게 아니라 그 자신만의 새 RT 를
+        # 새로 발급받을 뿐이라 원자 single-use 불변식 자체는 안 깨진다.
+        grace_cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.auth_refresh_grace_seconds)
+        revoked_user_id = (await session.execute(
+            select(RefreshToken.user_id).where(
+                RefreshToken.token_hash == token_hash,
+                RefreshToken.revoked_at.is_not(None),
+                RefreshToken.revoked_at > grace_cutoff,
+                RefreshToken.expires_at > datetime.now(timezone.utc),
+            )
+        )).scalar_one_or_none()
+        if revoked_user_id is None:
+            logger.warning(
+                "auth.refresh 실패 reason=token_not_found_or_revoked_or_expired key=%s", correlation_key,
+            )
+            return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
+        logger.info(
+            "auth.refresh grace_reuse key=%s user_id=%s reason=multi_instance_race_loser_fork_rotation",
+            correlation_key, revoked_user_id,
+        )
+
+    user = await _get_user_by_id(session, revoked_user_id)
+    if not user:
+        logger.warning(
+            "auth.refresh 실패 reason=user_not_found key=%s user_id=%s", correlation_key, revoked_user_id,
+        )
+        return _err("USER_NOT_FOUND", "User not found", 401)
 
     _md = await _build_app_metadata(user, session)
     if settings.build_app_metadata_defallback:
@@ -919,6 +951,13 @@ async def totp_verify(
 
 # ─── OAuth ────────────────────────────────────────────────────────────────────
 
+# story #2155(2026-07-23, 선생님 지시): GitHub 로그인 제거 — 첫 화면 로그인 버튼이
+# "개발자 도구" 포지셔닝을 말하지 않게 하기 위함(GitHub App/봇 연동 `github_app.py`는
+# 완전히 별개 물건이라 무관 — config.py:209 주석 참조). 제거 전 prod 실측(디디, 읽기전용
+# 1회 잡): github_id는 있으나 다른 로그인 수단이 없는 사용자 0명 — 이관 경로 불요.
+# `_OAUTH_CONFIGS`가 provider 등록 자체를 게이트하므로("google" 하나만 등록) 아래
+# `_client_id`/`_client_secret`/oauth_callback의 provider 분기는 전부 "google 하나뿐"이
+# 확정된 상태에서 남은 스캐폴딩이다 — 향후 다른 provider가 추가되면 그때 다시 분기한다.
 _OAUTH_CONFIGS: dict[str, dict] = {
     "google": {
         "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
@@ -926,14 +965,6 @@ _OAUTH_CONFIGS: dict[str, dict] = {
         "userinfo_url": "https://www.googleapis.com/oauth2/v3/userinfo",
         "scope": "openid email profile",
         "id_field": "sub",
-        "email_field": "email",
-    },
-    "github": {
-        "authorize_url": "https://github.com/login/oauth/authorize",
-        "token_url": "https://github.com/login/oauth/access_token",
-        "userinfo_url": "https://api.github.com/user",
-        "scope": "read:user user:email",
-        "id_field": "id",
         "email_field": "email",
     },
 }
@@ -944,11 +975,11 @@ def _redirect_uri(provider: str) -> str:
 
 
 def _client_id(provider: str) -> str:
-    return settings.google_client_id if provider == "google" else settings.github_client_id
+    return settings.google_client_id
 
 
 def _client_secret(provider: str) -> str:
-    return settings.google_client_secret if provider == "google" else settings.github_client_secret
+    return settings.google_client_secret
 
 
 class OAuthCallbackRequest(BaseModel):
@@ -1024,18 +1055,6 @@ async def oauth_callback(
             return _err("OAUTH_USERINFO_FAILED", "Failed to fetch user info", 400)
         userinfo = userinfo_resp.json()
 
-        # GitHub email이 null인 경우 /user/emails로 추가 조회
-        if provider == "github" and not userinfo.get("email"):
-            emails_resp = await client.get(
-                "https://api.github.com/user/emails",
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            if emails_resp.status_code == 200:
-                emails = emails_resp.json()
-                primary = next((e["email"] for e in emails if e.get("primary") and e.get("verified")), None)
-                if primary:
-                    userinfo["email"] = primary
-
     oauth_id = str(userinfo.get(cfg["id_field"], ""))
     email = (userinfo.get(cfg["email_field"]) or "").lower().strip()
 
@@ -1043,7 +1062,7 @@ async def oauth_callback(
         return _err("OAUTH_MISSING_INFO", "Missing id or email from provider", 400)
 
     # 3. 기존 유저 조회 (oauth_id 기준 → email 기준 순)
-    id_col = User.google_id if provider == "google" else User.github_id
+    id_col = User.google_id
     result = await session.execute(select(User).where(id_col == oauth_id, User.is_active.is_(True)))
     user = result.scalar_one_or_none()
 
@@ -1279,8 +1298,15 @@ async def switch_project(
     if user is None:
         return _err("USER_NOT_FOUND", "User not found", 404)
 
+    # E-SECURITY SEC-S8(story 83ea3d6a) K — org_id 미전달이면 has_project_access가 org 필터
+    # 없이 판정해, J(cross-org project_access grant)로 생긴 행 하나만 있어도 target org의
+    # 정식 access+refresh 토큰이 발급되는 증폭 경로였다(SEC-S5~S8 가드를 우회하는 크리덴셜
+    # 발급 자체이므로 단순 열람보다 파급이 큼). 현재 세션의 org 컨텍스트로 명시 스코핑.
+    caller_org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
+    caller_org_id = uuid.UUID(str(caller_org_id_str)) if caller_org_id_str else None
+
     # 인가 체크 — team_member ∪ project_access(granted) ∪ owner/admin (me/memberships 3-branch 정합)
-    if not await has_project_access(session, user.id, body.project_id):
+    if not await has_project_access(session, user.id, body.project_id, caller_org_id):
         return _err("NOT_MEMBER", "Not an active member of this project", 403)
 
     # target 캡처 — _build_app_metadata가 내부 fallback으로 last_project_id를 덮어쓰므로 먼저 고정
@@ -1393,16 +1419,105 @@ class AuthMeResponse(BaseModel):
     member_id: str
     org_id: str | None
     project_id: str | None
+    # E-MCP-OPT(story ff6cb90d·doc mcp-multiproject-scoping-design §0/§1): 위 project_id(레거시,
+    # _resolve_api_key의 ORDER BY 임의 기본값)는 무변경 유지(기존 48개 mutation 라우트가 항상 값이
+    # 있다고 가정하는 blast radius 회피) — 아래 3필드가 근본 정의한 신규 계약. 무인자 기본값을
+    # "정확히" 판정: 단일 접근가능 프로젝트 or 명시 default_project_id만 신뢰, 그 외엔 추측 0(null).
+    resolved_default_project_id: str | None = None
+    is_project_ambiguous: bool = False
+    accessible_project_ids: list[str] = []
+
+
+async def _resolve_project_default(
+    session: AsyncSession, member_id: uuid.UUID, org_id: uuid.UUID,
+) -> tuple[str | None, bool, list[str]]:
+    """doc mcp-multiproject-scoping-design §1 — 신규 근본 판정(추측 금지).
+
+    단일 접근가능 프로젝트면 그대로(무회귀·에러 불필요) · 2개 이상이면 명시 default_project_id가
+    여전히 접근가능할 때만 사용 · 그 외(2개 이상 + 미설정/무효)엔 resolved=None + ambiguous=True로
+    호출자가 명시하게 한다(암묵 first-project 선택 금지)."""
+    accessible = await accessible_project_ids_in_org(session, member_id, org_id)
+    accessible_ids = [str(p) for p in accessible]
+    if len(accessible_ids) == 1:
+        return accessible_ids[0], False, accessible_ids
+    if not accessible_ids:
+        return None, False, accessible_ids  # 접근 가능 프로젝트 자체가 0 — 별개 문제(ambiguous 아님).
+    member_row = (await session.execute(
+        select(Member.default_project_id).where(Member.id == member_id)
+    )).scalar_one_or_none()
+    if member_row is not None and str(member_row) in accessible_ids:
+        return str(member_row), False, accessible_ids
+    return None, True, accessible_ids
 
 
 @router.get("/me", response_model=AuthMeResponse)
 async def get_auth_me(
     auth: AuthContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> AuthMeResponse:
-    """API Key Bearer 인증으로 바인딩된 member_id, org_id, project_id 반환."""
+    """API Key Bearer 인증으로 바인딩된 member_id, org_id, project_id 반환.
+
+    E-MCP-OPT: agent API 키(멀티프로젝트 가능)에 한해 resolved_default_project_id/
+    is_project_ambiguous/accessible_project_ids를 근본 판정(§1)해 추가 — human JWT 경로는
+    무변경(기본값 그대로, 이 스토리 스코프 밖)."""
     meta = auth.claims.get("app_metadata", {})
+    resolved: str | None = None
+    ambiguous = False
+    accessible_ids: list[str] = []
+    if meta.get("api_key_id"):
+        try:
+            member_id = uuid.UUID(auth.user_id)
+            org_id = uuid.UUID(str(auth.org_id or meta.get("org_id")))
+            resolved, ambiguous, accessible_ids = await _resolve_project_default(db, member_id, org_id)
+        except Exception:
+            logger.warning("get_auth_me: 신규 project default 판정 실패 — 레거시 필드만 반환", exc_info=True)
     return AuthMeResponse(
         member_id=auth.user_id,
         org_id=auth.org_id or meta.get("org_id"),
         project_id=meta.get("project_id"),
+        resolved_default_project_id=resolved,
+        is_project_ambiguous=ambiguous,
+        accessible_project_ids=accessible_ids,
+    )
+
+
+class SetDefaultProjectRequest(BaseModel):
+    project_id: uuid.UUID
+
+
+@router.patch("/me/default-project", response_model=AuthMeResponse)
+async def set_default_project(
+    body: SetDefaultProjectRequest,
+    auth: AuthContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AuthMeResponse:
+    """E-MCP-OPT(story ff6cb90d §3) — 멀티프로젝트 키의 기본 프로젝트 서버 저장(감사 가능).
+
+    write-time 강제: 지정 project_id가 caller의 accessible 집합 안에 있어야 함(cross-org/무권한
+    프로젝트 지정 차단·body-claimed 금지)."""
+    meta = auth.claims.get("app_metadata", {})
+    member_id = uuid.UUID(auth.user_id)
+    org_id = uuid.UUID(str(auth.org_id or meta.get("org_id")))
+    if not await has_project_access(db, member_id, body.project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to the specified project")
+
+    member = (await db.execute(select(Member).where(Member.id == member_id))).scalar_one_or_none()
+    if member is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    member.default_project_id = body.project_id
+    await db.flush()
+    # story #2132(2026-07-23): member.default_project_changed의 publish_event() 호출 제거 —
+    # FE 소비처 0(설계 doc `story-2139-2132-publish-event-unification-design` §1) + 그
+    # 죽은 org-level fanout(`_subscribers`) 자체가 삭제됨. 복구 대상 아님(신기능 스코프 밖).
+    await db.commit()
+
+    resolved, ambiguous, accessible_ids = await _resolve_project_default(db, member_id, org_id)
+    return AuthMeResponse(
+        member_id=str(member_id),
+        org_id=str(org_id),
+        project_id=meta.get("project_id"),
+        resolved_default_project_id=resolved,
+        is_project_ambiguous=ambiguous,
+        accessible_project_ids=accessible_ids,
     )

@@ -24,3 +24,8 @@ export function signalSessionExpired(): void {
 export function resetSessionExpired(): void {
   signaled = false;
 }
+
+/** story #2160 — 세션이 이미 죽었다고 확定된 상태인지(fetchWithAuth가 재시도 전에 조회). */
+export function isSessionExpiredSignaled(): boolean {
+  return signaled;
+}

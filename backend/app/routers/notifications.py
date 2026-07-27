@@ -18,7 +18,7 @@ from app.schemas.notification import (
 )
 from app.services.member_resolver import assert_caller_is_member, is_caller_member
 
-router = APIRouter(prefix="/api/v2", tags=["notifications"])
+router = APIRouter(prefix="/api/v2", tags=["notifications", "Organization"])
 
 
 async def _assert_self_or_org_admin(

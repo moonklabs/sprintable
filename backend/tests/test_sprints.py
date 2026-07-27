@@ -219,6 +219,9 @@ async def test_activate_sprint_200():
         active_sprint = _mock_sprint("active")
         caller = ResolvedMember(
             id=uuid.uuid4(), user_id=None, name="h", type="human", role="member", org_id=ORG_ID)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = active_sprint
+        session.execute = AsyncMock(return_value=mock_result)
         with patch("app.services.sprint.transition_sprint", AsyncMock(return_value=active_sprint)), \
              patch("app.services.member_resolver.resolve_member", AsyncMock(return_value=caller)):
             async with client as c:
@@ -694,7 +697,11 @@ async def test_update_sprint_goal_capacity_200():
 
     client, session, app = await _client()
     try:
-        with patch("app.repositories.base.BaseRepository.update", new_callable=AsyncMock) as mock_update:
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = updated
+        session.execute = AsyncMock(return_value=mock_result)
+        with patch("app.repositories.base.BaseRepository.update", new_callable=AsyncMock) as mock_update, \
+             patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)):
             mock_update.return_value = updated
             async with client as c:
                 resp = await c.patch(f"/api/v2/sprints/{SPRINT_ID}", json={

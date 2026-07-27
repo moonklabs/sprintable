@@ -9,6 +9,7 @@ import { OperatorTextarea } from '@/components/ui/operator-control';
 import { cn } from '@/lib/utils';
 import { DeltaTrack, fmt } from '@/components/outcome/outcome-result-card';
 import { AiGenerationLoading, type AiGenerationLoadingStep } from '@/components/ai/ai-generation-loading';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import type {
   RetroHypothesisResult,
   RetroNextHypothesis,
@@ -325,9 +326,14 @@ function RecommendationCard({
         <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setEditing((v) => !v)}>
           {editing ? t('recEditDone') : t('recEdit')}
         </Button>
-        <Button variant="hero" size="sm" className="h-6 px-2.5 text-xs" onClick={() => onAdopt(statement)} disabled={adopting}>
-          {adopting ? t('recAdopting') : t('recAdopt')}
-        </Button>
+        {/* story #2104 — BE retros.py:373(ADOPTION_REQUIRES_HUMAN)이 human-only로 채택을 403
+            거부한다("채택=인간 게이트", SOUL-LOCK 유나 §6). 에이전트 계정에도 버튼을 열어두면
+            #2091/#2103과 같은 결함이라 미리 숨긴다. */}
+        <HumanOnlyAction>
+          <Button variant="hero" size="sm" className="h-6 px-2.5 text-xs" onClick={() => onAdopt(statement)} disabled={adopting}>
+            {adopting ? t('recAdopting') : t('recAdopt')}
+          </Button>
+        </HumanOnlyAction>
       </div>
     </div>
   );
@@ -412,7 +418,7 @@ export function SprintCloseCockpit({
         <div className="flex flex-col items-center gap-2.5 rounded-xl border border-dashed border-border bg-muted/20 p-5 text-center">
           <Sparkles className="size-4 text-info" aria-hidden />
           <p className="text-xs text-muted-foreground">{t('synthesisGenerateHint')}</p>
-          {generateError ? <p className="text-xs text-destructive">{t('synthesisGenerateFailed')}</p> : null}
+          {generateError ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{t('synthesisGenerateFailed')}</p> : null}
           <Button variant="outline" size="sm" onClick={() => void handleGenerate()}>
             {t('synthesisGenerateCta')}
           </Button>
@@ -437,7 +443,7 @@ export function SprintCloseCockpit({
                   onAdopt={(statement) => void handleAdopt(i, rec, statement)}
                   onIgnore={() => setIgnoredIndexes((prev) => new Set([...prev, i]))}
                 />
-                {adoptError === i ? <p className="text-xs text-destructive">{t('recAdoptFailed')}</p> : null}
+                {adoptError === i ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{t('recAdoptFailed')}</p> : null}
               </div>
             ))}
           </div>

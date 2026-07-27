@@ -1,4 +1,5 @@
-"""스프린트 관련 MCP 도구 (8개)."""
+"""스프린트 관련 MCP 도구 (7개) — E-SECURITY SEC-S8 확장: delete_sprint 제거(에이전트
+hard-delete 차단, delete_story와 동형 조치. 까심 적대적 QA 발견 갭)."""
 from __future__ import annotations
 
 from mcp.types import TextContent
@@ -33,10 +34,10 @@ class UpdateSprintInput(SprintableInput):
 
 async def list_sprints(args: ListSprintsInput) -> list[TextContent]:
     """스프린트 목록 조회."""
-    params: dict = {"project_id": client.project_id}
-    if args.status:
-        params["status"] = args.status.value
     try:
+        params: dict = {"project_id": client.require_project_id()}
+        if args.status:
+            params["status"] = args.status.value
         return ok(await client.get("/api/v2/sprints", params=params))
     except Exception as exc:
         return err(str(exc))
@@ -76,14 +77,14 @@ async def get_velocity(args: SprintIdInput) -> list[TextContent]:
 
 async def create_sprint(args: CreateSprintInput) -> list[TextContent]:
     """스프린트 생성."""
-    body: dict = {"title": args.title, "project_id": client.project_id}
-    if args.start_date:
-        body["start_date"] = args.start_date
-    if args.end_date:
-        body["end_date"] = args.end_date
-    if args.team_size is not None:
-        body["team_size"] = args.team_size
     try:
+        body: dict = {"title": args.title, "project_id": client.require_project_id()}
+        if args.start_date:
+            body["start_date"] = args.start_date
+        if args.end_date:
+            body["end_date"] = args.end_date
+        if args.team_size is not None:
+            body["team_size"] = args.team_size
         return ok(await client.post("/api/v2/sprints", json=body))
     except Exception as exc:
         return err(str(exc))
@@ -102,13 +103,5 @@ async def update_sprint(args: UpdateSprintInput) -> list[TextContent]:
         updates["team_size"] = args.team_size
     try:
         return ok(await client.patch(f"/api/v2/sprints/{args.sprint_id}", json=updates))
-    except Exception as exc:
-        return err(str(exc))
-
-
-async def delete_sprint(args: SprintIdInput) -> list[TextContent]:
-    """스프린트 삭제."""
-    try:
-        return ok(await client.delete(f"/api/v2/sprints/{args.sprint_id}"))
     except Exception as exc:
         return err(str(exc))

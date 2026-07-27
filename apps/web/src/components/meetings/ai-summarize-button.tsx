@@ -55,9 +55,10 @@ export function AiSummarizeButton({ meetingId, hasTranscript, guardedFetch, onRe
         )}
       </div>
 
-      {/* AC6: 에러 표시 (AC9: i18n) */}
+      {/* AC6: 에러 표시 (AC9: i18n) — story #2105 2차: useAiSummarize.summarize()가 재시도 전
+          setError(null)을 먼저 호출해 매 시도마다 언마운트→리마운트된다. */}
       {error && (
-        <p className="text-xs text-destructive">
+        <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">
           {error.includes('NO_API_KEY') ? t('aiKeyRequired')
             : error.includes('NO_TRANSCRIPT') ? t('transcriptRequired')
             : error.includes('Monthly') || error.includes('monthly') ? t('aiMonthlyLimit')

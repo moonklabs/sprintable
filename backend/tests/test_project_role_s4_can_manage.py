@@ -45,22 +45,28 @@ async def test_team_member_create_agent_no_admin_403():
     org = uuid.uuid4()
     body = TeamMemberCreate(project_id=uuid.uuid4(), org_id=org, type="agent", name="new-agent")
     actor = _agent_actor()
-    session = MagicMock()
+    session = AsyncMock()
 
-    with patch("app.routers.team_members._resolve_actor", new=AsyncMock(return_value=actor)), patch(
-        "app.services.project_auth.has_project_role", new=AsyncMock(return_value=False)
-    ) as hpr:
+    # E-SECURITY SEC-S8(L): create_team_member가 이제 role 게이트 前 target-org 대조(신설)를
+    # 먼저 하므로 no-op으로 통과시켜 이 테스트의 실제 관심사(role 게이트 자체)만 검증.
+    with patch("app.routers.team_members._resolve_actor", new=AsyncMock(return_value=actor)), \
+         patch("app.services.project_auth.assert_target_in_caller_org", new=MagicMock(return_value=None)), \
+         patch("app.services.project_auth.has_project_role", new=AsyncMock(return_value=False)) as hpr:
         with pytest.raises(HTTPException) as ei:
             await create_team_member(body, session=session, auth=_auth(), org_id=org)
     assert ei.value.status_code == 403
-    # role 경로 사용 확認: actor.id·actor.project_id·min='admin'
+    # role 경로 사용 확認: 이제 actor 무관 target(body.project_id) 기준으로 단일 호출.
     hpr.assert_awaited_once()
     assert hpr.await_args.kwargs.get("min_role") == "admin"
+    assert hpr.await_args.args[2] == body.project_id
 
 
 @pytest.mark.anyio
-async def test_team_member_create_human_actor_skips_gate():
-    """human actor 는 agent 전용 게이트 미적용(has_project_role 미호출) — 무회귀."""
+async def test_team_member_create_human_actor_now_gated():
+    """E-SECURITY SEC-S8(L) 회귀: human actor(또는 actor 미해소)도 이제 동일 게이트 적용 —
+    과거엔 `if actor.type=="agent"`에 갇혀 human이면 인가가 통째로 스킵되던 CRITICAL 갭이었다.
+    무권한 human은 403(게이트가 410 deprecated-check보다 먼저 실행돼 has_project_role이 실제
+    호출됨)."""
     from app.routers.team_members import create_team_member
     from app.schemas.team_member import TeamMemberCreate
 
@@ -68,17 +74,17 @@ async def test_team_member_create_human_actor_skips_gate():
     body = TeamMemberCreate(project_id=uuid.uuid4(), org_id=org, type="human", name="x")
     human = MagicMock()
     human.type = "human"
-    session = MagicMock()
+    session = AsyncMock()
 
-    with patch("app.routers.team_members._resolve_actor", new=AsyncMock(return_value=human)), patch(
-        "app.services.project_auth.has_project_role", new=AsyncMock(return_value=False)
-    ) as hpr:
-        # human create 는 410(deprecated)로 끊기지만 게이트(has_project_role) 전에 막힘 → 미호출
+    with patch("app.routers.team_members._resolve_actor", new=AsyncMock(return_value=human)), \
+         patch("app.services.project_auth.assert_target_in_caller_org", new=MagicMock(return_value=None)), \
+         patch("app.services.project_auth.has_project_role", new=AsyncMock(return_value=False)) as hpr:
         from fastapi import HTTPException
 
-        with pytest.raises(HTTPException):
+        with pytest.raises(HTTPException) as ei:
             await create_team_member(body, session=session, auth=_auth(), org_id=org)
-    hpr.assert_not_awaited()
+        assert ei.value.status_code == 403
+    hpr.assert_awaited_once()
 
 
 # ── create_org_agent (agents.py) ─────────────────────────────────────────────
@@ -94,7 +100,13 @@ async def test_org_agent_create_agent_no_admin_403():
     org = uuid.uuid4()
     body = OrgAgentCreate(name="cos", scope_mode="org")
     actor = _agent_actor()
-    session = MagicMock()
+    session = AsyncMock()
+    # E-SECURITY SEC-S8(O): _resolve_org_project_ids가 이제 role 체크보다 먼저 실행돼(grant
+    # 대상 전체를 role 검증 대상으로 삼기 위함) org 프로젝트 목록 조회를 먼저 만족시켜야 한다.
+    single_project_id = uuid.uuid4()
+    mock_result = MagicMock()
+    mock_result.all.return_value = [(single_project_id,)]
+    session.execute = AsyncMock(return_value=mock_result)
 
     with patch("app.routers.team_members._resolve_actor", new=AsyncMock(return_value=actor)), patch(
         "app.services.project_auth.has_project_role", new=AsyncMock(return_value=False)
@@ -104,3 +116,5 @@ async def test_org_agent_create_agent_no_admin_403():
     assert ei.value.status_code == 403
     hpr.assert_awaited_once()
     assert hpr.await_args.kwargs.get("min_role") == "admin"
+    # O 회귀 확認: grant 대상(single_project_id) 기준으로 검증됐지 actor.project_id가 아니어야 함.
+    assert hpr.await_args.args[2] == single_project_id

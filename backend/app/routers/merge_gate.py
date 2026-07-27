@@ -16,7 +16,7 @@ from app.dependencies.database import get_db
 from app.services.merge_gate_metrics import compute_merge_gate_metrics
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(prefix="/api/v2/merge-gate", tags=["merge-gate"])
+router = APIRouter(prefix="/api/v2/merge-gate", tags=["merge-gate", "Trust"])
 
 
 class MergeGateMetricsResponse(BaseModel):

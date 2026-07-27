@@ -211,6 +211,18 @@ async def enforce_gate(
         if req_status == "approved":
             # S-GATE-3 ①: self-approval 차단(§3d hard) — 승인자(responded_by)가 원 트리거 actor
             # (park 시 metadata.actor_id)와 동일하면 거부(다른 승인자 필요). 둘 다 known·동일일 때만.
+            #
+            # story #2058 AC3: hitl.py::resolve_hitl_request 에 human-only 불변식이 생긴 뒤로
+            # (#2058 AC1) responded_by 는 이제 **항상 human**이다. 이 work_type(done/merge) 파킹의
+            # orig_actor_id 는 report-done 경로 자체가 agent_id 만 받아(#2047 AC5 조사 확인) **항상
+            # agent**다 — 서로 다른 identity 공간(사람의 id 축 vs 에이전트의 id 축)이라 이
+            # 비교는 이 흐름에서는 **구조적으로 항상 False**(죽은 코드는 아니다 — 우연한 문자열
+            # 충돌 없이는 못 걸리는 방어심층). 겨냥 조합이었던 "agent↔agent(동일 identity)
+            # self-approval"은 이제 애초에 requester=agent·resolver=human 불일치로 도달 자체가
+            # 막힌다. **human↔human self-approval**(사람이 스스로 트리거·스스로 승인)은 이
+            # work_type(done/merge, agent-only 트리거) 경로에는 존재하지 않지만, `enforce_gate`가
+            # 향후 human-triggerable work_type/request_type으로 확장되면 그 조합에서 이 분기가
+            # 다시 실제로 걸릴 수 있다 — 그래서 제거하지 않고 방어심층으로 유지한다.
             if (
                 responded_by is not None
                 and orig_actor_id is not None

@@ -47,16 +47,16 @@ class UpdateMeetingInput(SprintableInput):
 
 async def list_meetings(args: ListMeetingsInput) -> list[TextContent]:
     """프로젝트 미팅 목록 조회."""
-    params: dict = {"project_id": client.project_id}
-    if args.meeting_type:
-        params["meeting_type"] = args.meeting_type
-    if args.date_from:
-        params["date_from"] = args.date_from
-    if args.date_to:
-        params["date_to"] = args.date_to
-    if args.limit is not None:
-        params["limit"] = str(args.limit)
     try:
+        params: dict = {"project_id": client.require_project_id()}
+        if args.meeting_type:
+            params["meeting_type"] = args.meeting_type
+        if args.date_from:
+            params["date_from"] = args.date_from
+        if args.date_to:
+            params["date_to"] = args.date_to
+        if args.limit is not None:
+            params["limit"] = str(args.limit)
         return ok(await client.get("/api/v2/meetings", params=params))
     except Exception as exc:
         return err(str(exc))
@@ -72,12 +72,12 @@ async def get_meeting(args: MeetingIdInput) -> list[TextContent]:
 
 async def create_meeting(args: CreateMeetingInput) -> list[TextContent]:
     """미팅 생성."""
-    body: dict = {"title": args.title, "project_id": client.project_id}
-    for field in ("meeting_type", "date", "duration_min", "participants", "created_by"):
-        val = getattr(args, field)
-        if val is not None:
-            body[field] = val
     try:
+        body: dict = {"title": args.title, "project_id": client.require_project_id()}
+        for field in ("meeting_type", "date", "duration_min", "participants", "created_by"):
+            val = getattr(args, field)
+            if val is not None:
+                body[field] = val
         return ok(await client.post("/api/v2/meetings", json=body))
     except Exception as exc:
         return err(str(exc))

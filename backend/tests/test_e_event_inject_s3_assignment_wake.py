@@ -30,6 +30,10 @@ def _story(assignee_id):
     s.sprint_id = None
     s.assignee_id = assignee_id
     s.assignee_ids = [assignee_id] if assignee_id else []
+    # P0-03(doc trust-pipeline-be-design §5): 신규 필드 — MagicMock 반환 MagicMock이 Pydantic UUID
+    # 검증 실패하므로 명시 세팅.
+    s.human_owner_member_id = None
+    s.agent_delegate_ids = []
     s.meeting_id = None
     s.title = "Build login"
     s.description = "OAuth + password"
@@ -92,9 +96,11 @@ async def _run_patch(assignee_type: str):
              patch("app.routers.stories._resolve_actor_info", new_callable=AsyncMock, return_value=(None, None, None)), \
              patch("app.routers.stories._upsert_assignee_participation", new_callable=AsyncMock), \
              patch("app.repositories.story_assignee.StoryAssigneeRepository.set_for_story", new_callable=AsyncMock, return_value=[ASSIGNEE_ID]), \
-             patch("app.routers.stories.assign_recipient_seq", side_effect=_seq), \
-             patch("app.routers.stories.wake_agent") as mock_wake, \
-             patch("app.routers.stories.dispatch_notification", new_callable=AsyncMock) as mock_dispatch:
+             patch("app.services.activity_stream.extract_activities_best_effort", new_callable=AsyncMock), \
+             patch("app.services.conversation_webhook.deliver_injected_event_webhook", new_callable=AsyncMock), \
+             patch("app.services.event_seq.assign_recipient_seq", side_effect=_seq), \
+             patch("app.routers.agent_gateway.wake_agent") as mock_wake, \
+             patch("app.services.notification_dispatch.dispatch_notification", new_callable=AsyncMock) as mock_dispatch:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as c:
                 resp = await c.patch(f"/api/v2/stories/{STORY_ID}", json={"assignee_id": str(ASSIGNEE_ID)})

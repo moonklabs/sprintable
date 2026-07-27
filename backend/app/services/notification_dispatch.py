@@ -22,6 +22,28 @@ from app.services.webhook_targeting import active_webhook_member_ids
 logger = logging.getLogger(__name__)
 
 
+async def _query_muted_member_ids(
+    db: AsyncSession, member_ids: list[uuid.UUID],
+) -> set[uuid.UUID]:
+    """story 75570ab8: global mute(채널 막론) 멤버 집합 — 단일 조회로 SSOT화(이전엔
+    `_deliver_personal_webhooks`만 알고 있어서, mute+webhook 동시보유 에이전트가 Event-skip
+    판정(webhook이 커버한다고 가정)과 webhook mute-skip 둘 다에 걸려 **총 무전달**이었다).
+    호출자가 이 결과를 Event-skip 판정에도 반영해야 무음 조합이 사라진다."""
+    if not member_ids:
+        return set()
+    from app.models.notification_preference import NotificationPreference
+
+    rows = await db.execute(
+        select(NotificationPreference.member_id).where(
+            NotificationPreference.member_id.in_(member_ids),
+            NotificationPreference.scope_type == "global",
+            NotificationPreference.scope_id.is_(None),
+            NotificationPreference.level == "mute",
+        )
+    )
+    return {m for m in rows.scalars().all()}
+
+
 async def _deliver_personal_webhooks(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -30,6 +52,10 @@ async def _deliver_personal_webhooks(
     title: str,
     body: str | None,
     event_type: str,
+    reference_type: str | None = None,
+    reference_id: uuid.UUID | None = None,
+    context: dict | None = None,
+    muted_member_ids: set[uuid.UUID] | None = None,
 ) -> None:
     """96af343e: 활성 개인(member-scoped) WebhookConfig 보유 휴먼에게 알림 webhook POST.
 
@@ -37,11 +63,14 @@ async def _deliver_personal_webhooks(
     (채널 막론 mute 우선). SSRF 검증·HMAC 서명·Discord URL 포맷·retry 는
     dispatch_router._post_with_retry / app.core.ssrf 재사용. agent SSE 경로
     (route_dispatch_event)는 미변경(무회귀). 개별 POST 실패는 swallow → in-app 무영향.
+
+    muted_member_ids: story 75570ab8 — 호출자(dispatch_notification)가 이미 계산한 mute
+    집합을 넘기면 재조회 생략(Event-skip 판정과 동일 SSOT 재사용, 드리프트 방지). None이면
+    이 함수가 자체 조회(단독 호출 하위호환).
     """
     if not member_ids:
         return
     from app.core.ssrf import validate_webhook_url_async
-    from app.models.notification_preference import NotificationPreference
     from app.services.dispatch_router import _post_with_retry
 
     wh_rows = await db.execute(
@@ -57,15 +86,10 @@ async def _deliver_personal_webhooks(
         return
 
     # global mute 멤버 skip (CP②: 채널 막론 mute 우선)
-    muted_rows = await db.execute(
-        select(NotificationPreference.member_id).where(
-            NotificationPreference.member_id.in_([c.member_id for c in configs]),
-            NotificationPreference.scope_type == "global",
-            NotificationPreference.scope_id.is_(None),
-            NotificationPreference.level == "mute",
-        )
-    )
-    muted = {m for m in muted_rows.scalars().all()}
+    if muted_member_ids is None:
+        muted = await _query_muted_member_ids(db, [c.member_id for c in configs])
+    else:
+        muted = muted_member_ids
 
     for cfg in configs:
         if cfg.member_id in muted:
@@ -85,7 +109,17 @@ async def _deliver_personal_webhooks(
             payload = {"content": text}
             secret = None  # Discord 자체 인증 방식
         else:
-            payload = {"event": event_type, "title": title, "body": body}
+            # C0-S2: 에이전트가 payload만 보고 반응(답글)할 수 있도록 반응 맥락을 실는다 —
+            # reference(story 등) + context(comment_id·content·author). Discord(휴먼)는 content
+            # 텍스트 제약이라 위 분기 유지·structured 맥락은 generic(에이전트 런타임 endpoint) payload.
+            payload = {
+                "event": event_type,
+                "title": title,
+                "body": body,
+                "reference_type": reference_type,
+                "reference_id": str(reference_id) if reference_id else None,
+                "context": context or {},
+            }
             secret = cfg.secret
         try:
             await _post_with_retry(cfg.url, payload, secret, str(cfg.member_id))
@@ -104,6 +138,9 @@ async def dispatch_notification(
     reference_type: str | None = None,
     reference_id: uuid.UUID | None = None,
     source_project_id: uuid.UUID | None = None,
+    context: dict | None = None,
+    story_id: uuid.UUID | None = None,
+    sprint_id: uuid.UUID | None = None,
 ) -> None:
     """notification_settings 필터 후 enabled member에게 알림 발송.
 
@@ -118,6 +155,13 @@ async def dispatch_notification(
     뷰가 멀티프로젝트 멤버를 N행(동일 id)으로 내는데, 주어지면 dedup에서 그 프로젝트 행을 우선
     선택하고 에이전트 Event를 그 프로젝트로 스코프한다 — 임의 first-project로 떨구는 오라우팅 방지.
     미지정 시 기존 거동(첫 행) 유지 → 휴먼 1-알림 dedup 무회귀(additive·하위호환).
+
+    story #1953(P1a-S3): source_project_id는 Expo push data payload의 project_id로도 그대로
+    재사용된다(딥링크 매니페스트 Layer 2 계약 — org_id/project_id 전 타입 포함). 호출부가
+    안 넘기면, 아래에서 이미 조회한 대상 member들의 project_id가 전부 동일할 때만(모호성 없을
+    때만) 그 값으로 폴백한다 — 새 쿼리 없이 기존 조회 결과를 재사용(신규 DB 왕복 0).
+    story_id(task_completed)·sprint_id(가설 관련 dispatched/handoff_stuck)는 호출부가 이미
+    알고 있는 값을 그대로 실어 보내는 통과 파라미터(신규 조회는 호출부 책임, 여기선 없음).
     """
     if not target_member_ids:
         return
@@ -149,6 +193,15 @@ async def dispatch_notification(
         webhook_member_ids = await active_webhook_member_ids(
             db, org_id, enabled_member_ids
         )
+        # story 75570ab8: mute+webhook 동시보유 재판정 — active_webhook_member_ids는 mute를
+        # 모른다. 그래서 muted 에이전트가 "webhook이 커버한다"고 오판돼 Event insert도 스킵되고,
+        # 뒤이어 _deliver_personal_webhooks 자체 mute 체크로 webhook도 스킵돼 **총 무전달**이었다
+        # (그라운딩 0f428e1e 때 확인한 dispatch_notification 경로 지식 재사용). mute의 옳은
+        # 의미론 = "능동 push(webhook)만 끔" — 수동 backlog(Event/poll_events로 나중에 발견 가능)
+        # 까지 지우면 안 됨(webhook_targeting.py 자체가 명시한 "silent loss 방지" 설계 철학과
+        # 정합). 따라서 muted 멤버는 webhook-covered 취급에서 제외해 Event insert 경로로 폴백.
+        muted_member_ids = await _query_muted_member_ids(db, list(webhook_member_ids))
+        event_skip_member_ids = webhook_member_ids - muted_member_ids
 
         # BUG-2 수정: user_id.isnot(None) 필터 제거 — agent는 user_id=NULL이므로 제외됐던 문제
         # type 및 project_id도 함께 조회
@@ -197,12 +250,26 @@ async def dispatch_notification(
                 _picked[_m.id] = _m  # 트리거 프로젝트 행으로 교체
         members = list(_picked.values())
 
+        # story #1953: Expo push data payload용 project_id 해소. source_project_id가 명시되면
+        # 그대로 우선 사용(신뢰 가능한 트리거 프로젝트). 없으면 위에서 이미 조회한 members의
+        # project_id가 전부 동일할 때만(모호성 0) 그 값으로 폴백 — 신규 쿼리 없이 기존 조회
+        # 결과만 재사용. 여러 프로젝트가 섞여 있으면(org-wide 브로드캐스트 등) None으로 둬
+        # 오라우팅(잘못된 프로젝트로 딥링크) 방지.
+        _push_project_id = source_project_id
+        if _push_project_id is None:
+            _member_project_ids = {
+                getattr(_m, "project_id", None) for _m in members
+            } - {None}
+            if len(_member_project_ids) == 1:
+                _push_project_id = next(iter(_member_project_ids))
+
         inserted = False
         created_events: list[Event] = []  # L1 BE-3: fan-out 수렴용 event 수집
         for member_row in members:
             if member_row.type == "agent":
-                # 활성 웹훅 있는 에이전트 → 외부 채널로 전달되므로 내장 Event 스킵
-                if member_row.id in webhook_member_ids:
+                # 활성 웹훅 있는 에이전트 → 외부 채널로 전달되므로 내장 Event 스킵(단, muted면
+                # webhook도 안 나가므로 Event insert로 폴백 — 위 event_skip_member_ids 참고).
+                if member_row.id in event_skip_member_ids:
                     logger.debug(
                         "dispatch_notification: skip agent %s — has active webhook", member_row.id
                     )
@@ -273,15 +340,35 @@ async def dispatch_notification(
             from app.services.activity_stream import extract_activities_best_effort
             await extract_activities_best_effort(db, [e.id for e in created_events])
 
-        # 96af343e (옵션 C): 휴먼 개인 webhook 발송 — in-app Notification 과 동일 flush 타이밍
-        # best-effort. 활성 member-scoped WebhookConfig 보유 휴먼만(agent SSE 경로 무관).
-        human_member_ids = [
+        # 96af343e(옵션 C) + C0-S2(8bace49e 부활): 개인 webhook 발송 — 휴먼 + agent(활성 webhook).
+        # ⭐agent(활성 webhook)는 위에서 Event INSERT를 스킵했다("외부 채널로 전달" 전제). 그런데 그
+        # webhook을 여기서 실제로 쏘지 않으면 Event도 스킵·webhook도 미발송 = comment.created가
+        # webhook-agent에 미도달(죽은 경로). 이 경로를 부활시켜 에이전트 반응 왕복을 잇는다 —
+        # member-bound WebhookConfig·mute(NotificationPreference)·SSRF 재검증 기존 SSOT 재사용·
+        # Event-skip 유지라 이중배달 0(webhook 단일 채널).
+        webhook_deliver_ids = [
             m.id for m in members
-            if m.type != "agent" and getattr(m, "user_id", None)
+            if (m.type != "agent" and getattr(m, "user_id", None))
+            or (m.type == "agent" and m.id in webhook_member_ids)
         ]
         await _deliver_personal_webhooks(
-            db, org_id, human_member_ids, title=title, body=body, event_type=event_type
+            db, org_id, webhook_deliver_ids, title=title, body=body, event_type=event_type,
+            reference_type=reference_type, reference_id=reference_id, context=context,
+            muted_member_ids=muted_member_ids,
         )
+
+        # E-MOBILE M0·S3: EE 푸시 채널(웹훅과 나란한 별개 채널) — 등록 push_devices 로 Expo 발송.
+        # 대상 = enabled(설정 통과) − mute 멤버(deliver_expo_push 내부 필터). 웹훅 유무와 독립.
+        # EE 게이트(비-EE 무동작·core 무영향)·best-effort(발송 실패가 파이프라인 안 되돌림).
+        from app.core.config import settings as _settings
+        if _settings.is_ee_enabled:
+            from ee.services.expo_push import deliver_expo_push
+            await deliver_expo_push(
+                db, org_id, enabled_member_ids, title=title, body=body, event_type=event_type,
+                reference_type=reference_type, reference_id=reference_id, context=context,
+                muted_member_ids=muted_member_ids,
+                project_id=_push_project_id, story_id=story_id, sprint_id=sprint_id,
+            )
 
     except Exception:
         # BUG-1 수정: 에러 삼킴 제거 → 스택 트레이스 로깅

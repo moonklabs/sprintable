@@ -61,6 +61,12 @@ class StoryAttachment(BaseModel):
     size: int          # 바이트
     # E-STORAGE-SSOT S7: asset registry row id(denorm·catch#4). asset_links=SSOT·이 필드=denorm.
     asset_id: uuid.UUID | None = None
+    # story #2055 AC1/AC2/AC4: 이미지 첨부의 픽셀 크기 — 서버가 업로드 시점에 측정해 채운다
+    # (client 제공값은 위조 가능해 신뢰 안 함, image_dimensions.measure_image_dimensions).
+    # 비이미지 첨부(문서/오디오/비디오)·측정 실패·기존(이 필드 도입 전) 첨부는 None이 정상
+    # (AC4·AC3 — additive·nullable, 백필 안 함. FE는 None이면 기존 고정 프레임으로 폴백).
+    width: int | None = None
+    height: int | None = None
 
     @field_validator("url")
     @classmethod
@@ -101,6 +107,12 @@ class StoryCreate(BaseModel):
     assignee_id: uuid.UUID | None = None
     # E-BOARD S5: 복수 assignee. 미지정(None)이면 assignee_id 단독 동작(back-compat).
     assignee_ids: list[uuid.UUID] | None = None
+    # P0-03(doc trust-pipeline-be-design §5): Human owner(assignee와 별도 책임 필드). 라우터가
+    # write-time에 human 강제(비-human 지정 시 400).
+    human_owner_member_id: uuid.UUID | None = None
+    # P0-05 후속(doc scope-violation-signal-design §3): 착수 시점 자발적 선언 파일-경로 글롭.
+    # 미지정(None) = 판정 무신호(scope_violation 항상 False).
+    declared_scope_paths: list[str] | None = None
     # E-FILE S4: 보드 스토리 첨부 (기본 [], 최대 10).
     attachments: list[StoryAttachment] = []
     meeting_id: uuid.UUID | None = None
@@ -133,6 +145,11 @@ class StoryUpdate(BaseModel):
     assignee_id: uuid.UUID | None = None
     # E-BOARD S5: 복수 assignee. 미지정(None)이면 join 미변경(back-compat).
     assignee_ids: list[uuid.UUID] | None = None
+    # P0-03(doc trust-pipeline-be-design §5): Human owner. 미지정(exclude_unset)이면 변경 안 함.
+    human_owner_member_id: uuid.UUID | None = None
+    # P0-05 후속(doc scope-violation-signal-design §3): exclude_unset이면 변경 안 함. 명시 []/null로
+    # 해제 가능(story.declared_scope_changed 감사 이벤트가 라우터에서 old/new 기록).
+    declared_scope_paths: list[str] | None = None
     # E-FILE S4: 보드 스토리 첨부. 미지정(None)이면 변경 안 함(back-compat).
     attachments: list[StoryAttachment] | None = None
     meeting_id: uuid.UUID | None = None
@@ -168,6 +185,11 @@ class StoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    # story 9ac9b80f(FR·대표요청): 프로젝트 스코프 사람-읽는 #N — id(UUID)는 canonical 유지,
+    # 이건 additive 참조 편의 필드(project_id 내에서만 유일, 서버 채번·client-settable 아님).
+    # int | None: 실 생성 경로(REST API·oss_seed)는 항상 채번하지만, 레포지토리를 우회해 직접
+    # ORM construct하는 기존 테스트 fixture(이 스토리와 무관한 다른 에픽들) 행은 null일 수 있다.
+    story_number: int | None = None
     project_id: uuid.UUID
     org_id: uuid.UUID
     epic_id: uuid.UUID | None = None
@@ -175,6 +197,23 @@ class StoryResponse(BaseModel):
     assignee_id: uuid.UUID | None = None
     # E-BOARD S5: 복수 assignee. join 테이블 멤버. 레거시 행은 [assignee_id] 폴백.
     assignee_ids: list[uuid.UUID] = []
+    # P0-03(doc trust-pipeline-be-design §5): Human owner — 실 컬럼(ORM 그대로 노출).
+    human_owner_member_id: uuid.UUID | None = None
+    # P0-05 후속(doc scope-violation-signal-design §3): 실 컬럼(ORM 그대로 노출).
+    declared_scope_paths: list[str] | None = None
+
+    @field_validator("declared_scope_paths", mode="before")
+    @classmethod
+    def _coerce_declared_scope_paths(cls, v):
+        return v if isinstance(v, list) else None
+    # agent_delegate_ids: assignee_ids를 Member.type=="agent"로 필터한 파생 뷰(신규 저장 0) —
+    # ORM 컬럼 아님·라우터가 model_validate 前 transient attr로 세팅(assignee_ids 패턴 동형).
+    agent_delegate_ids: list[uuid.UUID] = []
+
+    @field_validator("agent_delegate_ids", mode="before")
+    @classmethod
+    def _coerce_agent_delegate_ids(cls, v):
+        return v if isinstance(v, list) else []
     # E-FILE S4: 보드 스토리 첨부 (column 값). list 아니면 [](레거시 None/mock 안전).
     attachments: list[dict] = []
     meeting_id: uuid.UUID | None = None
@@ -221,3 +260,27 @@ class StoryResponse(BaseModel):
     @classmethod
     def _coerce_has_evidence(cls, v):
         return v if isinstance(v, bool) else None
+
+    # Claimed vs Verified(doc claimed-vs-verified-spec-handoff §3): has_evidence(1 boolean) →
+    # 2신호 분리. self_reported=agent가 증거 첨부(has_evidence와 동일 신호원, 하위호환 유지용
+    # 별칭 관계). human_verified=책임자가 gate 승인(=gate_approval evidence)+who/when(검토자
+    # 서명). 셋 다 positive 단방향(True 또는 None, False 없음) — has_evidence와 동형 규율.
+    self_reported: bool | None = None
+    human_verified: bool | None = None
+    human_verified_by: uuid.UUID | None = None
+    human_verified_at: datetime | None = None
+
+    @field_validator("self_reported", "human_verified", mode="before")
+    @classmethod
+    def _coerce_evidence_bool_signal(cls, v):
+        return v if isinstance(v, bool) else None
+
+    @field_validator("human_verified_by", mode="before")
+    @classmethod
+    def _coerce_human_verified_by(cls, v):
+        return v if isinstance(v, uuid.UUID) else None
+
+    @field_validator("human_verified_at", mode="before")
+    @classmethod
+    def _coerce_human_verified_at(cls, v):
+        return v if isinstance(v, datetime) else None

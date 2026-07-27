@@ -54,7 +54,7 @@ export default function VerifyEmailPage() {
 
         {status === 'success' && (
           <div className="space-y-4">
-            <p className="text-sm font-medium text-success">{message}</p>
+            <p className="text-sm font-medium text-success" role="status" aria-live="polite" aria-atomic="true">{message}</p>
             <button
               onClick={() => router.push('/inbox')}
               className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
@@ -66,7 +66,7 @@ export default function VerifyEmailPage() {
 
         {status === 'error' && (
           <div className="space-y-4">
-            <p className="text-sm text-destructive">{message}</p>
+            <p className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{message}</p>
             <Link href="/login" className="block text-sm font-medium text-brand hover:text-brand/80">
               로그인으로 돌아가기
             </Link>

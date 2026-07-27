@@ -1,0 +1,294 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
+import { PenLine } from 'lucide-react';
+import { ArtifactViewer } from './artifact-viewer';
+import { ArtifactEditor } from './artifact-editor';
+import { ImportArtifactDialog } from './import-artifact-dialog';
+import {
+  adaptArtifactDetail, createArtifact, editArtifact, type ArtifactVersion, type BeArtifactVersionSummary,
+  type MemberRef, type VisualArtifact, type BeVisualArtifactDetail, type BeVisualArtifactSummary,
+} from '@/services/canvas';
+import { adaptComments, type BeArtifactComment, type CommentThread } from '@/services/canvas-comments';
+import { derivePendingCanonicalizeVersion, type CanonicalizeGateLookup } from '@/services/canvas-canonicalize';
+import { deriveNodeOperations, type ArtifactNode } from '@/services/canvas-nodes';
+import { listSpecPins, type SpecPin } from '@/services/canvas-spec-pins';
+
+interface ArtifactSectionProps {
+  storyId: string;
+  memberMap?: Record<string, MemberRef>;
+  className?: string;
+}
+
+interface ArtifactItem {
+  artifact: VisualArtifact;
+  versions: ArtifactVersion[];
+  threads: CommentThread[];
+  nodes: ArtifactNode[];
+  pendingCanonicalizeVersion: number | null;
+  /** story 7fe16274 — 편집 캔버스가 직접 저장(create/update/delete)하므로 여기선 뷰 모드
+   * 진입/재진입 시점에만 최신화(refreshSpecPins) — 커밋 배치가 아니라 즉시 저장이라
+   * handleCommitEdit 훅과는 별도 리프레시가 필요하다. */
+  specPins: SpecPin[];
+}
+
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T | null> {
+  try {
+    const res = await fetch(url, init);
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: T };
+    return json.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadArtifactThreads(artifactId: string, nodes: ArtifactNode[]): Promise<CommentThread[]> {
+  const [comments, versionSummaries] = await Promise.all([
+    fetchJson<BeArtifactComment[]>(`/api/visual-artifacts/${artifactId}/comments`),
+    fetchJson<BeArtifactVersionSummary[]>(`/api/visual-artifacts/${artifactId}/versions`),
+  ]);
+  return adaptComments(comments ?? [], nodes, versionSummaries ?? []);
+}
+
+/** GET /api/gates는 BE list_gates(response_model=list[...])를 그대로 pass-through — {data} 봉투가
+ * 없다(_ok() 미경유). fetchJson과 별개 helper로 raw 배열을 직접 받는다(gate-inbox.tsx와 동일 관례). */
+async function loadPendingCanonicalizeVersion(artifactId: string): Promise<number | null> {
+  try {
+    const res = await fetch(`/api/gates?work_item_id=${artifactId}&status=pending`);
+    const gates = res.ok ? (await res.json()) as CanonicalizeGateLookup[] : [];
+    return derivePendingCanonicalizeVersion(gates);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * E-CANVAS AC2(스토리 상세 첨부) — 실 데이터 attachment point. C1(artifact/version)·
+ * C2(comments)·C3(source_comment_id 결과 연결)를 한 컴포넌트에서 병합 — 각자 실 엔드포인트가
+ * 있으니 신규 BE 0(2026-07-11 그라운딩). 404/빈 목록은 "첨부 없음"과 동일 취급, mock 폴백 0
+ * (선생님 slop 지적 반영 원칙 계승).
+ */
+export function ArtifactSection({ storyId, memberMap = {}, className }: ArtifactSectionProps) {
+  const t = useTranslations('canvas');
+  const [items, setItems] = useState<ArtifactItem[]>([]);
+  // C3-S7 휴먼 딸깍 편집 — 어느 artifact가 편집 모드인지(tree만 진입·viewer가 게이트). 커밋 성공
+  // 후 종료해 fresh 재로드(BE가 버전마다 node.id 리매핑하므로 stale id 재사용 원천 차단).
+  const [editingArtifactId, setEditingArtifactId] = useState<string | null>(null);
+  // 9449da0e 캔버스 휴먼 진입점 — 빈 상태 "그리기" 딸깍 → create 모드(initialNodes=[]).
+  const [creating, setCreating] = useState(false);
+  // story 64010b05(C5 임포트 v1) — "그리기"와 co-located된 2번째 진입점.
+  const [importOpen, setImportOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const artifacts = await fetchJson<BeVisualArtifactSummary[]>(`/api/visual-artifacts?story_id=${storyId}`) ?? [];
+        if (artifacts.length === 0) return;
+
+        const resolved = await Promise.all(artifacts.map(async (a): Promise<ArtifactItem | null> => {
+          const detail = await fetchJson<BeVisualArtifactDetail>(`/api/visual-artifacts/${a.id}`);
+          if (!detail) return null;
+          const { artifact, versions } = adaptArtifactDetail(detail);
+          const [threads, pendingCanonicalizeVersion, specPins] = await Promise.all([
+            loadArtifactThreads(a.id, detail.nodes),
+            loadPendingCanonicalizeVersion(a.id),
+            listSpecPins(a.id),
+          ]);
+
+          return { artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion, specPins };
+        }));
+
+        if (!cancelled) setItems(resolved.filter((d): d is ArtifactItem => d !== null));
+      } catch {
+        // 네트워크 예외도 "첨부 없음"과 동일 취급 — 스토리 상세 화면 자체를 깨뜨리지 않는다.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [storyId]);
+
+  async function refreshThreads(artifactId: string, nodes: ArtifactNode[]) {
+    const threads = await loadArtifactThreads(artifactId, nodes);
+    setItems((cur) => cur.map((it) => (it.artifact.id === artifactId ? { ...it, threads } : it)));
+  }
+
+  /** story 7fe16274 — 스펙 핀은 편집 캔버스가 즉시 저장(커밋 배치 아님)이라, 뷰 모드
+   * 재진입 시점(onDone)에 명시적으로 최신화해야 한다. */
+  async function refreshSpecPins(artifactId: string) {
+    const specPins = await listSpecPins(artifactId);
+    setItems((cur) => cur.map((it) => (it.artifact.id === artifactId ? { ...it, specPins } : it)));
+  }
+
+  async function handleResolve(artifactId: string, nodes: ArtifactNode[], threadId: string) {
+    await fetchJson(`/api/visual-artifacts/${artifactId}/comments/${threadId}/resolve`, { method: 'POST' });
+    await refreshThreads(artifactId, nodes);
+  }
+
+  async function handleReply(artifactId: string, nodes: ArtifactNode[], threadId: string, body: string) {
+    await fetchJson(`/api/visual-artifacts/${artifactId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: body, parent_id: threadId }),
+    });
+    await refreshThreads(artifactId, nodes);
+  }
+
+  async function handleProposeCanonical(artifactId: string, versionNumber: number) {
+    await fetchJson(`/api/visual-artifacts/${artifactId}/versions/${versionNumber}/canonicalize`, { method: 'POST' });
+    const pendingCanonicalizeVersion = await loadPendingCanonicalizeVersion(artifactId);
+    setItems((cur) => cur.map((it) => (it.artifact.id === artifactId ? { ...it, pendingCanonicalizeVersion } : it)));
+  }
+
+  /**
+   * 딸깍 편집 커밋 — 편집기의 최종 노드셋을 baseline(현 버전 노드)과 diff해 operations로 유도,
+   * MCP와 동일한 `/edit` 엔드포인트로 커밋(새 버전). 성공 시 새 detail로 아이템을 갱신하고 편집
+   * 모드를 종료(fresh 재로드·정본 불변). 변경 0이면 조용히 종료, 실패면 편집 유지(원인 로깅).
+   */
+  async function handleCommitEdit(item: ArtifactItem, committedNodes: ArtifactNode[], summary: string) {
+    const operations = deriveNodeOperations(item.nodes, committedNodes);
+    if (operations.length === 0) { setEditingArtifactId(null); return; }
+    const detail = await editArtifact(item.artifact.id, operations, summary);
+    if (!detail) {
+      // 빈 catch 금지 계열 — 커밋 실패를 삼키지 않고 로깅, 편집 모드 유지(사용자 재시도 가능).
+      console.error('[canvas-edit] artifact edit commit failed', item.artifact.id);
+      return;
+    }
+    const { artifact, versions } = adaptArtifactDetail(detail);
+    const [threads, pendingCanonicalizeVersion, specPins] = await Promise.all([
+      loadArtifactThreads(artifact.id, detail.nodes),
+      loadPendingCanonicalizeVersion(artifact.id),
+      listSpecPins(artifact.id),
+    ]);
+    setItems((cur) => cur.map((it) => (it.artifact.id === artifact.id
+      ? { artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion, specPins }
+      : it)));
+    setEditingArtifactId(null);
+  }
+
+  /**
+   * "그리기" 생성 딸깍 커밋(9449da0e) — 빈 편집기(initialNodes=[])의 최종 노드셋을 story 귀속
+   * v1으로 생성. micro-decision (A) 확定: 제목은 항상 기본값("제목 없는 산출물"/"Untitled") —
+   * rename은 후속(갤러리 트랙). 성공 시 뷰어로 전환(fresh items). 실패는 silent 금지 — 로깅 +
+   * 생성 모드 유지(handleCommitEdit과 동일 규율).
+   */
+  async function handleCreateCommit(nodes: ArtifactNode[], summary: string) {
+    const detail = await createArtifact(storyId, t('untitledArtifact'), nodes, summary || undefined);
+    if (!detail) {
+      console.error('[canvas-create] artifact create commit failed', storyId);
+      return;
+    }
+    const { artifact, versions } = adaptArtifactDetail(detail);
+    const [threads, pendingCanonicalizeVersion] = await Promise.all([
+      loadArtifactThreads(artifact.id, detail.nodes),
+      loadPendingCanonicalizeVersion(artifact.id),
+    ]);
+    // 생성 중엔 artifactId가 없어 핀 저작 자체가 불가했다(EditCanvas가 도구를 비활성 처리) — 방금
+    // 막 생겨난 artifact라 핀이 있을 수 없음, 빈 배열로 시작(불필요한 fetch 0).
+    setItems((cur) => [...cur, { artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion, specPins: [] }]);
+    setCreating(false);
+  }
+
+  /** story 64010b05 — "임포트" 딸깍 커밋. handleCreateCommit과 동형이나 source='imported'만
+   * 다르다(신규 artifact 프리미티브 0 — 이후 편집/코멘트/정본/export는 동일 경로). */
+  async function handleImportCommit(nodes: ArtifactNode[]): Promise<boolean> {
+    const detail = await createArtifact(storyId, t('untitledArtifact'), nodes, undefined, 'imported');
+    if (!detail) {
+      console.error('[canvas-import] artifact import commit failed', storyId);
+      return false;
+    }
+    const { artifact, versions } = adaptArtifactDetail(detail);
+    const [threads, pendingCanonicalizeVersion] = await Promise.all([
+      loadArtifactThreads(artifact.id, detail.nodes),
+      loadPendingCanonicalizeVersion(artifact.id),
+    ]);
+    setItems((cur) => [...cur, { artifact, versions, threads, nodes: detail.nodes, pendingCanonicalizeVersion, specPins: [] }]);
+    return true;
+  }
+
+  if (items.length === 0 && !creating) {
+    return (
+      <div className={className}>
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-border bg-card px-6 py-9 text-center">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {t('sectionLabel')}
+          </div>
+          <PenLine className="size-6 text-muted-foreground/60" aria-hidden="true" />
+          <p className="text-sm font-medium text-foreground">{t('emptyTitle')}</p>
+          <p className="max-w-sm text-xs text-muted-foreground">{t('emptyHint')}</p>
+          {/* story 64010b05 §2 — 임포트는 "그리기"와 co-located된 2번째 입구(별도 숨은 경로 X). */}
+          <div className="mt-1 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              {t('createCta')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setImportOpen(true)}
+              className="rounded-md border border-border px-4 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              {t('importCta')}
+            </button>
+          </div>
+        </div>
+        <ImportArtifactDialog open={importOpen} onOpenChange={setImportOpen} onImport={handleImportCommit} />
+      </div>
+    );
+  }
+
+  if (creating) {
+    return (
+      <div className={className}>
+        <ArtifactEditor
+          title={t('untitledArtifact')}
+          initialNodes={[]}
+          onCommit={(committed, summary) => void handleCreateCommit(committed, summary)}
+          onDone={() => setCreating(false)}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className={className}>
+      {items.map((item) => {
+        const { artifact, versions, threads, nodes, pendingCanonicalizeVersion, specPins } = item;
+        // 편집 모드 = 뷰어 대신 편집기(같은 자리). tree 진입은 viewer의 onEnterEdit 게이트가 보장.
+        if (editingArtifactId === artifact.id) {
+          const currentVersion = versions.find((v) => v.version === artifact.current_version);
+          return (
+            <ArtifactEditor
+              key={artifact.id}
+              title={artifact.title}
+              initialNodes={nodes}
+              onCommit={(committed, summary) => void handleCommitEdit(item, committed, summary)}
+              onDone={() => { void refreshSpecPins(artifact.id); setEditingArtifactId(null); }}
+              artifactId={artifact.id}
+              canvasBounds={currentVersion?.canvasBounds}
+            />
+          );
+        }
+        return (
+          <ArtifactViewer
+            key={artifact.id}
+            artifact={artifact}
+            versions={versions}
+            memberMap={memberMap}
+            threads={threads}
+            nodes={nodes}
+            specPins={specPins}
+            onEnterEdit={() => setEditingArtifactId(artifact.id)}
+            onResolveThread={(threadId) => void handleResolve(artifact.id, nodes, threadId)}
+            onReplyThread={(threadId, body) => void handleReply(artifact.id, nodes, threadId, body)}
+            pendingCanonicalizeVersion={pendingCanonicalizeVersion}
+            onProposeCanonical={(versionNumber) => void handleProposeCanonical(artifact.id, versionNumber)}
+          />
+        );
+      })}
+    </div>
+  );
+}

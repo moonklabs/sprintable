@@ -49,7 +49,7 @@ async def test_recommend_relax_ask_to_allow_auto():
 
     with patch("app.services.disposition_advisor.resolve_disposition", new_callable=AsyncMock) as mock_disp, \
          patch("app.services.disposition_advisor.compute_member_trust_scores", new_callable=AsyncMock) as mock_trust:
-        mock_disp.return_value = "ask"
+        mock_disp.return_value = ("ask", "system_default")
         mock_trust.return_value = _trust_result(0.95, 20)
 
         result = await get_disposition_recommendation(
@@ -69,7 +69,7 @@ async def test_no_recommend_when_already_allow_auto_high_rate():
 
     with patch("app.services.disposition_advisor.resolve_disposition", new_callable=AsyncMock) as mock_disp, \
          patch("app.services.disposition_advisor.compute_member_trust_scores", new_callable=AsyncMock) as mock_trust:
-        mock_disp.return_value = "allow_auto"
+        mock_disp.return_value = ("allow_auto", "system_default")
         mock_trust.return_value = _trust_result(0.98, 20)
 
         result = await get_disposition_recommendation(
@@ -89,7 +89,7 @@ async def test_recommend_tighten_allow_auto_to_ask():
 
     with patch("app.services.disposition_advisor.resolve_disposition", new_callable=AsyncMock) as mock_disp, \
          patch("app.services.disposition_advisor.compute_member_trust_scores", new_callable=AsyncMock) as mock_trust:
-        mock_disp.return_value = "allow_auto"
+        mock_disp.return_value = ("allow_auto", "system_default")
         mock_trust.return_value = _trust_result(0.60, 15)
 
         result = await get_disposition_recommendation(
@@ -108,7 +108,7 @@ async def test_no_recommend_tighten_when_ask():
 
     with patch("app.services.disposition_advisor.resolve_disposition", new_callable=AsyncMock) as mock_disp, \
          patch("app.services.disposition_advisor.compute_member_trust_scores", new_callable=AsyncMock) as mock_trust:
-        mock_disp.return_value = "ask"
+        mock_disp.return_value = ("ask", "system_default")
         mock_trust.return_value = _trust_result(0.50, 15)
 
         result = await get_disposition_recommendation(
@@ -128,7 +128,7 @@ async def test_low_sample_guard_no_recommendation():
 
     with patch("app.services.disposition_advisor.resolve_disposition", new_callable=AsyncMock) as mock_disp, \
          patch("app.services.disposition_advisor.compute_member_trust_scores", new_callable=AsyncMock) as mock_trust:
-        mock_disp.return_value = "ask"
+        mock_disp.return_value = ("ask", "system_default")
         mock_trust.return_value = _trust_result(0.99, 3)  # 3건 < DEFAULT 10건
 
         result = await get_disposition_recommendation(
@@ -147,7 +147,7 @@ async def test_custom_min_verdicts():
 
     with patch("app.services.disposition_advisor.resolve_disposition", new_callable=AsyncMock) as mock_disp, \
          patch("app.services.disposition_advisor.compute_member_trust_scores", new_callable=AsyncMock) as mock_trust:
-        mock_disp.return_value = "ask"
+        mock_disp.return_value = ("ask", "system_default")
         mock_trust.return_value = _trust_result(0.95, 3)
 
         result = await get_disposition_recommendation(
@@ -166,7 +166,7 @@ async def test_no_verdicts_low_sample():
 
     with patch("app.services.disposition_advisor.resolve_disposition", new_callable=AsyncMock) as mock_disp, \
          patch("app.services.disposition_advisor.compute_member_trust_scores", new_callable=AsyncMock) as mock_trust:
-        mock_disp.return_value = "ask"
+        mock_disp.return_value = ("ask", "system_default")
         mock_trust.return_value = {"member_id": str(MEMBER_ID), "scores": [], "window_days": 90}
 
         result = await get_disposition_recommendation(

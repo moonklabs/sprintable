@@ -469,7 +469,7 @@ export function AgentDeploymentWizard({
           <h3 className="mt-4 text-lg font-semibold text-foreground">{t('emptyPersonasTitle')}</h3>
           <p className="mt-2 text-sm text-muted-foreground">{t('emptyPersonasBody')}</p>
           <div className="mt-5">
-            <Link href="/agents/personas/new" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('createCustomPersona')}</Link>
+            <Link href="/organization/workforce/personas/new" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('createCustomPersona')}</Link>
           </div>
         </div>
       );
@@ -483,7 +483,7 @@ export function AgentDeploymentWizard({
               <p className="text-sm font-medium text-foreground">{t('personaStepTitle')}</p>
               <p className="text-sm text-muted-foreground">{t('personaStepBody')}</p>
             </div>
-            <Link href="/agents/personas/new" className={buttonVariants({ variant: 'glass', size: 'lg' })}>{t('createCustomPersona')}</Link>
+            <Link href="/organization/workforce/personas/new" className={buttonVariants({ variant: 'glass', size: 'lg' })}>{t('createCustomPersona')}</Link>
           </div>
           {[{ label: t('builtInPersonas'), personas: builtinPersonas }, { label: t('customPersonas'), personas: customPersonas }].map((group) => (
             <div key={group.label} className="space-y-3">

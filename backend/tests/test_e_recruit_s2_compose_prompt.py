@@ -249,6 +249,26 @@ def test_compose_kit_tool_cheat_sheet_excludes_ungranted_groups():
     assert "sprintable_add_story" in out  # stories 그룹은 포함
 
 
+def test_compose_kit_tool_cheat_sheet_includes_transition_goal_in_epics_group():
+    """story #2010: sprintable_transition_goal — epics 권한을 받은 role 의 치트시트에 실제로
+    노출돼야 신규 채용 에이전트가 목표 lifecycle 전이 도구를 발견/사용할 수 있다(discoverability).
+    ALL_TOOL_NAMES 에서 누락되면(당초 상태) 이 테스트가 실패한다."""
+    role = _role(default_tool_groups=["epics"])
+    out = compose_kit(role, "claude-code")["onboarding"]
+    assert "sprintable_transition_goal" in out
+    assert "**epics**:" in out
+
+
+def test_compose_kit_tool_cheat_sheet_includes_delete_artifact_in_canvas_group():
+    """story #1922: sprintable_delete_artifact — canvas 권한을 받은 role 의 치트시트에 실제로
+    노출돼야 신규 채용 에이전트가 artifact 삭제 도구를 발견/사용할 수 있다(discoverability,
+    #2010과 동일 회귀 클래스 — 이번엔 ALL_TOOL_NAMES 최초 커밋부터 등록해 실패하지 않아야 함)."""
+    role = _role(default_tool_groups=["canvas"])
+    out = compose_kit(role, "claude-code")["onboarding"]
+    assert "sprintable_delete_artifact" in out
+    assert "**canvas**:" in out
+
+
 def test_compose_kit_always_allowed_tools_present_regardless_of_groups():
     """core(_ALWAYS_ALLOWED) 도구는 role 의 default_tool_groups 와 무관하게 항상 치트시트에 존재."""
     role = _role(default_tool_groups=["stories"])

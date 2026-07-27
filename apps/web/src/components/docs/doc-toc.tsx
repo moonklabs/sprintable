@@ -63,7 +63,7 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
               <X className="size-3.5" />
             </button>
           </div>
-          <nav className="max-h-72 overflow-y-auto py-1.5">
+          <nav className="focus-inset max-h-72 overflow-y-auto py-1.5">
             {headings.map((heading) => (
               <button
                 key={heading.id}

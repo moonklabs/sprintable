@@ -54,6 +54,8 @@ type DragSession = {
 
 interface MockupEditorShellProps {
   mockupId: string;
+  wsSlug: string;
+  projSlug: string;
 }
 
 const GRID_SIZE = 16;
@@ -208,7 +210,7 @@ function MockupNodeContent({ component }: { component: MockupComponent }) {
   return <div className="px-2 py-1 text-xs text-slate-500">{text}</div>;
 }
 
-export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
+export function MockupEditorShell({ mockupId, wsSlug, projSlug }: MockupEditorShellProps) {
   const t = useTranslations('mockup');
   const router = useRouter();
 
@@ -897,7 +899,7 @@ export function MockupEditorShell({ mockupId }: MockupEditorShellProps) {
           <button type="button" className={panelButtonClass} onClick={() => setZoom(100)}>{t('resetZoom')}</button>
           <button type="button" className={panelButtonClass} onClick={() => setShowGrid((current) => !current)}>{showGrid ? t('gridOn') : t('gridOff')}</button>
           <button type="button" className={panelButtonClass} onClick={() => setShowVersions((current) => !current)}>{t('versionHistory')}</button>
-          <button type="button" className={panelButtonClass} onClick={() => router.push(`/mockups/${mockupId}`)}>{t('preview')}</button>
+          <button type="button" className={panelButtonClass} onClick={() => router.push(`/${wsSlug}/${projSlug}/mockups/${mockupId}`)}>{t('preview')}</button>
           <button type="button" className={panelButtonClass} onClick={undo} disabled={historyPastRef.current.length <= 1}>{t('undo')}</button>
           <button type="button" className={panelButtonClass} onClick={redo} disabled={!historyFutureRef.current.length}>{t('redo')}</button>
           <button type="button" className={panelButtonClass} onClick={() => void copySelection()} disabled={!selectedIds.length}>{t('copy')}</button>

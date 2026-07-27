@@ -201,7 +201,7 @@ async def test_doc_approval_always_pending_despite_allow_auto():
     session.flush = AsyncMock(); session.refresh = AsyncMock()
     no_existing = MagicMock(); no_existing.scalar_one_or_none.return_value = None
     session.execute = AsyncMock(return_value=no_existing)
-    with patch("app.services.gate_service.resolve_disposition", new=AsyncMock(return_value="allow_auto")):
+    with patch("app.services.gate_service.resolve_disposition", new=AsyncMock(return_value=("allow_auto", "system_default"))):
         await create_gate(session, uuid.uuid4(), uuid.uuid4(), "doc", "doc_approval",
                           uuid.uuid4(), uuid.uuid4())
     assert captured["gate"].status == "pending"  # allow_auto → 그래도 pending(force)
@@ -217,7 +217,7 @@ async def test_non_doc_gate_still_auto_passes():
     session.flush = AsyncMock(); session.refresh = AsyncMock()
     no_existing = MagicMock(); no_existing.scalar_one_or_none.return_value = None
     session.execute = AsyncMock(return_value=no_existing)
-    with patch("app.services.gate_service.resolve_disposition", new=AsyncMock(return_value="allow_auto")):
+    with patch("app.services.gate_service.resolve_disposition", new=AsyncMock(return_value=("allow_auto", "system_default"))):
         await create_gate(session, uuid.uuid4(), uuid.uuid4(), "story", "merge",
                           uuid.uuid4(), uuid.uuid4())
     assert captured["gate"].status == "auto_passed"

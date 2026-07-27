@@ -74,3 +74,24 @@ def test_vendored_drift_fixed_workflow_guide_team_members_poll_events_also_alway
     for tool in ("sprintable_get_workflow_guide", "sprintable_list_team_members", "sprintable_poll_events"):
         assert tool in ssot_always
         assert tool in vendored_always
+
+
+def test_standup_tools_core_promoted_ssot_and_vendored():
+    """story 205e6831(FR·대표요청): 대표 role 불명확 → role_template 개별 수정 대신 스탠드업
+    5종을 core(_ALWAYS_ALLOWED) 편입(선생님 방향). 어떤 scope를 줘도 항상 허용돼야 하고,
+    SSOT/vendored 양쪽 드리프트 없어야 한다."""
+    from app.services.mcp_toolset import _ALWAYS_ALLOWED as ssot_always, is_tool_allowed as ssot_allowed
+    from sprintable_mcp.toolset import _ALWAYS_ALLOWED as vendored_always, is_tool_allowed as vendored_allowed
+
+    standup_tools = (
+        "sprintable_get_standup", "sprintable_save_standup", "sprintable_list_standup_entries",
+        "sprintable_standup_history", "sprintable_standup_missing",
+    )
+    for tool in standup_tools:
+        assert tool in ssot_always
+        assert tool in vendored_always
+        # role_template의 default_tool_groups에 "standup"이 전혀 없어도(narrow scope) 항상 허용.
+        assert ssot_allowed(tool, ["stories", "tasks"])
+        assert vendored_allowed(tool, ["stories", "tasks"])
+        assert ssot_allowed(tool, [])
+        assert vendored_allowed(tool, [])

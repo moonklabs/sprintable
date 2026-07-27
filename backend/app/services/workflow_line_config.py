@@ -291,6 +291,11 @@ async def request_publish(
             "requested_by_member_id": str(member_id),
             "entity_type": version.entity_type,
         },
+        # story #1968: version은 이미 로드된 엔티티(request_publish 파라미터) — 신규 쿼리
+        # 없이 그대로 재사용. project-level override면 값이 있고, org-level config면
+        # 구조적으로 None(project 무관 — 미해결 아님, workflow_line_config는 org/project
+        # 양쪽에서 config를 가질 수 있는 유일한 create_gate 호출부).
+        project_id=version.project_id,
     )
     version.review_gate_id = gate.id
     await session.flush()

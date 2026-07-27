@@ -4,10 +4,12 @@ import type { ComponentType } from 'react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Check, ChevronDown, LayoutGrid, LayoutList, Search } from 'lucide-react';
+import { Check, ChevronDown, LayoutGrid, LayoutList, Search, Workflow, Plus } from 'lucide-react';
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { useRenderNonce } from '@/hooks/use-render-nonce';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,12 +20,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast, ToastContainer } from '@/components/ui/toast';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { KanbanColumn } from './kanban-column';
 import { KanbanListView } from './kanban-list-view';
 import { KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
-import { COLUMNS, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
+import { COLUMNS, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
 
 /**
@@ -63,6 +67,8 @@ interface Task {
 
 interface KanbanBoardProps {
   projectId?: string;
+  wsSlug: string;
+  projSlug: string;
 }
 
 // WIP limit localStorage 키
@@ -102,12 +108,16 @@ function saveWipLimit(projectId: string | undefined, status: string, limit: numb
   }
 }
 
-export function KanbanBoard({ projectId }: KanbanBoardProps) {
+export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const t = useTranslations('board');
   const { toasts, addToast, dismissToast } = useToast();
   const [transitionError, setTransitionError] = useState<string | null>(null);
+  // story #2154 — 이 배너는 4초 후 자동 setTransitionError(null)로만 해소되고, 재시도 直前에
+  // 명시적으로 null 리셋하지 않는다(#2400이 남긴 latent gap). 4초 내 동일 사유가 재발하면
+  // 텍스트가 안 바뀌어 재낭독이 안 될 수 있던 것을 nonce-key로 구조적으로 막는다.
+  const [transitionErrorNonce, bumpTransitionErrorNonce] = useRenderNonce();
   const [stories, setStories] = useState<KanbanStory[]>([]);
   const [sprints, setSprints] = useState<KanbanSprint[]>([]);
   const [epics, setEpics] = useState<KanbanEpic[]>([]);
@@ -142,8 +152,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     else params.delete(key);
     const storyId = searchParams.get('story');
     if (storyId) params.set('story', storyId);
-    router.replace(`/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
-  }, [router, searchParams]);
+    router.replace(`/${wsSlug}/${projSlug}/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+  }, [router, searchParams, wsSlug, projSlug]);
 
   // BOARD-03: done 컬럼 collapse 상태
   const [doneCollapsed, setDoneCollapsed] = useState(false);
@@ -238,6 +248,87 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     setColumnTotals((prev) => ({ ...prev, [status]: Math.max(0, (prev[status] ?? 0) + delta) }));
   }, []);
 
+  // story #2059: 보드 실시간 반영 — 새 EventSource를 여는 대신 기존 useSseNotifications의
+  // extraEventNames 확장 지점을 구독한다(AC2, 이미 이 용도로 설계된 재사용 경로 —
+  // hooks/use-sse-notifications.ts 자체 문서 참고). story.status_changed/assignee_changed는
+  // ⚠️(2026-07-23 정정, #2139/#2132) 실제로는 _push_to_agent(member_id) 경로로 프로젝트
+  // 접근 가능한 멤버에게 개별 전송된다 — org 전체에 브로드캐스트하던 publish_event()는
+  // 아무도 구독하지 않던 죽은 레지스트리였고 오늘 삭제됐다(과거엔 이 코멘트가 그렇게 적어뒀으나
+  // 실제 배달 경로가 아니었다). project_id 클라 필터는 여전히 그대로 필요하다(수신 대상 멤버가
+  // 여러 프로젝트에 접근 가능해 필터 없이는 다른 프로젝트 카드까지 반응할 수 있음).
+  // 이미 로드된(페이지네이션으로 fetch된) 카드만 in-place 패치 — 전체 재fetch를 하지 않으므로
+  // 스크롤 위치·컬럼 순서가 흔들리지 않는다(AC3, #2050에서 배운 레이아웃 시프트 축과 동일 원리).
+  // 아직 로드 안 된 카드(다른 컬럼 페이지네이션 밖)의 신규 진입은 이 스토리 스코프 밖으로 둔다.
+  const { currentTeamMemberId } = useDashboardContext();
+
+  // story #2137 — 카드(stories 배열)와 상세 패널(selectedStory)이 별도 state라, SSE 패치를
+  // stories에만 적용하면 패널만 옛값에 고정된다(#2384·#2130과 같은 클래스의 3번째 재발 — 이번엔
+  // "갱신 신호를 아예 안 듣는 표면"). patchStory 하나로 묶어 두 state를 항상 같이 갱신해
+  // "한쪽만 패치" 자체를 구조적으로 불가능하게 만든다 — 이 handler에 새 이벤트 분기가 추가돼도
+  // 자동으로 이 보장을 물려받는다.
+  const patchStoryFromSse = useCallback((storyId: string, patch: Partial<KanbanStory>) => {
+    setStories((prev) => prev.map((s) => (s.id === storyId ? { ...s, ...patch } : s)));
+    setSelectedStory((prev) => (prev && prev.id === storyId ? { ...prev, ...patch } : prev));
+  }, []);
+
+  const handleBoardSseEvent = useCallback((eventName: string, data: unknown) => {
+    const payload = data as {
+      story_id?: string;
+      project_id?: string;
+      actor_id?: string;
+      actor_name?: string;
+      status?: string;
+      assignee_id?: string | null;
+      assignees?: string[];
+      position?: number;
+    };
+    if (!payload.story_id || !payload.project_id || payload.project_id !== projectId) return;
+    // 내 액션의 echo는 무시 — 이미 낙관 갱신했으므로 중복 패치·토스트 스팸을 방지한다.
+    if (currentTeamMemberId && payload.actor_id === currentTeamMemberId) return;
+
+    const existing = stories.find((s) => s.id === payload.story_id);
+    if (!existing) return;
+
+    const titleForToast = existing.title;
+    if (eventName === 'story.status_changed' && payload.status && payload.status !== existing.status) {
+      const newStatus = payload.status;
+      patchStoryFromSse(payload.story_id, { status: newStatus });
+      adjustColumnTotal(existing.status, -1);
+      adjustColumnTotal(newStatus, +1);
+    } else if (eventName === 'story.assignee_changed') {
+      // story #2133 — normalizeAssigneePatch가 assignee_id/assignee_ids 정합을 강제한다.
+      // 손으로 두 필드를 따로 계산하던 자리(#2130 근본)를 구조로 제거.
+      const assigneePatch = normalizeAssigneePatch({ assignee_id: payload.assignee_id, assignee_ids: payload.assignees });
+      patchStoryFromSse(payload.story_id, assigneePatch);
+    } else if (eventName === 'story.position_changed' && typeof payload.position === 'number' && payload.position !== existing.position) {
+      // story #2172 AC5 — BE는 이미 발행하고 있었으나(#2476) FE 구독이 없어 "프레임은 나가는데
+      // 아무도 안 받는" 죽은 경로였다(#2131이 고친 "프레임이 출발조차 안 함"의 거울상). 컬럼
+      // 렌더가 이미 position으로 정렬하므로(위 columnStories 계산부) position만 patch하면
+      // 재정렬은 그 정렬 로직이 그대로 이어받는다 — 별도 재배치 코드 불요.
+      patchStoryFromSse(payload.story_id, { position: payload.position });
+    } else {
+      return;
+    }
+
+    // AC4: 카드가 그냥 이동하지 않는다 — 누가 했는지 토스트로 드러낸다(안 그러면 사람은
+    // 자기 화면이 오작동한 것으로 읽는다).
+    const actorLabel = payload.actor_name ?? t('realtimeUnknownActor');
+    addToast({
+      type: 'info',
+      title: eventName === 'story.status_changed'
+        ? t('realtimeStatusChanged', { actor: actorLabel, title: titleForToast })
+        : eventName === 'story.assignee_changed'
+          ? t('realtimeAssigneeChanged', { actor: actorLabel, title: titleForToast })
+          : t('realtimePositionChanged', { actor: actorLabel, title: titleForToast }),
+    });
+  }, [projectId, currentTeamMemberId, stories, adjustColumnTotal, addToast, t, patchStoryFromSse]);
+
+  useSseNotifications({
+    memberId: currentTeamMemberId,
+    extraEventNames: ['story.status_changed', 'story.assignee_changed', 'story.position_changed'],
+    onExtraEvent: handleBoardSseEvent,
+  });
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -252,7 +343,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       const [storyResults, sprintsRes, epicsRes, membersRes] = await Promise.all([
         Promise.all(statuses.map((s) => fetchStoriesByStatus(s))),
         fetch(`/api/sprints${sprintParams}`),
-        fetch(`/api/epics?${epicParams.toString()}`),
+        fetch(`/api/goals?${epicParams.toString()}`),
         fetch(`/api/members${memberParams}`),
       ]);
 
@@ -425,8 +516,8 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     setAutoComposeNonce((n) => n + 1);
     const params = new URLSearchParams(searchParams.toString());
     params.delete('view');
-    router.replace(`/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
-  }, [searchParams, router]);
+    router.replace(`/${wsSlug}/${projSlug}/board${params.size > 0 ? `?${params.toString()}` : ''}`, { scroll: false });
+  }, [searchParams, router, wsSlug, projSlug]);
 
   // URL에서 스토리 ID 읽어서 자동으로 패널 열기
   useEffect(() => {
@@ -628,6 +719,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         adjustColumnTotal(story.status, +1);
         const errJson = await res.json().catch(() => null);
         if (errJson?.error?.code === 'FORBIDDEN') {
+          bumpTransitionErrorNonce();
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
         }
@@ -687,6 +779,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         adjustColumnTotal(story.status, +1);
         const errJson = await res.json().catch(() => null);
         if (errJson?.error?.code === 'FORBIDDEN') {
+          bumpTransitionErrorNonce();
           setTransitionError(t('transitionDenied'));
           setTimeout(() => setTransitionError(null), 4000);
         }
@@ -704,7 +797,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       adjustColumnTotal(newStatus, -1);
       adjustColumnTotal(story.status, +1);
     }
-  }, [stories, t, adjustColumnTotal, addToast]);
+  }, [stories, t, adjustColumnTotal, addToast, bumpTransitionErrorNonce]);
 
   const handleAssignStory = useCallback(async (storyId: string) => {
     // TODO: Implement proper member selection UI
@@ -764,6 +857,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         }),
       });
       if (!res.ok) {
+        bumpTransitionErrorNonce();
         setTransitionError(t('createStoryFailed'));
         return;
       }
@@ -773,9 +867,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       // 카드 렌더 컬럼(created.status)과 카운트를 동일 source로 정합 — BE가 status를 정규화해도 무어긋남
       adjustColumnTotal(created.status, +1);
     } catch {
+      bumpTransitionErrorNonce();
       setTransitionError(t('createStoryFailed'));
     }
-  }, [projectId, selectedSprintId, selectedEpicId, t, adjustColumnTotal]);
+  }, [projectId, selectedSprintId, selectedEpicId, t, adjustColumnTotal, bumpTransitionErrorNonce]);
 
   // AC1/AC5: WIP limit 핸들러
   const handleWipLimitEdit = useCallback((columnId: string) => {
@@ -826,7 +921,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     <div className="flex h-full flex-col overflow-hidden">
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       {transitionError && (
-        <div className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
+        // story #2154 — handleDragEnd/handleChangeStatus/handleCreateStory가 실패 시점마다
+        // bumpTransitionErrorNonce()를 함께 호출해, 4초 내 동일 사유가 재발해도 key가 바뀌어
+        // 항상 새 DOM 노드로 재낭독된다(#2400이 남긴 latent gap 해소).
+        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-md">
           ⚠️ {transitionError}
         </div>
       )}
@@ -887,7 +985,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto">
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('sprint_id', '')}>
                     <span className="flex-1">{t('allSprints')}</span>
@@ -909,7 +1007,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
               </div>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => router.push('/sprints')}>
+                <DropdownMenuItem onClick={() => router.push(`/${wsSlug}/${projSlug}/sprints`)}>
                   <span className="flex-1 text-xs text-muted-foreground">{t('manageSprints')}</span>
                 </DropdownMenuItem>
               </DropdownMenuGroup>
@@ -947,7 +1045,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto">
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('epic_id', '')}>
                     <span className="flex-1">{t('allEpics')}</span>
@@ -969,7 +1067,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
               </div>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => router.push('/epics')}>
+                <DropdownMenuItem onClick={() => router.push(`/${wsSlug}/${projSlug}/goals`)}>
                   <span className="flex-1 text-xs text-muted-foreground">{t('manageEpics')}</span>
                 </DropdownMenuItem>
               </DropdownMenuGroup>
@@ -1007,7 +1105,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                 />
               </div>
               <DropdownMenuSeparator />
-              <div className="max-h-[50vh] overflow-y-auto">
+              <div className="focus-inset max-h-[50vh] overflow-y-auto">
                 <DropdownMenuGroup>
                   <DropdownMenuItem onClick={() => updateFilter('assignee_id', '')}>
                     <span className="flex-1">{t('allAssignees')}</span>
@@ -1087,7 +1185,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                   />
                 </div>
                 <DropdownMenuSeparator />
-                <div className="max-h-[50vh] overflow-y-auto">
+                <div className="focus-inset max-h-[50vh] overflow-y-auto">
                   <DropdownMenuGroup>
                     <DropdownMenuItem onClick={() => setSelectedLabelIds([])}>
                       <span className="flex-1">{t('allLabels')}</span>
@@ -1169,9 +1267,34 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
       </div>
 
       {/* Content area */}
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {stories.length === 0 ? (
+          // story bb78f14b(doc resource-view-firsttouch-identity-pattern §4 "보드" 행 — ⚠️과함
+          // 주의 명시): 다른 4뷰(5요소)와 달리 여기는 3요소로 축소(아이콘+headline+CTA, explainer
+          // 1문장) — 보드 자체가 이미 레인 시각이라 별도 visual/AI hint는 중복·클러터.
+          // stories(unfiltered 원본)로 진짜 빈 프로젝트만 판정 — 필터/검색 결과 0건은 여기 안 타고
+          // 기존 per-column "스토리가 없습니다" 그대로(에픽 PR#2209에서 배운 필터빈 vs 진짜빈 구분).
+          // ⚠️컬럼 그리드를 대체하지 않고 그 위 배너로만 — CTA가 여는 백로그 인라인 컴포저
+          // (autoComposeSignal)가 KanbanColumn 내부 상태라, 컬럼 자체가 마운트돼 있어야
+          // CTA 클릭이 실제로 컴포저를 연다(대체했다면 신호를 받을 컬럼이 없어 무반응했을 것).
+          <div className="shrink-0 border-b border-border/60 px-6 py-4">
+            <EmptyState
+              icon={<Workflow className="size-8" />}
+              title={t('boardEmptyTitle')}
+              description={t('boardEmptyDescription')}
+              action={
+                <Button size="sm" onClick={() => setAutoComposeNonce((n) => n + 1)}>
+                  <Plus className="size-3.5" />
+                  {t('boardEmptyCta')}
+                </Button>
+              }
+              className="bg-transparent px-0 py-0"
+            />
+          </div>
+        ) : null}
+        <div className="min-h-0 flex-1 overflow-hidden">
         {viewMode === 'list' ? (
-          <div className="h-full overflow-y-auto">
+          <div className="focus-inset h-full overflow-y-auto">
             <KanbanListView
               stories={filteredStories}
               epicMap={epicMap}
@@ -1247,12 +1370,14 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                     assignees={(activeStory.assignee_ids ?? []).flatMap((id) => memberMap[id] ? [memberMap[id]] : [])}
                     onClick={() => {}}
                     lineStatus={storyLineMap[activeStory.id]}
+                    verifiedBy={activeStory.human_verified_by ? memberMap[activeStory.human_verified_by] : undefined}
                   />
                 </div>
               )}
             </DragOverlayCompat>
           </DndContext>
         )}
+        </div>
       </div>
 
       {/* Load more */}
@@ -1298,7 +1423,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
                 if (projectId) params.set('project_id', projectId);
                 params.set('limit', '50');
                 params.set('cursor', epicsNextCursor);
-                const res = await fetch(`/api/epics?${params.toString()}`);
+                const res = await fetch(`/api/goals?${params.toString()}`);
                 if (res.ok) {
                   const json = await res.json();
                   setEpics((prev) => [...prev, ...(json.data ?? [])]);

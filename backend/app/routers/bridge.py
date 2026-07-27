@@ -18,7 +18,7 @@ from app.repositories.bridge_inbound import BridgeInboundRepository, build_bridg
 from app.utils.slack_verify import verify_slack_signature
 from app.utils.teams_verify import verify_teams_request
 
-router = APIRouter(prefix="/api/v2/bridge", tags=["bridge"])
+router = APIRouter(prefix="/api/v2/bridge", tags=["bridge", "Organization"])
 
 
 # ─── S-D2: conversation inbound helper ────────────────────────────────────────

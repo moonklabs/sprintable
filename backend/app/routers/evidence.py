@@ -14,7 +14,7 @@ from app.models.pm import Story, Task
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import has_project_access
 
-router = APIRouter(prefix="/api/v2/evidence", tags=["evidence"])
+router = APIRouter(prefix="/api/v2/evidence", tags=["evidence", "Trust"])
 
 _WORK_ITEM_TYPES = frozenset({"story", "task"})
 

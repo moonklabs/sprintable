@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.pm import Epic, Sprint, Story, Task
+from app.models.pm import Goal, Sprint, Story, Task
 from app.models.team import TeamMember
 
 
@@ -22,7 +22,7 @@ class AnalyticsRepository:
         sprint_rows = sprints_r.all()
 
         epics_r = await self.session.execute(
-            select(func.count()).select_from(Epic).where(Epic.project_id == project_id, Epic.org_id == self.org_id)
+            select(func.count()).select_from(Goal).where(Goal.project_id == project_id, Goal.org_id == self.org_id)
         )
         epic_count = epics_r.scalar_one()
 
@@ -266,8 +266,11 @@ class AnalyticsRepository:
         }
 
     async def get_burndown(self, sprint_id: uuid.UUID) -> dict | None:
+        # E-SECURITY SEC-S8(story 83ea3d6a) DD(까심 라이브확定, CRITICAL·cross-org): 이 파일의
+        # 다른 메소드는 전부 org_id를 필터에 넣는데(예: get_overview) 이 둘만 org_id 필터가
+        # 없어 완전 무관 org가 sprint UUID만 알면 velocity/status를 그대로 열람할 수 있었다.
         sprint_r = await self.session.execute(
-            select(Sprint).where(Sprint.id == sprint_id)
+            select(Sprint).where(Sprint.id == sprint_id, Sprint.org_id == self.org_id)
         )
         sprint = sprint_r.scalar_one_or_none()
         if sprint is None:
@@ -275,7 +278,7 @@ class AnalyticsRepository:
 
         stories_r = await self.session.execute(
             select(Story.story_points, Story.status, Story.updated_at)
-            .where(Story.sprint_id == sprint_id, Story.deleted_at.is_(None))
+            .where(Story.sprint_id == sprint_id, Story.org_id == self.org_id, Story.deleted_at.is_(None))
         )
         stories = stories_r.all()
 
@@ -322,8 +325,11 @@ class AnalyticsRepository:
         }
 
     async def get_sprint_velocity(self, sprint_id: uuid.UUID) -> dict | None:
+        # E-SECURITY SEC-S8(story 83ea3d6a) DD: get_burndown과 동형 cross-org 갭.
         result = await self.session.execute(
-            select(Sprint.velocity, Sprint.title, Sprint.status).where(Sprint.id == sprint_id)
+            select(Sprint.velocity, Sprint.title, Sprint.status).where(
+                Sprint.id == sprint_id, Sprint.org_id == self.org_id
+            )
         )
         row = result.first()
         if row is None:

@@ -338,18 +338,31 @@ def test_require_api_scope_factory_passes_jwt():
 # ─── AuthContext org_id field ──────────────────────────────────────────────────
 
 def test_auth_context_includes_org_id_from_jwt():
-    """get_current_user가 JWT app_metadata.org_id를 AuthContext.org_id에 포함."""
+    """get_current_user가 JWT app_metadata.org_id를 AuthContext.org_id에 포함.
+
+    ⚠️story bea25062(2026-07-16): cutover 검사가 이제 무조건 DB를 조회한다(negative
+    existence-cache 제거, 산티아고 RED 조건 ①) — `db=None`은 더 이상 유효한 입력이 아니다.
+    이 테스트의 실제 관심사(JWT app_metadata.org_id 파싱)는 cutover와 무관하므로,
+    `AuthMigration` 행이 없는 "제약 없음" 상태를 정확히 대표하는 `.get()=None` mock으로
+    대체 — 우회가 아니라 이 임의 user_id에 대한 실제 DB 상태(마이그레이션 행 없음)를
+    정확히 표현한다. ⚠️user_id도 실제 토큰이 항상 담는 형태(유효 UUID 문자열, `str(user.
+    id)`)로 교체 — "user-1" 같은 non-UUID literal은 실 프로덕션 토큰에 절대 없는 값이라
+    cutover 검사의 `uuid.UUID()` 파싱에서 (정확히 의도대로) fail-closed로 거부된다."""
+    user_id = str(uuid.uuid4())
     with patch.dict("os.environ", {"JWT_SECRET": "test-secret"}):
         from app.core.security import create_access_token
-        token = create_access_token("user-1", email="a@b.com", app_metadata={"org_id": "org-abc"})
+        token = create_access_token(user_id, email="a@b.com", app_metadata={"org_id": "org-abc"})
 
     from fastapi.security import HTTPAuthorizationCredentials
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
+    mock_db = AsyncMock()
+    mock_db.get = AsyncMock(return_value=None)
+
     import asyncio
     with patch.dict("os.environ", {"JWT_SECRET": "test-secret"}):
         from app.dependencies.auth import get_current_user
-        ctx = asyncio.run(get_current_user(credentials=creds, x_agent_api_key=None, db=None))
+        ctx = asyncio.run(get_current_user(credentials=creds, x_agent_api_key=None, db=mock_db))
 
     assert ctx.org_id == "org-abc"
-    assert ctx.user_id == "user-1"
+    assert ctx.user_id == user_id

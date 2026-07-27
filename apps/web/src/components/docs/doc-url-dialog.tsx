@@ -140,7 +140,7 @@ function DocUrlDialogForm({
             </button>
           </p>
         ) : invalid ? (
-          <p className="text-xs text-destructive">{labels.slugInvalid}</p>
+          <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{labels.slugInvalid}</p>
         ) : hasExistingSlug ? (
           <p className="flex items-center gap-1 text-xs text-muted-foreground">
             <Info className="size-3 shrink-0" />

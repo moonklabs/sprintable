@@ -19,6 +19,7 @@ def anyio_backend():
 def _client(**methods):
     c = MagicMock()
     c.project_id = "proj-1"
+    c.require_project_id = MagicMock(return_value="proj-1")  # E-MCP-OPT ff6cb90d
     for name, ret in methods.items():
         setattr(c, name, AsyncMock(return_value=ret))
     return c
@@ -29,6 +30,7 @@ def _client(**methods):
 def test_compact_excludes_long_fields_and_flattens_metric():
     full = {
         "id": "h1", "status": "active", "statement": "s",
+        "project_id": "p1",
         "metric_definition": {"metric": "signups", "target": 100, "direction": "up", "source": "manual"},
         "measure_after": "2026-07-01T00:00:00Z", "epic_ids": ["e1"], "story_ids": ["s1"],
         "outcome_result": {"big": "x"}, "source_snapshot": {"y": "z"}, "human_accounting": {},
@@ -36,6 +38,8 @@ def test_compact_excludes_long_fields_and_flattens_metric():
     c = h._compact(full)
     assert c == {
         "id": "h1", "status": "active", "statement": "s",
+        # story fca4723d(C1): all_projects 조회 시 소속 project 식별용으로 노출.
+        "project_id": "p1",
         "metric": "signups", "target": 100, "direction": "up",
         "measure_after": "2026-07-01T00:00:00Z", "epic_ids": ["e1"], "story_ids": ["s1"],
     }
