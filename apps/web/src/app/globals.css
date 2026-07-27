@@ -516,6 +516,27 @@
   .tableWrapper {
     overflow-x: auto;
   }
+
+  /* story #2214(유나 판정, 2026-07-27) — "굴린다. 코드블럭만." TipTap/ProseMirror base CSS
+     (.ProseMirror { overflow-wrap: break-word } · .ProseMirror pre { white-space: pre-wrap })가
+     모든 <pre>를 강제로 접어, #2165가 코드블럭에 준 .scrollbar-visible 예외가 애초에 발동할
+     조건(가로 오버플로) 자체를 못 만들고 있었다(#2214 조사 — "스크롤바가 안 보인다"가 아니라
+     "스크롤할 일이 생길 수 없다"). code-block-copy.tsx가 코드블럭에만 부착하는
+     `.scrollbar-visible` 래퍼를 `.ProseMirror` 조상과 함께 잡아 특이도를 올려 라이브러리 base
+     규칙을 덮는다 — 산문·인용·inline code·표(#2203에서 이미 별도 처리)는 이 selector에
+     걸리지 않아 무접촉.
+     ⛔순서 필수: max-width:100%+min-width:0(레이아웃 안전장치, #2035류 body 밀림 방지)을
+     white-space:pre(본체, 실제로 굴러가게 하는 것)보다 먼저 건다 — 안 그러면 굴러가긴 하는데
+     컨테이너를 못 벗어나는 게 아니라 body 전체를 밀어내는 상태를 한 번 만들고 고치게 된다. */
+  .ProseMirror .scrollbar-visible {
+    max-width: 100%;
+    min-width: 0;
+  }
+  .ProseMirror .scrollbar-visible pre {
+    white-space: pre;
+    overflow-wrap: normal;
+  }
+
   .scrollbar-visible,
   .doc-renderer pre,
   .tableWrapper {
