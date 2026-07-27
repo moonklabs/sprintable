@@ -68,6 +68,22 @@ describe('문서 코드블럭이 실제로 "굴러갈 수 있다" — .ProseMirr
   });
 });
 
+describe('실제 스크롤 요소(shiki가 만드는 <pre> 자신)에도 scrollbar-visible 예외가 있다 (#2214 후속, 라이브 실측 발견)', () => {
+  // 라이브 실측(2026-07-27): 바깥 `.scrollbar-visible` wrapper div가 아니라 그 안의
+  // `<pre class="shiki ...">` 자신이 실제로 scrollLeft가 움직이는 요소였다(shiki 산출물 자체에
+  // overflow-x:auto가 붙어 내용이 pre 안에서 스스로 스크롤되고 바깥 wrapper의 scrollWidth에는
+  // 반영 안 됨 — wrapper는 scrollWidth===clientWidth로 남는다). 그 pre 자신에 scrollbar-width
+  // 예외가 없으면 "굴러가긴 하는데 스크롤바만 안 보이는" 반쪽 상태가 된다.
+  it('.ProseMirror .scrollbar-visible pre에 scrollbar-width:thin 예외가 있다', () => {
+    expect(css).toMatch(/\.ProseMirror \.scrollbar-visible pre\s*\{[^}]*scrollbar-width:\s*thin/);
+  });
+
+  it('webkit 스크롤바 규칙(track·thumb·hover)도 같은 selector로 붙어 있다', () => {
+    expect(css).toMatch(/\.ProseMirror \.scrollbar-visible pre::-webkit-scrollbar\s*\{[^}]*display:\s*block/);
+    expect(css).toMatch(/\.ProseMirror \.scrollbar-visible pre::-webkit-scrollbar-thumb\s*\{/);
+  });
+});
+
 describe('코드블럭/표 wrapper가 scrollbar-visible을 잃지 않았다 (#2165)', () => {
   const files = [
     'docs/extensions/code-block-copy.tsx',

@@ -537,6 +537,24 @@
     overflow-wrap: normal;
   }
 
+  /* story #2214 후속(라이브 실측으로 발견, 2026-07-27) — 실제로 스크롤되는 요소는
+     `.scrollbar-visible` 래퍼 div가 아니라 그 안의 `<pre class="shiki ...">` 그 자신이었다.
+     shiki가 생성하는 pre 자체에 이미 `overflow-x: auto`가 붙어 있어(라이브러리 산출물), 내용이
+     그 pre 안에서 스스로 스크롤되며 바깥 wrapper의 scrollWidth에는 반영되지 않는다(wrapper는
+     scrollWidth===clientWidth로 남는다 — 실측 확認). 그런데 위 `.scrollbar-visible,
+     .doc-renderer pre, .tableWrapper` 예외 목록은 그 **바깥 wrapper**에만 scrollbar-width:thin을
+     주고 있어서, 실제로 스크롤되는 이 pre 자신은 여전히 전역 `* { scrollbar-width: none }`을
+     그대로 물려받는다 — scrollLeft는 실제로 움직이는데(굴러가는 것 자체는 성립) 스크롤바만
+     안 보이는 반쪽 상태였다. `.ProseMirror .scrollbar-visible pre`에도 같은 예외를 준다. */
+  .ProseMirror .scrollbar-visible pre {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+  .ProseMirror .scrollbar-visible pre::-webkit-scrollbar { display: block; width: 6px; height: 6px; }
+  .ProseMirror .scrollbar-visible pre::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+  .ProseMirror .scrollbar-visible pre::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+  .ProseMirror .scrollbar-visible pre::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
   .scrollbar-visible,
   .doc-renderer pre,
   .tableWrapper {
