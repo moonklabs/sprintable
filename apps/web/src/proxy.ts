@@ -262,7 +262,19 @@ async function refreshMatchesActive(request: NextRequest, accessToken: string): 
   return true;
 }
 
-async function refreshWithToken(rt: string): Promise<{ accessToken: string; refreshToken: string } | null> {
+// #2124 ㉯(선생님 실측·오르테가군 판정 2026-07-27): 지우는 것은 "이 토큰은 진짜 죽었다"(백엔드가
+// 명시 401로 거부)일 때만이어야 한다 — 5xx/네트워크에러/타임아웃은 "확인 못 했다"이지 "죽었다"가
+// 아니다. 예전엔 `!res.ok`(401도 429도 503도 전부 동일) + `catch`(네트워크에러도 동일)를 구분
+// 없이 전부 "실패"로 뭉쳐 clearAuthCookies로 이어졌다 — 일시 장애 한 번에 멀쩡한 30일 세션이
+// 영구 삭제되는 근본(㉢, dev vitest로 트리거 도달 실증·proxy.test.ts). status==401만 "invalid"
+// (backend가 실제로 검사해 거부한 것 — TOKEN_REVOKED/INVALID_TOKEN/USER_NOT_FOUND 전부 401로
+// 통일돼 있음, backend/app/routers/auth.py 실측)로 좁히고 나머지는 전부 "transient"로 분리한다.
+type RefreshOutcome =
+  | { kind: 'ok'; accessToken: string; refreshToken: string }
+  | { kind: 'invalid' } // 백엔드가 401로 명시 거부 — 이 토큰은 진짜 죽음, 지워도 안전
+  | { kind: 'transient' }; // 5xx·429·네트워크에러·타임아웃·응답 파싱 실패 — 죽었는지 모름, 지우면 안 됨
+
+async function refreshWithToken(rt: string): Promise<RefreshOutcome> {
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
   try {
     const res = await fetch(`${fastapiUrl}/api/v2/auth/refresh`, {
@@ -270,39 +282,49 @@ async function refreshWithToken(rt: string): Promise<{ accessToken: string; refr
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: rt }),
     });
-    if (!res.ok) return null;
+    if (res.status === 401) return { kind: 'invalid' };
+    if (!res.ok) return { kind: 'transient' };
     const json = await res.json() as { data?: { access_token: string; refresh_token: string } };
     const tokens = json.data;
-    if (!tokens?.access_token || !tokens?.refresh_token) return null;
-    return { accessToken: tokens.access_token, refreshToken: tokens.refresh_token };
+    // 200인데 payload가 기대 shape가 아닌 것도 "토큰이 죽었다"는 신호가 아니다(예: 응답 파싱
+    // 실패·백엔드 계약 드리프트) — transient로 취급해 재시도 여지를 남긴다.
+    if (!tokens?.access_token || !tokens?.refresh_token) return { kind: 'transient' };
+    return { kind: 'ok', accessToken: tokens.access_token, refreshToken: tokens.refresh_token };
   } catch {
-    return null;
+    return { kind: 'transient' };
   }
 }
 
-async function tryRefreshViaFastapi(request: NextRequest): Promise<{ accessToken: string; refreshToken: string } | null> {
+async function tryRefreshViaFastapi(request: NextRequest): Promise<RefreshOutcome> {
   const rt = request.cookies.get(SP_RT_COOKIE)?.value;
+  let primaryOutcome: RefreshOutcome = { kind: 'invalid' }; // sp_rt 자체가 없음 = 시도할 것도 없음
   if (rt) {
-    const result = await refreshWithToken(rt);
-    if (result) return result;
+    primaryOutcome = await refreshWithToken(rt);
+    if (primaryOutcome.kind === 'ok') return primaryOutcome;
   }
 
-  // #2124(선생님 실측 2026-07-27): 멀티계정 switch/add-account 後 clearAuthCookies가 sp_at/sp_rt만
-  // 지우고 금고(sp_acct_rt_*)·sp_active_account는 안 건드리는 결함(㉢, 별도 fix 대상)과 맞물려,
-  // sp_rt가 없거나 죽어도 **활성 계정의 금고 토큰은 여전히 살아있는** 상태가 남는다 — 그런데 여기가
-  // 지금까지 그 금고의 존재 자체를 몰랐다(proxy.ts 전체 grep 0건이었던 자리). "매일 방문해도 늘
-  // 로그아웃"의 근본 — 이미 그 상태에 빠진 사용자를 여기서 꺼낸다.
+  // #2124 ㉮(선생님 실측 2026-07-27): 멀티계정 switch/add-account 後 clearAuthCookies가 sp_at/sp_rt만
+  // 지우고 금고(sp_acct_rt_*)·sp_active_account는 안 건드리는 ㉢과 맞물려, sp_rt가 없거나 죽어도
+  // **활성 계정의 금고 토큰은 여전히 살아있는** 상태가 남는다 — 그런데 여기가 지금까지 그 금고의
+  // 존재 자체를 몰랐다(proxy.ts 전체 grep 0건이었던 자리). "매일 방문해도 늘 로그아웃"의 근본 —
+  // 이미 그 상태에 빠진 사용자를 여기서 꺼낸다.
   // ⛔경계(오르테가군 지시, 표면 확장 금지):
   //   · sp_active_account가 가리키는 **그 계정의** 금고 항목만 본다(금고에 있는 아무 토큰이나 X).
   //   · 쿠키 값을 그대로 신뢰하지 않는다 — refreshWithToken이 백엔드 검증을 그대로 거친다(추가
   //     신뢰 경계 확장 0, 기존 rotate 경로 재사용).
   //   · sp_active_account가 가리키는 계정이 금고에 없으면 조용히 다른 걸로 넘어가지 않고 기존
-  //     null 그대로(폴백의 폴백 없음).
+  //     동작(폴백의 폴백 없음 — primaryOutcome 그대로 반환).
   const activeAccountId = request.cookies.get(ACTIVE_ACCOUNT_COOKIE)?.value;
-  if (!activeAccountId) return null;
+  if (!activeAccountId) return primaryOutcome;
   const vaultRt = request.cookies.get(`${VAULT_PREFIX}${activeAccountId}`)?.value;
-  if (!vaultRt) return null;
-  return refreshWithToken(vaultRt);
+  if (!vaultRt) return primaryOutcome;
+  const vaultOutcome = await refreshWithToken(vaultRt);
+  if (vaultOutcome.kind === 'ok') return vaultOutcome;
+  // 둘 다 실패 — 어느 한쪽이라도 transient(확인 못 함)면 안전 쪽(transient)으로 합산한다.
+  // 예: sp_rt는 진짜 죽었지만(invalid) 금고 시도가 마침 네트워크 에러(transient)면, 그 금고
+  // 토큰이 사실 살아있었을 수도 있으므로 지우면 안 된다 — "덜 확信한 쪽"을 최종 판정으로.
+  if (primaryOutcome.kind === 'transient' || vaultOutcome.kind === 'transient') return { kind: 'transient' };
+  return { kind: 'invalid' };
 }
 
 // story cd10e123(P0) 근본 수정 — AC1(551bbbee)이 만든 single-flight in-memory dedupe(아래 옛
@@ -369,13 +391,15 @@ function loginRedirect(request: NextRequest): NextResponse {
   return NextResponse.redirect(url);
 }
 
-// story e5225c0a(P0): refresh 시도 후 세션을 못 살렸을 때의 공통 응답. `refreshFailed`=true
-// (tryRefreshViaFastapi 자체가 null — BE 401/rotation 실패)일 때만 clearAuthCookies 호출.
-// refreshMatchesActive=false(RC2, superseded 계정의 늦은 refresh)는 refresh 자체는 성공이므로
-// 쿠키를 그대로 둔다 — 두 실패 사유를 여기서 한 번만 구분해 양쪽 호출부의 분기를 통일한다.
-function handleUnauthenticated(request: NextRequest, isApiPath: boolean, refreshFailed: boolean): NextResponse {
+// story e5225c0a(P0)+#2124 ㉯: refresh 시도 후 세션을 못 살렸을 때의 공통 응답. `clearCookies`=true
+// (RefreshOutcome.kind === 'invalid' — 백엔드가 401로 명시 거부한 경우만)일 때만 clearAuthCookies
+// 호출. 'transient'(5xx·네트워크에러 등, 죽었는지 확인 못 함)는 쿠키를 보존해 다음 방문에 다시
+// 시도할 여지를 남긴다(㉢ 수정 — 일시 장애로 멀쩡한 세션이 영구 삭제되던 것). refreshMatchesActive
+// =false(RC2, superseded 계정의 늦은 refresh)는 refresh 자체는 성공이므로 쿠키를 그대로 둔다 —
+// 이 세 실패 사유를 여기서 한 번만 구분해 양쪽 호출부의 분기를 통일한다.
+function handleUnauthenticated(request: NextRequest, isApiPath: boolean, clearCookies: boolean): NextResponse {
   const response = isApiPath ? NextResponse.next({ request }) : loginRedirect(request);
-  if (refreshFailed) clearAuthCookies(response);
+  if (clearCookies) clearAuthCookies(response);
   return response;
 }
 
@@ -449,10 +473,12 @@ async function resolveAndRespond(
   }
 
   if (claims.exp !== undefined && claims.exp - now < 300) {
-    const tokens = await tryRefreshViaFastapi(request);
-    // RC2: stale refresh(다른 계정)면 적용 안 함 — 현 active 세션 유지.
-    if (tokens && (await refreshMatchesActive(request, tokens.accessToken))) {
-      applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
+    const outcome = await tryRefreshViaFastapi(request);
+    // RC2: stale refresh(다른 계정)면 적용 안 함 — 현 active 세션 유지. transient/invalid는
+    // 이 프로액티브 갱신에서 아무것도 안 함(기존 access token이 아직 유효해 이 요청 자체는
+    // 문제 없음 — 실패해도 clearAuthCookies 대상 아님, 다음 요청이 다시 시도).
+    if (outcome.kind === 'ok' && (await refreshMatchesActive(request, outcome.accessToken))) {
+      applyTokenCookies(response, outcome.accessToken, outcome.refreshToken);
     }
   }
 
@@ -491,26 +517,26 @@ export async function proxy(request: NextRequest) {
   const accessToken = request.cookies.get(SP_AT_COOKIE)?.value;
 
   if (!accessToken) {
-    const tokens = await tryRefreshViaFastapi(request);
-    if (!tokens) return handleUnauthenticated(request, isApiPath, true);
+    const outcome = await tryRefreshViaFastapi(request);
+    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid');
     // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
-    if (!(await refreshMatchesActive(request, tokens.accessToken))) {
+    if (!(await refreshMatchesActive(request, outcome.accessToken))) {
       return handleUnauthenticated(request, isApiPath, false);
     }
-    return respondWithRefreshedToken(request, pathname, tokens, isApiPath);
+    return respondWithRefreshedToken(request, pathname, outcome, isApiPath);
   }
 
   const claims = await verifyAccessToken(accessToken);
 
   if (!claims) {
     // access token invalid/expired — try refresh
-    const tokens = await tryRefreshViaFastapi(request);
-    if (!tokens) return handleUnauthenticated(request, isApiPath, true);
+    const outcome = await tryRefreshViaFastapi(request);
+    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid');
     // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
-    if (!(await refreshMatchesActive(request, tokens.accessToken))) {
+    if (!(await refreshMatchesActive(request, outcome.accessToken))) {
       return handleUnauthenticated(request, isApiPath, false);
     }
-    return respondWithRefreshedToken(request, pathname, tokens, isApiPath);
+    return respondWithRefreshedToken(request, pathname, outcome, isApiPath);
   }
 
   return resolveAndRespond(request, pathname, accessToken, claims, request.headers);
