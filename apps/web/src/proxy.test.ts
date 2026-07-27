@@ -241,6 +241,54 @@ describe('proxy', () => {
     const response = await middleware(req);
     expect(response.status).toBe(403);
   });
+
+  // story #2212 근본원인 — curl로 라이브 재현해 확定한 결함: sp_at이 없거나 무효라 refresh를
+  // 타는 두 분기가, 새 토큰을 받고도 원 pathname을 그냥 NextResponse.next()로 통과시켰다.
+  // bare 레거시 링크(/board 등)는 그 pathname에 대응하는 페이지가 없어(오직 /{ws}/{proj}/board만
+  // 존재) Next 라우터가 즉시 404 — 토큰 자체는 정상으로 새로 발급됐는데도(다음 요청은 정상 301)
+  // 이 요청은 구제 안 됐다("재로그인 직후 첫 진입만 404, 재진입은 정상"과 정확히 일치). 이 두
+  // 테스트가 그 회귀가드 — refresh 성공 후에도 legacy-resource-redirect가 반드시 실행돼야 한다.
+  it('sp_at이 무효(만료 등)라 refresh를 타도, 그 새 토큰으로 legacy 리소스 경로가 여전히 301 해소된다(story #2212)', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const newAt = await makeAccessToken({ exp: now + 900, orgId: 'org-1', projectId: 'proj-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/auth/refresh')) {
+        return Promise.resolve({ ok: true, json: async () => ({ data: { access_token: newAt, refresh_token: 'new-rt' } }) });
+      }
+      if (url.includes('/api/v2/organizations/org-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      }
+      if (url.includes('/api/v2/projects/proj-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    // sp_at은 서명 자체가 무효(claims 검증 실패) — verifyAccessToken이 null을 반환하는 경로.
+    const response = await middleware(makeRequest('/board', { sp_at: 'not.a.valid.jwt', sp_rt: 'old-rt' }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/board');
+    expect(response.headers.get('set-cookie')).toContain('sp_at=');
+  });
+
+  it('sp_at 쿠키 자체가 없어(만료 후 삭제 등) refresh를 타도, 그 새 토큰으로 legacy 리소스 경로가 여전히 301 해소된다(story #2212)', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const newAt = await makeAccessToken({ exp: now + 900, orgId: 'org-1', projectId: 'proj-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/auth/refresh')) {
+        return Promise.resolve({ ok: true, json: async () => ({ data: { access_token: newAt, refresh_token: 'new-rt' } }) });
+      }
+      if (url.includes('/api/v2/organizations/org-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      }
+      if (url.includes('/api/v2/projects/proj-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const response = await middleware(makeRequest('/board', { sp_rt: 'valid-rt' }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/board');
+  });
 });
 
 describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
@@ -407,20 +455,36 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs');
   });
 
-  it('current-project 쿠키 없으면 개입 없이 통과 — Next 자체 404로 정직하게 실패(과잉확장 아님)', async () => {
+  // story #2212 — 이 두 케이스는 예전엔 "개입 없이 통과"(→ Next 자체 404)가 정답이라고
+  // 봤으나, 그 자체가 dead-end 결함이었다(AC3/AC4). 프로젝트를 못 정했거나(쿠키+JWT 둘 다 없음)
+  // BE 해소 자체가 실패해도, org는 확定돼 있으니 org-briefing(프로젝트 불필요 페이지)으로
+  // next=원 목적지를 들고 보낸다 — "고르면 여기로 돌아온다"(use-unified-switcher.ts가 소비).
+  it('current-project 쿠키도 JWT project_id도 없으면 404 대신 /org-briefing?next=<원경로+되돌이방지마커>로 302(story #2212)', async () => {
     const token = await makeAccessToken({ orgId: 'org-1' });
     const response = await middleware(makeRequest('/docs/my-doc', { sp_at: token }));
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(302);
+    // _prRetry=1 — 프로젝트를 골라도 또 실패하면(아래 되돌이 방지 테스트) 다시 안 튕기기 위한 내부 마커.
+    expect(response.headers.get('location')).toBe('https://app.example.com/org-briefing?next=%2Fdocs%2Fmy-doc%3F_prRetry%3D1');
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('org/project 단건 조회 실패(예: 삭제됨) 시 개입 없이 통과', async () => {
+  it('org/project는 확定됐는데 BE 단건 조회만 실패(예: 삭제됨)해도 404 대신 /org-briefing?next=<원경로+되돌이방지마커>로 302(story #2212)', async () => {
     const token = await makeAccessToken({ orgId: 'org-1' });
     mockFetch.mockResolvedValue({ ok: false, status: 404 });
     const response = await middleware(makeRequest('/docs/my-doc', {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('https://app.example.com/org-briefing?next=%2Fdocs%2Fmy-doc%3F_prRetry%3D1');
+  });
+
+  // story #2212(오르테가 지적, 되돌이 방지) — 프로젝트를 골라 next로 돌아왔는데도(=이 요청 자체가
+  // _prRetry=1을 달고 옴) 여전히 해소가 실패하면, 다시 /org-briefing으로 튕기지 않고 정직하게
+  // 멈춘다(Next 자체 404) — 무한 왕복 대신 "여기서 안 된다"는 신호.
+  it('되돌이 방지 — _prRetry=1을 달고 왔는데도 또 실패하면 다시 org-briefing으로 안 튕기고 개입 없이 통과(404)한다', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest('/docs/my-doc?_prRetry=1', { sp_at: token }));
+    expect(response.status).toBe(200); // 개입 없이 통과 — Next 라우터가 이 pathname에 404를 렌더
   });
 });
 

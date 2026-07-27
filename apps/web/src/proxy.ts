@@ -152,16 +152,62 @@ async function redirectLegacyResourcePath(
   // story #1998: 쿠키 우선(명시 switch-project 결과) — 없으면 JWT app_metadata.project_id로 fallback.
   const projectId = request.cookies.get(CURRENT_PROJECT_COOKIE)?.value
     ?? await getProjectIdFromAccessToken(accessToken);
-  if (!orgId || !projectId) return null;
+  // orgId조차 없으면(토큰 자체가 org_id를 못 실은 예외적 경우) 개입할 근거가 없어 그대로 통과
+  // (Next 자체 404) — verifyAccessToken 통과 후 이론상 가능하나 실사용 재현 없음, story #2212
+  // 스코프 밖(그 경우엔 org조차 모르니 org-briefing으로도 못 보낸다).
+  if (!orgId) return null;
+  // story #2212 — 여기서 그냥 null(→ Next 404)을 주던 것이 결함이었다. "프로젝트를 못 정했다"는
+  // 사고가 아니라 코드 주석에 그대로 선언된 설계였지만("해소 불가면 null"), 그 선택 자체가
+  // dead-end라 처방 대상이다. org는 확定됐으니 org-briefing(프로젝트 불필요 페이지)으로 보내고
+  // 원래 목적지를 ?next=로 보존 — use-unified-switcher.ts의 switchProject/switchOrgAndProject가
+  // 이 next를 읽어 프로젝트 선택 직후 그리로 돌려보낸다("고르면 여기로 돌아온다").
+  // ⛔되돌이 방지(오르테가 지적) — 이미 이 왕복을 한 번 거쳐온 요청(RESOLVE_RETRY_PARAM 존재)이
+  // 또 실패하면 다시 org-briefing으로 튕기지 않는다 — 프로젝트를 골라도 안 되는 것이면 무한
+  // 왕복 대신 정직하게 멈춘다(Next 자체 404).
+  if (!projectId) {
+    if (request.nextUrl.searchParams.has(RESOLVE_RETRY_PARAM)) return null;
+    return redirectToProjectPicker(request, pathname);
+  }
 
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
   const slugs = await resolveLegacyResourcePath(fastapiUrl, orgId, projectId, accessToken);
-  if (!slugs) return null;
+  // org/project는 둘 다 확定됐는데 BE 해소만 실패한 경우(예: 그 project가 삭제/접근철회)도
+  // 같은 안내로 보낸다(AC4: "404가 맞는 경우에도 다음 발이 붙는다") — 단, 이것도 되돌이 방지 적용.
+  if (!slugs) {
+    if (request.nextUrl.searchParams.has(RESOLVE_RETRY_PARAM)) return null;
+    return redirectToProjectPicker(request, pathname);
+  }
 
   const rest = pathname.slice(`/${resourceName}`.length); // '' | '/{sub}' | '/{sub}/{sub2}'
   const url = request.nextUrl.clone();
   url.pathname = `/${slugs.orgSlug}/${slugs.projectSlug}/${resourceName}${rest}`;
+  url.searchParams.delete(RESOLVE_RETRY_PARAM); // 성공 착지 URL에 내부 마커가 새지 않게
   return NextResponse.redirect(url, 301);
+}
+
+// story #2212 — org-briefing 왕복이 한 번 더 실패했을 때 무한 왕복을 막기 위한 내부 마커(오르테가
+// 지적). redirectToProjectPicker가 next 목적지에 심고, redirectLegacyResourcePath가 "이미 한 번
+// 튕겼던 요청인가"를 판별하는 데만 쓴다 — 사용자에게 노출될 일 없는(성공 시 delete) 순수 내부 신호.
+const RESOLVE_RETRY_PARAM = '_prRetry';
+
+// story #2212(오르테가 지적, open-redirect 방어) — next로 실어 보내는 값은 반드시 내부 경로여야
+// 한다. 여기(생성 쪽)의 originalPathname은 항상 request.nextUrl.pathname에서 유도돼 구조적으로
+// 안전하지만, 진짜 위험한 소비 지점은 use-unified-switcher.ts(그쪽은 사용자가 URL로 조작 가능한
+// ?next=를 읽어 router.push한다) — 방어는 그쪽에도 동일하게 있어야 한다(양쪽 다, 한쪽만으론 뚫림).
+function isSafeInternalPath(value: string): boolean {
+  return value.startsWith('/') && !value.startsWith('//') && !value.includes('\\');
+}
+
+function redirectToProjectPicker(request: NextRequest, originalPathname: string): NextResponse {
+  const url = request.nextUrl.clone();
+  url.pathname = '/org-briefing';
+  const targetSearch = new URLSearchParams(request.nextUrl.search);
+  targetSearch.set(RESOLVE_RETRY_PARAM, '1');
+  const targetQuery = targetSearch.toString();
+  const next = originalPathname + (targetQuery ? `?${targetQuery}` : '');
+  url.search = '';
+  if (isSafeInternalPath(next)) url.searchParams.set('next', next);
+  return NextResponse.redirect(url, 302); // 302 — 이 목적지는 계정 상태(현재 프로젝트)에 의존, 영구 아님
 }
 
 /**
@@ -308,65 +354,49 @@ function handleUnauthenticated(request: NextRequest, isApiPath: boolean, refresh
   return response;
 }
 
-export async function proxy(request: NextRequest) {
-  const pathname = request.nextUrl.pathname;
+// story #2212 — 근본원인(curl 재현으로 확定, 2026-07-27): accessToken이 없거나(만료 등) 무효라
+// refresh를 타는 두 분기가, refresh 성공 후 **바로 `NextResponse.next()`로 원 pathname을 그대로
+// 통과**시켰다. bare flat 링크(`/board` 등)는 그 pathname 자체엔 대응하는 페이지가 없어(오직
+// `/{ws}/{proj}/board`만 존재) redirectLegacyResourcePath를 거치지 못한 채 Next 라우터가 즉시
+// 404 — 새로 발급된 토큰은 org_id/project_id 둘 다 정상인데도(다음 요청은 정상 301) 이 요청
+// 자체는 구제되지 않았다. "세션 만료 후 재로그인 직후 첫 진입만 404, 재진입은 정상"이라는 선생님
+// 재현과 정확히 일치(curl: corrupt sp_at+valid sp_rt → 새 토큰 발급되지만 응답은 404 · 그 새
+// 토큰으로 재요청 → 301 정상). 고침: refresh 성공 시에도 그 새 토큰으로 이 요청 자체를
+// resolveAndRespond까지 마저 태운다(API 경로는 라우트 핸들러가 직접 인증하므로 제외 — 기존 그대로).
+async function respondWithRefreshedToken(
+  request: NextRequest,
+  pathname: string,
+  tokens: { accessToken: string; refreshToken: string },
+  isApiPath: boolean,
+): Promise<NextResponse> {
+  const headers = buildRefreshedHeaders(request, tokens);
+  const response = isApiPath
+    ? NextResponse.next({ request: { headers } })
+    : await (async () => {
+        const freshClaims = await verifyAccessToken(tokens.accessToken);
+        return freshClaims
+          ? resolveAndRespond(request, pathname, tokens.accessToken, freshClaims, headers)
+          : NextResponse.next({ request: { headers } });
+      })();
+  applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
+  return response;
+}
 
-  const isPublicPath =
-    PUBLIC_EXACT.includes(pathname) ||
-    PUBLIC_PREFIX.some((prefix) => pathname.startsWith(prefix));
-
-  if (isPublicPath) {
-    return NextResponse.next({ request });
-  }
-
-  // Authenticated API routes — try token refresh but never redirect to /login
-  const isApiPath = pathname.startsWith('/api/');
-
-  // Agent API keys are for MCP/HTTP API only — block UI route access
-  const authHeader = request.headers.get('Authorization');
-  if (!isApiPath && authHeader?.startsWith('Bearer ')) {
-    return new NextResponse(
-      JSON.stringify({ error: { code: 'FORBIDDEN', message: 'Agent API keys cannot access UI routes' } }),
-      { status: 403, headers: { 'Content-Type': 'application/json' } },
-    );
-  }
-
-  const accessToken = request.cookies.get(SP_AT_COOKIE)?.value;
-
-  if (!accessToken) {
-    const tokens = await tryRefreshViaFastapi(request);
-    if (!tokens) return handleUnauthenticated(request, isApiPath, true);
-    // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
-    if (!(await refreshMatchesActive(request, tokens.accessToken))) {
-      return handleUnauthenticated(request, isApiPath, false);
-    }
-    const headers = buildRefreshedHeaders(request, tokens);
-    const response = NextResponse.next({ request: { headers } });
-    applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
-    return response;
-  }
-
-  const claims = await verifyAccessToken(accessToken);
-
-  if (!claims) {
-    // access token invalid/expired — try refresh
-    const tokens = await tryRefreshViaFastapi(request);
-    if (!tokens) return handleUnauthenticated(request, isApiPath, true);
-    // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
-    if (!(await refreshMatchesActive(request, tokens.accessToken))) {
-      return handleUnauthenticated(request, isApiPath, false);
-    }
-    const headers = buildRefreshedHeaders(request, tokens);
-    const response = NextResponse.next({ request: { headers } });
-    applyTokenCookies(response, tokens.accessToken, tokens.refreshToken);
-    return response;
-  }
-
+// story a539c649/8fc51517/#2212 — 유효한 accessToken이 있을 때(원 요청이든, 방금 refresh로
+// 받은 것이든) 실제로 응답을 만드는 본체. 두 호출부(정상 경로·refresh-직후 경로)가 완전히
+// 같은 해소 순서를 타야 #2212 같은 우회가 다시 안 생긴다 — 로직을 여기 하나로 모은다.
+async function resolveAndRespond(
+  request: NextRequest,
+  pathname: string,
+  accessToken: string,
+  claims: { exp?: number },
+  baseHeaders: Headers,
+): Promise<NextResponse> {
   // Proactive refresh if expiring within 5 minutes.
   // AC3: x-pathname 주입 — (authenticated)/layout 이 /me 401 시 next 보존 redirect 에 사용(server component
   // 는 현재 경로를 직접 못 읽음).
   const now = Math.floor(Date.now() / 1000);
-  const fwdHeaders = new Headers(request.headers);
+  const fwdHeaders = new Headers(baseHeaders);
   fwdHeaders.set('x-pathname', pathname + request.nextUrl.search);
 
   // story a539c649(S2 최초·S3 일반화) — 이관 완료된 리소스(MIGRATED_RESOURCES)의 옛 flat
@@ -408,6 +438,57 @@ export async function proxy(request: NextRequest) {
   }
 
   return response;
+}
+
+export async function proxy(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
+  const isPublicPath =
+    PUBLIC_EXACT.includes(pathname) ||
+    PUBLIC_PREFIX.some((prefix) => pathname.startsWith(prefix));
+
+  if (isPublicPath) {
+    return NextResponse.next({ request });
+  }
+
+  // Authenticated API routes — try token refresh but never redirect to /login
+  const isApiPath = pathname.startsWith('/api/');
+
+  // Agent API keys are for MCP/HTTP API only — block UI route access
+  const authHeader = request.headers.get('Authorization');
+  if (!isApiPath && authHeader?.startsWith('Bearer ')) {
+    return new NextResponse(
+      JSON.stringify({ error: { code: 'FORBIDDEN', message: 'Agent API keys cannot access UI routes' } }),
+      { status: 403, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+
+  const accessToken = request.cookies.get(SP_AT_COOKIE)?.value;
+
+  if (!accessToken) {
+    const tokens = await tryRefreshViaFastapi(request);
+    if (!tokens) return handleUnauthenticated(request, isApiPath, true);
+    // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
+    if (!(await refreshMatchesActive(request, tokens.accessToken))) {
+      return handleUnauthenticated(request, isApiPath, false);
+    }
+    return respondWithRefreshedToken(request, pathname, tokens, isApiPath);
+  }
+
+  const claims = await verifyAccessToken(accessToken);
+
+  if (!claims) {
+    // access token invalid/expired — try refresh
+    const tokens = await tryRefreshViaFastapi(request);
+    if (!tokens) return handleUnauthenticated(request, isApiPath, true);
+    // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
+    if (!(await refreshMatchesActive(request, tokens.accessToken))) {
+      return handleUnauthenticated(request, isApiPath, false);
+    }
+    return respondWithRefreshedToken(request, pathname, tokens, isApiPath);
+  }
+
+  return resolveAndRespond(request, pathname, accessToken, claims, request.headers);
 }
 
 type ResolveWiringResult =
