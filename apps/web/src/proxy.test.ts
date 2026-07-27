@@ -75,7 +75,7 @@ describe('proxy', () => {
   it('does not accidentally widen the guard to all of /auth/* — /auth/reset-required stays protected', async () => {
     // 스코프 정확성 회귀가드 — "/auth/native만 열고 /auth/ 전체는 열지 않는다"는 명시 요구를
     // 실제로 지켰는지 확인. /auth/reset-required는 보호 라우트로 남아있어야 함.
-    mockFetch.mockResolvedValue({ ok: false, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
+    mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
     const response = await middleware(makeRequest('/auth/reset-required'));
     expect(response.status).toBe(307);
   });
@@ -111,7 +111,7 @@ describe('proxy', () => {
   });
 
   it('redirects to login when no sp_at cookie and refresh fails', async () => {
-    mockFetch.mockResolvedValue({ ok: false, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
+    mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
     const response = await middleware(makeRequest('/dashboard'));
     expect(response.status).toBe(307);
     // AC3(551bbbee): hard /login 대신 next 보존 + reason 배너 계약. graceful 세션 만료 UX.
@@ -134,7 +134,7 @@ describe('proxy', () => {
   it('clears sp_at/sp_rt cookies on definitive refresh failure — UI path (story e5225c0a P0)', async () => {
     // 산티아고 실측: refresh 실패 시 쿠키를 안 지워 30일 sp_rt 가 401 무한 재생산. 이 테스트는
     // 그 정확한 실패 모드를 재현하고 수정을 고정한다.
-    mockFetch.mockResolvedValue({ ok: false, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
+    mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
     const response = await middleware(makeRequest('/dashboard', { sp_rt: 'stale-rt-ui' }));
     expect(response.status).toBe(307);
     const setCookie = response.headers.get('set-cookie') ?? '';
@@ -143,7 +143,7 @@ describe('proxy', () => {
   });
 
   it('clears sp_at/sp_rt cookies on definitive refresh failure — API path (story e5225c0a P0)', async () => {
-    mockFetch.mockResolvedValue({ ok: false, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
+    mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
     const response = await middleware(makeRequest('/api/notifications', { sp_rt: 'stale-rt-api' }));
     expect(response.status).toBe(200); // handler 가 401 반환하도록 통과
     const setCookie = response.headers.get('set-cookie') ?? '';
@@ -159,7 +159,7 @@ describe('proxy', () => {
     process.env['NEXT_PUBLIC_APP_URL'] = 'https://app.sprintable.ai';
     process.env['NEXT_PUBLIC_COOKIE_DOMAIN'] = 'app.sprintable.ai';
     try {
-      mockFetch.mockResolvedValue({ ok: false, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
+      mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
       const response = await middleware(makeRequest('/dashboard', { sp_rt: 'stale-rt-domain' }));
       expect(response.status).toBe(307);
       const setCookie = response.headers.get('set-cookie') ?? '';
@@ -174,23 +174,32 @@ describe('proxy', () => {
     }
   });
 
-  // #2124(오르테가군·선생님 실측 2026-07-27): "매일 방문해도 늘 로그아웃" 인과사슬의 «방아쇠» 확認.
-  // tryRefreshViaFastapi()는 `if (!res.ok) return null`/`catch { return null }` — 진짜 401
-  // (TOKEN_REVOKED)과 일시 장애(429/5xx/네트워크에러/타임아웃)를 구분하지 않는다. 둘 다 동일하게
-  // refreshFailed=true → clearAuthCookies() 호출로 이어진다. 아래 두 테스트는 그 도달 경로가
-  // 실제로 존재함을(status를 401이 아닌 값으로 명시·네트워크 throw로) 실증한다.
-  it('clears sp_at/sp_rt even when backend returns a transient 503(rate-limit이나 콜드스타트 등) — NOT a genuine 401(story #2124 트리거 확認)', async () => {
+  // #2124 ㉯(오르테가군·선생님 실측 2026-07-27) — 기대값 뒤집힘(오르테가군 지시: 새로 짜지 말고
+  // 그 자리 뒤집는 것 — "결함을 증명하는 테스트"에서 "결함이 돌아오면 잡는 가드"로). 예전엔
+  // status를 안 가리고(401도 429도 5xx도 네트워크에러도) 전부 clearAuthCookies로 이어졌다 —
+  // 이제 status===401(진짜 TOKEN_REVOKED)만 지우고, 나머지(transient — 죽었는지 확인 못 함)는
+  // 쿠키를 보존해 다음 방문에 재시도할 여지를 남긴다.
+  it('일시 장애(503 — rate-limit이나 콜드스타트 등)에서는 sp_at/sp_rt를 지우지 않는다 — 진짜 401이 아니므로(story #2124 ㉯)', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: { code: 'SERVICE_UNAVAILABLE' } }) });
     const response = await middleware(makeRequest('/dashboard', { sp_rt: 'still-valid-rt-503' }));
-    expect(response.status).toBe(307);
+    expect(response.status).toBe(307); // 이 요청 자체는 여전히 미인증 처리(로그인으로) — 다만 쿠키는 살아남는다
     const setCookie = response.headers.get('set-cookie') ?? '';
-    expect(setCookie).toContain('sp_rt=;');
-    expect(setCookie).toContain('sp_at=;');
+    expect(setCookie).not.toContain('sp_rt=;');
+    expect(setCookie).not.toContain('sp_at=;');
   });
 
-  it('clears sp_at/sp_rt on a network-level throw(fetch reject — 타임아웃/DNS 등) — 토큰 자체는 무관(story #2124 트리거 확認)', async () => {
+  it('네트워크 레벨 throw(fetch reject — 타임아웃/DNS 등)에서도 sp_at/sp_rt를 지우지 않는다 — 토큰 자체는 무관하므로(story #2124 ㉯)', async () => {
     mockFetch.mockRejectedValue(new Error('fetch failed: network error'));
     const response = await middleware(makeRequest('/dashboard', { sp_rt: 'still-valid-rt-network-error' }));
+    expect(response.status).toBe(307);
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).not.toContain('sp_rt=;');
+    expect(setCookie).not.toContain('sp_at=;');
+  });
+
+  it('진짜 401(TOKEN_REVOKED)일 때는 여전히 sp_at/sp_rt를 지운다 — ㉯가 clearAuthCookies를 아예 없앤 게 아니라 조건만 좁힌 것임을 확認(story #2124 ㉯ 회귀가드)', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
+    const response = await middleware(makeRequest('/dashboard', { sp_rt: 'genuinely-dead-rt' }));
     expect(response.status).toBe(307);
     const setCookie = response.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('sp_rt=;');
