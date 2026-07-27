@@ -351,10 +351,14 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   const [sprintStoriesHasMore, setSprintStoriesHasMore] = useState(false);
   const [sprintStoriesNextCursor, setSprintStoriesNextCursor] = useState<string | null>(null);
   const [sprintStoriesLoadingMore, setSprintStoriesLoadingMore] = useState(false);
+  // story #2190 후속 — loadMore가 실패해도(주로 커서 인코딩 오류) 조용히 아무 일도 안 일어난
+  // 것처럼 보이던 자리. 실패는 실패로 보여야 한다(오르테가군 지적).
+  const [sprintStoriesLoadMoreError, setSprintStoriesLoadMoreError] = useState(false);
   const [backlogStories, setBacklogStories] = useState<Story[]>([]);
   const [backlogHasMore, setBacklogHasMore] = useState(false);
   const [backlogNextCursor, setBacklogNextCursor] = useState<string | null>(null);
   const [backlogLoadingMore, setBacklogLoadingMore] = useState(false);
+  const [backlogLoadMoreError, setBacklogLoadMoreError] = useState(false);
   const [loadingStories, setLoadingStories] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [activating, setActivating] = useState(false);
@@ -440,14 +444,21 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   const loadMoreSprintStories = useCallback(async () => {
     if (!selected || !sprintStoriesNextCursor || sprintStoriesLoadingMore) return;
     setSprintStoriesLoadingMore(true);
+    setSprintStoriesLoadMoreError(false);
     try {
-      const res = await fetch(`/api/stories?project_id=${projectId}&sprint_id=${selected.id}&limit=20&cursor=${sprintStoriesNextCursor}`);
+      // story #2190 후속 — cursor는 ISO datetime(+00:00 포함)이라 인코딩 없이 템플릿에 넣으면
+      // 쿼리스트링에서 '+'가 공백으로 디코드돼 BE가 파싱 실패한다(500). encodeURIComponent 필수.
+      const res = await fetch(`/api/stories?project_id=${projectId}&sprint_id=${selected.id}&limit=20&cursor=${encodeURIComponent(sprintStoriesNextCursor)}`);
       if (res.ok) {
         const json = await res.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
         setSprintStories((prev) => [...prev, ...(json.data ?? [])]);
         setSprintStoriesHasMore(json.meta?.hasMore ?? false);
         setSprintStoriesNextCursor(json.meta?.nextCursor ?? null);
+      } else {
+        setSprintStoriesLoadMoreError(true);
       }
+    } catch {
+      setSprintStoriesLoadMoreError(true);
     } finally {
       setSprintStoriesLoadingMore(false);
     }
@@ -456,14 +467,21 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   const loadMoreBacklog = useCallback(async () => {
     if (!backlogNextCursor || backlogLoadingMore) return;
     setBacklogLoadingMore(true);
+    setBacklogLoadMoreError(false);
     try {
-      const res = await fetch(`/api/stories/backlog?project_id=${projectId}&limit=20&cursor=${backlogNextCursor}`);
+      // story #2190 후속 — 위 loadMoreSprintStories와 동일 결함(같은 파일, 같은 원시 템플릿
+      // 보간). encodeURIComponent로 cursor의 '+00:00'이 공백으로 깨지는 것을 막는다.
+      const res = await fetch(`/api/stories/backlog?project_id=${projectId}&limit=20&cursor=${encodeURIComponent(backlogNextCursor)}`);
       if (res.ok) {
         const json = await res.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
         setBacklogStories((prev) => [...prev, ...(json.data ?? [])]);
         setBacklogHasMore(json.meta?.hasMore ?? false);
         setBacklogNextCursor(json.meta?.nextCursor ?? null);
+      } else {
+        setBacklogLoadMoreError(true);
       }
+    } catch {
+      setBacklogLoadMoreError(true);
     } finally {
       setBacklogLoadingMore(false);
     }
@@ -895,6 +913,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                 {sprintStoriesLoadingMore ? tc('loading') : tc('loadMore')}
               </Button>
             )}
+            {sprintStoriesLoadMoreError ? (
+              <p className="mt-1 text-xs text-destructive" role="alert">{t('loadMoreError')}</p>
+            ) : null}
           </>
         )}
       </div>
@@ -928,6 +949,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
               {backlogLoadingMore ? tc('loading') : tc('loadMore')}
             </Button>
           )}
+          {backlogLoadMoreError ? (
+            <p className="text-xs text-destructive" role="alert">{t('loadMoreError')}</p>
+          ) : null}
         </div>
       ) : null}
     </div>
