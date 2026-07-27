@@ -3,7 +3,7 @@ import { DocsService } from '@/services/docs';
 import { handleApiError } from '@/lib/api-error';
 import { getAuthContext } from '@/lib/auth-helpers';
 import { apiSuccess, apiError, ApiErrors } from '@/lib/api-response';
-import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
+import { parseCursorPageInput } from '@/lib/pagination';
 import { checkResourceLimit } from '@/lib/check-feature';
 import { createDocRepository } from '@/lib/storage/factory';
 
@@ -21,13 +21,11 @@ export async function GET(request: Request) {
     const slug = searchParams.get('slug');
     if (slug) return apiSuccess(await service.getDoc(projectId, slug));
 
-    if (searchParams.get('view') === 'tree') {
-      return apiSuccess(await service.getTree(projectId), {
-        mode: 'tree',
-        exception: 'hierarchy_preserving_tree_browse',
-      });
-    }
-
+    // story #2191(#2231 규약 A) — "view=tree" 전용 무커서 경로를 소거했다. BE 라우터는
+    // parent_id 유무로만 tree/list를 가르는데 이 route는 project_id만 보내 애초에 항상
+    // 일반 list() 분기로 떨어지고 있었다("tree 분기"는 실재하지 않았다) — 사이드바 문서
+    // 트리(기본 진입)도 태그 필터와 완전히 같은 커서 경로를 탄다. limit='20' 죽은
+    // 파라미터도 여기서 함께 정리(BE가 이제 실제로 cursor/limit을 받는다).
     const pageInput = parseCursorPageInput({
       limit: searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined,
       cursor: searchParams.get('cursor'),
@@ -35,12 +33,13 @@ export async function GET(request: Request) {
     const query = searchParams.get('q');
     const tagsParam = searchParams.get('tags');
     const tags = tagsParam ? tagsParam.split(',').map((t) => t.trim()).filter(Boolean) : undefined;
-    const rows = query
+    const result = query
       ? await service.search(projectId, query, { ...pageInput, tags })
       : await service.list(projectId, { ...pageInput, tags });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { page, meta } = buildCursorPageMeta(rows as any[], pageInput.limit, 'updated_at');
-    return apiSuccess(page, meta);
+    // ⛔BE가 has_more/next_cursor를 직접 계산해 낸다(#2540) — FE는 그 값을 그대로 믿는다.
+    // buildCursorPageMeta로 재추론하지 않는다(재추론은 오늘 여러 번 확認한 "같은 것을
+    // 두 곳에서 계산하는" 병의 근원).
+    return apiSuccess(result.items, { hasMore: result.hasMore, nextCursor: result.nextCursor });
   } catch (err: unknown) { return handleApiError(err); }
 }
 

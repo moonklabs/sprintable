@@ -156,9 +156,11 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   const fetchTree = useCallback(async (tags?: string[], cursor?: string | null) => {
     if (!projectId) return;
     try {
+      // story #2191 — "view=tree"는 죽은 파라미터였다(/api/docs가 그 값을 아예 안 읽어
+      // 항상 무커서 일반 목록 분기로 떨어졌다). #2540 이후 BE/FE 둘 다 커서를 실제로
+      // 지원하므로 이 파라미터를 지운다 — tags 유무와 무관하게 같은 커서 경로를 탄다.
       const fetchParams = new URLSearchParams({ project_id: projectId, limit: '20' });
       if (tags?.length) fetchParams.set('tags', tags.join(','));
-      else fetchParams.set('view', 'tree');
       if (cursor) fetchParams.set('cursor', cursor);
       const res = await fetch(`/api/docs?${fetchParams.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch tree');
