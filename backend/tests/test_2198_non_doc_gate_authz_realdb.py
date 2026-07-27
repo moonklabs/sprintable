@@ -221,3 +221,60 @@ async def test_transition_doc_approval_gate_still_unaffected():
         assert resp.status == "approved"  # doc_approval 경로는 #2198 변경으로 인한 영향 0.
     finally:
         await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_transition_artifact_canonicalize_gate_human_only_not_project_owner_required():
+    """PO 판정(2026-07-27, CI 회귀로 갈림): artifact_canonicalize 는 rule B(project owner/admin)
+    가 아니라 휴먼 전용(E-CANVAS C4-S8 설계)이다 — MEMBER_USER(project_access grant 자체가
+    없는, merge 게이트라면 위 테스트에서 403 나는 바로 그 사용자)로도 승인이 통과해야 한다.
+    이 테스트가 없으면 다음 사람이 #2198 의 rule B 를 "전 타입 균일"로 되돌려 이 회귀를
+    재현할 수 있다 — _non_doc_can_approve 표를 직접 겨냥해 고정."""
+    from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            gate_id_holder = {}
+            for sql in [
+                f"DELETE FROM gate WHERE org_id='{ORG}'",
+                f"DELETE FROM visual_artifacts WHERE org_id='{ORG}'",
+                f"DELETE FROM project_access WHERE project_id='{PROJ_A}'",
+                f"DELETE FROM org_members WHERE org_id='{ORG}'",
+                f"DELETE FROM stories WHERE org_id='{ORG}'",
+                f"DELETE FROM projects WHERE org_id='{ORG}'",
+                f"DELETE FROM users WHERE id IN ('{OWNER_USER}','{MEMBER_USER}')",
+                f"DELETE FROM organizations WHERE id='{ORG}'",
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','D2198','d2198-org3','free')",
+                "INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,"
+                f"login_fail_count,totp_enabled,totp_fail_count) VALUES "
+                f"('{MEMBER_USER}','member3@d2198.test','x','Member',true,true,0,false,0)",
+                # org-level role='member'(owner/admin 아님) + PROJ_A 에 project_access grant 자체 없음
+                # — merge 게이트였다면 위 test_transition_non_doc_gate_forbidden... 과 동일하게 403 날 사용자.
+                f"INSERT INTO org_members (id,org_id,user_id,role) VALUES ('{MEMBER_OM}','{ORG}','{MEMBER_USER}','member')",
+                f"INSERT INTO projects (id,org_id,name,slug) VALUES ('{PROJ_A}','{ORG}','A','proj-a4')",
+            ]:
+                await s.execute(text(sql))
+            from app.models.visual_artifact import VisualArtifact
+            artifact = VisualArtifact(
+                id=uuid.uuid4(), org_id=ORG, project_id=PROJ_A, title="Canon",
+                source="created", latest_version_number=1,
+            )
+            s.add(artifact)
+            await s.flush()
+            from app.models.gate import Gate
+            gate = Gate(
+                id=uuid.uuid4(), org_id=ORG, work_item_id=artifact.id, work_item_type="visual_artifact",
+                gate_type="artifact_canonicalize", status="pending",
+                neutral_facts={"version_number": 1, "requested_by_member_id": str(uuid.uuid4())},
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id_holder["id"] = gate.id
+        async with Session() as s:
+            resp = await transition_gate_endpoint(
+                id=gate_id_holder["id"], body=GateTransitionRequest(status="approved", note="정본화 승인"),
+                background_tasks=BackgroundTasks(), session=s, org_id=ORG, auth=_auth(MEMBER_USER),
+            )
+        assert resp.status == "approved"
+    finally:
+        await eng.dispose()
