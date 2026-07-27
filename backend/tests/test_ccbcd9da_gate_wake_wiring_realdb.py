@@ -165,7 +165,12 @@ async def test_transition_gate_endpoint_wakes_after_commit(monkeypatch):
             org_id=seeded["org"],
         )
         async with Session() as s2:
+            # #2198: 이 게이트는 work_item_type="doc" 이지만 gate_type="custom_review"(≠doc_approval)
+            # 라 non-doc 인가 분기(rule B)를 탄다 — approver 가 실 project_access/org_members grant
+            # 없이 만들어진 임의 ResolvedMember 라 rule B 를 그대로 두면 403(이 파일의 관심사인
+            # wake 배선과 무관). patch 로 우회 — project-role 축은 별도 realdb 테스트가 커버.
             with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=approver)), \
+                 patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)), \
                  patch.object(gates_mod, "wake_agent", _fake_wake_agent), \
                  patch("app.services.conversation_webhook.deliver_injected_event_webhook", _fake_deliver):
                 bg = BackgroundTasks()

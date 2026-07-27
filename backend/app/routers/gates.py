@@ -248,6 +248,38 @@ async def _non_doc_gate_approvable(
     return await is_org_owner_or_admin(session, user_id, org_id)
 
 
+# story #2198(까심 QA 적출·오르테가 PO 판정, 2026-07-27): non-doc gate_type 별 승인 자격 규칙 —
+# 이 표 하나가 list_gates can_approve·get_gate_endpoint can_approve·transition_gate_endpoint
+# 인가 **셋의 유일한 소스**다. 분기를 소비처마다 흩으면 오늘 고치는 그 병("타입마다 제각각
+# 규칙이 따로 논다")을 새로 심는 것이라 여기 한 자리로 고정한다. 새 gate_type 추가 시 여기부터
+# 볼 것.
+#
+# ⚠️호출 전제: caller 의 human 여부는 **각 소비처가 먼저 확認**한다(이 함수는 WHO=role/type 축만
+# 본다·human 축은 위에 있음) — transition_gate_endpoint 의 not-human 403(위)·list_gates/
+# get_gate_endpoint 의 `resolved.type == "human"` 게이트가 그 전제를 이미 보장한다.
+async def _non_doc_can_approve(
+    session: AsyncSession,
+    gate_type: str,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+) -> bool:
+    """gate_type 별 규칙 dispatch.
+
+    - artifact_canonicalize: **휴먼 전용**(추가 role 제약 없음). E-CANVAS C4-S8(story a5118cb0)
+      설계 주석(visual_artifacts.py propose_canonical_version 바로 위) — "승인/반려는 기존
+      범용 transition 이 처리(human-only authz 이미 강제됨)"이 명시된 전부다. rule B(project
+      owner/admin)로 좁히면 인가 갭을 메우는 게 아니라 **승인 가능 인구를 줄이는 기능 축소**다
+      (실패 재현 테스트가 승인자를 project_access grant 조차 없는 org 멤버로 seed 해 그 설계를
+      그대로 증언하고 있었다 — 픽스처 실수가 아니라 의도).
+    - 그 외(merge/pr_review/qa/deploy 등): rule B(``_non_doc_gate_approvable``, story #1974) —
+      project owner/admin, project-무관 work_item 은 org owner/admin.
+    """
+    if gate_type == "artifact_canonicalize":
+        return True
+    return await _non_doc_gate_approvable(session, user_id, org_id, project_id)
+
+
 @router.get("", response_model=list[GateResponse])
 async def list_gates(
     work_item_id: uuid.UUID | None = Query(default=None),
@@ -312,11 +344,20 @@ async def list_gates(
     # transition 강제와 can_approve_doc_gate_reason 단일 규칙 공용(DRY). 배치 project_id 주입(N+1 0)·비-휴먼/
     # 무자격/삭제 doc = False(default·fail-closed). additive — 실 authz 는 transition BE 가 강제(이 필드=가시성뿐).
     doc_gates = [(resp, g) for resp, g in zip(responses, gates) if g.gate_type == "doc_approval"]
+    # story #2198(까심 QA 적출·오르테가 PO 판정): non-doc gate(merge/pr_review/qa/deploy/
+    # artifact_canonicalize 등)도 doc_approval 과 **동일 골격**으로 can_approve 를 계산한다 —
+    # 지금까지 이 목록 응답의 can_approve 필드 자체는 계산되지 않아 Pydantic 기본값 False 가
+    # 그대로 나갔다(자격자에게 버튼이 안 뜨는 원 증상). ⚠️규칙은 "하나"가 아니라 gate_type 별
+    # 하나(_non_doc_can_approve 표 — artifact_canonicalize 는 rule B 를 씌우면 회귀임이 CI 로
+    # 드러나 갈렸다. 자세한 사유는 그 함수 docstring 참조).
+    non_doc_gates = [(resp, g) for resp, g in zip(responses, gates) if g.gate_type != "doc_approval"]
     # story #1974(P1a-S5): assigned_to_me 도 doc_approval 경로는 can_approve 와 **동일 계산**이라
     # caller 식별(resolve_member)을 can_approve enrich 와 공유 — 1회만 resolve(중복 계산 0).
+    # #2198: non-doc can_approve 도 이제 assigned_to_me 무관 항상 계산하므로 트리거를 gates 존재
+    # 여부로 넓힌다(doc_gates or non_doc_gates == gates 존재).
     resolved = None
     _uid: uuid.UUID | None = None
-    if doc_gates or assigned_to_me:
+    if doc_gates or non_doc_gates:
         try:
             resolved = await resolve_member(auth, org_id, session)
             _uid = uuid.UUID(auth.user_id)
@@ -346,6 +387,66 @@ async def list_gates(
             # (held→approved 직접 전이 불가하니 held 게이트는 can_approve=False 가 맞다) — 건드리지 않는다.
             resp.can_approve = _reason is None and is_valid_transition(g.status, "approved")
 
+    # project_id 배치 해소(story #1968 resolve_work_item_project_id 의 IN-clause 배치 버전 — 개별
+    # gate 마다 신규 쿼리 금지). doc 은 위에서 이미 배치 조회한 doc_proj 재사용(중복 쿼리 0).
+    # #2198: 이제 can_approve enrich(assigned_to_me 무관)와 assigned_to_me 필터링이 이 배치를
+    # 공유한다(예전엔 assigned_to_me=true 일 때만 계산했다). ⚠️전부 `resolved is not None and
+    # resolved.type == "human"` 게이트 **안**에서만 실행한다 — 캐치 안 되면(비휴먼/resolve 실패)
+    # eligible_ids 가 자연히 빈 채로 남고 can_approve=False(fail-closed)이므로 이 배치 쿼리들
+    # 자체가 불필요(N+1 0 철학과 동형 — "계산해도 결론이 안 바뀔 쿼리는 안 낸다").
+    project_id_by_work_item: dict[uuid.UUID, uuid.UUID | None] = dict(doc_proj)
+    # #2198(PO 판정): 캐시 키가 project_id 단독에서 (gate_type, project_id) 로 바뀌었다 — 승인
+    # 자격이 이제 gate_type 에도 의존한다(_non_doc_can_approve 표 참조. artifact_canonicalize
+    # 는 project_id 무관 항상 True).
+    approvable_cache: dict[tuple[str, uuid.UUID | None], bool] = {}
+    eligible_ids: set[uuid.UUID] = set()
+    if non_doc_gates and resolved is not None and resolved.type == "human":
+        story_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "story"}
+        task_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "task"}
+        # story #2082: artifact_canonicalize 게이트(work_item_type="visual_artifact")가 이 배치에서
+        # 빠져 있어 project_id_by_work_item 조회가 항상 None으로 떨어졌다 — _non_doc_gate_approvable
+        # 이 그걸 "구조적으로 project-무관"으로 오판해 org owner/admin에게만 노출되고, project-level
+        # owner/admin(정본 담당자)에겐 assigned_to_me=true 인박스에서 사라졌다(회귀). VisualArtifact.
+        # project_id는 NOT NULL이라 story/task와 동형으로 항상 배치 해소 가능.
+        artifact_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "visual_artifact"}
+        if story_ids:
+            rows = (await session.execute(
+                select(Story.id, Story.project_id).where(
+                    Story.id.in_(story_ids), Story.org_id == org_id,
+                )
+            )).all()
+            project_id_by_work_item.update({sid: pid for sid, pid in rows})
+        if task_ids:
+            rows = (await session.execute(
+                select(Task.id, Story.project_id)
+                .join(Story, Task.story_id == Story.id)
+                .where(Task.id.in_(task_ids), Task.org_id == org_id)
+            )).all()
+            project_id_by_work_item.update({tid: pid for tid, pid in rows})
+        if artifact_ids:
+            rows = (await session.execute(
+                select(VisualArtifact.id, VisualArtifact.project_id).where(
+                    VisualArtifact.id.in_(artifact_ids), VisualArtifact.org_id == org_id,
+                )
+            )).all()
+            project_id_by_work_item.update({aid: pid for aid, pid in rows})
+
+        # N+1 방지: gate 여러 건이 같은 (gate_type, project_id) 를 가리켜도 _non_doc_can_approve 는
+        # **고유 조합당 1회**만 호출(캐시) — gate 개수와 무관.
+        for _resp, g in non_doc_gates:
+            pid = project_id_by_work_item.get(g.work_item_id)
+            key = (g.gate_type, pid)
+            if key not in approvable_cache:
+                approvable_cache[key] = await _non_doc_can_approve(session, g.gate_type, _uid, org_id, pid)
+            if approvable_cache[key]:
+                eligible_ids.add(g.id)
+
+    # #2198: non-doc can_approve enrich — doc_gates 루프(위)와 동일하게 FSM(is_valid_transition)
+    # AND WHO(eligible_ids). additive·fail-closed default(Pydantic False)는 non-human/미해소
+    # caller·project 무권한 전부에서 자연히 유지된다(eligible_ids 에 없으면 False).
+    for resp, g in non_doc_gates:
+        resp.can_approve = g.id in eligible_ids and is_valid_transition(g.status, "approved")
+
     if not assigned_to_me:
         return responses
 
@@ -364,62 +465,6 @@ async def list_gates(
     # 승인할 대상이고 paused 일 뿐 "내 것"이다. 바깥 `status` 쿼리 필터가 이미 gates 를 원하는
     # 상태로 좁혀놨으니(예: status=held) 여기서 다시 "pending" 으로 하드코딩해 재필터하면 안
     # 된다 — 예전엔 그래서 `status=held&assigned_to_me=true` 가 항상 빈 배열이었다.
-    non_doc_gates = [
-        (resp, g) for resp, g in zip(responses, gates)
-        if g.gate_type != "doc_approval"
-    ]
-
-    # project_id 배치 해소(story #1968 resolve_work_item_project_id 의 IN-clause 배치 버전 — 개별
-    # gate 마다 신규 쿼리 금지). doc 은 위에서 이미 배치 조회한 doc_proj 재사용(중복 쿼리 0).
-    project_id_by_work_item: dict[uuid.UUID, uuid.UUID | None] = dict(doc_proj)
-    story_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "story"}
-    task_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "task"}
-    # story #2082: artifact_canonicalize 게이트(work_item_type="visual_artifact")가 이 배치에서
-    # 빠져 있어 project_id_by_work_item 조회가 항상 None으로 떨어졌다 — _non_doc_gate_approvable
-    # 이 그걸 "구조적으로 project-무관"으로 오판해 org owner/admin에게만 노출되고, project-level
-    # owner/admin(정본 담당자)에겐 assigned_to_me=true 인박스에서 사라졌다(회귀). VisualArtifact.
-    # project_id는 NOT NULL이라 story/task와 동형으로 항상 배치 해소 가능.
-    artifact_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "visual_artifact"}
-    if story_ids:
-        rows = (await session.execute(
-            select(Story.id, Story.project_id).where(
-                Story.id.in_(story_ids), Story.org_id == org_id,
-            )
-        )).all()
-        project_id_by_work_item.update({sid: pid for sid, pid in rows})
-    if task_ids:
-        rows = (await session.execute(
-            select(Task.id, Story.project_id)
-            .join(Story, Task.story_id == Story.id)
-            .where(Task.id.in_(task_ids), Task.org_id == org_id)
-        )).all()
-        project_id_by_work_item.update({tid: pid for tid, pid in rows})
-    if artifact_ids:
-        rows = (await session.execute(
-            select(VisualArtifact.id, VisualArtifact.project_id).where(
-                VisualArtifact.id.in_(artifact_ids), VisualArtifact.org_id == org_id,
-            )
-        )).all()
-        project_id_by_work_item.update({aid: pid for aid, pid in rows})
-
-    # N+1 방지: gate 여러 건이 같은 project 를 가리켜도 get_project_role/is_org_owner_or_admin 은
-    # **고유 project_id(및 org-fallback 1회)당 1회**만 호출(캐시) — gate 개수와 무관.
-    role_cache: dict[uuid.UUID, bool] = {}
-    org_admin_cache: bool | None = None
-    eligible_ids: set[uuid.UUID] = set()
-    for _resp, g in non_doc_gates:
-        pid = project_id_by_work_item.get(g.work_item_id)
-        if pid is not None:
-            if pid not in role_cache:
-                role_cache[pid] = await _non_doc_gate_approvable(session, _uid, org_id, pid)
-            if role_cache[pid]:
-                eligible_ids.add(g.id)
-        else:
-            if org_admin_cache is None:
-                org_admin_cache = await _non_doc_gate_approvable(session, _uid, org_id, None)
-            if org_admin_cache:
-                eligible_ids.add(g.id)
-
     filtered: list[GateResponse] = []
     for resp, g in zip(responses, gates):
         if g.gate_type == "doc_approval":
@@ -687,6 +732,29 @@ async def get_gate_endpoint(
     # 미경유) + 이 gate의 gate_type을 derive_risk_grade()로 파생(doc §2 SSOT).
     _posture = await get_org_posture(session, org_id)
     resp.risk_grade = derive_risk_grade(_posture, gate.gate_type)
+    # story #2198(까심 QA 적출·오르테가 확定): can_approve 가 이 엔드포인트에선 **전혀 계산되지
+    # 않고** 있었다(docstring 이 enrich 목록에 project_id/work_item_summary/risk_grade 만 적어
+    # 뒀던 것 자체가 증거) — doc_approval·non-doc 가릴 것 없이 Pydantic 기본값 False 가 그대로
+    # 나갔다. 딥링크 콜드 진입(알림 클릭 → 상세 직행, 위 docstring)이 이 엔드포인트를 쓰므로
+    # list_gates 를 먼저 거치지 않은 사용자는 상세 화면에서도 버튼을 영영 못 봤다. list_gates 와
+    # **동일 규칙**(can_approve_doc_gate_reason·_non_doc_gate_approvable)을 여기도 물린다 —
+    # project_id 는 위에서 이미 resolve_work_item_project_id 로 해소돼 있어 추가 조회 없음.
+    try:
+        resolved = await resolve_member(auth, org_id, session)
+        _uid = uuid.UUID(auth.user_id)
+    except Exception:  # noqa: BLE001 — caller resolve 실패는 상세 조회 비중단(fail-closed can_approve=False).
+        logger.warning("get_gate_endpoint caller resolve 실패(비중단) org=%s gate=%s", org_id, id, exc_info=True)
+        resolved = None
+        _uid = None
+    if resolved is not None:
+        if gate.gate_type == "doc_approval":
+            _reason = await can_approve_doc_gate_reason(
+                session, gate, resolved, _uid, org_id, doc_project_id=project_id,
+            )
+            resp.can_approve = _reason is None and is_valid_transition(gate.status, "approved")
+        elif resolved.type == "human":  # rule B 는 human 체크가 없어 여기서 fail-closed(list_gates 와 동형).
+            _approvable = await _non_doc_can_approve(session, gate.gate_type, _uid, org_id, project_id)
+            resp.can_approve = _approvable and is_valid_transition(gate.status, "approved")
     return resp
 
 
@@ -732,6 +800,44 @@ async def transition_gate_endpoint(
             raise HTTPException(
                 status_code=403,
                 detail="doc 결재 권한이 없습니다 (대상 프로젝트 접근 필요).",
+            )
+    elif _gate is not None:
+        # story #2198(까심 QA 적출·오르테가 PO 판정): non-doc 게이트(merge/pr_review/qa/deploy/
+        # artifact_canonicalize 등)는 이 분기 자체가 없어 **휴먼 org 멤버이기만 하면 통과**했다
+        # (위 not-human 체크뿐). 처방은 새 단일 규칙이 아니라 _non_doc_can_approve(위 정의)
+        # **타입별 표**를 여기 물리는 것 — artifact_canonicalize 는 첫 판정(rule B 균일 적용)
+        # 시도가 CI 에서 실 회귀로 드러나 갈렸다: E-CANVAS C4-S8 설계상 그 타입은 project
+        # owner/admin 이 아니라 **휴먼이면 승인 가능**이 계약이었다(테스트 픽스처가 무권한 org
+        # 멤버를 승인자로 seed 해 그 설계를 증언하고 있었음). 그 외 타입은 rule B(project
+        # owner/admin, project-무관 work_item 은 org owner/admin) 그대로.
+        #
+        # ⛔SoD(self-approval) 는 의도적으로 안 넣는다(오르테가 PO 판정, 2026-07-27) — 이유:
+        # ① doc 결재의 SoD 는 "저자성"(자기가 쓴 문서를 자기가 승인)을 막는 것인데 non-doc
+        #    게이트엔 그 저자성 관계가 같은 형태로 없다. ② non-doc 게이트 상신자는 사실상
+        #    에이전트이고 에이전트는 이미 승인 불가(93fc7aeb, 위 not-human 체크) — 사람 대
+        #    사람 SoD 가 붙을 자리가 실제로 거의 없다. ③ 넣으면 1인 org·소규모 팀에서 아무도
+        #    못 여는 교착이 생긴다(가정 아님 — PR #1998 이 그 교착을 고치는 물건). ④ 추적은
+        #    이미 확보돼 있다(resolver_id 를 body 무시하고 인증 caller 로 강제 기록, S23 RC①).
+        #    다음 사람이 "doc 엔 있는데 여긴 왜 없지"로 되돌아와 넣지 않도록 여기 남긴다.
+        _project_id = await resolve_work_item_project_id(
+            session, org_id, _gate.work_item_type, _gate.work_item_id,
+        )
+        # ⚠️_non_doc_gate_approvable(rule B, non-artifact_canonicalize 타입에만 적용)은
+        # `uuid.UUID(auth.user_id)`를 기대한다(get_project_role 이 users.id/project_access.
+        # member_id 로 매칭 — list_gates 의 _uid 와 동일 축). resolved.id(member row id)는
+        # doc_approval SoD 비교 전용 축이라 여기 쓰면 다른 사람으로 조회돼 fail-closed 오탐
+        # (정당한 owner/admin 이 403)이 난다 — 실제로 이 갭을 realdb 테스트가 잡았다.
+        if not await _non_doc_can_approve(session, _gate.gate_type, uuid.UUID(auth.user_id), org_id, _project_id):
+            # #2198(오르테가 PO, 라이브 측정 후 지시): 없던 바를 새로 세우는 변경이라 막히는
+            # 사람이 "무엇을 해야 하는지" 다음 발을 못 받으면 그 자리서 막막해진다(오늘 아침
+            # #2166 과 같은 자리 — 막는 것과 "다음 발을 주는 것"은 다른 일). 자격 기준(project
+            # owner/admin)과 다음 행동(관리자에게 권한 요청)까지 메시지에 명시.
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "이 게이트를 승인/거부할 권한이 없습니다 (해당 프로젝트의 owner/admin이어야 "
+                    "합니다). 프로젝트 관리자에게 권한을 요청하세요."
+                ),
             )
     # story #2027(까심 QA 적출): 고위험(risk_grade=high) 게이트의 approved 전이는 사유(note) 서버측
     # 강제 — void_gate/override_gate 기존 관례(reason 없으면 ValueError→422, void_gate 참고)에

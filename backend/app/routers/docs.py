@@ -229,6 +229,14 @@ class DocPreviewResponse(BaseModel):
     icon: str | None = None
     slug: str
     embed_chain: list[str] = []
+    # #2168 PR-①: 크로스프로젝트 doc 링크가 "링크 자신이 속한 project 를 실어 나르는" 처방이라
+    # 받는 쪽(FE embed-card)이 "현재 프로젝트"를 추측하지 않고 이 doc 의 실제 project 로 직행할
+    # 수 있어야 한다 — project_id(2차 조회 스코프용) + org_slug/project_slug(경로 세그먼트,
+    # `/{ws}/{proj}/docs/{slug}/view` 조립용). additive·project_slug 는 nullable(Project.slug
+    # 가 nullable — 옛 미백필 프로젝트는 None, FE 가 bare 링크로 우아하게 폴백).
+    project_id: uuid.UUID
+    org_slug: str
+    project_slug: str | None = None
 
 
 # ─── Preview (must be before /{id} to avoid routing conflict) ─────────────────
@@ -241,6 +249,8 @@ async def get_doc_preview(
     repo: DocRepository = Depends(_get_repo),
 ) -> DocPreviewResponse:
     from app.models.doc import Doc
+    from app.models.organization import Organization
+    from app.models.project import Project
 
     try:
         doc_uuid = uuid.UUID(q)
@@ -251,8 +261,16 @@ async def get_doc_preview(
     result = await db.execute(stmt.limit(1))
     doc = result.scalar_one_or_none()
 
+    if doc is not None:
+        # #2168 PR-①: get_doc 과 동형 갭 — org-scope happy path 가 project 인가 없이 즉시
+        # 반환하던 것을 canonical 가드로 통일(같은 이유: 링크가 project 를 실어 나르기 시작하며
+        # 이 경로의 실사용 빈도가 올라간다).
+        from app.services.project_auth import has_project_access
+        if not await has_project_access(db, uuid.UUID(auth.user_id), doc.project_id, repo.org_id):
+            raise HTTPException(status_code=403, detail="해당 문서의 프로젝트 접근 권한이 없습니다")
+
     if doc is None:
-        # cross-org fallback: slug/uuid 기반 전체 org 조회 후 membership 검증
+        # cross-org fallback: slug/uuid 기반 전체 org 조회 후 membership 검증 (기존, 무변경)
         try:
             doc_uuid2 = uuid.UUID(q)
             fallback_stmt = select(Doc).where(Doc.id == doc_uuid2, Doc.deleted_at.is_(None))
@@ -273,12 +291,22 @@ async def get_doc_preview(
         if member.scalar_one_or_none() is None:
             raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
 
+    org_slug = (await db.execute(
+        select(Organization.slug).where(Organization.id == doc.org_id)
+    )).scalar_one()
+    project_slug = (await db.execute(
+        select(Project.slug).where(Project.id == doc.project_id)
+    )).scalar_one_or_none()
+
     return DocPreviewResponse(
         id=doc.id,
         title=doc.title,
         icon=doc.icon,
         slug=doc.slug,
         embed_chain=[],
+        project_id=doc.project_id,
+        org_slug=org_slug,
+        project_slug=project_slug,
     )
 
 
@@ -292,8 +320,16 @@ async def get_doc(
     repo: DocRepository = Depends(_get_repo),
 ) -> DocResponse:
     doc = await repo.get(id)
+    if doc is not None:
+        # #2168 PR-①: 크로스프로젝트 doc 링크가 정상 동선이 되며 이 org-scope happy path의
+        # project 인가 누락(patch/delete 는 f69fcd91 로 이미 고쳐졌으나 GET 은 방치돼 있었음 —
+        # 同org 비-project caller 가 id만 알면 무제한 열람 가능하던 갭)이 실사용 IDOR 표면으로
+        # 커진다. canonical 가드(has_project_access)로 patch/delete 와 통일.
+        from app.services.project_auth import has_project_access
+        if not await has_project_access(session, uuid.UUID(auth.user_id), doc.project_id, repo.org_id):
+            raise HTTPException(status_code=403, detail="해당 문서의 프로젝트 접근 권한이 없습니다")
     if doc is None:
-        # cross-org fallback: project_id query param 없이 단일 id로 접근한 경우
+        # cross-org fallback: project_id query param 없이 단일 id로 접근한 경우 (기존, 무변경)
         from app.models.doc import Doc
         result = await session.execute(
             select(Doc).where(Doc.id == id, Doc.deleted_at.is_(None))
