@@ -1328,7 +1328,7 @@ class ActivityResponse(BaseModel):
 
 # ─── Comments ─────────────────────────────────────────────────────────────────
 
-@router.get("/{id}/comments", response_model=list[CommentResponse])
+@router.get("/{id}/comments")
 async def list_comments(
     id: uuid.UUID,
     limit: int = Query(default=20, le=100),
@@ -1336,7 +1336,12 @@ async def list_comments(
     db: AsyncSession = Depends(get_db),
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
-) -> list[CommentResponse]:
+) -> dict:
+    """story #2230: cursor 파라미터가 시그니처에만 있고 쿼리에 안 물려 있었다(선언-미사용
+    죽은 파라미터) — FE(story-detail-panel.tsx)는 이미 이 파라미터로 「더보기」를 완결해
+    두고 기다리고 있었다. #2231 정본 규약 A(limit+1 오버페치 + has_more/next_cursor body
+    meta, 참조 구현: conversations.py::list_messages)로 실제 동작하게 한다.
+    """
     # SEC(story #2206, 까심 인가 전수 스윕 A급): 쿼리 술어가 StoryComment.story_id == id 뿐이라
     # org_id 조건 자체가 없었다(project-only 누락이 아니라 org 조건 부재 — 같은 파일 다른
     # 엔드포인트들의 project-only 누락 갭과 다른 형태). 어느 org 멤버든 story UUID만 알면 다른
@@ -1346,11 +1351,26 @@ async def list_comments(
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
     await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
-    q = select(StoryComment).where(
-        StoryComment.story_id == id,
-    ).order_by(StoryComment.created_at.desc()).limit(limit)
+    q = select(StoryComment).where(StoryComment.story_id == id)
+    # #2540 CI 교훈(오르테가군): "값이 있는지"만 보면 안 되고 "그 값이 문자열인지"까지 봐야
+    # 한다 — 이 함수를 FastAPI DI 없이 직접 호출하며 cursor= 를 누락하면 파이썬 기본값인
+    # Query(...) 센티넬 객체(truthy) 가 그대로 들어온다. 문자열이 아니면 커서 없음으로 취급.
+    if isinstance(cursor, str) and cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor format")
+        q = q.where(StoryComment.created_at < cursor_dt)
+    q = q.order_by(StoryComment.created_at.desc()).limit(limit + 1)
     result = await db.execute(q)
-    return [CommentResponse.model_validate(r) for r in result.scalars()]
+    rows = list(result.scalars())
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    next_cursor = page[-1].created_at.isoformat() if has_more and page else None
+    return {
+        "data": [CommentResponse.model_validate(r) for r in page],
+        "meta": {"has_more": has_more, "next_cursor": next_cursor},
+    }
 
 
 async def _resolve_team_member_id(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> uuid.UUID:

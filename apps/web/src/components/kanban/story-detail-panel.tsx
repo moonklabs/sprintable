@@ -606,7 +606,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         if (res.ok) {
           const json = await res.json();
           setComments(json.data ?? []);
-          setNextCommentsCursor(json.meta?.nextCursor ?? null);
+          // story #2230: BE meta 필드는 snake_case(next_cursor) — camelCase 로 읽어 항상
+          // undefined였던 것이 커서가 죽어 보이던 세 번째 원인(BE 미반영·프록시 이중포장과 직렬).
+          setNextCommentsCursor(json.meta?.next_cursor ?? null);
         }
       } catch {
         setComments([]);
@@ -683,7 +685,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       if (res.ok) {
         const json = await res.json();
         setComments((prev) => [...prev, ...(json.data ?? [])]);
-        setNextCommentsCursor(json.meta?.nextCursor ?? null);
+        setNextCommentsCursor(json.meta?.next_cursor ?? null);
       }
     } finally {
       setLoadingMoreComments(false);
