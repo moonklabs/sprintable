@@ -29,7 +29,7 @@ def _doc(assignee_id=None):
     return SimpleNamespace(
         id=uuid.uuid4(), project_id=uuid.uuid4(), org_id=ORG, parent_id=None,
         title="t", slug="s", canonical_slug="s", slug_locked=False, icon=None,
-        sort_order=0, doc_type="page", is_folder=False, tags=[], updated_at=T,
+        sort_order=0, doc_type="page", is_folder=False, tags=[], created_at=T, updated_at=T,
         snippet=None, assignee_id=assignee_id,
     )
 
