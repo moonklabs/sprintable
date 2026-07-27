@@ -174,6 +174,90 @@ describe('proxy', () => {
     }
   });
 
+  // #2124(오르테가군·선생님 실측 2026-07-27): "매일 방문해도 늘 로그아웃" 인과사슬의 «방아쇠» 확認.
+  // tryRefreshViaFastapi()는 `if (!res.ok) return null`/`catch { return null }` — 진짜 401
+  // (TOKEN_REVOKED)과 일시 장애(429/5xx/네트워크에러/타임아웃)를 구분하지 않는다. 둘 다 동일하게
+  // refreshFailed=true → clearAuthCookies() 호출로 이어진다. 아래 두 테스트는 그 도달 경로가
+  // 실제로 존재함을(status를 401이 아닌 값으로 명시·네트워크 throw로) 실증한다.
+  it('clears sp_at/sp_rt even when backend returns a transient 503(rate-limit이나 콜드스타트 등) — NOT a genuine 401(story #2124 트리거 확認)', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: { code: 'SERVICE_UNAVAILABLE' } }) });
+    const response = await middleware(makeRequest('/dashboard', { sp_rt: 'still-valid-rt-503' }));
+    expect(response.status).toBe(307);
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('sp_rt=;');
+    expect(setCookie).toContain('sp_at=;');
+  });
+
+  it('clears sp_at/sp_rt on a network-level throw(fetch reject — 타임아웃/DNS 등) — 토큰 자체는 무관(story #2124 트리거 확認)', async () => {
+    mockFetch.mockRejectedValue(new Error('fetch failed: network error'));
+    const response = await middleware(makeRequest('/dashboard', { sp_rt: 'still-valid-rt-network-error' }));
+    expect(response.status).toBe(307);
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('sp_rt=;');
+    expect(setCookie).toContain('sp_at=;');
+  });
+
+  // #2124 사슬 3단계 — ㉮(vault 폴백) 착지 後 기대값 뒤집힘(오르테가군 지시: 새로 짜지 말고 그
+  // 셋의 기대값만 뒤집는 것). 원래는 "금고가 있어도 proxy가 안 봐서 복구 불가"를 증명하는
+  // 결함-재현 테스트였다 — 이제는 "sp_rt가 죽어도 active 계정의 금고 토큰으로 갱신에 성공한다"는
+  // 정상동작 가드다. 결함이 돌아오면(vault 폴백이 다시 사라지면) 이 테스트가 RED로 잡는다.
+  it('sp_rt가 죽어도 sp_active_account가 가리키는 계정의 금고(sp_acct_rt_<id>) 토큰으로 갱신에 성공한다(story #2124 ㉮)', async () => {
+    const activeId = '5dfbd9fc-94c2-4afc-9814-da4b7ad08c28';
+    const now = Math.floor(Date.now() / 1000);
+    const newAt = await new SignJWT({ type: 'access', email: 'test@example.com' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setSubject(activeId)
+      .setIssuedAt(now)
+      .setExpirationTime(now + 900)
+      .sign(new TextEncoder().encode(JWT_SECRET));
+    mockFetch.mockImplementation((_url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { refresh_token: string };
+      if (body.refresh_token === 'vaulted-active-account-rt') {
+        return Promise.resolve({ ok: true, json: async () => ({ data: { access_token: newAt, refresh_token: 'new-rt-from-vault' } }) });
+      }
+      // sp_rt(죽은 토큰) 경로는 여전히 503 — 그래서 폴백이 실제로 발동해야만 이 테스트가 통과한다.
+      return Promise.resolve({ ok: false, status: 503, json: async () => ({ error: { code: 'SERVICE_UNAVAILABLE' } }) });
+    });
+    const response = await middleware(makeRequest('/dashboard', {
+      sp_rt: 'active-rt-about-to-die',
+      [`sp_acct_rt_${activeId}`]: 'vaulted-active-account-rt',
+      sp_active_account: activeId,
+    }));
+    expect(response.status).toBe(200); // 리다이렉트 안 됨 — 로그인 화면으로 안 튕겨나감
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('sp_at=');
+    expect(setCookie).toContain('new-rt-from-vault');
+  });
+
+  // 경계 ①(오르테가군 지시): 금고에 있는 아무 토큰이나 쓰면 안 됨 — active 포인터가 가리키는
+  // 계정 것만. 다른 계정의 금고 항목이 있어도 그건 안 쓰고 기존(null) 동작 그대로.
+  it('active 포인터와 다른 계정의 금고 항목은 쓰지 않는다(story #2124 ㉮ 경계①)', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: { code: 'SERVICE_UNAVAILABLE' } }) });
+    const response = await middleware(makeRequest('/dashboard', {
+      sp_rt: 'active-rt-about-to-die',
+      sp_acct_rt_other_account_id: 'someone-elses-vault-token',
+      sp_active_account: 'this-account-id-has-no-vault-entry',
+    }));
+    expect(response.status).toBe(307); // 폴백 대상이 없으니 기존 그대로 로그인으로
+    // sp_rt 시도 1회만(active 계정 것도 아닌 다른 금고 항목으로 추가 시도 0)
+    const refreshCalls = mockFetch.mock.calls.filter((c: unknown[]) => (c[0] as string).includes('/api/v2/auth/refresh'));
+    expect(refreshCalls.length).toBe(1);
+  });
+
+  // 경계 ②(오르테가군 지시): active 포인터가 가리키는 계정이 금고에 아예 없으면 조용히 다른
+  // 걸로 안 감 — 기존 null 동작 그대로(폴백의 폴백 없음).
+  it('active 포인터가 가리키는 계정이 금고에 없으면 폴백 없이 기존 동작 그대로(story #2124 ㉮ 경계②)', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: { code: 'SERVICE_UNAVAILABLE' } }) });
+    const response = await middleware(makeRequest('/dashboard', {
+      sp_rt: 'active-rt-about-to-die',
+      sp_active_account: 'account-with-no-vault-entry-at-all',
+      // sp_acct_rt_account-with-no-vault-entry-at-all 쿠키 자체가 없음
+    }));
+    expect(response.status).toBe(307);
+    const refreshCalls = mockFetch.mock.calls.filter((c: unknown[]) => (c[0] as string).includes('/api/v2/auth/refresh'));
+    expect(refreshCalls.length).toBe(1);
+  });
+
   it('does NOT clear cookies when refresh succeeds but is suppressed for a different active account (RC2 regression guard)', async () => {
     // refreshMatchesActive=false 는 refresh 자체가 실패한 게 아니라(다른 계정의 늦은 refresh를
     // 의도적으로 무시하는 것) — clearAuthCookies 를 호출하면 안 된다. sp_active_account 포인터를

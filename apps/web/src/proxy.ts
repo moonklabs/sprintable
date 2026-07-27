@@ -235,6 +235,9 @@ function redirectRenamedResourcePath(request: NextRequest, pathname: string): Ne
 
 // bf305fa0 멀티계정 — active 포인터(switch가 set). 없으면 단일계정(back-compat).
 const ACTIVE_ACCOUNT_COOKIE = 'sp_active_account';
+// account-vault.ts와 동일 값 — 그 모듈은 next/headers(cookies())를 임포트해 middleware/proxy
+// 런타임에서 못 씀(ACTIVE_ACCOUNT_COOKIE와 동일 이유로 이미 로컬 재정의된 관례를 따름).
+const VAULT_PREFIX = 'sp_acct_rt_';
 
 /**
  * RC2(stale Set-Cookie suppression): refresh 결과를 sp_at/sp_rt 에 적용해도 되는지 판정.
@@ -259,10 +262,7 @@ async function refreshMatchesActive(request: NextRequest, accessToken: string): 
   return true;
 }
 
-async function tryRefreshViaFastapi(request: NextRequest): Promise<{ accessToken: string; refreshToken: string } | null> {
-  const rt = request.cookies.get(SP_RT_COOKIE)?.value;
-  if (!rt) return null;
-
+async function refreshWithToken(rt: string): Promise<{ accessToken: string; refreshToken: string } | null> {
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
   try {
     const res = await fetch(`${fastapiUrl}/api/v2/auth/refresh`, {
@@ -278,6 +278,31 @@ async function tryRefreshViaFastapi(request: NextRequest): Promise<{ accessToken
   } catch {
     return null;
   }
+}
+
+async function tryRefreshViaFastapi(request: NextRequest): Promise<{ accessToken: string; refreshToken: string } | null> {
+  const rt = request.cookies.get(SP_RT_COOKIE)?.value;
+  if (rt) {
+    const result = await refreshWithToken(rt);
+    if (result) return result;
+  }
+
+  // #2124(선생님 실측 2026-07-27): 멀티계정 switch/add-account 後 clearAuthCookies가 sp_at/sp_rt만
+  // 지우고 금고(sp_acct_rt_*)·sp_active_account는 안 건드리는 결함(㉢, 별도 fix 대상)과 맞물려,
+  // sp_rt가 없거나 죽어도 **활성 계정의 금고 토큰은 여전히 살아있는** 상태가 남는다 — 그런데 여기가
+  // 지금까지 그 금고의 존재 자체를 몰랐다(proxy.ts 전체 grep 0건이었던 자리). "매일 방문해도 늘
+  // 로그아웃"의 근본 — 이미 그 상태에 빠진 사용자를 여기서 꺼낸다.
+  // ⛔경계(오르테가군 지시, 표면 확장 금지):
+  //   · sp_active_account가 가리키는 **그 계정의** 금고 항목만 본다(금고에 있는 아무 토큰이나 X).
+  //   · 쿠키 값을 그대로 신뢰하지 않는다 — refreshWithToken이 백엔드 검증을 그대로 거친다(추가
+  //     신뢰 경계 확장 0, 기존 rotate 경로 재사용).
+  //   · sp_active_account가 가리키는 계정이 금고에 없으면 조용히 다른 걸로 넘어가지 않고 기존
+  //     null 그대로(폴백의 폴백 없음).
+  const activeAccountId = request.cookies.get(ACTIVE_ACCOUNT_COOKIE)?.value;
+  if (!activeAccountId) return null;
+  const vaultRt = request.cookies.get(`${VAULT_PREFIX}${activeAccountId}`)?.value;
+  if (!vaultRt) return null;
+  return refreshWithToken(vaultRt);
 }
 
 // story cd10e123(P0) 근본 수정 — AC1(551bbbee)이 만든 single-flight in-memory dedupe(아래 옛
