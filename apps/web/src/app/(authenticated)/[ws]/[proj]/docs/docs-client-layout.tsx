@@ -8,6 +8,7 @@ import { useHideOnScroll } from '@/lib/use-hide-on-scroll';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocTree } from '@/components/docs/doc-tree';
+import { DocAutoGroups } from '@/components/docs/doc-auto-groups';
 import { RecentsSection } from '@/components/docs/recents-section';
 import { useRecentDocs } from '@/components/docs/use-recent-docs';
 import { TreeSearchInput } from '@/components/docs/tree-search-input';
@@ -116,6 +117,22 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   const setSortMode = useCallback((mode: DocSortMode) => {
     setSortModeState(mode);
     if (projectId) localStorage.setItem(`docs-sort-mode:${projectId}`, mode);
+  }, [projectId]);
+
+  // story #2193 — "자동 묶음"(slug 접두어로 그룹, 폴더 소속과 무관) / "내 폴더"(기존 DocTree,
+  // 변경 없음) 전환. 기본값을 반드시 grouped로 둔다 — "내 폴더"를 기본으로 두면 폴더에 실제
+  // 담긴 13%(80/619)만 먼저 보여주고 나머지 87%는 한 번 더 탭을 눌러야 보이는 것이 되어,
+  // 이 스토리가 없애려는 문제(폴더 담김 여부에 발견 가능성이 좌우되는 것) 자체를 탭 순서로
+  // 재현하게 된다. 폴더는 그대로 남아 원하는 사람은 "내 폴더"로 전환해 쓴다.
+  const [viewMode, setViewModeState] = useState<'grouped' | 'folders'>('grouped');
+  useEffect(() => {
+    if (!projectId) return;
+    const saved = localStorage.getItem(`docs-view-mode:${projectId}`);
+    if (saved === 'grouped' || saved === 'folders') setViewModeState(saved);
+  }, [projectId]);
+  const setViewMode = useCallback((mode: 'grouped' | 'folders') => {
+    setViewModeState(mode);
+    if (projectId) localStorage.setItem(`docs-view-mode:${projectId}`, mode);
   }, [projectId]);
 
   const [pendingDocUpdate, setPendingDocUpdate] = useState<DocUpdate | null>(null);
@@ -274,9 +291,33 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         noResultsLabel={t('searchNoResults')}
         resultCountLabel={(n) => t('searchResultCount', { count: n })}
       />
-      {/* story #2167: 검색어 없을 때만 노출 — 검색 결과(서버 전문검색)는 ts_rank 관련도순이라
-          사용자가 고를 정렬 축이 아니다. 정렬은 "브라우징 중인 트리"에만 의미가 있다. */}
+      {/* story #2193 — "자동 묶음"(slug 접두어) / "내 폴더"(기존 트리) 전환. 검색 중엔
+          숨긴다(서버 전문검색 결과가 이미 답이라 그룹/트리 뷰 자체가 무의미 — sortMode
+          토글과 동일한 판단). */}
       {!isSearching && (
+        <div className="flex border-b border-border/60 px-2 pt-1.5">
+          {(['grouped', 'folders'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setViewMode(mode)}
+              className={cn(
+                'flex-1 border-b-2 px-2 pb-1.5 text-[11px] font-medium transition-colors',
+                viewMode === mode
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {mode === 'grouped' ? t('viewModeGrouped') : t('viewModeFolders')}
+            </button>
+          ))}
+        </div>
+      )}
+      {/* story #2167: 검색어 없을 때만 노출 — 검색 결과(서버 전문검색)는 ts_rank 관련도순이라
+          사용자가 고를 정렬 축이 아니다. 정렬은 "브라우징 중인 트리"에만 의미가 있다.
+          #2193: 정렬 토글은 "내 폴더"(기존 트리) 뷰에서만 의미가 있다 — 자동 묶음 뷰는
+          그룹 크기 기준 자체 정렬을 쓴다. */}
+      {!isSearching && viewMode === 'folders' && (
         <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5">
           <label htmlFor="docs-sort-mode" className="text-[11px] text-muted-foreground">{t('sortModeLabel')}</label>
           <select
@@ -345,8 +386,20 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
               label={t('recentDocs')}
               emptyLabel={t('noRecentDocs')}
             />
-            <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} projectId={projectId} sortMode={sortMode} />
-            {docsHasMore && (
+            {viewMode === 'grouped' ? (
+              <DocAutoGroups
+                docs={tree}
+                selectedSlug={currentSlug}
+                onSelect={handleSelectDoc}
+                inFolderLabel={t('groupInFolder')}
+                looseAtRootLabel={t('groupLooseAtRoot')}
+                restLabel={t('groupRest')}
+                moreLabel={(count) => t('groupMore', { count })}
+              />
+            ) : (
+              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} projectId={projectId} sortMode={sortMode} />
+            )}
+            {viewMode === 'folders' && docsHasMore && (
               <div className="px-2 py-1">
                 <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" disabled={docsLoadingMore} onClick={() => { if (!docsNextCursor || docsLoadingMore) return; setDocsLoadingMore(true); void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor); }}>
                   {docsLoadingMore ? tc('loading') : tc('loadMore')}
