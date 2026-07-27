@@ -276,7 +276,12 @@ async def get_missing_standups(
     project_id: uuid.UUID = Query(...),
     date_filter: date = Query(..., alias="date"),
     repo: StandupEntryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[uuid.UUID]:
+    # #2237: 형제(list_standup_history)와 동일한 project_id 쿼리파라미터 접근권 가드 추가 —
+    # 기존엔 auth 파라미터 자체가 없어 project_id를 caller 접근권 검증 없이 그대로 썼다.
+    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), project_id, repo.org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
     return await repo.get_missing(project_id, date_filter)
 
 
@@ -285,8 +290,13 @@ async def list_feedback(
     project_id: uuid.UUID = Query(...),
     date_filter: date = Query(..., alias="date"),
     db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> list[FeedbackResponse]:
+    # #2237: 형제(list_standups/list_standup_history)와 동일한 project_id 접근권 가드 추가 —
+    # 기존엔 auth 파라미터 자체가 없어 project_id를 caller 접근권 검증 없이 쿼리 필터로만 썼다.
+    if not await has_project_access(db, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
     q = (
         select(StandupFeedback)
         .join(StandupEntry, StandupFeedback.standup_entry_id == StandupEntry.id)

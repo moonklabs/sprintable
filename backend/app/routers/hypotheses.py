@@ -160,8 +160,12 @@ async def create_hypothesis(
 async def get_hypothesis(
     hypothesis_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> HypothesisResponse:
+    # #2237: 형제(update_hypothesis)와 동일한 project 접근권 가드 추가(기존엔 org-scope만 봤다·
+    # auth 파라미터 자체가 없었다).
+    await _assert_hypothesis_project_access(session, uuid.UUID(auth.user_id), org_id, hypothesis_id)
     try:
         return await svc.get_hypothesis(session, org_id, hypothesis_id)
     except svc.HypothesisServiceError as err:
@@ -192,6 +196,11 @@ async def transition_hypothesis(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> HypothesisResponse:
+    # #2237: 형제(update_hypothesis/unlink/archive)와 동일한 project 접근권 가드를 status 값과
+    # 무관하게 전 전이에 적용(기존엔 status=="active" 분기 안에만 있던 hyp 조회가 owner/admin
+    # role 체크로만 쓰였을 뿐, project 접근권 자체는 어떤 status 로도 검증되지 않았다 — #2198과
+    # 동형 「타입 분기 안에 갇힌 검사」. 同org 비-project 멤버도 kill/verify/falsify/archive 가능하던 갭).
+    await _assert_hypothesis_project_access(session, uuid.UUID(auth.user_id), org_id, hypothesis_id)
     caller = await resolve_member(auth, org_id, session)
     # §3.1.7 active 전이 권한은 라우터에서 보강(owner 휴먼 또는 org admin/owner).
     if body.status == "active":
@@ -214,8 +223,13 @@ async def link_hypothesis(
     hypothesis_id: uuid.UUID,
     body: HypothesisLinkRequest,
     session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> HypothesisResponse:
+    # #2237: 형제(unlink_hypothesis)와 동일하게 caller 의 hypothesis project 접근권 사전검증
+    # (기존엔 service 의 _assert_targets_same_project 가 "링크 대상들이 서로 같은 project인가"만
+    # 봤을 뿐 caller 접근권은 전혀 안 봤다 — 同org 비-project 멤버도 링크 주입 가능하던 갭).
+    await _assert_hypothesis_project_access(session, uuid.UUID(auth.user_id), org_id, hypothesis_id)
     # §3.7.2 cross-project 링크 금지 + 존재 검증은 service(link_hypothesis)가 단일 처리.
     try:
         return await svc.link_hypothesis(session, org_id, hypothesis_id, body)

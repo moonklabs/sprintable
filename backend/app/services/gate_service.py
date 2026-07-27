@@ -27,7 +27,9 @@ from sqlalchemy.orm import aliased
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
 from app.models.hitl_config import OrgGatePolicy
-from app.models.pm import Story, Task
+from app.models.hypothesis import Hypothesis
+from app.models.loop import LoopRun
+from app.models.pm import Goal, Sprint, Story, Task
 from app.models.visual_artifact import VisualArtifact
 from app.models.workflow_line import (
     WorkflowLineStepApproval,
@@ -179,6 +181,36 @@ _DISPOSITION_TO_STATUS: dict[str, str] = {
     "deny": "rejected",
 }
 
+# #2237(오르테가 PO 판정 2026-07-27, ①→②): create_gate() 실 호출부 6곳을 전부 읽어 만든 「전량」 —
+# DB에도 Pydantic에도 work_item_type 정본이 없다(gate_type만 GATE_TYPES로 검증됨, 비대칭 — 그 갭은
+# 별도 스토리로 오르테가군이 등재). 아래 8개는 각 모델의 project_id 컬럼을 기계적으로 확認해 project-
+# scoped로 분류한 것(새 규칙 발명 0 — 그냥 「project_id가 NOT NULL FK로 있는가」를 본 것):
+#   story·task·doc·visual_artifact(원래 4개) + loop(LoopRun.project_id)·hypothesis(Hypothesis.
+#   project_id)·epic(Goal.project_id — B1 rename 前 이름 그대로 남은 work_item_type 리터럴, 실체는
+#   Goal)·sprint(Sprint.project_id) — 전부 NOT NULL FK(app/models/{loop,hypothesis,pm}.py 확認).
+# 진짜 project-무관은 workflow_line_config의 'wf_line_version' 뿐(version.project_id가 nullable —
+# 구조적으로 project 경계가 없을 수 있음, 그 호출부가 이미 로드된 엔티티의 project_id를 직접 넘김).
+PROJECT_SCOPED_WORK_ITEM_TYPES: frozenset[str] = frozenset(
+    {"story", "task", "doc", "visual_artifact", "loop", "hypothesis", "epic", "sprint"}
+)
+KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES: frozenset[str] = frozenset({"wf_line_version"})
+
+
+def is_project_scoped_work_item_type(work_item_type: str) -> bool:
+    """호출부가 resolve_work_item_project_id()의 None을 «project-무관 타입이라 통과»와
+    «project-scoped 타입인데 해소 실패라 거부» 로 갈라 판단할 때 쓴다. 새 타입 발명이 아니라
+    resolve_work_item_project_id가 이미 아는 분기를 그대로 드러낸 것(SSOT 재사용)."""
+    return work_item_type in PROJECT_SCOPED_WORK_ITEM_TYPES
+
+
+def is_known_project_agnostic_work_item_type(work_item_type: str) -> bool:
+    """#2237(②, fail-closed 전환): resolve_work_item_project_id()가 None을 반환했을 때 «통과»는
+    이 명시적 allowlist에 있는 타입에만 허용한다 — PROJECT_SCOPED_WORK_ITEM_TYPES에도 이 집합에도
+    없는 미분류 타입(오타·미래에 추가될 새 타입)은 기본값이 «거부»다(과거엔 기본값이 «통과»라
+    fail-open이었다 — 새 work_item_type이 조용히 다시 뚫리는 재발 클래스였다)."""
+    return work_item_type in KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES
+
+
 async def resolve_work_item_project_id(
     session: AsyncSession, org_id: uuid.UUID, work_item_type: str, work_item_id: uuid.UUID,
 ) -> uuid.UUID | None:
@@ -191,16 +223,24 @@ async def resolve_work_item_project_id(
     (routers/gates.py 제네릭 생성 엔드포인트·merge_verdict_gate.py evaluate_merge_gate)과
     override_gate()의 sr(step_run)=None 폴백용.
 
-    Story/Doc/VisualArtifact.project_id는 NOT NULL이라 row가 있으면 항상 값이 있다. Task는
-    project_id 컬럼이 없어 story JOIN. 미지원/미인식 work_item_type(예: workflow_line_config의
+    PROJECT_SCOPED_WORK_ITEM_TYPES 8종은 project_id가 NOT NULL이라 row가 있으면 항상 값이 있다.
+    Task는 project_id 컬럼이 없어 story JOIN. 미지원/미인식 work_item_type(예: workflow_line_config의
     org-level 'wf_line_version' — 실제로 project-무관일 수 있음)은 None(best-effort — silent
-    실패가 아니라 구조적으로 project-scoped가 아닐 수 있다는 정직한 신호).
+    실패가 아니라 구조적으로 project-scoped가 아닐 수 있다는 정직한 신호). #2237: 호출부는 이 None을
+    그대로 "통과"로 읽지 말고 is_known_project_agnostic_work_item_type()으로 한 번 더 갈라야 한다
+    (project-scoped 타입의 해소 실패=거부, 진짜 무관 타입=통과 — 같은 None을 뭉개면 전자가 새는 것을
+    #2237이 create_gate_endpoint에서 실측으로 확認했다).
 
     story #2082: visual_artifact 분기는 이 함수 신설 시(story #1968) 누락돼 있었다 —
     artifact_canonicalize 게이트(work_item_type="visual_artifact")의 project_id가 항상
     None으로 해소돼 assigned_to_me=true 인박스에서 project-level owner/admin에게 안 보이는
     (org owner/admin에게만 노출되는) 회귀였다. VisualArtifact.project_id는 NOT NULL이라
-    Story/Doc과 동형으로 항상 해소 가능."""
+    Story/Doc과 동형으로 항상 해소 가능.
+
+    #2237: loop(workflow_parallel_approval.py 병렬승인·loop.py 자체 결정 게이트)·hypothesis/epic/
+    sprint(workflow_parallel_approval.py가 WorkflowLineStepRun.entity_type을 work_item_type으로
+    그대로 넘긴다 — app/models/workflow_line.py ENTITY_TYPES={story,doc,hypothesis,epic,sprint})
+    4종 신규 — 전부 project_id NOT NULL FK 확認 후 추가(기계적 확認, 새 규칙 아님)."""
     if work_item_type == "story":
         return (await session.execute(
             select(Story.project_id).where(Story.id == work_item_id, Story.org_id == org_id)
@@ -220,6 +260,24 @@ async def resolve_work_item_project_id(
             select(VisualArtifact.project_id).where(
                 VisualArtifact.id == work_item_id, VisualArtifact.org_id == org_id,
             )
+        )).scalar_one_or_none()
+    if work_item_type == "loop":
+        return (await session.execute(
+            select(LoopRun.project_id).where(LoopRun.id == work_item_id, LoopRun.org_id == org_id)
+        )).scalar_one_or_none()
+    if work_item_type == "hypothesis":
+        return (await session.execute(
+            select(Hypothesis.project_id).where(
+                Hypothesis.id == work_item_id, Hypothesis.org_id == org_id,
+            )
+        )).scalar_one_or_none()
+    if work_item_type == "epic":  # 실체=Goal(B1 rename 前 work_item_type 리터럴이 그대로 남음).
+        return (await session.execute(
+            select(Goal.project_id).where(Goal.id == work_item_id, Goal.org_id == org_id)
+        )).scalar_one_or_none()
+    if work_item_type == "sprint":
+        return (await session.execute(
+            select(Sprint.project_id).where(Sprint.id == work_item_id, Sprint.org_id == org_id)
         )).scalar_one_or_none()
     return None
 

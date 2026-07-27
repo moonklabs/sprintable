@@ -616,10 +616,10 @@ async def get_doc_share(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> ShareStatusResponse:
-    doc = await repo.get(id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Doc not found")
-    await _resolve_doc_member_id(auth, repo.org_id, db)  # 멤버십 게이트(비멤버 차단)
+    # #2237: 형제(enable/regenerate/disable_doc_share)와 동일한 project 접근권 가드로 통일 —
+    # 기존엔 org 멤버십(_resolve_doc_member_id)만 확認하고 project 접근권은 안 봤다.
+    # _require_doc_project_access가 org-scope 존재검증(404)+project 접근권(403)을 함께 처리한다.
+    await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     from app.services import doc_share
     return _share_resp(await doc_share.get_status(db, repo.org_id, id))
 
@@ -683,13 +683,13 @@ async def list_doc_comments(
     limit: int = Query(default=20, le=100),
     db: AsyncSession = Depends(get_db),
     repo: DocRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[DocCommentResponse]:
     # ⚠️S28 보안(까심 RC twin·revisions 동형 IDOR): doc 이 caller org 소속인지 org-scoped repo 로 검증.
     # ⭐comments 는 revisions(S28 전 잠복)와 달리 이미 populated 라 active cross-org 노출이었다(pre-
     # existing·revisions 고치며 surface sweep 서 적출·같이 봉인). org_id 가드(방어 심층).
-    doc = await repo.get(id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Doc not found")
+    # #2237: 형제(add_doc_comment)와 동일한 project 접근권 가드 추가(기존엔 org-scope만 봤다).
+    doc = await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     q = select(DocComment).where(
         DocComment.doc_id == id,
         DocComment.org_id == repo.org_id,
@@ -731,13 +731,13 @@ async def list_doc_revisions(
     limit: int = Query(default=50, le=100),
     db: AsyncSession = Depends(get_db),
     repo: DocRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[DocRevisionResponse]:
     # ⚠️S28 보안(까심 RC·cross-org IDOR): doc 이 caller org 소속인지 org-scoped repo 로 먼저 검증.
     # 안 하면 다른 org 가 doc UUID 추측만으로 revision content 를 읽는다(S28 전엔 revision 미배선이라
     # 빈 응답 잠복·재상신 스냅샷 배선으로 활성화). revision 쿼리에도 org_id 가드(방어 심층).
-    doc = await repo.get(id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Doc not found")
+    # #2237: 형제(PATCH/DELETE /{id})와 동일한 project 접근권 가드 추가(기존엔 org-scope만 봤다).
+    doc = await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     q = select(DocRevision).where(
         DocRevision.doc_id == id,
         DocRevision.org_id == repo.org_id,
