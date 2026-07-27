@@ -174,6 +174,7 @@ export default function InboxPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const t = useTranslations('inbox');
+  const tCommon = useTranslations('common');
   const tCage = useTranslations('cage');
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const activeTab = searchParams.get('tab') ?? 'notifications';
@@ -412,7 +413,7 @@ export default function InboxPage() {
             {projectId ? (
               <AttentionQueueView projectId={projectId} memberId={currentTeamMemberId} />
             ) : (
-              <p className="text-xs text-muted-foreground">{t('loading')}</p>
+              <p className="text-xs text-muted-foreground">{tCommon('loading')}</p>
             )}
           </div>
         ) : activeTab === 'gates' ? (
