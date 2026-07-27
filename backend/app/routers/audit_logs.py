@@ -8,7 +8,7 @@ from app.dependencies.database import get_db
 from app.repositories.audit import AuditLogRepository
 from app.schemas.audit import AuditLogResponse
 
-router = APIRouter(prefix="/api/v2/audit-logs", tags=["audit-logs"])
+router = APIRouter(prefix="/api/v2/audit-logs", tags=["audit-logs", "Trust"])
 
 
 def _get_repo(

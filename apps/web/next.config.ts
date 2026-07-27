@@ -35,6 +35,12 @@ const nextConfig: NextConfig = {
   // Set NEXT_DEV_ALLOWED_ORIGINS=host1,host2 in .env.local to enable
   allowedDevOrigins: process.env['NEXT_DEV_ALLOWED_ORIGINS']?.split(',').map((s) => s.trim()).filter(Boolean) ?? [],
   output: 'standalone',
+  // story #2050: 채팅 첨부 이미지가 next/image로 GCS 서명 URL을 리사이즈 요청할 수 있도록 허용.
+  // src는 항상 우리 /api/attachments/sign 응답에서만 오므로(사용자 입력 직접 미반영) 호스트
+  // 단위 허용으로 충분 — CSP img-src에도 이미 동일 호스트가 허용돼 있다.
+  images: {
+    remotePatterns: [{ protocol: 'https', hostname: 'storage.googleapis.com' }],
+  },
   // Bundle workspace packages from source (resolved via tsconfig paths) rather than
   // externalizing their built dist. The Cloud Build context uploads the host's
   // packages/*/dist (no .gcloudignore) and `next build --webpack` never rebuilds it,
@@ -67,6 +73,17 @@ const nextConfig: NextConfig = {
       // app(한)↔랜딩(영) 내용 상이로 별도 콘텐츠 스토리에서 처리한다.
       { source: '/llms.txt', destination: 'https://sprintable.ai/llms.txt', statusCode: 301, has: [{ type: 'host', value: 'app.sprintable.ai' }] },
       { source: '/llms-full.txt', destination: 'https://sprintable.ai/llms-full.txt', statusCode: 301, has: [{ type: 'host', value: 'app.sprintable.ai' }] },
+      // story c4980e70(조직 1급화 IA·doc org-1st-class-surface-ia-design-b §1): 에이전트 관리가
+      // /agents → /organization/workforce(조직=1급 구역)로 승격. 서브라우트 전체(상세·runs·recruiter 등) 보존.
+      { source: '/agents', destination: '/organization/workforce', permanent: true },
+      { source: '/agents/:path*', destination: '/organization/workforce/:path*', permanent: true },
+      // org-members 탭(settings)도 같은 승격 — 조직 구성원 관리의 새 1급 홈은 /organization/members.
+      {
+        source: '/settings',
+        has: [{ type: 'query', key: 'tab', value: 'org-members' }],
+        destination: '/organization/members',
+        permanent: true,
+      },
     ];
   },
   async rewrites() {

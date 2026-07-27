@@ -1,4 +1,6 @@
-"""스토리 관련 MCP 도구 (8개)."""
+"""스토리 관련 MCP 도구 (7개). E-SECURITY SEC-S1: delete_story는 의도적으로 제거됨 — 에이전트
+hard-delete는 사람 승인 없는 물리삭제라 차단(DELETE 엔드포인트 자체는 유지, 휴먼 전용으로 승격).
+삭제가 필요한 워크플로우는 상태변경/archive로 대체."""
 from __future__ import annotations
 
 from mcp.types import CallToolResult, TextContent
@@ -26,6 +28,9 @@ class AddStoryInput(SprintableInput):
     story_points: StoryPoints | None = None
     description: str | None = None
     acceptance_criteria: str | None = None
+    # P0-05 후속(doc scope-violation-signal-design §1 확定): 선언 주체 제한 없음 — 에이전트
+    # 자기신고 착수시점 파일-경로 글롭 선언(예: ["backend/app/routers/stories.py", "backend/tests/**"]).
+    declared_scope_paths: list[str] | None = None
 
 
 class UpdateStoryInput(SprintableInput):
@@ -37,14 +42,12 @@ class UpdateStoryInput(SprintableInput):
     acceptance_criteria: str | None = None
     assignee_id: str | None = None
     epic_id: str | None = None
+    # P0-05 후속: 도중 재선언/축소/해제(빈 배열)도 가능 — story.declared_scope_changed 감사 이벤트로 기록.
+    declared_scope_paths: list[str] | None = None
     # [{content_base64, name, content_type}, ...] — 스샷/작은 문서(최대 5개·파일당 2MiB·총 6MiB).
     # 기존 첨부에 **추가**된다(PATCH attachments 는 서버측 full-replace 라 update_story 가 먼저 기존
     # 첨부를 읽어 병합 — 새 첨부가 기존 걸 지우지 않는다).
     attachments: list[dict] | None = None
-
-
-class DeleteStoryInput(SprintableInput):
-    story_id: str
 
 
 class AssignStoryToSprintInput(SprintableInput):
@@ -63,20 +66,20 @@ class UpdateStoryStatusInput(SprintableInput):
 
 async def list_stories(args: ListStoriesInput) -> list[TextContent]:
     """프로젝트 스토리 목록 조회."""
-    params: dict = {"project_id": client.project_id}
-    if client.org_id:
-        params["org_id"] = client.org_id
-    if args.sprint_id:
-        params["sprint_id"] = args.sprint_id
-    if args.epic_id:
-        params["epic_id"] = args.epic_id
-    if args.status:
-        params["status"] = args.status.value
-    if args.priority:
-        params["priority"] = args.priority.value
-    if args.assignee_id:
-        params["assignee_id"] = args.assignee_id
     try:
+        params: dict = {"project_id": client.require_project_id()}
+        if client.org_id:
+            params["org_id"] = client.org_id
+        if args.sprint_id:
+            params["sprint_id"] = args.sprint_id
+        if args.epic_id:
+            params["epic_id"] = args.epic_id
+        if args.status:
+            params["status"] = args.status.value
+        if args.priority:
+            params["priority"] = args.priority.value
+        if args.assignee_id:
+            params["assignee_id"] = args.assignee_id
         return ok(await client.get("/api/v2/stories", params=params))
     except Exception as exc:
         return err(str(exc))
@@ -89,7 +92,7 @@ async def list_backlog(args: SprintableInput) -> list[TextContent]:
     # ⚠️ no_sprint 는 project_id 와 함께여야 backlog 분기 동작(stories.py list_stories).
     try:
         return ok(await client.get(
-            "/api/v2/stories", params={"project_id": client.project_id, "no_sprint": "true"}
+            "/api/v2/stories", params={"project_id": client.require_project_id(), "no_sprint": "true"}
         ))
     except Exception as exc:
         return err(str(exc))
@@ -97,22 +100,24 @@ async def list_backlog(args: SprintableInput) -> list[TextContent]:
 
 async def add_story(args: AddStoryInput) -> list[TextContent]:
     """스토리 생성."""
-    body: dict = {"title": args.title, "project_id": client.project_id}
-    if args.epic_id:
-        body["epic_id"] = args.epic_id
-    if args.sprint_id:
-        body["sprint_id"] = args.sprint_id
-    if args.assignee_id:
-        body["assignee_id"] = args.assignee_id
-    if args.priority:
-        body["priority"] = args.priority.value
-    if args.story_points:
-        body["story_points"] = args.story_points.value
-    if args.description:
-        body["description"] = args.description
-    if args.acceptance_criteria:
-        body["acceptance_criteria"] = args.acceptance_criteria
     try:
+        body: dict = {"title": args.title, "project_id": client.require_project_id()}
+        if args.epic_id:
+            body["epic_id"] = args.epic_id
+        if args.sprint_id:
+            body["sprint_id"] = args.sprint_id
+        if args.assignee_id:
+            body["assignee_id"] = args.assignee_id
+        if args.priority:
+            body["priority"] = args.priority.value
+        if args.story_points:
+            body["story_points"] = args.story_points.value
+        if args.description:
+            body["description"] = args.description
+        if args.acceptance_criteria:
+            body["acceptance_criteria"] = args.acceptance_criteria
+        if args.declared_scope_paths is not None:
+            body["declared_scope_paths"] = args.declared_scope_paths
         return ok(await client.post("/api/v2/stories", json=body))
     except Exception as exc:
         return err(str(exc))
@@ -135,6 +140,8 @@ async def update_story(args: UpdateStoryInput) -> list[TextContent]:
         updates["assignee_id"] = args.assignee_id
     if args.epic_id is not None:
         updates["epic_id"] = args.epic_id
+    if args.declared_scope_paths is not None:
+        updates["declared_scope_paths"] = args.declared_scope_paths
     try:
         if args.attachments:
             uploaded = await upload_attachments(
@@ -147,15 +154,6 @@ async def update_story(args: UpdateStoryInput) -> list[TextContent]:
                 existing = current.get("attachments") or [] if isinstance(current, dict) else []
                 updates["attachments"] = existing + uploaded
         return ok(await client.patch(f"/api/v2/stories/{args.story_id}", json=updates))
-    except Exception as exc:
-        return err(str(exc))
-
-
-async def delete_story(args: DeleteStoryInput) -> list[TextContent]:
-    """스토리 삭제."""
-    try:
-        await client.delete(f"/api/v2/stories/{args.story_id}")
-        return ok({"deleted": True})
     except Exception as exc:
         return err(str(exc))
 

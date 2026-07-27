@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from app.routers import gates as gates_mod
 from app.routers.gates import (
@@ -50,7 +50,10 @@ def _doc_gate(requester_id: uuid.UUID):
 
 async def _call(resolved, *, execute_results, has_access=None, status="approved"):
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=execute_results)
+    # story #2027: status="approved" 경로는 이 authz 체크들 뒤에 get_org_posture()로 session.execute
+    # 를 1회 더 호출한다(risk_grade 사유-강제 가드) — side_effect 리스트 끝에 그 몫을 추가. 이 파일의
+    # 관심사(project-access/self-approval authz)와 무관하므로 결과값은 무의미(None으로 충분).
+    session.execute = AsyncMock(side_effect=[*execute_results, _result(None)])
     transition = AsyncMock(return_value=SimpleNamespace())
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     patches = [
@@ -65,7 +68,10 @@ async def _call(resolved, *, execute_results, has_access=None, status="approved"
         for p in patches:
             stack.enter_context(p)
         result = await transition_gate_endpoint(
-            id=uuid.uuid4(), body=GateTransitionRequest(status=status),
+            # note 동봉: risk_grade 폴백(미분류 gate_type→고위험)이 이 authz 테스트의 관심사가
+            # 아닌 사유-강제 가드에 걸리지 않도록.
+            id=uuid.uuid4(), body=GateTransitionRequest(status=status, note="테스트 사유"),
+            background_tasks=BackgroundTasks(),
             session=session, org_id=uuid.uuid4(), auth=auth,
         )
     return result, transition
@@ -85,6 +91,7 @@ async def test_doc_gate_self_approval_forbidden():
         with pytest.raises(HTTPException) as ei:
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
             )
     assert ei.value.status_code == 403
@@ -104,6 +111,7 @@ async def test_doc_gate_missing_requester_fail_closed():
         with pytest.raises(HTTPException) as ei:
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
             )
     assert ei.value.status_code == 403
@@ -125,6 +133,7 @@ async def test_doc_gate_no_project_access_forbidden():
         with pytest.raises(HTTPException) as ei:
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
             )
     assert ei.value.status_code == 403
@@ -145,6 +154,7 @@ async def test_doc_gate_deleted_doc_forbidden():
         with pytest.raises(HTTPException) as ei:
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=session, org_id=uuid.uuid4(), auth=auth,
             )
     assert ei.value.status_code == 403
@@ -195,10 +205,21 @@ async def test_generic_endpoint_rejects_doc_approval_defense_in_depth():
 # ── 비-doc 게이트(merge 등)는 새 authz 무적용(기존 경로 무변경) ──
 @pytest.mark.anyio
 async def test_non_doc_gate_skips_doc_authz():
-    merge_gate = SimpleNamespace(gate_type="merge_approval", neutral_facts={}, work_item_id=uuid.uuid4())
-    # doc-gate 분기 미진입 → has_project_access 미호출·doc 미로드. transition 정상.
-    result, transition = await _call(
-        _human(uuid.uuid4()), execute_results=[_result(merge_gate)], has_access=None
+    # #2198: non-doc 분기가 이제 work_item_type/work_item_id 로 project 인가(rule B)를 강제하므로
+    # 명시(누락 시 AttributeError) — 이 테스트의 관심사는 "doc authz 분기를 안 타는가"이지 rule B
+    # 자체의 project-role 판정이 아니므로 _non_doc_gate_approvable 을 직접 patch 해 True 로 고정
+    # (그 판정 자체는 test_1974_gate_assigned_to_me.py/test_2198_*_realdb.py 가 커버).
+    merge_gate = SimpleNamespace(
+        gate_type="merge_approval", neutral_facts={}, work_item_id=uuid.uuid4(),
+        work_item_type="story",
     )
+    with patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)):
+        # doc-gate 분기 미진입 → has_project_access 미호출·doc 미로드. transition 정상.
+        # execute_results 2번째 = resolve_work_item_project_id(work_item_type="story")의 조회.
+        result, transition = await _call(
+            _human(uuid.uuid4()),
+            execute_results=[_result(merge_gate), _result(uuid.uuid4())],
+            has_access=None,
+        )
     assert result == "OK"
     transition.assert_awaited_once()

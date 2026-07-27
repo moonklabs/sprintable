@@ -303,6 +303,7 @@ async def decide_loop_artifacts(
         session, org_id, loop.id, "loop", "loop_decision",
         caller.id, role_id,
         neutral_facts={"requested_by_member_id": str(caller.id), "loop_title": loop.title},
+        project_id=loop.project_id,
     )
     # 재-결정 방지: 이 loop의 결정 프로세스가 이미 종결(approved/rejected)됐으면 side-effect 전 조기 차단.
     if gate.status != "pending":

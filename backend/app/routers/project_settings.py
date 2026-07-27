@@ -11,7 +11,7 @@ from app.models.project_setting import ProjectSetting
 from app.schemas.project_setting import ProjectSettingResponse, UpdateProjectSetting
 from app.services.project_auth import has_project_access, has_project_role
 
-router = APIRouter(prefix="/api/v2/project-settings", tags=["project-settings"])
+router = APIRouter(prefix="/api/v2/project-settings", tags=["project-settings", "Organization"])
 
 _DEFAULT_DEADLINE = time(9, 0)
 

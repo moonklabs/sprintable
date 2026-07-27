@@ -94,7 +94,9 @@ export function MyProfileSection() {
               </div>
             )}
           </div>
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {/* story #2105 2차 — handleSave가 재시도 전 setError(null)을 먼저 호출해(위 정의) 매
+              시도마다 언마운트→리마운트된다. */}
+          {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{error}</p>}
           <div className="flex items-center gap-4 py-2.5">
             <span className="w-20 shrink-0 text-muted-foreground">{t('profileEmail')}</span>
             <span className="text-muted-foreground">{profile.email ?? '—'}</span>

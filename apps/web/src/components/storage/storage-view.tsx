@@ -7,6 +7,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { formatTotalSize } from '@/lib/storage/format';
 import { StorageCapacityBanner } from './storage-capacity-banner';
 import { StorageFolderTree } from './storage-folder-tree';
@@ -22,9 +23,12 @@ import type {
   StorageViewMode,
 } from '@/lib/storage/types';
 
-export function StorageView() {
+// story a539c649 S3a/b: projectId 는 이제 page.tsx(headers() 경유 resolve 결과)가 prop 으로
+// 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 URL 이 가리키는 project.
+// projectName 은 순수 표시용(폴더 트리 헤더)이라 전역 컨텍스트 그대로 유지(artifacts와 동형).
+export function StorageView({ projectId }: { projectId: string }) {
   const t = useTranslations('storage');
-  const { projectId, projectName } = useDashboardContext();
+  const { projectName } = useDashboardContext();
 
   const [folders, setFolders] = useState<Folder[]>([]);
   const [items, setItems] = useState<Asset[]>([]);
@@ -47,6 +51,12 @@ export function StorageView() {
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const detailPanel = useContextualPanelState({ storageKey: 'storage-detail', defaultOpen: true });
+  // story #2061 — role/aria-modal은 있었지만 포커스 트랩·Esc·반환이 없던 손수구현 드로어.
+  const { setDrawerOpen: setDetailDrawerOpen } = detailPanel;
+  const detailDrawerTrapRef = useFocusTrap(
+    !detailPanel.supportsInlinePanel && detailPanel.drawerOpen,
+    useCallback(() => setDetailDrawerOpen(false), [setDetailDrawerOpen]),
+  );
   const reqIdRef = useRef(0);
 
   // 검색 디바운스
@@ -73,6 +83,34 @@ export function StorageView() {
       cancelled = true;
     };
   }, [projectId]);
+
+  // story #1939: 루트 레벨 폴더 생성. BE는 raw FastAPI 에러 바디({detail})를 그대로 통과시키므로
+  // (POST 핸들러가 !ok 응답을 apiSuccess로 감싸지 않고 원본 그대로 반환) 그 형태로 파싱한다.
+  const handleCreateFolder = useCallback(
+    async (name: string): Promise<{ ok: true } | { ok: false; errorMessage: string }> => {
+      if (!projectId) return { ok: false, errorMessage: t('newFolderGenericError') };
+      try {
+        const res = await fetch('/api/folders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, project_id: projectId }),
+        });
+        if (!res.ok) {
+          if (res.status === 409) return { ok: false, errorMessage: t('newFolderDuplicateError') };
+          return { ok: false, errorMessage: t('newFolderGenericError') };
+        }
+        const json = (await res.json()) as { data?: Folder };
+        const created = json.data;
+        if (!created) return { ok: false, errorMessage: t('newFolderGenericError') };
+        setFolders((prev) => [...prev, created]);
+        setSelectedFolderId(created.id);
+        return { ok: true };
+      } catch {
+        return { ok: false, errorMessage: t('newFolderGenericError') };
+      }
+    },
+    [projectId, t],
+  );
 
   const buildAssetsUrl = useCallback(
     (cursor?: string | null) => {
@@ -244,7 +282,7 @@ export function StorageView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <TopBarSlot title={topBarTitle} />
+      <TopBarSlot title={topBarTitle} showContextChip />
 
       <div className="px-4 pt-3 empty:hidden">
         <StorageCapacityBanner />
@@ -266,6 +304,7 @@ export function StorageView() {
           projectName={projectName}
           folderSearch={folderSearch}
           onFolderSearchChange={setFolderSearch}
+          onCreateFolder={handleCreateFolder}
         />
 
         <StorageAssetList
@@ -303,7 +342,14 @@ export function StorageView() {
 
       {/* <1536: 상세 패널 드로어 (contextual-panel storageKey 'storage-detail') */}
       {!supportsInlinePanel && detailPanel.drawerOpen ? (
-        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={t('title')}>
+        <div
+          ref={detailDrawerTrapRef}
+          tabIndex={-1}
+          className="fixed inset-0 z-50 outline-none"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('title')}
+        >
           <button
             type="button"
             aria-label={t('cancel')}

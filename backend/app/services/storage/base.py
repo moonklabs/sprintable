@@ -23,6 +23,13 @@ class StorageProvider(abc.ABC):
         """단기 만료 read 서명 URL. 실패 시 None(best-effort)."""
 
     @abc.abstractmethod
+    async def signed_write_url(
+        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None
+    ) -> str | None:
+        """단기 만료 write(PUT) 서명 URL — D3(put=FE) 원칙 유지하며 대용량 바이너리가 BE(Cloud Run)를
+        경유하지 않게 한다(E-CANVAS C1-S5: FE가 캡처한 PNG를 GCS에 직접 PUT). 실패 시 None(best-effort)."""
+
+    @abc.abstractmethod
     async def delete_object(self, container: str, object_path: str) -> bool:
         """객체 hard-delete(S8 grace cron). 이미 없으면 True(멱등)·실패 시 False(best-effort·호출부 계속)."""
 

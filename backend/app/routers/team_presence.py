@@ -30,7 +30,7 @@ from app.routers.team_members import _inject_active_stories
 from app.schemas.team_member import ActiveStorySummary
 from app.services import chat_presence
 
-router = APIRouter(prefix="/api/v2/team-presence", tags=["team-presence"])
+router = APIRouter(prefix="/api/v2/team-presence", tags=["team-presence", "Organization"])
 
 
 class TeamPresenceItem(BaseModel):
@@ -64,7 +64,7 @@ async def get_team_presence(
 
     # presence_status(computed) + active_story 주입은 team_members 경로 재사용(로직 중복 방지).
     responses = await _inject_active_stories(unique, session)
-    working_ids = chat_presence.working_member_ids()
+    working_ids = await chat_presence.working_member_ids()
 
     return [
         TeamPresenceItem(

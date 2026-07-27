@@ -28,9 +28,9 @@ from app.services.project_auth import (
     is_org_owner_or_admin,
 )
 
-router = APIRouter(prefix="/api/v2/projects", tags=["hitl-gate-config"])
+router = APIRouter(prefix="/api/v2/projects", tags=["hitl-gate-config", "Trust"])
 # S-GATE-4: org 기본값 단독 조회용 org-layer 라우터(project-effective GET과 별개·org 탭 surface).
-org_router = APIRouter(prefix="/api/v2/organizations", tags=["hitl-gate-config"])
+org_router = APIRouter(prefix="/api/v2/organizations", tags=["hitl-gate-config", "Trust"])
 
 
 class GateLevelEntry(BaseModel):

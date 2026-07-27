@@ -254,7 +254,12 @@ export function WorkflowTemplateGallerySection({
             })}
 
             {applyResult && (
-              <p className={`text-xs ${applyResult.ok ? 'text-success' : 'text-destructive'}`}>
+              <p
+                className={`text-xs ${applyResult.ok ? 'text-success' : 'text-destructive'}`}
+                role={applyResult.ok ? 'status' : 'alert'}
+                aria-live={applyResult.ok ? 'polite' : 'assertive'}
+                aria-atomic="true"
+              >
                 {applyResult.message}
               </p>
             )}

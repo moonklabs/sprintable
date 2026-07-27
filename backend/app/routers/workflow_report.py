@@ -42,7 +42,7 @@ def _fire_webhook(url: str, content: str, title: str, memo_url: str, memo_id: st
     except Exception:  # noqa: BLE001
         logger.warning("reply webhook fire failed url=%s", url, exc_info=True)
 
-router = APIRouter(prefix="/api/v2/workflow", tags=["workflow"])
+router = APIRouter(prefix="/api/v2/workflow", tags=["workflow", "Work"])
 
 # ─── 파이프라인 정의 (하드코딩) ───────────────────────────────────────────────
 
@@ -148,6 +148,14 @@ async def report_done(
     if story is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Story not found")
 
+    # E-SECURITY SEC-S8(story 83ea3d6a) Z2(까심 전수스윕, 실HTTP 확定): org-scope(#12)는 있으나
+    # caller의 실제 project 접근권(has_project_access) 검증이 없어, project_a만 grant된 caller가
+    # project_b story_id로 이 엔드포인트를 호출하면 stage 전이가 실제로 반영됐다(DB 재조회로
+    # backlog→in-progress 변조 확定, G-class).
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(session, uuid.UUID(auth.user_id), story.project_id, org_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Story not found")
+
     # S20 finding #12(sibling): body.agent_id도 검증 없이 gate/line 평가의 actor로 그대로
     # 쓰였다 — 임의 agent_id로 actor 스푸핑 가능했던 갭. caller org 소속 member인지 확인.
     agent_check = await session.execute(
@@ -238,8 +246,38 @@ async def report_done(
 
     # 스토리 상태 업데이트 (merge에서 auto_merge가 아니면 story_status=None이라 skip)
     if story_status:
+        old_status = story.status
         story_repo = StoryRepository(session, story.org_id)
-        await story_repo.update(story.id, status=story_status)
+        updated_story = await story_repo.update(story.id, status=story_status)
+        # story #2067(발견·회귀수정): 이 경로가 status_changed side-effects(events→L1·webhook·L2·
+        # notif·activity, 41a6e294 공유 helper)를 한 번도 안 불렀다 — 이 엔드포인트가 "에이전트가
+        # 스테이지 완료를 보고"하는 가장 흔한 status 변경 경로인데도(auto-merge→done 포함) board
+        # 실시간 갱신·알림·웹훅이 조용히 안 나갔다. PATCH /{id}/status와 동일 helper로 parity 확보.
+        if updated_story is not None:
+            agent_member = (await session.execute(
+                select(TeamMember).where(TeamMember.id == body.agent_id).limit(1)
+            )).scalar_one_or_none()
+            # E-ARCH S3b(story #2078): SSE만 outbox에 atomic 적재 — 반드시 commit 전에 호출
+            # (그래야 story status 커밋에 outbox row가 같이 실린다). event_broker_outbox_enabled
+            # 꺼진 동안은 완전 no-op(무회귀) — 아래 emit_story_status_changed()의 기존
+            # _push_to_agent 루프가 여전히 유일한 실 SSE 경로.
+            from app.services.story_status_events import stage_status_changed_sse_outbox
+            await stage_status_changed_sse_outbox(
+                session, story.org_id, updated_story, old_status,
+                actor_id=body.agent_id,
+                actor_name=agent_member.name if agent_member else None,
+                actor_role=agent_member.role if agent_member else None,
+                actor_type="agent",
+            )
+            await session.commit()
+            from app.services.story_status_events import emit_story_status_changed
+            await emit_story_status_changed(
+                session, story.org_id, updated_story, old_status,
+                actor_id=body.agent_id,
+                actor_name=agent_member.name if agent_member else None,
+                actor_role=agent_member.role if agent_member else None,
+                actor_type="agent",
+            )
 
     return ReportDoneResponse(
         story_id=body.story_id,

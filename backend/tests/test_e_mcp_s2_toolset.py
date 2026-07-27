@@ -37,6 +37,14 @@ def test_destructive_detection():
     assert not is_destructive("sprintable_list_stories")
 
 
+def test_standup_missing_grouped_with_standup_not_analytics():
+    """story 205e6831: standup_missing이 analytics 키워드 그룹에 잘못 묶여 있었음(피커 라벨
+    오분류) — standup 그룹으로 재분류. 이후 스탠드업 5종이 core(_ALWAYS_ALLOWED)로 편입돼
+    is_tool_allowed는 scope 무관 항상 True가 됐지만(별도 테스트), tool_group()의 분류 자체는
+    여전히 "analytics"가 아닌 "standup"이어야 한다(피커 UI 라벨 정합)."""
+    assert tool_group("sprintable_standup_missing") == "standup"
+
+
 def test_lock_unlock_reclassified_non_destructive():
     """S17: lock_files/unlock_files 는 file_locks.py 확인 결과 org/project-scoped advisory 조율
     도구(데이터 삭제/변경 아님) — is_destructive/admin 그룹 오분류를 근본수정. 진짜 파괴 작업

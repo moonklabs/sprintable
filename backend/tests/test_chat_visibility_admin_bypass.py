@@ -181,15 +181,37 @@ def _admin_routing_db(*, conv, project_id, participant_member_ids, agent_ids, ad
     - _effective_org_role(OrgMember.role) → admin_role
     - 헬퍼 participant/agent 조회 → human 판별
     - participant 체크 → requester_is_participant
+    - story #2009: get_conversation이 `_fetch_conversation_participants`(participants 배치
+      + lookup_members_by_ids + runtime_type 배치)를 추가로 호출 — 컬럼명 기반으로 정밀 분기.
     """
+    from collections import namedtuple
+
     sender = MagicMock()
     sender.id = uuid.uuid4()
     sender.role = "member"  # raw project role 낮음 — org에서 admin 상속
     sender.type = "human"
     sender.name = "admin user"
 
+    ParticipantRow = namedtuple("ParticipantRow", ["conversation_id", "member_id"])
+    RuntimeTypeRow = namedtuple("RuntimeTypeRow", ["id", "runtime_type"])
+
+    def _resolved_member_mock(mid):
+        m = MagicMock()
+        m.id = mid
+        m.user_id = uuid.uuid4()
+        m.name = f"member-{str(mid)[:8]}"
+        m.type = "agent" if mid in agent_ids else "human"
+        m.role = "member"
+        m.org_id = conv.org_id
+        m.project_id = project_id
+        m.avatar_url = None
+        return m
+
     async def _execute(stmt, *a, **k):
         sql = str(stmt).lower()
+        cols = list(stmt.selected_columns) if hasattr(stmt, "selected_columns") else []
+        col_names = {c.name for c in cols} if cols else set()
+
         # Conversation 단건 조회(participant 테이블 미포함 + conversations FROM)
         if "from conversations" in sql and "conversation_participants" not in sql:
             res = MagicMock()
@@ -199,23 +221,43 @@ def _admin_routing_db(*, conv, project_id, participant_member_ids, agent_ids, ad
             res = MagicMock()
             res.scalar_one_or_none.return_value = admin_role
             return res
-        if "team_members" in sql and "conversation_participants" not in sql:
-            # 두 용도: _resolve_member(sender) 또는 헬퍼 agent 확정
-            if "type" in sql and ("in (" in sql or "in(" in sql):
-                return _scalars_all(list(agent_ids))
-            res = MagicMock()
-            res.scalars.return_value.first.return_value = sender
-            return res
         if "conversation_participants" in sql:
-            cols = stmt.selected_columns if hasattr(stmt, "selected_columns") else None
-            ncols = len(list(cols)) if cols is not None else 1
-            if ncols >= 2:
-                return _rows_all([(conv.id, mid) for mid in participant_member_ids])
-            # 단건: member_id 헬퍼 또는 participant 체크
-            # participant 체크는 scalar_one_or_none 사용 → 별도 분기
+            if col_names == {"conversation_id", "member_id"}:
+                # story #2009: `_fetch_conversation_participants`(및 `_conversations_with_human_
+                # participant`)의 배치 조회 — attribute+tuple 겸용 namedtuple로 실 Row 흉내.
+                return _rows_all([
+                    ParticipantRow(conversation_id=conv.id, member_id=mid)
+                    for mid in participant_member_ids
+                ])
+            if col_names == {"muted_at", "last_read_at"}:
+                # 270c87e6/#1976: caller mute/read-state 조회 — one_or_none() 사용.
+                res = MagicMock()
+                row = MagicMock()
+                row.muted_at = None
+                row.last_read_at = None
+                res.one_or_none.return_value = row if requester_is_participant else None
+                return res
+            # 단건: member_id 헬퍼(1-col) 또는 participant 체크(scalar_one_or_none)
             res = MagicMock()
             res.scalars.return_value.all.return_value = list(participant_member_ids)
             res.scalar_one_or_none.return_value = (uuid.uuid4() if requester_is_participant else None)
+            return res
+        if "team_members" in sql:
+            # 4용도: _resolve_member(sender) / 헬퍼 agent 확정(1-col) /
+            # story #2009 lookup_members_by_ids(full-row) / runtime_type 배치(2-col).
+            if col_names == {"id", "runtime_type"}:
+                return _rows_all([
+                    RuntimeTypeRow(id=mid, runtime_type=("claude_code" if mid in agent_ids else None))
+                    for mid in participant_member_ids
+                ])
+            if col_names == {"id"} and "type" in sql and ("in (" in sql or "in(" in sql):
+                return _scalars_all(list(agent_ids))
+            if "team_members.id in" in sql or "team_members.id in(" in sql:
+                # story #2009: lookup_members_by_ids(전체 컬럼 select, id IN 필터).
+                return _scalars_all([_resolved_member_mock(mid) for mid in participant_member_ids])
+            # _resolve_member: user_id/org_id(/project_id) 등치 필터, id IN 아님.
+            res = MagicMock()
+            res.scalars.return_value.first.return_value = sender
             return res
         res = MagicMock()
         res.scalars.return_value.all.return_value = []
@@ -316,6 +358,24 @@ def _messages_routing_db(*, conv_id, project_id, participant_member_ids, agent_i
         if "from conversations" in sql and "conversation_participants" not in sql:
             res = MagicMock()
             res.scalar_one_or_none.return_value = project_id
+            return res
+        # story #1994 4회차: `_can_read_conversation`이 이제 participant∧admin-bypass 판정을
+        # `conversation_auth.conversation_readable_predicate`(SSOT) 하나의 `SELECT (<bool expr>)`
+        # 스칼라 쿼리로 접어 낸다(과거엔 참가자 존재 여부·human-participant 여부가 각각 별도
+        # `db.execute` 호출이었다 — 그래서 아래 `conversation_participants`/`team_members`
+        # 분기가 각각 독립적으로 답했다). 이 새 쿼리는 correlated EXISTS로 컴파일되므로 여전히
+        # sql 문자열에 "conversation_participants"/"team_members"가 등장하지만, 정답은 그
+        # 존재만으로 답할 수 있는 단일 값이 아니라 이 테스트 시나리오의 파라미터
+        # (participant_member_ids/agent_ids/requester_is_participant/admin_role)를 조합해야
+        # 나온다 — 그래서 "exists (select 1"이 나타나는 쿼리(이 predicate 특유의 시그니처)를
+        # 가장 먼저·가장 구체적으로 매치해 직접 계산한다(하위 범용 분기가 가로채기 전에).
+        if "exists (select 1" in sql and "conversation_participants" in sql:
+            has_human = any(mid not in agent_ids for mid in participant_member_ids)
+            admin_bypass = (not has_human) and admin_role in ("owner", "admin")
+            answer = bool(requester_is_participant or admin_bypass)
+            res = MagicMock()
+            res.scalar_one.return_value = answer
+            res.scalar_one_or_none.return_value = answer
             return res
         if "org_members" in sql:
             res = MagicMock()

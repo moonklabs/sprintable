@@ -118,9 +118,26 @@ export async function proxyToFastapi(
   });
 
   const resBody = await res.text();
+  const resHeaders: Record<string, string> = { 'Content-Type': res.headers.get('Content-Type') ?? 'application/json' };
+  // story #2190 — board 분기(list_stories status+project_id 조합)가 커서 페이지네이션 신호를
+  // 이 두 헤더로만 내보내는데(X-Total-Count/X-Next-Cursor, backend/app/routers/stories.py),
+  // 이전에는 Content-Type만 남기고 전부 버려서 호출부(예: stories/backlog route)가 meta를
+  // 영영 못 만들어 "더 보기"가 죽어 있었다.
+  //
+  // ⚠️허용목록만 옮기고 절대 res.headers를 통째로 복사하지 않는다 — 이 함수는 본문을 text()로
+  // 다시 읽어 새 Response로 재구성하는 구조라, 원본 헤더를 그대로 넘기면 깨지는 것들이 있다:
+  //   Content-Length    재직렬화한 본문과 길이가 안 맞아 응답이 깨짐
+  //   Content-Encoding  프록시가 이미 압축을 푼 상태인데 "gzip"이라 말해 클라가 못 읽음
+  //   Set-Cookie        백엔드 쿠키가 브라우저로 새어나감 — 보안 표면
+  //   Transfer-Encoding 재구성한 응답과 어긋남
+  // 다음에 새 헤더가 필요해지면 여기 배열에 명시적으로 추가할 것 — "그냥 다 넘기자"로 되돌리지 말 것.
+  for (const h of ['x-total-count', 'x-next-cursor']) {
+    const v = res.headers.get(h);
+    if (v) resHeaders[h] = v;
+  }
   return new Response(resBody, {
     status: res.status,
-    headers: { 'Content-Type': res.headers.get('Content-Type') ?? 'application/json' },
+    headers: resHeaders,
   });
 }
 

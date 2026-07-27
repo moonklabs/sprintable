@@ -1,7 +1,9 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy import (
+    BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,8 +44,10 @@ class Sprint(Base, OrgScopedMixin, TimestampMixin):
     stories: Mapped[list["Story"]] = relationship("Story", back_populates="sprint", lazy="select")
 
 
-class Epic(Base, OrgScopedMixin, TimestampMixin):
-    __tablename__ = "epics"
+class Goal(Base, OrgScopedMixin, TimestampMixin):
+    """계층 리네이밍 B1(story 1925): 구 Epic. 클래스/테이블명만 rename(FK 컬럼명 epic_id는
+    B4 후속 스코프 — stories.epic_id 등은 이번 변경 밖)."""
+    __tablename__ = "goals"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(
@@ -70,6 +74,14 @@ class Epic(Base, OrgScopedMixin, TimestampMixin):
     # E-BOARD-SCHEMA: 채점 필드 (outcome, 채점잡 전용)
     outcome_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="n_a")
     outcome_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # E-GLANCE wedge #2(story 96b19bc3) — 로드맵 조타 큐레이션. Story.position과 완전 동형
+    # (null=아직 큐레이션 안 됨·자동도출 순서 유지). 0175 additive nullable.
+    position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # source_loop_id: 어떤 goal(구 epic)이 어느 Loop 결과에서 파생 제안됐는지 계보 인터페이스
+    # (컬럼만·배선은 P3 후속). Loop이 goal을 자동 생성하지 않음(STEER: 휴먼이 항상 약속을 얹는다).
+    source_loop_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("loop_runs.id", ondelete="SET NULL"), nullable=True
+    )
 
     project: Mapped["Project"] = relationship("Project", back_populates="epics")
     stories: Mapped[list["Story"]] = relationship("Story", back_populates="epic", lazy="select")
@@ -77,13 +89,27 @@ class Epic(Base, OrgScopedMixin, TimestampMixin):
 
 class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "stories"
+    __table_args__ = (
+        # story 9ac9b80f(FR·대표요청): 프로젝트별 사람-읽는 sequential #N — race-safe 채번은
+        # app.repositories.story.allocate_story_number(advisory xact lock)이 보장, 이 제약은
+        # 그 보장이 깨졌을 때(버그·우회 write) 조용히 중복 채번되는 걸 막는 최후 방어선.
+        UniqueConstraint("project_id", "story_number", name="uq_stories_project_id_story_number"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # story 9ac9b80f: 프로젝트 스코프 sequential 사람-읽는 ID(#N) — UUID(id)는 그대로 canonical
+    # PK 유지, 이건 additive 참조 편의 컬럼. 서버(allocate_story_number)만 채번, client-settable
+    # 아님(StoryCreate에 없음). 실 생성 경로(StoryRepository.create·oss_seed) 둘 다 항상 채번하므로
+    # 실 데이터는 전부 non-null — nullable=True는 스키마 관용이 아니라, 이 모델을 직접 ORM
+    # construct하는 기존 테스트 fixture 51개(레포지토리 우회, 이 스토리와 무관한 다른 에픽들)를
+    # 강제 개조하지 않기 위함. Postgres UNIQUE는 NULL을 서로 다른 값으로 취급해 다건 NULL과
+    # 충돌 없이 공존(제약 무력화 아님 — non-null 값끼리는 여전히 프로젝트 내 유일 강제).
+    story_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     epic_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("epics.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("goals.id", ondelete="SET NULL"), nullable=True
     )
     sprint_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sprints.id", ondelete="SET NULL"), nullable=True
@@ -94,6 +120,16 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    # P0-03(doc trust-pipeline-be-design §5·story 23b9bdac): Human owner — assignee_id/assignee_ids
+    # (혼합 human/agent)와 별도 필드. 0176 additive nullable. FK 미부여(assignee_id와 동일 이유 —
+    # team_members VIEW/org_members 양쪽 해소값이라 단일 물리 FK 불가). write-time에 resolve_
+    # member_identity로 human 강제(app-level).
+    human_owner_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    # P0-05 후속(doc scope-violation-signal-design §3·story 174be6bc): 작업 착수 시점 자발적 선언
+    # 파일-경로 글롭 배열(0178 additive). None/빈 배열 = 판정 무신호(scope_violation 항상 False 유지).
+    declared_scope_paths: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     meeting_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="SET NULL"), nullable=True
     )
@@ -118,7 +154,7 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         JSONB, nullable=True, server_default=text("'[]'"), default=list
     )
 
-    epic: Mapped[Epic | None] = relationship("Epic", back_populates="stories")
+    epic: Mapped[Goal | None] = relationship("Goal", back_populates="stories")
     sprint: Mapped[Sprint | None] = relationship("Sprint", back_populates="stories")
     tasks: Mapped[list["Task"]] = relationship("Task", back_populates="story", lazy="select")
 

@@ -131,7 +131,7 @@ async def test_list_activity_logs_resolves_actor_name_via_member_resolver(
     resp = await router.list_activity_logs(
         project_id=None, actor_id=None, action=None, entity_type=None,
         entity_id=None, from_=None, to=None, limit=30, offset=0,
-        db=db, org_id=org, _auth=MagicMock(user_id=str(uuid.uuid4())),
+        db=db, org_id=org, auth=MagicMock(user_id=str(uuid.uuid4())),
     )
 
     assert resp.total == 1

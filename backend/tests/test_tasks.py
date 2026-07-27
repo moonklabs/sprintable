@@ -186,9 +186,24 @@ async def test_delete_task_200():
 async def test_delete_task_404():
     client, session, app = await _client()
     try:
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        session.execute = AsyncMock(return_value=mock_result)
+        # E-SECURITY SEC-S1(확장): delete_task가 이제 resolve_member(OrgMember 조회)를 먼저
+        # 태우므로, 1번째 execute는 human org_member를 리턴하고 이후(User/task 조회)만 None이어야
+        # 의도한 404(존재하지 않는 task)를 재현한다 — 안 그러면 resolve_member 쪽 400이 먼저 뜬다.
+        om_mock = MagicMock()
+        om_mock.id = uuid.uuid4()
+        om_mock.role = "member"
+        om_mock.org_id = ORG_ID
+
+        call_count = 0
+
+        async def mock_execute(stmt, *a, **kw):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = om_mock if call_count == 1 else None
+            return result
+
+        session.execute = mock_execute
 
         async with client as c:
             resp = await c.delete(f"/api/v2/tasks/{uuid.uuid4()}")

@@ -55,8 +55,9 @@ async def get_disposition_recommendation(
             "skipped_reason": str | None,
         }
     """
-    # 1. 현재 disposition 해소
-    current = await resolve_disposition(session, org_id, member_id, role_id, gate_type)
+    # 1. 현재 disposition 해소 (SID 301ee45d/#2047: 반환값이 (disposition, source) — 이 추천
+    # 로직은 현재값만 필요해 source는 버린다)
+    current, _source = await resolve_disposition(session, org_id, member_id, role_id, gate_type)
 
     # 2. 신뢰점수 조회
     trust = await compute_member_trust_scores(

@@ -33,6 +33,11 @@ ARG NEXT_PUBLIC_OAUTH_ENABLED
 ENV NEXT_PUBLIC_OAUTH_ENABLED=${NEXT_PUBLIC_OAUTH_ENABLED}
 ARG NEXT_PUBLIC_GA4_MEASUREMENT_ID
 ENV NEXT_PUBLIC_GA4_MEASUREMENT_ID=${NEXT_PUBLIC_GA4_MEASUREMENT_ID}
+# story #2078(E-ARCH 0단계) — SSE 멀티플렉서 롤백 플래그. dev만 GO(오르테가군 판정,
+# 2026-07-21) — prod는 develop→main 48커밋 일괄승격에 얹으면 문제 발생 시 원인 격리가
+# 안 돼 별도 판단으로 미룬다. 기본값 false(미설정 시 dev-safe fallback).
+ARG NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=false
+ENV NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=${NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED}
 RUN pnpm build
 
 # ─── 런타임 ──────────────────────────────────────────────────────────────────

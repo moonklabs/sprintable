@@ -100,5 +100,53 @@ else
   echo "[migrate] precheck: no action needed."
 fi
 
+# story 9ac9b80f 후속(2026-07-20 승격) — **prod fork 0183a 정합 게이트**:
+# 2026-07-16 FR-only 승격 때 prod head(0183) 바로 위에 0183a(`stories.story_number` DDL이
+# develop 0194와 byte-identical한 prod 전용 fork)를 얹었다. 이번 승격에서 auth 마이그
+# (0184~0193)와 0194가 함께 올라오면서 fork를 유지할 이유가 사라져 **0183a 파일을 제거**했다
+# — 그러면 0183a에 머물러 있는 prod DB는 `upgrade heads`가 "Can't locate revision '0183a'"로
+# 죽는다(EE-stamp 케이스와 동형의 구조적 문제). 파일이 없어진 fork 리비전에 DB가 서 있으면
+# 그 부모(0183)로 되감아 core 체인에 재진입시킨다 — 0183a가 물리 적용한 story_number 컬럼은
+# 0194가 존재 검사로 skip 하므로(같은 커밋에서 idempotent 가드 추가) 중복 DDL이 발생하지 않는다.
+# 조건이 정확히 "0183a가 미등록 리비전 + DB가 0183a에 있음"일 때만 발화하므로 dev/fresh DB엔
+# 영향 0(no-op).
+echo "[migrate] prod-fork precheck: checking 0183a reconcile..."
+FORK_STAMP_NEEDED=$(python3 <<'PYEOF2'
+import os
+from sqlalchemy import create_engine, text
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
+cfg = Config("alembic.ini")
+script = ScriptDirectory.from_config(cfg)
+try:
+    script.get_revision("0183a")
+    fork_known = True
+except Exception:
+    fork_known = False
+
+if fork_known:
+    print(0)  # 0183a 파일이 아직 있는 환경 — 되감을 이유 없음.
+else:
+    engine = create_engine(os.environ["ALEMBIC_DATABASE_URL"])
+    with engine.connect() as conn:
+        try:
+            versions = [row[0] for row in conn.execute(text("SELECT version_num FROM alembic_version"))]
+        except Exception:
+            versions = []
+    print(1 if "0183a" in versions else 0)
+PYEOF2
+)
+
+if [ "${FORK_STAMP_NEEDED}" = "1" ]; then
+  echo "[migrate] prod-fork precheck: DB sits on removed fork revision 0183a — stamping parent 0183 to rejoin the core chain."
+  # `alembic stamp 0183`(purge 없이)은 DB의 현재 값 0183a를 먼저 해소하려다 "Can't locate
+  # revision '0183a'"로 죽는다(실측 2026-07-20) — 파일이 없는 리비전이므로 당연. --purge는
+  # alembic_version 행을 비우고 대상 리비전을 새로 기록해 그 해소 단계를 건너뛴다.
+  alembic stamp 0183 --purge
+else
+  echo "[migrate] prod-fork precheck: no action needed."
+fi
+
 echo "Running: alembic upgrade heads"
 exec alembic upgrade heads

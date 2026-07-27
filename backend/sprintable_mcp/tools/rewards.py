@@ -31,25 +31,25 @@ class GetLeaderboardInput(SprintableInput):
 async def get_wallet(args: GetWalletInput) -> list[TextContent]:
     """팀원 보상 잔액 조회."""
     try:
-        return ok(await client.get("/api/v2/rewards", params={"project_id": client.project_id, "member_id": args.member_id, "balance": "true"}))
+        return ok(await client.get("/api/v2/rewards", params={"project_id": client.require_project_id(), "member_id": args.member_id, "balance": "true"}))
     except Exception as exc:
         return err(str(exc))
 
 
 async def give_reward(args: GiveRewardInput) -> list[TextContent]:
     """팀원 보상/패널티 지급."""
-    body: dict = {
-        "project_id": client.project_id,
-        "member_id": args.member_id,
-        "amount": args.amount,
-        "reason": args.reason,
-        "granted_by": args.granted_by,
-    }
-    if args.reference_type:
-        body["reference_type"] = args.reference_type
-    if args.reference_id:
-        body["reference_id"] = args.reference_id
     try:
+        body: dict = {
+            "project_id": client.require_project_id(),
+            "member_id": args.member_id,
+            "amount": args.amount,
+            "reason": args.reason,
+            "granted_by": args.granted_by,
+        }
+        if args.reference_type:
+            body["reference_type"] = args.reference_type
+        if args.reference_id:
+            body["reference_id"] = args.reference_id
         return ok(await client.post("/api/v2/rewards", json=body))
     except Exception as exc:
         return err(str(exc))
@@ -57,12 +57,12 @@ async def give_reward(args: GiveRewardInput) -> list[TextContent]:
 
 async def get_leaderboard_v2(args: GetLeaderboardInput) -> list[TextContent]:
     """보상 리더보드 조회."""
-    params: dict = {"project_id": client.project_id, "type": "leaderboard"}
-    if args.period:
-        params["period"] = args.period
-    if args.limit is not None:
-        params["limit"] = str(args.limit)
     try:
+        params: dict = {"project_id": client.require_project_id(), "type": "leaderboard"}
+        if args.period:
+            params["period"] = args.period
+        if args.limit is not None:
+            params["limit"] = str(args.limit)
         return ok(await client.get("/api/v2/rewards", params=params))
     except Exception as exc:
         return err(str(exc))

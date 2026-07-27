@@ -58,7 +58,15 @@ def create_access_token(
     email: str | None = None,
     app_metadata: dict[str, Any] | None = None,
     expires_delta: timedelta | None = None,
+    *,
+    auth_source: str | None = None,
+    device_attested: bool | None = None,
 ) -> str:
+    """story 1931(산티아고 §10 재확認 2026-07-16 조건4): `auth_source`/`device_attested`는
+    옵션 클레임 — None(기본, 기존 모든 호출부: password/oauth_callback/refresh 등)이면
+    payload에 아예 안 실려 기존 토큰 shape byte-identical(무회귀). OAuth-handoff consume만
+    명시적으로 채워 넣어 "이 세션이 attestation-gated 능력을 상속하지 않는다"는 assurance
+    seam을 지금 확보한다(§10.5 — 소비하는 라우트는 아직 없음, 향후 attestation 확장 대비)."""
     now = datetime.now(timezone.utc)
     exp = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     payload: dict[str, Any] = {
@@ -69,6 +77,10 @@ def create_access_token(
         "exp": int(exp.timestamp()),
         "type": "access",
     }
+    if auth_source is not None:
+        payload["auth_source"] = auth_source
+    if device_attested is not None:
+        payload["device_attested"] = device_attested
     return jwt.encode(payload, _get_secret(), algorithm="HS256")
 
 
@@ -95,8 +107,13 @@ def create_tokens(
     user_id: str,
     email: str | None = None,
     app_metadata: dict[str, Any] | None = None,
+    *,
+    auth_source: str | None = None,
+    device_attested: bool | None = None,
 ) -> dict[str, Any]:
-    access = create_access_token(user_id, email, app_metadata)
+    access = create_access_token(
+        user_id, email, app_metadata, auth_source=auth_source, device_attested=device_attested,
+    )
     refresh, expires_at = create_refresh_token(user_id, app_metadata)
     return {
         "access_token": access,

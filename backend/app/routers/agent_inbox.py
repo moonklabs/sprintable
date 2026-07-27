@@ -22,7 +22,7 @@ from app.models.event import Event
 from app.models.team import TeamMember
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/v2/agent-inbox", tags=["agent-inbox"])
+router = APIRouter(prefix="/api/v2/agent-inbox", tags=["agent-inbox", "Organization"])
 
 
 def _verify_signature(raw_body: bytes, signature_header: str | None) -> bool:
@@ -112,6 +112,11 @@ async def receive_inbox_webhook(
 
     # AC4: SSE 즉시 push (연결 중인 에이전트에게 바로 전달)
     from app.routers.events import _push_to_agent
-    _push_to_agent(str(agent_id), payload)
+    # #2158 부수 정정: event_id 누락 — Event row는 만들면서(위 db.add/commit) 이 push
+    # payload엔 그 id가 없었다. `_push_to_agent`가 event_id 유무로 A/B계열을 가르는데(DB
+    # backfill 대상 vs 재생 버퍼 대상), 이 site는 진짜 Event row가 있는 A계열이라 event_id
+    # 누락 시 B계열로 오분류돼 재생 버퍼에도 잡혀 재연결 시 DB backfill과 이중배달됐을 것.
+    # 원본 payload는 그대로 두고(이미 DB에 커밋된 값과 별개 사본으로) push에만 얹는다.
+    _push_to_agent(str(agent_id), {**payload, "event_id": str(event.id)})
 
     return {"ok": True, "event_id": str(event.id)}

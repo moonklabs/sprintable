@@ -84,7 +84,7 @@ async def test_query_org_scope_filters_and_cursor():
 # ── 라우터 wiring/응답 shape — mock ───────────────────────────────────────────────
 
 async def _client(activity_rows):
-    from app.dependencies.auth import get_verified_org_id
+    from app.dependencies.auth import get_current_user, get_verified_org_id
     from app.dependencies.database import get_db
     from app.main import app
 
@@ -96,8 +96,12 @@ async def _client(activity_rows):
     async def override_db():
         yield mock_session
 
+    async def override_auth():
+        return MagicMock(user_id=str(uuid.uuid4()))
+
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_verified_org_id] = lambda: uuid.uuid4()
+    app.dependency_overrides[get_current_user] = override_auth
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), app
 
 

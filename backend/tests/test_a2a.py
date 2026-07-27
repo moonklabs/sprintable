@@ -8,6 +8,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 MEMBER_ID = uuid.uuid4()
+ORG_ID = uuid.uuid4()
 
 
 def _mock_member(agent_role: str | None = "qa") -> MagicMock:
@@ -139,7 +140,7 @@ def _multi_row_result():
 
 @pytest.mark.anyio
 async def test_agent_card_200_reflects_role_template_skills():
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         member = _mock_member()
         persona = _mock_persona()
@@ -176,7 +177,7 @@ async def test_agent_card_interface_url_uses_backend_direct_url_not_request_sche
     테스트 클라이언트는 http://test로 요청해도 카드 url은 그 값을 반영하면 안 됨."""
     from app.routers import a2a as a2a_mod
 
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         member = _mock_member()
         persona = _mock_persona()
@@ -210,7 +211,7 @@ async def test_agent_card_prefers_role_template_skills_when_linked():
     """~300직군 카탈로그 S4: persona가 recruit_agent() 생성 marker(config.role_template_id)를
     가지면, 카드-빌드 시점에 그 role_template.skills(카탈로그 실시간 값)를 우선 반영 —
     persona 생성 시점 스냅샷(slug/tool_allowlist 파생 단일 skill)이 아니라."""
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         rt_id = str(uuid.uuid4())
         member = _mock_member()
@@ -250,7 +251,7 @@ async def test_agent_card_prefers_role_template_skills_when_linked():
 async def test_agent_card_falls_back_to_persona_when_role_template_skills_empty():
     """role_template_id는 있으나 그 role_template.skills가 아직 비어있으면(카탈로그 구조화
     미완료) persona-파생 단일 skill로 그레이스풀 폴백 — 빈 skills[] 노출 금지."""
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         rt_id = str(uuid.uuid4())
         member = _mock_member()
@@ -285,7 +286,7 @@ async def test_agent_card_falls_back_to_persona_when_role_template_skills_empty(
 @pytest.mark.anyio
 async def test_agent_card_200_unassigned_agent_fallback_skill():
     """persona 없음(미채용) — team_members.agent_role 기반 최소 skill 하나로 폴백, 크래시 없음."""
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         member = _mock_member(agent_role=None)
 
@@ -311,7 +312,7 @@ async def test_agent_card_200_unassigned_agent_fallback_skill():
 
 @pytest.mark.anyio
 async def test_agent_card_404_unknown_member():
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         session.execute = AsyncMock(return_value=_result(None))
 
@@ -459,6 +460,10 @@ async def test_send_message_working_when_webhook_configured():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([MEMBER_ID])  # active_webhook_member_ids: 활성 webhook 존재
             return _result(working_task)  # 최종 requery
 
@@ -498,6 +503,10 @@ async def test_send_message_working_when_member_has_multiple_active_webhooks():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([MEMBER_ID, MEMBER_ID])  # 활성 webhook 2개 이상(같은 멤버) 시뮬레이션
             return _result(working_task)
 
@@ -536,6 +545,10 @@ async def test_send_message_working_via_sse_pipeline_when_no_webhook():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([])  # webhook 없음
             return _result(working_task)
 
@@ -578,6 +591,10 @@ async def test_send_message_response_wraps_task_in_spec_envelope():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([])  # webhook 없음 → SSE 경로
             return _result(working_task)
 
@@ -619,6 +636,10 @@ async def test_send_message_delivered_content_embeds_completion_protocol_hint():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([MEMBER_ID])  # webhook 있음
             return _result(working_task)
 
@@ -838,7 +859,13 @@ async def test_unknown_method_returns_method_not_found():
 
 @pytest.mark.anyio
 async def test_rpc_requires_auth():
-    """P1-S2(story 7b93eb10): /rpc는 action-triggering이라 authed(PO 크럭스)."""
+    """P1-S2(story 7b93eb10): /rpc는 action-triggering이라 authed(PO 크럭스).
+
+    story #2003(Phase B P1-a): 인증 실패는 이제 REST status(401/403)가 아니라 JSON-RPC 2.0
+    envelope(HTTP 200 고정 + error.code=-32010 UNAUTHORIZED)으로 렌더 — get_current_user
+    Depends가 endpoint body 진입 前 raise한 HTTPException이 main.py 글로벌 핸들러의 /rpc
+    경로-분기로 이스케이프해 JSON-RPC 계약을 유지한다(회귀 아님 — 보안 판정 자체는 불변,
+    렌더 형식만 계약 통일)."""
     from app.main import app
     from app.dependencies.database import get_db
 
@@ -851,15 +878,23 @@ async def test_rpc_requires_auth():
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=_SEND_REQ)
-        assert resp.status_code in (401, 403)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["jsonrpc"] == "2.0"
+        assert body.get("result") is None
+        assert body["error"]["code"] == -32010
+        assert body["error"]["data"]["retryable"] is False
+        assert isinstance(body["error"]["code"], int)  # REST 엔벨로프 문자열 코드("UNAUTHORIZED")가 아님
     finally:
         app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
 async def test_rpc_cross_org_blocked():
-    """P1-S2(A): caller org와 다른 org의 agent에게는 404(존재 여부 누설 없이 차단) —
-    `_get_agent_member`에 org_id 검증 추가로 오늘 S20 클래스 IDOR 봉인."""
+    """P1-S2(A): caller org와 다른 org의 agent에게는 존재 여부 누설 없이 차단(`_get_agent_member`
+    에 org_id 검증 추가로 오늘 S20 클래스 IDOR 봉인) — story #2003: 이제 REST 404가 아니라
+    JSON-RPC envelope(HTTP 200 + error.code=-32011 AGENT_NOT_FOUND)으로 렌더된다. IDOR 차단
+    자체(0-row 조회)는 완전히 불변, 렌더 형식만 바뀜."""
     client, session, app = await _authed_client(uuid.uuid4())
     try:
         session.execute = AsyncMock(return_value=_result(None))  # org_id 불일치 → 조회 0행
@@ -867,7 +902,11 @@ async def test_rpc_cross_org_blocked():
         async with client as c:
             resp = await c.post(f"/api/v2/a2a/members/{MEMBER_ID}/rpc", json=_SEND_REQ)
 
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["jsonrpc"] == "2.0"
+        assert body["error"]["code"] == -32011
+        assert body["error"]["data"]["retryable"] is False
     finally:
         app.dependency_overrides.clear()
 
@@ -1271,6 +1310,10 @@ async def test_project_context_extension_preserved_when_declared_no_webhook():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([])  # webhook 없음
             return _result(working_task)
 
@@ -1323,6 +1366,10 @@ async def test_project_context_extension_ignored_when_not_declared():
             if call_count == 1:
                 return _result(member)
             if call_count == 2:
+                return _result(None)  # story #2004: advisory lock select — 반환값 미사용
+            if call_count == 3:
+                return _result(None)  # story #2004: existing_task lookup — 신규 message_id라 없음
+            if call_count == 4:
                 return _list_result([])
             return _result(working_task)
 
@@ -1357,7 +1404,7 @@ async def test_project_context_extension_ignored_when_not_declared():
 
 @pytest.mark.anyio
 async def test_agent_card_advertises_project_context_extension():
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         member = _mock_member()
         persona = _mock_persona()
@@ -1390,7 +1437,7 @@ async def test_agent_card_advertises_project_context_extension():
 
 @pytest.mark.anyio
 async def test_agent_card_advertises_bearer_security_scheme():
-    client, session, app = await _client()
+    client, session, app = await _authed_client(ORG_ID)
     try:
         member = _mock_member()
         persona = _mock_persona()

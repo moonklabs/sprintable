@@ -37,7 +37,7 @@ describe('AgentDeploymentVerificationStep', () => {
       </NextIntlClientProvider>,
     );
 
-    expect(markup).toContain('verification이 아직 완료되지 않은');
+    expect(markup).toContain('verification이 아직 완료되지 않았습니다');
     expect(markup).toContain('Verification 완료로 표시');
     expect(markup).not.toContain('verification 완료까지 기록되었습니다');
   });

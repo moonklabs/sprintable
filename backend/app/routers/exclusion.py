@@ -11,7 +11,7 @@ from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.exclusion_report import generate_exclusion_report
 
-router = APIRouter(prefix="/api/v2/exclusion", tags=["exclusion"])
+router = APIRouter(prefix="/api/v2/exclusion", tags=["exclusion", "Trust"])
 
 
 @router.get("/dry-run")

@@ -12,7 +12,7 @@ from app.repositories.organization import OrganizationRepository
 from app.schemas.org_invite import CreateOrgInvite, OrgInviteResponse
 from app.services.org_invite_email import send_invite_email
 
-router = APIRouter(prefix="/api/v2/organizations", tags=["org-invites"])
+router = APIRouter(prefix="/api/v2/organizations", tags=["org-invites", "Organization"])
 
 
 def _to_response(invite) -> OrgInviteResponse:

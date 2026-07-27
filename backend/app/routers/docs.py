@@ -71,7 +71,7 @@ async def _enrich_doc_summary(doc, session: AsyncSession) -> DocSummaryResponse:
     resp.assignee, resp.revisions = await _resolve_doc_extras(doc, session)
     return resp
 
-router = APIRouter(prefix="/api/v2/docs", tags=["docs"])
+router = APIRouter(prefix="/api/v2/docs", tags=["docs", "Knowledge"])
 
 
 def _get_repo(
@@ -127,6 +127,22 @@ async def list_docs(
     return [DocSummaryResponse.model_validate(d) for d in docs]
 
 
+async def _assert_doc_parent_in_project(
+    session: AsyncSession, project_id: uuid.UUID, parent_id: uuid.UUID | None,
+) -> None:
+    """E-SECURITY SEC-S8(story 83ea3d6a) Y(까심 전수스윕): parent_id가 project_id 소속인지
+    검증 없이 그대로 repo.create/setattr에 적용됐다(DocRepository.create는 BaseRepository
+    상속이라 소유권 검증 0) — 같은 org 다른 project의 doc을 parent로 지정해 doc 트리를
+    오염시킬 수 있었다(T/G와 동형 project-scope 부재). create/update 양쪽 재사용."""
+    if parent_id is None:
+        return
+    parent_project_id = (await session.execute(
+        select(Doc.project_id).where(Doc.id == parent_id, Doc.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if parent_project_id != project_id:
+        raise HTTPException(status_code=404, detail="Parent doc not found")
+
+
 @router.post("", response_model=DocResponse, status_code=201)
 async def create_doc(
     body: DocCreate,
@@ -143,6 +159,7 @@ async def create_doc(
         db=session,
         user_id=uuid.UUID(auth.user_id),
     )
+    await _assert_doc_parent_in_project(session, body.project_id, body.parent_id)
     # ⭐RC#1(body-trust 봉인): created_by 를 **인증 caller 로 강제**(body.created_by 무시·attribution
     # 위조 차단). 다른 doc write 경로(_resolve_doc_member_id·line~501)와 대칭. AC3-2d(2) canonical 유지.
     created_by = await _resolve_doc_member_id(auth, org_id, session)
@@ -160,6 +177,15 @@ async def create_doc(
         doc_type=body.doc_type,
         content_format=body.content_format,
         tags=body.tags,
+    )
+    # story #1993(E-KNOWLEDGE-LINK S1): mentions write-path — 신규 doc 이라 existing=∅(순수 insert
+    # 로 귀결하는 reconcile 재사용). **같은 트랜잭션**(try/except 로 삼키지 않음) — 실패 시 예외
+    # propagate 로 doc 생성 전체가 롤백된다(AC4 원자성). created_by 는 위에서 이미 canonicalize
+    # 됐지만 reconcile_doc_mentions 는 raw id 를 받아 자체적으로 재정규화(idempotent·재사용 함수
+    # 계약 단순화 — create/update 양쪽에서 canonical 여부와 무관하게 동일하게 호출 가능).
+    from app.services.mention_parser import reconcile_doc_mentions
+    await reconcile_doc_mentions(
+        session, org_id=org_id, doc_id=doc.id, html_content=doc.content, created_by=created_by,
     )
     # 활동로그: doc 생성 이벤트 기록 (생성류 미기록 갭 — 피드 정상화)
     from app.services.activity_log import record_created_activity
@@ -203,6 +229,14 @@ class DocPreviewResponse(BaseModel):
     icon: str | None = None
     slug: str
     embed_chain: list[str] = []
+    # #2168 PR-①: 크로스프로젝트 doc 링크가 "링크 자신이 속한 project 를 실어 나르는" 처방이라
+    # 받는 쪽(FE embed-card)이 "현재 프로젝트"를 추측하지 않고 이 doc 의 실제 project 로 직행할
+    # 수 있어야 한다 — project_id(2차 조회 스코프용) + org_slug/project_slug(경로 세그먼트,
+    # `/{ws}/{proj}/docs/{slug}/view` 조립용). additive·project_slug 는 nullable(Project.slug
+    # 가 nullable — 옛 미백필 프로젝트는 None, FE 가 bare 링크로 우아하게 폴백).
+    project_id: uuid.UUID
+    org_slug: str
+    project_slug: str | None = None
 
 
 # ─── Preview (must be before /{id} to avoid routing conflict) ─────────────────
@@ -215,6 +249,8 @@ async def get_doc_preview(
     repo: DocRepository = Depends(_get_repo),
 ) -> DocPreviewResponse:
     from app.models.doc import Doc
+    from app.models.organization import Organization
+    from app.models.project import Project
 
     try:
         doc_uuid = uuid.UUID(q)
@@ -225,8 +261,16 @@ async def get_doc_preview(
     result = await db.execute(stmt.limit(1))
     doc = result.scalar_one_or_none()
 
+    if doc is not None:
+        # #2168 PR-①: get_doc 과 동형 갭 — org-scope happy path 가 project 인가 없이 즉시
+        # 반환하던 것을 canonical 가드로 통일(같은 이유: 링크가 project 를 실어 나르기 시작하며
+        # 이 경로의 실사용 빈도가 올라간다).
+        from app.services.project_auth import has_project_access
+        if not await has_project_access(db, uuid.UUID(auth.user_id), doc.project_id, repo.org_id):
+            raise HTTPException(status_code=403, detail="해당 문서의 프로젝트 접근 권한이 없습니다")
+
     if doc is None:
-        # cross-org fallback: slug/uuid 기반 전체 org 조회 후 membership 검증
+        # cross-org fallback: slug/uuid 기반 전체 org 조회 후 membership 검증 (기존, 무변경)
         try:
             doc_uuid2 = uuid.UUID(q)
             fallback_stmt = select(Doc).where(Doc.id == doc_uuid2, Doc.deleted_at.is_(None))
@@ -247,12 +291,22 @@ async def get_doc_preview(
         if member.scalar_one_or_none() is None:
             raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
 
+    org_slug = (await db.execute(
+        select(Organization.slug).where(Organization.id == doc.org_id)
+    )).scalar_one()
+    project_slug = (await db.execute(
+        select(Project.slug).where(Project.id == doc.project_id)
+    )).scalar_one_or_none()
+
     return DocPreviewResponse(
         id=doc.id,
         title=doc.title,
         icon=doc.icon,
         slug=doc.slug,
         embed_chain=[],
+        project_id=doc.project_id,
+        org_slug=org_slug,
+        project_slug=project_slug,
     )
 
 
@@ -266,8 +320,16 @@ async def get_doc(
     repo: DocRepository = Depends(_get_repo),
 ) -> DocResponse:
     doc = await repo.get(id)
+    if doc is not None:
+        # #2168 PR-①: 크로스프로젝트 doc 링크가 정상 동선이 되며 이 org-scope happy path의
+        # project 인가 누락(patch/delete 는 f69fcd91 로 이미 고쳐졌으나 GET 은 방치돼 있었음 —
+        # 同org 비-project caller 가 id만 알면 무제한 열람 가능하던 갭)이 실사용 IDOR 표면으로
+        # 커진다. canonical 가드(has_project_access)로 patch/delete 와 통일.
+        from app.services.project_auth import has_project_access
+        if not await has_project_access(session, uuid.UUID(auth.user_id), doc.project_id, repo.org_id):
+            raise HTTPException(status_code=403, detail="해당 문서의 프로젝트 접근 권한이 없습니다")
     if doc is None:
-        # cross-org fallback: project_id query param 없이 단일 id로 접근한 경우
+        # cross-org fallback: project_id query param 없이 단일 id로 접근한 경우 (기존, 무변경)
         from app.models.doc import Doc
         result = await session.execute(
             select(Doc).where(Doc.id == id, Doc.deleted_at.is_(None))
@@ -330,6 +392,9 @@ async def update_doc(
                     "current_updated_at": doc.updated_at.isoformat(),
                 },
             )
+
+    if "parent_id" in data:
+        await _assert_doc_parent_in_project(session, doc.project_id, data["parent_id"])
 
     # 일반 필드 적용 (slug 제외)
     for attr, val in data.items():
@@ -415,6 +480,15 @@ async def update_doc(
             )
         )
 
+        # story #1993(E-KNOWLEDGE-LINK S1): mentions write-path — content 가 실제로 바뀐 patch 에서만
+        # diff reconcile(변경 없는 필드만 patch 하는 호출에서 불필요한 재파싱 skip). **같은 트랜잭션**
+        # (try/except 로 삼키지 않음) — 실패 시 예외 propagate 로 doc 수정 전체가 롤백된다(AC4 원자성).
+        from app.services.mention_parser import reconcile_doc_mentions
+        actor_id = await _resolve_doc_member_id(auth, repo.org_id, session)
+        await reconcile_doc_mentions(
+            session, org_id=repo.org_id, doc_id=doc.id, html_content=doc.content, created_by=actor_id,
+        )
+
     return DocResponse.model_validate(doc)
 
 
@@ -427,6 +501,19 @@ async def delete_doc(
     # f69fcd91: 대상 doc 의 project 접근 강제(cross-project IDOR 차단·get_project_scoped_org_id 의 org-only
     # fallback 으로 同org 비-project caller 가 타 project doc 삭제 가능하던 갭). 없으면 404·무권한 403.
     await _require_doc_project_access(repo.session, id, uuid.UUID(auth.user_id), repo.org_id)
+    # E-SECURITY SEC-S1 확장(까심 적대적 QA 발견 갭): delete_story와 동형으로 휴먼 전용화 + 삭제 감사.
+    from app.services.member_resolver import resolve_member
+    deleter = await resolve_member(auth, repo.org_id, repo.session)
+    if deleter.type != "human":
+        raise HTTPException(status_code=403, detail="Doc 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+    doc = await repo.get(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
+    from app.models.deletion_audit import DeletionAuditLog
+    repo.session.add(DeletionAuditLog(
+        id=uuid.uuid4(), org_id=repo.org_id, actor_id=deleter.id,
+        entity_type="doc", entity_id=id, entity_title=doc.title,
+    ))
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Doc not found")
@@ -434,8 +521,6 @@ async def delete_doc(
     # 삭제 권한자(인증 caller) 트리거 system cascade — human-gate authz 우회 정당(별도 결재 아님). void 는
     # begin_nested 격리 best-effort라 삭제 비중단. pending 아니면 no-op(멱등)·doc_approval 만 스코핑.
     from app.services.gate_service import void_pending_doc_gate
-    from app.services.member_resolver import resolve_member
-    deleter = await resolve_member(auth, repo.org_id, repo.session)
     await void_pending_doc_gate(repo.session, repo.org_id, id, deleter.id)
     return {"ok": True}
 
@@ -626,6 +711,48 @@ async def list_doc_revisions(
     ).order_by(DocRevision.created_at.desc()).limit(limit)
     result = await db.execute(q)
     return [DocRevisionResponse.model_validate(r) for r in result.scalars()]
+
+
+# ─── Backlinks (story #1994·E-KNOWLEDGE-LINK S2) ───────────────────────────────
+
+@router.get("/{id}/backlinks")
+async def get_doc_backlinks(
+    id: uuid.UUID,
+    limit: int = Query(default=30, ge=1, le=200),
+    before: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    repo: DocRepository = Depends(_get_repo),
+) -> dict:
+    """GET /api/v2/docs/{id}/backlinks — 이 doc을 멘션한 chat_message/doc 목록(cursor 페이지네이션,
+    `list_messages`(conversations.py)와 동일 convention: `?limit=&before=`, 응답
+    `{"data": [...], "meta": {"next_cursor", "has_more"}}`).
+
+    근본 설계 doc design-org-knowledge-mentions-backlinks §8① 불변식: backlink 공개 =
+    can_read(target_doc) AND can_read(source_resource). target 접근은 여기서
+    `_require_doc_project_access`(docs.py의 기존 canonical 인가 — 무권한/미존재 모두 404,
+    existence 오라클 없음)로 검증한다. **source**(멘션을 발신한 chat_message/doc) 접근은
+    산티아고 4회차 pass 이후 **단일** SQL statement에 authz predicate를 correlate하는 방식으로
+    판정한다(app.services.backlinks §8②·doc은 `accessible_project_ids_in_org`, chat_message는
+    `app.services.conversation_auth.conversation_readable_predicate` — `_can_read_conversation`
+    (conversations.py)이 단건 호출부에 쓰는 것과 **같은 SSOT 함수**를 메인 쿼리의 WHERE절에
+    직접 correlate해 쓴다. 2-phase로 "readable id 집합"을 먼저 SELECT해 Python에 들고 있다가
+    다음 쿼리에 넣는 구조가 아니므로 TOCTOU 윈도우가 구조적으로 없다) — target doc의 project
+    접근을 source에 상속하지 않는다(멀티프로젝트 org에서 target/source project가 다를 수
+    있다는 게 산티아고 리뷰가 잡은 이전 draft의 버그이자 이 story의 근본 이유). count/has_more는
+    authz-embedded 단일 쿼리 결과에서만 계산된다(no pagination oracle) — 미인가 source가 있어도
+    그 존재는 어디에도 드러나지 않는다.
+
+    `before`: story #1994 B3 — opaque composite cursor(base64, `(created_at, id)` 인코드).
+    클라이언트는 이전 응답의 `meta.next_cursor` 값을 그대로 되돌려주기만 하면 된다(파싱 금지 —
+    불투명 토큰). 디코드/검증은 `app.services.backlinks.decode_cursor`가 담당(손상 시 400).
+    """
+    await _require_doc_project_access(session, id, uuid.UUID(auth.user_id), repo.org_id)
+
+    from app.services.backlinks import list_doc_backlinks
+    return await list_doc_backlinks(
+        session, org_id=repo.org_id, doc_id=id, auth=auth, limit=limit, cursor=before,
+    )
 
 
 class DocTransitionRequest(BaseModel):

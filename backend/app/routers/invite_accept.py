@@ -10,7 +10,7 @@ from app.models.user import User
 from app.repositories.org_invite import OrgInviteRepository
 from app.schemas.invite_accept import AcceptInviteRequest, AcceptInviteResponse, InvitePreviewResponse
 
-router = APIRouter(prefix="/api/v2/invites", tags=["invites"])
+router = APIRouter(prefix="/api/v2/invites", tags=["invites", "Organization"])
 
 
 def _get_repo(session: AsyncSession = Depends(get_db)) -> OrgInviteRepository:

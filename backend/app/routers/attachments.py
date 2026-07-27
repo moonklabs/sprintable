@@ -27,7 +27,7 @@ from app.services.asset_registry import path_in_source_scope
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import has_project_access
 
-router = APIRouter(prefix="/api/v2/attachments", tags=["attachments"])
+router = APIRouter(prefix="/api/v2/attachments", tags=["attachments", "Knowledge"])
 
 _BUCKET = os.environ.get("GCS_MEMO_ATTACHMENTS_BUCKET", "sprintable-memo-attachments")
 _PUBLIC_PREFIX = f"https://storage.googleapis.com/{_BUCKET}/"
@@ -127,7 +127,11 @@ async def authorize_attachment(
                 _conversation_has_human_participant,
                 _effective_org_role,
             )
-            role = await _effective_org_role(auth, org_id, db, member)
+            # E-SECURITY SEC-S8(story 83ea3d6a) V 자매 갭(fix-on-sight): project_id 미전달이면
+            # 에이전트는 임의 project row role을 org-wide인 척 신뢰하던 갭(conversations.py
+            # get_conversation/list_messages와 동일 SSOT) — conv_proj(이미 해소된 이 conversation의
+            # 실 project)를 넘겨 그 project 전용 effective role로 재평가.
+            role = await _effective_org_role(auth, org_id, db, member, project_id=conv_proj)
             if not (
                 role in ("owner", "admin")
                 and not await _conversation_has_human_participant(conversation_id, db)

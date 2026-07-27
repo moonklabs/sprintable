@@ -7,7 +7,7 @@ import { useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
-import { useChatSse } from '@/hooks/use-chat-sse';
+import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
 interface Participant {
@@ -106,8 +106,9 @@ function ConversationRow({
         <span className="max-w-[80px] truncate rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">
           {others[0]?.name ?? '...'}
         </span>
+        {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
         {isAgentInConv && (
-          <span className="flex-shrink-0 rounded border border-brand/30 bg-brand/12 px-1.5 py-0.5 text-[10px] font-medium text-brand-strong">
+          <span className="flex-shrink-0 rounded border border-info/30 bg-info/12 px-1.5 py-0.5 text-[10px] font-medium text-info">
             {t('agent')}
           </span>
         )}
@@ -121,8 +122,9 @@ function ConversationRow({
               className="relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-muted-foreground ring-1 ring-background"
             >
               {p.name?.slice(0, 1) ?? '?'}
+              {/* story #2023 ⓑ: 죽은 클래스(bg-brand-strong 미매핑)이면서 L5 위반 — info로 교체해 둘 다 닫음 */}
               {p.type === 'agent' && (
-                <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-brand-strong ring-1 ring-background" />
+                <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-info ring-1 ring-background" />
               )}
             </div>
           ))}
@@ -301,9 +303,19 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     }
   }, [fetchConversations, fetchAllConversations]);
 
+  // story #1977(트랙B): 다른 탭/기기에서 mark-read → conversation.read SSE(#1976, 본인 타
+  // 커넥션 전파)로 이 목록이 열려있는 동안에도 unread 배지가 즉시 서버 truth로 자가정정.
+  const handleConversationRead = useCallback((payload: SseConversationReadPayload) => {
+    const applyRead = (list: ConversationItem[]) =>
+      list.map((c) => (c.id === payload.conversation_id ? { ...c, unread_count: payload.unread_count } : c));
+    setConversations(applyRead);
+    if (agentLoadedRef.current) setAllConversations(applyRead);
+  }, []);
+
   useChatSse({
     currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
+    onConversationRead: handleConversationRead,
   });
 
   const handleCreated = (conversationId: string) => {

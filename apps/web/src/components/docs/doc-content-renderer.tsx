@@ -7,6 +7,7 @@ import { detectEmbedService } from './extensions/embed-node';
 import { renderKatex } from './extensions/math-node';
 import { renderMermaid } from './lib/mermaid-renderer';
 import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 import DOMPurify from 'dompurify';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -57,6 +58,14 @@ const docMarkdownSanitizeSchema = {
       'dataSize',
       'dataMimeType',
       'dataFileData',
+      // story #1996: pageEmbed 원자 노드(page-embed-node.tsx renderHTML) 속성 — 이전엔
+      // 스키마 미포함이라 markdown 포맷 문서에서 rehype-sanitize가 전부 걷어내 querySelector
+      // 식별 자체가 불가능했다(HTML 포맷 문서만 우연히 살아남았을 갭).
+      'dataPageEmbed',
+      'dataDocId',
+      'dataTitle',
+      'dataIcon',
+      'dataSlug',
     ],
   },
 };
@@ -195,7 +204,8 @@ export function DocContentRenderer({
           });
           const wrapper = document.createElement('div');
           wrapper.innerHTML = highlighted;
-          wrapper.className = '[&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6 [&_code]:!bg-transparent overflow-x-auto';
+          // story #2165: 코드블럭은 전역 스크롤바 숨김 예외 — 가로로 잘린 줄을 알려야 한다.
+          wrapper.className = '[&_pre]:!bg-transparent [&_pre]:!m-0 [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6 [&_code]:!bg-transparent overflow-x-auto scrollbar-visible';
           if (pre.parentElement) pre.replaceWith(wrapper);
         }).catch(() => { /* fallback: keep original pre */ });
       });
@@ -247,6 +257,36 @@ export function DocContentRenderer({
       return () => span.removeEventListener('click', handleClick);
     });
 
+    // Page embed handlers (viewer) — story #1996(no-sloppy): 에디터 NodeView(PageEmbedExtension
+    // renderHTML)가 만드는 <div data-page-embed data-doc-id data-title data-icon data-slug>
+    // 원자 노드를 읽기전용 뷰가 렌더할 핸들러가 아예 없어(grep 0건) 빈 div로 깨져 보였다.
+    // wikiLink 핸들러와 동일 관례(카드 자체는 publicMode에서도 유지 — 제목/아이콘은 이미 원본
+    // 문서에 박힌 정적 메타라 노출 자체는 meta-leak 아님·클릭 네비게이션만 authed 전용으로 제한).
+    const pageEmbeds = Array.from(root.querySelectorAll<HTMLElement>('[data-page-embed]'));
+    const pageEmbedCleanup = pageEmbeds.map((block) => {
+      const title = block.getAttribute('data-title') || '';
+      const icon = block.getAttribute('data-icon') || '';
+      const slug = block.getAttribute('data-slug') || '';
+      const iconMarkup = icon
+        ? `<span class="shrink-0 text-lg">${escapeHtmlText(icon)}</span>`
+        : '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0 text-muted-foreground"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';
+      block.className = publicMode || !slug
+        ? 'not-prose my-2 flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3'
+        : 'not-prose my-2 flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 transition-colors hover:bg-muted/40';
+      block.innerHTML = `
+        ${iconMarkup}
+        <div class="min-w-0 flex-1">
+          <p class="truncate text-sm font-medium">${escapeHtmlText(title || '(제목 없음)')}</p>
+          ${slug ? `<p class="truncate text-xs opacity-60">/${escapeHtmlText(slug)}</p>` : ''}
+        </div>`;
+      // publicMode: doc-to-doc traversal 금지(wikiLink와 동일 meta-leak 경계) — 카드 렌더는
+      // 유지하되 클릭 네비게이션만 뺀다.
+      if (publicMode || !slug) return () => { /* no handler attached */ };
+      const handleClick = () => { window.location.href = `/docs/${slug}`; };
+      block.addEventListener('click', handleClick);
+      return () => block.removeEventListener('click', handleClick);
+    });
+
     // Math block rendering (viewer)
     const mathBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-type="mathBlock"]'));
     mathBlocks.forEach((block) => {
@@ -256,7 +296,8 @@ export function DocContentRenderer({
         if (error) {
           block.innerHTML = `<div class="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive font-mono">${escapeHtmlText(error)}</div>`;
         } else {
-          block.innerHTML = `<div class="flex justify-center overflow-x-auto py-3 [&_.katex]:text-foreground">${katexHtml}</div>`;
+          // story #2165: 긴 수식도 코드와 같은 성격(가로로 잘리면 사용자가 잘린 줄 모름) — 예외.
+          block.innerHTML = `<div class="flex justify-center overflow-x-auto scrollbar-visible py-3 [&_.katex]:text-foreground">${katexHtml}</div>`;
         }
       });
     });
@@ -452,6 +493,7 @@ export function DocContentRenderer({
     return () => {
       cleanup.forEach((dispose) => dispose());
       wikiCleanup.forEach((dispose) => dispose());
+      pageEmbedCleanup.forEach((dispose) => dispose());
       fileCleanup.forEach((dispose) => dispose());
       assetImgCleanup.forEach((dispose) => dispose());
       toggleCleanup.forEach((dispose) => dispose());
@@ -464,13 +506,70 @@ export function DocContentRenderer({
     return decorateHtmlContent(sanitized, headings, codeCopyLabel);
   }, [codeCopyLabel, content, contentFormat, headings]);
 
+  // story #2021 후속(PO 리뷰): 이 components 객체를 매 렌더 인라인으로 새로 만들면
+  // hast-util-to-jsx-runtime이 그 함수 참조를 그대로 React 엘리먼트 type으로 써서([[feedback:
+  // chat-bubble 근본원인과 동형]]) 소프트 내비게이션·polling으로 부모가 리렌더될 때마다
+  // img→`DocAssetImage`(로딩 state)·code→`MermaidReadonlyBlock`(svg 렌더 state)·
+  // `ShikiCodeBlock`(복사 피드백 state)가 언마운트→리마운트된다 — 이미지 깜빡임·mermaid
+  // 재렌더·복사 피드백 조기소실로 이어진다. useMemo로 이 핸들러들의 참조를 고정한다. 아래
+  // contentFormat==='html' 이른 return보다 위에 둬 훅 호출 순서를 무조건화한다(rules-of-hooks).
+  //
+  // h1/h2/h3는 여기 포함하지 않는다 — 그 자식은 plain <h1>뿐(로컬 state 없음)이라 리마운트돼도
+  // 잃을 게 없고, headingIndex가 ReactMarkdown이 AST를 훑는 매 패스(=매 렌더)마다 0부터 다시
+  // 매겨져야 하는데 메모이즈된 클로저에 넣으면 그 리셋이 깨진다 — 그래서 h1/h2/h3는 아래
+  // components 병합 시 매 렌더 새로 만드는 채로 둔다(무해 remount).
+  const stableMarkdownComponents = useMemo<Components>(() => ({
+    blockquote: ({ children }: { children?: ReactNode }) => <blockquote>{children}</blockquote>,
+    img: (props) => {
+      const { src, alt } = props as { src?: unknown; alt?: string };
+      const hasSrc = typeof src === 'string' && src.length > 0;
+      // asset-ref(data-asset-id·src 없음) — authed 에서만 서명 해석. public 모드는 절대
+      // fetch 하지 않고(401-leak 경계) NextImage(src="")로 두어 위 DOM effect 의 inert
+      // placeholder 치환에 맡긴다.
+      const assetId = !publicMode ? extractAssetId(props) : null;
+      if (assetId && !hasSrc) {
+        return <DocAssetImage assetId={assetId} alt={alt ?? ''} errorLabel={assetImageErrorLabel} />;
+      }
+      return <NextImage src={hasSrc ? (src as string) : ''} alt={alt ?? ''} width={800} height={600} style={{ maxWidth: '100%', height: 'auto' }} unoptimized />;
+    },
+    table: ({ children }: { children?: ReactNode }) => (
+      // story #2165: 표도 코드블럭과 같은 성격 — 가로로 잘린 열이 있다는 것을 알려야 한다.
+      <div className="not-prose overflow-x-auto scrollbar-visible rounded-xl border border-border">
+        <table>{children}</table>
+      </div>
+    ),
+    pre: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    code: (props) => {
+      const { children, className: codeClassName } = props as { children?: ReactNode; className?: string };
+      const childText = Array.isArray(children) ? children.join('') : String(children ?? '');
+      const inline = !String(codeClassName ?? '').includes('language-') && !childText.includes('\n');
+      if (!inline) {
+        const lang = String(codeClassName ?? '').replace('language-', '') || null;
+        if (lang === 'mermaid') {
+          return <MermaidReadonlyBlock code={childText} />;
+        }
+        return (
+          <ShikiCodeBlock
+            code={childText}
+            language={lang}
+            copyLabel={codeCopyLabel}
+            copiedLabel={codeCopiedLabel}
+          />
+        );
+      }
+      return <code>{children}</code>;
+    },
+  }), [publicMode, assetImageErrorLabel, codeCopyLabel, codeCopiedLabel]);
+
   const rootClassName = cn(
     'doc-renderer prose dark:prose-invert prose-sm max-w-none text-foreground',
     '[&_h1]:scroll-mt-24 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:tracking-tight',
     '[&_h2]:scroll-mt-24 [&_h2]:mt-10 [&_h2]:text-2xl [&_h2]:font-semibold',
     '[&_h3]:scroll-mt-24 [&_h3]:mt-8 [&_h3]:text-xl [&_h3]:font-semibold',
     '[&_p]:leading-7 [&_p]:text-foreground/92',
-    '[&_a]:text-[color:var(--brand-soft)] [&_a]:underline [&_a]:underline-offset-4',
+    // story #2023 ⓒ(§5-2): 유틸 부재로 인한 var() 우회 참조를 정식 토큰으로 되돌림 — 문서 본문
+    // 링크색, L1~L5 재분류 아님(콘텐츠 하이퍼링크는 서명·시스템상태 어느 축도 아님).
+    '[&_a]:text-brand-soft [&_a]:underline [&_a]:underline-offset-4',
     '[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:bg-muted/30 [&_blockquote]:px-4 [&_blockquote]:py-3 [&_blockquote]:text-muted-foreground',
     '[&_img]:max-h-[32rem] [&_img]:w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_img]:object-contain',
     '[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border [&_table]:bg-muted/20',
@@ -497,6 +596,8 @@ export function DocContentRenderer({
     );
   }
 
+  // ReactMarkdown이 이 AST 패스에서 h1/h2/h3를 문서 순서대로 호출하는 동안 매길 인덱스 —
+  // 매 렌더(=매 패스) 0부터 다시 시작해야 하므로 스코프를 여기(렌더 본문)에 둔다.
   let headingIndex = 0;
 
   return (
@@ -517,45 +618,7 @@ export function DocContentRenderer({
             const heading = headings[headingIndex++];
             return <h3 id={heading?.id}>{children}</h3>;
           },
-          blockquote: ({ children }) => <blockquote>{children}</blockquote>,
-          img: (props) => {
-            const { src, alt } = props as { src?: unknown; alt?: string };
-            const hasSrc = typeof src === 'string' && src.length > 0;
-            // asset-ref(data-asset-id·src 없음) — authed 에서만 서명 해석. public 모드는 절대
-            // fetch 하지 않고(401-leak 경계) NextImage(src="")로 두어 위 DOM effect 의 inert
-            // placeholder 치환에 맡긴다.
-            const assetId = !publicMode ? extractAssetId(props) : null;
-            if (assetId && !hasSrc) {
-              return <DocAssetImage assetId={assetId} alt={alt ?? ''} errorLabel={assetImageErrorLabel} />;
-            }
-            return <NextImage src={hasSrc ? (src as string) : ''} alt={alt ?? ''} width={800} height={600} style={{ maxWidth: '100%', height: 'auto' }} unoptimized />;
-          },
-          table: ({ children }) => (
-            <div className="not-prose overflow-x-auto rounded-xl border border-border">
-              <table>{children}</table>
-            </div>
-          ),
-          pre: ({ children }) => <>{children}</>,
-          code: (props) => {
-            const { children, className: codeClassName } = props as { children?: ReactNode; className?: string };
-            const childText = Array.isArray(children) ? children.join('') : String(children ?? '');
-            const inline = !String(codeClassName ?? '').includes('language-') && !childText.includes('\n');
-            if (!inline) {
-              const lang = String(codeClassName ?? '').replace('language-', '') || null;
-              if (lang === 'mermaid') {
-                return <MermaidReadonlyBlock code={childText} />;
-              }
-              return (
-                <ShikiCodeBlock
-                  code={childText}
-                  language={lang}
-                  copyLabel={codeCopyLabel}
-                  copiedLabel={codeCopiedLabel}
-                />
-              );
-            }
-            return <code>{children}</code>;
-          },
+          ...stableMarkdownComponents,
         }}
       >
         {content}
@@ -642,10 +705,10 @@ function ShikiCodeBlock({
       {html ? (
         <div
           dangerouslySetInnerHTML={{ __html: html }}
-          className="overflow-x-auto [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6 [&_code]:!bg-transparent"
+          className="overflow-x-auto scrollbar-visible [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6 [&_code]:!bg-transparent"
         />
       ) : (
-        <pre className="overflow-x-auto p-4 text-xs leading-6 text-foreground">
+        <pre className="overflow-x-auto scrollbar-visible p-4 text-xs leading-6 text-foreground">
           <code>{code}</code>
         </pre>
       )}
@@ -674,7 +737,7 @@ function decorateHtmlContent(content: string, headings: ReturnType<typeof extrac
   });
 
   const withTableShells = withHeadingIds.replace(/<table\b[\s\S]*?<\/table>/gi, (tableMarkup) => {
-    return `<div class="not-prose overflow-x-auto rounded-xl border border-border">${tableMarkup}</div>`;
+    return `<div class="not-prose overflow-x-auto scrollbar-visible rounded-xl border border-border">${tableMarkup}</div>`;
   });
 
   return withTableShells.replace(/<pre>([\s\S]*?)<\/pre>/gi, (_match, inner) => {

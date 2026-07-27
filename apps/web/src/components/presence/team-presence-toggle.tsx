@@ -48,7 +48,8 @@ export function PresenceToggleButton() {
       <Users className="size-4" />
       {workingCount > 0 ? (
         <span
-          className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-bold tabular-nums text-brand-foreground"
+          // story #2023 ⓑ: working 카운트 배지=L5(시스템 상태). info-foreground는 §3-3에서 신설(다크 AA 보정 포함).
+          className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-info px-1 text-[10px] font-bold tabular-nums text-info-foreground"
           aria-hidden
         >
           {workingCount}

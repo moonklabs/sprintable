@@ -83,7 +83,7 @@ async def test_owner_can_update_org_name():
 
         mock_repo = MagicMock()
         mock_repo.get_member_role = AsyncMock(return_value="owner")
-        mock_repo.update_name = AsyncMock(return_value=updated_org)
+        mock_repo.get = AsyncMock(return_value=updated_org)
 
         from app.routers.organizations import _get_repo
         app.dependency_overrides[_get_repo] = lambda: mock_repo
@@ -109,7 +109,7 @@ async def test_admin_can_update_org_name():
 
         mock_repo = MagicMock()
         mock_repo.get_member_role = AsyncMock(return_value="admin")
-        mock_repo.update_name = AsyncMock(return_value=updated_org)
+        mock_repo.get = AsyncMock(return_value=updated_org)
 
         from app.routers.organizations import _get_repo
         app.dependency_overrides[_get_repo] = lambda: mock_repo

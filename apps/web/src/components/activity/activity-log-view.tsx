@@ -7,10 +7,12 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
+import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
+import { deriveAuditProofState } from './derive-audit-proof-state';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface ActivityLogItem {
+export interface ActivityLogItem {
   id: string;
   project_id: string;
   actor_id: string | null;
@@ -57,21 +59,7 @@ function getDefaultDates() {
 // ─── Row skeleton ─────────────────────────────────────────────────────────────
 
 function RowSkeleton() {
-  return (
-    <div className="grid h-12 animate-pulse grid-cols-[1fr_1fr_1fr_1fr_2fr] gap-4 rounded-md bg-muted px-4" />
-  );
-}
-
-// ─── Context cell ─────────────────────────────────────────────────────────────
-
-function ContextCell({ context }: { context: Record<string, unknown> | null }) {
-  if (!context || Object.keys(context).length === 0) return <span className="text-muted-foreground">—</span>;
-  const entries = Object.entries(context).slice(0, 3);
-  return (
-    <span className="truncate text-xs text-muted-foreground">
-      {entries.map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}
-    </span>
-  );
+  return <div className="h-9 animate-pulse rounded-[6px] bg-muted" />;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -90,6 +78,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [forbidden, setForbidden] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const [actorFilter, setActorFilter] = useState(ALL);
   const [actionFilter, setActionFilter] = useState(ALL);
@@ -134,18 +123,28 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
     [buildParams],
   );
 
+  // story #2000: fetchLogs 내부 raw fetch가 네트워크 단에서 throw하면(오프라인 등) try 없이
+  // setLoading(false)가 영영 안 불려 스켈레톤이 무한행 — 세 진입점(load/loadMore/reload)
+  // 모두 try/catch/finally로 봉합, 기존 forbidden 패턴과 동형으로 loadError 상태+reload 재사용.
+
   // reset + reload on filter change
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setLoading(true);
       setForbidden(false);
+      setLoadError(false);
       setOffset(0);
-      const result = await fetchLogs(0);
-      if (cancelled) return;
-      setItems(result?.items ?? []);
-      setTotal(result?.total ?? 0);
-      setLoading(false);
+      try {
+        const result = await fetchLogs(0);
+        if (cancelled) return;
+        setItems(result?.items ?? []);
+        setTotal(result?.total ?? 0);
+      } catch {
+        if (!cancelled) setLoadError(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
     void load();
     return () => { cancelled = true; };
@@ -154,24 +153,34 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const loadMore = async () => {
     const nextOffset = offset + PAGE_SIZE;
     setLoadingMore(true);
-    const result = await fetchLogs(nextOffset);
-    if (result) {
-      setItems((prev) => [...prev, ...result.items]);
-      setOffset(nextOffset);
-      setTotal(result.total);
+    try {
+      const result = await fetchLogs(nextOffset);
+      if (result) {
+        setItems((prev) => [...prev, ...result.items]);
+        setOffset(nextOffset);
+        setTotal(result.total);
+      }
+    } catch {
+      // 더보기 실패는 조용히 두고 버튼을 그대로 남겨(재클릭으로 재시도 가능).
+    } finally {
+      setLoadingMore(false);
     }
-    setLoadingMore(false);
   };
 
-  const reload = () => {
+  const reload = async () => {
     setForbidden(false);
+    setLoadError(false);
     setLoading(true);
     setOffset(0);
-    fetchLogs(0).then((result) => {
+    try {
+      const result = await fetchLogs(0);
       setItems(result?.items ?? []);
       setTotal(result?.total ?? 0);
+    } catch {
+      setLoadError(true);
+    } finally {
       setLoading(false);
-    });
+    }
   };
 
   // ─── Dropdown options ──────────────────────────────────────────────────────
@@ -190,7 +199,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* Filters */}
@@ -245,9 +254,21 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
             <div className="flex h-64 items-center justify-center">
               <EmptyState title={t('forbiddenTitle')} description={t('forbiddenDescription')} />
             </div>
+          ) : loadError ? (
+            <div className="flex h-64 items-center justify-center">
+              <EmptyState
+                title={tc('error')}
+                description={tc('errorDescription')}
+                action={
+                  <Button variant="glass" size="sm" onClick={reload}>
+                    <RefreshCw className="mr-1.5 size-3.5" />
+                    {tc('retry')}
+                  </Button>
+                }
+              />
+            </div>
           ) : loading ? (
-            <div className="space-y-2">
-              <TableHeader t={t} />
+            <div className="space-y-1.5">
               {Array.from({ length: 8 }).map((_, i) => <RowSkeleton key={i} />)}
             </div>
           ) : items.length === 0 ? (
@@ -262,8 +283,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
               }
             />
           ) : (
-            <div className="space-y-1">
-              <TableHeader t={t} />
+            <div className="space-y-1.5">
               {items.map((item) => (
                 <ActivityRow key={item.id} item={item} />
               ))}
@@ -284,16 +304,15 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function TableHeader({ t }: { t: ReturnType<typeof useTranslations> }) {
-  return (
-    <div className="grid grid-cols-[140px_1fr_1fr_1fr_2fr] gap-4 border-b border-border/60 px-4 pb-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-      <span>{t('colTime')}</span>
-      <span>{t('colActor')}</span>
-      <span>{t('colAction')}</span>
-      <span>{t('colEntity')}</span>
-      <span>{t('colContext')}</span>
-    </div>
-  );
+export function auditClaim(item: ActivityLogItem): string {
+  if (item.entity_title) return item.entity_type ? `${item.entity_type} · ${item.entity_title}` : item.entity_title;
+  return item.action;
+}
+
+export function auditContextTooltip(item: ActivityLogItem): string | undefined {
+  const entries = item.context ? Object.entries(item.context) : [];
+  const lines = [`action: ${item.action}`, ...entries.map(([k, v]) => `${k}: ${String(v)}`)];
+  return lines.join('\n');
 }
 
 function ActivityRow({ item }: { item: ActivityLogItem }) {
@@ -303,19 +322,15 @@ function ActivityRow({ item }: { item: ActivityLogItem }) {
   });
 
   return (
-    <div className="grid h-12 grid-cols-[140px_1fr_1fr_1fr_2fr] items-center gap-4 rounded-md px-4 text-sm transition hover:bg-muted/50">
-      <span className="truncate text-xs text-muted-foreground">{time}</span>
-      <span className="truncate font-medium">{item.actor_name ?? '—'}</span>
-      <span className="truncate font-mono text-xs">{item.action}</span>
-      <span className="truncate text-xs">
-        {item.entity_type ? (
-          <span className="inline-flex items-center gap-1">
-            <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{item.entity_type}</span>
-            {item.entity_title && <span className="truncate text-muted-foreground">{item.entity_title}</span>}
-          </span>
-        ) : '—'}
-      </span>
-      <ContextCell context={item.context} />
+    <div title={auditContextTooltip(item)}>
+      <ProofCapsule
+        density="audit"
+        proofState={deriveAuditProofState(item.action)}
+        stateLabel={item.action}
+        claim={auditClaim(item)}
+        now={time}
+        human={item.actor_name ? { name: item.actor_name, role: item.actor_type ?? 'human' } : undefined}
+      />
     </div>
   );
 }

@@ -10,5 +10,5 @@ interface LegacyAgentDetailPageProps {
  */
 export default async function LegacyAgentDetailPage({ params }: LegacyAgentDetailPageProps) {
   const { id } = await params;
-  redirect(`/agents/${id}`);
+  redirect(`/organization/workforce/${id}`);
 }

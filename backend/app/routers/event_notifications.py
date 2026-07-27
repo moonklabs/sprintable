@@ -16,7 +16,7 @@ from app.models.conversation import Conversation, ConversationMessage, Conversat
 from app.models.event import Event
 from app.models.team import TeamMember
 
-router = APIRouter(prefix="/api/v2/event-notifications", tags=["event-notifications"])
+router = APIRouter(prefix="/api/v2/event-notifications", tags=["event-notifications", "Organization"])
 
 # 대화 이벤트 종류(휴먼 알림 정책 분기 대상). 비-대화 이벤트(dispatched 등)는 항상 노출.
 _CONVERSATION_EVENT_TYPES = ("conversation.message_created", "conversation:mention")

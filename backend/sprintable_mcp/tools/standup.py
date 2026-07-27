@@ -52,17 +52,17 @@ class CheckinSprintInput(SprintableInput):
 async def standup_missing(args: StandupDateInput) -> list[TextContent]:
     """스탠드업 미제출 멤버 조회."""
     try:
-        return ok(await client.get("/api/v2/standups/missing", params={"project_id": client.project_id, "date": args.date}))
+        return ok(await client.get("/api/v2/standups/missing", params={"project_id": client.require_project_id(), "date": args.date}))
     except Exception as exc:
         return err(str(exc))
 
 
 async def standup_history(args: StandupHistoryInput) -> list[TextContent]:
     """최근 스탠드업 히스토리 조회."""
-    params: dict = {"project_id": client.project_id}
-    if args.limit is not None:
-        params["limit"] = str(args.limit)
     try:
+        params: dict = {"project_id": client.require_project_id()}
+        if args.limit is not None:
+            params["limit"] = str(args.limit)
         return ok(await client.get("/api/v2/standups/history", params=params))
     except Exception as exc:
         return err(str(exc))
@@ -70,9 +70,9 @@ async def standup_history(args: StandupHistoryInput) -> list[TextContent]:
 
 async def get_standup(args: GetStandupInput) -> list[TextContent]:
     """멤버+날짜 기준 스탠드업 조회."""
-    # standups.py:34 author_id 파라미터 (MCP 입력은 member_id → author_id 매핑)
-    params: dict = {"author_id": args.member_id, "date": args.date, "project_id": client.project_id}
     try:
+        # standups.py:34 author_id 파라미터 (MCP 입력은 member_id → author_id 매핑)
+        params: dict = {"author_id": args.member_id, "date": args.date, "project_id": client.require_project_id()}
         return ok(await client.get("/api/v2/standups", params=params))
     except Exception as exc:
         return err(str(exc))
@@ -81,9 +81,10 @@ async def get_standup(args: GetStandupInput) -> list[TextContent]:
 async def save_standup(args: SaveStandupInput) -> list[TextContent]:
     """스탠드업 저장/업데이트.
 
-    1c2be9db: org-level 기본 — client.project_id 를 강제 주입하지 않는다(이전엔 project-level
+    1c2be9db: org-level 기본 — project_id를 강제 주입하지 않는다(이전엔 project-level
     행을 강제). project_id 생략 → BE 가 org-level 엔트리 1건으로 upsert 하고 작성자 접근
-    프로젝트로 자동 링크(projection). (org_id/author_id 는 BE 가 canonical 처리.)
+    프로젝트로 자동 링크(projection). (org_id/author_id 는 BE 가 canonical 처리.) 의도적으로
+    require_project_id()를 쓰지 않음(ambiguous 키도 org-level 저장은 가능해야 함).
     """
     body: dict = {"author_id": args.author_id, "date": args.date}
     for field in ("done", "plan", "blockers"):
@@ -99,19 +100,19 @@ async def save_standup(args: SaveStandupInput) -> list[TextContent]:
 async def list_standup_entries(args: ListStandupEntriesInput) -> list[TextContent]:
     """날짜 기준 스탠드업 목록 조회."""
     try:
-        return ok(await client.get("/api/v2/standups", params={"project_id": client.project_id, "date": args.date}))
+        return ok(await client.get("/api/v2/standups", params={"project_id": client.require_project_id(), "date": args.date}))
     except Exception as exc:
         return err(str(exc))
 
 
 async def get_retro_session(args: GetRetroSessionInput) -> list[TextContent]:
     """스프린트 레트로 세션 조회 (없으면 생성)."""
-    params: dict = {"project_id": client.project_id}
-    if args.org_id:
-        params["org_id"] = args.org_id
-    if args.initiator_id:
-        params["initiator_id"] = args.initiator_id
     try:
+        params: dict = {"project_id": client.require_project_id()}
+        if args.org_id:
+            params["org_id"] = args.org_id
+        if args.initiator_id:
+            params["initiator_id"] = args.initiator_id
         return ok(await client.get(f"/api/v2/retro/{args.sprint_id}", params=params))
     except Exception as exc:
         return err(str(exc))

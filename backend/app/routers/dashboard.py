@@ -10,7 +10,7 @@ from app.models.pm import Story, Task
 from app.models.team import TeamMember
 from app.schemas.dashboard import DashboardResponse, StoryItem, TaskItem
 
-router = APIRouter(prefix="/api/v2/dashboard", tags=["dashboard"])
+router = APIRouter(prefix="/api/v2/dashboard", tags=["dashboard", "Work"])
 
 
 @router.get("", response_model=DashboardResponse)

@@ -22,10 +22,16 @@ def _mock_story_obj(assignee_id=None):
     s.id = STORY_ID
     s.org_id = ORG_ID
     s.project_id = PROJECT_ID
+    # story 9ac9b80f: MagicMock 자동 속성은 Pydantic int|None 검증 실패 — 명시 세팅.
+    s.story_number = 1
     s.epic_id = None
     s.sprint_id = None
     s.assignee_id = assignee_id
     s.assignee_ids = [assignee_id] if assignee_id else []  # E-BOARD S5
+    # P0-03(doc trust-pipeline-be-design §5): 신규 필드 — MagicMock 반환 MagicMock이 Pydantic UUID
+    # 검증 실패하므로 명시 세팅.
+    s.human_owner_member_id = None
+    s.agent_delegate_ids = []
     s.meeting_id = None
     s.title = "Story 1"
     s.status = "backlog"
@@ -84,11 +90,23 @@ async def _make_client(mock_session):
 async def test_create_story_with_assignee_auto_creates_participation():
     """create_story + assignee → _upsert_assignee_participation 호출 단언."""
     mock_session = AsyncMock()
+    # P0-03(doc trust-pipeline-be-design §5): create_story가 assignee 有 시 _attach_agent_delegate_ids
+    # →lookup_members_by_ids로 신규 session.execute(select(TeamMember)...) 호출 — 미설정 AsyncMock은
+    # .scalars()가 코루틴을 반환해 .all() 실패(test_update_story_...와 동일 _empty 패턴 재사용).
+    _empty = MagicMock()
+    _empty.all.return_value = []
+    _empty.scalars.return_value.all.return_value = []
+    _empty.scalar_one_or_none.return_value = 1
+    _empty.scalar.return_value = None
+    mock_session.execute.return_value = _empty
     story = _mock_story_obj(assignee_id=MEMBER_ID)
 
     client, app = await _make_client(mock_session)
     try:
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+        # story 9ac9b80f: StoryRepository.create()가 이제 BaseRepository.create() 前에
+        # allocate_story_number()(실 DB 쿼리)를 먼저 호출한다 — 서브클래스 레벨을 patch해야
+        # mock 세션에 그 호출까지 안 부딪힌다(test_stories.py와 동형 수정).
+        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
              patch("app.routers.stories._upsert_assignee_participation", new_callable=AsyncMock) as mock_upsert:
             mock_create.return_value = story
             async with client as c:
@@ -116,7 +134,10 @@ async def test_create_story_without_assignee_no_participation():
 
     client, app = await _make_client(mock_session)
     try:
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+        # story 9ac9b80f: StoryRepository.create()가 이제 BaseRepository.create() 前에
+        # allocate_story_number()(실 DB 쿼리)를 먼저 호출한다 — 서브클래스 레벨을 patch해야
+        # mock 세션에 그 호출까지 안 부딪힌다(test_stories.py와 동형 수정).
+        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
              patch("app.routers.stories._upsert_assignee_participation", new_callable=AsyncMock) as mock_upsert:
             mock_create.return_value = story
             async with client as c:
@@ -138,10 +159,12 @@ async def test_update_story_assignee_auto_creates_participation():
     """update_story assignee 변경 → _upsert_assignee_participation 호출 단언."""
     mock_session = AsyncMock()
     # E-BOARD S5: update_story가 _attach_assignee_ids로 story_assignees 조회 → 빈 결과 모킹
+    # E-SECURITY SEC-S8(G): has_project_access(raw SQL) 도 scalar_one_or_none을 쓰므로 truthy로
+    # 설정해 접근권 통과시킴(StoryRepository.get은 아래서 별도 patch).
     _empty = MagicMock()
     _empty.all.return_value = []
     _empty.scalars.return_value.all.return_value = []
-    _empty.scalar_one_or_none.return_value = None
+    _empty.scalar_one_or_none.return_value = 1
     _empty.scalar.return_value = None
     mock_session.execute.return_value = _empty
     story = _mock_story_obj(assignee_id=MEMBER_ID)
@@ -236,7 +259,7 @@ async def test_create_story_without_assignee_still_201():
 
     client, app = await _make_client(mock_session)
     try:
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = story
             async with client as c:
                 resp = await c.post("/api/v2/stories", json={

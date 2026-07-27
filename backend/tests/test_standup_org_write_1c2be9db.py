@@ -71,8 +71,11 @@ async def test_org_level_post_resyncs_to_accessible_projects():
     p1, p2 = uuid.uuid4(), uuid.uuid4()
     client, app = await _client(uid, org)
     resync = AsyncMock()
+    from app.services.member_resolver import ResolvedMember
+    member = ResolvedMember(id=uuid.uuid4(), user_id=uid, name="h", type="human", role="member", org_id=org)
     try:
         with patch("app.routers.standups.canonicalize_member_id", new=AsyncMock(return_value=uuid.uuid4())), \
+             patch("app.routers.standups.resolve_member", new=AsyncMock(return_value=member)), \
              patch("app.routers.standups.accessible_project_ids_in_org", new=AsyncMock(return_value=[p1, p2])), \
              patch("app.repositories.standup.StandupEntryRepository.upsert", new=AsyncMock(return_value=_entry(org))), \
              patch("app.repositories.standup.StandupEntryRepository.resync_project_links", new=resync):
@@ -95,8 +98,11 @@ async def test_legacy_post_with_project_id_no_resync():
     client, app = await _client(uid, org)
     resync = AsyncMock()
     accessible = AsyncMock(return_value=[])
+    from app.services.member_resolver import ResolvedMember
+    member = ResolvedMember(id=uuid.uuid4(), user_id=uid, name="h", type="human", role="member", org_id=org)
     try:
         with patch("app.routers.standups.canonicalize_member_id", new=AsyncMock(return_value=uuid.uuid4())), \
+             patch("app.routers.standups.resolve_member", new=AsyncMock(return_value=member)), \
              patch("app.routers.standups.accessible_project_ids_in_org", new=accessible), \
              patch("app.repositories.standup.StandupEntryRepository.upsert", new=AsyncMock(return_value=_entry(org, uuid.uuid4()))), \
              patch("app.repositories.standup.StandupEntryRepository.resync_project_links", new=resync):

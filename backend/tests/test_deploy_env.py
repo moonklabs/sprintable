@@ -158,11 +158,17 @@ def test_dockerfile_uv_sync_uses_frozen():
 # ── deploy_backend.sh 4결함 fix (cutover 첫 prod 실행서 노출) ────────────────────
 
 def test_deploy_full_env_secrets():
-    """결함③: full env — DATABASE_URL/JWT 외 GOOGLE/GITHUB/RESEND/EMAIL 시크릿 포함."""
+    """결함③: full env — DATABASE_URL/JWT 외 GOOGLE/RESEND/EMAIL 시크릿 포함.
+
+    story #2155(2026-07-23): GitHub 로그인 제거로 GITHUB_CLIENT_ID/_SECRET 배선도 함께
+    삭제됐다(settings.github_client_id/github_client_secret 자체가 코드에 없음, #2436) —
+    더 이상 이 목록에 있으면 안 된다(회귀가드로 부재를 고정)."""
     s = _resolve(_DEPLOY, "dev")["SECRETS_SPEC"]
     for name in ("DATABASE_URL=", "JWT_SECRET=", "GOOGLE_CLIENT_ID=", "GOOGLE_CLIENT_SECRET=",
-                 "GITHUB_CLIENT_ID=", "RESEND_API_KEY=", "EMAIL_FROM="):
+                 "RESEND_API_KEY=", "EMAIL_FROM="):
         assert name in s, f"{name} 누락 (결함③ full env 미충족)"
+    assert "GITHUB_CLIENT_ID=" not in s, "GitHub 로그인 제거(#2155) 후에도 배선이 남아있음"
+    assert "GITHUB_CLIENT_SECRET=" not in s, "GitHub 로그인 제거(#2155) 후에도 배선이 남아있음"
 
 
 def test_deploy_cors_custom_delimiter_preserves_commas():
@@ -177,6 +183,26 @@ def test_deploy_app_url_env_specific():
     assert _resolve(_DEPLOY, "prod")["APP_URL"] == "https://app.sprintable.ai"
 
 
+def test_deploy_app_env_matches_local_envs_semantics():
+    """story cd10e123 계열(2026-07-21, 오르테가군 SPEC-vs-라이브 1:1 대조): dev는 코드가
+    기대하는 정확한 리터럴 "development"여야 한다(cron.py/auth_firebase_internal.py의
+    `_LOCAL_ENVS = {"development"}`가 정확히 이 문자열만 매칭 — "dev"였다면 그 세이프티넷이
+    조용히 꺼졌을 것). prod는 라이브 실측(APP_ENV=prod)과 동일 유지."""
+    dev_spec = _resolve(_DEPLOY, "dev")["ENV_VARS_SPEC"]
+    assert "APP_ENV=development@" in dev_spec, "dev APP_ENV가 _LOCAL_ENVS 리터럴('development')과 불일치"
+    prod_spec = _resolve(_DEPLOY, "prod")["ENV_VARS_SPEC"]
+    assert "APP_ENV=prod@" in prod_spec, "prod APP_ENV가 라이브 실측값(prod)과 불일치"
+
+
+def test_deploy_dev_frontend_url_not_fake_placeholder():
+    """story cd10e123 계열: 예전 dev FRONTEND_URL 기본값("...placeholder.run.app")은 실존한
+    적 없는 가짜 호스트 — CORS allowlist에 실제 프론트 도메인이 안 실렸을 것. dev-app.sprintable.ai
+    (라이브 실측 APP_URL과 동일 CF-fronted 도메인)로 교정됐는지 확認."""
+    spec = _resolve(_DEPLOY, "dev")["ENV_VARS_SPEC"]
+    assert "placeholder" not in spec, "가짜 placeholder 호스트 잔존"
+    assert "dev-app.sprintable.ai" in spec
+
+
 def test_deploy_no_invalid_probe_flag_and_has_vpc():
     """결함①: 무효 --startup-probe-path 제거. 결함②: VPC 플래그(Private-IP) 추가."""
     with open(_DEPLOY) as f:
@@ -186,6 +212,25 @@ def test_deploy_no_invalid_probe_flag_and_has_vpc():
     assert not flag_usage, "무효 플래그 --startup-probe-path 실사용 잔존(결함①)"
     src = "".join(lines)
     assert "--vpc-egress" in src and "--network=default" in src, "VPC 플래그 누락(결함②)"
+
+
+def test_deploy_backend_env_and_secrets_are_additive():
+    """결함⑤(story cd10e123 계열, 2026-07-21 durable-wiring 스윕 ⓐ): --set-env-vars/
+    --set-secrets(전체교체)는 이 일회성 런북이 기존 서비스 위에 실수로 재실행될 때
+    routine cloudbuild.yaml이 additive로 쌓아온 값(PG_LISTEN_ENABLED·REDIS_*·
+    GITHUB_APP_PRIVATE_KEY 등)을 조용히 지우는 landmine이었다 — --update-env-vars/
+    --update-secrets(additive)로 교정. --no-allow-unauthenticated도 현재 운영값
+    (--allow-unauthenticated, 2026-06-21 prod 403 사건 이후 명시 고정)과 충돌해 제거.
+    """
+    with open(_DEPLOY) as f:
+        lines = f.readlines()
+    # 주석 멘션(이 fix를 설명하는 텍스트 자체)은 무시하고 **실제 플래그 사용**만 검사.
+    used = lambda flag: [ln for ln in lines if ln.strip().startswith(flag)]
+    assert not used("--set-env-vars="), "--set-env-vars(전체교체) 실사용 잔존 — additive 회귀"
+    assert not used("--set-secrets="), "--set-secrets(전체교체) 실사용 잔존 — additive 회귀"
+    assert not used("--no-allow-unauthenticated"), "--no-allow-unauthenticated 실사용 잔존 — 현재 운영값과 충돌"
+    assert used("--update-env-vars=") and used("--update-secrets="), "--update-* 플래그 누락"
+    assert used("--allow-unauthenticated")
 
 
 # ── deploy_frontend.sh 결함 fix (deploy_backend.sh와 동일 패턴) ──────────────────
@@ -201,9 +246,60 @@ def test_deploy_frontend_no_invalid_flags():
 
 
 def test_deploy_frontend_single_set_env_vars():
-    """--set-env-vars 단일화(gcloud 반복 시 덮어써 NODE_ENV/NEXT_TELEMETRY 유실 위험 방지)."""
+    """--update-env-vars 단일화(gcloud 반복 시 덮어써 NODE_ENV/NEXT_TELEMETRY 유실 위험 방지).
+
+    story cd10e123 계열(2026-07-21, durable-wiring 스윕 ⓐ): --set-env-vars(전체교체)는 이
+    스크립트가 재실행될 때 cloudbuild.yaml deploy-frontend가 additive로 쌓아온 값(REALTIME_URL
+    등)을 조용히 지우는 landmine이라 --update-env-vars(additive)로 교정됐다 — 이 테스트도 새
+    플래그 이름으로 갱신(단일화라는 원래 의도는 동일하게 검증).
+    """
     with open(_DEPLOY_FE) as f:
-        src = f.read()
-    assert src.count("--set-env-vars=") == 1, "--set-env-vars 중복 → env 유실 위험"
+        lines = f.readlines()
+    src = "".join(lines)
+    # 주석 멘션(이 fix를 설명하는 텍스트 자체)은 무시하고 **실제 플래그 사용**만 검사.
+    used = lambda flag: [ln for ln in lines if ln.strip().startswith(flag)]
+    assert not used("--set-env-vars="), "--set-env-vars(전체교체) 실사용 잔존 — additive 회귀"
+    assert len(used("--update-env-vars=")) == 1, "--update-env-vars 중복 → env 유실 위험"
     for kv in ("NODE_ENV=production", "NEXT_TELEMETRY_DISABLED=1", "NEXT_PUBLIC_FASTAPI_URL="):
         assert kv in src, f"{kv} 누락"
+
+
+def test_deploy_frontend_cookie_domain_prod_only():
+    """story cd10e123 계열(2026-07-21, 오르테가군 SPEC-vs-라이브 1:1 대조): NEXT_PUBLIC_COOKIE_DOMAIN
+    은 story e5225c0a(3차 근본 — prod 로그인 풀림 원인 그 자체, 이 세션 초입에 재확認)가 정확히
+    이 값의 dev/prod 유무 차이 때문이었다. 예전엔 env 구분 없이 항상 바인딩 — 재실행 시 dev에
+    이 값이 새로 생겨 그 클래스 버그를 재현할 위험. env별로 분리됐는지 실증."""
+    with open(_DEPLOY_FE) as f:
+        src = f.read()
+    assert 'COOKIE_DOMAIN_SECRET_SPEC=""' in src, "dev COOKIE_DOMAIN_SECRET_SPEC 빈 값 누락"
+    assert "COOKIE_DOMAIN_SECRET_SPEC=\",NEXT_PUBLIC_COOKIE_DOMAIN=NEXT_PUBLIC_COOKIE_DOMAIN:latest\"" in src, \
+        "prod COOKIE_DOMAIN_SECRET_SPEC 누락"
+
+
+def test_deploy_frontend_dev_uses_cf_fronted_fastapi_domain():
+    """story cd10e123 계열: dev NEXT_PUBLIC_FASTAPI_URL 동적 discovery는 항상 raw *.run.app 로
+    resolve돼, 라이브 실측(CF-fronted dev-api.sprintable.ai)과 다르다 — 재실행 시 조용히
+    되돌아갈 위험. 하드코드 override 확認."""
+    with open(_DEPLOY_FE) as f:
+        src = f.read()
+    assert 'FASTAPI_URL_OVERRIDE="https://dev-api.sprintable.ai"' in src
+
+
+# ── story #2060(SID f2fe1c5e #2040 AC5 후속): uvicorn graceful shutdown 상한 ────────
+
+def test_dockerfile_uvicorn_bounds_graceful_shutdown():
+    """uvicorn 0.46.0 `timeout_graceful_shutdown` 기본값은 None(무기한) — 장수명 SSE 스트림이
+    안 끊기면 lifespan.shutdown()(pg_pubsub LISTEN 정리)이 영영 안 불리고 Cloud Run SIGKILL
+    (terminationGracePeriodSeconds 기본 10초, dev/prod 둘 다 미설정 — 오르테가군 gcloud 실측
+    2026-07-20)에 정리 없이 죽는다. `--timeout-graceful-shutdown 5`로 상한을 강제해
+    드레인 5초+정리(밀리초 단위) 5초 여유를 10초 한도 안에 확보한다."""
+    with open(_DOCKERFILE) as f:
+        src = f.read()
+    cmd_lines = [ln for ln in src.splitlines() if ln.strip().startswith("CMD")]
+    assert cmd_lines, "CMD 인스트럭션을 찾을 수 없음"
+    cmd = cmd_lines[-1]
+    assert "--timeout-graceful-shutdown" in cmd, (
+        "uvicorn CMD에 --timeout-graceful-shutdown 누락 — 기본값 None(무기한)으로 되돌아가면 "
+        "pg_pubsub LISTEN 정리가 SIGKILL에 밀려 좀비 커넥션이 재발한다."
+    )
+    assert '"5"' in cmd, "timeout 값이 5초가 아님 — Cloud Run 10초 유예 안에서의 안전 마진 확認 필요"

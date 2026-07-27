@@ -12,6 +12,9 @@ export interface Task {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  // E-VERIFY V0-S1/S2: 실증-done 신뢰 신호(story와 동일 계약). V0-S3 FE 표면은 story 카드/상세
+  // 한정(design doc §9 scope) — task 표면은 후속 스토리 판단.
+  has_evidence?: boolean | null;
 }
 
 export interface CreateTaskInput {

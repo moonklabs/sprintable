@@ -20,9 +20,16 @@ def anyio_backend():
 
 
 def _mock_session_with(scalar_value):
+    """story #1994 §5회차: `has_project_access`가 raw `text()` SQL(`SELECT 1 ... LIMIT 1` — row
+    있음/없음)에서 SQLAlchemy Core `exists()` 단일 불리언 표현식으로 구현이 바뀌었다(atom-level
+    SSOT `_project_access_predicate`로 추출, `project_access_valid_correlated`와 공유). 실행
+    메서드는 여전히 `scalar_one_or_none()`(mock 호환성 위해 의도적으로 유지 — project_auth.py
+    주석 참조)이라 기존 mock 관례를 그대로 재사용할 수 있다. `scalar_value`는 기존 테스트
+    바디와의 호환을 위해 1/None 관례를 그대로 받되 bool()로 정규화해 `scalar_one_or_none`에
+    태운다(EXISTS는 항상 정확히 1행 True/False를 내므로 실 DB에서는 `scalar_one()`과 동치)."""
     session = AsyncMock()
     result = MagicMock()
-    result.scalar_one_or_none.return_value = scalar_value
+    result.scalar_one_or_none.return_value = bool(scalar_value)
     session.execute = AsyncMock(return_value=result)
     return session
 
@@ -56,14 +63,22 @@ async def test_has_access_without_org_id():
 
 @pytest.mark.anyio
 async def test_query_passes_correct_params():
-    """user_id / project_id / org_id 파라미터 바인딩 검증."""
+    """user_id / project_id / org_id 바인딩 검증. §5회차: `has_project_access`가 이제 raw
+    text()+dict가 아니라 SQLAlchemy Core `select(predicate)`를 실행한다 — `session.execute`에
+    넘어간 실제 Select 구문을 literal-binds로 컴파일해 세 값이 모두 SQL 텍스트에 리터럴로
+    박혀 있는지 확인한다(구현 메커니즘은 바뀌었지만 "세 파라미터가 실제로 쿼리에 쓰인다"는
+    검증 의도는 그대로)."""
+    from sqlalchemy.dialects import postgresql
+
     session = _mock_session_with(None)
     await has_project_access(session, USER_ID, PROJECT_ID, ORG_ID)
     call_args = session.execute.call_args
-    params = call_args[0][1]
-    assert params["user_id"] == USER_ID
-    assert params["project_id"] == PROJECT_ID
-    assert params["org_id"] == ORG_ID
+    stmt = call_args[0][0]
+    compiled = stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+    sql_text = str(compiled)
+    assert str(USER_ID) in sql_text
+    assert str(PROJECT_ID) in sql_text
+    assert str(ORG_ID) in sql_text
 
 
 # ── first_accessible_project_id ───────────────────────────────────────────────

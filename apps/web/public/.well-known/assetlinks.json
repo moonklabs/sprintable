@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.moonklabs.sprintable",
+      "sha256_cert_fingerprints": [
+        "F5:D0:7A:92:EA:A1:BB:71:F6:AF:71:9C:EC:E7:34:65:E5:83:FA:CF:C1:90:EE:CA:A0:E1:F0:F1:02:9C:59:99"
+      ]
+    }
+  }
+]

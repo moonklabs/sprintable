@@ -20,7 +20,7 @@ class PolicyDocument(Base, OrgScopedMixin):
         UUID(as_uuid=True), ForeignKey("sprints.id", ondelete="CASCADE"), nullable=False, index=True
     )
     epic_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("epics.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True), ForeignKey("goals.id", ondelete="CASCADE"), nullable=False, index=True
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")

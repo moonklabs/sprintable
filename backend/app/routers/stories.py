@@ -1,26 +1,27 @@
+import json
+import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, field_validator
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.event import Event
-from app.models.pm import Epic, Story, StoryActivity, StoryComment
+from app.models.deletion_audit import DeletionAuditLog
+from app.models.pm import Goal, Story, StoryActivity, StoryComment
 from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.repositories.story_assignee import StoryAssigneeRepository
 from app.routers.agent_gateway import wake_agent
-from app.routers.events import publish_event
-from app.services.event_seq import assign_recipient_seq
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.schemas.story import StoryAttachment, StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
-from app.services.member_resolver import canonicalize_member_id
+from app.services.member_resolver import canonicalize_member_id, filter_org_member_ids, resolve_member
 from app.services.merge_verdict_gate import (
     AUTO_MERGE,
     evaluate_merge_gate,
@@ -29,6 +30,7 @@ from app.services.merge_verdict_gate import (
 )
 from app.services.verdict_capture import resolve_implementation_participation
 from app.services.notification_dispatch import dispatch_notification
+from app.services.story_assignee_events import emit_story_assignee_changed
 from app.services.story_status_events import emit_story_status_changed
 from app.services.webhook_dispatch import fire_webhooks
 from app.services.workflow_line_status import (
@@ -37,15 +39,15 @@ from app.services.workflow_line_status import (
     build_workflow_line_status,
     build_workflow_line_status_batch,
 )
-from app.services.workflow_pipeline import process_event
-from app.services.rule_evaluator import EventContext
 from app.services.workflow_violation import (
     build_violation_event,
     build_violation_flag,
     check_transition,
 )
 
-router = APIRouter(prefix="/api/v2/stories", tags=["stories"])
+router = APIRouter(prefix="/api/v2/stories", tags=["stories", "Work"])
+
+logger = logging.getLogger(__name__)
 
 
 async def _resolve_actor_info(
@@ -66,7 +68,7 @@ async def _resolve_actor_info(
 async def _resolve_epic_title(db: AsyncSession, epic_id: uuid.UUID | None) -> str | None:
     if not epic_id:
         return None
-    result = await db.execute(select(Epic).where(Epic.id == epic_id).limit(1))
+    result = await db.execute(select(Goal).where(Goal.id == epic_id).limit(1))
     epic = result.scalar_one_or_none()
     return epic.title if epic else None
 
@@ -86,19 +88,62 @@ async def list_stories(
     assignee_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     no_sprint: bool = Query(default=False, description="sprint 미배정 스토리만 반환"),
+    ids: str | None = Query(default=None, description="comma-separated story ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관)"),
+    story_number: int | None = Query(default=None, description="프로젝트 내 사람-읽는 #N(project_id와 함께 사용 — N은 project 내에서만 유일)"),
+    q: str | None = Query(default=None, description="title 부분검색(ILIKE) — 기존 필터와 AND 결합"),
     limit: int = Query(default=1000, ge=1, le=2000),
     cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
     response: Response = None,  # type: ignore[assignment]
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[StoryResponse]:
     from datetime import datetime
 
-    if no_sprint and project_id:
-        stories = await repo.list_backlog(project_id, limit=limit)
+    if ids is not None:
+        # story ca37b2b0 ②: 갤러리 등 정확한 story 집합이 필요한 소비자용 — base.list()의
+        # ORDER BY 부재(별건 d8787fa6)와 무관하게 요청한 id를 전부(또는 접근권 있는 만큼) 반환.
+        try:
+            story_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="invalid story id in ids")
+        if not story_ids:
+            return []
+        if len(story_ids) > 200:  # 워크플로우-라인 배치와 동형 방어(과대 IN 금지).
+            raise HTTPException(status_code=422, detail="too many ids (max 200)")
+        stories = await repo.list_by_ids(story_ids)
+        # 인가 스코프: org 소속이어도 caller가 접근 못 하는 project의 story는 조용히 필터링
+        # (타 project id가 섞여 들어와도 유출 0 — has_project_access와 동일 SSOT 배치 버전 재사용).
+        from app.services.project_auth import accessible_project_ids_in_org
+        accessible = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id)
+        stories = [s for s in stories if s.project_id in accessible]
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
+        await _attach_has_evidence(repo.session, stories)
+        return [StoryResponse.model_validate(s) for s in stories]
+
+    # story #2188 ④-b(2026-07-25, 오르테가군 판정 — 의도된 제약, 코드 고칠 이유 없음):
+    # `no_sprint=True`를 `project_id` 없이 보내면 이 분기 자체가 안 걸려 제네릭 분기(:148
+    # 이하)로 떨어지고, 거기엔 sprint_id IS NULL을 적용하는 로직이 없어 no_sprint가 통째로
+    # 무시된다 — 결함은 결함이나 도달 경로가 구조적으로 없다: FE `ApiStoryRepository.backlog()`
+    # 는 `projectId: string`(non-optional) 타입이라 컴파일 타임에 이 조합을 못 만들고, MCP
+    # `sprintable_list_backlog` 툴도 `client.require_project_id()`로 런타임 강제한다(양쪽 다
+    # test_2188_no_sprint_alone_contract_pin.py로 고정). 코드를 고치면 "밟히지도 않는 자리"에
+    # 검증 비용만 느는지라 주석+pinning 테스트로 계약을 선언하고 닫는다.
+    if no_sprint and project_id:
+        # story #2188 형제(#2489와 동형): 필터 전부 넘긴다.
+        # ⚠️ cursor는 안 넘긴다 — #2190은 이 분기와 무관함이 밝혀졌다(list_backlog
+        # docstring 참조: /api/stories/backlog 프록시가 status를 강제 부착해 실제로는
+        # board 분기로 감).
+        stories = await repo.list_backlog(
+            project_id, limit=limit, epic_id=epic_id, assignee_id=assignee_id,
+            status=status_filter, story_number=story_number, q=q,
+        )
+        await _attach_assignee_ids(repo.session, repo.org_id, stories)
+        await _attach_has_evidence(repo.session, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # CB-S4: status + project_id 조합 시 board 쿼리 (order_by + cursor + done 7일 제한)
+    # story #2188: sprint_id/assignee_id만 넘기고 epic_id/story_number/q는 조용히 빠뜨리던
+    # 자리 — 이 분기로 빠지는 조합에서도 제네릭 블록(:148 이하)과 동일하게 전 필터를 넘긴다.
     if status_filter and project_id:
         cursor_dt = datetime.fromisoformat(cursor) if cursor else None
         stories, total = await repo.list_board(
@@ -108,12 +153,16 @@ async def list_stories(
             cursor=cursor_dt,
             sprint_id=sprint_id,
             assignee_id=assignee_id,
+            epic_id=epic_id,
+            story_number=story_number,
+            q_text=q,
         )
         if response is not None:
             response.headers["X-Total-Count"] = str(total)
             if stories:
                 response.headers["X-Next-Cursor"] = stories[-1].created_at.isoformat()
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
+        await _attach_has_evidence(repo.session, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     filters: dict = {}
@@ -127,16 +176,44 @@ async def list_stories(
         filters["assignee_id"] = assignee_id
     if status_filter:
         filters["status"] = status_filter
-    stories = await repo.list(limit=limit, **filters)
+    if story_number is not None:
+        filters["story_number"] = story_number
+    # story #2189: 이 분기도 board 분기(:131)와 동형으로 cursor를 파싱해 넘긴다 — 안 넘기면
+    # FE(buildCursorPageMeta)가 계산한 nextCursor가 다음 요청에서 조용히 무시돼 같은 페이지가
+    # 반복된다(sprints/standup "더 보기" 중복 누적의 원인).
+    cursor_dt = datetime.fromisoformat(cursor) if cursor else None
+    stories = await repo.list(limit=limit, q=q, cursor=cursor_dt, **filters)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
+    await _attach_has_evidence(repo.session, stories)
     return [StoryResponse.model_validate(s) for s in stories]
+
+
+async def _attach_agent_delegate_ids(session: AsyncSession, stories: list[Story]) -> None:
+    """P0-03(doc trust-pipeline-be-design §5): 각 Story에 agent_delegate_ids(transient attr)를
+    채운다 — assignee_ids(이미 세팅돼 있다고 가정)를 Member.type=="agent"로 필터한 파생 뷰(신규
+    저장 0). N+1 회피 위해 배치. `_attach_assignee_ids` 뒤에, 또는 create_story처럼 assignee_ids를
+    인라인으로 세팅한 직후 호출한다."""
+    if not stories:
+        return
+    from app.services.member_resolver import lookup_members_by_ids
+
+    all_ids: set[uuid.UUID] = set()
+    for s in stories:
+        all_ids.update(s.assignee_ids)
+    resolved = await lookup_members_by_ids(all_ids, session)
+    for s in stories:
+        s.agent_delegate_ids = [
+            mid for mid in s.assignee_ids if resolved.get(mid) and resolved[mid].type == "agent"
+        ]
 
 
 async def _attach_assignee_ids(
     session: AsyncSession, org_id: uuid.UUID, stories: list[Story]
 ) -> None:
     """E-BOARD S5: 각 Story에 assignee_ids(transient attr)를 채워 StoryResponse.from_attributes가
-    읽도록 한다. join 비어있으면 단일 assignee_id로 폴백(레거시 행 back-compat). N+1 회피 위해 배치."""
+    읽도록 한다. join 비어있으면 단일 assignee_id로 폴백(레거시 행 back-compat). N+1 회피 위해 배치.
+
+    P0-03(doc trust-pipeline-be-design §5): 같은 배치에서 agent_delegate_ids도 채운다."""
     if not stories:
         return
     sa_repo = StoryAssigneeRepository(session, org_id)
@@ -146,6 +223,45 @@ async def _attach_assignee_ids(
         if not ids:
             ids = [s.assignee_id] if s.assignee_id else []
         s.assignee_ids = ids  # 매핑되지 않은 transient 속성 — from_attributes 전용
+    await _attach_agent_delegate_ids(session, stories)
+
+
+async def _attach_has_evidence(session: AsyncSession, stories: list[Story]) -> None:
+    """E-VERIFY V0-S2(story 3fbd048d) + Claimed vs Verified(doc
+    claimed-vs-verified-spec-handoff §3): evidence 있는 story에 has_evidence/self_reported=True
+    (transient attr) — 없으면 미설정(StoryResponse 기본값 None 유지, positive 단방향·부정
+    신호 0). gate_approval evidence(휴먼 책임자 gate 승인, 스푸핑 불가)가 있으면 추가로
+    human_verified=True+human_verified_by(who)·human_verified_at(when) 세팅.
+    _attach_assignee_ids와 동형 배치 패턴."""
+    if not stories:
+        return
+    from app.services.evidence_service import batch_has_evidence, batch_human_verified
+
+    story_ids = [s.id for s in stories]
+    ids_with_evidence = await batch_has_evidence(session, story_ids, "story")
+    verified_map = await batch_human_verified(session, story_ids, "story")
+    for s in stories:
+        if s.id in ids_with_evidence:
+            s.has_evidence = True
+            s.self_reported = True
+        verified = verified_map.get(s.id)
+        if verified is not None:
+            s.human_verified = True
+            s.human_verified_by = verified.created_by
+            s.human_verified_at = verified.created_at
+
+
+async def _assert_story_project_access(
+    session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, project_id: uuid.UUID
+) -> None:
+    """E-SECURITY SEC-S8(story 83ea3d6a) G: 개별-ID story 접근(get/update/status)이 org-scope만
+    있고 project 접근권 미검증이던 갭 — 같은 org 다른 project 멤버가 story id만 알면 조회/수정
+    가능했다. upload_story_attachment와 동형으로 has_project_access 재사용(휴먼 team_member·
+    에이전트 project_access grant 양쪽 처리). delete_story는 SEC-S3(#2014)가 별도 처리."""
+    from app.services.project_auth import has_project_access
+
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
 
 
 async def _upsert_assignee_participation(
@@ -218,6 +334,53 @@ def _enforce_mcp_attachment_declared_limit(attachments: list[dict]) -> None:
         )
 
 
+_STORY_LINK_TABLES = {"epic_id": "goals", "sprint_id": "sprints", "meeting_id": "meetings"}
+
+
+async def _assert_story_link_targets_in_project(
+    session: AsyncSession, project_id: uuid.UUID, body: "StoryCreate | StoryUpdate",
+) -> None:
+    """E-SECURITY SEC-S8(story 83ea3d6a) T(까심 전수스윕, 실HTTP 확定): epic_id/sprint_id/
+    meeting_id가 body.project_id 소속인지 검증 없이 그대로 repo.create에 전달됐다 — 같은 org
+    다른 project의 epic/sprint/meeting에 story를 링크할 수 있었다(G/R와 동형 project-scope
+    부재). enforce_body_context는 body.project_id 자체만 caller와 대조할 뿐, 그 project_id
+    "안에" 링크 대상이 실제로 속하는지는 안 본다.
+
+    E-SECURITY SEC-S8 X(까심 전수스윕): T는 create_story만 닫았고 update_story(PATCH) 경로가
+    남아있었다 — 여기서 StoryUpdate도 받아 같은 검증을 update_story에도 재사용(대상 project는
+    기존 story 자신의 project_id, StoryUpdate엔 project_id 필드 자체가 없어 변경 불가)."""
+    for field, table in _STORY_LINK_TABLES.items():
+        target_id = getattr(body, field)
+        if target_id is None:
+            continue
+        target_project_id = (await session.execute(
+            text(f"SELECT project_id FROM {table} WHERE id = :id"),  # noqa: S608 — table은 고정 allowlist(_STORY_LINK_TABLES), 요청값 아님
+            {"id": target_id},
+        )).scalar_one_or_none()
+        if target_project_id != project_id:
+            raise HTTPException(
+                status_code=404, detail=f"{field.replace('_id', '').title()} not found",
+            )
+
+
+async def _assert_human_owner(
+    session: AsyncSession, org_id: uuid.UUID, member_id: uuid.UUID | None,
+) -> None:
+    """P0-03(doc trust-pipeline-be-design §5) write-time 강제: human_owner_member_id로 지정된
+    member가 human이 아니면(에이전트·미해소) 400. resolve_member_identity 재사용(evidence_service의
+    gate_approval choke-point와 동일 SOUL-LOCK 규율 — body-claimed 신뢰 대신 서버 해소값만 신뢰)."""
+    if member_id is None:
+        return
+    from app.services.member_resolver import resolve_member_identity
+
+    resolved = await resolve_member_identity(member_id, org_id, session)
+    if resolved is None or resolved.type != "human":
+        raise HTTPException(
+            status_code=400,
+            detail="human_owner_member_id는 human member만 지정할 수 있습니다.",
+        )
+
+
 @router.post("", response_model=StoryResponse, status_code=201)
 async def create_story(
     body: StoryCreate,
@@ -234,6 +397,8 @@ async def create_story(
         db=session,
         user_id=uuid.UUID(auth.user_id),
     )
+    await _assert_story_link_targets_in_project(session, body.project_id, body)
+    await _assert_human_owner(session, org_id, body.human_owner_member_id)
     repo = StoryRepository(session, org_id)
     # E-BOARD S5: assignee_ids 제공 시 단일 assignee_id(주담당)는 첫 요소로 동기화(미지정 시).
     effective_ids = (
@@ -245,6 +410,12 @@ async def create_story(
         else (effective_ids[0] if effective_ids else None)
     )
     if body.attachments:
+        # story #2055 AC1: 이미지 첨부 픽셀 크기를 서버가 측정해 채운다 — client 제공 width/height는
+        # asset_id와 동일하게 위조 가능하므로 신뢰하지 않고 항상 서버 측정값으로 덮어쓴다(server
+        # authority). best-effort(측정 실패해도 저장 자체는 막지 않는다).
+        from app.services.image_dimensions import measure_image_dimensions
+        for a in body.attachments:
+            a.width, a.height = await measure_image_dimensions(a.content_type, a.url) or (None, None)
         _enforce_mcp_attachment_declared_limit([a.model_dump() for a in body.attachments])
     # S8: 서버사이드 capacity 게이트(ee seam·SaaS only·OSS no-op) — asset commit 前 per-file+총량 enforce.
     if settings.is_ee_enabled and body.attachments:
@@ -256,6 +427,8 @@ async def create_story(
         epic_id=body.epic_id,
         sprint_id=body.sprint_id,
         assignee_id=primary_assignee,
+        human_owner_member_id=body.human_owner_member_id,
+        declared_scope_paths=body.declared_scope_paths,
         meeting_id=body.meeting_id,
         status=body.status,
         priority=body.priority,
@@ -297,6 +470,9 @@ async def create_story(
     if primary_assignee:
         await _upsert_assignee_participation(session, org_id, story.id, primary_assignee)
     story.assignee_ids = saved_ids or ([story.assignee_id] if story.assignee_id else [])
+    # P0-03(doc trust-pipeline-be-design §5): agent_delegate_ids(transient) — update_story는
+    # _attach_assignee_ids 경유로 이미 채워지나, create_story는 인라인 경로라 별도 호출 필요.
+    await _attach_agent_delegate_ids(session, [story])
     # 활동로그: story 생성 이벤트 기록 (생성류 미기록 갭 — 피드 정상화)
     from app.services.activity_log import record_created_activity
     await record_created_activity(
@@ -340,11 +516,14 @@ async def get_workflow_line_metrics(
 async def get_story(
     id: uuid.UUID,
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     await _attach_assignee_ids(repo.session, repo.org_id, [story])
+    await _attach_has_evidence(repo.session, [story])
     return StoryResponse.model_validate(story)
 
 
@@ -411,7 +590,15 @@ async def upload_story_attachment(
     if not uploaded:
         raise HTTPException(status_code=502, detail="upload failed")
 
-    return StoryAttachment(url=object_path, name=body.name, content_type=body.content_type, size=len(data))
+    # story #2055 AC1: 바이트가 이미 메모리에 있으므로 재다운로드 없이 직접 측정.
+    from app.services.image_dimensions import measure_image_dimensions_from_bytes
+    dims = measure_image_dimensions_from_bytes(body.content_type, data)
+    width, height = dims if dims is not None else (None, None)
+
+    return StoryAttachment(
+        url=object_path, name=body.name, content_type=body.content_type, size=len(data),
+        width=width, height=height,
+    )
 
 
 # E-DG S10(P1-4 observability): workflow-line 상태 read API — "왜 막혔나·어디로 relay 됐나"를
@@ -502,10 +689,15 @@ class BulkUpdateRequest(BaseModel):
 @router.patch("/bulk", response_model=list[StoryResponse])
 async def bulk_update_stories(
     payload: BulkUpdateRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[StoryResponse]:
+    # #2176 AC1: 요청 수신 시각 — emit_story_status_changed에 그대로 넘겨 "요청 수신→emit 착수"
+    # 구간을 잰다(칸반 드래그/컬럼메뉴가 이 라우트를 타므로 미르코 실측 4,754ms의 서버측 성분을
+    # 여기서 갈라낸다). 순수 time.time() 캡처라 무부하.
+    _request_received_at = time.time()
     # 정공법 A(c1cd484b): /bulk 도 /status 와 동일 — status 변경을 항상 allow 하되 비순차 전진 점프는
     # violation flag(응답)+workflow_violation 이벤트로 가시화(차단 X). dnd 양경로(드래그·메뉴) 공통 SSOT.
     # violation 웹훅 수신자 필터용 actor 1회 해소(org-wide fan-out 박멸·/status 와 동형).
@@ -515,17 +707,37 @@ async def bulk_update_stories(
     except Exception:  # noqa: BLE001 — actor 해소 실패도 bulk 비차단.
         actor_id = None
 
+    from app.services.project_auth import has_project_access
+
     updated: list[Story] = []
     old_status_by_id: dict[uuid.UUID, str] = {}
+    # story #2172 AC1: assignee_id도 status와 동형으로 전이 前 old값 포착(setattr 前). None은
+    # "미배정→배정"의 유효한 old값이라 .get() 대신 멤버십(`in`)으로 "실제 변경 있었음"을 판정한다
+    # (status_by_id는 status가 None일 수 없어 .get()만으로 충분했던 것과 다른 지점).
+    old_assignee_by_id: dict[uuid.UUID, uuid.UUID | None] = {}
     for item in payload.items:
-        q = await db.execute(select(Story).where(Story.id == item.id))
+        # E-SECURITY SEC-S8(story 83ea3d6a) W(까심 QA, CRITICAL·실HTTP 확定): 이 raw 쿼리가
+        # org_id 필터 자체가 없어(정상 repo.get()은 self._org_filter() 명시·RLS도 0002서 off)
+        # 타 org의 story UUID만 알면 status/sprint_id/assignee_id/priority/position 전부
+        # 변조 가능했다(cross-org IDOR). repo.org_id로 스코프.
+        q = await db.execute(
+            select(Story).where(Story.id == item.id, Story.org_id == repo.org_id)
+        )
         story = q.scalar_one_or_none()
         if not story:
+            continue
+        # E-SECURITY SEC-S8(story 83ea3d6a) W2(까심 QA): org_id 필터로 cross-org는 닫혔으나
+        # same-org 다른 project의 story는 여전히 변조 가능했다(project-scope 부재, G/T와 동형).
+        # 개별-ID PATCH(_assert_story_project_access)와 동일 기준(has_project_access) 재사용 —
+        # 미접근 item은 not-found와 동형으로 조용히 스킵(존재 비노출·나머지 정당 item은 진행).
+        if not await has_project_access(db, uuid.UUID(auth.user_id), story.project_id, repo.org_id):
             continue
         update_data = item.model_dump(exclude={"id"}, exclude_none=True)
         # status 변경이면 전이 前 old_status 포착(violation 판정용·setattr 前).
         if "status" in update_data and update_data["status"] != story.status:
             old_status_by_id[story.id] = story.status
+        if "assignee_id" in update_data and update_data["assignee_id"] != story.assignee_id:
+            old_assignee_by_id[story.id] = story.assignee_id
         for k, v in update_data.items():
             setattr(story, k, v)
         # E-BOARD S5: 단일 assignee_id 변경 시 join 미러(단일↔복수 공존 정합)
@@ -541,6 +753,7 @@ async def bulk_update_stories(
         await db.refresh(s)
     # refresh 後 transient assignee_ids 세팅(refresh 는 매핑 컬럼만 reload·transient 보존).
     await _attach_assignee_ids(db, repo.org_id, updated)
+    await _attach_has_evidence(db, updated)
 
     # 응답(violation flag 포함) + violation 이벤트 페이로드를 commit 前에 빌드(commit 시 attr expire→
     # MissingGreenlet 방지·기존 results 빌드와 동일 시점). 이벤트 발화는 commit 後(/status 와 동일 순서).
@@ -563,18 +776,71 @@ async def bulk_update_stories(
 
     await db.commit()
 
-    # workflow_violation 발화(commit 後·기존 이벤트 타입이라 additive·기존 컨슈머 무영향). 실패는 비차단.
+    # workflow_violation 발화(commit 後). story #2132(2026-07-23): publish_event() 호출 제거 —
+    # FE 소비처 0(설계 doc §1) + 그 죽은 org-level fanout(`_subscribers`) 자체가 삭제됨.
+    # webhook(fire_webhooks, 아래)은 별개 채널이라 무관·그대로 유지.
     for _ev, _notify in violation_dispatch:
-        try:
-            publish_event(str(repo.org_id), "workflow_violation", _ev)
-        except Exception:  # noqa: BLE001
-            pass
         try:
             await fire_webhooks(
                 db, repo.org_id, "workflow_violation", _ev, recipient_member_ids=_notify,
             )
         except Exception:  # noqa: BLE001
             pass
+
+    # #2131 근본수정: bulk가 status를 실제로 바꾸면서도 emit_story_status_changed()를 아예
+    # 호출하지 않아 SSE 프레임이 서버에서 출발조차 안 했다(칸반 드래그·컬럼메뉴 둘 다 이 라우트라
+    # 남의 화면에 영원히 안 보이던 근본). PATCH /{id}/status(:1272)와 **같은 공유 helper**를
+    # 그대로 재사용 — 발행 지점을 갈라놓지 않는다(AC3, #2122/#2132와 동일 성질: 두 경로가
+    # 갈라지면 다음 결함이 또 한쪽에서만 재발). old_status_by_id는 위에서 이미 "실제로 바뀐
+    # item만" 채워둔 것을 그대로 재사용(중복 판정 없음).
+    actor_name = actor_role = actor_type = None
+    if old_status_by_id or old_assignee_by_id:
+        actor_name, actor_role, actor_type = await _resolve_actor_info(db, actor_id)
+
+    if old_status_by_id:
+        for s in updated:
+            old = old_status_by_id.get(s.id)
+            if old is None:
+                continue
+            try:
+                await emit_story_status_changed(
+                    db, repo.org_id, s, old,
+                    actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
+                    request_received_at=_request_received_at,
+                )
+            except Exception:  # noqa: BLE001 — 한 item의 emit 실패가 나머지 item을 막지 않음.
+                # 오르테가군 PR 리뷰(2026-07-24): warning은 찾을 때 안 보이는 자리 — 오늘
+                # #2128/#2160/#2161 전부 "조용한 실패"였다. 나가야 할 실시간 프레임이 안 나간
+                # 것 자체가 이 스토리가 고치는 병이라 ERROR로 올린다.
+                #
+                # story #2173: 이 try/except는 emit_story_status_changed 자체의 신뢰성을 못
+                # 믿어서가 아니다(그쪽은 이미 완전 내부 격리 — update_story_status의 단건
+                # 콜사이트 주석 참조) — **다건성**(이 item이 실패해도 for 루프의 나머지 item은
+                # 계속 처리돼야 함) 때문. 단건 경로엔 "나머지 item"이 없어 이 이유가 적용 안 된다.
+                logger.error(
+                    "bulk status_changed emit 실패(story=%s)", s.id, exc_info=True,
+                )
+
+    # story #2172 AC1: assignee_id도 status와 동형 — bulk가 assignee_id를 실제로 바꾸면서도
+    # 이 helper를 호출하지 않아 PATCH /{id}는 story.assignee_changed를 내는데 /bulk은 안 내는
+    # 계약 불일치가 있었다(현재 FE 라이브 콜러 0 — kanban-board.tsx는 assignee_id를 bulk로 안
+    # 보낸다. "지금 아무도 안 밟지만 계약은 깨져 있는" 자리를 여기서 닫는다). old_assignee_by_id는
+    # 멤버십으로 "실제 변경"만 담아뒀으므로 그대로 재사용(중복 판정 없음, status와 동형).
+    if old_assignee_by_id:
+        for s in updated:
+            if s.id not in old_assignee_by_id:
+                continue
+            old = old_assignee_by_id[s.id]
+            try:
+                await emit_story_assignee_changed(
+                    db, repo.org_id, s, old,
+                    background_tasks=background_tasks,
+                    actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
+                )
+            except Exception:  # noqa: BLE001 — 한 item의 emit 실패가 나머지 item을 막지 않음.
+                logger.error(
+                    "bulk assignee_changed emit 실패(story=%s)", s.id, exc_info=True,
+                )
     return results
 
 
@@ -587,10 +853,23 @@ async def update_story(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
+    _story_for_access = await repo.get(id)
+    if _story_for_access is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(db, auth, repo.org_id, _story_for_access.project_id)
+    await _assert_story_link_targets_in_project(db, _story_for_access.project_id, body)
+    if body.human_owner_member_id is not None:
+        await _assert_human_owner(db, repo.org_id, body.human_owner_member_id)
+
     data = body.model_dump(exclude_unset=True)
     # S7: client 제공 asset_id strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
     if data.get("attachments"):
         data["attachments"] = [{**a, "asset_id": None} for a in data["attachments"]]
+        # story #2055 AC1: width/height도 asset_id와 동일하게 server authority — client 값
+        # 무시하고 서버가 다시 측정(best-effort).
+        from app.services.image_dimensions import measure_image_dimensions
+        for a in data["attachments"]:
+            a["width"], a["height"] = await measure_image_dimensions(a["content_type"], a["url"]) or (None, None)
         _enforce_mcp_attachment_declared_limit(data["attachments"])
         # S8: 서버사이드 capacity 게이트(ee seam·SaaS only·OSS no-op) — 첨부 교체 commit 前 enforce.
         if settings.is_ee_enabled:
@@ -602,11 +881,14 @@ async def update_story(
     if assignee_ids_in is not None and "assignee_id" not in data:
         data["assignee_id"] = assignee_ids_in[0] if assignee_ids_in else None
     old_assignee_id: uuid.UUID | None = None
+    old_position: int | None = None
     story_before = None
-    if "assignee_id" in data:
+    # story #2172 AC2: position 변경도 old-value 대조가 필요해 assignee_id와 같은 사전조회를 공유.
+    if "assignee_id" in data or "position" in data:
         story_before = await repo.get(id)
         if story_before:
             old_assignee_id = story_before.assignee_id
+            old_position = story_before.position
     # H1-S5: PATCH /{id} 로 status=done 전이 시도도 board 경로와 동일하게 preflight 게이트(AC②).
     if data.get("status") == "done":
         gate_story = story_before or await repo.get(id)
@@ -683,129 +965,53 @@ async def update_story(
         pass
 
     if "assignee_id" in data and old_assignee_id != story.assignee_id:
-        org_id = repo.org_id
-        epic_title: str | None = None
-        try:
-            epic_title = await _resolve_epic_title(db, story.epic_id)
-        except Exception:
-            pass
-        event_data = {
-            "story_id": str(id),
-            "story_title": story.title,
-            "story_priority": story.priority,
-            "epic_id": str(story.epic_id) if story.epic_id else None,
-            "epic_title": epic_title,
-            "assignee_id": str(story.assignee_id) if story.assignee_id else None,
-            "old_assignee_id": str(old_assignee_id) if old_assignee_id else None,
-            "project_id": str(story.project_id),
-            "org_id": str(org_id),
-            "actor_id": str(actor_id) if actor_id else None,
-            "actor_name": actor_name,
-            "actor_role": actor_role,
-            "source_agent_id": str(actor_id) if (actor_id and actor_type == "agent") else None,
-            "assignees": [str(story.assignee_id)] if story.assignee_id else [],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        # AC1(c60dd33c 미러): assignee_changed webhook은 관련자만 — 담당자(신/구)+행위자. member-bound
-        # webhook이 무관 에이전트에 fan-out되던 갭 차단. member_id=null 브로드캐스트는 보존(preserve_broadcast).
-        _assignee_notify_ids = {
-            m for m in (story.assignee_id, old_assignee_id, actor_id) if m is not None
-        }
-        # publish_event는 org-level 브라우저 UI 활동피드(_subscribers·per-agent 미전파)라 org-wide 의도 유지(AC2).
-        publish_event(str(org_id), "story.assignee_changed", event_data)
-        try:
-            await fire_webhooks(
-                db, org_id, "story.assignee_changed", event_data,
-                recipient_member_ids=_assignee_notify_ids,
-            )
-        except Exception:
-            pass
-        try:
-            await process_event(db, org_id, story.project_id, EventContext(
-                event_type="story.assignee_changed",
-                trigger_type_slug="assignee_changed",
-                actor_id=str(actor_id) if actor_id else None,
-                metadata=event_data,
-            ))
-        except Exception:
-            pass
-        # E-EVENTBUS P3 S9 / E-EVENT-INJECT S3: story_assigned 알림 + agent assignment-wake
-        if story.assignee_id and story.assignee_id != old_assignee_id:
-            # assignee 멤버 타입 resolve (agent vs human)
-            assignee_type = (await db.execute(
-                select(TeamMember.type).where(TeamMember.id == story.assignee_id).limit(1)
-            )).scalar_one_or_none()
+        # story #2172 근본수정(AC1): 이 side-effects를 PATCH /bulk과 공유하는 단일 helper로
+        # 추출 — 두 라우트가 발행 지점을 갈라 갖던 #2131류 결함 재발을 막는다.
+        await emit_story_assignee_changed(
+            db, repo.org_id, story, old_assignee_id,
+            background_tasks=background_tasks,
+            actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
+        )
 
-            if assignee_type == "agent":
-                # E-EVENT-INJECT S3: agent에 배정만 해도 work-turn 시작.
-                # dispatch.py 미러 — content 실린 story_assigned Event + seq + commit BEFORE wake.
-                # (기존 dispatch_notification은 content 없는 dispatched라 connector가 드롭 → 깨우지 못함)
-                _detail = (story.description or "").strip()
-                _content = f"[story] {story.title}" + (f" — {_detail[:200]}" if _detail else "")
-                sa_event = Event(
-                    project_id=story.project_id,
-                    org_id=org_id,
-                    event_type="story_assigned",  # EventType enum 미존재 → literal (connector allow-list 포함)
-                    source_entity_type="story",
-                    source_entity_id=story.id,
-                    sender_id=actor_id,
-                    recipient_id=story.assignee_id,
-                    recipient_type="agent",
-                    payload={
-                        "story_id": str(story.id),
-                        "story_title": story.title,
-                        "content": _content,
-                        "event_type": "story_assigned",
-                    },
-                    status="pending",
-                )
-                db.add(sa_event)
-                await db.flush()
-                await assign_recipient_seq(db, sa_event)  # per-recipient dense seq
-                # L1 BE-3: story assignment → activity_events 1행(best-effort·commit 前·순서 불변).
-                from app.services.activity_stream import extract_activities_best_effort
-                await extract_activities_best_effort(db, [sa_event.id])
-                await db.commit()  # commit BEFORE wake — seq 확정, 이중전달 방지
-                if sa_event.recipient_seq is not None:
-                    wake_agent(str(story.assignee_id), sa_event.recipient_seq)
-                # 1f01c1ad: wake_agent(SSE)는 CC 세션 미도달 → member webhook(CC 릴레이)으로도 주입.
-                # dispatch.py 동형 — INJECTABLE 이벤트의 단일 CC 주입 경로(member webhook)로 일관 전달.
-                from app.services.conversation_webhook import deliver_injected_event_webhook
-                background_tasks.add_task(
-                    deliver_injected_event_webhook,
-                    org_id=org_id,
-                    recipient_id=story.assignee_id,
-                    content=_content,
-                    event_type="story_assigned",
-                    source_entity_type="story",
-                    source_entity_id=story.id,
-                )
-            else:
-                # human: 기존 dispatch_notification 유지 (변경 0)
-                await dispatch_notification(
-                    db,
-                    org_id=org_id,
-                    event_type="story_assigned",
-                    target_member_ids=[story.assignee_id],
-                    title=f"스토리 담당자로 지정됨: {story.title}",
-                    body=None,
-                    reference_type="story",
-                    reference_id=story.id,
-                )
-        if actor_id:
-            try:
-                db.add(StoryActivity(
-                    story_id=id,
-                    org_id=org_id,
-                    project_id=story.project_id,
-                    activity_type="assignee_changed",
-                    old_value=str(old_assignee_id) if old_assignee_id else None,
-                    new_value=str(story.assignee_id) if story.assignee_id else None,
-                    created_by=(await canonicalize_member_id(actor_id, db)),  # AC3-2d(1b) canonical
-                ))
-                await db.flush()
-            except Exception:
-                pass
+    # story #2172 AC2 판정(오르테가군 지시 — "재정렬 전용 이벤트가 필요한지, 기존 것으로
+    # 되는지 판단하고 근거 남길 것"): 신규 전용 event_type(`story.position_changed`)을 쓰되,
+    # 발행 메커니즘 자체는 assignee_changed와 동일한 기존 패턴(project_accessible_member_ids
+    # + _push_to_agent 개별 push, Event row 미생성)을 그대로 재사용한다. `story.status_changed`나
+    # `story.assignee_changed`를 재사용하지 않은 이유: FE 컨슈머가 event_type으로 분기하는데
+    # (kanban-board.tsx의 `payload.status`/`assignee_id` 필드 체크), 의미가 다른 필드 변경을
+    # 기존 타입에 얹으면 다음에 그 타입 소비처가 무관 필드를 오인 처리할 여지가 생긴다(오늘
+    # 세운 "동작은 한 곳에서만 선언" 원칙과 동형 — event_type과 payload 의미의 1:1을 지킨다).
+    # webhook/notification/StoryActivity를 안 붙인 이유: assignee_changed helper(story_assignee_events.py)
+    # 주석과 동일 논리 — position 값 자체는 story.position이 SSOT라 재조회로 복원되는 순수
+    # 상태축 신호일 뿐, "누가 언제 재배치했는지" 감사가 필요해지면(현재 AC엔 없음) StoryActivity를
+    # 추가해야 한다는 것이 이 판정이 무너지는 조건이다. FE 리스너는 story #2172 시점엔 아직
+    # 없다(kanban-board.tsx가 position PATCH 응답만 낙관적 반영·SSE 구독 X) — 이 이벤트는
+    # 계약(서버가 실제로 emit함)을 갖추는 것이 목적이고 FE 소비는 별도 스코프.
+    if "position" in data and old_position != story.position:
+        try:
+            from app.routers.events import _push_to_agent
+            from app.services.project_auth import project_accessible_member_ids
+
+            _pos_member_ids = await project_accessible_member_ids(db, repo.org_id, story.project_id)
+            _pos_payload = {
+                "event_type": "story.position_changed",
+                "story_id": str(id),
+                "story_title": story.title,
+                "position": story.position,
+                "old_position": old_position,
+                "status": story.status,
+                "project_id": str(story.project_id),
+                "org_id": str(repo.org_id),
+                "actor_id": str(actor_id) if actor_id else None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            for member_id in _pos_member_ids:
+                _push_to_agent(str(member_id), dict(_pos_payload))
+        except Exception:
+            logger.warning(
+                "position_changed SSE 포워딩 실패(story=%s project=%s)",
+                story.id, story.project_id, exc_info=True,
+            )
 
     # S-C2: story_updated — actor가 agent인 경우 기록 (AC2, AC6)
     if actor_id:
@@ -822,6 +1028,7 @@ async def update_story(
         )
 
     await _attach_assignee_ids(db, repo.org_id, [story])
+    await _attach_has_evidence(db, [story])
     return StoryResponse.model_validate(story)
 
 
@@ -831,10 +1038,40 @@ async def delete_story(
     repo: StoryRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    """E-SECURITY SEC-S1(story 70c9e92c): hard-delete는 휴먼 전용 — 에이전트 API키(사람 승인
+    없는 즉시 물리삭제)는 403. 삭제 전 actor/target를 감사 기록(story row 자체는 삭제되므로
+    미리 캡처 — DeletionAuditLog는 story FK 없이 독립 테이블이라 삭제 후에도 생존)."""
     from app.repositories.dependency import DependencyRepository
     from app.repositories.label import ItemLabelRepository
     from app.repositories.participation import ParticipationRepository
+
+    resolved = await resolve_member(auth, org_id, session)
+    if resolved.type != "human":
+        raise HTTPException(status_code=403, detail="Story 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    # E-SECURITY SEC-S3(story 90cd7e57): DELETE가 org-only 스코핑이라 프로젝트 미멤버(같은 org의
+    # 다른 프로젝트 소속)도 스토리 삭제 가능했음 — upload_story_attachment와 동일 SSOT
+    # (has_project_access)로 project 인가 적용. SEC-S1의 human-gate(에이전트 차단)와는 직교 축
+    # (actor 타입 vs project 소속) — human이어도 무관한 project면 여전히 403.
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(session, uuid.UUID(auth.user_id), story.project_id, org_id):
+        raise HTTPException(status_code=403, detail="No access to this project")
+
+    session.add(DeletionAuditLog(
+        id=uuid.uuid4(),
+        org_id=org_id,
+        actor_id=resolved.id,
+        entity_type="story",
+        entity_id=id,
+        entity_title=story.title,
+    ))
+
     ok = await repo.delete(id)
     if not ok:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -854,7 +1091,12 @@ async def update_story_status(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
+    # #2176 AC1: 요청 수신 시각(다른 어떤 DB/인가 작업보다도 먼저) — emit_story_status_changed에
+    # 그대로 넘겨 "요청 수신→emit 착수" 구간을 잰다. 순수 time.time() 캡처라 무부하.
+    _request_received_at = time.time()
     story_before = await repo.get(id)
+    if story_before is not None:
+        await _assert_story_project_access(db, auth, repo.org_id, story_before.project_id)
     old_status = story_before.status if story_before else None
 
     # 정공법 A(c1cd484b·선생님 지시): 전이 순서 **하드블록 폐지** — 비순차 점프도 항상 allow,
@@ -1003,14 +1245,11 @@ async def update_story_status(
                 severity="warn",
             )
             # AC4(동일 패턴): workflow_violation webhook도 관련자(행위자+담당자)만 — 동일 org-wide fan-out
-            # 박멸. publish_event(UI 활동피드)는 org-wide 유지.
+            # 박멸. story #2132(2026-07-23): publish_event() 호출 제거 — FE 소비처 0(설계 doc §1) +
+            # 그 죽은 org-level fanout(`_subscribers`) 자체가 삭제됨.
             _violation_notify_ids = {
                 m for m in (actor_id, story.assignee_id) if m is not None
             }
-            try:
-                publish_event(str(org_id), "workflow_violation", _v_event)
-            except Exception:
-                pass
             try:
                 await fire_webhooks(
                     db, org_id, "workflow_violation", _v_event,
@@ -1020,9 +1259,21 @@ async def update_story_status(
                 pass
         # 41a6e294: status_changed side-effects(events→L1·webhook·L2·notif·activity)는 공유 helper로
         # 발화 — gate-driven done(gate_service)과 동일 경로(parity·드리프트 0).
+        #
+        # story #2173(2026-07-24, 오르테가군 판정 — «결함인지 아닌지 가르기») 판정: 여기 try/except가
+        # 없는 것과 아래 bulk_update_stories의 item별 try/except는 **우연히 갈린 게 아니라 이제는
+        # 근거가 붙은 의도적 차이**다 — emit_story_status_changed() 자체가 이미 모든 side-effect를
+        # 개별 try/except로 감싸 내부적으로 완전 격리돼 있어(SSE·webhook·L2·notification·
+        # StoryActivity·trust_pipeline 전부, tests/test_emit_story_status_changed_isolation.py로
+        # 고정) 이 콜사이트에서 밖으로 던질 경로가 구조적으로 없다(라이브 로그 근거도 0건).
+        # bulk의 try/except는 emit 자체의 신뢰성 문제가 아니라 **다건성**(한 item의 실패가 나머지
+        # item을 막으면 안 됨) 때문 — 단건은 애초에 "나머지 item"이 없어 그 이유가 적용 안 된다.
+        # 무너지는 조건: emit_story_status_changed에 나중에 개별 try/except 없는 새 side-effect가
+        # 추가되면 이 판정이 깨진다 — 그 경우 추가하는 사람이 여기도 다시 감쌀지 판단해야 한다.
         await emit_story_status_changed(
             db, org_id, story, old_status,
             actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
+            request_received_at=_request_received_at,
         )
 
     # S-C2: story_updated — actor가 agent인 경우 기록 (AC2, AC6)
@@ -1040,6 +1291,7 @@ async def update_story_status(
         )
 
     await _attach_assignee_ids(db, repo.org_id, [story])
+    await _attach_has_evidence(db, [story])
     resp = StoryResponse.model_validate(story)
     # 정공법 A: 비순차 점프면 응답에 violation flag(차단 없이 가시화·/bulk 와 동일 SSOT).
     resp.violation = build_violation_flag(old_status, story.status)
@@ -1082,8 +1334,18 @@ async def list_comments(
     limit: int = Query(default=20, le=100),
     cursor: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
-    _repo: StoryRepository = Depends(_get_repo),
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[CommentResponse]:
+    # SEC(story #2206, 까심 인가 전수 스윕 A급): 쿼리 술어가 StoryComment.story_id == id 뿐이라
+    # org_id 조건 자체가 없었다(project-only 누락이 아니라 org 조건 부재 — 같은 파일 다른
+    # 엔드포인트들의 project-only 누락 갭과 다른 형태). 어느 org 멤버든 story UUID만 알면 다른
+    # org 의 댓글을 읽을 수 있었다. GET /{id}(524) 의 형제 가드(_assert_story_project_access)
+    # 를 그대로 재사용 — 새 규칙 발명 0.
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     q = select(StoryComment).where(
         StoryComment.story_id == id,
     ).order_by(StoryComment.created_at.desc()).limit(limit)
@@ -1115,7 +1377,8 @@ async def _resolve_team_member_id(auth: AuthContext, org_id: uuid.UUID, db: Asyn
 @router.post("/{id}/comments", response_model=CommentResponse, status_code=201)
 async def add_comment(
     id: uuid.UUID,
-    content: str = Body(..., embed=True),
+    content: str = Body(...),
+    mentioned_ids: list[uuid.UUID] = Body(default=[]),
     db: AsyncSession = Depends(get_db),
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
@@ -1135,6 +1398,38 @@ async def add_comment(
     db.add(comment)
     await db.commit()
     await db.refresh(comment)
+
+    # E-CANVAS C0-S1(story cfa61434) §F4: comment.created 이벤트 전파 — 기반층 검증 케이스
+    # (blueprint 제1원칙 "이벤트 없는 기능 금지"). 수신자 = story assignee(멀티) + mentioned_ids
+    # (cross-org 필터, conversations.py와 동형 컨벤션 — content regex 파싱은 이 코드베이스가
+    # 이미 폐기함[channel_router.py]) − 작성자 본인(자기알림 제외). dispatch_notification이
+    # 휴먼(in-app+webhook)/에이전트(Event INSERT→SSE·webhook) 양쪽 다 처리하는 기존 SSOT.
+    sa_repo = StoryAssigneeRepository(db, repo.org_id)
+    assignee_ids = set(await sa_repo.list_member_ids(story.id))
+    if not assignee_ids and story.assignee_id:
+        assignee_ids = {story.assignee_id}
+    valid_mentioned_ids = await filter_org_member_ids(set(mentioned_ids), repo.org_id, db)
+    target_member_ids = list((assignee_ids | valid_mentioned_ids) - {created_by})
+    if target_member_ids:
+        await dispatch_notification(
+            db,
+            org_id=repo.org_id,
+            event_type="comment.created",
+            target_member_ids=target_member_ids,
+            title=f"새 코멘트: {story.title}",
+            body=content[:200],
+            reference_type="story",
+            reference_id=story.id,
+            source_project_id=story.project_id,
+            # C0-S2: 에이전트가 payload만 보고 답글 달 수 있는 최소 반응 맥락(webhook generic payload).
+            context={
+                "story_id": str(story.id),
+                "comment_id": str(comment.id),
+                "content": content,
+                "author_member_id": str(created_by),
+            },
+        )
+
     return CommentResponse.model_validate(comment)
 
 
@@ -1145,8 +1440,14 @@ async def list_activities(
     id: uuid.UUID,
     limit: int = Query(default=20, le=100),
     db: AsyncSession = Depends(get_db),
-    _repo: StoryRepository = Depends(_get_repo),
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[ActivityResponse]:
+    # SEC(story #2206) — list_comments(1339)와 동형 갭·동형 처방. 자세한 사유는 그쪽 주석 참조.
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     q = select(StoryActivity).where(
         StoryActivity.story_id == id,
     ).order_by(StoryActivity.created_at.desc()).limit(limit)

@@ -414,7 +414,8 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
           </p>
         )}
         {verified && (
-          <div className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-success">
+          // story #2105 2차 — 검증 성공 결과도 polite로 낭독(#2096/#2105 1차와 동일 원칙).
+          <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-success">
             {t('verifiedBanner')}
           </div>
         )}

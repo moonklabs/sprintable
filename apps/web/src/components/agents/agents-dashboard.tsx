@@ -154,6 +154,11 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
   const [deployments, setDeployments] = useState(initialDeployments);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // codex-silent-defect-sweep D-8 — 자동 새로고침 오류를 전부 삼키고 옛 state를 유지하면 종료·
+  // 실패한 배포도 마지막 성공 시점 모습으로 계속 표시된다. 목록 자체(마지막 성공 스냅샷)는
+  // 유지하되(전면 에러로 바꾸지 않음 — 부분 실패는 부분만 표시), 새로고침이 실패 중임을
+  // 별도로 드러낸다.
+  const [refreshError, setRefreshError] = useState(false);
   const [pendingAction, setPendingAction] = useState<TransitionAction | null>(null);
   const [transitioning, setTransitioning] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -201,14 +206,17 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
     setIsRefreshing(true);
     try {
       const res = await fetch('/api/v1/agent-deployments');
-      if (!res.ok) return;
+      if (!res.ok) { setRefreshError(true); return; }
       const json = await res.json() as { data: AgentDeploymentCard[] | null };
       if (json.data) {
         setDeployments(json.data);
         setLastRefreshed(new Date());
+        setRefreshError(false);
       }
     } catch {
-      // Silently skip refresh failures
+      // codex-silent-defect-sweep D-8 — 마지막 성공 스냅샷(deployments)은 그대로 유지하되
+      // (전면 에러로 안 바꿈), 새로고침이 실패 중이라는 사실은 별도로 표시한다.
+      setRefreshError(true);
     } finally {
       setIsRefreshing(false);
     }
@@ -319,12 +327,13 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
             title={<h1 className="text-sm font-medium">{t('statusTitle')}</h1>}
             actions={
               canManageMembers ? (
-                <Link href="/agents/deploy" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+                <Link href="/organization/workforce/deploy" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
                   <Rocket className="mr-1.5 size-3.5" />
                   {t('openWizard')}
                 </Link>
               ) : null
             }
+            showContextChip
           />
       )}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6">
@@ -342,6 +351,19 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                     : '—',
                 })}
               </span>
+              {/* codex-silent-defect-sweep D-8 — 목록(deployments)은 마지막 성공 스냅샷을 그대로
+                  유지하되(전면 에러로 안 바꿈), 새로고침이 실패 중임은 별도로 드러낸다. */}
+              {refreshError ? (
+                <Badge
+                  variant="chip"
+                  className="inline-flex items-center gap-1 text-warning"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <TriangleAlert className="size-3" />
+                  {t('refreshFailedLabel')}
+                </Badge>
+              ) : null}
               <Badge variant="chip" className="inline-flex items-center gap-1">
                 <RefreshCw className={isRefreshing ? 'size-3 animate-spin' : 'size-3'} />
                 {t('autoRefreshLabel')}
@@ -358,7 +380,7 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                   <p className="mt-2 text-sm text-muted-foreground">{t('emptyDeploymentsBody')}</p>
                   {canManageMembers && (
                     <div className="mt-6 flex flex-wrap justify-center gap-2">
-                      <Link href="/agents/deploy" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('openWizard')}</Link>
+                      <Link href="/organization/workforce/deploy" className={buttonVariants({ variant: 'hero', size: 'lg' })}>{t('openWizard')}</Link>
                     </div>
                   )}
                 </div>
@@ -568,13 +590,13 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                   {cue === 'hitl' && (
-                                    <Link href="/agents/hitl" className={buttonVariants({ variant: 'glass', size: 'sm' })}>
+                                    <Link href="/organization/workforce/hitl" className={buttonVariants({ variant: 'glass', size: 'sm' })}>
                                       <TriangleAlert className="mr-1 size-3" />
                                       {t('hitlQueueCta')}
                                     </Link>
                                   )}
                                   {cue === 'deploy_failed' && (
-                                    <Link href="/agents/deploy" className={buttonVariants({ variant: 'glass', size: 'sm' })}>
+                                    <Link href="/organization/workforce/deploy" className={buttonVariants({ variant: 'glass', size: 'sm' })}>
                                       <Rocket className="mr-1 size-3" />
                                       {t('openWizard')}
                                     </Link>
@@ -590,7 +612,7 @@ export function AgentsDashboard({ deployments: initialDeployments, hideTopBar = 
                                     </Button>
                                   )}
                                   {(cue === 'retrying' || cue === 'manual_retry' || cue === 'inspect_failure') && (
-                                    <Link href="/agents/runs" className={buttonVariants({ variant: 'glass', size: 'sm' })}>
+                                    <Link href="/organization/workforce/runs" className={buttonVariants({ variant: 'glass', size: 'sm' })}>
                                       <History className="mr-1 size-3" />
                                       {tr('runHistory')}
                                     </Link>

@@ -144,7 +144,14 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
       </SectionCardHeader>
       <SectionCardBody className="space-y-3">
         {message && (
-          <Alert variant={message.type === 'success' ? 'success' : 'destructive'}>
+          // story #2105 2차 — handleToggle이 재시도 전 setMessage(null)을 먼저 호출해(위 정의) 매
+          // 시도마다 언마운트→리마운트된다. 에러=alert/assertive, 성공=status/polite.
+          <Alert
+            variant={message.type === 'success' ? 'success' : 'destructive'}
+            role={message.type === 'success' ? 'status' : 'alert'}
+            aria-live={message.type === 'success' ? 'polite' : 'assertive'}
+            aria-atomic="true"
+          >
             <AlertDescription>{message.text}</AlertDescription>
           </Alert>
         )}
@@ -163,7 +170,7 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
             접근 가능한 프로젝트가 없습니다.
           </p>
         ) : (
-          <div className="max-h-72 divide-y divide-border overflow-y-auto overflow-x-hidden rounded-md border border-border">
+          <div className="focus-inset max-h-72 divide-y divide-border overflow-y-auto overflow-x-hidden rounded-md border border-border">
             {projects.map((project) => {
               const errored = errorIds.has(project.id);
               const readDenied = readDeniedIds.has(project.id);
@@ -177,6 +184,9 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
                       type="button"
                       onClick={() => void loadGrants()}
                       className="inline-flex shrink-0 items-center gap-1 text-xs text-destructive hover:underline"
+                      role="alert"
+                      aria-live="assertive"
+                      aria-atomic="true"
                     >
                       로드 실패 · 재시도
                     </button>

@@ -239,3 +239,42 @@ async def upsert_link(
     session.add(link)
     await session.flush()
     return link
+
+
+async def merge_link_evidence(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    story_id: uuid.UUID,
+    repo_full_name: str,
+    pr_number: int,
+    *,
+    link_source: str,
+    confidence: str,
+    patch: dict,
+) -> PullRequestStoryLink:
+    """E-UI-DAEGBYEON P0-05 후속(doc scope-violation-signal-design §3·§4) — evidence **dict-merge**
+    upsert(덮어쓰기 금지). `upsert_link`는 explicit-link API 전용(evidence 전체 교체가 맞는 의미론)이라
+    별도 — 여기는 auto_match/sid로 **아직 행이 없을 수 있는** confident link에 scope_check 같은 신규
+    키를 안전하게 얹기 위함(기존 evidence의 다른 키 보존). 행 없으면 patch만으로 신규 생성."""
+    repo = normalize_repo(repo_full_name)
+    existing = (
+        await session.execute(
+            select(PullRequestStoryLink).where(
+                PullRequestStoryLink.org_id == org_id,
+                PullRequestStoryLink.repo_full_name == repo,
+                PullRequestStoryLink.pr_number == pr_number,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        existing.evidence = {**(existing.evidence or {}), **patch}
+        existing.deleted_at = None
+        await session.flush()
+        return existing
+    link = PullRequestStoryLink(
+        org_id=org_id, story_id=story_id, repo_full_name=repo, pr_number=pr_number,
+        link_source=link_source, confidence=confidence, evidence=dict(patch),
+    )
+    session.add(link)
+    await session.flush()
+    return link

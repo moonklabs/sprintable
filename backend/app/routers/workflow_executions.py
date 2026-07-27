@@ -12,7 +12,7 @@ from app.models.agent_routing_rule import AgentRoutingRule
 from app.models.team import TeamMember
 from app.models.workflow_execution_log import WorkflowExecutionLog
 
-router = APIRouter(prefix="/api/v2/workflow-executions", tags=["workflow-executions"])
+router = APIRouter(prefix="/api/v2/workflow-executions", tags=["workflow-executions", "Work"])
 
 
 class ExecutionLogItem(BaseModel):
@@ -58,9 +58,17 @@ async def story_execution_summary(
     story_ids: list[str] = Query(default=[]),
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict[str, StorySummaryItem]:
-    """Return latest execution status per story (no admin required — board/member view)."""
+    """Return latest execution status per story (no admin required — board/member view).
+
+    E-SECURITY SEC-S8(story 83ea3d6a) BB(까심 전수스윕, HIGH·읽기): project_id에 project 접근권
+    검증이 없어 남의 project 워크플로 실행 상태(story-level status/rule_name)가 노출됐다.
+    """
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(db, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+
     if not story_ids:
         return {}
 

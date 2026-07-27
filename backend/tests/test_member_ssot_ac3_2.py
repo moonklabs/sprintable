@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 
-@pytest.mark.parametrize("model_name", ["Epic", "Story", "Task"])
+@pytest.mark.parametrize("model_name", ["Goal", "Story", "Task"])
 def test_assignee_id_has_no_team_members_fk(model_name):
     """Batch2(0078): assignee_id team_members FK 제거 — grant-only 휴먼(org_member.id) 배정 시 실DB
     FK violation 500이 나지 않음. canonical은 assignee_id_v2."""

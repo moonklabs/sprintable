@@ -17,6 +17,16 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _bypass_story_project_guard():
+    """이 파일은 participation CRUD 메커닉을 mock 세션으로 검증한다. add/list의 story-project
+    인가 가드(_assert_story_project_access·resource-actual has_project_access)는 별도 realdb
+    스위트(test_e_sec_participation_story_project_scope_realdb)가 실 PG로 커버하므로, 여기선
+    no-op 패치해 mock 세션(모든 execute가 None 반환)과의 충돌(가드 404)을 피한다."""
+    with patch("app.routers.participation._assert_story_project_access", new_callable=AsyncMock):
+        yield
+
+
 def _mock_role(role_id=None, key="implementation", label="구현", is_default=True):
     r = MagicMock()
     r.id = role_id or ROLE_ID

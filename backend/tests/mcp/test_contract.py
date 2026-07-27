@@ -1,4 +1,10 @@
-"""S3-6: 시스템 콜 계약 검증 — 97개 도구 등록 + 스키마 무결성 (Phase 3 완료)."""
+"""S3-6: 시스템 콜 계약 검증 — 98개 도구 등록 + 스키마 무결성 (Phase 3 완료).
+
+E-SECURITY SEC-S1(확장): delete_story/task/epic/doc 4종 제거(에이전트 hard-delete 차단) —
+98개 → story만 제거해 97 → task/epic/doc 3종 추가 제거해 94. E-CANVAS C1-S3: create_artifact/
+get_artifact 2종 추가 — 94 → 96. E-SECURITY SEC-S8(확장): delete_sprint 제거 — 96 → 95.
+E-CANVAS C2-S6: list_artifact_comments/add_artifact_comment 2종 추가 — 95 → 97.
+E-CANVAS C3-S7: edit_artifact 1종 추가 — 97 → 98."""
 from __future__ import annotations
 
 import os
@@ -13,39 +19,45 @@ from sprintable_mcp.server import mcp  # noqa: E402
 _TOOLS: dict = mcp._tool_manager._tools
 
 EXPECTED_TOOLS = {
-    # stories (8)
+    # stories (7) — E-SECURITY SEC-S1: delete_story 의도적 제거(에이전트 hard-delete 차단)
     "sprintable_list_stories", "sprintable_list_backlog", "sprintable_add_story",
-    "sprintable_update_story", "sprintable_delete_story",
+    "sprintable_update_story",
     "sprintable_assign_story_to_sprint", "sprintable_unassign_story_from_sprint",
     "sprintable_update_story_status",
-    # tasks (7)
+    # tasks (6) — E-SECURITY SEC-S1(확장): delete_task 의도적 제거(에이전트 hard-delete 차단)
     "sprintable_list_tasks", "sprintable_list_my_tasks", "sprintable_get_task",
     "sprintable_add_task", "sprintable_update_task", "sprintable_update_task_status",
-    "sprintable_delete_task",
-    # epics (4)
+    # epics/goals (7) — E-SECURITY SEC-S1(확장): delete_epic 의도적 제거(에이전트 hard-delete
+    # 차단). 계층 리네이밍 B1(story 1925): sprintable_*_goal이 신(primary)·sprintable_*_epic은
+    # 같은 핸들러를 가리키는 deprecated 별칭(hierarchy-rename-alias-mechanism-design §1).
+    # story #2010: sprintable_transition_goal 신설(목표 lifecycle 전이 전용, rename 이후 신설이라
+    # 구 _epic 별칭 없음).
     "sprintable_list_epics", "sprintable_add_epic", "sprintable_update_epic",
-    "sprintable_delete_epic",
+    "sprintable_list_goals", "sprintable_add_goal", "sprintable_update_goal",
+    "sprintable_transition_goal",
     # hypotheses (6) — E1-S5
     "sprintable_list_hypotheses", "sprintable_get_hypothesis", "sprintable_create_hypothesis",
     "sprintable_update_hypothesis", "sprintable_link_hypothesis", "sprintable_confirm_hypothesis",
-    # sprints (8)
+    # sprints (7) — E-SECURITY SEC-S8(확장): delete_sprint 의도적 제거(에이전트 hard-delete 차단)
     "sprintable_list_sprints", "sprintable_sprint_summary", "sprintable_activate_sprint",
     "sprintable_close_sprint", "sprintable_get_velocity", "sprintable_create_sprint",
-    "sprintable_update_sprint", "sprintable_delete_sprint",
-    # docs (6)
+    "sprintable_update_sprint",
+    # docs (5) — E-SECURITY SEC-S1(확장): delete_doc 의도적 제거(에이전트 삭제 차단)
     "sprintable_list_docs", "sprintable_get_doc", "sprintable_search_docs",
-    "sprintable_create_doc", "sprintable_update_doc", "sprintable_delete_doc",
+    "sprintable_create_doc", "sprintable_update_doc",
     # analytics (11)
     "sprintable_get_project_overview", "sprintable_get_member_workload",
     "sprintable_get_sprint_velocity_history", "sprintable_search_stories",
     "sprintable_get_blocked_stories", "sprintable_get_unassigned_stories",
     "sprintable_get_overdue_tasks", "sprintable_get_recent_activity",
-    "sprintable_get_epic_progress", "sprintable_get_agent_stats",
+    "sprintable_get_epic_progress", "sprintable_get_goal_progress", "sprintable_get_agent_stats",
     "sprintable_get_project_health",
-    # core (2)
+    # core (4) — E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가.
     "sprintable_list_team_members", "sprintable_my_dashboard",
-    # chat (3)
+    "sprintable_list_projects", "sprintable_set_default_project",
+    # chat (4) — story 3cf50d90: get_chat_message(단건 원문 조회) 추가.
     "sprintable_send_chat_message", "sprintable_create_conversation", "sprintable_list_chat_messages",
+    "sprintable_get_chat_message",
     # meetings (6)
     "sprintable_list_meetings", "sprintable_get_meeting", "sprintable_create_meeting",
     "sprintable_update_meeting", "sprintable_delete_meeting", "sprintable_trigger_ai_summary",
@@ -79,19 +91,42 @@ EXPECTED_TOOLS = {
     "sprintable_lock_files", "sprintable_unlock_files",
     # a2a HITL writer (1) — E-A2A-완성 S-A3
     "sprintable_link_gate_to_task",
+    # evidence (1) — E-VERIFY V0-S1
+    "sprintable_add_evidence",
+    # visual artifacts (12) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
+    # 핀 저작(story 7fe16274) + story #1922(delete_artifact, soft delete·생성자 전용)
+    "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
+    "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
+    "sprintable_edit_artifact", "sprintable_propose_canonical_version",
+    "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
+    "sprintable_delete_spec_pin", "sprintable_delete_artifact",
     # smoke
     "ping",
 }
 
 
 def test_total_tool_count():
-    assert len(_TOOLS) == 97
+    # C1-S3(e50563b4): sprintable_list_artifacts 추가로 98→99... +1=100.
+    # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project 2종 추가 — 100→102.
+    # 편집 캔버스 핀 저작(story 7fe16274): spec pin 4종 추가 — 102→106.
+    # story 3cf50d90: get_chat_message(단건 원문 조회) 추가 — 106→107.
+    # 계층 리네이밍 B1(story 1925): sprintable_*_goal 4종 신설(add/list/update/get_progress) —
+    # 구 sprintable_*_epic 4종은 deprecated 별칭으로 유지(제거 아님) — 107→111.
+    # story #2010: sprintable_transition_goal 1종 신설(목표 lifecycle 전이, 구 _epic 별칭 없음) —
+    # 111→112. story #1922: sprintable_delete_artifact 1종 신설(artifact soft delete, 생성자
+    # 전용) — 112→113.
+    assert len(_TOOLS) == 113
 
 
 def test_all_expected_tools_registered():
     registered = set(_TOOLS.keys())
     missing = EXPECTED_TOOLS - registered
     assert not missing, f"미등록 도구: {missing}"
+    # ⭐양방향 봉인(까심 QA #2106): EXPECTED-registered 한 방향만 검사하면 신규 등록 툴이
+    # EXPECTED_TOOLS에 빠져도 공허통과한다(#2093/#2096 advisory 공허통과와 동형). 역방향으로
+    # "등록됐는데 EXPECTED에 없는 툴"을 잡아 신규 툴이 계약 목록 누락 시 즉시 RED로 봉인.
+    extra = registered - EXPECTED_TOOLS
+    assert not extra, f"EXPECTED_TOOLS에 없는 등록 툴(계약 목록 갱신 필요): {extra}"
 
 
 @pytest.mark.parametrize("tool_name", [

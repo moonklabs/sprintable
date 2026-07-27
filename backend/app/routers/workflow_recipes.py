@@ -17,7 +17,7 @@ from app.dependencies.auth import get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.workflow_template import WorkflowTemplate
 
-router = APIRouter(prefix="/api/v2/workflow-recipes", tags=["workflow-recipes"])
+router = APIRouter(prefix="/api/v2/workflow-recipes", tags=["workflow-recipes", "Work"])
 
 # AC6: 코드 내 3종 프리셋 — DB에 없을 때 fallback + 항상 포함
 _BUILTIN_RECIPES: list[dict[str, Any]] = [

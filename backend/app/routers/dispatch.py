@@ -12,7 +12,7 @@ from app.dependencies.database import get_db
 from app.models.team import TeamMember
 from app.services.agent_dispatch import DispatchResponse, dispatch_entity_to_assignee
 
-router = APIRouter(prefix="/api/v2/dispatch", tags=["dispatch"])
+router = APIRouter(prefix="/api/v2/dispatch", tags=["dispatch", "Organization"])
 
 logger = logging.getLogger(__name__)
 

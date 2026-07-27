@@ -33,7 +33,7 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     caller_id, spoofed = uuid.uuid4(), uuid.uuid4()
     captured = {}
 
-    async def _fake_transition(session, org_id, gid, status, resolver_id, note):
+    async def _fake_transition(session, org_id, gid, status, resolver_id, note, *, pending_deliveries=None):
         captured["resolver_id"] = resolver_id
         return MagicMock()
 
@@ -42,7 +42,9 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     monkeypatch.setattr(gm, "resolve_member", AsyncMock(return_value=caller))
     monkeypatch.setattr(gm, "transition_gate", _fake_transition)
     monkeypatch.setattr(gm.GateResponse, "model_validate", staticmethod(lambda g: g))
-    body = gm.GateTransitionRequest(status="approved", resolver_id=spoofed)
+    # story #2027: gate_type="merge"는 risk 매트릭스상 고위험(_HIGH_RISK_GATE_TYPES)이라 이 파일의
+    # 관심사(resolver_id 강제)와 무관한 사유-강제 가드를 note로 우회.
+    body = gm.GateTransitionRequest(status="approved", resolver_id=spoofed, note="테스트 사유")
     # 48f064e5: 엔드포인트가 doc-gate authz용 게이트 로드 → 비-doc 게이트 반환으로 그 분기 skip.
     _sess = AsyncMock()
     _gr = MagicMock()
@@ -50,8 +52,18 @@ async def test_gate_transition_forces_resolver_id_to_caller(monkeypatch):
     _g.gate_type = "merge"
     _gr.scalar_one_or_none.return_value = _g
     _sess.execute = AsyncMock(return_value=_gr)
+    from fastapi import BackgroundTasks
+    # #2198: non-doc 분기가 uuid.UUID(auth.user_id)를 rule B 에 쓰므로 auth 도 caller_id 와
+    # 일관된 실 UUID 문자열이 필요해졌다(bare MagicMock()의 auto-attribute 는 UUID 파싱이
+    # 안 됨) — 프로덕션에서는 resolve_member 자체가 auth.user_id 를 내부적으로 UUID 파싱하고
+    # 실패 시 그 안에서 400 을 내므로(member_resolver.py:68) 이 코드에 도달할 때 이미 유효함이
+    # 보장된다(_resolve_member_legacy). 이 테스트는 resolve_member 를 통째로 mock 해 그 내부
+    # 검증을 우회하므로, mock 이 대신 그 불변식(auth.user_id 가 resolved 대상과 일관됨)을 지켜야
+    # 한다. 이 파일의 관심사(resolver_id 강제)와는 무관 — patch 로 rule B 자체도 우회한다.
+    monkeypatch.setattr(gm, "_non_doc_gate_approvable", AsyncMock(return_value=True))
     await gm.transition_gate_endpoint(
-        uuid.uuid4(), body, session=_sess, org_id=uuid.uuid4(), auth=MagicMock())
+        uuid.uuid4(), body, background_tasks=BackgroundTasks(),
+        session=_sess, org_id=uuid.uuid4(), auth=MagicMock(user_id=str(caller_id)))
     assert captured["resolver_id"] == caller_id  # ⭐조작된 spoofed 가 아니라 인증 caller
     assert captured["resolver_id"] != spoofed
 

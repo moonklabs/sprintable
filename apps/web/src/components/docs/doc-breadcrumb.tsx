@@ -4,7 +4,7 @@ import { useCallback } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { buildDocPath } from './lib/doc-path';
-import type { Doc } from '@/app/(authenticated)/docs/docs-context';
+import type { Doc } from '@/app/(authenticated)/[ws]/[proj]/docs/docs-context';
 
 interface DocBreadcrumbProps {
   currentDocId: string;
@@ -31,7 +31,7 @@ export function DocBreadcrumb({ currentDocId, tree, onExpandFolder, ariaLabel }:
   if (path.length <= 1) return null;
 
   return (
-    <nav aria-label={ariaLabel} className="flex min-w-0 items-center gap-0.5 overflow-x-auto pb-0.5 text-[11px] text-muted-foreground">
+    <nav aria-label={ariaLabel} className="focus-inset flex min-w-0 items-center gap-0.5 overflow-x-auto pb-0.5 text-[11px] text-muted-foreground">
       {path.map((doc, idx) => {
         const isCurrent = idx === path.length - 1;
         return (

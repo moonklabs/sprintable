@@ -93,7 +93,7 @@ export default function RewardsPage() {
   if (!projectId) {
     return (
       <>
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
         <div className="flex h-64 items-center justify-center p-6">
           <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
         </div>
@@ -103,9 +103,9 @@ export default function RewardsPage() {
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl space-y-5 p-6">
 
           {/* 리더보드 */}

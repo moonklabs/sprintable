@@ -42,11 +42,24 @@ const DECISION_META: Record<Decision, { variant: 'success' | 'warning' | 'destru
 
 const DECISIONS = new Set(['auto_merge', 'ask_human', 'block']);
 
-/** auto_decision_reason(raw decision) 우선. 미상 + status=pending → ask_human 통합. 그 외 null. */
+/**
+ * auto_decision_reason(raw decision) 우선. 미상이면서 pending인 경우에만 ask_human으로
+ * 통합하되, 그 통합은 requires_human===true일 때만 — 즉 "판정 결과가 사람 확인을 요구한다"는
+ * 신호가 실제로 있을 때만 ask_human을 말한다.
+ *
+ * ⚠️story #2043 근본원인 fix: 이전엔 `status==='pending'`이면 requires_human 값과 무관하게
+ * 무조건 ask_human을 리턴했다 — `POST /api/v2/gates` 직접 생성처럼 판정 알고리즘 자체를
+ * 안 거쳐 requires_human이 기본값 false로 남은 게이트에서도 이 배지가 "Review needed"를
+ * 말했다. 같은 화면 아래쪽(gates/[id]/page.tsx)은 requires_human 기준으로 "Auto-passed"를
+ * 말해 한 화면이 서로 반대되는 두 문장을 동시에 말하는 자기모순이 났다(#2043 실측).
+ * requires_human을 조건에 넣으면 "판정을 안 거친 껍데기 게이트"는 ask_human도 auto도 아닌
+ * null(=판정 정보 없음)이 되어, 배지가 침묵하고 소비부(gates/[id]/page.tsx)가 그 침묵을
+ * "판정 미거침"이라는 정직한 한 문장으로 대신 말한다 — 모순 대신 단일 문장.
+ */
 export function gateDecision(gate: GateItem): Decision | null {
   const raw = gate.auto_decision_reason;
   if (raw && DECISIONS.has(raw)) return raw as Decision;
-  if (gate.status === 'pending') return 'ask_human';
+  if (gate.status === 'pending' && gate.requires_human === true) return 'ask_human';
   return null;
 }
 

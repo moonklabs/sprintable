@@ -177,7 +177,7 @@ async def test_override_endpoint_non_owner_403():
     """admin이어도 owner 아니면 403(override는 owner-only·admin보다 좁음)."""
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, patch
-    from fastapi import HTTPException
+    from fastapi import BackgroundTasks, HTTPException
     from app.routers import gates as gates_mod
     from app.routers.gates import GateOverrideRequest, override_gate_endpoint
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved_owner())), \
@@ -185,6 +185,7 @@ async def test_override_endpoint_non_owner_403():
         with pytest.raises(HTTPException) as ei:
             await override_gate_endpoint(
                 id=uuid.uuid4(), body=GateOverrideRequest(decision="approved", reason="x"),
+                background_tasks=BackgroundTasks(),
                 session=AsyncMock(), org_id=uuid.uuid4(),
                 auth=SimpleNamespace(user_id=str(uuid.uuid4())))
     assert ei.value.status_code == 403

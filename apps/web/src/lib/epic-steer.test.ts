@@ -1,0 +1,76 @@
+import { describe, expect, it } from 'vitest';
+import { computeReorderPatch, resolveRecipientPrefill, type SteerEpic } from './epic-steer';
+
+const e = (id: string, position?: number | null): SteerEpic => ({ id, position });
+
+describe('computeReorderPatch (로드맵 조타 재정렬 → bulk PATCH diff·wedge #2)', () => {
+  it('null 에픽을 맨 앞으로 끌면 그 항목만 position=1(나머지 null tail 유지·백필0)', () => {
+    // 원래 [A,B,E] 전부 null → E를 idx0으로. reordered=[E,A,B], movedNewIndex=0.
+    const patch = computeReorderPatch([e('E'), e('A'), e('B')], 0);
+    expect(patch).toEqual([{ id: 'E', position: 1 }]);
+  });
+
+  it('null만 있는 목록에서 idx2로 끌면 prefix 0..2를 1,2,3으로 큐레이션(시각 순서 persist)', () => {
+    const patch = computeReorderPatch([e('A'), e('B'), e('E')], 2);
+    expect(patch).toEqual([
+      { id: 'A', position: 1 },
+      { id: 'B', position: 2 },
+      { id: 'E', position: 3 },
+    ]);
+  });
+
+  it('드롭 지점 아래에 이미 큐레이션된 항목이 있으면 cutoff가 거기까지 확장돼 renumber된다', () => {
+    // idx3에 원래 position=5인 큐레이션. movedNewIndex=1 → cutoff=max(1,3)=3.
+    const patch = computeReorderPatch([e('A'), e('X'), e('B'), e('C', 5)], 1);
+    expect(patch).toEqual([
+      { id: 'A', position: 1 },
+      { id: 'X', position: 2 },
+      { id: 'B', position: 3 },
+      { id: 'C', position: 4 }, // 5→4로 정합
+    ]);
+  });
+
+  it('prefix position이 이미 정확하면 그 항목은 diff에서 제외(최소 쓰기)', () => {
+    const patch = computeReorderPatch([e('X', 1), e('Y', 2), e('Z')], 1);
+    expect(patch).toEqual([]);
+  });
+
+  it('순수 null tail(cutoff 이후)은 절대 건드리지 않는다(백필0)', () => {
+    // cur-1(pos1) 고정, 그 뒤 null 3개. movedNewIndex=0 → cutoff=0 → prefix만.
+    const patch = computeReorderPatch([e('cur-1', 1), e('n1'), e('n2'), e('n3')], 0);
+    expect(patch).toEqual([]); // 이미 pos1 정확 → 변경 0, tail 무손
+  });
+
+  // 까심 QA nit(#2078): 엣지 커버리지 보강 — 실측 안전은 확認됐고 케이스만 빈다.
+  it('빈 리스트 — 크래시 없이 빈 diff(방어)', () => {
+    expect(computeReorderPatch([], 0)).toEqual([]);
+  });
+
+  it('단일 항목(이미 pos1) — 스퓨리어스 쓰기 0', () => {
+    expect(computeReorderPatch([e('solo', 1)], 0)).toEqual([]);
+  });
+
+  it('기존 중복 position(데이터 이상) — prefix renumber가 자연 정합(중복 해소)', () => {
+    // A·B 둘 다 pos1(이상). cutoff=1까지 renumber → B가 2로 밀려 중복 제거·A는 그대로.
+    const patch = computeReorderPatch([e('A', 1), e('B', 1), e('C')], 1);
+    expect(patch).toEqual([{ id: 'B', position: 2 }]);
+  });
+});
+
+describe('resolveRecipientPrefill (STEER v2 커밋 수신자 프리필·마지막 선택 ∩ 가용·하드코딩 없음)', () => {
+  it('기억된 선택을 현재 가용 멤버와 교집합(순서 보존)', () => {
+    expect(resolveRecipientPrefill(['m2', 'm1'], ['m1', 'm2', 'm3'])).toEqual(['m2', 'm1']);
+  });
+
+  it('떠난/사라진 멤버는 자동 탈락', () => {
+    expect(resolveRecipientPrefill(['gone', 'm1'], ['m1', 'm2'])).toEqual(['m1']);
+  });
+
+  it('기억 없음 → 빈 배열(인간이 새로 선택·필수)', () => {
+    expect(resolveRecipientPrefill([], ['m1', 'm2'])).toEqual([]);
+  });
+
+  it('전부 무효 → 빈 배열(하드코딩 폴백 없음·org-agnostic)', () => {
+    expect(resolveRecipientPrefill(['x', 'y'], ['m1'])).toEqual([]);
+  });
+});

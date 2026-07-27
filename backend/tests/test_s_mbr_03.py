@@ -229,7 +229,13 @@ async def test_list_members_owner_always_included():
     from app.routers.members import list_members
 
     project_id = uuid.uuid4()
+    org_id = uuid.uuid4()
     mock_session = AsyncMock()
+
+    # E-SECURITY SEC-S6: list_members가 이제 먼저 project의 실 org_id를 조회해 caller org와
+    # 대조한다 — 이 목이 그 1번째 execute()에 응답.
+    org_lookup_mock = MagicMock()
+    org_lookup_mock.scalar_one_or_none.return_value = org_id
 
     # Human rows: org owner (id=owner_id) + org member (id=member_id)
     owner_id = uuid.uuid4()
@@ -244,10 +250,16 @@ async def test_list_members_owner_always_included():
     agent_mock = MagicMock()
     agent_mock.scalars.return_value.all.return_value = []
 
-    mock_session.execute = AsyncMock(side_effect=[human_mock, agent_mock])
-    mock_auth = MagicMock()
+    # round9(#2050): has_project_access 사전검증이 org_lookup과 human_rows 사이에 execute
+    # 1회를 추가한다(caller의 실 project 접근권 대조). 이 목이 그 호출에 truthy 응답.
+    access_mock = MagicMock()
+    access_mock.scalar_one_or_none.return_value = 1
 
-    result = await list_members(project_id=project_id, session=mock_session, _auth=mock_auth)
+    mock_session.execute = AsyncMock(side_effect=[org_lookup_mock, access_mock, human_mock, agent_mock])
+    mock_auth = MagicMock()
+    mock_auth.user_id = str(uuid.uuid4())
+
+    result = await list_members(project_id=project_id, session=mock_session, auth=mock_auth, org_id=org_id)
     # 두 멤버 모두 포함
     assert len(result) == 2
     roles = {r.role for r in result}

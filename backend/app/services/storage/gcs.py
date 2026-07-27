@@ -52,6 +52,37 @@ class GcsStorageProvider(StorageProvider):
             logger.warning("gcs storage: signed url 생성 실패 path=%s", object_path, exc_info=True)
             return None
 
+    async def signed_write_url(
+        self, container: str, object_path: str, *, ttl: timedelta, content_type: str | None = None
+    ) -> str | None:
+        """signed_read_url과 동형(IAM SignBlob V4) — method="PUT". content_type 지정 시 서명에
+        바인딩돼 FE PUT 요청의 Content-Type 헤더가 반드시 일치해야 한다(임의 타입 업로드 방지)."""
+
+        def _blocking() -> str:
+            import google.auth
+            from google.auth.transport.requests import Request as _AuthRequest
+            from google.cloud import storage
+
+            creds, _ = google.auth.default()
+            creds.refresh(_AuthRequest())
+            blob = storage.Client().bucket(container).blob(object_path)
+            kwargs: dict = {
+                "version": "v4",
+                "expiration": ttl,
+                "method": "PUT",
+                "service_account_email": getattr(creds, "service_account_email", None),
+                "access_token": creds.token,
+            }
+            if content_type:
+                kwargs["content_type"] = content_type
+            return blob.generate_signed_url(**kwargs)
+
+        try:
+            return await asyncio.to_thread(_blocking)
+        except Exception:
+            logger.warning("gcs storage: signed write url 생성 실패 path=%s", object_path, exc_info=True)
+            return None
+
     async def delete_object(self, container: str, object_path: str) -> bool:
         def _blocking() -> bool:
             from google.cloud import storage

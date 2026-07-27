@@ -8,6 +8,7 @@ export type {
   CreateEpicInput,
   UpdateEpicInput,
   EpicListFilters,
+  EpicPositionItem,
   RepositoryScopeContext,
 } from './interfaces/IEpicRepository';
 

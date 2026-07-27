@@ -34,8 +34,9 @@ def _agent(mid: uuid.UUID) -> ResolvedMember:
     )
 
 
-def _gate(requester_id, *, work_item_id=None, status="pending"):
+def _gate(requester_id, *, work_item_id=None, status="pending", gate_id=None):
     return SimpleNamespace(
+        id=gate_id or uuid.uuid4(),
         gate_type="doc_approval",
         neutral_facts={"requested_by_member_id": str(requester_id)} if requester_id else {},
         work_item_id=work_item_id or uuid.uuid4(),
@@ -165,9 +166,10 @@ async def _list_gates(gate, *, has_access, resolved=None, resolve_raises=False):
     )
     with patch.object(gates_mod.GateResponse, "model_validate", _resp), \
          patch.object(gates_mod, "resolve_member", rm), \
-         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=has_access)):
+         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=has_access)), \
+         patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         return await list_gates(
-            work_item_id=None, work_item_type=None, status=None,
+            work_item_id=None, work_item_type=None, status=None, assigned_to_me=False,
             session=session, org_id=org, auth=auth,
         )
 
@@ -197,28 +199,46 @@ async def test_list_gates_can_approve_false_for_agent():
     assert out[0].can_approve is False  # 비-휴먼
 
 
-@pytest.mark.anyio
-async def test_list_gates_non_doc_gate_untouched():
+async def _run_non_doc_can_approve(project_role):
+    org = uuid.uuid4()
     merge = SimpleNamespace(
-        gate_type="merge", work_item_type="story", work_item_id=uuid.uuid4(),
+        id=uuid.uuid4(), gate_type="merge", work_item_type="story", work_item_id=uuid.uuid4(),
         neutral_facts={}, status="pending",
     )
-    org = uuid.uuid4()
     gates_result = MagicMock()
     gates_result.scalars.return_value.all.return_value = [merge]
+    story_batch = MagicMock()
+    story_batch.all.return_value = [(merge.work_item_id, uuid.uuid4())]
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[gates_result])  # doc_ids 비어 doc batch 미실행
+    session.execute = AsyncMock(side_effect=[gates_result, story_batch])
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     rm = AsyncMock(return_value=_human(uuid.uuid4()))
     with patch.object(gates_mod.GateResponse, "model_validate", _resp), \
          patch.object(gates_mod, "resolve_member", rm), \
-         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)):
+         patch.object(gates_mod, "get_project_role", AsyncMock(return_value=project_role)), \
+         patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(
-            work_item_id=None, work_item_type=None, status=None,
+            work_item_id=None, work_item_type=None, status=None, assigned_to_me=False,
             session=session, org_id=org, auth=auth,
         )
+    return out, rm, merge
+
+
+@pytest.mark.anyio
+async def test_list_gates_non_doc_gate_can_approve_now_true_for_project_owner():
+    """story #2198(까심 QA 적출·오르테가 확定): 이 테스트가 대체하는 옛 테스트("non_doc_gate_untouched"·
+    "resolve_member 미호출")는 non-doc can_approve 가 계산 자체를 안 하던 원 결함을 그대로 pin
+    하고 있었다 — 그게 정확히 #2198 의 증상②였다. 이제 non-doc 게이트도 rule B
+    (_non_doc_gate_approvable, story #1974)로 can_approve 가 계산된다: project owner 면 True."""
+    out, rm, merge = await _run_non_doc_can_approve("owner")
+    assert out[0].can_approve is True
+    rm.assert_awaited_once()  # non-doc can_approve 계산에도 caller 식별이 필요해졌다(의도된 변화).
+
+
+@pytest.mark.anyio
+async def test_list_gates_non_doc_gate_can_approve_false_for_non_owner():
+    out, rm, merge = await _run_non_doc_can_approve("member")  # owner/admin 아님
     assert out[0].can_approve is False
-    rm.assert_not_awaited()  # 비-doc 게이트만이면 resolve_member 미호출(불필요 작업 0)
 
 
 @pytest.mark.anyio
@@ -235,7 +255,7 @@ async def test_list_gates_can_approve_uses_doc_approval_predicate_not_work_item_
     키잉하면 project_id=None→can_approve False 로 갈림(이 테스트가 그 회귀를 잠금)."""
     org, doc_id, pid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     g = SimpleNamespace(  # 이상: gate_type=doc_approval 이나 work_item_type≠doc
-        gate_type="doc_approval", work_item_type="story", work_item_id=doc_id,
+        id=uuid.uuid4(), gate_type="doc_approval", work_item_type="story", work_item_id=doc_id,
         neutral_facts={"requested_by_member_id": str(uuid.uuid4())}, status="pending",
     )
     gates_result = MagicMock()
@@ -247,9 +267,10 @@ async def test_list_gates_can_approve_uses_doc_approval_predicate_not_work_item_
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     with patch.object(gates_mod.GateResponse, "model_validate", _resp), \
          patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_human(uuid.uuid4()))), \
-         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)):
+         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
+         patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(
-            work_item_id=None, work_item_type=None, status=None,
+            work_item_id=None, work_item_type=None, status=None, assigned_to_me=False,
             session=session, org_id=org, auth=auth,
         )
     assert out[0].can_approve is True  # project_id 가 doc_approval predicate 로 조회됨(work_item_type 무관)

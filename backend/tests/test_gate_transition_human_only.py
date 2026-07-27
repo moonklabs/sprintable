@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from app.routers import gates as gates_mod
 from app.routers.gates import GateTransitionRequest, transition_gate_endpoint
@@ -32,18 +32,29 @@ def _resolved(member_type: str) -> ResolvedMember:
 
 async def _call(status: str, member_type: str):
     org_id = uuid.uuid4()
-    body = GateTransitionRequest(status=status, resolver_id=uuid.uuid4())
+    # story #2027: note 동봉 — 이 테스트는 휴먼/에이전트 authz만 검증(risk_grade 무관). note 없으면
+    # gate_type="merge_approval"이 risk 매트릭스 두 세트 어디에도 없어 폴백(보수적 고위험)으로 떨어져
+    # approve 가 새 사유-강제 가드에 걸린다 — 이 파일의 관심사가 아니므로 note 로 그 분기를 우회한다.
+    body = GateTransitionRequest(status=status, resolver_id=uuid.uuid4(), note="테스트 사유")
     session = AsyncMock()
     # 48f064e5: 엔드포인트가 doc-gate authz용 게이트 로드 → 비-doc 게이트 반환(merge 등)으로 그 분기 skip.
+    # #2198: non-doc 분기가 work_item_type/work_item_id 를 읽으므로 SimpleNamespace 에 명시(누락
+    # 시 AttributeError) — 이 테스트는 human-vs-agent authz만 검증하므로 project-role 판정
+    # (_non_doc_gate_approvable) 은 아래에서 직접 patch 해 True 로 고정(그 판정 자체는 이 파일의
+    # 관심사가 아님 — project-role 축은 test_2198_*_realdb.py 가 별도로 커버).
     _gr = MagicMock()
-    _gr.scalar_one_or_none.return_value = SimpleNamespace(gate_type="merge_approval")
+    _gr.scalar_one_or_none.return_value = SimpleNamespace(
+        gate_type="merge_approval", work_item_type="story", work_item_id=uuid.uuid4(),
+    )
     session.execute = AsyncMock(return_value=_gr)
     transition = AsyncMock(return_value=SimpleNamespace())
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved(member_type))), \
          patch.object(gates_mod, "transition_gate", transition), \
+         patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)), \
          patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
         result = await transition_gate_endpoint(
-            id=uuid.uuid4(), body=body, session=session, org_id=org_id, auth=SimpleNamespace(),
+            id=uuid.uuid4(), body=body, background_tasks=BackgroundTasks(),
+            session=session, org_id=org_id, auth=SimpleNamespace(user_id=str(uuid.uuid4())),
         )
     return result, transition
 
@@ -73,6 +84,7 @@ async def test_agent_approve_does_not_call_transition():
         with pytest.raises(HTTPException):
             await transition_gate_endpoint(
                 id=uuid.uuid4(), body=GateTransitionRequest(status="approved"),
+                background_tasks=BackgroundTasks(),
                 session=AsyncMock(), org_id=uuid.uuid4(), auth=SimpleNamespace(),
             )
     transition.assert_not_awaited()

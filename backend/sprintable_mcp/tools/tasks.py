@@ -1,4 +1,5 @@
-"""태스크 관련 MCP 도구 (7개)."""
+"""태스크 관련 MCP 도구 (6개) — E-SECURITY SEC-S1 확장: delete_task 제거(에이전트 hard-delete 차단,
+delete_story와 동형 조치. 까심 적대적 QA 발견 갭)."""
 from __future__ import annotations
 
 from mcp.types import TextContent
@@ -42,20 +43,16 @@ class UpdateTaskStatusInput(SprintableInput):
     status: TaskStatus
 
 
-class DeleteTaskInput(SprintableInput):
-    task_id: str
-
-
 async def list_tasks(args: ListTasksInput) -> list[TextContent]:
     """태스크 목록 조회."""
-    params: dict = {"project_id": client.project_id}
-    if args.story_id:
-        params["story_id"] = args.story_id
-    if args.assignee_id:
-        params["assignee_id"] = args.assignee_id
-    if args.status:
-        params["status"] = args.status.value
     try:
+        params: dict = {"project_id": client.require_project_id()}
+        if args.story_id:
+            params["story_id"] = args.story_id
+        if args.assignee_id:
+            params["assignee_id"] = args.assignee_id
+        if args.status:
+            params["status"] = args.status.value
         return ok(await client.get("/api/v2/tasks", params=params))
     except Exception as exc:
         return err(str(exc))
@@ -63,9 +60,9 @@ async def list_tasks(args: ListTasksInput) -> list[TextContent]:
 
 async def list_my_tasks(args: ListMyTasksInput) -> list[TextContent]:
     """내 태스크 목록 조회."""
-    assignee = args.assignee_id or client.member_id
-    params: dict = {"assignee_id": assignee, "project_id": client.project_id}
     try:
+        assignee = args.assignee_id or client.member_id
+        params: dict = {"assignee_id": assignee, "project_id": client.require_project_id()}
         return ok(await client.get("/api/v2/tasks", params=params))
     except Exception as exc:
         return err(str(exc))
@@ -113,14 +110,5 @@ async def update_task_status(args: UpdateTaskStatusInput) -> list[TextContent]:
     """태스크 상태 변경."""
     try:
         return ok(await client.patch(f"/api/v2/tasks/{args.task_id}", json={"status": args.status.value}))
-    except Exception as exc:
-        return err(str(exc))
-
-
-async def delete_task(args: DeleteTaskInput) -> list[TextContent]:
-    """태스크 삭제."""
-    try:
-        await client.delete(f"/api/v2/tasks/{args.task_id}")
-        return ok({"deleted": True})
     except Exception as exc:
         return err(str(exc))

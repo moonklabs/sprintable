@@ -224,6 +224,9 @@ async def test_members_list_200():
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [member_mock]
+        # E-SECURITY SEC-S6: list_members가 먼저 project의 실 org_id를 조회해 caller org(ORG_ID)와
+        # 대조한다 — 블랑켓 목이라 이 값을 맞춰야 그 가드를 통과한다.
+        mock_result.scalar_one_or_none.return_value = ORG_ID
         session.execute = AsyncMock(return_value=mock_result)
 
         async with client as c:

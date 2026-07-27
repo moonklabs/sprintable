@@ -124,7 +124,8 @@ async def test_get_role_template_by_slug_includes_behaviors_realdb():
             out = await get_role_template("backend", session=s)
         assert out.slug == "backend"
         assert "sprintable_" in out.role_behaviors
-        assert out.default_tool_groups == ["stories", "tasks", "epics", "chat", "docs"]
+        # story b4027b2e(SEC): canvas 그룹 신설 후 backend 역할에 추가(0180) — E-CANVAS BE 저작 전담.
+        assert out.default_tool_groups == ["stories", "tasks", "epics", "chat", "docs", "canvas"]
         assert out.is_builtin is True
     finally:
         await eng.dispose()

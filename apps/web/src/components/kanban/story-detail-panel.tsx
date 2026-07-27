@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import { AlertTriangle, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
+import { normalizeAssigneePatch } from './types';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 import { getFileIcon } from '@/lib/file-icon';
 import { imageFilesFromClipboard } from '@/lib/clipboard-image';
@@ -17,6 +18,12 @@ import { DependencyGraph } from './dependency-graph';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
+import { EvidenceSection } from '@/components/verify/evidence-section';
+import { deriveInFlightTrustChip } from '@/services/verify';
+import type { ProofState } from '@/components/proof-capsule/proof-capsule';
+import { Workcell, type WorkcellMessage } from '@/components/workcell/workcell';
+import { initials } from '@/lib/storage/format';
+import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
@@ -30,6 +37,9 @@ import {
   DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { ToastContainer, useToast } from '@/components/ui/toast';
+import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
 interface Task {
   id: string;
@@ -73,34 +83,42 @@ interface StoryDetailPanelProps {
 
 function taskTone(status: string) {
   if (status === 'done') return 'bg-success';
-  if (status === 'in-progress') return 'bg-brand';
+  if (status === 'in-progress') return 'bg-info'; // story #2023 ⓑ: 진행중=시스템 상태(L5), 브랜드 아님
   return 'bg-background/20';
 }
 
 // BE _MAX_STORY_ATTACHMENTS 정합 (schemas/story.py)
 const STORY_ATTACHMENT_LIMIT = 10;
 
+// story #2021 후속(PO 리뷰): components 객체를 렌더 함수 안에서 인라인으로 만들면 매 렌더
+// 새 함수 참조가 되어 react-markdown이 서브트리를 리마운트한다(chat-bubble 근본원인과 동형).
+// 이 패널은 댓글/액티비티 폴링·낙관 업데이트로 자주 리렌더되는 화면이라 위험이 실재한다.
+// 다만 여기 오버라이드는 전부 stateless 순수 태그(a도 target=_blank 평문 링크, 자체 state
+// 없음)라 useMemo조차 불필요 — 모듈 스코프 상수로 끌어올려 참조를 영구 고정한다.
+const descriptionViewerComponents = {
+  p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 break-words text-sm leading-6 text-muted-foreground last:mb-0">{children}</p>,
+  h1: ({ children }: { children?: React.ReactNode }) => <h1 className="mb-2 text-lg font-bold text-foreground">{children}</h1>,
+  h2: ({ children }: { children?: React.ReactNode }) => <h2 className="mb-2 text-base font-bold text-foreground">{children}</h2>,
+  h3: ({ children }: { children?: React.ReactNode }) => <h3 className="mb-1.5 text-sm font-bold text-foreground">{children}</h3>,
+  ul: ({ children }: { children?: React.ReactNode }) => <ul className="mb-2 ml-4 list-disc space-y-0.5 text-muted-foreground">{children}</ul>,
+  ol: ({ children }: { children?: React.ReactNode }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5 text-muted-foreground">{children}</ol>,
+  li: ({ children }: { children?: React.ReactNode }) => <li className="text-sm leading-6">{children}</li>,
+  // story #2165: 코드블럭은 전역 스크롤바 숨김 예외.
+  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg bg-muted p-3 text-[13px] text-foreground">{children}</pre>,
+  code: ({ children }: { children?: React.ReactNode }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">{children}</code>,
+  blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">{children}</a>,
+  strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold text-foreground">{children}</strong>,
+  em: ({ children }: { children?: React.ReactNode }) => <em className="italic text-muted-foreground">{children}</em>,
+  hr: () => <hr className="my-2 border-border" />,
+};
+
 function DescriptionViewer({ description }: { description: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[rehypeSanitize]}
-      components={{
-        p: ({ children }) => <p className="mb-2 break-words text-sm leading-6 text-muted-foreground last:mb-0">{children}</p>,
-        h1: ({ children }) => <h1 className="mb-2 text-lg font-bold text-foreground">{children}</h1>,
-        h2: ({ children }) => <h2 className="mb-2 text-base font-bold text-foreground">{children}</h2>,
-        h3: ({ children }) => <h3 className="mb-1.5 text-sm font-bold text-foreground">{children}</h3>,
-        ul: ({ children }) => <ul className="mb-2 ml-4 list-disc space-y-0.5 text-muted-foreground">{children}</ul>,
-        ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5 text-muted-foreground">{children}</ol>,
-        li: ({ children }) => <li className="text-sm leading-6">{children}</li>,
-        pre: ({ children }) => <pre className="mb-2 overflow-x-auto rounded-lg bg-muted p-3 text-[13px] text-foreground">{children}</pre>,
-        code: ({ children }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">{children}</code>,
-        blockquote: ({ children }) => <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
-        a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">{children}</a>,
-        strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
-        em: ({ children }) => <em className="italic text-muted-foreground">{children}</em>,
-        hr: () => <hr className="my-2 border-border" />,
-      }}
+      components={descriptionViewerComponents}
     >
       {description}
     </ReactMarkdown>
@@ -109,6 +127,13 @@ function DescriptionViewer({ description }: { description: string }) {
 
 export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId }: StoryDetailPanelProps) {
   const t = useTranslations('board');
+  // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
+  // 탭 루트를 BACK 대상으로 선주입. 카드 클릭으로 연 경우(history.length>1)는 no-op.
+  useSyntheticParentTabHistory('/more');
+  // story #2061 — 이 컴포넌트의 마운트 자체가 "열림"이라 active는 상수 true. Esc는 이미
+  // 위(편집모드 우선 취소) 자체 핸들러가 있어 여기선 Tab 트랩+포커스 반환만 담당한다
+  // (handleEscape:false — 이중 핸들러로 편집모드 취소 로직을 건너뛰지 않도록).
+  const panelTrapRef = useFocusTrap(true, onClose, { handleEscape: false });
   const { toasts, addToast, dismissToast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -156,6 +181,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   const [deps, setDeps] = useState<DependencyEdge[]>([]);
   const [loadingDeps, setLoadingDeps] = useState(false);
+  // P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩. gate_type/status/
+  // neutral_facts.ci_result만 필요(GateItem 전체 불요) — 얇은 로컬 타입으로 충분.
+  const [chipGates, setChipGates] = useState<{ gate_type: string; status: string; neutral_facts?: Record<string, unknown> | null }[]>([]);
   const [showAddDep, setShowAddDep] = useState(false);
   const [depQuery, setDepQuery] = useState('');
   const [depQueryResults, setDepQueryResults] = useState<{ id: string; title: string }[]>([]);
@@ -325,6 +353,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       .finally(() => setLoadingDeps(false));
   }, [story.id]);
 
+  // P0-04 in-flight 신뢰 칩 — StoryMergeGate와 동형 데이터소스(work_item_id 필터, BE 추가 0).
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/gates?work_item_id=${story.id}&work_item_type=story`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((gates) => { if (!cancelled) setChipGates(Array.isArray(gates) ? gates : []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [story.id]);
+
   // Keep the locally-displayed status synced when a different story is selected or the
   // board pushes an external update. Optimistic in-panel changes set it directly (handler),
   // so the badge reflects immediately without waiting for the prop round-trip (S6 AC2 ④).
@@ -339,6 +377,50 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   };
   const statusKey = statusKeyMap[localStatus];
   const statusLabel = statusKey ? t(statusKey) : localStatus;
+
+  // P0-04(trust-pipeline-minimal-decision) — in-flight 전용 칩. done엔 항상 무표시(TrustSeal
+  // 담당·중복 금지, deriveInFlightTrustChip 내부에서 강제). 무신호=칩 자체 미렌더(no-fiction).
+  const trustChip = deriveInFlightTrustChip(localStatus, chipGates);
+  const trustChipLabel = trustChip === 'needs_input' ? t('trustChipNeedsInput') : trustChip === 'merge_ready' ? t('trustChipMergeReady') : null;
+
+  // E-UI-DAEGBYEON P0 — Workcell 최소 실화면 배선(story `e5310d1b`, dead-path 방지).
+  // 정직한 최소 표면: 실 필드(title/status/assignee/description/acceptance_criteria/
+  // blocked_by/comments)만으로 채울 수 있는 것만 채운다 — 없는 값은 허구로 안 채움:
+  // - Run.now/stage는 story.status(coarse) 이상의 세부 행위 신호가 없어 statusLabel 그대로
+  //   사용(과장 없음). tools/scopes는 실 데이터 없어 빈 배열(빈 배열=정직, 조작 아님).
+  // - Evidence는 ProofCapsuleProps 실 매핑 인프라(EvidenceSection 재사용)가 후속 스코프라
+  //   지금은 null(정직한 "아직 증거 없음" — 스펙이 명시적으로 허용하는 케이스).
+  // - human assignee 없으면 Workcell 렌더 자체를 생략(허구 human 금지, ProofCapsule 배선과 동일 규율).
+  // P0-04 그라운딩(2026-07-11): GET /api/v2/agent-runs가 story_id 필터를 지원하지 않아(BE
+  // AgentRunRepository.list()는 project_id/agent_id만 필터) FE가 "지금 실제로 도는 에이전트가
+  // 있는지" 알 방법이 없다. 종전엔 blue 상태에 공용 "실행 중"(proofCapsuleStateRunning) 라벨을
+  // 썼는데, 이는 story.status='in-progress'라는 coarse 신호를 "에이전트가 지금 실행 중"이라는
+  // 더 구체적인 주장으로 과장한 것 — no-fiction 위반(파운더 독트린: 실시간 이벤트 텍스트≠실
+  // 실시간 신호). Workcell 전용으로 "진행 중"(workcellStateInProgress, 순수 status 반영, 실행
+  // 주장 없음)으로 정정. Board/Audit의 공용 blue="실행 중" 라벨은 별개 표면이라 스코프 밖
+  // (그쪽도 같은 근본 갭이 있으면 후속 별도 판단). 실 AgentRun story_id 필터는 디디 BE 티켓.
+  const PROOF_STATE_BY_STATUS: Record<string, ProofState> = {
+    'in-progress': 'blue', 'in-review': 'amber', done: 'green',
+  };
+  const proofState = PROOF_STATE_BY_STATUS[localStatus];
+  const proofStateLabel = proofState
+    ? { blue: t('workcellStateInProgress'), amber: t('proofCapsuleStateReviewing'), green: t('proofCapsuleStateProven'), red: t('proofCapsuleStateViolation') }[proofState]
+    : null;
+  const assigneeIds = story.assignee_ids?.length ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
+  const proofHumanId = assigneeIds.find((id) => memberMap[id] && memberMap[id]!.type !== 'agent');
+  const proofAgentId = assigneeIds.find((id) => memberMap[id]?.type === 'agent');
+  const proofHuman = proofHumanId ? memberMap[proofHumanId] : null;
+  const proofAgent = proofAgentId ? memberMap[proofAgentId] : null;
+
+  const WORKCELL_NEXT_NEED_BY_STATUS: Record<string, string> = {
+    'in-progress': t('workcellNextNeedInProgress'),
+    'in-review': t('workcellNextNeedInReview'),
+    done: t('workcellNextNeedDone'),
+  };
+  const workcellMessages: WorkcellMessage[] = comments.map((c) => ({
+    author: memberMap[c.created_by]?.name ?? c.created_by,
+    body: c.content,
+  }));
 
   const patchStory = async (body: Record<string, unknown>): Promise<KanbanStory | null> => {
     const res = await fetch(`/api/stories/${story.id}`, {
@@ -419,11 +501,12 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     // assignee_ids 전체 배열 교체(서버 last-write-wins) → 연타 시 마지막 로컬과 정합.
     const updated = await patchStory({ assignee_ids: next });
     if (updated) {
-      // BE가 assignee_id(주담당)를 assignee_ids[0]로 동기화 → 응답 우선, 없으면 로컬 계산.
-      const resolved = updated.assignee_ids ?? next;
-      assigneeIdsRef.current = resolved;
-      setLocalAssigneeIds(resolved);
-      onStoryUpdate?.({ ...story, assignee_ids: resolved, assignee_id: updated.assignee_id ?? resolved[0] ?? null });
+      // story #2133 — BE 응답(assignee_ids 우선, 없으면 로컬 next)을 normalizeAssigneePatch로
+      // 통과시켜 assignee_id를 손으로 다시 계산하지 않는다.
+      const assigneePatch = normalizeAssigneePatch({ assignee_ids: updated.assignee_ids ?? next });
+      assigneeIdsRef.current = assigneePatch.assignee_ids;
+      setLocalAssigneeIds(assigneePatch.assignee_ids);
+      onStoryUpdate?.({ ...story, ...assigneePatch });
     } else {
       assigneeIdsRef.current = prev; // PATCH 실패 → 직전 값 롤백
       setLocalAssigneeIds(prev);
@@ -438,7 +521,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     setEditingAssignee(false);
     const updated = await patchStory({ assignee_ids: [] });
     if (updated) {
-      onStoryUpdate?.({ ...story, assignee_ids: [], assignee_id: null });
+      onStoryUpdate?.({ ...story, ...normalizeAssigneePatch({ assignee_ids: [] }) });
     } else {
       assigneeIdsRef.current = prev; // 롤백
       setLocalAssigneeIds(prev);
@@ -666,13 +749,24 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       <div
         className="fixed inset-0 z-40 bg-overlay-backdrop backdrop-blur-sm lg:bg-transparent"
         onClick={onClose}
+        aria-hidden="true"
       />
 
       {/* Panel */}
-      <div className="fixed inset-0 z-50 bg-background shadow-xl backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border">
+      <div
+        ref={panelTrapRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={story.title}
+        className="fixed inset-0 z-50 bg-background shadow-xl outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border"
+      >
       <div className="flex h-full flex-col">
         <div className="flex items-start justify-between border-b border-border p-5">
           <div className="flex-1 space-y-2 pr-3">
+            {story.story_number ? (
+              <span className="block text-xs font-medium text-muted-foreground">#{story.story_number}</span>
+            ) : null}
             {editingTitle ? (
               <div className="space-y-2">
                 <input
@@ -704,47 +798,106 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 <span className="mt-1 shrink-0 text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">✎</span>
               </button>
             )}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <button type="button" disabled={savingStatus} aria-label={t('status')}>
-                    <StatusBadge status={localStatus} label={statusLabel} interactive />
-                  </button>
-                }
-              />
-              <DropdownMenuContent align="start">
-                {COLUMNS.map((col) => {
-                  const isCurrent = col.id === localStatus;
-                  // 정공법 A(c1cd484b): 전이-순서 disable 제거 — 어느 상태로든 선택 가능(하드블록 X).
-                  // 비정상 점프는 /status 응답 violation → 비차단 토스트로 가시화.
-                  return (
-                    <DropdownMenuItem
-                      key={col.id}
-                      disabled={savingStatus || isCurrent}
-                      onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
-                    >
-                      <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
-                      {t(statusKeyMap[col.id] ?? col.i18nKey)}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <button type="button" disabled={savingStatus} aria-label={t('status')}>
+                      <StatusBadge status={localStatus} label={statusLabel} interactive />
+                    </button>
+                  }
+                />
+                <DropdownMenuContent align="start">
+                  {COLUMNS.map((col) => {
+                    const isCurrent = col.id === localStatus;
+                    // 정공법 A(c1cd484b): 전이-순서 disable 제거 — 어느 상태로든 선택 가능(하드블록 X).
+                    // 비정상 점프는 /status 응답 violation → 비차단 토스트로 가시화.
+                    return (
+                      <DropdownMenuItem
+                        key={col.id}
+                        disabled={savingStatus || isCurrent}
+                        onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
+                      >
+                        <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
+                        {t(statusKeyMap[col.id] ?? col.i18nKey)}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {/* P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩(입력 필요/병합
+                  대기). done엔 렌더 0(TrustSeal 중복 방지)·무신호(gate 없음)면 칩 자체 미렌더. 5-status
+                  배지는 무변경(순수 additive 오버레이). 칸반 카드엔 안 얹음(Proofline이 이미 담당). */}
+              {trustChip && trustChipLabel ? (
+                <span
+                  className={
+                    trustChip === 'merge_ready'
+                      ? 'inline-flex items-center gap-1.5 rounded-[7px] bg-proof-green-soft px-2 py-0.5 text-[11px] font-semibold text-proof-green'
+                      : 'inline-flex items-center gap-1.5 rounded-[7px] bg-proof-amber-soft px-2 py-0.5 text-[11px] font-semibold text-proof-amber'
+                  }
+                >
+                  <span className={`size-1.5 rounded-full ${trustChip === 'merge_ready' ? 'bg-proof-green' : 'bg-proof-amber'}`} aria-hidden="true" />
+                  {trustChipLabel}
+                </span>
+              ) : null}
+            </div>
+            {/* E-VERIFY V0-S3 Lv1/Lv2 + P0-04 Claimed-vs-Verified — 완료 badge의 연장으로 읽히도록
+                바로 아래. 증거 0이면 EvidenceSection 자체가 null 렌더(행 미노출, §7 상태 매트릭스). */}
+            <EvidenceSection
+              workItemId={story.id}
+              workItemType="story"
+              selfReported={story.self_reported}
+              humanVerified={story.human_verified}
+              humanVerifiedBy={story.human_verified_by}
+              humanVerifiedAt={story.human_verified_at}
+              memberMap={memberMap}
+            />
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowDeleteConfirm(true)}
-              className="flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
-              aria-label={t('deleteStory')}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
+            {/* story #2104 — BE stories.py:1056이 human-only로 hard-delete를 403 거부한다(되돌릴
+                수 없는 조작). 에이전트 계정에도 트리거를 열어두면 #2091/#2103과 같은 결함이라
+                미리 숨긴다. */}
+            <HumanOnlyAction>
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+                aria-label={t('deleteStory')}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </HumanOnlyAction>
             <button type="button" onClick={onClose} className="rounded-md border border-border px-3 py-2 text-muted-foreground transition hover:text-foreground hover:bg-muted/50">✕</button>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
+            {/* E-UI-DAEGBYEON P0 — Workcell 4층 데뷔(최소 실화면 배선, story `e5310d1b`).
+                Evidence는 null(정직한 "아직 증거 없음" — EvidenceSection/StoryMergeGate 실
+                데이터 매핑은 후속 스코프, 대체 아님). human assignee 없으면 전체 생략. */}
+            {proofState && proofStateLabel && proofHuman ? (
+              <Workcell
+                title={story.title}
+                proofState={proofState}
+                stateLabel={proofStateLabel}
+                brief={{
+                  goal: story.description?.trim() || story.title,
+                  dod: story.acceptance_criteria?.trim() || t('workcellDodMissing'),
+                  owner: { name: proofHuman.name, role: 'human' },
+                  agent: proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined,
+                }}
+                run={{
+                  now: statusLabel,
+                  stage: statusLabel,
+                  tools: [],
+                  scopes: [],
+                  blocked: story.blocked_by?.length ? t('workcellBlockedReason') : null,
+                  nextNeed: WORKCELL_NEXT_NEED_BY_STATUS[localStatus] ?? statusLabel,
+                }}
+                evidence={null}
+                conversation={{ view: 'run', messages: workcellMessages }}
+              />
+            ) : null}
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>
@@ -810,7 +963,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   entityId={story.id}
                   projectId={projectId}
                   currentAssigneeId={localAssigneeIds.length > 1 ? undefined : (localAssigneeIds[0] ?? story.assignee_id)}
-                  onAssigneePatched={(aid) => onStoryUpdate?.({ ...story, assignee_id: aid })}
+                  // story #2133 — normalizeAssigneePatch가 assignee_id/assignee_ids 정합을
+                  // 강제해, 이 경로만 한쪽을 빠뜨리는 실수(#2384 근본)가 구조적으로 불가능해진다.
+                  onAssigneePatched={(aid) => {
+                    const assigneePatch = normalizeAssigneePatch({ assignee_id: aid });
+                    assigneeIdsRef.current = assigneePatch.assignee_ids;
+                    setLocalAssigneeIds(assigneePatch.assignee_ids);
+                    onStoryUpdate?.({ ...story, ...assigneePatch });
+                  }}
                 />
               </div>
             )}
@@ -846,7 +1006,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     onChange={(e) => setDescriptionDraft(e.target.value)}
                     onPaste={handlePasteAttach}
                     placeholder="Markdown 형식으로 작성하세요..."
-                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
                   />
                   <div className="flex gap-2">
@@ -893,7 +1053,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     value={acDraft}
                     onChange={(e) => setAcDraft(e.target.value)}
                     placeholder="Markdown 형식으로 작성하세요..."
-                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
                   />
                   <div className="flex gap-2">
@@ -983,8 +1143,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   <Loader2 className="size-3.5 animate-spin" /> {t('loading')}
                 </div>
               )}
+              {/* story #2105 2차 — handleAttachFiles가 재시도 전 setAttachError(false)를 먼저
+                  호출해(위 정의) 매 시도마다 언마운트→리마운트된다. */}
               {attachError && (
-                <p className="mt-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
+                <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-1 text-xs text-destructive">첨부 업로드에 실패했습니다. 다시 시도해 주세요.</p>
               )}
             </div>
 
@@ -1068,7 +1230,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           onChange={(e) => setNewLabelName(e.target.value)}
                           onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateLabel(); }}
                           placeholder="새 라벨 이름"
-                          className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                         <button
                           type="button"
@@ -1229,10 +1391,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     value={depQuery}
                     onChange={(e) => setDepQuery(e.target.value)}
                     placeholder={t('dep.searchPlaceholder')}
-                    className="w-full rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
+                    className="w-full rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   {depQueryResults.length > 0 && (
-                    <ul className="max-h-32 overflow-y-auto rounded border border-border bg-background">
+                    <ul className="focus-inset max-h-32 overflow-y-auto rounded border border-border bg-background">
                       {depQueryResults.map((s) => (
                         <li key={s.id}>
                           <button
@@ -1275,6 +1437,8 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               ) : null}
               {/* H1-S8 surface②: 머지 게이트 evidence(read-only·gate 있을 때만 노출) */}
               <StoryMergeGate storyId={story.id} />
+              {/* E-CANVAS AC2 attachment point — BE(C1-S3) 미착지 동안 404→무표시(mock 0). */}
+              <ArtifactSection storyId={story.id} memberMap={memberMap} />
             </div>
 
             {/* Tabs for Tasks, Comments, Activity */}
@@ -1316,7 +1480,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     placeholder="Add a comment..."
                     value={commentInput}
                     onChange={(e) => setCommentInput(e.target.value)}
-                    className="flex field-sizing-content min-h-[80px] w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex field-sizing-content min-h-[80px] w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                         void handleSubmitComment();

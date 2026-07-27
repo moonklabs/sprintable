@@ -11,12 +11,14 @@ from __future__ import annotations
 
 # ── toolset 그룹 키워드(tool 이름 부분일치, 위에서부터 우선) ──────────────────────
 # 그룹: stories/tasks/sprints/epics/chat/docs/analytics/retro/standup/meetings/
-#       notifications/webhooks/rewards/audit/agent_runs/admin/core
+#       notifications/webhooks/rewards/audit/agent_runs/canvas/admin/core
 _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("rewards", ("reward", "wallet", "leaderboard")),
-    ("analytics", ("velocity", "health", "dashboard", "overview", "stats", "standup_missing",
+    ("analytics", ("velocity", "health", "dashboard", "overview", "stats",
                    "sprint_summary", "recent_activity", "agent_stats", "blocked_stories",
-                   "unassigned_stories", "member_workload", "overdue", "epic_progress")),
+                   "unassigned_stories", "member_workload", "overdue", "epic_progress",
+                   # 계층 리네이밍 B1(story 1925): sprintable_get_goal_progress(신)도 이 그룹.
+                   "goal_progress")),
     ("agent_runs", ("agent_run", "run_status", "update_run")),
     ("audit", ("audit",)),
     ("webhooks", ("webhook",)),
@@ -28,11 +30,18 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("chat", ("chat", "message", "conversation")),
     ("sprints", ("sprint",)),
     ("hypotheses", ("hypothes",)),
-    ("epics", ("epic",)),
+    # 계층 리네이밍 B1(story 1925): "goal" 추가 — sprintable_add_goal 등 신 이름도 이 그룹으로
+    # 분류(구 이름 sprintable_add_epic과 동일 group, role_template.default_tool_groups의 "epics"
+    # literal은 유지 — 데이터 마이그 불요, 스탠드업 core-promotion 때와 동일 관례).
+    ("epics", ("epic", "goal")),
     ("tasks", ("task",)),
     ("stories", ("story", "stories", "backlog", "claim", "checkin")),
+    # story b4027b2e: E-CANVAS visual_artifacts가 임계(11개 도구·전용 REST 도메인)에 도달해
+    # cross-cutting always-allow에서 전용 그룹으로 승격(C1-S3 당시 예고된 신설). "canonical_version"
+    # (propose_canonical_version은 "artifact" substring이 없음)·"spec_pin"(핀 4종)까지 포괄.
+    ("canvas", ("artifact", "canonical_version", "spec_pin")),
     ("admin", ("give_reward", "emit_event", "trigger_ai", "activate_sprint",
-               "close_sprint", "delete_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
+               "close_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
 ]
 
 _CORE = "core"  # ping/notifications-check 등 기본 — 항상 허용
@@ -58,6 +67,33 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 아님). A2A 위임을 받은 어떤 역할의 에이전트든 default_tool_groups와 무관하게 써야 하는 협업
     # 도구라 특정 도메인 그룹에 안 묶는다(lock/unlock과 동일 논리).
     "sprintable_link_gate_to_task",
+    # E-VERIFY V0-S1(story 5a5ba27b): add_evidence — story/task 자기증명 첨부. work_item_id로
+    # story든 task든 첨부 가능해 단일 도메인 그룹(stories 또는 tasks)에 못 묶고, link_gate_to_task와
+    # 동형(자기 작업에 self-proof 첨부 = 데이터 파괴 아닌 협업/증명 유틸) — 어떤 역할의 working
+    # agent든 default_tool_groups 무관하게 done 첨부해야 하므로 always-allow.
+    "sprintable_add_evidence",
+    # story b4027b2e(SEC — 까심 #2140 QA④): E-CANVAS visual_artifacts 11종(원 6개 + 7fe16274
+    # 핀 4종 + list_spec_pins)을 여기서 제거하고 전용 "canvas" 그룹(_GROUP_KEYWORDS)으로 이관했다.
+    # 이전엔 cross-cutting always-allow였는데(C1-S3 당시 "추가 성장 시 전용 canvas 그룹 신설
+    # 고려" 예고), REST 쪽 `/api/v2/visual-artifacts`가 `_PATH_GROUP_PREFIXES` 미등록 + 라우터가
+    # scope 체크 의존성 자체를 안 씀 → toolgroup-제한(예 scope=['docs']) 키가 REST로 artifact
+    # mutation을 무제한 통과(까심 라이브 실증: POST→201). REST를 조이면서 MCP 쪽을 always-allow로
+    # 남기면 "도구는 보이는데 호출은 403"이 되므로 양쪽을 canvas 그룹으로 동시 이관(레거시
+    # read/write scope 키는 설계상 전 그룹 허용이라 무회귀).
+    # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project — 키 자기 신원/스코프 조회·전환
+    # 유틸(sprintable_my_dashboard·sprintable_ping과 동형: 특정 비즈니스 도메인 아닌 self-scope
+    # 도구). set_default_project는 write지만 caller 자신의 기본 프로젝트 설정만 바꾸는 self-scope
+    # 조작이라 파괴적이지 않음(has_project_access로 대상 검증). vendored 사본과 동기화 필수
+    # (sprintable_mcp/toolset.py).
+    "sprintable_list_projects", "sprintable_set_default_project",
+    # story 205e6831(FR·대표요청): 대표 role이 불명확(role_template 22개 중 어느 것이든 될 수
+    # 있음) — 개별 role의 default_tool_groups를 고치는 대신 스탠드업을 범용 업무로 core 편입
+    # (선생님 방향: 스탠드업은 직무 무관 공통 업무). tool_group()은 여전히 "standup" 그룹으로
+    # 분류하지만(피커 UI 라벨용), is_tool_allowed는 이 목록을 먼저 체크해 그룹/scope 무관 항상
+    # 허용 — role_template.default_tool_groups에 "standup" 유무와 무관하게 모든 role이 호출
+    # 가능해진다(pm/scrum-master 전용이던 걸 22개 role 전체로 확대 = 회귀 아닌 기능 추가).
+    "sprintable_get_standup", "sprintable_save_standup", "sprintable_list_standup_entries",
+    "sprintable_standup_history", "sprintable_standup_missing",
 })
 
 # scope 토큰: 그룹명 외에 read/write(레거시·전체 비파괴 의미), admin/destructive(파괴적 허용)
@@ -163,11 +199,19 @@ _ALWAYS_ALLOWED_PATH_PREFIXES: tuple[str, ...] = (
     "/api/v2/auth",
     "/api/v2/current-project",
     "/api/v2/agent",
+    # E-VERIFY V0-S1: evidence는 story/task 어느 쪽이든 첨부되는 cross-cutting 자기증명이라
+    # 단일 도메인 그룹에 안 묶임(_ALWAYS_ALLOWED의 sprintable_add_evidence와 동일 근거).
+    "/api/v2/evidence",
+    # story 205e6831(FR·대표요청): MCP _ALWAYS_ALLOWED에 스탠드업 5종을 core 편입했는데 여기(REST
+    # path scope)를 같이 안 고치면 canvas 선례(b4027b2e)와 동일한 "도구는 보이는데 호출은 403"
+    # 불일치가 재발한다 — tools/list는 항상 노출하지만 실제 HTTP 호출은 _check_api_key_scope가
+    # 여전히 "standup" 그룹 미보유 키를 막았을 것. 아래 _PATH_GROUP_PREFIXES의 standup 매핑도 같이
+    # 제거(이 prefix가 먼저 매치돼 always-allowed로 빠지므로 그 매핑은 이제 도달 불가 dead 항목).
+    "/api/v2/standups",
 )
 
 # path-prefix → toolset group(라우터 리소스 정렬). 모든 group 은 ALL_GROUPS 소속이어야 함.
 _PATH_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
-    ("/api/v2/standups", "standup"),
     ("/api/v2/rewards", "rewards"),
     ("/api/v2/wallet", "rewards"),
     ("/api/v2/leaderboard", "rewards"),
@@ -181,9 +225,18 @@ _PATH_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
     ("/api/v2/sprints", "sprints"),
     ("/api/v2/hypotheses", "hypotheses"),
     ("/api/v2/epics", "epics"),
+    # 계층 리네이밍 B1(story 1925): 신 경로(/api/v2/goals)도 동일 "epics" 그룹 — main.py가 같은
+    # router를 신/구 prefix 둘 다로 include하므로 REST scope 게이트도 짝을 맞춰야 한다(안 그러면
+    # canvas 선례 b4027b2e와 동일한 "신 경로만 게이트 누락" 불일치 재발).
+    ("/api/v2/goals", "epics"),
     ("/api/v2/docs", "docs"),
     ("/api/v2/agent-runs", "agent_runs"),
     ("/api/v2/analytics", "analytics"),
+    # story b4027b2e(SEC): 미등록 시 permissive-unmapped 폴백으로 toolgroup-제한 키가 전부 통과
+    # (까심 라이브 실증). ⚠️ 등록만으론 불충분 — app/routers/visual_artifacts.py 라우터가
+    # `get_verified_org_id`(이 체크를 트리거하는 의존성)를 안 쓰면 이 매핑 자체가 무효라 라우터
+    # 쪽 의존성 배선도 함께 필요(이 변경과 짝).
+    ("/api/v2/visual-artifacts", "canvas"),
 )
 
 
@@ -231,24 +284,30 @@ def resolve_manifest(scope: list[str] | None, all_tool_names: list[str]) -> dict
 #    도구 추가/삭제 시 여기 동기화(테스트가 그룹 커버리지·core/admin 정합 검증).
 ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_ping",
-    "sprintable_activate_sprint", "sprintable_add_epic", "sprintable_add_retro_action",
+    "sprintable_activate_sprint", "sprintable_add_epic", "sprintable_add_goal",
+    "sprintable_add_retro_action",
     "sprintable_add_retro_item", "sprintable_add_story", "sprintable_add_task",
     "sprintable_assign_story_to_sprint", "sprintable_change_retro_phase",
     "sprintable_check_notifications", "sprintable_checkin_sprint", "sprintable_claim_story",
     "sprintable_close_sprint", "sprintable_create_conversation", "sprintable_create_doc",
     "sprintable_create_meeting", "sprintable_create_retro_session", "sprintable_create_sprint",
-    "sprintable_delete_doc", "sprintable_delete_epic", "sprintable_delete_meeting",
-    "sprintable_delete_sprint", "sprintable_delete_story", "sprintable_delete_task",
+    "sprintable_delete_meeting",
+    # E-SECURITY SEC-S1(확장): sprintable_delete_story/task/epic/doc 의도적 제거(에이전트
+    # hard-delete 차단 — 까심 적대적 QA가 delete_story만으로는 반쪽임을 발견, story와 동형 확대).
+    # E-SECURITY SEC-S8 확장: sprintable_delete_sprint도 동일 사유로 제거.
     "sprintable_delete_webhook_config", "sprintable_emit_event", "sprintable_export_retro",
     "sprintable_get_agent_stats", "sprintable_get_blocked_stories", "sprintable_get_doc",
-    "sprintable_get_epic_progress", "sprintable_get_leaderboard_v2", "sprintable_get_meeting",
+    "sprintable_get_epic_progress", "sprintable_get_goal_progress",
+    "sprintable_get_leaderboard_v2", "sprintable_get_meeting",
     "sprintable_get_member_workload", "sprintable_get_overdue_tasks", "sprintable_get_project_health",
     "sprintable_get_project_overview", "sprintable_get_recent_activity",
     "sprintable_get_retro_session_by_sprint", "sprintable_get_sprint_velocity_history",
     "sprintable_get_standup", "sprintable_get_task", "sprintable_get_unassigned_stories",
     "sprintable_get_velocity", "sprintable_get_wallet", "sprintable_get_workflow_guide",
     "sprintable_give_reward", "sprintable_list_audit_logs", "sprintable_list_backlog",
+    "sprintable_get_chat_message",
     "sprintable_list_chat_messages", "sprintable_list_docs", "sprintable_list_epics",
+    "sprintable_list_goals",
     "sprintable_list_meetings", "sprintable_list_my_tasks", "sprintable_list_retro_sessions",
     "sprintable_list_sprints", "sprintable_list_standup_entries", "sprintable_list_stories",
     "sprintable_list_tasks", "sprintable_list_team_members", "sprintable_list_webhook_configs",
@@ -256,9 +315,16 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_mark_notification_read", "sprintable_my_dashboard", "sprintable_poll_events",
     "sprintable_save_standup", "sprintable_search_docs", "sprintable_search_stories",
     "sprintable_send_chat_message", "sprintable_sprint_summary", "sprintable_standup_history",
-    "sprintable_standup_missing", "sprintable_trigger_ai_summary",
+    "sprintable_standup_missing",
+    # story #2010: sprintable_transition_goal — 목표 lifecycle 전이 전용 신설(구 _epic 별칭
+    # 없음). tool_group()은 "goal" substring 매칭으로 "epics" 그룹에 귀속(add_goal/update_goal/
+    # list_goals와 동일 그룹) — role_template.default_tool_groups의 "epics" literal이 그대로
+    # 커버하므로 role_template 데이터 마이그 불요.
+    "sprintable_transition_goal",
+    "sprintable_trigger_ai_summary",
     "sprintable_unassign_story_from_sprint", "sprintable_unclaim_story", "sprintable_unlock_files",
-    "sprintable_update_doc", "sprintable_update_epic", "sprintable_update_meeting",
+    "sprintable_update_doc", "sprintable_update_epic", "sprintable_update_goal",
+    "sprintable_update_meeting",
     "sprintable_update_retro_action_status", "sprintable_update_run_status",
     "sprintable_update_sprint", "sprintable_update_story", "sprintable_update_story_status",
     "sprintable_update_task", "sprintable_update_task_status", "sprintable_upsert_webhook_config",
@@ -270,12 +336,36 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_get_loop_context",
     # a2a HITL writer (E-A2A-완성 S-A3)
     "sprintable_link_gate_to_task",
+    # evidence (E-VERIFY V0-S1)
+    "sprintable_add_evidence",
+    # visual artifacts (E-CANVAS C1-S3 + C2-S6 코멘트 + C3-S7 편집 + C4-S8 정본 제안 + 핀 저작 story 7fe16274)
+    "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
+    "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
+    "sprintable_edit_artifact", "sprintable_propose_canonical_version",
+    "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
+    "sprintable_delete_spec_pin",
+    # story #1922: sprintable_delete_artifact — artifact soft delete(생성자 전용) 전용 신설.
+    # #2010(sprintable_transition_goal)이 이 SSOT 목록 등록을 처음 커밋에서 빠뜨려 role-template
+    # picker 카탈로그/신규 에이전트 채용 치트시트에서 누락됐던 갭(follow-up 커밋 8126465e로 정정)을
+    # 이번엔 최초 커밋부터 함께 반영. tool_group()은 "artifact" substring 매칭으로 "canvas" 그룹
+    # 귀속(create_artifact/edit_artifact/delete_spec_pin과 동일 경로) — role_template의 "canvas"
+    # literal이 그대로 커버해 데이터 마이그 불요. is_destructive()도 "sprintable_delete" 접두로
+    # True(delete_spec_pin과 동형 — canvas 그룹 + destructive scope 둘 다 필요).
+    "sprintable_delete_artifact",
+    # projects (E-MCP-OPT story ff6cb90d)
+    "sprintable_list_projects", "sprintable_set_default_project",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.
+# story 205e6831: "standup"을 여기서 제거 — 스탠드업 5종 전부가 _ALWAYS_ALLOWED(core)로 편입돼
+# build_toolset_catalog()의 always-allowed 제외 로직상 이 그룹은 영구적으로 tools=[]가 된다
+# (모든 그룹은 멤버를 가져야 하는 카탈로그 계약 위반). "standup"은 _GROUP_KEYWORDS/ALL_GROUPS엔
+# 그대로 남겨둔다 — pm/scrum-master role_template.default_tool_groups가 여전히 이 literal
+# 토큰을 갖고 있어 제거 시 validate_tool_groups()가 unknown-group ValueError를 던진다(그
+# 토큰 자체는 이제 no-op이지만 seed seed 마이그 없이 여길 건드리면 recruit/rotate가 깨진다).
 _CATALOG_DISPLAY_ORDER: tuple[str, ...] = (
     "stories", "tasks", "sprints", "epics", "hypotheses", "chat", "docs", "analytics", "retro",
-    "standup", "meetings", "notifications", "webhooks", "rewards", "audit", "agent_runs",
+    "meetings", "notifications", "webhooks", "rewards", "audit", "agent_runs", "canvas",
 )
 
 

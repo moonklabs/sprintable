@@ -28,7 +28,7 @@ export default async function DashboardPage() {
     return (
       <div className="min-h-full p-4 lg:p-6">
         <div className="mx-auto max-w-7xl space-y-5">
-          <TopBarSlot title={<h1 className="text-sm font-medium">{t('commandCenter')}</h1>} />
+          <TopBarSlot title={<h1 className="text-sm font-medium">{t('commandCenter')}</h1>} showContextChip />
           <EmptyState
             title={t('noProjectTitle')}
             description={t('noProjectDescription')}
@@ -46,7 +46,7 @@ export default async function DashboardPage() {
   return (
     <div className="min-h-full p-4 lg:p-6">
       <div className="mx-auto max-w-7xl space-y-5">
-        <TopBarSlot title={<h1 className="text-sm font-medium">{t('commandCenter')}</h1>} />
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('commandCenter')}</h1>} showContextChip />
         <CommandCenter projectName={me.project_name} />
       </div>
     </div>

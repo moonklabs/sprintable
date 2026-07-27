@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -12,39 +11,152 @@ from app.core.config import settings
 from app.core.logging_config import configure_logging
 from app.core.rate_limit import limiter
 
-configure_logging(json_logs=os.getenv("APP_ENV", "development") != "development")
+# story #2179(2026-07-24, 오르테가군 판정) 근본수정 — 예전엔 `APP_ENV` 문자열 비교로 JSON
+# 로그 여부를 갈랐다("development"가 아니면 JSON). 그런데 JSON 로그가 필요한 진짜 조건은
+# "어느 환경인가"가 아니라 "Cloud Logging으로 나가는가" = "Cloud Run/GCE에서 도는가"다 —
+# 환경 이름 컨벤션이 갈리면(dev/development·prod/production 등, #2179 조사에서 실제로 이미
+# 코드베이스 전역에서 일관성이 깨져 있는 것 확認됨) 그 판정이 조용히 틀어진다(dev Cloud Run이
+# APP_ENV 미설정으로 기본값 "development"를 상속해 텍스트 포매터를 타면서, story
+# #2176(emit 구간 계측)·P1-S8(RAG 검색 계측)·llm_client(LLM 비용/토큰 계측)의 구조화 필드가
+# 전부 조용히 버려지고 있었다 — 메시지 텍스트만 남고 값이 없었음).
+#
+# `is_really_local`(story #2071→#2152, `app/core/config.py`)이 이미 "이 프로세스가 진짜
+# 로컬인가"를 이름이 아니라 실행 위치 신호로 판정한다(K_SERVICE 존재=Cloud Run 확定·
+# PYTEST_CURRENT_TEST=테스트·SPRINTABLE_LOCAL_DEV=로컬 docker-compose 명시). 이 신호를
+# 뒤집어 json_logs 축으로 재사용하면 환경 이름을 하나도 안 건드리고 dev·prod·GCE·MCP가
+# 전부 자동으로 맞는다(GCE도 K_SERVICE가 없지만 SPRINTABLE_LOCAL_DEV가 없어 is_really_local
+# =False로 정확히 판정됨 — #2152가 이미 해결). 로컬 개발(README 공식 경로인
+# `docker compose up`이 SPRINTABLE_LOCAL_DEV=1을 심음)과 pytest 실행은 그대로 텍스트 로그를
+# 받는다(무회귀).
+# ⚠️판단 하나 남긴다(오르테가군 지적 — 판정 근거뿐 아니라 무너지는 조건까지) — bare
+# `uvicorn` 직접 실행(docker-compose 없이, `SPRINTABLE_LOCAL_DEV` 미설정)은 이 변경으로
+# **텍스트→JSON으로 바뀐다.** README 공식 로컬 개발 경로가 아니라는 이유로 의도적으로 이
+# 영향권에 남겨뒀다 — 다음에 bare uvicorn을 쓰다 "왜 갑자기 JSON이 찍히지" 하고 헤매면
+# `SPRINTABLE_LOCAL_DEV=1`을 직접 설정하거나(docker-compose.yml과 동일 신호) `docker compose
+# up`으로 전환할 것. 이 경로까지 텍스트로 지켜야 한다는 요구가 생기면 그건 새 판단이 필요한
+# 것이지 이 커밋의 누락이 아니다.
+configure_logging(json_logs=not settings.is_really_local)
 _logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.core import shutdown as shutdown_module
     from app.core.database import engine
+    from app.routers.auth_firebase_internal import check_internal_secret_config
+    from app.routers.cron import check_cron_secret_config
     from app.routers.verdict_capture import warn_if_webhook_secret_misconfigured
+    from app.services.event_broker import check_outbox_dual_publish_config
+    from app.services.firebase_verifier import check_mobile_app_check_config
     from app.services.pg_pubsub import check_listen_config, listen_loop
 
+    # story c4c72eb1(E-ARCH GCE 이전) PR-A: asyncio.Event는 최초 .wait()/.set() 시점의 실행
+    # 루프에 바인딩된다 — 테스트가 TestClient(app)로 lifespan을 여러 번(서로 다른 루프로) 태우는
+    # 이 코드베이스 관례(story bea25062 주석 참조) 아래에서 단순 `.clear()`는 이전 루프에 바인딩된
+    # 채로 남아 다음 루프에서 RuntimeError를 낸다(뮤테이션 셀프체크로 직접 재현). startup마다
+    # 객체 자체를 재생성(shutdown.py의 reset_shutdown_event 참조 — 모듈 속성 접근으로 최신
+    # 객체를 읽어야 하므로 아래도 `shutdown_module.shutdown_event`로 접근, 정적 import 금지).
+    shutdown_module.reset_shutdown_event()
     warn_if_webhook_secret_misconfigured()  # Bot-M.2 P3: 웹훅 secret misconfig 를 트래픽 前 경고.
-    check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
-    task = asyncio.create_task(listen_loop())
+    # E-ARCH S1: PG_LISTEN_ENABLED=false인 서비스(api)는 이 검증 자체가 무의미 — LISTEN을 절대
+    # 안 켜므로 DB_PGBOUNCER/DATABASE_URL_DIRECT 정합을 강제할 이유가 없다(무해·불필요 fail 방지).
+    # #2122 cutover: 크로스-인스턴스 dispatch 백플레인을 단일 결정(pg|redis)해 중복배달 차단. pg_listen_enabled
+    # 직접 대신 resolver 로 게이팅 — PG_LISTEN + Redis dispatch 동시 활성이면 redis 우선(+ERROR). 미설정 시
+    # 기존 플래그서 파생(무회귀). realtime=redis / api=pg 로 자연 갈림.
+    from app.services.event_broker import resolve_backplane as _resolve_backplane
+    _backplane = _resolve_backplane(log_conflict=True)  # 충돌 ERROR 는 startup 1회만
+    # #2122 정합성 가드(mirror-risk·오르테가 2026-07-22): backplane=redis 인데 consume loop 이 안 도는 조합
+    # (dual_publish/consume off 인데 dispatch on)이면 dispatcher 0 = 백플레인은 정해졌는데 **수신자 없는**
+    # "조용한 사망"(오늘 #2122 가 정확히 그 모양이었다). dispatch 와 consume 은 독립 env 라 어긋날 수 있어
+    # startup 서 감지 → loud ERROR + pg 폴백(strictly-better: redis consume loop 이 어차피 안 뜨니 중복배달
+    # 없고, pg 가 뜨면 dispatcher 확보·안 떠도 최소한 침묵 아닌 로그로 관측 가능).
+    if _backplane == "redis" and not (
+        settings.event_broker_redis_dual_publish_enabled
+        and settings.event_broker_redis_consume_enabled
+    ):
+        _logger.error(
+            "REALTIME_BACKPLANE=redis(또는 dispatch_enabled)인데 consume loop 미기동"
+            "(dual_publish/consume off) = dispatcher 0. PG listen 으로 폴백. (#2122 정합성 가드)"
+        )
+        _backplane = "pg"
+    if _backplane == "pg":
+        check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
+    check_internal_secret_config()  # 산티아고 §9 finding 4: non-local + 시크릿 미설정 fail-closed.
+    check_cron_secret_config()  # story #2072: non-local + CRON_SECRET 미설정 fail-closed.
+    check_outbox_dual_publish_config()  # story #2138: outbox + dual_publish/dispatch 동시 fail-closed.
+    check_mobile_app_check_config()  # 산티아고 §9 finding 1: mobile 발급 on + App Check 미필수 fail-closed.
+    # story bea25062: cutover 존재-캐시는 의도적으로 startup에서 warm 안 함(자체 발견 —
+    # TestClient(app)로 lifespan을 태우는 기존 SSE 테스트들이 라우트 전용으로 짜둔 유한한
+    # mock db.execute() 순서-큐를 startup 시점의 이 캐시 조회가 몰래 하나 소비해 실패시켰다).
+    # 지연 초기화(첫 실 요청에서 채워짐)만으로 충분 — check_any_cutover_epoch_exists() 자체가
+    # DB 접속 불가/미준비 시에도 fail-safe라 startup에서 먼저 확인해둘 실익이 크지 않다.
+    # E-ARCH S1(2026-07-21, #2074 근본 — REST/실시간 서비스 분리 1단계): default=True(무회귀) —
+    # api 서비스에 PG_LISTEN_ENABLED=false를 배선하면 이 인스턴스는 RAW_LISTEN 커넥션을 전혀
+    # 안 잡는다(커넥션 예산 산식에서 이 항이 빠짐). realtime 서비스만 true로 유지.
+    task = asyncio.create_task(listen_loop()) if _backplane == "pg" else None  # #2122: resolver 게이팅
     # E-L2 S5: 휴리스틱 트리거 워커는 default-off — 명시 활성화 시에만 task 생성(AC①).
     l2_task = None
     if settings.l2_trigger_enabled:
         from app.services.l2_trigger_worker import L2TriggerWorker
 
         l2_task = asyncio.create_task(L2TriggerWorker().run())
+    # E-ARCH S2/S3(story #2078): redis_consume_loop은 dual_publish_enabled AND
+    # redis_consume_enabled 둘 다 켜져야 task 생성 — Memorystore 미배선 상태(redis_url=None)
+    # 에서도 이 브랜치 자체가 안 돌아 무해. consume_enabled는 "이 서비스가 Redis를 구독해
+    # dispatch하는 역할인가"(SSE를 실제로 서빙하는 realtime만 True — api는 발행만 하고 구독은
+    # 불필요, GHA per-env override로 false 배선) — dual_publish_enabled(발행, 모든 인스턴스
+    # 필요)와 독립적인 축이다(2026-07-21 정리, PG_LISTEN_ENABLED durable 분리와 동일 패턴).
+    # ⚠️이 loop은 두 가지 일을 한다 — (1) 항상: PG 도착 기록과 대조해 지연Δ 로그(관측)
+    # (2) event_broker_redis_dispatch_enabled(default False, 별개 게이트)도 켜지면
+    # publish_event()/_push_to_agent()를 실제로 호출해 SSE로 전달(실 dispatch).
+    redis_shadow_task = None
+    if settings.event_broker_redis_dual_publish_enabled and settings.event_broker_redis_consume_enabled:
+        from app.services.event_broker import redis_consume_loop
+
+        redis_shadow_task = asyncio.create_task(redis_consume_loop())
+    # E-ARCH S3(story #2078) 3a단계: outbox dispatcher는 event_broker_outbox_enabled(default
+    # False)일 때만 task 생성 — 꺼져 있으면 event_outbox row 자체가 안 쌓이니(OutboxEventBroker
+    # 가 insert를 스킵) 폴링할 게 없다. redis_shadow_task와 별개 게이트(outbox insert가 켜졌다고
+    # 즉시 dual-publish shadow까지 켜지는 건 아니다 — 두 플래그는 독립적으로 rollout 가능).
+    outbox_dispatcher_task = None
+    if settings.event_broker_outbox_enabled:
+        from app.services.event_broker import outbox_dispatcher_loop
+
+        outbox_dispatcher_task = asyncio.create_task(outbox_dispatcher_loop())
     try:
         yield
     finally:
-        task.cancel()
+        # story c4c72eb1(E-ARCH GCE 이전) PR-A: SSE 생성기(events.py/agent_gateway.py)가
+        # 이 신호를 구독해 강제 CancelledError를 기다리지 않고 스스로 정상 종료한다 — 다른
+        # 정리 작업(태스크 cancel 등)보다 먼저 set해 SSE 스트림이 최대한 빨리 반응하게 한다.
+        shutdown_module.shutdown_event.set()
+        if task is not None:
+            task.cancel()
         if l2_task is not None:
             l2_task.cancel()
+        if redis_shadow_task is not None:
+            redis_shadow_task.cancel()
+        if outbox_dispatcher_task is not None:
+            outbox_dispatcher_task.cancel()
         try:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            if task is not None:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             if l2_task is not None:
                 try:
                     await l2_task
+                except asyncio.CancelledError:
+                    pass
+            if redis_shadow_task is not None:
+                try:
+                    await redis_shadow_task
+                except asyncio.CancelledError:
+                    pass
+            if outbox_dispatcher_task is not None:
+                try:
+                    await outbox_dispatcher_task
                 except asyncio.CancelledError:
                     pass
         finally:
@@ -57,7 +169,18 @@ async def lifespan(app: FastAPI):
             await engine.dispose()
 
 
-from app.routers import a2a, account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, context_pack, gate_config, gate_metrics, attachments, audit_logs, auth, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, dispatch, docs, entities, epics, event_notifications, events, exclusion, file_locks, gates, github_integration, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, loops, mcp, me, meetings, members, merge_gate, mockups, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, release_notes, retros, rewards, role_templates, runtime_capabilities, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, webhooks, workflow_executions, workflow_line_config, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import a2a, account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, context_pack, deeplink_manifest, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, labels, loops, mcp, me, meetings, members, merge_gate, mockups, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, presence, project_access, project_settings, projects, public_docs, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+
+# 도메인 축 B(org-1st-class-surface-ia-design-b §3): OpenAPI 태그 조직-우선 위계.
+# 개별 라우터는 기존 세부 tag(예 "stories")를 그대로 유지하고 이 4축 태그를 추가로 보유(다중
+# tags·additive) — FastAPI가 이 openapi_tags 순서대로 문서를 그룹핑하고, 여기 없는 세부 tag는
+# 뒤이어 처음 등장한 순서로 노출된다. URL·오퍼레이션·세부 tag 값 불변(하위호환 100%).
+_OPENAPI_TAGS = [
+    {"name": "Organization", "description": "조직 — 구성원·역할·워크포스·신뢰 프로필·설정·통신"},
+    {"name": "Work", "description": "작업 — 스토리·에픽·스프린트·워크플로우·산출물"},
+    {"name": "Trust", "description": "신뢰 — 게이트·검증·감사 로그"},
+    {"name": "Knowledge", "description": "지식 — 문서·스토리지·조직 학습(loop)"},
+]
 
 app = FastAPI(
     title="Sprintable API v2",
@@ -66,6 +189,7 @@ app = FastAPI(
     docs_url="/api/v2/_swagger" if settings.debug else None,
     redoc_url=None,
     lifespan=lifespan,
+    openapi_tags=_OPENAPI_TAGS,
 )
 
 _HTTP_CODE_MAP: dict[int, str] = {
@@ -81,6 +205,15 @@ _HTTP_CODE_MAP: dict[int, str] = {
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    # story #2003(Phase B P1-a, E-A2A-PROTO): /rpc는 JSON-RPC 2.0 엔드포인트라 auth 실패
+    # (get_verified_org_id/get_current_user Depends)와 agent-not-found(_get_agent_member)가
+    # 핸들러 try/except 밖(dependency 단계/조기 호출)에서 raise 돼 REST 엔벨로프 대신 JSON-RPC
+    # error envelope으로 렌더해야 한다. 경로 정밀 매치(`is_a2a_rpc_path`)라 이 파일의 다른 라우트
+    # (agent-card.json 등)는 전혀 영향받지 않는다 — 아래 mapped/REST 분기는 그대로 유지.
+    if a2a.is_a2a_rpc_path(request.url.path):
+        message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        return await a2a.build_rpc_error_response(request, exc.status_code, message)
+
     mapped = _HTTP_CODE_MAP.get(exc.status_code, f"HTTP_{exc.status_code}")
     detail = exc.detail
     # dict detail 은 구조화 에러 의도(code/message/suggestion·retry_after 등) → error 객체로 패스스루.
@@ -117,6 +250,12 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     """예상치 못한 500 에러 — 내부 정보는 로그에만, 클라이언트엔 일반 메시지."""
     _logger.exception("Unhandled exception on %s %s: %s", request.method, request.url.path, exc)
     detail = str(exc) if settings.debug else "Internal server error"
+
+    # story #2003: /rpc의 미처리 예외도 JSON-RPC envelope으로(code=-32603 표준 Internal error,
+    # retryable=True — 5xx 분류). http_exception_handler와 동일 경로-정밀 매치.
+    if a2a.is_a2a_rpc_path(request.url.path):
+        return await a2a.build_rpc_error_response(request, 500, detail)
+
     return JSONResponse(
         status_code=500,
         content={"data": None, "error": {"code": "INTERNAL_ERROR", "message": detail}, "meta": None},
@@ -152,7 +291,11 @@ app.include_router(release_notes.router)
 app.include_router(conversations.router)
 app.include_router(presence.router)
 app.include_router(sprints.router)
-app.include_router(epics.router)
+# 계층 리네이밍 B1(story 1925): 목표(구 에픽) 전면 rename — 같은 router 객체를 신(primary)+구
+# (deprecated alias) 두 prefix로 include(hierarchy-rename-alias-mechanism-design §2). FastAPI가
+# 동일 APIRouter 인스턴스의 다중 prefix include를 표준 지원 — 핸들러 완전 동일, 로직 복제 0.
+app.include_router(goals.router, prefix="/api/v2/goals", tags=["goals", "Work"])
+app.include_router(goals.router, prefix="/api/v2/epics", tags=["epics-deprecated"], deprecated=True)
 app.include_router(hypotheses.router)
 app.include_router(loops.router)
 app.include_router(context_pack.router)
@@ -166,6 +309,7 @@ app.include_router(verdict_capture.router)
 app.include_router(trust_scores.router)
 app.include_router(hitl_config.router)
 app.include_router(gates.router)
+app.include_router(evidence.router)
 app.include_router(github_integration.router)
 app.include_router(gate_config.router)
 app.include_router(gate_config.org_router)
@@ -189,6 +333,7 @@ app.include_router(role_templates.router)
 app.include_router(entities.router)
 app.include_router(event_notifications.router)
 app.include_router(notifications.router)
+app.include_router(deeplink_manifest.router)  # story #1951: 딥링크 계약 매니페스트 v1 서빙
 app.include_router(onboarding.router)
 app.include_router(attachments.router)
 app.include_router(notification_preferences.router)
@@ -197,11 +342,13 @@ app.include_router(command_center.router)
 app.include_router(rewards.router)
 app.include_router(audit_logs.router)
 app.include_router(dashboard.router)
+app.include_router(glance.router)
 app.include_router(current_project.router)
 app.include_router(runtime_capabilities.router)
 app.include_router(members.router)
 app.include_router(merge_gate.router)
 app.include_router(organizations.router)
+app.include_router(resolve.router)
 app.include_router(org_invites.router)
 app.include_router(invite_accept.router)
 app.include_router(me.router)
@@ -223,6 +370,9 @@ app.include_router(agent_routing_rules.router)
 app.include_router(agent_sessions.router)
 app.include_router(bridge.router)
 app.include_router(cron.router)
+app.include_router(auth_firebase_internal.router)
+app.include_router(auth_native_bootstrap.router)
+app.include_router(device_installations.router)
 app.include_router(hitl.router)
 app.include_router(integrations.router)
 app.include_router(workflow_versions.router)
@@ -234,6 +384,7 @@ app.include_router(file_locks.router)
 app.include_router(workflow_report.router)
 app.include_router(workflow_trigger.router)
 app.include_router(mockups.router)
+app.include_router(visual_artifacts.router)
 app.include_router(plan_features.router)
 app.include_router(open_api_keys.router)
 app.include_router(channel.router)
@@ -242,3 +393,6 @@ app.include_router(ws_chat.router)
 if settings.is_ee_enabled:
     from ee.routers import billing  # type: ignore[import]
     app.include_router(billing.router, prefix="/api/v2/billing")
+
+    from ee.routers import push_devices  # type: ignore[import]
+    app.include_router(push_devices.router, prefix="/api/v2/push")

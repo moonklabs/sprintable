@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useTranslations } from 'next-intl';
@@ -8,6 +9,28 @@ import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
 import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { LabelChip } from '@/components/ui/label-chip';
+import { TrustSeal } from '@/components/verify/trust-seal';
+import { deriveTrustStage } from '@/services/verify';
+import { formatRelativeTime } from '@/lib/storage/format';
+import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
+
+// #1942 재작업(까심 REQUEST_CHANGES): 카드-상대 flip(left-0/right-0)은 보드가 가로스크롤이라
+// 카드 자체가 뷰포트 밖으로 밀려나면(신고 재현: 컬럼 280px, 카드 x=215~471, 뷰포트 390px) 어느
+// 쪽으로 flip해도 못 푼다 — 카드 우측 모서리(471)조차 이미 뷰포트 밖이라 "카드 기준 반대쪽"도
+// 여전히 뷰포트 밖. 뷰포트 좌표로 직접 clamp해야 카드 위치와 무관하게 항상 화면 안에 들어온다.
+const MENU_WIDTH = 192; // Tailwind w-48
+const VIEWPORT_MARGIN = 8;
+
+function clampToViewport(x: number): number {
+  return Math.min(Math.max(x, VIEWPORT_MARGIN), window.innerWidth - MENU_WIDTH - VIEWPORT_MARGIN);
+}
+
+// E-UI-DAEGBYEON P0 — Proof Capsule 확산(story `bf9037cb`). 상태→신뢰 파이프라인(후속 P0)이
+// status 모델 자체를 바꿀 예정이라 지금은 현 5-status를 4-Proofline색에 얇게만 매핑(과결합
+// 금지) — backlog/ready-for-dev/in-review는 전부 "대기"류라 amber로 묶는다(정밀 구분은 후속).
+const STATUS_TO_PROOF_STATE: Record<string, ProofState> = {
+  backlog: 'amber', 'ready-for-dev': 'amber', 'in-progress': 'blue', 'in-review': 'amber', done: 'green',
+};
 
 // E-MODERN A: 에픽 식별 dot — 기존 시맨틱 토큰만(신규 토큰/raw 팔레트 0). 신호색(warning=blocked·
 // accent-claim=agent·destructive) 회피해 의미 충돌 0. 랜덤 5색 채움 배지(loud)는 퇴출.
@@ -77,13 +100,21 @@ interface StoryCardProps {
   labels?: { id: string; name: string; color: string | null }[];
   gates?: { id: string; gate_type: string; status: string }[];
   lineStatus?: LineStatusSummary;
+  /** E-VERIFY P0-04 — story.human_verified_by(UUID)를 호출부가 미리 resolve해 넘긴 것(assignee/
+   * assignees와 동일 패턴). 결재자가 현재 담당자가 아닐 수 있어(assigneeList와 별개 조회). */
+  verifiedBy?: KanbanMember;
 }
 
-export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus, verifiedBy }: StoryCardProps) {
   const t = useTranslations('board');
   // E-BOARD S6: 복수 assignee. assignees 우선, 없으면 단일 assignee 폴백. agent 한 명이라도 있으면 agent 취급(glow).
   const assigneeList = (assignees && assignees.length > 0) ? assignees : (assignee ? [assignee] : []);
   const hasAgent = assigneeList.some((m) => m.type === 'agent');
+  // E-VERIFY P0-04(claimed-vs-verified-spec-handoff §3) — has_evidence 뭉갬을 2신호로 분리.
+  // verified는 human_verified_by 실 resolve 성공 시만(없으면 "누가"를 지어내지 않고 무표시로
+  // 후퇴 — claimed는 특정 신원 없이도 범용 봇 아이콘으로 정직 렌더 가능해 후퇴 불필요).
+  const trustStage = deriveTrustStage(story);
+  const trustAgent = assigneeList.find((m) => m.type === 'agent');
   const tCage = useTranslations('cage');
   // S11 ①: line badge — 신규 4상태(LineStatusSummary) + 기존 pending gate merge, boy-scout 1배지.
   const hasPendingGate = gates.some((g) => g.status === 'pending');
@@ -94,6 +125,13 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [triggering, setTriggering] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const statusMenuRef = useRef<HTMLDivElement>(null);
+  const statusTriggerRef = useRef<HTMLButtonElement>(null);
+  // #1942: 두 메뉴 다 position:fixed + 뷰포트 좌표 clamp(clampToViewport)로 연다 — 트리거(카드/
+  // 버튼)의 화면 위치와 무관하게 항상 뷰포트 안에 들어온다(카드-상대 anchor는 카드 자체가 뷰포트
+  // 밖일 때 답이 없다는 게 까심 QA 적출).
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [statusMenuPos, setStatusMenuPos] = useState<{ top: number; left: number } | null>(null);
 
   const handleKickoff = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -140,12 +178,16 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     touchAction: 'pan-x pan-y' as const,
   };
 
-  // Close menu on click outside
+  // Close menu on click outside — 서브메뉴는 이제 별도 portal(body 직계)이라 menuRef 서브트리
+  // 밖에 있다. 둘 중 하나라도 담고 있으면 outside로 치지 않는다.
   useEffect(() => {
     if (!contextMenuOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideMenu = menuRef.current?.contains(target);
+      const insideStatusMenu = statusMenuRef.current?.contains(target);
+      if (!insideMenu && !insideStatusMenu) {
         setContextMenuOpen(false);
         setStatusMenuOpen(false);
       }
@@ -170,9 +212,30 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     return () => document.removeEventListener('keydown', handleEscape);
   }, [contextMenuOpen]);
 
+  // 열려있는 동안 스크롤/리사이즈되면 닫는다(까심 QA 지적 ②) — 보드 컬럼의 overflow-x-auto
+  // 가로스크롤은 캡처 리스너로만 잡힌다(스크롤 이벤트는 버블링하지 않음). 재측정 대신 close가
+  // 더 안전한 이유: 열려 있는 동안 실측 위치를 계속 갱신하면 클릭 도중 메뉴가 움직여 오조작
+  // 위험이 생긴다 — 스크롤 즉시 닫고 다시 열게 하는 편이 안전.
+  useEffect(() => {
+    if (!contextMenuOpen) return;
+    const closeOnScrollOrResize = () => {
+      setContextMenuOpen(false);
+      setStatusMenuOpen(false);
+    };
+    window.addEventListener('scroll', closeOnScrollOrResize, true);
+    window.addEventListener('resize', closeOnScrollOrResize);
+    return () => {
+      window.removeEventListener('scroll', closeOnScrollOrResize, true);
+      window.removeEventListener('resize', closeOnScrollOrResize);
+    };
+  }, [contextMenuOpen]);
+
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    // 우클릭/롱프레스 지점(뷰포트 좌표)을 그대로 앵커로 쓰고 뷰포트 폭 안으로 clamp — 카드가
+    // 어디 있든(가로스크롤로 화면 밖까지 걸쳐 있어도) 메뉴는 항상 화면 안에서 뜬다.
+    setMenuPos({ top: e.clientY, left: clampToViewport(e.clientX) });
     setContextMenuOpen(true);
   }, []);
 
@@ -213,6 +276,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     { id: 'done', label: t('done') },
   ];
 
+  const proofState = STATUS_TO_PROOF_STATE[story.status] ?? 'amber';
+  const proofStateLabel = statuses.find((s) => s.id === story.status)?.label ?? story.status;
+
   return (
     <div
       ref={setNodeRef}
@@ -221,125 +287,155 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       {...listeners}
       onClick={onClick}
       onContextMenu={handleContextMenu}
-      title={`#${story.id.slice(0, 6)}`}
-      className="group relative cursor-pointer rounded-lg border border-border bg-card p-3 transition hover:border-muted-foreground/30"
+      title={story.story_number ? `#${story.story_number}` : story.title}
+      className="group relative cursor-pointer transition"
     >
-      {/* E-MODERN A: 에픽 = 작은 색 dot + muted 라벨(일관 식별·랜덤 채움배지 퇴출) */}
-      {epicName && story.epic_id ? (
-        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className={`size-1.5 shrink-0 rounded-sm ${getEpicDotClass(story.epic_id)}`} aria-hidden="true" />
-          <span className="min-w-0 truncate">{epicName}</span>
-        </div>
-      ) : null}
-      {/* E-MODERN A meta row — blocked=신호(text-warning+dot)·label 칩·line/gate=boy-scout 1배지(muted) */}
-      {(blockedBy.length > 0 && story.status !== 'done') || labels.length > 0 || lineBadge ? (
-        <div className="mb-2 flex flex-wrap items-center gap-1.5">
-          {blockedBy.length > 0 && story.status !== 'done' ? (
-            <span className="inline-flex items-center gap-1 text-[10px] text-warning">
-              <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
-              {t('blockedBy', { count: blockedBy.length })}
-            </span>
-          ) : null}
-          {labels.map((label) => (
-            <LabelChip key={label.id} label={label} />
-          ))}
-          {lineBadge === 'pending_gate' ? (
-            <Badge variant="outline" className="gap-1">
-              <Pause className="size-3 shrink-0" />
-              <span>{pendingGateType ? `${pendingGateType} ${tCage('gatePending')}` : tCage('gatePending')}</span>
-            </Badge>
-          ) : lineBadgeMeta ? (
-            // 가디언 fold-in: 실 alert(handoff_stuck=destructive·waiting_human=warning)는 색=신호 유지,
-            // 정보성(engine_degraded·grandfathered)만 outline. LINE_BADGE_META가 이미 그 위계라 variant 원복.
-            <Badge variant={lineBadgeMeta.variant} className="gap-1">
-              <lineBadgeMeta.Icon className="size-3 shrink-0" />
-              <span>{tCage(lineBadgeMeta.labelKey)}</span>
-            </Badge>
-          ) : null}
-        </div>
-      ) : null}
-      <p className="line-clamp-2 text-sm font-medium leading-snug text-foreground">{story.title}</p>
-      <div className="mt-2.5 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          {assigneeList.length > 0 ? (
-            <div className="flex -space-x-1.5">
-              {assigneeList.slice(0, 3).map((m) => (
-                <div
-                  key={m.id}
-                  className={`relative flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ring-1 ring-background ${
-                    m.type === 'agent'
-                      ? 'border-accent-claim/30 bg-accent-claim/10 text-accent-claim'
-                      : 'border-border bg-muted text-muted-foreground'
-                  }`}
-                  title={m.name}
-                >
-                  {getInitials(m.name)}
-                  {m.type === 'agent' && (
-                    <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-brand-strong ring-1 ring-background" />
-                  )}
-                </div>
-              ))}
-              {assigneeList.length > 3 && (
-                <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-medium text-muted-foreground ring-1 ring-background">
-                  +{assigneeList.length - 3}
-                </div>
-              )}
+      {/* E-UI-DAEGBYEON P0 — Board card = Proof Capsule(card density, #bf9037cb). 시각 셸만
+          교체(Proofline 4상태·컷코너·claim=제목) — 드래그/클릭/우클릭 메뉴는 전부 이 바깥 div가
+          그대로 소유(dnd-kit useSortable 노드=이 div 자체, 위 attributes/listeners 참고).
+          기존 카드의 실 기능(에픽·배지·담당자 스택·TrustSeal·SP·kickoff)은 하나도 안 잃고
+          footer 슬롯으로 그대로 이관 — no-fiction(evidence/gate는 실 데이터 없어 미전달). */}
+      <ProofCapsule
+        density="card"
+        proofState={proofState}
+        stateLabel={proofStateLabel}
+        claim={story.story_number ? `#${story.story_number} ${story.title}` : story.title}
+        footer={
+          <div className="mt-2">
+            {/* E-MODERN A: 에픽 = 작은 색 dot + muted 라벨(일관 식별·랜덤 채움배지 퇴출) */}
+            {epicName && story.epic_id ? (
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-proof-ink-3">
+                <span className={`size-1.5 shrink-0 rounded-sm ${getEpicDotClass(story.epic_id)}`} aria-hidden="true" />
+                <span className="min-w-0 truncate">{epicName}</span>
+              </div>
+            ) : null}
+            {/* E-MODERN A meta row — blocked=신호(text-warning+dot)·label 칩·line/gate=boy-scout 1배지(muted) */}
+            {(blockedBy.length > 0 && story.status !== 'done') || labels.length > 0 || lineBadge ? (
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                {blockedBy.length > 0 && story.status !== 'done' ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] text-warning">
+                    <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
+                    {t('blockedBy', { count: blockedBy.length })}
+                  </span>
+                ) : null}
+                {labels.map((label) => (
+                  <LabelChip key={label.id} label={label} />
+                ))}
+                {lineBadge === 'pending_gate' ? (
+                  <Badge variant="outline" className="gap-1">
+                    <Pause className="size-3 shrink-0" />
+                    <span>{pendingGateType ? `${pendingGateType} ${tCage('gatePending')}` : tCage('gatePending')}</span>
+                  </Badge>
+                ) : lineBadgeMeta ? (
+                  // 가디언 fold-in: 실 alert(handoff_stuck=destructive·waiting_human=warning)는 색=신호 유지,
+                  // 정보성(engine_degraded·grandfathered)만 outline. LINE_BADGE_META가 이미 그 위계라 variant 원복.
+                  <Badge variant={lineBadgeMeta.variant} className="gap-1">
+                    <lineBadgeMeta.Icon className="size-3 shrink-0" />
+                    <span>{tCage(lineBadgeMeta.labelKey)}</span>
+                  </Badge>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                {assigneeList.length > 0 ? (
+                  <div className="flex -space-x-1.5">
+                    {assigneeList.slice(0, 3).map((m) => (
+                      <div
+                        key={m.id}
+                        className={`relative flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ring-1 ring-background ${
+                          m.type === 'agent'
+                            ? 'border-accent-claim/30 bg-accent-claim/10 text-accent-claim'
+                            : 'border-border bg-muted text-muted-foreground'
+                        }`}
+                        title={m.name}
+                      >
+                        {getInitials(m.name)}
+                        {/* story #2023 ⓑ: 죽은 클래스(bg-brand-strong 미매핑)이면서 L5 위반 — info로 교체해 둘 다 닫음 */}
+                        {m.type === 'agent' && (
+                          <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-info ring-1 ring-background" />
+                        )}
+                      </div>
+                    ))}
+                    {assigneeList.length > 3 && (
+                      <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-medium text-muted-foreground ring-1 ring-background">
+                        +{assigneeList.length - 3}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div />
+                )}
+                {hasAgent && (
+                  <span className="inline-flex items-center gap-1 text-[10px] text-accent-claim">
+                    <span className="size-1.5 shrink-0 rounded-full bg-accent-claim" aria-hidden="true" />
+                    {t('filterAgents')}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {/* E-VERIFY P0-04(claimed-vs-verified-spec-handoff §3) — 증거 있는 done 카드에만
+                    (positive 단방향). 자리 예약 없이 조건부 렌더(무증거=완전 무표시, §7 상태
+                    매트릭스). human_verified→verified(green·who/when 실명)·self_reported만→
+                    claimed(amber) — 과거 has_evidence 기반 green 단일표시 중 인간 미검증 건은
+                    여기서 amber로 "정정"된다(회귀 아님, 거짓 신뢰 신호 제거). */}
+                {story.status === 'done' && trustStage === 'verified' && verifiedBy ? (
+                  <TrustSeal
+                    variant="verified"
+                    humanName={verifiedBy.name}
+                    when={story.human_verified_at ? formatRelativeTime(story.human_verified_at) : ''}
+                  />
+                ) : story.status === 'done' && trustStage === 'claimed' ? (
+                  <TrustSeal variant="claimed" agentInitial={trustAgent ? getInitials(trustAgent.name) : undefined} />
+                ) : null}
+                {story.story_points != null ? (
+                  <span className="text-[11px] tabular-nums text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
+                ) : null}
+                {/* E-MODERN A: 액션 점진 공개 — 데스크탑 hover 노출·모바일(hover 없음)은 상시(kickoff 도달성=기능 동결 보존) */}
+                <span className="flex items-center gap-1.5 opacity-100 transition focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+                  {lastExecution ? (
+                    <span
+                      title={[
+                        lastExecution.rule_name ?? '워크플로우 실행됨',
+                        lastExecution.completed_at ? new Date(lastExecution.completed_at).toLocaleString() : '',
+                        lastExecution.status === 'matched' ? '✅ 규칙 매칭' : '⊘ 규칙 없음',
+                      ].filter(Boolean).join(' · ')}
+                      className="flex h-5 w-5 items-center justify-center"
+                    >
+                      {lastExecution.status === 'matched' ? (
+                        <Zap className="h-3 w-3 text-warning" />
+                      ) : (
+                        <ZapOff className="h-3 w-3 text-muted-foreground/40" />
+                      )}
+                    </span>
+                  ) : null}
+                  {projectId ? (
+                    <button
+                      onClick={(e) => void handleKickoff(e)}
+                      disabled={triggering}
+                      title={t('kickoff')}
+                      className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition"
+                    >
+                      {triggering ? (
+                        <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+                      ) : (
+                        <Rocket className="h-3 w-3" />
+                      )}
+                    </button>
+                  ) : null}
+                </span>
+              </div>
             </div>
-          ) : (
-            <div />
-          )}
-          {hasAgent && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-accent-claim">
-              <span className="size-1.5 shrink-0 rounded-full bg-accent-claim" aria-hidden="true" />
-              {t('filterAgents')}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {story.story_points != null ? (
-            <span className="text-[11px] tabular-nums text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
-          ) : null}
-          {/* E-MODERN A: 액션 점진 공개 — 데스크탑 hover 노출·모바일(hover 없음)은 상시(kickoff 도달성=기능 동결 보존) */}
-          <span className="flex items-center gap-1.5 opacity-100 transition focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
-            {lastExecution ? (
-              <span
-                title={[
-                  lastExecution.rule_name ?? '워크플로우 실행됨',
-                  lastExecution.completed_at ? new Date(lastExecution.completed_at).toLocaleString() : '',
-                  lastExecution.status === 'matched' ? '✅ 규칙 매칭' : '⊘ 규칙 없음',
-                ].filter(Boolean).join(' · ')}
-                className="flex h-5 w-5 items-center justify-center"
-              >
-                {lastExecution.status === 'matched' ? (
-                  <Zap className="h-3 w-3 text-warning" />
-                ) : (
-                  <ZapOff className="h-3 w-3 text-muted-foreground/40" />
-                )}
-              </span>
-            ) : null}
-            {projectId ? (
-              <button
-                onClick={(e) => void handleKickoff(e)}
-                disabled={triggering}
-                title={t('kickoff')}
-                className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition"
-              >
-                {triggering ? (
-                  <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
-                ) : (
-                  <Rocket className="h-3 w-3" />
-                )}
-              </button>
-            ) : null}
-          </span>
-        </div>
-      </div>
+          </div>
+        }
+      />
 
-      {/* Context Menu */}
-      {contextMenuOpen && (
+      {/* Context Menu — body portal + position:fixed(뷰포트 좌표 clamp), 카드 위치와 무관하게 항상 화면 안 */}
+      {contextMenuOpen && menuPos && createPortal(
         <div
           ref={menuRef}
-          className="absolute left-0 top-full z-50 mt-1 w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+          style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, width: MENU_WIDTH }}
+          className="z-50 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
           onClick={(e) => e.stopPropagation()}
         >
           {onEdit && (
@@ -353,14 +449,26 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           {onChangeStatus && (
             <div className="relative">
               <button
-                onClick={() => setStatusMenuOpen(!statusMenuOpen)}
+                ref={statusTriggerRef}
+                onClick={() => {
+                  const rect = statusTriggerRef.current?.getBoundingClientRect();
+                  if (rect) {
+                    setStatusMenuPos({ top: rect.top, left: clampToViewport(rect.right + 4) });
+                  }
+                  setStatusMenuOpen(!statusMenuOpen);
+                }}
                 className="flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
               >
                 {t('changeStatus')}
                 <ChevronRight className="size-3.5" />
               </button>
-              {statusMenuOpen && (
-                <div className="absolute left-full top-0 ml-1 w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md">
+              {statusMenuOpen && statusMenuPos && createPortal(
+                <div
+                  ref={statusMenuRef}
+                  style={{ position: 'fixed', top: statusMenuPos.top, left: statusMenuPos.left, width: MENU_WIDTH }}
+                  className="z-50 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   {statuses.map((status) => (
                     <button
                       key={status.id}
@@ -370,7 +478,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                       {status.label}
                     </button>
                   ))}
-                </div>
+                </div>,
+                document.body,
               )}
             </div>
           )}
@@ -390,7 +499,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
               {t('deleteStory')}
             </button>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

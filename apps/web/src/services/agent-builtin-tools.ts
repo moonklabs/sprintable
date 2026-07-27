@@ -2,8 +2,8 @@
 import { z } from 'zod';
 import { MemoService } from './memo';
 import { StoryService } from './story';
-import { EpicService } from './epic';
-import { createEpicRepository } from '@/lib/storage/factory';
+import { GoalService } from './goal';
+import { createGoalRepository } from '@/lib/storage/factory';
 
 import { BUILTIN_AGENT_TOOL_NAMES, type BuiltinAgentToolName } from './agent-builtin-tool-names';
 export { BUILTIN_AGENT_TOOL_NAMES, type BuiltinAgentToolName };
@@ -261,8 +261,8 @@ function isExpiredTimestamp(value: string | null | undefined, now = Date.now()):
 export class AgentBuiltinToolService {
   private readonly memoService: MemoService;
   private readonly storyService: StoryService;
-  private _epicService: EpicService | null;
-  private _epicServicePromise: Promise<EpicService> | null = null;
+  private _epicService: GoalService | null;
+  private _epicServicePromise: Promise<GoalService> | null = null;
   private readonly auditLogger?: AuditLogger;
   private readonly fetchFn: typeof fetch;
   private readonly statusUpdateGateFn?: StatusUpdateGateFn;
@@ -272,7 +272,7 @@ export class AgentBuiltinToolService {
     options: {
       memoService?: MemoService;
       storyService?: StoryService;
-      epicService?: EpicService;
+      epicService?: GoalService;
       auditLogger?: AuditLogger;
       fetchFn?: typeof fetch;
       statusUpdateGateFn?: StatusUpdateGateFn;
@@ -286,10 +286,10 @@ export class AgentBuiltinToolService {
     this.statusUpdateGateFn = options.statusUpdateGateFn;
   }
 
-  private async getEpicService(): Promise<EpicService> {
+  private async getGoalService(): Promise<GoalService> {
     if (this._epicService) return this._epicService;
     if (!this._epicServicePromise) {
-      this._epicServicePromise = createEpicRepository().then((repo) => new EpicService(repo));
+      this._epicServicePromise = createGoalRepository().then((repo) => new GoalService(repo));
     }
     this._epicService = await this._epicServicePromise;
     return this._epicService;
@@ -426,7 +426,7 @@ export class AgentBuiltinToolService {
       }
       case 'create_epic': {
         const args = createEpicSchema.parse(rawArgs);
-        const epic = await (await this.getEpicService()).create({
+        const epic = await (await this.getGoalService()).create({
           project_id: ctx.memo.project_id,
           org_id: ctx.memo.org_id,
           title: args.title,
@@ -438,7 +438,7 @@ export class AgentBuiltinToolService {
       }
       case 'list_epics': {
         const args = listEpicsSchema.parse(rawArgs);
-        let epics = await (await this.getEpicService()).list({ project_id: ctx.memo.project_id });
+        let epics = await (await this.getGoalService()).list({ project_id: ctx.memo.project_id });
         if (args.status) epics = epics.filter((epic) => epic.status === args.status);
         return { epics: epics.slice(0, args.limit ?? MAX_LIST_ITEMS).map((epic) => this.presentEpic(epic as EpicRecord)) };
       }

@@ -130,8 +130,13 @@ class HitlRepository:
         }
         now = datetime.now(timezone.utc)
 
+        # E-MCP-OPT 후속(story f0c99070 AC1) — org_id도 함께 필터(기존엔 project_id 단독이라 org_id
+        # 미검사 갭). project_id가 이미 project→org 1:1이라 실질 동작 변화는 없으나, WHERE 절 자체가
+        # org 경계를 명시하지 않는 건 감사 관점에서 결함이라 명시 필터로 고정한다.
         existing = await self.session.execute(
-            select(HitlPolicy).where(HitlPolicy.project_id == project_id)
+            select(HitlPolicy).where(
+                HitlPolicy.org_id == org_id, HitlPolicy.project_id == project_id,
+            )
         )
         row = existing.scalar_one_or_none()
 
@@ -148,7 +153,7 @@ class HitlRepository:
         else:
             await self.session.execute(
                 update(HitlPolicy)
-                .where(HitlPolicy.project_id == project_id)
+                .where(HitlPolicy.org_id == org_id, HitlPolicy.project_id == project_id)
                 .values(config=config, updated_by=actor_id, updated_at=now)
             )
         await self.session.commit()

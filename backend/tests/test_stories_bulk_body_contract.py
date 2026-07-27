@@ -68,7 +68,7 @@ async def test_bulk_handler_refreshes_and_serializes(monkeypatch):
     # ⚠️ model_validate 는 모킹하지 않는다 — 실 직렬화를 태워야 P0 3차류를 잡는다.
 
     payload = BulkUpdateRequest(items=[{"id": str(story.id), "status": "done"}])
-    result = await bulk_update_stories(payload, db, repo, auth=MagicMock())
+    result = await bulk_update_stories(payload, MagicMock(), db, repo, auth=MagicMock(user_id=str(uuid.uuid4())))
 
     assert story.status == "done"  # setattr 적용
     db.refresh.assert_awaited_once_with(story)  # MissingGreenlet fix 가드(refresh 누락 시 실패)
@@ -93,22 +93,21 @@ async def test_bulk_nonsequential_jump_flags_violation_but_allows(monkeypatch):
 
     monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
     monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
-    _pub = MagicMock(); _fire = AsyncMock()
-    monkeypatch.setattr(stories_mod, "publish_event", _pub)
+    _fire = AsyncMock()
     monkeypatch.setattr(stories_mod, "fire_webhooks", _fire)
 
     payload = BulkUpdateRequest(items=[{"id": str(story.id), "status": "in-progress"}])
-    result = await bulk_update_stories(payload, db, repo, auth=MagicMock())
+    result = await bulk_update_stories(payload, MagicMock(), db, repo, auth=MagicMock(user_id=str(uuid.uuid4())))
 
     assert story.status == "in-progress"  # allow(차단 X)
     assert result[0].violation == {
         "level": "warn", "from": "backlog", "to": "in-progress", "skipped": 1,
     }
     db.commit.assert_awaited_once()
-    # workflow_violation 가시화 — 기존 이벤트 타입(additive)·commit 後 발화.
-    _pub.assert_called_once()
-    assert _pub.call_args[0][1] == "workflow_violation"
+    # workflow_violation 가시화 — commit 後 발화. story #2132(2026-07-23): publish_event()
+    # 호출은 삭제됐다(FE 소비처 0) — webhook만 남은 실 배달 경로.
     _fire.assert_awaited_once()
+    assert _fire.call_args[0][2] == "workflow_violation"
 
 
 @pytest.mark.anyio
@@ -125,10 +124,9 @@ async def test_bulk_adjacent_and_reopen_no_violation(monkeypatch):
         monkeypatch.setattr(stories_mod, "_attach_assignee_ids", AsyncMock())
         monkeypatch.setattr(stories_mod, "_resolve_team_member_id", AsyncMock(return_value=None))
         _fire = AsyncMock(); monkeypatch.setattr(stories_mod, "fire_webhooks", _fire)
-        monkeypatch.setattr(stories_mod, "publish_event", MagicMock())
 
         payload = BulkUpdateRequest(items=[{"id": str(story.id), "status": new}])
-        result = await bulk_update_stories(payload, db, repo, auth=MagicMock())
+        result = await bulk_update_stories(payload, MagicMock(), db, repo, auth=MagicMock(user_id=str(uuid.uuid4())))
 
         assert story.status == new  # allow
         assert result[0].violation is None, f"{old}->{new} should be no-violation"

@@ -277,10 +277,13 @@ async def test_current_project_get_via_conftest(test_client, mock_session):
 
 
 @pytest.mark.anyio
-async def test_members_list_via_conftest_s6(test_client, mock_session, project_id):
+async def test_members_list_via_conftest_s6(test_client, mock_session, project_id, org_id):
     """GET /api/v2/members 200."""
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = []
+    # E-SECURITY SEC-S6: list_members가 먼저 project의 실 org_id를 조회해 caller org(=org_id
+    # fixture)와 대조한다 — 블랑켓 목이라 이 값을 맞춰야 그 가드를 통과한다.
+    mock_result.scalar_one_or_none.return_value = org_id
     mock_session.execute = AsyncMock(return_value=mock_result)
 
     resp = await test_client.get(f"/api/v2/members?project_id={project_id}")

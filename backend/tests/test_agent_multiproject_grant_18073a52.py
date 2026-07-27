@@ -41,12 +41,21 @@ def _last_sql(session) -> str:
 
 @pytest.mark.anyio
 async def test_has_project_access_includes_agent_grant_branch():
+    """story #1994 §5회차: `has_project_access`가 raw text() SQL(`pa`/`m` alias 리터럴 문자열
+    존재 — 소스 텍스트 grep 가능)에서 SQLAlchemy Core `_project_access_predicate`(atom-level
+    SSOT)로 이식됐다. mock된 session에 실행된 Select는 이제 파라미터화 바인드(`:id_1` 등)라
+    구 방식의 원문 매칭이 안 통한다 — 대신 literal-binds로 컴파일해 같은 불변식(에이전트
+    grant 분기가 `project_access.member_id = members.id`·`members.type = 'agent'`·
+    `project_access.permission = 'granted'`를 모두 갖춘다)을 구조적으로 증명한다."""
+    from sqlalchemy.dialects import postgresql
+
     s = _session(scalar_value=None)
     await has_project_access(s, AGENT, PROJ, ORG)
-    sql = _last_sql(s)
-    assert "pa.member_id = m.id" in sql
-    assert "m.type = 'agent'" in sql
-    assert "pa.permission = 'granted'" in sql
+    stmt = s.execute.call_args[0][0]
+    sql = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    assert "project_access.member_id = members.id" in sql
+    assert "members.type = 'agent'" in sql
+    assert "project_access.permission = 'granted'" in sql
 
 
 @pytest.mark.anyio

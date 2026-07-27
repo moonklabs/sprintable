@@ -163,6 +163,81 @@ async def test_invalid_base64_rejected_400(monkeypatch, tmp_path):
         await eng.dispose()
 
 
+def _make_png(width: int, height: int) -> bytes:
+    """story #2055: imagesize가 파싱 가능한 최소 유효 PNG(IHDR만·픽셀 데이터 없음)."""
+    import struct
+    import zlib
+
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr_data = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    ihdr_type = b"IHDR"
+    crc = struct.pack(">I", zlib.crc32(ihdr_type + ihdr_data) & 0xFFFFFFFF)
+    return sig + struct.pack(">I", len(ihdr_data)) + ihdr_type + ihdr_data + crc
+
+
+@pytest.mark.anyio
+async def test_image_upload_measures_width_height(monkeypatch, tmp_path):
+    """story #2055 AC1: 이미지 첨부는 서버가 실제 픽셀 크기를 측정해 응답에 채운다."""
+    monkeypatch.setenv("STORAGE_PROVIDER", "local")
+    monkeypatch.setenv("STORAGE_LOCAL_ROOT", str(tmp_path))
+    from app.routers.conversations import UploadConversationAttachmentRequest, upload_conversation_attachment
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+        async with Session() as s:
+            png = _make_png(120, 300)
+            body = UploadConversationAttachmentRequest(
+                content_base64=base64.b64encode(png).decode(),
+                name="screenshot.png", content_type="image/png",
+            )
+            resp = await upload_conversation_attachment(
+                CONV, body, db=s, auth=_auth(AGENT_IN), org_id=ORG,
+            )
+            assert resp.width == 120
+            assert resp.height == 300
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_non_image_upload_has_no_dimensions(monkeypatch, tmp_path):
+    """story #2055 AC4: 비이미지 첨부는 width/height가 없는 것이 정상."""
+    monkeypatch.setenv("STORAGE_PROVIDER", "local")
+    monkeypatch.setenv("STORAGE_LOCAL_ROOT", str(tmp_path))
+    from app.routers.conversations import UploadConversationAttachmentRequest, upload_conversation_attachment
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+        async with Session() as s:
+            body = UploadConversationAttachmentRequest(
+                content_base64=base64.b64encode(b"%PDF-1.4 fake pdf bytes").decode(),
+                name="doc.pdf", content_type="application/pdf",
+            )
+            resp = await upload_conversation_attachment(
+                CONV, body, db=s, auth=_auth(AGENT_IN), org_id=ORG,
+            )
+            assert resp.width is None
+            assert resp.height is None
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_client_supplied_dimensions_are_ignored_server_remeasures(monkeypatch, tmp_path):
+    """story #2055 AC1: client가 width/height를 body에 실어도(스키마상 필드 자체는 없어 무시되지만,
+    혹시 다른 경로로 흘러들어와도) 응답은 항상 서버 측정값이어야 한다 — UploadConversationAttachmentRequest
+    자체에 width/height 입력 필드가 없다는 것 자체가 그 보장(server authority)을 스키마 레벨에서
+    구조적으로 강제한다는 것을 실증."""
+    from app.routers.conversations import UploadConversationAttachmentRequest
+
+    assert "width" not in UploadConversationAttachmentRequest.model_fields
+    assert "height" not in UploadConversationAttachmentRequest.model_fields
+
+
 @pytest.mark.anyio
 async def test_oversized_decoded_payload_rejected_413(monkeypatch, tmp_path):
     monkeypatch.setenv("STORAGE_PROVIDER", "local")

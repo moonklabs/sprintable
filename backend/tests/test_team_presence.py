@@ -35,7 +35,7 @@ async def test_team_presence_maps_presence_and_working():
     repo.list = AsyncMock(return_value=agents)
     with patch("app.routers.team_presence.TeamMemberRepository", return_value=repo), \
          patch("app.routers.team_presence._inject_active_stories", new=AsyncMock(return_value=responses)), \
-         patch("app.routers.team_presence.chat_presence.working_member_ids", return_value={str(a_id)}):
+         patch("app.routers.team_presence.chat_presence.working_member_ids", new=AsyncMock(return_value={str(a_id)})):
         result = await team_presence.get_team_presence(session=MagicMock(), org_id=ORG_ID)
 
     by_id = {str(r.member_id): r for r in result}
@@ -61,7 +61,7 @@ async def test_team_presence_dedups_multiproject_rows():
     repo.list = AsyncMock(return_value=agents)
     with patch("app.routers.team_presence.TeamMemberRepository", return_value=repo), \
          patch("app.routers.team_presence._inject_active_stories", new=_fake_inject), \
-         patch("app.routers.team_presence.chat_presence.working_member_ids", return_value=set()):
+         patch("app.routers.team_presence.chat_presence.working_member_ids", new=AsyncMock(return_value=set())):
         result = await team_presence.get_team_presence(session=MagicMock(), org_id=ORG_ID)
 
     assert captured["unique_count"] == 1  # dedup 후 1
@@ -74,6 +74,6 @@ async def test_team_presence_empty_when_no_agents():
     repo.list = AsyncMock(return_value=[])
     with patch("app.routers.team_presence.TeamMemberRepository", return_value=repo), \
          patch("app.routers.team_presence._inject_active_stories", new=AsyncMock(return_value=[])), \
-         patch("app.routers.team_presence.chat_presence.working_member_ids", return_value=set()):
+         patch("app.routers.team_presence.chat_presence.working_member_ids", new=AsyncMock(return_value=set())):
         result = await team_presence.get_team_presence(session=MagicMock(), org_id=ORG_ID)
     assert result == []
