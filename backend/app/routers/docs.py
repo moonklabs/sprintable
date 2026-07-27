@@ -285,14 +285,21 @@ async def get_doc_preview(
         # 접근하는 org owner/admin)을 이 뷰에 행이 없다는 이유로 "멤버 아님"으로 오판한다
         # — #2168 PR-①에서 primary path(위 has_project_access 호출)와 통일했던 그 canonical
         # 가드를 이 fallback 경로에도 동일 적용(#2215 계열, 새 규칙 발명 0).
-        # ⚠️org_id=None(cross-org 허용) — repo.org_id를 넘기면 안 된다. 이 분기는 애초에
-        # repo.get(id)가 None(=doc이 repo.org_id 소속이 아님)일 때만 도달하므로, 그 시점의
-        # doc은 구조적으로 repo.org_id와 다른 org에 속한다. repo.org_id로 스코프하면
-        # has_project_access의 org_scope_project 필터(Project.org_id==org_id)가 항상
-        # 거짓이 돼 owner-floor뿐 아니라 정상 team_member까지 전원 403 — 실측으로 발견
-        # (owner-floor 테스트뿐 아니라 기존 team_member 회귀 테스트도 함께 RED였음).
+        # ⚠️org_id=doc.org_id(repo.org_id 아님, None도 아님) — 이 분기는 애초에 repo.get(id)가
+        # None(=doc이 repo.org_id 소속이 아님)일 때만 도달하므로, 그 시점의 doc은 구조적으로
+        # repo.org_id와 다른 org에 속한다. repo.org_id로 스코프하면 org_scope_project 필터가
+        # 항상 거짓이 돼 owner-floor뿐 아니라 정상 team_member까지 전원 403(실측 발견).
+        # ⛔org_id=None(org 필터 완전 해제)도 안 쓴다 — human_grant_branch/admin_branch가
+        # org_scope 없이 project_access/OrgMember 존재만으로 통과시키면, "project_access
+        # 행은 남았지만 그 org 멤버는 아닌" 상태가 이론상 있을 때 탈퇴자에게 문을 열 수
+        # 있다(오르테가군 지적, 2026-07-27 — #2206과 동형 클래스 우려). 실측(org_members.py
+        # delete_org_member, S-MBR-10 AC5)으로 그 상태가 현재 코드베이스에선 안 만들어짐을
+        # 확認했지만(멤버 제거 시 project_access를 명시 DELETE), 그 불변식에 기대지 않는
+        # 좁은 형태가 더 안전 — doc.org_id를 쓰면 human_grant_branch/admin_branch가 "그
+        # doc의 org에 caller가 실제로 소속돼 있는가"까지 강제해 원래 fallback의 의미
+        # (caller의 주 org와 달라도 실 멤버십이면 통과)를 org 필터 없이 손댈 필요 없이 보존한다.
         from app.services.project_auth import has_project_access
-        if not await has_project_access(db, uuid.UUID(auth.user_id), doc.project_id, org_id=None):
+        if not await has_project_access(db, uuid.UUID(auth.user_id), doc.project_id, doc.org_id):
             raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
 
     org_slug = (await db.execute(
@@ -344,11 +351,14 @@ async def get_doc(
         # #2216: 위 primary path(line 327)와 동일 이유 — TeamMember 단독 조회는 owner-floor
         # 휴먼(명시 grant 없이 admin_branch로만 접근하는 org owner/admin)을 이 뷰에 행이
         # 없다는 이유로 "멤버 아님"으로 오판한다. 이 fallback도 canonical 가드로 통일.
-        # ⚠️org_id=None(cross-org 허용) — 이 분기는 repo.get(id)가 None일 때만 도달하므로
-        # doc이 구조적으로 repo.org_id 밖이다. repo.org_id로 스코프하면 org_scope_project
-        # 필터가 항상 거짓이 돼 owner-floor뿐 아니라 정상 team_member까지 전원 403(실측 발견).
+        # ⚠️org_id=doc.org_id(repo.org_id·None 둘 다 아님) — repo.org_id는 이 분기가 구조적으로
+        # cross-org라 항상 거짓이 되고(실측 발견), org_id=None(필터 완전 해제)은 human_grant_
+        # branch/admin_branch가 org 소속 확認 없이 project_access/OrgMember 존재만으로
+        # 통과시켜 "탈퇴자에게 문을 여는" 이론적 폭을 만든다(오르테가군 지적 — #2206과 동형
+        # 우려). doc.org_id를 쓰면 "그 doc의 org에 caller가 실제로 소속돼 있는가"까지
+        # 강제하면서 원래 fallback 의미(caller 주 org와 달라도 실 멤버십이면 통과)도 보존.
         from app.services.project_auth import has_project_access
-        if not await has_project_access(session, uuid.UUID(auth.user_id), doc.project_id, org_id=None):
+        if not await has_project_access(session, uuid.UUID(auth.user_id), doc.project_id, doc.org_id):
             raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
     # doc 상세(detail view)만 enrich: 담당자 member 요약 + 수정이력 요약 동봉(FE 이중 fetch 제거).
     # create/update/transition 은 write-path 라 plain(추가 쿼리 0·기존 테스트 broad-mock 무파손).

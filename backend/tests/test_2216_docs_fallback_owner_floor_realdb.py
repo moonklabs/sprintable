@@ -155,3 +155,43 @@ async def test_get_doc_preview_team_member_still_works():
         assert out.id == doc_id
     finally:
         await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_doc_rejects_dangling_project_access_outside_org():
+    """④ 방어심층(오르테가군 지적, 2026-07-27) — «project_access(org_member_id 경유) 행은
+    남았지만 그 org_member 는 doc.org_id 소속이 아닌» 가상 상태를 수동으로 만들어(정상
+    앱 플로우로는 org_members.py의 delete_org_member가 project_access를 같이 지워 도달
+    불가 — S-MBR-10 AC5) doc.org_id 스코프(human_grant_branch의 org_scope_human_grand=
+    OrgMember.org_id==org_id)가 그 상태를 여전히 거부하는지 직접 증명한다.
+    ⛔team_member_branch(members⋈project_access, org 무관)로 새지 않도록 members 행은
+    안 만든다 — 오직 org_members/project_access.org_member_id 축만 구성해 human_grant_
+    branch 하나만 겨눈다. org_id=None(필터 완전 해제)이었다면 이 caller는 project_access
+    존재 + user_id 매치만으로 통과했을 것(어느 org 소속인지 안 봄) — doc.org_id가 그보다
+    좁다는 것의 실행 증거."""
+    from app.repositories.doc import DocRepository
+    from app.routers.docs import get_doc
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            doc_id = await _seed(s)
+            # OUTSIDER_USER를 FAKE_OTHER_ORG(=doc.org_id인 ORG와 다른 org)의 org_member로
+            # 만들고, 그 org_member_id로 doc의 project에 대한 project_access grant를 심는다.
+            # organizations 행은 raw UUID만 소비하는 FK-미강제 필드라 FAKE_OTHER_ORG는
+            # 실제 organizations 행 없이도 org_members.org_id에 넣을 수 있다.
+            dangling_om_row = (await s.execute(text(
+                f"INSERT INTO org_members (id,org_id,user_id,role) VALUES "
+                f"(gen_random_uuid(),'{FAKE_OTHER_ORG}','{OUTSIDER_USER}','member') RETURNING id"
+            ))).one()
+            dangling_om_id = dangling_om_row[0]
+            await s.execute(text(
+                f"INSERT INTO project_access (id,project_id,org_member_id,permission) VALUES "
+                f"(gen_random_uuid(),'{PROJ}','{dangling_om_id}','granted')"
+            ))
+            await s.commit()
+        async with Session() as s:
+            with pytest.raises(HTTPException) as ei:
+                await get_doc(id=doc_id, session=s, auth=_auth(OUTSIDER_USER), repo=DocRepository(s, FAKE_OTHER_ORG))
+        assert ei.value.status_code == 403
+    finally:
+        await eng.dispose()
