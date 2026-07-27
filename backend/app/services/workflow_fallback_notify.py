@@ -13,6 +13,8 @@ import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.project import OrgMember
+from app.models.project_access import ProjectAccess
 from app.models.team import TeamMember
 from app.models.workflow_line import WorkflowLineStepRun, WorkflowLineStepRunEvent
 
@@ -50,7 +52,7 @@ async def fallback_notify(
         return {"status": "already_notified", "notified": False}
 
     # human owner = project active human member(들). Story/Project 에 owner 컬럼이 없어 휴먼 멤버로 해소.
-    targets = (await session.execute(
+    tm_targets = (await session.execute(
         select(TeamMember.id).where(
             TeamMember.org_id == org_id,
             TeamMember.project_id == sr.project_id,
@@ -58,6 +60,35 @@ async def fallback_notify(
             TeamMember.is_active.is_(True),
         )
     )).scalars().all()
+    target_ids = set(tm_targets)
+    # #2216(전달누락 계열): team_members뷰(members ⋈ project_access INNER JOIN) 단독으론
+    # grant-only 휴먼(project_access를 org_member_id 경유로만 가진 멤버)과 owner-floor org
+    # owner/admin(명시 project_access grant 없이 has_project_access의 admin_branch org-wide
+    # floor로만 이 프로젝트에 접근하는 멤버)이 조용히 빠졌다 — stuck handoff가 발생해도 fallback
+    # human 통지가 아예 안 갔다. has_project_access(project_auth.py)의 human_grant/org
+    # owner-admin-floor 두 분기를 동일 기준으로 재현해 OrgMember.id로 보강한다 —
+    # dispatch_notification은 이미 org_member.id 축 grant-only 해소를 지원한다
+    # (E-MEMBER-SSOT AC2-2, notification_dispatch.py 기존 주석).
+    grant_only_result = await session.execute(
+        select(OrgMember.id)
+        .select_from(ProjectAccess)
+        .join(OrgMember, ProjectAccess.org_member_id == OrgMember.id)
+        .where(
+            ProjectAccess.project_id == sr.project_id,
+            ProjectAccess.permission == "granted",
+            OrgMember.deleted_at.is_(None),
+        )
+    )
+    target_ids |= {row[0] for row in grant_only_result.all()}
+    owner_floor_result = await session.execute(
+        select(OrgMember.id).where(
+            OrgMember.org_id == org_id,
+            OrgMember.role.in_(["owner", "admin"]),
+            OrgMember.deleted_at.is_(None),
+        )
+    )
+    target_ids |= {row[0] for row in owner_floor_result.all()}
+    targets = list(target_ids)
 
     if targets:
         from app.services.notification_dispatch import dispatch_notification
