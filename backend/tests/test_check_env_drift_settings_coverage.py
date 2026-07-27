@@ -143,5 +143,10 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     mod = _load_check_env_drift()  # 모듈 자체 로드도 이 차단 안에서(위 실측과 동일 조건).
     keys = mod._settings_field_env_keys()
     # #2158: sse_transient_replay_enabled 필드 추가로 82→83(SSE_TRANSIENT_REPLAY_ENABLED 포함).
+    # #1999(fresh 셀프호스트 온보딩 데드엔드 해소): require_verified_email_for_org_create 필드
+    # 신설로 83→84 — 이메일 provider 미설정 셀프호스트에서 org 생성이 인증을 무조건 요구하던
+    # 것을 완화하는 신규 설정(기본 True, 호스티드/prod 동작 불변). 이 가드가 설계대로 새
+    # Settings 필드를 실제로 잡아낸 것 — 개수 자체가 늘어난 게 아니라 늘어난 게 정답이다.
     assert "PRESENCE_REDIS_ENABLED" in keys and "SSE_TRANSIENT_REPLAY_ENABLED" in keys
-    assert len(keys) == 83
+    assert "REQUIRE_VERIFIED_EMAIL_FOR_ORG_CREATE" in keys
+    assert len(keys) == 84
