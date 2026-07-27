@@ -142,4 +142,6 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     monkeypatch.setattr(builtins, "__import__", _blocking_import)
     mod = _load_check_env_drift()  # 모듈 자체 로드도 이 차단 안에서(위 실측과 동일 조건).
     keys = mod._settings_field_env_keys()
-    assert "PRESENCE_REDIS_ENABLED" in keys and len(keys) == 82
+    # #2158: sse_transient_replay_enabled 필드 추가로 82→83(SSE_TRANSIENT_REPLAY_ENABLED 포함).
+    assert "PRESENCE_REDIS_ENABLED" in keys and "SSE_TRANSIENT_REPLAY_ENABLED" in keys
+    assert len(keys) == 83

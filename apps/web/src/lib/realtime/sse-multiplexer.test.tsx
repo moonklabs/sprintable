@@ -259,4 +259,64 @@ describe('useSseMultiplexer — story #2078', () => {
       vi.useRealTimers();
     });
   });
+
+  // story #2162 — 마지막 수신이 B계열(presence·conversation.working, DB Event 행 없는 transient
+  // push)이면 재개 커서(last_event_id)로 승격되면 안 된다 — 안 그러면 서버가 그 id를 해소 못 해
+  // 시간 기준점을 잃고 재연결마다 최근 50건을 통째로 재전송한다(#2162 근본).
+  describe('재개 커서 B계열 오염 방지(#2162)', () => {
+    async function triggerTransientReconnect() {
+      await act(async () => {
+        instances[instances.length - 1]!.readyState = 0; // CONNECTING — 정상 순단(세션 확認 불필요)
+        instances[instances.length - 1]!.onerror?.();
+        await Promise.resolve();
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    }
+
+    it('B계열(presence) id는 커서로 승격되지 않는다 — 재연결 URL에 안 실린다', async () => {
+      vi.useFakeTimers();
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      // attachIfNeeded는 subscribe 시점에만 fake EventSource.addEventListener를 실제로 건다 —
+      // subscribe 없이 dispatchNamed(fake)만 부르면 리스너가 없어 아무 일도 안 일어나는(공허한
+      // 통과) 자리라, 먼저 구독해서 진짜 훅의 dispatchNamed 경로를 태운다.
+      await act(async () => { handle!.subscribe('presence', vi.fn()); });
+      act(() => { dispatchNamed(instances[0]!, 'presence', {}, 'transient-uuid-1'); });
+
+      await triggerTransientReconnect();
+
+      const reconnectUrl = new URL(instances[instances.length - 1]!.url, 'http://localhost');
+      expect(reconnectUrl.searchParams.get('last_event_id')).toBeNull();
+      vi.useRealTimers();
+    });
+
+    it('A계열(story.status_changed) id는 커서로 승격된다 — 재연결 URL에 실린다', async () => {
+      vi.useFakeTimers();
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { handle!.subscribe('story.status_changed', vi.fn()); });
+      act(() => { dispatchNamed(instances[0]!, 'story.status_changed', {}, 'db-event-id-1'); });
+
+      await triggerTransientReconnect();
+
+      const reconnectUrl = new URL(instances[instances.length - 1]!.url, 'http://localhost');
+      expect(reconnectUrl.searchParams.get('last_event_id')).toBe('db-event-id-1');
+      vi.useRealTimers();
+    });
+
+    it('핵심 시나리오 — A계열 수신 뒤 B계열이 마지막으로 와도 커서는 A계열 id를 유지한다', async () => {
+      vi.useFakeTimers();
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => {
+        handle!.subscribe('story.status_changed', vi.fn());
+        handle!.subscribe('presence', vi.fn());
+      });
+      act(() => { dispatchNamed(instances[0]!, 'story.status_changed', {}, 'a-series-id'); });
+      act(() => { dispatchNamed(instances[0]!, 'presence', {}, 'b-series-id'); }); // 마지막 수신 = B계열
+
+      await triggerTransientReconnect();
+
+      const reconnectUrl = new URL(instances[instances.length - 1]!.url, 'http://localhost');
+      expect(reconnectUrl.searchParams.get('last_event_id')).toBe('a-series-id'); // B계열에 안 덮임
+      vi.useRealTimers();
+    });
+  });
 });

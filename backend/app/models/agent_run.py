@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Computed, DateTime, ForeignKey, Integer, Numeric, Text, func
+from sqlalchemy import BigInteger, Computed, DateTime, ForeignKey, Integer, Numeric, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -50,15 +50,21 @@ class AgentRun(Base):
     # duration_ms_legacy 폴백에서 파생)인데 모델이 plain writable Integer로 매핑해 SQLAlchemy가
     # INSERT/UPDATE에 이 컬럼을 항상 emit → GeneratedAlwaysError로 agent_runs 생성 전건 실패했다.
     # Computed(persisted=True)로 read-only 선언 → DML서 제외(모델↔DB 드리프트 해소·create_all
-    # DDL도 prod와 동형 generated 컬럼 생성). 표현식은 baseline schema.sql과 byte-정합.
+    # DDL도 prod와 동형 generated 컬럼 생성).
+    #
+    # story #2161/#2181(2026-07-24, 오르테가군 라이브 발견, migration 0210): 32bit integer는
+    # ~24.83일(2,147,483,647ms)이 상한이라 오래 stuck된 run을 리퍼가 abandoned 전이(finished_at
+    # 기록)하는 순간 NumericValueOutOfRangeError. bigint로 확장(진실을 잃지 않는 유일한 선택 —
+    # "전이 시 finished_at 안 쓰기"는 사망시각 재상실이라 배제, "상한 clamp"는 지속시간 위장이라
+    # 배제, 근거는 0210 migration 참조).
     duration_ms: Mapped[int | None] = mapped_column(
-        Integer,
+        BigInteger,
         Computed(
             "CASE "
             "WHEN ((finished_at IS NOT NULL) AND (started_at IS NOT NULL)) "
-            "THEN GREATEST(((EXTRACT(epoch FROM (finished_at - started_at)) * (1000)::numeric))::integer, 0) "
-            "WHEN (duration_ms_legacy IS NOT NULL) THEN duration_ms_legacy "
-            "ELSE NULL::integer "
+            "THEN GREATEST(((EXTRACT(epoch FROM (finished_at - started_at)) * (1000)::numeric))::bigint, (0)::bigint) "
+            "WHEN (duration_ms_legacy IS NOT NULL) THEN (duration_ms_legacy)::bigint "
+            "ELSE NULL::bigint "
             "END",
             persisted=True,
         ),
@@ -78,3 +84,6 @@ class AgentRun(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # story #2161(0206): 생성 시점에 기록되는 종료 예정 시각 — app/services/agent_run_lifecycle.py
+    # 의 cron 스위퍼가 이 값을 넘긴 'running' run을 능동적으로 'abandoned' 전이한다.
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

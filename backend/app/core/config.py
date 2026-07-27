@@ -141,6 +141,15 @@ class Settings(BaseSettings):
     # false 배선(story #2078 PG_LISTEN_ENABLED durable 분리·PR #2364와 동일 패턴).
     event_broker_redis_consume_enabled: bool = True
 
+    # #2158(E-ARCH, 2026-07-24): DB row 없는 transient push(conversation.read·presence·
+    # conversation.working 등 `_push_to_agent()` 직접호출 B계열)가 SSE 재연결 공백(실측
+    # 359~427ms)에 `_agent_connections` 큐 부재로 조용히 영구유실(pushed=False, 재시도/DB잔존
+    # 없음) — 까심 2회 독립 라이브 재현. DB row화 대신(hot-path 부하 재적재 회피, #2123 유지)
+    # Redis ZSET에 짧은 TTL(기본 30s — sse_transient_replay.py 참조) 재생 버퍼를 둔다.
+    # default=False(무회귀) — off/redis_url 미설정/다운이면 기존 동작(유실)과 동일, 새 실패
+    # 모드 0(presence/lease와 동형 fail-open 철학).
+    sse_transient_replay_enabled: bool = False
+
     # E-ARCH S3(story #2078) 3a단계: `event_outbox` row insert를 EventBroker.publish()에 추가로
     # 얹는다(호출 타이밍은 안 바뀜 — 여전히 caller commit 이후, 별도 짧은 트랜잭션이라 아직 진짜
     # atomic outbox는 아님). default=False(무회귀) — 켜지기 전엔 OutboxEventBroker가 inner

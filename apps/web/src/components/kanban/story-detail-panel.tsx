@@ -103,7 +103,8 @@ const descriptionViewerComponents = {
   ul: ({ children }: { children?: React.ReactNode }) => <ul className="mb-2 ml-4 list-disc space-y-0.5 text-muted-foreground">{children}</ul>,
   ol: ({ children }: { children?: React.ReactNode }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5 text-muted-foreground">{children}</ol>,
   li: ({ children }: { children?: React.ReactNode }) => <li className="text-sm leading-6">{children}</li>,
-  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto rounded-lg bg-muted p-3 text-[13px] text-foreground">{children}</pre>,
+  // story #2165: 코드블럭은 전역 스크롤바 숨김 예외.
+  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg bg-muted p-3 text-[13px] text-foreground">{children}</pre>,
   code: ({ children }: { children?: React.ReactNode }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">{children}</code>,
   blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
   a: ({ href, children }: { href?: string; children?: React.ReactNode }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">{children}</a>,

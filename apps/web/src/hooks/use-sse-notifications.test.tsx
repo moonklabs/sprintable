@@ -9,12 +9,16 @@ import { createRoot, type Root } from 'react-dom/client';
 import { useSseNotifications, type SseEventNotification } from './use-sse-notifications';
 
 class FakeEventSource {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
   static instances: FakeEventSource[] = [];
   listeners: Record<string, Array<(e: { data: string; lastEventId?: string }) => void>> = {};
   onopen: (() => void) | null = null;
   onmessage: ((e: { data: string; lastEventId?: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   closed = false;
+  readyState = 0;
   constructor(public url: string, _opts?: unknown) {
     FakeEventSource.instances.push(this);
   }
@@ -22,8 +26,8 @@ class FakeEventSource {
     (this.listeners[type] ??= []).push(cb);
   }
   close() { this.closed = true; }
-  emit(type: string, data: string) {
-    for (const cb of this.listeners[type] ?? []) cb({ data });
+  emit(type: string, data: string, lastEventId?: string) {
+    for (const cb of this.listeners[type] ?? []) cb({ data, lastEventId });
   }
 }
 
@@ -111,5 +115,51 @@ describe('useSseNotifications — extraEventNames/onExtraEvent (additive, 9ef0f9
     const es = FakeEventSource.instances[0]!;
     // 기존 알림 채널도 여전히 안전하게(콜백 없어도 크래시 0).
     expect(() => act(() => { es.emit('notification', JSON.stringify({})); })).not.toThrow();
+  });
+});
+
+// story #2162 — 재개 커서(last_event_id) B계열 오염 방지의 standalone-fallback 경로 회귀가드.
+describe('useSseNotifications — 재개 커서 B계열 오염 방지(#2162)', () => {
+  async function triggerTransientReconnect() {
+    const es = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    await act(async () => {
+      es.readyState = FakeEventSource.CONNECTING; // 정상 순단(#2160 세션 확認 경로 안 탐)
+      es.onerror?.();
+      await Promise.resolve();
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  }
+
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('extraEventNames로 받은 B계열(conversation.working) id는 커서로 승격되지 않는다', async () => {
+    await act(async () => {
+      root.render(
+        <Harness memberId="m1" extraEventNames={['conversation.working']} onExtraEvent={vi.fn()} />,
+      );
+    });
+    const es = FakeEventSource.instances[0]!;
+    act(() => { es.emit('conversation.working', JSON.stringify({}), 'transient-uuid-1'); });
+
+    await triggerTransientReconnect();
+
+    const reconnectUrl = new URL(FakeEventSource.instances[FakeEventSource.instances.length - 1]!.url);
+    expect(reconnectUrl.searchParams.get('last_event_id')).toBeNull();
+  });
+
+  it('extraEventNames로 받은 A계열(story.trust_stage_changed) id는 커서로 승격된다', async () => {
+    await act(async () => {
+      root.render(
+        <Harness memberId="m1" extraEventNames={['story.trust_stage_changed']} onExtraEvent={vi.fn()} />,
+      );
+    });
+    const es = FakeEventSource.instances[0]!;
+    act(() => { es.emit('story.trust_stage_changed', JSON.stringify(TRUST_STAGE_PAYLOAD), 'db-event-id-1'); });
+
+    await triggerTransientReconnect();
+
+    const reconnectUrl = new URL(FakeEventSource.instances[FakeEventSource.instances.length - 1]!.url);
+    expect(reconnectUrl.searchParams.get('last_event_id')).toBe('db-event-id-1');
   });
 });

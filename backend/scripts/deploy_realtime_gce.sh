@@ -32,6 +32,25 @@
 # story #2142(2026-07-23, 선생님 GCE prod 전환 승인): prod 분기 신설 — 이 스크립트가 prod를
 # 받아들이게 하는 것만이 이 변경의 스코프. 실 리소스 생성(gcloud 실행)은 오르테가 DRY_RUN
 # 검수 통과 後 별도 승인 시점(이 PR에서 안 함).
+#
+# ⛔⛔ **dev 스택(`dev` 인자)은 2026-07-25 현재 «prod 패리티 검증 surface»가 아니다.**
+#     (story #2185 · 오르테가군 실측 — 방향 결정 전이라도 이 사실만은 먼저 선언한다)
+#
+#     여기서 초록이 나와도 **prod GCE 에 대해 아무것도 보장하지 않는다.** 근거:
+#     ```
+#     ① 경로에 없다   sprintable-frontend-dev 의 REALTIME_URL 은 이 GCE 가 아니라
+#                     Cloud Run `sprintable-realtime-dev` 를 가리킨다(라이브 실측).
+#     ② 트래픽이 없다 realtime-gateway-dev-backend GCLB 48시간 전수:
+#                     404 × 499(전부 인터넷 스캐너) · 200 × 1(우리 확認 트래픽)
+#     ③ ⭐코드가 낡았다  dev MIG 이미지 4efd483e(#2411, 07-22) vs prod 4d79fd98(#2457, 07-24).
+#                     **옛 코드를 검증하는 것은 검증이 아니다.**
+#     ```
+#     ⇒ *"GCE 에서 확認했다"* 를 이 dev 스택 결과로 말하면 **거짓 안심**이 된다. prod GCE
+#       고유 동작은 prod 승격 절차에서 직접 확認할 것.
+#
+#     이 선언이 무너지는 조건: dev MIG 가 develop HEAD 로 **자동** 유지되기 시작하면(수동
+#     배포 의존이 사라지면) 그때 다시 패리티 surface 가 된다 — 그 시점에 이 주석을 지울 것.
+#     ⚠️선언을 지우는 것까지가 그 작업의 일부다(story #2174 가드가 같은 규율을 강제한다).
 
 set -euo pipefail
 
@@ -116,6 +135,12 @@ case "${ENV}" in
         # 최종적으로 GCLB 프론트 URL로 바뀌어야 하는지는 provision_realtime_gclb.sh 완료 후
         # 별도 재확認 필요(TODO — 현재는 라이브 값 그대로 이관해 드리프트 0으로 시작).
         FASTAPI_URL="https://sprintable-realtime-dev-787818285179.asia-northeast3.run.app"
+        # story #2089 stage 3-a(2026-07-25, 오르테가군 지시) — «변수를 하나씩 움직인다»:
+        # 이미지는 그대로 두고 entrypoint만 app.realtime_main:app(SSE router 둘만 마운트,
+        # main.py:147의 90+ 라우터 일괄 import·ee 게이트를 안 거침)으로 교체해 dev GCE에서만
+        # 먼저 검증한다. prod는 이번 단계에서 손대지 않는다(아래 prod 분기가 기존
+        # app.main:app을 그대로 유지 — 이 값이 바로 그 분리 지점).
+        UVICORN_APP_MODULE="app.realtime_main:app"
         ;;
     prod)
         # story #2142(2026-07-23, 선생님 GCE prod 전환 승인): dev와 동일 구조, 리소스명·Cloud
@@ -180,6 +205,9 @@ case "${ENV}" in
         # 잠정값으로 둔다 — provision_realtime_gclb.sh 완료 후 GCLB 프론트 IP/도메인으로
         # 바꿔야 하는지는 별도 재확認 대상(이 PR은 스크립트가 prod를 받게만 하는 스코프).
         FASTAPI_URL="https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"
+        # story #2089 stage 3-a — prod는 이번 단계에서 안 건드린다. 기존 app.main:app 그대로
+        # (dev만 app.realtime_main:app으로 바뀌는 것과 대비되는 지점 — 위 dev 분기 주석 참조).
+        UVICORN_APP_MODULE="app.main:app"
         ;;
     *)
         echo "Usage: $0 [dev|prod]" >&2
@@ -216,10 +244,17 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}APP_URL=${APP_URL}"
 # 별도로 이 값들을 받았다(describe 대조 확認) — dev는 지금도 없음. 즉 이번 건은 "dev값이
 # 분기 밖에 남은" 이전 3건과 반대 방향: **prod가 나중에 추가로 받은 값을 이 스크립트가
 # 못 따라간 것**. 특히 APP_ENV는 `config.py::is_really_local`(story #2071 — `K_SERVICE`
-# 부재로 로컬 판정, GCE엔 K_SERVICE가 원천적으로 없어 그 프로퍼티 자체는 이 값과 무관하게
-# 계속 True로 나옴, 이건 별도 코드 결함으로 등재)와는 별개로 `app_env` 문자열을 직접 보는
-# 코드 경로를 위해 필요 — 지금 당장 시크릿 fail-open 구멍은 아니지만(CRON_SECRET_PROD·
-# FIREBASE_BFF_INTERNAL_SECRET 둘 다 바인딩돼 있어 그 경로는 안전) 미러링 원칙 그대로 적용.
+# 부재로 로컬 판정)와는 별개로 `app_env` 문자열을 직접 보는 코드 경로를 위해 필요 — 지금
+# 당장 시크릿 fail-open 구멍은 아니지만(CRON_SECRET_PROD·FIREBASE_BFF_INTERNAL_SECRET 둘 다
+# 바인딩돼 있어 그 경로는 안전) 미러링 원칙 그대로 적용.
+# ⚠️정정(story #2179, 2026-07-24) — 위 "GCE엔 K_SERVICE가 없어 is_really_local이 계속
+# True로 나온다"는 서술은 **#2152(2026-07-23) 이전** 상태를 가리키던 것이라 지금은 사실이
+# 아니다. #2152가 `is_really_local`을 "K_SERVICE 부재=로컬"에서 "긍정 신호(PYTEST_CURRENT_
+# TEST 또는 SPRINTABLE_LOCAL_DEV) 없으면 로컬 아님"으로 근본수정했고, GCE 배포 경로(이
+# 스크립트·Dockerfile) 어디에도 `SPRINTABLE_LOCAL_DEV`가 없어 GCE는 지금 정확히 False(로컬
+# 아님)로 떨어진다 — `test_2152_runtime_local_detection.py::test_gce_is_not_local`이 이 값을
+# 고정해두고 있다. 이 정정 자체가 story #2179의 근거였다(json_logs 판정 축을 APP_ENV 문자열
+# 대신 `is_really_local`로 교체해도 GCE가 반쪽으로 남지 않는다는 확認).
 if [ "${ENV}" = "prod" ]; then
     PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}APP_ENV=prod"
     PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}NEXT_PUBLIC_APP_URL=${APP_URL}"
@@ -304,9 +339,32 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}PRESENCE_ONLINE_REDIS_ENABLED=${PR
 # 여기 걸림, GCE 3노드 필수·멀티노드 합산 대조).
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}SSE_LEASE_REDIS_ENABLED=${SSE_LEASE_REDIS_ENABLED:-${_BACKPLANE_DEFAULT}}"
 # #2122(E-ARCH 근본): fanout(wake_agent) → Redis 백플레인 롤아웃 게이트(presence/lease 와 독립 flag).
-# env 로 flip(기본 false=pg_notify 직행 무회귀). #2122 라이브 재측정 배포=true(GCE PG_LISTEN=false라 wake
-# 가 Redis 백플레인 타야 타노드 도달 — 미설정 시 cross-node wake 0/2 재현). REALTIME_BACKPLANE 는 별개(cutover).
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}FANOUT_WAKE_REDIS_ENABLED=${FANOUT_WAKE_REDIS_ENABLED:-false}"
+# REALTIME_BACKPLANE 는 별개(cutover).
+#
+# story #2180(2026-07-25, 오르테가군 판정 — 기본값을 false 에서 durable true 로 승격):
+# 여태 `:-false` 라서 dev 라이브의 true 는 **SSOT 밖의 손 값**이었다(#2122 라이브 재측정 때
+# 손으로 넣은 것). 즉 다음 배포가 조용히 false 로 덮는 지뢰였다 — #2077(프론트 minScale 이
+# 코드 밖에 떠 있던 것)과 동형. 위 세 형제(presence/online/lease)는 이미 _BACKPLANE_DEFAULT
+# 로 못박혀 있는데 이것만 남아 있었다.
+#
+# 왜 true 가 맞는가:
+#   이 스택은 PG_LISTEN_ENABLED=false 다(아래 참조). ⇒ false 로 두면 wake 가 pg_notify 로만
+#   나가는데 **듣는 프로세스가 전 층에 0개**라 크로스노드 wake 가 조용히 사라진다
+#   (#2122 라이브에서 cross-node wake 0/2 재현됨). true 여야 Redis 백플레인을 타 타노드에 닿는다.
+#
+# 왜 «지금 아프지 않은데» 고치는가 (까심군 측정, 2026-07-25 · #2157 갈림길):
+#   GCLB access log 전수(관측 07-23 13:53Z~) — GCE 3노드에 wake_agent 콜사이트 라우트군
+#   (/api/v2/stories PATCH · /api/v2/gates POST · /api/v2/agents · /api/v2/a2a) 도달 **0건**.
+#   양성대조로 backend-prod 에서는 같은 쿼리에 다건 잡힘 ⇒ 계측기는 커밋을 볼 수 있다.
+#   ⇒ 현재 GCE 는 이벤트를 커밋하지 않는다 = **지금 켜도 라이브 동작 변화 0**(그래서 안전)
+#   ⇒ 동시에 «안 아픈 이유»가 구조적 보장이 아니라 **현 라우팅의 우연**이다 = 방치하면 라우팅이
+#      바뀌는 순간 조용히 깨진다. 안전하게 고칠 수 있는 지금 못박는다.
+#
+# 무너지는 조건: GCE 노드가 이벤트를 커밋하기 시작하는데 Redis 백플레인이 죽어 있으면, 이제는
+#   pg_notify 폴백조차 안 타므로 wake 가 통째로 유실된다(false 였을 때와 같은 결과). Redis
+#   가용성이 이 값의 전제다 — 위 형제 플래그 셋과 같은 전제라 새로 생기는 의존은 아니다.
+# ⚠️손 override 는 계속 가능하나(위 형제와 동일 규약), durable 값은 여기 한 곳이다.
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}FANOUT_WAKE_REDIS_ENABLED=${FANOUT_WAKE_REDIS_ENABLED:-${_BACKPLANE_DEFAULT}}"
 # ⛔story #2142(2026-07-23, 오르테가 전수 3방향 diff 적발, 4번째 묶음) — 같은 뿌리.
 # LLM_GEMINI_MODEL/_LOCATION·FIREBASE_OAUTH_HANDOFF_ENABLED 전부 backend-prod에 키
 # 자체가 없다(describe 대조 확認) — FIREBASE_OAUTH_HANDOFF_ENABLED=1은 특히 firebase
@@ -485,7 +543,7 @@ trap 'rm -f "${STARTUP_SCRIPT_FILE}"' EXIT
     done
     echo '  --env-file=/tmp/realtime-gateway-plain.env \'
     echo "  ${IMAGE} \\"
-    echo '  uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30'
+    echo "  uvicorn ${UVICORN_APP_MODULE} --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30"
     echo ''
     echo '# ── 부팅 진단(시리얼 콘솔로) — COS는 SSH/Cloud Logging 접근이 제한적이라, 컨테이너'
     echo '#    상태·소켓·프록시/앱 로그를 startup-script stdout(=시리얼)로 남겨 원격 진단 가능케 한다.'
@@ -519,6 +577,10 @@ if [ "${DRY_RUN}" = "1" ]; then
     # 테스트가 "진짜 배포될 것"을 검증하게 한다(base64 — 줄바꿈을 한 줄 KEY=VALUE 출력
     # 포맷 안에 안전하게 실어야 해서).
     _GENERATED_PLAIN_ENV_FILE_B64="$(sed -n '/^cat > \/tmp\/realtime-gateway-plain\.env/,/^PLAIN_ENV_EOF$/p' "${STARTUP_SCRIPT_FILE}" | sed '1d;$d' | base64 | tr -d '\n')"
+    # story #2089 stage 3-a — #2142와 동일 관례: 요약 변수(UVICORN_APP_MODULE)가 아니라
+    # startup-script에 실제로 적힌 uvicorn 커맨드 그 줄 자체를 노출해, 변수→실제 산출물
+    # 배선이 끊기지 않았는지 테스트가 직접 대조할 수 있게 한다.
+    _GENERATED_UVICORN_CMD_LINE="$(grep '^  uvicorn ' "${STARTUP_SCRIPT_FILE}")"
     cat <<EOF
 ENV=${ENV}
 MIG_NAME=${MIG_NAME}
@@ -532,6 +594,8 @@ RUNTIME_SA=${RUNTIME_SA}
 PLAIN_ENV_SPEC=${PLAIN_ENV_SPEC}
 SECRET_PAIRS=${SECRET_PAIRS}
 GENERATED_PLAIN_ENV_FILE_B64=${_GENERATED_PLAIN_ENV_FILE_B64}
+UVICORN_APP_MODULE=${UVICORN_APP_MODULE}
+GENERATED_UVICORN_CMD_LINE=${_GENERATED_UVICORN_CMD_LINE}
 EOF
     exit 0
 fi

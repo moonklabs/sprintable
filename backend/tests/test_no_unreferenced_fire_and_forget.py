@@ -19,12 +19,20 @@ _APP_DIR = Path(__file__).parent.parent / "app"
 # events.py/agent_gateway.py: story c4c72eb1 PR-A — get_task/shutdown_wait_task 모두 지역 변수에
 # 참조 보관 후 asyncio.wait()로 즉시 경합·완료 대기하고 각 finally에서 cancel() — fire-and-forget
 # 아닌 표준 "동시 대기" 패턴(#1970류 GC 조기수거 리스크 없음).
+# realtime_main.py: story #2089(2026-07-25) — main.py lifespan의 부분집합. listen_task/
+# redis_shadow_task/outbox_dispatcher_task 전부 지역변수 보관 + lifespan finally에서
+# cancel()+await로 명시 추적 — main.py가 허용된 바로 그 패턴과 코드 대조로 동일함을 확認
+# (fire_and_forget()으로 전환하면 Task를 안 돌려줘 명시적 cancel을 잃는다 — lifespan이
+# engine.dispose() 前에 백그라운드 루프를 반드시 먼저 멈춰야 하는 순서를 못 지키게 되는
+# 퇴행이라 전환하지 않았다). 이 안전성이 유지되는지는
+# test_realtime_main_lifespan_shutdown_order.py가 실행으로 계속 지킨다.
 _ALLOWED_FILES = {
     _APP_DIR / "main.py",
     _APP_DIR / "services" / "pg_pubsub.py",
     _APP_DIR / "services" / "l2_trigger_worker.py",
     _APP_DIR / "routers" / "events.py",
     _APP_DIR / "routers" / "agent_gateway.py",
+    _APP_DIR / "realtime_main.py",
 }
 _PATTERN = re.compile(r"\.create_task\(|\bensure_future\(")
 

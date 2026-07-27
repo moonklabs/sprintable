@@ -164,7 +164,7 @@ def test_live_sse_id_always_set_in_source():
     import inspect
     from app.routers import events as ev_module
     source = inspect.getsource(ev_module.agent_event_stream)
-    assert "_live_id = eid or str(uuid.uuid4())" in source
+    assert "_live_id = eid or _transient_id or str(uuid.uuid4())" in source  # #2158: _sse_transient_id 우선 재사용(id: 필드는 여전히 항상 보장)
     assert 'id: {_live_id}' in source
 
 
@@ -260,7 +260,7 @@ def test_live_event_yield_always_has_id_field():
     import inspect
     from app.routers import events as ev_module
     source = inspect.getsource(ev_module.agent_event_stream)
-    assert "_live_id = eid or str(uuid.uuid4())" in source
+    assert "_live_id = eid or _transient_id or str(uuid.uuid4())" in source  # #2158: _sse_transient_id 우선 재사용(id: 필드는 여전히 항상 보장)
     assert "id: {_live_id}" in source
 
 

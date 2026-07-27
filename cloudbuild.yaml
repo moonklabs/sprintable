@@ -87,6 +87,28 @@ substitutions:
   # 페이지 요청과 SSE가 다투게 만드는 방향이라 근거 없이 만지지 말 것.
   _FRONTEND_TIMEOUT: '60'
 
+  # story #2077(E-ARCH 0단계, 2026-07-24): `deploy-frontend` 스텝에 min/max-instances 플래그
+  # 자체가 한 번도 없었다(backend·realtime은 둘 다 배선돼 있었는데 frontend만 빠짐 — story
+  # #2005/backend와 동형 결함이 또 frontend에서 재발). "gcloud run deploy는 미지정 설정을
+  # preserve"라 다음 배포가 즉시 덮진 않지만, 리뷰·재현이 불가능하고(minScale=3이 왜 3인지
+  # 코드에 없음) 서비스 재생성/전체교체 경로를 타면 조용히 기본값(minScale 0)으로 복귀한다.
+  # ⭐이 minScale 상향은 #2074(선생님 실기기 "채팅 첫 진입 5~8초") 응급조치다 — 근본은
+  # "no available instance" abort(인스턴스 부족→콜드스타트 대기→요청 폐기). backend는 #2415로
+  # SSOT에 박혀 닫혔으나 frontend는 아직 코드 밖에 떠 있었다. 아래 dev-safe 기본값은 라이브
+  # 실측 그대로(2026-07-24, `gcloud run services describe sprintable-frontend-dev` 대조:
+  # latestReady==latestCreated·traffic 100%인 서빙 리비전 자체를 확認, template spec만 본 것
+  # 아님 — 오늘 prod FE 22시간 무실효 사고의 3축 교훈 적용). GHA가 prod에서 override(3/10).
+  _FRONTEND_MIN_INSTANCES: '1'
+  _FRONTEND_MAX_INSTANCES: '3'
+  # concurrency=80은 Cloud Run 플랫폼 기본값과 라이브 실측(dev describe 확認)이 이미 일치 —
+  # SSOT에 값을 안 박아도 드리프트 위험이 없다(플랫폼 기본값 자체가 곧 이 값). 굳이 플래그로
+  # 고정하지 않는다(불필요한 명시로 "왜 80이지" 오해를 만들 필요 없음) — 판단 근거만 여기 기록.
+  # startup-cpu-boost=true — `gcloud run deploy --help`: "Enabled by default when unspecified
+  # on new services"(신규 서비스 생성 시엔 기본 on이라 minScale=0류처럼 조용히 꺼지는 위험은
+  # 아니다). 그래도 "기존 서비스 update 시 미지정=현재값 preserve"와 "신규 생성 시 기본값"이
+  # 서로 다른 경로라 애매함이 남는다 — 아래 deploy-frontend에 `--cpu-boost`로 명시해 두 경로
+  # 모두 동일 결과가 되게 고정한다(dev/prod 공통값이라 별도 substitution 불필요).
+
   # E-ARCH 1단계 durable화 마지막 조각(story #2078, 2026-07-21 PO 손 플립 확認 후): api
   # (sprintable-backend-*)의 PG_LISTEN_ENABLED. ⚠️ 기본값 'true' — prod는 아직
   # sprintable-realtime-prod가 없다(deploy-realtime 스텝이 prod에서 스킵 중, PO 검증 전).
@@ -153,6 +175,13 @@ substitutions:
   _BACKEND_PRESENCE_REDIS_ENABLED: 'false'
   _BACKEND_PRESENCE_ONLINE_REDIS_ENABLED: 'false'
   _BACKEND_SSE_LEASE_REDIS_ENABLED: 'false'
+
+  # story #2158(2026-07-24) 후속(#2077에서 동반 배선) — 재생 버퍼 자체는 머지됐으나(PR #2468)
+  # 이 스위치를 켤 배선이 없어 사용자 경로 재측정을 못 하고 있었다. #2158의 취지 자체가
+  # "손 gcloud로 켜지 않는다"라 반드시 이 SSOT를 거친다. dev-safe 기본값 'false'(무회귀) —
+  # GHA가 dev만 명시 override(true). prod는 손대지 않는다(#2158 flag 자체가 아직 라이브
+  # 사용자 경로 검증 전이라 prod에 얹을 단계가 아님 — #2120/#2121/#2122와 동일 단계적 승격 원칙).
+  _BACKEND_SSE_TRANSIENT_REPLAY_ENABLED: 'false'
 
   # ⛔story cd10e123 계열 긴급수정(2026-07-21, codex 리서치 검증 중 적발): REDIS_URL·
   # EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED가 여태 여기 어디에도 없는 순수 수동 Cloud Run env
@@ -269,6 +298,14 @@ steps:
       - --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:${COMMIT_SHA}
       - --region=${_AR_REGION}
       - --timeout=${_FRONTEND_TIMEOUT}
+      # story #2077 — min/max-instances가 이 스텝에 한 번도 배선된 적이 없었다(backend·realtime은
+      # 있었는데 frontend만 빠짐). 현행 라이브 값 그대로 IaC에 고정(값 인상 아님) — 근거는 위
+      # substitutions 섹션의 _FRONTEND_MIN/MAX_INSTANCES 주석 참조.
+      - --min-instances=${_FRONTEND_MIN_INSTANCES}
+      - --max-instances=${_FRONTEND_MAX_INSTANCES}
+      # startup-cpu-boost=true는 라이브 실측(dev describe 확認) — 근거는 위 substitutions
+      # 섹션 주석 참조(minScale만큼 위험하진 않지만 명시로 애매함을 없앤다).
+      - --cpu-boost
       # E-ARCH 1단계(story #2078) — /api/event-stream 프록시 라우트가 REALTIME_URL을 읽어
       # SSE/LISTEN 전용 realtime-gateway로 향한다(REALTIME_URL 없으면 기존 FASTAPI_URL로
       # 폴백 — 이 값을 비우면 코드 변경·재배포 없이 즉시 원복). --update-env-vars(additive).
@@ -302,7 +339,7 @@ steps:
         # 에서 정정(구 `REDIS_CONSUME_ENABLED`는 Settings 필드와 안 맞아 무시되던 키) — 구 키는
         # --remove-env-vars로 명시 제거(안 지우면 두 키 공존, additive 함정).
         # story #2123 S0-b: FANOUT_WAKE_REDIS_ENABLED(dev만 true, prod는 손대지 않음).
-        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED}"
+        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}"
         # ⛔story #2141(2026-07-23, prod Redis Memorystore 전환): REDIS_URL을 여기서 이 스텝이
         # 예전엔 dev/prod 공용으로 plain env 넘겼다 — prod는 Secret Manager 바인딩(REDIS_URL_PROD,
         # AUTH 필요)으로 전환하는데, 같은 배포에 plain REDIS_URL 키까지 넘기면 Cloud Run이
@@ -388,6 +425,40 @@ steps:
         # (false/None)으로 되돌아가면 두 전송경로 동시 무효화(실시간 전면정지)가 된다.
         # 이 스텝은 이미 dev 전용 가드(위) 안이라 true를 직접 명시해도 안전(PG_LISTEN_ENABLED=
         # false와 동일 컨벤션) — REDIS_URL만 변수(연결문자열은 환경별로 다르므로).
+        #
+        # story #2178(2026-07-24, 까심 #2158 회귀검증에서 적발 → PO가 전수로 넓힘): deploy-backend
+        # 는 12키를 넘기는데 이 스텝은 8키뿐이라 backend·realtime 두 서비스가 다른 플래그 세트로
+        # 돌고 있었다 — 그 차이 자체가 어디에도 선언된 적이 없어 "켰다"고 믿는 사고가 반복됐다
+        # (#2158 SSE_TRANSIENT_REPLAY_ENABLED가 정확히 그 사고: record()는 backend-dev에서 돌아
+        # 정상이었는데, 실제 브라우저 SSE를 서빙하는 건 이 realtime-dev라 replay()가 이 서비스
+        # 에서 한 번도 안 돌고 있었다). 5종 전수 판정(코드 경로 실증, 값보다 "왜 다른지" 선언이
+        # 본체):
+        #   ⭐SSE_TRANSIENT_REPLAY_ENABLED  진짜 누락 — replay 대상 연결이 실제로 여기(realtime-
+        #     dev의 agent_event_stream)에 있다. 즉시 배선(아래).
+        #   ⭐SSE_LEASE_REDIS_ENABLED       진짜 누락 — events.py의 sse_lease.acquire/refresh/
+        #     release가 바로 이 파일의 agent_event_stream 안에서 직접 호출된다(연결 시점·30초
+        #     하트비트마다·해제 시). realtime-dev가 다인스턴스(_REALTIME_MIN/MAX_INSTANCES=2~8)
+        #     라 이게 꺼져 있으면 #2121이 고치려던 전역 429/503 캡이 인스턴스별로 쪼개져 그 결함이
+        #     이 서비스에서 그대로 재현된다. 즉시 배선(아래).
+        #   PRESENCE_REDIS_ENABLED         의도적 off(무해) — chat_presence는 이 파일(events.py)
+        #     어디에도 import/호출이 없다. 쓰기·읽기 전부 conversations.py/team_presence.py(REST
+        #     라우트)에만 있어 backend-dev에서만 실행된다.
+        #   PRESENCE_ONLINE_REDIS_ENABLED  의도적 off(무해) — 30초 SSE-틱 hot-path 기록은
+        #     agent_gateway.py의 /agent/stream(에이전트 전용, backend-dev가 직접 서빙)에만 있다.
+        #     이 파일의 agent_event_stream(브라우저 전용)엔 presence_online 참조가 전혀 없다.
+        #   FANOUT_WAKE_REDIS_ENABLED      의도적 off(무해) — wake_agent()는 REST 뮤테이션
+        #     라우트에서만 호출되고, 대상 큐(_agent_connections)도 에이전트 키인데 에이전트는
+        #     backend-dev에만 붙는다 — realtime-dev엔 그 큐 자체가 존재한 적이 없다.
+        # 위 두 건(누락)만 배선하고 나머지 셋은 의도적으로 그대로 둔다 — 한 덩어리로 "다 켜자"
+        # 하지 않는다(PO 지시).
+        # ⚠️이 판정이 딛고 선 전제(오르테가군 PR 리뷰 지적, 2026-07-24) — 위 세 건의 "의도적
+        # off" 판정은 **"realtime-dev에는 브라우저만 붙는다"**는 현재 라우팅 전제 위에 서 있다.
+        # 이 서비스는 backend와 **같은 풀 이미지**를 돌리므로 `/agent/stream`(agent_gateway.py)
+        # 라우트 자체는 살아 있다 — 지금은 에이전트가 항상 backend-dev로 붙도록 배선돼 있어(
+        # agent_onboarding_config.py::resolve_backend_direct_url) 무해할 뿐이다. **그 라우팅이
+        # 바뀌어 에이전트가 realtime-dev에도 붙게 되면 이 판정 전체를 재검토할 것** — 오늘 이
+        # 사달(#2178)의 근본원인이 정확히 "전제가 어디에도 안 적혀 있었던 것"이라, 판정 근거뿐
+        # 아니라 판정이 무너지는 조건까지 여기 남긴다.
         gcloud run deploy sprintable-realtime-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
@@ -395,7 +466,7 @@ steps:
           --max-instances=${_REALTIME_MAX_INSTANCES} \
           --timeout=${_REALTIME_TIMEOUT} \
           --allow-unauthenticated \
-          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=false,EVENT_BROKER_REDIS_CONSUME_ENABLED=true,REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true,EVENT_BROKER_REDIS_DISPATCH_ENABLED=true \
+          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=false,EVENT_BROKER_REDIS_CONSUME_ENABLED=true,REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true,EVENT_BROKER_REDIS_DISPATCH_ENABLED=true,SSE_TRANSIENT_REPLAY_ENABLED=true,SSE_LEASE_REDIS_ENABLED=true \
           --remove-env-vars=REDIS_CONSUME_ENABLED \
           --quiet
     waitFor: [run-migrate-job]

@@ -156,7 +156,8 @@ export class DocsService {
         .from('docs')
         .select('id, parent_id, title, slug, icon, sort_order, is_folder, updated_at')
         .eq('project_id', projectId)
-        .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
+        // story #2167: slug 도 검색 대상 — BE search_vector(migration 0206)와 대상 필드 정합.
+        .or(`title.ilike.%${query}%,slug.ilike.%${query}%,content.ilike.%${query}%`)
         .order('updated_at', { ascending: false });
       if (input?.tags?.length) builder = (builder as unknown as { contains: (col: string, val: string[]) => typeof builder }).contains('tags', input.tags);
       if (input?.cursor) builder = builder.lt('updated_at', input.cursor);

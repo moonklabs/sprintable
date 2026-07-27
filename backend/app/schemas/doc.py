@@ -55,6 +55,7 @@ class DocSummaryResponse(BaseModel):
     doc_type: str
     is_folder: bool
     tags: list[str]
+    created_at: datetime
     updated_at: datetime
     snippet: str | None = None
     # doc-payload enrich(slug-query 단건 경로): FE 상세 fetchDoc 이 GET /api/docs?slug= 를 쓰므로 이 응답에도

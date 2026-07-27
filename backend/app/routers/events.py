@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
+import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -46,6 +48,51 @@ import os as _os
 _MAX_SSE_CONNECTIONS: int = int(_os.getenv("MAX_SSE_CONNECTIONS", "100"))
 _sse_connection_count: int = 0
 _SSE_HEARTBEAT_TIMEOUT: float = float(_os.getenv("SSE_HEARTBEAT_TIMEOUT", "30"))
+
+# story #2128(2026-07-24, critical) — wall-clock 수명 상한(v2 설계 ①본체). realtime-dev가
+# 이 병으로 죽어 있었다: GCLB 뒤에서 클라 disconnect가 백엔드로 전파 안 되고(코드는 정상 —
+# request.is_disconnected() 체크·finally discard 둘 다 있음), 연결이 Cloud Run 타임아웃
+# (3600s)까지 자연 종료 없이 슬롯을 점유해 640슬롯(concurrency 80×maxInstances 8)이
+# 누적 고갈됐다(관측: 200 SSE 슬롯 점유 중앙값 3601초). 처방 제1원리(오르테가군 판정) —
+# 생명 판정 신호는 "판정 대상이 스스로 갱신할 수 없는 것"이어야 한다: heartbeat/ACK
+# staleness는 신호가 없는 정상 idle 연결(브라우저 EventSource는 out-of-band 신호 자체가
+# 0)을 오살하므로 "가속"으로만 쓰고, wall-clock 상한을 유일한 본체로 둔다. 좀비는 이 축을
+# 스스로 늘릴 수 없다 — 정상 연결도 이 상한에 걸려 재연결되지만 #2101 backfill+Last-Event-ID
+# 재개로 데이터 손실 0.
+#
+# N=90s 근거(2026-07-25 정정 — 최초 판단 600s의 전제가 라이브 관측으로 무너짐):
+# · 최초(600s) 근거는 "#2183 고쳐지면 프론트 60s 컷이 먼저 걸려 600s는 거의 발동 안 하는
+#   백스톱"이었다. 그런데 #2183(+후속 #2488 wall-clock 캡)이 착지한 後 실측(2026-07-25):
+#   upstream 점유시간이 617~659초로 나왔다 — 이게 바로 **이 600s+jitter 캡이 지금 상시
+#   발동 중**이라는 증거다. #2488 자체는 40%만 걸린다(미르코 관측: 같은 탭에서 58.5s/
+#   63.4s 두 무리가 섞여 나옴 — 요청 단위로 새는 경로가 남아있다는 뜻). 즉 "healthy는
+#   거의 안 걸린다"는 전제가 거짓이었고, 실제로는 "프론트 자신의 수명보다 조금 큰 값"
+#   이어야 맞는 자리였다.
+# · 프론트 Cloud Run timeoutSeconds=60은 dev·prod 공통(cloudbuild.yaml `_FRONTEND_TIMEOUT`
+#   단일값·분기별 override 없음 — 2026-07-22 라이브 실측이 코드에 durable화돼 있고, 오르테가군이
+#   2026-07-25 gcloud로 재확認: sprintable-frontend-dev/prod 둘 다 60). 이 컨테이너를 거치는
+#   요청은 healthy든 아니든 60s를 못 넘긴다 — 90s(60s+30s 여유)를 넘겨 사는 upstream은
+#   정의상 "프론트 요청은 죽었는데 upstream만 산" 상태, 즉 이 스토리가 자르려는 그 좀비다.
+# · 재연결 부하 증가 0 — 브라우저는 이미 60s마다 자연 재연결하므로, 90s 캡은 "프론트가
+#   이미 버린 연결"에만 걸린다. healthy 연결의 재연결 주기는 안 바뀐다.
+# · 까심군 AC6 측정(2026-07-25): 클라를 명시적으로 kill한 뒤 36초(3s×12회) 폴링해도
+#   `request.is_disconnected()`가 미검출(전부 online) — heartbeat 30s 경계를 넘겨도 감지가
+#   안 된다는 뜻이라, presence 수렴이 이 캡값 하나에 통째로 묶여 있다(감지가 안 되니
+#   스트림은 캡까지 안 죽고, presence는 스트림이 죽어야 내려간다). 캡을 내리면 그 수렴
+#   상한도 동일하게 내려가 사용자 체감이 실제로 달라진다 — "안 새게 막았다"를 넘어
+#   "새는 동안의 피해가 줄었다"는 근거가 이번엔 붙는다.
+# · 에이전트 경로(1800s)는 안 건드린다 — 프론트를 안 거치므로 이 전제 자체가 무관하다.
+#
+# 무너지는 조건(pinning 테스트 — tests/test_2128_sse_lifespan_cap.py 참조): "healthy 브라우저
+# upstream이 90s를 넘겨야 하는 정당한 경로가 실제로 관측되면"(예: 프론트 timeoutSeconds가
+# 60이 아닌 환경이 생기면, 또는 프론트를 거치지 않는 새 브라우저 연결 경로가 생기면) 이
+# 값을 재검토해야 한다 — 지금은 그런 경로 없음(프론트 경유가 유일한 브라우저 진입점).
+#
+# 배포 env가 아니라 코드 상수 — #2161 AGENT_RUN_TIMEOUT_HOURS와 동형(값이 두 곳에 살면
+# 오늘 하루 종일 데인 그 모양이 된다는 오르테가군 지적).
+_SSE_LIFESPAN_SEC: float = 90.0
+_SSE_LIFESPAN_JITTER_SEC: float = 15.0  # herd 방지(#2095 지터와 동일 목적) — base가 600→90로
+# 줄어든 만큼 비례 축소(기존 60s 지터를 그대로 두면 90s 기준 최대 +67% 변동이라 과도).
 
 # ─── S6-1: Backfill 볼륨 제어 ─────────────────────────────────────────────────
 _BACKFILL_THRESHOLD_SECONDS: int = int(_os.getenv("BACKFILL_THRESHOLD_SECONDS", "300"))
@@ -107,6 +154,22 @@ def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) 
 
     _from_listener=True: LISTEN 수신기에서 호출 시 pg_notify 재발행 금지 (무한 루프 차단).
     """
+    is_db_backed = bool(payload.get("event_id"))
+    # #2158 리뷰 반영(오르테가군 ①, 2026-07-24 — PR 전 지적): DB event_id가 없는 B계열은
+    # 발행 시점에 안정적 id를 **한 번만** 부여한다. 이전엔 generate()의 라이브 루프가 yield
+    # 시점마다 `uuid.uuid4()`를 새로 만들었는데(eid=None이라), 같은 논리적 이벤트가 배달
+    # 경로(라이브 vs 재생, 또는 다중 탭)마다 다른 id를 얻어 클라 SeenIdsCache dedup이
+    # 구조적으로 무력했다 — "같은 걸 다시 받아도 다른 id라 못 잡는" 상태. 여기서 한 번
+    # 정해두면 라이브 전달·Redis 재생 버퍼·다중 탭이 전부 같은 id를 쓴다.
+    # 필드명이 `event_id`가 아니라 `_sse_transient_id`인 이유: 이 값이 `event_id`였다면
+    # 아래 generate() 라이브 루프의 "eid 있으면 DB Event.status 조회" 분기가 이 가짜
+    # id로도 매 배달마다 DB를 때려(존재하지 않는 id라 매번 miss) AC3(hot-path DB 0)를
+    # 스스로 깬다 — A/B 판별 신호(`event_id`)와 상관관계 신호(id: 필드)를 분리한다.
+    # `_from_listener=True`(크로스인스턴스 리스너 콜백) 경로는 원발행 인스턴스가 이미 실어
+    # 보낸 값을 그대로 쓴다(`"_sse_transient_id" not in payload`) — 재할당하면 인스턴스마다
+    # 다른 id가 생겨 위 목적이 무효화된다.
+    if not is_db_backed and "_sse_transient_id" not in payload:
+        payload = {**payload, "_sse_transient_id": str(uuid.uuid4())}
     queues = _agent_connections.get(member_id)
     pushed = False
     if queues:
@@ -129,6 +192,15 @@ def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) 
         from app.services.event_broker import event_broker
         from app.services.pg_pubsub import fire_and_forget
         fire_and_forget(event_broker.publish("agent", member_id, payload.get("event_type", ""), payload))
+        # #2158: DB event_id가 없는 B계열(transient push — conversation.read·presence·
+        # conversation.working 등)만 재생 버퍼에 기록한다. A계열(event_id 有)은 DB backfill이
+        # 이미 커버하므로 여기서도 기록하면 재연결 시 이중배달(구조적으로 막아야 하는 것,
+        # AC2). `not _from_listener` 가드와 같은 자리에 둔 이유: 멀티인스턴스에서 원발행
+        # 인스턴스 1곳에서만 1회 기록해야(리스너 콜백마다 기록하면 인스턴스 수만큼 중복
+        # 기록) — event_broker.publish 호출과 동일하게 "원발행 1회"에만 태운다.
+        if not is_db_backed:
+            from app.services import sse_transient_replay
+            fire_and_forget(sse_transient_replay.record(member_id, payload))
     return pushed
 
 
@@ -304,6 +376,10 @@ async def agent_event_stream(
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=200)
     _agent_connections[member_id_str].add(queue)
 
+    # story #2128: 연결 시작 시점에 이미 종료 예정 시각을 갖고 태어난다(#2161과 동일 원리 —
+    # "시작할 때 이미 끝날 시각을 갖고 태어나게"). monotonic — 벽시계 조정에 영향 안 받음.
+    _lifespan_deadline = time.monotonic() + _SSE_LIFESPAN_SEC + random.uniform(0, _SSE_LIFESPAN_JITTER_SEC)
+
     async def generate():
         try:
             # 즉시 heartbeat → HTTP 응답 헤더 즉시 반환 (대량 백필 전 hang 방지)
@@ -394,6 +470,25 @@ async def agent_event_stream(
                         evt.delivered_at = now
                     await db.commit()
 
+            # #2158: B계열(DB event_id 없는 transient push) 재연결 갭 재생. 위 A계열 DB
+            # backfill과 같은 커서(`_ref`)를 재사용 — last_event_id가 A계열 Event를 가리키면
+            # 그 created_at, since_timestamp만 있으면 그 값, 둘 다 없으면(초기 연결 또는
+            # last_event_id가 B계열 id라 DB에 없어 못 구한 경우) replay()가 자체 TTL
+            # 윈도우로 하한을 잡는다(무한 재생 방지). A/B가 저장소로 분리돼 있어(Event 테이블
+            # vs Redis ZSET) 이 replay가 위 backfill과 겹쳐 중복 배달할 일은 구조적으로 없다.
+            from app.services import sse_transient_replay
+            _replay_cutoff = _ref.timestamp() if _ref is not None else None
+            for _r_payload in await sse_transient_replay.replay(member_id_str, since=_replay_cutoff):
+                _r_event_type = _r_payload.get("event_type", "message")
+                # #2158 리뷰 반영(오르테가군 ①): 원 push가 부여한 id를 그대로 재사용 —
+                # 여기서 새 uuid4를 만들면 이미 라이브로 받은 탭(또는 다른 재연결)이 받은
+                # id와 달라져 클라 SeenIdsCache dedup이 같은 이벤트를 다른 걸로 오판한다.
+                _r_id = _r_payload.pop("_sse_transient_id", None) or str(uuid.uuid4())
+                yield (
+                    f"event: {_r_event_type}\nid: {_r_id}\n"
+                    f"data: {json.dumps({**_r_payload, 'event_id': _r_id, 'is_backfill': True})}\n\n"
+                )
+
             # 신규 이벤트 리슨 — 대기 구간에서 커넥션 미점유, 이벤트마다 개별 세션
             # story c4c72eb1(E-ARCH GCE 이전) PR-A: 전역 shutdown_event를 queue.get()과 경합
             # 시켜(asyncio.wait FIRST_COMPLETED) 셧다운 신호에 하트비트 주기(최대 30초)를
@@ -405,6 +500,13 @@ async def agent_event_stream(
             shutdown_wait_task = asyncio.create_task(_shutdown_module.shutdown_event.wait())
             try:
                 while not await request.is_disconnected():
+                    # story #2128 ①본체: 좀비가 스스로 늘릴 수 없는 유일한 축 — disconnect
+                    # 감지 여부와 완전히 무관하게 발동(그게 이 방어선의 존재 이유). "완료로
+                    # 위장" 안 함 — 아래에서 특별취급 없이 기존 finally: 하나로 그대로 흘러간다
+                    # (정상종료·이상종료·수명초과 전부 같은 정리 경로, #2161 CAS 원칙의 적용).
+                    if time.monotonic() >= _lifespan_deadline:
+                        yield "event: lifespan_reconnect\ndata: {}\n\n"
+                        return
                     get_task = asyncio.create_task(queue.get())
                     try:
                         done, _pending = await asyncio.wait(
@@ -447,7 +549,13 @@ async def agent_event_stream(
                                 pass
                         # event_id 없는 경로(chats direct push 등)도 id: 보장 — 재연결 추적 약화 방지
                         # is_backfill: False 명시 + event_id 동기화 — SeenIdsCache dedup 및 relay 필터 정합성
-                        _live_id = eid or str(uuid.uuid4())
+                        # #2158: B계열은 `_push_to_agent`가 발행 시점에 부여한 `_sse_transient_id`를
+                        # 우선 사용(eid가 없을 때) — 여기서 매번 새 uuid4를 만들면 같은 논리적
+                        # 이벤트가 라이브 배달마다·재생 버퍼 배달과 서로 다른 id를 얻어 클라
+                        # dedup이 무력화된다(오르테가군 PR 전 리뷰 ①). 내부 필드는 event_id로
+                        # 대체돼 나가므로 원본 dict에서 제거(클라에 내부 키 노출 방지).
+                        _transient_id = event_data.pop("_sse_transient_id", None)
+                        _live_id = eid or _transient_id or str(uuid.uuid4())
                         _sse_data = json.dumps({**event_data, 'event_id': _live_id, 'is_backfill': False})
                         # S-COMM-12: canonical 이벤트 시 legacy alias도 병행 yield (HTTP SSE 하위호환)
                         if event_type == "conversation.message_created":

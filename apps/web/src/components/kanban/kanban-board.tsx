@@ -280,6 +280,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       status?: string;
       assignee_id?: string | null;
       assignees?: string[];
+      position?: number;
     };
     if (!payload.story_id || !payload.project_id || payload.project_id !== projectId) return;
     // 내 액션의 echo는 무시 — 이미 낙관 갱신했으므로 중복 패치·토스트 스팸을 방지한다.
@@ -299,6 +300,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       // 손으로 두 필드를 따로 계산하던 자리(#2130 근본)를 구조로 제거.
       const assigneePatch = normalizeAssigneePatch({ assignee_id: payload.assignee_id, assignee_ids: payload.assignees });
       patchStoryFromSse(payload.story_id, assigneePatch);
+    } else if (eventName === 'story.position_changed' && typeof payload.position === 'number' && payload.position !== existing.position) {
+      // story #2172 AC5 — BE는 이미 발행하고 있었으나(#2476) FE 구독이 없어 "프레임은 나가는데
+      // 아무도 안 받는" 죽은 경로였다(#2131이 고친 "프레임이 출발조차 안 함"의 거울상). 컬럼
+      // 렌더가 이미 position으로 정렬하므로(위 columnStories 계산부) position만 patch하면
+      // 재정렬은 그 정렬 로직이 그대로 이어받는다 — 별도 재배치 코드 불요.
+      patchStoryFromSse(payload.story_id, { position: payload.position });
     } else {
       return;
     }
@@ -310,13 +317,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       type: 'info',
       title: eventName === 'story.status_changed'
         ? t('realtimeStatusChanged', { actor: actorLabel, title: titleForToast })
-        : t('realtimeAssigneeChanged', { actor: actorLabel, title: titleForToast }),
+        : eventName === 'story.assignee_changed'
+          ? t('realtimeAssigneeChanged', { actor: actorLabel, title: titleForToast })
+          : t('realtimePositionChanged', { actor: actorLabel, title: titleForToast }),
     });
   }, [projectId, currentTeamMemberId, stories, adjustColumnTotal, addToast, t, patchStoryFromSse]);
 
   useSseNotifications({
     memberId: currentTeamMemberId,
-    extraEventNames: ['story.status_changed', 'story.assignee_changed'],
+    extraEventNames: ['story.status_changed', 'story.assignee_changed', 'story.position_changed'],
     onExtraEvent: handleBoardSseEvent,
   });
 

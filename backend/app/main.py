@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -12,7 +11,31 @@ from app.core.config import settings
 from app.core.logging_config import configure_logging
 from app.core.rate_limit import limiter
 
-configure_logging(json_logs=os.getenv("APP_ENV", "development") != "development")
+# story #2179(2026-07-24, 오르테가군 판정) 근본수정 — 예전엔 `APP_ENV` 문자열 비교로 JSON
+# 로그 여부를 갈랐다("development"가 아니면 JSON). 그런데 JSON 로그가 필요한 진짜 조건은
+# "어느 환경인가"가 아니라 "Cloud Logging으로 나가는가" = "Cloud Run/GCE에서 도는가"다 —
+# 환경 이름 컨벤션이 갈리면(dev/development·prod/production 등, #2179 조사에서 실제로 이미
+# 코드베이스 전역에서 일관성이 깨져 있는 것 확認됨) 그 판정이 조용히 틀어진다(dev Cloud Run이
+# APP_ENV 미설정으로 기본값 "development"를 상속해 텍스트 포매터를 타면서, story
+# #2176(emit 구간 계측)·P1-S8(RAG 검색 계측)·llm_client(LLM 비용/토큰 계측)의 구조화 필드가
+# 전부 조용히 버려지고 있었다 — 메시지 텍스트만 남고 값이 없었음).
+#
+# `is_really_local`(story #2071→#2152, `app/core/config.py`)이 이미 "이 프로세스가 진짜
+# 로컬인가"를 이름이 아니라 실행 위치 신호로 판정한다(K_SERVICE 존재=Cloud Run 확定·
+# PYTEST_CURRENT_TEST=테스트·SPRINTABLE_LOCAL_DEV=로컬 docker-compose 명시). 이 신호를
+# 뒤집어 json_logs 축으로 재사용하면 환경 이름을 하나도 안 건드리고 dev·prod·GCE·MCP가
+# 전부 자동으로 맞는다(GCE도 K_SERVICE가 없지만 SPRINTABLE_LOCAL_DEV가 없어 is_really_local
+# =False로 정확히 판정됨 — #2152가 이미 해결). 로컬 개발(README 공식 경로인
+# `docker compose up`이 SPRINTABLE_LOCAL_DEV=1을 심음)과 pytest 실행은 그대로 텍스트 로그를
+# 받는다(무회귀).
+# ⚠️판단 하나 남긴다(오르테가군 지적 — 판정 근거뿐 아니라 무너지는 조건까지) — bare
+# `uvicorn` 직접 실행(docker-compose 없이, `SPRINTABLE_LOCAL_DEV` 미설정)은 이 변경으로
+# **텍스트→JSON으로 바뀐다.** README 공식 로컬 개발 경로가 아니라는 이유로 의도적으로 이
+# 영향권에 남겨뒀다 — 다음에 bare uvicorn을 쓰다 "왜 갑자기 JSON이 찍히지" 하고 헤매면
+# `SPRINTABLE_LOCAL_DEV=1`을 직접 설정하거나(docker-compose.yml과 동일 신호) `docker compose
+# up`으로 전환할 것. 이 경로까지 텍스트로 지켜야 한다는 요구가 생기면 그건 새 판단이 필요한
+# 것이지 이 커밋의 누락이 아니다.
+configure_logging(json_logs=not settings.is_really_local)
 _logger = logging.getLogger(__name__)
 
 
@@ -23,6 +46,7 @@ async def lifespan(app: FastAPI):
     from app.routers.auth_firebase_internal import check_internal_secret_config
     from app.routers.cron import check_cron_secret_config
     from app.routers.verdict_capture import warn_if_webhook_secret_misconfigured
+    from app.services.event_broker import check_outbox_dual_publish_config
     from app.services.firebase_verifier import check_mobile_app_check_config
     from app.services.pg_pubsub import check_listen_config, listen_loop
 
@@ -59,6 +83,7 @@ async def lifespan(app: FastAPI):
         check_listen_config()  # ee7794eb ③ fail-closed: DB_PGBOUNCER on + DATABASE_URL_DIRECT 없으면 startup raise.
     check_internal_secret_config()  # 산티아고 §9 finding 4: non-local + 시크릿 미설정 fail-closed.
     check_cron_secret_config()  # story #2072: non-local + CRON_SECRET 미설정 fail-closed.
+    check_outbox_dual_publish_config()  # story #2138: outbox + dual_publish/dispatch 동시 fail-closed.
     check_mobile_app_check_config()  # 산티아고 §9 finding 1: mobile 발급 on + App Check 미필수 fail-closed.
     # story bea25062: cutover 존재-캐시는 의도적으로 startup에서 warm 안 함(자체 발견 —
     # TestClient(app)로 lifespan을 태우는 기존 SSE 테스트들이 라우트 전용으로 짜둔 유한한

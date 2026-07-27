@@ -1,0 +1,77 @@
+name: Serving Reality Guard
+
+# ⓓ 배포 실효 가드(story #2174) — "배포 성공"과 "사용자에게 도달"이 다른 것을 잡는다.
+#
+# ⚠️**env-drift-guard.yml 에 스텝으로 얹지 않고 별도 워크플로우로 둔다.** 한 job 안에 넣으면
+# 앞 스텝이 exit 1 인 순간 뒤 스텝이 안 돌아 — **가드 하나가 다른 가드를 조용히 끈다.**
+# 그 모양이 정확히 이 스토리가 잡으려는 결함이라, 같은 함정을 워크플로우 층에서 반복하지 않는다.
+# (env-drift-guard.yml 자신도 "독립 스케줄 워크플로우로 둬야 예산과 안 섞인다"고 적어 뒀다.)
+#
+# 주기: 6시간마다. 일 1회로 두면 실패한 배포를 최대 24시간 모른다 — 이 가드를 만들게 한
+# 표본 B 가 **5일**이었고, 표본 A 가 **22시간**이었다. 검사 비용은 서비스 11개 describe 라
+# 사실상 0 이므로 주기를 짧게 잡는 쪽의 손해가 없다.
+on:
+  schedule:
+    - cron: '15 */6 * * *'  # 00:15·06:15·12:15·18:15 UTC (env-drift-guard 와 시각 분리)
+  workflow_dispatch: {}     # 배포 직후 온디맨드 확認용
+
+concurrency:
+  group: serving-reality-guard
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write  # Workload Identity Federation
+
+jobs:
+  serving-check:
+    name: Check serving reality
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # env-drift-guard.yml 과 동일 WIF 패턴 재사용 — 신규 시크릿 불필요.
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install --quiet pyyaml
+
+      # ⚠️이 스크립트는 앱 런타임을 import 하지 않는다(gcloud + yaml 파싱만) — story #2135 에서
+      # 배운 것: infra 도구가 앱 의존성을 import 하면 이 가벼운 CI 에서 매일 크래시한다.
+      - name: Run serving reality check
+        id: serving
+        run: python3 infra/check_serving_reality.py
+
+      # ⛔"알림 불가 → 조용히 스킵" 금지 — 그러면 감시가 꺼졌는데 켜진 것처럼 보인다.
+      # env-drift-guard.yml 과 같은 규율(웹훅 미등록 자체를 실패로 만든다).
+      - name: Notify on serving-reality failure (Discord)
+        if: failure() && steps.serving.outcome == 'failure'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.ENV_DRIFT_GUARD_DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "::error::ENV_DRIFT_GUARD_DISCORD_WEBHOOK_URL 미등록 — 배포 실효 문제를 감지했는데 알릴 방법이 없다. 이 자체가 실패여야 하는(PO 시크릿 등록 필요) — GHA 스케줄 워크플로우 실패 통지가 최소 폴백."
+            exit 1
+          fi
+          curl -fsS -X POST "${DISCORD_WEBHOOK_URL}" \
+            -H "Content-Type: application/json" \
+            -d "$(printf '{"content":"⛔ 배포 실효 가드 FAIL — 배포는 성공했는데 사용자에게 안 닿고 있을 수 있다. 상세: %s"}' "${RUN_URL}")"

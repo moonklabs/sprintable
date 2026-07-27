@@ -19,6 +19,10 @@ interface ChatViewProps {
   currentTeamMemberId: string;
   projectId?: string;
   apiPrefix?: string;
+  // story #2032 AC4: ESC로 나갈 목적지. router.replace()로 이동한다(router.back()/
+  // window.history.back() 직접호출 금지 — [[feedback-history-back-nextjs]] 하우스룰,
+  // #2266이 이미 이 페이지의 헤더 백버튼에 적용한 것과 동일 패턴).
+  backHref?: string;
   // S8 #2: pre-send capability 경고 대상(에이전트 participant runtime). 빈 배열이면 경고 미표시(graceful).
   commandTargets?: CommandTarget[];
   // 1aeecdde P2: 에이전트 member_id → presence_status(연결축 dot). 없으면 dot 미표시(graceful).
@@ -51,7 +55,7 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
-export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
@@ -663,11 +667,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
           {/* Input */}
           <ChatInput
+            threadId={threadId}
             onSend={handleSend}
             onUploadFile={handleUploadFile}
             projectId={projectId}
             commandTargets={commandTargets}
             placeholder={isMobile ? t('inputPlaceholderMobile') : t('inputPlaceholderFull')}
+            onEscape={() => router.replace(backHref)}
           />
         </div>
 

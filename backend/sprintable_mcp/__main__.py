@@ -26,7 +26,18 @@ async def _setup() -> list[str] | None:
 
 def main() -> None:
     if not settings.sprintable_api_url:
-        print("Error: SPRINTABLE_API_URL environment variable required", file=sys.stderr)
+        # story #2166(2026-07-25, 까심 QA): 이전엔 "required"만 찍고 값이 무엇인지·어디서
+        # 얻는지 0였다 — OSS 사용자의 첫 명령이 안내 없이 죽는 첫인상 결함이었다. self-host
+        # 예시(docker-compose 기본 backend 포트 8000)만 값으로 박는다 — prod URL을 여기
+        # 하드코딩하면 self-host 사용자를 조용히 우리 백엔드로 연결시키는 더 나쁜 결함이 된다
+        # (①을 기본값으로도 채택 안 한 이유와 동일 근거).
+        print(
+            "Error: SPRINTABLE_API_URL environment variable required "
+            "(the base URL of your Sprintable backend).\n"
+            "  Self-hosting (docker compose up)? Try: export SPRINTABLE_API_URL=http://localhost:8000\n"
+            "  Using a hosted Sprintable instance? See https://pypi.org/project/sprintable/ for the URL to use.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # E-MCP-HTTP S1: transport 분기. http=외부/Poke(per-request bearer·startup env-key auth/filter 없음·

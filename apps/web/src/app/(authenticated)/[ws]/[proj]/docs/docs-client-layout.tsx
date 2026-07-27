@@ -8,20 +8,27 @@ import { useHideOnScroll } from '@/lib/use-hide-on-scroll';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { DocTree } from '@/components/docs/doc-tree';
+import { DocAutoGroups } from '@/components/docs/doc-auto-groups';
 import { RecentsSection } from '@/components/docs/recents-section';
 import { useRecentDocs } from '@/components/docs/use-recent-docs';
 import { TreeSearchInput } from '@/components/docs/tree-search-input';
-import { useTreeFilter } from '@/components/docs/use-tree-filter';
+import { DocSearchResults, type DocSearchResult } from '@/components/docs/doc-search-results';
 import { useTreeExpanded } from '@/components/docs/use-tree-expanded';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChevronDown, ChevronLeft, ChevronRight, FileText, Plus, X } from 'lucide-react';
-import { DocsLayoutContext, type Doc, type DocUpdate } from './docs-context';
+import { DocsLayoutContext, type Doc, type DocSortMode, type DocUpdate } from './docs-context';
 import { useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
+
+// story #2167: BE search_full_text 의 limit(doc.py:83)과 동일 값 — 화면에 "상위 N건" 문구를
+// 낼 때 실제 서버 cap과 어긋나지 않게 한 곳에서만 선언한다.
+const DOC_SEARCH_LIMIT = 50;
+// story #2167: 타이핑 매 keystroke마다 서버를 안 치도록 최소 지연(ms).
+const DOC_SEARCH_DEBOUNCE_MS = 250;
 
 interface DocsClientLayoutProps {
   children: React.ReactNode;
@@ -63,7 +70,70 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   const [docsLoadingMore, setDocsLoadingMore] = useState(false);
   const [tagsCollapsed, setTagsCollapsed] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const { isSearching, visibleIds, matchedIds } = useTreeFilter(tree, searchQuery);
+  const isSearching = searchQuery.trim().length > 0;
+  const [searchResults, setSearchResults] = useState<DocSearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+
+  // story #2167(2026-07-25, 까심, PO 판정 (나)): 검색어가 있을 때 "이 문서가 있는가"의 답은
+  // 서버 전문검색(search_vector — slug 포함, migration 0206)만이 낸다. 로컬 트리(tree state)는
+  // 페이지네이션된 사본이라 아직 안 로드된 문서는 로컬필터로 걸러도 못 찾는다 — 그 반쪽짜리
+  // 상태를 피하려고 검색-모드는 전량 서버 결과로 갈아끼운다(DocSearchResults, 플랫 리스트).
+  // 디바운스: 매 keystroke 요청 방지. AbortController: 늦게 도착한 stale 응답이 최신 타이핑
+  // 결과를 덮어쓰는 레이스 방지.
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q || !projectId) { setSearchResults([]); setSearchLoading(false); return; }
+
+    setSearchLoading(true);
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void fetch(`/api/docs?project_id=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q)}&limit=${DOC_SEARCH_LIMIT}`, { signal: controller.signal })
+        .then((res) => (res.ok ? res.json() : { data: [] }))
+        .then((json: { data?: DocSearchResult[] }) => {
+          setSearchResults(json.data ?? []);
+          setSearchLoading(false);
+        })
+        .catch((err) => {
+          if (err?.name === 'AbortError') return;
+          setSearchResults([]);
+          setSearchLoading(false);
+        });
+    }, DOC_SEARCH_DEBOUNCE_MS);
+
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [searchQuery, projectId]);
+
+  // story #2167: 트리 표시 정렬 — 'manual'(sort_order·드래그로 바뀜, 기본값) / 'title' / 'updated_at'.
+  // 프로젝트별 저장(기존 docs-sidebar-collapsed·use-tree-expanded와 동일 localStorage 패턴).
+  // 표시 전용 — sort_order 값 자체는 이 토글로 절대 바뀌지 않는다(doc-tree.tsx compareDocsForSort
+  // 참고). 'manual'로 돌아오면 드래그로 정한 순서가 그대로 남아있다.
+  const [sortMode, setSortModeState] = useState<DocSortMode>('manual');
+  useEffect(() => {
+    if (!projectId) return;
+    const saved = localStorage.getItem(`docs-sort-mode:${projectId}`);
+    if (saved === 'manual' || saved === 'title' || saved === 'updated_at') setSortModeState(saved);
+    else setSortModeState('manual');
+  }, [projectId]);
+  const setSortMode = useCallback((mode: DocSortMode) => {
+    setSortModeState(mode);
+    if (projectId) localStorage.setItem(`docs-sort-mode:${projectId}`, mode);
+  }, [projectId]);
+
+  // story #2193 — "자동 묶음"(slug 접두어로 그룹, 폴더 소속과 무관) / "내 폴더"(기존 DocTree,
+  // 변경 없음) 전환. 기본값을 반드시 grouped로 둔다 — "내 폴더"를 기본으로 두면 폴더에 실제
+  // 담긴 13%(80/619)만 먼저 보여주고 나머지 87%는 한 번 더 탭을 눌러야 보이는 것이 되어,
+  // 이 스토리가 없애려는 문제(폴더 담김 여부에 발견 가능성이 좌우되는 것) 자체를 탭 순서로
+  // 재현하게 된다. 폴더는 그대로 남아 원하는 사람은 "내 폴더"로 전환해 쓴다.
+  const [viewMode, setViewModeState] = useState<'grouped' | 'folders'>('grouped');
+  useEffect(() => {
+    if (!projectId) return;
+    const saved = localStorage.getItem(`docs-view-mode:${projectId}`);
+    if (saved === 'grouped' || saved === 'folders') setViewModeState(saved);
+  }, [projectId]);
+  const setViewMode = useCallback((mode: 'grouped' | 'folders') => {
+    setViewModeState(mode);
+    if (projectId) localStorage.setItem(`docs-view-mode:${projectId}`, mode);
+  }, [projectId]);
 
   const [pendingDocUpdate, setPendingDocUpdate] = useState<DocUpdate | null>(null);
   const clearPendingDocUpdate = useCallback(() => setPendingDocUpdate(null), []);
@@ -134,8 +204,9 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     } catch { await fetchTree(); }
   }, [fetchTree]);
 
-  const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission') => {
+  const handleMoveDenied = useCallback((reason: 'circular' | 'no-permission' | 'sort-mode-active') => {
     if (reason === 'circular') addToast({ title: t('moveCircularError'), type: 'error' });
+    else if (reason === 'sort-mode-active') addToast({ title: t('moveSortModeActiveError'), type: 'warning' });
     else addToast({ title: t('movePermissionError'), type: 'warning' });
   }, [addToast, t]);
 
@@ -172,7 +243,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       });
       if (!res.ok) throw new Error('Failed to create doc');
       const { data } = await res.json();
-      setTree((prev) => [{ id: data.id, parent_id: data.parent_id || null, title: data.title, slug: data.slug, icon: data.icon || null, sort_order: data.sort_order || 0, is_folder: data.is_folder || false }, ...prev]);
+      setTree((prev) => [{ id: data.id, parent_id: data.parent_id || null, title: data.title, slug: data.slug, icon: data.icon || null, sort_order: data.sort_order || 0, is_folder: data.is_folder || false, updated_at: data.updated_at }, ...prev]);
       // story a539c649 S2 — doc-project-url.ts 헤더 참고(#2154 구조적 소거).
       router.push(newDocUrl(wsSlug, projSlug, data.slug));
     } catch {
@@ -214,12 +285,53 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         onChange={setSearchQuery}
         onClear={() => setSearchQuery('')}
         isSearching={isSearching}
-        matchCount={matchedIds.size}
+        matchCount={searchResults.length}
         placeholder={t('searchTree')}
         clearLabel={t('clearSearch')}
         noResultsLabel={t('searchNoResults')}
         resultCountLabel={(n) => t('searchResultCount', { count: n })}
       />
+      {/* story #2193 — "자동 묶음"(slug 접두어) / "내 폴더"(기존 트리) 전환. 검색 중엔
+          숨긴다(서버 전문검색 결과가 이미 답이라 그룹/트리 뷰 자체가 무의미 — sortMode
+          토글과 동일한 판단). */}
+      {!isSearching && (
+        <div className="flex border-b border-border/60 px-2 pt-1.5">
+          {(['grouped', 'folders'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setViewMode(mode)}
+              className={cn(
+                'flex-1 border-b-2 px-2 pb-1.5 text-[11px] font-medium transition-colors',
+                viewMode === mode
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {mode === 'grouped' ? t('viewModeGrouped') : t('viewModeFolders')}
+            </button>
+          ))}
+        </div>
+      )}
+      {/* story #2167: 검색어 없을 때만 노출 — 검색 결과(서버 전문검색)는 ts_rank 관련도순이라
+          사용자가 고를 정렬 축이 아니다. 정렬은 "브라우징 중인 트리"에만 의미가 있다.
+          #2193: 정렬 토글은 "내 폴더"(기존 트리) 뷰에서만 의미가 있다 — 자동 묶음 뷰는
+          그룹 크기 기준 자체 정렬을 쓴다. */}
+      {!isSearching && viewMode === 'folders' && (
+        <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5">
+          <label htmlFor="docs-sort-mode" className="text-[11px] text-muted-foreground">{t('sortModeLabel')}</label>
+          <select
+            id="docs-sort-mode"
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value as DocSortMode)}
+            className="rounded-md border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground"
+          >
+            <option value="manual">{t('sortModeManual')}</option>
+            <option value="title">{t('sortModeTitle')}</option>
+            <option value="updated_at">{t('sortModeUpdatedAt')}</option>
+          </select>
+        </div>
+      )}
       {!isSearching && (() => {
         const allTags = [...new Set(tree.flatMap((d) => (d as unknown as { tags?: string[] | null }).tags ?? []))];
         if (allTags.length === 0) return null;
@@ -248,24 +360,49 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         );
       })()}
       <div className="flex-1 overflow-y-auto p-2">
-        {loading ? (
+        {isSearching ? (
+          <DocSearchResults
+            results={searchResults}
+            loading={searchLoading}
+            selectedSlug={currentSlug}
+            onSelect={handleSelectDoc}
+            loadingLabel={t('searchLoading')}
+            noResultsLabel={t('searchNoResults')}
+            resultCountLabel={(n) => t('searchResultCount', { count: n })}
+            cappedLabel={t('searchResultsCapped', { count: DOC_SEARCH_LIMIT })}
+            cap={DOC_SEARCH_LIMIT}
+          />
+        ) : loading ? (
           <p className="px-2 py-4 text-xs text-muted-foreground">{t('loading')}</p>
         ) : tree.length === 0 ? (
           <EmptyState title={t('title')} description={t('selectDoc')} className="mt-2 bg-background/70" action={<Button size="sm" onClick={handleNewDoc}><Plus className="mr-1 h-4 w-4" />{t('newDoc')}</Button>} />
         ) : (
           <>
-            {!isSearching && (
-              <RecentsSection
-                recentSlugs={recentSlugs}
+            <RecentsSection
+              recentSlugs={recentSlugs}
+              docs={tree}
+              selectedSlug={currentSlug}
+              onSelect={handleSelectDoc}
+              label={t('recentDocs')}
+              emptyLabel={t('noRecentDocs')}
+            />
+            {viewMode === 'grouped' ? (
+              <DocAutoGroups
                 docs={tree}
                 selectedSlug={currentSlug}
                 onSelect={handleSelectDoc}
-                label={t('recentDocs')}
-                emptyLabel={t('noRecentDocs')}
+                inFolderLabel={t('groupInFolder')}
+                looseAtRootLabel={t('groupLooseAtRoot')}
+                thisMonthLabel={t('groupThisMonth')}
+                lastMonthLabel={t('groupLastMonth')}
+                olderLabel={t('groupOlder')}
+                unknownDateLabel={t('groupUnknownDate')}
+                moreLabel={(count) => t('groupMore', { count })}
               />
+            ) : (
+              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} projectId={projectId} sortMode={sortMode} />
             )}
-            <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} projectId={projectId} visibleIds={visibleIds} matchedIds={matchedIds} searchQuery={searchQuery} isSearching={isSearching} />
-            {!isSearching && docsHasMore && (
+            {viewMode === 'folders' && docsHasMore && (
               <div className="px-2 py-1">
                 <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" disabled={docsLoadingMore} onClick={() => { if (!docsNextCursor || docsLoadingMore) return; setDocsLoadingMore(true); void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor); }}>
                   {docsLoadingMore ? tc('loading') : tc('loadMore')}

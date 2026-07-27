@@ -149,9 +149,16 @@ export function ThreadPanel({
 
       {/* Input */}
       <ChatInput
+        // story #2032: 스레드 답글 초안은 부모 대화의 본문 초안과 같은 슬롯을 쓰면 서로
+        // 덮어써 사고가 난다(AC3, "A 대화 초안이 B 대화에 나타나면 사고"와 같은 클래스) —
+        // conversationId만이 아니라 parentMessage.id까지 합성해 스레드별로도 분리한다.
+        threadId={`${conversationId}:thread:${parentMessage.id}`}
         onSend={handleSend}
         projectId={projectId}
         placeholder="답글을 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈)"
+        // story #2032 AC5류 우선순위 — 스레드 패널이 열린 상태에서 ESC는 대화 전체를 나가는
+        // 것이 아니라 이 패널을 먼저 닫는다(중첩 오버레이는 안쪽부터 닫히는 것과 동형).
+        onEscape={onClose}
       />
     </div>
   );
