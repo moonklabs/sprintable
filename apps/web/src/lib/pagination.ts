@@ -27,6 +27,41 @@ export function parseCursorPageInput(input?: CursorPageInput, defaults?: { defau
   };
 }
 
+/**
+ * story #2231 AC4 — 클라이언트가 커서 페이지네이션 meta를 읽는 공용 진입점.
+ *
+ * 규약 A(#2231)는 두 가지 합법적인 표기로 온다: BE가 직접 내는 응답은 snake_case
+ * (has_more/next_cursor, 예: comments — #2230 이후), FE 프록시가 buildCursorPageMeta로
+ * 직접 지어내는 응답은 camelCase(hasMore/nextCursor, 예: docs/goals/stories/tasks). 둘 다
+ * "규약 A 안"이라 정상 — 이 함수가 어느 쪽이든 받아 하나로 정규화한다.
+ *
+ * ⛔진짜 문제는 **둘 다 없는 경우**(meta 자체가 없거나, 다른 규약(B/C)이거나, #2230 이전의
+ * 이중포장처럼 meta가 통째로 유실된 경우)를 `json.meta?.nextCursor ?? null` 같은 옵셔널
+ * 체이닝이 "다음 페이지 없음"과 구분 없이 조용히 삼켰다는 것 — 오늘 그 병의 정확한 모양이다.
+ * 이 함수는 그 경우를 삼키지 않는다: 화면은 "더 보기 없음"으로 안전하게 낙하시키되(부분실패로
+ * 전면 에러를 만들지 않는 house style 유지), console.error로 시끄럽게 드러낸다.
+ */
+export function parseCursorMeta(meta: unknown, source: string): CursorPageMeta {
+  if (meta && typeof meta === 'object') {
+    const m = meta as Record<string, unknown>;
+    const hasCamel = typeof m['hasMore'] === 'boolean';
+    const hasSnake = typeof m['has_more'] === 'boolean';
+    if (hasCamel || hasSnake) {
+      const hasMore = (hasCamel ? m['hasMore'] : m['has_more']) as boolean;
+      const nextCursorRaw = hasCamel ? m['nextCursor'] : m['next_cursor'];
+      const nextCursor = typeof nextCursorRaw === 'string' ? nextCursorRaw : null;
+      const limit = typeof m['limit'] === 'number' ? m['limit'] : 0;
+      return { ...m, limit, hasMore, nextCursor };
+    }
+  }
+  console.error(
+    `[pagination] ${source}: cursor page meta가 규약 A(hasMore/has_more) 형태가 아니다 — ` +
+    `"더 보기 없음"으로 낙하하지만 실제로는 더 있을 수 있다(story #2231 AC4). meta=`,
+    meta,
+  );
+  return { limit: 0, hasMore: false, nextCursor: null };
+}
+
 export function buildCursorPageMeta<T extends object, K extends keyof T & string>(
   rows: T[] | null | undefined,
   limit: number,
