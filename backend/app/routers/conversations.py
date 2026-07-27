@@ -12,13 +12,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import and_, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
-from app.models.project import OrgMember
+from app.models.project import OrgMember, Project
 from app.models.team import AgentMessageAllowlist, TeamMember
 from app.models.agent_deployment import AgentAuditLog
 from app.models.webhook_config import WebhookConfig
@@ -37,6 +38,7 @@ from app.services.member_resolver import (
     resolve_member,
     resolve_member_identity,
 )
+from app.services.project_auth import project_access_valid_correlated
 from app.services.storage import get_storage_provider
 
 logger = logging.getLogger(__name__)
@@ -1053,6 +1055,83 @@ async def get_unread_count_total(
     sender = await _resolve_member(auth, org_id, db)
     total = (await db.execute(_total_unread_count_stmt(sender.id))).scalar_one()
     return {"count": int(total)}
+
+
+@router.get("/recent-outside-project")
+async def list_recent_conversations_outside_project(
+    project_id: uuid.UUID = Query(..., description="현재 보고 있는 프로젝트(제외 대상)"),
+    limit: int = Query(default=5, ge=1, le=5),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """GET /api/v2/conversations/recent-outside-project — story #2168 PR-② BE.
+
+    현재 프로젝트 **밖**에서 caller가 참여 중인 대화 최근 5개. 정렬 축은 유나·오르테가군
+    승인 스펙(2026-07-27) 그대로 caller 자신의 `ConversationParticipant.last_read_at`
+    (내가 마지막으로 들어간 시각) DESC — ⛔ 대화의 마지막 메시지 시각이 아니다(크로스-프로젝트
+    목록에서 그 축은 "남이 더 떠든 방이 위로 온다"는 소음이 된다, 스펙 문구 그대로).
+    NULL(한 번도 안 들어간 참여)은 가장 오래 전 취급으로 정렬 뒤로 밀린다(`nulls_last()`).
+
+    인가(스펙 실패-자리 "수동 사라짐=조용히 빠짐, 무알림"의 BE 축): FE가 나중에 403/404로
+    거르는 게 아니라 **이 쿼리 자체가** 지금 시점 접근 불가 대화를 담지 않는다 —
+    `project_access_valid_correlated`(project_auth.py, `has_project_access`와 동일
+    SSOT `_project_access_predicate` 재사용, story #1994 5회차가 확립한 "참가 행은 남아도
+    project_access 회수 시 못 읽는다" 불변식)를 메인 statement의 WHERE절에 직접 correlate —
+    별도 SELECT로 "접근 가능 project 집합"을 먼저 만들어 `.in_()`으로 거르는 2-phase가 아니라
+    같은 스냅샷 안에서 평가되는 correlated EXISTS(TOCTOU-by-construction, backlinks.py와 동형).
+
+    admin-bypass(`conversation_readable_predicate`의 우변, agent-only 대화를 관리자에게
+    추가 노출하는 축)는 여기서 의도적으로 미적용 — 이 엔드포인트는 애초에
+    `ConversationParticipant`(caller 자신의 참가 행)를 INNER JOIN해 "내가 참여한 대화"로만
+    후보를 좁힌다(비참여 admin-bypass 대화는 `last_read_at`이라는 정렬 축 자체가 없어
+    "오래 안 들어간 것부터" 캡의 의미론에 애초에 안 낀다 — list_conversations의
+    `include_agent_conversations`처럼 별도 admin 전용 노출 축이 필요하면 그건 이 스토리
+    스코프 밖의 별개 결정).
+    """
+    sender = await _resolve_member(auth, org_id, db, project_id=None)
+    uid = uuid.UUID(str(auth.user_id))
+
+    # 응답용 project 조인은 별도 alias로 둔다 — `project_access_valid_correlated`가 내부에서
+    # 다루는 `Project`와 identity가 겹치면 SQLAlchemy가 이 outer join의 Project를 correlated
+    # EXISTS 안쪽으로 잘못 끌어들여(auto-correlation) "FROM 절 0개"로 즉시 InvalidRequestError —
+    # 실측으로 발견(realdb 테스트 최초 실행 시 100% 재현).
+    ProjectAlias = aliased(Project)
+
+    stmt = (
+        select(Conversation, ProjectAlias.name, ProjectAlias.slug, ConversationParticipant.last_read_at)
+        .join(
+            ConversationParticipant,
+            and_(
+                ConversationParticipant.conversation_id == Conversation.id,
+                ConversationParticipant.member_id == sender.id,
+            ),
+        )
+        .join(ProjectAlias, ProjectAlias.id == Conversation.project_id)
+        .where(
+            Conversation.org_id == org_id,
+            Conversation.project_id != project_id,
+            project_access_valid_correlated(Conversation.project_id, caller_id=uid, org_id=org_id),
+        )
+        .order_by(ConversationParticipant.last_read_at.desc().nulls_last())
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+
+    return {
+        "data": [
+            {
+                "id": str(conv.id),
+                "type": conv.type,
+                "title": conv.title,
+                "project_id": str(conv.project_id),
+                "project_name": project_name,
+                "project_slug": project_slug,
+                "last_read_at": last_read_at.isoformat() if last_read_at else None,
+            }
+            for conv, project_name, project_slug, last_read_at in rows
+        ]
+    }
 
 
 @router.get("/{conversation_id}", response_model=ConversationResponse)
