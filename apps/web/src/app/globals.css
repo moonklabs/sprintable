@@ -503,20 +503,37 @@
 
   /* .doc-renderer pre: doc-content-renderer.tsx의 legacy html-format 경로가 raw HTML 문자열을
      그대로 주입해(dangerouslySetInnerHTML) 내부 <pre>에 클래스를 직접 못 붙인다 — 조상
-     .doc-renderer(항상 존재하는 컨테이너 클래스)를 거쳐 후손 선택자로 동일 예외를 적용한다. */
+     .doc-renderer(항상 존재하는 컨테이너 클래스)를 거쳐 후손 선택자로 동일 예외를 적용한다.
+
+     story #2203 — .tableWrapper는 @tiptap/extension-table(doc-editor.tsx의 Table.configure)이
+     테이블을 감쌀 때 항상 붙이는 자체 클래스다(이 프로젝트 코드가 아니라 라이브러리 기본
+     node view라 className prop을 못 건다 — .doc-renderer pre와 같은 이유로 후손 선택자를
+     못 쓰고 클래스명 자체로 잡는다). 이 클래스에 애초에 overflow-x 규칙이 하나도 없어서
+     scrollbar-width:none(위 전역 숨김)만 먹고 스크롤 자체가 안 되고 있었다(#2165가 스크롤바
+     "숨김"만 예외 처리했지, 이 컨테이너는 애초에 스크롤 "가능"조차 아니었다 — 별개 결함).
+     overflow-x:auto가 본체이고, scrollbar-visible 예외는 그 다음이다(순서가 바뀌면 막대만
+     생기고 여전히 안 굴러간다). */
+  .tableWrapper {
+    overflow-x: auto;
+  }
   .scrollbar-visible,
-  .doc-renderer pre {
+  .doc-renderer pre,
+  .tableWrapper {
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   }
   .scrollbar-visible::-webkit-scrollbar,
-  .doc-renderer pre::-webkit-scrollbar { display: block; width: 6px; height: 6px; }
+  .doc-renderer pre::-webkit-scrollbar,
+  .tableWrapper::-webkit-scrollbar { display: block; width: 6px; height: 6px; }
   .scrollbar-visible::-webkit-scrollbar-track,
-  .doc-renderer pre::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+  .doc-renderer pre::-webkit-scrollbar-track,
+  .tableWrapper::-webkit-scrollbar-track { background: var(--scrollbar-track); }
   .scrollbar-visible::-webkit-scrollbar-thumb,
-  .doc-renderer pre::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+  .doc-renderer pre::-webkit-scrollbar-thumb,
+  .tableWrapper::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
   .scrollbar-visible::-webkit-scrollbar-thumb:hover,
-  .doc-renderer pre::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+  .doc-renderer pre::-webkit-scrollbar-thumb:hover,
+  .tableWrapper::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
   /* story #2062(유나 규격): #2057의 outline-offset:2px(바깥 4px 돌출)가 패딩 0인
      overflow-*-auto 스크롤 컨테이너에서 클리핑된다 — 링이 컨테이너 밖으로 못 새어나가
