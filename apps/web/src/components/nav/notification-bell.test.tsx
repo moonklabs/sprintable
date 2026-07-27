@@ -73,6 +73,26 @@ function stubFetchSequenceByOffset(pagesByOffset: Record<number, { items: Return
   }));
 }
 
+// story #2192 — "더 보기" 클릭 사이에 SSE로 실시간 알림이 목록 앞에 끼어들어도(prepend)
+// offsetRef(API로 실제 받은 건수만 누적)가 오염되지 않는지 재현한다. 오르테가군이 "이 PR에서
+// 제일 깨지기 쉬운 자리"로 지목한 곳 — notifications.length를 직접 offset으로 썼다면 SSE
+// prepend가 1건 생길 때마다 다음 "더 보기" 요청의 offset이 실제보다 하나씩 밀린다.
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  listeners: Record<string, Array<(e: { data: string; lastEventId?: string }) => void>> = {};
+  onopen: (() => void) | null = null;
+  onmessage: ((e: { data: string; lastEventId?: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  constructor(public url: string) { FakeEventSource.instances.push(this); }
+  addEventListener(type: string, cb: (e: { data: string; lastEventId?: string }) => void) {
+    (this.listeners[type] ??= []).push(cb);
+  }
+  close() { /* no-op */ }
+  emit(type: string, data: unknown) {
+    for (const cb of this.listeners[type] ?? []) cb({ data: JSON.stringify(data) });
+  }
+}
+
 async function openBell() {
   await act(async () => { root.render(withIntl(<NotificationBell />)); });
   const bellButton = container.querySelector('button[aria-expanded]') as HTMLButtonElement;
@@ -121,5 +141,32 @@ describe('NotificationBell — 더 보기(story #2192 AC3/AC4)', () => {
     await clickLoadMore(); // offset=60 요청 기대(누적)
     expect(desktopPanel.querySelectorAll('ul li')).toHaveLength(65); // 60 + 5
     expect(Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '더 보기')).toBeUndefined(); // 3페이지째 hasMore=false
+  });
+
+  it('더 보기 사이에 SSE 실시간 알림이 앞에 끼어들어도 다음 페이지 offset이 안 밀린다(오르테가군 지적 — 제일 깨지기 쉬운 자리)', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({
+      0: { items: Array.from({ length: 30 }, (_, i) => notif(`n${i}`)), hasMore: true },
+      30: { items: Array.from({ length: 5 }, (_, i) => notif(`n2-${i}`)), hasMore: false },
+    });
+    await openBell();
+
+    const desktopPanel = container.querySelector('.w-80')!;
+    expect(desktopPanel.querySelectorAll('ul li')).toHaveLength(30);
+
+    // SSE로 실시간 알림 1건이 목록 맨 앞에 끼어든다 — API로 받은 게 아니므로 offsetRef는 그대로 30이어야.
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => {
+      es.emit('notification', { id: 'live-1', event_type: 'story_status_changed', source_entity_type: null, source_entity_id: null, payload: {}, read_at: null, created_at: '2026-07-27T01:00:00Z' });
+    });
+    expect(desktopPanel.querySelectorAll('ul li')).toHaveLength(31); // 30(API) + 1(SSE)
+
+    // "더 보기"를 누르면 offsetRef(30)를 그대로 써서 offset=30을 요청해야 한다 — SSE로 31개가
+    // 됐다고 offset=31을 보내면 실제 30번째 API 항목을 건너뛰게 된다(중복/누락의 정확한 형태).
+    const loadMoreBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '더 보기') as HTMLButtonElement;
+    await act(async () => { loadMoreBtn.click(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(desktopPanel.querySelectorAll('ul li')).toHaveLength(36); // 30(API) + 1(SSE) + 5(API 2페이지)
   });
 });
