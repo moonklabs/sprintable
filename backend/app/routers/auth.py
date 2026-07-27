@@ -793,8 +793,18 @@ async def refresh_token(
             )
         )).scalar_one_or_none()
         if revoked_user_id is None:
+            # #2124(관측성 보강 — 오르테가군 요청 2026-07-27): 하드 401은 지금까지 계정 상관이
+            # 0이라 "누가 이 루프에 빠졌는지" 못 쫓았다(prod 실측: 같은 key가 ~20초 간격으로
+            # 수십 회 반복 — "가끔 풀린다"가 아니라 "빠지면 못 나온다"). row 자체(만료/폐기든)가
+            # 있으면 user_id를 읽기만(best-effort, 인가 판정에 영향 0 — 이미 위에서 거부 확定
+            # 後의 순수 로깅 조회) 해 로그에 싣는다. 새 규칙 발명 0 — grace_reuse가 이미 로깅하는
+            # user_id 축을 실패 로그에도 동일하게 확장하는 것뿐.
+            _diag_user_id = (await session.execute(
+                select(RefreshToken.user_id).where(RefreshToken.token_hash == token_hash)
+            )).scalar_one_or_none()
             logger.warning(
-                "auth.refresh 실패 reason=token_not_found_or_revoked_or_expired key=%s", correlation_key,
+                "auth.refresh 실패 reason=token_not_found_or_revoked_or_expired key=%s user_id=%s",
+                correlation_key, _diag_user_id,
             )
             return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
         logger.info(
@@ -815,6 +825,15 @@ async def refresh_token(
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    # #2124(관측성 보강): 성공 회전도 old_key→new_key로 로깅 — 지금까지 성공 경로엔 로그가
+    # 아예 없어(까심발견류 '침묵이 결함을 오래 살린다'와 동형) "회전은 성공했는데 클라가 새
+    # 토큰을 저장 못 했는가(㉮)"를 훗날 old_key의 하드 401과 new_key의 미사용 여부로 대조
+    # 가능하게 한다. ⛔이 로그만으론 ㉮/㉯/㉰을 이 순간 즉시 못 가른다 — 다음 요청과의 대조가
+    # 필요(추가 조사 축이지 이 changeset의 판정은 아님).
+    new_correlation_key = hash_token(tokens["refresh_token"])[:12]
+    logger.info(
+        "auth.refresh rotated old_key=%s new_key=%s user_id=%s", correlation_key, new_correlation_key, user.id,
+    )
 
     return _ok(tokens)
 
