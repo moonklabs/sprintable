@@ -179,5 +179,11 @@ app.add_middleware(
 )
 
 app.include_router(events.router)
+# story #2196(2026-07-27) — 지금 아무도 안 부른다(SPRINTABLE_API_URL이 여전히 backend
+# 직통을 가리킴). 그러나 코드는 살아 있다 — 라이브 실측: /api/v2/agent/stream 401(존재·
+# 인증필요) vs /api/v2/organizations 404(없음) vs /ping 200(정상). "안 도는 것"이 아니라
+# "안 불리는 것"이다. 지우지 않는 이유: 에이전트 SSE를 이쪽으로 재배선하는 #2241의 전제라,
+# 지우면 그때 다시 세워야 한다. ⭐이 주석을 언제 갱신하는가 — #2241이 착지해 이 마운트가
+# 실제로 트래픽을 받기 시작하면 더 이상 "죽은 경로"가 아니므로 그 시점에 고칠 것.
 app.include_router(agent_gateway.router)
 app.include_router(health.router)
