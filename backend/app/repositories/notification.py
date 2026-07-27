@@ -15,13 +15,21 @@ class NotificationRepository(BaseRepository[Notification]):
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         super().__init__(Notification, session, org_id)
 
-    async def list(self, user_id: uuid.UUID, is_read: bool | None = None, limit: int = 200) -> list[Notification]:  # type: ignore[override]
+    async def list(
+        self,
+        user_id: uuid.UUID,
+        is_read: bool | None = None,
+        limit: int = 200,
+        before: datetime | None = None,
+    ) -> list[Notification]:  # type: ignore[override]
         q = select(Notification).where(
             self._org_filter(),
             Notification.user_id == user_id,
         )
         if is_read is not None:
             q = q.where(Notification.is_read == is_read)
+        if before is not None:
+            q = q.where(Notification.created_at < before)
         q = q.order_by(Notification.created_at.desc()).limit(limit)
         result = await self.session.execute(q)
         return list(result.scalars().all())
