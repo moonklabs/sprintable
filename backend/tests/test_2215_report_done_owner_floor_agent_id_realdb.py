@@ -60,9 +60,9 @@ async def _clean(s):
         f"DELETE FROM participation WHERE org_id IN ('{ORG}','{OTHER_ORG}')",
         f"DELETE FROM participation_role WHERE org_id IN ('{ORG}','{OTHER_ORG}')",
         f"DELETE FROM stories WHERE org_id IN ('{ORG}','{OTHER_ORG}')",
-        f"DELETE FROM team_members WHERE org_id IN ('{ORG}','{OTHER_ORG}')",
         f"DELETE FROM project_access WHERE project_id IN "
         f"(SELECT id FROM projects WHERE org_id IN ('{ORG}','{OTHER_ORG}'))",
+        f"DELETE FROM members WHERE org_id IN ('{ORG}','{OTHER_ORG}')",
         f"DELETE FROM projects WHERE org_id IN ('{ORG}','{OTHER_ORG}')",
         f"DELETE FROM org_members WHERE org_id IN ('{ORG}','{OTHER_ORG}')",
         f"DELETE FROM users WHERE id IN ('{OWNER_USER}','{OUTSIDER_USER}')",
@@ -104,20 +104,21 @@ async def _seed(s) -> tuple[uuid.UUID, uuid.UUID]:
 
 
 async def _seed_agent_with_grant(s) -> uuid.UUID:
-    """③용 — project_access grant 有 정상 agent(team_members 뷰에 자연히 잡힘)."""
-    from app.models.team import TeamMember
-    agent = TeamMember(
-        id=uuid.uuid4(), org_id=ORG, project_id=AGENT_PROJ, type="agent", name="Agent",
-        is_active=True,
-    )
-    s.add(agent)
-    await s.flush()
+    """③용 — project_access grant 有 정상 agent. ⚠️team_members는 실 배포 스키마에서
+    UNION 뷰(members ⋈ project_access)라 직접 INSERT/DELETE 불가 — 실 base 테이블인
+    members + project_access(member_id 경유)에 심으면 뷰가 자연히 반영한다(#2206/#2515
+    계열 test_doc_mutation_project_scope_idor_realdb.py와 동일 관례)."""
+    agent_id = uuid.uuid4()
+    await s.execute(text(
+        f"INSERT INTO members (id,org_id,type,name,is_active) VALUES "
+        f"('{agent_id}','{ORG}','agent','Agent',true)"
+    ))
     await s.execute(text(
         f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES "
-        f"(gen_random_uuid(),'{AGENT_PROJ}','{agent.id}','granted')"
+        f"(gen_random_uuid(),'{AGENT_PROJ}','{agent_id}','granted')"
     ))
     await s.commit()
-    return agent.id
+    return agent_id
 
 
 async def _seed_story_with_participation(s, member_id: uuid.UUID, project_id: uuid.UUID) -> uuid.UUID:
