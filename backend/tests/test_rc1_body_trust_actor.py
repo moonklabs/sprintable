@@ -16,10 +16,15 @@ import pytest
 
 
 def _non_doc_gate_session():
-    """48f064e5: 엔드포인트가 doc-gate authz용 게이트 로드 → 비-doc 게이트 반환으로 그 분기 skip."""
+    """48f064e5: 엔드포인트가 doc-gate authz용 게이트 로드 → 비-doc 게이트 반환으로 그 분기 skip.
+    #2198: non-doc 분기가 work_item_type/work_item_id 를 읽으므로 명시(누락 시 AttributeError) —
+    이 파일의 관심사는 resolver_id 강제(RC#1)이지 project-role 판정이 아니므로 호출부가
+    _non_doc_gate_approvable 을 별도로 patch 해 그 판정 자체를 우회한다."""
     s = AsyncMock()
     gr = MagicMock()
-    gr.scalar_one_or_none.return_value = SimpleNamespace(gate_type="merge")
+    gr.scalar_one_or_none.return_value = SimpleNamespace(
+        gate_type="merge", work_item_type="story", work_item_id=uuid.uuid4(),
+    )
     s.execute = AsyncMock(return_value=gr)
     return s
 
@@ -68,7 +73,8 @@ async def test_transition_forces_resolver_ignoring_body():
 
     from fastapi import BackgroundTasks
     with patch.object(mod, "resolve_member", AsyncMock(return_value=caller)), \
-         patch.object(mod, "transition_gate", _fake_transition):
+         patch.object(mod, "transition_gate", _fake_transition), \
+         patch.object(mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)):
         # story #2027: _non_doc_gate_session()의 gate_type="merge"는 고위험(_HIGH_RISK_GATE_TYPES)이라
         # 이 파일의 관심사(resolver_id 강제)와 무관한 사유-강제 가드를 note로 우회.
         await transition_gate_endpoint(

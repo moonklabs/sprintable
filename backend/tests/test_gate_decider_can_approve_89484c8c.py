@@ -199,29 +199,46 @@ async def test_list_gates_can_approve_false_for_agent():
     assert out[0].can_approve is False  # 비-휴먼
 
 
-@pytest.mark.anyio
-async def test_list_gates_non_doc_gate_untouched():
+async def _run_non_doc_can_approve(project_role):
+    org = uuid.uuid4()
     merge = SimpleNamespace(
-        gate_type="merge", work_item_type="story", work_item_id=uuid.uuid4(),
+        id=uuid.uuid4(), gate_type="merge", work_item_type="story", work_item_id=uuid.uuid4(),
         neutral_facts={}, status="pending",
     )
-    org = uuid.uuid4()
     gates_result = MagicMock()
     gates_result.scalars.return_value.all.return_value = [merge]
+    story_batch = MagicMock()
+    story_batch.all.return_value = [(merge.work_item_id, uuid.uuid4())]
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[gates_result])  # doc_ids 비어 doc batch 미실행
+    session.execute = AsyncMock(side_effect=[gates_result, story_batch])
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     rm = AsyncMock(return_value=_human(uuid.uuid4()))
     with patch.object(gates_mod.GateResponse, "model_validate", _resp), \
          patch.object(gates_mod, "resolve_member", rm), \
-         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
+         patch.object(gates_mod, "get_project_role", AsyncMock(return_value=project_role)), \
          patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(
             work_item_id=None, work_item_type=None, status=None, assigned_to_me=False,
             session=session, org_id=org, auth=auth,
         )
+    return out, rm, merge
+
+
+@pytest.mark.anyio
+async def test_list_gates_non_doc_gate_can_approve_now_true_for_project_owner():
+    """story #2198(까심 QA 적출·오르테가 확定): 이 테스트가 대체하는 옛 테스트("non_doc_gate_untouched"·
+    "resolve_member 미호출")는 non-doc can_approve 가 계산 자체를 안 하던 원 결함을 그대로 pin
+    하고 있었다 — 그게 정확히 #2198 의 증상②였다. 이제 non-doc 게이트도 rule B
+    (_non_doc_gate_approvable, story #1974)로 can_approve 가 계산된다: project owner 면 True."""
+    out, rm, merge = await _run_non_doc_can_approve("owner")
+    assert out[0].can_approve is True
+    rm.assert_awaited_once()  # non-doc can_approve 계산에도 caller 식별이 필요해졌다(의도된 변화).
+
+
+@pytest.mark.anyio
+async def test_list_gates_non_doc_gate_can_approve_false_for_non_owner():
+    out, rm, merge = await _run_non_doc_can_approve("member")  # owner/admin 아님
     assert out[0].can_approve is False
-    rm.assert_not_awaited()  # 비-doc 게이트만이면 resolve_member 미호출(불필요 작업 0)
 
 
 @pytest.mark.anyio
