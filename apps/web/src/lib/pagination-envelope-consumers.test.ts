@@ -12,6 +12,12 @@
 //   ② hasMore/nextCursor 외의 이름으로 같은 개념을 나르는 새 규약(D)이 생기면 이 정규식
 //      자체가 못 본다 — 그 경우는 새 정규식이 필요하다.
 //   ③ 주석 스트립은 근사치다(i18n-key-coverage.test.ts와 동일 방식·동일 한계).
+//   ④ ⭐**producer 쪽 이중포장은 이 가드의 스코프 밖이다** — 이 가드는 "소비자가 봉투를
+//      제대로 읽는가"만 본다. "프록시가 봉투 자체를 망가뜨리는가"(예: agent-runs-list가
+//      소비하는 /api/v1/agent-runs가 `apiSuccess(await _r.json())`로 BE의 {data,meta}
+//      전체를 다시 자기 data에 얹어 바깥 meta가 항상 null인 경우, #2230 이전 comments와
+//      동형·2026-07-27 재발견으로 3번째 사례가 됨 — 전수 필요)는 별도 가드/스토리가
+//      필요하다(story #2231 본문 참고, 이번 PR 스코프 밖).
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
