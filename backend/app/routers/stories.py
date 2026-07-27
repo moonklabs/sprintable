@@ -1352,7 +1352,10 @@ async def list_comments(
         raise HTTPException(status_code=404, detail="Story not found")
     await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     q = select(StoryComment).where(StoryComment.story_id == id)
-    if cursor:
+    # #2540 CI 교훈(오르테가군): "값이 있는지"만 보면 안 되고 "그 값이 문자열인지"까지 봐야
+    # 한다 — 이 함수를 FastAPI DI 없이 직접 호출하며 cursor= 를 누락하면 파이썬 기본값인
+    # Query(...) 센티넬 객체(truthy) 가 그대로 들어온다. 문자열이 아니면 커서 없음으로 취급.
+    if isinstance(cursor, str) and cursor:
         try:
             cursor_dt = datetime.fromisoformat(cursor)
         except ValueError:

@@ -151,3 +151,31 @@ async def test_no_cursor_under_limit_has_more_false_realdb():
         assert page["meta"]["next_cursor"] is None
     finally:
         await eng.dispose()
+
+
+class _FakeQuerySentinel:
+    """#2540 CI 재현(오르테가군) — FastAPI Query(...) 객체처럼 str이 아니면서 truthy인 것을
+    흉내낸다. list_comments를 FastAPI DI 없이 직접 호출하며 cursor= 를 누락하면 실제로
+    이런 모양의 객체(파이썬 함수 기본값)가 들어온다."""
+    default = None
+
+
+@pytest.mark.anyio
+async def test_non_string_truthy_cursor_treated_as_no_cursor_not_crash_realdb():
+    from app.routers.stories import list_comments
+    from app.repositories.story import StoryRepository
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s, n=3)
+
+        fake_sentinel = _FakeQuerySentinel()
+        assert bool(fake_sentinel) is True  # 전제 확인 — truthy임
+
+        async with Session() as s:
+            repo = StoryRepository(s, ORG)
+            page = await list_comments(id=STORY, limit=20, cursor=fake_sentinel, db=s, repo=repo, auth=_auth())
+        assert [c.id for c in page["data"]] == seeded, "커서 없음으로 취급돼 전체가 나와야 한다(크래시 아님)"
+    finally:
+        await eng.dispose()
