@@ -393,7 +393,10 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                 onSelect={handleSelectDoc}
                 inFolderLabel={t('groupInFolder')}
                 looseAtRootLabel={t('groupLooseAtRoot')}
-                restLabel={t('groupRest')}
+                thisMonthLabel={t('groupThisMonth')}
+                lastMonthLabel={t('groupLastMonth')}
+                olderLabel={t('groupOlder')}
+                unknownDateLabel={t('groupUnknownDate')}
                 moreLabel={(count) => t('groupMore', { count })}
               />
             ) : (

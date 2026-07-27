@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { computeDocGroups, type DocGroup, type GroupableDoc } from './lib/doc-groups';
+import { bucketDocsByTime, computeDocGroups, type DocGroup, type GroupableDoc } from './lib/doc-groups';
 
 // story #2193 — "자동 묶음" 뷰. 기존 DocTree(폴더 계층·드래그 이동)는 그대로 두고, 이건
 // 완전히 별개의 읽기전용 브라우징 뷰다. 폴더에 담겼는지와 무관하게 slug 접두어로 문서를
@@ -16,8 +16,14 @@ interface DocAutoGroupsProps {
   onSelect: (slug: string) => void;
   inFolderLabel: string;
   looseAtRootLabel: string;
-  restLabel: string;
+  thisMonthLabel: string;
+  lastMonthLabel: string;
+  olderLabel: string;
+  unknownDateLabel: string;
   moreLabel: (count: number) => string;
+  /** 테스트용 주입 지점 — 생략하면 렌더 시점의 실제 시각을 쓴다. bucketDocsByTime이 순수함수로
+   * now를 받게 설계된 것과 같은 이유(월 경계에서 실행 시점에 따라 결과가 흔들리는 테스트를 피함). */
+  now?: Date;
 }
 
 // AC3 "2단 접힘" — 그룹 하나가 e-canvas처럼 17개만 되어도 접힌 헤더 하나로 시작하고, 펼쳐도
@@ -116,37 +122,47 @@ function GroupHeader({ group, inFolderLabel, looseAtRootLabel, moreLabel, select
   );
 }
 
-export function DocAutoGroups({ docs, selectedSlug, onSelect, inFolderLabel, looseAtRootLabel, restLabel, moreLabel }: DocAutoGroupsProps) {
+// story #2193 후속(#2505 착지로 created_at 확보) — 약한 접두어 문서(369건급)를 시간
+// 그릇으로 세분화한다. 반드시 created_at 기준(수정일 아님) — 이유 셋은 doc-groups.ts의
+// bucketDocsByTime 주석 참고. unknownDate는 "이전"에 조용히 묻히지 않고 별도 그룹으로
+// 노출한다(created_at 누락/파싱 실패를 숨기지 않기 위함).
+function timeBucketGroups(ungrouped: GroupableDoc[], now: Date, labels: {
+  thisMonthLabel: string; lastMonthLabel: string; olderLabel: string; unknownDateLabel: string;
+}): DocGroup[] {
+  const { thisMonth, lastMonth, older, unknownDate } = bucketDocsByTime(ungrouped, now);
+  const buckets: Array<[string, string, GroupableDoc[]]> = [
+    ['this-month', labels.thisMonthLabel, thisMonth],
+    ['last-month', labels.lastMonthLabel, lastMonth],
+    ['older', labels.olderLabel, older],
+    ['unknown-date', labels.unknownDateLabel, unknownDate],
+  ];
+  return buckets
+    .filter(([, , members]) => members.length > 0)
+    .map(([key, label, members]) => ({ key, label, inFolder: [], looseAtRoot: members }));
+}
+
+export function DocAutoGroups({
+  docs, selectedSlug, onSelect, inFolderLabel, looseAtRootLabel,
+  thisMonthLabel, lastMonthLabel, olderLabel, unknownDateLabel, moreLabel, now: nowProp,
+}: DocAutoGroupsProps) {
   const { groups, ungrouped } = useMemo(() => computeDocGroups(docs), [docs]);
+  // 마운트 시점 1회만 고정 — 렌더마다 "이번 달" 경계가 흔들리지 않게(그리고 doc-groups.ts의
+  // bucketDocsByTime이 now를 주입받는 순수함수로 설계된 이유와 같은 결). nowProp이 있으면
+  // (테스트) 그걸 쓰고, 없으면(실제 렌더) 마운트 시점 시각을 한 번만 잡는다.
+  const now = useMemo(() => nowProp ?? new Date(), [nowProp]);
+  const timeGroups = useMemo(
+    () => timeBucketGroups(ungrouped, now, { thisMonthLabel, lastMonthLabel, olderLabel, unknownDateLabel }),
+    [ungrouped, now, thisMonthLabel, lastMonthLabel, olderLabel, unknownDateLabel],
+  );
 
   return (
     <nav className="space-y-0.5">
       {groups.map((group) => (
         <GroupHeader key={group.key} group={group} inFolderLabel={inFolderLabel} looseAtRootLabel={looseAtRootLabel} moreLabel={moreLabel} selectedSlug={selectedSlug} onSelect={onSelect} />
       ))}
-      {ungrouped.length > 0 && (
-        // story #2193 AC2/AC6 — 원래는 여기가 시간 버킷(이번 달/지난 달/이전)으로 세분화될
-        // 자리다. backend DocSummaryResponse에 created_at이 아직 없어(스키마 확인 완료,
-        // updated_at만 있음, 후속 PR #2505에서 추가 중) 지금은 하나로 묶어 두고, 필드가
-        // 오면 이 슬롯 안에서만 세분화하면 된다 — 그룹 배치 구조 자체는 이미 맞춰져 있다.
-        //
-        // ⚠️ 다음 사람에게: 그때 반드시 created_at 기준으로 나눌 것 — updated_at이 아니다.
-        // 이유 셋(유나양 판정):
-        //  ① 에이전트 오염 회피 — updated_at 기준이면 에이전트가 방금 건드린 문서가 위로
-        //     온다. 사람이 안 봤는데 상단에 서는 "거짓 최신성"이 된다.
-        //  ② 훑기의 안정적 척추 — 버킷이 매번 바뀌면 "어디 있더라"가 안 된다. created_at은
-        //     한번 정해지면 안 변해 고정된 기준이 된다.
-        //  ③ 역할 분리 — 위쪽 "최근 본 것"(RecentsSection)이 이미 사람의 열람 최신성 축을
-        //     담당한다. 시간 버킷까지 updated_at이면 그 축이 두 번 겹친다.
-        <GroupHeader
-          group={{ key: 'ungrouped', label: restLabel, inFolder: [], looseAtRoot: ungrouped }}
-          inFolderLabel={inFolderLabel}
-          looseAtRootLabel={looseAtRootLabel}
-          moreLabel={moreLabel}
-          selectedSlug={selectedSlug}
-          onSelect={onSelect}
-        />
-      )}
+      {timeGroups.map((group) => (
+        <GroupHeader key={group.key} group={group} inFolderLabel={inFolderLabel} looseAtRootLabel={looseAtRootLabel} moreLabel={moreLabel} selectedSlug={selectedSlug} onSelect={onSelect} />
+      ))}
     </nav>
   );
 }

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { computeDocGroups, type GroupableDoc } from './doc-groups';
+import { bucketDocsByTime, computeDocGroups, type GroupableDoc } from './doc-groups';
 
-function doc(id: string, slug: string, parent_id: string | null = null): GroupableDoc {
-  return { id, slug, parent_id, title: id };
+function doc(id: string, slug: string, parent_id: string | null = null, created_at?: string): GroupableDoc {
+  return { id, slug, parent_id, title: id, created_at };
 }
 
 describe('computeDocGroups', () => {
@@ -66,5 +66,42 @@ describe('computeDocGroups', () => {
     const docs = [doc('1', 'research'), doc('2', 'research'), doc('3', 'research')];
     const { groups } = computeDocGroups(docs);
     expect(groups[0]!.key).toBe('research');
+  });
+});
+
+describe('bucketDocsByTime', () => {
+  const NOW = new Date('2026-07-27T00:00:00Z');
+
+  it('같은 달(created_at)은 이번 달로 간다', () => {
+    const docs = [doc('1', 'x', null, '2026-07-01T00:00:00Z'), doc('2', 'x', null, '2026-07-26T23:59:00Z')];
+    const { thisMonth, lastMonth, older, unknownDate } = bucketDocsByTime(docs, NOW);
+    expect(thisMonth.map((d) => d.id)).toEqual(['1', '2']);
+    expect(lastMonth).toHaveLength(0);
+    expect(older).toHaveLength(0);
+    expect(unknownDate).toHaveLength(0);
+  });
+
+  it('바로 전달(月)은 지난 달로 간다', () => {
+    const docs = [doc('1', 'x', null, '2026-06-15T00:00:00Z')];
+    const { lastMonth } = bucketDocsByTime(docs, NOW);
+    expect(lastMonth.map((d) => d.id)).toEqual(['1']);
+  });
+
+  it('두 달 이상 전은 이전으로 간다', () => {
+    const docs = [doc('1', 'x', null, '2026-05-01T00:00:00Z'), doc('2', 'x', null, '2025-01-01T00:00:00Z')];
+    const { older } = bucketDocsByTime(docs, NOW);
+    expect(older.map((d) => d.id).sort()).toEqual(['1', '2']);
+  });
+
+  it('AC — created_at이 없거나 파싱 불가능한 문서는 "이전"에 조용히 묻히지 않고 unknownDate로 명시적으로 분리된다', () => {
+    const docs = [
+      doc('1', 'x', null, undefined),
+      doc('2', 'x', null, 'not-a-real-date'),
+      doc('3', 'x', null, '2026-07-01T00:00:00Z'),
+    ];
+    const { unknownDate, thisMonth, older } = bucketDocsByTime(docs, NOW);
+    expect(unknownDate.map((d) => d.id).sort()).toEqual(['1', '2']);
+    expect(thisMonth.map((d) => d.id)).toEqual(['3']);
+    expect(older).toHaveLength(0); // 잘못된 날짜가 "이전"에 잘못 섞이지 않는다
   });
 });
