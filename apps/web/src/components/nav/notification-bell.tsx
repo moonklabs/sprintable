@@ -409,7 +409,13 @@ export function NotificationBell() {
   }, [open, projectId]);
 
   // story #2192 AC3 — "더 보기": offsetRef(SSE prepend와 무관하게 API로 실제 가져온 건수)부터
-  // 이어서 받아 뒤에 붙인다.
+  // 이어서 받아 뒤에 붙인다. 이 콜백은 notifications를 deps에 안 갖는다(의도) — offsetRef로
+  // 추적하므로 불필요하다.
+  // ⚠️여기서 offsetRef.current를 notifications.length(또는 notifications?.length)로 바꾸면
+  // 두 가지가 동시에 깨진다: ① SSE prepend가 offset을 오염시키는 원래 버그가 되돌아오고,
+  // ② 이 콜백이 useCallback으로 메모이즈돼 notifications가 deps에 없어 stale closure로
+  // 조용히 옛 값을 읽는다(뮤테이션 셀프체크 중 실측 — 그 상태로는 회귀테스트도 우연히
+  // 통과해버려서 "테스트가 초록"과 "테스트가 이 결함을 잡는다"가 갈리는 걸 직접 봤다).
   const handleLoadMore = useCallback(async () => {
     if (!hasMore || loadingMore) return;
     setLoadingMore(true);
