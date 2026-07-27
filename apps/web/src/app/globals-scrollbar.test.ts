@@ -41,6 +41,33 @@ describe('.tableWrapper(TipTap 테이블 노드뷰 기본 클래스)가 실제�
   });
 });
 
+describe('문서 코드블럭이 실제로 "굴러갈 수 있다" — .ProseMirror pre-wrap을 코드블럭만 덮는다 (#2214)', () => {
+  it('.ProseMirror .scrollbar-visible pre가 white-space:pre로 덮는다(라이브러리 base pre-wrap 무력화)', () => {
+    expect(css).toMatch(/\.ProseMirror \.scrollbar-visible pre\s*\{[^}]*white-space:\s*pre[^-]/);
+  });
+
+  it('overflow-wrap도 normal로 되돌린다(조상 .ProseMirror의 break-word 상속 차단)', () => {
+    expect(css).toMatch(/\.ProseMirror \.scrollbar-visible pre\s*\{[^}]*overflow-wrap:\s*normal/);
+  });
+
+  it('⛔안전장치 — max-width:100%+min-width:0이 white-space:pre보다 먼저 나온다(#2035류 body 밀림 방지)', () => {
+    const safetyIdx = css.indexOf('.ProseMirror .scrollbar-visible {');
+    const bodyIdx = css.indexOf('.ProseMirror .scrollbar-visible pre {');
+    expect(safetyIdx).toBeGreaterThan(-1);
+    expect(bodyIdx).toBeGreaterThan(-1);
+    expect(safetyIdx).toBeLessThan(bodyIdx);
+    const safetyBlock = css.slice(safetyIdx, bodyIdx);
+    expect(safetyBlock).toMatch(/max-width:\s*100%/);
+    expect(safetyBlock).toMatch(/min-width:\s*0/);
+  });
+
+  it('산문·인용·표 selector는 이 규칙에 안 걸린다(코드블럭 scrollbar-visible 래퍼만 특이도를 올림)', () => {
+    // .ProseMirror .scrollbar-visible 자체가 code-block-copy.tsx 전용 클래스 조합이라, 이
+    // selector 문자열 자체에 prose(p)나 blockquote·table 태그가 안 섞여 있어야 한다.
+    expect(css).not.toMatch(/\.ProseMirror \.scrollbar-visible[^{]*[,\s](p|blockquote|table)[,\s{]/);
+  });
+});
+
 describe('코드블럭/표 wrapper가 scrollbar-visible을 잃지 않았다 (#2165)', () => {
   const files = [
     'docs/extensions/code-block-copy.tsx',
