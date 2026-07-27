@@ -81,7 +81,21 @@ def _get_repo(
     return DocRepository(session, org_id)
 
 
-@router.get("", response_model=list[DocSummaryResponse])
+def _doc_page_envelope(docs: list, limit: int) -> dict:
+    """story #2191: #2231 정본 규약 A(limit+1 오버페치 + has_more/next_cursor body meta).
+    docs 는 이미 limit+1 개까지 조회된 상태로 들어온다(호출부에서 overfetch)."""
+    from app.repositories.doc import encode_doc_cursor
+
+    has_more = len(docs) > limit
+    page = docs[:limit]
+    next_cursor = encode_doc_cursor(page[-1]) if has_more and page else None
+    return {
+        "data": [DocSummaryResponse.model_validate(d) for d in page],
+        "meta": {"has_more": has_more, "next_cursor": next_cursor},
+    }
+
+
+@router.get("")
 async def list_docs(
     project_id: uuid.UUID | None = Query(default=None),
     parent_id: uuid.UUID | None = Query(default=None),
@@ -90,15 +104,19 @@ async def list_docs(
     slug: str | None = Query(default=None),
     q: str | None = Query(default=None, description="전문 검색 — 제목 + 본문"),
     limit: int = Query(default=500, ge=1, le=1000),
+    cursor: str | None = Query(default=None, description="(sort_order,id) 복합 커서 — 이전 페이지 meta.next_cursor 값 그대로"),
     repo: DocRepository = Depends(_get_repo),
-) -> list[DocSummaryResponse]:
+) -> dict:
     # AC1 + AC3: 전문 검색 — project_id 필수
+    # story #2191: 의도적으로 커서 미지원(관련도순 + 위치커서 조합이 결과를 뒤섞음, repo단
+    # search_full_text 주석 참조) — has_more/next_cursor는 항상 False/None으로 봉투만 맞춘다.
     if q and project_id:
         results = await repo.search_full_text(project_id, q.strip(), limit=min(limit, 50))
-        return [
+        data = [
             DocSummaryResponse.model_validate(doc).model_copy(update={"snippet": snippet})
             for doc, snippet in results
         ]
+        return {"data": data, "meta": {"has_more": False, "next_cursor": None}}
 
     if slug and project_id:
         doc = await repo.get_by_slug(project_id, slug)
@@ -107,24 +125,26 @@ async def list_docs(
             doc = await repo.get_by_alias(project_id, slug)
         # slug 단건 경로 = FE 문서 상세 fetchDoc 의 실 경로 → detail 과 동일하게 enrich(담당자/수정이력).
         # 일반 list/tree/search 분기는 enrich 안 함(다건 N+1 회피·페이로드 과확장 금지).
-        return [await _enrich_doc_summary(doc, repo.session)] if doc else []
+        # story #2191: 단건 lookup이라 페이지네이션 대상이 아님 — has_more는 구조적으로 항상 False.
+        data = [await _enrich_doc_summary(doc, repo.session)] if doc else []
+        return {"data": data, "meta": {"has_more": False, "next_cursor": None}}
 
     if tags and project_id:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-        docs = await repo.search_by_tags(project_id, tag_list, limit=limit)
-        return [DocSummaryResponse.model_validate(d) for d in docs]
+        docs = await repo.search_by_tags(project_id, tag_list, limit=limit + 1, cursor=cursor)
+        return _doc_page_envelope(docs, limit)
 
     if project_id and parent_id is not None:
-        docs = await repo.list_tree(project_id, parent_id, limit=limit)
-        return [DocSummaryResponse.model_validate(d) for d in docs]
+        docs = await repo.list_tree(project_id, parent_id, limit=limit + 1, cursor=cursor)
+        return _doc_page_envelope(docs, limit)
 
     filters: dict = {}
     if project_id:
         filters["project_id"] = project_id
     if doc_type:
         filters["doc_type"] = doc_type
-    docs = await repo.list(limit=limit, **filters)
-    return [DocSummaryResponse.model_validate(d) for d in docs]
+    docs = await repo.list(limit=limit + 1, cursor=cursor, **filters)
+    return _doc_page_envelope(docs, limit)
 
 
 async def _assert_doc_parent_in_project(

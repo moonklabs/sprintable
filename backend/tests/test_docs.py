@@ -84,7 +84,10 @@ async def test_list_docs_200():
             resp = await c.get(f"/api/v2/docs?project_id={PROJECT_ID}")
 
         assert resp.status_code == 200
-        assert len(resp.json()) == 1
+        # story #2191: #2231 정본 규약 A — bare array → {data,meta} 봉투.
+        body = resp.json()
+        assert len(body["data"]) == 1
+        assert body["meta"]["has_more"] is False
     finally:
         app.dependency_overrides.clear()
 

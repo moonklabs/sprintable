@@ -62,7 +62,7 @@ async def test_docs_list_via_conftest(test_client, mock_session, project_id, org
 
     resp = await test_client.get(f"/api/v2/docs?project_id={project_id}")
     assert resp.status_code == 200
-    assert resp.json() == []
+    assert resp.json()["data"] == []
 
 
 @pytest.mark.anyio
