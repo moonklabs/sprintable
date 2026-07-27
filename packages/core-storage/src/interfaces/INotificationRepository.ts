@@ -33,4 +33,8 @@ export interface INotificationRepository {
   list(filters: NotificationListFilters): Promise<Notification[]>;
   markRead(id: string, userId: string): Promise<Notification>;
   markAllRead(userId: string): Promise<number>;
+  // story #2194 — list(limit:200).length는 200건 넘는 계정에서 실제 unread 수를 거짓으로
+  // 200에 고정시킨다. BE에 이미 진짜 unbounded SQL COUNT 엔드포인트(/api/v2/notifications/count)가
+  // 있으므로 뱃지는 반드시 이 메서드로 받아야 한다 — list+length로 대체하지 말 것.
+  countUnread(userId: string): Promise<number>;
 }
