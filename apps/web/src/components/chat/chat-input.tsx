@@ -130,6 +130,32 @@ interface EntityResult {
   status: string | null;
 }
 
+// story #2263(C-5) ㉠㉢: 종류를 «글자»로 보이는 라벨. ⛔서버가 신규 종류를 주면(registry는
+// 화면이 모르는 채로 늘 수 있다) 목록에 없는 값도 "정상 경로"로 그려야 한다 — 매핑이 없으면
+// 원문 종류 문자열을 그대로 쓴다(공백/대문자 처리 없이도 "sprint"·"hypothesis"처럼 읽을 수
+// 있는 값이라 그 자체로 충분히 "정상"이다. 빈 문자열·물음표·아이콘만 남기는 실패 대신).
+const ENTITY_TYPE_LABELS: Record<string, string> = {
+  story: '스토리', doc: '문서', epic: '에픽', task: '작업',
+};
+export function entityTypeLabel(type: string): string {
+  return ENTITY_TYPE_LABELS[type] ?? type;
+}
+
+// story #2263(C-5) ㉡: 종류로 묶어 보이되 열은 나누지 않는다(키보드 이동이 한 줄기여야 하므로
+// entityResults 자체의 순서를 그룹 순서로 재배열한다 — entityIndex가 이 배열을 그대로
+// 인덱싱하므로 렌더 순서=키보드 이동 순서가 항상 같다, 별도 변환이 렌더 시점에 필요 없다).
+// ⛔BE(entities.py)의 최종 정렬(가나다/최신순)이 종류를 뒤섞을 수 있으므로 첫 등장 순서를
+// 그룹 우선순위로 쓰는 stable regroup(하드코딩된 타입 나열 없음 — 데이터가 순서를 정한다).
+export function groupEntitiesByType(results: EntityResult[]): EntityResult[] {
+  const order: string[] = [];
+  const buckets = new Map<string, EntityResult[]>();
+  for (const r of results) {
+    if (!buckets.has(r.entity_type)) { buckets.set(r.entity_type, []); order.push(r.entity_type); }
+    buckets.get(r.entity_type)!.push(r);
+  }
+  return order.flatMap((type) => buckets.get(type)!);
+}
+
 // story #2032 — 대화별 임시저장(localStorage). 대화 전환은 ChatView가 key={conversation_id}로
 // ChatInput을 통째로 리마운트시키므로(page.tsx), threadId가 이 컴포넌트 수명 중에 바뀌는
 // 경우 자체가 없다 — 마운트 시 lazy initializer로 그 대화의 초안을 1회 읽으면 AC3(대화별
@@ -235,7 +261,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         .then((json: EntityResult[] | { data?: EntityResult[] }) => {
           if (cancelled) return;
           const arr = Array.isArray(json) ? json : (json.data ?? []);
-          setEntityResults(Array.isArray(arr) ? arr : []);
+          setEntityResults(groupEntitiesByType(Array.isArray(arr) ? arr : []));
           setEntityIndex(0);
         })
         .catch(() => {});
@@ -620,13 +646,20 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           </ul>
         )}
 
-        {/* Entity dropdown */}
+        {/* Entity dropdown — story #2263(C-5) ㉡: 종류별 구역(머리글)으로 묶되 열은 안 나눈다
+            (entityResults가 이미 groupEntitiesByType로 그룹 순서라 렌더 순서=entityIndex 순서). */}
         {entityResults.length > 0 && (
           <ul role="listbox" aria-label="엔티티 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
             {entityResults.map((entity, idx) => {
               const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
+              const isNewGroup = idx === 0 || entityResults[idx - 1]!.entity_type !== entity.entity_type;
               return (
               <li key={`${entity.entity_type}:${entity.entity_id}`}>
+                {isNewGroup && (
+                  <div className="sticky top-0 bg-popover px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {entityTypeLabel(entity.entity_type)}
+                  </div>
+                )}
                 <button
                   type="button"
                   id={`entity-opt-${idx}`}
@@ -635,7 +668,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   onMouseDown={(e) => { e.preventDefault(); selectEntity(entity); }}
                   className={`flex w-full items-center px-3 py-2 text-left text-sm transition ${idx === entityIndex ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
                 >
-                  <EntityIcon className="mr-1.5 size-3.5 shrink-0" />
+                  {/* ㉠: 종류는 위 머리글의 «글자»가 1차 신호 — 이 아이콘은 어디까지나 보조. */}
+                  <EntityIcon className="mr-1.5 size-3.5 shrink-0" aria-hidden />
                   <span className="font-medium">{entity.title}</span>
                   {entity.status ? (
                     <span className="ml-2 rounded px-1.5 py-0.5 text-xs bg-muted text-muted-foreground">{entity.status}</span>
