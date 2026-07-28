@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Edit2 } from 'lucide-react';
 import { useDocsLayout } from '../../docs-context';
 import { docUrl } from '@/components/docs/lib/doc-project-url';
+import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
 
 interface DocDetail {
   id: string;
@@ -91,6 +92,9 @@ export default function DocViewPage() {
             codeCopiedLabel={t('codeCopied')}
             assetImageErrorLabel={t('attachImageUnavailable')}
           />
+          {/* 두 번째 backlinks 자리(첫 자리: story-detail-panel, story #2299) — 컴포넌트
+              변경 0, entityType="doc" 호출만 다르다(PO 판정 그대로). */}
+          <EntityBacklinksSection entityType="doc" entityId={doc.id} />
         </div>
       </div>
     </div>

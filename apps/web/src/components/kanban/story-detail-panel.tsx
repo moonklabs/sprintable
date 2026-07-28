@@ -26,7 +26,7 @@ import { Workcell, type WorkcellMessage } from '@/components/workcell/workcell';
 import { initials } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
-import { StoryBacklinksSection } from '@/components/kanban/story-backlinks-section';
+import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
 import { Button } from '@/components/ui/button';
@@ -1068,7 +1068,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
             {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
                 (doc [slug]/view는 후속 판). */}
-            <StoryBacklinksSection storyId={story.id} />
+            <EntityBacklinksSection entityType="story" entityId={story.id} />
 
             {story.story_points != null ? (
               <div>
