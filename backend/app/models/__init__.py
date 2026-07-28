@@ -24,11 +24,9 @@ from app.models.mockup import MockupComponent, MockupPage, MockupScenario, Mocku
 from app.models.user import RefreshToken, User
 from app.models.workflow_version import WorkflowVersion
 from app.models.api_key import ApiKey
-from app.models.project_api_key import ProjectApiKey
 from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
 from app.models.plan_tier_limit import PlanTierLimit
-from app.models.plan_feature import PlanFeature
 from app.models.policy_document import PolicyDocument
 from app.models.audit import AuditLog
 from app.models.webhook_config import WebhookConfig
@@ -63,30 +61,18 @@ from app.models.org_invite import OrgInvite
 from app.models.project_access import ProjectAccess
 from app.models.member import AgentProjectProfile, Member, MemberIdentityAlias
 from app.models.activity_event import ActivityEvent
-from app.models.activity_log import ActivityLog
 from app.models.asset import Asset, AssetFolder, AssetLink
 from app.models.release_note import ReleaseNote
 from app.models.role_template import RoleTemplate
-# fix(2026-07-28, #2201 후속 CI 적출): 아래 11개 모듈이 여기 없어 `import app.models`만으로는
-# Base.metadata에 등록 안 됐다(2026-07-20 hitl_config/participation 건과 동일 클래스 결함 —
-# app/models/*.py 파일 목록 대 이 파일의 import 목록을 전수 대조해 한 번에 찾음). 프로세스에서
-# 그 모델이 어디서도 아직 안 읽힌 채 realdb 테스트의 create_all()이 먼저 돌면 해당 테이블이
-# 통째로 안 생긴다 — "그 테스트가 프로세스의 첫 realdb 테스트일 때만" 조용히 재현돼(#2201
-# `events` 테이블 사례) 원인 특정이 어려운 결함 계열이다.
-from app.models.label import Label, ItemLabel
-from app.models.onboarding_event import OnboardingEvent
-from app.models.verdict import Verdict
-from app.models.workflow_execution_log import WorkflowExecutionLog
-from app.models.workflow_line import (
-    WorkflowLineDefinition,
-    WorkflowLineDefinitionVersion,
-    WorkflowLineStepRun,
-    WorkflowLineStepApproval,
-    WorkflowLineStepRunEvent,
-    WorkflowRoleAssignment,
-)
-from app.models.workflow_template import WorkflowTemplate
-from app.models.workflow_trigger_type import WorkflowTriggerType
+# fix(2026-07-28, #2201 후속 CI 적출): app/models/*.py 파일 목록 대 이 파일의 import 목록을
+# 전수 대조해, `import app.models`만으로는 Base.metadata에 안 잡히는 모듈 11개를 찾았다
+# (2026-07-20 hitl_config/participation 건과 동일 결함 클래스). 이 PR이 실제로 필요한 것은
+# `event`(Event/"events" 테이블) 하나뿐이라 그것만 여기서 등재한다 — 나머지 10개(activity_log·
+# plan_feature·project_api_key·label·onboarding_event·verdict·workflow_execution_log·
+# workflow_line·workflow_template·workflow_trigger_type)는 등재 시 destructive_schema
+# 테스트(101개 파일 × 파일당 create_all/drop_all) 총소요가 CI 예산(25분, 기준선 16~17분)을
+# 넘겨 별도 스토리로 분리(PO 세움) — "등재를 미루는 것"이 아니라 "파일마다 전체 스키마를
+# create_all/drop_all하는 구조 자체를 먼저 손보는 것"이 그 스토리의 실제 과제.
 from app.models.trust_snapshot import OrgMemberTrustSnapshot
 from app.models.visual_artifact import ArtifactNode, ArtifactVersion, VisualArtifact
 # fix(2026-07-20, #2058 후속 CI 적출): 이 두 모듈이 여기 없어 `import app.models`만으로는
@@ -191,20 +177,4 @@ __all__ = [
     "User",
     "WorkflowVersion",
     "Event",
-    "ActivityLog",
-    "PlanFeature",
-    "ProjectApiKey",
-    "Label",
-    "ItemLabel",
-    "OnboardingEvent",
-    "Verdict",
-    "WorkflowExecutionLog",
-    "WorkflowLineDefinition",
-    "WorkflowLineDefinitionVersion",
-    "WorkflowLineStepRun",
-    "WorkflowLineStepApproval",
-    "WorkflowLineStepRunEvent",
-    "WorkflowRoleAssignment",
-    "WorkflowTemplate",
-    "WorkflowTriggerType",
 ]
