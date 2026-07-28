@@ -10,12 +10,15 @@ form="mention"이라 이 인덱스의 `WHERE form <> 'proof'` 조건에 항상 �
 전부 `form="mention"`으로 들어간다. 이건 데이터 손실이 아니라 **원래 없던 정보를 지어내지
 않는 것**(안 세는 것과 지어내는 것을 가르는 오늘의 규율 그대로) — 새로 생기는 행부터는
 정확한 form 이 기록된다.
+
+`source_field="body"` 로 채운다(PO 정정: NOT NULL·"자리가 본문이다"가 참) — 옛 표의 두
+source_type(chat_message·doc) 둘 다 텍스트 필드가 하나뿐이라 이게 유일하게 맞는 값이다.
 """
 from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,7 +42,7 @@ async def backfill_mentions_to_references(session: AsyncSession, *, org_id: uuid
             "id": uuid.uuid4(),
             "org_id": m.org_id,
             "source_type": m.source_type,
-            "source_field": None,  # 옛 표엔 서브 위치 개념이 없었다.
+            "source_field": "body",  # 옛 표의 두 source_type 다 텍스트 필드가 하나뿐이다.
             "source_id": m.source_id,
             "target_type": m.target_type,
             "target_id": m.target_id,
@@ -55,7 +58,7 @@ async def backfill_mentions_to_references(session: AsyncSession, *, org_id: uuid
     # 순수 INDEX다 — index_elements + index_where로 그 인덱스를 정확히 가리킨다).
     insert_stmt = insert_stmt.on_conflict_do_nothing(
         index_elements=[
-            Reference.source_type, func.coalesce(Reference.source_field, ""), Reference.source_id,
+            Reference.source_type, Reference.source_field, Reference.source_id,
             Reference.target_type, Reference.target_id, Reference.form,
         ],
         index_where=Reference.form != "proof",

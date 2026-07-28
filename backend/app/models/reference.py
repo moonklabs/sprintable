@@ -5,8 +5,14 @@
 
 축 정리(오르테가군 2026-07-28 판정):
   자리(source_type, source_field, source_id)  — source_field 는 같은 엔티티 안 여러 텍스트
-    필드(예: story description vs acceptance_criteria)를 가르는 서브 위치. 텍스트 필드가
-    하나뿐인 소스(chat_message 등)는 None.
+    필드(예: story description vs acceptance_criteria)를 가르는 서브 위치. **NOT NULL** —
+    텍스트 필드가 하나뿐인 소스(chat_message 등)도 "없음"이 아니라 "본문 하나뿐"이 사실이라
+    `"body"`를 실제로 적는다(PO 정정: 모르는 것을 NULL로 두지 않고 아는 것을 적는다 —
+    "자리가 없다"가 아니라 "자리가 본문이다"가 참).
+    ⛔유니크 축에 nullable 컬럼을 넣으면 NULL 행끼리는 "다른 값"으로 취급돼 유니크가 안
+    걸린다(Postgres 표준 동작) — source_field를 NOT NULL로 만든 이유가 이것. 오늘 세션에
+    같은 병이 두 번 나왔다(uq_stories_project_id_story_number → 여기) — **유니크 축의
+    컬럼은 NOT NULL 이거나, NULL 이 진짜 "값"으로 의미가 있어야 한다.**
   대상(target_type, target_id)                — source 와 동일 폴리모픽 원칙.
   형태(form)   — mention(인라인)·embed(카드)·proof(범위 스냅샷) **3값 CHECK로 닫는다**
     (유한하고 안 늘어나는 축 — entity type 과 다른 성격이라 여기만 CHECK).
@@ -33,7 +39,7 @@ write-path(`insert_chat_mentions`/`reconcile_doc_mentions`)는 저장 타깃만 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Index, Text, column, func, text
+from sqlalchemy import CheckConstraint, DateTime, Index, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -56,16 +62,11 @@ class Reference(Base, OrgScopedMixin):
         # 유일성 축이 다르다. proof 의 진짜 유일성은 proof_payload(어느 범위인가)까지 있어야
         # 서는데, 그 모양은 #2265(유나 lane) 몫이라 아직 모른다 — 지금 굳히면 그때 마이그를
         # 또 파야 하니 **모르는 것을 지금 단정하지 않는다**(부분 유니크로 proof만 열어 둠).
-        # source_field 도 키에 포함 — 같은 스토리의 description/acceptance_criteria 는 다른
-        # "자리"라 같은 대상을 각각 멘션해도 별개 사실이다(합치면 안 됨).
-        # ⛔source_field 는 nullable — Postgres UNIQUE/부분 유니크 인덱스는 NULL 을 서로
-        # 다른 값으로 취급해(story #2249 세션에서 이미 겪은 그 함정과 동형 — uq_stories_
-        # project_id_story_number 참조) source_field=NULL 인 행끼리는 **비교가 항상 거짓이라
-        # 중복이 안 잡힌다**. COALESCE로 NULL을 빈 문자열로 접어 비교 가능하게 만든다.
+        # source_field 는 NOT NULL(위 모듈 docstring 참조) — COALESCE 없이도 그대로 유니크
+        # 비교가 성립한다(기억에 의존하는 가드를 만들지 않는다).
         Index(
             "uq_entity_references_non_proof",
-            "source_type", func.coalesce(column("source_field"), text("''")), "source_id",
-            "target_type", "target_id", "form",
+            "source_type", "source_field", "source_id", "target_type", "target_id", "form",
             unique=True,
             postgresql_where=text("form <> 'proof'"),
         ),
@@ -74,8 +75,9 @@ class Reference(Base, OrgScopedMixin):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     source_type: Mapped[str] = mapped_column(Text, nullable=False)
     # story #2259: 같은 엔티티 안 복수 텍스트 필드를 가르는 서브 위치(예: "description" vs
-    # "acceptance_criteria") — 필드가 하나뿐인 source_type 은 None.
-    source_field: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # "acceptance_criteria") — 필드가 하나뿐인 source_type 도 "body"를 적는다(모듈 docstring
+    # 참조 — NOT NULL, NULL로 "없음"을 표현하지 않는다).
+    source_field: Mapped[str] = mapped_column(Text, nullable=False)
     source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     target_type: Mapped[str] = mapped_column(Text, nullable=False)
     target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)

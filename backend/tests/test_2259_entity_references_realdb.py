@@ -95,7 +95,7 @@ async def test_insert_rejects_unregistered_entity_type():
             await session.commit()
             with pytest.raises(UnregisteredEntityTypeError):
                 await insert_reference(
-                    session, org_id=org.id, source_type="chat_message", source_field=None,
+                    session, org_id=org.id, source_type="chat_message", source_field="body",
                     source_id=uuid.uuid4(), target_type="not_a_real_type", target_id=uuid.uuid4(),
                     form="mention", created_by=member.id,
                 )
@@ -114,7 +114,7 @@ async def test_insert_rejects_invalid_form():
             await session.commit()
             with pytest.raises(ValueError):
                 await insert_reference(
-                    session, org_id=org.id, source_type="chat_message", source_field=None,
+                    session, org_id=org.id, source_type="chat_message", source_field="body",
                     source_id=uuid.uuid4(), target_type="doc", target_id=uuid.uuid4(),
                     form="not_a_real_form", created_by=member.id,
                 )
@@ -301,7 +301,7 @@ async def test_orphan_type_count_catches_unregistered_type_in_storage():
             # insert_reference 를 우회해 registry 검증 없이 직접 삽입(오타 타입 시뮬레이션 —
             # write 경로가 안 걸러도 orphan 점검이 잡아야 하는 것을 증명).
             bogus = Reference(
-                id=uuid_mod.uuid4(), org_id=org.id, source_type="story", source_field=None,
+                id=uuid_mod.uuid4(), org_id=org.id, source_type="story", source_field="description",
                 source_id=story.id, target_type="sprintt",  # 오타
                 target_id=uuid_mod.uuid4(), form="mention", created_by=member.id,
             )
@@ -330,14 +330,14 @@ async def test_duplicate_mention_rejected_by_unique_index():
             await session.commit()
 
             session.add(Reference(
-                id=uuid.uuid4(), org_id=org.id, source_type="story", source_field=None,
+                id=uuid.uuid4(), org_id=org.id, source_type="story", source_field="description",
                 source_id=story.id, target_type="doc", target_id=doc.id, form="mention",
                 created_by=member.id,
             ))
             await session.commit()
 
             session.add(Reference(
-                id=uuid.uuid4(), org_id=org.id, source_type="story", source_field=None,
+                id=uuid.uuid4(), org_id=org.id, source_type="story", source_field="description",
                 source_id=story.id, target_type="doc", target_id=doc.id, form="mention",
                 created_by=member.id,
             ))
@@ -366,12 +366,12 @@ async def test_duplicate_proof_is_allowed():
             await session.commit()
 
             session.add(Reference(
-                id=uuid.uuid4(), org_id=org.id, source_type="story", source_field=None,
+                id=uuid.uuid4(), org_id=org.id, source_type="story", source_field="description",
                 source_id=story.id, target_type="doc", target_id=doc.id, form="proof",
                 created_by=member.id,
             ))
             session.add(Reference(
-                id=uuid.uuid4(), org_id=org.id, source_type="story", source_field=None,
+                id=uuid.uuid4(), org_id=org.id, source_type="story", source_field="description",
                 source_id=story.id, target_type="doc", target_id=doc.id, form="proof",
                 created_by=member.id,
             ))
@@ -381,9 +381,10 @@ async def test_duplicate_proof_is_allowed():
 
 
 @pytest.mark.anyio
-async def test_null_source_field_still_dedupes_via_coalesce():
-    """⛔NULL 함정 — source_field가 nullable이라 COALESCE 없이 부분 유니크를 걸면 NULL<>NULL
-    이라 중복이 안 잡힌다(uq_stories_project_id_story_number와 같은 함정). 여기선 잡혀야 한다."""
+async def test_chat_message_duplicate_mention_dedupes_correctly():
+    """chat_message 소스(source_field="body" 고정)도 정상적으로 중복이 잡힌다 — PO 정정
+    전에는 source_field가 nullable이라 NULL<>NULL 함정으로 이게 «안 잡혔을» 자리(오늘
+    세션 두 번째 재발한 uq_stories_project_id_story_number류 함정, NOT NULL로 근본 해소)."""
     from sqlalchemy.exc import IntegrityError
 
     from app.models.reference import Reference
@@ -397,15 +398,41 @@ async def test_null_source_field_still_dedupes_via_coalesce():
             await session.commit()
 
             session.add(Reference(
-                id=uuid.uuid4(), org_id=org.id, source_type="chat_message", source_field=None,
+                id=uuid.uuid4(), org_id=org.id, source_type="chat_message", source_field="body",
                 source_id=message_id, target_type="doc", target_id=doc.id, form="mention",
                 created_by=member.id,
             ))
             await session.commit()
 
             session.add(Reference(
-                id=uuid.uuid4(), org_id=org.id, source_type="chat_message", source_field=None,
+                id=uuid.uuid4(), org_id=org.id, source_type="chat_message", source_field="body",
                 source_id=message_id, target_type="doc", target_id=doc.id, form="mention",
+                created_by=member.id,
+            ))
+            with pytest.raises(IntegrityError):
+                await session.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_source_field_not_null_enforced_at_db_level():
+    """PO 정정의 근본 요구 — source_field에 NULL을 넣으려 하면 DB가 거부한다(NOT NULL).
+    "자리가 없다"는 상태 자체가 스키마에서 표현 불가능해야 한다는 것이 이 처방의 핵심."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.reference import Reference
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org, project, member = await _seed_org_project_member(session)
+            doc = await _seed_doc(session, org, project)
+            await session.commit()
+
+            session.add(Reference(
+                id=uuid.uuid4(), org_id=org.id, source_type="chat_message", source_field=None,
+                source_id=uuid.uuid4(), target_type="doc", target_id=doc.id, form="mention",
                 created_by=member.id,
             ))
             with pytest.raises(IntegrityError):

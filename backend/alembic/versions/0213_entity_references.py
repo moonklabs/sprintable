@@ -24,7 +24,10 @@ def upgrade() -> None:
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("org_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("source_type", sa.Text(), nullable=False),
-        sa.Column("source_field", sa.Text(), nullable=True),
+        # PO 정정(2026-07-28): NOT NULL — 자리가 없는 게 아니라 "본문"이 그 자리다(단일-필드
+        # source_type도 "body"를 실제로 적는다). NULL이면 유니크 인덱스에서 NULL<>NULL이라
+        # 중복이 안 잡히는 함정(오늘 세션 두 번째 재발) — NOT NULL로 근본에서 막는다.
+        sa.Column("source_field", sa.Text(), nullable=False),
         sa.Column("source_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("target_type", sa.Text(), nullable=False),
         sa.Column("target_id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -42,14 +45,11 @@ def upgrade() -> None:
     )
     # 부분 유니크(PO 판정 2026-07-28): proof 는 뺀다(같은 자리·같은 대상을 다른 범위로 여러 번
     # 인용하는 게 정상 쓰임 — proof_payload 가 정해지기 전까진 그 축으로 유일성을 못 세운다,
-    # #2265 몫). COALESCE로 source_field(nullable)의 NULL 비교 함정을 접는다(NULL<>NULL이라
-    # 그대로 두면 이 인덱스가 아무것도 안 잡는다).
+    # #2265 몫). source_field가 NOT NULL이라 COALESCE 없이도 그대로 유니크가 성립한다.
     op.execute(
         """
         CREATE UNIQUE INDEX uq_entity_references_non_proof
-        ON entity_references (
-            source_type, COALESCE(source_field, ''), source_id, target_type, target_id, form
-        )
+        ON entity_references (source_type, source_field, source_id, target_type, target_id, form)
         WHERE form <> 'proof'
         """
     )

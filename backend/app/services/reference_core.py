@@ -37,7 +37,7 @@ class UnregisteredEntityTypeError(ValueError):
 class ResolvedReference:
     id: uuid.UUID
     source_type: str
-    source_field: str | None
+    source_field: str
     source_id: uuid.UUID
     target_type: str
     target_id: uuid.UUID
@@ -57,7 +57,7 @@ async def insert_reference(
     *,
     org_id: uuid.UUID,
     source_type: str,
-    source_field: str | None,
+    source_field: str,
     source_id: uuid.UUID,
     target_type: str,
     target_id: uuid.UUID,
