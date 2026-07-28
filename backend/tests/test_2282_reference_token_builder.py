@@ -10,6 +10,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+import pytest
+
 from app.services.reference_token import build_reference_token
 
 
@@ -60,10 +62,14 @@ def test_build_reference_token_matches_fe_applyEntity_format_no_trailing_space()
 def test_build_reference_token_escapes_brackets_matching_fe_applyAsset_rule():
     """⭐PO critical 판정(2026-07-28) — FE `applyEntity`가 title을 escape 안 하는 게 실제
     보안 결함으로 확정됐다(형제 `applyAsset`은 `[ ] ( ) \\`+개행을 escape — 그 코멘트가
-    "phishing 링크 렌더 차단"이라고 명시). 게다가 `[TAG] 제목`류가 이 조직의 실제 명명
-    관례라 예외 입력이 아니라 기본 입력이었다(실측: entities/search 쿼리 4개가 전부 캡까지
-    참). 이 함수는 이제 **applyAsset과 같은 규칙**으로 escape한다 — BE가 만드는 토큰은
-    무조건 안전해진다."""
+    "phishing 링크 렌더 차단"이라고 명시). 이 함수는 이제 **applyAsset과 같은 규칙**으로
+    escape한다 — BE가 만드는 토큰은 무조건 안전해진다.
+
+    ⛔PO 재정정(2026-07-28): "이 조직의 명명 관례가 흔하다"는 «급한 이유»일 뿐 «요건»이
+    아니다 — 요건은 "우리 관례를 받는다"가 아니라 **"어떤 제목이든 안 깨진다"**다. 제목에
+    특정 문자를 쓰지 말라고 하는 것은 제품이 질 일을 사람에게 미루는 것이라 안 하는 길이다.
+    아래 `test_build_reference_token_handles_arbitrary_special_characters`가 그 일반
+    요건을 다룬다 — 이 테스트는 그중 "링크 위장" 시나리오 하나만 남긴다."""
     doc_id = uuid.uuid4()
     dangerous_title = "Report](https://evil.example)[Click"
     token = build_reference_token("doc", doc_id, dangerous_title)
@@ -72,8 +78,9 @@ def test_build_reference_token_escapes_brackets_matching_fe_applyAsset_rule():
 
 
 def test_build_reference_token_escapes_realistic_org_tag_prefix_title():
-    """⭐실측 회귀 가드 — 이 조직의 실제 명명 관례(`[TAG] 제목`, 예: 오늘 만든 #2266/#2284/
-    #2282 스토리 자신도 이 패턴)가 안전한 토큰을 낸다는 것을 실물 사례로 고정한다."""
+    """실측 회귀 가드(참고 사례 하나) — 이 조직에서 실제로 쓰이는 `[TAG] 제목` 형태가
+    안전한 토큰을 낸다는 것을 실물 사례로 고정한다. ⛔단 이건 "이 형태만 지원한다"는
+    뜻이 아니다 — 일반 요건은 아래 파라미터화 테스트가 다룬다."""
     story_id = uuid.uuid4()
     title = "[E-CONNECT] 참조 토큰을 «만드는 법»을 응답이 알려 준다"
     token = build_reference_token("story", story_id, title)
@@ -81,6 +88,32 @@ def test_build_reference_token_escapes_realistic_org_tag_prefix_title():
     # 안쪽 대괄호가 escape됐으니 바깥 [...] 몸통이 첫 `]`에서 조기 종료되지 않는다.
     body_end = token.index("](entity:")
     assert token[1:body_end] == r"\[E-CONNECT\] 참조 토큰을 «만드는 법»을 응답이 알려 준다"
+
+
+@pytest.mark.parametrize("title", [
+    "🚀 Launch Plan [Q3] 🎯",
+    "Say \"Hello\" and 'Bye'",
+    "日本語のタイトル [テスト] 中文标题 한국어 عربي",
+    "C:\\Users\\test[1]",  # title 자체에 이미 backslash가 있는 경우(이중 escape 견고성)
+    "[[deep]] nesting ]] test",
+    "🔥 [TAG] \"quoted\" 日本語 (paren) \\ end — 모든 축 동시",
+    "제목 — 부제(2024)",
+    "Emoji only 😀😃😄",
+])
+def test_build_reference_token_handles_arbitrary_special_characters(title):
+    """⭐⭐PO 판정(2026-07-28, 선생님 지적) — 요건은 «우리 조직 명명 관례를 받는다»가
+    아니라 **«어떤 제목이든 안 깨진다»**다. 다른 조직은 `(2024)`·`제목 — 부제`·이모지·
+    다국어 — 무엇이든 쓴다. 「이 문자는 못 씁니다」가 어디에도 뜨지 않아야 하는 것이
+    요건이지, 특정 조직의 관례를 지원하는 게 요건이 아니다. 이 테스트는 임의의 특수문자
+    조합이 항상 안전하게 escape되고(생성) 항상 다시 파싱되는지(왕복, 파서 쪽은
+    test_1993_mention_parser.py에서 별도로도 재검증) 확認한다."""
+    from app.services.mention_parser import extract_chat_entity_mentions
+
+    entity_id = uuid.uuid4()
+    token = build_reference_token("doc", entity_id, title)
+    assert token is not None
+    parsed = extract_chat_entity_mentions(f"메시지 본문: {token} 뒤에 텍스트")
+    assert parsed == [("doc", entity_id)], f"title={title!r} token={token!r}"
 
 
 def test_build_reference_token_escapes_backslash_and_collapses_newlines():

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 from app.services.mention_parser import (
     extract_chat_doc_mention_ids,
     extract_doc_mention_ids,
@@ -72,9 +74,11 @@ def test_extract_chat_requires_title_brackets():
 
 
 def test_extract_chat_title_with_escaped_bracket_still_matches():
-    """⭐핵심 회귀 가드 — `[TAG] 제목`류(이 조직의 실제 명명 관례)가 escape된 채로 와도
-    파싱이 성공해야 한다. 예전 정규식(`[^\\]]*`)은 escape를 몰라 이 케이스에서 통째로
-    매치 실패했다(#2282 발견·재현)."""
+    """⭐핵심 회귀 가드 — 제목에 escape된 `]`가 있어도 파싱이 성공해야 한다(요건은 특정
+    조직의 명명 관례를 받는 게 아니라 "어떤 제목이든 안 깨진다"는 것 — PO 재정정,
+    2026-07-28). 예전 정규식(`[^\\]]*`)은 escape를 몰라 이 케이스에서 통째로 매치
+    실패했다(#2282 발견·재현). `[TAG] 제목`(이 조직에서 실제로 쓰는 형태 하나)은 그
+    일반 요건이 실물에 적용된 사례일 뿐이다."""
     from app.services.mention_parser import extract_chat_entity_mentions
 
     story_id = uuid.uuid4()
@@ -90,6 +94,29 @@ def test_extract_chat_title_with_escaped_paren_and_backslash_still_matches():
     title = r"Report\]\(https://evil.example\)\[Click"
     content = f"[{title}](entity:doc:{doc_id})"
     assert extract_chat_entity_mentions(content) == [("doc", doc_id)]
+
+
+@pytest.mark.parametrize("raw_title", [
+    "🚀 Launch Plan [Q3] 🎯",
+    "Say \"Hello\" and 'Bye'",
+    "日本語のタイトル [テスト] 中文标题 한국어 عربي",
+    "C:\\Users\\test[1]",
+    "[[deep]] nesting ]] test",
+    "제목 — 부제(2024)",
+    "Report](https://evil.example)[Click here",  # `](` 가 제목 «안»에 literal로 등장
+])
+def test_extract_chat_arbitrary_special_char_title_roundtrips(raw_title):
+    """⭐⭐PO 판정(2026-07-28, 선생님 재정정) — 요건은 "우리 조직 관례를 받는다"가 아니라
+    "어떤 제목이든 안 깨진다"다. `build_reference_token`이 만든 escape된 토큰이 이
+    파서로 정확히 다시 파싱되는지 임의 특수문자 조합으로 확認한다(생성-파싱 왕복을
+    파서 쪽에서 직접, 빌더 쪽 테스트와 별도로 재검증)."""
+    from app.services.mention_parser import extract_chat_entity_mentions
+    from app.services.reference_token import build_reference_token
+
+    doc_id = uuid.uuid4()
+    token = build_reference_token("doc", doc_id, raw_title)
+    content = f"메시지: {token} 끝"
+    assert extract_chat_entity_mentions(content) == [("doc", doc_id)], f"title={raw_title!r}"
 
 
 def test_extract_chat_plain_title_without_escapes_still_matches_backward_compat():
