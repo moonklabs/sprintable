@@ -192,3 +192,52 @@ async def test_story_response_reference_token_roundtrips_through_chat():
             assert rows[0].target_id == story.id
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_bracket_prefixed_title_reference_token_roundtrips_through_chat():
+    """⭐⭐이 세션의 핵심 발견 — 「[TAG] 제목」류(이 조직의 실제 명명 관례, 오늘 만든
+    #2266/#2284/#2282 스토리 자신도 이 패턴)가 실제로 채팅을 왕복해 entity_references에
+    등록되는지 실증한다. 이 테스트가 예전 `_CHAT_TOKEN_RE`(escape-unaware)였다면 RED였을
+    것 — PARSED: []로 재현된 그 버그를 직접 잡는 회귀 가드."""
+    from app.models.pm import Story
+    from app.models.reference import Reference
+    from app.schemas.story import StoryResponse
+    from app.services.mention_parser import insert_chat_mentions
+    from sqlalchemy import select
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org, project, member = await _seed_org_project_member(session)
+            story = Story(
+                id=uuid.uuid4(), org_id=org.id, project_id=project.id,
+                title="[E-CONNECT] 참조 토큰을 «만드는 법»을 응답이 알려 준다"
+                " — ⛔포맷이 FE에 하나뿐이라 BE가 따로 만들면 쌍둥이가 된다",
+                status="backlog",
+            )
+            session.add(story)
+            await session.commit()
+
+            story_response = StoryResponse.model_validate(story)
+            token = story_response.reference_token
+            assert token is not None
+            assert "\\[E-CONNECT\\]" in token  # escape 확인
+
+            message_id = uuid.uuid4()
+            await insert_chat_mentions(
+                session, org_id=org.id, message_id=message_id, content=f"참고: {token}",
+                created_by=member.id,
+            )
+            await session.commit()
+
+            rows = (await session.execute(
+                select(Reference).where(Reference.source_id == message_id)
+            )).scalars().all()
+            assert len(rows) == 1, (
+                f"[TAG] 제목 토큰이 왕복하지 않았다(#2282 발견 버그 회귀) — rows={rows}"
+            )
+            assert rows[0].target_type == "story"
+            assert rows[0].target_id == story.id
+    finally:
+        await engine.dispose()

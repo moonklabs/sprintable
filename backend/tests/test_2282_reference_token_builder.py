@@ -2,8 +2,8 @@
 
 AC2(단일 SSOT) — DocResponse/StoryResponse/GoalResponse가 전부 같은
 `build_reference_token`을 재사용하는지, AC5(해석 불가 타입엔 안 줌), AC3(FE `applyEntity`와의
-parity — 이스케이핑 부재까지 그대로 pin)를 다룬다. AC4(왕복 실증)는 realdb 테스트
-(`test_2282_reference_token_roundtrip_realdb.py`) 몫.
+포맷 parity + escape — PO critical 판정으로 `applyAsset`과 동일 escape 규칙을 적용)를
+다룬다. AC4(왕복 실증)는 realdb 테스트(`test_2282_reference_token_roundtrip_realdb.py`) 몫.
 """
 from __future__ import annotations
 
@@ -57,18 +57,39 @@ def test_build_reference_token_matches_fe_applyEntity_format_no_trailing_space()
     assert not token.endswith(" ")
 
 
-def test_build_reference_token_does_not_escape_brackets_matching_fe_gap():
-    """⛔AC3 실측 pin — FE `applyEntity`는 title을 escape하지 않는다(형제 `applyAsset`은
-    한다). 이 함수도 **동일하게 escape 안 함**(있는 척 안 함, parity가 목적) — 제목에
-    `]`가 들어가면 토큰 구조가 깨진다는 것을 이 테스트가 고정한다. ⚠️이건 알려진 gap이지
-    이 함수의 버그가 아니다(#2282 보고 참조 — FE도 같이 고쳐야 하는 별건)."""
+def test_build_reference_token_escapes_brackets_matching_fe_applyAsset_rule():
+    """⭐PO critical 판정(2026-07-28) — FE `applyEntity`가 title을 escape 안 하는 게 실제
+    보안 결함으로 확정됐다(형제 `applyAsset`은 `[ ] ( ) \\`+개행을 escape — 그 코멘트가
+    "phishing 링크 렌더 차단"이라고 명시). 게다가 `[TAG] 제목`류가 이 조직의 실제 명명
+    관례라 예외 입력이 아니라 기본 입력이었다(실측: entities/search 쿼리 4개가 전부 캡까지
+    참). 이 함수는 이제 **applyAsset과 같은 규칙**으로 escape한다 — BE가 만드는 토큰은
+    무조건 안전해진다."""
     doc_id = uuid.uuid4()
     dangerous_title = "Report](https://evil.example)[Click"
     token = build_reference_token("doc", doc_id, dangerous_title)
-    # escape 안 됐다는 것 자체를 pin(문자 그대로 들어감 — \\[ \\] 변환 없음).
-    assert token == f"[{dangerous_title}](entity:doc:{doc_id})"
-    assert "\\]" not in token
-    assert "\\)" not in token
+    expected_escaped = r"Report\]\(https://evil.example\)\[Click"
+    assert token == f"[{expected_escaped}](entity:doc:{doc_id})"
+
+
+def test_build_reference_token_escapes_realistic_org_tag_prefix_title():
+    """⭐실측 회귀 가드 — 이 조직의 실제 명명 관례(`[TAG] 제목`, 예: 오늘 만든 #2266/#2284/
+    #2282 스토리 자신도 이 패턴)가 안전한 토큰을 낸다는 것을 실물 사례로 고정한다."""
+    story_id = uuid.uuid4()
+    title = "[E-CONNECT] 참조 토큰을 «만드는 법»을 응답이 알려 준다"
+    token = build_reference_token("story", story_id, title)
+    assert token == f"[\\[E-CONNECT\\] 참조 토큰을 «만드는 법»을 응답이 알려 준다](entity:story:{story_id})"
+    # 안쪽 대괄호가 escape됐으니 바깥 [...] 몸통이 첫 `]`에서 조기 종료되지 않는다.
+    body_end = token.index("](entity:")
+    assert token[1:body_end] == r"\[E-CONNECT\] 참조 토큰을 «만드는 법»을 응답이 알려 준다"
+
+
+def test_build_reference_token_escapes_backslash_and_collapses_newlines():
+    doc_id = uuid.uuid4()
+    title = "Path\\to\\file\nSecond line\r\nThird"
+    token = build_reference_token("doc", doc_id, title)
+    assert "\\\\" in token  # backslash escaped
+    assert "\n" not in token and "\r" not in token
+    assert token == f"[Path\\\\to\\\\file Second line Third](entity:doc:{doc_id})"
 
 
 # ─── DocResponse/StoryResponse/GoalResponse computed_field — AC1/AC2 ────────

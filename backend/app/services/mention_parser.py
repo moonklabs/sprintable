@@ -43,6 +43,7 @@ design-org-knowledge-mentions-backlinks §2.
 """
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from html.parser import HTMLParser
@@ -55,13 +56,24 @@ from app.models.reference import Reference
 from app.services.member_resolver import canonicalize_member_id
 from app.services.reference_registry import ENTITY_RESOLVERS
 
+logger = logging.getLogger(__name__)
+
 _UUID_RE = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 
 # FE `applyEntity`(chat-input.tsx) 가 만드는 정확한 토큰: `[title](entity:<type>:<id>) `.
-# title 은 `[...]` 안에 임의 텍스트(escape 없음 — applyEntity 는 asset 경로만 이스케이프한다) ·
 # id 는 UUID. type 그룹을 남겨 향후 story/epic 확장 시 재사용 가능하게 하되, 이번엔 doc 만 필터.
+#
+# ⛔story #2282(PO critical, 2026-07-28): title 안의 `[^\]]*`(그냥 "]가 아닌 문자 반복")는
+# escape 를 전혀 모른다 — title 에 `]`가 들어가면(이 조직의 실제 명명 관례 `[TAG] 제목`이
+# 정확히 이 경우다) **어디서 escape 했든 안 했든** 그 `]`에서 무조건 멈추고, 그 뒤에
+# `(entity:...)`가 바로 안 오면(제목이 이어지므로 안 온다) **매치 자체가 통째로 실패**한다
+# (조용히 0건 추출 — AC4 왕복 실증 중 직접 재현). `(?:[^\]\\]|\\.)*`로 교체: "]나 \가 아닌
+# 문자" 또는 "\+아무문자(escape 시퀀스)"의 반복 — escape된 `\]`는 멈추지 않고 진짜(escape
+# 안 된) `]`에서만 멈춘다. `build_reference_token`(reference_token.py)이 title을
+# backslash-escape하는 것과 **짝**이다 — 한쪽만 고치면(escape만 하고 파서는 그대로) 여전히
+# 안 열린다는 것을 실측으로 확인했다.
 _CHAT_TOKEN_RE = re.compile(
-    r"\[[^\]]*\]\(entity:(?P<type>[a-z]+):(?P<id>" + _UUID_RE + r")\)"
+    r"\[(?:[^\]\\]|\\.)*\]\(entity:(?P<type>[a-z]+):(?P<id>" + _UUID_RE + r")\)"
 )
 
 
@@ -73,7 +85,16 @@ def extract_chat_entity_mentions(content: str) -> list[tuple[str, uuid.UUID]]:
     write-path 호출부가 target_types 로 내린다(추출/저장의 경계를 함수 시그니처로 옮김).
     이 함수를 다시 열어 타입별 분기를 추가하는 일은 이제 없다(그러면 죽은 경로가 재발한다).
 
-    malformed(정규식 미매치·잘못된 UUID)는 자연히 스킵된다."""
+    malformed(정규식 미매치·잘못된 UUID)는 자연히 스킵된다.
+
+    ⛔story #2282(PO 판정, 2026-07-28): "매치 실패가 조용했던 것" 자체가 사고였다 — 예전
+    `_CHAT_TOKEN_RE`가 escape를 몰라 `[TAG] 제목`류(이 조직의 실제 명명 관례)에서 매치가
+    통째로 실패했는데도 아무 신호가 없었다(사람은 picker로 골랐고 화면엔 링크처럼 보이는데
+    데이터엔 아무것도 안 남는 — "실패가 성공처럼 보이는" 최악의 판). 그래서 이 함수는 이제
+    "토큰 모양"(`](entity:`)이 본문에 있는데 실제 추출 건수가 그보다 적으면 경고 로그를
+    남긴다 — 재발해도 조용히 안 넘어가게 하는 최소 감시망(완벽한 검출은 아니다 — 우연히
+    `](entity:`를 포함한 무관한 텍스트가 오탐을 낼 수 있다는 것도 안다, 그래도 "0신호"보다
+    낫다)."""
     if not content:
         return []
     seen: set[tuple[str, uuid.UUID]] = set()
@@ -88,6 +109,13 @@ def extract_chat_entity_mentions(content: str) -> list[tuple[str, uuid.UUID]]:
         if key not in seen:
             seen.add(key)
             result.append(key)
+    shape_count = content.count("](entity:")
+    if len(result) < shape_count:
+        logger.warning(
+            "mention_parser: token-shaped substring count(%d) exceeds extracted count(%d) — "
+            "possible silent parse failure. content_snippet=%r",
+            shape_count, len(result), content[:200],
+        )
     return result
 
 
