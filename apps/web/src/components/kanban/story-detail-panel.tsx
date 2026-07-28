@@ -108,13 +108,29 @@ const descriptionViewerComponents = {
   pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg bg-muted p-3 text-[13px] text-foreground">{children}</pre>,
   code: ({ children }: { children?: React.ReactNode }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">{children}</code>,
   blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
-  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">{children}</a>,
+  // 긴급 정정(2026-07-28, PO 검수): description/AC 뷰어는 부모 div에 클릭=편집모드 진입
+  // onClick이 걸려 있다(1093·1140줄) — 링크가 stopPropagation 없이 렌더돼 클릭이 그대로
+  // 버블링, 링크가 새 탭으로 열리는 동시에 편집모드까지 열렸다. 링크 클릭은 여기서 끊는다.
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-primary underline underline-offset-2"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {children}
+    </a>
+  ),
   strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold text-foreground">{children}</strong>,
   em: ({ children }: { children?: React.ReactNode }) => <em className="italic text-muted-foreground">{children}</em>,
   hr: () => <hr className="my-2 border-border" />,
 };
 
-function DescriptionViewer({ description }: { description: string }) {
+// export: 회귀 테스트(부모 클릭=편집모드 진입 wrapper 안에서 링크 클릭이 전파를 끊는지)를
+// StoryDetailPanel 전체 마운트 없이 격리 검증하기 위함(story-detail-panel.tsx는 huge prop
+// surface라 전체 마운트 테스트가 비실용적) — 동작 변경 없는 순수 export 추가.
+export function DescriptionViewer({ description }: { description: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
