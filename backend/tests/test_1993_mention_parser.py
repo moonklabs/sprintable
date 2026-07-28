@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 from app.services.mention_parser import (
     extract_chat_doc_mention_ids,
     extract_doc_mention_ids,
@@ -66,6 +68,94 @@ def test_extract_chat_requires_title_brackets():
     doc_id = uuid.uuid4()
     content = f"entity:doc:{doc_id} (bracket 없음)"
     assert extract_chat_doc_mention_ids(content) == []
+
+
+# ─── story #2282(PO critical) — escape-aware 정규식 (제목 안 `]`가 조기종료 안 함) ────
+
+
+def test_extract_chat_title_with_escaped_bracket_still_matches():
+    """⭐핵심 회귀 가드 — 제목에 escape된 `]`가 있어도 파싱이 성공해야 한다(요건은 특정
+    조직의 명명 관례를 받는 게 아니라 "어떤 제목이든 안 깨진다"는 것 — PO 재정정,
+    2026-07-28). 예전 정규식(`[^\\]]*`)은 escape를 몰라 이 케이스에서 통째로 매치
+    실패했다(#2282 발견·재현). `[TAG] 제목`(이 조직에서 실제로 쓰는 형태 하나)은 그
+    일반 요건이 실물에 적용된 사례일 뿐이다."""
+    from app.services.mention_parser import extract_chat_entity_mentions
+
+    story_id = uuid.uuid4()
+    title = r"\[E-CONNECT\] 참조 토큰을 «만드는 법»을 응답이 알려 준다"
+    content = f"[{title}](entity:story:{story_id})"
+    assert extract_chat_entity_mentions(content) == [("story", story_id)]
+
+
+def test_extract_chat_title_with_escaped_paren_and_backslash_still_matches():
+    from app.services.mention_parser import extract_chat_entity_mentions
+
+    doc_id = uuid.uuid4()
+    title = r"Report\]\(https://evil.example\)\[Click"
+    content = f"[{title}](entity:doc:{doc_id})"
+    assert extract_chat_entity_mentions(content) == [("doc", doc_id)]
+
+
+@pytest.mark.parametrize("raw_title", [
+    "🚀 Launch Plan [Q3] 🎯",
+    "Say \"Hello\" and 'Bye'",
+    "日本語のタイトル [テスト] 中文标题 한국어 عربي",
+    "C:\\Users\\test[1]",
+    "[[deep]] nesting ]] test",
+    "제목 — 부제(2024)",
+    "Report](https://evil.example)[Click here",  # `](` 가 제목 «안»에 literal로 등장
+])
+def test_extract_chat_arbitrary_special_char_title_roundtrips(raw_title):
+    """⭐⭐PO 판정(2026-07-28, 선생님 재정정) — 요건은 "우리 조직 관례를 받는다"가 아니라
+    "어떤 제목이든 안 깨진다"다. `build_reference_token`이 만든 escape된 토큰이 이
+    파서로 정확히 다시 파싱되는지 임의 특수문자 조합으로 확認한다(생성-파싱 왕복을
+    파서 쪽에서 직접, 빌더 쪽 테스트와 별도로 재검증)."""
+    from app.services.mention_parser import extract_chat_entity_mentions
+    from app.services.reference_token import build_reference_token
+
+    doc_id = uuid.uuid4()
+    token = build_reference_token("doc", doc_id, raw_title)
+    content = f"메시지: {token} 끝"
+    assert extract_chat_entity_mentions(content) == [("doc", doc_id)], f"title={raw_title!r}"
+
+
+def test_extract_chat_plain_title_without_escapes_still_matches_backward_compat():
+    """escape-aware로 바꿔도 escape 없는 기존 토큰(대다수 실 데이터)은 그대로 매치돼야
+    한다 — 회귀 0."""
+    doc_id = uuid.uuid4()
+    content = f"[Pricing Policy](entity:doc:{doc_id})"
+    assert extract_chat_doc_mention_ids(content) == [doc_id]
+
+
+# ─── story #2282(PO 판정) — 매치 실패를 조용히 넘기지 않는다(감시망) ──────────
+
+
+def test_extract_chat_warns_on_unparsed_token_shape(caplog):
+    """⭐토큰 «모양»(`](entity:`)이 있는데 실제 추출이 그보다 적으면 경고를 남긴다 — "실패가
+    성공처럼 보이는" 것을 막는 최소 감시망. 일부러 다시 escape-unaware 패턴을 흉내내
+    (실제 매치 실패를 유발할 순 없으니 문자열 자체에 `](entity:`를 여러 번 심어 카운트를
+    올린다) 경고가 뜨는지 확認한다."""
+    import logging
+    from app.services.mention_parser import extract_chat_entity_mentions
+
+    caplog.set_level(logging.WARNING, logger="app.services.mention_parser")
+    doc_id = uuid.uuid4()
+    # 진짜 토큰 1개 + "](entity:" 모양만 흉내낸 잡음 1개 → shape_count(2) > extracted(1).
+    content = f"[Real](entity:doc:{doc_id}) 그리고 이상한 텍스트 ](entity: 어쩌고"
+    result = extract_chat_entity_mentions(content)
+    assert result == [("doc", doc_id)]
+    assert any("possible silent parse failure" in r.message for r in caplog.records)
+
+
+def test_extract_chat_no_warning_when_shapes_all_parsed(caplog):
+    import logging
+    from app.services.mention_parser import extract_chat_entity_mentions
+
+    caplog.set_level(logging.WARNING, logger="app.services.mention_parser")
+    doc_id = uuid.uuid4()
+    content = f"[Real](entity:doc:{doc_id})"
+    extract_chat_entity_mentions(content)
+    assert not any("possible silent parse failure" in r.message for r in caplog.records)
 
 
 # ─── extract_doc_mention_ids (HTMLParser — wikiLink/pageEmbed data-doc-id) ────

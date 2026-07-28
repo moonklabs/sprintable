@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 
 from app.schemas.attachment import validate_attachment_url
 
@@ -284,3 +284,11 @@ class StoryResponse(BaseModel):
     @classmethod
     def _coerce_human_verified_at(cls, v):
         return v if isinstance(v, datetime) else None
+
+    # story #2282(E-CONNECT) AC1/AC2: 이 story를 가리키는 참조 토큰 — DocResponse와 동일
+    # 단일 builder 재사용(app.services.reference_token.build_reference_token).
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def reference_token(self) -> str | None:
+        from app.services.reference_token import build_reference_token
+        return build_reference_token("story", self.id, self.title)
