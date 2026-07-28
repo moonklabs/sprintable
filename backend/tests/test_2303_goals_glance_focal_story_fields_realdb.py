@@ -406,3 +406,106 @@ async def test_focal_story_excludes_fields_the_screen_does_not_read():
         }, focal
     finally:
         await engine.dispose()
+
+
+# ─── 오르테가 리뷰(2026-07-29, PR #2602) — 「반만 고친」 지적 ──────────────────
+#
+# _AUTO_VERIFY_MAP은 단일 소유자로 옮겼지만, proof_count/human_verified/self_reported의
+# «쿼리 조건»은 hero(routers/glance.py 단건)와 goal.py(배치)가 각자 다시 쓴 것 — 지금은
+# 같은 값을 내지만 규칙이 두 자리에 산다(상수보다 위험 — 조건이 조용히 갈릴 수 있다).
+# 배치 vs 단건이라 함수 공유가 억지가 될 수 있어, 처방은 "같은 story_id에 대해 두 경로가
+# 같은 값을 내는지" 값 동일성으로 대조하는 realdb 테스트 — AC3의 진짜 형태.
+
+
+async def _fetch_hero(app, Session, caller_user_id, org_id, story_id):
+    await _setup_app_human(app, Session, caller_user_id, org_id)
+    client = _client_for(app)
+    try:
+        resp = await client.get("/api/v2/glance/hero", params={"story_id": str(story_id)})
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+
+async def test_focal_story_values_match_glance_hero_for_same_story_rich_case():
+    """같은 story_id — hero(단건)와 focal_story(배치)가 값 하나하나 같아야 한다(존재
+    여부가 아니라 값 동일성). rich 케이스: evidence 다건 + human_verified + merge gate +
+    pending gate 전부 갖춘 story."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            verifier_id, _ = await _make_human_member(s, org.id, project.id, name="Verifier")
+            goal = await _make_goal(s, org.id, project.id)
+            story = await _make_story(
+                s, org.id, project.id, goal.id, assignee_id=caller_id,
+                status="in-progress", title="Rich",
+            )
+            await _make_evidence(s, org.id, story.id, created_by=caller_id, type="url", ref="https://a")
+            await _make_evidence(s, org.id, story.id, created_by=caller_id, type="pr", ref="https://b")
+            await _make_evidence(
+                s, org.id, story.id, created_by=verifier_id, type="gate_approval", ref="approved",
+            )
+            await _make_gate(
+                s, org.id, story.id, status="pending", gate_type="human_review",
+                requires_human=True,
+            )
+            await _make_gate(
+                s, org.id, story.id, status="approved", gate_type="merge",
+                evidence_status="sufficient",
+            )
+
+        hero = await _fetch_hero(app, Session, caller_user_id, org.id, story.id)
+        focal = await _fetch_focal(app, Session, caller_user_id, org.id, project.id)
+        assert focal is not None
+        assert focal["id"] == str(story.id), focal
+
+        # proof_count는 evidence type을 안 가린다(hero·goal.py 둘 다 work_item_type만 필터) —
+        # url·pr·gate_approval 3건 전부 세어져야 한다.
+        assert focal["proof_count"] == hero["proof_count"] == 3, (focal, hero)
+        assert focal["auto_verify"] == hero["auto_verify"] == "passed", (focal, hero)
+        assert focal["trust"]["self_reported"] == hero["trust"]["self_reported"] is True
+        assert focal["trust"]["human_verified"] == hero["trust"]["human_verified"] is True
+        assert focal["trust"]["human_verified_at"] == hero["trust"]["human_verified_at"], (focal, hero)
+        assert focal["trust"]["human_verified_by"]["name"] == hero["trust"]["human_verified_by"]["name"]
+        assert focal["gate"]["gate_type"] == hero["gate"]["gate_type"] == "human_review"
+        assert focal["gate"]["requires_human"] == hero["gate"]["requires_human"] is True
+    finally:
+        await engine.dispose()
+
+
+async def test_focal_story_values_match_glance_hero_for_same_story_empty_case():
+    """빈 케이스 — evidence·gate 전부 없는 story도 두 경로가 같은 "없음"을 낸다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            goal = await _make_goal(s, org.id, project.id)
+            story = await _make_story(
+                s, org.id, project.id, goal.id, assignee_id=caller_id,
+                status="in-progress", title="Empty",
+            )
+
+        hero = await _fetch_hero(app, Session, caller_user_id, org.id, story.id)
+        focal = await _fetch_focal(app, Session, caller_user_id, org.id, project.id)
+        assert focal is not None
+
+        assert focal["proof_count"] == hero["proof_count"] == 0
+        assert focal["auto_verify"] == hero["auto_verify"] is None
+        assert focal["trust"]["self_reported"] == hero["trust"]["self_reported"] is False
+        assert focal["trust"]["human_verified"] == hero["trust"]["human_verified"] is False
+        assert focal["trust"]["human_verified_at"] == hero["trust"]["human_verified_at"] is None
+        assert focal["trust"]["human_verified_by"] == hero["trust"]["human_verified_by"] is None
+        assert focal["gate"] == hero["gate"] is None
+    finally:
+        await engine.dispose()
