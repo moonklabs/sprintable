@@ -620,6 +620,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             presenceStatus={presenceById?.[msg.created_by]}
                             isWorking={typingAgents.some((a) => a.id === msg.created_by)}
                             highlight={msg.id === highlightId}
+                            projectId={projectId}
                           />
                           {/* S5: 트리거 메시지 직후 차단 hint notice(차단 에이전트별 1건) */}
                           {commandHints[msg.id]?.map((h) => (
