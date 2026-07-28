@@ -7,12 +7,26 @@
  * ㉡화면이 먼저 늘려서 아직 없는 라우트를 부르게 되는 경우.
  */
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+
+// PO 지적(CI 빨강, 2026-07-28) — 로컬 워크트리와 CI 체크아웃의 경로 깊이가 달라 `../../` 개수를
+// 세는 방식이 CI에서만 깨졌다(로컬=1단계 더 깊은 경로). `../` 개수를 세지 않고 `backend/`가
+// 있는 첫 조상 디렉터리를 레포 루트로 찾아 올라간다 — 워크트리·CI·경로 깊이 전부와 무관.
+function findRepoRoot(startDir: string): string {
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    if (existsSync(join(dir, 'backend', 'app', 'services', 'backlinks.py'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break; // 파일시스템 루트 도달 — 더 못 올라감
+    dir = parent;
+  }
+  throw new Error(`레포 루트(backend/app/services/backlinks.py를 포함하는 조상)를 ${startDir}에서 못 찾았다`);
+}
 
 function parseBackendAllowedTargetTypes(): Set<string> {
-  // vitest CWD는 apps/web(이 프로젝트의 관례) — backend는 두 단계 위.
-  const path = resolve(process.cwd(), '../../backend/app/services/backlinks.py');
+  const repoRoot = findRepoRoot(process.cwd());
+  const path = resolve(repoRoot, 'backend/app/services/backlinks.py');
   const source = readFileSync(path, 'utf-8');
   const m = source.match(/BACKLINKS_ALLOWED_TARGET_TYPES\s*=\s*frozenset\(\{([^}]*)\}\)/);
   if (!m) throw new Error('BACKLINKS_ALLOWED_TARGET_TYPES 정의를 backlinks.py에서 못 찾았다 — 이 테스트 자체가 오탐 아닌지 먼저 확인');
