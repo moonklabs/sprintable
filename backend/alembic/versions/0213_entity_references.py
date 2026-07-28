@@ -33,10 +33,6 @@ def upgrade() -> None:
         sa.Column("created_by", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.CheckConstraint("form IN ('mention', 'embed', 'proof')", name="ck_entity_references_form"),
-        sa.UniqueConstraint(
-            "source_type", "source_id", "target_type", "target_id", "form",
-            name="uq_entity_references_source_target_form",
-        ),
     )
     op.create_index(
         "ix_entity_references_source", "entity_references", ["org_id", "source_type", "source_id"],
@@ -44,9 +40,23 @@ def upgrade() -> None:
     op.create_index(
         "ix_entity_references_target", "entity_references", ["org_id", "target_type", "target_id"],
     )
+    # 부분 유니크(PO 판정 2026-07-28): proof 는 뺀다(같은 자리·같은 대상을 다른 범위로 여러 번
+    # 인용하는 게 정상 쓰임 — proof_payload 가 정해지기 전까진 그 축으로 유일성을 못 세운다,
+    # #2265 몫). COALESCE로 source_field(nullable)의 NULL 비교 함정을 접는다(NULL<>NULL이라
+    # 그대로 두면 이 인덱스가 아무것도 안 잡는다).
+    op.execute(
+        """
+        CREATE UNIQUE INDEX uq_entity_references_non_proof
+        ON entity_references (
+            source_type, COALESCE(source_field, ''), source_id, target_type, target_id, form
+        )
+        WHERE form <> 'proof'
+        """
+    )
 
 
 def downgrade() -> None:
+    op.execute("DROP INDEX IF EXISTS uq_entity_references_non_proof")
     op.drop_index("ix_entity_references_target", table_name="entity_references")
     op.drop_index("ix_entity_references_source", table_name="entity_references")
     op.drop_table("entity_references")

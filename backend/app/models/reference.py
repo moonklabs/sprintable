@@ -33,7 +33,7 @@ write-path(`insert_chat_mentions`/`reconcile_doc_mentions`)는 저장 타깃만 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Index, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, Index, Text, column, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -49,12 +49,25 @@ class Reference(Base, OrgScopedMixin):
         Index("ix_entity_references_source", "org_id", "source_type", "source_id"),
         Index("ix_entity_references_target", "org_id", "target_type", "target_id"),
         CheckConstraint("form IN ('mention', 'embed', 'proof')", name="ck_entity_references_form"),
-        # mentions 테이블의 uq_mentions_source_target 과 동일 SSOT 원칙(같은 이유: insert-only
-        # write-path 의 ON CONFLICT DO NOTHING 방어 + 백필 재실행 시 idempotent 보장).
-        # ⛔form 도 키에 포함 — 같은 (source,target) 쌍이라도 mention/embed 는 다른 사실.
-        UniqueConstraint(
-            "source_type", "source_id", "target_type", "target_id", "form",
-            name="uq_entity_references_source_target_form",
+        # mentions 테이블의 uq_mentions_source_target 과 동일 SSOT 원칙(insert-only write-path의
+        # ON CONFLICT DO NOTHING 방어 + 백필 재실행 시 idempotent 보장).
+        # ⛔PO 판정(2026-07-28): proof 는 이 제약에서 뺀다 — proof 는 "대화의 다른 범위"를
+        # 각각 박는 정상 쓰임이 있어(같은 자리·같은 대상을 두 조각으로 인용) mention/embed 와
+        # 유일성 축이 다르다. proof 의 진짜 유일성은 proof_payload(어느 범위인가)까지 있어야
+        # 서는데, 그 모양은 #2265(유나 lane) 몫이라 아직 모른다 — 지금 굳히면 그때 마이그를
+        # 또 파야 하니 **모르는 것을 지금 단정하지 않는다**(부분 유니크로 proof만 열어 둠).
+        # source_field 도 키에 포함 — 같은 스토리의 description/acceptance_criteria 는 다른
+        # "자리"라 같은 대상을 각각 멘션해도 별개 사실이다(합치면 안 됨).
+        # ⛔source_field 는 nullable — Postgres UNIQUE/부분 유니크 인덱스는 NULL 을 서로
+        # 다른 값으로 취급해(story #2249 세션에서 이미 겪은 그 함정과 동형 — uq_stories_
+        # project_id_story_number 참조) source_field=NULL 인 행끼리는 **비교가 항상 거짓이라
+        # 중복이 안 잡힌다**. COALESCE로 NULL을 빈 문자열로 접어 비교 가능하게 만든다.
+        Index(
+            "uq_entity_references_non_proof",
+            "source_type", func.coalesce(column("source_field"), text("''")), "source_id",
+            "target_type", "target_id", "form",
+            unique=True,
+            postgresql_where=text("form <> 'proof'"),
         ),
     )
 

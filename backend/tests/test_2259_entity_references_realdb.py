@@ -312,3 +312,103 @@ async def test_orphan_type_count_catches_unregistered_type_in_storage():
             assert orphans.get("target:sprintt") == 1
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_duplicate_mention_rejected_by_unique_index():
+    """PO 정정(2026-07-28) — mention/embed는 같은 (자리,대상) 재삽입이 막힌다."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.reference import Reference
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org, project, member = await _seed_org_project_member(session)
+            story = await _seed_story(session, org, project)
+            doc = await _seed_doc(session, org, project)
+            await session.commit()
+
+            session.add(Reference(
+                id=uuid.uuid4(), org_id=org.id, source_type="story", source_field=None,
+                source_id=story.id, target_type="doc", target_id=doc.id, form="mention",
+                created_by=member.id,
+            ))
+            await session.commit()
+
+            session.add(Reference(
+                id=uuid.uuid4(), org_id=org.id, source_type="story", source_field=None,
+                source_id=story.id, target_type="doc", target_id=doc.id, form="mention",
+                created_by=member.id,
+            ))
+            with pytest.raises(IntegrityError):
+                await session.commit()
+            await session.rollback()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_duplicate_proof_is_allowed():
+    """PO 정정(2026-07-28) — proof는 같은 (자리,대상)을 여러 조각(다른 범위)으로 인용하는
+    것이 정상 쓰임이라, 부분 유니크 인덱스에서 제외돼 막히면 안 된다. 별도 세션/엔진으로
+    분리(앞 테스트의 IntegrityError+rollback 뒤 같은 세션을 계속 쓰면 asyncpg 커넥션이
+    greenlet 브릿지에서 불안정해지는 것 관찰 — 이 코드베이스의 기존 rollback 테스트들도
+    전부 rollback 직후 종료하지 계속 쓰지 않는 것과 같은 이유로 세션을 새로 연다)."""
+    from app.models.reference import Reference
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org, project, member = await _seed_org_project_member(session)
+            story = await _seed_story(session, org, project)
+            doc = await _seed_doc(session, org, project)
+            await session.commit()
+
+            session.add(Reference(
+                id=uuid.uuid4(), org_id=org.id, source_type="story", source_field=None,
+                source_id=story.id, target_type="doc", target_id=doc.id, form="proof",
+                created_by=member.id,
+            ))
+            session.add(Reference(
+                id=uuid.uuid4(), org_id=org.id, source_type="story", source_field=None,
+                source_id=story.id, target_type="doc", target_id=doc.id, form="proof",
+                created_by=member.id,
+            ))
+            await session.commit()  # 두 proof 다 살아있어야 한다(예외 없이).
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_null_source_field_still_dedupes_via_coalesce():
+    """⛔NULL 함정 — source_field가 nullable이라 COALESCE 없이 부분 유니크를 걸면 NULL<>NULL
+    이라 중복이 안 잡힌다(uq_stories_project_id_story_number와 같은 함정). 여기선 잡혀야 한다."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.reference import Reference
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org, project, member = await _seed_org_project_member(session)
+            message_id = uuid.uuid4()
+            doc = await _seed_doc(session, org, project)
+            await session.commit()
+
+            session.add(Reference(
+                id=uuid.uuid4(), org_id=org.id, source_type="chat_message", source_field=None,
+                source_id=message_id, target_type="doc", target_id=doc.id, form="mention",
+                created_by=member.id,
+            ))
+            await session.commit()
+
+            session.add(Reference(
+                id=uuid.uuid4(), org_id=org.id, source_type="chat_message", source_field=None,
+                source_id=message_id, target_type="doc", target_id=doc.id, form="mention",
+                created_by=member.id,
+            ))
+            with pytest.raises(IntegrityError):
+                await session.commit()
+    finally:
+        await engine.dispose()
