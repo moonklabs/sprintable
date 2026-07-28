@@ -63,16 +63,9 @@ def _async_url() -> str:
 async def _session_factory():
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-    import app.models  # noqa: F401 — 전 모델 메타데이터 로드(⚠️아래 참조 — 이것만으론 부족)
-    # ⛔`app.models`(__init__.py)는 `app.models.event`(Event/"events" 테이블)를 안 끌어온다
-    # (agent_event_seq·event_outbox·activity_event만 임포트 — grep 확認). 이 프로세스에서
-    # `Event`가 아직 어디서도 임포트 안 된 시점에 create_all이 먼저 돌면 "events" 테이블이
-    # 통째로 안 만들어진다 — 그 뒤 `agent_event_stream`(app.routers.events, 모듈 레벨에서
-    # `from app.models.event import Event`)이 처음 임포트되며 뒤늦게 Base.metadata에 등록
-    # 되지만 이미 create_all은 끝난 후라 DB엔 없다(`UndefinedTableError: relation "events"
-    # does not exist`, 이 프로세스의 첫 realdb 테스트에서만 재현 — 그 다음 테스트부터는
-    # Event가 이미 등록돼 있어 무재현. 실측 2026-07-28). create_all **前** 명시 임포트로 봉인.
-    from app.models.event import Event  # noqa: F401
+    import app.models  # noqa: F401 — 전 모델 메타데이터 로드(app/models/__init__.py가 Event 등
+    # 11종을 끌어오도록 봉인됨 — 2026-07-28, #2201 후속. 근본 수정은 app/models/__init__.py에
+    # 있음. 상세 경위는 그 파일 주석 참조).
     from app.core.database import Base
 
     engine = create_async_engine(_async_url())
