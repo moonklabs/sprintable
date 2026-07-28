@@ -6,6 +6,7 @@ DB/세션 불요 — extract_chat_doc_mention_ids(정규식)·extract_doc_mentio
 from __future__ import annotations
 
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -280,3 +281,99 @@ def test_extract_doc_mention_ids_wrapper_still_ignores_form():
         f'<div data-page-embed data-doc-id="{doc_id}"></div>'
     )
     assert extract_doc_mention_ids(html) == [doc_id]
+
+
+# ─── story #2301(오르테가 리뷰): insert_chat_mentions가 코어의 «얇은 변환»인지 직접 확인 ──
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_insert_chat_mentions_is_a_thin_conversion_of_core_result():
+    """`insert_chat_mentions`가 자체 필터/dropped 계산을 다시 하지 않고 코어의 결과값을
+    그대로 반환하는지 — 코어를 mock해 임의의 (stored, dropped) 조합을 주입했을 때
+    `ChatMentionResult`가 그 값과 **정확히 일치**하면 래퍼에 남은 이중 로직이 없다는 뜻이다
+    (오르테가 리뷰 지적, 2026-07-29 — 이전엔 래퍼가 자체 dropped를 계산해 반환해서 이
+    mock을 통과할 수 없었다)."""
+    import app.services.mention_parser as mp
+
+    org_id = uuid.uuid4()
+    message_id = uuid.uuid4()
+    fake_result = mp.ReconcileResult(
+        stored=7, removed=0, dropped=[{"target_type": "sentinel", "target_id": "x"}],
+    )
+    with patch.object(mp, "reconcile_entity_references", new=AsyncMock(return_value=fake_result)) as m:
+        result = await mp.insert_chat_mentions(
+            db=object(), org_id=org_id, message_id=message_id,
+            content=f"[X](entity:doc:{uuid.uuid4()})", created_by=uuid.uuid4(),
+        )
+    assert result.stored == fake_result.stored
+    assert result.dropped == fake_result.dropped
+    _, kwargs = m.call_args
+    assert kwargs["known_new"] is True
+    assert kwargs["source_type"] == "chat_message"
+    assert kwargs["source_field"] == "body"
+
+
+@pytest.mark.anyio
+async def test_insert_chat_mentions_no_tokens_passes_empty_refs_to_core():
+    """토큰이 아예 없는 일반 메시지도 코어를 호출한다(빈 `extracted_refs`로) — 별도
+    "비면 skip" 분기를 래퍼에 안 둔다(코어의 `known_new=True` 경로 자체가 이 경우 DB
+    왕복 0으로 귀결하므로, 래퍼가 따로 판단할 필요가 없다 — `reconcile_entity_references`
+    docstring의 known_new 설명 참조. 실제 DB 미접촉은 `db=None`으로 도는
+    `test_dropped_logging_red_green_mutation_self_check`가 실측한다)."""
+    import app.services.mention_parser as mp
+
+    fake_result = mp.ReconcileResult(stored=0, removed=0, dropped=[])
+    with patch.object(mp, "reconcile_entity_references", new=AsyncMock(return_value=fake_result)) as m:
+        result = await mp.insert_chat_mentions(
+            db=object(), org_id=uuid.uuid4(), message_id=uuid.uuid4(),
+            content="plain text, no tokens", created_by=uuid.uuid4(),
+        )
+    m.assert_awaited_once()
+    _, kwargs = m.call_args
+    assert kwargs["extracted_refs"] == []
+    assert result.stored == 0
+    assert result.dropped == []
+
+
+def test_chat_message_body_immutability_premise_still_holds():
+    """`insert_chat_mentions`가 코어에 넘기는 `known_new=True`는 "채팅 메시지 본문은 편집
+    되지 않는다"는 전제에 기댄다(오르테가 지적, 2026-07-29) — 그 전제가 사라지면 stale
+    참조 삭제가 조용히 안 도는 날이 오는데, 주석은 안 잡히니(다음 사람이 안 읽는다) 이
+    테스트로 묶는다: `conversations.py`에 메시지 «본문» 편집 라우트(messages/{id}의
+    PATCH/PUT)가 생기면 RED.
+
+    ⛔이 전제가 깨지면 할 일(실패 메시지에도 명시): `insert_chat_mentions`이 코어를 부를 때
+    `known_new=True`를 걷고(기본값 False로 되돌려) 완전 reconcile로 전환할 것 — doc/story와
+    동형으로 편집-가능 콘텐츠는 항상 stale-delete를 돈다.
+
+    양성대조: 이 스캐너가 실재하는 PATCH 라우트 3개(mute·status·conversation 본체)는 실제로
+    집는지 확인한다 — 안 그러면 "메시지 편집 라우트 0건"이 "정말 없다"인지 "스캐너가 안
+    본다"인지 구분이 안 된다."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "app" / "routers" / "conversations.py"
+    text = src.read_text()
+    routes = re.findall(r'@router\.(patch|put)\(\s*"([^"]+)"', text)
+
+    # 양성대조 — 스캐너가 실재하는 3건은 실제로 잡는다(안 그러면 아래 진짜 시험이 공허통과).
+    assert ("patch", "/{conversation_id}/mute") in routes, "스캐너가 실재 라우트를 못 잡는다"
+    assert ("patch", "/{conversation_id}/status") in routes, "스캐너가 실재 라우트를 못 잡는다"
+    assert ("patch", "/{conversation_id}") in routes, "스캐너가 실재 라우트를 못 잡는다"
+
+    # 진짜 시험 — 메시지 본문 편집 라우트(messages/{id} 형태의 PATCH/PUT)는 아직 없어야 한다.
+    message_edit_routes = [
+        (method, path) for method, path in routes
+        if "messages/" in path or path.rstrip("/").endswith("messages")
+    ]
+    assert message_edit_routes == [], (
+        f"메시지 편집 라우트가 생겼다({message_edit_routes}) — insert_chat_mentions의 "
+        "known_new=True 전제(채팅 메시지는 편집되지 않는다)가 깨졌다. mention_parser.py의 "
+        "insert_chat_mentions에서 known_new=True를 걷고 완전 reconcile(기본값 False)로 "
+        "되돌릴 것."
+    )

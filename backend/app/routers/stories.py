@@ -982,6 +982,39 @@ async def update_story(
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
 
+    # story #2301(E-CONNECT, 오르테가 판정 2026-07-29): story 본문/AC의 `#` 엔티티 토큰이
+    # 저장 시 entity_references로 걷히지 않던 갭(#2597이 FE 삽입 UI만 열고 BE 파서가 아예
+    # 없었다) — insert_chat_mentions·reconcile_doc_mentions를 병합한 공용 코어
+    # `reconcile_entity_references`를 직접 호출한다(AC1: story 전용 write 헬퍼를 새로
+    # 만들지 않는다). description과 acceptance_criteria는 **서로 다른 source_field**라
+    # 각각 독립적으로 reconcile — 같은 대상을 본문과 AC 양쪽에 걸면 두 행 다 남는다(멱등
+    # 키에 source_field가 있어 서로 다른 참조로 선다). **같은 트랜잭션**(commit 전, 실패
+    # 시 예외 propagate로 story 저장 전체가 롤백 — chat/doc과 동일 AC4 원자성).
+    if "description" in data or "acceptance_criteria" in data:
+        from app.services.mention_parser import extract_chat_entity_mentions, reconcile_entity_references
+
+        _mention_actor_id: uuid.UUID | None = None
+        try:
+            _mention_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
+        except Exception:
+            _mention_actor_id = None
+        if "description" in data:
+            _desc_pairs = extract_chat_entity_mentions(story.description or "")
+            await reconcile_entity_references(
+                db, org_id=repo.org_id, source_type="story", source_field="description",
+                source_id=story.id,
+                extracted_refs=[(t, i, "mention") for t, i in _desc_pairs],
+                created_by=_mention_actor_id,
+            )
+        if "acceptance_criteria" in data:
+            _ac_pairs = extract_chat_entity_mentions(story.acceptance_criteria or "")
+            await reconcile_entity_references(
+                db, org_id=repo.org_id, source_type="story", source_field="acceptance_criteria",
+                source_id=story.id,
+                extracted_refs=[(t, i, "mention") for t, i in _ac_pairs],
+                created_by=_mention_actor_id,
+            )
+
     # E-STORAGE-SSOT S2: 첨부 교체(attachments 제공) 시 asset registry 재동기화(reconcile·SSOT 정확).
     if "attachments" in data:
         _cb: uuid.UUID | None = None
