@@ -43,6 +43,14 @@ def is_valid_transition(from_status: str, to_status: str) -> bool:
     return (from_status, to_status) in _VALID_TRANSITIONS
 
 
+# story #2303(2026-07-29): Gate.evidence_status(merge gate 재평가 결과)의 원자료→간소화값
+# 매핑 — 원래 app/routers/glance.py의 hero 엔드포인트 전용 상수였다. app/repositories/goal.py
+# (`?include=glance`의 focal_story.auto_verify)가 같은 매핑이 다시 필요해지면서 두 자리에
+# 같은 dict를 각자 적어두면 오늘 하루 반복 관측된 twin-system 갭이 재발한다 — 모델 레이어를
+# 단일 소유자로 삼고 양쪽(라우터·레포지토리)이 여기서 import한다.
+AUTO_VERIFY_MAP: dict[str, str] = {"sufficient": "passed", "blocked": "failed"}
+
+
 class Gate(Base):
     __tablename__ = "gate"
 
