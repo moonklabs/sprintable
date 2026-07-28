@@ -416,6 +416,12 @@
   "board": {
     "title": "Kanban Board",
     "subtitle": "Drag stories to change status",
+    "backlinksTitle": "Things that point here",
+    "backlinksTargetGone": "Target no longer exists",
+    "backlinksEmptyFallback": "0 references observed",
+    "backlinksEmptyScoped": "0 references observed (collection scope: source={sources} only · {excludes} not collected, so not counted here)",
+    "backlinksExcludePrSid": "PR/commit \"[SID:XXX]\" text convention",
+    "backlinksExcludeEvidenceFreeText": "Free-text evidence references",
     "backlog": "Backlog",
     "readyForDev": "Ready for Dev",
     "inProgress": "In Progress",

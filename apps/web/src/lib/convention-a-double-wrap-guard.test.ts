@@ -9,7 +9,8 @@
  *   해당 안 됨(이중포장 자체가 구조적으로 불가) — 스킵.
  * - docs.py(list_docs)·notifications.py(list_notifications): FE가 이 BE 엔드포인트를 아예
  *   안 쓰고 별도 내부 서비스/레포지토리를 쓴다(다른 아키텍처) — 이 클래스의 위험군이 아님, 스킵.
- * - docs.py(get_doc_backlinks): FE 프록시 자체가 아직 없음(story #2263 별건, 배선 자체가 안 됨).
+ * - docs.py(get_doc_backlinks): FE 프록시 자체가 아직 없음(story #2264/C-6 별건, 배선 자체가
+ *   안 됨 — stories.py(get_story_backlinks)는 #2299에서 배선돼 아래 목록에 있다).
  * - 미래에 새로 생기는 규약A 엔드포인트는 이 가드가 자동으로 못 잡는다 — 만들 때 이 파일에
  *   케이스를 추가하는 것이 유일한 방어선이다.
  */
@@ -61,5 +62,10 @@ describe('규약A 엔드포인트 FE 프록시 — 이중포장 없음 가드', 
   it('standup/history — #2248 처방 유지 확認', async () => {
     const { GET } = await import('@/app/api/standup/history/route');
     await assertNoDoubleWrap(GET);
+  });
+
+  it('stories/[id]/backlinks — #2299 신설 프록시(처음부터 raw unwrap으로 지어짐)', async () => {
+    const { GET } = await import('@/app/api/stories/[id]/backlinks/route');
+    await assertNoDoubleWrap(GET, { params: Promise.resolve({ id: 's1' }) });
   });
 });

@@ -26,6 +26,7 @@ import { Workcell, type WorkcellMessage } from '@/components/workcell/workcell';
 import { initials } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
+import { StoryBacklinksSection } from '@/components/kanban/story-backlinks-section';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
 import { Button } from '@/components/ui/button';
@@ -1064,6 +1065,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
             {/* E-DG S12: handoff stuck UX — DISPATCH 직후·handoff_stuck일 때만 조건부 렌더(자체 게이트) */}
             <StuckHandoffSection storyId={story.id} memberMap={memberMap} />
+
+            {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
+                (doc [slug]/view는 후속 판). */}
+            <StoryBacklinksSection storyId={story.id} />
 
             {story.story_points != null ? (
               <div>
