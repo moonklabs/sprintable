@@ -292,7 +292,16 @@ BACKLINKS_ALLOWED_TARGET_TYPES = frozenset({"doc", "story"})
 
 
 class UnsupportedBacklinkTargetTypeError(ValueError):
-    """target_type이 BACKLINKS_ALLOWED_TARGET_TYPES 밖 — 호출 라우터가 400으로 번역한다."""
+    """target_type이 BACKLINKS_ALLOWED_TARGET_TYPES 밖 — 호출 라우터가 400으로 번역한다.
+
+    ⛔PO 리뷰(2026-07-28): 지금은 이 분기가 HTTP 경로로 «도달 불가»하다 — docs.py/stories.py
+    둘 다 target_type을 client 입력이 아니라 고정 literal("doc"/"story")로 넘긴다. 그래서
+    「아무도 안 타는 분기」로 보여 다음 사람이 지울 위험이 있다 — 지우면 안 된다. **허용목록이
+    언젠가 client 입력(예: 단일 generic `/entities/{type}/{id}/backlinks` 라우트)을 받게 되는
+    날, 이 분기가 TARGET 게이트 누락을 막는 유일한 방어선**이 된다. 지금도
+    `test_list_entity_backlinks_rejects_unsupported_target_type`이 이 분기를 직접 타서
+    커버리지에 살아 있고, 허용목록을 게이트 없이 늘리면 그 테스트가 걸린다(RED로 잡는다는
+    뜻이 아니라 — 허용목록에 추가한 사람이 이 클래스의 존재를 코드에서 보게 된다는 뜻)."""
 
 
 async def list_entity_backlinks(
