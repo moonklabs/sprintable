@@ -326,8 +326,31 @@ async def list_entity_backlinks(
 
     반환: `{"data": [...], "meta": {"next_cursor": str|None, "has_more": bool}}` — list_messages와
     동일 shape(AC1 "same convention"). data 항목: {id, source_type, source_id, created_by,
-    created_at, doc: {id,title}|None, message: {id,conversation_id,content_snippet,sender}|None}.
-    `created_by`는 raw UUID가 아니라 `{id,name,type}`|None(sender와 동형 처리 — Extra fix).
+    created_at, still_exists, doc: {id,title}|None, message: {id,conversation_id,content_snippet,
+    sender}|None}. `created_by`는 raw UUID가 아니라 `{id,name,type}`|None(sender와 동형 처리 —
+    Extra fix).
+
+    `still_exists`(story #2299, E-CONNECT — "끊어진 참조 가시성" 배선): 이 backlink item의
+    **SOURCE**(target이 아니다 — target은 URL의 id 자신이고, 이 함수에 도달했다는 것 자체가
+    호출부의 404 게이트를 통과했다는 뜻이라 항상 존재한다. "끊어짐"이 있을 수 있는 쪽은
+    source뿐이다)가 아직 살아 있는지. doc source는 soft-delete 여부(`Doc.deleted_at`)로
+    판정 — 예전엔 이 조건이 JOIN에 있어 삭제된 source가 결과에서 통째로 빠졌다(PO가 "조용히
+    사라지는 것"으로 재판정, `test_soft_deleted_source_doc_excluded` 개정). chat_message
+    source는 SOURCE_ONLY_TYPES(불변, soft-delete 없음)라 항상 True — genuinely-missing
+    message row(하드삭제/오손 데이터)는 이 필드가 다루는 대상이 아니고 여전히 결과에서
+    제외된다(`test_missing_source_message_excluded_no_crash`, 이 스토리가 안 건드림 —
+    "삭제 lifecycle"과 "오손 데이터"는 다른 문제).
+
+    ⛔story #2299 AC⑥(이 판이 못 잡는 것 선언):
+      · `reference_core.list_references`는 여전히 아무도 안 부른다(#2591이 증명한 채 그대로 —
+        이 story는 그 함수를 살리지 않았다, PO 판정대로 "안 도는 문"을 살리는 대신 여기
+        `list_entity_backlinks`에 별도로 얹었다. `list_references`를 살릴지는 별건).
+      · story/task 등 doc이 아닌 source_type은 이 함수가 애초에 다루지 않는다(위 docstring
+        "source_type은 chat_message·doc 뿐" — still_exists도 그 두 종류에만 존재).
+      · target 자신이 이 응답 처리 도중(요청과 요청 사이가 아니라 같은 요청 내에서) 삭제되는
+        TOCTOU 창은 다루지 않는다(호출부의 404 게이트가 요청 시작 시점 1회 확인 — 그 이후
+        target 삭제는 이 응답에 반영 안 됨, 기존 backlinks 전체의 기존 계약과 동일).
+
     `next_cursor`는 opaque composite base64 토큰(B3) — `before` query param에 그대로 되돌려준다.
     """
     if target_type not in BACKLINKS_ALLOWED_TARGET_TYPES:
@@ -396,6 +419,16 @@ async def list_entity_backlinks(
             Reference,
             Doc.project_id.label("doc_project_id"),
             Doc.title.label("doc_title"),
+            # ⛔story #2299(E-CONNECT, PO 판정 2026-07-29): 여기 있던 `Doc.deleted_at.is_(None)`이
+            # JOIN ON절에서 soft-deleted source doc을 "매치 실패"로 만들어 project_id가 NULL이
+            # 되고, 그 결과 아래 WHERE의 authz 체크(project_access_valid_correlated)가 NULL
+            # project에 대해 무조건 거짓이 되어 행 자체가 결과에서 «조용히» 빠졌다(`test_soft_
+            # deleted_source_doc_excluded`가 그걸 "정답"으로 고정하고 있었다 — PO가 그 자체를
+            # 버그로 재판정: "목록에서 빼면 그게 바로 조용히 사라지는 것"). deleted_at 조건을
+            # JOIN에서 빼 soft-deleted 문서도 매치되게 하고(그래야 project_id가 살아서 authz가
+            # 원래 프로젝트 기준으로 정상 평가된다 — 삭제됐다고 접근권 검사가 사라지면 안 된다),
+            # 대신 deleted_at 자체를 별도 컬럼으로 select해 still_exists 판정에 쓴다.
+            Doc.deleted_at.label("doc_deleted_at"),
             ConversationMessage.conversation_id.label("msg_conversation_id"),
             ConversationMessage.content.label("msg_content"),
             ConversationMessage.sender_id.label("msg_sender_id"),
@@ -407,7 +440,6 @@ async def list_entity_backlinks(
                 Doc.id == Reference.source_id,
                 Reference.source_type == "doc",
                 Doc.org_id == org_id,
-                Doc.deleted_at.is_(None),  # soft-deleted source doc 배제
             ),
         )
         .outerjoin(
@@ -481,9 +513,14 @@ async def list_entity_backlinks(
             "created_at": m.created_at.isoformat(),
             "doc": None,
             "message": None,
+            # story #2299 AC⑤: 「끊어짐」은 색/경고가 아니라 사실 필드다 — 렌더(색·문구)는 FE
+            # 몫. chat_message는 SOURCE_ONLY_TYPES(불변·soft-delete 없음, reference_registry.py
+            # 참조)라 항상 True — doc만 아래서 실제 판정으로 덮어쓴다.
+            "still_exists": True,
         }
         if m.source_type == "doc":
             item["doc"] = {"id": str(m.source_id), "title": r.doc_title}
+            item["still_exists"] = r.doc_deleted_at is None
         elif m.source_type == "chat_message":
             sender = member_map.get(r.msg_sender_id) if r.msg_sender_id is not None else None
             item["message"] = {
