@@ -186,7 +186,7 @@ async def test_create_reference_rejects_unregistered_source_type():
         client = _client_for(app)
         try:
             resp = await client.post("/api/v2/references", json={
-                "source_type": "task", "source_id": str(uuid.uuid4()), "source_field": "body",
+                "source_type": "task", "source_id": str(uuid.uuid4()),
                 "target_type": "story", "target_id": str(story.id),
             })
             assert resp.status_code == 400, resp.text
@@ -214,7 +214,7 @@ async def test_create_reference_rejects_unregistered_target_type():
         client = _client_for(app)
         try:
             resp = await client.post("/api/v2/references", json={
-                "source_type": "chat_message", "source_id": str(msg.id), "source_field": "body",
+                "source_type": "chat_message", "source_id": str(msg.id),
                 "target_type": "task", "target_id": str(uuid.uuid4()),
             })
             assert resp.status_code == 400, resp.text
@@ -251,7 +251,7 @@ async def test_create_reference_404_when_source_inaccessible():
         client = _client_for(app)
         try:
             resp = await client.post("/api/v2/references", json={
-                "source_type": "chat_message", "source_id": str(msg.id), "source_field": "body",
+                "source_type": "chat_message", "source_id": str(msg.id),
                 "target_type": "story", "target_id": str(story.id),
             })
             assert resp.status_code == 404, resp.text
@@ -283,7 +283,7 @@ async def test_create_reference_404_when_target_inaccessible():
         client = _client_for(app)
         try:
             resp = await client.post("/api/v2/references", json={
-                "source_type": "chat_message", "source_id": str(msg.id), "source_field": "body",
+                "source_type": "chat_message", "source_id": str(msg.id),
                 "target_type": "story", "target_id": str(story.id),
             })
             assert resp.status_code == 404, resp.text
@@ -312,13 +312,14 @@ async def test_create_reference_succeeds_when_both_accessible():
         client = _client_for(app)
         try:
             resp = await client.post("/api/v2/references", json={
-                "source_type": "chat_message", "source_id": str(msg.id), "source_field": "body",
+                "source_type": "chat_message", "source_id": str(msg.id),
                 "target_type": "doc", "target_id": str(doc.id),
             })
             assert resp.status_code == 201, resp.text
             body = resp.json()
             assert body["source_type"] == "chat_message"
             assert body["source_id"] == str(msg.id)
+            assert body["source_field"] == "body"
             assert body["target_type"] == "doc"
             assert body["target_id"] == str(doc.id)
             assert body["form"] == "mention"
@@ -352,15 +353,17 @@ async def test_create_reference_idempotent_same_tuple_returns_existing():
         client = _client_for(app)
         try:
             payload = {
-                "source_type": "chat_message", "source_id": str(msg.id), "source_field": "body",
+                "source_type": "chat_message", "source_id": str(msg.id),
                 "target_type": "doc", "target_id": str(doc.id),
             }
             resp1 = await client.post("/api/v2/references", json=payload)
             assert resp1.status_code == 201, resp1.text
             resp2 = await client.post("/api/v2/references", json=payload)
-            # ⛔계약: 재호출은 409가 아니라 200/201 + 기존 행 재반환.
-            assert resp2.status_code in (200, 201), resp2.text
+            # ⛔계약: 재호출은 409가 아니라 200 + 기존 행 재반환(첫 호출만 201 — PO 판정:
+            # FE가 "새로 생겼는지"를 상태코드로 구별할 수 있어야 연타가 카운트를 안 부풀린다).
+            assert resp2.status_code == 200, resp2.text
             assert resp1.json()["id"] == resp2.json()["id"]
+            assert resp1.json()["source_field"] == resp2.json()["source_field"] == "body"
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
@@ -451,7 +454,7 @@ async def test_delete_reference_succeeds_when_both_accessible():
         client = _client_for(app)
         try:
             create_resp = await client.post("/api/v2/references", json={
-                "source_type": "chat_message", "source_id": str(msg.id), "source_field": "body",
+                "source_type": "chat_message", "source_id": str(msg.id),
                 "target_type": "doc", "target_id": str(doc.id),
             })
             ref_id = create_resp.json()["id"]
@@ -473,7 +476,7 @@ async def test_delete_reference_succeeds_when_both_accessible():
 
 @pytest.mark.anyio
 async def test_source_gate_red_green_mutation_self_check():
-    """`_SOURCE_ACCESS_GATES["chat_message"]`를 임시로 no-op화하면 위
+    """`_SOURCE_TYPE_CONFIG["chat_message"].access_gate`를 임시로 no-op화하면 위
     test_create_reference_404_when_source_inaccessible의 outsider가 404 대신 201로
     새는지(=게이트가 실제로 막고 있었는지) 직접 증명한다."""
     import app.routers.references as references_module
@@ -491,18 +494,20 @@ async def test_source_gate_red_green_mutation_self_check():
 
         from app.main import app
 
-        original_gates = dict(references_module._SOURCE_ACCESS_GATES)
+        original_config = dict(references_module._SOURCE_TYPE_CONFIG)
 
         async def _noop_true(*args, **kwargs):
             return True
 
-        references_module._SOURCE_ACCESS_GATES["chat_message"] = _noop_true
+        references_module._SOURCE_TYPE_CONFIG["chat_message"] = references_module.SourceTypeConfig(
+            "body", _noop_true
+        )
         try:
             await _setup_app_human(app, Session, outsider_user_id, org.id)
             client = _client_for(app)
             try:
                 resp = await client.post("/api/v2/references", json={
-                    "source_type": "chat_message", "source_id": str(msg.id), "source_field": "body",
+                    "source_type": "chat_message", "source_id": str(msg.id),
                     "target_type": "story", "target_id": str(story.id),
                 })
                 assert resp.status_code == 201, (
@@ -512,15 +517,15 @@ async def test_source_gate_red_green_mutation_self_check():
                 await client.aclose()
                 app.dependency_overrides.clear()
         finally:
-            references_module._SOURCE_ACCESS_GATES.clear()
-            references_module._SOURCE_ACCESS_GATES.update(original_gates)
+            references_module._SOURCE_TYPE_CONFIG.clear()
+            references_module._SOURCE_TYPE_CONFIG.update(original_config)
 
         # 원복 후 GREEN 재확인.
         await _setup_app_human(app, Session, outsider_user_id, org.id)
         client = _client_for(app)
         try:
             resp = await client.post("/api/v2/references", json={
-                "source_type": "chat_message", "source_id": str(msg.id), "source_field": "body",
+                "source_type": "chat_message", "source_id": str(msg.id),
                 "target_type": "story", "target_id": str(story.id),
             })
             assert resp.status_code == 404, resp.text
