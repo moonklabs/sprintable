@@ -712,9 +712,21 @@ async def test_soft_deleted_source_doc_stays_marked_broken_not_excluded():
     """⭐PO 재판정(2026-07-29, story #2299): 이 테스트의 원래 이름은
     `test_soft_deleted_source_doc_excluded`였고 "삭제된 source는 결과에서 빠진다"를 정답으로
     고정하고 있었다 — PO가 그 자체를 「조용히 사라지는 것」버그로 재분류했다(#2591이 증명한
-    "still_exists는 있는데 내주는 길이 없다"의 배선 완료판). 이제는 반대를 고정한다: 행은
-    남고(①) `still_exists`가 정확히 갈린다(②양성대조 — 같은 응답에 살아있는 것과 죽은 것이
-    같이 있고, 살아있는 쪽엔 「끊어짐」 표기가 없다=still_exists true).
+    "still_exists는 있는데 내주는 길이 없다"의 배선 완료판).
+
+    ⛔왜 옛 기대가 틀렸는가(재분류 근거 — «누락»이 아니라 «authz 부작용»이었다): 옛 쿼리는
+    soft-deleted source doc을 JOIN **ON절**의 `Doc.deleted_at.is_(None)`로 걸렀다 — JOIN이
+    매치 실패하면 `Doc.project_id`가 NULL이 되고, WHERE절의 authz 체크
+    (`project_access_valid_correlated(Doc.project_id, ...)`)가 그 NULL에 대해 무조건
+    거짓으로 평가되어 행 자체가 결과에서 빠졌다. 즉 "삭제된 걸 의도적으로 숨긴 필터"가 아니라
+    "존재 판정을 authz 체크에 얹었다가 그 authz가 실패한" 부작용 — `still_exists` 필드만
+    얹고 이 JOIN을 안 고쳤으면 여전히 안 보였을 것이다. 그래서 deleted_at 조건을 JOIN에서
+    빼(project_id를 살려 authz가 원래 프로젝트 기준으로 정상 평가되게) 별도 select한
+    deleted_at으로 still_exists를 판정한다(위 `list_entity_backlinks` 코드 주석 참조).
+
+    이제는 반대를 고정한다: 행은 남고(①) `still_exists`가 정확히 갈린다(②양성대조 — 같은
+    응답에 살아있는 것과 죽은 것이 같이 있고, 살아있는 쪽엔 「끊어짐」 표기가 없다=still_exists
+    true).
 
     ⛔③대체 선언: 라이브로 실 `DELETE /api/v2/docs/{id}`를 호출하지 않는다 — 그 엔드포인트도
     story 삭제(오르테가군이 오늘 직접 밟은 403)와 동형으로 휴먼 전용이다(`docs.py` delete_doc
