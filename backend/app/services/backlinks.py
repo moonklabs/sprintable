@@ -279,18 +279,41 @@ async def _chat_predicate_inputs(
     return caller_member_id, is_api_key
 
 
-async def list_doc_backlinks(
+# ─── story #2266(C-8) — target_type 일반화, 허용목록(allowlist) ──────────────────
+# PO 판정(2026-07-28): target_type을 자유 파라미터로 열면 «게이트가 안 선 타입까지 통과하는
+# 구멍»이 생긴다 — 이 함수는 TARGET 접근 검증을 스스로 하지 않고(§8①) 호출부(라우터)가
+# 이미 검증했다는 전제로 짜여 있기 때문(위 docstring 참조). 그래서 "이 타입은 호출부가 실제로
+# 게이트를 세웠다"를 이 allowlist가 보증한다 — 코드 레벨 계약이지 편의 목록이 아니다.
+BACKLINKS_ALLOWED_TARGET_TYPES = frozenset({"doc", "story"})
+# ⛔registry(reference_registry.ENTITY_RESOLVERS)의 나머지 타입(epic 등)이 여기 없는 이유는
+# "의도적 제외"가 아니라 **게이트 미비**다 — 그 타입들의 라우터에 아직 이 함수와 동형인
+# TARGET project-access 선-게이트(docs.py._require_doc_project_access ·
+# stories.py._assert_story_project_access)가 없다. 게이트가 서는 순서대로 여기 추가한다.
+
+
+class UnsupportedBacklinkTargetTypeError(ValueError):
+    """target_type이 BACKLINKS_ALLOWED_TARGET_TYPES 밖 — 호출 라우터가 400으로 번역한다."""
+
+
+async def list_entity_backlinks(
     db: AsyncSession,
     *,
     org_id: uuid.UUID,
-    doc_id: uuid.UUID,
+    target_type: str,
+    target_id: uuid.UUID,
     auth: AuthContext,
     limit: int,
     cursor: str | None,
 ) -> dict:
-    """GET /api/v2/docs/{id}/backlinks 코어. 호출부(docs.py)가 target doc 접근을 이미 검증했다는
-    전제(§8① target read access는 별도·기존 라우트 책임) — 여기선 source 접근만 mention 행
-    단위로 판정한다.
+    """GET /api/v2/{docs,stories}/{id}/backlinks 코어(#2266 — target_type 일반화). 호출부
+    (docs.py/stories.py)가 target 접근을 이미 검증했다는 전제(§8① target read access는 별도·
+    기존 라우트 책임) — 여기선 source 접근만 mention 행 단위로 판정한다.
+
+    story #2266: `target_type`은 `BACKLINKS_ALLOWED_TARGET_TYPES`(허용목록)에 있는 값만
+    받는다 — 그 밖의 값은 `UnsupportedBacklinkTargetTypeError`(호출부가 400으로 번역). SOURCE
+    측 로직(authz predicate·응답 item shape)은 target_type과 완전히 무관하다(SELECT/JOIN이
+    `Reference.source_id`·`Reference.source_type` 기준이지 target 기준이 아니다) — 그래서
+    이 함수는 target_type이 늘어도 SOURCE 쪽 쿼리를 한 글자도 안 바꾼다.
 
     반환: `{"data": [...], "meta": {"next_cursor": str|None, "has_more": bool}}` — list_messages와
     동일 shape(AC1 "same convention"). data 항목: {id, source_type, source_id, created_by,
@@ -298,6 +321,9 @@ async def list_doc_backlinks(
     `created_by`는 raw UUID가 아니라 `{id,name,type}`|None(sender와 동형 처리 — Extra fix).
     `next_cursor`는 opaque composite base64 토큰(B3) — `before` query param에 그대로 되돌려준다.
     """
+    if target_type not in BACKLINKS_ALLOWED_TARGET_TYPES:
+        raise UnsupportedBacklinkTargetTypeError(target_type)
+
     cursor_key: tuple[datetime, uuid.UUID] | None = None
     if cursor:
         cursor_key = decode_cursor(cursor)
@@ -392,8 +418,8 @@ async def list_doc_backlinks(
         .where(
             Reference.org_id == org_id,
             Reference.source_field == "body",
-            Reference.target_type == "doc",
-            Reference.target_id == doc_id,
+            Reference.target_type == target_type,
+            Reference.target_id == target_id,
             or_(
                 and_(
                     Reference.source_type == "doc",
@@ -415,6 +441,11 @@ async def list_doc_backlinks(
         cursor_created_at, cursor_id = cursor_key
         stmt = stmt.where(tuple_(Reference.created_at, Reference.id) < tuple_(cursor_created_at, cursor_id))
 
+    # story #2266 AC6(정렬은 "최근"이 아니라 "쓸모"): entity_references는 지금 조회수·클릭·
+    # 관련도 등 recency 이외의 신호를 전혀 안 쌓는다(row에 그런 컬럼이 없다) — "쓸모" 축으로
+    # 정렬하려 해도 지금 계산할 수 있는 신호가 하나도 없다. created_at DESC를 유지하는 이유는
+    # "그냥 기본값"이 아니라 "지금 유일하게 존재하는 신호가 이것뿐"이라는 사실이다. 신호가
+    # 생기면(예: form!=proof 우선순위, 조회 카운트) 그때 다시 정렬 기준을 판정한다.
     stmt = stmt.order_by(Reference.created_at.desc(), Reference.id.desc()).limit(limit + 1)
 
     rows = (await db.execute(stmt)).all()
@@ -459,4 +490,37 @@ async def list_doc_backlinks(
         last_mention = page_rows[-1].Reference
         next_cursor = encode_cursor(last_mention.created_at, last_mention.id)
 
-    return {"data": data, "meta": {"next_cursor": next_cursor, "has_more": has_more}}
+    # story #2266 AC4(정직성 관문): "0건"을 "출처 없음"으로 읽지 않도록, 이 응답이 실제로
+    # 무엇을 셌는지를 구조화된 사실로 함께 낸다(문안 렌더는 FE 몫 — 여기선 FE가 틀리지 않게
+    # 근거 사실만 준다). ⛔이 쿼리는 `Reference.form`을 필터링하지 않는다(mention/embed/proof
+    # 전부 포함 — 위 stmt에 form 조건이 없다) — 그래서 "mention/embed만"이라고 쓰면 거짓이다.
+    # source_type은 이 함수가 아는 두 값(chat_message·doc)뿐 — PR "[SID:XXX]" 텍스트 관례·
+    # evidence 자유텍스트 참조는 entity_references에 전혀 안 쌓이므로(구조화 전) 이 카운트에
+    # 없다.
+    collection_scope = {
+        "source_types": ["chat_message", "doc"],
+        "forms": "all",
+        "excludes": ["pr_sid_text_convention", "evidence_free_text_reference"],
+    }
+
+    return {
+        "data": data,
+        "meta": {"next_cursor": next_cursor, "has_more": has_more, "collection_scope": collection_scope},
+    }
+
+
+async def list_doc_backlinks(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    auth: AuthContext,
+    limit: int,
+    cursor: str | None,
+) -> dict:
+    """하위호환 wrapper(story #2266) — 기존 호출부(docs.py)·기존 테스트(test_1994_*)가 이
+    이름·시그니처 그대로 쓴다. 실제 로직은 `list_entity_backlinks(target_type="doc", ...)`로
+    위임한다(둘이 서로 다른 코드가 아니다 — 하나의 SSOT)."""
+    return await list_entity_backlinks(
+        db, org_id=org_id, target_type="doc", target_id=doc_id, auth=auth, limit=limit, cursor=cursor,
+    )
