@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import exists, select
@@ -251,24 +251,57 @@ async def update_standup(
     return (await _entries_with_plan_stories([entry], session, org_id, uuid.UUID(auth.user_id)))[0]
 
 
-@router.get("/history", response_model=list[StandupEntryResponse])
+@router.get("/history")
 async def list_standup_history(
     project_id: uuid.UUID = Query(...),
     limit: int = Query(default=30, ge=1, le=200),
+    cursor: str | None = Query(default=None),
     repo: StandupEntryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
-) -> list[StandupEntryResponse]:
+) -> dict:
     """GET /api/v2/standups/history — 최근 N개 스탠드업 히스토리 조회 (AC2 S-STANDUP-FIX).
 
     b47f9b05: list/upsert/update 와 동일하게 plan_stories org-scope enrich(a9e67531) 적용 — 미적용 시
     백로그→데일리 할일(plan_story_ids)이 plan_stories 빈 채 내려가 cross-board 미노출(SaaS FE 프록시 포함).
+
+    story #2248: 이 엔드포인트엔 원래 cursor도 order_by도 없었다(repo.list()가 정렬 없이 limit만
+    적용) — "최근 N개"라면서 결정적 순서 보장이 없었다(#2231 표 CAPPED-NO-NEXT-PAGE, ㉯✗). #2231
+    정본 규약 A(참조 구현: stories.py::list_comments/list_activities)로 도달 가능하게 한다.
+    repo.list()는 다른 호출부(list_standups, line 181)와 공유하는 범용 메서드라 여기서 손대지
+    않고, 이 엔드포인트만 raw 쿼리로 바이패스한다(project_id EXISTS join은 repo.list()와 동일 로직
+    재현 — 규약 재발명 없음, 필터 로직만 재현).
     """
     # ratchet round5(잔여 HIGH): 동일 패턴(project_id 필터 미검증) — resource-actual 직접검증.
     if not await has_project_access(repo.session, uuid.UUID(auth.user_id), project_id, repo.org_id):
         raise HTTPException(status_code=404, detail="Project not found")
 
-    entries = await repo.list(project_id=project_id, limit=limit)
-    return await _entries_with_plan_stories(entries, repo.session, repo.org_id, uuid.UUID(auth.user_id))
+    q = select(StandupEntry).where(
+        StandupEntry.org_id == repo.org_id,
+        exists().where(
+            StandupEntryProject.entry_id == StandupEntry.id,
+            StandupEntryProject.project_id == project_id,
+        ),
+    )
+    # #2540 CI 교훈(오르테가군): "값이 있는지"만 보면 안 되고 "그 값이 문자열인지"까지 봐야
+    # 한다 — 이 함수를 FastAPI DI 없이 직접 호출하며 cursor= 를 누락하면 파이썬 기본값인
+    # Query(...) 센티넬 객체(truthy) 가 그대로 들어온다. 문자열이 아니면 커서 없음으로 취급.
+    if isinstance(cursor, str) and cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor format")
+        q = q.where(StandupEntry.created_at < cursor_dt)
+    q = q.order_by(StandupEntry.created_at.desc()).limit(limit + 1)
+    result = await repo.session.execute(q)
+    rows = list(result.scalars())
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    next_cursor = page[-1].created_at.isoformat() if has_more and page else None
+    enriched = await _entries_with_plan_stories(page, repo.session, repo.org_id, uuid.UUID(auth.user_id))
+    return {
+        "data": enriched,
+        "meta": {"has_more": has_more, "next_cursor": next_cursor},
+    }
 
 
 @router.get("/missing", response_model=list[uuid.UUID])

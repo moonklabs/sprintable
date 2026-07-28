@@ -125,16 +125,24 @@ def _auth():
 
 @pytest.mark.anyio
 async def test_history_endpoint_enriches_backlog_plan_story():
-    """history 가 백로그(cross-board) plan_story 를 enrich — 미적용 시 plan_stories 빈 채 미노출 회귀."""
+    """history 가 백로그(cross-board) plan_story 를 enrich — 미적용 시 plan_stories 빈 채 미노출 회귀.
+
+    story #2248: list_standup_history가 #2231 규약A로 바뀌며 repo.list()를 안 쓰고
+    repo.session.execute(raw query)로 바이패스한다 — result.scalars()를 엔트리 소스로 재설정
+    (result.all()은 그대로 두 번째 호출인 enrich의 story resolve용). 반환도 {"data":[...],
+    "meta":{...}} 봉투로 바뀌어 out["data"][0]으로 접근한다(out[0] 아님).
+    """
     from app.routers.standups import list_standup_history
     backlog = uuid.uuid4()
     session = AsyncMock()
-    result = MagicMock(); result.all.return_value = [_row(backlog, "Backlog", "backlog")]
+    result = MagicMock()
+    result.scalars.return_value = [_entry([backlog])]
+    result.all.return_value = [_row(backlog, "Backlog", "backlog")]
     session.execute = AsyncMock(return_value=result)
     repo = _repo(list_ret=[_entry([backlog])], session=session)
     with _accessible(PROJECT_ID):
-        out = await list_standup_history(project_id=uuid.uuid4(), limit=30, repo=repo, auth=_auth())
-    assert [ps.id for ps in out[0].plan_stories] == [backlog]  # 백로그 노출(enrich)
+        out = await list_standup_history(project_id=uuid.uuid4(), limit=30, cursor=None, repo=repo, auth=_auth())
+    assert [ps.id for ps in out["data"][0].plan_stories] == [backlog]  # 백로그 노출(enrich)
 
 
 @pytest.mark.anyio
