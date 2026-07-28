@@ -13,6 +13,15 @@ DB CHECK 가 안 지켜 주니 이게 유일한 감시망).
 것만. 블루프린트가 언급한 나머지(sprint·artifact·hypothesis·goal·task·chat message·
 evidence)는 "등록되면 열리는" 것이지, 쓰지도 않을 resolver 를 미리 짓는 것은 그 자체가
 "만들어졌는데 도는 자리가 없는" 죽은 경로다(#2260이 고친 그 클래스를 재발시키지 않는다).
+
+⛔story #2273(C-1b) 실측으로 발견: source(자리)와 target(대상)은 "존재판정이 필요한가"가
+다르다 — chat_message는 정당한 source_type(채팅 write-path가 실제로 매일 쓰는 값)이지만
+**target으로 가리켜질 일이 없어 resolver가 없다**(메시지는 불변·삭제돼도 backlinks
+read-path의 LEFT JOIN이 자연히 걸러낸다, 별도 존재판정 불필요). 이걸 ENTITY_RESOLVERS
+(target 전용 registry)에 없다고 "오타/미등록"으로 취급하면 **정상 데이터를 사고로 오탐**한다
+(count_orphan_types 실측에서 직접 걸림 — chat_message가 source로 366건 "orphan"으로
+잡혔던 것). `SOURCE_ONLY_TYPES`가 그 구분을 명시한다: source로는 유효하나 target
+존재판정은 없는 타입.
 """
 from __future__ import annotations
 
@@ -66,28 +75,49 @@ ENTITY_RESOLVERS: dict[str, EntityExistsResolver] = {
 }
 
 
+# source_type으로는 유효하나 target 존재판정(resolver)은 없는 타입 — 위 모듈 docstring
+# 참조. write-path(mention_parser.py)가 이 타입들을 source_type으로 직접 씀(하드코딩 리터럴,
+# 사용자 입력 아님 — #2260이 이미 검증한 신뢰 경계).
+SOURCE_ONLY_TYPES: frozenset[str] = frozenset({"chat_message"})
+
+
 def is_registered_entity_type(entity_type: str) -> bool:
+    """target_type 검증용 — 존재판정(resolver)이 있는 타입인가."""
     return entity_type in ENTITY_RESOLVERS
 
 
-async def count_orphan_types(session: AsyncSession, org_id: uuid.UUID) -> dict[str, int]:
+def is_valid_source_type(entity_type: str) -> bool:
+    """source_type 검증용 — target-capable(ENTITY_RESOLVERS) 이거나 source-only 인가."""
+    return entity_type in ENTITY_RESOLVERS or entity_type in SOURCE_ONLY_TYPES
+
+
+async def count_orphan_types(session: AsyncSession, org_id: uuid.UUID | None = None) -> dict[str, int]:
     """⭐PO가 요구한 감시망 — entity_references 에 저장된 행 중 source_type/target_type 이
-    registry 에 없는 것을 종류별로 센다. 0이 정상 — 0이 아니면 오타/미등록 타입이 조용히
-    쓰기를 통과한 사고(이 함수가 잡아야 하는 그 사고)다."""
+    registry(+source-only 허용목록)에 없는 것을 종류별로 센다. 0이 정상 — 0이 아니면
+    오타/미등록 타입이 조용히 쓰기를 통과한 사고(이 함수가 잡아야 하는 그 사고)다.
+    org_id=None(기본) = 전체 org.
+
+    ⛔story #2273(C-1b) AC10: 이 함수는 #2259에서 만들어졌지만 테스트만 불렀다 — "만들어졌는데
+    도는 자리가 없는" 그 클래스였다. `app.routers.cron.entity_references_orphan_check`가 이제
+    이걸 실제로 호출하는 자리다(Cloud Scheduler → CRON_SECRET 게이트 → 이 함수, 기존
+    workflow-* cron 엔드포인트와 같은 배선).
+
+    ⛔source_type과 target_type은 다른 "known" 집합으로 판정한다(SOURCE_ONLY_TYPES 참조) —
+    같은 집합으로 재면 chat_message 같은 정상 source가 오탐된다(실측으로 걸린 자리)."""
     from collections import Counter
 
     from app.models.reference import Reference
 
-    known = set(ENTITY_RESOLVERS)
-    rows = (
-        await session.execute(
-            select(Reference.source_type, Reference.target_type).where(Reference.org_id == org_id)
-        )
-    ).all()
+    known_targets = set(ENTITY_RESOLVERS)
+    known_sources = known_targets | SOURCE_ONLY_TYPES
+    stmt = select(Reference.source_type, Reference.target_type)
+    if org_id is not None:
+        stmt = stmt.where(Reference.org_id == org_id)
+    rows = (await session.execute(stmt)).all()
     counts: Counter[str] = Counter()
     for source_type, target_type in rows:
-        if source_type not in known:
+        if source_type not in known_sources:
             counts[f"source:{source_type}"] += 1
-        if target_type not in known:
+        if target_type not in known_targets:
             counts[f"target:{target_type}"] += 1
     return dict(counts)

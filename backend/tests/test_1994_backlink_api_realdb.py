@@ -264,10 +264,14 @@ async def _make_doc(session, org_id, project_id, title="Doc", content="", delete
 
 
 async def _make_mention(session, org_id, source_type, source_id, target_id, created_by, created_at=None):
-    from app.models.mention import Mention
-    m = Mention(
-        id=uuid.uuid4(), org_id=org_id, source_type=source_type, source_id=source_id,
-        target_type="doc", target_id=target_id, created_by=created_by,
+    """⛔story #2273(C-1b): entity_references(Reference)에 시드한다 — read-path(list_doc_
+    backlinks)가 그쪽을 읽도록 재배선됐다. source_field="body"(doc/chat_message 둘 다 텍스트
+    필드가 하나뿐)."""
+    from app.models.reference import Reference
+    m = Reference(
+        id=uuid.uuid4(), org_id=org_id, source_type=source_type, source_field="body",
+        source_id=source_id, target_type="doc", target_id=target_id, form="mention",
+        created_by=created_by,
     )
     if created_at is not None:
         m.created_at = created_at
@@ -936,7 +940,7 @@ async def test_sabotage_intra_statement_revoke_barrier_doc_source_project_access
         revoked = {"done": False}
 
         def _revoke_mid_statement(conn, cursor, statement, parameters, context, executemany):
-            if revoked["done"] or "mentions" not in statement.lower():
+            if revoked["done"] or "entity_references" not in statement.lower():
                 return
             revoked["done"] = True
             import psycopg2
@@ -1000,7 +1004,7 @@ async def test_sabotage_intra_statement_revoke_barrier_chat_source_project_acces
         revoked = {"done": False}
 
         def _revoke_mid_statement(conn, cursor, statement, parameters, context, executemany):
-            if revoked["done"] or "mentions" not in statement.lower():
+            if revoked["done"] or "entity_references" not in statement.lower():
                 return
             revoked["done"] = True
             import psycopg2
@@ -1088,7 +1092,7 @@ async def test_sabotage_intra_statement_revoke_barrier_human_admin_bypass_eligib
         revoked = {"done": False}
 
         def _revoke_mid_statement(conn, cursor, statement, parameters, context, executemany):
-            if revoked["done"] or "mentions" not in statement.lower():
+            if revoked["done"] or "entity_references" not in statement.lower():
                 return
             revoked["done"] = True
             import psycopg2
@@ -1165,7 +1169,7 @@ async def test_sabotage_intra_statement_revoke_barrier_agent_admin_bypass_eligib
         revoked = {"done": False}
 
         def _revoke_mid_statement(conn, cursor, statement, parameters, context, executemany):
-            if revoked["done"] or "mentions" not in statement.lower():
+            if revoked["done"] or "entity_references" not in statement.lower():
                 return
             revoked["done"] = True
             import psycopg2
@@ -1794,8 +1798,8 @@ async def test_query_count_o1_regardless_of_hidden_conversation_count():
 
 async def test_sabotage_foreign_org_chat_source_admin_bypass_excluded():
     """산티아고 Blocker 1(4회차 재발견): org A 휴먼 owner/admin caller — org B에 agent-only
-    대화(휴먼 참가자 없음)의 메시지가 있고, `Mention.org_id=org_A.id`(호출자 org)이지만
-    `source_id`는 그 org-B 메시지를 가리키는 mention 행을 심는다(write-path 버그 또는
+    대화(휴먼 참가자 없음)의 메시지가 있고, `Reference.org_id=org_A.id`(호출자 org)이지만
+    `source_id`는 그 org-B 메시지를 가리키는 참조 행을 심는다(write-path 버그 또는
     적대적/오손 데이터 시뮬레이션 — 어떻게 그 상태에 도달했든 read-time 방어가 이걸 잡아야
     한다는 게 핵심). org A owner의 admin-bypass가 org 경계 없이 `agent_only_candidates`
     전체에 적용됐던 3회차 버그의 정확한 재현 시나리오.
@@ -1924,11 +1928,87 @@ async def test_ssot_single_select_against_mentions_proves_no_two_phase():
             await client.aclose()
             app.dependency_overrides.clear()
 
-        mentions_selects = [sql for sql in statements if "mentions" in sql.lower()]
+        mentions_selects = [sql for sql in statements if "entity_references" in sql.lower()]
         assert len(mentions_selects) == 1, (
             "SSOT 구조 회귀(Blocker 2, 4회차): mentions 테이블을 건드리는 SELECT가 1개가 "
             f"아님(2-phase 재구현 의심) — {len(mentions_selects)}개:\n"
             + "\n---\n".join(mentions_selects)
         )
+    finally:
+        await engine.dispose()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# story #2273(C-1b) — 재배선 후 AC5: 백필된 옛 데이터 + 재배선 후 새 데이터가 둘 다 보인다
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def test_backfilled_old_data_and_post_cutover_new_data_both_visible_in_backlinks():
+    """⭐AC5 핵심 — read/write 재배선이 실제로 «짝»으로 성립하는지 하나의 왕복으로 증명한다.
+    ①옛 mentions 표에 직접 시드(백필 이전 데이터 시뮬레이션) → backfill 실행 →
+    ②그 뒤 insert_chat_mentions(재배선된 새 write-path)로 새 멘션 추가 →
+    ③GET /docs/{id}/backlinks 한 번 호출로 **둘 다** 뜨는 것을 확인한다.
+    하나라도 안 뜨면 read/write 어느 한쪽이 아직 옛 표만 보거나 쓰는 것이다."""
+    from app.main import app
+    from app.models.mention import Mention
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            other_id, _ = await _make_human_member(s, org.id, project.id)
+            target_doc = await _make_doc(s, org.id, project.id, title="Target")
+            old_source_doc = await _make_doc(s, org.id, project.id, title="Old Source (pre-backfill)")
+
+            # ① 백필 이전 데이터 시뮬레이션 — 옛 mentions 표에 직접 시드(재배선된 write-path를
+            # 거치지 않는다 — 이게 "이미 있던 데이터"라는 뜻이다).
+            s.add(Mention(
+                id=uuid.uuid4(), org_id=org.id, source_type="doc", source_id=old_source_doc.id,
+                target_type="doc", target_id=target_doc.id, created_by=caller_id,
+            ))
+            await s.commit()
+
+            from app.services.reference_backfill import backfill_mentions_to_references
+            await backfill_mentions_to_references(s, org_id=org.id)
+            await s.commit()
+
+            # ② 재배선 후 새 멘션 — 재배선된 실제 write-path(insert_chat_mentions)로 추가.
+            # ⛔실제 ConversationMessage row가 있어야 한다 — backlinks 쿼리가 그걸 LEFT JOIN해
+            # Conversation까지 타는데(Conversation.id.isnot(None) 가드), message_id를 지어내면
+            # 그 JOIN이 NULL이 돼 결과에서 조용히 빠진다(먼저 겪은 자리 — 코드가 아니라 이 테스트
+            # 시딩의 함정이었다).
+            conv_id = await _make_conversation(
+                s, org.id, project.id, [caller_id, other_id], created_by=caller_id, conv_type="dm",
+            )
+            msg = await _add_message(
+                s, conv_id, caller_id, f"[새 참고](entity:doc:{target_doc.id})", _t(9),
+            )
+            from app.services.mention_parser import insert_chat_mentions
+            await insert_chat_mentions(
+                s, org_id=org.id, message_id=msg.id, content=msg.content, created_by=caller_id,
+            )
+            await s.commit()
+            new_message_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks?limit=30")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            source_ids = {item["source_id"] for item in body["data"]}
+            assert str(old_source_doc.id) in source_ids, (
+                "백필된 옛 데이터가 안 보인다 — read-path가 backfill 결과를 못 읽는 것"
+            )
+            assert str(new_message_id) in source_ids, (
+                "재배선 후 새로 쓴 멘션이 안 보인다 — write-path가 여전히 옛 표에 쓰거나, "
+                "read-path가 새 표를 안 읽는 것"
+            )
+            assert len(body["data"]) == 2, body
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
     finally:
         await engine.dispose()

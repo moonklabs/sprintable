@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.reference import FORMS, Reference
-from app.services.reference_registry import ENTITY_RESOLVERS, is_registered_entity_type
+from app.services.reference_registry import ENTITY_RESOLVERS, is_registered_entity_type, is_valid_source_type
 
 Direction = Literal["outgoing", "incoming"]
 
@@ -67,7 +67,10 @@ async def insert_reference(
 ) -> Reference:
     if form not in FORMS:
         raise ValueError(f"form must be one of {sorted(FORMS)}, got {form!r}")
-    if not is_registered_entity_type(source_type):
+    # ⛔source/target은 다른 기준 — source는 SOURCE_ONLY_TYPES(예: chat_message, target으로
+    # 안 쓰여 resolver가 없다)도 허용하지만 target은 존재판정이 가능한 타입만(reference_
+    # registry.py 모듈 docstring 참조, #2273 실측 발견).
+    if not is_valid_source_type(source_type):
         raise UnregisteredEntityTypeError(f"source_type {source_type!r} not in reference_registry")
     if not is_registered_entity_type(target_type):
         raise UnregisteredEntityTypeError(f"target_type {target_type!r} not in reference_registry")

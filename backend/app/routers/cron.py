@@ -289,6 +289,32 @@ async def seed_default_story_line_cron(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── GET /api/v2/internal/cron/entity-references-orphan-check ─────────────────
+# story #2273(C-1b) AC10: count_orphan_types(#2259가 만든 함수)에 「도는 자리」를 준다 —
+# 안 그러면 그 함수 자체가 「만들어졌는데 도는 자리가 없는」 것이 된다. 정상은 0(registry
+# 밖 타입이 entity_references에 하나도 안 쌓였다는 뜻) — 0이 아니면 write 경로 어딘가
+# (registry 검증을 우회한 직접 INSERT 등)가 오타/미등록 타입을 조용히 통과시킨 것이다.
+# ⛔이 엔드포인트는 데이터를 바꾸지 않는다(read-only 점검) — 결과는 응답 JSON + 로그에
+# 남는다(logger.warning으로 0이 아닌 경우 특히 눈에 띄게).
+
+@router.get("/entity-references-orphan-check")
+async def entity_references_orphan_check(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.reference_registry import count_orphan_types
+        orphans = await count_orphan_types(session)  # org_id=None → 전체 org
+        total = sum(orphans.values())
+        if total:
+            logger.warning("entity_references orphan types found: %s (total=%d)", orphans, total)
+        return _ok({"orphans": orphans, "total": total})
+    except Exception as exc:
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/inbox-outbox ────────────────────────────────────
 
 @router.get("/inbox-outbox")

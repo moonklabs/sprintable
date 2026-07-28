@@ -17,8 +17,9 @@ source_type(chat_message·doc) 둘 다 텍스트 필드가 하나뿐이라 이�
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,3 +66,33 @@ async def backfill_mentions_to_references(session: AsyncSession, *, org_id: uuid
     )
     await session.execute(insert_stmt)
     return len(mentions)
+
+
+@dataclass(frozen=True)
+class BackfillVerification:
+    old_count: int
+    new_count: int
+
+    @property
+    def matches(self) -> bool:
+        return self.old_count == self.new_count
+
+
+async def verify_backfill_complete(
+    session: AsyncSession, *, org_id: uuid.UUID | None = None,
+) -> BackfillVerification:
+    """story #2273 AC1 — "돌렸다"가 아니라 **수가 같다**를 보인다. 옛 mentions 행 수와
+    이번 백필로 생긴 entity_references 행 수(form='mention'·source_field='body'로 정확히
+    필터 — 재배선 후 새로 쓰인 mention/embed 행까지 같이 세면 이 비교 자체가 무의미해진다)를
+    비교한다. 다르면 그 차이 자체가 "무엇이 안 옮겨졌는지"의 단서다(이 함수는 진단만 —
+    원인 조사는 호출부 몫)."""
+    old_stmt = select(func.count()).select_from(Mention)
+    new_stmt = select(func.count()).select_from(Reference).where(
+        Reference.form == "mention", Reference.source_field == "body",
+    )
+    if org_id is not None:
+        old_stmt = old_stmt.where(Mention.org_id == org_id)
+        new_stmt = new_stmt.where(Reference.org_id == org_id)
+    old_count = (await session.execute(old_stmt)).scalar_one()
+    new_count = (await session.execute(new_stmt)).scalar_one()
+    return BackfillVerification(old_count=old_count, new_count=new_count)

@@ -5,6 +5,9 @@ AC1 핵심: 「메시지 → 스토리」임베드가 실제로 만들어진다(
 증명한다. AC2(하드코딩 리터럴 제거)는 이 테스트가 story/epic target_type 이 실제로 써지는
 것으로 간접 증명 — insert_chat_mentions 안에 target_type="doc" 리터럴이 남아 있었다면 이
 테스트들은 전부 실패했을 것이다.
+
+⛔story #2273(C-1b): write target이 `entity_references`(Reference)로 재배선돼 이 파일도
+그쪽을 조회하도록 갱신됐다.
 """
 from __future__ import annotations
 
@@ -76,7 +79,7 @@ async def test_chat_mention_to_story_round_trips():
     """⭐AC1 핵심 — 메시지→스토리 임베드가 실제로 만들어지고 다시 읽힌다(죽은 경로 재현/해소)."""
     from sqlalchemy import select
 
-    from app.models.mention import Mention
+    from app.models.reference import Reference
     from app.services.mention_parser import insert_chat_mentions
 
     engine, factory = await _session_factory()
@@ -96,7 +99,7 @@ async def test_chat_mention_to_story_round_trips():
             await session.commit()
 
             rows = (
-                await session.execute(select(Mention).where(Mention.source_id == message_id))
+                await session.execute(select(Reference).where(Reference.source_id == message_id))
             ).scalars().all()
             assert len(rows) == 1, (
                 "메시지→스토리 멘션이 저장되지 않았다 — insert_chat_mentions 안 어딘가에 "
@@ -114,7 +117,7 @@ async def test_chat_mention_to_epic_round_trips():
     """같은 메시지에 doc·story·epic 세 종류가 섞여도 전부 저장된다 — 종류별 분기가 코드에 없다."""
     from sqlalchemy import select
 
-    from app.models.mention import Mention
+    from app.models.reference import Reference
     from app.services.mention_parser import insert_chat_mentions
 
     engine, factory = await _session_factory()
@@ -137,7 +140,7 @@ async def test_chat_mention_to_epic_round_trips():
             await session.commit()
 
             rows = (
-                await session.execute(select(Mention).where(Mention.source_id == message_id))
+                await session.execute(select(Reference).where(Reference.source_id == message_id))
             ).scalars().all()
             got = {(r.target_type, r.target_id) for r in rows}
             assert got == {("doc", doc_id), ("story", story_id), ("epic", epic_id)}
@@ -151,7 +154,7 @@ async def test_target_types_param_is_the_boundary_not_a_body_branch():
     아니라 시그니처 파라미터가 결정한다는 것을 직접 증명)."""
     from sqlalchemy import select
 
-    from app.models.mention import Mention
+    from app.models.reference import Reference
     from app.services.mention_parser import insert_chat_mentions
 
     engine, factory = await _session_factory()
@@ -171,7 +174,7 @@ async def test_target_types_param_is_the_boundary_not_a_body_branch():
             await session.commit()
 
             rows = (
-                await session.execute(select(Mention).where(Mention.source_id == message_id))
+                await session.execute(select(Reference).where(Reference.source_id == message_id))
             ).scalars().all()
             got = {(r.target_type, r.target_id) for r in rows}
             assert got == {("doc", doc_id)}, "target_types 로 좁혔는데 story가 새어 들어왔다"
