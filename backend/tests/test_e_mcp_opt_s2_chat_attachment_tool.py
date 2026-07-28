@@ -145,6 +145,36 @@ async def test_send_chat_message_uploads_then_sends_with_attachments():
 
 
 @pytest.mark.anyio
+async def test_send_chat_message_with_attachment_still_surfaces_references_sideband():
+    """⭐PO 질문(2026-07-29) — 첨부가 있을 때도 references가 실리는가? 답: 실린다. 이유:
+    첨부는 `payload["attachments"]`에만 영향을 주고, 응답 재구성(`raw.get("data")` +
+    sibling 병합)은 첨부 유무와 무관하게 같은 코드 경로다 — 백엔드 메시지 엔드포인트도
+    하나뿐이고 그 엔드포인트의 `references` 계산은 `msg.content`(mention 토큰)만 본다,
+    `attachments` 필드와 독립. 이 테스트가 그 구조적 주장을 실측으로 고정한다(첨부+
+    mention 토큰을 같은 메시지에 같이 넣어 sibling이 살아남는지 직접 본다)."""
+    args = SendChatInput(
+        thread_id="conv-1", content="[T](entity:task:t-1)",
+        attachments=[{"content_base64": _b64(4), "name": "s.png", "content_type": "image/png"}],
+    )
+    upload_result = {"url": "org/o/project/p/chat/conv-1/x-s.png", "name": "s.png", "content_type": "image/png", "size": 4}
+    backend_response = {
+        "data": {"id": "m1", "content": "[T](entity:task:t-1)"},
+        "references": {"stored": 1, "dropped": []},
+    }
+
+    with patch.object(chat_mod.client, "post", new=AsyncMock(return_value=upload_result)), \
+         patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value=backend_response)) as m_full:
+        result = await send_chat_message(args)
+
+    import json
+    body = json.loads(result[0].text)
+    assert body["id"] == "m1"
+    assert body["references"] == {"stored": 1, "dropped": []}
+    _, kwargs = m_full.call_args
+    assert kwargs["json"]["attachments"] == [upload_result]  # 첨부도 같이 전송됐다
+
+
+@pytest.mark.anyio
 async def test_send_chat_message_upload_failure_does_not_call_message_create():
     args = SendChatInput(
         thread_id="conv-1", content="x",
