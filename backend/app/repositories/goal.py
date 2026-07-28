@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.gate import Gate
 from app.models.hypothesis import Hypothesis, HypothesisEpicLink
 from app.models.pm import Goal, Story
 from app.repositories.base import BaseRepository
@@ -152,6 +153,78 @@ class GoalRepository(BaseRepository[Goal]):
                 continue
             goal.total_stories = int(row.total_stories or 0)  # type: ignore[attr-defined]
             goal.done_stories = int(row.done_stories or 0)  # type: ignore[attr-defined]
+
+    async def attach_glance_aggregates(self, goals: Sequence[Goal]) -> None:
+        """story #2298(3단 웨이터폴 근절) — `?include=glance` 옵트인 전용, `list_paginated`
+        기본 경로는 이걸 안 부른다(byte-identical 보장은 라우터가 호출 여부로 가른다).
+
+        participant_ids: 에픽별 고유 assignee_id 집합(FE `deriveCollaboration` 이관 — "참여=
+        presence만"이라 집합 계산, 캡을 두면 뒤쪽 story의 assignee가 빠져 값 자체가 틀려진다
+        — 그래서 캡 없음).
+
+        focal_story: FE `pickFocalStory`(in-progress 중 gate-pending 우선, 없으면 최신
+        in-progress) 이관. tiebreak는 기존 `/api/stories?epic_id=` 기본 정렬(created_at DESC,
+        id DESC)과 동일하게 맞춘다 — gate 우선순위 자체는 이번에 "처음으로" 실제 재료(gate
+        데이터)를 갖고 평가된다(`GlanceFocalStory` docstring 참조 — 기존엔 재료가 없어 죽어
+        있던 분기)."""
+        for goal in goals:
+            goal.participant_ids = []  # type: ignore[attr-defined]
+            goal.focal_story = None  # type: ignore[attr-defined]
+        if not goals:
+            return
+
+        goal_ids = [g.id for g in goals]
+
+        participant_rows = await self.session.execute(
+            select(Story.epic_id, Story.assignee_id).where(
+                Story.epic_id.in_(goal_ids), Story.org_id == self.org_id,
+                Story.deleted_at.is_(None), Story.assignee_id.isnot(None),
+            )
+        )
+        participants_by_goal: dict[uuid.UUID, set[uuid.UUID]] = {}
+        for epic_id, assignee_id in participant_rows.all():
+            participants_by_goal.setdefault(epic_id, set()).add(assignee_id)
+        for goal in goals:
+            ids = participants_by_goal.get(goal.id)
+            if ids:
+                goal.participant_ids = sorted(ids, key=str)  # type: ignore[attr-defined]
+
+        in_progress_rows = await self.session.execute(
+            select(Story.id, Story.epic_id, Story.title, Story.status, Story.assignee_id)
+            .where(
+                Story.epic_id.in_(goal_ids), Story.org_id == self.org_id,
+                Story.deleted_at.is_(None), Story.status == "in-progress",
+            )
+            .order_by(Story.created_at.desc(), Story.id.desc())
+        )
+        candidates_by_goal: dict[uuid.UUID, list] = {}
+        story_ids: list[uuid.UUID] = []
+        for row in in_progress_rows.all():
+            candidates_by_goal.setdefault(row.epic_id, []).append(row)
+            story_ids.append(row.id)
+
+        # N+1 회피 — 배치 gate 조회. Gate는 work_item_id/work_item_type 폴리모픽(FK 없음,
+        # S11 workflow-line 배치 read와 동일 패턴: work_item_id.in_(ids)).
+        pending_story_ids: set[uuid.UUID] = set()
+        if story_ids:
+            gate_rows = await self.session.execute(
+                select(Gate.work_item_id).where(
+                    Gate.work_item_id.in_(story_ids), Gate.work_item_type == "story",
+                    Gate.org_id == self.org_id, Gate.status == "pending",
+                )
+            )
+            pending_story_ids = set(gate_rows.scalars().all())
+
+        for goal in goals:
+            candidates = candidates_by_goal.get(goal.id)
+            if not candidates:
+                continue
+            picked = next((r for r in candidates if r.id in pending_story_ids), candidates[0])
+            goal.focal_story = {  # type: ignore[attr-defined]
+                "id": picked.id, "title": picked.title, "status": picked.status,
+                "assignee_id": picked.assignee_id,
+                "gate_status": "pending" if picked.id in pending_story_ids else None,
+            }
 
     async def get_progress(self, id: uuid.UUID) -> GoalProgressResponse:
         result = await self.session.execute(
