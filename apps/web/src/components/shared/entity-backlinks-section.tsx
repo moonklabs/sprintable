@@ -47,11 +47,16 @@ const EXCLUDE_LABEL_KEYS: Record<string, string> = {
  *
  * ⛔이 맵은 **임시**다 — BE가 언젠가 client 입력을 받는 단일 generic
  * `/entities/{type}/{id}/backlinks` 라우트로 접으면(PO가 `UnsupportedBacklinkTargetTypeError`
- * 리뷰에 미리 남겨둔 방향) 이 맵은 통째로 지운다(entity_type을 그대로 세그먼트로 쓰면 되므로). */
-const ENTITY_ROUTE_SEGMENT: Record<string, string> = {
+ * 리뷰에 미리 남겨둔 방향) 이 맵은 통째로 지운다(entity_type을 그대로 세그먼트로 쓰면 되므로).
+ *
+ * ⛔`Record<string, string>`으로 선언하면 `keyof`가 `string`으로 넓어져 타입가드가 이름만 있고
+ * 실제로는 아무것도 안 막는다(`entityType="epic"`이 컴파일을 그냥 통과해 `/api/undefined/...`로
+ * 나갈 수 있었던 자리, PO 지적) — `as const satisfies`로 좁혀 `BacklinksEntityType`이 실제로
+ * `'story' | 'doc'` 리터럴 유니온이 되게 한다. */
+const ENTITY_ROUTE_SEGMENT = {
   story: 'stories',
   doc: 'docs',
-};
+} as const satisfies Record<string, string>;
 
 export type BacklinksEntityType = keyof typeof ENTITY_ROUTE_SEGMENT;
 
