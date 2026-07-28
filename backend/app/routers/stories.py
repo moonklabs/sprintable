@@ -521,6 +521,11 @@ async def get_workflow_line_status_batch(
 
 
 # E-DG S15(P1-6): line metric 집계(org-scoped·read-only·default-off org=no-op). ⚠️ /{id} 보다 먼저.
+# story #2245 경계 기록(스냅샷·판정 아님, 2026-07-28) — 개별 story 식별·내용 없이 org 전체
+# COUNT/SUM뿐이라 이번 병(항목별 project 접근권 누락)의 대상이 아니라고 보고 이 스토리 스코프
+# 밖에 남긴다. ⛔완전히 무해하다는 뜻은 아니다 — 집계는 "내가 못 보는 프로젝트의 일이 몇
+# 건인가"를 알려 준다. 개별 식별은 불가하고 org 내부라 지금은 열어 두지만, project 격리를
+# 엄히 요구하는 고객이 생기면 다음에 손댈 자리가 여기다.
 @router.get("/workflow-line/metrics")
 async def get_workflow_line_metrics(
     window_days: int = Query(default=14, ge=1, le=90),
