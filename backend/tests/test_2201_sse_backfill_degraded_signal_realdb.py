@@ -81,7 +81,7 @@ async def _seed(Session, *, with_stale_event: bool = False, with_fresh_event: bo
             ))
             await s.commit()
 
-    return {"org_id": org_id, "member_id": member_id, "event_id": event_id}
+    return {"org_id": org_id, "project_id": project_id, "member_id": member_id, "event_id": event_id}
 
 
 async def _setup_app(app, Session, member_id, org_id):
@@ -214,6 +214,54 @@ async def test_cursor_fresh_within_threshold_complete_true():
                 client, f"/api/v2/events/stream?last_event_id={seeded['event_id']}"
             )
             assert frame == {"complete": True, "reason": None, "returned": 0}
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_returned_reflects_actual_count_not_the_cap():
+    """PO 리뷰(2026-07-28) — `returned`가 이름 그대로인지 실증한다: 그 모드의 상한(cursor_
+    not_found → 50건 캡)이 아니라 **실제 쿼리 결과 건수**여야 한다. 오늘 하루 「이름이 실제와
+    다른 것」에 세 번 걸렸다(X-Total-Count=len(items)·next_after_seq가 실은 커서·
+    lastTransitionTime이 나이 아님) — 이번엔 실측으로 미리 가른다.
+
+    시나리오: cursor_not_found(50건 캡 경로)인데 실제 pending 이벤트는 **2건뿐**. `returned`가
+    50이 아니라 2로 나오면 실제 건수를 담고 있다는 뜻 — 왜냐하면 `sync_status`가 heartbeat
+    다음·**개별 백필 이벤트 스트리밍 시작 前**에 나가는 건 맞지만, 그 시점은 이미 DB 쿼리가
+    끝나 `pending_events` 리스트가 메모리에 있는 시점이다(라우터 코드: 쿼리 실행 → `sync_status`
+    yield → 그 리스트를 배치로 스트리밍하는 순서). "스트리밍 시작 前"이지 "쿼리 前"이 아니다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        seeded = await _seed(Session)
+        # cursor_not_found 유도(존재하지 않는 last_event_id) + 실제 pending 이벤트 2건만 시드
+        # (50건 캡보다 훨씬 작게 — 캡값이 그대로 찍히면 바로 드러나도록).
+        async with Session() as s:
+            from app.models.event import Event
+            for _ in range(2):
+                s.add(Event(
+                    id=uuid.uuid4(), project_id=seeded["project_id"], org_id=seeded["org_id"],
+                    event_type="test.event", recipient_id=seeded["member_id"],
+                    recipient_type="agent", payload={}, status="pending",
+                ))
+            await s.commit()
+
+        await _setup_app(app, Session, seeded["member_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            missing_cursor = uuid.uuid4()
+            frame = await _read_sync_status_frame(
+                client, f"/api/v2/events/stream?last_event_id={missing_cursor}"
+            )
+            assert frame["reason"] == "cursor_not_found"
+            assert frame["returned"] == 2, (
+                f"returned={frame['returned']} — 50(캡)이 찍혔으면 «상한»을 담고 있는 것이라 "
+                "이름이 거짓말인 버그. 실제 시드한 2건이 나와야 한다."
+            )
         finally:
             await client.aclose()
     finally:
