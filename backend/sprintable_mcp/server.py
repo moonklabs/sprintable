@@ -29,6 +29,7 @@ from .schemas import SprintableInput
 from .toolset import is_tool_allowed
 from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
 from .tools.evidence import AddEvidenceInput, add_evidence
+from .tools.judgments import AddJudgmentInput, ListJudgmentsInput, add_judgment, list_judgments
 from .tools.visual_artifacts import (
     AddArtifactCommentInput, CreateArtifactInput, CreateSpecPinInput, DeleteArtifactInput,
     DeleteSpecPinInput, EditArtifactInput, GetArtifactInput, ListArtifactCommentsInput,
@@ -542,6 +543,16 @@ _TOOL_DEFS: list[tuple] = [
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
      " 남김. 선택제(첨부 안 해도 무불이익).",
      AddEvidenceInput, add_evidence),
+    # 판단 칸 (2) — story #2268(D단계, E-CONNECT)
+    ("sprintable_add_judgment",
+     "판단(judgment)·못 잰 것(unmeasurable)·철회(retraction)·정련(refinement)·세는 법 틀림"
+     "(method_error)을 남긴다. Evidence(됐다의 증거)와 별개 — 판정 자체의 기록. retraction/"
+     "refinement/method_error는 target_id(무엇에 대한 말인지) 필수.",
+     AddJudgmentInput, add_judgment),
+    ("sprintable_list_judgments",
+     "판단/철회 pull 조회 — work_item_id·method·scope로 좁혀 묻는다. retractions는 상한과"
+     " 무관하게 항상 전체, active는 캡되며 meta.omitted_count로 잘린 건수를 알려준다.",
+     ListJudgmentsInput, list_judgments),
     # Visual artifacts (12) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
     # 핀 저작(story 7fe16274) + story #1922(delete_artifact, soft delete·생성자 전용)
     ("sprintable_create_artifact",

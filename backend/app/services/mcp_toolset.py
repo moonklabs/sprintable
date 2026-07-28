@@ -72,6 +72,10 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 동형(자기 작업에 self-proof 첨부 = 데이터 파괴 아닌 협업/증명 유틸) — 어떤 역할의 working
     # agent든 default_tool_groups 무관하게 done 첨부해야 하므로 always-allow.
     "sprintable_add_evidence",
+    # story #2268(D단계, E-CONNECT — "판단 칸"): add_judgment/list_judgments — 판단/철회는
+    # work_item_ids(다건 또는 0건 general)에 걸치는 cross-cutting 기록이라 add_evidence와
+    # 동일 논리로 core 취급. vendored 사본과 동기화 필수(sprintable_mcp/toolset.py).
+    "sprintable_add_judgment", "sprintable_list_judgments",
     # story b4027b2e(SEC — 까심 #2140 QA④): E-CANVAS visual_artifacts 11종(원 6개 + 7fe16274
     # 핀 4종 + list_spec_pins)을 여기서 제거하고 전용 "canvas" 그룹(_GROUP_KEYWORDS)으로 이관했다.
     # 이전엔 cross-cutting always-allow였는데(C1-S3 당시 "추가 성장 시 전용 canvas 그룹 신설
@@ -202,6 +206,8 @@ _ALWAYS_ALLOWED_PATH_PREFIXES: tuple[str, ...] = (
     # E-VERIFY V0-S1: evidence는 story/task 어느 쪽이든 첨부되는 cross-cutting 자기증명이라
     # 단일 도메인 그룹에 안 묶임(_ALWAYS_ALLOWED의 sprintable_add_evidence와 동일 근거).
     "/api/v2/evidence",
+    # story #2268(D단계): judgments도 evidence와 동일 근거(work_item_ids 다건/0건 cross-cutting).
+    "/api/v2/judgments",
     # story 205e6831(FR·대표요청): MCP _ALWAYS_ALLOWED에 스탠드업 5종을 core 편입했는데 여기(REST
     # path scope)를 같이 안 고치면 canvas 선례(b4027b2e)와 동일한 "도구는 보이는데 호출은 403"
     # 불일치가 재발한다 — tools/list는 항상 노출하지만 실제 HTTP 호출은 _check_api_key_scope가
@@ -338,6 +344,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_link_gate_to_task",
     # evidence (E-VERIFY V0-S1)
     "sprintable_add_evidence",
+    # 판단 칸 (story #2268, D단계)
+    "sprintable_add_judgment", "sprintable_list_judgments",
     # visual artifacts (E-CANVAS C1-S3 + C2-S6 코멘트 + C3-S7 편집 + C4-S8 정본 제안 + 핀 저작 story 7fe16274)
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",

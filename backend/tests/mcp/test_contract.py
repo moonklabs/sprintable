@@ -93,6 +93,8 @@ EXPECTED_TOOLS = {
     "sprintable_link_gate_to_task",
     # evidence (1) — E-VERIFY V0-S1
     "sprintable_add_evidence",
+    # 판단 칸 (2) — story #2268(D단계, E-CONNECT)
+    "sprintable_add_judgment", "sprintable_list_judgments",
     # visual artifacts (12) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
     # 핀 저작(story 7fe16274) + story #1922(delete_artifact, soft delete·생성자 전용)
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
@@ -114,8 +116,9 @@ def test_total_tool_count():
     # 구 sprintable_*_epic 4종은 deprecated 별칭으로 유지(제거 아님) — 107→111.
     # story #2010: sprintable_transition_goal 1종 신설(목표 lifecycle 전이, 구 _epic 별칭 없음) —
     # 111→112. story #1922: sprintable_delete_artifact 1종 신설(artifact soft delete, 생성자
-    # 전용) — 112→113.
-    assert len(_TOOLS) == 113
+    # 전용) — 112→113. story #2268(D단계): sprintable_add_judgment/list_judgments 2종 신설
+    # (판단 칸 pull 진입점 MCP 노출) — 113→115.
+    assert len(_TOOLS) == 115
 
 
 def test_all_expected_tools_registered():
