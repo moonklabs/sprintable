@@ -9,7 +9,12 @@ from app.dependencies.database import get_db
 from app.models.dependency import ITEM_TYPES
 from app.models.pm import Goal, Sprint, Story
 from app.repositories.dependency import DependencyRepository
-from app.schemas.dependency import DependencyCreate, DependencyGraphResponse, DependencyResponse
+from app.schemas.dependency import (
+    DependencyCreate,
+    DependencyGraphResponse,
+    DependencyResponse,
+    DependencyUpdate,
+)
 from app.services.dependency_graph import get_graph, would_create_cycle
 from app.services.project_auth import accessible_project_ids_in_org, has_project_access
 
@@ -130,6 +135,45 @@ async def list_dependencies(
     await _assert_item_project_access(repo.session, uuid.UUID(auth.user_id), repo.org_id, item_id, item_type)
     deps = await repo.list_by_item(item_id, item_type)
     return [DependencyResponse.model_validate(d) for d in deps]
+
+
+@router.patch("/{id}", response_model=DependencyResponse)
+async def update_dependency(
+    id: uuid.UUID,
+    body: DependencyUpdate,
+    repo: DependencyRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> DependencyResponse:
+    """story #2258 AC3: 대기 해제 조건(dep_type) «수정» — 생성+삭제로 흉내내지 않는다(같은 id·
+    created_at 보존, 감사 기록이 「삭제 후 생성」이 아니라 「수정」으로 남는다). create/delete와
+    동일하게 양쪽-아이템 project 접근권 게이트(반쪽 금지) + trust_pipeline 훅 유지."""
+    dep = await repo.get(id)
+    if dep is None:
+        raise HTTPException(status_code=404, detail="의존성을 찾을 수 없음")
+    user_id = uuid.UUID(auth.user_id)
+    await _assert_item_project_access(repo.session, user_id, repo.org_id, dep.from_id, dep.item_type)
+    await _assert_item_project_access(repo.session, user_id, repo.org_id, dep.to_id, dep.item_type)
+
+    # P0-04: dep_type 변경으로 blocks 여부가 어느 방향으로든 뒤집힐 수 있어(depends_on→blocks도
+    # blocks→depends_on도) create/delete와 달리 "old이거나 new이거나 blocks"로 넓게 게이트한다.
+    _trust_before = None
+    if dep.item_type == "story" and (dep.dep_type == "blocks" or body.dep_type == "blocks"):
+        from app.services.trust_pipeline import compute_trust_facts
+
+        _trust_before = await compute_trust_facts(repo.session, repo.org_id, dep.to_id)
+
+    updated = await repo.update_dep_type(id, body.dep_type)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="의존성을 찾을 수 없음")
+
+    if _trust_before is not None:
+        from app.services.trust_pipeline import maybe_emit_trust_stage_changed
+
+        await maybe_emit_trust_stage_changed(
+            repo.session, repo.org_id, dep.to_id, _trust_before, actor_id=user_id
+        )
+
+    return DependencyResponse.model_validate(updated)
 
 
 @router.delete("/{id}", status_code=200)

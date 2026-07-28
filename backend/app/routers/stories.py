@@ -18,6 +18,7 @@ from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.repositories.story_assignee import StoryAssigneeRepository
 from app.routers.agent_gateway import wake_agent
+from app.routers.gates import GateResponse
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.schemas.story import StoryAttachment, StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
@@ -1487,6 +1488,40 @@ async def add_comment(
         )
 
     return CommentResponse.model_validate(comment)
+
+
+@router.post("/{id}/request-verification", response_model=GateResponse, status_code=201)
+async def request_verification(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> GateResponse:
+    """story #2258 — 검증요청: 제네릭 게이트 생성(POST /api/v2/gates)은 이미 있었는데(work_item_type
+    무관) FE가 story에서 부르는 곳이 0곳이었다(member_id/role_id를 client가 알아야 해 실질적으로
+    막혀 있었음). doc.py::transition_doc이 doc_approval 게이트를 상신 시 자동 생성하는 것과
+    동형 패턴 — 여기서도 role_id를 서버가 `_default_role_id`로 해소해 client가 아무것도 몰라도
+    되게 한다. gate_type="qa"(GATE_TYPES 중 「검증」에 가장 가까운 값). create_gate 자체가 멱등
+    (재요청 시 기존 pending 재사용, rejected는 자동 재오픈)이라 여기서 별도 처리 불필요.
+    """
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.gate_service import create_gate
+    from app.services.workflow_line_config import _default_role_id
+
+    member_id = await _resolve_team_member_id(auth, repo.org_id, db)
+    role_id = await _default_role_id(db, repo.org_id) or story.id
+    gate = await create_gate(
+        db, repo.org_id, story.id, "story", "qa",
+        member_id, role_id,
+        neutral_facts={"requested_by_member_id": str(member_id), "story_title": story.title},
+        project_id=story.project_id,
+    )
+    await db.commit()
+    return GateResponse.model_validate(gate)
 
 
 # ─── Activities ───────────────────────────────────────────────────────────────

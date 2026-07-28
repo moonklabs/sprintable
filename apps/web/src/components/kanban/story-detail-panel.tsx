@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { AlertTriangle, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
 import { normalizeAssigneePatch } from './types';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
@@ -340,6 +340,54 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const handleRemoveDep = async (depId: string) => {
     const res = await fetch(`/api/dependencies/${depId}`, { method: 'DELETE' });
     if (res.ok) setDeps((prev) => prev.filter((d) => d.id !== depId));
+  };
+
+  // story #2258 AC2 — 검증요청: BE(request-verification)는 이미 있었는데 화면이 부르지 않던 경로.
+  // 서버 응답의 gate를 그대로 chipGates에 반영(낙관적 아님 — 실제로 저장된 것을 다시 읽는다).
+  const [requestingVerification, setRequestingVerification] = useState(false);
+  const handleRequestVerification = async () => {
+    if (requestingVerification) return;
+    setRequestingVerification(true);
+    try {
+      const res = await fetch(`/api/stories/${story.id}/request-verification`, { method: 'POST' });
+      if (res.ok) {
+        const gate = await res.json() as { gate_type: string; status: string; neutral_facts?: Record<string, unknown> | null };
+        setChipGates((prev) => [...prev.filter((g) => g.gate_type !== 'qa'), gate]);
+        addToast({ type: 'success', title: t('verificationRequested') });
+      } else {
+        addToast({ type: 'error', title: t('verificationRequestFailed') });
+      }
+    } catch {
+      addToast({ type: 'error', title: t('verificationRequestFailed') });
+    } finally {
+      setRequestingVerification(false);
+    }
+  };
+
+  // story #2258 AC3: 대기 해제 조건(dep_type) «수정» — 삭제 후 재생성이 아니라 같은 행을 PATCH.
+  // 서버 응답의 dep_type을 그대로 반영(낙관적 플립 아님 — 실제로 저장된 값을 다시 읽는다).
+  const [updatingDepId, setUpdatingDepId] = useState<string | null>(null);
+  const handleToggleDepType = async (dep: DependencyEdge) => {
+    if (updatingDepId) return;
+    const nextType = dep.dep_type === 'blocks' ? 'depends_on' : 'blocks';
+    setUpdatingDepId(dep.id);
+    try {
+      const res = await fetch(`/api/dependencies/${dep.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dep_type: nextType }),
+      });
+      if (res.ok) {
+        const updated = await res.json() as DependencyEdge;
+        setDeps((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+      } else {
+        addToast({ type: 'error', title: t('dep.addFailed') });
+      }
+    } catch {
+      addToast({ type: 'error', title: t('dep.addFailed') });
+    } finally {
+      setUpdatingDepId(null);
+    }
   };
 
   useEffect(() => {
@@ -847,6 +895,22 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   {trustChipLabel}
                 </span>
               ) : null}
+              {/* story #2258 AC2 — 검증요청: pending "qa" gate가 없을 때만 요청 버튼, 있으면 대기 배지. */}
+              {chipGates.some((g) => g.gate_type === 'qa' && g.status === 'pending') ? (
+                <span className="inline-flex items-center gap-1.5 rounded-[7px] bg-proof-amber-soft px-2 py-0.5 text-[11px] font-semibold text-proof-amber">
+                  <span className="size-1.5 rounded-full bg-proof-amber" aria-hidden="true" />
+                  {t('verificationPending')}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void handleRequestVerification()}
+                  disabled={requestingVerification}
+                  className="inline-flex items-center gap-1 rounded-[7px] border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+                >
+                  {requestingVerification ? t('loading') : t('requestVerification')}
+                </button>
+              )}
             </div>
             {/* E-VERIFY V0-S3 Lv1/Lv2 + P0-04 Claimed-vs-Verified — 완료 badge의 연장으로 읽히도록
                 바로 아래. 증거 0이면 EvidenceSection 자체가 null 렌더(행 미노출, §7 상태 매트릭스). */}
@@ -1315,6 +1379,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           <span className="min-w-0 truncate">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocker.status}</span> : null}
                         </button>
+                        <button type="button" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                          <ArrowLeftRight className="size-3" />
+                        </button>
                         <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label="Remove">
                           <X className="size-3" />
                         </button>
@@ -1332,6 +1399,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           <span className="font-medium shrink-0">Blocking</span>
                           <span className="min-w-0 truncate">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocked.status}</span> : null}
+                        </button>
+                        <button type="button" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                          <ArrowLeftRight className="size-3" />
                         </button>
                         <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
                           <X className="size-3" />
@@ -1351,6 +1421,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           <span className="min-w-0 truncate">{target?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {target?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{target.status}</span> : null}
                         </button>
+                        <button type="button" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                          <ArrowLeftRight className="size-3" />
+                        </button>
                         <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
                           <X className="size-3" />
                         </button>
@@ -1368,6 +1441,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           <span className="font-medium shrink-0">Depended by</span>
                           <span className="min-w-0 truncate">{source?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {source?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{source.status}</span> : null}
+                        </button>
+                        <button type="button" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                          <ArrowLeftRight className="size-3" />
                         </button>
                         <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
                           <X className="size-3" />

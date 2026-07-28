@@ -429,6 +429,10 @@
     "proofCapsuleStateVerified": "Verified",
     "trustChipNeedsInput": "Needs input",
     "trustChipMergeReady": "Merge ready",
+    "requestVerification": "Request verification",
+    "verificationPending": "Verification pending",
+    "verificationRequested": "Verification requested",
+    "verificationRequestFailed": "Failed to request verification",
     "workcellStateInProgress": "In progress",
     "workcellDodMissing": "No DoD specified",
     "workcellBlockedReason": "Waiting on dependency stories",
@@ -523,6 +527,7 @@
       "cycleDetected": "Dependency creates a cycle",
       "invalidSelf": "Invalid dependency (self-reference not allowed)",
       "addFailed": "Failed to add dependency",
+      "toggleType": "Switch blocks/depends",
       "add": "Add",
       "typeBlocks": "Blocks",
       "typeDepends": "Depends",
@@ -3268,7 +3273,11 @@
     "evidenceTypeDeploy": "Deploy",
     "evidenceTypeMetric": "Metric",
     "evidenceTypeReport": "Report",
-    "evidenceTypeGateApproval": "Gate approval"
+    "evidenceTypeGateApproval": "Gate approval",
+    "evidenceAdd": "Link evidence",
+    "evidenceAddFailed": "Failed to link evidence",
+    "evidenceRefPlaceholder": "URL or reference",
+    "evidenceNotePlaceholder": "Note (optional)"
   },
   "canvas": {
     "versionLineage": "Version lineage",

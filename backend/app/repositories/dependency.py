@@ -33,6 +33,15 @@ class DependencyRepository(BaseRepository[ItemDependency]):
         await self.session.flush()
         return result.rowcount  # type: ignore[return-value]
 
+    async def update_dep_type(self, id: uuid.UUID, dep_type: str) -> ItemDependency | None:
+        """story #2258 AC3: 같은 행을 UPDATE(id/created_at 보존) — delete+create로 흉내내지 않는다."""
+        dep = await self.get(id)
+        if dep is None:
+            return None
+        dep.dep_type = dep_type
+        await self.session.flush()
+        return dep
+
     async def exists(self, from_id: uuid.UUID, to_id: uuid.UUID, item_type: str) -> bool:
         result = await self.session.execute(
             select(ItemDependency.id).where(
