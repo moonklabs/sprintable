@@ -34,3 +34,34 @@ describe('ApiStoryRepository.list — q(제목검색) 파라미터가 실제 요
     expect(requestedUrl).not.toContain('q=');
   });
 });
+
+describe('ApiStoryRepository.list — story_number(#2283 참조해소) 파라미터가 실제 요청 URL에 실린다', () => {
+  // BE(stories.py:93)는 이미 story_number 필터를 받는데 이 query 객체엔 없었다 — q 소실
+  // (083176e8)과 같은 클래스, 이번엔 story_number가 조립 지점에서만 빠져 있었다.
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [] }),
+    })) as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('includes story_number in the outgoing query string when filters.story_number is set', async () => {
+    const repo = new ApiStoryRepository('token');
+    await repo.list({ project_id: 'proj-1', story_number: 2249 });
+
+    const requestedUrl = (fetchMock.mock.calls[0]![0] as URL | string).toString();
+    expect(requestedUrl).toContain('story_number=2249');
+  });
+
+  it('omits story_number from the query string when filters.story_number is undefined', async () => {
+    const repo = new ApiStoryRepository('token');
+    await repo.list({ project_id: 'proj-1' });
+
+    const requestedUrl = (fetchMock.mock.calls[0]![0] as URL | string).toString();
+    expect(requestedUrl).not.toContain('story_number=');
+  });
+});
