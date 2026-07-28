@@ -10,6 +10,7 @@ import uuid
 from app.services.mention_parser import (
     extract_chat_doc_mention_ids,
     extract_doc_mention_ids,
+    extract_doc_mention_targets,
 )
 
 
@@ -133,3 +134,59 @@ def test_extract_doc_malformed_html_does_not_raise():
     # 예외 없이 리턴되면 충분(잘린 태그라도 이미 열린 span 의 속성은 잡힘).
     result = extract_doc_mention_ids(html)
     assert doc_id in result
+
+
+# ─── extract_doc_mention_targets (story #2284 — form 보존: wikiLink→mention·pageEmbed→embed) ──
+
+
+def test_extract_doc_targets_wikilink_is_mention_form():
+    doc_id = uuid.uuid4()
+    html = f'<span data-type="wikiLink" data-doc-id="{doc_id}">X</span>'
+    assert extract_doc_mention_targets(html) == [(doc_id, "mention")]
+
+
+def test_extract_doc_targets_page_embed_is_embed_form():
+    doc_id = uuid.uuid4()
+    html = f'<div data-page-embed data-doc-id="{doc_id}"></div>'
+    assert extract_doc_mention_targets(html) == [(doc_id, "embed")]
+
+
+def test_extract_doc_targets_mixed_forms_both_kept_distinct():
+    """⭐AC1 핵심 — 파싱 시점에 있던 형태 구분이 저장 직전 단계까지 버려지지 않고 살아남는다."""
+    id1, id2 = uuid.uuid4(), uuid.uuid4()
+    html = (
+        f'<span data-type="wikiLink" data-doc-id="{id1}">A</span>'
+        f'<div data-page-embed data-doc-id="{id2}"></div>'
+    )
+    assert extract_doc_mention_targets(html) == [(id1, "mention"), (id2, "embed")]
+
+
+def test_extract_doc_targets_same_doc_as_both_forms_not_collapsed():
+    """같은 doc이 인라인 멘션과 카드 임베드 둘 다로 등장하면 (id, form)이 달라 둘 다 남는다 —
+    entity_references의 partial unique index가 form을 키에 포함하므로 공존이 설계상 맞다."""
+    doc_id = uuid.uuid4()
+    html = (
+        f'<span data-type="wikiLink" data-doc-id="{doc_id}">A</span>'
+        f'<div data-page-embed data-doc-id="{doc_id}"></div>'
+    )
+    assert extract_doc_mention_targets(html) == [(doc_id, "mention"), (doc_id, "embed")]
+
+
+def test_extract_doc_targets_duplicate_same_form_deduped():
+    doc_id = uuid.uuid4()
+    html = (
+        f'<span data-type="wikiLink" data-doc-id="{doc_id}">A</span>'
+        f'<span data-type="wikiLink" data-doc-id="{doc_id}">A again</span>'
+    )
+    assert extract_doc_mention_targets(html) == [(doc_id, "mention")]
+
+
+def test_extract_doc_mention_ids_wrapper_still_ignores_form():
+    """extract_doc_mention_ids(하위호환 래퍼)는 여전히 id만 반환 — form이 다른 같은 id도
+    한 번만(기존 계약 무변경)."""
+    doc_id = uuid.uuid4()
+    html = (
+        f'<span data-type="wikiLink" data-doc-id="{doc_id}">A</span>'
+        f'<div data-page-embed data-doc-id="{doc_id}"></div>'
+    )
+    assert extract_doc_mention_ids(html) == [doc_id]

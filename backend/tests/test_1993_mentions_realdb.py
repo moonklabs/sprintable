@@ -162,6 +162,128 @@ async def test_doc_reconcile_adds_and_removes_stale_mentions():
         await engine.dispose()
 
 
+# ─── story #2284 AC5: 왕복 실측 — 인라인 멘션과 카드 임베드가 서로 다른 form으로 선다 ──
+
+
+async def test_doc_reconcile_wikilink_and_page_embed_land_as_distinct_forms():
+    """⭐AC5 핵심 — 문서 본문에 인라인 멘션 하나와 카드 임베드 하나를 같이 넣으면
+    entity_references에 서로 다른 form(mention/embed)으로 각각 행이 생긴다(예전엔 둘 다
+    "mention"으로 뭉개졌다)."""
+    from app.models.reference import Reference
+    from app.services.mention_parser import reconcile_doc_mentions
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org, project, member = await _seed_org_project_member(session)
+            await session.commit()
+
+            source_doc_id = uuid.uuid4()
+            mention_target = uuid.uuid4()
+            embed_target = uuid.uuid4()
+
+            html = (
+                f'<span data-type="wikiLink" data-doc-id="{mention_target}">M</span>'
+                f'<div data-page-embed data-doc-id="{embed_target}"></div>'
+            )
+            await reconcile_doc_mentions(
+                session, org_id=org.id, doc_id=source_doc_id, html_content=html,
+                created_by=member.id,
+            )
+            await session.commit()
+
+            rows = (await session.execute(
+                select(Reference.target_id, Reference.form).where(
+                    Reference.source_type == "doc", Reference.source_id == source_doc_id,
+                )
+            )).all()
+            by_target = {row.target_id: row.form for row in rows}
+            assert by_target == {mention_target: "mention", embed_target: "embed"}
+    finally:
+        await engine.dispose()
+
+
+async def test_doc_reconcile_switching_page_embed_to_wikilink_swaps_form_not_stacks():
+    """같은 대상이 pageEmbed→wikiLink로 바뀌면(사용자가 카드를 인라인 멘션으로 바꿔 재저장)
+    embed 행이 사라지고 mention 행 하나만 남는다 — 두 form이 동시에 쌓이지 않는다."""
+    from app.models.reference import Reference
+    from app.services.mention_parser import reconcile_doc_mentions
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org, project, member = await _seed_org_project_member(session)
+            await session.commit()
+
+            source_doc_id = uuid.uuid4()
+            target = uuid.uuid4()
+
+            html_v1 = f'<div data-page-embed data-doc-id="{target}"></div>'
+            await reconcile_doc_mentions(
+                session, org_id=org.id, doc_id=source_doc_id, html_content=html_v1,
+                created_by=member.id,
+            )
+            await session.commit()
+
+            html_v2 = f'<span data-type="wikiLink" data-doc-id="{target}">X</span>'
+            await reconcile_doc_mentions(
+                session, org_id=org.id, doc_id=source_doc_id, html_content=html_v2,
+                created_by=member.id,
+            )
+            await session.commit()
+
+            rows = (await session.execute(
+                select(Reference.target_id, Reference.form).where(
+                    Reference.source_type == "doc", Reference.source_id == source_doc_id,
+                )
+            )).all()
+            assert [(row.target_id, row.form) for row in rows] == [(target, "mention")]
+    finally:
+        await engine.dispose()
+
+
+async def test_doc_reconcile_proof_rows_untouched_by_reconcile():
+    """⛔reconcile_doc_mentions는 mention/embed만 다룬다 — 같은 (source_doc, target_doc) 쌍에
+    미리 존재하는 form="proof" 행은 이 함수가 절대 건드리지 않는다(다른 write 경로 소유)."""
+    from app.models.reference import Reference
+    from app.services.mention_parser import reconcile_doc_mentions
+
+    engine, factory = await _session_factory()
+    try:
+        async with factory() as session:
+            org, project, member = await _seed_org_project_member(session)
+            await session.commit()
+
+            source_doc_id = uuid.uuid4()
+            target = uuid.uuid4()
+
+            proof_row = Reference(
+                id=uuid.uuid4(), org_id=org.id, source_type="doc", source_field="body",
+                source_id=source_doc_id, target_type="doc", target_id=target, form="proof",
+                created_by=member.id,
+            )
+            session.add(proof_row)
+            await session.commit()
+
+            # 본문에 아무 언급도 없음 — reconcile이 "다 지운다"면 proof도 같이 지워질 위험.
+            await reconcile_doc_mentions(
+                session, org_id=org.id, doc_id=source_doc_id, html_content="<p>empty</p>",
+                created_by=member.id,
+            )
+            await session.commit()
+
+            rows = (await session.execute(
+                select(Reference).where(
+                    Reference.source_type == "doc", Reference.source_id == source_doc_id,
+                )
+            )).scalars().all()
+            assert len(rows) == 1
+            assert rows[0].id == proof_row.id
+            assert rows[0].form == "proof"
+    finally:
+        await engine.dispose()
+
+
 # ─── AC4-3: 중복 삽입 → UNIQUE 로 1 row 만 ──────────────────────────────────────
 
 

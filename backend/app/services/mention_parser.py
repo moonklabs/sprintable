@@ -33,6 +33,13 @@ design-org-knowledge-mentions-backlinks §2.
 
 기존 `mentioned_ids`(ConversationMessage 컬럼·멤버 알림용) 파이프라인은 이 모듈이 전혀
 참조하지 않는다 — 완전히 독립된 병행 경로.
+
+⛔story #2284: 이 모듈이 쓰는 form은 `mention`·`embed` 둘뿐이다. `proof`는 여기서 만들지
+않는다 — 「지원 안 함」이 아니라 「아직 안 만듦」이다: proof는 #2265(대화 일부를 view-only로
+잘라 박는 기능, 별도 write 경로)의 몫으로 설계돼 있고 그 write 경로 자체가 아직 없다(코드
+0줄). doc의 wikiLink→mention·pageEmbed→embed 구분은 파싱 시점에 이미 있던 재료를 저장
+시점에 버리지 않게 고친 것뿐이라 작은 일이었지만, proof는 새 UI 흐름(어느 대화 구간을
+자를지)과 새 write 경로가 통째로 필요해 크기가 다르다.
 """
 from __future__ import annotations
 
@@ -97,26 +104,34 @@ class _DocMentionHTMLParser(HTMLParser):
     tiptap `mergeAttributes`/`renderHTML` 이 만드는 attribute 순서가 보장되지 않아 위치 기반
     정규식은 attribute 순서가 바뀌면 깨진다 — HTMLParser 는 attrs 를 (name, value) 튜플 리스트로
     주므로 dict 화해 이름으로 조회하면 순서 무관.
+
+    story #2284: 어느 태그였는지(wikiLink=인라인 멘션 / pageEmbed=카드 임베드)를 **버리지
+    않고** (doc_id, form) 쌍으로 남긴다 — 파싱 시점엔 이미 있던 구분이 예전엔 저장 시점에
+    뭉개졌다(#2259 이후 form이 리터럴 "mention"으로 하드코딩됐던 자리).
     """
 
     def __init__(self) -> None:
         super().__init__()
-        self.doc_ids: list[str] = []
+        self.doc_refs: list[tuple[str, str]] = []  # (raw_doc_id, form)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_map = dict(attrs)
         if tag == "span" and attr_map.get("data-type") == "wikiLink":
             doc_id = attr_map.get("data-doc-id")
             if doc_id:
-                self.doc_ids.append(doc_id)
+                self.doc_refs.append((doc_id, "mention"))
         elif tag == "div" and "data-page-embed" in attr_map:
             doc_id = attr_map.get("data-doc-id")
             if doc_id:
-                self.doc_ids.append(doc_id)
+                self.doc_refs.append((doc_id, "embed"))
 
 
-def extract_doc_mention_ids(html_content: str) -> list[uuid.UUID]:
-    """doc content(HTML) 에서 wikiLink/pageEmbed 의 data-doc-id 를 순서 보존 + 중복 제거로 추출.
+def extract_doc_mention_targets(html_content: str) -> list[tuple[uuid.UUID, str]]:
+    """doc content(HTML) 에서 wikiLink/pageEmbed 의 data-doc-id 를 **형태(form)와 함께** 순서
+    보존 + 중복 제거로 추출한다. 반환: `[(target_doc_id, form), ...]` — wikiLink→"mention",
+    pageEmbed→"embed"(story #2284). 같은 doc이 인라인 멘션과 카드 임베드 둘 다로 등장하면
+    서로 다른 (id, form) 쌍이라 둘 다 남는다(entity_references의 partial unique index가
+    form을 키에 포함하므로 공존 가능 — 우연이 아니라 설계).
 
     malformed HTML(HTMLParser 가 못 견디는 조각)·malformed UUID 는 조용히 스킵 — 파서 예외로
     전체 doc 저장이 실패하면 안 된다."""
@@ -130,13 +145,26 @@ def extract_doc_mention_ids(html_content: str) -> list[uuid.UUID]:
         # HTMLParser 는 malformed 마크업에도 대체로 관대(best-effort recovery)하지만, 방어적으로
         # 예외 자체도 삼킨다 — 여기까지 왔으면 이미 파싱된 partial 결과를 그대로 쓴다(전체 실패 금지).
         pass
-    seen: set[uuid.UUID] = set()
-    result: list[uuid.UUID] = []
-    for raw in parser.doc_ids:
+    seen: set[tuple[uuid.UUID, str]] = set()
+    result: list[tuple[uuid.UUID, str]] = []
+    for raw_id, form in parser.doc_refs:
         try:
-            doc_id = uuid.UUID(raw)
+            doc_id = uuid.UUID(raw_id)
         except ValueError:
             continue
+        key = (doc_id, form)
+        if key not in seen:
+            seen.add(key)
+            result.append(key)
+    return result
+
+
+def extract_doc_mention_ids(html_content: str) -> list[uuid.UUID]:
+    """하위호환 편의 래퍼(story #2284) — id만 필요한 호출부용. form 정보가 필요하면
+    `extract_doc_mention_targets`를 직접 쓸 것(reconcile_doc_mentions가 그렇게 한다)."""
+    seen: set[uuid.UUID] = set()
+    result: list[uuid.UUID] = []
+    for doc_id, _form in extract_doc_mention_targets(html_content):
         if doc_id not in seen:
             seen.add(doc_id)
             result.append(doc_id)
@@ -155,6 +183,12 @@ async def insert_chat_mentions(
     """채팅 write-path: insert-only(메시지 불변 전제 — 재조정 불필요). 같은 트랜잭션(caller 의
     세션 그대로 사용·별도 커밋 없음) — 실패 시 예외가 그대로 propagate 되어 caller(메시지 전송
     트랜잭션) 전체가 롤백된다(AC4 원자성).
+
+    ⛔story #2284 AC3: 채팅 쪽엔 **멘션/임베드를 가를 재료가 없다** — `_CHAT_TOKEN_RE`가 아는
+    토큰 문법은 `[title](entity:type:id)` **하나뿐**(doc의 wikiLink/pageEmbed 같은 두 번째
+    문법이 없다). 그래서 채팅은 지금 「없는데 있는 척」이 아니라 **문자 그대로 mention만
+    만든다** — 아래 `"form": "mention"`이 하드코딩이 아니라 지금 있는 유일한 값이다. 채팅에
+    임베드 문법을 추가하는 건 이 스토리 범위 밖(새 문법을 만드는 별건 — #2284 본문 참조).
 
     story #2260: target_type 은 본문에서 추출된 값을 그대로 쓴다(내부에서 결정하지 않는다) —
     이 함수엔 entity type 리터럴이 하나도 없다. `target_types`는 **지금 이 write-path 가
@@ -215,26 +249,42 @@ async def reconcile_doc_mentions(
     전체가 롤백된다(AC4 원자성).
 
     story #2273: write target이 `entity_references`로 재배선됐다. source_field="body"(doc
-    본문은 텍스트 필드가 하나뿐)."""
-    target_ids = {tid for tid in extract_doc_mention_ids(html_content) if tid != doc_id}
+    본문은 텍스트 필드가 하나뿐).
 
-    existing_ids = set(
-        (
-            await db.execute(
-                select(Reference.target_id).where(
-                    Reference.source_type == "doc",
-                    Reference.source_field == "body",
-                    Reference.source_id == doc_id,
-                    Reference.target_type == "doc",
-                    Reference.form == "mention",
-                )
+    story #2284: diff 단위가 target_id 하나였던 것을 **(target_id, form) 쌍**으로 넓혔다 —
+    같은 대상이라도 wikiLink(mention)와 pageEmbed(embed)는 서로 다른 행이라(파서가 이제
+    구분을 보존한다). ⛔이 함수는 mention/embed 두 form만 다룬다 — proof(form)는 이 write
+    경로가 만들지도 지우지도 않는다(#2265 전용 별도 write 경로 몫 — 아직 존재하지 않는다).
+    그래서 존재-조회에 `Reference.form.in_(("mention", "embed"))`로 명시해 proof 행을
+    이 diff의 시야 밖에 둔다(실수로 지우는 사고 원천 차단).
+
+    ⛔AC4(기존 행 소급 재분류 안 함, 별개 판단): 이 함수는 «마이그레이션 스크립트»가 아니라
+    doc이 저장될 때마다 도는 diff다 — 예전에 form="mention"으로 잘못 저장된 pageEmbed
+    참조가 있는 doc을 사용자가 «다시 저장」하면, 그 저장이 새 파서로 다시 diff되어 자연히
+    embed로 갈린다(그 doc이 재저장되지 않는 한 예전 값 그대로 남는다). 이건 소급 일괄
+    재분류(=이 스토리가 안 하는 것)가 아니라 정상적인 reconcile-on-save의 자연스러운 결과다
+    — 그래서 별도 backfill 코드는 없다. 그 doc의 `entity_references` row가 갈린 시점(=이
+    행의 `created_at`)이 그 doc 한정으로는 경계다."""
+    target_refs = {
+        (tid, form) for tid, form in extract_doc_mention_targets(html_content) if tid != doc_id
+    }
+
+    existing_rows = (
+        await db.execute(
+            select(Reference.target_id, Reference.form).where(
+                Reference.source_type == "doc",
+                Reference.source_field == "body",
+                Reference.source_id == doc_id,
+                Reference.target_type == "doc",
+                Reference.form.in_(("mention", "embed")),
             )
-        ).scalars().all()
-    )
+        )
+    ).all()
+    existing_refs = {(row.target_id, row.form) for row in existing_rows}
 
-    stale_ids = existing_ids - target_ids
-    if stale_ids:
-        from sqlalchemy import delete as sa_delete
+    stale_refs = existing_refs - target_refs
+    if stale_refs:
+        from sqlalchemy import delete as sa_delete, tuple_
 
         await db.execute(
             sa_delete(Reference).where(
@@ -242,13 +292,13 @@ async def reconcile_doc_mentions(
                 Reference.source_field == "body",
                 Reference.source_id == doc_id,
                 Reference.target_type == "doc",
-                Reference.form == "mention",
-                Reference.target_id.in_(stale_ids),
+                Reference.form.in_(("mention", "embed")),
+                tuple_(Reference.target_id, Reference.form).in_(stale_refs),
             )
         )
 
-    new_ids = target_ids - existing_ids
-    if new_ids:
+    new_refs = target_refs - existing_refs
+    if new_refs:
         canonical_created_by = await canonicalize_member_id(created_by, db)
         stmt = pg_insert(Reference).values([
             {
@@ -259,10 +309,10 @@ async def reconcile_doc_mentions(
                 "source_id": doc_id,
                 "target_type": "doc",
                 "target_id": target_id,
-                "form": "mention",
+                "form": form,
                 "created_by": canonical_created_by,
             }
-            for target_id in new_ids
+            for target_id, form in new_refs
         ])
         stmt = stmt.on_conflict_do_nothing(
             index_elements=[
