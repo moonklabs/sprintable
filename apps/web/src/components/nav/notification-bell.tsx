@@ -123,6 +123,21 @@ async function fetchNotifications(projectId?: string, offset = 0): Promise<Notif
   return { items: [], hasMore: false };
 }
 
+// story #2201 — PR #2554(BE) 계약. `returned`는 캡이 아니라 실제 전송 건수(디디군이 테스트로
+// 못박음) — 이 훅은 판정에 안 쓴다(complete/reason만으로 충분). no_cursor는 "최초 연결"이라
+// 강등이 아니다 — 제외한다(오르테가군 확定).
+interface SseSyncStatus {
+  complete: boolean;
+  reason: 'no_cursor' | 'cursor_not_found' | 'cursor_stale' | null;
+  returned: number;
+}
+
+function isSyncDegraded(data: SseSyncStatus): boolean {
+  return !data.complete && data.reason !== null && data.reason !== 'no_cursor';
+}
+
+const SYNC_STATUS_EVENT_NAMES = ['sync_status'];
+
 async function fetchUnreadCount(projectId?: string): Promise<number> {
   const params = projectId ? `?project_id=${projectId}` : '';
   // story #2160 — 30초 폴링이 401을 조용히 삼키던 자리(fetchWithAuth로 전환).
@@ -150,6 +165,8 @@ interface NotificationPanelProps {
   hasMore: boolean;
   loadingMore: boolean;
   onLoadMore: () => void;
+  // story #2201 — SSE backfill이 커서 무효/캡으로 강등됐을 때만 true(no_cursor는 제외).
+  syncDegraded: boolean;
 }
 
 function NotificationPanel({
@@ -160,6 +177,7 @@ function NotificationPanel({
   hasMore,
   loadingMore,
   onLoadMore,
+  syncDegraded,
 }: NotificationPanelProps) {
   const t = useTranslations('inbox');
   const tCommon = useTranslations('common');
@@ -206,6 +224,14 @@ function NotificationPanel({
           </button>
         </div>
       </div>
+
+      {/* story #2201 — SSE backfill이 강등된 연결에서만 뜨는 옅은 회색 한 줄. no_cursor(최초
+          연결)는 제외 — "일부 유실"이 아니라 "아직 아무것도 안 받은 정상 상태"이기 때문. */}
+      {syncDegraded && (
+        <div className="shrink-0 border-b bg-muted/50 px-4 py-1.5 text-xs text-muted-foreground">
+          {t('syncDegradedBanner')}
+        </div>
+      )}
 
       {/* 필터 탭 */}
       <div className="focus-inset flex shrink-0 overflow-x-auto border-b">
@@ -334,6 +360,9 @@ export function NotificationBell() {
   // prepend가 "더 보기" 다음 페이지 경계를 밀려나게 만들어 중복/누락이 생긴다).
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  // story #2201 — SSE backfill이 강등된 채로 도착했을 때만 true. 재연결로 sync_status가
+  // 다시 오면(complete:true거나 no_cursor) 자동으로 걷힌다 — 별도 dismiss 없음(스펙 그대로).
+  const [syncDegraded, setSyncDegraded] = useState(false);
   const offsetRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -371,7 +400,21 @@ export function NotificationBell() {
     }
   }, [t]);
 
-  useSseNotifications({ onNotification: handleSseNotification, memberId: currentTeamMemberId });
+  // story #2201 — sync_status는 SseEventNotification 계약과 무관한 별도 이벤트라
+  // extraEventNames/onExtraEvent로 구독한다(핸들러 파이프라인을 안 건드림).
+  const handleSyncStatus = useCallback((eventName: string, data: unknown) => {
+    if (eventName !== 'sync_status') return;
+    const parsed = data as Partial<SseSyncStatus>;
+    if (typeof parsed.complete !== 'boolean') return;
+    setSyncDegraded(isSyncDegraded(parsed as SseSyncStatus));
+  }, []);
+
+  useSseNotifications({
+    onNotification: handleSseNotification,
+    memberId: currentTeamMemberId,
+    extraEventNames: SYNC_STATUS_EVENT_NAMES,
+    onExtraEvent: handleSyncStatus,
+  });
 
   // unread count 폴링 (30초 — SSE 실패 보완)
   useEffect(() => {
@@ -512,6 +555,7 @@ export function NotificationBell() {
             hasMore={hasMore}
             loadingMore={loadingMore}
             onLoadMore={() => void handleLoadMore()}
+            syncDegraded={syncDegraded}
           />
         </div>
       )}
@@ -534,6 +578,7 @@ export function NotificationBell() {
             hasMore={hasMore}
             loadingMore={loadingMore}
             onLoadMore={() => void handleLoadMore()}
+            syncDegraded={syncDegraded}
           />
         </div>
       )}

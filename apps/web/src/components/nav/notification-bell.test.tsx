@@ -170,3 +170,70 @@ describe('NotificationBell — 더 보기(story #2192 AC3/AC4)', () => {
     expect(desktopPanel.querySelectorAll('ul li')).toHaveLength(36); // 30(API) + 1(SSE) + 5(API 2페이지)
   });
 });
+
+// story #2201 — BE(PR #2554)가 emit하는 `sync_status` 프레임을 받아 배너를 띄우는지 검증.
+// AC5(회귀 가드): 커서가 무효/캡에 걸린 상태(complete:false, reason≠no_cursor)를 재현했을 때만
+// 배너가 뜨는 것 — 정상 커서로만 도는 테스트는 이 결함을 못 잡는다(AC5 명시 요구사항).
+describe('NotificationBell — sync_status 배너(story #2201)', () => {
+  function emitSyncStatus(data: { complete: boolean; reason: string | null; returned: number }) {
+    const es = FakeEventSource.instances[0]!;
+    return act(async () => { es.emit('sync_status', data); });
+  }
+
+  it('강등(cursor_stale)이면 배너가 뜬다', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    await openBell();
+
+    await emitSyncStatus({ complete: false, reason: 'cursor_stale', returned: 5 });
+
+    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았습니다');
+  });
+
+  it('강등(cursor_not_found)이면 배너가 뜬다', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    await openBell();
+
+    await emitSyncStatus({ complete: false, reason: 'cursor_not_found', returned: 50 });
+
+    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았습니다');
+  });
+
+  it('음성대조 — no_cursor(최초 연결)는 배너가 안 뜬다(오르테가군 확定: 강등이 아니라 정상 최초상태)', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    await openBell();
+
+    await emitSyncStatus({ complete: false, reason: 'no_cursor', returned: 0 });
+
+    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았습니다');
+  });
+
+  it('음성대조 — complete:true(정상 완결)면 배너가 안 뜬다', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    await openBell();
+
+    await emitSyncStatus({ complete: true, reason: null, returned: 12 });
+
+    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았습니다');
+  });
+
+  it('강등 배너가 뜬 뒤 재연결로 정상 sync_status가 오면 자동으로 걷힌다(별도 dismiss 없음, 스펙 그대로)', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    await openBell();
+
+    await emitSyncStatus({ complete: false, reason: 'cursor_stale', returned: 5 });
+    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았습니다');
+
+    await emitSyncStatus({ complete: true, reason: null, returned: 8 });
+    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았습니다');
+  });
+});
