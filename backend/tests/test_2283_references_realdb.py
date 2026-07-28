@@ -215,7 +215,9 @@ async def test_create_reference_rejects_unregistered_target_type():
         try:
             resp = await client.post("/api/v2/references", json={
                 "source_type": "chat_message", "source_id": str(msg.id),
-                "target_type": "task", "target_id": str(uuid.uuid4()),
+                # ⛔story #2294(2026-07-28)부터 task가 ENTITY_RESOLVERS에 등록됐다(twin-system
+                # drift 경보 — 이 값을 바꾼 이유). 여전히 미등록인 타입으로 교체.
+                "target_type": "sprint", "target_id": str(uuid.uuid4()),
             })
             assert resp.status_code == 400, resp.text
         finally:

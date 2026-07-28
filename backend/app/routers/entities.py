@@ -11,11 +11,21 @@ from app.dependencies.database import get_db
 from app.models.doc import Doc
 from app.models.pm import Goal, Story, Task
 from app.services.project_auth import has_project_access
+from app.services.reference_registry import ENTITY_RESOLVERS
 
 router = APIRouter(prefix="/api/v2/entities", tags=["entities", "Work"])
 
-VALID_TYPES = {"story", "doc", "epic", "task"}
 DEFAULT_LIMIT = 10
+
+
+def _valid_types() -> set[str]:
+    """story #2294 AC1: 검색 허용목록을 `reference_registry.ENTITY_RESOLVERS`에서 «파생»한다 —
+    여기 종류를 다시 나열하지 않는다(맞춘 목록은 다시 갈린다는 것을 오늘 `task`가 실측으로
+    보였다: 이 파일이 예전엔 `{"story","doc","epic","task"}`를 손으로 들고 있었는데
+    registry엔 `task`가 없어 검색은 되지만 저장은 안 되는 결함이 났다). 매 호출마다 registry를
+    다시 읽는다(모듈 로드 시점 스냅샷 금지) — registry가 늘거나 줄면 이 함수도 즉시 같이
+    바뀌어야 "둘이 갈릴 수 없다"는 AC1의 요구가 실제로 성립한다."""
+    return set(ENTITY_RESOLVERS)
 
 
 class EntitySearchResult(BaseModel):
@@ -41,8 +51,9 @@ async def search_entities(
     if not await has_project_access(db, uuid.UUID(auth.user_id), project_id, org_id):
         raise HTTPException(status_code=404, detail="Project not found")
 
-    requested = set(types.split(",")) if types else VALID_TYPES
-    requested = requested & VALID_TYPES
+    valid_types = _valid_types()
+    requested = set(types.split(",")) if types else valid_types
+    requested = requested & valid_types
 
     search = f"%{q}%" if q else None
     results: list[EntitySearchResult] = []

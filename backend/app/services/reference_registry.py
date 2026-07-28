@@ -14,6 +14,15 @@ DB CHECK 가 안 지켜 주니 이게 유일한 감시망).
 evidence)는 "등록되면 열리는" 것이지, 쓰지도 않을 resolver 를 미리 짓는 것은 그 자체가
 "만들어졌는데 도는 자리가 없는" 죽은 경로다(#2260이 고친 그 클래스를 재발시키지 않는다).
 
+⛔story #2294(2026-07-28): 4번째로 `task` 를 연다 — 위 경계("쓰지도 않을 resolver 를
+미리 짓지 않는다")에 어긋나지 않는다. `task` 는 이미 검색 허용목록(`entities.py
+VALID_TYPES`)에 있어 화면이 이미 고를 수 있게 주고 있었다(소비자가 이미 서 있다) —
+그런데 이 registry 에는 없어 `insert_chat_mentions` 의 `target_types` 기본값(=이 dict)이
+`task` 를 조용히 걸러내고 있었다("화면은 주는데 서버가 막는" 제3의 결함 클래스, #2259
+AC2가 요구한 "종류 하나 추가 + `reference.py`/`reference_core.py` diff 0"의 실증이기도
+하다). `goal` 은 열지 않는다 — `epic` 과 물리적으로 같은 테이블(`Goal` = 구
+"Epic"의 리네이밍, B1 계층 리네이밍) 이라 이미 `epic` 으로 열려 있다.
+
 ⛔story #2273(C-1b) 실측으로 발견: source(자리)와 target(대상)은 "존재판정이 필요한가"가
 다르다 — chat_message는 정당한 source_type(채팅 write-path가 실제로 매일 쓰는 값)이지만
 **target으로 가리켜질 일이 없어 resolver가 없다**(메시지는 불변·삭제돼도 backlinks
@@ -66,12 +75,24 @@ async def _resolve_epics(session: AsyncSession, org_id: uuid.UUID, ids: list[uui
     return set(rows)
 
 
+async def _resolve_tasks(session: AsyncSession, org_id: uuid.UUID, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    from app.models.pm import Task
+
+    rows = (
+        await session.execute(
+            select(Task.id).where(Task.org_id == org_id, Task.id.in_(ids), Task.deleted_at.is_(None))
+        )
+    ).scalars().all()
+    return set(rows)
+
+
 # entity_type(str) -> resolver. 각 resolver 는 (session, org_id, ids) -> {존재하는 id 집합}.
 # ⛔이 dict 가 유일한 SSOT — write 검증과 read 존재판정이 둘 다 이걸 참조한다(재구현 0).
 ENTITY_RESOLVERS: dict[str, EntityExistsResolver] = {
     "doc": _resolve_docs,
     "story": _resolve_stories,
     "epic": _resolve_epics,
+    "task": _resolve_tasks,
 }
 
 
@@ -131,10 +152,25 @@ async def _project_id_of_epic(session: AsyncSession, org_id: uuid.UUID, entity_i
     ).scalar_one_or_none()
 
 
+async def _project_id_of_task(session: AsyncSession, org_id: uuid.UUID, entity_id: uuid.UUID) -> uuid.UUID | None:
+    from app.models.pm import Story, Task
+
+    # Task엔 project_id 컬럼이 없다(story_id FK만) — entities.py search_entities의 task 분기와
+    # 동일하게 Story를 join해 project_id를 얻는다(재구현 0 — 같은 스코핑 규칙).
+    return (
+        await session.execute(
+            select(Story.project_id)
+            .join(Task, Task.story_id == Story.id)
+            .where(Task.id == entity_id, Task.org_id == org_id, Task.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
+
+
 PROJECT_ID_RESOLVERS: dict[str, EntityProjectIdResolver] = {
     "doc": _project_id_of_doc,
     "story": _project_id_of_story,
     "epic": _project_id_of_epic,
+    "task": _project_id_of_task,
 }
 
 
