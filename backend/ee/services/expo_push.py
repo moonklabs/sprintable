@@ -161,6 +161,8 @@ async def deliver_expo_push(
         ]
 
         dead_tokens: list[str] = []
+        ok_count = 0
+        error_count = 0
         for i in range(0, len(messages), _EXPO_MAX_BATCH):
             chunk = messages[i : i + _EXPO_MAX_BATCH]
             chunk_devices = devices[i : i + _EXPO_MAX_BATCH]
@@ -168,9 +170,19 @@ async def deliver_expo_push(
             # ticket 은 메시지와 동순서. 개수 불일치(부분 응답) 시 zip 이 짧은 쪽 기준(안전).
             for dev, ticket in zip(chunk_devices, tickets):
                 if isinstance(ticket, dict) and ticket.get("status") == "error":
+                    error_count += 1
                     err = (ticket.get("details") or {}).get("error")
                     if err == "DeviceNotRegistered":
                         dead_tokens.append(dev.expo_push_token)
+                elif isinstance(ticket, dict) and ticket.get("status") == "ok":
+                    ok_count += 1
+
+        # 2026-07-28(#2289): 성공 티켓은 이전까지 어디에도 안 남아 "서버가 쐈는데 실패" vs
+        # "서버가 아예 안 쐈다"를 로그만으로 못 갈랐다(둘 다 조용함) — 매 발송마다 요약을 남긴다.
+        logger.info(
+            "expo push: sent org=%s event=%s devices=%d ok=%d error=%d",
+            org_id, event_type, len(devices), ok_count, error_count,
+        )
 
         if dead_tokens:
             await db.execute(
