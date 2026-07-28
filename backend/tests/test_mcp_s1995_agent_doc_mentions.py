@@ -149,6 +149,22 @@ def test_mention_entity_endpoints_match_backend_entity_resolvers():
     assert _MENTION_ENDPOINT_KNOWN_GAP.isdisjoint(chat_mod._MENTION_ENTITY_ENDPOINTS)
 
 
+def test_mention_ref_literal_matches_mention_entity_endpoints_directly():
+    """⭐PO 지적(2026-07-29): 위 테스트는 `_MENTION_ENTITY_ENDPOINTS`↔`ENTITY_RESOLVERS`
+    (dict↔registry) «둘만» 잰다 — `MentionRef.type`의 Pydantic `Literal`(스키마 검증 축)은
+    지금까지 «손으로 같이 맞춰 왔을 뿐» 어느 테스트도 직접 재지 않았다. Literal과 dict가
+    서로 갈리면(예: dict에만 새 키를 추가하고 Literal enum을 깜빡하면) 위 테스트는 여전히
+    통과하는데(Literal은 안 보니까) 실제로는 `MentionRef(type="새키", ...)`가 스키마
+    레벨에서 거부되는 죽은 경로가 생긴다 — registry↔dict가 아니라 «dict↔Literal» 축의
+    twin-system 갭. `typing.get_args()`로 Literal의 실제 허용값을 직접 추출해 dict 키와
+    동일한지 고정한다(세 축 중 마지막 하나)."""
+    import typing
+
+    literal_type = typing.get_type_hints(MentionRef)["type"]
+    literal_values = set(typing.get_args(literal_type))
+    assert literal_values == set(chat_mod._MENTION_ENTITY_ENDPOINTS)
+
+
 # ── send_chat_message: token synthesis (title given) ─────────────────────────
 @pytest.mark.anyio
 async def test_send_chat_message_synthesizes_token_with_given_title():
