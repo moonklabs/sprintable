@@ -1,4 +1,5 @@
 {
+  "_snapshot_policy": "story #2293(2026-07-28) — 이건 그 시점의 스냅샷이지 실시간 측정이 아니다. backend/scripts/shard_destructive_tests.py의 partition()이 이 가중치로 샤드 4개를 균형배분한다 — 스위트가 자라거나(새 destructive_schema 파일 추가) 특정 파일이 눈에 띄게 느려지면 이 스냅샷은 조용히 낡고 샤드 균형도 조용히 무너진다(discover 자체는 항상 최신이라 파일이 빠지진 않지만, 무거운 새 파일이 '평균 가중치'로만 잡혀 한 샤드에 쏠릴 수 있다). 재측정 시점 기준: (a) destructive_schema 파일 수가 이 스냅샷 대비 +20% 이상 늘었을 때, (b) 어느 한 샤드의 CI 벽시계가 다른 샤드 대비 눈에 띄게(체감상 1.5배 이상) 벌어질 때, (c) 25분 천장 대비 여유가 다시 좁아지는 게 느껴질 때. 재측정 방법: PR run의 'Backend destructive-schema (shard)' 각 job 로그에서 파일별 pytest 실행시간을 다시 뽑아 이 files 배열과 total_files/total_sec/measured_at을 갱신.",
   "source_run": 30360717358,
   "measured_at": "2026-07-28",
   "total_files": 94,

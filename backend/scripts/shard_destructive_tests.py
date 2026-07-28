@@ -51,6 +51,28 @@ def load_weights(weights_path: Path = WEIGHTS_PATH) -> dict[str, float]:
     return {e["file"]: float(e["sec"]) for e in data.get("files", [])}
 
 
+def check_staleness(discovered_count: int, weights_path: Path = WEIGHTS_PATH) -> str | None:
+    """story #2293 후속(파울로군 지적, 2026-07-28) — 이 스냅샷은 실시간 측정이 아니다.
+    스위트가 자라면 조용히 낡는다. 재측정 기준(a)만 여기서 자동 확인한다(파일 수 +20% —
+    weights_path의 `_snapshot_policy`에 (b)(c) 수동 기준도 적혀 있다: 샤드 간 벽시계가
+    1.5배 이상 벌어지거나 25분 천장 대비 여유가 다시 좁아지면 재측정)."""
+    if not weights_path.exists():
+        return None
+    data = json.loads(weights_path.read_text())
+    snapshot_total = data.get("total_files")
+    if not snapshot_total:
+        return None
+    growth = (discovered_count - snapshot_total) / snapshot_total
+    if growth >= 0.20:
+        return (
+            f"가중치 스냅샷({weights_path.name}, {data.get('measured_at', '?')} · "
+            f"{snapshot_total}개) 대비 discover가 {discovered_count}개 — "
+            f"+{growth * 100:.0f}% 증가. 재측정 권장(무거운 새 파일이 '평균 가중치'로만 "
+            f"잡혀 한 샤드에 쏠릴 수 있다)."
+        )
+    return None
+
+
 def partition(files: list[str], weights: dict[str, float], shard_count: int) -> tuple[list[list[str]], list[float]]:
     """greedy LPT — 무거운 순으로 정렬해 매번 «지금 가장 가벼운 샤드」에 넣는다.
     ⭐이 함수는 무손실이다(모든 파일이 정확히 하나의 샤드에 들어간다) —
@@ -81,6 +103,10 @@ def main() -> int:
     files = discover_files()
     weights = load_weights()
     shards, totals = partition(files, weights, args.shard_count)
+
+    staleness = check_staleness(len(files))
+    if staleness:
+        print(f"⚠️ {staleness}", file=sys.stderr)
 
     if args.print_summary:
         print(f"discovered {len(files)} destructive_schema files total (discover가 SSOT)", file=sys.stderr)
