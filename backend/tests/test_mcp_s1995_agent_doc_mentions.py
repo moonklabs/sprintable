@@ -181,6 +181,10 @@ def test_mention_ref_literal_matches_backend_entity_resolvers_directly():
     literal_type = typing.get_type_hints(MentionRef)["type"]
     literal_values = set(typing.get_args(literal_type))
     assert literal_values == set(ENTITY_RESOLVERS) - _MENTION_ENDPOINT_KNOWN_GAP
+    # ⭐PO 지적(2026-07-29): "없다"만 고정하면 다음 사람이 "빠뜨린 건가"를 다시 세게 된다 —
+    # WHY: evidence는 GET /api/v2/evidence/{id}(단건조회) 라우트 자체가 없어(work_item_id로
+    # 거르는 list만 존재) MCP가 title을 auto-fetch할 방법이 없다 — 그래서 Literal에 못 올린다.
+    # 단건 GET이 생기면 여기와 `_MENTION_ENTITY_ENDPOINTS`(chat.py)를 같이 늘린다.
     assert "evidence" not in literal_values
     assert "evidence" in set(ENTITY_RESOLVERS)
 
