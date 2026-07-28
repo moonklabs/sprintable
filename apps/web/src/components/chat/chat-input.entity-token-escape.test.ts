@@ -49,6 +49,35 @@ describe('applyEntity — AC1: applyAsset과 같은 규칙을 쓴다(형제 비�
   });
 });
 
+// PO 지적(2026-07-28, #2577 머지 후) — 디디군이 BE `build_reference_token` 테스트를 임의
+// 문자(이모지·다국어·중첩·기존 backslash)로 넓혔다. "규칙이 하나면 테스트도 하나여야" 하므로
+// FE도 같은 문자 집합을 검증한다(backend/app/services/reference_registry.py 테스트의
+// parametrize 목록과 그대로 맞춘 것 — PR #2576 참조).
+describe('BE(#2282/#2576) 테스트와 동일 문자 집합 대조 — AC6 확장', () => {
+  it.each([
+    '日本語のタイトル [テスト] 中文标题 한국어 عربي',
+    'C:\\Users\\test[1]', // title 자체에 이미 backslash가 있는 경우(이중 escape 견고성)
+    '🔥 [TAG] "quoted" 日本語 (paren) \\ end — 모든 축 동시',
+  ])('임의 특수문자 제목이 항상 안전하게 escape되고 href가 왕복 파싱된다: %s', (title) => {
+    const { text } = applyEntity('#', 1, title, 'story', '11111111-1111-1111-1111-111111111111');
+    // href(entity:type:id)는 title 내용과 무관하게 항상 정확히 재추출돼야 한다.
+    const hrefMatch = text.match(/\(entity:(\w+):([0-9a-f-]{36})\)/i);
+    expect(hrefMatch?.[1]).toBe('story');
+    expect(hrefMatch?.[2]).toBe('11111111-1111-1111-1111-111111111111');
+    // href 앞부분(링크 텍스트)에 이스케이프 안 된 ] ( ) 가 없어야 한다(구문 안 끊김).
+    const beforeHref = text.slice(0, text.indexOf('](entity:'));
+    const unescapedBracket = /(?<!\\)[\])(]/.test(beforeHref.slice(1));
+    expect(unescapedBracket).toBe(false);
+  });
+
+  it('BE와 같은 "조직 명명 관례(`[TAG] 제목`)" 케이스도 안전하다(실제 데이터 관례 재현)', () => {
+    const { text } = applyEntity('#', 1, '[E-CONNECT] 참조가 상태와 다음 행동을 들고 온다', 'story', '11111111-1111-1111-1111-111111111111');
+    expect(text).toContain('\\[E-CONNECT\\]');
+    const hrefMatch = text.match(/\(entity:(\w+):([0-9a-f-]{36})\)/i);
+    expect(hrefMatch?.[1]).toBe('story');
+  });
+});
+
 describe('AC5: escape 뒤에도 토큰이 다시 파싱된다(왕복 확認 — 막느라 못 쓰게 만들지 않는다)', () => {
   it('escape된 토큰에서 href(entity:type:id)를 그대로 추출할 수 있다(chat-bubble.tsx 파서와 동일 정규식)', () => {
     const malicious = 'x](evil)[y';
