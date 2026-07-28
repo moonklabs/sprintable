@@ -403,6 +403,30 @@ async def agent_event_stream(
                 # S0-1: 초기 연결(last_event_id=None, since_timestamp=None)은 INITIAL 상한 적용
                 is_initial = last_event_id is None and since_timestamp is None
                 exceed, limit = _compute_backfill_mode(_ref, now, initial=is_initial)
+                # story #2201: 강등 «사실»만이 아니라 «이유»를 클라이언트에 싣는다 — 지금까지는
+                # 캡에 걸려 과거를 못 채워도(exceed=True) 아무 신호 없이 정상 응답처럼 돌아갔다.
+                # ⛔_compute_backfill_mode의 시그니처·반환값(exceed, limit)은 손대지 않는다(동작
+                # 불변 — 50/100/5 캡은 그대로) · reason만 호출부에서 옆에 붙인다(이 세 값 각각을
+                # 판별할 정보는 이미 위에서 계산돼 있다: is_initial · _ref(None이면 커서를
+                # 보냈어도 못 찾은 것 · since_timestamp 폴백도 없었던 것) · exceed).
+                if is_initial:
+                    _backfill_reason: str | None = "no_cursor"
+                elif _ref is None:
+                    _backfill_reason = "cursor_not_found"
+                elif exceed:
+                    _backfill_reason = "cursor_stale"
+                else:
+                    _backfill_reason = None
+                # done-gate(story #2201): "코드 넣었다"로 안 닫는다 — 이 로그가 gcloud logging
+                # read로 실제로 잡히는 것까지 확認해야 완료다. no_cursor(진짜 최초접속)는 정상
+                # 트래픽이라 제외 — 재연결인데 못 따라잡은 두 경우(cursor_not_found·cursor_stale)
+                # 만 센다(강등 «빈도»가 이 신호의 목적이지 최초접속 빈도가 아니다).
+                if _backfill_reason in ("cursor_not_found", "cursor_stale"):
+                    import logging
+                    logging.getLogger(__name__).info(
+                        "sse.backfill_degraded reason=%s org_id=%s member_id=%s",
+                        _backfill_reason, org_id, resolved_member_id,
+                    )
                 # story #2101: pending뿐 아니라 최근 delivered도 포함 — 동일 member의
                 # 다른 연결(탭)이 먼저 받아 delivered로 마킹한 이벤트를, 재연결한 이 연결도
                 # 다시 받게 한다(중복은 클라 dedup이 처리, 영구 유실 0이 목표).
@@ -456,6 +480,16 @@ async def agent_event_stream(
                         .limit(100)
                     )
                     pending_events = result.scalars().all()
+
+                # story #2201: heartbeat 다음, backfill 이벤트 스트리밍 시작 前에 전용 이벤트
+                # 타입으로 보낸다 — 응답 헤더/heartbeat 메타에는 못 싣는다(heartbeat은 위에서
+                # 이 판정 前에 이미 나가 헤더를 flush했다, hang 방지 설계라 이 스토리에서 손대지
+                # 않는다). 미등록 named event는 이 정확히 같은 엔드포인트에서 heartbeat이 매일
+                # 무해함을 실증 중이라 계약 안전은 이미 확認됨(FE·MCP 브리지 둘 다 조용히 무시).
+                yield (
+                    "event: sync_status\n"
+                    f"data: {json.dumps({'complete': _backfill_reason is None, 'reason': _backfill_reason, 'returned': len(pending_events)})}\n\n"
+                )
 
                 for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
                     batch = pending_events[i : i + _SSE_BATCH_SIZE]
