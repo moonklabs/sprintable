@@ -91,6 +91,53 @@ def is_valid_source_type(entity_type: str) -> bool:
     return entity_type in ENTITY_RESOLVERS or entity_type in SOURCE_ONLY_TYPES
 
 
+# ─── story #2283 — target TARGET 접근 게이트(project_id 조회) ────────────────
+# ⛔ENTITY_RESOLVERS(존재판정)와 별개 축이다: "이 id가 존재하는가"와 "그 엔티티의 project_id는
+# 무엇인가"는 다른 질문이다(has_project_access가 project_id를 요구한다). 같은 3개 타입에
+# 대해 각각 별도 함수가 필요하지만(테이블이 다르므로 구조적으로 불가피), registry 자체는
+# ENTITY_RESOLVERS와 **동형 dict**로 둔다 — 새 타입을 열 때 두 registry에 항목을 "같이"
+# 추가하게 강제하려면 dict가 갈라져 있어야 한다(합치면 "존재판정만 있고 project_id 조회는
+# 없는" 조용한 누락이 가능해진다). 두 registry의 key 집합이 같은지는 테스트로 고정한다
+# (test_2283_references_realdb.py) — twin-system drift 방지.
+
+EntityProjectIdResolver = Callable[[AsyncSession, uuid.UUID, uuid.UUID], Awaitable["uuid.UUID | None"]]
+
+
+async def _project_id_of_doc(session: AsyncSession, org_id: uuid.UUID, entity_id: uuid.UUID) -> uuid.UUID | None:
+    from app.models.doc import Doc
+
+    return (
+        await session.execute(
+            select(Doc.project_id).where(Doc.id == entity_id, Doc.org_id == org_id, Doc.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
+
+
+async def _project_id_of_story(session: AsyncSession, org_id: uuid.UUID, entity_id: uuid.UUID) -> uuid.UUID | None:
+    from app.models.pm import Story
+
+    return (
+        await session.execute(
+            select(Story.project_id).where(Story.id == entity_id, Story.org_id == org_id, Story.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
+
+
+async def _project_id_of_epic(session: AsyncSession, org_id: uuid.UUID, entity_id: uuid.UUID) -> uuid.UUID | None:
+    from app.models.pm import Goal
+
+    return (
+        await session.execute(select(Goal.project_id).where(Goal.id == entity_id, Goal.org_id == org_id))
+    ).scalar_one_or_none()
+
+
+PROJECT_ID_RESOLVERS: dict[str, EntityProjectIdResolver] = {
+    "doc": _project_id_of_doc,
+    "story": _project_id_of_story,
+    "epic": _project_id_of_epic,
+}
+
+
 async def count_orphan_types(session: AsyncSession, org_id: uuid.UUID | None = None) -> dict[str, int]:
     """⭐PO가 요구한 감시망 — entity_references 에 저장된 행 중 source_type/target_type 이
     registry(+source-only 허용목록)에 없는 것을 종류별로 센다. 0이 정상 — 0이 아니면
