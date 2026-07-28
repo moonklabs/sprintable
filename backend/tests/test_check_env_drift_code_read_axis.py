@@ -1,0 +1,251 @@
+"""story #2296 축⑤ "코드가 읽는데 아무도 안 주는 값" — infra/check_env_drift.py 신규 축 회귀가드.
+
+2026-07-28 prod 앱 로그인 장애 그대로 재현·고정한다: `MOBILE_APP_LINK_ORIGIN`(기본값이
+dev-app.sprintable.ai — ㉡최고위험)·`FIREBASE_BFF_INTERNAL_SECRET`(기본값 없음 — ㉠높음) 둘
+다 IaC(deploy_frontend.sh)에도 라이브(frontend-prod)에도 없었다. gcloud 라이브 접근 없이
+(정적 스캔·allowlist 파싱은 순수 로컬 로직) 실행 가능한 부분만 고정한다.
+"""
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_INFRA_DIR = _REPO_ROOT / "infra"
+
+
+def _load_check_env_drift():
+    spec = importlib.util.spec_from_file_location(
+        "check_env_drift", _INFRA_DIR / "check_env_drift.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# ── AC3 — 위험 등급이 실제로 갈린다 ────────────────────────────────────────────
+
+def test_classify_dev_default_is_highest():
+    mod = _load_check_env_drift()
+    assert mod._classify_code_read_risk(["https://dev-app.sprintable.ai"]) == "highest"
+
+
+def test_classify_localhost_and_test_defaults_are_also_highest():
+    mod = _load_check_env_drift()
+    assert mod._classify_code_read_risk(["http://localhost:8000"]) == "highest"
+    assert mod._classify_code_read_risk(["test-mode"]) == "highest"
+
+
+def test_classify_no_default_is_high_not_highest():
+    """FIREBASE_BFF_INTERNAL_SECRET의 실제 모양 — 기본값 자체가 없다. dev 가리키는 것보다는
+    한 등급 낮다(㉠) — 즉시 undefined로 드러나 쪽이 조용한 오지정보다 상대적으로 덜 insidious."""
+    mod = _load_check_env_drift()
+    assert mod._classify_code_read_risk([None]) == "high"
+
+
+def test_classify_env_agnostic_default_is_low():
+    mod = _load_check_env_drift()
+    assert mod._classify_code_read_risk(["us-east-1"]) == "low"
+    assert mod._classify_code_read_risk([".storage"]) == "low"
+
+
+def test_three_tiers_are_actually_different_not_one_bucket():
+    """AC3 본체 — 세 등급이 «다른 값»으로 나와야 한다(하나로 뭉치면 등급이 아니다)."""
+    mod = _load_check_env_drift()
+    tiers = {
+        mod._classify_code_read_risk(["https://dev-app.sprintable.ai"]),
+        mod._classify_code_read_risk([None]),
+        mod._classify_code_read_risk(["us-east-1"]),
+    }
+    assert tiers == {"highest", "high", "low"}
+
+
+# ── 추출 — 소스 리터럴만 읽는다(라이브 값 없이도 동작) ──────────────────────────
+
+def test_web_env_reads_finds_the_real_incident_file(tmp_path):
+    mod = _load_check_env_drift()
+    src = tmp_path / "route.ts"
+    src.write_text(
+        "const A = () => process.env['MOBILE_APP_LINK_ORIGIN'] ?? 'https://dev-app.sprintable.ai';\n"
+        "const B = () => process.env['FIREBASE_BFF_INTERNAL_SECRET'];\n"
+    )
+    reads = mod._web_env_reads(tmp_path)
+    assert reads["MOBILE_APP_LINK_ORIGIN"][0][1] == "https://dev-app.sprintable.ai"
+    assert reads["FIREBASE_BFF_INTERNAL_SECRET"][0][1] is None
+
+
+def test_web_env_reads_ignores_test_files(tmp_path):
+    mod = _load_check_env_drift()
+    (tmp_path / "route.test.ts").write_text("process.env['SOME_TEST_ONLY_KEY'] = 'x';\n")
+    reads = mod._web_env_reads(tmp_path)
+    assert "SOME_TEST_ONLY_KEY" not in reads
+
+
+def test_web_env_reads_never_touches_live_values():
+    """AC5 — 이 함수의 시그니처 자체가 소스 Path만 받는다(라이브 env 접근 불가능한 구조).
+    함수가 아예 gcloud를 부를 방법이 없다는 것을 소스 검사로 고정."""
+    import inspect
+    mod = _load_check_env_drift()
+    src = inspect.getsource(mod._web_env_reads)
+    assert "gcloud" not in src and "_live_env_entries" not in src
+
+
+# ── AC1 — 오늘의 두 건이 실제로 잡힌다(fixture 재현, 라이브 값은 지금 채워져 있으므로) ──
+
+# AC7에서 이 두 키를 deploy_frontend.sh에 실제로 추가한다 — 그러면 실시간
+# `_iac_covered_keys_for_service()`는 "이미 고쳐진" 상태를 돌려주게 된다. AC1은 "사고 당시"를
+# 재현하는 것이 목적이라 그 두 키만 빼서 사고 시점 상태를 흉내낸다(그 외 실제 IaC 상태는
+# 그대로 써서 NEXT_PUBLIC_FASTAPI_URL 같은 무관한 키가 findings에 섞이지 않게 한다).
+_INCIDENT_KEYS = {"MOBILE_APP_LINK_ORIGIN", "FIREBASE_BFF_INTERNAL_SECRET"}
+
+
+def test_ac1_mobile_app_link_origin_reproduces_as_highest_fail():
+    """실제 리포 소스(오늘 그 파일)를 그대로 스캔 + 실제 per-service IaC 커버리지에서 사고
+    당시 상태(그 두 키만 없음)를 흉내 — highest 등급으로 잡혀야 한다."""
+    mod = _load_check_env_drift()
+    reads = mod._web_env_reads()  # 실제 apps/web/src 스캔 — MOBILE_APP_LINK_ORIGIN 실존 확認
+    assert "MOBILE_APP_LINK_ORIGIN" in reads
+
+    covered = mod._iac_covered_keys_for_service("sprintable-frontend-prod") - _INCIDENT_KEYS
+    highest, high, low = mod._unsupplied_code_read_findings(reads, covered, set())
+    assert any("MOBILE_APP_LINK_ORIGIN" in line for line in highest), (
+        f"highest에 MOBILE_APP_LINK_ORIGIN이 없음 — {highest}"
+    )
+
+
+def test_ac1_firebase_bff_internal_secret_reproduces_as_high():
+    mod = _load_check_env_drift()
+    reads = mod._web_env_reads()
+    assert "FIREBASE_BFF_INTERNAL_SECRET" in reads
+
+    covered = mod._iac_covered_keys_for_service("sprintable-frontend-prod") - _INCIDENT_KEYS
+    highest, high, low = mod._unsupplied_code_read_findings(reads, covered, set())
+    assert any("FIREBASE_BFF_INTERNAL_SECRET" in line for line in high), (
+        f"high에 FIREBASE_BFF_INTERNAL_SECRET이 없음 — {high}"
+    )
+
+
+def test_ac1_full_main_reproduces_frontend_prod_incident_and_fails(monkeypatch, capsys):
+    """⭐AC1 본체 — main()을 통째로 돌려 「가드가 빨개지는 것」을 실제로 본다.
+    frontend-prod 라이브를 사고 당시 그대로(두 키 다 없음) fixture로 흉내낸다."""
+    mod = _load_check_env_drift()
+
+    monkeypatch.setattr(mod, "_list_live_services", lambda: ["sprintable-frontend-prod"])
+    monkeypatch.setattr(
+        mod, "_live_env_entries",
+        lambda service: [{"name": "OTHER_UNRELATED_KEY", "value": "x"}],  # 그 둘은 없음
+    )
+    monkeypatch.setattr(mod, "_load_allowlist", lambda: ({}, {}))
+    monkeypatch.setattr(mod, "_load_code_read_exempt", lambda: set())
+    monkeypatch.setattr(mod, "_iac_covered_keys_for_service", lambda service: set())
+    monkeypatch.setattr(mod, "_iac_covered_keys", lambda: set())
+    # ①②③④축은 이 서비스가 그 매핑들 밖이라 자연히 skip — ⑤만 단독으로 신호를 낸다.
+
+    exit_code = mod.main()
+
+    assert exit_code == 1, "MOBILE_APP_LINK_ORIGIN(highest)이 잡혔어야 하는데 통과함"
+    out = capsys.readouterr().out
+    assert "⑤㉡" in out and "MOBILE_APP_LINK_ORIGIN" in out
+    assert "sprintable-frontend-prod" in out
+
+
+# ── AC2 — 양성대조: 정상 상태에서는 안 걸린다 ──────────────────────────────────
+
+def test_ac2_positive_control_both_keys_covered_does_not_fire():
+    """지금(고쳐진 뒤) 상태를 흉내 — 두 키가 covered_keys에 있으면 findings에 안 나와야
+    한다. 둘 다 걸리면 판별력 0(뭘 넣어도 FAIL)이라 이 테스트가 그 축퇴를 막는다."""
+    mod = _load_check_env_drift()
+    reads = mod._web_env_reads()
+    covered_after_fix = {"MOBILE_APP_LINK_ORIGIN", "FIREBASE_BFF_INTERNAL_SECRET"}
+    highest, high, low = mod._unsupplied_code_read_findings(reads, covered_after_fix, set())
+    assert not any("MOBILE_APP_LINK_ORIGIN" in line for line in highest)
+    assert not any("FIREBASE_BFF_INTERNAL_SECRET" in line for line in high)
+
+
+def test_ac2_positive_control_full_main_passes_when_covered(monkeypatch, capsys):
+    """⛔`_iac_covered_keys_for_service`는 모킹하지 않는다 — 진짜 IaC(현재 리포)를 그대로
+    쓰고, 사고의 그 두 키만 라이브로 "공급된 것처럼" fixture로 얹는다. 나머지 실제 코드베이스
+    findings(highest 대상인 NEXT_PUBLIC_FASTAPI_URL 등)는 실제 IaC가 이미 커버하고 있어
+    자연히 안 걸린다 — 그게 이 테스트가 «진짜 양성대조»인 이유(인위적으로 다 가려서 초록을
+    만든 게 아니다)."""
+    mod = _load_check_env_drift()
+    monkeypatch.setattr(mod, "_list_live_services", lambda: ["sprintable-frontend-prod"])
+    monkeypatch.setattr(
+        mod, "_live_env_entries",
+        lambda service: [
+            {"name": "MOBILE_APP_LINK_ORIGIN", "valueFrom": {}},
+            {"name": "FIREBASE_BFF_INTERNAL_SECRET", "valueFrom": {}},
+        ],
+    )
+    monkeypatch.setattr(mod, "_load_allowlist", lambda: ({}, {}))
+
+    exit_code = mod.main()
+    out = capsys.readouterr().out
+    assert "MOBILE_APP_LINK_ORIGIN" not in out
+    assert "FIREBASE_BFF_INTERNAL_SECRET" not in out
+    # ⛔"⑤㉡" 헤더 자체가 아니라 안내문(항상 찍히는 remediation guidance)에 그 글자가 섞여
+    # 있을 수 있어 헤더 전체 문자열로 정밀하게 확認한다(오탐 방지 — 이 assertion 자체가
+    # 처음엔 너무 넓어 자기 오탐을 냈다).
+    assert "⑤㉡코드가 읽는데" not in out, f"highest 등급 FAIL 섹션이 실제로 찍힘(양성대조 오염) — {out}"
+    assert exit_code == 0
+
+
+# ── AC4 — 오탐 수를 세어 적는다(실 저장소 스캔) ─────────────────────────────────
+
+def test_ac4_real_repo_scan_counts_are_recorded():
+    """2026-07-28 실측(AC7 반영 前 — deploy_frontend.sh에 그 두 키를 추가하기 전 기준) —
+    이 수치가 바뀌면(새 env 추가·exempt 갱신 등) 이 테스트가 알린다. exempt 18건은
+    KMS/Storage/Dogfood 3개 기능-스위치 군으로 코드 확認 후 등재한 것 — 나머지는 정직히
+    미triage 상태로 남긴다(라이브 접근 불가 환경이라 IaC-only 상한선 — 실제 CI는 라이브도
+    더해 이보다 작거나 같은 수를 본다)."""
+    mod = _load_check_env_drift()
+    reads = mod._web_env_reads()
+    exempt = mod._load_code_read_exempt()
+    covered = mod._iac_covered_keys_for_service("sprintable-frontend-prod") - _INCIDENT_KEYS
+
+    highest, high, low = mod._unsupplied_code_read_findings(reads, covered, exempt)
+    total_reads = len(reads)
+    total_findings = len(highest) + len(high) + len(low)
+
+    print(
+        f"\n[AC4] 총 고유 env 키 {total_reads}개 · exempt {len(exempt)}개 · "
+        f"미커버 findings {total_findings}개(highest={len(highest)}, high={len(high)}, low={len(low)})"
+    )
+    # 정확한 숫자 고정(2026-07-28) — 스위트가 실패하면 숫자가 바뀐 것, 원인을 봐야 한다.
+    assert len(highest) == 1, highest
+    assert len(high) == 15, high
+    assert len(low) == 9, low
+    assert len(exempt) == 18
+
+
+# ── AC5 — 값을 안 읽는다 ──────────────────────────────────────────────────────
+
+def test_ac5_findings_never_reference_live_env_values():
+    """라이브 entry가 «value 필드 자체가 없어도»(name만) ⑤ 판정이 정상 동작해야 한다 —
+    이 축이 구조적으로 값을 필요로 하지 않는다는 증거."""
+    mod = _load_check_env_drift()
+    reads = {"SOME_KEY": [("file.ts", None)]}
+    # covered_keys는 이름 집합일 뿐, live entry의 "value"를 담을 여지가 없는 자료형(set[str]).
+    highest, high, low = mod._unsupplied_code_read_findings(reads, {"SOME_KEY"}, set())
+    assert highest == [] and high == [] and low == []
+
+
+# ── ⛔AC6 — 이 축이 여전히 못 잡는 것(코드 검증 아니라 문서화·정직한 선언) ─────────
+#
+# 1. 런타임에 동적으로 조립된 키(`process.env[varName]`, `process.env[\`PREFIX_${x}\`]`)는
+#    정적 정규식(`[A-Z][A-Z0-9_]*` 리터럴)으로 안 보인다.
+# 2. `??`/`||` 폴백이 아니라 `if (!process.env.X) throw` 류 런타임 가드는 "기본값 없음"으로
+#    뭉뚱그려진다 — 그 가드가 실제로 얼마나 엄격한지는 못 가른다.
+# 3. NEXT_PUBLIC_* 접두 키는 Next.js가 빌드타임에 인라인할 수 있어, 그 경우 라이브 Cloud Run
+#    env 유무 자체가 무관해진다 — 이 축은 그 구분을 못 한다(과탐 방향 — 실제로는 괜찮은데
+#    "안 채워졌다"고 보고할 수 있음).
+# 4. IaC 커버리지는 «스크립트에 그 키 리터럴이 있는가»만 본다 — 조건부 분기(`if [ "$ENV" =
+#    "prod" ]`) 안에 있어도 스크립트 전체 텍스트에서 매치되면 "있다"로 잡힌다(과소탐지
+#    방향 — dev 분기에만 있어도 prod가 커버된 것처럼 보일 수 있음).
+def test_ac6_dynamic_key_construction_is_not_detected(tmp_path):
+    """1번 한계를 코드로도 고정 — 동적 키 조립은 진짜로 안 잡힌다는 것을 실증."""
+    mod = _load_check_env_drift()
+    src = tmp_path / "dynamic.ts"
+    src.write_text("const key = 'RUNTIME_' + suffix; const v = process.env[key];\n")
+    reads = mod._web_env_reads(tmp_path)
+    assert reads == {}, "동적 키 조립은 이 축이 원천적으로 못 본다는 전제가 깨짐"

@@ -27,7 +27,21 @@ Settings 클래스 자체를 extra="forbid"로 바꾸는 건 안 함(플랫폼/�
 안정화되기 전엔 FAIL 승격하지 않는다(exit code에 반영 안 함 — stdout 열거만). exempt 목록이
 triage로 정리된 後 별도 커밋에서 fail로 승격할 것.
 
+⑤(story #2296, 2026-07-28) — 코드가 읽는데 아무도 안 주는 값. ①②③④는 전부 "라이브 ↔
+IaC" 두 자리만 본다 — 둘 다 그 값을 모르면(둘 다 안 준다) "드리프트 없음"으로 읽힌다. 오늘
+프론트 prod 로그인이 정확히 그 구멍으로 죽었다(`MOBILE_APP_LINK_ORIGIN`·
+`FIREBASE_BFF_INTERNAL_SECRET` 둘 다 IaC에도 라이브 어디에도 없었다 — dev는 하드코딩
+기본값이 우연히 dev 주소와 같아 "그냥 됐다"). 세 번째 축 "코드가 읽는 이름"을 붙인다 —
+`apps/web/src`를 정적 스캔해 `process.env['X']`/`process.env.X` 읽는 키를 전부 뽑고,
+IaC∪라이브(그 서비스 것) 어디에도 없는 키를 위험 등급별로 보고한다. 백엔드는 이미 ④(Settings
+커버리지)와 pydantic-settings의 필수 필드 검증(기본값 없는 필드는 기동 자체가 실패)이
+같은 역할을 구조적으로 하고 있어 이 축의 신규 대상이 아니다 — Next.js는 `process.env.X`가
+없어도 그냥 `undefined`로 흘러 기동은 되고 런타임에 조용히 깨지는 게 이 사고의 근본이었다.
+
 값 자체는 절대 출력/기록하지 않는다 — 매치 여부(bool)만 사용, stdout엔 키 이름·서비스만.
+⚠️⑤의 "기본값" 판정은 예외다 — 소스 코드에 **리터럴로 박힌** 폴백 문자열(이미 git에
+공개돼 있는 것, 예: `'https://dev-app.sprintable.ai'`)만 읽는다. 라이브 Cloud Run env
+value는 이 축도 절대 안 읽는다(①이 이미 뽑아 둔 키 «이름» 집합만 재사용).
 
 로컬 수동 실행:
     python3 infra/check_env_drift.py
@@ -227,6 +241,26 @@ def _extract_keys_from_text(text: str) -> set[str]:
     return set(_KEY_RE.findall(text))
 
 
+def _iac_covered_keys_for_service(service: str) -> set[str]:
+    """⑤ 전용 — ①의 `_iac_covered_keys()`는 전 서비스 스크립트를 합쳐(global union) 판정한다
+    (v1 실용적 타협, 위 클래스 docstring 참고). 그런데 그 합집합이 정확히 이 축의 두 실사고
+    중 하나(`FIREBASE_BFF_INTERNAL_SECRET`)를 가린다 — 그 키는 deploy_backend.sh에만 있고
+    deploy_frontend.sh엔 없는데, 전역 합집합으로 보면 "IaC 어딘가엔 있다"가 되어 frontend가
+    실제로 그 키를 공급받는지와 무관하게 "커버됨"으로 잘못 판정된다. ⑤는 그래서 «이
+    서비스를 담당하는 스크립트»로만 좁혀 본다(공유 cloudbuild.yaml/cloud-build.yml은
+    여러 서비스가 같은 스텝에서 배선될 수 있어 그대로 포함)."""
+    covered: set[str] = set()
+    for rel in ("cloudbuild.yaml", ".github/workflows/cloud-build.yml"):
+        path = _REPO_ROOT / rel
+        if path.exists():
+            covered |= _extract_keys_from_text(path.read_text())
+    for rel in _SERVICE_SCRIPT_MAP.get(service, []):
+        path = _REPO_ROOT / rel
+        if path.exists():
+            covered |= _extract_keys_from_text(path.read_text())
+    return covered
+
+
 def _iac_covered_keys() -> set[str]:
     covered: set[str] = set()
     for rel in ("cloudbuild.yaml", ".github/workflows/cloud-build.yml"):
@@ -241,23 +275,121 @@ def _iac_covered_keys() -> set[str]:
     return covered
 
 
+# ⑤ 코드가 읽는데 아무도 안 주는 값 — apps/web/src 정적 스캔 대상.
+_WEB_SRC_DIR = _REPO_ROOT / "apps" / "web" / "src"
+_ENV_BRACKET_RE = re.compile(r"process\.env\[\s*['\"]([A-Z][A-Z0-9_]*)['\"]\s*\]")
+_ENV_DOT_RE = re.compile(r"process\.env\.([A-Z][A-Z0-9_]*)")
+# 매치 직후 200자 안에서 `?? '...'`/`|| '...'`(문자열 리터럴 폴백)만 인식한다 — 함수 호출·
+# 변수 등 리터럴이 아닌 폴백은 "기본값 없음"과 동일하게 취급(안전 쪽, ㉠으로 승격).
+_DEFAULT_LITERAL_RE = re.compile(r"""^\s*(?:\?\?|\|\|)\s*['"]([^'"]*)['"]""")
+
+# 플랫폼/빌드가 항상 채우거나 이 축의 판정 대상이 아닌 잘 알려진 키.
+# NEXT_RUNTIME — Next.js가 빌드/런타임에 자동 주입(nodejs/edge 런타임 구분), 사람이 배포
+# 설정으로 "공급"하는 값이 아니다(2026-07-28 실측 확認 — instrumentation.ts가 읽지만 그
+# 값은 배포 SSOT/라이브 env var가 아니라 프레임워크가 실행 컨텍스트에 따라 스스로 세팅).
+_WEB_ENV_IGNORE = {"NODE_ENV", "NEXT_RUNTIME"}
+
+# ⑤가 대상으로 삼는 서비스 — apps/web 코드베이스를 실제로 구동하는 라이브 서비스만.
+_WEB_CODE_SERVICES = {"sprintable-frontend-dev", "sprintable-frontend-prod"}
+
+
+def _web_env_reads(src_dir: Path = _WEB_SRC_DIR) -> dict[str, list[tuple[str, str | None]]]:
+    """반환: {key: [(file_relpath, default_literal_or_None), ...]}. 소스 «리터럴»만 읽는다
+    (git에 이미 공개된 텍스트) — 라이브 env value는 이 함수가 존재를 몰라도 된다."""
+    findings: dict[str, list[tuple[str, str | None]]] = {}
+    if not src_dir.exists():
+        return findings
+    paths = sorted(src_dir.rglob("*.ts")) + sorted(src_dir.rglob("*.tsx"))
+    for path in paths:
+        if ".test." in path.name or ".spec." in path.name:
+            continue
+        text = path.read_text(errors="ignore")
+        try:
+            rel = str(path.relative_to(_REPO_ROOT))
+        except ValueError:
+            rel = str(path)  # src_dir이 repo 밖(테스트의 tmp_path 등)일 때의 폴백
+        for regex in (_ENV_BRACKET_RE, _ENV_DOT_RE):
+            for m in regex.finditer(text):
+                key = m.group(1)
+                if key in _WEB_ENV_IGNORE:
+                    continue
+                tail = text[m.end():m.end() + 200]
+                dmatch = _DEFAULT_LITERAL_RE.match(tail)
+                default = dmatch.group(1) if dmatch else None
+                findings.setdefault(key, []).append((rel, default))
+    return findings
+
+
+def _classify_code_read_risk(defaults: list[str | None]) -> str:
+    """같은 키를 여러 곳에서 읽으면 «가장 위험한» 등급으로 접는다.
+    반환: "highest"(㉡ dev/localhost/test 기본값) · "high"(㉠ 기본값 없음) · "low"(㉢ 무관 상수)."""
+    if any(d is not None and re.search(r"dev|localhost|test", d, re.IGNORECASE) for d in defaults):
+        return "highest"
+    if any(d is None for d in defaults):
+        return "high"
+    return "low"
+
+
+def _unsupplied_code_read_findings(
+    web_reads: dict[str, list[tuple[str, str | None]]],
+    covered_keys: set[str],
+    code_read_exempt: set[str],
+) -> tuple[list[str], list[str], list[str]]:
+    """covered_keys(그 서비스의 IaC∪라이브 키 «이름» 집합)에 없는 키만, 등급별로 3개 리스트로
+    나눠 돌려준다(highest, high, low). exempt는 아예 리스트에서 빠진다(알려진 정상)."""
+    highest, high, low = [], [], []
+    for key in sorted(web_reads):
+        if key in covered_keys or key in code_read_exempt:
+            continue
+        occurrences = web_reads[key]
+        tier = _classify_code_read_risk([d for _, d in occurrences])
+        sample = ", ".join(sorted({f for f, _ in occurrences})[:2])
+        line = f"{key} ({sample})"
+        (highest if tier == "highest" else high if tier == "high" else low).append(line)
+    return highest, high, low
+
+
+def _load_code_read_exempt() -> set[str]:
+    import yaml
+    data = yaml.safe_load(_ALLOWLIST_PATH.read_text())
+    return {entry["key"] for entry in data.get("code_read_exempt", [])}
+
+
 def main() -> int:
     excluded_axes, allowlist_services = _load_allowlist()
     iac_keys = _iac_covered_keys()
     settings_field_keys = _settings_field_env_keys()
     settings_exempt = _load_settings_exempt()
+    web_reads = _web_env_reads()  # ⑤ — repo 정적 스캔, 서비스 루프 밖(반복 파일 IO 방지)
+    code_read_exempt = _load_code_read_exempt()
 
     live_services = _list_live_services()
     key_set_failures: list[str] = []
     value_check_failures: list[str] = []
     secret_shape_failures: list[str] = []
     settings_coverage_report: list[str] = []  # ④ report-only — FAIL 집합에 안 넣음(위 docstring).
+    code_read_highest_failures: list[str] = []  # ⑤㉡ — FAIL 집합에 들어감(오늘 실제 사고 등급).
+    code_read_report: list[str] = []  # ⑤㉠㉢ — report-only(오탐 triage 전까지, ④와 동일 원칙).
     unmapped: list[str] = []
 
     checked = 0
     value_checked = 0
     for service in live_services:
         envs = _live_env_entries(service)
+
+        # ⑤ 코드가 읽는데 아무도 안 주는 값 — apps/web을 구동하는 서비스만.
+        # ⛔전역 iac_keys가 아니라 이 서비스 전용 IaC 커버리지를 쓴다(위 함수 docstring 참고 —
+        # 전역이면 FIREBASE_BFF_INTERNAL_SECRET류가 "backend 스크립트에 있으니 커버됨"으로
+        # 잘못 판정된다).
+        if service in _WEB_CODE_SERVICES:
+            live_keys_for_web = {e["name"] for e in envs}
+            covered = _iac_covered_keys_for_service(service) | live_keys_for_web
+            highest, high, low = _unsupplied_code_read_findings(web_reads, covered, code_read_exempt)
+            if highest:
+                code_read_highest_failures.append(f"{service}: {', '.join(highest)}")
+            for tier_label, items in (("㉠기본값없음", high), ("㉢환경무관", low)):
+                if items:
+                    code_read_report.append(f"{service}[{tier_label}]: {', '.join(items)}")
 
         # ③ 평문 시크릿 형태 검출 — excluded_services 여부와 무관하게 전 서비스에 적용.
         secret_hits = _plain_secret_shaped_keys(envs)
@@ -314,8 +446,18 @@ def main() -> int:
             + ", ".join(unmapped)
         )
 
-    if key_set_failures or value_check_failures or secret_shape_failures or settings_coverage_report:
-        print("❌ env 드리프트 발견:")
+    # ⚠️story #2296 후속 자체 발견 — ④(settings_coverage_report)가 "report-only"라는 docstring과
+    # 달리, 원래 코드는 이 값이 하나라도 있으면 아래 블록에 들어가 무조건 `return 1`로
+    # 떨어지는 latent 버그였다(triage 직후라 지금까지 값이 늘 0이라 안 드러났을 뿐).
+    # ⑤㉠㉢도 같은 성질(report-only)로 설계하는 참이라 그대로 물려받으면 안 됨 — FAIL 판정과
+    # report-only 판정을 여기서 명시적으로 분리한다.
+    has_fail = bool(
+        key_set_failures or value_check_failures or secret_shape_failures or code_read_highest_failures
+    )
+    has_report_only = bool(settings_coverage_report or code_read_report)
+
+    if has_fail or has_report_only:
+        print("❌ env 드리프트 발견:" if has_fail else "⚠️ env 드리프트 report-only 발견(FAIL 아님):")
         if key_set_failures:
             print("  ①키집합 대조:")
             for line in key_set_failures:
@@ -327,6 +469,17 @@ def main() -> int:
         if secret_shape_failures:
             print("  ③평문 시크릿 형태 검출(⛔ 값은 출력하지 않음 — 키 이름만):")
             for line in secret_shape_failures:
+                print(f"    - {line}")
+        if code_read_highest_failures:
+            print(
+                "  ⑤㉡코드가 읽는데 아무도 안 주는 값(기본값이 dev/localhost/test — "
+                "prod에서 다른 환경을 가리키는 그 사고 형태, 2026-07-28 실사고):"
+            )
+            for line in code_read_highest_failures:
+                print(f"    - {line}")
+        if code_read_report:
+            print("  ⑤㉠㉢코드가 읽는데 아무도 안 주는 값(report-only — 등급별, FAIL 아님):")
+            for line in code_read_report:
                 print(f"    - {line}")
         if settings_coverage_report:
             print(
@@ -353,16 +506,24 @@ def main() -> int:
             "③은 즉시 Secret Manager secretKeyRef로 전환 바라는(평문 유지 시 재확定 시마다 재발). "
             "④는 (a) 플랫폼/런타임 주입 → settings_exempt 등재(어느 파일이 읽는지 명시), "
             "(b) 진짜 무효 배선 → 제거 또는 Settings 필드 추가, (c) 이름만 다른 alias → "
-            "Settings 필드명 자체를 그 이름에 맞게 정정."
+            "Settings 필드명 자체를 그 이름에 맞게 정정. "
+            "⑤㉡은 즉시 그 서비스에 실제 값을 채우는 것(오늘 사고와 동일 형태 — 방치하면 그 "
+            "환경을 가리키는 채로 조용히 돈다). ⑤㉠㉢은 report-only — 의도적이면 "
+            "code_read_exempt(infra/manual-env-allowlist.yml)에 사유와 함께 등재."
         )
-        return 1
+        if not has_fail:
+            print("\n(⛔위는 report-only 항목뿐 — FAIL 아님. exit code는 0.)")
+        else:
+            return 1
 
     print(
-        f"✅ 드리프트 없음 — ①{checked}개 서비스 키집합"
+        f"✅ 드리프트 없음(FAIL 기준) — ①{checked}개 서비스 키집합"
         f"(제외 {sum(1 for a in excluded_axes.values() if 'key_set' in a)}개), "
         f"②{value_checked}개 서비스 값 대조, "
         f"③{len(live_services)}개 서비스 전체 평문시크릿 스캔 완료(제외 없음), "
-        f"④{len(_SETTINGS_CONSUMING_SERVICES)}개 서비스 Settings 커버리지 대조 완료."
+        f"④{len(_SETTINGS_CONSUMING_SERVICES)}개 서비스 Settings 커버리지 대조 완료, "
+        f"⑤{len(_WEB_CODE_SERVICES & set(live_services))}개 서비스 코드읽기↔공급 대조 완료"
+        f"(㉡최고위험 대조 포함)."
     )
     return 0
 

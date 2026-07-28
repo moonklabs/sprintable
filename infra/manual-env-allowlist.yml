@@ -406,3 +406,51 @@ settings_exempt:
     reason: >-
       backend/scripts/deploy_realtime_gce.sh:349 "의도적 제외" — 재시작 트리거용 타임스탬프
       마커, 코드가 읽는 값이 아니라 애초에 no-read by design.
+
+# ⑤(story #2296, 2026-07-28) — apps/web이 읽는데 IaC∪라이브 어디에도 없는 키 중, 코드로
+# 직접 확認해 "정상(조건부로만 필요·기본값으로 도는 게 맞음)"이라고 판단한 것들.
+# ⛔여기 등재는 "영원히 안 본다"가 아니라 "지금 근거를 남긴다"다 — 그 조건부 스위치가
+# 실제로 켜지는 환경이 생기면 이 사유도 같이 재검토해야 한다.
+code_read_exempt:
+  - key: KMS_PROVIDER
+    reason: >-
+      apps/web/src/lib/kms/provider.ts — 'local'|'gcp'|'vault' 스위치, 기본값 'local'로
+      떨어지면 아래 GCP_KMS_*/VAULT_* 자체가 안 읽힘(코드 확認).
+  - key: LOCAL_KMS_MASTER_KEY
+    reason: KMS_PROVIDER=local(기본값)일 때만 실제로 쓰임 — 위 항목과 같은 스위치.
+  - key: GCP_KMS_BEARER_TOKEN
+    reason: KMS_PROVIDER=gcp일 때만 쓰임(기본은 local) — provider.ts 코드 확認.
+  - key: GCP_KMS_KEY_NAME
+    reason: KMS_PROVIDER=gcp일 때만 쓰임(기본은 local) — provider.ts 코드 확認.
+  - key: VAULT_ADDR
+    reason: KMS_PROVIDER=vault일 때만 쓰임(기본은 local) — provider.ts 코드 확認.
+  - key: VAULT_TOKEN
+    reason: KMS_PROVIDER=vault일 때만 쓰임(기본은 local) — provider.ts 코드 확認.
+  - key: STORAGE_PROVIDER
+    reason: >-
+      apps/web/src/lib/storage/config.ts:12-13 — 기본값 'local'로 떨어짐(코드 확認, ㉢로도
+      이미 낮음 등급). 아래 S3_*/GCS_*는 이 값이 s3/gcs일 때만 실제로 쓰임.
+  - key: S3_ACCESS_KEY_ID
+    reason: STORAGE_PROVIDER=s3일 때만 쓰임(기본은 local) — config.ts 코드 확認.
+  - key: S3_ENDPOINT
+    reason: STORAGE_PROVIDER=s3일 때만 쓰임(기본은 local) — config.ts 코드 확認.
+  - key: S3_SECRET_ACCESS_KEY
+    reason: STORAGE_PROVIDER=s3일 때만 쓰임(기본은 local) — config.ts 코드 확認.
+  - key: GCS_CREDENTIALS_JSON
+    reason: STORAGE_PROVIDER=gcs일 때만 쓰임(기본은 local) — providers/gcs.ts 코드 확認.
+  - key: GCS_PROJECT_ID
+    reason: STORAGE_PROVIDER=gcs일 때만 쓰임(기본은 local) — providers/gcs.ts 코드 확認.
+  - key: INTERNAL_DOGFOOD_ACCESS_ENABLED
+    reason: >-
+      apps/web/src/lib/internal-dogfood.ts:44 `=== 'true'` — 미설정 시 false로 떨어지는
+      명시적 기능 토글(내부 도그푸딩 전용, 이름 자체가 그 스코프를 명시).
+  - key: INTERNAL_DOGFOOD_ACCESS_MAX_AGE_SECONDS
+    reason: INTERNAL_DOGFOOD_ACCESS_ENABLED가 꺼져 있으면(기본) 실질 영향 없음 — 같은 기능군.
+  - key: INTERNAL_DOGFOOD_ACCESS_SECRET
+    reason: INTERNAL_DOGFOOD_ACCESS_ENABLED가 꺼져 있으면(기본) 실질 영향 없음 — 같은 기능군.
+  - key: INTERNAL_DOGFOOD_DEFAULT_ORG_ID
+    reason: INTERNAL_DOGFOOD_ACCESS_ENABLED가 꺼져 있으면(기본) 실질 영향 없음 — 같은 기능군.
+  - key: INTERNAL_DOGFOOD_DEFAULT_PROJECT_ID
+    reason: INTERNAL_DOGFOOD_ACCESS_ENABLED가 꺼져 있으면(기본) 실질 영향 없음 — 같은 기능군.
+  - key: INTERNAL_DOGFOOD_DEFAULT_PROJECT_NAME
+    reason: INTERNAL_DOGFOOD_ACCESS_ENABLED가 꺼져 있으면(기본) 실질 영향 없음 — 같은 기능군.
