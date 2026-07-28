@@ -97,10 +97,9 @@ async def count_orphan_types(session: AsyncSession, org_id: uuid.UUID | None = N
     오타/미등록 타입이 조용히 쓰기를 통과한 사고(이 함수가 잡아야 하는 그 사고)다.
     org_id=None(기본) = 전체 org.
 
-    ⛔story #2273(C-1b) AC10: 이 함수는 #2259에서 만들어졌지만 테스트만 불렀다 — "만들어졌는데
-    도는 자리가 없는" 그 클래스였다. `app.routers.cron.entity_references_orphan_check`가 이제
-    이걸 실제로 호출하는 자리다(Cloud Scheduler → CRON_SECRET 게이트 → 이 함수, 기존
-    workflow-* cron 엔드포인트와 같은 배선).
+    ⛔story #2273(C-1b) AC10: "도는 자리"(cron endpoint)를 주는 배선은 이 PR에서 CI 회귀를
+    일으켜(전역 CRON_SECRET 누수 의심) 별도 PR로 분리했다 — 이 함수 자체는 그대로 두되,
+    호출자 배선은 그 후속 PR 몫이다.
 
     ⛔source_type과 target_type은 다른 "known" 집합으로 판정한다(SOURCE_ONLY_TYPES 참조) —
     같은 집합으로 재면 chat_message 같은 정상 source가 오탐된다(실측으로 걸린 자리)."""
