@@ -116,7 +116,13 @@ export function EvidenceSection({
         }),
       });
       if (!res.ok) { setAddError(true); return; }
-      const created = (await res.json()) as EvidenceItem;
+      // 긴급 정정(2026-07-28): `as EvidenceItem` 단언이 봉투 이중포장을 조용히 통과시켰다
+      // (build/typecheck 둘 다 못 잡음) — 최소 형상 가드로 대체. 없으면 실패로 취급한다.
+      const raw: unknown = await res.json();
+      const created = (raw && typeof raw === 'object' && 'id' in raw && 'type' in raw && 'ref' in raw)
+        ? (raw as EvidenceItem)
+        : null;
+      if (!created) { setAddError(true); return; }
       // AC1: 붙인 뒤 다시 읽어서 붙어 있는 것 — 서버 응답(실제로 저장된 값)을 그대로 리스트에 반영.
       setItems((prev) => [created, ...(prev ?? [])]);
       setAddRef('');
