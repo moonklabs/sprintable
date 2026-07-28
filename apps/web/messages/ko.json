@@ -416,6 +416,12 @@
   "board": {
     "title": "칸반 보드",
     "subtitle": "스토리를 드래그하여 상태를 변경하세요",
+    "backlinksTitle": "이것을 가리키는 것들",
+    "backlinksTargetGone": "대상이 없습니다",
+    "backlinksEmptyFallback": "관찰된 참조 0건",
+    "backlinksEmptyScoped": "관찰된 참조 0건 (수집범위: source={sources}만 · {excludes}는 미수집이라 이 수에 없음)",
+    "backlinksExcludePrSid": "PR/커밋의 [SID:XXX] 텍스트 관례",
+    "backlinksExcludeEvidenceFreeText": "증거(evidence) 자유텍스트 참조",
     "backlog": "백로그",
     "readyForDev": "개발 대기",
     "inProgress": "진행 중",
