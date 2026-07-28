@@ -84,7 +84,10 @@ async def test_list_docs_200():
             resp = await c.get(f"/api/v2/docs?project_id={PROJECT_ID}")
 
         assert resp.status_code == 200
-        assert len(resp.json()) == 1
+        # story #2191: #2231 정본 규약 A — bare array → {data,meta} 봉투.
+        body = resp.json()
+        assert len(body["data"]) == 1
+        assert body["meta"]["has_more"] is False
     finally:
         app.dependency_overrides.clear()
 
@@ -227,12 +230,17 @@ async def test_list_docs_with_parent_id_200():
 
 @pytest.mark.anyio
 async def test_list_doc_revisions_cross_org_404():
-    """⚠️S28 보안(까심 RC·cross-org IDOR): 다른 org doc 의 revisions 요청 → org-scoped repo.get None →
-    404. revision content 무노출(S28 스냅샷 배선으로 활성화된 누출 봉인)."""
+    """⚠️S28 보안(까심 RC·cross-org IDOR): 다른 org doc 의 revisions 요청 → 404. revision content
+    무노출(S28 스냅샷 배선으로 활성화된 누출 봉인). #2237: org-scope에 project-scope도 더해져
+    _require_doc_project_access(형제 add_doc_comment/enable_doc_share와 동일 SSOT)가 이 검증을
+    맡는다 — doc 미존재/타org 둘 다 404로 흡수(존재 비노출)."""
+    from fastapi import HTTPException
     client, session, app = await _client()
     try:
-        # org-scoped repo.get 이 None(이 org 소속 아님) → 404·revision 쿼리 미실행.
-        with patch("app.repositories.base.BaseRepository.get", AsyncMock(return_value=None)):
+        with patch(
+            "app.routers.docs._require_doc_project_access",
+            AsyncMock(side_effect=HTTPException(status_code=404, detail="Doc not found")),
+        ):
             async with client as c:
                 resp = await c.get(f"/api/v2/docs/{DOC_ID}/revisions")
         assert resp.status_code == 404
@@ -242,7 +250,7 @@ async def test_list_doc_revisions_cross_org_404():
 
 @pytest.mark.anyio
 async def test_list_doc_revisions_in_org_200():
-    """org 소속 doc 은 revisions 정상 반환(org_id 가드 통과)."""
+    """org+project 접근권 보유 caller는 revisions 정상 반환(형제 가드 통과)."""
     client, session, app = await _client()
     try:
         rev = MagicMock()
@@ -256,7 +264,7 @@ async def test_list_doc_revisions_in_org_200():
         rev_result = MagicMock()
         rev_result.scalars.return_value = [rev]
         session.execute = AsyncMock(return_value=rev_result)
-        with patch("app.repositories.base.BaseRepository.get", AsyncMock(return_value=_mock_doc())):
+        with patch("app.routers.docs._require_doc_project_access", AsyncMock(return_value=_mock_doc())):
             async with client as c:
                 resp = await c.get(f"/api/v2/docs/{DOC_ID}/revisions")
         assert resp.status_code == 200
@@ -267,13 +275,76 @@ async def test_list_doc_revisions_in_org_200():
 
 @pytest.mark.anyio
 async def test_list_doc_comments_cross_org_404():
-    """⚠️S28 보안(까심 RC twin): 다른 org doc 의 comments 요청 → org-scoped repo.get None → 404.
-    revisions 와 동형 IDOR(comments 는 이미 populated 라 active 노출이었음·같이 봉인)."""
+    """⚠️S28 보안(까심 RC twin): 다른 org doc 의 comments 요청 → 404. revisions 와 동형 IDOR(comments
+    는 이미 populated 라 active 노출이었음·같이 봉인). #2237: _require_doc_project_access로 project-
+    scope도 함께 검증(형제 add_doc_comment와 동일 SSOT)."""
+    from fastapi import HTTPException
     client, session, app = await _client()
     try:
-        with patch("app.repositories.base.BaseRepository.get", AsyncMock(return_value=None)):
+        with patch(
+            "app.routers.docs._require_doc_project_access",
+            AsyncMock(side_effect=HTTPException(status_code=404, detail="Doc not found")),
+        ):
             async with client as c:
                 resp = await c.get(f"/api/v2/docs/{DOC_ID}/comments")
         assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_doc_comments_in_org_200():
+    """org+project 접근권 보유 caller는 comments 정상 반환(형제 가드 통과)."""
+    client, session, app = await _client()
+    try:
+        cmt = MagicMock()
+        cmt.id = uuid.uuid4()
+        cmt.doc_id = DOC_ID
+        cmt.org_id = ORG_ID
+        cmt.project_id = PROJECT_ID
+        cmt.content = "nice doc"
+        cmt.created_by = uuid.uuid4()
+        cmt.created_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        cmt_result = MagicMock()
+        cmt_result.scalars.return_value = [cmt]
+        session.execute = AsyncMock(return_value=cmt_result)
+        with patch("app.routers.docs._require_doc_project_access", AsyncMock(return_value=_mock_doc())):
+            async with client as c:
+                resp = await c.get(f"/api/v2/docs/{DOC_ID}/comments")
+        assert resp.status_code == 200
+        assert resp.json()[0]["content"] == "nice doc"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_doc_share_cross_project_404():
+    """#2237 봉인: 형제(enable/regenerate/disable_doc_share)와 동일하게 project 접근권 없으면 404
+    (기존엔 org 멤버십만 확認하고 project 접근권은 안 봤다)."""
+    from fastapi import HTTPException
+    client, session, app = await _client()
+    try:
+        with patch(
+            "app.routers.docs._require_doc_project_access",
+            AsyncMock(side_effect=HTTPException(status_code=403, detail="해당 문서의 프로젝트 접근 권한이 없습니다")),
+        ):
+            async with client as c:
+                resp = await c.get(f"/api/v2/docs/{DOC_ID}/share")
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_doc_share_in_project_200():
+    """project 접근권 보유 caller는 share 상태 정상 반환(형제 가드 통과)."""
+    client, session, app = await _client()
+    try:
+        with patch("app.routers.docs._require_doc_project_access", AsyncMock(return_value=_mock_doc())), \
+             patch("app.services.doc_share.get_status", AsyncMock(return_value=None)):
+            async with client as c:
+                resp = await c.get(f"/api/v2/docs/{DOC_ID}/share")
+        assert resp.status_code == 200
+        assert resp.json()["enabled"] is False
     finally:
         app.dependency_overrides.clear()

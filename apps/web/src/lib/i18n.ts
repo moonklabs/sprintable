@@ -1,7 +1,3 @@
-export function getMessageFallback(namespace: string, key: string) {
-  return `${namespace}.${key}`;
-}
-
 export function formatLocaleDate(
   value: string | number | Date,
   locale?: string,

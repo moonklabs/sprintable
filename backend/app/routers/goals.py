@@ -137,9 +137,13 @@ async def create_goal(
 async def get_goal(
     id: uuid.UUID,
     repo: GoalRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> GoalResponse:
     goal = await repo.get(id)
     if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    # #2237: 형제(update_goal)와 동일한 project 접근권 가드 추가(기존엔 org-scope만 봤다).
+    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), goal.project_id, repo.org_id):
         raise HTTPException(status_code=404, detail="Goal not found")
     return GoalResponse.model_validate(goal)
 
@@ -382,9 +386,13 @@ async def delete_goal(
 async def get_goal_progress(
     id: uuid.UUID,
     repo: GoalRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> GoalProgressResponse:
     goal = await repo.get(id)
     if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    # #2237: 형제(update_goal)와 동일한 project 접근권 가드 추가(기존엔 org-scope만 봤다).
+    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), goal.project_id, repo.org_id):
         raise HTTPException(status_code=404, detail="Goal not found")
     return await repo.get_progress(id)
 

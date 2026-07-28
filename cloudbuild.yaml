@@ -471,6 +471,27 @@ steps:
           --quiet
     waitFor: [run-migrate-job]
 
+  # story #2185(2026-07-27) — GCE MIG(realtime-gateway) 자동배포. deploy-realtime(위, Cloud
+  # Run 폴백)과 별개 타깃이다. ⛔dev 전용 하드게이트 — prod GCE 는 실사용 중(48h 정상응답
+  # 353건)이라 승인 없는 자동 재배포가 되면 안 된다. prod 를 붙이는 시점엔 사람이 이 가드를
+  # 코드로 직접 고칠 것(위 deploy-realtime 의 _DEPLOY_ENV 가드와 동일 컨벤션 — env/substitution
+  # 으로 여는 방식은 쓰지 않는다). 스크립트 자체가 이미 무중단 rolling-update(--max-unavailable=0
+  # --max-surge=1)로 설계돼 있다(story #2114 S5 실증).
+  - id: deploy-realtime-gce
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY_ENV}" != "dev" ]; then
+          echo "skip deploy-realtime-gce: dev 전용 하드게이트(story #2185) — prod GCE는 사람이 직접 배포한다"
+          exit 0
+        fi
+        GCP_PROJECT="${PROJECT_ID}" GCP_REGION="${_AR_REGION}" COMMIT_SHA="${COMMIT_SHA}" \
+          bash backend/scripts/deploy_realtime_gce.sh dev
+    waitFor: [run-migrate-job]
+
 options:
   machineType: E2_HIGHCPU_8
   logging: CLOUD_LOGGING_ONLY

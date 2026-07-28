@@ -88,9 +88,15 @@ async def _setup_app(app, Session, org_id, user_id):
 
 
 async def _seed_common(session):
-    """org + project + caller(human org member)."""
+    """org + project + caller(human org member, project_access grant).
+
+    #2237(PR #2546 CI 적발): transition_hypothesis가 status=="active" 밖에서도 project 접근권을
+    강제하게 되면서 — 이 fixture가 caller를 org member로만 만들고 project_access grant를 준 적이
+    없던 것(이전엔 그 검사 자체가 없어 안 드러났다)이 실제로 거부(404)로 드러났다. 가드가 옳고
+    fixture가 낡았던 케이스(②) — caller에게 project_access를 명시로 세워 준다."""
     from app.models.organization import Organization
     from app.models.project import OrgMember, Project
+    from app.models.project_access import ProjectAccess
     from app.models.user import User
 
     org = Organization(id=uuid.uuid4(), name="Org", slug=f"org-{uuid.uuid4().hex[:8]}")
@@ -106,6 +112,10 @@ async def _seed_common(session):
     await session.commit()
     caller_om = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=caller.id, role="member")
     session.add(caller_om)
+    await session.commit()
+    session.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=project.id, org_member_id=caller_om.id, permission="granted", role="member",
+    ))
     await session.commit()
 
     return {"org_id": org.id, "project_id": project.id, "caller_id": caller_om.id, "caller_user_id": caller.id}

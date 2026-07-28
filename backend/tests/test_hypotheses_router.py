@@ -244,7 +244,11 @@ async def test_create_endpoint_service_error_maps_dict_detail(app_with_overrides
 async def test_get_endpoint_not_found_404(app_with_overrides):
     from httpx import ASGITransport, AsyncClient
     err = HypothesisServiceError("HYPOTHESIS_NOT_FOUND", "없음")
-    with patch.object(r.svc, "get_hypothesis", AsyncMock(side_effect=err)):
+    # #2237: get_hypothesis가 이제 svc.get_hypothesis 전에 _assert_hypothesis_project_access를
+    # 거친다(형제 update_hypothesis와 동일 SSOT) — 이 테스트는 mock_session이 실 쿼리를 못 받는
+    # 자리라(get_db override가 iter([...])라 session.execute까지 안 감) 그 가드도 함께 patch한다.
+    with patch.object(r, "_assert_hypothesis_project_access", AsyncMock(return_value=None)), \
+         patch.object(r.svc, "get_hypothesis", AsyncMock(side_effect=err)):
         async with AsyncClient(transport=ASGITransport(app=app_with_overrides), base_url="http://t") as c:
             resp = await c.get(f"/api/v2/hypotheses/{HYP_ID}")
     assert resp.status_code == 404

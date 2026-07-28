@@ -33,24 +33,12 @@
 # 받아들이게 하는 것만이 이 변경의 스코프. 실 리소스 생성(gcloud 실행)은 오르테가 DRY_RUN
 # 검수 통과 後 별도 승인 시점(이 PR에서 안 함).
 #
-# ⛔⛔ **dev 스택(`dev` 인자)은 2026-07-25 현재 «prod 패리티 검증 surface»가 아니다.**
-#     (story #2185 · 오르테가군 실측 — 방향 결정 전이라도 이 사실만은 먼저 선언한다)
-#
-#     여기서 초록이 나와도 **prod GCE 에 대해 아무것도 보장하지 않는다.** 근거:
-#     ```
-#     ① 경로에 없다   sprintable-frontend-dev 의 REALTIME_URL 은 이 GCE 가 아니라
-#                     Cloud Run `sprintable-realtime-dev` 를 가리킨다(라이브 실측).
-#     ② 트래픽이 없다 realtime-gateway-dev-backend GCLB 48시간 전수:
-#                     404 × 499(전부 인터넷 스캐너) · 200 × 1(우리 확認 트래픽)
-#     ③ ⭐코드가 낡았다  dev MIG 이미지 4efd483e(#2411, 07-22) vs prod 4d79fd98(#2457, 07-24).
-#                     **옛 코드를 검증하는 것은 검증이 아니다.**
-#     ```
-#     ⇒ *"GCE 에서 확認했다"* 를 이 dev 스택 결과로 말하면 **거짓 안심**이 된다. prod GCE
-#       고유 동작은 prod 승격 절차에서 직접 확認할 것.
-#
-#     이 선언이 무너지는 조건: dev MIG 가 develop HEAD 로 **자동** 유지되기 시작하면(수동
-#     배포 의존이 사라지면) 그때 다시 패리티 surface 가 된다 — 그 시점에 이 주석을 지울 것.
-#     ⚠️선언을 지우는 것까지가 그 작업의 일부다(story #2174 가드가 같은 규율을 강제한다).
+# ⭐story #2185(2026-07-27) — 위에 있던 「dev 는 패리티 surface 가 아니다」 선언이 무너지는
+#     조건이 이 PR 로 성립해 지운다: dev 프론트 REALTIME_URL 이 이미 이 GCE 를 가리키고(당시
+#     ①번, 라이브 실측 2026-07-27), cloudbuild.yaml `deploy-realtime-gce` 스텝(dev 전용 하드
+#     게이트)이 이 스크립트를 develop 푸시마다 자동 호출해 이미지가 더 이상 손 배포로 낡지
+#     않는다(당시 ③번). ⇒ dev MIG 는 이제 develop HEAD 커밋으로 자동 유지되고 실 브라우저
+#     트래픽도 이 경로를 타므로, dev 스택 결과를 prod 패리티 검증 근거로 다시 써도 된다.
 
 set -euo pipefail
 

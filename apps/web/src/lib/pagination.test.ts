@@ -1,5 +1,57 @@
-import { describe, expect, it } from 'vitest';
-import { buildCursorPageMeta, paginateInMemory, parseCursorPageInput } from './pagination';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildCursorPageMeta, paginateInMemory, parseCursorMeta, parseCursorPageInput } from './pagination';
+
+describe('parseCursorMeta (#2231 AC4 — 규약 A 하나만 전제, 규약 밖이면 조용히 삼키지 않는다)', () => {
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
+  it('camelCase(hasMore/nextCursor) — FE가 buildCursorPageMeta로 직접 지은 응답', () => {
+    const meta = parseCursorMeta({ limit: 20, hasMore: true, nextCursor: 'abc' }, 'test:camel');
+    expect(meta).toEqual({ limit: 20, hasMore: true, nextCursor: 'abc' });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('snake_case(has_more/next_cursor) — BE가 직접 내는 규약 A 응답(예: comments)', () => {
+    const meta = parseCursorMeta({ limit: 20, has_more: true, next_cursor: 'xyz' }, 'test:snake');
+    expect(meta).toEqual({ limit: 20, hasMore: true, nextCursor: 'xyz', has_more: true, next_cursor: 'xyz' });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('마지막 페이지(hasMore:false) — nextCursor는 문자열이 아니어도(null) 조용히 통과', () => {
+    const meta = parseCursorMeta({ limit: 20, has_more: false, next_cursor: null }, 'test:last-page');
+    expect(meta).toEqual({ limit: 20, hasMore: false, nextCursor: null, has_more: false, next_cursor: null });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('⛔양성대조 — meta가 아예 없으면(undefined) 조용히 hasMore:false로 낙하하지 않고 console.error로 드러낸다', () => {
+    const meta = parseCursorMeta(undefined, 'test:missing-meta');
+    expect(meta).toEqual({ limit: 0, hasMore: false, nextCursor: null });
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy.mock.calls[0]?.[0]).toContain('test:missing-meta');
+  });
+
+  it('⛔양성대조 — 오늘 실제로 걸린 자리(agent-runs 이중포장): meta가 이중포장된 전체 봉투이면(hasMore/has_more 둘 다 없음) 드러난다', () => {
+    // apiSuccess(await _r.json())가 BE의 {data,error,meta}를 통째로 다시 data에 얹으면
+    // 바깥 meta는 항상 null이다 — 이 경우를 재현.
+    const meta = parseCursorMeta(null, 'test:double-wrapped');
+    expect(meta.hasMore).toBe(false);
+    expect(meta.nextCursor).toBeNull();
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('규약 밖 형태(예: offset+limit 래퍼, 규약 C)도 드러난다', () => {
+    const meta = parseCursorMeta({ items: [], total: 5, offset: 0, limit: 20 }, 'test:convention-c');
+    expect(meta.hasMore).toBe(false);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('pagination helpers', () => {
   it('clamps limit and normalizes cursor input', () => {

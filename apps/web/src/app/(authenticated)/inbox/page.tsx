@@ -156,9 +156,13 @@ function AgentJoinedDetailPanel({
   );
 }
 
-async function fetchInboxNotifications(typeFilter: string) {
+// story #2195 — 기본(notifications) 탭이 서버 하드코딩 limit=50 + 커서 없음으로 51번째부터
+// 조용히 잘렸다. BE(#2538, 규약 A)가 이제 has_more/next_cursor를 body meta로 낸다 —
+// cursor를 실어 보내고 그 meta를 그대로 다음 요청에 이어 붙인다.
+async function fetchInboxNotifications(typeFilter: string, cursor?: string | null) {
   const params = new URLSearchParams();
   if (typeFilter) params.set('type', typeFilter);
+  if (cursor) params.set('cursor', cursor);
 
   const res = await fetch(`/api/notifications?${params}`);
   if (!res.ok) return null;
@@ -167,6 +171,8 @@ async function fetchInboxNotifications(typeFilter: string) {
   return {
     notifications: (json.data ?? []) as Notification[],
     unreadCount: (json.meta?.unreadCount ?? 0) as number,
+    hasMore: (json.meta?.hasMore ?? false) as boolean,
+    nextCursor: (json.meta?.nextCursor ?? null) as string | null,
   };
 }
 
@@ -174,6 +180,7 @@ export default function InboxPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const t = useTranslations('inbox');
+  const tCommon = useTranslations('common');
   const tCage = useTranslations('cage');
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const activeTab = searchParams.get('tab') ?? 'notifications';
@@ -192,17 +199,40 @@ export default function InboxPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // story #2195 — 사용자가 "더 보기"로 두 번째 페이지 이상을 이미 펼친 뒤, 15초 폴링
+  // 리프레시가 그 상태를 조용히 1페이지로 되돌리면 안 된다(펼친 걸 다시 접는 것으로 읽힌다).
+  // 더 보기를 누른 적이 있으면 그 뒤로는 자동 폴링을 건너뛴다.
+  const [pagedBeyondFirst, setPagedBeyondFirst] = useState(false);
   const [workflowExecs, setWorkflowExecs] = useState<WorkflowExecItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const { toasts, addToast, dismissToast } = useToast();
 
   const refreshNotifications = useCallback(async () => {
+    if (pagedBeyondFirst) return;
     const result = await fetchInboxNotifications('');
     if (!result) return;
 
     setNotifications(result.notifications);
     setUnreadCount(result.unreadCount);
-  }, []);
+    setHasMore(result.hasMore);
+    setNextCursor(result.nextCursor);
+  }, [pagedBeyondFirst]);
+
+  const loadMoreNotifications = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    const result = await fetchInboxNotifications('', nextCursor);
+    if (result) {
+      setNotifications((prev) => [...prev, ...result.notifications]);
+      setHasMore(result.hasMore);
+      setNextCursor(result.nextCursor);
+      setPagedBeyondFirst(true);
+    }
+    setLoadingMore(false);
+  }, [nextCursor, loadingMore]);
 
   useEffect(() => {
     let cancelled = false;
@@ -213,6 +243,8 @@ export default function InboxPage() {
       if (!cancelled && result) {
         setNotifications(result.notifications);
         setUnreadCount(result.unreadCount);
+        setHasMore(result.hasMore);
+        setNextCursor(result.nextCursor);
       }
       if (!cancelled) setLoading(false);
     }
@@ -412,7 +444,7 @@ export default function InboxPage() {
             {projectId ? (
               <AttentionQueueView projectId={projectId} memberId={currentTeamMemberId} />
             ) : (
-              <p className="text-xs text-muted-foreground">{t('loading')}</p>
+              <p className="text-xs text-muted-foreground">{tCommon('loading')}</p>
             )}
           </div>
         ) : activeTab === 'gates' ? (
@@ -574,6 +606,20 @@ export default function InboxPage() {
                 </div>
               ))
             )}
+            {/* story #2195 — hasMore가 참일 때만 노출(서버가 못 줄 때 서 있지 않게). */}
+            {!loading && hasMore ? (
+              <div className="px-3 py-3">
+                <Button
+                  variant="glass"
+                  size="sm"
+                  className="w-full"
+                  disabled={loadingMore}
+                  onClick={() => void loadMoreNotifications()}
+                >
+                  {tCommon('loadMore')}
+                </Button>
+              </div>
+            ) : null}
           </div>
         </div>
 

@@ -24,6 +24,7 @@ from app.services.gate_service import (
     derive_risk_grade,
     get_org_posture,
     hold_gate,
+    is_known_project_agnostic_work_item_type,
     resolve_work_item_project_id,
     transition_gate,
     unhold_gate,
@@ -213,6 +214,18 @@ async def create_gate_endpoint(
     project_id = await resolve_work_item_project_id(
         session, org_id, body.work_item_type, body.work_item_id,
     )
+    # #2237: resolve_work_item_project_id는 조회 전용(gate_service.py) — caller 접근권은 여기서
+    # 별도 강제해야 한다(형제 get_gate_endpoint와 동일 SSOT·동일 404 관례로 존재 비노출).
+    # ⛔project_id가 None인 이유를 가른다(오르테가 PO 판정, 2026-07-27 라이브 실측 발견) —
+    # 「project-무관 타입이라 None」과 「project-scoped 타입인데 해소 실패(타 org·부재)라 None」이
+    # 같은 값으로 뭉개져 있으면 후자가 검사를 skip해 버린다(실측: 타 org story로 gate 201 생성됨).
+    # fail-closed(②): 통과는 KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES(명시 allowlist)에 있을 때만 —
+    # PROJECT_SCOPED_WORK_ITEM_TYPES에도 그 목록에도 없는 미분류 타입은 기본값이 거부다.
+    if project_id is not None:
+        if not await has_project_access(session, uuid.UUID(_auth.user_id), project_id, org_id):
+            raise HTTPException(status_code=404, detail="Project not found")
+    elif not is_known_project_agnostic_work_item_type(body.work_item_type):
+        raise HTTPException(status_code=404, detail="Project not found")
     gate = await create_gate(
         session=session,
         org_id=org_id,
@@ -718,9 +731,15 @@ async def get_gate_endpoint(
     project_id = await resolve_work_item_project_id(
         session, org_id, gate.work_item_type, gate.work_item_id,
     )
-    if project_id is not None and not await has_project_access(
-        session, uuid.UUID(auth.user_id), project_id, org_id
-    ):
+    # #2237: project_id가 None인 이유를 가른다(오르테가 PO 판정, 2026-07-27) — 「project-무관
+    # 타입이라 None」과 「project-scoped 타입인데 해소 실패(work_item이 이 org에 없음)라 None」이
+    # 같은 값으로 뭉개져 있으면 후자가 검사를 skip해 버린다. gate.work_item_id가 org_id 스코프
+    # 안에서 해소 안 되는 것은 이 gate 자체가 가리키는 대상이 이 org에 없다는 뜻이라 거부.
+    # fail-closed(②): 통과는 KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES 명시 allowlist에 있을 때만.
+    if project_id is not None:
+        if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+            raise HTTPException(status_code=404, detail="Gate not found")
+    elif not is_known_project_agnostic_work_item_type(gate.work_item_type):
         raise HTTPException(status_code=404, detail="Gate not found")
 
     resp = GateResponse.model_validate(gate)

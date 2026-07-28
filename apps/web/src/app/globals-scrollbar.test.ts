@@ -66,6 +66,32 @@ describe('문서 코드블럭이 실제로 "굴러갈 수 있다" — .ProseMirr
     // selector 문자열 자체에 prose(p)나 blockquote·table 태그가 안 섞여 있어야 한다.
     expect(css).not.toMatch(/\.ProseMirror \.scrollbar-visible[^{]*[,\s](p|blockquote|table)[,\s{]/);
   });
+
+  // story #2229(라이브 실측, 2026-07-27) — #2214가 편집기 뷰(실 ProseMirror 런타임)에서
+  // 절반만 먹혔다. 이 규칙이 @layer base **안**에 있었기 때문 — prosemirror-view가 런타임에
+  // 주입하는 `.ProseMirror pre { white-space: pre-wrap }`은 레포 어디에도 소스가 없는(런타임
+  // <style> 직접 주입) **레이어 밖(unlayered)** 규칙이라, CSS Cascade Layers 스펙상 특이도와
+  // 무관하게 레이어 안 규칙을 항상 이긴다. #2203(.tableWrapper)이 같은 @layer base 안에서도
+  // 먹혔던 건 그저 경쟁 규칙이 없었기 때문일 뿐 — "레이어 안에서도 이긴다"는 증거가 아니었다.
+  // ⛔이 테스트는 "CSS 문자열이 있는가"만 볼 수 있고 "실제로 이겼는가"(computed style)는
+  // jsdom이 CSS 레이아웃을 안 돌려 원리적으로 못 잡는다 — 그 축은 라이브/실브라우저 렌더로만
+  // 확인 가능(#2229에서 정적 HTML 재현으로 검증 완료, 라이브 배포 확認은 별도).
+  it('⛔.ProseMirror .scrollbar-visible 규칙은 @layer base 안에 있지 않다(레이어 밖이어야 라이브러리 런타임 주입 스타일을 이긴다)', () => {
+    const layerBaseStart = css.indexOf('@layer base {');
+    expect(layerBaseStart).toBeGreaterThan(-1);
+    let depth = 0;
+    let layerBaseEnd = -1;
+    for (let i = layerBaseStart; i < css.length; i++) {
+      if (css[i] === '{') depth++;
+      if (css[i] === '}') {
+        depth--;
+        if (depth === 0) { layerBaseEnd = i; break; }
+      }
+    }
+    expect(layerBaseEnd).toBeGreaterThan(-1);
+    const layerBaseBlock = css.slice(layerBaseStart, layerBaseEnd);
+    expect(layerBaseBlock).not.toContain('.ProseMirror .scrollbar-visible');
+  });
 });
 
 describe('실제 스크롤 요소(shiki가 만드는 <pre> 자신)에도 scrollbar-visible 예외가 있다 (#2214 후속, 라이브 실측 발견)', () => {

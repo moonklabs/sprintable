@@ -120,8 +120,12 @@ async def test_list_notifications_200():
                 resp = await c.get(f"/api/v2/notifications?user_id={MEMBER_ID}")
 
         assert resp.status_code == 200
-        assert len(resp.json()) == 1
-        assert resp.json()[0]["is_read"] is False
+        body = resp.json()
+        assert len(body["data"]) == 1
+        assert body["data"][0]["is_read"] is False
+        # story #2195: #2231 정본 규약 A — body meta 로 has_more/next_cursor 를 낸다.
+        assert body["meta"]["has_more"] is False
+        assert body["meta"]["next_cursor"] is None
     finally:
         app.dependency_overrides.clear()
 
@@ -137,7 +141,7 @@ async def test_list_notifications_is_read_filter_200():
                 resp = await c.get(f"/api/v2/notifications?user_id={MEMBER_ID}&is_read=true")
 
         assert resp.status_code == 200
-        assert resp.json() == []
+        assert resp.json()["data"] == []
     finally:
         app.dependency_overrides.clear()
 

@@ -124,20 +124,25 @@ async def test_generic_gate_endpoint_threads_resolved_project_id():
         work_item_id=work_item_id, work_item_type="story", gate_type="merge",
         member_id=uuid.uuid4(), role_id=uuid.uuid4(),
     )
+    # #2237: create_gate_endpoint가 project_id 해소 後 caller 접근권을 강제하게 됐다 — 이 테스트는
+    # threading(①resolve→②create로 넘김) 자체만 검증하므로 has_project_access는 True로 통과시킨다.
+    auth = SimpleNamespace(user_id=str(uuid.uuid4()))
 
     with patch.object(gates_mod, "resolve_work_item_project_id",
                        AsyncMock(return_value=project_id)) as resolve_spy, \
+         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "create_gate", AsyncMock(return_value=gate)) as create_spy, \
          patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
-        await create_gate_endpoint(body=body, session=session, org_id=org_id, _auth=SimpleNamespace())
+        await create_gate_endpoint(body=body, session=session, org_id=org_id, _auth=auth)
 
     resolve_spy.assert_awaited_once_with(session, org_id, "story", work_item_id)
     assert create_spy.await_args.kwargs["project_id"] == project_id
 
 
 @pytest.mark.anyio
-async def test_generic_gate_endpoint_unresolvable_type_passes_none():
-    """미인식 work_item_type이면 project_id=None 그대로 넘어간다(크래시 아님 — best-effort)."""
+async def test_generic_gate_endpoint_known_agnostic_type_passes_none():
+    """#2237(②): KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES 명시 allowlist(예: wf_line_version)에
+    있는 타입만 project_id=None 그대로 통과한다(진짜 project-무관 타입 — 크래시 아님)."""
     from app.routers import gates as gates_mod
     from app.routers.gates import GateCreateRequest, create_gate_endpoint
 
@@ -146,7 +151,7 @@ async def test_generic_gate_endpoint_unresolvable_type_passes_none():
     session.commit = AsyncMock()
     gate = SimpleNamespace(id=uuid.uuid4(), status="pending")
     body = GateCreateRequest(
-        work_item_id=work_item_id, work_item_type="mystery_type", gate_type="qa",
+        work_item_id=work_item_id, work_item_type="wf_line_version", gate_type="qa",
         member_id=uuid.uuid4(), role_id=uuid.uuid4(),
     )
 
@@ -157,6 +162,31 @@ async def test_generic_gate_endpoint_unresolvable_type_passes_none():
         await create_gate_endpoint(body=body, session=session, org_id=org_id, _auth=SimpleNamespace())
 
     assert create_spy.await_args.kwargs["project_id"] is None
+
+
+@pytest.mark.anyio
+async def test_generic_gate_endpoint_unclassified_type_rejected_fail_closed():
+    """#2237(②, fail-closed 전환): PROJECT_SCOPED_WORK_ITEM_TYPES에도
+    KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES에도 없는 미분류 타입은 이제 기본값이 거부다(과거엔
+    통과였다 — 새 work_item_type이 조용히 다시 뚫리는 재발 클래스를 막는다)."""
+    from fastapi import HTTPException
+    from app.routers import gates as gates_mod
+    from app.routers.gates import GateCreateRequest, create_gate_endpoint
+
+    org_id, work_item_id = uuid.uuid4(), uuid.uuid4()
+    session = AsyncMock()
+    body = GateCreateRequest(
+        work_item_id=work_item_id, work_item_type="mystery_type", gate_type="qa",
+        member_id=uuid.uuid4(), role_id=uuid.uuid4(),
+    )
+
+    with patch.object(gates_mod, "resolve_work_item_project_id", AsyncMock(return_value=None)):
+        with pytest.raises(HTTPException) as ei:
+            await create_gate_endpoint(
+                body=body, session=session, org_id=org_id,
+                _auth=SimpleNamespace(user_id=str(uuid.uuid4())),
+            )
+    assert ei.value.status_code == 404
 
 
 # ── merge_verdict_gate.py evaluate_merge_gate ────────────────────────────────
