@@ -1106,7 +1106,12 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   </div>
                 </div>
               ) : story.description ? (
-                <div className="mt-2 cursor-pointer" onClick={() => setEditingDescription(true)}>
+                // 긴급 정정(2026-07-28, PO 검수·#2275) — 본문 전체에 클릭=편집모드 onClick이
+                // 걸려 있으면 안의 링크 등 대화형 요소가 stopPropagation을 각각 붙여야만
+                // 살아남는 구조라 위험하다(#2566은 링크 하나만 증상 패치). 상호작용 규약을
+                // 아예 「편집 진입은 위 ✎ 수정 버튼으로만」으로 좁혀 원천 차단한다 — 본문
+                // 안의 무엇을 눌러도 편집모드가 끼어들 수 없다.
+                <div className="mt-2">
                   <DescriptionViewer description={story.description} />
                 </div>
               ) : (
@@ -1153,7 +1158,8 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   </div>
                 </div>
               ) : story.acceptance_criteria ? (
-                <div className="mt-2 cursor-pointer" onClick={() => setEditingAC(true)}>
+                // #2275 — description과 동일 처방: 편집 진입은 위 ✎ 수정 버튼으로만.
+                <div className="mt-2">
                   <DescriptionViewer description={story.acceptance_criteria} />
                 </div>
               ) : (
