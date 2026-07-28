@@ -705,10 +705,22 @@ async def test_pagination_has_more_false_and_no_next_cursor_when_all_fit_one_pag
         await engine.dispose()
 
 
-# ─── (e) soft-deleted / 미존재 source 제외 ──────────────────────────────────────
+# ─── (e) soft-deleted source doc — story #2299 재판정: 빼지 말고 still_exists=false로 표시 ──
 
 
-async def test_soft_deleted_source_doc_excluded():
+async def test_soft_deleted_source_doc_stays_marked_broken_not_excluded():
+    """⭐PO 재판정(2026-07-29, story #2299): 이 테스트의 원래 이름은
+    `test_soft_deleted_source_doc_excluded`였고 "삭제된 source는 결과에서 빠진다"를 정답으로
+    고정하고 있었다 — PO가 그 자체를 「조용히 사라지는 것」버그로 재분류했다(#2591이 증명한
+    "still_exists는 있는데 내주는 길이 없다"의 배선 완료판). 이제는 반대를 고정한다: 행은
+    남고(①) `still_exists`가 정확히 갈린다(②양성대조 — 같은 응답에 살아있는 것과 죽은 것이
+    같이 있고, 살아있는 쪽엔 「끊어짐」 표기가 없다=still_exists true).
+
+    ⛔③대체 선언: 라이브로 실 `DELETE /api/v2/docs/{id}`를 호출하지 않는다 — 그 엔드포인트도
+    story 삭제(오르테가군이 오늘 직접 밟은 403)와 동형으로 휴먼 전용이다(`docs.py` delete_doc
+    `deleter.type != "human"` → 403, 에이전트 API키 차단). 그래서 여기선 realdb에 `Doc.deleted_
+    at`를 직접 심어(soft-delete 상태를 만들어) 대체한다 — 라이브 시도가 막혀서가 아니라
+    애초에 이 caller(에이전트)로는 시도 자체가 불가능하다는 뜻."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -733,8 +745,13 @@ async def test_soft_deleted_source_doc_excluded():
             resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
             assert resp.status_code == 200, resp.text
             body = resp.json()
+            # ①행 잔존 — 둘 다 결과에 있다(하나가 빠지면 그게 「조용히 사라지는 것」).
             ids = {item["source_id"] for item in body["data"]}
-            assert ids == {str(live_source.id)}, body
+            assert ids == {str(deleted_source.id), str(live_source.id)}, body
+            # ②양성대조 — 같은 응답 안에서 갈린다(전부 True/False면 판별력 0).
+            still_exists_by_id = {item["source_id"]: item["still_exists"] for item in body["data"]}
+            assert still_exists_by_id[str(deleted_source.id)] is False
+            assert still_exists_by_id[str(live_source.id)] is True
         finally:
             await client.aclose()
     finally:
