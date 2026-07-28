@@ -72,7 +72,7 @@ from app.models.role_template import RoleTemplate
 # workflow_line·workflow_template·workflow_trigger_type)는 등재 시 destructive_schema
 # 테스트(101개 파일 × 파일당 create_all/drop_all) 총소요가 CI 예산(25분, 기준선 16~17분)을
 # 넘겨 별도 스토리로 분리 — "[인프라·CI] 모델 하나 늘 때마다 CI가 몇 분씩 느려진다 — 집합
-# 모듈 누락 10건을 «등재할 수 없는» 상태다"(id 69d7380e-9567-47ed-9194-d9784cbf637a).
+# 모듈 누락 10건을 «등재할 수 없는» 상태다"(#2255).
 # "등재를 미루는 것"이 아니라 "파일마다 전체 스키마를 create_all/drop_all하는 구조 자체를
 # 먼저 손보는 것"이 그 스토리의 실제 과제.
 from app.models.trust_snapshot import OrgMemberTrustSnapshot
