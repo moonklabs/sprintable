@@ -72,15 +72,24 @@ def test_escape_mention_title_collapses_newlines_to_single_space():
 
 # ── MentionRef schema validation ──────────────────────────────────────────────
 def test_mention_ref_rejects_invalid_type():
-    """type이 doc/story/epic 외 값이면 Pydantic 스키마 레벨에서 거부(AC1) — 핸들러 코드
-    진입 전 차단."""
+    """type이 허용 목록 외 값이면 Pydantic 스키마 레벨에서 거부(AC1) — 핸들러 코드 진입
+    전 차단. `goal`은 절대 안 열리는 값(epic과 물리적으로 같은 테이블)이라 진짜 "미등록"
+    예시로 안전하다."""
     with pytest.raises(ValidationError):
-        MentionRef(type="task", id="t-1")
+        MentionRef(type="goal", id="t-1")
 
 
 def test_send_chat_input_rejects_invalid_mention_type():
     with pytest.raises(ValidationError):
-        SendChatInput(thread_id="conv-1", content="hi", mentions=[{"type": "task", "id": "t-1"}])
+        SendChatInput(thread_id="conv-1", content="hi", mentions=[{"type": "goal", "id": "t-1"}])
+
+
+def test_mention_ref_rejects_evidence_type_intentional_gap():
+    """`evidence`는 백엔드 ENTITY_RESOLVERS엔 있지만(#2294 B단계) MCP mentions Literal엔
+    없다 — GET /api/v2/evidence/{id} 단건조회 라우트가 없어서다(의도적 gap,
+    `_MENTION_ENDPOINT_KNOWN_GAP` 참조). 그 gap이 스키마 레벨에서 실제로 거부로 이어지는지."""
+    with pytest.raises(ValidationError):
+        MentionRef(type="evidence", id="ev-1")
 
 
 def test_mention_ref_accepts_doc_type():
@@ -98,14 +107,46 @@ def test_mention_ref_accepts_epic_type():
     assert m.type == "epic"
 
 
+def test_mention_ref_accepts_task_type():
+    m = MentionRef(type="task", id="t-1", title="My Task")
+    assert m.type == "task"
+
+
+def test_mention_ref_accepts_sprint_type():
+    m = MentionRef(type="sprint", id="sp-1", title="Sprint 12")
+    assert m.type == "sprint"
+
+
+def test_mention_ref_accepts_artifact_type():
+    m = MentionRef(type="artifact", id="a-1", title="My Artifact")
+    assert m.type == "artifact"
+
+
+def test_mention_ref_accepts_hypothesis_type():
+    m = MentionRef(type="hypothesis", id="h-1", title="My Hypothesis")
+    assert m.type == "hypothesis"
+
+
+# story #2294 B단계(2026-07-29): evidence는 백엔드 registry에 있지만 GET /{id} 단건조회
+# 라우트가 없어(list만 있음) MCP mentions에서 의도적으로 뺀다 — 조용히 빠진 것과 일부러
+# 뺀 것은 처방이 다르므로 이유를 명시 등재한다(infra/mcp-path-contract-allowlist.yml의
+# "알고 있다"는 선언 관례와 동형).
+_MENTION_ENDPOINT_KNOWN_GAP: frozenset[str] = frozenset({"evidence"})
+
+
 def test_mention_entity_endpoints_match_backend_entity_resolvers():
     """`_MENTION_ENTITY_ENDPOINTS`(MCP 쪽 type→GET endpoint 매핑)가 백엔드
     `reference_registry.ENTITY_RESOLVERS`(존재판정 registry, #2259/#2266/#2283이 계속 SSOT로
-    써 온 것)와 같은 타입 집합인지 고정 — 한쪽만 늘면(예: 백엔드에 새 target_type 등록,
-    MCP mentions는 안 넓힘) agent 경로만 뒤처지는 형제 비대칭이 조용히 생긴다."""
+    써 온 것)와 같은 타입 집합인지 고정(알려진 gap `_MENTION_ENDPOINT_KNOWN_GAP` 제외) —
+    한쪽만 늘면(예: 백엔드에 새 target_type 등록, MCP mentions는 안 넓힘) agent 경로만
+    뒤처지는 형제 비대칭이 조용히 생긴다. ⛔story #2294에서 이 테스트가 실제로 RED였다
+    (task가 백엔드에만 열리고 여기 안 넓혀진 채 develop에 머지됨 — merge-order 드리프트)."""
     from app.services.reference_registry import ENTITY_RESOLVERS
 
-    assert set(chat_mod._MENTION_ENTITY_ENDPOINTS) == set(ENTITY_RESOLVERS)
+    assert set(chat_mod._MENTION_ENTITY_ENDPOINTS) == set(ENTITY_RESOLVERS) - _MENTION_ENDPOINT_KNOWN_GAP
+    # gap 자체가 정말 gap인지도 고정 — evidence가 실수로 뚫려도(둘 다에 존재) 이 assert가 잡는다.
+    assert _MENTION_ENDPOINT_KNOWN_GAP <= set(ENTITY_RESOLVERS)
+    assert _MENTION_ENDPOINT_KNOWN_GAP.isdisjoint(chat_mod._MENTION_ENTITY_ENDPOINTS)
 
 
 # ── send_chat_message: token synthesis (title given) ─────────────────────────

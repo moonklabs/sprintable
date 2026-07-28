@@ -215,9 +215,10 @@ async def test_create_reference_rejects_unregistered_target_type():
         try:
             resp = await client.post("/api/v2/references", json={
                 "source_type": "chat_message", "source_id": str(msg.id),
-                # ⛔story #2294(2026-07-28)부터 task가 ENTITY_RESOLVERS에 등록됐다(twin-system
-                # drift 경보 — 이 값을 바꾼 이유). 여전히 미등록인 타입으로 교체.
-                "target_type": "sprint", "target_id": str(uuid.uuid4()),
+                # ⛔story #2294(2026-07-28)부터 task가, B단계(2026-07-29)부터 sprint도
+                # ENTITY_RESOLVERS에 등록됐다(twin-system drift 경보 — 이 값을 바꾼 이유).
+                # goal은 epic과 같은 테이블이라 앞으로도 절대 안 열리는 안전한 예시.
+                "target_type": "goal", "target_id": str(uuid.uuid4()),
             })
             assert resp.status_code == 400, resp.text
         finally:

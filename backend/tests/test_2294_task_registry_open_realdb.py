@@ -398,8 +398,10 @@ async def test_send_message_with_task_mention_stores_and_reports_via_sideband():
 
 @pytest.mark.anyio
 async def test_send_message_with_unregistered_type_mention_reports_dropped(caplog):
-    """등록 안 된 타입(sprint — #2294 이후에도 여전히 안 연다) 토큰은 조용히 사라지지
-    않고 references.dropped에 실려 온다 + 경고 로그가 발화한다."""
+    """등록 안 된 타입(goal — epic과 같은 테이블이라 앞으로도 절대 안 연다) 토큰은 조용히
+    사라지지 않고 references.dropped에 실려 온다 + 경고 로그가 발화한다.
+    ⛔`sprint`는 #2294 B단계(2026-07-29)부터 ENTITY_RESOLVERS에 등록됐다(twin-system
+    drift 경보 — 이 값을 goal로 바꾼 이유)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -412,18 +414,18 @@ async def test_send_message_with_unregistered_type_mention_reports_dropped(caplo
 
         await _setup_app_human(app, Session, user_id, org.id)
         client = _client_for(app)
-        fake_sprint_id = uuid.uuid4()
+        fake_goal_id = uuid.uuid4()
         try:
             with caplog.at_level(logging.WARNING, logger="app.services.mention_parser"):
                 resp = await client.post(
                     f"/api/v2/conversations/{conv_id}/messages",
-                    json={"content": f"[Sprint 12](entity:sprint:{fake_sprint_id})"},
+                    json={"content": f"[Goal X](entity:goal:{fake_goal_id})"},
                 )
             assert resp.status_code == 201, resp.text
             body = resp.json()
             assert body["references"]["stored"] == 0
             assert body["references"]["dropped"] == [
-                {"target_type": "sprint", "target_id": str(fake_sprint_id)}
+                {"target_type": "goal", "target_id": str(fake_goal_id)}
             ]
         finally:
             await client.aclose()
@@ -596,7 +598,7 @@ async def test_dropped_logging_red_green_mutation_self_check():
         try:
             result = await mp.insert_chat_mentions(
                 None, org_id=uuid.uuid4(), message_id=uuid.uuid4(),
-                content=f"[X](entity:sprint:{uuid.uuid4()})", created_by=uuid.uuid4(),
+                content=f"[X](entity:goal:{uuid.uuid4()})", created_by=uuid.uuid4(),
             )
             assert result.dropped, "사보타주가 안 먹었다 — dropped 자체가 비었다"
             assert not any("dropped" in m for m in records), "사보타주됐는데 로그가 그대로 남았다(RED 실패)"
@@ -615,7 +617,7 @@ async def test_dropped_logging_red_green_mutation_self_check():
     try:
         result2 = await mp.insert_chat_mentions(
             None, org_id=uuid.uuid4(), message_id=uuid.uuid4(),
-            content=f"[X](entity:sprint:{uuid.uuid4()})", created_by=uuid.uuid4(),
+            content=f"[X](entity:goal:{uuid.uuid4()})", created_by=uuid.uuid4(),
         )
         assert result2.dropped
         assert any("dropped" in m and "unregistered target_type" in m for m in records2), (
