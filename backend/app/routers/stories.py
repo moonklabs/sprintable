@@ -1491,21 +1491,42 @@ async def add_comment(
 
 # ─── Activities ───────────────────────────────────────────────────────────────
 
-@router.get("/{id}/activities", response_model=list[ActivityResponse])
+@router.get("/{id}/activities")
 async def list_activities(
     id: uuid.UUID,
     limit: int = Query(default=20, le=100),
+    cursor: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
-) -> list[ActivityResponse]:
+) -> dict:
+    """story #2247: FE(story-detail-panel.tsx)의 「더보기」가 이미 완결돼 기다리고 있었는데
+    이 엔드포인트에 cursor 자체가 없어 원천적으로 도달 불가였다(#2231 표 CAPPED-NO-NEXT-PAGE).
+    #2231 정본 규약 A(limit+1 오버페치 + has_more/next_cursor body meta, 참조 구현:
+    stories.py::list_comments — #2230에서 이미 같은 처방을 받은 형제 엔드포인트)로 도달 가능하게 한다.
+    """
     # SEC(story #2206) — list_comments(1339)와 동형 갭·동형 처방. 자세한 사유는 그쪽 주석 참조.
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
     await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
-    q = select(StoryActivity).where(
-        StoryActivity.story_id == id,
-    ).order_by(StoryActivity.created_at.desc()).limit(limit)
+    q = select(StoryActivity).where(StoryActivity.story_id == id)
+    # #2540 CI 교훈(오르테가군): "값이 있는지"만 보면 안 되고 "그 값이 문자열인지"까지 봐야
+    # 한다 — 이 함수를 FastAPI DI 없이 직접 호출하며 cursor= 를 누락하면 파이썬 기본값인
+    # Query(...) 센티넬 객체(truthy) 가 그대로 들어온다. 문자열이 아니면 커서 없음으로 취급.
+    if isinstance(cursor, str) and cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor format")
+        q = q.where(StoryActivity.created_at < cursor_dt)
+    q = q.order_by(StoryActivity.created_at.desc()).limit(limit + 1)
     result = await db.execute(q)
-    return [ActivityResponse.model_validate(r) for r in result.scalars()]
+    rows = list(result.scalars())
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    next_cursor = page[-1].created_at.isoformat() if has_more and page else None
+    return {
+        "data": [ActivityResponse.model_validate(r) for r in page],
+        "meta": {"has_more": has_more, "next_cursor": next_cursor},
+    }
