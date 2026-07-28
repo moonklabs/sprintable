@@ -51,7 +51,9 @@ _CORE = "core"  # ping/notifications-check 등 기본 — 항상 허용
 # (workflow_guide·team_members·poll_events)을 여기 포함 — picker 가 core(always-on)로 표시하는데
 # enforcement 가 explicit scope 에서 거부하던 비정합 해소. read 유틸은 비파괴라 always-allow 안전.
 _ALWAYS_ALLOWED: frozenset[str] = frozenset({
-    "ping", "sprintable_ping", "sprintable_my_dashboard", "sprintable_check_notifications",
+    # story #2304: "sprintable_ping"은 실재하지 않는 유령 이름이라 걷는다 — 이 목록에 둘 다
+    # 적어 두는 "우연한 방패"는 다음 이름축 불일치도 조용히 지나가게 한다.
+    "ping", "sprintable_my_dashboard", "sprintable_check_notifications",
     "sprintable_get_workflow_guide", "sprintable_list_team_members", "sprintable_poll_events",
     # P1-S12: get_workflow_guide 동형(read-only·에이전트 on-demand pull) — 항상 허용.
     "sprintable_get_loop_context",
@@ -289,7 +291,10 @@ def resolve_manifest(scope: list[str] | None, all_tool_names: list[str]) -> dict
 # ⚠️ backend 는 sprintable_mcp 를 import 하지 않으므로(디탱글) 이 목록이 backend-owned SSOT.
 #    도구 추가/삭제 시 여기 동기화(테스트가 그룹 커버리지·core/admin 정합 검증).
 ALL_TOOL_NAMES: tuple[str, ...] = (
-    "sprintable_ping",
+    # story #2304: 실등록명은 "ping"이다(server.py:311 `@mcp.tool()` 데코레이터, `_TOOL_DEFS`
+    # 밖에서 단독등록 — sprintable_mcp/tests/test_e2e_dev.py 등 다수 테스트·라이브 MCP client가
+    # 이미 이 이름으로 실호출한다). "sprintable_ping"은 이 목록에만 존재하던 유령 이름이었다.
+    "ping",
     "sprintable_activate_sprint", "sprintable_add_epic", "sprintable_add_goal",
     "sprintable_add_retro_action",
     "sprintable_add_retro_item", "sprintable_add_story", "sprintable_add_task",
@@ -386,7 +391,10 @@ def build_toolset_catalog() -> dict:
     - is_core = core(항상허용 잠금 그룹). is_destructive = admin(위험 작업 격리·opt-in).
     - 순서: core → 비파괴 15그룹(_CATALOG_DISPLAY_ORDER) → admin(파괴적) 마지막.
     """
-    always = {t for t in _ALWAYS_ALLOWED if t.startswith("sprintable_")}
+    # story #2304: 예전엔 "sprintable_" 접두사로 필터했는데, 그 필터의 유일한 실효과가
+    # "ping"(비접두사, 실등록명)을 core 그룹에서 조용히 빼는 것이었다 — _ALWAYS_ALLOWED가
+    # 이제 정확한 이름만 담으므로 필터 없이 그대로 쓴다.
+    always = set(_ALWAYS_ALLOWED)
     buckets: dict[str, list[str]] = {}
     for t in ALL_TOOL_NAMES:
         if t in always:
