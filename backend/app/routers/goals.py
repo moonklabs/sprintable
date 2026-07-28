@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.repositories.goal import GoalRepository
-from app.schemas.goal import GoalCreate, GoalProgressResponse, GoalResponse, GoalUpdate
+from app.schemas.goal import GoalCreate, GoalProgressResponse, GoalResponse, GoalUpdate, GoalWithGlanceResponse
 from app.services.project_auth import has_project_access
 
 router = APIRouter(tags=["goals", "Work"])
@@ -28,7 +29,7 @@ def _get_repo(
     return GoalRepository(session, org_id)
 
 
-@router.get("", response_model=list[GoalResponse])
+@router.get("", response_model=None)
 async def list_goals(
     response: Response,
     project_id: uuid.UUID | None = Query(default=None),
@@ -36,17 +37,27 @@ async def list_goals(
     limit: int | None = Query(default=None, ge=1, le=2000),
     cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
     order_by: str = Query(default="created_at"),
+    include: str | None = Query(
+        default=None,
+        description='"glance"면 participant_ids/focal_story가 추가로 붙는다(story #2298, 옵트인).',
+    ),
     repo: GoalRepository = Depends(_get_repo),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
-) -> list[GoalResponse]:
+) -> list[GoalResponse] | JSONResponse:
     """목표 목록 — true cursor 페이지네이션 + 전체 카운트(X-Total-Count 헤더).
 
     1000+ 목표가 조용히 잘리던 문제(#1200/569f5316)를 근절: limit/cursor로 위임
     페이지네이션하고, 페이지와 무관한 전체 개수를 X-Total-Count로 노출한다.
     limit 미지정 시 기존 동작(최대 1000)과 호환되며, 1000+ 인 경우에도 헤더로
     잘림 여부를 호출자가 인지할 수 있어 silent-truncation이 아니다.
-    """
+
+    ⛔story #2298(3단 웨이터폴 근절, 오르테가 계약 2026-07-29): `include=glance`는 순수
+    옵트인이다 — 파라미터가 없으면 이 함수는 기존과 완전히 같은 코드 경로(`response_model`을
+    `None`으로 바꾼 것은 두 응답 모델을 라우터가 직접 분기하기 위함일 뿐, 미지정 시 반환값은
+    이전과 byte-identical — `test_2298_goals_glance_include_realdb.py`가 그걸 고정한다).
+    `GoalResponse`에 optional 필드를 얹지 않고 별도 `GoalWithGlanceResponse`로 가른 이유도
+    같다(같은 모델에 얹으면 기본값이라도 JSON에 항상 찍혀 계약이 깨진다)."""
     # ratchet round8(잔여 HIGH): project_id 필터(지정 시)에 caller 접근권 검증이 없어
     # same-org cross-project goal(제목/목표/전략의도)이 노출됐다 — resource-actual
     # project_id 직접검증. EE 훅 없음(이 엔드포인트는 EE RBAC 미적용 확認).
@@ -73,12 +84,29 @@ async def list_goals(
     goals, total = await repo.list_paginated(
         limit=limit, cursor=cursor_dt, order_by=order_by, **filters
     )
-    response.headers["X-Total-Count"] = str(total)
-    # order_by="position"(옵트인 로드맵 조타 정렬, wedge #2)은 복합 정렬이라 created_at cursor로
-    # 이어붙일 수 없다 — 이 모드에서는 X-Next-Cursor 미노출(호출자가 이어달리기 시도 안 하도록).
+
+    if include != "glance":
+        response.headers["X-Total-Count"] = str(total)
+        # order_by="position"(옵트인 로드맵 조타 정렬, wedge #2)은 복합 정렬이라 created_at
+        # cursor로 이어붙일 수 없다 — 이 모드에서는 X-Next-Cursor 미노출(호출자가 이어달리기
+        # 시도 안 하도록).
+        if goals and order_by != "position":
+            response.headers["X-Next-Cursor"] = goals[-1].created_at.isoformat()
+        return [GoalResponse.model_validate(e) for e in goals]
+
+    # ⛔직접 Response를 반환하면 위 `response: Response` 의존성에 건 헤더는 FastAPI가 안
+    # 적용한다(반환한 Response 객체가 그대로 나간다) — 여기 JSONResponse에 같은 헤더를
+    # 다시 건다.
+    await repo.attach_glance_aggregates(goals)
+    glance_response = JSONResponse(
+        content=[
+            GoalWithGlanceResponse.model_validate(e).model_dump(mode="json") for e in goals
+        ]
+    )
+    glance_response.headers["X-Total-Count"] = str(total)
     if goals and order_by != "position":
-        response.headers["X-Next-Cursor"] = goals[-1].created_at.isoformat()
-    return [GoalResponse.model_validate(e) for e in goals]
+        glance_response.headers["X-Next-Cursor"] = goals[-1].created_at.isoformat()
+    return glance_response
 
 
 def _resolve_outcome_status(metric_definition: object, measure_after: object, current_status: str = "n_a") -> str:
