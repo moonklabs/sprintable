@@ -57,7 +57,22 @@ import subprocess
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+def _find_repo_root(start: Path) -> Path:
+    """story #2305 AC5 — '../' 개수를 세지 않고 표식 디렉터리(.git)를 찾아 올라간다.
+    이 파일이 옮겨져도(디렉터리 깊이가 바뀌어도) 조용히 엉뚱한 경로를 안 가리킨다.
+    ⛔못 찾으면 조용히 넘기지 않고 즉시 실패한다(재료를 못 찾은 가드가 skip으로 통과하면
+    안 된다는 원칙 — 2026-07-28 #2600 실사고 교훈)."""
+    cur = start.resolve()
+    for _ in range(20):
+        if (cur / ".git").exists():
+            return cur
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+    raise RuntimeError(f"repo root(.git 표식)를 {start} 위로 못 찾음 — 잘못된 위치에서 실행됐을 가능성")
+
+
+_REPO_ROOT = _find_repo_root(Path(__file__).resolve().parent)
 _REGION = "asia-northeast3"
 _ALLOWLIST_PATH = _REPO_ROOT / "infra" / "manual-env-allowlist.yml"
 
@@ -104,6 +119,13 @@ def _load_settings_exempt() -> dict[str, str]:
 # 전 서비스 공통으로 파싱해 합집합에 넣는다(어느 스텝이 어느 서비스를 겨냥하는지까지 세밀하게
 # 가르지 않음 — v1은 "이 repo의 IaC 전체에 이 키가 한 번이라도 선언된 적 있는가"로 판정).
 # 여기 없는 서비스가 gcloud 열거에 나타나면 FAIL로 잡는다(매핑 자체가 최신인지 강제).
+#
+# ⭐story #2305 — 이 dict의 key 집합(7개)이 서비스명의 **SSOT(마스터)**다. AC1 확定 근거:
+# `sprintable-realtime-prod`는 cloudbuild.yaml에 실선언이 아니라 **주석 문장에만** 등장한다
+# (deploy-realtime 스텝이 prod에서 아직 스킵 중 — 2026-07-29 직접 확認, grep이 주석을 매칭한
+# 오탐이 아님을 실코드로 재확認). `_SETTINGS_CONSUMING_SERVICES`·`_SERVICE_DRY_RUN_MAP`·
+# `_WEB_CODE_SERVICES`는 전부 이 마스터의 **부분집합**이어야 한다(서로 같을 필요는 없다 —
+# 각자 다른 목적의 의도적 서브셋). `_service_subset_wellformed_violations()`가 이걸 강제한다.
 _SERVICE_SCRIPT_MAP: dict[str, list[str]] = {
     "sprintable-backend-dev": ["backend/scripts/deploy_backend.sh"],
     "sprintable-backend-prod": ["backend/scripts/deploy_backend.sh"],
@@ -293,6 +315,78 @@ _WEB_ENV_IGNORE = {"NODE_ENV", "NEXT_RUNTIME"}
 _WEB_CODE_SERVICES = {"sprintable-frontend-dev", "sprintable-frontend-prod"}
 
 
+# ── ⑥ story #2305: 서비스명 부분집합 wellformed + 외부 IaC 대조 ────────────────────
+#
+# 배경(doc `duplicate-registry-census-20260728` #9·#10, 원 판정 철회됨): "4곳이 같은 목록이라
+# 일치해야 한다"는 애초에 틀린 전제였다 — 넷은 각자 다른 목적의 **의도적 부분집합**이다.
+# 진짜 구멍은 「그 부분집합들이 마스터(_SERVICE_SCRIPT_MAP)의 실제 부분집합인지 재는 자가
+# 0건」이었다 — 오타로 만든 유령 서비스명이 들어가도 아무도 못 잡는다.
+#
+# ⛔양방향(집합 동일)으로 재면 안 된다 — 의도적 부분집합이 거짓 불일치로 잡힌다. **한 방향만**
+# (subset - master == 공집합) 잰다.
+_SERVICE_NAME_RE = re.compile(r"sprintable-[a-z]+-(?:dev|prod)")
+
+
+def _service_subset_wellformed_violations() -> list[str]:
+    """`_SERVICE_SCRIPT_MAP`(마스터) 밖의 이름이 나머지 세 목록에 있으면 그 이름을 낸다.
+    한 방향만 잰다 — 마스터가 부분집합보다 큰 것(예: mcp-dev/prod가 이 셋 어디에도 없는 것)은
+    정상이라 잡지 않는다."""
+    master = set(_SERVICE_SCRIPT_MAP)
+    violations: list[str] = []
+    for label, subset in (
+        ("_SETTINGS_CONSUMING_SERVICES", _SETTINGS_CONSUMING_SERVICES),
+        ("_SERVICE_DRY_RUN_MAP", set(_SERVICE_DRY_RUN_MAP)),
+        ("_WEB_CODE_SERVICES", _WEB_CODE_SERVICES),
+    ):
+        for ghost in sorted(subset - master):
+            violations.append(
+                f"{label}: 마스터(_SERVICE_SCRIPT_MAP)에 없는 이름: {ghost!r} "
+                f"— 오타인가, 마스터에 추가할 것인가?"
+            )
+    return violations
+
+
+def _strip_comment(line: str) -> str:
+    """bash·YAML 둘 다 '#'가 주석 시작 — 이 저장소의 대상 파일들엔 문자열 리터럴 안에 '#'이
+    없음을 확認했다(2026-07-29). ⛔이걸 안 하면 "sprintable-realtime-prod가 없다"처럼 주석
+    문장 안의 서비스명을 실선언으로 오탐한다 — #10 census 항목이 정확히 이 오탐이었다."""
+    idx = line.find("#")
+    return line if idx == -1 else line[:idx]
+
+
+def _external_iac_service_literals() -> set[str]:
+    """cloudbuild.yaml·.github/workflows/*.yml·deploy_*.sh에서 실선언된(주석 아닌) 서비스명
+    리터럴을 정적으로 모은다. ⛔AC5 — 대상 파일이 하나라도 없으면 조용히 skip하지 않고
+    즉시 실패한다(재료를 못 찾은 가드가 "통과"로 읽히면 안 된다)."""
+    targets = [
+        _REPO_ROOT / "cloudbuild.yaml",
+        *sorted((_REPO_ROOT / ".github" / "workflows").glob("*.yml")),
+        *sorted((_REPO_ROOT / "backend" / "scripts").glob("deploy_*.sh")),
+    ]
+    missing = [str(p) for p in targets if not p.exists()]
+    if missing:
+        raise RuntimeError(
+            f"서비스명 스캔 대상 파일을 못 찾음(AC5 — skip 대신 실패): {missing}"
+        )
+    names: set[str] = set()
+    for path in targets:
+        for line in path.read_text().splitlines():
+            names |= set(_SERVICE_NAME_RE.findall(_strip_comment(line)))
+    return names
+
+
+def _external_iac_wellformed_violations() -> list[str]:
+    """외부 IaC(cloudbuild.yaml·workflows·deploy_*.sh)에 실선언된 서비스명이 마스터
+    (_SERVICE_SCRIPT_MAP)에 없으면 그 이름을 낸다 — 한 방향만."""
+    master = set(_SERVICE_SCRIPT_MAP)
+    external = _external_iac_service_literals()
+    return [
+        f"외부 IaC(cloudbuild.yaml/workflows/deploy_*.sh)에 있는데 마스터에 없는 이름: "
+        f"{ghost!r} — 오타인가, 마스터에 추가할 것인가?"
+        for ghost in sorted(external - master)
+    ]
+
+
 def _web_env_reads(src_dir: Path = _WEB_SRC_DIR) -> dict[str, list[tuple[str, str | None]]]:
     """반환: {key: [(file_relpath, default_literal_or_None), ...]}. 소스 «리터럴»만 읽는다
     (git에 이미 공개된 텍스트) — 라이브 env value는 이 함수가 존재를 몰라도 된다."""
@@ -434,6 +528,11 @@ def main() -> int:
     code_read_baseline = _load_code_read_high_baseline()
     today = _today()
 
+    # ⑥ story #2305 — 순수 정적 대조(라이브 서비스 열거 불필요), 루프 밖에서 한 번만.
+    service_subset_violations = (
+        _service_subset_wellformed_violations() + _external_iac_wellformed_violations()
+    )
+
     live_services = _list_live_services()
     key_set_failures: list[str] = []
     value_check_failures: list[str] = []
@@ -536,6 +635,7 @@ def main() -> int:
     has_fail = bool(
         key_set_failures or value_check_failures or secret_shape_failures
         or code_read_highest_failures or code_read_baseline_escalations
+        or service_subset_violations
     )
     has_report_only = bool(settings_coverage_report or code_read_report)
 
@@ -559,6 +659,13 @@ def main() -> int:
         if secret_shape_failures:
             print("  ③평문 시크릿 형태 검출(⛔ 값은 출력하지 않음 — 키 이름만):")
             for line in secret_shape_failures:
+                print(f"    - {line}")
+        if service_subset_violations:
+            print(
+                "  ⑥서비스명 부분집합 wellformed(story #2305) — 마스터(_SERVICE_SCRIPT_MAP)에\n"
+                "    없는 유령 이름이 부분집합 목록 또는 외부 IaC에 들어왔다:"
+            )
+            for line in service_subset_violations:
                 print(f"    - {line}")
         if code_read_highest_failures:
             print(
@@ -607,7 +714,9 @@ def main() -> int:
             "환경을 가리키는 채로 조용히 돈다). ⑤㉠ baseline 밖(신규/만료)은 (a) 값을 채우거나 "
             "(b) 정상이면 code_read_high_baseline에 reason/declared_by/until(최대30일)과 "
             "함께 등재하거나 (c) 영구 정상이면 code_read_exempt로 승격 — 셋 다 "
-            "infra/manual-env-allowlist.yml. ⑤㉢은 report-only(승격 대상 아님)."
+            "infra/manual-env-allowlist.yml. ⑤㉢은 report-only(승격 대상 아님). "
+            "⑥은 오타면 그 자리에서 고치고, 정말 새 서비스면 _SERVICE_SCRIPT_MAP(마스터)에 "
+            "먼저 추가한 뒤 필요한 부분집합에 편입."
         )
         if not has_fail:
             print("\n(⛔위는 report-only 항목뿐 — FAIL 아님. exit code는 0.)")
@@ -621,7 +730,9 @@ def main() -> int:
         f"③{len(live_services)}개 서비스 전체 평문시크릿 스캔 완료(제외 없음), "
         f"④{len(_SETTINGS_CONSUMING_SERVICES)}개 서비스 Settings 커버리지 대조 완료, "
         f"⑤{len(_WEB_CODE_SERVICES & set(live_services))}개 서비스 코드읽기↔공급 대조 완료"
-        f"(㉡최고위험 대조 포함)."
+        f"(㉡최고위험 대조 포함), "
+        f"⑥서비스명 부분집합 wellformed(마스터 {len(_SERVICE_SCRIPT_MAP)}개 기준) + "
+        f"외부 IaC 대조 완료."
     )
     return 0
 
