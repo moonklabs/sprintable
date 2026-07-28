@@ -86,6 +86,10 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
                     {entityTypeLabel(entity.entity_type)}
                   </div>
                 )}
+                {/* ⛔focus-outset을 일부러 안 붙인다(PO 확認, 2026-07-28) — 이 하이라이트(bg-accent)는
+                    entityIndex state로 그려지는 것이지 실제 DOM :focus가 아니다(화살표nav가 textarea에
+                    머물고 이 버튼으로 진짜 focus를 옮기지 않는다). 즉 여기엔 클리핑될 포커스 링 자체가
+                    없다 — "형제(listbox)엔 focus-inset이 있는데 여긴 outset이 없네" 하고 넣지 말 것. */}
                 <button
                   type="button"
                   role="option"
