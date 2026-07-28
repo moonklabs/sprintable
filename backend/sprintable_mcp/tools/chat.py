@@ -29,6 +29,12 @@ def escape_mention_title(title: str) -> str:
     백슬래시로 escape하고, `\r`/`\n` 연속을 단일 공백으로 접는다. title이 caller 제공이든
     (agent가 임의 문자열 전달 가능) DB에서 fetch한 것이든(문서 제목에 임의 문자 가능) 동일하게
     적용해야 `[{title}](entity:doc:{id})` 토큰 구조가 깨지지 않는다.
+
+    ⛔PO 지적(2026-07-28, #2585 리뷰): 이 함수가 여전히 「규칙이 둘인 자리」 하나를 남긴다 —
+    title을 caller가 직접 지정하는 경로(`_resolve_mention_content`에서 `mention.title is not
+    None`인 분기)는 백엔드 `build_reference_token`이 만들 토큰이 애초에 없다(그 문자열은 DB에
+    없는 caller 전용 표시 문구이므로). 그래서 이 경로만은 어쩔 수 없이 로컬 escape를 계속 쓴다 —
+    `_escape_title`(reference_token.py)과 규칙이 갈리면 다시 벌어질 자리로 표시해 둔다.
     """
     escaped = _MENTION_TITLE_ESCAPE_RE.sub(lambda m: "\\" + m.group(0), title)
     return _MENTION_TITLE_NEWLINE_RE.sub(" ", escaped)
@@ -51,9 +57,19 @@ class MentionRef(SprintableInput):
     """agent 발신 채팅 메시지에 첨부할 entity mention — story 1995(doc 링크 안 됨 근본수정) +
     story #2283 후속(2026-07-28, doc→doc/story/epic 확장).
 
-    type은 스키마 레벨에서 doc/story/epic만 허용(Literal, `_MENTION_ENTITY_ENDPOINTS`와 동일
-    축 — test_mention_ref_types_match_entity_endpoints가 드리프트를 고정) — 그 외 값은
-    핸들러 코드 진입 전에 거부된다.
+    type은 스키마 레벨에서 doc/story/epic만 허용(Literal). MCP 서버는 백엔드 `app.*`를 import
+    하지 않고 HTTP로만 통신하는 별도 프로세스라(api_client.py 참조) 이 목록을 백엔드
+    `reference_registry.ENTITY_RESOLVERS`에서 런타임에 **파생시킬 수 없다** — 두 프로세스가
+    같은 값을 손으로 맞춰 유지하는 수밖에 없는 자리다. 대신
+    `test_mention_entity_endpoints_match_backend_entity_resolvers`가 **테스트로** 그 동일성을
+    고정한다 — 백엔드 registry가 늘면 이 테스트가 빨개져서 여기(이 Literal +
+    `_MENTION_ENTITY_ENDPOINTS`)도 늘리도록 강제한다.
+
+    ⛔실제로 story #2294(target_type에 `task` 개설)에서 이 테스트가 바로 빨개질 것이다 — 그때
+    답은 **이 테스트를 고치거나 느슨하게 하는 것이 아니라, 여기 Literal과
+    `_MENTION_ENTITY_ENDPOINTS`에 `task` 항목을 추가하는 것**이다(가드가 걸렸을 때 나올 수
+    있는 세 가지 반응 — 목록을 넓힌다 / 테스트를 고친다 / 무시한다 — 중 첫 번째만 옳다는 것을
+    미리 적어 둔다).
     """
 
     type: Literal["doc", "story", "epic"]
@@ -125,6 +141,15 @@ async def _resolve_mention_content(args: SendChatInput) -> str:
         entity = await client.get(endpoint)
         token = (entity.get("reference_token") if isinstance(entity, dict) else None) or None
         if token is None:
+            # ⛔PO 지적(2026-07-28, #2585 리뷰): "경고만"으로는 이 폴백이 실제로 얼마나
+            # 타는지 아무도 모른다 — 그러면 twin-rule(로컬 escape vs 서버 build_reference_token)
+            # 이 살아 있는데 살아 있는 줄 모르는 상태가 된다. 이 경고 로그 자체가 그 카운터다 —
+            # Cloud Logging에서 logger="sprintable_mcp.tools.chat" + "missing reference_token"
+            # 문자열로 검색해 발화 빈도를 센다. 만료 날짜를 미리 정하지 않은 이유: MCP와 백엔드가
+            # 같은 배포 유닛(둘 다 backend/ 하위)이라 정상 상태에선 skew가 없어야 하지만, Cloud
+            # Run 리비전 교체 중 짧은 창(구 리비전 파드가 아직 트래픽을 받는 순간)엔 실제로 있을
+            # 수 있다 — 그게 "일회성"인지 "배포마다 반복"인지 아직 실측이 없다. 카운트가 0에
+            # 수렴하면(또는 배포 롤아웃 창에서만 튀는 패턴이 확인되면) 그때 폴백을 걷는다.
             title = (entity.get("title") or "") if isinstance(entity, dict) else ""
             token = f"[{escape_mention_title(title)}](entity:{mention.type}:{mention.id})"
             logger.warning(
