@@ -46,33 +46,47 @@ def escape_mention_title(title: str) -> str:
 # 토큰 문자열을 만드는" 경로는 이 조직 명명 관례([TAG] 제목)에서 구조적으로 깨진다 — 정답은
 # 손으로 안 짓고 **백엔드가 준 reference_token을 그대로 쓰는** 것(#2282 SSOT). doc만
 # 지원하던 것을 story/epic까지 넓혀 «형제 비대칭»(FE만 안 깨지는 것)을 없앤다.
+#
+# ⛔story #2294(2026-07-28, 실제로 걸린 드리프트): task가 백엔드 ENTITY_RESOLVERS에 열렸는데
+# 이 dict는 안 늘어 test_mention_entity_endpoints_match_backend_entity_resolvers가 develop
+# HEAD에서 RED였다 — 서로 다른 두 PR이 각각은 옳은 변경이었는데 합쳐지며 이 축이 깨진
+# "merge-order로만 드러나는" 드리프트였다(#2585는 #2294보다 먼저 작성돼 task를 몰랐다).
+# ⛔B단계(2026-07-29): sprint·artifact·hypothesis도 같이 연다(GET /{id} 단건조회 엔드포인트가
+# 실재해 title 미지정 mention의 auto-fetch가 가능함을 확認). `evidence`는 **의도적으로 뺀다**
+# — GET /api/v2/evidence/{id}(단건조회) 라우트 자체가 없다(list만 work_item_id로 필터링해서
+# 있음). 이 비대칭은 test_mcp_s1995의 `_MENTION_ENDPOINT_KNOWN_GAP`이 명시 선언한다(조용히
+# 빠진 것과 일부러 뺀 것은 처방이 다르다).
 _MENTION_ENTITY_ENDPOINTS: dict[str, str] = {
     "doc": "/api/v2/docs/{id}",
     "story": "/api/v2/stories/{id}",
     "epic": "/api/v2/goals/{id}",
+    "task": "/api/v2/tasks/{id}",
+    "sprint": "/api/v2/sprints/{id}",
+    "artifact": "/api/v2/visual-artifacts/{id}",
+    "hypothesis": "/api/v2/hypotheses/{id}",
 }
 
 
 class MentionRef(SprintableInput):
     """agent 발신 채팅 메시지에 첨부할 entity mention — story 1995(doc 링크 안 됨 근본수정) +
-    story #2283 후속(2026-07-28, doc→doc/story/epic 확장).
+    story #2283/#2294 후속(2026-07-28~29, doc→doc/story/epic/task/sprint/artifact/
+    hypothesis 확장 — evidence는 GET /{id} 단건조회가 없어 의도적으로 제외, 아래
+    `_MENTION_ENTITY_ENDPOINTS` 주석 참조).
 
-    type은 스키마 레벨에서 doc/story/epic만 허용(Literal). MCP 서버는 백엔드 `app.*`를 import
-    하지 않고 HTTP로만 통신하는 별도 프로세스라(api_client.py 참조) 이 목록을 백엔드
+    type은 스키마 레벨에서 이 목록만 허용(Literal). MCP 서버는 백엔드 `app.*`를 import 하지
+    않고 HTTP로만 통신하는 별도 프로세스라(api_client.py 참조) 이 목록을 백엔드
     `reference_registry.ENTITY_RESOLVERS`에서 런타임에 **파생시킬 수 없다** — 두 프로세스가
     같은 값을 손으로 맞춰 유지하는 수밖에 없는 자리다. 대신
     `test_mention_entity_endpoints_match_backend_entity_resolvers`가 **테스트로** 그 동일성을
-    고정한다 — 백엔드 registry가 늘면 이 테스트가 빨개져서 여기(이 Literal +
-    `_MENTION_ENTITY_ENDPOINTS`)도 늘리도록 강제한다.
+    (알려진 gap인 evidence를 뺀 나머지에 대해) 고정한다 — 백엔드 registry가 더 늘면 이 테스트가
+    빨개져서 여기(이 Literal + `_MENTION_ENTITY_ENDPOINTS`)도 늘리도록 강제한다.
 
-    ⛔실제로 story #2294(target_type에 `task` 개설)에서 이 테스트가 바로 빨개질 것이다 — 그때
-    답은 **이 테스트를 고치거나 느슨하게 하는 것이 아니라, 여기 Literal과
-    `_MENTION_ENTITY_ENDPOINTS`에 `task` 항목을 추가하는 것**이다(가드가 걸렸을 때 나올 수
-    있는 세 가지 반응 — 목록을 넓힌다 / 테스트를 고친다 / 무시한다 — 중 첫 번째만 옳다는 것을
-    미리 적어 둔다).
+    ⛔가드가 걸렸을 때 나올 수 있는 세 가지 반응 — 목록을 넓힌다 / 테스트를 고친다(또는
+    느슨하게 한다) / 무시한다 — 중 첫 번째만 옳다. GET /{id}가 아예 없는 타입(evidence류)만
+    예외로, 이유와 함께 명시 등재한다(조용히 빼지 않는다).
     """
 
-    type: Literal["doc", "story", "epic"]
+    type: Literal["doc", "story", "epic", "task", "sprint", "artifact", "hypothesis"]
     id: str
     title: str | None = None
 

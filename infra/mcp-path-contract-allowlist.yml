@@ -43,12 +43,16 @@ declared_indirect:
     function: _resolve_mention_content
     reason: >-
       경로를 `_MENTION_ENTITY_ENDPOINTS[mention.type].format(id=mention.id)`로 조립하는
-      client.get(endpoint) 호출(story #2283 후속, 2026-07-28 — doc→doc/story/epic 확장 +
-      title 미지정 시 서버 reference_token 재사용으로 도입). 호출부는 `mention.type`이 doc/
-      story/epic 셋 중 하나로 Literal 검증되므로 실제로 조립되는 경로는 정확히 3가지뿐 —
-      수기 추적: /api/v2/docs/{id}(app/routers/docs.py:GET /{id}) ·
-      /api/v2/stories/{id}(app/routers/stories.py:539 GET /{id}) ·
-      /api/v2/goals/{id}(app/routers/goals.py:136 GET /{id}, main.py:296에서
-      prefix=/api/v2/goals로 마운트) — 셋 다 실재 확認됨(2026-07-28).
+      client.get(endpoint) 호출(story #2283 후속 2026-07-28 doc→doc/story/epic 확장,
+      story #2294 B단계 2026-07-29 task/sprint/artifact/hypothesis 추가 — evidence는
+      GET /{id} 라우트 자체가 없어 의도적 제외, backend/tests/test_mcp_s1995_agent_doc_
+      mentions.py의 `_MENTION_ENDPOINT_KNOWN_GAP` 참조). 호출부는 `mention.type`이 Literal로
+      검증되므로 실제로 조립되는 경로는 정확히 7가지 — 수기 추적: /api/v2/docs/{id}
+      (docs.py GET /{id}) · /api/v2/stories/{id}(stories.py:539 GET /{id}) ·
+      /api/v2/goals/{id}(goals.py:136 GET /{id}, main.py:296 prefix=/api/v2/goals 마운트) ·
+      /api/v2/tasks/{id}(tasks.py:127 GET /{id}) · /api/v2/sprints/{id}(sprints.py:163
+      GET /{id}) · /api/v2/visual-artifacts/{id}(visual_artifacts.py:214 GET /{id}) ·
+      /api/v2/hypotheses/{id}(hypotheses.py:159 GET /{hypothesis_id}) — 일곱 다 실재
+      확認됨(2026-07-29).
     declared_by: 디디 은와추쿠
     until: "2026-08-27"
