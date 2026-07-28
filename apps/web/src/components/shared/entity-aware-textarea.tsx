@@ -75,7 +75,7 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
       />
       {/* story #2263(C-5) ㉠㉡㉢ 그대로 재사용 — chat-input.tsx 엔티티 dropdown과 동형 렌더. */}
       {entityPicker.entityResults.length > 0 && (
-        <ul role="listbox" aria-label="엔티티 후보" className="absolute left-0 z-50 mt-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+        <ul role="listbox" aria-label="엔티티 후보" className="focus-inset absolute left-0 z-50 mt-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
           {entityPicker.entityResults.map((entity, idx) => {
             const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
             const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;

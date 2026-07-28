@@ -92,4 +92,25 @@ describe('EntityAwareTextarea — story #2264', () => {
     expect(value).toContain('\\]');
     expect(value).toContain('(entity:story:11111111-1111-1111-1111-111111111111)');
   });
+
+  it('⛔드롭다운(overflow-y-auto listbox)에 focus-inset이 있다 — story #2062 회귀가드(verify:focus-inset-coverage) 재발 방지', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{ entity_type: 'story', entity_id: '11111111-1111-1111-1111-111111111111', title: '제목', status: null }],
+    }))));
+    await act(async () => {
+      root.render(<ControlledHarness initial="" projectId="p1" onValueChange={() => {}} />);
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '#');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+
+    const listbox = container.querySelector('[role="listbox"]');
+    expect(listbox).not.toBeNull();
+    expect(listbox!.className).toContain('focus-inset');
+  });
 });
