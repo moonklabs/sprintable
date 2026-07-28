@@ -35,49 +35,78 @@ const EXCLUDE_LABEL_KEYS: Record<string, string> = {
   evidence_free_text_reference: 'backlinksExcludeEvidenceFreeText',
 };
 
-interface StoryBacklinksSectionProps {
-  storyId: string;
+/** BacklinksEntityType → BE 라우트 세그먼트. 불규칙복수(story→stories)라 순수 접미사 파생이
+ * 아닌 조회 테이블로 연다 — PROJECT_ID_RESOLVERS와 같은 성격(종류-분기가 아니라 표기 파생).
+ *
+ * ⛔이 맵의 키 집합은 BE `backlinks.py::BACKLINKS_ALLOWED_TARGET_TYPES`(현재
+ * `frozenset({"doc", "story"})`)와 **글자 그대로 같은 집합**이어야 한다 — 미리 늘리지 않는다.
+ * epic 등 나머지 registry 타입이 거기 없는 이유는 "라우트가 없어서"가 아니라 그 라우터들에
+ * `_require_doc_project_access`/`_assert_story_project_access`와 동형인 TARGET
+ * project-access 선-게이트가 아직 없어서다(PO 확認, 2026-07-28) — 게이트 없이 여기 먼저
+ * 추가하면 화면이 "게이트 없는 라우트"를 부르게 된다.
+ *
+ * ⛔이 맵은 **임시**다 — BE가 언젠가 client 입력을 받는 단일 generic
+ * `/entities/{type}/{id}/backlinks` 라우트로 접으면(PO가 `UnsupportedBacklinkTargetTypeError`
+ * 리뷰에 미리 남겨둔 방향) 이 맵은 통째로 지운다(entity_type을 그대로 세그먼트로 쓰면 되므로).
+ *
+ * ⛔`Record<string, string>`으로 선언하면 `keyof`가 `string`으로 넓어져 타입가드가 이름만 있고
+ * 실제로는 아무것도 안 막는다(`entityType="epic"`이 컴파일을 그냥 통과해 `/api/undefined/...`로
+ * 나갈 수 있었던 자리, PO 지적) — `as const satisfies`로 좁혀 `BacklinksEntityType`이 실제로
+ * `'story' | 'doc'` 리터럴 유니온이 되게 한다. */
+const ENTITY_ROUTE_SEGMENT = {
+  story: 'stories',
+  doc: 'docs',
+} as const satisfies Record<string, string>;
+
+export type BacklinksEntityType = keyof typeof ENTITY_ROUTE_SEGMENT;
+
+interface EntityBacklinksSectionProps {
+  entityType: BacklinksEntityType;
+  entityId: string;
 }
 
 /**
- * story #2299(E-CONNECT) — 「이것을 가리키는 것들」 목록. story-detail-panel 신설 섹션(첫 자리 —
- * doc [slug]/view는 후속 판, PO 지시대로 한 자리로 절차를 세운다).
+ * story #2299(E-CONNECT) — 「이것을 가리키는 것들」 목록. 첫 자리는 story-detail-panel,
+ * 두 번째 자리(doc `[slug]/view`)가 오면서 entityType/entityId 축으로 일반화했다(PO 지시:
+ * "두 번째 자리가 올 때 일반화한다" — 소비자 없는 추상을 미리 짓지 않는다). API 경로는
+ * ENTITY_ROUTE_SEGMENT로만 파생 — 화면 코드에 종류를 나열/분기하지 않는다.
  *
- * still_exists 표시 규율(유나 확定):
+ * still_exists 표시 규율(유나 확定, entityType 무관):
  *  ①끊어진 항목도 목록에서 안 뺀다(그대로 보여줌 — 사라진 척 안 함).
  *  ②사실로 보인다 — 오류색/경고 아이콘 없이 회색(노랑=기다릴 것 전용, 여기는 아무도 안 기다림).
  *  ③문구는 비난 없이 「대상이 없습니다」(삭제됨/깨짐 같은 말 안 씀).
- *  ④종류(doc/chat_message)와 무관하게 문구 한 벌.
+ *  ④backlink source 종류(doc/chat_message)와 무관하게 문구 한 벌.
  */
 interface LoadedResult {
-  storyId: string;
+  entityType: BacklinksEntityType;
+  entityId: string;
   items: BacklinkItem[];
   scope: CollectionScope | null;
 }
 
-export function StoryBacklinksSection({ storyId }: StoryBacklinksSectionProps) {
+export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinksSectionProps) {
   const t = useTranslations('board');
-  // story-detail-panel은 story 전환 시 이 컴포넌트를 리마운트하지 않는다(같은 인스턴스에
-  // storyId prop만 바뀜) — 그래서 결과에 storyId를 같이 담아 「지금 보이는 결과가 지금
-  // storyId 것인지」를 렌더 시점에 판정한다(effect 안에서 동기 setState로 리셋하는 대신 —
-  // react-hooks/set-state-in-effect가 막는 패턴. 전환 중엔 이전 story 결과가 안 보인다).
+  // story-detail-panel처럼 entityId만 바뀌고 이 컴포넌트가 리마운트 안 되는 호출부가 있을 수
+  // 있다 — 결과에 entityType+entityId를 같이 담아 렌더 시점에 일치 여부로 판정한다(전환-누출
+  // 방지, #2299 원본 회귀테스트와 동형. 동기 setState-in-effect도 그래서 안 씀).
   const [result, setResult] = useState<LoadedResult | 'failed' | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/stories/${storyId}/backlinks`, { cache: 'no-store' })
+    const segment = ENTITY_ROUTE_SEGMENT[entityType];
+    fetch(`/api/${segment}/${entityId}/backlinks`, { cache: 'no-store' })
       .then((r) => (r.ok ? (r.json() as Promise<{ data?: BacklinkItem[]; meta?: BacklinksMeta }>) : null))
       .then((json) => {
         if (cancelled) return;
         if (!json) { setResult('failed'); return; }
-        setResult({ storyId, items: json.data ?? [], scope: json.meta?.collection_scope ?? null });
+        setResult({ entityType, entityId, items: json.data ?? [], scope: json.meta?.collection_scope ?? null });
       })
       .catch(() => { if (!cancelled) setResult('failed'); });
     return () => { cancelled = true; };
-  }, [storyId]);
+  }, [entityType, entityId]);
 
   // 조용한 폴백 — 다른 애드온 섹션(stuck-handoff-section 등)과 동형, 로딩/실패/전환-중으로 노이즈를 안 낸다.
-  if (result === null || result === 'failed' || result.storyId !== storyId) return null;
+  if (result === null || result === 'failed' || result.entityType !== entityType || result.entityId !== entityId) return null;
   const { items, scope } = result;
 
   return (
