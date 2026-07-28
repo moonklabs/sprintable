@@ -244,6 +244,7 @@ async def reconcile_entity_references(
     extracted_refs: list[tuple[str, uuid.UUID, str]],
     created_by: uuid.UUID | None,
     target_types: frozenset[str] = frozenset(ENTITY_RESOLVERS),
+    known_new: bool = False,
 ) -> ReconcileResult:
     """story #2301 — `(source_type, source_field, source_id)` 하나가 «지금» 가리키는 대상
     전체를 diff로 맞춘다: 사라진 토큰의 참조는 삭제(`removed`), 새로 생긴 토큰은 insert
@@ -253,7 +254,19 @@ async def reconcile_entity_references(
     `extracted_refs`는 caller가 이미 파싱해 온 (target_type, target_id, form) 3튜플이다 —
     이 함수는 파싱을 하지 않는다(`ReconcileResult` docstring 참조). `target_types` 밖의
     target_type은 registry 미등록으로 걸러 `dropped`에 담는다(#2294 관례 그대로 — 침묵 거부
-    금지).
+    금지). 이 필터·dropped·경고 로직은 **여기 한 곳에만** 있다 — caller(래퍼)가 같은 로직을
+    다시 하면 코어가 나중에 바뀔 때 래퍼만 옛 모양으로 남는 twin-system 갭이 된다(오르테가
+    리뷰 지적, 2026-07-29 — `insert_chat_mentions`가 실제로 이 갭에 걸렸었다).
+
+    `known_new=True`(채팅 전용): source_id가 **이번에 처음 생긴 것이라 기존 참조가 있을
+    수 없다는 걸 caller가 이미 아는 경우**(메시지는 불변·매번 신규) — existing-refs SELECT와
+    stale-delete를 통째로 건너뛴다(insert-only 고속 경로). ⛔이걸 "valid가 비면 스킵"으로
+    일반화하면 안 된다 — doc/story처럼 **재조정되는** source는 이번 저장에 유효한 대상이
+    0개여도(토큰을 전부 지운 경우) 삭제해야 할 **기존** stale 참조가 있을 수 있어(`test_doc_
+    reconcile_adds_and_removes_stale_mentions`·`test_clearing_description_entirely_removes_
+    all_its_references` 참조) existing-refs 조회를 건너뛸 수 없다. `known_new`는 "이 source_id
+    자체가 신규"라는 caller의 사전 지식이지, "이번 파싱 결과가 비었다"는 사후 계산이 아니다
+    — 그래서 기본값 False(안전한 쪽)이고 chat만 명시적으로 True를 넘긴다.
 
     같은 트랜잭션(caller 세션 그대로 사용, 별도 커밋 없음) — 실패 시 예외가 그대로
     propagate되어 caller(story/doc/chat 저장 트랜잭션) 전체가 롤백된다(chat/doc 기존
@@ -275,30 +288,37 @@ async def reconcile_entity_references(
         if not (tt == source_type and tid == source_id)
     }
 
-    existing_rows = await db.execute(
-        select(Reference.target_type, Reference.target_id, Reference.form).where(
-            Reference.org_id == org_id,
-            Reference.source_type == source_type,
-            Reference.source_field == source_field,
-            Reference.source_id == source_id,
-            Reference.form.in_(("mention", "embed")),
-        )
-    )
-    existing_refs = {(row.target_type, row.target_id, row.form) for row in existing_rows.all()}
-
-    stale_refs = existing_refs - target_refs
-    if stale_refs:
-        from sqlalchemy import delete as sa_delete, tuple_
-
-        await db.execute(
-            sa_delete(Reference).where(
+    if known_new:
+        # insert-only 고속 경로 — existing-refs SELECT/stale-delete 자체를 건너뛴다(DB 왕복
+        # 0~1회: target_refs가 비면 그마저도 0). `test_dropped_logging_red_green_mutation_
+        # self_check`가 db=None으로 이 경로를 직접 실증한다.
+        existing_refs: set[tuple[str, uuid.UUID, str]] = set()
+        stale_refs: set[tuple[str, uuid.UUID, str]] = set()
+    else:
+        existing_rows = await db.execute(
+            select(Reference.target_type, Reference.target_id, Reference.form).where(
                 Reference.org_id == org_id,
                 Reference.source_type == source_type,
                 Reference.source_field == source_field,
                 Reference.source_id == source_id,
-                tuple_(Reference.target_type, Reference.target_id, Reference.form).in_(stale_refs),
+                Reference.form.in_(("mention", "embed")),
             )
         )
+        existing_refs = {(row.target_type, row.target_id, row.form) for row in existing_rows.all()}
+
+        stale_refs = existing_refs - target_refs
+        if stale_refs:
+            from sqlalchemy import delete as sa_delete, tuple_
+
+            await db.execute(
+                sa_delete(Reference).where(
+                    Reference.org_id == org_id,
+                    Reference.source_type == source_type,
+                    Reference.source_field == source_field,
+                    Reference.source_id == source_id,
+                    tuple_(Reference.target_type, Reference.target_id, Reference.form).in_(stale_refs),
+                )
+            )
 
     new_refs = target_refs - existing_refs
     if new_refs:
@@ -370,43 +390,27 @@ async def insert_chat_mentions(
     안 된 raw `]` 토큰이 조용히 버려지는 것을 확인) 그 경로는 여전히 registry 밖 타입을 만들
     수 있다 — `dropped`가 비지 않는 것 자체가 그 신호(기능이 아니라 가드)다.
 
-    ⛔story #2301(2026-07-29): 이 함수는 이제 `reconcile_entity_references`(공용 코어)의
-    얇은 래퍼다 — 파싱(`extract_chat_entity_mentions`, form 항상 "mention")만 여기서 하고
-    실제 write/diff는 코어에 위임한다. 채팅은 매번 신규 메시지(기존 참조 0건)라 diff가
-    항상 순수 insert로 귀결 — 동작 회귀 없음(`ReconcileResult` docstring AC4 참조).
+    ⛔story #2301(2026-07-29, 오르테가 리뷰 반영): 이 함수는 `reconcile_entity_references`
+    (공용 코어)의 **얇은 변환**이다 — 파싱(`extract_chat_entity_mentions`, form 항상
+    "mention")만 여기서 하고, 필터링·dropped 계산·경고 로그는 전부 코어에 맡긴다(코어를
+    두 번째로 재구현하지 않는다 — 최초 리뷰에서 이 래퍼가 코어와 같은 필터/dropped/로그
+    로직을 중복 소유해 "코어의 dropped 경로를 실제로 타는 호출부가 0"이 되는 twin-system
+    갭이었다는 지적을 반영해 고쳤다).
 
-    `all_pairs`가 비거나(토큰 자체가 없는 일반 메시지, 압도적 다수) 필터 후 `pairs`가 비면
-    (전부 registry 밖이라 dropped) 코어 호출 자체를 skip(DB 왕복 0) — 이 원래 있던 얕은
-    최적화를 유지한다(`test_dropped_logging_red_green_mutation_self_check`가 `db=None`으로
-    이 경로를 직접 실증한다 — DB를 안 건드린다는 계약 자체가 테스트로 고정돼 있다)."""
+    `known_new=True`를 코어에 넘긴다 — 채팅 메시지는 매번 신규(불변·재조정 불필요)라는
+    사실을 caller가 이미 알고 있다는 선언(`reconcile_entity_references` docstring 참조).
+    이 플래그 하나로 existing-refs 조회/stale-delete가 통째로 스킵되고, `extracted_refs`가
+    비거나 전부 dropped라 insert할 것도 없으면 DB 왕복이 0회로 자연히 귀결한다 — 별도의
+    "비면 skip" 분기를 이 래퍼에 따로 두지 않는다(`test_dropped_logging_red_green_mutation_
+    self_check`가 `db=None`으로 이 경로를 직접 실증한다)."""
     all_pairs = extract_chat_entity_mentions(content)
-    if not all_pairs:
-        return ChatMentionResult(stored=0, dropped=[])
-
-    pairs = [(etype, eid) for etype, eid in all_pairs if etype in target_types]
-    dropped = [
-        {"target_type": etype, "target_id": str(eid)}
-        for etype, eid in all_pairs if etype not in target_types
-    ]
-    if dropped:
-        logger.warning(
-            "insert_chat_mentions: dropped %d mention(s) with unregistered target_type "
-            "(message_id=%s, target_types=%s) dropped=%s",
-            len(dropped), message_id, sorted(target_types), dropped,
-        )
-    if not pairs:
-        return ChatMentionResult(stored=0, dropped=dropped)
-
-    # ⛔pairs는 이미 target_types로 걸러졌다 — 코어에 다시 target_types를 넘기면 이중
-    # 필터링(무해하지만 코어 쪽 dropped는 항상 빈 배열)이라, 반환은 여기서 이미 계산한
-    # `dropped`를 쓴다(코어의 dropped를 쓰면 위에서 로그까지 남긴 사실이 반환값에서 사라진다).
-    extracted_refs = [(etype, eid, "mention") for etype, eid in pairs]
+    extracted_refs = [(etype, eid, "mention") for etype, eid in all_pairs]
     result = await reconcile_entity_references(
         db, org_id=org_id, source_type="chat_message", source_field="body",
         source_id=message_id, extracted_refs=extracted_refs, created_by=created_by,
-        target_types=target_types,
+        target_types=target_types, known_new=True,
     )
-    return ChatMentionResult(stored=result.stored, dropped=dropped)
+    return ChatMentionResult(stored=result.stored, dropped=result.dropped)
 
 
 async def count_phantom_task_mentions(db: AsyncSession) -> int:
@@ -484,13 +488,18 @@ async def reconcile_doc_mentions(
     얇은 래퍼다 — 파싱(`extract_doc_mention_targets`, HTML wikiLink/pageEmbed)만 여기서
     하고 diff/write는 코어에 위임한다. self-ref 가드(`tid != doc_id`)는 코어의 일반화된
     가드(`target_type==source_type and target_id==source_id`, source_type이 항상 "doc"
-    이므로 동치)로 대체됐다 — 동작 동일. `target_types={"doc"}`는 원래 이 함수가 registry
-    필터링을 아예 안 했던 것과 동치(추출 결과가 항상 "doc" 타입뿐이라 필터가 no-op)."""
+    이므로 동치)로 대체됐다 — 동작 동일.
+
+    ⛔`target_types`는 명시로 안 넘긴다(코어 기본값 = registry 전체를 그대로 쓴다) — 지금은
+    추출 결과가 항상 "doc" 타입뿐이라 no-op이지만(오르테가 리뷰 지적, 2026-07-29), "doc은
+    doc만 가리킨다"를 여기 하드코딩(`target_types={"doc"}`)해 두면 파서가 나중에 다른
+    entity_type을 뽑게 되는 날(선생님 지시 원문 "어떤 엔티티든 임베드") 파서는 뽑았는데
+    필터가 조용히 막는 벽이 된다. no-op인 지금 없애 두면 파서가 늘 때 이 함수를 안 고쳐도
+    자동으로 따라온다."""
     extracted_refs = [
         ("doc", target_id, form) for target_id, form in extract_doc_mention_targets(html_content)
     ]
     await reconcile_entity_references(
         db, org_id=org_id, source_type="doc", source_field="body", source_id=doc_id,
         extracted_refs=extracted_refs, created_by=created_by,
-        target_types=frozenset({"doc"}),
     )
