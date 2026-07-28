@@ -1111,6 +1111,8 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 // 살아남는 구조라 위험하다(#2566은 링크 하나만 증상 패치). 상호작용 규약을
                 // 아예 「편집 진입은 위 ✎ 수정 버튼으로만」으로 좁혀 원천 차단한다 — 본문
                 // 안의 무엇을 눌러도 편집모드가 끼어들 수 없다.
+                // ⛔이 div에 onClick을 다시 붙이지 않는다 — 편집 진입은 «수정 버튼»으로만.
+                // 본문 안의 링크·멘션·체크박스가 자기 일을 해야 하기 때문이다.
                 <div className="mt-2">
                   <DescriptionViewer description={story.description} />
                 </div>
@@ -1159,6 +1161,8 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 </div>
               ) : story.acceptance_criteria ? (
                 // #2275 — description과 동일 처방: 편집 진입은 위 ✎ 수정 버튼으로만.
+                // ⛔이 div에 onClick을 다시 붙이지 않는다 — 본문 안의 링크·멘션·체크박스가
+                // 자기 일을 해야 하기 때문이다.
                 <div className="mt-2">
                   <DescriptionViewer description={story.acceptance_criteria} />
                 </div>
