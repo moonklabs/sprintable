@@ -8,23 +8,26 @@ merge_ready(리뷰/머지 대기)·needs_input·verify_fail. 유나 spec(glance-
 
 story #2249: 「그 상태에 들어간 시각」(entered_state_at) — kind별 소스가 다르다(전수):
   gate_pending → WorkflowLineStepApproval.created_at(row가 매 사이클 새 INSERT라 정확) — exact
-  blocked      → ItemDependency.created_at — approx(아래 참조)
+  blocked      → 항상 None(아래 참조 — "모름"이지 근사 아님)
   merge_ready  → StoryActivity(status_changed→in-review) 최신 행 — exact(값이 있으면 정확·
                  actor_id 없는 시스템 트리거 시엔 아예 None으로 빠짐. "값의 정밀도"가 아니라
                  "값의 유무" 문제라 approx로 분류하지 않는다 — None 자체가 이미 그 신호다)
   needs_input  → Gate.status_entered_at(신규 컬럼 — updated_at 대체 불가 실측 후 신설, #2249 AC1) — exact
   verify_fail  → Gate.evidence_status_entered_at(위와 동일 사유, status와 별개 축) — exact
 
-⚠️blocked=approx인 이유·크기(오르테가군 리뷰 2026-07-28): 막는 쪽 story가 done→(나중에)
-재오픈되면, 실제 "다시 막힌" 시각은 재오픈 시점인데 dependency row는 원래 생성 시각을 그대로
-들고 있다 — **오차가 몇 분/몇 시간 단위로 유계가 아니라, 재오픈까지의 간격만큼(수 시간~수
-개월) 임의로 커질 수 있다**(구조적 edge case, jitter 아님). 발생 빈도는 라이브 데이터 없이는
-모른다(dev DB 직접 접근 불가 — VPC 격리, 별도 실측 필요). 방향은 항상 "실제보다 더 오래 막힌
-것처럼" 과대추정(48h+ 카운트에서 false positive 방향) — #2250이 이 값 위에 임계를 세울 때
-반드시 반영할 것.
+⛔blocked는 값을 안 싣는다(오르테가군 리뷰 2026-07-28, 처방 정정 — 최초엔 approx로 실었으나
+철회): `ItemDependency.created_at`을 후보로 검토했으나, 막는 쪽 story가 done→(나중에)재오픈되면
+실제 "다시 막힌" 시각은 재오픈 시점인데 dependency row는 원래 생성 시각을 그대로 들고 있어
+**오차가 유계 지터가 아니라 재오픈까지의 간격만큼(수 시간~수 개월) 임의로 커질 수 있다.**
+**유계가 아닌 오차는 근사가 아니다** — "approx" 라벨을 붙이면 어림값이 아니라 라벨 붙인
+거짓이 되고, 항상 "더 오래 막힌 것처럼" 과대추정하는 방향이라 유나 설계(체류시간이 위계를
+만든다)의 정렬이 거짓으로 서며 #2250의 48h+ 임계에 구조적 false positive를 넣는다.
+「모르면 안 준다」— 근본(재진입 시각을 기록하는 것 자체가 없음)은 별도 스토리로 분리한다
+(PO가 세우는 중 — 그게 있어야 blocked도 exact로 설 수 있다. 지금은 재료가 없어 못 하는 것이
+맞는 판단).
 
-정밀도는 `entered_state_at_precision`("exact"|"approx"|None)으로 값과 함께 실어 FE가 구분
-가능하게 한다(어떻게 다룰지는 FE/디자인 판단 — BE는 구분 가능하게 싣기만 한다).
+정밀도는 `entered_state_at_precision`("exact"|None, 값과 항상 짝)으로 값과 함께 실어 FE가
+구분 가능하게 한다(어떻게 다룰지는 FE/디자인 판단 — BE는 구분 가능하게 싣기만 한다).
 시맨틱(AC4): 전부 UTC·"마지막으로 이 상태가 된 시각"(재진입 시 갱신, 최초 진입 아님). 둘 다
 옵셔널 필드(모르는 필드 무시가 기본 — 회귀 0).
 """
@@ -57,7 +60,6 @@ _LIMIT = 100
 
 # story #2249(오르테가군 리뷰): entered_state_at의 정밀도 — 모듈 docstring 참조.
 _PRECISION_EXACT = "exact"
-_PRECISION_APPROX = "approx"
 
 
 async def _batch_story_entered_in_review_at(
@@ -94,8 +96,9 @@ class AttentionItem(BaseModel):
     # 참조) — 원천이 아예 없거나(edge case) 조회 실패 시 None(옵셔널·모르는 필드 무시가 기본).
     entered_state_at: datetime | None = None
     # 오르테가군 리뷰(2026-07-28): "근사"가 화면에서 "정확"처럼 보이면 유나 설계(체류시간이
-    # 위계를 만든다)의 정렬 신뢰가 무너진다 — 값과 함께 정밀도를 싣는다. "exact"|"approx"|None
-    # (entered_state_at이 None이면 이 필드도 None). 다루는 법(흐리기/정렬제외 등)은 FE 판단.
+    # 위계를 만든다)의 정렬 신뢰가 무너진다 — 값과 함께 정밀도를 싣는다. "exact"|None만 존재
+    # (entered_state_at이 None이면 이 필드도 None) — "approx"는 없다: 유계가 아닌 오차는 근사가
+    # 아니라 «모름»이다(blocked가 그 사례 — 값 자체를 안 싣는다, 모듈 docstring 참조).
     entered_state_at_precision: str | None = None
 
 
@@ -158,7 +161,7 @@ async def glance_attention(
     blocked = aliased(Story)
     blocked_rows = (
         await session.execute(
-            select(blocked.id, blocked.title, blocker.id, ItemDependency.created_at)
+            select(blocked.id, blocked.title, blocker.id)
             .select_from(ItemDependency)
             .join(blocker, blocker.id == ItemDependency.from_id)
             .join(blocked, blocked.id == ItemDependency.to_id)
@@ -175,14 +178,17 @@ async def glance_attention(
             .limit(_LIMIT)
         )
     ).all()
-    for blocked_id, title, blocker_id, entered_at in blocked_rows:
+    for blocked_id, title, blocker_id in blocked_rows:
         items.append(AttentionItem(
             kind="blocked",
             story_id=blocked_id,
             title=title,
             ref={"blocker_story_id": str(blocker_id)},
-            entered_state_at=entered_at,
-            entered_state_at_precision=_PRECISION_APPROX,
+            # ⛔값을 안 싣는다 — ItemDependency.created_at은 유계가 아닌 오차(재오픈 edge case
+            # 시 수 시간~수 개월)를 낼 수 있어 "근사"가 아니라 "모름"이다(모듈 docstring 참조).
+            # 재진입 시각을 기록하는 근본 수정 전까지 None으로 정직하게 비운다.
+            entered_state_at=None,
+            entered_state_at_precision=None,
         ))
 
     # ③ merge_ready = 프로젝트의 in-review story 중 **실제 병합 가능**(P0-04 엄격화 — doc

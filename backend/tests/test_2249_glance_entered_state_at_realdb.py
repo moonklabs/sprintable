@@ -215,10 +215,11 @@ async def test_needs_input_and_verify_fail_use_new_gate_columns():
 
 
 @pytest.mark.anyio
-async def test_blocked_entered_state_at_is_marked_approx():
-    """⭐오르테가군 리뷰(2026-07-28) pin — blocked만 entered_state_at_precision="approx"다.
-    「근사가 화면에서 정확으로 보이면 안 된다」— gate_pending(exact)과 blocked(approx)를
-    같은 응답에서 함께 시드해 값이 섞이지 않는 것까지 실증한다."""
+async def test_blocked_entered_state_at_is_none_not_approx():
+    """⭐오르테가군 리뷰(2026-07-28, 처방 정정) pin — blocked는 entered_state_at=None(값을
+    안 싣는다). 최초엔 "approx"로 실었으나 철회됨: ItemDependency.created_at의 오차가 유계
+    지터가 아니라(재오픈 edge case 시 수 시간~수 개월) 임의로 커질 수 있어 「근사」 라벨을
+    붙이면 «라벨 붙인 거짓»이 된다 — 「모르면 안 준다」가 맞는 처방."""
     from app.main import app
     from app.models.dependency import ItemDependency
 
@@ -242,12 +243,11 @@ async def test_blocked_entered_state_at_is_marked_approx():
             resp = await client.get(f"/api/v2/glance/attention?project_id={seeded['project_id']}")
             assert resp.status_code == 200, resp.text
             item = next(i for i in resp.json()["items"] if i["kind"] == "blocked")
-            assert item["entered_state_at"] is not None
-            assert item["entered_state_at_precision"] == "approx", (
-                "blocked는 막는 쪽 재오픈 edge case로 dependency.created_at이 실제 진입보다 "
-                "이를 수 있다 — approx로 표시돼야 화면이 gate_pending(exact)과 같은 것으로 "
-                "오인하지 않는다."
+            assert item["entered_state_at"] is None, (
+                "blocked의 entered_state_at은 유계가 아닌 오차라 값을 실으면 안 된다 — "
+                "ItemDependency.created_at을 쓰면 재오픈 edge case에서 몇 개월까지 틀릴 수 있다."
             )
+            assert item["entered_state_at_precision"] is None  # 값-정밀도는 항상 짝.
         finally:
             await client.aclose()
     finally:
