@@ -13,3 +13,14 @@ export async function GET(request: Request) {
     return apiSuccess(await _r.json());
   } catch (err: unknown) { return handleApiError(err); }
 }
+
+/** story #2258 — 증거연결: BE는 이미 있었는데 FE가 부르지 않던 경로. */
+export async function POST(request: Request) {
+  try {
+    const me = await getAuthContext(request);
+    if (!me) return ApiErrors.unauthorized();
+    const _r = await proxyToFastapi(request, '/api/v2/evidence');
+    if (!_r.ok) return _r;
+    return apiSuccess(await _r.json());
+  } catch (err: unknown) { return handleApiError(err); }
+}

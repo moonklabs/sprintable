@@ -429,6 +429,10 @@
     "proofCapsuleStateVerified": "검증됨",
     "trustChipNeedsInput": "입력 필요",
     "trustChipMergeReady": "병합 대기",
+    "requestVerification": "검증 요청",
+    "verificationPending": "검증 대기 중",
+    "verificationRequested": "검증 요청됨",
+    "verificationRequestFailed": "검증 요청 실패",
     "workcellStateInProgress": "진행 중",
     "workcellDodMissing": "완료 조건 미기재",
     "workcellBlockedReason": "의존 스토리 대기 중",
@@ -523,6 +527,7 @@
       "cycleDetected": "사이클이 발생하는 의존성",
       "invalidSelf": "잘못된 의존성 (자기참조 불가)",
       "addFailed": "의존성 추가 실패",
+      "toggleType": "차단/의존 전환",
       "add": "추가",
       "typeBlocks": "차단",
       "typeDepends": "의존",
@@ -3268,7 +3273,11 @@
     "evidenceTypeDeploy": "배포",
     "evidenceTypeMetric": "지표",
     "evidenceTypeReport": "리포트",
-    "evidenceTypeGateApproval": "게이트 승인"
+    "evidenceTypeGateApproval": "게이트 승인",
+    "evidenceAdd": "증거 연결",
+    "evidenceAddFailed": "증거 연결 실패",
+    "evidenceRefPlaceholder": "URL 또는 참조",
+    "evidenceNotePlaceholder": "메모(선택)"
   },
   "canvas": {
     "versionLineage": "버전 lineage",
