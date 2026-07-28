@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, computed_field
 
 # 계층 리네이밍 B1(story 1925): 구 epic.py — 클래스/필드명만 rename, DB 컬럼(stories.epic_id 등)은
 # B4 후속(스코프 밖). 구 이름(GoalXxx의 별칭)은 REST/MCP 레이어(routers/goals.py·sprintable_mcp)에서
@@ -94,6 +94,14 @@ class GoalResponse(BaseModel):
     source_loop_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+
+    # story #2282(E-CONNECT) AC1/AC2: 이 goal(=epic, entity_type 문자열은 registry 기준
+    # "epic" — reference_registry._resolve_epics가 Goal 모델을 쓴다)을 가리키는 참조 토큰.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def reference_token(self) -> str | None:
+        from app.services.reference_token import build_reference_token
+        return build_reference_token("epic", self.id, self.title)
 
 
 class GoalProgressResponse(BaseModel):

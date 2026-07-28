@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, computed_field
 
 
 class DocCreate(BaseModel):
@@ -107,6 +107,15 @@ class DocResponse(BaseModel):
     # additive·nullable(하위호환·미enrich 응답/list 엔 None). FE 는 별도 member/revisions fetch 제거.
     assignee: DocMemberSummary | None = None
     revisions: DocRevisionsSummary | None = None
+
+    # story #2282(E-CONNECT) AC1/AC2: 이 doc을 가리키는 참조 토큰 — 단일 builder(app.services.
+    # reference_token.build_reference_token) 재사용. id/title에서 매 직렬화 시 계산되므로
+    # 호출부(create/get/update 등)가 매번 따로 채울 필요가 없다(빠뜨릴 자리 자체가 없다).
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def reference_token(self) -> str | None:
+        from app.services.reference_token import build_reference_token
+        return build_reference_token("doc", self.id, self.title)
 
 
 class ShareStatusResponse(BaseModel):

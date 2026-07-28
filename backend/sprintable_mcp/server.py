@@ -318,16 +318,19 @@ async def ping() -> list[TextContent]:
 _TOOL_DEFS: list[tuple] = [
     # Stories (8)
     ("sprintable_list_stories",
-     "[일감] 프로젝트 스토리 목록 조회. project_id/org_id context 자동 주입.",
+     "[일감] 프로젝트 스토리 목록 조회. project_id/org_id context 자동 주입."
+     " 각 항목의 reference_token 필드가 그 스토리를 가리키는 참조 토큰"
+     "([제목](entity:story:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      ListStoriesInput, list_stories),
     ("sprintable_list_backlog",
      "[일감] 백로그 스토리 목록 (스프린트 미배정).",
      SprintableInput, list_backlog),
     ("sprintable_add_story",
-     "[일감] 스토리 생성.",
+     "[일감] 스토리 생성. 응답 reference_token 필드가 이 스토리를 가리키는 참조 토큰"
+     "([제목](entity:story:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      AddStoryInput, add_story),
     ("sprintable_update_story",
-     "[일감] 스토리 수정.",
+     "[일감] 스토리 수정. 응답 reference_token은 sprintable_add_story와 동일.",
      UpdateStoryInput, update_story),
     # E-SECURITY SEC-S1: sprintable_delete_story 의도적 제거(에이전트 hard-delete 차단).
     ("sprintable_assign_story_to_sprint",
@@ -363,13 +366,15 @@ _TOOL_DEFS: list[tuple] = [
     # 함수**를 참조하는 deprecated 별칭(hierarchy-rename-alias-mechanism-design §1 — 로직 복제
     # 0, 드리프트 불가). 별칭 유지 기간 동안 무중단 서빙.
     ("sprintable_list_goals",
-     "[일감] 목표 목록 조회.",
+     "[일감] 목표 목록 조회. 각 항목의 reference_token 필드가 그 목표를 가리키는 참조 토큰"
+     "([제목](entity:epic:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      ListGoalsInput, list_goals),
     ("sprintable_add_goal",
-     "[일감] 목표 생성.",
+     "[일감] 목표 생성. 응답 reference_token 필드가 이 목표를 가리키는 참조 토큰"
+     "([제목](entity:epic:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      AddGoalInput, add_goal),
     ("sprintable_update_goal",
-     "[일감] 목표 수정.",
+     "[일감] 목표 수정. 응답 reference_token은 sprintable_add_goal과 동일.",
      UpdateGoalInput, update_goal),
     # story #2010: 목표 lifecycle 전이 전용 도구(rename B1 이후 신설이라 구 _epic 별칭 없음 —
     # update_goal의 status 필드는 백엔드가 422로 거부해 이 도구만이 유일한 전이 경로).
@@ -440,19 +445,23 @@ _TOOL_DEFS: list[tuple] = [
      UpdateSprintInput, update_sprint),
     # Docs (5) — E-SECURITY SEC-S1 확장: delete_doc 제거(에이전트 삭제 차단)
     ("sprintable_list_docs",
-     "[지식] 문서 목록 조회 (tree 또는 tag 필터).",
+     "[지식] 문서 목록 조회 (tree 또는 tag 필터). 각 항목의 reference_token 필드가 그 문서를"
+     " 가리키는 참조 토큰([제목](entity:doc:id))을 준다 — 채팅 등에 그대로 쓰면 참조가"
+     " 생긴다(story #2282).",
      ListDocsInput, list_docs),
     ("sprintable_get_doc",
-     "[지식] slug로 문서 단건 조회.",
+     "[지식] slug로 문서 단건 조회. 응답 reference_token 필드가 이 문서를 가리키는 참조 토큰"
+     "([제목](entity:doc:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      GetDocInput, get_doc),
     ("sprintable_search_docs",
      "[지식] 문서 제목/본문 검색.",
      SearchDocsInput, search_docs),
     ("sprintable_create_doc",
-     "[지식] 문서 생성.",
+     "[지식] 문서 생성. 응답 reference_token 필드가 이 문서를 가리키는 참조 토큰"
+     "([제목](entity:doc:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      CreateDocInput, create_doc),
     ("sprintable_update_doc",
-     "[지식] 문서 수정.",
+     "[지식] 문서 수정. 응답 reference_token은 sprintable_create_doc과 동일.",
      UpdateDocInput, update_doc),
     # Analytics (11)
     ("sprintable_get_project_overview",
