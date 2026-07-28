@@ -163,7 +163,7 @@ async def test_count_orphan_types_org_id_none_aggregates_all_orgs():
         await engine.dispose()
 
 
-# ⛔story #2274로 분리(2026-07-28) — cron endpoint(entity_references_orphan_check) 배선이
-# 이 PR의 CI에서 전역 401 회귀를 냈다(원인 미규명 — CRON_SECRET 전역 누수 의심, #2274 AC1이
-# 그 원인부터 밝힌다). count_orphan_types 자체(위 테스트들)는 재배선 본체와 무관해 남기고,
-# cron endpoint를 직접 부르는 테스트만 여기서 뺐다 — 원인 규명 뒤 #2274에서 다시 짠다.
+# ⛔story #2274로 분리됐던 cron endpoint(entity_references_orphan_check) 테스트는 원인
+# 규명(테스트 격리 오염 — CRON_SECRET 전역 미복원, cron 라우터 자체는 무죄) 후
+# tests/test_2274_cron_orphan_check_realdb.py로 다시 짜졌다(monkeypatch.setattr 사용 —
+# 같은 사고 재발 없음). 이 파일은 재배선(#2273) 본체 검증만 남긴다.
