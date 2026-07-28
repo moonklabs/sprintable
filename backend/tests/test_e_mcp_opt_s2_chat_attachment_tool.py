@@ -105,9 +105,13 @@ async def test_upload_attachments_calls_endpoint_per_file():
 # ── send_chat_message 회귀 + 체이닝 ────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_send_chat_message_no_attachments_unchanged_payload():
-    """첨부 없으면 기존 동작 그대로(회귀 0) — payload 에 attachments 키 자체가 없음."""
+    """첨부 없으면 기존 동작 그대로(회귀 0) — payload 에 attachments 키 자체가 없음.
+
+    ⛔story #2294 ③ 후속(2026-07-29): 메시지 전송은 이제 `client.post`가 아니라
+    `client.post_full`(unwrap=False, {"data": {...}} 응답의 sibling 보존용)을 쓴다 —
+    첨부 업로드(`client.post`)와는 다른 메서드라 각각 따로 mock한다."""
     args = SendChatInput(thread_id="conv-1", content="hi")
-    with patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m:
+    with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value={"data": {"id": "m1"}})) as m:
         await send_chat_message(args)
         _, kwargs = m.call_args
         assert "attachments" not in kwargs["json"]
@@ -124,11 +128,14 @@ async def test_send_chat_message_uploads_then_sends_with_attachments():
 
     async def _fake_post(path, json=None):
         calls.append((path, json))
-        if path.endswith("/attachments"):
-            return upload_result
-        return {"id": "m1"}
+        return upload_result
 
-    with patch.object(chat_mod.client, "post", new=AsyncMock(side_effect=_fake_post)):
+    async def _fake_post_full(path, json=None):
+        calls.append((path, json))
+        return {"data": {"id": "m1"}}
+
+    with patch.object(chat_mod.client, "post", new=AsyncMock(side_effect=_fake_post)), \
+         patch.object(chat_mod.client, "post_full", new=AsyncMock(side_effect=_fake_post_full)):
         result = await send_chat_message(args)
         assert len(calls) == 2
         assert calls[0][0] == "/api/v2/conversations/conv-1/attachments"
@@ -149,9 +156,11 @@ async def test_send_chat_message_upload_failure_does_not_call_message_create():
         calls.append(path)
         raise RuntimeError("upload 403")
 
-    with patch.object(chat_mod.client, "post", new=AsyncMock(side_effect=_fake_post)):
+    with patch.object(chat_mod.client, "post", new=AsyncMock(side_effect=_fake_post)), \
+         patch.object(chat_mod.client, "post_full", new=AsyncMock()) as m_full:
         result = await send_chat_message(args)
         assert calls == ["/api/v2/conversations/conv-1/attachments"]
+        m_full.assert_not_awaited()  # 업로드 실패 시 메시지 생성 자체를 시도하지 않는다
         assert result[0].text.startswith("Error")
 
 
@@ -164,13 +173,9 @@ async def test_send_chat_message_partial_failure_logs_orphan_warning(caplog):
     )
     upload_result = {"url": "org/o/project/p/chat/conv-1/x-s.png", "name": "s.png", "content_type": "image/png", "size": 4}
 
-    async def _fake_post(path, json=None):
-        if path.endswith("/attachments"):
-            return upload_result
-        raise RuntimeError("message create failed")
-
     with caplog.at_level(logging.WARNING, logger=chat_mod.logger.name):
-        with patch.object(chat_mod.client, "post", new=AsyncMock(side_effect=_fake_post)):
+        with patch.object(chat_mod.client, "post", new=AsyncMock(return_value=upload_result)), \
+             patch.object(chat_mod.client, "post_full", new=AsyncMock(side_effect=RuntimeError("message create failed"))):
             result = await send_chat_message(args)
     assert result[0].text.startswith("Error")
     assert any("orphaned" in r.message for r in caplog.records)
