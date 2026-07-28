@@ -1,4 +1,6 @@
 """story #1995: `sprintable_send_chat_message`의 agent doc-mention 토큰 합성 — MCP 쪽 검증.
+story #2283 후속(오르테가 라이브 실측, 2026-07-28): doc→doc/story/epic 확장 + title 미지정
+경로가 백엔드 `reference_token`(#2282 SSOT)을 재사용하도록 변경 — 검증도 함께 확장.
 
 근본 원인: human이 채팅 UI에서 `#`으로 doc를 검색하면 chat-input.tsx의 applyEntity()가
 `[title](entity:doc:id) ` 토큰을 삽입해 doc 링크/backlink가 동작한다. agent가
@@ -7,11 +9,14 @@ sprintable_send_chat_message로 보내는 raw content엔 이 토큰을 만들 �
 
 이 테스트는 (1) escape helper 단위 테스트(adversarial title — token-injection/forged-link
 방지), (2) mentions→토큰 합성 통합 테스트(title 명시/생략 양쪽 경로 + 404 전파),
-(3) mentions 생략 시 회귀 0(가장 중요), (4) type Literal["doc"] 외 값이 Pydantic 스키마
-레벨에서 거부되는지를 검증한다.
+(3) mentions 생략 시 회귀 0(가장 중요), (4) type Literal["doc","story","epic"] 외 값이
+Pydantic 스키마 레벨에서 거부되는지, (5) title 생략 시 서버 `reference_token`을 그대로
+재사용하는지(+ 없을 때 로컬 fallback+경고), (6) `_MENTION_ENTITY_ENDPOINTS`가 백엔드
+`ENTITY_RESOLVERS`와 축이 같은지(twin-system drift 고정)를 검증한다.
 """
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -67,9 +72,10 @@ def test_escape_mention_title_collapses_newlines_to_single_space():
 
 # ── MentionRef schema validation ──────────────────────────────────────────────
 def test_mention_ref_rejects_invalid_type():
-    """type이 "doc" 외 값이면 Pydantic 스키마 레벨에서 거부(AC1) — 핸들러 코드 진입 전 차단."""
+    """type이 doc/story/epic 외 값이면 Pydantic 스키마 레벨에서 거부(AC1) — 핸들러 코드
+    진입 전 차단."""
     with pytest.raises(ValidationError):
-        MentionRef(type="story", id="s-1")
+        MentionRef(type="task", id="t-1")
 
 
 def test_send_chat_input_rejects_invalid_mention_type():
@@ -80,6 +86,26 @@ def test_send_chat_input_rejects_invalid_mention_type():
 def test_mention_ref_accepts_doc_type():
     m = MentionRef(type="doc", id="d-1", title="My Doc")
     assert m.type == "doc"
+
+
+def test_mention_ref_accepts_story_type():
+    m = MentionRef(type="story", id="s-1", title="My Story")
+    assert m.type == "story"
+
+
+def test_mention_ref_accepts_epic_type():
+    m = MentionRef(type="epic", id="e-1", title="My Epic")
+    assert m.type == "epic"
+
+
+def test_mention_entity_endpoints_match_backend_entity_resolvers():
+    """`_MENTION_ENTITY_ENDPOINTS`(MCP 쪽 type→GET endpoint 매핑)가 백엔드
+    `reference_registry.ENTITY_RESOLVERS`(존재판정 registry, #2259/#2266/#2283이 계속 SSOT로
+    써 온 것)와 같은 타입 집합인지 고정 — 한쪽만 늘면(예: 백엔드에 새 target_type 등록,
+    MCP mentions는 안 넓힘) agent 경로만 뒤처지는 형제 비대칭이 조용히 생긴다."""
+    from app.services.reference_registry import ENTITY_RESOLVERS
+
+    assert set(chat_mod._MENTION_ENTITY_ENDPOINTS) == set(ENTITY_RESOLVERS)
 
 
 # ── send_chat_message: token synthesis (title given) ─────────────────────────
@@ -134,21 +160,93 @@ async def test_send_chat_message_escapes_adversarial_given_title():
         )
 
 
-# ── send_chat_message: title omitted → fetched via client.get ────────────────
+# ── send_chat_message: title omitted → fetched via client.get, reuses reference_token ──
 @pytest.mark.anyio
-async def test_send_chat_message_fetches_title_when_omitted():
+async def test_send_chat_message_reuses_backend_reference_token_when_title_omitted():
+    """⭐#2283 후속 핵심 — title 생략 시 응답의 `reference_token`(#2282 SSOT, 서버가 이미
+    escape까지 끝낸 것)을 그대로 쓴다. 여기서 로컬 escape를 다시 태우지 않는다는 것이 핵심
+    (title이 실제로는 `]`를 포함해도, reference_token 필드 자체가 이미 정답이므로 title
+    파싱/재조립이 필요 없다).
+
+    ⛔fixture 설계 주의 — reference_token을 title의 로컬 escape 결과와 «일부러 다르게»
+    만든다(예: 다른 표시 문구). 둘이 같으면 "reference_token을 썼다"와 "fallback으로 title을
+    로컬 escape했다"를 구별할 수 없는 테스트가 된다(오늘 낮에 반복 경계한 confound 클래스) —
+    실제로 이 실수로 처음 짠 버전은 sabotage(강제 fallback)해도 GREEN이 나와 자체발견했다."""
     args = SendChatInput(
         thread_id="conv-1",
         content="see this",
         mentions=[{"type": "doc", "id": "doc-1"}],
     )
-    with patch.object(chat_mod.client, "get", new=AsyncMock(return_value={"id": "doc-1", "title": "Fetched Doc"})) as g, \
+    fetched = {
+        "id": "doc-1", "title": "Fetched Doc",
+        "reference_token": "[SERVER-CANONICAL-TOKEN](entity:doc:doc-1)",
+    }
+    with patch.object(chat_mod.client, "get", new=AsyncMock(return_value=fetched)) as g, \
          patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m:
         result = await send_chat_message(args)
         g.assert_awaited_once_with("/api/v2/docs/doc-1")
         _, kwargs = m.call_args
-        assert kwargs["json"]["content"] == "see this [Fetched Doc](entity:doc:doc-1) "
+        assert kwargs["json"]["content"] == (
+            "see this [SERVER-CANONICAL-TOKEN](entity:doc:doc-1) "
+        )
         assert "Error" not in result[0].text
+
+
+@pytest.mark.anyio
+async def test_send_chat_message_reuses_reference_token_for_story_type():
+    args = SendChatInput(
+        thread_id="conv-1",
+        content="see this",
+        mentions=[{"type": "story", "id": "story-1"}],
+    )
+    fetched = {
+        "id": "story-1", "title": "My Story",
+        "reference_token": "[SERVER-CANONICAL-STORY-TOKEN](entity:story:story-1)",
+    }
+    with patch.object(chat_mod.client, "get", new=AsyncMock(return_value=fetched)) as g, \
+         patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m:
+        await send_chat_message(args)
+        g.assert_awaited_once_with("/api/v2/stories/story-1")
+        _, kwargs = m.call_args
+        assert kwargs["json"]["content"] == "see this [SERVER-CANONICAL-STORY-TOKEN](entity:story:story-1) "
+
+
+@pytest.mark.anyio
+async def test_send_chat_message_reuses_reference_token_for_epic_type():
+    args = SendChatInput(
+        thread_id="conv-1",
+        content="see this",
+        mentions=[{"type": "epic", "id": "epic-1"}],
+    )
+    fetched = {
+        "id": "epic-1", "title": "My Epic",
+        "reference_token": "[SERVER-CANONICAL-EPIC-TOKEN](entity:epic:epic-1)",
+    }
+    with patch.object(chat_mod.client, "get", new=AsyncMock(return_value=fetched)) as g, \
+         patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m:
+        await send_chat_message(args)
+        g.assert_awaited_once_with("/api/v2/goals/epic-1")
+        _, kwargs = m.call_args
+        assert kwargs["json"]["content"] == "see this [SERVER-CANONICAL-EPIC-TOKEN](entity:epic:epic-1) "
+
+
+@pytest.mark.anyio
+async def test_send_chat_message_falls_back_to_local_escape_when_reference_token_missing(caplog):
+    """방어적 폴백 — 응답에 reference_token 필드가 없으면(구버전 백엔드 등) title로 로컬
+    escape 조립하고 경고 로그를 남긴다(조용한 skew 금지)."""
+    args = SendChatInput(
+        thread_id="conv-1",
+        content="see this",
+        mentions=[{"type": "doc", "id": "doc-1"}],
+    )
+    fetched = {"id": "doc-1", "title": "Fetched Doc"}  # reference_token 없음
+    with caplog.at_level(logging.WARNING, logger="sprintable_mcp.tools.chat"):
+        with patch.object(chat_mod.client, "get", new=AsyncMock(return_value=fetched)), \
+             patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m:
+            await send_chat_message(args)
+            _, kwargs = m.call_args
+            assert kwargs["json"]["content"] == "see this [Fetched Doc](entity:doc:doc-1) "
+    assert any("missing reference_token" in r.message for r in caplog.records)
 
 
 # ── send_chat_message: 404 on doc fetch propagates, no message POST ──────────

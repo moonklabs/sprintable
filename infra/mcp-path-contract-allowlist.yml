@@ -66,3 +66,16 @@ declared_indirect:
       conversations.py:2162) 전부 실재 확認됨(2026-07-28)
     declared_by: 까심 아르야
     until: "2026-08-27"
+  - module: chat
+    function: _resolve_mention_content
+    reason: >-
+      경로를 `_MENTION_ENTITY_ENDPOINTS[mention.type].format(id=mention.id)`로 조립하는
+      client.get(endpoint) 호출(story #2283 후속, 2026-07-28 — doc→doc/story/epic 확장 +
+      title 미지정 시 서버 reference_token 재사용으로 도입). 호출부는 `mention.type`이 doc/
+      story/epic 셋 중 하나로 Literal 검증되므로 실제로 조립되는 경로는 정확히 3가지뿐 —
+      수기 추적: /api/v2/docs/{id}(app/routers/docs.py:GET /{id}) ·
+      /api/v2/stories/{id}(app/routers/stories.py:539 GET /{id}) ·
+      /api/v2/goals/{id}(app/routers/goals.py:136 GET /{id}, main.py:296에서
+      prefix=/api/v2/goals로 마운트) — 셋 다 실재 확認됨(2026-07-28).
+    declared_by: 디디 은와추쿠
+    until: "2026-08-27"

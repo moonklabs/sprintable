@@ -607,9 +607,12 @@ _TOOL_DEFS: list[tuple] = [
      ProposeCanonicalInput, propose_canonical_version),
     # Chat (4)
     ("sprintable_send_chat_message",
-     "[조직] conversation thread에 채팅 메시지 발송. mentions=[{type:\"doc\", id, title?}]로 human"
-     " `#`-검색 doc mention과 동형인 `[title](entity:doc:id)` 토큰을 content에 합성(title 생략 시"
-     " 서버가 doc title 조회) — agent 발신 메시지에서도 doc 링크/backlink가 동작하게 한다.",
+     "[조직] conversation thread에 채팅 메시지 발송. mentions=[{type:\"doc\"|\"story\"|\"epic\", id,"
+     " title?}]로 human `#`-검색 mention과 동형인 `[title](entity:<type>:id)` 토큰을 content에"
+     " 합성(title 생략 시 서버가 canonical title로 만든 reference_token을 그대로 재사용 —"
+     " content에 직접 `[제목](entity:...)` 문자열을 손으로 짓지 말 것: 제목에 `]`가 들어가면"
+     " (예: \"[TAG] 제목\" 관례) 파서가 못 읽는다) — agent 발신 메시지에서도 링크/backlink가"
+     " 동작하게 한다.",
      SendChatInput, send_chat_message),
     ("sprintable_create_conversation",
      "[조직] 새 conversation thread 생성.",
