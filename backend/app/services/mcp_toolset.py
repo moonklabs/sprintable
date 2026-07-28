@@ -294,6 +294,10 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     # story #2304: 실등록명은 "ping"이다(server.py:311 `@mcp.tool()` 데코레이터, `_TOOL_DEFS`
     # 밖에서 단독등록 — sprintable_mcp/tests/test_e2e_dev.py 등 다수 테스트·라이브 MCP client가
     # 이미 이 이름으로 실호출한다). "sprintable_ping"은 이 목록에만 존재하던 유령 이름이었다.
+    # ⛔접두사 없음은 실수가 아니라 «의도»다 — 나머지 114개가 전부 sprintable_* 라고 이 줄을
+    # "sprintable_ping"으로 되돌리지 말 것. 실등록명이 ping이고 e2e·라이브 MCP client가 이
+    # 이름으로 부른다. 바꾸려면 클라이언트 쪽이 먼저 따라와야 한다(server.py:311 데코레이터
+    # 개명 + 모든 호출자 마이그 선행, story #2304).
     "ping",
     "sprintable_activate_sprint", "sprintable_add_epic", "sprintable_add_goal",
     "sprintable_add_retro_action",
