@@ -20,6 +20,14 @@ import type { Asset } from '@/lib/storage/types';
 import { imageFilesFromClipboard } from '@/lib/clipboard-image';
 import { ENTITY_ICONS } from './embed-card';
 import { AssetPickerPopover } from './asset-picker-popover';
+import {
+  applyEntity, entityTypeLabel, escapeMarkdownLinkText, getEntityQuery, groupEntitiesByType, type EntityResult,
+} from './chat-input-entity-tokens';
+import { useEntityPicker } from '@/hooks/use-entity-picker';
+
+// story #2264(C-6): 토큰조립/그룹핑/라벨은 이제 참조 코어(chat-input-entity-tokens.ts)에
+// 산다 — 여기선 재-export만 해서 기존 소비부(테스트 등)의 import 경로를 그대로 둔다.
+export { applyEntity, entityTypeLabel, escapeMarkdownLinkText, groupEntitiesByType };
 
 /** S8 #2: pre-send capability 경고 대상 — 대화의 에이전트 participant(본인 제외) runtime. */
 export interface CommandTarget {
@@ -44,39 +52,6 @@ function applyMention(value: string, cursorPos: number, name: string): { text: s
   const replacement = `@${name} `;
   return { text: value.slice(0, start) + replacement + value.slice(cursorPos), caretPos: start + replacement.length };
 }
-
-function getEntityQuery(value: string, cursorPos: number): string | null {
-  const before = value.slice(0, cursorPos);
-  const m = before.match(/#([\w가-힣]*)$/);
-  return m ? m[1] : null;
-}
-
-// story #2292(보안·critical) — 링크 텍스트(markdown `[text](url)`의 text 부분) escape.
-// `[ ] ( ) \` 와 개행이 markdown-link 토큰 구조를 변조(예 `x](https://phish)[y` → 외부
-// phishing 링크 렌더)하는 걸 차단한다. ⛔형제 함수(applyEntity·applyAsset)가 이 상수 하나를
-// 공유해야 한다 — 각자 자기 정규식을 들고 있으면 그게 바로 오늘 반복된 「형제 비대칭」이다.
-export function escapeMarkdownLinkText(text: string): string {
-  return text.replace(/[\\[\]()]/g, '\\$&').replace(/[\r\n]+/g, ' ');
-}
-
-export function applyEntity(
-  value: string,
-  cursorPos: number,
-  title: string,
-  entityType: string,
-  entityId: string,
-): { text: string; caretPos: number } {
-  const before = value.slice(0, cursorPos);
-  const m = before.match(/#([\w가-힣]*)$/);
-  if (!m) return { text: value, caretPos: cursorPos };
-  const start = cursorPos - m[0].length;
-  // story #2292: title은 story/doc/epic/task 검색결과 — 자유 텍스트라 escape 필수(형제
-  // applyAsset은 이미 하고 있었다. 여기만 빠져 있던 것이 발견된 결함).
-  const safeTitle = escapeMarkdownLinkText(title);
-  const replacement = `[${safeTitle}](entity:${entityType}:${entityId}) `;
-  return { text: value.slice(0, start) + replacement + value.slice(cursorPos), caretPos: start + replacement.length };
-}
-
 
 // S6: 스토리지 자산 선택 → 토큰 삽입. applyEntity 미러(트리거 문자 없이 caret 위치에 삽입).
 // 토큰 형식 정확히 `[${name}](entity:asset:${id}) ` (chat-bubble 의 entity:asset 렌더 경로와 정합).
@@ -121,39 +96,6 @@ interface MentionMember {
   id: string;
   name: string;
   role?: string | null;
-}
-
-interface EntityResult {
-  entity_type: string;
-  entity_id: string;
-  title: string;
-  status: string | null;
-}
-
-// story #2263(C-5) ㉠㉢: 종류를 «글자»로 보이는 라벨. ⛔서버가 신규 종류를 주면(registry는
-// 화면이 모르는 채로 늘 수 있다) 목록에 없는 값도 "정상 경로"로 그려야 한다 — 매핑이 없으면
-// 원문 종류 문자열을 그대로 쓴다(공백/대문자 처리 없이도 "sprint"·"hypothesis"처럼 읽을 수
-// 있는 값이라 그 자체로 충분히 "정상"이다. 빈 문자열·물음표·아이콘만 남기는 실패 대신).
-const ENTITY_TYPE_LABELS: Record<string, string> = {
-  story: '스토리', doc: '문서', epic: '에픽', task: '작업',
-};
-export function entityTypeLabel(type: string): string {
-  return ENTITY_TYPE_LABELS[type] ?? type;
-}
-
-// story #2263(C-5) ㉡: 종류로 묶어 보이되 열은 나누지 않는다(키보드 이동이 한 줄기여야 하므로
-// entityResults 자체의 순서를 그룹 순서로 재배열한다 — entityIndex가 이 배열을 그대로
-// 인덱싱하므로 렌더 순서=키보드 이동 순서가 항상 같다, 별도 변환이 렌더 시점에 필요 없다).
-// ⛔BE(entities.py)의 최종 정렬(가나다/최신순)이 종류를 뒤섞을 수 있으므로 첫 등장 순서를
-// 그룹 우선순위로 쓰는 stable regroup(하드코딩된 타입 나열 없음 — 데이터가 순서를 정한다).
-export function groupEntitiesByType(results: EntityResult[]): EntityResult[] {
-  const order: string[] = [];
-  const buckets = new Map<string, EntityResult[]>();
-  for (const r of results) {
-    if (!buckets.has(r.entity_type)) { buckets.set(r.entity_type, []); order.push(r.entity_type); }
-    buckets.get(r.entity_type)!.push(r);
-  }
-  return order.flatMap((type) => buckets.get(type)!);
 }
 
 // story #2032 — 대화별 임시저장(localStorage). 대화 전환은 ChatView가 key={conversation_id}로
@@ -219,9 +161,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const [mentionMembers, setMentionMembers] = useState<MentionMember[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
 
-  const [entityQuery, setEntityQuery] = useState<string | null>(null);
-  const [entityResults, setEntityResults] = useState<EntityResult[]>([]);
-  const [entityIndex, setEntityIndex] = useState(0);
+  // story #2264(C-6): 채팅 전용이던 entityQuery/entityResults/entityIndex + 검색 effect가
+  // 참조 코어 hook으로 옮겨갔다 — 이 컴포넌트는 소비자일 뿐이다.
+  const entityPicker = useEntityPicker(projectId);
 
   const [commandQuery, setCommandQuery] = useState<string | null>(null);
   const [commandIndex, setCommandIndex] = useState(0);
@@ -249,25 +191,6 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       .catch(() => {});
     return () => { cancelled = true; };
   }, [mentionQuery, projectId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (entityQuery === null || !projectId) { setEntityResults([]); return; }
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams({ project_id: projectId });
-      if (entityQuery) params.set('q', entityQuery);
-      fetch(`/api/entities/search?${params}`)
-        .then((r) => r.json())
-        .then((json: EntityResult[] | { data?: EntityResult[] }) => {
-          if (cancelled) return;
-          const arr = Array.isArray(json) ? json : (json.data ?? []);
-          setEntityResults(groupEntitiesByType(Array.isArray(arr) ? arr : []));
-          setEntityIndex(0);
-        })
-        .catch(() => {});
-    }, 200);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [entityQuery, projectId]);
 
   const adjustHeight = () => {
     const el = textareaRef.current;
@@ -312,23 +235,20 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       setCommandIndex(0);
       setMentionQuery(null);
       setMentionMembers([]);
-      setEntityQuery(null);
-      setEntityResults([]);
+      entityPicker.close();
     } else if (mq !== null) {
       setMentionQuery(mq);
       setCommandQuery(null);
-      setEntityQuery(null);
-      setEntityResults([]);
+      entityPicker.close();
     } else if (eq !== null) {
-      setEntityQuery(eq);
+      entityPicker.setEntityQuery(eq);
       setCommandQuery(null);
       setMentionQuery(null);
       setMentionMembers([]);
     } else {
       setMentionQuery(null);
       setMentionMembers([]);
-      setEntityQuery(null);
-      setEntityResults([]);
+      entityPicker.close();
       setCommandQuery(null);
     }
   };
@@ -355,8 +275,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     const cursorPos = textarea?.selectionStart ?? text.length;
     const { text: nextText, caretPos } = applyEntity(text, cursorPos, entity.title, entity.entity_type, entity.entity_id);
     setText(nextText);
-    setEntityQuery(null);
-    setEntityResults([]);
+    entityPicker.close();
     requestAnimationFrame(() => {
       textarea?.focus();
       textarea?.setSelectionRange(caretPos, caretPos);
@@ -436,12 +355,12 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); const c = commandCandidates[commandIndex] ?? commandCandidates[0]; if (c) selectCommand(c); return; }
       if (e.key === 'Escape') { setCommandQuery(null); return; }
     }
-    if (entityResults.length > 0) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); setEntityIndex((i) => (i + 1) % entityResults.length); return; }
-      if (e.key === 'ArrowUp') { e.preventDefault(); setEntityIndex((i) => (i - 1 + entityResults.length) % entityResults.length); return; }
+    if (entityPicker.entityResults.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); entityPicker.moveDown(); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); entityPicker.moveUp(); return; }
       // §5.2 select 가드: async 윈도우서 index가 범위 밖이면 undefined select 방지(클램프+존재 체크).
-      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); const ent = entityResults[entityIndex] ?? entityResults[0]; if (ent) selectEntity(ent); return; }
-      if (e.key === 'Escape') { setEntityQuery(null); setEntityResults([]); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); const ent = entityPicker.entityResults[entityPicker.entityIndex] ?? entityPicker.entityResults[0]; if (ent) selectEntity(ent); return; }
+      if (e.key === 'Escape') { entityPicker.close(); return; }
     }
     if (mentionMembers.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex((i) => (i + 1) % mentionMembers.length); return; }
@@ -648,11 +567,11 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
         {/* Entity dropdown — story #2263(C-5) ㉡: 종류별 구역(머리글)으로 묶되 열은 안 나눈다
             (entityResults가 이미 groupEntitiesByType로 그룹 순서라 렌더 순서=entityIndex 순서). */}
-        {entityResults.length > 0 && (
+        {entityPicker.entityResults.length > 0 && (
           <ul role="listbox" aria-label="엔티티 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
-            {entityResults.map((entity, idx) => {
+            {entityPicker.entityResults.map((entity, idx) => {
               const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
-              const isNewGroup = idx === 0 || entityResults[idx - 1]!.entity_type !== entity.entity_type;
+              const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;
               return (
               <li key={`${entity.entity_type}:${entity.entity_id}`}>
                 {isNewGroup && (
@@ -664,9 +583,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   type="button"
                   id={`entity-opt-${idx}`}
                   role="option"
-                  aria-selected={idx === entityIndex}
+                  aria-selected={idx === entityPicker.entityIndex}
                   onMouseDown={(e) => { e.preventDefault(); selectEntity(entity); }}
-                  className={`flex w-full items-center px-3 py-2 text-left text-sm transition ${idx === entityIndex ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+                  className={`flex w-full items-center px-3 py-2 text-left text-sm transition ${idx === entityPicker.entityIndex ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
                 >
                   {/* ㉠: 종류는 위 머리글의 «글자»가 1차 신호 — 이 아이콘은 어디까지나 보조. */}
                   <EntityIcon className="mr-1.5 size-3.5 shrink-0" aria-hidden />
@@ -733,11 +652,11 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           ref={textareaRef}
           rows={1}
           value={text}
-          aria-controls={commandCandidates.length > 0 ? 'command-opt-0' : mentionMembers.length > 0 ? 'mention-opt-0' : entityResults.length > 0 ? 'entity-opt-0' : undefined}
+          aria-controls={commandCandidates.length > 0 ? 'command-opt-0' : mentionMembers.length > 0 ? 'mention-opt-0' : entityPicker.entityResults.length > 0 ? 'entity-opt-0' : undefined}
           aria-activedescendant={
             commandCandidates.length > 0 ? `command-opt-${commandIndex}`
               : mentionMembers.length > 0 ? `mention-opt-${mentionIndex}`
-              : entityResults.length > 0 ? `entity-opt-${entityIndex}`
+              : entityPicker.entityResults.length > 0 ? `entity-opt-${entityPicker.entityIndex}`
               : undefined
           }
           onChange={(e) => handleTextChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
@@ -747,8 +666,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
             window.setTimeout(() => {
               setMentionQuery(null);
               setMentionMembers([]);
-              setEntityQuery(null);
-              setEntityResults([]);
+              entityPicker.close();
               setCommandQuery(null);
             }, 150);
           }}
