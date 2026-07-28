@@ -20,6 +20,7 @@ from app.models.event_outbox import EventOutbox
 from app.models.gate import Gate
 from app.models.github_installation import GithubInstallation, GithubInstallNonce, GithubWebhookDelivery
 from app.models.hitl import HitlPolicy, HitlRequest
+from app.models.judgment import Judgment
 from app.models.mockup import MockupComponent, MockupPage, MockupScenario, MockupVersion, UsageMeter
 from app.models.user import RefreshToken, User
 from app.models.workflow_version import WorkflowVersion
