@@ -490,6 +490,7 @@ async def create_story(
 async def get_workflow_line_status_batch(
     ids: str = Query(..., description="comma-separated story ids"),
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[LineStatusSummary]:
     try:
         story_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
@@ -499,7 +500,24 @@ async def get_workflow_line_status_batch(
         return []
     if len(story_ids) > 200:  # 보드 페이지 단위 방어(과대 IN 금지)
         raise HTTPException(status_code=422, detail="too many ids (max 200)")
-    return await build_workflow_line_status_batch(repo.session, repo.org_id, story_ids)
+    # story #2245(형제 비대칭 — 배치판): 단건(get_workflow_line_status)과 같은 구멍이 여기 있었다
+    # (org-scope만, 항목별 project 접근권 검사 0) — 200개까지 한 번에 새는 자리라 단건보다 값이 큼.
+    # ⛔has_project_access를 id마다 부르지 않는다(쿼리 200회) — 접근 가능한 project 집합을
+    # 한 번에 구해(accessible_project_ids_in_org) 조회 前에 story_ids를 거른다(+1~2 쿼리로 끝남).
+    project_by_id = dict((await repo.session.execute(
+        select(Story.id, Story.project_id).where(
+            Story.org_id == repo.org_id, Story.id.in_(story_ids),
+        )
+    )).all())
+    from app.services.project_auth import accessible_project_ids_in_org
+    accessible = set(
+        await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id)
+    )
+    # ⛔접근권 없는 id는 조용히 빼고 나머지만 준다(부분 성공) — 몇 개가 빠졌는지도 알리지 않는다.
+    # "빠졌다"는 말 자체가 그 id의 존재를 누설한다 — 없는 id와 못 보는 id를 구분하지 않는다
+    # (404/403을 안 가르는 것과 같은 이유).
+    filtered_ids = [sid for sid in story_ids if project_by_id.get(sid) in accessible]
+    return await build_workflow_line_status_batch(repo.session, repo.org_id, filtered_ids)
 
 
 # E-DG S15(P1-6): line metric 집계(org-scoped·read-only·default-off org=no-op). ⚠️ /{id} 보다 먼저.
