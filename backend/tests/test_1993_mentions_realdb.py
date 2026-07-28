@@ -1,9 +1,14 @@
-"""story #1993(E-KNOWLEDGE-LINK S1) — mentions 테이블(0200)+write-path 파서 realPG 통합 검증.
+"""story #1993(E-KNOWLEDGE-LINK S1) — mentions write-path 파서 realPG 통합 검증.
 
-AC4 실증: 채팅/doc 멘션 삽입→mentions row·doc 재저장 시 추가/삭제 reconcile·중복 UNIQUE 1row·
-자기참조 0·CHECK 제약 위반 실제 거부·본요청 실패 시 mentions 도 함께 롤백(원자성). #1982(CI
-realPG 배선)로 CI 에서도 skip 없이 돈다 — 로컬은 PARITY_TEST_DATABASE_URL/ALEMBIC_DATABASE_URL
-(migrated real PG) 필요.
+⛔story #2273(C-1b): write target이 `mentions`(Mention)에서 `entity_references`(Reference)로
+재배선됐다 — 이 파일의 write-path 관련 테스트(삽입·reconcile·중복 흡수·롤백·canonicalize)는
+전부 Reference를 조회하도록 갱신됐다(옛 표 자체의 CHECK 제약 테스트만 Mention에 남는다 —
+옛 표는 안 지웠으니 그 스키마 보증은 여전히 유효하고 테스트할 가치가 있다).
+
+AC4 실증: 채팅/doc 멘션 삽입→entity_references row·doc 재저장 시 추가/삭제 reconcile·중복
+부분유니크 1row·자기참조 0·본요청 실패 시 함께 롤백(원자성). #1982(CI realPG 배선)로 CI
+에서도 skip 없이 돈다 — 로컬은 PARITY_TEST_DATABASE_URL/ALEMBIC_DATABASE_URL(migrated real
+PG) 필요.
 """
 from __future__ import annotations
 
@@ -77,7 +82,7 @@ async def _seed_org_project_member(session):
 
 
 async def test_chat_mention_insert_creates_row():
-    from app.models.mention import Mention
+    from app.models.reference import Reference
     from app.services.mention_parser import insert_chat_mentions
 
     engine, factory = await _session_factory()
@@ -96,14 +101,16 @@ async def test_chat_mention_insert_creates_row():
             )
             await session.commit()
 
-            rows = (await session.execute(select(Mention).where(Mention.source_id == message_id))).scalars().all()
+            rows = (await session.execute(select(Reference).where(Reference.source_id == message_id))).scalars().all()
             assert len(rows) == 1
             row = rows[0]
             assert row.org_id == org.id
             assert row.source_type == "chat_message"
+            assert row.source_field == "body"
             assert row.source_id == message_id
             assert row.target_type == "doc"
             assert row.target_id == target_doc_id
+            assert row.form == "mention"
             assert row.created_by == member.id
     finally:
         await engine.dispose()
@@ -113,7 +120,7 @@ async def test_chat_mention_insert_creates_row():
 
 
 async def test_doc_reconcile_adds_and_removes_stale_mentions():
-    from app.models.mention import Mention
+    from app.models.reference import Reference
     from app.services.mention_parser import reconcile_doc_mentions
 
     engine, factory = await _session_factory()
@@ -135,7 +142,7 @@ async def test_doc_reconcile_adds_and_removes_stale_mentions():
             await session.commit()
 
             rows_v1 = (await session.execute(
-                select(Mention.target_id).where(Mention.source_type == "doc", Mention.source_id == source_doc_id)
+                select(Reference.target_id).where(Reference.source_type == "doc", Reference.source_id == source_doc_id)
             )).scalars().all()
             assert set(rows_v1) == {target_b}
 
@@ -148,7 +155,7 @@ async def test_doc_reconcile_adds_and_removes_stale_mentions():
             await session.commit()
 
             rows_v2 = (await session.execute(
-                select(Mention.target_id).where(Mention.source_type == "doc", Mention.source_id == source_doc_id)
+                select(Reference.target_id).where(Reference.source_type == "doc", Reference.source_id == source_doc_id)
             )).scalars().all()
             assert set(rows_v2) == {target_c}
     finally:
@@ -159,7 +166,7 @@ async def test_doc_reconcile_adds_and_removes_stale_mentions():
 
 
 async def test_duplicate_target_collapses_to_one_row_via_unique():
-    from app.models.mention import Mention
+    from app.models.reference import Reference
     from app.services.mention_parser import insert_chat_mentions
 
     engine, factory = await _session_factory()
@@ -176,15 +183,16 @@ async def test_duplicate_target_collapses_to_one_row_via_unique():
                 session, org_id=org.id, message_id=message_id, content=content, created_by=member.id,
             )
             await session.commit()
-            # 같은 (source_type, source_id, target_type, target_id) 를 한 번 더 insert 시도
-            # (예: 재시도/중복 호출 시나리오) — ON CONFLICT DO NOTHING 이 UNIQUE 를 흡수해야 한다.
+            # 같은 (source_type, source_field, source_id, target_type, target_id, form) 를 한 번
+            # 더 insert 시도(예: 재시도/중복 호출 시나리오) — ON CONFLICT DO NOTHING 이 부분
+            # 유니크를 흡수해야 한다.
             await insert_chat_mentions(
                 session, org_id=org.id, message_id=message_id, content=content, created_by=member.id,
             )
             await session.commit()
 
             rows = (await session.execute(
-                select(Mention).where(Mention.source_id == message_id, Mention.target_id == target_doc_id)
+                select(Reference).where(Reference.source_id == message_id, Reference.target_id == target_doc_id)
             )).scalars().all()
             assert len(rows) == 1
     finally:
@@ -224,7 +232,7 @@ async def test_raw_duplicate_insert_without_on_conflict_rejected_by_unique():
 
 
 async def test_self_reference_mention_dropped():
-    from app.models.mention import Mention
+    from app.models.reference import Reference
     from app.services.mention_parser import reconcile_doc_mentions
 
     engine, factory = await _session_factory()
@@ -242,7 +250,7 @@ async def test_self_reference_mention_dropped():
             await session.commit()
 
             rows = (await session.execute(
-                select(Mention).where(Mention.source_type == "doc", Mention.source_id == self_doc_id)
+                select(Reference).where(Reference.source_type == "doc", Reference.source_id == self_doc_id)
             )).scalars().all()
             assert len(rows) == 0
     finally:
@@ -296,10 +304,10 @@ async def test_check_constraint_rejects_invalid_target_type():
 
 
 async def test_mentions_rollback_when_enclosing_transaction_fails():
-    """doc 저장 트랜잭션 중간에 강제 에러 주입 → mentions row 도 남지 않아야 한다(같은 세션/
+    """doc 저장 트랜잭션 중간에 강제 에러 주입 → 참조 row 도 남지 않아야 한다(같은 세션/
     트랜잭션 — get_db 의 rollback-on-exception 과 동형: 여기선 직접 session.rollback() 으로
     같은 효과를 재현)."""
-    from app.models.mention import Mention
+    from app.models.reference import Reference
     from app.services.mention_parser import reconcile_doc_mentions
 
     engine, factory = await _session_factory()
@@ -315,15 +323,15 @@ async def test_mentions_rollback_when_enclosing_transaction_fails():
             await reconcile_doc_mentions(
                 session, org_id=org.id, doc_id=source_doc_id, html_content=html, created_by=member.id,
             )
-            # mentions insert 는 flush 상태 — 아직 커밋 안 됨. 여기서 본요청(doc 저장)이 실패했다고
+            # 참조 insert 는 flush 상태 — 아직 커밋 안 됨. 여기서 본요청(doc 저장)이 실패했다고
             # 가정(예: 이후 slug 충돌 등으로 라우터가 예외 raise) → get_db 의 except 블록이
             # session.rollback() 을 호출하는 것과 동형 재현.
             await session.rollback()
 
             rows = (await session.execute(
-                select(Mention).where(Mention.source_type == "doc", Mention.source_id == source_doc_id)
+                select(Reference).where(Reference.source_type == "doc", Reference.source_id == source_doc_id)
             )).scalars().all()
-            assert len(rows) == 0, "본요청 롤백 시 mentions 도 함께 사라져야 한다(원자 트랜잭션)"
+            assert len(rows) == 0, "본요청 롤백 시 참조도 함께 사라져야 한다(원자 트랜잭션)"
     finally:
         await engine.dispose()
 
@@ -332,7 +340,7 @@ async def test_mentions_rollback_when_enclosing_transaction_fails():
 
 
 async def test_created_by_is_canonicalized_via_alias():
-    from app.models.mention import Mention
+    from app.models.reference import Reference
     from app.models.member import MemberIdentityAlias
     from app.services.mention_parser import insert_chat_mentions
 
@@ -358,7 +366,7 @@ async def test_created_by_is_canonicalized_via_alias():
             await session.commit()
 
             row = (await session.execute(
-                select(Mention).where(Mention.source_id == message_id)
+                select(Reference).where(Reference.source_id == message_id)
             )).scalar_one()
             assert row.created_by == member.id, "legacy alias_id 가 아닌 canonical member.id 로 저장돼야 한다"
     finally:

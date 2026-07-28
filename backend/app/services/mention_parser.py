@@ -21,10 +21,15 @@ design-org-knowledge-mentions-backlinks §2.
 
 ⛔story #2260: **어떤 entity_type 이 지원되는지는 추출 함수의 관심사가 아니다** — 추출은
 `entity:<type>:<id>` 토큰을 있는 그대로 전부 뽑고, "지금 이 write-path 가 뭘 쓰기 허용하는가"는
-`insert_chat_mentions(target_types=...)` 파라미터가 결정한다(기본값 = `app.models.mention.
-TARGET_TYPES`, 스키마 CHECK 와 동일 SSOT). 새 타입을 열려면 스키마 CHECK + 그 기본값만 넓히면
-되고, 추출 함수나 write 헬퍼 몸통에 분기를 추가할 필요가 없다 — «메시지→문서만 되고
-메시지→스토리는 파서가 막는» 죽은 경로가 이 구조에서는 재발하지 않는다.
+`insert_chat_mentions(target_types=...)` 파라미터가 결정한다. 새 타입을 열려면 registry(아래
+참조) + 그 기본값만 넓히면 되고, 추출 함수나 write 헬퍼 몸통에 분기를 추가할 필요가 없다 —
+«메시지→문서만 되고 메시지→스토리는 파서가 막는» 죽은 경로가 이 구조에서는 재발하지 않는다.
+
+⛔story #2273(C-1b): write 대상이 옛 `mentions` 표에서 **`entity_references` 표로 재배선**됐다
+(#2259가 세운 그 표). `target_types` 기본값도 `app.models.mention.TARGET_TYPES`(스키마 CHECK)
+대신 `app.services.reference_registry.ENTITY_RESOLVERS`(실제 쓰기 가능한 타입의 진짜 SSOT —
+이제 Mention이 아니라 Reference가 write target이므로 그쪽 registry가 맞는 기준)를 쓴다.
+옛 `mentions` 표는 이 모듈에서 더 이상 쓰지 않는다(지우지는 않는다 — 되돌릴 길, #2273 AC7).
 
 기존 `mentioned_ids`(ConversationMessage 컬럼·멤버 알림용) 파이프라인은 이 모듈이 전혀
 참조하지 않는다 — 완전히 독립된 병행 경로.
@@ -39,8 +44,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.models.mention import TARGET_TYPES, Mention
+from app.models.reference import Reference
 from app.services.member_resolver import canonicalize_member_id
+from app.services.reference_registry import ENTITY_RESOLVERS
 
 _UUID_RE = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 
@@ -144,7 +150,7 @@ async def insert_chat_mentions(
     message_id: uuid.UUID,
     content: str,
     created_by: uuid.UUID,
-    target_types: frozenset[str] = TARGET_TYPES,
+    target_types: frozenset[str] = frozenset(ENTITY_RESOLVERS),
 ) -> None:
     """채팅 write-path: insert-only(메시지 불변 전제 — 재조정 불필요). 같은 트랜잭션(caller 의
     세션 그대로 사용·별도 커밋 없음) — 실패 시 예외가 그대로 propagate 되어 caller(메시지 전송
@@ -152,9 +158,13 @@ async def insert_chat_mentions(
 
     story #2260: target_type 은 본문에서 추출된 값을 그대로 쓴다(내부에서 결정하지 않는다) —
     이 함수엔 entity type 리터럴이 하나도 없다. `target_types`는 **지금 이 write-path 가
-    실제로 쓰기를 허용하는 타입의 경계**(schema CHECK와 동일 SSOT, app.models.mention.
-    TARGET_TYPES)일 뿐 — 새 타입을 지원하려면 스키마 CHECK + 이 기본값만 넓히면 되고, 이
-    함수 몸통에 분기를 추가할 필요가 없다(대상 종류를 코드에 나열한 곳이 여기 없다는 뜻)."""
+    실제로 쓰기를 허용하는 타입의 경계**(기본값 = reference_registry.ENTITY_RESOLVERS, story
+    #2273부터 진짜 SSOT — write target이 Reference라 그쪽 registry가 기준) — 새 타입을
+    지원하려면 registry + 이 기본값만 넓히면 되고, 이 함수 몸통에 분기를 추가할 필요가 없다.
+
+    story #2273: write target이 옛 `mentions`(Mention)에서 `entity_references`(Reference)로
+    재배선됐다. source_field="body"(채팅 메시지는 텍스트 필드가 하나뿐 — PO 정정, NULL로
+    "없음"을 표현하지 않는다)."""
     pairs = [
         (etype, eid) for etype, eid in extract_chat_entity_mentions(content)
         if etype in target_types
@@ -162,22 +172,30 @@ async def insert_chat_mentions(
     if not pairs:
         return
     canonical_created_by = await canonicalize_member_id(created_by, db)
-    stmt = pg_insert(Mention).values([
+    stmt = pg_insert(Reference).values([
         {
             "id": uuid.uuid4(),
             "org_id": org_id,
             "source_type": "chat_message",
+            "source_field": "body",
             "source_id": message_id,
             "target_type": entity_type,
             "target_id": entity_id,
+            "form": "mention",
             "created_by": canonical_created_by,
         }
         for entity_type, entity_id in pairs
     ])
-    # UNIQUE(source_type, source_id, target_type, target_id) 방어 — insert-only 전제라 원칙적으로
-    # 이 message_id 에 대한 기존 row 는 없지만(신규 메시지), 같은 메시지 안에 동일 doc 을 가리키는
+    # 부분 유니크(uq_entity_references_non_proof) 방어 — insert-only 전제라 원칙적으로 이
+    # message_id 에 대한 기존 row 는 없지만(신규 메시지), 같은 메시지 안에 동일 대상을 가리키는
     # 토큰이 두 번 이상 남아도(추출 단계에서 이미 dedupe 하지만 방어적으로) 무해하게 흡수한다.
-    stmt = stmt.on_conflict_do_nothing(constraint="uq_mentions_source_target")
+    stmt = stmt.on_conflict_do_nothing(
+        index_elements=[
+            Reference.source_type, Reference.source_field, Reference.source_id,
+            Reference.target_type, Reference.target_id, Reference.form,
+        ],
+        index_where=Reference.form != "proof",
+    )
     await db.execute(stmt)
 
 
@@ -190,20 +208,25 @@ async def reconcile_doc_mentions(
     created_by: uuid.UUID,
 ) -> None:
     """doc write-path: diff 기반 reconcile(create/update 공용 — create 는 existing=∅ 이라 순수
-    insert 로 귀결). 새 content 에 더 이상 없는 기존 mentions 는 삭제, 새로 생긴 건
+    insert 로 귀결). 새 content 에 더 이상 없는 기존 참조는 삭제, 새로 생긴 건
     ON CONFLICT DO NOTHING 으로 insert. 자기참조(target doc == source doc)는 드롭.
 
     같은 트랜잭션(caller 세션 그대로) — 실패 시 예외 propagate 로 caller(doc 저장 트랜잭션)
-    전체가 롤백된다(AC4 원자성)."""
+    전체가 롤백된다(AC4 원자성).
+
+    story #2273: write target이 `entity_references`로 재배선됐다. source_field="body"(doc
+    본문은 텍스트 필드가 하나뿐)."""
     target_ids = {tid for tid in extract_doc_mention_ids(html_content) if tid != doc_id}
 
     existing_ids = set(
         (
             await db.execute(
-                select(Mention.target_id).where(
-                    Mention.source_type == "doc",
-                    Mention.source_id == doc_id,
-                    Mention.target_type == "doc",
+                select(Reference.target_id).where(
+                    Reference.source_type == "doc",
+                    Reference.source_field == "body",
+                    Reference.source_id == doc_id,
+                    Reference.target_type == "doc",
+                    Reference.form == "mention",
                 )
             )
         ).scalars().all()
@@ -214,28 +237,38 @@ async def reconcile_doc_mentions(
         from sqlalchemy import delete as sa_delete
 
         await db.execute(
-            sa_delete(Mention).where(
-                Mention.source_type == "doc",
-                Mention.source_id == doc_id,
-                Mention.target_type == "doc",
-                Mention.target_id.in_(stale_ids),
+            sa_delete(Reference).where(
+                Reference.source_type == "doc",
+                Reference.source_field == "body",
+                Reference.source_id == doc_id,
+                Reference.target_type == "doc",
+                Reference.form == "mention",
+                Reference.target_id.in_(stale_ids),
             )
         )
 
     new_ids = target_ids - existing_ids
     if new_ids:
         canonical_created_by = await canonicalize_member_id(created_by, db)
-        stmt = pg_insert(Mention).values([
+        stmt = pg_insert(Reference).values([
             {
                 "id": uuid.uuid4(),
                 "org_id": org_id,
                 "source_type": "doc",
+                "source_field": "body",
                 "source_id": doc_id,
                 "target_type": "doc",
                 "target_id": target_id,
+                "form": "mention",
                 "created_by": canonical_created_by,
             }
             for target_id in new_ids
         ])
-        stmt = stmt.on_conflict_do_nothing(constraint="uq_mentions_source_target")
+        stmt = stmt.on_conflict_do_nothing(
+            index_elements=[
+                Reference.source_type, Reference.source_field, Reference.source_id,
+                Reference.target_type, Reference.target_id, Reference.form,
+            ],
+            index_where=Reference.form != "proof",
+        )
         await db.execute(stmt)

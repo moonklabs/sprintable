@@ -183,7 +183,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.doc import Doc
-from app.models.mention import Mention
+from app.models.reference import Reference
 from app.services.conversation_auth import conversation_readable_predicate
 from app.services.member_resolver import ResolvedMember, lookup_members_by_ids
 from app.services.project_auth import (
@@ -345,7 +345,12 @@ async def list_doc_backlinks(
         )
 
     # ── 단일 authz-embedded keyset 쿼리 — Python authz filter/retry 0, 2-phase 없음 ──
-    # mentions.source_id는 polymorphic(FK 없음: docs.id 또는 conversation_messages.id) —
+    # ⛔story #2273(C-1b): source는 entity_references(Reference)에서 읽는다(#2259가 세운 표,
+    # #2273이 write-path와 같은 배포로 read도 재배선 — read/write를 가르면 그 사이 창에서
+    # 화면이 거짓말한다, PO 판정). source_field == "body" 필터는 이 read-path가 아는 두
+    # source_type(doc·chat_message) 다 텍스트 필드가 하나뿐이라는 사실과 짝을 맞춘 것(다른
+    # source_field 값 — 예: story description/AC — 는 이 backlinks 엔드포인트의 스코프 밖).
+    # entity_references.source_id는 polymorphic(FK 없음: docs.id 또는 conversation_messages.id) —
     # 두 conditional LEFT JOIN(+ chat-source는 Conversation까지 세 번째 LEFT JOIN)으로 각각의
     # source_type에서만 매치시킨다. Conversation JOIN의 ON절 `Conversation.org_id == org_id`가
     # Blocker 1(org-scope 누락) fix — Doc JOIN의 `Doc.org_id == org_id`와 동형. §8③ 요구대로
@@ -353,19 +358,19 @@ async def list_doc_backlinks(
     # WHERE 절에 직접 embed한다(별도 SELECT로 먼저 집합을 만들지 않음 — TOCTOU-by-construction).
     stmt = (
         select(
-            Mention,
+            Reference,
             Doc.project_id.label("doc_project_id"),
             Doc.title.label("doc_title"),
             ConversationMessage.conversation_id.label("msg_conversation_id"),
             ConversationMessage.content.label("msg_content"),
             ConversationMessage.sender_id.label("msg_sender_id"),
         )
-        .select_from(Mention)
+        .select_from(Reference)
         .outerjoin(
             Doc,
             and_(
-                Doc.id == Mention.source_id,
-                Mention.source_type == "doc",
+                Doc.id == Reference.source_id,
+                Reference.source_type == "doc",
                 Doc.org_id == org_id,
                 Doc.deleted_at.is_(None),  # soft-deleted source doc 배제
             ),
@@ -373,8 +378,8 @@ async def list_doc_backlinks(
         .outerjoin(
             ConversationMessage,
             and_(
-                ConversationMessage.id == Mention.source_id,
-                Mention.source_type == "chat_message",
+                ConversationMessage.id == Reference.source_id,
+                Reference.source_type == "chat_message",
             ),
         )
         .outerjoin(
@@ -385,18 +390,19 @@ async def list_doc_backlinks(
             ),
         )
         .where(
-            Mention.org_id == org_id,
-            Mention.target_type == "doc",
-            Mention.target_id == doc_id,
+            Reference.org_id == org_id,
+            Reference.source_field == "body",
+            Reference.target_type == "doc",
+            Reference.target_id == doc_id,
             or_(
                 and_(
-                    Mention.source_type == "doc",
+                    Reference.source_type == "doc",
                     # §5회차 Blocker 1 fix: 사전 IN-list가 아니라 correlated EXISTS(같은 statement
                     # ·같은 스냅샷 — 위 chat-source project_access_valid와 동일 SSOT 호출).
                     project_access_valid_correlated(Doc.project_id, caller_id=uid, org_id=org_id),
                 ),
                 and_(
-                    Mention.source_type == "chat_message",
+                    Reference.source_type == "chat_message",
                     # org join이 매치 실패하면(다른 org 소속 conversation) Conversation.id가
                     # NULL — 이 가드가 그 행을 admin-bypass 포함 어떤 경로로도 확실히 탈락시킨다.
                     Conversation.id.isnot(None),
@@ -407,9 +413,9 @@ async def list_doc_backlinks(
     )
     if cursor_key is not None:
         cursor_created_at, cursor_id = cursor_key
-        stmt = stmt.where(tuple_(Mention.created_at, Mention.id) < tuple_(cursor_created_at, cursor_id))
+        stmt = stmt.where(tuple_(Reference.created_at, Reference.id) < tuple_(cursor_created_at, cursor_id))
 
-    stmt = stmt.order_by(Mention.created_at.desc(), Mention.id.desc()).limit(limit + 1)
+    stmt = stmt.order_by(Reference.created_at.desc(), Reference.id.desc()).limit(limit + 1)
 
     rows = (await db.execute(stmt)).all()
     has_more = len(rows) > limit
@@ -418,14 +424,14 @@ async def list_doc_backlinks(
     # 최종 페이지 행에서만 sender/created_by 배치 해소(N+1 없음 — §ⓝ 기존 관례 유지).
     sender_ids = {
         r.msg_sender_id for r in page_rows
-        if r.Mention.source_type == "chat_message" and r.msg_sender_id is not None
+        if r.Reference.source_type == "chat_message" and r.msg_sender_id is not None
     }
-    creator_ids = {r.Mention.created_by for r in page_rows if r.Mention.created_by is not None}
+    creator_ids = {r.Reference.created_by for r in page_rows if r.Reference.created_by is not None}
     member_map = await lookup_members_by_ids(sender_ids | creator_ids, db)
 
     data: list[dict] = []
     for r in page_rows:
-        m = r.Mention
+        m = r.Reference
         creator = member_map.get(m.created_by) if m.created_by is not None else None
         item: dict = {
             "id": str(m.id),
@@ -450,7 +456,7 @@ async def list_doc_backlinks(
 
     next_cursor = None
     if has_more and page_rows:
-        last_mention = page_rows[-1].Mention
+        last_mention = page_rows[-1].Reference
         next_cursor = encode_cursor(last_mention.created_at, last_mention.id)
 
     return {"data": data, "meta": {"next_cursor": next_cursor, "has_more": has_more}}
