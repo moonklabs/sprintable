@@ -1,12 +1,13 @@
 """story #1993(E-KNOWLEDGE-LINK S1) — mentions write-path 파서. 근본 설계 doc
 design-org-knowledge-mentions-backlinks §2.
 
-두 개의 독립된 순수 추출 함수 + 두 개의 DB write 헬퍼로 구성된다:
+순수 추출 함수 + DB write 헬퍼로 구성된다:
 
-  · `extract_chat_doc_mention_ids` — 채팅 메시지 content 에서 `[title](entity:doc:<uuid>)`
+  · `extract_chat_entity_mentions` — 채팅 메시지 content 에서 `[title](entity:<type>:<uuid>)`
     토큰(FE `apps/web/src/components/chat/chat-input.tsx` applyEntity 가 만드는 정확한 포맷 —
-    `#` 트리거 검색 결과 선택 시 삽입)을 정규식으로 추출한다. 채팅 메시지는 수정 불가 전제라
-    파서도 매번 전체를 새로 파싱해 insert-only 로 쓴다(재조정 불필요).
+    `#` 트리거 검색 결과 선택 시 삽입)을 (entity_type, id) 쌍으로 **전부** 추출한다. 채팅
+    메시지는 수정 불가 전제라 파서도 매번 전체를 새로 파싱해 insert-only 로 쓴다(재조정 불필요).
+  · `extract_chat_doc_mention_ids` — 위의 doc-only 하위호환 래퍼(기존 호출부/테스트용).
   · `extract_doc_mention_ids` — doc content(HTML — tiptap `editor.getHTML()` 그대로 저장,
     content_format 무관하게 실제 마크업은 HTML)에서 wikiLink(`<span data-type="wikiLink"
     data-doc-id="...">`) 와 pageEmbed(`<div data-page-embed data-doc-id="...">`) 의
@@ -14,13 +15,16 @@ design-org-knowledge-mentions-backlinks §2.
     attribute 순서가 보장되지 않는다는 게 설계 doc 의 근거(mergeAttributes 가 만드는 순서는
     tiptap 내부 구현에 의존하므로 위치 기반 정규식은 취약).
 
-두 함수 모두 malformed 토큰(파싱 실패·잘못된 UUID)은 **조용히 스킵**한다 — 멘션 파싱 실패로
+추출 함수는 malformed 토큰(파싱 실패·잘못된 UUID)을 **조용히 스킵**한다 — 멘션 파싱 실패로
 본 메시지/문서 저장 전체가 실패하면 안 된다는 원칙(AC와 별개로, 파서 자체의 malformed-tolerance).
-자기참조(target doc == source doc)는 두 write 헬퍼가 공통으로 드롭한다.
+자기참조(target doc == source doc)는 doc write 헬퍼가 드롭한다.
 
-story/epic 멘션은 **파싱하지 않는다**(스키마 CHECK 는 여지를 열어두되 이번 스토리는 doc 만 —
-과확장 금지). 확장 시 `_CHAT_TOKEN_RE`의 `type` 그룹을 소비하는 분기만 추가하면 된다(현재는
-`doc` 타입만 필터링).
+⛔story #2260: **어떤 entity_type 이 지원되는지는 추출 함수의 관심사가 아니다** — 추출은
+`entity:<type>:<id>` 토큰을 있는 그대로 전부 뽑고, "지금 이 write-path 가 뭘 쓰기 허용하는가"는
+`insert_chat_mentions(target_types=...)` 파라미터가 결정한다(기본값 = `app.models.mention.
+TARGET_TYPES`, 스키마 CHECK 와 동일 SSOT). 새 타입을 열려면 스키마 CHECK + 그 기본값만 넓히면
+되고, 추출 함수나 write 헬퍼 몸통에 분기를 추가할 필요가 없다 — «메시지→문서만 되고
+메시지→스토리는 파서가 막는» 죽은 경로가 이 구조에서는 재발하지 않는다.
 
 기존 `mentioned_ids`(ConversationMessage 컬럼·멤버 알림용) 파이프라인은 이 모듈이 전혀
 참조하지 않는다 — 완전히 독립된 병행 경로.
@@ -35,7 +39,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.models.mention import Mention
+from app.models.mention import TARGET_TYPES, Mention
 from app.services.member_resolver import canonicalize_member_id
 
 _UUID_RE = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
@@ -48,26 +52,37 @@ _CHAT_TOKEN_RE = re.compile(
 )
 
 
-def extract_chat_doc_mention_ids(content: str) -> list[uuid.UUID]:
-    """채팅 메시지 content 에서 `entity:doc:<uuid>` 토큰의 doc id 를 순서 보존 + 중복 제거로 추출.
+def extract_chat_entity_mentions(content: str) -> list[tuple[str, uuid.UUID]]:
+    """채팅 메시지 content 에서 `entity:<type>:<uuid>` 토큰 전부를 (entity_type, id) 쌍으로,
+    순서 보존 + 중복 제거해 추출한다.
 
-    malformed(정규식 미매치·잘못된 UUID)는 자연히 스킵된다. story/epic 등 다른 entity type
-    토큰은 무시(doc 만 스코프)."""
+    ⛔story #2260: 어떤 entity_type 이 "지원되는지"는 이 함수의 관심사가 아니다 — 그 판단은
+    write-path 호출부가 target_types 로 내린다(추출/저장의 경계를 함수 시그니처로 옮김).
+    이 함수를 다시 열어 타입별 분기를 추가하는 일은 이제 없다(그러면 죽은 경로가 재발한다).
+
+    malformed(정규식 미매치·잘못된 UUID)는 자연히 스킵된다."""
     if not content:
         return []
-    seen: set[uuid.UUID] = set()
-    result: list[uuid.UUID] = []
+    seen: set[tuple[str, uuid.UUID]] = set()
+    result: list[tuple[str, uuid.UUID]] = []
     for m in _CHAT_TOKEN_RE.finditer(content):
-        if m.group("type") != "doc":
-            continue
+        entity_type = m.group("type")
         try:
-            doc_id = uuid.UUID(m.group("id"))
+            entity_id = uuid.UUID(m.group("id"))
         except (ValueError, AttributeError):
             continue
-        if doc_id not in seen:
-            seen.add(doc_id)
-            result.append(doc_id)
+        key = (entity_type, entity_id)
+        if key not in seen:
+            seen.add(key)
+            result.append(key)
     return result
+
+
+def extract_chat_doc_mention_ids(content: str) -> list[uuid.UUID]:
+    """`extract_chat_entity_mentions`의 doc-only 하위집합(하위호환 편의 래퍼) — 순서 보존.
+    ⛔새 호출부는 이 함수 대신 `extract_chat_entity_mentions`를 쓸 것(타입 필터링이 이미
+    걸려 있어 story #2260이 고친 문제를 다시 들여올 수 있다)."""
+    return [eid for etype, eid in extract_chat_entity_mentions(content) if etype == "doc"]
 
 
 class _DocMentionHTMLParser(HTMLParser):
@@ -129,13 +144,22 @@ async def insert_chat_mentions(
     message_id: uuid.UUID,
     content: str,
     created_by: uuid.UUID,
+    target_types: frozenset[str] = TARGET_TYPES,
 ) -> None:
-    """채팅 write-path: insert-only(메시지 불변 전제 — 재조정 불필요). 자기참조 개념이 없다
-    (source=chat_message, target=doc — 항상 다른 타입). 같은 트랜잭션(caller 의 세션 그대로
-    사용·별도 커밋 없음) — 실패 시 예외가 그대로 propagate 되어 caller(메시지 전송 트랜잭션)
-    전체가 롤백된다(AC4 원자성)."""
-    target_ids = extract_chat_doc_mention_ids(content)
-    if not target_ids:
+    """채팅 write-path: insert-only(메시지 불변 전제 — 재조정 불필요). 같은 트랜잭션(caller 의
+    세션 그대로 사용·별도 커밋 없음) — 실패 시 예외가 그대로 propagate 되어 caller(메시지 전송
+    트랜잭션) 전체가 롤백된다(AC4 원자성).
+
+    story #2260: target_type 은 본문에서 추출된 값을 그대로 쓴다(내부에서 결정하지 않는다) —
+    이 함수엔 entity type 리터럴이 하나도 없다. `target_types`는 **지금 이 write-path 가
+    실제로 쓰기를 허용하는 타입의 경계**(schema CHECK와 동일 SSOT, app.models.mention.
+    TARGET_TYPES)일 뿐 — 새 타입을 지원하려면 스키마 CHECK + 이 기본값만 넓히면 되고, 이
+    함수 몸통에 분기를 추가할 필요가 없다(대상 종류를 코드에 나열한 곳이 여기 없다는 뜻)."""
+    pairs = [
+        (etype, eid) for etype, eid in extract_chat_entity_mentions(content)
+        if etype in target_types
+    ]
+    if not pairs:
         return
     canonical_created_by = await canonicalize_member_id(created_by, db)
     stmt = pg_insert(Mention).values([
@@ -144,11 +168,11 @@ async def insert_chat_mentions(
             "org_id": org_id,
             "source_type": "chat_message",
             "source_id": message_id,
-            "target_type": "doc",
-            "target_id": target_id,
+            "target_type": entity_type,
+            "target_id": entity_id,
             "created_by": canonical_created_by,
         }
-        for target_id in target_ids
+        for entity_type, entity_id in pairs
     ])
     # UNIQUE(source_type, source_id, target_type, target_id) 방어 — insert-only 전제라 원칙적으로
     # 이 message_id 에 대한 기존 row 는 없지만(신규 메시지), 같은 메시지 안에 동일 doc 을 가리키는
