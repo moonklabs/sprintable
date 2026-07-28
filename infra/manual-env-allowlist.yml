@@ -454,3 +454,72 @@ code_read_exempt:
     reason: INTERNAL_DOGFOOD_ACCESS_ENABLED가 꺼져 있으면(기본) 실질 영향 없음 — 같은 기능군.
   - key: INTERNAL_DOGFOOD_DEFAULT_PROJECT_NAME
     reason: INTERNAL_DOGFOOD_ACCESS_ENABLED가 꺼져 있으면(기본) 실질 영향 없음 — 같은 기능군.
+
+# ⑤㉠(story #2296 후속, 파울로군 지시 2026-07-28) — «알려진 채무» 래칫 baseline.
+# ⛔code_read_exempt(위)와 다르다 — exempt는 "코드로 확認해 영구히 정상"이고, 이건 "아직
+# triage 안 됐지만 지금 당장 FAIL로 막으면 가드가 꺼지니 일단 알고 있다"다. baseline에
+# 없는 새 ㉠(high)가 생기면 즉시 FAIL — 그래서 baseline 목록이 늘어나는 건 이 가드가
+# 막으려는 바로 그 방향이다(새 구멍 추가는 이 파일을 고치는 게 아니라 실제로 값을
+# 채우는 걸로 막혀야 한다).
+# reason/declared_by/until 필수(최대 30일) — mcp-path-contract-allowlist.yml(#2280)과
+# 동일 계약. 2026-07-28 실측 기준 14건 — check_env_drift.py 실행 로그의
+# "⑤㉠ baseline" 카운트가 이 숫자와 일치해야 정상(달라지면 파일이 낡은 것).
+code_read_high_baseline:
+  - key: AGENT_INBOX_HMAC_SECRET
+    reason: apps/web/src/services/inbox-item.service.ts — 기본값 없음, 미triage.
+    declared_by: PO
+    until: "2026-08-27"
+  - key: APP_BASE_URL
+    reason: apps/web/src/lib/auth/cookies.ts — 기본값 없음, 미triage(Amplify 레거시 override 후보).
+    declared_by: PO
+    until: "2026-08-27"
+  - key: FIREBASE_AUTH_ISSUE_SESSION
+    reason: apps/web/src/app/api/auth/firebase/session/route.ts — 기본값 없음, 미triage.
+    declared_by: PO
+    until: "2026-08-27"
+  - key: FIREBASE_AUTH_MOBILE_ISSUE
+    reason: apps/web/src/app/auth/native/route.ts — 기본값 없음, 미triage.
+    declared_by: PO
+    until: "2026-08-27"
+  - key: FIREBASE_OAUTH_HANDOFF_ENABLED
+    reason: apps/web/src/app/auth/oauth-handoff/route.ts — 기본값 없음, 미triage(기능 플래그 추정).
+    declared_by: PO
+    until: "2026-08-27"
+  - key: LICENSE_CONSENT
+    reason: apps/web/src/lib/ee-enabled.ts — 기본값 없음, 미triage.
+    declared_by: PO
+    until: "2026-08-27"
+  - key: MCP_ALLOWED_TOKEN_REFS
+    reason: apps/web/src/lib/mcp-secrets.ts — 기본값 없음, 미triage.
+    declared_by: PO
+    until: "2026-08-27"
+  - key: NEXT_PUBLIC_APP_URL
+    reason: apps/web/src/lib/auth/cookies.ts 등 — 기본값 없음, 미triage.
+    declared_by: PO
+    until: "2026-08-27"
+  - key: NEXT_PUBLIC_EE_ENABLED
+    reason: apps/web/src/lib/ee.ts — 기본값 없음, 미triage(기능 플래그 추정).
+    declared_by: PO
+    until: "2026-08-27"
+  - key: NEXT_PUBLIC_FIREBASE_API_KEY
+    reason: >-
+      apps/web/src/lib/auth/firebase-client.ts — 기본값 없음, 미triage. NEXT_PUBLIC_*
+      빌드타임 인라이닝 모호성 있음(AC6 한계 참고).
+    declared_by: PO
+    until: "2026-08-27"
+  - key: NEXT_PUBLIC_FIREBASE_APP_ID
+    reason: apps/web/src/lib/auth/firebase-client.ts — 기본값 없음, 미triage(위와 동일 축).
+    declared_by: PO
+    until: "2026-08-27"
+  - key: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    reason: apps/web/src/lib/auth/firebase-client.ts — 기본값 없음, 미triage(위와 동일 축).
+    declared_by: PO
+    until: "2026-08-27"
+  - key: NEXT_PUBLIC_FIREBASE_AUTH_ENABLED
+    reason: apps/web/src/lib/auth/firebase-client.ts — 기본값 없음, 미triage(기능 플래그 추정).
+    declared_by: PO
+    until: "2026-08-27"
+  - key: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    reason: apps/web/src/lib/auth/firebase-client.ts·lib/db/server.ts — 기본값 없음, 미triage(위와 동일 축).
+    declared_by: PO
+    until: "2026-08-27"

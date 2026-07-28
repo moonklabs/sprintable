@@ -334,9 +334,11 @@ def _unsupplied_code_read_findings(
     web_reads: dict[str, list[tuple[str, str | None]]],
     covered_keys: set[str],
     code_read_exempt: set[str],
-) -> tuple[list[str], list[str], list[str]]:
-    """covered_keys(그 서비스의 IaC∪라이브 키 «이름» 집합)에 없는 키만, 등급별로 3개 리스트로
-    나눠 돌려준다(highest, high, low). exempt는 아예 리스트에서 빠진다(알려진 정상)."""
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
+    """covered_keys(그 서비스의 IaC∪라이브 키 «이름» 집합)에 없는 키만, 등급별로 3개
+    (key, line) 리스트로 나눠 돌려준다(highest, high, low). exempt는 아예 리스트에서
+    빠진다(알려진 정상). key를 별도로 주는 이유 — ㉠(high)는 baseline 래칫과 대조해야
+    한다(story #2296 후속, 파울로군 지시 2026-07-28)."""
     highest, high, low = [], [], []
     for key in sorted(web_reads):
         if key in covered_keys or key in code_read_exempt:
@@ -345,7 +347,7 @@ def _unsupplied_code_read_findings(
         tier = _classify_code_read_risk([d for _, d in occurrences])
         sample = ", ".join(sorted({f for f, _ in occurrences})[:2])
         line = f"{key} ({sample})"
-        (highest if tier == "highest" else high if tier == "high" else low).append(line)
+        (highest if tier == "highest" else high if tier == "high" else low).append((key, line))
     return highest, high, low
 
 
@@ -355,6 +357,73 @@ def _load_code_read_exempt() -> set[str]:
     return {entry["key"] for entry in data.get("code_read_exempt", [])}
 
 
+# ⑤ 후속(2026-07-28, 파울로군 지시) — ㉠(high)를 전부 report-only로 영원히 두면 "없는
+# 가드"가 된다. 지금 알려진 것을 baseline으로 얼리고, baseline에 없는 «새» high만 FAIL —
+# 그러면 지금은 안 빨개지고, 새 구멍은 막히고, baseline을 줄여야 한다는 압력이 남는다.
+# ⛔baseline이 "묻어두는 곳"이 되지 않도록 self-expiring(#2280/#2174와 동일 원칙)+매 실행
+# 카운트 출력을 강제한다.
+_MAX_CODE_READ_BASELINE_HORIZON_DAYS = 30
+
+
+def _load_code_read_high_baseline() -> dict[str, dict]:
+    import yaml
+    data = yaml.safe_load(_ALLOWLIST_PATH.read_text())
+    return {entry["key"]: entry for entry in data.get("code_read_high_baseline", [])}
+
+
+def _baseline_entry_expired(entry: dict, today) -> str | None:
+    """infra/mcp_path_contract_guard.py::_expired와 동일 계약(만료·형식 위반이면 사유,
+    아니면 None) — 이 가드 계열 전체가 공유하는 규율이라 그대로 재현한다."""
+    from datetime import date
+
+    until_raw = entry.get("until")
+    if not until_raw:
+        return "`until`(만료일)이 없다 — 영원히 사는 baseline은 허용하지 않는다"
+    try:
+        until = date.fromisoformat(str(until_raw))
+    except ValueError:
+        return f"`until` 형식이 YYYY-MM-DD가 아니다: {until_raw!r}"
+    if until < today:
+        return f"baseline이 만료됐다(until={until}) — 재triage 필요"
+    horizon = (until - today).days
+    if horizon > _MAX_CODE_READ_BASELINE_HORIZON_DAYS:
+        return f"`until`이 너무 멀다({until} · {horizon}일 뒤) — 최대 {_MAX_CODE_READ_BASELINE_HORIZON_DAYS}일"
+    if not entry.get("reason"):
+        return "`reason`(사유)이 없다"
+    if not entry.get("declared_by"):
+        return "`declared_by`(선언자)가 없다"
+    return None
+
+
+def _split_high_by_baseline(
+    high_items: list[tuple[str, str]], baseline: dict[str, dict], today
+) -> tuple[list[str], list[str]]:
+    """high(㉠) findings를 baseline과 대조 — (baseline_ok_lines, new_or_expired_lines).
+    후자는 FAIL로 승격된다(baseline에 없거나, 있어도 만료됐으면)."""
+    ok, escalate = [], []
+    for key, line in high_items:
+        entry = baseline.get(key)
+        if entry is None:
+            escalate.append(f"{line} — 🔴baseline에 없는 신규")
+            continue
+        problem = _baseline_entry_expired(entry, today)
+        if problem:
+            escalate.append(f"{line} — 🔴baseline 등재는 있으나 {problem}")
+        else:
+            ok.append(f"{line} — baseline(until={entry['until']})")
+    return ok, escalate
+
+
+def _today():
+    import os as _os
+    from datetime import date, datetime, timezone
+
+    env = _os.environ.get("ENV_DRIFT_GUARD_TODAY")
+    if env:
+        return date.fromisoformat(env)
+    return datetime.now(timezone.utc).date()
+
+
 def main() -> int:
     excluded_axes, allowlist_services = _load_allowlist()
     iac_keys = _iac_covered_keys()
@@ -362,6 +431,8 @@ def main() -> int:
     settings_exempt = _load_settings_exempt()
     web_reads = _web_env_reads()  # ⑤ — repo 정적 스캔, 서비스 루프 밖(반복 파일 IO 방지)
     code_read_exempt = _load_code_read_exempt()
+    code_read_baseline = _load_code_read_high_baseline()
+    today = _today()
 
     live_services = _list_live_services()
     key_set_failures: list[str] = []
@@ -369,7 +440,9 @@ def main() -> int:
     secret_shape_failures: list[str] = []
     settings_coverage_report: list[str] = []  # ④ report-only — FAIL 집합에 안 넣음(위 docstring).
     code_read_highest_failures: list[str] = []  # ⑤㉡ — FAIL 집합에 들어감(오늘 실제 사고 등급).
-    code_read_report: list[str] = []  # ⑤㉠㉢ — report-only(오탐 triage 전까지, ④와 동일 원칙).
+    code_read_baseline_escalations: list[str] = []  # ⑤㉠ baseline 밖(신규/만료) — FAIL 집합.
+    code_read_baseline_ok_count = 0  # ⑤㉠ baseline 안(알려진 채무) — report-only, 매번 카운트만.
+    code_read_report: list[str] = []  # ⑤㉢ — report-only(환경무관, 승격 대상 아님).
     unmapped: list[str] = []
 
     checked = 0
@@ -386,10 +459,19 @@ def main() -> int:
             covered = _iac_covered_keys_for_service(service) | live_keys_for_web
             highest, high, low = _unsupplied_code_read_findings(web_reads, covered, code_read_exempt)
             if highest:
-                code_read_highest_failures.append(f"{service}: {', '.join(highest)}")
-            for tier_label, items in (("㉠기본값없음", high), ("㉢환경무관", low)):
-                if items:
-                    code_read_report.append(f"{service}[{tier_label}]: {', '.join(items)}")
+                code_read_highest_failures.append(
+                    f"{service}: {', '.join(line for _, line in highest)}"
+                )
+            # ⭐파울로군 지시(2026-07-28) — ㉠을 영원히 report-only로 두면 없는 가드가 된다.
+            # baseline(known, self-expiring)에 없는 신규 ㉠만 FAIL로 승격한다.
+            baseline_ok, escalate = _split_high_by_baseline(high, code_read_baseline, today)
+            code_read_baseline_ok_count += len(baseline_ok)
+            if escalate:
+                code_read_baseline_escalations.append(f"{service}: {', '.join(escalate)}")
+            if low:
+                code_read_report.append(
+                    f"{service}[㉢환경무관]: {', '.join(line for _, line in low)}"
+                )
 
         # ③ 평문 시크릿 형태 검출 — excluded_services 여부와 무관하게 전 서비스에 적용.
         secret_hits = _plain_secret_shaped_keys(envs)
@@ -452,9 +534,17 @@ def main() -> int:
     # ⑤㉠㉢도 같은 성질(report-only)로 설계하는 참이라 그대로 물려받으면 안 됨 — FAIL 판정과
     # report-only 판정을 여기서 명시적으로 분리한다.
     has_fail = bool(
-        key_set_failures or value_check_failures or secret_shape_failures or code_read_highest_failures
+        key_set_failures or value_check_failures or secret_shape_failures
+        or code_read_highest_failures or code_read_baseline_escalations
     )
     has_report_only = bool(settings_coverage_report or code_read_report)
+
+    # ⭐파울로군 지시 ③ — baseline 수를 «매번» 찍는다(FAIL이든 성공이든 무관). baseline을
+    # 묻어두는 곳으로 쓰지 않으려면 그 크기가 줄어드는지 매 실행 눈에 보여야 한다.
+    print(
+        f"⑤㉠ baseline(known, self-expiring): {code_read_baseline_ok_count}건 "
+        f"— infra/manual-env-allowlist.yml의 code_read_high_baseline 참고"
+    )
 
     if has_fail or has_report_only:
         print("❌ env 드리프트 발견:" if has_fail else "⚠️ env 드리프트 report-only 발견(FAIL 아님):")
@@ -477,8 +567,14 @@ def main() -> int:
             )
             for line in code_read_highest_failures:
                 print(f"    - {line}")
+        if code_read_baseline_escalations:
+            print(
+                "  ⑤㉠코드가 읽는데 아무도 안 주는 값 — baseline 밖(신규 또는 만료, FAIL):"
+            )
+            for line in code_read_baseline_escalations:
+                print(f"    - {line}")
         if code_read_report:
-            print("  ⑤㉠㉢코드가 읽는데 아무도 안 주는 값(report-only — 등급별, FAIL 아님):")
+            print("  ⑤㉢코드가 읽는데 아무도 안 주는 값(환경무관 상수 — report-only, FAIL 아님):")
             for line in code_read_report:
                 print(f"    - {line}")
         if settings_coverage_report:
@@ -508,8 +604,10 @@ def main() -> int:
             "(b) 진짜 무효 배선 → 제거 또는 Settings 필드 추가, (c) 이름만 다른 alias → "
             "Settings 필드명 자체를 그 이름에 맞게 정정. "
             "⑤㉡은 즉시 그 서비스에 실제 값을 채우는 것(오늘 사고와 동일 형태 — 방치하면 그 "
-            "환경을 가리키는 채로 조용히 돈다). ⑤㉠㉢은 report-only — 의도적이면 "
-            "code_read_exempt(infra/manual-env-allowlist.yml)에 사유와 함께 등재."
+            "환경을 가리키는 채로 조용히 돈다). ⑤㉠ baseline 밖(신규/만료)은 (a) 값을 채우거나 "
+            "(b) 정상이면 code_read_high_baseline에 reason/declared_by/until(최대30일)과 "
+            "함께 등재하거나 (c) 영구 정상이면 code_read_exempt로 승격 — 셋 다 "
+            "infra/manual-env-allowlist.yml. ⑤㉢은 report-only(승격 대상 아님)."
         )
         if not has_fail:
             print("\n(⛔위는 report-only 항목뿐 — FAIL 아님. exit code는 0.)")

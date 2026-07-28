@@ -249,3 +249,102 @@ def test_ac6_dynamic_key_construction_is_not_detected(tmp_path):
     src.write_text("const key = 'RUNTIME_' + suffix; const v = process.env[key];\n")
     reads = mod._web_env_reads(tmp_path)
     assert reads == {}, "동적 키 조립은 이 축이 원천적으로 못 본다는 전제가 깨짐"
+
+
+# ── ⑤㉠ baseline 래칫(파울로군 지시, 2026-07-28) — report-only가 영원히 report-only가
+# 되지 않도록: baseline에 없는 새 ㉠은 FAIL, baseline 안은 count만, self-expiring ──────
+
+
+def _entry(reason="r", declared_by="PO", until="2026-08-27"):
+    return {"reason": reason, "declared_by": declared_by, "until": until}
+
+
+def test_baseline_known_high_is_not_escalated():
+    mod = _load_check_env_drift()
+    baseline = {"KNOWN_KEY": _entry()}
+    ok, escalate = mod._split_high_by_baseline(
+        [("KNOWN_KEY", "KNOWN_KEY (file.ts)")], baseline, mod._today()
+    )
+    assert len(ok) == 1 and escalate == []
+
+
+def test_new_high_not_in_baseline_is_escalated():
+    """AC의 핵심 — baseline에 없는 신규 ㉠은 즉시 FAIL 대상이 된다."""
+    mod = _load_check_env_drift()
+    ok, escalate = mod._split_high_by_baseline(
+        [("BRAND_NEW_KEY", "BRAND_NEW_KEY (file.ts)")], {}, mod._today()
+    )
+    assert ok == [] and len(escalate) == 1
+    assert "BRAND_NEW_KEY" in escalate[0] and "신규" in escalate[0]
+
+
+def test_baseline_entry_expired_is_escalated():
+    """만료된 baseline은 신규와 동일하게 FAIL — 「묻어두는 곳」이 되지 않는다."""
+    from datetime import date
+    mod = _load_check_env_drift()
+    baseline = {"OLD_KEY": _entry(until="2026-01-01")}
+    ok, escalate = mod._split_high_by_baseline(
+        [("OLD_KEY", "OLD_KEY (file.ts)")], baseline, date(2026, 7, 28)
+    )
+    assert ok == [] and len(escalate) == 1 and "만료" in escalate[0]
+
+
+def test_baseline_entry_too_far_in_future_is_escalated():
+    mod = _load_check_env_drift()
+    baseline = {"K": _entry(until="2099-12-31")}
+    ok, escalate = mod._split_high_by_baseline([("K", "K (f.ts)")], baseline, mod._today())
+    assert ok == [] and "너무 멀다" in escalate[0]
+
+
+def test_baseline_entry_without_reason_is_escalated():
+    mod = _load_check_env_drift()
+    entry = _entry()
+    del entry["reason"]
+    baseline = {"K": entry}
+    ok, escalate = mod._split_high_by_baseline([("K", "K (f.ts)")], baseline, mod._today())
+    assert ok == [] and "reason" in escalate[0]
+
+
+def test_repo_code_read_high_baseline_is_wellformed():
+    """저장소에 실제로 커밋된 baseline(14건, 2026-07-28)이 형식을 지키는지."""
+    mod = _load_check_env_drift()
+    baseline = mod._load_code_read_high_baseline()
+    assert len(baseline) == 14
+    for key, entry in baseline.items():
+        problem = mod._baseline_entry_expired(entry, mod._today())
+        assert problem is None, f"{key}: {problem}"
+
+
+def test_ac1_full_main_new_high_key_escalates_to_fail(monkeypatch, capsys):
+    """⭐라이브 재현 — baseline에 없는 새 ㉠ 하나가 실제로 main()을 exit 1로 떨어뜨리는지
+    end-to-end로 본다(AC1이 요구하는 "가드가 빨개지는 것"을 ㉠ 축에서도 만족)."""
+    mod = _load_check_env_drift()
+    monkeypatch.setattr(mod, "_list_live_services", lambda: ["sprintable-frontend-prod"])
+    monkeypatch.setattr(mod, "_live_env_entries", lambda service: [])
+    monkeypatch.setattr(mod, "_load_allowlist", lambda: ({}, {}))
+    monkeypatch.setattr(mod, "_iac_covered_keys_for_service", lambda service: set())
+    monkeypatch.setattr(mod, "_iac_covered_keys", lambda: set())
+    monkeypatch.setattr(
+        mod, "_web_env_reads",
+        lambda: {"BRAND_NEW_UNBASELINED_KEY": [("fake.ts", None)]},  # 기본값 없음 = ㉠
+    )
+    monkeypatch.setattr(mod, "_load_code_read_exempt", lambda: set())
+    monkeypatch.setattr(mod, "_load_code_read_high_baseline", lambda: {})  # baseline 비어있음
+
+    exit_code = mod.main()
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert "BRAND_NEW_UNBASELINED_KEY" in out and "신규" in out
+
+
+def test_baseline_count_is_always_printed(monkeypatch, capsys):
+    """③ — baseline 수를 «매번» 찍는다(성공 경로에서도). 안 찍으면 baseline이 줄어드는지
+    아무도 모른다."""
+    mod = _load_check_env_drift()
+    monkeypatch.setattr(mod, "_list_live_services", lambda: [])  # 서비스 0개 — 완전 성공 경로
+    monkeypatch.setattr(mod, "_load_allowlist", lambda: ({}, {}))
+
+    exit_code = mod.main()
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "⑤㉠ baseline" in out
