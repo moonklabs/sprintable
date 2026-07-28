@@ -623,17 +623,21 @@ class FallbackNotifyRequest(BaseModel):
     step_run_id: uuid.UUID
 
 
-# E-DG S12 Gap2: stuck handoff fallback human notification. 기존 _get_repo org-scoped auth·없는
-# story 404·dispatch_notification 재사용·idempotent(run당 1회·already_notified)·status rollback 0.
+# E-DG S12 Gap2: stuck handoff fallback human notification. 없는 story 404·dispatch_notification
+# 재사용·idempotent(run당 1회·already_notified)·status rollback 0.
+# story #2245(형제 비대칭 — 쓰기): _get_repo가 org-scope만 걸어 project 접근권 검사가 없었다.
+# 형제 get_story/get_workflow_line_status와 동일 가드(_assert_story_project_access) 재사용.
 @router.post("/{id}/workflow-line/fallback-notify")
 async def workflow_line_fallback_notify(
     id: uuid.UUID,
     body: FallbackNotifyRequest,
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     from app.services.workflow_fallback_notify import fallback_notify
     result = await fallback_notify(repo.session, repo.org_id, id, body.step_run_id)
     if result.get("status") == "not_found":
@@ -648,6 +652,10 @@ class WithdrawRequest(BaseModel):
 
 # E-DG S17: author/owner pending gate run 철회(withdraw). requester/owner/admin 만·idempotent·
 # Gate enum 미확장(run/approval status 로만)·entity 미전이.
+# story #2245(형제 비대칭 — 쓰기): _get_repo가 org-scope만 걸어 project 접근권 검사가 없었다.
+# 형제 get_story/get_workflow_line_status와 동일 가드(_assert_story_project_access) 재사용 —
+# requester/owner/admin(아래 withdraw_pending_run 내부 판정)보다 먼저, project 접근권 자체가
+# 없으면 그 판정에 도달하지도 못하게 한다.
 @router.post("/{id}/workflow-line/withdraw")
 async def workflow_line_withdraw(
     id: uuid.UUID,
@@ -659,6 +667,7 @@ async def workflow_line_withdraw(
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
     from app.services.workflow_recall import withdraw_pending_run
     result = await withdraw_pending_run(repo.session, repo.org_id, id, body.step_run_id, actor_id, body.reason)
