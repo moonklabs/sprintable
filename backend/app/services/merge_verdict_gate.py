@@ -14,12 +14,14 @@ import logging
 import math
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.models.gate import set_gate_evidence_status, set_gate_status
 from app.models.participation import ParticipationRole
 from app.services.gate_resolver import (
     SOURCE_MEMBER_OVERRIDE,
@@ -404,7 +406,7 @@ async def evaluate_merge_gate(
             *((gate.neutral_facts or {}).get("decision_history") or []),
             prior,
         ]
-        gate.status = "pending"
+        set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
         gate.resolver_id = None
         gate.resolved_at = None
         gate.resolution_note = None
@@ -429,7 +431,7 @@ async def evaluate_merge_gate(
     # S5 board preflight)가 영속화한다. 재평가 시 동일 키로 멱등 갱신. (이전엔 MergeGateDecision 리턴엔
     # 있으나 gate row 영속화 0 → FE S8이 null을 읽어 GateInbox 액션 미노출 = dogfood 적발 버그.)
     gate.requires_human = decision != AUTO_MERGE
-    gate.evidence_status = _evidence_status(decision)
+    set_gate_evidence_status(gate, _evidence_status(decision), now=datetime.now(timezone.utc))
     gate.decision_basis = reason
     gate.auto_decision_reason = decision
     await session.flush()

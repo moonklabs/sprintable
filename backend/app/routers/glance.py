@@ -1,9 +1,19 @@
 """글랜스 '손이 필요한 것' 예외 스트림 BE (story db7eb049·E-GLANCE 2D).
 
 현 프로젝트의 human-attention **실신호만** 반환한다 — gate_pending(인간 승인 대기)·blocked(의존 대기)·
-merge_ready(리뷰/머지 대기). 유나 spec(glance-focus-legible-fe-spec-handoff ⓓ) 계약: 활동량/타임스탬프/
-순위 0·감시 아니라 신뢰(주어=프로젝트/팀·예외만)·실신호 없으면 정직 빈배열(FE "손 필요한 것 없음").
-3 신호 전부 project_id 직스코프(approval.project_id·story.project_id 직결·조인은 title enrich만).
+merge_ready(리뷰/머지 대기)·needs_input·verify_fail. 유나 spec(glance-focus-legible-fe-spec-handoff
+ⓓ) 계약: 활동량/순위 0·감시 아니라 신뢰(주어=프로젝트/팀·예외만)·실신호 없으면 정직 빈배열(FE
+"손 필요한 것 없음"). 5 신호 전부 project_id 직스코프(approval.project_id·story.project_id 직결·
+조인은 title enrich만).
+
+story #2249: 「그 상태에 들어간 시각」(entered_state_at) — kind별 소스가 다르다(전수):
+  gate_pending → WorkflowLineStepApproval.created_at(row가 매 사이클 새 INSERT라 정확)
+  blocked      → ItemDependency.created_at(근사 — 막는 쪽 재오픈 edge case는 늦게 반영될 수 있음)
+  merge_ready  → StoryActivity(status_changed→in-review) 최신 행(best-effort·actor_id 없으면 유실 가능)
+  needs_input  → Gate.status_entered_at(신규 컬럼 — updated_at 대체 불가 실측 후 신설, #2249 AC1)
+  verify_fail  → Gate.evidence_status_entered_at(위와 동일 사유, status와 별개 축)
+시맨틱(AC4): 전부 UTC·"마지막으로 이 상태가 된 시각"(재진입 시 갱신, 최초 진입 아님). 옵셔널
+필드(모르는 필드 무시가 기본 — 회귀 0).
 """
 import uuid
 from datetime import datetime
@@ -20,7 +30,7 @@ from app.models.dependency import ItemDependency
 from app.models.evidence import Evidence
 from app.models.gate import Gate
 from app.models.member import Member
-from app.models.pm import Story
+from app.models.pm import Story, StoryActivity
 from app.models.workflow_line import WorkflowLineStepApproval
 from app.services.evidence_service import batch_human_verified
 from app.services.project_auth import has_project_access
@@ -33,6 +43,29 @@ _OPEN_EXCLUDED_STATUSES = ("done",)
 _LIMIT = 100
 
 
+async def _batch_story_entered_in_review_at(
+    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, datetime]:
+    """merge_ready 신호원 — Story가 **마지막으로** in-review로 전이한 시각(StoryActivity 감사
+    로그 최신 행, #2249). best-effort — story_status_events.emit_story_status_changed가
+    actor_id 없으면 행을 안 남긴다(시스템 트리거 시 유실 가능, 알려진 한계)."""
+    if not story_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(StoryActivity.story_id, func.max(StoryActivity.created_at))
+            .where(
+                StoryActivity.org_id == org_id,
+                StoryActivity.story_id.in_(story_ids),
+                StoryActivity.activity_type == "status_changed",
+                StoryActivity.new_value == "in-review",
+            )
+            .group_by(StoryActivity.story_id)
+        )
+    ).all()
+    return {story_id: entered_at for story_id, entered_at in rows}
+
+
 class AttentionItem(BaseModel):
     # P0-04(doc trust-pipeline-be-design §6): AQ 5신호 계약(attention-queue-fe-spec-handoff §6).
     # scope_violation은 §7 확定②로 이번 스코프 미구현 — 항상 빈 신호(kind로 등장 안 함·정직한 미가용).
@@ -40,6 +73,9 @@ class AttentionItem(BaseModel):
     story_id: uuid.UUID | None = None
     title: str | None = None
     ref: dict = Field(default_factory=dict)
+    # story #2249: 「그 상태에 들어간 시각」(UTC·마지막 진입). 소스는 kind별로 다름(모듈 docstring
+    # 참조) — 원천이 아예 없거나(edge case) 조회 실패 시 None(옵셔널·모르는 필드 무시가 기본).
+    entered_state_at: datetime | None = None
 
 
 class AttentionResponse(BaseModel):
@@ -69,6 +105,7 @@ async def glance_attention(
                 WorkflowLineStepApproval.gate_id,
                 gate_story.id,
                 gate_story.title,
+                WorkflowLineStepApproval.created_at,
             )
             .select_from(WorkflowLineStepApproval)
             .outerjoin(Gate, Gate.id == WorkflowLineStepApproval.gate_id)
@@ -85,12 +122,13 @@ async def glance_attention(
             .limit(_LIMIT)
         )
     ).all()
-    for approval_id, gate_id, story_id, title in gate_rows:
+    for approval_id, gate_id, story_id, title, entered_at in gate_rows:
         items.append(AttentionItem(
             kind="gate_pending",
             story_id=story_id,
             title=title,
             ref={"approval_id": str(approval_id), "gate_id": str(gate_id) if gate_id else None},
+            entered_state_at=entered_at,
         ))
 
     # ② blocked = 프로젝트의 open story를 막고 있는 미해소 blocks-dependency(막는 쪽도 미완).
@@ -98,7 +136,7 @@ async def glance_attention(
     blocked = aliased(Story)
     blocked_rows = (
         await session.execute(
-            select(blocked.id, blocked.title, blocker.id)
+            select(blocked.id, blocked.title, blocker.id, ItemDependency.created_at)
             .select_from(ItemDependency)
             .join(blocker, blocker.id == ItemDependency.from_id)
             .join(blocked, blocked.id == ItemDependency.to_id)
@@ -115,12 +153,13 @@ async def glance_attention(
             .limit(_LIMIT)
         )
     ).all()
-    for blocked_id, title, blocker_id in blocked_rows:
+    for blocked_id, title, blocker_id, entered_at in blocked_rows:
         items.append(AttentionItem(
             kind="blocked",
             story_id=blocked_id,
             title=title,
             ref={"blocker_story_id": str(blocker_id)},
+            entered_state_at=entered_at,
         ))
 
     # ③ merge_ready = 프로젝트의 in-review story 중 **실제 병합 가능**(P0-04 엄격화 — doc
@@ -142,14 +181,18 @@ async def glance_attention(
     verified_map = await batch_human_verified(session, review_ids, "story")
     verify_fail_ids = await batch_verify_fail(session, org_id, review_ids)
     blocked_ids = await batch_unresolved_blocker(session, org_id, review_ids)
+    entered_in_review_map = await _batch_story_entered_in_review_at(session, org_id, review_ids)
     for story_id, title in review_rows:
         if story_id in verified_map and story_id not in verify_fail_ids and story_id not in blocked_ids:
-            items.append(AttentionItem(kind="merge_ready", story_id=story_id, title=title))
+            items.append(AttentionItem(
+                kind="merge_ready", story_id=story_id, title=title,
+                entered_state_at=entered_in_review_map.get(story_id),
+            ))
 
     # ④ needs_input = 프로젝트의 오픈 story 중 사람 판단 대기(§7 확定① — Gate(requires_human, pending)).
     needs_input_rows = (
         await session.execute(
-            select(Story.id, Story.title)
+            select(Story.id, Story.title, Gate.status_entered_at)
             .select_from(Gate)
             .join(Story, (Story.id == Gate.work_item_id) & (Gate.work_item_type == "story"))
             .where(
@@ -163,14 +206,16 @@ async def glance_attention(
             .limit(_LIMIT)
         )
     ).all()
-    for story_id, title in needs_input_rows:
-        items.append(AttentionItem(kind="needs_input", story_id=story_id, title=title))
+    for story_id, title, entered_at in needs_input_rows:
+        items.append(AttentionItem(
+            kind="needs_input", story_id=story_id, title=title, entered_state_at=entered_at,
+        ))
 
     # ⑤ verify_fail = 프로젝트의 오픈 story 중 검증(merge gate) 실패(glance/hero의 기존
     # evidence_status=="blocked" 계약 재사용).
     verify_fail_rows = (
         await session.execute(
-            select(Story.id, Story.title)
+            select(Story.id, Story.title, Gate.evidence_status_entered_at)
             .select_from(Gate)
             .join(Story, (Story.id == Gate.work_item_id) & (Gate.work_item_type == "story"))
             .where(
@@ -184,8 +229,10 @@ async def glance_attention(
             .limit(_LIMIT)
         )
     ).all()
-    for story_id, title in verify_fail_rows:
-        items.append(AttentionItem(kind="verify_fail", story_id=story_id, title=title))
+    for story_id, title, entered_at in verify_fail_rows:
+        items.append(AttentionItem(
+            kind="verify_fail", story_id=story_id, title=title, entered_state_at=entered_at,
+        ))
 
     # scope_violation: §7 확定② — 이번 스코프 미구현. 쿼리 자체가 없음(정직한 미가용·항상 빈 신호).
 
