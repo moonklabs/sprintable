@@ -490,6 +490,7 @@ async def create_story(
 async def get_workflow_line_status_batch(
     ids: str = Query(..., description="comma-separated story ids"),
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[LineStatusSummary]:
     try:
         story_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
@@ -499,10 +500,32 @@ async def get_workflow_line_status_batch(
         return []
     if len(story_ids) > 200:  # 보드 페이지 단위 방어(과대 IN 금지)
         raise HTTPException(status_code=422, detail="too many ids (max 200)")
-    return await build_workflow_line_status_batch(repo.session, repo.org_id, story_ids)
+    # story #2245(형제 비대칭 — 배치판): 단건(get_workflow_line_status)과 같은 구멍이 여기 있었다
+    # (org-scope만, 항목별 project 접근권 검사 0) — 200개까지 한 번에 새는 자리라 단건보다 값이 큼.
+    # ⛔has_project_access를 id마다 부르지 않는다(쿼리 200회) — 접근 가능한 project 집합을
+    # 한 번에 구해(accessible_project_ids_in_org) 조회 前에 story_ids를 거른다(+1~2 쿼리로 끝남).
+    project_by_id = dict((await repo.session.execute(
+        select(Story.id, Story.project_id).where(
+            Story.org_id == repo.org_id, Story.id.in_(story_ids),
+        )
+    )).all())
+    from app.services.project_auth import accessible_project_ids_in_org
+    accessible = set(
+        await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id)
+    )
+    # ⛔접근권 없는 id는 조용히 빼고 나머지만 준다(부분 성공) — 몇 개가 빠졌는지도 알리지 않는다.
+    # "빠졌다"는 말 자체가 그 id의 존재를 누설한다 — 없는 id와 못 보는 id를 구분하지 않는다
+    # (404/403을 안 가르는 것과 같은 이유).
+    filtered_ids = [sid for sid in story_ids if project_by_id.get(sid) in accessible]
+    return await build_workflow_line_status_batch(repo.session, repo.org_id, filtered_ids)
 
 
 # E-DG S15(P1-6): line metric 집계(org-scoped·read-only·default-off org=no-op). ⚠️ /{id} 보다 먼저.
+# story #2245 경계 기록(스냅샷·판정 아님, 2026-07-28) — 개별 story 식별·내용 없이 org 전체
+# COUNT/SUM뿐이라 이번 병(항목별 project 접근권 누락)의 대상이 아니라고 보고 이 스토리 스코프
+# 밖에 남긴다. ⛔완전히 무해하다는 뜻은 아니다 — 집계는 "내가 못 보는 프로젝트의 일이 몇
+# 건인가"를 알려 준다. 개별 식별은 불가하고 org 내부라 지금은 열어 두지만, project 격리를
+# 엄히 요구하는 고객이 생기면 다음에 손댈 자리가 여기다.
 @router.get("/workflow-line/metrics")
 async def get_workflow_line_metrics(
     window_days: int = Query(default=14, ge=1, le=90),
@@ -602,16 +625,20 @@ async def upload_story_attachment(
 
 
 # E-DG S10(P1-4 observability): workflow-line 상태 read API — "왜 막혔나·어디로 relay 됐나"를
-# 채팅 없이 board/API 서 안다(FE S11 데이터 소스). 기존 story read auth(_get_repo·org-scoped)
-# 재사용·없는 story 404·active 없으면 terminal 5개 history·engine_degraded/grandfathered 명시.
+# 채팅 없이 board/API 서 안다(FE S11 데이터 소스). 없는 story 404·active 없으면 terminal 5개
+# history·engine_degraded/grandfathered 명시.
+# story #2245(형제 비대칭): org-scope만으론 불충분하다 — 바로 위 get_story가 이미 그걸 알고
+# _assert_story_project_access를 추가로 부른다. 이 엔드포인트만 org-scope에서 멈춰 있었다.
 @router.get("/{id}/workflow-line/status", response_model=WorkflowLineStatusResponse)
 async def get_workflow_line_status(
     id: uuid.UUID,
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> WorkflowLineStatusResponse:
-    story = await repo.get(id)  # org/project-scoped read auth(AC⑤)·scope 밖/없으면 None→404
+    story = await repo.get(id)  # org-scoped·scope 밖/없으면 None→404
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     return await build_workflow_line_status(repo.session, repo.org_id, id)
 
 
@@ -619,17 +646,21 @@ class FallbackNotifyRequest(BaseModel):
     step_run_id: uuid.UUID
 
 
-# E-DG S12 Gap2: stuck handoff fallback human notification. 기존 _get_repo org-scoped auth·없는
-# story 404·dispatch_notification 재사용·idempotent(run당 1회·already_notified)·status rollback 0.
+# E-DG S12 Gap2: stuck handoff fallback human notification. 없는 story 404·dispatch_notification
+# 재사용·idempotent(run당 1회·already_notified)·status rollback 0.
+# story #2245(형제 비대칭 — 쓰기): _get_repo가 org-scope만 걸어 project 접근권 검사가 없었다.
+# 형제 get_story/get_workflow_line_status와 동일 가드(_assert_story_project_access) 재사용.
 @router.post("/{id}/workflow-line/fallback-notify")
 async def workflow_line_fallback_notify(
     id: uuid.UUID,
     body: FallbackNotifyRequest,
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     from app.services.workflow_fallback_notify import fallback_notify
     result = await fallback_notify(repo.session, repo.org_id, id, body.step_run_id)
     if result.get("status") == "not_found":
@@ -644,6 +675,10 @@ class WithdrawRequest(BaseModel):
 
 # E-DG S17: author/owner pending gate run 철회(withdraw). requester/owner/admin 만·idempotent·
 # Gate enum 미확장(run/approval status 로만)·entity 미전이.
+# story #2245(형제 비대칭 — 쓰기): _get_repo가 org-scope만 걸어 project 접근권 검사가 없었다.
+# 형제 get_story/get_workflow_line_status와 동일 가드(_assert_story_project_access) 재사용 —
+# requester/owner/admin(아래 withdraw_pending_run 내부 판정)보다 먼저, project 접근권 자체가
+# 없으면 그 판정에 도달하지도 못하게 한다.
 @router.post("/{id}/workflow-line/withdraw")
 async def workflow_line_withdraw(
     id: uuid.UUID,
@@ -655,6 +690,7 @@ async def workflow_line_withdraw(
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
     from app.services.workflow_recall import withdraw_pending_run
     result = await withdraw_pending_run(repo.session, repo.org_id, id, body.step_run_id, actor_id, body.reason)
