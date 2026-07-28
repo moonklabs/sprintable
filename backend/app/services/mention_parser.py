@@ -46,6 +46,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from dataclasses import dataclass
 from html.parser import HTMLParser
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -199,6 +200,18 @@ def extract_doc_mention_ids(html_content: str) -> list[uuid.UUID]:
     return result
 
 
+@dataclass(frozen=True)
+class ChatMentionResult:
+    """story #2294 ③ — 메시지 전송 응답의 `references` 사이드밴드가 그대로 실어 나르는 모양
+    (`command_gate.blocked[]` 선례와 동일 원칙, 재구현 0). `stored`는 이번 호출에서 실제로
+    쓰기를 시도한 건수(등록된 target_type만), `dropped`는 토큰은 파싱됐지만 target_type이
+    `target_types`(registry) 밖이라 걸러진 것들 — 화면이 "연결했다고 믿었는데 조용히 안
+    만들어진" 경우를 볼 수 있는 유일한 창구다(#2294 발견의 근본 원인)."""
+
+    stored: int
+    dropped: list[dict[str, str]]
+
+
 async def insert_chat_mentions(
     db: AsyncSession,
     *,
@@ -207,7 +220,7 @@ async def insert_chat_mentions(
     content: str,
     created_by: uuid.UUID,
     target_types: frozenset[str] = frozenset(ENTITY_RESOLVERS),
-) -> None:
+) -> ChatMentionResult:
     """채팅 write-path: insert-only(메시지 불변 전제 — 재조정 불필요). 같은 트랜잭션(caller 의
     세션 그대로 사용·별도 커밋 없음) — 실패 시 예외가 그대로 propagate 되어 caller(메시지 전송
     트랜잭션) 전체가 롤백된다(AC4 원자성).
@@ -226,13 +239,37 @@ async def insert_chat_mentions(
 
     story #2273: write target이 옛 `mentions`(Mention)에서 `entity_references`(Reference)로
     재배선됐다. source_field="body"(채팅 메시지는 텍스트 필드가 하나뿐 — PO 정정, NULL로
-    "없음"을 표현하지 않는다)."""
-    pairs = [
-        (etype, eid) for etype, eid in extract_chat_entity_mentions(content)
-        if etype in target_types
+    "없음"을 표현하지 않는다).
+
+    ⛔story #2294 AC3/③(2026-07-28, 미르코 실측·PO 판정): 예전엔 `target_types` 밖 타입을
+    **완전히 침묵하며** 걸렀다(반환값 `None`, 로그 0) — "화면은 링크를 그려 주는데 서버는
+    조용히 거부"하는 결함이 여기서 났다(`task`가 실제로 이 자리에 걸렸다: 검색은 내주는데
+    registry엔 없었다). 이제 걸러진 것을 `ChatMentionResult.dropped`로 반환 + `logger.warning`
+    으로 남긴다 — 호출자(conversations.py)가 이걸 메시지 응답의 `references` 사이드밴드로
+    실어 화면이 "저장 결과를 실제로 볼" 창구를 준다. `stored`는 성공(등록된 타입) 건수 —
+    #2294 ①(검색 허용목록이 registry에서 파생)이 서면 화면이 애초에 못 고르는 종류를 보낼 수
+    없어져 정상 경로에선 `dropped`가 항상 빈 배열이다. 그래도 이 필드를 남기는 이유: 사람이
+    손으로 토큰을 치거나 에이전트가 API로 본문을 직접 쓸 수 있어(PO가 직접 실측 — escape
+    안 된 raw `]` 토큰이 조용히 버려지는 것을 확인) 그 경로는 여전히 registry 밖 타입을 만들
+    수 있다 — `dropped`가 비지 않는 것 자체가 그 신호(기능이 아니라 가드)다."""
+    all_pairs = extract_chat_entity_mentions(content)
+    if not all_pairs:
+        return ChatMentionResult(stored=0, dropped=[])
+
+    pairs = [(etype, eid) for etype, eid in all_pairs if etype in target_types]
+    dropped = [
+        {"target_type": etype, "target_id": str(eid)}
+        for etype, eid in all_pairs if etype not in target_types
     ]
+    if dropped:
+        logger.warning(
+            "insert_chat_mentions: dropped %d mention(s) with unregistered target_type "
+            "(message_id=%s, target_types=%s) dropped=%s",
+            len(dropped), message_id, sorted(target_types), dropped,
+        )
     if not pairs:
-        return
+        return ChatMentionResult(stored=0, dropped=dropped)
+
     canonical_created_by = await canonicalize_member_id(created_by, db)
     stmt = pg_insert(Reference).values([
         {
@@ -259,6 +296,45 @@ async def insert_chat_mentions(
         index_where=Reference.form != "proof",
     )
     await db.execute(stmt)
+    return ChatMentionResult(stored=len(pairs), dropped=dropped)
+
+
+async def count_phantom_task_mentions(db: AsyncSession) -> int:
+    """story #2294 AC6 — `task`가 registry 밖이던 시절 `insert_chat_mentions`가 조용히
+    걸러낸 흔적을 센다: content에 `entity:task:<uuid>` 토큰이 있는데 `entity_references`에
+    대응 행이 없는 메시지 수. 백필 여부는 PO가 판단 — 이 함수는 세기만 한다(조용히
+    가정하지 않는다).
+
+    N+1 금지 — 후보 메시지 id를 먼저 모아 한 번의 IN 조회로 존재 여부를 대조한다(reference_
+    core.py의 `_batch_resolve_existence`와 동일 원칙)."""
+    from app.models.conversation import ConversationMessage
+
+    candidate_rows = (
+        await db.execute(
+            select(ConversationMessage.id, ConversationMessage.content).where(
+                ConversationMessage.content.like("%entity:task:%")
+            )
+        )
+    ).all()
+    candidate_ids = [
+        msg_id for msg_id, content in candidate_rows
+        if any(etype == "task" for etype, _ in extract_chat_entity_mentions(content))
+    ]
+    if not candidate_ids:
+        return 0
+
+    existing_ids = set(
+        (
+            await db.execute(
+                select(Reference.source_id).where(
+                    Reference.source_type == "chat_message",
+                    Reference.target_type == "task",
+                    Reference.source_id.in_(candidate_ids),
+                )
+            )
+        ).scalars().all()
+    )
+    return sum(1 for mid in candidate_ids if mid not in existing_ids)
 
 
 async def reconcile_doc_mentions(

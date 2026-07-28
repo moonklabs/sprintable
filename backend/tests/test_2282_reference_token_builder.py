@@ -40,10 +40,12 @@ def test_build_reference_token_epic():
 
 
 def test_build_reference_token_unregistered_type_returns_none():
-    """⭐AC5 핵심 — task/artifact/hypothesis 등 ENTITY_RESOLVERS 밖 타입엔 토큰을 안 준다
-    (못 주는 것을 준 것처럼 보이면 그게 거짓)."""
+    """⭐AC5 핵심 — sprint/artifact/hypothesis 등 ENTITY_RESOLVERS 밖 타입엔 토큰을 안 준다
+    (못 주는 것을 준 것처럼 보이면 그게 거짓). ⛔`task`는 story #2294(2026-07-28)부터
+    ENTITY_RESOLVERS에 등록됐으므로 이 "밖" 목록에서 뺐다 — 등록되면 이 테스트가 그대로
+    두면 실패하는 것 자체가 twin-system(#2283이 세운 원칙) 드리프트 경보다."""
     target_id = uuid.uuid4()
-    for unsupported in ("task", "artifact", "hypothesis", "chat_message", "epic_typo"):
+    for unsupported in ("sprint", "artifact", "hypothesis", "chat_message", "epic_typo"):
         assert build_reference_token(unsupported, target_id, "X") is None, unsupported
 
 
