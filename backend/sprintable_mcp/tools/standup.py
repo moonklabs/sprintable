@@ -35,11 +35,11 @@ class ListStandupEntriesInput(SprintableInput):
 
 class GetRetroSessionInput(SprintableInput):
     sprint_id: str
-    org_id: str | None = None
-    initiator_id: str | None = None
+    title: str | None = None  # 새로 만들어야 할 때만 쓰임(생략 시 서버가 "{스프린트} 회고")
 
 
 class UpdateRetroActionStatusInput(SprintableInput):
+    session_id: str  # story #2281 AC2 — 실제 서버 경로가 세션 id를 요구해 추가(누락이 원 결함)
     action_id: str
     status: str  # open | done
 
@@ -106,22 +106,24 @@ async def list_standup_entries(args: ListStandupEntriesInput) -> list[TextConten
 
 
 async def get_retro_session(args: GetRetroSessionInput) -> list[TextContent]:
-    """스프린트 레트로 세션 조회 (없으면 생성)."""
+    """스프린트 레트로 세션 조회(없으면 생성) — story #2281 AC3ⓐ: 부르던 경로/메커니즘
+    자체가 서버에 없었다(#2271). `POST /api/v2/retros/by-sprint`를 신설해 고쳤다."""
     try:
-        params: dict = {"project_id": client.require_project_id()}
-        if args.org_id:
-            params["org_id"] = args.org_id
-        if args.initiator_id:
-            params["initiator_id"] = args.initiator_id
-        return ok(await client.get(f"/api/v2/retro/{args.sprint_id}", params=params))
+        body: dict = {"sprint_id": args.sprint_id}
+        if args.title:
+            body["title"] = args.title
+        return ok(await client.post("/api/v2/retros/by-sprint", json=body))
     except Exception as exc:
         return err(str(exc))
 
 
 async def update_retro_action_status(args: UpdateRetroActionStatusInput) -> list[TextContent]:
-    """레트로 액션 아이템 상태 변경 (open|done)."""
+    """레트로 액션 아이템 상태 변경 (open|done) — story #2281 AC2: 경로에 세션 id가
+    빠져 있었다(입력 스키마 자체에 필드가 없었음)."""
     try:
-        return ok(await client.patch(f"/api/v2/retro/actions/{args.action_id}", json={"status": args.status}))
+        return ok(await client.patch(
+            f"/api/v2/retros/{args.session_id}/actions/{args.action_id}", json={"status": args.status}
+        ))
     except Exception as exc:
         return err(str(exc))
 

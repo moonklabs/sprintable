@@ -13,6 +13,13 @@ class CreateSession(BaseModel):
     created_by: uuid.UUID | None = None
 
 
+class GetOrCreateBySprint(BaseModel):
+    """story #2281 AC3ⓐ — sprint_id 기준 get-or-create. project_id는 안 받는다 —
+    sprint 자체가 project를 이미 알아 caller가 넘긴 값과 어긋날 여지가 없다."""
+    sprint_id: uuid.UUID
+    title: str | None = None
+
+
 class ItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

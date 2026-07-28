@@ -15,44 +15,17 @@
 # 다음에 같은 파일에 새 병이 또 생겨도 "어차피 여기 원래 빨갛잖아"로 안 보이게 된다.
 # 만료되면 가드가 다시 빨개지고, 그때 #2281 진행 상황을 다시 판단한다.
 
-# 경로 불일치 — story #2281에서 해소 예정. 넷을 같은 답으로 고치지 않기로 함(파울로/까심 합의,
-# 2026-07-28): 경로만 틀린 것 1 · 경로+입력스키마 둘 다 틀린 것 1 · 서버에 기능 자체가 없는 것 2
-# (ⓐ만든다/ⓑ도구를 걷는다/ⓒ명시적 오류로 바꾼다 중 #2281 안에서 판정).
-declared_mismatches:
-  - module: notifications
-    method: PATCH
-    path: /api/v2/notifications
-    tool: mark_notification_read
-    reason: >-
-      단건 알림 읽음처리 라우트가 서버에 없음(#2271 발견, #2281에서 ⓐ만든다/ⓑ걷는다/ⓒ명시오류
-      중 판정 — 유나 화면실측 "가르기 안 됨"과 맞물림)
-    declared_by: PO
-    until: "2026-08-27"
-  - module: notifications
-    method: PATCH
-    path: /api/v2/notifications
-    tool: mark_all_notifications_read
-    reason: >-
-      실제 경로는 PATCH /api/v2/notifications/mark-all-read(#2271 발견, #2281에서 경로 수정 예정)
-    declared_by: PO
-    until: "2026-08-27"
-  - module: standup
-    method: GET
-    path: /api/v2/retro/{sprint_id}
-    tool: get_retro_session
-    reason: >-
-      sprint_id 기준 get-or-create 메커니즘 자체가 서버에 없음(#2271 발견, #2281에서 판정)
-    declared_by: PO
-    until: "2026-08-27"
-  - module: standup
-    method: PATCH
-    path: /api/v2/retro/actions/{action_id}
-    tool: update_retro_action_status
-    reason: >-
-      경로도 틀렸고 입력 스키마(UpdateRetroActionStatusInput)에 세션 id 필드 자체가 없어 경로만
-      고쳐도 못 고침(#2271 발견, #2281에서 스키마+경로 동시 수정 예정)
-    declared_by: PO
-    until: "2026-08-27"
+# story #2281(2026-07-28)에서 4건 전부 해소됨 — declared_mismatches가 빈 배열인 것 자체가
+# 그 증거다(가드가 그린으로 남아 있으면 해소된 것, 다시 불일치가 뜨면 회귀).
+#   · mark_notification_read → ⓒ명시적 오류로 판정(서버측 신설은 알림 재설계 #2201/#2279와
+#     순서가 얽혀 PO가 순서를 잡기로 함 — err() 반환, client 호출 자체를 안 하므로 이 가드
+#     스코프(client.METHOD 호출) 밖으로 자연히 빠짐)
+#   · mark_all_notifications_read → 경로 수정(/mark-all-read) + type 필터 미지원을 명시 오류로
+#   · get_retro_session → ⓐ서버에 신설(POST /api/v2/retros/by-sprint, get-or-create)
+#   · update_retro_action_status → 경로+입력스키마(session_id) 동시 수정
+# 회귀가드: backend/tests/test_2281_mcp_path_and_schema_fixes.py·
+#           test_2281_retro_get_or_create_by_sprint_realdb.py
+declared_mismatches: []
 
 # 간접경로 — 리터럴이 아니라 변수로 경로를 받는 공용 헬퍼. 정적 대조가 원천적으로 못 읽어서
 # "조용히 빠지는" 쪽이라 이름을 반드시 명시하고(M), 수기 추적 결과까지 여기 남긴다.
