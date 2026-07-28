@@ -164,7 +164,12 @@ def load_mcp_declared(tools_dir: Path = _TOOLS_DIR):
     빠지지 않는다 — 2026-07-28 attachments.py:upload_attachments 발견 이후 필수 요건)."""
     calls = []
     unreadable = []
-    method_re = re.compile(r"client\.(get|post|patch|put|delete)\(")
+    # ⛔story #2294 ③ 후속(2026-07-29): `post_full`은 `post`와 «같은 HTTP verb·같은 경로
+    # 추적 대상»이다 — {data: T} 자동 언래핑을 끄는 것뿐(unwrap=False), 검증해야 할 경로
+    # 자체는 post()와 동일 축이라 verb=POST로 매칭한다(가드를 느슨하게 하는 게 아니라
+    # 어휘를 넓히는 것 — 위 모듈 docstring의 "자동으로 못 읽었다고 조용히 빠지지 않는다"
+    # 원칙 그대로 여기도 적용).
+    method_re = re.compile(r"client\.(get|post_full|post|patch|put|delete)\(")
     request_re = re.compile(r'client\.request\(\s*\n?\s*"(GET|POST|PATCH|PUT|DELETE)",\s*\n?\s*')
 
     for fpath in sorted(tools_dir.glob("*.py")):
@@ -172,7 +177,8 @@ def load_mcp_declared(tools_dir: Path = _TOOLS_DIR):
         src = fpath.read_text()
 
         for m in method_re.finditer(src):
-            method = m.group(1).upper()
+            # post_full은 언래핑만 끄는 post의 변형 — 검증 축은 여전히 실제 HTTP verb(POST).
+            method = "POST" if m.group(1) == "post_full" else m.group(1).upper()
             after = src[m.end():]
             lit = re.match(r'\s*f?"([^"]*)"', after)
             if lit:

@@ -149,6 +149,46 @@ def test_mention_entity_endpoints_match_backend_entity_resolvers():
     assert _MENTION_ENDPOINT_KNOWN_GAP.isdisjoint(chat_mod._MENTION_ENTITY_ENDPOINTS)
 
 
+def test_mention_ref_literal_matches_mention_entity_endpoints_directly():
+    """⭐PO 지적(2026-07-29): 위 테스트는 `_MENTION_ENTITY_ENDPOINTS`↔`ENTITY_RESOLVERS`
+    (dict↔registry) «둘만» 잰다 — `MentionRef.type`의 Pydantic `Literal`(스키마 검증 축)은
+    지금까지 «손으로 같이 맞춰 왔을 뿐» 어느 테스트도 직접 재지 않았다. Literal과 dict가
+    서로 갈리면(예: dict에만 새 키를 추가하고 Literal enum을 깜빡하면) 위 테스트는 여전히
+    통과하는데(Literal은 안 보니까) 실제로는 `MentionRef(type="새키", ...)`가 스키마
+    레벨에서 거부되는 죽은 경로가 생긴다 — registry↔dict가 아니라 «dict↔Literal» 축의
+    twin-system 갭. `typing.get_args()`로 Literal의 실제 허용값을 직접 추출해 dict 키와
+    동일한지 고정한다(세 축 중 마지막 하나)."""
+    import typing
+
+    literal_type = typing.get_type_hints(MentionRef)["type"]
+    literal_values = set(typing.get_args(literal_type))
+    assert literal_values == set(chat_mod._MENTION_ENTITY_ENDPOINTS)
+
+
+def test_mention_ref_literal_matches_backend_entity_resolvers_directly():
+    """⭐PO 재지적(2026-07-29, 같은 메시지 후속): 바로 위 테스트(Literal↔dict)와
+    `test_mention_entity_endpoints_match_backend_entity_resolvers`(dict↔registry)가
+    각각 통과해도 그건 dict를 매개로 한 «간접» 등식일 뿐 — Literal을 registry(8종)와
+    직접 비교하는 자리는 없었다. 두 테스트가 «우연히 같은 7종 집합」을 두 번 잰 것일
+    가능성을 배제 못 한다(예: 나중에 dict↔registry 테스트가 리팩터로 사라지면 이
+    등식이 조용히 깨질 수 있는 자리). registry를 매개 없이 직접 걸어 evidence 단
+    하나만 빠진 것인지 고정한다 — PO 표현 그대로 "evidence가 MCP 쪽에 «둘 다» 없는"
+    상태를 이 테스트 하나로 직접 증명."""
+    import typing
+
+    from app.services.reference_registry import ENTITY_RESOLVERS
+
+    literal_type = typing.get_type_hints(MentionRef)["type"]
+    literal_values = set(typing.get_args(literal_type))
+    assert literal_values == set(ENTITY_RESOLVERS) - _MENTION_ENDPOINT_KNOWN_GAP
+    # ⭐PO 지적(2026-07-29): "없다"만 고정하면 다음 사람이 "빠뜨린 건가"를 다시 세게 된다 —
+    # WHY: evidence는 GET /api/v2/evidence/{id}(단건조회) 라우트 자체가 없어(work_item_id로
+    # 거르는 list만 존재) MCP가 title을 auto-fetch할 방법이 없다 — 그래서 Literal에 못 올린다.
+    # 단건 GET이 생기면 여기와 `_MENTION_ENTITY_ENDPOINTS`(chat.py)를 같이 늘린다.
+    assert "evidence" not in literal_values
+    assert "evidence" in set(ENTITY_RESOLVERS)
+
+
 # ── send_chat_message: token synthesis (title given) ─────────────────────────
 @pytest.mark.anyio
 async def test_send_chat_message_synthesizes_token_with_given_title():
@@ -157,7 +197,7 @@ async def test_send_chat_message_synthesizes_token_with_given_title():
         content="see this",
         mentions=[{"type": "doc", "id": "11111111-1111-1111-1111-111111111111", "title": "My Doc"}],
     )
-    with patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m, \
+    with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value={"data": {"id": "m1"}})) as m, \
          patch.object(chat_mod.client, "get", new=AsyncMock()) as g:
         result = await send_chat_message(args)
         g.assert_not_called()  # title 명시 → doc GET 조회 스킵
@@ -178,7 +218,7 @@ async def test_send_chat_message_synthesizes_token_multiple_mentions_no_double_s
             {"type": "doc", "id": "doc-b", "title": "Doc B"},
         ],
     )
-    with patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m:
+    with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value={"data": {"id": "m1"}})) as m:
         await send_chat_message(args)
         _, kwargs = m.call_args
         assert kwargs["json"]["content"] == (
@@ -193,7 +233,7 @@ async def test_send_chat_message_escapes_adversarial_given_title():
         content="see this",
         mentions=[{"type": "doc", "id": "doc-1", "title": "x](https://evil.example)[y"}],
     )
-    with patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m:
+    with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value={"data": {"id": "m1"}})) as m:
         await send_chat_message(args)
         _, kwargs = m.call_args
         assert kwargs["json"]["content"] == (
@@ -223,7 +263,7 @@ async def test_send_chat_message_reuses_backend_reference_token_when_title_omitt
         "reference_token": "[SERVER-CANONICAL-TOKEN](entity:doc:doc-1)",
     }
     with patch.object(chat_mod.client, "get", new=AsyncMock(return_value=fetched)) as g, \
-         patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m:
+         patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value={"data": {"id": "m1"}})) as m:
         result = await send_chat_message(args)
         g.assert_awaited_once_with("/api/v2/docs/doc-1")
         _, kwargs = m.call_args
@@ -245,7 +285,7 @@ async def test_send_chat_message_reuses_reference_token_for_story_type():
         "reference_token": "[SERVER-CANONICAL-STORY-TOKEN](entity:story:story-1)",
     }
     with patch.object(chat_mod.client, "get", new=AsyncMock(return_value=fetched)) as g, \
-         patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m:
+         patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value={"data": {"id": "m1"}})) as m:
         await send_chat_message(args)
         g.assert_awaited_once_with("/api/v2/stories/story-1")
         _, kwargs = m.call_args
@@ -264,7 +304,7 @@ async def test_send_chat_message_reuses_reference_token_for_epic_type():
         "reference_token": "[SERVER-CANONICAL-EPIC-TOKEN](entity:epic:epic-1)",
     }
     with patch.object(chat_mod.client, "get", new=AsyncMock(return_value=fetched)) as g, \
-         patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m:
+         patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value={"data": {"id": "m1"}})) as m:
         await send_chat_message(args)
         g.assert_awaited_once_with("/api/v2/goals/epic-1")
         _, kwargs = m.call_args
@@ -283,7 +323,7 @@ async def test_send_chat_message_falls_back_to_local_escape_when_reference_token
     fetched = {"id": "doc-1", "title": "Fetched Doc"}  # reference_token 없음
     with caplog.at_level(logging.WARNING, logger="sprintable_mcp.tools.chat"):
         with patch.object(chat_mod.client, "get", new=AsyncMock(return_value=fetched)), \
-             patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m:
+             patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value={"data": {"id": "m1"}})) as m:
             await send_chat_message(args)
             _, kwargs = m.call_args
             assert kwargs["json"]["content"] == "see this [Fetched Doc](entity:doc:doc-1) "
@@ -300,12 +340,105 @@ async def test_send_chat_message_mention_doc_not_found_errors_without_posting_me
     )
 
     with patch.object(chat_mod.client, "get", new=AsyncMock(side_effect=RuntimeError("404 Not Found"))) as g, \
-         patch.object(chat_mod.client, "post", new=AsyncMock()) as m:
+         patch.object(chat_mod.client, "post_full", new=AsyncMock()) as m:
         result = await send_chat_message(args)
         g.assert_awaited_once_with("/api/v2/docs/missing-doc")
         m.assert_not_called()  # broken 토큰이 실린 반쪽 메시지가 저장되지 않는다
         assert result[0].text.startswith("Error")
         assert "404" in result[0].text
+
+
+# ── references/command_gate sibling 노출(2026-07-29 오르테가 라이브 실측 버그) ──
+
+
+@pytest.mark.anyio
+async def test_send_chat_message_surfaces_references_sideband_from_backend():
+    """⭐이 버그가 실제로 있었던 자리 — 백엔드가 `{"data": {...}, "references": {...}}`를
+    돌려줘도 예전엔 `client.post()`의 자동 unwrap이 `references`를 통째로 버려서 CI green·
+    배포 SHA 일치에도 MCP 호출부엔 한 번도 안 닿았다(라이브 재현으로 발견). `post_full`
+    (unwrap=False)로 원본을 받아 재구성하는지 — sibling이 실제로 살아남는지를 직접 본다."""
+    args = SendChatInput(thread_id="conv-1", content="[T](entity:task:t-1)")
+    backend_response = {
+        "data": {"id": "m1", "content": "[T](entity:task:t-1)"},
+        "references": {"stored": 1, "dropped": [{"target_type": "sprint", "target_id": "s-1"}]},
+    }
+    with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value=backend_response)):
+        result = await send_chat_message(args)
+    import json
+    body = json.loads(result[0].text)
+    assert body["id"] == "m1"  # data가 평탄하게 풀렸다(기존 MCP 호출부 기대 모양 유지)
+    assert body["references"] == {"stored": 1, "dropped": [{"target_type": "sprint", "target_id": "s-1"}]}
+
+
+@pytest.mark.anyio
+async def test_send_chat_message_surfaces_command_gate_sideband_from_backend():
+    """references와 같은 클래스의 기존 버그 — command_gate도 같은 이유로 MCP 경로에서
+    한 번도 안 보이고 있었다(이번에 같이 드러남). 같은 수정으로 같이 고쳐지는지."""
+    args = SendChatInput(thread_id="conv-1", content="/unsupported-command")
+    backend_response = {
+        "data": {"id": "m2", "content": "/unsupported-command"},
+        "command_gate": {"blocked": ["unsupported-command"]},
+    }
+    with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value=backend_response)):
+        result = await send_chat_message(args)
+    import json
+    body = json.loads(result[0].text)
+    assert body["command_gate"] == {"blocked": ["unsupported-command"]}
+
+
+@pytest.mark.anyio
+async def test_send_chat_message_plain_response_without_sideband_stays_flat():
+    """⛔회귀 0 — 백엔드가 sibling 없이 `{"data": {...}}`만 주면(평문 메시지의 일반 경로)
+    기존과 동일하게 평탄한 메시지 필드만 남는다(references/command_gate 키 자체가 없음)."""
+    args = SendChatInput(thread_id="conv-1", content="그냥 평문")
+    backend_response = {"data": {"id": "m3", "content": "그냥 평문"}}
+    with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value=backend_response)):
+        result = await send_chat_message(args)
+    import json
+    body = json.loads(result[0].text)
+    assert body["id"] == "m3"
+    assert "references" not in body
+    assert "command_gate" not in body
+
+
+# ── RED→GREEN 자체검증 — post_full 안 쓰면 sideband가 실제로 사라지는지 ──────────
+
+
+@pytest.mark.anyio
+async def test_sideband_exposure_red_green_mutation_self_check():
+    """`post_full` 대신 옛 `post`(자동 unwrap)를 쓰도록 사보타주하면 references가 실제로
+    사라지는지(RED) → 원복하면 다시 나오는지(GREEN) — 이번에 고친 버그 그 자체를 재현."""
+    import sprintable_mcp.tools.chat as chat_module
+
+    args = SendChatInput(thread_id="conv-1", content="[T](entity:task:t-1)")
+    backend_full_response = {
+        "data": {"id": "m1", "content": "[T](entity:task:t-1)"},
+        "references": {"stored": 1, "dropped": []},
+    }
+
+    original_send = chat_module.send_chat_message
+
+    async def _sabotaged_send(a):
+        # 사보타주: post_full 대신 post(자동 unwrap)를 써서 옛 버그를 재현.
+        unwrapped = await chat_module.client.post(
+            f"/api/v2/conversations/{a.thread_id}/messages", json={"content": a.content},
+        )
+        return chat_module.ok(unwrapped)
+
+    with patch.object(
+        chat_module.client, "post", new=AsyncMock(return_value=backend_full_response["data"]),
+    ):
+        # post()는 이미 unwrap된(= "data"만 있는) 값을 돌려준다고 가정(실제 client.post 동작과 동일).
+        import json
+        result = await _sabotaged_send(args)
+        body = json.loads(result[0].text)
+        assert "references" not in body, "사보타주가 안 먹었다 — references가 여전히 있다(RED 실패)"
+
+    # 원복 — 실제 send_chat_message(post_full 사용)로 같은 입력을 돌리면 references가 다시 뜬다.
+    with patch.object(chat_module.client, "post_full", new=AsyncMock(return_value=backend_full_response)):
+        result2 = await original_send(args)
+        body2 = json.loads(result2[0].text)
+        assert body2.get("references") == {"stored": 1, "dropped": []}, "원복 후에도 안 뜬다(GREEN 실패)"
 
 
 # ── mentions 생략 → 회귀 0 (가장 중요) ─────────────────────────────────────────
@@ -314,7 +447,7 @@ async def test_send_chat_message_mentions_omitted_byte_identical_to_current_beha
     """mentions 필드 자체를 안 넘긴 기존 호출자는 payload가 이 변경 前과 완전히 동일해야 한다."""
     args = SendChatInput(thread_id="conv-1", content="hi there")
     assert args.mentions is None
-    with patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m, \
+    with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value={"data": {"id": "m1"}})) as m, \
          patch.object(chat_mod.client, "get", new=AsyncMock()) as g:
         result = await send_chat_message(args)
         g.assert_not_called()
@@ -329,7 +462,7 @@ async def test_send_chat_message_mentions_omitted_byte_identical_to_current_beha
 async def test_send_chat_message_empty_mentions_list_byte_identical():
     """mentions=[] (falsy) 도 mentions=None과 동일하게 동작 — content 변조 없음."""
     args = SendChatInput(thread_id="conv-1", content="hi there", mentions=[])
-    with patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m:
+    with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value={"data": {"id": "m1"}})) as m:
         await send_chat_message(args)
         _, kwargs = m.call_args
         assert kwargs["json"]["content"] == "hi there"

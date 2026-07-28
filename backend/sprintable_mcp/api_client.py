@@ -278,6 +278,7 @@ class SprintableClient:
         *,
         json: dict | None = None,
         params: dict | None = None,
+        unwrap: bool = True,
     ) -> Any:
         url = f"{self._base_url}{path}"
         # E-MCP-HTTP S1: effective 키 = per-request override(http 멀티테넌트) ∨ env 단일키(stdio·무회귀).
@@ -327,7 +328,15 @@ class SprintableClient:
             raise SprintableApiError(resp.status_code, message, body)
 
         data = resp.json()
-        # {data: T} 래핑이면 언래핑, 그 외(배열 등)는 직접 반환
+        # ⛔story #2294 ③ 후속(오르테가 라이브 실측, 2026-07-29): {data: T, ...sibling} 래핑을
+        # 무조건 data만 남기고 sibling(예: references·command_gate)을 통째로 버렸다 — 그 결과
+        # #2294가 만든 references{stored,dropped} 사이드밴드가 MCP 호출부에는 «한 번도» 안
+        # 닿고 있었다(CI green·배포 SHA 일치인데도 사용자에게 안 보였던 정확한 원인). 그리고
+        # 같은 이유로 이 함수를 공유하는 **command_gate도 처음부터 MCP 경로에서 안 보였다**
+        # (이번에 같이 드러난 기존 버그 — 별도로 새로 만든 게 아니다). unwrap=False를 넘기면
+        # 언래핑하지 않고 전체를 그대로 반환한다(소수 호출부 — sibling 키가 필요한 곳만 씀).
+        if not unwrap:
+            return data
         if isinstance(data, dict) and "data" in data:
             return data["data"]
         return data
@@ -337,6 +346,11 @@ class SprintableClient:
 
     async def post(self, path: str, *, json: dict | None = None) -> Any:
         return await self.request("POST", path, json=json or {})
+
+    async def post_full(self, path: str, *, json: dict | None = None) -> Any:
+        """post()와 동일하되 `{data: T, ...sibling}` 래핑을 풀지 않고 그대로 반환한다 —
+        sibling 키(references·command_gate 등)가 필요한 소수 호출부(send_chat_message)용."""
+        return await self.request("POST", path, json=json or {}, unwrap=False)
 
     async def put(self, path: str, *, json: dict | None = None) -> Any:
         return await self.request("PUT", path, json=json or {})

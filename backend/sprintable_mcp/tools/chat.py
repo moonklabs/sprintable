@@ -199,7 +199,22 @@ async def send_chat_message(args: SendChatInput) -> list[TextContent]:
         uploaded_urls = [a["url"] for a in attachments if isinstance(a, dict) and a.get("url")]
         if attachments:
             payload["attachments"] = attachments
-        return ok(await client.post(f"/api/v2/conversations/{args.thread_id}/messages", json=payload))
+        # ⛔story #2294 ③ 후속(오르테가 라이브 실측, 2026-07-29): 백엔드 응답은
+        # `{"data": {...메시지}, "references": {...}?, "command_gate": {...}?}` 모양인데,
+        # 일반 unwrap 경로(SprintableApiClient.request의 기본 동작)가 sibling 키를 전부
+        # 버리고 data만 반환했다 — references{stored,dropped} 사이드밴드가 CI green·배포
+        # SHA 일치에도 MCP 호출부에는 한 번도 안 닿던 정확한 원인(같은 이유로 command_gate도
+        # 처음부터 MCP 경로에서 안 보였다 — 이번에 같이 드러난 기존 버그). unwrap=False로
+        # 원본을 받아 여기서 명시적으로 재구성한다 — 기존 MCP 호출부가 기대하는 평탄한
+        # 메시지 필드 모양은 그대로 유지하면서 sibling 키만 얹는다(회귀 0: sibling이 없는
+        # 평문 메시지는 이전과 byte-identical).
+        raw = await client.post_full(f"/api/v2/conversations/{args.thread_id}/messages", json=payload)
+        result: dict = dict(raw.get("data") or {}) if isinstance(raw, dict) else raw
+        if isinstance(raw, dict):
+            for sibling_key in ("references", "command_gate", "forked", "forked_conversation_id"):
+                if sibling_key in raw:
+                    result[sibling_key] = raw[sibling_key]
+        return ok(result)
     except Exception as exc:
         if uploaded_urls:
             # 업로드는 성공했으나 메시지 생성이 실패한 경우 — asset registry 는 SAVE-time(메시지
