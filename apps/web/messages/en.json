@@ -2766,6 +2766,10 @@
   },
   "chats": {
     "unreadMarker": "Unread from here",
+    "referenceCandidatePrompt": "Link {token} as a story?",
+    "referenceCandidateConfirm": "Yes",
+    "referenceCandidateReject": "Don't ask again",
+    "referenceCandidateComingSoon": "Linking {token} is coming soon",
     "inputPlaceholderMobile": "Type a message… (@ mention)",
     "inputPlaceholderFull": "Type a message… (Enter to send / Shift+Enter for new line / @ mention / # entity)",
     "isTyping": "{name} is typing",

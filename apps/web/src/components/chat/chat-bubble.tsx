@@ -16,6 +16,7 @@ import { AttachmentMedia } from './attachment-media';
 import { AttachmentFile } from './attachment-file';
 import { MessageContextMenu } from './message-context-menu';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
+import { ReferenceSuggestionRow } from './reference-suggestion-row';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -331,6 +332,10 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
               <ChatMarkdown content={displayContent} isMine={isMine} />
             </div>
           )}
+
+          {/* story #2283 — 보낸 직후 그 메시지 바로 아래에서 한 번 제안(작성자 본인에게만,
+              isMine 게이트는 컴포넌트 내부에서 건다). ⛔남의 메시지엔 안 뜬다. */}
+          {!isCmd && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} />}
 
           {/* Attachments — a54ddc16: auth-gated 서명 라우트 경유(public 직링크 미사용).
               이미지=AttachmentImage(3상태 render)·오디오/비디오=AttachmentMedia(story #2051,
