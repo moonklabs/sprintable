@@ -21,6 +21,22 @@ jobs:
     # #2372(미르코군, FE only — ko/en.json+goals tsx, 마이그레이션 파일 0개)까지 20m13s에
     # 걸려 "재시도로 넘김"이 마이그레이션 무관 PR에도 세금이 되는 게 실측됐다 — 응급으로
     # 25분 상향(근본 스위트 분할은 #2081 AC2/AC3 후속).
+    #
+    # ⭐story #2293(2026-07-28) — 왜 이 job이 pytest를 안 도는지(AC1):
+    # 이 job은 한때 `backend-test`(아래)와 **byte-identical한 pytest 3스텝**(alembic upgrade
+    # heads + non-destructive real-DB pytest + destructive-schema 94개 파일 격리순회)을
+    # 중복으로 돌리고 있었다 — story #1982/8236bbc3(2026-07-17)가 backend-test의 realDB
+    # 커버리지 갭을 닫으며 이 job의 2단계 구조를 "재사용"했는데, 그 뒤 이 job 쪽 pytest
+    # 스텝을 접는 후속 정리가 없었다. 직접 대조(까심군, 2026-07-28) 결과 커맨드 문자열까지
+    # 동일 — "create_all vs migration" 같은 스키마 구성 방식의 분기는 애초에 없었다(둘 다
+    # `alembic upgrade heads`). PR #2576이 이 job에서 destructive 94개 중 77개까지 pass하고
+    # 25분 천장에 cancelled된 사고(#2293)를 계기로, 아래 4스텝(마이그레이션 경로 자체의
+    # 무결성 검증 — baseline parity·dual-head 수렴·existing-DB no-op)만 남기고 pytest 실행은
+    # **`backend-test`가 유일한 실행처**가 되도록 걷어냈다. destructive-schema 94개는 이제
+    # backend-test 쪽에서 샤딩(`backend-test-destructive`, 4-way)으로 처리한다.
+    # ⛔이 job 이름(`Alembic upgrade head (fresh DB)`)은 develop 필수 상태 체크 문자열이라
+    # **바꾸지 않았다** — 바꿨으면 branch protection이 이름 매칭 실패로 조용히 안 걸렸을
+    # 것(파울로군 실측·경고, 2026-07-28).
     timeout-minutes: 25
 
     services:
@@ -90,16 +106,6 @@ jobs:
           test "$(P "SELECT count(*) FROM pg_constraint WHERE conname='ck_asset_links_source_type'")" = "1"
           echo "baseline parity OK: team_members=VIEW, org_member_id nullable, seed present, 0097 applied, asset registry present, REVISION=0096"
 
-      # story 8236bbc3: 기존 "account resolve/switch"(1개 파일)·"asset registry"(13개 파일)
-      # 하드코딩 리스트 2스텝을 흡수 — real-DB 게이팅(ALEMBIC_DATABASE_URL/PARITY_TEST_DATABASE_URL)
-      # 전체(파일명 무관, destructive_schema 마커 제외 84개 파일)가 자기 skipif로 자동 활성화된다.
-      # 신규 real-DB 테스트 파일은 이 스텝에 아무것도 안 해도 자동 편입(누락 원천차단).
-      # test_member_ssot_parity_realdb.py는 파일 자체 무조건 skip(post-cutover 불일치 — 파일
-      # 상단 주석·design-ci-realdb-gap-8236bbc3 §1 참고).
-      - name: Real-DB tests (non-destructive, auto-discovered via marker)
-        working-directory: backend
-        run: uv run pytest -q -m "not destructive_schema"
-
       # story bda4beac: dual-head(core+ee_pricing) checkout에서 "current == 단일 head" 비교는
       # 항상 실패한다(current가 2행이라 head=1건과 부분일치 안 됨) — 두 head 집합이 정확히
       # 일치하는지(comm -3, 차집합 0행) 비교로 교체. 단일-head 컨텍스트(main)에서도 그대로
@@ -126,44 +132,6 @@ jobs:
             echo "FAIL: migrations re-ran on a DB already at heads (existing-DB path not a no-op)"; exit 1
           fi
           echo "OK: existing-DB upgrade heads is a no-op"
-
-      # story 8236bbc3: destructive_schema 마커 파일(Base.metadata.create_all/drop_all로 자체
-      # 스키마 직접 관리)은 위 alembic-migrated 공유 DB(sprintable_test)에서 절대 실행하지
-      # 않는다 — 실측(design doc §1-C): 단 1개 파일의 drop_all()이 DROP TABLE
-      # agent_project_profiles→ForeignKeyViolationError로 DB를 오염시키고 같은 세션 후속
-      # 테스트 전부가 연쇄 실패(116건). 파일마다 독립 throwaway DB(sprintable_test_iso)로
-      # 완전 격리 — sprintable_test는 절대 건드리지 않는다.
-      - name: Real-DB tests (destructive schema — isolated fresh DB per file)
-        working-directory: backend
-        run: |
-          set -uo pipefail
-          # ⭐set -e를 여기선 안 쓴다(로컬 e2e 시뮬레이션 실측 교훈, 2026-07-03) — 파일별
-          # 루프에서 첫 실패 파일이 스크립트를 즉시 죽이면 나머지 파일은 전혀 실행되지 않고
-          # 조용히 스킵된 것과 동일한 결과가 된다(이 스토리가 막으려는 바로 그 실패 유형).
-          # 전체 파일을 끝까지 돌리고 실패를 누적, 마지막에 하나라도 있으면 exit 1.
-          mapfile -t files < <(
-            uv run pytest -q -m destructive_schema --collect-only \
-              | grep -oE '^tests/[a-zA-Z0-9_]+\.py' | sort -u
-          )
-          echo "destructive files: ${#files[@]}"
-          failed_files=()
-          for f in "${files[@]}"; do
-            echo "::group::isolated $f"
-            PGPASSWORD=sprintable dropdb -h localhost -U sprintable --if-exists sprintable_test_iso
-            PGPASSWORD=sprintable createdb -h localhost -U sprintable sprintable_test_iso
-            PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test_iso \
-              -c 'CREATE EXTENSION IF NOT EXISTS vector;'
-            ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-            PARITY_TEST_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-            DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_iso \
-            uv run pytest -q "$f" || failed_files+=("$f")
-            echo "::endgroup::"
-          done
-          if [ "${#failed_files[@]}" -gt 0 ]; then
-            echo "FAILED files: ${failed_files[*]}"
-            exit 1
-          fi
-          echo "OK: all ${#files[@]} isolated destructive-schema files passed"
 
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
@@ -238,29 +206,32 @@ jobs:
         working-directory: backend
         run: uv run alembic upgrade heads
 
-  backend-test:
-    name: Backend pytest
+  # story #2293(2026-07-28) — destructive_schema 94개 파일 순차 격리 루프(파일마다 fresh
+  # throwaway DB 생성/드롭)가 25분 천장에 붙었다(PR #2576 conclusion=cancelled, 77/94까지
+  # 전부 pass하고 시간만 모자라 잘림 — 빨간 것은 0건). 개별 테스트는 안 느리다(2026-07-28
+  # 실측 최대 16.24초, `infra/destructive-schema-shard-weights.json`) — 파일마다 붙는
+  # dropdb/createdb/CREATE EXTENSION 오버헤드가 94번 누적된 것이 벽시계 대부분이었다.
+  # `backend/scripts/shard_destructive_tests.py`가 그 오버헤드를 4-way로 병렬화한다
+  # (`test_shard_destructive_tests.py::test_partition_is_lossless_for_any_input`이 무손실을
+  # 고정 — 파일이 조용히 안 도는 샤드 경계 실패를 막는다).
+  #
+  # ⛔이 job은 develop 필수 상태 체크가 아니다(파울로군 실측, 2026-07-28: 필수 체크는
+  # "Backend pytest"·"Lint, Type Check, Test, Build"·"Alembic upgrade head (fresh DB)" 셋
+  # 뿐). 그래서 `backend-test`(아래, 필수)가 `needs:`로 이 job에 의존하고, 이 job의 샤드가
+  # 하나라도 실패하면 `backend-test`가 그 사실을 스스로 감지해 명시적으로 fail한다(GitHub의
+  # 기본 skip 전파에 기대지 않는다 — "유일한 실행처가 조용히 안 돌면 아무도 모른다"는
+  # 지적에 대한 답).
+  backend-test-destructive:
+    name: Backend destructive-schema (shard)
     runs-on: ubuntu-latest
-    # story #1982(2026-07-17): postgres service + real-PG env 배선. 이 갭은 story #1472
-    # (2026-06-21)에서 이미 발견됐고, story 8236bbc3(#1619, 2026-07-03)이 "backend-test job
-    # 무변경(회귀0 최대보수)"으로 의도적으로 유보했던 트레이드오프다 — 그 결과 `_REAL_DB_SKIP`
-    # 마커 테스트(예: test_1974_gate_assigned_to_me.py의 realdb 3건)가 이 job에서 조용히 skip
-    # 되어 CI green이 realPG 왕복 거동을 실제로 보증하지 못했다. 여기서 alembic-fresh-db job과
-    # 동일 자격증명·동일 2단계 구조(non-destructive 공유 DB + destructive_schema 격리 순회)를
-    # 재사용해 닫는다. destructive_schema 마커 테스트를 이 postgres 위에서 격리 없이 평면
-    # `pytest`로 돌리면 파일마다 붙는 autouse 스키마-리셋 fixture(tests/conftest.py:84,
-    # DROP SCHEMA public CASCADE)가 공유 alembic-migrated 스키마를 오염시켜 story 8236bbc3가
-    # 문서화한 116건 연쇄 실패를 이 job에서도 재현하므로, 단일 평면 실행이 아니라 반드시
-    # 동일한 2단계 분리 구조가 필요하다(217초 실측 + 격리 순회 버퍼 — alembic-fresh-db와 동일
-    # timeout-minutes: 20으로 상향).
-    # ⚠️story #2081 응급 상향(2026-07-21): alembic-fresh-db와 동일 destructive_schema 스위트를
-    # 도는 job이라 같은 20m 캡 위험을 공유한다 — 대칭으로 25분 상향(근본은 #2081 AC2/AC3 후속).
     timeout-minutes: 25
+    strategy:
+      fail-fast: false  # 한 샤드 실패가 다른 샤드를 취소하면 "어디까지 진짜 돌았는지"가 흐려진다
+      matrix:
+        shard: [0, 1, 2, 3]
 
     services:
       postgres:
-        # pgvector image: the baseline schema declares `CREATE EXTENSION vector` (embeddings),
-        # which the stock postgres:16 image lacks. Cloud SQL (dev/prod) has pgvector available.
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: sprintable
@@ -290,32 +261,27 @@ jobs:
         with:
           version: 'latest'
 
-      # non-destructive real-PG 테스트(84개 파일, destructive_schema 마커 제외)는 alembic-migrated
-      # 스키마(view·nullable·seed 포함 baseline)에 의존한다 — alembic-fresh-db job과 동일하게
-      # fresh DB를 먼저 heads까지 올린다(그렇지 않으면 테이블 부재로 realdb 테스트가 실패한다).
-      - name: alembic upgrade heads (fresh DB → baseline)
+      - name: Determine this shard's file list
         working-directory: backend
-        run: uv run alembic upgrade heads
+        run: |
+          uv run python scripts/shard_destructive_tests.py \
+            --shard-index ${{ matrix.shard }} --shard-count 4 --print-summary \
+            > /tmp/shard_files.txt
+          echo "이 샤드(${{ matrix.shard }}) 파일 수: $(wc -l < /tmp/shard_files.txt)"
 
-      - name: Run pytest (non-destructive, real-PG auto-discovered via marker)
-        working-directory: backend
-        run: uv run pytest -q -m "not destructive_schema"
-
-      # destructive_schema 마커 파일(Base.metadata.create_all/drop_all로 자체 스키마 직접 관리)은
-      # 위 alembic-migrated 공유 DB(sprintable_test)에서 절대 실행하지 않는다 — story 8236bbc3
-      # 실측대로 drop_all()이 DB를 오염시켜 같은 세션 후속 테스트 전부를 연쇄 실패시킬 수 있다.
-      # 파일마다 독립 throwaway DB(sprintable_test_iso)로 완전 격리한다.
-      - name: Run pytest (destructive schema — isolated fresh DB per file)
+      # story 8236bbc3: destructive_schema 마커 파일(Base.metadata.create_all/drop_all로 자체
+      # 스키마 직접 관리)은 alembic-migrated 공유 DB에서 절대 실행하지 않는다 — 실측대로
+      # drop_all()이 DB를 오염시켜 같은 세션 후속 테스트 전부를 연쇄 실패시킬 수 있다.
+      # 파일마다 독립 throwaway DB(sprintable_test_iso)로 완전 격리한다(샤딩 전과 동일 원칙 —
+      # 바뀐 것은 «몇 개를 도는가»이지 «어떻게 격리하는가»가 아니다).
+      - name: Run pytest (destructive schema — isolated fresh DB per file, this shard)
         working-directory: backend
         run: |
           set -uo pipefail
-          # set -e를 여기선 안 쓴다(alembic-fresh-db job과 동일 이유) — 첫 실패 파일이 스크립트를
-          # 즉시 죽이면 나머지 파일은 조용히 미실행된 것과 동일한 결과가 된다.
-          mapfile -t files < <(
-            uv run pytest -q -m destructive_schema --collect-only \
-              | grep -oE '^tests/[a-zA-Z0-9_]+\.py' | sort -u
-          )
-          echo "destructive files: ${#files[@]}"
+          # set -e를 여기선 안 쓴다 — 첫 실패 파일이 스크립트를 즉시 죽이면 이 샤드의 나머지
+          # 파일은 조용히 미실행된 것과 동일한 결과가 된다(#2293이 막으려는 바로 그 실패 유형).
+          mapfile -t files < /tmp/shard_files.txt
+          echo "destructive files (shard ${{ matrix.shard }}): ${#files[@]}"
           failed_files=()
           for f in "${files[@]}"; do
             echo "::group::isolated $f"
@@ -333,7 +299,78 @@ jobs:
             echo "FAILED files: ${failed_files[*]}"
             exit 1
           fi
-          echo "OK: all ${#files[@]} isolated destructive-schema files passed"
+          echo "OK: all ${#files[@]} isolated destructive-schema files passed (shard ${{ matrix.shard }})"
+
+  backend-test:
+    name: Backend pytest
+    runs-on: ubuntu-latest
+    needs: [backend-test-destructive]
+    if: always()
+    # story #1982(2026-07-17): postgres service + real-PG env 배선. 이 갭은 story #1472
+    # (2026-06-21)에서 이미 발견됐고, story 8236bbc3(#1619, 2026-07-03)이 "backend-test job
+    # 무변경(회귀0 최대보수)"으로 의도적으로 유보했던 트레이드오프다 — 그 결과 `_REAL_DB_SKIP`
+    # 마커 테스트(예: test_1974_gate_assigned_to_me.py의 realdb 3건)가 이 job에서 조용히 skip
+    # 되어 CI green이 realPG 왕복 거동을 실제로 보증하지 못했다. non-destructive real-DB
+    # 커버리지는 이 job이 직접 돈다(공유 alembic-migrated 스키마 위 — 격리 불요).
+    #
+    # ⭐story #2293(2026-07-28): destructive_schema 94개는 더는 이 job이 직접 돌지 않는다
+    # (AC1 — alembic-fresh-db와 byte-identical 중복이었다·아래 backend-test-destructive로
+    # 이관). 이 job은 develop 필수 상태 체크(이름 "Backend pytest")라 **이름을 바꾸지
+    # 않았다** — `needs: [backend-test-destructive]` + `if: always()` + 아래 첫 스텝의 명시적
+    # exit 1로, 94개 중 하나라도 실패/샤드가 안 돌면 이 필수 체크 자체가 빨개지게 만든다
+    # (GitHub의 기본 `needs`-실패-시-skip에만 기대면 "필수 체크가 skipped로 조용히 안
+    # 걸리는" 위험이 있다 — 파울로군 지적).
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        # pgvector image: the baseline schema declares `CREATE EXTENSION vector` (embeddings),
+        # which the stock postgres:16 image lacks. Cloud SQL (dev/prod) has pgvector available.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      PARITY_TEST_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
+      JWT_SECRET: ci-test-secret-at-least-32-chars-long
+      SECRET_KEY: ci-test-secret-at-least-32-chars-long
+
+    steps:
+      - name: Require all destructive-schema shards to have succeeded
+        if: needs.backend-test-destructive.result != 'success'
+        run: |
+          echo "backend-test-destructive result=${{ needs.backend-test-destructive.result }} — destructive-schema 94개의 유일한 실행처가 실패했거나 안 돎"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+
+      # non-destructive real-PG 테스트(84개 파일, destructive_schema 마커 제외)는 alembic-migrated
+      # 스키마(view·nullable·seed 포함 baseline)에 의존한다 — fresh DB를 먼저 heads까지 올린다
+      # (그렇지 않으면 테이블 부재로 realdb 테스트가 실패한다).
+      - name: alembic upgrade heads (fresh DB → baseline)
+        working-directory: backend
+        run: uv run alembic upgrade heads
+
+      - name: Run pytest (non-destructive, real-PG auto-discovered via marker)
+        working-directory: backend
+        run: uv run pytest -q -m "not destructive_schema"
 
   ci:
     name: Lint, Type Check, Test, Build
