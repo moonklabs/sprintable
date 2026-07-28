@@ -160,14 +160,18 @@ async def list_versions_endpoint(
     return [VersionResponse.model_validate(v) for v in rows]
 
 
+# story #2245(형제 비대칭): org-scope만으론 불충분하다 — 바로 아래 update_draft_version(PATCH)이
+# 이미 로드 後 _require_draft_author를 부른다. 이 GET만 org-scope에서 멈춰 있었다.
 @router.get("/versions/{version_id}", response_model=VersionResponse)
 async def get_version(
     version_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _auth: AuthContext = Depends(get_current_user),
+    auth: AuthContext = Depends(get_current_user),
 ) -> VersionResponse:
-    return VersionResponse.model_validate(await _load_version(session, org_id, version_id))
+    version = await _load_version(session, org_id, version_id)
+    await _require_draft_author(session, uuid.UUID(auth.user_id), org_id, version.project_id)
+    return VersionResponse.model_validate(version)
 
 
 class PatchDraftRequest(BaseModel):

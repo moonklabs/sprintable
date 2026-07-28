@@ -14,6 +14,7 @@ from .attachments import upload_attachments
 
 class ListDocsInput(SprintableInput):
     tags: list[str] | None = None
+    cursor: str | None = None  # #2191: 이전 호출의 meta.next_cursor 값을 그대로 넘기면 다음 페이지
 
 
 class GetDocInput(SprintableInput):
@@ -53,15 +54,38 @@ class UpdateDocInput(SprintableInput):
     attachments: list[dict] | None = None
 
 
+def _unwrap_docs_page(result: object) -> tuple[list, dict]:
+    """story #2191: BE GET /api/v2/docs 가 bare array → {data,meta}(#2231 규약 A)로 바뀜.
+    이 MCP 계층의 소비자들(list_docs·get_doc·search_docs)이 여전히 배열을 기대하므로
+    공통으로 언랩한다. 구 bare-array 응답(롤백/미갱신 BE)도 하위호환으로 통과시킨다."""
+    if isinstance(result, dict) and "data" in result:
+        return result["data"], (result.get("meta") or {})
+    return (result if isinstance(result, list) else []), {}
+
+
 async def list_docs(args: ListDocsInput) -> list[TextContent]:
-    """프로젝트 문서 목록 조회 (tree 또는 tag 필터)."""
+    """프로젝트 문서 목록 조회 (tree 또는 tag 필터). 더 있으면(has_more) 다음 페이지 안내가
+    별도 텍스트 블록으로 붙는다."""
     try:
         params: dict = {"project_id": client.require_project_id()}
         if args.tags:
             params["tags"] = ",".join(args.tags)
         else:
             params["view"] = "tree"
-        return ok(await client.get("/api/v2/docs", params=params))
+        if args.cursor:
+            params["cursor"] = args.cursor
+        result = await client.get("/api/v2/docs", params=params)
+        items, meta = _unwrap_docs_page(result)
+        blocks = ok(items)
+        if meta.get("has_more"):
+            blocks.append(TextContent(
+                type="text",
+                text=(
+                    f"※ 더 있음 — 이 응답은 {len(items)}건까지만 포함(전량 아님). "
+                    f'다음 페이지: list_docs를 cursor="{meta.get("next_cursor")}"로 다시 호출.'
+                ),
+            ))
+        return blocks
     except Exception as exc:
         return err(str(exc))
 
@@ -73,11 +97,15 @@ async def get_doc(args: GetDocInput) -> list[TextContent]:
     반환해 에이전트가 서로의 doc 본문을 못 읽었다. slug→id 해소 후 GET /{id}(DocResponse·content
     보유)를 surface한다. 메타데이터(id·title·slug·tags·updated_at)는 DocResponse에 그대로 있어
     기존 소비자 무영향(content 필드만 추가).
+
+    story #2191: slug 조회 자체는 BE에서도 항상 {data,meta} 봉투로 오므로(단건이라도) 여기서
+    같은 방식으로 언랩한다 — 안 하면 summaries[0]이 dict를 정수 인덱싱하려다 터진다.
     """
     try:
-        summaries = await client.get(
+        result = await client.get(
             "/api/v2/docs", params={"project_id": client.require_project_id(), "slug": args.slug}
         )
+        summaries, _meta = _unwrap_docs_page(result)
         if not summaries:
             return err(f"Doc not found: {args.slug}")
         doc_id = summaries[0]["id"]
@@ -87,12 +115,18 @@ async def get_doc(args: GetDocInput) -> list[TextContent]:
 
 
 async def search_docs(args: SearchDocsInput) -> list[TextContent]:
-    """문서 제목/본문 검색 (tag 필터 선택)."""
+    """문서 제목/본문 검색 (tag 필터 선택).
+
+    story #2191: 이 경로(q+project_id)는 BE에서 관련도(ts_rank)순이라 커서 페이지네이션을
+    의도적으로 지원 안 함(has_more는 항상 false) — 언랩만 하고 다음 페이지 안내는 안 붙인다.
+    """
     try:
         params: dict = {"project_id": client.require_project_id(), "q": args.query}
         if args.tags:
             params["tags"] = ",".join(args.tags)
-        return ok(await client.get("/api/v2/docs", params=params))
+        result = await client.get("/api/v2/docs", params=params)
+        items, _meta = _unwrap_docs_page(result)
+        return ok(items)
     except Exception as exc:
         return err(str(exc))
 

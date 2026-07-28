@@ -52,6 +52,7 @@ export type {
   CreateDocInput,
   UpdateDocInput,
   DocListFilters,
+  DocPageResult,
 } from './interfaces/IDocRepository';
 
 export type {
@@ -75,6 +76,7 @@ export type {
   Notification,
   CreateNotificationInput,
   NotificationListFilters,
+  NotificationListResult,
 } from './interfaces/INotificationRepository';
 
 export type {

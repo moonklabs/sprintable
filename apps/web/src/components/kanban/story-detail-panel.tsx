@@ -11,6 +11,7 @@ import { normalizeAssigneePatch } from './types';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 import { getFileIcon } from '@/lib/file-icon';
 import { imageFilesFromClipboard } from '@/lib/clipboard-image';
+import { parseCursorMeta } from '@/lib/pagination';
 import { AttachmentImage } from '@/components/chat/attachment-image';
 import { AttachmentFile } from '@/components/chat/attachment-file';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
@@ -606,7 +607,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         if (res.ok) {
           const json = await res.json();
           setComments(json.data ?? []);
-          setNextCommentsCursor(json.meta?.nextCursor ?? null);
+          // story #2230: BE meta 필드는 snake_case(next_cursor) — camelCase 로 읽어 항상
+          // undefined였던 것이 커서가 죽어 보이던 세 번째 원인(BE 미반영·프록시 이중포장과 직렬).
+          // story #2231 AC4: 그 casing 판단을 여기서 다시 하지 않는다 — 공용 파서로 위임.
+          setNextCommentsCursor(parseCursorMeta(json.meta, 'story-detail-panel:comments').nextCursor);
         }
       } catch {
         setComments([]);
@@ -626,7 +630,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         if (res.ok) {
           const json = await res.json();
           setActivities(json.data ?? []);
-          setNextActivitiesCursor(json.meta?.nextCursor ?? null);
+          // story #2231 AC4: BE list_activities는 아직 cursor를 안 낸다(CAPPED-NO-NEXT-PAGE) —
+          // 지금은 meta가 없어 "더 없음"으로 낙하하는 게 맞지만, 조용히가 아니라 console.error로
+          // 드러나야 다음에 BE가 cursor를 추가했을 때 이 자리가 계속 죽어 있는 걸 놓치지 않는다.
+          setNextActivitiesCursor(parseCursorMeta(json.meta, 'story-detail-panel:activities').nextCursor);
         }
       } catch {
         setActivities([]);
@@ -683,7 +690,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       if (res.ok) {
         const json = await res.json();
         setComments((prev) => [...prev, ...(json.data ?? [])]);
-        setNextCommentsCursor(json.meta?.nextCursor ?? null);
+        setNextCommentsCursor(parseCursorMeta(json.meta, 'story-detail-panel:comments:loadMore').nextCursor);
       }
     } finally {
       setLoadingMoreComments(false);
@@ -699,7 +706,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       if (res.ok) {
         const json = await res.json();
         setActivities((prev) => [...prev, ...(json.data ?? [])]);
-        setNextActivitiesCursor(json.meta?.nextCursor ?? null);
+        setNextActivitiesCursor(parseCursorMeta(json.meta, 'story-detail-panel:activities:loadMore').nextCursor);
       }
     } finally {
       setLoadingMoreActivities(false);

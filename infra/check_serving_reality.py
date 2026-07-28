@@ -48,9 +48,14 @@
 4. 리비전이 Ready 인 것과 **실제로 요청을 정상 처리하는 것**은 다르다 — 헬스체크는 이 가드 밖.
 5. 고정을 **누가** 했는지는 안 본다(공용 자격증명이라 감사로그로도 못 가른다 — 표본 A 에서
    실제로 못 갈랐다). 이 가드는 "누가"가 아니라 "선언됐는가"만 묻는다.
-6. 정상 배포 중 몇 초간 나타나는 `latestReady != latestCreated` **과도기**가 하필 크론
-   타이밍과 겹치면 오탐이 난다(확률은 낮다 — 6시간 주기 × 수십초 창). 오탐 시 다음
-   사이클에서 자연히 사라지므로 선언하지 말고 다음 실행을 볼 것.
+6. ✅story #2246(2026-07-28)로 해소 — 예전엔 정상 배포 중 몇 초간 나타나는
+   `latestReady != latestCreated` **과도기**가 크론/온디맨드 실행과 겹치면 축B 오탐이 났다
+   (실측: 리비전 생성 1.3초 뒤 판정 → FAIL, 18.79초 뒤 실제 Ready). 지금은 `_STALL_GRACE_
+   SECONDS`(90s, 관측 최대 18.8s 대비 여유) 안이면 FAIL 대신 "판정 보류"로 넘어간다.
+   ⛔axis A(트래픽 고정) 쪽은 같은 레이스가 구조적으로 없다 — Cloud Run 은 새 리비전이
+   Ready 가 되기 前까지 트래픽을 옮기지 않으므로(latestRevision:true 태그가 옛 리비전에
+   계속 남아 있음), `_is_pinned`가 잡는 "100% 미만" 상태 자체가 배포 진행 중에는 발생하지
+   않는다(2026-07-28 확認, 이번 스토리에서 axis A 는 손대지 않음).
 7. **같은 문제를 몇 번 알렸는지 세지 않는다** — 아래 "알림 반복" 참조.
 ```
 
@@ -124,6 +129,34 @@ def _serving_status(service: str) -> dict:
         "latest_ready": status.get("latestReadyRevisionName"),
         "latest_created": status.get("latestCreatedRevisionName"),
     }
+
+
+# story #2246 — 축B 오탐 수정: 「Ready 에 도달 못 했다」와 「아직 도달 안 했다」를 나이로 가른다.
+# 근거(2026-07-28 실측, 11개 서비스의 «갓 배포된» 최신 리비전 created→Ready 델타 표본):
+#   18.7 · 17.7 · 7.9 · 9.4 · 18.8 · 11.2 · 7.9 · 6.2 · 5.6 · 12.9 · 12.7 (초) — 최대 18.8초.
+# ⛔이 값들은 `status.conditions[Ready].lastTransitionTime`이 **아니라**
+# `metadata.creationTimestamp` 대비로만 유효하다 — lastTransitionTime 은 그 리비전이 나중에
+# 스케일링/재시작 등으로 조건이 다시 평가되면 갱신되므로, 오래된 리비전에서 같은 계산을 하면
+# 수천~수십만 초가 나온다(실측으로 확認 — 원래 데이터를 오염시킬 뻔했다). 그래서 age 판정도
+# creationTimestamp 만 쓴다(아래 `_revision_created_at`).
+# 유예값 = 관측 최대(18.8s) 대비 넉넉한 여유(~4.8배) — #2128 이 60s(프론트 컷)+30s 여유로
+# 90s 를 정한 것과 같은 근거 스타일. 6시간 주기 가드라 90s 유예를 더 줘도 감시력 손실은
+# 사실상 0(진짜 정체는 다음 실행에서도 나이가 계속 크게 나와 반드시 잡힌다).
+_STALL_GRACE_SECONDS = 90.0
+
+
+def _revision_created_at(revision_name: str) -> datetime:
+    """리비전 metadata.creationTimestamp — 「나이」 판정 축(story #2246).
+
+    ⛔`status.conditions[].lastTransitionTime`은 쓰지 않는다 — 그건 "마지막 상태 전환
+    시각"이라 스케일링·재시작 등으로 나중에 갱신될 수 있어, 오래 살아있는 리비전에서는
+    "생성 시각"과 전혀 무관해진다(2026-07-28 실측 — 이 값으로 유예 판정을 했으면 몇 시간
+    전 리비전도 "방금 생겼다"로 잘못 읽었을 것)."""
+    out = _run([
+        "gcloud", "run", "revisions", "describe", revision_name,
+        f"--region={_REGION}", "--format=value(metadata.creationTimestamp)",
+    ])
+    return datetime.fromisoformat(out.replace("Z", "+00:00"))
 
 
 def _load_allowlist() -> tuple[dict[str, dict], dict[str, dict]]:
@@ -211,6 +244,7 @@ def main() -> int:
 
     undeclared_pins: list[str] = []
     undeclared_stalls: list[str] = []
+    deferred_stalls: list[str] = []
     bad_declarations: list[str] = []
     unreadable: list[str] = []
     live_pinned: set[str] = set()
@@ -256,11 +290,32 @@ def main() -> int:
         if stalled:
             live_stalled.add(service)
             if service not in declared_stalls:
-                undeclared_stalls.append(
-                    f"{service}: 최신 리비전이 Ready 에 도달 못 했다 — "
-                    f"latestCreated={st['latest_created']} · "
-                    f"실제 서빙 가능한 최신={st['latest_ready']}"
-                )
+                # story #2246 — 「도달 못 했다」와 「아직 도달 안 했다」를 나이로 가른다.
+                # 나이를 못 재도(gcloud 실패 등) 유예를 못 주는 쪽(=즉시 FAIL)이 안전하다 —
+                # 유예는 «봐주는 것»이 아니라 «판정에 필요한 근거(나이)가 있을 때만» 쓴다.
+                age_seconds: float | None = None
+                try:
+                    created_at = _revision_created_at(st["latest_created"])
+                    age_seconds = (datetime.now(timezone.utc) - created_at).total_seconds()
+                except Exception:  # noqa: BLE001 — 나이 조회 실패는 유예 불가로만 처리(배치는 계속)
+                    age_seconds = None
+
+                if age_seconds is not None and 0 <= age_seconds <= _STALL_GRACE_SECONDS:
+                    deferred_stalls.append(
+                        f"{service}: 생성 후 {age_seconds:.0f}초 경과 — 아직 유예 기간"
+                        f"({_STALL_GRACE_SECONDS:.0f}초) 내라 판정 보류(다음 실행에서 다시 본다). "
+                        f"latestCreated={st['latest_created']} · latestReady={st['latest_ready']}"
+                    )
+                else:
+                    age_desc = (
+                        f"생성 후 {age_seconds / 60:.1f}분 경과했는데"
+                        if age_seconds is not None else "생성 시각을 확認 못 했는데"
+                    )
+                    undeclared_stalls.append(
+                        f"{service}: {age_desc} Ready 가 아니다 — "
+                        f"latestCreated={st['latest_created']} · "
+                        f"실제 서빙 가능한 최신={st['latest_ready']}"
+                    )
 
     # 선언 자체의 건강 — 만료·사유누락·사실과 어긋남.
     for kind, declared, live in (
@@ -295,6 +350,10 @@ def main() -> int:
             print("  ⚠️상태를 못 읽은 서비스(감시 공백 — 조용히 넘기지 않는다):")
             for line in unreadable:
                 print(f"    - {line}")
+        if deferred_stalls:
+            print("  ⏳ 판정 보류(배포 직후로 보임 — 이건 FAIL 사유가 아니다):")
+            for line in deferred_stalls:
+                print(f"    - {line}")
         print(
             f"\n검사한 서비스 {len(services) - len(unreadable)}/{len(services)}개.\n"
             "→ **이 알림을 멈추는 방법은 둘뿐이다: 상태를 고치거나, 선언하거나.** "
@@ -308,9 +367,20 @@ def main() -> int:
         )
         return 1
 
+    # story #2246 — 판정 보류는 "통과"가 아니다. FAIL 을 안 울려도(de-dup 없이 알림 반복하는
+    # 규율을 이 축까지 넓히지 않는다 — 배포 직후 정상 진행 중인 것까지 시끄러우면 그게 새 노이즈)
+    # 조용히 삼키지도 않는다 — 다음 실행에서 같은 리비전을 다시 재고, 그때도 Ready 가 아니면
+    # 나이가 유예를 넘겨 반드시 FAIL 로 넘어간다(상태를 따로 기억할 필요가 없다).
+    if deferred_stalls:
+        print("⏳ 판정 보류 — 배포 직후로 보인다(정체 아님, 다음 실행에서 다시 본다):")
+        for line in deferred_stalls:
+            print(f"    - {line}")
+        print()
+
     print(
         f"✅ 배포 실효 이상 없음 — {len(services)}개 Cloud Run 서비스 전부 검사 "
-        f"(축A 트래픽 고정/분할 0건·축B 롤아웃 정체 0건·선언 문제 0건·조회 실패 0건). "
+        f"(축A 트래픽 고정/분할 0건·축B 롤아웃 정체 0건·선언 문제 0건·조회 실패 0건"
+        f"{'·판정 보류 ' + str(len(deferred_stalls)) + '건' if deferred_stalls else ''}). "
         f"⚠️GCE MIG·'최신 머지가 서빙되는가'는 이 가드 밖(모듈 docstring 참조)."
     )
     return 0

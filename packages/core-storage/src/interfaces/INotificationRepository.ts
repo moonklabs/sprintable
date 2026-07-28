@@ -28,9 +28,17 @@ export interface NotificationListFilters extends PaginationOptions {
   is_read?: boolean;
 }
 
+// story #2195(#2231 규약 A) — BE가 has_more/next_cursor를 body meta로 직접 계산해 낸다
+// (limit+1 오버페치는 BE 내부에서 이미 끝남 — FE가 buildCursorPageMeta로 재추론하지 않는다).
+export interface NotificationListResult {
+  items: Notification[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
 export interface INotificationRepository {
   create(input: CreateNotificationInput): Promise<Notification>;
-  list(filters: NotificationListFilters): Promise<Notification[]>;
+  list(filters: NotificationListFilters): Promise<NotificationListResult>;
   markRead(id: string, userId: string): Promise<Notification>;
   markAllRead(userId: string): Promise<number>;
   // story #2194 — list(limit:200).length는 200건 넘는 계정에서 실제 unread 수를 거짓으로

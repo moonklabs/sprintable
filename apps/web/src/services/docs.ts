@@ -19,10 +19,6 @@ export class DocsService {
     return this.repo.list({ project_id: projectId, limit: input?.limit, cursor: input?.cursor ?? undefined, tags: input?.tags });
   }
 
-  async getTree(projectId: string) {
-    return this.repo.getTree(projectId);
-  }
-
   async getDoc(projectId: string, slug: string) {
     return this.repo.getBySlug(projectId, slug);
   }

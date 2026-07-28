@@ -81,7 +81,21 @@ def _get_repo(
     return DocRepository(session, org_id)
 
 
-@router.get("", response_model=list[DocSummaryResponse])
+def _doc_page_envelope(docs: list, limit: int) -> dict:
+    """story #2191: #2231 정본 규약 A(limit+1 오버페치 + has_more/next_cursor body meta).
+    docs 는 이미 limit+1 개까지 조회된 상태로 들어온다(호출부에서 overfetch)."""
+    from app.repositories.doc import encode_doc_cursor
+
+    has_more = len(docs) > limit
+    page = docs[:limit]
+    next_cursor = encode_doc_cursor(page[-1]) if has_more and page else None
+    return {
+        "data": [DocSummaryResponse.model_validate(d) for d in page],
+        "meta": {"has_more": has_more, "next_cursor": next_cursor},
+    }
+
+
+@router.get("")
 async def list_docs(
     project_id: uuid.UUID | None = Query(default=None),
     parent_id: uuid.UUID | None = Query(default=None),
@@ -90,15 +104,19 @@ async def list_docs(
     slug: str | None = Query(default=None),
     q: str | None = Query(default=None, description="전문 검색 — 제목 + 본문"),
     limit: int = Query(default=500, ge=1, le=1000),
+    cursor: str | None = Query(default=None, description="(sort_order,id) 복합 커서 — 이전 페이지 meta.next_cursor 값 그대로"),
     repo: DocRepository = Depends(_get_repo),
-) -> list[DocSummaryResponse]:
+) -> dict:
     # AC1 + AC3: 전문 검색 — project_id 필수
+    # story #2191: 의도적으로 커서 미지원(관련도순 + 위치커서 조합이 결과를 뒤섞음, repo단
+    # search_full_text 주석 참조) — has_more/next_cursor는 항상 False/None으로 봉투만 맞춘다.
     if q and project_id:
         results = await repo.search_full_text(project_id, q.strip(), limit=min(limit, 50))
-        return [
+        data = [
             DocSummaryResponse.model_validate(doc).model_copy(update={"snippet": snippet})
             for doc, snippet in results
         ]
+        return {"data": data, "meta": {"has_more": False, "next_cursor": None}}
 
     if slug and project_id:
         doc = await repo.get_by_slug(project_id, slug)
@@ -107,24 +125,26 @@ async def list_docs(
             doc = await repo.get_by_alias(project_id, slug)
         # slug 단건 경로 = FE 문서 상세 fetchDoc 의 실 경로 → detail 과 동일하게 enrich(담당자/수정이력).
         # 일반 list/tree/search 분기는 enrich 안 함(다건 N+1 회피·페이로드 과확장 금지).
-        return [await _enrich_doc_summary(doc, repo.session)] if doc else []
+        # story #2191: 단건 lookup이라 페이지네이션 대상이 아님 — has_more는 구조적으로 항상 False.
+        data = [await _enrich_doc_summary(doc, repo.session)] if doc else []
+        return {"data": data, "meta": {"has_more": False, "next_cursor": None}}
 
     if tags and project_id:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-        docs = await repo.search_by_tags(project_id, tag_list, limit=limit)
-        return [DocSummaryResponse.model_validate(d) for d in docs]
+        docs = await repo.search_by_tags(project_id, tag_list, limit=limit + 1, cursor=cursor)
+        return _doc_page_envelope(docs, limit)
 
     if project_id and parent_id is not None:
-        docs = await repo.list_tree(project_id, parent_id, limit=limit)
-        return [DocSummaryResponse.model_validate(d) for d in docs]
+        docs = await repo.list_tree(project_id, parent_id, limit=limit + 1, cursor=cursor)
+        return _doc_page_envelope(docs, limit)
 
     filters: dict = {}
     if project_id:
         filters["project_id"] = project_id
     if doc_type:
         filters["doc_type"] = doc_type
-    docs = await repo.list(limit=limit, **filters)
-    return [DocSummaryResponse.model_validate(d) for d in docs]
+    docs = await repo.list(limit=limit + 1, cursor=cursor, **filters)
+    return _doc_page_envelope(docs, limit)
 
 
 async def _assert_doc_parent_in_project(
@@ -596,10 +616,10 @@ async def get_doc_share(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> ShareStatusResponse:
-    doc = await repo.get(id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Doc not found")
-    await _resolve_doc_member_id(auth, repo.org_id, db)  # 멤버십 게이트(비멤버 차단)
+    # #2237: 형제(enable/regenerate/disable_doc_share)와 동일한 project 접근권 가드로 통일 —
+    # 기존엔 org 멤버십(_resolve_doc_member_id)만 확認하고 project 접근권은 안 봤다.
+    # _require_doc_project_access가 org-scope 존재검증(404)+project 접근권(403)을 함께 처리한다.
+    await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     from app.services import doc_share
     return _share_resp(await doc_share.get_status(db, repo.org_id, id))
 
@@ -663,13 +683,13 @@ async def list_doc_comments(
     limit: int = Query(default=20, le=100),
     db: AsyncSession = Depends(get_db),
     repo: DocRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[DocCommentResponse]:
     # ⚠️S28 보안(까심 RC twin·revisions 동형 IDOR): doc 이 caller org 소속인지 org-scoped repo 로 검증.
     # ⭐comments 는 revisions(S28 전 잠복)와 달리 이미 populated 라 active cross-org 노출이었다(pre-
     # existing·revisions 고치며 surface sweep 서 적출·같이 봉인). org_id 가드(방어 심층).
-    doc = await repo.get(id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Doc not found")
+    # #2237: 형제(add_doc_comment)와 동일한 project 접근권 가드 추가(기존엔 org-scope만 봤다).
+    doc = await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     q = select(DocComment).where(
         DocComment.doc_id == id,
         DocComment.org_id == repo.org_id,
@@ -711,13 +731,13 @@ async def list_doc_revisions(
     limit: int = Query(default=50, le=100),
     db: AsyncSession = Depends(get_db),
     repo: DocRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> list[DocRevisionResponse]:
     # ⚠️S28 보안(까심 RC·cross-org IDOR): doc 이 caller org 소속인지 org-scoped repo 로 먼저 검증.
     # 안 하면 다른 org 가 doc UUID 추측만으로 revision content 를 읽는다(S28 전엔 revision 미배선이라
     # 빈 응답 잠복·재상신 스냅샷 배선으로 활성화). revision 쿼리에도 org_id 가드(방어 심층).
-    doc = await repo.get(id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Doc not found")
+    # #2237: 형제(PATCH/DELETE /{id})와 동일한 project 접근권 가드 추가(기존엔 org-scope만 봤다).
+    doc = await _require_doc_project_access(db, id, uuid.UUID(auth.user_id), repo.org_id)
     q = select(DocRevision).where(
         DocRevision.doc_id == id,
         DocRevision.org_id == repo.org_id,

@@ -131,6 +131,52 @@ async def _hyp_col(Session, hyp_id, col):
         )).scalar_one()
 
 
+# ── #2237 READ — GET /{hypothesis_id} (get_hypothesis) ─────────────────────────
+# 착수 前: auth 파라미터 자체가 없었고 project 접근권 검사도 없었다(org-scope repo.get()뿐).
+# 형제 update_hypothesis와 동일한 _assert_hypothesis_project_access로 봉인.
+
+@pytest.mark.anyio
+async def test_get_hypothesis_own_project_200():
+    """회귀0: project_a grant caller가 project_a hyp 조회 → 200."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/hypotheses/{seeded['hyp_a_id']}")
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["statement"] == "Hyp A"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_hypothesis_cross_project_blocked_404():
+    """봉인: 접근권 없는 project_b hyp 조회 시도 → 404(수정 前엔 200으로 통과해 statement 노출)."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/hypotheses/{seeded['hyp_b_id']}")
+            assert resp.status_code == 404, resp.text
+            assert "Hyp B orig" not in resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_update_hypothesis_own_project_200():
     """회귀0: project_a grant caller가 project_a hyp statement 수정 → 200 + 반영."""
@@ -214,6 +260,109 @@ async def test_unlink_hypothesis_cross_project_blocked_404():
                 json={"epic_ids": [], "story_ids": [], "unlink_sprint": True},
             )
             assert resp.status_code == 404, resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ── #2237 WRITE① — POST /{hypothesis_id}/links (link_hypothesis) ───────────────
+# 착수 前: 이 라우터는 caller 접근권을 전혀 안 봤다(service의 _assert_targets_same_project는
+# 링크 대상들의 상호 project 정합성만 검증) — 형제 unlink_hypothesis(위 테스트)와 정확히 같은
+# 모양으로 봉인한다(_assert_hypothesis_project_access 재사용).
+
+@pytest.mark.anyio
+async def test_link_hypothesis_own_project_200():
+    """회귀0: project_a grant caller가 project_a hyp에 링크(빈 페이로드) → 200."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                f"/api/v2/hypotheses/{seeded['hyp_a_id']}/links",
+                json={"epic_ids": [], "story_ids": []},
+            )
+            assert resp.status_code == 200, resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_link_hypothesis_cross_project_blocked_404():
+    """봉인: 접근권 없는 project_b hyp에 링크 주입 시도 → 404(가드가 service 前 차단·기존엔 200으로 통과했다)."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                f"/api/v2/hypotheses/{seeded['hyp_b_id']}/links",
+                json={"epic_ids": [], "story_ids": []},
+            )
+            assert resp.status_code == 404, resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ── #2237 WRITE③ — POST /{hypothesis_id}/transition (transition_hypothesis) ────
+# 착수 前: project 접근권 검사가 status=="active" 분기 안에서 owner/admin role 체크로만 쓰였을 뿐,
+# proposed→killed 같은 non-active 전이는 project 검사가 라우터·서비스 어디에도 없었다(#2198과
+# 동형 「타입 분기 안에 갇힌 검사」). _assert_hypothesis_project_access를 분기 밖으로 꺼내 봉인.
+
+@pytest.mark.anyio
+async def test_transition_hypothesis_own_project_200():
+    """회귀0: project_a grant caller가 project_a hyp를 proposed→killed 전이 → 200."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                f"/api/v2/hypotheses/{seeded['hyp_a_id']}/transition", json={"status": "killed"},
+            )
+            assert resp.status_code == 200, resp.text
+            assert await _hyp_col(Session, seeded["hyp_a_id"], "status") == "killed"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_transition_hypothesis_cross_project_blocked_404_not_transitioned():
+    """봉인: 접근권 없는 project_b hyp를 proposed→killed 전이 시도(non-active 경로) → 404 +
+    **미전이 직조회**(status='proposed' 유지). 수정 前엔 이 경로에 project 검사가 없어 200으로 통과했다."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                f"/api/v2/hypotheses/{seeded['hyp_b_id']}/transition", json={"status": "killed"},
+            )
+            assert resp.status_code == 404, resp.text
+            assert await _hyp_col(Session, seeded["hyp_b_id"], "status") == "proposed", "cross-project hyp 전이됨(IDOR)"
         finally:
             await client.aclose()
     finally:

@@ -37,11 +37,25 @@ def _load():
     return module
 
 
-def _stub(monkeypatch, mod, statuses: dict[str, dict], pins=None, stalls=None):
+def _stub(monkeypatch, mod, statuses: dict[str, dict], pins=None, stalls=None, revision_ages=None):
+    """revision_ages: {revision_name: datetime}(creationTimestamp) — 기본은 «훨씬 옛날»(1시간
+    前)이라, 지정 안 하면 축B 정체가 유예 없이 즉시 FAIL(story #2246 이전 동작과 동일 — 기존
+    표본 B 류 테스트가 별도 수정 없이 그대로 통과하게)."""
+    from datetime import datetime, timedelta, timezone
+
     monkeypatch.setattr(mod, "_list_live_services", lambda: list(statuses))
     monkeypatch.setattr(mod, "_serving_status", lambda s: statuses[s])
     monkeypatch.setattr(mod, "_load_allowlist", lambda: (pins or {}, stalls or {}))
     monkeypatch.setenv("SERVING_REALITY_TODAY", "2026-07-25")
+
+    _ages = revision_ages or {}
+
+    def _fake_created_at(revision_name: str) -> datetime:
+        if revision_name in _ages:
+            return _ages[revision_name]
+        return datetime.now(timezone.utc) - timedelta(hours=1)
+
+    monkeypatch.setattr(mod, "_revision_created_at", _fake_created_at)
 
 
 def _healthy(rev: str = "svc-00010-aaa") -> dict:
@@ -89,6 +103,74 @@ def test_sample_b_undeclared_stall_is_caught(monkeypatch, capsys):
     assert mod.main() == 1
     out = capsys.readouterr().out
     assert "축B" in out and "00015-bn6" in out
+
+
+def test_stall_within_grace_is_deferred_not_failed(monkeypatch, capsys):
+    """story #2246 본체 — 리비전이 생성된 지 얼마 안 됐으면(유예 안) 정체가 아니라
+    "아직 배포 중"이다. FAIL 이 아니라 판정 보류로 넘어가고, 다음 실행에서 다시 본다."""
+    from datetime import datetime, timedelta, timezone
+    mod = _load()
+    just_created = datetime.now(timezone.utc) - timedelta(seconds=5)
+    _stub(
+        monkeypatch, mod,
+        {"sprintable-realtime-dev": {
+            "traffic": [{
+                "revisionName": "sprintable-realtime-dev-00183-h45",
+                "percent": 100, "latestRevision": True,
+            }],
+            "latest_ready": "sprintable-realtime-dev-00183-h45",
+            "latest_created": "sprintable-realtime-dev-00184-bmv",
+        }},
+        revision_ages={"sprintable-realtime-dev-00184-bmv": just_created},
+    )
+    assert mod.main() == 0
+    out = capsys.readouterr().out
+    assert "판정 보류" in out and "00184-bmv" in out
+    assert "⛔ 배포 실효 가드 FAIL" not in out  # FAIL 로 안 떨어졌어야 한다
+    assert "축B 선언 없는 롤아웃 정체" not in out  # undeclared_stalls 헤딩엔 안 잡혔어야 한다
+
+
+def test_stall_beyond_grace_still_fails(monkeypatch, capsys):
+    """⭐양성대조(AC5) — 유예를 넣었다고 진짜 정체를 눈감으면 안 된다. 나이가 유예를
+    넘긴(90초 초과) 정체는 여전히 FAIL 해야 한다."""
+    from datetime import datetime, timedelta, timezone
+    mod = _load()
+    long_ago = datetime.now(timezone.utc) - timedelta(minutes=10)
+    _stub(
+        monkeypatch, mod,
+        {"sprintable-internal-api-dev": {
+            "traffic": [{
+                "revisionName": "sprintable-internal-api-dev-00014-bwq",
+                "percent": 100, "latestRevision": True,
+            }],
+            "latest_ready": "sprintable-internal-api-dev-00014-bwq",
+            "latest_created": "sprintable-internal-api-dev-00015-bn6",
+        }},
+        revision_ages={"sprintable-internal-api-dev-00015-bn6": long_ago},
+    )
+    assert mod.main() == 1
+    out = capsys.readouterr().out
+    assert "축B" in out and "00015-bn6" in out
+    assert "분 경과했는데" in out  # AC4 — 나이를 말하는 문구
+
+
+def test_stall_age_lookup_failure_fails_immediately(monkeypatch, capsys):
+    """나이를 못 재면(gcloud 실패 등) 유예를 줄 근거가 없다 — 안전 쪽(즉시 FAIL)으로 떨어진다."""
+    mod = _load()
+
+    def _boom(revision_name):
+        raise RuntimeError("gcloud transient error")
+
+    _stub(monkeypatch, mod, {
+        "svc-x": {
+            "traffic": [{"revisionName": "x-1", "percent": 100, "latestRevision": True}],
+            "latest_ready": "x-1", "latest_created": "x-2",
+        },
+    })
+    monkeypatch.setattr(mod, "_revision_created_at", _boom)
+    assert mod.main() == 1
+    out = capsys.readouterr().out
+    assert "축B" in out and "생성 시각을 확認 못 했는데" in out
 
 
 def test_declared_stall_within_expiry_passes(monkeypatch):

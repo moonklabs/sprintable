@@ -1,0 +1,97 @@
+name: Deploy Digest Guard
+
+# ⓔ 배포 실효 가드 axis②(story #2174) — "새 리비전이 떴다"와 "내가 민 그 커밋이다"가 다른 것을
+# 잡는다. check_serving_reality.py(축A 고정·축B 정체, 6시간 주기)의 스스로 선언한 빈칸을 채운다:
+# "지금 서빙되는 것이 최신 머지인가"는 그 가드가 원리적으로 모른다(주기 실행이라 "기대 리비전"
+# 자체가 없다). 이 워크플로우는 배포 직후 **온디맨드로만** 호출돼 "이 커밋이 실렸는가"를 확認한다.
+#
+# ⛔6시간 cron 에 얹지 않는다 — "기대 커밋 SHA"라는 개념 자체가 배포 이벤트에 묶인 것이라
+# 순수 주기실행과 컨셉이 다르다. 억지로 합치면 축A/B 와 다른 실패 모드가 같은 job 을 공유해
+# "하나가 다른 하나를 조용히 끈다"는, 이 가드 계열이 계속 경계해 온 함정을 반복한다.
+#
+# 사용: 승격/배포 워크플로우 마지막 스텝에서 이 워크플로우를 커밋 SHA 와 함께 트리거하거나,
+# 배포 직후 사람이 workflow_dispatch 로 수동 실행한다(오늘 우리가 gcloud 로 손으로 하던 절차).
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Cloud Run 서비스 이름(예: sprintable-backend-prod)'
+        required: true
+        type: string
+      commit_sha:
+        description: '기대하는 커밋 SHA(전체 40자 — Artifact Registry 태그와 정확히 일치해야 함)'
+        required: true
+        type: string
+      region:
+        description: 'Cloud Run 리전'
+        required: false
+        default: 'asia-northeast3'
+        type: string
+  workflow_call:
+    inputs:
+      service:
+        required: true
+        type: string
+      commit_sha:
+        required: true
+        type: string
+      region:
+        required: false
+        default: 'asia-northeast3'
+        type: string
+
+permissions:
+  contents: read
+  id-token: write  # Workload Identity Federation
+
+jobs:
+  digest-check:
+    name: Check deploy digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # serving-reality-guard.yml 과 동일 WIF 패턴 재사용 — 신규 시크릿 불필요.
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ⚠️앱 런타임을 import 하지 않는다(gcloud subprocess 만) — serving-reality-guard.yml 과
+      # 동일 원칙(story #2135 교훈: infra 도구가 앱 의존성을 끌어오면 가벼운 CI 가 매일 깨진다).
+      - name: Run deploy digest check
+        run: |
+          python3 infra/check_deploy_digest.py \
+            "${{ inputs.service }}" \
+            "${{ inputs.commit_sha }}" \
+            --region "${{ inputs.region }}"
+
+      # ⛔"알림 불가 → 조용히 스킵" 금지 — serving-reality-guard.yml 과 동일 규율.
+      - name: Notify on digest mismatch (Discord)
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.ENV_DRIFT_GUARD_DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "::error::ENV_DRIFT_GUARD_DISCORD_WEBHOOK_URL 미등록 — digest 불일치를 감지했는데 알릴 방법이 없다."
+            exit 1
+          fi
+          curl -fsS -X POST "${DISCORD_WEBHOOK_URL}" \
+            -H "Content-Type: application/json" \
+            -d "$(printf '{"content":"⛔ 배포 실효 가드(axis②) FAIL — %s 서비스가 기대한 커밋을 서빙하지 않을 수 있다. 상세: %s"}' "${{ inputs.service }}" "${RUN_URL}")"

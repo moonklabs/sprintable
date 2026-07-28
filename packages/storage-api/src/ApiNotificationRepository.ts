@@ -1,5 +1,10 @@
-import type { INotificationRepository, Notification, CreateNotificationInput, NotificationListFilters } from '@sprintable/core-storage';
+import type { INotificationRepository, Notification, CreateNotificationInput, NotificationListFilters, NotificationListResult } from '@sprintable/core-storage';
 import { fastapiCall } from './utils';
+
+interface RawNotificationListResponse {
+  data: Notification[];
+  meta: { has_more: boolean; next_cursor: string | null };
+}
 
 export class ApiNotificationRepository implements INotificationRepository {
   constructor(private readonly accessToken: string = '') {}
@@ -8,8 +13,19 @@ export class ApiNotificationRepository implements INotificationRepository {
     return fastapiCall<Notification>('POST', '/api/v2/notifications', this.accessToken, { body: input });
   }
 
-  async list(filters: NotificationListFilters): Promise<Notification[]> {
-    return fastapiCall<Notification[]>('GET', '/api/v2/notifications', this.accessToken, { query: { user_id: filters.user_id, is_read: filters.is_read != null ? String(filters.is_read) : undefined, limit: filters.limit } });
+  // story #2195(#2231 규약 A) — BE가 {data, meta:{has_more, next_cursor}}로 응답한다(#2538).
+  // cursor는 BE 쿼리 파라미터명 `before`로 매핑한다(FE 공통 필드명은 cursor로 유지 — 다른
+  // 저장소들과 인터페이스 일관성).
+  async list(filters: NotificationListFilters): Promise<NotificationListResult> {
+    const res = await fastapiCall<RawNotificationListResponse>('GET', '/api/v2/notifications', this.accessToken, {
+      query: {
+        user_id: filters.user_id,
+        is_read: filters.is_read != null ? String(filters.is_read) : undefined,
+        limit: filters.limit,
+        before: filters.cursor ?? undefined,
+      },
+    });
+    return { items: res.data, hasMore: res.meta.has_more, nextCursor: res.meta.next_cursor };
   }
 
   async markRead(id: string, _userId: string): Promise<Notification> {

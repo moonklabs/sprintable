@@ -15,17 +15,25 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const typeFilter = searchParams.get('type');
     const unreadOnly = searchParams.get('unread') === 'true';
+    // story #2195(#2231 규약 A) — 하드코딩 limit=50 + 커서 없음으로 51번째부터 조용히
+    // 잘리던 자리. BE(#2538)가 before 커서 + has_more/next_cursor를 지원한다.
+    const cursor = searchParams.get('cursor');
 
     const repo = await createNotificationRepository();
-    const notifications = await repo.list({
+    const { items, hasMore, nextCursor } = await repo.list({
       user_id: me.id,
       is_read: unreadOnly ? false : undefined,
       limit: 50,
+      cursor,
     });
-    const filtered = typeFilter ? notifications.filter((n) => n.type === typeFilter) : notifications;
+    // ⛔type 필터는 서버 커서 페이지 이후 클라이언트 측 후처리다 — 이 필터를 쓰는 유일한
+    // 호출자(now-face.tsx)는 페이지네이션 없이 단발 조회만 하므로 hasMore/nextCursor와
+    // 어긋나지 않는다(#2195 스코프 확認). 페이지네이션 UI(inbox 기본 탭)는 typeFilter를
+    // 안 쓴다.
+    const filtered = typeFilter ? items.filter((n) => n.type === typeFilter) : items;
     const withHrefs = await attachNotificationHrefs(undefined, filtered);
     const unreadCount = filtered.filter((n) => !n.is_read).length;
-    return apiSuccess(withHrefs, { unreadCount });
+    return apiSuccess(withHrefs, { unreadCount, hasMore, nextCursor });
   } catch (err: unknown) {
     return handleApiError(err);
   }

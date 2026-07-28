@@ -153,7 +153,8 @@ async def test_list_comments_same_org_project_member_still_works():
             repo = StoryRepository(s, VICTIM_ORG)
             auth = AuthContext(user_id=str(VICTIM_MEMBER), email=None, claims={}, org_id=str(VICTIM_ORG))
             out = await list_comments(id=STORY, limit=20, cursor=None, db=s, repo=repo, auth=auth)
-        assert len(out) == 1
-        assert out[0].content == "타org 에 새면 안 되는 댓글"
+        # story #2230: 응답이 bare list → {data,meta}(#2231 규약 A)로 바뀜.
+        assert len(out["data"]) == 1
+        assert out["data"][0].content == "타org 에 새면 안 되는 댓글"
     finally:
         await eng.dispose()
