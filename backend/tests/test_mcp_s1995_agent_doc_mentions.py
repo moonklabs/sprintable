@@ -165,6 +165,26 @@ def test_mention_ref_literal_matches_mention_entity_endpoints_directly():
     assert literal_values == set(chat_mod._MENTION_ENTITY_ENDPOINTS)
 
 
+def test_mention_ref_literal_matches_backend_entity_resolvers_directly():
+    """⭐PO 재지적(2026-07-29, 같은 메시지 후속): 바로 위 테스트(Literal↔dict)와
+    `test_mention_entity_endpoints_match_backend_entity_resolvers`(dict↔registry)가
+    각각 통과해도 그건 dict를 매개로 한 «간접» 등식일 뿐 — Literal을 registry(8종)와
+    직접 비교하는 자리는 없었다. 두 테스트가 «우연히 같은 7종 집합」을 두 번 잰 것일
+    가능성을 배제 못 한다(예: 나중에 dict↔registry 테스트가 리팩터로 사라지면 이
+    등식이 조용히 깨질 수 있는 자리). registry를 매개 없이 직접 걸어 evidence 단
+    하나만 빠진 것인지 고정한다 — PO 표현 그대로 "evidence가 MCP 쪽에 «둘 다» 없는"
+    상태를 이 테스트 하나로 직접 증명."""
+    import typing
+
+    from app.services.reference_registry import ENTITY_RESOLVERS
+
+    literal_type = typing.get_type_hints(MentionRef)["type"]
+    literal_values = set(typing.get_args(literal_type))
+    assert literal_values == set(ENTITY_RESOLVERS) - _MENTION_ENDPOINT_KNOWN_GAP
+    assert "evidence" not in literal_values
+    assert "evidence" in set(ENTITY_RESOLVERS)
+
+
 # ── send_chat_message: token synthesis (title given) ─────────────────────────
 @pytest.mark.anyio
 async def test_send_chat_message_synthesizes_token_with_given_title():
