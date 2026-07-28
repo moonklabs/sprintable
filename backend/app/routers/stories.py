@@ -602,16 +602,20 @@ async def upload_story_attachment(
 
 
 # E-DG S10(P1-4 observability): workflow-line 상태 read API — "왜 막혔나·어디로 relay 됐나"를
-# 채팅 없이 board/API 서 안다(FE S11 데이터 소스). 기존 story read auth(_get_repo·org-scoped)
-# 재사용·없는 story 404·active 없으면 terminal 5개 history·engine_degraded/grandfathered 명시.
+# 채팅 없이 board/API 서 안다(FE S11 데이터 소스). 없는 story 404·active 없으면 terminal 5개
+# history·engine_degraded/grandfathered 명시.
+# story #2245(형제 비대칭): org-scope만으론 불충분하다 — 바로 위 get_story가 이미 그걸 알고
+# _assert_story_project_access를 추가로 부른다. 이 엔드포인트만 org-scope에서 멈춰 있었다.
 @router.get("/{id}/workflow-line/status", response_model=WorkflowLineStatusResponse)
 async def get_workflow_line_status(
     id: uuid.UUID,
     repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
 ) -> WorkflowLineStatusResponse:
-    story = await repo.get(id)  # org/project-scoped read auth(AC⑤)·scope 밖/없으면 None→404
+    story = await repo.get(id)  # org-scoped·scope 밖/없으면 None→404
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     return await build_workflow_line_status(repo.session, repo.org_id, id)
 
 
