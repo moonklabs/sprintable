@@ -51,7 +51,15 @@ function getEntityQuery(value: string, cursorPos: number): string | null {
   return m ? m[1] : null;
 }
 
-function applyEntity(
+// story #2292(보안·critical) — 링크 텍스트(markdown `[text](url)`의 text 부분) escape.
+// `[ ] ( ) \` 와 개행이 markdown-link 토큰 구조를 변조(예 `x](https://phish)[y` → 외부
+// phishing 링크 렌더)하는 걸 차단한다. ⛔형제 함수(applyEntity·applyAsset)가 이 상수 하나를
+// 공유해야 한다 — 각자 자기 정규식을 들고 있으면 그게 바로 오늘 반복된 「형제 비대칭」이다.
+export function escapeMarkdownLinkText(text: string): string {
+  return text.replace(/[\\[\]()]/g, '\\$&').replace(/[\r\n]+/g, ' ');
+}
+
+export function applyEntity(
   value: string,
   cursorPos: number,
   title: string,
@@ -62,21 +70,23 @@ function applyEntity(
   const m = before.match(/#([\w가-힣]*)$/);
   if (!m) return { text: value, caretPos: cursorPos };
   const start = cursorPos - m[0].length;
-  const replacement = `[${title}](entity:${entityType}:${entityId}) `;
+  // story #2292: title은 story/doc/epic/task 검색결과 — 자유 텍스트라 escape 필수(형제
+  // applyAsset은 이미 하고 있었다. 여기만 빠져 있던 것이 발견된 결함).
+  const safeTitle = escapeMarkdownLinkText(title);
+  const replacement = `[${safeTitle}](entity:${entityType}:${entityId}) `;
   return { text: value.slice(0, start) + replacement + value.slice(cursorPos), caretPos: start + replacement.length };
 }
 
 
 // S6: 스토리지 자산 선택 → 토큰 삽입. applyEntity 미러(트리거 문자 없이 caret 위치에 삽입).
 // 토큰 형식 정확히 `[${name}](entity:asset:${id}) ` (chat-bubble 의 entity:asset 렌더 경로와 정합).
-function applyAsset(
+export function applyAsset(
   value: string,
   cursorPos: number,
   name: string,
   assetId: string,
 ): { text: string; caretPos: number } {
-  // 파일명 escape — `[ ] ( ) \` 와 개행이 markdown-link 토큰 구조를 변조(예 `x](https://phish)[y` → 외부 phishing 링크 렌더)하는 걸 차단.
-  const safeName = name.replace(/[\\[\]()]/g, '\\$&').replace(/[\r\n]+/g, ' ');
+  const safeName = escapeMarkdownLinkText(name);
   const replacement = `[${safeName}](entity:asset:${assetId}) `;
   return { text: value.slice(0, cursorPos) + replacement + value.slice(cursorPos), caretPos: cursorPos + replacement.length };
 }
