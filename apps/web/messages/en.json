@@ -1712,7 +1712,8 @@
     "emptyStory": "No story notifications",
     "emptySystem": "No system notifications",
     "daysAgo": "d ago",
-    "bellAriaLabelCount": "{count} notifications"
+    "bellAriaLabelCount": "{count} notifications",
+    "syncDegradedBanner": "Some older notifications may be missing — check the list below"
   },
   "invite": {
     "title": "Organization Invitation",
