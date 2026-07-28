@@ -338,3 +338,42 @@ async def test_insert_chat_mentions_no_tokens_passes_empty_refs_to_core():
     assert kwargs["extracted_refs"] == []
     assert result.stored == 0
     assert result.dropped == []
+
+
+def test_chat_message_body_immutability_premise_still_holds():
+    """`insert_chat_mentions`가 코어에 넘기는 `known_new=True`는 "채팅 메시지 본문은 편집
+    되지 않는다"는 전제에 기댄다(오르테가 지적, 2026-07-29) — 그 전제가 사라지면 stale
+    참조 삭제가 조용히 안 도는 날이 오는데, 주석은 안 잡히니(다음 사람이 안 읽는다) 이
+    테스트로 묶는다: `conversations.py`에 메시지 «본문» 편집 라우트(messages/{id}의
+    PATCH/PUT)가 생기면 RED.
+
+    ⛔이 전제가 깨지면 할 일(실패 메시지에도 명시): `insert_chat_mentions`이 코어를 부를 때
+    `known_new=True`를 걷고(기본값 False로 되돌려) 완전 reconcile로 전환할 것 — doc/story와
+    동형으로 편집-가능 콘텐츠는 항상 stale-delete를 돈다.
+
+    양성대조: 이 스캐너가 실재하는 PATCH 라우트 3개(mute·status·conversation 본체)는 실제로
+    집는지 확인한다 — 안 그러면 "메시지 편집 라우트 0건"이 "정말 없다"인지 "스캐너가 안
+    본다"인지 구분이 안 된다."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "app" / "routers" / "conversations.py"
+    text = src.read_text()
+    routes = re.findall(r'@router\.(patch|put)\(\s*"([^"]+)"', text)
+
+    # 양성대조 — 스캐너가 실재하는 3건은 실제로 잡는다(안 그러면 아래 진짜 시험이 공허통과).
+    assert ("patch", "/{conversation_id}/mute") in routes, "스캐너가 실재 라우트를 못 잡는다"
+    assert ("patch", "/{conversation_id}/status") in routes, "스캐너가 실재 라우트를 못 잡는다"
+    assert ("patch", "/{conversation_id}") in routes, "스캐너가 실재 라우트를 못 잡는다"
+
+    # 진짜 시험 — 메시지 본문 편집 라우트(messages/{id} 형태의 PATCH/PUT)는 아직 없어야 한다.
+    message_edit_routes = [
+        (method, path) for method, path in routes
+        if "messages/" in path or path.rstrip("/").endswith("messages")
+    ]
+    assert message_edit_routes == [], (
+        f"메시지 편집 라우트가 생겼다({message_edit_routes}) — insert_chat_mentions의 "
+        "known_new=True 전제(채팅 메시지는 편집되지 않는다)가 깨졌다. mention_parser.py의 "
+        "insert_chat_mentions에서 known_new=True를 걷고 완전 reconcile(기본값 False)로 "
+        "되돌릴 것."
+    )
