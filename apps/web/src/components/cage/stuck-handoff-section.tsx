@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { AlertTriangle, Check, Loader2, RotateCcw } from 'lucide-react';
+import { AlertTriangle, Check, Loader2, RotateCcw, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ToastContainer, useToast } from '@/components/ui/toast';
@@ -17,6 +17,9 @@ import type { KanbanMember, WorkflowLineStatus, WorkflowLineStepRun } from '@/co
  * 데이터 = S11 per-story workflow-line/status(추가 BE 0). 신규 토큰 0.
  */
 type FallbackState = 'idle' | 'notifying' | 'notified' | 'failed';
+// story #2272 — 형제(fallback-notify)와 같은 흐름 안의 withdraw. 되돌릴 수 없는 조작이라
+// 'confirming' 단계를 둔다(⛔단클릭 바로 실행 금지) — AC5.
+type WithdrawState = 'idle' | 'confirming' | 'withdrawing' | 'withdrawn' | 'failed';
 
 interface StuckHandoffSectionProps {
   storyId: string;
@@ -27,6 +30,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
   const t = useTranslations('cage');
   const [step, setStep] = useState<WorkflowLineStepRun | null>(null);
   const [fallback, setFallback] = useState<FallbackState>('idle');
+  const [withdraw, setWithdraw] = useState<WithdrawState>('idle');
   const { toasts, addToast, dismissToast } = useToast();
 
   useEffect(() => {
@@ -64,6 +68,32 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
     }
   };
 
+  // story #2272 AC5 — withdraw는 되돌릴 수 없다(BE: run.status='withdrawn'은 terminal, 재개
+  // 엔드포인트 없음, gate/approval도 함께 닫힘). 그래서 idle→confirming(경고 노출)→withdrawing
+  // 순서를 강제한다 — ⛔"되돌릴 수 없습니다"를 숨기지 않는다.
+  const handleWithdraw = async () => {
+    if (withdraw === 'withdrawing' || withdraw === 'withdrawn') return;
+    if (withdraw !== 'confirming') { setWithdraw('confirming'); return; }
+    setWithdraw('withdrawing');
+    try {
+      const res = await fetch(`/api/stories/${storyId}/workflow-line/withdraw`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ step_run_id: step.id }),
+      });
+      if (res.ok) {
+        setWithdraw('withdrawn');
+        addToast({ type: 'success', title: t('withdrawSuccess') });
+      } else {
+        setWithdraw('failed');
+        addToast({ type: 'error', title: t('withdrawError') });
+      }
+    } catch {
+      setWithdraw('failed');
+      addToast({ type: 'error', title: t('withdrawError') });
+    }
+  };
+
   const btn = {
     idle: { cls: 'bg-destructive text-destructive-foreground hover:bg-destructive/90', Icon: AlertTriangle, label: t('fallbackNotifyOwner'), disabled: false },
     notifying: { cls: 'bg-destructive/10 text-destructive', Icon: Loader2, label: t('fallbackNotifying'), disabled: true },
@@ -95,6 +125,37 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
           <BtnIcon className={`size-3.5 shrink-0 ${fallback === 'notifying' ? 'animate-spin' : ''}`} />
           {btn.label}
         </Button>
+        {/* story #2272 — ⓔ withdraw(형제 fallback-notify와 같은 흐름). 되돌릴 수 없어 confirm 단계 */}
+        {withdraw === 'withdrawn' ? (
+          <div className="flex items-center gap-1.5 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+            <Check className="size-3.5 shrink-0" />
+            {t('withdrawn')}
+          </div>
+        ) : withdraw === 'confirming' ? (
+          <div className="space-y-1.5 rounded-md border border-destructive/40 bg-destructive/5 p-2">
+            <p className="text-[11px] text-destructive">{t('withdrawIrreversibleWarning')}</p>
+            <div className="flex gap-1.5">
+              <Button variant="ghost" size="sm" className="flex-1 text-muted-foreground" onClick={() => setWithdraw('idle')}>
+                {t('withdrawCancel')}
+              </Button>
+              <Button variant="ghost" size="sm" className="flex-1 gap-1 text-destructive hover:bg-destructive/10" onClick={() => void handleWithdraw()}>
+                <XCircle className="size-3.5 shrink-0" />
+                {t('withdrawConfirm')}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full gap-1.5 text-muted-foreground hover:text-destructive"
+            disabled={withdraw === 'withdrawing'}
+            onClick={() => void handleWithdraw()}
+          >
+            {withdraw === 'withdrawing' ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : <XCircle className="size-3.5 shrink-0" />}
+            {withdraw === 'withdrawing' ? t('withdrawing') : t('withdrawRequest')}
+          </Button>
+        )}
       </div>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
