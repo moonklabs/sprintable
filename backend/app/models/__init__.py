@@ -15,6 +15,7 @@ from app.models.device_installation import DeviceInstallation, DeviceProofChalle
 from app.models.entity_slug_history import EntitySlugHistory
 from app.models.embedding import Embedding
 from app.models.evidence import Evidence
+from app.models.event import Event
 from app.models.event_outbox import EventOutbox
 from app.models.gate import Gate
 from app.models.github_installation import GithubInstallation, GithubInstallNonce, GithubWebhookDelivery
@@ -63,6 +64,17 @@ from app.models.activity_event import ActivityEvent
 from app.models.asset import Asset, AssetFolder, AssetLink
 from app.models.release_note import ReleaseNote
 from app.models.role_template import RoleTemplate
+# fix(2026-07-28, #2201 후속 CI 적출): app/models/*.py 파일 목록 대 이 파일의 import 목록을
+# 전수 대조해, `import app.models`만으로는 Base.metadata에 안 잡히는 모듈 11개를 찾았다
+# (2026-07-20 hitl_config/participation 건과 동일 결함 클래스). 이 PR이 실제로 필요한 것은
+# `event`(Event/"events" 테이블) 하나뿐이라 그것만 여기서 등재한다 — 나머지 10개(activity_log·
+# plan_feature·project_api_key·label·onboarding_event·verdict·workflow_execution_log·
+# workflow_line·workflow_template·workflow_trigger_type)는 등재 시 destructive_schema
+# 테스트(101개 파일 × 파일당 create_all/drop_all) 총소요가 CI 예산(25분, 기준선 16~17분)을
+# 넘겨 별도 스토리로 분리 — "[인프라·CI] 모델 하나 늘 때마다 CI가 몇 분씩 느려진다 — 집합
+# 모듈 누락 10건을 «등재할 수 없는» 상태다"(id 69d7380e-9567-47ed-9194-d9784cbf637a).
+# "등재를 미루는 것"이 아니라 "파일마다 전체 스키마를 create_all/drop_all하는 구조 자체를
+# 먼저 손보는 것"이 그 스토리의 실제 과제.
 from app.models.trust_snapshot import OrgMemberTrustSnapshot
 from app.models.visual_artifact import ArtifactNode, ArtifactVersion, VisualArtifact
 # fix(2026-07-20, #2058 후속 CI 적출): 이 두 모듈이 여기 없어 `import app.models`만으로는
@@ -166,4 +178,5 @@ __all__ = [
     "RefreshToken",
     "User",
     "WorkflowVersion",
+    "Event",
 ]
