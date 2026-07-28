@@ -551,6 +551,36 @@ async def get_story(
     return StoryResponse.model_validate(story)
 
 
+# ─── Backlinks (story #2266·C-8·E-CONNECT — target_type 일반화의 첫 사용처) ─────
+# `app.services.backlinks.list_entity_backlinks`는 SOURCE 접근만 스스로 판정하고 TARGET 접근은
+# 호출부 책임(§8① 동일 계약, docs.py의 get_doc_backlinks와 동형). 이 라우트가 그 TARGET
+# 게이트다 — get_story와 동일한 `_assert_story_project_access` 재사용(AC2: 같은 PR에 게이트,
+# AC7: 새 인증 미발명).
+@router.get("/{id}/backlinks")
+async def get_story_backlinks(
+    id: uuid.UUID,
+    limit: int = Query(default=30, ge=1, le=200),
+    before: str | None = Query(default=None),
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """GET /api/v2/stories/{id}/backlinks — 이 story를 가리키는 chat_message/doc 목록(#2266,
+    C-8 "역방향"). docs.py의 get_doc_backlinks와 동일 convention(cursor pagination, 응답
+    shape) — 실제 쿼리는 `list_entity_backlinks`가 target_type만 다르게 받아 처리하는 **같은
+    코드**다(중복 구현 아님). 존재하지 않는 story는 404, 있지만 project 접근 없으면 403
+    (`_assert_story_project_access` — get_story와 동일 계약, existence oracle 없음)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.backlinks import list_entity_backlinks
+    return await list_entity_backlinks(
+        repo.session, org_id=repo.org_id, target_type="story", target_id=id,
+        auth=auth, limit=limit, cursor=before,
+    )
+
+
 class UploadStoryAttachmentRequest(BaseModel):
     """E-MCP-OPT S6: MCP(비-브라우저)용 JSON/base64 첨부 업로드 요청(chat과 동형)."""
 
