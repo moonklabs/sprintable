@@ -27,6 +27,7 @@ import { initials } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
+import { EntityAwareTextarea } from '@/components/shared/entity-aware-textarea';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
 import { Button } from '@/components/ui/button';
@@ -1093,10 +1094,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               </div>
               {editingDescription ? (
                 <div className="mt-2 space-y-2">
-                  <textarea
+                  {/* story #2264(C-6) AC3: 새 자리 비용 = 설정 한 줄 — <textarea>를
+                      <EntityAwareTextarea>로 바꾸고 projectId만 넘기면 `#` 피커가 붙는다.
+                      참조 코어(chat-input-entity-tokens.ts/use-entity-picker.ts) diff 0. */}
+                  <EntityAwareTextarea
                     value={descriptionDraft}
-                    onChange={(e) => setDescriptionDraft(e.target.value)}
+                    onChange={setDescriptionDraft}
                     onPaste={handlePasteAttach}
+                    projectId={projectId}
                     placeholder="Markdown 형식으로 작성하세요..."
                     className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
@@ -1148,9 +1153,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               </div>
               {editingAC ? (
                 <div className="mt-2 space-y-2">
-                  <textarea
+                  {/* story #2264(C-6) AC3: 같은 설정 한 줄 — description과 동일 컴포넌트 재사용. */}
+                  <EntityAwareTextarea
                     value={acDraft}
-                    onChange={(e) => setAcDraft(e.target.value)}
+                    onChange={setAcDraft}
+                    projectId={projectId}
                     placeholder="Markdown 형식으로 작성하세요..."
                     className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
