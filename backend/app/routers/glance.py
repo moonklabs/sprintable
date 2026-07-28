@@ -7,13 +7,26 @@ merge_ready(리뷰/머지 대기)·needs_input·verify_fail. 유나 spec(glance-
 조인은 title enrich만).
 
 story #2249: 「그 상태에 들어간 시각」(entered_state_at) — kind별 소스가 다르다(전수):
-  gate_pending → WorkflowLineStepApproval.created_at(row가 매 사이클 새 INSERT라 정확)
-  blocked      → ItemDependency.created_at(근사 — 막는 쪽 재오픈 edge case는 늦게 반영될 수 있음)
-  merge_ready  → StoryActivity(status_changed→in-review) 최신 행(best-effort·actor_id 없으면 유실 가능)
-  needs_input  → Gate.status_entered_at(신규 컬럼 — updated_at 대체 불가 실측 후 신설, #2249 AC1)
-  verify_fail  → Gate.evidence_status_entered_at(위와 동일 사유, status와 별개 축)
-시맨틱(AC4): 전부 UTC·"마지막으로 이 상태가 된 시각"(재진입 시 갱신, 최초 진입 아님). 옵셔널
-필드(모르는 필드 무시가 기본 — 회귀 0).
+  gate_pending → WorkflowLineStepApproval.created_at(row가 매 사이클 새 INSERT라 정확) — exact
+  blocked      → ItemDependency.created_at — approx(아래 참조)
+  merge_ready  → StoryActivity(status_changed→in-review) 최신 행 — exact(값이 있으면 정확·
+                 actor_id 없는 시스템 트리거 시엔 아예 None으로 빠짐. "값의 정밀도"가 아니라
+                 "값의 유무" 문제라 approx로 분류하지 않는다 — None 자체가 이미 그 신호다)
+  needs_input  → Gate.status_entered_at(신규 컬럼 — updated_at 대체 불가 실측 후 신설, #2249 AC1) — exact
+  verify_fail  → Gate.evidence_status_entered_at(위와 동일 사유, status와 별개 축) — exact
+
+⚠️blocked=approx인 이유·크기(오르테가군 리뷰 2026-07-28): 막는 쪽 story가 done→(나중에)
+재오픈되면, 실제 "다시 막힌" 시각은 재오픈 시점인데 dependency row는 원래 생성 시각을 그대로
+들고 있다 — **오차가 몇 분/몇 시간 단위로 유계가 아니라, 재오픈까지의 간격만큼(수 시간~수
+개월) 임의로 커질 수 있다**(구조적 edge case, jitter 아님). 발생 빈도는 라이브 데이터 없이는
+모른다(dev DB 직접 접근 불가 — VPC 격리, 별도 실측 필요). 방향은 항상 "실제보다 더 오래 막힌
+것처럼" 과대추정(48h+ 카운트에서 false positive 방향) — #2250이 이 값 위에 임계를 세울 때
+반드시 반영할 것.
+
+정밀도는 `entered_state_at_precision`("exact"|"approx"|None)으로 값과 함께 실어 FE가 구분
+가능하게 한다(어떻게 다룰지는 FE/디자인 판단 — BE는 구분 가능하게 싣기만 한다).
+시맨틱(AC4): 전부 UTC·"마지막으로 이 상태가 된 시각"(재진입 시 갱신, 최초 진입 아님). 둘 다
+옵셔널 필드(모르는 필드 무시가 기본 — 회귀 0).
 """
 import uuid
 from datetime import datetime
@@ -41,6 +54,10 @@ router = APIRouter(prefix="/api/v2/glance", tags=["glance", "Work"])
 # blocked/merge_ready 판정의 "아직 open" = non-done(command_center 규율 재사용).
 _OPEN_EXCLUDED_STATUSES = ("done",)
 _LIMIT = 100
+
+# story #2249(오르테가군 리뷰): entered_state_at의 정밀도 — 모듈 docstring 참조.
+_PRECISION_EXACT = "exact"
+_PRECISION_APPROX = "approx"
 
 
 async def _batch_story_entered_in_review_at(
@@ -76,6 +93,10 @@ class AttentionItem(BaseModel):
     # story #2249: 「그 상태에 들어간 시각」(UTC·마지막 진입). 소스는 kind별로 다름(모듈 docstring
     # 참조) — 원천이 아예 없거나(edge case) 조회 실패 시 None(옵셔널·모르는 필드 무시가 기본).
     entered_state_at: datetime | None = None
+    # 오르테가군 리뷰(2026-07-28): "근사"가 화면에서 "정확"처럼 보이면 유나 설계(체류시간이
+    # 위계를 만든다)의 정렬 신뢰가 무너진다 — 값과 함께 정밀도를 싣는다. "exact"|"approx"|None
+    # (entered_state_at이 None이면 이 필드도 None). 다루는 법(흐리기/정렬제외 등)은 FE 판단.
+    entered_state_at_precision: str | None = None
 
 
 class AttentionResponse(BaseModel):
@@ -129,6 +150,7 @@ async def glance_attention(
             title=title,
             ref={"approval_id": str(approval_id), "gate_id": str(gate_id) if gate_id else None},
             entered_state_at=entered_at,
+            entered_state_at_precision=_PRECISION_EXACT,
         ))
 
     # ② blocked = 프로젝트의 open story를 막고 있는 미해소 blocks-dependency(막는 쪽도 미완).
@@ -160,6 +182,7 @@ async def glance_attention(
             title=title,
             ref={"blocker_story_id": str(blocker_id)},
             entered_state_at=entered_at,
+            entered_state_at_precision=_PRECISION_APPROX,
         ))
 
     # ③ merge_ready = 프로젝트의 in-review story 중 **실제 병합 가능**(P0-04 엄격화 — doc
@@ -184,9 +207,11 @@ async def glance_attention(
     entered_in_review_map = await _batch_story_entered_in_review_at(session, org_id, review_ids)
     for story_id, title in review_rows:
         if story_id in verified_map and story_id not in verify_fail_ids and story_id not in blocked_ids:
+            _entered_at = entered_in_review_map.get(story_id)
             items.append(AttentionItem(
                 kind="merge_ready", story_id=story_id, title=title,
-                entered_state_at=entered_in_review_map.get(story_id),
+                entered_state_at=_entered_at,
+                entered_state_at_precision=_PRECISION_EXACT if _entered_at is not None else None,
             ))
 
     # ④ needs_input = 프로젝트의 오픈 story 중 사람 판단 대기(§7 확定① — Gate(requires_human, pending)).
@@ -209,6 +234,9 @@ async def glance_attention(
     for story_id, title, entered_at in needs_input_rows:
         items.append(AttentionItem(
             kind="needs_input", story_id=story_id, title=title, entered_state_at=entered_at,
+            # 배포 前 생성된 기존 Gate 행은 status_entered_at이 아직 None일 수 있다(다음 전이
+            # 때 채워짐) — 값 없을 땐 정밀도도 None(값과 정밀도는 항상 짝으로 움직인다).
+            entered_state_at_precision=_PRECISION_EXACT if entered_at is not None else None,
         ))
 
     # ⑤ verify_fail = 프로젝트의 오픈 story 중 검증(merge gate) 실패(glance/hero의 기존
@@ -232,6 +260,7 @@ async def glance_attention(
     for story_id, title, entered_at in verify_fail_rows:
         items.append(AttentionItem(
             kind="verify_fail", story_id=story_id, title=title, entered_state_at=entered_at,
+            entered_state_at_precision=_PRECISION_EXACT if entered_at is not None else None,
         ))
 
     # scope_violation: §7 확定② — 이번 스코프 미구현. 쿼리 자체가 없음(정직한 미가용·항상 빈 신호).

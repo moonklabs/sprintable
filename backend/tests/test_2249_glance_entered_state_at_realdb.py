@@ -146,6 +146,7 @@ async def test_gate_pending_entered_state_at_matches_approval_created_at():
             assert item["entered_state_at"] is not None
             got = datetime.fromisoformat(item["entered_state_at"].replace("Z", "+00:00"))
             assert abs((got - expected_at).total_seconds()) < 1
+            assert item["entered_state_at_precision"] == "exact"
         finally:
             await client.aclose()
     finally:
@@ -198,12 +199,55 @@ async def test_needs_input_and_verify_fail_use_new_gate_columns():
             ni_item = next(i for i in items if i["kind"] == "needs_input")
             got_ni = datetime.fromisoformat(ni_item["entered_state_at"].replace("Z", "+00:00"))
             assert got_ni == ni_entered
+            assert ni_item["entered_state_at_precision"] == "exact"
 
             vf_item = next(i for i in items if i["kind"] == "verify_fail")
             got_vf = datetime.fromisoformat(vf_item["entered_state_at"].replace("Z", "+00:00"))
             assert got_vf == vf_entered
+            assert vf_item["entered_state_at_precision"] == "exact"
 
             assert got_ni != got_vf  # 서로 다른 축(status vs evidence_status)임을 재확認.
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_blocked_entered_state_at_is_marked_approx():
+    """⭐오르테가군 리뷰(2026-07-28) pin — blocked만 entered_state_at_precision="approx"다.
+    「근사가 화면에서 정확으로 보이면 안 된다」— gate_pending(exact)과 blocked(approx)를
+    같은 응답에서 함께 시드해 값이 섞이지 않는 것까지 실증한다."""
+    from app.main import app
+    from app.models.dependency import ItemDependency
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_base(s)
+            blocker = _story(seeded["org_id"], seeded["project_id"], "Blocker")
+            blocked_story = _story(seeded["org_id"], seeded["project_id"], "Blocked Story")
+            s.add_all([blocker, blocked_story])
+            await s.commit()
+            s.add(ItemDependency(
+                id=uuid.uuid4(), org_id=seeded["org_id"], from_id=blocker.id, to_id=blocked_story.id,
+                dep_type="blocks", item_type="story",
+            ))
+            await s.commit()
+
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/glance/attention?project_id={seeded['project_id']}")
+            assert resp.status_code == 200, resp.text
+            item = next(i for i in resp.json()["items"] if i["kind"] == "blocked")
+            assert item["entered_state_at"] is not None
+            assert item["entered_state_at_precision"] == "approx", (
+                "blocked는 막는 쪽 재오픈 edge case로 dependency.created_at이 실제 진입보다 "
+                "이를 수 있다 — approx로 표시돼야 화면이 gate_pending(exact)과 같은 것으로 "
+                "오인하지 않는다."
+            )
         finally:
             await client.aclose()
     finally:
