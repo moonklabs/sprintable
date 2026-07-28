@@ -33,6 +33,7 @@ from app.models.webhook_config import WebhookConfig
 from app.models.push_device import PushDevice
 from app.models.doc import Doc, DocShareToken, DocSlugAlias
 from app.models.mention import Mention
+from app.models.reference import Reference
 from app.models.meeting import Meeting
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
@@ -126,6 +127,7 @@ __all__ = [
     "ItemDependency",
     "EntitySlugHistory",
     "Mention",
+    "Reference",
     "MockupComponent",
     "MockupPage",
     "MockupScenario",
