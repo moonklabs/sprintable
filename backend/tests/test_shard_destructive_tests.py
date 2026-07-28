@@ -92,3 +92,30 @@ def test_shard_index_out_of_range_is_rejected():
     mod = _load()
     with pytest.raises(ValueError):
         mod.partition(["a"], {}, shard_count=0)
+
+
+def test_check_staleness_flags_20pct_file_growth(tmp_path):
+    mod = _load()
+    weights_path = tmp_path / "weights.json"
+    weights_path.write_text(json.dumps({
+        "measured_at": "2026-01-01", "total_files": 100, "total_sec": 500.0,
+        "files": [{"file": "tests/test_a.py", "sec": 5.0}],
+    }))
+    assert mod.check_staleness(119, weights_path) is None, "19% 증가는 아직 경고 아님"
+    warning = mod.check_staleness(120, weights_path)
+    assert warning is not None and "+20%" in warning
+
+
+def test_check_staleness_silent_when_stable(tmp_path):
+    mod = _load()
+    weights_path = tmp_path / "weights.json"
+    weights_path.write_text(json.dumps({
+        "measured_at": "2026-01-01", "total_files": 94, "total_sec": 534.7, "files": [],
+    }))
+    assert mod.check_staleness(94, weights_path) is None
+    assert mod.check_staleness(80, weights_path) is None, "줄어든 것은 경고 대상 아님"
+
+
+def test_check_staleness_missing_file_is_silent(tmp_path):
+    mod = _load()
+    assert mod.check_staleness(94, tmp_path / "nope.json") is None
