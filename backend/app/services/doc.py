@@ -118,7 +118,11 @@ async def transition_doc(
                 "resolution_note": gate.resolution_note,
             }
             _facts["decision_history"] = [*_facts.get("decision_history", []), _prior]
-            gate.status = "pending"
+            from datetime import datetime, timezone
+
+            from app.models.gate import set_gate_status
+
+            set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
             gate.resolver_id = None
             gate.resolved_at = None
             gate.resolution_note = None

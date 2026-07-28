@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.models.doc import Doc
-from app.models.gate import Gate, is_valid_transition
+from app.models.gate import Gate, is_valid_transition, set_gate_status
 from app.models.hitl_config import OrgGatePolicy
 from app.models.hypothesis import Hypothesis
 from app.models.loop import LoopRun
@@ -339,7 +339,7 @@ async def _reopen_rejected_gate(
     if gate_type in _ALWAYS_MANUAL_GATE_TYPES:
         new_status = "pending"
 
-    gate.status = new_status
+    set_gate_status(gate, new_status, now=datetime.now(timezone.utc))
     gate.resolver_id = None
     gate.resolution_note = None
     gate.resolved_at = datetime.now(timezone.utc) if new_status != "pending" else None
@@ -436,6 +436,8 @@ async def create_gate(
         work_item_type=work_item_type,
         gate_type=gate_type,
         status=status,
+        # #2249: 신규 행이라 값 비교(set_gate_status)가 필요 없다 — 생성 시점이 곧 최초 진입 시각.
+        status_entered_at=datetime.now(timezone.utc),
         neutral_facts=neutral_facts,
         resolved_at=datetime.now(timezone.utc) if status != "pending" else None,
     )
@@ -504,7 +506,7 @@ async def transition_gate(
 
         _trust_before = await compute_trust_facts(session, org_id, gate.work_item_id)
 
-    gate.status = new_status
+    set_gate_status(gate, new_status, now=datetime.now(timezone.utc))
     gate.resolver_id = resolver_id
     gate.resolved_at = datetime.now(timezone.utc)
     # story #2027: 이전엔 rejected 에만 저장 — approved 도 note 를 받을 수 있는데(override 의
@@ -589,7 +591,7 @@ async def void_gate(
     if not (reason or "").strip():
         raise ValueError("void 사유(reason)는 필수입니다.")
 
-    gate.status = "voided"
+    set_gate_status(gate, "voided", now=datetime.now(timezone.utc))
     gate.resolver_id = voider_id
     gate.resolution_note = reason
     gate.resolved_at = datetime.now(timezone.utc)
@@ -694,7 +696,7 @@ async def hold_gate(
     if not is_valid_transition(gate.status, "held"):
         raise ValueError(f"불법 전이: {gate.status} → held. pending 게이트만 보류 가능.")
 
-    gate.status = "held"
+    set_gate_status(gate, "held", now=datetime.now(timezone.utc))
     gate.resolver_id = holder_id          # status='held' 가 holder 로 해석(approve/reject 아님)
     gate.resolution_note = reason          # 선택
     gate.held_until = held_until           # 무기한이면 None
@@ -730,7 +732,7 @@ async def unhold_gate(
     if not is_valid_transition(gate.status, "pending"):
         raise ValueError(f"불법 전이: {gate.status} → pending. 보류(held) 게이트만 재개 가능.")
 
-    gate.status = "pending"
+    set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
     gate.resolver_id = None
     gate.resolution_note = None
     gate.held_until = None
@@ -969,7 +971,7 @@ async def resolve_gate_from_verdict(
         return None  # 게이트 없음 → graceful
 
     new_status = "approved" if verdict_result == "pass" else "rejected"
-    gate.status = new_status
+    set_gate_status(gate, new_status, now=datetime.now(timezone.utc))
     gate.resolver_id = resolver_id
     gate.resolved_at = datetime.now(timezone.utc)
     await session.flush()

@@ -1,6 +1,7 @@
 """POST /api/v2/workflow/report-done — 에이전트 작업 완료 보고 + 다음 단계 자동 트리거."""
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -11,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.gate import Gate
+from app.models.gate import Gate, set_gate_evidence_status
 from app.models.pm import Story
 from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
@@ -118,7 +119,7 @@ async def _record_gate_evidence(session: AsyncSession, decision: MergeGateDecisi
     if gate is None:
         return
     gate.requires_human = decision.decision != AUTO_MERGE
-    gate.evidence_status = _evidence_status(decision.decision)
+    set_gate_evidence_status(gate, _evidence_status(decision.decision), now=datetime.now(timezone.utc))
     gate.decision_basis = decision.reason
     gate.auto_decision_reason = decision.decision
     await session.flush()

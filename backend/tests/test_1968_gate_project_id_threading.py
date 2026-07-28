@@ -201,7 +201,7 @@ async def test_merge_gate_threads_resolved_project_id():
     org_id, story_id, project_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     session = AsyncMock()
     part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4())
-    gate = SimpleNamespace(id=uuid.uuid4(), status="auto_passed")
+    gate = SimpleNamespace(id=uuid.uuid4(), status="auto_passed", evidence_status=None)
 
     with patch.object(mvg, "resolve_implementation_participation", AsyncMock(return_value=part)), \
          patch.object(mvg, "_role_key", AsyncMock(return_value="implementation")), \
