@@ -94,8 +94,14 @@ def test_real_destructive_tools_still_blocked_without_admin_grant_after_s17():
 
 
 def test_always_allowed_tools():
-    assert is_tool_allowed("sprintable_ping", ["stories"])  # 핵심 도구는 그룹 무관 허용
+    assert is_tool_allowed("ping", ["stories"])  # 핵심 도구는 그룹 무관 허용
     assert is_tool_allowed("ping", [])
+
+
+def test_ghost_sprintable_ping_no_longer_always_allowed():
+    """story #2304: "sprintable_ping"은 실재하지 않는 이름이라 더는 _ALWAYS_ALLOWED 방패를 안 받는다
+    — group 판정 경로로 떨어져 명시 scope 밖이면 거부된다(실제 도구가 아니므로 호출될 일도 없다)."""
+    assert not is_tool_allowed("sprintable_ping", ["stories"])
 
 
 def test_lock_unlock_allowed_regardless_of_domain_scope():

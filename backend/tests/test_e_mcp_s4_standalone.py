@@ -40,7 +40,7 @@ def test_vendored_toolset_matches_backend_rules():
     matrix_tools = [
         "sprintable_add_story", "sprintable_add_task", "sprintable_delete_story",
         "sprintable_give_reward", "sprintable_send_chat_message", "sprintable_get_velocity",
-        "sprintable_ping", "sprintable_create_sprint", "sprintable_lock_files",
+        "ping", "sprintable_ping", "sprintable_create_sprint", "sprintable_lock_files",
     ]
     matrix_scopes = [None, [], ["read", "write"], ["stories"], ["stories", "tasks"],
                      ["stories", "destructive"], ["admin"]]

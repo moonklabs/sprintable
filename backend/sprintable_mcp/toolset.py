@@ -45,7 +45,9 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
 _CORE = "core"
 
 _ALWAYS_ALLOWED: frozenset[str] = frozenset({
-    "ping", "sprintable_ping", "sprintable_my_dashboard", "sprintable_check_notifications",
+    # story #2304(2026-07-29): "sprintable_ping"은 실재하지 않는 유령 이름이라 걷는다 —
+    # app/services/mcp_toolset.py와 짝맞춤(SEC-S8류 재드리프트 방지).
+    "ping", "sprintable_my_dashboard", "sprintable_check_notifications",
     # P1-S12: 백엔드 SSOT(app/services/mcp_toolset.py)와 대조해 기존 드리프트 발견 후 동기화
     # (get_workflow_guide/list_team_members/poll_events가 vendored 사본에 빠져있었음 — 발견 즉시
     # 수정, read 유틸은 비파괴라 always-allow 안전). sprintable_get_loop_context(P1-S12, 이 스토리
