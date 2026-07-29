@@ -2772,6 +2772,12 @@
   },
   "chats": {
     "unreadMarker": "Unread from here",
+    "citationAnchored": "Cited from here — pick the last message",
+    "citationSelectedCount": "{count} messages selected",
+    "citationCancel": "Cancel",
+    "citationSaveToStory": "Save to story",
+    "citationSaving": "Saving…",
+    "citationSaved": "Saved",
     "referenceCandidatePromptStory": "Link {token} as a story?",
     "referenceCandidatePromptDoc": "Link {token} as a doc?",
     "referenceCandidateConfirm": "Yes",

@@ -14,6 +14,8 @@ import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { normalizeToMessage, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
 import { useMessageRangeSelection } from '@/hooks/use-message-range-selection';
+import { CitationComposeBar, type CitationSaveState } from './citation-compose-bar';
+import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 
 interface ChatViewProps {
@@ -63,11 +65,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const t = useTranslations('chats');
   const isMobile = useIsMobile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  // story #2265(C-7) — 대화 인용(proof) 범위 선택. 진입점(citeAction)은 아직 ChatBubble에
-  // 안 넘긴다("짓되 안 켜는다", PO 지시 2026-07-29 — write 엔드포인트가 서면 그 한 줄로 켠다).
-  // 그래서 mode는 지금 항상 'idle'이고 isAnchor/isInRange도 항상 false — 사용자 눈엔 무변화.
+  // story #2265(C-7) 저장 조각(2026-07-29) — write 엔드포인트(#2632)가 서서 citeAction을
+  // 실제로 켠다. 선택 확定(confirming) 후 스토리 피커를 열어 골라진 스토리에 저장한다.
   const citeSelection = useMessageRangeSelection();
   const orderedMessageIds = useMemo(() => messages.map((m) => m.id), [messages]);
+  const [citationPickerOpen, setCitationPickerOpen] = useState(false);
+  const [citationSaveState, setCitationSaveState] = useState<CitationSaveState>('idle');
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -362,6 +365,56 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
   }, [apiPrefix, threadId]);
 
+  // story #2265(C-7) 저장 조각 — 확定된 range(rangeStartId~rangeEndId, orderedMessageIds
+  // 순서 기준 양끝 포함)를 스냅샷으로 얼려 골라진 스토리에 proof로 POST한다. 스냅샷을
+  // 얼리는 이유는 PO 판정(2026-07-29): "얼려야 대조가 가능하다" — proof_payload.snapshot
+  // 참조.
+  const handleSaveCitation = useCallback(async (storyId: string) => {
+    const { rangeStartId, rangeEndId } = citeSelection;
+    if (!rangeStartId || !rangeEndId) return;
+    const startIndex = orderedMessageIds.indexOf(rangeStartId);
+    const endIndex = orderedMessageIds.indexOf(rangeEndId);
+    if (startIndex === -1 || endIndex === -1) return;
+    const rangeMessages = messages.slice(startIndex, endIndex + 1);
+    if (rangeMessages.length === 0) return;
+
+    setCitationSaveState('saving');
+    try {
+      const res = await fetch(`/api/stories/${storyId}/references`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_type: 'chat_message',
+          target_id: rangeStartId,
+          form: 'proof',
+          proof_payload: {
+            conversation_id: threadId,
+            start_message_id: rangeStartId,
+            end_message_id: rangeEndId,
+            snapshot: rangeMessages.map((m) => ({
+              message_id: m.id, author_id: m.created_by, content: m.content, created_at: m.created_at,
+            })),
+          },
+        }),
+      });
+      if (!res.ok) {
+        // story #2265(C-7), PO 지적(2026-07-29): 실패를 하나로 뭉치면 사용자가 무엇을
+        // 고쳐야 할지 못 가른다 — 원인별로 다른 상태를 세운다(재시도/취소는 항상 남긴다,
+        // 조용히 idle로 안 돌아간다 — "저장됐다"고 믿게 만드는 것이 제일 나쁜 자리).
+        setCitationSaveState(res.status === 404 ? 'error_permission' : res.status === 400 ? 'error_invalid' : 'error_network');
+        return;
+      }
+      setCitationSaveState('saved');
+      setCitationPickerOpen(false);
+      window.setTimeout(() => {
+        citeSelection.cancel();
+        setCitationSaveState('idle');
+      }, 1500);
+    } catch {
+      setCitationSaveState('error_network');
+    }
+  }, [citeSelection, orderedMessageIds, messages, threadId]);
+
   // P2 RC: 자신이 보낸 스레드 답글은 SSE 미수신 → 로컬에서 reply_count +1
   const handleReplyAdded = useCallback((parentId: string) => {
     setMessages((prev) =>
@@ -653,6 +706,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             projectId={projectId}
                             isCiteAnchor={citeSelection.isAnchor(msg.id)}
                             isCiteInRange={citeSelection.isInRange(msg.id, orderedMessageIds)}
+                            citeAction={
+                              citeSelection.mode === 'confirming'
+                                ? undefined // 범위 확定 후엔 저장/취소를 먼저 끝내게(재선택은 취소부터).
+                                : citeSelection.mode === 'anchored'
+                                  ? { kind: 'end', onSelect: () => citeSelection.confirmEnd(msg.id, orderedMessageIds) }
+                                  : { kind: 'start', onSelect: () => citeSelection.startSelection(msg.id) }
+                            }
                           />
                           {/* S5: 트리거 메시지 직후 차단 hint notice(차단 에이전트별 1건) */}
                           {commandHints[msg.id]?.map((h) => (
@@ -705,6 +765,21 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             </div>
           )}
 
+          {/* story #2265(C-7) 저장 조각 — 선택 중/확定 후 안내+저장. idle이면 안 뜬다(무변화). */}
+          {citeSelection.mode !== 'idle' && (
+            <CitationComposeBar
+              mode={citeSelection.mode}
+              selectedCount={
+                citeSelection.rangeStartId && citeSelection.rangeEndId
+                  ? Math.max(0, orderedMessageIds.indexOf(citeSelection.rangeEndId) - orderedMessageIds.indexOf(citeSelection.rangeStartId) + 1)
+                  : 0
+              }
+              saveState={citationSaveState}
+              onCancel={() => { citeSelection.cancel(); setCitationSaveState('idle'); }}
+              onSave={() => { if (projectId) setCitationPickerOpen(true); }}
+            />
+          )}
+
           {/* Input */}
           <ChatInput
             threadId={threadId}
@@ -715,6 +790,18 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             placeholder={isMobile ? t('inputPlaceholderMobile') : t('inputPlaceholderFull')}
             onEscape={() => router.replace(backHref)}
           />
+
+          {/* story #2265(C-7) — 확定된 범위를 어느 스토리에 붙일지 고르는 자리. 기존
+              StoryPickerDialog 재사용(새 피커 0). projectId 없으면(비-프로젝트 DM 등)
+              저장 버튼 자체를 못 누르게 막지 않고 다이얼로그 진입만 막는다(방어적). */}
+          {projectId && (
+            <StoryPickerDialog
+              open={citationPickerOpen}
+              onOpenChange={setCitationPickerOpen}
+              projectId={projectId}
+              onSelect={(storyId) => void handleSaveCitation(storyId)}
+            />
+          )}
         </div>
 
         {/* AC7/AC8: 스레드 패널 — 데스크톱 사이드 패널 / 모바일 전체 뷰 */}
