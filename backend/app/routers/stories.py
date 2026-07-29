@@ -684,6 +684,25 @@ async def get_story_outgoing_references(
         repo.session, org_id=repo.org_id, entity_type="story", entity_id=id,
         direction="outgoing", visible_ids_by_type=visible,
     )
+
+    # story #2269(C-11) AC0-2 축B(2026-07-29, PO 지적): 「#<번호> 관찰 수집(축A, #2643)」만
+    # 해서는 화면에 아무것도 안 뜬다 — render-time 치환에 필요한 번호→story_id 매핑을 이
+    # 응답에 함께 싣는다. description+acceptance_criteria 둘 다 스캔해 하나로 합친다(번호는
+    # project 스코프라 필드와 무관하게 항상 같은 대상을 가리킨다). ⛔대괄호 참조(위 `refs`)와
+    # 달리 이 매핑은 가시성(visible) 필터를 거치지 않는다 — story는 이 write-path가 project
+    # 안에서만 해소하므로(project_id 스코프 자체가 가시성 경계와 같다) 별도 존재-비노출
+    # 판정이 이미 필요 없다(C-3 원칙과 충돌하지 않음 — target이 항상 caller와 같은 project다).
+    from app.services.mention_parser import resolve_bare_number_story_targets
+
+    bare_number_targets: dict[int, uuid.UUID] = {}
+    for field_text in (story.description, story.acceptance_criteria):
+        if not field_text:
+            continue
+        resolved = await resolve_bare_number_story_targets(
+            repo.session, org_id=repo.org_id, project_id=story.project_id, content=field_text,
+        )
+        bare_number_targets.update(resolved)
+
     return {
         "data": [
             {
@@ -696,7 +715,8 @@ async def get_story_outgoing_references(
                 "proof_payload": r.proof_payload,
             }
             for r in refs
-        ]
+        ],
+        "bare_number_targets": {str(number): str(story_id) for number, story_id in bare_number_targets.items()},
     }
 
 

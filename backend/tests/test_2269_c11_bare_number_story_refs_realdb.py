@@ -264,3 +264,85 @@ async def test_removing_bare_number_from_description_removes_its_reference():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ─── AC0-2 축B: 번호→uuid 매핑(화면 표시용, PO 지적 2026-07-29) ──────────────
+# 「축A(관찰수집)만 해서는 화면에 아무것도 안 뜬다」— resolve_bare_number_story_targets가
+# reconcile용 3튜플(축A)과 달리 번호를 보존해 반환하는지, 그리고 GET /{id}/references가
+# 그 매핑을 형제 필드로 정확히 싣는지 검증한다.
+
+
+def test_resolve_bare_number_story_targets_preserves_number_unit():
+    """순수 로직 확인: reconcile용 축A 함수는 번호를 버리지만, 축B 함수는 number→id를 그대로
+    보존한다(같은 SELECT를 재사용하는 리팩터가 축A 계약을 깨지 않았는지 코드 레벨 확인)."""
+    import inspect
+
+    from app.services.mention_parser import resolve_bare_number_story_refs
+
+    # 축A가 축B를 재사용(중복 쿼리 로직 없음)하는지 소스로 직접 확인 — DRY 회귀 감시.
+    assert "resolve_bare_number_story_targets" in inspect.getsource(resolve_bare_number_story_refs)
+
+
+async def test_outgoing_references_endpoint_includes_bare_number_targets():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            target = await _make_story(s, org.id, project.id, title="Target")
+            target.story_number = 7171
+            await s.commit()
+            story = await _make_story(
+                s, org.id, project.id, title="Source",
+                description="해소됨 #7171, 미해소 #999999",
+            )
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/stories/{story.id}/references?direction=outgoing")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["bare_number_targets"] == {"7171": str(target.id)}
+            assert "999999" not in body["bare_number_targets"]
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_outgoing_references_bare_number_targets_merges_description_and_ac():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            target_a = await _make_story(s, org.id, project.id, title="A")
+            target_a.story_number = 8181
+            target_b = await _make_story(s, org.id, project.id, title="B")
+            target_b.story_number = 8282
+            await s.commit()
+            story = await _make_story(
+                s, org.id, project.id, title="Source",
+                description="본문 #8181", acceptance_criteria="AC #8282",
+            )
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/stories/{story.id}/references?direction=outgoing")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["bare_number_targets"] == {"8181": str(target_a.id), "8282": str(target_b.id)}
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

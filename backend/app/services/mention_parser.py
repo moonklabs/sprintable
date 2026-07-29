@@ -211,6 +211,37 @@ def extract_bare_number_candidates(content: str) -> list[int]:
     return result
 
 
+async def resolve_bare_number_story_targets(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    content: str,
+) -> dict[int, uuid.UUID]:
+    """story #2269(C-11) AC0-2 축B(2026-07-29 추가, PO 지적 — 축A만으로는 화면에 아무것도 안
+    뜬다: "번역만 하면 되겠지" 함정 재현) — `extract_bare_number_candidates`가 뽑은 번호를
+    **번호를 보존한 채** story로 해소한다(number → story_id). `resolve_bare_number_story_refs`
+    (축A, reconcile 3튜플 전용 — 번호를 버리고 target만 반환)와 같은 SELECT를 하지만, 화면
+    표시(render-time `#<번호>` → `entity:story:<uuid>` 치환)엔 어느 번호가 어느 대상인지가
+    필요해 번호를 살려 반환하는 별도 함수로 분리했다.
+
+    ⛔`story_number`는 **project_id 유일**이지 org 유일이 아니다 — 소스의 project_id로만
+    스코프(축A와 동일 규율, mutation self-check로 실증됨 — test_2269 참조)."""
+    numbers = extract_bare_number_candidates(content)
+    if not numbers:
+        return {}
+    from app.models.pm import Story
+
+    rows = (await db.execute(
+        select(Story.story_number, Story.id).where(
+            Story.org_id == org_id,
+            Story.project_id == project_id,
+            Story.story_number.in_(numbers),
+        )
+    )).all()
+    return {row.story_number: row.id for row in rows}
+
+
 async def resolve_bare_number_story_refs(
     db: AsyncSession,
     *,
@@ -218,29 +249,14 @@ async def resolve_bare_number_story_refs(
     project_id: uuid.UUID,
     content: str,
 ) -> list[tuple[str, uuid.UUID, str]]:
-    """story #2269(C-11) AC0-2 축A — `extract_bare_number_candidates`가 뽑은 번호를 실제
-    story로 해소해 `reconcile_entity_references`가 바로 받는 (target_type, target_id, form)
-    3튜플로 반환한다(caller가 대괄호 파서 결과와 합쳐 한 번에 reconcile — 저장 시 원문
-    rewrite는 하지 않는다, doc `c11-2269-ac0-findings` AC0-2 축A/축B 구분 참조).
-
-    ⛔`story_number`는 **project_id 유일**이지 org 유일이 아니다(`pm.py`
-    uq_stories_project_id_story_number) — 반드시 이 텍스트가 쓰인 소스(caller)의
-    project_id로 스코프한다. 존재하지 않는 번호는 다른 추출기와 동형으로 조용히 스킵
-    (`reconcile_entity_references`의 target_not_found 게이트가 어차피 한 번 더 걸러
-    주지만, 여기서도 최소한만 걸러 불필요한 존재판정 왕복을 줄인다)."""
-    numbers = extract_bare_number_candidates(content)
-    if not numbers:
-        return []
-    from app.models.pm import Story
-
-    rows = (await db.execute(
-        select(Story.id).where(
-            Story.org_id == org_id,
-            Story.project_id == project_id,
-            Story.story_number.in_(numbers),
-        )
-    )).all()
-    return [("story", row.id, "mention") for row in rows]
+    """story #2269(C-11) AC0-2 축A — `resolve_bare_number_story_targets`가 준 number→id
+    매핑을 `reconcile_entity_references`가 바로 받는 (target_type, target_id, form) 3튜플로
+    변환한다(caller가 대괄호 파서 결과와 합쳐 한 번에 reconcile — 저장 시 원문 rewrite는
+    하지 않는다, doc `c11-2269-ac0-findings` AC0-2 축A/축B 구분 참조)."""
+    targets = await resolve_bare_number_story_targets(
+        db, org_id=org_id, project_id=project_id, content=content,
+    )
+    return [("story", story_id, "mention") for story_id in targets.values()]
 
 
 def extract_chat_doc_mention_ids(content: str) -> list[uuid.UUID]:
