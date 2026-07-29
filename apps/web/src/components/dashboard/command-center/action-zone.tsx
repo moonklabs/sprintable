@@ -1,9 +1,18 @@
 'use client';
 
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { ShieldCheck, GitPullRequest, AlertTriangle, CheckCircle2, ChevronRight } from 'lucide-react';
+import { ShieldCheck, GitPullRequest, Ban, AlertTriangle, CheckCircle2, ChevronRight, History } from 'lucide-react';
 import { type MyActions, type Priority, type QueueItem, type AttentionItem } from './types';
+import { selectVisibleQueue, countChangedSince, getLastSeenMs, markSeenNow, minutesAgo } from './derive-action-zone';
+
+const QUEUE_CAP = 5; // now-face.tsx CAP 관례 재사용(§7-4 잘림-보이기).
+
+// story #2288: use-recent-docs.ts 관례 재사용 — localStorage 읽기는 useSyncExternalStore로
+// (SSR 스냅샷=null, 클라 하이드레이션 후 실값) 해 setState-in-effect 없이 hydration-safe.
+function subscribeNoop() { return () => {}; }
+function getServerSnapshot() { return null; }
 
 // 우선순위 좌border(색=신호): danger/warn만 색·info는 중립(canonical §4 alert만 색).
 const PRIORITY_BORDER: Record<Priority, string> = {
@@ -14,7 +23,7 @@ const PRIORITY_BORDER: Record<Priority, string> = {
 
 function QueueRow({ item }: { item: QueueItem }) {
   const t = useTranslations('dashboard');
-  const ctx = item.context as { gate_id?: string; story_id?: string; kind?: string; status?: string };
+  const ctx = item.context as { gate_id?: string; story_id?: string; kind?: string; status?: string; blocked_story_id?: string };
   if (item.type === 'gate_approval') {
     // 승인은 우발 mutation 방지 위해 게이트 인박스로 1클릭 네비게이션(전체 맥락서 결재).
     return (
@@ -30,17 +39,48 @@ function QueueRow({ item }: { item: QueueItem }) {
       </Link>
     );
   }
+  // story #2288: BE의 'my_blockers'(내가 막고 있음)를 review_merge로 오인 렌더하던 것을
+  // 바로잡는다 — types.ts 참조. §2 dedup(같은 다음 발이면 한 줄)은 이 슬라이스 범위 밖.
+  if (item.type === 'my_blockers') {
+    return (
+      <Link
+        href={ctx.blocked_story_id ? `/board?story=${ctx.blocked_story_id}` : '/board'}
+        className={`flex items-center gap-2 rounded-lg border border-l-2 border-border bg-card p-2.5 text-xs transition hover:border-muted-foreground/30 ${PRIORITY_BORDER[item.priority]}`}
+      >
+        <Ban className="size-3.5 shrink-0 text-warning" />
+        <span className="min-w-0 flex-1 truncate text-foreground">
+          <span className="text-muted-foreground">{t('ccQueueMyBlocker')} · </span>{item.title ?? ctx.story_id?.slice(0, 6)}
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground">{t('ccQueueReview')}<ChevronRight className="size-3" /></span>
+      </Link>
+    );
+  }
+  if (item.type === 'review_merge') {
+    return (
+      <Link
+        href={ctx.story_id ? `/board?story=${ctx.story_id}` : '/board'}
+        className={`flex items-center gap-2 rounded-lg border border-l-2 border-border bg-card p-2.5 text-xs transition hover:border-muted-foreground/30 ${PRIORITY_BORDER[item.priority]}`}
+      >
+        <GitPullRequest className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-foreground">
+          <span className="text-muted-foreground">{t('ccQueueReviewMerge')} · </span>{item.title ?? ctx.story_id?.slice(0, 6)}
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground">{t('ccQueueReview')}<ChevronRight className="size-3" /></span>
+      </Link>
+    );
+  }
+  // story #2288, PO 지적(2026-07-29): 'my_blockers'가 이 자리(암묵적 else)에 떨어져
+  // review_merge로 오인 렌더되던 것이 그 버그였다 — BE가 FE 미선언 타입을 보내도 다시는
+  // «남의 문구로» 조용히 렌더되지 않게, 인식 못한 타입은 안전한 미확인 표시로 가른다.
+  // ⛔TS 유니온은 컴파일타임에만 닫혀 있다 — BE가 실제로 새 타입을 보내는 것은 여기서만 잡힌다.
+  const unknownType: string = item.type;
+  if (process.env.NODE_ENV !== 'production') {
+    console.warn('ActionZone/QueueRow: unrecognized action_queue item type', { type: unknownType });
+  }
   return (
-    <Link
-      href={ctx.story_id ? `/board?story=${ctx.story_id}` : '/board'}
-      className={`flex items-center gap-2 rounded-lg border border-l-2 border-border bg-card p-2.5 text-xs transition hover:border-muted-foreground/30 ${PRIORITY_BORDER[item.priority]}`}
-    >
-      <GitPullRequest className="size-3.5 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate text-foreground">
-        <span className="text-muted-foreground">{t('ccQueueReviewMerge')} · </span>{item.title ?? ctx.story_id?.slice(0, 6)}
-      </span>
-      <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground">{t('ccQueueReview')}<ChevronRight className="size-3" /></span>
-    </Link>
+    <div className="flex items-center gap-2 rounded-lg border border-l-2 border-dashed border-border bg-card p-2.5 text-xs text-muted-foreground">
+      <span className="min-w-0 flex-1 truncate">{t('ccQueueUnknownType')}</span>
+    </div>
   );
 }
 
@@ -69,10 +109,28 @@ export function ActionZone({ data, resolveName, epicTitles }: {
   epicTitles: Record<string, string>;
 }) {
   const t = useTranslations('dashboard');
-  const queue = data?.action_queue.items ?? [];
+  const queue = useMemo(() => data?.action_queue.items ?? [], [data]);
   const attention = data?.attention.items ?? [];
   const hasPending = (data?.attention.pending.length ?? 0) > 0;
   const isClear = data?.is_clear === true;
+
+  // story #2288 §8-4·§7-4: 자를 땐 review_merge부터, 잘렸으면 반드시 말한다.
+  const { visible: visibleQueue, cutCount } = selectVisibleQueue(queue, QUEUE_CAP);
+
+  // story #2288 §8-8(기존 3관계 범위): 방문 사이 새로 생긴 항목 수를 접힌 줄로 알린다.
+  // 처음 방문(기준점 없음)은 0 — 「모름」을 「전부 새것」으로 지어내지 않는다(getLastSeenMs 참조).
+  // 읽기는 useSyncExternalStore(하이드레이션 안전, setState-in-effect 없음) · 쓰기만 effect로.
+  const lastSeenMs = useSyncExternalStore(subscribeNoop, getLastSeenMs, getServerSnapshot);
+  const awayCount = useMemo(() => countChangedSince(queue, lastSeenMs), [queue, lastSeenMs]);
+  const lastSeenMinutesAgo = minutesAgo(lastSeenMs);
+  useEffect(() => {
+    if (!data) return;
+    markSeenNow(Date.now());
+  }, [data]);
+  const lastSeenAgo = lastSeenMinutesAgo === null ? null
+    : lastSeenMinutesAgo < 60 ? t('ccMinAgo', { n: lastSeenMinutesAgo })
+    : lastSeenMinutesAgo < 1440 ? t('ccHourAgo', { n: Math.floor(lastSeenMinutesAgo / 60) })
+    : t('ccDayAgo', { n: Math.floor(lastSeenMinutesAgo / 1440) });
 
   return (
     <section aria-label={t('ccZoneActions')} className="space-y-3 rounded-xl border border-border bg-card/40 p-3">
@@ -103,14 +161,28 @@ export function ActionZone({ data, resolveName, epicTitles }: {
             </div>
           ) : null}
 
-          {/* 행동 큐 — BE 정렬 순서 유지(재정렬 X) */}
+          {/* story #2288 §8-8: 자리를 비운 사이 생긴 것 — 접힌 줄, 항목 아님, 빨강 금지(사실이지 나쁜 소식 아님) */}
+          {awayCount > 0 ? (
+            <div className="flex items-center gap-1.5 rounded-md border border-dashed border-border px-2.5 py-1.5 text-[11px] text-muted-foreground">
+              <History className="size-3 shrink-0" aria-hidden="true" />
+              <span>
+                {t('ccChangedSince', { count: awayCount })}
+                {lastSeenAgo ? <span> · {t('ccLastSeenSuffix', { ago: lastSeenAgo })}</span> : null}
+              </span>
+            </div>
+          ) : null}
+
+          {/* 행동 큐 — BE 정렬 순서 유지, 자를 때만 §8-4 순서 적용(재정렬 아님, selectVisibleQueue 참조) */}
           <div className="space-y-1.5">
             <span className="text-[11px] font-medium text-foreground">{t('ccQueueTitle')}</span>
-            {queue.length > 0 ? (
-              queue.map((q, i) => <QueueRow key={`${q.type}-${i}`} item={q} />)
+            {visibleQueue.length > 0 ? (
+              visibleQueue.map((q, i) => <QueueRow key={`${q.type}-${i}`} item={q} />)
             ) : (
               <p className="text-xs text-muted-foreground">{t('ccQueueEmpty')}</p>
             )}
+            {cutCount > 0 ? (
+              <p className="text-[11px] text-muted-foreground">{t('ccQueueTruncated', { shown: visibleQueue.length, total: queue.length })}</p>
+            ) : null}
           </div>
         </>
       )}

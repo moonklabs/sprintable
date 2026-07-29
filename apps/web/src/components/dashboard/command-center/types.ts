@@ -3,10 +3,12 @@
 export type Priority = 'danger' | 'warn' | 'info';
 
 export interface QueueItem {
-  type: 'gate_approval' | 'review_merge';
+  // story #2288: 'my_blockers' 추가 — BE(`command_center.py`)가 이미 내보내는데 타입에 없어
+  // action-zone.tsx의 QueueRow가 review_merge로 오인 렌더하던 것을 바로잡는다.
+  type: 'gate_approval' | 'review_merge' | 'my_blockers';
   priority: Priority;
   title?: string | null; // review_merge만 top-level title(story 제목)
-  context: Record<string, unknown>; // gate_approval:{gate_id,approval_group_id,kind} / review_merge:{story_id,status}
+  context: Record<string, unknown>; // gate_approval:{gate_id,approval_group_id,kind} / review_merge:{story_id,status} / my_blockers:{blocker_story_id,blocked_story_id}
   created_at: string | null;
 }
 
