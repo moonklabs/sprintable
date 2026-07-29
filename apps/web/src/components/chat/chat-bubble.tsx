@@ -38,6 +38,21 @@ interface ContextMenuState {
   y: number;
 }
 
+// story #2263 AC6 — 본문 토큰(target_type+target_id)이 메시지의 stored 참조 목록에 있는지
+// 대조한다. `references === undefined`(옛 서버·SSE 디스패치 등 이 필드를 안 주는 경로)는
+// 판단 재료가 없다는 뜻이라 유령 처리를 보류한다(폴백 — 기존처럼 그대로 그린다). 대소문자
+// 차이(사용자가 UUID를 대문자로 쳐 넣는 경우)를 흡수하려 양쪽 다 lower-case로 비교한다.
+function isGhostReference(
+  references: ChatMessage['references'],
+  targetType: string,
+  targetId: string,
+): boolean {
+  if (references === undefined) return false;
+  const type = targetType.toLowerCase();
+  const id = targetId.toLowerCase();
+  return !references.some((r) => r.target_type.toLowerCase() === type && r.target_id.toLowerCase() === id);
+}
+
 // Convert @name tokens to markdown links so react-markdown v10 can render them via the `a` component.
 // Uses negative lookbehind to skip already-linked mentions (e.g. inside [...]).
 function prepareMentions(content: string): string {
@@ -98,7 +113,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
   );
 }
 
-function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean }) {
+function ChatMarkdown({ content, isMine, references }: { content: string; isMine: boolean; references: ChatMessage['references'] }) {
   const text = isMine ? 'text-primary-foreground' : 'text-foreground';
   const muted = isMine ? 'text-primary-foreground/70' : 'text-muted-foreground';
   const codeBg = isMine ? 'bg-primary-foreground/10 text-primary-foreground' : 'bg-muted text-foreground';
@@ -160,14 +175,18 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
       const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
       if (m) {
         // S6: 자산 토큰은 컴팩트 칩 대신 리치 임베드 카드(썸네일+메타+화살표).
+        // ⛔asset은 reference_registry.ENTITY_RESOLVERS 밖의 FE 전용 타입이라(embed-card.tsx
+        // 주석 참조) mention_parser가 애초에 entity_references에 안 쓴다 — stored 참조와
+        // 대조하면 asset 임베드가 전부 유령으로 오판된다. 유령 판정 자체를 안 태운다.
         if (m[1]!.toLowerCase() === 'asset') {
           return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} />;
         }
-        return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
+        const ghost = isGhostReference(references, m[1]!, m[2]!);
+        return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} ghost={ghost} />;
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
-  }), [text, muted, codeBg, border, isMine]);
+  }), [text, muted, codeBg, border, isMine, references]);
 
   if (!hasMarkdown && !hasMention) {
     return (
@@ -331,7 +350,7 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
                 ? 'rounded-tr-sm bg-primary text-primary-foreground'
                 : 'rounded-tl-sm bg-muted text-foreground'
             }`}>
-              <ChatMarkdown content={displayContent} isMine={isMine} />
+              <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} />
             </div>
           )}
 

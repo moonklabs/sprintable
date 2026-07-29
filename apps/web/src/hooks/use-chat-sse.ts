@@ -30,6 +30,12 @@ export interface ChatMessage {
   parent_id?: string | null;    // null = top-level message; set = this is a thread reply
   reply_count?: number;
   last_reply_at?: string | null;
+  /** story #2263 AC6 — 읽기 경로(list_messages/get_message/list_message_replies)만 싣는
+   * stored 참조 사이드밴드(conversations.py fetch_stored_references). ⛔`undefined`(키
+   * 자체가 없음 — SSE 디스패치·전송 직후 응답 등 이 필드를 안 주는 경로)와 `[]`(읽기 경로가
+   * 실제로 0건을 확認)를 구분한다 — 전자는 "판단 재료 없음"이라 유령 판정을 보류(폴백,
+   * 기존처럼 그대로 그린다)하고, 후자는 본문 토큰과 대조해 유령을 가른다. */
+  references?: Array<{ target_type: string; target_id: string }>;
 }
 
 // Normalize backend _to_chat_message format → ChatMessage
@@ -49,6 +55,10 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     parent_id: (raw.parent_id ?? raw.thread_id ?? null) as string | null,
     reply_count: (raw.reply_count ?? 0) as number,
     last_reply_at: (raw.last_reply_at ?? null) as string | null,
+    // story #2263 AC6 — key 부재(undefined)와 빈 배열([])을 그대로 통과시킨다. `raw.references
+    // ?? []`처럼 기본값을 주면 "옛 서버라 필드가 없다"가 "참조 0건 확認됨"으로 뭉개져 유령
+    // 판정이 항상 켜지는 회귀가 난다(오늘 아침 유령 칩 사고와 같은 모양).
+    references: Array.isArray(raw.references) ? raw.references as ChatMessage['references'] : undefined,
   };
 }
 
