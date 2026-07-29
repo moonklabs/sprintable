@@ -592,3 +592,43 @@ async def reconcile_doc_mentions(
         db, org_id=org_id, source_type="doc", source_field="body", source_id=doc_id,
         extracted_refs=extracted_refs, created_by=created_by,
     )
+
+
+async def fetch_stored_references(
+    db: AsyncSession, *, org_id: uuid.UUID, source_type: str, source_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, list[dict[str, str]]]:
+    """story #2263 AC6 / #2262(C-4) 첫 발(오르테가 판정 2026-07-29, 스레드 7256d5cc) — 읽기
+    경로용. 채팅 `#` 검색이 만든 칩은 write 응답(`references.dropped[]`, #2294)으로만
+    한 번 확인되고 새로고침하면 사라진다 — `get_chat_message`가 그 메시지가 실제로 건
+    참조를 다시 안 실어서(파서가 `content`를 재작성하지 않는 insert-only라 화면은 본문
+    정규식 매치만으로 칩을 그리므로, dropped된 참조도 저장된 것과 똑같은 칩으로 보인다).
+
+    ⛔이 함수는 **stored 참조만** 되살린다(`target_type`·`target_id` — "무엇을 가리키나"까지).
+    `dropped`는 그 저장 시점의 이야기라 영속이 아니다(오르테가 판정) — 복원 대상이 아니고,
+    FE는 "본문 토큰 N개 ↔ stored M개"를 대조해 어느 칩이 안 걸렸는지 스스로 가른다. 「지금
+    상태·다음 행동」(status 등)은 여기서 안 얹는다 — #2262 본체가 얹을 자리(그 순간부터는
+    새 노출이라 C-3/#2261 권한 게이트가 #2262 前에 서야 한다, 오르테가 판정 그대로).
+
+    N+1 방지 — 호출자가 여러 source_id(예: `list_messages`의 페이지 전체)를 한 번에 넘기면
+    쿼리 1회로 전부 해소한다(개별 message마다 왕복하지 않는다). `ix_entity_references_source`
+    (org_id, source_type, source_id)가 이 IN 쿼리를 커버한다.
+
+    반환: `source_id -> [{"target_type", "target_id"}, ...]`. 호출자는 이 dict에 없는
+    source_id를 **빈 리스트**로 취급해야 한다(그 source가 stored 참조 0건이라는 뜻 —
+    "옛 서버라 필드가 없다"와 구분하기 위해 호출자가 payload에 항상 `references: []`를
+    싣는 것이 이 함수의 계약이 아니라 **호출자의 책임**이다, 아래 conversations.py 참조)."""
+    if not source_ids:
+        return {}
+    rows = (await db.execute(
+        select(Reference.source_id, Reference.target_type, Reference.target_id).where(
+            Reference.org_id == org_id,
+            Reference.source_type == source_type,
+            Reference.source_id.in_(source_ids),
+        )
+    )).all()
+    result: dict[uuid.UUID, list[dict[str, str]]] = {}
+    for source_id, target_type, target_id in rows:
+        result.setdefault(source_id, []).append(
+            {"target_type": target_type, "target_id": str(target_id)}
+        )
+    return result
