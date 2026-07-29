@@ -214,6 +214,12 @@ class StoryResponse(BaseModel):
     @classmethod
     def _coerce_agent_delegate_ids(cls, v):
         return v if isinstance(v, list) else []
+    # story #2315 AC1: 채팅 write 응답의 `references{stored, dropped[]}` 사이드밴드(#2294)와
+    # 같은 모양 — story PATCH도 description·acceptance_criteria에서 reconcile_entity_
+    # references를 돌리는데(#2599) 그 결과를 응답이 말 안 하던 형제 비대칭을 닫는다.
+    # ORM 컬럼 아님·update_story가 model_validate 前 transient attr로 세팅(agent_delegate_ids
+    # 패턴 동형) — GET/list 등 다른 경로는 세팅하지 않으므로 기본값 None으로 빠진다.
+    references: dict | None = None
     # E-FILE S4: 보드 스토리 첨부 (column 값). list 아니면 [](레거시 None/mock 안전).
     attachments: list[dict] = []
     meeting_id: uuid.UUID | None = None

@@ -25,6 +25,9 @@ def _mock_story(status: str = "backlog") -> MagicMock:
     # 검증 실패하므로 명시 세팅(위 outcome 필드와 동일 이유).
     s.human_owner_member_id = None
     s.agent_delegate_ids = []
+    # story #2315 AC1: references(transient, dict|None) — 위와 동일 이유(MagicMock 자동
+    # 속성이 Pydantic dict|None 검증 실패)로 명시 세팅.
+    s.references = None
     s.meeting_id = None
     s.title = "Story 1"
     s.status = status

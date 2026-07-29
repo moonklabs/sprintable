@@ -67,6 +67,33 @@ describe('/api/stories/[id] (직접 서비스 StoryService)', () => {
     expect(h.logActivity).toHaveBeenCalledWith(expect.objectContaining({ action_type: 'status_changed', new_value: 'done' }));
   });
 
+  // story #2315 AC1: BE가 story 객체의 형제 키로 얹는 `references`를 응답 최상위(data와
+  // 같은 층)로 옮기는지 — 데이터 안에 남으면 KanbanStory에 낯선 필드가 섞여 든다.
+  it('PATCH: hoists references sibling from BE payload to response top-level', async () => {
+    h.parseBody.mockResolvedValue({ success: true, data: { description: 'x' } });
+    h.getById.mockResolvedValue({ id: ID, status: 'todo', title: 'T', assignee_id: null });
+    h.update.mockResolvedValue({
+      id: ID, title: 'T',
+      references: { stored: 1, dropped: [{ target_type: 'story', target_id: 'not-a-uuid', reason: 'malformed_token' }] },
+    });
+    const res = await PATCH(req('PATCH'), ctx());
+    const json = await res.json();
+    expect(json.references).toEqual({
+      stored: 1, dropped: [{ target_type: 'story', target_id: 'not-a-uuid', reason: 'malformed_token' }],
+    });
+    expect(json.data).not.toHaveProperty('references');
+  });
+
+  it('PATCH: omits references entirely when BE reports null (normal path)', async () => {
+    h.parseBody.mockResolvedValue({ success: true, data: { title: 'New Title' } });
+    h.getById.mockResolvedValue({ id: ID, status: 'todo', title: 'T', assignee_id: null });
+    h.update.mockResolvedValue({ id: ID, title: 'New Title', references: null });
+    const res = await PATCH(req('PATCH'), ctx());
+    const json = await res.json();
+    expect(json).not.toHaveProperty('references');
+    expect(json.data).not.toHaveProperty('references');
+  });
+
   it('DELETE: deletes via service.delete(id) → {ok:true}', async () => {
     h.del.mockResolvedValue(undefined);
     const res = await DELETE(req('DELETE'), ctx());
