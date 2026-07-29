@@ -74,6 +74,9 @@ async def my_actions(
     # 이 필드는 안 걸렸을 것 — 그래서 "한 정의로 묶기"는 지금 인프라로는 불가능하다는 것이
     # 확인된 사실이다(추측 아님). 진짜 재발 방지(BE↔FE type 집합 parity 테스트)는 PO가 별도
     # 스토리로 세운다 — 이 코멘트는 그 전까지의 "적어 둔 것" 역할(미르코의 types.ts 코멘트와 짝).
+    # ⛔만료 조건(PO 지시, 2026-07-29): OpenAPI→FE 자동생성이 서면 이 코멘트 셋(여기+FE 둘)을
+    # 지운다 — 이유(자동생성 부재)가 사라진 뒤에도 처방(수동 코멘트 유지)이 남으면 그 자체가
+    # 다음 사람에게 "아직도 수동으로 맞춰야 한다"는 거짓 신호가 되어 해가 된다.
     queue: list[dict] = []
     # 게이트 승인 대기 = 내가 approver 인 pending blocking approval(member-private·서버 resolve member_id).
     # story #2288(E-CONNECT) BE 명세3(§3-1㉢·§4-1, 미르코 작성): gate_type 패스스루 —
