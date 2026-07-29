@@ -183,6 +183,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.doc import Doc
+from app.models.meeting import Meeting
 from app.models.pm import Story
 from app.models.reference import Reference
 from app.services.conversation_auth import conversation_readable_predicate
@@ -483,6 +484,16 @@ async def list_entity_backlinks(
             ConversationMessage.conversation_id.label("msg_conversation_id"),
             ConversationMessage.content.label("msg_content"),
             ConversationMessage.sender_id.label("msg_sender_id"),
+            # story #2267(C-9): meeting·story도 source가 될 수 있다(창조-출처, relation=
+            # 'created_from') — Doc과 동형(직접 project_id 보유·soft-delete)이라 같은 패턴.
+            # #2299 교훈 그대로: deleted_at은 JOIN ON절에 안 넣는다(soft-delete돼도 project_id는
+            # 살아야 authz가 정상 평가된다).
+            Meeting.project_id.label("meeting_project_id"),
+            Meeting.title.label("meeting_title"),
+            Meeting.deleted_at.label("meeting_deleted_at"),
+            Story.project_id.label("story_source_project_id"),
+            Story.title.label("story_source_title"),
+            Story.deleted_at.label("story_source_deleted_at"),
         )
         .select_from(Reference)
         .outerjoin(
@@ -507,6 +518,23 @@ async def list_entity_backlinks(
                 Conversation.org_id == org_id,  # ⭐ Blocker 1(4회차): org 경계 명시 검증
             ),
         )
+        .outerjoin(
+            Meeting,
+            and_(
+                Meeting.id == Reference.source_id,
+                Reference.source_type == "meeting",
+                # Meeting엔 org_id 컬럼이 없다(project 경유로만 org 스코프) — project_access_
+                # valid_correlated가 project→org 소속을 확認하므로 여기선 project_id로만 매치.
+            ),
+        )
+        .outerjoin(
+            Story,
+            and_(
+                Story.id == Reference.source_id,
+                Reference.source_type == "story",
+                Story.org_id == org_id,
+            ),
+        )
         .where(
             Reference.org_id == org_id,
             Reference.source_field == "body",
@@ -525,6 +553,16 @@ async def list_entity_backlinks(
                     # NULL — 이 가드가 그 행을 admin-bypass 포함 어떤 경로로도 확실히 탈락시킨다.
                     Conversation.id.isnot(None),
                     chat_predicate,
+                ),
+                and_(
+                    # story #2267(C-9): meeting source — Doc과 동일 패턴(project_id 직접보유).
+                    Reference.source_type == "meeting",
+                    project_access_valid_correlated(Meeting.project_id, caller_id=uid, org_id=org_id),
+                ),
+                and_(
+                    # story #2267(C-9): story source(㉢분할·복제 출처) — Doc과 동일 패턴.
+                    Reference.source_type == "story",
+                    project_access_valid_correlated(Story.project_id, caller_id=uid, org_id=org_id),
                 ),
             ),
         )
@@ -562,11 +600,17 @@ async def list_entity_backlinks(
             "source_id": str(m.source_id),
             "created_by": _member_summary_same_org(creator, org_id),
             "created_at": m.created_at.isoformat(),
+            # story #2267(C-9): 'none'(본문 참조)·'created_from'(target이 이 source에서
+            # 만들어졌다 — "출처"). ⛔컨테이너(epic/sprint/meeting_id)와 이 값을 화면에서
+            # 섞지 않는다(스토리 AC4) — 이 필드가 있어야 FE가 "출처"만 따로 표시할 수 있다.
+            "relation": m.relation,
             "doc": None,
             "message": None,
+            "meeting": None,
+            "story": None,
             # story #2299 AC⑤: 「끊어짐」은 색/경고가 아니라 사실 필드다 — 렌더(색·문구)는 FE
             # 몫. chat_message는 SOURCE_ONLY_TYPES(불변·soft-delete 없음, reference_registry.py
-            # 참조)라 항상 True — doc만 아래서 실제 판정으로 덮어쓴다.
+            # 참조)라 항상 True — doc·meeting·story만 아래서 실제 판정으로 덮어쓴다.
             "still_exists": True,
         }
         if m.source_type == "doc":
@@ -580,6 +624,12 @@ async def list_entity_backlinks(
                 "content_snippet": build_content_snippet(r.msg_content),
                 "sender": _member_summary_same_org(sender, org_id),
             }
+        elif m.source_type == "meeting":
+            item["meeting"] = {"id": str(m.source_id), "title": r.meeting_title}
+            item["still_exists"] = r.meeting_deleted_at is None
+        elif m.source_type == "story":
+            item["story"] = {"id": str(m.source_id), "title": r.story_source_title}
+            item["still_exists"] = r.story_source_deleted_at is None
         data.append(item)
 
     next_cursor = None
@@ -591,11 +641,11 @@ async def list_entity_backlinks(
     # 무엇을 셌는지를 구조화된 사실로 함께 낸다(문안 렌더는 FE 몫 — 여기선 FE가 틀리지 않게
     # 근거 사실만 준다). ⛔이 쿼리는 `Reference.form`을 필터링하지 않는다(mention/embed/proof
     # 전부 포함 — 위 stmt에 form 조건이 없다) — 그래서 "mention/embed만"이라고 쓰면 거짓이다.
-    # source_type은 이 함수가 아는 두 값(chat_message·doc)뿐 — PR "[SID:XXX]" 텍스트 관례·
-    # evidence 자유텍스트 참조는 entity_references에 전혀 안 쌓이므로(구조화 전) 이 카운트에
-    # 없다.
+    # source_type은 이 함수가 아는 네 값(chat_message·doc·meeting·story, story #2267 C-9가
+    # meeting·story를 추가)뿐 — PR "[SID:XXX]" 텍스트 관례·evidence 자유텍스트 참조는
+    # entity_references에 전혀 안 쌓이므로(구조화 전) 이 카운트에 없다.
     collection_scope = {
-        "source_types": ["chat_message", "doc"],
+        "source_types": ["chat_message", "doc", "meeting", "story"],
         "forms": "all",
         "excludes": ["pr_sid_text_convention", "evidence_free_text_reference"],
     }

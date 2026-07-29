@@ -186,7 +186,13 @@ ENTITY_RESOLVERS: dict[str, EntityExistsResolver] = {
 # 를 ENTITY_RESOLVERS로 옮겼었으나 되돌렸다(그 등록이 검색·MCP·project축 계약까지 강제해
 # CI 13건이 깨졌다, PO 판정) — chat_message는 source_only이면서 «동시에» target_only(아래)
 # 이기도 하다, 서로 배타적이지 않다.
-SOURCE_ONLY_TYPES: frozenset[str] = frozenset({"chat_message"})
+# ⛔story #2267(C-9, 2026-07-29): meeting도 이 집합의 멤버다 — 일감의 "생성 출처"로 meeting을
+# 가리켜야 하는데(회의에서 스토리가 나왔다), meeting은 ENTITY_RESOLVERS(완전지원)의 다른 네
+# 계약(검색·MCP mention·project축·reference_token)을 하나도 못 갖춘다 — entities.py의 검색
+# 핸들러 목록에 meeting이 없다(화면 어디서도 "회의를 @멘션 대상으로 검색"하는 경로 자체가
+# 없다). chat_message와 동형: 자기 존재로 원인만 기록될 뿐, 남이 그것을 "가리키는" 대상은 아니다.
+# target 자격(TARGET_ONLY_TYPES)도 필요 없다 — meeting을 인용/임베드하는 기능 자체가 없다.
+SOURCE_ONLY_TYPES: frozenset[str] = frozenset({"chat_message", "meeting"})
 
 # ⛔TARGET_ONLY_TYPES(SOURCE_ONLY_TYPES와 대칭, story #2263 PO 판정 2026-07-29) — target은
 # 될 수 있으나(존재판정 가능) ENTITY_RESOLVERS의 나머지 네 계약(검색·project축·MCP
