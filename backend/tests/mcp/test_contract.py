@@ -95,6 +95,8 @@ EXPECTED_TOOLS = {
     "sprintable_add_evidence",
     # 판단 칸 (2) — story #2268(D단계, E-CONNECT)
     "sprintable_add_judgment", "sprintable_list_judgments",
+    # 세션 시작 컨텍스트 (1) — story #2268(C-10, E-CONNECT)
+    "sprintable_get_session_context",
     # visual artifacts (12) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
     # 핀 저작(story 7fe16274) + story #1922(delete_artifact, soft delete·생성자 전용)
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
@@ -117,8 +119,9 @@ def test_total_tool_count():
     # story #2010: sprintable_transition_goal 1종 신설(목표 lifecycle 전이, 구 _epic 별칭 없음) —
     # 111→112. story #1922: sprintable_delete_artifact 1종 신설(artifact soft delete, 생성자
     # 전용) — 112→113. story #2268(D단계): sprintable_add_judgment/list_judgments 2종 신설
-    # (판단 칸 pull 진입점 MCP 노출) — 113→115.
-    assert len(_TOOLS) == 115
+    # (판단 칸 pull 진입점 MCP 노출) — 113→115. story #2268(C-10): sprintable_get_session_context
+    # 1종 신설(세션 시작 컨텍스트 REST를 MCP로 노출 — PO 판정: REST뿐이면 못 쓴다) — 115→116.
+    assert len(_TOOLS) == 116
 
 
 def test_all_expected_tools_registered():
