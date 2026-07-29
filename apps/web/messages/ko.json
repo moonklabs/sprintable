@@ -3315,6 +3315,8 @@
     "chatProofSectionTitle": "대화 근거",
     "chatProofCount": "대화 근거 {count}건",
     "chatProofSomeUnavailable": "{count}건은 표시할 수 없음",
+    "chatProofLoadFailed": "대화 근거를 불러오지 못했습니다",
+    "chatProofRetry": "다시 시도",
     "chatProofOpenSource": "대화에서 열기",
     "chatProofOpenOriginal": "지금 원본 보기",
     "chatProofEdited": "원본이 수정되었습니다 · {date}",

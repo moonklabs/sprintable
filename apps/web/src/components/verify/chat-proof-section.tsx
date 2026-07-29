@@ -106,13 +106,24 @@ export function ChatProofSection({ storyId }: ChatProofSectionProps) {
   const [refs, setRefs] = useState<StoryProofReference[] | null>(null);
   const [skippedCount, setSkippedCount] = useState(0);
   const [loadedForId, setLoadedForId] = useState<string | null>(null);
+  // story #2265(C-7), PO 지적(2026-07-29): 404(C-3 존재 비노출 — 이 스토리에 접근권이 없어
+  // «없는 것»으로 보여야 함)와 «그 외 실패»(네트워크 끊김·5xx — «모름»)를 같은 빈 화면으로
+  // 접으면 폴백이 모름을 없음으로 지어낸다. loadError는 후자만 표시한다(재시도 가능·사용자
+  // 숙제 아님 — 다시 누르면 실제로 결과가 바뀔 수 있는 자리).
+  const [loadError, setLoadError] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/stories/${storyId}/references?direction=outgoing`, { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => {
+        if (r.ok) return r.json();
+        if (r.status === 404) return null; // C-3 존재 비노출 — 확認된 "없음".
+        throw new Error(`load failed: ${r.status}`); // 그 외(권한 이외 오류)는 "모름".
+      })
       .then((json) => {
         if (cancelled) return;
+        setLoadError(false);
         const { items, skippedIds } = json ? parseStoryProofReferences(json) : { items: [], skippedIds: [] };
         if (skippedIds.length > 0 && process.env.NODE_ENV !== 'production') {
           // dev 전용: 다음 사람이 왜 안 뜨는지 보게(PO 지시, 2026-07-29).
@@ -123,12 +134,28 @@ export function ChatProofSection({ storyId }: ChatProofSectionProps) {
         setLoadedForId(storyId);
       })
       .catch(() => {
-        if (!cancelled) { setRefs([]); setSkippedCount(0); setLoadedForId(storyId); }
+        if (cancelled) return;
+        setLoadError(true);
+        setRefs([]);
+        setSkippedCount(0);
+        setLoadedForId(storyId);
       });
     return () => { cancelled = true; };
-  }, [storyId]);
+  }, [storyId, retryNonce]);
 
-  if (refs === null || loadedForId !== storyId || (refs.length === 0 && skippedCount === 0)) return null;
+  if (refs === null || loadedForId !== storyId) return null;
+  if (!loadError && refs.length === 0 && skippedCount === 0) return null; // 확認된 0건 — 조용히 안 보임.
+
+  if (loadError) {
+    return (
+      <p className="text-[11px] text-muted-foreground">
+        {t('chatProofLoadFailed')}{' '}
+        <button type="button" onClick={() => setRetryNonce((n) => n + 1)} className="text-primary hover:underline">
+          {t('chatProofRetry')}
+        </button>
+      </p>
+    );
+  }
 
   return (
     <div className="space-y-2">
