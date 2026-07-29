@@ -16,6 +16,12 @@ import { NotificationService } from '@/services/notification.service';
 // 조립한다 — meta에 얹지 않는 이유: parseDroppedReferences가 이미 다른 표면(채팅의 raw
 // backend 응답)에서 top-level만 보도록 고정돼 있어, 여기서만 meta로 옮기면 두 표면이 같은
 // 파서를 쓰면서 자리가 갈리는 쌍둥이 갭이 된다.
+//
+// ⛔정책 7.3(`{data, error, meta}` 삼종) 의도적 예외 — 이 PATCH 핸들러만. 위반이 아니라
+// FE 계약(top-level `references`, #2614)을 지키기 위한 선택이다. `data` 안에 넣지 않는
+// 이유: `references`가 story 필드가 아닌데 거기 섞이면 `KanbanStory` 타입이 오염된다.
+// 다음 사람이 "왜 여기만 정책을 안 지키나"로 읽지 않도록 — 실제 조립부는 아래 `if
+// (references)` 블록, 근거는 이 주석.
 interface StoryReferencesSideband {
   stored: number;
   dropped: Array<{ target_type: string; target_id: string; reason?: string }>;
