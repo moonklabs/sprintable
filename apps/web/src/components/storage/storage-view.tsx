@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -23,12 +24,40 @@ import type {
   StorageViewMode,
 } from '@/lib/storage/types';
 
+// story #2302 AC1 — `?asset=` 딥링크가 무엇을 해야 하는지의 판정만 순수 함수로 뽑아 둔다
+// (StorageView 전체를 렌더하지 않고도 이 결정 로직 자체를 단위테스트하기 위함 — 이 컴포넌트는
+// useDashboardContext/useContextualPanelState/useFocusTrap 등 컨텍스트가 많아 풀 렌더 테스트
+// 비용이 크다). 부수효과(fetch·setState)는 호출부(useEffect)에 그대로 둔다.
+export type AssetDeepLinkAction =
+  | { type: 'none' }
+  | { type: 'wait' }
+  | { type: 'select-from-page'; assetId: string }
+  | { type: 'fetch-fallback'; assetId: string };
+
+export function resolveAssetDeepLinkAction(params: {
+  assetId: string | null;
+  projectId: string;
+  selectedAssetId: string | null;
+  items: Pick<Asset, 'id'>[];
+  loading: boolean;
+}): AssetDeepLinkAction {
+  const { assetId, projectId, selectedAssetId, items, loading } = params;
+  if (!assetId || !projectId) return { type: 'none' };
+  if (selectedAssetId === assetId) return { type: 'none' }; // 이미 선택돼 있다 — 재실행 방지.
+  if (items.some((a) => a.id === assetId)) return { type: 'select-from-page', assetId };
+  // "첫 페이지에 있을 때만 되는" 반쪽 링크를 만들지 않기 위해(PO 판정 — epic 404와 같은 부류:
+  // 갈 수 있다고 말하고 배신하는 것이 제일 나쁘다) 못 찾으면 무조건 포기하지 않고 단건조회로 폴백한다.
+  if (loading) return { type: 'wait' }; // 첫 페이지 로드가 아직 안 끝났다 — 그 결과부터 보고 판단.
+  return { type: 'fetch-fallback', assetId };
+}
+
 // story a539c649 S3a/b: projectId 는 이제 page.tsx(headers() 경유 resolve 결과)가 prop 으로
 // 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 URL 이 가리키는 project.
 // projectName 은 순수 표시용(폴더 트리 헤더)이라 전역 컨텍스트 그대로 유지(artifacts와 동형).
 export function StorageView({ projectId }: { projectId: string }) {
   const t = useTranslations('storage');
   const { projectName } = useDashboardContext();
+  const searchParams = useSearchParams();
 
   const [folders, setFolders] = useState<Folder[]>([]);
   const [items, setItems] = useState<Asset[]>([]);
@@ -39,6 +68,13 @@ export function StorageView({ projectId }: { projectId: string }) {
 
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  // story #2302 — `?asset=` 딥링크(embed-card getEntityHref('asset',...)·team-activity-view가
+  // 만드는 링크)가 지금까지 사문(死文)이었다(searchParams를 읽는 코드가 아예 없었다). items는
+  // 커서 페이지네이션이라 그 asset이 첫 페이지/현재 폴더에 없으면 `items.find`가 못 찾는데,
+  // "첫 페이지에 있을 때만 되는 링크"는 그 자체로 반쪽 fix(PO 판정 — epic 404와 같은 "갈 수
+  // 있다고 말하고 배신하는" 부류) — 그래서 fetch-by-id 폴백을 별도 state로 둔다(items에 억지로
+  // 끼워 넣지 않는다 — 다른 폴더 소속일 수 있어 목록 필터 의미를 깨지 않기 위함).
+  const [deepLinkedAsset, setDeepLinkedAsset] = useState<Asset | null>(null);
   const [viewMode, setViewMode] = useState<StorageViewMode>('list');
   const [sort, setSort] = useState<AssetSort>('date');
   const [order, setOrder] = useState<SortOrder>('desc');
@@ -151,6 +187,37 @@ export function StorageView({ projectId }: { projectId: string }) {
     })();
   }, [projectId, buildAssetsUrl]);
 
+  // story #2302 AC1(asset을 실제로 ①로 만든다) — `?asset=`이 가리키는 자산을 자동 선택한다.
+  // 현재(필터된) 페이지에 있으면 그대로 선택, 없으면(다른 폴더·다음 페이지) 단건 GET으로
+  // 폴백해서 가져온다 — "첫 페이지에 있을 때만 되는" 반쪽 링크를 만들지 않기 위해서다(PO 판정,
+  // epic 404와 같은 부류: 갈 수 있다고 말하고 배신하는 것이 제일 나쁘다).
+  useEffect(() => {
+    const action = resolveAssetDeepLinkAction({
+      assetId: searchParams.get('asset'), projectId, selectedAssetId, items, loading,
+    });
+    if (action.type === 'none' || action.type === 'wait') return;
+    if (action.type === 'select-from-page') {
+      setSelectedAssetId(action.assetId);
+      if (!detailPanel.supportsInlinePanel) setDetailDrawerOpen(true);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/assets/${action.assetId}`);
+        if (!res.ok) return; // 조용히 무시 — 대상이 없으면 그냥 선택되지 않는다(별도 에러 UI는 이 스코프 밖).
+        const json = (await res.json()) as { data?: Asset };
+        if (cancelled || !json.data) return;
+        setDeepLinkedAsset(json.data);
+        setSelectedAssetId(json.data.id);
+        if (!detailPanel.supportsInlinePanel) setDetailDrawerOpen(true);
+      } catch {
+        /* 조용히 무시 */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [searchParams, projectId, selectedAssetId, items, loading, detailPanel.supportsInlinePanel, setDetailDrawerOpen]);
+
   const handleRetry = useCallback(() => {
     // buildAssetsUrl 의존성은 동일하므로 강제 재요청을 위해 effectiveSearch 토글 대신 재-set
     setError(false);
@@ -257,8 +324,9 @@ export function StorageView({ projectId }: { projectId: string }) {
   );
 
   const selectedAsset = useMemo(
-    () => items.find((a) => a.id === selectedAssetId) ?? null,
-    [items, selectedAssetId],
+    () => items.find((a) => a.id === selectedAssetId)
+      ?? (deepLinkedAsset?.id === selectedAssetId ? deepLinkedAsset : null),
+    [items, selectedAssetId, deepLinkedAsset],
   );
 
   // 요약 칩: 로드된 집합 기준(전체 카운트 전용 엔드포인트 부재 — 가정/NOTE).
