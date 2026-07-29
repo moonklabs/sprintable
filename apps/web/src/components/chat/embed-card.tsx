@@ -506,21 +506,31 @@ export function EntityChip({
   entityId,
   label,
   href,
+  ghost = false,
 }: {
   entityType: string;
   entityId?: string;
   label: string;
   href: string | null;
+  /** story #2263 AC6 — 본문 토큰이 메시지의 stored 참조(읽기 경로 사이드밴드)와 매칭되지
+   * 않을 때(=유령 칩, dropped됐거나 손으로 친 토큰). #2302 AC4 규율을 그대로 재사용한다 —
+   * 회색 하나(GRAY_STATE_COLOR)·행동 0(클릭·모달 없음)·기본 커서·문구는 이미 선 "대상이
+   * 없습니다"(신규 문구 발명 금지). */
+  ghost?: boolean;
 }) {
   const [showModal, setShowModal] = useState(false);
-  const colorClass = ENTITY_COLORS[entityType] ?? GRAY_STATE_COLOR;
+  const colorClass = ghost ? GRAY_STATE_COLOR : (ENTITY_COLORS[entityType] ?? GRAY_STATE_COLOR);
 
   const inner = (
     <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs font-medium ${colorClass}`}>
       <EntityGlyph Icon={resolveEntityIcon(entityType)} label={label} className="size-3 shrink-0" />
-      <span>{label}</span>
+      <span>{ghost ? '대상이 없습니다' : label}</span>
     </span>
   );
+
+  if (ghost) {
+    return <span className="inline-flex cursor-default no-underline">{inner}</span>;
+  }
 
   if (entityId) {
     return (

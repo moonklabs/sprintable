@@ -60,6 +60,53 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+describe('ChatBubble — story #2263 AC6 유령 칩(stored 참조 대조)', () => {
+  it('references가 undefined(옛 서버·SSE 디스패치 폴백)면 유령 판정을 안 하고 그대로 그린다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, references: undefined }} isMine={false} />));
+    });
+    const chip = container.querySelector('button');
+    expect(chip).not.toBeNull();
+    expect(container.textContent).not.toContain('대상이 없습니다');
+  });
+
+  it('references가 빈 배열(읽기 경로가 참조 0건을 확認)이면 본문 토큰이 유령으로 그려진다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, references: [] }} isMine={false} />));
+    });
+    // 유령 칩은 버튼(클릭·모달)이 아니라 행동 0의 span이어야 한다.
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).toContain('대상이 없습니다');
+  });
+
+  it('음성대조 — references에 본문 토큰과 정확히 일치하는 항목이 있으면 정상 칩 그대로다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
+          isMine={false}
+        />,
+      ));
+    });
+    const chip = container.querySelector('button');
+    expect(chip).not.toBeNull();
+    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.textContent).toContain('제안서.md');
+  });
+
+  it('asset 토큰은 stored 참조 대조 대상이 아니다(registry 밖 타입 — 유령 오판 방지)', async () => {
+    const assetMsg: ChatMessage = {
+      ...baseMessage,
+      content: `[파일.png](entity:asset:${DOC_ID})`,
+      references: [], // 참조 0건이어도 asset은 유령 처리하면 안 된다.
+    };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={assetMsg} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('대상이 없습니다');
+  });
+});
+
 describe('ChatBubble 문서 임베드 미리보기 모달 — 폴링 유발 리렌더 생존', () => {
   it('무관한 prop(presenceStatus)이 바뀌어 부모가 리렌더돼도 열린 모달이 유지된다', async () => {
     await act(async () => {
