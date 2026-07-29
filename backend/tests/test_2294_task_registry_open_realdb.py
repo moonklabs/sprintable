@@ -202,7 +202,8 @@ async def test_entities_search_task_type_actually_returns_results():
             )
             assert resp.status_code == 200, resp.text
             body = resp.json()
-            assert any(r["entity_id"] == str(task.id) and r["entity_type"] == "task" for r in body)
+            # story #2263(C-5) 계약②: 응답 shape가 flat list → {data, types}로 바뀌었다.
+            assert any(r["entity_id"] == str(task.id) and r["entity_type"] == "task" for r in body["data"])
         finally:
             await client.aclose()
             app.dependency_overrides.clear()

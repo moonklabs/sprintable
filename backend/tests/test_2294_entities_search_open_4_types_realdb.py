@@ -245,7 +245,7 @@ async def test_search_finds_sprint_with_data_present():
             )
             assert resp.status_code == 200, resp.text
             body = resp.json()
-            assert any(r["entity_id"] == str(sprint.id) and r["entity_type"] == "sprint" for r in body)
+            assert any(r["entity_id"] == str(sprint.id) and r["entity_type"] == "sprint" for r in body["data"])
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
@@ -274,7 +274,7 @@ async def test_search_finds_artifact_with_data_present():
             )
             assert resp.status_code == 200, resp.text
             body = resp.json()
-            assert any(r["entity_id"] == str(artifact.id) and r["entity_type"] == "artifact" for r in body)
+            assert any(r["entity_id"] == str(artifact.id) and r["entity_type"] == "artifact" for r in body["data"])
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
@@ -303,7 +303,7 @@ async def test_search_finds_hypothesis_with_data_present():
             )
             assert resp.status_code == 200, resp.text
             body = resp.json()
-            assert any(r["entity_id"] == str(hyp.id) and r["entity_type"] == "hypothesis" for r in body)
+            assert any(r["entity_id"] == str(hyp.id) and r["entity_type"] == "hypothesis" for r in body["data"])
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
@@ -333,7 +333,7 @@ async def test_search_finds_evidence_via_story_work_item_with_data_present():
             )
             assert resp.status_code == 200, resp.text
             body = resp.json()
-            assert any(r["entity_id"] == str(ev.id) and r["entity_type"] == "evidence" for r in body)
+            assert any(r["entity_id"] == str(ev.id) and r["entity_type"] == "evidence" for r in body["data"])
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
@@ -367,7 +367,7 @@ async def test_search_finds_evidence_via_task_work_item_with_data_present():
             )
             assert resp.status_code == 200, resp.text
             body = resp.json()
-            assert any(r["entity_id"] == str(ev.id) and r["entity_type"] == "evidence" for r in body)
+            assert any(r["entity_id"] == str(ev.id) and r["entity_type"] == "evidence" for r in body["data"])
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
@@ -412,7 +412,7 @@ async def test_search_all_eight_types_in_one_request_when_no_types_filter():
             )
             assert resp.status_code == 200, resp.text
             body = resp.json()
-            found_types = {r["entity_type"] for r in body}
+            found_types = {r["entity_type"] for r in body["data"]}
             assert found_types == {"story", "doc", "epic", "task", "sprint", "artifact", "hypothesis", "evidence"}, (
                 f"여덟 종류가 다 안 나왔다: {found_types}"
             )

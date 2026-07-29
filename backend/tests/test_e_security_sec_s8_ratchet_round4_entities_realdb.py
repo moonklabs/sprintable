@@ -136,7 +136,8 @@ async def test_project_a_human_can_search_own_project_empty_result():
         try:
             resp = await client.get(f"/api/v2/entities/search?project_id={seeded['project_a_id']}")
             assert resp.status_code == 200, resp.text
-            assert resp.json() == []
+            # story #2263(C-5) 계약②: 응답 shape가 flat list → {data, types}로 바뀌었다.
+            assert resp.json()["data"] == []
         finally:
             await client.aclose()
     finally:
