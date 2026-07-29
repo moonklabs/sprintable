@@ -228,3 +228,59 @@ describe('ActionZone — story #2288 §8-8 자리를 비운 사이', () => {
     expect(container.textContent).toContain('내 것 1건에 변경이 있었습니다');
   });
 });
+
+describe('ActionZone — story #2288, BE 명세4(#2650) waiting_on_others: 「기다리는 것」 별도 구역', () => {
+  it('waiting_on_others 항목은 행동 큐가 아니라 별도 「기다리는 것」 구역에 뜬다', async () => {
+    await render({
+      action_queue: { scope: 'project', items: [queueItem('waiting_on_others', { context: { story_id: 's1', gate_type: 'qa' } })] },
+      attention: { scope: 'project', items: [], pending: [] },
+      is_clear: false,
+    });
+    expect(container.textContent).toContain('기다리는 것');
+    expect(container.textContent).toContain('qa 대기 중');
+  });
+
+  it('§3-1㉢: 버튼이 없다(행동 없는 것에 버튼을 달지 않는다)', async () => {
+    await render({
+      action_queue: { scope: 'project', items: [queueItem('waiting_on_others', { context: { story_id: 's1', gate_type: 'qa' } })] },
+      attention: { scope: 'project', items: [], pending: [] },
+      is_clear: false,
+    });
+    // 「기다리는 것」 구역 안에는 버튼(승인/리뷰 등 행동 유도 텍스트)이 없다.
+    expect(container.textContent).not.toContain('승인');
+    expect(container.textContent).not.toContain('리뷰');
+  });
+
+  it('gate_type이 없으면(null) 일반 라벨로 대체한다(사람을 지어내지 않는다)', async () => {
+    await render({
+      action_queue: { scope: 'project', items: [queueItem('waiting_on_others', { context: { story_id: 's1', gate_type: null } })] },
+      attention: { scope: 'project', items: [], pending: [] },
+      is_clear: false,
+    });
+    expect(container.textContent).toContain('게이트 대기 중');
+  });
+
+  it('waiting_on_others는 잘림 표시(§7-4) 대상 큐에서 빠진다 — 행동 큐 cap과 별개다', async () => {
+    const items: QueueItem[] = [
+      ...Array.from({ length: 5 }, () => queueItem('review_merge')),
+      ...Array.from({ length: 3 }, (_, i) => queueItem('waiting_on_others', { context: { story_id: `w${i}`, gate_type: 'qa' } })),
+    ];
+    await render({
+      action_queue: { scope: 'project', items },
+      attention: { scope: 'project', items: [], pending: [] },
+      is_clear: false,
+    });
+    // 행동 큐는 review_merge 5건 = cap 이하라 안 잘림. waiting 3건은 별도 구역에 전부 뜬다.
+    expect(container.textContent).not.toContain('건을 보이고 있습니다');
+    expect(container.textContent).toContain('기다리는 것');
+  });
+
+  it('gate_approval 항목에 gate_type이 실리면 함께 보인다(#2650 BE 명세3)', async () => {
+    await render({
+      action_queue: { scope: 'project', items: [queueItem('gate_approval', { context: { kind: '결재자', gate_type: 'deploy' } })] },
+      attention: { scope: 'project', items: [], pending: [] },
+      is_clear: false,
+    });
+    expect(container.textContent).toContain('deploy');
+  });
+});

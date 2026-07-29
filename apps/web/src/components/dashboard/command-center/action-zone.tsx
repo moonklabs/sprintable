@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { ShieldCheck, GitPullRequest, Ban, AlertTriangle, CheckCircle2, ChevronRight, History } from 'lucide-react';
+import { ShieldCheck, GitPullRequest, Ban, AlertTriangle, CheckCircle2, ChevronRight, History, Clock } from 'lucide-react';
 import { type MyActions, type Priority, type QueueItem, type AttentionItem } from './types';
 import { selectVisibleQueue, splitRenderableQueue, countChangedSince, countAttentionChangedSince, getLastSeenMs, markSeenNow, minutesAgo } from './derive-action-zone';
 
@@ -25,9 +25,10 @@ const PRIORITY_BORDER: Record<Priority, string> = {
 // 마지막 분기는 방어선(defense-in-depth)이다 — 직접 단위테스트하려고 export한다.
 export function QueueRow({ item }: { item: QueueItem }) {
   const t = useTranslations('dashboard');
-  const ctx = item.context as { gate_id?: string; story_id?: string; kind?: string; status?: string; blocked_story_id?: string };
+  const ctx = item.context as { gate_id?: string; story_id?: string; kind?: string; gate_type?: string | null; status?: string; blocked_story_id?: string };
   if (item.type === 'gate_approval') {
     // 승인은 우발 mutation 방지 위해 게이트 인박스로 1클릭 네비게이션(전체 맥락서 결재).
+    // gate_type(#2650 BE 명세3 착지) — kind(결재자 역할)와 다른 축. 둘 다 있으면 둘 다 보인다.
     return (
       <Link
         href="/inbox?tab=gates"
@@ -35,7 +36,7 @@ export function QueueRow({ item }: { item: QueueItem }) {
       >
         <ShieldCheck className="size-3.5 shrink-0 text-warning" />
         <span className="min-w-0 flex-1 truncate text-foreground">
-          {t('ccQueueGateApproval')}{ctx.kind ? <span className="text-muted-foreground"> · {ctx.kind}</span> : null}
+          {t('ccQueueGateApproval')}{ctx.gate_type ? <span className="text-muted-foreground"> · {ctx.gate_type}</span> : null}{ctx.kind ? <span className="text-muted-foreground"> · {ctx.kind}</span> : null}
         </span>
         <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground">{t('ccQueueApprove')}<ChevronRight className="size-3" /></span>
       </Link>
@@ -86,6 +87,27 @@ export function QueueRow({ item }: { item: QueueItem }) {
   );
 }
 
+/**
+ * story #2288, BE 명세4(#2650 착지) — 「내 것인데 남이 잡음」. §3-1㉢ 정의 그대로: 발(다음
+ * 행동)이 내게 없다 — ⛔버튼을 달지 않는다(행동 없는 것에 버튼을 달면 없는 길을 가리킨다).
+ * PO 지시(2026-07-29): priority=info이나 danger/warn(행동 촉구) 축과 같은 자리에 섞지
+ * 않는다 — 행동 큐와 별도 구역("기다리는 것")으로 렌더.
+ */
+function WaitingRow({ item }: { item: QueueItem }) {
+  const t = useTranslations('dashboard');
+  const ctx = item.context as { story_id?: string; gate_type?: string | null };
+  const gate = ctx.gate_type ?? t('ccGateGeneric');
+  return (
+    <Link
+      href={ctx.story_id ? `/board?story=${ctx.story_id}` : '/board'}
+      className="flex items-center gap-2 rounded-lg border border-border bg-card p-2.5 text-xs text-muted-foreground transition hover:border-muted-foreground/30"
+    >
+      <Clock className="size-3.5 shrink-0" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate">{t('ccWaitingGateReason', { gate })}</span>
+    </Link>
+  );
+}
+
 function AttentionRow({ item, resolveName, epicTitles }: { item: AttentionItem; resolveName: (id: string | null | undefined) => string | null; epicTitles: Record<string, string> }) {
   const t = useTranslations('dashboard');
   // id+enum → 카피 조합(raw error/log 없음). entity 제목 resolve(없으면 타입 라벨)·게이트.
@@ -119,8 +141,12 @@ export function ActionZone({ data, resolveName, epicTitles }: {
   // PO 지시(2026-07-29): QueueRow가 못 알아보는 타입은 개별 소음 줄 대신 목록에서 걷어내고
   // 요약 한 줄로만 말한다(#2265 ChatProofSection skippedCount 관례) — 잘림과 다른 사실.
   const { renderable: renderableQueue, unrenderableCount } = useMemo(() => splitRenderableQueue(queue), [queue]);
+  // waiting_on_others는 행동 큐(잘림·자르는순서 대상)가 아니라 별도 "기다리는 것" 구역이다
+  // (PO 지시 2026-07-29) — actionable에서 미리 뺀다.
+  const actionableQueue = useMemo(() => renderableQueue.filter((q) => q.type !== 'waiting_on_others'), [renderableQueue]);
+  const waitingItems = useMemo(() => renderableQueue.filter((q) => q.type === 'waiting_on_others'), [renderableQueue]);
   // story #2288 §8-4·§7-4: 자를 땐 review_merge부터, 잘렸으면 반드시 말한다.
-  const { visible: visibleQueue, cutCount } = selectVisibleQueue(renderableQueue, QUEUE_CAP);
+  const { visible: visibleQueue, cutCount } = selectVisibleQueue(actionableQueue, QUEUE_CAP);
 
   // story #2288 §8-8: 방문 사이 새로 생긴 것 — action_queue 3관계뿐 아니라 attention(감지
   // 신호, org-scope이나 「지금 볼 것」에 이미 뜨는 것)도 PO 확認(2026-07-29)으로 포함.
@@ -192,7 +218,7 @@ export function ActionZone({ data, resolveName, epicTitles }: {
             {cutCount > 0 ? (
               // ccQueueTruncated 문구는 자리만 확保 — 최종 워딩은 유나 lane(§8-4 규율을
               // 담아 통일된 톤으로 검수 예정, 지금은 기능 검증용 임시 문구).
-              <p className="text-[11px] text-muted-foreground">{t('ccQueueTruncated', { shown: visibleQueue.length, total: renderableQueue.length })}</p>
+              <p className="text-[11px] text-muted-foreground">{t('ccQueueTruncated', { shown: visibleQueue.length, total: actionableQueue.length })}</p>
             ) : null}
             {unrenderableCount > 0 ? (
               // ccQueueUnrenderableCount도 자리만 확保 — 최종 워딩은 유나 lane(같은 코멘트,
@@ -200,6 +226,15 @@ export function ActionZone({ data, resolveName, epicTitles }: {
               <p className="text-[11px] text-muted-foreground">{t('ccQueueUnrenderableCount', { count: unrenderableCount })}</p>
             ) : null}
           </div>
+
+          {/* story #2288, BE 명세4(#2650): 「내 것인데 남이 잡음」— 행동 큐와 별도 구역, 버튼 없음(§3-1㉢).
+              ccWaitingTitle·ccWaitingGateReason도 자리만 확保 — 최종 워딩은 유나 lane. */}
+          {waitingItems.length > 0 ? (
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-medium text-foreground">{t('ccWaitingTitle')}</span>
+              {waitingItems.map((w, i) => <WaitingRow key={`${(w.context as { story_id?: string }).story_id ?? i}`} item={w} />)}
+            </div>
+          ) : null}
         </>
       )}
     </section>

@@ -30,7 +30,7 @@ export function selectVisibleQueue(queue: QueueItem[], cap: number): VisibleQueu
 
 // action-zone.tsx QueueRow가 실제로 그릴 줄 아는 타입(PO 지적 2026-07-29 가드와 짝) — 여기서도
 // 같은 목록을 쓴다. 하나만 두 곳에 흩어지면 그 자체가 「한 개념에 두 기준」이 된다.
-const RENDERABLE_TYPES = new Set<QueueItem['type']>(['gate_approval', 'review_merge', 'my_blockers']);
+const RENDERABLE_TYPES = new Set<QueueItem['type']>(['gate_approval', 'review_merge', 'my_blockers', 'waiting_on_others']);
 
 export interface RenderableQueueResult {
   renderable: QueueItem[];

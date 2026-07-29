@@ -5,10 +5,15 @@ export type Priority = 'danger' | 'warn' | 'info';
 export interface QueueItem {
   // story #2288: 'my_blockers' 추가 — BE(`command_center.py`)가 이미 내보내는데 타입에 없어
   // action-zone.tsx의 QueueRow가 review_merge로 오인 렌더하던 것을 바로잡는다.
-  type: 'gate_approval' | 'review_merge' | 'my_blockers';
+  // 'waiting_on_others'(#2650, BE 명세4): 「내 것인데 남이 잡음」— priority 항상 'info',
+  // action-zone.tsx에서 행동 큐와 별도 구역("기다리는 것")으로 렌더(버튼 없음).
+  type: 'gate_approval' | 'review_merge' | 'my_blockers' | 'waiting_on_others';
   priority: Priority;
   title?: string | null; // review_merge만 top-level title(story 제목)
-  context: Record<string, unknown>; // gate_approval:{gate_id,approval_group_id,kind} / review_merge:{story_id,status} / my_blockers:{blocker_story_id,blocked_story_id}
+  // gate_approval:{gate_id,approval_group_id,kind,gate_type} / review_merge:{story_id,status} /
+  // my_blockers:{blocker_story_id,blocked_story_id} /
+  // waiting_on_others:{story_id,gate_type,approver_member_id} — BE가 story_id로 이미 dedupe.
+  context: Record<string, unknown>;
   created_at: string | null;
 }
 
