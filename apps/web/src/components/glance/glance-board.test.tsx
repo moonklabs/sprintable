@@ -203,3 +203,24 @@ describe('GlanceBoard — 실패 상태 구분(codex-silent-defect-sweep B-3/D-7
     expect(container.innerHTML).not.toContain('일부 정보를 불러오지 못했습니다');
   });
 });
+
+// #2310(e-mobile-content-painted-contract) — /glance는 웨이터폴이 있는 화면(#2298)이라
+// "첫 유의미한 페인트"를 데이터 도착이 아니라 스켈레톤이 뜨는 시점(마운트 즉시)으로 잡는다.
+// loadGlanceData를 절대 resolve하지 않는 pending promise로 고정해, 신호가 데이터를
+// «기다리지 않고» 나가는 것을 실증한다(이걸 놓치면 웨이터폴이 몇 초든 신호가 그만큼 늦어진다).
+describe('GlanceBoard — content-painted 신호(#2310)', () => {
+  it('데이터 fetch가 끝나기 전(스켈레톤 단계)에 이미 신호를 보낸다', async () => {
+    loadGlanceDataMock.mockReturnValue(new Promise(() => {})); // 영구 pending — resolve 없음
+    const postMessage = vi.fn();
+    (window as unknown as { ReactNativeWebView?: { postMessage: typeof postMessage } }).ReactNativeWebView = { postMessage };
+    await mount();
+    expect(postMessage).toHaveBeenCalledWith(JSON.stringify({ type: 'content-painted' }));
+    delete (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView;
+  });
+
+  it('네이티브 셸 밖(일반 브라우저)에서는 조용히 무동작(window.ReactNativeWebView 없음 — 크래시 0)', async () => {
+    loadGlanceDataMock.mockResolvedValue(EMPTY_DATA);
+    delete (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView;
+    await expect(mount()).resolves.not.toThrow();
+  });
+});
