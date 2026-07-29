@@ -240,12 +240,12 @@ describe('ActionZone — story #2288, BE 명세4(#2650) waiting_on_others: 「�
     expect(container.textContent).toContain('QA 대기 중'); // 번역 라벨 — 원시값 'qa' 그대로 안 나옴(PO 지적)
   });
 
-  it('§3-1㉢, PO 지적(2026-07-29): 「기다리는 것」 구역 안에만 버튼·링크가 0개다(양성 대조 — 같이 있는 행동 항목엔 있다)', async () => {
+  it('§3-1㉢, PO 정정(2026-07-29): 판별자는 "상태를 바꾸는가"이지 "클릭 가능한가"가 아니다 — 구역 안에 상태변경 컨트롤 0개 + 「가는」 링크는 있어야 한다(양성대조 둘)', async () => {
     await render({
       action_queue: {
         scope: 'project',
         items: [
-          queueItem('gate_approval', { context: { kind: '결재자', gate_type: 'qa' } }), // 양성 대조: 행동 항목
+          queueItem('gate_approval', { context: { kind: '결재자', gate_type: 'qa' } }), // 양성 대조①: 행동 항목
           queueItem('waiting_on_others', { context: { story_id: 's1', gate_type: 'qa' } }),
         ],
       },
@@ -254,9 +254,13 @@ describe('ActionZone — story #2288, BE 명세4(#2650) waiting_on_others: 「�
     });
     const waitingZone = container.querySelector('[data-testid="cc-waiting-zone"]');
     expect(waitingZone).not.toBeNull();
-    expect(waitingZone!.querySelectorAll('button, a')).toHaveLength(0); // 구역 «안»만 — 0개
-    // 자가 살아있음: 행동 항목(게이트 승인 대기)은 컨테이너 전체 기준으로 링크가 있다.
-    expect(container.querySelectorAll('a').length).toBeGreaterThan(0);
+    // 「없어야 할 것이 없다」 — 상태를 바꾸는 컨트롤(버튼·role=button·form) 0개.
+    expect(waitingZone!.querySelectorAll('button, [role="button"], form')).toHaveLength(0);
+    // 「있어야 할 것이 있다」 — 양성대조②: 「가서 보는」 링크는 구역 «안에» 있어야 한다
+    // (없으면 「내가 기다리는 그것」을 확認할 길이 없다 — 「해소」 목적 자체가 안 선다).
+    expect(waitingZone!.querySelectorAll('a').length).toBeGreaterThan(0);
+    // 양성대조①: 행동 항목(게이트 승인 대기)은 컨테이너 전체 기준으로 링크가 있다.
+    expect(container.querySelectorAll('a').length).toBeGreaterThan(waitingZone!.querySelectorAll('a').length);
   });
 
   it('gate_type이 없으면(null) 일반 라벨로 대체한다(사람을 지어내지 않는다)', async () => {

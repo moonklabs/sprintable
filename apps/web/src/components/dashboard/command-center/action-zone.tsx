@@ -97,19 +97,24 @@ export function QueueRow({ item }: { item: QueueItem }) {
 
 /**
  * story #2288, BE 명세4(#2650 착지) — 「내 것인데 남이 잡음」. §3-1㉢ 정의 그대로: 발(다음
- * 행동)이 내게 없다 — ⛔버튼도 링크도 달지 않는다(목업 v3의 `.wr` 행 그대로 plain div —
- * 행동 없는 것에 클릭 가능한 요소를 두면 없는 길을 가리킨다. PO 지적 2026-07-29: 원래
- * Link였던 것이 결함 — 「해소」가 목적이지 "가 보라"는 유도가 아니다).
+ * 행동)이 내게 없다 — ⛔«상태를 바꾸는» 컨트롤(버튼·승인/거절)을 달지 않는다.
+ * ⭐PO 정정(2026-07-29): 「행동이 없다」≠「볼 수 없다」— 판별자는 "상태를 바꾸는가"이지
+ * "클릭 가능한가"가 아니다. 가서 보는 링크는 «해소»(내가 놓친 게 아니라 남이 잡고 있다는
+ * 것을 확認)에 필요하므로 남긴다(첫 시도에서 <Link>를 <div>로 지웠던 것이 결함이었음 —
+ * 목업 v3의 plain div `.wr`도 실은 목업 쪽 결함, 유나 lane으로 전달됨).
  * priority=info이나 danger/warn(행동 촉구) 축과 같은 자리에 섞지 않는다 — 별도 구역.
  */
 function WaitingRow({ item }: { item: QueueItem }) {
   const t = useTranslations('dashboard');
   const ctx = item.context as { story_id?: string; gate_type?: string | null };
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-border bg-card p-2.5 text-xs text-muted-foreground">
+    <Link
+      href={ctx.story_id ? `/board?story=${ctx.story_id}` : '/board'}
+      className="flex items-center gap-2 rounded-lg border border-border bg-card p-2.5 text-xs text-muted-foreground transition hover:border-muted-foreground/30"
+    >
       <Clock className="size-3.5 shrink-0" aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate">{t('ccWaitingGateReason', { gate: gateLabel(t, ctx.gate_type) })}</span>
-    </div>
+    </Link>
   );
 }
 
