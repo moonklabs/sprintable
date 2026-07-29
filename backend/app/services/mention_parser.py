@@ -40,6 +40,14 @@ design-org-knowledge-mentions-backlinks §2.
 0줄). doc의 wikiLink→mention·pageEmbed→embed 구분은 파싱 시점에 이미 있던 재료를 저장
 시점에 버리지 않게 고친 것뿐이라 작은 일이었지만, proof는 새 UI 흐름(어느 대화 구간을
 자를지)과 새 write 경로가 통째로 필요해 크기가 다르다.
+
+⛔story #2316 AC5(미르코 문안, 디디 반영): 이 파서가 «못 보는» 것:
+  ①맨 번호 — 본문의 `#2249`처럼 대괄호·`entity:` 문법이 **아예 없는** 참조. 이 판은 그것을
+    **한 건도 안 센다.** 사람이 손으로 쓴 참조 대부분이 이 모양이다(C-11이 다룬다).
+  ②닫힌 문법 밖 — `](entity:`를 포함한 무관한 텍스트가 오탐을 낼 수 있다(기존).
+  ⇒ 즉 이 파서의 수치는 **「멘션 문법으로 쓰인 것」의 전수**이지 **「본문에 있는 참조」의
+    전수가 아니다.** 두 수를 같은 이름으로 부르면 안 된다 — #2269(C-11)의 원석 830~1993건이
+    전부 ①모양이라, 이 파서로 재고 "참조 N건"이라 부르면 그 수가 실제의 몇십 분의 일이다.
 """
 from __future__ import annotations
 
@@ -48,6 +56,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from typing import Any
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -613,22 +622,32 @@ async def fetch_stored_references(
     쿼리 1회로 전부 해소한다(개별 message마다 왕복하지 않는다). `ix_entity_references_source`
     (org_id, source_type, source_id)가 이 IN 쿼리를 커버한다.
 
-    반환: `source_id -> [{"target_type", "target_id"}, ...]`. 호출자는 이 dict에 없는
-    source_id를 **빈 리스트**로 취급해야 한다(그 source가 stored 참조 0건이라는 뜻 —
-    "옛 서버라 필드가 없다"와 구분하기 위해 호출자가 payload에 항상 `references: []`를
-    싣는 것이 이 함수의 계약이 아니라 **호출자의 책임**이다, 아래 conversations.py 참조)."""
+    반환: `source_id -> [{"target_type", "target_id", "form", "proof_payload"}, ...]`. 호출자는
+    이 dict에 없는 source_id를 **빈 리스트**로 취급해야 한다(그 source가 stored 참조 0건이라는
+    뜻 — "옛 서버라 필드가 없다"와 구분하기 위해 호출자가 payload에 항상 `references: []`를
+    싣는 것이 이 함수의 계약이 아니라 **호출자의 책임**이다, 아래 conversations.py 참조).
+
+    ⛔story #2262 후속(오르테가 지시, 2026-07-29): `form`·`proof_payload`를 추가한다 —
+    `insert_reference`는 form 매개변수·FORMS 검증·proof_payload 필드까지 이미 갖췄는데(쓰기는
+    갈리는데) 이 읽기 함수가 그 둘을 안 실어 와 화면이 mention/embed/proof를 못 갈랐다("저장·
+    쓰기·읽기·표시" 중 읽기에서 끊기는 이 에픽의 반복 패턴). C-7(#2265)이 이 값으로 세 형태를
+    가르는 첫 소비자가 된다."""
     if not source_ids:
         return {}
     rows = (await db.execute(
-        select(Reference.source_id, Reference.target_type, Reference.target_id).where(
+        select(
+            Reference.source_id, Reference.target_type, Reference.target_id,
+            Reference.form, Reference.proof_payload,
+        ).where(
             Reference.org_id == org_id,
             Reference.source_type == source_type,
             Reference.source_id.in_(source_ids),
         )
     )).all()
-    result: dict[uuid.UUID, list[dict[str, str]]] = {}
-    for source_id, target_type, target_id in rows:
-        result.setdefault(source_id, []).append(
-            {"target_type": target_type, "target_id": str(target_id)}
-        )
+    result: dict[uuid.UUID, list[dict[str, Any]]] = {}
+    for source_id, target_type, target_id, form, proof_payload in rows:
+        result.setdefault(source_id, []).append({
+            "target_type": target_type, "target_id": str(target_id),
+            "form": form, "proof_payload": proof_payload,
+        })
     return result
