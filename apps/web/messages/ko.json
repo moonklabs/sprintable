@@ -3308,6 +3308,7 @@
     "evidenceNotePlaceholder": "메모(선택)",
     "chatProofSectionTitle": "대화 근거",
     "chatProofCount": "대화 근거 {count}건",
+    "chatProofSomeUnavailable": "{count}건은 표시할 수 없음",
     "chatProofOpenSource": "대화에서 열기",
     "chatProofOpenOriginal": "지금 원본 보기",
     "chatProofEdited": "원본이 수정되었습니다 · {date}",
