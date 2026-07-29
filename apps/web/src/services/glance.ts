@@ -26,6 +26,27 @@ export interface RoadmapEpic {
   completionPct: number;
 }
 
+/** story #2298/#2303 — `?include=glance` 옵트인 시 `focal_story`에 실리는 9필드. `/api/glance/hero?story_id=`
+ * 전체 웨이브를 대체(#2303 그라운딩: glance-hero.tsx + 호출체인이 실제로 읽는 필드만 — description·
+ * envelope.claim/status·gate.status/decision_basis/auto_decision_reason·human_verified_by.member_id/role·
+ * gates 전체배열은 화면이 안 읽어 의도적으로 뺐다). */
+export interface BeFocalStory {
+  id: string;
+  title: string;
+  status: string;
+  assignee_id: string | null;
+  assignee_ids: string[];
+  proof_count: number;
+  auto_verify: 'passed' | 'failed' | null;
+  gate: { gate_type: string; requires_human: boolean } | null;
+  trust: {
+    self_reported: boolean;
+    human_verified: boolean;
+    human_verified_by: { name: string } | null;
+    human_verified_at: string | null;
+  };
+}
+
 /** `GET /api/goals` 응답 항목(core-storage `Epic` 인터페이스 미러, 필요 필드만). */
 export interface BeEpicListItem {
   id: string;
@@ -36,6 +57,10 @@ export interface BeEpicListItem {
   // (드래그 없음). BE order_by=position 미지정/미보유 시 전부 null 취급 → 기존 created_at 정렬과
   // 동일(#2056 회귀0).
   position?: number | null;
+  // story #2298(3단 웨이터폴 근절) — `?include=glance` 옵트인일 때만 실린다(미지정 시 undefined,
+  // BE byte-identical 계약 그대로). participant_ids: 이 에픽의 고유 assignee_id 집합(캡 없음).
+  participant_ids?: string[];
+  focal_story?: BeFocalStory | null;
 }
 
 /**
@@ -133,13 +158,6 @@ export function derivePhrase(completionPct: number, total: number): ProgressPhra
   return 'wrappingUp';
 }
 
-/** `GET /api/stories?epic_id=` 항목(core-storage `Story` 인터페이스 미러, 필요 필드만). */
-export interface BeStoryListItem {
-  id: string;
-  epic_id: string | null;
-  assignee_id: string | null;
-}
-
 export interface EpicCollaborator {
   id: string;
   name: string;
@@ -148,29 +166,6 @@ export interface EpicCollaborator {
 export interface EpicCollaboration {
   epicId: string;
   collaborators: EpicCollaborator[];
-}
-
-/**
- * 참여 = "붙어있나" 여부만(§5 하드라인) — 개수·처리량 절대 집계 안 함. 스토리를 배정자별로
- * 세지 않고 distinct assignee_id만 뽑아 "이 사람이 이 에픽에 함께 있다"만 표현.
- */
-export function deriveCollaboration(
-  epicIds: string[],
-  stories: BeStoryListItem[],
-  memberNames: Record<string, string>,
-): EpicCollaboration[] {
-  const storiesByEpic = new Map<string, BeStoryListItem[]>();
-  for (const s of stories) {
-    if (!s.epic_id) continue;
-    const list = storiesByEpic.get(s.epic_id) ?? [];
-    list.push(s);
-    storiesByEpic.set(s.epic_id, list);
-  }
-  return epicIds.map((epicId) => {
-    const list = storiesByEpic.get(epicId) ?? [];
-    const ids = Array.from(new Set(list.map((s) => s.assignee_id).filter((id): id is string => !!id)));
-    return { epicId, collaborators: ids.map((id) => ({ id, name: memberNames[id] ?? id })) };
-  });
 }
 
 /** `GET /api/activity-logs` 항목(`dashboard-activity-timeline.tsx`의 로컬 인터페이스 미러). */

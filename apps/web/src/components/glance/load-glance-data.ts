@@ -1,28 +1,28 @@
 import type { EpicProgress } from '@/components/dashboard/command-center/types';
 import {
-  deriveCollaboration,
   mergeRoadmap,
   filterMilestoneEvents,
   scopeRoadmapEpics,
   type BeActivityLogItem,
   type BeEpicListItem,
-  type BeStoryListItem,
   type EpicCollaboration,
   type RoadmapEpic,
 } from '@/services/glance';
-import { pickFocalStory, type HeroStory, type HeroMember } from './hero-logic';
+import type { HeroStory, HeroMember } from './hero-logic';
+import type { HeroEnvelope } from './derive-hero-envelope';
 import { parseAttentionSignals, type BeAttentionSignal } from './derive-exception-signals';
-import { parseHeroEnvelope, type HeroEnvelope } from './derive-hero-envelope';
 
-// codex-silent-defect-sweep D-7 — overview/멤버/스토리/활동/예외 fetch 실패를 `?? []`/`?? 0`으로
+// codex-silent-defect-sweep D-7 — overview/멤버/활동/예외 fetch 실패를 `?? []`/`?? 0`으로
 // 실제 빈 데이터처럼 치환하면 "데이터가 없다"와 "못 가져왔다"가 화면에서 구분이 안 된다. 폴백
 // 자체(빈 배열로 렌더 지속)는 유지하되, 어떤 조각이 실패했는지 이 플래그로 caller에 넘겨 caller가
 // 그 영역만 "재시도 가능" 표시로 구분되게 그린다 — 전면 에러 화면으로 바꾸지 않는다(부분 실패는
 // 부분만 표시).
+// story #2298(3단 웨이터폴 근절): `stories` 필드 삭제 — 예전엔 per-epic story-list fetch(웨이브②)의
+// 실패를 따로 추적했으나, 그 fetch 자체가 없어졌다(collaboration·heroStory 전부 epics(+glance)
+// 응답에서 나온다 — 그 fetch가 실패하면 epicsRaw가 null이 되어 이 함수 자체가 throw한다, 아래 참고).
 export interface GlanceDataPartialErrors {
   overview: boolean;
   members: boolean;
-  stories: boolean;
   activity: boolean;
   attention: boolean;
 }
@@ -39,8 +39,9 @@ export interface GlanceData {
   // 예외 스트림(story 0441a197): #2097 glance/attention 실신호(gate_pending·blocked·merge_ready).
   // 미가용/실패는 빈 배열로 정직 처리(throw 0) — 예외 스트림은 없으면 "손 필요한 것 없음" 빈상태.
   attentionSignals: BeAttentionSignal[];
-  // hero ProofCapsule 리치 envelope(story 04da0281): #2099 glance/hero. 형상 붕괴/미가용은 null →
-  // hero 최소 렌더 폴백(claim+state+참여자만·no-fiction). heroStory 없으면 애초에 fetch 안 함.
+  // hero ProofCapsule 리치 envelope(story 04da0281→#2298/#2303) — heroStory와 항상 짝(둘 다
+  // null이거나 둘 다 존재). 예전엔 별도 fetch(웨이브③)라 story는 있는데 envelope만 실패하는
+  // 상태가 가능했으나, 이제 같은 focal_story 객체에서 나오므로 그 상태 자체가 구조적으로 없다.
   heroEnvelope: HeroEnvelope | null;
   partialErrors: GlanceDataPartialErrors;
 }
@@ -56,20 +57,32 @@ async function fetchJson(url: string): Promise<unknown> {
 }
 
 /**
- * E-GLANCE 현황판 데이터 병합 — §10 소스 4종: /api/goals(순서 SSOT) · /api/dashboard/overview
- * (진척) · /api/stories?epic_id=(참여) · /api/activity-logs(생동). 로드맵 blank 재발(2026-07-11)
- * 진짜 근본은 이 함수의 activity-logs 처리였다 — `GET /api/v2/activity-logs`는 flat 배열이
- * 아니라 `ActivityLogListResponse{items,total,limit,offset}`(activity_logs.py:65)를 반환하는데
- * `.items` 추출 없이 그 wrapper를 배열인 척 넘겨 매번 throw했다(dashboard-activity-timeline.tsx의
- * `json.data.items`와 대조해 확인). 애초에 재마운트 레이스가 아니라 이 결정적 크래시였던 것으로
- * 밝혀져, 이전 라운드(in-flight dedup·resolvedCache·동기 마운트 읽기)의 module-level 캐시
- * 복잡도는 걷어냈다(#c3d1565d, less-is-more) — 단순 1회 fetch로 되돌린다.
+ * E-GLANCE 현황판 데이터 병합 — §10 소스 4종(이제 3종 fetch): `/api/goals?include=glance`
+ * (순서 SSOT + 참여·hero 재료) · `/api/dashboard/overview`(진척) · `/api/activity-logs`(생동).
+ * story #2298(3단 웨이터폴 근절, PO 실측 2026-07-28 — 로그인 後 2.07초가 이 웨이터폴에서
+ * 나옴)+#2303(계약 확장): `roadmap.map(epic ⇒ /api/stories?epic_id=)`(N건, 예전 웨이브②)와
+ * `/api/glance/hero?story_id=`(예전 웨이브③) 둘 다 제거 — `?include=glance`의
+ * `participant_ids`/`focal_story`가 그 재료를 웨이브①에서 함께 싣는다. ⛔판정 기준은
+ * "요청이 3→1로 줄었는가"가 아니라 "화면이 그리는 것 중 하나도 안 줄어드는가 + 요청이
+ * 주는가"(PO 재확定, 2026-07-28) — hero envelope의 9필드(assignee_ids·proof_count·
+ * auto_verify·gate.*·trust.*, glance-hero.tsx 호출체인 그라운딩으로 확정)가 전부 BE 계약에
+ * 실려 화면 표시 내용은 한 글자도 안 줄었다.
+ *
+ * ⛔동작 변경 하나(PR 본문에도 명시): `pickFocalStory`의 gate-우선 분기가 이 story가 도입된
+ * 2026-07-12부터 재료(story listing에 `gates` 필드 자체가 없었음) 없이 죽어있었다 — 지금
+ * BE가 실제 gate 데이터로 그 분기를 처음 살린다. 지금까지는 in-progress 중 항상 첫 번째가
+ * hero였는데, 이제부터는 gate-pending story가 있으면 그게 우선한다.
+ *
+ * activity-logs는 flat 배열이 아니라 `ActivityLogListResponse{items,total,limit,offset}` —
+ * 로드맵 blank 재발(2026-07-11)의 진짜 근본이 이 처리였다(#c3d1565d). 단순 1회 fetch(dedup/캐시
+ * 없음)로 유지.
  */
 export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   const [epicsJson, overviewJson, membersJson, activityJson, attentionJson] = await Promise.all([
     // wedge #2: order_by=position 옵트인 — 조타(큐레이션) 결과를 아크가 curated-first로 소비만
     // 반영(드래그 없음). position 모드는 커서 미발행이나 아크는 원래 전량로드(limit=100)라 무관.
-    fetchJson(`/api/goals?project_id=${projectId}&limit=100&order_by=position`),
+    // story #2298/#2303: include=glance — participant_ids/focal_story를 같은 응답에 싣는다.
+    fetchJson(`/api/goals?project_id=${projectId}&limit=100&order_by=position&include=glance`),
     fetchJson('/api/dashboard/overview'),
     fetchJson('/api/team-members'),
     fetchJson(`/api/activity-logs?project_id=${projectId}&limit=20`),
@@ -94,39 +107,31 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
     memberMap[m.id] = { name: m.name, type: m.type ?? 'human' };
   }
 
-  const storyLists = await Promise.all(roadmap.map((e) => fetchJson(`/api/stories?epic_id=${e.id}&limit=100`)));
-  const stories = storyLists.flatMap((s) => unwrap<BeStoryListItem[]>(s) ?? []);
-  const collaboration = deriveCollaboration(roadmap.map((e) => e.id), stories, memberNames);
+  // story #2298/#2303: collaboration은 이제 `participant_ids`(에픽별 고유 assignee_id 집합,
+  // BE가 이미 distinct로 계산)에서 바로 파생 — 추가 fetch·재-distinct 둘 다 불필요.
+  const rawById = new Map(arc.epics.map((e) => [e.id, e]));
+  const collaboration: EpicCollaboration[] = roadmap.map((e) => {
+    const ids = rawById.get(e.id)?.participant_ids ?? [];
+    return { epicId: e.id, collaborators: ids.map((id) => ({ id, name: memberNames[id] ?? id })) };
+  });
 
-  // codex-silent-defect-sweep D-7 — fetchJson은 실패(네트워크 오류·!res.ok·파싱 실패) 시 항상
-  // `null`을 반환한다(catch(() => null)). 이 null 자체가 "못 가져왔다"의 유일한 신호라, unwrap
-  // 이후(형상 파싱 이후)가 아니라 여기서 원본 fetch 결과로 판정해야 진짜 실패와 형상은 맞지만
-  // 우연히 빈 배열인 정상 응답을 안 섞는다.
+  // 2D 재설계: hero = 현재(active) 에픽의 focal 활성 story. story #2298/#2303부터 story·
+  // envelope 재료 전부 `focal_story`(같은 epics(+glance) 응답)에서 나온다 — 추가 fetch 0.
+  const activeEpic = roadmap.find((e) => e.roadmapStatus === 'active') ?? null;
+  const focal = activeEpic ? (rawById.get(activeEpic.id)?.focal_story ?? null) : null;
+  const heroStory: HeroStory | null = focal
+    ? { id: focal.id, title: focal.title, status: focal.status, assignee_id: focal.assignee_id, assignee_ids: focal.assignee_ids }
+    : null;
+  const heroEnvelope: HeroEnvelope | null = focal
+    ? { proof_count: focal.proof_count, auto_verify: focal.auto_verify, gate: focal.gate, trust: focal.trust }
+    : null;
+
   const partialErrors: GlanceDataPartialErrors = {
     overview: overviewJson === null,
     members: membersJson === null,
-    stories: storyLists.some((s) => s === null),
     activity: activityJson === null,
     attention: attentionJson === null,
   };
-
-  // 2D 재설계: hero = 현재(active) 에픽의 focal 활성 story. 위에서 이미 per-epic으로 받은
-  // 스토리 목록(storyLists)을 재사용해 활성 에픽의 full 스토리에서 focal을 고른다(추가 fetch 0).
-  const activeEpic = roadmap.find((e) => e.roadmapStatus === 'active') ?? null;
-  let heroStory: HeroStory | null = null;
-  if (activeEpic) {
-    const idx = roadmap.findIndex((e) => e.id === activeEpic.id);
-    const activeStories = unwrap<HeroStory[]>(storyLists[idx]) ?? [];
-    heroStory = pickFocalStory(activeStories);
-  }
-
-  // hero 리치 envelope — focal story가 있을 때만 fetch(#2099 glance/hero). 실패/형상붕괴는 null →
-  // hero 최소 렌더 폴백(parseHeroEnvelope가 방어). 신규 fetch는 hero 있는 경우 1회뿐(추가부하 최소).
-  let heroEnvelope: HeroEnvelope | null = null;
-  if (heroStory) {
-    const heroJson = await fetchJson(`/api/glance/hero?story_id=${heroStory.id}`);
-    heroEnvelope = parseHeroEnvelope(heroJson);
-  }
 
   // activity-logs는 flat 배열이 아니라 {items,...} wrapper — 위 함수 doc 참고.
   const activityItems = unwrap<{ items: BeActivityLogItem[] }>(activityJson)?.items ?? [];

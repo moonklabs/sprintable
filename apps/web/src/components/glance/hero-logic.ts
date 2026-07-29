@@ -6,15 +6,16 @@ import type { ProofState } from '@/components/proof-capsule/proof-capsule';
  * 활성 story**를 렌더한다("지금 무엇을 하는가"). 에픽 레벨 발명 절대 0(no-fiction).
  */
 
-/** hero 배선에 필요한 story 최소 형상(`/api/stories?epic_id=` 응답에서). */
+/** hero 배선에 필요한 story 최소 형상 — story #2303 그라운딩(glance-hero.tsx + 호출체인이
+ * 실제로 읽는 필드만): `description`·`gates`(전체배열)는 화면이 안 읽어 뺐다(focal story
+ * 선정 자체가 BE `?include=glance`로 이관되며 이 파일에서 gate 우선순위를 다시 평가할
+ * 필요가 없어졌다 — pickFocalStory 삭제, 아래 참고). */
 export interface HeroStory {
   id: string;
   title: string;
   status: string;
-  description: string | null;
   assignee_id: string | null;
   assignee_ids?: string[];
-  gates?: { gate_type: string; status: string }[];
 }
 
 export interface HeroMember {
@@ -27,17 +28,6 @@ const PROOF_STATE_BY_STATUS: Record<string, ProofState> = {
   'in-review': 'amber',
   done: 'green',
 };
-
-/**
- * 현재 에픽의 focal 활성 story 선정(spec 락): **in-progress 중 gate-pending 우선, 없으면 첫 in-progress**.
- * in-progress가 하나도 없으면 null → hero 미표시(평온 빈상태·억지 렌더 0).
- */
-export function pickFocalStory(stories: HeroStory[]): HeroStory | null {
-  const inProgress = stories.filter((s) => s.status === 'in-progress');
-  if (inProgress.length === 0) return null;
-  const withPendingGate = inProgress.find((s) => s.gates?.some((g) => g.status === 'pending'));
-  return withPendingGate ?? inProgress[0]!;
-}
 
 /** story.status → ProofState(StoryDetailPanel 정본 매핑). 프루프 표면 없는 상태(backlog 등)는 null. */
 export function heroProofState(status: string): ProofState | null {

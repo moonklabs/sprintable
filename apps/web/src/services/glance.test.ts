@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  deriveCollaboration,
   deriveRoadmapStatus,
   deriveVagueRecency,
   derivePhrase,
@@ -9,7 +8,6 @@ import {
   scopeRoadmapEpics,
   type BeActivityLogItem,
   type BeEpicListItem,
-  type BeStoryListItem,
 } from './glance';
 import type { EpicProgress } from '@/components/dashboard/command-center/types';
 
@@ -150,32 +148,6 @@ describe('derivePhrase (정성 진척 언어 — %는 보조)', () => {
   });
   it('buckets near-complete progress as wrappingUp', () => {
     expect(derivePhrase(95, 20)).toBe('wrappingUp');
-  });
-});
-
-describe('deriveCollaboration (참여=presence만, 개수 집계 0)', () => {
-  const stories: BeStoryListItem[] = [
-    { id: 's1', epic_id: 'e1', assignee_id: 'm1' },
-    { id: 's2', epic_id: 'e1', assignee_id: 'm1' }, // 같은 사람 중복 스토리 — collaborator는 1명이어야
-    { id: 's3', epic_id: 'e1', assignee_id: 'm2' },
-    { id: 's4', epic_id: 'e2', assignee_id: null }, // 미배정
-  ];
-  const memberNames = { m1: '미르코 페트로비치', m2: '유나 홀름' };
-
-  it('dedupes repeated assignees on the same epic into a single presence entry', () => {
-    const [e1] = deriveCollaboration(['e1'], stories, memberNames);
-    expect(e1!.collaborators).toHaveLength(2);
-    expect(e1!.collaborators.map((c) => c.name).sort()).toEqual(['미르코 페트로비치', '유나 홀름']);
-  });
-
-  it('returns an empty collaborator list (not a crash) when no story is assigned', () => {
-    const [e2] = deriveCollaboration(['e2'], stories, memberNames);
-    expect(e2!.collaborators).toEqual([]);
-  });
-
-  it('returns an empty collaborator list for an epic with no stories at all', () => {
-    const [e3] = deriveCollaboration(['e3'], stories, memberNames);
-    expect(e3!.collaborators).toEqual([]);
   });
 });
 
