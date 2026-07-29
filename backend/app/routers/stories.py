@@ -587,6 +587,80 @@ async def get_story_backlinks(
     )
 
 
+# ─── 의미 후보(story #2328·C-11 ㉡층·E-CONNECT — 3단계 승격의 ②③) ─────
+@router.get("/{id}/reference-candidates")
+async def get_story_reference_candidates(
+    id: uuid.UUID,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[dict]:
+    """GET /api/v2/stories/{id}/reference-candidates — 이 story의 본문/AC에서 관찰된 맨 번호
+    참조 위에 얹힌 「의미 후보」 목록(AC5: 별도 정리 화면이 아니라 story 상세 화면이 이 자리에서
+    직접 부른다). get_story_backlinks와 동일 접근 게이트(`_assert_story_project_access`)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.reference_semantic_candidates import list_candidates_for_source
+
+    candidates = await list_candidates_for_source(
+        repo.session, org_id=repo.org_id, source_type="story", source_id=id,
+    )
+    return [
+        {
+            "id": str(c.id),
+            "source_field": c.source_field,
+            "target_type": c.target_type,
+            "target_id": str(c.target_id),
+            "relation_kind": c.relation_kind,
+            "matched_keyword": c.matched_keyword,
+            "snippet": c.snippet,
+            "status": c.status,
+            "declared_by": str(c.declared_by) if c.declared_by else None,
+            "declared_at": c.declared_at.isoformat() if c.declared_at else None,
+            "created_at": c.created_at.isoformat(),
+        }
+        for c in candidates
+    ]
+
+
+@router.post("/{id}/reference-candidates/{candidate_id}/declare")
+async def declare_story_reference_candidate(
+    id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """POST .../declare — AC5: 사람이 후보를 골라 「선언됨」으로 승격. ⛔AC4: 이 엔드포인트가
+    바꾸는 것은 candidate.status/declared_by/declared_at 셋뿐이다 — 막힘·대기·종료·에이전트
+    실행 등 다른 어떤 부수효과도 일으키지 않는다(회귀 테스트가 이 계약을 지킨다)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.reference_semantic_candidates import (
+        CandidateNotFoundError,
+        declare_candidate,
+    )
+
+    actor_id = await _resolve_team_member_id(auth, repo.org_id, repo.session)
+    try:
+        candidate = await declare_candidate(
+            repo.session, org_id=repo.org_id, candidate_id=candidate_id, declared_by=actor_id,
+        )
+    except CandidateNotFoundError:
+        raise HTTPException(status_code=404, detail="Reference candidate not found")
+    await repo.session.commit()
+    return {
+        "id": str(candidate.id),
+        "status": candidate.status,
+        "declared_by": str(candidate.declared_by) if candidate.declared_by else None,
+        "declared_at": candidate.declared_at.isoformat() if candidate.declared_at else None,
+    }
+
+
 async def _visible_target_ids(
     session: AsyncSession, org_id: uuid.UUID, caller_id: uuid.UUID,
     ids_by_type: dict[str, set[uuid.UUID]], auth: AuthContext,
@@ -1219,6 +1293,7 @@ async def update_story(
             reconcile_entity_references,
             resolve_bare_number_story_refs,
         )
+        from app.services.reference_semantic_candidates import generate_and_store_candidates
 
         _mention_actor_id: uuid.UUID | None = None
         try:
@@ -1251,6 +1326,13 @@ async def update_story(
             )
             _ref_stored += _desc_result.stored
             _ref_dropped.extend(_desc_result.dropped)
+            # story #2328(C-11 ㉡층, PO 판정 2026-07-29): 참조(관찰됨, 위) 위에 「의미 후보」를
+            # 얹는다 — 새 참조만(소급 안 함), 이 write-path가 매 저장마다 도는 것 자체가 "지금
+            # 저장되는 것"이라는 사실을 보장한다. 같은 트랜잭션, 실패 시 story 저장 전체 롤백.
+            await generate_and_store_candidates(
+                db, org_id=repo.org_id, project_id=story.project_id, source_type="story",
+                source_field="description", source_id=story.id, content=_desc_text,
+            )
         if "acceptance_criteria" in data:
             _ac_text = story.acceptance_criteria or ""
             _ac_pairs = extract_chat_entity_mentions(_ac_text)
@@ -1265,6 +1347,10 @@ async def update_story(
             )
             _ref_stored += _ac_result.stored
             _ref_dropped.extend(_ac_result.dropped)
+            await generate_and_store_candidates(
+                db, org_id=repo.org_id, project_id=story.project_id, source_type="story",
+                source_field="acceptance_criteria", source_id=story.id, content=_ac_text,
+            )
         # 채팅(conversations.py)과 동일 게이트: 정상 경로(둘 다 0)에선 필드 자체를 안 싣는다.
         if _ref_stored or _ref_dropped:
             story.references = {"stored": _ref_stored, "dropped": _ref_dropped}
