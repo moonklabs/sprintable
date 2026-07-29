@@ -86,11 +86,27 @@ describe('CitationComposeBar — story #2265(C-7) 저장 조각', () => {
     expect(container.querySelector('button')).toBeNull();
   });
 
-  it('saveState="error"이면 실패 문구가 뜨고 저장 버튼으로 재시도할 수 있다', async () => {
+  it.each([
+    ['error_permission', '권한이 없습니다'],
+    ['error_invalid', '처리할 수 없습니다'],
+    ['error_network', '네트워크를 확인'],
+  ] as const)('saveState=%s이면 그 원인에 맞는 문구가 뜨고 저장 버튼으로 재시도할 수 있다(중복 idle 복귀 없음)', async (state, expectedSubstring) => {
     await act(async () => {
-      root.render(wrap(<CitationComposeBar mode="confirming" selectedCount={2} saveState="error" onCancel={NOOP} onSave={NOOP} />));
+      root.render(wrap(<CitationComposeBar mode="confirming" selectedCount={2} saveState={state} onCancel={NOOP} onSave={NOOP} />));
     });
     expect(container.textContent).toContain('저장 실패');
-    expect(container.textContent).toContain('스토리에 저장');
+    expect(container.textContent).toContain(expectedSubstring);
+    expect(container.textContent).toContain('스토리에 저장'); // 재시도 가능 — 멈춰 있지 않다.
+  });
+
+  it('셋(권한·범위·네트워크) 실패 문구는 서로 다르다 — 같은 말로 뭉치지 않는다(PO 지적 2026-07-29)', async () => {
+    const texts = new Set<string>();
+    for (const state of ['error_permission', 'error_invalid', 'error_network'] as const) {
+      await act(async () => {
+        root.render(wrap(<CitationComposeBar mode="confirming" selectedCount={1} saveState={state} onCancel={NOOP} onSave={NOOP} />));
+      });
+      texts.add(container.textContent ?? '');
+    }
+    expect(texts.size).toBe(3);
   });
 });

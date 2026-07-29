@@ -2778,7 +2778,6 @@
     "citationSaveToStory": "스토리에 저장",
     "citationSaving": "저장 중…",
     "citationSaved": "저장됨",
-    "citationSaveFailed": "저장 실패 — 다시 시도해 주세요",
     "referenceCandidatePromptStory": "{token}를 스토리로 잇겠습니까?",
     "referenceCandidatePromptDoc": "{token}를 문서로 잇겠습니까?",
     "referenceCandidateConfirm": "예",

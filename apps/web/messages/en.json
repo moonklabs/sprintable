@@ -2778,7 +2778,6 @@
     "citationSaveToStory": "Save to story",
     "citationSaving": "Saving…",
     "citationSaved": "Saved",
-    "citationSaveFailed": "Save failed — please try again",
     "referenceCandidatePromptStory": "Link {token} as a story?",
     "referenceCandidatePromptDoc": "Link {token} as a doc?",
     "referenceCandidateConfirm": "Yes",

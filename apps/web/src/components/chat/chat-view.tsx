@@ -397,7 +397,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           },
         }),
       });
-      if (!res.ok) { setCitationSaveState('error'); return; }
+      if (!res.ok) {
+        // story #2265(C-7), PO 지적(2026-07-29): 실패를 하나로 뭉치면 사용자가 무엇을
+        // 고쳐야 할지 못 가른다 — 원인별로 다른 상태를 세운다(재시도/취소는 항상 남긴다,
+        // 조용히 idle로 안 돌아간다 — "저장됐다"고 믿게 만드는 것이 제일 나쁜 자리).
+        setCitationSaveState(res.status === 404 ? 'error_permission' : res.status === 400 ? 'error_invalid' : 'error_network');
+        return;
+      }
       setCitationSaveState('saved');
       setCitationPickerOpen(false);
       window.setTimeout(() => {
@@ -405,7 +411,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
         setCitationSaveState('idle');
       }, 1500);
     } catch {
-      setCitationSaveState('error');
+      setCitationSaveState('error_network');
     }
   }, [citeSelection, orderedMessageIds, messages, threadId]);
 
