@@ -3308,6 +3308,7 @@
     "evidenceNotePlaceholder": "Note (optional)",
     "chatProofSectionTitle": "Chat evidence",
     "chatProofCount": "{count} chat evidence items",
+    "chatProofSomeUnavailable": "{count} unavailable",
     "chatProofOpenSource": "Open in chat",
     "chatProofOpenOriginal": "View original now",
     "chatProofEdited": "Original was edited · {date}",

@@ -21,6 +21,7 @@ import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outc
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
+import { ChatProofSection } from '@/components/verify/chat-proof-section';
 import { deriveInFlightTrustChip } from '@/services/verify';
 import type { ProofState } from '@/components/proof-capsule/proof-capsule';
 import { Workcell, type WorkcellMessage } from '@/components/workcell/workcell';
@@ -954,6 +955,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               humanVerifiedAt={story.human_verified_at}
               memberMap={memberMap}
             />
+            {/* story #2265(C-7) PR1b — "대화 근거"(proof). EvidenceSection 바로 아래,
+                "근거" 계열 이름으로(구조 이름 "참조"·"임베드" 미노출, PO 확定). 0건이면
+                EvidenceSection과 동일하게 null 렌더. */}
+            <ChatProofSection storyId={story.id} />
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {/* story #2104 — BE stories.py:1056이 human-only로 hard-delete를 403 거부한다(되돌릴
