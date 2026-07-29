@@ -101,6 +101,12 @@ class VisualArtifactSummary(BaseModel):
     # denorm 캐시(latest_version_number와 동일 목적 — 버전 서브쿼리 회피). SSOT는
     # ArtifactVersion.canvas_bounds, 이 값은 항상 최신 버전 값과 동기화된다.
     canvas_bounds: CanvasBounds | None = None
+    # story #2262 AC9②(PO 판정 2026-07-29): visual_artifact는 status 컬럼이 없다 — 「지금
+    # 상태」대신 「미결」을 들고 오는 첫 실증. 이름이 세는 단위를 그대로 말한다(오르테가 확정):
+    # ArtifactComment(root+reply 전부, 스레드는 제품에 없는 개념) WHERE resolved=false 개수.
+    # 라우터가 model_validate 前 transient attr로 세팅(agent_delegate_ids 패턴 동형) — 항상
+    # 세팅되므로(N+1 방지 배치 조회, 0도 명시) 여기 기본값(0)이 실제로 쓰일 일은 없다.
+    unresolved_comment_count: int = 0
 
 
 class VisualArtifactDetail(BaseModel):
@@ -126,6 +132,10 @@ class VisualArtifactDetail(BaseModel):
     # denorm 캐시가 아님).
     canvas_bounds: CanvasBounds | None = None
     nodes: list[ArtifactNodeOut]
+    # story #2262 AC9②: VisualArtifactSummary와 동형 — 여기 위 주석 참조. 이 클래스는
+    # from_attributes를 안 쓰므로(라우터가 키워드 인자로 직접 생성) 기본값 0이 실제로
+    # 쓰이지 않는다는 보장이 없다 — 호출부(_load_detail)가 항상 명시로 넘긴다.
+    unresolved_comment_count: int = 0
 
 
 class CreateArtifactCommentRequest(BaseModel):
