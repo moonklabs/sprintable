@@ -3315,6 +3315,8 @@
     "chatProofSectionTitle": "Chat evidence",
     "chatProofCount": "{count} chat evidence items",
     "chatProofSomeUnavailable": "{count} unavailable",
+    "chatProofLoadFailed": "Couldn't load chat evidence",
+    "chatProofRetry": "Retry",
     "chatProofOpenSource": "Open in chat",
     "chatProofOpenOriginal": "View original now",
     "chatProofEdited": "Original was edited · {date}",

@@ -109,11 +109,43 @@ describe('ChatProofSection — story #2265(C-7) PR1b 섹션 렌더', () => {
     expect(container.textContent).toContain('1');
   });
 
-  it('fetch 실패 시 크래시 없이 빈 상태(null 렌더)로 graceful degrade한다', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network'); }));
+  it('404(C-3 존재 비노출)이면 조용히 빈 화면(null 렌더) — "권한 없음" 배너를 안 띄운다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) })));
     await act(async () => { root.render(wrap(<ChatProofSection storyId="story-1" />)); });
     await act(async () => { await Promise.resolve(); });
     expect(container.innerHTML).toBe('');
+  });
+
+  it('네트워크 예외(fetch throw)면 "모름"을 "없음"으로 지어내지 않고 불러오기 실패를 보인다(PO 지적 2026-07-29)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network'); }));
+    await act(async () => { root.render(wrap(<ChatProofSection storyId="story-1" />)); });
+    await act(async () => { await Promise.resolve(); });
+    expect(container.textContent).toContain('불러오지 못했습니다');
+    expect(container.textContent).toContain('다시 시도');
+  });
+
+  it('5xx 응답도 네트워크 예외와 동일하게 불러오기 실패로 처리한다(404만 «없음»)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    await act(async () => { root.render(wrap(<ChatProofSection storyId="story-1" />)); });
+    await act(async () => { await Promise.resolve(); });
+    expect(container.textContent).toContain('불러오지 못했습니다');
+  });
+
+  it('다시 시도를 누르면 재요청하고, 그때 성공하면 정상 렌더로 복귀한다', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => { throw new Error('network'); })
+      .mockImplementationOnce(async () => ({ ok: true, json: async () => ({ data: [VALID_ROW] }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => { root.render(wrap(<ChatProofSection storyId="story-1" />)); });
+    await act(async () => { await Promise.resolve(); });
+    expect(container.textContent).toContain('불러오지 못했습니다');
+
+    const retryBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '다시 시도');
+    await act(async () => { retryBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain('이 방향으로 가시는');
   });
 
   it('still_exists=false인 항목은 삭제됨 상태로 렌더한다(내용 숨김·삭제됨 표지)', async () => {
