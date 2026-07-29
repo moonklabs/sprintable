@@ -166,7 +166,11 @@ async def test_goals_list_without_include_has_no_glance_fields():
             assert len(body) == 1
             assert "participant_ids" not in body[0], body[0]
             assert "focal_story" not in body[0], body[0]
-            assert set(body[0].keys()) == set(GoalResponse.model_fields) | {"reference_token"}
+            # story #2262(C-4) AC9(오르테가 근본처방, 2026-07-29): 손으로 {"reference_token",
+            # "next_action_code"}를 더하면 다음 computed_field가 또 이 테스트를 깬다(오늘
+            # 두 번째로 같은 병) — pydantic v2가 이미 구분해 추적하는 model_computed_fields를
+            # 써서 "computed_field가 늘어도 테스트가 저절로 따라가게" 근본으로 고친다.
+            assert set(body[0].keys()) == set(GoalResponse.model_fields) | set(GoalResponse.model_computed_fields)
         finally:
             await client.aclose()
     finally:
