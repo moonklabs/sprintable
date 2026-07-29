@@ -99,7 +99,7 @@ async def _seed(session, *, with_default_role: bool = True):
 
 
 def _client_for(app):
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
@@ -212,8 +212,9 @@ async def test_request_verification_without_default_role_falls_back_not_500():
 
 
 @pytest.mark.anyio
-async def test_request_verification_cross_project_blocked_403_no_gate():
-    """봉인: 접근권 없는 project의 story에 검증요청 시도 → 403 + gate 미생성."""
+async def test_request_verification_cross_project_blocked_404_no_gate():
+    """봉인: 접근권 없는 project의 story에 검증요청 시도 → 404(story #2322, 2026-07-29 —
+    예전엔 403이었으나 존재 비노출 규율로 통일) + gate 미생성."""
     from app.main import app
     engine, Session = await _session_factory()
     try:
@@ -223,7 +224,7 @@ async def test_request_verification_cross_project_blocked_403_no_gate():
         client = _client_for(app)
         try:
             resp = await client.post(f"/api/v2/stories/{seeded['story_other_id']}/request-verification")
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 404, resp.text
         finally:
             await client.aclose()
 
