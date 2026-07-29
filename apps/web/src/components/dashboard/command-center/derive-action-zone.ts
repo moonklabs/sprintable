@@ -1,4 +1,4 @@
-import type { QueueItem } from './types';
+import type { QueueItem, AttentionItem } from './types';
 
 /**
  * story #2288 — 명세(`me-axis-screen-spec-2288`) §7-4·§8-4·§8-8 중 «재료 없이도 서는» 셋:
@@ -51,18 +51,33 @@ function writeLastSeenMs(nowMs: number): void {
   }
 }
 
-/**
- * §8-8 — 자리를 비운 사이 몇 건이 바뀌었는지(기존 3관계 범위 한정). 처음 방문(기준점 없음)은
- * 0으로 — 「모름」을 「전부 새것」으로 지어내지 않는다. `nowMs`는 호출부가 넘긴다
- * (Date.now() 직접 호출 없이 테스트 가능하게).
- */
-export function countChangedSince(queue: QueueItem[], lastSeenMs: number | null): number {
+function countChangedSinceGeneric<T>(items: T[], lastSeenMs: number | null, getIso: (item: T) => string | null): number {
   if (lastSeenMs === null) return 0;
-  return queue.filter((q) => {
-    if (!q.created_at) return false;
-    const t = new Date(q.created_at).getTime();
+  return items.filter((item) => {
+    const iso = getIso(item);
+    if (!iso) return false;
+    const t = new Date(iso).getTime();
     return Number.isFinite(t) && t > lastSeenMs;
   }).length;
+}
+
+/**
+ * §8-8 — 자리를 비운 사이 action_queue(담당·결재자·내가 막고 있음) 중 몇 건이 바뀌었는지.
+ * 처음 방문(기준점 없음)은 0으로 — 「모름」을 「전부 새것」으로 지어내지 않는다.
+ */
+export function countChangedSince(queue: QueueItem[], lastSeenMs: number | null): number {
+  return countChangedSinceGeneric(queue, lastSeenMs, (q) => q.created_at);
+}
+
+/**
+ * story #2288, PO 확認(2026-07-29) — §8-8을 action_queue 3관계 밖으로 넓힌다: attention(감지
+ * 신호, org-scope이나 「지금 볼 것」에 나와 이미 내가 보는 것)도 같은 자로 잰다. `stuck_since`를
+ * 「생겨난 시점」으로 쓴다(created_at 없음 — 감지 시각이 그 역할). 별도 함수인 이유:
+ * attention은 action_queue와 다른 배열·다른 타임스탬프 필드라 하나로 합칠 근거가 약하고,
+ * 호출부(ActionZone)가 둘을 더해 하나의 배너로 보인다(계산은 분리, 표시만 합침 — §7-0 층3).
+ */
+export function countAttentionChangedSince(attention: AttentionItem[], lastSeenMs: number | null): number {
+  return countChangedSinceGeneric(attention, lastSeenMs, (a) => a.stuck_since);
 }
 
 /** 방문 시 1회 호출 — 「지금」을 다음 방문의 기준점으로 남긴다. */
