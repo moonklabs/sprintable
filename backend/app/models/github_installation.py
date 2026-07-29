@@ -76,6 +76,11 @@ class GithubWebhookDelivery(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="received")
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # story #2327(재정의): status="ignored"일 때의 실제 사유(no_installation_id·
+    # installation_not_registered_or_suspended·resolve_story_for_pr 실패·no_actionable_signal
+    # 등) — 이전엔 HTTP 응답에만 있어(웹훅 호출자는 GitHub라 아무도 안 읽음) 회고 측정이
+    # 원천 불가능했다(2466/2468 ignored 원인 분기를 못 좁힌 실측이 그 증거).
+    skipped_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
