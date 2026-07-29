@@ -505,6 +505,9 @@ async def github_webhook(
             session, source, event, payload, installation_id, delivery
         )
         delivery.status = status_label
+        # story #2327(재정의): "ignored"의 실제 사유를 delivery 행에도 남긴다 — HTTP 응답
+        # 본문에만 있으면 웹훅 호출자(GitHub)만 보고 아무도 회고 측정을 못 한다.
+        delivery.skipped_reason = result.get("skipped_reason") if status_label == "ignored" else None
         delivery.processed_at = datetime.now(timezone.utc)
         await session.commit()
         return _ok(result)
