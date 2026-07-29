@@ -50,13 +50,13 @@ class JudgmentResponse(BaseModel):
 
 class JudgmentListMeta(BaseModel):
     scope: str | None
-    capped: bool
-    cap_basis: str
-    omitted_count: int
+    active_capped: bool
+    active_cap_basis: str
+    active_omitted_count: int
 
 
 class JudgmentListResponse(BaseModel):
-    retractions: list[JudgmentResponse]
+    corrections: list[JudgmentResponse]
     active: list[JudgmentResponse]
     meta: JudgmentListMeta
 

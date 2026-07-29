@@ -1,11 +1,24 @@
 """story #2268(D단계, E-CONNECT — "판단 칸") — judgments write/read 코어.
 
-AC(오르테가, 2026-07-29): pull 전용 — 「물으면 준다」, push 금지. `retractions`는 상한과
+AC(오르테가, 2026-07-29): pull 전용 — 「물으면 준다」, push 금지. `corrections`(앞선 말에
+대한 말 — retraction·refinement·method_error, `TARGET_REQUIRED_KINDS`와 동일 집합)는 상한과
 무관하게 항상 전체(캡 예외 — "철회된 걸 다시 주장 안 하는가"가 이 판의 판정기준이므로 여기서
-잘리면 그 기준 자체가 무너진다). `active`(judgment/unmeasurable/refinement/method_error)는
+잘리면 그 기준 자체가 무너진다). `active`(judgment/unmeasurable — corrections 아닌 나머지)는
 "다음 발 수" 기준으로 캡 — 지금 실측 가능한 랭킹 신호가 recency뿐이라 그걸로 자르고
-`meta.cap_basis`로 정직하게 선언한다(다른 신호 없으면 있는 척 안 함, #2266 backlinks의
+`meta.active_cap_basis`로 정직하게 선언한다(다른 신호 없으면 있는 척 안 함, #2266 backlinks의
 collection_scope 정직성 패턴과 동형).
+
+⛔story #2308(2026-07-29, 오르테가 자백): 최초 구현은 캡 예외를 `kind == "retraction"`
+하나로만 좁혀 썼다 — AC 원문 「retractions는 상한과 무관하게 전량」이 «집합의 정의»가 아니라
+«원소 이름 하나»를 썼기 때문(정확한 독해였지만 좁은 표현이 구현을 좁혔다). 결과: 셋 중 가장
+넓게 번지는 `method_error`(그 판단 + 같은 방법으로 낸 다른 모든 말을 무효화)가 캡에 가장 먼저
+걸리는, 설계 목적과 정반대인 상태였다. 지금은 `TARGET_REQUIRED_KINDS`(모델에 이미 있는 상수)를
+캡 예외 집합으로 직접 파생해 쓴다 — 종류를 손으로 다시 나열하지 않는다(새 correction 종류가
+생기면 자동으로 따라온다). 응답 필드도 `retractions`→`corrections`로 개명(내용이 이제 셋을
+담으므로 이름이 하나만 가리키면 거짓이 된다) — 이 필드의 실제 소비자는 이 저장소 안(router
+스키마·MCP 도구 wrapper·이 PR의 realdb 테스트)뿐임을 grep으로 확인했고(호출 경로·HTTP 경로
+둘 다 — import 그래프만으론 부족), 배포 하루 만의 라이브 사용도 ORM 계산값이라 저장되지
+않으므로 별도 마이그레이션 없이 한 커밋에서 전 소비자를 함께 갱신한다.
 
 app-level 검증을 먼저 하는 이유(#2259 reference_core.insert_reference와 동일 패턴 — 이중
 방어): DB CHECK만 믿으면 실패 시 raw IntegrityError 텍스트가 그대로 API 밖으로 샌다. 여기서
@@ -94,15 +107,15 @@ async def list_judgments(
     if scope is not None:
         filters.append(Judgment.scope == scope)
 
-    retraction_rows = (
+    correction_rows = (
         await session.execute(
             select(Judgment)
-            .where(*filters, Judgment.kind == "retraction")
+            .where(*filters, Judgment.kind.in_(TARGET_REQUIRED_KINDS))
             .order_by(Judgment.created_at.desc())
         )
     ).scalars().all()
 
-    active_filters = [*filters, Judgment.kind != "retraction"]
+    active_filters = [*filters, Judgment.kind.not_in(TARGET_REQUIRED_KINDS)]
     total_active = (
         await session.execute(select(func.count(Judgment.id)).where(*active_filters))
     ).scalar_one()
@@ -112,14 +125,17 @@ async def list_judgments(
         )
     ).scalars().all()
 
-    omitted_count = max(0, total_active - len(active_rows))
+    active_omitted_count = max(0, total_active - len(active_rows))
     return {
-        "retractions": list(retraction_rows),
+        # corrections는 캡 예외 — 위 쿼리에 limit이 없으므로 항상 전량, 그러므로 이쪽은
+        # 절대 잘리지 않는다(아래 meta가 active 쪽에만 있는 이유 — 어느 쪽이 잘렸는지
+        # 필드 이름 자체가 말하게 한다, story #2308 AC3).
+        "corrections": list(correction_rows),
         "active": list(active_rows),
         "meta": {
             "scope": scope,
-            "capped": omitted_count > 0,
-            "cap_basis": "recency",
-            "omitted_count": omitted_count,
+            "active_capped": active_omitted_count > 0,
+            "active_cap_basis": "recency",
+            "active_omitted_count": active_omitted_count,
         },
     }
