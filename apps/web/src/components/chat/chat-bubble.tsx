@@ -14,7 +14,7 @@ import { getFileIcon } from '@/lib/file-icon';
 import { AttachmentImage } from './attachment-image';
 import { AttachmentMedia } from './attachment-media';
 import { AttachmentFile } from './attachment-file';
-import { MessageContextMenu } from './message-context-menu';
+import { MessageContextMenu, type CiteAction } from './message-context-menu';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
 import { ReferenceSuggestionRow } from './reference-suggestion-row';
 
@@ -31,6 +31,12 @@ interface ChatBubbleProps {
   highlight?: boolean;
   /** story #2283: 참조 후보(#번호·#슬러그) 해소 스코프. 없으면 그 확인 UI가 시도를 안 한다. */
   projectId?: string;
+  /** story #2265(C-7) — 대화 인용(proof) 범위 선택 배선. 셋 다 생략하면(undefined) 기존
+   * 렌더와 완전히 동일하다 — 진입점(citeAction)을 호출부가 아직 안 넘기는 한 이 기능은
+   * 사용자에게 안 보인다("짓되 안 켜는다", PO 지시 2026-07-29). */
+  isCiteAnchor?: boolean;
+  isCiteInRange?: boolean;
+  citeAction?: CiteAction;
 }
 
 interface ContextMenuState {
@@ -213,7 +219,10 @@ function ChatMarkdown({ content, isMine, references }: { content: string; isMine
 
 const LONG_PRESS_MS = 500;
 
-export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, onDelete, presenceStatus, isWorking = false, highlight = false, projectId }: ChatBubbleProps) {
+export function ChatBubble({
+  message, isMine, isGrouped = false, onOpenThread, onDelete, presenceStatus, isWorking = false,
+  highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction,
+}: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
@@ -283,7 +292,7 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
     <>
       <div
         id={`msg-${message.id}`}
-        className={`flex scroll-mt-4 gap-2 transition-shadow ${isMine ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''}`}
+        className={`flex scroll-mt-4 gap-2 transition-shadow ${isMine ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''}`}
         onContextMenu={handleContextMenu}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -426,6 +435,7 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
           onCopy={handleCopy}
           onDelete={handleDelete}
           onClose={() => setContextMenu(null)}
+          citeAction={citeAction}
         />
       )}
     </>

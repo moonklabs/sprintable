@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, RefreshCw } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -13,6 +13,7 @@ import { ThreadPanel } from './thread-panel';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { normalizeToMessage, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
+import { useMessageRangeSelection } from '@/hooks/use-message-range-selection';
 import { EmptyState } from '@/components/ui/empty-state';
 
 interface ChatViewProps {
@@ -62,6 +63,11 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const t = useTranslations('chats');
   const isMobile = useIsMobile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // story #2265(C-7) — 대화 인용(proof) 범위 선택. 진입점(citeAction)은 아직 ChatBubble에
+  // 안 넘긴다("짓되 안 켜는다", PO 지시 2026-07-29 — write 엔드포인트가 서면 그 한 줄로 켠다).
+  // 그래서 mode는 지금 항상 'idle'이고 isAnchor/isInRange도 항상 false — 사용자 눈엔 무변화.
+  const citeSelection = useMessageRangeSelection();
+  const orderedMessageIds = useMemo(() => messages.map((m) => m.id), [messages]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -645,6 +651,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             isWorking={typingAgents.some((a) => a.id === msg.created_by)}
                             highlight={msg.id === highlightId}
                             projectId={projectId}
+                            isCiteAnchor={citeSelection.isAnchor(msg.id)}
+                            isCiteInRange={citeSelection.isInRange(msg.id, orderedMessageIds)}
                           />
                           {/* S5: 트리거 메시지 직후 차단 hint notice(차단 에이전트별 1건) */}
                           {commandHints[msg.id]?.map((h) => (
