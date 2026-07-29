@@ -460,6 +460,13 @@ async def list_entity_backlinks(
     # 화면이 거짓말한다, PO 판정). source_field == "body" 필터는 이 read-path가 아는 두
     # source_type(doc·chat_message) 다 텍스트 필드가 하나뿐이라는 사실과 짝을 맞춘 것(다른
     # source_field 값 — 예: story description/AC — 는 이 backlinks 엔드포인트의 스코프 밖).
+    # ⛔story #2267(C-9, 오르테가군 재지적 2026-07-29·2026-07-30): 이 필터는 「지금은 맞고
+    # 곧 틀리는」자리였다 — relation='created_from'(창조-출처) 행은 애초에 텍스트 필드에서
+    # 파싱된 게 아니라(source_field='self' sentinel, 아래 write-path 참조) "본문 참조"가 아니다.
+    # 그대로 두면 이 필터가 출처 참조를 조용히 걸러낸다("출처를 만들었는데 정작 보여주는
+    # 화면에서 안 보이는" 오늘 계속 만난 그 모양). ⇒ relation='created_from'이면 source_field
+    # 값과 무관하게 항상 통과시키고, relation='none'(일반 멘션)일 때만 기존 "body" 스코프
+    # 제한을 그대로 적용한다.
     # entity_references.source_id는 polymorphic(FK 없음: docs.id 또는 conversation_messages.id) —
     # 두 conditional LEFT JOIN(+ chat-source는 Conversation까지 세 번째 LEFT JOIN)으로 각각의
     # source_type에서만 매치시킨다. Conversation JOIN의 ON절 `Conversation.org_id == org_id`가
@@ -537,7 +544,7 @@ async def list_entity_backlinks(
         )
         .where(
             Reference.org_id == org_id,
-            Reference.source_field == "body",
+            or_(Reference.relation == "created_from", Reference.source_field == "body"),
             Reference.target_type == target_type,
             Reference.target_id == target_id,
             or_(
