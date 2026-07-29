@@ -200,6 +200,11 @@ TARGET_ONLY_TYPES: frozenset[str] = frozenset({"chat_message"})
 
 # TARGET_ONLY_TYPES 멤버의 존재판정 resolver. ENTITY_RESOLVERS와 분리된 이유는 위와 동일 —
 # 이 dict에 들어간다고 검색/MCP/project축 계약까지 진 것으로 오인되면 안 된다.
+#
+# ⛔chat_message는 «target은 되나 완전지원은 아니다» —
+#   검색 대상 아님(UI 없음) · project 축 아님 · 단독 조회 라우트 없음.
+#   ⇒ ENTITY_RESOLVERS에 넣으면 다섯 계약(search·PROJECT_ID·MCP…)이 전부 요구되어
+#     13건이 깨진다(2026-07-29 실측). 「왜 여기만 따로지?」로 되돌리지 말 것.
 TARGET_ONLY_RESOLVERS: dict[str, EntityExistsResolver] = {
     "chat_message": _resolve_chat_messages,
 }

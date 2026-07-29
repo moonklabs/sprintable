@@ -289,7 +289,8 @@ async def test_create_proof_reference_readable_conversation_201_then_read_back()
     """왕복(write→read) — 대화를 읽을 수 있는 caller가 proof를 박으면 201 + proof_payload를
     그대로 돌려받고(PO 정정: POST 응답도 payload를 싣는다 — 저장 직후 재조회 없이 그릴 수
     있게), 그 다음 GET /references(outgoing)에서도 같은 payload로 보인다. still_exists는
-    chat_message가 이제 ENTITY_RESOLVERS에 등록돼(story #2263) True로 판정된다 — 예전
+    chat_message가 이제 존재판정 가능한 타입이 돼(story #2263, `TARGET_ONLY_RESOLVERS` —
+    ENTITY_RESOLVERS 완전등록은 CI 13건을 깨 되돌렸다, PO 판정) True로 판정된다 — 예전
     가정(등록 밖이라 None)은 이 PR 자체가 바꾼 축이다."""
     from app.main import app
 
@@ -400,6 +401,96 @@ async def test_create_proof_reference_unreadable_conversation_404():
                 },
             )
             assert resp.status_code == 404, resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_outgoing_references_chat_message_target_hidden_from_non_participant():
+    """⛔PO 지적(2026-07-29) — 「구조를 옮기면(ENTITY_RESOLVERS→TARGET_ONLY_RESOLVERS) 그 위에
+    얹힌 고침(_visible_target_ids의 chat_message 참여자-기반 분기)도 같이 옮겨야 한다」는
+    확認이 이 세션에 아직 없었다(기존 왕복 테스트는 작성자 본인만 GET을 불렀다 — 그 caller는
+    항상 participant라 negative 케이스를 못 잡는다). 여기서 별도 caller(project 접근권은
+    있어 story 게이트는 통과하지만 conversation participant는 아님)로 GET을 불러 chat_message
+    참조가 목록에서 조용히 빠지는지(C-3 존재-비노출 규율) 직접 확認한다."""
+    from app.main import app
+    from app.models.member import Member
+    from app.models.project import OrgMember
+    from app.models.project_access import ProjectAccess
+    from app.models.user import User
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id, "P")
+            participant_member_id, participant_user_id = await _make_human_member(s, org.id, project.id)
+            source_story = await _make_story(s, org.id, project.id, title="Source")
+            conv = await _make_conversation(s, org.id, project.id, participant_ids=[participant_member_id])
+
+            from app.models.conversation import ConversationMessage
+            msg = ConversationMessage(
+                id=uuid.uuid4(), conversation_id=conv.id, sender_id=participant_member_id, content="quoted text",
+            )
+            s.add(msg)
+            await s.commit()
+            message_id = msg.id
+
+            # non-participant: project 접근권은 있으나(story 게이트 통과) conversation
+            # participant는 아니다 — test_create_proof_reference_unreadable_conversation_404와
+            # 동일 셋업 패턴, 다만 여기선 이미 존재하는 참조를 GET으로 조회하는 쪽.
+            user_id = uuid.uuid4()
+            s.add(User(id=user_id, email=f"np-{user_id.hex[:8]}@test.com", hashed_password="x"))
+            await s.commit()
+            om = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=user_id, role="member")
+            s.add(om)
+            await s.commit()
+            s.add(Member(id=om.id, org_id=org.id, type="human", user_id=user_id, name="NonParticipant"))
+            await s.commit()
+            s.add(ProjectAccess(
+                id=uuid.uuid4(), project_id=project.id, org_member_id=om.id, member_id=om.id,
+                permission="granted", role="member",
+            ))
+            await s.commit()
+            non_participant_user_id = user_id
+
+            from app.services.reference_core import insert_reference
+            await insert_reference(
+                s, org_id=org.id, source_type="story", source_field="description",
+                source_id=source_story.id, target_type="chat_message", target_id=message_id,
+                form="proof", created_by=participant_user_id,
+                proof_payload={"conversation_id": str(conv.id), "snapshot": []},
+            )
+            await s.commit()
+
+        # 양성대조 — participant 본인은 그대로 보인다.
+        await _setup_app_human(app, Session, participant_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(
+                f"/api/v2/stories/{source_story.id}/references", params={"direction": "outgoing"},
+            )
+            assert resp.status_code == 200, resp.text
+            assert len(resp.json()["data"]) == 1, "participant는 chat_message 참조가 보여야 한다"
+        finally:
+            await client.aclose()
+        app.dependency_overrides.clear()
+
+        # 음성대조 — non-participant는 story 자체는 보이지만(project 접근권 있음) 그 안의
+        # chat_message 참조는 목록에서 조용히 빠져야 한다(404/403 노출이 아니라 빈 목록).
+        await _setup_app_human(app, Session, non_participant_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(
+                f"/api/v2/stories/{source_story.id}/references", params={"direction": "outgoing"},
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["data"] == [], (
+                "non-participant에겐 chat_message 참조가 존재 자체가 새지 않아야 한다(C-3 규율)"
+            )
         finally:
             await client.aclose()
     finally:
