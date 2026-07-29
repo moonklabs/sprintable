@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 # 뷰어 통합 재설계(story 1948d19d): 비정상 거대값 방어 상한. Figma류 대형 캔버스 툴의 실용 한계보다
 # 넉넉하되(20000px), 정수 오버플로/스토리지 남용성 값은 확실히 막는 값 — 특정 스펙 수치가 아니라
@@ -108,6 +108,13 @@ class VisualArtifactSummary(BaseModel):
     # 세팅되므로(N+1 방지 배치 조회, 0도 명시) 여기 기본값(0)이 실제로 쓰일 일은 없다.
     unresolved_comment_count: int = 0
 
+    # story #2262(C-4) AC9: 참조 카드의 「다음 행동」 재료 — SSOT는 app.services.next_action.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_code(self) -> str | None:
+        from app.services.next_action import artifact_next_action
+        return artifact_next_action(unresolved_comment_count=self.unresolved_comment_count)
+
 
 class VisualArtifactDetail(BaseModel):
     id: uuid.UUID
@@ -136,6 +143,13 @@ class VisualArtifactDetail(BaseModel):
     # from_attributes를 안 쓰므로(라우터가 키워드 인자로 직접 생성) 기본값 0이 실제로
     # 쓰이지 않는다는 보장이 없다 — 호출부(_load_detail)가 항상 명시로 넘긴다.
     unresolved_comment_count: int = 0
+
+    # story #2262(C-4) AC9: VisualArtifactSummary와 동형.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_code(self) -> str | None:
+        from app.services.next_action import artifact_next_action
+        return artifact_next_action(unresolved_comment_count=self.unresolved_comment_count)
 
 
 class CreateArtifactCommentRequest(BaseModel):

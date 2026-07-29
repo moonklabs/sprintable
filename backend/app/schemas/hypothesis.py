@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator, model_validator
 
 from app.schemas.story import _validate_metric_definition
 
@@ -113,6 +113,15 @@ class HypothesisResponse(BaseModel):
     sprint_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+
+    # story #2262(C-4) AC9: 참조 카드의 「다음 행동」 재료 — SSOT는 app.services.next_action.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_code(self) -> str | None:
+        from app.services.next_action import hypothesis_next_action
+        return hypothesis_next_action(
+            status=self.status, measure_after=self.measure_after, metric_definition=self.metric_definition,
+        )
 
     @classmethod
     def from_model(

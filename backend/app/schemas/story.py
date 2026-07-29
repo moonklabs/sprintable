@@ -302,3 +302,18 @@ class StoryResponse(BaseModel):
     def reference_token(self) -> str | None:
         from app.services.reference_token import build_reference_token
         return build_reference_token("story", self.id, self.title)
+
+    # story #2262(C-4) AC9: 참조 카드의 「다음 행동」 재료 — SSOT는 app.services.next_action
+    # (조건식만, 문구는 유나 lane). None="디딜 것 없음"(positive 단방향, has_evidence와 동형).
+    # ⛔doc(e-connect-c4-trigger-condition-table)이 승인한 축은 outcome-measurement 하나뿐 —
+    # self_reported/human_verified(task와 동일 필드)도 story에 있다는 것을 구현 중 발견했지만,
+    # 그걸 story의 다음 행동으로도 쓸지는 리뷰 안 된 별건 판단이라 여기서 임의로 안 얹는다
+    # (지어내지 않는다 원칙 — PO 승인 없이 새 축 추가 금지).
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_code(self) -> str | None:
+        from app.services.next_action import outcome_measurement_next_action
+        return outcome_measurement_next_action(
+            outcome_status=self.outcome_status, measure_after=self.measure_after,
+            metric_definition=self.metric_definition, system_owned_sources=frozenset({"ga4"}),
+        )
