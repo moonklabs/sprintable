@@ -51,11 +51,13 @@ class ListJudgmentsInput(SprintableInput):
 
 
 async def list_judgments(args: ListJudgmentsInput) -> list[TextContent]:
-    """pull 전용 — 「물으면 준다」(push 없음). `retractions`는 상한과 무관하게 항상 전체
-    (철회된 판단을 다시 주장하지 않으려면 빠짐없이 봐야 한다). `active`(judgment/
-    unmeasurable/refinement/method_error)는 recency 기준으로 캡되며, `meta.omitted_count`가
-    실제로 몇 건 잘렸는지 알려준다. `method` 필터는 "같은 방법으로 낸 다른 말들"을 역추적할
-    때 쓴다(method_error를 남기기 전에 먼저 이걸로 훑어보는 것을 권장)."""
+    """pull 전용 — 「물으면 준다」(push 없음). `corrections`(retraction·refinement·
+    method_error — 앞선 말에 대한 말 전부)는 상한과 무관하게 항상 전체(철회된 판단을 다시
+    주장하지 않으려면 빠짐없이 봐야 한다). `active`(judgment/unmeasurable)는 recency
+    기준으로 캡되며, `meta.active_omitted_count`가 실제로 몇 건 잘렸는지 알려준다(잘리는
+    것은 항상 active뿐 — corrections는 절대 안 잘린다). `method` 필터는 "같은 방법으로 낸
+    다른 말들"을 역추적할 때 쓴다(method_error를 남기기 전에 먼저 이걸로 훑어보는 것을
+    권장)."""
     try:
         params: dict = {}
         if args.work_item_id is not None:

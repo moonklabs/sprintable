@@ -3,8 +3,8 @@
 오르테가 AC(2026-07-29, 스레드 7256d5cc) 7개를 그대로 잰다:
   ①Evidence 카운트 오염 없음(judgment 삽입 전후 batch_has_evidence·GET /evidence·
     glance proof_count 변화 0)
-  ②철회는 캡을 안 받는다(active는 잘리고 retractions는 전량)
-  ③omitted_count가 정확한 수
+  ②철회는 캡을 안 받는다(active는 잘리고 corrections는 전량)
+  ③active_omitted_count가 정확한 수
   ④method 축 역추적(?method=Y로 같은 방법으로 낸 다른 말들이 함께 나옴)
   ⑤scope 위반이 API 층에서 422로 거절(DB CHECK가 아니라 사람이 읽을 메시지로)
   ⑥⛔"PO가 실제로 한 건 쓴다"는 이 PR의 몫이 아니다 — 여기선 그 «메커니즘»만 증명한다
@@ -185,10 +185,13 @@ async def test_judgment_insert_does_not_move_evidence_signals():
         await engine.dispose()
 
 
-# ─── ②③철회 uncapped + omitted_count 정확 ────────────────────────────────────
+# ─── ②③정정(retraction·refinement·method_error) uncapped + active_omitted_count 정확 ──
 
 
-async def test_retractions_uncapped_active_capped_with_accurate_omitted_count():
+async def test_corrections_uncapped_active_capped_with_accurate_omitted_count():
+    """story #2308(2026-07-29) — 캡 예외가 `TARGET_REQUIRED_KINDS` 전체(retraction·
+    refinement·method_error)를 덮는지 증명한다. retraction 하나만 테스트하면 그 회귀가
+    다시 들어와도 이 테스트가 못 잡는다 — 셋 다 각각 캡보다 많이 넣어 전량 생존을 본다."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -213,30 +216,36 @@ async def test_retractions_uncapped_active_capped_with_accurate_omitted_count():
                 assert resp.status_code == 201, resp.text
                 active_ids.append(resp.json()["id"])
 
-            retraction_ids = []
-            for target_id in active_ids[:3]:
+            correction_ids = []
+            for kind, target_id in zip(
+                ["retraction", "refinement", "method_error"], active_ids[:3], strict=True
+            ):
                 resp = await client.post(
                     "/api/v2/judgments",
                     json={
-                        "scope": "general", "kind": "retraction", "target_id": target_id,
-                        "statement": f"retract {target_id}",
+                        "scope": "general", "kind": kind, "target_id": target_id,
+                        "statement": f"{kind} of {target_id}",
                     },
                 )
                 assert resp.status_code == 201, resp.text
-                retraction_ids.append(resp.json()["id"])
+                correction_ids.append(resp.json()["id"])
 
             resp = await client.get("/api/v2/judgments", params={"scope": "general", "limit": 2})
             assert resp.status_code == 200, resp.text
             body = resp.json()
 
             assert len(body["active"]) == 2, body["active"]
-            assert {r["id"] for r in body["retractions"]} == set(retraction_ids), body["retractions"]
-            assert len(body["retractions"]) == 3
+            assert {r["id"] for r in body["corrections"]} == set(correction_ids), body["corrections"]
+            assert len(body["corrections"]) == 3
+            # 셋 다 실제로 섞여 나오는지(하나의 kind로 쏠려 있지 않은지) 확인.
+            assert {r["kind"] for r in body["corrections"]} == {
+                "retraction", "refinement", "method_error",
+            }, body["corrections"]
 
-            assert body["meta"]["capped"] is True
-            assert body["meta"]["cap_basis"] == "recency"
-            # active 총량 = 5(judgment) + 3(retraction은 active 아님) = 5. 2건 반환 → 3건 누락.
-            assert body["meta"]["omitted_count"] == 3, body["meta"]
+            assert body["meta"]["active_capped"] is True
+            assert body["meta"]["active_cap_basis"] == "recency"
+            # active 총량 = 5(judgment) + 0(정정 셋은 active 아님) = 5. 2건 반환 → 3건 누락.
+            assert body["meta"]["active_omitted_count"] == 3, body["meta"]
         finally:
             await client.aclose()
     finally:
@@ -302,8 +311,12 @@ async def test_method_filter_surfaces_all_statements_produced_by_same_method():
             assert resp.status_code == 200, resp.text
             body = resp.json()
             active_ids = {j["id"] for j in body["active"]}
-            assert active_ids == {r1.json()["id"], r2.json()["id"], r3.json()["id"]}
-            assert r_other.json()["id"] not in active_ids
+            correction_ids = {j["id"] for j in body["corrections"]}
+            # story #2308: method_error(r3)는 정정 축이라 corrections에 있다 — active엔
+            # judgment 둘(r1·r2)만 남는다. method 필터가 두 축 모두에 걸리는지도 여기서 확인.
+            assert active_ids == {r1.json()["id"], r2.json()["id"]}, active_ids
+            assert correction_ids == {r3.json()["id"]}, correction_ids
+            assert r_other.json()["id"] not in active_ids | correction_ids
         finally:
             await client.aclose()
     finally:
@@ -432,9 +445,10 @@ async def test_general_scope_entry_is_pullable_via_scope_filter():
 
             listed = await client.get("/api/v2/judgments", params={"scope": "general"})
             assert listed.status_code == 200, listed.text
-            ids = {j["id"] for j in listed.json()["active"]}
-            assert original.json()["id"] in ids
-            assert correction.json()["id"] in ids
+            body = listed.json()
+            # story #2308: judgment(original)은 active, method_error(correction)는 corrections.
+            assert original.json()["id"] in {j["id"] for j in body["active"]}
+            assert correction.json()["id"] in {j["id"] for j in body["corrections"]}
         finally:
             await client.aclose()
     finally:

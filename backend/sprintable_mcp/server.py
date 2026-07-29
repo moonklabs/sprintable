@@ -550,8 +550,9 @@ _TOOL_DEFS: list[tuple] = [
      "refinement/method_error는 target_id(무엇에 대한 말인지) 필수.",
      AddJudgmentInput, add_judgment),
     ("sprintable_list_judgments",
-     "판단/철회 pull 조회 — work_item_id·method·scope로 좁혀 묻는다. retractions는 상한과"
-     " 무관하게 항상 전체, active는 캡되며 meta.omitted_count로 잘린 건수를 알려준다.",
+     "판단/철회 pull 조회 — work_item_id·method·scope로 좁혀 묻는다. corrections(retraction/"
+     "refinement/method_error)는 상한과 무관하게 항상 전체, active는 캡되며"
+     " meta.active_omitted_count로 잘린 건수를 알려준다.",
      ListJudgmentsInput, list_judgments),
     # Visual artifacts (12) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
     # 핀 저작(story 7fe16274) + story #1922(delete_artifact, soft delete·생성자 전용)
