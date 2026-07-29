@@ -258,11 +258,17 @@ async def _assert_story_project_access(
     """E-SECURITY SEC-S8(story 83ea3d6a) G: 개별-ID story 접근(get/update/status)이 org-scope만
     있고 project 접근권 미검증이던 갭 — 같은 org 다른 project 멤버가 story id만 알면 조회/수정
     가능했다. upload_story_attachment와 동형으로 has_project_access 재사용(휴먼 team_member·
-    에이전트 project_access grant 양쪽 처리). delete_story는 SEC-S3(#2014)가 별도 처리."""
+    에이전트 project_access grant 양쪽 처리). delete_story는 SEC-S3(#2014)가 별도 처리.
+
+    ⛔story #2322(2026-07-29, PO 판정): 무권한을 403이 아닌 404로 낸다 — 존재 비노출 규율을
+    이 파일 전체에서 통일한다(participation.py의 동명 헬퍼·gates.py get_gate_endpoint가 이미
+    이 규율이었다 — 「같은 엔티티가 경로마다 다른 답」을 내던 것이 진짜 결함이었다). 조직
+    경계(다른 org)는 이 함수 호출 前에 이미 404로 막혀 있다(repo.get()의 org 필터) — 이 함수가
+    새로 여는 것은 「조직 안·프로젝트 밖」 하나뿐이고, 그 답도 이제 404다."""
     from app.services.project_auth import has_project_access
 
     if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
-        raise HTTPException(status_code=403, detail="No access to this project")
+        raise HTTPException(status_code=404, detail="Story not found")
 
 
 async def _upsert_assignee_participation(
