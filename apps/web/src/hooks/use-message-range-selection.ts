@@ -48,6 +48,11 @@ export function useMessageRangeSelection(): MessageRangeSelection {
       if (prev.mode !== 'anchored' || !prev.anchorId) return prev;
       const anchorIndex = orderedMessageIds.indexOf(prev.anchorId);
       const endIndex = orderedMessageIds.indexOf(messageId);
+      // 이 분기는 지금 도는 경로가 없다(2026-07-29 확認 — chat-view.tsx엔 가상화 라이브러리가
+      // 0건이고 messages state는 prepend만 해 축소되지 않는다, 언마운트→재마운트는 선택 자체가
+      // 정상 취소되는 별개 경로). ⇒ 가상화가 들어오면 이 분기가 돈다 — 그때는 "무시"가 아니라
+      // "다른 데서(서버/스토어) 순서를 다시 얻는" 쪽으로 바꾼다(anchor id 자체는 훅이 계속
+      // 들고 있으므로 그 id로 재조회하면 된다). 도는 경로가 없다고 죽은 코드로 지우지 말 것.
       if (anchorIndex === -1 || endIndex === -1) return prev; // 순서를 모르면 확定하지 않는다.
       const [startId, endId] = anchorIndex <= endIndex
         ? [prev.anchorId, messageId]
