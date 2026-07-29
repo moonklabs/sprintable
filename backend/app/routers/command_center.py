@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +27,7 @@ from app.models.agent_run import AgentRun
 from app.models.dependency import ItemDependency
 from app.models.hypothesis import Hypothesis
 from app.models.member import AgentProjectProfile, Member
-from app.models.pm import Goal, Story, StoryActivity
+from app.models.pm import Goal, Story, StoryActivity, Task
 from app.models.workflow_line import WorkflowLineStepApproval, WorkflowLineStepRun
 from app.services.member_resolver import resolve_member
 
@@ -60,6 +60,20 @@ async def my_actions(
     member_id = member.id
     now = _now()
 
+    # ⛔⛔ story #2288 리뷰(2026-07-29, PO 지적 — my_blockers 누락 버그의 근본): 이 함수가
+    # queue.append({"type": ...})로 내보내는 문자열 전수는 **세 곳이 같이 움직여야 하는**
+    # 목록의 원천이다 — ①여기(BE, SSOT) ②apps/web/src/components/dashboard/command-center/
+    # types.ts의 QueueItem.type union ③같은 디렉터리 derive-action-zone.ts의
+    # RENDERABLE_TYPES(Record<QueueItem['type'], true> — TS 컴파일 타임에 ②와는 이미 강제
+    # 동기화됨). 여기 새 "type" 값을 추가하면 ②도 같이 늘려야 한다(안 그러면 splitRenderableQueue
+    # 가 "표시할 수 없음"으로 조용히 떨어뜨린다).
+    #
+    # ⛔실측(2026-07-29): OpenAPI→FE 타입 자동생성 파이프라인이 이 레포에 없다(grep 전수 —
+    # openapi_tags는 Swagger UI 문서 그룹핑 용도뿐). 이 엔드포인트 자체도 Pydantic response_model
+    # 없이 raw dict를 JSONResponse로 반환해(FastAPI 자동 스키마 생성 대상이 아님) 있었다 해도
+    # 이 필드는 안 걸렸을 것 — 그래서 "한 정의로 묶기"는 지금 인프라로는 불가능하다는 것이
+    # 확인된 사실이다(추측 아님). 진짜 재발 방지(BE↔FE type 집합 parity 테스트)는 PO가 별도
+    # 스토리로 세운다 — 이 코멘트는 그 전까지의 "적어 둔 것" 역할(미르코의 types.ts 코멘트와 짝).
     queue: list[dict] = []
     # 게이트 승인 대기 = 내가 approver 인 pending blocking approval(member-private·서버 resolve member_id).
     # story #2288(E-CONNECT) BE 명세3(§3-1㉢·§4-1, 미르코 작성): gate_type 패스스루 —
@@ -80,24 +94,68 @@ async def my_actions(
             .limit(50)
         )
     ).all()
+    # story #2288(E-CONNECT) BE 명세2(§2③, 무게 — 근사치 OK, 정확 집계는 #2221 별건): 같은
+    # approval_group_id(quorum)에 나 말고 몇 명이 더 pending인지. N+1 금지 — group by 배치.
+    _approval_group_ids = [a.approval_group_id for a, _gt in approvals]
+    approval_group_counts: dict[uuid.UUID, int] = {}
+    if _approval_group_ids:
+        rows = (
+            await session.execute(
+                select(WorkflowLineStepApproval.approval_group_id, func.count(WorkflowLineStepApproval.id))
+                .where(
+                    WorkflowLineStepApproval.org_id == org_id,
+                    WorkflowLineStepApproval.approval_group_id.in_(_approval_group_ids),
+                    WorkflowLineStepApproval.status == "pending",
+                    WorkflowLineStepApproval.blocking.is_(True),
+                )
+                .group_by(WorkflowLineStepApproval.approval_group_id)
+            )
+        ).all()
+        approval_group_counts = {gid: cnt for gid, cnt in rows}
     for a, gate_type in approvals:
+        # 그룹 전체 pending 수 - 나 자신 = "나 말고 몇 명 더" — 음수 방지 max(0, ...).
+        # story #2288 리뷰(2026-07-29, PO 지적): 필드명 자체에 "approx"를 박는다 — 정확
+        # 집계(#2221 별건)와 헷갈리면 "N건 기다립니다"가 정확한 수로 읽혀 오늘 그 병(수를
+        # 내밀면 사람은 정확한 줄 안다)이 재발한다. 응답 밖(코드 주석만)으론 안 드러난다.
+        waiting_count_approx = max(0, approval_group_counts.get(a.approval_group_id, 1) - 1)
         queue.append({
             "type": "gate_approval",
             "priority": "warn",
             "context": {"gate_id": str(a.gate_id) if a.gate_id else None,
                         "approval_group_id": str(a.approval_group_id), "kind": a.kind,
-                        "gate_type": gate_type},
+                        "gate_type": gate_type, "waiting_count_approx": waiting_count_approx},
             "created_at": a.created_at.isoformat() if a.created_at else None,
         })
-    # 리뷰/머지 대기 = 내 배정 in-review 스토리(member-private).
+    # story #2288(E-CONNECT) BE 명세5(2026-07-29 확定, PO 기준): review_merge를 status==
+    # 'in-review' 하나에서 "done 아닌 전체"로 넓힌다 — PO 기준 그대로 "내가 지금 손을 대면
+    # 무언가 달라지는가". ⛔단 "선행 대기"(아직 안 풀린 blocks 의존성이 이 story를 막고
+    # 있음)는 제외한다 — 손대도 안 바뀌는 것은 waiting 축이지 review_merge 축이 아니다
+    # (그 축은 이미 my_blockers/waiting_on_others가 다룬다 — 여기서 새로 안 만든다).
+    _ReviewBlocker = aliased(Story)
+    _blocked_by_open_dependency = (
+        select(ItemDependency.id)
+        .select_from(ItemDependency)
+        .join(_ReviewBlocker, _ReviewBlocker.id == ItemDependency.from_id)
+        .where(
+            ItemDependency.org_id == org_id,
+            ItemDependency.to_id == Story.id,
+            ItemDependency.dep_type == "blocks",
+            ItemDependency.item_type == "story",
+            _ReviewBlocker.org_id == org_id,
+            _ReviewBlocker.status.not_in(_OPEN_EXCLUDED_STATUSES),  # 막는 쪽이 아직 open.
+            _ReviewBlocker.deleted_at.is_(None),
+        )
+        .correlate(Story)
+    )
     reviews = (
         await session.execute(
             select(Story)
             .where(
                 Story.org_id == org_id,
                 Story.assignee_id == member_id,
-                Story.status == "in-review",
+                Story.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 Story.deleted_at.is_(None),
+                ~exists(_blocked_by_open_dependency),
             )
             .order_by(Story.updated_at.desc())
             .limit(50)
@@ -110,6 +168,40 @@ async def my_actions(
             "title": s.title,
             "context": {"story_id": str(s.id), "status": s.status},
             "created_at": s.updated_at.isoformat() if s.updated_at else None,
+        })
+    # story #2288(E-CONNECT) BE 명세1(§1-1, 태스크 줄): 담당 스토리 소속 여부와 무관하게
+    # "내가 담당인 미완료 Task"를 그 자체로 항목화한다 — 스토리는 소속 표시만(미르코 명세
+    # 원문 그대로, 스토리를 따로 my_task로 중복 안 냄).
+    my_tasks = (
+        await session.execute(
+            select(Task, Story.title)
+            .join(Story, Story.id == Task.story_id)
+            .where(
+                Task.org_id == org_id,
+                Task.assignee_id == member_id,
+                # story #2288 리뷰(2026-07-29, PO 지적): "미완료"는 명세5(review_merge)와
+                # «같은 자»를 써야 한다 — 안 그러면 같은 화면에 "다른 뜻의 미완료"가 둘 선다.
+                # _OPEN_EXCLUDED_STATUSES(파일 상단, 지금은 ("done",) 하나)가 그 SSOT다.
+                # ⛔이 상수는 Story 어휘로 지어졌다 — Task에 얹기 전 CHECK 제약을 직접
+                # 조회해 어휘가 같은지 실측했다(psql \d+ tasks, 2026-07-29): tasks_status_
+                # check = ANY('todo','in-progress','done') — Story와 "done" 하나로 동일하다.
+                # Task 전용 완료값이 따로 있었다면 이 재사용은 결함이었을 것(그런 값 없음).
+                Task.status.not_in(_OPEN_EXCLUDED_STATUSES),
+                Task.deleted_at.is_(None),
+                Story.org_id == org_id,
+                Story.deleted_at.is_(None),
+            )
+            .order_by(Task.updated_at.desc())
+            .limit(50)
+        )
+    ).all()
+    for t, story_title in my_tasks:
+        queue.append({
+            "type": "my_task",
+            "priority": "info",
+            "title": t.title,
+            "context": {"task_id": str(t.id), "story_id": str(t.story_id), "story_title": story_title},
+            "created_at": t.updated_at.isoformat() if t.updated_at else None,
         })
     # CC-BE.2 내가 풀 블로커(member-private): 내 담당(blocker) 스토리가 막은 open 스토리. caller-bound.
     _Blocker = aliased(Story)
@@ -134,11 +226,37 @@ async def my_actions(
             .limit(50)
         )
     ).all()
+    # story #2288 BE 명세2(§2③, 무게): 같은 blocker_story_id가 총 몇 개의 open story를
+    # 막고 있는지 — N+1 금지, group by 배치(위 my_blockers 쿼리와 동일 WHERE 축 재사용).
+    _blocker_ids = [blocker_id for blocker_id, _blocked_id in my_blockers]
+    blocker_weight_counts: dict[uuid.UUID, int] = {}
+    if _blocker_ids:
+        rows = (
+            await session.execute(
+                select(ItemDependency.from_id, func.count(func.distinct(ItemDependency.to_id)))
+                .select_from(ItemDependency)
+                .join(_Blocked, _Blocked.id == ItemDependency.to_id)
+                .where(
+                    ItemDependency.org_id == org_id,
+                    ItemDependency.dep_type == "blocks",
+                    ItemDependency.item_type == "story",
+                    ItemDependency.from_id.in_(_blocker_ids),
+                    _Blocked.org_id == org_id,
+                    _Blocked.status.not_in(_OPEN_EXCLUDED_STATUSES),
+                    _Blocked.deleted_at.is_(None),
+                )
+                .group_by(ItemDependency.from_id)
+            )
+        ).all()
+        blocker_weight_counts = {bid: cnt for bid, cnt in rows}
     for blocker_id, blocked_id in my_blockers:
         queue.append({
             "type": "my_blockers",
             "priority": "danger",  # 내가 푸는 게 남을 막고 있음 — 최우선.
-            "context": {"blocker_story_id": str(blocker_id), "blocked_story_id": str(blocked_id)},
+            # story #2288 리뷰(2026-07-29, PO 지적): gate_approval과 동일 이유로
+            # waiting_count_approx — 정확 집계(#2221)와 구분되게 필드명 자체에 근사치임을 싣는다.
+            "context": {"blocker_story_id": str(blocker_id), "blocked_story_id": str(blocked_id),
+                        "waiting_count_approx": blocker_weight_counts.get(blocker_id, 1)},
         })
 
     # story #2288(E-CONNECT) BE 명세4(§3-1㉢·§4-1, PO 강조 — 이 스토리의 심장): 「내 것인데

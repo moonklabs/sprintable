@@ -75,12 +75,14 @@ async def _make_step_run(session, org_id, project_id, *, entity_type, entity_id,
     return run
 
 
-async def _make_approval(session, org_id, project_id, *, step_run_id, approver_member_id, status="pending"):
+async def _make_approval(
+    session, org_id, project_id, *, step_run_id, approver_member_id, status="pending", approval_group_id=None,
+):
     from app.models.workflow_line import WorkflowLineStepApproval
 
     approval = WorkflowLineStepApproval(
         id=uuid.uuid4(), org_id=org_id, project_id=project_id,
-        step_run_id=step_run_id, approval_group_id=uuid.uuid4(),
+        step_run_id=step_run_id, approval_group_id=approval_group_id or uuid.uuid4(),
         approver_member_id=approver_member_id, approver_member_type="human",
         kind="approver", blocking=True, status=status,
     )
@@ -265,6 +267,225 @@ async def test_waiting_on_others_dedupes_multi_approver_quorum_realdb():
             items = resp.json()["action_queue"]["items"]
             matches = [i for i in items if i["type"] == "waiting_on_others" and i["context"]["story_id"] == str(story.id)]
             assert len(matches) == 1
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ─── BE 명세1(태스크 줄)·명세2(무게)·명세5(담당 판정 확장) — 2026-07-29 ────────────
+
+
+async def _make_task(session, org_id, story_id, *, assignee_id=None, title="Task", status="todo"):
+    from app.models.pm import Task
+
+    task = Task(
+        id=uuid.uuid4(), org_id=org_id, story_id=story_id, assignee_id=assignee_id,
+        title=title, status=status,
+    )
+    session.add(task)
+    await session.commit()
+    return task
+
+
+async def _make_dependency(session, org_id, *, from_id, to_id, dep_type="blocks", item_type="story"):
+    from app.models.dependency import ItemDependency
+
+    dep = ItemDependency(
+        id=uuid.uuid4(), org_id=org_id, from_id=from_id, to_id=to_id,
+        dep_type=dep_type, item_type=item_type,
+    )
+    session.add(dep)
+    await session.commit()
+    return dep
+
+
+async def test_my_task_shows_for_incomplete_assigned_task_realdb():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_member(s, org.id, project.id)
+            story = await _make_story(s, org.id, project.id, title="Parent")
+            task = await _make_task(s, org.id, story.id, assignee_id=caller_id, title="구현", status="in-progress")
+            # 양성대조: done task는 안 뜬다.
+            await _make_task(s, org.id, story.id, assignee_id=caller_id, title="이미끝남", status="done")
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/command-center/my-actions")
+            assert resp.status_code == 200, resp.text
+            items = resp.json()["action_queue"]["items"]
+            my_tasks = [i for i in items if i["type"] == "my_task"]
+            assert len(my_tasks) == 1
+            assert my_tasks[0]["context"]["task_id"] == str(task.id)
+            assert my_tasks[0]["context"]["story_id"] == str(story.id)
+            assert my_tasks[0]["context"]["story_title"] == "Parent"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_review_merge_now_includes_non_in_review_assigned_stories_realdb():
+    """BE 명세5: status=='in-review' 하나가 아니라 done 아닌 전체로 넓어졌는지 실PG로 확인."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_member(s, org.id, project.id)
+            in_progress_story = await _make_story(s, org.id, project.id, title="InProgress")
+            in_progress_story.assignee_id = caller_id
+            in_progress_story.status = "in-progress"
+            done_story = await _make_story(s, org.id, project.id, title="Done")
+            done_story.assignee_id = caller_id
+            done_story.status = "done"
+            await s.commit()
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/command-center/my-actions")
+            assert resp.status_code == 200, resp.text
+            items = resp.json()["action_queue"]["items"]
+            review_story_ids = {i["context"]["story_id"] for i in items if i["type"] == "review_merge"}
+            assert str(in_progress_story.id) in review_story_ids
+            assert str(done_story.id) not in review_story_ids
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_review_merge_excludes_story_blocked_by_open_dependency_realdb():
+    """BE 명세5 「선행 대기」 제외 — 아직 안 풀린 blocks 의존성이 있으면 review_merge에서 빠진다.
+    양성대조: blocker가 done이면(선행이 풀렸으면) 다시 뜬다.
+
+    ⛔뮤테이션 자가검증(2026-07-29, PO 지시 — "없으면 「제외했다」가 주장"): command_center.py의
+    `~exists(_blocked_by_open_dependency)` 조건을 실제로 지우고 이 테스트를 돌려 RED 확認함
+    (blocked_story.id가 review_story_ids에 새는 것을 직접 관측) → 복원 → GREEN 재확認."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_member(s, org.id, project.id)
+            blocked_story = await _make_story(s, org.id, project.id, title="Blocked")
+            blocked_story.assignee_id = caller_id
+            blocked_story.status = "in-progress"
+            open_blocker = await _make_story(s, org.id, project.id, title="OpenBlocker")
+            open_blocker.status = "in-progress"
+            await s.commit()
+            await _make_dependency(s, org.id, from_id=open_blocker.id, to_id=blocked_story.id)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/command-center/my-actions")
+            assert resp.status_code == 200, resp.text
+            items = resp.json()["action_queue"]["items"]
+            review_story_ids = {i["context"]["story_id"] for i in items if i["type"] == "review_merge"}
+            assert str(blocked_story.id) not in review_story_ids
+
+            # 양성대조: blocker를 done으로 풀면 다시 뜬다.
+            from sqlalchemy import select as sa_select
+            from app.models.pm import Story as StoryModel
+
+            async with Session() as s2:
+                res = await s2.execute(sa_select(StoryModel).where(StoryModel.id == open_blocker.id))
+                row = res.scalar_one()
+                row.status = "done"
+                await s2.commit()
+
+            resp2 = await client.get("/api/v2/command-center/my-actions")
+            assert resp2.status_code == 200, resp2.text
+            items2 = resp2.json()["action_queue"]["items"]
+            review_story_ids2 = {i["context"]["story_id"] for i in items2 if i["type"] == "review_merge"}
+            assert str(blocked_story.id) in review_story_ids2
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_gate_approval_waiting_count_quorum_realdb():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_member(s, org.id, project.id)
+            other_id, _ = await _make_member(s, org.id, project.id)
+            story = await _make_story(s, org.id, project.id, title="QuorumGate")
+            run = await _make_step_run(s, org.id, project.id, entity_type="story", entity_id=story.id)
+            group_id = uuid.uuid4()
+            await _make_approval(
+                s, org.id, project.id, step_run_id=run.id, approver_member_id=caller_id,
+                approval_group_id=group_id,
+            )
+            await _make_approval(
+                s, org.id, project.id, step_run_id=run.id, approver_member_id=other_id,
+                approval_group_id=group_id,
+            )
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/command-center/my-actions")
+            assert resp.status_code == 200, resp.text
+            items = resp.json()["action_queue"]["items"]
+            ga = next(i for i in items if i["type"] == "gate_approval")
+            assert ga["context"]["waiting_count_approx"] == 1  # 나 제외 1명 더.
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_my_blockers_waiting_count_realdb():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_member(s, org.id, project.id)
+            blocker = await _make_story(s, org.id, project.id, title="MultiBlocker")
+            blocker.assignee_id = caller_id
+            blocked_a = await _make_story(s, org.id, project.id, title="A")
+            blocked_a.status = "in-progress"
+            blocked_b = await _make_story(s, org.id, project.id, title="B")
+            blocked_b.status = "in-progress"
+            await s.commit()
+            await _make_dependency(s, org.id, from_id=blocker.id, to_id=blocked_a.id)
+            await _make_dependency(s, org.id, from_id=blocker.id, to_id=blocked_b.id)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get("/api/v2/command-center/my-actions")
+            assert resp.status_code == 200, resp.text
+            items = resp.json()["action_queue"]["items"]
+            my_blockers_items = [i for i in items if i["type"] == "my_blockers"]
+            assert len(my_blockers_items) == 2  # 여전히 blocked story당 한 항목(변경 없음).
+            assert all(i["context"]["waiting_count_approx"] == 2 for i in my_blockers_items)  # 무게는 공유.
         finally:
             await client.aclose()
     finally:
