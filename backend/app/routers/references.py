@@ -152,9 +152,12 @@ async def create_reference(
         created_by=canonical_created_by,
     )
     stmt = stmt.on_conflict_do_nothing(
+        # story #2267(C-9): relation이 유니크 인덱스에 추가돼 이 목록도 같이 늘어야 매치한다 —
+        # 이 라우트는 relation을 안 채우므로(위 .values() 참조) 컬럼 기본값 'none'이 그대로
+        # 적용된다("본문 참조", 이 라우트의 명시적 멘션 생성 용도 그대로).
         index_elements=[
             Reference.source_type, Reference.source_field, Reference.source_id,
-            Reference.target_type, Reference.target_id, Reference.form,
+            Reference.target_type, Reference.target_id, Reference.form, Reference.relation,
         ],
         index_where=Reference.form != "proof",
     ).returning(Reference.id)

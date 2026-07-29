@@ -116,6 +116,12 @@ class StoryCreate(BaseModel):
     # E-FILE S4: 보드 스토리 첨부 (기본 [], 최대 10).
     attachments: list[StoryAttachment] = []
     meeting_id: uuid.UUID | None = None
+    # story #2267(C-9): 이 스토리가 «무엇에서» 만들어졌는지(출처) — 선택. epic_id/sprint_id/
+    # meeting_id(컨테이너·재배정 가능)와 다른 축이다. 제공되면 entity_references에
+    # relation='created_from' 한 줄이 생성 시점에 자동으로 남는다(불변 — 이후 컨테이너가
+    # 바뀌어도 이 사실은 안 흔들린다). ⛔둘 다 지정해야 유효(하나만 있으면 무시).
+    origin_type: str | None = None
+    origin_id: uuid.UUID | None = None
     status: str = "backlog"
     priority: str = "medium"
     story_points: int | None = None

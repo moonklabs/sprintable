@@ -487,6 +487,34 @@ async def create_story(
         entity_type="story", entity_id=story.id, project_id=story.project_id,
         title=story.title,
     )
+    # story #2267(C-9): 출처(「무엇에서 만들었나」) — 컨테이너(epic/sprint/meeting_id)와
+    # 다른 축. 둘 다 제공됐을 때만(하나만 있으면 무시 — 부분입력은 의미가 없다) entity_
+    # references에 relation='created_from' 한 줄을 심는다. source_field='self' — 텍스트
+    # 필드에서 파싱된 게 아니라(그런 "필드"가 없다) 엔티티 전체가 원인이라는 sentinel
+    # (source_field 기존 관례 "body"와 같은 원칙, 값만 다름 — app/models/reference.py 참조).
+    # ⛔소급 없음(이 호출 자체가 신규 생성 시점에만 있다 — 옛 스토리는 그대로 「아직 모름」).
+    if body.origin_type is not None and body.origin_id is not None:
+        from app.services.reference_core import UnregisteredEntityTypeError, insert_reference
+
+        try:
+            await insert_reference(
+                session,
+                org_id=org_id,
+                source_type=body.origin_type,
+                source_field="self",
+                source_id=body.origin_id,
+                target_type="story",
+                target_id=story.id,
+                form="mention",
+                created_by=await _resolve_team_member_id(auth, org_id, session),
+                relation="created_from",
+            )
+        except UnregisteredEntityTypeError as exc:
+            # ⛔여기서 commit하지 않는다 — get_db 의존성이 요청 끝에 한 번만 commit하고,
+            # 예외가 나면 세션 전체(story 생성 flush 포함)를 rollback한다(app/core/database.py
+            # get_db). 부분성공(스토리는 남고 출처만 빠짐)을 만들지 않기 위해 그 불변식을
+            # 그대로 따른다 — 여기서 별도 commit을 하면 그 원자성이 깨진다.
+            raise HTTPException(status_code=400, detail=f"invalid origin_type: {exc}") from exc
     return StoryResponse.model_validate(story)
 
 

@@ -353,7 +353,8 @@ async def test_story_backlinks_zero_result_still_carries_collection_scope():
             body = resp.json()
             assert body["data"] == []
             scope = body["meta"]["collection_scope"]
-            assert scope["source_types"] == ["chat_message", "doc"]
+            # story #2267(C-9): meeting·story가 창조-출처(relation='created_from') source로 추가됨.
+            assert scope["source_types"] == ["chat_message", "doc", "meeting", "story"]
             assert scope["forms"] == "all"
             assert "pr_sid_text_convention" in scope["excludes"]
             assert "evidence_free_text_reference" in scope["excludes"]

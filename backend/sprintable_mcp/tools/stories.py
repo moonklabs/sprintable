@@ -31,6 +31,11 @@ class AddStoryInput(SprintableInput):
     # P0-05 후속(doc scope-violation-signal-design §1 확定): 선언 주체 제한 없음 — 에이전트
     # 자기신고 착수시점 파일-경로 글롭 선언(예: ["backend/app/routers/stories.py", "backend/tests/**"]).
     declared_scope_paths: list[str] | None = None
+    # story #2267(C-9): 이 스토리가 무엇에서 만들어졌는지(출처) — 선택. 이 대화(chat_message)
+    # 에서 나왔다면 그 메시지 id를 origin_type="chat_message"·origin_id로 넘긴다. 둘 다
+    # 지정해야 유효 — 하나만 있으면 무시된다(app/schemas/story.py StoryCreate와 동형).
+    origin_type: str | None = None
+    origin_id: str | None = None
 
 
 class UpdateStoryInput(SprintableInput):
@@ -118,6 +123,9 @@ async def add_story(args: AddStoryInput) -> list[TextContent]:
             body["acceptance_criteria"] = args.acceptance_criteria
         if args.declared_scope_paths is not None:
             body["declared_scope_paths"] = args.declared_scope_paths
+        if args.origin_type and args.origin_id:
+            body["origin_type"] = args.origin_type
+            body["origin_id"] = args.origin_id
         return ok(await client.post("/api/v2/stories", json=body))
     except Exception as exc:
         return err(str(exc))

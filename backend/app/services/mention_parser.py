@@ -514,9 +514,12 @@ async def reconcile_entity_references(
             for target_type, target_id, form in new_refs
         ])
         stmt = stmt.on_conflict_do_nothing(
+            # story #2267(C-9): relation이 유니크 인덱스에 추가돼 이 목록도 같이 늘어야
+            # 매치한다 — 이 write-path(멘션 추출)는 relation을 안 채우므로(위 dict 참조)
+            # 컬럼 기본값 'none'이 그대로 적용된다(창조-출처는 이 파서가 다루는 개념이 아니다).
             index_elements=[
                 Reference.source_type, Reference.source_field, Reference.source_id,
-                Reference.target_type, Reference.target_id, Reference.form,
+                Reference.target_type, Reference.target_id, Reference.form, Reference.relation,
             ],
             index_where=Reference.form != "proof",
         )

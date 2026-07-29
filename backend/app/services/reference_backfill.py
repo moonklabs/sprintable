@@ -57,10 +57,14 @@ async def backfill_mentions_to_references(session: AsyncSession, *, org_id: uuid
     # 부분 유니크 인덱스라 이름(constraint=)이 아니라 인덱스가 실제로 잡는 컬럼식으로
     # 타겟팅한다(Postgres ON CONFLICT ON CONSTRAINT는 바닥이 CONSTRAINT여야 하고, 이건 바닥이
     # 순수 INDEX다 — index_elements + index_where로 그 인덱스를 정확히 가리킨다).
+    # ⛔story #2267(C-9): relation이 인덱스에 추가돼 이 목록도 같이 늘어야 한다 — 안 늘리면
+    # "그 인덱스와 매치하는 제약이 없다"로 매 실행이 즉시 에러(로컬 disposable PG로 실측
+    # 확認, 2026-07-29). 백필 행은 relation을 안 채우므로(위 .values() 참조) 컬럼 기본값
+    # 'none'이 그대로 적용된다 — "본문 참조"(㉠㉢류 창조-출처 아님)라는 사실 그대로다.
     insert_stmt = insert_stmt.on_conflict_do_nothing(
         index_elements=[
             Reference.source_type, Reference.source_field, Reference.source_id,
-            Reference.target_type, Reference.target_id, Reference.form,
+            Reference.target_type, Reference.target_id, Reference.form, Reference.relation,
         ],
         index_where=Reference.form != "proof",
     )

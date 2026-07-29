@@ -23,7 +23,7 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.reference import FORMS, Reference
+from app.models.reference import FORMS, NO_RELATION, RELATIONS, Reference
 from app.services.reference_registry import (
     ENTITY_RESOLVERS,
     TARGET_ONLY_RESOLVERS,
@@ -48,6 +48,10 @@ class ResolvedReference:
     target_type: str
     target_id: uuid.UUID
     form: str
+    # story #2267(C-9): 'none'(본문 참조, 기존 전부) 또는 'created_from'(target이 이 source
+    # 에서 만들어졌다 — "출처"). NOT NULL sentinel — form/source_field와 다른 축
+    # (app/models/reference.py 참조).
+    relation: str
     created_at: object
     # PO (b) — 읽는 시점 판정. **direction 에 따라 무엇을 가리키는지 달라진다** —
     # outgoing 이면 target 의 존재, incoming 이면 source 의 존재("반대편"이 항상 이 값의
@@ -75,9 +79,12 @@ async def insert_reference(
     form: str,
     created_by: uuid.UUID | None,
     proof_payload: dict | None = None,
+    relation: str = NO_RELATION,
 ) -> Reference:
     if form not in FORMS:
         raise ValueError(f"form must be one of {sorted(FORMS)}, got {form!r}")
+    if relation not in RELATIONS:
+        raise ValueError(f"relation must be one of {sorted(RELATIONS)}, got {relation!r}")
     # ⛔source/target은 다른 기준 — source는 SOURCE_ONLY_TYPES(예: chat_message, 채팅
     # write-path의 정당한 source지만 완전지원 엔티티는 아니다)도 허용하지만 target은
     # ENTITY_RESOLVERS(완전지원) 또는 TARGET_ONLY_TYPES(target 전용, 예: chat_message가
@@ -91,7 +98,7 @@ async def insert_reference(
     ref = Reference(
         id=uuid.uuid4(), org_id=org_id, source_type=source_type, source_field=source_field,
         source_id=source_id, target_type=target_type, target_id=target_id, form=form,
-        proof_payload=proof_payload, created_by=created_by,
+        proof_payload=proof_payload, created_by=created_by, relation=relation,
     )
     session.add(ref)
     return ref
@@ -171,7 +178,7 @@ async def list_references(
             ResolvedReference(
                 id=r.id, source_type=r.source_type, source_field=r.source_field,
                 source_id=r.source_id, target_type=r.target_type, target_id=r.target_id,
-                form=r.form, created_at=r.created_at, still_exists=still_exists,
+                form=r.form, relation=r.relation, created_at=r.created_at, still_exists=still_exists,
                 proof_payload=r.proof_payload,
             )
         )
