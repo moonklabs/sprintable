@@ -177,6 +177,11 @@ ENTITY_RESOLVERS: dict[str, EntityExistsResolver] = {
 # 참조. 지금은 빈 집합이다 — chat_message가 유일한 멤버였으나 story #2263(C-7, 2026-07-29)
 # 이 처음으로 target 존재판정(`_resolve_chat_messages`)을 등록해 ENTITY_RESOLVERS로 옮겼다
 # (proof form이 대화 메시지를 인용하며 그 메시지가 사라졌는지도 판정할 수 있어야 하므로).
+#
+# ⛔현재 비어 있다(2026-07-29 · chat_message를 ENTITY_RESOLVERS로 이관하면서 소진).
+# ⇒ 지우지 않는다 — «target이 될 수 없고 source만 되는» 타입이 생기면 여기 든다.
+# ⇒ 그때까지 `is_valid_source_type`의 둘째 항(`entity_type in SOURCE_ONLY_TYPES`)은
+#   항상 False다 — 다른 답을 낼 수 있는 입력이 없는 채로 실행되는 자리(㉢, 오늘 규율).
 SOURCE_ONLY_TYPES: frozenset[str] = frozenset()
 
 
