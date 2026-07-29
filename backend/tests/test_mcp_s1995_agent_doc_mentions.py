@@ -84,14 +84,6 @@ def test_send_chat_input_rejects_invalid_mention_type():
         SendChatInput(thread_id="conv-1", content="hi", mentions=[{"type": "goal", "id": "t-1"}])
 
 
-def test_mention_ref_rejects_evidence_type_intentional_gap():
-    """`evidence`는 백엔드 ENTITY_RESOLVERS엔 있지만(#2294 B단계) MCP mentions Literal엔
-    없다 — GET /api/v2/evidence/{id} 단건조회 라우트가 없어서다(의도적 gap,
-    `_MENTION_ENDPOINT_KNOWN_GAP` 참조). 그 gap이 스키마 레벨에서 실제로 거부로 이어지는지."""
-    with pytest.raises(ValidationError):
-        MentionRef(type="evidence", id="ev-1")
-
-
 def test_mention_ref_accepts_doc_type():
     m = MentionRef(type="doc", id="d-1", title="My Doc")
     assert m.type == "doc"
@@ -127,26 +119,25 @@ def test_mention_ref_accepts_hypothesis_type():
     assert m.type == "hypothesis"
 
 
-# story #2294 B단계(2026-07-29): evidence는 백엔드 registry에 있지만 GET /{id} 단건조회
-# 라우트가 없어(list만 있음) MCP mentions에서 의도적으로 뺀다 — 조용히 빠진 것과 일부러
-# 뺀 것은 처방이 다르므로 이유를 명시 등재한다(infra/mcp-path-contract-allowlist.yml의
-# "알고 있다"는 선언 관례와 동형).
-_MENTION_ENDPOINT_KNOWN_GAP: frozenset[str] = frozenset({"evidence"})
+def test_mention_ref_accepts_evidence_type():
+    """story #2314(2026-07-29): GET /api/v2/evidence/{id} 단건조회가 신설돼 evidence도
+    다른 6종과 동형으로 열렸다 — 예전엔 `_MENTION_ENDPOINT_KNOWN_GAP`으로 의도적 제외였으나
+    그 근거(단건조회 라우트 부재)가 사라져 이 gap을 걷는다."""
+    m = MentionRef(type="evidence", id="ev-1", title="My Evidence")
+    assert m.type == "evidence"
 
 
 def test_mention_entity_endpoints_match_backend_entity_resolvers():
     """`_MENTION_ENTITY_ENDPOINTS`(MCP 쪽 type→GET endpoint 매핑)가 백엔드
     `reference_registry.ENTITY_RESOLVERS`(존재판정 registry, #2259/#2266/#2283이 계속 SSOT로
-    써 온 것)와 같은 타입 집합인지 고정(알려진 gap `_MENTION_ENDPOINT_KNOWN_GAP` 제외) —
-    한쪽만 늘면(예: 백엔드에 새 target_type 등록, MCP mentions는 안 넓힘) agent 경로만
-    뒤처지는 형제 비대칭이 조용히 생긴다. ⛔story #2294에서 이 테스트가 실제로 RED였다
-    (task가 백엔드에만 열리고 여기 안 넓혀진 채 develop에 머지됨 — merge-order 드리프트)."""
+    써 온 것)와 같은 타입 집합인지 고정 — 한쪽만 늘면(예: 백엔드에 새 target_type 등록, MCP
+    mentions는 안 넓힘) agent 경로만 뒤처지는 형제 비대칭이 조용히 생긴다. ⛔story #2294에서
+    이 테스트가 실제로 RED였다(task가 백엔드에만 열리고 여기 안 넓혀진 채 develop에 머지됨
+    — merge-order 드리프트). story #2314(2026-07-29): evidence도 완전히 합류해 이제 gap
+    없이 순수 등식이다(예전엔 `_MENTION_ENDPOINT_KNOWN_GAP`으로 evidence 하나를 뺐었다)."""
     from app.services.reference_registry import ENTITY_RESOLVERS
 
-    assert set(chat_mod._MENTION_ENTITY_ENDPOINTS) == set(ENTITY_RESOLVERS) - _MENTION_ENDPOINT_KNOWN_GAP
-    # gap 자체가 정말 gap인지도 고정 — evidence가 실수로 뚫려도(둘 다에 존재) 이 assert가 잡는다.
-    assert _MENTION_ENDPOINT_KNOWN_GAP <= set(ENTITY_RESOLVERS)
-    assert _MENTION_ENDPOINT_KNOWN_GAP.isdisjoint(chat_mod._MENTION_ENTITY_ENDPOINTS)
+    assert set(chat_mod._MENTION_ENTITY_ENDPOINTS) == set(ENTITY_RESOLVERS)
 
 
 def test_mention_ref_literal_matches_mention_entity_endpoints_directly():
@@ -168,24 +159,22 @@ def test_mention_ref_literal_matches_mention_entity_endpoints_directly():
 def test_mention_ref_literal_matches_backend_entity_resolvers_directly():
     """⭐PO 재지적(2026-07-29, 같은 메시지 후속): 바로 위 테스트(Literal↔dict)와
     `test_mention_entity_endpoints_match_backend_entity_resolvers`(dict↔registry)가
-    각각 통과해도 그건 dict를 매개로 한 «간접» 등식일 뿐 — Literal을 registry(8종)와
-    직접 비교하는 자리는 없었다. 두 테스트가 «우연히 같은 7종 집합」을 두 번 잰 것일
+    각각 통과해도 그건 dict를 매개로 한 «간접» 등식일 뿐 — Literal을 registry와
+    직접 비교하는 자리는 없었다. 두 테스트가 «우연히 같은 집합」을 두 번 잰 것일
     가능성을 배제 못 한다(예: 나중에 dict↔registry 테스트가 리팩터로 사라지면 이
-    등식이 조용히 깨질 수 있는 자리). registry를 매개 없이 직접 걸어 evidence 단
-    하나만 빠진 것인지 고정한다 — PO 표현 그대로 "evidence가 MCP 쪽에 «둘 다» 없는"
-    상태를 이 테스트 하나로 직접 증명."""
+    등식이 조용히 깨질 수 있는 자리). registry를 매개 없이 직접 걸어 고정한다.
+
+    story #2314(2026-07-29): evidence도 이제 Literal·registry 양쪽에 다 있다 — 예전엔
+    "evidence가 MCP 쪽에 «둘 다» 없는" 상태를 증명하던 자리였으나, GET /{id} 신설로
+    그 gap이 닫혀 이제는 순수 완전-일치 증명이다."""
     import typing
 
     from app.services.reference_registry import ENTITY_RESOLVERS
 
     literal_type = typing.get_type_hints(MentionRef)["type"]
     literal_values = set(typing.get_args(literal_type))
-    assert literal_values == set(ENTITY_RESOLVERS) - _MENTION_ENDPOINT_KNOWN_GAP
-    # ⭐PO 지적(2026-07-29): "없다"만 고정하면 다음 사람이 "빠뜨린 건가"를 다시 세게 된다 —
-    # WHY: evidence는 GET /api/v2/evidence/{id}(단건조회) 라우트 자체가 없어(work_item_id로
-    # 거르는 list만 존재) MCP가 title을 auto-fetch할 방법이 없다 — 그래서 Literal에 못 올린다.
-    # 단건 GET이 생기면 여기와 `_MENTION_ENTITY_ENDPOINTS`(chat.py)를 같이 늘린다.
-    assert "evidence" not in literal_values
+    assert literal_values == set(ENTITY_RESOLVERS)
+    assert "evidence" in literal_values
     assert "evidence" in set(ENTITY_RESOLVERS)
 
 
