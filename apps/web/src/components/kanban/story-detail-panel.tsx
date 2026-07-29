@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { useTranslations } from 'next-intl';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeSanitize from 'rehype-sanitize';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { AlertTriangle, ArrowLeftRight, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
 import { normalizeAssigneePatch } from './types';
@@ -14,6 +14,7 @@ import { imageFilesFromClipboard } from '@/lib/clipboard-image';
 import { parseCursorMeta } from '@/lib/pagination';
 import { AttachmentImage } from '@/components/chat/attachment-image';
 import { AttachmentFile } from '@/components/chat/attachment-file';
+import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from '@/components/chat/reference-drop-notice';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
 import { DependencyGraph } from './dependency-graph';
@@ -95,6 +96,27 @@ function taskTone(status: string) {
 // BE _MAX_STORY_ATTACHMENTS 정합 (schemas/story.py)
 const STORY_ATTACHMENT_LIMIT = 10;
 
+// story #2269(C-11) AC0-2 보너스 발견: `entity:story:<uuid>` 새 형식 링크의 href가 두 겹
+// 필터에 막혀 있었다(EntityChip 경로가 chat-bubble.tsx 전용이던 이유 — description/AC
+// 뷰어엔 안 뚫려 있었다) —
+//   ①react-markdown 자체의 `urlTransform`(기본값 `defaultUrlTransform`)이 http/https 등
+//     "안전 프로토콜"이 아니면 href를 통째로 빈 문자열로 지운다(rehype 단계보다 먼저 작동).
+//   ②그걸 통과해도 rehype-sanitize의 defaultSchema가 protocols.href에 http/https/irc/ircs/
+//     mailto/xmpp만 허용해 다시 지운다.
+// 그래서 chat-bubble.tsx는 이미 `urlTransform` 오버라이드를 갖고 있었다(그쪽엔 ②가 아예
+// 없다 — 이 컴포넌트는 rehypeSanitize를 쓰는 게 다른 점) — 이 컴포넌트는 둘 다 뚫어야 한다.
+// `descriptionSanitizeSchema`는 ②를 위한 것이고, 아래 `DescriptionViewer`의 `urlTransform` prop이
+// ①을 위한 것 — 두 겹 다 `entity:` 하나만 추가로 열고 그 외(특히 javascript:/data:)는
+// 원래 막던 대로 둔다(뮤테이션 자가검증: description-viewer.test.tsx의 "javascript:/data:
+// href는 여전히 막힌다" 테스트가 그 증거).
+const descriptionSanitizeSchema = {
+  ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), 'entity'],
+  },
+};
+
 // story #2021 후속(PO 리뷰): components 객체를 렌더 함수 안에서 인라인으로 만들면 매 렌더
 // 새 함수 참조가 되어 react-markdown이 서브트리를 리마운트한다(chat-bubble 근본원인과 동형).
 // 이 패널은 댓글/액티비티 폴링·낙관 업데이트로 자주 리렌더되는 화면이라 위험이 실재한다.
@@ -131,15 +153,60 @@ const descriptionViewerComponents = {
   hr: () => <hr className="my-2 border-border" />,
 };
 
+// story #2269(C-11) AC0 — chat-bubble.tsx의 isGhostReference와 동형(레지스트리 분리 이유는
+// ChatMessage['references']와 shape은 같지만 출처가 다른 엔드포인트라 별개 타입으로 둔다).
+export interface OutgoingReference {
+  target_type: string;
+  target_id: string;
+}
+
+function isGhostOutgoingReference(
+  references: OutgoingReference[] | undefined,
+  targetType: string,
+  targetId: string,
+): boolean {
+  if (references === undefined) return false;
+  const type = targetType.toLowerCase();
+  const id = targetId.toLowerCase();
+  return !references.some((r) => r.target_type.toLowerCase() === type && r.target_id.toLowerCase() === id);
+}
+
 // export: 회귀 테스트(부모 클릭=편집모드 진입 wrapper 안에서 링크 클릭이 전파를 끊는지)를
 // StoryDetailPanel 전체 마운트 없이 격리 검증하기 위함(story-detail-panel.tsx는 huge prop
 // surface라 전체 마운트 테스트가 비실용적) — 동작 변경 없는 순수 export 추가.
-export function DescriptionViewer({ description }: { description: string }) {
+//
+// story #2269(C-11) AC0: `references`는 GET /api/stories/{id}/references?direction=outgoing
+// 응답(이 story의 outgoing 참조 전체) — undefined면 유령 판정을 보류한다(#2622와 동일 폴백
+// 원칙). entity: 링크 렌더는 `a` 오버라이드 하나만 `references`에 의존하므로 그 함수만
+// useMemo로 새로 만들고 나머지(descriptionViewerComponents)는 그대로 재사용해 리마운트
+// 표면을 최소화한다.
+export function DescriptionViewer({ description, references }: { description: string; references?: OutgoingReference[] }) {
+  const components = useMemo(() => ({
+    ...descriptionViewerComponents,
+    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+      // id는 UUID만 허용 — chat-bubble.tsx의 entity: 파싱 규칙과 동일.
+      const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+      // ⛔asset은 reference_registry.ENTITY_RESOLVERS 밖의 FE 전용 타입(mention_parser.py
+      // 주석 참조) — chat-bubble.tsx와 동일하게 일반 EntityChip 경로를 안 태운다.
+      if (m && m[1]!.toLowerCase() !== 'asset') {
+        const ghost = isGhostOutgoingReference(references, m[1]!, m[2]!);
+        return (
+          // 긴급 정정(2026-07-28) 재발 방지 — 부모 div의 편집모드 진입 onClick으로 버블링 금지.
+          <span onClick={(e) => e.stopPropagation()}>
+            <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} ghost={ghost} />
+          </span>
+        );
+      }
+      return descriptionViewerComponents.a({ href, children });
+    },
+  }), [references]);
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeSanitize]}
-      components={descriptionViewerComponents}
+      rehypePlugins={[[rehypeSanitize, descriptionSanitizeSchema]]}
+      urlTransform={(url) => (url.startsWith('entity:') ? url : defaultUrlTransform(url))}
+      components={components}
     >
       {description}
     </ReactMarkdown>
@@ -275,6 +342,32 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       })
       .catch(() => {})
       .finally(() => setLoadingLabels(false));
+  }, [story.id]);
+
+  // story #2269(C-11) AC0-2 축B — description/AC 본문의 entity: 링크 유령 판정용 outgoing
+  // 참조 목록. ChatProofSection과 같은 엔드포인트(GET /{id}/references?direction=outgoing)를
+  // 재사용한다(전용 라우트 신설 0). 실패·미로드 시 undefined 유지 — #2622와 동일하게 판단
+  // 재료가 없으면 유령 판정을 보류한다(false-ghost보다 미판정이 안전).
+  const [outgoingRefs, setOutgoingRefs] = useState<OutgoingReference[] | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    setOutgoingRefs(undefined);
+    fetch(`/api/stories/${story.id}/references?direction=outgoing`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: { data?: unknown } | null) => {
+        if (cancelled || !json) return;
+        const rows = Array.isArray(json.data) ? json.data : [];
+        setOutgoingRefs(
+          rows
+            .filter((r): r is { target_type: string; target_id: string } =>
+              typeof (r as { target_type?: unknown })?.target_type === 'string'
+              && typeof (r as { target_id?: unknown })?.target_id === 'string')
+            .map((r) => ({ target_type: r.target_type, target_id: r.target_id })),
+        );
+      })
+      .catch(() => { /* undefined 유지 — 유령 판정 보류 */ });
+    return () => { cancelled = true; };
   }, [story.id]);
 
   const handleAttachLabel = async (labelId: string) => {
@@ -1142,7 +1235,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 // ⛔이 div에 onClick을 다시 붙이지 않는다 — 편집 진입은 «수정 버튼»으로만.
                 // 본문 안의 링크·멘션·체크박스가 자기 일을 해야 하기 때문이다.
                 <div className="mt-2">
-                  <DescriptionViewer description={story.description} />
+                  <DescriptionViewer description={story.description} references={outgoingRefs} />
                 </div>
               ) : (
                 <button
@@ -1194,7 +1287,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 // ⛔이 div에 onClick을 다시 붙이지 않는다 — 본문 안의 링크·멘션·체크박스가
                 // 자기 일을 해야 하기 때문이다.
                 <div className="mt-2">
-                  <DescriptionViewer description={story.acceptance_criteria} />
+                  <DescriptionViewer description={story.acceptance_criteria} references={outgoingRefs} />
                 </div>
               ) : (
                 <button
