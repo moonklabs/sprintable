@@ -136,3 +136,55 @@ describe('ChatBubble 문서 임베드 미리보기 모달 — 폴링 유발 리�
     expect(document.body.querySelector('button[aria-label="닫기"]')).not.toBeNull();
   });
 });
+
+describe('ChatBubble — story #2265(C-7) 인용 범위 선택 배선(props 생략 시 회귀 0)', () => {
+  it('isCiteAnchor·isCiteInRange·citeAction을 전부 생략하면 좌측 표시가 안 생긴다(기존 호출부 무변경)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={baseMessage} isMine={false} />));
+    });
+    const wrapperDiv = container.querySelector(`#msg-${baseMessage.id}`);
+    expect(wrapperDiv?.className).not.toContain('border-l-primary');
+  });
+
+  it('isCiteAnchor가 true면 좌측 3px 표시 클래스가 붙는다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={baseMessage} isMine={false} isCiteAnchor />));
+    });
+    const wrapperDiv = container.querySelector(`#msg-${baseMessage.id}`);
+    expect(wrapperDiv?.className).toContain('border-l-primary');
+  });
+
+  it('isCiteInRange가 true면 좌측 3px 표시 클래스가 붙는다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={baseMessage} isMine={false} isCiteInRange />));
+    });
+    const wrapperDiv = container.querySelector(`#msg-${baseMessage.id}`);
+    expect(wrapperDiv?.className).toContain('border-l-primary');
+  });
+
+  it('citeAction을 생략하면(호출부가 아직 안 넘긴 상태) 우클릭 메뉴에 인용 항목이 안 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={baseMessage} isMine={false} />));
+    });
+    const wrapperDiv = container.querySelector(`#msg-${baseMessage.id}`)!;
+    await act(async () => {
+      wrapperDiv.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect(container.textContent).not.toContain('인용');
+    expect(document.body.textContent).not.toContain('인용');
+  });
+
+  it('citeAction을 넘기면 우클릭 메뉴에 그 kind에 맞는 인용 항목이 뜬다', async () => {
+    const onSelect = () => {};
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble message={baseMessage} isMine={false} citeAction={{ kind: 'start', onSelect }} />,
+      ));
+    });
+    const wrapperDiv = container.querySelector(`#msg-${baseMessage.id}`)!;
+    await act(async () => {
+      wrapperDiv.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect(document.body.textContent).toContain('여기부터 인용');
+  });
+});

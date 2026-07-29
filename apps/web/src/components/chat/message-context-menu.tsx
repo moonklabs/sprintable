@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { MessageSquareReply, Copy, Trash2, Quote } from 'lucide-react';
 
-interface CiteAction {
+export interface CiteAction {
   /** story #2265(C-7) PR2 — 아직 선택 중이 아니면 "start"(여기부터), 이미 다른 메시지가
    * anchor로 찍힌 중이면 "end"(여기까지). 라벨/판단은 호출부(use-message-range-selection
    * 소비부)가 정하고, 이 메뉴는 그 결정을 그대로 그린다. */
