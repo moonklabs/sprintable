@@ -109,13 +109,51 @@ const STORY_ATTACHMENT_LIMIT = 10;
 // ①을 위한 것 — 두 겹 다 `entity:` 하나만 추가로 열고 그 외(특히 javascript:/data:)는
 // 원래 막던 대로 둔다(뮤테이션 자가검증: description-viewer.test.tsx의 "javascript:/data:
 // href는 여전히 막힌다" 테스트가 그 증거).
+// story #2269(C-11) AC0-2 축B(2026-07-29, PO 지적) — `bare-number:` 도 같은 두 겹 필터를
+// 통과해야 한다(entity:와 동일 이유). `#<번호>`를 render-time에 `[#번호](bare-number:번호)`
+// 로 치환(`prepareBareNumberRefs`)해 이 스킴으로 태우므로 여기서도 열어야 한다.
 const descriptionSanitizeSchema = {
   ...defaultSchema,
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), 'entity'],
+    href: [...(defaultSchema.protocols?.href ?? []), 'entity', 'bare-number'],
   },
 };
+
+// story #2269(C-11) AC0-3 세는 정의(backend `mention_parser._BARE_STORY_NUMBER_RE`/
+// `_redact_code_spans`와 1:1 대응 — 정의가 두 곳에 따로 있으면 그 자체가 드리프트 위험이라
+// 정규식을 문자 그대로 포트했다). word-boundary로 `##`·`foo#123` 오탐 배제, 코드블록/인라인
+// 코드 안은 참조 아님으로 제외.
+const BARE_STORY_NUMBER_RE = /(?<![\w#])#(\d+)\b/g;
+const FENCED_CODE_BLOCK_RE = /```[\s\S]*?```/g;
+const INLINE_CODE_SPAN_RE = /`[^`\n]*`/g;
+
+function redactCodeSpans(content: string): string {
+  const blank = (m: string) => ' '.repeat(m.length);
+  return content.replace(FENCED_CODE_BLOCK_RE, blank).replace(INLINE_CODE_SPAN_RE, blank);
+}
+
+// story #2269(C-11) AC0-2 축B — chat-bubble.tsx의 `prepareMentions()`(@name → [@name]
+// (mention:name))와 동형. `#2258` 을 `[#2258](bare-number:2258)` 마크다운 링크 문법으로
+// 바꿔 기존 `a` 오버라이드 경로에 태운다. ⛔치환은 redact된 사본에서 위치만 찾고, 실제
+// 삽입은 **원문**에 대해 한다(redact가 길이를 보존하므로 위치가 그대로 대응) — 코드블록
+// 안의 원문 백틱 등을 훼손하지 않기 위함.
+function prepareBareNumberRefs(content: string): string {
+  const redacted = redactCodeSpans(content);
+  let result = '';
+  let lastIndex = 0;
+  BARE_STORY_NUMBER_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = BARE_STORY_NUMBER_RE.exec(redacted)) !== null) {
+    const start = m.index;
+    const end = start + m[0].length;
+    result += content.slice(lastIndex, start);
+    result += `[#${m[1]}](bare-number:${m[1]})`;
+    lastIndex = end;
+  }
+  result += content.slice(lastIndex);
+  return result;
+}
 
 // story #2021 후속(PO 리뷰): components 객체를 렌더 함수 안에서 인라인으로 만들면 매 렌더
 // 새 함수 참조가 되어 react-markdown이 서브트리를 리마운트한다(chat-bubble 근본원인과 동형).
@@ -177,13 +215,42 @@ function isGhostOutgoingReference(
 //
 // story #2269(C-11) AC0: `references`는 GET /api/stories/{id}/references?direction=outgoing
 // 응답(이 story의 outgoing 참조 전체) — undefined면 유령 판정을 보류한다(#2622와 동일 폴백
-// 원칙). entity: 링크 렌더는 `a` 오버라이드 하나만 `references`에 의존하므로 그 함수만
-// useMemo로 새로 만들고 나머지(descriptionViewerComponents)는 그대로 재사용해 리마운트
-// 표면을 최소화한다.
-export function DescriptionViewer({ description, references }: { description: string; references?: OutgoingReference[] }) {
+// 원칙). `bareNumberTargets`는 같은 응답의 형제 필드(번호→story_id, AC0-2 축B) — undefined면
+// `#<번호>` 치환 자체를 보류한다(축A 결과 없이 렌더하면 전부 거짓 유령이 된다). entity:/
+// bare-number: 링크 렌더는 `a` 오버라이드 하나만 이 값들에 의존하므로 그 함수만 useMemo로
+// 새로 만들고 나머지(descriptionViewerComponents)는 그대로 재사용해 리마운트 표면을 최소화.
+export function DescriptionViewer({
+  description, references, bareNumberTargets,
+}: {
+  description: string;
+  references?: OutgoingReference[];
+  bareNumberTargets?: Record<string, string>;
+}) {
   const components = useMemo(() => ({
     ...descriptionViewerComponents,
     a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+      // story #2269(C-11) AC0-2 축B — `prepareBareNumberRefs`가 만든 `bare-number:<번호>`
+      // 토큰. `bareNumberTargets`에 매칭되면 정상 칩(entityId=uuid), 없으면(미해소·미로드
+      // 둘 다) **유령 칩**으로 그린다 — entityId 없이 ghost=true(EntityChip의 ghost 분기는
+      // entityId를 아예 안 쓴다). ⛔"삭제됨"이 아니라 "대상이 없습니다"(EntityChip 기존
+      // 문구, 시제 중립) 그대로 재사용 — PO 우려(「삭제됨」처럼 보이면 거짓)를 위해 새 문구를
+      // 발명하지 않고 기존 문구가 이미 시제 중립임을 그대로 쓴다(문구 변경 0).
+      const bareMatch = href?.match(/^bare-number:(\d+)$/);
+      if (bareMatch) {
+        const number = bareMatch[1]!;
+        const targetId = bareNumberTargets?.[number];
+        return (
+          <span onClick={(e) => e.stopPropagation()}>
+            <EntityChip
+              entityType="story"
+              entityId={targetId}
+              label={`#${number}`}
+              href={targetId ? getEntityHref('story', targetId) : null}
+              ghost={!targetId}
+            />
+          </span>
+        );
+      }
       // id는 UUID만 허용 — chat-bubble.tsx의 entity: 파싱 규칙과 동일.
       const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
       // ⛔asset은 reference_registry.ENTITY_RESOLVERS 밖의 FE 전용 타입(mention_parser.py
@@ -199,16 +266,20 @@ export function DescriptionViewer({ description, references }: { description: st
       }
       return descriptionViewerComponents.a({ href, children });
     },
-  }), [references]);
+  }), [references, bareNumberTargets]);
+
+  // bareNumberTargets가 아직 없으면(미로드) 치환을 보류 — #<번호>는 그대로 평문(#2622와
+  // 동일 폴백 원칙, 미판정을 유령으로 지어내지 않는다).
+  const prepared = bareNumberTargets !== undefined ? prepareBareNumberRefs(description) : description;
 
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[[rehypeSanitize, descriptionSanitizeSchema]]}
-      urlTransform={(url) => (url.startsWith('entity:') ? url : defaultUrlTransform(url))}
+      urlTransform={(url) => (url.startsWith('entity:') || url.startsWith('bare-number:') ? url : defaultUrlTransform(url))}
       components={components}
     >
-      {description}
+      {prepared}
     </ReactMarkdown>
   );
 }
@@ -344,18 +415,24 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       .finally(() => setLoadingLabels(false));
   }, [story.id]);
 
-  // story #2269(C-11) AC0-2 축B — description/AC 본문의 entity: 링크 유령 판정용 outgoing
-  // 참조 목록. ChatProofSection과 같은 엔드포인트(GET /{id}/references?direction=outgoing)를
-  // 재사용한다(전용 라우트 신설 0). 실패·미로드 시 undefined 유지 — #2622와 동일하게 판단
-  // 재료가 없으면 유령 판정을 보류한다(false-ghost보다 미판정이 안전).
+  // description/AC 본문의 entity: 링크 유령 판정용 outgoing 참조 목록. ChatProofSection과
+  // 같은 엔드포인트(GET /{id}/references?direction=outgoing)를 재사용한다(전용 라우트
+  // 신설 0). 실패·미로드 시 undefined 유지 — #2622와 동일하게 판단 재료가 없으면 유령
+  // 판정을 보류한다(false-ghost보다 미판정이 안전).
   const [outgoingRefs, setOutgoingRefs] = useState<OutgoingReference[] | undefined>(undefined);
+  // story #2269(C-11) AC0-2 축B(2026-07-29, PO 지적) — 「#<번호>」 관찰 수집(축A, #2643)만
+  // 해서는 화면에 아무것도 안 뜬다. 같은 응답의 형제 필드 `bare_number_targets`(번호→story_id)
+  // 를 받아 DescriptionViewer의 render-time 치환에 넘긴다. undefined면 치환 자체를 보류(축A
+  // 미로드와 동형 폴백 — 안 뜨는 게 거짓 렌더보다 안전).
+  const [bareNumberTargets, setBareNumberTargets] = useState<Record<string, string> | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
     setOutgoingRefs(undefined);
+    setBareNumberTargets(undefined);
     fetch(`/api/stories/${story.id}/references?direction=outgoing`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((json: { data?: unknown } | null) => {
+      .then((json: { data?: unknown; bare_number_targets?: unknown } | null) => {
         if (cancelled || !json) return;
         const rows = Array.isArray(json.data) ? json.data : [];
         setOutgoingRefs(
@@ -365,8 +442,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               && typeof (r as { target_id?: unknown })?.target_id === 'string')
             .map((r) => ({ target_type: r.target_type, target_id: r.target_id })),
         );
+        if (json.bare_number_targets && typeof json.bare_number_targets === 'object') {
+          setBareNumberTargets(json.bare_number_targets as Record<string, string>);
+        }
       })
-      .catch(() => { /* undefined 유지 — 유령 판정 보류 */ });
+      .catch(() => { /* undefined 유지 — 유령/치환 판정 보류 */ });
     return () => { cancelled = true; };
   }, [story.id]);
 
@@ -1235,7 +1315,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 // ⛔이 div에 onClick을 다시 붙이지 않는다 — 편집 진입은 «수정 버튼»으로만.
                 // 본문 안의 링크·멘션·체크박스가 자기 일을 해야 하기 때문이다.
                 <div className="mt-2">
-                  <DescriptionViewer description={story.description} references={outgoingRefs} />
+                  <DescriptionViewer description={story.description} references={outgoingRefs} bareNumberTargets={bareNumberTargets} />
                 </div>
               ) : (
                 <button
@@ -1287,7 +1367,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 // ⛔이 div에 onClick을 다시 붙이지 않는다 — 본문 안의 링크·멘션·체크박스가
                 // 자기 일을 해야 하기 때문이다.
                 <div className="mt-2">
-                  <DescriptionViewer description={story.acceptance_criteria} references={outgoingRefs} />
+                  <DescriptionViewer description={story.acceptance_criteria} references={outgoingRefs} bareNumberTargets={bareNumberTargets} />
                 </div>
               ) : (
                 <button
