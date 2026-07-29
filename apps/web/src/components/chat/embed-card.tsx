@@ -7,19 +7,23 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   ExternalLink, X, FileText, File, Layers, CheckSquare, Eye,
-  Calendar, Image, FlaskConical, Paperclip, type LucideIcon,
+  Calendar, Image, FlaskConical, Paperclip, MessageSquareQuote, type LucideIcon,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { docViewUrl } from '@/components/docs/lib/doc-project-url';
 import { initials } from '@/lib/storage/format';
 
-// story #2302 — 이 8종은 BE reference_registry.py ENTITY_RESOLVERS 와 키 집합이 같아야 한다
-// (AC2·AC5, entity-icons.registry-parity.test.ts 가 코드스캔으로 대조). `asset`은 registry
+// story #2302 — 이 타입들은 BE reference_registry.py ENTITY_RESOLVERS 와 키 집합이 같아야
+// 한다(AC2·AC5, entity-icons.registry-parity.test.ts 가 코드스캔으로 대조). `asset`은 registry
 // 밖 FE 전용 타입(AC5 명시 예외) — 아이콘을 **일부러** 안 준다: asset은 이미지/PDF/영상 등
 // content-type이 제각각이라 타입 레벨 단일 아이콘이 의미가 없고(개별 파일 아이콘은
 // getFileIcon이 파일별로 처리), "아이콘 없으면 이름 글자로"가 AC4가 못박은 **기본값**이지
 // asset만의 예외 처리가 아니다 — 그래서 이 fallback은 `resolveEntityIcon()`이 모든 타입에
 // 공통 적용한다(Hash 캐치올을 버림 — 있지도 않은 아이콘을 그리는 거짓보다 글자가 정직하다).
+//
+// story #2263(C-7, 2026-07-29): chat_message가 BE ENTITY_RESOLVERS에 새로 등록됐다(proof
+// form이 대화 메시지를 인용하며 target이 됨) — parity 테스트가 그 즉시 이 파일에 걸렸다,
+// 정확히 의도한 대로(회귀 0건이 아니라 진짜 새 타입을 잡은 것).
 export const ENTITY_ICONS: Record<string, LucideIcon> = {
   story: FileText,
   doc: File,
@@ -29,6 +33,7 @@ export const ENTITY_ICONS: Record<string, LucideIcon> = {
   artifact: Image,
   hypothesis: FlaskConical,
   evidence: Paperclip,
+  chat_message: MessageSquareQuote,
 };
 
 /** ENTITY_ICONS에 없는 타입(지금은 asset뿐) → 아이콘 대신 이름 첫 글자(들). 예외 처리 아님(위 주석). */
@@ -58,6 +63,7 @@ const ENTITY_COLORS: Record<string, string> = {
   artifact: 'border-info/30 bg-info/8 text-foreground',
   hypothesis: 'border-border bg-muted/40 text-foreground',
   evidence: 'border-border bg-muted/40 text-foreground',
+  chat_message: 'border-border bg-muted/40 text-foreground',
   // S6: 스토리지 자산 토큰 — info 틴트(파일 아이콘은 content-type 의존이라 AssetEmbedCard 에서 getFileIcon 처리).
   asset: 'border-info/30 bg-info/8 text-foreground',
 };
@@ -89,6 +95,12 @@ export function getEntityHref(entityType: string, entityId: string): string | nu
     case 'artifact': return null; // 레코드마다 ②/③ — 위 함수 doc 참고.
     case 'hypothesis': return null; // ③ 고정 — 위 함수 doc 참고.
     case 'evidence': return null; // ② — resolved_story_id는 EntityPreviewModal이 fetch 후 판정(task와 동형).
+    // ③ 고정 — story #2263(C-7): chat_message를 가리키는 mention/embed 칩은 아직 아무도 안
+    // 만든다(proof의 실제 소비 UI는 이 범용 EntityChip/EmbedCard가 아니라 미르코의 전용
+    // ChatProofEmbed 컴포넌트, #2265 PR1a). 여기 키가 있어야 하는 이유는 BE registry
+    // parity뿐 — 실제 클릭 가능한 진입점이 생기면(바로 그 conversation으로 보내는 등) ②로
+    // 승격한다.
+    case 'chat_message': return null;
     default: return null;
   }
 }
