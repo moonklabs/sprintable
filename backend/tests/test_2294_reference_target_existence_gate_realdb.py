@@ -11,6 +11,14 @@ target_id의 «실재»는 한 번도 확認하지 않았다.
 `reference_core._batch_resolve_existence`(ENTITY_RESOLVERS 그 자체)를 재사용. 각 resolver가
 `WHERE org_id == org_id`로 스코프하므로 실재하지만 다른 org 소속인 UUID도 "없음"으로 걸린다
 (존재+org 소속을 한 번에 검증) — ㉠새는가(보안) 질문에 대한 답이 이것.
+
+⛔story #2316(같은 PR·같은 스레드, 까심 라이브 실측): 「대상이 없음」과는 다른 셋째 사유
+— `](entity:task:not-a-uuid)`처럼 모양은 맞는데 id가 UUID가 아닌 토큰은 `extract_chat_
+entity_mentions`가 애초에 못 뽑아 `candidate_ids`에도 못 들어간다(`count_phantom_task_
+mentions`가 이 케이스를 영원히 0건으로 보고하던 이유). `dropped` 사유를 셋으로 가른다:
+`unregistered_target_type`(타입 미등록)·`target_not_found`(대상 실재 안 함)·
+`malformed_token`(모양은 맞으나 파싱 실패) — 사람이 할 일이 다르므로("다른 종류로 걸어라"
+vs "다시 골라라" vs "고쳐 쳐라") 데이터 축으로 가른다(화면 문구는 여전히 종류 안 가림).
 """
 from __future__ import annotations
 
@@ -313,5 +321,90 @@ async def test_doc_reconcile_to_nonexistent_target_is_dropped():
                 select(Reference).where(Reference.target_id == fake_target_doc_id)
             )).scalars().all()
             assert rows == []
+    finally:
+        await engine.dispose()
+
+
+# ─── story #2316 — 셋째 사유: malformed_token(모양은 맞으나 id가 UUID 아님) ─────
+
+
+async def test_chat_mention_with_non_uuid_id_reports_malformed_token():
+    """까심 라이브 재현 — `](entity:task:...)` 모양은 있는데 id 부분이 UUID가 아니다.
+    strict 정규식(id 그룹이 UUID 형태 강제)이 매치 자체를 실패하므로 candidate_ids에도
+    못 들어간다 — 이 테스트가 그 케이스를 dropped 채널로 실제로 드러내는지 증명한다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            member_id, user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [member_id], member_id)
+
+        await _setup_app_human(app, Session, user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                f"/api/v2/conversations/{conv_id}/messages",
+                json={"content": "[망가진 토큰](entity:task:not-a-uuid)"},
+            )
+            assert resp.status_code == 201, resp.text
+            body = resp.json()
+            assert body["references"]["stored"] == 0, body["references"]
+            assert body["references"]["dropped"] == [
+                {"target_type": "task", "target_id": "not-a-uuid", "reason": "malformed_token"}
+            ], body["references"]
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_chat_mention_mixing_valid_and_malformed_tokens_reports_both_correctly():
+    """정상 토큰과 망가진 토큰이 한 메시지에 섞이면 — 정상은 저장되고 망가진 것만
+    dropped에 실린다(하나가 다른 하나를 가리지 않는다, 오르테가 «양방향 재기» 규율)."""
+    from app.main import app
+    from app.models.reference import Reference
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            member_id, user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [member_id], member_id)
+            story = await _make_story(s, org.id, project.id)
+            task = await _make_task(s, org.id, story.id)
+
+        await _setup_app_human(app, Session, user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                f"/api/v2/conversations/{conv_id}/messages",
+                json={
+                    "content": (
+                        f"[진짜 작업](entity:task:{task.id}) "
+                        "[망가진 토큰](entity:task:not-a-uuid)"
+                    ),
+                },
+            )
+            assert resp.status_code == 201, resp.text
+            body = resp.json()
+            assert body["references"]["stored"] == 1, body["references"]
+            assert body["references"]["dropped"] == [
+                {"target_type": "task", "target_id": "not-a-uuid", "reason": "malformed_token"}
+            ], body["references"]
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+
+        async with Session() as s:
+            rows = (await s.execute(
+                select(Reference).where(Reference.target_id == task.id)
+            )).scalars().all()
+            assert len(rows) == 1
     finally:
         await engine.dispose()

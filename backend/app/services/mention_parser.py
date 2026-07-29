@@ -121,6 +121,42 @@ def extract_chat_entity_mentions(content: str) -> list[tuple[str, uuid.UUID]]:
     return result
 
 
+# story #2316(2026-07-29, 까심 라이브 실측 — dev, 읽기 전용): id 부분이 UUID 모양이 아닌
+# 토큰(`](entity:task:not-a-uuid)`)은 `_CHAT_TOKEN_RE`의 id 그룹이 `_UUID_RE`를 강제하므로
+# 매치 자체가 실패한다 — `try/except ValueError`(위 106-109행)는 그래서 사실상 도달 불가
+# 코드다. 그 결과 `count_phantom_task_mentions`(AC6)가 이 케이스를 영원히 "0건"으로
+# 보고한다 — "탐지가 없다"가 아니라 "탐지된 게(위 shape_count 경고 로그) 도달하는 자리가
+# 없다"(PO 표현). id를 느슨하게(`[^)]*`) 잡는 별도 정규식으로 "모양은 맞는데 못 파싱한"
+# 토큰만 골라 caller(`insert_chat_mentions`)에 반환 — 그쪽이 `dropped`에
+# `reason="malformed_token"`으로 얹는다. 코어(`reconcile_entity_references`)에 안 넣는
+# 이유: 코어는 이미 파싱된 `extracted_refs`만 받는 계약이라(#2301) 애초에 추출조차 안 된
+# 토큰은 코어의 시야 밖 — #2301의 "얇은 변환" 원칙 위반이 아니라 코어가 볼 수 없는 축이다.
+_CHAT_TOKEN_SHAPE_RE = re.compile(
+    r"\[(?:[^\]\\]|\\.)*\]\(entity:(?P<type>[a-z]+):(?P<id>[^)]*)\)"
+)
+
+
+def find_malformed_chat_tokens(content: str) -> list[dict[str, str]]:
+    """모양(`](entity:<type>:...)`)은 맞지만 id가 UUID가 아니라 `extract_chat_entity_
+    mentions`가 애초에 못 뽑은 토큰을 찾는다. 순서 무관, 중복 제거(동일 (type, raw_id)
+    반복은 한 건으로)."""
+    if not content:
+        return []
+    strict_matches = {
+        (m.group("type"), m.group("id")) for m in _CHAT_TOKEN_RE.finditer(content)
+    }
+    seen: set[tuple[str, str]] = set()
+    malformed: list[dict[str, str]] = []
+    for m in _CHAT_TOKEN_SHAPE_RE.finditer(content):
+        entity_type, raw_id = m.group("type"), m.group("id")
+        key = (entity_type, raw_id)
+        if key in strict_matches or key in seen:
+            continue
+        seen.add(key)
+        malformed.append({"target_type": entity_type, "target_id": raw_id, "reason": "malformed_token"})
+    return malformed
+
+
 def extract_chat_doc_mention_ids(content: str) -> list[uuid.UUID]:
     """`extract_chat_entity_mentions`의 doc-only 하위집합(하위호환 편의 래퍼) — 순서 보존.
     ⛔새 호출부는 이 함수 대신 `extract_chat_entity_mentions`를 쓸 것(타입 필터링이 이미
@@ -446,7 +482,16 @@ async def insert_chat_mentions(
         source_id=message_id, extracted_refs=extracted_refs, created_by=created_by,
         target_types=target_types, known_new=True,
     )
-    return ChatMentionResult(stored=result.stored, dropped=result.dropped)
+    # story #2316: 코어가 못 보는 축(추출조차 실패한 토큰) — 래퍼가 직접 찾아 dropped에
+    # 얹는다(위 find_malformed_chat_tokens docstring 참조, #2301 "얇은 변환" 예외 아님).
+    malformed = find_malformed_chat_tokens(content)
+    if malformed:
+        logger.warning(
+            "insert_chat_mentions: dropped %d malformed-id token(s) — shape matched but id "
+            "is not a UUID (message_id=%s) dropped=%s",
+            len(malformed), message_id, malformed,
+        )
+    return ChatMentionResult(stored=result.stored, dropped=[*result.dropped, *malformed])
 
 
 async def count_phantom_task_mentions(db: AsyncSession) -> int:
