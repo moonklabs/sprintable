@@ -81,9 +81,12 @@ def _data(resp):
     return body.get("data", body) if isinstance(body, dict) else {}
 
 
-# my-actions 쿼리 순서: approvals → reviews → my_blockers(.all) → agent_stuck → stalled(.all) → unanswered(.all).
-def _ma_seq(approvals=(), reviews=(), my_blockers=(), stuck=(), stalled=(), unanswered=()):
-    return [_r_scalars(approvals), _r_scalars(reviews), _r_all(my_blockers),
+# my-actions 쿼리 순서: approvals(.all, gate_type 조인) → reviews → my_blockers(.all) →
+# waiting_on_others(.all, story #2288 BE 명세4 신규) → agent_stuck → stalled(.all) → unanswered(.all).
+# ⛔approvals는 story #2288 BE 명세3(gate_type 패스스루)로 WorkflowLineStepRun과 조인해 이제
+# (approval, gate_type) 튜플을 낸다 — 단일 ORM 엔티티가 아니므로 scalars() 대신 .all().
+def _ma_seq(approvals=(), reviews=(), my_blockers=(), waiting=(), stuck=(), stalled=(), unanswered=()):
+    return [_r_all(approvals), _r_scalars(reviews), _r_all(my_blockers), _r_all(waiting),
             _r_scalars(stuck), _r_all(stalled), _r_all(unanswered)]
 
 
@@ -100,7 +103,7 @@ async def test_my_actions_scope_separation_and_items():
                       started_at=_DT, failure_message="SECRET raw error")
     resp, session, resolver = await _get(
         "/api/v2/command-center/my-actions",
-        execute_seq=_ma_seq(approvals=[approval], reviews=[review], stuck=[stuck]))
+        execute_seq=_ma_seq(approvals=[(approval, "merge")], reviews=[review], stuck=[stuck]))
     assert resp.status_code == 200
     d = _data(resp)
     assert d["action_queue"]["scope"] == "member"      # ⭐member-private.
@@ -109,6 +112,79 @@ async def test_my_actions_scope_separation_and_items():
     assert d["attention"]["items"][0]["type"] == "agent_stuck" and d["attention"]["items"][0]["auto_detected"]
     assert "SECRET raw error" not in resp.text          # ⭐민감 텍스트 비노출.
     assert d["attention"]["pending"] == ["time_sensitive"]  # CC-BE.2서 나머지 채움(my_blockers→큐로 이동).
+
+
+# ── story #2288(E-CONNECT) BE 명세3+4 ────────────────────────────────────────
+@pytest.mark.anyio
+async def test_gate_approval_carries_gate_type_passthrough():
+    """BE 명세3(§3-1㉢·§4-1): gate_approval 항목의 context에 gate_type이 WorkflowLineStepRun.
+    effective_gate_type 그대로 실린다(값을 새로 만들지 않고 기존 SSOT를 조인해 패스스루)."""
+    approval = MagicMock(gate_id=uuid.uuid4(), approval_group_id=uuid.uuid4(), kind="approver", created_at=_DT)
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=_ma_seq(approvals=[(approval, "merge")]))
+    assert resp.status_code == 200
+    items = _data(resp)["action_queue"]["items"]
+    ga = next(i for i in items if i["type"] == "gate_approval")
+    assert ga["context"]["gate_type"] == "merge"
+
+
+@pytest.mark.anyio
+async def test_gate_approval_gate_type_null_when_run_has_none():
+    approval = MagicMock(gate_id=uuid.uuid4(), approval_group_id=uuid.uuid4(), kind="approver", created_at=_DT)
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=_ma_seq(approvals=[(approval, None)]))
+    assert resp.status_code == 200
+    items = _data(resp)["action_queue"]["items"]
+    ga = next(i for i in items if i["type"] == "gate_approval")
+    assert ga["context"]["gate_type"] is None
+
+
+@pytest.mark.anyio
+async def test_waiting_on_others_item_shape_and_priority():
+    """BE 명세4: 내 담당 story인데 승인 대기가 남에게 있으면 waiting_on_others(§3-1㉢) —
+    priority=info(danger/warn류 행동촉구 축과 안 섞는다, 버튼 없는 자리)."""
+    story_id = uuid.uuid4()
+    approver_id = uuid.uuid4()
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=_ma_seq(waiting=[(story_id, "merge", approver_id)]))
+    assert resp.status_code == 200
+    items = _data(resp)["action_queue"]["items"]
+    w = next(i for i in items if i["type"] == "waiting_on_others")
+    assert w["priority"] == "info"
+    assert w["context"] == {
+        "story_id": str(story_id), "gate_type": "merge", "approver_member_id": str(approver_id),
+    }
+
+
+@pytest.mark.anyio
+async def test_waiting_on_others_dedupes_multi_approver_story_to_one_item():
+    """한 story에 승인자가 여럿(quorum)이어도 waiting_on_others는 story당 한 항목만."""
+    story_id = uuid.uuid4()
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=_ma_seq(waiting=[
+            (story_id, "merge", uuid.uuid4()),
+            (story_id, "merge", uuid.uuid4()),
+        ]),
+    )
+    assert resp.status_code == 200
+    items = [i for i in _data(resp)["action_queue"]["items"] if i["type"] == "waiting_on_others"]
+    assert len(items) == 1
+
+
+@pytest.mark.anyio
+async def test_waiting_on_others_query_scopes_by_assignee_and_excludes_self_as_approver():
+    """⛔뮤테이션 자가검증 축 대신 쿼리 자체를 직접 읽어 확인(모킹 세션이라 SQL 실행은 못함) —
+    approver_member_id != member_id 조건과 assignee_id == member_id 조건이 둘 다 WHERE에
+    있는지 5번째(0-indexed 3) execute 호출의 컴파일된 SQL 문자열로 검증."""
+    resp, session, resolver = await _get("/api/v2/command-center/my-actions", execute_seq=_ma_seq())
+    assert resp.status_code == 200
+    waiting_call_sql = str(session.execute.await_args_list[3].args[0])
+    assert "assignee_id" in waiting_call_sql
+    assert "approver_member_id" in waiting_call_sql
 
 
 @pytest.mark.anyio
@@ -152,10 +228,11 @@ async def test_my_actions_uses_canonical_member_resolver():
 
 @pytest.mark.anyio
 async def test_my_actions_agent_stuck_filters_to_agent():
-    """HIGH2: agent_stuck 쿼리(4번째 execute)가 resolved_member_type=='agent' 로 필터."""
+    """HIGH2: agent_stuck 쿼리(story #2288 BE 명세4 삽입으로 5번째 execute로 밀림)가
+    resolved_member_type=='agent' 로 필터."""
     resp, session, resolver = await _get("/api/v2/command-center/my-actions", execute_seq=_ma_seq())
     assert resp.status_code == 200
-    assert "resolved_member_type" in str(session.execute.await_args_list[3].args[0])
+    assert "resolved_member_type" in str(session.execute.await_args_list[4].args[0])
 
 
 @pytest.mark.anyio
