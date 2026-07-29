@@ -210,6 +210,14 @@ async def _count_unresolved_comments(
         return {}
     rows = (await session.execute(
         select(ArtifactComment.artifact_id, func.count())
+        # ⛔뮤테이션 자가검증(#2623)으로 실측: 이 `.in_(artifact_ids)`를 지워도 아래
+        # `.group_by(ArtifactComment.artifact_id)`가 코멘트를 자기 artifact_id로만 묶어 주므로
+        # 다른 artifact의 미해결 코멘트가 섞여 들지 않는다(6/6 GREEN 유지 — 격리를 보장하는
+        # 것은 이 필터가 아니라 GROUP BY다). 그래도 지우지 않는 이유: 이 필터가 없으면 매
+        # 호출마다 **org 전체**(다른 org 포함) artifact_comments를 스캔·집계한 뒤 파이썬에서
+        # 필요한 id만 골라내는 꼴이 된다 — 스코프 축소(성능)가 이 줄의 실제 역할이지, 격리는
+        # 아니다. "성능 최적화라 지워도 안전"으로 읽지 말 것 — 안전은 유지되지만 스캔 범위가
+        # org 전체로 커진다.
         .where(ArtifactComment.artifact_id.in_(artifact_ids), ArtifactComment.resolved.is_(False))
         .group_by(ArtifactComment.artifact_id)
     )).all()
