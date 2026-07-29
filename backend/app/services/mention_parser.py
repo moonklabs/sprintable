@@ -256,6 +256,17 @@ async def resolve_bare_number_story_refs(
     targets = await resolve_bare_number_story_targets(
         db, org_id=org_id, project_id=project_id, content=content,
     )
+    # ⛔story #2269 AC0-1 후속(오르테가군 판정, 2026-07-30): 대괄호 `entity:story:<uuid>`
+    # 멘션과 이 맨번호 결과가 여기서 같은 form="mention"으로 합쳐진다 — 서로 다른 문법(추출기
+    # 다름·존재검사 방식 다름)인데 저장되면 구분이 사라진다(#2284와 같은 병 재발). 실측
+    # 결과 지금은 "안 가른다"(대괄호 story-멘션 원문 2건뿐 — 둘 다 단일 검증용 story #2321
+    # 한 건에서 같은 순간 난 것, 조직 실사용 아님). ⭐다시 볼 조건(사건 기반, 날짜 아님):
+    # ①대괄호 story-멘션이 세 자리(100+)에 들어서거나, ②㉠(대괄호)·㉡(맨번호) 출처 참조를
+    # 실제로 다르게 다뤄야 할 일이 생기면 — 그때 form을 가른다(예: "mention_bracket"/
+    # "mention_bare" 또는 별도 discriminator 컬럼). 가르기 전 반드시 전수 확인할 자리:
+    # 이 함수의 existing-refs diff(reconcile_entity_references)·verify_backfill_complete
+    # (reference_backfill.py)·POST /api/v2/references·story 출처기록(#2267) 4곳 + FORMS
+    # CHECK 제약(app/models/reference.py) — story #2269 description 2026-07-30 섹션에 전수 기록됨.
     return [("story", story_id, "mention") for story_id in targets.values()]
 
 
