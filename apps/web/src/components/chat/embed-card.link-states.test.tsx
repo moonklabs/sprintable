@@ -118,7 +118,7 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
   });
 });
 
-describe('AC4 — hypothesis·evidence는 고정 ③(fetch 자체를 안 함, 무한 스피너 자체발견 회귀가드)', () => {
+describe('AC4 — hypothesis는 고정 ③(fetch 자체를 안 함, 무한 스피너 자체발견 회귀가드)', () => {
   it('hypothesis는 fetch를 시도하지 않고 즉시 "열 수 있는 화면이 없습니다"를 보인다(무한 스피너 아님)', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
@@ -131,17 +131,32 @@ describe('AC4 — hypothesis·evidence는 고정 ③(fetch 자체를 안 함, �
     expect(document.body.textContent).not.toContain('불러오는 중');
     expect(document.body.textContent).toContain('열 수 있는 화면이 없습니다');
   });
+});
 
-  it('evidence도 동일 — #2314(GET /api/v2/evidence/{id}) 개통 전까지 임시 ③', async () => {
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
+describe('AC3/AC4 — evidence는 부모 story로("담긴 곳으로 갑니다", story #2314 승격)', () => {
+  it('story #2314(2026-07-29): GET /api/v2/evidence/{id} 개통 前엔 임시 ③이었으나, 이제 fetch해서 ②로 판정한다 — resolved_story_id를 BE가 이미 한 번에 해소해 준다(task처럼 2단 조인 불필요)', async () => {
+    stubFetch(async (url) => {
+      expect(url).toContain('/api/evidence/');
+      return { ok: true, json: async () => ({ data: { resolved_story_id: 's-parent-2' } }) };
+    });
     await act(async () => {
       root.render(<EmbedCard entity_type="evidence" entity_id="ev1" title="증거 A" status={null} />);
     });
     await openCard();
     await flush();
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(document.body.textContent).not.toContain('불러오는 중');
+    const link = document.querySelector('a[href="/board?story=s-parent-2"]');
+    expect(link).not.toBeNull();
+    expect(link!.textContent).toContain('담긴 곳으로 갑니다');
+  });
+
+  it('resolved_story_id가 없으면(예: 부모 task가 사라짐) 회색·행동0 "열 수 있는 화면이 없습니다"(거짓 링크 금지)', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ data: { resolved_story_id: null } }) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="evidence" entity_id="ev2" title="증거 B" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.querySelectorAll('a[href^="/board?story="]').length).toBe(0);
     expect(document.body.textContent).toContain('열 수 있는 화면이 없습니다');
   });
 });

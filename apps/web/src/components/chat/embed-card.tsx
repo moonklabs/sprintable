@@ -66,14 +66,15 @@ const ENTITY_COLORS: Record<string, string> = {
 // 있는 상태가 아니다(담긴 곳으로 보내거나, 애초에 갈 곳이 없는 것). 구별은 색이 아니라 말로.
 export const GRAY_STATE_COLOR = 'border-border bg-muted/40 text-muted-foreground';
 
-/** story #2302 — task·evidence는 항상 담긴 곳(②) 또는 미승격(③) 판정에 own-href가 없다(모델
- * FK 그대로: Task.story_id/Evidence.work_item_id 항상 NOT NULL — 항상 유일한 부모, 모호함 0).
+/** story #2302 — task·evidence는 항상 담긴 곳(②) 판정에 own-href가 없다(모델 FK 그대로:
+ * Task.story_id/Evidence.work_item_id 항상 NOT NULL — 항상 유일한 부모, 모호함 0).
  * hypothesis는 링크테이블 3종(epic/story/sprint 다대다)이라 "담긴 곳 하나"를 정할 수 없어 항상
  * ③(만료조건: hypothesis 전용 화면이 생기면 ①로 승격). artifact는 story_id/epic_id/doc_id가
  * 전부 nullable·최대 1개뿐이라(hypothesis처럼 여럿 동시가능이 아님) 레코드마다 갈린다 —
  * EntityPreviewModal이 fetch한 detail로 판정(이 함수는 own-href만 다뤄 null 반환).
- * evidence는 #2314(GET /api/v2/evidence/{id} 개통) 전까지 임시 ③ — 그 라우트가 열리면 이 값을
- * task와 동형으로 승격한다(PO 확認, 2026-07-29).
+ * evidence는 story #2314(2026-07-29, GET /api/v2/evidence/{id} 개통)로 task와 동형인 ②로
+ * 승격됐다 — work_item_type이 story든 task든 응답의 resolved_story_id(BE가 이미 한 번에
+ * 해소해 준다) 하나로 EntityPreviewModal이 판정한다.
  */
 export function getEntityHref(entityType: string, entityId: string): string | null {
   switch (entityType) {
@@ -87,7 +88,7 @@ export function getEntityHref(entityType: string, entityId: string): string | nu
     case 'task': return null; // ② — 부모 story_id는 EntityPreviewModal이 fetch 후 판정.
     case 'artifact': return null; // 레코드마다 ②/③ — 위 함수 doc 참고.
     case 'hypothesis': return null; // ③ 고정 — 위 함수 doc 참고.
-    case 'evidence': return null; // ③ 임시(#2314 대기) — 위 함수 doc 참고.
+    case 'evidence': return null; // ② — resolved_story_id는 EntityPreviewModal이 fetch 후 판정(task와 동형).
     default: return null;
   }
 }
@@ -111,10 +112,13 @@ const ENTITY_API: Record<string, (id: string) => string> = {
   epic: (id) => `/api/goals/${id}`,
   asset: (id) => `/api/assets/${id}`,
   // story #2302 — task.story_id(항상 유일 부모)·artifact.{story_id,epic_id,doc_id}(최대 1개,
-  // 전부 nullable)를 읽어 ②/③을 레코드 단위로 판정하는 재료. hypothesis·evidence는 의도적으로
-  // 여기 없다(위 getEntityHref 주석 참고 — 애초에 fetch할 필요가 없는 고정 ③).
+  // 전부 nullable)를 읽어 ②/③을 레코드 단위로 판정하는 재료. hypothesis는 의도적으로 여기
+  // 없다(위 getEntityHref 주석 참고 — 애초에 fetch할 필요가 없는 고정 ③).
   task: (id) => `/api/tasks/${id}`,
   artifact: (id) => `/api/visual-artifacts/${id}`,
+  // story #2314(2026-07-29): GET /api/v2/evidence/{id}가 신설돼 evidence도 fetch-eligible로
+  // 승격 — 응답의 resolved_story_id를 EntityPreviewModal이 읽는다(아래 evidence 분기).
+  evidence: (id) => `/api/evidence/${id}`,
 };
 
 const MdBadge = ({ label }: { label: string }) => (
@@ -271,7 +275,7 @@ function EntityPreviewModal({
     }
 
     const url = ENTITY_API[entityType]?.(entityId);
-    if (!url) return; // hypothesis·evidence 등 — fetch 전략 자체가 없다(loading도 이미 false로 시작).
+    if (!url) return; // hypothesis 등 — fetch 전략 자체가 없다(loading도 이미 false로 시작).
     fetch(url)
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then((json) => { if (!cancelled) setDetail((json as { data?: Record<string, unknown> }).data ?? json as Record<string, unknown>); })
@@ -318,8 +322,14 @@ function EntityPreviewModal({
       : null;
     resolvedHref = parentHref;
     linkKind = parentHref ? 'via-parent' : null;
-  } else if (entityType === 'hypothesis' || entityType === 'evidence') {
-    // ③ 고정(hypothesis) / ③ 임시(evidence, #2314 대기) — 위 getEntityHref 주석 참고.
+  } else if (entityType === 'evidence') {
+    // ② — story #2314(2026-07-29): BE GET /{id}가 work_item_type이 story든 task든 이미
+    // resolved_story_id 하나로 해소해 준다(task처럼 여기서 또 한 번 join할 필요가 없다).
+    const storyId = (detail as { resolved_story_id?: string | null } | null)?.resolved_story_id ?? null;
+    resolvedHref = storyId ? `/board?story=${storyId}` : null;
+    linkKind = resolvedHref ? 'via-parent' : null;
+  } else if (entityType === 'hypothesis') {
+    // ③ 고정 — 위 getEntityHref 주석 참고.
     resolvedHref = null;
     linkKind = null;
   } else {
