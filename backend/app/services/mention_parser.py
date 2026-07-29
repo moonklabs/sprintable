@@ -34,12 +34,14 @@ design-org-knowledge-mentions-backlinks §2.
 기존 `mentioned_ids`(ConversationMessage 컬럼·멤버 알림용) 파이프라인은 이 모듈이 전혀
 참조하지 않는다 — 완전히 독립된 병행 경로.
 
-⛔story #2284: 이 모듈이 쓰는 form은 `mention`·`embed` 둘뿐이다. `proof`는 여기서 만들지
-않는다 — 「지원 안 함」이 아니라 「아직 안 만듦」이다: proof는 #2265(대화 일부를 view-only로
-잘라 박는 기능, 별도 write 경로)의 몫으로 설계돼 있고 그 write 경로 자체가 아직 없다(코드
-0줄). doc의 wikiLink→mention·pageEmbed→embed 구분은 파싱 시점에 이미 있던 재료를 저장
-시점에 버리지 않게 고친 것뿐이라 작은 일이었지만, proof는 새 UI 흐름(어느 대화 구간을
-자를지)과 새 write 경로가 통째로 필요해 크기가 다르다.
+⛔story #2284, 재정정(2026-07-29 · #2277 census가 적발한 자기모순 — PO 지시로 즉시 정정):
+이 모듈이 쓰는 form은 `mention`·`embed` 둘뿐이다. `proof`는 여기서 만들지 않는다 — **「아직
+안 만듦」이 아니라 채팅에 그것을 가를 재료가 없어서 안 만드는 것이다(설계)**: `proof`는
+C-7(#2265, 대화 일부를 view-only로 잘라 박는 기능)이 이 파서 write-path **밖**의 별도 경로로
+쓰는 form이다 — 이 파서가 만들 일이 아니다. doc의 wikiLink→mention·pageEmbed→embed 구분은
+파싱 시점에 이미 있던 재료를 저장 시점에 버리지 않게 고친 것뿐이라 작은 일이었지만, proof는
+새 UI 흐름(어느 대화 구간을 자를지)과 새 write 경로가 통째로 필요해 크기가 다르다 — 이건
+이 모듈의 미완이 아니라 다른 모듈의 몫이라는 뜻이다.
 
 ⛔story #2316 AC5(미르코 문안, 디디 반영): 이 파서(`extract_chat_entity_mentions` 등 대괄호
 문법 추출기)가 «못 보는» 것:
@@ -663,7 +665,7 @@ async def reconcile_doc_mentions(
     story #2284: diff 단위가 target_id 하나였던 것을 **(target_id, form) 쌍**으로 넓혔다 —
     같은 대상이라도 wikiLink(mention)와 pageEmbed(embed)는 서로 다른 행이라(파서가 이제
     구분을 보존한다). ⛔이 함수는 mention/embed 두 form만 다룬다 — proof(form)는 이 write
-    경로가 만들지도 지우지도 않는다(#2265 전용 별도 write 경로 몫 — 아직 존재하지 않는다).
+    경로가 만들지도 지우지도 않는다(설계 — C-7(#2265) 전용, 이 파서 밖의 별도 write 경로 몫).
     그래서 존재-조회에 `Reference.form.in_(("mention", "embed"))`로 명시해 proof 행을
     이 diff의 시야 밖에 둔다(실수로 지우는 사고 원천 차단).
 
