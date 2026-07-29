@@ -1194,7 +1194,11 @@ async def update_story(
     # 키에 source_field가 있어 서로 다른 참조로 선다). **같은 트랜잭션**(commit 전, 실패
     # 시 예외 propagate로 story 저장 전체가 롤백 — chat/doc과 동일 AC4 원자성).
     if "description" in data or "acceptance_criteria" in data:
-        from app.services.mention_parser import extract_chat_entity_mentions, reconcile_entity_references
+        from app.services.mention_parser import (
+            extract_chat_entity_mentions,
+            reconcile_entity_references,
+            resolve_bare_number_story_refs,
+        )
 
         _mention_actor_id: uuid.UUID | None = None
         try:
@@ -1206,24 +1210,37 @@ async def update_story(
         # 쪽에서 나온 것인지 화면이 구분하지 않는다(#2608 규율 — 화면은 종류로 안 가른다·그
         # 이유와 같다). dropped 사유 열거형은 채팅 쪽(#2294/#2612)이 이미 SSOT라 여기서
         # 새로 만들지 않는다.
+        #
+        # story #2269(C-11) AC1: 대괄호 문법(`extract_chat_entity_mentions`)과 맨 번호
+        # (`resolve_bare_number_story_refs`) 결과를 **합쳐서** 한 번에 reconcile한다 — 같은
+        # 대상을 두 문법으로 각각 가리켜도 (target_type, target_id, form) 3튜플이 같아 자연히
+        # 중복 제거된다(reconcile_entity_references의 set 기반 diff, 별도 dedupe 불필요).
         _ref_stored = 0
         _ref_dropped: list[dict[str, str]] = []
         if "description" in data:
-            _desc_pairs = extract_chat_entity_mentions(story.description or "")
+            _desc_text = story.description or ""
+            _desc_pairs = extract_chat_entity_mentions(_desc_text)
+            _desc_bare_refs = await resolve_bare_number_story_refs(
+                db, org_id=repo.org_id, project_id=story.project_id, content=_desc_text,
+            )
             _desc_result = await reconcile_entity_references(
                 db, org_id=repo.org_id, source_type="story", source_field="description",
                 source_id=story.id,
-                extracted_refs=[(t, i, "mention") for t, i in _desc_pairs],
+                extracted_refs=[(t, i, "mention") for t, i in _desc_pairs] + _desc_bare_refs,
                 created_by=_mention_actor_id,
             )
             _ref_stored += _desc_result.stored
             _ref_dropped.extend(_desc_result.dropped)
         if "acceptance_criteria" in data:
-            _ac_pairs = extract_chat_entity_mentions(story.acceptance_criteria or "")
+            _ac_text = story.acceptance_criteria or ""
+            _ac_pairs = extract_chat_entity_mentions(_ac_text)
+            _ac_bare_refs = await resolve_bare_number_story_refs(
+                db, org_id=repo.org_id, project_id=story.project_id, content=_ac_text,
+            )
             _ac_result = await reconcile_entity_references(
                 db, org_id=repo.org_id, source_type="story", source_field="acceptance_criteria",
                 source_id=story.id,
-                extracted_refs=[(t, i, "mention") for t, i in _ac_pairs],
+                extracted_refs=[(t, i, "mention") for t, i in _ac_pairs] + _ac_bare_refs,
                 created_by=_mention_actor_id,
             )
             _ref_stored += _ac_result.stored

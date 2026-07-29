@@ -41,13 +41,22 @@ design-org-knowledge-mentions-backlinks §2.
 시점에 버리지 않게 고친 것뿐이라 작은 일이었지만, proof는 새 UI 흐름(어느 대화 구간을
 자를지)과 새 write 경로가 통째로 필요해 크기가 다르다.
 
-⛔story #2316 AC5(미르코 문안, 디디 반영): 이 파서가 «못 보는» 것:
-  ①맨 번호 — 본문의 `#2249`처럼 대괄호·`entity:` 문법이 **아예 없는** 참조. 이 판은 그것을
-    **한 건도 안 센다.** 사람이 손으로 쓴 참조 대부분이 이 모양이다(C-11이 다룬다).
+⛔story #2316 AC5(미르코 문안, 디디 반영): 이 파서(`extract_chat_entity_mentions` 등 대괄호
+문법 추출기)가 «못 보는» 것:
+  ①맨 번호 — 본문의 `#2249`처럼 대괄호·`entity:` 문법이 **아예 없는** 참조. **이 대괄호
+    파서는** 그것을 한 건도 안 센다. 사람이 손으로 쓴 참조 대부분이 이 모양이다.
   ②닫힌 문법 밖 — `](entity:`를 포함한 무관한 텍스트가 오탐을 낼 수 있다(기존).
-  ⇒ 즉 이 파서의 수치는 **「멘션 문법으로 쓰인 것」의 전수**이지 **「본문에 있는 참조」의
-    전수가 아니다.** 두 수를 같은 이름으로 부르면 안 된다 — #2269(C-11)의 원석 830~1993건이
-    전부 ①모양이라, 이 파서로 재고 "참조 N건"이라 부르면 그 수가 실제의 몇십 분의 일이다.
+  ⇒ 즉 **대괄호 파서**의 수치는 「멘션 문법으로 쓰인 것」의 전수이지 「본문에 있는 참조」의
+    전수가 아니다. #2269(C-11)의 원석 830~1993건이 전부 ①모양이었다.
+
+⭐story #2269(C-11) AC1(2026-07-29): 위 ①갭 중 **story description/acceptance_criteria의
+"#<번호>"가 다른 story를 가리키는 경우만** `extract_bare_number_candidates` +
+`resolve_bare_number_story_refs`가 별도로 채운다(대괄호 파서를 고치지 않고 **더한다** — 함수
+안에 분기 추가 금지 원칙 유지). ⛔여전히 못 보는 것: (a) 채팅 메시지 본문의 맨 번호(이
+write-path는 story description/AC 전용 — conversations.py 쪽은 별건), (b) story가 아닌
+타입(task/doc/epic 등)을 가리키는 맨 번호(story_number 스코프만 지원), (c) 신규 story
+생성 시점(`create_story`는 애초에 이 reconcile 자체를 안 부른다 — 대괄호 멘션도 마찬가지
+기존 갭, 이 스토리가 만든 것 아님).
 """
 from __future__ import annotations
 
@@ -164,6 +173,74 @@ def find_malformed_chat_tokens(content: str) -> list[dict[str, str]]:
         seen.add(key)
         malformed.append({"target_type": entity_type, "target_id": raw_id, "reason": "malformed_token"})
     return malformed
+
+
+# story #2269(C-11) AC0-3 세는 정의(doc `c11-2269-ac0-findings` 확定분) — word-boundary로
+# `##`·URL 프래그먼트 등 오탐을 배제한다. `(?<![\w#])`: 바로 앞이 단어문자·#이면 매치 안 함
+# (`##2258`이나 `foo#2258`은 스킵 — 후자는 URL 프래그먼트 패턴과 겹칠 수 있어 보수적으로 뺀다).
+_BARE_STORY_NUMBER_RE = re.compile(r"(?<![\w#])#(\d+)\b")
+_FENCED_CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
+
+
+def _redact_code_spans(content: str) -> str:
+    """세는 정의: 코드블록/인라인 코드 안의 `#번호`는 참조가 아니다(예시·복사용 텍스트).
+    같은 길이의 공백으로 치환해 나머지 텍스트의 문자 위치는 그대로 유지한다(위치가 필요한
+    호출부는 아직 없지만, 치환 대신 삭제하면 인접 텍스트가 붙어 새 오탐을 만들 수 있어
+    길이 보존 쪽을 택했다)."""
+    def _blank(m: re.Match[str]) -> str:
+        return " " * len(m.group(0))
+    return _INLINE_CODE_SPAN_RE.sub(_blank, _FENCED_CODE_BLOCK_RE.sub(_blank, content))
+
+
+def extract_bare_number_candidates(content: str) -> list[int]:
+    """story #2269(C-11) AC0-3 — 대괄호·`entity:` 문법이 «없는» `#<번호>` 원석 후보를 순서
+    보존 + 중복 제거로 뽑는다(순수 함수, DB 왕복 없음 — 번호가 실제 존재하는 story를
+    가리키는지는 이 함수의 관심사가 아니다, `resolve_bare_number_story_refs` 참조). 코드블록/
+    인라인 코드 안의 매치는 제외한다(위 `_redact_code_spans`)."""
+    if not content:
+        return []
+    redacted = _redact_code_spans(content)
+    seen: set[int] = set()
+    result: list[int] = []
+    for m in _BARE_STORY_NUMBER_RE.finditer(redacted):
+        n = int(m.group(1))
+        if n not in seen:
+            seen.add(n)
+            result.append(n)
+    return result
+
+
+async def resolve_bare_number_story_refs(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    content: str,
+) -> list[tuple[str, uuid.UUID, str]]:
+    """story #2269(C-11) AC0-2 축A — `extract_bare_number_candidates`가 뽑은 번호를 실제
+    story로 해소해 `reconcile_entity_references`가 바로 받는 (target_type, target_id, form)
+    3튜플로 반환한다(caller가 대괄호 파서 결과와 합쳐 한 번에 reconcile — 저장 시 원문
+    rewrite는 하지 않는다, doc `c11-2269-ac0-findings` AC0-2 축A/축B 구분 참조).
+
+    ⛔`story_number`는 **project_id 유일**이지 org 유일이 아니다(`pm.py`
+    uq_stories_project_id_story_number) — 반드시 이 텍스트가 쓰인 소스(caller)의
+    project_id로 스코프한다. 존재하지 않는 번호는 다른 추출기와 동형으로 조용히 스킵
+    (`reconcile_entity_references`의 target_not_found 게이트가 어차피 한 번 더 걸러
+    주지만, 여기서도 최소한만 걸러 불필요한 존재판정 왕복을 줄인다)."""
+    numbers = extract_bare_number_candidates(content)
+    if not numbers:
+        return []
+    from app.models.pm import Story
+
+    rows = (await db.execute(
+        select(Story.id).where(
+            Story.org_id == org_id,
+            Story.project_id == project_id,
+            Story.story_number.in_(numbers),
+        )
+    )).all()
+    return [("story", row.id, "mention") for row in rows]
 
 
 def extract_chat_doc_mention_ids(content: str) -> list[uuid.UUID]:
