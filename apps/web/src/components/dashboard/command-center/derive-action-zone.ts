@@ -28,8 +28,8 @@ export function selectVisibleQueue(queue: QueueItem[], cap: number): VisibleQueu
   return { visible, cutCount: queue.length - visible.length };
 }
 
-// action-zone.tsx QueueRow가 실제로 그릴 줄 아는 타입(PO 지적 2026-07-29 가드와 짝) — 여기서도
-// 같은 목록을 쓴다. 하나만 두 곳에 흩어지면 그 자체가 「한 개념에 두 기준」이 된다.
+// ⛔세 목록 중 하나 — types.ts의 QueueItem.type 주석 참조(BE 실제 type ↔ 이 Set ↔
+// action-zone.tsx QueueRow의 렌더 분기, 셋이 같이 움직여야 한다 · PO 지적 2026-07-29).
 const RENDERABLE_TYPES = new Set<QueueItem['type']>(['gate_approval', 'review_merge', 'my_blockers', 'waiting_on_others']);
 
 export interface RenderableQueueResult {
