@@ -364,8 +364,14 @@ async def test_list_messages_response_shape():
         agents_result = MagicMock()
         agents_result.scalars.return_value.all.return_value = [agent_id]
 
+        # story #2263 AC6: list_messages가 페이지 전체 참조를 쿼리 1회로 배치 조회
+        # (fetch_stored_references) — `.all()`(scalars 아님) 결과, 빈 페이지 가정.
+        refs_result = MagicMock()
+        refs_result.all.return_value = []
+
         session.execute = AsyncMock(side_effect=[
             conv_project_result, member_result, pids_result, agents_result, msgs_result, sender_result,
+            refs_result,
         ])
 
         async with client as c:
