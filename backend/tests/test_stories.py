@@ -28,6 +28,10 @@ def _mock_story(status: str = "backlog") -> MagicMock:
     # story #2315 AC1: references(transient, dict|None) — 위와 동일 이유(MagicMock 자동
     # 속성이 Pydantic dict|None 검증 실패)로 명시 세팅.
     s.references = None
+    # story #2328(C-11 ㉡층): is_reference_candidate·matched_snippet(transient) — 위와 동일
+    # 이유(MagicMock 자동 속성이 Pydantic bool/str|None 검증 실패)로 명시 세팅.
+    s.is_reference_candidate = False
+    s.matched_snippet = None
     s.meeting_id = None
     s.title = "Story 1"
     s.status = status
