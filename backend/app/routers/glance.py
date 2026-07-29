@@ -44,6 +44,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.dependency import ItemDependency
 from app.models.evidence import Evidence
+from app.models.gate import AUTO_VERIFY_MAP as _GATE_AUTO_VERIFY_MAP
 from app.models.gate import Gate
 from app.models.member import Member
 from app.models.pm import Story, StoryActivity
@@ -281,7 +282,10 @@ async def glance_attention(
 # ac_met/ac_total(acceptance_criteria=freeform Text)·risk(플랫폼 위험도판정 안 함)·diff(미저장).
 # PO判定(2026-07-12): BE는 구조화 필드만·표시문자열/라벨 금지(i18n=FE lane)·라벨 합성은 FE가
 # decision_basis/auto_decision_reason verbatim으로.
-_AUTO_VERIFY_MAP = {"sufficient": "passed", "blocked": "failed"}
+# story #2303: 이 매핑의 단일 소유자는 app/models/gate.py(AUTO_VERIFY_MAP)로 옮겼다 —
+# app/repositories/goal.py(`?include=glance`의 focal_story.auto_verify)도 같은 매핑이
+# 필요해져, 라우터 전용 상수를 두 곳에 각자 두면 twin-system 갭이 된다.
+_AUTO_VERIFY_MAP = _GATE_AUTO_VERIFY_MAP
 
 
 class HeroMember(BaseModel):

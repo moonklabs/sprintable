@@ -104,23 +104,58 @@ class GoalResponse(BaseModel):
         return build_reference_token("epic", self.id, self.title)
 
 
+class GlanceFocalStoryGate(BaseModel):
+    """story #2303 — `synthesizeGateAction`(FE, `glance-hero.tsx` 밖의 다른 파일 — 단일
+    파일 grep만으론 놓치는 자리, 미르코 실측)이 읽는 딱 둘. `gate.status`("pending")는 안
+    싣는다 — `gate`가 non-null인 것 자체가 이미 "pending 게이트가 있다"는 뜻이라 중복."""
+    gate_type: str
+    requires_human: bool
+
+
+class GlanceFocalStoryVerifiedBy(BaseModel):
+    """story #2303 — `name`만. member 서브객체(`member_id`/`role`)는 화면이 안 읽어서 뺀다."""
+    name: str
+
+
+class GlanceFocalStoryTrust(BaseModel):
+    self_reported: bool
+    human_verified: bool
+    human_verified_by: GlanceFocalStoryVerifiedBy | None = None
+    human_verified_at: datetime | None = None
+
+
 class GlanceFocalStory(BaseModel):
     """story #2298(3단 웨이터폴 근절) — `pickFocalStory`(FE `hero-logic.ts`) 규칙을 서버로
-    이관한 결과. gate_status는 in-progress 후보들 중 하나라도 pending gate가 있으면 그
-    story가 우선 선택되고("gate-우선"), 이 필드엔 그 pending 게이트가 있었는지만 담는다
-    (전체 gate 목록은 안 실음 — 이 필드가 실제로 쓰이는 axis 하나뿐이라 과확장 금지).
+    이관한 결과.
 
     ⛔이 규칙은 FE 원본에도 있었지만 `/api/stories?epic_id=` 응답에 `gates` 필드 자체가
     없어(전 코드베이스 grep 확인, `StoryResponse`에 그 필드 없음) 실제로는 단 한 번도
     평가된 적이 없다(2026-07-12 story dee92c96 도입 이래 죽어있던 분기 — git log -S로 확인,
     "언제부터 회귀했는지"가 아니라 "애초에 재료가 없었다"). 여기서 되살리면 동작이 바뀐다 —
     지금까지는 항상 in-progress 중 첫 번째였고, 이제부터 gate-pending이 우선한다. 조용히
-    바꾸지 않는다(PR 본문에 명시)."""
+    바꾸지 않는다(PR 본문에 명시).
+
+    ⛔story #2303(계약 확장, 오르테가+미르코 판정 2026-07-29): #2298이 처음 냈던 4필드
+    (id·title·status·assignee_id·gate_status)로 `/api/glance/hero?story_id=`를 완전히
+    대체하려 했더니 **화면이 실제로 읽는 것 중 둘이 빠져 있었다**(assignee_ids 배열 —
+    없으면 다중배정 story의 human+agent 동시표시가 항상 단일로 좁혀짐·gate.requires_human —
+    gate_status로 근사 불가, 미르코 확인). 판정 기준이 "요청 수 감소"가 아니라 "화면이
+    그리는 것 중 하나도 안 줄어드는가 + 요청이 주는가"로 재확정되며, 미르코가
+    `glance-hero.tsx` + 호출체인(`splitParticipants`·`heroProofState`·`buildEvidence`·
+    `buildTrustSeal`·`synthesizeGateAction`)을 끝까지 추적해 뽑은 9필드만 정확히 싣는다.
+    `description`·`envelope.*`·`gate.status`·`gate.decision_basis`·`gate.
+    auto_decision_reason`·`human_verified_by.member_id`·`human_verified_by.role`·
+    `gates`(전체배열)는 화면이 안 읽는 것으로 확인돼 의도적으로 뺀다("있는 만큼만 단다").
+    합성(i18n 라벨 등)은 서버가 하지 않는다 — 원자료만 싣고 조립은 화면이 한다(AC4)."""
     id: uuid.UUID
     title: str
     status: str
     assignee_id: uuid.UUID | None
-    gate_status: str | None
+    assignee_ids: list[uuid.UUID] = []
+    proof_count: int
+    auto_verify: str | None = None
+    gate: GlanceFocalStoryGate | None = None
+    trust: GlanceFocalStoryTrust
 
 
 class GoalWithGlanceResponse(GoalResponse):

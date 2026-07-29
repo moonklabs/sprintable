@@ -277,7 +277,8 @@ async def test_focal_story_prefers_gate_pending_over_more_recently_created():
             focal = resp.json()[0]["focal_story"]
             assert focal is not None
             assert focal["id"] == str(older_gated.id), focal
-            assert focal["gate_status"] == "pending"
+            # story #2303: gate_status(str) → gate(object|None). non-null 자체가 "pending 있음".
+            assert focal["gate"] == {"gate_type": "human_review", "requires_human": False}, focal
         finally:
             await client.aclose()
     finally:
@@ -313,7 +314,7 @@ async def test_focal_story_falls_back_to_most_recent_in_progress_when_no_gate_pe
             focal = resp.json()[0]["focal_story"]
             assert focal is not None
             assert focal["id"] == str(newer.id), focal
-            assert focal["gate_status"] is None
+            assert focal["gate"] is None  # story #2303: gate_status(str) → gate(object|None)
         finally:
             await client.aclose()
     finally:
