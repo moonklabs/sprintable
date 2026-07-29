@@ -50,6 +50,11 @@ class ResolvedReference:
     # (반대편 entity_type 이 registry 밖이라 존재판정 자체를 못 한 경우 — count_orphan_types
     # 가 잡는 그 케이스). True/False 만 신뢰.
     still_exists: bool | None
+    # story #2263(C-7, 2026-07-29 · PO 정정): 그대로 싣는다 — proof 소비처(C-7 섹션)가 카드를
+    # 여럿 펼쳐 보이는 자리라 단건 상세 라우트를 따로 지으면 N+1이 된다(PO 자기정정 — 소비
+    # 패턴을 안 보고 "무거우니 목록엔 빼자"로 먼저 갈랐던 것). 내부 구조는 안 읽는다(그대로
+    # 통과) — 크기 문제는 응답 shape이 아니라 저장 시점 범위 상한으로 막는다(#2263 AC).
+    proof_payload: dict | None = None
 
 
 async def insert_reference(
@@ -155,6 +160,7 @@ async def list_references(
                 id=r.id, source_type=r.source_type, source_field=r.source_field,
                 source_id=r.source_id, target_type=r.target_type, target_id=r.target_id,
                 form=r.form, created_at=r.created_at, still_exists=still_exists,
+                proof_payload=r.proof_payload,
             )
         )
     return resolved

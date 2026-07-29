@@ -589,17 +589,35 @@ async def get_story_backlinks(
 
 async def _visible_target_ids(
     session: AsyncSession, org_id: uuid.UUID, caller_id: uuid.UUID,
-    ids_by_type: dict[str, set[uuid.UUID]],
+    ids_by_type: dict[str, set[uuid.UUID]], auth: AuthContext,
+    conversation_id_by_target_id: dict[uuid.UUID, uuid.UUID] | None = None,
 ) -> dict[str, set[uuid.UUID]]:
     """story #2263 AC6 — outgoing references의 TARGET 측 가시성. C-3(#2261)의 존재-비노출
     규율 그대로: 등록되지 않은 target_type이거나 project_id를 못 구하면(row 없음) 안 보이는
     쪽으로 fail-closed — reference_registry.PROJECT_ID_RESOLVERS(story #2314가 evidence에
-    이미 재사용한 그 SSOT)를 여기서도 그대로 쓴다, 새 인증경로 발명 없음."""
+    이미 재사용한 그 SSOT)를 여기서도 그대로 쓴다, 새 인증경로 발명 없음.
+
+    ⛔chat_message는 예외 축 — project로 스코프되지 않는다(참여자 기반, #2261 시기부터 알려진
+    "넷째 경계"). PROJECT_ID_RESOLVERS에 없으므로 project 분기를 안 타고, POST 라우트이 이미
+    쓰는 `_can_read_conversation`(participant 기반 SSOT)를 그대로 재사용한다 — conversation_id
+    는 ConversationMessage row를 다시 join하지 않고 `Reference.proof_payload`에 이미 저장된
+    값을 호출부가 넘겨준다(그 payload가 유일한 SSOT — write 시점에 검증된 그 conversation_id
+    그대로, message row 존재 여부와 무관하게 일관된 값)."""
     from app.services.project_auth import has_project_access
     from app.services.reference_registry import PROJECT_ID_RESOLVERS
 
     visible: dict[str, set[uuid.UUID]] = {}
+    conversation_id_by_target_id = conversation_id_by_target_id or {}
     for target_type, target_ids in ids_by_type.items():
+        if target_type == "chat_message":
+            from app.routers.conversations import _can_read_conversation
+
+            for target_id in target_ids:
+                conv_id = conversation_id_by_target_id.get(target_id)
+                if conv_id is not None and await _can_read_conversation(conv_id, session, auth, org_id):
+                    visible.setdefault(target_type, set()).add(target_id)
+            continue
+
         resolver = PROJECT_ID_RESOLVERS.get(target_type)
         if resolver is None:
             continue
@@ -628,9 +646,12 @@ async def get_story_outgoing_references(
     의 반대편, 즉 이 story가 가리키는 대상들)의 가시성은 `_visible_target_ids`가 판정 —
     C-3(#2261)이 세운 것과 같은 규율(못 보는 대상은 존재 사실도 새지 않는다).
 
-    응답은 메타만 싣는다(form·target_type·target_id·created_at·still_exists) — proof_payload
-    는 여기 안 싣는다(PO 판정 2026-07-29: 목록에 스냅샷 payload를 통째로 실으면 응답이
-    무거워진다 — payload 전량은 단건 상세 라우트의 몫, 이 라우트가 아니다)."""
+    응답은 proof_payload를 그대로 싣는다(PO 정정, 2026-07-29): 처음엔 "목록=메타만·단건=
+    payload전량"으로 갈랐으나, 그 갈림이 소비 패턴을 안 보고 낸 판단이었다 — C-7 proof
+    섹션은 카드를 여럿 펼쳐 보이는 자리라 단건 상세 라우트를 따로 지으면 N+1이 된다(그리고
+    아무도 그 단건 라우트를 지은 적이 없어 "저장은 되는데 읽을 길이 없다"는 상태이기도
+    했다). 크기 문제는 응답 shape이 아니라 저장 시점 범위 상한으로 막는다(PO: 지금은 하드
+    리밋 없이 로그만, 실사용 뒤 정한다)."""
     if direction != "outgoing":
         raise HTTPException(status_code=400, detail="direction must be 'outgoing' (incoming: use /backlinks)")
 
@@ -643,16 +664,21 @@ async def get_story_outgoing_references(
     from app.services.reference_core import list_references
 
     raw_targets = (await repo.session.execute(
-        select(Reference.target_type, Reference.target_id).where(
+        select(Reference.target_type, Reference.target_id, Reference.proof_payload).where(
             Reference.org_id == repo.org_id, Reference.source_type == "story", Reference.source_id == id,
         )
     )).all()
     ids_by_type: dict[str, set[uuid.UUID]] = {}
-    for target_type, target_id in raw_targets:
+    conversation_id_by_target_id: dict[uuid.UUID, uuid.UUID] = {}
+    for target_type, target_id, proof_payload in raw_targets:
         ids_by_type.setdefault(target_type, set()).add(target_id)
+        if target_type == "chat_message" and proof_payload and proof_payload.get("conversation_id"):
+            conversation_id_by_target_id[target_id] = uuid.UUID(str(proof_payload["conversation_id"]))
 
     caller_id = uuid.UUID(str(auth.user_id))
-    visible = await _visible_target_ids(repo.session, repo.org_id, caller_id, ids_by_type)
+    visible = await _visible_target_ids(
+        repo.session, repo.org_id, caller_id, ids_by_type, auth, conversation_id_by_target_id,
+    )
 
     refs = await list_references(
         repo.session, org_id=repo.org_id, entity_type="story", entity_id=id,
@@ -667,6 +693,7 @@ async def get_story_outgoing_references(
                 "target_id": str(r.target_id),
                 "created_at": r.created_at.isoformat(),
                 "still_exists": r.still_exists,
+                "proof_payload": r.proof_payload,
             }
             for r in refs
         ]
@@ -753,6 +780,7 @@ async def create_story_proof_reference(
         "target_type": ref.target_type,
         "target_id": str(ref.target_id),
         "created_at": ref.created_at.isoformat(),
+        "proof_payload": ref.proof_payload,
     }
 
 

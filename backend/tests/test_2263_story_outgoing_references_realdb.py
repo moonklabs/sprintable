@@ -109,9 +109,9 @@ async def _seed(session):
 
 
 @pytest.mark.anyio
-async def test_outgoing_references_shows_visible_target_only_no_payload():
-    """양성대조 + 누설0: visible_doc만 나오고, form·target 메타는 있으나 payload 키 자체가
-    응답에 없다(목록=메타만, PO 판정)."""
+async def test_outgoing_references_shows_visible_target_only_includes_payload():
+    """양성대조 + 누설0: visible_doc만 나오고, form·target 메타·proof_payload(mention이라
+    None)를 싣는다(PO 정정 — 목록도 payload를 싣는다, 단건 상세 라우트는 안 지음)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -136,7 +136,11 @@ async def test_outgoing_references_shows_visible_target_only_no_payload():
             assert item["form"] == "mention"
             assert item["target_type"] == "doc"
             assert item["still_exists"] is True
-            assert "proof_payload" not in item, "목록은 메타만 — payload 키 자체가 없어야 한다"
+            # PO 정정(2026-07-29): 목록도 proof_payload를 싣는다(단건 상세 라우트를 안 지음 —
+            # C-7이 카드를 여럿 펼쳐 보이는 자리라 단건이면 N+1). mention form엔 payload가
+            # 애초에 없어 None — "키가 없다"가 아니라 "값이 null"이다(필드 자체는 항상 존재).
+            assert "proof_payload" in item
+            assert item["proof_payload"] is None
         finally:
             await client.aclose()
     finally:
@@ -247,7 +251,7 @@ async def test_outgoing_references_mutation_self_check_visibility_gate_actually_
 
         original_visible = stories_module._visible_target_ids
 
-        async def _always_all_visible(session, org_id, caller_id, ids_by_type):
+        async def _always_all_visible(session, org_id, caller_id, ids_by_type, auth, conversation_id_by_target_id=None):
             return {t: set(ids) for t, ids in ids_by_type.items()}
 
         stories_module._visible_target_ids = _always_all_visible
@@ -282,10 +286,11 @@ async def test_outgoing_references_mutation_self_check_visibility_gate_actually_
 
 @pytest.mark.anyio
 async def test_create_proof_reference_readable_conversation_201_then_read_back():
-    """왕복(write→read) — 대화를 읽을 수 있는 caller가 proof를 박으면 201, 그 다음 GET
-    /references(outgoing)에서 실제로 보인다(단, still_exists는 chat_message가
-    ENTITY_RESOLVERS 밖이라 None — target_type=doc/story류와 다른 축, 이 테스트는 status
-    201·저장 자체만 확認)."""
+    """왕복(write→read) — 대화를 읽을 수 있는 caller가 proof를 박으면 201 + proof_payload를
+    그대로 돌려받고(PO 정정: POST 응답도 payload를 싣는다 — 저장 직후 재조회 없이 그릴 수
+    있게), 그 다음 GET /references(outgoing)에서도 같은 payload로 보인다. still_exists는
+    chat_message가 이제 ENTITY_RESOLVERS에 등록돼(story #2263) True로 판정된다 — 예전
+    가정(등록 밖이라 None)은 이 PR 자체가 바꾼 축이다."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -296,23 +301,31 @@ async def test_create_proof_reference_readable_conversation_201_then_read_back()
             member_id, caller_id = await _make_human_member(s, org.id, project.id)
             source_story = await _make_story(s, org.id, project.id, title="Source")
             conv = await _make_conversation(s, org.id, project.id, participant_ids=[member_id])
-            message_id = uuid.uuid4()
+
+            from app.models.conversation import ConversationMessage
+            msg = ConversationMessage(
+                id=uuid.uuid4(), conversation_id=conv.id, sender_id=member_id, content="quoted text",
+            )
+            s.add(msg)
+            await s.commit()
+            message_id = msg.id
 
         await _setup_app_human(app, Session, caller_id, org.id)
         client = _client_for(app)
         try:
+            payload = {
+                "conversation_id": str(conv.id),
+                "start_message_id": str(message_id), "end_message_id": str(message_id),
+                "snapshot": [{
+                    "message_id": str(message_id), "author_id": str(caller_id),
+                    "content": "quoted text", "created_at": "2026-07-29T00:00:00Z",
+                }],
+            }
             resp = await client.post(
                 f"/api/v2/stories/{source_story.id}/references",
                 json={
                     "target_type": "chat_message", "target_id": str(message_id), "form": "proof",
-                    "proof_payload": {
-                        "conversation_id": str(conv.id),
-                        "start_message_id": str(message_id), "end_message_id": str(message_id),
-                        "snapshot": [{
-                            "message_id": str(message_id), "author_id": str(caller_id),
-                            "content": "quoted text", "created_at": "2026-07-29T00:00:00Z",
-                        }],
-                    },
+                    "proof_payload": payload,
                 },
             )
             assert resp.status_code == 201, resp.text
@@ -320,6 +333,18 @@ async def test_create_proof_reference_readable_conversation_201_then_read_back()
             assert body["form"] == "proof"
             assert body["target_type"] == "chat_message"
             assert body["target_id"] == str(message_id)
+            assert body["proof_payload"] == payload, "POST 응답도 payload를 그대로 돌려줘야 한다"
+
+            read_resp = await client.get(
+                f"/api/v2/stories/{source_story.id}/references", params={"direction": "outgoing"},
+            )
+            assert read_resp.status_code == 200, read_resp.text
+            items = read_resp.json()["data"]
+            assert len(items) == 1
+            assert items[0]["proof_payload"] == payload, "GET 목록에서도 같은 payload가 보여야 한다"
+            assert items[0]["still_exists"] is True, (
+                "chat_message가 이제 ENTITY_RESOLVERS에 등록돼 True로 판정돼야 한다"
+            )
         finally:
             await client.aclose()
     finally:
