@@ -69,3 +69,9 @@ class TaskResponse(BaseModel):
     def next_action_code(self) -> str | None:
         from app.services.next_action import verification_next_action
         return verification_next_action(self_reported=self.self_reported, human_verified=self.human_verified)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_category(self) -> str | None:
+        from app.services.next_action import next_action_category
+        return next_action_category(self.next_action_code)

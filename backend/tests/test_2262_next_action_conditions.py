@@ -1,14 +1,19 @@
 """story #2262(C-4) AC9 — app.services.next_action의 조건식 단위 검증. 순수 함수(DB 무접촉)라
 실PG 없이 돈다. doc `e-connect-c4-trigger-condition-table`의 발생조건표를 그대로 pin한다 —
-①있음/②확定 없음/④주체 세 축을 각 함수마다 양성·음성 대조로 고정."""
+①있음/②확定 없음/④주체 세 축을 각 함수마다 양성·음성 대조로 고정.
+
+⛔PO 판정(2026-07-29, PR#2633 머지 後 리뷰): `artifact_next_action`(unresolved_comment_count
+재노출뿐)·doc_next_action의 `superseded_by` 분기(superseded_by 원자 필드와 중복)를 뺐다 —
+next_action.py 모듈 docstring 참조. 아래 테스트도 그에 맞춰 갱신."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
 from app.services.next_action import (
-    artifact_next_action,
+    NEXT_ACTION_CATEGORIES,
     doc_next_action,
     hypothesis_next_action,
+    next_action_category,
     outcome_measurement_next_action,
     verification_next_action,
 )
@@ -101,19 +106,11 @@ def test_verification_already_resolved_returns_none_either_direction():
 
 
 def test_doc_draft_returns_decision_pending():
-    assert doc_next_action(status="draft", superseded_by=None) == "decision_pending"
+    assert doc_next_action(status="draft") == "decision_pending"
 
 
-def test_doc_superseded_returns_superseded_even_if_also_draft():
-    """superseded_by가 우선 — 더 확定적인 다음 행동(가야 할 곳이 이미 정해짐)."""
-    import uuid
-    target = uuid.uuid4()
-    assert doc_next_action(status="draft", superseded_by=target) == "superseded"
-    assert doc_next_action(status="active", superseded_by=target) == "superseded"
-
-
-def test_doc_decided_not_superseded_returns_none():
-    assert doc_next_action(status="active", superseded_by=None) is None
+def test_doc_decided_returns_none():
+    assert doc_next_action(status="active") is None
 
 
 # ─── hypothesis_next_action ───────────────────────────────────────────────────
@@ -145,12 +142,35 @@ def test_hypothesis_measuring_not_yet_due_returns_none():
     ) is None
 
 
-# ─── artifact_next_action ─────────────────────────────────────────────────────
+# ─── next_action_category (PO 판정 2026-07-29, §3-1과 같은 축) ───────────────
 
 
-def test_artifact_unresolved_returns_code():
-    assert artifact_next_action(unresolved_comment_count=3) == "artifact_has_unresolved_comments"
+def test_category_none_code_returns_none():
+    assert next_action_category(None) is None
 
 
-def test_artifact_zero_returns_none():
-    assert artifact_next_action(unresolved_comment_count=0) is None
+def test_category_actionable_codes():
+    assert next_action_category("outcome_measurement_due") == "actionable"
+    assert next_action_category("hypothesis_measurement_due") == "actionable"
+
+
+def test_category_waiting_codes():
+    assert next_action_category("verification_pending") == "waiting"
+    assert next_action_category("decision_pending") == "waiting"
+
+
+def test_category_unknown_code_raises():
+    """새 코드를 next_action.py에 추가하면서 NEXT_ACTION_CATEGORIES에 안 넣는 실수를
+    조용히 통과시키지 않는다 — KeyError로 즉시 드러난다."""
+    import pytest
+    with pytest.raises(KeyError):
+        next_action_category("some_future_code_nobody_classified")
+
+
+def test_all_returned_codes_are_classified():
+    """이 모듈이 실제로 반환하는 모든 코드가 NEXT_ACTION_CATEGORIES에 있다 — 회귀 시
+    새 코드를 추가하고 분류를 빠뜨리면 여기서 잡힌다."""
+    assert set(NEXT_ACTION_CATEGORIES) == {
+        "outcome_measurement_due", "hypothesis_measurement_due",
+        "verification_pending", "decision_pending",
+    }

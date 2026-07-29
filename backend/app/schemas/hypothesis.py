@@ -123,6 +123,12 @@ class HypothesisResponse(BaseModel):
             status=self.status, measure_after=self.measure_after, metric_definition=self.metric_definition,
         )
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_category(self) -> str | None:
+        from app.services.next_action import next_action_category
+        return next_action_category(self.next_action_code)
+
     @classmethod
     def from_model(
         cls,

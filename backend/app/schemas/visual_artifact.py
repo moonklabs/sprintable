@@ -107,13 +107,12 @@ class VisualArtifactSummary(BaseModel):
     # 라우터가 model_validate 前 transient attr로 세팅(agent_delegate_ids 패턴 동형) — 항상
     # 세팅되므로(N+1 방지 배치 조회, 0도 명시) 여기 기본값(0)이 실제로 쓰일 일은 없다.
     unresolved_comment_count: int = 0
-
-    # story #2262(C-4) AC9: 참조 카드의 「다음 행동」 재료 — SSOT는 app.services.next_action.
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def next_action_code(self) -> str | None:
-        from app.services.next_action import artifact_next_action
-        return artifact_next_action(unresolved_comment_count=self.unresolved_comment_count)
+    # ⛔story #2262(C-4, PO 판정 2026-07-29): 여기 있던 `next_action_code`(artifact_next_action
+    # 호출)를 뺐다 — `unresolved_comment_count`(바로 위)가 이미 원자 필드로 응답에 있어
+    # 완전히 같은 사실을 두 칸에 중복으로 실었던 것(한 사실이 두 칸에 살면 언젠가 갈라진다).
+    # 근거는 "응답에 있다"가 아니라 "FE가 이 원자 필드로 직접 판정할 수 있다"인 것 — 지금은
+    # 아무도 안 읽지만(next_action_code 소비 0%) 읽을 재료는 이미 서 있다. 빼도 없어지는
+    # 동작이 0인 이유가 바로 이것(FE 소비 0%였다는 사실 그대로).
 
 
 class VisualArtifactDetail(BaseModel):
@@ -143,13 +142,8 @@ class VisualArtifactDetail(BaseModel):
     # from_attributes를 안 쓰므로(라우터가 키워드 인자로 직접 생성) 기본값 0이 실제로
     # 쓰이지 않는다는 보장이 없다 — 호출부(_load_detail)가 항상 명시로 넘긴다.
     unresolved_comment_count: int = 0
-
-    # story #2262(C-4) AC9: VisualArtifactSummary와 동형.
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def next_action_code(self) -> str | None:
-        from app.services.next_action import artifact_next_action
-        return artifact_next_action(unresolved_comment_count=self.unresolved_comment_count)
+    # ⛔story #2262(C-4, PO 판정 2026-07-29): VisualArtifactSummary와 동형 — 위 클래스의
+    # next_action_code 제거 사유 그대로(unresolved_comment_count 원자 필드와 중복).
 
 
 class CreateArtifactCommentRequest(BaseModel):

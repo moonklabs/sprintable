@@ -28,6 +28,7 @@ def test_story_response_exposes_next_action_code():
     )
     resp = StoryResponse.model_validate(obj)
     assert resp.next_action_code == "outcome_measurement_due"
+    assert resp.next_action_category == "actionable"
 
 
 def test_doc_response_exposes_next_action_code():
@@ -42,9 +43,13 @@ def test_doc_response_exposes_next_action_code():
     )
     resp = DocResponse.model_validate(obj)
     assert resp.next_action_code == "decision_pending"
+    assert resp.next_action_category == "waiting"
 
 
-def test_artifact_summary_exposes_next_action_code():
+def test_artifact_summary_has_no_next_action_code():
+    """⛔story #2262(C-4, PO 판정 2026-07-29): next_action_code를 뺐다 —
+    unresolved_comment_count(원자 필드, 아래)가 이미 응답에 있어 완전히 같은 사실을
+    두 칸에 실었던 것. FE는 unresolved_comment_count>0으로 직접 판정한다."""
     from app.schemas.visual_artifact import VisualArtifactSummary
 
     obj = SimpleNamespace(
@@ -53,7 +58,8 @@ def test_artifact_summary_exposes_next_action_code():
         canvas_bounds=None, unresolved_comment_count=2,
     )
     resp = VisualArtifactSummary.model_validate(obj)
-    assert resp.next_action_code == "artifact_has_unresolved_comments"
+    assert not hasattr(resp, "next_action_code")
+    assert resp.unresolved_comment_count == 2
 
 
 def test_task_response_exposes_next_action_code():
@@ -67,6 +73,7 @@ def test_task_response_exposes_next_action_code():
     )
     resp = TaskResponse.model_validate(obj)
     assert resp.next_action_code == "verification_pending"
+    assert resp.next_action_category == "waiting"
 
 
 def test_goal_response_exposes_next_action_code():
@@ -82,6 +89,7 @@ def test_goal_response_exposes_next_action_code():
     )
     resp = GoalResponse.model_validate(obj)
     assert resp.next_action_code == "outcome_measurement_due"
+    assert resp.next_action_category == "actionable"
 
 
 def test_sprint_response_exposes_next_action_code():
@@ -98,3 +106,4 @@ def test_sprint_response_exposes_next_action_code():
     )
     resp = SprintResponse.model_validate(obj)
     assert resp.next_action_code == "outcome_measurement_due"
+    assert resp.next_action_category == "actionable"
