@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { selectVisibleQueue, countChangedSince, getLastSeenMs, markSeenNow } from './derive-action-zone';
-import type { QueueItem } from './types';
+import { selectVisibleQueue, countChangedSince, countAttentionChangedSince, getLastSeenMs, markSeenNow } from './derive-action-zone';
+import type { QueueItem, AttentionItem } from './types';
 
 function item(type: QueueItem['type'], createdAt: string | null = null): QueueItem {
   return { type, priority: 'info', context: {}, created_at: createdAt };
+}
+
+function attentionItem(stuckSince: string | null = null): AttentionItem {
+  return { type: 'agent_stuck', severity: 'warn', auto_detected: true, entity_type: 'story', entity_id: 'e1', gate_type: null, stuck_since: stuckSince };
 }
 
 describe('selectVisibleQueue — story #2288 §7-4·§8-4', () => {
@@ -56,6 +60,22 @@ describe('countChangedSince — story #2288 §8-8', () => {
       item('my_blockers', null), // created_at 없음 — 안 셈
     ];
     expect(countChangedSince(queue, lastSeen)).toBe(1);
+  });
+});
+
+describe('countAttentionChangedSince — story #2288, PO 확認(2026-07-29): §8-8을 attention까지 넓힘', () => {
+  it('기준점이 없으면(첫 방문) 0', () => {
+    expect(countAttentionChangedSince([attentionItem('2026-07-29T00:00:00Z')], null)).toBe(0);
+  });
+
+  it('stuck_since가 기준점 이후인 것만 센다(생겨난 시점으로 씀)', () => {
+    const lastSeen = new Date('2026-07-29T00:00:00Z').getTime();
+    const attention = [
+      attentionItem('2026-07-28T23:00:00Z'), // 이전 — 안 셈
+      attentionItem('2026-07-29T01:00:00Z'), // 이후 — 셈
+      attentionItem(null), // 없음 — 안 셈
+    ];
+    expect(countAttentionChangedSince(attention, lastSeen)).toBe(1);
   });
 });
 

@@ -191,4 +191,18 @@ describe('ActionZone — story #2288 §8-8 자리를 비운 사이', () => {
     await render(data); // 같은 data, 재마운트 — 기준점이 갱신됐으면 더 이상 "새것"이 아니다.
     expect(container.textContent).not.toContain('변경이 있었습니다');
   });
+
+  it('story #2288, PO 확認(2026-07-29): attention(감지 신호) 쪽 새 항목도 같은 배너에 합산된다', async () => {
+    store.set('sprintable:command-center:v1:last-seen-actions', String(new Date('2026-07-29T00:00:00Z').getTime()));
+    await render({
+      action_queue: { scope: 'project', items: [] },
+      attention: {
+        scope: 'project',
+        items: [{ type: 'agent_stuck', severity: 'warn', auto_detected: true, entity_type: 'story', entity_id: 'e1', gate_type: null, stuck_since: '2026-07-29T01:00:00Z' }],
+        pending: [],
+      },
+      is_clear: false,
+    });
+    expect(container.textContent).toContain('내 것 1건에 변경이 있었습니다');
+  });
 });

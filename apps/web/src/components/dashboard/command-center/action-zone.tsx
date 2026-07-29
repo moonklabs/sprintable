@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ShieldCheck, GitPullRequest, Ban, AlertTriangle, CheckCircle2, ChevronRight, History } from 'lucide-react';
 import { type MyActions, type Priority, type QueueItem, type AttentionItem } from './types';
-import { selectVisibleQueue, countChangedSince, getLastSeenMs, markSeenNow, minutesAgo } from './derive-action-zone';
+import { selectVisibleQueue, countChangedSince, countAttentionChangedSince, getLastSeenMs, markSeenNow, minutesAgo } from './derive-action-zone';
 
 const QUEUE_CAP = 5; // now-face.tsx CAP 관례 재사용(§7-4 잘림-보이기).
 
@@ -110,18 +110,22 @@ export function ActionZone({ data, resolveName, epicTitles }: {
 }) {
   const t = useTranslations('dashboard');
   const queue = useMemo(() => data?.action_queue.items ?? [], [data]);
-  const attention = data?.attention.items ?? [];
+  const attention = useMemo(() => data?.attention.items ?? [], [data]);
   const hasPending = (data?.attention.pending.length ?? 0) > 0;
   const isClear = data?.is_clear === true;
 
   // story #2288 §8-4·§7-4: 자를 땐 review_merge부터, 잘렸으면 반드시 말한다.
   const { visible: visibleQueue, cutCount } = selectVisibleQueue(queue, QUEUE_CAP);
 
-  // story #2288 §8-8(기존 3관계 범위): 방문 사이 새로 생긴 항목 수를 접힌 줄로 알린다.
+  // story #2288 §8-8: 방문 사이 새로 생긴 것 — action_queue 3관계뿐 아니라 attention(감지
+  // 신호, org-scope이나 「지금 볼 것」에 이미 뜨는 것)도 PO 확認(2026-07-29)으로 포함.
   // 처음 방문(기준점 없음)은 0 — 「모름」을 「전부 새것」으로 지어내지 않는다(getLastSeenMs 참조).
   // 읽기는 useSyncExternalStore(하이드레이션 안전, setState-in-effect 없음) · 쓰기만 effect로.
   const lastSeenMs = useSyncExternalStore(subscribeNoop, getLastSeenMs, getServerSnapshot);
-  const awayCount = useMemo(() => countChangedSince(queue, lastSeenMs), [queue, lastSeenMs]);
+  const awayCount = useMemo(
+    () => countChangedSince(queue, lastSeenMs) + countAttentionChangedSince(attention, lastSeenMs),
+    [queue, attention, lastSeenMs],
+  );
   const lastSeenMinutesAgo = minutesAgo(lastSeenMs);
   useEffect(() => {
     if (!data) return;
@@ -181,6 +185,8 @@ export function ActionZone({ data, resolveName, epicTitles }: {
               <p className="text-xs text-muted-foreground">{t('ccQueueEmpty')}</p>
             )}
             {cutCount > 0 ? (
+              // ccQueueTruncated 문구는 자리만 확保 — 최종 워딩은 유나 lane(§8-4 규율을
+              // 담아 통일된 톤으로 검수 예정, 지금은 기능 검증용 임시 문구).
               <p className="text-[11px] text-muted-foreground">{t('ccQueueTruncated', { shown: visibleQueue.length, total: queue.length })}</p>
             ) : null}
           </div>
