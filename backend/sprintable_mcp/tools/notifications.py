@@ -63,14 +63,20 @@ async def check_notifications(args: CheckNotificationsInput) -> list[TextContent
 
 
 async def mark_notification_read(args: MarkNotificationReadInput) -> list[TextContent]:
-    """알림 읽음 처리 — story #2281 AC3ⓒ: 단건 읽음처리 라우트가 서버에 없다(#2271 발견).
-    ⓐ(서버에 만든다)는 알림 자체의 재설계(#2201·#2279)와 순서가 얽혀 PO가 순서를 잡기로
-    했다 — 그때까지 이 도구는 «조용한 404» 대신 명시적으로 미지원임을 말한다(AC4)."""
-    return err(
-        "단건 알림 읽음처리는 서버에 아직 구현돼 있지 않습니다(story #2281 — "
-        "알림 재설계 #2201/#2279와 순서가 얽혀 보류 중). 전체 읽음처리는 "
-        "mark_all_notifications_read를 쓰세요."
-    )
+    """알림 읽음 처리 — story #2281 재정정(2026-07-29): PATCH /api/v2/notifications/{id}/read
+    가 실제로 있다(notifications.py mark_read, 48de882a에서 FE Inbox 클릭 경로 보강 목적으로
+    이미 신설됨). 서버 라우트는 body를 받지 않고 항상 읽음으로만 설정한다(unmark 기능 자체가
+    없다) — is_read=False 를 조용히 무시하지 않고 명시 오류로 막는다(mark_all_notifications_read
+    의 type 필터와 동형 규율)."""
+    if args.is_read is False:
+        return err(
+            "알림을 다시 안읽음으로 되돌리는 기능은 서버가 지원하지 않습니다"
+            "(무시하고 읽음 처리하면 의도와 다른 결과가 조용히 발생하므로 막습니다)."
+        )
+    try:
+        return ok(await client.patch(f"/api/v2/notifications/{args.notification_id}/read"))
+    except Exception as exc:
+        return err(str(exc))
 
 
 async def mark_all_notifications_read(args: MarkAllNotificationsReadInput) -> list[TextContent]:
