@@ -329,7 +329,14 @@ _TOOL_DEFS: list[tuple] = [
      SprintableInput, list_backlog),
     ("sprintable_add_story",
      "[일감] 스토리 생성. 응답 reference_token 필드가 이 스토리를 가리키는 참조 토큰"
-     "([제목](entity:story:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
+     "([제목](entity:story:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282). "
+     "⭐story #2267(C-9): 이 스토리가 «무엇에서» 만들어졌는지 아는 건 만드는 당신뿐이다 — "
+     "채워라. 지금 이 대화(오르테가군의 지시·논의)에서 나온 것이면 "
+     "origin_type=\"chat_message\"·origin_id=<이 스토리를 만들게 한 그 메시지의 id>를 "
+     "같이 보내라. 다른 스토리를 쪼개거나 복제한 것이면 origin_type=\"story\"·"
+     "origin_id=<원본 스토리 id>. 회의에서 나온 것이면 origin_type=\"meeting\". "
+     "둘 다 줘야 유효(하나만 있으면 조용히 무시된다) — 안 채우면 이 스토리의 출처는 "
+     "영원히 «미수집」으로 남는다(소급 안 됨, story #2267 AC5).",
      AddStoryInput, add_story),
     ("sprintable_update_story",
      "[일감] 스토리 수정. 응답 reference_token은 sprintable_add_story와 동일.",
