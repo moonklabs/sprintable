@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { ShieldCheck } from 'lucide-react';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
+import { formatRelativeTime } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
 import {
   parseAttentionQueueSignals, buildAttentionQueueFromBe, buildAttentionQueue, diffAttentionQueueItemIds,
@@ -58,6 +59,7 @@ function AttentionRow({ item, highlighted, onNavigate }: {
         human={item.actor && !item.actor.isAgent ? { name: item.actor.name, role: '' } : undefined}
         agent={item.actor?.isAgent ? { name: item.actor.name, initial: item.actor.name.slice(0, 1) } : undefined}
         gate={{ action: item.actionLabel, href: item.href, tone: item.actionTone }}
+        duration={item.enteredStateAtMs !== null ? formatRelativeTime(new Date(item.enteredStateAtMs).toISOString()) : undefined}
         className="rounded-none border-0"
       />
     </div>

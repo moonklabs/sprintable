@@ -46,6 +46,10 @@ export interface ProofCapsuleProps {
   proofState: ProofState;
   stateLabel: string;
   claim: string;
+  /** row 밀도 전용(story #2249, Attention Queue) — 「그 상태에 들어간 지 얼마나 됐는지」를 호출부가
+   * 미리 포맷해 넘긴다(예: "3일 전"). 모르면 아예 넘기지 않는다(빈 문자열/"모름" 라벨로 지어내지
+   * 않음 — glance.py의 entered_state_at이 null인 신호는 값 자체가 없다). */
+  duration?: string;
   /** full/audit만 사용 — card/row는 다중 담당자(예: Board card의 assignee 스택)를 자체
    * 렌더하는 경우가 많아 요구하지 않는다(optional, 2026-07-11 Board 확산 시 완화). */
   human?: ProofCapsuleHuman;
@@ -75,7 +79,7 @@ export interface ProofCapsuleProps {
  * glow·999px pill·숫자 KPI화·raw CoT·초록만-완료 전부 미사용(색은 항상 stateLabel 텍스트 병기).
  */
 export function ProofCapsule({
-  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, density, footer, className,
+  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration,
 }: ProofCapsuleProps) {
   if (density === 'audit') {
     return (
@@ -86,7 +90,7 @@ export function ProofCapsule({
     return (
       <InlineRow
         proofState={proofState} stateLabel={stateLabel} claim={claim} human={human} agent={agent}
-        gate={gate} className={className}
+        gate={gate} duration={duration} className={className}
       />
     );
   }
@@ -314,14 +318,15 @@ const GATE_BUTTON_TONE: Record<NonNullable<ProofCapsuleGate['tone']>, string> = 
 };
 
 function InlineRow({
-  proofState, stateLabel, claim, human, agent, gate, className,
-}: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'human' | 'agent' | 'gate' | 'className'>) {
+  proofState, stateLabel, claim, human, agent, gate, duration, className,
+}: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'human' | 'agent' | 'gate' | 'duration' | 'className'>) {
   return (
     <CutCornerShell state={proofState} cut={16} className={cn('w-full', className)}>
       <div className="flex min-h-[52px] min-w-0 flex-1 items-center gap-2.5 px-3 py-2">
         <span className="w-24 shrink-0"><StateHeader state={proofState} label={stateLabel} /></span>
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-proof-ink">{claim}</span>
         <span className="inline-flex shrink-0 items-center gap-2">
+          {duration ? <span className="shrink-0 text-[10.5px] font-medium text-proof-ink-3">{duration}</span> : null}
           {human ? <ProofAvatar label={initials(human.name)} size={22} /> : null}
           {agent ? <ProofAvatar label={agent.initial} isAgent size={22} /> : null}
           {gate ? (

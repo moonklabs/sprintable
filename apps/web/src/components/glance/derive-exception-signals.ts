@@ -119,6 +119,9 @@ export function toExceptionQueueItems(
     actionLabel: labels.action[sig.kind],
     actionTone: TONE_BY_KIND[sig.kind],
     href: hrefFor(sig),
+    // story #2249: 이 엔드포인트(BeAttentionSignal)는 entered_state_at 자체를 안 실어(exception-stream
+    // 설계 자체가 "활동량/타임스탬프 0") null이 정확한 값 — 위조 금지.
+    enteredStateAtMs: null,
     sortKey: 0,
   }));
   return buildAttentionQueue(items, items.length).shown;
