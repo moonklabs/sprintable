@@ -49,7 +49,7 @@
   "mobileTabBar": {
     "navLabel": "Mobile tab navigation",
     "now": "Now",
-    "approvals": "Notifications",
+    "approvals": "Approvals",
     "chat": "Chat",
     "more": "More",
     "moreTempNotice": "Temporary list — will be replaced by the full screen soon."

@@ -16,9 +16,14 @@ import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
 // route 매핑(오르테가군 확定, 2026-07-17): "지금"·"결재함" 탭은 셸-우선 원칙에 따라 최종 콘텐츠
 // (지금 홈=S8/#1964, 결재함 통합큐=S4/#1960) 없이 기존 라우트를 그대로 가리킨다 — 후속 스토리가
 // 그 자리에서 콘텐츠만 원자적으로 교체한다(빅뱅 전환 금지).
-const TABS = [
+// export: story #2279 회귀가드(href가 조용히 되돌아가지 않게 직접 단위테스트).
+export const TABS = [
   { key: 'now', href: '/glance', icon: CircleDot, labelKey: 'now' as const },
-  { key: 'approvals', href: '/inbox', icon: Inbox, labelKey: 'approvals' as const },
+  // story #2279(PO 판정, 2026-07-29): 라벨("결재")·배지(게이트 대기 수)와 착지가 어긋나
+  // 있던 것 — 이름=가는 곳=세는 것 셋을 한 줄로 맞춘다. #2164가 세운 "진입점 라벨은 착지
+  // 탭과 일치" 규칙은 그대로 두고 착지 쪽을 게이트 탭으로 옮긴다(라벨을 규칙에 맞춘다).
+  // "알림" 탭은 안 없어진다 — /inbox 페이지 내부 탭 스위처로 한 번 더 탭하면 그대로 있다.
+  { key: 'approvals', href: '/inbox?tab=gates', icon: Inbox, labelKey: 'approvals' as const },
   { key: 'chat', href: '/chats', icon: MessageSquare, labelKey: 'chat' as const },
   // "전체"는 시안상 정식 목록화 대상(S9/#1965) — 기존 모바일 GNB Sheet(햄버거) 재사용은
   // blueprint §3.2 "모바일 사이드바 폐기" 방향과 충돌해 하지 않는다(오르테가군 확定). 이 스토리

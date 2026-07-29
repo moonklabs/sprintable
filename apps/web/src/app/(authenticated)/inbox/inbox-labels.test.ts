@@ -31,26 +31,33 @@ describe('inbox tab labels (#2164)', () => {
       expect((messages.inbox as Record<string, unknown>).title).toBeUndefined();
     });
 
-    // 파울로 정정(2026-07-25): 사이드바/모바일탭/커맨드팔레트 진입점이 전부 bare `/inbox`
+    // 파울로 정정(2026-07-25): 사이드바/커맨드팔레트 진입점이 전부 bare `/inbox`
     // (=알림 탭)로 착지하는데 라벨은 "결재함"이었다 — "가장 많이 눌리는 그 이름"이 여전히
     // 어긋나 있으면 반쪽. 진입점 라벨은 착지하는 탭 이름과 일치해야 한다(area 진입점 원칙).
-    it(`${locale}: /inbox(bare) 진입점 라벨(GNB·모바일탭·커맨드팔레트·인박스내 뒤로가기)이 착지 탭과 일치한다`, () => {
+    it(`${locale}: /inbox(bare) 진입점 라벨(GNB·커맨드팔레트·인박스내 뒤로가기)이 착지 탭과 일치한다`, () => {
       const approvalsWord = locale === 'ko' ? '결재함' : 'Approvals';
       const notificationsLabel = messages.inbox.notificationsTabLabel;
 
       // app-sidebar.tsx: <Link href="/inbox" /> 라벨
       expect(messages.nav.inbox).toBe(notificationsLabel);
-      // mobile-tab-bar.tsx: { href: '/inbox', labelKey: 'approvals' } 라벨
-      expect(messages.mobileTabBar.approvals).toBe(notificationsLabel);
       // command-palette.tsx: { href: '/inbox', labelKey: 'goInbox' } 라벨
       expect(messages.commandPalette.goInbox).toContain(notificationsLabel);
       // inbox/page.tsx 모바일 상세뷰 "목록으로" — 알림 목록으로 돌아가는 것이므로 동일
       expect(messages.inbox.backToList).toBe(notificationsLabel);
 
-      // 이 넷 중 어느 것도 "결재함"/"Approvals"를 자칭하지 않는다(진짜 게이트 탭 전용 이름).
+      // 이 셋 중 어느 것도 "결재함"/"Approvals"를 자칭하지 않는다(진짜 게이트 탭 전용 이름).
       expect(messages.nav.inbox).not.toBe(approvalsWord);
-      expect(messages.mobileTabBar.approvals).not.toBe(approvalsWord);
       expect(messages.inbox.backToList).not.toBe(approvalsWord);
+    });
+
+    // story #2279(PO 판정, 2026-07-29): 모바일 탭바의 이 진입점만은 «다른 그룹»이다 —
+    // href가 `/inbox?tab=gates`로 게이트 탭에 착지하고, 배지도 게이트 대기 수(#api/gates)라
+    // "알림"이 아니라 "결재"가 맞는 이름이다(위 그룹과 같은 원칙 — 착지 탭과 이름을
+    // 맞춘다 — 을 «다른 착지 탭»에 적용한 것뿐, 원칙 자체가 바뀐 게 아니다).
+    it(`${locale}: 모바일 탭바 "결재" 진입점은 게이트 탭에 착지하므로 알림 라벨을 안 쓴다`, () => {
+      const notificationsLabel = messages.inbox.notificationsTabLabel;
+      expect(messages.mobileTabBar.approvals).not.toBe(notificationsLabel);
+      expect(messages.mobileTabBar.approvals).not.toBe('');
     });
 
     // gates/[id]/page.tsx의 "← 결재함" 뒤로가기는 게이트 워크플로 내부 이동이라 반대 원칙:

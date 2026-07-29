@@ -3,7 +3,7 @@
 // organization/settings 등, #1958 "전체" 스텁 목록 그대로)이 전부 회색이었다. getActiveTabKey가
 // #1951 매니페스트 SSOT(상세→parentTab)를 그대로 재사용해 정확히 판정하는지 고정.
 import { describe, expect, it } from 'vitest';
-import { getActiveTabKey } from './mobile-tab-bar';
+import { getActiveTabKey, TABS } from './mobile-tab-bar';
 
 describe('getActiveTabKey', () => {
   it('/glance 및 하위 경로는 now', () => {
@@ -39,5 +39,14 @@ describe('getActiveTabKey', () => {
 
   it('/more 자기 자신도 more', () => {
     expect(getActiveTabKey('/more')).toBe('more');
+  });
+});
+
+// story #2279(PO 판정, 2026-07-29): 라벨("결재")·배지(게이트 대기 수)·착지(href)가 한 줄로
+// 서야 한다 — bare `/inbox`(알림 탭 착지)로 되돌아가면 라벨과 다시 어긋난다.
+describe('TABS — story #2279 회귀가드', () => {
+  it('approvals 탭은 게이트 탭(/inbox?tab=gates)에 착지한다 — 알림 탭(bare /inbox)이 아니다', () => {
+    const approvalsTab = TABS.find((t) => t.key === 'approvals');
+    expect(approvalsTab?.href).toBe('/inbox?tab=gates');
   });
 });
