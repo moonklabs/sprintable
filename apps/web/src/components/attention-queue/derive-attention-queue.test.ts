@@ -21,7 +21,7 @@ const t = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'att
 const tEn = createTranslator({ locale: 'en', messages: enMessages, namespace: 'attentionQueue' }) as unknown as AttentionQueueTranslator;
 
 function beItem(overrides: Partial<BeAttentionItem> = {}): BeAttentionItem {
-  return { kind: 'verify_fail', story_id: 'story-1', title: '결제 복구 플로우', ref: {}, ...overrides };
+  return { kind: 'verify_fail', story_id: 'story-1', title: '결제 복구 플로우', ref: {}, entered_state_at: null, ...overrides };
 }
 
 describe('parseAttentionQueueSignals', () => {
@@ -72,6 +72,21 @@ describe('parseAttentionQueueSignals', () => {
       ],
     });
     expect(items).toHaveLength(0);
+  });
+
+  it('story #2249 — extracts entered_state_at when present as an ISO string', () => {
+    const items = parseAttentionQueueSignals({
+      items: [beItem({ entered_state_at: '2026-07-26T00:00:00.000Z' })],
+    });
+    expect(items[0]!.entered_state_at).toBe('2026-07-26T00:00:00.000Z');
+  });
+
+  it('story #2249 — defaults entered_state_at to null when absent or malformed (모름, 지어내지 않음)', () => {
+    const items = parseAttentionQueueSignals({
+      items: [beItem({ entered_state_at: undefined }), beItem({ entered_state_at: 12345 as unknown as null })],
+    });
+    expect(items[0]!.entered_state_at).toBeNull();
+    expect(items[1]!.entered_state_at).toBeNull();
   });
 });
 
@@ -148,17 +163,48 @@ describe('buildAttentionQueueFromBe', () => {
     ], tEn);
     expect(items[0]!.claim).toContain('blocked by 2');
   });
+
+  it('story #2249 — threads entered_state_at into enteredStateAtMs for 1:1 kinds (verify_fail/merge_ready)', () => {
+    const items = buildAttentionQueueFromBe([
+      beItem({ kind: 'verify_fail', entered_state_at: '2026-07-26T00:00:00.000Z' }),
+    ], t);
+    expect(items[0]!.enteredStateAtMs).toBe(Date.parse('2026-07-26T00:00:00.000Z'));
+    expect(items[0]!.sortKey).toBeGreaterThan(0);
+  });
+
+  it('story #2249 — enteredStateAtMs/sortKey stay null/0 when entered_state_at is unknown (blocked 등)', () => {
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'blocked', entered_state_at: null })], t);
+    expect(items[0]!.enteredStateAtMs).toBeNull();
+    expect(items[0]!.sortKey).toBe(0);
+  });
+
+  it('story #2249 — blocked 집계는 여러 신호 중 가장 이른(min) entered_state_at을 쓴다', () => {
+    const items = buildAttentionQueueFromBe([
+      beItem({ kind: 'blocked', story_id: 'story-1', entered_state_at: '2026-07-27T00:00:00.000Z' }),
+      beItem({ kind: 'blocked', story_id: 'story-1', entered_state_at: '2026-07-25T00:00:00.000Z' }),
+    ], t);
+    expect(items[0]!.enteredStateAtMs).toBe(Date.parse('2026-07-25T00:00:00.000Z'));
+  });
+
+  it('story #2249 — decision_needed는 먼저 등장한 신호(gate_pending/needs_input)의 entered_state_at을 쓴다', () => {
+    const items = buildAttentionQueueFromBe([
+      beItem({ kind: 'gate_pending', story_id: 'story-1', entered_state_at: '2026-07-26T00:00:00.000Z' }),
+      beItem({ kind: 'needs_input', story_id: 'story-1', entered_state_at: '2026-07-28T00:00:00.000Z' }),
+    ], t);
+    expect(items[0]!.enteredStateAtMs).toBe(Date.parse('2026-07-26T00:00:00.000Z'));
+  });
 });
 
 describe('buildAttentionQueue', () => {
   function item(kind: AttentionQueueItem['kind'], sortKey: number): AttentionQueueItem {
     return {
       id: `${kind}-${sortKey}`, kind, kindLabel: kind, proofState: kind === 'merge_ready' ? 'green' : 'amber',
-      claim: kind, actor: null, actionLabel: '가기', actionTone: 'neutral', href: '/board', sortKey,
+      claim: kind, actor: null, actionLabel: '가기', actionTone: 'neutral', href: '/board',
+      enteredStateAtMs: null, sortKey,
     };
   }
 
-  it('sorts amber-tier items before merge_ready (green), most-recent-first within a tier', () => {
+  it('sorts amber-tier items before merge_ready (green), longest-elapsed(체류시간)-first within a tier', () => {
     const { shown } = buildAttentionQueue([
       item('merge_ready', 100),
       item('verify_fail', 10),
@@ -185,7 +231,8 @@ describe('diffAttentionQueueItemIds (9ef0f914 — SSE-triggered refetch diff)', 
   function item(id: string, claim: string): AttentionQueueItem {
     return {
       id, kind: 'blocked', kindLabel: '막힘', proofState: 'amber', claim,
-      actor: null, actionLabel: '조율', actionTone: 'neutral', href: '/board', sortKey: 0,
+      actor: null, actionLabel: '조율', actionTone: 'neutral', href: '/board',
+      enteredStateAtMs: null, sortKey: 0,
     };
   }
 
