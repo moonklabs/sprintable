@@ -168,6 +168,10 @@ async def my_actions(
                 # story #2288 리뷰(2026-07-29, PO 지적): "미완료"는 명세5(review_merge)와
                 # «같은 자»를 써야 한다 — 안 그러면 같은 화면에 "다른 뜻의 미완료"가 둘 선다.
                 # _OPEN_EXCLUDED_STATUSES(파일 상단, 지금은 ("done",) 하나)가 그 SSOT다.
+                # ⛔이 상수는 Story 어휘로 지어졌다 — Task에 얹기 전 CHECK 제약을 직접
+                # 조회해 어휘가 같은지 실측했다(psql \d+ tasks, 2026-07-29): tasks_status_
+                # check = ANY('todo','in-progress','done') — Story와 "done" 하나로 동일하다.
+                # Task 전용 완료값이 따로 있었다면 이 재사용은 결함이었을 것(그런 값 없음).
                 Task.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 Task.deleted_at.is_(None),
                 Story.org_id == org_id,
