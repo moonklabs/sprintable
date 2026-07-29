@@ -73,6 +73,9 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # work_item_ids(다건 또는 0건 general)에 걸치는 cross-cutting 기록이라 add_evidence와
     # 동일 논리로 core 취급(백엔드 SSOT와 동기화, app/services/mcp_toolset.py 참고).
     "sprintable_add_judgment", "sprintable_list_judgments",
+    # story #2268(C-10, E-CONNECT — "세션 시작 컨텍스트"): get_session_context — my_dashboard/
+    # get_loop_context와 동형 core 취급(백엔드 SSOT와 동기화, app/services/mcp_toolset.py 참고).
+    "sprintable_get_session_context",
     # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project — 키 자기 신원/스코프 조회·전환
     # 유틸(sprintable_my_dashboard·sprintable_ping과 동형: 특정 비즈니스 도메인 아닌 self-scope
     # 도구). set_default_project는 write지만 caller 자신의 기본 프로젝트 설정만 바꾸는 self-scope

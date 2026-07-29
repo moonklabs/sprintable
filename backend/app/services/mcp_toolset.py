@@ -78,6 +78,11 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # work_item_ids(다건 또는 0건 general)에 걸치는 cross-cutting 기록이라 add_evidence와
     # 동일 논리로 core 취급. vendored 사본과 동기화 필수(sprintable_mcp/toolset.py).
     "sprintable_add_judgment", "sprintable_list_judgments",
+    # story #2268(C-10, E-CONNECT — "세션 시작 컨텍스트"): get_session_context — my_dashboard/
+    # get_loop_context와 동형(read-only·self-scope pull, 특정 도메인 그룹 아님) core 취급.
+    # PO 판정(2026-07-29): REST뿐이면 에이전트가 못 쓴다 — MCP core로 노출해야 실제로 도는
+    # 자리가 된다. vendored 사본과 동기화 필수(sprintable_mcp/toolset.py).
+    "sprintable_get_session_context",
     # story b4027b2e(SEC — 까심 #2140 QA④): E-CANVAS visual_artifacts 11종(원 6개 + 7fe16274
     # 핀 4종 + list_spec_pins)을 여기서 제거하고 전용 "canvas" 그룹(_GROUP_KEYWORDS)으로 이관했다.
     # 이전엔 cross-cutting always-allow였는데(C1-S3 당시 "추가 성장 시 전용 canvas 그룹 신설
@@ -355,6 +360,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_add_evidence",
     # 판단 칸 (story #2268, D단계)
     "sprintable_add_judgment", "sprintable_list_judgments",
+    # 세션 시작 컨텍스트 (story #2268, C-10)
+    "sprintable_get_session_context",
     # visual artifacts (E-CANVAS C1-S3 + C2-S6 코멘트 + C3-S7 편집 + C4-S8 정본 제안 + 핀 저작 story 7fe16274)
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",

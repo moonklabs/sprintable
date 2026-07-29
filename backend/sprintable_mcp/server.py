@@ -30,6 +30,7 @@ from .toolset import is_tool_allowed
 from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.judgments import AddJudgmentInput, ListJudgmentsInput, add_judgment, list_judgments
+from .tools.session_context import SessionContextInput, get_session_context
 from .tools.visual_artifacts import (
     AddArtifactCommentInput, CreateArtifactInput, CreateSpecPinInput, DeleteArtifactInput,
     DeleteSpecPinInput, EditArtifactInput, GetArtifactInput, ListArtifactCommentsInput,
@@ -555,6 +556,13 @@ _TOOL_DEFS: list[tuple] = [
      " meta.active_omitted_count로 잘린 건수를 알려준다. 각 원소의 correction_ids가"
      " 비어있지 않으면 이미 정정된 것이니 그대로 믿지 말 것.",
      ListJudgmentsInput, list_judgments),
+    # 세션 시작 컨텍스트 (1) — story #2268(C-10, E-CONNECT)
+    ("sprintable_get_session_context",
+     "세션 시작 컨텍스트 — 내 stories/tasks + 거기 붙은 판단/정정 + (since를 주면) 그 뒤"
+     " 최근 활동을 한 호출로 준다. since에 직전 세션 종료 시각(ISO 8601)을 주면 그 뒤"
+     " 활동만 옴 — 안 주면 recent_activity는 null(모름, 빈 목록 아님). progress.txt 같은"
+     " 제품 밖 파일 대신 이 도구가 그 자리를 대신한다.",
+     SessionContextInput, get_session_context),
     # Visual artifacts (12) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
     # 핀 저작(story 7fe16274) + story #1922(delete_artifact, soft delete·생성자 전용)
     ("sprintable_create_artifact",
