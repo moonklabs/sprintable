@@ -3291,7 +3291,7 @@
     "trustSealSignedOff": "Signed off",
     "evidenceShow": "Show evidence",
     "evidenceHide": "Hide evidence",
-    "evidenceCount": "{count} evidence items",
+    "evidenceCount": "{count} attached evidence items",
     "evidenceSignedBy": "Evidence for this completion — left by {name}",
     "evidenceMore": "{count} more evidence items",
     "evidenceLoadError": "Couldn't load evidence",
@@ -3305,7 +3305,17 @@
     "evidenceAdd": "Link evidence",
     "evidenceAddFailed": "Failed to link evidence",
     "evidenceRefPlaceholder": "URL or reference",
-    "evidenceNotePlaceholder": "Note (optional)"
+    "evidenceNotePlaceholder": "Note (optional)",
+    "chatProofSectionTitle": "Chat evidence",
+    "chatProofCount": "{count} chat evidence items",
+    "chatProofOpenSource": "Open in chat",
+    "chatProofOpenOriginal": "View original now",
+    "chatProofEdited": "Original was edited · {date}",
+    "chatProofDeleted": "Original was deleted · quoted {date}",
+    "chatProofDeletedTag": "Deleted",
+    "chatProofNoAccess": "Can't view · permission",
+    "chatProofTruncatedBefore": "{count} lines omitted above",
+    "chatProofTruncatedAfter": "{count} lines omitted below"
   },
   "canvas": {
     "versionLineage": "Version lineage",
