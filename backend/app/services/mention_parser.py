@@ -55,6 +55,7 @@ from sqlalchemy import select
 
 from app.models.reference import Reference
 from app.services.member_resolver import canonicalize_member_id
+from app.services.reference_core import _batch_resolve_existence
 from app.services.reference_registry import ENTITY_RESOLVERS
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,42 @@ def extract_chat_entity_mentions(content: str) -> list[tuple[str, uuid.UUID]]:
             shape_count, len(result), content[:200],
         )
     return result
+
+
+# story #2316(2026-07-29, 까심 라이브 실측 — dev, 읽기 전용): id 부분이 UUID 모양이 아닌
+# 토큰(`](entity:task:not-a-uuid)`)은 `_CHAT_TOKEN_RE`의 id 그룹이 `_UUID_RE`를 강제하므로
+# 매치 자체가 실패한다 — `try/except ValueError`(위 106-109행)는 그래서 사실상 도달 불가
+# 코드다. 그 결과 `count_phantom_task_mentions`(AC6)가 이 케이스를 영원히 "0건"으로
+# 보고한다 — "탐지가 없다"가 아니라 "탐지된 게(위 shape_count 경고 로그) 도달하는 자리가
+# 없다"(PO 표현). id를 느슨하게(`[^)]*`) 잡는 별도 정규식으로 "모양은 맞는데 못 파싱한"
+# 토큰만 골라 caller(`insert_chat_mentions`)에 반환 — 그쪽이 `dropped`에
+# `reason="malformed_token"`으로 얹는다. 코어(`reconcile_entity_references`)에 안 넣는
+# 이유: 코어는 이미 파싱된 `extracted_refs`만 받는 계약이라(#2301) 애초에 추출조차 안 된
+# 토큰은 코어의 시야 밖 — #2301의 "얇은 변환" 원칙 위반이 아니라 코어가 볼 수 없는 축이다.
+_CHAT_TOKEN_SHAPE_RE = re.compile(
+    r"\[(?:[^\]\\]|\\.)*\]\(entity:(?P<type>[a-z]+):(?P<id>[^)]*)\)"
+)
+
+
+def find_malformed_chat_tokens(content: str) -> list[dict[str, str]]:
+    """모양(`](entity:<type>:...)`)은 맞지만 id가 UUID가 아니라 `extract_chat_entity_
+    mentions`가 애초에 못 뽑은 토큰을 찾는다. 순서 무관, 중복 제거(동일 (type, raw_id)
+    반복은 한 건으로)."""
+    if not content:
+        return []
+    strict_matches = {
+        (m.group("type"), m.group("id")) for m in _CHAT_TOKEN_RE.finditer(content)
+    }
+    seen: set[tuple[str, str]] = set()
+    malformed: list[dict[str, str]] = []
+    for m in _CHAT_TOKEN_SHAPE_RE.finditer(content):
+        entity_type, raw_id = m.group("type"), m.group("id")
+        key = (entity_type, raw_id)
+        if key in strict_matches or key in seen:
+            continue
+        seen.add(key)
+        malformed.append({"target_type": entity_type, "target_id": raw_id, "reason": "malformed_token"})
+    return malformed
 
 
 def extract_chat_doc_mention_ids(content: str) -> list[uuid.UUID]:
@@ -273,7 +310,7 @@ async def reconcile_entity_references(
     AC4 원자성 계약과 동일)."""
     valid = [(tt, tid, form) for tt, tid, form in extracted_refs if tt in target_types]
     dropped = [
-        {"target_type": tt, "target_id": str(tid)}
+        {"target_type": tt, "target_id": str(tid), "reason": "unregistered_target_type"}
         for tt, tid, _form in extracted_refs if tt not in target_types
     ]
     if dropped:
@@ -287,6 +324,41 @@ async def reconcile_entity_references(
         (tt, tid, form) for tt, tid, form in valid
         if not (tt == source_type and tid == source_id)
     }
+
+    # ⛔story #2294 후속(2026-07-29, 오르테가 라이브 실측): 실재하지 않는(또는 이 org 밖)
+    # target_id가 그대로 저장되던 결함 — POST /references(insert_reference 호출부)·
+    # GET /entities/search는 이미 존재판정을 거치는데 이 write-path만 target_types(등록된
+    # «타입»인가)만 보고 target_id의 «실재»는 한 번도 확認하지 않았다(미르코 코드 추적으로
+    # 좁힌 자리, PO가 dev 라이브에서 직접 재현). `reference_core._batch_resolve_existence`
+    # (POST /references·GET /search와 같은 계열, ENTITY_RESOLVERS 그 자체)를 그대로 재사용
+    # — 세 번째 게이트를 새로 짓지 않는다(PO 지시). 각 resolver가 `WHERE org_id == org_id`로
+    # 스코프하므로 크로스-org 실재 UUID도 "없음"으로 걸린다(존재+org 소속을 한 번에 검증).
+    # 존재하지 않는 target은 `dropped`로(사유를 `unregistered_target_type`과 구분되게
+    # `target_not_found`로 — "타입이 미등록"과 "대상이 없음"은 사람이 할 일이 다르다는 PO
+    # 판단). ㉠target_refs가 비면 ids_by_type도 비어 `_batch_resolve_existence`가 session을
+    # 아예 안 건드린다 — known_new=True·db=None 자기검증 경로(아래 known_new 분기 참조)의
+    # "DB 왕복 0" 불변식을 이 게이트가 깨지 않는다.
+    if target_refs:
+        ids_by_type: dict[str, set[uuid.UUID]] = {}
+        for tt, tid, _form in target_refs:
+            ids_by_type.setdefault(tt, set()).add(tid)
+        existing_by_type = await _batch_resolve_existence(db, org_id, ids_by_type)
+        not_found = [
+            (tt, tid, form) for tt, tid, form in target_refs
+            if tid not in existing_by_type.get(tt, set())
+        ]
+        if not_found:
+            dropped.extend(
+                {"target_type": tt, "target_id": str(tid), "reason": "target_not_found"}
+                for tt, tid, _form in not_found
+            )
+            logger.warning(
+                "reconcile_entity_references: dropped %d ref(s) whose target does not exist "
+                "(source_type=%s, source_field=%s, source_id=%s) dropped=%s",
+                len(not_found), source_type, source_field, source_id,
+                [{"target_type": tt, "target_id": str(tid)} for tt, tid, _form in not_found],
+            )
+            target_refs -= set(not_found)
 
     if known_new:
         # insert-only 고속 경로 — existing-refs SELECT/stale-delete 자체를 건너뛴다(DB 왕복
@@ -410,7 +482,16 @@ async def insert_chat_mentions(
         source_id=message_id, extracted_refs=extracted_refs, created_by=created_by,
         target_types=target_types, known_new=True,
     )
-    return ChatMentionResult(stored=result.stored, dropped=result.dropped)
+    # story #2316: 코어가 못 보는 축(추출조차 실패한 토큰) — 래퍼가 직접 찾아 dropped에
+    # 얹는다(위 find_malformed_chat_tokens docstring 참조, #2301 "얇은 변환" 예외 아님).
+    malformed = find_malformed_chat_tokens(content)
+    if malformed:
+        logger.warning(
+            "insert_chat_mentions: dropped %d malformed-id token(s) — shape matched but id "
+            "is not a UUID (message_id=%s) dropped=%s",
+            len(malformed), message_id, malformed,
+        )
+    return ChatMentionResult(stored=result.stored, dropped=[*result.dropped, *malformed])
 
 
 async def count_phantom_task_mentions(db: AsyncSession) -> int:

@@ -425,7 +425,7 @@ async def test_send_message_with_unregistered_type_mention_reports_dropped(caplo
             body = resp.json()
             assert body["references"]["stored"] == 0
             assert body["references"]["dropped"] == [
-                {"target_type": "goal", "target_id": str(fake_goal_id)}
+                {"target_type": "goal", "target_id": str(fake_goal_id), "reason": "unregistered_target_type"}
             ]
         finally:
             await client.aclose()
