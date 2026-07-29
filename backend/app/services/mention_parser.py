@@ -55,6 +55,7 @@ from sqlalchemy import select
 
 from app.models.reference import Reference
 from app.services.member_resolver import canonicalize_member_id
+from app.services.reference_core import _batch_resolve_existence
 from app.services.reference_registry import ENTITY_RESOLVERS
 
 logger = logging.getLogger(__name__)
@@ -273,7 +274,7 @@ async def reconcile_entity_references(
     AC4 원자성 계약과 동일)."""
     valid = [(tt, tid, form) for tt, tid, form in extracted_refs if tt in target_types]
     dropped = [
-        {"target_type": tt, "target_id": str(tid)}
+        {"target_type": tt, "target_id": str(tid), "reason": "unregistered_target_type"}
         for tt, tid, _form in extracted_refs if tt not in target_types
     ]
     if dropped:
@@ -287,6 +288,41 @@ async def reconcile_entity_references(
         (tt, tid, form) for tt, tid, form in valid
         if not (tt == source_type and tid == source_id)
     }
+
+    # ⛔story #2294 후속(2026-07-29, 오르테가 라이브 실측): 실재하지 않는(또는 이 org 밖)
+    # target_id가 그대로 저장되던 결함 — POST /references(insert_reference 호출부)·
+    # GET /entities/search는 이미 존재판정을 거치는데 이 write-path만 target_types(등록된
+    # «타입»인가)만 보고 target_id의 «실재»는 한 번도 확認하지 않았다(미르코 코드 추적으로
+    # 좁힌 자리, PO가 dev 라이브에서 직접 재현). `reference_core._batch_resolve_existence`
+    # (POST /references·GET /search와 같은 계열, ENTITY_RESOLVERS 그 자체)를 그대로 재사용
+    # — 세 번째 게이트를 새로 짓지 않는다(PO 지시). 각 resolver가 `WHERE org_id == org_id`로
+    # 스코프하므로 크로스-org 실재 UUID도 "없음"으로 걸린다(존재+org 소속을 한 번에 검증).
+    # 존재하지 않는 target은 `dropped`로(사유를 `unregistered_target_type`과 구분되게
+    # `target_not_found`로 — "타입이 미등록"과 "대상이 없음"은 사람이 할 일이 다르다는 PO
+    # 판단). ㉠target_refs가 비면 ids_by_type도 비어 `_batch_resolve_existence`가 session을
+    # 아예 안 건드린다 — known_new=True·db=None 자기검증 경로(아래 known_new 분기 참조)의
+    # "DB 왕복 0" 불변식을 이 게이트가 깨지 않는다.
+    if target_refs:
+        ids_by_type: dict[str, set[uuid.UUID]] = {}
+        for tt, tid, _form in target_refs:
+            ids_by_type.setdefault(tt, set()).add(tid)
+        existing_by_type = await _batch_resolve_existence(db, org_id, ids_by_type)
+        not_found = [
+            (tt, tid, form) for tt, tid, form in target_refs
+            if tid not in existing_by_type.get(tt, set())
+        ]
+        if not_found:
+            dropped.extend(
+                {"target_type": tt, "target_id": str(tid), "reason": "target_not_found"}
+                for tt, tid, _form in not_found
+            )
+            logger.warning(
+                "reconcile_entity_references: dropped %d ref(s) whose target does not exist "
+                "(source_type=%s, source_field=%s, source_id=%s) dropped=%s",
+                len(not_found), source_type, source_field, source_id,
+                [{"target_type": tt, "target_id": str(tid)} for tt, tid, _form in not_found],
+            )
+            target_refs -= set(not_found)
 
     if known_new:
         # insert-only 고속 경로 — existing-refs SELECT/stale-delete 자체를 건너뛴다(DB 왕복
