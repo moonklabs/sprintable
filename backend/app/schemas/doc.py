@@ -117,6 +117,13 @@ class DocResponse(BaseModel):
         from app.services.reference_token import build_reference_token
         return build_reference_token("doc", self.id, self.title)
 
+    # story #2262(C-4) AC9: 참조 카드의 「다음 행동」 재료 — SSOT는 app.services.next_action.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_code(self) -> str | None:
+        from app.services.next_action import doc_next_action
+        return doc_next_action(status=self.status, superseded_by=self.superseded_by)
+
 
 class ShareStatusResponse(BaseModel):
     """b1574f5a: 문서 공유 상태(관리 API). enabled=active 토큰 유무."""

@@ -103,6 +103,18 @@ class GoalResponse(BaseModel):
         from app.services.reference_token import build_reference_token
         return build_reference_token("epic", self.id, self.title)
 
+    # story #2262(C-4) AC9: outcome-measurement 축만(doc `e-connect-c4-trigger-condition-
+    # table` 승인 범위) — 「미결 스토리 수」·risky_status 축은 outcome 축과 동시에 참일 수
+    # 있어 우선순위 판단이 필요한 별건(미구현, doc에 기록).
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_code(self) -> str | None:
+        from app.services.next_action import outcome_measurement_next_action
+        return outcome_measurement_next_action(
+            outcome_status=self.outcome_status, measure_after=self.measure_after,
+            metric_definition=self.metric_definition, system_owned_sources=frozenset({"ga4", "internal_ops"}),
+        )
+
 
 class GlanceFocalStoryGate(BaseModel):
     """story #2303 — `synthesizeGateAction`(FE, `glance-hero.tsx` 밖의 다른 파일 — 단일
