@@ -252,6 +252,7 @@
     "ccQueueReview": "리뷰",
     "ccQueueMyBlocker": "내가 막고 있음",
     "ccQueueUnknownType": "새 종류의 항목 — 아직 표시할 수 없습니다",
+    "ccQueueUnrenderableCount": "{count}건은 표시할 수 없습니다",
     "ccQueueTruncated": "{total}건 중 {shown}건을 보이고 있습니다 — 남이 기다리는 것은 자르지 않습니다",
     "ccChangedSince": "내 것 {count}건에 변경이 있었습니다",
     "ccLastSeenSuffix": "마지막으로 본 것은 {ago}입니다",

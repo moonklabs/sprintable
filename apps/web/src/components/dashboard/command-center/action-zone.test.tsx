@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
-import { ActionZone } from './action-zone';
+import { ActionZone, QueueRow } from './action-zone';
 import type { MyActions, QueueItem } from './types';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -97,8 +97,8 @@ describe('ActionZone — story #2288 my_blockers 타입 fix', () => {
   });
 });
 
-describe('ActionZone — story #2288, PO 지적(2026-07-29): BE-FE 타입 목록 어긋남 가드', () => {
-  it('QueueRow가 모르는 type이 오면 review_merge 문구로 조용히 오인 렌더하지 않고 미확인 표시를 낸다', async () => {
+describe('ActionZone — story #2288, PO 지시(2026-07-29): 못 알아보는 타입은 요약 한 줄로', () => {
+  it('QueueRow가 모르는 type은 개별 줄로 안 뜨고(소음 없음), review_merge로도 오인 렌더 안 된다', async () => {
     // BE가 FE 미선언 새 타입을 보내는 상황 재현 — 런타임에는 TS 유니온이 못 막는다.
     const unknownItem = queueItem('gate_approval', { title: '알수없음' });
     (unknownItem as { type: string }).type = 'brand_new_be_type';
@@ -107,6 +107,32 @@ describe('ActionZone — story #2288, PO 지적(2026-07-29): BE-FE 타입 목록
       attention: { scope: 'project', items: [], pending: [] },
       is_clear: false,
     });
+    expect(container.textContent).not.toContain('새 종류의 항목'); // 개별 줄은 안 그린다(splitRenderableQueue가 걸러냄).
+    expect(container.textContent).not.toContain('리뷰·머지 대기');
+    expect(container.textContent).toContain('1건은 표시할 수 없습니다'); // 대신 요약 한 줄.
+  });
+
+  it('인식되는 항목과 못 알아보는 항목이 섞이면, 아는 것은 정상 렌더하고 모르는 것만 요약에 센다', async () => {
+    const known = queueItem('gate_approval');
+    const unknown1 = queueItem('gate_approval');
+    (unknown1 as { type: string }).type = 'brand_new_be_type_a';
+    const unknown2 = queueItem('gate_approval');
+    (unknown2 as { type: string }).type = 'brand_new_be_type_b';
+    await render({
+      action_queue: { scope: 'project', items: [known, unknown1, unknown2] },
+      attention: { scope: 'project', items: [], pending: [] },
+      is_clear: false,
+    });
+    expect(container.textContent).toContain('게이트 승인 대기');
+    expect(container.textContent).toContain('2건은 표시할 수 없습니다');
+  });
+});
+
+describe('QueueRow — story #2288: 방어선(defense-in-depth) 단위테스트, splitRenderableQueue를 우회해 직접 호출한 경우', () => {
+  it('인식 못한 type이 직접 들어와도 review_merge 문구로 오인 렌더하지 않고 미확인 표시를 낸다', async () => {
+    const unknownItem = queueItem('gate_approval');
+    (unknownItem as { type: string }).type = 'brand_new_be_type';
+    await act(async () => { root.render(wrap(<QueueRow item={unknownItem} />)); });
     expect(container.textContent).toContain('새 종류의 항목');
     expect(container.textContent).not.toContain('리뷰·머지 대기');
   });
@@ -115,11 +141,7 @@ describe('ActionZone — story #2288, PO 지적(2026-07-29): BE-FE 타입 목록
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const unknownItem = queueItem('gate_approval');
     (unknownItem as { type: string }).type = 'brand_new_be_type';
-    await render({
-      action_queue: { scope: 'project', items: [unknownItem] },
-      attention: { scope: 'project', items: [], pending: [] },
-      is_clear: false,
-    });
+    await act(async () => { root.render(wrap(<QueueRow item={unknownItem} />)); });
     expect(warnSpy).toHaveBeenCalledWith(
       'ActionZone/QueueRow: unrecognized action_queue item type',
       expect.objectContaining({ type: 'brand_new_be_type' }),

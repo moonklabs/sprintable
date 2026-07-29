@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ShieldCheck, GitPullRequest, Ban, AlertTriangle, CheckCircle2, ChevronRight, History } from 'lucide-react';
 import { type MyActions, type Priority, type QueueItem, type AttentionItem } from './types';
-import { selectVisibleQueue, countChangedSince, countAttentionChangedSince, getLastSeenMs, markSeenNow, minutesAgo } from './derive-action-zone';
+import { selectVisibleQueue, splitRenderableQueue, countChangedSince, countAttentionChangedSince, getLastSeenMs, markSeenNow, minutesAgo } from './derive-action-zone';
 
 const QUEUE_CAP = 5; // now-face.tsx CAP 관례 재사용(§7-4 잘림-보이기).
 
@@ -21,7 +21,9 @@ const PRIORITY_BORDER: Record<Priority, string> = {
   info: 'border-l-border',
 };
 
-function QueueRow({ item }: { item: QueueItem }) {
+// story #2288: 정상 경로에서는 splitRenderableQueue가 미확인 타입을 미리 걸러내므로 이 아래
+// 마지막 분기는 방어선(defense-in-depth)이다 — 직접 단위테스트하려고 export한다.
+export function QueueRow({ item }: { item: QueueItem }) {
   const t = useTranslations('dashboard');
   const ctx = item.context as { gate_id?: string; story_id?: string; kind?: string; status?: string; blocked_story_id?: string };
   if (item.type === 'gate_approval') {
@@ -114,8 +116,11 @@ export function ActionZone({ data, resolveName, epicTitles }: {
   const hasPending = (data?.attention.pending.length ?? 0) > 0;
   const isClear = data?.is_clear === true;
 
+  // PO 지시(2026-07-29): QueueRow가 못 알아보는 타입은 개별 소음 줄 대신 목록에서 걷어내고
+  // 요약 한 줄로만 말한다(#2265 ChatProofSection skippedCount 관례) — 잘림과 다른 사실.
+  const { renderable: renderableQueue, unrenderableCount } = useMemo(() => splitRenderableQueue(queue), [queue]);
   // story #2288 §8-4·§7-4: 자를 땐 review_merge부터, 잘렸으면 반드시 말한다.
-  const { visible: visibleQueue, cutCount } = selectVisibleQueue(queue, QUEUE_CAP);
+  const { visible: visibleQueue, cutCount } = selectVisibleQueue(renderableQueue, QUEUE_CAP);
 
   // story #2288 §8-8: 방문 사이 새로 생긴 것 — action_queue 3관계뿐 아니라 attention(감지
   // 신호, org-scope이나 「지금 볼 것」에 이미 뜨는 것)도 PO 확認(2026-07-29)으로 포함.
@@ -187,7 +192,12 @@ export function ActionZone({ data, resolveName, epicTitles }: {
             {cutCount > 0 ? (
               // ccQueueTruncated 문구는 자리만 확保 — 최종 워딩은 유나 lane(§8-4 규율을
               // 담아 통일된 톤으로 검수 예정, 지금은 기능 검증용 임시 문구).
-              <p className="text-[11px] text-muted-foreground">{t('ccQueueTruncated', { shown: visibleQueue.length, total: queue.length })}</p>
+              <p className="text-[11px] text-muted-foreground">{t('ccQueueTruncated', { shown: visibleQueue.length, total: renderableQueue.length })}</p>
+            ) : null}
+            {unrenderableCount > 0 ? (
+              // ccQueueUnrenderableCount도 자리만 확保 — 최종 워딩은 유나 lane(같은 코멘트,
+              // PO 지시 2026-07-29). 「N건은 표시할 수 없음」— 잘림과 다른 사실이라 별도 줄.
+              <p className="text-[11px] text-muted-foreground">{t('ccQueueUnrenderableCount', { count: unrenderableCount })}</p>
             ) : null}
           </div>
         </>

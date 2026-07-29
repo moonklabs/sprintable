@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { selectVisibleQueue, countChangedSince, countAttentionChangedSince, getLastSeenMs, markSeenNow } from './derive-action-zone';
+import { selectVisibleQueue, splitRenderableQueue, countChangedSince, countAttentionChangedSince, getLastSeenMs, markSeenNow } from './derive-action-zone';
 import type { QueueItem, AttentionItem } from './types';
 
 function item(type: QueueItem['type'], createdAt: string | null = null): QueueItem {
@@ -43,6 +43,21 @@ describe('selectVisibleQueue — story #2288 §7-4·§8-4', () => {
     const c = item('review_merge');
     const { visible } = selectVisibleQueue([a, b, c], 2);
     expect(visible).toEqual([a, b]); // c(review_merge, cuttable 중 뒤쪽)가 잘리고, a·b는 원 순서 그대로
+  });
+});
+
+describe('splitRenderableQueue — story #2288, PO 지시(2026-07-29): 못 알아보는 타입은 요약으로', () => {
+  it('전부 인식되는 타입이면 그대로 전부 renderable, unrenderableCount 0', () => {
+    const queue = [item('gate_approval'), item('review_merge'), item('my_blockers')];
+    expect(splitRenderableQueue(queue)).toEqual({ renderable: queue, unrenderableCount: 0 });
+  });
+
+  it('인식 못한 타입은 renderable에서 빠지고 unrenderableCount로만 센다', () => {
+    const known = item('gate_approval');
+    const unknown = { ...item('gate_approval'), type: 'brand_new_be_type' } as unknown as QueueItem;
+    const { renderable, unrenderableCount } = splitRenderableQueue([known, unknown]);
+    expect(renderable).toEqual([known]);
+    expect(unrenderableCount).toBe(1);
   });
 });
 

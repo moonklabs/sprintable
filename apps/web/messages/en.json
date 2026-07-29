@@ -252,6 +252,7 @@
     "ccQueueReview": "Review",
     "ccQueueMyBlocker": "Blocking others",
     "ccQueueUnknownType": "New item type — can't display yet",
+    "ccQueueUnrenderableCount": "{count} item(s) can't be displayed",
     "ccQueueTruncated": "Showing {shown} of {total} — items others are waiting on are never cut",
     "ccChangedSince": "{count} of your items changed",
     "ccLastSeenSuffix": "last seen {ago}",

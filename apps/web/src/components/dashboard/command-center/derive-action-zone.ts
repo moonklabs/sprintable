@@ -28,6 +28,26 @@ export function selectVisibleQueue(queue: QueueItem[], cap: number): VisibleQueu
   return { visible, cutCount: queue.length - visible.length };
 }
 
+// action-zone.tsx QueueRow가 실제로 그릴 줄 아는 타입(PO 지적 2026-07-29 가드와 짝) — 여기서도
+// 같은 목록을 쓴다. 하나만 두 곳에 흩어지면 그 자체가 「한 개념에 두 기준」이 된다.
+const RENDERABLE_TYPES = new Set<QueueItem['type']>(['gate_approval', 'review_merge', 'my_blockers']);
+
+export interface RenderableQueueResult {
+  renderable: QueueItem[];
+  unrenderableCount: number;
+}
+
+/**
+ * story #2288, PO 지시(2026-07-29) — #2265 ChatProofSection의 skippedCount와 같은 관례:
+ * QueueRow가 인식 못하는 타입은 개별 자리표시 줄로 하나씩 그리지 않고(소음), 목록에서
+ * 걷어내 「N건은 표시할 수 없음」 요약 한 줄로만 말한다. 잘림(cutCount, selectVisibleQueue)과
+ * 다른 사실이다 — 잘림은 「안 보여준다」(재료는 있음), 이건 「못 알아본다」(재료 형상 모름).
+ */
+export function splitRenderableQueue(queue: QueueItem[]): RenderableQueueResult {
+  const renderable = queue.filter((q) => RENDERABLE_TYPES.has(q.type));
+  return { renderable, unrenderableCount: queue.length - renderable.length };
+}
+
 const LAST_SEEN_KEY = 'sprintable:command-center:v1:last-seen-actions';
 
 function readLastSeenMs(): number | null {
