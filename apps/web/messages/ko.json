@@ -2793,7 +2793,7 @@
     "commandBlockedSettings": "런타임 설정 보기",
     "referenceDropNotice": "연결이 저장되지 않았습니다",
     "referenceDropNoticeCount": "연결 {count}건이 저장되지 않았습니다",
-    "referenceDropRetryHint": "다시 시도해 보세요",
+    "referenceDropHint": "링크 글자는 남지만 연결은 걸리지 않았습니다",
     "commandPreviewSendAsCommand": "커맨드로 전송됩니다",
     "commandPreviewSendAsLiteral": "리터럴 텍스트로 전송됩니다",
     "commandSuggestPixel": "픽셀 검증 요청",

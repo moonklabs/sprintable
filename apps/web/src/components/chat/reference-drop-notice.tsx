@@ -37,6 +37,11 @@ export function parseDroppedReferences(raw: unknown): DroppedReference[] {
  * 바로 아래(command-hint-notice.tsx와 동일 위치·동일 inset 톤). ⛔종류별 문구 없음(AC9) — 몇 건이
  * 떨어졌는지만 말하고, 무엇이었는지는 말하지 않는다(그건 화면이 아니라 사람이 기억한다 —
  * "방금 내가 걸려던 것" 문맥은 사용자가 갖고 있다).
+ *
+ * ⛔PO 지적(2026-07-29, 머지 직전) — 힌트 문구가 원래 "다시 시도해 보세요"였는데 이건 거짓
+ * 안내였다. `dropped`는 registry에 없는 종류라 **저장 안 하기로 결정된 것**이지 일시적 오류가
+ * 아니다 — 다시 시도해도 똑같이 실패하고, 사용자는 자기가 뭘 잘못한 줄 알게 된다. 가드가 낸
+ * "결함 신호"를 "사용자 행동 요구"로 옮기면 책임이 반대로 간다 — 지금은 사실만 말한다.
  */
 export function ReferenceDropNotice({ dropped, onDismiss }: { dropped: DroppedReference[]; onDismiss: () => void }) {
   const t = useTranslations('chats');
@@ -46,7 +51,7 @@ export function ReferenceDropNotice({ dropped, onDismiss }: { dropped: DroppedRe
     <div className="mx-2 flex items-start gap-2.5 rounded-xl border border-warning-border bg-warning-tint px-3.5 py-2.5">
       <div className="min-w-0 flex-1 space-y-0.5">
         <p className="text-sm text-foreground">{lead}</p>
-        <p className="text-sm text-muted-foreground">{t('referenceDropRetryHint')}</p>
+        <p className="text-sm text-muted-foreground">{t('referenceDropHint')}</p>
       </div>
       <button
         type="button"

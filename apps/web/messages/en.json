@@ -2793,7 +2793,7 @@
     "commandBlockedSettings": "View runtime settings",
     "referenceDropNotice": "The link wasn't saved",
     "referenceDropNoticeCount": "{count} links weren't saved",
-    "referenceDropRetryHint": "Try again",
+    "referenceDropHint": "The text remains, but nothing was linked",
     "commandPreviewSendAsCommand": "Will send as a command",
     "commandPreviewSendAsLiteral": "Will send as literal text",
     "commandSuggestPixel": "Request pixel verification",
