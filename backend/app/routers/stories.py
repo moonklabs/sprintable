@@ -998,22 +998,36 @@ async def update_story(
             _mention_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
         except Exception:
             _mention_actor_id = None
+        # story #2315 AC1(오르테가 판정 2026-07-29, 채팅과 "한 글자도 다르지 않게"): 두 호출의
+        # dropped를 **평면 배열 하나**로 합친다 — description·acceptance_criteria 중 어느
+        # 쪽에서 나온 것인지 화면이 구분하지 않는다(#2608 규율 — 화면은 종류로 안 가른다·그
+        # 이유와 같다). dropped 사유 열거형은 채팅 쪽(#2294/#2612)이 이미 SSOT라 여기서
+        # 새로 만들지 않는다.
+        _ref_stored = 0
+        _ref_dropped: list[dict[str, str]] = []
         if "description" in data:
             _desc_pairs = extract_chat_entity_mentions(story.description or "")
-            await reconcile_entity_references(
+            _desc_result = await reconcile_entity_references(
                 db, org_id=repo.org_id, source_type="story", source_field="description",
                 source_id=story.id,
                 extracted_refs=[(t, i, "mention") for t, i in _desc_pairs],
                 created_by=_mention_actor_id,
             )
+            _ref_stored += _desc_result.stored
+            _ref_dropped.extend(_desc_result.dropped)
         if "acceptance_criteria" in data:
             _ac_pairs = extract_chat_entity_mentions(story.acceptance_criteria or "")
-            await reconcile_entity_references(
+            _ac_result = await reconcile_entity_references(
                 db, org_id=repo.org_id, source_type="story", source_field="acceptance_criteria",
                 source_id=story.id,
                 extracted_refs=[(t, i, "mention") for t, i in _ac_pairs],
                 created_by=_mention_actor_id,
             )
+            _ref_stored += _ac_result.stored
+            _ref_dropped.extend(_ac_result.dropped)
+        # 채팅(conversations.py)과 동일 게이트: 정상 경로(둘 다 0)에선 필드 자체를 안 싣는다.
+        if _ref_stored or _ref_dropped:
+            story.references = {"stored": _ref_stored, "dropped": _ref_dropped}
 
     # E-STORAGE-SSOT S2: 첨부 교체(attachments 제공) 시 asset registry 재동기화(reconcile·SSOT 정확).
     if "attachments" in data:
