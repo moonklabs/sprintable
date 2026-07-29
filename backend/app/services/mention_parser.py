@@ -544,6 +544,14 @@ async def reconcile_doc_mentions(
     insert 로 귀결). 새 content 에 더 이상 없는 기존 참조는 삭제, 새로 생긴 건
     ON CONFLICT DO NOTHING 으로 insert. 자기참조(target doc == source doc)는 드롭.
 
+    ⛔story #2316 AC7(못 잡는 것 선언): 채팅 write-path의 `find_malformed_chat_tokens`
+    (모양은 맞는데 id가 UUID가 아닌 토큰을 `dropped(reason="malformed_token")`로 잡는
+    가드)는 이 함수(doc write-path)엔 없다 — `extract_doc_mention_targets`는 정규식이
+    아니라 `HTMLParser`로 `data-doc-id` attribute를 읽는 구조라 "모양은 맞는데 파싱
+    실패"라는 실패 축 자체가 성립하지 않는다(attribute가 없으면 그 태그를 그냥 못
+    본 것 — "본 것 같은데 못 뽑았다"가 없다). 그래서 doc write-path는 malformed_token
+    탐지 대상이 아니고, target 존재+org 소속 검증(story #2294 후속, 아래)만 적용된다.
+
     같은 트랜잭션(caller 세션 그대로) — 실패 시 예외 propagate 로 caller(doc 저장 트랜잭션)
     전체가 롤백된다(AC4 원자성).
 
