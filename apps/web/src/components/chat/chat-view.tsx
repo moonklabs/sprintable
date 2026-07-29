@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { ChatBubble } from './chat-bubble';
 import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
+import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from './reference-drop-notice';
 import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
@@ -69,6 +70,11 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // S5: 미지원 런타임 커맨드 차단 hint — 트리거 메시지 id에 keyed된 ephemeral state.
   // POST 응답 command_gate.blocked에서만 적재(persist 안 함·reload 시 소멸).
   const [commandHints, setCommandHints] = useState<Record<string, BlockedHint[]>>({});
+  // story #2294 AC8 — 낙관적으로 링크만 그리고 저장 결과를 안 보던 침묵을 깬다. 응답 최상위
+  // (data의 형제, conversations.py:2165) references.dropped[]를 트리거 메시지 id에 keyed
+  // 적재(commandHints와 동일 ephemeral 패턴 — persist 안 함·reload 시 소멸, 저장 성공/실패
+  // 자체는 이미 DB에 반영돼 있어 잃을 정보가 없다).
+  const [referenceDropHints, setReferenceDropHints] = useState<Record<string, DroppedReference[]>>({});
   // 1aeecdde P2: 답장 생성 중 에이전트 typing — #1353 GET /working 폴링(BE 45s TTL) 결과.
   const [typingAgents, setTypingAgents] = useState<{ id: string; name: string }[]>([]);
   // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
@@ -388,7 +394,25 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     if (blocked?.length) {
       setCommandHints((prev) => ({ ...prev, [sent.id]: blocked }));
     }
+    // story #2294 AC8/AC11 — references도 raw 최상위(data의 형제)에 실린다. 정상 경로에선
+    // dropped가 항상 빈 배열(#2294 AC1이 검색 허용목록을 registry에서 파생시켜 화면이 못
+    // 고르는 종류를 애초에 못 보내게 막는다) — 그래도 사람이 손으로 토큰을 치거나 에이전트가
+    // API로 본문을 직접 쓰는 경로는 여전히 열려 있어(PO 실측, 2026-07-28) dropped가 비지
+    // 않으면 그 자체가 결함 신호다.
+    const dropped = parseDroppedReferences(raw);
+    if (dropped.length) {
+      setReferenceDropHints((prev) => ({ ...prev, [sent.id]: dropped }));
+    }
   }, [threadId, addMessage, apiPrefix, pathname, router]);
+
+  const dismissReferenceDropHint = useCallback((messageId: string) => {
+    setReferenceDropHints((prev) => {
+      if (!(messageId in prev)) return prev;
+      const next = { ...prev };
+      delete next[messageId];
+      return next;
+    });
+  }, []);
 
   // chat-attach: 파일을 GCS에 업로드(서버사이드)하고 첨부 메타를 반환 — 유령경로(/api/chats/.../upload) 폐기.
   // 반환된 메타는 chat-input이 모아 handleSend의 attachments로 한 메시지에 함께 전송한다.
@@ -626,6 +650,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                           {commandHints[msg.id]?.map((h) => (
                             <CommandHintNotice key={h.agent_id} hint={h} />
                           ))}
+                          {/* story #2294 AC8: 트리거 메시지 직후 참조 저장실패 notice(종류-무관 1건) */}
+                          {referenceDropHints[msg.id] && (
+                            <ReferenceDropNotice
+                              dropped={referenceDropHints[msg.id]!}
+                              onDismiss={() => dismissReferenceDropHint(msg.id)}
+                            />
+                          )}
                         </Fragment>
                       );
                     })}
