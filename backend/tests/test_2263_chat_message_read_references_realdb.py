@@ -53,15 +53,26 @@ async def _session_factory():
 
 
 async def _setup(session):
-    """org + project + human(TeamMember, user_id 경유 해소) + conversation(참가자=그 human).
+    """org + project + human(members ⋈ project_access) + conversation(참가자=그 human).
 
-    `Conversation.created_by`는 `team_members.id` FK다 — `_resolve_member`(conversations.py)가
-    JWT 휴먼을 `TeamMember.user_id == auth.user_id`로 해소하므로, TeamMember.id 자체가 아니라
-    User.id를 auth 신원으로 쓴다(team_member.id는 participant/created_by 양쪽의 canonical key).
+    ⛔story #2263 CI 회귀(오르테가 실측, 2026-07-29): `team_members`는 0088부터 **뷰**다
+    (members ⋈ project_access, `_e_members_projection_view` 계열 마이그레이션 참조) — `TeamMember`
+    ORM으로 직접 `session.add()`하면 로컬 `create_all`(진짜 테이블 재현)에서는 통과하지만 실
+    마이그레이션된 스키마(CI)에서는 `cannot insert into view`로 죽는다(로컬/CI 스키마 드리프트,
+    reference_local_realdb_pg16_pgvector 계열 함정과 동형). 그래서 뷰가 아니라 **뷰의 원재료**
+    (`Member` + `ProjectAccess`)에 쓴다 — 뷰가 `m.id`를 그대로 투영하므로 `member.id`가
+    곧 `team_members.id`(0075 ID 보존과 같은 원리). `_resolve_member`(conversations.py)는
+    JWT 휴먼을 `TeamMember.user_id == auth.user_id`(뷰 경유)로 해소하므로 auth 신원은
+    `member.id`가 아니라 `user.id`를 쓴다.
+
+    `conversations.created_by`/`conversation_participants.member_id`는 현재 스키마에 FK가
+    없다(schema.sql 확認) — `team_members(_legacy)`를 가리키는 값을 몰라도 무방, `member.id`를
+    그대로 쓴다.
     """
     from app.models.organization import Organization
     from app.models.project import Project
-    from app.models.team import TeamMember
+    from app.models.member import Member
+    from app.models.project_access import ProjectAccess
     from app.models.user import User
     from app.models.conversation import Conversation, ConversationParticipant
 
@@ -74,18 +85,17 @@ async def _setup(session):
     user = User(id=uuid.uuid4(), email=f"u-{uuid.uuid4().hex[:8]}@test.local", hashed_password="x")
     session.add(user)
     await session.flush()
-    tm = TeamMember(
-        id=uuid.uuid4(), org_id=org.id, project_id=project.id, user_id=user.id,
-        type="human", name="Human",
-    )
-    session.add(tm)
+    member = Member(id=uuid.uuid4(), org_id=org.id, type="human", user_id=user.id, name="Human")
+    session.add(member)
     await session.flush()
-    conv = Conversation(id=uuid.uuid4(), org_id=org.id, project_id=project.id, type="group", created_by=tm.id)
+    session.add(ProjectAccess(project_id=project.id, member_id=member.id, permission="granted", role="member"))
+    await session.flush()
+    conv = Conversation(id=uuid.uuid4(), org_id=org.id, project_id=project.id, type="group", created_by=member.id)
     session.add(conv)
     await session.flush()
-    session.add(ConversationParticipant(conversation_id=conv.id, member_id=tm.id))
+    session.add(ConversationParticipant(conversation_id=conv.id, member_id=member.id))
     await session.commit()
-    return org, project, tm, user, conv
+    return org, project, member, user, conv
 
 
 async def _make_target_doc(session, org_id, project_id, title="Target"):
@@ -144,7 +154,7 @@ async def test_get_message_returns_stored_reference_after_reload():
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            org, project, tm, user, conv = await _setup(s)
+            org, project, member, user, conv = await _setup(s)
             target = await _make_target_doc(s, org.id, project.id)
 
         from app.main import app
@@ -174,7 +184,7 @@ async def test_list_messages_returns_stored_references_per_message_without_n_plu
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            org, project, tm, user, conv = await _setup(s)
+            org, project, member, user, conv = await _setup(s)
             target_a = await _make_target_doc(s, org.id, project.id, title="A")
             target_b = await _make_target_doc(s, org.id, project.id, title="B")
 
@@ -227,7 +237,7 @@ async def test_message_with_no_tokens_has_empty_references_list_not_missing_fiel
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            org, project, tm, user, conv = await _setup(s)
+            org, project, member, user, conv = await _setup(s)
 
         from app.main import app
         await _setup_app_human(app, Session, user.id, org.id)
@@ -254,7 +264,7 @@ async def test_dropped_reference_is_not_restored_on_reload_only_absence_from_sto
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            org, project, tm, user, conv = await _setup(s)
+            org, project, member, user, conv = await _setup(s)
 
         from app.main import app
         await _setup_app_human(app, Session, user.id, org.id)
@@ -285,7 +295,7 @@ async def test_list_message_replies_returns_stored_references():
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            org, project, tm, user, conv = await _setup(s)
+            org, project, member, user, conv = await _setup(s)
             target = await _make_target_doc(s, org.id, project.id)
 
         from app.main import app
