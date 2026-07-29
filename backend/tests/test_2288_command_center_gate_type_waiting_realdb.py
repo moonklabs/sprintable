@@ -369,7 +369,11 @@ async def test_review_merge_now_includes_non_in_review_assigned_stories_realdb()
 
 async def test_review_merge_excludes_story_blocked_by_open_dependency_realdb():
     """BE 명세5 「선행 대기」 제외 — 아직 안 풀린 blocks 의존성이 있으면 review_merge에서 빠진다.
-    양성대조: blocker가 done이면(선행이 풀렸으면) 다시 뜬다."""
+    양성대조: blocker가 done이면(선행이 풀렸으면) 다시 뜬다.
+
+    ⛔뮤테이션 자가검증(2026-07-29, PO 지시 — "없으면 「제외했다」가 주장"): command_center.py의
+    `~exists(_blocked_by_open_dependency)` 조건을 실제로 지우고 이 테스트를 돌려 RED 확認함
+    (blocked_story.id가 review_story_ids에 새는 것을 직접 관측) → 복원 → GREEN 재확認."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -446,7 +450,7 @@ async def test_gate_approval_waiting_count_quorum_realdb():
             assert resp.status_code == 200, resp.text
             items = resp.json()["action_queue"]["items"]
             ga = next(i for i in items if i["type"] == "gate_approval")
-            assert ga["context"]["waiting_count"] == 1  # 나 제외 1명 더.
+            assert ga["context"]["waiting_count_approx"] == 1  # 나 제외 1명 더.
         finally:
             await client.aclose()
     finally:
@@ -481,7 +485,7 @@ async def test_my_blockers_waiting_count_realdb():
             items = resp.json()["action_queue"]["items"]
             my_blockers_items = [i for i in items if i["type"] == "my_blockers"]
             assert len(my_blockers_items) == 2  # 여전히 blocked story당 한 항목(변경 없음).
-            assert all(i["context"]["waiting_count"] == 2 for i in my_blockers_items)  # 무게는 공유.
+            assert all(i["context"]["waiting_count_approx"] == 2 for i in my_blockers_items)  # 무게는 공유.
         finally:
             await client.aclose()
     finally:

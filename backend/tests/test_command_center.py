@@ -307,7 +307,7 @@ async def test_gate_approval_waiting_count_excludes_self():
     assert resp.status_code == 200
     items = _data(resp)["action_queue"]["items"]
     ga = next(i for i in items if i["type"] == "gate_approval")
-    assert ga["context"]["waiting_count"] == 2
+    assert ga["context"]["waiting_count_approx"] == 2
 
 
 @pytest.mark.anyio
@@ -324,7 +324,7 @@ async def test_my_blockers_waiting_count_reflects_total_blocked():
     assert resp.status_code == 200
     items = _data(resp)["action_queue"]["items"]
     mb = next(i for i in items if i["type"] == "my_blockers")
-    assert mb["context"]["waiting_count"] == 3
+    assert mb["context"]["waiting_count_approx"] == 3
 
 
 @pytest.mark.anyio

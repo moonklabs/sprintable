@@ -100,13 +100,16 @@ async def my_actions(
         approval_group_counts = {gid: cnt for gid, cnt in rows}
     for a, gate_type in approvals:
         # 그룹 전체 pending 수 - 나 자신 = "나 말고 몇 명 더" — 음수 방지 max(0, ...).
-        waiting_count = max(0, approval_group_counts.get(a.approval_group_id, 1) - 1)
+        # story #2288 리뷰(2026-07-29, PO 지적): 필드명 자체에 "approx"를 박는다 — 정확
+        # 집계(#2221 별건)와 헷갈리면 "N건 기다립니다"가 정확한 수로 읽혀 오늘 그 병(수를
+        # 내밀면 사람은 정확한 줄 안다)이 재발한다. 응답 밖(코드 주석만)으론 안 드러난다.
+        waiting_count_approx = max(0, approval_group_counts.get(a.approval_group_id, 1) - 1)
         queue.append({
             "type": "gate_approval",
             "priority": "warn",
             "context": {"gate_id": str(a.gate_id) if a.gate_id else None,
                         "approval_group_id": str(a.approval_group_id), "kind": a.kind,
-                        "gate_type": gate_type, "waiting_count": waiting_count},
+                        "gate_type": gate_type, "waiting_count_approx": waiting_count_approx},
             "created_at": a.created_at.isoformat() if a.created_at else None,
         })
     # story #2288(E-CONNECT) BE 명세5(2026-07-29 확定, PO 기준): review_merge를 status==
@@ -162,7 +165,10 @@ async def my_actions(
             .where(
                 Task.org_id == org_id,
                 Task.assignee_id == member_id,
-                Task.status != "done",
+                # story #2288 리뷰(2026-07-29, PO 지적): "미완료"는 명세5(review_merge)와
+                # «같은 자»를 써야 한다 — 안 그러면 같은 화면에 "다른 뜻의 미완료"가 둘 선다.
+                # _OPEN_EXCLUDED_STATUSES(파일 상단, 지금은 ("done",) 하나)가 그 SSOT다.
+                Task.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 Task.deleted_at.is_(None),
                 Story.org_id == org_id,
                 Story.deleted_at.is_(None),
@@ -229,8 +235,10 @@ async def my_actions(
         queue.append({
             "type": "my_blockers",
             "priority": "danger",  # 내가 푸는 게 남을 막고 있음 — 최우선.
+            # story #2288 리뷰(2026-07-29, PO 지적): gate_approval과 동일 이유로
+            # waiting_count_approx — 정확 집계(#2221)와 구분되게 필드명 자체에 근사치임을 싣는다.
             "context": {"blocker_story_id": str(blocker_id), "blocked_story_id": str(blocked_id),
-                        "waiting_count": blocker_weight_counts.get(blocker_id, 1)},
+                        "waiting_count_approx": blocker_weight_counts.get(blocker_id, 1)},
         })
 
     # story #2288(E-CONNECT) BE 명세4(§3-1㉢·§4-1, PO 강조 — 이 스토리의 심장): 「내 것인데
