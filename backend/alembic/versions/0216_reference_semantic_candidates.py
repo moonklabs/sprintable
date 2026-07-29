@@ -38,7 +38,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.CheckConstraint(
             "relation_kind IS NULL OR relation_kind IN "
-            "('낳음', '근거인용', '동종사례', '잇따름', '명시적_무관')",
+            "('spawned', 'cited_as_evidence', 'similar_case', 'followed', 'explicitly_unrelated')",
             name="ck_reference_semantic_candidates_relation_kind",
         ),
         sa.CheckConstraint(

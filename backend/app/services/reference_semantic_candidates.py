@@ -55,15 +55,19 @@ from app.services.mention_parser import (
 # candidate.status가 항상 "estimated"(추정됨, AC3)임을 통해 이게 확정이 아니라는 것을
 # 알아야 한다 — kind 필드 자체에 "미측정" 라벨을 얹지 않는 이유는 status 필드가 이미 그
 # 신호를 전 레코드에 걸쳐 표현하기 때문이다(중복 표현 안 함).
+#
+# ⛔PO 지적(2026-07-29, 미르코군의 qa-리터럴-노출 사고와 자매 문제): 값은 영문 식별자여야
+# 한다 — DB 값은 식별자, 사람이 읽는 말은 en.json/ko.json 번역 몫. 아래 키는
+# `app.models.reference_semantic_candidate.RELATION_KIND_LABELS_KO`로 원표(한글) 대조 유지.
 _KEYWORD_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("잇따름", re.compile(r"의존[:：]|의존\s*그래프|→.*→|앞에\s*서는가")),
-    ("낳음", re.compile(
+    ("followed", re.compile(r"의존[:：]|의존\s*그래프|→.*→|앞에\s*서는가")),
+    ("spawned", re.compile(
         r"신규\s*스토리\s*등재|중\s*발견|중\s*적출|발견\s*\(#|발단\s*[—\-]|검수\s*중|"
         r"수행\s*중\s*직접\s*발견"
     )),
-    ("동종사례", re.compile(r"같은\s*병|같은\s*성질|같은\s*계열|결함\s*계열|같은\s*클래스")),
-    ("명시적_무관", re.compile(r"직교|무관(?!심)")),
-    ("근거인용", re.compile(r"머지\s*`[0-9a-f]+`\s*\(PR\s*#|PR\s*#\d+\s*본문에\s*기록|확認\s*완료")),
+    ("similar_case", re.compile(r"같은\s*병|같은\s*성질|같은\s*계열|결함\s*계열|같은\s*클래스")),
+    ("explicitly_unrelated", re.compile(r"직교|무관(?!심)")),
+    ("cited_as_evidence", re.compile(r"머지\s*`[0-9a-f]+`\s*\(PR\s*#|PR\s*#\d+\s*본문에\s*기록|확認\s*완료")),
 )
 
 _SNIPPET_RADIUS = 80

@@ -72,7 +72,7 @@ def test_rules_never_classify_ground_truth_non_relationships_as_relationships():
     포함이라 생략 — 표본 크기 축소가 아니라 재현 편의상 발췌)."""
     from app.services.reference_semantic_candidates import classify_relation_kind
 
-    is_relationship = {"낳음", "잇따름"}
+    is_relationship = {"spawned", "followed"}
     for snippet in _GROUND_TRUTH_NOT_A_RELATIONSHIP_SNIPPETS:
         kind, _ = classify_relation_kind(snippet)
         assert kind not in is_relationship, (
@@ -91,9 +91,9 @@ def test_precision_of_asserted_relationships_is_currently_perfect_small_n():
     kind, _ = classify_relation_kind(
         "`#2627`(PR1a: ChatProofEmbed) → `#2630`(PR2: 선택 상태 기계) → `#2636`(chat-view 배선)"
     )
-    assert kind == "잇따름"
+    assert kind == "followed"
     kind, _ = classify_relation_kind("ee2f4e58(#1660) 검증 중 발견·범위 밖으로 분리한 별도 버그.")
-    assert kind == "낳음"
+    assert kind == "spawned"
 
 
 @pytest.fixture
@@ -148,7 +148,7 @@ async def test_saving_bare_number_reference_creates_estimated_candidate():
                 cands = await _candidates(s, org.id, story.id, source_field="description")
                 assert len(cands) == 1
                 assert cands[0].target_id == target.id
-                assert cands[0].relation_kind == "동종사례"  # AC6 재활성화(2026-07-29 PO 판정)
+                assert cands[0].relation_kind == "similar_case"  # AC6 재활성화(2026-07-29 PO 판정)
                 assert cands[0].status == "estimated"  # AC3 — 자동 확정 아님
                 assert cands[0].declared_by is None
                 assert cands[0].declared_at is None

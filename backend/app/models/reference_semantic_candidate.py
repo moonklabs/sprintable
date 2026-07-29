@@ -13,9 +13,13 @@ docstring이 스스로 막아 둔 것이 근거).
   id를 caller가 모른다. 자연키를 그대로 재사용하면 이 표가 Reference의 내부 PK에 결합하지
   않고 독립적으로 재계산 가능하다(재조정 시 두 표 사이 결합을 늘리지 않는다).
 
-  relation_kind — 낳음/근거인용/동종사례/잇따름/명시적_무관 중 하나, 또는 NULL(=미분류,
-    규칙 매치 없음 — AC10: taxonomy 밖도 버리지 않고 저장한다, NULL 자체가 그 값이다.
-    표본 26번 자기참조 같은 taxonomy 밖 사례가 실제로 존재함을 확認했다).
+  relation_kind — ⛔영문 식별자(PO 지적 2026-07-29: "DB 값은 식별자, 사람이 읽는 말은
+    번역"이어야 함 — 미르코군이 같은 병(qa 상태 리터럴이 화면에 날것으로 새는 것)을 겪은
+    직후 발견된 자매 사고). 5종 중 하나 또는 NULL(=미분류, AC10 — taxonomy 밖도 버리지
+    않고 저장한다). 한글 원표(`story_refcheck_classification_20260728.md`)와의 대조가
+    끊기지 않도록 `RELATION_KIND_LABELS_KO` 매핑을 아래 상수로 남긴다:
+      spawned(원표: 낳음) · cited_as_evidence(근거인용) · similar_case(동종사례) ·
+      followed(잇따름) · explicitly_unrelated(명시적_무관)
   status — estimated(기본, AC3 「추정됨」) | declared(사람이 승격, AC5 「선언됨」).
   declared_by/declared_at — status=declared로 승격한 사람/시각(감사 추적).
 
@@ -41,8 +45,21 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 from app.models.base import OrgScopedMixin
 
-RELATION_KINDS = frozenset({"낳음", "근거인용", "동종사례", "잇따름", "명시적_무관"})
+RELATION_KINDS = frozenset(
+    {"spawned", "cited_as_evidence", "similar_case", "followed", "explicitly_unrelated"}
+)
 # NULL(미분류)은 값이지 부재가 아니다(AC10) — 위 5종 밖이면 저장 시 NULL로 남는다.
+
+# ⛔PO 지적(2026-07-29): DB 값(위 RELATION_KINDS)은 식별자, 사람이 읽는 말은 번역(en.json/
+# ko.json) 몫 — 이 매핑은 번역 파일이 아니라 한글 원표(story_refcheck_classification_
+# 20260728.md)와의 대조가 끊기지 않게 하는 개발자용 참조표다(화면에 노출 안 함).
+RELATION_KIND_LABELS_KO: dict[str, str] = {
+    "spawned": "낳음",
+    "cited_as_evidence": "근거인용",
+    "similar_case": "동종사례",
+    "followed": "잇따름",
+    "explicitly_unrelated": "명시적_무관",
+}
 
 STATUSES = frozenset({"estimated", "declared"})
 
@@ -52,7 +69,7 @@ class ReferenceSemanticCandidate(Base, OrgScopedMixin):
     __table_args__ = (
         CheckConstraint(
             "relation_kind IS NULL OR relation_kind IN "
-            "('낳음', '근거인용', '동종사례', '잇따름', '명시적_무관')",
+            "('spawned', 'cited_as_evidence', 'similar_case', 'followed', 'explicitly_unrelated')",
             name="ck_reference_semantic_candidates_relation_kind",
         ),
         CheckConstraint(
