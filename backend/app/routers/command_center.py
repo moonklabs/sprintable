@@ -60,6 +60,20 @@ async def my_actions(
     member_id = member.id
     now = _now()
 
+    # ⛔⛔ story #2288 리뷰(2026-07-29, PO 지적 — my_blockers 누락 버그의 근본): 이 함수가
+    # queue.append({"type": ...})로 내보내는 문자열 전수는 **세 곳이 같이 움직여야 하는**
+    # 목록의 원천이다 — ①여기(BE, SSOT) ②apps/web/src/components/dashboard/command-center/
+    # types.ts의 QueueItem.type union ③같은 디렉터리 derive-action-zone.ts의
+    # RENDERABLE_TYPES(Record<QueueItem['type'], true> — TS 컴파일 타임에 ②와는 이미 강제
+    # 동기화됨). 여기 새 "type" 값을 추가하면 ②도 같이 늘려야 한다(안 그러면 splitRenderableQueue
+    # 가 "표시할 수 없음"으로 조용히 떨어뜨린다).
+    #
+    # ⛔실측(2026-07-29): OpenAPI→FE 타입 자동생성 파이프라인이 이 레포에 없다(grep 전수 —
+    # openapi_tags는 Swagger UI 문서 그룹핑 용도뿐). 이 엔드포인트 자체도 Pydantic response_model
+    # 없이 raw dict를 JSONResponse로 반환해(FastAPI 자동 스키마 생성 대상이 아님) 있었다 해도
+    # 이 필드는 안 걸렸을 것 — 그래서 "한 정의로 묶기"는 지금 인프라로는 불가능하다는 것이
+    # 확인된 사실이다(추측 아님). 진짜 재발 방지(BE↔FE type 집합 parity 테스트)는 PO가 별도
+    # 스토리로 세운다 — 이 코멘트는 그 전까지의 "적어 둔 것" 역할(미르코의 types.ts 코멘트와 짝).
     queue: list[dict] = []
     # 게이트 승인 대기 = 내가 approver 인 pending blocking approval(member-private·서버 resolve member_id).
     # story #2288(E-CONNECT) BE 명세3(§3-1㉢·§4-1, 미르코 작성): gate_type 패스스루 —
