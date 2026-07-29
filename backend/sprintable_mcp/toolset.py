@@ -38,8 +38,11 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # (app/services/mcp_toolset.py 참고. "canonical_version"은 propose_canonical_version에
     # "artifact" substring이 없어 별도 키워드 필요, "spec_pin"은 핀 4종).
     ("canvas", ("artifact", "canonical_version", "spec_pin")),
+    # story #2311(2026-07-29): "delete_sprint" 제거 — E-SECURITY SEC-S8 확장으로 그 이름의
+    # 도구 자체가 이미 없다(원본 app/services/mcp_toolset.py에는 "제거했다"는 주석만 남아
+    # 있었는데 vendored 사본에만 실제 키워드로 잔존해 있었다 — 원본과 동기화).
     ("admin", ("give_reward", "emit_event", "trigger_ai", "activate_sprint",
-               "close_sprint", "delete_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
+               "close_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
 ]
 
 _CORE = "core"
