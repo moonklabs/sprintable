@@ -17,9 +17,12 @@
 
 # story #2281(2026-07-28)에서 4건 전부 해소됨 — declared_mismatches가 빈 배열인 것 자체가
 # 그 증거다(가드가 그린으로 남아 있으면 해소된 것, 다시 불일치가 뜨면 회귀).
-#   · mark_notification_read → ⓒ명시적 오류로 판정(서버측 신설은 알림 재설계 #2201/#2279와
-#     순서가 얽혀 PO가 순서를 잡기로 함 — err() 반환, client 호출 자체를 안 하므로 이 가드
-#     스코프(client.METHOD 호출) 밖으로 자연히 빠짐)
+#   · mark_notification_read → ⭐재정정(2026-07-29, 선생님 지시): ⓒ(명시적 오류) 판정에
+#     만료조건이 없어 서버 라우트가 실제로 생긴 뒤에도 도구가 계속 거부를 반환하고 있었다
+#     (PATCH /api/v2/notifications/{id}/read, 48de882a에서 이미 신설됨 — 순서를 얽던 재설계
+#     #2201/#2279도 "벨은 그대로 산다"로 소멸). 지금은 ⓐ(server 실호출)로 전환, PR #2628.
+#     client.patch 호출 자체가 있으므로 이 가드 스코프(client.METHOD 호출) 안으로 들어옴 —
+#     정적경로라 정상 대조됨(회귀가드가 계속 잡는다).
 #   · mark_all_notifications_read → 경로 수정(/mark-all-read) + type 필터 미지원을 명시 오류로
 #   · get_retro_session → ⓐ서버에 신설(POST /api/v2/retros/by-sprint, get-or-create)
 #   · update_retro_action_status → 경로+입력스키마(session_id) 동시 수정
@@ -44,15 +47,16 @@ declared_indirect:
     reason: >-
       경로를 `_MENTION_ENTITY_ENDPOINTS[mention.type].format(id=mention.id)`로 조립하는
       client.get(endpoint) 호출(story #2283 후속 2026-07-28 doc→doc/story/epic 확장,
-      story #2294 B단계 2026-07-29 task/sprint/artifact/hypothesis 추가 — evidence는
-      GET /{id} 라우트 자체가 없어 의도적 제외, backend/tests/test_mcp_s1995_agent_doc_
-      mentions.py의 `_MENTION_ENDPOINT_KNOWN_GAP` 참조). 호출부는 `mention.type`이 Literal로
-      검증되므로 실제로 조립되는 경로는 정확히 7가지 — 수기 추적: /api/v2/docs/{id}
-      (docs.py GET /{id}) · /api/v2/stories/{id}(stories.py:539 GET /{id}) ·
+      story #2294 B단계 2026-07-29 task/sprint/artifact/hypothesis 추가, story #2314
+      2026-07-29(3차) evidence 추가 — GET /api/v2/evidence/{id} 신설로 예전 「의도적 제외」
+      근거가 사라져 `_MENTION_ENDPOINT_KNOWN_GAP`도 함께 걷음, PR #2626). 호출부는
+      `mention.type`이 Literal로 검증되므로 실제로 조립되는 경로는 정확히 8가지 — 수기 추적:
+      /api/v2/docs/{id}(docs.py GET /{id}) · /api/v2/stories/{id}(stories.py:539 GET /{id}) ·
       /api/v2/goals/{id}(goals.py:136 GET /{id}, main.py:296 prefix=/api/v2/goals 마운트) ·
       /api/v2/tasks/{id}(tasks.py:127 GET /{id}) · /api/v2/sprints/{id}(sprints.py:163
       GET /{id}) · /api/v2/visual-artifacts/{id}(visual_artifacts.py:214 GET /{id}) ·
-      /api/v2/hypotheses/{id}(hypotheses.py:159 GET /{hypothesis_id}) — 일곱 다 실재
+      /api/v2/hypotheses/{id}(hypotheses.py:159 GET /{hypothesis_id}) ·
+      /api/v2/evidence/{id}(evidence.py GET /{id}, story #2314 신설) — 여덟 다 실재
       확認됨(2026-07-29).
     declared_by: 디디 은와추쿠
     until: "2026-08-27"
