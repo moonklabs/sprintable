@@ -169,6 +169,21 @@ services:
       - key: CRON_SECRET
         reason: dev와 동일 — cron 엔드포인트 인증 시크릿, 부트스트랩 스크립트 미편입.
         owner: TBD
+      - key: FIREBASE_OAUTH_HANDOFF_ENABLED
+        value_check: skip
+        reason: >-
+          story #1931 feature flag(dev/realtime-dev와 동일 축) — settings.py:261
+          firebase_oauth_handoff_enabled, backend/app/routers/auth_firebase_internal.py:503,576
+          이 게이트로 issue/consume 501 분기(껐다 켰다 배포 없이 토글하는 것이 이 값의
+          존재 이유라 SSOT 편입 대상 아님). frontend-prod의 동일 키와 «짝»이라 — 프론트가
+          FIREBASE_OAUTH_HANDOFF_ENABLED를 켠 채 이 값만 꺼지면 BFF 내부호출이 501로
+          막힌다. ⛔만료 조건: handoff가 기본 동작으로 승격되면 이 값·위 게이트·FE 분기를
+          함께 제거할 것(2026-07-28 인시던트 대응 중 수동 세팅 확認, 계정으로 주체 특定 불가).
+          ⚠️값 형식 위험: 지금 이 서비스는 `1`(pydantic bool 파서가 True로 읽음), frontend-prod는
+          문자열 `true`(정확 일치 비교) — 지금은 둘 다 켜진 뜻이 같지만, 누가 frontend를
+          `1`로 바꾸면 그쪽은 정확 일치가 깨져 조용히 꺼진다. 통일은 이번 판 스코프 밖 — 위험만
+          기록해 둔다.
+        owner: TBD
       - key: GITHUB_APP_CLIENT_ID
         reason: dev와 동일 사유.
         owner: TBD
@@ -344,6 +359,19 @@ services:
     keys:
       - key: APP_BASE_URL
         reason: 용도/생성 경위 미확認 — owner 확인 필요(TBD로 이미 알려진 항목, memory 참고).
+        owner: TBD
+      - key: FIREBASE_OAUTH_HANDOFF_ENABLED
+        value_check: skip
+        reason: >-
+          story #1931 feature flag(dev와 동일 축) — apps/web/src/app/auth/oauth-handoff/route.ts:65
+          가 이 값을 정확히 문자열 'true'로 검사한다(껐다 켰다 배포 없이 토글하는 것이 이
+          값의 존재 이유라 SSOT 편입 대상 아님). backend-prod의 동일 키와 «짝»이라 — 둘이
+          같이 켜져 있어야 handoff issue/consume 내부호출이 성공한다. ⛔만료 조건: handoff가
+          기본 동작으로 승격되면 이 값·FE 분기·백엔드 게이트를 함께 제거할 것(2026-07-28
+          인시던트 대응 중 수동 세팅 확認, 계정으로 주체 특定 불가).
+          ⚠️값 형식 위험: 이 서비스는 문자열 `true`(정확 일치 비교), backend-prod는 `1`(pydantic
+          bool 파서가 True로 읽음) — 지금은 둘 다 켜진 뜻이 같지만, 이 값이 `1`로 바뀌면 route.ts:65의
+          정확 일치가 깨져 프론트만 조용히 꺼진다. 통일은 이번 판 스코프 밖 — 위험만 기록해 둔다.
         owner: TBD
       - key: SECRET_REFRESH_1777617854
         reason: >-
