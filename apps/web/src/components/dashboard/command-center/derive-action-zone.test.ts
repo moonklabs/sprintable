@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { selectVisibleQueue, splitRenderableQueue, countChangedSince, countAttentionChangedSince, getLastSeenMs, markSeenNow } from './derive-action-zone';
+import { selectVisibleQueue, splitRenderableQueue, countChangedSince, countAttentionChangedSince, gateTypeLabelKey, getLastSeenMs, markSeenNow } from './derive-action-zone';
 import type { QueueItem, AttentionItem } from './types';
 
 function item(type: QueueItem['type'], createdAt: string | null = null): QueueItem {
@@ -91,6 +91,23 @@ describe('countAttentionChangedSince — story #2288, PO 확認(2026-07-29): §8
       attentionItem(null), // 없음 — 안 셈
     ];
     expect(countAttentionChangedSince(attention, lastSeen)).toBe(1);
+  });
+});
+
+describe('gateTypeLabelKey — story #2288, PO 지적(2026-07-29): gate_type 원시값 화면 노출 결함 fix', () => {
+  it('알려진 값(GATE_TYPES + doc_approval)은 i18n 키를 반환한다', () => {
+    expect(gateTypeLabelKey('qa')).toBe('ccGateTypeQa');
+    expect(gateTypeLabelKey('pr_review')).toBe('ccGateTypePrReview');
+    expect(gateTypeLabelKey('merge')).toBe('ccGateTypeMerge');
+    expect(gateTypeLabelKey('deploy')).toBe('ccGateTypeDeploy');
+    expect(gateTypeLabelKey('workflow_config_publish')).toBe('ccGateTypeWorkflowConfigPublish');
+    expect(gateTypeLabelKey('doc_approval')).toBe('ccGateTypeDocApproval');
+  });
+
+  it('null·undefined·모르는 값은 전부 null — 호출부가 일반 라벨로 떨어뜨린다(원시값 폴백 금지)', () => {
+    expect(gateTypeLabelKey(null)).toBeNull();
+    expect(gateTypeLabelKey(undefined)).toBeNull();
+    expect(gateTypeLabelKey('some_future_unknown_gate')).toBeNull();
   });
 });
 

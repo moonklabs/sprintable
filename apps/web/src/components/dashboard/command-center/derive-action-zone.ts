@@ -28,13 +28,44 @@ export function selectVisibleQueue(queue: QueueItem[], cap: number): VisibleQueu
   return { visible, cutCount: queue.length - visible.length };
 }
 
-// ⛔세 목록 중 하나 — types.ts의 QueueItem.type 주석 참조(BE 실제 type ↔ 이 Set ↔
+// ⛔세 목록 중 하나 — types.ts의 QueueItem.type 주석 참조(BE 실제 type ↔ 이 목록 ↔
 // action-zone.tsx QueueRow의 렌더 분기, 셋이 같이 움직여야 한다 · PO 지적 2026-07-29).
-const RENDERABLE_TYPES = new Set<QueueItem['type']>(['gate_approval', 'review_merge', 'my_blockers', 'waiting_on_others']);
+// PO 재질문(2026-07-29): 코멘트는 "읽어야" 서는데, 타입으로 묶으면 "안 읽어도" 빨개진다 —
+// Record<QueueItem['type'], true>는 TS가 모든 키를 요구하므로, QueueItem.type에 새 값이
+// 추가되는데 여기 안 채우면 "Property '…' is missing" 컴파일 에러가 즉시 난다(Set이었을
+// 때는 안 그랬다 — 조용히 새 값을 놓쳐도 컴파일이 통과했다).
+const RENDERABLE_TYPES: Record<QueueItem['type'], true> = {
+  gate_approval: true,
+  review_merge: true,
+  my_blockers: true,
+  waiting_on_others: true,
+};
 
 export interface RenderableQueueResult {
   renderable: QueueItem[];
   unrenderableCount: number;
+}
+
+// PO 지적(2026-07-29): gate_type 원시값(BE enum 문자열)이 한국어 화면에 날것으로 나오던
+// 결함 — 닫힌 집합(GATE_TYPES, backend/app/models/hitl_config.py: pr_review·qa·merge·deploy·
+// workflow_config_publish + doc_approval은 backend/app/services/doc.py DOC_GATE_TYPE)이라
+// 번역 맵을 둔다. i18n 키만 반환 — 실제 문구는 action-zone.tsx가 next-intl로 그린다.
+const GATE_TYPE_LABEL_KEYS: Record<string, string> = {
+  qa: 'ccGateTypeQa',
+  pr_review: 'ccGateTypePrReview',
+  merge: 'ccGateTypeMerge',
+  deploy: 'ccGateTypeDeploy',
+  workflow_config_publish: 'ccGateTypeWorkflowConfigPublish',
+  doc_approval: 'ccGateTypeDocApproval',
+};
+
+/**
+ * gate_type → i18n 키. 맵에 없는 값(미래 확장·오타 등)은 null — 호출부가 null일 때와
+ * «같은 자리»(일반 라벨)로 떨어뜨린다. 원시값을 폴백으로 내보내지 않는다(PO 지적).
+ */
+export function gateTypeLabelKey(gateType: string | null | undefined): string | null {
+  if (!gateType) return null;
+  return GATE_TYPE_LABEL_KEYS[gateType] ?? null;
 }
 
 /**
@@ -44,7 +75,7 @@ export interface RenderableQueueResult {
  * 다른 사실이다 — 잘림은 「안 보여준다」(재료는 있음), 이건 「못 알아본다」(재료 형상 모름).
  */
 export function splitRenderableQueue(queue: QueueItem[]): RenderableQueueResult {
-  const renderable = queue.filter((q) => RENDERABLE_TYPES.has(q.type));
+  const renderable = queue.filter((q) => q.type in RENDERABLE_TYPES);
   return { renderable, unrenderableCount: queue.length - renderable.length };
 }
 

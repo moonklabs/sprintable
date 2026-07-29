@@ -23,7 +23,7 @@ const DATA: MyActions = {
   attention: {
     scope: 'project',
     items: [
-      { type: 'agent_stuck', severity: 'warn', auto_detected: true, entity_type: 'story', entity_id: 's1', gate_type: '리뷰', stuck_since: '2026-07-10T00:00:00Z' },
+      { type: 'agent_stuck', severity: 'warn', auto_detected: true, entity_type: 'story', entity_id: 's1', gate_type: 'qa', stuck_since: '2026-07-10T00:00:00Z' },
     ],
     pending: [],
   },
@@ -33,7 +33,7 @@ const DATA: MyActions = {
 describe('ActionZone attention row (command-center-surveillance-reframe-handoff — "대기는 경보가 아니라 상태")', () => {
   it('renders "게이트 대기 중" copy without a precise elapsed-minutes count or "멈춤" wording', () => {
     const markup = renderToStaticMarkup(wrap(<ActionZone data={DATA} resolveName={() => null} epicTitles={{}} />));
-    expect(markup).toContain('리뷰 대기 중');
+    expect(markup).toContain('QA 대기 중'); // gate_type='qa' → 번역 라벨(gateLabel), 원시값 안 보임(PO 지적 2026-07-29)
     expect(markup).not.toContain('멈춤');
     expect(markup).not.toMatch(/\d+\s*분째/);
   });
@@ -237,18 +237,26 @@ describe('ActionZone — story #2288, BE 명세4(#2650) waiting_on_others: 「�
       is_clear: false,
     });
     expect(container.textContent).toContain('기다리는 것');
-    expect(container.textContent).toContain('qa 대기 중');
+    expect(container.textContent).toContain('QA 대기 중'); // 번역 라벨 — 원시값 'qa' 그대로 안 나옴(PO 지적)
   });
 
-  it('§3-1㉢: 버튼이 없다(행동 없는 것에 버튼을 달지 않는다)', async () => {
+  it('§3-1㉢, PO 지적(2026-07-29): 「기다리는 것」 구역 안에만 버튼·링크가 0개다(양성 대조 — 같이 있는 행동 항목엔 있다)', async () => {
     await render({
-      action_queue: { scope: 'project', items: [queueItem('waiting_on_others', { context: { story_id: 's1', gate_type: 'qa' } })] },
+      action_queue: {
+        scope: 'project',
+        items: [
+          queueItem('gate_approval', { context: { kind: '결재자', gate_type: 'qa' } }), // 양성 대조: 행동 항목
+          queueItem('waiting_on_others', { context: { story_id: 's1', gate_type: 'qa' } }),
+        ],
+      },
       attention: { scope: 'project', items: [], pending: [] },
       is_clear: false,
     });
-    // 「기다리는 것」 구역 안에는 버튼(승인/리뷰 등 행동 유도 텍스트)이 없다.
-    expect(container.textContent).not.toContain('승인');
-    expect(container.textContent).not.toContain('리뷰');
+    const waitingZone = container.querySelector('[data-testid="cc-waiting-zone"]');
+    expect(waitingZone).not.toBeNull();
+    expect(waitingZone!.querySelectorAll('button, a')).toHaveLength(0); // 구역 «안»만 — 0개
+    // 자가 살아있음: 행동 항목(게이트 승인 대기)은 컨테이너 전체 기준으로 링크가 있다.
+    expect(container.querySelectorAll('a').length).toBeGreaterThan(0);
   });
 
   it('gate_type이 없으면(null) 일반 라벨로 대체한다(사람을 지어내지 않는다)', async () => {
@@ -275,12 +283,23 @@ describe('ActionZone — story #2288, BE 명세4(#2650) waiting_on_others: 「�
     expect(container.textContent).toContain('기다리는 것');
   });
 
-  it('gate_approval 항목에 gate_type이 실리면 함께 보인다(#2650 BE 명세3)', async () => {
+  it('gate_approval 항목에 gate_type이 실리면 번역된 라벨로 함께 보인다(#2650 BE 명세3, PO 지적: 원시값 금지)', async () => {
     await render({
       action_queue: { scope: 'project', items: [queueItem('gate_approval', { context: { kind: '결재자', gate_type: 'deploy' } })] },
       attention: { scope: 'project', items: [], pending: [] },
       is_clear: false,
     });
-    expect(container.textContent).toContain('deploy');
+    expect(container.textContent).toContain('배포');
+    expect(container.textContent).not.toContain('deploy');
+  });
+
+  it('PO 지적(2026-07-29): 맵에 없는 gate_type이 오면 원시값을 안 내보내고 일반 라벨(null과 같은 자리)로 떨어진다', async () => {
+    await render({
+      action_queue: { scope: 'project', items: [queueItem('waiting_on_others', { context: { story_id: 's1', gate_type: 'some_future_unknown_gate' } })] },
+      attention: { scope: 'project', items: [], pending: [] },
+      is_clear: false,
+    });
+    expect(container.textContent).toContain('게이트 대기 중');
+    expect(container.textContent).not.toContain('some_future_unknown_gate');
   });
 });

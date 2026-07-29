@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { ShieldCheck, GitPullRequest, Ban, AlertTriangle, CheckCircle2, ChevronRight, History, Clock } from 'lucide-react';
 import { type MyActions, type Priority, type QueueItem, type AttentionItem } from './types';
-import { selectVisibleQueue, splitRenderableQueue, countChangedSince, countAttentionChangedSince, getLastSeenMs, markSeenNow, minutesAgo } from './derive-action-zone';
+import { selectVisibleQueue, splitRenderableQueue, countChangedSince, countAttentionChangedSince, gateTypeLabelKey, getLastSeenMs, markSeenNow, minutesAgo } from './derive-action-zone';
 
 const QUEUE_CAP = 5; // now-face.tsx CAP 관례 재사용(§7-4 잘림-보이기).
 
@@ -21,6 +21,13 @@ const PRIORITY_BORDER: Record<Priority, string> = {
   info: 'border-l-border',
 };
 
+// PO 지적(2026-07-29): gate_type 원시값을 화면에 그대로 내보내지 않는다 — 아는 값은
+// 번역, 모르는 값은 null과 같은 일반 라벨로(derive-action-zone.gateTypeLabelKey 참조).
+function gateLabel(t: ReturnType<typeof useTranslations>, gateType: string | null | undefined): string {
+  const key = gateTypeLabelKey(gateType);
+  return key ? t(key) : t('ccGateGeneric');
+}
+
 // story #2288: 정상 경로에서는 splitRenderableQueue가 미확인 타입을 미리 걸러내므로 이 아래
 // 마지막 분기는 방어선(defense-in-depth)이다 — 직접 단위테스트하려고 export한다.
 export function QueueRow({ item }: { item: QueueItem }) {
@@ -29,6 +36,7 @@ export function QueueRow({ item }: { item: QueueItem }) {
   if (item.type === 'gate_approval') {
     // 승인은 우발 mutation 방지 위해 게이트 인박스로 1클릭 네비게이션(전체 맥락서 결재).
     // gate_type(#2650 BE 명세3 착지) — kind(결재자 역할)와 다른 축. 둘 다 있으면 둘 다 보인다.
+    // PO 지적(2026-07-29): 원시값(qa·deploy 등)을 그대로 안 보인다 — gateLabel로 번역.
     return (
       <Link
         href="/inbox?tab=gates"
@@ -36,7 +44,7 @@ export function QueueRow({ item }: { item: QueueItem }) {
       >
         <ShieldCheck className="size-3.5 shrink-0 text-warning" />
         <span className="min-w-0 flex-1 truncate text-foreground">
-          {t('ccQueueGateApproval')}{ctx.gate_type ? <span className="text-muted-foreground"> · {ctx.gate_type}</span> : null}{ctx.kind ? <span className="text-muted-foreground"> · {ctx.kind}</span> : null}
+          {t('ccQueueGateApproval')}{ctx.gate_type ? <span className="text-muted-foreground"> · {gateLabel(t, ctx.gate_type)}</span> : null}{ctx.kind ? <span className="text-muted-foreground"> · {ctx.kind}</span> : null}
         </span>
         <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground">{t('ccQueueApprove')}<ChevronRight className="size-3" /></span>
       </Link>
@@ -89,22 +97,19 @@ export function QueueRow({ item }: { item: QueueItem }) {
 
 /**
  * story #2288, BE 명세4(#2650 착지) — 「내 것인데 남이 잡음」. §3-1㉢ 정의 그대로: 발(다음
- * 행동)이 내게 없다 — ⛔버튼을 달지 않는다(행동 없는 것에 버튼을 달면 없는 길을 가리킨다).
- * PO 지시(2026-07-29): priority=info이나 danger/warn(행동 촉구) 축과 같은 자리에 섞지
- * 않는다 — 행동 큐와 별도 구역("기다리는 것")으로 렌더.
+ * 행동)이 내게 없다 — ⛔버튼도 링크도 달지 않는다(목업 v3의 `.wr` 행 그대로 plain div —
+ * 행동 없는 것에 클릭 가능한 요소를 두면 없는 길을 가리킨다. PO 지적 2026-07-29: 원래
+ * Link였던 것이 결함 — 「해소」가 목적이지 "가 보라"는 유도가 아니다).
+ * priority=info이나 danger/warn(행동 촉구) 축과 같은 자리에 섞지 않는다 — 별도 구역.
  */
 function WaitingRow({ item }: { item: QueueItem }) {
   const t = useTranslations('dashboard');
   const ctx = item.context as { story_id?: string; gate_type?: string | null };
-  const gate = ctx.gate_type ?? t('ccGateGeneric');
   return (
-    <Link
-      href={ctx.story_id ? `/board?story=${ctx.story_id}` : '/board'}
-      className="flex items-center gap-2 rounded-lg border border-border bg-card p-2.5 text-xs text-muted-foreground transition hover:border-muted-foreground/30"
-    >
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-card p-2.5 text-xs text-muted-foreground">
       <Clock className="size-3.5 shrink-0" aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate">{t('ccWaitingGateReason', { gate })}</span>
-    </Link>
+      <span className="min-w-0 flex-1 truncate">{t('ccWaitingGateReason', { gate: gateLabel(t, ctx.gate_type) })}</span>
+    </div>
   );
 }
 
@@ -115,7 +120,8 @@ function AttentionRow({ item, resolveName, epicTitles }: { item: AttentionItem; 
   // 트리거로만 쓰이고(위쪽 필터링), 여기선 경과 분(minutesSince) 계산·표시를 걷었다 — "대기는
   // 경보가 아니라 상태"(§1/§8 시간 강조 0). 색도 warning→info/muted 중립 톤.
   const entity = resolveName(item.entity_id) ?? epicTitles[item.entity_id] ?? item.entity_type;
-  const gate = item.gate_type ?? t('ccGateGeneric');
+  // PO 지적(2026-07-29, #2650 리뷰) — gate_type 원시값을 그대로 안 보인다(gateLabel 참조).
+  const gate = gateLabel(t, item.gate_type);
   return (
     <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5 text-xs">
       <span className="mt-1 size-1.5 shrink-0 rounded-full bg-info/60" aria-hidden="true" />
@@ -230,7 +236,7 @@ export function ActionZone({ data, resolveName, epicTitles }: {
           {/* story #2288, BE 명세4(#2650): 「내 것인데 남이 잡음」— 행동 큐와 별도 구역, 버튼 없음(§3-1㉢).
               ccWaitingTitle·ccWaitingGateReason도 자리만 확保 — 최종 워딩은 유나 lane. */}
           {waitingItems.length > 0 ? (
-            <div className="space-y-1.5">
+            <div className="space-y-1.5" data-testid="cc-waiting-zone">
               <span className="text-[11px] font-medium text-foreground">{t('ccWaitingTitle')}</span>
               {waitingItems.map((w, i) => <WaitingRow key={`${(w.context as { story_id?: string }).story_id ?? i}`} item={w} />)}
             </div>
