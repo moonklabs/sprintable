@@ -194,7 +194,13 @@ async def list_stories(
     stories = await repo.list(limit=limit, q=q, cursor=cursor_dt, **filters)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
     await _attach_has_evidence(repo.session, stories)
-    if boost_candidates_from is not None:
+    # ⛔isinstance 가드(단순 `is not None` 아님) — 이 라우터 함수를 FastAPI 경유 없이 직접
+    # 호출하는 기존 실PG 테스트 다수(test_2188_*·test_2189_*·test_083176e8_* 등)가 이
+    # 새 파라미터를 모른 채 kwargs를 안 넘기면, Python 기본값 평가상 `Query(default=None,
+    # ...)` 센티널 객체 그대로가 들어온다(FastAPI가 실 HTTP 요청에서만 그 센티널을 실제
+    # 값으로 해소해 준다) — 그 객체는 `is not None`을 통과해 버려 DB 쿼리에 UUID 자리로
+    # 새 나가 asyncpg가 깨진다. isinstance로 진짜 UUID만 받아들인다.
+    if isinstance(boost_candidates_from, uuid.UUID):
         stories = await _boost_reference_candidates(
             repo.session, repo.org_id, stories, boost_candidates_from,
         )
