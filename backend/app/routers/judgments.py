@@ -46,6 +46,10 @@ class JudgmentResponse(BaseModel):
     statement: str
     created_by: uuid.UUID
     created_at: datetime
+    # story #2308 후속: 이 원소를 target으로 삼는 correction id들(list_judgments 전용 —
+    # POST 응답에선 항상 []. 한 목록만 읽어도 "이건 정정됐다"가 보이게, active·corrections
+    # 양쪽 다 이 필드를 갖는다).
+    correction_ids: list[uuid.UUID] = []
 
 
 class JudgmentListMeta(BaseModel):

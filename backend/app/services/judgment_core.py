@@ -24,6 +24,21 @@ app-level 검증을 먼저 하는 이유(#2259 reference_core.insert_reference�
 방어): DB CHECK만 믿으면 실패 시 raw IntegrityError 텍스트가 그대로 API 밖으로 샌다. 여기서
 먼저 걸러 사람이 읽을 수 있는 메시지로 거절한다 — CHECK는 그래도 안 뺀다("코드가 아니라
 제약이 지킨다"가 이 판의 crux, 오르테가 표현).
+
+⛔story #2308 후속(2026-07-29, 오르테가 라이브 dogfooding — #2302에 실제 write→read 왕복):
+`active`의 축은 "철회됐나"가 아니라 "말의 층위"(kind가 TARGET_REQUIRED_KINDS 밖인가)라서,
+이미 retraction의 target이 된 judgment도 `active`에 그대로 남는다(설계대로 — 버그 아님).
+그런데 필드 이름이 "active"라 그 목록만 읽는 소비자는 철회된 판단을 유효한 것으로 오독한다.
+`corrections` 원소도 같은 함정이 있다 — method_error는 "그 판단 + 같은 방법으로 낸 다른
+모든 말"을 무효화하는 «번지는» 정정이라, 정정이 다른 정정을 target하는 것이 예외가 아니라
+method_error의 정상 모양이다(예: 관측 방법 자체가 틀렸다고 밝혀지면 그 방법으로 낸 판단들
+전부가 흔들린다). 그래서 `active`와 `corrections` 양쪽 모두를, 각 원소가 target인
+correction id 목록(`correction_ids`)으로 decorate한다 — 한 목록만 읽어도 "이건 그대로
+믿으면 안 된다"를 그 자리에서 알 수 있게(계보 전체를 재귀로 펼치지 않는다 — 그건 소비자가
+target_id를 따라가면 되는 별개 층위, 1단계 표시만 이 판의 경계).
+`correction_ids_by_target`은 `correction_rows`(캡 예외, 항상 전량)에서만 파생하므로 캡과
+무충돌 — active가 recency로 잘려도(그 항목 자체가 안 보이는 것) correction_ids 계산 자체는
+항상 완전한 데이터 위에서 이뤄진다.
 """
 from __future__ import annotations
 
@@ -126,6 +141,18 @@ async def list_judgments(
     ).scalars().all()
 
     active_omitted_count = max(0, total_active - len(active_rows))
+
+    # story #2308 후속: "이건 그대로 믿으면 안 된다" 교차참조 — target인 원소를 가진 모든
+    # correction을 target_id별로 묶는다. corrections는 캡 예외(항상 전량)라 이 map은
+    # 완전하다. active·corrections 양쪽 원소를 이 «단일» map으로 decorate — 두 자리에
+    # 따로 계산하면 한쪽만 고쳐지는 비대칭이 재발한다(오늘 하루 반복 관측된 병).
+    correction_ids_by_target: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for corr in correction_rows:
+        if corr.target_id is not None:
+            correction_ids_by_target.setdefault(corr.target_id, []).append(corr.id)
+    for row in (*active_rows, *correction_rows):
+        row.correction_ids = correction_ids_by_target.get(row.id, [])  # type: ignore[attr-defined]
+
     return {
         # corrections는 캡 예외 — 위 쿼리에 limit이 없으므로 항상 전량, 그러므로 이쪽은
         # 절대 잘리지 않는다(아래 meta가 active 쪽에만 있는 이유 — 어느 쪽이 잘렸는지

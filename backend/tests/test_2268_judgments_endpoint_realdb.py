@@ -454,3 +454,174 @@ async def test_general_scope_entry_is_pullable_via_scope_filter():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ─── correction_ids 교차참조(2026-07-29, 오르테가 라이브 dogfooding 후속) ──────
+#
+# "active(유효)"라는 이름만 읽고 철회된 판단을 유효로 오독하는 함정 — active·corrections
+# 양쪽 원소가 자신을 target으로 삼는 correction id들을 실어, 한 목록만 읽어도 "이건 그대로
+# 믿으면 안 된다"가 보이게 한다. 정정이 다른 정정을 target하는 것(method_error가 흔히 그렇듯)
+# 도 정상 모양이라 corrections 원소도 똑같이 decorate한다.
+
+
+def _find(items, item_id):
+    return next(j for j in items if j["id"] == item_id)
+
+
+async def test_active_item_carries_correction_ids_when_retracted():
+    """오르테가가 #2302에서 실제로 재현한 시나리오 그대로 — judgment→retraction 왕복."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            original = await client.post(
+                "/api/v2/judgments",
+                json={
+                    "scope": "general", "kind": "judgment",
+                    "statement": "artifact/asset은 전용 화면 있음 — page.tsx 파일 실재가 근거",
+                },
+            )
+            assert original.status_code == 201, original.text
+            retraction = await client.post(
+                "/api/v2/judgments",
+                json={
+                    "scope": "general", "kind": "retraction", "target_id": original.json()["id"],
+                    "statement": "철회 — 파일이 있다는 화면이 있다의 근거가 못 된다(사문 코드)",
+                },
+            )
+            assert retraction.status_code == 201, retraction.text
+
+            resp = await client.get("/api/v2/judgments", params={"scope": "general"})
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+
+            active_item = _find(body["active"], original.json()["id"])
+            assert active_item["correction_ids"] == [retraction.json()["id"]], active_item
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_correction_item_itself_carries_correction_ids_when_further_corrected():
+    """method_error는 «번지는» 정정이라 정정이 정정을 target하는 것이 정상 모양 —
+    corrections[] 원소도 active와 동형으로 decorate돼야 한다(오늘 세션에 반복 관측된
+    "한쪽만 고쳐지는 비대칭" 재발 방지 — PO 결정: 같은 PR에서 두 목록 다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            original = await client.post(
+                "/api/v2/judgments",
+                json={
+                    "scope": "general", "kind": "judgment",
+                    "statement": "4fps 관측 기반 — 렌더 파이프라인이 안정적이라 판단",
+                },
+            )
+            assert original.status_code == 201, original.text
+            refinement = await client.post(
+                "/api/v2/judgments",
+                json={
+                    "scope": "general", "kind": "refinement", "target_id": original.json()["id"],
+                    "statement": "저해상도에서만 안정적 — 고해상도는 별도 재측정 필요",
+                },
+            )
+            assert refinement.status_code == 201, refinement.text
+            # refinement 자체가 method_error의 target이 되는 경우 — "관측 방법 자체가
+            # 틀렸다"는 정정이 이미 나온 정정(refinement)까지 함께 흔든다.
+            method_error = await client.post(
+                "/api/v2/judgments",
+                json={
+                    "scope": "general", "kind": "method_error", "target_id": refinement.json()["id"],
+                    "statement": "4fps 관측 자체가 틀렸다(15fps로 재측정) — 그 관측 기반 정련도 무효",
+                },
+            )
+            assert method_error.status_code == 201, method_error.text
+
+            resp = await client.get("/api/v2/judgments", params={"scope": "general"})
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+
+            refinement_item = _find(body["corrections"], refinement.json()["id"])
+            assert refinement_item["correction_ids"] == [method_error.json()["id"]], refinement_item
+            # method_error 자신은 아무도 target하지 않았으므로 빈 배열.
+            method_error_item = _find(body["corrections"], method_error.json()["id"])
+            assert method_error_item["correction_ids"] == [], method_error_item
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_correction_ids_decoration_positively_fires_for_every_targeted_item():
+    """⭐오르테가 요청 가드 — «decoration이 빠진 원소가 0인가». map이 비면 조용히 전부
+    무표시가 되는 실패 모드가 있다(«돌고 있는데 아무것도 안 재는» 모양) — 그러니 단일
+    사례가 아니라 여러 개 동시에 넣어, 매칭돼야 할 게 전부 매칭됐는지(누락 0)와 매칭되면
+    안 될 게 실제로 비어있는지(오염 0) 양방향으로 잰다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            targets = []
+            for i in range(4):
+                r = await client.post(
+                    "/api/v2/judgments",
+                    json={"scope": "general", "kind": "judgment", "statement": f"판단 {i}"},
+                )
+                assert r.status_code == 201, r.text
+                targets.append(r.json()["id"])
+
+            # 0·1·2번째만 철회, 3번째는 안 건드림(음성대조).
+            retraction_ids = {}
+            for idx in (0, 1, 2):
+                r = await client.post(
+                    "/api/v2/judgments",
+                    json={
+                        "scope": "general", "kind": "retraction", "target_id": targets[idx],
+                        "statement": f"철회 {idx}",
+                    },
+                )
+                assert r.status_code == 201, r.text
+                retraction_ids[targets[idx]] = r.json()["id"]
+
+            resp = await client.get("/api/v2/judgments", params={"scope": "general", "limit": 10})
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            active_by_id = {j["id"]: j for j in body["active"]}
+
+            for idx in (0, 1, 2):
+                item = active_by_id[targets[idx]]
+                assert item["correction_ids"] == [retraction_ids[targets[idx]]], (idx, item)
+            # 안 건드린 3번째는 correction_ids가 실제로 비어있어야(오염 0).
+            assert active_by_id[targets[3]]["correction_ids"] == [], active_by_id[targets[3]]
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

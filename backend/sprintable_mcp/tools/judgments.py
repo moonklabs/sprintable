@@ -55,9 +55,12 @@ async def list_judgments(args: ListJudgmentsInput) -> list[TextContent]:
     method_error — 앞선 말에 대한 말 전부)는 상한과 무관하게 항상 전체(철회된 판단을 다시
     주장하지 않으려면 빠짐없이 봐야 한다). `active`(judgment/unmeasurable)는 recency
     기준으로 캡되며, `meta.active_omitted_count`가 실제로 몇 건 잘렸는지 알려준다(잘리는
-    것은 항상 active뿐 — corrections는 절대 안 잘린다). `method` 필터는 "같은 방법으로 낸
-    다른 말들"을 역추적할 때 쓴다(method_error를 남기기 전에 먼저 이걸로 훑어보는 것을
-    권장)."""
+    것은 항상 active뿐 — corrections는 절대 안 잘린다). ⛔각 원소(`active`·`corrections`
+    둘 다)의 `correction_ids`가 비어있지 않으면 그 항목은 이미 정정됐다는 뜻 — 그대로
+    믿지 말고 `corrections`에서 그 id를 찾아 무엇이 어떻게 정정됐는지 확인할 것(정정이
+    다른 정정을 target하는 것도 정상 — method_error는 여러 말에 번지므로). `method` 필터는
+    "같은 방법으로 낸 다른 말들"을 역추적할 때 쓴다(method_error를 남기기 전에 먼저 이걸로
+    훑어보는 것을 권장)."""
     try:
         params: dict = {}
         if args.work_item_id is not None:
