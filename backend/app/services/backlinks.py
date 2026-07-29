@@ -177,12 +177,13 @@ import uuid
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import and_, false as sa_false, or_, select, tuple_
+from sqlalchemy import and_, false as sa_false, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.doc import Doc
+from app.models.pm import Story
 from app.models.reference import Reference
 from app.services.conversation_auth import conversation_readable_predicate
 from app.services.member_resolver import ResolvedMember, lookup_members_by_ids
@@ -302,6 +303,56 @@ class UnsupportedBacklinkTargetTypeError(ValueError):
     `test_list_entity_backlinks_rejects_unsupported_target_type`이 이 분기를 직접 타서
     커버리지에 살아 있고, 허용목록을 게이트 없이 늘리면 그 테스트가 걸린다(RED로 잡는다는
     뜻이 아니라 — 허용목록에 추가한 사람이 이 클래스의 존재를 코드에서 보게 된다는 뜻)."""
+
+
+# ⛔story #2277(E-CONNECT) target_type → model — count_zero_referenced_entities 전용.
+# BACKLINKS_ALLOWED_TARGET_TYPES와 반드시 같은 키 집합이어야 한다(AC1: "#2266이 세운 허용
+# 목록과 같은 목록을 쓴다, 별도 목록을 만들지 않는다") — 이 dict의 키를 늘릴 땐 반드시
+# BACKLINKS_ALLOWED_TARGET_TYPES도 같이 늘어 있어야 한다(파생이 아니라 하드코딩인 이유: model
+# 클래스 자체는 registry가 담을 수 없는 타입정보라 여기 한 곳에만 둔다).
+_ZERO_REF_MODELS: dict[str, type] = {"doc": Doc, "story": Story}
+
+
+async def count_zero_referenced_entities(
+    session: AsyncSession, org_id: uuid.UUID | None = None,
+) -> dict[str, int]:
+    """story #2277 AC1/AC2 — target_type별로 "가리키는 참조가 0건"인 엔티티 수를 센다.
+    대상 타입은 #2266이 세운 `BACKLINKS_ALLOWED_TARGET_TYPES`(doc·story)와 동일 허용목록만
+    쓴다(AC1 — 별도 목록을 새로 만들지 않는다). org_id=None(기본)이면 전체 org 스코프.
+
+    ⛔AC2 후속(PO 정정, 2026-07-29): 이 함수가 세는 수는 「고아」가 아니라 「이 항목을 가리키는
+    mention/embed/proof 참조가 entity_references에 0건」이라는 사실뿐이다 — `entity_references`
+    테이블 자체가 아직 얕게 채워진 상태(참조추적 기능이 신생)라면 이 수의 대부분은 「실제로
+    미언급」이 아니라 「추적이 아직 안 돈 것」이다. 그래서 이 함수를 부르는 자리는 항상
+    `count_entity_references_total`(아래)도 같이 불러 분모를 나란히 실어야 한다(cron endpoint
+    참조) — 절대값만 단독으로 보고하지 않는다."""
+    counts: dict[str, int] = {}
+    for target_type in sorted(BACKLINKS_ALLOWED_TARGET_TYPES):
+        model = _ZERO_REF_MODELS[target_type]
+        stmt = (
+            select(func.count())
+            .select_from(model)
+            .outerjoin(
+                Reference,
+                and_(Reference.target_type == target_type, Reference.target_id == model.id),
+            )
+            .where(model.deleted_at.is_(None), Reference.id.is_(None))
+        )
+        if org_id is not None:
+            stmt = stmt.where(model.org_id == org_id)
+        counts[target_type] = (await session.execute(stmt)).scalar_one()
+    return counts
+
+
+async def count_entity_references_total(session: AsyncSession, org_id: uuid.UUID | None = None) -> int:
+    """story #2277 AC2/AC3 — `entity_references` 총행수(분모). `count_zero_referenced_entities`의
+    결과를 단독으로 보고하면 다음 사람이 그 수를 「고아 수」로 오독한다(2026-07-29 dev 실측:
+    zero_referenced doc 871/story 2497인데 이 총행수가 62뿐이라 실은 분모미채움이었다) — 이
+    함수가 그 오독을 막는 짝이다."""
+    stmt = select(func.count()).select_from(Reference)
+    if org_id is not None:
+        stmt = stmt.where(Reference.org_id == org_id)
+    return (await session.execute(stmt)).scalar_one()
 
 
 async def list_entity_backlinks(
