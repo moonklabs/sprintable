@@ -14,6 +14,7 @@ import { imageFilesFromClipboard } from '@/lib/clipboard-image';
 import { parseCursorMeta } from '@/lib/pagination';
 import { AttachmentImage } from '@/components/chat/attachment-image';
 import { AttachmentFile } from '@/components/chat/attachment-file';
+import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from '@/components/chat/reference-drop-notice';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
 import { DependencyGraph } from './dependency-graph';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
@@ -181,6 +182,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [editingAC, setEditingAC] = useState(false);
   const [acDraft, setAcDraft] = useState(story.acceptance_criteria ?? '');
   const [savingAC, setSavingAC] = useState(false);
+  // story #2315 — description/acceptance_criteria PATCH가 참조를 조용히 거를 수 있다(#2294와
+  // 같은 병, story 저장 축). BE가 아직 사이드밴드를 안 실어도(parseDroppedReferences가 빈
+  // 배열로 폴백) 안 깨지고, 실으면 바로 뜬다 — ephemeral(persist 안 함·패널 재오픈 시 소멸).
+  const [referenceDropped, setReferenceDropped] = useState<DroppedReference[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [attachError, setAttachError] = useState(false);
   const attachInputRef = useRef<HTMLInputElement>(null);
@@ -489,15 +494,21 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     body: c.content,
   }));
 
-  const patchStory = async (body: Record<string, unknown>): Promise<KanbanStory | null> => {
+  // story #2315 — patchStory는 예전엔 `json.data`만 읽어 최상위 형제 필드를 전부 버렸다(채팅
+  // handleSend가 raw 최상위에서 command_gate를 읽는 것과 같은 자리인데, 여기는 그렇게 안 하고
+  // 있었다). description/acceptance_criteria PATCH는 BE가 참조를 추출하는데(#2599)
+  // 그 결과(`references.dropped[]`)를 아직 안 실어보내는 상태 — 그래도 미리 읽는 쪽을 갖춰
+  // 둔다: parseDroppedReferences는 필드가 없으면 빈 배열로 안전하게 폴백하므로(throw 0),
+  // BE가 나중에 사이드밴드를 실어도 FE를 따로 안 건드려도 되고, 지금 당장도 안 깨진다.
+  const patchStory = async (body: Record<string, unknown>): Promise<{ story: KanbanStory | null; dropped: DroppedReference[] }> => {
     const res = await fetch(`/api/stories/${story.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { story: null, dropped: [] };
     const json = await res.json();
-    return json.data as KanbanStory;
+    return { story: json.data as KanbanStory, dropped: parseDroppedReferences(json) };
   };
 
   const handleChangeStatus = async (newStatus: string) => {
@@ -538,7 +549,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       return;
     }
     setSavingTitle(true);
-    const updated = await patchStory({ title: titleDraft.trim() });
+    const { story: updated } = await patchStory({ title: titleDraft.trim() });
     setSavingTitle(false);
     setEditingTitle(false);
     if (updated) onStoryUpdate?.({ ...story, title: updated.title });
@@ -566,7 +577,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     assigneeIdsRef.current = next;   // 동기 갱신 → 연타 시 다음 클릭이 최신 기준으로 계산
     setLocalAssigneeIds(next);       // 옵티미스틱 — 체크마크/표시 즉시 반영
     // assignee_ids 전체 배열 교체(서버 last-write-wins) → 연타 시 마지막 로컬과 정합.
-    const updated = await patchStory({ assignee_ids: next });
+    const { story: updated } = await patchStory({ assignee_ids: next });
     if (updated) {
       // story #2133 — BE 응답(assignee_ids 우선, 없으면 로컬 next)을 normalizeAssigneePatch로
       // 통과시켜 assignee_id를 손으로 다시 계산하지 않는다.
@@ -586,7 +597,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     assigneeIdsRef.current = [];
     setLocalAssigneeIds([]);         // 옵티미스틱
     setEditingAssignee(false);
-    const updated = await patchStory({ assignee_ids: [] });
+    const { story: updated } = await patchStory({ assignee_ids: [] });
     if (updated) {
       onStoryUpdate?.({ ...story, ...normalizeAssigneePatch({ assignee_ids: [] }) });
     } else {
@@ -602,9 +613,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       return;
     }
     setSavingDescription(true);
-    const updated = await patchStory({ description: descriptionDraft || null });
+    const { story: updated, dropped } = await patchStory({ description: descriptionDraft || null });
     setSavingDescription(false);
     setEditingDescription(false);
+    setReferenceDropped(dropped);
     if (updated) onStoryUpdate?.({ ...story, description: updated.description });
   };
 
@@ -614,9 +626,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       return;
     }
     setSavingAC(true);
-    const updated = await patchStory({ acceptance_criteria: acDraft || null });
+    const { story: updated, dropped } = await patchStory({ acceptance_criteria: acDraft || null });
     setSavingAC(false);
     setEditingAC(false);
+    setReferenceDropped(dropped);
     if (updated) onStoryUpdate?.({ ...story, acceptance_criteria: updated.acceptance_criteria });
   };
 
@@ -639,7 +652,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         uploaded.push(await res.json() as SendAttachment);
       }
       const next = [...current, ...uploaded]; // 전체 교체: 기존 보존 + 신규 누적
-      const updated = await patchStory({ attachments: next });
+      const { story: updated } = await patchStory({ attachments: next });
       onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
     } catch {
       setAttachError(true);
@@ -660,7 +673,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   const handleRemoveAttachment = async (url: string) => {
     const next = (story.attachments ?? []).filter((a) => a.url !== url); // filter → 전체 교체
-    const updated = await patchStory({ attachments: next });
+    const { story: updated } = await patchStory({ attachments: next });
     onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
   };
 
@@ -1188,6 +1201,12 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 </button>
               )}
             </div>
+
+            {/* story #2315 — description/acceptance_criteria 저장이 참조를 조용히 거를 수
+                있다는 것을 화면이 말한다(#2294와 동일 컴포넌트·동일 규율 — 종류-무관 문구). */}
+            {referenceDropped.length > 0 && (
+              <ReferenceDropNotice dropped={referenceDropped} onDismiss={() => setReferenceDropped([])} />
+            )}
 
             {/* Attachments — chat-attach 자산 미러 (E-FILE S4) */}
             <div>
