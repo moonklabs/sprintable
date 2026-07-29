@@ -98,7 +98,17 @@ export function getEntityHref(entityType: string, entityId: string): string | nu
     // ③ 고정 — story #2263(C-7): chat_message를 가리키는 mention/embed 칩은 아직 아무도 안
     // 만든다(proof의 실제 소비 UI는 이 범용 EntityChip/EmbedCard가 아니라 미르코의 전용
     // ChatProofEmbed 컴포넌트, #2265 PR1a). 여기 키가 있어야 하는 이유는 BE registry
-    // parity뿐 — 실제 클릭 가능한 진입점이 생기면(바로 그 conversation으로 보내는 등) ②로
+    // parity뿐.
+    //
+    // ⛔PO 지적(2026-07-29): hypothesis와 «다른» 이유로 ③이다 — hypothesis는 상세 라우트가
+    // 정말 없어서 모달 footer("열 수 있는 화면이 없습니다")가 참이지만, chat_message는
+    // 그 대화 화면(`/chats/{conversation_id}?messageId={id}`)이 실제로 «있다». 지금 이
+    // null이 그 화면을 감추는 거짓 응답을 만든다 — 다만 고치려면 BE
+    // `_resolve_chat_messages`(reference_registry.py)가 다른 8개 타입과 공유하는
+    // ENTITY_RESOLVERS 계약(session,org_id,ids)->set[uuid]을 깨거나, message_id 단독
+    // 조회 라우트(지금 0개 — conversations.py의 메시지 라우트 4개 전부 conversation_id를
+    // path에 요구)를 새로 지어야 해 이 PR 범위 밖으로 미룬다(#2263 본문에도 명시). 실제
+    // 클릭 가능한 진입점이 생기면(바로 그 conversation으로 보내는 등) ②로
     // 승격한다.
     case 'chat_message': return null;
     default: return null;
