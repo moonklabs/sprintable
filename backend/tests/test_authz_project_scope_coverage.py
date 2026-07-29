@@ -141,6 +141,8 @@ _KNOWN_DEBT_ALLOWLIST: dict[str, str] = {
         "MEDIUM — S20 fast-follow가 cross-org만 막았고 same-org cross-project는 오늘 계열과 동형 미검증",
     "app.routers.dashboard:get_dashboard":
         "MEDIUM — member_id는 org-scope 검증하나 explicit project_id에 접근권 검증 없음(assignee 필터로 blast-radius는 좁음)",
+    "app.routers.session_context:get_session_context_endpoint":
+        "MEDIUM — dashboard.get_dashboard와 동일 갭(story #2268이 dashboard_core.get_my_work를 그대로 재사용해 상속, 신규 결함 아님)",
     "app.routers.agent_runs:create_agent_run":
         "MEDIUM — body.agent_id의 org 소속만 검증하고 body.story_id는 caller org/project 접근권 미검증",
     "app.routers.merge_gate:get_merge_gate_metrics":
