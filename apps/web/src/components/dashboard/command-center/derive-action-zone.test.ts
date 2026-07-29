@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { selectVisibleQueue, countChangedSince, countAttentionChangedSince, getLastSeenMs, markSeenNow } from './derive-action-zone';
+import { selectVisibleQueue, splitRenderableQueue, countChangedSince, countAttentionChangedSince, gateTypeLabelKey, getLastSeenMs, markSeenNow } from './derive-action-zone';
 import type { QueueItem, AttentionItem } from './types';
 
 function item(type: QueueItem['type'], createdAt: string | null = null): QueueItem {
@@ -46,6 +46,21 @@ describe('selectVisibleQueue — story #2288 §7-4·§8-4', () => {
   });
 });
 
+describe('splitRenderableQueue — story #2288, PO 지시(2026-07-29): 못 알아보는 타입은 요약으로', () => {
+  it('전부 인식되는 타입이면 그대로 전부 renderable, unrenderableCount 0', () => {
+    const queue = [item('gate_approval'), item('review_merge'), item('my_blockers')];
+    expect(splitRenderableQueue(queue)).toEqual({ renderable: queue, unrenderableCount: 0 });
+  });
+
+  it('인식 못한 타입은 renderable에서 빠지고 unrenderableCount로만 센다', () => {
+    const known = item('gate_approval');
+    const unknown = { ...item('gate_approval'), type: 'brand_new_be_type' } as unknown as QueueItem;
+    const { renderable, unrenderableCount } = splitRenderableQueue([known, unknown]);
+    expect(renderable).toEqual([known]);
+    expect(unrenderableCount).toBe(1);
+  });
+});
+
 describe('countChangedSince — story #2288 §8-8', () => {
   it('기준점이 없으면(첫 방문) 0 — 모름을 전부 새것으로 지어내지 않는다', () => {
     const queue = [item('review_merge', '2026-07-29T00:00:00Z')];
@@ -76,6 +91,23 @@ describe('countAttentionChangedSince — story #2288, PO 확認(2026-07-29): §8
       attentionItem(null), // 없음 — 안 셈
     ];
     expect(countAttentionChangedSince(attention, lastSeen)).toBe(1);
+  });
+});
+
+describe('gateTypeLabelKey — story #2288, PO 지적(2026-07-29): gate_type 원시값 화면 노출 결함 fix', () => {
+  it('알려진 값(GATE_TYPES + doc_approval)은 i18n 키를 반환한다', () => {
+    expect(gateTypeLabelKey('qa')).toBe('ccGateTypeQa');
+    expect(gateTypeLabelKey('pr_review')).toBe('ccGateTypePrReview');
+    expect(gateTypeLabelKey('merge')).toBe('ccGateTypeMerge');
+    expect(gateTypeLabelKey('deploy')).toBe('ccGateTypeDeploy');
+    expect(gateTypeLabelKey('workflow_config_publish')).toBe('ccGateTypeWorkflowConfigPublish');
+    expect(gateTypeLabelKey('doc_approval')).toBe('ccGateTypeDocApproval');
+  });
+
+  it('null·undefined·모르는 값은 전부 null — 호출부가 일반 라벨로 떨어뜨린다(원시값 폴백 금지)', () => {
+    expect(gateTypeLabelKey(null)).toBeNull();
+    expect(gateTypeLabelKey(undefined)).toBeNull();
+    expect(gateTypeLabelKey('some_future_unknown_gate')).toBeNull();
   });
 });
 

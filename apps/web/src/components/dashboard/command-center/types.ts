@@ -3,12 +3,24 @@
 export type Priority = 'danger' | 'warn' | 'info';
 
 export interface QueueItem {
-  // story #2288: 'my_blockers' 추가 — BE(`command_center.py`)가 이미 내보내는데 타입에 없어
-  // action-zone.tsx의 QueueRow가 review_merge로 오인 렌더하던 것을 바로잡는다.
-  type: 'gate_approval' | 'review_merge' | 'my_blockers';
+  // ⛔⛔ 세 목록이 항상 같이 움직여야 한다(PO 지적 2026-07-29 — my_blockers 누락 버그의
+  // 근본): ①여기(BE `command_center.py`가 실제로 내보내는 `type` 값 전수) ②action-zone.tsx
+  // `RENDERABLE_TYPES` ③action-zone.tsx `QueueRow`의 렌더 분기. 하나를 늘리면 셋 다 고친다
+  // — 안 그러면 splitRenderableQueue가 새 타입을 "표시할 수 없음"으로 조용히 떨어뜨린다.
+  // (진짜 재발 방지는 BE↔FE 타입 집합 parity 테스트 — PO가 별도 스토리로 세움. 이 코멘트는
+  // 그 전까지의 "적어 둔 것" 역할.)
+  //
+  // story #2288: 'my_blockers' 추가 — BE가 이미 내보내는데 타입에 없어 QueueRow가
+  // review_merge로 오인 렌더하던 것을 바로잡는다.
+  // 'waiting_on_others'(#2650, BE 명세4): 「내 것인데 남이 잡음」— priority 항상 'info',
+  // action-zone.tsx에서 행동 큐와 별도 구역("기다리는 것")으로 렌더(버튼 없음).
+  type: 'gate_approval' | 'review_merge' | 'my_blockers' | 'waiting_on_others';
   priority: Priority;
   title?: string | null; // review_merge만 top-level title(story 제목)
-  context: Record<string, unknown>; // gate_approval:{gate_id,approval_group_id,kind} / review_merge:{story_id,status} / my_blockers:{blocker_story_id,blocked_story_id}
+  // gate_approval:{gate_id,approval_group_id,kind,gate_type} / review_merge:{story_id,status} /
+  // my_blockers:{blocker_story_id,blocked_story_id} /
+  // waiting_on_others:{story_id,gate_type,approver_member_id} — BE가 story_id로 이미 dedupe.
+  context: Record<string, unknown>;
   created_at: string | null;
 }
 

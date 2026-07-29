@@ -28,6 +28,61 @@ export function selectVisibleQueue(queue: QueueItem[], cap: number): VisibleQueu
   return { visible, cutCount: queue.length - visible.length };
 }
 
+// ⛔세 목록 중 하나 — types.ts의 QueueItem.type 주석 참조(BE 실제 type ↔ 이 목록 ↔
+// action-zone.tsx QueueRow의 렌더 분기, 셋이 같이 움직여야 한다 · PO 지적 2026-07-29).
+// PO 재질문(2026-07-29): 코멘트는 "읽어야" 서는데, 타입으로 묶으면 "안 읽어도" 빨개진다 —
+// Record<QueueItem['type'], true>는 TS가 모든 키를 요구하므로, QueueItem.type에 새 값이
+// 추가되는데 여기 안 채우면 "Property '…' is missing" 컴파일 에러가 즉시 난다(Set이었을
+// 때는 안 그랬다 — 조용히 새 값을 놓쳐도 컴파일이 통과했다).
+const RENDERABLE_TYPES: Record<QueueItem['type'], true> = {
+  gate_approval: true,
+  review_merge: true,
+  my_blockers: true,
+  waiting_on_others: true,
+};
+
+export interface RenderableQueueResult {
+  renderable: QueueItem[];
+  unrenderableCount: number;
+}
+
+// PO 지적(2026-07-29): gate_type 원시값(BE enum 문자열)이 한국어 화면에 날것으로 나오던
+// 결함 — 닫힌 집합이라 번역 맵을 둔다. i18n 키만 반환 — 실제 문구는 action-zone.tsx가
+// next-intl로 그린다.
+// ⛔이 집합은 BE에 «한 곳»이 아니라 «두 곳»에 산다(PO 지적 — 값진 함정, 다음 사람도 놓치기
+// 쉽다): GATE_TYPES(backend/app/models/hitl_config.py: pr_review·qa·merge·deploy·
+// workflow_config_publish) + doc_approval(backend/app/services/doc.py의 DOC_GATE_TYPE,
+// hitl_config.py의 GATE_TYPES frozenset에는 없음). 새 gate_type을 여기 추가할 땐 두 파일
+// 다 확認한다.
+const GATE_TYPE_LABEL_KEYS: Record<string, string> = {
+  qa: 'ccGateTypeQa',
+  pr_review: 'ccGateTypePrReview',
+  merge: 'ccGateTypeMerge',
+  deploy: 'ccGateTypeDeploy',
+  workflow_config_publish: 'ccGateTypeWorkflowConfigPublish',
+  doc_approval: 'ccGateTypeDocApproval',
+};
+
+/**
+ * gate_type → i18n 키. 맵에 없는 값(미래 확장·오타 등)은 null — 호출부가 null일 때와
+ * «같은 자리»(일반 라벨)로 떨어뜨린다. 원시값을 폴백으로 내보내지 않는다(PO 지적).
+ */
+export function gateTypeLabelKey(gateType: string | null | undefined): string | null {
+  if (!gateType) return null;
+  return GATE_TYPE_LABEL_KEYS[gateType] ?? null;
+}
+
+/**
+ * story #2288, PO 지시(2026-07-29) — #2265 ChatProofSection의 skippedCount와 같은 관례:
+ * QueueRow가 인식 못하는 타입은 개별 자리표시 줄로 하나씩 그리지 않고(소음), 목록에서
+ * 걷어내 「N건은 표시할 수 없음」 요약 한 줄로만 말한다. 잘림(cutCount, selectVisibleQueue)과
+ * 다른 사실이다 — 잘림은 「안 보여준다」(재료는 있음), 이건 「못 알아본다」(재료 형상 모름).
+ */
+export function splitRenderableQueue(queue: QueueItem[]): RenderableQueueResult {
+  const renderable = queue.filter((q) => q.type in RENDERABLE_TYPES);
+  return { renderable, unrenderableCount: queue.length - renderable.length };
+}
+
 const LAST_SEEN_KEY = 'sprintable:command-center:v1:last-seen-actions';
 
 function readLastSeenMs(): number | null {

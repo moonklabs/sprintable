@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { ShieldCheck, GitPullRequest, Ban, AlertTriangle, CheckCircle2, ChevronRight, History } from 'lucide-react';
+import { ShieldCheck, GitPullRequest, Ban, AlertTriangle, CheckCircle2, ChevronRight, History, Clock } from 'lucide-react';
 import { type MyActions, type Priority, type QueueItem, type AttentionItem } from './types';
-import { selectVisibleQueue, countChangedSince, countAttentionChangedSince, getLastSeenMs, markSeenNow, minutesAgo } from './derive-action-zone';
+import { selectVisibleQueue, splitRenderableQueue, countChangedSince, countAttentionChangedSince, gateTypeLabelKey, getLastSeenMs, markSeenNow, minutesAgo } from './derive-action-zone';
 
 const QUEUE_CAP = 5; // now-face.tsx CAP 관례 재사용(§7-4 잘림-보이기).
 
@@ -21,11 +21,22 @@ const PRIORITY_BORDER: Record<Priority, string> = {
   info: 'border-l-border',
 };
 
-function QueueRow({ item }: { item: QueueItem }) {
+// PO 지적(2026-07-29): gate_type 원시값을 화면에 그대로 내보내지 않는다 — 아는 값은
+// 번역, 모르는 값은 null과 같은 일반 라벨로(derive-action-zone.gateTypeLabelKey 참조).
+function gateLabel(t: ReturnType<typeof useTranslations>, gateType: string | null | undefined): string {
+  const key = gateTypeLabelKey(gateType);
+  return key ? t(key) : t('ccGateGeneric');
+}
+
+// story #2288: 정상 경로에서는 splitRenderableQueue가 미확인 타입을 미리 걸러내므로 이 아래
+// 마지막 분기는 방어선(defense-in-depth)이다 — 직접 단위테스트하려고 export한다.
+export function QueueRow({ item }: { item: QueueItem }) {
   const t = useTranslations('dashboard');
-  const ctx = item.context as { gate_id?: string; story_id?: string; kind?: string; status?: string; blocked_story_id?: string };
+  const ctx = item.context as { gate_id?: string; story_id?: string; kind?: string; gate_type?: string | null; status?: string; blocked_story_id?: string };
   if (item.type === 'gate_approval') {
     // 승인은 우발 mutation 방지 위해 게이트 인박스로 1클릭 네비게이션(전체 맥락서 결재).
+    // gate_type(#2650 BE 명세3 착지) — kind(결재자 역할)와 다른 축. 둘 다 있으면 둘 다 보인다.
+    // PO 지적(2026-07-29): 원시값(qa·deploy 등)을 그대로 안 보인다 — gateLabel로 번역.
     return (
       <Link
         href="/inbox?tab=gates"
@@ -33,7 +44,7 @@ function QueueRow({ item }: { item: QueueItem }) {
       >
         <ShieldCheck className="size-3.5 shrink-0 text-warning" />
         <span className="min-w-0 flex-1 truncate text-foreground">
-          {t('ccQueueGateApproval')}{ctx.kind ? <span className="text-muted-foreground"> · {ctx.kind}</span> : null}
+          {t('ccQueueGateApproval')}{ctx.gate_type ? <span className="text-muted-foreground"> · {gateLabel(t, ctx.gate_type)}</span> : null}{ctx.kind ? <span className="text-muted-foreground"> · {ctx.kind}</span> : null}
         </span>
         <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground">{t('ccQueueApprove')}<ChevronRight className="size-3" /></span>
       </Link>
@@ -84,6 +95,29 @@ function QueueRow({ item }: { item: QueueItem }) {
   );
 }
 
+/**
+ * story #2288, BE 명세4(#2650 착지) — 「내 것인데 남이 잡음」. §3-1㉢ 정의 그대로: 발(다음
+ * 행동)이 내게 없다 — ⛔«상태를 바꾸는» 컨트롤(버튼·승인/거절)을 달지 않는다.
+ * ⭐PO 정정(2026-07-29): 「행동이 없다」≠「볼 수 없다」— 판별자는 "상태를 바꾸는가"이지
+ * "클릭 가능한가"가 아니다. 가서 보는 링크는 «해소»(내가 놓친 게 아니라 남이 잡고 있다는
+ * 것을 확認)에 필요하므로 남긴다(첫 시도에서 <Link>를 <div>로 지웠던 것이 결함이었음 —
+ * 목업 v3의 plain div `.wr`도 실은 목업 쪽 결함, 유나 lane으로 전달됨).
+ * priority=info이나 danger/warn(행동 촉구) 축과 같은 자리에 섞지 않는다 — 별도 구역.
+ */
+function WaitingRow({ item }: { item: QueueItem }) {
+  const t = useTranslations('dashboard');
+  const ctx = item.context as { story_id?: string; gate_type?: string | null };
+  return (
+    <Link
+      href={ctx.story_id ? `/board?story=${ctx.story_id}` : '/board'}
+      className="flex items-center gap-2 rounded-lg border border-border bg-card p-2.5 text-xs text-muted-foreground transition hover:border-muted-foreground/30"
+    >
+      <Clock className="size-3.5 shrink-0" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate">{t('ccWaitingGateReason', { gate: gateLabel(t, ctx.gate_type) })}</span>
+    </Link>
+  );
+}
+
 function AttentionRow({ item, resolveName, epicTitles }: { item: AttentionItem; resolveName: (id: string | null | undefined) => string | null; epicTitles: Record<string, string> }) {
   const t = useTranslations('dashboard');
   // id+enum → 카피 조합(raw error/log 없음). entity 제목 resolve(없으면 타입 라벨)·게이트.
@@ -91,7 +125,8 @@ function AttentionRow({ item, resolveName, epicTitles }: { item: AttentionItem; 
   // 트리거로만 쓰이고(위쪽 필터링), 여기선 경과 분(minutesSince) 계산·표시를 걷었다 — "대기는
   // 경보가 아니라 상태"(§1/§8 시간 강조 0). 색도 warning→info/muted 중립 톤.
   const entity = resolveName(item.entity_id) ?? epicTitles[item.entity_id] ?? item.entity_type;
-  const gate = item.gate_type ?? t('ccGateGeneric');
+  // PO 지적(2026-07-29, #2650 리뷰) — gate_type 원시값을 그대로 안 보인다(gateLabel 참조).
+  const gate = gateLabel(t, item.gate_type);
   return (
     <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5 text-xs">
       <span className="mt-1 size-1.5 shrink-0 rounded-full bg-info/60" aria-hidden="true" />
@@ -114,8 +149,15 @@ export function ActionZone({ data, resolveName, epicTitles }: {
   const hasPending = (data?.attention.pending.length ?? 0) > 0;
   const isClear = data?.is_clear === true;
 
+  // PO 지시(2026-07-29): QueueRow가 못 알아보는 타입은 개별 소음 줄 대신 목록에서 걷어내고
+  // 요약 한 줄로만 말한다(#2265 ChatProofSection skippedCount 관례) — 잘림과 다른 사실.
+  const { renderable: renderableQueue, unrenderableCount } = useMemo(() => splitRenderableQueue(queue), [queue]);
+  // waiting_on_others는 행동 큐(잘림·자르는순서 대상)가 아니라 별도 "기다리는 것" 구역이다
+  // (PO 지시 2026-07-29) — actionable에서 미리 뺀다.
+  const actionableQueue = useMemo(() => renderableQueue.filter((q) => q.type !== 'waiting_on_others'), [renderableQueue]);
+  const waitingItems = useMemo(() => renderableQueue.filter((q) => q.type === 'waiting_on_others'), [renderableQueue]);
   // story #2288 §8-4·§7-4: 자를 땐 review_merge부터, 잘렸으면 반드시 말한다.
-  const { visible: visibleQueue, cutCount } = selectVisibleQueue(queue, QUEUE_CAP);
+  const { visible: visibleQueue, cutCount } = selectVisibleQueue(actionableQueue, QUEUE_CAP);
 
   // story #2288 §8-8: 방문 사이 새로 생긴 것 — action_queue 3관계뿐 아니라 attention(감지
   // 신호, org-scope이나 「지금 볼 것」에 이미 뜨는 것)도 PO 확認(2026-07-29)으로 포함.
@@ -187,9 +229,23 @@ export function ActionZone({ data, resolveName, epicTitles }: {
             {cutCount > 0 ? (
               // ccQueueTruncated 문구는 자리만 확保 — 최종 워딩은 유나 lane(§8-4 규율을
               // 담아 통일된 톤으로 검수 예정, 지금은 기능 검증용 임시 문구).
-              <p className="text-[11px] text-muted-foreground">{t('ccQueueTruncated', { shown: visibleQueue.length, total: queue.length })}</p>
+              <p className="text-[11px] text-muted-foreground">{t('ccQueueTruncated', { shown: visibleQueue.length, total: actionableQueue.length })}</p>
+            ) : null}
+            {unrenderableCount > 0 ? (
+              // ccQueueUnrenderableCount도 자리만 확保 — 최종 워딩은 유나 lane(같은 코멘트,
+              // PO 지시 2026-07-29). 「N건은 표시할 수 없음」— 잘림과 다른 사실이라 별도 줄.
+              <p className="text-[11px] text-muted-foreground">{t('ccQueueUnrenderableCount', { count: unrenderableCount })}</p>
             ) : null}
           </div>
+
+          {/* story #2288, BE 명세4(#2650): 「내 것인데 남이 잡음」— 행동 큐와 별도 구역, 버튼 없음(§3-1㉢).
+              ccWaitingTitle·ccWaitingGateReason도 자리만 확保 — 최종 워딩은 유나 lane. */}
+          {waitingItems.length > 0 ? (
+            <div className="space-y-1.5" data-testid="cc-waiting-zone">
+              <span className="text-[11px] font-medium text-foreground">{t('ccWaitingTitle')}</span>
+              {waitingItems.map((w, i) => <WaitingRow key={`${(w.context as { story_id?: string }).story_id ?? i}`} item={w} />)}
+            </div>
+          ) : null}
         </>
       )}
     </section>
