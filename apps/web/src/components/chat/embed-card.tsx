@@ -20,6 +20,13 @@ import { initials } from '@/lib/storage/format';
 // getFileIcon이 파일별로 처리), "아이콘 없으면 이름 글자로"가 AC4가 못박은 **기본값**이지
 // asset만의 예외 처리가 아니다 — 그래서 이 fallback은 `resolveEntityIcon()`이 모든 타입에
 // 공통 적용한다(Hash 캐치올을 버림 — 있지도 않은 아이콘을 그리는 거짓보다 글자가 정직하다).
+//
+// ⛔story #2263(C-7, 2026-07-29) — 한 번 여기 chat_message를 추가했다가 되돌렸다: BE
+// ENTITY_RESOLVERS에 등록하면 «완전지원 엔티티»(검색·MCP mention·project축 parity까지)를
+// 전부 갖춰야 한다는 게 CI 13건 실패로 드러났다(PO 판정). chat_message는 참조 TARGET은
+// 되지만 그 다섯 계약을 구조적으로 다 못 갖춰(검색대상 아님·project축 아님·단독조회
+// 라우트 없음) `reference_registry.TARGET_ONLY_TYPES`라는 별도 집합으로 옮겨졌다 —
+// ENTITY_RESOLVERS 밖이라 이 FE parity 대조에도 안 걸린다(의도적으로 안 나타난다).
 export const ENTITY_ICONS: Record<string, LucideIcon> = {
   story: FileText,
   doc: File,

@@ -133,6 +133,24 @@ async def _resolve_hypotheses(session: AsyncSession, org_id: uuid.UUID, ids: lis
     return set(rows)
 
 
+async def _resolve_chat_messages(session: AsyncSession, org_id: uuid.UUID, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    """story #2263(C-7, 2026-07-29) — chat_message가 처음으로 TARGET이 되는 자리(proof가
+    대화 메시지를 인용). ⛔ENTITY_RESOLVERS에는 안 들어간다(PO 판정, 아래 TARGET_ONLY_TYPES
+    참조) — 검색 대상도 project축도 MCP mention 대상도 아니라 "완전지원 엔티티" 다섯 계약을
+    구조적으로 못 갖춘다. 이 resolver는 TARGET_ONLY_RESOLVERS를 통해 존재판정에만 쓰인다.
+    (메시지 자체엔 org_id 컬럼이 없어 Conversation을 통해서만 org 스코프 가능 — join 필요.)"""
+    from app.models.conversation import Conversation, ConversationMessage
+
+    rows = (
+        await session.execute(
+            select(ConversationMessage.id)
+            .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+            .where(Conversation.org_id == org_id, ConversationMessage.id.in_(ids))
+        )
+    ).scalars().all()
+    return set(rows)
+
+
 async def _resolve_evidence(session: AsyncSession, org_id: uuid.UUID, ids: list[uuid.UUID]) -> set[uuid.UUID]:
     from app.models.evidence import Evidence
 
@@ -143,7 +161,13 @@ async def _resolve_evidence(session: AsyncSession, org_id: uuid.UUID, ids: list[
 
 
 # entity_type(str) -> resolver. 각 resolver 는 (session, org_id, ids) -> {존재하는 id 집합}.
-# ⛔이 dict 가 유일한 SSOT — write 검증과 read 존재판정이 둘 다 이걸 참조한다(재구현 0).
+# ⛔이 dict 가 «완전지원 엔티티» SSOT다 — 여기 들어가면 다섯 계약을 전부 진다: ①존재판정
+# ②entities/search handler ③PROJECT_ID_RESOLVERS 동일 키 ④MCP mention 엔드포인트
+# ⑤reference_token 빌더 대상. story #2263(C-7, 2026-07-29)에서 chat_message를 «존재판정만»
+# 필요해서 여기 넣었다가 CI 13건이 한 번에 깨졌다(PO 판정, 2026-07-29) — 검색 대상이 아니고
+# ·project 축이 아니고·단독조회 라우트가 없어 ②③④를 구조적으로 못 갖추는데 그 셋을
+# 강제로 요구받은 것. 「target이 될 수 있다」와 「완전지원 엔티티다」는 다른 축이라 — 그
+# 둘을 가르는 자리가 아래 TARGET_ONLY_TYPES다.
 ENTITY_RESOLVERS: dict[str, EntityExistsResolver] = {
     "doc": _resolve_docs,
     "story": _resolve_stories,
@@ -157,14 +181,47 @@ ENTITY_RESOLVERS: dict[str, EntityExistsResolver] = {
 
 
 # source_type으로는 유효하나 target 존재판정(resolver)은 없는 타입 — 위 모듈 docstring
-# 참조. write-path(mention_parser.py)가 이 타입들을 source_type으로 직접 씀(하드코딩 리터럴,
-# 사용자 입력 아님 — #2260이 이미 검증한 신뢰 경계).
+# 참조. chat_message가 그 멤버다(채팅 write-path가 매일 쓰는 정당한 source — mention_parser.py
+# 참조, 이 PR과 무관한 원래 용도). ⛔story #2263(2026-07-29) 한때 이 집합을 비우고 chat_message
+# 를 ENTITY_RESOLVERS로 옮겼었으나 되돌렸다(그 등록이 검색·MCP·project축 계약까지 강제해
+# CI 13건이 깨졌다, PO 판정) — chat_message는 source_only이면서 «동시에» target_only(아래)
+# 이기도 하다, 서로 배타적이지 않다.
 SOURCE_ONLY_TYPES: frozenset[str] = frozenset({"chat_message"})
+
+# ⛔TARGET_ONLY_TYPES(SOURCE_ONLY_TYPES와 대칭, story #2263 PO 판정 2026-07-29) — target은
+# 될 수 있으나(존재판정 가능) ENTITY_RESOLVERS의 나머지 네 계약(검색·project축·MCP
+# mention·reference_token)은 구조적으로 못 갖추는 타입. chat_message가 첫 멤버 — proof
+# form이 대화 메시지를 인용해 target이 되지만, 메시지는 검색 대상이 아니고(민 확認)
+# project로 스코프되지 않고(참여자 기반, #2261부터 알려진 "넷째 경계") 단독조회 라우트가
+# 없다(conversations.py의 메시지 라우트 4개 전부 conversation_id를 path에 요구). 위
+# SOURCE_ONLY_TYPES와 겹치는 멤버(chat_message)가 있는 것은 정상이다 — source 자격과
+# target 자격은 독립된 두 질문이다.
+TARGET_ONLY_TYPES: frozenset[str] = frozenset({"chat_message"})
+
+# TARGET_ONLY_TYPES 멤버의 존재판정 resolver. ENTITY_RESOLVERS와 분리된 이유는 위와 동일 —
+# 이 dict에 들어간다고 검색/MCP/project축 계약까지 진 것으로 오인되면 안 된다.
+#
+# ⛔chat_message는 «target은 되나 완전지원은 아니다» —
+#   검색 대상 아님(UI 없음) · project 축 아님 · 단독 조회 라우트 없음.
+#   ⇒ ENTITY_RESOLVERS에 넣으면 다섯 계약(search·PROJECT_ID·MCP…)이 전부 요구되어
+#     13건이 깨진다(2026-07-29 실측). 「왜 여기만 따로지?」로 되돌리지 말 것.
+TARGET_ONLY_RESOLVERS: dict[str, EntityExistsResolver] = {
+    "chat_message": _resolve_chat_messages,
+}
 
 
 def is_registered_entity_type(entity_type: str) -> bool:
-    """target_type 검증용 — 존재판정(resolver)이 있는 타입인가."""
+    """«완전지원 엔티티» 판정용(검색·MCP mention·reference_token 등) — ENTITY_RESOLVERS
+    멤버인가. TARGET_ONLY_TYPES는 의도적으로 포함하지 않는다(위 모듈 주석 참조)."""
     return entity_type in ENTITY_RESOLVERS
+
+
+def is_valid_target_type(entity_type: str) -> bool:
+    """target_type 검증용(write-path, insert_reference가 부른다) — 존재판정(resolver)이
+    있는 타입인가. ENTITY_RESOLVERS(완전지원)이거나 TARGET_ONLY_TYPES(target 전용)면 OK —
+    `is_registered_entity_type`과 달리 TARGET_ONLY_TYPES도 통과시킨다(그게 이 함수가
+    따로 존재하는 이유)."""
+    return entity_type in ENTITY_RESOLVERS or entity_type in TARGET_ONLY_TYPES
 
 
 def is_valid_source_type(entity_type: str) -> bool:
@@ -319,12 +376,15 @@ async def count_orphan_types(session: AsyncSession, org_id: uuid.UUID | None = N
     호출자 배선은 그 후속 PR 몫이다.
 
     ⛔source_type과 target_type은 다른 "known" 집합으로 판정한다(SOURCE_ONLY_TYPES 참조) —
-    같은 집합으로 재면 chat_message 같은 정상 source가 오탐된다(실측으로 걸린 자리)."""
+    같은 집합으로 재면 chat_message 같은 정상 source가 오탐된다(실측으로 걸린 자리).
+
+    ⛔story #2263(C-7) 후속: target 쪽도 ENTITY_RESOLVERS만으로는 부족하다 — TARGET_ONLY_TYPES
+    (chat_message)를 뺴면 proof가 만든 정당한 target이 orphan으로 오탐된다."""
     from collections import Counter
 
     from app.models.reference import Reference
 
-    known_targets = set(ENTITY_RESOLVERS)
+    known_targets = set(ENTITY_RESOLVERS) | TARGET_ONLY_TYPES
     known_sources = known_targets | SOURCE_ONLY_TYPES
     stmt = select(Reference.source_type, Reference.target_type)
     if org_id is not None:

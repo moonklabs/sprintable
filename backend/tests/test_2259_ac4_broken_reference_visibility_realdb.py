@@ -5,11 +5,13 @@
   ㉠참조 «행»이 남는가/사라지는가 — target이 하드삭제돼도 CASCADE가 없어 행은 남는다.
   ㉡read 경로(`reference_core.list_references`)가 그것을 어떻게 보여주는가 — `still_exists`
     필드로 "존재하지 않는다"를 명시적으로 실어 보낸다(조용히 누락시키지 않는다).
-  ㉢「끊어졌다」가 사용자에게 어떻게 보이는가 — ⛔정직한 답: **아직 아무 라이브 엔드포인트도
-    `list_references`를 호출하지 않는다**(코드 grep으로 실증). 즉 ㉡의 신호는 서비스
-    레이어에서 올바르게 계산되지만, 지금은 어떤 사용자에게도 도달하지 않는다 — 이 설계
-    제약("조용히 사라지면 그건 거짓말이다")이 아직 지켜지지 않은 상태를 그대로 선언한다
-    (기능을 새로 짓지 않고, 갭을 정확히 재서 적는 것이 이번 판의 스코프).
+  ㉢「끊어졌다」가 사용자에게 어떻게 보이는가 — ⛔story #2263(C-7, 2026-07-29)로 이 선언이
+    갱신됐다: **이제 라이브 엔드포인트가 하나 있다** — GET
+    /api/v2/stories/{id}/references?direction=outgoing (routers/stories.py)가 이 함수를
+    직접 부른다. ㉡의 `still_exists` 신호가 이제 그 라우트를 통해 실제로 사용자에게
+    도달한다(스토리에 인용된 chat_message/doc/story 등 outgoing 참조 목록에서 확인 가능).
+    이 파일의 코드 스캔은 "0건"에서 "정확히 이 한 곳"으로 바뀐 것을 고정한다(다른 라우터가
+    조용히 추가로 부르기 시작하면 다시 이 테스트가 갱신 대상이 된다).
 """
 from __future__ import annotations
 
@@ -31,19 +33,19 @@ def anyio_backend():
 # ─── ㉢ 코드 스캔 — list_references의 라이브 호출부가 정말 0인지 ────────────────
 
 
-def test_list_references_has_zero_live_router_callers():
-    """⛔이 테스트가 RED가 되면(즉 어딘가 router가 list_references를 부르기 시작하면) 이
-    파일의 ㉢ 선언(「아직 사용자에게 안 보인다」)을 다시 써야 한다는 신호다 — 그때는
-    선언을 지우는 게 아니라 이 테스트와 함께 갱신한다."""
+def test_list_references_has_exactly_one_live_router_caller():
+    """story #2263(C-7)로 갱신 — 0건에서 정확히 stories.py 한 곳으로 바뀌었다(위 모듈
+    docstring ㉢ 참조). 이 테스트가 다시 RED가 되면(다른 router도 부르기 시작하면) 이 목록과
+    모듈 docstring을 함께 갱신한다 — 선언을 지우는 게 아니라 늘어난 사실 그대로 반영한다."""
     routers_dir = Path(__file__).resolve().parents[1] / "app" / "routers"
     callers = []
     for py_file in sorted(routers_dir.glob("*.py")):
         text = py_file.read_text()
         if re.search(r"\blist_references\s*\(", text):
             callers.append(py_file.name)
-    assert callers == [], (
-        f"list_references가 이제 router에서 호출된다({callers}) — "
-        "㉢ 선언(«아직 사용자에게 안 보인다»)이 낡았다. 이 테스트와 PR 본문을 같이 갱신할 것."
+    assert callers == ["stories.py"], (
+        f"list_references 호출부 목록이 예상과 다르다({callers}) — "
+        "㉢ 선언(«정확히 stories.py 한 곳»)이 낡았다. 이 테스트와 PR 본문을 같이 갱신할 것."
     )
 
 
