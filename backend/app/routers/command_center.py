@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +27,7 @@ from app.models.agent_run import AgentRun
 from app.models.dependency import ItemDependency
 from app.models.hypothesis import Hypothesis
 from app.models.member import AgentProjectProfile, Member
-from app.models.pm import Goal, Story, StoryActivity
+from app.models.pm import Goal, Story, StoryActivity, Task
 from app.models.workflow_line import WorkflowLineStepApproval, WorkflowLineStepRun
 from app.services.member_resolver import resolve_member
 
@@ -80,24 +80,65 @@ async def my_actions(
             .limit(50)
         )
     ).all()
+    # story #2288(E-CONNECT) BE 명세2(§2③, 무게 — 근사치 OK, 정확 집계는 #2221 별건): 같은
+    # approval_group_id(quorum)에 나 말고 몇 명이 더 pending인지. N+1 금지 — group by 배치.
+    _approval_group_ids = [a.approval_group_id for a, _gt in approvals]
+    approval_group_counts: dict[uuid.UUID, int] = {}
+    if _approval_group_ids:
+        rows = (
+            await session.execute(
+                select(WorkflowLineStepApproval.approval_group_id, func.count(WorkflowLineStepApproval.id))
+                .where(
+                    WorkflowLineStepApproval.org_id == org_id,
+                    WorkflowLineStepApproval.approval_group_id.in_(_approval_group_ids),
+                    WorkflowLineStepApproval.status == "pending",
+                    WorkflowLineStepApproval.blocking.is_(True),
+                )
+                .group_by(WorkflowLineStepApproval.approval_group_id)
+            )
+        ).all()
+        approval_group_counts = {gid: cnt for gid, cnt in rows}
     for a, gate_type in approvals:
+        # 그룹 전체 pending 수 - 나 자신 = "나 말고 몇 명 더" — 음수 방지 max(0, ...).
+        waiting_count = max(0, approval_group_counts.get(a.approval_group_id, 1) - 1)
         queue.append({
             "type": "gate_approval",
             "priority": "warn",
             "context": {"gate_id": str(a.gate_id) if a.gate_id else None,
                         "approval_group_id": str(a.approval_group_id), "kind": a.kind,
-                        "gate_type": gate_type},
+                        "gate_type": gate_type, "waiting_count": waiting_count},
             "created_at": a.created_at.isoformat() if a.created_at else None,
         })
-    # 리뷰/머지 대기 = 내 배정 in-review 스토리(member-private).
+    # story #2288(E-CONNECT) BE 명세5(2026-07-29 확定, PO 기준): review_merge를 status==
+    # 'in-review' 하나에서 "done 아닌 전체"로 넓힌다 — PO 기준 그대로 "내가 지금 손을 대면
+    # 무언가 달라지는가". ⛔단 "선행 대기"(아직 안 풀린 blocks 의존성이 이 story를 막고
+    # 있음)는 제외한다 — 손대도 안 바뀌는 것은 waiting 축이지 review_merge 축이 아니다
+    # (그 축은 이미 my_blockers/waiting_on_others가 다룬다 — 여기서 새로 안 만든다).
+    _ReviewBlocker = aliased(Story)
+    _blocked_by_open_dependency = (
+        select(ItemDependency.id)
+        .select_from(ItemDependency)
+        .join(_ReviewBlocker, _ReviewBlocker.id == ItemDependency.from_id)
+        .where(
+            ItemDependency.org_id == org_id,
+            ItemDependency.to_id == Story.id,
+            ItemDependency.dep_type == "blocks",
+            ItemDependency.item_type == "story",
+            _ReviewBlocker.org_id == org_id,
+            _ReviewBlocker.status.not_in(_OPEN_EXCLUDED_STATUSES),  # 막는 쪽이 아직 open.
+            _ReviewBlocker.deleted_at.is_(None),
+        )
+        .correlate(Story)
+    )
     reviews = (
         await session.execute(
             select(Story)
             .where(
                 Story.org_id == org_id,
                 Story.assignee_id == member_id,
-                Story.status == "in-review",
+                Story.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 Story.deleted_at.is_(None),
+                ~exists(_blocked_by_open_dependency),
             )
             .order_by(Story.updated_at.desc())
             .limit(50)
@@ -110,6 +151,33 @@ async def my_actions(
             "title": s.title,
             "context": {"story_id": str(s.id), "status": s.status},
             "created_at": s.updated_at.isoformat() if s.updated_at else None,
+        })
+    # story #2288(E-CONNECT) BE 명세1(§1-1, 태스크 줄): 담당 스토리 소속 여부와 무관하게
+    # "내가 담당인 미완료 Task"를 그 자체로 항목화한다 — 스토리는 소속 표시만(미르코 명세
+    # 원문 그대로, 스토리를 따로 my_task로 중복 안 냄).
+    my_tasks = (
+        await session.execute(
+            select(Task, Story.title)
+            .join(Story, Story.id == Task.story_id)
+            .where(
+                Task.org_id == org_id,
+                Task.assignee_id == member_id,
+                Task.status != "done",
+                Task.deleted_at.is_(None),
+                Story.org_id == org_id,
+                Story.deleted_at.is_(None),
+            )
+            .order_by(Task.updated_at.desc())
+            .limit(50)
+        )
+    ).all()
+    for t, story_title in my_tasks:
+        queue.append({
+            "type": "my_task",
+            "priority": "info",
+            "title": t.title,
+            "context": {"task_id": str(t.id), "story_id": str(t.story_id), "story_title": story_title},
+            "created_at": t.updated_at.isoformat() if t.updated_at else None,
         })
     # CC-BE.2 내가 풀 블로커(member-private): 내 담당(blocker) 스토리가 막은 open 스토리. caller-bound.
     _Blocker = aliased(Story)
@@ -134,11 +202,35 @@ async def my_actions(
             .limit(50)
         )
     ).all()
+    # story #2288 BE 명세2(§2③, 무게): 같은 blocker_story_id가 총 몇 개의 open story를
+    # 막고 있는지 — N+1 금지, group by 배치(위 my_blockers 쿼리와 동일 WHERE 축 재사용).
+    _blocker_ids = [blocker_id for blocker_id, _blocked_id in my_blockers]
+    blocker_weight_counts: dict[uuid.UUID, int] = {}
+    if _blocker_ids:
+        rows = (
+            await session.execute(
+                select(ItemDependency.from_id, func.count(func.distinct(ItemDependency.to_id)))
+                .select_from(ItemDependency)
+                .join(_Blocked, _Blocked.id == ItemDependency.to_id)
+                .where(
+                    ItemDependency.org_id == org_id,
+                    ItemDependency.dep_type == "blocks",
+                    ItemDependency.item_type == "story",
+                    ItemDependency.from_id.in_(_blocker_ids),
+                    _Blocked.org_id == org_id,
+                    _Blocked.status.not_in(_OPEN_EXCLUDED_STATUSES),
+                    _Blocked.deleted_at.is_(None),
+                )
+                .group_by(ItemDependency.from_id)
+            )
+        ).all()
+        blocker_weight_counts = {bid: cnt for bid, cnt in rows}
     for blocker_id, blocked_id in my_blockers:
         queue.append({
             "type": "my_blockers",
             "priority": "danger",  # 내가 푸는 게 남을 막고 있음 — 최우선.
-            "context": {"blocker_story_id": str(blocker_id), "blocked_story_id": str(blocked_id)},
+            "context": {"blocker_story_id": str(blocker_id), "blocked_story_id": str(blocked_id),
+                        "waiting_count": blocker_weight_counts.get(blocker_id, 1)},
         })
 
     # story #2288(E-CONNECT) BE 명세4(§3-1㉢·§4-1, PO 강조 — 이 스토리의 심장): 「내 것인데

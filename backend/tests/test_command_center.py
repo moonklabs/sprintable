@@ -81,13 +81,32 @@ def _data(resp):
     return body.get("data", body) if isinstance(body, dict) else {}
 
 
-# my-actions 쿼리 순서: approvals(.all, gate_type 조인) → reviews → my_blockers(.all) →
-# waiting_on_others(.all, story #2288 BE 명세4 신규) → agent_stuck → stalled(.all) → unanswered(.all).
+# my-actions 쿼리 순서: approvals(.all, gate_type 조인) → [approval_group_counts, approvals
+# 비어있지 않을 때만·명세2 무게] → reviews → my_tasks(명세1, 항상 실행) → my_blockers(.all) →
+# [blocker_weight_counts, my_blockers 비어있지 않을 때만·명세2 무게] → waiting_on_others(.all) →
+# agent_stuck → stalled(.all) → unanswered(.all).
 # ⛔approvals는 story #2288 BE 명세3(gate_type 패스스루)로 WorkflowLineStepRun과 조인해 이제
 # (approval, gate_type) 튜플을 낸다 — 단일 ORM 엔티티가 아니므로 scalars() 대신 .all().
-def _ma_seq(approvals=(), reviews=(), my_blockers=(), waiting=(), stuck=(), stalled=(), unanswered=()):
-    return [_r_all(approvals), _r_scalars(reviews), _r_all(my_blockers), _r_all(waiting),
-            _r_scalars(stuck), _r_all(stalled), _r_all(unanswered)]
+# ⛔명세2(무게) 배치 쿼리 둘은 **조건부**(원본 리스트가 비면 DB 왕복 자체를 스킵) — 그래서
+# 이 헬퍼도 고정 리스트가 아니라 그 조건을 그대로 반영해 순서를 조립한다(안 그러면 approvals/
+# my_blockers를 채운 테스트만 다음 호출들이 전부 밀려 엉뚱한 mock을 받는다).
+def _ma_seq(
+    approvals=(), reviews=(), my_blockers=(), waiting=(), stuck=(), stalled=(), unanswered=(),
+    my_tasks=(), approval_group_counts=(), blocker_weight_counts=(),
+):
+    seq = [_r_all(approvals)]
+    if approvals:
+        seq.append(_r_all(approval_group_counts))
+    seq.append(_r_scalars(reviews))
+    seq.append(_r_all(my_tasks))
+    seq.append(_r_all(my_blockers))
+    if my_blockers:
+        seq.append(_r_all(blocker_weight_counts))
+    seq.append(_r_all(waiting))
+    seq.append(_r_scalars(stuck))
+    seq.append(_r_all(stalled))
+    seq.append(_r_all(unanswered))
+    return seq
 
 
 _DT = datetime(2026, 6, 23, tzinfo=timezone.utc)
@@ -179,10 +198,11 @@ async def test_waiting_on_others_dedupes_multi_approver_story_to_one_item():
 async def test_waiting_on_others_query_scopes_by_assignee_and_excludes_self_as_approver():
     """⛔뮤테이션 자가검증 축 대신 쿼리 자체를 직접 읽어 확인(모킹 세션이라 SQL 실행은 못함) —
     approver_member_id != member_id 조건과 assignee_id == member_id 조건이 둘 다 WHERE에
-    있는지 5번째(0-indexed 3) execute 호출의 컴파일된 SQL 문자열로 검증."""
+    있는지 확인한다. 순서: approvals(0)·reviews(1)·my_tasks(2)·my_blockers(3)·waiting(4)
+    — story #2288 BE 명세1(my_tasks)이 my_blockers 앞에 삽입되며 인덱스가 밀렸다."""
     resp, session, resolver = await _get("/api/v2/command-center/my-actions", execute_seq=_ma_seq())
     assert resp.status_code == 200
-    waiting_call_sql = str(session.execute.await_args_list[3].args[0])
+    waiting_call_sql = str(session.execute.await_args_list[4].args[0])
     assert "assignee_id" in waiting_call_sql
     assert "approver_member_id" in waiting_call_sql
 
@@ -228,11 +248,12 @@ async def test_my_actions_uses_canonical_member_resolver():
 
 @pytest.mark.anyio
 async def test_my_actions_agent_stuck_filters_to_agent():
-    """HIGH2: agent_stuck 쿼리(story #2288 BE 명세4 삽입으로 5번째 execute로 밀림)가
+    """HIGH2: agent_stuck 쿼리(story #2288 BE 명세1 my_tasks 삽입으로 6번째 execute로
+    다시 밀림 — approvals(0)·reviews(1)·my_tasks(2)·my_blockers(3)·waiting(4)·stuck(5))가
     resolved_member_type=='agent' 로 필터."""
     resp, session, resolver = await _get("/api/v2/command-center/my-actions", execute_seq=_ma_seq())
     assert resp.status_code == 200
-    assert "resolved_member_type" in str(session.execute.await_args_list[4].args[0])
+    assert "resolved_member_type" in str(session.execute.await_args_list[5].args[0])
 
 
 @pytest.mark.anyio
@@ -251,6 +272,71 @@ async def test_my_actions_resolver_failure_propagates():
         resolve_raises=HTTPException(status_code=400, detail="member not found"))
     assert resp.status_code == 400
     session.execute.assert_not_awaited()
+
+
+# ── story #2288(E-CONNECT) BE 명세1(태스크 줄)·명세2(무게)·명세5(담당 판정 확장) ──────────
+@pytest.mark.anyio
+async def test_my_task_item_from_incomplete_assigned_task():
+    """BE 명세1(§1-1): 담당 미완료 Task가 my_task 항목으로 뜬다 — 스토리는 소속 표시만
+    (별도 review_merge/story 항목으로 중복 안 남)."""
+    story_id = uuid.uuid4()
+    task = MagicMock(id=uuid.uuid4(), story_id=story_id, title="구현 마무리", updated_at=_DT)
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=_ma_seq(my_tasks=[(task, "부모 스토리 제목")]))
+    assert resp.status_code == 200
+    items = _data(resp)["action_queue"]["items"]
+    mt = next(i for i in items if i["type"] == "my_task")
+    assert mt["title"] == "구현 마무리"
+    assert mt["context"] == {
+        "task_id": str(task.id), "story_id": str(story_id), "story_title": "부모 스토리 제목",
+    }
+
+
+@pytest.mark.anyio
+async def test_gate_approval_waiting_count_excludes_self():
+    """BE 명세2(§2③, 무게): 같은 approval_group에 총 3명 pending이면 waiting_count=2(나 제외)."""
+    approval = MagicMock(gate_id=uuid.uuid4(), approval_group_id=uuid.uuid4(), kind="approver", created_at=_DT)
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=_ma_seq(
+            approvals=[(approval, "merge")],
+            approval_group_counts=[(approval.approval_group_id, 3)],
+        ),
+    )
+    assert resp.status_code == 200
+    items = _data(resp)["action_queue"]["items"]
+    ga = next(i for i in items if i["type"] == "gate_approval")
+    assert ga["context"]["waiting_count"] == 2
+
+
+@pytest.mark.anyio
+async def test_my_blockers_waiting_count_reflects_total_blocked():
+    """BE 명세2(§2③, 무게): 이 blocker가 총 3개 open story를 막고 있으면 waiting_count=3."""
+    blocker_id, blocked_id = uuid.uuid4(), uuid.uuid4()
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=_ma_seq(
+            my_blockers=[(blocker_id, blocked_id)],
+            blocker_weight_counts=[(blocker_id, 3)],
+        ),
+    )
+    assert resp.status_code == 200
+    items = _data(resp)["action_queue"]["items"]
+    mb = next(i for i in items if i["type"] == "my_blockers")
+    assert mb["context"]["waiting_count"] == 3
+
+
+@pytest.mark.anyio
+async def test_review_merge_excludes_blocked_by_open_dependency_query_shape():
+    """BE 명세5: review_merge 쿼리가 status!=done으로 넓어지고, 아직 안 풀린 blocks
+    의존성이 있는 story는 제외하는 EXISTS 서브쿼리를 갖는지 SQL 문자열로 확인
+    (모킹 세션이라 실행 결과는 test_2288 realdb가 증명 — 여긴 쿼리 shape만)."""
+    resp, session, resolver = await _get("/api/v2/command-center/my-actions", execute_seq=_ma_seq())
+    assert resp.status_code == 200
+    reviews_sql = str(session.execute.await_args_list[1].args[0])
+    assert "status" in reviews_sql
+    assert "EXISTS" in reviews_sql.upper()
 
 
 # ── /overview ─────────────────────────────────────────────────────────────────
