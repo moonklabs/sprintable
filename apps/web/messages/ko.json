@@ -3291,7 +3291,7 @@
     "trustSealSignedOff": "책임 서명",
     "evidenceShow": "근거 보기",
     "evidenceHide": "근거 접기",
-    "evidenceCount": "근거 {count}건",
+    "evidenceCount": "첨부 근거 {count}건",
     "evidenceSignedBy": "이 완결의 근거 — {name}가 남김",
     "evidenceMore": "근거 {count}건 더 보기",
     "evidenceLoadError": "근거를 불러오지 못했습니다",
@@ -3305,7 +3305,17 @@
     "evidenceAdd": "증거 연결",
     "evidenceAddFailed": "증거 연결 실패",
     "evidenceRefPlaceholder": "URL 또는 참조",
-    "evidenceNotePlaceholder": "메모(선택)"
+    "evidenceNotePlaceholder": "메모(선택)",
+    "chatProofSectionTitle": "대화 근거",
+    "chatProofCount": "대화 근거 {count}건",
+    "chatProofOpenSource": "대화에서 열기",
+    "chatProofOpenOriginal": "지금 원본 보기",
+    "chatProofEdited": "원본이 수정되었습니다 · {date}",
+    "chatProofDeleted": "원본이 삭제되었습니다 · 인용 시점 {date}",
+    "chatProofDeletedTag": "삭제됨",
+    "chatProofNoAccess": "볼 수 없습니다 · 권한",
+    "chatProofTruncatedBefore": "앞 {count}줄 생략",
+    "chatProofTruncatedAfter": "뒤 {count}줄 생략"
   },
   "canvas": {
     "versionLineage": "버전 lineage",

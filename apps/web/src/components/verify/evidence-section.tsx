@@ -162,6 +162,10 @@ export function EvidenceSection({
             aria-hidden
           />
           <span className="text-xs font-semibold text-foreground">{sealLabel}</span>
+          {/* story #2265(C-7) PO 지적, 2026-07-29: 이 수는 Evidence 테이블 건수뿐이다 — 바로
+            아래 붙을 proof(채팅 인용) 섹션은 다른 모델이라 여기 안 잡힌다. "근거 N건"으로
+            두면 그 옆의 proof가 안 세어진 것처럼 보여 총량을 거짓으로 만든다 — "첨부 근거"로
+            좁혀 이 수가 «첨부형»만 센다는 것을 명시한다(두 섹션 통합은 별건으로 등재). */}
           {items ? (
             <span className="text-[11px] text-muted-foreground">· {t('evidenceCount', { count: items.length })}</span>
           ) : null}
