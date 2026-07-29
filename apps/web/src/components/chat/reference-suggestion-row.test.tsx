@@ -187,4 +187,25 @@ describe('ReferenceSuggestionRow — story #2283', () => {
     await render({ messageId: 'm1', content: '#2249 확認 부탁', isMine: true });
     expect(container.textContent).toBe('');
   });
+
+  it('#2313 — 한 메시지에서 거절한 토큰을 다른(새) 메시지에서 다시 쳐도 제안이 안 뜬다(사람 경로 재현: #2283 결함)', async () => {
+    await render({ messageId: 'm1', content: '#2049 이건 거절 테스트', isMine: true });
+    const rejectBtn = container.querySelector('button[aria-label="묻지 않기"]') as HTMLButtonElement;
+    await act(async () => { rejectBtn.click(); });
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    // 같은 토큰, 다른 messageId — #2283 원 구현(messageId::raw 키)에서는 여기서 다시 떴다.
+    await render({ messageId: 'm2', content: '#2049 두번째 시도 — 다시 안 물어야 하는', isMine: true });
+    expect(container.textContent).toBe('');
+  });
+
+  it('#2313 양성대조 — 거절 안 한 다른 토큰은 다른 메시지에서도 여전히 제안된다', async () => {
+    await render({ messageId: 'm1', content: '#2049 거절할 것', isMine: true });
+    const rejectBtn = container.querySelector('button[aria-label="묻지 않기"]') as HTMLButtonElement;
+    await act(async () => { rejectBtn.click(); });
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await render({ messageId: 'm2', content: '#2250 은 거절 안 함', isMine: true, projectId: 'p1' });
+    expect(container.textContent).toContain('#2250를 스토리로 잇겠습니까?');
+  });
 });
