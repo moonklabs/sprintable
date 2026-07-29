@@ -4,14 +4,17 @@ import { X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 /**
- * story #2294 AC8/AC9/AC11 — 메시지 전송 응답 최상위(`data`의 형제, `conversations.py:2165`)
- * `references.dropped[]` 1건. BE는 `target_type`/`target_id`만 준다 — FE는 그것으로 **분기하지
- * 않는다**(분기하면 그 자체가 "화면이 종류를 아는 것"이 되어 AC9 "종류-무관"이 깨진다). 그래서
- * 이 타입엔 일부러 target_type을 안 실었다 — 개수만 센다.
+ * story #2294 AC8/AC9/AC11 — 메시지 전송(및 #2315: story PATCH) 응답 최상위(`data`의 형제,
+ * `conversations.py:2165`) `references.dropped[]` 1건. BE(#2612)는 `reason`도 함께 싣는다
+ * (`unregistered_target_type`/`target_not_found`/`malformed_token`) — FE는 그것으로 **분기하지
+ * 않는다**(분기하면 그 자체가 "화면이 이유/종류를 아는 것"이 되어 AC9 "종류-무관"이 깨진다).
+ * 그래서 `reason`을 구체 리터럴 유니온이 아니라 `string`으로만 받는다 — BE가 사유를 넷·다섯으로
+ * 늘려도 이 파일이 그 집합을 다시 나열(twin-system)하지 않게. 개수만 센다.
  */
 export interface DroppedReference {
   target_type: string;
   target_id: string;
+  reason?: string;
 }
 
 /**

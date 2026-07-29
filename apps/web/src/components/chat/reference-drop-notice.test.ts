@@ -36,4 +36,20 @@ describe('parseDroppedReferences', () => {
     expect(parseDroppedReferences(undefined)).toEqual([]);
     expect(parseDroppedReferences('garbage')).toEqual([]);
   });
+
+  // #2612 — dropped 항목에 reason이 붙었다(unregistered_target_type/target_not_found/
+  // malformed_token). FE는 이걸로 분기하지 않으므로(AC9) reason 유무와 무관하게 개수만
+  // 맞으면 된다 — reason 값 자체를 검증/필터링하지 않는 것이 의도다.
+  it('reason이 실려도(#2612) 그대로 통과한다 — 값을 검증/분기하지 않는다', () => {
+    const raw = {
+      references: {
+        dropped: [
+          { target_type: 'task', target_id: 't1', reason: 'unregistered_target_type' },
+          { target_type: 'story', target_id: 's1', reason: 'target_not_found' },
+          { target_type: 'epic', target_id: 'e1', reason: 'malformed_token' },
+        ],
+      },
+    };
+    expect(parseDroppedReferences(raw)).toHaveLength(3);
+  });
 });
