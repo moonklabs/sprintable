@@ -19,6 +19,7 @@ import {
 } from './derive-exception-signals';
 import type { HeroEnvelope } from './derive-hero-envelope';
 import type { HeroStory, HeroMember } from './hero-logic';
+import { notifyContentPainted } from '@/lib/native-shell-bridge';
 
 // story 190f4c71(doc resource-view-firsttouch-identity-pattern §4 "현황판(glance)" 행 — 정체성=
 // 프로젝트 여정[시작→지금→앞으로]·visual=로드맵 waypoint·첫행동=첫 에픽): 3-waypoint **직선** 배치.
@@ -78,6 +79,17 @@ export function GlanceBoard({ projectId, className }: GlanceBoardProps) {
   const [epicsError, setEpicsError] = useState(false);
   // codex-silent-defect-sweep D-7 — 나머지 조각(overview/멤버/스토리/활동/예외) 개별 실패 플래그.
   const [partialErrors, setPartialErrors] = useState<GlanceDataPartialErrors>(EMPTY_PARTIAL_ERRORS);
+
+  // #2310(e-mobile-content-painted-contract) — 웹 반쪽은 로그인 화면(PR#2610)뿐이었다. /glance는
+  // 인증 후 화면이라 데이터 도착이 아니라 **스켈레톤이 뜨는 시점**(마운트 즉시, `loading` 초기값
+  // true라 아래 return이 항상 뭔가를 그린다)이 "첫 유의미한 페인트"다 — #2298 웨이터폴이 몇 초가
+  // 걸리든 이 신호는 그 전에 나가야 한다(유나 진단: "끊김이 아니라 비어 있음이 문제" — 스켈레톤도
+  // "보이는 것"이다). ⚠️(authenticated)/layout.tsx의 서버사이드 순차 await 체인(session→
+  // me/memberships/orgs→projectInfo)은 이 컴포넌트가 마운트되기 *전* 단계라 이 신호가 못 건드리는
+  // 별도 병목이다(#2298 그라운딩 당시 발견) — 이 스토리 범위 밖으로 남겨 둔다.
+  useEffect(() => {
+    notifyContentPainted();
+  }, []);
 
   const fetchGlance = useCallback((cancelledRef: { cancelled: boolean }) => {
     setLoading(true);
