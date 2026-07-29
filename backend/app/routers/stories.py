@@ -194,12 +194,15 @@ async def list_stories(
     stories = await repo.list(limit=limit, q=q, cursor=cursor_dt, **filters)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
     await _attach_has_evidence(repo.session, stories)
-    # ⛔isinstance 가드(단순 `is not None` 아님) — 이 라우터 함수를 FastAPI 경유 없이 직접
-    # 호출하는 기존 실PG 테스트 다수(test_2188_*·test_2189_*·test_083176e8_* 등)가 이
-    # 새 파라미터를 모른 채 kwargs를 안 넘기면, Python 기본값 평가상 `Query(default=None,
-    # ...)` 센티널 객체 그대로가 들어온다(FastAPI가 실 HTTP 요청에서만 그 센티널을 실제
-    # 값으로 해소해 준다) — 그 객체는 `is not None`을 통과해 버려 DB 쿼리에 UUID 자리로
-    # 새 나가 asyncpg가 깨진다. isinstance로 진짜 UUID만 받아들인다.
+    # ⛔일반 함정(2026-07-29, PO 지적 — "측정 경로 ≠ 실행 경로"): `Query(default=None, ...)`
+    # 기본값은 「값」이 아니라 「센티널 객체」다 — FastAPI가 실 HTTP 요청 경유에서만 그것을
+    # 실제 값(여기선 None)으로 해소한다. 이 라우터 함수를 FastAPI 경유 없이 직접 호출하는
+    # 테스트(이 새 파라미터를 모른 채 kwargs를 안 넘기는 기존 다수 — test_2188_*·
+    # test_2189_*·test_083176e8_* 등)는 그 센티널 객체 그대로를 받는다. 센티널은 `is not
+    # None` 가드를 «참»으로 통과시켜 버린다("None이 아니다"는 맞지만 "UUID다"는 아니다) —
+    # DB 쿼리에 UUID 자리로 새 나가 asyncpg가 깨진다. ⛔이 코드베이스 다른 곳에 `Query(...)`/
+    # `Depends(...)` 기본값을 옵셔널 파라미터로 받는 자리가 또 있으면 같은 함정이다 —
+    # `is not None`이 아니라 `isinstance(..., <실제타입>)`으로 검사할 것.
     if isinstance(boost_candidates_from, uuid.UUID):
         stories = await _boost_reference_candidates(
             repo.session, repo.org_id, stories, boost_candidates_from,
