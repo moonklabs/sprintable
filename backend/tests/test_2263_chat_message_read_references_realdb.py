@@ -169,7 +169,11 @@ async def test_get_message_returns_stored_reference_after_reload():
             resp = await client.get(f"/api/v2/conversations/{conv.id}/messages/{msg_id}")
             assert resp.status_code == 200, resp.text
             body = resp.json()
-            assert body["references"] == [{"target_type": "doc", "target_id": str(target.id)}]
+            # story #2316 후속: form·proof_payload 추가(C-7/#2265 소비 대상) — 채팅 mention은
+            # 항상 form="mention"·proof_payload=None(insert_chat_mentions 계약).
+            assert body["references"] == [
+                {"target_type": "doc", "target_id": str(target.id), "form": "mention", "proof_payload": None}
+            ]
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
@@ -215,11 +219,11 @@ async def test_list_messages_returns_stored_references_per_message_without_n_plu
             assert len(msgs) == 3
             by_content = {m["content"]: m["references"] for m in msgs}
             assert by_content[_token("A", "doc", target_a.id)] == [
-                {"target_type": "doc", "target_id": str(target_a.id)}
+                {"target_type": "doc", "target_id": str(target_a.id), "form": "mention", "proof_payload": None}
             ]
             assert by_content["no tokens here"] == []
             assert by_content[_token("B", "doc", target_b.id)] == [
-                {"target_type": "doc", "target_id": str(target_b.id)}
+                {"target_type": "doc", "target_id": str(target_b.id), "form": "mention", "proof_payload": None}
             ]
             # ⭐N+1 방지 — 메시지 3건인데 참조 조회는 페이지당 1회만 나가야 한다.
             assert calls["n"] == 1, f"페이지 1개에 참조 조회가 {calls['n']}번 나갔다(N+1)"
@@ -312,7 +316,9 @@ async def test_list_message_replies_returns_stored_references():
             replies = resp.json()["data"]
             assert len(replies) == 1
             assert replies[0]["id"] == reply_id
-            assert replies[0]["references"] == [{"target_type": "doc", "target_id": str(target.id)}]
+            assert replies[0]["references"] == [
+                {"target_type": "doc", "target_id": str(target.id), "form": "mention", "proof_payload": None}
+            ]
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
