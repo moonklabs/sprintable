@@ -24,7 +24,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.reference import FORMS, Reference
-from app.services.reference_registry import ENTITY_RESOLVERS, is_registered_entity_type, is_valid_source_type
+from app.services.reference_registry import (
+    ENTITY_RESOLVERS,
+    TARGET_ONLY_RESOLVERS,
+    TARGET_ONLY_TYPES,
+    is_valid_source_type,
+    is_valid_target_type,
+)
 
 Direction = Literal["outgoing", "incoming"]
 
@@ -72,12 +78,14 @@ async def insert_reference(
 ) -> Reference:
     if form not in FORMS:
         raise ValueError(f"form must be one of {sorted(FORMS)}, got {form!r}")
-    # ⛔source/target은 다른 기준 — source는 SOURCE_ONLY_TYPES(예: chat_message, target으로
-    # 안 쓰여 resolver가 없다)도 허용하지만 target은 존재판정이 가능한 타입만(reference_
-    # registry.py 모듈 docstring 참조, #2273 실측 발견).
+    # ⛔source/target은 다른 기준 — source는 SOURCE_ONLY_TYPES(예: chat_message, 채팅
+    # write-path의 정당한 source지만 완전지원 엔티티는 아니다)도 허용하지만 target은
+    # ENTITY_RESOLVERS(완전지원) 또는 TARGET_ONLY_TYPES(target 전용, 예: chat_message가
+    # proof의 대상이 되는 자리 — story #2263)만 허용한다(reference_registry.py 모듈
+    # docstring 참조, #2273 실측 발견 + #2263 PO 판정).
     if not is_valid_source_type(source_type):
         raise UnregisteredEntityTypeError(f"source_type {source_type!r} not in reference_registry")
-    if not is_registered_entity_type(target_type):
+    if not is_valid_target_type(target_type):
         raise UnregisteredEntityTypeError(f"target_type {target_type!r} not in reference_registry")
 
     ref = Reference(
@@ -92,10 +100,14 @@ async def insert_reference(
 async def _batch_resolve_existence(
     session: AsyncSession, org_id: uuid.UUID, ids_by_type: dict[str, set[uuid.UUID]],
 ) -> dict[str, set[uuid.UUID]]:
-    """㉡N+1 금지 — entity_type 별로 묶어 resolver 를 **한 번씩만** 호출한다."""
+    """㉡N+1 금지 — entity_type 별로 묶어 resolver 를 **한 번씩만** 호출한다.
+
+    ⛔story #2263: ENTITY_RESOLVERS(완전지원)뿐 아니라 TARGET_ONLY_RESOLVERS(target 전용,
+    예: chat_message)도 본다 — 둘 다 "존재판정 가능"이라는 같은 질문에 답하지만, 완전지원
+    여부(검색·MCP 등)는 이 함수의 관심사가 아니다."""
     existing_by_type: dict[str, set[uuid.UUID]] = {}
     for entity_type, ids in ids_by_type.items():
-        resolver = ENTITY_RESOLVERS.get(entity_type)
+        resolver = ENTITY_RESOLVERS.get(entity_type) or TARGET_ONLY_RESOLVERS.get(entity_type)
         if resolver is None:
             # registry 밖 타입 — 존재판정 불가(count_orphan_types 가 별도로 이 사고를 잡는다).
             existing_by_type[entity_type] = set()
@@ -151,7 +163,7 @@ async def list_references(
         other_type = r.target_type if direction == "outgoing" else r.source_type
         other_id = r.target_id if direction == "outgoing" else r.source_id
         still_exists: bool | None
-        if other_type not in ENTITY_RESOLVERS:
+        if other_type not in ENTITY_RESOLVERS and other_type not in TARGET_ONLY_TYPES:
             still_exists = None  # registry 밖 타입 — 판정 불가(orphan 점검이 별도로 잡음).
         else:
             still_exists = other_id in existing_by_type.get(other_type, set())
