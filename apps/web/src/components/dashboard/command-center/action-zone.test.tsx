@@ -97,6 +97,37 @@ describe('ActionZone — story #2288 my_blockers 타입 fix', () => {
   });
 });
 
+describe('ActionZone — story #2288, PO 지적(2026-07-29): BE-FE 타입 목록 어긋남 가드', () => {
+  it('QueueRow가 모르는 type이 오면 review_merge 문구로 조용히 오인 렌더하지 않고 미확인 표시를 낸다', async () => {
+    // BE가 FE 미선언 새 타입을 보내는 상황 재현 — 런타임에는 TS 유니온이 못 막는다.
+    const unknownItem = queueItem('gate_approval', { title: '알수없음' });
+    (unknownItem as { type: string }).type = 'brand_new_be_type';
+    await render({
+      action_queue: { scope: 'project', items: [unknownItem] },
+      attention: { scope: 'project', items: [], pending: [] },
+      is_clear: false,
+    });
+    expect(container.textContent).toContain('새 종류의 항목');
+    expect(container.textContent).not.toContain('리뷰·머지 대기');
+  });
+
+  it('개발 환경에서 console.warn으로 남긴다(다음 사람이 새 타입이 온 것을 바로 알 수 있게)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const unknownItem = queueItem('gate_approval');
+    (unknownItem as { type: string }).type = 'brand_new_be_type';
+    await render({
+      action_queue: { scope: 'project', items: [unknownItem] },
+      attention: { scope: 'project', items: [], pending: [] },
+      is_clear: false,
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      'ActionZone/QueueRow: unrecognized action_queue item type',
+      expect.objectContaining({ type: 'brand_new_be_type' }),
+    );
+    warnSpy.mockRestore();
+  });
+});
+
 describe('ActionZone — story #2288 §7-4·§8-4 잘림 표시·자르는 순서', () => {
   it('큐가 cap 이하면 잘림 표시가 없다', async () => {
     await render({

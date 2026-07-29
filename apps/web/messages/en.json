@@ -251,6 +251,7 @@
     "ccQueueReviewMerge": "Review & merge pending",
     "ccQueueReview": "Review",
     "ccQueueMyBlocker": "Blocking others",
+    "ccQueueUnknownType": "New item type — can't display yet",
     "ccQueueTruncated": "Showing {shown} of {total} — items others are waiting on are never cut",
     "ccChangedSince": "{count} of your items changed",
     "ccLastSeenSuffix": "last seen {ago}",

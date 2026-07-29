@@ -55,17 +55,32 @@ function QueueRow({ item }: { item: QueueItem }) {
       </Link>
     );
   }
+  if (item.type === 'review_merge') {
+    return (
+      <Link
+        href={ctx.story_id ? `/board?story=${ctx.story_id}` : '/board'}
+        className={`flex items-center gap-2 rounded-lg border border-l-2 border-border bg-card p-2.5 text-xs transition hover:border-muted-foreground/30 ${PRIORITY_BORDER[item.priority]}`}
+      >
+        <GitPullRequest className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-foreground">
+          <span className="text-muted-foreground">{t('ccQueueReviewMerge')} · </span>{item.title ?? ctx.story_id?.slice(0, 6)}
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground">{t('ccQueueReview')}<ChevronRight className="size-3" /></span>
+      </Link>
+    );
+  }
+  // story #2288, PO 지적(2026-07-29): 'my_blockers'가 이 자리(암묵적 else)에 떨어져
+  // review_merge로 오인 렌더되던 것이 그 버그였다 — BE가 FE 미선언 타입을 보내도 다시는
+  // «남의 문구로» 조용히 렌더되지 않게, 인식 못한 타입은 안전한 미확인 표시로 가른다.
+  // ⛔TS 유니온은 컴파일타임에만 닫혀 있다 — BE가 실제로 새 타입을 보내는 것은 여기서만 잡힌다.
+  const unknownType: string = item.type;
+  if (process.env.NODE_ENV !== 'production') {
+    console.warn('ActionZone/QueueRow: unrecognized action_queue item type', { type: unknownType });
+  }
   return (
-    <Link
-      href={ctx.story_id ? `/board?story=${ctx.story_id}` : '/board'}
-      className={`flex items-center gap-2 rounded-lg border border-l-2 border-border bg-card p-2.5 text-xs transition hover:border-muted-foreground/30 ${PRIORITY_BORDER[item.priority]}`}
-    >
-      <GitPullRequest className="size-3.5 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate text-foreground">
-        <span className="text-muted-foreground">{t('ccQueueReviewMerge')} · </span>{item.title ?? ctx.story_id?.slice(0, 6)}
-      </span>
-      <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground">{t('ccQueueReview')}<ChevronRight className="size-3" /></span>
-    </Link>
+    <div className="flex items-center gap-2 rounded-lg border border-l-2 border-dashed border-border bg-card p-2.5 text-xs text-muted-foreground">
+      <span className="min-w-0 flex-1 truncate">{t('ccQueueUnknownType')}</span>
+    </div>
   );
 }
 
