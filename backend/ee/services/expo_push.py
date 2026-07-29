@@ -161,6 +161,9 @@ async def deliver_expo_push(
         ]
 
         dead_tokens: list[str] = []
+        ok_count = 0
+        error_count = 0
+        error_reasons: dict[str, int] = {}
         for i in range(0, len(messages), _EXPO_MAX_BATCH):
             chunk = messages[i : i + _EXPO_MAX_BATCH]
             chunk_devices = devices[i : i + _EXPO_MAX_BATCH]
@@ -168,9 +171,22 @@ async def deliver_expo_push(
             # ticket 은 메시지와 동순서. 개수 불일치(부분 응답) 시 zip 이 짧은 쪽 기준(안전).
             for dev, ticket in zip(chunk_devices, tickets):
                 if isinstance(ticket, dict) and ticket.get("status") == "error":
-                    err = (ticket.get("details") or {}).get("error")
+                    error_count += 1
+                    err = (ticket.get("details") or {}).get("error") or ticket.get("message") or "unknown"
+                    error_reasons[err] = error_reasons.get(err, 0) + 1
                     if err == "DeviceNotRegistered":
                         dead_tokens.append(dev.expo_push_token)
+                elif isinstance(ticket, dict) and ticket.get("status") == "ok":
+                    ok_count += 1
+
+        # 2026-07-28(#2289): 성공 티켓은 이전까지 어디에도 안 남아 "서버가 쐈는데 실패" vs
+        # "서버가 아예 안 쐈다"를 로그만으로 못 갈랐다(둘 다 조용함) — 매 발송마다 요약을 남긴다.
+        # error_reasons는 Expo의 고정 에러 코드(DeviceNotRegistered·InvalidCredentials 등)만
+        # 담는다 — 토큰 값은 절대 안 남긴다(시크릿에 준하는 취급).
+        logger.info(
+            "expo push: sent org=%s event=%s devices=%d ok=%d error=%d reasons=%s",
+            org_id, event_type, len(devices), ok_count, error_count, error_reasons or None,
+        )
 
         if dead_tokens:
             await db.execute(

@@ -6,8 +6,13 @@ from typing import Any
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.evidence import Evidence
+from app.models.gate import AUTO_VERIFY_MAP as _AUTO_VERIFY_MAP
+from app.models.gate import Gate
 from app.models.hypothesis import Hypothesis, HypothesisEpicLink
+from app.models.member import Member
 from app.models.pm import Goal, Story
+from app.models.story_assignee import StoryAssignee
 from app.repositories.base import BaseRepository
 from app.schemas.goal import GoalProgressResponse
 
@@ -152,6 +157,164 @@ class GoalRepository(BaseRepository[Goal]):
                 continue
             goal.total_stories = int(row.total_stories or 0)  # type: ignore[attr-defined]
             goal.done_stories = int(row.done_stories or 0)  # type: ignore[attr-defined]
+
+    async def attach_glance_aggregates(self, goals: Sequence[Goal]) -> None:
+        """story #2298(3단 웨이터폴 근절) — `?include=glance` 옵트인 전용, `list_paginated`
+        기본 경로는 이걸 안 부른다(byte-identical 보장은 라우터가 호출 여부로 가른다).
+
+        participant_ids: 에픽별 고유 assignee_id 집합(FE `deriveCollaboration` 이관 — "참여=
+        presence만"이라 집합 계산, 캡을 두면 뒤쪽 story의 assignee가 빠져 값 자체가 틀려진다
+        — 그래서 캡 없음).
+
+        focal_story: FE `pickFocalStory`(in-progress 중 gate-pending 우선, 없으면 최신
+        in-progress) 이관. tiebreak는 기존 `/api/stories?epic_id=` 기본 정렬(created_at DESC,
+        id DESC)과 동일하게 맞춘다 — gate 우선순위 자체는 이번에 "처음으로" 실제 재료(gate
+        데이터)를 갖고 평가된다(`GlanceFocalStory` docstring 참조 — 기존엔 재료가 없어 죽어
+        있던 분기). story #2303부터 `focal_story`가 `/api/glance/hero?story_id=`가 주던
+        9필드(assignee_ids·proof_count·auto_verify·gate.*·trust.*)까지 싣는다 — 전부 픽된
+        focal story id 집합(페이지 전체 goal 기준)으로 배치 조회, N+1 없음."""
+        for goal in goals:
+            goal.participant_ids = []  # type: ignore[attr-defined]
+            goal.focal_story = None  # type: ignore[attr-defined]
+        if not goals:
+            return
+
+        goal_ids = [g.id for g in goals]
+
+        participant_rows = await self.session.execute(
+            select(Story.epic_id, Story.assignee_id).where(
+                Story.epic_id.in_(goal_ids), Story.org_id == self.org_id,
+                Story.deleted_at.is_(None), Story.assignee_id.isnot(None),
+            )
+        )
+        participants_by_goal: dict[uuid.UUID, set[uuid.UUID]] = {}
+        for epic_id, assignee_id in participant_rows.all():
+            participants_by_goal.setdefault(epic_id, set()).add(assignee_id)
+        for goal in goals:
+            ids = participants_by_goal.get(goal.id)
+            if ids:
+                goal.participant_ids = sorted(ids, key=str)  # type: ignore[attr-defined]
+
+        in_progress_rows = await self.session.execute(
+            select(Story.id, Story.epic_id, Story.title, Story.status, Story.assignee_id)
+            .where(
+                Story.epic_id.in_(goal_ids), Story.org_id == self.org_id,
+                Story.deleted_at.is_(None), Story.status == "in-progress",
+            )
+            .order_by(Story.created_at.desc(), Story.id.desc())
+        )
+        candidates_by_goal: dict[uuid.UUID, list] = {}
+        story_ids: list[uuid.UUID] = []
+        for row in in_progress_rows.all():
+            candidates_by_goal.setdefault(row.epic_id, []).append(row)
+            story_ids.append(row.id)
+
+        # N+1 회피 — 배치 pending-gate 조회. Gate는 work_item_id/work_item_type 폴리모픽(FK
+        # 없음, S11 workflow-line 배치 read와 동일 패턴: work_item_id.in_(ids)). gate_type·
+        # requires_human까지 같이 뽑아 두면(story #2303) tie-break 판정과 최종 gate 필드를
+        # «같은 쿼리»로 겸한다(따로 또 조회 안 함) — created_at DESC라 story별 첫 항목이
+        # 최신 pending gate(기존 hero의 `.order_by(created_at.desc()).limit(1)`과 동형).
+        pending_gate_by_story: dict[uuid.UUID, Any] = {}
+        if story_ids:
+            gate_rows = await self.session.execute(
+                select(Gate.work_item_id, Gate.gate_type, Gate.requires_human).where(
+                    Gate.work_item_id.in_(story_ids), Gate.work_item_type == "story",
+                    Gate.org_id == self.org_id, Gate.status == "pending",
+                ).order_by(Gate.created_at.desc())
+            )
+            for row in gate_rows.all():
+                pending_gate_by_story.setdefault(row.work_item_id, row)
+        pending_story_ids = set(pending_gate_by_story)
+
+        picked_by_goal: dict[uuid.UUID, Any] = {}
+        for goal in goals:
+            candidates = candidates_by_goal.get(goal.id)
+            if not candidates:
+                continue
+            picked_by_goal[goal.id] = next(
+                (r for r in candidates if r.id in pending_story_ids), candidates[0]
+            )
+        if not picked_by_goal:
+            return
+
+        focal_ids = [r.id for r in picked_by_goal.values()]
+
+        # assignee_ids — StoryAssignee join(E-BOARD S5). 배열이라 캡 없음(전부).
+        assignee_rows = await self.session.execute(
+            select(StoryAssignee.story_id, StoryAssignee.member_id).where(
+                StoryAssignee.story_id.in_(focal_ids), StoryAssignee.org_id == self.org_id,
+            )
+        )
+        assignee_ids_by_story: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for story_id, member_id in assignee_rows.all():
+            assignee_ids_by_story.setdefault(story_id, []).append(member_id)
+
+        # proof_count — evidence row 개수(hero와 동일 정의).
+        proof_rows = await self.session.execute(
+            select(Evidence.work_item_id, func.count(Evidence.id)).where(
+                Evidence.org_id == self.org_id, Evidence.work_item_id.in_(focal_ids),
+                Evidence.work_item_type == "story",
+            ).group_by(Evidence.work_item_id)
+        )
+        proof_count_by_story: dict[uuid.UUID, int] = dict(proof_rows.all())
+
+        # auto_verify — merge gate의 evidence_status(hero의 _AUTO_VERIFY_MAP과 동일 원자료).
+        merge_rows = await self.session.execute(
+            select(Gate.work_item_id, Gate.evidence_status).where(
+                Gate.org_id == self.org_id, Gate.work_item_id.in_(focal_ids),
+                Gate.work_item_type == "story", Gate.gate_type == "merge",
+            ).order_by(Gate.created_at.desc())
+        )
+        merge_status_by_story: dict[uuid.UUID, str | None] = {}
+        for story_id, evidence_status in merge_rows.all():
+            merge_status_by_story.setdefault(story_id, evidence_status)
+
+        # human_verified — 최신 gate_approval evidence(휴먼 서명·스푸핑불가, hero와 동일).
+        hv_rows = await self.session.execute(
+            select(Evidence.work_item_id, Evidence.created_by, Evidence.created_at).where(
+                Evidence.org_id == self.org_id, Evidence.work_item_id.in_(focal_ids),
+                Evidence.work_item_type == "story", Evidence.type == "gate_approval",
+            ).order_by(Evidence.created_at.desc())
+        )
+        hv_by_story: dict[uuid.UUID, Any] = {}
+        for row in hv_rows.all():
+            hv_by_story.setdefault(row.work_item_id, row)
+
+        hv_member_ids = {row.created_by for row in hv_by_story.values() if row.created_by}
+        member_name_by_id: dict[uuid.UUID, str] = {}
+        if hv_member_ids:
+            member_rows = await self.session.execute(
+                select(Member.id, Member.name).where(Member.id.in_(hv_member_ids))
+            )
+            member_name_by_id = dict(member_rows.all())
+
+        for goal_id, picked in picked_by_goal.items():
+            proof_count = proof_count_by_story.get(picked.id, 0)
+            hv_row = hv_by_story.get(picked.id)
+            hv_member = None
+            if hv_row is not None and hv_row.created_by in member_name_by_id:
+                hv_member = {"name": member_name_by_id[hv_row.created_by]}
+            pending_gate = pending_gate_by_story.get(picked.id)
+            merge_status = merge_status_by_story.get(picked.id)
+
+            goal = next(g for g in goals if g.id == goal_id)
+            goal.focal_story = {  # type: ignore[attr-defined]
+                "id": picked.id, "title": picked.title, "status": picked.status,
+                "assignee_id": picked.assignee_id,
+                "assignee_ids": assignee_ids_by_story.get(picked.id, []),
+                "proof_count": proof_count,
+                "auto_verify": _AUTO_VERIFY_MAP.get(merge_status) if merge_status else None,
+                "gate": (
+                    {"gate_type": pending_gate.gate_type, "requires_human": pending_gate.requires_human}
+                    if pending_gate is not None else None
+                ),
+                "trust": {
+                    "self_reported": proof_count > 0,
+                    "human_verified": hv_row is not None,
+                    "human_verified_by": hv_member,
+                    "human_verified_at": hv_row.created_at if hv_row is not None else None,
+                },
+            }
 
     async def get_progress(self, id: uuid.UUID) -> GoalProgressResponse:
         result = await self.session.execute(

@@ -29,6 +29,7 @@ from .schemas import SprintableInput
 from .toolset import is_tool_allowed
 from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
 from .tools.evidence import AddEvidenceInput, add_evidence
+from .tools.judgments import AddJudgmentInput, ListJudgmentsInput, add_judgment, list_judgments
 from .tools.visual_artifacts import (
     AddArtifactCommentInput, CreateArtifactInput, CreateSpecPinInput, DeleteArtifactInput,
     DeleteSpecPinInput, EditArtifactInput, GetArtifactInput, ListArtifactCommentsInput,
@@ -318,16 +319,19 @@ async def ping() -> list[TextContent]:
 _TOOL_DEFS: list[tuple] = [
     # Stories (8)
     ("sprintable_list_stories",
-     "[일감] 프로젝트 스토리 목록 조회. project_id/org_id context 자동 주입.",
+     "[일감] 프로젝트 스토리 목록 조회. project_id/org_id context 자동 주입."
+     " 각 항목의 reference_token 필드가 그 스토리를 가리키는 참조 토큰"
+     "([제목](entity:story:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      ListStoriesInput, list_stories),
     ("sprintable_list_backlog",
      "[일감] 백로그 스토리 목록 (스프린트 미배정).",
      SprintableInput, list_backlog),
     ("sprintable_add_story",
-     "[일감] 스토리 생성.",
+     "[일감] 스토리 생성. 응답 reference_token 필드가 이 스토리를 가리키는 참조 토큰"
+     "([제목](entity:story:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      AddStoryInput, add_story),
     ("sprintable_update_story",
-     "[일감] 스토리 수정.",
+     "[일감] 스토리 수정. 응답 reference_token은 sprintable_add_story와 동일.",
      UpdateStoryInput, update_story),
     # E-SECURITY SEC-S1: sprintable_delete_story 의도적 제거(에이전트 hard-delete 차단).
     ("sprintable_assign_story_to_sprint",
@@ -363,13 +367,15 @@ _TOOL_DEFS: list[tuple] = [
     # 함수**를 참조하는 deprecated 별칭(hierarchy-rename-alias-mechanism-design §1 — 로직 복제
     # 0, 드리프트 불가). 별칭 유지 기간 동안 무중단 서빙.
     ("sprintable_list_goals",
-     "[일감] 목표 목록 조회.",
+     "[일감] 목표 목록 조회. 각 항목의 reference_token 필드가 그 목표를 가리키는 참조 토큰"
+     "([제목](entity:epic:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      ListGoalsInput, list_goals),
     ("sprintable_add_goal",
-     "[일감] 목표 생성.",
+     "[일감] 목표 생성. 응답 reference_token 필드가 이 목표를 가리키는 참조 토큰"
+     "([제목](entity:epic:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      AddGoalInput, add_goal),
     ("sprintable_update_goal",
-     "[일감] 목표 수정.",
+     "[일감] 목표 수정. 응답 reference_token은 sprintable_add_goal과 동일.",
      UpdateGoalInput, update_goal),
     # story #2010: 목표 lifecycle 전이 전용 도구(rename B1 이후 신설이라 구 _epic 별칭 없음 —
     # update_goal의 status 필드는 백엔드가 422로 거부해 이 도구만이 유일한 전이 경로).
@@ -440,19 +446,23 @@ _TOOL_DEFS: list[tuple] = [
      UpdateSprintInput, update_sprint),
     # Docs (5) — E-SECURITY SEC-S1 확장: delete_doc 제거(에이전트 삭제 차단)
     ("sprintable_list_docs",
-     "[지식] 문서 목록 조회 (tree 또는 tag 필터).",
+     "[지식] 문서 목록 조회 (tree 또는 tag 필터). 각 항목의 reference_token 필드가 그 문서를"
+     " 가리키는 참조 토큰([제목](entity:doc:id))을 준다 — 채팅 등에 그대로 쓰면 참조가"
+     " 생긴다(story #2282).",
      ListDocsInput, list_docs),
     ("sprintable_get_doc",
-     "[지식] slug로 문서 단건 조회.",
+     "[지식] slug로 문서 단건 조회. 응답 reference_token 필드가 이 문서를 가리키는 참조 토큰"
+     "([제목](entity:doc:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      GetDocInput, get_doc),
     ("sprintable_search_docs",
      "[지식] 문서 제목/본문 검색.",
      SearchDocsInput, search_docs),
     ("sprintable_create_doc",
-     "[지식] 문서 생성.",
+     "[지식] 문서 생성. 응답 reference_token 필드가 이 문서를 가리키는 참조 토큰"
+     "([제목](entity:doc:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      CreateDocInput, create_doc),
     ("sprintable_update_doc",
-     "[지식] 문서 수정.",
+     "[지식] 문서 수정. 응답 reference_token은 sprintable_create_doc과 동일.",
      UpdateDocInput, update_doc),
     # Analytics (11)
     ("sprintable_get_project_overview",
@@ -533,6 +543,16 @@ _TOOL_DEFS: list[tuple] = [
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
      " 남김. 선택제(첨부 안 해도 무불이익).",
      AddEvidenceInput, add_evidence),
+    # 판단 칸 (2) — story #2268(D단계, E-CONNECT)
+    ("sprintable_add_judgment",
+     "판단(judgment)·못 잰 것(unmeasurable)·철회(retraction)·정련(refinement)·세는 법 틀림"
+     "(method_error)을 남긴다. Evidence(됐다의 증거)와 별개 — 판정 자체의 기록. retraction/"
+     "refinement/method_error는 target_id(무엇에 대한 말인지) 필수.",
+     AddJudgmentInput, add_judgment),
+    ("sprintable_list_judgments",
+     "판단/철회 pull 조회 — work_item_id·method·scope로 좁혀 묻는다. retractions는 상한과"
+     " 무관하게 항상 전체, active는 캡되며 meta.omitted_count로 잘린 건수를 알려준다.",
+     ListJudgmentsInput, list_judgments),
     # Visual artifacts (12) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
     # 핀 저작(story 7fe16274) + story #1922(delete_artifact, soft delete·생성자 전용)
     ("sprintable_create_artifact",
@@ -598,9 +618,12 @@ _TOOL_DEFS: list[tuple] = [
      ProposeCanonicalInput, propose_canonical_version),
     # Chat (4)
     ("sprintable_send_chat_message",
-     "[조직] conversation thread에 채팅 메시지 발송. mentions=[{type:\"doc\", id, title?}]로 human"
-     " `#`-검색 doc mention과 동형인 `[title](entity:doc:id)` 토큰을 content에 합성(title 생략 시"
-     " 서버가 doc title 조회) — agent 발신 메시지에서도 doc 링크/backlink가 동작하게 한다.",
+     "[조직] conversation thread에 채팅 메시지 발송. mentions=[{type:\"doc\"|\"story\"|\"epic\", id,"
+     " title?}]로 human `#`-검색 mention과 동형인 `[title](entity:<type>:id)` 토큰을 content에"
+     " 합성(title 생략 시 서버가 canonical title로 만든 reference_token을 그대로 재사용 —"
+     " content에 직접 `[제목](entity:...)` 문자열을 손으로 짓지 말 것: 제목에 `]`가 들어가면"
+     " (예: \"[TAG] 제목\" 관례) 파서가 못 읽는다) — agent 발신 메시지에서도 링크/backlink가"
+     " 동작하게 한다.",
      SendChatInput, send_chat_message),
     ("sprintable_create_conversation",
      "[조직] 새 conversation thread 생성.",

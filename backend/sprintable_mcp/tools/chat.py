@@ -29,19 +29,64 @@ def escape_mention_title(title: str) -> str:
     백슬래시로 escape하고, `\r`/`\n` 연속을 단일 공백으로 접는다. title이 caller 제공이든
     (agent가 임의 문자열 전달 가능) DB에서 fetch한 것이든(문서 제목에 임의 문자 가능) 동일하게
     적용해야 `[{title}](entity:doc:{id})` 토큰 구조가 깨지지 않는다.
+
+    ⛔PO 지적(2026-07-28, #2585 리뷰): 이 함수가 여전히 「규칙이 둘인 자리」 하나를 남긴다 —
+    title을 caller가 직접 지정하는 경로(`_resolve_mention_content`에서 `mention.title is not
+    None`인 분기)는 백엔드 `build_reference_token`이 만들 토큰이 애초에 없다(그 문자열은 DB에
+    없는 caller 전용 표시 문구이므로). 그래서 이 경로만은 어쩔 수 없이 로컬 escape를 계속 쓴다 —
+    `_escape_title`(reference_token.py)과 규칙이 갈리면 다시 벌어질 자리로 표시해 둔다.
     """
     escaped = _MENTION_TITLE_ESCAPE_RE.sub(lambda m: "\\" + m.group(0), title)
     return _MENTION_TITLE_NEWLINE_RE.sub(" ", escaped)
 
 
-class MentionRef(SprintableInput):
-    """agent 발신 채팅 메시지에 첨부할 entity mention — story 1995(doc 링크 안 됨 근본수정).
+# story #2283 후속(오르테가 라이브 실측, 2026-07-28): #2282가 만든 escape-aware 정규식은
+# «escape된» `]`만 통과시키고 날것 `]`은 여전히 파서를 못 넘는다(설계상 유지 — greedy/lazy로
+# 늘리면 토큰 경계가 모호해져 더 큰 사고를 부른다는 PO 판정). 그러니 "제목을 손으로 짜서
+# 토큰 문자열을 만드는" 경로는 이 조직 명명 관례([TAG] 제목)에서 구조적으로 깨진다 — 정답은
+# 손으로 안 짓고 **백엔드가 준 reference_token을 그대로 쓰는** 것(#2282 SSOT). doc만
+# 지원하던 것을 story/epic까지 넓혀 «형제 비대칭»(FE만 안 깨지는 것)을 없앤다.
+#
+# ⛔story #2294(2026-07-28, 실제로 걸린 드리프트): task가 백엔드 ENTITY_RESOLVERS에 열렸는데
+# 이 dict는 안 늘어 test_mention_entity_endpoints_match_backend_entity_resolvers가 develop
+# HEAD에서 RED였다 — 서로 다른 두 PR이 각각은 옳은 변경이었는데 합쳐지며 이 축이 깨진
+# "merge-order로만 드러나는" 드리프트였다(#2585는 #2294보다 먼저 작성돼 task를 몰랐다).
+# ⛔B단계(2026-07-29): sprint·artifact·hypothesis도 같이 연다(GET /{id} 단건조회 엔드포인트가
+# 실재해 title 미지정 mention의 auto-fetch가 가능함을 확認). `evidence`는 **의도적으로 뺀다**
+# — GET /api/v2/evidence/{id}(단건조회) 라우트 자체가 없다(list만 work_item_id로 필터링해서
+# 있음). 이 비대칭은 test_mcp_s1995의 `_MENTION_ENDPOINT_KNOWN_GAP`이 명시 선언한다(조용히
+# 빠진 것과 일부러 뺀 것은 처방이 다르다).
+_MENTION_ENTITY_ENDPOINTS: dict[str, str] = {
+    "doc": "/api/v2/docs/{id}",
+    "story": "/api/v2/stories/{id}",
+    "epic": "/api/v2/goals/{id}",
+    "task": "/api/v2/tasks/{id}",
+    "sprint": "/api/v2/sprints/{id}",
+    "artifact": "/api/v2/visual-artifacts/{id}",
+    "hypothesis": "/api/v2/hypotheses/{id}",
+}
 
-    type은 스키마 레벨에서 "doc"만 허용(Literal) — MCP tool-call 검증 단계에서 그 외 값은
-    핸들러 코드 진입 전에 거부된다(AC1).
+
+class MentionRef(SprintableInput):
+    """agent 발신 채팅 메시지에 첨부할 entity mention — story 1995(doc 링크 안 됨 근본수정) +
+    story #2283/#2294 후속(2026-07-28~29, doc→doc/story/epic/task/sprint/artifact/
+    hypothesis 확장 — evidence는 GET /{id} 단건조회가 없어 의도적으로 제외, 아래
+    `_MENTION_ENTITY_ENDPOINTS` 주석 참조).
+
+    type은 스키마 레벨에서 이 목록만 허용(Literal). MCP 서버는 백엔드 `app.*`를 import 하지
+    않고 HTTP로만 통신하는 별도 프로세스라(api_client.py 참조) 이 목록을 백엔드
+    `reference_registry.ENTITY_RESOLVERS`에서 런타임에 **파생시킬 수 없다** — 두 프로세스가
+    같은 값을 손으로 맞춰 유지하는 수밖에 없는 자리다. 대신
+    `test_mention_entity_endpoints_match_backend_entity_resolvers`가 **테스트로** 그 동일성을
+    (알려진 gap인 evidence를 뺀 나머지에 대해) 고정한다 — 백엔드 registry가 더 늘면 이 테스트가
+    빨개져서 여기(이 Literal + `_MENTION_ENTITY_ENDPOINTS`)도 늘리도록 강제한다.
+
+    ⛔가드가 걸렸을 때 나올 수 있는 세 가지 반응 — 목록을 넓힌다 / 테스트를 고친다(또는
+    느슨하게 한다) / 무시한다 — 중 첫 번째만 옳다. GET /{id}가 아예 없는 타입(evidence류)만
+    예외로, 이유와 함께 명시 등재한다(조용히 빼지 않는다).
     """
 
-    type: Literal["doc"]
+    type: Literal["doc", "story", "epic", "task", "sprint", "artifact", "hypothesis"]
     id: str
     title: str | None = None
 
@@ -78,11 +123,22 @@ class GetChatMessageInput(SprintableInput):
 
 
 async def _resolve_mention_content(args: SendChatInput) -> str:
-    """story 1995: mentions → `[title](entity:doc:id) ` 토큰을 합성해 content에 붙인다.
+    """story 1995 + #2283 후속: mentions → `[title](entity:<type>:id) ` 토큰을 합성해 content에
+    붙인다.
 
-    title 미지정 mention은 GET /api/v2/docs/{id}로 canonical title을 조회(AC3) — 404/기타 에러는
-    그대로 propagate(호출자 send_chat_message의 try/except가 잡아 err()로 노출·메시지 POST 자체를
-    막는다 — broken 토큰이 실린 반쪽 메시지가 저장되는 걸 방지).
+    ⛔title 미지정 mention은 GET(_MENTION_ENTITY_ENDPOINTS)으로 엔티티를 조회하고, 그 응답의
+    `reference_token` 필드(#2282 SSOT — DocResponse/StoryResponse/GoalResponse가
+    @computed_field로 매 직렬화마다 서버가 escape까지 끝내 만든 것)를 **그대로** 쓴다 — title을
+    가져와 여기서 다시 escape하지 않는다. 로컬 escape 로직(`escape_mention_title`)과 백엔드
+    `build_reference_token`의 escape 규칙이 각각 따로 존재하면(오늘 하루 반복 걸린 twin-system
+    클래스) 한쪽만 고쳐질 때 다시 벌어진다 — 서버가 이미 만든 토큰을 재사용하면 그 위험 자체가
+    없다. 응답에 `reference_token`이 없으면(구버전 백엔드 등 방어적 폴백) title로 로컬 조립하고
+    경고 로그를 남긴다. 404/기타 에러는 그대로 propagate(호출자 send_chat_message의 try/except가
+    잡아 err()로 노출·메시지 POST 자체를 막는다 — broken 토큰이 실린 반쪽 메시지가 저장되는 걸
+    방지).
+
+    title **지정** mention(캐릭터가 표시 문구를 커스텀하고 싶을 때)은 백엔드에 해당 문자열의
+    토큰이 없으므로 로컬 escape로 직접 짓는다 — 이 경로만 `escape_mention_title`을 쓴다.
 
     join 컨벤션: 각 토큰은 FE applyEntity()/applyAsset() 관례와 동일하게 trailing space를 포함
     (`[title](entity:doc:id) `) — 여러 mention은 토큰을 그대로 이어붙이고(토큰마다 이미 뒤 공백이
@@ -92,11 +148,30 @@ async def _resolve_mention_content(args: SendChatInput) -> str:
     """
     tokens: list[str] = []
     for mention in args.mentions or []:
-        title = mention.title
-        if title is None:
-            doc = await client.get(f"/api/v2/docs/{mention.id}")
-            title = (doc.get("title") or "") if isinstance(doc, dict) else ""
-        tokens.append(f"[{escape_mention_title(title)}](entity:doc:{mention.id}) ")
+        if mention.title is not None:
+            tokens.append(f"[{escape_mention_title(mention.title)}](entity:{mention.type}:{mention.id}) ")
+            continue
+        endpoint = _MENTION_ENTITY_ENDPOINTS[mention.type].format(id=mention.id)
+        entity = await client.get(endpoint)
+        token = (entity.get("reference_token") if isinstance(entity, dict) else None) or None
+        if token is None:
+            # ⛔PO 지적(2026-07-28, #2585 리뷰): "경고만"으로는 이 폴백이 실제로 얼마나
+            # 타는지 아무도 모른다 — 그러면 twin-rule(로컬 escape vs 서버 build_reference_token)
+            # 이 살아 있는데 살아 있는 줄 모르는 상태가 된다. 이 경고 로그 자체가 그 카운터다 —
+            # Cloud Logging에서 logger="sprintable_mcp.tools.chat" + "missing reference_token"
+            # 문자열로 검색해 발화 빈도를 센다. 만료 날짜를 미리 정하지 않은 이유: MCP와 백엔드가
+            # 같은 배포 유닛(둘 다 backend/ 하위)이라 정상 상태에선 skew가 없어야 하지만, Cloud
+            # Run 리비전 교체 중 짧은 창(구 리비전 파드가 아직 트래픽을 받는 순간)엔 실제로 있을
+            # 수 있다 — 그게 "일회성"인지 "배포마다 반복"인지 아직 실측이 없다. 카운트가 0에
+            # 수렴하면(또는 배포 롤아웃 창에서만 튀는 패턴이 확인되면) 그때 폴백을 걷는다.
+            title = (entity.get("title") or "") if isinstance(entity, dict) else ""
+            token = f"[{escape_mention_title(title)}](entity:{mention.type}:{mention.id})"
+            logger.warning(
+                "send_chat_message: %s %s GET response missing reference_token — built locally "
+                "as fallback (possible backend/mcp version skew)",
+                mention.type, mention.id,
+            )
+        tokens.append(f"{token} ")
     token_block = "".join(tokens)
     return f"{args.content} {token_block}" if args.content else token_block
 
@@ -124,7 +199,22 @@ async def send_chat_message(args: SendChatInput) -> list[TextContent]:
         uploaded_urls = [a["url"] for a in attachments if isinstance(a, dict) and a.get("url")]
         if attachments:
             payload["attachments"] = attachments
-        return ok(await client.post(f"/api/v2/conversations/{args.thread_id}/messages", json=payload))
+        # ⛔story #2294 ③ 후속(오르테가 라이브 실측, 2026-07-29): 백엔드 응답은
+        # `{"data": {...메시지}, "references": {...}?, "command_gate": {...}?}` 모양인데,
+        # 일반 unwrap 경로(SprintableApiClient.request의 기본 동작)가 sibling 키를 전부
+        # 버리고 data만 반환했다 — references{stored,dropped} 사이드밴드가 CI green·배포
+        # SHA 일치에도 MCP 호출부에는 한 번도 안 닿던 정확한 원인(같은 이유로 command_gate도
+        # 처음부터 MCP 경로에서 안 보였다 — 이번에 같이 드러난 기존 버그). unwrap=False로
+        # 원본을 받아 여기서 명시적으로 재구성한다 — 기존 MCP 호출부가 기대하는 평탄한
+        # 메시지 필드 모양은 그대로 유지하면서 sibling 키만 얹는다(회귀 0: sibling이 없는
+        # 평문 메시지는 이전과 byte-identical).
+        raw = await client.post_full(f"/api/v2/conversations/{args.thread_id}/messages", json=payload)
+        result: dict = dict(raw.get("data") or {}) if isinstance(raw, dict) else raw
+        if isinstance(raw, dict):
+            for sibling_key in ("references", "command_gate", "forked", "forked_conversation_id"):
+                if sibling_key in raw:
+                    result[sibling_key] = raw[sibling_key]
+        return ok(result)
     except Exception as exc:
         if uploaded_urls:
             # 업로드는 성공했으나 메시지 생성이 실패한 경우 — asset registry 는 SAVE-time(메시지

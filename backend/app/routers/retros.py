@@ -26,6 +26,7 @@ from app.schemas.retro import (
     CreateAction,
     CreateItem,
     CreateSession,
+    GetOrCreateBySprint,
     GroupItem,
     ItemResponse,
     PhaseTransition,
@@ -164,6 +165,57 @@ async def create_session(
         created_by=creator.id,
     )
     return SessionListResponse.model_validate(session)
+
+
+@router.post("/by-sprint", response_model=SessionResponse)
+async def get_or_create_session_by_sprint(
+    body: GetOrCreateBySprint,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> SessionResponse:
+    """story #2281 AC3ⓐ — MCP `get_retro_session`(sprint_id 기준 get-or-create)이 부르던
+    메커니즘이 서버에 여태 없었다(#2271에서 처음 발견 — 도구는 등재됐지만 한 번도 정상
+    실행된 적 없었다). project_id는 caller가 안 넘긴다 — sprint 자체가 project를 이미
+    알므로(POST "" 처럼 body.project_id와 body.sprint_id의 정합을 별도 검증할 필요가
+    구조적으로 없다).
+
+    ⚠️여러 세션이 같은 sprint에 있을 수 있는 경우(수동 중복 생성 등) — `created_at DESC`로
+    명시 정렬해 가장 최근 것을 반환한다(BaseRepository.list()는 ORDER BY가 없어 비결정적 —
+    story #2260류 교훈, 여기서 직접 쿼리로 우회)."""
+    sprint = (
+        await db.execute(select(Sprint).where(Sprint.id == body.sprint_id, Sprint.org_id == org_id))
+    ).scalar_one_or_none()
+    if sprint is None:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    if not await has_project_access(db, uuid.UUID(auth.user_id), sprint.project_id, org_id):
+        raise HTTPException(status_code=403, detail="해당 프로젝트 접근 권한이 없습니다")
+
+    existing = (
+        await db.execute(
+            select(RetroSession)
+            .where(
+                RetroSession.org_id == org_id,
+                RetroSession.sprint_id == body.sprint_id,
+            )
+            .order_by(RetroSession.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if existing is not None:
+        session = existing
+    else:
+        creator = await resolve_member(auth, org_id, db, project_id=sprint.project_id)
+        repo = RetroSessionRepository(db, org_id)
+        session = await repo.create(
+            project_id=sprint.project_id,
+            title=body.title or f"{sprint.title} 회고",
+            sprint_id=body.sprint_id,
+            created_by=creator.id,
+        )
+
+    return await _build_session_response(db, session, auth)
 
 
 async def _build_session_response(

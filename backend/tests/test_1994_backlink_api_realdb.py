@@ -264,10 +264,14 @@ async def _make_doc(session, org_id, project_id, title="Doc", content="", delete
 
 
 async def _make_mention(session, org_id, source_type, source_id, target_id, created_by, created_at=None):
-    from app.models.mention import Mention
-    m = Mention(
-        id=uuid.uuid4(), org_id=org_id, source_type=source_type, source_id=source_id,
-        target_type="doc", target_id=target_id, created_by=created_by,
+    """⛔story #2273(C-1b): entity_references(Reference)에 시드한다 — read-path(list_doc_
+    backlinks)가 그쪽을 읽도록 재배선됐다. source_field="body"(doc/chat_message 둘 다 텍스트
+    필드가 하나뿐)."""
+    from app.models.reference import Reference
+    m = Reference(
+        id=uuid.uuid4(), org_id=org_id, source_type=source_type, source_field="body",
+        source_id=source_id, target_type="doc", target_id=target_id, form="mention",
+        created_by=created_by,
     )
     if created_at is not None:
         m.created_at = created_at
@@ -701,10 +705,34 @@ async def test_pagination_has_more_false_and_no_next_cursor_when_all_fit_one_pag
         await engine.dispose()
 
 
-# ─── (e) soft-deleted / 미존재 source 제외 ──────────────────────────────────────
+# ─── (e) soft-deleted source doc — story #2299 재판정: 빼지 말고 still_exists=false로 표시 ──
 
 
-async def test_soft_deleted_source_doc_excluded():
+async def test_soft_deleted_source_doc_stays_marked_broken_not_excluded():
+    """⭐PO 재판정(2026-07-29, story #2299): 이 테스트의 원래 이름은
+    `test_soft_deleted_source_doc_excluded`였고 "삭제된 source는 결과에서 빠진다"를 정답으로
+    고정하고 있었다 — PO가 그 자체를 「조용히 사라지는 것」버그로 재분류했다(#2591이 증명한
+    "still_exists는 있는데 내주는 길이 없다"의 배선 완료판).
+
+    ⛔왜 옛 기대가 틀렸는가(재분류 근거 — «누락»이 아니라 «authz 부작용»이었다): 옛 쿼리는
+    soft-deleted source doc을 JOIN **ON절**의 `Doc.deleted_at.is_(None)`로 걸렀다 — JOIN이
+    매치 실패하면 `Doc.project_id`가 NULL이 되고, WHERE절의 authz 체크
+    (`project_access_valid_correlated(Doc.project_id, ...)`)가 그 NULL에 대해 무조건
+    거짓으로 평가되어 행 자체가 결과에서 빠졌다. 즉 "삭제된 걸 의도적으로 숨긴 필터"가 아니라
+    "존재 판정을 authz 체크에 얹었다가 그 authz가 실패한" 부작용 — `still_exists` 필드만
+    얹고 이 JOIN을 안 고쳤으면 여전히 안 보였을 것이다. 그래서 deleted_at 조건을 JOIN에서
+    빼(project_id를 살려 authz가 원래 프로젝트 기준으로 정상 평가되게) 별도 select한
+    deleted_at으로 still_exists를 판정한다(위 `list_entity_backlinks` 코드 주석 참조).
+
+    이제는 반대를 고정한다: 행은 남고(①) `still_exists`가 정확히 갈린다(②양성대조 — 같은
+    응답에 살아있는 것과 죽은 것이 같이 있고, 살아있는 쪽엔 「끊어짐」 표기가 없다=still_exists
+    true).
+
+    ⛔③대체 선언: 라이브로 실 `DELETE /api/v2/docs/{id}`를 호출하지 않는다 — 그 엔드포인트도
+    story 삭제(오르테가군이 오늘 직접 밟은 403)와 동형으로 휴먼 전용이다(`docs.py` delete_doc
+    `deleter.type != "human"` → 403, 에이전트 API키 차단). 그래서 여기선 realdb에 `Doc.deleted_
+    at`를 직접 심어(soft-delete 상태를 만들어) 대체한다 — 라이브 시도가 막혀서가 아니라
+    애초에 이 caller(에이전트)로는 시도 자체가 불가능하다는 뜻."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -729,8 +757,13 @@ async def test_soft_deleted_source_doc_excluded():
             resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
             assert resp.status_code == 200, resp.text
             body = resp.json()
+            # ①행 잔존 — 둘 다 결과에 있다(하나가 빠지면 그게 「조용히 사라지는 것」).
             ids = {item["source_id"] for item in body["data"]}
-            assert ids == {str(live_source.id)}, body
+            assert ids == {str(deleted_source.id), str(live_source.id)}, body
+            # ②양성대조 — 같은 응답 안에서 갈린다(전부 True/False면 판별력 0).
+            still_exists_by_id = {item["source_id"]: item["still_exists"] for item in body["data"]}
+            assert still_exists_by_id[str(deleted_source.id)] is False
+            assert still_exists_by_id[str(live_source.id)] is True
         finally:
             await client.aclose()
     finally:
@@ -936,7 +969,7 @@ async def test_sabotage_intra_statement_revoke_barrier_doc_source_project_access
         revoked = {"done": False}
 
         def _revoke_mid_statement(conn, cursor, statement, parameters, context, executemany):
-            if revoked["done"] or "mentions" not in statement.lower():
+            if revoked["done"] or "entity_references" not in statement.lower():
                 return
             revoked["done"] = True
             import psycopg2
@@ -1000,7 +1033,7 @@ async def test_sabotage_intra_statement_revoke_barrier_chat_source_project_acces
         revoked = {"done": False}
 
         def _revoke_mid_statement(conn, cursor, statement, parameters, context, executemany):
-            if revoked["done"] or "mentions" not in statement.lower():
+            if revoked["done"] or "entity_references" not in statement.lower():
                 return
             revoked["done"] = True
             import psycopg2
@@ -1088,7 +1121,7 @@ async def test_sabotage_intra_statement_revoke_barrier_human_admin_bypass_eligib
         revoked = {"done": False}
 
         def _revoke_mid_statement(conn, cursor, statement, parameters, context, executemany):
-            if revoked["done"] or "mentions" not in statement.lower():
+            if revoked["done"] or "entity_references" not in statement.lower():
                 return
             revoked["done"] = True
             import psycopg2
@@ -1165,7 +1198,7 @@ async def test_sabotage_intra_statement_revoke_barrier_agent_admin_bypass_eligib
         revoked = {"done": False}
 
         def _revoke_mid_statement(conn, cursor, statement, parameters, context, executemany):
-            if revoked["done"] or "mentions" not in statement.lower():
+            if revoked["done"] or "entity_references" not in statement.lower():
                 return
             revoked["done"] = True
             import psycopg2
@@ -1794,8 +1827,8 @@ async def test_query_count_o1_regardless_of_hidden_conversation_count():
 
 async def test_sabotage_foreign_org_chat_source_admin_bypass_excluded():
     """산티아고 Blocker 1(4회차 재발견): org A 휴먼 owner/admin caller — org B에 agent-only
-    대화(휴먼 참가자 없음)의 메시지가 있고, `Mention.org_id=org_A.id`(호출자 org)이지만
-    `source_id`는 그 org-B 메시지를 가리키는 mention 행을 심는다(write-path 버그 또는
+    대화(휴먼 참가자 없음)의 메시지가 있고, `Reference.org_id=org_A.id`(호출자 org)이지만
+    `source_id`는 그 org-B 메시지를 가리키는 참조 행을 심는다(write-path 버그 또는
     적대적/오손 데이터 시뮬레이션 — 어떻게 그 상태에 도달했든 read-time 방어가 이걸 잡아야
     한다는 게 핵심). org A owner의 admin-bypass가 org 경계 없이 `agent_only_candidates`
     전체에 적용됐던 3회차 버그의 정확한 재현 시나리오.
@@ -1924,11 +1957,87 @@ async def test_ssot_single_select_against_mentions_proves_no_two_phase():
             await client.aclose()
             app.dependency_overrides.clear()
 
-        mentions_selects = [sql for sql in statements if "mentions" in sql.lower()]
+        mentions_selects = [sql for sql in statements if "entity_references" in sql.lower()]
         assert len(mentions_selects) == 1, (
             "SSOT 구조 회귀(Blocker 2, 4회차): mentions 테이블을 건드리는 SELECT가 1개가 "
             f"아님(2-phase 재구현 의심) — {len(mentions_selects)}개:\n"
             + "\n---\n".join(mentions_selects)
         )
+    finally:
+        await engine.dispose()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# story #2273(C-1b) — 재배선 후 AC5: 백필된 옛 데이터 + 재배선 후 새 데이터가 둘 다 보인다
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def test_backfilled_old_data_and_post_cutover_new_data_both_visible_in_backlinks():
+    """⭐AC5 핵심 — read/write 재배선이 실제로 «짝»으로 성립하는지 하나의 왕복으로 증명한다.
+    ①옛 mentions 표에 직접 시드(백필 이전 데이터 시뮬레이션) → backfill 실행 →
+    ②그 뒤 insert_chat_mentions(재배선된 새 write-path)로 새 멘션 추가 →
+    ③GET /docs/{id}/backlinks 한 번 호출로 **둘 다** 뜨는 것을 확인한다.
+    하나라도 안 뜨면 read/write 어느 한쪽이 아직 옛 표만 보거나 쓰는 것이다."""
+    from app.main import app
+    from app.models.mention import Mention
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            other_id, _ = await _make_human_member(s, org.id, project.id)
+            target_doc = await _make_doc(s, org.id, project.id, title="Target")
+            old_source_doc = await _make_doc(s, org.id, project.id, title="Old Source (pre-backfill)")
+
+            # ① 백필 이전 데이터 시뮬레이션 — 옛 mentions 표에 직접 시드(재배선된 write-path를
+            # 거치지 않는다 — 이게 "이미 있던 데이터"라는 뜻이다).
+            s.add(Mention(
+                id=uuid.uuid4(), org_id=org.id, source_type="doc", source_id=old_source_doc.id,
+                target_type="doc", target_id=target_doc.id, created_by=caller_id,
+            ))
+            await s.commit()
+
+            from app.services.reference_backfill import backfill_mentions_to_references
+            await backfill_mentions_to_references(s, org_id=org.id)
+            await s.commit()
+
+            # ② 재배선 후 새 멘션 — 재배선된 실제 write-path(insert_chat_mentions)로 추가.
+            # ⛔실제 ConversationMessage row가 있어야 한다 — backlinks 쿼리가 그걸 LEFT JOIN해
+            # Conversation까지 타는데(Conversation.id.isnot(None) 가드), message_id를 지어내면
+            # 그 JOIN이 NULL이 돼 결과에서 조용히 빠진다(먼저 겪은 자리 — 코드가 아니라 이 테스트
+            # 시딩의 함정이었다).
+            conv_id = await _make_conversation(
+                s, org.id, project.id, [caller_id, other_id], created_by=caller_id, conv_type="dm",
+            )
+            msg = await _add_message(
+                s, conv_id, caller_id, f"[새 참고](entity:doc:{target_doc.id})", _t(9),
+            )
+            from app.services.mention_parser import insert_chat_mentions
+            await insert_chat_mentions(
+                s, org_id=org.id, message_id=msg.id, content=msg.content, created_by=caller_id,
+            )
+            await s.commit()
+            new_message_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks?limit=30")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            source_ids = {item["source_id"] for item in body["data"]}
+            assert str(old_source_doc.id) in source_ids, (
+                "백필된 옛 데이터가 안 보인다 — read-path가 backfill 결과를 못 읽는 것"
+            )
+            assert str(new_message_id) in source_ids, (
+                "재배선 후 새로 쓴 멘션이 안 보인다 — write-path가 여전히 옛 표에 쓰거나, "
+                "read-path가 새 표를 안 읽는 것"
+            )
+            assert len(body["data"]) == 2, body
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
     finally:
         await engine.dispose()

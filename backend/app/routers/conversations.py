@@ -1862,7 +1862,7 @@ async def send_message(
     # 예외가 그대로 propagate 되어 메시지 전송 전체가 롤백된다(AC4 원자성 — 아래 best-effort 블록들과
     # 의도적으로 다른 격리 수준).
     from app.services.mention_parser import insert_chat_mentions
-    await insert_chat_mentions(
+    mention_result = await insert_chat_mentions(
         db, org_id=org_id, message_id=msg.id, content=msg.content, created_by=sender.id,
     )
 
@@ -2155,6 +2155,15 @@ async def send_message(
     # E-CHAT-CMD S4: 미지원 런타임으로 차단된 커맨드의 hint 를 발신자에게 반환(AC3 hint response).
     if command_hints:
         response["command_gate"] = {"blocked": command_hints}
+    # story #2294 ③(PO 판정, 미르코 실측): `command_gate.blocked[]`와 동일 원칙 — 화면이
+    # 링크를 그린 뒤 "저장 결과"를 실제로 볼 창구가 구조적으로 없었다(epic/task는 backlinks
+    # read 엔드포인트 자체가 없다). mention 토큰이 하나라도 있었을 때만 싣는다(대부분의
+    # 평문 메시지는 무변경 — 회귀 0). 정상 경로(#2294 ①이 서면 화면이 애초에 못 고르는
+    # 종류를 못 보낸다)에선 dropped가 항상 빈 배열이다 — 그래도 필드를 남기는 이유는
+    # mention_parser.ChatMentionResult 참조(사람이 손으로 토큰을 치거나 에이전트가 API로
+    # 직접 쓰는 경로는 여전히 존재).
+    if mention_result.stored or mention_result.dropped:
+        response["references"] = {"stored": mention_result.stored, "dropped": mention_result.dropped}
     return response
 
 

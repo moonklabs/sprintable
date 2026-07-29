@@ -45,7 +45,9 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
 _CORE = "core"
 
 _ALWAYS_ALLOWED: frozenset[str] = frozenset({
-    "ping", "sprintable_ping", "sprintable_my_dashboard", "sprintable_check_notifications",
+    # story #2304(2026-07-29): "sprintable_ping"은 실재하지 않는 유령 이름이라 걷는다 —
+    # app/services/mcp_toolset.py와 짝맞춤(SEC-S8류 재드리프트 방지).
+    "ping", "sprintable_my_dashboard", "sprintable_check_notifications",
     # P1-S12: 백엔드 SSOT(app/services/mcp_toolset.py)와 대조해 기존 드리프트 발견 후 동기화
     # (get_workflow_guide/list_team_members/poll_events가 vendored 사본에 빠져있었음 — 발견 즉시
     # 수정, read 유틸은 비파괴라 always-allow 안전). sprintable_get_loop_context(P1-S12, 이 스토리
@@ -64,6 +66,10 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 유틸이라 단일 도메인 그룹에 못 묶음. link_gate_to_task와 동일 논리로 core 취급(백엔드
     # SSOT와 동기화, app/services/mcp_toolset.py 참고).
     "sprintable_add_evidence",
+    # story #2268(D단계, E-CONNECT — "판단 칸"): add_judgment/list_judgments — 판단/철회는
+    # work_item_ids(다건 또는 0건 general)에 걸치는 cross-cutting 기록이라 add_evidence와
+    # 동일 논리로 core 취급(백엔드 SSOT와 동기화, app/services/mcp_toolset.py 참고).
+    "sprintable_add_judgment", "sprintable_list_judgments",
     # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project — 키 자기 신원/스코프 조회·전환
     # 유틸(sprintable_my_dashboard·sprintable_ping과 동형: 특정 비즈니스 도메인 아닌 self-scope
     # 도구). set_default_project는 write지만 caller 자신의 기본 프로젝트 설정만 바꾸는 self-scope

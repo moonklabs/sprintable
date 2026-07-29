@@ -20,6 +20,14 @@ import type { Asset } from '@/lib/storage/types';
 import { imageFilesFromClipboard } from '@/lib/clipboard-image';
 import { ENTITY_ICONS } from './embed-card';
 import { AssetPickerPopover } from './asset-picker-popover';
+import {
+  applyEntity, entityTypeLabel, escapeMarkdownLinkText, getEntityQuery, groupEntitiesByType, type EntityResult,
+} from './chat-input-entity-tokens';
+import { useEntityPicker } from '@/hooks/use-entity-picker';
+
+// story #2264(C-6): 토큰조립/그룹핑/라벨은 이제 참조 코어(chat-input-entity-tokens.ts)에
+// 산다 — 여기선 재-export만 해서 기존 소비부(테스트 등)의 import 경로를 그대로 둔다.
+export { applyEntity, entityTypeLabel, escapeMarkdownLinkText, groupEntitiesByType };
 
 /** S8 #2: pre-send capability 경고 대상 — 대화의 에이전트 participant(본인 제외) runtime. */
 export interface CommandTarget {
@@ -45,38 +53,15 @@ function applyMention(value: string, cursorPos: number, name: string): { text: s
   return { text: value.slice(0, start) + replacement + value.slice(cursorPos), caretPos: start + replacement.length };
 }
 
-function getEntityQuery(value: string, cursorPos: number): string | null {
-  const before = value.slice(0, cursorPos);
-  const m = before.match(/#([\w가-힣]*)$/);
-  return m ? m[1] : null;
-}
-
-function applyEntity(
-  value: string,
-  cursorPos: number,
-  title: string,
-  entityType: string,
-  entityId: string,
-): { text: string; caretPos: number } {
-  const before = value.slice(0, cursorPos);
-  const m = before.match(/#([\w가-힣]*)$/);
-  if (!m) return { text: value, caretPos: cursorPos };
-  const start = cursorPos - m[0].length;
-  const replacement = `[${title}](entity:${entityType}:${entityId}) `;
-  return { text: value.slice(0, start) + replacement + value.slice(cursorPos), caretPos: start + replacement.length };
-}
-
-
 // S6: 스토리지 자산 선택 → 토큰 삽입. applyEntity 미러(트리거 문자 없이 caret 위치에 삽입).
 // 토큰 형식 정확히 `[${name}](entity:asset:${id}) ` (chat-bubble 의 entity:asset 렌더 경로와 정합).
-function applyAsset(
+export function applyAsset(
   value: string,
   cursorPos: number,
   name: string,
   assetId: string,
 ): { text: string; caretPos: number } {
-  // 파일명 escape — `[ ] ( ) \` 와 개행이 markdown-link 토큰 구조를 변조(예 `x](https://phish)[y` → 외부 phishing 링크 렌더)하는 걸 차단.
-  const safeName = name.replace(/[\\[\]()]/g, '\\$&').replace(/[\r\n]+/g, ' ');
+  const safeName = escapeMarkdownLinkText(name);
   const replacement = `[${safeName}](entity:asset:${assetId}) `;
   return { text: value.slice(0, cursorPos) + replacement + value.slice(cursorPos), caretPos: cursorPos + replacement.length };
 }
@@ -111,13 +96,6 @@ interface MentionMember {
   id: string;
   name: string;
   role?: string | null;
-}
-
-interface EntityResult {
-  entity_type: string;
-  entity_id: string;
-  title: string;
-  status: string | null;
 }
 
 // story #2032 — 대화별 임시저장(localStorage). 대화 전환은 ChatView가 key={conversation_id}로
@@ -183,9 +161,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const [mentionMembers, setMentionMembers] = useState<MentionMember[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
 
-  const [entityQuery, setEntityQuery] = useState<string | null>(null);
-  const [entityResults, setEntityResults] = useState<EntityResult[]>([]);
-  const [entityIndex, setEntityIndex] = useState(0);
+  // story #2264(C-6): 채팅 전용이던 entityQuery/entityResults/entityIndex + 검색 effect가
+  // 참조 코어 hook으로 옮겨갔다 — 이 컴포넌트는 소비자일 뿐이다.
+  const entityPicker = useEntityPicker(projectId);
 
   const [commandQuery, setCommandQuery] = useState<string | null>(null);
   const [commandIndex, setCommandIndex] = useState(0);
@@ -213,25 +191,6 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       .catch(() => {});
     return () => { cancelled = true; };
   }, [mentionQuery, projectId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (entityQuery === null || !projectId) { setEntityResults([]); return; }
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams({ project_id: projectId });
-      if (entityQuery) params.set('q', entityQuery);
-      fetch(`/api/entities/search?${params}`)
-        .then((r) => r.json())
-        .then((json: EntityResult[] | { data?: EntityResult[] }) => {
-          if (cancelled) return;
-          const arr = Array.isArray(json) ? json : (json.data ?? []);
-          setEntityResults(Array.isArray(arr) ? arr : []);
-          setEntityIndex(0);
-        })
-        .catch(() => {});
-    }, 200);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [entityQuery, projectId]);
 
   const adjustHeight = () => {
     const el = textareaRef.current;
@@ -276,23 +235,20 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       setCommandIndex(0);
       setMentionQuery(null);
       setMentionMembers([]);
-      setEntityQuery(null);
-      setEntityResults([]);
+      entityPicker.close();
     } else if (mq !== null) {
       setMentionQuery(mq);
       setCommandQuery(null);
-      setEntityQuery(null);
-      setEntityResults([]);
+      entityPicker.close();
     } else if (eq !== null) {
-      setEntityQuery(eq);
+      entityPicker.setEntityQuery(eq);
       setCommandQuery(null);
       setMentionQuery(null);
       setMentionMembers([]);
     } else {
       setMentionQuery(null);
       setMentionMembers([]);
-      setEntityQuery(null);
-      setEntityResults([]);
+      entityPicker.close();
       setCommandQuery(null);
     }
   };
@@ -319,8 +275,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     const cursorPos = textarea?.selectionStart ?? text.length;
     const { text: nextText, caretPos } = applyEntity(text, cursorPos, entity.title, entity.entity_type, entity.entity_id);
     setText(nextText);
-    setEntityQuery(null);
-    setEntityResults([]);
+    entityPicker.close();
     requestAnimationFrame(() => {
       textarea?.focus();
       textarea?.setSelectionRange(caretPos, caretPos);
@@ -400,12 +355,12 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); const c = commandCandidates[commandIndex] ?? commandCandidates[0]; if (c) selectCommand(c); return; }
       if (e.key === 'Escape') { setCommandQuery(null); return; }
     }
-    if (entityResults.length > 0) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); setEntityIndex((i) => (i + 1) % entityResults.length); return; }
-      if (e.key === 'ArrowUp') { e.preventDefault(); setEntityIndex((i) => (i - 1 + entityResults.length) % entityResults.length); return; }
+    if (entityPicker.entityResults.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); entityPicker.moveDown(); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); entityPicker.moveUp(); return; }
       // §5.2 select 가드: async 윈도우서 index가 범위 밖이면 undefined select 방지(클램프+존재 체크).
-      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); const ent = entityResults[entityIndex] ?? entityResults[0]; if (ent) selectEntity(ent); return; }
-      if (e.key === 'Escape') { setEntityQuery(null); setEntityResults([]); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); const ent = entityPicker.entityResults[entityPicker.entityIndex] ?? entityPicker.entityResults[0]; if (ent) selectEntity(ent); return; }
+      if (e.key === 'Escape') { entityPicker.close(); return; }
     }
     if (mentionMembers.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex((i) => (i + 1) % mentionMembers.length); return; }
@@ -610,22 +565,30 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           </ul>
         )}
 
-        {/* Entity dropdown */}
-        {entityResults.length > 0 && (
+        {/* Entity dropdown — story #2263(C-5) ㉡: 종류별 구역(머리글)으로 묶되 열은 안 나눈다
+            (entityResults가 이미 groupEntitiesByType로 그룹 순서라 렌더 순서=entityIndex 순서). */}
+        {entityPicker.entityResults.length > 0 && (
           <ul role="listbox" aria-label="엔티티 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
-            {entityResults.map((entity, idx) => {
+            {entityPicker.entityResults.map((entity, idx) => {
               const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
+              const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;
               return (
               <li key={`${entity.entity_type}:${entity.entity_id}`}>
+                {isNewGroup && (
+                  <div className="sticky top-0 bg-popover px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {entityTypeLabel(entity.entity_type)}
+                  </div>
+                )}
                 <button
                   type="button"
                   id={`entity-opt-${idx}`}
                   role="option"
-                  aria-selected={idx === entityIndex}
+                  aria-selected={idx === entityPicker.entityIndex}
                   onMouseDown={(e) => { e.preventDefault(); selectEntity(entity); }}
-                  className={`flex w-full items-center px-3 py-2 text-left text-sm transition ${idx === entityIndex ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+                  className={`flex w-full items-center px-3 py-2 text-left text-sm transition ${idx === entityPicker.entityIndex ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
                 >
-                  <EntityIcon className="mr-1.5 size-3.5 shrink-0" />
+                  {/* ㉠: 종류는 위 머리글의 «글자»가 1차 신호 — 이 아이콘은 어디까지나 보조. */}
+                  <EntityIcon className="mr-1.5 size-3.5 shrink-0" aria-hidden />
                   <span className="font-medium">{entity.title}</span>
                   {entity.status ? (
                     <span className="ml-2 rounded px-1.5 py-0.5 text-xs bg-muted text-muted-foreground">{entity.status}</span>
@@ -689,11 +652,11 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           ref={textareaRef}
           rows={1}
           value={text}
-          aria-controls={commandCandidates.length > 0 ? 'command-opt-0' : mentionMembers.length > 0 ? 'mention-opt-0' : entityResults.length > 0 ? 'entity-opt-0' : undefined}
+          aria-controls={commandCandidates.length > 0 ? 'command-opt-0' : mentionMembers.length > 0 ? 'mention-opt-0' : entityPicker.entityResults.length > 0 ? 'entity-opt-0' : undefined}
           aria-activedescendant={
             commandCandidates.length > 0 ? `command-opt-${commandIndex}`
               : mentionMembers.length > 0 ? `mention-opt-${mentionIndex}`
-              : entityResults.length > 0 ? `entity-opt-${entityIndex}`
+              : entityPicker.entityResults.length > 0 ? `entity-opt-${entityPicker.entityIndex}`
               : undefined
           }
           onChange={(e) => handleTextChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
@@ -703,8 +666,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
             window.setTimeout(() => {
               setMentionQuery(null);
               setMentionMembers([]);
-              setEntityQuery(null);
-              setEntityResults([]);
+              entityPicker.close();
               setCommandQuery(null);
             }, 150);
           }}

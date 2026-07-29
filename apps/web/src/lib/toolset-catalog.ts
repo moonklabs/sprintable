@@ -31,7 +31,7 @@ export interface ToolsetCatalog {
  */
 export const TEMP_TOOLSET_CATALOG: ToolsetCatalog = {
   groups: [
-    { key: 'core', is_core: true, is_destructive: false, tools: ['sprintable_ping', 'sprintable_my_dashboard', 'sprintable_check_notifications'] },
+    { key: 'core', is_core: true, is_destructive: false, tools: ['ping', 'sprintable_my_dashboard', 'sprintable_check_notifications'] },
     { key: 'stories', is_core: false, is_destructive: false, tools: ['sprintable_add_story', 'sprintable_list_stories', 'sprintable_update_story_status', 'sprintable_claim_story', 'sprintable_search_stories'] },
     { key: 'tasks', is_core: false, is_destructive: false, tools: ['sprintable_add_task', 'sprintable_list_tasks', 'sprintable_update_task_status', 'sprintable_get_task'] },
     { key: 'sprints', is_core: false, is_destructive: false, tools: ['sprintable_list_sprints', 'sprintable_assign_story_to_sprint', 'sprintable_checkin_sprint', 'sprintable_sprint_summary'] },

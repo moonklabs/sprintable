@@ -18,6 +18,7 @@ from app.models.team import TeamMember
 from app.repositories.story import StoryRepository
 from app.repositories.story_assignee import StoryAssigneeRepository
 from app.routers.agent_gateway import wake_agent
+from app.routers.gates import GateResponse
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
 from app.schemas.story import StoryAttachment, StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
@@ -550,6 +551,36 @@ async def get_story(
     return StoryResponse.model_validate(story)
 
 
+# ─── Backlinks (story #2266·C-8·E-CONNECT — target_type 일반화의 첫 사용처) ─────
+# `app.services.backlinks.list_entity_backlinks`는 SOURCE 접근만 스스로 판정하고 TARGET 접근은
+# 호출부 책임(§8① 동일 계약, docs.py의 get_doc_backlinks와 동형). 이 라우트가 그 TARGET
+# 게이트다 — get_story와 동일한 `_assert_story_project_access` 재사용(AC2: 같은 PR에 게이트,
+# AC7: 새 인증 미발명).
+@router.get("/{id}/backlinks")
+async def get_story_backlinks(
+    id: uuid.UUID,
+    limit: int = Query(default=30, ge=1, le=200),
+    before: str | None = Query(default=None),
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """GET /api/v2/stories/{id}/backlinks — 이 story를 가리키는 chat_message/doc 목록(#2266,
+    C-8 "역방향"). docs.py의 get_doc_backlinks와 동일 convention(cursor pagination, 응답
+    shape) — 실제 쿼리는 `list_entity_backlinks`가 target_type만 다르게 받아 처리하는 **같은
+    코드**다(중복 구현 아님). 존재하지 않는 story는 404, 있지만 project 접근 없으면 403
+    (`_assert_story_project_access` — get_story와 동일 계약, existence oracle 없음)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.backlinks import list_entity_backlinks
+    return await list_entity_backlinks(
+        repo.session, org_id=repo.org_id, target_type="story", target_id=id,
+        auth=auth, limit=limit, cursor=before,
+    )
+
+
 class UploadStoryAttachmentRequest(BaseModel):
     """E-MCP-OPT S6: MCP(비-브라우저)용 JSON/base64 첨부 업로드 요청(chat과 동형)."""
 
@@ -950,6 +981,39 @@ async def update_story(
     story = await repo.update(id, **data)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
+
+    # story #2301(E-CONNECT, 오르테가 판정 2026-07-29): story 본문/AC의 `#` 엔티티 토큰이
+    # 저장 시 entity_references로 걷히지 않던 갭(#2597이 FE 삽입 UI만 열고 BE 파서가 아예
+    # 없었다) — insert_chat_mentions·reconcile_doc_mentions를 병합한 공용 코어
+    # `reconcile_entity_references`를 직접 호출한다(AC1: story 전용 write 헬퍼를 새로
+    # 만들지 않는다). description과 acceptance_criteria는 **서로 다른 source_field**라
+    # 각각 독립적으로 reconcile — 같은 대상을 본문과 AC 양쪽에 걸면 두 행 다 남는다(멱등
+    # 키에 source_field가 있어 서로 다른 참조로 선다). **같은 트랜잭션**(commit 전, 실패
+    # 시 예외 propagate로 story 저장 전체가 롤백 — chat/doc과 동일 AC4 원자성).
+    if "description" in data or "acceptance_criteria" in data:
+        from app.services.mention_parser import extract_chat_entity_mentions, reconcile_entity_references
+
+        _mention_actor_id: uuid.UUID | None = None
+        try:
+            _mention_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
+        except Exception:
+            _mention_actor_id = None
+        if "description" in data:
+            _desc_pairs = extract_chat_entity_mentions(story.description or "")
+            await reconcile_entity_references(
+                db, org_id=repo.org_id, source_type="story", source_field="description",
+                source_id=story.id,
+                extracted_refs=[(t, i, "mention") for t, i in _desc_pairs],
+                created_by=_mention_actor_id,
+            )
+        if "acceptance_criteria" in data:
+            _ac_pairs = extract_chat_entity_mentions(story.acceptance_criteria or "")
+            await reconcile_entity_references(
+                db, org_id=repo.org_id, source_type="story", source_field="acceptance_criteria",
+                source_id=story.id,
+                extracted_refs=[(t, i, "mention") for t, i in _ac_pairs],
+                created_by=_mention_actor_id,
+            )
 
     # E-STORAGE-SSOT S2: 첨부 교체(attachments 제공) 시 asset registry 재동기화(reconcile·SSOT 정확).
     if "attachments" in data:
@@ -1489,23 +1553,78 @@ async def add_comment(
     return CommentResponse.model_validate(comment)
 
 
-# ─── Activities ───────────────────────────────────────────────────────────────
-
-@router.get("/{id}/activities", response_model=list[ActivityResponse])
-async def list_activities(
+@router.post("/{id}/request-verification", response_model=GateResponse, status_code=201)
+async def request_verification(
     id: uuid.UUID,
-    limit: int = Query(default=20, le=100),
     db: AsyncSession = Depends(get_db),
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
-) -> list[ActivityResponse]:
+) -> GateResponse:
+    """story #2258 — 검증요청: 제네릭 게이트 생성(POST /api/v2/gates)은 이미 있었는데(work_item_type
+    무관) FE가 story에서 부르는 곳이 0곳이었다(member_id/role_id를 client가 알아야 해 실질적으로
+    막혀 있었음). doc.py::transition_doc이 doc_approval 게이트를 상신 시 자동 생성하는 것과
+    동형 패턴 — 여기서도 role_id를 서버가 `_default_role_id`로 해소해 client가 아무것도 몰라도
+    되게 한다. gate_type="qa"(GATE_TYPES 중 「검증」에 가장 가까운 값). create_gate 자체가 멱등
+    (재요청 시 기존 pending 재사용, rejected는 자동 재오픈)이라 여기서 별도 처리 불필요.
+    """
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.gate_service import create_gate
+    from app.services.workflow_line_config import _default_role_id
+
+    member_id = await _resolve_team_member_id(auth, repo.org_id, db)
+    role_id = await _default_role_id(db, repo.org_id) or story.id
+    gate = await create_gate(
+        db, repo.org_id, story.id, "story", "qa",
+        member_id, role_id,
+        neutral_facts={"requested_by_member_id": str(member_id), "story_title": story.title},
+        project_id=story.project_id,
+    )
+    await db.commit()
+    return GateResponse.model_validate(gate)
+
+
+# ─── Activities ───────────────────────────────────────────────────────────────
+
+@router.get("/{id}/activities")
+async def list_activities(
+    id: uuid.UUID,
+    limit: int = Query(default=20, le=100),
+    cursor: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """story #2247: FE(story-detail-panel.tsx)의 「더보기」가 이미 완결돼 기다리고 있었는데
+    이 엔드포인트에 cursor 자체가 없어 원천적으로 도달 불가였다(#2231 표 CAPPED-NO-NEXT-PAGE).
+    #2231 정본 규약 A(limit+1 오버페치 + has_more/next_cursor body meta, 참조 구현:
+    stories.py::list_comments — #2230에서 이미 같은 처방을 받은 형제 엔드포인트)로 도달 가능하게 한다.
+    """
     # SEC(story #2206) — list_comments(1339)와 동형 갭·동형 처방. 자세한 사유는 그쪽 주석 참조.
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
     await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
-    q = select(StoryActivity).where(
-        StoryActivity.story_id == id,
-    ).order_by(StoryActivity.created_at.desc()).limit(limit)
+    q = select(StoryActivity).where(StoryActivity.story_id == id)
+    # #2540 CI 교훈(오르테가군): "값이 있는지"만 보면 안 되고 "그 값이 문자열인지"까지 봐야
+    # 한다 — 이 함수를 FastAPI DI 없이 직접 호출하며 cursor= 를 누락하면 파이썬 기본값인
+    # Query(...) 센티넬 객체(truthy) 가 그대로 들어온다. 문자열이 아니면 커서 없음으로 취급.
+    if isinstance(cursor, str) and cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor format")
+        q = q.where(StoryActivity.created_at < cursor_dt)
+    q = q.order_by(StoryActivity.created_at.desc()).limit(limit + 1)
     result = await db.execute(q)
-    return [ActivityResponse.model_validate(r) for r in result.scalars()]
+    rows = list(result.scalars())
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    next_cursor = page[-1].created_at.isoformat() if has_more and page else None
+    return {
+        "data": [ActivityResponse.model_validate(r) for r in page],
+        "meta": {"has_more": has_more, "next_cursor": next_cursor},
+    }

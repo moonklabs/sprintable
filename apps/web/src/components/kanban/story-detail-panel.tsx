@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { AlertTriangle, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
 import { normalizeAssigneePatch } from './types';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
@@ -26,6 +26,8 @@ import { Workcell, type WorkcellMessage } from '@/components/workcell/workcell';
 import { initials } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
+import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
+import { EntityAwareTextarea } from '@/components/shared/entity-aware-textarea';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
 import { Button } from '@/components/ui/button';
@@ -108,13 +110,29 @@ const descriptionViewerComponents = {
   pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg bg-muted p-3 text-[13px] text-foreground">{children}</pre>,
   code: ({ children }: { children?: React.ReactNode }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">{children}</code>,
   blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
-  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">{children}</a>,
+  // 긴급 정정(2026-07-28, PO 검수): description/AC 뷰어는 부모 div에 클릭=편집모드 진입
+  // onClick이 걸려 있다(1093·1140줄) — 링크가 stopPropagation 없이 렌더돼 클릭이 그대로
+  // 버블링, 링크가 새 탭으로 열리는 동시에 편집모드까지 열렸다. 링크 클릭은 여기서 끊는다.
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-primary underline underline-offset-2"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {children}
+    </a>
+  ),
   strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold text-foreground">{children}</strong>,
   em: ({ children }: { children?: React.ReactNode }) => <em className="italic text-muted-foreground">{children}</em>,
   hr: () => <hr className="my-2 border-border" />,
 };
 
-function DescriptionViewer({ description }: { description: string }) {
+// export: 회귀 테스트(부모 클릭=편집모드 진입 wrapper 안에서 링크 클릭이 전파를 끊는지)를
+// StoryDetailPanel 전체 마운트 없이 격리 검증하기 위함(story-detail-panel.tsx는 huge prop
+// surface라 전체 마운트 테스트가 비실용적) — 동작 변경 없는 순수 export 추가.
+export function DescriptionViewer({ description }: { description: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -340,6 +358,54 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const handleRemoveDep = async (depId: string) => {
     const res = await fetch(`/api/dependencies/${depId}`, { method: 'DELETE' });
     if (res.ok) setDeps((prev) => prev.filter((d) => d.id !== depId));
+  };
+
+  // story #2258 AC2 — 검증요청: BE(request-verification)는 이미 있었는데 화면이 부르지 않던 경로.
+  // 서버 응답의 gate를 그대로 chipGates에 반영(낙관적 아님 — 실제로 저장된 것을 다시 읽는다).
+  const [requestingVerification, setRequestingVerification] = useState(false);
+  const handleRequestVerification = async () => {
+    if (requestingVerification) return;
+    setRequestingVerification(true);
+    try {
+      const res = await fetch(`/api/stories/${story.id}/request-verification`, { method: 'POST' });
+      if (res.ok) {
+        const gate = await res.json() as { gate_type: string; status: string; neutral_facts?: Record<string, unknown> | null };
+        setChipGates((prev) => [...prev.filter((g) => g.gate_type !== 'qa'), gate]);
+        addToast({ type: 'success', title: t('verificationRequested') });
+      } else {
+        addToast({ type: 'error', title: t('verificationRequestFailed') });
+      }
+    } catch {
+      addToast({ type: 'error', title: t('verificationRequestFailed') });
+    } finally {
+      setRequestingVerification(false);
+    }
+  };
+
+  // story #2258 AC3: 대기 해제 조건(dep_type) «수정» — 삭제 후 재생성이 아니라 같은 행을 PATCH.
+  // 서버 응답의 dep_type을 그대로 반영(낙관적 플립 아님 — 실제로 저장된 값을 다시 읽는다).
+  const [updatingDepId, setUpdatingDepId] = useState<string | null>(null);
+  const handleToggleDepType = async (dep: DependencyEdge) => {
+    if (updatingDepId) return;
+    const nextType = dep.dep_type === 'blocks' ? 'depends_on' : 'blocks';
+    setUpdatingDepId(dep.id);
+    try {
+      const res = await fetch(`/api/dependencies/${dep.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dep_type: nextType }),
+      });
+      if (res.ok) {
+        const updated = await res.json() as DependencyEdge;
+        setDeps((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+      } else {
+        addToast({ type: 'error', title: t('dep.addFailed') });
+      }
+    } catch {
+      addToast({ type: 'error', title: t('dep.addFailed') });
+    } finally {
+      setUpdatingDepId(null);
+    }
   };
 
   useEffect(() => {
@@ -847,6 +913,22 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   {trustChipLabel}
                 </span>
               ) : null}
+              {/* story #2258 AC2 — 검증요청: pending "qa" gate가 없을 때만 요청 버튼, 있으면 대기 배지. */}
+              {chipGates.some((g) => g.gate_type === 'qa' && g.status === 'pending') ? (
+                <span className="inline-flex items-center gap-1.5 rounded-[7px] bg-proof-amber-soft px-2 py-0.5 text-[11px] font-semibold text-proof-amber">
+                  <span className="size-1.5 rounded-full bg-proof-amber" aria-hidden="true" />
+                  {t('verificationPending')}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void handleRequestVerification()}
+                  disabled={requestingVerification}
+                  className="inline-flex items-center gap-1 rounded-[7px] border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+                >
+                  {requestingVerification ? t('loading') : t('requestVerification')}
+                </button>
+              )}
             </div>
             {/* E-VERIFY V0-S3 Lv1/Lv2 + P0-04 Claimed-vs-Verified — 완료 badge의 연장으로 읽히도록
                 바로 아래. 증거 0이면 EvidenceSection 자체가 null 렌더(행 미노출, §7 상태 매트릭스). */}
@@ -985,6 +1067,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             {/* E-DG S12: handoff stuck UX — DISPATCH 직후·handoff_stuck일 때만 조건부 렌더(자체 게이트) */}
             <StuckHandoffSection storyId={story.id} memberMap={memberMap} />
 
+            {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
+                (doc [slug]/view는 후속 판). */}
+            <EntityBacklinksSection entityType="story" entityId={story.id} />
+
             {story.story_points != null ? (
               <div>
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('storyPoints')}</span>
@@ -1008,10 +1094,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               </div>
               {editingDescription ? (
                 <div className="mt-2 space-y-2">
-                  <textarea
+                  {/* story #2264(C-6) AC3: 새 자리 비용 = 설정 한 줄 — <textarea>를
+                      <EntityAwareTextarea>로 바꾸고 projectId만 넘기면 `#` 피커가 붙는다.
+                      참조 코어(chat-input-entity-tokens.ts/use-entity-picker.ts) diff 0. */}
+                  <EntityAwareTextarea
                     value={descriptionDraft}
-                    onChange={(e) => setDescriptionDraft(e.target.value)}
+                    onChange={setDescriptionDraft}
                     onPaste={handlePasteAttach}
+                    projectId={projectId}
                     placeholder="Markdown 형식으로 작성하세요..."
                     className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
@@ -1026,7 +1116,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   </div>
                 </div>
               ) : story.description ? (
-                <div className="mt-2 cursor-pointer" onClick={() => setEditingDescription(true)}>
+                // 긴급 정정(2026-07-28, PO 검수·#2275) — 본문 전체에 클릭=편집모드 onClick이
+                // 걸려 있으면 안의 링크 등 대화형 요소가 stopPropagation을 각각 붙여야만
+                // 살아남는 구조라 위험하다(#2566은 링크 하나만 증상 패치). 상호작용 규약을
+                // 아예 「편집 진입은 위 ✎ 수정 버튼으로만」으로 좁혀 원천 차단한다 — 본문
+                // 안의 무엇을 눌러도 편집모드가 끼어들 수 없다.
+                // ⛔이 div에 onClick을 다시 붙이지 않는다 — 편집 진입은 «수정 버튼»으로만.
+                // 본문 안의 링크·멘션·체크박스가 자기 일을 해야 하기 때문이다.
+                <div className="mt-2">
                   <DescriptionViewer description={story.description} />
                 </div>
               ) : (
@@ -1056,9 +1153,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               </div>
               {editingAC ? (
                 <div className="mt-2 space-y-2">
-                  <textarea
+                  {/* story #2264(C-6) AC3: 같은 설정 한 줄 — description과 동일 컴포넌트 재사용. */}
+                  <EntityAwareTextarea
                     value={acDraft}
-                    onChange={(e) => setAcDraft(e.target.value)}
+                    onChange={setAcDraft}
+                    projectId={projectId}
                     placeholder="Markdown 형식으로 작성하세요..."
                     className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
@@ -1073,7 +1172,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   </div>
                 </div>
               ) : story.acceptance_criteria ? (
-                <div className="mt-2 cursor-pointer" onClick={() => setEditingAC(true)}>
+                // #2275 — description과 동일 처방: 편집 진입은 위 ✎ 수정 버튼으로만.
+                // ⛔이 div에 onClick을 다시 붙이지 않는다 — 본문 안의 링크·멘션·체크박스가
+                // 자기 일을 해야 하기 때문이다.
+                <div className="mt-2">
                   <DescriptionViewer description={story.acceptance_criteria} />
                 </div>
               ) : (
@@ -1315,6 +1417,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           <span className="min-w-0 truncate">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocker.status}</span> : null}
                         </button>
+                        <button type="button" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                          <ArrowLeftRight className="size-3" />
+                        </button>
                         <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-warning/20 group-hover:block" aria-label="Remove">
                           <X className="size-3" />
                         </button>
@@ -1332,6 +1437,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           <span className="font-medium shrink-0">Blocking</span>
                           <span className="min-w-0 truncate">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{blocked.status}</span> : null}
+                        </button>
+                        <button type="button" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                          <ArrowLeftRight className="size-3" />
                         </button>
                         <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
                           <X className="size-3" />
@@ -1351,6 +1459,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           <span className="min-w-0 truncate">{target?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {target?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{target.status}</span> : null}
                         </button>
+                        <button type="button" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                          <ArrowLeftRight className="size-3" />
+                        </button>
                         <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
                           <X className="size-3" />
                         </button>
@@ -1368,6 +1479,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                           <span className="font-medium shrink-0">Depended by</span>
                           <span className="min-w-0 truncate">{source?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {source?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{source.status}</span> : null}
+                        </button>
+                        <button type="button" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                          <ArrowLeftRight className="size-3" />
                         </button>
                         <button type="button" onClick={() => void handleRemoveDep(d.id)} className="hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block" aria-label="Remove">
                           <X className="size-3" />

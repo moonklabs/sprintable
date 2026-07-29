@@ -16,6 +16,7 @@ import { AttachmentMedia } from './attachment-media';
 import { AttachmentFile } from './attachment-file';
 import { MessageContextMenu } from './message-context-menu';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
+import { ReferenceSuggestionRow } from './reference-suggestion-row';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -28,6 +29,8 @@ interface ChatBubbleProps {
   isWorking?: boolean;
   // Deeplink (ade2d6d5): 딥링크 진입 시 일시 하이라이트(ring). 토큰 기반·테마 인지.
   highlight?: boolean;
+  /** story #2283: 참조 후보(#번호·#슬러그) 해소 스코프. 없으면 그 확인 UI가 시도를 안 한다. */
+  projectId?: string;
 }
 
 interface ContextMenuState {
@@ -191,7 +194,7 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
 
 const LONG_PRESS_MS = 500;
 
-export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, onDelete, presenceStatus, isWorking = false, highlight = false }: ChatBubbleProps) {
+export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, onDelete, presenceStatus, isWorking = false, highlight = false, projectId }: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
@@ -331,6 +334,10 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
               <ChatMarkdown content={displayContent} isMine={isMine} />
             </div>
           )}
+
+          {/* story #2283 — 보낸 직후 그 메시지 바로 아래에서 한 번 제안(작성자 본인에게만,
+              isMine 게이트는 컴포넌트 내부에서 건다). ⛔남의 메시지엔 안 뜬다. */}
+          {!isCmd && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
 
           {/* Attachments — a54ddc16: auth-gated 서명 라우트 경유(public 직링크 미사용).
               이미지=AttachmentImage(3상태 render)·오디오/비디오=AttachmentMedia(story #2051,

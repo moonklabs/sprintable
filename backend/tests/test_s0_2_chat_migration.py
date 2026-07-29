@@ -67,10 +67,12 @@ def test_to_discord_payload_content_fields():
     assert "reply_id:" not in content
 
 
-def test_to_discord_payload_embed_url():
-    """Discord embed URL에 /conversations/{id} 경로 사용."""
-    import os
-    os.environ["NEXT_PUBLIC_APP_URL"] = "https://app.example.com"
+def test_to_discord_payload_embed_url(monkeypatch):
+    """Discord embed URL에 /conversations/{id} 경로 사용.
+    ⛔story #2274: 예전엔 os.environ 직접 대입이라 이 값이 프로세스 끝까지 굳었다(auth.py·
+    docs.py·org_invite_email.py·discord_webhook.py가 이 env를 읽는 소비자라 blast
+    radius가 넓음) — monkeypatch.setenv로 테스트 종료 시 자동 복원되게 고쳤다."""
+    monkeypatch.setenv("NEXT_PUBLIC_APP_URL", "https://app.example.com")
     from app.services.conversation_webhook import _to_discord_payload
 
     payload = {

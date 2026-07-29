@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import {
-  Check, ChevronDown, ChevronUp, ExternalLink, Link2, Paperclip,
+  Check, ChevronDown, ChevronUp, ExternalLink, Link2, Paperclip, Plus,
   GitPullRequest, Rocket, TrendingUp, FileText, CheckCircle2,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -11,6 +11,9 @@ import { formatRelativeTime } from '@/lib/storage/format';
 import { deriveTrustStage, type EvidenceItem, type EvidenceType } from '@/services/verify';
 
 const VISIBLE_LIMIT = 4;
+
+// BE _CLIENT_CREATABLE_TYPES(evidence.py) 미러 — gate_approval은 시스템 전용(직접 생성 차단).
+const CLIENT_CREATABLE_TYPES: EvidenceType[] = ['url', 'file', 'pr', 'deploy', 'metric', 'report'];
 
 const TYPE_ICON: Record<EvidenceType, typeof Link2> = {
   url: Link2,
@@ -89,6 +92,47 @@ export function EvidenceSection({
   const handleToggle = () => {
     if (!expanded && items === null) { void fetchEvidence(); }
     setExpanded((v) => !v);
+  };
+
+  // story #2258 — 증거연결: BE(create_evidence)는 이미 있었는데 화면이 부르지 않던 경로.
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addType, setAddType] = useState<EvidenceType>('url');
+  const [addRef, setAddRef] = useState('');
+  const [addNote, setAddNote] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState(false);
+
+  const handleAddEvidence = async () => {
+    if (!addRef.trim() || adding) return;
+    setAdding(true);
+    setAddError(false);
+    try {
+      const res = await fetch('/api/evidence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          work_item_id: workItemId, work_item_type: workItemType,
+          type: addType, ref: addRef.trim(), note: addNote.trim() || null,
+        }),
+      });
+      if (!res.ok) { setAddError(true); return; }
+      // 긴급 정정(2026-07-28): `as EvidenceItem` 단언이 봉투 이중포장을 조용히 통과시켰다
+      // (build/typecheck 둘 다 못 잡음) — 최소 형상 가드로 대체. 없으면 실패로 취급한다.
+      const raw: unknown = await res.json();
+      const created = (raw && typeof raw === 'object' && 'id' in raw && 'type' in raw && 'ref' in raw)
+        ? (raw as EvidenceItem)
+        : null;
+      if (!created) { setAddError(true); return; }
+      // AC1: 붙인 뒤 다시 읽어서 붙어 있는 것 — 서버 응답(실제로 저장된 값)을 그대로 리스트에 반영.
+      setItems((prev) => [created, ...(prev ?? [])]);
+      setAddRef('');
+      setAddNote('');
+      setShowAddForm(false);
+    } catch {
+      setAddError(true);
+    } finally {
+      setAdding(false);
+    }
   };
 
   // 증거 0 = 신뢰 행 자체를 렌더하지 않는다(§7 상태 매트릭스 — 현행과 동일 무표시, "증명 안 됨" 금지).
@@ -182,6 +226,63 @@ export function EvidenceSection({
                 ) : null}
               </>
             ) : null}
+
+            {showAddForm ? (
+              <div className="mt-2 space-y-1.5 rounded-md border border-border bg-muted/20 p-2">
+                <div className="flex flex-wrap gap-1">
+                  {CLIENT_CREATABLE_TYPES.map((ty) => (
+                    <button
+                      key={ty}
+                      type="button"
+                      onClick={() => setAddType(ty)}
+                      className={cn(
+                        'rounded px-2 py-0.5 text-[10px] font-medium transition',
+                        addType === ty ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {t(TYPE_LABEL_KEY[ty])}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  value={addRef}
+                  onChange={(e) => setAddRef(e.target.value)}
+                  placeholder={t('evidenceRefPlaceholder')}
+                  className="w-full rounded border border-border bg-background px-2 py-1 text-xs"
+                />
+                <input
+                  type="text"
+                  value={addNote}
+                  onChange={(e) => setAddNote(e.target.value)}
+                  placeholder={t('evidenceNotePlaceholder')}
+                  className="w-full rounded border border-border bg-background px-2 py-1 text-xs"
+                />
+                {addError ? <p className="text-[11px] text-destructive">{t('evidenceAddFailed')}</p> : null}
+                <div className="flex justify-end gap-1.5">
+                  <button type="button" onClick={() => setShowAddForm(false)} className="rounded px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground">
+                    {tCommon('cancel')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleAddEvidence()}
+                    disabled={!addRef.trim() || adding}
+                    className="rounded bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
+                  >
+                    {adding ? tCommon('loading') : t('evidenceAdd')}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowAddForm(true)}
+                className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                <Plus className="h-3 w-3" aria-hidden />
+                {t('evidenceAdd')}
+              </button>
+            )}
           </div>
         ) : null}
       </div>

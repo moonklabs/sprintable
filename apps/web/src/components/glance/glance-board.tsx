@@ -59,7 +59,6 @@ interface GlanceBoardProps {
 const EMPTY_PARTIAL_ERRORS: GlanceDataPartialErrors = {
   overview: false,
   members: false,
-  stories: false,
   activity: false,
   attention: false,
 };

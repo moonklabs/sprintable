@@ -271,6 +271,117 @@ async def test_list_dependencies_cross_project_blocked_404():
         await engine.dispose()
 
 
+# ── update/PATCH (story #2258 AC3: 「수정」이지 「삭제 후 생성」이 아니다) ──────────
+
+async def _dep_row(Session, dep_id):
+    from sqlalchemy import text
+    async with Session() as s:
+        row = (await s.execute(
+            text("SELECT id, created_at, dep_type FROM item_dependency WHERE id = :i"), {"i": dep_id}
+        )).one_or_none()
+        return None if row is None else {"id": row[0], "created_at": row[1], "dep_type": row[2]}
+
+
+@pytest.mark.anyio
+async def test_update_dependency_own_project_200_same_id_and_created_at():
+    """AC3 본체: dep_type이 바뀌어도 id·created_at이 그대로다(같은 행 UPDATE — delete+create였다면
+    created_at이 갱신되거나 id가 바뀌었을 것)."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        before = await _dep_row(Session, seeded["dep_aa"])
+        assert before["dep_type"] == "blocks"
+
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/dependencies/{seeded['dep_aa']}", json={"dep_type": "depends_on"},
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["dep_type"] == "depends_on"
+        finally:
+            await client.aclose()
+
+        after = await _dep_row(Session, seeded["dep_aa"])
+        assert after["id"] == before["id"], "id가 바뀜 — delete+create로 흉내낸 것"
+        assert after["created_at"] == before["created_at"], "created_at이 바뀜 — delete+create로 흉내낸 것"
+        assert after["dep_type"] == "depends_on"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_update_dependency_cross_project_blocked_404_not_changed():
+    """봉인: 접근권 없는 project_b 의존성 PATCH 시도 → 404 + **미변경 직조회**."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/dependencies/{seeded['dep_bb']}", json={"dep_type": "depends_on"},
+            )
+            assert resp.status_code == 404, resp.text
+        finally:
+            await client.aclose()
+        row = await _dep_row(Session, seeded["dep_bb"])
+        assert row["dep_type"] == "blocks", "cross-project 의존성이 변경됨(IDOR)"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_update_dependency_not_found_404():
+    """존재하지 않는 id → 404(반쪽 게이트가 아니라 조회 자체가 없음)."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/dependencies/{uuid.uuid4()}", json={"dep_type": "depends_on"},
+            )
+            assert resp.status_code == 404, resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_update_dependency_invalid_dep_type_422():
+    """dep_type 화이트리스트 밖 값 → 422(생성 경로와 동일 검증)."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/dependencies/{seeded['dep_aa']}", json={"dep_type": "not-a-type"},
+            )
+            assert resp.status_code == 422, resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 # ── graph (AC3: 응답 필터·사이클 org-wide 보존) ─────────────────────────────────
 
 @pytest.mark.anyio

@@ -119,6 +119,7 @@ export function ThreadPanel({
           message={parentMessage}
           isMine={parentMessage.created_by === currentTeamMemberId}
           isGrouped={false}
+          projectId={projectId}
         />
       </div>
 
@@ -139,6 +140,7 @@ export function ThreadPanel({
                   message={msg}
                   isMine={msg.created_by === currentTeamMemberId}
                   isGrouped={isGrouped}
+                  projectId={projectId}
                 />
               );
             })}

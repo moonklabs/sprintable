@@ -27,7 +27,21 @@ Settings 클래스 자체를 extra="forbid"로 바꾸는 건 안 함(플랫폼/�
 안정화되기 전엔 FAIL 승격하지 않는다(exit code에 반영 안 함 — stdout 열거만). exempt 목록이
 triage로 정리된 後 별도 커밋에서 fail로 승격할 것.
 
+⑤(story #2296, 2026-07-28) — 코드가 읽는데 아무도 안 주는 값. ①②③④는 전부 "라이브 ↔
+IaC" 두 자리만 본다 — 둘 다 그 값을 모르면(둘 다 안 준다) "드리프트 없음"으로 읽힌다. 오늘
+프론트 prod 로그인이 정확히 그 구멍으로 죽었다(`MOBILE_APP_LINK_ORIGIN`·
+`FIREBASE_BFF_INTERNAL_SECRET` 둘 다 IaC에도 라이브 어디에도 없었다 — dev는 하드코딩
+기본값이 우연히 dev 주소와 같아 "그냥 됐다"). 세 번째 축 "코드가 읽는 이름"을 붙인다 —
+`apps/web/src`를 정적 스캔해 `process.env['X']`/`process.env.X` 읽는 키를 전부 뽑고,
+IaC∪라이브(그 서비스 것) 어디에도 없는 키를 위험 등급별로 보고한다. 백엔드는 이미 ④(Settings
+커버리지)와 pydantic-settings의 필수 필드 검증(기본값 없는 필드는 기동 자체가 실패)이
+같은 역할을 구조적으로 하고 있어 이 축의 신규 대상이 아니다 — Next.js는 `process.env.X`가
+없어도 그냥 `undefined`로 흘러 기동은 되고 런타임에 조용히 깨지는 게 이 사고의 근본이었다.
+
 값 자체는 절대 출력/기록하지 않는다 — 매치 여부(bool)만 사용, stdout엔 키 이름·서비스만.
+⚠️⑤의 "기본값" 판정은 예외다 — 소스 코드에 **리터럴로 박힌** 폴백 문자열(이미 git에
+공개돼 있는 것, 예: `'https://dev-app.sprintable.ai'`)만 읽는다. 라이브 Cloud Run env
+value는 이 축도 절대 안 읽는다(①이 이미 뽑아 둔 키 «이름» 집합만 재사용).
 
 로컬 수동 실행:
     python3 infra/check_env_drift.py
@@ -43,7 +57,22 @@ import subprocess
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+def _find_repo_root(start: Path) -> Path:
+    """story #2305 AC5 — '../' 개수를 세지 않고 표식 디렉터리(.git)를 찾아 올라간다.
+    이 파일이 옮겨져도(디렉터리 깊이가 바뀌어도) 조용히 엉뚱한 경로를 안 가리킨다.
+    ⛔못 찾으면 조용히 넘기지 않고 즉시 실패한다(재료를 못 찾은 가드가 skip으로 통과하면
+    안 된다는 원칙 — 2026-07-28 #2600 실사고 교훈)."""
+    cur = start.resolve()
+    for _ in range(20):
+        if (cur / ".git").exists():
+            return cur
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+    raise RuntimeError(f"repo root(.git 표식)를 {start} 위로 못 찾음 — 잘못된 위치에서 실행됐을 가능성")
+
+
+_REPO_ROOT = _find_repo_root(Path(__file__).resolve().parent)
 _REGION = "asia-northeast3"
 _ALLOWLIST_PATH = _REPO_ROOT / "infra" / "manual-env-allowlist.yml"
 
@@ -90,6 +119,13 @@ def _load_settings_exempt() -> dict[str, str]:
 # 전 서비스 공통으로 파싱해 합집합에 넣는다(어느 스텝이 어느 서비스를 겨냥하는지까지 세밀하게
 # 가르지 않음 — v1은 "이 repo의 IaC 전체에 이 키가 한 번이라도 선언된 적 있는가"로 판정).
 # 여기 없는 서비스가 gcloud 열거에 나타나면 FAIL로 잡는다(매핑 자체가 최신인지 강제).
+#
+# ⭐story #2305 — 이 dict의 key 집합(7개)이 서비스명의 **SSOT(마스터)**다. AC1 확定 근거:
+# `sprintable-realtime-prod`는 cloudbuild.yaml에 실선언이 아니라 **주석 문장에만** 등장한다
+# (deploy-realtime 스텝이 prod에서 아직 스킵 중 — 2026-07-29 직접 확認, grep이 주석을 매칭한
+# 오탐이 아님을 실코드로 재확認). `_SETTINGS_CONSUMING_SERVICES`·`_SERVICE_DRY_RUN_MAP`·
+# `_WEB_CODE_SERVICES`는 전부 이 마스터의 **부분집합**이어야 한다(서로 같을 필요는 없다 —
+# 각자 다른 목적의 의도적 서브셋). `_service_subset_wellformed_violations()`가 이걸 강제한다.
 _SERVICE_SCRIPT_MAP: dict[str, list[str]] = {
     "sprintable-backend-dev": ["backend/scripts/deploy_backend.sh"],
     "sprintable-backend-prod": ["backend/scripts/deploy_backend.sh"],
@@ -227,6 +263,26 @@ def _extract_keys_from_text(text: str) -> set[str]:
     return set(_KEY_RE.findall(text))
 
 
+def _iac_covered_keys_for_service(service: str) -> set[str]:
+    """⑤ 전용 — ①의 `_iac_covered_keys()`는 전 서비스 스크립트를 합쳐(global union) 판정한다
+    (v1 실용적 타협, 위 클래스 docstring 참고). 그런데 그 합집합이 정확히 이 축의 두 실사고
+    중 하나(`FIREBASE_BFF_INTERNAL_SECRET`)를 가린다 — 그 키는 deploy_backend.sh에만 있고
+    deploy_frontend.sh엔 없는데, 전역 합집합으로 보면 "IaC 어딘가엔 있다"가 되어 frontend가
+    실제로 그 키를 공급받는지와 무관하게 "커버됨"으로 잘못 판정된다. ⑤는 그래서 «이
+    서비스를 담당하는 스크립트»로만 좁혀 본다(공유 cloudbuild.yaml/cloud-build.yml은
+    여러 서비스가 같은 스텝에서 배선될 수 있어 그대로 포함)."""
+    covered: set[str] = set()
+    for rel in ("cloudbuild.yaml", ".github/workflows/cloud-build.yml"):
+        path = _REPO_ROOT / rel
+        if path.exists():
+            covered |= _extract_keys_from_text(path.read_text())
+    for rel in _SERVICE_SCRIPT_MAP.get(service, []):
+        path = _REPO_ROOT / rel
+        if path.exists():
+            covered |= _extract_keys_from_text(path.read_text())
+    return covered
+
+
 def _iac_covered_keys() -> set[str]:
     covered: set[str] = set()
     for rel in ("cloudbuild.yaml", ".github/workflows/cloud-build.yml"):
@@ -241,23 +297,280 @@ def _iac_covered_keys() -> set[str]:
     return covered
 
 
+# ⑤ 코드가 읽는데 아무도 안 주는 값 — apps/web/src 정적 스캔 대상.
+_WEB_SRC_DIR = _REPO_ROOT / "apps" / "web" / "src"
+_ENV_BRACKET_RE = re.compile(r"process\.env\[\s*['\"]([A-Z][A-Z0-9_]*)['\"]\s*\]")
+_ENV_DOT_RE = re.compile(r"process\.env\.([A-Z][A-Z0-9_]*)")
+# 매치 직후 200자 안에서 `?? '...'`/`|| '...'`(문자열 리터럴 폴백)만 인식한다 — 함수 호출·
+# 변수 등 리터럴이 아닌 폴백은 "기본값 없음"과 동일하게 취급(안전 쪽, ㉠으로 승격).
+_DEFAULT_LITERAL_RE = re.compile(r"""^\s*(?:\?\?|\|\|)\s*['"]([^'"]*)['"]""")
+
+# 플랫폼/빌드가 항상 채우거나 이 축의 판정 대상이 아닌 잘 알려진 키.
+# NEXT_RUNTIME — Next.js가 빌드/런타임에 자동 주입(nodejs/edge 런타임 구분), 사람이 배포
+# 설정으로 "공급"하는 값이 아니다(2026-07-28 실측 확認 — instrumentation.ts가 읽지만 그
+# 값은 배포 SSOT/라이브 env var가 아니라 프레임워크가 실행 컨텍스트에 따라 스스로 세팅).
+_WEB_ENV_IGNORE = {"NODE_ENV", "NEXT_RUNTIME"}
+
+# ⑤가 대상으로 삼는 서비스 — apps/web 코드베이스를 실제로 구동하는 라이브 서비스만.
+_WEB_CODE_SERVICES = {"sprintable-frontend-dev", "sprintable-frontend-prod"}
+
+
+# ── ⑥ story #2305: 서비스명 부분집합 wellformed + 외부 IaC 대조 ────────────────────
+#
+# 배경(doc `duplicate-registry-census-20260728` #9·#10, 원 판정 철회됨): "4곳이 같은 목록이라
+# 일치해야 한다"는 애초에 틀린 전제였다 — 넷은 각자 다른 목적의 **의도적 부분집합**이다.
+# 진짜 구멍은 「그 부분집합들이 마스터(_SERVICE_SCRIPT_MAP)의 실제 부분집합인지 재는 자가
+# 0건」이었다 — 오타로 만든 유령 서비스명이 들어가도 아무도 못 잡는다.
+#
+# ⛔양방향(집합 동일)으로 재면 안 된다 — 의도적 부분집합이 거짓 불일치로 잡힌다. **한 방향만**
+# (subset - master == 공집합) 잰다.
+_SERVICE_NAME_RE = re.compile(r"sprintable-[a-z]+-(?:dev|prod)")
+
+
+def _service_subset_wellformed_violations() -> list[str]:
+    """`_SERVICE_SCRIPT_MAP`(마스터) 밖의 이름이 나머지 세 목록에 있으면 그 이름을 낸다.
+    한 방향만 잰다 — 마스터가 부분집합보다 큰 것(예: mcp-dev/prod가 이 셋 어디에도 없는 것)은
+    정상이라 잡지 않는다."""
+    master = set(_SERVICE_SCRIPT_MAP)
+    violations: list[str] = []
+    for label, subset in (
+        ("_SETTINGS_CONSUMING_SERVICES", _SETTINGS_CONSUMING_SERVICES),
+        ("_SERVICE_DRY_RUN_MAP", set(_SERVICE_DRY_RUN_MAP)),
+        ("_WEB_CODE_SERVICES", _WEB_CODE_SERVICES),
+    ):
+        for ghost in sorted(subset - master):
+            violations.append(
+                f"{label}: 마스터(_SERVICE_SCRIPT_MAP)에 없는 이름: {ghost!r} "
+                f"— 오타인가, 마스터에 추가할 것인가?"
+            )
+    return violations
+
+
+def _strip_comment(line: str) -> str:
+    """bash·YAML 둘 다 '#'가 주석 시작 — 이 저장소의 대상 파일들엔 문자열 리터럴 안에 '#'이
+    없음을 확認했다(2026-07-29). ⛔이걸 안 하면 "sprintable-realtime-prod가 없다"처럼 주석
+    문장 안의 서비스명을 실선언으로 오탐한다 — #10 census 항목이 정확히 이 오탐이었다."""
+    idx = line.find("#")
+    return line if idx == -1 else line[:idx]
+
+
+def _external_iac_service_literals() -> set[str]:
+    """cloudbuild.yaml·.github/workflows/*.yml·deploy_*.sh에서 실선언된(주석 아닌) 서비스명
+    리터럴을 정적으로 모은다. ⛔AC5 — 대상 파일이 하나라도 없으면 조용히 skip하지 않고
+    즉시 실패한다(재료를 못 찾은 가드가 "통과"로 읽히면 안 된다)."""
+    targets = [
+        _REPO_ROOT / "cloudbuild.yaml",
+        *sorted((_REPO_ROOT / ".github" / "workflows").glob("*.yml")),
+        *sorted((_REPO_ROOT / "backend" / "scripts").glob("deploy_*.sh")),
+    ]
+    missing = [str(p) for p in targets if not p.exists()]
+    if missing:
+        raise RuntimeError(
+            f"서비스명 스캔 대상 파일을 못 찾음(AC5 — skip 대신 실패): {missing}"
+        )
+    names: set[str] = set()
+    for path in targets:
+        for line in path.read_text().splitlines():
+            names |= set(_SERVICE_NAME_RE.findall(_strip_comment(line)))
+    return names
+
+
+def _external_iac_wellformed_violations() -> list[str]:
+    """외부 IaC(cloudbuild.yaml·workflows·deploy_*.sh)에 실선언된 서비스명이 마스터
+    (_SERVICE_SCRIPT_MAP)에 없으면 그 이름을 낸다 — 한 방향만."""
+    master = set(_SERVICE_SCRIPT_MAP)
+    external = _external_iac_service_literals()
+    return [
+        f"외부 IaC(cloudbuild.yaml/workflows/deploy_*.sh)에 있는데 마스터에 없는 이름: "
+        f"{ghost!r} — 오타인가, 마스터에 추가할 것인가?"
+        for ghost in sorted(external - master)
+    ]
+
+
+def _web_env_reads(src_dir: Path = _WEB_SRC_DIR) -> dict[str, list[tuple[str, str | None]]]:
+    """반환: {key: [(file_relpath, default_literal_or_None), ...]}. 소스 «리터럴»만 읽는다
+    (git에 이미 공개된 텍스트) — 라이브 env value는 이 함수가 존재를 몰라도 된다."""
+    findings: dict[str, list[tuple[str, str | None]]] = {}
+    if not src_dir.exists():
+        return findings
+    paths = sorted(src_dir.rglob("*.ts")) + sorted(src_dir.rglob("*.tsx"))
+    for path in paths:
+        if ".test." in path.name or ".spec." in path.name:
+            continue
+        text = path.read_text(errors="ignore")
+        try:
+            rel = str(path.relative_to(_REPO_ROOT))
+        except ValueError:
+            rel = str(path)  # src_dir이 repo 밖(테스트의 tmp_path 등)일 때의 폴백
+        for regex in (_ENV_BRACKET_RE, _ENV_DOT_RE):
+            for m in regex.finditer(text):
+                key = m.group(1)
+                if key in _WEB_ENV_IGNORE:
+                    continue
+                tail = text[m.end():m.end() + 200]
+                dmatch = _DEFAULT_LITERAL_RE.match(tail)
+                default = dmatch.group(1) if dmatch else None
+                findings.setdefault(key, []).append((rel, default))
+    return findings
+
+
+def _classify_code_read_risk(defaults: list[str | None]) -> str:
+    """같은 키를 여러 곳에서 읽으면 «가장 위험한» 등급으로 접는다.
+    반환: "highest"(㉡ dev/localhost/test 기본값) · "high"(㉠ 기본값 없음) · "low"(㉢ 무관 상수)."""
+    if any(d is not None and re.search(r"dev|localhost|test", d, re.IGNORECASE) for d in defaults):
+        return "highest"
+    if any(d is None for d in defaults):
+        return "high"
+    return "low"
+
+
+def _unsupplied_code_read_findings(
+    web_reads: dict[str, list[tuple[str, str | None]]],
+    covered_keys: set[str],
+    code_read_exempt: set[str],
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
+    """covered_keys(그 서비스의 IaC∪라이브 키 «이름» 집합)에 없는 키만, 등급별로 3개
+    (key, line) 리스트로 나눠 돌려준다(highest, high, low). exempt는 아예 리스트에서
+    빠진다(알려진 정상). key를 별도로 주는 이유 — ㉠(high)는 baseline 래칫과 대조해야
+    한다(story #2296 후속, 파울로군 지시 2026-07-28)."""
+    highest, high, low = [], [], []
+    for key in sorted(web_reads):
+        if key in covered_keys or key in code_read_exempt:
+            continue
+        occurrences = web_reads[key]
+        tier = _classify_code_read_risk([d for _, d in occurrences])
+        sample = ", ".join(sorted({f for f, _ in occurrences})[:2])
+        line = f"{key} ({sample})"
+        (highest if tier == "highest" else high if tier == "high" else low).append((key, line))
+    return highest, high, low
+
+
+def _load_code_read_exempt() -> set[str]:
+    import yaml
+    data = yaml.safe_load(_ALLOWLIST_PATH.read_text())
+    return {entry["key"] for entry in data.get("code_read_exempt", [])}
+
+
+# ⑤ 후속(2026-07-28, 파울로군 지시) — ㉠(high)를 전부 report-only로 영원히 두면 "없는
+# 가드"가 된다. 지금 알려진 것을 baseline으로 얼리고, baseline에 없는 «새» high만 FAIL —
+# 그러면 지금은 안 빨개지고, 새 구멍은 막히고, baseline을 줄여야 한다는 압력이 남는다.
+# ⛔baseline이 "묻어두는 곳"이 되지 않도록 self-expiring(#2280/#2174와 동일 원칙)+매 실행
+# 카운트 출력을 강제한다.
+_MAX_CODE_READ_BASELINE_HORIZON_DAYS = 30
+
+
+def _load_code_read_high_baseline() -> dict[str, dict]:
+    import yaml
+    data = yaml.safe_load(_ALLOWLIST_PATH.read_text())
+    return {entry["key"]: entry for entry in data.get("code_read_high_baseline", [])}
+
+
+def _baseline_entry_expired(entry: dict, today) -> str | None:
+    """infra/mcp_path_contract_guard.py::_expired와 동일 계약(만료·형식 위반이면 사유,
+    아니면 None) — 이 가드 계열 전체가 공유하는 규율이라 그대로 재현한다."""
+    from datetime import date
+
+    until_raw = entry.get("until")
+    if not until_raw:
+        return "`until`(만료일)이 없다 — 영원히 사는 baseline은 허용하지 않는다"
+    try:
+        until = date.fromisoformat(str(until_raw))
+    except ValueError:
+        return f"`until` 형식이 YYYY-MM-DD가 아니다: {until_raw!r}"
+    if until < today:
+        return f"baseline이 만료됐다(until={until}) — 재triage 필요"
+    horizon = (until - today).days
+    if horizon > _MAX_CODE_READ_BASELINE_HORIZON_DAYS:
+        return f"`until`이 너무 멀다({until} · {horizon}일 뒤) — 최대 {_MAX_CODE_READ_BASELINE_HORIZON_DAYS}일"
+    if not entry.get("reason"):
+        return "`reason`(사유)이 없다"
+    if not entry.get("declared_by"):
+        return "`declared_by`(선언자)가 없다"
+    return None
+
+
+def _split_high_by_baseline(
+    high_items: list[tuple[str, str]], baseline: dict[str, dict], today
+) -> tuple[list[str], list[str]]:
+    """high(㉠) findings를 baseline과 대조 — (baseline_ok_lines, new_or_expired_lines).
+    후자는 FAIL로 승격된다(baseline에 없거나, 있어도 만료됐으면)."""
+    ok, escalate = [], []
+    for key, line in high_items:
+        entry = baseline.get(key)
+        if entry is None:
+            escalate.append(f"{line} — 🔴baseline에 없는 신규")
+            continue
+        problem = _baseline_entry_expired(entry, today)
+        if problem:
+            escalate.append(f"{line} — 🔴baseline 등재는 있으나 {problem}")
+        else:
+            ok.append(f"{line} — baseline(until={entry['until']})")
+    return ok, escalate
+
+
+def _today():
+    import os as _os
+    from datetime import date, datetime, timezone
+
+    env = _os.environ.get("ENV_DRIFT_GUARD_TODAY")
+    if env:
+        return date.fromisoformat(env)
+    return datetime.now(timezone.utc).date()
+
+
 def main() -> int:
     excluded_axes, allowlist_services = _load_allowlist()
     iac_keys = _iac_covered_keys()
     settings_field_keys = _settings_field_env_keys()
     settings_exempt = _load_settings_exempt()
+    web_reads = _web_env_reads()  # ⑤ — repo 정적 스캔, 서비스 루프 밖(반복 파일 IO 방지)
+    code_read_exempt = _load_code_read_exempt()
+    code_read_baseline = _load_code_read_high_baseline()
+    today = _today()
+
+    # ⑥ story #2305 — 순수 정적 대조(라이브 서비스 열거 불필요), 루프 밖에서 한 번만.
+    service_subset_violations = (
+        _service_subset_wellformed_violations() + _external_iac_wellformed_violations()
+    )
 
     live_services = _list_live_services()
     key_set_failures: list[str] = []
     value_check_failures: list[str] = []
     secret_shape_failures: list[str] = []
     settings_coverage_report: list[str] = []  # ④ report-only — FAIL 집합에 안 넣음(위 docstring).
+    code_read_highest_failures: list[str] = []  # ⑤㉡ — FAIL 집합에 들어감(오늘 실제 사고 등급).
+    code_read_baseline_escalations: list[str] = []  # ⑤㉠ baseline 밖(신규/만료) — FAIL 집합.
+    code_read_baseline_ok_count = 0  # ⑤㉠ baseline 안(알려진 채무) — report-only, 매번 카운트만.
+    code_read_report: list[str] = []  # ⑤㉢ — report-only(환경무관, 승격 대상 아님).
     unmapped: list[str] = []
 
     checked = 0
     value_checked = 0
     for service in live_services:
         envs = _live_env_entries(service)
+
+        # ⑤ 코드가 읽는데 아무도 안 주는 값 — apps/web을 구동하는 서비스만.
+        # ⛔전역 iac_keys가 아니라 이 서비스 전용 IaC 커버리지를 쓴다(위 함수 docstring 참고 —
+        # 전역이면 FIREBASE_BFF_INTERNAL_SECRET류가 "backend 스크립트에 있으니 커버됨"으로
+        # 잘못 판정된다).
+        if service in _WEB_CODE_SERVICES:
+            live_keys_for_web = {e["name"] for e in envs}
+            covered = _iac_covered_keys_for_service(service) | live_keys_for_web
+            highest, high, low = _unsupplied_code_read_findings(web_reads, covered, code_read_exempt)
+            if highest:
+                code_read_highest_failures.append(
+                    f"{service}: {', '.join(line for _, line in highest)}"
+                )
+            # ⭐파울로군 지시(2026-07-28) — ㉠을 영원히 report-only로 두면 없는 가드가 된다.
+            # baseline(known, self-expiring)에 없는 신규 ㉠만 FAIL로 승격한다.
+            baseline_ok, escalate = _split_high_by_baseline(high, code_read_baseline, today)
+            code_read_baseline_ok_count += len(baseline_ok)
+            if escalate:
+                code_read_baseline_escalations.append(f"{service}: {', '.join(escalate)}")
+            if low:
+                code_read_report.append(
+                    f"{service}[㉢환경무관]: {', '.join(line for _, line in low)}"
+                )
 
         # ③ 평문 시크릿 형태 검출 — excluded_services 여부와 무관하게 전 서비스에 적용.
         secret_hits = _plain_secret_shaped_keys(envs)
@@ -314,8 +627,27 @@ def main() -> int:
             + ", ".join(unmapped)
         )
 
-    if key_set_failures or value_check_failures or secret_shape_failures or settings_coverage_report:
-        print("❌ env 드리프트 발견:")
+    # ⚠️story #2296 후속 자체 발견 — ④(settings_coverage_report)가 "report-only"라는 docstring과
+    # 달리, 원래 코드는 이 값이 하나라도 있으면 아래 블록에 들어가 무조건 `return 1`로
+    # 떨어지는 latent 버그였다(triage 직후라 지금까지 값이 늘 0이라 안 드러났을 뿐).
+    # ⑤㉠㉢도 같은 성질(report-only)로 설계하는 참이라 그대로 물려받으면 안 됨 — FAIL 판정과
+    # report-only 판정을 여기서 명시적으로 분리한다.
+    has_fail = bool(
+        key_set_failures or value_check_failures or secret_shape_failures
+        or code_read_highest_failures or code_read_baseline_escalations
+        or service_subset_violations
+    )
+    has_report_only = bool(settings_coverage_report or code_read_report)
+
+    # ⭐파울로군 지시 ③ — baseline 수를 «매번» 찍는다(FAIL이든 성공이든 무관). baseline을
+    # 묻어두는 곳으로 쓰지 않으려면 그 크기가 줄어드는지 매 실행 눈에 보여야 한다.
+    print(
+        f"⑤㉠ baseline(known, self-expiring): {code_read_baseline_ok_count}건 "
+        f"— infra/manual-env-allowlist.yml의 code_read_high_baseline 참고"
+    )
+
+    if has_fail or has_report_only:
+        print("❌ env 드리프트 발견:" if has_fail else "⚠️ env 드리프트 report-only 발견(FAIL 아님):")
         if key_set_failures:
             print("  ①키집합 대조:")
             for line in key_set_failures:
@@ -327,6 +659,30 @@ def main() -> int:
         if secret_shape_failures:
             print("  ③평문 시크릿 형태 검출(⛔ 값은 출력하지 않음 — 키 이름만):")
             for line in secret_shape_failures:
+                print(f"    - {line}")
+        if service_subset_violations:
+            print(
+                "  ⑥서비스명 부분집합 wellformed(story #2305) — 마스터(_SERVICE_SCRIPT_MAP)에\n"
+                "    없는 유령 이름이 부분집합 목록 또는 외부 IaC에 들어왔다:"
+            )
+            for line in service_subset_violations:
+                print(f"    - {line}")
+        if code_read_highest_failures:
+            print(
+                "  ⑤㉡코드가 읽는데 아무도 안 주는 값(기본값이 dev/localhost/test — "
+                "prod에서 다른 환경을 가리키는 그 사고 형태, 2026-07-28 실사고):"
+            )
+            for line in code_read_highest_failures:
+                print(f"    - {line}")
+        if code_read_baseline_escalations:
+            print(
+                "  ⑤㉠코드가 읽는데 아무도 안 주는 값 — baseline 밖(신규 또는 만료, FAIL):"
+            )
+            for line in code_read_baseline_escalations:
+                print(f"    - {line}")
+        if code_read_report:
+            print("  ⑤㉢코드가 읽는데 아무도 안 주는 값(환경무관 상수 — report-only, FAIL 아님):")
+            for line in code_read_report:
                 print(f"    - {line}")
         if settings_coverage_report:
             print(
@@ -353,16 +709,30 @@ def main() -> int:
             "③은 즉시 Secret Manager secretKeyRef로 전환 바라는(평문 유지 시 재확定 시마다 재발). "
             "④는 (a) 플랫폼/런타임 주입 → settings_exempt 등재(어느 파일이 읽는지 명시), "
             "(b) 진짜 무효 배선 → 제거 또는 Settings 필드 추가, (c) 이름만 다른 alias → "
-            "Settings 필드명 자체를 그 이름에 맞게 정정."
+            "Settings 필드명 자체를 그 이름에 맞게 정정. "
+            "⑤㉡은 즉시 그 서비스에 실제 값을 채우는 것(오늘 사고와 동일 형태 — 방치하면 그 "
+            "환경을 가리키는 채로 조용히 돈다). ⑤㉠ baseline 밖(신규/만료)은 (a) 값을 채우거나 "
+            "(b) 정상이면 code_read_high_baseline에 reason/declared_by/until(최대30일)과 "
+            "함께 등재하거나 (c) 영구 정상이면 code_read_exempt로 승격 — 셋 다 "
+            "infra/manual-env-allowlist.yml. ⑤㉢은 report-only(승격 대상 아님). "
+            "⑥은 오타면 그 자리에서 고치고, 정말 새 서비스면 _SERVICE_SCRIPT_MAP(마스터)에 "
+            "먼저 추가한 뒤 필요한 부분집합에 편입."
         )
-        return 1
+        if not has_fail:
+            print("\n(⛔위는 report-only 항목뿐 — FAIL 아님. exit code는 0.)")
+        else:
+            return 1
 
     print(
-        f"✅ 드리프트 없음 — ①{checked}개 서비스 키집합"
+        f"✅ 드리프트 없음(FAIL 기준) — ①{checked}개 서비스 키집합"
         f"(제외 {sum(1 for a in excluded_axes.values() if 'key_set' in a)}개), "
         f"②{value_checked}개 서비스 값 대조, "
         f"③{len(live_services)}개 서비스 전체 평문시크릿 스캔 완료(제외 없음), "
-        f"④{len(_SETTINGS_CONSUMING_SERVICES)}개 서비스 Settings 커버리지 대조 완료."
+        f"④{len(_SETTINGS_CONSUMING_SERVICES)}개 서비스 Settings 커버리지 대조 완료, "
+        f"⑤{len(_WEB_CODE_SERVICES & set(live_services))}개 서비스 코드읽기↔공급 대조 완료"
+        f"(㉡최고위험 대조 포함), "
+        f"⑥서비스명 부분집합 wellformed(마스터 {len(_SERVICE_SCRIPT_MAP)}개 기준) + "
+        f"외부 IaC 대조 완료."
     )
     return 0
 

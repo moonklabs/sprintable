@@ -51,7 +51,9 @@ _CORE = "core"  # ping/notifications-check 등 기본 — 항상 허용
 # (workflow_guide·team_members·poll_events)을 여기 포함 — picker 가 core(always-on)로 표시하는데
 # enforcement 가 explicit scope 에서 거부하던 비정합 해소. read 유틸은 비파괴라 always-allow 안전.
 _ALWAYS_ALLOWED: frozenset[str] = frozenset({
-    "ping", "sprintable_ping", "sprintable_my_dashboard", "sprintable_check_notifications",
+    # story #2304: "sprintable_ping"은 실재하지 않는 유령 이름이라 걷는다 — 이 목록에 둘 다
+    # 적어 두는 "우연한 방패"는 다음 이름축 불일치도 조용히 지나가게 한다.
+    "ping", "sprintable_my_dashboard", "sprintable_check_notifications",
     "sprintable_get_workflow_guide", "sprintable_list_team_members", "sprintable_poll_events",
     # P1-S12: get_workflow_guide 동형(read-only·에이전트 on-demand pull) — 항상 허용.
     "sprintable_get_loop_context",
@@ -72,6 +74,10 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 동형(자기 작업에 self-proof 첨부 = 데이터 파괴 아닌 협업/증명 유틸) — 어떤 역할의 working
     # agent든 default_tool_groups 무관하게 done 첨부해야 하므로 always-allow.
     "sprintable_add_evidence",
+    # story #2268(D단계, E-CONNECT — "판단 칸"): add_judgment/list_judgments — 판단/철회는
+    # work_item_ids(다건 또는 0건 general)에 걸치는 cross-cutting 기록이라 add_evidence와
+    # 동일 논리로 core 취급. vendored 사본과 동기화 필수(sprintable_mcp/toolset.py).
+    "sprintable_add_judgment", "sprintable_list_judgments",
     # story b4027b2e(SEC — 까심 #2140 QA④): E-CANVAS visual_artifacts 11종(원 6개 + 7fe16274
     # 핀 4종 + list_spec_pins)을 여기서 제거하고 전용 "canvas" 그룹(_GROUP_KEYWORDS)으로 이관했다.
     # 이전엔 cross-cutting always-allow였는데(C1-S3 당시 "추가 성장 시 전용 canvas 그룹 신설
@@ -202,6 +208,8 @@ _ALWAYS_ALLOWED_PATH_PREFIXES: tuple[str, ...] = (
     # E-VERIFY V0-S1: evidence는 story/task 어느 쪽이든 첨부되는 cross-cutting 자기증명이라
     # 단일 도메인 그룹에 안 묶임(_ALWAYS_ALLOWED의 sprintable_add_evidence와 동일 근거).
     "/api/v2/evidence",
+    # story #2268(D단계): judgments도 evidence와 동일 근거(work_item_ids 다건/0건 cross-cutting).
+    "/api/v2/judgments",
     # story 205e6831(FR·대표요청): MCP _ALWAYS_ALLOWED에 스탠드업 5종을 core 편입했는데 여기(REST
     # path scope)를 같이 안 고치면 canvas 선례(b4027b2e)와 동일한 "도구는 보이는데 호출은 403"
     # 불일치가 재발한다 — tools/list는 항상 노출하지만 실제 HTTP 호출은 _check_api_key_scope가
@@ -283,7 +291,14 @@ def resolve_manifest(scope: list[str] | None, all_tool_names: list[str]) -> dict
 # ⚠️ backend 는 sprintable_mcp 를 import 하지 않으므로(디탱글) 이 목록이 backend-owned SSOT.
 #    도구 추가/삭제 시 여기 동기화(테스트가 그룹 커버리지·core/admin 정합 검증).
 ALL_TOOL_NAMES: tuple[str, ...] = (
-    "sprintable_ping",
+    # story #2304: 실등록명은 "ping"이다(server.py:311 `@mcp.tool()` 데코레이터, `_TOOL_DEFS`
+    # 밖에서 단독등록 — sprintable_mcp/tests/test_e2e_dev.py 등 다수 테스트·라이브 MCP client가
+    # 이미 이 이름으로 실호출한다). "sprintable_ping"은 이 목록에만 존재하던 유령 이름이었다.
+    # ⛔접두사 없음은 실수가 아니라 «의도»다 — 나머지 114개가 전부 sprintable_* 라고 이 줄을
+    # "sprintable_ping"으로 되돌리지 말 것. 실등록명이 ping이고 e2e·라이브 MCP client가 이
+    # 이름으로 부른다. 바꾸려면 클라이언트 쪽이 먼저 따라와야 한다(server.py:311 데코레이터
+    # 개명 + 모든 호출자 마이그 선행, story #2304).
+    "ping",
     "sprintable_activate_sprint", "sprintable_add_epic", "sprintable_add_goal",
     "sprintable_add_retro_action",
     "sprintable_add_retro_item", "sprintable_add_story", "sprintable_add_task",
@@ -338,6 +353,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_link_gate_to_task",
     # evidence (E-VERIFY V0-S1)
     "sprintable_add_evidence",
+    # 판단 칸 (story #2268, D단계)
+    "sprintable_add_judgment", "sprintable_list_judgments",
     # visual artifacts (E-CANVAS C1-S3 + C2-S6 코멘트 + C3-S7 편집 + C4-S8 정본 제안 + 핀 저작 story 7fe16274)
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
@@ -378,7 +395,10 @@ def build_toolset_catalog() -> dict:
     - is_core = core(항상허용 잠금 그룹). is_destructive = admin(위험 작업 격리·opt-in).
     - 순서: core → 비파괴 15그룹(_CATALOG_DISPLAY_ORDER) → admin(파괴적) 마지막.
     """
-    always = {t for t in _ALWAYS_ALLOWED if t.startswith("sprintable_")}
+    # story #2304: 예전엔 "sprintable_" 접두사로 필터했는데, 그 필터의 유일한 실효과가
+    # "ping"(비접두사, 실등록명)을 core 그룹에서 조용히 빼는 것이었다 — _ALWAYS_ALLOWED가
+    # 이제 정확한 이름만 담으므로 필터 없이 그대로 쓴다.
+    always = set(_ALWAYS_ALLOWED)
     buckets: dict[str, list[str]] = {}
     for t in ALL_TOOL_NAMES:
         if t in always:

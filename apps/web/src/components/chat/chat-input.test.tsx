@@ -163,3 +163,51 @@ describe('ChatInput — ESC 우선순위(story #2032 AC4/AC5)', () => {
     expect(onEscape).not.toHaveBeenCalled(); // 후보 우선 — 대화 밖으로 안 나감
   });
 });
+
+describe('ChatInput — `#` 엔티티 피커 종류별 그룹화(story #2263 ㉠㉡㉢)', () => {
+  it('뒤섞인 종류 응답이 실 렌더에서 종류별 머리글로 묶여 나온다(모르는 종류도 정상 렌더)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/entities/search')) {
+        return new Response(JSON.stringify({
+          // 일부러 인터리빙(doc·story·doc·sprint) — 그룹핑이 실제로 재배열해야만
+          // "문서 둘"이 "스토리 하나"보다 앞으로 옮겨진다(그룹핑 없으면 원본 순서 그대로라
+          // "스토리 하나"가 "문서 둘"보다 앞에 남아 이 assertion이 그 결여를 잡아낸다).
+          data: [
+            { entity_type: 'doc', entity_id: 'd1', title: '문서 하나', status: null },
+            { entity_type: 'story', entity_id: 's1', title: '스토리 하나', status: 'in-progress' },
+            { entity_type: 'doc', entity_id: 'd2', title: '문서 둘', status: null },
+            { entity_type: 'sprint', entity_id: 'sp1', title: '스프린트 하나', status: null },
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({ data: [] }));
+    }));
+
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" projectId="p1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '#');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // 엔티티 검색은 200ms 디바운스 뒤 fetch — 실 타이머로 흘려보낸다.
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+
+    const listbox = container.querySelector('[role="listbox"]');
+    expect(listbox).not.toBeNull();
+    const text = listbox!.textContent ?? '';
+    // ㉡: 인터리빙된 응답이 doc 그룹으로 다시 묶인다 — 그룹핑이 없다면 "문서 둘"은
+    // 원본 순서상 "스토리 하나" 뒤에 그대로 남아 이 assertion이 실패한다(mutation-verified).
+    expect(text.indexOf('문서 둘')).toBeLessThan(text.indexOf('스토리 하나'));
+    expect(text.indexOf('문서 하나')).toBeLessThan(text.indexOf('문서 둘'));
+    // ㉠: 종류 라벨이 글자로 보인다.
+    expect(text).toContain('문서');
+    expect(text).toContain('스토리');
+    // ㉢: 모르는 종류(sprint)도 빈 값·물음표 없이 원문 그대로 정상 렌더된다.
+    expect(text).toContain('sprint');
+    expect(text).toContain('스프린트 하나');
+  });
+});

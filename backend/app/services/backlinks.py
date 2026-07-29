@@ -183,7 +183,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.doc import Doc
-from app.models.mention import Mention
+from app.models.reference import Reference
 from app.services.conversation_auth import conversation_readable_predicate
 from app.services.member_resolver import ResolvedMember, lookup_members_by_ids
 from app.services.project_auth import (
@@ -279,25 +279,83 @@ async def _chat_predicate_inputs(
     return caller_member_id, is_api_key
 
 
-async def list_doc_backlinks(
+# ─── story #2266(C-8) — target_type 일반화, 허용목록(allowlist) ──────────────────
+# PO 판정(2026-07-28): target_type을 자유 파라미터로 열면 «게이트가 안 선 타입까지 통과하는
+# 구멍»이 생긴다 — 이 함수는 TARGET 접근 검증을 스스로 하지 않고(§8①) 호출부(라우터)가
+# 이미 검증했다는 전제로 짜여 있기 때문(위 docstring 참조). 그래서 "이 타입은 호출부가 실제로
+# 게이트를 세웠다"를 이 allowlist가 보증한다 — 코드 레벨 계약이지 편의 목록이 아니다.
+BACKLINKS_ALLOWED_TARGET_TYPES = frozenset({"doc", "story"})
+# ⛔registry(reference_registry.ENTITY_RESOLVERS)의 나머지 타입(epic 등)이 여기 없는 이유는
+# "의도적 제외"가 아니라 **게이트 미비**다 — 그 타입들의 라우터에 아직 이 함수와 동형인
+# TARGET project-access 선-게이트(docs.py._require_doc_project_access ·
+# stories.py._assert_story_project_access)가 없다. 게이트가 서는 순서대로 여기 추가한다.
+
+
+class UnsupportedBacklinkTargetTypeError(ValueError):
+    """target_type이 BACKLINKS_ALLOWED_TARGET_TYPES 밖 — 호출 라우터가 400으로 번역한다.
+
+    ⛔PO 리뷰(2026-07-28): 지금은 이 분기가 HTTP 경로로 «도달 불가»하다 — docs.py/stories.py
+    둘 다 target_type을 client 입력이 아니라 고정 literal("doc"/"story")로 넘긴다. 그래서
+    「아무도 안 타는 분기」로 보여 다음 사람이 지울 위험이 있다 — 지우면 안 된다. **허용목록이
+    언젠가 client 입력(예: 단일 generic `/entities/{type}/{id}/backlinks` 라우트)을 받게 되는
+    날, 이 분기가 TARGET 게이트 누락을 막는 유일한 방어선**이 된다. 지금도
+    `test_list_entity_backlinks_rejects_unsupported_target_type`이 이 분기를 직접 타서
+    커버리지에 살아 있고, 허용목록을 게이트 없이 늘리면 그 테스트가 걸린다(RED로 잡는다는
+    뜻이 아니라 — 허용목록에 추가한 사람이 이 클래스의 존재를 코드에서 보게 된다는 뜻)."""
+
+
+async def list_entity_backlinks(
     db: AsyncSession,
     *,
     org_id: uuid.UUID,
-    doc_id: uuid.UUID,
+    target_type: str,
+    target_id: uuid.UUID,
     auth: AuthContext,
     limit: int,
     cursor: str | None,
 ) -> dict:
-    """GET /api/v2/docs/{id}/backlinks 코어. 호출부(docs.py)가 target doc 접근을 이미 검증했다는
-    전제(§8① target read access는 별도·기존 라우트 책임) — 여기선 source 접근만 mention 행
-    단위로 판정한다.
+    """GET /api/v2/{docs,stories}/{id}/backlinks 코어(#2266 — target_type 일반화). 호출부
+    (docs.py/stories.py)가 target 접근을 이미 검증했다는 전제(§8① target read access는 별도·
+    기존 라우트 책임) — 여기선 source 접근만 mention 행 단위로 판정한다.
+
+    story #2266: `target_type`은 `BACKLINKS_ALLOWED_TARGET_TYPES`(허용목록)에 있는 값만
+    받는다 — 그 밖의 값은 `UnsupportedBacklinkTargetTypeError`(호출부가 400으로 번역). SOURCE
+    측 로직(authz predicate·응답 item shape)은 target_type과 완전히 무관하다(SELECT/JOIN이
+    `Reference.source_id`·`Reference.source_type` 기준이지 target 기준이 아니다) — 그래서
+    이 함수는 target_type이 늘어도 SOURCE 쪽 쿼리를 한 글자도 안 바꾼다.
 
     반환: `{"data": [...], "meta": {"next_cursor": str|None, "has_more": bool}}` — list_messages와
     동일 shape(AC1 "same convention"). data 항목: {id, source_type, source_id, created_by,
-    created_at, doc: {id,title}|None, message: {id,conversation_id,content_snippet,sender}|None}.
-    `created_by`는 raw UUID가 아니라 `{id,name,type}`|None(sender와 동형 처리 — Extra fix).
+    created_at, still_exists, doc: {id,title}|None, message: {id,conversation_id,content_snippet,
+    sender}|None}. `created_by`는 raw UUID가 아니라 `{id,name,type}`|None(sender와 동형 처리 —
+    Extra fix).
+
+    `still_exists`(story #2299, E-CONNECT — "끊어진 참조 가시성" 배선): 이 backlink item의
+    **SOURCE**(target이 아니다 — target은 URL의 id 자신이고, 이 함수에 도달했다는 것 자체가
+    호출부의 404 게이트를 통과했다는 뜻이라 항상 존재한다. "끊어짐"이 있을 수 있는 쪽은
+    source뿐이다)가 아직 살아 있는지. doc source는 soft-delete 여부(`Doc.deleted_at`)로
+    판정 — 예전엔 이 조건이 JOIN에 있어 삭제된 source가 결과에서 통째로 빠졌다(PO가 "조용히
+    사라지는 것"으로 재판정, `test_soft_deleted_source_doc_excluded` 개정). chat_message
+    source는 SOURCE_ONLY_TYPES(불변, soft-delete 없음)라 항상 True — genuinely-missing
+    message row(하드삭제/오손 데이터)는 이 필드가 다루는 대상이 아니고 여전히 결과에서
+    제외된다(`test_missing_source_message_excluded_no_crash`, 이 스토리가 안 건드림 —
+    "삭제 lifecycle"과 "오손 데이터"는 다른 문제).
+
+    ⛔story #2299 AC⑥(이 판이 못 잡는 것 선언):
+      · `reference_core.list_references`는 여전히 아무도 안 부른다(#2591이 증명한 채 그대로 —
+        이 story는 그 함수를 살리지 않았다, PO 판정대로 "안 도는 문"을 살리는 대신 여기
+        `list_entity_backlinks`에 별도로 얹었다. `list_references`를 살릴지는 별건).
+      · story/task 등 doc이 아닌 source_type은 이 함수가 애초에 다루지 않는다(위 docstring
+        "source_type은 chat_message·doc 뿐" — still_exists도 그 두 종류에만 존재).
+      · target 자신이 이 응답 처리 도중(요청과 요청 사이가 아니라 같은 요청 내에서) 삭제되는
+        TOCTOU 창은 다루지 않는다(호출부의 404 게이트가 요청 시작 시점 1회 확인 — 그 이후
+        target 삭제는 이 응답에 반영 안 됨, 기존 backlinks 전체의 기존 계약과 동일).
+
     `next_cursor`는 opaque composite base64 토큰(B3) — `before` query param에 그대로 되돌려준다.
     """
+    if target_type not in BACKLINKS_ALLOWED_TARGET_TYPES:
+        raise UnsupportedBacklinkTargetTypeError(target_type)
+
     cursor_key: tuple[datetime, uuid.UUID] | None = None
     if cursor:
         cursor_key = decode_cursor(cursor)
@@ -345,7 +403,12 @@ async def list_doc_backlinks(
         )
 
     # ── 단일 authz-embedded keyset 쿼리 — Python authz filter/retry 0, 2-phase 없음 ──
-    # mentions.source_id는 polymorphic(FK 없음: docs.id 또는 conversation_messages.id) —
+    # ⛔story #2273(C-1b): source는 entity_references(Reference)에서 읽는다(#2259가 세운 표,
+    # #2273이 write-path와 같은 배포로 read도 재배선 — read/write를 가르면 그 사이 창에서
+    # 화면이 거짓말한다, PO 판정). source_field == "body" 필터는 이 read-path가 아는 두
+    # source_type(doc·chat_message) 다 텍스트 필드가 하나뿐이라는 사실과 짝을 맞춘 것(다른
+    # source_field 값 — 예: story description/AC — 는 이 backlinks 엔드포인트의 스코프 밖).
+    # entity_references.source_id는 polymorphic(FK 없음: docs.id 또는 conversation_messages.id) —
     # 두 conditional LEFT JOIN(+ chat-source는 Conversation까지 세 번째 LEFT JOIN)으로 각각의
     # source_type에서만 매치시킨다. Conversation JOIN의 ON절 `Conversation.org_id == org_id`가
     # Blocker 1(org-scope 누락) fix — Doc JOIN의 `Doc.org_id == org_id`와 동형. §8③ 요구대로
@@ -353,28 +416,37 @@ async def list_doc_backlinks(
     # WHERE 절에 직접 embed한다(별도 SELECT로 먼저 집합을 만들지 않음 — TOCTOU-by-construction).
     stmt = (
         select(
-            Mention,
+            Reference,
             Doc.project_id.label("doc_project_id"),
             Doc.title.label("doc_title"),
+            # ⛔story #2299(E-CONNECT, PO 판정 2026-07-29): 여기 있던 `Doc.deleted_at.is_(None)`이
+            # JOIN ON절에서 soft-deleted source doc을 "매치 실패"로 만들어 project_id가 NULL이
+            # 되고, 그 결과 아래 WHERE의 authz 체크(project_access_valid_correlated)가 NULL
+            # project에 대해 무조건 거짓이 되어 행 자체가 결과에서 «조용히» 빠졌다(`test_soft_
+            # deleted_source_doc_excluded`가 그걸 "정답"으로 고정하고 있었다 — PO가 그 자체를
+            # 버그로 재판정: "목록에서 빼면 그게 바로 조용히 사라지는 것"). deleted_at 조건을
+            # JOIN에서 빼 soft-deleted 문서도 매치되게 하고(그래야 project_id가 살아서 authz가
+            # 원래 프로젝트 기준으로 정상 평가된다 — 삭제됐다고 접근권 검사가 사라지면 안 된다),
+            # 대신 deleted_at 자체를 별도 컬럼으로 select해 still_exists 판정에 쓴다.
+            Doc.deleted_at.label("doc_deleted_at"),
             ConversationMessage.conversation_id.label("msg_conversation_id"),
             ConversationMessage.content.label("msg_content"),
             ConversationMessage.sender_id.label("msg_sender_id"),
         )
-        .select_from(Mention)
+        .select_from(Reference)
         .outerjoin(
             Doc,
             and_(
-                Doc.id == Mention.source_id,
-                Mention.source_type == "doc",
+                Doc.id == Reference.source_id,
+                Reference.source_type == "doc",
                 Doc.org_id == org_id,
-                Doc.deleted_at.is_(None),  # soft-deleted source doc 배제
             ),
         )
         .outerjoin(
             ConversationMessage,
             and_(
-                ConversationMessage.id == Mention.source_id,
-                Mention.source_type == "chat_message",
+                ConversationMessage.id == Reference.source_id,
+                Reference.source_type == "chat_message",
             ),
         )
         .outerjoin(
@@ -385,18 +457,19 @@ async def list_doc_backlinks(
             ),
         )
         .where(
-            Mention.org_id == org_id,
-            Mention.target_type == "doc",
-            Mention.target_id == doc_id,
+            Reference.org_id == org_id,
+            Reference.source_field == "body",
+            Reference.target_type == target_type,
+            Reference.target_id == target_id,
             or_(
                 and_(
-                    Mention.source_type == "doc",
+                    Reference.source_type == "doc",
                     # §5회차 Blocker 1 fix: 사전 IN-list가 아니라 correlated EXISTS(같은 statement
                     # ·같은 스냅샷 — 위 chat-source project_access_valid와 동일 SSOT 호출).
                     project_access_valid_correlated(Doc.project_id, caller_id=uid, org_id=org_id),
                 ),
                 and_(
-                    Mention.source_type == "chat_message",
+                    Reference.source_type == "chat_message",
                     # org join이 매치 실패하면(다른 org 소속 conversation) Conversation.id가
                     # NULL — 이 가드가 그 행을 admin-bypass 포함 어떤 경로로도 확실히 탈락시킨다.
                     Conversation.id.isnot(None),
@@ -407,9 +480,14 @@ async def list_doc_backlinks(
     )
     if cursor_key is not None:
         cursor_created_at, cursor_id = cursor_key
-        stmt = stmt.where(tuple_(Mention.created_at, Mention.id) < tuple_(cursor_created_at, cursor_id))
+        stmt = stmt.where(tuple_(Reference.created_at, Reference.id) < tuple_(cursor_created_at, cursor_id))
 
-    stmt = stmt.order_by(Mention.created_at.desc(), Mention.id.desc()).limit(limit + 1)
+    # story #2266 AC6(정렬은 "최근"이 아니라 "쓸모"): entity_references는 지금 조회수·클릭·
+    # 관련도 등 recency 이외의 신호를 전혀 안 쌓는다(row에 그런 컬럼이 없다) — "쓸모" 축으로
+    # 정렬하려 해도 지금 계산할 수 있는 신호가 하나도 없다. created_at DESC를 유지하는 이유는
+    # "그냥 기본값"이 아니라 "지금 유일하게 존재하는 신호가 이것뿐"이라는 사실이다. 신호가
+    # 생기면(예: form!=proof 우선순위, 조회 카운트) 그때 다시 정렬 기준을 판정한다.
+    stmt = stmt.order_by(Reference.created_at.desc(), Reference.id.desc()).limit(limit + 1)
 
     rows = (await db.execute(stmt)).all()
     has_more = len(rows) > limit
@@ -418,14 +496,14 @@ async def list_doc_backlinks(
     # 최종 페이지 행에서만 sender/created_by 배치 해소(N+1 없음 — §ⓝ 기존 관례 유지).
     sender_ids = {
         r.msg_sender_id for r in page_rows
-        if r.Mention.source_type == "chat_message" and r.msg_sender_id is not None
+        if r.Reference.source_type == "chat_message" and r.msg_sender_id is not None
     }
-    creator_ids = {r.Mention.created_by for r in page_rows if r.Mention.created_by is not None}
+    creator_ids = {r.Reference.created_by for r in page_rows if r.Reference.created_by is not None}
     member_map = await lookup_members_by_ids(sender_ids | creator_ids, db)
 
     data: list[dict] = []
     for r in page_rows:
-        m = r.Mention
+        m = r.Reference
         creator = member_map.get(m.created_by) if m.created_by is not None else None
         item: dict = {
             "id": str(m.id),
@@ -435,9 +513,14 @@ async def list_doc_backlinks(
             "created_at": m.created_at.isoformat(),
             "doc": None,
             "message": None,
+            # story #2299 AC⑤: 「끊어짐」은 색/경고가 아니라 사실 필드다 — 렌더(색·문구)는 FE
+            # 몫. chat_message는 SOURCE_ONLY_TYPES(불변·soft-delete 없음, reference_registry.py
+            # 참조)라 항상 True — doc만 아래서 실제 판정으로 덮어쓴다.
+            "still_exists": True,
         }
         if m.source_type == "doc":
             item["doc"] = {"id": str(m.source_id), "title": r.doc_title}
+            item["still_exists"] = r.doc_deleted_at is None
         elif m.source_type == "chat_message":
             sender = member_map.get(r.msg_sender_id) if r.msg_sender_id is not None else None
             item["message"] = {
@@ -450,7 +533,40 @@ async def list_doc_backlinks(
 
     next_cursor = None
     if has_more and page_rows:
-        last_mention = page_rows[-1].Mention
+        last_mention = page_rows[-1].Reference
         next_cursor = encode_cursor(last_mention.created_at, last_mention.id)
 
-    return {"data": data, "meta": {"next_cursor": next_cursor, "has_more": has_more}}
+    # story #2266 AC4(정직성 관문): "0건"을 "출처 없음"으로 읽지 않도록, 이 응답이 실제로
+    # 무엇을 셌는지를 구조화된 사실로 함께 낸다(문안 렌더는 FE 몫 — 여기선 FE가 틀리지 않게
+    # 근거 사실만 준다). ⛔이 쿼리는 `Reference.form`을 필터링하지 않는다(mention/embed/proof
+    # 전부 포함 — 위 stmt에 form 조건이 없다) — 그래서 "mention/embed만"이라고 쓰면 거짓이다.
+    # source_type은 이 함수가 아는 두 값(chat_message·doc)뿐 — PR "[SID:XXX]" 텍스트 관례·
+    # evidence 자유텍스트 참조는 entity_references에 전혀 안 쌓이므로(구조화 전) 이 카운트에
+    # 없다.
+    collection_scope = {
+        "source_types": ["chat_message", "doc"],
+        "forms": "all",
+        "excludes": ["pr_sid_text_convention", "evidence_free_text_reference"],
+    }
+
+    return {
+        "data": data,
+        "meta": {"next_cursor": next_cursor, "has_more": has_more, "collection_scope": collection_scope},
+    }
+
+
+async def list_doc_backlinks(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    auth: AuthContext,
+    limit: int,
+    cursor: str | None,
+) -> dict:
+    """하위호환 wrapper(story #2266) — 기존 호출부(docs.py)·기존 테스트(test_1994_*)가 이
+    이름·시그니처 그대로 쓴다. 실제 로직은 `list_entity_backlinks(target_type="doc", ...)`로
+    위임한다(둘이 서로 다른 코드가 아니다 — 하나의 SSOT)."""
+    return await list_entity_backlinks(
+        db, org_id=org_id, target_type="doc", target_id=doc_id, auth=auth, limit=limit, cursor=cursor,
+    )

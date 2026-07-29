@@ -155,3 +155,72 @@ describe('GET /api/auth/callback/[provider] — native OAuth-handoff branch', ()
     expect(h.cookiesDeleteMock).toHaveBeenCalledWith('oauth_native_challenge_google');
   });
 });
+
+describe('GET /api/auth/callback/[provider] — state 검증 분기 로그(2026-07-28 진단, 가드는 무변화)', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+    h.cookiesGetMock.mockReset();
+    h.cookiesDeleteMock.mockReset();
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  function stubCookies(overrides: Record<string, string> = {}) {
+    h.cookiesGetMock.mockImplementation((name: string) =>
+      name in overrides ? { value: overrides[name] } : undefined,
+    );
+  }
+
+  it('ⓐ 쿠키가 아예 없으면 missing_cookie로 로그되고, 검증 결과는 원래와 동일하게 csrf_mismatch로 리다이렉트한다', async () => {
+    stubCookies(); // oauth_state_google 자체가 없음
+    const res = await GET(
+      makeRequest({ code: 'c', state: 'some-state-value-from-attacker-or-replay' }),
+      routeParams(),
+    );
+    expect(res.headers.get('location')).toBe('http://localhost:3108/login?error=csrf_mismatch');
+    expect(mockFetch).not.toHaveBeenCalled(); // FastAPI까지 안 감(검증이 여전히 앞단에서 막음)
+
+    const logLine = warnSpy.mock.calls.map((c) => String(c[0])).find((l) => l.includes('state_check'));
+    expect(logLine).toContain('outcome=missing_cookie');
+    expect(logLine).toContain('stored_state_len=null');
+  });
+
+  it('ⓑ 쿠키는 있는데 값이 다르면 state_mismatch로 로그되고, 검증 결과는 원래와 동일하게 csrf_mismatch로 리다이렉트한다', async () => {
+    stubCookies({ oauth_state_google: 'stored-value-aaa' });
+    const res = await GET(makeRequest({ code: 'c', state: 'incoming-value-bbb' }), routeParams());
+    expect(res.headers.get('location')).toBe('http://localhost:3108/login?error=csrf_mismatch');
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    const logLine = warnSpy.mock.calls.map((c) => String(c[0])).find((l) => l.includes('state_check'));
+    expect(logLine).toContain('outcome=state_mismatch');
+    expect(logLine).not.toContain('stored_state_len=null'); // 존재는 했다
+  });
+
+  it('양성대조 — 통과 경로(dev 포함)에도 outcome=ok 로그가 남는다(미도달과 무로그를 구분)', async () => {
+    stubCookies({ oauth_state_google: 'matching-state' });
+    mockFetch.mockResolvedValueOnce({
+      ok: true, json: async () => ({ data: { access_token: 'at', refresh_token: 'rt' } }),
+    });
+    await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+
+    const logLine = warnSpy.mock.calls.map((c) => String(c[0])).find((l) => l.includes('state_check'));
+    expect(logLine).toContain('outcome=ok');
+  });
+
+  it('⛔state 값·쿠키 값을 로그에 절대 안 찍는다(길이/존재 여부만) — 세 분기 모두', async () => {
+    const secretState = 'THIS-MUST-NEVER-APPEAR-IN-LOGS-abc123';
+    const secretStored = 'THIS-STORED-VALUE-MUST-NEVER-APPEAR-xyz789';
+
+    stubCookies({ oauth_state_google: secretStored });
+    await GET(makeRequest({ code: 'c', state: secretState }), routeParams());
+
+    const allLoggedText = warnSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+    expect(allLoggedText).not.toContain(secretState);
+    expect(allLoggedText).not.toContain(secretStored);
+  });
+});

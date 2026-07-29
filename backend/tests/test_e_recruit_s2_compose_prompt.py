@@ -274,7 +274,7 @@ def test_compose_kit_always_allowed_tools_present_regardless_of_groups():
     role = _role(default_tool_groups=["stories"])
     out = compose_kit(role, "claude-code")["onboarding"]
     assert "sprintable_get_workflow_guide" in out
-    assert "sprintable_ping" in out
+    assert "ping" in out  # story #2304: 실등록명 — "sprintable_ping"은 유령이었다
 
 
 def test_compose_kit_raises_on_unknown_default_tool_group():

@@ -66,6 +66,11 @@ case "${ENV}" in
         # 항상 raw *.run.app 로 resolve돼 재실행 시 이 값을 조용히 되돌린다.
         FASTAPI_URL_OVERRIDE="https://dev-api.sprintable.ai"
         COOKIE_DOMAIN_SECRET_SPEC=""
+        # story #2296(2026-07-28) — apps/web/src/app/api/auth/callback/[provider]/route.ts:11의
+        # 하드코딩 폴백('https://dev-app.sprintable.ai')과 정확히 같은 값. 이 스크립트가 그
+        # 값을 명시적으로 공급하지 않아도 dev는 "우연히" 맞았다(사고 원인 그 자체). SSOT에 넣는
+        # 이유는 "지워져서"가 아니라 "아무도 여기 있는 줄 몰라서"다(AC7, PO 자기정정 참고).
+        MOBILE_APP_LINK_ORIGIN="https://dev-app.sprintable.ai"
         ;;
     prod)
         SERVICE_NAME="sprintable-frontend-prod"
@@ -77,6 +82,12 @@ case "${ENV}" in
         RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
         FASTAPI_URL_OVERRIDE=""
         COOKIE_DOMAIN_SECRET_SPEC=",NEXT_PUBLIC_COOKIE_DOMAIN=NEXT_PUBLIC_COOKIE_DOMAIN:latest"
+        # story #2296(2026-07-28) — 2026-07-28 prod 앱 로그인 장애의 근본원인 두 건 중 하나.
+        # 이 값이 없어 코드의 dev 기본값으로 되돌아갔다(prod가 dev 앱 주소를 가리킴). 저장소
+        # 전체가 이미 app.sprintable.ai를 prod 정본으로 쓴다(deploy_backend.sh:79,81·
+        # setup_dns.sh:44·verify_gcp_migration.sh:22·setup_secret_manager.sh:45의
+        # NEXT_PUBLIC_COOKIE_DOMAIN 등) — 그 관례를 그대로 따른다.
+        MOBILE_APP_LINK_ORIGIN="https://app.sprintable.ai"
         ;;
     *)
         echo "Usage: $0 [dev|prod]"; exit 1 ;;
@@ -113,8 +124,11 @@ if [[ -z "${FASTAPI_URL}" ]]; then
     log "WARNING: FastAPI service '${FASTAPI_SERVICE}' not found. NEXT_PUBLIC_FASTAPI_URL will be empty."
 fi
 
-ENV_VARS_SPEC="NODE_ENV=production,NEXT_TELEMETRY_DISABLED=1,NEXT_PUBLIC_FASTAPI_URL=${FASTAPI_URL}"
-SECRETS_SPEC="NEXT_PUBLIC_SUPABASE_URL=NEXT_PUBLIC_SUPABASE_URL:latest,NEXT_PUBLIC_SUPABASE_ANON_KEY=NEXT_PUBLIC_SUPABASE_ANON_KEY:latest,JWT_SECRET=JWT_SECRET:latest${COOKIE_DOMAIN_SECRET_SPEC}"
+ENV_VARS_SPEC="NODE_ENV=production,NEXT_TELEMETRY_DISABLED=1,NEXT_PUBLIC_FASTAPI_URL=${FASTAPI_URL},MOBILE_APP_LINK_ORIGIN=${MOBILE_APP_LINK_ORIGIN}"
+# FIREBASE_BFF_INTERNAL_SECRET — deploy_backend.sh:125가 이미 같은 Secret Manager 시크릿을
+# 바인딩한다(story #2296 이전에도 존재 — backend는 받고 있었다). frontend가 그동안 이 스크립트로
+# 안 받고 있었던 것이 2026-07-28 사고의 나머지 절반이다. 값은 옮기지 않는다(:latest 참조만).
+SECRETS_SPEC="NEXT_PUBLIC_SUPABASE_URL=NEXT_PUBLIC_SUPABASE_URL:latest,NEXT_PUBLIC_SUPABASE_ANON_KEY=NEXT_PUBLIC_SUPABASE_ANON_KEY:latest,JWT_SECRET=JWT_SECRET:latest,FIREBASE_BFF_INTERNAL_SECRET=FIREBASE_BFF_INTERNAL_SECRET:latest${COOKIE_DOMAIN_SECRET_SPEC}"
 
 if [ "${DRY_RUN}" = "1" ]; then
     cat <<EOF

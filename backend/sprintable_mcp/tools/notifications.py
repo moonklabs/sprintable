@@ -63,20 +63,26 @@ async def check_notifications(args: CheckNotificationsInput) -> list[TextContent
 
 
 async def mark_notification_read(args: MarkNotificationReadInput) -> list[TextContent]:
-    """알림 읽음 처리."""
-    body: dict = {"id": args.notification_id, "is_read": args.is_read if args.is_read is not None else True}
-    try:
-        return ok(await client.patch("/api/v2/notifications", json=body))
-    except Exception as exc:
-        return err(str(exc))
+    """알림 읽음 처리 — story #2281 AC3ⓒ: 단건 읽음처리 라우트가 서버에 없다(#2271 발견).
+    ⓐ(서버에 만든다)는 알림 자체의 재설계(#2201·#2279)와 순서가 얽혀 PO가 순서를 잡기로
+    했다 — 그때까지 이 도구는 «조용한 404» 대신 명시적으로 미지원임을 말한다(AC4)."""
+    return err(
+        "단건 알림 읽음처리는 서버에 아직 구현돼 있지 않습니다(story #2281 — "
+        "알림 재설계 #2201/#2279와 순서가 얽혀 보류 중). 전체 읽음처리는 "
+        "mark_all_notifications_read를 쓰세요."
+    )
 
 
 async def mark_all_notifications_read(args: MarkAllNotificationsReadInput) -> list[TextContent]:
-    """전체 알림 읽음 처리."""
-    body: dict = {"markAllRead": True}
+    """전체 알림 읽음 처리 — story #2281 AC1: 경로가 틀렸었다(#2271). 서버는 body를
+    아예 안 받는다(auth로만 전체를 읽음처리) — type 필터는 서버 미지원이라 조용히
+    무시하지 않고 명시 오류로 막는다(AC4)."""
     if args.type:
-        body["type"] = args.type
+        return err(
+            "mark_all_notifications_read의 type 필터는 서버가 아직 지원하지 않습니다"
+            "(무시하고 전체를 읽음처리하면 의도와 다른 결과가 조용히 발생하므로 막습니다)."
+        )
     try:
-        return ok(await client.patch("/api/v2/notifications", json=body))
+        return ok(await client.patch("/api/v2/notifications/mark-all-read"))
     except Exception as exc:
         return err(str(exc))

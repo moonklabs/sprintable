@@ -65,6 +65,7 @@ export async function GET(request: Request) {
       limit: searchParams.get('limit') ? Number(searchParams.get('limit')) : undefined,
       cursor: searchParams.get('cursor'),
     }, { defaultLimit: 50, maxLimit: 100 });
+    const storyNumberParam = searchParams.get('story_number');
     const stories = await service.list({
       sprint_id: searchParams.get('sprint_id') ?? undefined,
       epic_id: searchParams.get('epic_id') ?? undefined,
@@ -73,6 +74,7 @@ export async function GET(request: Request) {
       project_id: searchParams.get('project_id') ?? undefined,
       q: searchParams.get('q') ?? undefined,
       unassigned: searchParams.get('unassigned') === 'true' ? true : undefined,
+      story_number: storyNumberParam ? Number(storyNumberParam) : undefined,
       limit: pageInput.limit + 1,  // RC3: 오버페치 → buildCursorPageMeta hasMore 판단
       cursor: pageInput.cursor,
     });

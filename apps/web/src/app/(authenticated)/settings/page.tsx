@@ -143,6 +143,10 @@ export default function SettingsPage() {
   const [orgImpactLoading, setOrgImpactLoading] = useState(false);
   const [projectMemberships] = useState<Array<{ projectId: string; projectName: string }>>([]);
   const [settings, setSettings] = useState<NotificationSetting[]>([]);
+  // story #2272 — 알림 설정(형제: 이벤트타입별 채널토글, 위 settings)과 같은 자리에 선다.
+  // scope_type='global'·channel='in_app' 조합의 level(all/mentions/mute) — 기본 알림 레벨.
+  const [globalPreferenceLevel, setGlobalPreferenceLevel] = useState<'all' | 'mentions' | 'mute'>('all');
+  const [savingPreferenceLevel, setSavingPreferenceLevel] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -322,6 +326,14 @@ export default function SettingsPage() {
             setSettings(settingsJson.data ?? []);
           }
 
+          // story #2272 — 형제(notification-preferences)의 global·in_app level 조회.
+          const preferencesRes = await fetch('/api/notification-preferences');
+          if (preferencesRes.ok) {
+            const preferencesJson = await preferencesRes.json() as { data?: Array<{ scope_type: string; channel: string; level: 'all' | 'mentions' | 'mute' }> };
+            const global = (preferencesJson.data ?? []).find((p) => p.scope_type === 'global' && p.channel === 'in_app');
+            if (global) setGlobalPreferenceLevel(global.level);
+          }
+
           // Get webhook configs
           const webhookRes = await fetch('/api/webhooks/config');
           if (webhookRes.ok) {
@@ -395,6 +407,33 @@ export default function SettingsPage() {
     } catch {
       applySettingOptimistic(eventType, currentEnabled);
       addToast({ type: 'error', title: t('notificationSaveError') });
+    }
+  };
+
+  // story #2272 AC1 — 왕복 write→read: PUT 응답(DB RETURNING으로 실제 저장된 값)을 그대로
+  // 반영한다(낙관적 아님). 형제(toggleSetting)와 달리 낙관적 갱신을 안 쓰는 이유는 이 값이
+  // 3-way(all/mentions/mute) 단일 선택이라 실패 시 되돌릴 "이전 값"이 항상 명확해 서버 응답을
+  // 기다리는 편이 더 정확하다.
+  const handleSetGlobalPreferenceLevel = async (level: 'all' | 'mentions' | 'mute') => {
+    if (savingPreferenceLevel || level === globalPreferenceLevel) return;
+    setSavingPreferenceLevel(true);
+    try {
+      const res = await fetch('/api/notification-preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: [{ scope_type: 'global', scope_id: null, channel: 'in_app', level }] }),
+      });
+      if (res.ok) {
+        const json = await res.json() as { data?: Array<{ scope_type: string; channel: string; level: 'all' | 'mentions' | 'mute' }> };
+        const saved = (json.data ?? []).find((p) => p.scope_type === 'global' && p.channel === 'in_app');
+        if (saved) setGlobalPreferenceLevel(saved.level);
+      } else {
+        addToast({ type: 'error', title: t('notificationSaveError') });
+      }
+    } catch {
+      addToast({ type: 'error', title: t('notificationSaveError') });
+    } finally {
+      setSavingPreferenceLevel(false);
     }
   };
 
@@ -757,6 +796,24 @@ export default function SettingsPage() {
                           <span className="w-14">{t('notification_channel_in_app')}</span>
                           <span className="w-14 opacity-40">{t('notification_channel_webhook')}</span>
                           <span className="w-14 opacity-40">{t('notification_channel_email')}</span>
+                        </div>
+                      </div>
+
+                      {/* story #2272 — 형제(notification-preferences)와 같은 자리: 기본 알림 레벨 */}
+                      <div className="mb-4 flex items-center justify-between rounded-md border border-border bg-muted/20 px-3 py-2.5">
+                        <span className="text-sm text-foreground">{t('notificationDefaultLevel')}</span>
+                        <div className="flex shrink-0 gap-1">
+                          {(['all', 'mentions', 'mute'] as const).map((level) => (
+                            <button
+                              key={level}
+                              type="button"
+                              disabled={savingPreferenceLevel}
+                              onClick={() => void handleSetGlobalPreferenceLevel(level)}
+                              className={`rounded px-2 py-1 text-xs font-medium transition disabled:opacity-50 ${globalPreferenceLevel === level ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                            >
+                              {t(`notificationLevel_${level}`)}
+                            </button>
+                          ))}
                         </div>
                       </div>
 

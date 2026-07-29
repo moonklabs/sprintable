@@ -10,6 +10,27 @@ const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://loca
 // association이 분리되므로(§10.2) env로 주입 — PO/인프라 lane이 prod 값 설정 책임.
 const APP_LINK_ORIGIN = () => process.env['MOBILE_APP_LINK_ORIGIN'] ?? 'https://dev-app.sprintable.ai';
 
+// 진단(2026-07-28, 모바일 구글 로그인 prod security_check_failed) — ⛔가드를 푸는 것이 아니다,
+// 통과 조건은 글자 하나도 안 바뀐다. state 검증 실패가 「쿠키가 아예 안 옴(ⓐ)」과 「쿠키는
+// 왔는데 값이 다름(ⓑ)」 두 서로 다른 사고로 뭉쳐 있어 처방 방향이 갈리는데 지금은 구분이
+// 안 된다 — 서버 로그에만 분기해 남긴다(사용자 화면 문구는 csrf_mismatch로 동일 유지).
+// ⛔state 값·쿠키 값·인증 코드는 절대 안 찍는다(길이/존재 여부만). dev의 통과 경로에도
+// 성공 로그를 남겨야 "안 찍힘=미도달"과 "안 찍힘=로그 자체가 없음"이 갈린다(양성대조).
+function logOauthStateCheck(
+  outcome: 'missing_cookie' | 'state_mismatch' | 'ok',
+  request: Request,
+  provider: string,
+  nativeChallenge: string | null,
+  stateLen: number,
+  storedStateLen: number | null,
+): void {
+  console.warn(
+    `auth.oauth.callback.state_check outcome=${outcome} provider=${provider} ` +
+    `native=${Boolean(nativeChallenge)} state_len=${stateLen} stored_state_len=${storedStateLen ?? 'null'} ` +
+    `referer=${request.headers.get('referer') ?? 'null'} ua=${request.headers.get('user-agent') ?? 'null'}`,
+  );
+}
+
 function cookieBase() {
   const domain = process.env['NEXT_PUBLIC_COOKIE_DOMAIN'];
   return { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' as const, path: '/', ...(domain ? { domain } : {}) };
@@ -61,9 +82,17 @@ export async function GET(request: Request, { params }: RouteParams) {
   cookieStore.delete(`oauth_next_${provider}`);
   cookieStore.delete(`oauth_native_challenge_${provider}`);
 
-  if (!storedState || storedState !== state) {
+  // ⛔통과 조건은 원래와 동일(storedState 존재 AND 일치) — 분기는 로그용일 뿐, 검증 자체는
+  // 안 바뀐다. 두 실패 분기 다 사용자에게는 동일한 csrf_mismatch로 리다이렉트한다.
+  if (!storedState) {
+    logOauthStateCheck('missing_cookie', request, provider, nativeChallenge, state.length, null);
     return NextResponse.redirect(`${origin}/login?error=csrf_mismatch`);
   }
+  if (storedState !== state) {
+    logOauthStateCheck('state_mismatch', request, provider, nativeChallenge, state.length, storedState.length);
+    return NextResponse.redirect(`${origin}/login?error=csrf_mismatch`);
+  }
+  logOauthStateCheck('ok', request, provider, nativeChallenge, state.length, storedState.length);
 
   // FastAPI OAuth callback
   const fastapiRes = await fetch(`${FASTAPI_URL()}/api/v2/auth/oauth/callback`, {

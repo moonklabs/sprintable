@@ -1,0 +1,385 @@
+{
+  "_snapshot_policy": "story #2293(2026-07-28) — 이건 그 시점의 스냅샷이지 실시간 측정이 아니다. backend/scripts/shard_destructive_tests.py의 partition()이 이 가중치로 샤드 4개를 균형배분한다 — 스위트가 자라거나(새 destructive_schema 파일 추가) 특정 파일이 눈에 띄게 느려지면 이 스냅샷은 조용히 낡고 샤드 균형도 조용히 무너진다(discover 자체는 항상 최신이라 파일이 빠지진 않지만, 무거운 새 파일이 '평균 가중치'로만 잡혀 한 샤드에 쏠릴 수 있다). 재측정 시점 기준: (a) destructive_schema 파일 수가 이 스냅샷 대비 +20% 이상 늘었을 때, (b) 어느 한 샤드의 CI 벽시계가 다른 샤드 대비 눈에 띄게(체감상 1.5배 이상) 벌어질 때, (c) 25분 천장 대비 여유가 다시 좁아지는 게 느껴질 때. 재측정 방법: PR run의 'Backend destructive-schema (shard)' 각 job 로그에서 파일별 pytest 실행시간을 다시 뽑아 이 files 배열과 total_files/total_sec/measured_at을 갱신.",
+  "source_run": 30360717358,
+  "measured_at": "2026-07-28",
+  "total_files": 94,
+  "total_sec": 534.7,
+  "files": [
+    {
+      "file": "tests/test_2161_agent_run_reaper.py",
+      "sec": 16.24
+    },
+    {
+      "file": "tests/test_edg_s9_parallel_quorum.py",
+      "sec": 13.1
+    },
+    {
+      "file": "tests/test_edg_s18_runtime_mode.py",
+      "sec": 11.19
+    },
+    {
+      "file": "tests/test_2054_gate_inbox.py",
+      "sec": 10.72
+    },
+    {
+      "file": "tests/test_2043_ac3_hitl_reason_enforce.py",
+      "sec": 10.7
+    },
+    {
+      "file": "tests/test_a2a_sa3_link_gate_to_task_realdb.py",
+      "sec": 10.61
+    },
+    {
+      "file": "tests/test_e_recruit_s5_connection_artifact_realdb.py",
+      "sec": 10.6
+    },
+    {
+      "file": "tests/test_edg_s14_role_resolver.py",
+      "sec": 10.49
+    },
+    {
+      "file": "tests/test_1970_gate_single_get.py",
+      "sec": 10.24
+    },
+    {
+      "file": "tests/test_1972_gate_risk_grade.py",
+      "sec": 10.14
+    },
+    {
+      "file": "tests/test_2172_assignee_position_events.py",
+      "sec": 9.82
+    },
+    {
+      "file": "tests/test_a2a_sa5_auth_required_realdb.py",
+      "sec": 9.73
+    },
+    {
+      "file": "tests/test_2038_hypothesis_outcome_result_enforce.py",
+      "sec": 9.62
+    },
+    {
+      "file": "tests/test_2181_mockup_model_db_drift.py",
+      "sec": 9.55
+    },
+    {
+      "file": "tests/test_project_relay_owner.py",
+      "sec": 9.32
+    },
+    {
+      "file": "tests/test_e_recruit_s3_recruit_service_realdb.py",
+      "sec": 8.7
+    },
+    {
+      "file": "tests/test_1974_gate_assigned_to_me.py",
+      "sec": 8.59
+    },
+    {
+      "file": "tests/test_2131_bulk_status_changed_sse_realdb.py",
+      "sec": 8.49
+    },
+    {
+      "file": "tests/test_a2a_sa1_deadline_sweeper_realdb.py",
+      "sec": 8.28
+    },
+    {
+      "file": "tests/test_1973_gate_urgency_sort.py",
+      "sec": 7.89
+    },
+    {
+      "file": "tests/test_2027_gate_approval_reason_enforce.py",
+      "sec": 7.76
+    },
+    {
+      "file": "tests/test_e_loop_ledger_s26_context_pack_synthesis.py",
+      "sec": 7.64
+    },
+    {
+      "file": "tests/test_2039_project_slug_ascii.py",
+      "sec": 7.24
+    },
+    {
+      "file": "tests/test_edg_s13_sla_processor.py",
+      "sec": 7.11
+    },
+    {
+      "file": "tests/test_edg_s32_reassign.py",
+      "sec": 7.02
+    },
+    {
+      "file": "tests/test_edg_s7_handoff_relay.py",
+      "sec": 6.78
+    },
+    {
+      "file": "tests/test_2201_sse_backfill_degraded_signal_realdb.py",
+      "sec": 6.75
+    },
+    {
+      "file": "tests/test_edg_s3_engine.py",
+      "sec": 6.68
+    },
+    {
+      "file": "tests/test_edg_s4_resolver.py",
+      "sec": 6.66
+    },
+    {
+      "file": "tests/test_2082_artifact_canonicalize_gate_inbox.py",
+      "sec": 6.62
+    },
+    {
+      "file": "tests/test_edg_s6_gate_hook.py",
+      "sec": 6.62
+    },
+    {
+      "file": "tests/test_edg_s19_grandfather.py",
+      "sec": 6.57
+    },
+    {
+      "file": "tests/test_edg_s8_watchdog.py",
+      "sec": 6.56
+    },
+    {
+      "file": "tests/test_edg_s10_status_api.py",
+      "sec": 6.46
+    },
+    {
+      "file": "tests/test_2078_event_outbox_realdb.py",
+      "sec": 6.1
+    },
+    {
+      "file": "tests/test_edg_s23_hypothesis_overlay.py",
+      "sec": 5.91
+    },
+    {
+      "file": "tests/test_2086_assignee_changed_sse.py",
+      "sec": 5.88
+    },
+    {
+      "file": "tests/test_h1_s9_merge_gate_metrics.py",
+      "sec": 5.83
+    },
+    {
+      "file": "tests/test_1983_doc_gate_assigned_to_me_who_state.py",
+      "sec": 5.81
+    },
+    {
+      "file": "tests/test_2058_hitl_human_only.py",
+      "sec": 5.8
+    },
+    {
+      "file": "tests/test_edg_s5_merge_gate.py",
+      "sec": 5.69
+    },
+    {
+      "file": "tests/test_edg_s12be_recipient_fallback.py",
+      "sec": 5.54
+    },
+    {
+      "file": "tests/test_agent_access_matrix_realdb.py",
+      "sec": 5.42
+    },
+    {
+      "file": "tests/test_2047_explicit_ask_gate.py",
+      "sec": 5.39
+    },
+    {
+      "file": "tests/test_e_loop_ledger_p1_s11_dispatch_context_pack_realdb.py",
+      "sec": 5.23
+    },
+    {
+      "file": "tests/test_edg_s31_hold.py",
+      "sec": 5.21
+    },
+    {
+      "file": "tests/test_edg_s33_override.py",
+      "sec": 5.17
+    },
+    {
+      "file": "tests/test_edg_s30_void_recovery.py",
+      "sec": 5.16
+    },
+    {
+      "file": "tests/test_edg_s22_doc_overlay.py",
+      "sec": 5.03
+    },
+    {
+      "file": "tests/test_edg_s34_line_versions.py",
+      "sec": 4.98
+    },
+    {
+      "file": "tests/test_2004_a2a_sendmessage_idempotency_realdb.py",
+      "sec": 4.92
+    },
+    {
+      "file": "tests/test_edg_s26_sprint_overlay.py",
+      "sec": 4.9
+    },
+    {
+      "file": "tests/test_edg_s17_recall.py",
+      "sec": 4.67
+    },
+    {
+      "file": "tests/test_edg_s16_seed.py",
+      "sec": 4.66
+    },
+    {
+      "file": "tests/test_2249_gate_entered_at_realdb.py",
+      "sec": 4.59
+    },
+    {
+      "file": "tests/test_edg_batch_line_status.py",
+      "sec": 4.56
+    },
+    {
+      "file": "tests/test_edg_s15_metrics.py",
+      "sec": 4.56
+    },
+    {
+      "file": "tests/test_1968_gate_project_id_threading.py",
+      "sec": 4.48
+    },
+    {
+      "file": "tests/test_e_loop_ledger_s27_context_pack_recommendation.py",
+      "sec": 4.41
+    },
+    {
+      "file": "tests/test_2078_publish_atomic.py",
+      "sec": 4.38
+    },
+    {
+      "file": "tests/test_merge_verdict_gate.py",
+      "sec": 4.34
+    },
+    {
+      "file": "tests/test_ho_s9_e2e_closed_loop.py",
+      "sec": 4.31
+    },
+    {
+      "file": "tests/test_e_loop_ledger_p1_s12_context_pack_items_realdb.py",
+      "sec": 4.2
+    },
+    {
+      "file": "tests/test_edg_s25_epic_overlay.py",
+      "sec": 4.17
+    },
+    {
+      "file": "tests/test_edg_s2_config_governance.py",
+      "sec": 4.13
+    },
+    {
+      "file": "tests/test_2049_default_participation_roles.py",
+      "sec": 4.1
+    },
+    {
+      "file": "tests/test_ccbcd9da_gate_wake_wiring_realdb.py",
+      "sec": 4.07
+    },
+    {
+      "file": "tests/test_e_loop_ledger_p1_s3_embed_backlog_realdb.py",
+      "sec": 4.04
+    },
+    {
+      "file": "tests/test_org_create_seeds_default_participation_role.py",
+      "sec": 4.01
+    },
+    {
+      "file": "tests/test_a2a_sa4_streaming_realdb.py",
+      "sec": 3.93
+    },
+    {
+      "file": "tests/test_edg_s28_doc_resubmit.py",
+      "sec": 3.81
+    },
+    {
+      "file": "tests/test_edg_s29_dryrun_preview.py",
+      "sec": 3.29
+    },
+    {
+      "file": "tests/test_merge_gate_reject_resubmit_reopen.py",
+      "sec": 3.2
+    },
+    {
+      "file": "tests/test_2101_sse_recent_delivered_backfill_realdb.py",
+      "sec": 3.0
+    },
+    {
+      "file": "tests/test_claim_participation.py",
+      "sec": 2.94
+    },
+    {
+      "file": "tests/test_doc_gate_cascade_scope_realdb.py",
+      "sec": 2.9
+    },
+    {
+      "file": "tests/test_s29_active_line_get.py",
+      "sec": 2.7
+    },
+    {
+      "file": "tests/test_2128_sse_lifespan_cap.py",
+      "sec": 2.65
+    },
+    {
+      "file": "tests/test_h1_s7_gate_verdict.py",
+      "sec": 2.65
+    },
+    {
+      "file": "tests/test_h1_fix2_approve_advances_done.py",
+      "sec": 2.46
+    },
+    {
+      "file": "tests/test_h1_s10_e2e.py",
+      "sec": 2.38
+    },
+    {
+      "file": "tests/test_ho_gate_done_side_effects.py",
+      "sec": 2.31
+    },
+    {
+      "file": "tests/test_ho_s2_outcome_verdict.py",
+      "sec": 2.28
+    },
+    {
+      "file": "tests/test_ho_s7_cold_start_seed.py",
+      "sec": 2.23
+    },
+    {
+      "file": "tests/test_a2a_p1_s1_recruit_card_contract_realdb.py",
+      "sec": 2.2
+    },
+    {
+      "file": "tests/test_e_recruit_s16_rotate_idor_realdb.py",
+      "sec": 2.16
+    },
+    {
+      "file": "tests/test_cron_retry_dry_run.py",
+      "sec": 2.1
+    },
+    {
+      "file": "tests/test_e_loop_ledger_p1_s3f_poison_pill_terminal.py",
+      "sec": 2.07
+    },
+    {
+      "file": "tests/test_ho_s4_scorer_verdict_wiring.py",
+      "sec": 2.07
+    },
+    {
+      "file": "tests/test_ho_s1_score_hypotheses_smoke.py",
+      "sec": 1.89
+    },
+    {
+      "file": "tests/test_e_loop_ledger_p1_s3g_score_hypotheses_savepoint_realdb.py",
+      "sec": 1.86
+    },
+    {
+      "file": "tests/test_e_loop_ledger_p1_s5_embedding_backfill_realdb.py",
+      "sec": 1.86
+    },
+    {
+      "file": "tests/test_e_loop_ledger_p1_s6_context_pack_search_realdb.py",
+      "sec": 1.86
+    },
+    {
+      "file": "tests/test_2216_workflow_fallback_notify_owner_floor_realdb.py",
+      "sec": 1.76
+    }
+  ]
+}

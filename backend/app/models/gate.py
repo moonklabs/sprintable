@@ -43,6 +43,14 @@ def is_valid_transition(from_status: str, to_status: str) -> bool:
     return (from_status, to_status) in _VALID_TRANSITIONS
 
 
+# story #2303(2026-07-29): Gate.evidence_status(merge gate 재평가 결과)의 원자료→간소화값
+# 매핑 — 원래 app/routers/glance.py의 hero 엔드포인트 전용 상수였다. app/repositories/goal.py
+# (`?include=glance`의 focal_story.auto_verify)가 같은 매핑이 다시 필요해지면서 두 자리에
+# 같은 dict를 각자 적어두면 오늘 하루 반복 관측된 twin-system 갭이 재발한다 — 모델 레이어를
+# 단일 소유자로 삼고 양쪽(라우터·레포지토리)이 여기서 import한다.
+AUTO_VERIFY_MAP: dict[str, str] = {"sufficient": "passed", "blocked": "failed"}
+
+
 class Gate(Base):
     __tablename__ = "gate"
 
@@ -64,9 +72,36 @@ class Gate(Base):
     evidence_status: Mapped[str | None] = mapped_column(Text, nullable=True)
     decision_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
     auto_decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #2249: "이 상태에 들어간 시각" — updated_at(onupdate=func.now())은 이 목적에 못 쓴다
+    # (실측: merge_verdict_gate.evaluate_merge_gate가 CI/PR 재평가마다 evidence_status를 같은
+    # 값으로 재대입해도 onupdate가 발동 — updated_at은 "이 상태가 된 시각"이 아니라 "재평가
+    # 횟수"를 재고 있었다). status/evidence_status는 서로 다른 축이라 컬럼도 분리한다. 값이
+    # 실제로 바뀔 때만 세팅할 것 — set_gate_status()/gate_service.py의 evidence_status 대입
+    # 지점에서 값 비교 후 조건부로만 갱신한다(gate.py 직접 대입 금지, SSOT 헬퍼 경유).
+    status_entered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    evidence_status_entered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+def set_gate_status(gate: "Gate", new_status: str, *, now: datetime) -> None:
+    """`gate.status = ...`를 직접 쓰지 말고 이걸 경유할 것 — status_entered_at은 값이 «실제로
+    바뀔 때만» 갱신한다(같은 값 재대입은 no-op). #2249 AC4: 재평가/재제출로 같은 상태에 다시
+    떨어져도 진입 시각이 리셋되지 않아야 한다는 요건을 이 한 곳에서만 지킨다."""
+    if gate.status == new_status:
+        return
+    gate.status = new_status
+    gate.status_entered_at = now
+
+
+def set_gate_evidence_status(gate: "Gate", new_evidence_status: str | None, *, now: datetime) -> None:
+    """evidence_status는 status와 별개 축(merge gate 재평가마다 갱신될 수 있음) — 같은 이유로
+    값이 실제로 바뀔 때만 evidence_status_entered_at을 갱신한다."""
+    if gate.evidence_status == new_evidence_status:
+        return
+    gate.evidence_status = new_evidence_status
+    gate.evidence_status_entered_at = now

@@ -105,9 +105,13 @@ async def test_upload_attachments_calls_endpoint_per_file():
 # ── send_chat_message 회귀 + 체이닝 ────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_send_chat_message_no_attachments_unchanged_payload():
-    """첨부 없으면 기존 동작 그대로(회귀 0) — payload 에 attachments 키 자체가 없음."""
+    """첨부 없으면 기존 동작 그대로(회귀 0) — payload 에 attachments 키 자체가 없음.
+
+    ⛔story #2294 ③ 후속(2026-07-29): 메시지 전송은 이제 `client.post`가 아니라
+    `client.post_full`(unwrap=False, {"data": {...}} 응답의 sibling 보존용)을 쓴다 —
+    첨부 업로드(`client.post`)와는 다른 메서드라 각각 따로 mock한다."""
     args = SendChatInput(thread_id="conv-1", content="hi")
-    with patch.object(chat_mod.client, "post", new=AsyncMock(return_value={"id": "m1"})) as m:
+    with patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value={"data": {"id": "m1"}})) as m:
         await send_chat_message(args)
         _, kwargs = m.call_args
         assert "attachments" not in kwargs["json"]
@@ -124,17 +128,50 @@ async def test_send_chat_message_uploads_then_sends_with_attachments():
 
     async def _fake_post(path, json=None):
         calls.append((path, json))
-        if path.endswith("/attachments"):
-            return upload_result
-        return {"id": "m1"}
+        return upload_result
 
-    with patch.object(chat_mod.client, "post", new=AsyncMock(side_effect=_fake_post)):
+    async def _fake_post_full(path, json=None):
+        calls.append((path, json))
+        return {"data": {"id": "m1"}}
+
+    with patch.object(chat_mod.client, "post", new=AsyncMock(side_effect=_fake_post)), \
+         patch.object(chat_mod.client, "post_full", new=AsyncMock(side_effect=_fake_post_full)):
         result = await send_chat_message(args)
         assert len(calls) == 2
         assert calls[0][0] == "/api/v2/conversations/conv-1/attachments"
         assert calls[1][0] == "/api/v2/conversations/conv-1/messages"
         assert calls[1][1]["attachments"] == [upload_result]
         assert "Error" not in result[0].text
+
+
+@pytest.mark.anyio
+async def test_send_chat_message_with_attachment_still_surfaces_references_sideband():
+    """⭐PO 질문(2026-07-29) — 첨부가 있을 때도 references가 실리는가? 답: 실린다. 이유:
+    첨부는 `payload["attachments"]`에만 영향을 주고, 응답 재구성(`raw.get("data")` +
+    sibling 병합)은 첨부 유무와 무관하게 같은 코드 경로다 — 백엔드 메시지 엔드포인트도
+    하나뿐이고 그 엔드포인트의 `references` 계산은 `msg.content`(mention 토큰)만 본다,
+    `attachments` 필드와 독립. 이 테스트가 그 구조적 주장을 실측으로 고정한다(첨부+
+    mention 토큰을 같은 메시지에 같이 넣어 sibling이 살아남는지 직접 본다)."""
+    args = SendChatInput(
+        thread_id="conv-1", content="[T](entity:task:t-1)",
+        attachments=[{"content_base64": _b64(4), "name": "s.png", "content_type": "image/png"}],
+    )
+    upload_result = {"url": "org/o/project/p/chat/conv-1/x-s.png", "name": "s.png", "content_type": "image/png", "size": 4}
+    backend_response = {
+        "data": {"id": "m1", "content": "[T](entity:task:t-1)"},
+        "references": {"stored": 1, "dropped": []},
+    }
+
+    with patch.object(chat_mod.client, "post", new=AsyncMock(return_value=upload_result)), \
+         patch.object(chat_mod.client, "post_full", new=AsyncMock(return_value=backend_response)) as m_full:
+        result = await send_chat_message(args)
+
+    import json
+    body = json.loads(result[0].text)
+    assert body["id"] == "m1"
+    assert body["references"] == {"stored": 1, "dropped": []}
+    _, kwargs = m_full.call_args
+    assert kwargs["json"]["attachments"] == [upload_result]  # 첨부도 같이 전송됐다
 
 
 @pytest.mark.anyio
@@ -149,9 +186,11 @@ async def test_send_chat_message_upload_failure_does_not_call_message_create():
         calls.append(path)
         raise RuntimeError("upload 403")
 
-    with patch.object(chat_mod.client, "post", new=AsyncMock(side_effect=_fake_post)):
+    with patch.object(chat_mod.client, "post", new=AsyncMock(side_effect=_fake_post)), \
+         patch.object(chat_mod.client, "post_full", new=AsyncMock()) as m_full:
         result = await send_chat_message(args)
         assert calls == ["/api/v2/conversations/conv-1/attachments"]
+        m_full.assert_not_awaited()  # 업로드 실패 시 메시지 생성 자체를 시도하지 않는다
         assert result[0].text.startswith("Error")
 
 
@@ -164,13 +203,9 @@ async def test_send_chat_message_partial_failure_logs_orphan_warning(caplog):
     )
     upload_result = {"url": "org/o/project/p/chat/conv-1/x-s.png", "name": "s.png", "content_type": "image/png", "size": 4}
 
-    async def _fake_post(path, json=None):
-        if path.endswith("/attachments"):
-            return upload_result
-        raise RuntimeError("message create failed")
-
     with caplog.at_level(logging.WARNING, logger=chat_mod.logger.name):
-        with patch.object(chat_mod.client, "post", new=AsyncMock(side_effect=_fake_post)):
+        with patch.object(chat_mod.client, "post", new=AsyncMock(return_value=upload_result)), \
+             patch.object(chat_mod.client, "post_full", new=AsyncMock(side_effect=RuntimeError("message create failed"))):
             result = await send_chat_message(args)
     assert result[0].text.startswith("Error")
     assert any("orphaned" in r.message for r in caplog.records)
