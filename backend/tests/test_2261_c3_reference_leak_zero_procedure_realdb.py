@@ -300,17 +300,15 @@ async def test_three_way_byte_identical_story_backlinks_source_axis():
 
 @pytest.mark.anyio
 async def test_single_axis_target_gate_flagged_403_vs_404_asymmetry():
-    """⚠️실측 결과 — 스토리 본문이 가정한 «단건 축도 byte-identical»이 지금 코드에서는 안 선다.
+    """⚠️실측 결과(2026-07-29 갱신) — 이 테스트가 처음 적힌 시점엔 story·doc 둘 다 «존재하되
+    접근권 없음»=403이었다(#2261 원 실측). 그 비대칭은 #2322로 별건 등재됐고, #2322 PR #1
+    (PR #2624)이 stories.py `_assert_story_project_access`를 403→404로 통일했다 — 그래서
+    story 축은 이제 404다(#2261이 찾아낸 문제 하나가 실제로 닫혔다는 증거이기도 하다).
 
-    `_assert_story_project_access`/`_require_doc_project_access`는 대상이 «존재하되 접근권
-    없음»이면 403, «존재 자체가 없음»이면 404를 낸다(stories.py:264·docs.py:598 — 코드로
-    직접 확認, 둘 다 일관되게 이 패턴). references.py의 create/delete 게이트(둘 다 404 —
-    "존재 비노출 오라클")와 다른 설계다.
-
-    ⛔이 테스트는 실패가 아니라 «지금 상태를 고정하는 기록»이다 — SEC-S8(story 83ea3d6a)가
-    이미 감사한 기존 계약을 이 PR이 조용히 바꾸지 않는다(범위 밖 변경 금지). 이 비대칭이
-    #2261의 «누설 0» 기준에 부합하는지는 PO 판단으로 남긴다 — 코드가 그렇다는 사실만 여기
-    실측으로 고정해 둔다."""
+    docs.py `_require_doc_project_access`는 #2322 PR #3(아직 미착수 — E-CONNECT 에픽
+    완료 후로 보류, 2026-07-29 3차 선생님 지시)이라 doc 축은 여전히 403 — 지금은 **story만
+    404·doc은 403**인 상태를 그대로 고정한다(이것도 #2322 자신이 명시한 "의도적 과도기
+    비대칭"이다). #2322 PR #3이 착지하면 doc 쪽도 여기서 404로 다시 갱신해야 한다."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -331,8 +329,9 @@ async def test_single_axis_target_gate_flagged_403_vs_404_asymmetry():
             resp_doc_theirs = await client.get(f"/api/v2/docs/{doc_theirs.id}/backlinks")
             resp_doc_ghost = await client.get(f"/api/v2/docs/{uuid.uuid4()}/backlinks")
 
-            # 실측 그대로 기록 — 존재하되 접근권 없음=403, 존재 자체가 없음=404.
-            assert resp_story_theirs.status_code == 403, resp_story_theirs.text
+            # story: #2322 PR #1(PR #2624)로 404 통일 완료 — 존재하되 접근권 없음도 404.
+            # doc: #2322 PR #3 미착수(E-CONNECT 완료 후 보류) — 아직 403 그대로.
+            assert resp_story_theirs.status_code == 404, resp_story_theirs.text
             assert resp_story_ghost.status_code == 404, resp_story_ghost.text
             assert resp_doc_theirs.status_code == 403, resp_doc_theirs.text
             assert resp_doc_ghost.status_code == 404, resp_doc_ghost.text
