@@ -133,6 +133,22 @@ async def _resolve_hypotheses(session: AsyncSession, org_id: uuid.UUID, ids: lis
     return set(rows)
 
 
+async def _resolve_chat_messages(session: AsyncSession, org_id: uuid.UUID, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    """story #2263(C-7, 2026-07-29) — chat_message가 처음으로 TARGET이 되는 자리(proof가
+    대화 메시지를 인용). 그 전까지 chat_message는 SOURCE_ONLY_TYPES였다(메시지 자체엔 org_id
+    컬럼이 없어 Conversation을 통해서만 org 스코프 가능 — join 필요)."""
+    from app.models.conversation import Conversation, ConversationMessage
+
+    rows = (
+        await session.execute(
+            select(ConversationMessage.id)
+            .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+            .where(Conversation.org_id == org_id, ConversationMessage.id.in_(ids))
+        )
+    ).scalars().all()
+    return set(rows)
+
+
 async def _resolve_evidence(session: AsyncSession, org_id: uuid.UUID, ids: list[uuid.UUID]) -> set[uuid.UUID]:
     from app.models.evidence import Evidence
 
@@ -153,13 +169,15 @@ ENTITY_RESOLVERS: dict[str, EntityExistsResolver] = {
     "artifact": _resolve_artifacts,
     "hypothesis": _resolve_hypotheses,
     "evidence": _resolve_evidence,
+    "chat_message": _resolve_chat_messages,
 }
 
 
 # source_type으로는 유효하나 target 존재판정(resolver)은 없는 타입 — 위 모듈 docstring
-# 참조. write-path(mention_parser.py)가 이 타입들을 source_type으로 직접 씀(하드코딩 리터럴,
-# 사용자 입력 아님 — #2260이 이미 검증한 신뢰 경계).
-SOURCE_ONLY_TYPES: frozenset[str] = frozenset({"chat_message"})
+# 참조. 지금은 빈 집합이다 — chat_message가 유일한 멤버였으나 story #2263(C-7, 2026-07-29)
+# 이 처음으로 target 존재판정(`_resolve_chat_messages`)을 등록해 ENTITY_RESOLVERS로 옮겼다
+# (proof form이 대화 메시지를 인용하며 그 메시지가 사라졌는지도 판정할 수 있어야 하므로).
+SOURCE_ONLY_TYPES: frozenset[str] = frozenset()
 
 
 def is_registered_entity_type(entity_type: str) -> bool:

@@ -587,6 +587,175 @@ async def get_story_backlinks(
     )
 
 
+async def _visible_target_ids(
+    session: AsyncSession, org_id: uuid.UUID, caller_id: uuid.UUID,
+    ids_by_type: dict[str, set[uuid.UUID]],
+) -> dict[str, set[uuid.UUID]]:
+    """story #2263 AC6 — outgoing references의 TARGET 측 가시성. C-3(#2261)의 존재-비노출
+    규율 그대로: 등록되지 않은 target_type이거나 project_id를 못 구하면(row 없음) 안 보이는
+    쪽으로 fail-closed — reference_registry.PROJECT_ID_RESOLVERS(story #2314가 evidence에
+    이미 재사용한 그 SSOT)를 여기서도 그대로 쓴다, 새 인증경로 발명 없음."""
+    from app.services.project_auth import has_project_access
+    from app.services.reference_registry import PROJECT_ID_RESOLVERS
+
+    visible: dict[str, set[uuid.UUID]] = {}
+    for target_type, target_ids in ids_by_type.items():
+        resolver = PROJECT_ID_RESOLVERS.get(target_type)
+        if resolver is None:
+            continue
+        for target_id in target_ids:
+            project_id = await resolver(session, org_id, target_id)
+            if project_id is not None and await has_project_access(session, caller_id, project_id, org_id):
+                visible.setdefault(target_type, set()).add(target_id)
+    return visible
+
+
+@router.get("/{id}/references")
+async def get_story_outgoing_references(
+    id: uuid.UUID,
+    direction: str = Query(default="outgoing"),
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """GET /api/v2/stories/{id}/references?direction=outgoing — story #2263 AC6(오르테가
+    판정 2026-07-29): 이 story가 가리키는 것(reference_core.list_references의 첫 실제
+    소비자 — 그때까지 이 함수를 부르는 라우터가 0곳이었다). `direction=incoming`은 이 라우트
+    범위 밖(그건 이미 GET /{id}/backlinks가 다른 응답 shape로 다룬다) — 명시 400으로 거부해
+    「둘 다 되는 척」을 안 한다.
+
+    TARGET(이 story 자신)은 get_story_backlinks와 동일 게이트(`_assert_story_project_access`
+    — 없으면 404, 있지만 project 밖이면 404, #2322 PR#1 통일 반영). 다시 가리키는 쪽(outgoing
+    의 반대편, 즉 이 story가 가리키는 대상들)의 가시성은 `_visible_target_ids`가 판정 —
+    C-3(#2261)이 세운 것과 같은 규율(못 보는 대상은 존재 사실도 새지 않는다).
+
+    응답은 메타만 싣는다(form·target_type·target_id·created_at·still_exists) — proof_payload
+    는 여기 안 싣는다(PO 판정 2026-07-29: 목록에 스냅샷 payload를 통째로 실으면 응답이
+    무거워진다 — payload 전량은 단건 상세 라우트의 몫, 이 라우트가 아니다)."""
+    if direction != "outgoing":
+        raise HTTPException(status_code=400, detail="direction must be 'outgoing' (incoming: use /backlinks)")
+
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.models.reference import Reference
+    from app.services.reference_core import list_references
+
+    raw_targets = (await repo.session.execute(
+        select(Reference.target_type, Reference.target_id).where(
+            Reference.org_id == repo.org_id, Reference.source_type == "story", Reference.source_id == id,
+        )
+    )).all()
+    ids_by_type: dict[str, set[uuid.UUID]] = {}
+    for target_type, target_id in raw_targets:
+        ids_by_type.setdefault(target_type, set()).add(target_id)
+
+    caller_id = uuid.UUID(str(auth.user_id))
+    visible = await _visible_target_ids(repo.session, repo.org_id, caller_id, ids_by_type)
+
+    refs = await list_references(
+        repo.session, org_id=repo.org_id, entity_type="story", entity_id=id,
+        direction="outgoing", visible_ids_by_type=visible,
+    )
+    return {
+        "data": [
+            {
+                "id": str(r.id),
+                "form": r.form,
+                "target_type": r.target_type,
+                "target_id": str(r.target_id),
+                "created_at": r.created_at.isoformat(),
+                "still_exists": r.still_exists,
+            }
+            for r in refs
+        ]
+    }
+
+
+class CreateStoryProofReferenceRequest(BaseModel):
+    """story #2263 AC6(2026-07-29, 오르테가 판정) — C-7(#2265) 「선택→저장」 전용 write
+    계약. 지금은 target=chat_message·form=proof 조합 하나만 지원한다(다른 target_type/form은
+    이 라우트가 필요해지면 그때 넓힌다 — #2260/#2261이 반복한 "안 쓰는 라우터 미리 짓지
+    않는다" 원칙과 동형)."""
+
+    target_type: str
+    target_id: uuid.UUID
+    form: str
+    proof_payload: dict
+
+
+@router.post("/{id}/references", status_code=201)
+async def create_story_proof_reference(
+    id: uuid.UUID,
+    body: CreateStoryProofReferenceRequest,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """POST /api/v2/stories/{id}/references — story #2263 AC6 후속(2026-07-29, 오르테가
+    판정): `insert_reference`가 프로덕션 호출부 0건이라 C-7(#2265, 대화 조각 인용)이 저장할
+    라우트가 없었다 — 그 첫 write 소비자를 연다. 읽기(GET /{id}/references)와 같은 PR —
+    write→read 왕복이 그 안에서 증명된다.
+
+    지금은 target_type="chat_message"·form="proof" 조합만 지원(위 스키마 docstring 참조) —
+    그 밖은 명시 400(조용한 무시 금지).
+
+    권한 셋:
+    ①source(이 story)는 get_story_backlinks/GET references와 동일 게이트
+      (`_assert_story_project_access`, #2322 통일).
+    ②target(인용되는 conversation) — 그 대화를 못 읽는 사람이 조각을 박으면 안 된다(PO
+      판정) — `conversations._can_read_conversation`(canonical 단건 predicate, SSOT 재사용
+      — 새 인증경로 발명 없음)로 `proof_payload["conversation_id"]`를 검사한다.
+    ③범위 상한 — C-7 규격("증거이지 대화 사본이 아니다")이 있으나 PO가 숫자를 아직 안
+      박았다(2026-07-29: "일단 안 막되 크기를 로그로 남긴다, 실사용 뒤 정한다") — 그래서
+      여기서 하드 리밋을 걸지 않고 `logger.info`로 snapshot 길이만 남긴다."""
+    if body.target_type != "chat_message" or body.form != "proof":
+        raise HTTPException(
+            status_code=400,
+            detail="이 라우트는 지금 target_type='chat_message'·form='proof' 조합만 지원합니다",
+        )
+
+    conversation_id = body.proof_payload.get("conversation_id")
+    if not conversation_id:
+        raise HTTPException(status_code=400, detail="proof_payload.conversation_id is required")
+
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.routers.conversations import _can_read_conversation
+
+    can_read = await _can_read_conversation(
+        uuid.UUID(str(conversation_id)), repo.session, auth, repo.org_id,
+    )
+    if not can_read:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    snapshot = body.proof_payload.get("snapshot") or []
+    logger.info(
+        "create_story_proof_reference: story=%s snapshot_messages=%d", id, len(snapshot),
+    )
+
+    from app.services.reference_core import insert_reference
+
+    caller_id = uuid.UUID(str(auth.user_id))
+    ref = await insert_reference(
+        repo.session, org_id=repo.org_id, source_type="story", source_field="proof",
+        source_id=id, target_type=body.target_type, target_id=body.target_id,
+        form=body.form, created_by=caller_id, proof_payload=body.proof_payload,
+    )
+    await repo.session.commit()
+
+    return {
+        "id": str(ref.id),
+        "form": ref.form,
+        "target_type": ref.target_type,
+        "target_id": str(ref.target_id),
+        "created_at": ref.created_at.isoformat(),
+    }
+
+
 class UploadStoryAttachmentRequest(BaseModel):
     """E-MCP-OPT S6: MCP(비-브라우저)용 JSON/base64 첨부 업로드 요청(chat과 동형)."""
 
