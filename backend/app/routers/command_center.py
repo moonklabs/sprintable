@@ -62,9 +62,14 @@ async def my_actions(
 
     queue: list[dict] = []
     # 게이트 승인 대기 = 내가 approver 인 pending blocking approval(member-private·서버 resolve member_id).
+    # story #2288(E-CONNECT) BE 명세3(§3-1㉢·§4-1, 미르코 작성): gate_type 패스스루 —
+    # WorkflowLineStepApproval 자체엔 gate_type 필드가 없다(kind는 approver 역할 축, 다른 개념).
+    # WorkflowLineStepRun.effective_gate_type이 SSOT(위 stuck 자동감지 쿼리도 이 필드를 그대로
+    # 쓴다 — 새 값을 만들지 않는다) — step_run_id로 조인해 그대로 실어 보낸다.
     approvals = (
         await session.execute(
-            select(WorkflowLineStepApproval)
+            select(WorkflowLineStepApproval, WorkflowLineStepRun.effective_gate_type)
+            .join(WorkflowLineStepRun, WorkflowLineStepRun.id == WorkflowLineStepApproval.step_run_id)
             .where(
                 WorkflowLineStepApproval.org_id == org_id,
                 WorkflowLineStepApproval.approver_member_id == member_id,
@@ -74,13 +79,14 @@ async def my_actions(
             .order_by(WorkflowLineStepApproval.created_at.asc())
             .limit(50)
         )
-    ).scalars().all()
-    for a in approvals:
+    ).all()
+    for a, gate_type in approvals:
         queue.append({
             "type": "gate_approval",
             "priority": "warn",
             "context": {"gate_id": str(a.gate_id) if a.gate_id else None,
-                        "approval_group_id": str(a.approval_group_id), "kind": a.kind},
+                        "approval_group_id": str(a.approval_group_id), "kind": a.kind,
+                        "gate_type": gate_type},
             "created_at": a.created_at.isoformat() if a.created_at else None,
         })
     # 리뷰/머지 대기 = 내 배정 in-review 스토리(member-private).
@@ -133,6 +139,60 @@ async def my_actions(
             "type": "my_blockers",
             "priority": "danger",  # 내가 푸는 게 남을 막고 있음 — 최우선.
             "context": {"blocker_story_id": str(blocker_id), "blocked_story_id": str(blocked_id)},
+        })
+
+    # story #2288(E-CONNECT) BE 명세4(§3-1㉢·§4-1, PO 강조 — 이 스토리의 심장): 「내 것인데
+    # 남이 잡고 있음」 = 내가 담당(assignee)인 story인데 그 워크플로 라인의 pending blocking
+    # 승인 대기가 «내가 아닌» approver에게 있는 경우. §3-1㉢ 정의 그대로 — 발(다음 행동)이
+    # 내게 없다. ⛔이 항목엔 버튼을 안 단다(FE 몫 — 여기선 type만 가른다): 목적이 «행동
+    # 유도»가 아니라 「내가 놓친 게 아니라 남이 잡고 있다」는 «해소»다.
+    # 「나의 것」 정의(AC2 명시 요구): 지금은 **담당(assignee_id)** 하나만 — 결재자·멘션·claim
+    # 은 포함 안 함(추측으로 넓히지 않는다, 대조표가 곧 명세라는 PO 지시 그대로).
+    _WaitingStory = aliased(Story)
+    waiting_rows = (
+        await session.execute(
+            select(
+                _WaitingStory.id,
+                WorkflowLineStepRun.effective_gate_type,
+                WorkflowLineStepApproval.approver_member_id,
+            )
+            .select_from(_WaitingStory)
+            .join(
+                WorkflowLineStepRun,
+                (WorkflowLineStepRun.org_id == org_id)
+                & (WorkflowLineStepRun.entity_type == "story")
+                & (WorkflowLineStepRun.entity_id == _WaitingStory.id)
+                & (WorkflowLineStepRun.status == "pending"),
+            )
+            .join(
+                WorkflowLineStepApproval,
+                (WorkflowLineStepApproval.org_id == org_id)
+                & (WorkflowLineStepApproval.step_run_id == WorkflowLineStepRun.id)
+                & (WorkflowLineStepApproval.status == "pending")
+                & (WorkflowLineStepApproval.blocking.is_(True)),
+            )
+            .where(
+                _WaitingStory.org_id == org_id,
+                _WaitingStory.assignee_id == member_id,
+                _WaitingStory.deleted_at.is_(None),
+                WorkflowLineStepApproval.approver_member_id != member_id,
+            )
+            .order_by(_WaitingStory.updated_at.desc())
+            .limit(100)
+        )
+    ).all()
+    # ⛔한 story에 승인자가 여럿(quorum)이면 위 join이 story당 여러 행을 낸다 — story는 화면에
+    # «한 번»만 뜨는 게 맞다(대기 이유가 여럿이어도 "기다리는 대상"은 하나). story_id로 dedupe.
+    seen_waiting_story_ids: set[uuid.UUID] = set()
+    for story_id, gate_type, approver_id in waiting_rows:
+        if story_id in seen_waiting_story_ids:
+            continue
+        seen_waiting_story_ids.add(story_id)
+        queue.append({
+            "type": "waiting_on_others",
+            "priority": "info",  # §3-1㉢: 행동 없음 — danger/warn(행동 촉구) 축과 안 섞는다.
+            "context": {"story_id": str(story_id), "gate_type": gate_type,
+                        "approver_member_id": str(approver_id)},
         })
 
     # ── 자동 이상감지(org-scope) — enum/ids/age 만(민감 텍스트 0) ──────────────────────
