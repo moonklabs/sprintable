@@ -3,7 +3,10 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { UPCOMING_LIMIT, type EpicFlowNodesResponse } from './derive-flow';
-import { deriveFlowMapLane, parseDependencyGraphEdges, type FlowMapLane, type RawDependencyEdge } from './derive-flow-map';
+import {
+  deriveFlowMapLane, parseDependencyGraphEdges, parseReferenceCandidateEdges,
+  type FlowMapLane, type RawDependencyEdge, type RawReferenceCandidate,
+} from './derive-flow-map';
 import { FlowMapCanvas } from './flow-map-canvas';
 
 interface FlowEpicNodesProps {
@@ -50,6 +53,14 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory }: F
     // 오늘은 결과가 똑같이 빈 배열이겠지만, «받으러 갔다»는 사실 자체가 다르다). item_id
     // 없이 `item_type=story`만 넘겨 프로젝트 전체 그래프를 받고 이 에픽의 노드 id로 필터링
     // — 실 데이터가 쌓이면(org 스케일) item_id 배치 조회로 좁혀야 한다(오늘은 0행이라 무해).
+    //
+    // 오르테가군 확定(2026-07-30, PR#2701 배포 후 라이브 실측으로 발견) — 화면이 보던
+    // `dependencies`(계획형, 0행)와 디디군이 백필한 실 재료 `reference_semantic_candidates`
+    // (1321건)는 «다른 표»라 앞의 fetch만으로는 실 후보가 안 왔다. 까심군 벌크 엔드포인트
+    // (`/api/goals/{id}/reference-candidates`, PR#2704)를 추가로 부른다 — 응답은 BE 원시
+    // 어휘 그대로(래핑 없음, `dependencies/graph`와 같은 plain-array 패턴)라 `unwrap` 안 씀.
+    // 두 출처를 `parseReferenceCandidateEdges`/`parseDependencyGraphEdges`로 각각 정규화한
+    // 뒤 하나의 FlowMapEdge[] 로 합친다 — 렌더 레이어(FlowMapCanvas)는 출처를 모른다.
     // 실패해도 전체를 죽이지 않는다(간선은 보강 정보, 노드가 핵심 — 부분 실패는 부분만 표시).
     Promise.all([
       fetch(`/api/analytics/epic-flow-nodes?project_id=${projectId}&epic_id=${epicId}&upcoming_limit=${UPCOMING_LIMIT}`)
@@ -58,17 +69,24 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory }: F
       fetch('/api/dependencies/graph?item_type=story')
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null),
-    ]).then(([nodesJson, graphJson]) => {
+      fetch(`/api/goals/${epicId}/reference-candidates`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ]).then(([nodesJson, graphJson, candidatesJson]) => {
       if (cancelled) return;
       const data = unwrap<EpicFlowNodesResponse>(nodesJson);
       if (!data) {
         setState({ kind: 'error' });
         return;
       }
-      const graph = unwrap<{ edges: RawDependencyEdge[] }>(graphJson);
       const epicNodeIds = new Set([...data.now.items, ...data.upcoming.items].map((i) => i.id));
-      const allEdges = parseDependencyGraphEdges(graph?.edges ?? []);
-      const edges = allEdges.filter((e) => epicNodeIds.has(e.fromNodeId) && epicNodeIds.has(e.toNodeId));
+      const graph = unwrap<{ edges: RawDependencyEdge[] }>(graphJson);
+      const dependencyEdges = parseDependencyGraphEdges(graph?.edges ?? []);
+      const rawCandidates: RawReferenceCandidate[] = Array.isArray(candidatesJson) ? candidatesJson : [];
+      const candidateEdges = parseReferenceCandidateEdges(rawCandidates);
+      const edges = [...dependencyEdges, ...candidateEdges].filter(
+        (e) => epicNodeIds.has(e.fromNodeId) && epicNodeIds.has(e.toNodeId),
+      );
       const lane = deriveFlowMapLane(epicId, epicTitle, data.past.total, data.now.items, data.upcoming.items, edges);
       setState({ kind: 'ready', lane });
     }).catch(() => {
