@@ -552,6 +552,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // (타이핑마다 부르는 게 아님 — 스펙 ①이 금지하는 것은 그것 하나뿐).
   // ⛔지금 안 하는 것 — 패널이 열린 채로 본문을 저장해 BE가 새 후보를 만들어도(write-path
   // 훅) 이 패널은 갱신하지 않는다. 다음 판으로 미룬다(오늘 규율 — 갭을 적어 남긴다).
+  // ⚠️테스트 갭 — `depQuery` 길이에 따라 "무엇을 보이는가"는 순수 함수(selectDepPickerItems/
+  // extractReferenceCandidates)로 빼 dep-picker-candidates.test.ts가 잡지만, 이 effect의
+  // showAddDep 전이/ref 리셋 자체는 effect라 단위테스트가 못 잡는다 — 이 자리를 만지면
+  // "닫고 다시 열어 후보가 새로 오는지"를 손으로(라이브) 확認할 것.
   useEffect(() => {
     if (!showAddDep) { depCandidatesFetchedRef.current = false; return; }
     if (depCandidatesFetchedRef.current) return;
