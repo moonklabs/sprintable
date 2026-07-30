@@ -28,6 +28,13 @@ def _mock_story(status: str = "backlog") -> MagicMock:
     # story #2315 AC1: references(transient, dict|None) — 위와 동일 이유(MagicMock 자동
     # 속성이 Pydantic dict|None 검증 실패)로 명시 세팅.
     s.references = None
+    # ⛔일반 함정(2026-07-29, PO 지적 — 오늘 두 번째로 같은 부류): MagicMock은 "모르는 속성"을
+    # 에러 없이 그럴싸한 MagicMock 값으로 «조용히» 채운다 — StoryResponse에 새 필드를 추가할
+    # 때마다 이 mock fixture(및 같은 패턴을 쓰는 다른 mock 기반 테스트 파일들)에도 그 필드를
+    # 명시로 세팅해야 한다(안 하면 Pydantic 검증에서 "Input should be a valid X"로 실패).
+    # story #2328(C-11 ㉡층): is_reference_candidate·matched_snippet(transient) — 명시 세팅.
+    s.is_reference_candidate = False
+    s.matched_snippet = None
     s.meeting_id = None
     s.title = "Story 1"
     s.status = status

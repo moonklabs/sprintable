@@ -230,6 +230,13 @@ class StoryResponse(BaseModel):
     # 채팅 GET도 같은 침묵이라 새로고침한 메시지가 어느 참조가 걸렸는지 원리적으로 말 못
     # 하는 것과 동일 갭). 이 필드 하나로 "참조가 걸렸었는지"를 되살릴 수 없다.
     references: dict | None = None
+    # story #2328(C-11 ㉡층, 유나 규격 2026-07-29) — GET /api/stories?boost_candidates_from=
+    # 가 붙었을 때만 채워진다(다른 모든 경로는 기본값 False/None으로 빠진다 — agent_delegate_
+    # ids 패턴 동형, ORM 컬럼 아님, 라우터가 model_validate 前 transient attr로 세팅).
+    # ⛔후보가 아닌 항목엔 반드시 False/None으로 남는다(유나 규격 ①, FE가 섞지 않게).
+    # ⛔matched_snippet은 본문의 그 자리를 그대로 낸다 — 지어내지 않는다(유나 규격 ②).
+    is_reference_candidate: bool = False
+    matched_snippet: str | None = None
     # E-FILE S4: 보드 스토리 첨부 (column 값). list 아니면 [](레거시 None/mock 안전).
     attachments: list[dict] = []
     meeting_id: uuid.UUID | None = None

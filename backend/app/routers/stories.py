@@ -92,6 +92,14 @@ async def list_stories(
     ids: str | None = Query(default=None, description="comma-separated story ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관)"),
     story_number: int | None = Query(default=None, description="프로젝트 내 사람-읽는 #N(project_id와 함께 사용 — N은 project 내에서만 유일)"),
     q: str | None = Query(default=None, description="title 부분검색(ILIKE) — 기존 필터와 AND 결합"),
+    boost_candidates_from: uuid.UUID | None = Query(
+        default=None,
+        description=(
+            "story #2328(C-11 ㉡층) — 이 story의 의미 후보(status=estimated) 대상을 결과 "
+            "맨 앞으로 재정렬(필터링 아님, q 비어도 동작). 해당 항목엔 is_reference_candidate="
+            "true·matched_snippet이 실린다(유나 규격, 2026-07-29)."
+        ),
+    ),
     limit: int = Query(default=1000, ge=1, le=2000),
     cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
     response: Response = None,  # type: ignore[assignment]
@@ -186,7 +194,50 @@ async def list_stories(
     stories = await repo.list(limit=limit, q=q, cursor=cursor_dt, **filters)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
     await _attach_has_evidence(repo.session, stories)
+    # ⛔일반 함정(2026-07-29, PO 지적 — "측정 경로 ≠ 실행 경로"): `Query(default=None, ...)`
+    # 기본값은 「값」이 아니라 「센티널 객체」다 — FastAPI가 실 HTTP 요청 경유에서만 그것을
+    # 실제 값(여기선 None)으로 해소한다. 이 라우터 함수를 FastAPI 경유 없이 직접 호출하는
+    # 테스트(이 새 파라미터를 모른 채 kwargs를 안 넘기는 기존 다수 — test_2188_*·
+    # test_2189_*·test_083176e8_* 등)는 그 센티널 객체 그대로를 받는다. 센티널은 `is not
+    # None` 가드를 «참»으로 통과시켜 버린다("None이 아니다"는 맞지만 "UUID다"는 아니다) —
+    # DB 쿼리에 UUID 자리로 새 나가 asyncpg가 깨진다. ⛔이 코드베이스 다른 곳에 `Query(...)`/
+    # `Depends(...)` 기본값을 옵셔널 파라미터로 받는 자리가 또 있으면 같은 함정이다 —
+    # `is not None`이 아니라 `isinstance(..., <실제타입>)`으로 검사할 것.
+    if isinstance(boost_candidates_from, uuid.UUID):
+        stories = await _boost_reference_candidates(
+            repo.session, repo.org_id, stories, boost_candidates_from,
+        )
     return [StoryResponse.model_validate(s) for s in stories]
+
+
+async def _boost_reference_candidates(
+    session: AsyncSession, org_id: uuid.UUID, stories: list[Story], source_id: uuid.UUID,
+) -> list[Story]:
+    """story #2328(C-11 ㉡층, 유나 규격 2026-07-29) — 의존성 고르기 검색결과 중 source_id
+    story의 의미 후보(status=estimated)를 맨 앞으로 재정렬한다. ⛔거르지 않는다(유나 규격
+    ③) — 전달받은 stories를 그대로 재정렬만 한다. 후보인 항목엔 transient attr(agent_
+    delegate_ids 패턴 동형)로 is_reference_candidate=True·matched_snippet을 세팅해
+    "왜 여기 있는지"를 응답에 싣는다(유나 규격 ①② — 뱃지가 아니라 이유, 지어내지 않는다)."""
+    from app.models.reference_semantic_candidate import ReferenceSemanticCandidate
+
+    result = await session.execute(
+        select(ReferenceSemanticCandidate.target_id, ReferenceSemanticCandidate.snippet).where(
+            ReferenceSemanticCandidate.org_id == org_id,
+            ReferenceSemanticCandidate.source_type == "story",
+            ReferenceSemanticCandidate.source_id == source_id,
+            ReferenceSemanticCandidate.target_type == "story",
+            ReferenceSemanticCandidate.status == "estimated",
+        )
+    )
+    snippet_by_target: dict[uuid.UUID, str] = {row.target_id: row.snippet for row in result.all()}
+    if not snippet_by_target:
+        return stories
+    for story in stories:
+        if story.id in snippet_by_target:
+            story.is_reference_candidate = True
+            story.matched_snippet = snippet_by_target[story.id]
+    # stable sort — 후보가 앞으로, 각 그룹 내 원래 상대순서는 그대로 유지(유나 규격 ③).
+    return sorted(stories, key=lambda s: 0 if s.id in snippet_by_target else 1)
 
 
 async def _attach_agent_delegate_ids(session: AsyncSession, stories: list[Story]) -> None:
