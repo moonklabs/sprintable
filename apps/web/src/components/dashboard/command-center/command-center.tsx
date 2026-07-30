@@ -89,9 +89,16 @@ export function CommandCenter({ projectName }: { projectName?: string | null }) 
           {fleet ? (
             <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-[11px]">
               <span className="font-medium text-foreground">{t('ccFleet', { count: fleet.total_agents })}</span>
-              {isPending(fleet.status_breakdown) ? (
+              {/* story #2338 — BE는 status_breakdown을 실 객체로 보낸다(더 이상 통짜
+                  PendingData가 아니다). isPending에 걸면 이 실 객체와 영원히 안 맞아
+                  아래 실측값이 렌더 코드에 도달하지 못했다(#2338이 잡은 사고). */}
+              {!isPending(fleet.status_breakdown) ? (
+                <span className="text-muted-foreground/70">
+                  · {t('ccFleetOnlineWorking', { online: fleet.status_breakdown.online, working: fleet.status_breakdown.working })}
+                </span>
+              ) : (
                 <span className="text-muted-foreground/70">· {t('ccFleetBreakdownPending')}</span>
-              ) : null}
+              )}
             </div>
           ) : null}
         </div>

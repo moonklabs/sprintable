@@ -43,6 +43,42 @@ export interface MyActions {
 /** pending_data 슬롯(CC-BE.2 채우면 자동 라이브). mock/0 절대 금지 — "준비중" 또는 omit. */
 export interface PendingData { status: 'pending_data' }
 
+// ⛔story #2338(2026-07-30) — 아래 다섯 shape은 command_center.py가 «이미» 실 객체로
+// 보내고 있다(더 이상 PendingData 통짜 센티널이 아니다). risk.overdue만 여전히 BE가
+// 리터럴 PendingData를 심어 보낸다(그 필드만 진짜 미구현) — 나머지는 전부 실측값이다.
+// `isPending(ps.risk)`처럼 필드 «전체»에 옛 통짜-센티널 검사를 걸면 이 실 객체들과
+// 절대 매치 안 돼 렌더 코드에 영원히 도달하지 못한다(이 스토리가 잡은 사고 그 자체).
+export interface RiskMetrics {
+  blocked: number; // ⛔#2224 판정: 되살리지 않는다(item_dependency 엣지 org 전체 0 — 상시 0).
+  failed_runs: number; // ✅실측값 — 최근 7일 실패 agent_run 수.
+  overdue: PendingData; // ⛔BE도 미구현(command_center.py가 리터럴 _PENDING을 심음) — FE로 못 고침.
+}
+
+export interface CycleTimeMetrics {
+  avg_days: number | null; // 표본 0건이면 null(지어내지 않음).
+  sample: number; // 최근 30일 done 전이 표본 수.
+}
+
+export interface ContributionMetrics {
+  agent: number;
+  human: number;
+  unassigned: number;
+}
+
+export interface CostTrendPoint { date: string; cost_usd: number; tokens: number }
+
+export interface CostTrendMetrics {
+  points: CostTrendPoint[];
+  total_cost_usd: number;
+  delta_pct: number | null;
+}
+
+export interface FleetStatusBreakdown {
+  online: number;
+  offline: number;
+  working: number;
+}
+
 export interface EpicProgress {
   epic_id: string;
   title: string;
@@ -61,15 +97,15 @@ export interface RecentChange {
 
 export interface Overview {
   scope: string;
-  fleet: { total_agents: number; status_breakdown: PendingData | Record<string, unknown> };
+  fleet: { total_agents: number; status_breakdown: PendingData | FleetStatusBreakdown };
   project_status: {
     epics: EpicProgress[];
     outcome: { hit: number; total: number };
     recent_changes: RecentChange[];
-    risk: PendingData | Record<string, unknown>;
-    cycle_time: PendingData | Record<string, unknown>;
-    contribution: PendingData | Record<string, unknown>;
-    cost_trend: PendingData | Record<string, unknown>;
+    risk: PendingData | RiskMetrics;
+    cycle_time: PendingData | CycleTimeMetrics;
+    contribution: PendingData | ContributionMetrics;
+    cost_trend: PendingData | CostTrendMetrics;
   };
 }
 
