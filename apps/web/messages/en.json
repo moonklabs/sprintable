@@ -463,7 +463,13 @@
     "drawerHeading": "Gate/blocked signals · {n}",
     "nodesLoading": "Loading nodes…",
     "nodesError": "Couldn't load nodes.",
-    "flowMapLaneEmpty": "Nothing to draw yet."
+    "flowMapLaneEmpty": "Nothing to draw yet.",
+    "nodeStatusInProgress": "In Progress",
+    "nodeStatusInReview": "In Review",
+    "nodeStatusReadyForDev": "Ready for Dev",
+    "nodeStatusBlocked": "Blocked",
+    "nodeStatusBacklog": "Backlog",
+    "nodeStatusDone": "Done"
   },
   "board": {
     "title": "Kanban Board",

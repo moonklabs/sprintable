@@ -14,6 +14,18 @@ interface FlowMapCanvasProps {
   lanes: FlowMapLane[];
 }
 
+// PO 지적(2026-07-30) — 판을 갈아엎으며 색/모양(border-left)만 남기고 「status를 사람이
+// 읽는 말」이 조용히 사라질 뻔했다(구 FlowNodeCard의 상태 배지가 이 카드로 안 옮겨짐). 색은
+// 범례 없이는 뜻을 못 나르므로, 카드 자체에 라벨 텍스트를 그대로 유지한다(구 카드와 동형).
+const STATUS_LABEL_KEY: Record<string, string> = {
+  'in-progress': 'nodeStatusInProgress',
+  'in-review': 'nodeStatusInReview',
+  'ready-for-dev': 'nodeStatusReadyForDev',
+  blocked: 'nodeStatusBlocked',
+  backlog: 'nodeStatusBacklog',
+  done: 'nodeStatusDone',
+};
+
 function nodeToneClass(node: FlowMapNode): string {
   if (node.kind === 'now') return 'border-l-info';
   if (node.status === 'blocked') return 'border-l-destructive';
@@ -21,12 +33,17 @@ function nodeToneClass(node: FlowMapNode): string {
 }
 
 function FlowMapNodeCard({ node, left, top }: { node: FlowMapNode; left: number; top: number }) {
+  const t = useTranslations('flow');
+  const statusKey = STATUS_LABEL_KEY[node.status];
   return (
     <div
       className={`absolute w-[110px] truncate rounded border border-l-[3px] border-border bg-card px-1.5 py-1 text-[11px] shadow-sm ${nodeToneClass(node)}`}
       style={{ left, top }}
     >
-      <div className="truncate font-mono text-[9px] text-muted-foreground">#{node.storyNumber}</div>
+      <div className="flex items-center justify-between gap-1 font-mono text-[9px] text-muted-foreground">
+        <span className="truncate">#{node.storyNumber}</span>
+        <span className="shrink-0">{statusKey ? t(statusKey) : node.status}</span>
+      </div>
       <div className="truncate">{node.title}</div>
     </div>
   );

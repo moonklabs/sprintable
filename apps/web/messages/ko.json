@@ -463,7 +463,13 @@
     "drawerHeading": "게이트·막힘 신호 · {n}",
     "nodesLoading": "노드를 불러오는 중…",
     "nodesError": "노드를 불러오지 못했습니다.",
-    "flowMapLaneEmpty": "아직 그릴 노드가 없습니다."
+    "flowMapLaneEmpty": "아직 그릴 노드가 없습니다.",
+    "nodeStatusInProgress": "진행 중",
+    "nodeStatusInReview": "리뷰 중",
+    "nodeStatusReadyForDev": "개발 대기",
+    "nodeStatusBlocked": "막힘",
+    "nodeStatusBacklog": "백로그",
+    "nodeStatusDone": "완료"
   },
   "board": {
     "title": "칸반 보드",
