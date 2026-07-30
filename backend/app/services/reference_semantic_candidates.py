@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -256,6 +256,88 @@ async def list_candidates_for_epic_stories(
         .order_by(ReferenceSemanticCandidate.created_at.asc())
     )
     return list(result.scalars().all())
+
+
+@dataclass(frozen=True)
+class NextUpCandidate:
+    """`list_next_up_candidates`가 내는 한 행 — 유나양 규격(2026-07-30) ⑥ "#2123과 이어져
+    있습니다" 문구를 FE가 재조회 없이 바로 짤 수 있도록 source/target의 표시용 필드까지
+    이미 얹어서 반환한다(계산은 BE, 화면은 그리기만 원칙)."""
+
+    id: uuid.UUID
+    source_id: uuid.UUID
+    source_story_number: int | None
+    source_title: str
+    source_closed_at: datetime
+    target_id: uuid.UUID
+    target_story_number: int | None
+    target_title: str
+    relation_kind: str | None
+    status: str
+    is_recent: bool
+
+
+async def list_next_up_candidates(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, recent_days: int = 14,
+) -> list[NextUpCandidate]:
+    """story #2223 후속(오르테가군 판정, 2026-07-30) — 「방금 닫힌 것의 다음」 재료. 유나양
+    규격 정정: 기간은 «필터»가 아니라 «정렬 가중치»다 — 대상(done 소스 → backlog 타깃) 후보를
+    «전량» 반환하고, `recent_days`(기본 14 — 오르테가군 판정: 7일 59건/목표 49개=1.2개는
+    얇고, 30일은 "최근"이라 부르기 어렵다) 이내에 소스가 done된 것만 `is_recent=True`로
+    표시해 정렬 앞쪽에 세운다. 자르지 않는다(유나양 "거르지 않고 근거를 붙여 위로 올린다"
+    원칙 — 걸러내면 사람의 판단을 대신하는 것이 된다).
+
+    ⛔`source_closed_at`은 진짜 상태-전이 시각이 아니라 `Story.updated_at`(근사치)이다 — story
+    모델에 done 전이 전용 타임스탬프가 없다(activity_events 조인은 이 스토리 스코프 밖, 오르테가군
+    "그에 준하는 것" 허용 그대로). done 이후 무관한 필드 편집이 있으면 실제보다 최근으로
+    보일 수 있다는 것이 알려진 한계 — 화면에 숨기지 않고 이 docstring과 보고에 남긴다.
+
+    ⛔이 함수는 기각(#2221, `rejected_relations`) 필터를 별도로 안 건다 — 기각된 (source,
+    target) 쌍은 `reject_candidate`가 candidate 행 자체를 지우므로, 지금 이 표에 남아 있는
+    행은 정의상 기각되지 않은 것이다(build_candidate_rows의 write-time 필터와 동형 보장)."""
+    from sqlalchemy.orm import aliased
+
+    from app.models.pm import Story
+
+    Source = aliased(Story)
+    Target = aliased(Story)
+    result = await db.execute(
+        select(
+            ReferenceSemanticCandidate.id,
+            ReferenceSemanticCandidate.source_id,
+            Source.story_number,
+            Source.title,
+            Source.updated_at,
+            ReferenceSemanticCandidate.target_id,
+            Target.story_number,
+            Target.title,
+            ReferenceSemanticCandidate.relation_kind,
+            ReferenceSemanticCandidate.status,
+        )
+        .join(Source, ReferenceSemanticCandidate.source_id == Source.id)
+        .join(Target, ReferenceSemanticCandidate.target_id == Target.id)
+        .where(
+            ReferenceSemanticCandidate.org_id == org_id,
+            ReferenceSemanticCandidate.source_type == "story",
+            ReferenceSemanticCandidate.target_type == "story",
+            Source.project_id == project_id,
+            Target.project_id == project_id,
+            Source.status == "done",
+            Target.status == "backlog",
+        )
+    )
+    cutoff = datetime.now(UTC) - timedelta(days=recent_days)
+    rows = [
+        NextUpCandidate(
+            id=cid, source_id=sid, source_story_number=s_num, source_title=s_title,
+            source_closed_at=s_updated, target_id=tid, target_story_number=t_num,
+            target_title=t_title, relation_kind=kind, status=status,
+            is_recent=s_updated >= cutoff,
+        )
+        for (cid, sid, s_num, s_title, s_updated, tid, t_num, t_title, kind, status) in result.all()
+    ]
+    rows.sort(key=lambda r: (not r.is_recent, -r.source_closed_at.timestamp()))
+    return rows
 
 
 async def list_candidates_for_source(
