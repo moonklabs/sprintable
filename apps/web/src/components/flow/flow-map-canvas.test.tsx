@@ -41,6 +41,7 @@ function makeLane(overrides: Partial<FlowMapLane> = {}): FlowMapLane {
   return {
     epicId: 'e1', title: 'Epic 1', pastTotal: 0,
     nowNodes: [], queueNodesByDepth: new Map(), overflows: [], edges: [],
+    pastBundle: { total: 0, internalCount: 0, outgoingCount: 0 },
     ...overrides,
   };
 }
@@ -200,5 +201,86 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
     const noEdges = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[noEdges]} onSelectStory={() => {}} />)); });
     expect(container.textContent).not.toContain('낳음');
+  });
+});
+
+// 유나양 규격(아티팩트 a125909a, "묶음이 선을 통과시킨다") — 89%가 안 보이던 것의 답.
+describe('FlowMapCanvas — past-bundle card (묶음이 선을 통과시킨다)', () => {
+  it('renders all 3 lines of the bundle card (완료 N·묶음 / 안에서 이어진 것 M / 여기서 나온 다음 K건)', async () => {
+    const lane = makeLane({
+      pastTotal: 46,
+      nowNodes: [makeNode({ id: 'n1' })],
+      pastBundle: { total: 46, internalCount: 73, outgoingCount: 3 },
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    expect(container.textContent).toContain('완료 46');
+    expect(container.textContent).toContain('안에서 이어진 것 73');
+    expect(container.textContent).toContain('여기서 나온 다음 3건');
+  });
+
+  it('draws a line from the bundle card to a rendered node when an edge resolves to PAST_BUNDLE_NODE_ID (기존 5개→더 그려짐)', async () => {
+    const nowNode = makeNode({ id: 'n1', kind: 'now' });
+    const lane = makeLane({
+      pastTotal: 18,
+      nowNodes: [nowNode],
+      pastBundle: { total: 18, internalCount: 73, outgoingCount: 1 },
+      edges: [makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'spawn', confirmed: false })],
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    const line = container.querySelector('line[data-edge-kind="spawn"]');
+    expect(line).not.toBeNull();
+    // 묶음 카드는 폭이 다르다(110px) — 좌표가 실제로 그 카드 좌상단(left:20)에서 시작해야 한다.
+    expect(Number(line?.getAttribute('x1'))).toBeGreaterThanOrEqual(20);
+  });
+});
+
+describe('FlowMapCanvas — grouped edges (여러 선이 한 점에 모이면 굵기+수)', () => {
+  it('draws ONE line (not N overlapping lines) when multiple edges share the same endpoints, with a count label', async () => {
+    const nowNode = makeNode({ id: 'n1', kind: 'now' });
+    const lane = makeLane({
+      nowNodes: [nowNode],
+      pastTotal: 5,
+      pastBundle: { total: 5, internalCount: 0, outgoingCount: 3 },
+      edges: [
+        makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'spawn', confirmed: true }),
+        makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'spawn', confirmed: true }),
+        makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'spawn', confirmed: true }),
+      ],
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    const lines = container.querySelectorAll('line[data-edge-kind]');
+    expect(lines).toHaveLength(1); // 3건이 겹쳐 하나로
+    expect(lines[0]?.getAttribute('data-edge-count')).toBe('3');
+    expect(lines[0]?.getAttribute('stroke-width')).toBe('2'); // 2~3건 = 2px
+    expect(container.querySelector('text')?.textContent).toBe('3'); // 수를 선 위에
+  });
+
+  it('renders the line achromatic (no kind-specific color) when a group mixes different kinds (한 색으로 단정하지 않는다)', async () => {
+    const nowNode = makeNode({ id: 'n1', kind: 'now' });
+    const lane = makeLane({
+      nowNodes: [nowNode],
+      pastTotal: 5,
+      pastBundle: { total: 5, internalCount: 0, outgoingCount: 2 },
+      edges: [
+        makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'spawn', confirmed: true }),
+        makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'then', confirmed: true }),
+      ],
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    const line = container.querySelector('line[data-edge-kind="mixed"]');
+    expect(line).not.toBeNull();
+    expect(line?.getAttribute('stroke')).toBe('var(--muted-foreground)');
+  });
+
+  it('does not show a count label for a group of exactly 1 edge', async () => {
+    const nowNode = makeNode({ id: 'n1', kind: 'now' });
+    const lane = makeLane({
+      nowNodes: [nowNode],
+      pastTotal: 5,
+      pastBundle: { total: 5, internalCount: 0, outgoingCount: 1 },
+      edges: [makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'spawn', confirmed: true })],
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    expect(container.querySelector('text')).toBeNull();
   });
 });

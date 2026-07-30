@@ -1,10 +1,12 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import type { FlowMapLane, FlowMapNode, FlowMapEdgeKind } from './derive-flow-map';
+import type { FlowMapLane, FlowMapNode, FlowMapEdgeKind, FlowMapEdgeGroup } from './derive-flow-map';
 import {
   FLOW_MAP_GRID_STEP, FLOW_MAP_NOW_LINE_X, FLOW_MAP_DEPTH0_X, computeLaneHeight, shouldShowNoDeeperReason,
-  computeNodePositions, computeSupersededNodeIds, computeEdgeLineEndpoints,
+  computeNodePositions, computeSupersededNodeIds, computeEdgeLineEndpoints, groupEdgesByEndpoints,
+  edgeGroupStrokeWidth, PAST_BUNDLE_NODE_ID, PAST_BUNDLE_LEFT, PAST_BUNDLE_TOP, PAST_BUNDLE_CARD_WIDTH,
+  PAST_BUNDLE_CARD_HEIGHT,
 } from './derive-flow-map';
 
 // 카드 실측(FlowMapNodeCard): w-[110px], 높이는 두 줄 텍스트+padding으로 24px 안팎(NODE_ROW_HEIGHT
@@ -80,11 +82,14 @@ function FlowMapNodeCard({ node, left, top, superseded, onSelectStory }: { node:
 // 이와 직교하는 stroke-dasharray(확定=실선/제안=점선)로만 표현 — 아래 표에는 없다.
 // null(종 미정)은 화살촉 자체가 없다(유나양 지적: 넷째 모양을 주면 "미정"이 확定된 하나의
 // 종류처럼 보인다 — 모르면 그 채널을 비운다). 다만 방향은 아는지라 끝점에 점 하나만.
-function edgeKindStyle(kind: FlowMapEdgeKind): { color: string; strokeWidth: number; markerEnd: string; markerStart?: string } {
-  if (kind === 'spawn') return { color: 'var(--info)', strokeWidth: 1.4, markerEnd: 'url(#flow-edge-arrow-open)' };
-  if (kind === 'then') return { color: 'var(--brand)', strokeWidth: 1.4, markerEnd: 'url(#flow-edge-arrow-filled)', markerStart: 'url(#flow-edge-dot-start)' };
-  if (kind === 'supersede') return { color: 'var(--muted-foreground)', strokeWidth: 1.4, markerEnd: 'url(#flow-edge-bar)' };
-  return { color: 'var(--muted-foreground)', strokeWidth: 1, markerEnd: 'url(#flow-edge-dot-end)' }; // 종 미정
+function edgeKindStyle(kind: FlowMapEdgeKind | 'mixed'): { color: string; markerEnd: string; markerStart?: string } {
+  if (kind === 'spawn') return { color: 'var(--info)', markerEnd: 'url(#flow-edge-arrow-open)' };
+  if (kind === 'then') return { color: 'var(--brand)', markerEnd: 'url(#flow-edge-arrow-filled)', markerStart: 'url(#flow-edge-dot-start)' };
+  if (kind === 'supersede') return { color: 'var(--muted-foreground)', markerEnd: 'url(#flow-edge-bar)' };
+  // 종 미정(null) · 여러 종이 섮인 그룹('mixed') — 둘 다 "이 선이 «무슨 종»인지 하나로
+  // 말할 수 없다"는 같은 사정이라 같은 모양(화살촉 없음, 끝점 점)을 쓴다(유나양 규격:
+  // 종 미정은 넷째 모양 없이 무채, 섮인 그룹도 "한 색으로 단정하지 않는다"=무채).
+  return { color: 'var(--muted-foreground)', markerEnd: 'url(#flow-edge-dot-end)' };
 }
 
 function FlowEdgeMarkerDefs() {
@@ -195,23 +200,47 @@ export function FlowMapCanvas({ lanes, onSelectStory }: FlowMapCanvasProps) {
                       <FlowEdgeMarkerDefs />
                       {(() => {
                         const positions = computeNodePositions(lane, NODE_ROW_HEIGHT, NOW_CLUSTER_X);
-                        return lane.edges.map((edge) => {
-                          const coords = computeEdgeLineEndpoints(positions, edge, NODE_CARD_WIDTH, NODE_CARD_HEIGHT);
+                        const dimensionOverrides = new Map([
+                          [PAST_BUNDLE_NODE_ID, { width: PAST_BUNDLE_CARD_WIDTH, height: PAST_BUNDLE_CARD_HEIGHT }],
+                        ]);
+                        // 유나양 규격(묶음-간선 후속) — 같은 (from,to) 쌍으로 여러 간선이
+                        // 겹칠 수 있다(여러 과거 스토리가 같은 묶음 카드로 모여 같은 살아있는
+                        // 노드를 가리키는 경우). 겹친 채로 두면 몇 건인지 안 보이므로 그룹당
+                        // 하나의 선(굵기 3단+count>1이면 수 라벨)으로 그린다.
+                        const groups = groupEdgesByEndpoints(lane.edges);
+                        return groups.map((group: FlowMapEdgeGroup) => {
+                          const coords = computeEdgeLineEndpoints(
+                            positions, group, { width: NODE_CARD_WIDTH, height: NODE_CARD_HEIGHT }, dimensionOverrides,
+                          );
                           if (!coords) return null;
                           const { x1, y1, x2, y2 } = coords;
-                          const style = edgeKindStyle(edge.kind);
+                          const style = edgeKindStyle(group.uniformKind);
+                          const midX = (x1 + x2) / 2;
+                          const midY = (y1 + y2) / 2;
                           return (
-                            <line
-                              key={`${edge.fromNodeId}-${edge.toNodeId}`}
-                              data-edge-kind={edge.kind ?? 'unknown'}
-                              data-edge-confirmed={edge.confirmed}
-                              x1={x1} y1={y1} x2={x2} y2={y2}
-                              stroke={style.color}
-                              strokeWidth={style.strokeWidth}
-                              strokeDasharray={edge.confirmed ? undefined : '4 3'}
-                              markerEnd={style.markerEnd}
-                              markerStart={style.markerStart}
-                            />
+                            <g key={`${group.fromNodeId}-${group.toNodeId}`}>
+                              <line
+                                data-edge-kind={group.uniformKind === 'mixed' ? 'mixed' : (group.uniformKind ?? 'unknown')}
+                                data-edge-confirmed={group.allConfirmed}
+                                data-edge-count={group.count}
+                                x1={x1} y1={y1} x2={x2} y2={y2}
+                                stroke={style.color}
+                                strokeWidth={edgeGroupStrokeWidth(group.count)}
+                                strokeDasharray={group.allConfirmed ? undefined : '4 3'}
+                                markerEnd={style.markerEnd}
+                                markerStart={style.markerStart}
+                              />
+                              {group.count > 1 ? (
+                                <text
+                                  x={midX} y={midY - 4}
+                                  textAnchor="middle"
+                                  className="fill-muted-foreground font-mono text-[9px] font-semibold"
+                                  style={{ paintOrder: 'stroke', stroke: 'var(--card)', strokeWidth: 3 }}
+                                >
+                                  {group.count}
+                                </text>
+                              ) : null}
+                            </g>
                           );
                         });
                       })()}
@@ -222,17 +251,27 @@ export function FlowMapCanvas({ lanes, onSelectStory }: FlowMapCanvasProps) {
                     <p className="absolute left-3 top-2 text-[11px] text-muted-foreground">{t('flowMapLaneEmpty')}</p>
                   ) : null}
 
-                  {/* ④과거 묶음 카드 — BE past:{total}엔 items가 없어(스키마 자체 없음) 개별
-                      카드/최근1건을 지을 수 없다. 건수만 정직하게 보인다(지어내지 않는다). */}
+                  {/* ④과거 묶음 카드 — 유나양 규격(아티팩트 a125909a, "묶음이 선을 통과시킨다")
+                      3줄: ①무엇이 몇 개 접혔나 ②접힌 것끼리 이어진 수(볼 수 없는 것, 안
+                      그리는 것과 없는 것은 다르다는 규율 그대로 수로 정직하게) ③접힌 것이
+                      지금·미래로 보낸 수(볼 수 있는 것 — 선생님 "후속 작업이 어떻게 준비되고
+                      연결되는가" 물음의 직접적인 답). BE past:{total}엔 개별 스토리 id가
+                      없어(스키마 자체 없음) 낱개 카드는 못 짓는다 — 그래도 이 3줄은 간선
+                      집계만으로 계산 가능(deriveFlowMapLane의 pastBundle). */}
                   {lane.pastTotal > 0 ? (
                     <div
-                      className="absolute w-[90px] rounded border border-border bg-muted px-1.5 py-1 opacity-75"
-                      style={{ left: 20, top: 4 }}
+                      className="absolute rounded border border-border bg-muted px-1.5 py-1 opacity-75"
+                      style={{ left: PAST_BUNDLE_LEFT, top: PAST_BUNDLE_TOP, width: PAST_BUNDLE_CARD_WIDTH }}
                     >
                       <div className="font-mono text-[9px] font-semibold text-foreground">
-                        {t('flowMapPastCount', { n: lane.pastTotal })}
+                        {t('flowMapPastCount', { n: lane.pastTotal })} · {t('flowMapPastBundle')}
                       </div>
-                      <div className="text-[10px] text-muted-foreground">{t('flowMapPastBundle')}</div>
+                      <div className="text-[9px] text-muted-foreground">
+                        {t('flowMapPastInternalCount', { n: lane.pastBundle.internalCount })}
+                      </div>
+                      <div className="text-[9px] font-semibold text-brand">
+                        {t('flowMapPastOutgoingCount', { n: lane.pastBundle.outgoingCount })}
+                      </div>
                     </div>
                   ) : null}
 
