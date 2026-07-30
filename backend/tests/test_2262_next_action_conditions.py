@@ -1,14 +1,19 @@
 """story #2262(C-4) AC9 — app.services.next_action의 조건식 단위 검증. 순수 함수(DB 무접촉)라
 실PG 없이 돈다. doc `e-connect-c4-trigger-condition-table`의 발생조건표를 그대로 pin한다 —
-①있음/②확定 없음/④주체 세 축을 각 함수마다 양성·음성 대조로 고정."""
+①있음/②확定 없음/④주체 세 축을 각 함수마다 양성·음성 대조로 고정.
+
+⛔PO 판정(2026-07-29, PR#2633 머지 後 리뷰): `artifact_next_action`(unresolved_comment_count
+재노출뿐)·doc_next_action의 `superseded_by` 분기(superseded_by 원자 필드와 중복)를 뺐다 —
+next_action.py 모듈 docstring 참조. 아래 테스트도 그에 맞춰 갱신."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
 from app.services.next_action import (
-    artifact_next_action,
+    NEXT_ACTION_CATEGORIES,
     doc_next_action,
     hypothesis_next_action,
+    next_action_category,
     outcome_measurement_next_action,
     verification_next_action,
 )
@@ -101,19 +106,11 @@ def test_verification_already_resolved_returns_none_either_direction():
 
 
 def test_doc_draft_returns_decision_pending():
-    assert doc_next_action(status="draft", superseded_by=None) == "decision_pending"
+    assert doc_next_action(status="draft") == "decision_pending"
 
 
-def test_doc_superseded_returns_superseded_even_if_also_draft():
-    """superseded_by가 우선 — 더 확定적인 다음 행동(가야 할 곳이 이미 정해짐)."""
-    import uuid
-    target = uuid.uuid4()
-    assert doc_next_action(status="draft", superseded_by=target) == "superseded"
-    assert doc_next_action(status="active", superseded_by=target) == "superseded"
-
-
-def test_doc_decided_not_superseded_returns_none():
-    assert doc_next_action(status="active", superseded_by=None) is None
+def test_doc_decided_returns_none():
+    assert doc_next_action(status="active") is None
 
 
 # ─── hypothesis_next_action ───────────────────────────────────────────────────
@@ -145,12 +142,53 @@ def test_hypothesis_measuring_not_yet_due_returns_none():
     ) is None
 
 
-# ─── artifact_next_action ─────────────────────────────────────────────────────
+# ─── next_action_category (PO 판정 2026-07-29, §3-1과 같은 축) ───────────────
 
 
-def test_artifact_unresolved_returns_code():
-    assert artifact_next_action(unresolved_comment_count=3) == "artifact_has_unresolved_comments"
+def test_category_none_code_returns_none():
+    assert next_action_category(None) is None
 
 
-def test_artifact_zero_returns_none():
-    assert artifact_next_action(unresolved_comment_count=0) is None
+def test_category_actionable_codes():
+    assert next_action_category("outcome_measurement_due") == "actionable"
+    assert next_action_category("hypothesis_measurement_due") == "actionable"
+
+
+def test_category_waiting_codes():
+    assert next_action_category("verification_pending") == "waiting"
+    assert next_action_category("decision_pending") == "waiting"
+
+
+def test_category_unknown_code_falls_back_to_none_with_warning(caplog):
+    """⛔민군 지적(2026-07-30, PO 판정 — "가드는 CI에·폴백은 운영에"): 운영 경로(응답
+    직렬화 시점 computed_field)에서 매핑 밖 코드를 만나도 절대 안 던진다 — list
+    엔드포인트에서 레코드 한 건의 미분류가 응답 전체를 500으로 끌고 가면 안 되기
+    때문(사용자를 인질로 개발자에게 말하는 가드는 가드가 아니다). None을 반환하고
+    logger.warning만 남긴다 — 새 코드 분류 누락을 «잡는» 자리는 아래 CI 회귀테스트."""
+    import logging
+    with caplog.at_level(logging.WARNING, logger="app.services.next_action"):
+        result = next_action_category("some_future_code_nobody_classified")
+    assert result is None
+    assert "미분류" in caplog.text
+
+
+def test_all_returned_codes_are_classified():
+    """⛔민군 지적(2026-07-30): 기존 버전은 NEXT_ACTION_CATEGORIES를 자기 자신과 대조하는
+    동어반복이라 "등록된 것이 등록돼 있다"만 확認하고 영원히 통과했다 — 새 코드를
+    실제로 추가하고 분류를 빠뜨려도 절대 안 잡혔을 것이다. 대신 4개 함수를 각자의
+    "발생조건"(위 test_*_returns_code들과 동일 트리거 입력)으로 «실제 호출»해 진짜
+    반환값 집합을 뽑고, 그걸 NEXT_ACTION_CATEGORIES와 대조한다 — 독립 원본이라 새
+    코드가 추가되고 분류가 빠지면 이 대조가 실제로 깨진다."""
+    actually_returned_codes = {
+        outcome_measurement_next_action(
+            outcome_status="pending", measure_after=_PAST, metric_definition={"source": "manual"},
+            system_owned_sources=frozenset({"ga4"}), now=_NOW,
+        ),
+        verification_next_action(self_reported=True, human_verified=None),
+        doc_next_action(status="draft"),
+        hypothesis_next_action(
+            status="measuring", measure_after=_PAST, metric_definition={"source": "manual"}, now=_NOW,
+        ),
+    }
+    assert None not in actually_returned_codes, "발생조건 트리거 입력이 잘못돼 코드가 안 나온다"
+    assert actually_returned_codes == set(NEXT_ACTION_CATEGORIES)

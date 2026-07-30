@@ -127,6 +127,12 @@ class SprintResponse(SprintBase):
             metric_definition=self.metric_definition, system_owned_sources=frozenset({"ga4", "internal_ops"}),
         )
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_category(self) -> str | None:
+        from app.services.next_action import next_action_category
+        return next_action_category(self.next_action_code)
+
 
 class KickoffBody(BaseModel):
     message: str | None = None
