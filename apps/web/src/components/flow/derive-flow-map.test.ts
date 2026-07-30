@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  computeNodeDepth, deriveFlowMapLane, computeLaneHeight,
+  computeNodeDepth, deriveFlowMapLane, computeLaneHeight, shouldShowNoDeeperReason, FLOW_MAP_TOP_N,
   type FlowMapEdge, type FlowMapLane,
 } from './derive-flow-map';
 import type { EpicFlowNodeItem } from './derive-flow';
@@ -68,17 +68,44 @@ describe('deriveFlowMapLane', () => {
     expect(lane.queueNodesByDepth.get(1)?.map((n) => n.id)).toEqual(['u2']);
   });
 
-  it('does not truncate a depth column (top-N truncation is a later stage, not built yet)', () => {
-    const items = Array.from({ length: 20 }, (_, i) => makeItem({ id: `u${i}`, story_number: i }));
+  it('caps a depth column at FLOW_MAP_TOP_N and reports the rest as overflow (판C — 잘린 수를 정직하게)', () => {
+    const items = Array.from({ length: FLOW_MAP_TOP_N + 2 }, (_, i) => makeItem({ id: `u${i}`, story_number: i }));
     const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [], items, []);
-    expect(lane.queueNodesByDepth.get(0)).toHaveLength(20);
+    expect(lane.queueNodesByDepth.get(0)).toHaveLength(FLOW_MAP_TOP_N);
+    expect(lane.overflows).toEqual([{ depth: 0, hiddenCount: 2 }]);
+  });
+
+  it('reports no overflow when a depth column has exactly TOP_N or fewer', () => {
+    const items = Array.from({ length: FLOW_MAP_TOP_N }, (_, i) => makeItem({ id: `u${i}` }));
+    const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [], items, []);
+    expect(lane.overflows).toEqual([]);
+  });
+
+  it('sorts blocked nodes first within a depth column ("다음 지정됨" tier deferred — no field yet)', () => {
+    const items = [
+      makeItem({ id: 'u1', status: 'backlog' }),
+      makeItem({ id: 'u2', status: 'blocked' }),
+      makeItem({ id: 'u3', status: 'backlog' }),
+    ];
+    const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [], items, []);
+    expect(lane.queueNodesByDepth.get(0)?.map((n) => n.id)).toEqual(['u2', 'u1', 'u3']);
+  });
+
+  it('keeps a blocked node visible ahead of the cutoff even when it would otherwise be truncated', () => {
+    const items = [
+      ...Array.from({ length: FLOW_MAP_TOP_N }, (_, i) => makeItem({ id: `u${i}`, status: 'backlog' })),
+      makeItem({ id: 'blocked1', status: 'blocked' }),
+    ];
+    const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [], items, []);
+    expect(lane.queueNodesByDepth.get(0)?.map((n) => n.id)).toContain('blocked1');
+    expect(lane.overflows).toEqual([{ depth: 0, hiddenCount: 1 }]);
   });
 });
 
 function makeLane(overrides: Partial<FlowMapLane> = {}): FlowMapLane {
   return {
     epicId: 'e1', title: 'Epic 1', pastTotal: 0,
-    nowNodes: [], queueNodesByDepth: new Map(),
+    nowNodes: [], queueNodesByDepth: new Map(), overflows: [],
     ...overrides,
   };
 }
@@ -106,5 +133,34 @@ describe('computeLaneHeight', () => {
       ]]]),
     });
     expect(computeLaneHeight(lane, 28, 0)).toBe(56); // 2 queue nodes * 28 > 1 now node * 28
+  });
+
+  it('adds one extra row for a depth column that has an overflow card (판C — 더보기 카드도 한 행)', () => {
+    const lane = makeLane({
+      queueNodesByDepth: new Map([[0, [{ id: 'q1', storyNumber: 1, title: 't', status: 'backlog', kind: 'queue', depth: 0 }]]]),
+      overflows: [{ depth: 0, hiddenCount: 5 }],
+    });
+    expect(computeLaneHeight(lane, 28, 0)).toBe(56); // (1 card + 1 overflow card) * 28
+  });
+});
+
+describe('shouldShowNoDeeperReason', () => {
+  it('is true when depth-0 has nodes and no depth>=1 exists (org has 0 edges today)', () => {
+    const lane = makeLane({ queueNodesByDepth: new Map([[0, [
+      { id: 'q1', storyNumber: 1, title: 't', status: 'backlog', kind: 'queue', depth: 0 },
+    ]]]) });
+    expect(shouldShowNoDeeperReason(lane)).toBe(true);
+  });
+
+  it('is false once a depth>=1 node exists (edges landed — message must self-disappear)', () => {
+    const lane = makeLane({ queueNodesByDepth: new Map([
+      [0, [{ id: 'q1', storyNumber: 1, title: 't', status: 'backlog', kind: 'queue', depth: 0 }]],
+      [1, [{ id: 'q2', storyNumber: 2, title: 't', status: 'backlog', kind: 'queue', depth: 1 }]],
+    ]) });
+    expect(shouldShowNoDeeperReason(lane)).toBe(false);
+  });
+
+  it('is false when the lane has no queue nodes at all (nothing to anchor the message to)', () => {
+    expect(shouldShowNoDeeperReason(makeLane())).toBe(false);
   });
 });
