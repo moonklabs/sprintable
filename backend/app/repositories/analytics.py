@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -9,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.gate import Gate
 from app.models.pm import Goal, Sprint, Story, Task
 from app.models.team import TeamMember
+
+logger = logging.getLogger(__name__)
 
 
 class AnalyticsRepository:
@@ -238,6 +241,27 @@ class AnalyticsRepository:
             )
         )
         blocked_ids = set(blocked_r.scalars().all())
+
+        # ⭐PO 지적(2026-07-30): ㉡류(pending Gate가 매였는데 위 좁힌 조건을 못 채워 blocked
+        # 밖으로 빠진 것)가 늘어나는 것을 "누가 아는가"가 남는다 — 칸(응답 필드)을 새로
+        # 만들지 않아도 «셀 수는» 있게, 매 호출마다 로그로 남긴다(dev 실측 2026-07-30: 1건).
+        gated_not_blocked_r = await self.session.execute(
+            select(func.count(Gate.work_item_id.distinct())).where(
+                Gate.org_id == self.org_id,
+                Gate.work_item_type == "story",
+                Gate.work_item_id.in_(story_ids),
+                Gate.status == "pending",
+                ~((Gate.requires_human.is_(True)) & (Gate.evidence_status == "insufficient")),
+            )
+        )
+        gated_not_blocked_count = gated_not_blocked_r.scalar_one()
+        if gated_not_blocked_count:
+            logger.info(
+                "get_epics_progress_lane: gated-but-not-blocked(㉡) count=%d project_id=%s "
+                "(pending Gate 있으나 requires_human/evidence_status 조건 미충족 — other에 섞임, "
+                "story #2224 PO 지적 — 늘면 별도 칸 분리 검토)",
+                gated_not_blocked_count, project_id,
+            )
 
         from app.services.next_action import next_action_category, verification_next_action
 
