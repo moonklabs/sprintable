@@ -2,7 +2,9 @@
 
 import { useTranslations } from 'next-intl';
 import type { FlowMapLane, FlowMapNode } from './derive-flow-map';
-import { FLOW_MAP_GRID_STEP, FLOW_MAP_NOW_LINE_X, FLOW_MAP_DEPTH0_X, computeLaneHeight } from './derive-flow-map';
+import {
+  FLOW_MAP_GRID_STEP, FLOW_MAP_NOW_LINE_X, FLOW_MAP_DEPTH0_X, computeLaneHeight, shouldShowNoDeeperReason,
+} from './derive-flow-map';
 
 // 유나 목업(`be8709a4`) 실측 치수 — "그림이 정본"(2026-07-30), 비슷한 값이 아니라 그 숫자.
 const HEADER_HEIGHT = 22; // .colhd
@@ -37,7 +39,7 @@ function FlowMapNodeCard({ node, left, top }: { node: FlowMapNode; left: number;
   const statusKey = STATUS_LABEL_KEY[node.status];
   return (
     <div
-      className={`absolute w-[110px] truncate rounded border border-l-[3px] border-border bg-card px-1.5 py-1 text-[11px] shadow-sm ${nodeToneClass(node)}`}
+      className={`absolute w-[110px] overflow-visible rounded border border-l-[3px] border-border bg-card px-1.5 py-1 text-[11px] shadow-sm ${nodeToneClass(node)}`}
       style={{ left, top }}
     >
       <div className="flex items-center justify-between gap-1 font-mono text-[9px] text-muted-foreground">
@@ -45,16 +47,29 @@ function FlowMapNodeCard({ node, left, top }: { node: FlowMapNode; left: number;
         <span className="shrink-0">{statusKey ? t(statusKey) : node.status}</span>
       </div>
       <div className="truncate">{node.title}</div>
+      {/* ⑥ 포트(형태만, 2026-07-30 PO 판정) — 간선이 org 전체 0건인 지금이야말로 포트를
+          «먼저» 세워야 한다(포트가 첫 연결을 만드는 유일한 길 — 재료를 소비만 하는 것과
+          달리 재료를 만드는 것은 미룰수록 0이 굳는다). 오늘은 모양만: 실제 드래그로
+          `POST /api/v2/dependencies`(from=왼쪽/to=오른쪽/dep_type='blocks' 고정, 방향
+          PO 확定 2026-07-30)를 부르는 배선은 다음 조각. */}
+      <span
+        aria-hidden="true"
+        className="absolute right-[-5px] top-1/2 h-[9px] w-[9px] -translate-y-1/2 rounded-full border-[1.5px] border-info bg-card"
+      />
     </div>
   );
 }
 
 /**
- * story #2224 L3 — 갈래 «지도» 최소 본체(유나 목업 `be8709a4` 판A/판B/판C, PO 판정
- * 2026-07-30). 오늘 범위는 딱 셋: ⑤레인 높이가 «내용에서 계산»(고정 아님) · ①노드가 «의존
- * 깊이 좌표»(x = depth × 110px, computeNodeDepth가 실제 계산 — 오늘은 간선이 없어 전부
- * depth 0) · ②「지금」 세로선(left 292px). 열마다 상위3+더보기·과거 묶음카드·포트·슬롯은
- * 레인 6개를 한 판에 얹는 멀티레인 BE 계약이 착지한 다음 단계(별도 PR) — 여기서 미리 안 짓는다.
+ * story #2224 L3 — 갈래 «지도»(유나 목업 `be8709a4` 판A/판B/판C, PO 판정 2026-07-30).
+ * ⑤레인 높이가 «내용에서 계산»(고정 아님) · ①노드가 «의존 깊이 좌표»(x = depth × 110px,
+ * computeNodeDepth가 실제 계산 — 오늘은 간선이 없어 전부 depth 0) · ②「지금」 세로선
+ * (left 292px) · ③열마다 상위 3 + 「+N건」 점선 카드(잘린 수를 정직하게 보이는 것 —
+ * 「67 중 15」와 같은 규율) · ④과거는 개별 카드 없이 건수만(BE `past:{total}` 스키마에
+ * items 필드가 아예 없어 "최근 1건 낱개"는 오늘 데이터로 지을 수 없다 — 지어내지 않는다).
+ *
+ * 포트(⑥)는 «그림»만 서 있다 — 실제 저장 배선은 #2221(부산물형 간선 3종)이 착지한 뒤
+ * (PO 정정 2026-07-30, 기존 `dependencies`(계획형)에 쓰면 6주 0건 운명을 물려받는다).
  *
  * `lanes`를 배열로 받는 것은 오늘의 단일-에픽 구조에 이미 «내일의 모양»을 맞춰 두는 것이다
  * (PO 지시 — "한 레인 전용으로 짜지 마시는, 처음부터 레인 배열을 받는 형태로"). 오늘은 이
@@ -96,7 +111,6 @@ export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
               <div key={lane.epicId} className="relative flex border-b border-border last:border-b-0" style={{ height }}>
                 <div className="w-[150px] shrink-0 border-r border-border px-2 py-1.5">
                   <p className="truncate text-[11px] font-semibold text-foreground">{lane.title}</p>
-                  <p className="text-[9px] text-muted-foreground">{t('canvasPast')} · {lane.pastTotal}</p>
                 </div>
                 <div className="relative min-w-0 flex-1">
                   {/* ②「지금」 세로선 — 아티팩트 실측: left 292px, top 0~바닥, 1px, info, opacity .5 */}
@@ -106,8 +120,22 @@ export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
                     style={{ left: FLOW_MAP_NOW_LINE_X }}
                   />
 
-                  {lane.nowNodes.length === 0 && lane.queueNodesByDepth.size === 0 ? (
+                  {lane.pastTotal === 0 && lane.nowNodes.length === 0 && lane.queueNodesByDepth.size === 0 ? (
                     <p className="absolute left-3 top-2 text-[11px] text-muted-foreground">{t('flowMapLaneEmpty')}</p>
+                  ) : null}
+
+                  {/* ④과거 묶음 카드 — BE past:{total}엔 items가 없어(스키마 자체 없음) 개별
+                      카드/최근1건을 지을 수 없다. 건수만 정직하게 보인다(지어내지 않는다). */}
+                  {lane.pastTotal > 0 ? (
+                    <div
+                      className="absolute w-[90px] rounded border border-border bg-muted px-1.5 py-1 opacity-75"
+                      style={{ left: 20, top: 4 }}
+                    >
+                      <div className="font-mono text-[9px] font-semibold text-foreground">
+                        {t('flowMapPastCount', { n: lane.pastTotal })}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">{t('flowMapPastBundle')}</div>
+                    </div>
                   ) : null}
 
                   {lane.nowNodes.map((node, i) => (
@@ -116,18 +144,42 @@ export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
 
                   {/* ①깊이 좌표 — x = FLOW_MAP_DEPTH0_X + depth × FLOW_MAP_GRID_STEP. depth는
                       computeNodeDepth가 실제 계산한 값(간선 없는 오늘은 전부 0 → 한 열). */}
-                  {Array.from(lane.queueNodesByDepth.entries()).map(([depth, nodes]) => (
-                    <div key={depth}>
-                      {nodes.map((node, i) => (
-                        <FlowMapNodeCard
-                          key={node.id}
-                          node={node}
-                          left={FLOW_MAP_DEPTH0_X + depth * FLOW_MAP_GRID_STEP}
-                          top={4 + i * NODE_ROW_HEIGHT}
-                        />
-                      ))}
-                    </div>
-                  ))}
+                  {Array.from(lane.queueNodesByDepth.entries()).map(([depth, nodes]) => {
+                    const overflow = lane.overflows.find((o) => o.depth === depth);
+                    const x = FLOW_MAP_DEPTH0_X + depth * FLOW_MAP_GRID_STEP;
+                    return (
+                      <div key={depth}>
+                        {nodes.map((node, i) => (
+                          <FlowMapNodeCard key={node.id} node={node} left={x} top={4 + i * NODE_ROW_HEIGHT} />
+                        ))}
+                        {/* ③「+N건」 더보기 카드(판C) — 잘린 수를 정직하게 보인다. "숨김"이
+                            아니라 "있다는 걸 보여주며 접는 것"(오늘 「67 중 15」와 같은 규율). */}
+                        {overflow ? (
+                          <div
+                            className="absolute flex w-[110px] items-center gap-1 rounded border border-dashed border-border px-1.5 py-1 text-[10px] text-muted-foreground"
+                            style={{ left: x, top: 4 + nodes.length * NODE_ROW_HEIGHT }}
+                          >
+                            <b className="font-mono font-semibold text-foreground">
+                              {t('flowMapMoreCount', { n: overflow.hiddenCount })}
+                            </b>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+
+                  {/* ⑥ 조건부 문구(PO 판정 2026-07-30) — "그리지 않는 것"이 아니라 "왜 비었는지
+                      말하는 것"이 0을 그리는 것의 완성형. 하드코딩된 텍스트가 아니라 depth≥1
+                      항목이 실제로 없을 때만 뜨는 조건문 — 간선이 착지해 depth 2열이 생기는
+                      날 이 조건이 스스로 거짓이 되어 사라진다(거짓말이 될 위험 없음). */}
+                  {shouldShowNoDeeperReason(lane) ? (
+                    <p
+                      className="absolute font-mono text-[9px] text-brand"
+                      style={{ left: FLOW_MAP_DEPTH0_X + FLOW_MAP_GRID_STEP + 12, top: height / 2 - 6 }}
+                    >
+                      {t('flowMapNoDeeperReason')}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             );
