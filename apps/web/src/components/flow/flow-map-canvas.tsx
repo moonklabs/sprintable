@@ -4,7 +4,7 @@ import { useTranslations } from 'next-intl';
 import type { FlowMapLane, FlowMapNode, FlowMapEdgeKind } from './derive-flow-map';
 import {
   FLOW_MAP_GRID_STEP, FLOW_MAP_NOW_LINE_X, FLOW_MAP_DEPTH0_X, computeLaneHeight, shouldShowNoDeeperReason,
-  computeNodePositions, computeSupersededNodeIds,
+  computeNodePositions, computeSupersededNodeIds, computeEdgeLineEndpoints,
 } from './derive-flow-map';
 
 // 카드 실측(FlowMapNodeCard): w-[110px], 높이는 두 줄 텍스트+padding으로 24px 안팎(NODE_ROW_HEIGHT
@@ -196,13 +196,9 @@ export function FlowMapCanvas({ lanes, onSelectStory }: FlowMapCanvasProps) {
                       {(() => {
                         const positions = computeNodePositions(lane, NODE_ROW_HEIGHT, NOW_CLUSTER_X);
                         return lane.edges.map((edge) => {
-                          const from = positions.get(edge.fromNodeId);
-                          const to = positions.get(edge.toNodeId);
-                          if (!from || !to) return null;
-                          const x1 = from.left + NODE_CARD_WIDTH;
-                          const y1 = from.top + NODE_CARD_HEIGHT / 2;
-                          const x2 = to.left;
-                          const y2 = to.top + NODE_CARD_HEIGHT / 2;
+                          const coords = computeEdgeLineEndpoints(positions, edge, NODE_CARD_WIDTH, NODE_CARD_HEIGHT);
+                          if (!coords) return null;
+                          const { x1, y1, x2, y2 } = coords;
                           const style = edgeKindStyle(edge.kind);
                           return (
                             <line

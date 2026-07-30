@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeNodeDepth, deriveFlowMapLane, computeLaneHeight, shouldShowNoDeeperReason, computeNodePositions,
-  parseDependencyGraphEdges, parseReferenceCandidateEdges, FLOW_MAP_TOP_N, FLOW_MAP_FOLD_THRESHOLD,
-  FLOW_MAP_DEPTH0_X, FLOW_MAP_GRID_STEP,
+  computeEdgeLineEndpoints, parseDependencyGraphEdges, parseReferenceCandidateEdges, FLOW_MAP_TOP_N,
+  FLOW_MAP_FOLD_THRESHOLD, FLOW_MAP_DEPTH0_X, FLOW_MAP_GRID_STEP,
   type FlowMapEdge, type FlowMapLane, type RawReferenceCandidate,
 } from './derive-flow-map';
 import type { EpicFlowNodeItem } from './derive-flow';
@@ -244,6 +244,40 @@ describe('computeNodePositions', () => {
     const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [], items, []);
     const positions = computeNodePositions(lane, 28, 252);
     expect(positions.has(`u${FLOW_MAP_TOP_N}`)).toBe(false);
+  });
+});
+
+// 라이브 실측 자가발견(2026-07-30, PR#2706 배포 후) — 실제로 x1===x2===732, y1===y2===16으로
+// 완전히 겹친 선(0길이, 화면에 안 보임)이 라이브에서 나왔다. 카드 너비(110)와 그리드 간격(110)이
+// 같아 인접 depth·같은 행 사이 간격이 0인 게 원인 — 재현 케이스를 그대로 고정한다.
+describe('computeEdgeLineEndpoints', () => {
+  it('returns null when either endpoint has no position (truncated node)', () => {
+    const positions = new Map([['a', { left: 0, top: 0 }]]);
+    expect(computeEdgeLineEndpoints(positions, edge('a', 'ghost'), 110, 24)).toBeNull();
+  });
+
+  it('connects a card\'s right edge to the target card\'s left edge for a normal (non-adjacent) gap', () => {
+    const positions = new Map([
+      ['a', { left: 100, top: 0 }],
+      ['b', { left: 300, top: 0 }],
+    ]);
+    const coords = computeEdgeLineEndpoints(positions, edge('a', 'b'), 110, 24);
+    expect(coords).toEqual({ x1: 210, y1: 12, x2: 300, y2: 12 });
+  });
+
+  // 라이브 재현 — depth2(left=622)→depth3(left=732), 같은 행(top=4): 카드너비(110)=
+  // 그리드간격(110)이라 x1(622+110=732)===x2(732), y1===y2 ⇒ 고침 전엔 0길이였다.
+  it('nudges endpoints apart when they would otherwise collapse to the same point (실 재현)', () => {
+    const positions = new Map([
+      ['from', { left: 622, top: 4 }],
+      ['to', { left: 732, top: 4 }],
+    ]);
+    const coords = computeEdgeLineEndpoints(positions, edge('from', 'to'), 110, 24);
+    expect(coords).not.toBeNull();
+    const dx = coords!.x2 - coords!.x1;
+    const dy = coords!.y2 - coords!.y1;
+    expect(Math.sqrt(dx * dx + dy * dy)).toBeGreaterThanOrEqual(6);
+    expect(coords!.x1).not.toBe(coords!.x2); // 고침 전엔 여기서 732===732로 실패했다.
   });
 });
 
