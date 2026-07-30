@@ -1,22 +1,48 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { FileText, MessageSquare } from 'lucide-react';
+import { FileText, MessageSquare, Calendar, BookOpen } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
 
 interface BacklinkMember { id: string; name: string; type: string }
 
-interface BacklinkItem {
+// export: story #2267(C-9) — story-origin-section.tsx가 같은 응답 형상을 소비한다(출처는
+// 이 목록과 같은 엔드포인트·같은 item 형상, relation 축으로만 갈린다).
+export interface BacklinkItem {
   id: string;
-  source_type: 'chat_message' | 'doc';
+  // story #2267(C-9): meeting·story도 source가 될 수 있다(backend/app/services/backlinks.py
+  // 동반 확장) — doc·chat_message 둘뿐이던 것에서 넓어짐.
+  source_type: 'chat_message' | 'doc' | 'meeting' | 'story';
   source_id: string;
   created_by: BacklinkMember | null;
   created_at: string;
-  /** story #2299: 「끊어짐」은 사실 필드 — 색/문구는 여기(FE)서 정한다(BE는 계산만). */
+  /** story #2267(C-9): 'none'(본문 참조) · 'created_from'(target이 이 source에서 만들어졌다
+   * — "출처"). ⛔컨테이너(epic/sprint/meeting_id)와 이 값을 화면에서 섞지 않는다(AC4) —
+   * relation==='created_from'인 항목은 story-origin-section.tsx가 별도로 그리므로 이 목록
+   * (「이것을 가리키는 것들」)에서는 제외한다(아래 mentionItems). */
+  relation: 'none' | 'created_from';
   still_exists: boolean;
   doc: { id: string; title: string } | null;
   message: { id: string; conversation_id: string; content_snippet: string; sender: BacklinkMember | null } | null;
+  meeting: { id: string; title: string } | null;
+  story: { id: string; title: string } | null;
+}
+
+const SOURCE_TYPE_ICON = {
+  doc: FileText,
+  chat_message: MessageSquare,
+  meeting: Calendar,
+  story: BookOpen,
+} as const satisfies Record<BacklinkItem['source_type'], unknown>;
+
+function backlinkLabel(item: BacklinkItem): string | undefined {
+  switch (item.source_type) {
+    case 'doc': return item.doc?.title;
+    case 'chat_message': return item.message?.content_snippet;
+    case 'meeting': return item.meeting?.title;
+    case 'story': return item.story?.title;
+  }
 }
 
 interface CollectionScope {
@@ -108,11 +134,14 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
   // 조용한 폴백 — 다른 애드온 섹션(stuck-handoff-section 등)과 동형, 로딩/실패/전환-중으로 노이즈를 안 낸다.
   if (result === null || result === 'failed' || result.entityType !== entityType || result.entityId !== entityId) return null;
   const { items, scope } = result;
+  // story #2267(C-9) AC4 — relation==='created_from'인 항목은 「출처」(story-origin-section.tsx
+  // 전용)이지 「이것을 가리키는 것들」(멘션)이 아니다. 같은 응답을 두 섹션이 각자 걸러 쓴다.
+  const mentionItems = items.filter((item) => item.relation !== 'created_from');
 
   return (
     <div className="border-t border-border/60 px-4 py-3">
       <p className="mb-2 text-xs font-medium text-muted-foreground">{t('backlinksTitle')}</p>
-      {items.length === 0 ? (
+      {mentionItems.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           {scope
             ? t('backlinksEmptyScoped', {
@@ -125,9 +154,9 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
         </p>
       ) : (
         <ul className="flex flex-col gap-1.5">
-          {items.map((item) => {
-            const Icon = item.source_type === 'doc' ? FileText : MessageSquare;
-            const label = item.source_type === 'doc' ? item.doc?.title : item.message?.content_snippet;
+          {mentionItems.map((item) => {
+            const Icon = SOURCE_TYPE_ICON[item.source_type];
+            const label = backlinkLabel(item);
             const creatorName = item.created_by?.name;
             return (
               <li

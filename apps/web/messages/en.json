@@ -436,6 +436,8 @@
     "backlinksEmptyScoped": "0 references observed (collection scope: source={sources} only · {excludes} not collected, so not counted here)",
     "backlinksExcludePrSid": "PR/commit \"[SID:XXX]\" text convention",
     "backlinksExcludeEvidenceFreeText": "Free-text evidence references",
+    "originTitle": "Created from",
+    "originNotCollected": "Origin not yet collected (collection scope: only new-creation paths that receive origin_type/origin_id — items outside this path, or created before it, are uncollected, meaning «unknown», not «none»)",
     "backlog": "Backlog",
     "readyForDev": "Ready for Dev",
     "inProgress": "In Progress",
