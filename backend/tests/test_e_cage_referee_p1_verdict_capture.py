@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.verdict_capture import parse_story_id
+from app.services.verdict_capture import parse_story_id, parse_story_number
 
 ORG_ID = uuid.uuid4()
 STORY_ID = uuid.uuid4()
@@ -44,6 +44,39 @@ def test_parse_story_id_case_insensitive():
 def test_parse_story_id_in_middle():
     sid = uuid.uuid4()
     assert parse_story_id(f"prefix [SID:{sid}] suffix") == sid
+
+
+# ── story_number 태그 파싱 단위 테스트 (story #2327 후속, 2026-07-30) ─────────
+# 양성 3건은 오늘 실제로 머지된 PR 제목 원문(PO 지시 — "오늘 실제 PR 제목 3건이 이미 표본").
+
+def test_parse_story_number_bracket_form_real_pr_title_1():
+    title = "[SID:2288] 세 목록 상호참조 코멘트에 만료 조건 추가"
+    assert parse_story_number(title) == 2288
+
+
+def test_parse_story_number_fix_hash_form_real_pr_title_2():
+    title = "fix(#2328): 후보 머리글에 유나 규격의 em-dash 리터럴이 빠져 있었다"
+    assert parse_story_number(title) == 2328
+
+
+def test_parse_story_number_bracket_form_real_pr_title_3():
+    title = "[SID:2267] AC4/AC7 — 컨테이너와 출처를 화면에서 가른다"
+    assert parse_story_number(title) == 2267
+
+
+def test_parse_story_number_negative_number_without_marker():
+    """음성 대조 — 숫자처럼 생겼지만 SID 마커(`[SID:`·`fix(#`)가 없으면 None.
+
+    "2288"이 본문에 있다고 다 잡으면 오매치(예: PR 번호·버전·ms 단위)가 SID로 오인된다."""
+    assert parse_story_number("fix: bump timeout to 2288ms") is None
+    assert parse_story_number("chore: release 2328") is None
+    assert parse_story_number("") is None
+
+
+def test_parse_story_number_does_not_match_uuid_form():
+    """UUID form([SID:<uuid>])은 이 파서가 안 잡는다 — parse_story_id 전용 축."""
+    sid = uuid.uuid4()
+    assert parse_story_number(f"[SID:{sid}] feat") is None
 
 
 # ── resolve_implementation_participation 단위 테스트 ─────────────────────────

@@ -27,7 +27,6 @@ from app.models.pm import Story
 from app.routers.cron import CRON_SECRET, _err, _ok, verify_cron
 from app.services.github_app import get_installation_token
 from app.services.pr_story_link import merge_link_evidence, resolve_story_for_pr
-from app.services.story_status_events import advance_story_to_done
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
     capture_review_verdict,
@@ -377,17 +376,44 @@ async def _process_webhook_event(
     if native_ci_state is not None:
         result = {**result, "native_ci": {"state": native_ci_state, "reason": native_ci_reason}}
 
-    # Bot-L.1 close-on-merge: **confident link**(explicit·auto high·sid)+merge → story done(idempotent).
-    # med/low/text suggestion 은 should_auto_close=False → close 안 함(오매치 done 방지). gate-approve 와
-    # 동일 advance_story_to_done 헬퍼(단일 정책·중복 advance 0). actor=system(자동). already-done=no-op.
+    # ⛔story #2327 후속(PO 판정, 2026-07-30) — close-on-merge **정지**. 「머지 ≠ done, done은
+    # 사람 확認 後」가 팀 규율인데 이 블록은 explicit/auto-high/sid confident link + merge만으로
+    # 사람 확認 없이 즉시 done을 밀었다(advance_story_to_done 직접 호출) — 규율과 정면 충돌.
+    # 지금까지는 SID 링크 해소 자체가 거의 항상 실패해(story #2202/#2327 실측) 이 분기에 실제로
+    # 도달한 적이 드물어 드러나지 않았을 뿐, «게이트»가 아니라 **스위치 자체가 없는 무조건 실행**
+    # 이었다(should_auto_close는 org/workflow 설정이 아니라 매 PR confidence로 즉석 계산되는 값).
+    # SID 정규식 fix(story_number 인식, 이 PR)가 이 분기의 도달률을 정상적으로 되돌리면, 그 순간
+    # «거짓 done 자동화»가 라이브에서 돌기 시작한다 — 그래서 fix와 같은 PR에서 정지시킨다.
+    # ⛔advance_story_to_done()은 gate-approve(_advance_story_on_merge_approve)와 공유 헬퍼라
+    # 그 함수 자체는 손대지 않는다 — 이 호출부(webhook merge 분기) 하나만 멈춘다. `would_close`로
+    # "정지 안 했으면 벌어졌을 일"은 계속 보이게 남겨(관측 가능·소급 판단 재료), 실제 mutation만 뺀다.
+    #
+    # ⛔PO 지적(2026-07-30, em-dash PR#2668/2670 되돌림과 같은 교훈 — "지운 이유를 안 남기면
+    # 다음 사람이 «자동 done이 빠졌네」로 되살린다"): 여기 다시 advance_story_to_done()을 넣기
+    # 前에 반드시 확認할 것 —
+    #   ①왜 뺐나: 「머지 ≠ done. done은 AC 전량 대조 실측 後」가 이 조직의 규율이고, 이 블록은
+    #     explicit/auto-high/sid confident link + merge만으로 사람 확認 없이 즉시 done을 밀었다.
+    #   ②무엇이 없어졌나: explicit SID + merged → 자동 done. 지금은 사람이 판단한다(auto_close.
+    #     would_close로 "됐을 일"만 관측 가능하게 남김, 실제 전이는 0).
+    #   ③⭐만료 조건(되살릴 문): 조직이 "자동 done을 켜고 끄는" 설정(org/workflow 단위)을 갖게
+    #     되면, 그 설정을 읽어 조건부로 되살린다 — 그 설정 자체가 아직 없다(이 파일 존재 확認,
+    #     별건으로 PO가 세운다). 설정 없이 이 줄만 되돌리면 오늘과 같은 사고(사람 확認 없는
+    #     자동 done)가 재발한다.
     if merged and rl.should_auto_close:
-        story_obj = await session.get(Story, story_id)
-        closed = False
-        if story_obj is not None and story_obj.org_id == org_id:  # org-scope 재확인(anti-IDOR).
-            closed = await advance_story_to_done(session, org_id, story_obj, actor_type="system")
+        # PO 지적(2026-07-30): 웹훅 HTTP 응답은 아무도 안 읽는다(호출자가 GitHub) — would_close를
+        # «셀 수 있게» 로그에도 남긴다. 이 로그 건수가 #2339(자동 done on/off 설정)의 크기를
+        # 재는 자다(0이면 안 급함·많으면 급함).
+        logger.info(
+            "auto_close suppressed: story=%s source=%s confidence=%s",
+            story_id, rl.source, rl.confidence,
+        )
         result = {
             **result,
-            "auto_close": {"closed": closed, "source": rl.source, "confidence": rl.confidence},
+            "auto_close": {
+                "closed": False, "would_close": True,
+                "source": rl.source, "confidence": rl.confidence,
+                "note": "story #2327 PO 판정 2026-07-30: close-on-merge 정지 — done은 사람 확認 後",
+            },
         }
     if scope_result is not None:
         result = {**result, "scope_check": scope_result}
