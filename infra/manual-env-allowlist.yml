@@ -115,6 +115,14 @@ services:
       - key: GITHUB_WEBHOOK_SECRET
         reason: GitHub 웹훅 서명 검증 시크릿 — 부트스트랩 스크립트 미편입.
         owner: TBD
+      - key: GITHUB_APP_WEBHOOK_SECRET
+        reason: >-
+          GitHub App 웹훅 서명 검증 — 이 값이 없으면 App 서명 검증을 통째로 건너뛰고
+          «전부 legacy» 로 떨어진다(#2327 실측, app_inert = not app_secret). 부트스트랩
+          스크립트 미편입(GITHUB_WEBHOOK_SECRET과 동일 카테고리) — 값은 GitHub App
+          설정 화면에서만 얻을 수 있어 별도 확認 필요, 이 항목은 그 값이 채워지기 前에도
+          허용목록 등재만 먼저 한다.
+        owner: TBD
       - key: H1_MERGE_GATE_ADVISORY
         value_check: skip
         reason: feature flag — 수동 토글.
@@ -205,6 +213,9 @@ services:
       - key: GITHUB_WEBHOOK_SECRET
         reason: dev와 동일 사유.
         owner: TBD
+      - key: GITHUB_APP_WEBHOOK_SECRET
+        reason: dev와 동일 사유 — GitHub App 웹훅 서명 검증(#2327 실측 참고).
+        owner: TBD
       - key: H1_MERGE_GATE_ADVISORY
         value_check: skip
         reason: dev와 동일 — feature flag.
@@ -290,6 +301,9 @@ services:
         owner: TBD
       - key: GITHUB_WEBHOOK_SECRET
         reason: backend-dev와 동일 사유.
+        owner: TBD
+      - key: GITHUB_APP_WEBHOOK_SECRET
+        reason: backend-dev와 동일 사유 — GitHub App 웹훅 서명 검증(#2327 실측 참고).
         owner: TBD
       - key: H1_MERGE_GATE_ADVISORY
         value_check: skip
