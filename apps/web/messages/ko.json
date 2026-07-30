@@ -555,7 +555,7 @@
       "typeDepends": "의존",
       "searchPlaceholder": "스토리 제목으로 검색...",
       "incompletePreds": "미완료 선행 {count}건 — 시작 전 확인 권장",
-      "candidatesHeader": "── 이 스토리 본문에 나온 것 ──",
+      "candidatesHeader": "이 스토리 본문에 나온 것",
       "candidateMentionHint": "이 스토리 본문에 나옵니다"
     }
   },

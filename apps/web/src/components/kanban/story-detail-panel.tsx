@@ -1791,6 +1791,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     return (
                       <ul className="focus-inset max-h-32 overflow-y-auto rounded border border-border bg-background">
                         {showingCandidates && (
+                          // story #2328 — 유나 규격 원문의 「── ... ──」는 "구분선이 있다"를
+                          // 아스키로 흉내낸 표기였지 문자로 넣으라는 뜻이 아니었다(2026-07-30
+                          // 확定, PR#2668 되돌림). 스크린리더가 "대시 대시 대시"로 읽고, 폰트별
+                          // 길이가 달라지고, 번역 시 좌우 정렬이 무너진다 — 선이 필요하면 CSS로
+                          // 긋고 문자는 머리글 텍스트만 남긴다.
                           <li aria-hidden className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                             {t('dep.candidatesHeader')}
                           </li>
