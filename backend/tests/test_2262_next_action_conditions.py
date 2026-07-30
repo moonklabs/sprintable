@@ -159,18 +159,36 @@ def test_category_waiting_codes():
     assert next_action_category("decision_pending") == "waiting"
 
 
-def test_category_unknown_code_raises():
-    """새 코드를 next_action.py에 추가하면서 NEXT_ACTION_CATEGORIES에 안 넣는 실수를
-    조용히 통과시키지 않는다 — KeyError로 즉시 드러난다."""
-    import pytest
-    with pytest.raises(KeyError):
-        next_action_category("some_future_code_nobody_classified")
+def test_category_unknown_code_falls_back_to_none_with_warning(caplog):
+    """⛔민군 지적(2026-07-30, PO 판정 — "가드는 CI에·폴백은 운영에"): 운영 경로(응답
+    직렬화 시점 computed_field)에서 매핑 밖 코드를 만나도 절대 안 던진다 — list
+    엔드포인트에서 레코드 한 건의 미분류가 응답 전체를 500으로 끌고 가면 안 되기
+    때문(사용자를 인질로 개발자에게 말하는 가드는 가드가 아니다). None을 반환하고
+    logger.warning만 남긴다 — 새 코드 분류 누락을 «잡는» 자리는 아래 CI 회귀테스트."""
+    import logging
+    with caplog.at_level(logging.WARNING, logger="app.services.next_action"):
+        result = next_action_category("some_future_code_nobody_classified")
+    assert result is None
+    assert "미분류" in caplog.text
 
 
 def test_all_returned_codes_are_classified():
-    """이 모듈이 실제로 반환하는 모든 코드가 NEXT_ACTION_CATEGORIES에 있다 — 회귀 시
-    새 코드를 추가하고 분류를 빠뜨리면 여기서 잡힌다."""
-    assert set(NEXT_ACTION_CATEGORIES) == {
-        "outcome_measurement_due", "hypothesis_measurement_due",
-        "verification_pending", "decision_pending",
+    """⛔민군 지적(2026-07-30): 기존 버전은 NEXT_ACTION_CATEGORIES를 자기 자신과 대조하는
+    동어반복이라 "등록된 것이 등록돼 있다"만 확認하고 영원히 통과했다 — 새 코드를
+    실제로 추가하고 분류를 빠뜨려도 절대 안 잡혔을 것이다. 대신 4개 함수를 각자의
+    "발생조건"(위 test_*_returns_code들과 동일 트리거 입력)으로 «실제 호출»해 진짜
+    반환값 집합을 뽑고, 그걸 NEXT_ACTION_CATEGORIES와 대조한다 — 독립 원본이라 새
+    코드가 추가되고 분류가 빠지면 이 대조가 실제로 깨진다."""
+    actually_returned_codes = {
+        outcome_measurement_next_action(
+            outcome_status="pending", measure_after=_PAST, metric_definition={"source": "manual"},
+            system_owned_sources=frozenset({"ga4"}), now=_NOW,
+        ),
+        verification_next_action(self_reported=True, human_verified=None),
+        doc_next_action(status="draft"),
+        hypothesis_next_action(
+            status="measuring", measure_after=_PAST, metric_definition={"source": "manual"}, now=_NOW,
+        ),
     }
+    assert None not in actually_returned_codes, "발생조건 트리거 입력이 잘못돼 코드가 안 나온다"
+    assert actually_returned_codes == set(NEXT_ACTION_CATEGORIES)

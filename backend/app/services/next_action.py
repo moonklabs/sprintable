@@ -36,12 +36,18 @@ unresolved_comment_count`라는 **이미 있는 원자 필드**와 완전히 같
 판별자): actionable(㉠, 손대면 달라짐) vs waiting(㉡, 남이 해야 해서 안 달라짐).
 `NEXT_ACTION_CATEGORIES`가 그 매핑의 SSOT다 — FE가 코드별로 각자 판단하면 7번째 코드가
 생길 때 또 어긋난다(오늘 겪은 "코드 목록을 FE가 하드코딩" 함정과 같은 병). 새 코드를
-추가하려면 반드시 이 매핑에도 넣어야 한다(그러지 않으면 아래 회귀테스트가 KeyError로 막는다).
+추가하려면 반드시 이 매핑에도 넣어야 한다 — ⛔단 그 가드는 「CI에」 산다(회귀테스트가
+next_action.py 소스에서 실제 반환값을 독립 추출해 대조), 「운영에」는 안 산다(민군 지적
+2026-07-30 — `next_action_category`는 매핑 밖 코드를 만나도 절대 안 던지고 None+경고
+로그만 남긴다, 아래 함수 docstring 참조).
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # story #2262 AC9④: outcome_status 3단계(n_a→pending→hit|miss, outcome_scorer.py:15 확인)
 # 공유 — story/epic/sprint 전부 이 전이를 쓴다.
@@ -136,8 +142,25 @@ def hypothesis_next_action(
 
 def next_action_category(code: str | None) -> str | None:
     """`next_action_code`를 ㉠actionable/㉡waiting으로 분류(SSOT — FE가 각자 안 판단한다).
-    None(디딜 것 없음)은 그대로 None. 매핑 밖 코드는 KeyError — 새 코드를 추가하면서
-    이 매핑을 빠뜨리는 실수를 조용히 통과시키지 않는다(발견을 늦추지 않는다)."""
+    None(디딜 것 없음)은 그대로 None.
+
+    ⛔민군 지적(2026-07-30, PO 판정 — "가드는 CI에·폴백은 운영에"): 이 함수는
+    `@computed_field`(schemas/*.py)로 응답 직렬화 시점에 도는지라, 여기서 던지면
+    list 엔드포인트에서 레코드 «한 건»의 미분류가 응답 «전체»를 opaque 500으로
+    끌고 간다(사용자를 인질로 개발자에게 말하는 것 — 가드가 아니다). 그래서 운영
+    경로는 절대 던지지 않는다 — 매핑 밖 코드는 `None`을 반환하고 `logger.warning`
+    으로만 남긴다. `None`은 `next_action_code` 자체가 이미 `str | None`이라 FE에
+    새 분기가 필요 없는 «이미 정당한 값»이다. 「새 코드 추가 시 분류를 빠뜨리는
+    실수」를 잡는 자리는 CI의 회귀테스트(아래 `test_all_returned_codes_are_
+    classified`, next_action.py 소스에서 실제 반환값을 독립 추출해 대조)다 —
+    운영 코드 경로가 그 가드 역할을 겸하지 않는다."""
     if code is None:
         return None
-    return NEXT_ACTION_CATEGORIES[code]
+    category = NEXT_ACTION_CATEGORIES.get(code)
+    if category is None:
+        logger.warning(
+            "next_action_category: 미분류 코드 %r — NEXT_ACTION_CATEGORIES에 추가 필요"
+            "(CI 회귀테스트가 이걸 빨개지게 해야 하는데 여기까지 왔다는 것 자체가 이상 신호)",
+            code,
+        )
+    return category
