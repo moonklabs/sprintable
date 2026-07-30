@@ -387,6 +387,18 @@ async def _process_webhook_event(
     # ⛔advance_story_to_done()은 gate-approve(_advance_story_on_merge_approve)와 공유 헬퍼라
     # 그 함수 자체는 손대지 않는다 — 이 호출부(webhook merge 분기) 하나만 멈춘다. `would_close`로
     # "정지 안 했으면 벌어졌을 일"은 계속 보이게 남겨(관측 가능·소급 판단 재료), 실제 mutation만 뺀다.
+    #
+    # ⛔PO 지적(2026-07-30, em-dash PR#2668/2670 되돌림과 같은 교훈 — "지운 이유를 안 남기면
+    # 다음 사람이 «자동 done이 빠졌네」로 되살린다"): 여기 다시 advance_story_to_done()을 넣기
+    # 前에 반드시 확認할 것 —
+    #   ①왜 뺐나: 「머지 ≠ done. done은 AC 전량 대조 실측 後」가 이 조직의 규율이고, 이 블록은
+    #     explicit/auto-high/sid confident link + merge만으로 사람 확認 없이 즉시 done을 밀었다.
+    #   ②무엇이 없어졌나: explicit SID + merged → 자동 done. 지금은 사람이 판단한다(auto_close.
+    #     would_close로 "됐을 일"만 관측 가능하게 남김, 실제 전이는 0).
+    #   ③⭐만료 조건(되살릴 문): 조직이 "자동 done을 켜고 끄는" 설정(org/workflow 단위)을 갖게
+    #     되면, 그 설정을 읽어 조건부로 되살린다 — 그 설정 자체가 아직 없다(이 파일 존재 확認,
+    #     별건으로 PO가 세운다). 설정 없이 이 줄만 되돌리면 오늘과 같은 사고(사람 확認 없는
+    #     자동 done)가 재발한다.
     if merged and rl.should_auto_close:
         result = {
             **result,
