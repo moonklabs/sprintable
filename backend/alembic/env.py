@@ -4,6 +4,18 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, inspect, pool
 from alembic import context
 
+# ⛔story #2267(C-9) 후속 사고(2026-07-30): 아래 `context.configure(...)`가
+# `transaction_per_migration`을 켜지 않는다(기본 False) — 이 상태에서 개별 마이그레이션이
+# `op.get_context().autocommit_block()`(예: `CREATE INDEX CONCURRENTLY`를 트랜잭션 밖에서
+# 돌리려는 시도)을 쓰면, "기존 DB에 증분 1개만 얹는" 실배포 경로에서 `AssertionError
+# (self._transaction is not None)`로 100% 죽는다(0217 마이그레이션이 dev에서 이렇게
+# 실제로 죽었다 — 로컬 "빈 DB에서 수십 개 배치 적용" 경로에서만 우연히 통과했었다).
+# alembic 자체 문서도 autocommit block을 쓰려면 transaction_per_migration을 권장한다.
+# ⇒ 이 프로젝트에서 `autocommit_block()`은 원리적으로 쓸 수 없다(이 파일 설정을 바꾸지
+# 않는 한). `CREATE INDEX CONCURRENTLY`가 정말 필요하면(대상 표가 수십만 행 이상이라
+# 인덱스 빌드 중 쓰기를 막으면 안 될 때) 마이그레이션에 넣지 말고 배포 후 별도 수동
+# psql 세션으로 돌린다.
+
 config = context.config
 
 if config.config_file_name is not None:
