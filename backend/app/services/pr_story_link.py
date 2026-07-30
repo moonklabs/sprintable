@@ -8,6 +8,10 @@ close-on-merge 가 **오매치 done 을 못 내게** 한다(med/low/text 는 sug
 
 per-org 격리(anti-IDOR): org 가 알려진 경우(app webhook) 전 조회를 org-scope. org 미상(legacy webhook)이면
 SID 전역 조회로 story→org 를 도출(기존 무회귀). story 는 항상 `org_id AND deleted_at IS NULL` 재검증.
+
+story #2327 AC4 왕복 실측(2026-07-30, PR#2673 배포 後): 이 PR 자체가 `[SID:2288]` 태그를 달고
+실제로 merge 경로를 탄다 — pull_request_story_link 행 생성(양성)·story #2288 status 불변(음성)·
+`auto_close suppressed` 로그 발화(관측)를 한 사건에서 실측하기 위한 것(왕복 증거, 코드 변경 없음).
 """
 from __future__ import annotations
 
