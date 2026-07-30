@@ -237,7 +237,7 @@
     "ccFleet": "Fleet {count}",
     "ccFleetBreakdownPending": "Status breakdown pending",
     "ccFleetOnlineWorking": "Online {online} · Working {working}",
-    "ccGlanceTooltip": "See the project glance",
+    "ccFlowTooltip": "See the project flow",
     "ccLoading": "Loading…",
     "ccZoneActions": "Your actions now",
     "ccClearTitle": "All clear",

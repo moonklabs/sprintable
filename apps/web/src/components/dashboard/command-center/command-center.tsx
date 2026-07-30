@@ -77,8 +77,11 @@ export function CommandCenter({ projectName }: { projectName?: string | null }) 
         <div className="flex items-center gap-2">
           {activeEpic ? (
             <Link
-              href="/glance"
-              title={t('ccGlanceTooltip')}
+              // story #2224(선생님 정정 2026-07-30, 진입점 전수 스윕) — `/glance` 라우트가
+              // 삭제되고 `/flow`로 흡수됐다(PR#2698). bare `/flow`는 proxy.ts
+              // MIGRATED_RESOURCES 안전망(오늘 등록)이 org/project 쿠키로 해소한다.
+              href="/flow"
+              title={t('ccFlowTooltip')}
               className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
             >
               <Map className="size-3 shrink-0" aria-hidden="true" />

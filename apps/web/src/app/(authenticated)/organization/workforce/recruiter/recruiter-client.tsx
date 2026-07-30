@@ -1183,7 +1183,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   </p>
                   <p className="text-xs text-muted-foreground">{selectedRole?.name} · {t('deployedNote')}</p>
                 </div>
-                <Link href="/board" className="shrink-0 text-xs font-semibold text-primary hover:underline">{t('viewInBoard')} →</Link>
+                {/* story #2224(선생님 정정 2026-07-30, 진입점 전수 스윕) — `/board` 삭제 후
+                    `/flow?view=list`로 흡수. 라벨("보드에서 보기")은 목적지 콘텐츠(칸반)가
+                    그대로라 안 바꿨다 — bare href는 proxy.ts MIGRATED_RESOURCES 안전망이
+                    org/project 쿠키로 해소한다. */}
+                <Link href="/flow?view=list" className="shrink-0 text-xs font-semibold text-primary hover:underline">{t('viewInBoard')} →</Link>
               </div>
 
               <p className="flex items-start gap-1.5 text-xs text-info">

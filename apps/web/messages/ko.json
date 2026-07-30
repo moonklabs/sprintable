@@ -237,7 +237,7 @@
     "ccFleet": "함대 {count}",
     "ccFleetBreakdownPending": "상태 집계 준비중",
     "ccFleetOnlineWorking": "온라인 {online} · 작업중 {working}",
-    "ccGlanceTooltip": "프로젝트 현황판 보기",
+    "ccFlowTooltip": "프로젝트 흐름 보기",
     "ccLoading": "불러오는 중…",
     "ccZoneActions": "지금 내 할 일",
     "ccClearTitle": "괜찮습니다",
