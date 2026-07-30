@@ -553,7 +553,7 @@
       "typeDepends": "Depends",
       "searchPlaceholder": "Search by story title...",
       "incompletePreds": "{count} incomplete predecessor(s) — check before starting",
-      "candidatesHeader": "Found in this story's body",
+      "candidatesHeader": "── Found in this story's body ──",
       "candidateMentionHint": "Mentioned in this story's body"
     }
   },
