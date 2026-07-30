@@ -29,9 +29,13 @@ function jsonResponse(body: unknown, ok = true): Response {
 }
 
 const GOALS = [
-  { id: 'e-stall', title: 'E-Stall', total_stories: 10, done_stories: 2 },
-  { id: 'e-quiet', title: 'E-Quiet', total_stories: 5, done_stories: 5 },
-  { id: 'e-ready', title: 'E-Ready', total_stories: 8, done_stories: 3 },
+  { id: 'e-stall', title: 'E-Stall', status: 'active', total_stories: 10, done_stories: 2 },
+  { id: 'e-quiet', title: 'E-Quiet', status: 'active', total_stories: 5, done_stories: 5 },
+  { id: 'e-ready', title: 'E-Ready', status: 'active', total_stories: 8, done_stories: 3 },
+  // 라이브 결함 fix(2026-07-31) 회귀 가드 — 이미 닫힌 목표가 "다음이 없는" 목표로 잘못
+  // 세지 않는지를 이 fixture가 지킨다. E-Closed는 next-up으로 표시하지 않는다.
+  { id: 'e-closed', title: 'E-Closed', status: 'done', total_stories: 3, done_stories: 3 },
+  { id: 'e-archived', title: 'E-Archived', status: 'archived', total_stories: 4, done_stories: 4 },
 ];
 
 function makeStory(overrides: Partial<{
@@ -135,9 +139,12 @@ describe('NextMakerScreen — real fetch orchestration', () => {
 
     // e-stall: in-progress(p1) + no ready-for-dev → about-to-stall. e-quiet: neither → quiet.
     // e-ready: has ready-for-dev(r1) → excluded from "다음이 비어 있는" count.
+    // e-closed(done)/e-archived(archived) must never enter the count — totalGoals stays 3, not 5.
     expect(container.textContent).toContain('목표 3개 중 2개에');
     expect(container.textContent).toContain('E-Stall');
     expect(container.textContent).toContain('E-Quiet');
+    expect(container.textContent).not.toContain('E-Closed');
+    expect(container.textContent).not.toContain('E-Archived');
   });
 
   it('clicking 다음 고르기 fetches this epic reference-candidates and renders the backlog candidate with a waiting-days reason', async () => {

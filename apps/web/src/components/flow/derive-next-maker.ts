@@ -10,6 +10,7 @@
 export interface NextMakerGoal {
   id: string;
   title: string;
+  status: string; // draft | active | done | archived (GOAL_STATUSES)
   totalStories: number;
   doneStories: number;
 }
@@ -17,12 +18,29 @@ export interface NextMakerGoal {
 export interface RawGoal {
   id: string;
   title: string;
+  status: string;
   total_stories: number;
   done_stories: number;
 }
 
 export function parseGoals(raw: RawGoal[]): NextMakerGoal[] {
-  return raw.map((g) => ({ id: g.id, title: g.title, totalStories: g.total_stories, doneStories: g.done_stories }));
+  return raw.map((g) => ({
+    id: g.id, title: g.title, status: g.status, totalStories: g.total_stories, doneStories: g.done_stories,
+  }));
+}
+
+/**
+ * 라이브 실측 결함 fix(2026-07-31, PO 지적 — 배포 직후 발견) — 이 필터가 빠져 있어 이미
+ * `done`/`archived`인 목표까지 「다음이 없다」로 세고 있었다(226개 중 223개, 그중
+ * 195개가 이미 닫힌 목표). 이미 끝난 목표에 다음이 없는 것은 당연한 사실이지, 사람이
+ * 처리할 숙제가 아니다 — 「다음을 만드는 화면」의 대상은 «활성» 목표뿐이다. `draft`도
+ * 제외한다(사람 확認 前 초안 — draft→active 전이 자체가 human-only, PO 판정 GOAL_STATUSES
+ * 참고). 이 필터는 goals 배열 하나에만 적용하면 되는 «단일 근본원인»이다 — 그 뒤를 잇는
+ * deriveGoalStems/deriveHeadline은 무변경으로 올바른 수를 낸다(활성 목표만 들어오므로
+ * "217개는 이미 끝났을 수 있습니다"도 자연히 "활성인데 오래 조용한 것"이 된다).
+ */
+export function filterActiveGoals(goals: NextMakerGoal[]): NextMakerGoal[] {
+  return goals.filter((g) => g.status === 'active');
 }
 
 export interface NextMakerStory {

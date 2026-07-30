@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import {
-  parseGoals, parseStories, parseNextUp,
+  parseGoals, parseStories, parseNextUp, filterActiveGoals,
   deriveGoalStems, deriveRecentlyClosedEpicIds, sortStemsByStallUrgency,
   deriveHeadline, deriveZeroStageStats,
   type NextMakerGoal, type NextMakerStory, type RawGoal, type RawStoryLite, type RawNextUp,
@@ -108,7 +108,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory }: NextMak
         ]);
         if (cancelled) return;
 
-        const goals = parseGoals(rawGoals);
+        const goals = filterActiveGoals(parseGoals(rawGoals));
         const activeStories = parseStories(storiesByStatus.flat());
         const rawNextUp: RawNextUp[] = Array.isArray(nextUpRes) ? nextUpRes : [];
         const nextUp = parseNextUp(rawNextUp);
