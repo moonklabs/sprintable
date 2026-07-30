@@ -79,8 +79,9 @@ async def _require_retro_project_access(
     ).scalar_one_or_none()
     if retro is None:
         raise HTTPException(status_code=404, detail="Retro session not found")
+    # ⛔story #2342(2026-07-30): 무권한을 403이 아닌 404로 — stories.py와 동일 존재 비노출 규율.
     if not await has_project_access(session, user_id, retro.project_id, org_id):
-        raise HTTPException(status_code=403, detail="해당 회고의 프로젝트 접근 권한이 없습니다")
+        raise HTTPException(status_code=404, detail="Retro session not found")
     return retro
 
 
@@ -110,8 +111,9 @@ async def list_sessions(
     user_id = uuid.UUID(auth.user_id)
     if project_id is not None:
         # 명시 필터 시 그 프로젝트 접근권 선검증(무권한 project_id로 org 존재 여부 탐색 차단).
+        # ⛔story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일.
         if not await has_project_access(db, user_id, project_id, repo.org_id):
-            raise HTTPException(status_code=403, detail="해당 프로젝트 접근 권한이 없습니다")
+            raise HTTPException(status_code=404, detail="Project not found")
     filters: dict = {}
     if project_id:
         filters["project_id"] = project_id
@@ -134,8 +136,9 @@ async def create_session(
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> SessionListResponse:
     # body.project_id 를 검증 없이 신뢰하면 무권한 project 에 session 을 심는 mutation IDOR.
+    # ⛔story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일.
     if not await has_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id):
-        raise HTTPException(status_code=403, detail="해당 프로젝트 접근 권한이 없습니다")
+        raise HTTPException(status_code=404, detail="Project not found")
     # 까심 QA(#1880 embed-switch 中 실 Postgres 재현) — body.sprint_id가 실제 body.project_id
     # 소속인지 검증하는 FK/CHECK가 없어 project A 세션에 project B sprint를 링크 가능했다.
     # embed(session.project_id로 스코프)와 별도 /sprints/{id}/hypotheses(sprint의 실제
@@ -188,8 +191,9 @@ async def get_or_create_session_by_sprint(
     ).scalar_one_or_none()
     if sprint is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
+    # ⛔story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일.
     if not await has_project_access(db, uuid.UUID(auth.user_id), sprint.project_id, org_id):
-        raise HTTPException(status_code=403, detail="해당 프로젝트 접근 권한이 없습니다")
+        raise HTTPException(status_code=404, detail="Project not found")
 
     existing = (
         await db.execute(

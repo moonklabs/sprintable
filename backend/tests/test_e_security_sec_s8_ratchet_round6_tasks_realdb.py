@@ -120,7 +120,8 @@ async def _setup_app(app, Session, user_id, org_id):
 @pytest.mark.anyio
 async def test_no_grant_human_cannot_list_tasks_via_other_project_story_id():
     """봉인 실증: project_a에만 grant된 휴먼이 project_b story_id(project_id 파라미터
-    없이!)로 task 조회 시도 → 403(기존엔 story_id→project 접근권 검증 0이라 200+유출)."""
+    없이!)로 task 조회 시도 → 404(기존엔 story_id→project 접근권 검증 0이라 200+유출).
+    ⛔story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -132,7 +133,7 @@ async def test_no_grant_human_cannot_list_tasks_via_other_project_story_id():
         client = _client_for(app)
         try:
             resp = await client.get(f"/api/v2/tasks?story_id={seeded['story_b_id']}")
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 404, resp.text
         finally:
             await client.aclose()
     finally:
@@ -157,7 +158,7 @@ async def test_no_grant_human_cannot_list_tasks_via_other_project_story_id_and_a
             resp = await client.get(
                 f"/api/v2/tasks?story_id={seeded['story_b_id']}&assignee_id={uuid.uuid4()}"
             )
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 404, resp.text  # story #2342(2026-07-30): 403이 아니다
         finally:
             await client.aclose()
     finally:
@@ -166,8 +167,10 @@ async def test_no_grant_human_cannot_list_tasks_via_other_project_story_id_and_a
 
 
 @pytest.mark.anyio
-async def test_nonexistent_story_id_returns_403_not_leak():
-    """엣지: 존재하지 않는 story_id도 403(존재여부 자체를 흘리지 않음)."""
+async def test_nonexistent_story_id_returns_404_not_leak():
+    """엣지: 존재하지 않는 story_id도 404(존재여부 자체를 흘리지 않음).
+    ⛔story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일 — 이제 "없음"과 "권한없음"이
+    같은 응답(404)이라 이 테스트 이름 자체가 그 규율의 실증이 된다."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -179,7 +182,7 @@ async def test_nonexistent_story_id_returns_403_not_leak():
         client = _client_for(app)
         try:
             resp = await client.get(f"/api/v2/tasks?story_id={uuid.uuid4()}")
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 404, resp.text
         finally:
             await client.aclose()
     finally:

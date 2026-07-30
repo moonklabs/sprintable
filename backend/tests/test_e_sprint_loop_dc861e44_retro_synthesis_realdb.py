@@ -265,8 +265,9 @@ async def test_recommend_next_without_synthesis_409():
 
 
 @pytest.mark.anyio
-async def test_synthesize_cross_project_403():
-    """IDOR 가드 상속(#1801) — USER는 PROJ_B(SESSION_B) grant 없음."""
+async def test_synthesize_cross_project_404():
+    """IDOR 가드 상속(#1801) — USER는 PROJ_B(SESSION_B) grant 없음.
+    story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일."""
     from app.routers.retros import synthesize_session
 
     eng, Session = await _engine()
@@ -276,7 +277,7 @@ async def test_synthesize_cross_project_403():
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
                 await synthesize_session(SESSION_B, db=s, auth=_auth(), repo=_repo(s))
-            assert ei.value.status_code == 403
+            assert ei.value.status_code == 404
     finally:
         await eng.dispose()
 

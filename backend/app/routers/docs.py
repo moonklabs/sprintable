@@ -285,9 +285,12 @@ async def get_doc_preview(
         # #2168 PR-①: get_doc 과 동형 갭 — org-scope happy path 가 project 인가 없이 즉시
         # 반환하던 것을 canonical 가드로 통일(같은 이유: 링크가 project 를 실어 나르기 시작하며
         # 이 경로의 실사용 빈도가 올라간다).
+        # ⛔story #2342(2026-07-30, PR#2624 「미완의 롤아웃」 후속): 무권한을 403이 아닌
+        # 404로 낸다 — stories.py._assert_story_project_access와 같은 자로 통일(존재
+        # 비노출 규율, story #2322).
         from app.services.project_auth import has_project_access
         if not await has_project_access(db, uuid.UUID(auth.user_id), doc.project_id, repo.org_id):
-            raise HTTPException(status_code=403, detail="해당 문서의 프로젝트 접근 권한이 없습니다")
+            raise HTTPException(status_code=404, detail="Document not found")
 
     if doc is None:
         # cross-org fallback: slug/uuid 기반 전체 org 조회 후 membership 검증 (기존, 무변경)
@@ -318,9 +321,10 @@ async def get_doc_preview(
         # 좁은 형태가 더 안전 — doc.org_id를 쓰면 human_grant_branch/admin_branch가 "그
         # doc의 org에 caller가 실제로 소속돼 있는가"까지 강제해 원래 fallback의 의미
         # (caller의 주 org와 달라도 실 멤버십이면 통과)를 org 필터 없이 손댈 필요 없이 보존한다.
+        # ⛔story #2342(2026-07-30): 무권한을 403이 아닌 404로 — 위 primary path와 통일.
         from app.services.project_auth import has_project_access
         if not await has_project_access(db, uuid.UUID(auth.user_id), doc.project_id, doc.org_id):
-            raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
+            raise HTTPException(status_code=404, detail="Document not found")
 
     org_slug = (await db.execute(
         select(Organization.slug).where(Organization.id == doc.org_id)
@@ -356,9 +360,10 @@ async def get_doc(
         # project 인가 누락(patch/delete 는 f69fcd91 로 이미 고쳐졌으나 GET 은 방치돼 있었음 —
         # 同org 비-project caller 가 id만 알면 무제한 열람 가능하던 갭)이 실사용 IDOR 표면으로
         # 커진다. canonical 가드(has_project_access)로 patch/delete 와 통일.
+        # ⛔story #2342(2026-07-30): 무권한을 403이 아닌 404로 — 존재 비노출 규율 통일.
         from app.services.project_auth import has_project_access
         if not await has_project_access(session, uuid.UUID(auth.user_id), doc.project_id, repo.org_id):
-            raise HTTPException(status_code=403, detail="해당 문서의 프로젝트 접근 권한이 없습니다")
+            raise HTTPException(status_code=404, detail="Doc not found")
     if doc is None:
         # cross-org fallback: project_id query param 없이 단일 id로 접근한 경우 (기존, 무변경)
         from app.models.doc import Doc
@@ -377,9 +382,10 @@ async def get_doc(
         # 통과시켜 "탈퇴자에게 문을 여는" 이론적 폭을 만든다(오르테가군 지적 — #2206과 동형
         # 우려). doc.org_id를 쓰면 "그 doc의 org에 caller가 실제로 소속돼 있는가"까지
         # 강제하면서 원래 fallback 의미(caller 주 org와 달라도 실 멤버십이면 통과)도 보존.
+        # ⛔story #2342(2026-07-30): 무권한을 403이 아닌 404로 — 위 primary path와 통일.
         from app.services.project_auth import has_project_access
         if not await has_project_access(session, uuid.UUID(auth.user_id), doc.project_id, doc.org_id):
-            raise HTTPException(status_code=403, detail="해당 프로젝트의 멤버가 아닌")
+            raise HTTPException(status_code=404, detail="Doc not found")
     # doc 상세(detail view)만 enrich: 담당자 member 요약 + 수정이력 요약 동봉(FE 이중 fetch 제거).
     # create/update/transition 은 write-path 라 plain(추가 쿼리 0·기존 테스트 broad-mock 무파손).
     return await _enrich_doc_response(doc, session)
