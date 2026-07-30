@@ -13,7 +13,6 @@ import {
   CircleHelp,
   ClipboardList,
   FlaskConical,
-  FolderKanban,
   GalleryVerticalEnd,
   Gauge,
   HardDrive,
@@ -28,6 +27,7 @@ import {
   Shield,
   Users,
   Users2,
+  Workflow,
 } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
@@ -102,6 +102,11 @@ export function AppSidebar({
   const storageLink = resourceLink('storage');
   const goalsLink = resourceLink('goals');
   const boardLink = resourceLink('board');
+  // story #2224(IA v2.2 §7-3, AC12) — 기본 진입은 /flow, 사이드바가 통합뷰를 가리킨다.
+  // 칸반(/board)은 살아 있고 딥링크도 무변경이지만, 사이드바에 board를 flow와 나란히
+  // 1Depth로 세우지 않는다("나란히 두면 「내렸다」가 무효가 된다" — §7-3) — /flow 안의
+  // 보기 전환(?view=kanban)이 "내비 2Depth 이하" 요건을 충족하는 그 자리다.
+  const flowLink = resourceLink('flow');
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
   // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/board?story={id}` 또는 이관 후
@@ -325,12 +330,12 @@ export function AppSidebar({
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  render={<Link href={boardLink.href} />}
-                  isActive={boardLink.isActive}
-                  tooltip={t('board')}
+                  render={<Link href={flowLink.href} />}
+                  isActive={flowLink.isActive || boardLink.isActive}
+                  tooltip={t('flow')}
                 >
-                  <FolderKanban />
-                  <span>{t('board')}</span>
+                  <Workflow />
+                  <span>{t('flow')}</span>
                   <KbdHint>B</KbdHint>
                 </SidebarMenuButton>
               </SidebarMenuItem>

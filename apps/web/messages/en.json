@@ -57,6 +57,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "sprintManagement": "Sprint Management",
+    "flow": "Flow",
     "board": "Board",
     "settings": "Settings",
     "standup": "Standup",
