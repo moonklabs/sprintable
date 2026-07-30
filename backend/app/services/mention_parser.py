@@ -740,13 +740,19 @@ async def fetch_stored_references(
     `insert_reference`는 form 매개변수·FORMS 검증·proof_payload 필드까지 이미 갖췄는데(쓰기는
     갈리는데) 이 읽기 함수가 그 둘을 안 실어 와 화면이 mention/embed/proof를 못 갈랐다("저장·
     쓰기·읽기·표시" 중 읽기에서 끊기는 이 에픽의 반복 패턴). C-7(#2265)이 이 값으로 세 형태를
-    가르는 첫 소비자가 된다."""
+    가르는 첫 소비자가 된다.
+
+    ⛔story #2262 AC1(「지점」, PO 판정 2026-07-30): `Reference.created_at`을 `referenced_at`
+    으로 이름 붙여 추가한다 — **이 참조가 «언제 생겼나»**(본문에 그 토큰이 저장된 시각)이지
+    **가리키는 대상이 «언제 만들어졌나»가 아니다**. `created_at` 그대로 내면 "무엇의
+    created_at인가"가 안 갈려 오늘 반복된 그 병(한 이름이 두 뜻)이 또 난다. FE가 이 값을
+    실제로 보일지는 아직 안 정해졌다 — 이 함수는 나르기만 한다(판단은 카드 디자인 몫)."""
     if not source_ids:
         return {}
     rows = (await db.execute(
         select(
             Reference.source_id, Reference.target_type, Reference.target_id,
-            Reference.form, Reference.proof_payload,
+            Reference.form, Reference.proof_payload, Reference.created_at,
         ).where(
             Reference.org_id == org_id,
             Reference.source_type == source_type,
@@ -754,9 +760,10 @@ async def fetch_stored_references(
         )
     )).all()
     result: dict[uuid.UUID, list[dict[str, Any]]] = {}
-    for source_id, target_type, target_id, form, proof_payload in rows:
+    for source_id, target_type, target_id, form, proof_payload, created_at in rows:
         result.setdefault(source_id, []).append({
             "target_type": target_type, "target_id": str(target_id),
             "form": form, "proof_payload": proof_payload,
+            "referenced_at": created_at.isoformat(),
         })
     return result
