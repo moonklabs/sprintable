@@ -15,22 +15,33 @@ docstring이 스스로 막아 둔 것이 근거).
 
   relation_kind — ⛔영문 식별자(PO 지적 2026-07-29: "DB 값은 식별자, 사람이 읽는 말은
     번역"이어야 함 — 미르코군이 같은 병(qa 상태 리터럴이 화면에 날것으로 새는 것)을 겪은
-    직후 발견된 자매 사고). 5종 중 하나 또는 NULL(=미분류, AC10 — taxonomy 밖도 버리지
+    직후 발견된 자매 사고). 6종 중 하나 또는 NULL(=미분류, AC10 — taxonomy 밖도 버리지
     않고 저장한다). 한글 원표(`story_refcheck_classification_20260728.md`)와의 대조가
     끊기지 않도록 `RELATION_KIND_LABELS_KO` 매핑을 아래 상수로 남긴다:
       spawned(원표: 낳음) · cited_as_evidence(근거인용) · similar_case(동종사례) ·
-      followed(잇따름) · explicitly_unrelated(명시적_무관)
+      followed(잇따름) · explicitly_unrelated(명시적_무관) · superseded(대체)
+
+    ⛔superseded(대체) — story #2223 판정(오르테가군, 2026-07-30) 추가. 다른 5종과 성질이
+    다르다(한쪽이 죽는 유일한 관계) — 표본 실측 0건이라 자동분류 규칙(`_KEYWORD_RULES`)에
+    안 넣는다. 사람이 직접 골라야만 붙는 값 — declare와는 별도 액션(아래 참조).
   status — estimated(기본, AC3 「추정됨」) | declared(사람이 승격, AC5 「선언됨」).
   declared_by/declared_at — status=declared로 승격한 사람/시각(감사 추적).
+  ⛔relation_kind와 status는 서로 «다른 질문»이다(오르테가군 판정, 2026-07-30) — declare는
+  "이 연결이 실재하는가"만 확認하고(AC4 계약 그대로, 셋만 바꿈), "무슨 종류인가"는 별도
+  엔드포인트(`set_candidate_relation_kind`)가 담당한다. 한 클릭에 두 판단을 묶지 않는다.
 
 ⛔범위(AC1·#2269 AC0-3과 동일 모집단 유지): 이 표는 story description/acceptance_criteria의
 맨 번호(`#<번호>`)가 다른 story를 가리키는 경우만 다룬다 — bracket 멘션(`entity:type:uuid`
 문법)은 여기 후보가 안 된다. 섞으면 57.5% 실측 기준(AC1 재검증 모집단)이 흐려진다.
 
-⛔새 참조만(PO 판정 2026-07-29 ③, 소급 안 함) — 이 표에 행이 생기는 유일한 경로는 story
-저장(생성·수정) write-path(`app/services/reference_semantic_candidates.py`)뿐이다. 배치
-백필 없음 — 옛 1261건(이미 해소된 참조)은 그 story가 다시 저장될 때만(정상 편집) 자연히
-후보가 생긴다, 별도 재실행 로직 없음.
+⛔story #2223(2026-07-30) 판정으로 위 "소급 안 함"이 뒤집혔다 — create_story가
+`_reconcile_story_references_and_candidates()`를 한 번도 안 불렀던 버그(오르테가군, 오늘
+아침 수정)로 이 표가 선 뒤(2026-07-29 23:18~) 실제로 쌓인 행이 104건뿐(해소된 후보
+1349건 대비 7.7%)이었던 것이 실측으로 드러나 "소급"이 사실상 "첫 채우기"였다 — 그래서
+`backend/scripts/backfill_reference_semantic_candidates.py`(1회성, Cloud Run Job으로
+실행·재실행해도 멱등 — `store_semantic_candidates`의 ON CONFLICT DO NOTHING 그대로 재사용)
+가 생겼다. write-path(story 저장 시점)는 여전히 유일한 **상시** 경로다 — 백필은 그 경로를
+과거 데이터에 한 번 더 돌리는 것뿐, 별도 로직을 새로 만들지 않는다.
 
 ⛔미래번호(모집단에 없는 대상, 164건·11.5%)는 행 자체가 없다(PO 판정 ② — 제외, read-time
 재수집이라 그 번호가 실제 story로 만들어지면 다음 저장 때 저절로 들어온다).
@@ -46,9 +57,12 @@ from app.core.database import Base
 from app.models.base import OrgScopedMixin
 
 RELATION_KINDS = frozenset(
-    {"spawned", "cited_as_evidence", "similar_case", "followed", "explicitly_unrelated"}
+    {
+        "spawned", "cited_as_evidence", "similar_case", "followed", "explicitly_unrelated",
+        "superseded",
+    }
 )
-# NULL(미분류)은 값이지 부재가 아니다(AC10) — 위 5종 밖이면 저장 시 NULL로 남는다.
+# NULL(미분류)은 값이지 부재가 아니다(AC10) — 위 6종 밖이면 저장 시 NULL로 남는다.
 
 # ⛔PO 지적(2026-07-29): DB 값(위 RELATION_KINDS)은 식별자, 사람이 읽는 말은 번역(en.json/
 # ko.json) 몫 — 이 매핑은 번역 파일이 아니라 한글 원표(story_refcheck_classification_
@@ -59,6 +73,7 @@ RELATION_KIND_LABELS_KO: dict[str, str] = {
     "similar_case": "동종사례",
     "followed": "잇따름",
     "explicitly_unrelated": "명시적_무관",
+    "superseded": "대체",
 }
 
 STATUSES = frozenset({"estimated", "declared"})
@@ -69,7 +84,8 @@ class ReferenceSemanticCandidate(Base, OrgScopedMixin):
     __table_args__ = (
         CheckConstraint(
             "relation_kind IS NULL OR relation_kind IN "
-            "('spawned', 'cited_as_evidence', 'similar_case', 'followed', 'explicitly_unrelated')",
+            "('spawned', 'cited_as_evidence', 'similar_case', 'followed', "
+            "'explicitly_unrelated', 'superseded')",
             name="ck_reference_semantic_candidates_relation_kind",
         ),
         CheckConstraint(
