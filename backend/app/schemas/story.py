@@ -171,6 +171,10 @@ class StoryUpdate(BaseModel):
     # outcome_status/outcome_result는 Update 제외 — 채점잡 전용
     # E-CAGE-REFEREE P1: 오염 마킹 (PO 직접 플래그, 자동 대량 마킹 금지)
     is_excluded: bool | None = None
+    # ⛔story #2346 AC7(2026-07-30, PO 판정 — 「사람 세기」에서 「기계 게이트」로 격상): 긴
+    # 텍스트 필드(description·acceptance_criteria)가 절반 이상 줄면 기본 거부한다(오늘 3건
+    # 모두 -80%대 급감 — 정당한 축약이면 이 플래그로 명시 승인한다).
+    allow_shrink: bool = False
 
     @field_validator("metric_definition")
     @classmethod

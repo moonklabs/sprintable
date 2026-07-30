@@ -394,6 +394,20 @@ def _enforce_mcp_attachment_declared_limit(attachments: list[dict]) -> None:
 
 _STORY_LINK_TABLES = {"epic_id": "goals", "sprint_id": "sprints", "meeting_id": "meetings"}
 
+# ⛔story #2346 AC3(2026-07-30, story 하나만 먼저 — docs.py/agent_runs.py는 미착수, 아래
+# _STORY_UPDATED_ACTIVITY_TODO 참조): 「긴 텍스트 필드」의 정의를 한 자리 상수로 — 필드명을
+# 흩어 놓지 않는다. 나중에 필드가 늘면 여기만 고친다.
+_LENGTH_TRACKED_FIELDS = ("description", "acceptance_criteria")
+# ⛔story #2346 AC7(2026-07-30, PO 판정 — 사람 세기에서 기계 게이트로 격상): 같은 날 실제로
+# 난 3건의 급감 사고가 전부 -80%대였다(3619→437·4052→경고문구·2121→진행현황뿐) — 그보다
+# 훨씬 낮은 50%를 임계로 잡아도 셋 다 막혔을 것이다. `allow_shrink=true`로 명시 승인 가능.
+_SHRINK_BLOCK_THRESHOLD = 0.5
+# ⛔story #2346 AC7 회귀 발견(2026-07-30): 짧은 문자열(예: entity 토큰 하나)은 몇 글자만
+# 바뀌어도 퍼센트가 크다("[Target](entity:doc:…)"(~48자)→"no tokens here"(14자)가 -70%지만
+# 무해한 정상 편집이다) — 이 게이트는 «긴 텍스트 필드의 참사적 손실»을 막는 것이지 «모든
+# 문자열의 비율 변화»를 막는 게 아니므로, 원본이 이 길이 미만이면 게이트를 안 켠다.
+_SHRINK_BLOCK_MIN_LENGTH = 200
+
 
 async def _assert_story_link_targets_in_project(
     session: AsyncSession, project_id: uuid.UUID, body: "StoryCreate | StoryUpdate",
@@ -1408,6 +1422,8 @@ async def update_story(
         if settings.is_ee_enabled:
             from ee.plan_limits import check_storage_capacity  # type: ignore[import]
             await check_storage_capacity(db, repo.org_id, data["attachments"])
+    # ⛔story #2346 AC7: allow_shrink는 stories 컬럼이 아니므로 repo.update 전에 분리(assignee_ids와 동형).
+    allow_shrink = data.pop("allow_shrink", False)
     # E-BOARD S5: assignee_ids는 stories 컬럼이 아니므로 repo.update 전에 분리.
     assignee_ids_in = data.pop("assignee_ids", None)
     # assignee_ids만 제공되면 단일 assignee_id(주담당)를 첫 요소로 동기화 → 기존 event/notify 로직 재사용.
@@ -1415,13 +1431,37 @@ async def update_story(
         data["assignee_id"] = assignee_ids_in[0] if assignee_ids_in else None
     old_assignee_id: uuid.UUID | None = None
     old_position: int | None = None
+    old_field_lengths: dict[str, int] = {}
     story_before = None
     # story #2172 AC2: position 변경도 old-value 대조가 필요해 assignee_id와 같은 사전조회를 공유.
-    if "assignee_id" in data or "position" in data:
+    # story #2346 AC3: 긴 텍스트 필드 급감 기록도 같은 사전조회(repo.update() 前 old 값)가 필요.
+    if "assignee_id" in data or "position" in data or any(f in data for f in _LENGTH_TRACKED_FIELDS):
         story_before = await repo.get(id)
         if story_before:
             old_assignee_id = story_before.assignee_id
             old_position = story_before.position
+            # ⛔story_before는 같은 세션의 identity map이라 repo.update() 뒤 story와 «같은
+            # 객체»가 된다(속성이 그 자리서 덮어써짐) — old_assignee_id/old_position처럼
+            # «스칼라 값»으로 지금 떠 둬야 update 前 값을 실제로 보존한다.
+            for _f in _LENGTH_TRACKED_FIELDS:
+                if _f in data:
+                    old_field_lengths[_f] = len(getattr(story_before, _f) or "")
+    # ⛔story #2346 AC7: 긴 텍스트 필드가 50% 이상 줄면 거부 — 오늘 실제 3건 사고(모두 -80%대)가
+    # 전부 이 게이트에 막혔을 것이다. allow_shrink=true로 명시 승인(정당한 축약)만 통과.
+    if old_field_lengths and not allow_shrink:
+        for _f, _before_len in old_field_lengths.items():
+            if _before_len < _SHRINK_BLOCK_MIN_LENGTH:
+                continue
+            _after_len = len(data.get(_f) or "")
+            if _after_len < _before_len * (1 - _SHRINK_BLOCK_THRESHOLD):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"{_f} shrank {_before_len}→{_after_len} chars "
+                        f"({round((1 - _after_len / _before_len) * 100)}% smaller) — "
+                        "if intentional, resend with allow_shrink=true"
+                    ),
+                )
     # H1-S5: PATCH /{id} 로 status=done 전이 시도도 board 경로와 동일하게 preflight 게이트(AC②).
     if data.get("status") == "done":
         gate_story = story_before or await repo.get(id)
@@ -1573,6 +1613,19 @@ async def update_story(
     # S-C2: story_updated — actor가 agent인 경우 기록 (AC2, AC6)
     if actor_id:
         from app.services.activity_log import record_activity_bg
+        _context: dict = {"fields": list(data.keys()), "story_title": story.title}
+        # ⛔story #2346 AC3(2026-07-30): 「지워졌는지 원래 없었는지 구분할 수단이 없다」던
+        # 갭 — 전문 스냅샷은 비싸 「이전 길이 → 이후 길이」만 남긴다. 길이가 «안 변한» 경우엔
+        # 안 남긴다(양성 대조 — 매번 남으면 로그가 잡음이 된다). docs.py·agent_runs.py는
+        # 아직 activity 로깅 자체가 없어 미착수 — #2346 본문에 남은 항목으로 적어 둔다.
+        if old_field_lengths:
+            _length_changes = {}
+            for _f, _before_len in old_field_lengths.items():
+                _after_len = len(getattr(story, _f) or "")
+                if _before_len != _after_len:
+                    _length_changes[_f] = {"before": _before_len, "after": _after_len}
+            if _length_changes:
+                _context["length_changes"] = _length_changes
         background_tasks.add_task(
             record_activity_bg,
             org_id=repo.org_id,
@@ -1581,7 +1634,7 @@ async def update_story(
             project_id=story.project_id,
             entity_type="story",
             entity_id=id,
-            context={"fields": list(data.keys()), "story_title": story.title},
+            context=_context,
         )
 
     await _attach_assignee_ids(db, repo.org_id, [story])
