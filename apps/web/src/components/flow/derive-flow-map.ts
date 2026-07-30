@@ -13,9 +13,28 @@ export const FLOW_MAP_DEPTH0_X = FLOW_MAP_NOW_LINE_X + FLOW_MAP_GRID_STEP; // �
 // #2221이 착지하면 그대로 재사용한다 — 저장 배선만 그때 바뀐다.
 export const FLOW_MAP_TOP_N = 3; // 열마다 카드로 그리는 상위 건수 — 나머지는 "+N건" 카드
 
+// PO 판정(2026-07-30, 실측 후속) — 목표(에픽)당 스토리 «중앙값 7»(대부분 접을 필요가
+// 없다)· «최대 141»(그 하나는 반드시 접혀야 한다)을 재고 나온 조건. 이전엔 3개 넘으면
+// 무조건 접었는데 그러면 "4개짜리 열"도 "+1건"으로 접혀 사람이 볼 수 있는 것까지 숨긴다
+// (대부분 열이 이 크기라 무조건 접기는 실질적으로 늘 접는 것과 같았다). 이 임계값을
+// 넘을 때만 접는다 — 넘지 않으면 전부(FLOW_MAP_TOP_N보다 많아도) 그대로 보인다.
+export const FLOW_MAP_FOLD_THRESHOLD = 5;
+
+/** 유나양 규격(2026-07-30, PO 전달) — 관계 종류 4종(축1). `null` = "종 미정"(아직 종이
+ * 안 지정된 «제안» 간선 — #2223 산문 추출은 항상 이 상태로 들어온다). 종 미정은 별도
+ * 넷째 «모양»을 갖지 않는다(화살촉 자체를 없앰) — 모르는 것을 아는 척 그리지 않는다는
+ * 원칙(유나양 지적: 넷째 모양을 주면 「미정」이 하나의 확定된 종류처럼 보인다). */
+export type FlowMapEdgeKind = 'spawn' | 'then' | 'supersede' | null;
+
 export interface FlowMapEdge {
   fromNodeId: string;
   toNodeId: string;
+  /** 종(낳음/잇따름/대체/미정) — 축1. */
+  kind: FlowMapEdgeKind;
+  /** 확認 상태(축2, 축1과 직교) — true=사람이 1클릭으로 확定, false=산문에서 뽑힌 제안
+   * (#2223 본문 "자동 확定 금지" 원칙). 확認 여부와 무관하게 종은 가질 수 있다(예: 확認된
+   * "낳음"도 있고 제안 상태의 "낳음"도 있다) — 두 축은 서로를 제약하지 않는다. */
+  confirmed: boolean;
 }
 
 /** `GET /api/dependencies/graph` 원시 응답 엣지 하나 — `backend/app/services/dependency_graph.py
@@ -39,12 +58,16 @@ export interface RawDependencyEdge {
  * ⛔#2223(부산물형 3종 간선 — 낳음/잇따름/대체)은 아직 실 엔드포인트가 없다(디디 실측은
  * "산문에서 뽑히는 제안선" 단계, 2026-07-30) — 이 함수는 오늘 실존하는 «계획형»만 다룬다.
  * #2223이 착지하면 별도 파서가 추가되는 것이지 이 함수를 확장하는 게 아니다(계획형·부산물형은
- * 서로 다른 의미 축이라 한 함수에서 섞으면 방향 규칙이 꼬인다). */
+ * 서로 다른 의미 축이라 한 함수에서 섞으면 방향 규칙이 꼬인다).
+ *
+ * kind/confirmed(2026-07-30, 유나양 4×2 규격 후속): 계획형 `dependencies`는 사람이 UI로
+ * 직접 만든 선언이라 confirmed=true가 항상 맞다(제안 단계가 없는 시스템) — 다만
+ * 낳음/잇따름/대체 «어느 것도 아니라» kind=null(종 미정)로 둔다. */
 export function parseDependencyGraphEdges(raw: RawDependencyEdge[]): FlowMapEdge[] {
   return raw.map((e) => (
     e.dep_type === 'depends_on'
-      ? { fromNodeId: e.to_id, toNodeId: e.from_id }
-      : { fromNodeId: e.from_id, toNodeId: e.to_id }
+      ? { fromNodeId: e.to_id, toNodeId: e.from_id, kind: null, confirmed: true }
+      : { fromNodeId: e.from_id, toNodeId: e.to_id, kind: null, confirmed: true }
   ));
 }
 
@@ -141,9 +164,12 @@ export function deriveFlowMapLane(
   const overflows: FlowMapOverflow[] = [];
   for (const [depth, nodes] of byDepth) {
     const sorted = [...nodes].sort((a, b) => queueSortKey(a) - queueSortKey(b));
-    queueNodesByDepth.set(depth, sorted.slice(0, FLOW_MAP_TOP_N));
-    const hiddenCount = sorted.length - FLOW_MAP_TOP_N;
-    if (hiddenCount > 0) overflows.push({ depth, hiddenCount });
+    if (sorted.length > FLOW_MAP_FOLD_THRESHOLD) {
+      queueNodesByDepth.set(depth, sorted.slice(0, FLOW_MAP_TOP_N));
+      overflows.push({ depth, hiddenCount: sorted.length - FLOW_MAP_TOP_N });
+    } else {
+      queueNodesByDepth.set(depth, sorted); // 임계값 이하 — 전부 보인다, 접지 않는다.
+    }
   }
 
   const renderedIds = new Set<string>(nowNodes.map((n) => n.id));
@@ -176,6 +202,19 @@ export function computeNodePositions(
     });
   }
   return positions;
+}
+
+/** 유나양 지적(2026-07-30, PO 전달) — "대체"(supersede)만 유일하게 «간선이 노드 렌더에
+ * 영향을 주는» 종류다(낳음·잇따름은 둘 다 살아있는 관계라 선만 그으면 되지만, 대체는 한쪽이
+ * 죽는 관계라 «옛 노드»의 표시가 같이 바뀌어야 — 안 그러면 "대체됐는데 옛 것이 멀쩡히 살아
+ * 보이는" 화면이 된다). ⛔단 «확認된» 대체만 — «제안» 상태의 대체까지 옛 노드를 흐리면
+ * 확認 안 된 것을 화면이 대신 판정하는 것이 된다(유나양 지적, 사람이 안 한 판정을 화면이
+ * 대신 내면 안 된다). 방향 규칙(이 세션 확定): fromNodeId=옛 노드(대체당함), toNodeId=새
+ * 노드(대체함) — "이전→이후" 시간 방향은 낳음·잇따름과 동일하게 유지한다. */
+export function computeSupersededNodeIds(edges: FlowMapEdge[]): Set<string> {
+  return new Set(
+    edges.filter((e) => e.kind === 'supersede' && e.confirmed).map((e) => e.fromNodeId),
+  );
 }
 
 /** 레인 하나의 높이(px) — 고정값이 아니라 «내용»에서 계산한다(판C ⑤, "고정이면 어느 레인은

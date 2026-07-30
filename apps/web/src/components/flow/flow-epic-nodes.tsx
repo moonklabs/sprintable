@@ -10,6 +10,7 @@ interface FlowEpicNodesProps {
   projectId: string;
   epicId: string;
   epicTitle: string;
+  onSelectStory: (storyId: string) => void;
 }
 
 type LoadState =
@@ -33,7 +34,7 @@ function unwrap<T>(json: unknown): T | null {
  * 감싸 FlowMapCanvas에 넘긴다. 멀티레인 BE 계약이 착지하면 호출부가 여러 에픽을 fetch해
  * 배열을 채우는 것으로 끝난다(이 컴포넌트/FlowMapCanvas 모두 무변경).
  */
-export function FlowEpicNodes({ projectId, epicId, epicTitle }: FlowEpicNodesProps) {
+export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory }: FlowEpicNodesProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
 
@@ -85,5 +86,5 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle }: FlowEpicNodesPro
     return <p className="px-2 py-2 text-[11px] text-muted-foreground">{t('nodesError')}</p>;
   }
 
-  return <FlowMapCanvas lanes={[state.lane]} />;
+  return <FlowMapCanvas lanes={[state.lane]} onSelectStory={onSelectStory} />;
 }

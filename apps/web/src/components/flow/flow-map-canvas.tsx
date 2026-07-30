@@ -1,10 +1,10 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import type { FlowMapLane, FlowMapNode } from './derive-flow-map';
+import type { FlowMapLane, FlowMapNode, FlowMapEdgeKind } from './derive-flow-map';
 import {
   FLOW_MAP_GRID_STEP, FLOW_MAP_NOW_LINE_X, FLOW_MAP_DEPTH0_X, computeLaneHeight, shouldShowNoDeeperReason,
-  computeNodePositions,
+  computeNodePositions, computeSupersededNodeIds,
 } from './derive-flow-map';
 
 // 카드 실측(FlowMapNodeCard): w-[110px], 높이는 두 줄 텍스트+padding으로 24px 안팎(NODE_ROW_HEIGHT
@@ -20,6 +20,11 @@ const NOW_CLUSTER_X = FLOW_MAP_NOW_LINE_X - 40; // "지금" 노드는 세로선 
 
 interface FlowMapCanvasProps {
   lanes: FlowMapLane[];
+  /** 노드 클릭 → 스토리 상세 패널(선생님 지적 2026-07-30 — 동사 0개였다). PO 판정:
+   * 「패널을 연다」— 캔버스 밖이라 곧 들어올 줌(축척)과 충돌하지 않고, 절대좌표 레이아웃도
+   * 안 흔들린다(이유 셋 중 둘째·셋째). `?view=list&story={id}`로 기존 KanbanBoard 오픈
+   * 경로를 그대로 탄다(딥링크가 이미 쓰는 그 길, 새 패널을 짓지 않는다). */
+  onSelectStory: (storyId: string) => void;
 }
 
 // PO 지적(2026-07-30) — 판을 갈아엎으며 색/모양(border-left)만 남기고 「status를 사람이
@@ -40,19 +45,24 @@ function nodeToneClass(node: FlowMapNode): string {
   return 'border-l-border border-dashed'; // .n.queue — 아직 시작 안 한 것은 점선
 }
 
-function FlowMapNodeCard({ node, left, top }: { node: FlowMapNode; left: number; top: number }) {
+function FlowMapNodeCard({ node, left, top, superseded, onSelectStory }: { node: FlowMapNode; left: number; top: number; superseded: boolean; onSelectStory: (storyId: string) => void }) {
   const t = useTranslations('flow');
   const statusKey = STATUS_LABEL_KEY[node.status];
   return (
-    <div
-      className={`absolute w-[110px] overflow-visible rounded border border-l-[3px] border-border bg-card px-1.5 py-1 text-[11px] shadow-sm ${nodeToneClass(node)}`}
+    <button
+      type="button"
+      onClick={() => onSelectStory(node.id)}
+      className={`focus-inset absolute w-[110px] cursor-pointer overflow-visible rounded border border-l-[3px] border-border bg-card px-1.5 py-1 text-left text-[11px] shadow-sm hover:border-info/60 ${nodeToneClass(node)} ${superseded ? 'opacity-50' : ''}`}
       style={{ left, top }}
     >
       <div className="flex items-center justify-between gap-1 font-mono text-[9px] text-muted-foreground">
         <span className="truncate">#{node.storyNumber}</span>
         <span className="shrink-0">{statusKey ? t(statusKey) : node.status}</span>
       </div>
-      <div className="truncate">{node.title}</div>
+      {/* 대체(확認됨)만 — "옛 노드"에 취소선(유나양 규격). 제안 상태는 절대 취소선을 넣지
+          않는다(computeSupersededNodeIds가 confirmed 간선만 모으므로 이 자리는 값만 받는다 —
+          "제안이면 안 흐린다"는 판단을 이 컴포넌트가 다시 하지 않는다). */}
+      <div className={`truncate ${superseded ? 'line-through' : ''}`}>{node.title}</div>
       {/* ⑥ 포트(형태만, 2026-07-30 PO 판정) — 간선이 org 전체 0건인 지금이야말로 포트를
           «먼저» 세워야 한다(포트가 첫 연결을 만드는 유일한 길 — 재료를 소비만 하는 것과
           달리 재료를 만드는 것은 미룰수록 0이 굳는다). 오늘은 모양만: 실제 드래그로
@@ -62,7 +72,44 @@ function FlowMapNodeCard({ node, left, top }: { node: FlowMapNode; left: number;
         aria-hidden="true"
         className="absolute right-[-5px] top-1/2 h-[9px] w-[9px] -translate-y-1/2 rounded-full border-[1.5px] border-info bg-card"
       />
-    </div>
+    </button>
+  );
+}
+
+// 유나양 규격(2026-07-30, PO 전달) — 축1(관계 종류) 4종의 «모양» 채널. 축2(확認 상태)는
+// 이와 직교하는 stroke-dasharray(확定=실선/제안=점선)로만 표현 — 아래 표에는 없다.
+// null(종 미정)은 화살촉 자체가 없다(유나양 지적: 넷째 모양을 주면 "미정"이 확定된 하나의
+// 종류처럼 보인다 — 모르면 그 채널을 비운다). 다만 방향은 아는지라 끝점에 점 하나만.
+function edgeKindStyle(kind: FlowMapEdgeKind): { color: string; strokeWidth: number; markerEnd: string; markerStart?: string } {
+  if (kind === 'spawn') return { color: 'var(--info)', strokeWidth: 1.4, markerEnd: 'url(#flow-edge-arrow-open)' };
+  if (kind === 'then') return { color: 'var(--brand)', strokeWidth: 1.4, markerEnd: 'url(#flow-edge-arrow-filled)', markerStart: 'url(#flow-edge-dot-start)' };
+  if (kind === 'supersede') return { color: 'var(--muted-foreground)', strokeWidth: 1.4, markerEnd: 'url(#flow-edge-bar)' };
+  return { color: 'var(--muted-foreground)', strokeWidth: 1, markerEnd: 'url(#flow-edge-dot-end)' }; // 종 미정
+}
+
+function FlowEdgeMarkerDefs() {
+  return (
+    <defs>
+      {/* 낳음 — 빈 화살촉(윤곽선만, 안이 안 채워짐) */}
+      <marker id="flow-edge-arrow-open" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M1,1 L9,5 L1,9" fill="none" stroke="var(--info)" strokeWidth={1.4} />
+      </marker>
+      {/* 잇따름 — 채운 화살촉 + 출발점 점 */}
+      <marker id="flow-edge-arrow-filled" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M1,1 L9,5 L1,9 Z" fill="var(--brand)" />
+      </marker>
+      <marker id="flow-edge-dot-start" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5">
+        <circle cx="5" cy="5" r="3.5" fill="var(--brand)" />
+      </marker>
+      {/* 대체 — 화살촉 없이 막대 끝(⊣) */}
+      <marker id="flow-edge-bar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="8" orient="auto-start-reverse">
+        <line x1="9" y1="1" x2="9" y2="9" stroke="var(--muted-foreground)" strokeWidth={1.6} />
+      </marker>
+      {/* 종 미정 — 화살촉 없음, 끝점에 작은 점만("여기서 끝난다"만 말하는, 방향 이상은 주장 안 함) */}
+      <marker id="flow-edge-dot-end" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4">
+        <circle cx="5" cy="5" r="3" fill="var(--muted-foreground)" />
+      </marker>
+    </defs>
   );
 }
 
@@ -81,7 +128,7 @@ function FlowMapNodeCard({ node, left, top }: { node: FlowMapNode; left: number;
  * (PO 지시 — "한 레인 전용으로 짜지 마시는, 처음부터 레인 배열을 받는 형태로"). 오늘은 이
  * 배열의 길이가 늘 1(펼친 에픽 하나) — 멀티레인 계약이 오면 호출부만 배열을 채워 넘기면 된다.
  */
-export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
+export function FlowMapCanvas({ lanes, onSelectStory }: FlowMapCanvasProps) {
   const t = useTranslations('flow');
   const maxDepth = Math.max(0, ...lanes.flatMap((l) => Array.from(l.queueNodesByDepth.keys())));
   const canvasWidth = FLOW_MAP_DEPTH0_X + (maxDepth + 1) * FLOW_MAP_GRID_STEP + 20;
@@ -113,6 +160,7 @@ export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
         <div className="relative" style={{ width: Math.max(canvasWidth, 400) }}>
           {lanes.map((lane) => {
             const height = computeLaneHeight(lane, NODE_ROW_HEIGHT, LANE_MIN_HEIGHT);
+            const supersededIds = computeSupersededNodeIds(lane.edges);
             return (
               <div key={lane.epicId} className="relative flex border-b border-border last:border-b-0" style={{ height }}>
                 <div className="w-[150px] shrink-0 border-r border-border px-2 py-1.5">
@@ -134,10 +182,9 @@ export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
 
                   {/* 간선(⑥) — 선생님 지시(2026-07-30) 후속: "edges=[]를 항상 넘긴다"와
                       "받았는데 화면에 못 그린다"는 다른 병이라 이 SVG 레이어 자체가 오늘까지
-                      없었다(양쪽 다 진짜 병이었다). 종류별(낳음/잇따름/대체) 시각 구분은
-                      유나양의 4번째 축(제안↔확認) 확定 대기 중이라 오늘은 «단일 스타일 직선»
-                      으로만 "연결이 있으면 선이 실제로 그려진다"를 증명한다 — 종별 스타일은
-                      그 축이 오면 이 자리(strokeDasharray/marker 분기)에 얹는다. */}
+                      없었다(양쪽 다 진짜 병이었다). 유나양 규격(축1 관계종류 4종×축2 확認
+                      상태 2종=8) — 종은 marker(화살촉/점/막대)+색으로, 확認 여부는
+                      strokeDasharray(확定=실선/제안=점선)로 직교하게 표현한다. */}
                   {lane.edges.length > 0 ? (
                     <svg
                       aria-hidden="true"
@@ -145,6 +192,7 @@ export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
                       width="100%"
                       height="100%"
                     >
+                      <FlowEdgeMarkerDefs />
                       {(() => {
                         const positions = computeNodePositions(lane, NODE_ROW_HEIGHT, NOW_CLUSTER_X);
                         return lane.edges.map((edge) => {
@@ -155,12 +203,18 @@ export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
                           const y1 = from.top + NODE_CARD_HEIGHT / 2;
                           const x2 = to.left;
                           const y2 = to.top + NODE_CARD_HEIGHT / 2;
+                          const style = edgeKindStyle(edge.kind);
                           return (
                             <line
                               key={`${edge.fromNodeId}-${edge.toNodeId}`}
+                              data-edge-kind={edge.kind ?? 'unknown'}
+                              data-edge-confirmed={edge.confirmed}
                               x1={x1} y1={y1} x2={x2} y2={y2}
-                              stroke="var(--muted-foreground)"
-                              strokeWidth={1.2}
+                              stroke={style.color}
+                              strokeWidth={style.strokeWidth}
+                              strokeDasharray={edge.confirmed ? undefined : '4 3'}
+                              markerEnd={style.markerEnd}
+                              markerStart={style.markerStart}
                             />
                           );
                         });
@@ -187,7 +241,7 @@ export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
                   ) : null}
 
                   {lane.nowNodes.map((node, i) => (
-                    <FlowMapNodeCard key={node.id} node={node} left={NOW_CLUSTER_X} top={4 + i * NODE_ROW_HEIGHT} />
+                    <FlowMapNodeCard key={node.id} node={node} left={NOW_CLUSTER_X} top={4 + i * NODE_ROW_HEIGHT} superseded={supersededIds.has(node.id)} onSelectStory={onSelectStory} />
                   ))}
 
                   {/* ①깊이 좌표 — x = FLOW_MAP_DEPTH0_X + depth × FLOW_MAP_GRID_STEP. depth는
@@ -198,7 +252,7 @@ export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
                     return (
                       <div key={depth}>
                         {nodes.map((node, i) => (
-                          <FlowMapNodeCard key={node.id} node={node} left={x} top={4 + i * NODE_ROW_HEIGHT} />
+                          <FlowMapNodeCard key={node.id} node={node} left={x} top={4 + i * NODE_ROW_HEIGHT} superseded={supersededIds.has(node.id)} onSelectStory={onSelectStory} />
                         ))}
                         {/* ③「+N건」 더보기 카드(판C) — 잘린 수를 정직하게 보인다. "숨김"이
                             아니라 "있다는 걸 보여주며 접는 것"(오늘 「67 중 15」와 같은 규율). */}
@@ -239,6 +293,22 @@ export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
           })}
         </div>
       </div>
+
+      {/* 하단 범례(유나양 규격, 2026-07-30 PO 전달) — 색을 지워도 4종이 갈리도록 화살촉/점/
+          막대 모양으로 설명한다. 그려진 선이 하나도 없으면(오늘 org 0행 그대로) 설명할
+          대상이 없어 범례도 안 띄운다(빈 기능을 위한 상시 chrome을 만들지 않는다).
+          ⛔카운트 줄("확認 N · 후보 M · 기각 K")은 디디군 백필이 끝나 실 카운트가 배선된
+          뒤에 얹는다 — 지금 숫자를 만들어 보이면 지어내는 것이라 이 판에서는 뺐다. */}
+      {lanes.some((l) => l.edges.length > 0) ? (
+        <div className="flex flex-wrap items-center gap-3 border-t border-border px-2 py-1.5 text-[10px] text-muted-foreground">
+          <span className="flex items-center gap-1"><span aria-hidden="true" className="text-info">▷</span>{t('edgeLegendSpawn')}</span>
+          <span className="flex items-center gap-1"><span aria-hidden="true" className="text-brand">▶</span>{t('edgeLegendThen')}</span>
+          <span className="flex items-center gap-1"><span aria-hidden="true">⊣</span>{t('edgeLegendSupersede')}</span>
+          <span className="flex items-center gap-1"><span aria-hidden="true">—●</span>{t('edgeLegendUnknownKind')}</span>
+          <span aria-hidden="true">│</span>
+          <span>{t('edgeLegendConfirmedVsProposed')}</span>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -112,6 +112,19 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     router.push(`/${wsSlug}/${projSlug}/flow${qs ? `?${qs}` : ''}`);
   }, [router, searchParams, wsSlug, projSlug]);
 
+  // 선생님 지적(2026-07-30, 오르테가군 전달) — "노드를 눌러도 아무 일이 안 나는" 것이
+  // #2224 AC1의 두 번째 결함이었다(간선 그리기와 별개). PO 판정: 「패널을 연다」로 간다
+  // (캔버스 안 확장은 절대좌표라 레이아웃이 흔들리고, 곧 들어올 줌과도 정면충돌). 이미
+  // `KanbanBoard`가 `?story=` 를 읽어 패널을 여는 길이 있다(딥링크가 그 길을 쓴다) —
+  // 새 패널을 짓지 않고 «그 길을 그대로 타는» 것이 오늘의 배선. view를 list로 함께
+  // 바꿔야 KanbanBoard 자체가 마운트된다(list일 때만 렌더되는 조건부 마운트, 아래 참고).
+  const handleSelectStory = useCallback((storyId: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('view', 'list');
+    params.set('story', storyId);
+    router.push(`/${wsSlug}/${projSlug}/flow?${params.toString()}`);
+  }, [router, searchParams, wsSlug, projSlug]);
+
   const exceptionItems = useMemo(() => {
     if (!data) return [];
     const labels: ExceptionLabels = {
@@ -205,7 +218,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
                 <FlowLane rows={laneRows} totalEpicCount={data?.totalEpicCount ?? 0} />
               </div>
               <div className="focus-inset min-w-0 flex-1 overflow-x-auto">
-                <FlowCanvas rows={laneRows} activeEpicId={activeEpicId} edgeCount={edgeCount} projectId={projectId} />
+                <FlowCanvas rows={laneRows} activeEpicId={activeEpicId} edgeCount={edgeCount} projectId={projectId} onSelectStory={handleSelectStory} />
               </div>
             </div>
           </>
