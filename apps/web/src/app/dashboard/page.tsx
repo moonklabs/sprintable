@@ -8,7 +8,10 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
 import { CommandCenter } from '@/components/dashboard/command-center/command-center';
 
-// E-MODERN [Track C] 커맨드 센터로 교체(현 vanity 위젯 제거). 헤더+2구역·canonical 부품·pending_data graceful.
+// E-MODERN [Track C/command-center] 커맨드 센터로 교체(현 vanity 위젯 제거). 헤더+2구역·canonical
+// 부품·pending_data graceful. ⚠️이 "Track C"는 command-center라는 «조각» 이름이지, E-MODERN
+// 블루프린트(doc: e-modern-modernization-blueprint)의 전략 Track C("UI 갈아엎기" 전체)가 아니다
+// — 같은 글자가 두 다른 체계에서 쓰여 "Track C 했다"가 어느 쪽인지 헷갈리던 것을 정정(2026-07-30).
 // 데이터는 CommandCenter(client)가 org-scope BE 2엔드포인트로 자체 fetch — 서버 prefetch 불요.
 export default async function DashboardPage() {
   const t = await getTranslations('dashboard');
