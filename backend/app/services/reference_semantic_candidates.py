@@ -22,12 +22,16 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
+from datetime import UTC
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.reference_semantic_candidate import ReferenceSemanticCandidate
+from app.models.reference_semantic_candidate import (
+    RELATION_KINDS,
+    ReferenceSemanticCandidate,
+)
 from app.services.mention_parser import (
     _BARE_STORY_NUMBER_RE,
     _redact_code_spans,
@@ -241,9 +245,39 @@ async def declare_candidate(
     candidate = result.scalar_one_or_none()
     if candidate is None:
         raise CandidateNotFoundError()
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     candidate.status = "declared"
     candidate.declared_by = declared_by
-    candidate.declared_at = datetime.now(timezone.utc)
+    candidate.declared_at = datetime.now(UTC)
+    return candidate
+
+
+class InvalidRelationKindError(Exception):
+    pass
+
+
+async def set_candidate_relation_kind(
+    db: AsyncSession, *, org_id: uuid.UUID, candidate_id: uuid.UUID, relation_kind: str | None,
+) -> ReferenceSemanticCandidate:
+    """story #2223 판정(오르테가군, 2026-07-30) — "이 연결이 실재하는가"(declare)와 "무슨
+    종류인가"(이 함수) 는 «다른 질문»이라 한 클릭에 안 묶는다. declare_candidate와 달리 이
+    함수는 relation_kind **하나만** 바꾼다 — status/declared_by/declared_at는 안 건드린다
+    (AC4가 declare 쪽에 지운 그 경계를 이 함수 쪽에서도 대칭으로 지킨다 — declare 여부와
+    무관하게 종 지정이 가능하다, 순서를 강제하지 않는다).
+
+    relation_kind=None 허용 — 잘못 지정한 것을 「미분류」로 되돌리는 경로(AC10 정신: 모르는
+    것을 억지로 채운 채로 안 둔다)."""
+    if relation_kind is not None and relation_kind not in RELATION_KINDS:
+        raise InvalidRelationKindError(relation_kind)
+    result = await db.execute(
+        select(ReferenceSemanticCandidate).where(
+            ReferenceSemanticCandidate.org_id == org_id,
+            ReferenceSemanticCandidate.id == candidate_id,
+        )
+    )
+    candidate = result.scalar_one_or_none()
+    if candidate is None:
+        raise CandidateNotFoundError()
+    candidate.relation_kind = relation_kind
     return candidate

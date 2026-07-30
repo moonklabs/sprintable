@@ -839,6 +839,46 @@ async def declare_story_reference_candidate(
     }
 
 
+class SetReferenceCandidateRelationKindRequest(BaseModel):
+    relation_kind: str | None = None
+
+
+@router.post("/{id}/reference-candidates/{candidate_id}/relation-kind")
+async def set_story_reference_candidate_relation_kind(
+    id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    body: SetReferenceCandidateRelationKindRequest,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """POST .../relation-kind — story #2223 판정(오르테가군, 2026-07-30): "이 연결이
+    실재하는가"(declare, 위)와 "무슨 종류인가"(이 엔드포인트)는 «다른 질문» — 한 클릭에
+    안 묶는다. declare 전후 아무 때나 호출 가능(순서 강제 없음). relation_kind=null로
+    미분류로 되돌릴 수 있다(AC10 정신)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.reference_semantic_candidates import (
+        CandidateNotFoundError,
+        InvalidRelationKindError,
+        set_candidate_relation_kind,
+    )
+
+    try:
+        candidate = await set_candidate_relation_kind(
+            repo.session, org_id=repo.org_id, candidate_id=candidate_id,
+            relation_kind=body.relation_kind,
+        )
+    except CandidateNotFoundError:
+        raise HTTPException(status_code=404, detail="Reference candidate not found")
+    except InvalidRelationKindError:
+        raise HTTPException(status_code=400, detail="Invalid relation_kind")
+    await repo.session.commit()
+    return {"id": str(candidate.id), "relation_kind": candidate.relation_kind}
+
+
 async def _visible_target_ids(
     session: AsyncSession, org_id: uuid.UUID, caller_id: uuid.UUID,
     ids_by_type: dict[str, set[uuid.UUID]], auth: AuthContext,

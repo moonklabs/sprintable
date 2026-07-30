@@ -366,3 +366,186 @@ async def test_declare_only_changes_status_declared_by_declared_at():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# story #2223(2026-07-30, 오르테가군 판정) — relation_kind 지정은 declare와 «다른 질문»이라
+# 별도 엔드포인트로 분리됐다. 아래 넷이 그 계약을 실PG로 고정한다.
+
+
+async def test_set_relation_kind_updates_kind_only():
+    """새 엔드포인트가 relation_kind만 바꾸고 status/declared_by/declared_at은 안 건드린다
+    (declare 쪽 AC4와 대칭 계약)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            target = await _make_story(s, org.id, project.id, title="Target")
+            target.story_number = 5006
+            await s.commit()
+            story = await _make_story(s, org.id, project.id, title="Source")
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/stories/{story.id}",
+                json={"description": "아무 표면단서 없이 그냥 #5006 라고만 적은 문장"},
+            )
+            assert resp.status_code == 200, resp.text
+            candidate_id = (
+                await client.get(f"/api/v2/stories/{story.id}/reference-candidates")
+            ).json()[0]["id"]
+
+            kind_resp = await client.post(
+                f"/api/v2/stories/{story.id}/reference-candidates/{candidate_id}/relation-kind",
+                json={"relation_kind": "superseded"},
+            )
+            assert kind_resp.status_code == 200, kind_resp.text
+            assert kind_resp.json()["relation_kind"] == "superseded"
+
+            async with Session() as s:
+                cands = await _candidates(s, org.id, story.id, source_field="description")
+                assert len(cands) == 1
+                assert cands[0].relation_kind == "superseded"
+                assert cands[0].status == "estimated"  # declare 안 거쳤으니 그대로
+                assert cands[0].declared_by is None
+                assert cands[0].declared_at is None
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_set_relation_kind_rejects_invalid_value():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            target = await _make_story(s, org.id, project.id, title="Target")
+            target.story_number = 5007
+            await s.commit()
+            story = await _make_story(s, org.id, project.id, title="Source")
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/stories/{story.id}",
+                json={"description": "#5007 아무 단서 없음"},
+            )
+            assert resp.status_code == 200, resp.text
+            candidate_id = (
+                await client.get(f"/api/v2/stories/{story.id}/reference-candidates")
+            ).json()[0]["id"]
+
+            kind_resp = await client.post(
+                f"/api/v2/stories/{story.id}/reference-candidates/{candidate_id}/relation-kind",
+                json={"relation_kind": "not_a_real_kind"},
+            )
+            assert kind_resp.status_code == 400, kind_resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_set_relation_kind_to_none_clears_it():
+    """AC10 정신 — 잘못 지정한 종을 다시 미분류(NULL)로 되돌릴 수 있다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            target = await _make_story(s, org.id, project.id, title="Target")
+            target.story_number = 5008
+            await s.commit()
+            story = await _make_story(s, org.id, project.id, title="Source")
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/stories/{story.id}",
+                json={"description": "#5008 아무 단서 없음"},
+            )
+            assert resp.status_code == 200, resp.text
+            candidate_id = (
+                await client.get(f"/api/v2/stories/{story.id}/reference-candidates")
+            ).json()[0]["id"]
+
+            await client.post(
+                f"/api/v2/stories/{story.id}/reference-candidates/{candidate_id}/relation-kind",
+                json={"relation_kind": "spawned"},
+            )
+            clear_resp = await client.post(
+                f"/api/v2/stories/{story.id}/reference-candidates/{candidate_id}/relation-kind",
+                json={"relation_kind": None},
+            )
+            assert clear_resp.status_code == 200, clear_resp.text
+            assert clear_resp.json()["relation_kind"] is None
+
+            async with Session() as s:
+                cands = await _candidates(s, org.id, story.id, source_field="description")
+                assert cands[0].relation_kind is None
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_set_relation_kind_does_not_require_declare_first():
+    """순서 강제 없음 — declare 전에도 종을 지정할 수 있다(오르테가군 판정 그대로)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            target = await _make_story(s, org.id, project.id, title="Target")
+            target.story_number = 5009
+            await s.commit()
+            story = await _make_story(s, org.id, project.id, title="Source")
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/stories/{story.id}",
+                json={"description": "#5009 아무 단서 없음"},
+            )
+            assert resp.status_code == 200, resp.text
+            candidate_id = (
+                await client.get(f"/api/v2/stories/{story.id}/reference-candidates")
+            ).json()[0]["id"]
+
+            kind_resp = await client.post(
+                f"/api/v2/stories/{story.id}/reference-candidates/{candidate_id}/relation-kind",
+                json={"relation_kind": "followed"},
+            )
+            assert kind_resp.status_code == 200, kind_resp.text
+
+            async with Session() as s:
+                cands = await _candidates(s, org.id, story.id, source_field="description")
+                assert cands[0].relation_kind == "followed"
+                assert cands[0].status == "estimated"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
