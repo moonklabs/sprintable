@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -268,6 +268,49 @@ def _extract_pr_ci(event: str, payload: dict) -> tuple[int, bool, str | None, st
     return pr_number, merged, ci_conclusion, head_sha
 
 
+def _repo_owner(repo: str) -> str | None:
+    """`owner/repo` → `owner`. 형식 아니면 None(추측 금지)."""
+    if not repo or "/" not in repo:
+        return None
+    owner = repo.split("/", 1)[0]
+    return owner or None
+
+
+async def _resolve_legacy_org_by_repo_owner(
+    session: AsyncSession, repo: str
+) -> tuple[uuid.UUID | None, str]:
+    """legacy webhook(이미 legacy_secret HMAC 을 통과한 «검증된» 요청)에서 org_id 를 repo owner 로 해소.
+    (org_id, reason) 반환 — reason ∈ {org_resolved_via_repo_owner, repo_owner_ambiguous, repo_owner_unknown}.
+
+    ①왜 이 길을 열었나: story #2327 후속 실측(2026-07-30) — legacy 는 서명검증을 이미 통과했는데
+    org_id 를 못 풀어 story_number/PR-link/auto_match 등 org-scope 필요 경로 전체가 막혀 있었다
+    (`GITHUB_APP_WEBHOOK_SECRET` 미설정 확認 — app 경로 자체가 전무·2575건 legacy ignored 다수가
+    이 갭). repository.full_name 의 owner 는 모든 webhook payload 에 항상 있고, PO 판정(2026-07-30):
+    「검증된 요청인데 org 를 못 푼다」는 보안 경계가 아니라 결함이라 이 매치는 우회가 아니라 정공이다.
+    ②무엇을 안 하는가: 서명검증을 건너뛰지 않는다(이 함수는 `_resolve_webhook_source`가 이미
+    source='legacy'로 확정한 요청에만 불린다) · source 를 'app'으로 바꿔치지 않는다(그대로 legacy로
+    기록) · **정확히 1건 매치일 때만** 해소한다(0건·2건+ 는 거부 — 「첫 것을 고른다」 금지).
+    ③⭐만료 조건: `GITHUB_APP_WEBHOOK_SECRET` 이 설정돼 app 경로가 라이브로 도는 것이 확認되면,
+    이 폴백은 다중 org 안전성(exactly-1-match 전제가 org 여러 개일 때도 유지되는지 — 지금은
+    `github_installation` 이 1행이라 위험 없음)을 다시 재고 그때 유지 여부를 정한다."""
+    owner = _repo_owner(repo)
+    if owner is None:
+        return None, "repo_owner_unknown"
+    rows = (
+        await session.execute(
+            select(GithubInstallation.org_id).where(
+                func.lower(GithubInstallation.account_login) == owner.lower(),
+                GithubInstallation.suspended_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    if len(rows) == 0:
+        return None, "repo_owner_unknown"
+    if len(rows) > 1:
+        return None, "repo_owner_ambiguous"
+    return rows[0], "org_resolved_via_repo_owner"
+
+
 async def _process_webhook_event(
     session: AsyncSession, source: str, event: str, payload: dict, installation_id: int | None,
     delivery: GithubWebhookDelivery,
@@ -275,9 +318,10 @@ async def _process_webhook_event(
     """검증·dedup 통과한 이벤트 처리(legacy/app 라우팅·Bot-L.1 resolver 체인). (result, status) 반환.
 
     org resolve: **app**=installation.id→github_installation(suspended 제외)→그 org_id만(anti-IDOR·payload
-    추론 금지·resolve 先). **legacy**=resolver 가 SID 전역→story.org_id(무회귀). story 해소=resolver 체인
-    (explicit>auto high>SID>text). **close-on-merge**=should_auto_close(confident)+merge → advance_story_to_done
-    (단일 idempotent 헬퍼). native CI(Bot-M.1)=installation 토큰. caller 가 동일 트랜잭션으로 commit/rollback.
+    추론 금지·resolve 先). **legacy**=repo owner→account_login exactly-1-match 시도(story #2327 후속) →
+    실패시 resolver 가 SID 전역→story.org_id(무회귀). story 해소=resolver 체인(explicit>auto high>SID>text).
+    **close-on-merge**=should_auto_close(confident)+merge → advance_story_to_done(단일 idempotent 헬퍼).
+    native CI(Bot-M.1)=installation 토큰. caller 가 동일 트랜잭션으로 commit/rollback.
 
     P0-05 후속(doc scope-violation-signal-design §2): scope-violation 판정은 머지/CI 액션가능신호와
     **독립**(PR 자체 이벤트에서 판정) — resolver를 그 skip보다 먼저 실행해 두 판정이 서로를 막지 않게 한다.
@@ -305,12 +349,34 @@ async def _process_webhook_event(
             return {"skipped_reason": "installation_not_registered_or_suspended", "recorded": []}, "ignored"
         org_id = installation.org_id
         delivery.org_id = org_id
+    elif source == "legacy":
+        # ⭐story #2327 후속(PO 판정 2026-07-30): legacy 도 검증된 요청 — repo owner 로 org 해소
+        # 시도(exactly-1-match 만). 실패해도 아래 resolver 는 org_id=None 무회귀 경로로 그대로 진행.
+        repo_owner_org_id, repo_owner_reason = await _resolve_legacy_org_by_repo_owner(session, repo)
+        logger.info(
+            "legacy org resolve: repo=%s reason=%s org_id=%s", repo, repo_owner_reason, repo_owner_org_id,
+        )
+        if repo_owner_org_id is not None:
+            org_id = repo_owner_org_id
+            delivery.org_id = org_id
 
-    # Bot-L.1 resolver 체인: explicit>auto high>SID>text. app=org-scoped(org 알려짐)·legacy=SID 전역→story.org_id.
+    # Bot-L.1 resolver 체인: explicit>auto high>SID>text. app/repo-owner-resolved legacy=org-scoped·
+    # 그 외 legacy=SID 전역→story.org_id(무회귀).
     # ⚠️행동가능신호(merged/ci) skip **前**에 실행 — scope-check(§2)가 그 신호와 무관하게 판정돼야 함.
     rl = await resolve_story_for_pr(session, org_id, repo, pr_number, texts)
     if rl.story_id is None:
-        return {"skipped_reason": rl.reason, "recorded": []}, "ignored"  # no_match/auto suggestion 등.
+        skipped_reason = rl.reason
+        # legacy 에서 org 해소 자체가 실패(ambiguous/unknown)했고 resolver 가 바로 그 이유(org 없어서
+        # story_number 시도조차 못 함)로 skip했으면, 더 구체적인 새 이유로 대체 — 「조용히 안 붙는」
+        # 것 방지(PO 지적, story #2327 후속): skipped_reason 이 세지는 이름이어야 나중에 판단 가능.
+        if (
+            source == "legacy"
+            and org_id is None
+            and repo_owner_reason in ("repo_owner_ambiguous", "repo_owner_unknown")
+            and rl.reason == "story_number_requires_org_scope"
+        ):
+            skipped_reason = repo_owner_reason
+        return {"skipped_reason": skipped_reason, "recorded": []}, "ignored"  # no_match/auto suggestion 등.
     story_id = rl.story_id
     org_id = rl.org_id  # app=입력 org·legacy=story.org_id(resolver 검증). 단일 진실원.
     delivery.org_id = org_id
