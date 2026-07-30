@@ -79,14 +79,17 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory }: F
         setState({ kind: 'error' });
         return;
       }
-      const epicNodeIds = new Set([...data.now.items, ...data.upcoming.items].map((i) => i.id));
       const graph = unwrap<{ edges: RawDependencyEdge[] }>(graphJson);
       const dependencyEdges = parseDependencyGraphEdges(graph?.edges ?? []);
       const rawCandidates: RawReferenceCandidate[] = Array.isArray(candidatesJson) ? candidatesJson : [];
       const candidateEdges = parseReferenceCandidateEdges(rawCandidates);
-      const edges = [...dependencyEdges, ...candidateEdges].filter(
-        (e) => epicNodeIds.has(e.fromNodeId) && epicNodeIds.has(e.toNodeId),
-      );
+      // ⛔자가발견 결함(2026-07-30, PR#2709 "묶음이 선을 통과시킨다" 배포 후 재검토 중) —
+      // "양끝 다 now/upcoming(=살아있음)에 있는 것만" 미리 걸러내던 이 필터가 있으면, 과거
+      // (done) 스토리에 닿은 간선은 deriveFlowMapLane에 «도달하기도 전에» 사라진다. 즉
+      // PR#2709의 묶음-해소 로직(양끝 살아있음/한쪽만 과거/양끝 과거 3분류)이 볼 재료 자체가
+      // 없어져 그 PR 전체가 라이브에서 죽은 코드가 되는 구조였다 — 분류는 이제
+      // deriveFlowMapLane 내부의 몫이라 여기서 미리 걸러내지 않는다. 원시 edges를 그대로 넘긴다.
+      const edges = [...dependencyEdges, ...candidateEdges];
       const lane = deriveFlowMapLane(epicId, epicTitle, data.past.total, data.now.items, data.upcoming.items, edges);
       setState({ kind: 'ready', lane });
     }).catch(() => {
