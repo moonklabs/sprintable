@@ -255,18 +255,28 @@ jobs:
         working-directory: backend
         run: |
           set -e
-          BASE_REF="${{ github.event.pull_request.base.ref }}"
-          if [ -z "$BASE_REF" ]; then
-            BASE_REF="develop"
+          # PO 질문(2026-07-30): "PR은 develop 대비인데, develop 자신에 푸시될 때는 무엇과
+          # 견주는가?" — pull_request 이벤트는 PR의 base 브랜치(보통 develop)와, push
+          # 이벤트(예: develop에 직접 머지)는 그 push 직전 커밋(github.event.before)과
+          # 비교한다. 둘 다 없으면(예: 새 브랜치 최초 push) 비교 대상이 없어 검사를 스킵한다
+          # — 그 경로에서는 이 가드가 안 돈다(한계로 남김, "이제 다 잡는다"로 안 읽히게).
+          PR_BASE_REF="${{ github.event.pull_request.base.ref }}"
+          PUSH_BEFORE_SHA="${{ github.event.before }}"
+          COMPARE_REF=""
+          if [ -n "$PR_BASE_REF" ]; then
+            git fetch origin "$PR_BASE_REF" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="origin/$PR_BASE_REF"
+          elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git fetch origin "$PUSH_BEFORE_SHA" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="$PUSH_BEFORE_SHA"
           fi
-          git fetch origin "$BASE_REF" --depth=1 2>&1 | tail -3 || true
-          if git show "origin/$BASE_REF:backend/scripts/query_sentinel_baseline.txt" > /tmp/base_baseline.txt 2>/dev/null; then
+          if [ -n "$COMPARE_REF" ] && git show "$COMPARE_REF:backend/scripts/query_sentinel_baseline.txt" > /tmp/base_baseline.txt 2>/dev/null; then
             grep -vE '^#|^$' /tmp/base_baseline.txt | sort -u > /tmp/base_sorted.txt
             grep -vE '^#|^$' scripts/query_sentinel_baseline.txt | sort -u > /tmp/head_sorted.txt
             new_lines=$(comm -13 /tmp/base_sorted.txt /tmp/head_sorted.txt || true)
             base_count=$(wc -l < /tmp/base_sorted.txt | tr -d ' ')
             head_count=$(wc -l < /tmp/head_sorted.txt | tr -d ' ')
-            echo "baseline entries: base($BASE_REF)=$base_count head=$head_count"
+            echo "baseline entries: base($COMPARE_REF)=$base_count head=$head_count"
             if [ -n "$new_lines" ]; then
               echo "FAIL: 베이스라인에 «새» 항목이 추가됐다 — 이 파일은 줄기만 허용한다(story #2335)." \
                    "새 위반은 여기 grandfather로 넣지 말고 실제로 고치는(파라미터를 명시로 넘기는) 것이 맞다:"
@@ -275,7 +285,7 @@ jobs:
             fi
             echo "OK: baseline은 늘지 않았다(줄었으면 환영 — 그만큼 사이트가 고쳐진 것)"
           else
-            echo "base($BASE_REF)에 베이스라인 파일이 아직 없음 — 이 PR이 첫 도입이라 증가검사 스킵"
+            echo "비교 대상 없음(PR 컨텍스트 아님 + push-before 미상 — 예: 새 브랜치 최초 push) — 증가검사 스킵"
           fi
 
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
