@@ -373,9 +373,13 @@ def _resolve_name_via_wrapper(
 # S1 doc(`draft-1951-deeplink-manifest-v1` §2) 확인 4건(goal/sprint/chat/team_member) +
 # 이 스토리(#1952) 착수 전 GATE1 확장 조사 결과.
 #
-# story_detail: `apps/web/.../[ws]/[proj]/board/board-client.tsx`가 쓰는
-#   `kanban-board.tsx`가 `searchParams.get('story')`로 StoryDetailPanel을 연다(실측) — 별도
-#   `[id]` 서브라우트가 아니라 board 페이지의 쿼리파람 소비 방식(sprint_detail과 동형).
+# story_detail: story #2224(선생님 정정, 2026-07-30) — "보드+현황판 통합"으로 `/board`
+#   라우트 자체가 삭제되고 `/flow`(view=list 세그)로 흡수됐다(next.config redirects()로
+#   `/board?story=X` → `/flow?story=X&view=list` 301 안전망은 남지만, 매니페스트는 리다이렉트
+#   경유가 아니라 "앱이 직접 여는" 최종 주소를 들고 있어야 한다 — CI test_ac3가 이 갱신 누락을
+#   실제로 잡았다). `flow-client.tsx`가 그대로 마운트하는 `kanban-board.tsx`가 여전히
+#   `searchParams.get('story')`로 StoryDetailPanel을 연다(구현 이관, 소비 방식은 동일) — 별도
+#   `[id]` 서브라우트가 아니라 쿼리파람 소비 방식(sprint_detail과 동형).
 # doc_detail: `docs/[slug]/page.tsx` 동적 라우트 존재(id→slug 변환은 §7 기존 GET
 #   /docs/{id} 응답 필드로 해소 — 라우트 자체는 실존).
 # artifact_detail: **GAP으로 확인**(`apps/web/src/components/canvas/artifact-gallery-view.tsx`
@@ -389,7 +393,7 @@ TARGET_ROUTE_GLOBS: dict[str, tuple[str, ...]] = {
     "chat_thread": ("(authenticated)/chats/[conversation_id]/page.tsx",),
     "team_member_detail": ("(authenticated)/organization/workforce/[id]/page.tsx",),
     "doc_detail": ("(authenticated)/[ws]/[proj]/docs/[slug]/page.tsx",),
-    "story_detail": ("(authenticated)/[ws]/[proj]/board/page.tsx",),
+    "story_detail": ("(authenticated)/[ws]/[proj]/flow/page.tsx",),
 }
 
 
