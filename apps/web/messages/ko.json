@@ -441,7 +441,7 @@
     "title": "흐름",
     "loading": "불러오는 중…",
     "viewFlow": "갈래",
-    "viewKanban": "칸반",
+    "viewList": "칸반",
     "laneHeading": "목표 · {n}",
     "laneEmpty": "아직 목표가 없습니다.",
     "laneUnknown": "아직 상태를 모릅니다(스토리 없음).",

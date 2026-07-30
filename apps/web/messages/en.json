@@ -441,7 +441,7 @@
     "title": "Flow",
     "loading": "Loading…",
     "viewFlow": "Flow",
-    "viewKanban": "Kanban",
+    "viewList": "Kanban",
     "laneHeading": "Goals · {n}",
     "laneEmpty": "No goals yet.",
     "laneUnknown": "Status unknown yet (no stories).",
