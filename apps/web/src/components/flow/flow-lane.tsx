@@ -22,7 +22,7 @@ export function FlowLane({ rows, totalEpicCount }: FlowLaneProps) {
   }
 
   return (
-    <div className="w-full shrink-0 space-y-3 border-border md:w-48 md:border-r md:pr-3 lg:w-56">
+    <div className="w-full shrink-0 space-y-3 border-border lg:w-56 lg:border-r lg:pr-3">
       <p className="px-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         {t('laneHeading', { n: totalEpicCount })}
       </p>
