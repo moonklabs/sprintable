@@ -30,6 +30,7 @@ import { initials } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
+import { StoryOriginSection } from '@/components/shared/story-origin-section';
 import { EntityAwareTextarea } from '@/components/shared/entity-aware-textarea';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
@@ -1323,6 +1324,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
             {/* E-DG S12: handoff stuck UX — DISPATCH 직후·handoff_stuck일 때만 조건부 렌더(자체 게이트) */}
             <StuckHandoffSection storyId={story.id} memberMap={memberMap} />
+
+            {/* story #2267(C-9): 「무엇에서 만들었나」(출처) — 컨테이너(epic/sprint/meeting_id,
+                위 필드들)와 다른 축이라 별도 섹션. EntityBacklinksSection과 나란히 두되 먼저
+                — 출처가 "이 항목이 왜 여기 있는지"에 더 가까운 질문이라 위쪽에 둔다. */}
+            <StoryOriginSection storyId={story.id} />
 
             {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
                 (doc [slug]/view는 후속 판). */}
