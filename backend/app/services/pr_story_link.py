@@ -11,12 +11,15 @@ SID 전역 조회로 story→org 를 도출(기존 무회귀). story 는 항상 
 """
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.models.pm import Story
 from app.models.pull_request_story_link import PullRequestStoryLink
@@ -236,6 +239,14 @@ async def resolve_story_for_pr(
                 )
             ).scalars().all()
             story_number_ambiguous = len(probe) > 1
+            # story #2327 후속(PO 지적, 2026-07-30): 「조용히 안 붙는」것 방지 — 사람 화면엔
+            # 안 나가도 개발자가 «몇 건이 이렇게 빠지는가»를 셀 수 있어야 한다(logger.warning
+            # 만으로 skip reason이 사라졌던 웹훅 handler와 같은 병 재발 방지).
+            if story_number_ambiguous:
+                logger.warning(
+                    "resolve_story_for_pr: story_number=%s ambiguous(%d project 충돌, org=%s) — "
+                    "추측 없이 skip(story_number_ambiguous)", story_number, len(probe), org_id,
+                )
 
     # 4) auto_match med/low → suggestion(영속·done 금지). 아니면 legacy 호환 skip reason.
     if auto_suggestion is not None:

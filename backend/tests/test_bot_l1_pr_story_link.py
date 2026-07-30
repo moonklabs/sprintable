@@ -202,17 +202,23 @@ async def test_resolver_story_number_ambiguous_across_projects_no_resolve():
     """같은 org 안 다른 project 에 같은 story_number 2건+ → 추측 안 함(close 금지·ambiguous 사유)."""
     # explicit(None) → auto_match([]) → scoped_story_by_number(2건, len!=1 → None) → probe(2건, ambiguous 판정).
     session = _session([_scalar(None), _scalars([]), _scalars([_story(), _story()]), _scalars([_story(), _story()])])
-    rl = await resolve_story_for_pr(session, ORG_A, "org/repo", 7, ["[SID:1] title"])
+    with patch.object(prl.logger, "warning") as warn:
+        rl = await resolve_story_for_pr(session, ORG_A, "org/repo", 7, ["[SID:1] title"])
     assert rl.story_id is None and rl.should_auto_close is False
     assert rl.reason == "story_number_ambiguous"
+    # PO 지적(2026-07-30) — 「조용히 안 붙는」것 방지: skip이 셀 수 있는 신호를 남겨야 한다.
+    warn.assert_called_once()
+    assert "story_number_ambiguous" in warn.call_args.args[0]
 
 
 @pytest.mark.anyio
 async def test_resolver_story_number_not_found_when_org_known():
     """org 알고 번호 태그 있으나 0건 → story_number_not_found(추측 없이 skip)."""
     session = _session([_scalar(None), _scalars([]), _scalars([]), _scalars([])])
-    rl = await resolve_story_for_pr(session, ORG_A, "org/repo", 7, ["[SID:99999]"])
+    with patch.object(prl.logger, "warning") as warn:
+        rl = await resolve_story_for_pr(session, ORG_A, "org/repo", 7, ["[SID:99999]"])
     assert rl.story_id is None and rl.reason == "story_number_not_found"
+    warn.assert_not_called()  # not_found(0건)는 ambiguous가 아니다 — 경고 과다발생 방지.
 
 
 @pytest.mark.anyio
