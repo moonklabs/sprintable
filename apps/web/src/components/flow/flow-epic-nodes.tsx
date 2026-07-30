@@ -3,13 +3,14 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { UPCOMING_LIMIT, type EpicFlowNodesResponse } from './derive-flow';
-import { deriveFlowMapLane, type FlowMapLane } from './derive-flow-map';
+import { deriveFlowMapLane, parseDependencyGraphEdges, type FlowMapLane, type RawDependencyEdge } from './derive-flow-map';
 import { FlowMapCanvas } from './flow-map-canvas';
 
 interface FlowEpicNodesProps {
   projectId: string;
   epicId: string;
   epicTitle: string;
+  onSelectStory: (storyId: string) => void;
 }
 
 type LoadState =
@@ -17,10 +18,10 @@ type LoadState =
   | { kind: 'error' }
   | { kind: 'ready'; lane: FlowMapLane };
 
-function unwrap(json: unknown): EpicFlowNodesResponse | null {
+function unwrap<T>(json: unknown): T | null {
   if (!json || typeof json !== 'object') return null;
   const d = (json as { data?: unknown }).data;
-  return (d ?? json) as EpicFlowNodesResponse;
+  return (d ?? json) as T;
 }
 
 /**
@@ -33,7 +34,7 @@ function unwrap(json: unknown): EpicFlowNodesResponse | null {
  * 감싸 FlowMapCanvas에 넘긴다. 멀티레인 BE 계약이 착지하면 호출부가 여러 에픽을 fetch해
  * 배열을 채우는 것으로 끝난다(이 컴포넌트/FlowMapCanvas 모두 무변경).
  */
-export function FlowEpicNodes({ projectId, epicId, epicTitle }: FlowEpicNodesProps) {
+export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory }: FlowEpicNodesProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
 
@@ -43,24 +44,36 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle }: FlowEpicNodesPro
     // 패턴이지 FE가 브라우저에서 직접 부를 상대경로가 아니다(401 Missing Authorization
     // header로 실패했다, 직접 실측). 다른 모든 엔드포인트처럼 FE 프록시 라우트
     // (`/api/analytics/epic-flow-nodes/route.ts`)를 거쳐야 인증 토큰이 실린다.
-    fetch(`/api/analytics/epic-flow-nodes?project_id=${projectId}&epic_id=${epicId}&upcoming_limit=${UPCOMING_LIMIT}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json: unknown) => {
-        if (cancelled) return;
-        const data = unwrap(json);
-        if (!data) {
-          setState({ kind: 'error' });
-          return;
-        }
-        // #2221(구조화된 연결 간선) 미착지 — edges는 항상 빈 배열. computeNodeDepth가 이
-        // 빈 배열을 받아 «자연히» 전부 depth 0을 내는 것이라, 이 자리에서 특수분기를 두지
-        // 않는다(간선이 착지하면 이 한 줄이 실 배열로 바뀌는 것만으로 여러 열이 열린다).
-        const lane = deriveFlowMapLane(epicId, epicTitle, data.past.total, data.now.items, data.upcoming.items, []);
-        setState({ kind: 'ready', lane });
-      })
-      .catch(() => {
-        if (!cancelled) setState({ kind: 'error' });
-      });
+    //
+    // 선생님 지시(2026-07-30, P0) — "edges=[]를 항상 넘긴다"(하드코딩)와 "받았는데 0건"은
+    // 다른 사실이다. 기존 계획형 `dependencies/graph`를 실제로 fetch한다(org 전체가 0행이라
+    // 오늘은 결과가 똑같이 빈 배열이겠지만, «받으러 갔다»는 사실 자체가 다르다). item_id
+    // 없이 `item_type=story`만 넘겨 프로젝트 전체 그래프를 받고 이 에픽의 노드 id로 필터링
+    // — 실 데이터가 쌓이면(org 스케일) item_id 배치 조회로 좁혀야 한다(오늘은 0행이라 무해).
+    // 실패해도 전체를 죽이지 않는다(간선은 보강 정보, 노드가 핵심 — 부분 실패는 부분만 표시).
+    Promise.all([
+      fetch(`/api/analytics/epic-flow-nodes?project_id=${projectId}&epic_id=${epicId}&upcoming_limit=${UPCOMING_LIMIT}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      fetch('/api/dependencies/graph?item_type=story')
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ]).then(([nodesJson, graphJson]) => {
+      if (cancelled) return;
+      const data = unwrap<EpicFlowNodesResponse>(nodesJson);
+      if (!data) {
+        setState({ kind: 'error' });
+        return;
+      }
+      const graph = unwrap<{ edges: RawDependencyEdge[] }>(graphJson);
+      const epicNodeIds = new Set([...data.now.items, ...data.upcoming.items].map((i) => i.id));
+      const allEdges = parseDependencyGraphEdges(graph?.edges ?? []);
+      const edges = allEdges.filter((e) => epicNodeIds.has(e.fromNodeId) && epicNodeIds.has(e.toNodeId));
+      const lane = deriveFlowMapLane(epicId, epicTitle, data.past.total, data.now.items, data.upcoming.items, edges);
+      setState({ kind: 'ready', lane });
+    }).catch(() => {
+      if (!cancelled) setState({ kind: 'error' });
+    });
     return () => {
       cancelled = true;
     };
@@ -73,5 +86,5 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle }: FlowEpicNodesPro
     return <p className="px-2 py-2 text-[11px] text-muted-foreground">{t('nodesError')}</p>;
   }
 
-  return <FlowMapCanvas lanes={[state.lane]} />;
+  return <FlowMapCanvas lanes={[state.lane]} onSelectStory={onSelectStory} />;
 }

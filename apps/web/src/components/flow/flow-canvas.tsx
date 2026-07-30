@@ -16,6 +16,10 @@ interface FlowCanvasProps {
   edgeCount: number;
   /** 노드 틀(2026-07-30) — 펼친 에픽의 스토리 노드를 부르는 데 필요. */
   projectId: string;
+  /** 노드 클릭 → 스토리 상세 패널 열기(선생님 지적 2026-07-30 — "노드를 눌러도 아무 일이
+   * 안 나는" AC1 결함 후속). PO 판정: `?view=list&story={id}`로 네비게이트(KanbanBoard의
+   * 기존 패널 오픈 경로를 그대로 탄다). */
+  onSelectStory: (storyId: string) => void;
 }
 
 /**
@@ -25,7 +29,7 @@ interface FlowCanvasProps {
  * 펼쳤을 때만 `?epic_id=` 단위 온디맨드로 부른다(FlowEpicNodes) — 179개 전체를 한 번에
  * 부르지 않으므로 N+1 회귀가 아니다(펼친 «하나»만, PO 판정 명시).
  */
-export function FlowCanvas({ rows, activeEpicId, edgeCount, projectId }: FlowCanvasProps) {
+export function FlowCanvas({ rows, activeEpicId, edgeCount, projectId, onSelectStory }: FlowCanvasProps) {
   const t = useTranslations('flow');
   const edges = deriveEdgeSummary(edgeCount);
   // 접힌 상태 기본(PO 판정 2026-07-30) — 단일 아코디언(동시 여러 에픽 펼침 방지, 온디맨드
@@ -90,7 +94,7 @@ export function FlowCanvas({ rows, activeEpicId, edgeCount, projectId }: FlowCan
                     ) : null}
                   </div>
                 </button>
-                {isExpanded ? <FlowEpicNodes projectId={projectId} epicId={row.id} epicTitle={row.title} /> : null}
+                {isExpanded ? <FlowEpicNodes projectId={projectId} epicId={row.id} epicTitle={row.title} onSelectStory={onSelectStory} /> : null}
               </li>
             );
           })}
