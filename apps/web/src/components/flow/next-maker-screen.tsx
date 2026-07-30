@@ -12,6 +12,7 @@ import {
 } from './derive-next-maker';
 import { NextMakerHeader } from './next-maker-header';
 import { GoalStemCard, type MemberLite } from './goal-stem-card';
+import { StemRow } from './stem-row';
 import { OrphanStoriesPanel } from './orphan-stories-panel';
 import { parseCursorMeta } from '@/lib/pagination';
 
@@ -96,6 +97,10 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory }: NextMak
   // 반영한다(promotedIds와 같은 패턴). 재fetch 없이도 그 목표의 대기 칸이 즉시 늘고 orphan
   // 목록에서 즉시 빠진다 — "안 보이면 잃는다"의 반대(배정하면 즉시 줄기에 서는 것이 보인다).
   const [assignedEpicByStoryId, setAssignedEpicByStoryId] = useState<Map<string, string>>(new Map());
+  // ①갈래(선·노드)가 화면의 몸통(PO 판정 2026-07-31, 선생님 "이게 뭔지.." 후속) — 줄기
+  // «선택»은 왼쪽 좁은 열(StemRow)이 맡고, 선택된 줄기 하나의 캔버스가 오른쪽 넓은 본문에
+  // 선다. 명시로 고른 적 없으면 목록의 첫 번째(=가장 급한 것, 정렬 규격 그대로)가 기본.
+  const [focusedEpicId, setFocusedEpicId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -189,6 +194,12 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory }: NextMak
   const needsNextStems = useMemo(() => sortStemsByStallUrgency(stems.filter((s) => !s.hasNext)), [stems]);
   const hasNextStems = useMemo(() => stems.filter((s) => s.hasNext), [stems]);
   const orphanStories = useMemo(() => deriveOrphanStories(effectiveActiveStories), [effectiveActiveStories]);
+  const allListedStems = useMemo(() => [...needsNextStems, ...hasNextStems], [needsNextStems, hasNextStems]);
+  // 명시 선택이 아직 없거나, 선택했던 줄기가 목록에서 사라졌으면(승격/전이로) 첫 번째로 낙하.
+  const effectiveFocusedEpicId = (focusedEpicId && allListedStems.some((s) => s.epicId === focusedEpicId))
+    ? focusedEpicId
+    : (allListedStems[0]?.epicId ?? null);
+  const focusedStem = allListedStems.find((s) => s.epicId === effectiveFocusedEpicId) ?? null;
 
   if (state.kind === 'loading') {
     return (
@@ -206,58 +217,79 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory }: NextMak
     <div className="space-y-4">
       <NextMakerHeader headline={headline} zeroStage={zeroStage} />
 
-      {/* PO 판정(2026-07-31) — 첫 줄 «아래» 별도 줄(다른 축, 섞지 않는다). 줄기가 없는
-          것은 「다음 고르기」 목록에 영영 안 뜬다(줄기별 구조라서) — 별도 패널로 세운다. */}
-      <OrphanStoriesPanel
-        orphanStories={orphanStories}
-        activeGoals={effectiveGoals}
-        onSelectStory={onSelectStory}
-        onAssigned={handleOrphanAssigned}
-      />
+      {/* ①갈래(선·노드)가 화면의 몸통(PO 판정 2026-07-31) — 왼쪽 좁은 열(목표 선택) : 오른쪽
+          넓은 본문(선택된 목표의 갈래 캔버스) = 대략 1:3, "머리:갈래=1:3 이하"와 같은 원칙을
+          가로축에도 적용. w-72(좁음) vs flex-1(남는 폭 전부)로 비율을 코드가 아니라 레이아웃이
+          말하게 한다. */}
+      <div className="flex gap-4">
+        <div className="w-72 shrink-0 space-y-3 overflow-y-auto">
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+              {t('nextMakerNeedsNextHeading', { n: headline.needsNextCount })}
+            </p>
+            {needsNextStems.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{t('nextMakerAllHaveNext')}</p>
+            ) : (
+              needsNextStems.map((stem, i) => {
+                // PO 판정(2026-07-31, 2차) — 「N개는 이미 끝났을 수 있습니다」를 헤드라인에서
+                // 내려 3순위(quiet) 목표 목록 «옆»(바로 위)에 붙인다. 정렬이 이미 about-to-stall
+                // → recently-active → quiet 순이라 quiet는 항상 꼬리의 연속 구간이다.
+                const showQuietHint = stem.priority === 'quiet'
+                  && (i === 0 || needsNextStems[i - 1].priority !== 'quiet');
+                return (
+                  <div key={stem.epicId}>
+                    {showQuietHint && (
+                      <p className="mb-1 mt-2 text-[10px] text-muted-foreground">
+                        {t('nextMakerQuietHint', { n: headline.quietCount })}
+                      </p>
+                    )}
+                    <StemRow stem={stem} isFocused={stem.epicId === effectiveFocusedEpicId} onFocus={setFocusedEpicId} />
+                  </div>
+                );
+              })
+            )}
+          </div>
 
-      <div className="space-y-2">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-          {t('nextMakerNeedsNextHeading', { n: headline.needsNextCount })}
-        </p>
-        {needsNextStems.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t('nextMakerAllHaveNext')}</p>
-        ) : (
-          needsNextStems.map((stem) => (
-            <GoalStemCard
-              key={stem.epicId}
-              stem={stem}
-              projectId={projectId}
-              backlogStories={backlogByEpic.get(stem.epicId) ?? []}
-              recentlyClosedTargetIds={state.kind === 'ready' ? state.recentlyClosedTargetIds : new Set()}
-              memberMap={memberMap}
-              onSelectStory={onSelectStory}
-              onStoryPromoted={handleStoryPromoted}
-              onGoalTransitioned={handleGoalTransitioned}
-            />
-          ))
-        )}
-      </div>
+          {hasNextStems.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+                {t('nextMakerHasNextHeading', { n: headline.hasNextCount })}
+              </p>
+              {hasNextStems.map((stem) => (
+                <StemRow key={stem.epicId} stem={stem} isFocused={stem.epicId === effectiveFocusedEpicId} onFocus={setFocusedEpicId} />
+              ))}
+            </div>
+          )}
 
-      {hasNextStems.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-            {t('nextMakerHasNextHeading', { n: headline.hasNextCount })}
-          </p>
-          {hasNextStems.map((stem) => (
-            <GoalStemCard
-              key={stem.epicId}
-              stem={stem}
-              projectId={projectId}
-              backlogStories={backlogByEpic.get(stem.epicId) ?? []}
-              recentlyClosedTargetIds={state.kind === 'ready' ? state.recentlyClosedTargetIds : new Set()}
-              memberMap={memberMap}
-              onSelectStory={onSelectStory}
-              onStoryPromoted={handleStoryPromoted}
-              onGoalTransitioned={handleGoalTransitioned}
-            />
-          ))}
+          {/* 결함 fix(2026-07-31, PO 판정 — 선생님 "이게 뭔지.." 지적 후속, 자리를 «남는 곳»이
+              아니라 «성질»로 정한다: 목표별로 다음을 고르는 화면이라, 목표가 «없는» 것은 목표
+              목록을 다 보인 «다음» 순서다). */}
+          <OrphanStoriesPanel
+            orphanStories={orphanStories}
+            activeGoals={effectiveGoals}
+            onSelectStory={onSelectStory}
+            onAssigned={handleOrphanAssigned}
+          />
         </div>
-      )}
+
+        <div className="min-w-0 flex-1">
+          {focusedStem ? (
+            <GoalStemCard
+              key={focusedStem.epicId}
+              stem={focusedStem}
+              projectId={projectId}
+              backlogStories={backlogByEpic.get(focusedStem.epicId) ?? []}
+              recentlyClosedTargetIds={state.kind === 'ready' ? state.recentlyClosedTargetIds : new Set()}
+              memberMap={memberMap}
+              onSelectStory={onSelectStory}
+              onStoryPromoted={handleStoryPromoted}
+              onGoalTransitioned={handleGoalTransitioned}
+            />
+          ) : (
+            <p className="text-xs text-muted-foreground">{t('nextMakerNoStems')}</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

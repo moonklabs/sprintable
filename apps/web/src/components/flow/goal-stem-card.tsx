@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import type { GoalStem, NextMakerStory } from './derive-next-maker';
@@ -25,7 +25,6 @@ interface GoalStemCardProps {
 }
 
 type PickState =
-  | { kind: 'closed' }
   | { kind: 'loading' }
   | { kind: 'error' }
   | { kind: 'ready'; candidates: NextPickCandidate[] };
@@ -38,30 +37,38 @@ const REASON_LABEL_KEY: Record<NextPickReasonKey, string> = {
 };
 
 /**
- * story #2224 후속(2026-07-31) — 줄기(목표) 카드 하나. 접힘=요약 flags+[다음 고르기] 버튼.
- * 펼침=③근거 붙인 후보(NEXT_PICK_TOP_COUNT개 강조+나머지 목록) — 완료 조건은 "화면이 선다"가
+ * story #2224 후속(2026-07-31) — 「초점」 잡힌 줄기 하나의 본체. 결함 fix(선생님 "이게 뭔지..")
+ * 후속 재구조: 예전엔 이 컴포넌트가 «접힘/펼침»을 스스로 들고 좁은 전체폭 카드로 쌓였는데,
+ * PO 판정("갈래가 화면의 몸통이어야 한다·머리:갈래=1:3 이하")에 따라 — 줄기 «선택»은
+ * `StemRow`(왼쪽 좁은 열)가 맡고, 이 컴포넌트는 항상 «펼쳐진 채»로 오른쪽 넓은 본문에
+ * «하나만» 마운트된다(초점 바뀌면 부모가 key로 통째로 새로 마운트 — pickState/showRest가
+ * 초점마다 자연히 리셋). 캔버스가 몸통이라 펼침을 껐다켰다 할 이유가 없어졌다.
+ *
+ * ③근거 붙은 후보(NEXT_PICK_TOP_COUNT개 강조+나머지 목록) — 완료 조건은 "화면이 선다"가
  * 아니라 "다음이 실제로 생긴다"(PO)라 [다음으로] 버튼이 실제 PATCH를 쏜다. 조용한(3순위)
- * 목표는 ④[아직 하는 중입니까?] 프롬프트를 같은 자리에 얹는다. ⑤이어짐은 본체가 아니라
- * 펼친 뒤 맨 아래 보조 박스로 붙는다(기존 FlowEpicNodes 그대로 재사용 — 새 캔버스 안 그림).
+ * 목표는 ④[아직 하는 중입니까?] 프롬프트를 같은 자리에 얹는다.
+ *
+ * ①갈래(선·노드)가 이제 «몸통» — 픽 패널은 그 위(작게), 캔버스는 아래(크게, min-h로 지배).
  */
 export function GoalStemCard({
   stem, projectId, backlogStories, recentlyClosedTargetIds, memberMap,
   onSelectStory, onStoryPromoted, onGoalTransitioned,
 }: GoalStemCardProps) {
   const t = useTranslations('flow');
-  const [expanded, setExpanded] = useState(false);
-  const [pickState, setPickState] = useState<PickState>({ kind: 'closed' });
+  const [pickState, setPickState] = useState<PickState>({ kind: 'loading' });
   const [promotingId, setPromotingId] = useState<string | null>(null);
   const [showRest, setShowRest] = useState(false);
   const [quietBusy, setQuietBusy] = useState(false);
   const [quietDismissed, setQuietDismissed] = useState(false);
 
-  const loadCandidates = useCallback(() => {
+  useEffect(() => {
+    let cancelled = false;
     setPickState({ kind: 'loading' });
     fetch(`/api/goals/${stem.epicId}/reference-candidates`)
       .then((r) => (r.ok ? r.json() : []))
       .catch(() => [])
       .then((raw: unknown) => {
+        if (cancelled) return;
         const rows: RawReferenceCandidate[] = Array.isArray(raw) ? raw : [];
         const referencedIds = new Set(
           rows.filter((c) => c.relation_kind !== 'explicitly_unrelated').map((c) => c.target_id),
@@ -69,13 +76,9 @@ export function GoalStemCard({
         const candidates = deriveNextPickCandidates(backlogStories, recentlyClosedTargetIds, referencedIds, Date.now());
         setPickState({ kind: 'ready', candidates });
       });
-  }, [stem.epicId, backlogStories, recentlyClosedTargetIds]);
-
-  const handleToggle = useCallback(() => {
-    const next = !expanded;
-    setExpanded(next);
-    if (next && pickState.kind === 'closed') loadCandidates();
-  }, [expanded, pickState.kind, loadCandidates]);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- backlogStories/recentlyClosedTargetIds identity churns every parent render; epicId is the real trigger.
+  }, [stem.epicId]);
 
   const handlePromote = useCallback((storyId: string) => {
     setPromotingId(storyId);
@@ -103,92 +106,52 @@ export function GoalStemCard({
       .finally(() => setQuietBusy(false));
   }, [stem.epicId, onGoalTransitioned]);
 
-  const accentClass = stem.priority === 'about-to-stall'
-    ? 'border-l-amber-500'
-    : stem.hasNext ? 'border-l-emerald-500' : 'border-l-border';
-
   return (
-    <div className={`rounded-lg border border-l-[3px] ${accentClass}`}>
-      <div className="flex items-center gap-3 px-3 py-2.5">
-        <span className="w-40 shrink-0 truncate text-[13px] font-semibold text-foreground">{stem.title}</span>
-        <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
-          {stem.inProgressCount > 0 && (
-            <Flag tone="info" label={t('nextMakerFlagInProgress', { n: stem.inProgressCount })} />
-          )}
-          {stem.waitingCount > 0 && (
-            <Flag tone="neutral" label={t('nextMakerFlagWaiting', { n: stem.waitingCount })} />
-          )}
-          {stem.priority === 'recently-active' && (
-            <Flag tone="brand" label={t('nextMakerFlagRecentlyClosed')} />
-          )}
-          {stem.hasNext && (
-            <Flag tone="brand" label={t('nextMakerFlagHasNext', { n: stem.readyForDevCount })} />
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={handleToggle}
-          className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium transition ${
-            expanded ? 'border-border text-foreground' : 'border-primary bg-primary text-primary-foreground'
-          }`}
-        >
-          {t(stem.hasNext ? 'nextMakerOpenAction' : 'nextMakerPickAction')}
-        </button>
+    <div className="space-y-3">
+      <div>
+        <h2 className="text-sm font-semibold text-foreground">{stem.title}</h2>
+        {/* PO 판정(2026-07-31) — 「한 번에 다 정하지 않아도 됩니다」는 첫 줄(헤드라인)이 아니라
+            여기(다음 고르기가 실제로 열린 자리)로 내린다. 설명 셋이 헤드라인에 몰려 "화면이
+            변명으로 시작"하던 것을 이 한 줄만 남기고 나머지 둘은 다른 자리로 흩었다. */}
+        <p className="mt-0.5 text-xs text-muted-foreground">{t('nextMakerSubline')}</p>
       </div>
 
-      {expanded && (
-        <div className="space-y-3 border-t border-border bg-muted/30 px-3 py-3">
-          {stem.priority === 'quiet' && !quietDismissed && (
-            <QuietPrompt
-              busy={quietBusy}
-              onContinue={() => setQuietDismissed(true)}
-              onClose={() => handleGoalTransition('done')}
-              onArchive={() => handleGoalTransition('archived')}
-            />
-          )}
-
-          {backlogStories.length === 0 ? (
-            <p className="text-xs text-muted-foreground">{t('nextMakerNoCandidates')}</p>
-          ) : pickState.kind === 'loading' ? (
-            <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-              {t('nextMakerPickLoading')}
-            </div>
-          ) : pickState.kind === 'ready' ? (
-            <NextPickList
-              candidates={pickState.candidates}
-              memberMap={memberMap}
-              promotingId={promotingId}
-              showRest={showRest}
-              onShowRest={() => setShowRest(true)}
-              onPromote={handlePromote}
-              onSelectStory={onSelectStory}
-              t={t}
-            />
-          ) : null}
-
-          {/* ⑤이어짐 — 본체가 아니라 펼친 뒤 맨 아래 보조 박스(PO note ⑤, a920c25f v2).
-              기존 FlowEpicNodes를 그대로 재사용 — 새 렌더 경로를 만들지 않는다. */}
-          <div className="border-t border-border pt-2">
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-              {t('nextMakerFlowboxHeading', { title: stem.title })}
-            </p>
-            <FlowEpicNodes projectId={projectId} epicId={stem.epicId} epicTitle={stem.title} onSelectStory={onSelectStory} />
-          </div>
-        </div>
+      {stem.priority === 'quiet' && !quietDismissed && (
+        <QuietPrompt
+          busy={quietBusy}
+          onContinue={() => setQuietDismissed(true)}
+          onClose={() => handleGoalTransition('done')}
+          onArchive={() => handleGoalTransition('archived')}
+        />
       )}
+
+      {backlogStories.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t('nextMakerNoCandidates')}</p>
+      ) : pickState.kind === 'loading' ? (
+        <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+          {t('nextMakerPickLoading')}
+        </div>
+      ) : pickState.kind === 'ready' ? (
+        <NextPickList
+          candidates={pickState.candidates}
+          memberMap={memberMap}
+          promotingId={promotingId}
+          showRest={showRest}
+          onShowRest={() => setShowRest(true)}
+          onPromote={handlePromote}
+          onSelectStory={onSelectStory}
+          t={t}
+        />
+      ) : null}
+
+      {/* ①갈래(선·노드)가 이 화면의 몸통(PO 판정 2026-07-31, 선생님 "이게 뭔지.." 후속) —
+          픽 패널이 «위/작게», 캔버스가 «아래/크게»다. min-h로 시각 지배력을 명시로 준다. */}
+      <div className="min-h-[520px] rounded-lg border border-border">
+        <FlowEpicNodes projectId={projectId} epicId={stem.epicId} epicTitle={stem.title} onSelectStory={onSelectStory} />
+      </div>
     </div>
   );
-}
-
-function Flag({ tone, label }: { tone: 'info' | 'neutral' | 'brand' | 'warn'; label: string }) {
-  const cls = {
-    info: 'border-info/50 text-info',
-    neutral: 'border-border text-muted-foreground',
-    brand: 'border-primary/50 text-primary font-semibold',
-    warn: 'border-amber-500/50 text-amber-600 dark:text-amber-400 font-semibold',
-  }[tone];
-  return <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${cls}`}>{label}</span>;
 }
 
 function QuietPrompt({
