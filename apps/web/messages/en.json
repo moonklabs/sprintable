@@ -439,7 +439,7 @@
     "canvasNow": "Now",
     "canvasUpcoming": "Upcoming",
     "canvasEmpty": "Nothing to draw yet.",
-    "canvasScopeNotice": "This screen only draws at epic granularity for now — individual work nodes and the time axis are the next slice. (Why: this only draws what a single query can produce.)",
+    "canvasScopeNotice": "This screen only draws at epic granularity for now — individual work nodes and the time axis are the next slice.",
     "canvasNotYetShown": "Not yet shown: in-progress · waiting · blocked · stalled counts.",
     "canvasActiveMarker": "Currently running",
     "edgesCount": "{n} connection(s) awaiting confirmation",

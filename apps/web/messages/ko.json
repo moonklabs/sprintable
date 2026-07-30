@@ -440,7 +440,7 @@
     "canvasUpcoming": "이어질 것",
     "canvasEmpty": "아직 그릴 것이 없습니다.",
     "canvasActiveMarker": "지금 도는 갈래",
-    "canvasScopeNotice": "이 화면은 아직 «에픽 단위»까지만 그립니다 — 개별 작업 노드와 시간축은 다음 판입니다. (왜: 한 번의 조회로 그릴 수 있는 데까지만 그립니다.)",
+    "canvasScopeNotice": "이 화면은 아직 «에픽 단위»까지만 그립니다 — 개별 작업 노드와 시간축은 다음 판입니다.",
     "canvasNotYetShown": "아직 표시하지 않습니다: 진행 중·대기·막힘·멈춤 건수.",
     "edgesCount": "연결 {n}건 확인 대기",
     "edgesEmptyHonest": "연결 0건 — 이 지도는 아직 이어지지 않았습니다.",
