@@ -116,7 +116,16 @@ def extract_chat_entity_mentions(content: str) -> list[tuple[str, uuid.UUID]]:
     "토큰 모양"(`](entity:`)이 본문에 있는데 실제 추출 건수가 그보다 적으면 경고 로그를
     남긴다 — 재발해도 조용히 안 넘어가게 하는 최소 감시망(완벽한 검출은 아니다 — 우연히
     `](entity:`를 포함한 무관한 텍스트가 오탐을 낼 수 있다는 것도 안다, 그래도 "0신호"보다
-    낫다)."""
+    낫다).
+
+    ⛔story #2329(2026-07-30 실측, #2316 AC8): 이 경고가 95%(dev 14일 n=39 중 37건) 우리가
+    스토리/AC 본문·팀 채팅에서 `](entity:` 문법을 «인용·설명»할 때 울렸다 — 실제 파싱 실패가
+    아니라 코드펜스·인라인코드 안의 예시 텍스트였다. `shape_count`를 재기 前에
+    `_redact_code_spans()`(#2269가 만든 헬퍼, 지금까지 `extract_bare_number_candidates`
+    전용)를 통과시켜 코드펜스/인라인코드 안의 `](entity:`는 안 센다 — 새 헬퍼를 만들지
+    않는다(두 자리가 "코드블록이란 무엇인가"를 각자 정의하면 #2242의 "한 개념에 두 기준"이
+    된다). ⛔인용 블록(`>`)까지는 `_redact_code_spans()`가 안 덮는다 — 그 문법으로 인용된
+    `](entity:`는 여전히 shape_count에 잡힌다(넓히는 것은 이 스토리 범위 밖)."""
     if not content:
         return []
     seen: set[tuple[str, uuid.UUID]] = set()
@@ -131,7 +140,7 @@ def extract_chat_entity_mentions(content: str) -> list[tuple[str, uuid.UUID]]:
         if key not in seen:
             seen.add(key)
             result.append(key)
-    shape_count = content.count("](entity:")
+    shape_count = _redact_code_spans(content).count("](entity:")
     if len(result) < shape_count:
         logger.warning(
             "mention_parser: token-shaped substring count(%d) exceeds extracted count(%d) — "

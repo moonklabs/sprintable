@@ -159,6 +159,68 @@ def test_extract_chat_no_warning_when_shapes_all_parsed(caplog):
     assert not any("possible silent parse failure" in r.message for r in caplog.records)
 
 
+# ─── story #2329(2026-07-30, #2316 AC8) — shape_count 오탐 95% 걷기 ───────────
+# _redact_code_spans() 재사용(코드펜스/인라인코드 안의 `](entity:`는 안 센다) — AC2 양성
+# 대조(펜스 안은 안 세이고 펜스 밖 진짜 깨진 토큰은 여전히 세인다) + AC3 뮤테이션 자가검증.
+
+
+def test_extract_chat_no_warning_when_broken_shape_is_inside_fenced_code_block(caplog):
+    """AC2 ㉠ — 코드펜스 «안»의 토큰형 문자열(우리가 문법을 설명·인용할 때 쓰는 것과 동형)은
+    shape_count에서 안 세인다 — 경고가 안 뜬다."""
+    import logging
+    from app.services.mention_parser import extract_chat_entity_mentions
+
+    caplog.set_level(logging.WARNING, logger="app.services.mention_parser")
+    doc_id = uuid.uuid4()
+    content = (
+        f"[Real](entity:doc:{doc_id}) 그리고 설명:\n"
+        "```\n"
+        "예시 문법: ](entity: 이렇게 생겼다\n"
+        "```"
+    )
+    result = extract_chat_entity_mentions(content)
+    assert result == [("doc", doc_id)]
+    assert not any("possible silent parse failure" in r.message for r in caplog.records)
+
+
+def test_extract_chat_still_warns_when_broken_shape_is_outside_fenced_code_block(caplog):
+    """AC2 ㉡(판별력) — 펜스 «밖»의 진짜 깨진 토큰형은 여전히 세인다·경고가 뜬다. ①만
+    재면(안 세이는 것만 확인) 「경고를 죽인 것」과 구별이 안 된다 — ①②를 같이 재야 이
+    처방이 "소음만 걷었다"이지 "감시망 자체를 죽였다"가 아님을 증명한다."""
+    import logging
+    from app.services.mention_parser import extract_chat_entity_mentions
+
+    caplog.set_level(logging.WARNING, logger="app.services.mention_parser")
+    doc_id = uuid.uuid4()
+    content = f"[Real](entity:doc:{doc_id}) 그리고 이상한 텍스트 ](entity: 어쩌고"
+    result = extract_chat_entity_mentions(content)
+    assert result == [("doc", doc_id)]
+    assert any("possible silent parse failure" in r.message for r in caplog.records)
+
+
+def test_extract_chat_shape_count_redaction_mutation_self_check(caplog, monkeypatch):
+    """AC3 — 뮤테이션 자가검증. `_redact_code_spans` 호출을 빼면(=고치기 前 상태로 되돌리면)
+    코드펜스 안 토큰형에도 다시 경고가 뜬다(RED) — 방금 위 테스트가 실제로 이 배선을
+    지키고 있다는 것을 증명한다."""
+    import logging
+    import app.services.mention_parser as mp
+
+    monkeypatch.setattr(mp, "_redact_code_spans", lambda content: content)
+
+    caplog.set_level(logging.WARNING, logger="app.services.mention_parser")
+    doc_id = uuid.uuid4()
+    content = (
+        f"[Real](entity:doc:{doc_id}) 그리고 설명:\n"
+        "```\n"
+        "예시 문법: ](entity: 이렇게 생겼다\n"
+        "```"
+    )
+    mp.extract_chat_entity_mentions(content)
+    assert any("possible silent parse failure" in r.message for r in caplog.records), (
+        "_redact_code_spans 배선을 빼도 경고가 안 뜨면 위 양성 테스트가 아무것도 안 지키는 것"
+    )
+
+
 # ─── extract_doc_mention_ids (HTMLParser — wikiLink/pageEmbed data-doc-id) ────
 
 
