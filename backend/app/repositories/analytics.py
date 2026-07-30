@@ -322,6 +322,89 @@ class AnalyticsRepository:
             lane["other"] += 1  # done, 또는 backlog/ready-for-dev/in-review 중 최근 변경된 것
         return {"lanes": lanes, "stories_without_epic": no_epic_count}
 
+    async def get_epic_flow_nodes(
+        self, project_id: uuid.UUID, epic_id: uuid.UUID, upcoming_limit: int = 15,
+    ) -> dict:
+        """story #2224(S2-1, 갈래 화면) 노드 계약 — 급전환(2026-07-30, PO 판정): "N+1이라
+        노드를 안 그린다"는 안 그릴 이유가 아니라 BE 계약을 하나 더 만들 이유였다(선생님 질책).
+
+        ⛔한 에픽 최대 141건(dev 실측) — 179개 에픽 전체를 한 번에 주면(수천 건) 응답이
+        죽는다. 그래서 이 계약은 «에픽 하나» 단위다(?epic_id= 필수) — 좌 레인(전체 에픽
+        요약)은 이미 get_epics_progress_lane이 주고, 펼친 에픽만 이 함수가 노드를 준다
+        (유나 "접기/펴기 1차 필수"와 맞물림). 한 에픽 141건이면 단일 쿼리로 N+1 없이 충분.
+
+        세 구역(시간축) — ⛔7상태(실행가능·검증필요·멈춤·연결미상…, 노드에 붙는 «표시»)와는
+        다른 축이다. 섞으면 같은 것을 두 번 말하는 것이라 여기서는 구역만 가른다:
+          ①지금(now)     = status in {in-progress, in-review} — "검토 중"도 사람이 지금
+                            손대는 중이라 지금에 든다(PO 판정). ready-for-dev는 안 넣는다 —
+                            "잡을 수 있는 것"과 "잡고 있는 것"이 섞인다. «전량» 반환.
+          ②이어질(upcoming) = 나머지(backlog·ready-for-dev 등, done 제외) — «상위 upcoming_limit
+                            건»만. 순서: 막힌 것(pending Gate·requires_human=true·
+                            evidence_status=insufficient, 좌 레인과 같은 정의) > 실행가능
+                            (status=='ready-for-dev', PO: "이어질 것의 맨 앞") > 나머지, 그
+                            안에서 최근 변경 순. ⛔잘린 개수를 반드시 함께 낸다("없앤 것"이
+                            아니라 "안 그린 것" — 오늘 규율 그대로).
+          ③지나온(past)  = status=='done' — ⛔노드로 안 그린다. «수»로만 접는다.
+        """
+        stories_r = await self.session.execute(
+            select(
+                Story.id, Story.story_number, Story.title, Story.status,
+                Story.assignee_id, Story.updated_at,
+            ).where(
+                Story.project_id == project_id,
+                Story.org_id == self.org_id,
+                Story.epic_id == epic_id,
+                Story.deleted_at.is_(None),
+            )
+        )
+        stories = stories_r.all()
+        story_ids = [s.id for s in stories]
+
+        blocked_r = await self.session.execute(
+            select(Gate.work_item_id.distinct()).where(
+                Gate.org_id == self.org_id,
+                Gate.work_item_type == "story",
+                Gate.work_item_id.in_(story_ids),
+                Gate.status == "pending",
+                Gate.requires_human.is_(True),
+                Gate.evidence_status == "insufficient",
+            )
+        )
+        blocked_ids = set(blocked_r.scalars().all())
+
+        def _node(s) -> dict:
+            return {
+                "id": str(s.id),
+                "story_number": s.story_number,
+                "title": s.title,
+                "status": s.status,
+                "assignee_id": str(s.assignee_id) if s.assignee_id else None,
+                "updated_at": s.updated_at.isoformat(),
+            }
+
+        now_items, upcoming_all, past_count = [], [], 0
+        for s in stories:
+            if s.status == "done":
+                past_count += 1
+            elif s.status in ("in-progress", "in-review"):
+                now_items.append(_node(s))
+            else:
+                priority = 0 if s.id in blocked_ids else (1 if s.status == "ready-for-dev" else 2)
+                upcoming_all.append((priority, s.updated_at, _node(s)))
+
+        upcoming_all.sort(key=lambda t: (t[0], -t[1].timestamp()))
+        upcoming_total = len(upcoming_all)
+        upcoming_shown = [n for _, _, n in upcoming_all[:upcoming_limit]]
+
+        return {
+            "epic_id": str(epic_id),
+            "now": {"total": len(now_items), "items": now_items},
+            "upcoming": {
+                "total": upcoming_total, "shown": len(upcoming_shown), "items": upcoming_shown,
+            },
+            "past": {"total": past_count},
+        }
+
     async def get_agent_stats(self, project_id: uuid.UUID, agent_id: uuid.UUID) -> dict:
         member_r = await self.session.execute(
             select(TeamMember.id).where(
