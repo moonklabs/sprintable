@@ -153,15 +153,17 @@ async def update_agent_run(
     _finished_at = body.finished_at
     if _finished_at is None and body.status in _TERMINAL_STATUSES:
         _finished_at = datetime.now(timezone.utc)
+    # ⛔story #2346 AC1(2026-07-30): result_summary·last_error_code가 «생략돼도 항상 덮어써져»
+    # 매 status 갱신마다 앞선 값이 null로 지워지던 결함 — exclude_unset=True로 「캐폴러가
+    # 실제로 이 요청에 넣은 필드만」 repo에 넘긴다. 캐폴러가 명시로 null을 보내면(의도적
+    # 비우기) 여전히 지워진다 — "생략"과 "명시적 null"을 이제 구분한다(repo.update()의 예외
+    # 특례는 그 구분을 못 해 항상 지웠다 — 아래에서 제거).
+    _explicit_fields = body.model_dump(exclude_unset=True, exclude={"status", "finished_at"})
     run = await repo.update(
         id,
         status=body.status,
-        result_summary=body.result_summary,
-        input_tokens=body.input_tokens,
-        output_tokens=body.output_tokens,
-        cost_usd=body.cost_usd,
-        last_error_code=body.last_error_code,
         finished_at=_finished_at,
+        **_explicit_fields,
     )
     if run is None:
         raise HTTPException(status_code=404, detail="Agent run not found")
