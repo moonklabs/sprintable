@@ -317,6 +317,11 @@ def main() -> int:
     new_violations = [v for v in result.violations if violation_key(v) not in baseline]
     grandfathered = [v for v in result.violations if violation_key(v) in baseline]
 
+    # ⭐PO 지적(2026-07-30): 베이스라인 «수»를 CI 로그에 매번 찍는다 — 아무도 안 보면 「줄고
+    # 있는지」가 죽는다(줄지 않아도 최소한 보이기는 해야 한다). 별도 CI 스텝(git diff 기반)이
+    # 이 파일 자체에 새 줄이 «추가»되는 것을 막는다(baseline은 줄기만 허용) — 이 스크립트는
+    # "지금 몇 개가 grandfathered인가"만 보인다.
+    print(f"grandfathered: {len(baseline)}")
     print(f"위반 {len(result.violations)}건(베이스라인 기존 {len(grandfathered)}건 + 신규 {len(new_violations)}건) "
           f"· SKIPPED {len(result.skipped)}건(추적불가 — story #2335 AC5, «못 잡는 것»의 크기)")
 

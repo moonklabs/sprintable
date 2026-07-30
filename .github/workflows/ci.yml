@@ -242,9 +242,41 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Scan for Query(...) params missing at router direct-call sites
         working-directory: backend
         run: python3 scripts/lint_query_sentinel_direct_calls.py
+      # ⭐PO 판정(2026-07-30): grandfather 베이스라인은 "지금 있는 걸 봐준다"이지 "앞으로도
+      # 여기 한 줄 더 넣고 넘어가도 된다"가 아니다 — 그러면 이 가드를 우회하는 «합법적인 문»이
+      # 된다. 베이스라인 파일은 «줄기만» 허용한다: base 브랜치(보통 develop) 대비 새로 추가된
+      # 줄이 있으면 실패시킨다(제거는 자유 — 사이트를 고쳐서 줄어드는 것은 언제나 환영).
+      - name: "Verify baseline can only shrink (story #2335 — no new grandfather entries)"
+        working-directory: backend
+        run: |
+          set -e
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          if [ -z "$BASE_REF" ]; then
+            BASE_REF="develop"
+          fi
+          git fetch origin "$BASE_REF" --depth=1 2>&1 | tail -3 || true
+          if git show "origin/$BASE_REF:backend/scripts/query_sentinel_baseline.txt" > /tmp/base_baseline.txt 2>/dev/null; then
+            grep -vE '^#|^$' /tmp/base_baseline.txt | sort -u > /tmp/base_sorted.txt
+            grep -vE '^#|^$' scripts/query_sentinel_baseline.txt | sort -u > /tmp/head_sorted.txt
+            new_lines=$(comm -13 /tmp/base_sorted.txt /tmp/head_sorted.txt || true)
+            base_count=$(wc -l < /tmp/base_sorted.txt | tr -d ' ')
+            head_count=$(wc -l < /tmp/head_sorted.txt | tr -d ' ')
+            echo "baseline entries: base($BASE_REF)=$base_count head=$head_count"
+            if [ -n "$new_lines" ]; then
+              echo "FAIL: 베이스라인에 «새» 항목이 추가됐다 — 이 파일은 줄기만 허용한다(story #2335)." \
+                   "새 위반은 여기 grandfather로 넣지 말고 실제로 고치는(파라미터를 명시로 넘기는) 것이 맞다:"
+              echo "$new_lines"
+              exit 1
+            fi
+            echo "OK: baseline은 늘지 않았다(줄었으면 환영 — 그만큼 사이트가 고쳐진 것)"
+          else
+            echo "base($BASE_REF)에 베이스라인 파일이 아직 없음 — 이 PR이 첫 도입이라 증가검사 스킵"
+          fi
 
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
