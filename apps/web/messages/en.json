@@ -427,6 +427,24 @@
     "memorySlotTitle": "Memory",
     "memorySlotBody": "Org-level accumulated memory is coming soon."
   },
+  "flow": {
+    "title": "Flow",
+    "loading": "Loading…",
+    "viewFlow": "Flow",
+    "viewKanban": "Kanban",
+    "laneHeading": "Goals · {n}",
+    "laneEmpty": "No goals yet.",
+    "canvasPast": "Past",
+    "canvasNow": "Now",
+    "canvasUpcoming": "Upcoming",
+    "canvasEmpty": "Nothing to draw yet.",
+    "canvasScopeNotice": "This screen only draws at epic granularity for now — individual work nodes and the time axis are the next slice. (Why: this only draws what a single query can produce.)",
+    "canvasNotYetShown": "Not yet shown: in-progress · waiting · blocked · stalled counts.",
+    "canvasActiveMarker": "Currently running",
+    "edgesCount": "{n} connection(s) awaiting confirmation",
+    "edgesEmptyHonest": "0 connections — this map isn't linked up yet.",
+    "drawerHeading": "Gate/blocked signals · {n}"
+  },
   "board": {
     "title": "Kanban Board",
     "subtitle": "Drag stories to change status",
