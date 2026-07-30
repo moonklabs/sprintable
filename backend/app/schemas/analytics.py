@@ -183,6 +183,18 @@ class EpicFlowNodesResponse(BaseModel):
     past: FlowNodePastZone
 
 
+class EpicFlowNodesBatchResponse(BaseModel):
+    """story #2679(2026-07-30) — GET .../epic-flow-nodes?epic_ids=a,b,c. L3 캔버스가 여러
+    레인을 한 화면에 동시에 그리며 단일-에픽 계약이 레인 수만큼 호출을 요구하게 됐다
+    (오늘 금지한 패턴) — FE가 이미 아는 epic_id 목록을 넘겨 한 번에 받는다.
+    ⛔epic_ids가 상한(EPIC_FLOW_NODES_BATCH_MAX)을 넘으면 앞 N개만 처리되고 나머지는
+    skipped_epic_ids에 실린다("없앤 것"이 아니라 "안 그린 것" — 오늘 규율 그대로)."""
+    epics: list[EpicFlowNodesResponse]
+    requested_count: int
+    processed_count: int
+    skipped_epic_ids: list[uuid.UUID]
+
+
 class AgentStatsResponse(BaseModel):
     # S2-1 신규 지표 (stories 기반)
     completed: int

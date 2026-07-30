@@ -143,6 +143,149 @@ async def test_epic_flow_nodes_three_zones_and_one_call():
         await engine.dispose()
 
 
+async def test_epic_flow_nodes_batch_multiple_epics_one_call_each_query():
+    """story #2679 — epic_ids로 여러 에픽을 «한 번의 호출»로 받고, story/Gate 쿼리가 각각
+    1번씩(에픽 개수와 무관, N+1 없음)인지."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+
+            from app.models.pm import Goal
+            epic_a = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="Epic A")
+            epic_b = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="Epic B")
+            s.add_all([epic_a, epic_b])
+            await s.commit()
+
+            story_a_ip = await _make_story(s, org.id, project.id, title="A_IP")
+            story_a_ip.epic_id = epic_a.id
+            story_a_ip.status = "in-progress"
+
+            story_a_done = await _make_story(s, org.id, project.id, title="A_DONE")
+            story_a_done.epic_id = epic_a.id
+            story_a_done.status = "done"
+
+            story_b_backlog = await _make_story(s, org.id, project.id, title="B_BACKLOG")
+            story_b_backlog.epic_id = epic_b.id
+            story_b_backlog.status = "backlog"
+            await s.commit()
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        query_count = {"n": 0}
+        try:
+            from sqlalchemy import event
+            from app.core.database import engine as _global_engine
+
+            def _count(*args, **kwargs):
+                query_count["n"] += 1
+
+            event.listen(_global_engine.sync_engine, "before_cursor_execute", _count)
+            try:
+                resp = await client.get(
+                    "/api/v2/analytics/epic-flow-nodes",
+                    params={
+                        "project_id": str(project.id),
+                        "epic_ids": f"{epic_a.id},{epic_b.id}",
+                    },
+                )
+            finally:
+                event.remove(_global_engine.sync_engine, "before_cursor_execute", _count)
+
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["requested_count"] == 2
+            assert body["processed_count"] == 2
+            assert body["skipped_epic_ids"] == []
+            assert len(body["epics"]) == 2
+
+            by_id = {e["epic_id"]: e for e in body["epics"]}
+            assert by_id[str(epic_a.id)]["now"]["total"] == 1
+            assert by_id[str(epic_a.id)]["past"]["total"] == 1
+            assert by_id[str(epic_b.id)]["upcoming"]["total"] == 1
+
+            # story 쿼리 1 + gate 쿼리 1(+ project-access 확認용 소수) — 에픽 개수(2)만큼
+            # 곱해지지 않는 것이 핵심(N+1이면 훨씬 커진다). 넉넉히 10 미만으로 고정 상한 확認.
+            assert query_count["n"] < 10, f"쿼리 수가 큼(N+1 의심): {query_count['n']}"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_epic_flow_nodes_batch_over_cap_truncates_and_reports_skipped():
+    """상한(EPIC_FLOW_NODES_BATCH_MAX) 초과 시 앞 N개만 처리되고 나머지는 skipped_epic_ids에
+    실린다 — "없앤 것"이 아니라 "안 그린 것"(오늘 규율)."""
+    from app.main import app
+    from app.repositories.analytics import AnalyticsRepository
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            fake_ids = [str(uuid.uuid4()) for _ in range(AnalyticsRepository.EPIC_FLOW_NODES_BATCH_MAX + 5)]
+            resp = await client.get(
+                "/api/v2/analytics/epic-flow-nodes",
+                params={"project_id": str(project.id), "epic_ids": ",".join(fake_ids)},
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["requested_count"] == len(fake_ids)
+            assert body["processed_count"] == AnalyticsRepository.EPIC_FLOW_NODES_BATCH_MAX
+            assert len(body["skipped_epic_ids"]) == 5
+            assert set(body["skipped_epic_ids"]) == set(fake_ids[AnalyticsRepository.EPIC_FLOW_NODES_BATCH_MAX:])
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_epic_flow_nodes_requires_exactly_one_of_epic_id_or_epic_ids():
+    """양쪽 다 주거나 둘 다 안 주면 400 — 모호한 요청을 서버가 임의로 고르지 않는다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            neither = await client.get(
+                "/api/v2/analytics/epic-flow-nodes", params={"project_id": str(project.id)},
+            )
+            assert neither.status_code == 400
+
+            both = await client.get(
+                "/api/v2/analytics/epic-flow-nodes",
+                params={
+                    "project_id": str(project.id), "epic_id": str(uuid.uuid4()),
+                    "epic_ids": str(uuid.uuid4()),
+                },
+            )
+            assert both.status_code == 400
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 async def test_epic_flow_nodes_upcoming_limit_truncates_and_reports_total():
     """upcoming_limit보다 이어질 것이 많으면 shown < total이어야 하고, 잘린 개수를 응답이
     말해야 한다("없앤 것"이 아니라 "안 그린 것", PO 규율)."""
