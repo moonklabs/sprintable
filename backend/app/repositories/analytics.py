@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.gate import Gate
 from app.models.pm import Goal, Sprint, Story, Task
 from app.models.team import TeamMember
+
+logger = logging.getLogger(__name__)
 
 
 class AnalyticsRepository:
@@ -172,6 +176,151 @@ class AnalyticsRepository:
             "done_points": done_pts,
             "completion_pct": round((done / total) * 100) if total > 0 else 0,
         }
+
+    async def get_epics_progress_lane(self, project_id: uuid.UUID) -> dict:
+        """story #2224(S2-1, 갈래 화면) 좌측 레인 — 미르코 실측: `EpicProgress`에 진행/대기/
+        막힘/멈춤 네 칸이 없어 레인이 반만 선다. 에픽마다 따로 부르면 N+1이라 «한 번의 호출»로
+        project 전체 에픽의 네 칸을 낸다.
+
+        분류 우선순위(겹치는 신호를 하나로 정리하는 순서 — 다른 순서를 쓰면 답이 달라진다):
+          ①막힘(blocked)   = 그 story에 매인 pending Gate가 있고 requires_human=true·
+                              evidence_status='insufficient'다(§4-5 "문" · 민 실측 32건과
+                              같은 자로 맞춤 — PO 확認 요청에 따라 필터를 일치시켰다. 그냥
+                              "pending Gate 매임"만 쓰면 민 수와 다른 정의가 같은 화면에
+                              두 벌 서는 것이었다).
+          ②대기(waiting)   = ①이 아니고 next_action_category=='waiting'(#2262 SSOT 재사용 —
+                              verification_pending: self_reported=True·아직 human_verified 안 됨)
+          ③진행(in_progress) = ①②가 아니고 status=='in-progress'
+          ④멈춤(stalled)   = ①②③이 아니고 status!='done'이고 168시간(민 실측 — §7-③의 "48h"는
+                              07-23 시안 값·미재측정, 문서로 남은 값은 168h) 넘게 updated_at 불변
+          ⑤그 외(other)    = ①~④ 어디에도 안 잡힘 — ⛔PO 지적(2026-07-30): "합계≠total_stories는
+                              의도했어도 화면에서는 거짓말이 된다" — 그래서 이 칸도 명시로 낸다.
+                              in_progress+waiting+blocked+stalled+other == total_stories 항상 성립.
+
+        ⛔`other`에 실제로 드는 것 둘(성질이 다름, PO 지적 2026-07-30 — dev 실측 2026-07-30):
+          ㉠정상적으로 네 칸 밖(최근 168h 이내 변경된 backlog/ready-for-dev/in-review · done)
+            — dev 실측 약 2050/2079건, 압도 다수.
+          ㉡pending Gate가 매여 있는데 requires_human=false 또는 evidence_status가
+            'insufficient'가 아니라 ①막힘에서 빠진 것 — dev 실측 **1건**
+            (requires_human=False·evidence_status=None). 「승인도 자동 통과도 안 되는 결재」
+            류와 같은 냄새(#2261 계열)나 n=1이라 이 함수에서 별도 칸을 새로 만들지 않는다
+            — 필요해지면(건수가 늘면) 그때 쪼갠다. 지금은 ㉠과 ㉡을 `other` 하나로 합친 채
+            이 사실만 기록해 둔다(다음 사람이 "other=잡동사니"로 오인하지 않게).
+          참고: ①막힘(narrow) dev 실측 28건 — 민 실측 32건과 4건 차이는 **확認됨**: 이
+          함수는 epic_id가 있는 story만 레인에 담는데(에픽 좌측 레인이 목적이므로), 막힌
+          32건 중 4건이 epic_id가 없다(dev 실측). 버그 아님 — 이 엔드포인트의 스코프
+          자체가 "에픽에 속한 것"이라 그 4건은 애초에 이 화면의 대상이 아니다.
+
+        ⛔이 우선순위·168h 임계 둘 다 «잠정»이다 — #2218(S0-1)이 임계를 실측(8~12건 나오는
+        값)해 재확定하기 전까지 쓰는 값. 화면에 "이 수는 잠정"이라는 신호를 실어야 한다면
+        이 함수가 아니라 호출부(FE 계약)의 몫이다.
+
+        ⛔`stories_without_epic`(PO 판정 2026-07-30, dev 445건 실측 후 뒤집힘): 처음엔
+        "미배정 레인을 만들지 않는다 + PO가 4건을 직접 붙인다"였으나, 전체 445건임이 실측되며
+        "손으로 못 붙이는 규모"·"에픽 없음은 결함이 아니라 사실"로 판정이 바뀌었다. 레인은
+        여전히 안 만들되(445를 한 줄에 담으면 화면을 그 줄이 먹는다), 그 수를 **응답에
+        실어** 화면이 "에픽에 속한 것만 여기 있습니다 · 나머지 N건은 이 레인 밖입니다"를
+        정직하게 말할 수 있게 한다 — 로그만으로는 화면이 그 말을 할 수 없다."""
+        stories_r = await self.session.execute(
+            select(Story.id, Story.epic_id, Story.status, Story.updated_at).where(
+                Story.project_id == project_id,
+                Story.org_id == self.org_id,
+                Story.deleted_at.is_(None),
+                Story.epic_id.is_not(None),
+            )
+        )
+        stories = stories_r.all()
+        story_ids = [s.id for s in stories]
+
+        # ⭐PO 판정(2026-07-30, 에픽 없는 막힘 4건 건): "미배정" 레인은 안 만든다(만들면 에픽
+        # 안 다는 것이 "괜찮은 일"이 되어 그 줄이 계속 자란다) — 대신 «에픽 없는 story 전량»을
+        # 셀 수 있게 로그로 남긴다(㉡류와 같은 방식 — 칸은 안 만들되 0이 아니면 누군가 안다).
+        no_epic_count_r = await self.session.execute(
+            select(func.count(Story.id)).where(
+                Story.project_id == project_id,
+                Story.org_id == self.org_id,
+                Story.deleted_at.is_(None),
+                Story.epic_id.is_(None),
+            )
+        )
+        no_epic_count = no_epic_count_r.scalar_one()
+        if no_epic_count:
+            logger.info(
+                "get_epics_progress_lane: epic 없는 story count=%d project_id=%s "
+                "(이 레인 자체에서 영영 안 보임 — story #2224 PO 판정: 미배정 레인을 만들지 "
+                "않고 PO가 직접 에픽에 붙인다, 이 로그는 재발 감지용)",
+                no_epic_count, project_id,
+            )
+
+        from app.services.evidence_service import batch_has_evidence, batch_human_verified
+
+        evidence_ids = await batch_has_evidence(self.session, story_ids, "story")
+        verified_map = await batch_human_verified(self.session, story_ids, "story")
+
+        blocked_r = await self.session.execute(
+            select(Gate.work_item_id.distinct()).where(
+                Gate.org_id == self.org_id,
+                Gate.work_item_type == "story",
+                Gate.work_item_id.in_(story_ids),
+                Gate.status == "pending",
+                Gate.requires_human.is_(True),
+                Gate.evidence_status == "insufficient",
+            )
+        )
+        blocked_ids = set(blocked_r.scalars().all())
+
+        # ⭐PO 지적(2026-07-30): ㉡류(pending Gate가 매였는데 위 좁힌 조건을 못 채워 blocked
+        # 밖으로 빠진 것)가 늘어나는 것을 "누가 아는가"가 남는다 — 칸(응답 필드)을 새로
+        # 만들지 않아도 «셀 수는» 있게, 매 호출마다 로그로 남긴다(dev 실측 2026-07-30: 1건).
+        gated_not_blocked_r = await self.session.execute(
+            select(func.count(Gate.work_item_id.distinct())).where(
+                Gate.org_id == self.org_id,
+                Gate.work_item_type == "story",
+                Gate.work_item_id.in_(story_ids),
+                Gate.status == "pending",
+                ~((Gate.requires_human.is_(True)) & (Gate.evidence_status == "insufficient")),
+            )
+        )
+        gated_not_blocked_count = gated_not_blocked_r.scalar_one()
+        if gated_not_blocked_count:
+            logger.info(
+                "get_epics_progress_lane: gated-but-not-blocked(㉡) count=%d project_id=%s "
+                "(pending Gate 있으나 requires_human/evidence_status 조건 미충족 — other에 섞임, "
+                "story #2224 PO 지적 — 늘면 별도 칸 분리 검토)",
+                gated_not_blocked_count, project_id,
+            )
+
+        from app.services.next_action import next_action_category, verification_next_action
+
+        now = datetime.now(timezone.utc)
+        stall_threshold_hours = 168  # 민 실측(문서 기록값) — 48h는 07-23 시안의 미재측정 값
+
+        lanes: dict[str, dict] = {}
+        for s in stories:
+            epic_key = str(s.epic_id)
+            lane = lanes.setdefault(
+                epic_key,
+                {"in_progress": 0, "waiting": 0, "blocked": 0, "stalled": 0, "other": 0},
+            )
+            if s.id in blocked_ids:
+                lane["blocked"] += 1
+                continue
+            self_reported = s.id in evidence_ids
+            human_verified = True if s.id in verified_map else None
+            code = verification_next_action(self_reported=self_reported, human_verified=human_verified)
+            if next_action_category(code) == "waiting":
+                lane["waiting"] += 1
+                continue
+            if s.status == "in-progress":
+                lane["in_progress"] += 1
+                continue
+            if s.status != "done":
+                age_hours = (now - s.updated_at).total_seconds() / 3600
+                if age_hours > stall_threshold_hours:
+                    lane["stalled"] += 1
+                    continue
+            lane["other"] += 1  # done, 또는 backlog/ready-for-dev/in-review 중 최근 변경된 것
+        return {"lanes": lanes, "stories_without_epic": no_epic_count}
 
     async def get_agent_stats(self, project_id: uuid.UUID, agent_id: uuid.UUID) -> dict:
         member_r = await self.session.execute(

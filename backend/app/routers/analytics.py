@@ -11,7 +11,9 @@ from app.repositories.analytics import AnalyticsRepository
 from app.schemas.analytics import (
     AgentStatsResponse,
     BurndownResponse,
+    EpicProgressLane,
     EpicProgressResponse,
+    EpicsProgressLaneResponse,
     MemberWorkloadResponse,
     ProjectHealthResponse,
     ProjectOverviewResponse,
@@ -95,6 +97,23 @@ async def get_epic_progress(
     await _assert_project_access(repo, auth, project_id)
     data = await repo.get_epic_progress(project_id, epic_id)
     return EpicProgressResponse.model_validate(data)
+
+
+@router.get("/analytics/epics-progress-lane", response_model=EpicsProgressLaneResponse)
+async def get_epics_progress_lane(
+    project_id: uuid.UUID = Query(...),
+    repo: AnalyticsRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> EpicsProgressLaneResponse:
+    """story #2224(S2-1, 갈래 화면) 좌측 레인 — project 전체 에픽의 진행/대기/막힘/멈춤을
+    «한 번의 호출»로 낸다(미르코 실측 갭: EpicProgressResponse엔 이 네 칸이 없었다)."""
+    await _assert_project_access(repo, auth, project_id)
+    result = await repo.get_epics_progress_lane(project_id)
+    return EpicsProgressLaneResponse(
+        epics={k: EpicProgressLane.model_validate(v) for k, v in result["lanes"].items()},
+        stall_threshold_hours=168,
+        stories_without_epic=result["stories_without_epic"],
+    )
 
 
 @router.get("/analytics/agent-stats", response_model=AgentStatsResponse)
