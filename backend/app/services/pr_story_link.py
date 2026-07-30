@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pm import Story
 from app.models.pull_request_story_link import PullRequestStoryLink
-from app.services.verdict_capture import parse_story_id  # _SID_RE 흡수(legacy 무회귀).
+from app.services.verdict_capture import parse_story_id, parse_story_number  # _SID_RE 흡수(legacy 무회귀).
 
 _VALID_SOURCES = ("explicit", "auto_match", "sid", "text")
 _VALID_CONFIDENCE = ("high", "medium", "low")
@@ -72,6 +72,25 @@ async def _global_story(session: AsyncSession, story_id: uuid.UUID) -> Story | N
             select(Story).where(Story.id == story_id, Story.deleted_at.is_(None))
         )
     ).scalar_one_or_none()
+
+
+async def _scoped_story_by_number(
+    session: AsyncSession, org_id: uuid.UUID, story_number: int
+) -> Story | None:
+    """story #2327 후속 — org-scope story_number 조회. **정확히 1건일 때만** 반환(0건·2건+는 None).
+
+    story_number는 (project_id, story_number)만 유일 — org 안에 project가 여럿이면 같은 번호가
+    다른 project에도 있을 수 있다(dev 실측: 저번호는 실제 충돌 존재). 2건+ 나오면 어느 쪽인지
+    추측하지 않는다 — «틀리게 닫느니 안 닫는다»(이 파일 전체의 close-on-merge 규율과 동형).
+    org_id는 필수 인자(legacy org-미상 경로는 이 함수를 호출하지 않는다 — 호출부에서 가드)."""
+    rows = (
+        await session.execute(
+            select(Story).where(
+                Story.org_id == org_id, Story.story_number == story_number, Story.deleted_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    return rows[0] if len(rows) == 1 else None
 
 
 async def _auto_match(
@@ -192,11 +211,45 @@ async def resolve_story_for_pr(
                 story.id, story.org_id, "sid", "high", True, "sid_exact", {"sid": str(sid)}
             )
 
+    # 3b) story #2327 후속 — SID(UUID)가 없거나 못 찾았을 때, story_number 태그(`[SID:2288]`·
+    # `fix(#2288):`, 팀이 실제로 쓰는 두 형식)로 재시도. ⛔org_id 없으면(legacy) 시도 자체를 안
+    # 한다 — story_number는 org 전체 유일이 아니라(§_scoped_story_by_number 주석) org 없이
+    # 전역 조회하면 다른 org 의 같은 번호로 오매치할 수 있다.
+    story_number = None
+    story_number_ambiguous = False
+    if sid is None and org_id is not None:
+        story_number = next((n for t in texts if (n := parse_story_number(t))), None)
+        if story_number is not None:
+            num_story = await _scoped_story_by_number(session, org_id, story_number)
+            if num_story is not None:
+                return ResolvedLink(
+                    num_story.id, num_story.org_id, "sid", "high", True, "sid_exact_by_number",
+                    {"story_number": story_number},
+                )
+            # 0건인지 2건+(ambiguous)인지 구분 — 리포트에서 사유를 정확히 읽으려면 필요.
+            probe = (
+                await session.execute(
+                    select(Story.id).where(
+                        Story.org_id == org_id, Story.story_number == story_number,
+                        Story.deleted_at.is_(None),
+                    )
+                )
+            ).scalars().all()
+            story_number_ambiguous = len(probe) > 1
+
     # 4) auto_match med/low → suggestion(영속·done 금지). 아니면 legacy 호환 skip reason.
     if auto_suggestion is not None:
         return auto_suggestion
-    # SID 있으나 story 미해소(org-scope 미매치 포함)=story_not_found·SID 없음=no_sid_tag(legacy 무회귀).
-    reason = "story_not_found" if sid is not None else "no_sid_tag"
+    # 사유 우선순위: UUID SID 있으나 미해소 > number SID ambiguous > number SID 미해소(0건) >
+    # number 태그인데 org 미상이라 시도 자체를 안 함 > 태그 자체가 없음(legacy 무회귀).
+    if sid is not None:
+        reason = "story_not_found"
+    elif story_number is not None:
+        reason = "story_number_ambiguous" if story_number_ambiguous else "story_number_not_found"
+    elif org_id is None and any(parse_story_number(t) for t in texts):
+        reason = "story_number_requires_org_scope"
+    else:
+        reason = "no_sid_tag"
     return ResolvedLink(None, org_id, None, None, False, reason)
 
 

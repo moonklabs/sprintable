@@ -160,6 +160,73 @@ def test_normalize_repo_lowercase():
     assert normalize_repo("  MoonkLabs/Sprintable ") == "moonklabs/sprintable"
 
 
+# ── story_number SID(§2327 후속, 2026-07-30) — org-scope 조회 + 유일성 ─────────────
+# 실측 근거: _SID_RE(UUID 36자 전용)가 팀이 실제로 쓰는 두 PR 제목 형식(`[SID:2288]`·
+# `fix(#2288):`) 어느 쪽과도 안 맞았다 — 오늘 PR 제목 3건으로 직접 실행해 확認(story #2202).
+# story_number는 org 전체 유일이 아니므로(uq_stories_project_id_story_number) 여기서도 "정확히
+# 1건일 때만 확定"을 반드시 검증한다(0건·2건+는 오매치 방지를 위해 close 금지).
+
+@pytest.mark.anyio
+async def test_resolver_story_number_bracket_form_resolves_when_org_known():
+    """`[SID:2288]`(팀 실사용 형식1) + org 알 때 + 정확히 1건 → sid_exact_by_number·close 가능."""
+    story = _story(id=uuid.uuid4())
+    # explicit(None) → auto_match([]) → scoped_story_by_number([story]).
+    session = _session([_scalar(None), _scalars([]), _scalars([story])])
+    rl = await resolve_story_for_pr(session, ORG_A, "org/repo", 7, ["[SID:2288] 세 목록 상호참조 코멘트에 만료 조건 추가"])
+    assert rl.story_id == story.id and rl.source == "sid" and rl.confidence == "high"
+    assert rl.should_auto_close is True and rl.reason == "sid_exact_by_number"
+
+
+@pytest.mark.anyio
+async def test_resolver_story_number_fix_hash_form_resolves_when_org_known():
+    """`fix(#2328):`(팀 실사용 형식2) + org 알 때 + 정확히 1건 → 동일하게 해소."""
+    story = _story(id=uuid.uuid4())
+    session = _session([_scalar(None), _scalars([]), _scalars([story])])
+    rl = await resolve_story_for_pr(
+        session, ORG_A, "org/repo", 7, ["fix(#2328): 후보 머리글에 유나 규격의 em-dash 리터럴이 빠져 있었다"]
+    )
+    assert rl.story_id == story.id and rl.source == "sid" and rl.confidence == "high"
+    assert rl.should_auto_close is True
+
+
+@pytest.mark.anyio
+async def test_resolver_story_number_negative_no_marker_falls_through():
+    """숫자만 있고 마커 없으면(`fix: bump to 2288ms`) story_number 파싱 자체가 안 된다 — no_sid_tag로 귀결."""
+    session = _session([_scalar(None), _scalars([])])  # explicit(None) → auto_match([]) → 그 이상 안 감.
+    rl = await resolve_story_for_pr(session, ORG_A, "org/repo", 7, ["fix: bump timeout to 2288ms"])
+    assert rl.story_id is None and rl.reason == "no_sid_tag"
+
+
+@pytest.mark.anyio
+async def test_resolver_story_number_ambiguous_across_projects_no_resolve():
+    """같은 org 안 다른 project 에 같은 story_number 2건+ → 추측 안 함(close 금지·ambiguous 사유)."""
+    # explicit(None) → auto_match([]) → scoped_story_by_number(2건, len!=1 → None) → probe(2건, ambiguous 판정).
+    session = _session([_scalar(None), _scalars([]), _scalars([_story(), _story()]), _scalars([_story(), _story()])])
+    rl = await resolve_story_for_pr(session, ORG_A, "org/repo", 7, ["[SID:1] title"])
+    assert rl.story_id is None and rl.should_auto_close is False
+    assert rl.reason == "story_number_ambiguous"
+
+
+@pytest.mark.anyio
+async def test_resolver_story_number_not_found_when_org_known():
+    """org 알고 번호 태그 있으나 0건 → story_number_not_found(추측 없이 skip)."""
+    session = _session([_scalar(None), _scalars([]), _scalars([]), _scalars([])])
+    rl = await resolve_story_for_pr(session, ORG_A, "org/repo", 7, ["[SID:99999]"])
+    assert rl.story_id is None and rl.reason == "story_number_not_found"
+
+
+@pytest.mark.anyio
+async def test_resolver_story_number_requires_org_scope_when_org_none():
+    """legacy(org 미상) + 번호 태그 → «전역 조회로 오매치」를 막기 위해 DB 호출 자체를 안 함.
+
+    org_id None이면 explicit/auto_match/(uuid) global 조회 전부 미도달이고 number 축도 org
+    가드에 걸려 조회 자체가 없다 — execute 0회를 `_session([])`(빈 side_effect)로 직접 증명한다."""
+    session = _session([])
+    rl = await resolve_story_for_pr(session, None, "org/repo", 7, ["[SID:2288] title"])
+    assert rl.story_id is None and rl.reason == "story_number_requires_org_scope"
+    session.execute.assert_not_awaited()
+
+
 # ── explicit-link endpoint (anti-IDOR) ───────────────────────────────────────────
 def _inst(account_login="org"):
     return MagicMock(account_login=account_login, suspended_at=None)
