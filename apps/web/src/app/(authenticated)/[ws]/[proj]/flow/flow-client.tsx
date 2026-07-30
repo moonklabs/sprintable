@@ -157,7 +157,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
             <div className="sticky left-0 z-[1] shrink-0 bg-background">
               <FlowLane rows={laneRows} totalEpicCount={data?.totalEpicCount ?? 0} />
             </div>
-            <div className="min-w-0 flex-1 overflow-x-auto">
+            <div className="focus-inset min-w-0 flex-1 overflow-x-auto">
               <FlowCanvas rows={laneRows} activeEpicId={activeEpicId} edgeCount={edgeCount} />
             </div>
           </div>
