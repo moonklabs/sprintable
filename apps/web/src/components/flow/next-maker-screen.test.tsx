@@ -40,7 +40,7 @@ const GOALS = [
 
 function makeStory(overrides: Partial<{
   id: string; story_number: number; title: string; status: string;
-  assignee_id: string | null; updated_at: string; epic_id: string;
+  assignee_id: string | null; updated_at: string; epic_id: string | null;
 }> = {}) {
   return {
     id: 's1', story_number: 1, title: 'Story', status: 'backlog',
@@ -64,6 +64,8 @@ function buildFetchMock(calledUrls: string[], patchBodies: unknown[] = []) {
           data: [
             makeStory({ id: 'b1', story_number: 101, epic_id: 'e-stall', updated_at: '2026-06-01T00:00:00Z' }),
             makeStory({ id: 'b2', story_number: 102, epic_id: 'e-quiet' }),
+            // 목표(epic) 없는 orphan — 「목표 정하기」패널의 대상(PO 판정 2026-07-31).
+            makeStory({ id: 'o1', story_number: 401, epic_id: null, title: 'Orphan Story' }),
           ],
           meta: { hasMore: false, nextCursor: null, limit: 100 },
         });
@@ -104,6 +106,9 @@ function buildFetchMock(calledUrls: string[], patchBodies: unknown[] = []) {
     }
     if (url.includes('/transition') && init?.method === 'POST') {
       return jsonResponse({ data: { id: 'e-quiet', status: 'done' } });
+    }
+    if (/^\/api\/stories\/[^/]+$/.test(url) && init?.method === 'PATCH') {
+      return jsonResponse({ data: { id: 'o1', epic_id: 'e-stall' } });
     }
     throw new Error(`unexpected fetch: ${url}`);
   });
@@ -225,5 +230,53 @@ describe('NextMakerScreen — real fetch orchestration', () => {
     expect(container.textContent).not.toContain('E-Quiet');
     // 3 goals total, e-quiet removed entirely → totalGoals in the headline drops to 2.
     expect(container.textContent).toContain('목표 2개 중 1개에');
+  });
+
+  it('orphan panel: assigning a goal PATCHes /api/stories/[id] with epic_id and the story disappears from the orphan list', async () => {
+    const calledUrls: string[] = [];
+    const patchBodies: unknown[] = [];
+    vi.stubGlobal('fetch', buildFetchMock(calledUrls, patchBodies));
+
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(container.textContent).toContain('목표에 안 붙은 일이 1건 있습니다');
+
+    const summaryButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('목표에 안 붙은 일이'));
+    await act(async () => {
+      summaryButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(container.textContent).toContain('Orphan Story');
+    const pickButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '목표 정하기');
+    expect(pickButton).toBeTruthy();
+    await act(async () => {
+      pickButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const select = container.querySelector('select')!;
+    expect(select).toBeTruthy();
+    await act(async () => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
+      nativeSetter.call(select, 'e-stall');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const confirmButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '배정');
+    expect(confirmButton).toBeTruthy();
+    await act(async () => {
+      confirmButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(calledUrls.some((u) => u === '/api/stories/o1')).toBe(true);
+    expect(patchBodies).toContainEqual({ epic_id: 'e-stall' });
+    expect(container.textContent).not.toContain('목표에 안 붙은 일이');
+    expect(container.textContent).not.toContain('Orphan Story');
   });
 });

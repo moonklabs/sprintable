@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseGoals, parseStories, parseNextUp, filterActiveGoals,
   deriveGoalStems, deriveRecentlyClosedEpicIds, sortStemsByStallUrgency,
-  deriveHeadline, deriveZeroStageStats,
+  deriveHeadline, deriveZeroStageStats, deriveOrphanStories,
   type NextMakerGoal, type NextMakerStory,
 } from './derive-next-maker';
 
@@ -179,5 +179,38 @@ describe('deriveZeroStageStats', () => {
 
   it('empty input → all zero except the injected blocked count', () => {
     expect(deriveZeroStageStats([], 0)).toEqual({ canDo: 0, unowned: 0, blocked: 0, backlogTotal: 0, backlogOwned: 0 });
+  });
+});
+
+describe('deriveOrphanStories', () => {
+  it('keeps only backlog stories with no epicId', () => {
+    const result = deriveOrphanStories([
+      story({ id: 'a', status: 'backlog', epicId: null }),
+      story({ id: 'b', status: 'backlog', epicId: 'e1' }), // has an epic — excluded
+      story({ id: 'c', status: 'ready-for-dev', epicId: null }), // not backlog — excluded
+      story({ id: 'd', status: 'in-progress', epicId: null }), // not backlog — excluded
+    ]);
+    expect(result.map((s) => s.id)).toEqual(['a']);
+  });
+
+  it('sorts owned-first (PO: "주인 있는데 목표 없는 것이 제일 이상한 것")', () => {
+    const result = deriveOrphanStories([
+      story({ id: 'unowned1', status: 'backlog', epicId: null, assigneeId: null }),
+      story({ id: 'owned1', status: 'backlog', epicId: null, assigneeId: 'u1' }),
+      story({ id: 'unowned2', status: 'backlog', epicId: null, assigneeId: null }),
+      story({ id: 'owned2', status: 'backlog', epicId: null, assigneeId: 'u2' }),
+    ]);
+    expect(result.map((s) => s.id)).toEqual(['owned1', 'owned2', 'unowned1', 'unowned2']);
+  });
+
+  it('does not mutate the input array', () => {
+    const input = [story({ id: 'a', status: 'backlog', epicId: null })];
+    const original = [...input];
+    deriveOrphanStories(input);
+    expect(input).toEqual(original);
+  });
+
+  it('empty input → empty output, no crash', () => {
+    expect(deriveOrphanStories([])).toEqual([]);
   });
 });

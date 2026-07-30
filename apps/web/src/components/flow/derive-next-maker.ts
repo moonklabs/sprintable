@@ -286,3 +286,20 @@ export function deriveZeroStageStats(activeStories: NextMakerStory[], blockedCou
   }
   return { canDo, unowned, blocked: blockedCount, backlogTotal, backlogOwned };
 }
+
+/**
+ * PO 판정(2026-07-31, 라이브 실측 후속 — 샘플 5건이 전부 «오늘 만든» 스토리였다) — 새로
+ * 만든 스토리가 목표에 안 붙는 패턴이 있고, 줄기별로 고르는 이 화면 구조상 목표 없는
+ * backlog는 «영영 안 보인다»(안 보이면 잃는 것). 「다음 고르기」(이 목표의 다음은 무엇인가)
+ * 와는 «다른 물음»(이것은 어느 목표의 일인가)이라 별도 패널·별도 행동([목표 정하기])으로
+ * 세운다 — 「다음으로」를 달면 안 되는 이유: 목표가 없는데 "이 목표의 다음"이 될 수 없다.
+ * 주인 있는데 목표 없는 것이 가장 이상한 경우라 그것을 맨 위로(PO 판정, "제일 이상한 것").
+ */
+export function deriveOrphanStories(activeStories: NextMakerStory[]): NextMakerStory[] {
+  const orphans = activeStories.filter((s) => s.status === 'backlog' && !s.epicId);
+  return [...orphans].sort((a, b) => {
+    const aOwned = a.assigneeId ? 1 : 0;
+    const bOwned = b.assigneeId ? 1 : 0;
+    return bOwned - aOwned;
+  });
+}
