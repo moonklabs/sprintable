@@ -546,8 +546,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // 건드린다 — 그 "else"가 "아무것도 안 함"에서 "후보를 보임"으로 바뀌는 것뿐이라, 후보는
   // 별도 소스(boost_candidates_from)로 따로 불러온다. BE는 필터링이 아니라 재정렬만 하므로
   // (PR#2659) is_reference_candidate===true인 것만 FE가 직접 골라낸다.
+  //
+  // 패널을 닫으면 ref를 풀어 "다음에 열 때 다시 부른다" — 닫힘이 자연스러운 무효화 신호라
+  // (PO 지적, 2026-07-30). 호출 횟수는 여전히 "사람이 패널을 여는 횟수"만큼이라 늘지 않는다
+  // (타이핑마다 부르는 게 아님 — 스펙 ①이 금지하는 것은 그것 하나뿐).
+  // ⛔지금 안 하는 것 — 패널이 열린 채로 본문을 저장해 BE가 새 후보를 만들어도(write-path
+  // 훅) 이 패널은 갱신하지 않는다. 다음 판으로 미룬다(오늘 규율 — 갭을 적어 남긴다).
   useEffect(() => {
-    if (!showAddDep || depCandidatesFetchedRef.current) return;
+    if (!showAddDep) { depCandidatesFetchedRef.current = false; return; }
+    if (depCandidatesFetchedRef.current) return;
     depCandidatesFetchedRef.current = true;
     const params = new URLSearchParams({ boost_candidates_from: story.id });
     if (projectId) params.set('project_id', projectId);
