@@ -6,14 +6,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { KanbanBoard } from '@/components/kanban/kanban-board';
-import { GlanceHero } from '@/components/glance/glance-hero';
 import { ExceptionStream } from '@/components/glance/exception-stream';
 import { toExceptionQueueItems, type BeAttentionSignal, type ExceptionLabels } from '@/components/glance/derive-exception-signals';
 import { loadGlanceData, type GlanceData } from '@/components/glance/load-glance-data';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { FlowLane } from '@/components/flow/flow-lane';
-import { FlowCanvas } from '@/components/flow/flow-canvas';
-import { deriveFlowLaneRows, type EpicsProgressLaneResponse } from '@/components/flow/derive-flow';
+import { NextMakerScreen } from '@/components/flow/next-maker-screen';
 
 interface FlowPageClientProps {
   projectId: string;
@@ -68,26 +65,19 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
 
   const [data, setData] = useState<GlanceData | null>(null);
   const [loading, setLoading] = useState(true);
-  // L2 정정(유나 목업 eacf5b50, 2026-07-30) — 좌 레인 5분류(#2672)+시간축 3분류(#2686)의
-  // 단일 소스. loadGlanceData()와 별도 fetch인 이유: 그 함수는 /glance와 공유하는지라(§I-6
-  // "두 벌 서지 않는다") 건드리지 않는다 — 이 화면(/flow)만 쓰는 재료라 여기서 따로 부른다.
-  // 실패해도 laneRows는 hasLaneData=false로 정직하게 비고, 화면이 죽지 않는다(null 유지).
-  const [laneData, setLaneData] = useState<EpicsProgressLaneResponse | null>(null);
 
+  // ⛔결함 fix(2026-07-31, "다음을 만드는 화면" 착지 — 아티팩트 a920c25f v2) — 예전엔
+  // epics-progress-lane을 여기서 따로 fetch해 FlowLane/FlowCanvas에 먹였으나, 그 둘이
+  // NextMakerScreen으로 교체되며 그 컴포넌트가 같은 엔드포인트를 자기 몫(막힘 합계)으로
+  // 스스로 fetch한다 — 여기서 또 부르면 같은 요청을 두 번 쏘는 것이라 제거한다(§I-6 "두 벌
+  // 서지 않는다"의 거울상 — 이번엔 fetch 중복 쪽).
   const fetchData = useCallback((cancelledRef: { cancelled: boolean }) => {
     setLoading(true);
     void (async () => {
       try {
-        const [result, laneResult] = await Promise.all([
-          loadGlanceData(projectId),
-          fetch(`/api/analytics/epics-progress-lane?project_id=${projectId}`)
-            .then((r) => (r.ok ? r.json() : null))
-            .then((json: { data?: EpicsProgressLaneResponse } | null) => json?.data ?? null)
-            .catch(() => null),
-        ]);
+        const result = await loadGlanceData(projectId);
         if (cancelledRef.cancelled) return;
         setData(result);
-        setLaneData(laneResult);
       } catch {
         if (cancelledRef.cancelled) return;
         setData(null);
@@ -142,13 +132,6 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     return toExceptionQueueItems(data.attentionSignals as BeAttentionSignal[], labels);
   }, [data, tGlance]);
 
-  const laneRows = useMemo(() => deriveFlowLaneRows(data?.roadmap ?? [], laneData), [data, laneData]);
-  const activeEpicId = useMemo(() => data?.roadmap.find((e) => e.roadmapStatus === 'active')?.id ?? null, [data]);
-
-  // #2221(구조화된 연결 간선) 미착지 — 실제 배열 길이 0에서 나온 값이지 리터럴이 아니다.
-  // #2221이 착지해 실 간선 배열을 내려주면 이 상수를 그 배열의 length로 바꾸는 것으로 끝난다.
-  const edgeCount = 0;
-
   return (
     <>
       <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
@@ -186,42 +169,20 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // 않고 그대로 마운트, `?view=kanban`(레거시)도 이 칸으로 들어온다.
           <KanbanBoard projectId={projectId} wsSlug={wsSlug} projSlug={projSlug} />
         ) : (
-          // 「갈래」보기 — 목업(`63b240a4`) 세 영역 중 ①초점 스트립+②L3 캔버스가 이 보기의
-          // 규격이다(③관제만 보기 밖 껍데기로 승격, 구조 최종 확定 2026-07-30 — 유나양이 "목업
-          // 세 영역=갈래 보기의 규격"으로 층을 갈라 세그 구조와의 충돌을 풀었다).
-          <>
-            {loading ? (
-              <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                {t('loading')}
-              </div>
-            ) : data?.heroStory ? (
-              <GlanceHero story={data.heroStory} memberMap={data.memberMap} envelope={data.heroEnvelope} />
-            ) : (
-              <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-                {tGlance('heroEmpty')}
-              </p>
-            )}
-
-            {/* IA §2 유나 추가 지적(2026-07-30) — 좌 레인은 "블록 하나"가 아니라 "고정 열 + 가로
-                스크롤 캔버스"의 두 영역 레이아웃이다(옛 시안 `.lanes`+`.scroll` 구조). 지금 캔버스가
-                폭을 넘치지 않아도(에픽 수가 적으면 스크롤이 안 생김) 구조를 미리 세워 둔다 — 나중에
-                노드가 늘어 캔버스가 넓어질 때 이 구조 없이 끼워 넣을 수 없다(구조는 나중에 못 붙인다). */}
-            <div className="flex gap-4">
-              {/* 레인은 캔버스의 «형제»라 스크롤 조상이 아니다 — sticky 불요(옛 시안
-                  `.lanes{position:relative}`와 동일 패턴). 전에 `sticky left-0`을 달았었는데
-                  그건 트리거할 스크롤 조상이 없어 실제로는 아무것도 안 하는 코드였다(PO 지적
-                  2026-07-30 — "무해하나 무의미한 선언은 무해하지 않다", 다음 사람이 "이게 sticky로
-                  도는구나"로 오독한다). ⛔구조를 부모-자식(레인이 캔버스 안으로 들어가는 형태)으로
-                  바꾸면 그때 sticky가 다시 필요해진다 — 그때 재검토. */}
-              <div className="shrink-0 bg-background">
-                <FlowLane rows={laneRows} totalEpicCount={data?.totalEpicCount ?? 0} />
-              </div>
-              <div className="focus-inset min-w-0 flex-1 overflow-x-auto">
-                <FlowCanvas rows={laneRows} activeEpicId={activeEpicId} edgeCount={edgeCount} projectId={projectId} onSelectStory={handleSelectStory} />
-              </div>
+          // 「갈래」보기 — story #2224 후속(2026-07-31, PO 지시, 아티팩트 a920c25f v2 "다음을
+          // 만드는 화면"). GlanceHero(①초점 스트립)+FlowLane(좌 레인)+FlowCanvas(에픽 아코디언)
+          // 3종을 NextMakerScreen 하나로 교체한다 — 실측이 초점을 뒤집었다: 문제는 "다음이 안
+          // 보이는 것"이 아니라 "다음이 없는 것"이라 첫 줄이 그 사실을 직접 말하고, 이어짐(선)은
+          // 줄기를 펼쳤을 때만 보조로 붙는다(본체가 아니다 — PO note ⑤). memberMap은
+          // loadGlanceData가 이미 fetch한 것(GlanceHero가 쓰던 그 재료, §I-6 재사용).
+          loading ? (
+            <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              {t('loading')}
             </div>
-          </>
+          ) : (
+            <NextMakerScreen projectId={projectId} memberMap={data?.memberMap ?? {}} onSelectStory={handleSelectStory} />
+          )
         )}
 
         {/* ③ 관제 서랍 — 보기 무관 고정, 접힘 기본(IA §2). ExceptionStream = #2100 예외 스트림
