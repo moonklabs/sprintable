@@ -19,6 +19,7 @@ import uuid
 import pytest
 from sqlalchemy import select
 
+from tests.test_2298_goals_glance_include_realdb import _make_goal
 from tests.test_2301_story_body_mentions_realdb import (
     _REAL_DB_URL,
     _client_for,
@@ -548,4 +549,159 @@ async def test_set_relation_kind_does_not_require_declare_first():
             await client.aclose()
     finally:
         app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# story #2223 후속(2026-07-30, 오르테가군 판정) — 캔버스는 에픽 하나치를 한 번에 받아야
+# 한다(story별 N+1로는 못 쓴다). 아래 셋이 그 신설 엔드포인트를 실PG로 고정한다.
+
+
+async def test_epic_reference_candidates_returns_candidates_across_stories():
+    """같은 에픽 소속 story 둘이 각각 만든 candidate가 «한 번의» 에픽 조회로 다 나온다 —
+    각 행에 source_id가 명시로 실려(어느 story에서 왔는지 캔버스가 알아야 간선을 그린다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            goal = await _make_goal(s, org.id, project.id, title="Epic")
+            target = await _make_story(s, org.id, project.id, title="Target")
+            target.story_number = 5010
+            await s.commit()
+            story_a = await _make_story(s, org.id, project.id, title="Source A")
+            story_a.epic_id = goal.id
+            story_b = await _make_story(s, org.id, project.id, title="Source B")
+            story_b.epic_id = goal.id
+            await s.commit()
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            for story, keyword in ((story_a, "#5010 신규 스토리 등재 - 발견분"), (story_b, "#5010 아무 단서 없음")):
+                resp = await client.patch(
+                    f"/api/v2/stories/{story.id}", json={"description": keyword},
+                )
+                assert resp.status_code == 200, resp.text
+
+            resp = await client.get(f"/api/v2/goals/{goal.id}/reference-candidates")
+            assert resp.status_code == 200, resp.text
+            candidates = resp.json()
+            assert len(candidates) == 2
+            source_ids = {c["source_id"] for c in candidates}
+            assert source_ids == {str(story_a.id), str(story_b.id)}
+            for c in candidates:
+                assert c["target_id"] == str(target.id)
+                assert "relation_kind" in c and "status" in c
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_epic_reference_candidates_excludes_other_epics():
+    """다른 에픽 소속 story의 candidate는 안 새어 나온다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            goal_a = await _make_goal(s, org.id, project.id, title="Epic A")
+            goal_b = await _make_goal(s, org.id, project.id, title="Epic B")
+            target = await _make_story(s, org.id, project.id, title="Target")
+            target.story_number = 5011
+            await s.commit()
+            story_in_b = await _make_story(s, org.id, project.id, title="Source in B")
+            story_in_b.epic_id = goal_b.id
+            await s.commit()
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/stories/{story_in_b.id}",
+                json={"description": "#5011 신규 스토리 등재 - 발견분"},
+            )
+            assert resp.status_code == 200, resp.text
+
+            resp = await client.get(f"/api/v2/goals/{goal_a.id}/reference-candidates")
+            assert resp.status_code == 200, resp.text
+            assert resp.json() == []
+
+            resp = await client.get(f"/api/v2/goals/{goal_b.id}/reference-candidates")
+            assert resp.status_code == 200, resp.text
+            assert len(resp.json()) == 1
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_epic_reference_candidates_404_for_missing_goal():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/goals/{uuid.uuid4()}/reference-candidates")
+            assert resp.status_code == 404
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# 오르테가군 지적(2026-07-30, PR#2702 리뷰 후속) — 까심군이 중복 `PATCH relation_kind` 테스트를
+# 지우면서 「app 검증(RELATION_KINDS)을 우회한 값을 DB CHECK가 실제로 막는가」를 재던 시험이
+# 같이 사라졌다. 이 CHECK는 `reference_semantic_candidates`(이 테이블) 소유라 그쪽 PR엔 세울
+# 자리가 없다 — 여기가 그 갭을 되메우는 자리. raw SQL로 ORM(`set_candidate_relation_kind`의
+# `RELATION_KINDS` 검증)을 완전히 우회해 마이그레이션/수동 INSERT 경로에서도 CHECK 자체가
+# 정말 거는지를 직접 확인한다(app 단 검증만 믿으면 그 경로들에서 샌다).
+
+
+async def test_check_constraint_rejects_invalid_relation_kind_via_raw_sql():
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            _caller_id, _caller_user_id = await _make_human_member(s, org.id, project.id)
+            target = await _make_story(s, org.id, project.id, title="Target")
+            target.story_number = 5012
+            await s.commit()
+            source = await _make_story(s, org.id, project.id, title="Source")
+
+            with pytest.raises(IntegrityError) as exc_info:
+                await s.execute(
+                    text(
+                        "INSERT INTO reference_semantic_candidates "
+                        "(id, org_id, source_type, source_field, source_id, target_type, "
+                        "target_id, form, relation_kind, snippet, status) "
+                        "VALUES (gen_random_uuid(), :org_id, 'story', 'description', :source_id, "
+                        "'story', :target_id, 'mention', 'not_a_real_kind', 'snippet', 'estimated')"
+                    ),
+                    {"org_id": org.id, "source_id": source.id, "target_id": target.id},
+                )
+                await s.commit()
+            assert "ck_reference_semantic_candidates_relation_kind" in str(exc_info.value)
+            await s.rollback()
+    finally:
         await engine.dispose()
