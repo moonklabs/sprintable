@@ -19,7 +19,6 @@ import {
   Inbox,
   Layers,
   LayoutDashboard,
-  Map,
   MessageSquare,
   Newspaper,
   Search,
@@ -357,16 +356,6 @@ export function AppSidebar({
                 >
                   <Layers />
                   <span>{t('goals')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/glance" />}
-                  isActive={isActive('/glance')}
-                  tooltip={t('glance')}
-                >
-                  <Map />
-                  <span>{t('glance')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
