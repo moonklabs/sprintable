@@ -81,12 +81,19 @@ async function findOriginAcrossPages(storyId: string, signal: { cancelled: boole
     const json = await res.json() as BacklinksPage;
     const items = json.data ?? [];
     collected = collected.concat(items);
-    if (items.some((i) => i.relation === 'created_from')) break; // 찾았으면 더 안 넘긴다.
+    if (items.some((i) => i.relation === 'created_from')) return collected; // 찾았으면 더 안 넘긴다.
     // #2231 AC4 — 커서 페이지네이션 meta는 parseCursorMeta()로만 읽는다(직접 옵셔널 체이닝
     // 금지, 저장소 전수 가드 테스트가 새 자리를 잡는다).
     const pageMeta = parseCursorMeta(json.meta, 'story-origin-section');
-    if (!pageMeta.hasMore || !pageMeta.nextCursor) break; // 다 봤다(진짜 없거나 미수집).
+    if (!pageMeta.hasMore || !pageMeta.nextCursor) return collected; // 다 봤다(진짜 없거나 미수집).
     cursor = pageMeta.nextCursor;
+    if (page === MAX_PAGES - 1) {
+      // PO 지적(2026-07-30) — "MAX_PAGES 상한에 걸려서 모름"과 "정말 없어서 모름"은 화면에서
+      // 같은 문구(originNotCollected)로 정직하게 통일되지만("모름"이니 거짓은 아님), created_from은
+      // 유일 행이라 2000건을 넘겨도 못 찾는 것은 «있을 수 없는 일» — 즉 결함 신호다. 화면은
+      // 그대로 「모름」이되, 개발자에게만 알린다(오늘 "가드는 CI에·폴백은 운영에"의 세 번째 얼굴).
+      console.warn(`[story-origin-section] MAX_PAGES(${MAX_PAGES}) 상한까지 다 봤는데 storyId=${storyId}의 created_from을 못 찾았다 — created_from은 유일 행이라 이 상한에 걸리는 것 자체가 비정상.`);
+    }
   }
   return collected;
 }

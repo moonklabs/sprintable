@@ -140,6 +140,34 @@ describe('StoryOriginSection', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('PO 지적(2026-07-30) — MAX_PAGES 상한까지 다 봤는데 못 찾으면 개발자에게만 경고(화면은 그대로 미수집)', async () => {
+    // has_more:true를 계속 주는 무한 페이지처럼 흉내(진짜라면 있을 수 없는 비정상 상황).
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: 'm', source_type: 'doc', source_id: 'd1', created_by: null, created_at: '2026-07-01T00:00:00Z', relation: 'none', still_exists: true, doc: { id: 'd1', title: '멘션' }, message: null, meeting: null, story: null }],
+      meta: { next_cursor: 'cursor-next', has_more: true },
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await render('s1');
+    expect(container.textContent).toContain('출처 미수집'); // 화면은 그대로 정직한 미수집
+    expect(fetchMock).toHaveBeenCalledTimes(10); // MAX_PAGES=10에서 멈춘다(무한루프 아님)
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]![0]).toContain('MAX_PAGES');
+  });
+
+  it('정상적으로 전 페이지를 다 봐서(has_more 소진) 못 찾은 경우엔 경고를 안 낸다(비정상 신호와 구분)', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: 'm', source_type: 'doc', source_id: 'd1', created_by: null, created_at: '2026-07-01T00:00:00Z', relation: 'none', still_exists: true, doc: { id: 'd1', title: '멘션' }, message: null, meeting: null, story: null }],
+      meta: { next_cursor: null, has_more: false },
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await render('s1');
+    expect(container.textContent).toContain('출처 미수집');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
   it('fetch 실패 시 조용히 아무것도 안 그린다(EntityBacklinksSection과 동형)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 500 })));
     await render('s1');
