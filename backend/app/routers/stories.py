@@ -879,6 +879,113 @@ async def set_story_reference_candidate_relation_kind(
     return {"id": str(candidate.id), "relation_kind": candidate.relation_kind}
 
 
+class RejectRelationRequest(BaseModel):
+    reason: str | None = None
+
+
+@router.post("/{id}/reference-candidates/{candidate_id}/reject")
+async def reject_story_reference_candidate(
+    id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    body: RejectRelationRequest = RejectRelationRequest(),
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """POST .../reject — story #2221 후속(오르테가 판정, 2026-07-30): 관계 단위 기각(간선이
+    아니라 관계 — 유나 지적). 이 candidate 행이 가리키는 (source, target) 쌍 전체를
+    `rejected_relations`에 기록하고, 같은 쌍을 가리키는 다른 field/form의 candidate 행도
+    함께 지운다 — 그래야 「description에서 기각했는데 AC에서 또 뜬다」가 안 생긴다. 다음
+    산문 임포트부터 이 쌍은 후보 생성 단계에서 걸러진다(지우기가 아니라 기록이라 영속)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.reference_semantic_candidates import (
+        CandidateNotFoundError,
+        reject_candidate,
+    )
+
+    actor_id = await _resolve_team_member_id(auth, repo.org_id, repo.session)
+    try:
+        await reject_candidate(
+            repo.session, org_id=repo.org_id, candidate_id=candidate_id,
+            rejected_by=actor_id, reason=body.reason,
+        )
+    except CandidateNotFoundError:
+        raise HTTPException(status_code=404, detail="Reference candidate not found")
+    await repo.session.commit()
+    return {"ok": True}
+
+
+@router.get("/{id}/rejected-relations")
+async def list_story_rejected_relations(
+    id: uuid.UUID,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[dict]:
+    """GET .../rejected-relations — 이 story가 기각한 관계 목록(되살리기 UI용)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from sqlalchemy import select as _select
+
+    from app.models.rejected_relation import RejectedRelation
+
+    rows = (await repo.session.execute(
+        _select(RejectedRelation).where(
+            RejectedRelation.org_id == repo.org_id,
+            RejectedRelation.source_type == "story",
+            RejectedRelation.source_id == id,
+        )
+    )).scalars().all()
+    return [
+        {
+            "id": str(r.id),
+            "target_type": r.target_type,
+            "target_id": str(r.target_id),
+            "reason": r.reason,
+            "rejected_by": str(r.rejected_by) if r.rejected_by else None,
+            "rejected_at": r.rejected_at.isoformat(),
+        }
+        for r in rows
+    ]
+
+
+@router.delete("/{id}/rejected-relations/{target_id}")
+async def undo_story_rejected_relation(
+    id: uuid.UUID,
+    target_id: uuid.UUID,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """DELETE .../rejected-relations/{target_id} — 되살리기(오르테가 판정: 지금은 단순하게,
+    rejected_relations 행을 삭제한다 — 되살린 기록 자체는 안 남긴다). ⛔되살려도 candidate
+    행이 즉시 돌아오지 않는다 — 다음 story 저장이 있어야 새로 후보가 생긴다(이 모듈의
+    "새 참조만" 설계 원칙, #2328 ③)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.reference_semantic_candidates import (
+        RejectedRelationNotFoundError,
+        undo_rejection,
+    )
+
+    try:
+        await undo_rejection(
+            repo.session, org_id=repo.org_id, source_type="story", source_id=id,
+            target_type="story", target_id=target_id,
+        )
+    except RejectedRelationNotFoundError:
+        raise HTTPException(status_code=404, detail="Rejected relation not found")
+    await repo.session.commit()
+    return {"ok": True}
+
+
 async def _visible_target_ids(
     session: AsyncSession, org_id: uuid.UUID, caller_id: uuid.UUID,
     ids_by_type: dict[str, set[uuid.UUID]], auth: AuthContext,

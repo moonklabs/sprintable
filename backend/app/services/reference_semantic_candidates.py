@@ -32,6 +32,7 @@ from app.models.reference_semantic_candidate import (
     RELATION_KINDS,
     ReferenceSemanticCandidate,
 )
+from app.models.rejected_relation import RejectedRelation
 from app.services.mention_parser import (
     _BARE_STORY_NUMBER_RE,
     _redact_code_spans,
@@ -134,12 +135,20 @@ async def build_candidate_rows(
     안 버린다")과는 다른 축이다 — AC10은 «분류가 안 됐을 뿐 실제 관계 가능성이 있는» 것을
     보존하는 것이고, 자기참조는 애초에 사람에게 내밀 값이 없다(자기 자신을 가리킨다는
     사실은 승격 판단 대상이 아니다). 여기서 제외하지 이미 저장된 기존 자기참조 행을
-    소급 정리하지는 않는다(#2328 ③ "소급 안 함"과 동일 원칙)."""
+    소급 정리하지는 않는다(#2328 ③ "소급 안 함"과 동일 원칙).
+
+    ⛔story #2221 후속(오르테가 판정, 2026-07-30): 관계 단위로 기각된(target_id) 쌍도 여기서
+    제외한다 — 산문이 그대로 남아 있어도 사람이 「아니오」한 관계는 재임포트마다 또 후보로
+    뜨면 안 된다(그러면 사람이 같은 것을 영원히 다시 기각하게 된다). `rejected_relations`가
+    「기록」(지우지 않음)이라 이 필터가 매 저장마다 다시 걸러낼 수 있다."""
     pairs = extract_bare_number_candidates_with_snippets(content)
     if not pairs:
         return []
     targets = await resolve_bare_number_story_targets(
         db, org_id=org_id, project_id=project_id, content=content,
+    )
+    rejected_target_ids = await _rejected_target_ids(
+        db, org_id=org_id, source_type="story", source_id=source_id,
     )
     rows: list[CandidateRow] = []
     for n, snippet in pairs:
@@ -148,12 +157,30 @@ async def build_candidate_rows(
             continue  # 미래번호(미해소) — PO 판정 ②, 후보 자체를 안 만든다
         if story_id == source_id:
             continue  # 자기참조 — 승격 판단 대상 아님(위 docstring 참조)
+        if story_id in rejected_target_ids:
+            continue  # 관계 단위 기각됨 — 위 docstring 참조
         kind, keyword = classify_relation_kind(snippet)
         rows.append(CandidateRow(
             matched_number=n, target_story_id=story_id, snippet=snippet,
             relation_kind=kind, matched_keyword=keyword,
         ))
     return rows
+
+
+async def _rejected_target_ids(
+    db: AsyncSession, *, org_id: uuid.UUID, source_type: str, source_id: uuid.UUID,
+) -> set[uuid.UUID]:
+    """이 source가 이미 관계 단위로 기각한 target_id 집합(target_type="story" 고정 — 이
+    모듈의 모집단 자체가 story→story뿐, 위 모듈 docstring 참조)."""
+    result = await db.execute(
+        select(RejectedRelation.target_id).where(
+            RejectedRelation.org_id == org_id,
+            RejectedRelation.source_type == source_type,
+            RejectedRelation.source_id == source_id,
+            RejectedRelation.target_type == "story",
+        )
+    )
+    return set(result.scalars().all())
 
 
 async def store_semantic_candidates(
@@ -281,3 +308,81 @@ async def set_candidate_relation_kind(
         raise CandidateNotFoundError()
     candidate.relation_kind = relation_kind
     return candidate
+
+
+class RejectedRelationNotFoundError(Exception):
+    pass
+
+
+async def reject_candidate(
+    db: AsyncSession, *, org_id: uuid.UUID, candidate_id: uuid.UUID,
+    rejected_by: uuid.UUID, reason: str | None = None,
+) -> None:
+    """story #2221 후속 — 관계 단위 기각. 클릭한 candidate 행의 (source, target) 쌍을
+    `rejected_relations`에 기록(멱등 — 이미 기각돼 있으면 그대로 둔다)하고, 같은 org의 같은
+    (source, target) 쌍을 가리키는 candidate 행 «전부»(field/form이 달라도)를 지운다 —
+    기각은 «간선이 아니라 관계」(오르테가 판정, 유나 지적)라 관계 전체가 화면에서 빠져야
+    한다. ⛔ 소급 없음(#2328 ③과 동일 원칙) — 이 함수가 지우는 건 지금 존재하는 candidate
+    행뿐, `build_candidate_rows`의 필터(`_rejected_target_ids`)가 다음 저장부터 새로
+    생기는 것을 막는다.
+
+    ⛔rejected_by는 필수다(오르테가 지시, 2026-07-30) — 여러 사람이 같은 목록을 보므로
+    「누가 기각했나」 없이는 되살릴 때 판단이 안 선다. caller(router)가 항상
+    `_resolve_team_member_id`로 실제 team_member id를 넘긴다(그 함수는 non-optional
+    반환 계약이라 여기 None이 들어올 일이 없다)."""
+    result = await db.execute(
+        select(ReferenceSemanticCandidate).where(
+            ReferenceSemanticCandidate.org_id == org_id,
+            ReferenceSemanticCandidate.id == candidate_id,
+        )
+    )
+    candidate = result.scalar_one_or_none()
+    if candidate is None:
+        raise CandidateNotFoundError()
+
+    source_type, source_id = candidate.source_type, candidate.source_id
+    target_type, target_id = candidate.target_type, candidate.target_id
+
+    stmt = pg_insert(RejectedRelation).values(
+        id=uuid.uuid4(), org_id=org_id, source_type=source_type, source_id=source_id,
+        target_type=target_type, target_id=target_id, reason=reason, rejected_by=rejected_by,
+    )
+    stmt = stmt.on_conflict_do_nothing(
+        index_elements=["source_type", "source_id", "target_type", "target_id"],
+    )
+    await db.execute(stmt)
+
+    siblings = await db.execute(
+        select(ReferenceSemanticCandidate).where(
+            ReferenceSemanticCandidate.org_id == org_id,
+            ReferenceSemanticCandidate.source_type == source_type,
+            ReferenceSemanticCandidate.source_id == source_id,
+            ReferenceSemanticCandidate.target_type == target_type,
+            ReferenceSemanticCandidate.target_id == target_id,
+        )
+    )
+    for row in siblings.scalars().all():
+        await db.delete(row)
+
+
+async def undo_rejection(
+    db: AsyncSession, *, org_id: uuid.UUID, source_type: str, source_id: uuid.UUID,
+    target_type: str, target_id: uuid.UUID,
+) -> None:
+    """되살리기(오르테가 지시) — rejected_relations 행을 삭제한다(판정: 지금은 단순하게,
+    되살린 기록 자체는 안 남긴다). ⛔삭제된 후보 행은 자동으로 안 돌아온다 — 다음 story
+    저장(정상 편집)이 있어야 `build_candidate_rows`가 다시 후보를 만든다(이 모듈의
+    "새 참조만" 설계와 동일 원칙, #2328 ③)."""
+    result = await db.execute(
+        select(RejectedRelation).where(
+            RejectedRelation.org_id == org_id,
+            RejectedRelation.source_type == source_type,
+            RejectedRelation.source_id == source_id,
+            RejectedRelation.target_type == target_type,
+            RejectedRelation.target_id == target_id,
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise RejectedRelationNotFoundError()
+    await db.delete(row)
