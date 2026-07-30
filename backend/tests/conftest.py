@@ -1,4 +1,31 @@
-"""Shared pytest fixtures for backend tests."""
+"""Shared pytest fixtures for backend tests.
+
+⛔⛔라우터 함수를 직접 호출할 때: `Query(...)`/`Depends(...)` 기본값은 실값이 아니라
+«센티널 객체»다 — 명시로 안 넘기면 그 객체 자체가 그대로 들어간다(story #2191이 2026-07-XX
+`test_2193_doc_summary_created_at_realdb.py`에서 처음 겪었고, #2659(2026-07-30)가 CI 21건
+실패로 같은 병을 두 번째로 냈다).
+
+`x: T | None = Query(default=None)`의 실제 기본값은 `fastapi.params.Query` 인스턴스다 —
+FastAPI가 **실제 HTTP 요청 경로**를 탈 때만 이 센티널을 실값(쿼리 파라미터 또는 None)으로
+해소한다. 이 코드베이스는 라우터 함수를 `client.get(...)`(HTTP 경유) 대신 `await
+list_stories(...)`처럼 **직접 호출**하는 테스트가 흔한데(HTTP 왕복 없이 빠르게 wiring만
+보려는 것), 그 경로에서는 FastAPI의 해소가 안 일어난다 — 파라미터를 안 넘기면 센티널
+객체가 그대로 함수 안으로 들어가고, `if x is not None:` 같은 가드는 그 객체를 "값이 있다"고
+착각해 통과시킨다(크래시하거나, 더 나쁘면 조용히 틀린 분기를 탄다).
+
+⇒ ⭐**규율: 라우터 함수를 직접 호출하는 테스트는 그 함수가 선언한 `Query(...)`/`Depends(...)`
+파라미터를 «전부» 명시로 넘겨라** — 하나라도 빠뜨리면 안 된다.
+
+⛔이 규율이 지켜지는지는 CI의 `scripts/lint_query_sentinel_direct_calls.py`(story #2335,
+"Query(None) sentinel direct-call lint" 잡)가 AST로 자동 대조한다 — 새로 빠뜨리면 그 잡이
+빨개진다. 다만 그 lint를 처음 켠 시점(2026-07-30) develop에 이미 있던 위반은
+`scripts/query_sentinel_baseline.txt`에 grandfather로 남아 있다(전부 실행 시 크래시로
+드러나는 것이 실측 확認됐고 — 조용히 틀리는 사례는 0건이었다 — 그래서 개별 수리는 안 하기로
+판정됐다, story #2335 AC6). 새 테스트를 쓸 때 이 주석을 «봤어야» 그 병을 세 번째로 안 낸다
+— 지금까지는 이 주석이 `test_2193_*.py` 파일 안에만 있어서 그 파일을 여는 사람만 읽었다
+(story #2335가 잡은 세 번째 재발의 근본 원인). 이 conftest.py는 모든 테스트 파일이 로드
+시점에 거치는 자리라, 여기 적어야 «다음 사람도» 읽는다.
+"""
 import ast
 import os
 import re

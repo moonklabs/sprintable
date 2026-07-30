@@ -1,0 +1,13 @@
+# story #2335 grandfather 베이스라인 — 2026-07-30 lint 첫 도입 시점 develop의 기존 위반
+# AC6 판정: 조용히 틀리는 것 0건(전부 크래시)이라 개별 수리는 이 판이 아니다 — 그래서
+# 여기 있는 항목은 실패시키지 않는다. 새 위반(여기 없는 것)만 CI를 빨갛게 한다.
+# 형식: 파일::함수::정렬된누락파라미터(콤마구분) — 라인번호는 고의로 안 담는다(편집마다 흔들림).
+tests/test_1970_gate_single_get.py::list_gates::sort
+tests/test_1972_gate_risk_grade.py::list_gates::sort
+tests/test_2188_no_sprint_alone_contract_pin.py::list_stories::boost_candidates_from
+tests/test_2198_non_doc_gate_authz_realdb.py::list_gates::sort
+tests/test_2206_story_comments_activities_org_scope_realdb.py::list_activities::cursor
+tests/test_ca37b2b0_stories_ids_batch_realdb.py::list_stories::assignee_id,boost_candidates_from,cursor,epic_id,limit,no_sprint,project_id,q,sprint_id,status_filter,story_number
+tests/test_chat_visibility_admin_bypass.py::list_messages::before,limit,thread_id
+tests/test_gate_decider_can_approve_89484c8c.py::list_gates::sort
+tests/test_gate_inbox_doc_enrich.py::list_gates::sort
