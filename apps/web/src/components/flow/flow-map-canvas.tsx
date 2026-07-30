@@ -295,16 +295,19 @@ export function FlowMapCanvas({ lanes, onSelectStory }: FlowMapCanvasProps) {
       </div>
 
       {/* 하단 범례(유나양 규격, 2026-07-30 PO 전달) — 색을 지워도 4종이 갈리도록 화살촉/점/
-          막대 모양으로 설명한다. 그려진 선이 하나도 없으면(오늘 org 0행 그대로) 설명할
-          대상이 없어 범례도 안 띄운다(빈 기능을 위한 상시 chrome을 만들지 않는다).
-          ⛔카운트 줄("확認 N · 후보 M · 기각 K")은 디디군 백필이 끝나 실 카운트가 배선된
-          뒤에 얹는다 — 지금 숫자를 만들어 보이면 지어내는 것이라 이 판에서는 뺐다. */}
+          막대 모양으로 설명한다. 순서는 «많은 것이 앞»(유나양 확定, 백필 실측 종 미정
+          85%) — [종 미정][낳음][잇따름][대체], 실제 분포 순으로 읽어야 눈에 먼저 든다.
+          그려진 선이 하나도 없으면(오늘 org 0행 그대로) 설명할 대상이 없어 범례도 안
+          띄운다(빈 기능을 위한 상시 chrome을 만들지 않는다).
+          ⛔카운트 줄("확認 N · 종 미정 N · 지금 볼 수 있는 후보 155 · 기각 N")은 디디군
+          벌크 엔드포인트(`/goals/{id}/reference-candidates`)가 착지해 실 카운트가
+          배선된 뒤에 얹는다 — 지금 숫자를 만들어 보이면 지어내는 것이라 이 판에서는 뺐다. */}
       {lanes.some((l) => l.edges.length > 0) ? (
         <div className="flex flex-wrap items-center gap-3 border-t border-border px-2 py-1.5 text-[10px] text-muted-foreground">
+          <span className="flex items-center gap-1"><span aria-hidden="true">—●</span>{t('edgeLegendUnknownKind')}</span>
           <span className="flex items-center gap-1"><span aria-hidden="true" className="text-info">▷</span>{t('edgeLegendSpawn')}</span>
           <span className="flex items-center gap-1"><span aria-hidden="true" className="text-brand">▶</span>{t('edgeLegendThen')}</span>
           <span className="flex items-center gap-1"><span aria-hidden="true">⊣</span>{t('edgeLegendSupersede')}</span>
-          <span className="flex items-center gap-1"><span aria-hidden="true">—●</span>{t('edgeLegendUnknownKind')}</span>
           <span aria-hidden="true">│</span>
           <span>{t('edgeLegendConfirmedVsProposed')}</span>
         </div>
