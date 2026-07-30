@@ -220,7 +220,19 @@ class AnalyticsRepository:
         "손으로 못 붙이는 규모"·"에픽 없음은 결함이 아니라 사실"로 판정이 바뀌었다. 레인은
         여전히 안 만들되(445를 한 줄에 담으면 화면을 그 줄이 먹는다), 그 수를 **응답에
         실어** 화면이 "에픽에 속한 것만 여기 있습니다 · 나머지 N건은 이 레인 밖입니다"를
-        정직하게 말할 수 있게 한다 — 로그만으로는 화면이 그 말을 할 수 없다."""
+        정직하게 말할 수 있게 한다 — 로그만으로는 화면이 그 말을 할 수 없다.
+
+        ⛔`past_cnt`/`now_cnt`/`upcoming_cnt` + `title`/`done`/`total`/`pct`(급추가, 2026-07-30
+        —선생님이 /flow 화면에서 직접 지적): 상단이 "지나온 것│지금│이어질 것"(시간축)을
+        약속하는데 그 아래 막대는 그 축을 안 쓰는 진행률(%)이었다 — 이름이 약속하는 축과
+        실제 축이 다른, 오늘 하루 반복 관측된 그 병의 또 다른 인스턴스. `epic-flow-nodes`가
+        이미 확定한 시간축 정의를 그대로 재사용한다(다른 정의를 새로 만들면 같은 화면에
+        "지금"이 두 벌 선다): past=status=='done', now=status in {in-progress, in-review},
+        upcoming=나머지(ready-for-dev 포함 — "잡을 수 있는 것"과 "잡고 있는 것"을 안 섞음).
+        ⛔에픽마다 `epic-flow-nodes`를 부르면 N+1(100개 에픽=100번) — 이 함수가 이미 한 번에
+        긁어온 story 목록을 «재분류만» 해서 새 DB 호출 없이 계산한다. title/done/total/pct는
+        Goal(에픽) 테이블 조회 1번을 추가한다(에픽마다가 아니라 project 전체 한 번) — 그래도
+        총 쿼리 수는 story 1 + gate 1 + no_epic_count 1 + goal-title 1 = 4, 에픽 개수와 무관."""
         stories_r = await self.session.execute(
             select(Story.id, Story.epic_id, Story.status, Story.updated_at).where(
                 Story.project_id == project_id,
@@ -295,13 +307,38 @@ class AnalyticsRepository:
         now = datetime.now(timezone.utc)
         stall_threshold_hours = 168  # 민 실측(문서 기록값) — 48h는 07-23 시안의 미재측정 값
 
+        # 급추가(2026-07-30): 에픽 title — 한 번에 전부(에픽마다 아님, N+1 회피).
+        epic_ids_present = {s.epic_id for s in stories}
+        titles_r = await self.session.execute(
+            select(Goal.id, Goal.title).where(Goal.id.in_(epic_ids_present))
+        )
+        titles_by_id = {row.id: row.title for row in titles_r.all()}
+
         lanes: dict[str, dict] = {}
+        zones: dict[str, dict] = {}
         for s in stories:
             epic_key = str(s.epic_id)
             lane = lanes.setdefault(
                 epic_key,
                 {"in_progress": 0, "waiting": 0, "blocked": 0, "stalled": 0, "other": 0},
             )
+            zone = zones.setdefault(
+                epic_key,
+                {
+                    "title": titles_by_id.get(s.epic_id), "total": 0, "done": 0,
+                    "past_cnt": 0, "now_cnt": 0, "upcoming_cnt": 0,
+                },
+            )
+            zone["total"] += 1
+            # 시간축(epic-flow-nodes와 동일 정의 재사용) — 위 5분류축과는 다른 별개 축이다.
+            if s.status == "done":
+                zone["done"] += 1
+                zone["past_cnt"] += 1
+            elif s.status in ("in-progress", "in-review"):
+                zone["now_cnt"] += 1
+            else:
+                zone["upcoming_cnt"] += 1
+
             if s.id in blocked_ids:
                 lane["blocked"] += 1
                 continue
@@ -320,7 +357,11 @@ class AnalyticsRepository:
                     lane["stalled"] += 1
                     continue
             lane["other"] += 1  # done, 또는 backlog/ready-for-dev/in-review 중 최근 변경된 것
-        return {"lanes": lanes, "stories_without_epic": no_epic_count}
+
+        for epic_key, zone in zones.items():
+            zone["pct"] = round((zone["done"] / zone["total"]) * 100) if zone["total"] > 0 else 0
+
+        return {"lanes": lanes, "zones": zones, "stories_without_epic": no_epic_count}
 
     async def get_epic_flow_nodes(
         self, project_id: uuid.UUID, epic_id: uuid.UUID, upcoming_limit: int = 15,

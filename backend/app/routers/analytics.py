@@ -15,6 +15,7 @@ from app.schemas.analytics import (
     EpicProgressLane,
     EpicProgressResponse,
     EpicsProgressLaneResponse,
+    EpicZoneCounts,
     MemberWorkloadResponse,
     ProjectHealthResponse,
     ProjectOverviewResponse,
@@ -112,6 +113,7 @@ async def get_epics_progress_lane(
     result = await repo.get_epics_progress_lane(project_id)
     return EpicsProgressLaneResponse(
         epics={k: EpicProgressLane.model_validate(v) for k, v in result["lanes"].items()},
+        zones={k: EpicZoneCounts.model_validate(v) for k, v in result["zones"].items()},
         stall_threshold_hours=168,
         stories_without_epic=result["stories_without_epic"],
     )

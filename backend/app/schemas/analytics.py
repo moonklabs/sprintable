@@ -112,6 +112,21 @@ class EpicProgressLane(BaseModel):
     other: int
 
 
+class EpicZoneCounts(BaseModel):
+    """급추가(2026-07-30, 선생님이 /flow에서 직접 지적) — 화면 상단이 「지나온 것│지금│
+    이어질 것」(시간축)을 약속하는데 막대는 그 축을 안 쓰는 진행률(%)이었다. `epic-flow-nodes`가
+    이미 확定한 시간축 정의를 그대로 재사용한다(다른 데서 새로 정의하면 "지금"이 두 벌 선다):
+    past_cnt=done, now_cnt=in-progress+in-review, upcoming_cnt=나머지(ready-for-dev 포함).
+    past_cnt+now_cnt+upcoming_cnt == total 항상 성립."""
+    title: str | None
+    total: int
+    done: int
+    pct: int
+    past_cnt: int
+    now_cnt: int
+    upcoming_cnt: int
+
+
 class EpicsProgressLaneResponse(BaseModel):
     """{epic_id(str): EpicProgressLane} — project 전체 에픽을 «한 번의 호출»로 낸다(N+1 회피).
     ⛔잠정치: 멈춤 임계 168h는 #2218(S0-1) 재측정 전까지의 값.
@@ -124,6 +139,7 @@ class EpicsProgressLaneResponse(BaseModel):
     실어 화면이 "에픽에 속한 것만 여기 있습니다 · 나머지 N건은 이 레인 밖입니다"를
     말할 수 있게 한다."""
     epics: dict[str, EpicProgressLane]
+    zones: dict[str, EpicZoneCounts]
     stall_threshold_hours: int
     stories_without_epic: int
 
