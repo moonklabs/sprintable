@@ -127,23 +127,7 @@ export interface EpicFlowNodesResponse {
   past: { total: number };
 }
 
-export interface FlowNodeZones {
-  nowItems: EpicFlowNodeItem[];
-  nowTotal: number;
-  upcomingItems: EpicFlowNodeItem[];
-  upcomingTotal: number;
-  upcomingShown: number;
-  pastTotal: number;
-}
-
-/** BE 응답 → 화면이 쓰는 형태. 순수 매핑(정렬·필터 재적용 없음 — BE 계약이 이미 순서를 확定했다). */
-export function deriveFlowNodeZones(response: EpicFlowNodesResponse): FlowNodeZones {
-  return {
-    nowItems: response.now.items,
-    nowTotal: response.now.total,
-    upcomingItems: response.upcoming.items,
-    upcomingTotal: response.upcoming.total,
-    upcomingShown: response.upcoming.items.length,
-    pastTotal: response.past.total,
-  };
-}
+// deriveFlowNodeZones/FlowNodeZones(구 평면목록 렌더링용) 제거(2026-07-30) — L3 지도
+// (derive-flow-map.ts의 deriveFlowMapLane)로 렌더링 자체가 바뀌어 더 이상 아무도 안 부르는
+// 죽은 코드가 됐다(grep 확認). EpicFlowNodesResponse/EpicFlowNodeItem은 fetch 응답 타입으로
+// 계속 필요해 남긴다.

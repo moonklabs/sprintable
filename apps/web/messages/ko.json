@@ -457,21 +457,13 @@
     "canvasUpcoming": "이어질 것",
     "canvasEmpty": "아직 그릴 것이 없습니다.",
     "canvasActiveMarker": "지금 도는 갈래",
-    "canvasScopeNotice": "기본은 «에픽 단위» 막대입니다 — 펼치면 개별 작업 노드를 봅니다. 시간축은 다음 판입니다.",
+    "canvasScopeNotice": "기본은 «에픽 단위» 막대입니다 — 펼치면 목표 하나를 좌표 지도로 봅니다. 문·연결·여러 목표를 한 판에 보는 것은 다음 판입니다.",
     "edgesCount": "연결 {n}건 확인 대기",
     "edgesEmptyHonest": "연결 0건 — 이 지도는 아직 이어지지 않았습니다.",
     "drawerHeading": "게이트·막힘 신호 · {n}",
     "nodesLoading": "노드를 불러오는 중…",
     "nodesError": "노드를 불러오지 못했습니다.",
-    "nodesNowEmpty": "지금 손대는 스토리가 없습니다.",
-    "nodesUpcomingEmpty": "이어질 스토리가 없습니다.",
-    "nodesUpcomingCount": "{total} 중 {shown} 표시",
-    "nodeStatusInProgress": "진행 중",
-    "nodeStatusInReview": "리뷰 중",
-    "nodeStatusReadyForDev": "개발 대기",
-    "nodeStatusBlocked": "막힘",
-    "nodeStatusBacklog": "백로그",
-    "nodeStatusDone": "완료"
+    "flowMapLaneEmpty": "아직 그릴 노드가 없습니다."
   },
   "board": {
     "title": "칸반 보드",

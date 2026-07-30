@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { RoadmapEpic } from '@/services/glance';
 import {
   deriveFlowLaneRows, derivePastRatio, deriveEdgeSummary, FLOW_LANE_CAP,
-  deriveFlowNodeZones, type EpicFlowNodesResponse, type EpicsProgressLaneResponse,
+  type EpicsProgressLaneResponse,
 } from './derive-flow';
 
 function makeEpic(overrides: Partial<RoadmapEpic> = {}): RoadmapEpic {
@@ -98,47 +98,7 @@ describe('deriveEdgeSummary', () => {
   });
 });
 
-function makeNode(overrides: Partial<EpicFlowNodesResponse['now']['items'][number]> = {}) {
-  return { id: 's1', story_number: 1, title: 'Story', status: 'in-progress', assignee_id: null, updated_at: '2026-07-30T00:00:00Z', ...overrides };
-}
-
-describe('deriveFlowNodeZones', () => {
-  it('carries now/upcoming items+total and past total through untouched(no re-sort/re-filter — BE 계약이 이미 정렬을 확定)', () => {
-    const response: EpicFlowNodesResponse = {
-      epic_id: 'e1',
-      now: { total: 5, items: [makeNode({ id: 'n1' }), makeNode({ id: 'n2', status: 'in-review' })] },
-      upcoming: { total: 67, items: [makeNode({ id: 'u1' }), makeNode({ id: 'u2' })] },
-      past: { total: 72 },
-    };
-    expect(deriveFlowNodeZones(response)).toEqual({
-      nowItems: response.now.items,
-      nowTotal: 5,
-      upcomingItems: response.upcoming.items,
-      upcomingTotal: 67,
-      upcomingShown: 2,
-      pastTotal: 72,
-    });
-  });
-
-  it('derives upcomingShown from actual items.length, not from upcoming.total(잘린 수를 정직하게 — total과 items.length가 다를 수 있다는 계약)', () => {
-    const response: EpicFlowNodesResponse = {
-      epic_id: 'e1',
-      now: { total: 0, items: [] },
-      upcoming: { total: 67, items: [makeNode()] },
-      past: { total: 0 },
-    };
-    expect(deriveFlowNodeZones(response).upcomingShown).toBe(1);
-  });
-
-  it('handles all-zero zones (genuinely empty epic) without inventing data', () => {
-    const response: EpicFlowNodesResponse = {
-      epic_id: 'e1',
-      now: { total: 0, items: [] },
-      upcoming: { total: 0, items: [] },
-      past: { total: 0 },
-    };
-    expect(deriveFlowNodeZones(response)).toEqual({
-      nowItems: [], nowTotal: 0, upcomingItems: [], upcomingTotal: 0, upcomingShown: 0, pastTotal: 0,
-    });
-  });
-});
+// deriveFlowNodeZones 테스트(구 평면목록 렌더링용) 제거(2026-07-30) — 그 함수 자체가 아무도
+// 안 부르는 죽은 코드가 되어 derive-flow.ts에서 삭제됐다. 그 자리는 이제
+// derive-flow-map.test.ts의 deriveFlowMapLane 테스트가 지킨다(upcomingShown이 지키던
+// "잘린 수를 정직하게" 규율은 그쪽에서 top-N 잘림 단계가 서면 이어받는다).
