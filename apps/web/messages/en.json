@@ -517,7 +517,12 @@
     "nextPickReasonReferenced": "referenced in the text",
     "nextPickReasonOwned": "owned",
     "nextPickReasonOwnedNamed": "owned · {name}",
-    "nextPickReasonWaiting": "waiting {n}d"
+    "nextPickReasonWaiting": "waiting {n}d",
+    "orphanSummary": "{n} items have no goal",
+    "orphanHint": "assign one and it joins that stem",
+    "orphanPickAction": "Set goal",
+    "orphanPickPlaceholder": "Select a goal",
+    "orphanAssignConfirm": "Assign"
   },
   "board": {
     "backlinksTitle": "Things that point here",

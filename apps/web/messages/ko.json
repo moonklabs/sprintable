@@ -517,7 +517,12 @@
     "nextPickReasonReferenced": "본문에서 이어짐",
     "nextPickReasonOwned": "주인 있음",
     "nextPickReasonOwnedNamed": "주인 있음 · {name}",
-    "nextPickReasonWaiting": "{n}일 기다림"
+    "nextPickReasonWaiting": "{n}일 기다림",
+    "orphanSummary": "목표에 안 붙은 일이 {n}건 있습니다",
+    "orphanHint": "목표를 정하면 줄기에 섭니다",
+    "orphanPickAction": "목표 정하기",
+    "orphanPickPlaceholder": "목표 선택",
+    "orphanAssignConfirm": "배정"
   },
   "board": {
     "backlinksTitle": "이것을 가리키는 것들",

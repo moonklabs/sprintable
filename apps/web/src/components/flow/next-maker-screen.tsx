@@ -6,12 +6,13 @@ import { Loader2 } from 'lucide-react';
 import {
   parseGoals, parseStories, parseNextUp, filterActiveGoals,
   deriveGoalStems, deriveRecentlyClosedEpicIds, sortStemsByStallUrgency,
-  deriveHeadline, deriveZeroStageStats,
+  deriveHeadline, deriveZeroStageStats, deriveOrphanStories,
   type NextMakerGoal, type NextMakerStory, type RawGoal, type RawStoryLite, type RawNextUp,
   type GoalStem,
 } from './derive-next-maker';
 import { NextMakerHeader } from './next-maker-header';
 import { GoalStemCard, type MemberLite } from './goal-stem-card';
+import { OrphanStoriesPanel } from './orphan-stories-panel';
 import { parseCursorMeta } from '@/lib/pagination';
 
 interface NextMakerScreenProps {
@@ -91,6 +92,10 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory }: NextMak
   // "실제로 다음이 생겼다"가 눈으로 보인다). refetchNonce로 강제 전체 재계산은 별도 트리거.
   const [promotedIds, setPromotedIds] = useState<Set<string>>(new Set());
   const [transitionedEpicIds, setTransitionedEpicIds] = useState<Set<string>>(new Set());
+  // 「목표 정하기」(PO 판정 2026-07-31) — 배정된 스토리는 로컬에서 즉시 그 목표 소속으로
+  // 반영한다(promotedIds와 같은 패턴). 재fetch 없이도 그 목표의 대기 칸이 즉시 늘고 orphan
+  // 목록에서 즉시 빠진다 — "안 보이면 잃는다"의 반대(배정하면 즉시 줄기에 서는 것이 보인다).
+  const [assignedEpicByStoryId, setAssignedEpicByStoryId] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
@@ -134,14 +139,24 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory }: NextMak
   const handleGoalTransitioned = useCallback((epicId: string) => {
     setTransitionedEpicIds((prev) => new Set(prev).add(epicId));
   }, []);
+  const handleOrphanAssigned = useCallback((storyId: string, epicId: string) => {
+    setAssignedEpicByStoryId((prev) => new Map(prev).set(storyId, epicId));
+  }, []);
 
-  // 승격된 스토리는 로컬에서 즉시 ready-for-dev로 승격 반영(재fetch 없이) — 왕복이 화면에
-  // 바로 보이는 것이 완료 조건(PO)이라 서버 재조회를 기다리게 하지 않는다.
+  // 승격된 스토리는 로컬에서 즉시 ready-for-dev로 승격 반영, 배정된 스토리는 즉시 그
+  // 목표 소속으로 반영(재fetch 없이) — 왕복이 화면에 바로 보이는 것이 완료 조건(PO)이라
+  // 서버 재조회를 기다리게 하지 않는다.
   const effectiveActiveStories = useMemo(() => {
     if (state.kind !== 'ready') return [];
-    if (promotedIds.size === 0) return state.activeStories;
-    return state.activeStories.map((s) => (promotedIds.has(s.id) ? { ...s, status: 'ready-for-dev' } : s));
-  }, [state, promotedIds]);
+    if (promotedIds.size === 0 && assignedEpicByStoryId.size === 0) return state.activeStories;
+    return state.activeStories.map((s) => {
+      const patched = { ...s };
+      if (promotedIds.has(s.id)) patched.status = 'ready-for-dev';
+      const newEpicId = assignedEpicByStoryId.get(s.id);
+      if (newEpicId) patched.epicId = newEpicId;
+      return patched;
+    });
+  }, [state, promotedIds, assignedEpicByStoryId]);
 
   const effectiveGoals = useMemo(() => {
     if (state.kind !== 'ready') return [];
@@ -173,6 +188,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory }: NextMak
 
   const needsNextStems = useMemo(() => sortStemsByStallUrgency(stems.filter((s) => !s.hasNext)), [stems]);
   const hasNextStems = useMemo(() => stems.filter((s) => s.hasNext), [stems]);
+  const orphanStories = useMemo(() => deriveOrphanStories(effectiveActiveStories), [effectiveActiveStories]);
 
   if (state.kind === 'loading') {
     return (
@@ -189,6 +205,15 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory }: NextMak
   return (
     <div className="space-y-4">
       <NextMakerHeader headline={headline} zeroStage={zeroStage} />
+
+      {/* PO 판정(2026-07-31) — 첫 줄 «아래» 별도 줄(다른 축, 섞지 않는다). 줄기가 없는
+          것은 「다음 고르기」 목록에 영영 안 뜬다(줄기별 구조라서) — 별도 패널로 세운다. */}
+      <OrphanStoriesPanel
+        orphanStories={orphanStories}
+        activeGoals={effectiveGoals}
+        onSelectStory={onSelectStory}
+        onAssigned={handleOrphanAssigned}
+      />
 
       <div className="space-y-2">
         <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
