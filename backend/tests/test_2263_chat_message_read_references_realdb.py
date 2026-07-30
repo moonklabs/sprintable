@@ -38,6 +38,27 @@ async def _dispose_global_engine_after_test():
     await _global_engine.dispose()
 
 
+def _strip_referenced_at(refs: list[dict]) -> list[dict]:
+    """story #2262 AC1(「지점」, 2026-07-30): fetch_stored_references가 이제
+    `referenced_at`(비결정적 타임스탬프)도 낸다 — 아래 exact-equality 검증에서는
+    그 필드가 «있다는 것»만 확認하고 값 자체는 떼어낸다(테스트가 시각을 하드코딩하지
+    않는다).
+
+    ⛔가드 한계 선언(PO 지적, 2026-07-30 — "가드는 못 잡는 것도 선언한다"): 이 방식은
+    exact-equality의 원래 역할("의도치 않은 필드가 몰래 추가되면 빨개진다")을 이 dict에
+    한해 «약화»시킨다 — `referenced_at` 외의 새 키가 몰래 추가돼도 여기선 안 잡힌다
+    (떼어낸 뒤 비교라 남은 키 집합만 본다). 더 나은 대안(타임스탬프를 고정값으로 치환한
+    뒤 dict 전체를 그대로 대조 — 그러면 새 키 추가도 계속 잡힌다)이 있으나 지금은 고치지
+    않는다(PO 지시) — 이 주석이 그 미고침을 명시로 남긴다."""
+    out = []
+    for r in refs:
+        assert "referenced_at" in r and isinstance(r["referenced_at"], str) and r["referenced_at"], (
+            f"referenced_at 누락 또는 빈 값: {r!r}"
+        )
+        out.append({k: v for k, v in r.items() if k != "referenced_at"})
+    return out
+
+
 def _async_url() -> str:
     url = _REAL_DB_URL
     for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
@@ -171,7 +192,7 @@ async def test_get_message_returns_stored_reference_after_reload():
             body = resp.json()
             # story #2316 후속: form·proof_payload 추가(C-7/#2265 소비 대상) — 채팅 mention은
             # 항상 form="mention"·proof_payload=None(insert_chat_mentions 계약).
-            assert body["references"] == [
+            assert _strip_referenced_at(body["references"]) == [
                 {"target_type": "doc", "target_id": str(target.id), "form": "mention", "proof_payload": None}
             ]
         finally:
@@ -218,11 +239,11 @@ async def test_list_messages_returns_stored_references_per_message_without_n_plu
             msgs = body["data"]
             assert len(msgs) == 3
             by_content = {m["content"]: m["references"] for m in msgs}
-            assert by_content[_token("A", "doc", target_a.id)] == [
+            assert _strip_referenced_at(by_content[_token("A", "doc", target_a.id)]) == [
                 {"target_type": "doc", "target_id": str(target_a.id), "form": "mention", "proof_payload": None}
             ]
             assert by_content["no tokens here"] == []
-            assert by_content[_token("B", "doc", target_b.id)] == [
+            assert _strip_referenced_at(by_content[_token("B", "doc", target_b.id)]) == [
                 {"target_type": "doc", "target_id": str(target_b.id), "form": "mention", "proof_payload": None}
             ]
             # ⭐N+1 방지 — 메시지 3건인데 참조 조회는 페이지당 1회만 나가야 한다.
@@ -316,7 +337,7 @@ async def test_list_message_replies_returns_stored_references():
             replies = resp.json()["data"]
             assert len(replies) == 1
             assert replies[0]["id"] == reply_id
-            assert replies[0]["references"] == [
+            assert _strip_referenced_at(replies[0]["references"]) == [
                 {"target_type": "doc", "target_id": str(target.id), "form": "mention", "proof_payload": None}
             ]
         finally:
