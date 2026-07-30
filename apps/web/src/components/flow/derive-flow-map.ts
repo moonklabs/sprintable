@@ -71,6 +71,53 @@ export function parseDependencyGraphEdges(raw: RawDependencyEdge[]): FlowMapEdge
   ));
 }
 
+/** `GET /api/v2/{stories,goals}/{id}/reference-candidates` 원시 응답 하나(#2328 C-11,
+ * `backend/app/models/reference_semantic_candidate.py`) — BE는 화면 모양에 맞춰 걸러주지
+ * 않고 원시 어휘 그대로 낸다(PO 확定 2026-07-30 — "서버가 걸러버리면 나중에 다른 화면이
+ * 그것을 못 쓴다", cited_as_evidence/similar_case는 노드 상세 참조 목록의 재료라 여기서
+ * 버리면 그 화면이 죽는다). `relation_kind` 6종 중 3종(cited_as_evidence/similar_case/
+ * explicitly_unrelated)은 이 함수가 걸러 낸다(아래 참고) — 어댑터 책임이지 서버 책임이 아니다. */
+export interface RawReferenceCandidate {
+  id: string;
+  source_id: string;
+  target_id: string;
+  relation_kind: 'spawned' | 'cited_as_evidence' | 'similar_case' | 'followed' | 'explicitly_unrelated' | 'superseded' | null;
+  status: 'estimated' | 'declared';
+}
+
+/** 오르테가군 확定(2026-07-30, #2223 판정) — 6종 중 «시간 방향이 있는» 넷만 간선으로 그린다.
+ * cited_as_evidence(근거인용)·similar_case(동종사례)는 대칭/비방향 관계라 "다음 흐름"
+ * 화살표가 아니다(버리는 게 아니라 «노드 상세 참조 목록»으로 가는 별도 화면의 재료 —
+ * 이 함수의 반환값에는 안 실린다는 뜻일 뿐). explicitly_unrelated는 애초에 "«선을 안 긋기
+ * 위한»" 표시(자동분류 규칙이 "직교/무관" 키워드로 판정한 것) — 점선으로라도 그리면
+ * "무관인데 선이 있다"는 모순이 된다.
+ *
+ * 방향 규칙(오르테가군 확定, 2026-07-30 — 이름이 "source가 무엇을 했나"로 적혀 있다는 것이
+ * 근거): `spawned` = source가 target을 «낳았다» → source가 먼저(그대로). `followed` =
+ * source가 target을 «따른다» → target이 먼저(뒤집음, `parseDependencyGraphEdges`의
+ * depends_on 뒤집기와 같은 자리·같은 이유). `superseded` = source가 target을 «대체했다» →
+ * target이 «옛것»(뒤집음). 이 뒤집기도 이 함수 «한 곳»에서만 한다.
+ *
+ * status: estimated(추정, AC3)=confirmed:false(제안) · declared(선언됨, AC5, 사람이
+ * 1클릭)=confirmed:true(확定) — #2223 본문 "자동 확定 금지"와 그대로 대응. */
+export function parseReferenceCandidateEdges(raw: RawReferenceCandidate[]): FlowMapEdge[] {
+  const edges: FlowMapEdge[] = [];
+  for (const c of raw) {
+    const confirmed = c.status === 'declared';
+    if (c.relation_kind === 'spawned') {
+      edges.push({ fromNodeId: c.source_id, toNodeId: c.target_id, kind: 'spawn', confirmed });
+    } else if (c.relation_kind === 'followed') {
+      edges.push({ fromNodeId: c.target_id, toNodeId: c.source_id, kind: 'then', confirmed });
+    } else if (c.relation_kind === 'superseded') {
+      edges.push({ fromNodeId: c.target_id, toNodeId: c.source_id, kind: 'supersede', confirmed });
+    } else if (c.relation_kind === null) {
+      edges.push({ fromNodeId: c.source_id, toNodeId: c.target_id, kind: null, confirmed });
+    }
+    // cited_as_evidence · similar_case · explicitly_unrelated — 의도적으로 드롭(위 docblock).
+  }
+  return edges;
+}
+
 /** 노드 하나의 «의존 깊이» — 들어오는 간선이 없으면 0(시작점), 있으면 «선행 노드 깊이 중
  * 최댓값+1». edges가 항상 빈 배열인 오늘(#2221 미착지)은 이 재귀가 «자연히» 전부 0을 내는
  * 것이라 — `if (edges.length === 0) return 0` 같은 특수분기를 두지 않는다(PO 지시

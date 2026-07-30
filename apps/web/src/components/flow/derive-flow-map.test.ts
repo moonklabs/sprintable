@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeNodeDepth, deriveFlowMapLane, computeLaneHeight, shouldShowNoDeeperReason, computeNodePositions,
-  parseDependencyGraphEdges, FLOW_MAP_TOP_N, FLOW_MAP_FOLD_THRESHOLD, FLOW_MAP_DEPTH0_X, FLOW_MAP_GRID_STEP,
-  type FlowMapEdge, type FlowMapLane,
+  parseDependencyGraphEdges, parseReferenceCandidateEdges, FLOW_MAP_TOP_N, FLOW_MAP_FOLD_THRESHOLD,
+  FLOW_MAP_DEPTH0_X, FLOW_MAP_GRID_STEP,
+  type FlowMapEdge, type FlowMapLane, type RawReferenceCandidate,
 } from './derive-flow-map';
 import type { EpicFlowNodeItem } from './derive-flow';
 
@@ -170,6 +171,54 @@ describe('parseDependencyGraphEdges', () => {
 
   it('returns an empty array for an empty response (org has 0 rows today — honest empty, not a crash)', () => {
     expect(parseDependencyGraphEdges([])).toEqual([]);
+  });
+});
+
+function makeCandidate(overrides: Partial<RawReferenceCandidate> = {}): RawReferenceCandidate {
+  return { id: 'c1', source_id: 's1', target_id: 't1', relation_kind: null, status: 'estimated', ...overrides };
+}
+
+describe('parseReferenceCandidateEdges', () => {
+  it('keeps spawned(source→target) direction as-is — source spawned target, source is first', () => {
+    const edges = parseReferenceCandidateEdges([makeCandidate({ source_id: 'a', target_id: 'b', relation_kind: 'spawned' })]);
+    expect(edges).toEqual([{ fromNodeId: 'a', toNodeId: 'b', kind: 'spawn', confirmed: false }]);
+  });
+
+  it('flips followed(source→target) — source follows target, so target is first', () => {
+    const edges = parseReferenceCandidateEdges([makeCandidate({ source_id: 'a', target_id: 'b', relation_kind: 'followed' })]);
+    expect(edges).toEqual([{ fromNodeId: 'b', toNodeId: 'a', kind: 'then', confirmed: false }]);
+  });
+
+  it('flips superseded(source→target) — source supersedes target, so target is the OLD one, first', () => {
+    const edges = parseReferenceCandidateEdges([makeCandidate({ source_id: 'a', target_id: 'b', relation_kind: 'superseded' })]);
+    expect(edges).toEqual([{ fromNodeId: 'b', toNodeId: 'a', kind: 'supersede', confirmed: false }]);
+  });
+
+  it('keeps NULL(종 미정) direction as source→target — kind unknown but direction (who mentioned whom) is still known', () => {
+    const edges = parseReferenceCandidateEdges([makeCandidate({ source_id: 'a', target_id: 'b', relation_kind: null })]);
+    expect(edges).toEqual([{ fromNodeId: 'a', toNodeId: 'b', kind: null, confirmed: false }]);
+  });
+
+  it('maps status=declared to confirmed=true and status=estimated to confirmed=false', () => {
+    const declared = parseReferenceCandidateEdges([makeCandidate({ relation_kind: 'spawned', status: 'declared' })]);
+    expect(declared[0]?.confirmed).toBe(true);
+    const estimated = parseReferenceCandidateEdges([makeCandidate({ relation_kind: 'spawned', status: 'estimated' })]);
+    expect(estimated[0]?.confirmed).toBe(false);
+  });
+
+  // 오르테가군 확定(2026-07-30) — 이 셋은 "다음 흐름" 화살표가 아니라 노드 상세의 참조
+  // 목록으로 가는 별도 재료다. 버리는 게 아니라 "이 함수의 반환값에는 안 실린다"는 뜻.
+  it('drops cited_as_evidence, similar_case, and explicitly_unrelated — not directional, not drawn as flow-map edges', () => {
+    const edges = parseReferenceCandidateEdges([
+      makeCandidate({ relation_kind: 'cited_as_evidence' }),
+      makeCandidate({ relation_kind: 'similar_case' }),
+      makeCandidate({ relation_kind: 'explicitly_unrelated' }),
+    ]);
+    expect(edges).toEqual([]);
+  });
+
+  it('returns an empty array for an empty response', () => {
+    expect(parseReferenceCandidateEdges([])).toEqual([]);
   });
 });
 
