@@ -114,9 +114,18 @@ class EpicProgressLane(BaseModel):
 
 class EpicsProgressLaneResponse(BaseModel):
     """{epic_id(str): EpicProgressLane} — project 전체 에픽을 «한 번의 호출»로 낸다(N+1 회피).
-    ⛔잠정치: 멈춤 임계 168h는 #2218(S0-1) 재측정 전까지의 값."""
+    ⛔잠정치: 멈춤 임계 168h는 #2218(S0-1) 재측정 전까지의 값.
+
+    ⛔`stories_without_epic`(PO 판정 2026-07-30, dev 실측 445건 후 뒤집힘): 에픽 없음은
+    결함이 아니라 «사실»이다(445건이면 손으로 붙일 수 있는 규모가 아니다 — 「미배정」
+    레인은 여전히 안 만든다, 다만 이유가 바뀌었다: "나쁜 습관을 굳힐까 봐"에서 "445를
+    한 줄에 담으면 그게 제일 큰 줄이 되어 화면을 먹는다"로). 화면이 «거짓말만 안 하면»
+    된다 — 좌 레인 합계를 project 전체인 것처럼 보이지 않는다. 그래서 이 수를 응답에
+    실어 화면이 "에픽에 속한 것만 여기 있습니다 · 나머지 N건은 이 레인 밖입니다"를
+    말할 수 있게 한다."""
     epics: dict[str, EpicProgressLane]
     stall_threshold_hours: int
+    stories_without_epic: int
 
 
 class AgentStatsResponse(BaseModel):

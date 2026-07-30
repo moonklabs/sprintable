@@ -86,6 +86,11 @@ async def test_epics_progress_lane_buckets_correctly_and_one_call():
             story_not_blocked.epic_id = epic.id
             story_not_blocked.status = "in-progress"
 
+            # ⑦epic 없음 — story #2224 PO 판정(2026-07-30, dev 445건 실측 후): 레인은 여전히
+            # 안 만들되 이 수는 응답에 실린다(화면이 "나머지 N건은 레인 밖" 말할 수 있게).
+            story_no_epic = await _make_story(s, org.id, project.id, title="NO_EPIC")
+            story_no_epic.status = "backlog"
+
             await s.commit()
 
             from app.models.evidence import Evidence
@@ -141,6 +146,7 @@ async def test_epics_progress_lane_buckets_correctly_and_one_call():
             # 없어 blocked에 안 잡히고, status=in-progress라 in_progress로 떨어져야 한다.
             assert sum(lane.values()) == 6, "네 칸(진행/대기/막힘/멈춤) + other == total_stories 항상 성립해야 함"
             assert body["stall_threshold_hours"] == 168
+            assert body["stories_without_epic"] == 1, "epic 없는 story(story_no_epic) 1건이 응답에 실려야 함"
             assert call_count["n"] == 1, f"repo 메서드가 {call_count['n']}번 불림(N+1 의심)"
         finally:
             await client.aclose()

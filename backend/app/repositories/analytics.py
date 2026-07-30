@@ -177,7 +177,7 @@ class AnalyticsRepository:
             "completion_pct": round((done / total) * 100) if total > 0 else 0,
         }
 
-    async def get_epics_progress_lane(self, project_id: uuid.UUID) -> dict[str, dict]:
+    async def get_epics_progress_lane(self, project_id: uuid.UUID) -> dict:
         """story #2224(S2-1, 갈래 화면) 좌측 레인 — 미르코 실측: `EpicProgress`에 진행/대기/
         막힘/멈춤 네 칸이 없어 레인이 반만 선다. 에픽마다 따로 부르면 N+1이라 «한 번의 호출»로
         project 전체 에픽의 네 칸을 낸다.
@@ -213,7 +213,14 @@ class AnalyticsRepository:
 
         ⛔이 우선순위·168h 임계 둘 다 «잠정»이다 — #2218(S0-1)이 임계를 실측(8~12건 나오는
         값)해 재확定하기 전까지 쓰는 값. 화면에 "이 수는 잠정"이라는 신호를 실어야 한다면
-        이 함수가 아니라 호출부(FE 계약)의 몫이다."""
+        이 함수가 아니라 호출부(FE 계약)의 몫이다.
+
+        ⛔`stories_without_epic`(PO 판정 2026-07-30, dev 445건 실측 후 뒤집힘): 처음엔
+        "미배정 레인을 만들지 않는다 + PO가 4건을 직접 붙인다"였으나, 전체 445건임이 실측되며
+        "손으로 못 붙이는 규모"·"에픽 없음은 결함이 아니라 사실"로 판정이 바뀌었다. 레인은
+        여전히 안 만들되(445를 한 줄에 담으면 화면을 그 줄이 먹는다), 그 수를 **응답에
+        실어** 화면이 "에픽에 속한 것만 여기 있습니다 · 나머지 N건은 이 레인 밖입니다"를
+        정직하게 말할 수 있게 한다 — 로그만으로는 화면이 그 말을 할 수 없다."""
         stories_r = await self.session.execute(
             select(Story.id, Story.epic_id, Story.status, Story.updated_at).where(
                 Story.project_id == project_id,
@@ -313,7 +320,7 @@ class AnalyticsRepository:
                     lane["stalled"] += 1
                     continue
             lane["other"] += 1  # done, 또는 backlog/ready-for-dev/in-review 중 최근 변경된 것
-        return lanes
+        return {"lanes": lanes, "stories_without_epic": no_epic_count}
 
     async def get_agent_stats(self, project_id: uuid.UUID, agent_id: uuid.UUID) -> dict:
         member_r = await self.session.execute(
