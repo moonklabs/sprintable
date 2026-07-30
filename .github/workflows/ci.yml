@@ -285,7 +285,10 @@ jobs:
             fi
             echo "OK: baseline은 늘지 않았다(줄었으면 환영 — 그만큼 사이트가 고쳐진 것)"
           else
-            echo "비교 대상 없음(PR 컨텍스트 아님 + push-before 미상 — 예: 새 브랜치 최초 push) — 증가검사 스킵"
+            # PO 지적(2026-07-30): 한계를 문서에만 적으면 "그 파일 여는 사람"만 안다(#2191이
+            # 그렇게 세 번째 재발했다) — 이 스킵도 CI stdout에 즉시·눈에 띄게 찍어야 그 자리로
+            # 들어온 사람이 바로 안다. grep하기 쉬운 고정 문구로 남긴다.
+            echo "baseline growth check skipped: no comparison base (PR context 아님 + push-before 미상 — 예: 새 브랜치 최초 push)"
           fi
 
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
