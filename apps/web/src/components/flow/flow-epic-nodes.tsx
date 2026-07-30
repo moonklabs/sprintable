@@ -36,7 +36,11 @@ export function FlowEpicNodes({ projectId, epicId }: FlowEpicNodesProps) {
     // FlowCanvas에서 조건부 렌더 — 다른 행이 펼쳐지면 이 인스턴스 자체가 언마운트/재마운트된다,
     // "상세페이지 key-remount" 표준과 동형) effect 안에서 loading으로 재설정할 필요가 없다.
     let cancelled = false;
-    fetch(`/api/v2/analytics/epic-flow-nodes?project_id=${projectId}&epic_id=${epicId}&upcoming_limit=${UPCOMING_LIMIT}`)
+    // 결함 fix(2026-07-30, 라이브 픽셀 검증 중 발견) — `/api/v2/...`는 백엔드 원본 경로
+    // 패턴이지 FE가 브라우저에서 직접 부를 상대경로가 아니다(401 Missing Authorization
+    // header로 실패했다, 직접 실측). 다른 모든 엔드포인트처럼 FE 프록시 라우트
+    // (`/api/analytics/epic-flow-nodes/route.ts`)를 거쳐야 인증 토큰이 실린다.
+    fetch(`/api/analytics/epic-flow-nodes?project_id=${projectId}&epic_id=${epicId}&upcoming_limit=${UPCOMING_LIMIT}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((json: unknown) => {
         if (cancelled) return;
