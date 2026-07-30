@@ -251,6 +251,39 @@ export function computeNodePositions(
   return positions;
 }
 
+// 라이브 실측 자가발견(2026-07-30, PR#2706 배포 후) — `FlowMapNodeCard`의 카드 너비(110px)와
+// `FLOW_MAP_GRID_STEP`(110px)이 «정확히 같아서» 인접 depth 열(예: depth2→depth3)의 «같은
+// 행(row)»에 있는 두 카드는 간격이 0이다. 그 경우 간선의 x1(from 오른쪽 끝)과 x2(to 왼쪽 끝)이
+// «완전히 같은 좌표»가 돼 선 길이가 0(점 하나, 화면에 안 보임)이 된다 — 데이터는 맞게 왔는데
+// 렌더가 점이 되는 것은 진짜 병이다(라이브에서 x1===x2===732, y1===y2===16으로 직접 확認).
+const EDGE_MIN_VISIBLE_LENGTH = 6;
+
+/** 간선 하나의 SVG `<line>` 시작/끝 좌표. 두 끝점이 실질적으로 겹치면(위 사정) 최소 가시
+ * 길이를 보장하도록 x축으로 살짝 벌린다(이 지도는 depth가 x축이라 "벌어져 보여야 하는"
+ * 방향도 x축과 같다) — 카드 쪽으로 몇 px 파고드는 것이, 데이터가 왔는데 안 보이는 것보다
+ * 낫다. 위치가 없는(TOP_N에 잘린) 노드로의 간선은 null(호출부가 그 자리를 건너뛴다). */
+export function computeEdgeLineEndpoints(
+  positions: Map<string, { left: number; top: number }>,
+  edge: FlowMapEdge,
+  cardWidth: number,
+  cardHeight: number,
+): { x1: number; y1: number; x2: number; y2: number } | null {
+  const from = positions.get(edge.fromNodeId);
+  const to = positions.get(edge.toNodeId);
+  if (!from || !to) return null;
+  let x1 = from.left + cardWidth;
+  const y1 = from.top + cardHeight / 2;
+  let x2 = to.left;
+  const y2 = to.top + cardHeight / 2;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  if (Math.sqrt(dx * dx + dy * dy) < EDGE_MIN_VISIBLE_LENGTH) {
+    x1 -= EDGE_MIN_VISIBLE_LENGTH / 2;
+    x2 += EDGE_MIN_VISIBLE_LENGTH / 2;
+  }
+  return { x1, y1, x2, y2 };
+}
+
 /** 유나양 지적(2026-07-30, PO 전달) — "대체"(supersede)만 유일하게 «간선이 노드 렌더에
  * 영향을 주는» 종류다(낳음·잇따름은 둘 다 살아있는 관계라 선만 그으면 되지만, 대체는 한쪽이
  * 죽는 관계라 «옛 노드»의 표시가 같이 바뀌어야 — 안 그러면 "대체됐는데 옛 것이 멀쩡히 살아
