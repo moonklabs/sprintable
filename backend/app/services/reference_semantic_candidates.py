@@ -316,7 +316,7 @@ class RejectedRelationNotFoundError(Exception):
 
 async def reject_candidate(
     db: AsyncSession, *, org_id: uuid.UUID, candidate_id: uuid.UUID,
-    rejected_by: uuid.UUID | None, reason: str | None = None,
+    rejected_by: uuid.UUID, reason: str | None = None,
 ) -> None:
     """story #2221 후속 — 관계 단위 기각. 클릭한 candidate 행의 (source, target) 쌍을
     `rejected_relations`에 기록(멱등 — 이미 기각돼 있으면 그대로 둔다)하고, 같은 org의 같은
@@ -324,7 +324,12 @@ async def reject_candidate(
     기각은 «간선이 아니라 관계」(오르테가 판정, 유나 지적)라 관계 전체가 화면에서 빠져야
     한다. ⛔ 소급 없음(#2328 ③과 동일 원칙) — 이 함수가 지우는 건 지금 존재하는 candidate
     행뿐, `build_candidate_rows`의 필터(`_rejected_target_ids`)가 다음 저장부터 새로
-    생기는 것을 막는다."""
+    생기는 것을 막는다.
+
+    ⛔rejected_by는 필수다(오르테가 지시, 2026-07-30) — 여러 사람이 같은 목록을 보므로
+    「누가 기각했나」 없이는 되살릴 때 판단이 안 선다. caller(router)가 항상
+    `_resolve_team_member_id`로 실제 team_member id를 넘긴다(그 함수는 non-optional
+    반환 계약이라 여기 None이 들어올 일이 없다)."""
     result = await db.execute(
         select(ReferenceSemanticCandidate).where(
             ReferenceSemanticCandidate.org_id == org_id,

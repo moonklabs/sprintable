@@ -31,6 +31,10 @@ class RejectedRelation(Base, OrgScopedMixin):
 
     되살리기(rejected→proposed로 복귀)는 이 행을 «삭제»한다(오르테가 판정: 지금은 단순한
     쪽으로 — 되살린 기록 자체를 남기지 않는다, 필요해지면 그때 소프트-무효화로 바꾼다).
+
+    ⛔rejected_by는 NOT NULL이다(오르테가 지시, 2026-07-30 — 판이 커진 후 재요청): 여러
+    사람이 같은 후보 목록을 보므로 「누가 이걸 아니라고 했나」가 없으면 되살릴 때 판단이
+    안 선다. reason은 그대로 nullable(안 채워도 되는 것).
     """
 
     __tablename__ = "rejected_relations"
@@ -49,7 +53,7 @@ class RejectedRelation(Base, OrgScopedMixin):
     target_type: Mapped[str] = mapped_column(Text, nullable=False)
     target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    rejected_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    rejected_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     rejected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

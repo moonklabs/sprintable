@@ -9,6 +9,9 @@ CHECK·declare 승격 경로 둘 다 확認됨). 남은 갭은 사람이 「아�
 
 순수 additive — 신규 테이블뿐, 기존 테이블/데이터 손상 0.
 
+⛔rejected_by는 NOT NULL이다(오르테가 지시, 2026-07-30) — 여러 사람이 같은 후보 목록을
+보므로 「누가 이걸 아니라고 했나」가 없으면 되살릴 때 판단이 안 선다.
+
 Revision ID: 0220
 Revises: 0219
 Create Date: 2026-07-30
@@ -33,7 +36,7 @@ def upgrade() -> None:
         sa.Column("target_type", sa.Text(), nullable=False),
         sa.Column("target_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("reason", sa.Text(), nullable=True),
-        sa.Column("rejected_by", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("rejected_by", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("rejected_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.UniqueConstraint(
             "source_type", "source_id", "target_type", "target_id",
