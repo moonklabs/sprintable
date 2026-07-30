@@ -30,6 +30,10 @@ export interface Story {
   // E-VERIFY V0-S1/S2: 실증-done 신뢰 신호. positive 단방향(false 절대 안 씀) — true면 근거 有,
   // null이면 완전 무표시(신뢰 표면 렌더 조건 그 자체).
   has_evidence?: boolean | null;
+  // story #2328(C-11 ㉡층, PR#2659): boost_candidates_from 필터를 줬을 때만 non-default —
+  // 그 스토리 본문에서 발견된 의미 후보(status="estimated")면 true + 매칭 스니펫.
+  is_reference_candidate?: boolean;
+  matched_snippet?: string | null;
 }
 
 export interface CreateStoryInput {
@@ -97,6 +101,9 @@ export interface StoryListFilters extends PaginationOptions {
    * 무관한 배치 lookup 의미론(정확히 이 id들만, project 필터와 무관하게 cross-project는
    * BE가 조용히 걸러냄). */
   ids?: string[];
+  /** story #2328(C-11 ㉡층) — 이 story_id의 의미 후보를 결과 맨 앞으로 재정렬(필터 아님,
+   * q 비어도 동작). 해당 항목엔 is_reference_candidate=true·matched_snippet이 실린다. */
+  boost_candidates_from?: string;
 }
 
 export interface IStoryRepository {

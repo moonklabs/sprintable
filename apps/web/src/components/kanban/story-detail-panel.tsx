@@ -209,6 +209,36 @@ function isGhostOutgoingReference(
   return !references.some((r) => r.target_type.toLowerCase() === type && r.target_id.toLowerCase() === id);
 }
 
+// export: story #2328(C-11 ㉡층) — 후보/검색 전환 판정을 StoryDetailPanel 전체 마운트 없이
+// 격리 검증하기 위함(같은 이유로 huge prop surface라 전체 마운트 테스트가 비실용적). 유나
+// 규격 ①③: 2글자 미만(빈 입력·1글자·다 지운 것 — 한 상태)이면 후보, 아니면 검색 결과 —
+// 섞지 않는다. 트림 후 판정(공백만 있는 입력도 "미만"으로 취급).
+export function selectDepPickerItems<T>(
+  depQuery: string,
+  candidates: T[],
+  searchResults: T[],
+): { items: T[]; showingCandidates: boolean } {
+  const showingCandidates = depQuery.trim().length < 2;
+  return { items: showingCandidates ? candidates : searchResults, showingCandidates };
+}
+
+interface RawStoryRow {
+  id: string;
+  title: string;
+  is_reference_candidate?: boolean;
+  matched_snippet?: string | null;
+}
+
+// export: story #2328 — BE(PR#2659)는 필터링이 아니라 재정렬만 하므로(boost_candidates_from을
+// 줘도 전체 목록이 돌아온다), is_reference_candidate===true인 것만 FE가 직접 골라낸다.
+// 자기 자신 제외 + 상한 6(기존 검색 결과와 동일 cap, story-detail-panel.tsx:501)은 그대로.
+export function extractReferenceCandidates(rows: RawStoryRow[], selfId: string): { id: string; title: string; matched_snippet?: string | null }[] {
+  return rows
+    .filter((s) => s.id !== selfId && s.is_reference_candidate === true)
+    .slice(0, 6)
+    .map((s) => ({ id: s.id, title: s.title, matched_snippet: s.matched_snippet }));
+}
+
 // export: 회귀 테스트(부모 클릭=편집모드 진입 wrapper 안에서 링크 클릭이 전파를 끊는지)를
 // StoryDetailPanel 전체 마운트 없이 격리 검증하기 위함(story-detail-panel.tsx는 huge prop
 // surface라 전체 마운트 테스트가 비실용적) — 동작 변경 없는 순수 export 추가.
@@ -350,6 +380,13 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [showAddDep, setShowAddDep] = useState(false);
   const [depQuery, setDepQuery] = useState('');
   const [depQueryResults, setDepQueryResults] = useState<{ id: string; title: string }[]>([]);
+  // story #2328(C-11 ㉡층, 유나 규격 2026-07-29): 검색어 2글자 미만(빈 입력·1글자·다 지운
+  // 것 — 한 상태)일 때 "아무것도 안 함" 대신 이 스토리 본문에 나온 의미 후보를 보인다.
+  // 패널 열 때(showAddDep true 전이) «한 번»만 불러 상태로 들고 — 이후 쿼리를 지웠다 다시
+  // 비워도 재요청하지 않는다(depCandidatesFetchedRef). 후보와 검색 결과는 절대 안 섞는다 —
+  // 2글자 이상이면 이 배열이 아니라 depQueryResults를 그린다(아래 렌더 분기 참조).
+  const [depCandidates, setDepCandidates] = useState<{ id: string; title: string; matched_snippet?: string | null }[]>([]);
+  const depCandidatesFetchedRef = useRef(false);
   const [depType, setDepType] = useState<'blocks' | 'depends_on'>('blocks');
   const [addingDep, setAddingDep] = useState(false);
 
@@ -504,6 +541,35 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     }, 300);
     return () => clearTimeout(tid);
   }, [depQuery, story.id, projectId]);
+
+  // story #2328(C-11 ㉡층): 기존 검색 게이트(위 useEffect의 `length < 2`)는 한 줄도 안
+  // 건드린다 — 그 "else"가 "아무것도 안 함"에서 "후보를 보임"으로 바뀌는 것뿐이라, 후보는
+  // 별도 소스(boost_candidates_from)로 따로 불러온다. BE는 필터링이 아니라 재정렬만 하므로
+  // (PR#2659) is_reference_candidate===true인 것만 FE가 직접 골라낸다.
+  //
+  // 패널을 닫으면 ref를 풀어 "다음에 열 때 다시 부른다" — 닫힘이 자연스러운 무효화 신호라
+  // (PO 지적, 2026-07-30). 호출 횟수는 여전히 "사람이 패널을 여는 횟수"만큼이라 늘지 않는다
+  // (타이핑마다 부르는 게 아님 — 스펙 ①이 금지하는 것은 그것 하나뿐).
+  // ⛔지금 안 하는 것 — 패널이 열린 채로 본문을 저장해 BE가 새 후보를 만들어도(write-path
+  // 훅) 이 패널은 갱신하지 않는다. 다음 판으로 미룬다(오늘 규율 — 갭을 적어 남긴다).
+  // ⚠️테스트 갭 — `depQuery` 길이에 따라 "무엇을 보이는가"는 순수 함수(selectDepPickerItems/
+  // extractReferenceCandidates)로 빼 dep-picker-candidates.test.ts가 잡지만, 이 effect의
+  // showAddDep 전이/ref 리셋 자체는 effect라 단위테스트가 못 잡는다 — 이 자리를 만지면
+  // "닫고 다시 열어 후보가 새로 오는지"를 손으로(라이브) 확認할 것.
+  useEffect(() => {
+    if (!showAddDep) { depCandidatesFetchedRef.current = false; return; }
+    if (depCandidatesFetchedRef.current) return;
+    depCandidatesFetchedRef.current = true;
+    const params = new URLSearchParams({ boost_candidates_from: story.id });
+    if (projectId) params.set('project_id', projectId);
+    fetch(`/api/stories?${params}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((json) => {
+        const results = (json?.data ?? []) as RawStoryRow[];
+        setDepCandidates(extractReferenceCandidates(results, story.id));
+      })
+      .catch(() => {});
+  }, [showAddDep, story.id, projectId]);
 
   const handleAddDep = async (targetId: string) => {
     setAddingDep(true);
@@ -1711,22 +1777,39 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     placeholder={t('dep.searchPlaceholder')}
                     className="w-full rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                   />
-                  {depQueryResults.length > 0 && (
-                    <ul className="focus-inset max-h-32 overflow-y-auto rounded border border-border bg-background">
-                      {depQueryResults.map((s) => (
-                        <li key={s.id}>
-                          <button
-                            type="button"
-                            onClick={() => void handleAddDep(s.id)}
-                            disabled={addingDep}
-                            className="w-full px-2 py-1.5 text-left text-xs hover:bg-muted truncate disabled:opacity-50"
-                          >
-                            {s.title}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                  {/* story #2328(C-11 ㉡층): 2글자 미만이면 후보(depCandidates), 2글자
+                      이상이면 검색 결과(depQueryResults) — 절대 안 섞는다(갈아치움). */}
+                  {(() => {
+                    const { items, showingCandidates } = selectDepPickerItems(depQuery, depCandidates, depQueryResults);
+                    if (items.length === 0) return null;
+                    return (
+                      <ul className="focus-inset max-h-32 overflow-y-auto rounded border border-border bg-background">
+                        {showingCandidates && (
+                          <li aria-hidden className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            {t('dep.candidatesHeader')}
+                          </li>
+                        )}
+                        {items.map((s) => (
+                          <li key={s.id}>
+                            <button
+                              type="button"
+                              onClick={() => void handleAddDep(s.id)}
+                              disabled={addingDep}
+                              className="w-full px-2 py-1.5 text-left text-xs hover:bg-muted disabled:opacity-50"
+                            >
+                              <span className="block truncate">{s.title}</span>
+                              {showingCandidates ? (
+                                <span className="block truncate text-[11px] text-muted-foreground">
+                                  {t('dep.candidateMentionHint')}
+                                  {'matched_snippet' in s && s.matched_snippet ? ` · ${s.matched_snippet}` : ''}
+                                </span>
+                              ) : null}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    );
+                  })()}
                 </div>
               )}
             </div>

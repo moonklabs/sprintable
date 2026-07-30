@@ -24,6 +24,8 @@ export class ApiStoryRepository implements IStoryRepository {
         // story #2283(참조 후보 해소) — BE(stories.py:93)는 이미 story_number 필터를 받는데
         // 이 query 객체엔 없었다(q 소실 083176e8과 같은 클래스 — 있는 필드가 여기서만 빠짐).
         story_number: filters.story_number,
+        // story #2328(C-11 ㉡층, PR#2659) — 같은 클래스 재발 방지로 처음부터 여기 포함.
+        boost_candidates_from: filters.boost_candidates_from,
       },
     });
   }
