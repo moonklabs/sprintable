@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.gate import Gate
 from app.models.pm import Goal, Sprint, Story, Task
 from app.models.team import TeamMember
 
@@ -172,6 +173,79 @@ class AnalyticsRepository:
             "done_points": done_pts,
             "completion_pct": round((done / total) * 100) if total > 0 else 0,
         }
+
+    async def get_epics_progress_lane(self, project_id: uuid.UUID) -> dict[str, dict]:
+        """story #2224(S2-1, 갈래 화면) 좌측 레인 — 미르코 실측: `EpicProgress`에 진행/대기/
+        막힘/멈춤 네 칸이 없어 레인이 반만 선다. 에픽마다 따로 부르면 N+1이라 «한 번의 호출»로
+        project 전체 에픽의 네 칸을 낸다.
+
+        분류 우선순위(겹치는 신호를 하나로 정리하는 순서 — 다른 순서를 쓰면 답이 달라진다):
+          ①막힘(blocked)   = 그 story에 매인 pending 상태 Gate가 있다(§4-5 "문")
+          ②대기(waiting)   = ①이 아니고 next_action_category=='waiting'(#2262 SSOT 재사용 —
+                              verification_pending: self_reported=True·아직 human_verified 안 됨)
+          ③진행(in_progress) = ①②가 아니고 status=='in-progress'
+          ④멈춤(stalled)   = ①②③이 아니고 status!='done'이고 168시간(민 실측 — §7-③의 "48h"는
+                              07-23 시안 값·미재측정, 문서로 남은 값은 168h) 넘게 updated_at 불변
+          그 외(backlog·ready-for-dev·in-review인데 최근 변경된 것·done)는 네 칸 어디에도 안
+          잡힌다 — 합계가 total_stories와 다를 수 있다(의도된 것, 지어내지 않는다).
+
+        ⛔이 우선순위·168h 임계 둘 다 «잠정»이다 — #2218(S0-1)이 임계를 실측(8~12건 나오는
+        값)해 재확定하기 전까지 쓰는 값. 화면에 "이 수는 잠정"이라는 신호를 실어야 한다면
+        이 함수가 아니라 호출부(FE 계약)의 몫이다."""
+        stories_r = await self.session.execute(
+            select(Story.id, Story.epic_id, Story.status, Story.updated_at).where(
+                Story.project_id == project_id,
+                Story.org_id == self.org_id,
+                Story.deleted_at.is_(None),
+                Story.epic_id.is_not(None),
+            )
+        )
+        stories = stories_r.all()
+        story_ids = [s.id for s in stories]
+
+        from app.services.evidence_service import batch_has_evidence, batch_human_verified
+
+        evidence_ids = await batch_has_evidence(self.session, story_ids, "story")
+        verified_map = await batch_human_verified(self.session, story_ids, "story")
+
+        blocked_r = await self.session.execute(
+            select(Gate.work_item_id.distinct()).where(
+                Gate.org_id == self.org_id,
+                Gate.work_item_type == "story",
+                Gate.work_item_id.in_(story_ids),
+                Gate.status == "pending",
+            )
+        )
+        blocked_ids = set(blocked_r.scalars().all())
+
+        from app.services.next_action import next_action_category, verification_next_action
+
+        now = datetime.now(timezone.utc)
+        stall_threshold_hours = 168  # 민 실측(문서 기록값) — 48h는 07-23 시안의 미재측정 값
+
+        lanes: dict[str, dict] = {}
+        for s in stories:
+            epic_key = str(s.epic_id)
+            lane = lanes.setdefault(
+                epic_key, {"in_progress": 0, "waiting": 0, "blocked": 0, "stalled": 0}
+            )
+            if s.id in blocked_ids:
+                lane["blocked"] += 1
+                continue
+            self_reported = s.id in evidence_ids
+            human_verified = True if s.id in verified_map else None
+            code = verification_next_action(self_reported=self_reported, human_verified=human_verified)
+            if next_action_category(code) == "waiting":
+                lane["waiting"] += 1
+                continue
+            if s.status == "in-progress":
+                lane["in_progress"] += 1
+                continue
+            if s.status != "done":
+                age_hours = (now - s.updated_at).total_seconds() / 3600
+                if age_hours > stall_threshold_hours:
+                    lane["stalled"] += 1
+        return lanes
 
     async def get_agent_stats(self, project_id: uuid.UUID, agent_id: uuid.UUID) -> dict:
         member_r = await self.session.execute(
