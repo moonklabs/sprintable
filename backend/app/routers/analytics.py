@@ -11,6 +11,7 @@ from app.repositories.analytics import AnalyticsRepository
 from app.schemas.analytics import (
     AgentStatsResponse,
     BurndownResponse,
+    EpicFlowNodesBatchResponse,
     EpicFlowNodesResponse,
     EpicProgressLane,
     EpicProgressResponse,
@@ -119,20 +120,38 @@ async def get_epics_progress_lane(
     )
 
 
-@router.get("/analytics/epic-flow-nodes", response_model=EpicFlowNodesResponse)
+@router.get("/analytics/epic-flow-nodes")
 async def get_epic_flow_nodes(
     project_id: uuid.UUID = Query(...),
-    epic_id: uuid.UUID = Query(...),
+    epic_id: uuid.UUID | None = Query(default=None),
+    epic_ids: str | None = Query(default=None, description="콤마구분 UUID 목록(story #2679 배치)"),
     upcoming_limit: int = Query(default=15, ge=1, le=100),
     repo: AnalyticsRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
-) -> EpicFlowNodesResponse:
+) -> EpicFlowNodesResponse | EpicFlowNodesBatchResponse:
     """story #2224 노드 계약(급전환, 2026-07-30 PO 판정) — 「지금/이어질/지나온」 세 구역
     노드를 «에픽 하나» 단위로 한 번의 호출로 낸다(179 에픽 전체를 한 번에 주면 수천 건이라
-    안 준다 — 펼친 에픽만). `upcoming_limit`은 FE 화면 상한(PO 감 10~15, 기본 15)."""
+    안 준다 — 펼친 에픽만). `upcoming_limit`은 FE 화면 상한(PO 감 10~15, 기본 15).
+
+    story #2679(2026-07-30, PO 급요청) — L3 캔버스가 여러 레인을 한 화면에 동시에 그리며
+    이 «에픽 하나» 계약이 레인 수만큼 호출을 요구하게 됐다(오늘 금지한 패턴). `epic_ids`
+    (콤마구분)로 여러 에픽을 한 번에 받는다 — FE가 이미 아는 epic_id 목록을 넘긴다(lane과
+    다른 정렬을 새로 판정하지 않는다, PO 판정). `epic_id`·`epic_ids` 중 정확히 하나만."""
     await _assert_project_access(repo, auth, project_id)
-    result = await repo.get_epic_flow_nodes(project_id, epic_id, upcoming_limit)
-    return EpicFlowNodesResponse.model_validate(result)
+    if (epic_id is None) == (epic_ids is None):
+        raise HTTPException(status_code=400, detail="epic_id 또는 epic_ids 중 정확히 하나를 지정하십시오")
+    if epic_id is not None:
+        result = await repo.get_epic_flow_nodes(project_id, epic_id, upcoming_limit)
+        return EpicFlowNodesResponse.model_validate(result)
+
+    try:
+        parsed_ids = [uuid.UUID(s.strip()) for s in epic_ids.split(",") if s.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="epic_ids는 콤마구분 UUID 목록이어야 합니다")
+    if not parsed_ids:
+        raise HTTPException(status_code=400, detail="epic_ids가 비어 있습니다")
+    batch_result = await repo.get_epic_flow_nodes_batch(project_id, parsed_ids, upcoming_limit)
+    return EpicFlowNodesBatchResponse.model_validate(batch_result)
 
 
 @router.get("/analytics/agent-stats", response_model=AgentStatsResponse)

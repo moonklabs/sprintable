@@ -366,35 +366,45 @@ class AnalyticsRepository:
     async def get_epic_flow_nodes(
         self, project_id: uuid.UUID, epic_id: uuid.UUID, upcoming_limit: int = 15,
     ) -> dict:
-        """story #2224(S2-1, 갈래 화면) 노드 계약 — 급전환(2026-07-30, PO 판정): "N+1이라
-        노드를 안 그린다"는 안 그릴 이유가 아니라 BE 계약을 하나 더 만들 이유였다(선생님 질책).
+        """story #2224(S2-1, 갈래 화면) 노드 계약 — 단일 에픽 편의 래퍼. 실 쿼리는
+        `get_epic_flow_nodes_batch`(story #2679, 2026-07-30 — L3 캔버스가 여러 레인을
+        «한 화면»에 동시에 그리게 되며 «에픽 하나»뿐이던 이 계약이 레인 수만큼 호출을
+        요구하게 됐다, 오늘 금지한 그 패턴)가 하고, 이 메서드는 배치 결과에서 하나만 꺼낸다
+        — 로직을 두 곳에 두지 않는다."""
+        batch = await self.get_epic_flow_nodes_batch(project_id, [epic_id], upcoming_limit)
+        return batch["epics"][0]
 
-        ⛔한 에픽 최대 141건(dev 실측) — 179개 에픽 전체를 한 번에 주면(수천 건) 응답이
-        죽는다. 그래서 이 계약은 «에픽 하나» 단위다(?epic_id= 필수) — 좌 레인(전체 에픽
-        요약)은 이미 get_epics_progress_lane이 주고, 펼친 에픽만 이 함수가 노드를 준다
-        (유나 "접기/펴기 1차 필수"와 맞물림). 한 에픽 141건이면 단일 쿼리로 N+1 없이 충분.
+    # ⛔story #2679 AC1(2026-07-30, PO 급요청 — #2346보다 먼저): epic_ids 상한. 179개 에픽
+    # 전체를 한 번에 받으면(에픽당 최대 141건 실측) 응답이 죽는다 — L3 캔버스가 실제로
+    # 동시에 그리는 레인 수(오늘 예시 6개)보다 5배 넉넉히 잡는다. 넘으면 앞 N개만 처리하고
+    # 잘린 epic_id들을 명시한다(오늘 규율 그대로 — "없앤 것"이 아니라 "안 그린 것").
+    EPIC_FLOW_NODES_BATCH_MAX = 30
 
-        세 구역(시간축) — ⛔7상태(실행가능·검증필요·멈춤·연결미상…, 노드에 붙는 «표시»)와는
-        다른 축이다. 섞으면 같은 것을 두 번 말하는 것이라 여기서는 구역만 가른다:
-          ①지금(now)     = status in {in-progress, in-review} — "검토 중"도 사람이 지금
-                            손대는 중이라 지금에 든다(PO 판정). ready-for-dev는 안 넣는다 —
-                            "잡을 수 있는 것"과 "잡고 있는 것"이 섞인다. «전량» 반환.
-          ②이어질(upcoming) = 나머지(backlog·ready-for-dev 등, done 제외) — «상위 upcoming_limit
-                            건»만. 순서: 막힌 것(pending Gate·requires_human=true·
-                            evidence_status=insufficient, 좌 레인과 같은 정의) > 실행가능
-                            (status=='ready-for-dev', PO: "이어질 것의 맨 앞") > 나머지, 그
-                            안에서 최근 변경 순. ⛔잘린 개수를 반드시 함께 낸다("없앤 것"이
-                            아니라 "안 그린 것" — 오늘 규율 그대로).
-          ③지나온(past)  = status=='done' — ⛔노드로 안 그린다. «수»로만 접는다.
+    async def get_epic_flow_nodes_batch(
+        self, project_id: uuid.UUID, epic_ids: list[uuid.UUID], upcoming_limit: int = 15,
+    ) -> dict:
+        """story #2679 — epic_flow_nodes를 N개 에픽에 대해 «한 번의 호출»로 낸다(FE가
+        이미 아는 epic_id 목록을 넘긴다 — lane과 다른 정렬을 새로 판정하지 않는다, PO 판정).
+
+        N+1 없음: story 쿼리 1번(전체 epic_ids에 IN) + Gate 쿼리 1번(전체 story_ids에 IN) —
+        에픽 개수와 무관하게 쿼리 수 고정, get_epics_progress_lane과 같은 패턴.
+
+        세 구역(시간축) 정의는 get_epic_flow_nodes(단일)와 100% 동일(한 자리에서만 정의 —
+        두 곳이 각자 정의하면 갈린다): ①지금=in-progress+in-review ②이어질=나머지(상위
+        upcoming_limit만, 막힌 것>ready-for-dev>나머지 순) ③지나온=done(수만).
         """
+        requested = list(dict.fromkeys(epic_ids))  # 순서 보존 중복 제거
+        processed = requested[: self.EPIC_FLOW_NODES_BATCH_MAX]
+        skipped = requested[self.EPIC_FLOW_NODES_BATCH_MAX:]
+
         stories_r = await self.session.execute(
             select(
                 Story.id, Story.story_number, Story.title, Story.status,
-                Story.assignee_id, Story.updated_at,
+                Story.assignee_id, Story.updated_at, Story.epic_id,
             ).where(
                 Story.project_id == project_id,
                 Story.org_id == self.org_id,
-                Story.epic_id == epic_id,
+                Story.epic_id.in_(processed),
                 Story.deleted_at.is_(None),
             )
         )
@@ -423,27 +433,39 @@ class AnalyticsRepository:
                 "updated_at": s.updated_at.isoformat(),
             }
 
-        now_items, upcoming_all, past_count = [], [], 0
+        by_epic: dict[uuid.UUID, dict] = {
+            eid: {"now_items": [], "upcoming_all": [], "past_count": 0} for eid in processed
+        }
         for s in stories:
+            bucket = by_epic[s.epic_id]
             if s.status == "done":
-                past_count += 1
+                bucket["past_count"] += 1
             elif s.status in ("in-progress", "in-review"):
-                now_items.append(_node(s))
+                bucket["now_items"].append(_node(s))
             else:
                 priority = 0 if s.id in blocked_ids else (1 if s.status == "ready-for-dev" else 2)
-                upcoming_all.append((priority, s.updated_at, _node(s)))
+                bucket["upcoming_all"].append((priority, s.updated_at, _node(s)))
 
-        upcoming_all.sort(key=lambda t: (t[0], -t[1].timestamp()))
-        upcoming_total = len(upcoming_all)
-        upcoming_shown = [n for _, _, n in upcoming_all[:upcoming_limit]]
+        epics_out = []
+        for eid in processed:
+            bucket = by_epic[eid]
+            upcoming_all = bucket["upcoming_all"]
+            upcoming_all.sort(key=lambda t: (t[0], -t[1].timestamp()))
+            upcoming_shown = [n for _, _, n in upcoming_all[:upcoming_limit]]
+            epics_out.append({
+                "epic_id": str(eid),
+                "now": {"total": len(bucket["now_items"]), "items": bucket["now_items"]},
+                "upcoming": {
+                    "total": len(upcoming_all), "shown": len(upcoming_shown), "items": upcoming_shown,
+                },
+                "past": {"total": bucket["past_count"]},
+            })
 
         return {
-            "epic_id": str(epic_id),
-            "now": {"total": len(now_items), "items": now_items},
-            "upcoming": {
-                "total": upcoming_total, "shown": len(upcoming_shown), "items": upcoming_shown,
-            },
-            "past": {"total": past_count},
+            "epics": epics_out,
+            "requested_count": len(requested),
+            "processed_count": len(processed),
+            "skipped_epic_ids": [str(eid) for eid in skipped],
         }
 
     async def get_agent_stats(self, project_id: uuid.UUID, agent_id: uuid.UUID) -> dict:
