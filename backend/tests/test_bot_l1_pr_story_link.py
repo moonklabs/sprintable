@@ -354,9 +354,10 @@ async def _merge_webhook(*, should_close: bool):
                  patch.object(vmod.settings, "github_app_webhook_secret", ""), \
                  patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)), \
                  patch.object(vmod, "capture_pr_ci_verdict",
-                              new=AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None})):
+                              new=AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None})), \
+                 patch.object(vmod.logger, "info") as info_log:
                 resp = await c.post("/api/v2/internal/verdict/github-webhook", content=body, headers=headers)
-        return resp, session
+        return resp, session, info_log
     finally:
         fastapi_app.dependency_overrides.clear()
 
@@ -367,7 +368,7 @@ async def test_close_on_merge_confident_reports_would_close_but_does_not_mutate(
 
     정지됐다: session.get(Story)로 실제 조회·mutation을 하지 않고(story.status 안 건드림), 응답의
     auto_close.closed=False·would_close=True로만 «벌어졌을 일」을 관측 가능하게 남긴다."""
-    resp, session = await _merge_webhook(should_close=True)
+    resp, session, info_log = await _merge_webhook(should_close=True)
     assert resp.status_code == 200
     body = resp.json()["data"]
     assert body["auto_close"] == {
@@ -375,12 +376,17 @@ async def test_close_on_merge_confident_reports_would_close_but_does_not_mutate(
         "note": "story #2327 PO 판정 2026-07-30: close-on-merge 정지 — done은 사람 확認 後",
     }
     session.get.assert_not_awaited()  # story mutation 경로 자체에 안 감(no-op).
+    # PO 지적(2026-07-30) — 웹훅 HTTP 응답은 아무도 안 읽는다. would_close를 로그로도 셀 수
+    # 있어야 #2339(자동 done on/off 설정) 크기를 잴 수 있다.
+    info_log.assert_called_once()
+    assert "auto_close suppressed" in info_log.call_args.args[0]
 
 
 @pytest.mark.anyio
 async def test_close_on_merge_skips_when_not_confident():
     """merge 라도 should_auto_close=False(med/low/text) → auto_close 필드 자체가 안 실림."""
-    resp, session = await _merge_webhook(should_close=False)
+    resp, session, info_log = await _merge_webhook(should_close=False)
     assert resp.status_code == 200
     assert "auto_close" not in resp.json()["data"]
     session.get.assert_not_awaited()
+    info_log.assert_not_called()  # not-confident 는 suppressed 대상 자체가 아니다(로그 과다발생 방지).

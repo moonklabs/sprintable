@@ -400,6 +400,13 @@ async def _process_webhook_event(
     #     별건으로 PO가 세운다). 설정 없이 이 줄만 되돌리면 오늘과 같은 사고(사람 확認 없는
     #     자동 done)가 재발한다.
     if merged and rl.should_auto_close:
+        # PO 지적(2026-07-30): 웹훅 HTTP 응답은 아무도 안 읽는다(호출자가 GitHub) — would_close를
+        # «셀 수 있게» 로그에도 남긴다. 이 로그 건수가 #2339(자동 done on/off 설정)의 크기를
+        # 재는 자다(0이면 안 급함·많으면 급함).
+        logger.info(
+            "auto_close suppressed: story=%s source=%s confidence=%s",
+            story_id, rl.source, rl.confidence,
+        )
         result = {
             **result,
             "auto_close": {
