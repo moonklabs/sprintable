@@ -1457,10 +1457,15 @@ async def update_story(
             _lost_chars = _before_len - _after_len
             _is_relative_shrink = _after_len < _before_len * (1 - _SHRINK_BLOCK_THRESHOLD)
             if _is_relative_shrink and _lost_chars >= _SHRINK_BLOCK_MIN_LOST_CHARS:
+                # ⛔story #2346(PO 2026-07-30 08:12Z): 「가드 신호를 사용자 숙제로 번역하지
+                # 않는다」— 「거부되었습니다」만 오면 포기하거나 우회한다. «무엇이»(story_number)
+                # «어디가»(필드명) «얼마나»(전→후 길이) 줄었는지와 «다음에 뭘 할지»
+                # (allow_shrink=true)를 한 메시지 안에 전부 싣는다 — #2342형 대상 혼동 사고를
+                # 그 자리서 보이게 하는 목적도 겸한다.
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        f"{_f} shrank {_before_len}→{_after_len} chars "
+                        f"#{story_before.story_number} {_f} shrank {_before_len}→{_after_len} chars "
                         f"({round((1 - _after_len / _before_len) * 100)}% smaller) — "
                         "if intentional, resend with allow_shrink=true"
                     ),
