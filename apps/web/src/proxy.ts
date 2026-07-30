@@ -123,6 +123,11 @@ const MIGRATED_RESOURCES: Record<string, string[]> = {
   storage: [],
   epics: [],
   board: [],
+  // story #2224(선생님 정정 2026-07-30) — glance는 원래 ws/proj-scoped로 "이관"된 적이 없는
+  // 순수 top-level 라우트였지만, "보드+현황판 통합"의 실제 자리가 /flow로 확定되며 같은 부류의
+  // 문제(bare 딥링크가 org+project를 몰라 해소해야 함)가 생겼다 — 이미 검증된 이 표를 재사용
+  // 한다(새 미들웨어 층을 세우지 않는다, 아래 redirectRenamedResourcePath와 짝).
+  glance: [],
   // story #2016: 8fc51517(B1 리네이밍)이 epics→goals 경로 리터럴을 바꾸면서 RENAMED_RESOURCES에만
   // 반영되고 여기(MIGRATED_RESOURCES)엔 신 이름 'goals'를 안 넣었다 — bare `/epics`는 이 표를 거쳐
   // `/{ws}/{proj}/epics`로 301된 뒤 redirectRenamedResourcePath가 2차로 `goals`로 다시 301하지만,
@@ -219,6 +224,11 @@ function redirectToProjectPicker(request: NextRequest, originalPathname: string)
  */
 const RENAMED_RESOURCES: Record<string, string> = {
   epics: 'goals',
+  // story #2224(선생님 정정 2026-07-30) — glance는 이제 /flow 안의 한 조각. 위 MIGRATED_RESOURCES
+  // 항목과 짝: bare `/glance` → (redirectLegacyResourcePath) → `/{ws}/{proj}/glance` →
+  // (여기) → `/{ws}/{proj}/flow`. `?story=`/`?task_id=` 등 쿼리는 두 함수 다 request.nextUrl을
+  // clone해 그대로 들고 가므로 안전(RESOLVE_RETRY_PARAM 외엔 손대지 않는다).
+  glance: 'flow',
 };
 
 function redirectRenamedResourcePath(request: NextRequest, pathname: string): NextResponse | null {

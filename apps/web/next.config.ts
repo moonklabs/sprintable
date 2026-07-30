@@ -84,6 +84,12 @@ const nextConfig: NextConfig = {
         destination: '/organization/members',
         permanent: true,
       },
+      // story #2224(선생님 정정 2026-07-30) — "보드+현황판 통합"의 실제 자리는 /flow. board는
+      // 살아 있는 기능(KanbanBoard)이라 라우트만 흡수 — permanent:false(되돌리기 쉬운 쪽, IA가
+      // 갓 확定돼 하루 안에도 두 번 뒤집힌 전례가 있다). `?story=`/`?task_id=` 등 미매치 쿼리는
+      // Next.js redirects()가 destination에 자동 병합(문서화된 동작, dev 빌드로 curl 실측 확認
+      // 완료 — 값으로 닫음).
+      { source: '/:ws/:proj/board', destination: '/:ws/:proj/flow?view=list', permanent: false },
     ];
   },
   async rewrites() {

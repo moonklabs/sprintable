@@ -158,57 +158,8 @@ export function derivePhrase(completionPct: number, total: number): ProgressPhra
   return 'wrappingUp';
 }
 
-export interface EpicCollaborator {
-  id: string;
-  name: string;
-}
-
-export interface EpicCollaboration {
-  epicId: string;
-  collaborators: EpicCollaborator[];
-}
-
-/** `GET /api/activity-logs` 항목(`dashboard-activity-timeline.tsx`의 로컬 인터페이스 미러). */
-export interface BeActivityLogItem {
-  id: string;
-  actor_type: 'human' | 'agent' | null;
-  action: string;
-  entity_type: string | null;
-  entity_title: string | null;
-  created_at: string;
-}
-
-/**
- * "누가 주어인가" 리트머스(§6) — 이 리스트는 액터(누가 했나) 아닌 이벤트(무슨 일이 일어났나)가
- * 주어가 되도록 actor 정보를 아예 실어보내지 않는다(개인 미시활동 미노출). 마일스톤 관련
- * action만 허용목록(기존 `dashboard-activity-timeline`과 동일 집합 재사용 — 신규 action 문자열
- * 추정 안 함), 그 외는 무시(생동 스트림은 "일어난 일 중 의미 있는 것"만).
- */
-const MILESTONE_ACTIONS = new Set([
-  'story.status_changed',
-  'story.created',
-  'agent_run.completed',
-  'agent_run.failed',
-  'sprint.started',
-  'sprint.closed',
-  'doc.created',
-]);
-
-export function filterMilestoneEvents(items: BeActivityLogItem[]): BeActivityLogItem[] {
-  return items.filter((i) => MILESTONE_ACTIONS.has(i.action));
-}
-
-export type VagueRecency = 'justNow' | 'aWhileAgo' | 'today' | 'earlier';
-
-/**
- * 목업(`e-glance-glance-board-mockup-render`) §④ "방금"/"조금 전"/"오늘" — 분 단위 정밀 경과
- * 표시("N분째") 없이 아주 성긴 버킷만. §8 "지연/멈춤 시간 강조 0" 리트머스 유지하며 시각
- * 디테일만 보강(완전 시간 생략 대신 목업 그대로).
- */
-export function deriveVagueRecency(occurredAtMs: number, nowMs: number): VagueRecency {
-  const diffMin = (nowMs - occurredAtMs) / 60000;
-  if (diffMin < 5) return 'justNow';
-  if (diffMin < 60) return 'aWhileAgo';
-  if (diffMin < 60 * 24) return 'today';
-  return 'earlier';
-}
+// story #2224(선생님 정정 2026-07-30) — EpicCollaborator/EpicCollaboration(협업맵)·
+// BeActivityLogItem/filterMilestoneEvents(생동 스트림)·VagueRecency/deriveVagueRecency(§④
+// 성긴 시각 버킷)를 삭제했다. 유일 소비처였던 `CollaborationMap`·`LiveStream`이 `/glance`
+// 삭제와 함께 죽은 코드였다(grep 전수 확認 — 사용처 0). `ProgressTrajectory`(§4, 진짜
+// "진행 궤적" — 이 이름 그대로)도 같은 감사에서 죽은 코드로 확認돼 함께 삭제했다.
