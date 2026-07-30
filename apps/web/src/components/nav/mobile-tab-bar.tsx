@@ -45,10 +45,12 @@ export const TABS = [
 // "이 경로는 소속상 어느 탭인가"를 판정하는 단일 함수로 교체한다.
 //
 // story #2224(선생님 정정 2026-07-30) — `/flow`는 다른 ws/proj-scoped 리소스(board·goals·
-// loops 등, 아래 ④ 참고)와 달리 "지금" 탭의 목적지 그 자체다 — bare `/flow`가 아니라
-// `/{ws}/{proj}/flow`라 3번째 세그먼트로 판정한다(orgSlug/projectSlug를 몰라도 되는 순수
-// pathname 판정을 유지하기 위함 — resourceLink처럼 slug를 아는 컨텍스트가 여기엔 없다).
+// loops 등, 아래 ④ 참고)와 달리 "지금" 탭의 목적지 그 자체다 — `/{ws}/{proj}/flow`(3번째
+// 세그먼트)뿐 아니라 TABS의 `now.href` 자체가 «bare» `/flow`라 그 형태도 인식해야 한다
+// (선생님 실측 2026-07-30 — 탭을 누른 그 순간의 pathname은 bare, proxy.ts 301이 실 slug로
+// 착지시키기 «전»의 찰나에 하이라이트가 꺼졌다). `/glance`(옛 라우트)의 bare 인식과 대칭.
 function isFlowPath(pathname: string): boolean {
+  if (pathname === '/flow' || pathname.startsWith('/flow/')) return true;
   const segments = pathname.split('/').filter(Boolean);
   return segments[2] === 'flow';
 }
