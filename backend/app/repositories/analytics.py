@@ -180,14 +180,20 @@ class AnalyticsRepository:
         project 전체 에픽의 네 칸을 낸다.
 
         분류 우선순위(겹치는 신호를 하나로 정리하는 순서 — 다른 순서를 쓰면 답이 달라진다):
-          ①막힘(blocked)   = 그 story에 매인 pending 상태 Gate가 있다(§4-5 "문")
+          ①막힘(blocked)   = 그 story에 매인 pending Gate가 있고 requires_human=true·
+                              evidence_status='insufficient'다(§4-5 "문" · 민 실측 32건과
+                              같은 자로 맞춤 — PO 확認 요청에 따라 필터를 일치시켰다. 그냥
+                              "pending Gate 매임"만 쓰면 민 수와 다른 정의가 같은 화면에
+                              두 벌 서는 것이었다).
           ②대기(waiting)   = ①이 아니고 next_action_category=='waiting'(#2262 SSOT 재사용 —
                               verification_pending: self_reported=True·아직 human_verified 안 됨)
           ③진행(in_progress) = ①②가 아니고 status=='in-progress'
           ④멈춤(stalled)   = ①②③이 아니고 status!='done'이고 168시간(민 실측 — §7-③의 "48h"는
                               07-23 시안 값·미재측정, 문서로 남은 값은 168h) 넘게 updated_at 불변
-          그 외(backlog·ready-for-dev·in-review인데 최근 변경된 것·done)는 네 칸 어디에도 안
-          잡힌다 — 합계가 total_stories와 다를 수 있다(의도된 것, 지어내지 않는다).
+          ⑤그 외(other)    = ①~④ 어디에도 안 잡힘(backlog·ready-for-dev·in-review 중 최근
+                              변경된 것 · done) — ⛔PO 지적(2026-07-30): "합계≠total_stories는
+                              의도했어도 화면에서는 거짓말이 된다" — 그래서 이 칸도 명시로 낸다.
+                              in_progress+waiting+blocked+stalled+other == total_stories 항상 성립.
 
         ⛔이 우선순위·168h 임계 둘 다 «잠정»이다 — #2218(S0-1)이 임계를 실측(8~12건 나오는
         값)해 재확定하기 전까지 쓰는 값. 화면에 "이 수는 잠정"이라는 신호를 실어야 한다면
@@ -214,6 +220,8 @@ class AnalyticsRepository:
                 Gate.work_item_type == "story",
                 Gate.work_item_id.in_(story_ids),
                 Gate.status == "pending",
+                Gate.requires_human.is_(True),
+                Gate.evidence_status == "insufficient",
             )
         )
         blocked_ids = set(blocked_r.scalars().all())
@@ -227,7 +235,8 @@ class AnalyticsRepository:
         for s in stories:
             epic_key = str(s.epic_id)
             lane = lanes.setdefault(
-                epic_key, {"in_progress": 0, "waiting": 0, "blocked": 0, "stalled": 0}
+                epic_key,
+                {"in_progress": 0, "waiting": 0, "blocked": 0, "stalled": 0, "other": 0},
             )
             if s.id in blocked_ids:
                 lane["blocked"] += 1
@@ -245,6 +254,8 @@ class AnalyticsRepository:
                 age_hours = (now - s.updated_at).total_seconds() / 3600
                 if age_hours > stall_threshold_hours:
                     lane["stalled"] += 1
+                    continue
+            lane["other"] += 1  # done, 또는 backlog/ready-for-dev/in-review 중 최근 변경된 것
         return lanes
 
     async def get_agent_stats(self, project_id: uuid.UUID, agent_id: uuid.UUID) -> dict:

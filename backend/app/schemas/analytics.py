@@ -100,14 +100,16 @@ class EpicProgressResponse(BaseModel):
 
 
 class EpicProgressLane(BaseModel):
-    """story #2224(S2-1) 좌측 레인 — 미르코 실측 갭. 네 칸이 서로 겹치지 않게 우선순위로
-    정리한다(막힘>대기>진행>멈춤, AnalyticsRepository.get_epics_progress_lane 참조) —
-    합계가 그 에픽의 total_stories와 다를 수 있다(의도된 것, backlog/최근변경/done은
-    네 칸 밖)."""
+    """story #2224(S2-1) 좌측 레인 — 미르코 실측 갭. 다섯 칸이 서로 겹치지 않게 우선순위로
+    정리한다(막힘>대기>진행>멈춤>other, AnalyticsRepository.get_epics_progress_lane 참조).
+    ⛔`other`(PO 지적, 2026-07-30): 「합계≠total_stories는 의도했어도 화면에서는 거짓말이
+    된다」— done, 또는 backlog/ready-for-dev/in-review 중 최근(168h 이내) 변경된 것이 여기
+    든다. in_progress+waiting+blocked+stalled+other는 그 에픽의 total_stories와 항상 같다."""
     in_progress: int
     waiting: int
     blocked: int
     stalled: int
+    other: int
 
 
 class EpicsProgressLaneResponse(BaseModel):

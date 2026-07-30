@@ -74,10 +74,17 @@ async def test_epics_progress_lane_buckets_correctly_and_one_call():
             story_stalled.epic_id = epic.id
             story_stalled.status = "backlog"
 
-            # ⑤uncounted: done (네 칸 어디에도 안 잡힘)
+            # ⑤uncounted: done (네 칸 어디에도 안 잡힘 → other)
             story_done = await _make_story(s, org.id, project.id, title="DONE")
             story_done.epic_id = epic.id
             story_done.status = "done"
+
+            # ⑥음성대조: pending gate가 있어도 requires_human/evidence_status 조건을 안
+            # 채우면 「막힘」이 아니다(민 32건 정의와 좁혀 맞춘 것 — 그냥 "pending 매임"만
+            # 이었으면 이 story도 blocked로 잘못 잡혔을 것).
+            story_not_blocked = await _make_story(s, org.id, project.id, title="PENDING_BUT_NOT_BLOCKED")
+            story_not_blocked.epic_id = epic.id
+            story_not_blocked.status = "in-progress"
 
             await s.commit()
 
@@ -89,7 +96,11 @@ async def test_epics_progress_lane_buckets_correctly_and_one_call():
             from app.models.gate import Gate
             s.add(Gate(
                 id=uuid.uuid4(), org_id=org.id, work_item_id=story_blocked.id, work_item_type="story",
-                gate_type="merge", status="pending",
+                gate_type="merge", status="pending", requires_human=True, evidence_status="insufficient",
+            ))
+            s.add(Gate(
+                id=uuid.uuid4(), org_id=org.id, work_item_id=story_not_blocked.id, work_item_type="story",
+                gate_type="merge", status="pending", requires_human=False, evidence_status=None,
             ))
             await s.commit()
 
@@ -123,7 +134,12 @@ async def test_epics_progress_lane_buckets_correctly_and_one_call():
             assert resp.status_code == 200, resp.text
             body = resp.json()
             lane = body["epics"][str(epic.id)]
-            assert lane == {"in_progress": 1, "waiting": 1, "blocked": 1, "stalled": 1}, lane
+            assert lane == {
+                "in_progress": 2, "waiting": 1, "blocked": 1, "stalled": 1, "other": 1,
+            }, lane
+            # story_not_blocked는 pending gate가 있어도 requires_human/evidence_status 조건이
+            # 없어 blocked에 안 잡히고, status=in-progress라 in_progress로 떨어져야 한다.
+            assert sum(lane.values()) == 6, "네 칸(진행/대기/막힘/멈춤) + other == total_stories 항상 성립해야 함"
             assert body["stall_threshold_hours"] == 168
             assert call_count["n"] == 1, f"repo 메서드가 {call_count['n']}번 불림(N+1 의심)"
         finally:
