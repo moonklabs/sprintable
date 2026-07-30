@@ -90,7 +90,7 @@ export function FlowCanvas({ rows, activeEpicId, edgeCount, projectId }: FlowCan
                     ) : null}
                   </div>
                 </button>
-                {isExpanded ? <FlowEpicNodes projectId={projectId} epicId={row.id} /> : null}
+                {isExpanded ? <FlowEpicNodes projectId={projectId} epicId={row.id} epicTitle={row.title} /> : null}
               </li>
             );
           })}
