@@ -265,3 +265,56 @@ async def test_ac7_small_shrink_under_threshold_not_blocked():
             assert resp.description == slightly_shorter
     finally:
         await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_ac7_absolute_loss_catches_the_200_char_gap_floor_used_to_miss():
+    """AC7 정정(2026-07-30, PO 지적) — 「원본 길이」 floor는 200자 미만 본문의 완전 삭제를
+    안 막는 구멍이 있었다. 「손실 절대량」 자로 바꿔 이 정확한 사례(200자→10자, -95%·-190자)가
+    이제 막히는지."""
+    from fastapi import HTTPException
+    from app.repositories.story import StoryRepository
+    from app.routers.stories import update_story
+    from app.schemas.story import StoryUpdate
+
+    eng, Session = await _engine()
+    try:
+        original = "x" * 200
+        async with Session() as s:
+            await _seed(s, original)
+
+        async with Session() as s:
+            repo = StoryRepository(s, ORG)
+            bg = BackgroundTasks()
+            with pytest.raises(HTTPException) as ei:
+                await update_story(
+                    STORY, StoryUpdate(description="y" * 10), bg, repo=repo, db=s, auth=_auth(),
+                )
+            assert ei.value.status_code == 400
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_ac7_small_absolute_loss_not_blocked_even_at_high_percentage():
+    """양성 대조 — entity 토큰류 짧은 문자열은 퍼센트가 커도(절대량이 작으면) 안 막힌다.
+    test_2301의 "[Target](entity:doc:…)"(~48자)→"no tokens here"(14자, -70%·-34자) 재현."""
+    from app.repositories.story import StoryRepository
+    from app.routers.stories import update_story
+    from app.schemas.story import StoryUpdate
+
+    eng, Session = await _engine()
+    try:
+        token_like = "[Target](entity:doc:11111111-1111-1111-1111-111111111111)"  # 48자
+        async with Session() as s:
+            await _seed(s, token_like)
+
+        async with Session() as s:
+            repo = StoryRepository(s, ORG)
+            bg = BackgroundTasks()
+            resp = await update_story(
+                STORY, StoryUpdate(description="no tokens here"), bg, repo=repo, db=s, auth=_auth(),
+            )
+            assert resp.description == "no tokens here"
+    finally:
+        await eng.dispose()

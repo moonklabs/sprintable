@@ -402,11 +402,12 @@ _LENGTH_TRACKED_FIELDS = ("description", "acceptance_criteria")
 # 난 3건의 급감 사고가 전부 -80%대였다(3619→437·4052→경고문구·2121→진행현황뿐) — 그보다
 # 훨씬 낮은 50%를 임계로 잡아도 셋 다 막혔을 것이다. `allow_shrink=true`로 명시 승인 가능.
 _SHRINK_BLOCK_THRESHOLD = 0.5
-# ⛔story #2346 AC7 회귀 발견(2026-07-30): 짧은 문자열(예: entity 토큰 하나)은 몇 글자만
-# 바뀌어도 퍼센트가 크다("[Target](entity:doc:…)"(~48자)→"no tokens here"(14자)가 -70%지만
-# 무해한 정상 편집이다) — 이 게이트는 «긴 텍스트 필드의 참사적 손실»을 막는 것이지 «모든
-# 문자열의 비율 변화»를 막는 게 아니므로, 원본이 이 길이 미만이면 게이트를 안 켠다.
-_SHRINK_BLOCK_MIN_LENGTH = 200
+# ⛔story #2346 AC7 정정(2026-07-30, PO 지적 — 「원본 길이」 floor는 구멍을 남긴다): 200자
+# 본문이 통째로 지워지는 것("읽지 않고 쓰는" 것 자체가 문제지 길이가 아니다)은 원본-길이
+# floor로는 안 막혔다. 「원본 길이」 대신 「손실 절대량」으로 자를 바꾼다 — floor가 필요
+# 없어진다: entity 토큰(~48자→14자, -70%지만 -34자)은 절대량이 작아 안 막히고, 200자→10자
+# (-95%·-190자)는 막힌다 — 특수 분기 없이 자연히 갈린다.
+_SHRINK_BLOCK_MIN_LOST_CHARS = 100
 
 
 async def _assert_story_link_targets_in_project(
@@ -1450,10 +1451,12 @@ async def update_story(
     # 전부 이 게이트에 막혔을 것이다. allow_shrink=true로 명시 승인(정당한 축약)만 통과.
     if old_field_lengths and not allow_shrink:
         for _f, _before_len in old_field_lengths.items():
-            if _before_len < _SHRINK_BLOCK_MIN_LENGTH:
+            if _before_len == 0:
                 continue
             _after_len = len(data.get(_f) or "")
-            if _after_len < _before_len * (1 - _SHRINK_BLOCK_THRESHOLD):
+            _lost_chars = _before_len - _after_len
+            _is_relative_shrink = _after_len < _before_len * (1 - _SHRINK_BLOCK_THRESHOLD)
+            if _is_relative_shrink and _lost_chars >= _SHRINK_BLOCK_MIN_LOST_CHARS:
                 raise HTTPException(
                     status_code=400,
                     detail=(
