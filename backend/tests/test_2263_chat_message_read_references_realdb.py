@@ -42,7 +42,14 @@ def _strip_referenced_at(refs: list[dict]) -> list[dict]:
     """story #2262 AC1(「지점」, 2026-07-30): fetch_stored_references가 이제
     `referenced_at`(비결정적 타임스탬프)도 낸다 — 아래 exact-equality 검증에서는
     그 필드가 «있다는 것»만 확認하고 값 자체는 떼어낸다(테스트가 시각을 하드코딩하지
-    않는다)."""
+    않는다).
+
+    ⛔가드 한계 선언(PO 지적, 2026-07-30 — "가드는 못 잡는 것도 선언한다"): 이 방식은
+    exact-equality의 원래 역할("의도치 않은 필드가 몰래 추가되면 빨개진다")을 이 dict에
+    한해 «약화»시킨다 — `referenced_at` 외의 새 키가 몰래 추가돼도 여기선 안 잡힌다
+    (떼어낸 뒤 비교라 남은 키 집합만 본다). 더 나은 대안(타임스탬프를 고정값으로 치환한
+    뒤 dict 전체를 그대로 대조 — 그러면 새 키 추가도 계속 잡힌다)이 있으나 지금은 고치지
+    않는다(PO 지시) — 이 주석이 그 미고침을 명시로 남긴다."""
     out = []
     for r in refs:
         assert "referenced_at" in r and isinstance(r["referenced_at"], str) and r["referenced_at"], (
