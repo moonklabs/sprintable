@@ -11,6 +11,7 @@ from app.repositories.analytics import AnalyticsRepository
 from app.schemas.analytics import (
     AgentStatsResponse,
     BurndownResponse,
+    EpicFlowNodesResponse,
     EpicProgressLane,
     EpicProgressResponse,
     EpicsProgressLaneResponse,
@@ -114,6 +115,22 @@ async def get_epics_progress_lane(
         stall_threshold_hours=168,
         stories_without_epic=result["stories_without_epic"],
     )
+
+
+@router.get("/analytics/epic-flow-nodes", response_model=EpicFlowNodesResponse)
+async def get_epic_flow_nodes(
+    project_id: uuid.UUID = Query(...),
+    epic_id: uuid.UUID = Query(...),
+    upcoming_limit: int = Query(default=15, ge=1, le=100),
+    repo: AnalyticsRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> EpicFlowNodesResponse:
+    """story #2224 노드 계약(급전환, 2026-07-30 PO 판정) — 「지금/이어질/지나온」 세 구역
+    노드를 «에픽 하나» 단위로 한 번의 호출로 낸다(179 에픽 전체를 한 번에 주면 수천 건이라
+    안 준다 — 펼친 에픽만). `upcoming_limit`은 FE 화면 상한(PO 감 10~15, 기본 15)."""
+    await _assert_project_access(repo, auth, project_id)
+    result = await repo.get_epic_flow_nodes(project_id, epic_id, upcoming_limit)
+    return EpicFlowNodesResponse.model_validate(result)
 
 
 @router.get("/analytics/agent-stats", response_model=AgentStatsResponse)

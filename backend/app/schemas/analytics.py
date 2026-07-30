@@ -128,6 +128,45 @@ class EpicsProgressLaneResponse(BaseModel):
     stories_without_epic: int
 
 
+class FlowNode(BaseModel):
+    """story #2224 노드 계약 — 화면 한 줄에 필요한 만큼만(id·SID·제목·status·담당·마지막
+    변화 시각). 7상태 뱃지는 이 필드가 아니라 FE가 status에서 도출(다른 축, PO 판정)."""
+    id: uuid.UUID
+    story_number: int | None  # allocate_story_number()가 채번 — DB제약은 nullable(모델 참조)
+    title: str
+    status: str
+    assignee_id: uuid.UUID | None
+    updated_at: datetime
+
+
+class FlowNodeZone(BaseModel):
+    total: int
+    items: list[FlowNode]
+
+
+class FlowNodeUpcomingZone(BaseModel):
+    """⛔`shown`(PO 규율 2026-07-30): 잘린 개수를 반드시 함께 낸다 — "없앤 것"이 아니라
+    "안 그린 것"이라 말할 수 있게. total > shown이면 화면이 "N건 중 M건 표시"를 말한다."""
+    total: int
+    shown: int
+    items: list[FlowNode]
+
+
+class FlowNodePastZone(BaseModel):
+    """지나온(done) 것은 노드로 안 그린다 — 수로만 접는다(PO 판정)."""
+    total: int
+
+
+class EpicFlowNodesResponse(BaseModel):
+    """GET .../epic-flow-nodes?epic_id=... — 한 에픽 단위(179개 에픽 전체를 한 번에 주면
+    수천 건이라 응답이 죽는다, dev 실측 최대 141건/에픽). 세 구역(지금·이어질·지나온)은
+    «시간»축이지 7상태(실행가능·검증필요…) 축이 아니다 — 섞으면 같은 것을 두 번 말한다."""
+    epic_id: uuid.UUID
+    now: FlowNodeZone
+    upcoming: FlowNodeUpcomingZone
+    past: FlowNodePastZone
+
+
 class AgentStatsResponse(BaseModel):
     # S2-1 신규 지표 (stories 기반)
     completed: int
