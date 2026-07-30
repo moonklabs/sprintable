@@ -306,7 +306,7 @@ jobs:
             # 라인 파일 자체가 아직 없었다"(예: 이 lint를 «처음» 들여오는 PR 자신). 이것도
             # 앞의 것과 별개 이유이므로 다른 문구로 남긴다 — 다음 사람이 "PR context가 없어서
             # 스킵됐나?"와 헷갈리지 않게.
-            echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 query_sentinel_baseline.txt 없음 — 최초 도입 PR 등)"
+            echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 query_sentinel_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #2335 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
           fi
 
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
