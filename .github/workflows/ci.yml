@@ -260,15 +260,26 @@ jobs:
           # 이벤트(예: develop에 직접 머지)는 그 push 직전 커밋(github.event.before)과
           # 비교한다. 둘 다 없으면(예: 새 브랜치 최초 push) 비교 대상이 없어 검사를 스킵한다
           # — 그 경로에서는 이 가드가 안 돈다(한계로 남김, "이제 다 잡는다"로 안 읽히게).
+          # ⛔실측(2026-07-30, CI 로그로 발견): `git fetch origin <branch> --depth=1`은
+          # `FETCH_HEAD`만 채운다 — `refs/remotes/origin/<branch>`(즉 `origin/develop`
+          # 이라는 이름)는 «만들지 않는다». 그래서 이 스텝이 처음 실렸을 때 PR_BASE_REF가
+          # 정확히 "develop"으로 치환됐는데도 `git show origin/develop:...`가 그런 ref가
+          # 없어 조용히 실패 → else(스킵) 분기로 떨어졌다(정확히 이 가드가 막으려던 그 모양
+          # — "실행되는데 바깥을 안 만나는" 것. 뮤테이션 없이 실전에서 스스로 걸린 사례).
+          # 고침: fetch 직후의 `FETCH_HEAD`를 그 자리에서 바로 쓴다(별도 remote-tracking
+          # ref 이름에 의존하지 않는다).
           PR_BASE_REF="${{ github.event.pull_request.base.ref }}"
           PUSH_BEFORE_SHA="${{ github.event.before }}"
           COMPARE_REF=""
+          COMPARE_LABEL=""
           if [ -n "$PR_BASE_REF" ]; then
             git fetch origin "$PR_BASE_REF" --depth=1 2>&1 | tail -3 || true
-            COMPARE_REF="origin/$PR_BASE_REF"
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="PR base:$PR_BASE_REF"
           elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
             git fetch origin "$PUSH_BEFORE_SHA" --depth=1 2>&1 | tail -3 || true
-            COMPARE_REF="$PUSH_BEFORE_SHA"
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="push-before:$PUSH_BEFORE_SHA"
           fi
           if [ -n "$COMPARE_REF" ] && git show "$COMPARE_REF:backend/scripts/query_sentinel_baseline.txt" > /tmp/base_baseline.txt 2>/dev/null; then
             grep -vE '^#|^$' /tmp/base_baseline.txt | sort -u > /tmp/base_sorted.txt
@@ -276,7 +287,7 @@ jobs:
             new_lines=$(comm -13 /tmp/base_sorted.txt /tmp/head_sorted.txt || true)
             base_count=$(wc -l < /tmp/base_sorted.txt | tr -d ' ')
             head_count=$(wc -l < /tmp/head_sorted.txt | tr -d ' ')
-            echo "baseline entries: base($COMPARE_REF)=$base_count head=$head_count"
+            echo "baseline entries: base($COMPARE_LABEL)=$base_count head=$head_count"
             if [ -n "$new_lines" ]; then
               echo "FAIL: 베이스라인에 «새» 항목이 추가됐다 — 이 파일은 줄기만 허용한다(story #2335)." \
                    "새 위반은 여기 grandfather로 넣지 말고 실제로 고치는(파라미터를 명시로 넘기는) 것이 맞다:"
@@ -284,11 +295,18 @@ jobs:
               exit 1
             fi
             echo "OK: baseline은 늘지 않았다(줄었으면 환영 — 그만큼 사이트가 고쳐진 것)"
-          else
+          elif [ -z "$COMPARE_REF" ]; then
             # PO 지적(2026-07-30): 한계를 문서에만 적으면 "그 파일 여는 사람"만 안다(#2191이
             # 그렇게 세 번째 재발했다) — 이 스킵도 CI stdout에 즉시·눈에 띄게 찍어야 그 자리로
             # 들어온 사람이 바로 안다. grep하기 쉬운 고정 문구로 남긴다.
             echo "baseline growth check skipped: no comparison base (PR context 아님 + push-before 미상 — 예: 새 브랜치 최초 push)"
+          else
+            # ⭐COMPARE_REF는 있었으나(PR base 또는 push-before를 정상 식별) git show가
+            # 실패한 경우 — 가장 흔한 정당한 사유는 "그 비교시점(base 브랜치)에는 이 베이스
+            # 라인 파일 자체가 아직 없었다"(예: 이 lint를 «처음» 들여오는 PR 자신). 이것도
+            # 앞의 것과 별개 이유이므로 다른 문구로 남긴다 — 다음 사람이 "PR context가 없어서
+            # 스킵됐나?"와 헷갈리지 않게.
+            echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 query_sentinel_baseline.txt 없음 — 최초 도입 PR 등)"
           fi
 
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
