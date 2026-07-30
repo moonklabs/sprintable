@@ -64,8 +64,8 @@ async def _seed(s, initial_description: str) -> None:
         await s.execute(text(sql))
     await s.execute(
         text(
-            "INSERT INTO stories (id,org_id,project_id,title,status,priority,description) "
-            "VALUES (:id,:org,:proj,'test story','backlog','medium',:desc)"
+            "INSERT INTO stories (id,org_id,project_id,title,status,priority,description,story_number) "
+            "VALUES (:id,:org,:proj,'test story','backlog','medium',:desc,2346)"
         ),
         {"id": STORY, "org": ORG, "proj": PROJ, "desc": initial_description},
     )
@@ -206,6 +206,12 @@ async def test_ac7_shrink_over_50_percent_blocked_without_flag():
                 )
             assert ei.value.status_code == 400
             assert "3619" in ei.value.detail and "437" in ei.value.detail
+            # PO 요청(2026-07-30 08:12Z) — 가드 신호를 사용자 숙제로 번역하지 않는다: 무엇이
+            # (story_number) 어디가(필드명) 줄었는지와 다음 행동(allow_shrink=true)이 한
+            # 메시지 안에 다 있어야 한다.
+            assert "description" in ei.value.detail
+            assert "allow_shrink=true" in ei.value.detail
+            assert "#2346" in ei.value.detail, f"story_number이 메시지에 없음: {ei.value.detail}"
 
         # 봉인 — 거부됐으니 원본이 그대로 살아 있어야 한다(부분 적용 없음).
         async with Session() as s:
