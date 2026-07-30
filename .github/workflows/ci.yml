@@ -133,6 +133,99 @@ jobs:
           fi
           echo "OK: existing-DB upgrade heads is a no-op"
 
+  # story #2330(CI·승격안전, 2026-07-30) — alembic-fresh-db(위)는 "빈 DB에서 baseline-stamp
+  # 후 나머지 리비전 전부를 «한 번의» command.upgrade() 호출(=한 트랜잭션 블록)"으로 올린다.
+  # 그런데 실배포(dev/prod)는 언제나 "이미 어떤 리비전에 있는 DB에 «새 리비전 하나»를 얹는"
+  # 별개의 job 실행이다 — 0217(story #2267)의 `autocommit_block()`이 정확히 이 차이로 갈렸다
+  # (빈 DB에서 한 번에 쭉 올릴 때는 통과, 0216까지 올려진 DB에 0217만 단독 적용할 때만
+  # `AssertionError(self._transaction is not None)`로 죽었다 — 민 로컬 재현, 2026-07-30).
+  # ⭐이 job은 alembic-fresh-db를 «대체»하지 않는다 — 둘은 다른 것을 잰다(fresh-db는 "전체
+  # 히스토리를 처음부터 재생할 수 있는가", 이 job은 "이미 마이그레이션된 기존 DB에 최신
+  # 리비전 «한 단»이 그대로 얹히는가" — prod 승격이 실제로 밟는 경로는 후자).
+  #
+  # ⛔이 job이 못 잡는 것(반드시 읽어야 하는 한계 — story #2330 AC4. 스크립트 docstring에도
+  # 같은 내용이 있다):
+  #   · 여러 리비전이 «한 배치»로 함께 올라갈 때만 나는 상호작용 — 이 job은 항상 "head(들)
+  #     직전까지 + head(들)만 단독" 두 단계만 재현한다(마지막 한 단만 단독으로 떼어 시험).
+  #   · 실제 prod 데이터 크기/분포에서만 나는 문제(락 경합·인덱스 빌드 시간) — CI DB는 비어 있다.
+  #   · downgrade(롤백) 경로 — upgrade만 잰다.
+  # 「이제 다 잡는다」로 읽으면 그것이 다음 사고다.
+  alembic-single-step-promotion:
+    name: Alembic upgrade head (existing DB, single-step)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      JWT_SECRET: ci-test-secret-at-least-32-chars-long
+      SECRET_KEY: ci-test-secret-at-least-32-chars-long
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+
+      # story #2330 AC2(양성 대조는 이 잡 자체가 아니라 이 스토리를 구현한 PR 설명에 실측
+      # 기록 — 옛 0217(autocommit_block 쓰던 버전)로 이 스크립트를 로컬 재현하면 실제로
+      # RED, 지금 이 잡은 그 버그가 고쳐진 develop 상태를 잰다).
+      - name: alembic upgrade — existing DB, single-step (parent → head alone, 별개 호출 2회)
+        working-directory: backend
+        run: uv run python scripts/ci_alembic_single_step_promotion_check.py
+
+      - name: Verify reached heads
+        working-directory: backend
+        run: |
+          set -e
+          cur=$(uv run alembic current 2>/dev/null | grep -oE '^[0-9a-z_]+' | sort)
+          heads=$(uv run alembic heads 2>/dev/null | grep -oE '^[0-9a-z_]+' | sort)
+          echo "current=$cur"
+          echo "heads=$heads"
+          test -n "$cur"
+          diff <(echo "$cur") <(echo "$heads")
+
+  # story #2330 AC6 — env.py(PR#2661)의 "autocommit_block()은 이 프로젝트에서 원리적으로
+  # 못 쓴다" 주석은 «읽어야» 서는 것이었다(주석만으로는 다음 사람이 또 쓸 수 있다). grep
+  # 가드로 승격한다 — 마이그레이션 파일에 그 호출이 들어오면 CI가 빨개진다.
+  alembic-no-autocommit-block:
+    name: Alembic migrations — no autocommit_block() (guard)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: grep for autocommit_block() calls in migration files
+        run: |
+          # 실제 호출(`op.get_context().autocommit_block()`)만 잡는다 — docstring 산문에서
+          # backtick으로 `autocommit_block()`을 «설명」하는 것(이 파일들에도 있다, 0217의
+          # 사고 경위 서술)까지 걸리면 develop이 영구 RED가 된다. 실호출은 항상 앞에
+          # `.`(메서드 호출 점)이 오고, 산문 인용은 backtick이 오므로 `\.` 앵커로 가른다.
+          if grep -rnE '\.autocommit_block\s*\(' backend/alembic/versions/; then
+            echo "FAIL: autocommit_block()은 이 프로젝트 alembic/env.py 설정(transaction_per_migration=False)에서" \
+                 "원리적으로 못 쓴다(story #2330 — 0217 dev 배포 사고). CREATE INDEX CONCURRENTLY가 필요하면" \
+                 "마이그레이션에 넣지 말고 배포 후 별도 수동 psql 세션으로 돌리는(env.py 주석 참조)."
+            exit 1
+          fi
+          echo "OK: no autocommit_block() calls in migration files"
+
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
   # 못 잡는다(실제로 못 잡아서 prod 승격이 롤백된 그 사고). PR base가 main일 때만 도는 이
