@@ -67,7 +67,11 @@ async def create_judgment(
     method: str | None,
     statement: str,
     created_by: uuid.UUID,
+    source_message_id: uuid.UUID | None = None,
 ) -> Judgment:
+    """⛔2026-07-30(오르테가 철회 — target_id 순환 실측): target_id는 ㉡(TARGET_REQUIRED_KINDS)
+    셋에서도 이제 선택이다 — 처음 쓰는 사람은 가리킬 이전 판정이 없다. 더 이상 필수로
+    막지 않는다(아래 존재-검증만 target_id가 «주어졌을 때» 수행)."""
     if kind not in JUDGMENT_KINDS:
         raise InvalidJudgmentError(f"kind must be one of {sorted(JUDGMENT_KINDS)}")
     if scope not in JUDGMENT_SCOPES:
@@ -78,10 +82,6 @@ async def create_judgment(
         raise InvalidJudgmentError("scope='general'이면 work_item_ids는 비어 있어야 합니다(일반 교훈)")
     if scope == "items" and not work_item_ids:
         raise InvalidJudgmentError("scope='items'면 work_item_ids가 최소 1개 필요합니다(아직 안 붙인 상태 금지)")
-    if kind in TARGET_REQUIRED_KINDS and target_id is None:
-        raise InvalidJudgmentError(
-            f"kind={kind!r}는 target_id가 필수입니다(무엇에 대한 말인지 모르는 {kind}는 저장 금지)"
-        )
 
     if target_id is not None:
         target_exists = (
@@ -95,7 +95,7 @@ async def create_judgment(
     judgment = Judgment(
         id=uuid.uuid4(), org_id=org_id, scope=scope, work_item_ids=list(work_item_ids),
         kind=kind, target_id=target_id, method=method, statement=statement,
-        created_by=created_by,
+        created_by=created_by, source_message_id=source_message_id,
     )
     session.add(judgment)
     await session.flush()

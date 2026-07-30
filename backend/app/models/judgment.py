@@ -6,7 +6,21 @@ GET /evidence·glance proof_count 등 무필터 카운트 자리가 셋 실재�
 두 층(유나 판정):
   ㉠원래 낸 말   judgment(판정+근거) · unmeasurable(못 잰 것과 왜) — 스스로 서므로 target_id 불요.
   ㉡앞선 말에 대한 말 retraction(철회) · refinement(정련) · method_error(세는 법이 틀림)
-    — target_id 필수(무엇에 대한 말인지 없는 메타-말은 저장 자체를 막는다).
+
+⛔story #2268 후속(2026-07-30, 오르테가 철회·디디 실측): target_id를 ㉡ 셋에서도 선택으로
+내린다 — target_id는 "이전 판정의 id"인데, 처음 쓰는 사람은 이전 판정이 애초에 없어
+가리킬 것이 없다("처음 쓰는 사람은 영원히 못 들어가는 순환"). 실측: 오늘 org 전체 정정
+기록이 1건뿐이었던 것이 이 순환 때문일 공산이 크다. `TARGET_REQUIRED_KINDS`는 이름 그대로
+"필수"가 아니게 됐지만 집합 자체(㉡ 층 분류축, corrections vs active 판별에 계속 쓰임)는
+남긴다 — 이름을 바꾸면 소비자(judgment_core.py의 active/corrections 분류)를 다 훑어야
+하고, 이 변경의 크기가 아니다.
+
+`source_message_id`(신설, nullable) — 이 판정이 어느 채팅 메시지에서 나왔는지 가리킨다.
+"이미 적은 것을 다시 쓰지 않는" 것이 목적(정정을 statement에 처음부터 다시 서술하지 않고
+원본 메시지를 가리킬 수 있게).
+
+⛔PATCH/PUT은 짓지 않는다(의도, 빠뜨림 아님) — judgments는 append-only다. "정정을 남기는
+도구"가 정정 가능해지면 "이 정정은 나중에 고쳐졌나"를 또 물어야 하는 모순이 생긴다.
 
 work_item_ids는 오늘 실측 근거 셋 위에 설계(대화 스레드 7256d5cc, 2026-07-29):
   (a) 여러 story에 «걸치는» 교훈(twin-system drift류) — 단일 FK로는 못 세운다.
@@ -28,8 +42,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
 JUDGMENT_KINDS = frozenset({"judgment", "unmeasurable", "retraction", "refinement", "method_error"})
-# ㉡ — 앞선 말에 대한 말. target_id NOT NULL을 요구하는 축(스키마 레벨 강제 — "무엇을
-# 철회하는지 모르는 철회"가 저장되는 것을 원천 차단).
+# ㉡ — 앞선 말에 대한 말(분류축, active/corrections 판별에 쓰임). ⛔2026-07-30부터 target_id를
+# 「요구」하지 않는다(이름은 남기되 스키마 레벨 강제는 뺐다 — 위 모듈 docstring 참조).
 TARGET_REQUIRED_KINDS = frozenset({"retraction", "refinement", "method_error"})
 JUDGMENT_SCOPES = frozenset({"items", "general"})
 
@@ -46,10 +60,6 @@ class Judgment(Base):
             "(scope = 'general' AND work_item_ids = '{}') OR "
             "(scope = 'items' AND work_item_ids <> '{}')",
             name="ck_judgments_scope_work_item_ids_pairing",
-        ),
-        CheckConstraint(
-            "(kind NOT IN ('retraction', 'refinement', 'method_error')) OR (target_id IS NOT NULL)",
-            name="ck_judgments_target_required_for_meta_kinds",
         ),
         Index("ix_judgments_org", "org_id"),
         Index("ix_judgments_work_item_ids", "work_item_ids", postgresql_using="gin"),
@@ -69,6 +79,10 @@ class Judgment(Base):
     # 프로젝트 관례(entity_references 등)가 폴리모픽 대상엔 FK를 안 거는 쪽이라 여기도
     # 같은 테이블 자기참조는 명시 FK로 마이그레이션에 남긴다).
     target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # ⛔2026-07-30 신설: 이 판정이 나온 채팅 메시지(conversation_messages.id) — "이미 적은
+    # 것을 다시 안 쓰게" 하는 것이 목적. FK는 안 건다(이 프로젝트 관례 — 폴리모픽/느슨한
+    # 참조에는 FK를 안 거는 쪽, target_id의 자기참조 FK와는 다른 성격의 참조라 구분).
+    source_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # "어떤 방법으로 쟀는가" — method_error가 "같은 방법으로 낸 다른 말들"을 역추적하는 축
     # (오르테가 명시 요구, 2026-07-29). 자유 텍스트(방법 taxonomy는 아직 없음 — 과확장 금지).
     method: Mapped[str | None] = mapped_column(Text, nullable=True)

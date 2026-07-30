@@ -382,7 +382,9 @@ async def test_general_scope_nonempty_work_item_ids_rejected_with_422_not_500():
         await engine.dispose()
 
 
-async def test_meta_kind_without_target_id_rejected_with_422_not_500():
+async def test_meta_kind_without_target_id_now_accepted_201():
+    """⛔뒤집힘(2026-07-30, 오르테가 철회): target_id 없는 ㉡을 예전엔 422로 거절했다 —
+    지금은 정반대로 201을 확認한다(처음 쓰는 사람이 이전 판정을 몰라도 남길 수 있어야 함)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -399,8 +401,39 @@ async def test_meta_kind_without_target_id_rejected_with_422_not_500():
                 "/api/v2/judgments",
                 json={"scope": "general", "kind": "retraction", "statement": "무엇을 철회하는지 모름"},
             )
-            assert resp.status_code == 422, resp.text
-            assert "target_id" in resp.text
+            assert resp.status_code == 201, resp.text
+            assert resp.json()["target_id"] is None
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_source_message_id_round_trips_through_http():
+    """신설(2026-07-30) — 채팅 메시지 id를 넘기면 응답에 그대로 실리는지(HTTP 계층)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            msg_id = str(uuid.uuid4())
+            resp = await client.post(
+                "/api/v2/judgments",
+                json={
+                    "scope": "general", "kind": "judgment", "statement": "stmt",
+                    "source_message_id": msg_id,
+                },
+            )
+            assert resp.status_code == 201, resp.text
+            assert resp.json()["source_message_id"] == msg_id
         finally:
             await client.aclose()
     finally:
@@ -428,7 +461,8 @@ async def test_general_scope_entry_is_pullable_via_scope_filter():
         await _setup_app_human(app, Session, caller_user_id, org.id)
         client = _client_for(app)
         try:
-            # method_error(㉡)는 target_id 필수이므로 먼저 ㉠(judgment) 하나를 세운다.
+            # target_id는 이제 선택이지만, 이 테스트는 "correction_ids 데코레이션"을 보려는
+            # 것이라 실제로 target을 거는 정상 경로로 먼저 ㉠(judgment) 하나를 세운다.
             original = await client.post(
                 "/api/v2/judgments",
                 json={"scope": "general", "kind": "judgment", "statement": "부분 체크로 판단함"},
