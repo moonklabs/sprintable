@@ -439,6 +439,74 @@ async def _assert_human_owner(
         )
 
 
+async def _reconcile_story_references_and_candidates(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    story: Story,
+    check_description: bool,
+    check_acceptance_criteria: bool,
+    mention_actor_id: uuid.UUID | None,
+) -> None:
+    """story #2301/#2328 공용 코어 — description·acceptance_criteria의 `#`엔티티 토큰을
+    entity_references(#2259)로 걷고 reference_semantic_candidates(#2328)를 얹는다.
+
+    ⛔파울로 판정(2026-07-30, dev 전수스윕 0/420 사고 원인): 이 로직이 원래 update_story()
+    에만 있었다 — create_story()는 한 번도 부르지 않았다. "새 참조만(소급 안 함)"이라는
+    #2328 판정이 "저장 시점마다"를 의도했는데, 실제로는 "«수정» 시점마다"로만 구현된 것
+    (create가 빠짐 — 사람은 스토리를 만들 때 본문을 다 쓰고 만들므로 "새 것"의 대부분이
+    이 갭에 빠졌다). create_story·update_story 둘 다 **이 함수 하나**를 호출한다 — 로직을
+    두 벌 만들지 않는다(파울로 명시 지시)."""
+    from app.services.mention_parser import (
+        extract_chat_entity_mentions,
+        reconcile_entity_references,
+        resolve_bare_number_story_refs,
+    )
+    from app.services.reference_semantic_candidates import generate_and_store_candidates
+
+    _ref_stored = 0
+    _ref_dropped: list[dict[str, str]] = []
+    if check_description:
+        _desc_text = story.description or ""
+        _desc_pairs = extract_chat_entity_mentions(_desc_text)
+        _desc_bare_refs = await resolve_bare_number_story_refs(
+            db, org_id=org_id, project_id=story.project_id, content=_desc_text,
+        )
+        _desc_result = await reconcile_entity_references(
+            db, org_id=org_id, source_type="story", source_field="description",
+            source_id=story.id,
+            extracted_refs=[(t, i, "mention") for t, i in _desc_pairs] + _desc_bare_refs,
+            created_by=mention_actor_id,
+        )
+        _ref_stored += _desc_result.stored
+        _ref_dropped.extend(_desc_result.dropped)
+        await generate_and_store_candidates(
+            db, org_id=org_id, project_id=story.project_id, source_type="story",
+            source_field="description", source_id=story.id, content=_desc_text,
+        )
+    if check_acceptance_criteria:
+        _ac_text = story.acceptance_criteria or ""
+        _ac_pairs = extract_chat_entity_mentions(_ac_text)
+        _ac_bare_refs = await resolve_bare_number_story_refs(
+            db, org_id=org_id, project_id=story.project_id, content=_ac_text,
+        )
+        _ac_result = await reconcile_entity_references(
+            db, org_id=org_id, source_type="story", source_field="acceptance_criteria",
+            source_id=story.id,
+            extracted_refs=[(t, i, "mention") for t, i in _ac_pairs] + _ac_bare_refs,
+            created_by=mention_actor_id,
+        )
+        _ref_stored += _ac_result.stored
+        _ref_dropped.extend(_ac_result.dropped)
+        await generate_and_store_candidates(
+            db, org_id=org_id, project_id=story.project_id, source_type="story",
+            source_field="acceptance_criteria", source_id=story.id, content=_ac_text,
+        )
+    # 채팅(conversations.py)과 동일 게이트: 정상 경로(둘 다 0)에선 필드 자체를 안 싣는다.
+    if _ref_stored or _ref_dropped:
+        story.references = {"stored": _ref_stored, "dropped": _ref_dropped}
+
+
 @router.post("", response_model=StoryResponse, status_code=201)
 async def create_story(
     body: StoryCreate,
@@ -566,6 +634,22 @@ async def create_story(
             # get_db). 부분성공(스토리는 남고 출처만 빠짐)을 만들지 않기 위해 그 불변식을
             # 그대로 따른다 — 여기서 별도 commit을 하면 그 원자성이 깨진다.
             raise HTTPException(status_code=400, detail=f"invalid origin_type: {exc}") from exc
+    # ⛔파울로 판정(2026-07-30, dev 전수스윕 0/420 사고): entity_references(#2259/#2301)·
+    # reference_semantic_candidates(#2328) reconcile이 update_story()에만 있고 이 함수
+    # (POST 생성)에는 «한 번도» 없었다 — 사람은 스토리를 «본문을 다 쓰고» 만드는 것이
+    # 보통이라, 이 갭이 "새 것"의 대부분을 빠뜨렸다(#2330이 그 실물 증거 — 아래 참조).
+    # update_story와 같은 트랜잭션 원자성(같은 세션, commit 전 — 실패 시 story 생성
+    # 전체가 롤백)으로 붙인다.
+    _mention_actor_id: uuid.UUID | None = None
+    try:
+        _mention_actor_id = await _resolve_team_member_id(auth, org_id, session)
+    except Exception:
+        _mention_actor_id = None
+    await _reconcile_story_references_and_candidates(
+        session, org_id=org_id, story=story,
+        check_description=True, check_acceptance_criteria=True,
+        mention_actor_id=_mention_actor_id,
+    )
     return StoryResponse.model_validate(story)
 
 
@@ -1366,73 +1450,21 @@ async def update_story(
     # 각각 독립적으로 reconcile — 같은 대상을 본문과 AC 양쪽에 걸면 두 행 다 남는다(멱등
     # 키에 source_field가 있어 서로 다른 참조로 선다). **같은 트랜잭션**(commit 전, 실패
     # 시 예외 propagate로 story 저장 전체가 롤백 — chat/doc과 동일 AC4 원자성).
+    # ⛔실제 reconcile·candidate 로직은 `_reconcile_story_references_and_candidates`
+    # (create_story와 공유) — 2026-07-30, create에 이 훅이 없던 결함 수정 시 두 벌 대신
+    # 공용 함수로 추출.
     if "description" in data or "acceptance_criteria" in data:
-        from app.services.mention_parser import (
-            extract_chat_entity_mentions,
-            reconcile_entity_references,
-            resolve_bare_number_story_refs,
-        )
-        from app.services.reference_semantic_candidates import generate_and_store_candidates
-
         _mention_actor_id: uuid.UUID | None = None
         try:
             _mention_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
         except Exception:
             _mention_actor_id = None
-        # story #2315 AC1(오르테가 판정 2026-07-29, 채팅과 "한 글자도 다르지 않게"): 두 호출의
-        # dropped를 **평면 배열 하나**로 합친다 — description·acceptance_criteria 중 어느
-        # 쪽에서 나온 것인지 화면이 구분하지 않는다(#2608 규율 — 화면은 종류로 안 가른다·그
-        # 이유와 같다). dropped 사유 열거형은 채팅 쪽(#2294/#2612)이 이미 SSOT라 여기서
-        # 새로 만들지 않는다.
-        #
-        # story #2269(C-11) AC1: 대괄호 문법(`extract_chat_entity_mentions`)과 맨 번호
-        # (`resolve_bare_number_story_refs`) 결과를 **합쳐서** 한 번에 reconcile한다 — 같은
-        # 대상을 두 문법으로 각각 가리켜도 (target_type, target_id, form) 3튜플이 같아 자연히
-        # 중복 제거된다(reconcile_entity_references의 set 기반 diff, 별도 dedupe 불필요).
-        _ref_stored = 0
-        _ref_dropped: list[dict[str, str]] = []
-        if "description" in data:
-            _desc_text = story.description or ""
-            _desc_pairs = extract_chat_entity_mentions(_desc_text)
-            _desc_bare_refs = await resolve_bare_number_story_refs(
-                db, org_id=repo.org_id, project_id=story.project_id, content=_desc_text,
-            )
-            _desc_result = await reconcile_entity_references(
-                db, org_id=repo.org_id, source_type="story", source_field="description",
-                source_id=story.id,
-                extracted_refs=[(t, i, "mention") for t, i in _desc_pairs] + _desc_bare_refs,
-                created_by=_mention_actor_id,
-            )
-            _ref_stored += _desc_result.stored
-            _ref_dropped.extend(_desc_result.dropped)
-            # story #2328(C-11 ㉡층, PO 판정 2026-07-29): 참조(관찰됨, 위) 위에 「의미 후보」를
-            # 얹는다 — 새 참조만(소급 안 함), 이 write-path가 매 저장마다 도는 것 자체가 "지금
-            # 저장되는 것"이라는 사실을 보장한다. 같은 트랜잭션, 실패 시 story 저장 전체 롤백.
-            await generate_and_store_candidates(
-                db, org_id=repo.org_id, project_id=story.project_id, source_type="story",
-                source_field="description", source_id=story.id, content=_desc_text,
-            )
-        if "acceptance_criteria" in data:
-            _ac_text = story.acceptance_criteria or ""
-            _ac_pairs = extract_chat_entity_mentions(_ac_text)
-            _ac_bare_refs = await resolve_bare_number_story_refs(
-                db, org_id=repo.org_id, project_id=story.project_id, content=_ac_text,
-            )
-            _ac_result = await reconcile_entity_references(
-                db, org_id=repo.org_id, source_type="story", source_field="acceptance_criteria",
-                source_id=story.id,
-                extracted_refs=[(t, i, "mention") for t, i in _ac_pairs] + _ac_bare_refs,
-                created_by=_mention_actor_id,
-            )
-            _ref_stored += _ac_result.stored
-            _ref_dropped.extend(_ac_result.dropped)
-            await generate_and_store_candidates(
-                db, org_id=repo.org_id, project_id=story.project_id, source_type="story",
-                source_field="acceptance_criteria", source_id=story.id, content=_ac_text,
-            )
-        # 채팅(conversations.py)과 동일 게이트: 정상 경로(둘 다 0)에선 필드 자체를 안 싣는다.
-        if _ref_stored or _ref_dropped:
-            story.references = {"stored": _ref_stored, "dropped": _ref_dropped}
+        await _reconcile_story_references_and_candidates(
+            db, org_id=repo.org_id, story=story,
+            check_description="description" in data,
+            check_acceptance_criteria="acceptance_criteria" in data,
+            mention_actor_id=_mention_actor_id,
+        )
 
     # E-STORAGE-SSOT S2: 첨부 교체(attachments 제공) 시 asset registry 재동기화(reconcile·SSOT 정확).
     if "attachments" in data:
