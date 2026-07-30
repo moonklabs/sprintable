@@ -225,6 +225,26 @@ class AnalyticsRepository:
         stories = stories_r.all()
         story_ids = [s.id for s in stories]
 
+        # ⭐PO 판정(2026-07-30, 에픽 없는 막힘 4건 건): "미배정" 레인은 안 만든다(만들면 에픽
+        # 안 다는 것이 "괜찮은 일"이 되어 그 줄이 계속 자란다) — 대신 «에픽 없는 story 전량»을
+        # 셀 수 있게 로그로 남긴다(㉡류와 같은 방식 — 칸은 안 만들되 0이 아니면 누군가 안다).
+        no_epic_count_r = await self.session.execute(
+            select(func.count(Story.id)).where(
+                Story.project_id == project_id,
+                Story.org_id == self.org_id,
+                Story.deleted_at.is_(None),
+                Story.epic_id.is_(None),
+            )
+        )
+        no_epic_count = no_epic_count_r.scalar_one()
+        if no_epic_count:
+            logger.info(
+                "get_epics_progress_lane: epic 없는 story count=%d project_id=%s "
+                "(이 레인 자체에서 영영 안 보임 — story #2224 PO 판정: 미배정 레인을 만들지 "
+                "않고 PO가 직접 에픽에 붙인다, 이 로그는 재발 감지용)",
+                no_epic_count, project_id,
+            )
+
         from app.services.evidence_service import batch_has_evidence, batch_human_verified
 
         evidence_ids = await batch_has_evidence(self.session, story_ids, "story")
