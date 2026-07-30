@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { RoadmapEpic } from '@/services/glance';
 import {
   deriveFlowLaneRows, derivePastRatio, deriveEdgeSummary, FLOW_LANE_CAP,
-  deriveFlowNodeZones, type EpicFlowNodesResponse,
+  deriveFlowNodeZones, type EpicFlowNodesResponse, type EpicsProgressLaneResponse,
 } from './derive-flow';
 
 function makeEpic(overrides: Partial<RoadmapEpic> = {}): RoadmapEpic {
@@ -17,20 +17,56 @@ function makeEpic(overrides: Partial<RoadmapEpic> = {}): RoadmapEpic {
   };
 }
 
+function makeLaneData(overrides: Partial<EpicsProgressLaneResponse> = {}): EpicsProgressLaneResponse {
+  return {
+    epics: {
+      e1: { in_progress: 2, waiting: 3, blocked: 1, stalled: 0, other: 4 },
+    },
+    zones: {
+      e1: { title: 'Epic 1', total: 10, done: 4, pct: 40, past_cnt: 4, now_cnt: 2, upcoming_cnt: 4 },
+    },
+    stall_threshold_hours: 168,
+    stories_without_epic: 0,
+    ...overrides,
+  };
+}
+
 describe('deriveFlowLaneRows', () => {
-  it('maps only the display fields (id/title/done/total/completionPct)', () => {
-    const rows = deriveFlowLaneRows([makeEpic()]);
-    expect(rows).toEqual([{ id: 'e1', title: 'Epic 1', done: 2, total: 10, completionPct: 20 }]);
+  it('reads done/total/completionPct from zones (not roadmap) when laneData has the epic', () => {
+    const rows = deriveFlowLaneRows([makeEpic()], makeLaneData());
+    expect(rows).toEqual([{
+      id: 'e1', title: 'Epic 1', done: 4, total: 10, completionPct: 40,
+      inProgress: 2, waiting: 3, blocked: 1, stalled: 0,
+      pastCnt: 4, nowCnt: 2, upcomingCnt: 4, hasLaneData: true,
+    }]);
+  });
+
+  it('falls back to roadmap done/total/completionPct and all-zero flags when the epic has no lane data (0-story epic)', () => {
+    const rows = deriveFlowLaneRows([makeEpic({ id: 'e2', done: 0, total: 0, completionPct: 0 })], makeLaneData());
+    expect(rows).toEqual([{
+      id: 'e2', title: 'Epic 1', done: 0, total: 0, completionPct: 0,
+      inProgress: 0, waiting: 0, blocked: 0, stalled: 0,
+      pastCnt: 0, nowCnt: 0, upcomingCnt: 0, hasLaneData: false,
+    }]);
+  });
+
+  it('falls back to roadmap fields and hasLaneData=false when laneData itself is null (fetch not done/failed)', () => {
+    const rows = deriveFlowLaneRows([makeEpic()], null);
+    expect(rows).toEqual([{
+      id: 'e1', title: 'Epic 1', done: 2, total: 10, completionPct: 20,
+      inProgress: 0, waiting: 0, blocked: 0, stalled: 0,
+      pastCnt: 0, nowCnt: 0, upcomingCnt: 0, hasLaneData: false,
+    }]);
   });
 
   it('caps at FLOW_LANE_CAP', () => {
     const epics = Array.from({ length: FLOW_LANE_CAP + 5 }, (_, i) => makeEpic({ id: `e${i}` }));
-    const rows = deriveFlowLaneRows(epics);
+    const rows = deriveFlowLaneRows(epics, null);
     expect(rows).toHaveLength(FLOW_LANE_CAP);
   });
 
   it('returns empty array for empty input (no invented rows)', () => {
-    expect(deriveFlowLaneRows([])).toEqual([]);
+    expect(deriveFlowLaneRows([], null)).toEqual([]);
   });
 });
 

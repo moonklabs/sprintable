@@ -44,16 +44,10 @@ export function FlowCanvas({ rows, activeEpicId, edgeCount, projectId }: FlowCan
       <p className="rounded-md border border-dashed border-border px-3 py-2 text-[11px] text-muted-foreground">
         {t('canvasScopeNotice')}
       </p>
-      {/* 유나 규격 — 미수집·미구현·안 그림을 갈라 보이지 않고 "아직 표시하지 않습니다" 한 줄에
-          항목만 합쳐 나열한다(좌 레인의 진행/대기/막힘/멈춤 결핍도 여기 한 곳에 합침, flow-lane.tsx
-          참조). 만료 조건은 화면이 아니라 #2224 본문에 둔다(PO가 직접 기입).
-          ⚠️민의 #2338 교훈 재확認(2026-07-30) — 이 문구는 지금 "그릴 데이터 소스 자체가 없다"는
-          무조건 참인 사실을 말하는 것이라 하드코딩이 안전하다(#2338의 `isPending()`처럼 "데이터가
-          와도 영원히 안 빠지는 조건"이 아니다). PR#2672(좌 레인 4분류) 데이터를 실제로 fetch해
-          붙이는 후속 커밋에서는, 그 fetch 결과의 null/undefined 여부로 이 목록에서 항목을 빼는
-          조건을 반드시 써야 한다 — 지금처럼 무조건 보여주는 문자열로 두면 재료가 와도 안 빠지는
-          같은 함정에 빠진다. */}
-      <p className="px-3 text-[11px] text-muted-foreground/70">{t('canvasNotYetShown')}</p>
+      {/* canvasNotYetShown(진행/대기/막힘/멈춤 결핍 고지) 제거(2026-07-30) — 그 4항목을
+          좌 레인이 실제로 그리기 시작해(#2672 배선, flow-lane.tsx) 더 이상 참이 아닌 문구가
+          됐다(#2338 교훈 그대로 — 데이터가 오면 반드시 빼야 하는 자리). 지금 이 캔버스가 정말
+          안 그리는 것(문·간선·연결 포트·드래그)은 canvasScopeNotice 한 줄로 충분하다. */}
 
       <div className="grid grid-cols-3 gap-2 px-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         <span>{t('canvasPast')}</span>
