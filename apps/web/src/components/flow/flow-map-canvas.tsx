@@ -113,10 +113,16 @@ export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
                   <p className="truncate text-[11px] font-semibold text-foreground">{lane.title}</p>
                 </div>
                 <div className="relative min-w-0 flex-1">
-                  {/* ②「지금」 세로선 — 아티팩트 실측: left 292px, top 0~바닥, 1px, info, opacity .5 */}
+                  {/* ②「지금」 세로선 — PO 정정(2026-07-30): 두께·색·불투명도는 통합 골격
+                      목업 `63b240a4`(정본) 실측 그대로(2px · foreground · opacity .85) —
+                      기존 값(1px · info · .5)은 `be8709a4`(②영역 내부 좌표세부 판) 것이었던
+                      PO 자신의 착오. left는 목업의 절대 560px을 그대로 옮기지 않는다 — 이
+                      캔버스는 폭이 가변(overflow-x-auto)이라 "오늘 눈금의 위치"인
+                      FLOW_MAP_NOW_LINE_X(그리드 규칙상의 지금-눈금)가 정본이지, 목업의 고정
+                      1000px 캔버스 기준 절대좌표가 정본이 아니다. */}
                   <span
                     aria-hidden="true"
-                    className="absolute top-0 bottom-0 w-px bg-info opacity-50"
+                    className="absolute top-0 bottom-0 w-[2px] bg-foreground opacity-[0.85]"
                     style={{ left: FLOW_MAP_NOW_LINE_X }}
                   />
 
