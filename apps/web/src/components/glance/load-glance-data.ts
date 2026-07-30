@@ -117,7 +117,21 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
 
   // 2D 재설계: hero = 현재(active) 에픽의 focal 활성 story. story #2298/#2303부터 story·
   // envelope 재료 전부 `focal_story`(같은 epics(+glance) 응답)에서 나온다 — 추가 fetch 0.
-  const activeEpic = roadmap.find((e) => e.roadmapStatus === 'active') ?? null;
+  //
+  // 결함 fix(2026-07-30, 선생님 직접 발견 — "열린 스토리가 없다고 나오던데"): 이전엔 roadmap
+  // 안에서 status==='active'인 «첫» 에픽을 무조건 집었다. 이 프로젝트엔 active 에픽이 52개나
+  // 동시에 있어(179개 중) "첫 번째"가 실제 진행 상황과 무관하게 뽑혔다 — E-UI-DAEGBYEON(진행중
+  // 스토리 실재)을 두고 E-CHAT-REALTIME(진행중 스토리 0건)이 "지금"으로 뽑혀 초점 스트립이
+  // 항상 빈 채로 뜬 사례가 실측됨. focal_story가 실재하는 active 에픽을 우선한다 — 그런 에픽이
+  // 하나도 없을 때만(=진짜 0건) 기존처럼 첫 active로 폴백(정직한 빈 상태).
+  // ⛔불완전한 처방: active 에픽 52개 중에서도 여전히 roadmap 배열 순서상 «먼저 오는 하나»를
+  // 고르는 것뿐 — "가장 최근에 움직인 에픽"으로 좁히려면 에픽의 updated_at이 필요한데
+  // `BeEpicListItem`엔 created_at만 있고 updated_at이 없다(BE 계약에 없음). 그 필드가
+  // 오면(#미정, BE 후속) "focal_story 있음" 다음 tie-break로 최신순 정렬을 추가한다.
+  const activeEpic =
+    roadmap.find((e) => e.roadmapStatus === 'active' && rawById.get(e.id)?.focal_story) ??
+    roadmap.find((e) => e.roadmapStatus === 'active') ??
+    null;
   const focal = activeEpic ? (rawById.get(activeEpic.id)?.focal_story ?? null) : null;
   const heroStory: HeroStory | null = focal
     ? { id: focal.id, title: focal.title, status: focal.status, assignee_id: focal.assignee_id, assignee_ids: focal.assignee_ids }

@@ -122,6 +122,48 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
     expect(data.heroEnvelope).toBeNull();
   });
 
+  it('picks an active epic that actually has a focal_story over an earlier active epic with none(결함 fix 2026-07-30 — 선생님 실측 "열린 스토리가 없다": active 에픽 다수 중 «첫 번째»가 무조건 뽑혀 실제 진행중 스토리가 있는 다른 active 에픽을 두고 빈 에픽이 hero로 선택되던 버그)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/goals')) {
+        return jsonResponse([
+          { id: 'e-empty', title: 'E-CHAT-REALTIME(진행중 없음)', status: 'active', created_at: '2026-07-01T00:00:00Z', participant_ids: [], focal_story: null },
+          { id: 'e-has-work', title: 'E-UI-DAEGBYEON(진행중 있음)', status: 'active', created_at: '2026-07-02T00:00:00Z', participant_ids: [], focal_story: {
+            id: 's-real', title: '실제 진행중 스토리', status: 'in-progress', assignee_id: null, assignee_ids: [],
+            proof_count: 0, auto_verify: null, gate: null,
+            trust: { self_reported: false, human_verified: false, human_verified_by: null, human_verified_at: null },
+          } },
+        ]);
+      }
+      if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
+      if (url.startsWith('/api/team-members')) return jsonResponse([]);
+      if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
+      if (url.startsWith('/api/glance/attention')) return jsonResponse({ items: [] });
+      return jsonResponse([]);
+    }));
+    const data = await loadGlanceData('proj-multi-active');
+    expect(data.activeEpicTitle).toBe('E-UI-DAEGBYEON(진행중 있음)');
+    expect(data.heroStory?.id).toBe('s-real');
+  });
+
+  it('falls back to the first active epic when none of the active epics have a focal_story(진짜 0건 — 정직한 빈 상태 유지)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/goals')) {
+        return jsonResponse([
+          { id: 'e1', title: 'Epic One', status: 'active', created_at: '2026-07-01T00:00:00Z', participant_ids: [], focal_story: null },
+          { id: 'e2', title: 'Epic Two', status: 'active', created_at: '2026-07-02T00:00:00Z', participant_ids: [], focal_story: null },
+        ]);
+      }
+      if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
+      if (url.startsWith('/api/team-members')) return jsonResponse([]);
+      if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
+      if (url.startsWith('/api/glance/attention')) return jsonResponse({ items: [] });
+      return jsonResponse([]);
+    }));
+    const data = await loadGlanceData('proj-all-empty-active');
+    expect(data.activeEpicTitle).toBe('Epic One');
+    expect(data.heroStory).toBeNull();
+  });
+
   it('unwraps the attention envelope {data:{items}} into attentionSignals — 형상 불일치 crash 없이 실신호 배선', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/api/goals')) return jsonResponse([]);
