@@ -354,26 +354,33 @@ async def _merge_webhook(*, should_close: bool):
                  patch.object(vmod.settings, "github_app_webhook_secret", ""), \
                  patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)), \
                  patch.object(vmod, "capture_pr_ci_verdict",
-                              new=AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None})), \
-                 patch.object(vmod, "advance_story_to_done", new=AsyncMock(return_value=True)) as adv:
+                              new=AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None})):
                 resp = await c.post("/api/v2/internal/verdict/github-webhook", content=body, headers=headers)
-        return resp, adv, session
+        return resp, session
     finally:
         fastapi_app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
-async def test_close_on_merge_confident_advances_story():
-    """merge + confident link(should_auto_close) → advance_story_to_done 호출(done)."""
-    resp, adv, session = await _merge_webhook(should_close=True)
+async def test_close_on_merge_confident_reports_would_close_but_does_not_mutate():
+    """story #2327 PO 판정(2026-07-30, 「머지≠done」규율) — merge + confident link여도 close-on-merge
+
+    정지됐다: session.get(Story)로 실제 조회·mutation을 하지 않고(story.status 안 건드림), 응답의
+    auto_close.closed=False·would_close=True로만 «벌어졌을 일」을 관측 가능하게 남긴다."""
+    resp, session = await _merge_webhook(should_close=True)
     assert resp.status_code == 200
-    adv.assert_awaited_once()  # 단일 헬퍼로 done 진행.
-    assert "auto_close" in resp.text
+    body = resp.json()["data"]
+    assert body["auto_close"] == {
+        "closed": False, "would_close": True, "source": "sid", "confidence": "high",
+        "note": "story #2327 PO 판정 2026-07-30: close-on-merge 정지 — done은 사람 확認 後",
+    }
+    session.get.assert_not_awaited()  # story mutation 경로 자체에 안 감(no-op).
 
 
 @pytest.mark.anyio
 async def test_close_on_merge_skips_when_not_confident():
-    """merge 라도 should_auto_close=False(med/low/text) → advance 미호출(오매치 done 0)."""
-    resp, adv, session = await _merge_webhook(should_close=False)
+    """merge 라도 should_auto_close=False(med/low/text) → auto_close 필드 자체가 안 실림."""
+    resp, session = await _merge_webhook(should_close=False)
     assert resp.status_code == 200
-    adv.assert_not_awaited()
+    assert "auto_close" not in resp.json()["data"]
+    session.get.assert_not_awaited()
