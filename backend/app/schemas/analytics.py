@@ -181,6 +181,12 @@ class EpicFlowNodesResponse(BaseModel):
     now: FlowNodeZone
     upcoming: FlowNodeUpcomingZone
     past: FlowNodePastZone
+    # ⛔story #2679 후속(2026-07-30) — /flow 초점 스트립 4종 수치 중 둘. blocked_count는
+    # get_epics_progress_lane의 lane["blocked"]와 같은 Gate 필터(status 무관, 형제 화면과
+    # 안 갈림). last_changed_at은 「마지막 변경 이후」다 — 「마지막 머지/배포 이후」가 옳은
+    # 정의이나 그 소스가 없어(merged_at 미저장·배포 추적 테이블 없음) 이름을 좁혀 낸다.
+    blocked_count: int
+    last_changed_at: datetime | None
 
 
 class EpicFlowNodesBatchResponse(BaseModel):
