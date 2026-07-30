@@ -10,10 +10,13 @@ GET /evidence·glance proof_count 등 무필터 카운트 자리가 셋 실재�
 ⛔story #2268 후속(2026-07-30, 오르테가 철회·디디 실측): target_id를 ㉡ 셋에서도 선택으로
 내린다 — target_id는 "이전 판정의 id"인데, 처음 쓰는 사람은 이전 판정이 애초에 없어
 가리킬 것이 없다("처음 쓰는 사람은 영원히 못 들어가는 순환"). 실측: 오늘 org 전체 정정
-기록이 1건뿐이었던 것이 이 순환 때문일 공산이 크다. `TARGET_REQUIRED_KINDS`는 이름 그대로
-"필수"가 아니게 됐지만 집합 자체(㉡ 층 분류축, corrections vs active 판별에 계속 쓰임)는
-남긴다 — 이름을 바꾸면 소비자(judgment_core.py의 active/corrections 분류)를 다 훑어야
-하고, 이 변경의 크기가 아니다.
+기록이 1건뿐이었던 것이 이 순환 때문일 공산이 크다.
+
+⛔`TARGET_REQUIRED_KINDS` → `TARGET_LINKABLE_KINDS` 개명(오르테가 재지적, 같은 날): 집합
+자체(㉡ 층 분류축, corrections vs active 판별에 계속 쓰임)는 남기되, 이름의 "REQUIRED"가
+"target_id가 필수인 종류"로 계속 읽혀 다음 사람이 그 이름만 보고 다시 강제를 얹을 위험이
+있었다(오늘 반복 관측한 "이름이 약속하는 축과 실제 축이 다르다" 병과 같은 모양). "할 수
+있다"(linkable)와 "해야 한다"(required)는 다른 말이다 — 실제 뜻하는 것은 전자다.
 
 `source_message_id`(신설, nullable) — 이 판정이 어느 채팅 메시지에서 나왔는지 가리킨다.
 "이미 적은 것을 다시 쓰지 않는" 것이 목적(정정을 statement에 처음부터 다시 서술하지 않고
@@ -42,9 +45,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
 JUDGMENT_KINDS = frozenset({"judgment", "unmeasurable", "retraction", "refinement", "method_error"})
-# ㉡ — 앞선 말에 대한 말(분류축, active/corrections 판별에 쓰임). ⛔2026-07-30부터 target_id를
-# 「요구」하지 않는다(이름은 남기되 스키마 레벨 강제는 뺐다 — 위 모듈 docstring 참조).
-TARGET_REQUIRED_KINDS = frozenset({"retraction", "refinement", "method_error"})
+# ㉡ — 앞선 말에 대한 말(분류축, active/corrections 판별에 쓰임). target_id를 가질 «수
+# 있는» 종류이지 가져야「하는」 종류가 아니다(2026-07-30부터, TARGET_REQUIRED_KINDS에서
+# 개명 — 위 모듈 docstring 참조).
+TARGET_LINKABLE_KINDS = frozenset({"retraction", "refinement", "method_error"})
 JUDGMENT_SCOPES = frozenset({"items", "general"})
 
 

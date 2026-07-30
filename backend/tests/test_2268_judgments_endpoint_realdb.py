@@ -189,7 +189,7 @@ async def test_judgment_insert_does_not_move_evidence_signals():
 
 
 async def test_corrections_uncapped_active_capped_with_accurate_omitted_count():
-    """story #2308(2026-07-29) — 캡 예외가 `TARGET_REQUIRED_KINDS` 전체(retraction·
+    """story #2308(2026-07-29) — 캡 예외가 `TARGET_LINKABLE_KINDS` 전체(retraction·
     refinement·method_error)를 덮는지 증명한다. retraction 하나만 테스트하면 그 회귀가
     다시 들어와도 이 테스트가 못 잡는다 — 셋 다 각각 캡보다 많이 넣어 전량 생존을 본다."""
     from app.main import app
