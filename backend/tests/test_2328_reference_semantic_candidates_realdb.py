@@ -705,3 +705,178 @@ async def test_check_constraint_rejects_invalid_relation_kind_via_raw_sql():
             await s.rollback()
     finally:
         await engine.dispose()
+
+
+# story #2223 후속(2026-07-30, 오르테가군 판정) — 「방금 닫힌 것의 다음」(GET
+# /reference-candidates/next-up). 기간은 필터가 아니라 정렬 가중치 — 전량 반환 + is_recent
+# 플래그. 아래 넷이 그 계약을 실PG로 고정한다.
+
+
+async def _make_candidate_row(session, org_id, source, target, relation_kind=None):
+    from app.models.reference_semantic_candidate import ReferenceSemanticCandidate
+
+    row = ReferenceSemanticCandidate(
+        id=uuid.uuid4(), org_id=org_id, source_type="story", source_field="description",
+        source_id=source.id, target_type="story", target_id=target.id, form="mention",
+        relation_kind=relation_kind, snippet="s", status="estimated",
+    )
+    session.add(row)
+    await session.commit()
+    return row
+
+
+async def test_next_up_returns_all_with_recency_flag_not_filtered():
+    """기간은 자르지 않는다 — recent_days 밖(오래된 소스)도 그대로 응답에 실리되
+    is_recent=false로 뒤로 밀린다."""
+    from sqlalchemy import text as sql_text
+
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+
+            recent_source = await _make_story(s, org.id, project.id, title="Recent Source")
+            recent_source.status = "done"
+            old_source = await _make_story(s, org.id, project.id, title="Old Source")
+            old_source.status = "done"
+            target_recent = await _make_story(s, org.id, project.id, title="Target Recent")
+            target_recent.status = "backlog"
+            target_old = await _make_story(s, org.id, project.id, title="Target Old")
+            target_old.status = "backlog"
+            await s.commit()
+
+            # old_source의 updated_at을 raw SQL로 90일 전으로 밀어둔다 — ORM onupdate=func.now()가
+            # 매 UPDATE마다 되돌리므로 ORM 경로로는 과거 시각을 못 심는다.
+            await s.execute(
+                sql_text("UPDATE stories SET updated_at = now() - interval '90 days' WHERE id = :id"),
+                {"id": old_source.id},
+            )
+            await s.commit()
+
+            await _make_candidate_row(s, org.id, recent_source, target_recent)
+            await _make_candidate_row(s, org.id, old_source, target_old)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(
+                "/api/v2/reference-candidates/next-up",
+                params={"project_id": str(project.id), "recent_days": 14},
+            )
+            assert resp.status_code == 200, resp.text
+            rows = resp.json()
+            assert len(rows) == 2  # 자르지 않음 — 오래된 것도 실린다
+            by_source = {r["source_id"]: r for r in rows}
+            assert by_source[str(recent_source.id)]["is_recent"] is True
+            assert by_source[str(old_source.id)]["is_recent"] is False
+            # 정렬: is_recent=true가 앞
+            assert rows[0]["source_id"] == str(recent_source.id)
+            # FE 문구용 필드
+            assert rows[0]["source_story_number"] == recent_source.story_number
+            assert rows[0]["source_title"] == "Recent Source"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_next_up_excludes_non_done_source_and_non_backlog_target():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+
+            not_done_source = await _make_story(s, org.id, project.id, title="Not Done Source")
+            not_done_source.status = "in-progress"
+            done_source = await _make_story(s, org.id, project.id, title="Done Source")
+            done_source.status = "done"
+            backlog_target = await _make_story(s, org.id, project.id, title="Backlog Target")
+            backlog_target.status = "backlog"
+            done_target = await _make_story(s, org.id, project.id, title="Done Target")
+            done_target.status = "done"
+            await s.commit()
+
+            await _make_candidate_row(s, org.id, not_done_source, backlog_target)  # source 조건 위반
+            await _make_candidate_row(s, org.id, done_source, done_target)  # target 조건 위반
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(
+                "/api/v2/reference-candidates/next-up", params={"project_id": str(project.id)},
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json() == []
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_next_up_scoped_by_project():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project_a = await _make_project(s, org.id, name="Project A")
+            project_b = await _make_project(s, org.id, name="Project B")
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project_a.id)
+
+            source_b = await _make_story(s, org.id, project_b.id, title="Source B")
+            source_b.status = "done"
+            target_b = await _make_story(s, org.id, project_b.id, title="Target B")
+            target_b.status = "backlog"
+            await s.commit()
+            await _make_candidate_row(s, org.id, source_b, target_b)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(
+                "/api/v2/reference-candidates/next-up", params={"project_id": str(project_a.id)},
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json() == []
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_next_up_404_for_project_without_access():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            other_project = await _make_project(s, org.id, name="Other")
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(
+                "/api/v2/reference-candidates/next-up",
+                params={"project_id": str(other_project.id)},
+            )
+            assert resp.status_code == 404
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
