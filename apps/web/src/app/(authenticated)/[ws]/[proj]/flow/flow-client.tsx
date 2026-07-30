@@ -154,7 +154,13 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // 폭을 넘치지 않아도(에픽 수가 적으면 스크롤이 안 생김) 구조를 미리 세워 둔다 — 나중에
           // 노드가 늘어 캔버스가 넓어질 때 이 구조 없이 끼워 넣을 수 없다(구조는 나중에 못 붙인다).
           <div className="flex gap-4">
-            <div className="sticky left-0 z-[1] shrink-0 bg-background">
+            {/* 레인은 캔버스의 «형제»라 스크롤 조상이 아니다 — sticky 불요(옛 시안
+                `.lanes{position:relative}`와 동일 패턴). 전에 `sticky left-0`을 달았었는데
+                그건 트리거할 스크롤 조상이 없어 실제로는 아무것도 안 하는 코드였다(PO 지적
+                2026-07-30 — "무해하나 무의미한 선언은 무해하지 않다", 다음 사람이 "이게 sticky로
+                도는구나"로 오독한다). ⛔구조를 부모-자식(레인이 캔버스 안으로 들어가는 형태)으로
+                바꾸면 그때 sticky가 다시 필요해진다 — 그때 재검토. */}
+            <div className="shrink-0 bg-background">
               <FlowLane rows={laneRows} totalEpicCount={data?.totalEpicCount ?? 0} />
             </div>
             <div className="focus-inset min-w-0 flex-1 overflow-x-auto">
