@@ -226,6 +226,26 @@ jobs:
           fi
           echo "OK: no autocommit_block() calls in migration files"
 
+  # story #2335([클래스 봉인]) — Query(default=None) 센티널이 «직접호출 테스트»를 통해 새는
+  # 클래스를 막는다. 같은 병이 #2191(테스트 주석에만 남고 코드가드 안 고침)→#2659(CI 21건
+  # 실패)로 두 번 났고, 오늘(2026-07-30) 전수 스윕에서 12건 전부 크래시(조용히 틀리는 것 0건)
+  # 임을 확認 — 그래서 41건 개별 수리는 안 하고(AC6, 크래시는 CI가 이미 잡는다) "이 클래스가
+  # 세 번째 나지 않게" 막는 lint만 짓는다. 순수 AST 정적분석 — DB/의존성 불요, python3 stdlib뿐.
+  #
+  # grandfather 베이스라인(scripts/query_sentinel_baseline.txt): lint 도입 시점 develop에
+  # 이미 있던 위반은 실패시키지 않는다(41건 개별 수리는 이 판이 아니라는 AC6 판정 그대로) —
+  # 베이스라인에 없는 **새** 위반만 여기서 빨개진다.
+  query-sentinel-direct-call-lint:
+    name: Query(None) sentinel direct-call lint (guard)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan for Query(...) params missing at router direct-call sites
+        working-directory: backend
+        run: python3 scripts/lint_query_sentinel_direct_calls.py
+
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
   # 못 잡는다(실제로 못 잡아서 prod 승격이 롤백된 그 사고). PR base가 main일 때만 도는 이
