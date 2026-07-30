@@ -82,7 +82,14 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
     return orgSlug && currentProjectSlug ? `/${orgSlug}/${currentProjectSlug}/${resource}` : `/${resource}`;
   }
   const docsHref = resourceHref('docs');
-  const boardHref = resourceHref('board');
+  // story #2224(선생님 정정 2026-07-30, 진입점 전수 스윕) — `/board` 라우트가 삭제되고
+  // `/flow?view=list`로 흡수됐다(PR#2698). "보드로 이동"(goBoard) 라벨은 목적지 콘텐츠(칸반)가
+  // 그대로라 안 바꿨지만, href는 최종 주소를 직접 가리켜야 한다(리다이렉트 경유는 "은퇴한
+  // 주소가 진입점에 살아 있다"는 문제를 남긴다). 쿼리 없는 bare href로 두고 각 사용처가
+  // 자기 쿼리를 직접 이어붙인다(아래 boardHref처럼 미리 합쳐두면 story= 이어붙일 때
+  // `?`가 두 번 생긴다).
+  const flowHref = resourceHref('flow');
+  const boardHref = `${flowHref}?view=list`;
   const ITEMS = useMemo(
     () => STATIC_ITEMS.map((item) => {
       if (item.id === 'go-docs') return { ...item, href: docsHref };

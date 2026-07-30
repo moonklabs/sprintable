@@ -12,8 +12,10 @@ export interface ActionCommandTranslator {
 export interface StoryContext {
   storyId: string;
   storyTitle: string;
-  /** story a539c649 S3d: 이 스토리가 열려있던 board 의 실 path(/{ws}/{proj}/board 또는 아직
-   * ws/proj slug 미해소 시 bare /board — 미들웨어 legacy-redirect 안전망이 받는다). */
+  /** story #2224(선생님 정정 2026-07-30) — 이 스토리가 열려있던 화면의 실 path. `/board`
+   * 삭제 후 `/{ws}/{proj}/flow?view=list`(또는 slug 미해소 시 bare `/flow?view=list` —
+   * proxy.ts MIGRATED_RESOURCES 안전망이 받는다). ⛔이미 `?view=list` 쿼리를 포함하고
+   * 있으므로 story id는 `&`로 이어붙인다(`?`를 또 쓰면 두 번째 `?`가 무효 쿼리로 깨진다). */
   boardHref: string;
 }
 
@@ -42,7 +44,7 @@ export function buildActionCommands(t: ActionCommandTranslator, context?: StoryC
       group: 'action',
       labelKey: 'actionDelegateStory',
       label: t('actionDelegateStory', { title: context.storyTitle }),
-      targetRoute: `${context.boardHref}?story=${context.storyId}`,
+      targetRoute: `${context.boardHref}&story=${context.storyId}`,
       impact: t('actionDelegateStoryImpact', { title: context.storyTitle }),
       danger: false,
     });

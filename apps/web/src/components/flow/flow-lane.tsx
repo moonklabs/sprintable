@@ -48,8 +48,13 @@ export function FlowLane({ rows, totalEpicCount }: FlowLaneProps) {
     return <p className="px-1 py-3 text-xs text-muted-foreground">{t('laneEmpty')}</p>;
   }
 
+  // ⛔결함 fix(2026-07-30, 선생님 실측 지적 — "/flow 모바일 최적화가 하나도 안 됐다") — 옛
+  // `w-full`은 이 컴포넌트가 캔버스 없이 단독 스택으로 쓰이던 시절의 흔적이다. 지금은 항상
+  // `flex` 행의 형제(FlowCanvas와 나란히)라 `w-full`이 행 전체(390px 뷰포트에서도)를 먹어
+  // 캔버스를 0폭으로 밀어냈다(실측: FlowCanvas 렌더 폭 0px). 본격 모바일 재설계는 #2225 —
+  // 이번 판은 "안 깨지게"만: lg 미만에서도 좁은 고정폭으로 캔버스에 자리를 준다.
   return (
-    <div className="w-full shrink-0 space-y-3 border-border lg:w-64 lg:border-r lg:pr-3">
+    <div className="w-32 shrink-0 space-y-3 border-border lg:w-64 lg:border-r lg:pr-3">
       <p className="px-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         {t('laneHeading', { n: totalEpicCount })}
       </p>

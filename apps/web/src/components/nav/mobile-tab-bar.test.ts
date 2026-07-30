@@ -6,7 +6,12 @@ import { describe, expect, it } from 'vitest';
 import { getActiveTabKey, TABS } from './mobile-tab-bar';
 
 describe('getActiveTabKey', () => {
-  it('/glance 및 하위 경로는 now', () => {
+  it('/{ws}/{proj}/flow 및 하위 경로는 now — story #2224, "지금" 탭의 새 목적지', () => {
+    expect(getActiveTabKey('/qa-org/qa-proj/flow')).toBe('now');
+    expect(getActiveTabKey('/qa-org/qa-proj/flow/anything')).toBe('now');
+  });
+
+  it('/glance 및 하위 경로도 계속 now(옛 라우트 — 리다이렉트 경유 도착 대비)', () => {
     expect(getActiveTabKey('/glance')).toBe('now');
     expect(getActiveTabKey('/glance/foo')).toBe('now');
   });
@@ -48,5 +53,10 @@ describe('TABS — story #2279 회귀가드', () => {
   it('approvals 탭은 게이트 탭(/inbox?tab=gates)에 착지한다 — 알림 탭(bare /inbox)이 아니다', () => {
     const approvalsTab = TABS.find((t) => t.key === 'approvals');
     expect(approvalsTab?.href).toBe('/inbox?tab=gates');
+  });
+
+  it('now 탭은 /flow에 착지한다 — story #2224, 옛 /glance(삭제됨)로 조용히 되돌아가지 않는다', () => {
+    const nowTab = TABS.find((t) => t.key === 'now');
+    expect(nowTab?.href).toBe('/flow');
   });
 });

@@ -100,18 +100,18 @@ export function AppSidebar({
   const sprintsLink = resourceLink('sprints');
   const storageLink = resourceLink('storage');
   const goalsLink = resourceLink('goals');
-  const boardLink = resourceLink('board');
   // story #2224(IA v2.2 §7-3, AC12) — 기본 진입은 /flow, 사이드바가 통합뷰를 가리킨다.
-  // 칸반(/board)은 살아 있고 딥링크도 무변경이지만, 사이드바에 board를 flow와 나란히
-  // 1Depth로 세우지 않는다("나란히 두면 「내렸다」가 무효가 된다" — §7-3) — /flow 안의
-  // 보기 전환(?view=kanban)이 "내비 2Depth 이하" 요건을 충족하는 그 자리다.
+  // 칸반은 /flow?view=list로 흡수됐다(PR#2698, `/board` 라우트 자체는 삭제) — 사이드바에
+  // board를 flow와 나란히 1Depth로 세우지 않는다("나란히 두면 「내렸다」가 무효가 된다" —
+  // §7-3) — /flow 안의 보기 전환(?view=list)이 "내비 2Depth 이하" 요건을 충족하는 그 자리다.
   const flowLink = resourceLink('flow');
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
-  // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/board?story={id}` 또는 이관 후
-  // `/{ws}/{proj}/board?story={id}`)에서 열렸을 때만 context 주입. story a539c649 S3d:
-  // boardLink.isActive가 두 형태 모두 판정(리소스별 resourceLink 헬퍼 재사용).
-  const contextStoryId = boardLink.isActive ? (searchParams.get('story') ?? undefined) : undefined;
+  // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/flow?view=list&story={id}`)에서 열렸을
+  // 때만 context 주입. story #2224 정정(2026-07-30): 옛 boardLink.isActive 대신
+  // flowLink.isActive로 판정 — `/board`가 삭제돼 그 판정이 다시는 참이 될 수 없었다(칸반
+  // 보기가 이제 /flow 경로이므로 옛 체크로는 위임 명령이 영영 안 뜨는 조용한 회귀였다).
+  const contextStoryId = flowLink.isActive ? (searchParams.get('story') ?? undefined) : undefined;
 
   // 4dad38d3: 모바일 nav 아이템 선택 후 드로어 auto-close. route 변경 시 닫는다(전 아이템 DRY 커버).
   // 데스크탑은 isMobile 가드로 no-op·백드롭 탭 닫기(Sheet onOpenChange)는 무영향.
@@ -322,7 +322,8 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* ② 작업 / Work — 흐르는 일(보드·스프린트·에픽·현황판·Loop·스탠드업·회고). ia-4zone SSOT 확定. */}
+        {/* ② 작업 / Work — 흐르는 일(흐름·스프린트·목표·Loop·스탠드업·회고). ia-4zone SSOT 확定.
+            board·glance는 /flow로 흡수되며 별도 1Depth 항목이 아니게 됐다(#2224, PR#2698). */}
         <SidebarGroup>
           <SidebarGroupLabel>{t('zoneWork')}</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -330,7 +331,7 @@ export function AppSidebar({
               <SidebarMenuItem>
                 <SidebarMenuButton
                   render={<Link href={flowLink.href} />}
-                  isActive={flowLink.isActive || boardLink.isActive}
+                  isActive={flowLink.isActive}
                   tooltip={t('flow')}
                 >
                   <Workflow />
