@@ -392,6 +392,16 @@ class AnalyticsRepository:
         세 구역(시간축) 정의는 get_epic_flow_nodes(단일)와 100% 동일(한 자리에서만 정의 —
         두 곳이 각자 정의하면 갈린다): ①지금=in-progress+in-review ②이어질=나머지(상위
         upcoming_limit만, 막힌 것>ready-for-dev>나머지 순) ③지나온=done(수만).
+
+        ⛔story #2679 후속(2026-07-30, PO 판정 — /flow 초점 스트립 4종 수치 중 둘): 새 쿼리 없이
+        이미 fetch한 stories/blocked_ids에서 파생만 한다.
+          `blocked_count` — get_epics_progress_lane의 lane["blocked"](analytics.py 참조)와
+            «같은 Gate 필터»를 status와 무관하게 센다(형제 화면과 갈리지 않게).
+          `last_changed_at` — ⛔「멈춘 시간」의 옳은 정의는 「마지막 머지/배포 이후」이나 그
+            소스가 없다(merged_at 저장 안 됨·배포 추적 테이블 없음, PR 본문 참조). 지금 잴 수
+            있는 것은 Story.updated_at 최댓값뿐이라 이름을 「마지막 변경 이후」로 좁혀 낸다 —
+            «재는 것보다 이름이 넓으면 화면이 거짓말한다»(오늘 규율). ISO 문자열 그대로 반환
+            (시간→N시간 환산은 FE 몫, 화면에 시계가 있다).
         """
         requested = list(dict.fromkeys(epic_ids))  # 순서 보존 중복 제거
         processed = requested[: self.EPIC_FLOW_NODES_BATCH_MAX]
@@ -434,10 +444,25 @@ class AnalyticsRepository:
             }
 
         by_epic: dict[uuid.UUID, dict] = {
-            eid: {"now_items": [], "upcoming_all": [], "past_count": 0} for eid in processed
+            eid: {
+                "now_items": [], "upcoming_all": [], "past_count": 0,
+                "blocked_count": 0, "last_changed_at": None,
+            }
+            for eid in processed
         }
         for s in stories:
             bucket = by_epic[s.epic_id]
+            # ⛔story #2679(2026-07-30, PO 판정) — 초점 스트립 「문 앞 N」: 같은 Gate 필터를
+            # get_epics_progress_lane의 lane["blocked"](analytics.py:343)과 동일하게 status와
+            # 무관하게 센다(그 형제 메서드와 갈리면 두 화면이 다른 수를 말한다).
+            if s.id in blocked_ids:
+                bucket["blocked_count"] += 1
+            # ⛔story #2679 「멈춘 시간」 재료 — PO 판정(2026-07-30): 「최근 머지/배포 이후」가
+            # 옳은 정의이나 그 소스가 없다(merged_at·배포 추적 테이블 전무, PR본문 참조).
+            # 지금 잴 수 있는 것은 Story.updated_at 최댓값뿐이라 «마지막 변경 이후»로 이름을
+            # 좁혀 낸다(재는 것보다 이름이 넓으면 화면이 거짓말한다 — 오늘 규율의 거울상).
+            if bucket["last_changed_at"] is None or s.updated_at > bucket["last_changed_at"]:
+                bucket["last_changed_at"] = s.updated_at
             if s.status == "done":
                 bucket["past_count"] += 1
             elif s.status in ("in-progress", "in-review"):
@@ -459,6 +484,10 @@ class AnalyticsRepository:
                     "total": len(upcoming_all), "shown": len(upcoming_shown), "items": upcoming_shown,
                 },
                 "past": {"total": bucket["past_count"]},
+                "blocked_count": bucket["blocked_count"],
+                "last_changed_at": (
+                    bucket["last_changed_at"].isoformat() if bucket["last_changed_at"] else None
+                ),
             })
 
         return {

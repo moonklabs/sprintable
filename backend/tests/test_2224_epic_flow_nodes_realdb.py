@@ -130,6 +130,10 @@ async def test_epic_flow_nodes_three_zones_and_one_call():
             assert body["past"]["total"] == 2
             assert "items" not in body["past"], "지나온 것은 노드로 안 나간다 — 수로만"
 
+            # story #2679 후속(초점 스트립) — blocked_count(story_blocked 1건)·last_changed_at(존재).
+            assert body["blocked_count"] == 1
+            assert body["last_changed_at"] is not None
+
             for node in body["now"]["items"] + body["upcoming"]["items"]:
                 assert set(node.keys()) == {
                     "id", "story_number", "title", "status", "assignee_id", "updated_at",
@@ -211,6 +215,83 @@ async def test_epic_flow_nodes_batch_multiple_epics_one_call_each_query():
             # story 쿼리 1 + gate 쿼리 1(+ project-access 확認용 소수) — 에픽 개수(2)만큼
             # 곱해지지 않는 것이 핵심(N+1이면 훨씬 커진다). 넉넉히 10 미만으로 고정 상한 확認.
             assert query_count["n"] < 10, f"쿼리 수가 큼(N+1 의심): {query_count['n']}"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_epic_flow_nodes_focus_metrics_blocked_count_and_last_changed_at():
+    """story #2679 후속(2026-07-30, /flow 초점 스트립) — blocked_count는 status와 무관하게
+    pending-gate 건수를 세고(get_epics_progress_lane의 lane["blocked"]와 같은 필터),
+    last_changed_at은 그 에픽 스토리들의 updated_at 최댓값(「마지막 변경 이후」— 「마지막
+    머지」가 아님, 그 소스가 없어 이름을 좁혀 낸 것)."""
+    from datetime import datetime
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+
+            from app.models.pm import Goal
+            epic = Goal(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="Epic")
+            s.add(epic)
+            await s.commit()
+
+            older = await _make_story(s, org.id, project.id, title="OLDER")
+            older.epic_id = epic.id
+            older.status = "in-progress"
+            await s.commit()
+
+            blocked_1 = await _make_story(s, org.id, project.id, title="BLOCKED_1")
+            blocked_1.epic_id = epic.id
+            blocked_1.status = "backlog"
+
+            blocked_2 = await _make_story(s, org.id, project.id, title="BLOCKED_2_DONE")
+            blocked_2.epic_id = epic.id
+            blocked_2.status = "done"  # 막힘은 status(zone)와 무관하게 세어야 함
+            await s.commit()
+
+            # ⛔onupdate=func.now()가 커밋 시 실제 시각으로 덮어써 Python에서 과거 시각을
+            # 직접 대입해도 안 먹는다(SQLAlchemy 컬럼 레벨 onupdate가 항상 이긴다) — 그래서
+            # 「나중에 커밋된 것이 더 최근」이라는 자연스러운 순서로 MAX를 검증한다.
+            newest = await _make_story(s, org.id, project.id, title="NEWEST")
+            newest.epic_id = epic.id
+            newest.status = "backlog"
+            await s.commit()
+            await s.refresh(newest)
+            await s.refresh(older)
+
+            from app.models.gate import Gate
+            s.add_all([
+                Gate(
+                    id=uuid.uuid4(), org_id=org.id, work_item_id=blocked_1.id, work_item_type="story",
+                    gate_type="merge", status="pending", requires_human=True, evidence_status="insufficient",
+                ),
+                Gate(
+                    id=uuid.uuid4(), org_id=org.id, work_item_id=blocked_2.id, work_item_type="story",
+                    gate_type="merge", status="pending", requires_human=True, evidence_status="insufficient",
+                ),
+            ])
+            await s.commit()
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(
+                "/api/v2/analytics/epic-flow-nodes",
+                params={"project_id": str(project.id), "epic_id": str(epic.id)},
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["blocked_count"] == 2, "done 상태(blocked_2)도 막힘이면 세어야 함(status 무관)"
+            last_changed = datetime.fromisoformat(body["last_changed_at"])
+            assert last_changed == newest.updated_at, "MAX가 가장 나중에 커밋된 것이어야 함"
+            assert last_changed > older.updated_at, "더 먼저 커밋된 것보다 나중이어야 함"
         finally:
             await client.aclose()
     finally:
