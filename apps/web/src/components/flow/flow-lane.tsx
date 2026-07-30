@@ -15,8 +15,7 @@ interface Flag {
 }
 
 /** 행 하나의 플래그 목록. 유나 목업(eacf5b50, "갈래 — 축척 4층")의 L2 대륙 규격 —
- * 0인 항목은 생략(범위가 아니라 "지금 이 목표에 실제로 걸려 있는 것"만 말한다), 전부 0이면
- * 걸린 것이 없다는 뜻이므로 중립 "이상 없음" 하나로 정직하게 대신한다. */
+ * 0인 항목은 생략(범위가 아니라 "지금 이 목표에 실제로 걸려 있는 것"만 말한다). */
 function buildFlags(row: FlowLaneRow): Flag[] {
   const flags: Flag[] = [];
   if (row.blocked > 0) flags.push({ key: 'blocked', count: row.blocked, tone: 'warn' });
@@ -77,8 +76,12 @@ export function FlowLane({ rows, totalEpicCount }: FlowLaneProps) {
               {!row.hasLaneData ? (
                 <p className="text-[10px] text-muted-foreground/70">{t('laneUnknown')}</p>
               ) : flags.length === 0 ? (
+                // PO 지적(2026-07-30) — 플래그 넷이 다 0인 것은 "완료"(done===total)와 "아직
+                // 아무도 안 잡음"(done<total, 백로그뿐)의 서로 다른 두 사실을 가릴 수 있다.
+                // "이상 없음" 한 문구로 덮으면 오늘 하루 반복 잡은 그 병(다른 것을 같은 말로
+                // 덮는 것)의 재발이라 — zones에 이미 있는 done/total로 갈라 각자 정직하게 말한다.
                 <span className="inline-block rounded border border-border px-1 py-0.5 text-[10px] text-muted-foreground">
-                  {t('laneFlagNone')}
+                  {row.done === row.total ? t('laneComplete') : t('laneNotStarted')}
                 </span>
               ) : (
                 <div className="flex flex-wrap gap-1">
