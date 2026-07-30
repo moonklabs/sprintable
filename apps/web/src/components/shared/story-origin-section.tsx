@@ -5,6 +5,7 @@ import { FileText, MessageSquare, Calendar, BookOpen } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { getEntityHref } from '@/components/chat/embed-card';
+import { parseCursorMeta } from '@/lib/pagination';
 import type { BacklinkItem } from './entity-backlinks-section';
 import { deriveStoryOrigin } from './derive-story-origin';
 
@@ -53,6 +54,43 @@ interface LoadedResult {
   items: BacklinkItem[];
 }
 
+interface BacklinksPage {
+  data?: BacklinkItem[];
+  meta?: unknown;
+}
+
+// story #2267(C-9) AC4/AC7 — PO 지적(2026-07-30): /backlinks는 커서 페이지네이션(기본
+// limit=30, created_at DESC)이라 `data.some(...)`을 첫 페이지에만 걸면 거짓 「미수집」이
+// 난다 — created_from은 스토리 생성 시 «단 한 번» 기록되는 유일 행이라 창조 시점이 곧
+// created_at이고, 그 뒤에 쌓인 멘션이 30건만 넘어도 DESC 정렬에서 통째로 뒤 페이지로
+// 밀려난다(있는데 «없다»고 하는 것). ⇒ limit=200(BE 상한)으로 크게 물고, 못 찾으면
+// has_more를 따라 다음 페이지까지 이어 찾는다. MAX_PAGES=10(최대 2000건)은 방어적
+// 상한일 뿐 — created_from은 유일 행이므로 실사용에서 이 상한에 걸릴 일은 없다.
+const PAGE_LIMIT = 200;
+const MAX_PAGES = 10;
+
+async function findOriginAcrossPages(storyId: string, signal: { cancelled: boolean }): Promise<BacklinkItem[] | 'failed'> {
+  let cursor: string | null = null;
+  let collected: BacklinkItem[] = [];
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const params = new URLSearchParams({ limit: String(PAGE_LIMIT) });
+    if (cursor) params.set('before', cursor);
+    const res = await fetch(`/api/stories/${storyId}/backlinks?${params}`, { cache: 'no-store' });
+    if (signal.cancelled) return collected;
+    if (!res.ok) return 'failed';
+    const json = await res.json() as BacklinksPage;
+    const items = json.data ?? [];
+    collected = collected.concat(items);
+    if (items.some((i) => i.relation === 'created_from')) break; // 찾았으면 더 안 넘긴다.
+    // #2231 AC4 — 커서 페이지네이션 meta는 parseCursorMeta()로만 읽는다(직접 옵셔널 체이닝
+    // 금지, 저장소 전수 가드 테스트가 새 자리를 잡는다).
+    const pageMeta = parseCursorMeta(json.meta, 'story-origin-section');
+    if (!pageMeta.hasMore || !pageMeta.nextCursor) break; // 다 봤다(진짜 없거나 미수집).
+    cursor = pageMeta.nextCursor;
+  }
+  return collected;
+}
+
 /**
  * story #2267(C-9) AC4/AC7 — 「무엇에서 만들었나」(출처)를 「어느 그룹에 속하는가」
  * (컨테이너: epic/sprint/meeting_id)와 별도 섹션으로 그린다. relation==='created_from'인
@@ -64,16 +102,15 @@ export function StoryOriginSection({ storyId }: StoryOriginSectionProps) {
   const [result, setResult] = useState<LoadedResult | 'failed' | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/stories/${storyId}/backlinks`, { cache: 'no-store' })
-      .then((r) => (r.ok ? (r.json() as Promise<{ data?: BacklinkItem[] }>) : null))
-      .then((json) => {
-        if (cancelled) return;
-        if (!json) { setResult('failed'); return; }
-        setResult({ storyId, items: json.data ?? [] });
+    const signal = { cancelled: false };
+    findOriginAcrossPages(storyId, signal)
+      .then((outcome) => {
+        if (signal.cancelled) return;
+        if (outcome === 'failed') { setResult('failed'); return; }
+        setResult({ storyId, items: outcome });
       })
-      .catch(() => { if (!cancelled) setResult('failed'); });
-    return () => { cancelled = true; };
+      .catch(() => { if (!signal.cancelled) setResult('failed'); });
+    return () => { signal.cancelled = true; };
   }, [storyId]);
 
   // 조용한 폴백 — EntityBacklinksSection과 동형(로딩/실패/전환-중 노이즈 없음).

@@ -88,6 +88,58 @@ describe('StoryOriginSection', () => {
     expect(link?.getAttribute('href')).toBe('/chats/conv1?messageId=msg1');
   });
 
+  it('PO 지적(2026-07-30) — created_from이 둘째 페이지에 있어도 찾아낸다(첫 페이지엔 멘션만 30+건)', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (!url.includes('before=')) {
+        // 1페이지 — 멘션뿐, has_more=true.
+        return new Response(JSON.stringify({
+          data: [{ id: 'm1', source_type: 'doc', source_id: 'd1', created_by: null, created_at: '2026-07-29T00:00:00Z', relation: 'none', still_exists: true, doc: { id: 'd1', title: '최근 멘션' }, message: null, meeting: null, story: null }],
+          meta: { next_cursor: 'cursor-2', has_more: true },
+        }));
+      }
+      // 2페이지(before=cursor-2) — 진짜 출처가 여기.
+      return new Response(JSON.stringify({
+        data: [{ id: 'origin1', source_type: 'doc', source_id: 'd2', created_by: null, created_at: '2026-07-01T00:00:00Z', relation: 'created_from', still_exists: true, doc: { id: 'd2', title: '원본 설계 문서' }, message: null, meeting: null, story: null }],
+        meta: { next_cursor: null, has_more: false },
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await render('s1');
+    expect(container.textContent).toContain('원본 설계 문서');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]![0]).toContain('before=cursor-2');
+  });
+
+  it('첫 페이지에서 찾으면 둘째 페이지를 더 안 부른다(호출 낭비 없음)', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: 'origin1', source_type: 'doc', source_id: 'd1', created_by: null, created_at: '2026-07-30T00:00:00Z', relation: 'created_from', still_exists: true, doc: { id: 'd1', title: '즉시 발견' }, message: null, meeting: null, story: null }],
+      meta: { next_cursor: 'cursor-2', has_more: true },
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+    await render('s1');
+    expect(container.textContent).toContain('즉시 발견');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('전 페이지를 다 봐도(has_more 소진) 못 찾으면 미수집 문구로 정직하게 닫는다', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (!url.includes('before=')) {
+        return new Response(JSON.stringify({
+          data: [{ id: 'm1', source_type: 'doc', source_id: 'd1', created_by: null, created_at: '2026-07-29T00:00:00Z', relation: 'none', still_exists: true, doc: { id: 'd1', title: '멘션1' }, message: null, meeting: null, story: null }],
+          meta: { next_cursor: 'cursor-2', has_more: true },
+        }));
+      }
+      return new Response(JSON.stringify({
+        data: [{ id: 'm2', source_type: 'doc', source_id: 'd2', created_by: null, created_at: '2026-07-01T00:00:00Z', relation: 'none', still_exists: true, doc: { id: 'd2', title: '멘션2' }, message: null, meeting: null, story: null }],
+        meta: { next_cursor: null, has_more: false },
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await render('s1');
+    expect(container.textContent).toContain('출처 미수집');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('fetch 실패 시 조용히 아무것도 안 그린다(EntityBacklinksSection과 동형)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 500 })));
     await render('s1');
