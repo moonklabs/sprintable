@@ -249,7 +249,8 @@ async def test_adopt_already_adopted_409():
 
 
 @pytest.mark.anyio
-async def test_adopt_cross_project_403():
+async def test_adopt_cross_project_404():
+    """story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일."""
     from app.routers.retros import adopt_next_hypothesis
     from app.schemas.retro import AdoptNextHypothesis
 
@@ -260,7 +261,7 @@ async def test_adopt_cross_project_403():
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
                 await adopt_next_hypothesis(SESSION_B, AdoptNextHypothesis(id=CANDIDATE_ID), db=s, auth=_auth(), repo=_repo(s))
-            assert ei.value.status_code == 403
+            assert ei.value.status_code == 404
     finally:
         await eng.dispose()
 
