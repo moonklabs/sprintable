@@ -6,7 +6,8 @@ import {
   FLOW_MAP_GRID_STEP, FLOW_MAP_NOW_LINE_X, FLOW_MAP_DEPTH0_X, computeLaneHeight, shouldShowNoDeeperReason,
   computeNodePositions, computeSupersededNodeIds, computeEdgeLineEndpoints, groupEdgesByEndpoints,
   edgeGroupStrokeWidth, PAST_BUNDLE_NODE_ID, PAST_BUNDLE_LEFT, PAST_BUNDLE_TOP, PAST_BUNDLE_CARD_WIDTH,
-  PAST_BUNDLE_CARD_HEIGHT,
+  PAST_BUNDLE_CARD_HEIGHT, PAST_EXPANDED_LEFT, PAST_EXPANDED_TOP_START, PAST_EXPANDED_ROW_HEIGHT,
+  PAST_EXPANDED_BOX_WIDTH,
 } from './derive-flow-map';
 
 // 카드 실측(FlowMapNodeCard): w-[110px], 높이는 두 줄 텍스트+padding으로 24px 안팎(NODE_ROW_HEIGHT
@@ -27,6 +28,14 @@ interface FlowMapCanvasProps {
    * 안 흔들린다(이유 셋 중 둘째·셋째). `?view=list&story={id}`로 기존 KanbanBoard 오픈
    * 경로를 그대로 탄다(딥링크가 이미 쓰는 그 길, 새 패널을 짓지 않는다). */
   onSelectStory: (storyId: string) => void;
+  /** 유나양 규격(아티팩트 a125909a, "누르면 펼쳐지는 것이 곧 줌인") — 묶음 카드를 누르면
+   * 호출부(FlowEpicNodes)가 개별 과거 스토리를 fetch해 `pastItems`로 다시 넘긴다. 오늘은
+   * 레인이 늘 하나(펼친 에픽 하나)라 콜백에 lane 식별자가 없다 — `onSelectStory`와 같은
+   * 자리(오늘의 단일-레인 구조에 내일의 여러-레인 모양을 미리 맞추는 대신, 지금은 콜백
+   * 자체를 단순하게 둔다. 멀티레인이 오면 epicId 인자를 추가하는 것으로 끝난다). */
+  onTogglePastBundle: () => void;
+  /** fetch 진행 중 — 묶음 카드가 "불러오는 중…"을 보이는 자리. */
+  isPastBundleLoading: boolean;
 }
 
 // PO 지적(2026-07-30) — 판을 갈아엎으며 색/모양(border-left)만 남기고 「status를 사람이
@@ -43,6 +52,7 @@ const STATUS_LABEL_KEY: Record<string, string> = {
 
 function nodeToneClass(node: FlowMapNode): string {
   if (node.kind === 'now') return 'border-l-info';
+  if (node.kind === 'past') return 'border-l-border'; // 펼친 과거 — 끝난 것이라 점선(미착수 표시) 아님
   if (node.status === 'blocked') return 'border-l-destructive';
   return 'border-l-border border-dashed'; // .n.queue — 아직 시작 안 한 것은 점선
 }
@@ -50,11 +60,14 @@ function nodeToneClass(node: FlowMapNode): string {
 function FlowMapNodeCard({ node, left, top, superseded, onSelectStory }: { node: FlowMapNode; left: number; top: number; superseded: boolean; onSelectStory: (storyId: string) => void }) {
   const t = useTranslations('flow');
   const statusKey = STATUS_LABEL_KEY[node.status];
+  // 유나양 규격(아티팩트 a125909a `.nd.past{opacity:.62}`) — 펼친 과거 카드는 항상 흐림
+  // (대체-확認 흐림과 별개 사정 — 이미 끝난 일이라는 사실 자체를 흐림으로 나타낸다).
+  const dimmed = superseded || node.kind === 'past';
   return (
     <button
       type="button"
       onClick={() => onSelectStory(node.id)}
-      className={`focus-inset absolute w-[110px] cursor-pointer overflow-visible rounded border border-l-[3px] border-border bg-card px-1.5 py-1 text-left text-[11px] shadow-sm hover:border-info/60 ${nodeToneClass(node)} ${superseded ? 'opacity-50' : ''}`}
+      className={`focus-inset absolute w-[110px] cursor-pointer overflow-visible rounded border border-l-[3px] border-border bg-card px-1.5 py-1 text-left text-[11px] shadow-sm hover:border-info/60 ${nodeToneClass(node)} ${dimmed ? 'opacity-50' : ''}`}
       style={{ left, top }}
     >
       <div className="flex items-center justify-between gap-1 font-mono text-[9px] text-muted-foreground">
@@ -133,7 +146,7 @@ function FlowEdgeMarkerDefs() {
  * (PO 지시 — "한 레인 전용으로 짜지 마시는, 처음부터 레인 배열을 받는 형태로"). 오늘은 이
  * 배열의 길이가 늘 1(펼친 에픽 하나) — 멀티레인 계약이 오면 호출부만 배열을 채워 넘기면 된다.
  */
-export function FlowMapCanvas({ lanes, onSelectStory }: FlowMapCanvasProps) {
+export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPastBundleLoading }: FlowMapCanvasProps) {
   const t = useTranslations('flow');
   const maxDepth = Math.max(0, ...lanes.flatMap((l) => Array.from(l.queueNodesByDepth.keys())));
   const canvasWidth = FLOW_MAP_DEPTH0_X + (maxDepth + 1) * FLOW_MAP_GRID_STEP + 20;
@@ -251,16 +264,16 @@ export function FlowMapCanvas({ lanes, onSelectStory }: FlowMapCanvasProps) {
                     <p className="absolute left-3 top-2 text-[11px] text-muted-foreground">{t('flowMapLaneEmpty')}</p>
                   ) : null}
 
-                  {/* ④과거 묶음 카드 — 유나양 규격(아티팩트 a125909a, "묶음이 선을 통과시킨다")
-                      3줄: ①무엇이 몇 개 접혔나 ②접힌 것끼리 이어진 수(볼 수 없는 것, 안
-                      그리는 것과 없는 것은 다르다는 규율 그대로 수로 정직하게) ③접힌 것이
-                      지금·미래로 보낸 수(볼 수 있는 것 — 선생님 "후속 작업이 어떻게 준비되고
-                      연결되는가" 물음의 직접적인 답). BE past:{total}엔 개별 스토리 id가
-                      없어(스키마 자체 없음) 낱개 카드는 못 짓는다 — 그래도 이 3줄은 간선
-                      집계만으로 계산 가능(deriveFlowMapLane의 pastBundle). */}
-                  {lane.pastTotal > 0 ? (
-                    <div
-                      className="absolute rounded border border-border bg-muted px-1.5 py-1 opacity-75"
+                  {/* ④과거 묶음 카드 — 유나양 규격(아티팩트 a125909a, "묶음이 선을 통과시킨다").
+                      접힌 상태(pastNodes 비어있음): 3줄(무엇이 몇 개 접혔나 · 접힌 것끼리
+                      이어진 수(볼 수 없는 것, 수로 정직하게) · 접힌 것이 지금·미래로 보낸
+                      수(볼 수 있는 것 — 선생님 "후속 작업이 어떻게 준비되는가" 물음의 답))
+                      + 클릭하면 펼쳐진다("누르면 펼쳐지는 것이 곧 줌인" — 별도 줌 컨트롤 불요). */}
+                  {lane.pastTotal > 0 && lane.pastNodes.length === 0 ? (
+                    <button
+                      type="button"
+                      onClick={onTogglePastBundle}
+                      className="focus-inset absolute cursor-pointer rounded border border-border bg-muted px-1.5 py-1 text-left opacity-75 hover:border-brand/60"
                       style={{ left: PAST_BUNDLE_LEFT, top: PAST_BUNDLE_TOP, width: PAST_BUNDLE_CARD_WIDTH }}
                     >
                       <div className="font-mono text-[9px] font-semibold text-foreground">
@@ -272,8 +285,47 @@ export function FlowMapCanvas({ lanes, onSelectStory }: FlowMapCanvasProps) {
                       <div className="text-[9px] font-semibold text-brand">
                         {t('flowMapPastOutgoingCount', { n: lane.pastBundle.outgoingCount })}
                       </div>
+                      <div className="text-[9px] text-muted-foreground">
+                        {isPastBundleLoading ? t('flowMapPastLoading') : t('flowMapPastExpandHint')}
+                      </div>
+                    </button>
+                  ) : null}
+
+                  {/* 펼친 상태 — 개별 과거 카드가 낱개로 서고, 위 간선 SVG가 이미 이 좌표
+                      (computeNodePositions의 'past-expanded' 열)로 직접 그려진다. 다시
+                      누르면 접힌다("다시 누르면 접힙니다", 유나양 규격 그대로). */}
+                  {lane.pastNodes.length > 0 ? (
+                    <div
+                      className="absolute rounded border border-dashed border-brand/50 bg-brand/[0.03] px-2 pb-2 pt-5"
+                      style={{
+                        left: PAST_BUNDLE_LEFT, top: PAST_BUNDLE_TOP,
+                        width: PAST_EXPANDED_BOX_WIDTH,
+                        height: PAST_EXPANDED_TOP_START - PAST_BUNDLE_TOP + lane.pastNodes.length * PAST_EXPANDED_ROW_HEIGHT,
+                      }}
+                    >
+                      <span className="absolute -top-[9px] left-2 bg-card px-1 font-mono text-[9.5px] text-brand">
+                        {t('flowMapPastCount', { n: lane.pastTotal })} · {t('flowMapPastExpandedCaption')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={onTogglePastBundle}
+                        className="focus-inset absolute right-1 top-1 text-[9px] text-muted-foreground underline"
+                      >
+                        {t('flowMapPastCollapseHint')}
+                      </button>
                     </div>
                   ) : null}
+
+                  {lane.pastNodes.map((node, i) => (
+                    <FlowMapNodeCard
+                      key={node.id}
+                      node={node}
+                      left={PAST_EXPANDED_LEFT}
+                      top={PAST_EXPANDED_TOP_START + i * PAST_EXPANDED_ROW_HEIGHT}
+                      superseded={supersededIds.has(node.id)}
+                      onSelectStory={onSelectStory}
+                    />
+                  ))}
 
                   {lane.nowNodes.map((node, i) => (
                     <FlowMapNodeCard key={node.id} node={node} left={NOW_CLUSTER_X} top={4 + i * NODE_ROW_HEIGHT} superseded={supersededIds.has(node.id)} onSelectStory={onSelectStory} />

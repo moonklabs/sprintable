@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { UPCOMING_LIMIT, type EpicFlowNodesResponse } from './derive-flow';
+import { UPCOMING_LIMIT, type EpicFlowNodeItem, type EpicFlowNodesResponse } from './derive-flow';
 import {
   deriveFlowMapLane, parseDependencyGraphEdges, parseReferenceCandidateEdges,
-  type FlowMapLane, type RawDependencyEdge, type RawReferenceCandidate,
+  type FlowMapEdge, type FlowMapLane, type RawDependencyEdge, type RawReferenceCandidate,
 } from './derive-flow-map';
 import { FlowMapCanvas } from './flow-map-canvas';
+import { parseCursorMeta } from '@/lib/pagination';
 
 interface FlowEpicNodesProps {
   projectId: string;
@@ -19,12 +20,50 @@ interface FlowEpicNodesProps {
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'error' }
-  | { kind: 'ready'; lane: FlowMapLane };
+  | { kind: 'ready'; data: EpicFlowNodesResponse; edges: FlowMapEdge[] };
 
 function unwrap<T>(json: unknown): T | null {
   if (!json || typeof json !== 'object') return null;
   const d = (json as { data?: unknown }).data;
   return (d ?? json) as T;
+}
+
+interface RawStoryListPage {
+  data: Array<{ id: string; story_number: number; title: string; status: string }>;
+  meta: unknown;
+}
+
+/** 유나양 규격(아티팩트 a125909a, "누르면 펼쳐지는 것이 곧 줌인") — 묶음 카드를 누르면 이
+ * 에픽의 done 스토리 «전부»를 가져온다(잘라내지 않는다, PO 판정 2026-07-30 — "많으니 미리
+ * 잘라 두자는 안 하시는"). 페이지가 나뉘면(FE 프록시 `maxLimit:100`) cursor를 따라간다.
+ *
+ * ⛔`project_id`를 «일부러» 안 넣는다 — `status`+`project_id`를 같이 보내면 BE가 "board
+ * 분기"(`list_board`)로 빠지는데, 그 분기가 `status==='done'`일 때 «최근 7일·최대 10건»을
+ * 하드코딩으로 자른다(라이브 실측, 2026-07-30 — 오르테가군이 직접 겪은 offset 무시보다 한
+ * 겹 더 나쁜 함정: 어떤 limit을 줘도 안 늘어난다). `project_id` 없이 `epic_id`+`status=done`
+ * 만 보내면 그 분기를 안 타고 일반 `repo.list()` 경로로 가 그 제한이 없다(인가는
+ * `_org_filter()`만으로 충분 — org 스코프가 SSOT라 project_id 생략이 인가 누수를 안 만드는
+ * 것까지 코드로 확認했다, 2026-07-30). 이 주석 없이 project_id를 「빠뜨린 것 같다」며
+ * 되돌리면 다시 깨진다 — 오르테가군이 명시로 짚은 자리.
+ */
+async function fetchAllDonePastItems(epicId: string): Promise<EpicFlowNodeItem[]> {
+  const items: EpicFlowNodeItem[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < 50; page += 1) { // 안전 상한(무한루프 방어) — 5000건 넘는 done은 오늘 없다.
+    const params = new URLSearchParams({ epic_id: epicId, status: 'done', limit: '100' });
+    if (cursor) params.set('cursor', cursor);
+    const res = await fetch(`/api/stories?${params.toString()}`);
+    if (!res.ok) break;
+    const json: RawStoryListPage = await res.json();
+    const rows = Array.isArray(json.data) ? json.data : [];
+    for (const s of rows) {
+      items.push({ id: s.id, story_number: s.story_number, title: s.title, status: s.status, assignee_id: null, updated_at: '' });
+    }
+    const page = parseCursorMeta(json.meta, 'FlowEpicNodes.fetchAllDonePastItems');
+    if (!page.hasMore || !page.nextCursor) break;
+    cursor = page.nextCursor;
+  }
+  return items;
 }
 
 /**
@@ -40,6 +79,11 @@ function unwrap<T>(json: unknown): T | null {
 export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory }: FlowEpicNodesProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  // 유나양 규격(아티팩트 a125909a) — 「펼침 상태」는 «묶음 단위»로 든다(오르테가군 지시:
+  // "노드 단위로 들면 묶음이 안 서는" — 노드가 아니라 이 레인의 과거 묶음 «하나»가 펼쳐진
+  // 상태를 표현). 오늘은 레인이 늘 하나(펼친 에픽 하나)라 컴포넌트 지역 상태로 충분하다.
+  const [pastItems, setPastItems] = useState<EpicFlowNodeItem[]>([]);
+  const [isPastBundleLoading, setIsPastBundleLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,6 +106,11 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory }: F
     // 두 출처를 `parseReferenceCandidateEdges`/`parseDependencyGraphEdges`로 각각 정규화한
     // 뒤 하나의 FlowMapEdge[] 로 합친다 — 렌더 레이어(FlowMapCanvas)는 출처를 모른다.
     // 실패해도 전체를 죽이지 않는다(간선은 보강 정보, 노드가 핵심 — 부분 실패는 부분만 표시).
+    //
+    // ⛔자가발견 결함(2026-07-30, PR#2709 "묶음이 선을 통과시킨다" 배포 후 재검토 중, hotfix
+    // PR#2710로 해소) — "양끝 다 now/upcoming에 있는 것만" 미리 걸러내던 필터가 있으면 과거
+    // (done) 스토리에 닿은 간선은 deriveFlowMapLane에 «도달하기도 전에» 사라진다. 분류(양끝
+    // 살아있음/한쪽만/양끝 과거)는 deriveFlowMapLane 내부의 몫이라 여기서 미리 안 거른다.
     Promise.all([
       fetch(`/api/analytics/epic-flow-nodes?project_id=${projectId}&epic_id=${epicId}&upcoming_limit=${UPCOMING_LIMIT}`)
         .then((r) => (r.ok ? r.json() : null))
@@ -83,15 +132,8 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory }: F
       const dependencyEdges = parseDependencyGraphEdges(graph?.edges ?? []);
       const rawCandidates: RawReferenceCandidate[] = Array.isArray(candidatesJson) ? candidatesJson : [];
       const candidateEdges = parseReferenceCandidateEdges(rawCandidates);
-      // ⛔자가발견 결함(2026-07-30, PR#2709 "묶음이 선을 통과시킨다" 배포 후 재검토 중) —
-      // "양끝 다 now/upcoming(=살아있음)에 있는 것만" 미리 걸러내던 이 필터가 있으면, 과거
-      // (done) 스토리에 닿은 간선은 deriveFlowMapLane에 «도달하기도 전에» 사라진다. 즉
-      // PR#2709의 묶음-해소 로직(양끝 살아있음/한쪽만 과거/양끝 과거 3분류)이 볼 재료 자체가
-      // 없어져 그 PR 전체가 라이브에서 죽은 코드가 되는 구조였다 — 분류는 이제
-      // deriveFlowMapLane 내부의 몫이라 여기서 미리 걸러내지 않는다. 원시 edges를 그대로 넘긴다.
       const edges = [...dependencyEdges, ...candidateEdges];
-      const lane = deriveFlowMapLane(epicId, epicTitle, data.past.total, data.now.items, data.upcoming.items, edges);
-      setState({ kind: 'ready', lane });
+      setState({ kind: 'ready', data, edges });
     }).catch(() => {
       if (!cancelled) setState({ kind: 'error' });
     });
@@ -100,12 +142,43 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory }: F
     };
   }, [projectId, epicId, epicTitle]);
 
+  // 에픽이 바뀌면(다른 행을 펼치면) 펼침 상태를 들고 가지 않는다 — 「이 묶음이 펼쳐졌나」는
+  // 이 레인 소유라 다른 에픽으로 넘어가면 리셋되는 게 맞다. 별도 리셋 effect가 필요 없는
+  // 이유: flow-canvas.tsx가 단일 아코디언(`isExpanded ? <FlowEpicNodes .../> : null`)이라
+  // 다른 행을 펼치면 이 컴포넌트«전체»가 언마운트→새 마운트된다 — `epicId`가 이미 마운트된
+  // 채로 바뀌는 경우 자체가 없다(pastItems 초기값 `[]`가 항상 새 마운트의 값).
+  const handleTogglePastBundle = useCallback(() => {
+    if (pastItems.length > 0) {
+      setPastItems([]); // 다시 누르면 접힌다(유나양 규격 그대로).
+      return;
+    }
+    setIsPastBundleLoading(true);
+    fetchAllDonePastItems(epicId)
+      .then((items) => setPastItems(items))
+      .finally(() => setIsPastBundleLoading(false));
+  }, [epicId, pastItems.length]);
+
+  const lane: FlowMapLane | null = useMemo(() => {
+    if (state.kind !== 'ready') return null;
+    return deriveFlowMapLane(
+      epicId, epicTitle, state.data.past.total, state.data.now.items, state.data.upcoming.items,
+      state.edges, pastItems,
+    );
+  }, [state, pastItems, epicId, epicTitle]);
+
   if (state.kind === 'loading') {
     return <p className="px-2 py-2 text-[11px] text-muted-foreground">{t('nodesLoading')}</p>;
   }
-  if (state.kind === 'error') {
+  if (state.kind === 'error' || !lane) {
     return <p className="px-2 py-2 text-[11px] text-muted-foreground">{t('nodesError')}</p>;
   }
 
-  return <FlowMapCanvas lanes={[state.lane]} onSelectStory={onSelectStory} />;
+  return (
+    <FlowMapCanvas
+      lanes={[lane]}
+      onSelectStory={onSelectStory}
+      onTogglePastBundle={handleTogglePastBundle}
+      isPastBundleLoading={isPastBundleLoading}
+    />
+  );
 }

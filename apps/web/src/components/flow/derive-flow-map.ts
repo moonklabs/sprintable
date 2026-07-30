@@ -149,7 +149,7 @@ export interface FlowMapBundleStats {
   outgoingCount: number;
 }
 
-export type FlowMapNodeKind = 'now' | 'queue';
+export type FlowMapNodeKind = 'now' | 'queue' | 'past';
 
 export interface FlowMapNode {
   id: string;
@@ -185,6 +185,11 @@ export interface FlowMapLane {
   edges: FlowMapEdge[];
   /** 과거 묶음 카드 3줄 중 2·3줄의 재료 — 위 FlowMapBundleStats 참고. */
   pastBundle: FlowMapBundleStats;
+  /** 유나양 규격(아티팩트 a125909a, "펼친 상태") — 묶음 카드를 누르면 이 배열이 채워지고
+   * 카드는 사라져 개별 노드로 갈라진다("이것이 곧 줌인"). 비어 있으면 접힌 상태(오늘 기본).
+   * BE `past:{total}`엔 개별 항목이 없어 호출부가 별도 fetch(`GET /api/stories?epic_id=&
+   * status=done`, project_id는 빼야 함 — board 7일/10건 분기를 피하는 자리)로 채워 넘긴다. */
+  pastNodes: FlowMapNode[];
 }
 
 /** 정렬 규칙(판C) — "막힘 › 다음 지정됨 › 나머지". "다음 지정됨"에 대응하는 실 데이터
@@ -203,6 +208,7 @@ export function deriveFlowMapLane(
   nowItems: EpicFlowNodeItem[],
   upcomingItems: EpicFlowNodeItem[],
   edges: FlowMapEdge[] = [],
+  pastItems: EpicFlowNodeItem[] = [],
 ): FlowMapLane {
   const nowNodes: FlowMapNode[] = nowItems.map((item) => ({
     id: item.id,
@@ -241,21 +247,37 @@ export function deriveFlowMapLane(
     }
   }
 
+  // 유나양 규격(아티팩트 a125909a, "펼친 상태") — 묶음 카드를 누르면(호출부가 pastItems를
+  // 채워 넘기면) 과거 스토리도 개별 좌표를 갖는다. depth 개념이 없어(과거는 "이전에 끝난"
+  // 것이라 의존 깊이를 다시 셀 이유가 없다) 항상 depth 0.
+  const pastNodes: FlowMapNode[] = pastItems.map((item) => ({
+    id: item.id,
+    storyNumber: item.story_number,
+    title: item.title,
+    status: item.status,
+    kind: 'past',
+    depth: 0,
+  }));
+  const isPastExpanded = pastNodes.length > 0;
+
   const renderedIds = new Set<string>(nowNodes.map((n) => n.id));
   for (const nodes of queueNodesByDepth.values()) {
     for (const n of nodes) renderedIds.add(n.id);
   }
+  for (const n of pastNodes) renderedIds.add(n.id);
+
   // 유나양 규격(2026-07-30, "묶음이 선을 통과시키게") — «살아있는»(now/upcoming 어느 쪽으로든
-  // BE가 실제로 준) id의 전체 집합. renderedIds(TOP_N에 잘린 것 제외)보다 넓다 — 잘린 것과
+  // BE가 실제로 준) id의 전체 집합. renderedIds(TOP_N에 잘린 것 제외)보다 좁다 — 잘린 것과
   // 과거는 다른 사정이라 가른다: 잘린 건 "그릴 좌표가 없어 오늘은 못 그림"(기존 그대로,
-  // 이 판에서 손 안 댐), 과거는 "카드 자체가 없어 «묶음»으로 몰아 그림"(이번 판의 신규).
+  // 이 판에서 손 안 댐), 과거는 "카드 자체가 없어 «묶음»으로 몰아 그림"(펼치면 개별 좌표).
   const aliveIds = new Set<string>([...nowItems, ...upcomingItems].map((i) => i.id));
 
   // pastTotal=0이면 now+upcoming이 이 에픽의 전부라는 뜻 — 그 경우 aliveIds 밖의 id는
   // "과거"가 아니라 «이 에픽 소속이 아니거나 실재하지 않는» 참조다(묶을 카드 자체가 없다).
   // 그런 참조까지 묶음으로 몰면 존재하지 않는 카드로 선이 향하는 유령이 된다 — pastTotal>0
-  // 일 때만 "aliveIds 밖=과거"로 해석한다.
-  const hasPastBundle = pastTotal > 0;
+  // «이고 아직 안 펼쳤을» 때만 "aliveIds 밖=과거"로 해석한다. 펼친 뒤엔 pastNodes가 이미
+  // renderedIds에 들어 있어 이 분기 자체가 필요 없다(양끝 다 개별 좌표로 바로 그려진다).
+  const hasPastBundle = pastTotal > 0 && !isPastExpanded;
 
   const renderableEdges: FlowMapEdge[] = [];
   let internalCount = 0;
@@ -266,7 +288,7 @@ export function deriveFlowMapLane(
     if (fromRendered && toRendered) {
       renderableEdges.push(e);
     } else if (!hasPastBundle) {
-      continue; // 묶음 카드 자체가 없다 — 기존 동작 그대로 드롭.
+      continue; // 묶음 카드 자체가 없다(펼쳤거나 애초에 과거가 0) — 기존 동작 그대로 드롭.
     } else if (!aliveIds.has(e.fromNodeId) && !aliveIds.has(e.toNodeId)) {
       internalCount += 1; // 양끝 다 과거 — 카드에서 나와 카드로 돌아가는 고리, 그릴 수 없다.
     } else if (!aliveIds.has(e.fromNodeId) && toRendered) {
@@ -282,6 +304,7 @@ export function deriveFlowMapLane(
   return {
     epicId, title, pastTotal, nowNodes, queueNodesByDepth, overflows, edges: renderableEdges,
     pastBundle: { total: pastTotal, internalCount, outgoingCount },
+    pastNodes,
   };
 }
 
@@ -290,7 +313,7 @@ export function deriveFlowMapLane(
  * 열 안에서의 순번(위에서부터 0,1,2…) — 오늘의 카드 렌더 순서(now는 nowNodes 순서, queue는
  * queueNodesByDepth의 그 depth 배열 순서)와 정확히 같다. */
 export interface FlowMapLogicalPosition {
-  column: 'now' | 'past-bundle' | number;
+  column: 'now' | 'past-bundle' | 'past-expanded' | number;
   row: number;
 }
 
@@ -306,6 +329,16 @@ export const PAST_BUNDLE_TOP = 4;
 export const PAST_BUNDLE_CARD_WIDTH = 110;
 export const PAST_BUNDLE_CARD_HEIGHT = 52;
 
+// 펼친 상태(유나양 규격, "opened" 박스) — 개별 과거 카드는 일반 카드보다 작다(mockup
+// .nd.past 실측 비율 그대로: 132/190 ≈ .69 폭, 좁은 카드). 박스 상단에 캡션("완료 N·펼쳐짐")
+// 자리를 두고 그 아래로 카드가 쌓인다.
+export const PAST_EXPANDED_LEFT = PAST_BUNDLE_LEFT + 10;
+export const PAST_EXPANDED_TOP_START = PAST_BUNDLE_TOP + 22; // 박스 캡션 높이
+export const PAST_EXPANDED_CARD_WIDTH = 90;
+export const PAST_EXPANDED_CARD_HEIGHT = 24;
+export const PAST_EXPANDED_ROW_HEIGHT = 28;
+export const PAST_EXPANDED_BOX_WIDTH = 172; // mockup 실측(.opened width:190 - 여백)
+
 /** BE 응답(now/queue 노드) → 노드별 논리 좌표. 화면 픽셀이 «전혀» 등장하지 않는다 — 이
  * 자리가 "데이터가 정하는 것"과 "축척이 정하는 것"의 경계(오르테가군 지시 2026-07-30,
  * 축척 스토리 착수 前 정지 작업: "지금 x = depth × GRID_STEP로 논리 좌표가 곧 화면 픽셀이라
@@ -320,9 +353,15 @@ export function computeNodeLogicalPositions(lane: FlowMapLane): Map<string, Flow
       positions.set(node.id, { column: depth, row: i });
     });
   }
-  // 과거 묶음 카드 — pastTotal이 있을 때만 위치를 준다(그릴 카드 자체가 없으면 위치도 없다,
-  // "완료 N·묶음" 카드의 기존 조건부 렌더 `pastTotal > 0`과 정확히 같은 조건).
-  if (lane.pastTotal > 0) {
+  // 유나양 규격(아티팩트 a125909a) — 펼친 상태(pastNodes가 채워짐)면 개별 과거 노드가
+  // 각자 좌표를 갖고, 묶음 카드(집계) 자리는 사라진다("카드를 누르면 안의 노드가 낱개로
+  // 서는" — 집계 카드와 펼친 개별 카드가 동시에 있지 않다). 접힌 상태(pastNodes 비어있고
+  // pastTotal>0)일 때만 묶음 앵커 하나.
+  if (lane.pastNodes.length > 0) {
+    lane.pastNodes.forEach((node, i) => {
+      positions.set(node.id, { column: 'past-expanded', row: i });
+    });
+  } else if (lane.pastTotal > 0) {
     positions.set(PAST_BUNDLE_NODE_ID, { column: 'past-bundle', row: 0 });
   }
   return positions;
@@ -352,6 +391,11 @@ export function projectToScreen(
     // 과거 묶음 카드는 depth 그리드 밖의 고정 앵커 — flow-map-canvas.tsx의 카드 렌더링과
     // 정확히 같은 값(PAST_BUNDLE_LEFT/TOP)을 쓴다(단일 소스, 위 now/queue와 동일 원칙).
     return { left: PAST_BUNDLE_LEFT, top: PAST_BUNDLE_TOP };
+  }
+  if (position.column === 'past-expanded') {
+    // 펼친 박스 안에서 세로로 쌓인다 — 축척과 무관한 고정 앵커(오늘은 묶음처럼 depth 그리드
+    // 밖). scale이 이 열에도 적용될지는 축척 스토리가 정할 몫(오늘은 항상 scale=1이라 무해).
+    return { left: PAST_EXPANDED_LEFT, top: PAST_EXPANDED_TOP_START + position.row * PAST_EXPANDED_ROW_HEIGHT };
   }
   const left = position.column === 'now'
     ? config.nowClusterX
@@ -499,8 +543,15 @@ export function computeLaneHeight(lane: FlowMapLane, nodeRowHeight: number, minH
   const maxColumnCount = Math.max(1, nowColumnCount, ...queueColumnCounts);
   // 과거 묶음 카드(묶음-간선 후속, 3줄로 늘어난 뒤 PAST_BUNDLE_CARD_HEIGHT가 한 행보다
   // 커질 수 있다) — 그 높이도 레인 높이 후보에 넣는다(안 넣으면 카드가 레인 밖으로 넘친다).
-  const pastBundleHeight = lane.pastTotal > 0 ? PAST_BUNDLE_TOP + PAST_BUNDLE_CARD_HEIGHT : 0;
-  return Math.max(minHeight, maxColumnCount * nodeRowHeight, pastBundleHeight);
+  const pastBundleHeight = lane.pastTotal > 0 && lane.pastNodes.length === 0
+    ? PAST_BUNDLE_TOP + PAST_BUNDLE_CARD_HEIGHT
+    : 0;
+  // 펼친 상태 — PO 판정 2026-07-30("많으니 미리 잘라 두자는 안 하시는, 먼저 다 그려 보고
+  // 읽히는지를 재는 것이 순서") 그대로 개수를 미리 자르지 않는다. 레인이 그만큼 커진다.
+  const pastExpandedHeight = lane.pastNodes.length > 0
+    ? PAST_EXPANDED_TOP_START + lane.pastNodes.length * PAST_EXPANDED_ROW_HEIGHT
+    : 0;
+  return Math.max(minHeight, maxColumnCount * nodeRowHeight, pastBundleHeight, pastExpandedHeight);
 }
 
 /** ⑥ 조건부 문구(PO 판정 2026-07-30) 트리거 — depth 0 열은 있는데 depth 1 이상이 «전혀»
