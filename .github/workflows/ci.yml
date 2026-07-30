@@ -309,6 +309,57 @@ jobs:
             echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 query_sentinel_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #2335 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
           fi
 
+  project-access-403-lint:
+    name: has_project_access 403 lint (guard, story #2342)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for has_project_access denial raising 403 (should be 404)
+        working-directory: backend
+        run: python3 scripts/lint_project_access_403.py
+      # story #2335와 동일 계약 — 베이스라인은 «줄기만» 허용한다(2026-07-30 발견: #2342
+      # 스코프 밖에 22곳이 더 있어 지금 당장 못 고친다 — 새로 늘리는 것만 막는다).
+      - name: "Verify baseline can only shrink (story #2342 — no new grandfather entries)"
+        working-directory: backend
+        run: |
+          set -e
+          PR_BASE_REF="${{ github.event.pull_request.base.ref }}"
+          PUSH_BEFORE_SHA="${{ github.event.before }}"
+          COMPARE_REF=""
+          COMPARE_LABEL=""
+          if [ -n "$PR_BASE_REF" ]; then
+            git fetch origin "$PR_BASE_REF" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="PR base:$PR_BASE_REF"
+          elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git fetch origin "$PUSH_BEFORE_SHA" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="push-before:$PUSH_BEFORE_SHA"
+          fi
+          if [ -n "$COMPARE_REF" ] && git show "$COMPARE_REF:backend/scripts/project_access_403_baseline.txt" > /tmp/base_baseline.txt 2>/dev/null; then
+            grep -vE '^#|^$' /tmp/base_baseline.txt | sort -u > /tmp/base_sorted.txt
+            grep -vE '^#|^$' scripts/project_access_403_baseline.txt | sort -u > /tmp/head_sorted.txt
+            new_lines=$(comm -13 /tmp/base_sorted.txt /tmp/head_sorted.txt || true)
+            base_count=$(wc -l < /tmp/base_sorted.txt | tr -d ' ')
+            head_count=$(wc -l < /tmp/head_sorted.txt | tr -d ' ')
+            echo "baseline entries: base($COMPARE_LABEL)=$base_count head=$head_count"
+            if [ -n "$new_lines" ]; then
+              echo "FAIL: 베이스라인에 «새» 항목이 추가됐다 — 이 파일은 줄기만 허용한다(story #2342)." \
+                   "새 위반은 여기 grandfather로 넣지 말고 실제로 고치는(403→404) 것이 맞다:"
+              echo "$new_lines"
+              exit 1
+            fi
+            echo "OK: baseline은 늘지 않았다(줄었으면 환영 — 그만큼 사이트가 고쳐진 것)"
+          elif [ -z "$COMPARE_REF" ]; then
+            echo "baseline growth check skipped: no comparison base (PR context 아님 + push-before 미상 — 예: 새 브랜치 최초 push)"
+          else
+            echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 project_access_403_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #2342 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
+          fi
+
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
   # 못 잡는다(실제로 못 잡아서 prod 승격이 롤백된 그 사고). PR base가 main일 때만 도는 이

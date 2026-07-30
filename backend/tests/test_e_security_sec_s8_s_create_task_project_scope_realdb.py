@@ -116,8 +116,8 @@ async def _setup_app(app, Session, user_id, org_id):
 
 @pytest.mark.anyio
 async def test_no_grant_human_cannot_create_task_on_other_project_story():
-    """S 재현: project_a에만 grant된 휴먼이 project_b의 story_id로 task 생성 시도 → 403
-    (기존엔 org-scope만 봐서 201로 통과했음)."""
+    """S 재현: project_a에만 grant된 휴먼이 project_b의 story_id로 task 생성 시도 → 404
+    (기존엔 org-scope만 봐서 201로 통과했음). story #2342(2026-07-30): 403이 아니다."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -135,7 +135,7 @@ async def test_no_grant_human_cannot_create_task_on_other_project_story():
                     "title": "Injected Task",
                 },
             )
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 404, resp.text
         finally:
             await client.aclose()
     finally:

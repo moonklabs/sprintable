@@ -1,0 +1,28 @@
+# story #2342(2026-07-30) lint_project_access_403.py 그랜드파더 베이스라인.
+# 이 lint를 처음 켠 시점 develop에 이미 있던 「has_project_access 거부 → 403」 22곳(고유
+# (파일,함수) 키 기준, attachments.py::authorize_attachment는 두 자리를 가져 1키로 묶임).
+# #2342 스코프(task/doc/retro 4개 헬퍼)는 전부 고쳐서 이 목록에 없다 — 여기 남은 것은
+# #2342보다 큰 범위(별건 전수 스윕 후보, PO 판단 대기)다. 새 위반만 CI를 막는다 —
+# 이 파일에서 항목을 빼는 것(=고치는 것)은 환영, 늘리는 것은 CI가 막는다.
+app/routers/agent_runs.py::create_agent_run
+app/routers/agent_runs.py::list_agent_runs
+app/routers/assets.py::_scope_filter
+app/routers/assets.py::create_folder
+app/routers/assets.py::list_folders
+app/routers/attachments.py::authorize_attachment
+app/routers/auth.py::set_default_project
+app/routers/context_pack.py::search_context_pack
+app/routers/current_project.py::set_current_project
+app/routers/docs.py::_require_doc_project_access
+app/routers/docs.py::register_doc_asset
+app/routers/docs.py::upload_doc_attachment
+app/routers/evidence.py::_assert_work_item_access
+app/routers/file_locks.py::list_file_locks
+app/routers/gate_config.py::get_gate_config
+app/routers/goals.py::steer_dispatch
+app/routers/meetings.py::_get_repo
+app/routers/project_settings.py::get_project_settings
+app/routers/standups.py::add_feedback
+app/routers/stories.py::delete_story
+app/routers/stories.py::upload_story_attachment
+app/routers/team_members.py::claim_story
