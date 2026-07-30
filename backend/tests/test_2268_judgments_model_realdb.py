@@ -5,8 +5,9 @@ AC를 #2268에 박는 중, 이 PR은 그 위에 다른 사람이 안전하게 �
   ①kind 허용목록
   ②scope 허용목록
   ③scope↔work_item_ids 쌍 강제("아직 안 붙임"과 "어디에도 안 붙는 것"을 스키마가 가른다)
-  ④㉡(retraction/refinement/method_error)은 target_id NOT NULL 강제
+  ④㉡(retraction/refinement/method_error)의 target_id는 선택(2026-07-30부터 — 뒤집힘, 아래 참조)
   ⑤target_id는 judgments 자기참조 FK
+  ⑥source_message_id(신설, 2026-07-30) — nullable, 값이 그대로 저장/왕복되는지
 """
 from __future__ import annotations
 
@@ -139,17 +140,19 @@ async def test_items_scope_with_work_item_ids_accepted():
         await engine.dispose()
 
 
-# ─── ④㉡ target_id NOT NULL 강제 ─────────────────────────────────────────────
+# ─── ④㉡ target_id 선택(2026-07-30부터, 오르테가 철회) ─────────────────────────
 
 
 @pytest.mark.parametrize("kind", ["retraction", "refinement", "method_error"])
-async def test_meta_kind_without_target_id_rejected(kind):
+async def test_meta_kind_without_target_id_now_accepted(kind):
+    """⛔뒤집힘(2026-07-30): target_id NOT NULL 강제를 CHECK에서 뺐다 — target_id는
+    "이전 판정의 id"인데 처음 쓰는 사람은 이전 판정이 없어 가리킬 것이 없었다(순환).
+    이 테스트는 예전엔 IntegrityError를 기대했다 — 지금은 정반대로 성공을 확認한다."""
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             s.add(_judgment(kind=kind, target_id=None))
-            with pytest.raises(IntegrityError, match="ck_judgments_target_required_for_meta_kinds"):
-                await s.commit()
+            await s.commit()
     finally:
         await engine.dispose()
 
@@ -222,5 +225,43 @@ async def test_method_error_stores_method_for_backtrace():
                 )
             ).scalars().all()
             assert {r.id for r in rows} == {original.id, correction.id}
+    finally:
+        await engine.dispose()
+
+
+# ─── source_message_id(신설, 2026-07-30) ────────────────────────────────────
+
+
+async def test_source_message_id_round_trips():
+    """이 판정이 나온 채팅 메시지를 가리키는 nullable 컬럼 — "이미 적은 것을 다시 안 쓰게"
+    하는 목적. FK 없음(느슨한 참조, 이 프로젝트 관례)."""
+    engine, Session = await _session_factory()
+    try:
+        msg_id = uuid.uuid4()
+        async with Session() as s:
+            j = _judgment(kind="judgment", source_message_id=msg_id)
+            s.add(j)
+            await s.commit()
+            row_id = j.id
+
+        async with Session() as s:
+            from sqlalchemy import select
+            from app.models.judgment import Judgment
+            row = (
+                await s.execute(select(Judgment).where(Judgment.id == row_id))
+            ).scalar_one()
+            assert row.source_message_id == msg_id
+    finally:
+        await engine.dispose()
+
+
+async def test_source_message_id_defaults_to_none():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            j = _judgment(kind="judgment")
+            s.add(j)
+            await s.commit()
+            assert j.source_message_id is None
     finally:
         await engine.dispose()

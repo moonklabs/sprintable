@@ -1,7 +1,7 @@
 """story #2268(D단계, E-CONNECT — "판단 칸") — judgments write/read 코어.
 
 AC(오르테가, 2026-07-29): pull 전용 — 「물으면 준다」, push 금지. `corrections`(앞선 말에
-대한 말 — retraction·refinement·method_error, `TARGET_REQUIRED_KINDS`와 동일 집합)는 상한과
+대한 말 — retraction·refinement·method_error, `TARGET_LINKABLE_KINDS`와 동일 집합)는 상한과
 무관하게 항상 전체(캡 예외 — "철회된 걸 다시 주장 안 하는가"가 이 판의 판정기준이므로 여기서
 잘리면 그 기준 자체가 무너진다). `active`(judgment/unmeasurable — corrections 아닌 나머지)는
 "다음 발 수" 기준으로 캡 — 지금 실측 가능한 랭킹 신호가 recency뿐이라 그걸로 자르고
@@ -12,7 +12,7 @@ collection_scope 정직성 패턴과 동형).
 하나로만 좁혀 썼다 — AC 원문 「retractions는 상한과 무관하게 전량」이 «집합의 정의»가 아니라
 «원소 이름 하나»를 썼기 때문(정확한 독해였지만 좁은 표현이 구현을 좁혔다). 결과: 셋 중 가장
 넓게 번지는 `method_error`(그 판단 + 같은 방법으로 낸 다른 모든 말을 무효화)가 캡에 가장 먼저
-걸리는, 설계 목적과 정반대인 상태였다. 지금은 `TARGET_REQUIRED_KINDS`(모델에 이미 있는 상수)를
+걸리는, 설계 목적과 정반대인 상태였다. 지금은 `TARGET_LINKABLE_KINDS`(모델에 이미 있는 상수)를
 캡 예외 집합으로 직접 파생해 쓴다 — 종류를 손으로 다시 나열하지 않는다(새 correction 종류가
 생기면 자동으로 따라온다). 응답 필드도 `retractions`→`corrections`로 개명(내용이 이제 셋을
 담으므로 이름이 하나만 가리키면 거짓이 된다) — 이 필드의 실제 소비자는 이 저장소 안(router
@@ -26,7 +26,7 @@ app-level 검증을 먼저 하는 이유(#2259 reference_core.insert_reference�
 제약이 지킨다"가 이 판의 crux, 오르테가 표현).
 
 ⛔story #2308 후속(2026-07-29, 오르테가 라이브 dogfooding — #2302에 실제 write→read 왕복):
-`active`의 축은 "철회됐나"가 아니라 "말의 층위"(kind가 TARGET_REQUIRED_KINDS 밖인가)라서,
+`active`의 축은 "철회됐나"가 아니라 "말의 층위"(kind가 TARGET_LINKABLE_KINDS 밖인가)라서,
 이미 retraction의 target이 된 judgment도 `active`에 그대로 남는다(설계대로 — 버그 아님).
 그런데 필드 이름이 "active"라 그 목록만 읽는 소비자는 철회된 판단을 유효한 것으로 오독한다.
 `corrections` 원소도 같은 함정이 있다 — method_error는 "그 판단 + 같은 방법으로 낸 다른
@@ -47,7 +47,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.judgment import JUDGMENT_KINDS, JUDGMENT_SCOPES, TARGET_REQUIRED_KINDS, Judgment
+from app.models.judgment import JUDGMENT_KINDS, JUDGMENT_SCOPES, TARGET_LINKABLE_KINDS, Judgment
 
 DEFAULT_ACTIVE_LIMIT = 20
 
@@ -67,7 +67,11 @@ async def create_judgment(
     method: str | None,
     statement: str,
     created_by: uuid.UUID,
+    source_message_id: uuid.UUID | None = None,
 ) -> Judgment:
+    """⛔2026-07-30(오르테가 철회 — target_id 순환 실측): target_id는 ㉡(TARGET_LINKABLE_KINDS)
+    셋에서도 이제 선택이다 — 처음 쓰는 사람은 가리킬 이전 판정이 없다. 더 이상 필수로
+    막지 않는다(아래 존재-검증만 target_id가 «주어졌을 때» 수행)."""
     if kind not in JUDGMENT_KINDS:
         raise InvalidJudgmentError(f"kind must be one of {sorted(JUDGMENT_KINDS)}")
     if scope not in JUDGMENT_SCOPES:
@@ -78,10 +82,6 @@ async def create_judgment(
         raise InvalidJudgmentError("scope='general'이면 work_item_ids는 비어 있어야 합니다(일반 교훈)")
     if scope == "items" and not work_item_ids:
         raise InvalidJudgmentError("scope='items'면 work_item_ids가 최소 1개 필요합니다(아직 안 붙인 상태 금지)")
-    if kind in TARGET_REQUIRED_KINDS and target_id is None:
-        raise InvalidJudgmentError(
-            f"kind={kind!r}는 target_id가 필수입니다(무엇에 대한 말인지 모르는 {kind}는 저장 금지)"
-        )
 
     if target_id is not None:
         target_exists = (
@@ -95,7 +95,7 @@ async def create_judgment(
     judgment = Judgment(
         id=uuid.uuid4(), org_id=org_id, scope=scope, work_item_ids=list(work_item_ids),
         kind=kind, target_id=target_id, method=method, statement=statement,
-        created_by=created_by,
+        created_by=created_by, source_message_id=source_message_id,
     )
     session.add(judgment)
     await session.flush()
@@ -125,12 +125,12 @@ async def list_judgments(
     correction_rows = (
         await session.execute(
             select(Judgment)
-            .where(*filters, Judgment.kind.in_(TARGET_REQUIRED_KINDS))
+            .where(*filters, Judgment.kind.in_(TARGET_LINKABLE_KINDS))
             .order_by(Judgment.created_at.desc())
         )
     ).scalars().all()
 
-    active_filters = [*filters, Judgment.kind.not_in(TARGET_REQUIRED_KINDS)]
+    active_filters = [*filters, Judgment.kind.not_in(TARGET_LINKABLE_KINDS)]
     total_active = (
         await session.execute(select(func.count(Judgment.id)).where(*active_filters))
     ).scalar_one()

@@ -17,17 +17,20 @@ class AddJudgmentInput(SprintableInput):
     kind: str  # judgment | unmeasurable | retraction | refinement | method_error
     statement: str
     work_item_ids: list[str] = []
-    target_id: str | None = None  # ㉡(retraction/refinement/method_error)은 필수
+    # ⛔2026-07-30부터 선택(retraction/refinement/method_error 포함) — 이전 판정을 몰라도
+    # 남길 수 있다(target_id는 "이전 판정의 id"인데 처음 쓰는 사람은 그게 없어 순환에 갇혔다).
+    target_id: str | None = None
     method: str | None = None  # method_error 역추적 축
+    source_message_id: str | None = None  # 이 판정이 나온 채팅 메시지(이미 적은 것을 다시 안 쓰게)
 
 
 async def add_judgment(args: AddJudgmentInput) -> list[TextContent]:
     """판단(judgment)·못 잰 것(unmeasurable)·철회(retraction)·정련(refinement)·세는 법
     틀림(method_error)을 남긴다. Evidence와 별개 — "됐다"의 증거가 아니라 "이렇게 판단했다/
     이 판단은 틀렸다"는 판정 자체를 기록한다. scope="general"이면 work_item_ids는 비워야
-    하고(특정 작업과 무관한 일반 교훈), scope="items"면 최소 1개 필요하다. retraction/
-    refinement/method_error는 target_id(무엇에 대한 말인지)가 필수 — 없으면 서버가 422로
-    거절한다."""
+    하고(특정 작업과 무관한 일반 교훈), scope="items"면 최소 1개 필요하다. target_id(무엇에
+    대한 말인지)는 선택이다 — 있으면 이 org에 실재하는 판정이어야 한다(없으면 422). 이
+    도구는 append-only다(수정/삭제 없음) — 잘못 남겼으면 retraction으로 새로 남긴다."""
     try:
         payload: dict = {
             "scope": args.scope, "kind": args.kind, "statement": args.statement,
@@ -37,6 +40,8 @@ async def add_judgment(args: AddJudgmentInput) -> list[TextContent]:
             payload["target_id"] = args.target_id
         if args.method is not None:
             payload["method"] = args.method
+        if args.source_message_id is not None:
+            payload["source_message_id"] = args.source_message_id
         result = await client.post("/api/v2/judgments", json=payload)
         return ok(result)
     except Exception as exc:
