@@ -61,12 +61,17 @@ class AgentRunRepository:
         return run
 
     async def update(self, id: uuid.UUID, **fields: Any) -> AgentRun | None:
+        """⛔story #2346 AC1(2026-07-30): 예전엔 result_summary·last_error_code만 `v is not
+        None or k in (...)` 특례로 «항상» 덮어썼다 — caller가 그 필드를 아예 안 준 요청도
+        None으로 지웠다(생략 vs 명시적 null을 이 계층에서 구분 못 함). 이제 caller(라우터)가
+        exclude_unset=True로 «실제로 요청에 있던 필드만» 넘긴다는 계약이므로, 이 메서드는
+        받은 것을 그대로 적용하기만 한다 — 특례 불필요(fields에 있다는 것 자체가 "이 값으로
+        설정하라"는 의도, None이 와도 그건 명시적 비우기)."""
         run = await self.get(id)
         if run is None:
             return None
         for k, v in fields.items():
-            if v is not None or k in ("result_summary", "last_error_code"):
-                setattr(run, k, v)
+            setattr(run, k, v)
         await self.session.flush()
         await self.session.refresh(run)
         return run
