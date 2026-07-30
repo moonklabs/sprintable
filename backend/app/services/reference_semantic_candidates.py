@@ -236,6 +236,28 @@ async def generate_and_store_candidates(
     )
 
 
+async def list_candidates_for_epic_stories(
+    db: AsyncSession, *, org_id: uuid.UUID, epic_id: uuid.UUID,
+) -> list[ReferenceSemanticCandidate]:
+    """story #2223 후속(오르테가군 판정, 2026-07-30) — 캔버스는 에픽 하나치 후보를 «한 번에»
+    받아야 한다. story별 왕복(`/stories/{id}/reference-candidates`, N+1)으로는 못 쓴다 —
+    stories JOIN으로 그 에픽 소속 story 전체의 candidate를 한 쿼리로 반환한다. 새 재료를
+    만들지 않는다(같은 `reference_semantic_candidates` 표, 조회 축만 다르다)."""
+    from app.models.pm import Story
+
+    result = await db.execute(
+        select(ReferenceSemanticCandidate)
+        .join(Story, ReferenceSemanticCandidate.source_id == Story.id)
+        .where(
+            ReferenceSemanticCandidate.org_id == org_id,
+            ReferenceSemanticCandidate.source_type == "story",
+            Story.epic_id == epic_id,
+        )
+        .order_by(ReferenceSemanticCandidate.created_at.asc())
+    )
+    return list(result.scalars().all())
+
+
 async def list_candidates_for_source(
     db: AsyncSession, *, org_id: uuid.UUID, source_type: str, source_id: uuid.UUID,
 ) -> list[ReferenceSemanticCandidate]:
