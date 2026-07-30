@@ -442,6 +442,25 @@ async def _process_webhook_event(
     if native_ci_state is not None:
         result = {**result, "native_ci": {"state": native_ci_state, "reason": native_ci_reason}}
 
+    # ⭐story #2327 후속(PO 판정, 2026-07-30, PR#2685 실 웹훅 시험대가 드러낸 갭) — merge 시
+    # PullRequestStoryLink 에도 쓴다. `Verdict`(record_verdict, 위 capture_pr_ci_verdict 안)에도
+    # 쓰고 `PullRequestStoryLink`(여기)에도 쓴다 — 전자는 «신뢰/게이트 축» · 후자는 «UI 가 읽는
+    # 링크 축»(GET /api/v2/integrations/github/links, github_integration.py). **둘이 갈리면 화면과
+    # 판정이 다른 말을 한다** — 그래서 같은 이벤트에서 둘 다 쓴다(중복이 아니라 각자 다른 소비처).
+    # ⛔여기서 도달한 story_id는 항상 confident 매치(explicit/auto-high/sid)뿐이라 rl.source가
+    # 'sid'/'auto_match'/'explicit' 중 하나 — 사람이 명시한 게 아닌 이상 'explicit'로 «절대» 안
+    # 찍힌다(오늘 소급 205건과 동일 라벨 규율). merge_link_evidence는 이미 있는 함수(scope-check
+    # 용도로 open/synchronize에서 이미 쓰임)를 그대로 재사용 — 새 함수 0개, org+repo+pr_number
+    # 존재 확인 후 upsert(멱등 — synchronize 뒤 merge가 와도 행 하나).
+    # ⭐만료 조건: #2327의 「Verdict를 정본으로 삼고 PullRequestStoryLink를 은퇴」 판단이 실행되면,
+    # 이 두 번째 쓰기(PullRequestStoryLink)는 그때 정리 대상이 된다.
+    if merged:
+        await merge_link_evidence(
+            session, org_id, story_id, repo, pr_number,
+            link_source=rl.source, confidence=rl.confidence,
+            patch={"webhook_merge": {"recorded_at": datetime.now(timezone.utc).isoformat()}},
+        )
+
     # ⛔story #2327 후속(PO 판정, 2026-07-30) — close-on-merge **정지**. 「머지 ≠ done, done은
     # 사람 확認 後」가 팀 규율인데 이 블록은 explicit/auto-high/sid confident link + merge만으로
     # 사람 확認 없이 즉시 done을 밀었다(advance_story_to_done 직접 호출) — 규율과 정면 충돌.
