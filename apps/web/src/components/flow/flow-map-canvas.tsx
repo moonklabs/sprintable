@@ -4,7 +4,13 @@ import { useTranslations } from 'next-intl';
 import type { FlowMapLane, FlowMapNode } from './derive-flow-map';
 import {
   FLOW_MAP_GRID_STEP, FLOW_MAP_NOW_LINE_X, FLOW_MAP_DEPTH0_X, computeLaneHeight, shouldShowNoDeeperReason,
+  computeNodePositions,
 } from './derive-flow-map';
+
+// 카드 실측(FlowMapNodeCard): w-[110px], 높이는 두 줄 텍스트+padding으로 24px 안팎(NODE_ROW_HEIGHT
+// 28px 중 4px가 행간) — 선은 카드 "왼쪽 가장자리 중앙"→"오른쪽 가장자리 중앙"을 잇는다.
+const NODE_CARD_WIDTH = 110;
+const NODE_CARD_HEIGHT = 24;
 
 // 유나 목업(`be8709a4`) 실측 치수 — "그림이 정본"(2026-07-30), 비슷한 값이 아니라 그 숫자.
 const HEADER_HEIGHT = 22; // .colhd
@@ -125,6 +131,42 @@ export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
                     className="absolute top-0 bottom-0 w-[2px] bg-foreground opacity-[0.85]"
                     style={{ left: FLOW_MAP_NOW_LINE_X }}
                   />
+
+                  {/* 간선(⑥) — 선생님 지시(2026-07-30) 후속: "edges=[]를 항상 넘긴다"와
+                      "받았는데 화면에 못 그린다"는 다른 병이라 이 SVG 레이어 자체가 오늘까지
+                      없었다(양쪽 다 진짜 병이었다). 종류별(낳음/잇따름/대체) 시각 구분은
+                      유나양의 4번째 축(제안↔확認) 확定 대기 중이라 오늘은 «단일 스타일 직선»
+                      으로만 "연결이 있으면 선이 실제로 그려진다"를 증명한다 — 종별 스타일은
+                      그 축이 오면 이 자리(strokeDasharray/marker 분기)에 얹는다. */}
+                  {lane.edges.length > 0 ? (
+                    <svg
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-0"
+                      width="100%"
+                      height="100%"
+                    >
+                      {(() => {
+                        const positions = computeNodePositions(lane, NODE_ROW_HEIGHT, NOW_CLUSTER_X);
+                        return lane.edges.map((edge) => {
+                          const from = positions.get(edge.fromNodeId);
+                          const to = positions.get(edge.toNodeId);
+                          if (!from || !to) return null;
+                          const x1 = from.left + NODE_CARD_WIDTH;
+                          const y1 = from.top + NODE_CARD_HEIGHT / 2;
+                          const x2 = to.left;
+                          const y2 = to.top + NODE_CARD_HEIGHT / 2;
+                          return (
+                            <line
+                              key={`${edge.fromNodeId}-${edge.toNodeId}`}
+                              x1={x1} y1={y1} x2={x2} y2={y2}
+                              stroke="var(--muted-foreground)"
+                              strokeWidth={1.2}
+                            />
+                          );
+                        });
+                      })()}
+                    </svg>
+                  ) : null}
 
                   {lane.pastTotal === 0 && lane.nowNodes.length === 0 && lane.queueNodesByDepth.size === 0 ? (
                     <p className="absolute left-3 top-2 text-[11px] text-muted-foreground">{t('flowMapLaneEmpty')}</p>

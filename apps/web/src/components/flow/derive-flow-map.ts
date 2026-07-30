@@ -18,6 +18,36 @@ export interface FlowMapEdge {
   toNodeId: string;
 }
 
+/** `GET /api/dependencies/graph` 원시 응답 엣지 하나 — `backend/app/services/dependency_graph.py
+ * get_graph()`가 내는 그대로({id, from_id, to_id, dep_type}). */
+export interface RawDependencyEdge {
+  id: string;
+  from_id: string;
+  to_id: string;
+  dep_type: string;
+}
+
+/** 선생님 지시(2026-07-30, P0) — "edges=[]를 항상 넘긴다"(하드코딩)와 "실제로 받았는데
+ * 0건"(정직한 빈 값)은 다른 사실이다. 이 함수가 그 구분을 만드는 자리 — 기존 계획형
+ * `dependencies`(blocks/depends_on)를 실제로 fetch해 FlowMapEdge로 정규화한다.
+ *
+ * 방향 규칙(PO 확定 2026-07-30, computeNodeDepth와 동일 방향): `blocks(A→B)`="A가 B를
+ * 막는다"=A가 먼저 → fromNodeId=A·toNodeId=B(그대로). `depends_on(A→B)`="A가 B에 의존"=B가
+ * 먼저 → «뒤집어» fromNodeId=B·toNodeId=A. 이 뒤집기는 이 함수 «한 곳»에서만 한다(여러 곳에
+ * 흩으면 언젠가 한쪽이 그 정규화를 빠뜨린다).
+ *
+ * ⛔#2223(부산물형 3종 간선 — 낳음/잇따름/대체)은 아직 실 엔드포인트가 없다(디디 실측은
+ * "산문에서 뽑히는 제안선" 단계, 2026-07-30) — 이 함수는 오늘 실존하는 «계획형»만 다룬다.
+ * #2223이 착지하면 별도 파서가 추가되는 것이지 이 함수를 확장하는 게 아니다(계획형·부산물형은
+ * 서로 다른 의미 축이라 한 함수에서 섞으면 방향 규칙이 꼬인다). */
+export function parseDependencyGraphEdges(raw: RawDependencyEdge[]): FlowMapEdge[] {
+  return raw.map((e) => (
+    e.dep_type === 'depends_on'
+      ? { fromNodeId: e.to_id, toNodeId: e.from_id }
+      : { fromNodeId: e.from_id, toNodeId: e.to_id }
+  ));
+}
+
 /** 노드 하나의 «의존 깊이» — 들어오는 간선이 없으면 0(시작점), 있으면 «선행 노드 깊이 중
  * 최댓값+1». edges가 항상 빈 배열인 오늘(#2221 미착지)은 이 재귀가 «자연히» 전부 0을 내는
  * 것이라 — `if (edges.length === 0) return 0` 같은 특수분기를 두지 않는다(PO 지시
@@ -58,6 +88,11 @@ export interface FlowMapLane {
    * (판C, 카드 없이 사라지지 않고 "+N건"으로 보이는 것이 핵심 — 눈에 안 보이는 결핍 금지). */
   queueNodesByDepth: Map<number, FlowMapNode[]>;
   overflows: FlowMapOverflow[];
+  /** 선생님 지적(2026-07-30) — "edges=[]를 항상 넘기는" 하드코딩과 "실제로 받았는데 0건"은
+   * 다른 사실이다. 렌더 레이어(FlowMapCanvas)가 실제로 선을 그릴 수 있도록, «양쪽 끝이 모두
+   * 화면에 그려지는 노드인» 간선만 여기 보존한다(TOP_N에 잘려 안 보이는 노드로 가는 선은
+   * 그릴 좌표가 없어 제외 — "숨은 노드로 가는 유령 선"을 만들지 않는다). */
+  edges: FlowMapEdge[];
 }
 
 /** 정렬 규칙(판C) — "막힘 › 다음 지정됨 › 나머지". "다음 지정됨"에 대응하는 실 데이터
@@ -111,7 +146,36 @@ export function deriveFlowMapLane(
     if (hiddenCount > 0) overflows.push({ depth, hiddenCount });
   }
 
-  return { epicId, title, pastTotal, nowNodes, queueNodesByDepth, overflows };
+  const renderedIds = new Set<string>(nowNodes.map((n) => n.id));
+  for (const nodes of queueNodesByDepth.values()) {
+    for (const n of nodes) renderedIds.add(n.id);
+  }
+  const renderableEdges = edges.filter((e) => renderedIds.has(e.fromNodeId) && renderedIds.has(e.toNodeId));
+
+  return { epicId, title, pastTotal, nowNodes, queueNodesByDepth, overflows, edges: renderableEdges };
+}
+
+/** 노드 하나가 화면에 그려질 {left, top}(카드 좌상단) — FlowMapCanvas의 카드 렌더링과
+ * «같은 공식»을 간선 SVG 렌더링도 써야 선이 카드 위치와 어긋나지 않는다(위치 계산을 두 곳에
+ * 따로 두면 언젠가 하나만 바뀌어 어긋난다 — 단일 소스). now 노드는 nowClusterX 고정열,
+ * queue 노드는 depth × gridStep 열 — 카드 렌더링(flow-map-canvas.tsx)과 동일 순서로 순회해
+ * 같은 top(= 4 + i × nodeRowHeight)을 낸다. */
+export function computeNodePositions(
+  lane: FlowMapLane,
+  nodeRowHeight: number,
+  nowClusterX: number,
+): Map<string, { left: number; top: number }> {
+  const positions = new Map<string, { left: number; top: number }>();
+  lane.nowNodes.forEach((node, i) => {
+    positions.set(node.id, { left: nowClusterX, top: 4 + i * nodeRowHeight });
+  });
+  for (const [depth, nodes] of lane.queueNodesByDepth) {
+    const x = FLOW_MAP_DEPTH0_X + depth * FLOW_MAP_GRID_STEP;
+    nodes.forEach((node, i) => {
+      positions.set(node.id, { left: x, top: 4 + i * nodeRowHeight });
+    });
+  }
+  return positions;
 }
 
 /** 레인 하나의 높이(px) — 고정값이 아니라 «내용»에서 계산한다(판C ⑤, "고정이면 어느 레인은

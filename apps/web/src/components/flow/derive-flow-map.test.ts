@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  computeNodeDepth, deriveFlowMapLane, computeLaneHeight, shouldShowNoDeeperReason, FLOW_MAP_TOP_N,
+  computeNodeDepth, deriveFlowMapLane, computeLaneHeight, shouldShowNoDeeperReason, computeNodePositions,
+  parseDependencyGraphEdges, FLOW_MAP_TOP_N, FLOW_MAP_DEPTH0_X, FLOW_MAP_GRID_STEP,
   type FlowMapEdge, type FlowMapLane,
 } from './derive-flow-map';
 import type { EpicFlowNodeItem } from './derive-flow';
@@ -100,12 +101,97 @@ describe('deriveFlowMapLane', () => {
     expect(lane.queueNodesByDepth.get(0)?.map((n) => n.id)).toContain('blocked1');
     expect(lane.overflows).toEqual([{ depth: 0, hiddenCount: 1 }]);
   });
+
+  // 선생님 지적(2026-07-30) — "edges=[]를 항상 넘긴다"와 "받았는데 화면에 못 그린다"는
+  // 다른 병이다. 렌더 가능한(카드로 실제로 그려지는) 노드끼리의 간선만 보존해야 SVG
+  // 레이어가 유령 선(안 보이는 노드로 가는 선)을 안 그린다.
+  it('keeps an edge whose both endpoints are actually rendered (now→queue)', () => {
+    const edges: FlowMapEdge[] = [{ fromNodeId: 'n1', toNodeId: 'u1' }];
+    const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [makeItem({ id: 'n1' })], [makeItem({ id: 'u1' })], edges);
+    expect(lane.edges).toEqual([{ fromNodeId: 'n1', toNodeId: 'u1' }]);
+  });
+
+  it('drops an edge whose target was truncated by TOP_N overflow — no line to a card that is not drawn', () => {
+    // r(뿌리, depth 0) → u0..u3(전부 depth 1, r→ui 간선으로 밀림). depth 1 열에 4개가
+    // 몰려 TOP_N=3에 잘리고(정렬 키가 전부 같아 stable sort로 입력 순서 보존) 마지막
+    // u3만 overflow로 빠진다 — u3로 가는 간선(r→u3)도 함께 사라져야 한다.
+    const items = [
+      makeItem({ id: 'r' }),
+      ...Array.from({ length: FLOW_MAP_TOP_N + 1 }, (_, i) => makeItem({ id: `u${i}`, story_number: i })),
+    ];
+    const edges: FlowMapEdge[] = Array.from({ length: FLOW_MAP_TOP_N + 1 }, (_, i) => ({ fromNodeId: 'r', toNodeId: `u${i}` }));
+    const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [], items, edges);
+    expect(lane.queueNodesByDepth.get(1)?.map((n) => n.id)).toEqual(['u0', 'u1', 'u2']);
+    expect(lane.overflows).toEqual([{ depth: 1, hiddenCount: 1 }]);
+    expect(lane.edges).toEqual(
+      expect.arrayContaining([{ fromNodeId: 'r', toNodeId: 'u0' }, { fromNodeId: 'r', toNodeId: 'u1' }, { fromNodeId: 'r', toNodeId: 'u2' }]),
+    );
+    expect(lane.edges).not.toContainEqual({ fromNodeId: 'r', toNodeId: 'u3' });
+  });
+
+  it('drops an edge referencing a node id that does not exist in this lane at all', () => {
+    const edges: FlowMapEdge[] = [{ fromNodeId: 'ghost', toNodeId: 'n1' }];
+    const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [makeItem({ id: 'n1' })], [], edges);
+    expect(lane.edges).toEqual([]);
+  });
+});
+
+describe('parseDependencyGraphEdges', () => {
+  it('keeps blocks(A→B) direction as-is — A(blocker) is fromNodeId, B is toNodeId', () => {
+    const edges = parseDependencyGraphEdges([{ id: 'd1', from_id: 'a', to_id: 'b', dep_type: 'blocks' }]);
+    expect(edges).toEqual([{ fromNodeId: 'a', toNodeId: 'b' }]);
+  });
+
+  it('flips depends_on(A→B) — A depends on B means B comes first, so fromNodeId=B, toNodeId=A', () => {
+    const edges = parseDependencyGraphEdges([{ id: 'd1', from_id: 'a', to_id: 'b', dep_type: 'depends_on' }]);
+    expect(edges).toEqual([{ fromNodeId: 'b', toNodeId: 'a' }]);
+  });
+
+  it('normalizes a mix of both dep_types to the same causal direction convention', () => {
+    const edges = parseDependencyGraphEdges([
+      { id: 'd1', from_id: 'x', to_id: 'y', dep_type: 'blocks' }, // x first
+      { id: 'd2', from_id: 'p', to_id: 'q', dep_type: 'depends_on' }, // q first
+    ]);
+    expect(edges).toEqual([
+      { fromNodeId: 'x', toNodeId: 'y' },
+      { fromNodeId: 'q', toNodeId: 'p' },
+    ]);
+  });
+
+  it('returns an empty array for an empty response (org has 0 rows today — honest empty, not a crash)', () => {
+    expect(parseDependencyGraphEdges([])).toEqual([]);
+  });
+});
+
+describe('computeNodePositions', () => {
+  it('places now nodes at the fixed now-cluster column, stacked by row index', () => {
+    const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [makeItem({ id: 'n1' }), makeItem({ id: 'n2' })], []);
+    const positions = computeNodePositions(lane, 28, 252);
+    expect(positions.get('n1')).toEqual({ left: 252, top: 4 });
+    expect(positions.get('n2')).toEqual({ left: 252, top: 32 });
+  });
+
+  it('places queue nodes at depth × grid-step, stacked by row index within that depth', () => {
+    const items = [makeItem({ id: 'u1' }), makeItem({ id: 'u2' })];
+    const edges: FlowMapEdge[] = [{ fromNodeId: 'u1', toNodeId: 'u2' }];
+    const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [], items, edges);
+    const positions = computeNodePositions(lane, 28, 252);
+    expect(positions.get('u1')).toEqual({ left: FLOW_MAP_DEPTH0_X, top: 4 });
+    expect(positions.get('u2')).toEqual({ left: FLOW_MAP_DEPTH0_X + FLOW_MAP_GRID_STEP, top: 4 });
+  });
+
+  it('has no entry for a node truncated by TOP_N overflow (nothing to draw a line to)', () => {
+    const items = Array.from({ length: FLOW_MAP_TOP_N + 1 }, (_, i) => makeItem({ id: `u${i}` }));
+    const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [], items, []);
+    const positions = computeNodePositions(lane, 28, 252);
+    expect(positions.has(`u${FLOW_MAP_TOP_N}`)).toBe(false);
+  });
 });
 
 function makeLane(overrides: Partial<FlowMapLane> = {}): FlowMapLane {
   return {
     epicId: 'e1', title: 'Epic 1', pastTotal: 0,
-    nowNodes: [], queueNodesByDepth: new Map(), overflows: [],
+    nowNodes: [], queueNodesByDepth: new Map(), overflows: [], edges: [],
     ...overrides,
   };
 }
