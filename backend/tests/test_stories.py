@@ -118,7 +118,12 @@ async def test_create_story_201():
         # 그 호출까지 재현하지 않고 라우터 wiring만 검증하려면 서브클래스 레벨(StoryRepository.create)
         # 을 patch해야 한다(BaseRepository.create만 patch하면 allocate_story_number가 mock
         # session.execute()에 그대로 부딪혀 TypeError).
-        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create:
+        # story #2330(2026-07-30, dev 0/420 사고 수정): create_story가 이제
+        # _reconcile_story_references_and_candidates도 부른다(mention_parser/
+        # reference_semantic_candidates 실DB 쿼리) — 라우터 wiring만 보는 이 테스트는
+        # 그 호출 자체를 no-op으로 patch한다(행동 검증은 test_2328_candidate_hook_on_create_realdb.py).
+        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock):
             mock_create.return_value = story
 
             async with client as c:
@@ -399,7 +404,8 @@ async def test_create_story_with_intent_fields_201():
         # 그 호출까지 재현하지 않고 라우터 wiring만 검증하려면 서브클래스 레벨(StoryRepository.create)
         # 을 patch해야 한다(BaseRepository.create만 patch하면 allocate_story_number가 mock
         # session.execute()에 그대로 부딪혀 TypeError).
-        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock):
             mock_create.return_value = story
 
             async with client as c:
@@ -468,7 +474,8 @@ async def test_create_story_outcome_fields_ignored():
         # 그 호출까지 재현하지 않고 라우터 wiring만 검증하려면 서브클래스 레벨(StoryRepository.create)
         # 을 patch해야 한다(BaseRepository.create만 patch하면 allocate_story_number가 mock
         # session.execute()에 그대로 부딪혀 TypeError).
-        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock):
             mock_create.return_value = story
 
             async with client as c:

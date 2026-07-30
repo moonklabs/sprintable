@@ -118,11 +118,19 @@ def extract_bare_number_candidates_with_snippets(content: str) -> list[tuple[int
 
 
 async def build_candidate_rows(
-    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, content: str,
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, source_id: uuid.UUID,
+    content: str,
 ) -> list[CandidateRow]:
     """맨 번호 후보를 스니펫과 함께 뽑고, 「해소된」(실제 존재하는 story를 가리키는) 것만
     남긴다 — 미래번호(모집단에 없는 대상, PO 판정 2026-07-29 ②)는 여기서 후보 자체를 안
-    만든다(조용히 스킵, 별도 로그 없음 — #2269 AC1이 이미 그 11.5%를 문서로 남겼다)."""
+    만든다(조용히 스킵, 별도 로그 없음 — #2269 AC1이 이미 그 11.5%를 문서로 남겼다).
+
+    ⛔자기참조 제외(파울로 판정 2026-07-30, dev 실물 사례 — story #2329가 본문에 자기
+    번호("판정: #2329 닫는다")를 적어 자신을 가리키는 후보가 실제로 생겼다): AC10("미분류도
+    안 버린다")과는 다른 축이다 — AC10은 «분류가 안 됐을 뿐 실제 관계 가능성이 있는» 것을
+    보존하는 것이고, 자기참조는 애초에 사람에게 내밀 값이 없다(자기 자신을 가리킨다는
+    사실은 승격 판단 대상이 아니다). 여기서 제외하지 이미 저장된 기존 자기참조 행을
+    소급 정리하지는 않는다(#2328 ③ "소급 안 함"과 동일 원칙)."""
     pairs = extract_bare_number_candidates_with_snippets(content)
     if not pairs:
         return []
@@ -134,6 +142,8 @@ async def build_candidate_rows(
         story_id = targets.get(n)
         if story_id is None:
             continue  # 미래번호(미해소) — PO 판정 ②, 후보 자체를 안 만든다
+        if story_id == source_id:
+            continue  # 자기참조 — 승격 판단 대상 아님(위 docstring 참조)
         kind, keyword = classify_relation_kind(snippet)
         rows.append(CandidateRow(
             matched_number=n, target_story_id=story_id, snippet=snippet,
@@ -186,7 +196,9 @@ async def generate_and_store_candidates(
     """caller(story 저장 write-path) 편의 진입점 — build+store를 한 번에. 같은 트랜잭션
     (caller 세션 그대로 사용, 별도 커밋 없음) — 실패 시 예외가 그대로 propagate되어 story
     저장 전체가 롤백된다(entity_references reconcile과 동일 원자성 계약)."""
-    rows = await build_candidate_rows(db, org_id=org_id, project_id=project_id, content=content)
+    rows = await build_candidate_rows(
+        db, org_id=org_id, project_id=project_id, source_id=source_id, content=content,
+    )
     return await store_semantic_candidates(
         db, org_id=org_id, source_type=source_type, source_field=source_field,
         source_id=source_id, rows=rows,
