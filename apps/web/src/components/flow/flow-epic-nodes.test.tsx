@@ -89,6 +89,43 @@ describe('FlowEpicNodes — merges dependencies-graph edges with reference-candi
     expect(line?.getAttribute('data-edge-confirmed')).toBe('false'); // status=estimated → 제안
   });
 
+  // 자가발견 결함(2026-07-30, PR#2709 배포 후 재검토 중) — "양끝 다 now/upcoming에 있는
+  // 것만" 미리 걸러내던 필터가 있으면, 과거(done) 스토리에 닿은 간선은 deriveFlowMapLane의
+  // 묶음-해소 로직(PR#2709)에 도달하기도 전에 사라진다. 그 필터를 없앤 것을 여기서 고정한다
+  // — target_id가 now/upcoming 어디에도 없는(=과거로 해석되는) 후보가 실제로 묶음-해소된
+  // <line>까지 그려지는 것을 왕복 확認.
+  it('renders a bundle-resolved line for a candidate edge whose target is NOT in now/upcoming (a past/done story) when pastTotal > 0 — regression for the premature pre-filter bug', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/analytics/epic-flow-nodes')) {
+        return jsonResponse({
+          data: {
+            epic_id: 'e1', now: { total: 1, items: [NOW_ITEM] }, upcoming: { total: 0, shown: 0, items: [] },
+            past: { total: 5 }, blocked_count: 0, last_changed_at: null,
+          },
+        });
+      }
+      if (url.includes('/api/dependencies/graph')) return jsonResponse({ item_type: 'story', nodes: [], edges: [] });
+      if (url.includes('/api/goals/e1/reference-candidates')) {
+        // target_id='past-story'는 now/upcoming 그 어디에도 없다 — 과거로 해석돼야 한다.
+        return jsonResponse([
+          { id: 'c1', source_id: 'past-story', source_field: 'description', target_type: 'story', target_id: 'n1', relation_kind: 'spawned', matched_keyword: null, snippet: 's', status: 'declared', declared_by: null, declared_at: null, created_at: '2026-07-30T00:00:00Z' },
+        ]);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      root.render(wrap(<FlowEpicNodes projectId="p1" epicId="e1" epicTitle="Epic 1" onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const line = container.querySelector('line[data-edge-kind="spawn"]');
+    expect(line).not.toBeNull(); // 필터가 남아 있었다면 여기서 null이었을 것(재현 확認).
+    expect(line?.getAttribute('data-edge-confirmed')).toBe('true');
+  });
+
   it('still renders (no edges, no crash) when the reference-candidates fetch fails — partial failure does not kill the whole view', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
