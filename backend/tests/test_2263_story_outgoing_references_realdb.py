@@ -141,6 +141,14 @@ async def test_outgoing_references_shows_visible_target_only_includes_payload():
             # 애초에 없어 None — "키가 없다"가 아니라 "값이 null"이다(필드 자체는 항상 존재).
             assert "proof_payload" in item
             assert item["proof_payload"] is None
+            # story #2262 AC1(「지점」, PO 판정 2026-07-30): 응답이 「이 참조가 언제 생겼나」를
+            # referenced_at으로 실어야 한다 — created_at(옛 이름)이 아니다. 형제 함수
+            # mention_parser.fetch_stored_references()는 이미 이 이름으로 나가는데 이 라우트는
+            # 안 바뀐 채 남아 있었다(실 dev GET으로 발견).
+            assert "referenced_at" in item, "created_at(옛 이름)이 아니라 referenced_at이어야 함"
+            assert "created_at" not in item
+            from datetime import datetime
+            datetime.fromisoformat(item["referenced_at"])
         finally:
             await client.aclose()
     finally:

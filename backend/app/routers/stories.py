@@ -947,7 +947,13 @@ async def get_story_outgoing_references(
                 "form": r.form,
                 "target_type": r.target_type,
                 "target_id": str(r.target_id),
-                "created_at": r.created_at.isoformat(),
+                # story #2262 AC1(「지점」, PO 판정 2026-07-30): 「이 참조가 언제 생겼나」이지
+                # 「대상이 언제 만들어졌나」가 아니다 — mention_parser.fetch_stored_references()는
+                # 이미 referenced_at으로 나가는데(conversations.py 소비), 이 라우트(story의
+                # outgoing references)는 reference_core.list_references()를 써서 이름이 안 바뀐
+                # 채 남아 있었다(실 dev GET으로 발견 — 본문의 "이미 반환한다"는 처방이지 현재
+                # 상태가 아니었다).
+                "referenced_at": r.created_at.isoformat(),
                 "still_exists": r.still_exists,
                 "proof_payload": r.proof_payload,
             }
